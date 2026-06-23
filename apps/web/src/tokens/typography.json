@@ -1,0 +1,26 @@
+{
+  "primary": {
+    "h1": { "size": "32px", "weight": "700" },
+    "h2": { "size": "24px", "weight": "700" },
+    "cardTitle": { "size": "20px", "weight": "600" },
+    "body": { "size": "18px", "weight": "400" },
+    "textbook": { "size": "20px", "weight": "400", "lineHeight": 1.8 },
+    "caption": { "size": "14px", "weight": "400" }
+  },
+  "junior": {
+    "h1": { "size": "28px", "weight": "600" },
+    "h2": { "size": "22px", "weight": "600" },
+    "cardTitle": { "size": "18px", "weight": "600" },
+    "body": { "size": "16px", "weight": "400" },
+    "textbook": { "size": "17px", "weight": "400", "lineHeight": 1.7 },
+    "caption": { "size": "13px", "weight": "400" }
+  },
+  "senior": {
+    "h1": { "size": "24px", "weight": "600" },
+    "h2": { "size": "20px", "weight": "600" },
+    "cardTitle": { "size": "17px", "weight": "600" },
+    "body": { "size": "15px", "weight": "400" },
+    "textbook": { "size": "16px", "weight": "400", "lineHeight": 1.6 },
+    "caption": { "size": "12px", "weight": "400" }
+  }
+}

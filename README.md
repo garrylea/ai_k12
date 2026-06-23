@@ -23,7 +23,7 @@ The goal is to move away from "blanket teaching" towards "precision learning" by
 - `apps/web`: React-based web application.
 - `apps/desktop`: Electron-based desktop application.
 - `apps/server`: Node.js backend API.
-- `services/crawler`: Python-based data crawling and processing service.
+- `tools/crawler`: Python-based data crawling and processing service.
 - `packages/`: Shared configurations and types.
 - `docs/`: Design documents and requirements.
 

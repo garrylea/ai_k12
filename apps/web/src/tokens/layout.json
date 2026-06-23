@@ -1,0 +1,18 @@
+{
+  "spacing": { "0": "0", "1": "4px", "2": "8px", "3": "12px", "4": "16px", "6": "24px", "8": "32px", "12": "48px" },
+  "radius": {
+    "primary": { "card": "24px", "button": "18px", "pill": "9999px" },
+    "junior": { "card": "16px", "button": "14px", "pill": "9999px" },
+    "senior": { "card": "12px", "button": "10px", "pill": "9999px" }
+  },
+  "shadow": {
+    "card": "0 2px 8px rgba(45,36,25,0.06)",
+    "elevated": "0 8px 24px rgba(45,36,25,0.10)",
+    "glowBrand": "0 0 16px rgba(255,159,45,0.25)"
+  },
+  "motion": {
+    "ease": "cubic-bezier(0.33, 1, 0.68, 1)",
+    "duration": { "fast": "150ms", "normal": "250ms", "slow": "400ms", "theme": "800ms" },
+    "spring": { "stiffness": 260, "damping": 18 }
+  }
+}
