@@ -1,0 +1,3498 @@
+openapi: 3.1.0
+info:
+  title: K12 智学系统 API
+  description: K12 智学系统 REST API 与 WebSocket 规范
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000/api
+    description: 开发环境
+  - url: https://api.example.com/api
+    description: 生产环境
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: 认证与授权
+  - name: Users
+    description: 用户账号管理
+  - name: Progress
+    description: 学习进度与解锁
+  - name: Content
+    description: 内容与课程体系
+  - name: KnowledgeGraph
+    description: 知识点图谱
+  - name: Assessment
+    description: 测评与考试
+  - name: AI
+    description: AI 辅导与智能能力
+  - name: Refinery
+    description: 数据识别与提取
+  - name: Files
+    description: 文件上传
+  - name: ErrorBook
+    description: 双错题本
+  - name: Conversations
+    description: 对话管理
+  - name: Rewards
+    description: 奖励服务
+  - name: Parent
+    description: 家长端服务
+  - name: Quota
+    description: AI 额度与套餐
+paths:
+  # Auth
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: 家长注册
+      operationId: registerParent
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 统一登录
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: 登出
+      operationId: logout
+      responses:
+        '200':
+          description: 登出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /auth/password/reset-request:
+    post:
+      tags: [Auth]
+      summary: 请求重置密码
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+      responses:
+        '200':
+          description: 请求已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /auth/password/reset:
+    post:
+      tags: [Auth]
+      summary: 确认重置密码
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                code:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: 密码已重置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: 获取当前身份
+      operationId: getMe
+      responses:
+        '200':
+          description: 当前用户信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+
+  # Users
+  /users/parents/me:
+    get:
+      tags: [Users]
+      summary: 当前家长资料
+      operationId: getParentMe
+      responses:
+        '200':
+          description: 家长资料
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Parent'
+    patch:
+      tags: [Users]
+      summary: 更新家长资料
+      operationId: updateParentMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Parent'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /users/students:
+    get:
+      tags: [Users]
+      summary: 学生子账号列表
+      operationId: listStudents
+      responses:
+        '200':
+          description: 学生列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Student'
+    post:
+      tags: [Users]
+      summary: 创建学生子账号
+      operationId: createStudent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStudentRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Student'
+  /users/students/{studentId}:
+    get:
+      tags: [Users]
+      summary: 学生资料
+      operationId: getStudent
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 学生资料
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Student'
+    patch:
+      tags: [Users]
+      summary: 更新学生资料
+      operationId: updateStudent
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Student'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /users/students/{studentId}/settings:
+    get:
+      tags: [Users]
+      summary: 学生 UI 设置
+      operationId: getStudentSettings
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 设置项
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentSettings'
+    patch:
+      tags: [Users]
+      summary: 更新学生 UI 设置
+      operationId: updateStudentSettings
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudentSettings'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+
+  # Progress
+  /progress/students/{studentId}/overview:
+    get:
+      tags: [Progress]
+      summary: 学习总览
+      operationId: getProgressOverview
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 进度总览
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProgressOverview'
+  /progress/students/{studentId}/subjects/{subjectId}:
+    get:
+      tags: [Progress]
+      summary: 单学科进度
+      operationId: getSubjectProgress
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: subjectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 学科进度
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubjectProgress'
+
+  # Content
+  /content/subjects:
+    get:
+      tags: [Content]
+      summary: 学科列表
+      operationId: listSubjects
+      responses:
+        '200':
+          description: 学科列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Subject'
+  /content/versions:
+    get:
+      tags: [Content]
+      summary: 教材版本列表
+      operationId: listVersions
+      parameters:
+        - name: subjectId
+          in: query
+          schema:
+            type: string
+        - name: gradeBand
+          in: query
+          schema:
+            type: string
+            enum: [primary, junior, senior]
+      responses:
+        '200':
+          description: 版本列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TextbookVersion'
+  /content/subjects/{subjectId}:
+    get:
+      tags: [Content]
+      summary: 学科详情
+      operationId: getSubject
+      parameters:
+        - name: subjectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 学科详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Subject'
+  /content/versions/{versionId}:
+    get:
+      tags: [Content]
+      summary: 版本详情
+      operationId: getVersion
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 版本详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TextbookVersion'
+  /content/versions/{versionId}/units:
+    get:
+      tags: [Content]
+      summary: 单元列表
+      operationId: listUnits
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 单元列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Unit'
+  /content/versions/{versionId}/units/{unitId}:
+    get:
+      tags: [Content]
+      summary: 单元详情
+      operationId: getUnit
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 单元详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Unit'
+  /content/versions/{versionId}/units/{unitId}/lessons:
+    get:
+      tags: [Content]
+      summary: 课列表
+      operationId: listLessons
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 课列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Lesson'
+  /content/versions/{versionId}/units/{unitId}/lessons/{lessonId}:
+    get:
+      tags: [Content]
+      summary: 课详情
+      operationId: getLesson
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lessonId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 课详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Lesson'
+  /content/versions/{versionId}/units/{unitId}/lessons/{lessonId}/cards:
+    get:
+      tags: [Content]
+      summary: 教材卡片列表
+      operationId: listCards
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lessonId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 卡片列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Card'
+  /content/cards/{cardId}:
+    get:
+      tags: [Content]
+      summary: 单张卡片
+      operationId: getCard
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 卡片详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Card'
+  /content/knowledge-points:
+    get:
+      tags: [Content]
+      summary: 知识点查询
+      operationId: listKnowledgePoints
+      parameters:
+        - name: subjectId
+          in: query
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 知识点列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/KnowledgePoint'
+  /content/knowledge-points/{knowledgePointId}:
+    get:
+      tags: [Content]
+      summary: 知识点详情
+      operationId: getKnowledgePoint
+      parameters:
+        - name: knowledgePointId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 知识点详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/KnowledgePoint'
+  /content/questions:
+    get:
+      tags: [Content]
+      summary: 题库查询
+      operationId: listQuestions
+      parameters:
+        - name: knowledgePointId
+          in: query
+          schema:
+            type: string
+        - name: difficulty
+          in: query
+          schema:
+            type: string
+            enum: [easy, medium, hard]
+        - name: type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 题目列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Question'
+  /content/questions/{questionId}:
+    get:
+      tags: [Content]
+      summary: 题目详情
+      operationId: getQuestion
+      parameters:
+        - name: questionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 题目详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Question'
+
+  # Knowledge Graph
+  /knowledge-graph/knowledge-points/{id}/relations:
+    get:
+      tags: [KnowledgeGraph]
+      summary: 知识点关系
+      operationId: getKnowledgeRelations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 关系列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/KnowledgeRelation'
+  /knowledge-graph/students/{studentId}/mastery:
+    get:
+      tags: [KnowledgeGraph]
+      summary: 掌握度 overlay
+      operationId: getMastery
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 掌握度数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/KnowledgeMastery'
+  /knowledge-graph/students/{studentId}/weak-points:
+    get:
+      tags: [KnowledgeGraph]
+      summary: 薄弱点
+      operationId: getWeakPoints
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 薄弱点列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/WeakPoint'
+
+  # Assessment
+  /assessment/students/{studentId}/homework:
+    get:
+      tags: [Assessment]
+      summary: 待做作业列表
+      operationId: listHomework
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 作业列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Homework'
+  /assessment/homework/{homeworkId}:
+    get:
+      tags: [Assessment]
+      summary: 作业详情
+      operationId: getHomework
+      parameters:
+        - name: homeworkId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 作业详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/HomeworkDetail'
+  /assessment/homework/{homeworkId}/submissions:
+    post:
+      tags: [Assessment]
+      summary: 开始作业
+      operationId: startHomework
+      parameters:
+        - name: homeworkId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 提交记录创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Submission'
+  /assessment/homework/{homeworkId}/submissions/{submissionId}/submit:
+    post:
+      tags: [Assessment]
+      summary: 提交作业
+      operationId: submitHomework
+      parameters:
+        - name: homeworkId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitAssessmentRequest'
+      responses:
+        '200':
+          description: 提交成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubmissionResult'
+  /assessment/exams:
+    get:
+      tags: [Assessment]
+      summary: 考试列表
+      operationId: listExams
+      parameters:
+        - name: studentId
+          in: query
+          schema:
+            type: string
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [unit, midterm, final]
+      responses:
+        '200':
+          description: 考试列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Exam'
+    post:
+      tags: [Assessment]
+      summary: 创建考试
+      operationId: createExam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExamRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Exam'
+  /assessment/exams/{examId}:
+    get:
+      tags: [Assessment]
+      summary: 考试详情
+      operationId: getExam
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 考试详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExamDetail'
+  /assessment/exams/{examId}/submissions:
+    post:
+      tags: [Assessment]
+      summary: 开始考试
+      operationId: startExam
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 考试开始
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Submission'
+  /assessment/exams/{examId}/submissions/{submissionId}/save:
+    post:
+      tags: [Assessment]
+      summary: 自动保存
+      operationId: saveExam
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveAnswersRequest'
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /assessment/exams/{examId}/submissions/{submissionId}/submit:
+    post:
+      tags: [Assessment]
+      summary: 提交考试
+      operationId: submitExam
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitAssessmentRequest'
+      responses:
+        '200':
+          description: 提交成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubmissionResult'
+  /assessment/submissions/{submissionId}:
+    get:
+      tags: [Assessment]
+      summary: 提交记录
+      operationId: getSubmission
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 提交记录
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Submission'
+  /assessment/submissions/{submissionId}/results:
+    get:
+      tags: [Assessment]
+      summary: 批改结果
+      operationId: getResults
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 结果详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubmissionResult'
+  /assessment/submissions/{submissionId}/answers/{answerId}/hint:
+    post:
+      tags: [Assessment]
+      summary: 请求提示
+      operationId: requestHint
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: answerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 提示内容
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AIMessage'
+  /assessment/submissions/{submissionId}/answers/{answerId}/explain:
+    post:
+      tags: [Assessment]
+      summary: 请求讲解
+      operationId: requestExplain
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: answerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 讲解内容
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AIMessage'
+  /assessment/submissions/{submissionId}/answers:
+    post:
+      tags: [Assessment]
+      summary: 提交单题答案
+      operationId: submitAnswer
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerRequest'
+      responses:
+        '200':
+          description: 提交成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Answer'
+
+  # AI
+  /ai/tutor:
+    post:
+      tags: [AI]
+      summary: 苏格拉底辅导
+      operationId: aiTutor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TutorRequest'
+      responses:
+        '200':
+          description: AI 响应
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TutorResponse'
+  /ai/hint:
+    post:
+      tags: [AI]
+      summary: 生成提示
+      operationId: aiHint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HintRequest'
+      responses:
+        '200':
+          description: 提示
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AIMessage'
+  /ai/explain:
+    post:
+      tags: [AI]
+      summary: 生成讲解
+      operationId: aiExplain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExplainRequest'
+      responses:
+        '200':
+          description: 讲解
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AIMessage'
+  /ai/grade:
+    post:
+      tags: [AI]
+      summary: 主观题判分
+      operationId: aiGrade
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GradeRequest'
+      responses:
+        '200':
+          description: 判分结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GradeResult'
+  /ai/variation:
+    post:
+      tags: [AI]
+      summary: 生成变式题
+      operationId: aiVariation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VariationRequest'
+      responses:
+        '200':
+          description: 变式题列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/VariationQuestion'
+  /ai/report:
+    post:
+      tags: [AI]
+      summary: 生成学情报告
+      operationId: aiReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+      responses:
+        '200':
+          description: 报告内容
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ReportContent'
+  /ai/quota:
+    get:
+      tags: [AI]
+      summary: AI 额度查询
+      operationId: getAIQuota
+      responses:
+        '200':
+          description: 额度信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AIQuota'
+
+  # Refinery
+  /refinery/extract:
+    post:
+      tags: [Refinery]
+      summary: 实时提取题目
+      operationId: extractQuestion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractRequest'
+      responses:
+        '200':
+          description: 提取任务已创建
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExtractTask'
+  /refinery/tasks/{taskId}:
+    get:
+      tags: [Refinery]
+      summary: 查询提取任务
+      operationId: getExtractTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExtractTask'
+
+  # Files
+  /files/upload:
+    post:
+      tags: [Files]
+      summary: 文件上传
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                source:
+                  type: string
+                  enum: [auxiliary, ocr, answer]
+      responses:
+        '200':
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UploadedFile'
+  /files/{fileId}:
+    get:
+      tags: [Files]
+      summary: 文件元数据
+      operationId: getFile
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 文件元数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UploadedFile'
+
+  # ErrorBook
+  /error-book/students/{studentId}/main:
+    get:
+      tags: [ErrorBook]
+      summary: 主线错题本
+      operationId: listMainErrors
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 错题列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ErrorItem'
+  /error-book/students/{studentId}/aux:
+    get:
+      tags: [ErrorBook]
+      summary: 辅线错题本
+      operationId: listAuxErrors
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 错题列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ErrorItem'
+  /error-book/items/{errorItemId}:
+    get:
+      tags: [ErrorBook]
+      summary: 错题详情
+      operationId: getErrorItem
+      parameters:
+        - name: errorItemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 错题详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ErrorItem'
+  /error-book/items/{errorItemId}/redo:
+    post:
+      tags: [ErrorBook]
+      summary: 错题重做
+      operationId: redoErrorItem
+      parameters:
+        - name: errorItemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedoRequest'
+      responses:
+        '200':
+          description: 重做结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RedoResult'
+  /error-book/items/{errorItemId}/clear:
+    post:
+      tags: [ErrorBook]
+      summary: 标记清零
+      operationId: clearErrorItem
+      parameters:
+        - name: errorItemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 清零成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /error-book/items/{errorItemId}/explanation:
+    get:
+      tags: [ErrorBook]
+      summary: 获取解析
+      operationId: getExplanation
+      parameters:
+        - name: errorItemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 解析内容
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AIMessage'
+  /error-book/items/{errorItemId}/variations:
+    get:
+      tags: [ErrorBook]
+      summary: 变式题列表
+      operationId: listVariations
+      parameters:
+        - name: errorItemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 变式题列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/VariationQuestion'
+  /error-book/items/{errorItemId}/variations/{variationId}/submit:
+    post:
+      tags: [ErrorBook]
+      summary: 提交变式题答案
+      operationId: submitVariation
+      parameters:
+        - name: errorItemId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: variationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedoRequest'
+      responses:
+        '200':
+          description: 提交结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RedoResult'
+  /error-book/aux:
+    post:
+      tags: [ErrorBook]
+      summary: 创建辅线错题
+      operationId: createAuxError
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAuxErrorRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ErrorItem'
+  /error-book/students/{studentId}/stats:
+    get:
+      tags: [ErrorBook]
+      summary: 错题统计
+      operationId: getErrorStats
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 统计数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ErrorStats'
+  /error-book/students/{studentId}/clear-status:
+    get:
+      tags: [ErrorBook]
+      summary: 清零状态
+      operationId: getClearStatus
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 清零状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClearStatus'
+
+  # Conversations
+  /conversations:
+    get:
+      tags: [Conversations]
+      summary: 会话列表
+      operationId: listConversations
+      parameters:
+        - name: studentId
+          in: query
+          schema:
+            type: string
+        - name: track
+          in: query
+          schema:
+            type: string
+            enum: [mainline, auxiliary]
+      responses:
+        '200':
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Conversation'
+    post:
+      tags: [Conversations]
+      summary: 创建会话
+      operationId: createConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversationRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Conversation'
+  /conversations/{dialogueId}:
+    get:
+      tags: [Conversations]
+      summary: 会话详情
+      operationId: getConversation
+      parameters:
+        - name: dialogueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 会话详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Conversation'
+    patch:
+      tags: [Conversations]
+      summary: 更新会话
+      operationId: updateConversation
+      parameters:
+        - name: dialogueId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                archived:
+                  type: boolean
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /conversations/{dialogueId}/messages:
+    get:
+      tags: [Conversations]
+      summary: 消息历史
+      operationId: listMessages
+      parameters:
+        - name: dialogueId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: beforeId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: 消息列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Message'
+    post:
+      tags: [Conversations]
+      summary: 发送消息
+      operationId: sendMessage
+      parameters:
+        - name: dialogueId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '200':
+          description: 消息已发送
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Message'
+
+  # Rewards
+  /rewards/students/{studentId}:
+    get:
+      tags: [Rewards]
+      summary: 学生奖励记录
+      operationId: listRewards
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 奖励列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Reward'
+  /rewards/students/{studentId}/available:
+    get:
+      tags: [Rewards]
+      summary: 待领取奖励
+      operationId: listAvailableRewards
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 待领取奖励
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Reward'
+  /rewards/students/{studentId}/claim/{rewardId}:
+    post:
+      tags: [Rewards]
+      summary: 领取奖励
+      operationId: claimReward
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: rewardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 领取成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Reward'
+  /rewards/students/{studentId}/history:
+    get:
+      tags: [Rewards]
+      summary: 奖励历史
+      operationId: getRewardHistory
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 历史记录
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Reward'
+  /rewards/parents/{parentId}/pending:
+    get:
+      tags: [Rewards]
+      summary: 待兑现奖励
+      operationId: listPendingRewards
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 待兑现列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Reward'
+  /rewards/{rewardRecordId}/redeem:
+    post:
+      tags: [Rewards]
+      summary: 家长确认兑现
+      operationId: redeemReward
+      parameters:
+        - name: rewardRecordId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 确认成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /rewards/{rewardRecordId}/fulfill:
+    post:
+      tags: [Rewards]
+      summary: 标记已履约
+      operationId: fulfillReward
+      parameters:
+        - name: rewardRecordId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 标记成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+
+  # Parent
+  /parent/dashboard:
+    get:
+      tags: [Parent]
+      summary: 家长仪表盘
+      operationId: getDashboard
+      responses:
+        '200':
+          description: 仪表盘数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Dashboard'
+  /parent/students/{studentId}/reports:
+    get:
+      tags: [Parent]
+      summary: 学情报告列表
+      operationId: listReports
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 报告列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LearningReport'
+  /parent/students/{studentId}/reports/{reportId}:
+    get:
+      tags: [Parent]
+      summary: 单份报告
+      operationId: getReport
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 报告详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LearningReport'
+  /parent/students/{studentId}/errors:
+    get:
+      tags: [Parent]
+      summary: 孩子错题（只读）
+      operationId: listParentErrors
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 错题列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ErrorItem'
+  /parent/students/{studentId}/chat-logs:
+    get:
+      tags: [Parent]
+      summary: AI 对话回放列表
+      operationId: listChatLogs
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 对话列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Conversation'
+  /parent/students/{studentId}/chat-logs/{dialogueId}:
+    get:
+      tags: [Parent]
+      summary: 单条对话详情
+      operationId: getChatLog
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: dialogueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 对话详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ConversationDetail'
+  /parent/students/{studentId}/goals:
+    get:
+      tags: [Parent]
+      summary: 学习目标列表
+      operationId: listGoals
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 目标列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Goal'
+    post:
+      tags: [Parent]
+      summary: 创建目标
+      operationId: createGoal
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGoalRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Goal'
+  /parent/students/{studentId}/goals/{goalId}:
+    patch:
+      tags: [Parent]
+      summary: 更新目标
+      operationId: updateGoal
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: goalId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGoalRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+    delete:
+      tags: [Parent]
+      summary: 删除目标
+      operationId: deleteGoal
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: goalId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /parent/students/{studentId}/controls:
+    get:
+      tags: [Parent]
+      summary: 行为管控配置
+      operationId: getControls
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 管控配置
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Controls'
+    put:
+      tags: [Parent]
+      summary: 更新行为管控
+      operationId: updateControls
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Controls'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /parent/students/{studentId}/rewards:
+    get:
+      tags: [Parent]
+      summary: 奖励管理视图
+      operationId: listParentRewards
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 奖励列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Reward'
+  /parent/alerts:
+    get:
+      tags: [Parent]
+      summary: 异常预警
+      operationId: listAlerts
+      responses:
+        '200':
+          description: 预警列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Alert'
+  /parent/alerts/{alertId}/read:
+    patch:
+      tags: [Parent]
+      summary: 标记预警已读
+      operationId: markAlertRead
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 标记成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /parent/account:
+    get:
+      tags: [Parent]
+      summary: 家长账号摘要
+      operationId: getParentAccount
+      responses:
+        '200':
+          description: 账号信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParentAccount'
+
+  # Quota
+  /quota/current:
+    get:
+      tags: [Quota]
+      summary: 当前套餐
+      operationId: getCurrentQuota
+      responses:
+        '200':
+          description: 套餐信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Quota'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CommonResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+      required: [code, message]
+
+    TokenResponse:
+      allOf:
+        - $ref: '#/components/schemas/CommonResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                token:
+                  type: string
+                user:
+                  $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [parent, student]
+        name:
+          type: string
+        phone:
+          type: string
+
+    Parent:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            subscriptionStatus:
+              type: string
+
+    Student:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        username:
+          type: string
+        age:
+          type: integer
+        grade:
+          type: string
+        textbookVersion:
+          type: string
+        parentId:
+          type: string
+
+    CreateStudentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        username:
+          type: string
+        age:
+          type: integer
+        grade:
+          type: string
+        textbookVersion:
+          type: string
+      required: [name, username, age, grade]
+
+    StudentSettings:
+      type: object
+      properties:
+        theme:
+          type: string
+          enum: [auto, day, night]
+        school:
+          type: string
+          enum: [primary, junior, senior]
+        motionEnabled:
+          type: boolean
+
+    ProgressOverview:
+      type: object
+      properties:
+        studentId:
+          type: string
+        currentSubjectId:
+          type: string
+        currentUnitId:
+          type: string
+        currentLessonId:
+          type: string
+        nextUnlockType:
+          type: string
+          enum: [lesson, unit_test, midterm, final]
+        isClear:
+          type: boolean
+        pendingClearCount:
+          type: integer
+
+    SubjectProgress:
+      type: object
+      properties:
+        subjectId:
+          type: string
+        units:
+          type: array
+          items:
+            type: object
+            properties:
+              unitId:
+                type: string
+              status:
+                type: string
+                enum: [locked, available, completed]
+              clearStatus:
+                type: boolean
+
+    Subject:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        gradeBands:
+          type: array
+          items:
+            type: string
+
+    TextbookVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        subjectId:
+          type: string
+        publisher:
+          type: string
+
+    Unit:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        order:
+          type: integer
+
+    Lesson:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        order:
+          type: integer
+
+    Card:
+      type: object
+      properties:
+        id:
+          type: string
+        lessonId:
+          type: string
+        content:
+          type: string
+        sortOrder:
+          type: integer
+          description: 课内卡片序号
+        cardType:
+          type: string
+          enum: [concept, example, practice, explore, summary, reading]
+          description: 卡片类型，驱动展示与滚动条策略
+        title:
+          type: string
+          nullable: true
+          description: 卡片标题，如"例1：分数的初步认识"
+        breadcrumb:
+          type: string
+          description: 面包屑，如"第2单元 › 第3课"。服务端在卡片列表/详情接口中通过 JOIN lessons+units 计算，整个列表只算一次，同课所有卡片共享。
+          example: "第2单元 › 第3课"
+        textbookPage:
+          type: string
+          nullable: true
+          description: 教材物理页码引用，如"P12-13"
+        knowledgePointIds:
+          type: array
+          items:
+            type: string
+
+    KnowledgePoint:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        subject:
+          type: string
+        gradeBand:
+          type: string
+        description:
+          type: string
+
+    KnowledgeRelation:
+      type: object
+      properties:
+        srcId:
+          type: string
+        dstId:
+          type: string
+        relationType:
+          type: string
+          enum: [prerequisite, contains]
+        weight:
+          type: number
+
+    KnowledgeMastery:
+      type: object
+      properties:
+        knowledgePointId:
+          type: string
+        masteryScore:
+          type: number
+        errorCount:
+          type: integer
+        level:
+          type: string
+          enum: [L1, L2, L3, L4, L5]
+
+    WeakPoint:
+      type: object
+      properties:
+        knowledgePointId:
+          type: string
+        name:
+          type: string
+        errorRate:
+          type: number
+        recommendation:
+          type: string
+
+    Question:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        content:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+        knowledgePointIds:
+          type: array
+          items:
+            type: string
+
+    Homework:
+      type: object
+      properties:
+        id:
+          type: string
+        lessonId:
+          type: string
+        title:
+          type: string
+        dueAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, submitted, graded]
+
+    HomeworkDetail:
+      allOf:
+        - $ref: '#/components/schemas/Homework'
+        - type: object
+          properties:
+            questions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Question'
+
+    Exam:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        scope:
+          type: string
+          enum: [unit, midterm, final]
+        timeLimit:
+          type: integer
+        status:
+          type: string
+          enum: [pending, in_progress, submitted, graded]
+
+    ExamDetail:
+      allOf:
+        - $ref: '#/components/schemas/Exam'
+        - type: object
+          properties:
+            questions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Question'
+
+    CreateExamRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        unitId:
+          type: string
+        scope:
+          type: string
+          enum: [unit, midterm, final]
+
+    Submission:
+      type: object
+      properties:
+        id:
+          type: string
+        assessmentId:
+          type: string
+        assessmentType:
+          type: string
+          enum: [homework, exam]
+        status:
+          type: string
+          enum: [in_progress, submitted, grading, graded]
+        startedAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: string
+          format: date-time
+
+    SubmitAssessmentRequest:
+      type: object
+      properties:
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnswerRequest'
+
+    SaveAnswersRequest:
+      type: object
+      properties:
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnswerRequest'
+
+    AnswerRequest:
+      type: object
+      properties:
+        questionId:
+          type: string
+        answerText:
+          type: string
+        attachmentFileIds:
+          type: array
+          items:
+            type: string
+
+    Answer:
+      type: object
+      properties:
+        id:
+          type: string
+        questionId:
+          type: string
+        answerText:
+          type: string
+        score:
+          type: number
+        feedback:
+          type: string
+        isCorrect:
+          type: boolean
+
+    SubmissionResult:
+      type: object
+      properties:
+        submissionId:
+          type: string
+        totalScore:
+          type: number
+        maxScore:
+          type: number
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Answer'
+        weakPointIds:
+          type: array
+          items:
+            type: string
+
+    AIMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [assistant, system]
+        content:
+          type: string
+        type:
+          type: string
+          enum: [socratic, fallback, block, hint, explain]
+
+    TutorRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        mode:
+          type: string
+          enum: [mainline, auxiliary]
+        cardId:
+          type: string
+        knowledgeId:
+          type: string
+        message:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              fileId:
+                type: string
+        dialogueId:
+          type: string
+      required: [studentId, mode, message]
+
+    TutorResponse:
+      type: object
+      properties:
+        dialogueId:
+          type: string
+        message:
+          $ref: '#/components/schemas/AIMessage'
+        safety:
+          type: object
+          properties:
+            isLearningRelated:
+              type: boolean
+            alertLevel:
+              type: string
+              enum: [none, warning]
+        fallback:
+          type: boolean
+
+    HintRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        questionId:
+          type: string
+        currentAnswer:
+          type: string
+
+    ExplainRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        questionId:
+          type: string
+        context:
+          type: string
+
+    GradeRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        questionId:
+          type: string
+        answerText:
+          type: string
+        attachmentFileIds:
+          type: array
+          items:
+            type: string
+        referenceAnswer:
+          type: string
+
+    GradeResult:
+      type: object
+      properties:
+        score:
+          type: number
+        maxScore:
+          type: number
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              stepNumber:
+                type: integer
+              score:
+                type: number
+              comment:
+                type: string
+        overallComment:
+          type: string
+
+    VariationRequest:
+      type: object
+      properties:
+        originalQuestionId:
+          type: string
+        knowledgePointId:
+          type: string
+        difficulty:
+          type: string
+        level:
+          type: string
+          enum: [L1, L2, L3, L4, L5]
+
+    VariationQuestion:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+        difficulty:
+          type: string
+
+    ReportRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        period:
+          type: string
+          enum: [weekly, monthly, unit]
+        unitId:
+          type: string
+
+    ReportContent:
+      type: object
+      properties:
+        summary:
+          type: string
+        strengths:
+          type: array
+          items:
+            type: string
+        weaknesses:
+          type: array
+          items:
+            type: string
+        suggestions:
+          type: array
+          items:
+            type: string
+
+    AIQuota:
+      type: object
+      properties:
+        planName:
+          type: string
+        totalTokens:
+          type: integer
+        usedTokens:
+          type: integer
+        remainingTokens:
+          type: integer
+        resetAt:
+          type: string
+          format: date-time
+
+    ExtractRequest:
+      type: object
+      properties:
+        fileId:
+          type: string
+        source:
+          type: string
+          enum: [auxiliary, ocr]
+
+    ExtractTask:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        result:
+          $ref: '#/components/schemas/Question'
+
+    UploadedFile:
+      type: object
+      properties:
+        fileId:
+          type: string
+        url:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+
+    ErrorItem:
+      type: object
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        track:
+          type: string
+          enum: [main, aux]
+        questionId:
+          type: string
+        question:
+          $ref: '#/components/schemas/Question'
+        level:
+          type: string
+          enum: [L1, L2, L3, L4, L5]
+        isCleared:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [homework, unit_test, midterm, final, auxiliary]
+
+    RedoRequest:
+      type: object
+      properties:
+        answerText:
+          type: string
+        attachmentFileIds:
+          type: array
+          items:
+            type: string
+
+    RedoResult:
+      type: object
+      properties:
+        isCorrect:
+          type: boolean
+        levelUp:
+          type: boolean
+        newLevel:
+          type: string
+          enum: [L1, L2, L3, L4, L5]
+        explanationId:
+          type: string
+        variationIds:
+          type: array
+          items:
+            type: string
+
+    CreateAuxErrorRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        questionId:
+          type: string
+        extractedContent:
+          type: string
+
+    ErrorStats:
+      type: object
+      properties:
+        totalErrors:
+          type: integer
+        clearedErrors:
+          type: integer
+        pendingErrors:
+          type: integer
+        byKnowledgePoint:
+          type: array
+          items:
+            type: object
+            properties:
+              knowledgePointId:
+                type: string
+              count:
+                type: integer
+
+    ClearStatus:
+      type: object
+      properties:
+        isAllClear:
+          type: boolean
+        pendingItems:
+          type: array
+          items:
+            type: string
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        track:
+          type: string
+          enum: [mainline, auxiliary]
+        cardId:
+          type: string
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateConversationRequest:
+      type: object
+      properties:
+        studentId:
+          type: string
+        track:
+          type: string
+          enum: [mainline, auxiliary]
+        cardId:
+          type: string
+        knowledgeId:
+          type: string
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        dialogueId:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        type:
+          type: string
+        model:
+          type: string
+        tokenCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    SendMessageRequest:
+      type: object
+      properties:
+        content:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              fileId:
+                type: string
+
+    Reward:
+      type: object
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        type:
+          type: string
+          enum: [virtual, material]
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [available, claimed, pending_redemption, redeemed, fulfilled]
+        claimedAt:
+          type: string
+          format: date-time
+
+    Goal:
+      type: object
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        title:
+          type: string
+        period:
+          type: string
+          enum: [daily, weekly]
+        target:
+          type: integer
+        reminderEnabled:
+          type: boolean
+
+    CreateGoalRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        period:
+          type: string
+          enum: [daily, weekly]
+        target:
+          type: integer
+        reminderEnabled:
+          type: boolean
+
+    Controls:
+      type: object
+      properties:
+        dailyTimeLimit:
+          type: integer
+        disabledHours:
+          type: array
+          items:
+            type: object
+            properties:
+              start:
+                type: string
+              end:
+                type: string
+        rewardRedemptionEnabled:
+          type: boolean
+        auxiliaryEnabled:
+          type: boolean
+        photoSearchEnabled:
+          type: boolean
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        type:
+          type: string
+          enum: [chat_off_topic, anomaly, quota_warning, goal_reminder]
+        level:
+          type: string
+          enum: [info, warning, critical]
+        message:
+          type: string
+        isRead:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    Dashboard:
+      type: object
+      properties:
+        students:
+          type: array
+          items:
+            type: object
+            properties:
+              studentId:
+                type: string
+              name:
+                type: string
+              todayStudyMinutes:
+                type: integer
+              pendingAlerts:
+                type: integer
+              lastActiveAt:
+                type: string
+                format: date-time
+        unreadAlerts:
+          type: integer
+
+    LearningReport:
+      type: object
+      properties:
+        id:
+          type: string
+        studentId:
+          type: string
+        period:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        content:
+          $ref: '#/components/schemas/ReportContent'
+
+    ParentAccount:
+      type: object
+      properties:
+        parent:
+          $ref: '#/components/schemas/Parent'
+        subscription:
+          type: object
+          properties:
+            planName:
+              type: string
+            status:
+              type: string
+            expiresAt:
+              type: string
+              format: date-time
+        quota:
+          $ref: '#/components/schemas/AIQuota'
+
+    Quota:
+      type: object
+      properties:
+        planName:
+          type: string
+        totalTokens:
+          type: integer
+        usedTokens:
+          type: integer
+        remainingTokens:
+          type: integer
+        resetAt:
+          type: string
+          format: date-time
+
+    RegisterRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+        password:
+          type: string
+        guardianAgreement:
+          type: boolean
+      required: [phone, password, guardianAgreement]
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+
+    ConversationDetail:
+      allOf:
+        - $ref: '#/components/schemas/Conversation'
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/Message'
