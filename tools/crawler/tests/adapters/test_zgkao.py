@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 
 from main import Crawler, parse_args
-from checkpoint import Checkpoint
-from validator import PdfValidator
-from storage import Storage
+from core.checkpoint import Checkpoint
+from core.validator import PdfValidator
+from core.storage import Storage
 from pypdf import PdfWriter
 
 

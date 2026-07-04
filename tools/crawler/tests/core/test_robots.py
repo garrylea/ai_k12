@@ -9,7 +9,7 @@
 
 import pytest
 
-from robots import RobotsChecker
+from core.robots import RobotsChecker
 
 
 ZGKAO_ROBOTS_TXT = (

@@ -54,6 +54,24 @@ class Fetcher:
                     bytes_written += len(chunk)
         return bytes_written
 
+    def fetch_head(self, url: str) -> tuple[int, dict]:
+        """Send HEAD request. Returns (status_code, headers_dict). Does not raise on 4xx."""
+        for attempt in range(self._max_retries):
+            if attempt > 0 and self._crawl_delay > 0:
+                time.sleep(self._crawl_delay)
+            try:
+                response = self._session.request(
+                    method="HEAD",
+                    url=url,
+                    timeout=self._timeout,
+                )
+            except requests.RequestException:
+                continue
+            if response.status_code >= 500:
+                continue
+            return response.status_code, dict(response.headers)
+        return 503, {}
+
     def _fetch_with_retry(self, url: str, stream: bool, extra_headers: dict | None = None):
         last_response = None
         for attempt in range(self._max_retries):

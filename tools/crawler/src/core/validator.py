@@ -57,3 +57,39 @@ class PdfValidator:
             page_count=page_count,
             error=None,
         )
+
+
+@dataclass
+class ImageValidationResult:
+    is_valid: bool
+    file_size_bytes: int
+    format: Optional[str]
+    error: Optional[str]
+
+
+class ImageValidator:
+    JPEG_MAGIC = b"\xff\xd8\xff"
+    MIN_JPEG_SIZE = 4  # A valid JPEG needs more than just the magic bytes
+
+    def validate(self, file_path: str) -> ImageValidationResult:
+        path = Path(file_path)
+        if not path.exists():
+            return ImageValidationResult(
+                is_valid=False, file_size_bytes=0, format=None,
+                error=f"file not found: {path}",
+            )
+        size = path.stat().st_size
+        if size < self.MIN_JPEG_SIZE:
+            return ImageValidationResult(
+                is_valid=False, file_size_bytes=size, format=None,
+                error="file too small or empty",
+            )
+        content = path.read_bytes()
+        if not content.startswith(self.JPEG_MAGIC):
+            return ImageValidationResult(
+                is_valid=False, file_size_bytes=size, format=None,
+                error="invalid jpeg magic number",
+            )
+        return ImageValidationResult(
+            is_valid=True, file_size_bytes=size, format="jpeg", error=None,
+        )

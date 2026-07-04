@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from checkpoint import Checkpoint
+from core.checkpoint import Checkpoint
 
 
 @pytest.fixture

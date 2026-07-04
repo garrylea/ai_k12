@@ -9,13 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from checkpoint import Checkpoint
+from core.checkpoint import Checkpoint
 from classifier import Classification
-from fetcher import Fetcher
+from core.fetcher import Fetcher
 from parser import IndexParser, DetailParser
-from robots import RobotsChecker
-from storage import Storage
-from validator import PdfValidator
+from core.robots import RobotsChecker
+from core.storage import Storage
+from core.validator import PdfValidator
 
 
 @dataclass

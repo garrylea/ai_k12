@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from classifier import Classification
-from storage import Storage
+from core.storage import ImageStore, Storage
 
 
 @pytest.fixture
@@ -194,3 +194,75 @@ class TestRobotsCheckedFlag:
 def _read_meta(base_dir: Path, cls: Classification) -> dict:
     meta_path = base_dir / cls.subject / cls.level / cls.semester / cls.year / "meta.json"
     return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def image_store(tmp_path, crawl_time):
+    return ImageStore(
+        base_dir=str(tmp_path),
+        entry_url="https://basic.smartedu.cn/tchMaterial",
+        crawl_time=crawl_time,
+        site_adapter="smartedu",
+    )
+
+
+class TestImageStore:
+    def test_saves_page_with_zero_padded_name(self, image_store, tmp_path):
+        image_store.save_page(
+            dir_relpath=Path("数学/初中/人教版/九年级/上册/义务教育教科书·数学九年级上册"),
+            page=1,
+            content=b"\xff\xd8\xffpage1",
+            source_url="https://example.com/1.jpg",
+        )
+        file_path = tmp_path / "数学" / "初中" / "人教版" / "九年级" / "上册" / "义务教育教科书·数学九年级上册" / "page_001.jpg"
+        assert file_path.is_file()
+        assert file_path.read_bytes() == b"\xff\xd8\xffpage1"
+
+    def test_creates_meta_with_status_in_progress(self, image_store, tmp_path):
+        dir_relpath = Path("数学/初中/人教版/九年级/上册/义务教育教科书·数学九年级上册")
+        image_store.init_book_meta(
+            dir_relpath=dir_relpath,
+            classification={"subject": "数学", "level": "初中", "publisher": "人教版", "grade": "九年级", "semester": "上册", "title": "义务教育教科书·数学九年级上册"},
+            source={"site": "smartedu.cn", "asset_id": "a1", "content_id": "c1"},
+            total_pages=3,
+        )
+        meta = image_store.read_meta(dir_relpath)
+        assert meta["status"] == "in_progress"
+        assert meta["total_pages"] == 3
+        assert meta["files"] == []
+
+    def test_appends_file_record_after_save(self, image_store, tmp_path):
+        dir_relpath = Path("数学/初中/人教版/九年级/上册/书")
+        image_store.init_book_meta(dir_relpath, {"title": "书"}, {"asset_id": "a"}, 2)
+        image_store.save_page(dir_relpath, 1, b"\xff\xd8\xffa", "https://example.com/1.jpg")
+        meta = image_store.read_meta(dir_relpath)
+        assert len(meta["files"]) == 1
+        assert meta["files"][0]["filename"] == "page_001.jpg"
+        assert meta["files"][0]["page"] == 1
+        assert meta["files"][0]["type"] == "image"
+
+    def test_finalize_marks_complete(self, image_store, tmp_path):
+        dir_relpath = Path("数学/初中/人教版/九年级/上册/书")
+        image_store.init_book_meta(dir_relpath, {"title": "书"}, {"asset_id": "a"}, 2)
+        image_store.save_page(dir_relpath, 1, b"\xff\xd8\xffa", "https://example.com/1.jpg")
+        image_store.save_page(dir_relpath, 2, b"\xff\xd8\xffb", "https://example.com/2.jpg")
+        image_store.finalize_book(dir_relpath, failed_pages=[])
+        meta = image_store.read_meta(dir_relpath)
+        assert meta["status"] == "complete"
+
+    def test_finalize_with_failed_pages_marks_partial(self, image_store, tmp_path):
+        dir_relpath = Path("数学/初中/人教版/九年级/上册/书")
+        image_store.init_book_meta(dir_relpath, {"title": "书"}, {"asset_id": "a"}, 2)
+        image_store.save_page(dir_relpath, 1, b"\xff\xd8\xffa", "https://example.com/1.jpg")
+        image_store.finalize_book(dir_relpath, failed_pages=[2])
+        meta = image_store.read_meta(dir_relpath)
+        assert meta["status"] == "partial"
+
+    def test_rebuild_meta_from_disk(self, image_store, tmp_path):
+        dir_relpath = Path("数学/初中/人教版/九年级/上册/书")
+        target = tmp_path / "数学" / "初中" / "人教版" / "九年级" / "上册" / "书"
+        target.mkdir(parents=True)
+        (target / "page_001.jpg").write_bytes(b"\xff\xd8\xffa")
+        (target / "page_003.jpg").write_bytes(b"\xff\xd8\xffc")
+        rebuilt = image_store.rebuild_files_from_disk(dir_relpath)
+        assert {f["page"] for f in rebuilt} == {1, 3}
