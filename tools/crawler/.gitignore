@@ -1,0 +1,17 @@
+# 下载的 PDF 与 meta.json 不提交
+data/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+
+# OS
+.DS_Store
