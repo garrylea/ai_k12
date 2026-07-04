@@ -18,6 +18,7 @@ venv/
 ENV/
 .pytest_cache/
 .mypy_cache/
+data/
 data/raw/
 data/processed/
 
@@ -32,3 +33,5 @@ out/
 .idea/
 *.swp
 *.swo
+
+
