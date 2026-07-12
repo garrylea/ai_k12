@@ -63,3 +63,45 @@ class TestExtractCliMain:
         captured = capsys.readouterr()
         assert "[dry-run]" in captured.out
         assert "数学/试卷" in captured.out
+
+
+class TestExtractCliMultiPage:
+    def test_multi_page_textbook_writes_one_jsonl_per_page(self, tmp_path):
+        # 教材为扁平结构：书/page_001.md、page_002.md 共享同一目录（rel_path）。
+        # 修复前：两页共享 checkpoint key（目录级），第二页被 skip，输出互相覆盖。
+        # 修复后：每页有独立 checkpoint key 与输出文件。
+        from extract import ExtractionResult
+        from extract_cli import main
+        from models import TextbookCard
+
+        md_root = tmp_path / "md"
+        book_dir = md_root / "数学" / "书"
+        book_dir.mkdir(parents=True)
+        (book_dir / "page_001.md").write_text("page1", encoding="utf-8")
+        (book_dir / "page_002.md").write_text("page2", encoding="utf-8")
+
+        out_dir = tmp_path / "out"
+        card = TextbookCard(sort_order=1, card_type="concept", content="c")
+        fake_result = ExtractionResult(items=[card], prompt_tokens=1, completion_tokens=1)
+
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.LLMClient"), \
+             patch("extract_cli.Extractor") as mock_extractor:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=md_root,
+                output_dir=out_dir,
+                llm_api_key="fake",
+                llm_model="m",
+                llm_base_url=None,
+                llm_timeout=1,
+            )
+            mock_extractor.return_value.run.return_value = fake_result
+            main(["--input-dir", str(md_root), "--output-dir", str(out_dir)])
+
+        extracted_dir = out_dir / "extracted"
+        f1 = extracted_dir / "数学" / "书" / "page_001.jsonl"
+        f2 = extracted_dir / "数学" / "书" / "page_002.jsonl"
+        assert f1.exists(), f"{f1} should exist"
+        assert f2.exists(), f"{f2} should exist (second page must not be skipped)"
+        assert f1.read_text(encoding="utf-8").strip() != ""
+        assert f2.read_text(encoding="utf-8").strip() != ""

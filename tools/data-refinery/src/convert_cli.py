@@ -42,7 +42,7 @@ def main(argv=None):
     checkpoint = RefineryCheckpoint(config.output_dir / ".checkpoint.json")
     checkpoint.load()
 
-    runner = MineruRunner(bin_path=config.mineru_bin, timeout=config.mineru_timeout)
+    runner = MineruRunner(bin_path=config.mineru_bin, timeout=config.mineru_timeout, token=config.mineru_token)
     converter = Converter(runner=runner, output_dir=output_md_dir)
 
     materials = [m for m in scanner.scan() if _match_source(m, args.source)]

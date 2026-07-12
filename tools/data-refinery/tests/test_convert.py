@@ -19,7 +19,8 @@ class TestMineruRunner:
         runner._run = fake_run
         runner.run(input_paths, output_dir)
 
-        assert calls[0][0] == ["mineru", "extract", str(tmp_path / "a.pdf"), "-o", str(output_dir), "-f", "md"]
+        assert calls[0][0] == ["mineru", "extract", str(tmp_path / "a.pdf"), "-o", str(output_dir)]
+
 
 
 class TestConverter:
