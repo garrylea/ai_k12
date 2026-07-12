@@ -149,7 +149,7 @@ docs(data-refinery): align design doc with actual implementation
 **进展（2026-07-12）**：
 - ✅ `asset_store.py`（AssetStore + LocalAssetStore）、`image_rewrite.py`（图片物化 + 路径改写 + 填充 metadata）、`publish_cli.py`（产出 `output/published/<stem>.jsonl` + `output/assets/`）已实现，57 tests passed。
 - ✅ 资源路径暂用源相对稳定键（`questions/{subject}/{hash}/{idx}` 等），偏离 §9 的 `{id}`，待入库时改写。
-- ⏳ `db_loader.py`（MySQL 入库）后置：questions 仅需 `subject_id` 可直接入库；cards 受 `lesson_id` 映射阻断（爬虫路径无法自动定位 lesson），待教材元数据映射方案确定后再实现。
+- ⏳ `db_loader.py`（MySQL 入库）后置：questions 仅需 `subject_id` 可直接入库；cards 的 `lesson_id` 现已由 extract prompt 让 LLM 输出“课”标签（章内小节，如 `1.1 一元二次方程`），db_loader 只需把标签映射到 `lessons.id`（按 textbook_version 找 unit/lesson；lessons 表可由全书 card 的 lesson_id 标签去重反推 seed）。
 
 ---
 

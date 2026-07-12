@@ -13,6 +13,7 @@ class TestLoadPrompt:
     def test_loads_textbook_cards_prompt(self):
         text = _load_prompt("textbook_cards")
         assert "教材 Markdown" in text
+        assert "lesson_id" in text  # 卡片需标注所属“课”（章内小节）
 
 
 class TestMatchSource:

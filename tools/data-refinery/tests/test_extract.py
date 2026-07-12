@@ -46,6 +46,7 @@ class TestExtractor:
                 "items": [{
                     "sort_order": 1,
                     "card_type": "concept",
+                    "lesson_id": "1.1 二次根式",
                     "content": "二次根式的概念",
                 }]
             }),
@@ -59,3 +60,4 @@ class TestExtractor:
         assert len(result.items) == 1
         assert isinstance(result.items[0], TextbookCard)
         assert result.items[0].card_type == "concept"
+        assert result.items[0].lesson_id == "1.1 二次根式"
