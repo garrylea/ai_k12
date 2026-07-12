@@ -61,6 +61,29 @@ python src/extract_cli.py --source smartedu
 
 输出到 `tools/data-refinery/output/extracted/`，每份 Markdown 镜像一个 `<stem>.jsonl`（如 `page_001.jsonl`、`<试卷名>.jsonl`），多页教材各自独立、互不覆盖。
 
+### 3. publish：物化图片 + 改写路径 -> published JSONL
+
+```bash
+python src/publish_cli.py --source zgkao --dry-run
+python src/publish_cli.py --source smartedu
+```
+
+读 `output/extracted/` 的 `<stem>.jsonl`，把 `content`/`options`/`explanation` 里的原始图片引用 `![](images/xxx.jpg)` 按 §9 规范名（`stem_NN`、`opt_{label}`、`explain_NN`、`page_{N}_fig_{NN}`）物化到 `output/assets/`，改写为规范相对路径，并填充 `content_metadata.images[]` / `options[].image_url`。产物写到 `output/published/`（与 extracted 同构的 `<stem>.jsonl`）。
+
+> **暂不入库 MySQL**：资源路径用源相对稳定键（`questions/{subject}/{hash}/{idx}`、`textbooks/{subject}/{hash}/{sort_order}`）。DB 入库与 `lesson_id` 映射后置（见 `docs/superpowers/plans/2026-07-12-data-refinery-publish-stage.md`）。
+
+#### 开发期静态服务（让 web 能取到图片）
+
+`output/assets/` 需以静态目录暴露，前端通过 `ASSET_BASE_URL` 拼接：
+
+```bash
+# 临时静态服务（示例）
+cd tools/data-refinery/output && python3 -m http.server 3000
+# ASSET_BASE_URL=http://localhost:3000/assets/
+```
+
+前端 `resolveAssetUrl('questions/math/.../stem_01.jpg')` -> `http://localhost:3000/assets/questions/math/.../stem_01.jpg`。生产环境切换 CDN/OSS 只改 `ASSET_BASE_URL`。
+
 ## 配置
 
 | 环境变量 | 说明 | 默认值 |

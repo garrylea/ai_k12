@@ -5,6 +5,8 @@
 **创建日期：** 2026-07-12
 **前置：** `tools/data-refinery/` 的 convert / extract pipeline 已完成并对齐（见 `docs/文档转换设计.md`）。
 
+> **进展（2026-07-12）：** Task 1（asset_store）、Task 2（image_rewrite）、Task 4（publish_cli）已实现并测试（57 passed），产出 `output/published/<stem>.jsonl` + `output/assets/`。采用 §5.2 方案 2（源相对稳定键，暂不入库）。**Task 3（db_loader）后置**——待教材元数据映射（§8 #1）确定后再实现。Task 5 文档/静态服务说明已完成，apps/server 接线待后端就绪。
+
 ---
 
 ## 1. 背景与问题
