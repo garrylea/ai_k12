@@ -1,0 +1,5 @@
+# convert/extract pipeline 生成产物，不入库
+output/
+
+# 含 MINERU_TOKEN 等密钥（根 .gitignore 已忽略，此处显式标注）
+.env

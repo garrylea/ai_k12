@@ -68,8 +68,11 @@ def main(argv=None):
     failed = 0
 
     for source in sources:
-        rel = str(source.rel_path)
-        if not args.force and checkpoint.is_extracted(rel):
+        # 文件级唯一键：目录 + md 文件名，确保同一本书的每一页都有独立的 checkpoint 与输出路径，
+        # 避免教材扁平结构（多页共享同一 rel_path 目录）时第一页后其余页被 skip 或输出互相覆盖。
+        rel_file = source.rel_path / source.md_path.name
+        file_key = str(rel_file)
+        if not args.force and checkpoint.is_extracted(file_key):
             skipped += 1
             continue
         try:
@@ -77,17 +80,17 @@ def main(argv=None):
             extractor = Extractor(llm=llm, prompt=prompt, kind=source.kind)
             result = extractor.run(source.md_path)
 
-            target_dir = extracted_dir / source.rel_path
-            target_dir.mkdir(parents=True, exist_ok=True)
-            out_file = target_dir / ("questions.jsonl" if source.kind == "questions" else "cards.jsonl")
+            # 每份 md 镜像一个 jsonl（md 路径换后缀），多页教材各自独立、互不覆盖。
+            out_file = extracted_dir / rel_file.with_suffix(".jsonl")
+            out_file.parent.mkdir(parents=True, exist_ok=True)
             with out_file.open("w", encoding="utf-8") as f:
                 for item in result.items:
                     f.write(json.dumps(item.model_dump(mode="json"), ensure_ascii=False) + "\n")
 
-            checkpoint.mark_extracted(rel)
+            checkpoint.mark_extracted(file_key)
             extracted += 1
         except Exception as e:
-            print(f"[ERROR] {rel}: {e}")
+            print(f"[ERROR] {file_key}: {e}")
             failed += 1
 
     print(f"Extracted: {extracted}, Skipped: {skipped}, Failed: {failed}")

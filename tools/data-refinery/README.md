@@ -7,7 +7,6 @@
 ```
 tools/data-refinery/
 ├── src/
-│   ├── cli.py                # CLI 入口
 │   ├── config.py             # 配置加载
 │   ├── scanner.py            # 素材扫描器（PDF / 图片书）
 │   ├── checkpoint.py         # 断点续传
@@ -47,8 +46,8 @@ cp .env.example .env
 ### 1. convert：素材 → Markdown
 
 ```bash
-python src/cli.py convert --source zgkao --dry-run
-python src/cli.py convert --source smartedu
+python src/convert_cli.py --source zgkao --dry-run
+python src/convert_cli.py --source smartedu
 ```
 
 输出到 `tools/data-refinery/output/md/`，保留 MinerU 生成的 `.md`、`images/` 及中间文件。
@@ -56,11 +55,11 @@ python src/cli.py convert --source smartedu
 ### 2. extract：Markdown → 结构化 JSONL
 
 ```bash
-python src/cli.py extract --source zgkao --dry-run
-python src/cli.py extract --source smartedu
+python src/extract_cli.py --source zgkao --dry-run
+python src/extract_cli.py --source smartedu
 ```
 
-输出到 `tools/data-refinery/output/extracted/`，试卷生成 `questions.jsonl`，教材生成 `cards.jsonl`。
+输出到 `tools/data-refinery/output/extracted/`，每份 Markdown 镜像一个 `<stem>.jsonl`（如 `page_001.jsonl`、`<试卷名>.jsonl`），多页教材各自独立、互不覆盖。
 
 ## 配置
 
@@ -70,6 +69,7 @@ python src/cli.py extract --source smartedu
 | `REFINERY_OUTPUT_DIR` | 结果输出目录 | `tools/data-refinery/output` |
 | `MINERU_BIN` | MinerU 可执行文件 | `mineru-open-api` |
 | `MINERU_TIMEOUT` | MinerU 超时（秒） | `300` |
+| `MINERU_TOKEN` | MinerU API token（由 MinerU CLI 直接读取） | - |
 | `LLM_PROVIDER` | LLM 提供商 | `openai` |
 | `LLM_MODEL` | 模型名称 | `gpt-4o` |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | API 密钥 | - |
