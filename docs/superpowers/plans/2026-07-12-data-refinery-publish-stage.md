@@ -5,6 +5,8 @@
 **创建日期：** 2026-07-12
 **前置：** `tools/data-refinery/` 的 convert / extract pipeline 已完成并对齐（见 `docs/文档转换设计.md`）。
 
+> **进展（2026-07-12）：** Task 1（asset_store）、Task 2（image_rewrite）、Task 4（publish_cli）已实现并测试（57 passed），产出 `output/published/<stem>.jsonl` + `output/assets/`。采用 §5.2 方案 2（源相对稳定键，暂不入库）。**Task 3（db_loader）后置**——待教材元数据映射（§8 #1）确定后再实现。Task 5 文档/静态服务说明已完成，apps/server 接线待后端就绪。
+
 ---
 
 ## 1. 背景与问题
@@ -154,7 +156,7 @@ class AssetStore(Protocol):
 
 ## 8. 未决问题（实现前需确认）
 
-1. **教材元数据映射**：`rel_path`（如 `数学/初中/人教版/九年级/上册/书名/`）如何映射到 `textbook_versions`/`semesters`/`units`/`lessons`？是否需要一份"书名 → lesson 序列"映射表？谁维护？
+1. **教材元数据映射**（已部分解决 ✅）：`cards.lesson_id` 现由 extract prompt 让 LLM 输出“课”标签（章内小节，如 `1.1 一元二次方程`，见 `prompts/textbook_cards.txt`）。db_loader 只需把标签映射到 `lessons.id`。仍需确认：① `textbook_versions`/`semesters`/`units`/`lessons` 表如何 seed——可由全书 card 的 `lesson_id` 标签去重反推章/节结构来生成；② `rel_path` -> `textbook_version_id`（书名 -> 版本）仍需一份小映射表或约定。
 2. **`textbook_page` 推导**：extract 已移除 `extra_context`，`textbook_page` 需从 `page_NNN.md` 文件名推导（publish 阶段可补）。
 3. **图片与题干/选项的位置关联**：LLM 输出的 `content` 里 `![](images/xxx.jpg)` 的位置是否足够判定属题干还是解析？若 LLM 把图归错字段，需人工校验。
 4. **入库幂等**：重跑 publish 如何避免重复 INSERT？以 `source` + `source_year` + 题干 hash 做去重键，或清表重灌？

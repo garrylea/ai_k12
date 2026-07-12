@@ -13,27 +13,39 @@ class TestLoadPrompt:
     def test_loads_textbook_cards_prompt(self):
         text = _load_prompt("textbook_cards")
         assert "教材 Markdown" in text
+        assert "lesson_id" in text  # 卡片需标注所属“课”（章内小节）
 
 
 class TestMatchSource:
     def test_all_passes(self):
-        s = MarkdownSource(md_path=Path("x.md"), rel_path=Path("数学/试卷"), kind="questions")
+        s = MarkdownSource(md_path=Path("数学-模拟二-试卷.md"), rel_path=Path("数学/试卷"), kind="questions")
         assert _match_source(s, "all") is True
 
     def test_zgkao_matches_questions(self):
-        s = MarkdownSource(md_path=Path("x.md"), rel_path=Path("数学/试卷"), kind="questions")
+        s = MarkdownSource(md_path=Path("数学-模拟二-试卷.md"), rel_path=Path("数学/试卷"), kind="questions")
+        assert _match_source(s, "zgkao") is True
+
+    def test_zgkao_matches_answer(self):
+        s = MarkdownSource(md_path=Path("数学-模拟二-答案.md"), rel_path=Path("数学/答案"), kind="questions")
         assert _match_source(s, "zgkao") is True
 
     def test_zgkao_rejects_cards(self):
-        s = MarkdownSource(md_path=Path("x.md"), rel_path=Path("数学/书"), kind="cards")
+        s = MarkdownSource(md_path=Path("page_016.md"), rel_path=Path("数学/书"), kind="cards")
         assert _match_source(s, "zgkao") is False
 
     def test_smartedu_matches_cards(self):
-        s = MarkdownSource(md_path=Path("x.md"), rel_path=Path("数学/书"), kind="cards")
+        s = MarkdownSource(md_path=Path("page_016.md"), rel_path=Path("数学/书"), kind="cards")
         assert _match_source(s, "smartedu") is True
 
     def test_smartedu_rejects_questions(self):
-        s = MarkdownSource(md_path=Path("x.md"), rel_path=Path("数学/试卷"), kind="questions")
+        s = MarkdownSource(md_path=Path("数学-模拟二-试卷.md"), rel_path=Path("数学/试卷"), kind="questions")
+        assert _match_source(s, "smartedu") is False
+
+    def test_zgkao_uses_filename_not_directory(self):
+        # 回归：试卷文件名含“试卷”，但其所在目录名不含，仍应判为 zgkao。
+        # 修复前用目录名判断，扁平目录下会误判为 smartedu。
+        s = MarkdownSource(md_path=Path("数学-模拟二-试卷.md"), rel_path=Path("flat/dir"), kind="questions")
+        assert _match_source(s, "zgkao") is True
         assert _match_source(s, "smartedu") is False
 
 
@@ -63,6 +75,36 @@ class TestExtractCliMain:
         captured = capsys.readouterr()
         assert "[dry-run]" in captured.out
         assert "数学/试卷" in captured.out
+
+
+class TestExtractCliFileFilter:
+    def test_file_filter_matches_only_specified(self, tmp_path, capsys):
+        sub1 = tmp_path / "数学" / "2024"
+        sub2 = tmp_path / "数学" / "2025"
+        sub1.mkdir(parents=True)
+        sub2.mkdir(parents=True)
+
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.MarkdownScanner") as mock_scanner:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                llm_api_key="fake",
+                llm_model="gpt-4o",
+                llm_base_url=None,
+                llm_timeout=120,
+            )
+            mock_scanner.return_value.scan.return_value = [
+                MarkdownSource(md_path=sub1 / "西城-试卷.md", rel_path=Path("数学/2024"), kind="questions"),
+                MarkdownSource(md_path=sub2 / "海淀-试卷.md", rel_path=Path("数学/2025"), kind="questions"),
+            ]
+
+            from extract_cli import main
+            main(["--input-dir", str(tmp_path), "--file", "2024/西城", "--dry-run"])
+
+        out = capsys.readouterr().out
+        assert "西城" in out
+        assert "海淀" not in out
 
 
 class TestExtractCliMultiPage:

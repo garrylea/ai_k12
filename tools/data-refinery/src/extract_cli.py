@@ -16,6 +16,7 @@ def parse_args(argv=None):
     parser.add_argument("--input-dir", help="Markdown 输入目录（默认 tools/data-refinery/output/md）")
     parser.add_argument("--output-dir", help="提取结果输出目录（默认 tools/data-refinery/output/extracted）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
+    parser.add_argument("--file", help="只提取匹配的文件（相对路径子串匹配，如 '2024/...西城-模拟二-试卷'）")
     parser.add_argument("--force", action="store_true", help="强制重新提取")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要处理的 Markdown")
     return parser.parse_args(argv)
@@ -29,7 +30,9 @@ def _load_prompt(kind: str) -> str:
 def _match_source(source: MarkdownSource, filter_value: str) -> bool:
     if filter_value == "all":
         return True
-    name = source.rel_path.name
+    # 用 md 文件名判断来源（而非所在目录名），与 scanner 的 kind 推断、
+    # publish_cli 的过滤保持一致；避免扁平目录下目录名不含“试卷/答案”时误判。
+    name = source.md_path.name
     if filter_value == "zgkao":
         return "试卷" in name or "答案" in name
     if filter_value == "smartedu":
@@ -51,29 +54,39 @@ def main(argv=None):
     checkpoint.load()
 
     llm = LLMClient(
+        provider=config.llm_provider,
         api_key=config.llm_api_key or "",
+        auth_token=config.llm_auth_token,
         model=config.llm_model,
         base_url=config.llm_base_url,
         timeout=config.llm_timeout,
+        max_tokens=config.llm_max_tokens,
     )
 
     sources = [s for s in scanner.scan() if _match_source(s, args.source)]
+    if args.file:
+        # 按相对路径子串过滤，只处理指定文件（如某份漏抽的试卷）
+        sources = [s for s in sources if args.file in str(s.rel_path / s.md_path.name)]
     if args.dry_run:
         for s in sources:
-            print(f"[dry-run] {s.rel_path} ({s.kind})")
+            print(f"[dry-run] {s.rel_path / s.md_path.name} ({s.kind})")
+        if not sources:
+            print(f"[dry-run] 无文件匹配 --file={args.file!r}")
         return
 
     extracted = 0
     skipped = 0
     failed = 0
+    total = len(sources)
 
-    for source in sources:
+    for idx, source in enumerate(sources, 1):
         # 文件级唯一键：目录 + md 文件名，确保同一本书的每一页都有独立的 checkpoint 与输出路径，
         # 避免教材扁平结构（多页共享同一 rel_path 目录）时第一页后其余页被 skip 或输出互相覆盖。
         rel_file = source.rel_path / source.md_path.name
         file_key = str(rel_file)
         if not args.force and checkpoint.is_extracted(file_key):
             skipped += 1
+            print(f"[skip] ({idx}/{total}) {file_key}", flush=True)
             continue
         try:
             prompt = _load_prompt("exam_questions" if source.kind == "questions" else "textbook_cards")
@@ -89,11 +102,14 @@ def main(argv=None):
 
             checkpoint.mark_extracted(file_key)
             extracted += 1
+            print(f"[ok] ({idx}/{total}) {file_key} -> {len(result.items)} items", flush=True)
         except Exception as e:
-            print(f"[ERROR] {file_key}: {e}")
+            # flush=True：stdout 重定向到文件时为块缓冲，进程被 kill 会导致缓冲区丢失，
+            # 错误信息必须即时落盘以便诊断（如长输出超时、解析失败等）。
+            print(f"[ERROR] ({idx}/{total}) {file_key}: {e}", flush=True)
             failed += 1
 
-    print(f"Extracted: {extracted}, Skipped: {skipped}, Failed: {failed}")
+    print(f"Extracted: {extracted}, Skipped: {skipped}, Failed: {failed}", flush=True)
 
 
 if __name__ == "__main__":
