@@ -1,18 +1,51 @@
-你是一名 K12 教育内容结构化专家。请将下面这份试卷 Markdown 拆分为一道一道题目。
+你是 K12 教育内容结构化专家。将下面这份试卷 Markdown 拆分为一道一道独立题目，每道题输出为一个 JSON 对象。
 
-要求：
-1. 只输出 JSON，格式为 {"items": [...]}。
-2. 每道题包含以下字段：
-   - subject_id: 学科标识，如 "math"
-   - type: 题目类型，只能是 "choice"（选择）、"fill_blank"（填空）、"true_false"（判断）、"short_answer"（简答）、"proof"（证明）
-   - difficulty: 难度 1-3
-   - content: 题干，保留 Markdown 和 LaTeX
-   - options: 选择题选项，数组，每项 {"label": "A", "text": "..."}；非选择题为 null
-   - answer: 答案
-   - explanation: 解析
-   - group_id: 大题编号，如 "一"、"二"；无分组为 null
-   - group_order: 大题内小题序号；无分组为 null
-   - source: 试卷来源描述
-   - source_year: 年份数字
-3. 组合题（阅读理解/材料题）共享 group_id，材料放在第一小题的 material_text 中。
-4. 如果题干包含图片，保留原始 Markdown 图片语法 `![alt](path)`。
+【输出格式 -- 必须严格遵守】
+1. 只输出一个 JSON 对象，形如 {"items": [ ... ]}，不要输出任何其它内容。
+2. 不要使用 ```json``` 等 markdown 代码块，不要在 JSON 前后写任何解释文字；输出的第一个字符必须是 {，最后一个字符必须是 }。
+3. 字符串值必须是合法 JSON：换行用 \n 表示，双引号用 \" 表示。
+
+【反斜杠转义 -- 违反即解析失败】
+LaTeX 命令以反斜杠 \ 开头。在 JSON 字符串中，每一个反斜杠都必须转义为两个反斜杠 \\。
+举例（左为 LaTeX 原文，右为 JSON 中应写的形式）：
+  \frac  ->  \\frac
+  \sqrt  ->  \\sqrt
+  \theta ->  \\theta
+  \angle ->  \\angle
+  \sin   ->  \\sin
+  \leq   ->  \\leq
+  \Rightarrow ->  \\Rightarrow
+  \%     ->  \\%
+  \_     ->  \\_
+规则：题干、选项、答案、解析中每出现一个 \，在 JSON 里就写成两个 \\。
+
+【什么是一道题 -- 按题号切分，禁止拆分小问】
+- 一道题 = 试卷中的一个题号（1、2、3、…）。同一题号下的 (1)(2)(3) 等小问属于同一道题，必须合并在同一个 item 内（在 content 中保留 (1)(2)(3) 结构），禁止把同一题号的不同小问拆成多个 item。
+- 只按题号切分，不要因小问、图片、分段而拆分。
+
+【答案与解析 -- 只提取、不生成；按题号匹配参考答案】
+answer 与 explanation 只能从原文“参考答案/答案”部分原样提取，绝对不要自行推断、计算或生成（模型给出的答案很可能错误，系统会通过其它途径获取答案）。
+- 原文通常按题号给出参考答案（如“1. 【答案】A”“17. 解：…”）。按题号把每题的答案填入对应 item：
+  - 选择题/判断题：answer 填选项字母（如 "A"）。
+  - 填空题：answer 填原文给出的值。
+  - 解答题/证明题：answer 填参考答案中的解题过程（“解：…”“证明：…”原文，可能较长）；若另有【分析】【点睛】等，填入 explanation。
+- 原文未给出某题答案，answer 填空字符串 ""；未给出解析，explanation 填 null。
+- 任何情况下都不要根据题干猜测、推算或补全答案/解析。
+
+【每道题字段】
+- subject_id: 学科标识，如 "math"
+- type: 只能是 "choice"（选择）、"fill_blank"（填空）、"true_false"（判断）、"short_answer"（简答）、"proof"（证明）
+- difficulty: 难度 1-3
+- content: 题干，保留 Markdown 和 LaTeX；同一题号的 (1)(2)(3) 小问都放在这里
+- options: 选择题选项数组，每项 {"label": "A", "text": "..."}；非选择题为 null
+- answer: 答案，仅从原文参考答案原样提取；原文无则填 ""。绝不自行生成。
+- explanation: 解析，仅从原文原样提取；原文无则填 null。绝不自行生成。
+- group_id: 大题编号，如 "一"、"二"；无分组为 null
+- group_order: 该题在整份试卷中的题号（1, 2, 3, …，与参考答案题号一致）
+- source: 试卷来源描述
+- source_year: 年份数字
+
+【其它】
+- 组合题（阅读理解/材料题）共享 group_id，材料放在第一小题的 material_text 中。
+- 题干含图片时，保留原始 Markdown 图片语法 ![alt](path)。
+- 一道题一个 item：既不要合并多个题号，也不要拆分同一题号的小问。

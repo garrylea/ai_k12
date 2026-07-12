@@ -59,6 +59,12 @@ python src/extract_cli.py --source zgkao --dry-run
 python src/extract_cli.py --source smartedu
 ```
 
+只提取单个文件（按相对路径子串匹配，如某份漏抽的试卷）：
+
+```bash
+python src/extract_cli.py --file "2024/数学-初三(下)-202407-西城-模拟二-试卷"
+```
+
 输出到 `tools/data-refinery/output/extracted/`，每份 Markdown 镜像一个 `<stem>.jsonl`（如 `page_001.jsonl`、`<试卷名>.jsonl`），多页教材各自独立、互不覆盖。
 
 ### 3. publish：物化图片 + 改写路径 -> published JSONL

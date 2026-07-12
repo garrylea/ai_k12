@@ -28,9 +28,11 @@ class RefineryConfig:
     llm_provider: str
     llm_model: str
     llm_api_key: str | None
+    llm_auth_token: str | None
     llm_base_url: str | None
     llm_timeout: int
     llm_max_retries: int
+    llm_max_tokens: int
 
     @classmethod
     def from_env(cls, input_dir: str | None = None, output_dir: str | None = None) -> "RefineryConfig":
@@ -44,7 +46,10 @@ class RefineryConfig:
             llm_provider=os.getenv("LLM_PROVIDER", "openai"),
             llm_model=os.getenv("LLM_MODEL", "gpt-4o"),
             llm_api_key=os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
-            llm_base_url=os.getenv("LLM_BASE_URL"),
+            # 优先用 refinery 专属变量，避免被 shell 里 Claude Code 的 ANTHROPIC_AUTH_TOKEN 覆盖
+            llm_auth_token=os.getenv("LLM_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN"),
+            llm_base_url=os.getenv("LLM_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL"),
             llm_timeout=int(os.getenv("LLM_TIMEOUT", "120")),
             llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+            llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "16384")),
         )

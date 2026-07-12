@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from extract import Extractor
+from extract import Extractor, _parse_json_object
 from models import ExamQuestion, TextbookCard
 
 
@@ -61,3 +61,32 @@ class TestExtractor:
         assert isinstance(result.items[0], TextbookCard)
         assert result.items[0].card_type == "concept"
         assert result.items[0].lesson_id == "1.1 二次根式"
+
+
+class TestParseJSONObject:
+    """本地模型输出兼容性：代码块包裹、LaTeX 反斜杠漏转义。"""
+
+    def test_clean_json(self):
+        out = _parse_json_object('{"items": [{"a": 1}]}')
+        assert out == {"items": [{"a": 1}]}
+
+    def test_strips_code_fence(self):
+        out = _parse_json_object('```json\n{"items": []}\n```')
+        assert out == {"items": []}
+
+    def test_repairs_unescaped_latex_backslashes(self):
+        # 模型漏转义：\_ 与 \%（单反斜杠），合法转义 \n 须保留
+        raw = '{"items": [{"content": "填空 \\_\\_\\_ 与 $30\\%$\\n换行"}]}'
+        out = _parse_json_object(raw)
+        assert out["items"][0]["content"] == "填空 \\_\\_\\_ 与 $30\\%$\n换行"
+
+    def test_preserves_valid_escapes(self):
+        # \n \t 为合法转义，不得被加倍
+        raw = '{"items": [{"content": "a\\nb\\tc"}]}'
+        assert _parse_json_object(raw)["items"][0]["content"] == "a\nb\tc"
+
+    def test_empty_and_garbage(self):
+        assert _parse_json_object("") == {}
+        import pytest
+        with pytest.raises(json.JSONDecodeError):
+            _parse_json_object("not json at all")
