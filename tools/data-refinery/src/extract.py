@@ -111,6 +111,8 @@ class Extractor:
         response: LLMResponse = self._llm.complete(self._prompt, content)
         data = _parse_json_object(response.content)
         raw_items = data.get("items", [])
+        # 跳过 content 为 null/空 的条目（LLM 偶发对纯图片片段返回 null，避免整页失败）
+        raw_items = [it for it in raw_items if it.get("content")]
 
         if self._kind == "questions":
             items = [ExamQuestion(**item) for item in raw_items]

@@ -33,6 +33,11 @@ class RefineryConfig:
     llm_timeout: int
     llm_max_retries: int
     llm_max_tokens: int
+    db_host: str
+    db_port: int
+    db_user: str
+    db_pass: str
+    db_name: str
 
     @classmethod
     def from_env(cls, input_dir: str | None = None, output_dir: str | None = None) -> "RefineryConfig":
@@ -52,4 +57,9 @@ class RefineryConfig:
             llm_timeout=int(os.getenv("LLM_TIMEOUT", "120")),
             llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "16384")),
+            db_host=os.getenv("DB_HOST", "localhost"),
+            db_port=int(os.getenv("DB_PORT", "3306")),
+            db_user=os.getenv("DB_USER", "ai_k12"),
+            db_pass=os.getenv("DB_PASS", ""),
+            db_name=os.getenv("DB_NAME", "ai_k12"),
         )

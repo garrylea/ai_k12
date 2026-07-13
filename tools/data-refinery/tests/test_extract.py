@@ -62,6 +62,26 @@ class TestExtractor:
         assert result.items[0].card_type == "concept"
         assert result.items[0].lesson_id == "1.1 二次根式"
 
+    def test_skips_items_with_null_or_empty_content(self, tmp_path):
+        # LLM 偶发返回 content=null/"" 的卡片（如纯图片片段），应跳过而非整页失败
+        md_path = tmp_path / "教材.md"
+        md_path.write_text("# 教材\n形如...", encoding="utf-8")
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = MagicMock(
+            content=json.dumps({"items": [
+                {"sort_order": 1, "card_type": "concept", "content": "有效内容",
+                 "lesson_id": "26.1 反比例函数"},
+                {"sort_order": 2, "card_type": "concept", "content": None,
+                 "lesson_id": "26.1 反比例函数"},
+                {"sort_order": 3, "card_type": "example", "content": "", "lesson_id": None},
+            ]}),
+            prompt_tokens=10, completion_tokens=5,
+        )
+        extractor = Extractor(llm=mock_llm, prompt="system", kind="cards")
+        result = extractor.run(md_path)
+        assert len(result.items) == 1
+        assert result.items[0].content == "有效内容"
+
 
 class TestParseJSONObject:
     """本地模型输出兼容性：代码块包裹、LaTeX 反斜杠漏转义。"""

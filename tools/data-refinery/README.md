@@ -67,6 +67,8 @@ python src/extract_cli.py --file "2024/数学-初三(下)-202407-西城-模拟�
 
 输出到 `tools/data-refinery/output/extracted/`，每份 Markdown 镜像一个 `<stem>.jsonl`（如 `page_001.jsonl`、`<试卷名>.jsonl`），多页教材各自独立、互不覆盖。
 
+**lesson_id（教材卡片）**：LLM 每张卡片输出小节/章标题原文作为标识，续页/续卡片填 null，由 CLI 按书跨页继承（per-book running 状态），保证一节的内容落在同一 lesson_id。章前综述归该章"第 0 节"。封面/目录/版权/前言等前置内容不抽取（输出空 items）。断点续传时从已抽页 jsonl 回填状态。`--file` 只抽单页时不携带跨页状态，续页 card 的 lesson_id 可能为 null。
+
 ### 3. publish：物化图片 + 改写路径 -> published JSONL
 
 ```bash
@@ -90,6 +92,33 @@ cd tools/data-refinery/output && python3 -m http.server 3000
 
 前端 `resolveAssetUrl('questions/math/.../stem_01.jpg')` -> `http://localhost:3000/assets/questions/math/.../stem_01.jpg`。生产环境切换 CDN/OSS 只改 `ASSET_BASE_URL`。
 
+### 4. db_loader：published JSONL -> MySQL
+
+```bash
+python src/db_loader_cli.py --source all --dry-run
+python src/db_loader_cli.py --source all
+```
+
+读 `output/published/<stem>.jsonl`，按 kind 入库：
+
+- **cards**（教材）：按书目录分组、按页顺序收集，`sort_order` 跨页全局重排（保证 `uniq_cards_lesson_sort` 不碰撞）；解析 `rel_path`（`学科/学段/版本/年级/学期/书名`）派生 `textbook_versions`+`semesters`；解析 `lesson_id` 标签（`第N章 X` 章综述、`N.M[.K] X` 节）派生 `units`+`lessons`；`lesson_id` 标签映射到 `lessons.id` 后 INSERT cards。
+- **questions**（试卷）：`subject_id` 别名归一（`chem`->`chemistry`）-> `subjects.id`，INSERT questions。
+
+幂等：full-reload。每次跑先 `DELETE textbook_versions`（级联清 cards/lessons/units/semesters）+ `DELETE questions`，再重插；结构 find-or-create。`--source smartedu` 只清 cards 侧，`zgkao` 只清 questions。`--dry-run` 只列文件不入库。
+
+> DB 初始化（含 `subjects` seed）由 `tools/db/install_mysql.sh` 完成；连接配置见下表 `DB_*`。
+
+### 5. refinery：一键串联 publish + db_loader
+
+```bash
+python src/refinery_cli.py --source all            # publish + db_loader
+python src/refinery_cli.py --source all --dry-run  # 两步都只打印
+python src/refinery_cli.py --skip-publish          # 只 db_loader
+python src/refinery_cli.py --skip-load             # 只 publish
+```
+
+把后段（extracted -> published -> MySQL）串起来一键跑。前段（`convert_cli` 素材->md、`extract_cli` md->extracted）仍单独执行。`--source` / `--dry-run` 透传给两步。
+
 ## 配置
 
 | 环境变量 | 说明 | 默认值 |
@@ -105,6 +134,9 @@ cd tools/data-refinery/output && python3 -m http.server 3000
 | `LLM_BASE_URL` | 自定义 API 地址 | - |
 | `LLM_TIMEOUT` | LLM 超时（秒） | `120` |
 | `LLM_MAX_RETRIES` | 最大重试次数 | `3` |
+| `DB_HOST` / `DB_PORT` | MySQL 地址 / 端口 | `localhost` / `3306` |
+| `DB_USER` / `DB_PASS` | MySQL 业务用户 / 密码（db_loader 用） | `ai_k12` / - |
+| `DB_NAME` | MySQL 库名 | `ai_k12` |
 
 ## 测试
 

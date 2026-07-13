@@ -147,3 +147,116 @@ class TestExtractCliMultiPage:
         assert f2.exists(), f"{f2} should exist (second page must not be skipped)"
         assert f1.read_text(encoding="utf-8").strip() != ""
         assert f2.read_text(encoding="utf-8").strip() != ""
+
+
+class TestExtractCliLessonId:
+    """lesson_id 跨页继承 + 前置内容跳过（LLM 给标识，CLI 维护 per-book 状态）。"""
+
+    def _run(self, md_root, out_dir, page_results):
+        """page_results: 按页顺序的 ExtractionResult 列表，对应 scanner 排序后的 card 页。"""
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.LLMClient"), \
+             patch("extract_cli.Extractor") as mock_extractor:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=md_root,
+                output_dir=out_dir,
+                llm_api_key="fake",
+                llm_model="m",
+                llm_base_url=None,
+                llm_timeout=1,
+            )
+            mock_extractor.return_value.run.side_effect = page_results
+            from extract_cli import main
+            main(["--input-dir", str(md_root), "--output-dir", str(out_dir)])
+
+    def _read_jsonl(self, out_dir, rel):
+        import json
+        p = out_dir / "extracted" / rel
+        return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    def test_cross_page_inheritance(self, tmp_path):
+        # page_001 给 lesson_id="26.1..."；page_002 续页给 null，应继承 page_001 的值
+        from extract import ExtractionResult
+        from models import TextbookCard
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        (book / "page_001.md").write_text("p1", encoding="utf-8")
+        (book / "page_002.md").write_text("p2", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        r1 = ExtractionResult(
+            items=[TextbookCard(sort_order=1, card_type="concept", content="c",
+                                 lesson_id="26.1 反比例函数")],
+            prompt_tokens=1, completion_tokens=1)
+        r2 = ExtractionResult(
+            items=[TextbookCard(sort_order=1, card_type="example", content="d",
+                                 lesson_id=None)],
+            prompt_tokens=1, completion_tokens=1)
+        self._run(md_root, out_dir, [r1, r2])
+        items2 = self._read_jsonl(out_dir, "数学/书/page_002.jsonl")
+        assert items2[0]["lesson_id"] == "26.1 反比例函数"
+
+    def test_one_page_multiple_sections(self, tmp_path):
+        # 同一页跨两节：[26.1, null, 26.2] -> null 继承前一个 26.1
+        from extract import ExtractionResult
+        from models import TextbookCard
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        (book / "page_001.md").write_text("p1", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        cards = [
+            TextbookCard(sort_order=1, card_type="concept", content="a", lesson_id="26.1 反比例函数"),
+            TextbookCard(sort_order=2, card_type="example", content="b", lesson_id=None),
+            TextbookCard(sort_order=3, card_type="concept", content="c", lesson_id="26.2 实际问题与反比例函数"),
+        ]
+        self._run(md_root, out_dir, [ExtractionResult(items=cards, prompt_tokens=1, completion_tokens=1)])
+        items = self._read_jsonl(out_dir, "数学/书/page_001.jsonl")
+        assert [it["lesson_id"] for it in items] == [
+            "26.1 反比例函数", "26.1 反比例函数", "26.2 实际问题与反比例函数",
+        ]
+
+    def test_front_matter_skipped(self, tmp_path, capsys):
+        # 整页是前置内容（封面/目录等）-> LLM 返回空 items -> 不写 jsonl、记 checkpoint、日志提示
+        from extract import ExtractionResult
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        (book / "page_001.md").write_text("cover", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        self._run(md_root, out_dir, [ExtractionResult(items=[], prompt_tokens=1, completion_tokens=1)])
+        assert not (out_dir / "extracted" / "数学" / "书" / "page_001.jsonl").exists()
+        assert "front matter" in capsys.readouterr().out.lower()
+        from checkpoint import RefineryCheckpoint
+        ckpt = RefineryCheckpoint(out_dir / ".checkpoint.json")
+        ckpt.load()
+        assert ckpt.is_extracted("数学/书/page_001.md")
+
+    def test_resume_rebuilds_state_from_existing_jsonl(self, tmp_path):
+        # page_001 已抽（checkpoint + jsonl 末条 lesson_id="26.1..."）；page_002 续页 null 应继承
+        from extract import ExtractionResult
+        from models import TextbookCard
+        import json
+        from checkpoint import RefineryCheckpoint
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        (book / "page_001.md").write_text("p1", encoding="utf-8")
+        (book / "page_002.md").write_text("p2", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        ckpt = RefineryCheckpoint(out_dir / ".checkpoint.json")
+        ckpt.load()
+        ckpt.mark_extracted("数学/书/page_001.md")
+        f1 = out_dir / "extracted" / "数学" / "书" / "page_001.jsonl"
+        f1.parent.mkdir(parents=True, exist_ok=True)
+        f1.write_text(
+            json.dumps({"sort_order": 1, "card_type": "concept", "content": "c",
+                        "lesson_id": "26.1 反比例函数"}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        r2 = ExtractionResult(
+            items=[TextbookCard(sort_order=1, card_type="example", content="d", lesson_id=None)],
+            prompt_tokens=1, completion_tokens=1)
+        self._run(md_root, out_dir, [r2])  # 仅 page_002 会调用 run（page_001 被跳过）
+        items2 = self._read_jsonl(out_dir, "数学/书/page_002.jsonl")
+        assert items2[0]["lesson_id"] == "26.1 反比例函数"
