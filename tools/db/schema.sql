@@ -85,6 +85,19 @@ CREATE TABLE IF NOT EXISTS subjects (
   UNIQUE KEY uniq_subjects_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 基础种子数据（引用数据）：K12 全学科。INSERT IGNORE 保证重复执行幂等。
+-- 教材结构（textbook_versions/semesters/units/lessons）与 cards/questions 为派生数据，由 db_loader 入库，不在此 seed。
+INSERT IGNORE INTO subjects (name, code, grade_bands, sort_order, is_active) VALUES
+  ('数学',      'math',      'primary,junior,senior', 1, 1),
+  ('语文',      'chinese',   'primary,junior,senior', 2, 1),
+  ('英语',      'english',   'primary,junior,senior', 3, 1),
+  ('物理',      'physics',   'junior,senior',         4, 1),
+  ('化学',      'chemistry', 'junior,senior',         5, 1),
+  ('生物',      'biology',   'junior,senior',         6, 1),
+  ('历史',      'history',   'junior,senior',         7, 1),
+  ('地理',      'geography', 'junior,senior',         8, 1),
+  ('道德与法治','politics',  'junior,senior',         9, 1);
+
 CREATE TABLE IF NOT EXISTS textbook_versions (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   subject_id BIGINT NOT NULL,
