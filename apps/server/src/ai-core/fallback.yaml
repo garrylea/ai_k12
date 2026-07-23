@@ -1,0 +1,17 @@
+fallback:
+  consecutiveFailThreshold: 3
+  giveUpKeywords:
+    - 不会
+    - 不懂
+    - 不知道
+    - 太难
+    - 放弃
+    - 算不出来
+    - 想不出来
+    - 怎么做
+    - 完全不会
+  outputStructure:
+    - 温和开场
+    - 分步解析
+    - 知识点总结
+    - 学习建议

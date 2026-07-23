@@ -1,0 +1,23 @@
+safety:
+  classifier:
+    model: deepseek-v4-flash
+    confidenceThreshold: 0.7
+
+  off_topic:
+    escalateThreshold: 3
+    criticalThreshold: 5
+
+  anomaly:
+    types:
+      emotional:
+        alertLevel: warning
+        block: true
+      sensitive:
+        alertLevel: critical
+        block: true
+      abusive:
+        alertLevel: critical
+        block: true
+
+  gentleBlock:
+    randomPick: true

@@ -1,0 +1,19 @@
+retry:
+  maxRetries: 2
+  initialDelayMs: 1000
+  backoffMultiplier: 2
+  retryableCodes:
+    - RATE_LIMITED
+    - SERVICE_UNAVAILABLE
+    - TIMEOUT
+
+timeout:
+  default: 30000
+  tutoring: 15000
+  grading: 30000
+  variation: 45000
+  safety: 5000
+
+streaming:
+  firstTokenTimeoutMs: 3000
+  interTokenTimeoutMs: 10000
