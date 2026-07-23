@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 624" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#475569"/>
+    </marker>
+    <marker id="ahd" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#db2777"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="720" height="624" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="360" y="28" text-anchor="middle" font-size="17" font-weight="bold" fill="#0f172a">无状态 AI-Agent 中枢与上下文外置机制（修正版）</text>
+  <text x="360" y="50" text-anchor="middle" font-size="12" fill="#64748b">应用服务层位于网关与 AI-Agent 之间；AI-Agent 不直接接收用户请求，由业务服务按需调用</text>
+
+  <!-- Layer 1: 客户端层 -->
+  <rect x="40" y="72" width="600" height="46" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="56" y="100" font-size="14" fill="#1e3a8a">客户端层：WebApp / PC App / 家长端</text>
+
+  <!-- Arrow ① client -> gateway -->
+  <line x1="340" y1="118" x2="340" y2="138" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+  <text x="350" y="132" font-size="10.5" fill="#475569">① 请求携带 dialogueId</text>
+
+  <!-- Layer 2: 接入网关层 -->
+  <rect x="40" y="138" width="600" height="46" rx="8" fill="#cffafe" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="56" y="166" font-size="14" fill="#155e75">接入网关层：API Gateway（鉴权 / 路由 / 限流）</text>
+
+  <!-- Arrow gateway -> app service -->
+  <line x1="340" y1="184" x2="340" y2="216" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+  <text x="350" y="200" font-size="10.5" fill="#475569">① 请求继续转发</text>
+
+  <!-- Layer 3: 应用服务层 -->
+  <rect x="40" y="216" width="600" height="120" rx="8" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="56" y="238" font-size="13" font-weight="bold" fill="#6d28d9">应用服务层（业务服务）</text>
+
+  <!-- sub-box: 辅导业务服务 -->
+  <rect x="56" y="248" width="272" height="80" rx="6" fill="#ddd6fe" stroke="#7c3aed" stroke-width="1.2"/>
+  <text x="68" y="276" font-size="13" font-weight="bold" fill="#4c1d95">辅导业务服务</text>
+  <text x="68" y="298" font-size="11" fill="#5b21b6">持有 /api/ai/tutor 路由</text>
+  <text x="68" y="316" font-size="11" fill="#5b21b6">负责编排、调度与返回</text>
+
+  <!-- sub-box: ConversationService -->
+  <rect x="344" y="248" width="280" height="80" rx="6" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.2"/>
+  <text x="356" y="276" font-size="12" font-weight="bold" fill="#5b21b6">ConversationService</text>
+  <text x="356" y="296" font-size="11" fill="#6d28d9">对话流水 · 数据所有权</text>
+  <text x="356" y="314" font-size="10.5" fill="#6d28d9">落库 MySQL（ai_dialogues / ai_messages）</text>
+
+  <!-- arrow between the two sub-boxes -->
+  <line x1="330" y1="288" x2="342" y2="288" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#ah)"/>
+  <line x1="342" y1="296" x2="330" y2="296" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="300" y="284" font-size="9.5" fill="#7c3aed">读历史</text>
+  <text x="300" y="312" font-size="9.5" fill="#7c3aed">写本轮</text>
+
+  <!-- Arrow ② business service -> AI-Agent -->
+  <line x1="192" y1="328" x2="192" y2="358" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- Layer 4: 通用智能能力层 AI-Agent -->
+  <rect x="40" y="358" width="600" height="104" rx="8" fill="#fce7f3" stroke="#ec4899" stroke-width="1.5"/>
+  <text x="56" y="380" font-size="13" font-weight="bold" fill="#9d174d">通用智能能力层：AI-Agent 中枢（无状态）</text>
+  <text x="56" y="404" font-size="10.5" fill="#831843">内部流程：SafetyGuard → Router → PromptBuilder → ContextManager(注入上下文)</text>
+  <text x="56" y="422" font-size="10.5" fill="#831843">→ 调用大模型 API → ResponseParser → 返回业务服务</text>
+  <text x="56" y="444" font-size="10.5" fill="#be185d">② 由上层业务服务调用，不接收用户直接请求；进程内不留存任何用户数据</text>
+
+  <!-- Arrow ② label near top of AI-Agent band -->
+  <text x="200" y="350" font-size="10.5" fill="#475569">② 业务服务按需调用，传入对话上下文</text>
+
+  <!-- Dashed arrow ③ AI-Agent <-> ConversationService -->
+  <path d="M 640 410 C 664 410, 664 300, 626 300" fill="none" stroke="#db2777" stroke-width="1.8" stroke-dasharray="5,4" marker-end="url(#ahd)"/>
+  <text x="646" y="356" font-size="10" fill="#db2777">③ 读写</text>
+  <text x="646" y="370" font-size="10" fill="#db2777">对话消息</text>
+
+  <!-- Layer 5: 基础设施层 -->
+  <rect x="40" y="480" width="600" height="46" rx="8" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
+  <text x="56" y="508" font-size="14" fill="#334155">基础设施层：MySQL / Redis / OSS / RabbitMQ（对话流水落 MySQL）</text>
+
+  <!-- Insight box -->
+  <rect x="40" y="544" width="600" height="70" rx="8" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+  <text x="52" y="568" font-size="12" fill="#854d0e">无状态 ≠ 无记忆：Agent 进程不留存用户数据，上下文外置到 ConversationService(MySQL)。</text>
+  <text x="52" y="588" font-size="11" fill="#854d0e">好处：可水平扩展（任意实例处理任意用户）、跨节点无缝续接；上下文靠 dialogueId 在 DB 中按身份加载。</text>
+  <text x="52" y="606" font-size="11" fill="#854d0e">④ 返回：结果经业务服务 → 网关 → 客户端；本轮消息已写入 ConversationService 供下一轮复用。</text>
+</svg>

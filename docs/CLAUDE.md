@@ -11,12 +11,17 @@
 | [API接口与数据流设计文档.md](./API接口与数据流设计文档.md) | REST / WebSocket API 契约、端点清单、数据流时序 | 前后端接口联调、`services/` 层实现 |
 | [UX-UI设计文档.md](./UX-UI设计文档.md) | 页面规范、响应式规则、组件层级、交互细节 | 前端页面开发、组件库建设、视觉还原 |
 | [K12智学系统-AI辅导流程详细设计.md](./K12智学系统-AI辅导流程详细设计.md) | 苏格拉底辅导状态机、AI 话术策略、兜底规则 | AI 对话引擎、辅导交互流程实现 |
+| [K12智学系统-AI-Agent中枢设计文档.md](./K12智学系统-AI-Agent中枢设计文档.md) | AI-Agent 中枢 infra + capabilities 详细设计、Prompt 模板体系、模型路由策略 | AI 推理能力开发、Prompt 维护、模型配置 |
+| [AI-Agent 中枢 MVP 实现计划](./superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md) | AI-Agent 中枢 MVP 任务级实现计划（4 里程碑 / 22 任务：infra 6 组件、5 capabilities、数学 Prompt 模板、ConversationService 骨架、可观测性、回归测试） | `apps/server/ai-core` 模块编码实现（配合 superpowers:executing-plans / subagent-driven-development 执行） |
+| [智能组卷模块设计](./superpowers/specs/2026-07-23-exam-composition-design.md) | 预设驱动的组卷算法、知识点覆盖优化、去重策略、AI 补题预留 | 单元检测/期中/期末组卷功能开发 |
 
 **阅读优先级**：
 - 做需求/功能 → 先读 PRD
 - 做后端/数据库 → 先读 PRD + 架构文档
 - 做接口/联调 → 先读 PRD + API 文档
 - 做前端页面/组件 → 先读 PRD + UX-UI 文档
+- 做 AI 能力开发 → 先读 PRD + AI-Agent 中枢设计文档；进入编码时按 [AI-Agent 中枢 MVP 实现计划](./superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md) 逐任务执行
+- 做组卷/考试功能 → 先读 PRD + 架构 §4.2.8 + 智能组卷模块设计
 
 ---
 
