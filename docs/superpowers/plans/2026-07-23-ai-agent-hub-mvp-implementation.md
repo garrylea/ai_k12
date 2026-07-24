@@ -4078,3 +4078,20 @@ console.log('Tutoring response:', result.message.content.slice(0, 100));
 9. **回归基线**：`safety-classification.ts` 的样本标注已对齐 `classifyByKeywords` 实际行为（如 `2+3=5` 命中纯数字运算符正则归为 learning；含 `不会` 的消息因 learning 先于 anomaly 判定而归为 learning），基线 26/26 = 100%。
 
 验证：`npx tsc --noEmit` 通过；`npx vitest run` 14 文件 63 测试全绿；`safety-classification` 26/26。`grading-accuracy` 与 `tutoring-quality` 为需 API Key 的评估脚本（经 `tsx` 运行，不被 vitest 收录）。
+
+### 代码审查后修正（post-review, commit 39da9d3）
+
+对 ai-core 做了一次对抗性 code review（3 个并行 review 子代理），修复了以下真实缺陷（tsc 通过，72/72 测试）：
+
+- **tutor() 流程重排**：loadContext -> give-up/fallback -> safety/block。原先 give-up 关键词（太难/不知道等）先被 safety 当 off_topic 拦截，无法触发兜底。
+- **持久化用户消息**：block 与 fallback 路径原先只存 assistant 消息，导致 `countConsecutiveOffTopic` 永不升级告警。
+- **移除 "怎么做" 关键词**：它子串匹配了 "怎么做这道题" 这类正常求助，错误触发兜底，违反 Socratic 原则。
+- **ModelClient 错误码 + retryableCodes**：providers 经 `mapHttpError` 抛带正确 code 的 ModelClientError；ModelClient 仅重试 retryableCodes 内的错误（原先重试所有错误且丢弃错误码）。网络/AbortError 归为 TIMEOUT。
+- **GeminiClient**：system prompt 走 `systemInstruction`（原先映射为 user 角色）；finishReason 正确映射 MAX_TOKENS->length、SAFETY->content_filter；cost 从 usageMetadata 计算（原先恒 0）。
+- **ExplanationCapability errorHistory**：传数组而非 JSON 字符串，使 `{{#errorHistory}}` 区段正确迭代。
+- **GradingCapability**：retry 路径加 try/catch（fallback 失败时返回原始可用结果而非抛错）；`needsRetry` 在 stepSum=0 时用 totalScore 作分母（原先压制了重试）。
+- **SafetyGuard**：抽取共享 `LEARNING_PATTERNS`，`classifyByKeywords` 与 `countConsecutiveOffTopic` 使用同一集合（原先后者集合更小，"不会做" 被误计为 off-topic）。
+- **ResponseParser**：解析前剥离 UTF-8 BOM（原先 BOM 前缀的 JSON 三路解析全失败）。
+- **杂项**：移除失效的 `dev` 脚本（尚无 src/index.ts 入口）；移除 fallback-handler 中残留的 `as any`。
+
+**已知限制（本次未修，记录待后续）**：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 配置字段（per-scene timeout、classifier.confidenceThreshold、outputStructure）为声明式意图，尚未接线。
