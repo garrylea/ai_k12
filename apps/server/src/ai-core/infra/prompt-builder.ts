@@ -23,8 +23,15 @@ export class PromptBuilder {
     // Load and merge partials
     const partials = await this.loadPartials(bodyOnly);
 
-    // Render with Mustache
-    const rendered = Mustache.render(bodyOnly, request.context, partials);
+    // Render with Mustache. Spread customVariables onto the view so template
+    // references like {{maxScore}} resolve (they live under context.customVariables,
+    // not as top-level context keys). Disable HTML escaping: these are LLM prompts
+    // (plain text/markdown), not HTML, so characters like = < > & in math content
+    // must be preserved verbatim (default Mustache would turn "x=3" into "x&#x3D;3").
+    const view = { ...request.context, ...(request.context.customVariables ?? {}) };
+    const rendered = Mustache.render(bodyOnly, view, partials, {
+      escape: (value: unknown) => (value == null ? '' : String(value)),
+    });
 
     // Build messages array
     const messages = this.buildMessages(rendered, request.context.dialogueHistory as ChatMessage[] | undefined);
@@ -53,6 +60,9 @@ export class PromptBuilder {
     }
     if (capability === 'analysis') {
       return `analytics/report.md`;
+    }
+    if (capability === 'fallback') {
+      return `fallback/full-explanation.md`;
     }
     throw new Error(`Unknown capability: ${capability}`);
   }

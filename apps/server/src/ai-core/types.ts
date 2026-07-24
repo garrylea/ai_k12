@@ -32,7 +32,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis';
+export type CapabilityType = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'fallback';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry';
 
@@ -53,7 +53,7 @@ export interface PromptContext {
   studentAnswer?: string;
   dialogueHistory?: Message[];
   userMessage: string;
-  customVariables?: Record<string, string>;
+  customVariables?: Record<string, unknown>;
 }
 
 export interface PromptBuildResult {

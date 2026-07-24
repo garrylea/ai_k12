@@ -19,7 +19,7 @@ export class FallbackHandler {
 
   async handle(request: FallbackRequest): Promise<FallbackResponse> {
     const promptResult = await this.promptBuilder.build({
-      capability: 'explanation',
+      capability: 'fallback',
       subject: request.knowledgePoint.subject,
       context: {
         student: { grade: '', gradeLevel: '' },

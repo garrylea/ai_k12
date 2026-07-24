@@ -12,6 +12,7 @@ beforeAll(() => {
   mkdirSync(resolve(testTemplateDir, 'tutoring/math'), { recursive: true });
   mkdirSync(resolve(testTemplateDir, 'system'), { recursive: true });
   mkdirSync(resolve(testTemplateDir, 'explanation'), { recursive: true });
+  mkdirSync(resolve(testTemplateDir, 'grading'), { recursive: true });
 
   writeFileSync(resolve(testTemplateDir, 'system/socratic-rules.md'), `---
 version: "1.0"
@@ -59,6 +60,18 @@ description: "知识点重讲"
 
 ## User Message
 {{userMessage}}`);
+  writeFileSync(resolve(testTemplateDir, 'grading/math-proof.md'), `---
+version: "1.0"
+description: "证明题批改"
+---
+
+## System Prompt
+评分模板，满分 {{maxScore}}。
+
+## User Message
+学生答案：{{studentAnswer}}
+满分：{{maxScore}} 分
+`);
 });
 
 describe('PromptBuilder', () => {
@@ -142,5 +155,42 @@ describe('PromptBuilder', () => {
       },
     });
     expect(result.messages[0].content).toContain('错因分析模板');
+  });
+
+  it('renders customVariables into template', async () => {
+    const result = await builder.build({
+      capability: 'grading',
+      subject: 'math',
+      questionType: 'proof',
+      context: {
+        student: { grade: '七年级', gradeLevel: 'junior' },
+        studentAnswer: 'x=3',
+        userMessage: '请批改',
+        customVariables: { maxScore: '10' },
+      },
+    });
+    expect(result.messages[0].content).toContain('满分 10');
+    expect(result.messages[1].content).toContain('满分：10 分');
+    expect(result.messages[0].content).not.toContain('{{maxScore}}');
+  });
+
+  it('does not HTML-escape special characters in rendered values', async () => {
+    const result = await builder.build({
+      capability: 'grading',
+      subject: 'math',
+      questionType: 'proof',
+      context: {
+        student: { grade: '七年级', gradeLevel: 'junior' },
+        studentAnswer: 'x<3 & y>2',
+        userMessage: '请批改',
+        customVariables: { maxScore: '10' },
+      },
+    });
+    // These are LLM prompts, not HTML: = < > & in math content must be preserved.
+    expect(result.messages[1].content).toContain('x<3 & y>2');
+    expect(result.messages[1].content).not.toContain('&lt;');
+    expect(result.messages[1].content).not.toContain('&gt;');
+    expect(result.messages[1].content).not.toContain('&amp;');
+    expect(result.messages[1].content).not.toContain('&#x3D;');
   });
 });
