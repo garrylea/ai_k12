@@ -10,7 +10,7 @@ K12 智学系统 — an adaptive AI-powered K-12 education platform for Chinese 
 
 ```
 apps/web/             — Active. React frontend (Vite + TypeScript + Tailwind)
-apps/server/          — Planned. Node.js backend（下一个大件，见下文 Data Refinery 节）
+apps/server/          — Active (ai-core). Node.js backend; ai-core AI Agent Hub 已实现（见下文 ai-core 节），HTTP API 层待建
 apps/desktop/         — Planned. Electron wrapper
 packages/             — Planned. Shared configs/types
 tools/crawler/        — Active. 爬虫（zgkao 试卷 / smartedu 教材）
@@ -19,7 +19,7 @@ tools/db/             — Active. MySQL schema + install_mysql.sh
 docs/                 — PRD, API 设计, UX/UI, DB 设计, 数据管线总结
 ```
 
-`apps/web` 与 `tools/data-refinery`、`tools/db` 已有可运行代码；`apps/server` 待建。
+`apps/web`、`apps/server/ai-core` 与 `tools/data-refinery`、`tools/db` 已有可运行代码；`apps/server` 的 HTTP API 层待建。
 
 ## Development Commands
 
@@ -32,7 +32,20 @@ npm run preview  # Serve production build locally
 npm run lint     # ESLint for .ts/.tsx
 ```
 
-No test framework is configured yet.
+No test framework is configured yet for `apps/web`.
+
+### apps/server (ai-core)
+
+Commands run from `apps/server/`:
+
+```bash
+npm test            # vitest run (72 tests across 14 files)
+npm run test:watch  # vitest watch mode
+npm run build       # tsc (type-check + emit). NOTE: does not copy YAML/prompt assets to dist/ - see ai-core known limitations
+npx tsx src/ai-core/__tests__/safety-classification.ts   # deterministic safety regression (no API keys needed)
+```
+
+`grading-accuracy.ts` and `tutoring-quality.ts` in `__tests__/` are LLM eval scripts (require API keys, run via `tsx`, not picked up by vitest).
 
 ## Architecture (apps/web)
 
@@ -119,4 +132,31 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 - db_loader：subject 别名归一（chem->chemistry）、rel_path/lesson_id 解析派生教材结构、cards sort_order 跨页全局重排、full-reload 幂等。
 - DB：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。
 
-**下一个大件**：后端 API（`apps/server`，未建）——前端 `apps/web` 还连不上 DB。API 已设计（`docs/api/openapi.yaml` + `docs/API接口与数据流设计文档.md`），等实现。
+**下一个大件**：`apps/server` 的 HTTP API 层（把已实现的 ai-core 接到前端 `apps/web`）——前端 `apps/web` 还连不上 DB。ai-core AI Agent Hub 已实现（见下文 ai-core 节）；HTTP 端点已设计（`docs/api/openapi.yaml` + `docs/API接口与数据流设计文档.md`），等实现接入。
+
+
+## apps/server - ai-core AI Agent Hub（已实现）
+
+分支 `feat/ai-agent-hub-mvp`（已推送 origin）。两层架构：infra 层 + capabilities 层。tsc 通过、72/72 测试绿。
+
+**目录** `apps/server/src/ai-core/`：
+- `infra/` — ModelRouter、PromptBuilder、ModelClient（+Kimi/Qwen/DeepSeek/Gemini 适配器）、ResponseParser、SafetyGuard、FallbackHandler、Logger、Metrics
+- `capabilities/` — Tutoring（9 步：loadContext->give-up/fallback->safety/block->route->build->call->parse->persist->failcount）、Grading、Explanation、Variation、Analytics
+- `prompts/` — Mustache 模板（system/tutoring/grading/explanation/variation/analytics/fallback/safety）
+- `*.yaml` — model-routes / retry / safety / fallback 配置
+- `__tests__/` — 回归脚本（safety-classification 确定 26/26；grading-accuracy、tutoring-quality 需 API Key）
+
+**技术栈**：Node.js + TypeScript ESM（`"type":"module"`）、Vitest、Zod、Mustache、prom-client、dotenv。
+
+**改代码前必读的关键约定**：
+- **ModelClient DI**：各 capability 构造函数接受 `opts?: { modelClient?: ModelClient }`，测试注入 mock（无 API Key 也能跑）。生产用 `new ModelClient()`。
+- **PromptBuilder**：`customVariables`（`Record<string, unknown>`）已展平进 Mustache 视图，可传对象/数组（如 AnalyticsCapability 传 `stats` 对象，配合 `{{stats.x}}` 与 `{{#stats.topWeakPoints}}`）；**已关闭 HTML 转义**（LLM prompt 非 HTML，数学符号 `=<>` 必须原样保留）；`{{> partial}}` 加载 `system/*.md` 并剥 frontmatter；模板用 `## System Prompt` / `## User Message` 分段。
+- **模型 ID（勿改）**：`kimi-latest`（Moonshot）、`qwen-3.7-max`、`gemini-3.1-pro`、`deepseek-v4-flash`。配置里 kimi 的 key 是 `kimi` 但 modelId 是 `kimi-latest`。
+- **API Key**：用 `.env` 的 `KIMI_API_KEY`/`QWEN_API_KEY`/`GEMINI_API_KEY`/`DEEPSEEK_API_KEY` 及对应 `*_BASE_URL`（ai-core 专属，**不要用 `ANTHROPIC_*`**，会被 shell 里 Claude Code 覆盖）。
+- **错误处理**：provider 经 `mapHttpError`（`infra/model-client/errors.ts`）抛 `ModelClientError`（带 `ModelErrorCode`：429->RATE_LIMITED、4xx-auth->QUOTA_EXCEEDED、413->CONTEXT_TOO_LONG、406->CONTENT_FILTERED、5xx->SERVICE_UNAVAILABLE）；`ModelClient` 仅重试 `retryableCodes`（RATE_LIMITED/SERVICE_UNAVAILABLE/TIMEOUT），非重试错误立即抛。
+- **Gemini**：system prompt 走 `systemInstruction`（不是 user 角色）；finishReason 映射 MAX_TOKENS->length、SAFETY->content_filter。
+- **测试与文档同步铁律**：若测试断言与 config/types/设计文档的值冲突，**测试错**——改测试，勿改 config/设计文档。改代码或主文档时，同步更新所有引用该实现的设计/计划文档。
+
+**已知限制**（本次未修，记录待后续）：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断学生答错（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 字段（per-scene timeout、classifier.confidenceThreshold、outputStructure）为声明式意图未接线；`npm run build` 不拷贝 YAML/prompts 到 dist（生产部署需另加 copy 步骤）。
+
+**实现记录**：计划草稿偏差与 code-review 修正详见 `docs/superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md` 末尾「实现修正记录」「代码审查后修正」两节。
