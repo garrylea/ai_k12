@@ -13,7 +13,12 @@ beforeAll(() => {
   mkdirSync(resolve(testTemplateDir, 'system'), { recursive: true });
   mkdirSync(resolve(testTemplateDir, 'explanation'), { recursive: true });
 
-  writeFileSync(resolve(testTemplateDir, 'system/socratic-rules.md'), `### 核心原则
+  writeFileSync(resolve(testTemplateDir, 'system/socratic-rules.md'), `---
+version: "1.0"
+description: "苏格拉底规则片段"
+---
+
+### 核心原则
 1. 绝不直接给答案
 2. 积极鼓励`);
   writeFileSync(resolve(testTemplateDir, 'system/safety-rules.md'), `### 安全规则
@@ -75,6 +80,8 @@ describe('PromptBuilder', () => {
     expect(result.messages).toHaveLength(2);
     expect(result.messages[0].role).toBe('system');
     expect(result.messages[0].content).toContain('绝不直接给答案');
+    expect(result.messages[0].content).not.toContain('苏格拉底规则片段');
+    expect(result.messages[0].content).not.toContain('version');
     expect(result.messages[0].content).toContain('一元一次方程');
     expect(result.messages[1].role).toBe('user');
     expect(result.messages[1].content).toContain('老师，这个方程怎么解？');

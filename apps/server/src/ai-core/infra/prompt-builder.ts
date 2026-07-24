@@ -81,7 +81,7 @@ export class PromptBuilder {
       if (!partials[name]) {
         const partialPath = `system/${name}.md`;
         try {
-          partials[name] = await this.loadTemplate(partialPath);
+          partials[name] = this.stripFrontmatter(await this.loadTemplate(partialPath));
         } catch {
           console.warn(`[PromptBuilder] Partial not found: ${partialPath}`);
         }
@@ -89,6 +89,10 @@ export class PromptBuilder {
     }
 
     return partials;
+  }
+
+  private stripFrontmatter(template: string): string {
+    return template.replace(/^---[\s\S]*?---\n/, '');
   }
 
   private buildMessages(rendered: string, dialogueHistory?: ChatMessage[]): ChatMessage[] {
