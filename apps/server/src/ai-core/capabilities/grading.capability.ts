@@ -99,14 +99,14 @@ export class GradingCapability {
           schema: GradingResultSchema,
         });
         if (retryResult.success && retryResult.data) {
-          return retryResult.data;
+          return { ...retryResult.data, reasoning: retryResponse.reasoningContent };
         }
       } catch {
         // Retry failed (network error or non-retryable upstream) - return original below.
       }
     }
 
-    return parseResult.data;
+    return { ...parseResult.data, reasoning: chatResponse.reasoningContent };
   }
 
   needsRetry(result: GradingResult): boolean {

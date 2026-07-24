@@ -12,6 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export interface ExplanationResponse {
   content: string;
   mode: 'error_analysis' | 'knowledge_retry';
+  reasoning?: string;                // thinking(reasoning_content) for frontend display
 }
 
 export interface ExplanationCapabilityDeps {
@@ -71,6 +72,7 @@ export class ExplanationCapability {
 
     return {
       content: parsed.rawText ?? chatResponse.content,
+      reasoning: chatResponse.reasoningContent,
       mode: request.mode,
     };
   }

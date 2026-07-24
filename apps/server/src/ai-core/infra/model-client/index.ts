@@ -1,7 +1,7 @@
-import type { ChatRequest, ChatResponse, StreamChunk, RetryConfig } from '../../types.js';
-import { ModelClientError, ModelErrorCode } from '../../types.js';
+import type { ChatRequest, ChatResponse, StreamChunk, RetryOptions } from '../../types.js';
 import { timeoutConfig, getApiKeyByProvider } from '../../config.js';
 import type { ProviderAdapter } from './types.js';
+import { callWithRetry } from './errors.js';
 import { KimiClient } from './kimi-client.js';
 import { QwenClient } from './qwen-client.js';
 import { DeepSeekClient } from './deepseek-client.js';
@@ -9,15 +9,15 @@ import { GeminiClient } from './gemini-client.js';
 
 export class ModelClient {
   private providers = new Map<string, ProviderAdapter>();
-  private retryConfig: RetryConfig;
+  private retryOptions: RetryOptions;
   private providerOverrides?: Map<string, ProviderAdapter>;
 
-  constructor(opts?: { retryConfig?: RetryConfig; providers?: Map<string, ProviderAdapter> }) {
-    this.retryConfig = opts?.retryConfig ?? {
+  constructor(opts?: { retryOptions?: RetryOptions; providers?: Map<string, ProviderAdapter> }) {
+    this.retryOptions = opts?.retryOptions ?? {
       maxRetries: timeoutConfig.retry.maxRetries,
-      initialDelayMs: timeoutConfig.retry.initialDelayMs,
-      backoffMultiplier: timeoutConfig.retry.backoffMultiplier,
-      retryableCodes: timeoutConfig.retry.retryableCodes,
+      baseDelayMs: timeoutConfig.retry.baseDelayMs,
+      maxBackoffMs: timeoutConfig.retry.maxBackoffMs,
+      onRetry: timeoutConfig.retry.onRetry,
     };
     this.providerOverrides = opts?.providers;
   }
@@ -42,56 +42,63 @@ export class ModelClient {
     return client;
   }
 
+  /**
+   * Chat with the model. Defaults to streaming (stream !== false): consumes
+   * provider.streamChat and aggregates content + reasoningContent (thinking)
+   * into a ChatResponse. stream=false falls back to non-streaming provider.chat.
+   *
+   * gemini is forced to non-streaming until streamGenerateContent is implemented
+   * (TODO: needs GEMINI_API_KEY). Wrapped in callWithRetry (full-jitter backoff +
+   * Retry-After + onRetry); non-retryable errors throw immediately.
+   */
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const provider = this.getProvider(request.model.provider);
     const startTime = Date.now();
+    const useStream = request.stream !== false && request.model.provider !== 'gemini';
 
-    let lastError: ModelClientError | null = null;
-
-    for (let attempt = 0; attempt <= this.retryConfig.maxRetries; attempt++) {
-      try {
-        const response = await provider.chat(request);
-        return { ...response, latencyMs: Date.now() - startTime };
-      } catch (error) {
-        lastError = this.classifyError(error, request.model.modelId);
-        // Only retry errors whose code is in retryableCodes (e.g. RATE_LIMITED,
-        // SERVICE_UNAVAILABLE, TIMEOUT). Non-retryable errors (QUOTA_EXCEEDED,
-        // CONTENT_FILTERED, CONTEXT_TOO_LONG, UNKNOWN) throw immediately.
-        const isRetryable = this.retryConfig.retryableCodes.includes(lastError.code);
-        if (!isRetryable || attempt === this.retryConfig.maxRetries) {
-          throw lastError;
-        }
-        const delay = this.retryConfig.initialDelayMs * Math.pow(this.retryConfig.backoffMultiplier, attempt);
-        await new Promise(resolve => setTimeout(resolve, delay));
+    const run = async (): Promise<ChatResponse> => {
+      if (useStream) {
+        return this.aggregateStream(provider, request, startTime);
       }
-    }
+      const response = await provider.chat(request);
+      return { ...response, latencyMs: Date.now() - startTime };
+    };
 
-    throw lastError ?? new ModelClientError(ModelErrorCode.UNKNOWN, request.model.modelId, 'Max retries exceeded');
+    return callWithRetry(run, this.retryOptions);
   }
 
   /**
-   * Normalize a caught error into a ModelClientError, preserving the code when
-   * the provider already threw one (mapHttpError), otherwise classifying fetch
-   * network/timeout errors. retryable is derived from retryableCodes so the
-   * config is the single source of truth.
+   * Aggregate a provider's streamChat into a single ChatResponse. Collects
+   * content + reasoningContent (thinking). usage is best-effort: 0 when the
+   * provider's stream omits usage (e.g. Kimi - see ../kimi-chat.js note).
    */
-  private classifyError(error: unknown, modelId: string): ModelClientError {
-    let code: ModelErrorCode;
-    let message: string;
-    if (error instanceof ModelClientError) {
-      code = error.code;
-      message = error.message;
-    } else {
-      message = error instanceof Error ? error.message : 'Unknown error';
-      const isTimeout = error instanceof Error && (
-        error.name === 'TimeoutError' || error.name === 'AbortError' || /timeout|abort/i.test(message)
-      );
-      code = isTimeout ? ModelErrorCode.TIMEOUT : ModelErrorCode.SERVICE_UNAVAILABLE;
+  private async aggregateStream(provider: ProviderAdapter, request: ChatRequest, startTime: number): Promise<ChatResponse> {
+    let content = '';
+    let reasoningContent = '';
+    let finishReason: ChatResponse['finishReason'] = 'stop';
+
+    for await (const chunk of provider.streamChat(request)) {
+      if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
+      if (chunk.content) content += chunk.content;
+      if (chunk.finishReason) finishReason = chunk.finishReason;
     }
-    const retryable = this.retryConfig.retryableCodes.includes(code);
-    return new ModelClientError(code, modelId, message, retryable);
+
+    return {
+      id: `stream_${Date.now()}`,
+      model: request.model.modelId,
+      content,
+      reasoningContent: reasoningContent || undefined,
+      finishReason,
+      usage: { inputTokens: 0, outputTokens: 0, cost: 0 },
+      latencyMs: Date.now() - startTime,
+    };
   }
 
+  /**
+   * True streaming (AsyncIterable) for HTTP-layer SSE forwarding. NOT wrapped
+   * in callWithRetry - mid-stream retry would duplicate generated tokens, so it
+   * is the caller's (HTTP layer's) responsibility to handle stream errors.
+   */
   streamChat(request: ChatRequest): AsyncIterable<StreamChunk> {
     const provider = this.getProvider(request.model.provider);
     return provider.streamChat(request);

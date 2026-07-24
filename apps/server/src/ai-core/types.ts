@@ -85,6 +85,7 @@ export interface ChatResponse {
   id: string;
   model: string;
   content: string;
+  reasoningContent?: string;          // thinking 内容(reasoner 模型的 reasoning_content 聚合)
   finishReason: 'stop' | 'length' | 'content_filter' | 'error';
   usage: { inputTokens: number; outputTokens: number; cost: number };
   latencyMs: number;
@@ -92,36 +93,127 @@ export interface ChatResponse {
 
 export interface StreamChunk {
   content: string;
+  reasoningContent?: string;          // 增量 thinking delta(reasoning_content)
   finishReason?: 'stop' | 'length' | 'content_filter' | 'error';
 }
 
-export enum ModelErrorCode {
-  RATE_LIMITED = 'RATE_LIMITED',
-  QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
-  CONTEXT_TOO_LONG = 'CONTEXT_TOO_LONG',
-  CONTENT_FILTERED = 'CONTENT_FILTERED',
-  SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE',
-  TIMEOUT = 'TIMEOUT',
-  UNKNOWN = 'UNKNOWN',
+// ========== LLM Client Error Hierarchy (§3.3.4, based on ../llm-client.js) ==========
+
+export interface ErrorContext {
+  provider: string;
+  statusCode: number;          // 0 if no response received
+  providerCode: string | null; // provider-specific error code string
+  retryable: boolean;
+  retryAfterMs: number | null; // parsed Retry-After header, if any
+  hint: string;                // human-readable remediation hint
+  modelId: string;
 }
 
-export class ModelClientError extends Error {
-  constructor(
-    public code: ModelErrorCode,
-    public modelId: string,
-    message: string,
-    public retryable: boolean = true,
-  ) {
+/** Abstract base for every LLM client error. Subclasses set default retryable. */
+export class LLMClientError extends Error {
+  provider: string;
+  statusCode: number;
+  providerCode: string | null;
+  retryable: boolean;
+  retryAfterMs: number | null;
+  hint: string;
+  modelId: string;
+
+  constructor(message: string, ctx: ErrorContext) {
     super(message);
-    this.name = 'ModelClientError';
+    this.name = new.target.name;
+    this.provider = ctx.provider;
+    this.statusCode = ctx.statusCode;
+    this.providerCode = ctx.providerCode;
+    this.retryable = ctx.retryable;
+    this.retryAfterMs = ctx.retryAfterMs;
+    this.hint = ctx.hint;
+    this.modelId = ctx.modelId;
+  }
+
+  toString(): string {
+    return `[${this.name}] provider=${this.provider} status=${this.statusCode} ` +
+      `code=${this.providerCode ?? '-'} retryable=${this.retryable} :: ${this.message}`;
   }
 }
 
-export interface RetryConfig {
-  maxRetries: number;
-  initialDelayMs: number;
-  backoffMultiplier: number;
-  retryableCodes: ModelErrorCode[];
+/** 401 - API key missing/invalid/revoked. Non-retryable. */
+export class AuthenticationError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Authentication failed (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: false });
+  }
+}
+
+/** 402 / 429-insufficient_quota / qwen arrearage. Non-retryable. */
+export class InsufficientQuotaError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Quota or balance exhausted (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: false });
+  }
+}
+
+/** 403 - account tier/region/model permission denied. Non-retryable. */
+export class PermissionError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Permission denied (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: false });
+  }
+}
+
+/** 404 - model name/endpoint not found. Non-retryable. */
+export class ResourceNotFoundError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Resource not found (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: false });
+  }
+}
+
+/** 413 - request payload exceeded input-size cap. Non-retryable. (was CONTEXT_TOO_LONG) */
+export class RequestTooLargeError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Request payload too large (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: false });
+  }
+}
+
+/** 400/422 - request body failed validation. Non-retryable. */
+export class ValidationFailedError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Request validation failed (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: false });
+  }
+}
+
+/** 406 / gemini SAFETY - content safety filtered. Non-retryable. (ai-core extension, llm-client.js has no equivalent) */
+export class ContentFilteredError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Content filtered (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: false });
+  }
+}
+
+/** 429 rate limit (retryable body code). Surfaced after retries exhausted. */
+export class RateLimitError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Rate limit hit (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: true });
+  }
+}
+
+/** 5xx upstream server failure. Surfaced after retries exhausted. */
+export class ServerError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Server error (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: true });
+  }
+}
+
+/** AbortController timeout / network failure. Surfaced after retries exhausted. */
+export class TimeoutError extends LLMClientError {
+  constructor(ctx: ErrorContext) {
+    super(`[${ctx.provider}] Request timed out (status=${ctx.statusCode}): ${ctx.hint}`, { ...ctx, retryable: true });
+  }
+}
+
+// ========== Retry Options (§3.3.5, based on ../llm-client.js) ==========
+
+export interface RetryOptions {
+  maxRetries: number;       // max retry attempts after the first try
+  baseDelayMs: number;      // base for exponential backoff
+  maxBackoffMs: number;     // upper cap for jittered delay
+  onRetry?: (err: LLMClientError | Error, attempt: number, delayMs: number) => void;
 }
 
 // ========== Safety Guard Types (§3.4.3) ==========
@@ -179,6 +271,7 @@ export interface GradingResult {
   steps: StepGrade[];
   feedback: string;
   suggestions: string[];
+  reasoning?: string;                // thinking(reasoning_content), filled by capability (not LLM JSON)
 }
 
 export interface StepGrade {
@@ -208,6 +301,7 @@ export interface FallbackResponse {
   includesCompleteAnswer: true;
   summary: string;
   recommendations: string[];
+  reasoning?: string;                // thinking(reasoning_content) for frontend display
 }
 
 // ========== Tutoring Types (§4.1.4) ==========
@@ -235,6 +329,7 @@ export interface TutoringResponse {
     content: string;
     type: 'socratic' | 'fallback' | 'block' | 'complete';
   };
+  reasoning?: string;                // thinking(reasoning_content) for frontend display
   safety: { isLearningRelated: boolean; alertLevel: AlertLevel };
   isFallback: boolean;
   consecutiveFailCount: number;
@@ -286,6 +381,7 @@ export interface VariationQuestion {
 export interface VariationResponse {
   variations: VariationQuestion[];
   generatedBy: string;
+  reasoning?: string;                // thinking(reasoning_content) for frontend display
 }
 
 // ========== Analytics Types (§4.5.2-§4.5.3) ==========
@@ -313,6 +409,7 @@ export interface AnalyticsResponse {
   weakPointAnalysis: string;
   suggestions: string[];
   encouragement: string;
+  reasoning?: string;                // thinking(reasoning_content) for frontend display
 }
 
 // ========== Conversation Service Types (§6.1.2) ==========

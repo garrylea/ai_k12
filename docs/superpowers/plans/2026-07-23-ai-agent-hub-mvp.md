@@ -82,7 +82,7 @@ M1: 核心基础设施 ──► M2: 辅导能力 ──► M3: 评估能力 ─
 | `apps/server/src/ai-core/infra/model-client/deepseek-client.ts` | DeepSeek API 适配（OpenAI 兼容） |
 | `apps/server/src/ai-core/infra/model-client/gemini-client.ts` | Gemini API 适配（MVP 可 stub，数学难题场景才需要） |
 
-**接口**：`ChatRequest` / `ChatResponse` / `StreamChunk` / `ModelErrorCode` / `ModelClientError` / `RetryConfig`（设计文档 §3.3.3-§3.3.5）
+**接口**：`ChatRequest` / `ChatResponse` / `StreamChunk` / `LLMClientError`(及 11 子类) / `RetryOptions`（设计文档 §3.3.3-§3.3.5）
 
 #### 2.1.5 ResponseParser
 

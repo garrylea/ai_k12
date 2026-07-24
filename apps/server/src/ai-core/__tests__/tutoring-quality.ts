@@ -78,6 +78,7 @@ async function runTutoringTests(): Promise<void> {
 
       console.log(`[${scenario.id}] ${scenario.description}`);
       console.log(`  Response: ${result.message.content.slice(0, 150)}...`);
+      console.log(`  Reasoning: ${result.reasoning ? result.reasoning.slice(0, 80) + '...' : '(none)'}`);
       console.log(`  Type: ${result.message.type}`);
       console.log(`  Expected: ${scenario.expectedBehavior}`);
       console.log('');

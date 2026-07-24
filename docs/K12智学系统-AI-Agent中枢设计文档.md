@@ -582,6 +582,7 @@ interface ChatResponse {
   id: string;
   model: string;
   content: string;
+  reasoningContent?: string;       // thinking 内容(reasoner 模型 reasoning_content 聚合),透传前端展示
   finishReason: 'stop' | 'length' | 'content_filter' | 'error';
   usage: {
     inputTokens: number;
@@ -592,52 +593,75 @@ interface ChatResponse {
 }
 
 interface StreamChunk {
-  content: string;                // 增量 delta 文本
+  content: string;                // 增量 delta 文本(回答)
+  reasoningContent?: string;      // 增量 thinking delta(reasoning_content)
   finishReason?: 'stop' | 'length' | 'content_filter' | 'error';
 }
 ```
 
-#### 3.3.4 统一错误码
+#### 3.3.4 错误体系（基于 ../llm-client.js）
 
 ```typescript
-enum ModelErrorCode {
-  /** 速率限制 */
-  RATE_LIMITED = 'RATE_LIMITED',
-  /** 额度耗尽 */
-  QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
-  /** 上下文超长 */
-  CONTEXT_TOO_LONG = 'CONTEXT_TOO_LONG',
-  /** 内容安全过滤 */
-  CONTENT_FILTERED = 'CONTENT_FILTERED',
-  /** 服务不可用 */
-  SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE',
-  /** 请求超时 */
-  TIMEOUT = 'TIMEOUT',
-  /** 未知错误 */
-  UNKNOWN = 'UNKNOWN',
+interface ErrorContext {
+  provider: string;
+  statusCode: number;             // 0 表示无响应(网络/超时)
+  providerCode: string | null;    // provider 特定错误码
+  retryable: boolean;
+  retryAfterMs: number | null;    // 解析自 Retry-After header
+  hint: string;                   // 人类可读的修复提示
+  modelId: string;
 }
 
-class ModelClientError extends Error {
-  constructor(
-    public code: ModelErrorCode,
-    public modelId: string,
-    message: string,
-    public retryable: boolean = true,
-  ) {
-    super(message);
-  }
+// 抽象基类,所有 LLM 客户端错误的父类
+class LLMClientError extends Error {
+  provider: string;
+  statusCode: number;
+  providerCode: string | null;
+  retryable: boolean;
+  retryAfterMs: number | null;
+  hint: string;
+  modelId: string;
 }
+
+// 11 个子类(按 HTTP status 分类,retryable 由子类决定):
+class AuthenticationError extends LLMClientError;      // 401,不可重试
+class InsufficientQuotaError extends LLMClientError;   // 402 / 429-insufficient_quota / qwen arrearage,不可重试
+class PermissionError extends LLMClientError;          // 403,不可重试
+class ResourceNotFoundError extends LLMClientError;    // 404,不可重试
+class RequestTooLargeError extends LLMClientError;     // 413,不可重试(原 CONTEXT_TOO_LONG)
+class ValidationFailedError extends LLMClientError;   // 400/422,不可重试
+class ContentFilteredError extends LLMClientError;     // 406 / gemini SAFETY,不可重试(ai-core 扩展,llm-client 无此类)
+class RateLimitError extends LLMClientError;           // 429 限流,可重试
+class ServerError extends LLMClientError;              // 5xx,可重试
+class TimeoutError extends LLMClientError;             // abort/网络/408,可重试
+
+// 分类器: (provider, status, body, headers, modelId) -> 对应错误子类
+function classifyError({ provider, status, body, headers, modelId }): LLMClientError;
 ```
 
-#### 3.3.5 重试策略
+#### 3.3.5 重试策略（callWithRetry, full-jitter 退避）
 
 ```typescript
-interface RetryConfig {
-  maxRetries: number;             // 默认 2
-  initialDelayMs: number;         // 默认 1000ms
-  backoffMultiplier: number;      // 默认 2
-  retryableCodes: ModelErrorCode[];  // [RATE_LIMITED, SERVICE_UNAVAILABLE, TIMEOUT]
+interface RetryOptions {
+  maxRetries: number;             // 默认 2(retry.yaml)
+  baseDelayMs: number;            // 默认 1000
+  maxBackoffMs: number;           // 默认 60000
+  onRetry?: (err: LLMClientError | Error, attempt: number, delayMs: number) => void;
 }
+
+// full-jitter 指数退避: delay = random(0, min(maxBackoff, base * 2^attempt))
+function jitteredBackoff(attempt: number, baseDelay: number, maxBackoff: number): number;
+
+// 解析 Retry-After header(整数秒 / HTTP-date),返回毫秒
+function parseRetryAfter(value: string | null): number | null;
+
+// 包装异步操作,带 full-jitter 退避:
+//   - 非 retryable LLMClientError -> 立即抛
+//   - 重试耗尽 -> 抛最后一个错误
+//   - retryAfterMs 存在 -> 遵守(capped at maxBackoffMs)
+//   - 否则 -> jitteredBackoff(attempt)
+//   - 非 LLMClientError(原始网络/abort)视为可重试
+async function callWithRetry<T>(fn: () => Promise<T>, options: RetryOptions): Promise<T>;
 ```
 
 #### 3.3.6 核心处理逻辑（伪代码）
@@ -645,36 +669,51 @@ interface RetryConfig {
 ```typescript
 class ModelClient {
   private providers: Map<string, ProviderAdapter>;
-  
+  private retryOptions: RetryOptions;
+
   async chat(request: ChatRequest): Promise<ChatResponse> {
-    const provider = this.providers.get(request.model.provider);
+    const provider = this.getProvider(request.model.provider);
     const startTime = Date.now();
-    
-    for (let attempt = 0; attempt <= this.retryConfig.maxRetries; attempt++) {
-      try {
-        const response = await provider.chat(request);
-        const latency = Date.now() - startTime;
-        return { ...response, latencyMs: latency };
-      } catch (error) {
-        if (attempt === this.retryConfig.maxRetries || !this.isRetryable(error)) {
-          throw error;
-        }
-        const delay = this.retryConfig.initialDelayMs * Math.pow(this.retryConfig.backoffMultiplier, attempt);
-        await sleep(delay);
+    // 默认流式; gemini 暂降级非流式(streamGenerateContent 待实现)
+    const useStream = request.stream !== false && request.model.provider !== 'gemini';
+
+    const run = async (): Promise<ChatResponse> => {
+      if (useStream) {
+        return this.aggregateStream(provider, request, startTime);  // 消费 streamChat 聚合
       }
-    }
+      const response = await provider.chat(request);
+      return { ...response, latencyMs: Date.now() - startTime };
+    };
+
+    return callWithRetry(run, this.retryOptions);  // full-jitter 重试
   }
-  
-  async streamChat(request: ChatRequest): AsyncIterable<StreamChunk> {
-    const provider = this.providers.get(request.model.provider);
-    return provider.streamChat(request);
+
+  // 流式聚合: for await 消费 streamChat,累加 content + reasoningContent
+  private async aggregateStream(provider, request, startTime): Promise<ChatResponse> {
+    let content = '', reasoningContent = '', finishReason = 'stop';
+    for await (const chunk of provider.streamChat(request)) {
+      if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
+      if (chunk.content) content += chunk.content;
+      if (chunk.finishReason) finishReason = chunk.finishReason;
+    }
+    return { id, model, content, reasoningContent: reasoningContent || undefined, finishReason, usage: {0,0,0}, latencyMs };
+  }
+
+  // 真流式(供 HTTP 层 SSE 转发),不套 callWithRetry(mid-stream 重试会重复 token)
+  streamChat(request: ChatRequest): AsyncIterable<StreamChunk> {
+    return this.getProvider(request.model.provider).streamChat(request);
   }
 }
 ```
 
-**流式调用额外约定**：
-- 流式和非流式走同一 `chat()` 方法，通过 `stream: true` 标记在 `ChatRequest` 扩展字段区分
-- 流式响应首个 chunk 应包含 `role: 'assistant'`，供 ConvesrationService 预分配消息记录
+**流式与 thinking(reasoning_content)约定**：
+- `chat()` 默认 `stream: true`，走流式聚合；`stream: false` 降级非流式(用于 gemini 或显式降级)
+- 流式响应中 `delta.reasoning_content`(thinking)与 `delta.content`(回答)分开读取，分别聚合到 `ChatResponse.reasoningContent` 与 `ChatResponse.content`
+- `reasoningContent` 透传到各 capability 响应(TutoringResponse/GradingResult/ExplanationResponse/VariationResponse/AnalyticsResponse/FallbackResponse 的 `reasoning` 字段)，供前端展示思考过程；**前端如何显示是前端的事，但 Agent 必须捕获并透传**
+- gemini 流式(streamGenerateContent)暂未实现(待配 GEMINI_API_KEY)，ModelClient 对 gemini 强制非流式降级
+- `streamChat()` 不套 `callWithRetry`--mid-stream 重试会重复生成 token，流错误由调用方(HTTP 层)处理
+- 流式 usage 尽力收(部分 provider 如 Kimi 流式不返回 usage，此时 cost=0)
+- 流式响应首个 chunk 应包含 `role: 'assistant'`，供 ConversationService 预分配消息记录
 - 流式传输中断时，已接收的内容持久化不丢失，客户端重连后从 `lastMessageId` 续传
 
 ---
@@ -2368,10 +2407,10 @@ models:
 ```text
 主模型失败
   │
-  ├─ 错误可重试（RATE_LIMITED / SERVICE_UNAVAILABLE / TIMEOUT）
+  ├─ 错误可重试（RateLimitError / ServerError / TimeoutError）
   │   └─ 等待退避后重试（最多 2 次）
   │
-  ├─ 重试耗尽 或 错误不可重试（QUOTA_EXCEEDED / CONTEXT_TOO_LONG）
+  ├─ 重试耗尽 或 错误不可重试（InsufficientQuotaError / RequestTooLargeError 等非 retryable）
   │   └─ 切换到 fallback 模型
   │       │
   │       ├─ fallback 可用 → 用 fallback 继续
@@ -2810,7 +2849,7 @@ interface AgentLog {
 **ModelClient**：
 ```typescript
 // 见 §3.3.3 ChatRequest / ChatResponse / StreamChunk
-// 见 §3.3.4 ModelErrorCode / ModelClientError / §3.3.5 RetryConfig
+// 见 §3.3.4 错误体系(LLMClientError 及子类) / §3.3.5 重试策略(RetryOptions)
 ```
 
 **SafetyGuard**：
@@ -2989,12 +3028,8 @@ default:
 ```yaml
 retry:
   maxRetries: 2
-  initialDelayMs: 1000
-  backoffMultiplier: 2
-  retryableErrors:
-    - RATE_LIMITED
-    - SERVICE_UNAVAILABLE
-    - TIMEOUT
+  baseDelayMs: 1000
+  maxBackoffMs: 60000
 
 timeout:
   default: 30000          # 默认 30s

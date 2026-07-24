@@ -82,6 +82,7 @@ export class TutoringCapability {
       return {
         dialogueId,
         message: { role: 'assistant', content: fallbackResult.content, type: 'fallback' },
+        reasoning: fallbackResult.reasoning,
         safety: { isLearningRelated: true, alertLevel: 'none' },
         isFallback: true,
         consecutiveFailCount: 0,
@@ -165,6 +166,7 @@ export class TutoringCapability {
     return {
       dialogueId,
       message: { role: 'assistant', content, type: 'socratic' },
+      reasoning: chatResponse.reasoningContent,
       safety: { isLearningRelated: true, alertLevel: 'none' },
       isFallback: false,
       consecutiveFailCount: context.consecutiveFailCount + (isAnswerWrong ? 1 : 0),

@@ -81,6 +81,7 @@ export class VariationCapability {
     return {
       variations: parseResult.data.variations,
       generatedBy: routeResult.primary.modelId,
+      reasoning: chatResponse.reasoningContent,
     };
   }
 }

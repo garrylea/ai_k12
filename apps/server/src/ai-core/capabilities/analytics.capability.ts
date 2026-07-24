@@ -79,6 +79,6 @@ export class AnalyticsCapability {
       throw new Error(`Analytics parse failed: ${parseResult.errors?.join(', ')}`);
     }
 
-    return parseResult.data;
+    return { ...parseResult.data, reasoning: chatResponse.reasoningContent };
   }
 }

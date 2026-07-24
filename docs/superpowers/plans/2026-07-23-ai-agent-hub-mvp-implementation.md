@@ -4086,7 +4086,7 @@ console.log('Tutoring response:', result.message.content.slice(0, 100));
 - **tutor() 流程重排**：loadContext -> give-up/fallback -> safety/block。原先 give-up 关键词（太难/不知道等）先被 safety 当 off_topic 拦截，无法触发兜底。
 - **持久化用户消息**：block 与 fallback 路径原先只存 assistant 消息，导致 `countConsecutiveOffTopic` 永不升级告警。
 - **移除 "怎么做" 关键词**：它子串匹配了 "怎么做这道题" 这类正常求助，错误触发兜底，违反 Socratic 原则。
-- **ModelClient 错误码 + retryableCodes**：providers 经 `mapHttpError` 抛带正确 code 的 ModelClientError；ModelClient 仅重试 retryableCodes 内的错误（原先重试所有错误且丢弃错误码）。网络/AbortError 归为 TIMEOUT。
+- **ModelClient 错误码 + retryableCodes**：providers 经 `mapHttpError` 抛带正确 code 的 ModelClientError；ModelClient 仅重试 retryableCodes 内的错误（原先重试所有错误且丢弃错误码）。网络/AbortError 归为 TIMEOUT。⚠️ **2026-07-24 已重构**：采用 `../llm-client.js` 错误体系（11 个错误子类 + `classifyError` + `callWithRetry` full-jitter 退避 + Retry-After），替换 `mapHttpError`/`ModelClientError`/`ModelErrorCode`/`retryableCodes`；同时 `ModelClient.chat` 默认流式 + 处理 `reasoning_content`（thinking）。见 `2026-07-24-ai-core-error-streaming-refactor.md`。
 - **GeminiClient**：system prompt 走 `systemInstruction`（原先映射为 user 角色）；finishReason 正确映射 MAX_TOKENS->length、SAFETY->content_filter；cost 从 usageMetadata 计算（原先恒 0）。
 - **ExplanationCapability errorHistory**：传数组而非 JSON 字符串，使 `{{#errorHistory}}` 区段正确迭代。
 - **GradingCapability**：retry 路径加 try/catch（fallback 失败时返回原始可用结果而非抛错）；`needsRetry` 在 stepSum=0 时用 totalScore 作分母（原先压制了重试）。

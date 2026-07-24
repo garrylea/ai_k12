@@ -1,6 +1,6 @@
 import type { ChatRequest, ChatResponse, StreamChunk } from '../../types.js';
 import type { ProviderAdapter } from './types.js';
-import { mapHttpError } from './errors.js';
+import { classifyError } from './errors.js';
 
 // Gemini uses its own generateContent protocol (not OpenAI-compatible).
 // MVP: non-streaming chat implemented; streaming deferred.
@@ -18,27 +18,48 @@ export class GeminiClient implements ProviderAdapter {
         parts: [{ text: m.content }],
       }));
 
-    const response = await fetch(
-      `${request.model.baseUrl}/v1/models/${request.model.modelId}:generateContent?key=${this.apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents,
-          ...(systemMessages.length > 0
-            ? { systemInstruction: { parts: [{ text: systemMessages.map(m => m.content).join('\n\n') }] } }
-            : {}),
-          generationConfig: {
-            temperature: request.temperature ?? 0.7,
-            maxOutputTokens: request.maxTokens ?? request.model.maxOutputTokens,
-          },
-        }),
-        signal: AbortSignal.timeout(request.timeout ?? 30000),
-      }
-    );
+    let response: Response;
+    try {
+      response = await fetch(
+        `${request.model.baseUrl}/v1/models/${request.model.modelId}:generateContent?key=${this.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents,
+            ...(systemMessages.length > 0
+              ? { systemInstruction: { parts: [{ text: systemMessages.map(m => m.content).join('\n\n') }] } }
+              : {}),
+            generationConfig: {
+              temperature: request.temperature ?? 0.7,
+              maxOutputTokens: request.maxTokens ?? request.model.maxOutputTokens,
+            },
+          }),
+          signal: AbortSignal.timeout(request.timeout ?? 30000),
+        }
+      );
+    } catch (netErr) {
+      // 网络错误(DNS/连接失败/abort)归一为 status=0 -> TimeoutError
+      throw classifyError({
+        provider: 'Gemini',
+        status: 0,
+        body: { message: netErr instanceof Error ? netErr.message : String(netErr) },
+        headers: new Headers(),
+        modelId: request.model.modelId,
+      });
+    }
 
     if (!response.ok) {
-      throw mapHttpError('Gemini', response.status, await response.text(), request.model.modelId);
+      const raw = await response.text();
+      let parsed: unknown = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = { message: raw }; }
+      throw classifyError({
+        provider: 'Gemini',
+        status: response.status,
+        body: parsed,
+        headers: response.headers,
+        modelId: request.model.modelId,
+      });
     }
 
     const data = await response.json();
@@ -74,6 +95,8 @@ export class GeminiClient implements ProviderAdapter {
   }
 
   async *streamChat(_request: ChatRequest): AsyncIterable<StreamChunk> {
-    throw new Error('Gemini streaming not implemented for MVP');
+    // TODO: implement streamGenerateContent (SSE). Deferred - needs GEMINI_API_KEY
+    // to integration-test. ModelClient falls back to non-streaming chat for gemini.
+    throw new Error('Gemini streaming not implemented (TODO: streamGenerateContent, needs GEMINI_API_KEY)');
   }
 }

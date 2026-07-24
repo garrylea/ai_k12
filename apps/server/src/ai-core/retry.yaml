@@ -1,11 +1,7 @@
 retry:
   maxRetries: 2
-  initialDelayMs: 1000
-  backoffMultiplier: 2
-  retryableCodes:
-    - RATE_LIMITED
-    - SERVICE_UNAVAILABLE
-    - TIMEOUT
+  baseDelayMs: 1000
+  maxBackoffMs: 60000
 
 timeout:
   default: 45000

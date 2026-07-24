@@ -3,7 +3,7 @@ import { timeoutConfig } from '../config.js';
 
 interface FallbackDeps {
   promptBuilder: { build: (req: any) => Promise<{ messages: any[]; estimatedTokens: number; templateVersion: string }> };
-  modelClient: { chat: (req: any) => Promise<{ content: string }> };
+  modelClient: { chat: (req: any) => Promise<{ content: string; reasoningContent?: string }> };
   modelRouter: { route: (req: any) => { primary: { modelId: string }; reason: string } };
 }
 
@@ -48,6 +48,7 @@ export class FallbackHandler {
       includesCompleteAnswer: true,
       summary: this.extractSummary(chatResponse.content),
       recommendations: this.extractRecommendations(chatResponse.content),
+      reasoning: chatResponse.reasoningContent,
     };
   }
 

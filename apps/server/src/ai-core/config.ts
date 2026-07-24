@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
-import type { ModelConfig, RetryConfig } from './types.js';
+import type { ModelConfig, RetryOptions } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -35,7 +35,7 @@ interface RouteConfig {
 }
 
 interface TimeoutConfig {
-  retry: RetryConfig;
+  retry: RetryOptions;
   timeout: Record<string, number>;
   streaming: { firstTokenTimeoutMs: number; interTokenTimeoutMs: number };
 }
