@@ -4060,3 +4060,21 @@ const result = await cap.tutor({ studentId: 's1', mode: 'mainline', message: '1+
 console.log('Tutoring response:', result.message.content.slice(0, 100));
 "
 ```
+
+---
+
+## 实现修正记录（Implementation Deviations）
+
+实现阶段发现并修正了本计划草稿代码中的若干缺陷。实际代码（`apps/server/src/ai-core/`）是事实来源；以下记录与草稿的关键偏差，便于回溯：
+
+1. **ESM `__dirname`**：草稿在各 capability 中使用 `import.meta.dirname`。实际改用 `dirname(fileURLToPath(import.meta.url))`（与 `safety-guard.ts` 一致，避免 TS lib 类型问题）。
+2. **ModelClient 依赖注入**：草稿的 capability 构造函数硬编码 `new ModelClient()`，导致 TDD 测试无法在不调用真实 API 的情况下覆盖主流程。实际为 Tutoring/Grading/Explanation/Variation/Analytics 五个 capability 均增加 `opts?: { modelClient?: ModelClient }`，测试注入 mock。
+3. **PromptBuilder `customVariables` 未展开**：草稿 `Mustache.render(bodyOnly, request.context, ...)` 传 `context` 为视图，但 `{{maxScore}}` 等位于 `context.customVariables` 下而非顶层，导致渲染为空。实际改为 `const view = { ...request.context, ...request.context.customVariables }`。
+4. **Mustache HTML 转义**：默认转义会把数学内容里的 `=`/`<`/`>`/`&` 转成 `&#x3D;` 等（`x=3` → `x&#x3D;3`），破坏所有含数学符号的 prompt。实际传入 `{ escape: (v) => v == null ? '' : String(v) }` 关闭转义（LLM prompt 非 HTML）。
+5. **`customVariables` 类型放宽**：`Record<string, string>` → `Record<string, unknown>`，使 `AnalyticsCapability` 可传入 `stats` 对象，配合模板的 `{{stats.totalStudyMinutes}}` 嵌套查找与 `{{#stats.topWeakPoints}}` 区段迭代（草稿用点号字符串键 `'stats.totalStudyMinutes'`，在 Mustache 中无效）。
+6. **ExplanationCapability 缺少 `mode` 透传**：草稿 `promptBuilder.build({...})` 未传 `mode`，导致 `knowledge_retry` 仍加载 `error-analysis.md`。实际补上 `mode: request.mode`。
+7. **FallbackHandler 模板路由**：草稿用 `capability: 'explanation'`（加载 `error-analysis.md`），实际改为新增的 `capability: 'fallback'` → `fallback/full-explanation.md`（并在 `CapabilityType` 与 `resolveTemplatePath` 中登记 `fallback`）。
+8. **TutoringCapability `knowledgePoint` 类型**：`LoadContextResponse.currentKnowledgePoint.subject` 是 `string`，而 `FallbackRequest.knowledgePoint.subject` 是 `Subject`。草稿的 `context.currentKnowledgePoint ?? {...` 会报类型错误；实际改用 `context.subject` 重建对象。
+9. **回归基线**：`safety-classification.ts` 的样本标注已对齐 `classifyByKeywords` 实际行为（如 `2+3=5` 命中纯数字运算符正则归为 learning；含 `不会` 的消息因 learning 先于 anomaly 判定而归为 learning），基线 26/26 = 100%。
+
+验证：`npx tsc --noEmit` 通过；`npx vitest run` 14 文件 63 测试全绿；`safety-classification` 26/26。`grading-accuracy` 与 `tutoring-quality` 为需 API Key 的评估脚本（经 `tsx` 运行，不被 vitest 收录）。
