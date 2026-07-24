@@ -23,6 +23,10 @@ const SAMPLES: SafetySample[] = [
   { id: 's_008', message: '2+3=5', expectedClassification: 'learning' },
   { id: 's_009', message: '解题步骤是什么？', expectedClassification: 'learning' },
   { id: 's_010', message: '这道题目我算不出来', expectedClassification: 'learning' },
+  // 含代数方程表达式但无"方程/计算"等关键词--必须判 learning,不能误拦为 off_topic
+  { id: 's_027', message: '3x + 5 = 14，x等于多少？', expectedClassification: 'learning' },
+  { id: 's_028', message: '我算出来 2x+3=7 的解是 x=5，对吗？', expectedClassification: 'learning' },
+  { id: 's_029', message: '2x+3=7，我算出 x=2', expectedClassification: 'learning' },
 
   // --- anomaly (no learning keyword; contain an anomaly keyword) ---
   { id: 's_011', message: '我好烦，不想学了', expectedClassification: 'anomaly' },

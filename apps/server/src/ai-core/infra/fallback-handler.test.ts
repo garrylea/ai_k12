@@ -12,8 +12,8 @@ const fakeContent = `## 知识点总结
 function makeDeps(chatContent = fakeContent) {
   return {
     promptBuilder: { build: async () => ({ messages: [], estimatedTokens: 0, templateVersion: '1.0' }) },
-    modelClient: { chat: async () => ({ content: chatContent, id: 'r1', model: 'qwen-3.7-max', finishReason: 'stop' as const, usage: { inputTokens: 0, outputTokens: 0, cost: 0 }, latencyMs: 5 }) },
-    modelRouter: { route: () => ({ primary: { modelId: 'qwen-3.7-max' }, reason: 'test' }) },
+    modelClient: { chat: async () => ({ content: chatContent, id: 'r1', model: 'qwen3.7-max', finishReason: 'stop' as const, usage: { inputTokens: 0, outputTokens: 0, cost: 0 }, latencyMs: 5 }) },
+    modelRouter: { route: () => ({ primary: { modelId: 'qwen3.7-max' }, reason: 'test' }) },
   };
 }
 

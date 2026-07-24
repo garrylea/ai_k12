@@ -26,7 +26,7 @@ describe('VariationCapability', () => {
       chat: async (req: { messages: { role: string; content: string }[] }): Promise<ChatResponse> => {
         capturedMessages = req.messages;
         return {
-          id: 'r1', model: 'qwen-3.7-max', content: mockContent,
+          id: 'r1', model: 'qwen3.7-max', content: mockContent,
           finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
         };
       },

@@ -1,4 +1,5 @@
 import type { FallbackRequest, FallbackResponse } from '../types.js';
+import { timeoutConfig } from '../config.js';
 
 interface FallbackDeps {
   promptBuilder: { build: (req: any) => Promise<{ messages: any[]; estimatedTokens: number; templateVersion: string }> };
@@ -38,6 +39,7 @@ export class FallbackHandler {
     const chatResponse = await this.modelClient.chat({
       model: routeResult.primary,
       messages: promptResult.messages,
+      timeout: timeoutConfig.timeout.explanation ?? timeoutConfig.timeout.default,
     });
 
     return {

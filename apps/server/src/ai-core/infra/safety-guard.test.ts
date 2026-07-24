@@ -65,6 +65,18 @@ describe('SafetyGuard', () => {
     expect(result.classification).toBe('learning');
   });
 
+  it('classifies equation-bearing messages as learning (not off_topic)', () => {
+    // "3x+5=14,x等于多少" 含代数表达式但无"方程/计算"等词,曾误判 off_topic 而 block。
+    expect(guard.classifyByKeywords('3x + 5 = 14，x等于多少？').classification).toBe('learning');
+    expect(guard.classifyByKeywords('我算出来 2x+3=7 的解是 x=5，对吗？').classification).toBe('learning');
+    expect(guard.classifyByKeywords('2x+3=7，我算出 x=2').classification).toBe('learning');
+  });
+
+  it('still treats "1+1等于几" as off_topic (no half-width =)', () => {
+    // 回归保障:中文"等于"不含半角等号,不应被新方程正则误判为 learning。
+    expect(guard.classifyByKeywords('1+1等于几').classification).toBe('off_topic');
+  });
+
   it('classifies emotional distress as anomaly', () => {
     const result = guard.classifyByKeywords('我好烦不想学了');
     expect(result.classification).toBe('anomaly');

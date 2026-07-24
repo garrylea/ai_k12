@@ -113,7 +113,7 @@ M1: 核心基础设施 ──► M2: 辅导能力 ──► M3: 评估能力 ─
 
 ### 2.2 验收标准
 
-1. `ModelRouter.route({scene:'tutoring', subject:'math', difficulty:2})` → `{primary: 'qwen-3.7-max', fallback: 'deepseek-v4-flash'}`
+1. `ModelRouter.route({scene:'tutoring', subject:'math', difficulty:2})` → `{primary: 'qwen3.7-max', fallback: 'deepseek-v4-flash'}`
 2. `ModelRouter.route({scene:'safety', subject:'math'})` → `{primary: 'deepseek-v4-flash', fallback: undefined}`（安全检测无备选）
 3. `PromptBuilder.build({capability:'tutoring', subject:'math', track:'mainline', context:{...}})` → 完整 `ChatMessage[]`（含 system + user 消息）
 4. `ModelClient.chat({model, messages})` → 对 Kimi/Qwen/DeepSeek 任一厂商发起真实 API 调用并返回 `ChatResponse`

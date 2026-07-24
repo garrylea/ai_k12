@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { VariationRequest, VariationResponse, VariationQuestion } from '../types.js';
+import { timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
@@ -64,6 +65,7 @@ export class VariationCapability {
       model: routeResult.primary,
       messages: promptResult.messages,
       responseFormat: 'json_object',
+      timeout: timeoutConfig.timeout.variation ?? timeoutConfig.timeout.default,
     });
 
     const parseResult = this.responseParser.parse<{ variations: VariationQuestion[] }>({

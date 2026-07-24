@@ -14,7 +14,7 @@ describe('Metrics', () => {
   });
 
   it('getMetrics returns Prometheus text format with all registered metric names', async () => {
-    metrics.requestTotal.inc({ scene: 'tutoring', model: 'qwen-3.7-max', subject: 'math' });
+    metrics.requestTotal.inc({ scene: 'tutoring', model: 'qwen3.7-max', subject: 'math' });
     const text = await getMetrics();
 
     expect(text).toContain('ai_agent_request_total');

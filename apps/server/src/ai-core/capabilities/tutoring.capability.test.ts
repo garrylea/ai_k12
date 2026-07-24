@@ -43,7 +43,7 @@ describe('TutoringCapability', () => {
     const mockModelClient = {
       chat: async (): Promise<ChatResponse> => ({
         id: 'resp_1',
-        model: 'qwen-3.7-max',
+        model: 'qwen3.7-max',
         content: '你观察一下等式两边，有什么发现？',
         finishReason: 'stop',
         usage: { inputTokens: 10, outputTokens: 5, cost: 0 },
@@ -71,7 +71,7 @@ describe('TutoringCapability', () => {
     // ("怎么做这道题") routes to Socratic guidance, not a full-answer fallback.
     const mockModelClient = {
       chat: async (): Promise<ChatResponse> => ({
-        id: 'resp_3', model: 'qwen-3.7-max',
+        id: 'resp_3', model: 'qwen3.7-max',
         content: '我们先看看等式两边有什么不同。',
         finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
       }),
@@ -94,7 +94,7 @@ describe('TutoringCapability', () => {
     // instead of an off-topic block.
     const mockModelClient = {
       chat: async (): Promise<ChatResponse> => ({
-        id: 'resp_4', model: 'qwen-3.7-max',
+        id: 'resp_4', model: 'qwen3.7-max',
         content: '## 知识点总结\n一元一次方程的标准形式是 ax+b=0。\n\n## 建议\n- 多做基础练习',
         finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
       }),
@@ -116,7 +116,7 @@ describe('TutoringCapability', () => {
   it('triggers fallback on "不会做" and persists the user message', async () => {
     const mockModelClient = {
       chat: async (): Promise<ChatResponse> => ({
-        id: 'resp_2', model: 'qwen-3.7-max',
+        id: 'resp_2', model: 'qwen3.7-max',
         content: '## 知识点总结\n一元一次方程的标准形式是 ax+b=0。\n\n## 建议\n- 多做基础练习\n- 理解移项规则',
         finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
       }),

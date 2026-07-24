@@ -1,4 +1,5 @@
 import type { ExplanationRequest } from '../types.js';
+import { timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
@@ -60,6 +61,7 @@ export class ExplanationCapability {
     const chatResponse = await this.modelClient.chat({
       model: routeResult.primary,
       messages: promptResult.messages,
+      timeout: timeoutConfig.timeout.explanation ?? timeoutConfig.timeout.default,
     });
 
     const parsed = this.responseParser.parse({

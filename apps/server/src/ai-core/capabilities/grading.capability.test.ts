@@ -48,7 +48,7 @@ describe('GradingCapability', () => {
     });
     const mockModelClient = {
       chat: async (): Promise<ChatResponse> => ({
-        id: 'r1', model: 'qwen-3.7-max', content: mockContent,
+        id: 'r1', model: 'qwen3.7-max', content: mockContent,
         finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
       }),
     } as unknown as ModelClient;
@@ -106,7 +106,7 @@ describe('GradingCapability', () => {
       chat: async (): Promise<ChatResponse> => {
         callCount++;
         return {
-          id: `r${callCount}`, model: callCount === 1 ? 'qwen-3.7-max' : 'kimi-latest',
+          id: `r${callCount}`, model: callCount === 1 ? 'qwen3.7-max' : 'kimi-latest',
           content: callCount === 1 ? inconsistent : consistent,
           finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
         };
@@ -138,7 +138,7 @@ describe('GradingCapability', () => {
       chat: async (): Promise<ChatResponse> => {
         callCount++;
         if (callCount === 1) {
-          return { id: 'r1', model: 'qwen-3.7-max', content: inconsistent, finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5 };
+          return { id: 'r1', model: 'qwen3.7-max', content: inconsistent, finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5 };
         }
         throw new Error('fallback model failed');
       },

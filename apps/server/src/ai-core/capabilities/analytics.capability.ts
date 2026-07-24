@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { AnalyticsRequest, AnalyticsResponse } from '../types.js';
+import { timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
@@ -65,6 +66,7 @@ export class AnalyticsCapability {
       model: routeResult.primary,
       messages: promptResult.messages,
       responseFormat: 'json_object',
+      timeout: timeoutConfig.timeout.analysis ?? timeoutConfig.timeout.default,
     });
 
     const parseResult = this.responseParser.parse<AnalyticsResponse>({

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { GradingRequest, GradingResult } from '../types.js';
+import { timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
@@ -68,6 +69,7 @@ export class GradingCapability {
       model: routeResult.primary,
       messages: promptResult.messages,
       responseFormat: 'json_object',
+      timeout: timeoutConfig.timeout.grading ?? timeoutConfig.timeout.default,
     });
 
     const parseResult = this.responseParser.parse<GradingResult>({
@@ -89,6 +91,7 @@ export class GradingCapability {
           model: routeResult.fallback,
           messages: promptResult.messages,
           responseFormat: 'json_object',
+          timeout: timeoutConfig.timeout.grading ?? timeoutConfig.timeout.default,
         });
         const retryResult = this.responseParser.parse<GradingResult>({
           rawContent: retryResponse.content,

@@ -594,9 +594,9 @@ models:
       output: 0.012
     supportsStreaming: true
 
-  qwen-3.7-max:
+  qwen3.7-max:
     provider: qwen
-    modelId: qwen-3.7-max
+    modelId: qwen3.7-max
     baseUrl: ${QWEN_BASE_URL}
     apiKey: ${QWEN_API_KEY}
     contextWindow: 131072
@@ -635,57 +635,57 @@ routes:
   tutoring:
     - subject: math
       difficulty: [1, 2]
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: deepseek-v4-flash
     - subject: math
       difficulty: [3]
       primary: gemini-3.1-pro
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
     - subject: chinese
       primary: kimi
       fallback: deepseek-v4-flash
     - subject: english
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   grading:
     - subject: math
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: kimi
     - subject: chinese
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
     - subject: english
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   explanation:
     - subject: math
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: deepseek-v4-flash
     - subject: chinese
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
     - subject: english
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   variation:
     - subject: math
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: gemini-3.1-pro
 
   analysis:
     - subject: "*"
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   safety:
     - subject: "*"
       primary: deepseek-v4-flash
 
 default:
-  primary: qwen-3.7-max
+  primary: qwen3.7-max
   fallback: deepseek-v4-flash
 ```
 
@@ -875,16 +875,16 @@ import { ModelRouter } from './model-router.js';
 describe('ModelRouter', () => {
   const router = new ModelRouter();
 
-  it('routes math tutoring (easy) to qwen-3.7-max primary with deepseek fallback', () => {
+  it('routes math tutoring (easy) to qwen3.7-max primary with deepseek fallback', () => {
     const result = router.route({ scene: 'tutoring', subject: 'math', difficulty: 1 });
-    expect(result.primary.modelId).toBe('qwen-3.7-max');
+    expect(result.primary.modelId).toBe('qwen3.7-max');
     expect(result.fallback?.modelId).toBe('deepseek-v4-flash');
   });
 
   it('routes math tutoring (hard) to gemini-3.1-pro primary with qwen fallback', () => {
     const result = router.route({ scene: 'tutoring', subject: 'math', difficulty: 3 });
     expect(result.primary.modelId).toBe('gemini-3.1-pro');
-    expect(result.fallback?.modelId).toBe('qwen-3.7-max');
+    expect(result.fallback?.modelId).toBe('qwen3.7-max');
   });
 
   it('routes safety scene to deepseek-v4-flash with no fallback', () => {
@@ -903,12 +903,12 @@ describe('ModelRouter', () => {
     const result = router.route({ scene: 'analysis', subject: 'math' });
     // analysis has wildcard subject='*' rule
     expect(result.primary.modelId).toBe('kimi');
-    expect(result.fallback?.modelId).toBe('qwen-3.7-max');
+    expect(result.fallback?.modelId).toBe('qwen3.7-max');
   });
 
   it('matches without difficulty (loose match)', () => {
     const result = router.route({ scene: 'grading', subject: 'math' });
-    expect(result.primary.modelId).toBe('qwen-3.7-max');
+    expect(result.primary.modelId).toBe('qwen3.7-max');
   });
 });
 ```

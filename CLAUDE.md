@@ -151,12 +151,14 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 **改代码前必读的关键约定**：
 - **ModelClient DI**：各 capability 构造函数接受 `opts?: { modelClient?: ModelClient }`，测试注入 mock（无 API Key 也能跑）。生产用 `new ModelClient()`。
 - **PromptBuilder**：`customVariables`（`Record<string, unknown>`）已展平进 Mustache 视图，可传对象/数组（如 AnalyticsCapability 传 `stats` 对象，配合 `{{stats.x}}` 与 `{{#stats.topWeakPoints}}`）；**已关闭 HTML 转义**（LLM prompt 非 HTML，数学符号 `=<>` 必须原样保留）；`{{> partial}}` 加载 `system/*.md` 并剥 frontmatter；模板用 `## System Prompt` / `## User Message` 分段。
-- **模型 ID（勿改）**：`kimi-latest`（Moonshot）、`qwen-3.7-max`、`gemini-3.1-pro`、`deepseek-v4-flash`。配置里 kimi 的 key 是 `kimi` 但 modelId 是 `kimi-latest`。
+- **模型 ID（勿改）**：`kimi-latest`（Moonshot）、`qwen3.7-max`、`gemini-3.1-pro`、`deepseek-v4-flash`。配置里 kimi 的 key 是 `kimi` 但 modelId 是 `kimi-latest`。
 - **API Key**：用 `.env` 的 `KIMI_API_KEY`/`QWEN_API_KEY`/`GEMINI_API_KEY`/`DEEPSEEK_API_KEY` 及对应 `*_BASE_URL`（ai-core 专属，**不要用 `ANTHROPIC_*`**，会被 shell 里 Claude Code 覆盖）。
 - **错误处理**：provider 经 `mapHttpError`（`infra/model-client/errors.ts`）抛 `ModelClientError`（带 `ModelErrorCode`：429->RATE_LIMITED、4xx-auth->QUOTA_EXCEEDED、413->CONTEXT_TOO_LONG、406->CONTENT_FILTERED、5xx->SERVICE_UNAVAILABLE）；`ModelClient` 仅重试 `retryableCodes`（RATE_LIMITED/SERVICE_UNAVAILABLE/TIMEOUT），非重试错误立即抛。
 - **Gemini**：system prompt 走 `systemInstruction`（不是 user 角色）；finishReason 映射 MAX_TOKENS->length、SAFETY->content_filter。
 - **测试与文档同步铁律**：若测试断言与 config/types/设计文档的值冲突，**测试错**——改测试，勿改 config/设计文档。改代码或主文档时，同步更新所有引用该实现的设计/计划文档。
 
-**已知限制**（本次未修，记录待后续）：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断学生答错（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 字段（per-scene timeout、classifier.confidenceThreshold、outputStructure）为声明式意图未接线；`npm run build` 不拷贝 YAML/prompts 到 dist（生产部署需另加 copy 步骤）。
+**已知限制**（本次未修，记录待后续）：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断学生答错（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 字段（classifier.confidenceThreshold、outputStructure）为声明式意图未接线；`npm run build` 不拷贝 YAML/prompts 到 dist（生产部署需另加 copy 步骤）。
 
 **实现记录**：计划草稿偏差与 code-review 修正详见 `docs/superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md` 末尾「实现修正记录」「代码审查后修正」两节。
+
+**2026-07-24 修正**：① modelId 拼写 bug——`qwen-3.7-max` 改为 `qwen3.7-max`（dashscope 实际 ID，原配置多一短横线导致 404 model_not_found；全仓库含 model key/modelId/routes 引用/文档/测试统一替换）。② per-scene timeout 接线——`retry.yaml` 的 per-scene timeout 此前未接线（capability 调 chat 未传 timeout，走 kimi-client 硬编码 30000），现已在 tutoring/grading/explanation/variation/analytics + fallback-handler 的 chat 调用传 `timeoutConfig.timeout[scene] ?? timeoutConfig.timeout.default`，并调大取值（default 30000→45000、tutoring 15000→45000、variation 45000→60000、safety 5000→10000、新增 explanation:60000），解决 qwen3.7-max 生成长文本（如 fallback 完整解析）超时。③ SafetyGuard 误拦--`LEARNING_PATTERNS` 未覆盖含方程表达式但无学习关键词的消息（如「3x+5=14,x等于多少」），误判 off_topic 而 block；加代数方程识别正则（半角等号/变量项），不误伤「1+1等于几」（中文「等于」）。

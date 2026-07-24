@@ -8,11 +8,12 @@ retry:
     - TIMEOUT
 
 timeout:
-  default: 30000
-  tutoring: 15000
-  grading: 30000
-  variation: 45000
-  safety: 5000
+  default: 45000
+  tutoring: 45000
+  grading: 45000
+  variation: 60000
+  explanation: 60000
+  safety: 10000
 
 streaming:
   firstTokenTimeoutMs: 3000

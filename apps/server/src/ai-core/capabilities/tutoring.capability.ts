@@ -1,5 +1,5 @@
 import type { TutoringRequest, TutoringResponse } from '../types.js';
-import { fallbackConfig } from '../config.js';
+import { fallbackConfig, timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
@@ -142,6 +142,7 @@ export class TutoringCapability {
       model: routeResult.primary,
       messages: promptResult.messages,
       temperature: 0.7,
+      timeout: timeoutConfig.timeout.tutoring ?? timeoutConfig.timeout.default,
     });
 
     // Step 7: Parse response

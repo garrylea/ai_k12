@@ -12,9 +12,9 @@ models:
       output: 0.012
     supportsStreaming: true
 
-  qwen-3.7-max:
+  qwen3.7-max:
     provider: qwen
-    modelId: qwen-3.7-max
+    modelId: qwen3.7-max
     baseUrl: ${QWEN_BASE_URL}
     apiKey: ${QWEN_API_KEY}
     contextWindow: 131072
@@ -53,55 +53,55 @@ routes:
   tutoring:
     - subject: math
       difficulty: [1, 2]
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: deepseek-v4-flash
     - subject: math
       difficulty: [3]
       primary: gemini-3.1-pro
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
     - subject: chinese
       primary: kimi
       fallback: deepseek-v4-flash
     - subject: english
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   grading:
     - subject: math
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: kimi
     - subject: chinese
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
     - subject: english
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   explanation:
     - subject: math
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: deepseek-v4-flash
     - subject: chinese
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
     - subject: english
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   variation:
     - subject: math
-      primary: qwen-3.7-max
+      primary: qwen3.7-max
       fallback: gemini-3.1-pro
 
   analysis:
     - subject: "*"
       primary: kimi
-      fallback: qwen-3.7-max
+      fallback: qwen3.7-max
 
   safety:
     - subject: "*"
       primary: deepseek-v4-flash
 
 default:
-  primary: qwen-3.7-max
+  primary: qwen3.7-max
   fallback: deepseek-v4-flash
