@@ -18,6 +18,20 @@ describe('SafetyGuard', () => {
     expect(result).toBe(2);
   });
 
+  it('stops counting at a learning message like "我不会做"', () => {
+    // "我不会做" matches the learning pattern /不会/, so it must break the
+    // consecutive-off-topic chain (previously the smaller pattern set here
+    // missed /不会/ and counted it as off-topic, inflating the count to 2).
+    const count = guard.countConsecutiveOffTopic([
+      { role: 'user', content: '今天天气真好' },
+      { role: 'assistant', content: '...' },
+      { role: 'user', content: '我不会做' },
+      { role: 'assistant', content: '...' },
+      { role: 'user', content: '你玩什么游戏' },
+    ]);
+    expect(count).toBe(1);
+  });
+
   it('picks a random off_topic block phrase', () => {
     const phrase = guard.pickGentleBlockMessage('off_topic');
     expect(phrase).toBeTruthy();

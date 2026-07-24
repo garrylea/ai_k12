@@ -18,15 +18,17 @@ export class ResponseParser {
   }
 
   private parseJson<T>(raw: string, schema?: object, defaultResult?: T): ParseResult<T> {
+    // Strip UTF-8 BOM and leading whitespace - JSON.parse rejects BOM-prefixed input.
+    const sanitized = raw.replace(/^﻿/, '').trimStart();
     let data: unknown = undefined;
     const errors: string[] = [];
 
     // 1. Direct parse
-    try { data = JSON.parse(raw); } catch { /* continue */ }
+    try { data = JSON.parse(sanitized); } catch { /* continue */ }
 
     // 2. Extract from code block
     if (data === undefined) {
-      const match = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+      const match = sanitized.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
       if (match) {
         try { data = JSON.parse(match[1]); } catch { /* continue */ }
       }
@@ -34,7 +36,7 @@ export class ResponseParser {
 
     // 3. Repair common errors
     if (data === undefined) {
-      const repaired = this.repairJson(raw);
+      const repaired = this.repairJson(sanitized);
       if (repaired) {
         try { data = JSON.parse(repaired); } catch { /* continue */ }
       }

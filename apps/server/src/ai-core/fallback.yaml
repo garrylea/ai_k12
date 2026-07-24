@@ -8,7 +8,6 @@ fallback:
     - 放弃
     - 算不出来
     - 想不出来
-    - 怎么做
     - 完全不会
   outputStructure:
     - 温和开场

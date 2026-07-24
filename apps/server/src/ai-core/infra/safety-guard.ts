@@ -7,6 +7,17 @@ import { safetyConfig } from '../config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Shared learning-keyword set. Used by both classifyByKeywords and
+// countConsecutiveOffTopic so a message classified as "learning" is also
+// treated as a learning turn when counting consecutive off-topic messages
+// (otherwise "我不会做" would inflate the off-topic count and prematurely
+// escalate the alert level).
+const LEARNING_PATTERNS = [
+  /怎么[解算做]/, /什么是/, /为什么/, /方程/, /数学/, /题目/, /老师/,
+  /帮我/, /请教/, /公式/, /计算/, /证明/, /几何/, /函数/, /不会/,
+  /怎么做/, /解题/, /答案是什么/, /^[0-9+\-×÷=]+$/,
+];
+
 interface GentleBlockPhrases {
   off_topic: string[];
   emotional: string[];
@@ -79,13 +90,7 @@ export class SafetyGuard {
   }
 
   classifyByKeywords(message: string): { classification: Classification; confidence: number } {
-    const learningPatterns = [
-      /怎么[解算做]/, /什么是/, /为什么/, /方程/, /数学/, /题目/, /老师/,
-      /帮我/, /请教/, /公式/, /计算/, /证明/, /几何/, /函数/, /不会/,
-      /怎么做/, /解题/, /答案是什么/, /^[0-9+\-×÷=]+$/,
-    ];
-
-    if (learningPatterns.some(p => p.test(message))) {
+    if (LEARNING_PATTERNS.some(p => p.test(message))) {
       return { classification: 'learning', confidence: 0.9 };
     }
 
@@ -112,13 +117,11 @@ export class SafetyGuard {
   }
 
   countConsecutiveOffTopic(history: Message[]): number {
-    const learningPatterns = [/怎么[解算做]/, /什么是/, /方程/, /数学/, /题目/, /老师/, /帮我/, /公式/];
-
     let count = 0;
     for (let i = history.length - 1; i >= 0; i--) {
       const msg = history[i];
       if (msg.role !== 'user') continue;
-      if (learningPatterns.some(p => p.test(msg.content))) break;
+      if (LEARNING_PATTERNS.some(p => p.test(msg.content))) break;
       count++;
     }
     return count;

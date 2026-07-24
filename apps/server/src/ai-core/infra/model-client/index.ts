@@ -1,5 +1,5 @@
-import type { ChatRequest, ChatResponse, StreamChunk, ModelErrorCode, RetryConfig } from '../../types.js';
-import { ModelClientError } from '../../types.js';
+import type { ChatRequest, ChatResponse, StreamChunk, RetryConfig } from '../../types.js';
+import { ModelClientError, ModelErrorCode } from '../../types.js';
 import { timeoutConfig, getApiKeyByProvider } from '../../config.js';
 import type { ProviderAdapter } from './types.js';
 import { KimiClient } from './kimi-client.js';
@@ -46,26 +46,50 @@ export class ModelClient {
     const provider = this.getProvider(request.model.provider);
     const startTime = Date.now();
 
+    let lastError: ModelClientError | null = null;
+
     for (let attempt = 0; attempt <= this.retryConfig.maxRetries; attempt++) {
       try {
         const response = await provider.chat(request);
         return { ...response, latencyMs: Date.now() - startTime };
       } catch (error) {
-        const isLastAttempt = attempt === this.retryConfig.maxRetries;
-        if (isLastAttempt) {
-          throw new ModelClientError(
-            'UNKNOWN' as ModelErrorCode,
-            request.model.modelId,
-            error instanceof Error ? error.message : 'Unknown error',
-            false,
-          );
+        lastError = this.classifyError(error, request.model.modelId);
+        // Only retry errors whose code is in retryableCodes (e.g. RATE_LIMITED,
+        // SERVICE_UNAVAILABLE, TIMEOUT). Non-retryable errors (QUOTA_EXCEEDED,
+        // CONTENT_FILTERED, CONTEXT_TOO_LONG, UNKNOWN) throw immediately.
+        const isRetryable = this.retryConfig.retryableCodes.includes(lastError.code);
+        if (!isRetryable || attempt === this.retryConfig.maxRetries) {
+          throw lastError;
         }
         const delay = this.retryConfig.initialDelayMs * Math.pow(this.retryConfig.backoffMultiplier, attempt);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
-    throw new ModelClientError('UNKNOWN' as ModelErrorCode, request.model.modelId, 'Max retries exceeded');
+    throw lastError ?? new ModelClientError(ModelErrorCode.UNKNOWN, request.model.modelId, 'Max retries exceeded');
+  }
+
+  /**
+   * Normalize a caught error into a ModelClientError, preserving the code when
+   * the provider already threw one (mapHttpError), otherwise classifying fetch
+   * network/timeout errors. retryable is derived from retryableCodes so the
+   * config is the single source of truth.
+   */
+  private classifyError(error: unknown, modelId: string): ModelClientError {
+    let code: ModelErrorCode;
+    let message: string;
+    if (error instanceof ModelClientError) {
+      code = error.code;
+      message = error.message;
+    } else {
+      message = error instanceof Error ? error.message : 'Unknown error';
+      const isTimeout = error instanceof Error && (
+        error.name === 'TimeoutError' || error.name === 'AbortError' || /timeout|abort/i.test(message)
+      );
+      code = isTimeout ? ModelErrorCode.TIMEOUT : ModelErrorCode.SERVICE_UNAVAILABLE;
+    }
+    const retryable = this.retryConfig.retryableCodes.includes(code);
+    return new ModelClientError(code, modelId, message, retryable);
   }
 
   streamChat(request: ChatRequest): AsyncIterable<StreamChunk> {

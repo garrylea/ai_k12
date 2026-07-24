@@ -71,5 +71,11 @@ describe('ExplanationCapability', () => {
     expect(capturedMessages[0].content).toContain('重新讲解');
     expect(capturedMessages[0].content).not.toContain('错因分析');
     expect(result.mode).toBe('knowledge_retry');
+    // errorHistory is passed as an array and the {{#errorHistory}} section
+    // iterates it, rendering each past attempt (not a JSON dump).
+    expect(capturedMessages[1].content).toContain('题目：解方程 2x+3=7');
+    expect(capturedMessages[1].content).toContain('错误答案：x=3');
+    expect(capturedMessages[1].content).toContain('第2次尝试');
+    expect(capturedMessages[1].content).not.toContain('[object Object]');
   });
 });

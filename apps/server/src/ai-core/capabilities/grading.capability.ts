@@ -80,20 +80,26 @@ export class GradingCapability {
       throw new Error(`Grading parse failed: ${parseResult.errors?.join(', ')}`);
     }
 
-    // Validate total score: step sum should be within 20% of totalScore, else retry on fallback model
+    // Validate total score: step sum should be within 20% of totalScore, else retry on fallback model.
+    // If the retry call or its parse fails, fall through and return the original
+    // (suspicious but usable) result rather than throwing away a parseable answer.
     if (this.needsRetry(parseResult.data) && routeResult.fallback) {
-      const retryResponse = await this.modelClient.chat({
-        model: routeResult.fallback,
-        messages: promptResult.messages,
-        responseFormat: 'json_object',
-      });
-      const retryResult = this.responseParser.parse<GradingResult>({
-        rawContent: retryResponse.content,
-        mode: 'json',
-        schema: GradingResultSchema,
-      });
-      if (retryResult.success && retryResult.data) {
-        return retryResult.data;
+      try {
+        const retryResponse = await this.modelClient.chat({
+          model: routeResult.fallback,
+          messages: promptResult.messages,
+          responseFormat: 'json_object',
+        });
+        const retryResult = this.responseParser.parse<GradingResult>({
+          rawContent: retryResponse.content,
+          mode: 'json',
+          schema: GradingResultSchema,
+        });
+        if (retryResult.success && retryResult.data) {
+          return retryResult.data;
+        }
+      } catch {
+        // Retry failed (network error or non-retryable upstream) - return original below.
       }
     }
 
@@ -102,8 +108,12 @@ export class GradingCapability {
 
   needsRetry(result: GradingResult): boolean {
     const stepSum = result.steps.reduce((sum, s) => sum + s.score, 0);
-    if (stepSum === 0) return false;
-    const deviation = Math.abs(stepSum - result.totalScore) / stepSum;
+    // Use totalScore as the denominator when stepSum is 0: all steps wrong but
+    // a non-zero totalScore is itself a contradiction worth retrying. (Avoids
+    // 0/0 NaN and the previous false-negative that suppressed retry.)
+    const denominator = stepSum === 0 ? result.totalScore : stepSum;
+    if (denominator === 0) return false;
+    const deviation = Math.abs(stepSum - result.totalScore) / denominator;
     return deviation > 0.2;
   }
 }

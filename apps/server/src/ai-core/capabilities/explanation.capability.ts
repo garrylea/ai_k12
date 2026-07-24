@@ -34,9 +34,13 @@ export class ExplanationCapability {
       subject: request.subject,
     });
 
-    const customVariables: Record<string, string> = { wrongAnswer: request.wrongAnswer };
+    // errorHistory is passed as a real array (not JSON.stringified) so the
+    // knowledge-retry template's {{#errorHistory}}...{{/errorHistory}} section
+    // iterates over each entry, resolving {{question}}/{{wrongAnswer}}/{{attempts}}
+    // per item. A JSON string would render the section once with garbage.
+    const customVariables: Record<string, unknown> = { wrongAnswer: request.wrongAnswer };
     if (request.errorHistory) {
-      customVariables.errorHistory = JSON.stringify(request.errorHistory);
+      customVariables.errorHistory = request.errorHistory;
     }
 
     const promptResult = await this.promptBuilder.build({

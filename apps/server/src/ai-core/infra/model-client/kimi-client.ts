@@ -1,10 +1,11 @@
 import type { ChatRequest, ChatResponse, StreamChunk } from '../../types.js';
 import type { ProviderAdapter } from './types.js';
+import { mapHttpError } from './errors.js';
 
 // OpenAI-compatible chat client. Kimi, Qwen, and DeepSeek all speak this protocol,
 // so QwenClient and DeepSeekClient extend this class.
 export class KimiClient implements ProviderAdapter {
-  constructor(protected apiKey: string) {}
+  constructor(protected apiKey: string, protected providerName = 'Kimi') {}
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const response = await fetch(`${request.model.baseUrl}/v1/chat/completions`, {
@@ -26,7 +27,7 @@ export class KimiClient implements ProviderAdapter {
 
     if (!response.ok) {
       const err = await response.text();
-      throw new Error(`Kimi API error ${response.status}: ${err}`);
+      throw mapHttpError(this.providerName, response.status, err, request.model.modelId);
     }
 
     const data = await response.json();
@@ -64,7 +65,7 @@ export class KimiClient implements ProviderAdapter {
     });
 
     if (!response.ok) {
-      throw new Error(`Kimi API error ${response.status}`);
+      throw mapHttpError(this.providerName, response.status, await response.text(), request.model.modelId);
     }
 
     const reader = response.body?.getReader();

@@ -32,7 +32,7 @@ export class FallbackHandler {
 
     const routeResult = this.modelRouter.route({
       scene: 'explanation',
-      subject: request.knowledgePoint.subject as any,
+      subject: request.knowledgePoint.subject,
     });
 
     const chatResponse = await this.modelClient.chat({

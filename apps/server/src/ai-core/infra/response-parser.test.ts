@@ -76,4 +76,15 @@ describe('ResponseParser', () => {
     expect(result.success).toBe(false);
     expect(result.data).toEqual({ fallback: true });
   });
+
+  it('strips a UTF-8 BOM (and leading whitespace) before parsing JSON', () => {
+    const bom = '﻿';
+    const result = parser.parse({
+      rawContent: '  \n' + bom + '{"totalScore": 8, "maxScore": 10, "steps": [], "feedback": "good", "suggestions": []}',
+      mode: 'json',
+      schema: GradingResultSchema,
+    });
+    expect(result.success).toBe(true);
+    expect((result.data as any).totalScore).toBe(8);
+  });
 });
