@@ -10,6 +10,84 @@ from llm import LLMClient
 from extract_cli import _load_prompt
 
 
+# ---- 教材目录识别 ----
+
+_EXAM_DIR_MARKERS = {"second", "first"}  # zgkao 试卷路径第 4 段是学年，第 3 段是 second/first
+
+
+def _is_textbook_dir(parts: tuple[str, ...]) -> bool:
+    """判断 MD 子目录是否为教材（非试卷）。
+
+    教材路径：{subject}/{grade_band}/{publisher}/{grade}/{term}
+    试卷路径：{subject}/{grade_band}/second/{year}/{exam_name}
+    区分规则：第 3 段（索引 2）不是纯数字年份且不是 "second"/"first" → 教材。
+    """
+    if len(parts) < 5:
+        return False
+    level3 = parts[2]
+    # 试卷路径第 3 段是 "second" 或 "first"，第 4 段是年份数字
+    if level3 in _EXAM_DIR_MARKERS:
+        return False
+    if level3.isdigit():
+        return False
+    return True
+
+
+# ---- 年级/学期简写展开 ----
+
+_SHORT_GRADE = {
+    "一": "一年级", "二": "二年级", "三": "三年级",
+    "四": "四年级", "五": "五年级", "六": "六年级",
+    "七": "七年级", "八": "八年级", "九": "九年级",
+    "1": "一年级", "2": "二年级", "3": "三年级",
+    "4": "四年级", "5": "五年级", "6": "六年级",
+    "7": "七年级", "8": "八年级", "9": "九年级",
+}
+_SHORT_TERM = {"上": "上册", "下": "下册"}
+
+
+def _expand_grade_term(raw: str) -> tuple[str | None, str | None]:
+    """将用户输入的"九上"、"九年级上册"、"9,上册"等展开为 (grade, term)。
+
+    支持格式：
+    - "九上" → ("九年级", "上册")
+    - "九年级上册" → ("九年级", "上册")
+    - "九年级/上册" → ("九年级", "上册")
+    - "九,上" → ("九年级", "上册")
+    - "九年级" → ("九年级", None)
+    - "上册" → (None, "上册")
+    """
+    raw = raw.replace("/", "").replace(",", "").replace("，", "").strip()
+    # 尝试匹配 "X年级Y册" 格式
+    for short, full in _SHORT_GRADE.items():
+        if short in raw:
+            grade = full
+            rest = raw.replace(short, "").replace(full, "")
+            for st, ft in _SHORT_TERM.items():
+                if st in rest:
+                    return (grade, ft)
+            # 检查 rest 是否含"年级"
+            if "年级" in rest:
+                rest_no_grade = rest.replace("年级", "")
+                for st, ft in _SHORT_TERM.items():
+                    if st in rest_no_grade:
+                        return (grade, ft)
+            return (grade, None)
+    # 只有学期
+    for st, ft in _SHORT_TERM.items():
+        if st in raw:
+            return (None, ft)
+    # 已是完整格式（如"九年级/上册" via --book）
+    if "年级" in raw and "册" in raw:
+        for st, ft in _SHORT_TERM.items():
+            if st in raw:
+                grade_part = raw.replace(ft, "").replace(st, "")
+                return (grade_part.strip("/"), ft)
+    return (raw if raw else None, None)
+
+
+# ---- 目录页查找 ----
+
 def _find_toc_pages(book_dir: Path, max_pages: int = 10) -> list[Path]:
     """在教材 MD 目录中找目录页。前 max_pages 页内 MD 内容包含 '目录' 的页。"""
     mds = sorted(book_dir.glob("page_*.md"))
@@ -22,14 +100,106 @@ def _find_toc_pages(book_dir: Path, max_pages: int = 10) -> list[Path]:
     return found
 
 
+# ---- CLI ----
+
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="从教材目录页 LLM 提取章节结构")
+    parser = argparse.ArgumentParser(
+        description="从教材目录页 LLM 提取章节结构",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  python src/toc_parse_cli.py                                         # 扫描所有教材
+  python src/toc_parse_cli.py --grade 九年级 --term 上册               # 指定年级学期
+  python src/toc_parse_cli.py --grade 九上                             # 简写
+  python src/toc_parse_cli.py --subject 数学 --publisher 人教版         # 指定学科+版本
+  python src/toc_parse_cli.py --book "九年级/下册"                     # 路径子串匹配
+  python src/toc_parse_cli.py --dry-run                               # 试运行
+        """,
+    )
     parser.add_argument("--input-dir", help="MD 目录（默认 output/md）")
     parser.add_argument("--output-dir", help="TOC JSON 输出目录（默认 output/toc）")
+    parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="smartedu",
+                        help="素材来源过滤（默认 smartedu，只有教材有目录）")
+    parser.add_argument("--subject", help="学科过滤（如 数学、语文）")
+    parser.add_argument("--publisher", help="出版社过滤（如 人教版）")
+    parser.add_argument("--grade", help="年级过滤，支持简写：九上→九年级上册、9上→九年级上册")
+    parser.add_argument("--term", help="学期过滤：上册、下册（与 --grade 配合；简写如'九上'已含学期则无需单独指定）")
     parser.add_argument("--book", help="只处理指定教材（路径子串匹配，如'九年级/下册'）")
-    parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 TOC JSON，重新解析")
-    parser.add_argument("--dry-run", action="store_true", help="只打印将要处理的目录页")
+    parser.add_argument("--reconvert", action="store_true",
+                        help="清除 checkpoint + 删除已有 TOC JSON，重新解析")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只打印将要处理的目录页")
     return parser.parse_args(argv)
+
+
+def _match_source(rel: str, source: str) -> bool:
+    """判断路径是否匹配来源过滤。"""
+    if source == "all":
+        return True
+    *_, name = rel.replace("\\", "/").split("/")
+    if source == "zgkao":
+        return "试卷" in name or "答案" in name
+    if source == "smartedu":
+        return "试卷" not in name and "答案" not in name
+    return False
+
+
+def _build_textbook_list(md_dir: Path, args) -> list[Path]:
+    """构建待处理的教材目录列表，依次应用所有过滤条件。"""
+    # 扫描 6 级深度：{subject}/{grade_band}/{publisher}/{grade}/{term}/{book}
+    # 教材目录结构包含书名目录，试卷也匹配此深度
+    all_dirs = sorted(md_dir.glob("*/*/*/*/*/*"))
+    textbooks: list[Path] = []
+
+    # 跳过含隐藏目录的路径（如 .DS_Store 出现在任意层级）
+    all_dirs = [d for d in all_dirs if not any(p.startswith(".") for p in d.parts)]
+
+    grade_filter: str | None = None
+    term_filter: str | None = None
+
+    # 解析 --grade 简写
+    if args.grade:
+        grade_filter, term_from_grade = _expand_grade_term(args.grade)
+        if term_from_grade and not args.term:
+            term_filter = term_from_grade
+    if args.term:
+        term_filter = args.term
+
+    for d in all_dirs:
+        rel = str(d.relative_to(md_dir))
+        parts = tuple(rel.replace("\\", "/").split("/"))
+
+        # 1. 只处理教材（非试卷）
+        if not _is_textbook_dir(parts):
+            continue
+
+        # 2. 来源过滤
+        if not _match_source(rel, args.source):
+            continue
+
+        # 3. 学科过滤
+        if args.subject and parts[0] != args.subject:
+            continue
+
+        # 4. 出版社过滤（路径第 3 段）
+        if args.publisher and parts[2] != args.publisher:
+            continue
+
+        # 5. 年级过滤（路径第 4 段）
+        if grade_filter and parts[3] != grade_filter:
+            continue
+
+        # 6. 学期过滤（路径第 5 段）
+        if term_filter and parts[4] != term_filter:
+            continue
+
+        # 7. book 子串匹配
+        if args.book and args.book not in rel:
+            continue
+
+        textbooks.append(d)
+
+    return textbooks
 
 
 def main(argv=None):
@@ -41,15 +211,19 @@ def main(argv=None):
     checkpoint = RefineryCheckpoint(config.output_dir / ".toc_checkpoint.json")
     checkpoint.load()
 
-    book_dirs = sorted(md_dir.glob("*/*/*/*/*"))
-    if args.book:
-        book_dirs = [d for d in book_dirs if args.book in str(d.relative_to(md_dir))]
+    book_dirs = _build_textbook_list(md_dir, args)
 
     if args.dry_run:
+        if not book_dirs:
+            print("[dry-run] 未找到匹配的教材目录。提示：", flush=True)
+            print("  教材路径格式：{学科}/{学段}/{出版社}/{年级}/{册次}/", flush=True)
+            print("  如：数学/初中/人教版/九年级/上册/义务教育教科书·数学九年级上册", flush=True)
+            print(f"  共扫描 {len(sorted(md_dir.glob('*/*/*/*/*')))} 个目录，"
+                  f"其中教材 {len(book_dirs)} 个", flush=True)
         for d in book_dirs:
             pages = _find_toc_pages(d)
-            if pages:
-                print(f"[dry-run] {d.relative_to(md_dir)} -> {len(pages)} toc page(s)", flush=True)
+            status = f"→ {len(pages)} toc page(s)" if pages else "→ 未找到目录页"
+            print(f"[dry-run] {d.relative_to(md_dir)} {status}", flush=True)
         return
 
     llm = LLMClient(
