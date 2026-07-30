@@ -5,7 +5,9 @@
 - DbLoader 类：连库、find-or-create 结构、入库 cards/questions（集成测试覆盖）。
 """
 
+import hashlib
 import re
+import unicodedata
 from pathlib import Path
 
 # ---------- subject 归一 ----------
@@ -29,6 +31,26 @@ def normalize_subject(alias: str | None) -> str | None:
     if not alias:
         return alias
     return SUBJECT_ALIASES.get(alias, alias)
+
+
+# ---------- 题干规范化与去重哈希 ----------
+
+def normalize_content(content: str | None) -> str:
+    """题干规范化：NFKC 全半角归一 + 去所有空白 + 转小写。
+
+    用于 content_hash 去重：同一道题不同排版/空白/全半角/大小写归一后哈希相同；
+    换数换场景的变式题哈希不同（视为新题）。
+    """
+    if not content:
+        return ""
+    s = unicodedata.normalize("NFKC", content)
+    s = re.sub(r"\s+", "", s)
+    return s.lower()
+
+
+def content_hash(content: str | None) -> str:
+    """题干规范化后的 SHA-256 哈希（64 位 hex），存入 questions.content_hash 用于去重。"""
+    return hashlib.sha256(normalize_content(content).encode("utf-8")).hexdigest()
 
 
 # ---------- rel_path 解析（教材 card） ----------
@@ -138,6 +160,23 @@ def grade_to_code(grade: str) -> str:
     if not m:
         return grade
     return f"grade_{chinese_to_int(m.group(1))}"
+
+
+def _subject_code_by_name_fallback(name: str) -> str:
+    """根据 subject 中文名找 code，找不到返回原名。"""
+    name_map = {"数学": "math", "语文": "chinese", "英语": "english",
+                "物理": "physics", "化学": "chemistry", "生物": "biology",
+                "历史": "history", "地理": "geography", "道德与法治": "politics"}
+    return name_map.get(name, name)
+
+
+def _grade_band_from_path(toc_path: str) -> str:
+    """从 TOC 路径推断 grade_band。"""
+    if "小学" in toc_path:
+        return "primary"
+    elif "高中" in toc_path:
+        return "senior"
+    return "junior"
 
 
 # ---------- DbLoader ----------
@@ -277,6 +316,101 @@ class DbLoader:
         self._lesson[key] = lid
         return lid
 
+    def _match_lesson_by_name(self, name: str) -> int | None:
+        """按 lesson name 查已有 lesson 的 DB id。"""
+        row = self._query("SELECT id FROM lessons WHERE name=%s", (name,))
+        if row:
+            return row[0][0]
+        return None
+
+    def load_toc_structure(self, toc_path: str) -> dict:
+        """用 TOC JSON 全量建教材骨架。
+
+        从 TOC JSON 文件路径推导 rel_path 结构，逐条 find-or-create：
+        textbook_version → semester → units → lessons。
+        幂等：已存在的 unit/lesson 不重复创建。
+
+        Returns:
+            dict: {toc_path: str, chapters: int, lessons: int}
+        """
+        with open(toc_path, encoding="utf-8") as f:
+            toc = json.load(f)
+
+        # 从路径推导：toc/{subject}/{publisher}/{grade}/{book}.json
+        toc_file = Path(toc_path)
+        stem = toc_file.stem  # e.g. "数学_人教版_九年级_书_toc" or just book name
+
+        parent_parts = toc_file.parent.parts
+        # Expect: .../toc/{subject}/{publisher}/{grade}/{book}.json or similar
+        # Try to extract from path. If parent has enough parts:
+        if len(parent_parts) >= 3:
+            subject_name = parent_parts[-3]
+            publisher = parent_parts[-2]
+            grade = parent_parts[-1]
+        else:
+            # Fallback: parse from stem
+            parts = stem.split("_")
+            subject_name = parts[0] if len(parts) > 0 else ""
+            publisher = parts[1] if len(parts) > 1 else ""
+            grade = parts[2] if len(parts) > 2 else ""
+
+        subject_code = _subject_code_by_name_fallback(subject_name)
+        gb = _grade_band_from_path(toc_path)
+
+        # Extract term from grade string (e.g., "九年级" → grade_9, term from book name)
+        grade_code = grade
+        term_code = "first"  # default
+        if "下册" in toc_path or "下册" in stem:
+            term_code = "second"
+        if "上册" in toc_path or "上册" in stem:
+            term_code = "first"
+
+        tv_id = self._find_or_create_textbook_version(subject_code, publisher, gb)
+        sem_name = grade
+        sem_id = self._find_or_create_semester(tv_id, grade_code, term_code, sem_name)
+
+        chapters_count = 0
+        lessons_count = 0
+
+        for ch in toc.get("chapters", []):
+            chapter_num = ch.get("number", 0)
+            chapter_label = ch.get("label", f"第{chapter_num}章")
+
+            # 建 unit（章）
+            unit_id = self._find_or_create_unit(sem_id, chapter_num, chapter_label)
+            chapters_count += 1
+
+            # 建 章综述 lesson (sort_order=0)
+            self._find_or_create_lesson(unit_id, chapter_label, 0)
+            lessons_count += 1
+
+            # 建 节 lessons
+            lesson_sort = 0
+            for sec in ch.get("sections", []):
+                lesson_sort += 1
+                sec_label = sec.get("label", "")
+                if sec_label:
+                    self._find_or_create_lesson(unit_id, sec_label, lesson_sort)
+                    lessons_count += 1
+
+                for sub in sec.get("subsections", []):
+                    lesson_sort += 1
+                    sub_label = sub.get("label", "")
+                    if sub_label:
+                        self._find_or_create_lesson(unit_id, sub_label, lesson_sort)
+                        lessons_count += 1
+
+            # 建 supplement lessons (排在所有节之后)
+            for supp in ch.get("supplements", []):
+                lesson_sort += 1
+                supp_label = supp.get("label", "")
+                if supp_label:
+                    self._find_or_create_lesson(unit_id, supp_label, lesson_sort)
+                    lessons_count += 1
+
+        self._conn.commit()
+        return {"toc_path": toc_path, "chapters": chapters_count, "lessons": lessons_count}
+
     # --- reset（full-reload） ---
     def reset_cards(self):
         # DELETE textbook_versions 级联清空 semesters/units/lessons/cards，保证结构重建（名称等不残留）
@@ -292,10 +426,38 @@ class DbLoader:
         self._conn.commit()
 
     # --- 入库 ---
-    def load_book_cards(self, book_rel: str, cards: list[dict]) -> int:
+    def load_book_cards(self, book_rel: str, cards: list[dict], toc_path: str | None = None) -> int:
         info = parse_book_rel_path(book_rel)
         if not info:
             raise ValueError(f"无法解析教材 rel_path: {book_rel!r}")
+
+        if toc_path:
+            # TOC 模式：不动态建结构，card 直接匹配已有 lesson
+            count = 0
+            unmatched = 0
+            for c in cards:
+                lid = c.get("lesson_id")
+                if not lid:
+                    unmatched += 1
+                    continue
+                lesson_id_db = self._match_lesson_by_name(lid)
+                if lesson_id_db is None:
+                    # 尝试去掉首尾空格
+                    lid_stripped = lid.strip()
+                    if lid_stripped != lid:
+                        lesson_id_db = self._match_lesson_by_name(lid_stripped)
+                if lesson_id_db is None:
+                    print(f"[WARN] card lesson_id={lid!r} not found in DB, skipped", flush=True)
+                    unmatched += 1
+                    continue
+                sort_order = count + 1
+                self._insert_card(lesson_id_db, sort_order, c)
+                count += 1
+            if unmatched:
+                print(f"[WARN] {unmatched} card(s) could not be matched to any lesson", flush=True)
+            self._conn.commit()
+            return count
+
         subject_code = self._subject_code_by_name(info["subject"])
         gb = GRADE_BAND_MAP[info["grade_band"]]
         grade_code = grade_to_code(info["grade"])
@@ -360,16 +522,22 @@ class DbLoader:
         for q in questions:
             sid = self._subject_id_by_code(normalize_subject(q.get("subject_id")))
             opts = q.get("options")
+            content = q.get("content") or ""
+            chash = content_hash(content)
+            # 去重：content_hash 命中已有题则复用，跳过插入（PRD §7.10）
+            if self._query("SELECT id FROM questions WHERE content_hash=%s LIMIT 1", (chash,)):
+                continue
             self._exec(
                 "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, "
                 "content, options, answer, explanation, material_text, material_url, "
-                "grade_band, source, source_year) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "grade_band, source, source_year, content_hash) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
-                 q.get("content"),
+                 content,
                  json.dumps(opts, ensure_ascii=False) if opts is not None else None,
                  q.get("answer") or "", q.get("explanation"), q.get("material_text"),
-                 q.get("material_url"), q.get("grade_band"), q.get("source"), q.get("source_year")),
+                 q.get("material_url"), q.get("grade_band"), q.get("source"), q.get("source_year"),
+                 chash),
             )
             count += 1
         self._conn.commit()
