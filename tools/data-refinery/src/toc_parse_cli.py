@@ -308,6 +308,17 @@ def main(argv=None):
             print(f"[reconvert] cleared checkpoint for {cleared} book(s)", flush=True)
 
     for book_dir in book_dirs:
+        toc_pages = _find_toc_pages(book_dir)
+        if not toc_pages:
+            print(f"[WARN] {book_dir.relative_to(md_dir)}: no toc pages found", flush=True)
+            continue
+
+        book_key = str(book_dir.relative_to(md_dir))
+
+        if not args.reconvert and checkpoint.is_toc_parsed(book_key):
+            skipped += 1
+            print(f"[skip] {book_key}", flush=True)
+            continue
 
         try:
             toc_text = "\n\n".join(p.read_text(encoding="utf-8") for p in toc_pages)
