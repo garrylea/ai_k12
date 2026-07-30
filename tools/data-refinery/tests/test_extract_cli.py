@@ -55,6 +55,110 @@ class TestMatchSource:
         assert _match_source(s, "smartedu") is False
 
 
+class TestLevenshtein:
+    def test_identical(self):
+        from extract_cli import _levenshtein
+        assert _levenshtein("26.1 反比例函数", "26.1 反比例函数") == 0
+
+    def test_one_typo(self):
+        from extract_cli import _levenshtein
+        assert _levenshtein("26.1 反比利函数", "26.1 反比例函数") == 1
+
+    def test_missing_space(self):
+        from extract_cli import _levenshtein
+        assert _levenshtein("26.1反比例函数", "26.1 反比例函数") == 1
+
+    def test_empty(self):
+        from extract_cli import _levenshtein
+        assert _levenshtein("", "abc") == 3
+        assert _levenshtein("abc", "") == 3
+
+
+class TestFlattenTocLabels:
+    def test_extracts_all_labels(self):
+        from extract_cli import _flatten_toc_labels
+        toc = {
+            "book": "test",
+            "chapters": [{
+                "number": 26, "title": "反比例函数", "label": "第二十六章 反比例函数",
+                "sections": [{
+                    "number": [26, 1], "title": "反比例函数", "label": "26.1 反比例函数",
+                    "subsections": [{
+                        "number": [26, 1, 1], "title": "反比例函数",
+                        "label": "26.1.1 反比例函数"
+                    }]
+                }],
+                "supplements": [{"type": "supplement", "label": "小结"}]
+            }]
+        }
+        labels = _flatten_toc_labels(toc)
+        assert "第二十六章 反比例函数" in labels
+        assert "26.1 反比例函数" in labels
+        assert "26.1.1 反比例函数" in labels
+        assert "小结" in labels
+        assert len(labels) == 4
+
+
+class TestValidateAndCorrect:
+    def test_exact_match(self):
+        from extract_cli import validate_and_correct
+        from pathlib import Path
+        toc = {
+            "book": "test",
+            "chapters": [{
+                "number": 26, "title": "反比例函数", "label": "第二十六章 反比例函数",
+                "sections": [{
+                    "number": [26, 1], "title": "反比例函数", "label": "26.1 反比例函数",
+                    "subsections": [],
+                }],
+                "supplements": [],
+            }],
+        }
+        cards = {"a.jsonl": [{"lesson_id": "26.1 反比例函数"}]}
+        report = validate_and_correct(cards, toc, Path("/tmp"))
+        assert report["matched"] == 1
+        assert len(report["corrected"]) == 0
+        assert "missing" in report["summary"]
+
+    def test_auto_correct_typo(self):
+        from extract_cli import validate_and_correct
+        from pathlib import Path
+        toc = {
+            "book": "test",
+            "chapters": [{
+                "number": 26, "title": "反比例函数", "label": "第二十六章 反比例函数",
+                "sections": [{
+                    "number": [26, 1], "title": "反比例函数", "label": "26.1 反比例函数",
+                    "subsections": [],
+                }],
+                "supplements": [],
+            }],
+        }
+        cards = {"a.jsonl": [{"lesson_id": "26.1 反比利函数"}]}
+        report = validate_and_correct(cards, toc, Path("/tmp"))
+        assert report["matched"] == 0
+        assert len(report["corrected"]) == 1
+        assert report["corrected"][0]["original"] == "26.1 反比利函数"
+        assert report["corrected"][0]["corrected"] == "26.1 反比例函数"
+
+    def test_unmatched_far_apart(self):
+        from extract_cli import validate_and_correct
+        from pathlib import Path
+        toc = {
+            "book": "test",
+            "chapters": [{
+                "number": 26, "title": "反比例函数", "label": "第二十六章 反比例函数",
+                "sections": [],
+                "supplements": [],
+            }],
+        }
+        cards = {"a.jsonl": [{"lesson_id": "完全不同的标题"}]}
+        report = validate_and_correct(cards, toc, Path("/tmp"))
+        assert report["matched"] == 0
+        assert len(report["corrected"]) == 0
+        assert len(report["unmatched"]) == 1
+
+
 class TestExtractCliMain:
     def test_dry_run_prints_sources(self, tmp_path, capsys):
         sub = tmp_path / "数学/试卷"
