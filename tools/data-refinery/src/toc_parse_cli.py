@@ -165,11 +165,12 @@ def parse_args(argv=None):
         epilog="""
 示例:
   python src/toc_parse_cli.py                                         # 扫描所有教材
-  python src/toc_parse_cli.py --grade 九年级 --term 上册               # 指定年级学期
-  python src/toc_parse_cli.py --grade 九上                             # 简写
+  python src/toc_parse_cli.py --grade 九上                             # 九年级上册（简写）
   python src/toc_parse_cli.py --subject 数学 --publisher 人教版         # 指定学科+版本
   python src/toc_parse_cli.py --book "九年级/下册"                     # 路径子串匹配
   python src/toc_parse_cli.py --dry-run                               # 试运行
+  python src/toc_parse_cli.py --reconvert --grade 九下                 # 重新解析指定教材
+  python src/toc_parse_cli.py --reconvert                              # 重新解析所有教材
         """,
     )
     parser.add_argument("--input-dir", help="MD 目录（默认 output/md）")
@@ -291,26 +292,22 @@ def main(argv=None):
     prompt = _load_prompt("toc_parse")
 
     parsed = skipped = failed = 0
-    for book_dir in book_dirs:
-        toc_pages = _find_toc_pages(book_dir)
-        if not toc_pages:
-            print(f"[WARN] {book_dir.relative_to(md_dir)}: no toc pages found", flush=True)
-            continue
 
-        book_key = str(book_dir.relative_to(md_dir))
-
-        if not args.reconvert and checkpoint.is_toc_parsed(book_key):
-            skipped += 1
-            print(f"[skip] {book_key}", flush=True)
-            continue
-
-        if args.reconvert:
+    # --reconvert 预处理：清理匹配教材的 checkpoint + 旧 JSON
+    if args.reconvert:
+        cleared = 0
+        for book_dir in book_dirs:
+            book_key = str(book_dir.relative_to(md_dir))
             if checkpoint.is_toc_parsed(book_key):
                 checkpoint.unmark_toc_parsed(book_key)
+                cleared += 1
             out_file = toc_dir / f"{book_key}.json"
             if out_file.exists():
                 out_file.unlink()
-                print(f"[reconvert] deleted {out_file}", flush=True)
+        if cleared:
+            print(f"[reconvert] cleared checkpoint for {cleared} book(s)", flush=True)
+
+    for book_dir in book_dirs:
 
         try:
             toc_text = "\n\n".join(p.read_text(encoding="utf-8") for p in toc_pages)
