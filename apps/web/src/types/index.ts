@@ -51,3 +51,30 @@ export interface ErrorBookItem {
   lastErrorTime: string;
   timesErrored: number;
 }
+
+/** 卡片内单张图片的元信息 */
+export interface ImageMeta {
+  url: string;
+  alt?: string;
+  position: 'inline';
+  width: number;
+  height: number;
+}
+
+/** 教材学习卡片（对应 cards 表 + content_metadata） */
+export interface CardContent {
+  id: number;
+  lesson_id: number;
+  sort_order: number;
+  card_type: 'concept' | 'example' | 'practice' | 'explore' | 'summary' | 'reading';
+  title?: string;
+  content: string;  // Markdown 原文
+  content_metadata?: {
+    images: ImageMeta[];
+  };
+  knowledge_point_ids?: string[];
+  textbook_page?: string;
+}
+
+// Re-export from API service for convenience
+export type { StarMapData, ChapterData, SectionData } from '@/services/api';

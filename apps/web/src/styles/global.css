@@ -5,97 +5,104 @@
 /* ===== Student Day Mode (Orange-Red Warm) ===== */
 :root,
 [data-theme='student-day'] {
-  --brand-500: #f06a38;
-  --brand-400: #f5865a;
-  --brand-600: #d45328;
-  --brand-100: #fde5d8;
+  --brand-500: #ff6b35;
+  --brand-400: #ff8555;
+  --brand-600: #e85a28;
+  --brand-100: #fff0e8;
 
-  --bg-base: #f5f1ec;
-  --bg-card: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-subtle: #e9e2db;
+  --bg-base: #FAF6EE;
+  --bg-page: #F5F0E8;
+  --bg-form: #FAFAFA;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --bg-subtle: #F2EBE0;
 
-  --text-primary: #2a1f18;
-  --text-secondary: #6b5d52;
-  --text-tertiary: #9c8d80;
-  --text-on-brand: #ffffff;
-  --text-placeholder: #a3a3a3;
+  --text-primary: #2A1F18;
+  --text-secondary: #6B5D52;
+  --text-tertiary: #9C8D80;
+  --text-on-brand: #FFFFFF;
+  --text-placeholder: #A3A3A3;
 
-  --success: #4a9b6e;
-  --warning: #d89844;
-  --error: #c44a3f;
-  --info: #4a7ba6;
+  --success: #4A9B6E;
+  --warning: #D89844;
+  --error: #C44A3F;
+  --info: #4A7BA6;
 
-  --aux: #8b5a8e;
+  --aux: #8B5A8E;
 
   --radius-card: 16px;
   --radius-button: 10px;
   --radius-input: 8px;
   --radius-pill: 9999px;
 
-  --shadow-card: 0 2px 8px rgba(42, 31, 24, 0.06);
-  --shadow-elevated: 0 8px 24px rgba(42, 31, 24, 0.1);
-  --shadow-glow-brand: 0 0 16px rgba(229, 90, 43, 0.25);
-  --shadow-glow-success: 0 0 12px rgba(74, 155, 110, 0.3);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-elevated: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-card-strong: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-glow-brand: 0 0 16px rgba(255, 107, 53, 0.25);
+  --shadow-glow-success: 0 0 12px rgba(74, 155, 110, 0.30);
 
   --motion-ease: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 /* ===== Student Night Mode (Dark Tea Gold) ===== */
 [data-theme='student-night'] {
-  --brand-500: #d07a45;
-  --brand-400: #dc9460;
-  --brand-600: #b06432;
-  --brand-100: #382818;
+  --brand-500: #C9743E;
+  --brand-400: #D88E5E;
+  --brand-600: #B06030;
+  --brand-100: #3A2818;
 
-  --bg-base: #1a1612;
-  --bg-card: #25201a;
-  --bg-elevated: #2d2620;
-  --bg-subtle: #211c16;
+  --bg-base: #1A1612;
+  --bg-page: #FAFAFA;
+  --bg-card: #25201A;
+  --bg-elevated: #2D2620;
+  --bg-subtle: #211C16;
 
-  --text-primary: #e8dcc2;
-  --text-secondary: #b5a685;
-  --text-tertiary: #7d7158;
-  --text-on-brand: #1a1612;
+  --text-primary: #E8DCC2;
+  --text-secondary: #B5A685;
+  --text-tertiary: #7D7158;
+  --text-on-brand: #1A1612;
   --text-placeholder: var(--text-tertiary);
 
-  --success: #5c8a6a;
-  --warning: #c0904a;
-  --error: #a05a50;
-  --info: #6b8aa6;
+  --success: #5C8A6A;
+  --warning: #C0904A;
+  --error: #A05A50;
+  --info: #6B8AA6;
 
-  --aux: #7b5a8e;
+  --aux: #7B5A8E;
 
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --shadow-glow-brand: 0 0 16px rgba(201, 116, 62, 0.3);
-  --shadow-glow-success: 0 0 12px rgba(92, 138, 106, 0.3);
+  --shadow-card-strong: 0 28px 70px rgba(0, 0, 0, 0.5), 0 10px 30px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-glow-brand: 0 0 16px rgba(201, 116, 62, 0.30);
+  --shadow-glow-success: 0 0 12px rgba(92, 138, 106, 0.30);
 }
 
 /* ===== Parent Mode (Business Blue, forced day) ===== */
 [data-theme='parent'] {
-  --brand-500: #2563eb;
-  --brand-400: #3b82f6;
-  --brand-600: #1d4ed8;
-  --brand-100: #dbeafe;
+  --brand-500: #2563EB;
+  --brand-400: #3B82F6;
+  --brand-600: #1D4ED8;
+  --brand-100: #DBEAFE;
 
-  --bg-base: #f5f7fa;
-  --bg-card: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-subtle: #e5e9f0;
+  --bg-base: #F5F7FA;
+  --bg-page: #F5F7FA;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --bg-subtle: #E5E9F0;
 
-  --text-primary: #1f2937;
-  --text-secondary: #4b5563;
-  --text-tertiary: #9ca3af;
-  --text-on-brand: #ffffff;
-  --text-placeholder: #a3a3a3;
+  --text-primary: #1F2937;
+  --text-secondary: #4B5563;
+  --text-tertiary: #9CA3AF;
+  --text-on-brand: #FFFFFF;
+  --text-placeholder: #A3A3A3;
 
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #dc2626;
-  --info: #3b82f6;
+  --success: #10B981;
+  --warning: #F59E0B;
+  --error: #DC2626;
+  --info: #3B82F6;
 
-  --aux: #7c3aed;
+  --aux: #7C3AED;
 }
 
 /* ===== School Level Font Size Only (no color/radius differences) ===== */
@@ -104,9 +111,9 @@
   --fs-h2: 22px;
   --fs-card-title: 18px;
   --fs-body: 17px;
-  --fs-textbook: 19px;
+  --fs-textbook: 16px;
+  --lh-textbook: 1.6;
   --fs-caption: 13px;
-  --lh-textbook: 1.8;
 }
 
 [data-school='junior'] {
@@ -114,9 +121,9 @@
   --fs-h2: 20px;
   --fs-card-title: 16px;
   --fs-body: 15px;
-  --fs-textbook: 17px;
+  --fs-textbook: 16px;
+  --lh-textbook: 1.6;
   --fs-caption: 12px;
-  --lh-textbook: 1.7;
 }
 
 [data-school='senior'] {
@@ -125,7 +132,6 @@
   --fs-card-title: 15px;
   --fs-body: 14px;
   --fs-textbook: 16px;
-  --fs-caption: 12px;
   --lh-textbook: 1.6;
 }
 
@@ -133,8 +139,9 @@
 body {
   margin: 0;
   font-family:
-    'PingFang SC', 'PingFang HK', 'Hiragino Sans GB', 'Microsoft YaHei',
-    system-ui, -apple-system, sans-serif;
+    Inter, system-ui, -apple-system, 'PingFang SC', 'PingFang HK',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Source Han Sans SC',
+    'Noto Sans SC', sans-serif;
   background: var(--bg-base);
   color: var(--text-primary);
   transition: background-color 800ms ease, color 300ms ease;

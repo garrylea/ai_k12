@@ -1,270 +1,405 @@
-import { useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PlanetNode, SectionCard } from '@/components/business';
-import { Progress } from '@/components/base';
-import { Chapter, Section } from '@/types';
+import { fetchStarMap, type SectionData, type StarMapData } from '@/services/api';
 
-// 模拟章节数据（小学三年级数学人教版 上册）
-const mockChapters: Chapter[] = [
-  {
-    id: 'ch1',
-    title: '时、分、秒',
-    order: 1,
-    importance: 'medium',
-    status: 'completed',
-    progress: 100,
-    sections: [
-      { id: '1-1', title: '秒的认识', order: 1, knowledgePointCount: 3, status: 'completed', progress: 100 },
-      { id: '1-2', title: '时间的计算', order: 2, knowledgePointCount: 4, status: 'completed', progress: 100 },
-      { id: '1-3', title: '练习一', order: 3, knowledgePointCount: 2, status: 'completed', progress: 100 },
-    ],
-  },
-  {
-    id: 'ch2',
-    title: '万以内的加法和减法（一）',
-    order: 2,
-    importance: 'large',
-    status: 'completed',
-    progress: 100,
-    sections: [
-      { id: '2-1', title: '两位数加两位数', order: 1, knowledgePointCount: 4, status: 'completed', progress: 100 },
-      { id: '2-2', title: '两位数减两位数', order: 2, knowledgePointCount: 4, status: 'completed', progress: 100 },
-      { id: '2-3', title: '几百几十加减', order: 3, knowledgePointCount: 3, status: 'completed', progress: 100 },
-      { id: '2-4', title: '估算', order: 4, knowledgePointCount: 2, status: 'completed', progress: 100 },
-    ],
-  },
-  {
-    id: 'ch3',
-    title: '测量',
-    order: 3,
-    importance: 'large',
-    status: 'current',
-    progress: 40,
-    sections: [
-      { id: '3-1', title: '毫米、分米的认识', order: 1, knowledgePointCount: 5, status: 'completed', progress: 100 },
-      { id: '3-2', title: '千米的认识', order: 2, knowledgePointCount: 4, status: 'completed', progress: 100 },
-      { id: '3-3', title: '吨的认识', order: 3, knowledgePointCount: 3, status: 'current', progress: 30 },
-      { id: '3-4', title: '练习三', order: 4, knowledgePointCount: 2, status: 'locked', progress: 0 },
-    ],
-  },
-  {
-    id: 'ch4',
-    title: '万以内的加法和减法（二）',
-    order: 4,
-    importance: 'large',
-    status: 'locked',
-    progress: 0,
-    sections: [
-      { id: '4-1', title: '加法', order: 1, knowledgePointCount: 5, status: 'locked', progress: 0 },
-      { id: '4-2', title: '减法', order: 2, knowledgePointCount: 5, status: 'locked', progress: 0 },
-      { id: '4-3', title: '加减法的验算', order: 3, knowledgePointCount: 3, status: 'locked', progress: 0 },
-    ],
-  },
-  {
-    id: 'ch5',
-    title: '倍的认识',
-    order: 5,
-    importance: 'medium',
-    status: 'locked',
-    progress: 0,
-    sections: [
-      { id: '5-1', title: '倍的认识', order: 1, knowledgePointCount: 3, status: 'locked', progress: 0 },
-      { id: '5-2', title: '解决问题', order: 2, knowledgePointCount: 4, status: 'locked', progress: 0 },
-    ],
-  },
-  {
-    id: 'ch6',
-    title: '多位数乘一位数',
-    order: 6,
-    importance: 'large',
-    status: 'locked',
-    progress: 0,
-    sections: [
-      { id: '6-1', title: '口算乘法', order: 1, knowledgePointCount: 3, status: 'locked', progress: 0 },
-      { id: '6-2', title: '笔算乘法', order: 2, knowledgePointCount: 5, status: 'locked', progress: 0 },
-      { id: '6-3', title: '解决问题', order: 3, knowledgePointCount: 4, status: 'locked', progress: 0 },
-    ],
-  },
-  {
-    id: 'ch7',
-    title: '长方形和正方形',
-    order: 7,
-    importance: 'medium',
-    status: 'locked',
-    progress: 0,
-    sections: [
-      { id: '7-1', title: '四边形', order: 1, knowledgePointCount: 3, status: 'locked', progress: 0 },
-      { id: '7-2', title: '周长', order: 2, knowledgePointCount: 4, status: 'locked', progress: 0 },
-    ],
-  },
-  {
-    id: 'ch8',
-    title: '分数的初步认识',
-    order: 8,
-    importance: 'small',
-    status: 'locked',
-    progress: 0,
-    sections: [
-      { id: '8-1', title: '分数的初步认识', order: 1, knowledgePointCount: 3, status: 'locked', progress: 0 },
-      { id: '8-2', title: '分数的简单计算', order: 2, knowledgePointCount: 3, status: 'locked', progress: 0 },
-    ],
-  },
-];
-
-export default function StarMapPage() {
-  const [chapters] = useState<Chapter[]>(mockChapters);
-  const [selectedChapterId, setSelectedChapterId] = useState<string>(
-    mockChapters.find((c) => c.status === 'current')?.id || mockChapters[0].id,
+// --- Loading skeleton ---
+function LoadingSkeleton() {
+  return (
+    <div className="min-h-screen bg-[#FDFBF7] flex items-center justify-center">
+      <div className="space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 rounded-lg mx-auto" />
+        <div className="h-[480px] w-[800px] bg-slate-100 rounded-3xl" />
+      </div>
+    </div>
   );
+}
 
-  const selectedChapter = chapters.find((c) => c.id === selectedChapterId);
-  const completedCount = chapters.filter((c) => c.status === 'completed').length;
+// --- Error state ---
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center gap-4">
+      <p className="text-slate-500 text-lg">{message}</p>
+      <button onClick={onRetry} className="px-6 py-2.5 bg-[#ff6b35] text-white rounded-xl font-medium hover:bg-[#e85d28] transition-colors">
+        重试
+      </button>
+    </div>
+  );
+}
 
-  const handleSectionClick = (section: Section) => {
-    // 占位：进入小节学习
-    console.log('进入小节', section.id);
-  };
+// --- Helpers ---
+// Split a section title into an optional leading label (chapter/section number
+// or a column name) and the concept name. Titles carry a prefix separated by a
+// space, e.g. "21.1 一元二次方程" -> {prefix: "21.1", name: "一元二次方程"};
+// "阅读与思考 黄金分割数" -> {prefix: "阅读与思考", name: "黄金分割数"}.
+// order === 0 is the 章综述 (chapter-intro), shown as a fixed label.
+function splitSectionTitle(title: string, order: number): { prefix: string; name: string } {
+  if (order === 0) return { prefix: '', name: '章综述' };
+  const parts = title.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { prefix: '', name: title.trim() };
+  return { prefix: parts[0], name: parts.slice(1).join(' ') };
+}
+
+// Chapter titles carry the same "第二十一章 一元二次方程" prefix; the bottom bar
+// already shows a "第N章" badge, so drop the prefix and keep the concept name.
+function chapterDisplayName(title: string): string {
+  return splitSectionTitle(title, 1).name;
+}
+
+// Insert zero-width break opportunities after Chinese conjunctions so long
+// names wrap at a natural boundary (e.g. "实际问题与|一元二次方程") rather than
+// at an arbitrary character. Used with word-break: keep-all on the render span.
+const BREAK_AFTER = /([与和及且或、])/g;
+function insertBreaks(name: string): string {
+  return name.replace(BREAK_AFTER, '$1​');
+}
+
+// --- Planet types ---
+interface PlanetPosition {
+  id: string;
+  num: string;
+  title: string;
+  order: number;
+  status: 'completed' | 'current' | 'locked';
+  progress: number;
+  x: number;
+  y: number;
+  sections: SectionData[];
+}
+
+// --- Toast ---
+function Toast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 3000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
 
   return (
-    <div className="student-theme-container min-h-full p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* 顶部：学期信息 + 进度 */}
-        <div className="mb-8">
-          <div className="flex items-end justify-between mb-4">
-            <div>
-              <h1
-                className="font-bold text-[var(--text-primary)] mb-1"
-                style={{ fontSize: 'var(--fs-h1)' }}
-              >
-                三年级数学（上册）
-              </h1>
-              <p className="text-[var(--text-secondary)]" style={{ fontSize: 'var(--fs-body)' }}>
-                人教版 · 共 {chapters.length} 章 · 已完成 {completedCount} 章
-              </p>
-            </div>
-            <div className="flex items-center gap-3 text-sm text-[var(--text-tertiary)]">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-[var(--success)]" /> 已完成
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-[var(--brand-500)]" /> 当前
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-[var(--text-tertiary)]" /> 未解锁
-              </span>
-            </div>
-          </div>
-          <Progress
-            value={completedCount}
-            max={chapters.length}
-            variant="linear"
-            showPercent
-            label="学期进度"
-          />
-        </div>
+    <motion.div
+      initial={{ opacity: 0, y: 40 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 40 }}
+      className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-5 py-3 bg-rose-900/90 backdrop-blur-sm text-rose-200 rounded-xl text-sm font-medium border border-rose-800/50 shadow-xl"
+    >
+      {message}
+    </motion.div>
+  );
+}
 
-        {/* 章节星链图 */}
-        <div className="bg-[var(--bg-card)] rounded-[var(--radius-card)] shadow-[var(--shadow-card)] p-8 mb-8">
-          <div className="text-sm font-semibold text-[var(--text-secondary)] mb-6">
-            章节星链
+// --- Icons ---
+const LockIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const ArrowLeftIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
+
+// --- Main Component ---
+export default function StarMapPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [data, setData] = useState<StarMapData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedPlanetId, setSelectedPlanetId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Identity from login; subject chosen on the subject-select page.
+  // The server derives the trusted studentId from the JWT — studentId here is
+  // only the URL resource locator and must match the logged-in user.
+  const studentId = Number(localStorage.getItem('userId')) || 0;
+  const subjectId = (location.state as { subjectId?: number } | null)?.subjectId ?? 0;
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (!studentId || !subjectId) {
+        throw new Error('缺少学生或学科信息，请重新从学科选择页进入');
+      }
+      const result = await fetchStarMap(studentId, subjectId);
+      setData(result);
+      const current = result.chapters.find(c => c.status === 'current');
+      setSelectedPlanetId(current?.id ?? result.chapters[0]?.id ?? null);
+    } catch (err: any) {
+      setError(err.message || '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const selectedChapter = useMemo(
+    () => data?.chapters.find(c => c.id === selectedPlanetId) ?? null,
+    [data, selectedPlanetId],
+  );
+
+  // Compute planet positions
+  const planets = useMemo<PlanetPosition[]>(() => {
+    if (!data) return [];
+    const chapters = data.chapters;
+    const len = chapters.length;
+    return chapters.map((ch, i) => {
+      // Distribute evenly, slight Y stagger for visual interest
+      const t = (i + 1) / (len + 1);
+      const x = 8 + t * 84; // 8% to 92%
+      const y = 35 + (i % 2 === 0 ? -5 : 10);
+      return {
+        ...ch,
+        num: `第${ch.order}章`,
+        x,
+        y,
+      };
+    });
+  }, [data]);
+
+  // Build connection lines
+  const lines = useMemo(() => {
+    const result: { x1: number; y1: number; x2: number; y2: number; color: string; opacity: number; width: number; dash: string }[] = [];
+    for (let i = 0; i < planets.length - 1; i++) {
+      const a = planets[i];
+      const b = planets[i + 1];
+      const isActive = a.status === 'current' || (a.status === 'completed' && b.status === 'locked');
+      const isCompleted = a.status === 'completed' && b.status === 'completed';
+      result.push({
+        x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        color: isCompleted ? '#34d399' : isActive ? '#38bdf8' : '#475569',
+        opacity: isCompleted ? 0.5 : isActive ? 0.6 : 0.2,
+        width: isCompleted || isActive ? 2.5 : 2,
+        dash: isActive || isCompleted ? '6 4' : '5 5',
+      });
+    }
+    return result;
+  }, [planets]);
+
+  const handleSectionClick = (section: SectionData) => {
+    if (section.status === 'locked') {
+      setToast(`「${section.title}」尚未解锁，请先按顺序完成前面的学习！`);
+      return;
+    }
+    // Placeholder: navigate to learning page
+    console.log('进入小节', section.id, section.title);
+  };
+
+  const handlePlanetClick = (planet: PlanetPosition) => {
+    if (planet.status === 'locked') {
+      setToast('该关卡尚未解锁，请先完成前置章节的学习！');
+      return;
+    }
+    setSelectedPlanetId(planet.id);
+  };
+
+  if (loading) return <LoadingSkeleton />;
+  if (error) return <ErrorState message={error} onRetry={fetchData} />;
+  if (!data || planets.length === 0) {
+    return <ErrorState message="暂无课程数据" onRetry={fetchData} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-[#FDFBF7] text-slate-900 flex flex-col justify-between p-6 md:p-12 font-sans relative overflow-hidden">
+      {/* Ambient background blurs */}
+      <div className="absolute top-0 right-0 w-[450px] h-[450px] bg-[#F59E0B]/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 left-0 w-[400px] h-[400px] bg-[#2563EB]/5 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="max-w-6xl w-full mx-auto flex-1 flex flex-col justify-between">
+        {/* Header */}
+        <header className="flex items-center gap-4 border-b border-slate-100 pb-5">
+          <button
+            onClick={() => navigate('/student/subjects')}
+            className="p-2.5 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors text-slate-600"
+            title="返回学科选择"
+          >
+            <ArrowLeftIcon />
+          </button>
+          <div>
+            <div className="text-sm font-semibold tracking-wide text-[var(--brand-500)] uppercase">
+              {data.subjectName}
+            </div>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              {data.gradeName}{data.publisher ? ` · ${data.publisher}` : ''}
+            </h1>
           </div>
-          <div className="overflow-x-auto pb-4">
-            <div className="relative min-w-[1000px]">
-              {/* 星轨连接线 */}
-              <svg
-                className="absolute top-1/2 left-0 w-full h-2 -translate-y-1/2 pointer-events-none"
-                viewBox="0 0 1000 8"
-                preserveAspectRatio="none"
-              >
+        </header>
+
+        {/* Error toast */}
+        <AnimatePresence>
+          {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+        </AnimatePresence>
+
+        {/* Galaxy canvas */}
+        <main className="flex-1 my-6 flex flex-col items-stretch">
+          <div className="w-full bg-[#0c1424] rounded-3xl relative p-6 border border-slate-800 shadow-inner overflow-hidden flex flex-col justify-between min-h-[460px] md:min-h-[520px]">
+            {/* Radial gradient overlay */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900 via-[#0c1424] to-[#060a12] pointer-events-none" />
+
+            {/* SVG connection lines */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+              {lines.map((line, i) => (
                 <line
-                  x1="50" y1="4" x2="950" y2="4"
-                  stroke="var(--bg-subtle)"
-                  strokeWidth="2"
-                  strokeDasharray="6 6"
+                  key={i}
+                  x1={`${line.x1}%`}
+                  y1={`${line.y1}%`}
+                  x2={`${line.x2}%`}
+                  y2={`${line.y2}%`}
+                  stroke={line.color}
+                  strokeWidth={line.width}
+                  strokeDasharray={line.dash}
+                  opacity={line.opacity}
                   strokeLinecap="round"
                 />
-              </svg>
-              {/* 章节星球 */}
-              <div className="relative flex items-center justify-between gap-4 px-4">
-                {chapters.map((chapter) => (
-                  <div
-                    key={chapter.id}
-                    className="flex-1 flex justify-center"
-                    style={{ minWidth: chapter.importance === 'large' ? 140 : chapter.importance === 'medium' ? 110 : 80 }}
+              ))}
+            </svg>
+
+            {/* Planet nodes */}
+            <div className="absolute inset-0 z-10">
+              {planets.map((planet) => {
+                const isSelected = selectedPlanetId === planet.id;
+                const isCompleted = planet.status === 'completed';
+                const isLocked = planet.status === 'locked';
+                const isCurrent = planet.status === 'current';
+
+                return (
+                  <button
+                    key={planet.id}
+                    onClick={() => handlePlanetClick(planet)}
+                    style={{ left: `${planet.x}%`, top: `${planet.y}%` }}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 group focus:outline-none"
                   >
-                    <PlanetNode
-                      size={chapter.importance}
-                      status={chapter.status}
-                      label={`第${chapter.order}章`}
-                      sublabel={chapter.title}
-                      selected={chapter.id === selectedChapterId}
-                      onClick={() => setSelectedChapterId(chapter.id)}
+                    {/* Glow ring behind node */}
+                    <span
+                      className={`absolute -inset-6 rounded-full blur-md transition-all opacity-45 ${
+                        isCurrent
+                          ? 'bg-amber-500 scale-125 animate-pulse'
+                          : isSelected
+                          ? 'bg-cyan-500 scale-110'
+                          : isCompleted
+                          ? 'bg-emerald-500/40 hover:scale-105'
+                          : 'group-hover:bg-slate-700/20'
+                      }`}
                     />
-                  </div>
-                ))}
-              </div>
+
+                    {/* Planet circle */}
+                    <div
+                      className={`rounded-full flex flex-col items-center justify-center border-2 shadow-lg transition-all transform duration-300 relative z-20 ${
+                        isCurrent
+                          ? 'w-16 h-16 bg-[#162238] border-amber-400 text-amber-300 scale-110 drop-shadow-[0_0_12px_rgba(245,158,11,0.5)]'
+                          : isSelected
+                          ? 'w-11 h-11 bg-[#1e293b] text-cyan-400 border-cyan-400'
+                          : isCompleted
+                          ? 'w-10 h-10 bg-[#064e3b] text-emerald-400 border-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.3)]'
+                          : 'w-10 h-10 bg-[#182030] text-slate-600 border-slate-800'
+                      }`}
+                    >
+                      {isLocked ? (
+                        <LockIcon />
+                      ) : (
+                        <span className={`font-mono font-black ${isCurrent ? 'text-xl' : 'text-sm'}`}>
+                          {planet.order}
+                        </span>
+                      )}
+
+                      {isCompleted && (
+                        <div className="absolute -bottom-1 -right-1 bg-emerald-500 rounded-full text-white p-0.5 shadow-sm border border-[#064e3b]">
+                          <CheckIcon />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Title badge below */}
+                    <div className="absolute pt-2 left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none">
+                      <div
+                        className={`px-2 py-0.5 rounded text-[10px] md:text-[11px] font-bold shadow transition-colors ${
+                          isCurrent
+                            ? 'bg-amber-950/90 text-amber-300 border border-amber-500/40'
+                            : isSelected
+                            ? 'bg-slate-900 text-cyan-400 border border-cyan-500/30'
+                            : 'bg-[#151f32]/90 text-slate-400 border border-slate-800'
+                        }`}
+                      >
+                        {planet.title.length > 10 ? planet.title.slice(0, 10) + '…' : planet.title}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          </div>
-        </div>
 
-        {/* 选中章节的小节列表 */}
-        <AnimatePresence mode="wait">
-          {selectedChapter && (
-            <motion.div
-              key={selectedChapter.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.25 }}
-              className="bg-[var(--bg-card)] rounded-[var(--radius-card)] shadow-[var(--shadow-card)] p-8"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <div className="text-xs text-[var(--text-tertiary)] mb-1">
-                    第 {selectedChapter.order} 章
+            {/* Bottom sub-nav bar */}
+            <AnimatePresence mode="wait">
+              {selectedChapter && (
+                <motion.div
+                  key={selectedChapter.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 12 }}
+                  transition={{ duration: 0.25 }}
+                  className="relative z-20 mt-auto bg-slate-950/80 backdrop-blur-md rounded-2xl p-4 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                >
+                  <div className="flex-shrink-0">
+                    <span className="text-[10px] font-bold tracking-tight bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
+                      第{selectedChapter.order}章
+                    </span>
+                    <h3 className="text-sm font-bold text-slate-200 mt-1">{chapterDisplayName(selectedChapter.title)}</h3>
                   </div>
-                  <h2
-                    className="font-bold text-[var(--text-primary)]"
-                    style={{ fontSize: 'var(--fs-h2)' }}
-                  >
-                    {selectedChapter.title}
-                  </h2>
-                </div>
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="text-[var(--text-tertiary)]">
-                    {selectedChapter.sections.length} 个小节
-                  </span>
-                  <Progress
-                    value={selectedChapter.progress}
-                    variant="ring"
-                    size={56}
-                    showPercent
-                  />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {selectedChapter.sections.map((section) => (
-                  <SectionCard
-                    key={section.id}
-                    section={section}
-                    onClick={() => handleSectionClick(section)}
-                  />
-                ))}
-              </div>
-
-              {selectedChapter.status === 'locked' && (
-                <div className="mt-6 p-4 bg-[var(--bg-subtle)] rounded-[var(--radius-button)] text-sm text-[var(--text-secondary)] flex items-center gap-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                  <span>本章节尚未解锁，请先完成前置章节的学习</span>
-                </div>
+                  <div className="flex flex-wrap md:flex-nowrap gap-2 items-stretch flex-1 justify-end">
+                    {selectedChapter.sections.map((section) => {
+                      const isTaskCompleted = section.status === 'completed';
+                      const isTaskLocked = section.status === 'locked';
+                      const { prefix, name } = splitSectionTitle(section.title, section.order);
+                      return (
+                        <button
+                          key={section.id}
+                          onClick={() => handleSectionClick(section)}
+                          disabled={isTaskLocked}
+                          title={section.title}
+                          className={`text-xs px-3 py-2 rounded-xl border flex items-center gap-1.5 transition-all select-none font-medium ${
+                            isTaskCompleted
+                              ? 'bg-emerald-950/40 border-emerald-900/60 text-emerald-400 hover:bg-emerald-950/60'
+                              : isTaskLocked
+                              ? 'bg-slate-900/35 border-slate-900 text-slate-600 cursor-not-allowed opacity-35'
+                              : 'bg-[#ff7b39] hover:bg-[#e46425] text-white border-transparent shadow shadow-orange-500/30 font-bold animate-pulse'
+                          }`}
+                        >
+                          <span className="flex-shrink-0">
+                            {isTaskCompleted ? (
+                              <CheckIcon />
+                            ) : isTaskLocked ? (
+                              <LockIcon />
+                            ) : (
+                              <span className="block w-1.5 h-1.5 rounded-full bg-white" />
+                            )}
+                          </span>
+                          <span className="flex flex-col items-start leading-tight text-left max-w-[7em]">
+                            {prefix && (
+                              <span className="text-[9px] font-normal opacity-70 tracking-tight">{prefix}</span>
+                            )}
+                            <span className="[word-break:keep-all] [overflow-wrap:anywhere]">
+                              {insertBreaks(name)}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
               )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </AnimatePresence>
+          </div>
+        </main>
       </div>
     </div>
   );

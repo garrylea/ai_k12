@@ -14,9 +14,9 @@ interface PlanetNodeProps {
 }
 
 const sizeMap: Record<PlanetSize, number> = {
-  large: 96,
-  medium: 64,
-  small: 44,
+  large: 80,
+  medium: 56,
+  small: 40,
 };
 
 const labelSizeMap: Record<PlanetSize, string> = {

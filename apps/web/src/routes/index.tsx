@@ -1,6 +1,7 @@
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import LoginPage from '@/pages/auth/LoginPage';
 import SubjectSelectPage from '@/pages/auth/SubjectSelectPage';
+import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
@@ -21,10 +22,20 @@ const router = createBrowserRouter([
     path: '/login',
     element: <LoginPage />,
   },
+  // 入口选择页（独立全屏，登录后落地，主轨/辅轨分流）
+  {
+    path: '/student/entry',
+    element: <EntrySelectPage />,
+  },
   // 学科选择（独立全屏页，不在布局内）
   {
     path: '/student/subjects',
     element: <SubjectSelectPage />,
+  },
+  // 星图导航（独立全屏页，不在布局内）
+  {
+    path: '/student/star-map',
+    element: <StarMapPage />,
   },
   {
     path: '/parent',
@@ -48,7 +59,6 @@ const router = createBrowserRouter([
     element: <StudentLayout />,
     children: [
       { path: '', element: <Navigate to="/student/star-map" replace /> },
-      { path: 'star-map', element: <StarMapPage /> },
       { path: 'course-detail', element: <Placeholder title="课程详情 P2.2" /> },
       { path: 'ai-discuss', element: <Placeholder title="AI 讨论 P2.3" /> },
       { path: 'homework', element: <Placeholder title="课后作业 P2.4" /> },

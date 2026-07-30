@@ -1,23 +1,38 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/base';
+import { login } from '@/services/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!username || !password) {
       setError('请输入用户名和密码');
       return;
     }
-    const isPhone = /^1\d{10}$/.test(username);
-    if (isPhone) {
-      navigate('/parent/dashboard');
-    } else {
-      navigate('/student/subjects');
+    setLoading(true);
+    setError('');
+    try {
+      const result = await login(username, password);
+      localStorage.setItem('token', result.token);
+      localStorage.setItem('username', result.user.username);
+      localStorage.setItem('userId', String(result.user.id));
+      localStorage.setItem('userRole', result.user.role);
+
+      if (result.user.role === 'parent') {
+        navigate('/parent/dashboard');
+      } else {
+        navigate('/student/entry');
+      }
+    } catch (err: any) {
+      setError(err.message || '登录失败，请重试');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -25,22 +40,21 @@ export default function LoginPage() {
     <div
       data-theme="student-day"
       className="min-h-screen flex items-center justify-center p-4"
-      style={{ backgroundColor: '#FAFAFA' }}
+      style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-md">
         {/* 登录卡片：上橘红标题区 + 下白色表单区 */}
         <div
           className="rounded-[var(--radius-card)] overflow-hidden"
           style={{
-            backgroundColor: '#ffffff',
-            boxShadow:
-              '0 28px 70px rgba(0, 0, 0, 0.08), 0 10px 30px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.02)',
+            backgroundColor: 'var(--bg-card)',
+            boxShadow: 'var(--shadow-card-strong)',
           }}
         >
           {/* 上半部：品牌区 */}
           <div
             className="px-10 pt-8 pb-6 text-center space-y-4"
-            style={{ backgroundColor: '#ff6b35' }}
+            style={{ backgroundColor: 'var(--brand-500)' }}
           >
             {/* 顶部图标 */}
             <div className="flex justify-center">
@@ -97,7 +111,7 @@ export default function LoginPage() {
                     setUsername(e.target.value);
                     setError('');
                   }}
-                  className="w-full px-4 py-3 rounded-[var(--radius-input)] bg-[#FAFAFA] text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] outline-none focus:ring-2 focus:ring-[#ff6b35]/30"
+                  className="w-full px-4 py-3 rounded-[var(--radius-input)] bg-[var(--bg-form)] text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30"
                 />
               </div>
 
@@ -117,7 +131,7 @@ export default function LoginPage() {
                     setPassword(e.target.value);
                     setError('');
                   }}
-                  className="w-full px-4 py-3 rounded-[var(--radius-input)] bg-[#FAFAFA] text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] outline-none focus:ring-2 focus:ring-[#ff6b35]/30"
+                  className="w-full px-4 py-3 rounded-[var(--radius-input)] bg-[var(--bg-form)] text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30"
                 />
                 {error && (
                   <div className="mt-2 text-sm text-[var(--error)] bg-[var(--error)]/10 px-3 py-1.5 rounded-[var(--radius-input)]">
@@ -131,18 +145,19 @@ export default function LoginPage() {
             <Button
               variant="primary"
               size="lg"
-              className="w-full !bg-[#ff6b35] !text-white hover:!bg-[#ff5722] active:!bg-[#e64a19]"
+              className="w-full !bg-[var(--brand-500)] !text-white hover:!bg-[var(--brand-400)] active:!bg-[var(--brand-600)]"
               onClick={handleLogin}
+              disabled={loading}
             >
-              登录
+              {loading ? '登录中…' : '登录'}
             </Button>
 
             {/* 底部链接 */}
             <div className="flex items-center justify-between text-sm text-[var(--text-secondary)]">
-              <button className="hover:text-[#ff6b35] hover:underline">
+              <button className="hover:text-[var(--brand-500)] hover:underline">
                 注册
               </button>
-              <button className="hover:text-[#ff6b35] hover:underline">
+              <button className="hover:text-[var(--brand-500)] hover:underline">
                 忘记密码？
               </button>
             </div>
