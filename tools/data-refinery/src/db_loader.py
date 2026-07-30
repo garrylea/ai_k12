@@ -378,6 +378,7 @@ class DbLoader:
             # 建 章综述 lesson (sort_order=0)
             self._find_or_create_lesson(unit_id, chapter_label, 0)
             lessons_count += 1
+            last_lesson_name = chapter_label
 
             # 建 节 lessons
             lesson_sort = 0
@@ -387,6 +388,7 @@ class DbLoader:
                 if sec_label:
                     self._find_or_create_lesson(unit_id, sec_label, lesson_sort)
                     lessons_count += 1
+                    last_lesson_name = sec_label
 
                 for sub in sec.get("subsections", []):
                     lesson_sort += 1
@@ -394,6 +396,7 @@ class DbLoader:
                     if sub_label:
                         self._find_or_create_lesson(unit_id, sub_label, lesson_sort)
                         lessons_count += 1
+                        last_lesson_name = sub_label
 
             # 建 supplement lessons (排在所有节之后)
             for supp in ch.get("supplements", []):
@@ -402,6 +405,14 @@ class DbLoader:
                 if supp_label:
                     self._find_or_create_lesson(unit_id, supp_label, lesson_sort)
                     lessons_count += 1
+                    last_lesson_name = supp_label
+
+            # 标记单元最后一课：先清再设，保证重跑幂等
+            self._exec("UPDATE lessons SET is_unit_last=0 WHERE unit_id=%s", (unit_id,))
+            self._exec(
+                "UPDATE lessons SET is_unit_last=1 WHERE unit_id=%s AND name=%s",
+                (unit_id, last_lesson_name),
+            )
 
         self._conn.commit()
         return {"toc_path": toc_path, "chapters": chapters_count, "lessons": lessons_count}
