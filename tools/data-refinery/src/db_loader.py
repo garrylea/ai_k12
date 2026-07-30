@@ -330,40 +330,35 @@ class DbLoader:
         textbook_version → semester → units → lessons。
         幂等：已存在的 unit/lesson 不重复创建。
 
+        路径格式：output/toc/{subject}/{grade_band}/{publisher}/{grade}/{term}/{book}.json
+
         Returns:
             dict: {toc_path: str, chapters: int, lessons: int}
         """
         with open(toc_path, encoding="utf-8") as f:
             toc = json.load(f)
 
-        # 从路径推导：toc/{subject}/{publisher}/{grade}/{book}.json
         toc_file = Path(toc_path)
-        stem = toc_file.stem  # e.g. "数学_人教版_九年级_书_toc" or just book name
-
         parent_parts = toc_file.parent.parts
-        # Expect: .../toc/{subject}/{publisher}/{grade}/{book}.json or similar
-        # Try to extract from path. If parent has enough parts:
-        if len(parent_parts) >= 3:
-            subject_name = parent_parts[-3]
-            publisher = parent_parts[-2]
-            grade = parent_parts[-1]
+        # Path: .../toc/{subject}/{grade_band}/{publisher}/{grade}/{term}/
+        # Take the last 5 segments (matches book_dir structure from toc_parse_cli)
+        if len(parent_parts) >= 5:
+            subject_name = parent_parts[-5]
+            grade_band_raw = parent_parts[-4]   # "初中"
+            publisher = parent_parts[-3]         # "人教版"
+            grade = parent_parts[-2]             # "九年级"
+            term = parent_parts[-1]              # "上册"
         else:
-            # Fallback: parse from stem
-            parts = stem.split("_")
-            subject_name = parts[0] if len(parts) > 0 else ""
-            publisher = parts[1] if len(parts) > 1 else ""
-            grade = parts[2] if len(parts) > 2 else ""
+            raise ValueError(
+                f"无法从 TOC 路径解析教材结构，期望 5 级父目录 "
+                f"{{subject}}/{{grade_band}}/{{publisher}}/{{grade}}/{{term}}/，"
+                f"实际: {toc_file.parent}"
+            )
 
         subject_code = _subject_code_by_name_fallback(subject_name)
-        gb = _grade_band_from_path(toc_path)
-
-        # Extract term from grade string (e.g., "九年级" → grade_9, term from book name)
-        grade_code = grade
-        term_code = "first"  # default
-        if "下册" in toc_path or "下册" in stem:
-            term_code = "second"
-        if "上册" in toc_path or "上册" in stem:
-            term_code = "first"
+        gb = GRADE_BAND_MAP.get(grade_band_raw, "junior")
+        grade_code = grade_to_code(grade)
+        term_code = TERM_MAP.get(term, "first")
 
         tv_id = self._find_or_create_textbook_version(subject_code, publisher, gb)
         sem_name = grade
