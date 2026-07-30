@@ -361,7 +361,7 @@ class DbLoader:
         term_code = TERM_MAP.get(term, "first")
 
         tv_id = self._find_or_create_textbook_version(subject_code, publisher, gb)
-        sem_name = grade
+        sem_name = f"{grade}{term}"
         sem_id = self._find_or_create_semester(tv_id, grade_code, term_code, sem_name)
 
         chapters_count = 0
