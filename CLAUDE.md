@@ -51,8 +51,9 @@ npx tsx src/ai-core/__tests__/safety-classification.ts   # deterministic safety 
 
 ### Theme System
 
-Three themes via CSS variables + `data-theme` attribute on containers:
-- `student-day` — warm orange-red palette (default)
+Three themes via CSS variables + `data-theme` attribute on containers. The canonical tokens live in `apps/web/style.md` §2 and are implemented in `apps/web/src/styles/global.css`.
+
+- `student-day` — warm orange-red palette (`Brand-500 #ff6b35`), `Bg-Page #F5F0E8` (default)
 - `student-night` — dark tea-gold, auto-activates 18:00–06:00 via Zustand themeStore
 - `parent` — business blue-white, forced day mode
 
@@ -64,8 +65,8 @@ Night mode only applies inside `.student-theme-container` (learning immersion pa
 
 ### Visual Distinction: Dual-track
 
-- Mainline: orange-red (#E55A2B)
-- Auxiliary: purple (#8B5A8E)
+- Mainline: orange-red (`Brand-500 #ff6b35`, see `apps/web/style.md` §2.1)
+- Auxiliary: purple (`Aux #8B5A8E`, see `apps/web/style.md` §2.1)
 
 These must be visually distinct in navigation, tags, and error books.
 
@@ -92,7 +93,11 @@ Zustand for theme/motion preferences. No API layer yet.
 Before any UI work, read the authoritative docs:
 - `docs/K12智学系统-产品需求文档.md` — PRD (single source of truth for all features)
 - `docs/UX-UI设计文档.md` — Page specs and responsive rules
-- `apps/web/style.md` — Color palette, typography, spacing (the only style reference)
+- `apps/web/style.md` — Color palette, typography, spacing, shadows, and component specs (the only style reference). Key sections:
+  - §1 设计原则、§2 配色（统一一套，不分学段）
+  - §2.5 登录页规范、§2.6 入口选择页规范
+  - §8 学科选择页设计
+  - §11 实施清单
 
 Hard rules:
 1. No emoji in UI/components/copy. Icons must be linear SVG.
@@ -162,3 +167,19 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 **实现记录**：计划草稿偏差与 code-review 修正详见 `docs/superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md` 末尾「实现修正记录」「代码审查后修正」两节。
 
 **2026-07-24 修正**：① modelId 拼写 bug——`qwen-3.7-max` 改为 `qwen3.7-max`（dashscope 实际 ID，原配置多一短横线导致 404 model_not_found；全仓库含 model key/modelId/routes 引用/文档/测试统一替换）。② per-scene timeout 接线——`retry.yaml` 的 per-scene timeout 此前未接线（capability 调 chat 未传 timeout，走 kimi-client 硬编码 30000），现已在 tutoring/grading/explanation/variation/analytics + fallback-handler 的 chat 调用传 `timeoutConfig.timeout[scene] ?? timeoutConfig.timeout.default`，并调大取值（default 30000→45000、tutoring 15000→45000、variation 45000→60000、safety 5000→10000、新增 explanation:60000），解决 qwen3.7-max 生成长文本（如 fallback 完整解析）超时。③ SafetyGuard 误拦--`LEARNING_PATTERNS` 未覆盖含方程表达式但无学习关键词的消息（如「3x+5=14,x等于多少」），误判 off_topic 而 block；加代数方程识别正则（半角等号/变量项），不误伤「1+1等于几」（中文「等于」）。④ 错误模型 + 流式 + reasoning 重构--采用 `../llm-client.js` 错误体系（11 个错误子类 + `classifyError` + `callWithRetry` full-jitter 退避 + Retry-After + onRetry，替换 `ModelErrorCode`/`ModelClientError`/`RetryConfig`/`mapHttpError`）；`ModelClient.chat` 默认流式（聚合 `streamChat` 的 content + reasoningContent，gemini 降级非流式）；`kimi-client.streamChat` 读 `delta.reasoning_content`（thinking）；reasoning 透传到所有 capability 响应的 `reasoning` 字段。详见 `docs/superpowers/plans/2026-07-24-ai-core-error-streaming-refactor.md`。⑤ provider fetch 网络错误归一--`kimi`/`gemini`-client 的 `fetch` 加 try/catch，DNS/连接失败/abort 经 `classifyError(status=0)` 归一为 `TimeoutError`（此前 raw `TypeError` 逃逸未归一为 LLMClientError；用错误 baseurl 实测验证：重试 maxRetries 次后抛 `TimeoutError`，retryable=true，见 `__tests__/error-baseurl-test.ts`）。
+
+---
+
+## 双轨需求与前端风格（2026-07-27 锁定，2026-07-28 细化）
+
+双轨需求已锁定并同步文档：主轨学习先行实现（登录->入口选择页->学科选择->星图），辅轨答疑暂不实现仅保留入口占位。
+
+前端风格已对齐参考实现（`http://localhost:3000`）：
+- 背景色统一为暖米白 `Bg-Page #F5F0E8`；
+- 登录/入口/选科页采用独立白卡片、24px 大圆角、柔和分层阴影；
+- 图标统一为线性 SVG 书形，可选态使用 `from-[#FF6B35] to-[#FF8C61]` 渐变徽章，锁定态使用 `opacity-55` + 灰渐变徽章；
+- 标签使用 30px / font-black / tracking-tight；
+- 选科页显示「你好，{用户名}！」问候语；
+- PRD/UX/DB/data-refinery 文档已同步，`global.css` 与 `style.md` 一致，前端页面遵循简约风格（图标+词，去冗余文字，问候语除外）。
+
+相关规范已写入 `apps/web/style.md` §2.5、§2.6、§8。

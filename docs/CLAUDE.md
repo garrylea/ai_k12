@@ -8,20 +8,27 @@
 |---|---|---|
 | [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md) | **唯一权威需求基准**（PRD） | 所有需求、功能、流程、规则的设计输入 |
 | [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md) | 技术架构、子系统划分、数据模型、部署视图 | 后端开发、数据库设计、服务拆分决策 |
+| [K12智学系统-后端Web服务设计文档.md](./K12智学系统-后端Web服务设计文档.md) | NestJS HTTP 层架构：模块划分、Repository 模式、JWT 认证、统一响应、ai-core 集成 | `apps/server/` HTTP 接入层实现（Controller/Service/Repository/Middleware） |
 | [API接口与数据流设计文档.md](./API接口与数据流设计文档.md) | REST / WebSocket API 契约、端点清单、数据流时序 | 前后端接口联调、`services/` 层实现 |
 | [UX-UI设计文档.md](./UX-UI设计文档.md) | 页面规范、响应式规则、组件层级、交互细节 | 前端页面开发、组件库建设、视觉还原 |
 | [K12智学系统-AI辅导流程详细设计.md](./K12智学系统-AI辅导流程详细设计.md) | 苏格拉底辅导状态机、AI 话术策略、兜底规则 | AI 对话引擎、辅导交互流程实现 |
 | [K12智学系统-AI-Agent中枢设计文档.md](./K12智学系统-AI-Agent中枢设计文档.md) | AI-Agent 中枢 infra + capabilities 详细设计、Prompt 模板体系、模型路由策略 | AI 推理能力开发、Prompt 维护、模型配置 |
 | [AI-Agent 中枢 MVP 实现计划](./superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md) | AI-Agent 中枢 MVP 任务级实现计划（4 里程碑 / 22 任务：infra 6 组件、5 capabilities、数学 Prompt 模板、ConversationService 骨架、可观测性、回归测试） | `apps/server/ai-core` 模块编码实现（配合 superpowers:executing-plans / subagent-driven-development 执行） |
 | [智能组卷模块设计](./superpowers/specs/2026-07-23-exam-composition-design.md) | 预设驱动的组卷算法、知识点覆盖优化、去重策略、AI 补题预留 | 单元检测/期中/期末组卷功能开发 |
+| [K12智学系统-Card内容生成与渲染设计文档.md](./K12智学系统-Card内容生成与渲染设计文档.md) | 教材卡片拆分算法（Python）、图片尺寸折算与存储、前端 Markdown 渲染方案 | 教材卡片内容生成管线、前端卡片渲染 |
+| [data-refinery-管线总结与后续.md](./data-refinery-管线总结与后续.md) | 数据管线现状总结（convert/extract/publish/db_loader）、关键约定、已知问题、后续计划 | data-refinery 管线开发与维护 |
+| [data-refinery-TOC目录优先管线设计.md](./data-refinery-TOC目录优先管线设计.md) | TOC 目录优先管线设计：以教材目录页为主数据源建 DB 章节骨架，card 增量填充 | toc_parse 步骤开发、db_loader 骨架加载 |
+| [data-refinery-使用手册.md](./data-refinery-使用手册.md) | 数据管线全流程操作手册：爬虫、convert、toc_parse、extract、publish、db_loader 各命令参数详解与使用场景 | 日常数据生产、管线操作、新人上手 |
 
 **阅读优先级**：
 - 做需求/功能 → 先读 PRD
-- 做后端/数据库 → 先读 PRD + 架构文档
+- 做后端/数据库 → 先读 PRD + 架构文档 + 后端 Web 服务设计文档
 - 做接口/联调 → 先读 PRD + API 文档
 - 做前端页面/组件 → 先读 PRD + UX-UI 文档
 - 做 AI 能力开发 → 先读 PRD + AI-Agent 中枢设计文档；进入编码时按 [AI-Agent 中枢 MVP 实现计划](./superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md) 逐任务执行
+- 做卡片生成/渲染 → 先读 PRD + Card内容生成与渲染设计文档
 - 做组卷/考试功能 → 先读 PRD + 架构 §4.2.8 + 智能组卷模块设计
+- 做数据生产/管线操作 → 先读 [data-refinery-使用手册](./data-refinery-使用手册.md) + [管线总结](./data-refinery-管线总结与后续.md)
 
 ---
 

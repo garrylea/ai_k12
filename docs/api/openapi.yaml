@@ -378,6 +378,40 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/SubjectProgress'
+  /progress/students/{studentId}/star-map:
+    get:
+      tags: [Progress]
+      summary: 知识星图
+      description: >-
+        单学科知识星图：把学生进度 overlay 到教材结构，返回可直接渲染的章节/小节树。
+        服务端以 JWT 中的 studentId 为信任源（URL 段仅作资源定位，须与登录身份一致，
+        否则返回 code 1003）；教材版本按学科 + 学生学段（grade_band）解析；
+        学期按 progress.current_semester_id 选择，无进度记录时回退到该年级 sort_order
+        最小的学期（上册）。
+      operationId: getStarMap
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: subjectId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 星图数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StarMapData'
 
   # Content
   /content/subjects:
@@ -2514,6 +2548,70 @@ components:
         data:
           type: object
       required: [code, message]
+
+    StarMapData:
+      type: object
+      description: 星图渲染数据（章节=单元，小节=课）
+      properties:
+        subjectName:
+          type: string
+        gradeName:
+          type: string
+          description: 当前学期名称，如「九年级下册」
+        publisher:
+          type: string
+        totalUnits:
+          type: integer
+        completedUnits:
+          type: integer
+        chapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/StarMapChapter'
+      required: [subjectName, gradeName, totalUnits, completedUnits, chapters]
+
+    StarMapChapter:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        order:
+          type: integer
+        importance:
+          type: string
+          enum: [large, medium, small]
+        status:
+          type: string
+          enum: [completed, current, locked]
+        progress:
+          type: integer
+          description: 0-100
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/StarMapSection'
+      required: [id, title, order, importance, status, progress, sections]
+
+    StarMapSection:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        order:
+          type: integer
+        knowledgePointCount:
+          type: integer
+        status:
+          type: string
+          enum: [completed, current, locked]
+        progress:
+          type: integer
+          description: 0-100
+      required: [id, title, order, knowledgePointCount, status, progress]
 
     TokenResponse:
       allOf:

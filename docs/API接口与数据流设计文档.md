@@ -154,7 +154,10 @@
 |---|---|---|---|
 | GET | `/api/progress/students/{studentId}/overview` | 各学科进度总览：每科的当前单元/课、下一解锁节点、清零状态 | MVP |
 | GET | `/api/progress/students/{studentId}/subjects/{subjectId}` | 单学科完整进度与解锁链（家长关注具体科目时调用） | MVP |
+| GET | `/api/progress/students/{studentId}/star-map?subjectId=` | 单学科知识星图：把学生进度 overlay 到教材结构，返回可直接渲染的章节/小节树（含解锁/锁定/进行中状态）。服务端从 JWT 取 studentId（URL 段仅作资源定位，须与登录身份一致，否则 403）；教材版本按学科 + 学生学段（grade_band）解析；学期按 `progress.current_semester_id` 选择，无进度记录时回退到该年级 `sort_order` 最小学期（上册）。P2.1 星图页调用。 | MVP |
 | POST | `/api/progress/students/{studentId}/events` | 记录学习事件（由 Assessment/Reward 内部调用或开放） | P1 |
+
+> **学生当前学期的确定规则**：`progress` 表（unique `(student_id, subject_id)`）的 `current_semester_id` 是唯一事实源，由家长端在配置/开通学生时写入（如九年级生选九上或九下）。星图与后续学习流程一律读此字段决定展示哪一册；系统不按日历自动推断学期。学生尚无 `progress` 记录时，star-map 回退到该学段教材版本中 `sort_order` 最小的学期（即上册）作为默认展示。
 
 ### 4.4 Content — `/api/content`
 
@@ -682,7 +685,7 @@ POST /api/ai/report（AI-Agent AnalyticsCapability 生成报告文本）
 | P1.1 统一登录 | `/login` | `POST /api/auth/login`, `GET /api/auth/me` |
 | 家长注册 | `/register` | `POST /api/auth/register` |
 | P1.5 学科选择 | `/student/subjects` | `GET /api/content/subjects` |
-| P2.1 星图导航 | `/student/star-map` | `GET /api/progress/.../overview`, `GET /api/content/versions/.../units` |
+| P2.1 星图导航 | `/student/star-map` | `GET /api/progress/students/{id}/star-map?subjectId=`（星图主数据）；`GET /api/progress/.../overview`（跨学科总览，可选） |
 | P2.2 课程详情 | `/student/course-detail` | `GET /api/content/cards/{cardId}` |
 | P2.3 AI 讨论 | `/student/ai-discuss` | `POST /api/conversations`, WS `/ws/ai/{id}` |
 | P2.4 课后作业 | `/student/homework` | `GET /api/assessment/homework/{id}`, `POST .../answers`, `POST .../hint` |
