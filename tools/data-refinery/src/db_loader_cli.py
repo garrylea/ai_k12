@@ -44,27 +44,31 @@ def main(argv=None):
     args = parse_args(argv)
     cfg = RefineryConfig.from_env()
 
-    loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
-    try:
-        # === TOC mode: build skeleton only ===
-        if args.load_toc:
-            if not args.toc_path:
-                print("[ERROR] --load-toc requires --toc-path", flush=True)
-                return
+    # === TOC mode: build skeleton only (needs DB) ===
+    if args.load_toc:
+        if not args.toc_path:
+            print("[ERROR] --load-toc requires --toc-path", flush=True)
+            return
+        loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
+        try:
             result = loader.load_toc_structure(args.toc_path)
             print(f"[ok] TOC loaded: {result['chapters']} chapters, {result['lessons']} lessons", flush=True)
-            return
+        finally:
+            loader.close()
+        return
 
-        # === Normal mode: card/question loading ===
-        published_dir = Path(args.input_dir) if args.input_dir else cfg.output_dir / "published"
-        files = [p for p in sorted(published_dir.rglob("*.jsonl")) if _match_source(p.name, args.source)]
+    # === Normal mode: card/question loading ===
+    published_dir = Path(args.input_dir) if args.input_dir else cfg.output_dir / "published"
+    files = [p for p in sorted(published_dir.rglob("*.jsonl")) if _match_source(p.name, args.source)]
 
-        if args.dry_run:
-            for p in files:
-                print(f"{p.relative_to(published_dir)} ({_kind(p.name)})", flush=True)
-            print(f"共 {len(files)} 个文件", flush=True)
-            return
+    if args.dry_run:
+        for p in files:
+            print(f"{p.relative_to(published_dir)} ({_kind(p.name)})", flush=True)
+        print(f"共 {len(files)} 个文件", flush=True)
+        return
 
+    loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
+    try:
         # When --load-cards is NOT specified, do full-reload (backward compatible default)
         if not args.load_cards:
             if args.source in ("all", "smartedu"):
