@@ -19,6 +19,9 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="把 published JSONL 加载进 MySQL")
     parser.add_argument("--input-dir", help="published 输入目录（默认 output/published）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
+    parser.add_argument("--load-toc", action="store_true", help="只 load_toc_structure()，不入库 card（需配合 --toc-path）")
+    parser.add_argument("--load-cards", action="store_true", help="只 card/questions 入库，不建骨架")
+    parser.add_argument("--toc-path", help="TOC JSON 路径（--load-toc 时必传；--load-cards 时可选）")
     parser.add_argument("--dry-run", action="store_true", help="只打印，不入库")
     return parser.parse_args(argv)
 
@@ -40,25 +43,36 @@ def _match_source(name: str, source: str) -> bool:
 def main(argv=None):
     args = parse_args(argv)
     cfg = RefineryConfig.from_env()
-    published_dir = Path(args.input_dir) if args.input_dir else cfg.output_dir / "published"
-
-    files = [p for p in sorted(published_dir.rglob("*.jsonl")) if _match_source(p.name, args.source)]
-
-    if args.dry_run:
-        for p in files:
-            print(f"{p.relative_to(published_dir)} ({_kind(p.name)})", flush=True)
-        print(f"共 {len(files)} 个文件", flush=True)
-        return
 
     loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
     try:
-        # full-reload：按 source 清对应表
-        if args.source in ("all", "smartedu"):
-            loader.reset_cards()
-            print("[reset] DELETE cards", flush=True)
-        if args.source in ("all", "zgkao"):
-            loader.reset_questions()
-            print("[reset] DELETE questions", flush=True)
+        # === TOC mode: build skeleton only ===
+        if args.load_toc:
+            if not args.toc_path:
+                print("[ERROR] --load-toc requires --toc-path", flush=True)
+                return
+            result = loader.load_toc_structure(args.toc_path)
+            print(f"[ok] TOC loaded: {result['chapters']} chapters, {result['lessons']} lessons", flush=True)
+            return
+
+        # === Normal mode: card/question loading ===
+        published_dir = Path(args.input_dir) if args.input_dir else cfg.output_dir / "published"
+        files = [p for p in sorted(published_dir.rglob("*.jsonl")) if _match_source(p.name, args.source)]
+
+        if args.dry_run:
+            for p in files:
+                print(f"{p.relative_to(published_dir)} ({_kind(p.name)})", flush=True)
+            print(f"共 {len(files)} 个文件", flush=True)
+            return
+
+        # When --load-cards is NOT specified, do full-reload (backward compatible default)
+        if not args.load_cards:
+            if args.source in ("all", "smartedu"):
+                loader.reset_cards()
+                print("[reset] DELETE cards", flush=True)
+            if args.source in ("all", "zgkao"):
+                loader.reset_questions()
+                print("[reset] DELETE questions", flush=True)
 
         card_files = [p for p in files if _kind(p.name) == "cards"]
         q_files = [p for p in files if _kind(p.name) == "questions"]
@@ -78,7 +92,7 @@ def main(argv=None):
                     if line.strip():
                         cards.append(json.loads(line))
             book_rel = f"{book_key}/{pages[0].name}"
-            n = loader.load_book_cards(book_rel, cards)
+            n = loader.load_book_cards(book_rel, cards, toc_path=args.toc_path)
             total_cards += n
             print(f"[ok] {book_key} -> {n} cards", flush=True)
 
