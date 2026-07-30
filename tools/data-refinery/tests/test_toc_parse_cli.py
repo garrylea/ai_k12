@@ -6,6 +6,7 @@ from toc_parse_cli import (
     _is_textbook_dir,
     _expand_grade_term,
     _build_textbook_list,
+    _is_toc_like_page,
 )
 
 
@@ -75,12 +76,78 @@ class TestFindTocPages:
         (book_dir / "page_002.md").write_text("# 第二十六章", encoding="utf-8")
         assert _find_toc_pages(book_dir, max_pages=10) == []
 
-    def test_multiple_toc_pages(self, tmp_path):
+    def test_multi_page_toc(self, tmp_path):
+        """跨页目录：page_005 有'目录'锚点，page_006 是续页，page_007 是正文。"""
         book_dir = tmp_path / "book"
         book_dir.mkdir()
-        (book_dir / "page_005.md").write_text("## 目录\n26.1 反比例函数 2", encoding="utf-8")
-        (book_dir / "page_006.md").write_text("## 目录\n27.1 图形的相似 24", encoding="utf-8")
-        assert len(_find_toc_pages(book_dir)) == 2
+        (book_dir / "page_004.md").write_text("# 前言", encoding="utf-8")
+        # page_005: TOC 锚点页
+        (book_dir / "page_005.md").write_text(
+            "26.1 反比例函数 2\n"
+            "## 目录\n"
+            "26.2 实际问题与反比例函数 12\n"
+            "小结 20\n",
+            encoding="utf-8",
+        )
+        # page_006: TOC 续页（无"目录"但内容是编号+页码）
+        (book_dir / "page_006.md").write_text(
+            "## 第二十八章 锐角三角函数\n"
+            "28.1 锐角三角函数 61\n"
+            "28.2 解直角三角形及其应用 72\n"
+            "小结 83\n",
+            encoding="utf-8",
+        )
+        # page_007: 正文（不是目录）
+        (book_dir / "page_007.md").write_text(
+            "# 第二十六章 反比例函数\n\n"
+            "在本章中，我们将学习反比例函数的概念和性质。"
+            "反比例函数是初中数学的重要内容之一。\n",
+            encoding="utf-8",
+        )
+        pages = _find_toc_pages(book_dir)
+        assert len(pages) == 2
+        assert "page_005" in pages[0].name
+        assert "page_006" in pages[1].name
+
+    def test_toc_continuation_stops_at_body(self, tmp_path):
+        """续页碰到正文（长段落）即停止。"""
+        book_dir = tmp_path / "book"
+        book_dir.mkdir()
+        (book_dir / "page_005.md").write_text("## 目录\n26.1 反比例函数 2\n", encoding="utf-8")
+        # page_006 是正文：含"## 思考"教学模块标题
+        (book_dir / "page_006.md").write_text(
+            "## 思考\n\n请同学们思考以下问题：反比例函数的图象有什么特点？\n", encoding="utf-8"
+        )
+        pages = _find_toc_pages(book_dir)
+        assert len(pages) == 1
+        assert "page_005" in pages[0].name
+
+
+class TestIsTocLikePage:
+    def test_toc_page_identified(self, tmp_path):
+        p = tmp_path / "toc.md"
+        p.write_text("26.1 反比例函数 2\n28.1 锐角三角函数 61\n小结 83\n", encoding="utf-8")
+        assert _is_toc_like_page(p) is True
+
+    def test_body_page_rejected(self, tmp_path):
+        p = tmp_path / "body.md"
+        p.write_text(
+            "# 第二十六章 反比例函数\n\n"
+            "反比例函数是形如 y=k/x (k≠0) 的函数。"
+            "本章将学习反比例函数的定义、图象和性质。\n",
+            encoding="utf-8",
+        )
+        assert _is_toc_like_page(p) is False
+
+    def test_practice_page_rejected(self, tmp_path):
+        p = tmp_path / "practice.md"
+        p.write_text("## 练习\n\n1. 画出下列函数的图象：\n(1) y=1/x\n(2) y=2/x\n", encoding="utf-8")
+        assert _is_toc_like_page(p) is False
+
+    def test_empty_page_rejected(self, tmp_path):
+        p = tmp_path / "empty.md"
+        p.write_text("", encoding="utf-8")
+        assert _is_toc_like_page(p) is False
 
 
 class TestBuildTextbookList:

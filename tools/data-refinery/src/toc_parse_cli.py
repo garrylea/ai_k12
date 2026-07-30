@@ -88,16 +88,72 @@ def _expand_grade_term(raw: str) -> tuple[str | None, str | None]:
 
 # ---- 目录页查找 ----
 
+import re
+
+# 目录行模式：编号标题 + 行末数字（教材页码）
+_TOC_LINE_RE = re.compile(
+    r'^\s*(第[一二三四五六七八九十百零]+章.*\d+\s*$'   # 第N章 X 页码
+    r'|\d+\.\d+.*\d+\s*$'                             # N.M X 页码
+    r'|.*(小结|复习题|数学活动|阅读与思考).*\d+\s*$)'    # 非编号条目+页码
+)
+# 正文页标志：长段落、教学模块标题
+_BODY_MARKER_RE = re.compile(
+    r'^[^#\d!].{60,}$'              # 60字符以上的非标题非图片行
+    r'|##\s*(思考|练习|例\d|习题|复习巩固|探究|问题)'
+)
+
+
+def _is_toc_like_page(page_path: Path) -> bool:
+    """判断一页是否像目录页：
+    - 多数行是短行，带编号标题+行末页码
+    - 没有长正文段落
+    - 没有教学模块标题（思考/练习/例/习题等）
+    """
+    text = page_path.read_text(encoding="utf-8")
+    lines = [l.strip() for l in text.splitlines()
+             if l.strip() and not l.startswith("!")]
+    if not lines:
+        return False
+    toc_lines = sum(1 for l in lines if _TOC_LINE_RE.search(l))
+    body_lines = sum(1 for l in lines if _BODY_MARKER_RE.search(l))
+    if body_lines > 0:
+        return False
+    # 至少 30% 的行匹配目录模式
+    return toc_lines >= len(lines) * 0.3
+
+
 def _find_toc_pages(book_dir: Path, max_pages: int = 10) -> list[Path]:
-    """在教材 MD 目录中找目录页。前 max_pages 页内 MD 内容包含 '目录' 的页。"""
+    """在教材 MD 目录中找所有目录页（含跨页续页）。
+
+    策略：
+    1. 前 max_pages 页中找包含"目录"标题的页（锚点）
+    2. 从最后一个锚点向后扫描，收集连续的目录续页
+    3. 续页判断：内容模式匹配（编号+页码），非正文
+    4. 前 10 页找不到锚点则扩展到 20 页
+    """
     mds = sorted(book_dir.glob("page_*.md"))
     if not mds:
         return []
+
     candidates = mds[:max_pages]
-    found = [p for p in candidates if "目录" in p.read_text(encoding="utf-8")]
-    if not found and max_pages == 10:
-        return _find_toc_pages(book_dir, max_pages=20)
-    return found
+    anchors = [i for i, p in enumerate(candidates) if "目录" in p.read_text(encoding="utf-8")]
+
+    if not anchors:
+        if max_pages == 10:
+            return _find_toc_pages(book_dir, max_pages=20)
+        return []
+
+    # 从最后一个锚点开始，向后收集续页
+    start = anchors[-1]
+    toc_pages = [candidates[start]]
+
+    for p in candidates[start + 1:]:
+        if _is_toc_like_page(p):
+            toc_pages.append(p)
+        else:
+            break  # 遇到非目录页即停止
+
+    return toc_pages
 
 
 # ---- CLI ----
