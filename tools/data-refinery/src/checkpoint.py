@@ -10,6 +10,7 @@ class RefineryCheckpoint:
         self._converted: set[str] = set()
         self._extracted: set[str] = set()
         self._published: set[str] = set()
+        self._toc_parsed: set[str] = set()
 
     def load(self) -> None:
         if not self._path.exists():
@@ -21,6 +22,7 @@ class RefineryCheckpoint:
         self._converted = set(data.get("converted", []))
         self._extracted = set(data.get("extracted", []))
         self._published = set(data.get("published", []))
+        self._toc_parsed = set(data.get("toc_parsed", []))
 
     def is_converted(self, rel_path: str) -> bool:
         return rel_path in self._converted
@@ -43,6 +45,29 @@ class RefineryCheckpoint:
         self._published.add(rel_path)
         self.save()
 
+    def unmark_converted(self, rel_path: str) -> None:
+        self._converted.discard(rel_path)
+        self.save()
+
+    def unmark_extracted(self, rel_path: str) -> None:
+        self._extracted.discard(rel_path)
+        self.save()
+
+    def unmark_published(self, rel_path: str) -> None:
+        self._published.discard(rel_path)
+        self.save()
+
+    def is_toc_parsed(self, rel_path: str) -> bool:
+        return rel_path in self._toc_parsed
+
+    def mark_toc_parsed(self, rel_path: str) -> None:
+        self._toc_parsed.add(rel_path)
+        self.save()
+
+    def unmark_toc_parsed(self, rel_path: str) -> None:
+        self._toc_parsed.discard(rel_path)
+        self.save()
+
     def save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(
@@ -51,6 +76,7 @@ class RefineryCheckpoint:
                     "converted": sorted(self._converted),
                     "extracted": sorted(self._extracted),
                     "published": sorted(self._published),
+                    "toc_parsed": sorted(self._toc_parsed),
                 },
                 ensure_ascii=False,
                 indent=2,
