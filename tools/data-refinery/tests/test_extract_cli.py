@@ -12,8 +12,14 @@ class TestLoadPrompt:
 
     def test_loads_textbook_cards_prompt(self):
         text = _load_prompt("textbook_cards")
-        assert "教材 Markdown" in text
-        assert "lesson_id" in text  # 卡片需标注所属“课”（章内小节）
+        assert "K12 教育内容结构化专家" in text
+        assert "lesson_id" in text  # 卡片需标注所属"课"（章内小节）
+
+    def test_loads_toc_parse_prompt(self):
+        text = _load_prompt("toc_parse")
+        assert "目录解析" in text
+        assert "chapter" in text
+        assert "printed_page" in text
 
 
 class TestMatchSource:
