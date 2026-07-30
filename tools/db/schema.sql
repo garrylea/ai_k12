@@ -202,12 +202,14 @@ CREATE TABLE IF NOT EXISTS questions (
   grade_band VARCHAR(20) DEFAULT NULL,
   source VARCHAR(200) DEFAULT NULL,
   source_year SMALLINT DEFAULT NULL,
+  content_hash CHAR(64) DEFAULT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_q_subject_type_diff (subject_id, type, difficulty),
   KEY idx_q_grade (grade_band),
   KEY idx_q_group (group_id, group_order),
+  KEY idx_q_content_hash (content_hash),
   CONSTRAINT fk_questions_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Textbook Card Rendering Test</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #F5F0E8;
+      color: #333;
+      line-height: 1.8;
+      padding: 40px 20px;
+    }
+    h1 { text-align: center; font-size: 24px; margin-bottom: 32px; color: #222; }
+    h2 { font-size: 18px; margin-bottom: 8px; color: #555; }
+
+    /* Card container */
+    .card {
+      max-width: 860px;
+      margin: 0 auto 32px;
+      background: #fff;
+      border-radius: 24px;
+      padding: 40px 48px;
+      box-shadow:
+        0 1px 3px rgba(0,0,0,0.04),
+        0 8px 24px rgba(0,0,0,0.06);
+    }
+    .card h2 { font-size: 22px; color: #ff6b35; margin: 20px 0 12px; }
+    .card h3 { font-size: 18px; color: #444; margin: 16px 0 8px; }
+
+    /* KaTeX overrides */
+    .card .katex { font-size: 1.15em; }
+    .card .katex-display { margin: 1.2em 0; overflow-x: auto; overflow-y: hidden; }
+    .card .katex-display > .katex { text-align: center; }
+
+    /* Images inside card */
+    .card img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 20px auto;
+      border-radius: 8px;
+      border: 1px solid #eee;
+    }
+
+    /* Verification panel */
+    .verification {
+      max-width: 860px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 24px;
+      padding: 28px 36px;
+      box-shadow:
+        0 1px 3px rgba(0,0,0,0.04),
+        0 8px 24px rgba(0,0,0,0.06);
+    }
+    .verification h2 { font-size: 18px; color: #333; margin-bottom: 16px; }
+    .verification table { width: 100%; border-collapse: collapse; }
+    .verification th, .verification td {
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    }
+    .verification th { color: #888; font-weight: 600; border-bottom: 1px solid #eee; }
+    .verification td { border-bottom: 1px solid #f5f5f5; }
+    .pass { color: #16a34a; font-weight: 700; }
+    .fail { color: #dc2626; font-weight: 700; }
+    .warn { color: #d97706; font-weight: 700; }
+    .info { color: #2563eb; }
+
+    /* Console log area */
+    .console-log {
+      max-width: 860px;
+      margin: 24px auto;
+      background: #1e1e1e;
+      border-radius: 16px;
+      padding: 20px 28px;
+      color: #d4d4d4;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+    .console-log .log-time { color: #6a9955; }
+    .console-log .log-info { color: #569cd6; }
+    .console-log .log-pass { color: #4ec9b0; }
+    .console-log .log-fail { color: #f14c4c; }
+    .console-log .log-warn { color: #ce9178; }
+  </style>
+</head>
+<body>
+
+  <h1>Textbook Card Rendering -- Verification Test</h1>
+  <p style="text-align:center;color:#888;margin-top:-20px;margin-bottom:32px;font-size:14px;">
+    Markdown + LaTeX formulas + image with width/height from content_metadata
+  </p>
+
+  <div id="root"><p style="text-align:center;color:#aaa;padding:60px;">Rendering...</p></div>
+
+  <div class="verification">
+    <h2>Verification Results</h2>
+    <table>
+      <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+
+  <div class="console-log" id="console-log">
+    <div><span class="log-time">[test]</span> Awaiting results...</div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react/": "https://esm.sh/react@18.3.1/",
+      "react-dom/": "https://esm.sh/react-dom@18.3.1/",
+      "react-markdown": "https://esm.sh/react-markdown@9.0.1?external=react",
+      "remark-math": "https://esm.sh/remark-math@6.0.0",
+      "rehype-katex": "https://esm.sh/rehype-katex@7.0.0"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import React, { useEffect, useRef } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import ReactMarkdown from 'react-markdown';
+    import remarkMath from 'remark-math';
+    import rehypeKatex from 'rehype-katex';
+
+    // =========================================================================
+    // Mock content_metadata.images[] -- simulates what db_loader stores
+    // =========================================================================
+    const contentMetadata = {
+      images: [
+        {
+          url: "textbooks/math/abc12345/1/page_12_fig_01.jpg",
+          alt: "",
+          position: "inline",
+          width: 284,
+          height: 287
+        }
+      ]
+    };
+
+    // =========================================================================
+    // ASSET_BASE_URL -- simulates the CDN/published asset root
+    // =========================================================================
+    const ASSET_BASE_URL = "./test-images/";
+
+    // =========================================================================
+    // Test markdown -- adapted from page_012 of the textbook
+    // Image path uses simulated PUBLISHED format (as rewrite_card would produce)
+    // =========================================================================
+    const TEST_MARKDOWN = `## 21.2 解一元二次方程
+
+## 21.2.1 配方法
+
+问题1 一桶油漆可刷的面积为 $1500\\mathrm{dm}^2$ 李林用这桶油漆恰好刷完10个同样的正方体形状的盒子的全部外表面，你能算出盒子的棱长吗？
+
+设其中一个盒子的棱长为 $x\\mathrm{dm}$ ，则这个盒子的表面积为 $6x^{2}\\mathrm{dm}^{2}$ 。根据一桶油漆可刷的面积，列出方程
+
+$$
+10 \\times 6 x ^ {2} = 1 5 0 0. \\tag{①}
+$$
+
+![正方体盒子表面积示意图](textbooks/math/abc12345/1/page_12_fig_01.jpg)
+
+整理，得
+
+$$
+x ^ {2} = 2 5.
+$$
+
+根据平方根的意义，得
+
+$$
+x = \\pm 5,
+$$
+
+即
+
+$$
+x _ {1} = 5, \\quad x _ {2} = - 5.
+$$
+
+可以验证，5和-5是方程①的两个根，因为棱长不能是负值，所以盒子的棱长为 $5\\mathrm{dm}$。
+
+用方程解决实际问题时，要考虑所得结果是否符合实际意义。
+
+一般地，对于方程
+
+$$
+x ^ {2} = p, \\tag{I}
+$$
+
+（1）当 $p > 0$ 时，根据平方根的意义，方程（I）有两个不等的实数根
+
+$$
+x _ {1} = - \\sqrt {p}, \\quad x _ {2} = \\sqrt {p};
+$$
+
+（2）当 $p = 0$ 时，方程（I）有两个相等的实数根 $x_{1} = x_{2} = 0$；
+
+（3）当 $p < 0$ 时，因为对任意实数 $x$ ，都有 $x^{2} \\geqslant 0$ ，所以方程（I）无实数根。`;
+
+    // =========================================================================
+    // Console log capture
+    // =========================================================================
+    const logs = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+
+    function timestamp() {
+      const d = new Date();
+      return d.toLocaleTimeString('en-US', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+    }
+
+    console.log = function(...args) {
+      logs.push({ type: 'log', time: timestamp(), text: args.map(String).join(' ') });
+      origLog.apply(console, args);
+    };
+    console.warn = function(...args) {
+      logs.push({ type: 'warn', time: timestamp(), text: args.map(String).join(' ') });
+      origWarn.apply(console, args);
+    };
+    console.error = function(...args) {
+      logs.push({ type: 'error', time: timestamp(), text: args.map(String).join(' ') });
+      origError.apply(console, args);
+    };
+
+    function renderConsoleLog() {
+      const el = document.getElementById('console-log');
+      if (!el) return;
+      el.innerHTML = logs.map(l => {
+        let cls = 'log-info';
+        if (l.text.includes('PASS')) cls = 'log-pass';
+        else if (l.text.includes('FAIL')) cls = 'log-fail';
+        else if (l.text.includes('WARN')) cls = 'log-warn';
+        return `<div><span class="log-time">[${l.time}]</span> <span class="${cls}">${escHtml(l.text)}</span></div>`;
+      }).join('');
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // =========================================================================
+    // Custom img component that resolves asset URLs and injects width/height
+    // =========================================================================
+    function TextbookImg(props) {
+      const { src, alt, node, ...rest } = props;
+
+      // Look up content_metadata.images[] by the published URL (matching on url field)
+      let imageMeta = null;
+      if (src && contentMetadata.images) {
+        imageMeta = contentMetadata.images.find(img => img.url === src);
+      }
+
+      let resolvedSrc = src;
+      let w = undefined;
+      let h = undefined;
+
+      if (imageMeta) {
+        // Extract filename from the published path for local resolution
+        const filename = imageMeta.url.split('/').pop();
+        resolvedSrc = ASSET_BASE_URL + filename;
+        w = imageMeta.width;
+        h = imageMeta.height;
+        console.log(
+          `PASS Img lookup: published="${imageMeta.url}" -> resolved="${resolvedSrc}" (${w}x${h})`
+        );
+      } else {
+        console.log(`WARN Img lookup: no metadata found for src="${src}"`);
+      }
+
+      return React.createElement('img', {
+        src: resolvedSrc,
+        alt: alt || '',
+        width: w,
+        height: h,
+        loading: 'lazy',
+        ...rest
+      });
+    }
+
+    // =========================================================================
+    // Main App component
+    // =========================================================================
+    function App() {
+      const verificationRun = useRef(false);
+
+      useEffect(() => {
+        if (verificationRun.current) return;
+        verificationRun.current = true;
+
+        console.log('--- Textbook Card Rendering Verification ---');
+        console.log('ASSET_BASE_URL:', ASSET_BASE_URL);
+        console.log('content_metadata.images:', JSON.stringify(contentMetadata.images));
+        console.log('Markdown length:', TEST_MARKDOWN.length, 'chars');
+
+        // Run verification after React has committed to DOM
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            verifyResults();
+          });
+        });
+      }, []);
+
+      const components = {
+        img: TextbookImg
+      };
+
+      return React.createElement('div', { className: 'card' },
+        React.createElement(ReactMarkdown, {
+          remarkPlugins: [remarkMath],
+          rehypePlugins: [rehypeKatex],
+          components: components
+        }, TEST_MARKDOWN)
+      );
+    }
+
+    // =========================================================================
+    // Verification logic
+    // =========================================================================
+    function verifyResults() {
+      const checks = [];
+
+      // Check 1: inline LaTeX formulas
+      const cardEl = document.querySelector('.card');
+      const inlineKatex = cardEl ? cardEl.querySelectorAll('.katex:not(.katex-display > .katex)').length : 0;
+      const inlineExpected = TEST_MARKDOWN.match(/\$(?!\$)/g);
+      const inlineCount = inlineExpected ? Math.ceil(inlineExpected.length / 2) : 0; // pairs of $
+      checks.push({
+        name: 'Inline LaTeX formulas',
+        detail: `Found ${inlineKatex} .katex elements (expected ~${inlineCount} inline formulas)`,
+        pass: inlineKatex > 0
+      });
+
+      // Check 2: block LaTeX formulas
+      const blockKatex = cardEl ? cardEl.querySelectorAll('.katex-display').length : 0;
+      const blockExpected = (TEST_MARKDOWN.match(/\$\$/g) || []).length / 2;
+      checks.push({
+        name: 'Block LaTeX formulas',
+        detail: `Found ${blockKatex} .katex-display elements (expected ~${blockExpected})`,
+        pass: blockKatex > 0
+      });
+
+      // Check 3: image has width/height attributes
+      const imgs = cardEl ? cardEl.querySelectorAll('img') : [];
+      let imgHasWH = false;
+      let imgWHDetail = 'No images found';
+      if (imgs.length > 0) {
+        const img = imgs[0];
+        const w = img.getAttribute('width');
+        const h = img.getAttribute('height');
+        const naturalW = img.naturalWidth;
+        const naturalH = img.naturalHeight;
+        imgHasWH = !!(w && h);
+        imgWHDetail = `width="${w}", height="${h}", naturalSize=${naturalW}x${naturalH}, src="${img.getAttribute('src')}"`;
+        if (!imgHasWH) {
+          imgWHDetail += ' -- MISSING width/height attributes!';
+        }
+      }
+      checks.push({
+        name: 'Image width/height attributes',
+        detail: imgWHDetail,
+        pass: imgHasWH
+      });
+
+      // Check 4: image loads from test location
+      let imgLoadsOK = false;
+      let imgLoadDetail = 'No images found';
+      if (imgs.length > 0) {
+        const img = imgs[0];
+        const complete = img.complete;
+        const naturalW = img.naturalWidth;
+        imgLoadsOK = complete && naturalW > 0;
+        imgLoadDetail = `complete=${complete}, naturalWidth=${naturalW}` +
+          (imgLoadsOK ? '' : ' -- image may still be loading or failed');
+      }
+      checks.push({
+        name: 'Image loaded successfully',
+        detail: imgLoadDetail,
+        pass: imgLoadsOK
+      });
+
+      // Check 5: content_metadata.images lookup
+      const imgSrcFromDom = imgs.length > 0 ? imgs[0].getAttribute('src') : '';
+      const expectedFilename = 'page_12_fig_01.jpg';
+      const lookupWorks = imgSrcFromDom.includes(expectedFilename) && imgSrcFromDom.startsWith('./test-images/');
+      checks.push({
+        name: 'content_metadata lookup + path rewrite',
+        detail: `Image src="${imgSrcFromDom}" (should contain "${expectedFilename}")`,
+        pass: lookupWorks
+      });
+
+      // Check 6: overall card structure
+      const hasHeadings = cardEl ? cardEl.querySelectorAll('h2, h3').length : 0;
+      checks.push({
+        name: 'Document structure (headings)',
+        detail: `Found ${hasHeadings} headings (h2/h3)`,
+        pass: hasHeadings >= 2
+      });
+
+      // Log results
+      for (const c of checks) {
+        const status = c.pass ? 'PASS' : 'FAIL';
+        console.log(`${status} ${c.name}: ${c.detail}`);
+      }
+
+      const allPass = checks.every(c => c.pass);
+      console.log(allPass ? 'ALL CHECKS PASSED' : 'SOME CHECKS FAILED -- see above');
+
+      // Render results table
+      renderResultsTable(checks, allPass);
+      renderConsoleLog();
+
+      // Re-check image loading after a delay (images may load async)
+      if (!imgLoadsOK && imgs.length > 0) {
+        setTimeout(() => {
+          const img = imgs[0];
+          if (img.complete && img.naturalWidth > 0) {
+            console.log('PASS Image loaded (delayed): naturalWidth=' + img.naturalWidth + ', naturalHeight=' + img.naturalHeight);
+          } else if (!img.complete) {
+            console.log('WARN Image still loading after 1500ms');
+          } else {
+            console.log('FAIL Image failed to load: naturalWidth=' + img.naturalWidth);
+          }
+          renderConsoleLog();
+        }, 1500);
+      }
+    }
+
+    function renderResultsTable(checks, allPass) {
+      const tbody = document.getElementById('results-body');
+      if (!tbody) return;
+      tbody.innerHTML = checks.map(c =>
+        '<tr>' +
+          '<td>' + escHtml(c.name) + '</td>' +
+          '<td class="' + (c.pass ? 'pass' : 'fail') + '">' + (c.pass ? 'PASS' : 'FAIL') + '</td>' +
+          '<td style="font-size:13px">' + escHtml(c.detail) + '</td>' +
+        '</tr>'
+      ).join('') +
+      '<tr style="font-weight:700;border-top:2px solid #ddd;">' +
+        '<td>OVERALL</td>' +
+        '<td class="' + (allPass ? 'pass' : 'fail') + '">' + (allPass ? 'ALL PASS' : 'FAILURES') + '</td>' +
+        '<td>' + checks.filter(c=>c.pass).length + '/' + checks.length + ' checks passed</td>' +
+      '</tr>';
+    }
+
+    // =========================================================================
+    // Mount
+    // =========================================================================
+    const root = createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>

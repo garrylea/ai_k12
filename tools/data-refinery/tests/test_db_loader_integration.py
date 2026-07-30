@@ -21,9 +21,9 @@ def _card(lid, sort_order, card_type="concept", content="c"):
             "knowledge_point_ids": [], "textbook_page": "P1"}
 
 
-def _q(subject_id, group_order=1, qtype="choice", answer="B"):
+def _q(subject_id, group_order=1, qtype="choice", answer="B", content="题干"):
     return {"subject_id": subject_id, "group_id": "一", "group_order": group_order,
-            "type": qtype, "difficulty": 2, "content": "题干",
+            "type": qtype, "difficulty": 2, "content": content,
             "options": [{"label": "A", "text": "1"}, {"label": "B", "text": "2"}],
             "answer": answer, "explanation": None, "material_text": None,
             "material_url": None, "grade_band": None, "source": "测试卷", "source_year": 2024}
@@ -100,7 +100,7 @@ class TestLoadCards:
 
 class TestLoadQuestions:
     def test_insert(self, db):
-        n = db.load_questions([_q("math"), _q("chem")])  # chem 别名 -> chemistry
+        n = db.load_questions([_q("math", content="题干1"), _q("chem", content="题干2")])  # chem 别名 -> chemistry
         assert n == 2
         assert db._count("questions") == 2
 
@@ -109,6 +109,13 @@ class TestLoadQuestions:
         rows = db._query("SELECT subject_id FROM questions")
         chem_id = db._subject_id_by_code("chemistry")
         assert rows[0][0] == chem_id
+
+    def test_dedup_by_content_hash(self, db):
+        # 同 content_hash 命中已有题 -> 跳过插入（PRD §7.10 去重）
+        db.load_questions([_q("math", content="相同题干")])
+        n = db.load_questions([_q("math", content="相同题干")])
+        assert n == 0
+        assert db._count("questions") == 1
 
 
 class TestIdempotent:

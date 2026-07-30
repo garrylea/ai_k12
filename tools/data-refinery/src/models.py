@@ -31,3 +31,30 @@ class TextbookCard(BaseModel):
     content_metadata: dict | None = None
     knowledge_point_ids: list[str] | None = None
     textbook_page: str | None = None
+
+
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class ImageInfo:
+    """一张图片的元信息（image_scan 产出）"""
+    ref_path: str         # MD 中的引用路径，如 "images/hash.jpg"
+    disk_path: Path       # 磁盘实际路径
+    width: int            # px
+    height: int           # px
+    char_cost: int        # 折算字数
+    position_in_text: int  # 在 text_content 中的字符偏移
+
+
+@dataclass
+class CardFragment:
+    """拆分后的原始卡片片段（card_splitter 产出）"""
+    sort_order: int               # 页内序号，从 1 开始
+    content: str                  # 原始 Markdown（含图片引用），一字不改
+    images: list[ImageInfo]       # 本卡片包含的图片
+    raw_text_char_count: int      # 纯文字字数
+    image_char_cost: int          # 图片折算总字数
+    total_char_cost: int          # = raw_text_char_count + image_char_cost
+    textbook_page: str            # 从 MD 文件名提取，如 "P8"

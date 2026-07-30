@@ -28,7 +28,8 @@ def parse_args(argv=None):
     parser.add_argument("--input-dir", help="extract 产物目录（默认 output/extracted）")
     parser.add_argument("--output-dir", help="published 输出目录（默认 output/published）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
-    parser.add_argument("--force", action="store_true", help="强制重新发布")
+    parser.add_argument("--force", action="store_true", help="强制重新发布（忽略 checkpoint，但不删除已有输出）")
+    parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 published 文件，重新发布")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要发布的 JSONL")
     return parser.parse_args(argv)
 
@@ -76,6 +77,24 @@ def main(argv=None):
                 print(f"[dry-run] {rel}.jsonl ({_kind_for(rel)})")
         return
 
+    # --reconvert：清理匹配文件的 checkpoint + 删除已有 published 文件
+    if args.reconvert:
+        cleared = 0
+        for jsonl_path in jsonl_files:
+            rel = jsonl_path.relative_to(extracted_dir)
+            rel_file = rel.with_suffix("")
+            if not _match_source(rel_file, args.source):
+                continue
+            key = str(rel_file)
+            if checkpoint.is_published(key):
+                checkpoint.unmark_published(key)
+            out_file = published_dir / rel
+            if out_file.exists():
+                out_file.unlink()
+                print(f"[reconvert] deleted {out_file}", flush=True)
+            cleared += 1
+        print(f"[reconvert] cleared checkpoint for {cleared} source(s)", flush=True)
+
     published = 0
     skipped = 0
     failed = 0
@@ -86,7 +105,7 @@ def main(argv=None):
         if not _match_source(rel_file, args.source):
             continue
         key = str(rel_file)
-        if not args.force and checkpoint.is_published(key):
+        if not args.force and not args.reconvert and checkpoint.is_published(key):
             skipped += 1
             continue
         try:

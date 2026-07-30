@@ -190,7 +190,7 @@ class SmartEduAdapter(SiteAdapter):
             validator = ImageValidator()
 
         preview = item.raw.get("custom_properties", {}).get("preview", {})
-        slide_urls = self._build_page_urls(preview)
+        slide_urls = self._build_page_urls(preview, item.id, fetcher)
         if not slide_urls:
             return DownloadResult(files_failed=1)
 
@@ -233,16 +233,44 @@ class SmartEduAdapter(SiteAdapter):
             checkpoint.mark_downloaded(item.id)
         return result
 
-    @staticmethod
-    def _build_page_urls(preview: dict) -> list[str]:
-        """Build ordered page URL list from preview Slide keys."""
+    def _build_page_urls(self, preview: dict, asset_id: str | None = None, fetcher=None) -> list[str]:
+        """Build ordered page URL list.
+
+        Uses preview Slide keys as starting point, then binary-searches via HEAD
+        to find the actual total page count (preview often only shows ~49 slides
+        while the full book is 160+ pages).
+        """
         if not preview:
             return []
         slide_keys = [k for k in preview if k.startswith("Slide")]
         if not slide_keys:
             return []
         slide_keys.sort(key=lambda k: int(k[5:]))
-        return [preview[k] for k in slide_keys]
+        slide_urls = [preview[k] for k in slide_keys]
+        first_url = slide_urls[0]
+
+        # Determine max page via binary search on HEAD requests
+        base_url = first_url.rsplit("/", 1)[0]
+        min_page = len(slide_urls)
+        max_page = self._detect_max_page(base_url, min_page, fetcher)
+
+        return [f"{base_url}/{p}.jpg" for p in range(1, max_page + 1)]
+
+    @staticmethod
+    def _detect_max_page(base_url: str, min_page: int, fetcher) -> int:
+        """Binary search via HEAD to find the last existing page."""
+        if fetcher is None:
+            return min_page
+        low, high = min_page, 500
+        while low < high:
+            mid = (low + high + 1) // 2
+            url = f"{base_url}/{mid}.jpg"
+            status, _ = fetcher.fetch_head(url)
+            if status == 200:
+                low = mid
+            else:
+                high = mid - 1
+        return low
 
     def _storage_dir(self, item: Item) -> Path:
         parts = [item.tags.get(k, "其他") for k in ["subject", "level", "publisher", "grade", "semester"]]

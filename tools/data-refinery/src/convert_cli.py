@@ -14,7 +14,8 @@ def parse_args(argv=None):
     parser.add_argument("--input-dir", help="素材输入目录（默认 tools/crawler/data）")
     parser.add_argument("--output-dir", help="Markdown 输出目录（默认 tools/data-refinery/output/md）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
-    parser.add_argument("--force", action="store_true", help="强制重新转换")
+    parser.add_argument("--force", action="store_true", help="跳过 checkpoint，尝试继续处理未转完的页")
+    parser.add_argument("--reconvert", action="store_true", help="删除已有输出，重新转换所有页")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要处理的素材")
     return parser.parse_args(argv)
 
@@ -57,11 +58,14 @@ def main(argv=None):
 
     for material in materials:
         rel = str(material.rel_path)
-        if not args.force and checkpoint.is_converted(rel):
+        # reconvert 时清除 checkpoint 记录，确保后续管线（extract 等）也能重新处理
+        if args.reconvert and checkpoint.is_converted(rel):
+            checkpoint.unmark_converted(rel)
+        if not args.force and not args.reconvert and checkpoint.is_converted(rel):
             skipped += 1
             continue
         try:
-            converter.convert(material)
+            converter.convert(material, reconvert=args.reconvert)
             checkpoint.mark_converted(rel)
             converted += 1
         except Exception as e:

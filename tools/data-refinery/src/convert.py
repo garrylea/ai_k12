@@ -9,22 +9,39 @@ from scanner import Material
 
 
 class MineruRunner:
-    def __init__(self, bin_path: str = "mineru-open-api", timeout: int = 300, token: str | None = None, max_retries: int = 3, retry_delay: int = 30):
+    def __init__(self, bin_path: str = "mineru-open-api", timeout: int = 600, token: str | None = None, max_retries: int = 3, retry_delay: int = 70):
         self._bin = bin_path
         self._timeout = timeout
         self._token = token
         self._max_retries = max_retries
         self._retry_delay = retry_delay
 
+    _BATCH_SIZE = 10  # MinerU API rate limit: 50 files/min
+
     def run(self, input_paths: list[Path], output_dir: Path) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            self._bin,
-            "extract",
-            *[str(p) for p in input_paths],
-            "-o", str(output_dir),
-        ]
-        self._run(cmd)
+        # Resume: skip pages that already have corresponding .md output
+        existing_mds = {p.stem for p in output_dir.glob("*.md")}
+        pending = [p for p in input_paths if p.stem not in existing_mds]
+        if not pending:
+            print(f"  [resume] all {len(input_paths)} pages already converted")
+            return
+        skipped = len(input_paths) - len(pending)
+        if skipped:
+            print(f"  [resume] {skipped}/{len(input_paths)} pages already converted, processing {len(pending)} remaining")
+        # Batch to stay under MinerU API rate limit (~50 files/min)
+        for i in range(0, len(pending), self._BATCH_SIZE):
+            batch = pending[i : i + self._BATCH_SIZE]
+            cmd = [
+                self._bin,
+                "extract",
+                *[str(p) for p in batch],
+                "-o", str(output_dir),
+            ]
+            self._run(cmd)
+            if i + self._BATCH_SIZE < len(pending):
+                print(f"  [batch] {i+1}-{min(i+self._BATCH_SIZE, len(pending))}/{len(pending)}, pausing 15s...")
+                time.sleep(15)
 
     def _run(self, cmd: list[str]) -> None:
         env = os.environ.copy()
@@ -53,17 +70,14 @@ class Converter:
         self._runner = runner
         self._output_dir = Path(output_dir)
 
-    def convert(self, material: Material) -> Path:
+    def convert(self, material: Material, reconvert: bool = False) -> Path:
         target_dir = self._output_dir / material.rel_path
+        if reconvert:
+            # Clear all output before re-converting from scratch
+            if target_dir.exists():
+                import shutil
+                shutil.rmtree(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
-        if self._already_converted(target_dir):
-            return target_dir
 
         self._runner.run(material.input_paths, target_dir)
         return target_dir
-
-    @staticmethod
-    def _already_converted(target_dir: Path) -> bool:
-        if not target_dir.exists():
-            return False
-        return any(target_dir.glob("*.md"))

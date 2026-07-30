@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Callable
 
+from PIL import Image
+
 from asset_store import AssetStore
 from models import ExamQuestion, TextbookCard
 
@@ -72,7 +74,15 @@ def _rewrite_text(
         rel = f"{asset_prefix}/{name}"
         asset_store.put(rel, src)
         materialized.append(rel)
-        metas.append({"url": rel, "alt": alt, "position": "inline"})
+        meta = {"url": rel, "alt": alt, "position": "inline"}
+        try:
+            with Image.open(src) as img:
+                w, h = img.size
+            meta["width"] = w
+            meta["height"] = h
+        except Exception:
+            pass  # 无法读取尺寸则忽略
+        metas.append(meta)
         return f"![{alt}]({rel})"
 
     new_text = IMAGE_REF_RE.sub(replace, text or "")
