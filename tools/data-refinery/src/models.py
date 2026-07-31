@@ -42,8 +42,10 @@ class ImageInfo:
     """一张图片的元信息（image_scan 产出）"""
     ref_path: str         # MD 中的引用路径，如 "images/hash.jpg"
     disk_path: Path       # 磁盘实际路径
-    width: int            # px
-    height: int           # px
+    width: int            # 原始宽度 px
+    height: int           # 原始高度 px
+    scaled_width: int     # 缩放后宽度 px（≤IMG_MAX_WIDTH）
+    scaled_height: int    # 缩放后高度 px
     char_cost: int        # 折算字数
     position_in_text: int  # 在 text_content 中的字符偏移
 
