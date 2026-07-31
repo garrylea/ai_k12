@@ -33,8 +33,8 @@ def _count_text_chars(text: str) -> int:
     cleaned = re.sub(r"\$\$[^$]+\$\$", "", cleaned)
     cleaned = re.sub(r"\$[^$]+\$", "", cleaned)
     han = len(re.findall(r"[一-鿿]", cleaned))
-    eng = len(re.findall(r"[a-zA-Z]+", cleaned))
-    digits = len(re.findall(r"[0-9]+", cleaned))
+    eng = len(re.findall(r"[a-zA-Z]", cleaned))
+    digits = len(re.findall(r"[0-9]", cleaned))
     return han + eng + digits
 
 

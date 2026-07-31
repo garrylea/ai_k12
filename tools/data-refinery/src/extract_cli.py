@@ -33,12 +33,14 @@ def is_front_matter(text: str, page_num: int) -> bool:
     if any(k in text for k in ["出版社", "仅供个人学习", "未经授权", "版权所有"]):
         return True
 
-    # 2. 目录页：大量 "标题 数字" 行
+    # 2. 目录页：大量 "标题 数字" 行，或显式包含 "## 目录"
+    if "## 目录" in text:
+        return True
     toc_line_count = sum(
         1 for l in lines
         if re.search(r'[一二三四五六七八九十\d].+\s+\d{1,3}$', l)
     )
-    if len(lines) > 0 and toc_line_count / len(lines) >= 0.5:
+    if len(lines) > 0 and toc_line_count / len(lines) >= 0.3:
         return True
 
     # 3. 空页或前置空白页（前 10 页内极短内容）
