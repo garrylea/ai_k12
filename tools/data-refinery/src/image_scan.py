@@ -12,29 +12,30 @@ from models import ImageInfo
 
 # 匹配 ![alt](path)
 _IMAGE_REF_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-# 统一渲染基准常量
-_LINE_HEIGHT = 25.6      # 行盒总高：16px × 1.6
-_CHARS_PER_LINE = 46     # 每行汉字数：736px ÷ 16px
-_IMG_MAX_WIDTH = 700     # 图片有效显示宽度（留边后）
+
+# 统一渲染基准常量（对齐参考页实测）
+_LINE_HEIGHT = 26        # 参考页 body 行高
+_CHARS_PER_LINE = 48     # 768px prose / 16px 字宽
+_IMG_MAX_WIDTH = 768     # prose 宽度
 
 
 def _char_cost(height_px: int) -> int:
     """计算图片折算字数。
 
-    公式：ceil(height / 25.6) × 46
+    公式：ceil(height / 26) × 48
     """
     rows = int(-(-height_px // _LINE_HEIGHT))  # ceil 除法
     return rows * _CHARS_PER_LINE
 
 
 def _scale_for_width(raw_width: int, raw_height: int) -> tuple[int, int]:
-    """宽度适配：超宽图等比缩放至有效宽度。
+    """宽度适配：超宽图等比缩放至 prose 宽度。
 
     返回 (缩放后宽度, 缩放后高度)。
     """
     if raw_width > _IMG_MAX_WIDTH:
         scale = _IMG_MAX_WIDTH / raw_width
-        return _IMG_MAX_WIDTH, int(raw_height * scale + 0.5)  # 四舍五入取整
+        return _IMG_MAX_WIDTH, int(raw_height * scale + 0.5)
     return raw_width, raw_height
 
 
@@ -82,8 +83,10 @@ def scan_page(md_path: Path) -> list[ImageInfo]:
         results.append(ImageInfo(
             ref_path=ref_path,
             disk_path=disk_path,
-            width=scaled_w,
-            height=scaled_h,
+            width=raw_w,
+            height=raw_h,
+            scaled_width=scaled_w,
+            scaled_height=scaled_h,
             char_cost=cost,
             position_in_text=m.start(),
         ))
