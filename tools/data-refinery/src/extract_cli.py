@@ -7,6 +7,7 @@
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from card_labeler import CardLabeler
@@ -17,6 +18,34 @@ from image_scan import scan_page
 from llm import LLMClient
 from markdown_scanner import MarkdownScanner, MarkdownSource
 from models import TextbookCard
+
+import re
+
+
+def is_front_matter(text: str, page_num: int) -> bool:
+    """确定性预过滤：识别目录页、版权页、空页等前置内容。
+
+    在 LLM 标注之前调用，避免 gemma4 26B 误判。
+    """
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+    # 1. 版权页
+    if any(k in text for k in ["出版社", "仅供个人学习", "未经授权", "版权所有"]):
+        return True
+
+    # 2. 目录页：大量 "标题 数字" 行
+    toc_line_count = sum(
+        1 for l in lines
+        if re.search(r'[一二三四五六七八九十\d].+\s+\d{1,3}$', l)
+    )
+    if len(lines) > 0 and toc_line_count / len(lines) >= 0.5:
+        return True
+
+    # 3. 空页或前置空白页（前 10 页内极短内容）
+    if len(text.strip()) < 30 and page_num <= 10:
+        return True
+
+    return False
 
 
 def parse_args(argv=None):
@@ -30,6 +59,12 @@ def parse_args(argv=None):
     parser.add_argument("--force", action="store_true", help="强制重新提取（忽略 checkpoint，但不删除已有输出）")
     parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 JSONL，重新提取匹配页")
     parser.add_argument("--toc", help="TOC JSON 路径，用于校验 lesson_id + 自动修正")
+    parser.add_argument("--interval", type=float, default=0.0,
+                        help="每次 LLM 调用后 sleep 秒数（默认 0）")
+    parser.add_argument("--batch-size", type=int, default=0,
+                        help="每处理 N 页（发生 LLM 调用的页）后进入批次间歇（默认 0=不分批）")
+    parser.add_argument("--batch-sleep", type=float, default=0.0,
+                        help="批次之间 sleep 秒数（默认 0）")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要处理的 Markdown")
     return parser.parse_args(argv)
 
@@ -228,6 +263,7 @@ def main(argv=None):
     extracted = 0
     skipped = 0
     failed = 0
+    llm_calls = 0  # 仅统计真正发生 LLM 调用的页，用于节流
 
     for idx, source in enumerate(sources, 1):
         rel_file = source.rel_path / source.md_path.name
@@ -240,11 +276,20 @@ def main(argv=None):
             continue
 
         try:
-            # ① image_scan：获取图片尺寸 + 折算字数
+            # ① 前置页预过滤（确定性规则，避免 LLM 误判）
+            text = source.md_path.read_text(encoding="utf-8")
+            _m = re.search(r"page_(\d+)", source.md_path.name)
+            page_num = int(_m.group(1)) if _m else 0
+            if is_front_matter(text, page_num):
+                checkpoint.mark_extracted(file_key)
+                print(f"[ok] ({idx}/{total_processed}) {file_key} -> 0 items (front matter)", flush=True)
+                extracted += 1
+                continue
+
+            # ② image_scan：获取图片尺寸 + 折算字数
             images = scan_page(source.md_path)
 
-            # ② card_splitter：拆分卡片
-            text = source.md_path.read_text(encoding="utf-8")
+            # ③ card_splitter：拆分卡片
             cards = split_page(source.md_path, text, images)
 
             if not cards:
@@ -258,6 +303,16 @@ def main(argv=None):
             page_num = cards[0].textbook_page.replace("P", "") if cards else ""
             prev = book_lesson.get(book_key)
 
+            # 节流：在调用前（跳过首次）按批次/间隔 sleep
+            if llm_calls > 0:
+                if args.batch_size > 0 and llm_calls % args.batch_size == 0:
+                    if args.batch_sleep > 0:
+                        print(f"[throttle] batch of {args.batch_size} done, sleeping {args.batch_sleep}s", flush=True)
+                        time.sleep(args.batch_sleep)
+                elif args.interval > 0:
+                    time.sleep(args.interval)
+            llm_calls += 1
+
             try:
                 result = labeler.label(
                     [c.content for c in cards],
@@ -269,9 +324,9 @@ def main(argv=None):
                 # LLM 失败时用默认标注
                 from card_labeler import LabelResult, PageLabelResult
                 result = PageLabelResult(
-                    page_type="content",
+                    page_type="front_matter",
                     labels=[LabelResult(
-                        page_type="content", card_type="concept",
+                        page_type="front_matter", card_type="concept",
                         lesson_id=prev, title=None,
                         textbook_page=f"P{page_num}",
                     ) for _ in cards],
