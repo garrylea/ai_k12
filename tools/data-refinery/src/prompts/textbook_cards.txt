@@ -19,8 +19,8 @@
 - 第一个字符是 {，最后一个字符是 }
 
 【page_type -- 页类型】
-- "front_matter": 封面、版权页、目录、前言 → 整页不产出卡片
-- "chapter_intro": 章前综述/章前图 → 产出一张 reading 卡
+- "front_matter": 封面、版权页、目录、前言/本册导引/致同学/编者的话/出版说明/序言 → 整页不产出卡片
+- "chapter_intro": 章前综述/章前图（如"第二十一章 一元二次方程"的章首页，含本章学习目标、引入性故事或示意图） → 产出一张 reading 卡
 - "content": 正文内容 → 正常标注
 - "practice": 纯习题/练习页 → 正常标注，card_type 多为 "practice"
 
