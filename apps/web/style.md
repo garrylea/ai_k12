@@ -143,7 +143,30 @@
 
 **家长端**全程强制 `data-theme="parent"`，禁用夜间。布局、卡片、阴影、留白与非学习学生页保持一致，仅将品牌色与功能色替换为商务白蓝。
 
-### 2.5 登录页规范（P1.1）
+### 2.5 学习沉浸页专用 Token（P2.2 CourseDetail）
+
+以下 Token 专用于课程详情页（教材卡片阅读），值来源于参考页 `http://localhost:3000/student/learn` 实测（1920×825 视口）。
+
+```
+布局
+  Learn-Sidebar-Width    18rem (288px)   左侧阶段栏
+  Learn-Card-Max-W       56rem (896px)   白卡最大宽度
+  Learn-Prose-W          48rem (768px)   正文栏宽度
+
+颜色
+  Learn-Card-Bg          #FDFCF8         白卡背景
+  Learn-Text-Primary     #3C4A35         正文/列表
+  Learn-Heading-1        #333333         小节标题
+  Learn-Heading-2        #B0C4DE         卡片内标题
+
+字号
+  fs-learn-h1            1.25rem (20px)  小节标题
+  fs-learn-h2            1.125rem (18px) 卡片内标题
+  fs-learn-body          1rem (16px)     正文
+  lh-learn-body          1.625           正文行高
+```
+
+### 2.6 登录页规范（P1.1）
 
 登录页是「非学习阶段学生页」的基准范例，其他浅停留页应参照其简洁大气的处理方式。
 
@@ -176,7 +199,7 @@
 - 不出现「演示说明」「仅限家长」等冗余小字。
 - 不使用 `.student-theme-container`，不启用夜间切换。
 
-### 2.6 入口选择页规范（P1.2）
+### 2.7 入口选择页规范（P1.2）
 
 入口选择页是登录后的第一个浅停留页，采用与学科选择页一致的「暖底 + 独立白卡」语言。
 
@@ -210,18 +233,25 @@
 数学公式：KaTeX 内嵌，STIX Two Math 风格
 数字/代码：JetBrains Mono（成绩、倒计时等宽对齐）
 
-字号基准（学段差异仅体现在字号，配色与圆角全部统一）：
+**尺寸体系：流式等比缩放（fluid）。** 所有字号、圆角、间距以 `rem` 表达，随根字号
+`html { font-size: clamp(14px, 0.234vw + 12px, 21px) }` 跟随视口宽度平滑缩放：
+1024→14.4px、1280→15px、1920≈16.5px、2560≈18px、3840→21px（上下界 [14px,21px]）。
+下表 px 为**@根字号 16px 时的等效像素**；实现值用对应 rem（px÷16）。在 `global.css`
+的 `:root` 定义一套基准 `--fs-*`（全站可用），`[data-school='primary|junior|senior']`
+仅做 rem 覆盖微调。要整体重新缩放全站，只需调 `html` 的 clamp 斜率/上下界。
+
+字号基准（学段差异仅体现在字号，配色与圆角全部统一；px = @root16 等效值）：
 
 | 用途 | 小学 | 初中 | 高中 |
 |------|------|------|------|
-| H1 大标题 | 28px Bold | 26px Semibold | 24px Semibold |
-| H2 章节标题 | 22px Semibold | 20px Semibold | 18px Semibold |
-| 卡片标题 | 18px Semibold | 16px Semibold | 15px Semibold |
-| 正文 | 17px Regular | 15px Regular | 14px Regular |
-| 教材卡片正文 | 16px / 行距 1.6 | 16px / 行距 1.6 | 16px / 行距 1.6 |
-| 辅助说明 | 13px | 12px | 12px |
+| H1 大标题 | 1.75rem (28px) Bold | 1.625rem (26px) Semibold | 1.5rem (24px) Semibold |
+| H2 章节标题 | 1.375rem (22px) Semibold | 1.25rem (20px) Semibold | 1.125rem (18px) Semibold |
+| 卡片标题 | 1.125rem (18px) Semibold | 1rem (16px) Semibold | 0.9375rem (15px) Semibold |
+| 正文 | 1.0625rem (17px) Regular | 0.9375rem (15px) Regular | 0.875rem (14px) Regular |
+| 教材卡片正文 | 1rem (16px) / 行距 1.8 | 1rem (16px) / 行距 1.8 | 1rem (16px) / 行距 1.8 |
+| 辅助说明 | 0.8125rem (13px) | 0.75rem (12px) | 0.75rem (12px) |
 
-教材卡片正文行距统一加宽至 1.6-1.8，避免长时间阅读疲劳。
+教材卡片正文行距统一加宽至 1.8（参考阅读舒适度），避免长时间阅读疲劳。
 
 ---
 
@@ -231,11 +261,13 @@
 4px 基准。常用：4 / 8 / 12 / 16 / 24 / 32 / 48
 
 ### 4.2 圆角（统一，不按学段切换）
+以 rem 表达，随根字号流式缩放（px = @root16 等效值）。`--radius-pill` 保留 px，
+它是「完全圆角」哨兵值、不参与缩放。
 ```
---radius-card:     16px
---radius-button:   10px
---radius-pill:     9999px
---radius-input:    8px
+--radius-card:     1rem      /* 16px @root16 */
+--radius-button:   0.625rem  /* 10px */
+--radius-input:    0.5rem    /* 8px */
+--radius-pill:     9999px    /* 哨兵值，不缩放 */
 ```
 
 ### 4.3 阴影（柔和，避免硬阴影）
