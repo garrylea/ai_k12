@@ -43,7 +43,12 @@ def is_front_matter(text: str, page_num: int) -> bool:
     if len(lines) > 0 and toc_line_count / len(lines) >= 0.3:
         return True
 
-    # 3. 空页或前置空白页（前 10 页内极短内容）
+    # 3. 教材引言/前言页
+    intro_headings = ["本册导引", "致同学", "编者的话", "出版说明", "序言"]
+    if any(h in text for h in intro_headings):
+        return True
+
+    # 4. 空页或前置空白页（前 10 页内极短内容）
     if len(text.strip()) < 30 and page_num <= 10:
         return True
 
