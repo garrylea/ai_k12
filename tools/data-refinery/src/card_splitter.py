@@ -1,34 +1,39 @@
-"""卡片拆分器：将教材 Markdown 拆分为 ≤400 字（含图片折算）的卡片。
+"""卡片拆分器：将教材 Markdown 拆分为 ≤400 字文字 + ≤700 字总计（含图片折算）的卡片。
 
 核心规则：
-- 图片两步走：宽度适配（已在 image_scan 中完成）→ 高度三态判断
-- 文字按自然段落切分，贪心合并
+- 图片块级居中 → cost 按高度占多少整行算
+- 文字按自然段落切分，以段落+图为 bundle 贪心合并
 - content 原文不动，一字不改
+
+字数上限推导：
+- 参考页 prose 宽 768px，正文 16px → 每行 48 汉字
+- body 行高 26px → 行盒 26px
+- iPad 768 高屏可用正文区 ≈ 499px → 约 19 行
+- 48 × 19 = 912 字物理上限
+- 留余量（标题/标签/公式/列表宽行距）→ 文字 400 + 图片 ≤ 300 = 总计 700
 """
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from models import CardFragment, ImageInfo
 
-_CARD_LIMIT = 400          # 单卡字数上限
-_IMG_SOLO_THRESHOLD = 300  # 图片占卡 75%，触发独占卡
+_TEXT_LIMIT = 400          # 单卡文字上限
+_TOTAL_LIMIT = 700         # 单卡总上限（文字+图片折算）
+_LINE_HEIGHT = 26          # 参考页 body 行高
+_CHARS_PER_LINE = 48       # 768px prose / 16px 字宽
+_IMG_MAX_WIDTH = 768       # prose 宽度
 
 
 def _count_text_chars(text: str) -> int:
     """统计 text 中的有效字数（汉字 + 英文单词 + 数字，不含 Markdown 标记和 LaTeX 源码）。"""
-    # 去掉图片引用
     cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
-    # 去掉 Markdown 标记（标题 #、加粗 **、列表 -、引用 >、表格 | 等）
     cleaned = re.sub(r"[#*>\-|`~\[\]]+", "", cleaned)
-    # 去掉 LaTeX 块
     cleaned = re.sub(r"\$\$[^$]+\$\$", "", cleaned)
     cleaned = re.sub(r"\$[^$]+\$", "", cleaned)
-    # 统计汉字
     han = len(re.findall(r"[一-鿿]", cleaned))
-    # 统计英文单词
     eng = len(re.findall(r"[a-zA-Z]+", cleaned))
-    # 统计数字
     digits = len(re.findall(r"[0-9]+", cleaned))
     return han + eng + digits
 
@@ -52,29 +57,21 @@ def _images_in_range(images: list[ImageInfo], start: int, end: int) -> list[Imag
     return [img for img in images if start <= img.position_in_text < end]
 
 
-def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFragment]:
-    """将一页 Markdown 拆分为多张卡片。
+@dataclass
+class _Bundle:
+    """一个不可拆分的最小单元：一段文字 + 属于它的图片。"""
+    text: str
+    images: list[ImageInfo]
+    text_chars: int
+    image_cost: int
 
-    Args:
-        md_path: page_NNN.md 路径（用于提取页码）
-        text: 页面的完整 Markdown 文本
-        images: image_scan 产出的图片元信息列表
 
-    Returns:
-        拆分后的 CardFragment 列表
-    """
-    if not text.strip():
-        return []
-
-    page_label = _extract_page_number(md_path)
+def _make_bundles(text: str, images: list[ImageInfo]) -> list[_Bundle]:
+    """把 Markdown 拆分为 bundle 列表。若段落文字 >400，按句末标点切开。"""
     paragraphs = _split_paragraphs(text)
+    bundles: list[_Bundle] = []
 
-    # 先处理大图（情况 A：折算字数 ≥ 300 → 独占卡）
-    solo_fragments: list[CardFragment] = []
-    remaining_paras: list[str] = []
-    consumed_img_positions: set[int] = set()
-
-    pos = 0  # 追踪当前字符偏移
+    pos = 0
     for para in paragraphs:
         para_start = text.index(para, pos) if para in text[pos:] else pos
         para_end = para_start + len(para)
@@ -82,118 +79,26 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
 
         para_images = _images_in_range(images, para_start, para_end)
         para_text_chars = _count_text_chars(para)
-        para_img_cost = sum(img.char_cost for img in para_images)
 
-        # 检查是否触发情况 A
-        if para_img_cost >= _IMG_SOLO_THRESHOLD and len(para_images) == 1 and para_text_chars < 50:
-            img = para_images[0]
-            consumed_img_positions.add(img.position_in_text)
-            solo_fragments.append(CardFragment(
-                sort_order=0,  # 统一编号稍后
-                content=f"![]({img.ref_path})",
-                images=[img],
-                raw_text_char_count=0,
-                image_char_cost=img.char_cost,
-                total_char_cost=img.char_cost,
-                textbook_page=page_label,
-            ))
-            continue
-
-        remaining_paras.append(para)
-
-    # 如果页面全是情况 A 的图，直接返回
-    if not remaining_paras and solo_fragments:
-        for i, frag in enumerate(solo_fragments):
-            frag.sort_order = i + 1
-        return solo_fragments
-
-    # 处理情况 B（折算字数 < 300 但总字数超 400 → 二次缩小）
-    effective_paras: list[tuple[str, int]] = []  # (para_text, total_cost)
-    pos = 0
-    for para in remaining_paras:
-        para_start = text.index(para, pos) if para in text[pos:] else pos
-        para_end = para_start + len(para)
-        pos = para_end
-        para_images = _images_in_range(images, para_start, para_end)
-        para_text_chars = _count_text_chars(para)
-        para_img_cost = sum(img.char_cost for img in para_images)
-
-        if para_text_chars + para_img_cost > _CARD_LIMIT and para_img_cost < _IMG_SOLO_THRESHOLD:
-            # 情况 B：二次缩小图片
-            max_img_chars = max(0, _CARD_LIMIT - para_text_chars)
-            reduction_ratio = max_img_chars / para_img_cost if para_img_cost > 0 else 1.0
-            effective_cost = para_text_chars + max_img_chars
-            effective_paras.append((para, effective_cost))
-        else:
-            effective_paras.append((para, para_text_chars + para_img_cost))
-
-    # 贪心合并段落为卡片
-    fragments: list[tuple[list[str], int]] = []  # [(para_texts, total_cost), ...]
-    current_paras: list[str] = []
-    current_cost = 0
-
-    for para_text, para_cost in effective_paras:
-        if current_cost + para_cost <= _CARD_LIMIT:
-            current_paras.append(para_text)
-            current_cost += para_cost
-        else:
-            if current_paras:
-                fragments.append((current_paras, current_cost))
-            current_paras = [para_text]
-            current_cost = para_cost
-
-    if current_paras:
-        fragments.append((current_paras, current_cost))
-
-    # 处理超长单段（>400 字，按句末标点切割）
-    final_fragments: list[tuple[str, int]] = []
-    for paras, cost in fragments:
-        if len(paras) == 1 and cost > _CARD_LIMIT:
-            sub_texts = _split_long_text(paras[0])
+        if para_text_chars > _TEXT_LIMIT:
+            # 按句末标点切开
+            sub_texts = _split_long_text(para)
             for sub in sub_texts:
-                final_fragments.append((sub, _count_text_chars(sub) +
-                    sum(img.char_cost for img in _images_in_range(
-                        images, text.index(sub) if sub in text else 0,
-                        (text.index(sub) + len(sub)) if sub in text else 0))))
+                sub_start = text.index(sub, para_start) if sub in text[para_start:para_end] else para_start
+                sub_end = sub_start + len(sub)
+                sub_images = _images_in_range(images, sub_start, sub_end)
+                sub_chars = _count_text_chars(sub)
+                sub_cost = sum(img.char_cost for img in sub_images)
+                bundles.append(_Bundle(text=sub, images=sub_images, text_chars=sub_chars, image_cost=sub_cost))
         else:
-            final_fragments.append(("\n\n".join(paras), cost))
+            img_cost = sum(img.char_cost for img in para_images)
+            bundles.append(_Bundle(text=para, images=para_images, text_chars=para_text_chars, image_cost=img_cost))
 
-    # 重新编号 solo fragments
-    for idx, frag in enumerate(solo_fragments):
-        frag.sort_order = idx + 1
-
-    # 构建 CardFragment 输出
-    result: list[CardFragment] = list(solo_fragments)
-    sort_start = len(solo_fragments) + 1
-
-    for i, (content_text, _) in enumerate(final_fragments):
-        # 找到该片段内的图片
-        try:
-            start_pos = text.index(content_text)
-        except ValueError:
-            start_pos = 0
-        end_pos = start_pos + len(content_text)
-        frag_images = [img for img in images
-                       if start_pos <= img.position_in_text < end_pos
-                       and img.position_in_text not in consumed_img_positions]
-        frag_text_cost = _count_text_chars(content_text)
-        frag_img_cost = sum(img.char_cost for img in frag_images)
-
-        result.append(CardFragment(
-            sort_order=sort_start + i,
-            content=content_text,
-            images=frag_images,
-            raw_text_char_count=frag_text_cost,
-            image_char_cost=frag_img_cost,
-            total_char_cost=frag_text_cost + frag_img_cost,
-            textbook_page=page_label,
-        ))
-
-    return result
+    return bundles
 
 
 def _split_long_text(text: str) -> list[str]:
-    """对超长段落按句末标点切割，确保每段 ≤ 400 字。"""
+    """对超长段落按句末标点切割，确保每段文字 ≤ 400 字。"""
     sentences = re.split(r"(?<=[。！？])", text)
     result: list[str] = []
     current = ""
@@ -201,7 +106,7 @@ def _split_long_text(text: str) -> list[str]:
 
     for sent in sentences:
         sent_chars = _count_text_chars(sent)
-        if current_chars + sent_chars <= _CARD_LIMIT:
+        if current_chars + sent_chars <= _TEXT_LIMIT:
             current += sent
             current_chars += sent_chars
         else:
@@ -214,3 +119,147 @@ def _split_long_text(text: str) -> list[str]:
         result.append(current)
 
     return result if result else [text]
+
+
+def _compress_image(img: ImageInfo, target_cost: int) -> ImageInfo:
+    """等比压缩图片使其折算字数 ≤ target_cost。
+
+    返回新的 ImageInfo（scaled_* 和 char_cost 已更新）。
+    """
+    if img.char_cost <= target_cost:
+        return img
+
+    target_rows = max(1, target_cost // _CHARS_PER_LINE)
+    target_height = target_rows * _LINE_HEIGHT
+    scale = target_height / img.scaled_height
+    new_scaled_w = int(img.scaled_width * scale + 0.5)
+    new_scaled_h = target_height
+    new_cost = target_rows * _CHARS_PER_LINE
+
+    return ImageInfo(
+        ref_path=img.ref_path,
+        disk_path=img.disk_path,
+        width=img.width,
+        height=img.height,
+        scaled_width=new_scaled_w,
+        scaled_height=new_scaled_h,
+        char_cost=new_cost,
+        position_in_text=img.position_in_text,
+    )
+
+
+def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFragment]:
+    """将一页 Markdown 拆分为多张卡片。
+
+    Args:
+        md_path: page_NNN.md 路径
+        text: 页面的完整 Markdown 文本
+        images: image_scan 产出的图片元信息列表
+
+    Returns:
+        拆分后的 CardFragment 列表
+    """
+    if not text.strip():
+        return []
+
+    page_label = _extract_page_number(md_path)
+    bundles = _make_bundles(text, images)
+
+    # 先处理大图独占卡（单图 cost > 700）
+    solo_fragments: list[CardFragment] = []
+    remaining_bundles: list[_Bundle] = []
+    consumed_positions: set[int] = set()
+
+    for bundle in bundles:
+        if len(bundle.images) == 1 and bundle.text_chars < 50 and bundle.image_cost > _TOTAL_LIMIT:
+            img = bundle.images[0]
+            consumed_positions.add(img.position_in_text)
+            solo_fragments.append(CardFragment(
+                sort_order=0,
+                content=f"![]({img.ref_path})",
+                images=[img],
+                raw_text_char_count=0,
+                image_char_cost=img.char_cost,
+                total_char_cost=img.char_cost,
+                textbook_page=page_label,
+            ))
+        else:
+            remaining_bundles.append(bundle)
+
+    # 贪心合并 bundle 为卡片
+    fragments: list[CardFragment] = []
+    current_texts: list[str] = []
+    current_images: list[ImageInfo] = []
+    current_text_chars = 0
+    current_total = 0
+
+    def _close_card():
+        nonlocal current_texts, current_images, current_text_chars, current_total
+        if not current_texts:
+            return
+        content_text = "\n\n".join(current_texts)
+        frag_images = [img for img in current_images if img.position_in_text not in consumed_positions]
+        fragments.append(CardFragment(
+            sort_order=0,
+            content=content_text,
+            images=frag_images,
+            raw_text_char_count=current_text_chars,
+            image_char_cost=sum(img.char_cost for img in frag_images),
+            total_char_cost=current_text_chars + sum(img.char_cost for img in frag_images),
+            textbook_page=page_label,
+        ))
+        current_texts = []
+        current_images = []
+        current_text_chars = 0
+        current_total = 0
+
+    for bundle in remaining_bundles:
+        # 尝试直接放入当前卡
+        if current_text_chars + bundle.text_chars <= _TEXT_LIMIT and current_total + bundle.text_chars + bundle.image_cost <= _TOTAL_LIMIT:
+            current_texts.append(bundle.text)
+            current_images.extend(bundle.images)
+            current_text_chars += bundle.text_chars
+            current_total += bundle.text_chars + bundle.image_cost
+            continue
+
+        # 放不下：先把当前卡封存
+        _close_card()
+
+        # 现在把 bundle 放进新卡
+        if bundle.text_chars <= _TEXT_LIMIT and bundle.text_chars + bundle.image_cost <= _TOTAL_LIMIT:
+            current_texts = [bundle.text]
+            current_images = list(bundle.images)
+            current_text_chars = bundle.text_chars
+            current_total = bundle.text_chars + bundle.image_cost
+        elif bundle.text_chars <= _TEXT_LIMIT:
+            # 文字够但图超了：压缩图
+            image_room = _TOTAL_LIMIT - bundle.text_chars
+            compressed_images = [_compress_image(img, image_room) for img in bundle.images]
+            new_image_cost = sum(img.char_cost for img in compressed_images)
+            current_texts = [bundle.text]
+            current_images = compressed_images
+            current_text_chars = bundle.text_chars
+            current_total = bundle.text_chars + new_image_cost
+        else:
+            # 文字本身 >400（理论上 _make_bundles 已处理，兜底）
+            sub_texts = _split_long_text(bundle.text)
+            for sub in sub_texts:
+                sub_chars = _count_text_chars(sub)
+                if current_text_chars + sub_chars <= _TEXT_LIMIT and current_total + sub_chars <= _TOTAL_LIMIT:
+                    current_texts.append(sub)
+                    current_text_chars += sub_chars
+                    current_total += sub_chars
+                else:
+                    _close_card()
+                    current_texts = [sub]
+                    current_text_chars = sub_chars
+                    current_total = sub_chars
+
+    _close_card()
+
+    # 合并 solo fragments 和 merged fragments，统一编号
+    all_fragments = solo_fragments + fragments
+    for i, frag in enumerate(all_fragments, 1):
+        frag.sort_order = i
+
+    return all_fragments
