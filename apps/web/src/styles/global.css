@@ -30,10 +30,23 @@
 
   --aux: #8B5A8E;
 
-  --radius-card: 16px;
-  --radius-button: 10px;
-  --radius-input: 8px;
+  /* Radii in rem so they scale with the fluid root font-size (÷16 from px).
+     --radius-pill stays px: it's a "fully rounded" sentinel, not a real size. */
+  --radius-card: 1rem;      /* 16px @root16 */
+  --radius-button: 0.625rem; /* 10px */
+  --radius-input: 0.5rem;    /* 8px */
   --radius-pill: 9999px;
+
+  /* Baseline font-size tokens (rem) available app-wide — not just inside the
+     student learning shell. data-school overrides these per school level.
+     rem values scale with the fluid html font-size (see below). */
+  --fs-h1: 1.625rem;         /* 26px @root16 */
+  --fs-h2: 1.25rem;          /* 20px */
+  --fs-card-title: 1rem;     /* 16px */
+  --fs-body: 0.9375rem;      /* 15px */
+  --fs-textbook: 1rem;       /* 16px */
+  --fs-caption: 0.75rem;     /* 12px */
+  --lh-textbook: 1.8;
 
   --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
   --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
@@ -43,6 +56,23 @@
   --shadow-glow-success: 0 0 12px rgba(74, 155, 110, 0.30);
 
   --motion-ease: cubic-bezier(0.33, 1, 0.68, 1);
+
+  /* ===== Learn Page Tokens (P2.2 CourseDetail) =====
+     Values measured from reference page http://localhost:3000/student/learn
+     at 1920×825 viewport. */
+  --learn-sidebar-width: 18rem;        /* 288px @root16 */
+  --learn-sidebar-width-ipad: 14rem;   /* 224px for iPad */
+  --learn-card-max-w: 56rem;           /* 896px */
+  --learn-prose-w: 48rem;              /* 768px */
+  --learn-card-bg: #FDFCF8;
+  --learn-text-primary: #3C4A35;
+  --learn-heading-1: #333333;
+  --learn-heading-2: #B0C4DE;
+
+  --fs-learn-h1: 1.25rem;              /* 20px */
+  --fs-learn-h2: 1.125rem;             /* 18px */
+  --fs-learn-body: 1rem;               /* 16px */
+  --lh-learn-body: 1.625;              /* 26px */
 }
 
 /* ===== Student Night Mode (Dark Tea Gold) ===== */
@@ -105,34 +135,47 @@
   --aux: #7C3AED;
 }
 
-/* ===== School Level Font Size Only (no color/radius differences) ===== */
+/* ===== School Level Font Size Only (no color/radius differences) =====
+   rem overrides on the :root baseline; equivalent px @root16 in comments.
+   All scale with the fluid html font-size. */
 [data-school='primary'] {
-  --fs-h1: 28px;
-  --fs-h2: 22px;
-  --fs-card-title: 18px;
-  --fs-body: 17px;
-  --fs-textbook: 16px;
-  --lh-textbook: 1.6;
-  --fs-caption: 13px;
+  --fs-h1: 1.75rem;          /* 28px */
+  --fs-h2: 1.375rem;         /* 22px */
+  --fs-card-title: 1.125rem; /* 18px */
+  --fs-body: 1.0625rem;      /* 17px */
+  --fs-textbook: 1rem;       /* 16px */
+  --lh-textbook: 1.8;
+  --fs-caption: 0.8125rem;   /* 13px */
 }
 
 [data-school='junior'] {
-  --fs-h1: 26px;
-  --fs-h2: 20px;
-  --fs-card-title: 16px;
-  --fs-body: 15px;
-  --fs-textbook: 16px;
-  --lh-textbook: 1.6;
-  --fs-caption: 12px;
+  --fs-h1: 1.625rem;         /* 26px */
+  --fs-h2: 1.25rem;          /* 20px */
+  --fs-card-title: 1rem;     /* 16px */
+  --fs-body: 0.9375rem;      /* 15px */
+  --fs-textbook: 1rem;       /* 16px */
+  --lh-textbook: 1.8;
+  --fs-caption: 0.75rem;     /* 12px */
 }
 
 [data-school='senior'] {
-  --fs-h1: 24px;
-  --fs-h2: 18px;
-  --fs-card-title: 15px;
-  --fs-body: 14px;
-  --fs-textbook: 16px;
-  --lh-textbook: 1.6;
+  --fs-h1: 1.5rem;           /* 24px */
+  --fs-h2: 1.125rem;         /* 18px */
+  --fs-card-title: 0.9375rem;/* 15px */
+  --fs-body: 0.875rem;       /* 14px */
+  --fs-textbook: 1rem;       /* 16px */
+  --lh-textbook: 1.8;
+  --fs-caption: 0.75rem;     /* 12px */
+}
+
+/* ===== Fluid root font-size (drives proportional scaling) =====
+   Every rem unit — all Tailwind named utilities, plus the fs and radius
+   tokens above — scales with this. Anchors: 1280→15px, 1920≈16px, 2560≈18px,
+   clamped to [14px, 21px] so iPad (1024) doesn't shrink below 14 and 4K
+   (3840) doesn't grow past 21. h-screen / % / em are unaffected (already
+   correct). Tune the slope/bounds here to rescale the whole app at once. */
+html {
+  font-size: clamp(14px, 0.234vw + 12px, 21px);
 }
 
 /* ===== Global Base ===== */
@@ -154,6 +197,72 @@ body {
   color: var(--text-primary);
   --text-placeholder: var(--text-tertiary);
   transition: background-color 800ms ease, color 300ms ease;
+}
+
+/* ===== Textbook card prose (P2.2 CourseDetail Markdown body) ===== */
+.textbook-prose > * + * {
+  margin-top: 0.75em;
+}
+.textbook-prose p {
+  margin: 0;
+}
+.textbook-prose strong {
+  color: var(--brand-600);
+  font-weight: 700;
+}
+.textbook-prose ul,
+.textbook-prose ol {
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+.textbook-prose ul { list-style-type: disc; }
+.textbook-prose ol { list-style-type: decimal; }
+.textbook-prose .katex { font-size: 1.05em; }
+
+/* ===== Learn Page Prose (reference page styles) ===== */
+.learn-prose {
+  color: var(--learn-text-primary);
+  font-size: var(--fs-learn-body);
+  line-height: var(--lh-learn-body);
+}
+.learn-prose h2 {
+  color: var(--learn-heading-2);
+  font-size: var(--fs-learn-h2);
+  font-weight: 900;
+  line-height: 1.75rem;  /* 28px */
+  margin-bottom: 1.5rem;
+}
+.learn-prose h3 {
+  font-size: var(--fs-learn-body);
+  font-weight: 700;
+  line-height: var(--lh-learn-body);
+}
+.learn-prose p {
+  margin: 0;
+}
+.learn-prose p + p {
+  margin-top: 1rem;
+}
+.learn-prose strong {
+  font-weight: 700;
+}
+.learn-prose ul,
+.learn-prose ol {
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+.learn-prose ul { list-style-type: disc; }
+.learn-prose ol { list-style-type: decimal; }
+.learn-prose li {
+  line-height: 2;  /* 32px for list items */
+}
+.learn-prose .katex { font-size: 1.05em; }
+.learn-prose img {
+  display: block;
+  margin: 1rem auto;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-card);
 }
 
 /* ===== Scrollbar ===== */
