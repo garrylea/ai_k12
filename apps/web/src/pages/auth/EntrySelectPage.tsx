@@ -1,9 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 
-const BookIcon = ({ className }: { className?: string }) => (
+const BookIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   <svg
-    width="32"
-    height="32"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -31,7 +29,7 @@ export default function EntrySelectPage() {
           {/* 学习：可选主入口 */}
           <button
             onClick={() => navigate('/student/subjects')}
-            className="flex-1 max-w-[280px] min-w-[200px] h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
+            className="flex-1 max-w-[17.5rem] min-w-[12.5rem] h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
               boxShadow: 'var(--shadow-card)',
@@ -54,7 +52,7 @@ export default function EntrySelectPage() {
 
           {/* 答疑：锁定入口 */}
           <div
-            className="flex-1 max-w-[280px] min-w-[200px] h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 cursor-not-allowed"
+            className="flex-1 max-w-[17.5rem] min-w-[12.5rem] h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 cursor-not-allowed"
             style={{
               border: '1px solid rgb(241, 245, 249)',
               backgroundColor: 'rgba(248, 250, 252, 0.3)',

@@ -155,9 +155,10 @@
 
 颜色
   Learn-Card-Bg          #FDFCF8         白卡背景
+  Learn-Card-Border      #E8EDE4         白卡边框（参考页实测，带 subtle border）
   Learn-Text-Primary     #3C4A35         正文/列表
   Learn-Heading-1        #333333         小节标题
-  Learn-Heading-2        #B0C4DE         卡片内标题
+  Learn-Heading-2        #B0C4DE         卡片内标题（H2，带左侧色条标记）
 
 字号
   fs-learn-h1            1.25rem (20px)  小节标题
@@ -230,6 +231,8 @@
 ## 3. 字体与字号
 
 中文字族：Inter（拉丁）/ system-ui > 苹方 / PingFang SC > 思源黑体 / Source Han Sans SC > 系统默认
+**全局 letter-spacing: 0.05em**（参考页实测，提升中文阅读舒适度）
+**全局 line-height: 1.8**（宽行距护眼）
 数学公式：KaTeX 内嵌，STIX Two Math 风格
 数字/代码：JetBrains Mono（成绩、倒计时等宽对齐）
 

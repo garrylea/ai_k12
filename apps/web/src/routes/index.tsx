@@ -3,6 +3,7 @@ import LoginPage from '@/pages/auth/LoginPage';
 import SubjectSelectPage from '@/pages/auth/SubjectSelectPage';
 import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
+import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 
@@ -37,6 +38,11 @@ const router = createBrowserRouter([
     path: '/student/star-map',
     element: <StarMapPage />,
   },
+  // 课程详情/卡片阅读 P2.2（全屏沉浸层，隐藏侧边栏）
+  {
+    path: '/student/course-detail',
+    element: <CourseDetailPage />,
+  },
   {
     path: '/parent',
     element: <ParentLayout />,
@@ -59,7 +65,6 @@ const router = createBrowserRouter([
     element: <StudentLayout />,
     children: [
       { path: '', element: <Navigate to="/student/star-map" replace /> },
-      { path: 'course-detail', element: <Placeholder title="课程详情 P2.2" /> },
       { path: 'ai-discuss', element: <Placeholder title="AI 讨论 P2.3" /> },
       { path: 'homework', element: <Placeholder title="课后作业 P2.4" /> },
       { path: 'homework-result', element: <Placeholder title="作业解析 P2.5" /> },

@@ -7,8 +7,20 @@ export interface CardRow extends RowDataPacket {
   knowledge_point_ids: string | null;
 }
 
+export interface CardContentRow extends RowDataPacket {
+  id: number;
+  lesson_id: number;
+  sort_order: number;
+  card_type: string;
+  title: string | null;
+  content: string;
+  content_metadata: string | null;
+  textbook_page: string | null;
+}
+
 /**
- * Minimal card repo — Phase A only needs knowledgePointCount per lesson.
+ * Card repo — knowledgePointCount per lesson (star map) + full card content
+ * for the lesson reading page (P2.2 课程详情).
  */
 @Injectable()
 export class CardsRepository {
@@ -26,5 +38,15 @@ export class CardsRepository {
       ids.split(',').map(id => id.trim()).filter(Boolean).forEach(id => kpSet.add(id));
     }
     return kpSet.size;
+  }
+
+  /** Full ordered card list for a lesson (reading page). */
+  async findByLessonId(lessonId: number): Promise<CardContentRow[]> {
+    const [rows] = await this.pool.execute<CardContentRow[]>(
+      `SELECT id, lesson_id, sort_order, card_type, title, content, content_metadata, textbook_page
+       FROM cards WHERE lesson_id = ? ORDER BY sort_order`,
+      [lessonId],
+    );
+    return rows;
   }
 }

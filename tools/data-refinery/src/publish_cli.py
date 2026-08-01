@@ -28,6 +28,7 @@ def parse_args(argv=None):
     parser.add_argument("--input-dir", help="extract 产物目录（默认 output/extracted）")
     parser.add_argument("--output-dir", help="published 输出目录（默认 output/published）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
+    parser.add_argument("--pages", help="页码过滤，如 '1-6' 或 '1,3,5-8'")
     parser.add_argument("--force", action="store_true", help="强制重新发布（忽略 checkpoint，但不删除已有输出）")
     parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 published 文件，重新发布")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要发布的 JSONL")
@@ -43,6 +44,31 @@ def _match_source(rel_file: Path, filter_value: str) -> bool:
     if filter_value == "smartedu":
         return "试卷" not in name and "答案" not in name
     return False
+
+
+def _parse_pages(pages_spec: str) -> set[int]:
+    """Parse page spec like '1-6' or '1,3,5-8' into a set of page numbers."""
+    result: set[int] = set()
+    for part in pages_spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            result.update(range(int(lo.strip()), int(hi.strip()) + 1))
+        else:
+            result.add(int(part))
+    return result
+
+
+def _match_pages(jsonl_name: str, page_nums: set[int]) -> bool:
+    """Check if page_XXX.jsonl matches any of the given page numbers.
+
+    非 page_*.jsonl（试卷/答案聚合文件）不参与页过滤，视为匹配。
+    """
+    import re
+    m = re.search(r"page_(\d+)", jsonl_name)
+    if m:
+        return int(m.group(1)) in page_nums
+    return True
 
 
 def _kind_for(rel_file: Path) -> str:
@@ -69,6 +95,11 @@ def main(argv=None):
     checkpoint.load()
 
     jsonl_files = sorted(extracted_dir.rglob("*.jsonl"))
+
+    # --pages：页码过滤（page_*.jsonl 按页号匹配；试卷/答案聚合文件不受影响）
+    page_nums = _parse_pages(args.pages) if args.pages else None
+    if page_nums is not None:
+        jsonl_files = [p for p in jsonl_files if _match_pages(p.name, page_nums)]
 
     if args.dry_run:
         for p in jsonl_files:

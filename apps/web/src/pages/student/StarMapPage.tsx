@@ -9,7 +9,7 @@ function LoadingSkeleton() {
     <div className="min-h-screen bg-[#FDFBF7] flex items-center justify-center">
       <div className="space-y-6 animate-pulse">
         <div className="h-10 w-64 bg-slate-200 rounded-lg mx-auto" />
-        <div className="h-[480px] w-[800px] bg-slate-100 rounded-3xl" />
+        <div className="h-[30rem] w-[50rem] bg-slate-100 rounded-3xl" />
       </div>
     </div>
   );
@@ -88,20 +88,20 @@ function Toast({ message, onDismiss }: { message: string; onDismiss: () => void 
 
 // --- Icons ---
 const LockIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="11" width="18" height="11" rx="2" />
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
   </svg>
 );
 
 const CheckIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12" />
   </svg>
 );
 
 const ArrowLeftIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="15 18 9 12 15 6" />
   </svg>
 );
@@ -190,8 +190,16 @@ export default function StarMapPage() {
       setToast(`「${section.title}」尚未解锁，请先按顺序完成前面的学习！`);
       return;
     }
-    // Placeholder: navigate to learning page
-    console.log('进入小节', section.id, section.title);
+    // Enter the lesson reading page (P2.2). lessonId === section.id.
+    navigate('/student/course-detail', {
+      state: {
+        lessonId: Number(section.id),
+        breadcrumb: selectedChapter ? `${selectedChapter.title}` : undefined,
+        subjectName: data?.subjectName,
+        gradeName: data?.gradeName,
+        subjectId,
+      },
+    });
   };
 
   const handlePlanetClick = (planet: PlanetPosition) => {
@@ -211,8 +219,8 @@ export default function StarMapPage() {
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-slate-900 flex flex-col justify-between p-6 md:p-12 font-sans relative overflow-hidden">
       {/* Ambient background blurs */}
-      <div className="absolute top-0 right-0 w-[450px] h-[450px] bg-[#F59E0B]/5 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-40 left-0 w-[400px] h-[400px] bg-[#2563EB]/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[28.125rem] h-[28.125rem] bg-[#F59E0B]/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 left-0 w-[25rem] h-[25rem] bg-[#2563EB]/5 rounded-full blur-3xl pointer-events-none" />
 
       <div className="max-w-6xl w-full mx-auto flex-1 flex flex-col justify-between">
         {/* Header */}
@@ -241,7 +249,7 @@ export default function StarMapPage() {
 
         {/* Galaxy canvas */}
         <main className="flex-1 my-6 flex flex-col items-stretch">
-          <div className="w-full bg-[#0c1424] rounded-3xl relative p-6 border border-slate-800 shadow-inner overflow-hidden flex flex-col justify-between min-h-[460px] md:min-h-[520px]">
+          <div className="w-full bg-[#0c1424] rounded-3xl relative p-6 border border-slate-800 shadow-inner overflow-hidden flex flex-col justify-between min-h-[28.75rem] md:min-h-[32.5rem]">
             {/* Radial gradient overlay */}
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900 via-[#0c1424] to-[#060a12] pointer-events-none" />
 
@@ -321,7 +329,7 @@ export default function StarMapPage() {
                     {/* Title badge below */}
                     <div className="absolute pt-2 left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none">
                       <div
-                        className={`px-2 py-0.5 rounded text-[10px] md:text-[11px] font-bold shadow transition-colors ${
+                        className={`px-2 py-0.5 rounded text-[0.625rem] md:text-[0.6875rem] font-bold shadow transition-colors ${
                           isCurrent
                             ? 'bg-amber-950/90 text-amber-300 border border-amber-500/40'
                             : isSelected
@@ -349,7 +357,7 @@ export default function StarMapPage() {
                   className="relative z-20 mt-auto bg-slate-950/80 backdrop-blur-md rounded-2xl p-4 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4"
                 >
                   <div className="flex-shrink-0">
-                    <span className="text-[10px] font-bold tracking-tight bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
+                    <span className="text-[0.625rem] font-bold tracking-tight bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
                       第{selectedChapter.order}章
                     </span>
                     <h3 className="text-sm font-bold text-slate-200 mt-1">{chapterDisplayName(selectedChapter.title)}</h3>
@@ -385,7 +393,7 @@ export default function StarMapPage() {
                           </span>
                           <span className="flex flex-col items-start leading-tight text-left max-w-[7em]">
                             {prefix && (
-                              <span className="text-[9px] font-normal opacity-70 tracking-tight">{prefix}</span>
+                              <span className="text-[0.5625rem] font-normal opacity-70 tracking-tight">{prefix}</span>
                             )}
                             <span className="[word-break:keep-all] [overflow-wrap:anywhere]">
                               {insertBreaks(name)}

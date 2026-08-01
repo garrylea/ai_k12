@@ -356,12 +356,22 @@ def main(argv=None):
                 else:
                     lesson_id = book_lesson.get(book_key)
 
+                # title 去重：若 content 首行是 `#/## {title}`，从 content 剥离，
+                # 标题由前端用 title 字段渲染 H2，避免出现两次。
+                content = card.content
+                title = label.title
+                if title:
+                    for marker in ("## ", "# "):
+                        if content.startswith(f"{marker}{title}"):
+                            content = content[len(f"{marker}{title}"):].lstrip("\n")
+                            break
+
                 items.append(TextbookCard(
                     lesson_id=lesson_id,
                     sort_order=card.sort_order,
                     card_type=label.card_type,
-                    title=label.title,
-                    content=card.content,
+                    title=title,
+                    content=content,
                     content_metadata=None,  # publish 阶段写入
                     knowledge_point_ids=[],
                     textbook_page=label.textbook_page or card.textbook_page,

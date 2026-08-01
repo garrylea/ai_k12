@@ -24,4 +24,9 @@ export class ContentController {
   getLessons(@Param('unitId', ParseIntPipe) unitId: number) {
     return this.contentService.getLessons(unitId);
   }
+
+  @Get('lessons/:lessonId/cards')
+  getLessonCards(@Param('lessonId', ParseIntPipe) lessonId: number) {
+    return this.contentService.getLessonCards(lessonId);
+  }
 }

@@ -323,6 +323,25 @@ class DbLoader:
             return row[0][0]
         return None
 
+    def _match_parent_lesson(self, name: str) -> int | None:
+        """子节归并：'21.2.2 公式法' → 找父节 '21.2 解一元二次方程' 的 lesson id。
+
+        仅当 name 形如 N.M.K 且有标题（节标题）时，逐级向上找 N.M 父节。
+        """
+        m = re.match(r"^(\d+\.\d+)\.\d+\s+(.+)$", name.strip())
+        if not m:
+            return None
+        parent_prefix, parent_title = m.group(1), m.group(2)
+        # 1) 精确父节：21.2 + 标题 的后缀 2) 仅前缀匹配已存在的 lesson（如 '21.2 解一元二次方程'）
+        parent_label = f"{parent_prefix} {parent_title}"
+        lid = self._match_lesson_by_name(parent_label)
+        if lid is not None:
+            return lid
+        # 前缀匹配：DB 里任何 name 以 '21.2 ' 开头的 lesson
+        row = self._query("SELECT id FROM lessons WHERE name LIKE %s ORDER BY sort_order LIMIT 1",
+                          (f"{parent_prefix} %",))
+        return row[0][0] if row else None
+
     def load_toc_structure(self, toc_path: str) -> dict:
         """用 TOC JSON 全量建教材骨架。
 
@@ -439,6 +458,9 @@ class DbLoader:
 
         if toc_path:
             # TOC 模式：不动态建结构，card 直接匹配已有 lesson
+            # sort_order 按 DB lesson 内从 1 开始（与 full-reload 一致）；
+            # 子节（如 21.2.2）归并到父节（21.2）后，同一 DB lesson 下连续编号。
+            lesson_sort: dict[int, int] = {}
             count = 0
             unmatched = 0
             for c in cards:
@@ -453,11 +475,15 @@ class DbLoader:
                     if lid_stripped != lid:
                         lesson_id_db = self._match_lesson_by_name(lid_stripped)
                 if lesson_id_db is None:
+                    # 子节归并：N.M.K 子节（如 21.2.2 公式法）归并到父节 N.M（21.2 解一元二次方程），
+                    # 因为 DB 骨架按 TOC 只建到 N.M 一级
+                    lesson_id_db = self._match_parent_lesson(lid)
+                if lesson_id_db is None:
                     print(f"[WARN] card lesson_id={lid!r} not found in DB, skipped", flush=True)
                     unmatched += 1
                     continue
-                sort_order = count + 1
-                self._insert_card(lesson_id_db, sort_order, c)
+                lesson_sort[lesson_id_db] = lesson_sort.get(lesson_id_db, 0) + 1
+                self._insert_card(lesson_id_db, lesson_sort[lesson_id_db], c)
                 count += 1
             if unmatched:
                 print(f"[WARN] {unmatched} card(s) could not be matched to any lesson", flush=True)

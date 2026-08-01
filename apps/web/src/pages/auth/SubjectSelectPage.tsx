@@ -15,10 +15,8 @@ const subjects: SubjectConfig[] = [
   { key: 'english', name: '英语', available: false },
 ];
 
-const BookIcon = ({ className }: { className?: string }) => (
+const BookIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   <svg
-    width="32"
-    height="32"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"

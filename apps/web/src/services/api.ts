@@ -109,3 +109,38 @@ export function fetchStarMap(studentId: number, subjectId: number): Promise<Star
     `/progress/students/${studentId}/star-map?subjectId=${subjectId}`,
   );
 }
+
+// --- Lesson cards (P2.2 课程详情/卡片阅读) ---
+
+export interface CardImage {
+  url: string;
+  alt?: string;
+  position?: string;
+}
+
+export interface CardMetadata {
+  images?: CardImage[];
+  layout_hint?: string;
+  override_scroll?: 'allow' | 'disable';
+}
+
+export interface LessonCard {
+  id: number;
+  sortOrder: number;
+  cardType: 'concept' | 'example' | 'practice' | 'explore' | 'summary' | 'reading';
+  title: string | null;
+  content: string;
+  metadata: CardMetadata | null;
+  textbookPage: string | null;
+}
+
+export interface LessonCardsData {
+  lessonId: number;
+  lessonName: string;
+  totalCards: number;
+  cards: LessonCard[];
+}
+
+export function fetchLessonCards(lessonId: number): Promise<LessonCardsData> {
+  return fetchApi<LessonCardsData>(`/content/lessons/${lessonId}/cards`);
+}

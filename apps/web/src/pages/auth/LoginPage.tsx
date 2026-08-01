@@ -63,8 +63,7 @@ export default function LoginPage() {
                 aria-hidden="true"
               >
                 <svg
-                  width="40"
-                  height="40"
+                  className="w-10 h-10"
                   viewBox="0 0 48 48"
                   fill="none"
                   stroke="white"
@@ -82,7 +81,7 @@ export default function LoginPage() {
 
             {/* 标题 */}
             <div>
-              <h1 className="text-[32px] font-bold text-white tracking-wide">
+              <h1 className="text-[2rem] font-bold text-white tracking-wide">
                 智学系统
               </h1>
               <p className="text-white/80 text-sm mt-1">

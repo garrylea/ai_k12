@@ -22,22 +22,29 @@ convert(MinerU) → image_scan → card_splitter → card_labeler(LLM)
 
 ## 2. 统一渲染基准
 
-所有学段统一使用 **16px 字号 + 1.6 行高**。容器内容区宽度 736px，折合 46 汉字/行。
+正文统一使用 **16px 字号 + 1.6 行高**，卡片标题 **18px**。尺寸以 rem 表达，随根字号
+`clamp(14px, 0.234vw + 12px, 21px)` 流式缩放（style.md §3）；下表 px 为 @根字号16px 的等效值。
+因文字列宽（46rem）与字号（rem）同步缩放，**「46 汉字/行、700 字上限」在 iPad 与 PC 上渲染一致**。
 
 | 项 | 值 | 来源 |
 |---|---|---|
-| iPad 横屏宽度 | 1024px | iPad 横屏基准 |
+| iPad 横屏宽度（最紧断点） | 1024px | iPad 横屏基准 |
 | 侧边导航 StudentNav | 224px | `w-56` = 14rem × 16 |
 | 内容区宽度 | 800px | 1024 − 224 |
 | 卡片内边距 | 64px | `px-8` |
-| 文字区宽度 | **736px** | 800 − 64 |
+| 文字区宽度 | **736px = 46rem** | 800 − 64 |
 | 图片有效宽度（含留边） | **700px** | 736 − 18×2 |
-| 统一字号 | **16px** | 所有学段统一 |
+| 正文字号 | **16px = 1rem** | 所有学段统一 |
+| 卡片标题字号 | **18px = 1.125rem** | 所有学段统一 |
 | 统一行高系数 | **1.6** | 所有学段统一 |
 | 行盒总高 | **25.6px** | 16 × 1.6 |
 | 每行汉字数 | **46** | 736 ÷ 16 |
-| 单卡字数上限 | **400** | PRD §7.2 |
-| 图片占卡 75% 阈值 | **300** | 400 × 0.75 |
+| 无滚动可用正文行数 | **~19 行** | 768高屏：卡片撑满 header/footer 间，减标题块后 body ≈ 499px ÷ 25.6 |
+| 单卡字数上限 | **700** | 46 × 19 ≈ 874 物理上限，留 ~15% 余量（标题/标签/公式）→ 700，PRD §7.2 |
+| 图片占卡 75% 阈值 | **525** | 700 × 0.75 |
+
+**无滚动约束**：卡片高度由 `flex-1` 撑满 header/footer 之间（不写死），容量上限由最矮的
+首发断点（iPad 横屏 768 高）决定。700 字在该断点也不出纵向滚动条；更高的 PC 屏留白更多。
 
 ---
 
@@ -69,17 +76,17 @@ else:
 **第二步：高度判断（三种情况）**
 
 ```
-情况 A：缩放后折算字数 ≥ 300
+情况 A：缩放后折算字数 ≥ 525
     → 图片独占一张卡，content = 纯图 ![](path)
-    → 不计 400 字上限
+    → 不计 700 字上限
 
-情况 B：折算字数 < 300，但（折算字数 + 文字字数）> 400
+情况 B：折算字数 < 525，但（折算字数 + 文字字数）> 700
     → 图文放同一张卡放不下，对图片做第二次等比缩小
-    → 图可分配行数 m = floor((400 − 文字字数) / 46)
+    → 图可分配行数 m = floor((700 − 文字字数) / 46)
     → 目标高度 = m × 25.6，二次 scale = 目标高度 / 缩放后高度
-    → 新折算字数 = m × 46，总字数 ≤ 400
+    → 新折算字数 = m × 46，总字数 ≤ 700
 
-情况 C：折算字数 < 300，且（折算字数 + 文字字数）≤ 400
+情况 C：折算字数 < 525，且（折算字数 + 文字字数）≤ 700
     → 图文正常合并为一张卡
 ```
 
@@ -87,10 +94,10 @@ else:
 
 | 场景 | 原始尺寸 | 宽度缩放后 | 折算字数 | 判断 | 结果 |
 |---|---|---|---|---|---|
-| 超大图 | 1000×500 | 700×350 | 644 | ≥300（A） | 独占卡 |
-| 中等图 | 500×200 | 500×200 | 368 | ≥300（A） | 独占卡 |
-| 小图+多文 | 400×60 | 400×60 | 138 | <300，超限（B） | 二次缩小 |
-| 小图+少文 | 200×40 | 200×40 | 92 | <300，不超（C） | 图文合并 |
+| 超大图 | 1000×500 | 700×350 | 644 | ≥525（A） | 独占卡 |
+| 大图 | 1000×420 | 700×294 | 552 | ≥525（A） | 独占卡 |
+| 中图+多文 | 500×200 | 500×200 | 368 | <525，(368+文字)>700（B） | 二次缩小 |
+| 小图+少文 | 200×40 | 200×40 | 92 | <525，(92+文字)≤700（C） | 图文合并 |
 
 ---
 
@@ -213,7 +220,7 @@ interface CardContent {
 - 输入：MD 正文 + 图片清单
 - 按 §3 算法处理宽度适配 + 高度判断
 - 按自然段落（`\n\n`）切分，贪心合并
-- 全文 ≤ 400 字则整页一张卡
+- 全文 ≤ 700 字则整页一张卡
 - 超长段按句末标点切割
 - 输出：`List[CardFragment]`，content 原封不动
 
@@ -261,6 +268,8 @@ interface CardContent {
 | 8 | 前端 types/index.ts 新增 ImageMeta/CardContent | 待实施 |
 | — | convert_cli 断点续转 | ✅ 已完成 |
 | — | checkpoint 增强 | ✅ 已完成 |
+| — | card_splitter.py 页码标注过滤 | ✅ 已完成 |
+| — | progress.service.ts 首章/首节解锁逻辑 | ✅ 已完成 |
 
 ---
 
@@ -292,3 +301,161 @@ interface CardContent {
 ### 不变
 
 `scanner.py`、`publish_cli.py`、`db_loader.py/cli.py`、`schema.sql`、`config.py`、`asset_store.py`
+
+---
+
+## 9. 已知问题与修复记录
+
+### 9.1 章综述卡片混入页码标注（2026-08-01 修复）
+
+**问题描述：**
+第二十一章"章综述"在 star-map 中显示 7 页，实际应为 3 页。MinerU 转换 P15 时，将页眉页码 `"3 第二十一章 一元二次方程"` 误识别为正文，被 `card_splitter` 拆分为一张 11 字卡片，进而被 LLM 标注归入章综述 lesson。
+
+**根因：**
+1. MinerU `mineru-open-api extract` 没有 `--drop-header`/`--drop-footer` 参数，依赖模型自动过滤，偶有漏网。
+2. `card_splitter._split_paragraphs` 对双换行拆分时未过滤页码标注段落。
+
+**核心算法 — 页码标注过滤：**
+
+MinerU 输出的页眉/页码标注特征：行首为教材印刷页码数字，紧跟空格和章标题原文，无 Markdown 标记。例如：
+```
+3 第二十一章 一元二次方程
+```
+
+过滤规则设计为**精确匹配**，避免误杀正常短内容：
+- **必须**以数字开头（页码）
+- **必须**紧跟 `" 第N章 "` 格式（中文数字章号）
+- **必须**后续有非空白字符（章节名）
+- 正常标题如 `## 21.2.2 公式法`、`探究`、`练习` 均不匹配
+
+```python
+_PAGE_NUMBER_HEADER_RE = re.compile(r'^\d+\s+第[一二三四五六七八九十百零]+章\s+\S+.*$')
+
+def _is_page_number_header(text: str) -> bool:
+    return bool(_PAGE_NUMBER_HEADER_RE.match(text.strip()))
+```
+
+插入点：在 `_make_bundles` 中，段落拆分后、创建 bundle 前跳过匹配段落：
+```python
+for para in paragraphs:
+    if _is_page_number_header(para):
+        continue  # 跳过页码标注，不生成 bundle
+    # ... 正常创建 bundle
+```
+
+全量验证：九年级上册 94 页中仅 page_015.md 包含此模式，无漏杀/误杀。
+
+**修复后状态：**
+- 第二十一章章综述卡片：7 张 → **3 张**
+- P15-P20 错误归属的配方法/练习卡片已用 deepseek-v4-flash 重新标注，正确归入 `21.2.1 配方法` / `21.2.2 公式法` / `21.2.3 因式分解法`
+
+### 9.2 progress 为空时 star-map 首章/首节点全部锁定（2026-08-01 修复）
+
+**问题描述：**
+当 `progress` 表没有学习记录时，学生进入 star-map 后所有章节均为 locked 状态，无法开始学习。
+
+**根因：**
+`apps/server/src/modules/progress/progress.service.ts` 第 104 行用 `unit.order === 1` 判断"第一个 unit"，但 `unit.order` 是数据库 `units.sort_order` 字段（教材章节号，如 21, 22, 23...），不是 1-based 数组索引，所以 `=== 1` 永远为 false。同理，第 126 行用 `lesson.order === 1` 判断第一节，忽略了 `sort_order=0` 的章综述。
+
+**核心算法 — 章节/小节状态计算（三态机）：**
+
+状态流转基于 `progress` 表中的 `current_unit_id` 和 `current_lesson_id`，分为三种状态：`completed`（已完成）、`current`（当前学习中）、`locked`（未解锁）。
+
+**1. Unit（章）状态判断：**
+```
+if currentUnitId === null:
+    // 无学习记录：数组第一个 unit 为 current
+    unitStatus = (unitIndex === 0) ? 'current' : 'locked'
+else if unit.id < currentUnitId:
+    unitStatus = 'completed'
+else if unit.id === currentUnitId:
+    unitStatus = 'current'
+else:
+    unitStatus = 'locked'
+```
+
+**2. Lesson（小节）状态判断（在 current unit 内部）：**
+```
+if unitStatus === 'completed':
+    lessonStatus = 'completed'
+else if unitStatus === 'current':
+    if currentLessonId === null:
+        // 无进度记录：章综述（sort_order=0）为 current 入口
+        lessonStatus = (lessonIndex === 0) ? 'current' : 'locked'
+    else if lesson.id < currentLessonId:
+        lessonStatus = 'completed'
+    else if lesson.id === currentLessonId:
+        lessonStatus = 'current'
+    else:
+        lessonStatus = 'locked'
+else:
+    lessonStatus = 'locked'
+```
+
+**关键设计决策：**
+- 为什么章综述（`sort_order=0`）是 current 入口而非 `21.1`？
+  - 教材阅读顺序：章综述（章前引入）→ 21.1 → 21.2 → ...
+  - 章综述包含本章学习目标、引入性故事，应先读
+- 为什么用 `unitIndex === 0` 而不是 `unit.order === 1`？
+  - `sort_order` 是教材章节号（21, 22...），不是位置索引
+  - 第一本书的第一章可能是 21（九年级上册从第21章开始）
+
+**修复：**
+```typescript
+// 修复前（错误：unit.order 是 21/22/23，永远不等于 1）
+unitStatus = unit.order === 1 ? 'current' : 'locked';
+lessonStatus = lesson.order === 1 ? 'current' : 'locked';
+
+// 修复后（正确：用数组索引判断位置）
+unitStatus = unitIdx === 0 ? 'current' : 'locked';
+lessonStatus = lessonIdx === 0 ? 'current' : 'locked';
+```
+
+### 9.3 章综述知识点数空数组误判为 1（待修复）
+
+**问题描述：**
+`cardsRepo.countKnowledgePointsByLessonId()` 将 JSON 字符串 `"[]"` 当作一个有效 ID 加入 Set，导致空知识点的卡片仍返回 `knowledgePointCount = 1`。
+
+**核心算法 — 知识点计数（当前实现）：**
+
+```typescript
+async countKnowledgePointsByLessonId(lessonId: number): Promise<number> {
+  const [rows] = await this.pool.execute(
+    'SELECT knowledge_point_ids FROM cards WHERE lesson_id = ? AND knowledge_point_ids IS NOT NULL',
+    [lessonId],
+  );
+  const kpSet = new Set<string>();
+  for (const row of rows) {
+    const ids = (row.knowledge_point_ids as string) || '';
+    ids.split(',').map(id => id.trim()).filter(Boolean).forEach(id => kpSet.add(id));
+  }
+  return kpSet.size;
+}
+```
+
+**根因：**
+`ids.split(',')` 在 `"[]"` 上运行时产生 `['[', ']']`：
+- `'['` → trim 后非空 → 被当作有效 ID 加入 Set
+- `']'` → trim 后为空 → filter(Boolean) 过滤掉
+
+结果：空数组 `"[]"` 被误判为包含 1 个知识点 `'['`。
+
+**修复方向：**
+在 `cards.repo.ts` 中增加 JSON 解析或特殊值识别。推荐方案：先尝试 `JSON.parse()` 解析，若为数组则展开处理，非数组才按逗号分割：
+
+```typescript
+const ids = (row.knowledge_point_ids as string) || '';
+let idList: string[] = [];
+try {
+    const parsed = JSON.parse(ids);
+    if (Array.isArray(parsed)) {
+        idList = parsed;
+    } else if (typeof parsed === 'string') {
+        idList = [parsed];
+    }
+} catch {
+    // 兜底：按逗号分割（兼容旧数据）
+    idList = ids.split(',');
+}
+idList.map(id => id.trim()).filter(Boolean).forEach(id => kpSet.add(id));
+```

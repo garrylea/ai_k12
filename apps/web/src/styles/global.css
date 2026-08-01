@@ -55,6 +55,17 @@
   --shadow-glow-brand: 0 0 16px rgba(255, 107, 53, 0.25);
   --shadow-glow-success: 0 0 12px rgba(74, 155, 110, 0.30);
 
+  /* ===== 字体栈 ===== */
+  --font-sans:
+    Inter, system-ui, -apple-system, 'PingFang SC', 'PingFang HK',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Source Han Sans SC',
+    'Noto Sans SC', sans-serif;
+  /* 教材正文衬线体：思源宋体 + 宋体 fallback，长阅读更舒适（参考页实测） */
+  --font-serif:
+    'Source Han Serif SC', 'Source Han Serif CN', 'Noto Serif CJK SC',
+    'Noto Serif SC', 'Songti SC', 'SimSun', '宋体', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
   --motion-ease: cubic-bezier(0.33, 1, 0.68, 1);
 
   /* ===== Learn Page Tokens (P2.2 CourseDetail) =====
@@ -65,19 +76,31 @@
   --learn-card-max-w: 56rem;           /* 896px */
   --learn-prose-w: 48rem;              /* 768px */
   --learn-card-bg: #FDFCF8;
+  --learn-card-border: #E8EDE4;         /* 卡片边框，参考页实测 */
   --learn-text-primary: #3C4A35;
   --learn-heading-1: #333333;
   --learn-heading-2: #B0C4DE;
+  /* 学习沉浸层按钮（不分散注意力，参考页 EyeButton 主色） */
+  --learn-btn-primary: #B0C4DE;
+  --learn-btn-primary-hover: #9BB5D4;
 
   --fs-learn-h1: 1.25rem;              /* 20px */
   --fs-learn-h2: 1.125rem;             /* 18px */
   --fs-learn-body: 1rem;               /* 16px */
   --lh-learn-body: 1.625;              /* 26px */
+
+  /* 左侧栏护眼文字颜色（与参考页 eye-text-* 对齐） */
+  --sidebar-text-primary: #333333;
+  --sidebar-text-secondary: #666666;
+  --sidebar-text-muted: #999999;
 }
 
 /* ===== Student Night Mode (Dark Tea Gold) ===== */
 [data-theme='student-night'] {
   --brand-500: #C9743E;
+  /* 夜间学习按钮色（参考页夜间 --color-eye-accent-primary） */
+  --learn-btn-primary: #6E88A6;
+  --learn-btn-primary-hover: #829CB8;
   --brand-400: #D88E5E;
   --brand-600: #B06030;
   --brand-100: #3A2818;
@@ -100,6 +123,11 @@
   --info: #6B8AA6;
 
   --aux: #7B5A8E;
+
+  /* 左侧栏护眼文字颜色 — 夜间（与参考页对齐） */
+  --sidebar-text-primary: #D1C4B0;
+  --sidebar-text-secondary: #AB9E89;
+  --sidebar-text-muted: #7E725F;
 
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -181,14 +209,14 @@ html {
 /* ===== Global Base ===== */
 body {
   margin: 0;
-  font-family:
-    Inter, system-ui, -apple-system, 'PingFang SC', 'PingFang HK',
-    'Hiragino Sans GB', 'Microsoft YaHei', 'Source Han Sans SC',
-    'Noto Sans SC', sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg-base);
   color: var(--text-primary);
   transition: background-color 800ms ease, color 300ms ease;
   -webkit-font-smoothing: antialiased;
+  /* 参考页实测：字间距提升中文阅读舒适度 */
+  letter-spacing: 0.05em;
+  line-height: 1.8;
 }
 
 /* ===== Theme Container ===== */
@@ -231,11 +259,40 @@ body {
   font-weight: 900;
   line-height: 1.75rem;  /* 28px */
   margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.learn-prose h2::before {
+  content: '';
+  display: block;
+  width: 0.375rem;   /* 6px */
+  height: 1rem;       /* 16px */
+  border-radius: 9999px;
+  background: var(--learn-heading-2);
+  flex-shrink: 0;
 }
 .learn-prose h3 {
   font-size: var(--fs-learn-body);
   font-weight: 700;
   line-height: var(--lh-learn-body);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.learn-prose h3::before {
+  content: '';
+  display: block;
+  width: 0.3rem;     /* 5px */
+  height: 0.875rem;   /* 14px */
+  border-radius: 9999px;
+  background: var(--learn-heading-2);
+  flex-shrink: 0;
+}
+/* 标题前空行：任何元素后接标题时增加上间距（margin 在兄弟间会折叠，不会叠加） */
+.learn-prose * + h2,
+.learn-prose * + h3 {
+  margin-top: 1.5rem;
 }
 .learn-prose p {
   margin: 0;
@@ -263,6 +320,32 @@ body {
   max-width: 100%;
   height: auto;
   border-radius: var(--radius-card);
+}
+/* 图注容器：图片紧贴标注，无下边距 */
+.learn-prose .figure-caption-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 1rem 0;
+}
+.learn-prose .figure-caption-wrap > img {
+  margin: 0;
+}
+.learn-prose .figure-caption-wrap > .figure-caption-text {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+/* 练习题：题干加粗，子项缩进+小字 */
+.learn-prose .exercise-stem {
+  font-weight: 700;
+  color: var(--learn-text-primary);
+}
+.learn-prose .exercise-item {
+  padding-left: 2rem;
+  font-size: 0.9375rem;  /* 15px，比正文略小 */
+  color: var(--text-secondary);
 }
 
 /* ===== Scrollbar ===== */

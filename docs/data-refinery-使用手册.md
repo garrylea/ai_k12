@@ -306,6 +306,12 @@ python src/publish_cli.py
 # 只发布 smartedu
 python src/publish_cli.py --source smartedu
 
+# 只发布指定页（如教材第 8-20 页）
+python src/publish_cli.py --pages "8-20"
+
+# 发布指定单页 / 多页
+python src/publish_cli.py --pages "12,20"
+
 # 重新发布
 python src/publish_cli.py --reconvert
 
@@ -318,6 +324,7 @@ python src/publish_cli.py --dry-run
 | `--input-dir` | path | `output/extracted` | extracted JSONL 目录 |
 | `--output-dir` | path | `output/published` | published 输出目录 |
 | `--source` | all / zgkao / smartedu | `all` | 来源过滤 |
+| `--pages` | str | — | 页码过滤，如 `1-6` 或 `1,3,5-8`（仅 page_*.jsonl，试卷/答案聚合文件不受影响） |
 | `--force` | flag | 否 | 忽略 checkpoint |
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有输出 |
 | `--dry-run` | flag | 否 | 只打印不发布 |

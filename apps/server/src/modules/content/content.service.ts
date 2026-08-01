@@ -62,4 +62,34 @@ export class ContentService {
     }
     return result;
   }
+
+  /** Ordered cards of a lesson for the P2.2 reading page. */
+  async getLessonCards(lessonId: number) {
+    const lesson = await this.lessonsRepo.findById(lessonId);
+    if (!lesson) throw new NotFoundException({ code: 1002, message: '课程不存在' });
+
+    const cards = await this.cardsRepo.findByLessonId(lessonId);
+    return {
+      lessonId,
+      lessonName: lesson.name,
+      totalCards: cards.length,
+      cards: cards.map(c => ({
+        id: c.id,
+        sortOrder: c.sort_order,
+        cardType: c.card_type,
+        title: c.title,
+        content: c.content,
+        metadata: c.content_metadata ? safeParse(c.content_metadata) : null,
+        textbookPage: c.textbook_page,
+      })),
+    };
+  }
+}
+
+function safeParse(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }

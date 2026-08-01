@@ -13,10 +13,12 @@ interface PlanetNodeProps {
   onClick?: () => void;
 }
 
+// Sizes in rem (÷16 from px) so the planet scales with the fluid root
+// font-size instead of being pinned to device px in inline styles.
 const sizeMap: Record<PlanetSize, number> = {
-  large: 80,
-  medium: 56,
-  small: 40,
+  large: 5,   // 80px @root16
+  medium: 3.5, // 56px
+  small: 2.5,  // 40px
 };
 
 const labelSizeMap: Record<PlanetSize, string> = {
@@ -33,7 +35,10 @@ export function PlanetNode({
   selected,
   onClick,
 }: PlanetNodeProps) {
-  const px = sizeMap[size];
+  const rem = sizeMap[size];        // planet diameter in rem
+  const dim = `${rem}rem`;          // width/height
+  const ringDim = `${rem + 0.75}rem`; // selection ring (was px + 12)
+  const ringOffset = '-0.375rem';   // was -6px
   const clickable = status !== 'locked';
 
   const colors: Record<PlanetStatus, { fill: string; glow: string; ring: string }> = {
@@ -65,7 +70,7 @@ export function PlanetNode({
           clickable && 'cursor-pointer hover:scale-105',
           !clickable && 'cursor-not-allowed',
         )}
-        style={{ width: px, height: px }}
+        style={{ width: dim, height: dim }}
         aria-label={`${label}${status === 'locked' ? '（未解锁）' : ''}`}
       >
         {/* 选中环 */}
@@ -74,10 +79,10 @@ export function PlanetNode({
             className="absolute rounded-full border-2"
             style={{
               borderColor: 'var(--brand-500)',
-              width: px + 12,
-              height: px + 12,
-              top: -6,
-              left: -6,
+              width: ringDim,
+              height: ringDim,
+              top: ringOffset,
+              left: ringOffset,
             }}
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -89,7 +94,7 @@ export function PlanetNode({
         {status === 'current' && (
           <motion.div
             className="absolute rounded-full"
-            style={{ width: px, height: px, boxShadow: `0 0 ${px / 2}px ${c.glow}` }}
+            style={{ width: dim, height: dim, boxShadow: `0 0 ${rem / 2}rem ${c.glow}` }}
             animate={{ scale: [1, 1.15, 1] }}
             transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
           />
@@ -99,12 +104,12 @@ export function PlanetNode({
         {status === 'completed' && (
           <div
             className="absolute rounded-full"
-            style={{ width: px, height: px, boxShadow: `0 0 ${px / 3}px ${c.glow}` }}
+            style={{ width: dim, height: dim, boxShadow: `0 0 ${rem / 3}rem ${c.glow}` }}
           />
         )}
 
         {/* 星球本体 */}
-        <svg width={px} height={px} viewBox="0 0 100 100">
+        <svg width={dim} height={dim} viewBox="0 0 100 100">
           <defs>
             <radialGradient id={`grad-${size}-${status}`} cx="35%" cy="35%">
               <stop offset="0%" stopColor="rgba(255,255,255,0.4)" />
@@ -147,7 +152,7 @@ export function PlanetNode({
       </button>
 
       {/* 标签 */}
-      <div className="text-center max-w-[120px]">
+      <div className="text-center max-w-[7.5rem]">
         <div
           className={clsx(
             'font-semibold',

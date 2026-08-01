@@ -18,6 +18,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': 'http://localhost:3001',
+      '/assets': 'http://localhost:3001',
     },
   },
 });

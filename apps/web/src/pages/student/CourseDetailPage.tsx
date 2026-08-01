@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, Children } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -19,6 +19,16 @@ const ArrowLeftIcon = () => (
     <polyline points="15 18 9 12 15 6" />
   </svg>
 );
+const ChevronLeftIcon = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
+const ChevronRightIcon = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+);
 const ChatIcon = () => (
   <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -36,6 +46,34 @@ const MoonIcon = () => (
   </svg>
 );
 
+const CheckCircleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="9 12 12 15 16 10" />
+  </svg>
+);
+
+const CircleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+  </svg>
+);
+
+const LockIcon2 = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+const LogOutIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" y1="12" x2="9" y2="12" />
+  </svg>
+);
+
 const CARD_TYPE_LABEL: Record<LessonCard['cardType'], string> = {
   concept: '概念',
   example: '例题',
@@ -44,6 +82,78 @@ const CARD_TYPE_LABEL: Record<LessonCard['cardType'], string> = {
   summary: '小结',
   reading: '阅读',
 };
+
+/** 判断一段文本是否为图片标注（以"图"开头，如"图21.1-1"） */
+const FIGURE_CAPTION_RE = /^图[\d\u4e00-\u9fff]/;
+
+/**
+ * 检查 ReactMarkdown 的 p 节点 children 是否包含「图片 + 图注」结构。
+ * 如果是，返回 { imgEl, caption }；否则返回 null。
+ *
+ * 注意：因为我们在 components 里提供了自定义的 img 组件，
+ * 子元素的 type 是函数而非字符串 'img'，所以用 props.src 来识别图片。
+ */
+function extractFigureCaption(children: React.ReactNode): {
+  imgEl: React.ReactNode;
+  caption: string;
+} | null {
+  const kids = Children.toArray(children);
+  const imgKid = kids.find((c: any) => {
+    if (c === null || typeof c !== 'object') return false;
+    return !!c?.props?.src;
+  });
+  if (!imgKid) return null;
+
+  const imgIdx = kids.indexOf(imgKid);
+  const afterText = kids
+    .slice(imgIdx + 1)
+    .map((c: any) => {
+      if (typeof c === 'string') return c;
+      if (typeof c === 'number') return String(c);
+      return '';
+    })
+    .join('')
+    .trim();
+
+  if (!afterText || !FIGURE_CAPTION_RE.test(afterText)) return null;
+
+  return { imgEl: imgKid, caption: afterText };
+}
+
+/** 递归提取 React 子节点的纯文本（用于判断段落类型） */
+function getNodeText(node: React.ReactNode): string {
+  if (node === null || node === undefined) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(getNodeText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    return getNodeText((node as any).props?.children);
+  }
+  return '';
+}
+
+/** 练习题子项模式：(1) (2) ... (10) 等 */
+const EXERCISE_ITEM_RE = /^\([1-9]\d?\)/;
+/** 题干模式：以：或:结尾 */
+const EXERCISE_STEM_RE = /[：:]$/;
+
+/**
+ * 预处理卡片内容 markdown：
+ * 1. 转义行首 "N." 防止 markdown 解析为有序列表（保留题号文本）
+ * 2. 同行/单换行分隔的子题 "；(N)" / "; (N)" / "$ (N)" 拆成独立段落
+ * 3. 题干后确保段落分隔
+ */
+function preprocessContent(raw: string): string {
+  let result = raw;
+  // 1. 转义行首 N. 防止有序列表
+  result = result.replace(/^(\d+)\.\s/gm, '$1\\. ');
+  // 2. 任何非双换行位置后的 (N) 都补成段落分隔
+  //    匹配：非换行字符 + 可选空白 + (N) → 非换行字符 + \n\n + (N)
+  result = result.replace(/([^\n])\s*\((\d+)\)/g, '$1\n\n($2)');
+  // 3. 题干后确保段落分隔：：\n\n(N) 已由 2 保证，这里处理 ：(N) 无空格情况
+  result = result.replace(/([：:])\((\d+)\)/g, '$1\n\n($2)');
+  return result;
+}
 
 function LoadingSkeleton() {
   return (
@@ -78,7 +188,10 @@ export default function CourseDetailPage() {
     Number(searchParams.get('lessonId')) ??
     0;
   const breadcrumb = (location.state as { breadcrumb?: string } | null)?.breadcrumb ?? '';
-
+  const subjectName = (location.state as { subjectName?: string } | null)?.subjectName ?? '';
+  const gradeName = (location.state as { gradeName?: string } | null)?.gradeName ?? '';
+  const subjectId = (location.state as { subjectId?: number } | null)?.subjectId ?? 0;
+  const username = localStorage.getItem('username') ?? '';
   const [data, setData] = useState<LessonCardsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -126,94 +239,138 @@ export default function CourseDetailPage() {
 
   return (
     <div className="student-theme-container" data-theme={mode} data-school="junior">
-      <div className="h-screen flex bg-[var(--bg-base)] text-[var(--text-primary)] overflow-hidden">
+      <div className="h-screen flex bg-[var(--bg-page)] text-[var(--text-primary)] overflow-hidden">
         {/* 左侧阶段栏 */}
         <aside
           className="hidden md:flex flex-col shrink-0 bg-[var(--bg-page)] border-r border-[var(--bg-subtle)]"
           style={{ width: 'var(--learn-sidebar-width)' }}
         >
-          <div className="p-5">
+          <div className="p-6 mt-4 pb-2">
             <button
-              onClick={() => navigate('/student/level-map')}
-              className="flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors mb-4"
+              onClick={() => navigate('/student/star-map', { state: { subjectId } })}
+              className="flex items-center gap-1.5 text-xs font-semibold text-[var(--sidebar-text-secondary)] hover:text-[var(--sidebar-text-primary)] transition-colors mb-3 bg-[var(--bg-subtle)]/50 px-2.5 py-1.5 rounded-full border border-[var(--bg-subtle)] shadow-sm"
             >
               <ArrowLeftIcon />
-              <span>返回关卡星地图</span>
+              <span>返回关卡星图</span>
             </button>
-            <h2 className="text-sm text-[var(--text-tertiary)] mb-1">今日任务</h2>
-            <h1 className="text-lg font-bold text-[var(--text-primary)]">数学 · 初二上</h1>
+            <h2 className="text-sm font-medium text-[var(--sidebar-text-muted)] mb-1">今日任务</h2>
+            <h1 className="text-xl font-bold tracking-tight text-[var(--sidebar-text-primary)] mb-3">
+              {subjectName || '数学'} · {gradeName || '九年级上'}
+            </h1>
           </div>
 
-          <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
-            {/* 阶段列表 — 由后端接口返回，此处静态占位 */}
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-[var(--bg-subtle)]/50">
-              <div className="w-2 h-2 rounded-full bg-[var(--text-tertiary)] mt-1.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-[var(--text-secondary)]">错题清零（前一课）</p>
-                <p className="text-xs text-[var(--text-tertiary)]">有 2 道错题未清</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-3 rounded-lg">
-              <div className="w-2 h-2 rounded-full bg-[var(--brand-500)] mt-1.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-[var(--text-primary)]">12.2 一元二次方程的解法</p>
-                <p className="text-xs text-[var(--text-tertiary)]">核心知识</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-3 rounded-lg opacity-50">
-              <div className="w-2 h-2 rounded-full bg-[var(--text-tertiary)] mt-1.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-[var(--text-secondary)]">课堂练习</p>
-                <p className="text-xs text-[var(--text-tertiary)]">思路提示</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-3 rounded-lg opacity-50">
-              <div className="w-2 h-2 rounded-full bg-[var(--text-tertiary)] mt-1.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-[var(--text-secondary)]">第十二章 单元检测</p>
-                <p className="text-xs text-[var(--text-tertiary)]">闭卷测试</p>
-              </div>
-            </div>
+          <nav className="flex-1 px-4 space-y-4 overflow-y-auto mt-2">
+            {(() => {
+              const tasks = [
+                { id: 1, title: '错题清零（前一课）', subtitle: '有 2 道错题未清', status: 'unlocked' as const, path: '/student/review' },
+                { id: 2, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: 'current' as const, path: '/student/learn' },
+                { id: 3, title: '课堂练习', subtitle: '思路提示', status: 'locked' as const, path: '/student/practice' },
+                { id: 4, title: '单元检测', subtitle: '闭卷测试', status: 'locked' as const, path: '/student/unit-test' },
+              ];
+              return tasks.map((task, index) => {
+                const isLocked = task.status === 'locked';
+                const isCurrent = task.status === 'current';
+                const isCompleted = task.status === 'completed';
+                return (
+                  <div
+                    key={task.id}
+                    className={`relative ${!isLocked ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'}`}
+                    onClick={() => {
+                      if (!isLocked && task.path) {
+                        navigate(task.path);
+                      }
+                    }}
+                  >
+                    {index !== tasks.length - 1 && (
+                      <div className="absolute left-4 top-8 bottom-[-16px] w-[2px] bg-[var(--bg-subtle)]" />
+                    )}
+                    <div
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-300 ${
+                        isCurrent
+                          ? 'bg-[var(--learn-card-bg)] shadow-sm border border-[var(--learn-card-border)]'
+                          : 'border border-transparent hover:bg-[var(--bg-subtle)]/40'
+                      }`}
+                    >
+                      <div className="relative z-10 flex items-center justify-center bg-[var(--bg-page)]">
+                        {isCompleted && <CheckCircleIcon className="w-6 h-6 text-green-600" />}
+                        {isCurrent && <CircleIcon className="w-6 h-6 text-[var(--learn-btn-primary)]" />}
+                        {isLocked && <LockIcon2 className="w-5 h-5 text-[var(--sidebar-text-muted)]/60" />}
+                        {task.status === 'unlocked' && <CircleIcon className="w-5 h-5 text-[var(--learn-btn-primary)]/60 mx-[2px]" />}
+                      </div>
+                      <div>
+                        <div className={`text-sm font-medium ${isCurrent ? 'text-[var(--learn-btn-primary)] font-semibold' : 'text-[var(--sidebar-text-primary)]'} ${isLocked ? 'text-[var(--sidebar-text-muted)]' : ''}`}>
+                          {task.title}
+                        </div>
+                        <div className="text-xs text-[var(--sidebar-text-muted)] mt-1">
+                          {task.subtitle}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </nav>
 
-          <div className="p-4 border-t border-[var(--bg-subtle)]">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-[var(--bg-subtle)] flex items-center justify-center text-sm font-bold text-[var(--text-secondary)]">
-                小
+          <div className="p-4 mt-auto">
+            <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--learn-btn-primary)] flex items-center justify-center text-white font-bold text-lg">
+                  {username ? username[0].toUpperCase() : '学'}
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-[var(--sidebar-text-primary)]">{username || '学生'}</div>
+                  <div className="text-xs text-[var(--sidebar-text-muted)]">专注学习中...</div>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-[var(--text-primary)]">小明</p>
-                <p className="text-xs text-[var(--text-tertiary)]">专注学习中…</p>
-              </div>
+              <button
+                onClick={() => {
+                  localStorage.removeItem('token');
+                  localStorage.removeItem('userId');
+                  localStorage.removeItem('username');
+                  localStorage.removeItem('userRole');
+                  navigate('/login');
+                }}
+                className="p-2 text-[var(--sidebar-text-secondary)] hover:text-red-500 hover:bg-white rounded-xl transition-colors"
+                title="退出登录"
+              >
+                <LogOutIcon className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </aside>
 
-        {/* 主内容区 */}
+        {/* 主内容区 — header / Card / footer 三块同宽对齐（与 Card 一致的 max-width 居中） */}
         <main className="flex-1 min-w-0 flex flex-col">
-          {/* Header */}
-          <header className="flex items-center justify-between gap-4 px-6 py-4 shrink-0">
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="text-sm text-[var(--text-secondary)] truncate">
-                {breadcrumb ? `${breadcrumb} · ` : ''}{data.lessonName}
-              </span>
+          {/* Header — 顶部课本面包屑 + 进度 */}
+          <header className="shrink-0 relative flex justify-center px-4 md:px-8 py-4">
+            <div
+              className="w-full flex items-center justify-between gap-4"
+              style={{ maxWidth: 'var(--learn-card-max-w)' }}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-sm text-[var(--text-secondary)] truncate">
+                  {breadcrumb ? `${breadcrumb} · ` : ''}{data.lessonName}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 shrink-0">
+                <span className="text-sm font-medium text-[var(--text-tertiary)] tabular-nums">
+                  {page + 1} / {total}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-4 shrink-0">
-              <span className="text-sm font-medium text-[var(--text-tertiary)] tabular-nums">
-                {page + 1} / {total}
-              </span>
-              <button
-                onClick={() => setMode(mode === 'student-day' ? 'student-night' : 'student-day')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-pill)] text-xs text-[var(--text-secondary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-card)] transition-colors"
-                title="切换护眼模式"
-              >
-                {mode === 'student-day' ? <SunIcon /> : <MoonIcon />}
-                <span>护眼</span>
-              </button>
-            </div>
+            {/* 护眼 — 跳出 Card 对齐盒子，右上角 */}
+            <button
+              onClick={() => setMode(mode === 'student-day' ? 'student-night' : 'student-day')}
+              className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-pill)] text-xs text-[var(--text-secondary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-card)] transition-colors"
+              title="切换护眼模式"
+            >
+              {mode === 'student-day' ? <SunIcon /> : <MoonIcon />}
+              <span>护眼</span>
+            </button>
           </header>
 
-          {/* Card area */}
+          {/* Card area — 视口固定：flex-1 撑满 header/footer 之间，内容垂直居中，禁止卡片内滚动 */}
           <div className="flex-1 min-h-0 flex flex-col items-center px-4 md:px-8 py-2">
             <AnimatePresence mode="wait">
               <motion.div
@@ -239,36 +396,34 @@ export default function CourseDetailPage() {
                   </h1>
                 </div>
 
-                {/* 白卡 */}
+                {/* 白卡 — 撑满视口 */}
                 <div
-                  className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden"
+                  className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[var(--learn-card-border)] shadow-sm"
                   style={{ backgroundColor: 'var(--learn-card-bg)' }}
                 >
-                  {/* 卡片内容 — 垂直居中 */}
-                  <div className="flex-1 min-h-0 flex flex-col justify-center px-8 md:px-12 py-6 overflow-y-auto">
+                  {/* 卡片内容 — 垂直居中，无滚动条（内容由管线保证 ≤700 字放得下） */}
+                  <div className="flex-1 min-h-0 flex flex-col justify-center px-8 md:px-12 py-6">
                     <div className="mx-auto" style={{ width: '100%', maxWidth: 'var(--learn-prose-w)' }}>
-                      {/* 卡片类型标签 */}
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-[var(--brand-100)] text-[var(--brand-600)]">
-                          {CARD_TYPE_LABEL[card.cardType] ?? card.cardType}
-                        </span>
-                        {card.textbookPage && (
-                          <span className="text-xs text-[var(--text-tertiary)]">{card.textbookPage}</span>
-                        )}
-                      </div>
-
-                      {/* 卡片内容标题（H2） */}
-                      {card.title && (
-                        <h2
-                          className="font-black leading-snug mb-4"
-                          style={{
-                            fontSize: 'var(--fs-learn-h2)',
-                            color: 'var(--learn-heading-2)',
-                          }}
-                        >
-                          {card.title}
-                        </h2>
-                      )}
+                      {/* 卡片内容标题（H2）— 参考页风格：左侧色条 + 标题文字
+                          标题优先用 card.title，无标题则用卡片类型（探究/例题/练习等） */}
+                      {(() => {
+                        const displayTitle = card.title || (CARD_TYPE_LABEL[card.cardType] ?? card.cardType);
+                        return displayTitle ? (
+                          <h2
+                            className="font-black leading-snug mb-4 flex items-center gap-2"
+                            style={{
+                              fontSize: 'var(--fs-learn-h2)',
+                              color: 'var(--learn-heading-2)',
+                            }}
+                          >
+                            <span
+                              className="w-1.5 h-4 rounded-full shrink-0"
+                              style={{ backgroundColor: 'var(--learn-heading-2)' }}
+                            />
+                            {displayTitle}
+                          </h2>
+                        ) : null;
+                      })()}
 
                       {/* Markdown body */}
                       <div className="learn-prose">
@@ -276,26 +431,48 @@ export default function CourseDetailPage() {
                           remarkPlugins={[remarkMath, remarkGfm]}
                           rehypePlugins={[rehypeKatex]}
                           components={{
+                            p: ({ children, ...props }) => {
+                              // 1. 图片 + 图注
+                              const fig = extractFigureCaption(children);
+                              if (fig) {
+                                return (
+                                  <div className="figure-caption-wrap">
+                                    {fig.imgEl}
+                                    <span className="figure-caption-text">{fig.caption}</span>
+                                  </div>
+                                );
+                              }
+                              // 2. 练习题子项 (1) (2) ...
+                              const text = getNodeText(children).trim();
+                              if (EXERCISE_ITEM_RE.test(text)) {
+                                return <p className="exercise-item" {...props}>{children}</p>;
+                              }
+                              // 3. 题干（以 ：或 : 结尾）
+                              if (EXERCISE_STEM_RE.test(text)) {
+                                return <p className="exercise-stem" {...props}>{children}</p>;
+                              }
+                              return <p {...props}>{children}</p>;
+                            },
                             img: ({ src, alt }) => (
                               <img
                                 src={src ? resolveAsset(src) : ''}
                                 alt={alt ?? ''}
-                                className="block mx-auto my-4 max-w-full h-auto rounded-lg"
+                                className="block mx-auto my-4 max-w-full max-h-[60vh] object-contain rounded-lg"
                                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                               />
                             ),
                           }}
                         >
-                          {card.content}
+                          {preprocessContent(card.content)}
                         </ReactMarkdown>
                       </div>
                     </div>
                   </div>
 
-                  {/* 悬浮答疑按钮 */}
+                  {/* 悬浮答疑按钮（柔和钢蓝，不分散学习注意力） */}
                   <button
                     onClick={() => navigate('/student/ai-discuss', { state: { cardId: card.id, lessonId } })}
-                    className="absolute right-6 bottom-20 w-14 h-14 rounded-full bg-[var(--brand-500)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--brand-600)] transition-colors z-10"
+                    className="absolute right-6 bottom-20 w-14 h-14 rounded-full bg-[var(--learn-btn-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--learn-btn-primary-hover)] transition-colors z-10"
                     title="思辨答疑"
                   >
                     <ChatIcon />
@@ -305,31 +482,51 @@ export default function CourseDetailPage() {
             </AnimatePresence>
           </div>
 
-          {/* 底部操作栏 */}
-          <footer className="shrink-0 flex items-center justify-between gap-4 px-6 md:px-8 py-4">
-            <button
-              onClick={() => setPage(p => Math.max(0, p - 1))}
-              disabled={page <= 0}
-              className="px-5 py-2.5 rounded-[var(--radius-button)] text-[var(--text-secondary)] font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-subtle)] transition-colors"
+          {/* 底部操作栏 — 上一页 / 进度点 / 下一页，与 Card 同宽居中 */}
+          <footer className="shrink-0 flex justify-center px-4 md:px-8 py-4">
+            <div
+              className="w-full flex items-center justify-between gap-4"
+              style={{ maxWidth: 'var(--learn-card-max-w)' }}
             >
-              上一页
-            </button>
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page <= 0}
+                className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] text-[var(--text-secondary)] font-medium border border-[var(--learn-card-border)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-subtle)] transition-colors"
+              >
+                <ChevronLeftIcon />
+                <span>上一页</span>
+              </button>
 
-            {page < total - 1 ? (
-              <button
-                onClick={() => setPage(p => Math.min(total - 1, p + 1))}
-                className="px-5 py-2.5 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-white font-medium hover:bg-[var(--brand-600)] transition-colors"
-              >
-                下一页
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate('/student/homework', { state: { lessonId } })}
-                className="px-5 py-2.5 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-white font-medium hover:bg-[var(--brand-600)] transition-colors"
-              >
-                开始作业
-              </button>
-            )}
+              {/* 进度点 — 与 Card 同宽居中 */}
+              <div className="flex items-center gap-2">
+                {Array.from({ length: total }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={`rounded-full transition-colors ${
+                      i === page ? 'h-2 w-6 bg-[var(--learn-btn-primary)]' : 'h-2 w-2 bg-[var(--bg-subtle)]'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              {page < total - 1 ? (
+                <button
+                  onClick={() => setPage(p => Math.min(total - 1, p + 1))}
+                  className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] text-white font-medium shadow-sm transition-colors bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)]"
+                >
+                  <span>下一页</span>
+                  <ChevronRightIcon />
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate('/student/homework', { state: { lessonId } })}
+                  className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] bg-emerald-700 text-white font-medium hover:bg-emerald-800 transition-colors shadow-sm"
+                >
+                  <span>开始作业</span>
+                  <ChevronRightIcon />
+                </button>
+              )}
+            </div>
           </footer>
         </main>
       </div>

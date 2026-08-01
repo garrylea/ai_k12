@@ -27,15 +27,31 @@ _IMG_MAX_WIDTH = 768       # prose 宽度
 
 
 def _count_text_chars(text: str) -> int:
-    """统计 text 中的有效字数（汉字 + 英文单词 + 数字，不含 Markdown 标记和 LaTeX 源码）。"""
+    """按渲染行折算有效字数（不是字符数）。
+
+    对齐参考页渲染（prose 768px / 16px 字宽 → 每行 48 字，行高 26px）：
+    - 每行按 _CHARS_PER_LINE（48）计，不足一行按整行计
+    - 空行也占一行渲染高度，按一行计
+    - Markdown 标记与图片引用不计；LaTeX 源码剔除，但公式块（$$..$$）按独立行占位计
+    """
+    # 去掉图片引用（图片单独按 height 折算 image_char_cost）
     cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
+    # 公式块 $$...$$ 在参考页中是独立行，按 1 行占位
+    cleaned = re.sub(r"\$\$[^$]+\$\$", "X", cleaned)
+    # 行内公式 $...$ 剔除源码，按 1 个字符占位
+    cleaned = re.sub(r"\$[^$]+\$", "x", cleaned)
+    # 去掉 Markdown 标记符（标题 #、列表、引用等）
     cleaned = re.sub(r"[#*>\-|`~\[\]]+", "", cleaned)
-    cleaned = re.sub(r"\$\$[^$]+\$\$", "", cleaned)
-    cleaned = re.sub(r"\$[^$]+\$", "", cleaned)
-    han = len(re.findall(r"[一-鿿]", cleaned))
-    eng = len(re.findall(r"[a-zA-Z]", cleaned))
-    digits = len(re.findall(r"[0-9]", cleaned))
-    return han + eng + digits
+
+    rows = 0
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if not line:
+            rows += 1  # 空行占一行渲染高度
+            continue
+        chars = len(re.findall(r"[一-鿿]", line)) + len(re.findall(r"[a-zA-Z0-9]", line))
+        rows += max(1, -(-chars // _CHARS_PER_LINE))  # 不足一行按整行
+    return rows * _CHARS_PER_LINE
 
 
 def _extract_page_number(md_path: Path) -> str:
@@ -50,6 +66,15 @@ def _split_paragraphs(text: str) -> list[str]:
     """按双换行拆分段落，过滤纯空行。"""
     parts = re.split(r"\n\n+", text)
     return [p.strip() for p in parts if p.strip()]
+
+
+# 页码标注：如 "3 第二十一章 一元二次方程"，是页眉/页脚残留，非正文内容
+_PAGE_NUMBER_HEADER_RE = re.compile(r'^\d+\s+第[一二三四五六七八九十百零]+章\s+\S+.*$')
+
+
+def _is_page_number_header(text: str) -> bool:
+    """判断是否为页码标注（页眉/页脚残留），如 '3 第二十一章 一元二次方程'。"""
+    return bool(_PAGE_NUMBER_HEADER_RE.match(text.strip()))
 
 
 def _images_in_range(images: list[ImageInfo], start: int, end: int) -> list[ImageInfo]:
@@ -73,6 +98,8 @@ def _make_bundles(text: str, images: list[ImageInfo]) -> list[_Bundle]:
 
     pos = 0
     for para in paragraphs:
+        if _is_page_number_header(para):
+            continue
         para_start = text.index(para, pos) if para in text[pos:] else pos
         para_end = para_start + len(para)
         pos = para_end
@@ -243,17 +270,35 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
         else:
             # 文字本身 >400（理论上 _make_bundles 已处理，兜底）
             sub_texts = _split_long_text(bundle.text)
+            sub_start = 0
             for sub in sub_texts:
                 sub_chars = _count_text_chars(sub)
-                if current_text_chars + sub_chars <= _TEXT_LIMIT and current_total + sub_chars <= _TOTAL_LIMIT:
+                # 子段图片：按子段文本在 bundle.text 中的位置归属
+                sub_pos = bundle.text.find(sub, sub_start)
+                sub_end = sub_pos + len(sub)
+                sub_imgs = [img for img in bundle.images
+                            if sub_pos <= img.position_in_text < sub_end]
+                sub_img_cost = sum(img.char_cost for img in sub_imgs)
+                if current_text_chars + sub_chars <= _TEXT_LIMIT and current_total + sub_chars + sub_img_cost <= _TOTAL_LIMIT:
                     current_texts.append(sub)
+                    current_images.extend(sub_imgs)
                     current_text_chars += sub_chars
-                    current_total += sub_chars
+                    current_total += sub_chars + sub_img_cost
                 else:
                     _close_card()
                     current_texts = [sub]
-                    current_text_chars = sub_chars
-                    current_total = sub_chars
+                    # 文字放得下但图超了：压缩图
+                    if sub_chars <= _TEXT_LIMIT:
+                        image_room = _TOTAL_LIMIT - sub_chars
+                        current_images = [_compress_image(img, image_room) for img in sub_imgs]
+                        new_img_cost = sum(img.char_cost for img in current_images)
+                        current_text_chars = sub_chars
+                        current_total = sub_chars + new_img_cost
+                    else:
+                        current_images = list(sub_imgs)
+                        current_text_chars = sub_chars
+                        current_total = sub_chars + sub_img_cost
+                sub_start = sub_end
 
     _close_card()
 

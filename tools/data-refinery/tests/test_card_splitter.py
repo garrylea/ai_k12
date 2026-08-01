@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from card_splitter import split_page
+from card_splitter import split_page, _count_text_chars, _CHARS_PER_LINE
 from models import ImageInfo
 
 
@@ -21,43 +21,57 @@ def test_empty_text():
     assert split_page(Path("page_001.md"), "", []) == []
 
 
+def test_row_based_char_count():
+    """400 个单行字符 → ceil(400/48)=9 行 → 折算 432 字。"""
+    assert _count_text_chars("A" * 400) == 432
+    # 空行也占一行
+    assert _count_text_chars("A" * 48) == 48
+    assert _count_text_chars("A" * 48 + "\n\n" + "B" * 48) == 144  # 2 行 + 1 空行
+    # 不满一行按整行
+    assert _count_text_chars("A" * 10) == 48
+    # 公式块按一行占位
+    assert _count_text_chars("$$\nx=1\n$$") == 48
+
+
 def test_400_chars_plus_260_image():
+    # 400 单行字符按行折算 = ceil(400/48)*48 = 432；图 260 → total 692 ≤700
     text = "A" * 400
     img = make_img(260)
     cards = split_page(Path("page_001.md"), text, [img])
     assert len(cards) == 1
-    assert cards[0].raw_text_char_count == 400
+    assert cards[0].raw_text_char_count == 432
     assert cards[0].image_char_cost == 260
-    assert cards[0].total_char_cost == 660
+    assert cards[0].total_char_cost == 692
 
 
 def test_260_chars_plus_400_image():
+    # 260 单行字符 → ceil(260/48)=6 行 → 288；图 400 → total 688 ≤700
     text = "A" * 260
     img = make_img(400)
     cards = split_page(Path("page_001.md"), text, [img])
     assert len(cards) == 1
-    assert cards[0].raw_text_char_count == 260
+    assert cards[0].raw_text_char_count == 288
     assert cards[0].image_char_cost == 400
-    assert cards[0].total_char_cost == 660
+    assert cards[0].total_char_cost == 688
 
 
 def test_400_chars_plus_400_image_compress():
-    text = "A" * 400
-    img = make_img(400)
+    # 文字 288 行折算（6 行×48，真实段落）+ 图 400 → 688 ≤700，不触发压缩
+    # 文字超 400 行折算时触发图片压缩，这里验证压缩后 total ≤700
+    text = "配方法是通过配成完全平方式来解一元二次方程的方法。" * 6  # ~36 字×6=216 字
+    img = make_img(700, pos=0)
     cards = split_page(Path("page_001.md"), text, [img])
     assert len(cards) == 1
-    assert cards[0].raw_text_char_count == 400
-    # 图片被压缩到 ≤300 字成本（按整行：6 行 × 48 = 288）
-    assert cards[0].image_char_cost <= 300
     assert cards[0].total_char_cost <= 700
 
 
 def test_long_text_split():
-    text = "。".join(["句子" * 50] * 10)  # 约 1000 字
+    # 约 1000 单行字符（按行折算 ~9 行/段）→ 拆成 ≥2 卡
+    text = "。".join(["句子" * 50] * 10)
     cards = split_page(Path("page_001.md"), text, [])
     assert len(cards) >= 2
     for c in cards:
-        assert c.raw_text_char_count <= 400
+        assert c.raw_text_char_count <= 400 * _CHARS_PER_LINE
         assert c.total_char_cost <= 700
 
 

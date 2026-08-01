@@ -96,12 +96,13 @@ export class ProgressService {
     const chapters: ChapterData[] = [];
     let completedCount = 0;
 
-    for (const unit of units) {
+    for (let unitIdx = 0; unitIdx < units.length; unitIdx++) {
+      const unit = units[unitIdx];
       // Determine unit status
       let unitStatus: 'completed' | 'current' | 'locked' = 'locked';
       if (currentUnitId === null) {
         // No progress yet: first unit is current
-        unitStatus = unit.order === 1 ? 'current' : 'locked';
+        unitStatus = unitIdx === 0 ? 'current' : 'locked';
       } else if (unit.id < (currentUnitId ?? 0)) {
         unitStatus = 'completed';
       } else if (unit.id === currentUnitId) {
@@ -114,7 +115,7 @@ export class ProgressService {
       // (chapter-intro lesson); it stays as a section, but the frontend renders
       // its badge as "章综述" instead of repeating the chapter title.
       const lessons = await this.contentService.getLessons(unit.id);
-      const sections: SectionData[] = lessons.map((lesson: any) => {
+      const sections: SectionData[] = lessons.map((lesson: any, lessonIdx: number) => {
         let lessonStatus: 'completed' | 'current' | 'locked' = 'locked';
         let lessonProgress = 0;
 
@@ -123,7 +124,8 @@ export class ProgressService {
           lessonProgress = 100;
         } else if (unitStatus === 'current') {
           if (currentLessonId === null) {
-            lessonStatus = lesson.order === 1 ? 'current' : 'locked';
+            // No progress yet: chapter overview (index 0) is current; sections are locked
+            lessonStatus = lessonIdx === 0 ? 'current' : 'locked';
           } else if (lesson.id < (currentLessonId ?? 0)) {
             lessonStatus = 'completed';
             lessonProgress = 100;
