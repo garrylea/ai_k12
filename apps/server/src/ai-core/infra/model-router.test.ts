@@ -22,6 +22,11 @@ describe('ModelRouter', () => {
     expect(result.fallback).toBeUndefined();
   });
 
+  it('routes structuring scene to deepseek-v4-flash', () => {
+    const result = router.route({ scene: 'structuring', subject: 'math' });
+    expect(result.primary.modelId).toBe('deepseek-v4-flash');
+  });
+
   it('routes chinese tutoring to kimi primary', () => {
     const result = router.route({ scene: 'tutoring', subject: 'chinese' });
     expect(result.primary.modelId).toBe('kimi-latest');

@@ -63,4 +63,59 @@ describe('QuestionStructuringCapability', () => {
     });
     expect(result.type).toBe('choice');
   });
+
+  it('passes rawInput and inputType through to the prompt template', async () => {
+    let capturedMessages: any[] = [];
+    class CapturingFakeClient {
+      async chat(req: any) {
+        capturedMessages = req.messages;
+        return {
+          content: JSON.stringify({
+            type: 'short_answer', difficulty: 1, content: 'test', answer: 'a',
+            explanation: 'e', knowledgePoints: [], quality: 'good', qualityIssues: [],
+          }),
+          reasoningContent: '',
+        };
+      }
+    }
+    const cap = new QuestionStructuringCapability({ modelClient: new CapturingFakeClient() as any });
+    await cap.structure({
+      rawInput: '求解 2x=4',
+      inputType: 'text',
+      studentId: 's1',
+      subjectHint: 'math',
+      gradeBand: 'junior',
+    });
+    // The user message (last message) should contain the rawInput and inputType
+    const userMessage = capturedMessages[capturedMessages.length - 1].content;
+    expect(userMessage).toContain('求解 2x=4');
+    expect(userMessage).toContain('text');
+  });
+
+  it('returns default poor result when JSON fails schema validation', async () => {
+    class SchemaFailClient {
+      async chat() {
+        return {
+          content: JSON.stringify({
+            type: 'invalid_type',   // not in enum
+            difficulty: 5,           // not 1|2|3
+            content: 'test',
+            answer: 'a',
+            explanation: 'e',
+            knowledgePoints: [],
+            quality: 'good',
+          }),
+          reasoningContent: '',
+        };
+      }
+    }
+    const cap = new QuestionStructuringCapability({ modelClient: new SchemaFailClient() as any });
+    const result = await cap.structure({
+      rawInput: 'test',
+      inputType: 'text',
+      studentId: 's1',
+    });
+    expect(result.quality).toBe('poor');
+    expect(result.qualityIssues?.[0]).toBe('JSON 解析失败');
+  });
 });

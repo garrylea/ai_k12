@@ -26,16 +26,18 @@ const StructuredQuestionSchema = z.object({
   qualityIssues: z.array(z.string()).optional(),
 });
 
-const DEFAULT_RESULT: StructuredQuestion = {
-  type: 'short_answer',
-  difficulty: 1,
-  content: '',
-  answer: '',
-  explanation: '',
-  knowledgePoints: [],
-  quality: 'poor',
-  qualityIssues: ['JSON 解析失败'],
-};
+function createDefaultResult(): StructuredQuestion {
+  return {
+    type: 'short_answer',
+    difficulty: 1,
+    content: '',
+    answer: '',
+    explanation: '',
+    knowledgePoints: [],
+    quality: 'poor',
+    qualityIssues: ['JSON 解析失败'],
+  };
+}
 
 export interface QuestionStructuringCapabilityDeps {
   modelClient?: ModelClient;
@@ -53,7 +55,8 @@ export class QuestionStructuringCapability {
   }
 
   async structure(request: QuestionStructuringRequest): Promise<StructuredQuestion> {
-    const subject = (request.subjectHint ?? 'math') as Subject;
+    const subjectHint = request.subjectHint ?? 'math';
+    const subject: Subject = subjectHint === 'chinese' || subjectHint === 'english' ? subjectHint : 'math';
     const gradeBand = request.gradeBand ?? 'junior';
 
     const promptResult = await this.promptBuilder.build({
@@ -65,7 +68,7 @@ export class QuestionStructuringCapability {
         customVariables: {
           rawInput: request.rawInput,
           inputType: request.inputType,
-          subjectHint: subject,
+          subjectHint,
           gradeBand,
         },
       },
@@ -75,6 +78,7 @@ export class QuestionStructuringCapability {
     const chatResponse = await this.modelClient.chat({
       model: routeResult.primary,
       messages: promptResult.messages,
+      responseFormat: 'json_object',
       timeout: timeoutConfig.timeout.structuring ?? timeoutConfig.timeout.default,
     });
 
@@ -82,11 +86,15 @@ export class QuestionStructuringCapability {
       rawContent: chatResponse.content,
       mode: 'json',
       schema: StructuredQuestionSchema,
-      defaultResult: DEFAULT_RESULT,
+      defaultResult: createDefaultResult(),
     });
 
     if (!parsed.success || !parsed.data) {
-      return DEFAULT_RESULT;
+      const result = createDefaultResult();
+      if (parsed.errors && parsed.errors.length > 0) {
+        result.qualityIssues = ['JSON 解析失败', ...parsed.errors];
+      }
+      return result;
     }
     return parsed.data;
   }
