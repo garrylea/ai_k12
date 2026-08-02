@@ -6,7 +6,7 @@ export interface ApiResponse<T> {
   data: T;
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   code: number;
   constructor(code: number, message: string) {
     super(message);
