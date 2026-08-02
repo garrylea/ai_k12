@@ -8,13 +8,13 @@ export class QuestionsRepository {
 
   async findByContentHash(contentHash: string): Promise<QuestionRow | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM questions WHERE content_hash = ?`,
+      `SELECT * FROM questions WHERE content_hash = ? AND is_active = 1`,
       [contentHash],
     );
     return (rows[0] as QuestionRow) ?? null;
   }
 
-  async create(row: Omit<QuestionRow, 'id' | 'created_at'>): Promise<number> {
+  async create(row: Omit<QuestionRow, 'id' | 'created_at' | 'is_active'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO questions
        (subject_id, type, difficulty, content, options, answer, explanation, source, content_hash)
@@ -26,7 +26,7 @@ export class QuestionsRepository {
 
   async bindKnowledgePoint(questionId: number, knowledgePointId: number, role = 'primary'): Promise<void> {
     await this.pool.execute(
-      `INSERT INTO question_knowledge_points (question_id, knowledge_point_id, role) VALUES (?, ?, ?)`,
+      `INSERT IGNORE INTO question_knowledge_points (question_id, knowledge_point_id, role) VALUES (?, ?, ?)`,
       [questionId, knowledgePointId, role],
     );
   }

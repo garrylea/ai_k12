@@ -25,7 +25,7 @@ export class ExtractTasksRepository {
 
   async updateStatus(id: number, status: ExtractTaskRow['status'], result?: string, errorMessage?: string): Promise<void> {
     await this.pool.execute(
-      `UPDATE extract_tasks SET status = ?, result = ?, error_message = ?, updated_at = NOW(3) WHERE id = ?`,
+      `UPDATE extract_tasks SET status = ?, result = ?, error_message = ? WHERE id = ?`,
       [status, result ?? null, errorMessage ?? null, id],
     );
   }

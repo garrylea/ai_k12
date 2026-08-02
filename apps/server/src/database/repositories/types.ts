@@ -80,9 +80,10 @@ export interface QuestionRow extends RowDataPacket {
   content: string;
   options: string | null;
   answer: string;
-  explanation: string;
-  source: string;
-  content_hash: string;
+  explanation: string | null;
+  source: string | null;
+  content_hash: string | null;
+  is_active: number;
   created_at: Date;
 }
 

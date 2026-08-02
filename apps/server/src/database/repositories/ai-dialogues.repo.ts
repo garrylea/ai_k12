@@ -24,7 +24,7 @@ export class AiDialoguesRepository {
     return (rows[0] as AiDialogueRow) ?? null;
   }
 
-  async findByStudentAndTrack(studentId: number, track: string, limit: number, cursor?: number): Promise<AiDialogueRow[]> {
+  async findByStudentAndTrack(studentId: number, track: AiDialogueRow['track'], limit: number, cursor?: number): Promise<AiDialogueRow[]> {
     const clause = cursor ? 'AND id < ?' : '';
     const params = cursor ? [studentId, track, cursor, limit] : [studentId, track, limit];
     const [rows] = await this.pool.execute<RowDataPacket[]>(
