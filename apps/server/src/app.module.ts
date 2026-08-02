@@ -33,20 +33,19 @@ import { ErrorBookModule } from './modules/error-book/error-book.module.js';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Populate request.user from the Bearer token for protected routes.
-    // AuthMiddleware is a no-op when the token is missing/invalid, so public
-    // routes (api/auth/login, api/auth/register, api/content/*) remain open
-    // even if they happen to be matched here. Each protected controller
-    // declares @UseGuards(JwtAuthGuard) which reads request.user.
+    // AuthMiddleware populates request.user from the Bearer token (graceful no-op
+    // if missing/invalid). Apply to ALL routes EXCEPT public auth/content routes.
+    // Using exclude + wildcard ensures root-level routes (e.g. POST /api/conversations)
+    // are matched, which the explicit `api/conversations/*` pattern missed
+    // (Express 4 path-to-regexp requires a trailing segment after the wildcard).
     consumer
       .apply(AuthMiddleware)
-      .forRoutes(
-        { path: 'api/progress/*', method: RequestMethod.ALL },
-        { path: 'api/files/*', method: RequestMethod.ALL },
-        { path: 'api/conversations/*', method: RequestMethod.ALL },
-        { path: 'api/ai/*', method: RequestMethod.ALL },
-        { path: 'api/refinery/*', method: RequestMethod.ALL },
-        { path: 'api/error-book/*', method: RequestMethod.ALL },
-      );
+      .exclude(
+        { path: 'api/auth', method: RequestMethod.ALL },
+        { path: 'api/auth/*', method: RequestMethod.ALL },
+        { path: 'api/content', method: RequestMethod.ALL },
+        { path: 'api/content/*', method: RequestMethod.ALL },
+      )
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
   }
 }
