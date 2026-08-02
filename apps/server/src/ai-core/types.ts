@@ -1,6 +1,6 @@
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'safety';
+export type Scene = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek';
 export type Difficulty = 1 | 2 | 3;
@@ -32,9 +32,41 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'fallback';
+export type CapabilityType = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry';
+
+// ========== Question Structuring Types ==========
+
+export interface QuestionStructuringRequest {
+  rawInput: string;           // text or markdown from MinerU
+  inputType: 'text' | 'image_markdown';
+  studentId: string;
+  subjectHint?: string;       // e.g. 'math'
+  gradeBand?: string;         // e.g. 'junior'
+}
+
+export interface StructuredOption {
+  label: string;
+  text: string;
+  isCorrect: boolean;
+}
+
+/**
+ * LLM output: raw structured question. subjectId/contentHash/knowledgePointIds
+ * are resolved by the consuming ErrorBookService (Task 8), NOT by the LLM.
+ */
+export interface StructuredQuestion {
+  type: 'choice' | 'fill_blank' | 'true_false' | 'short_answer' | 'proof';
+  difficulty: 1 | 2 | 3;
+  content: string;
+  options?: StructuredOption[];
+  answer: string;
+  explanation: string;
+  knowledgePoints: string[];  // names from LLM; service layer resolves to IDs
+  quality: 'good' | 'poor';
+  qualityIssues?: string[];
+}
 
 export interface PromptBuildRequest {
   capability: CapabilityType;

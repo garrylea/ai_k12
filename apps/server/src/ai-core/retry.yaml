@@ -10,6 +10,7 @@ timeout:
   variation: 60000
   explanation: 60000
   safety: 10000
+  structuring: 45000
 
 streaming:
   firstTokenTimeoutMs: 3000

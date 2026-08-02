@@ -102,6 +102,11 @@ routes:
     - subject: "*"
       primary: deepseek-v4-flash
 
+  structuring:
+    - subject: "*"
+      primary: deepseek-v4-flash
+      fallback: qwen3.7-max
+
 default:
   primary: qwen3.7-max
   fallback: deepseek-v4-flash

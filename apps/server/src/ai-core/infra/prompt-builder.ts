@@ -64,6 +64,9 @@ export class PromptBuilder {
     if (capability === 'fallback') {
       return `fallback/full-explanation.md`;
     }
+    if (capability === 'structuring') {
+      return `structuring/question.md`;
+    }
     throw new Error(`Unknown capability: ${capability}`);
   }
 
