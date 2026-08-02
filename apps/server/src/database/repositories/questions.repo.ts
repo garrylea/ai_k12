@@ -24,6 +24,31 @@ export class QuestionsRepository {
     return result.insertId;
   }
 
+  /**
+   * Race-safe dedup: find by content_hash, else create. The UNIQUE constraint on
+   * content_hash catches the TOCTOU race (two concurrent inserts with same hash);
+   * ER_DUP_ENTRY is caught and resolved by re-reading the existing row.
+   */
+  async findOrCreate(row: Omit<QuestionRow, 'id' | 'created_at' | 'is_active'>): Promise<{ id: number; created: boolean }> {
+    const existing = await this.findByContentHash(row.content_hash);
+    if (existing) return { id: existing.id, created: false };
+    try {
+      const id = await this.create(row);
+      return { id, created: true };
+    } catch (err: any) {
+      // ER_DUP_ENTRY: race condition - another request inserted the same hash
+      if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
+        const existing = await this.findByContentHash(row.content_hash);
+        if (existing) return { id: existing.id, created: false };
+      }
+      throw err;
+    }
+  }
+
+  async deleteById(id: number): Promise<void> {
+    await this.pool.execute(`DELETE FROM questions WHERE id = ?`, [id]);
+  }
+
   async bindKnowledgePoint(questionId: number, knowledgePointId: number, role = 'primary'): Promise<void> {
     await this.pool.execute(
       `INSERT IGNORE INTO question_knowledge_points (question_id, knowledge_point_id, role) VALUES (?, ?, ?)`,

@@ -24,11 +24,18 @@ export class AuxErrorBooksRepository {
     return (rows[0] as AuxErrorBookRow) ?? null;
   }
 
-  async findByStudent(studentId: number, subjectId?: number): Promise<AuxErrorBookRow[]> {
-    const clause = subjectId ? 'AND subject_id = ?' : '';
-    const params = subjectId ? [studentId, subjectId] : [studentId];
+  async findByStudent(studentId: number, subjectId?: number, includeCleared = false): Promise<AuxErrorBookRow[]> {
+    const conditions = ['student_id = ?'];
+    const params: any[] = [studentId];
+    if (!includeCleared) {
+      conditions.push('is_cleared = 0');
+    }
+    if (subjectId) {
+      conditions.push('subject_id = ?');
+      params.push(subjectId);
+    }
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM aux_error_books WHERE student_id = ? ${clause} ORDER BY id DESC`,
+      `SELECT * FROM aux_error_books WHERE ${conditions.join(' AND ')} ORDER BY id DESC`,
       params,
     );
     return rows as AuxErrorBookRow[];

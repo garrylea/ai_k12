@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards, ParseIntPipe, ForbiddenException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards, ParseIntPipe, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ErrorBookService } from './error-book.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
@@ -13,13 +13,21 @@ export class ErrorBookController {
   async listAux(
     @Param('studentId', ParseIntPipe) studentId: number,
     @Query('subject') subject: string,
+    @Query('includeCleared') includeCleared: string,
     @CurrentUser() user: JwtUser,
   ) {
     // MVP: student can only query own aux errors. Parent access is a future concern.
     if (user.sub !== studentId) {
       throw new ForbiddenException({ code: 1003, message: '无权访问他人数据' });
     }
-    return this.errorBookService.listAux(studentId, subject ? Number(subject) : undefined);
+    let subjectId: number | undefined;
+    if (subject) {
+      subjectId = Number(subject);
+      if (!Number.isFinite(subjectId)) {
+        throw new BadRequestException({ code: 1001, message: 'subject 必须为数字' });
+      }
+    }
+    return this.errorBookService.listAux(studentId, subjectId, includeCleared === 'true');
   }
 
   @Post('aux')

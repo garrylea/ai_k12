@@ -170,7 +170,7 @@ AppModule
 
 **关键索引**：
 - `ai_dialogues`: `idx_dlg_student_track`
-- `questions`: `idx_q_content_hash`
+- `questions`: `uniq_q_content_hash` (UNIQUE)
 - `aux_error_books`: `idx_ae_student_subject`
 - `extract_tasks`: 按 `student_id` + `status`
 
@@ -372,17 +372,16 @@ interface QuestionStructuringRequest {
 
 ```typescript
 interface StructuredQuestion {
-  subjectId: number;
   type: 'choice' | 'fill_blank' | 'true_false' | 'short_answer' | 'proof';
   difficulty: 1 | 2 | 3;
   content: string;            // Markdown + LaTeX
   options?: Option[];
   answer: string;
   explanation: string;
-  knowledgePointIds: number[];
-  contentHash: string;        // 归一化后计算
+  knowledgePoints: string[];  // 知识点名称（LLM 输出，由 ErrorBookService 解析为 ID）
   quality: 'good' | 'poor';
   qualityIssues?: string[];
+  // 注：subjectId / contentHash / knowledgePointIds 由消费方（ErrorBookService）解析，非 LLM 输出
 }
 ```
 

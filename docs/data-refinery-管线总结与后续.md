@@ -71,7 +71,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - **辅轨图片转换**：apps/server（Node.js）直接 `child_process.spawn('mineru-open-api', ['extract', img, '-o', outDir])` 调 MinerU CLI（`convert.py:12` 的 `MineruRunner` 即此 CLI 的 Python subprocess 封装），拿到 md 文档+图片后交 ai-core 在线 LLM 结构化。不经 Python data-refinery，无需在 apps/server 部署 Python 运行时。
 - **题目结构化**：辅轨答疑的 题干/题型/知识点/难度/答案+解析 由 ai-core 调 LLM 在线完成（新 prompt，**不用 data-refinery 的 extract**--extract prompt 要求"答案只提取不生成"，辅轨题无答案需 LLM 生成）。
 - **题目入库去重（content_hash）**：
-  - `schema.sql` questions 表新增 `content_hash CHAR(64)` + `idx_q_content_hash` 索引。
+  - `schema.sql` questions 表新增 `content_hash CHAR(64)` + `uniq_q_content_hash` 唯一索引。
   - `db_loader.load_questions` 改造：插入前算 `content_hash`（`normalize_content` NFKC 归一 + 去空白 + 转小写 -> SHA-256），`SELECT id FROM questions WHERE content_hash=%s` 命中则跳过复用，未命中则插入含 hash。辅轨答疑入库走同一去重逻辑。
   - **回填现有 466 题**：因 full-reload 先 DELETE 再全插，重建 DB 后重跑 `refinery_cli` 即可给所有题写入 content_hash，无需单独回填脚本。
   - hash 精确匹配为主，未命中时辅以限制范围（同学科+题型）文本相似度兜底（辅轨入库侧实现）。

@@ -97,3 +97,16 @@ export interface UploadedFileRow extends RowDataPacket {
   source: string;
   created_at: Date;
 }
+
+export interface ErrorRedoLogRow extends RowDataPacket {
+  id: number;
+  error_book_type: 'main' | 'aux';
+  error_item_id: number;
+  student_id: number;
+  answer_text: string | null;
+  attachments: string | null;
+  is_correct: number;
+  error_level_before: number;
+  error_level_after: number;
+  created_at: Date;
+}
