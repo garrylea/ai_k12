@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, Children } from 'react';
+import { useEffect, useState, useMemo, useRef, Children } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, type LessonCard, type LessonCardsData } from '@/services/api';
+import { fetchLessonCards, updateProgress, type LessonCard, type LessonCardsData } from '@/services/api';
 
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
 const resolveAsset = (p: string) =>
@@ -147,12 +147,26 @@ function preprocessContent(raw: string): string {
   let result = raw;
   // 1. 转义行首 N. 防止有序列表
   result = result.replace(/^(\d+)\.\s/gm, '$1\\. ');
-  // 2. 任何非双换行位置后的 (N) 都补成段落分隔
-  //    匹配：非换行字符 + 可选空白 + (N) → 非换行字符 + \n\n + (N)
-  result = result.replace(/([^\n])\s*\((\d+)\)/g, '$1\n\n($2)');
+  // 1.5 全角括号数字统一为半角，避免（1）和(1)视觉上不对齐
+  result = result.replace(/（([1-9]\d?)）/g, '($1)');
+  // 2. 同行/单换行分隔的子题 "；(N)" / "; (N)" 拆成独立段落
+  //    只匹配标点后（分号、冒号、句号、问号、感叹号）的 (N)，避免误拆正文中的括号，如"与(2)类似"
+  result = result.replace(/([；;：:。．.？?！!])\s*\((\d+)\)/g, '$1\n\n($2)');
+  // 2.5 同一行内的题目编号 (1) xxx (2) yyy 拆成独立段落
+  //    要求 (N) 前后都有空格，避免误拆 "与(2)类似" 等正文括号
+  result = result.replace(/([^\n])\s+\(([1-9]\d?)\)(?=\s)/g, '$1\n\n($2)');
   // 3. 题干后确保段落分隔：：\n\n(N) 已由 2 保证，这里处理 ：(N) 无空格情况
   result = result.replace(/([：:])\((\d+)\)/g, '$1\n\n($2)');
+  // 4. 若内容以 ## 开头且紧接着还有另一行标题，则将首行 ## 提升为 #（大节标题更大）
+  result = result.replace(/^(#{2,6})\s(.+?)\n\n(#{1,6}\s)/m, '# $2\n\n$3');
   return result;
+}
+
+/** 判断 markdown 内容是否以标题行开头（# ~ ######） */
+function contentStartsWithHeading(raw: string): boolean {
+  const processed = preprocessContent(raw);
+  const firstNonEmptyLine = processed.split('\n').find(line => line.trim().length > 0);
+  return !!firstNonEmptyLine && /^#{1,6}\s/.test(firstNonEmptyLine.trim());
 }
 
 function LoadingSkeleton() {
@@ -196,6 +210,11 @@ export default function CourseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const prevPageRef = useRef(0);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [nextLessonId, setNextLessonId] = useState<number | null>(null);
+  const [isSubjectCompleted, setIsSubjectCompleted] = useState(false);
+  const [countdown, setCountdown] = useState(10);
 
   useEffect(() => {
     autoToggleNightMode();
@@ -221,8 +240,89 @@ export default function CourseDetailPage() {
 
   useEffect(() => { fetchData(); }, [lessonId]);
 
+  useEffect(() => {
+    prevPageRef.current = 0;
+    setShowCelebration(false);
+    setNextLessonId(null);
+    setIsSubjectCompleted(false);
+    setCountdown(10);
+  }, [lessonId]);
+
+  useEffect(() => {
+    if (!data || !subjectId || !lessonId) return;
+    const card = data.cards[page];
+    if (!card) return;
+    if (page > prevPageRef.current) {
+      updateProgress({ subjectId, lessonId, cardSortOrder: card.sortOrder })
+        .then((res) => {
+          if (res.advanced) {
+            if (res.completed) {
+              setIsSubjectCompleted(true);
+            } else if (res.nextLessonId) {
+              setNextLessonId(res.nextLessonId);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+    prevPageRef.current = page;
+  }, [page, data, subjectId, lessonId]);
+
   const total = data?.cards.length ?? 0;
   const card = useMemo(() => data?.cards[page] ?? null, [data, page]);
+
+  const finishLesson = async () => {
+    if (!data || !subjectId || !lessonId) return;
+    const lastCard = data.cards[data.cards.length - 1];
+    try {
+      const res = await updateProgress({ subjectId, lessonId, cardSortOrder: lastCard.sortOrder });
+      if (res.completed) {
+        setIsSubjectCompleted(true);
+      } else if (res.nextLessonId) {
+        setNextLessonId(res.nextLessonId);
+      } else if (res.reason === 'not_current_lesson' && res.currentLessonId) {
+        // Progress was already advanced by the page-turn effect
+        setNextLessonId(res.currentLessonId);
+      }
+    } catch {
+      // ignore
+    }
+    setShowCelebration(true);
+  };
+
+  useEffect(() => {
+    if (!showCelebration) return;
+    setCountdown(10);
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleStartNewLesson();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [showCelebration]);
+
+  const handleStartNewLesson = () => {
+    setShowCelebration(false);
+    if (isSubjectCompleted) {
+      navigate('/student/star-map', { state: { subjectId } });
+    } else if (nextLessonId) {
+      navigate('/student/course-detail', {
+        state: {
+          lessonId: nextLessonId,
+          subjectName,
+          gradeName,
+          subjectId,
+        },
+      });
+    } else {
+      navigate('/student/star-map', { state: { subjectId } });
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -261,11 +361,16 @@ export default function CourseDetailPage() {
 
           <nav className="flex-1 px-4 space-y-4 overflow-y-auto mt-2">
             {(() => {
+              const practiceStartIndex = data?.cards.findIndex(c => c.cardType === 'practice') ?? -1;
+              const hasPractice = practiceStartIndex >= 0;
+              const isPracticePhase = hasPractice && page >= practiceStartIndex;
+
               const tasks = [
-                { id: 1, title: '错题清零（前一课）', subtitle: '有 2 道错题未清', status: 'unlocked' as const, path: '/student/review' },
-                { id: 2, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: 'current' as const, path: '/student/learn' },
-                { id: 3, title: '课堂练习', subtitle: '思路提示', status: 'locked' as const, path: '/student/practice' },
-                { id: 4, title: '单元检测', subtitle: '闭卷测试', status: 'locked' as const, path: '/student/unit-test' },
+                { id: 1, title: '错题清零（前一课）', subtitle: '有 2 道错题未清', status: 'unlocked' as const },
+                { id: 2, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: isPracticePhase ? ('completed' as const) : ('current' as const) },
+                ...(hasPractice
+                  ? [{ id: 3, title: '课堂练习', subtitle: '思路提示', status: isPracticePhase ? ('current' as const) : ('locked' as const) }]
+                  : []),
               ];
               return tasks.map((task, index) => {
                 const isLocked = task.status === 'locked';
@@ -275,11 +380,6 @@ export default function CourseDetailPage() {
                   <div
                     key={task.id}
                     className={`relative ${!isLocked ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'}`}
-                    onClick={() => {
-                      if (!isLocked && task.path) {
-                        navigate(task.path);
-                      }
-                    }}
                   >
                     {index !== tasks.length - 1 && (
                       <div className="absolute left-4 top-8 bottom-[-16px] w-[2px] bg-[var(--bg-subtle)]" />
@@ -405,10 +505,12 @@ export default function CourseDetailPage() {
                   <div className="flex-1 min-h-0 flex flex-col justify-center px-8 md:px-12 py-6">
                     <div className="mx-auto" style={{ width: '100%', maxWidth: 'var(--learn-prose-w)' }}>
                       {/* 卡片内容标题（H2）— 参考页风格：左侧色条 + 标题文字
-                          标题优先用 card.title，无标题则用卡片类型（探究/例题/练习等） */}
+                          标题优先用 card.title，无标题则用卡片类型（探究/例题/练习等）
+                          若内容本身以 markdown 标题开头，则不再重复渲染固定标题 */}
                       {(() => {
                         const displayTitle = card.title || (CARD_TYPE_LABEL[card.cardType] ?? card.cardType);
-                        return displayTitle ? (
+                        const hasHeadingContent = contentStartsWithHeading(card.content);
+                        return displayTitle && !hasHeadingContent ? (
                           <h2
                             className="font-black leading-snug mb-4 flex items-center gap-2"
                             style={{
@@ -442,9 +544,9 @@ export default function CourseDetailPage() {
                                   </div>
                                 );
                               }
-                              // 2. 练习题子项 (1) (2) ...
+                              // 2. 练习题子项 (1) (2) ...（仅在练习卡片中生效，避免误伤正文步骤编号）
                               const text = getNodeText(children).trim();
-                              if (EXERCISE_ITEM_RE.test(text)) {
+                              if (card.cardType === 'practice' && EXERCISE_ITEM_RE.test(text)) {
                                 return <p className="exercise-item" {...props}>{children}</p>;
                               }
                               // 3. 题干（以 ：或 : 结尾）
@@ -509,27 +611,127 @@ export default function CourseDetailPage() {
                 ))}
               </div>
 
-              {page < total - 1 ? (
-                <button
-                  onClick={() => setPage(p => Math.min(total - 1, p + 1))}
-                  className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] text-white font-medium shadow-sm transition-colors bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)]"
-                >
-                  <span>下一页</span>
-                  <ChevronRightIcon />
-                </button>
-              ) : (
-                <button
-                  onClick={() => navigate('/student/homework', { state: { lessonId } })}
-                  className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] bg-emerald-700 text-white font-medium hover:bg-emerald-800 transition-colors shadow-sm"
-                >
-                  <span>开始作业</span>
-                  <ChevronRightIcon />
-                </button>
-              )}
+              {(() => {
+                const isLastPage = page === total - 1;
+                const nextCard = !isLastPage ? data.cards[page + 1] : null;
+                const isCurrentPractice = card?.cardType === 'practice';
+                const isNextPractice = nextCard?.cardType === 'practice';
+
+                if (isLastPage) {
+                  return (
+                    <button
+                      onClick={finishLesson}
+                      className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] bg-emerald-700 text-white font-medium hover:bg-emerald-800 transition-colors shadow-sm"
+                    >
+                      <span>完成</span>
+                      <ChevronRightIcon />
+                    </button>
+                  );
+                }
+
+                // 只在学习内容区域、即将进入 practice 时显示"课堂练习"
+                if (!isCurrentPractice && isNextPractice) {
+                  return (
+                    <button
+                      onClick={() => setPage(p => Math.min(total - 1, p + 1))}
+                      className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] text-white font-medium shadow-sm transition-colors bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)]"
+                    >
+                      <span>课堂练习</span>
+                      <ChevronRightIcon />
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    onClick={() => setPage(p => Math.min(total - 1, p + 1))}
+                    className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] text-white font-medium shadow-sm transition-colors bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)]"
+                  >
+                    <span>下一页</span>
+                    <ChevronRightIcon />
+                  </button>
+                );
+              })()}
             </div>
           </footer>
         </main>
       </div>
+
+      {/* 庆祝覆盖层 — 课程完成 */}
+      <AnimatePresence>
+        {showCelebration && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--bg-page)]"
+          >
+            <style>{`
+              @keyframes driftDownSuccess {
+                0% { transform: translateY(-20px) rotate(0deg) scale(0.6); opacity: 0; }
+                15% { opacity: 0.9; }
+                85% { opacity: 0.9; }
+                100% { transform: translateY(600px) rotate(360deg) scale(1.1); opacity: 0; }
+              }
+            `}</style>
+
+            {/* 撒花动效 */}
+            <div className="absolute inset-x-0 top-0 pointer-events-none overflow-hidden z-20 h-full">
+              {Array.from({ length: 20 }).map((_, i) => {
+                const shapes = ['🌸', '✨', '🎉', '🌟', '🎈'];
+                const shape = shapes[i % shapes.length];
+                const delay = (i * 0.12).toFixed(2);
+                const duration = (1.8 + (i % 3) * 0.4).toFixed(2);
+                const left = ((i * 7) % 95).toFixed(0);
+                const scale = (0.7 + (i % 4) * 0.15).toFixed(2);
+                return (
+                  <div
+                    key={i}
+                    className="pointer-events-none absolute"
+                    style={{
+                      left: `${left}%`,
+                      top: `-10px`,
+                      animation: `driftDownSuccess ${duration}s ease-out ${delay}s infinite normal forwards`,
+                      transform: `scale(${scale})`,
+                      opacity: 0,
+                    }}
+                  >
+                    {shape}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 成功图标 */}
+            <div className="relative mb-8">
+              <div className="absolute inset-0 bg-green-500/10 rounded-full blur-3xl animate-pulse" />
+              <div className="w-24 h-24 rounded-full bg-[#E2F0D9] border-4 border-green-600 shadow-md flex items-center justify-center text-green-700 relative z-10">
+                <CheckCircleIcon className="w-14 h-14" />
+              </div>
+            </div>
+
+            {/* 恭喜文字 */}
+            <div className="space-y-3 max-w-xl text-center z-10">
+              <h2 className="text-3xl md:text-4xl font-extrabold text-[var(--text-primary)] tracking-tight leading-snug">
+                {isSubjectCompleted ? '🎉 恭喜你，本学科全部完成！' : '🎉 恭喜你，本节学习完成！'}
+              </h2>
+              <p className="text-[var(--text-secondary)] text-sm font-semibold">
+                {countdown > 0 ? `${countdown} 秒后自动进入下一课` : '正在进入...'}
+              </p>
+            </div>
+
+            {/* 开始新课按钮 */}
+            <div className="pt-8 z-10">
+              <button
+                onClick={handleStartNewLesson}
+                className="flex items-center gap-2.5 bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)] text-white px-10 py-4 rounded-[var(--radius-button)] shadow-md transition-all duration-300 hover:scale-[1.02] font-semibold tracking-wide"
+              >
+                <span>{isSubjectCompleted ? '返回星图' : '开始新课'}</span>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -140,7 +140,7 @@ export default function StarMapPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [studentId, subjectId, location.key]);
 
   const selectedChapter = useMemo(
     () => data?.chapters.find(c => c.id === selectedPlanetId) ?? null,

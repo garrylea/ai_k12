@@ -342,6 +342,76 @@ class DbLoader:
                           (f"{parent_prefix} %",))
         return row[0][0] if row else None
 
+    # ---------- sort_order 防重复/重排 ----------
+
+    _CHAPTER_OVERVIEW_RE = re.compile(r"^第[一二三四五六七八九十百零]+章\s+")
+    _LESSON_NUM_RE = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?\b")
+    _PAGE_NUM_RE = re.compile(r"(\d+)")
+
+    def _parse_sort_key(self, name: str) -> tuple:
+        """用于 lessons 重排的排序键。数值越小越靠前。"""
+        if not name:
+            return (2, 0, 0, 0)
+        if self._CHAPTER_OVERVIEW_RE.match(name):
+            return (0, 0, 0, 0)
+        m = self._LESSON_NUM_RE.match(name)
+        if m:
+            chap = int(m.group(1))
+            main = int(m.group(2))
+            sub = int(m.group(3)) if m.group(3) else 0
+            return (0, chap, main, sub)
+        # 无编号：靠页码兜底（在 _renumber_lessons 中填充第5个元素）
+        return (1, 0, 0, 0)
+
+    def _extract_page_num(self, textbook_page: str | None) -> int:
+        """从 textbook_page（如 'P8'、'12'、'P12-13'）提取首个数字，失败返回 999999。"""
+        if not textbook_page:
+            return 999999
+        m = self._PAGE_NUM_RE.search(textbook_page)
+        return int(m.group(1)) if m else 999999
+
+    def _renumber_lessons(self, unit_id: int):
+        """按 lesson name 语义重新分配 sort_order（0 起，连续无重复）。
+
+        策略：
+        1. 有明确章节编号的（如 21.2 / 21.2.1）按编号排序
+        2. 章综述（第N章）排最前
+        3. 无编号的按内容首次出现的页码排序（页码也缺失的保持原相对顺序）
+        """
+        rows = self._query("SELECT id, name, sort_order FROM lessons WHERE unit_id=%s", (unit_id,))
+        if len(rows) <= 1:
+            return
+
+        lesson_ids = [r[0] for r in rows]
+        # 查询每个 lesson 关联 cards 的最小页码
+        page_map: dict[int, int] = {}
+        if lesson_ids:
+            placeholders = ",".join(["%s"] * len(lesson_ids))
+            page_rows = self._query(
+                f"SELECT lesson_id, MIN(textbook_page) FROM cards WHERE lesson_id IN ({placeholders}) GROUP BY lesson_id",
+                tuple(lesson_ids),
+            )
+            for lid, tp in page_rows:
+                page_map[lid] = self._extract_page_num(tp)
+
+        rows_with_key = []
+        for rid, name, old_so in rows:
+            base_key = self._parse_sort_key(name)
+            # 排序键：(类别标识, chapter, main, sub, 页码)
+            # 有编号：base_key[0]==0，页码=0（编号已足够）
+            # 无编号：base_key[0]==1，页码兜底
+            # 综述：base_key[0]==0 且全0
+            page = page_map.get(rid, 999999)
+            if base_key[0] == 0:
+                sort_key = (0, base_key[1], base_key[2], base_key[3], 0)
+            else:
+                sort_key = (1, 0, 0, 0, page)
+            rows_with_key.append((rid, name, old_so, sort_key))
+
+        rows_with_key.sort(key=lambda x: (x[3], x[2]))  # 键相同则保持原顺序
+        for new_order, (rid, name, old_so, key) in enumerate(rows_with_key):
+            self._exec("UPDATE lessons SET sort_order=%s WHERE id=%s", (new_order, rid))
+
     def load_toc_structure(self, toc_path: str) -> dict:
         """用 TOC JSON 全量建教材骨架。
 
@@ -433,6 +503,9 @@ class DbLoader:
                 (unit_id, last_lesson_name),
             )
 
+            # 重排 sort_order：防止新增/已有 lesson 的 sort_order 重复或错乱
+            self._renumber_lessons(unit_id)
+
         self._conn.commit()
         return {"toc_path": toc_path, "chapters": chapters_count, "lessons": lessons_count}
 
@@ -515,6 +588,7 @@ class DbLoader:
             grouped[lid].append(c)
 
         unit_ord: dict[int, int] = {}  # chapter -> 已分配的节序（不含综述 0）
+        touched_units: set[int] = set()
         count = 0
         for lid in order:
             p = parse_lesson_id(lid)
@@ -524,6 +598,7 @@ class DbLoader:
             chapter = p["chapter"]
             unit_name = overview_label.get(chapter, f"第{chapter}章")
             unit_id = self._find_or_create_unit(sem, chapter, unit_name)
+            touched_units.add(unit_id)
             if p["is_overview"]:
                 lesson_sort = 0
             else:
@@ -534,6 +609,9 @@ class DbLoader:
                 self._insert_card(lesson_id_db, i, c)
                 count += 1
         self._conn.commit()
+        # 重排涉及 unit 的 sort_order，防止新旧 lesson 顺序错乱或重复
+        for uid in touched_units:
+            self._renumber_lessons(uid)
         return count
 
     def _insert_card(self, lesson_id: int, sort_order: int, c: dict):

@@ -155,6 +155,7 @@
 | GET | `/api/progress/students/{studentId}/overview` | 各学科进度总览：每科的当前单元/课、下一解锁节点、清零状态 | MVP |
 | GET | `/api/progress/students/{studentId}/subjects/{subjectId}` | 单学科完整进度与解锁链（家长关注具体科目时调用） | MVP |
 | GET | `/api/progress/students/{studentId}/star-map?subjectId=` | 单学科知识星图：把学生进度 overlay 到教材结构，返回可直接渲染的章节/小节树（含解锁/锁定/进行中状态）。服务端从 JWT 取 studentId（URL 段仅作资源定位，须与登录身份一致，否则 403）；教材版本按学科 + 学生学段（grade_band）解析；学期按 `progress.current_semester_id` 选择，无进度记录时回退到该年级 `sort_order` 最小学期（上册）。P2.1 星图页调用。 | MVP |
+| POST | `/api/progress/update` | 学生翻页时上报当前卡片位置，更新 `current_card_sort` 与 `next_unlock_type`；遇到 practice 卡片切换为练习阶段，到达最后一页自动推进到下一课或标记学科完成。复习（往前翻页）不会回退进度。当 `reason=not_current_lesson` 时返回 `currentLessonId`，供前端获取当前进度中的下一课 ID。P2.2 课程详情页调用。 | MVP |
 | POST | `/api/progress/students/{studentId}/events` | 记录学习事件（由 Assessment/Reward 内部调用或开放） | P1 |
 
 > **学生当前学期的确定规则**：`progress` 表（unique `(student_id, subject_id)`）的 `current_semester_id` 是唯一事实源，由家长端在配置/开通学生时写入（如九年级生选九上或九下）。星图与后续学习流程一律读此字段决定展示哪一册；系统不按日历自动推断学期。学生尚无 `progress` 记录时，star-map 回退到该学段教材版本中 `sort_order` 最小的学期（即上册）作为默认展示。
@@ -397,14 +398,18 @@ GET /api/content/versions/{v}/units/{u}/lessons/{l}/cards
   ▼
 学生浏览卡片（页码 X/N）
   │
-  ├─ 点击「上一页」→ 回到上一张卡片（循环浏览）
+  ├─ 点击「上一页」→ 回到上一张卡片（复习，不上报进度）
   ├─ 点击「下一页」→ 进入下一张卡片
   │      │
+  │      ▼
+  │   POST /api/progress/update（上报当前卡片位置）
+  │      │  ├─ 遇到 practice 卡片 → next_unlock_type = 'practice'
+  │      │  └─ 到达最后一页 → 自动推进到下一课或标记完成
   │      ▼
   │   最后一张卡片看完
   │      │
   │      ▼
-  │   学生点击「完成本课」
+  │   学生点击「开始作业」
   │
   ├─ [可选] 点击「讨论」
   │   ▼
@@ -686,7 +691,7 @@ POST /api/ai/report（AI-Agent AnalyticsCapability 生成报告文本）
 | 家长注册 | `/register` | `POST /api/auth/register` |
 | P1.5 学科选择 | `/student/subjects` | `GET /api/content/subjects` |
 | P2.1 星图导航 | `/student/star-map` | `GET /api/progress/students/{id}/star-map?subjectId=`（星图主数据）；`GET /api/progress/.../overview`（跨学科总览，可选） |
-| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/cards/{cardId}` |
+| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`POST /api/progress/update`（翻页上报进度） |
 | P2.3 AI 讨论 | `/student/ai-discuss` | `POST /api/conversations`, WS `/ws/ai/{id}` |
 | P2.4 课后作业 | `/student/homework` | `GET /api/assessment/homework/{id}`, `POST .../answers`, `POST .../hint` |
 | P2.5 作业解析 | `/student/homework-result` | `GET /api/assessment/submissions/{id}/results` |
@@ -873,3 +878,4 @@ POST /api/error-book/items/{errorItemId}/redo
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | v1.0 | 2026-06-26 | 初始版本，覆盖 MVP 核心接口与数据流 |
+| v1.1 | 2026-08-01 | 新增 `POST /api/progress/update` 进度更新接口；更新 P2.2 课程详情左侧栏为数据驱动的 2~3 项结构（错题+学习内容+可选练习）；修复完成课程后进入下一课的 race condition，接口返回 `currentLessonId` 供前端定位下一课 |

@@ -144,3 +144,10 @@ export interface LessonCardsData {
 export function fetchLessonCards(lessonId: number): Promise<LessonCardsData> {
   return fetchApi<LessonCardsData>(`/content/lessons/${lessonId}/cards`);
 }
+
+export function updateProgress(data: { subjectId: number; lessonId: number; cardSortOrder: number }): Promise<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number }> {
+  return fetchApi<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number }>('/progress/update', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}

@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ProgressRepository } from '../../database/repositories/progress.repo.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
+import { LessonsRepository } from '../../database/repositories/lessons.repo.js';
+import { UnitsRepository } from '../../database/repositories/units.repo.js';
+import { SemestersRepository } from '../../database/repositories/semesters.repo.js';
 import { ContentService } from '../content/content.service.js';
 
 export interface SectionData {
@@ -36,6 +39,9 @@ export class ProgressService {
   constructor(
     private progressRepo: ProgressRepository,
     private studentsRepo: StudentsRepository,
+    private lessonsRepo: LessonsRepository,
+    private unitsRepo: UnitsRepository,
+    private semestersRepo: SemestersRepository,
     private contentService: ContentService,
   ) {}
 
@@ -175,5 +181,81 @@ export class ProgressService {
       completedUnits: completedCount,
       chapters,
     };
+  }
+
+  async updateProgress(studentId: number, subjectId: number, lessonId: number, cardSortOrder: number) {
+    let progress = await this.progressRepo.findByStudentAndSubject(studentId, subjectId);
+
+    if (!progress) {
+      // Auto-initialize progress for first-time learners
+      const lesson = await this.lessonsRepo.findById(lessonId);
+      if (!lesson) throw new NotFoundException({ code: 1002, message: '课程不存在' });
+
+      const unit = await this.unitsRepo.findById(lesson.unitId);
+      if (!unit) throw new NotFoundException({ code: 1002, message: '单元不存在' });
+
+      const semester = await this.semestersRepo.findById(unit.semesterId);
+      if (!semester) throw new NotFoundException({ code: 1002, message: '学期不存在' });
+
+      await this.progressRepo.create({
+        studentId,
+        subjectId,
+        textbookVersionId: semester.textbookVersionId,
+        semesterId: semester.id,
+        currentUnitId: unit.id,
+        currentLessonId: lesson.id,
+      });
+
+      progress = await this.progressRepo.findByStudentAndSubject(studentId, subjectId);
+      if (!progress) throw new NotFoundException({ code: 1002, message: '学习进度创建失败' });
+    }
+
+    // Only update progress for the current lesson; revisiting older lessons is a no-op
+    if (progress.currentLessonId !== lessonId) {
+      // When reviewing an older lesson, guide the user to the next lesson
+      // of the reviewed lesson so they can continue sequentially.
+      if (progress.currentLessonId != null && lessonId < progress.currentLessonId) {
+        const nextLesson = await this.contentService.getNextLesson(lessonId);
+        if (nextLesson) {
+          return { advanced: false, reason: 'not_current_lesson', nextLessonId: nextLesson.id };
+        }
+      }
+      return { advanced: false, reason: 'not_current_lesson', currentLessonId: progress.currentLessonId };
+    }
+
+    // Do not rewind progress when reviewing earlier cards
+    if (progress.currentCardSort != null && cardSortOrder < progress.currentCardSort) {
+      return { advanced: false, reason: 'reviewing' };
+    }
+
+    const lessonCards = await this.contentService.getLessonCards(lessonId);
+    const cards = lessonCards.cards;
+    if (cards.length === 0) {
+      throw new NotFoundException({ code: 1002, message: '课程暂无内容' });
+    }
+
+    const currentCard = cards.find(c => c.sortOrder === cardSortOrder);
+    if (!currentCard) {
+      throw new NotFoundException({ code: 1002, message: '卡片不存在' });
+    }
+
+    const lastCard = cards[cards.length - 1];
+    const isLastCard = currentCard.sortOrder === lastCard.sortOrder;
+
+    if (isLastCard) {
+      const nextLesson = await this.contentService.getNextLesson(lessonId);
+      if (nextLesson) {
+        const nextUnitId = nextLesson.unitId !== progress.currentUnitId ? nextLesson.unitId : null;
+        await this.progressRepo.advanceLesson(progress.id, nextLesson.id, nextUnitId);
+        return { advanced: true, nextLessonId: nextLesson.id };
+      }
+      // No more lessons: mark subject completed
+      await this.progressRepo.markCompleted(progress.id);
+      return { advanced: true, completed: true };
+    }
+
+    const nextUnlockType = currentCard.cardType === 'practice' ? 'practice' : 'lesson';
+    await this.progressRepo.updateCardSort(progress.id, cardSortOrder, nextUnlockType);
+    return { advanced: false, nextUnlockType };
   }
 }

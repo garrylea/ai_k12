@@ -84,7 +84,7 @@
   --learn-btn-primary: #B0C4DE;
   --learn-btn-primary-hover: #9BB5D4;
 
-  --fs-learn-h1: 1.25rem;              /* 20px */
+  --fs-learn-h1: 1.5rem;               /* 24px */
   --fs-learn-h2: 1.125rem;             /* 18px */
   --fs-learn-body: 1rem;               /* 16px */
   --lh-learn-body: 1.625;              /* 26px */
@@ -253,6 +253,25 @@ body {
   font-size: var(--fs-learn-body);
   line-height: var(--lh-learn-body);
 }
+.learn-prose h1 {
+  color: var(--learn-heading-2);
+  font-size: var(--fs-learn-h1);
+  font-weight: 900;
+  line-height: 1.75rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.learn-prose h1::before {
+  content: '';
+  display: block;
+  width: 0.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  background: var(--learn-heading-2);
+  flex-shrink: 0;
+}
 .learn-prose h2 {
   color: var(--learn-heading-2);
   font-size: var(--fs-learn-h2);
@@ -290,9 +309,14 @@ body {
   flex-shrink: 0;
 }
 /* 标题前空行：任何元素后接标题时增加上间距（margin 在兄弟间会折叠，不会叠加） */
+.learn-prose * + h1,
 .learn-prose * + h2,
 .learn-prose * + h3 {
   margin-top: 1.5rem;
+}
+/* 连续两行都是标题时，后一个（h2）收紧上间距，让层级更紧凑 */
+.learn-prose h1 + h2 {
+  margin-top: 0.75rem;
 }
 .learn-prose p {
   margin: 0;

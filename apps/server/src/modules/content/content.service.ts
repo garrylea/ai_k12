@@ -84,6 +84,36 @@ export class ContentService {
       })),
     };
   }
+
+  /** Find the next lesson after the given one (same unit or next unit). */
+  async getNextLesson(lessonId: number): Promise<{ id: number; unitId: number } | null> {
+    const current = await this.lessonsRepo.findById(lessonId);
+    if (!current) return null;
+
+    const unitLessons = await this.lessonsRepo.findByUnitId(current.unitId);
+    const currentIndex = unitLessons.findIndex(l => l.id === lessonId);
+
+    if (currentIndex >= 0 && currentIndex < unitLessons.length - 1) {
+      return { id: unitLessons[currentIndex + 1].id, unitId: current.unitId };
+    }
+
+    // Current unit's last lesson: find next unit's first lesson
+    const currentUnit = await this.unitsRepo.findById(current.unitId);
+    if (!currentUnit) return null;
+
+    const units = await this.unitsRepo.findBySemesterId(currentUnit.semesterId);
+    const unitIndex = units.findIndex(u => u.id === current.unitId);
+
+    if (unitIndex >= 0 && unitIndex < units.length - 1) {
+      const nextUnit = units[unitIndex + 1];
+      const nextUnitLessons = await this.lessonsRepo.findByUnitId(nextUnit.id);
+      if (nextUnitLessons.length > 0) {
+        return { id: nextUnitLessons[0].id, unitId: nextUnit.id };
+      }
+    }
+
+    return null;
+  }
 }
 
 function safeParse(json: string): unknown {

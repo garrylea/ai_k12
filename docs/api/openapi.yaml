@@ -412,6 +412,63 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/StarMapData'
+  /progress/update:
+    post:
+      tags: [Progress]
+      summary: 更新学习进度
+      description: >-
+        学生翻页时上报当前卡片位置，服务端据此更新进度。遇到 practice 卡片时
+        next_unlock_type 自动切换为 'practice'；到达最后一页时自动推进到下一课
+        或标记学科完成。复习（往前翻页）不会回退进度。
+      operationId: updateProgress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectId, lessonId, cardSortOrder]
+              properties:
+                subjectId:
+                  type: integer
+                  description: 学科 ID
+                lessonId:
+                  type: integer
+                  description: 当前课程 ID
+                cardSortOrder:
+                  type: integer
+                  description: 当前卡片的 sort_order
+      responses:
+        '200':
+          description: 更新结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          advanced:
+                            type: boolean
+                            description: 是否已推进到下一课/完成
+                          nextLessonId:
+                            type: integer
+                            description: 推进后的下一课 ID
+                          completed:
+                            type: boolean
+                            description: 是否已完成全部课程
+                          nextUnlockType:
+                            type: string
+                            description: 当前解锁阶段（lesson / practice）
+                          reason:
+                            type: string
+                            description: 未推进原因（reviewing / not_current_lesson）
+                          currentLessonId:
+                            type: integer
+                            description: 当前进度中的课程 ID（当 reason=not_current_lesson 时返回，供前端定位下一课）
 
   # Content
   /content/subjects:

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, ParseIntPipe, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, ParseIntPipe, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ProgressService } from './progress.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
@@ -20,5 +20,18 @@ export class ProgressController {
       throw new ForbiddenException({ code: 1003, message: '无权访问他人数据' });
     }
     return this.progressService.getStarMap(user.sub, subjectId);
+  }
+
+  @Post('update')
+  updateProgress(
+    @Body() body: { subjectId: number; lessonId: number; cardSortOrder: number },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.progressService.updateProgress(
+      user.sub,
+      body.subjectId,
+      body.lessonId,
+      body.cardSortOrder,
+    );
   }
 }

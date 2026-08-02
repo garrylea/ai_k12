@@ -58,6 +58,34 @@ export class ProgressRepository {
     return (result as any).insertId;
   }
 
+  async updateCardSort(progressId: number, currentCardSort: number, nextUnlockType: string): Promise<void> {
+    await this.pool.execute(
+      `UPDATE progress SET current_card_sort = ?, next_unlock_type = ? WHERE id = ?`,
+      [currentCardSort, nextUnlockType, progressId],
+    );
+  }
+
+  async advanceLesson(progressId: number, nextLessonId: number, nextUnitId: number | null): Promise<void> {
+    if (nextUnitId != null) {
+      await this.pool.execute(
+        `UPDATE progress SET current_unit_id = ?, current_lesson_id = ?, current_card_sort = 0, next_unlock_type = 'lesson' WHERE id = ?`,
+        [nextUnitId, nextLessonId, progressId],
+      );
+    } else {
+      await this.pool.execute(
+        `UPDATE progress SET current_lesson_id = ?, current_card_sort = 0, next_unlock_type = 'lesson' WHERE id = ?`,
+        [nextLessonId, progressId],
+      );
+    }
+  }
+
+  async markCompleted(progressId: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE progress SET status = 'completed', next_unlock_type = 'lesson' WHERE id = ?`,
+      [progressId],
+    );
+  }
+
   private mapRow(row: ProgressRow): Progress {
     return {
       id: row.id,

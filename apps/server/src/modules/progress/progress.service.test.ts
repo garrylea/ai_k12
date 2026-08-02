@@ -34,13 +34,16 @@ function makeService(opts: {
   const studentsRepo = {
     findById: async () => opts.student ?? null,
   };
+  const lessonsRepo = {} as any;
+  const unitsRepo = {} as any;
+  const semestersRepo = {} as any;
   const contentService = {
     getSubjects: async () => SUBJECTS,
     getVersions: async () => VERSIONS,
     getUnits: async (versionId: number) => UNITS_BY_VERSION[versionId] ?? [],
     getLessons: async () => [],
   };
-  return new ProgressService(progressRepo as any, studentsRepo as any, contentService as any);
+  return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any);
 }
 
 describe('ProgressService.getStarMap — semester/version selection', () => {
