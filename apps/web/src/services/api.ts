@@ -151,3 +151,143 @@ export function updateProgress(data: { subjectId: number; lessonId: number; card
     body: JSON.stringify(data),
   });
 }
+
+// --- Files (auxiliary upload) ---
+
+export interface UploadedFileResult {
+  fileId: number;
+  url: string;
+}
+
+export async function uploadFile(file: File): Promise<UploadedFileResult> {
+  const token = localStorage.getItem('token');
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE}/files/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // NOTE: do NOT set Content-Type - browser sets multipart boundary
+    body: form,
+  });
+  const json: ApiResponse<UploadedFileResult> = await res.json();
+  if (json.code !== 0) throw new ApiError(json.code, json.message);
+  return json.data;
+}
+
+// --- Conversations (auxiliary) ---
+
+export interface ConversationItem {
+  id: number;
+  track: 'mainline' | 'auxiliary';
+  title: string | null;
+  status: string;
+  created_at: string;
+}
+
+export function createConversation(req: {
+  track: 'auxiliary';
+  subjectId?: number;
+  knowledgePointId?: number;
+}): Promise<ConversationItem> {
+  return fetchApi<ConversationItem>('/conversations', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export function listConversations(track: 'auxiliary', cursor?: number): Promise<ConversationItem[]> {
+  const qs = cursor ? `?track=${track}&cursor=${cursor}` : `?track=${track}`;
+  return fetchApi<ConversationItem[]>(`/conversations${qs}`);
+}
+
+export interface MessageItem {
+  id: number;
+  dialogue_id: number;
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  type: string | null;
+  created_at: string;
+}
+
+export function getMessages(dialogueId: number, lastMessageId?: number): Promise<MessageItem[]> {
+  const qs = lastMessageId ? `?lastMessageId=${lastMessageId}` : '';
+  return fetchApi<MessageItem[]>(`/conversations/${dialogueId}/messages${qs}`);
+}
+
+// --- AI Tutor (auxiliary) ---
+
+export interface TutorResponse {
+  dialogueId: string;
+  message: { role: string; content: string; type?: string };
+  safety: { isLearningRelated: boolean; alertLevel: string };
+  fallback: boolean;
+  consecutiveFailCount: number;
+}
+
+export function tutor(req: {
+  mode: 'auxiliary';
+  message: string;
+  dialogueId?: string;
+  knowledgeId?: string;
+  cardId?: string;
+}): Promise<TutorResponse> {
+  return fetchApi<TutorResponse>('/ai/tutor', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+// --- Refinery (auxiliary extraction) ---
+
+export function extract(req: { fileId: number; source: 'auxiliary' }): Promise<{ taskId: number }> {
+  return fetchApi<{ taskId: number }>('/refinery/extract', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export interface ExtractTaskResult {
+  id: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  result: { markdown: string; structured: unknown } | null;
+  errorMessage: string | null;
+}
+
+export function getExtractTask(taskId: number): Promise<ExtractTaskResult> {
+  return fetchApi<ExtractTaskResult>(`/refinery/tasks/${taskId}`);
+}
+
+// --- Error Book (auxiliary) ---
+
+export interface AuxErrorItem {
+  id: number;
+  question_id: number | null;
+  level: number;
+  is_cleared: number;
+  source: string;
+  created_at: string;
+}
+
+export function listAuxErrors(
+  studentId: number,
+  subjectId?: number,
+  includeCleared = false,
+): Promise<AuxErrorItem[]> {
+  const params = new URLSearchParams();
+  if (subjectId) params.set('subject', String(subjectId));
+  if (includeCleared) params.set('includeCleared', 'true');
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return fetchApi<AuxErrorItem[]>(`/error-book/students/${studentId}/aux${qs}`);
+}
+
+export function createAuxError(req: {
+  subjectId: number;
+  source: 'auxiliary' | 'photo';
+  rawContent?: string;
+  extractTaskId?: number;
+}): Promise<{ errorId: number; questionId: number | null; structured: unknown }> {
+  return fetchApi<{ errorId: number; questionId: number | null; structured: unknown }>('/error-book/aux', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
