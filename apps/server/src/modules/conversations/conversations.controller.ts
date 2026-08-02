@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ConversationsService } from './conversations.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
@@ -25,22 +25,21 @@ export class ConversationsController {
   }
 
   @Get(':dialogueId')
-  async get(@Param('dialogueId') id: string, @CurrentUser() user: JwtUser) {
-    return this.conversationsService.get(Number(id), user.sub);
+  async get(@Param('dialogueId', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
+    return this.conversationsService.get(id, user.sub);
   }
 
   @Get(':dialogueId/messages')
   async messages(
-    @Param('dialogueId') id: string,
+    @Param('dialogueId', ParseIntPipe) id: number,
     @Query('lastMessageId') last: string,
     @CurrentUser() user: JwtUser,
   ) {
-    return this.conversationsService.getMessages(Number(id), user.sub, last ? Number(last) : undefined);
+    return this.conversationsService.getMessages(id, user.sub, last ? Number(last) : undefined);
   }
 
   @Post(':dialogueId/messages')
-  async append(@Param('dialogueId') id: string, @Body() dto: AppendMessageDto, @CurrentUser() user: JwtUser) {
-    await this.conversationsService.appendMessage(Number(id), user.sub, dto.content);
-    return { success: true };
+  async append(@Param('dialogueId', ParseIntPipe) id: number, @Body() dto: AppendMessageDto, @CurrentUser() user: JwtUser) {
+    await this.conversationsService.appendMessage(id, user.sub, dto.content);
   }
 }

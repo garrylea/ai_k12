@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { AiDialoguesRepository, AiMessagesRepository } from '../../database/repositories/index.js';
 import type { AiMessageRow } from '../../database/repositories/types.js';
 
 @Injectable()
 export class ConversationsService {
+  private readonly PAGE_SIZE = 10;
+
   constructor(
     private readonly dialoguesRepo: AiDialoguesRepository,
     private readonly messagesRepo: AiMessagesRepository,
@@ -13,6 +15,9 @@ export class ConversationsService {
     studentId: number,
     dto: { track: 'mainline' | 'auxiliary'; subjectId?: number; knowledgePointId?: number },
   ) {
+    if (dto.track !== 'mainline' && dto.track !== 'auxiliary') {
+      throw new BadRequestException({ code: 1001, message: 'track 必须为 mainline 或 auxiliary' });
+    }
     const id = await this.dialoguesRepo.create({
       student_id: studentId,
       subject_id: dto.subjectId ?? null,
@@ -27,7 +32,7 @@ export class ConversationsService {
   }
 
   async list(studentId: number, track: 'mainline' | 'auxiliary', cursor?: number) {
-    return this.dialoguesRepo.findByStudentAndTrack(studentId, track, 10, cursor);
+    return this.dialoguesRepo.findByStudentAndTrack(studentId, track, this.PAGE_SIZE, cursor);
   }
 
   async get(dialogueId: number, studentId: number) {
@@ -42,6 +47,9 @@ export class ConversationsService {
   }
 
   async appendMessage(dialogueId: number, studentId: number, content: string) {
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      throw new BadRequestException({ code: 1001, message: 'content 不能为空' });
+    }
     await this.get(dialogueId, studentId);
     await this.messagesRepo.create({
       dialogue_id: dialogueId,
