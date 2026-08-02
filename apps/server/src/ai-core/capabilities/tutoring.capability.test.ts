@@ -4,15 +4,49 @@ import { ConversationService } from '../../services/conversation/index.js';
 import { ModelClient } from '../infra/model-client/index.js';
 import type { ChatResponse } from '../types.js';
 
+class FakeDialoguesRepo {
+  rows: any[] = [];
+  nextId = 1;
+  async create(row: any) {
+    const id = this.nextId++;
+    this.rows.push({ id, ...row, created_at: new Date(), updated_at: new Date(), deleted_at: null });
+    return id;
+  }
+  async findById(id: number) { return this.rows.find((r) => r.id === id) ?? null; }
+  async updateFailCount(id: number, count: number) {
+    const r = this.rows.find((x) => x.id === id); if (r) r.consecutive_fail_count = count;
+  }
+  async archive(id: number) { const r = this.rows.find((x) => x.id === id); if (r) r.status = 'archived'; }
+  async findByStudentAndTrack() { return []; }
+  async updateTitle() {}
+}
+
+class FakeMessagesRepo {
+  rows: any[] = [];
+  async createMany(msgs: any[]) { for (const m of msgs) this.rows.push(m); }
+  async findByDialogue(dialogueId: number) {
+    return this.rows.filter((r) => r.dialogue_id === dialogueId);
+  }
+}
+
+class FakeStudentsRepo {
+  async findById(id: number) {
+    return { id, grade: '七年级', schoolLevel: 'junior', name: '小明' };
+  }
+}
+
 describe('TutoringCapability', () => {
   let convService: ConversationService;
+  let dialogueId: number;
 
-  beforeEach(() => {
-    convService = new ConversationService();
-    convService._reset();
-    convService.createDialogue({
+  beforeEach(async () => {
+    const dialogues = new FakeDialoguesRepo();
+    const messages = new FakeMessagesRepo();
+    const students = new FakeStudentsRepo();
+    convService = new ConversationService(dialogues as any, messages as any, students as any);
+    dialogueId = await convService.createDialogue({
       dialogueId: 'test_dialogue_1',
-      student: { grade: '七年级', gradeLevel: 'junior', name: '小明' },
+      studentId: 1,
       subject: 'math',
       track: 'mainline',
       currentKnowledgePoint: { id: 'kp_1', name: '一元一次方程', subject: 'math' },
@@ -27,14 +61,14 @@ describe('TutoringCapability', () => {
       studentId: 'student_1',
       mode: 'mainline',
       message: '今天天气真好我们去玩吧',
-      dialogueId: 'test_dialogue_1',
+      dialogueId: String(dialogueId),
     });
 
     expect(result.safety.isLearningRelated).toBe(false);
     expect(result.message.type).toBe('block');
     // The user's off-topic message must be persisted so consecutive-off-topic
     // escalation can fire across repeated blocks.
-    const persisted = convService.loadContext('test_dialogue_1', 3000);
+    const persisted = await convService.loadContext(String(dialogueId), 3000);
     expect(persisted!.messages.some(m => m.role === 'user' && m.content.includes('今天天气真好'))).toBe(true);
     expect(persisted!.messages.some(m => m.role === 'assistant')).toBe(true);
   });
@@ -56,10 +90,10 @@ describe('TutoringCapability', () => {
       studentId: 'student_1',
       mode: 'mainline',
       message: '老师，一元一次方程怎么解？',
-      dialogueId: 'test_dialogue_1',
+      dialogueId: String(dialogueId),
     });
 
-    expect(result.dialogueId).toBe('test_dialogue_1');
+    expect(result.dialogueId).toBe(String(dialogueId));
     expect(result.message.type).toBe('socratic');
     expect(result.message.content).toBe('你观察一下等式两边，有什么发现？');
     expect(result.isFallback).toBe(false);
@@ -81,7 +115,7 @@ describe('TutoringCapability', () => {
     const result = await capability.tutor({
       studentId: 'student_1', mode: 'mainline',
       message: '老师，这道题怎么做？',
-      dialogueId: 'test_dialogue_1',
+      dialogueId: String(dialogueId),
     });
 
     expect(result.isFallback).toBe(false);
@@ -104,12 +138,12 @@ describe('TutoringCapability', () => {
     const result = await capability.tutor({
       studentId: 'student_1', mode: 'mainline',
       message: '太难了，我不会',
-      dialogueId: 'test_dialogue_1',
+      dialogueId: String(dialogueId),
     });
 
     expect(result.isFallback).toBe(true);
     expect(result.message.type).toBe('fallback');
-    const persisted = convService.loadContext('test_dialogue_1', 3000);
+    const persisted = await convService.loadContext(String(dialogueId), 3000);
     expect(persisted!.messages.some(m => m.role === 'user' && m.content.includes('太难了'))).toBe(true);
   });
 
@@ -126,12 +160,12 @@ describe('TutoringCapability', () => {
     const result = await capability.tutor({
       studentId: 'student_1', mode: 'mainline',
       message: '我不会做',
-      dialogueId: 'test_dialogue_1',
+      dialogueId: String(dialogueId),
     });
 
     expect(result.isFallback).toBe(true);
     expect(result.message.type).toBe('fallback');
-    const persisted = convService.loadContext('test_dialogue_1', 3000);
+    const persisted = await convService.loadContext(String(dialogueId), 3000);
     expect(persisted!.messages.some(m => m.role === 'user' && m.content === '我不会做')).toBe(true);
   });
 });

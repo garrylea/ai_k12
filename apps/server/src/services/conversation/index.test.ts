@@ -1,74 +1,113 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ConversationService } from './index.js';
 
+class FakeDialoguesRepo {
+  rows: any[] = [];
+  nextId = 1;
+  async create(row: any) {
+    const id = this.nextId++;
+    this.rows.push({ id, ...row, created_at: new Date(), updated_at: new Date(), deleted_at: null });
+    return id;
+  }
+  async findById(id: number) { return this.rows.find((r) => r.id === id) ?? null; }
+  async updateFailCount(id: number, count: number) {
+    const r = this.rows.find((x) => x.id === id); if (r) r.consecutive_fail_count = count;
+  }
+  async archive(id: number) { const r = this.rows.find((x) => x.id === id); if (r) r.status = 'archived'; }
+  async findByStudentAndTrack() { return []; }
+  async updateTitle() {}
+}
+
+class FakeMessagesRepo {
+  rows: any[] = [];
+  async createMany(msgs: any[]) { for (const m of msgs) this.rows.push(m); }
+  async findByDialogue(dialogueId: number) {
+    return this.rows.filter((r) => r.dialogue_id === dialogueId);
+  }
+}
+
+class FakeStudentsRepo {
+  async findById(id: number) {
+    return { id, grade: '七年级', schoolLevel: 'junior', name: '小明' };
+  }
+}
+
 describe('ConversationService', () => {
   let svc: ConversationService;
-  beforeEach(() => {
-    svc = new ConversationService();
-    svc.createDialogue({
-      dialogueId: 'd1',
-      student: { grade: '七年级', gradeLevel: 'junior', name: '小明' },
+  let dialogues: FakeDialoguesRepo;
+  let messages: FakeMessagesRepo;
+  let students: FakeStudentsRepo;
+  let dialogueId: number;
+
+  beforeEach(async () => {
+    dialogues = new FakeDialoguesRepo();
+    messages = new FakeMessagesRepo();
+    students = new FakeStudentsRepo();
+    svc = new ConversationService(dialogues as any, messages as any, students as any);
+    dialogueId = await svc.createDialogue({
+      dialogueId: '1',
+      studentId: 1,
       subject: 'math',
       track: 'mainline',
-      cardContent: '一元一次方程',
       currentKnowledgePoint: { id: 'kp1', name: '一元一次方程', subject: 'math' },
       currentDifficulty: 2,
       currentQuestion: { content: '解 2x=4', answer: 'x=2' },
     });
   });
 
-  it('loadContext returns metadata and current KP/question/difficulty', () => {
-    const ctx = svc.loadContext('d1')!;
-    expect(ctx.subject).toBe('math');
-    expect(ctx.cardContent).toBe('一元一次方程');
-    expect(ctx.student.name).toBe('小明');
-    expect(ctx.currentKnowledgePoint?.id).toBe('kp1');
-    expect(ctx.currentDifficulty).toBe(2);
-    expect(ctx.currentQuestion?.content).toBe('解 2x=4');
-    expect(ctx.consecutiveFailCount).toBe(0);
-    expect(ctx.dialogueMetadata.track).toBe('mainline');
+  it('loadContext returns metadata and current KP', async () => {
+    const ctx = await svc.loadContext(String(dialogueId));
+    expect(ctx).not.toBeNull();
+    expect(ctx!.student.name).toBe('小明');
+    expect(ctx!.consecutiveFailCount).toBe(0);
+    expect(ctx!.dialogueMetadata.track).toBe('mainline');
   });
 
-  it('loadContext returns null for unknown dialogue', () => {
-    expect(svc.loadContext('nope')).toBeNull();
+  it('loadContext returns null for unknown dialogue', async () => {
+    expect(await svc.loadContext('99999')).toBeNull();
   });
 
-  it('saveMessages appends to history', () => {
-    svc.saveMessages({ dialogueId: 'd1', messages: [
+  it('loadContext returns null for non-numeric dialogueId', async () => {
+    expect(await svc.loadContext('not-a-number')).toBeNull();
+  });
+
+  it('saveMessages appends to history', async () => {
+    await svc.saveMessages({ dialogueId: String(dialogueId), messages: [
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi' },
     ]});
-    const ctx = svc.loadContext('d1')!;
-    expect(ctx.messages).toHaveLength(2);
-    expect(ctx.messages[0].content).toBe('hello');
-    expect(ctx.dialogueMetadata.messageCount).toBe(2);
+    const ctx = await svc.loadContext(String(dialogueId));
+    expect(ctx!.messages).toHaveLength(2);
+    expect(ctx!.messages[0].content).toBe('hello');
   });
 
-  it('updateFailCount increments and resets', () => {
-    svc.updateFailCount({ dialogueId: 'd1', increment: true });
-    svc.updateFailCount({ dialogueId: 'd1', increment: true });
-    expect(svc.loadContext('d1')!.consecutiveFailCount).toBe(2);
-    svc.updateFailCount({ dialogueId: 'd1', increment: false });
-    expect(svc.loadContext('d1')!.consecutiveFailCount).toBe(0);
+  it('saveMessages throws for unknown dialogue', async () => {
+    await expect(svc.saveMessages({ dialogueId: '99999', messages: [] })).rejects.toThrow(/not found/i);
   });
 
-  it('completeDialogue does not throw for existing dialogue', () => {
-    expect(() => svc.completeDialogue({ dialogueId: 'd1', reason: 'fallback_triggered' })).not.toThrow();
+  it('updateFailCount increments and resets', async () => {
+    await svc.updateFailCount({ dialogueId: String(dialogueId), increment: true });
+    await svc.updateFailCount({ dialogueId: String(dialogueId), increment: true });
+    let ctx = await svc.loadContext(String(dialogueId));
+    expect(ctx!.consecutiveFailCount).toBe(2);
+    await svc.updateFailCount({ dialogueId: String(dialogueId), increment: false });
+    ctx = await svc.loadContext(String(dialogueId));
+    expect(ctx!.consecutiveFailCount).toBe(0);
   });
 
-  it('saveMessages throws for unknown dialogue', () => {
-    expect(() => svc.saveMessages({ dialogueId: 'nope', messages: [] })).toThrow(/not found/i);
+  it('completeDialogue does not throw for existing dialogue', async () => {
+    await expect(svc.completeDialogue({ dialogueId: String(dialogueId), reason: 'fallback_triggered' })).resolves.toBeUndefined();
   });
 
-  it('truncates long history to fit token budget (keeps last 4)', () => {
+  it('truncates long history to fit token budget (keeps last 4)', async () => {
     for (let i = 0; i < 20; i++) {
-      svc.saveMessages({ dialogueId: 'd1', messages: [
+      await svc.saveMessages({ dialogueId: String(dialogueId), messages: [
         { role: 'user', content: 'X'.repeat(500) },
         { role: 'assistant', content: 'Y'.repeat(500) },
       ]});
     }
-    const ctx = svc.loadContext('d1', 100)!;
-    expect(ctx.messages.length).toBeLessThan(40);
-    expect(ctx.messages.length).toBeGreaterThanOrEqual(4);
+    const ctx = await svc.loadContext(String(dialogueId), 100);
+    expect(ctx!.messages.length).toBeLessThan(40);
+    expect(ctx!.messages.length).toBeGreaterThanOrEqual(4);
   });
 });

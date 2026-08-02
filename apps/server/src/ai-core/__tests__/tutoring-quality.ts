@@ -52,14 +52,49 @@ const SCENARIOS: TutoringScenario[] = [
   },
 ];
 
-async function runTutoringTests(): Promise<void> {
-  const convService = new ConversationService();
+// Minimal in-memory fakes so the eval script can run without a real DB.
+class FakeDialoguesRepo {
+  rows: any[] = [];
+  nextId = 1;
+  async create(row: any) {
+    const id = this.nextId++;
+    this.rows.push({ id, ...row, created_at: new Date(), updated_at: new Date(), deleted_at: null });
+    return id;
+  }
+  async findById(id: number) { return this.rows.find((r) => r.id === id) ?? null; }
+  async updateFailCount(id: number, count: number) {
+    const r = this.rows.find((x) => x.id === id); if (r) r.consecutive_fail_count = count;
+  }
+  async archive(id: number) { const r = this.rows.find((x) => x.id === id); if (r) r.status = 'archived'; }
+  async findByStudentAndTrack() { return []; }
+  async updateTitle() {}
+}
 
+class FakeMessagesRepo {
+  rows: any[] = [];
+  async createMany(msgs: any[]) { for (const m of msgs) this.rows.push(m); }
+  async findByDialogue(dialogueId: number) {
+    return this.rows.filter((r) => r.dialogue_id === dialogueId);
+  }
+}
+
+class FakeStudentsRepo {
+  async findById(_id: number) {
+    return { id: _id, grade: '七年级', schoolLevel: 'junior', name: '测试学生' };
+  }
+}
+
+async function runTutoringTests(): Promise<void> {
   for (const scenario of SCENARIOS) {
-    convService._reset();
-    convService.createDialogue({
+    // Fresh fakes per scenario (replaces the old convService._reset() call).
+    const dialogues = new FakeDialoguesRepo();
+    const messages = new FakeMessagesRepo();
+    const students = new FakeStudentsRepo();
+    const convService = new ConversationService(dialogues as any, messages as any, students as any);
+
+    const dialogueId = await convService.createDialogue({
       dialogueId: `test_${scenario.id}`,
-      student: { grade: '七年级', gradeLevel: 'junior', name: '测试学生' },
+      studentId: 1,
       subject: 'math',
       track: 'auxiliary',
       currentKnowledgePoint: { id: 'kp_1', name: '一元一次方程', subject: 'math' },
@@ -73,7 +108,7 @@ async function runTutoringTests(): Promise<void> {
         studentId: 'test_student',
         mode: 'auxiliary',
         message: scenario.studentMessage,
-        dialogueId: `test_${scenario.id}`,
+        dialogueId: String(dialogueId),
       });
 
       console.log(`[${scenario.id}] ${scenario.description}`);

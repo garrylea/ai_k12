@@ -1,105 +1,148 @@
-import type { Message, LoadContextResponse, Difficulty, Subject } from '../../ai-core/types.js';
-import type { DialogueRecord, SaveMessagesRequest, UpdateFailCountRequest, CompleteDialogueRequest } from './types.js';
+import { Injectable } from '@nestjs/common';
+import type { Message, LoadContextResponse, Subject, Track, Difficulty } from '../../ai-core/types.js';
+import type { SaveMessagesRequest, UpdateFailCountRequest, CompleteDialogueRequest } from './types.js';
+import { AiDialoguesRepository, AiMessagesRepository } from '../../database/repositories/index.js';
+import { StudentsRepository } from '../../database/repositories/students.repo.js';
 
 export interface CreateDialogueParams {
-  dialogueId: string;
-  student: { grade: string; gradeLevel: string; name: string };
-  subject: Subject;
-  cardContent?: string;
-  track: 'mainline' | 'auxiliary';
+  dialogueId: string;          // kept for compatibility; the DB id is what matters
+  studentId: number;            // NEW: required for DB persistence
+  subject: Subject;             // string union 'math' | 'chinese' | 'english'
+  cardContent?: string;         // mainline only; NOT persisted in ai_dialogues (no column)
+  track: Track;
   currentKnowledgePoint?: { id: string; name: string; subject: string };
-  currentDifficulty?: Difficulty;
-  currentQuestion?: { content: string; answer?: string };
+  currentDifficulty?: Difficulty;  // NOT persisted in ai_dialogues (no column)
+  currentQuestion?: { content: string; answer?: string };  // NOT persisted (no column)
 }
 
+@Injectable()
 export class ConversationService {
-  private dialogues = new Map<string, DialogueRecord>();
+  constructor(
+    private readonly dialoguesRepo: AiDialoguesRepository,
+    private readonly messagesRepo: AiMessagesRepository,
+    private readonly studentsRepo: StudentsRepository,
+  ) {}
 
-  createDialogue(params: CreateDialogueParams): void {
-    this.dialogues.set(params.dialogueId, {
-      dialogueId: params.dialogueId,
-      messages: [],
-      failCount: 0,
-      student: params.student,
-      subject: params.subject,
-      cardContent: params.cardContent,
+  async createDialogue(params: CreateDialogueParams): Promise<number> {
+    // subject_id: we only have the subject code (string), not the numeric DB id.
+    // Store null for now; loadContext returns 'math' as default (MVP is math-only).
+    // TODO: inject SubjectsRepository to resolve code -> id when multi-subject lands.
+    const subjectId: number | null = null;
+
+    // knowledge_point_id: try to parse as number; non-numeric IDs (e.g. 'kp_1') -> null
+    const kpIdRaw = params.currentKnowledgePoint ? Number(params.currentKnowledgePoint.id) : null;
+    const kpId: number | null = kpIdRaw !== null && Number.isFinite(kpIdRaw) ? kpIdRaw : null;
+
+    const id = await this.dialoguesRepo.create({
+      student_id: params.studentId,
+      subject_id: subjectId,
       track: params.track,
-      currentKnowledgePoint: params.currentKnowledgePoint,
-      currentDifficulty: params.currentDifficulty,
-      currentQuestion: params.currentQuestion,
-      createdAt: new Date(),
+      card_id: null,
+      knowledge_point_id: kpId,
+      title: params.track === 'auxiliary' ? '辅线答疑' : '主线讨论',
+      status: 'active',
+      consecutive_fail_count: 0,
     });
+    return id;
   }
 
-  loadContext(dialogueId: string, tokenBudget: number = 4000): LoadContextResponse | null {
-    const record = this.dialogues.get(dialogueId);
+  async loadContext(dialogueId: string, tokenBudget = 4000): Promise<LoadContextResponse | null> {
+    const id = Number(dialogueId);
+    if (!Number.isFinite(id)) return null;
+    const record = await this.dialoguesRepo.findById(id);
     if (!record) return null;
 
-    let messages = [...record.messages];
-    const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-    const charBudget = tokenBudget * 2;
+    const messages = await this.messagesRepo.findByDialogue(id);
+    const normalizedMessages: Message[] = messages.map((m) => ({ role: m.role, content: m.content }));
 
+    // Truncation (same algorithm as the in-memory version)
+    let finalMessages = normalizedMessages;
+    const totalChars = normalizedMessages.reduce((sum, m) => sum + m.content.length, 0);
+    const charBudget = tokenBudget * 2;
     if (totalChars > charBudget) {
-      const last4 = messages.slice(-4);
+      const last4 = normalizedMessages.slice(-4);
       const last4Chars = last4.reduce((sum, m) => sum + m.content.length, 0);
       const remainingBudget = charBudget - last4Chars;
-
-      const older = messages.slice(0, -4);
+      const older = normalizedMessages.slice(0, -4);
       const summaries: Message[] = [];
       const batchCount = Math.max(1, Math.ceil(older.length / 6));
       for (let i = 0; i < older.length; i += 6) {
         const batch = older.slice(i, i + 6);
-        const summary = `[对话摘要] ${batch.map(m => `${m.role}: ${m.content.slice(0, 30)}...`).join(' | ')}`;
+        const summary = `[对话摘要] ${batch.map((m) => `${m.role}: ${m.content.slice(0, 30)}...`).join(' | ')}`;
         if (summary.length <= remainingBudget / batchCount) {
           summaries.push({ role: 'system', content: summary });
         }
       }
-      messages = [...summaries, ...last4];
+      finalMessages = [...summaries, ...last4];
     }
 
+    const student = await this.studentsRepo.findById(record.student_id);
+
+    // subject: MVP is math-only; subject_id is not resolved to a code here.
+    // When multi-subject lands, inject SubjectsRepository to look up the code by id.
+    const subject: Subject = 'math';
+
     return {
-      messages,
-      student: record.student,
-      subject: record.subject,
-      cardContent: record.cardContent,
-      currentKnowledgePoint: record.currentKnowledgePoint,
-      currentDifficulty: record.currentDifficulty,
-      currentQuestion: record.currentQuestion,
-      consecutiveFailCount: record.failCount,
+      messages: finalMessages,
+      student: {
+        grade: student?.grade ?? '',
+        gradeLevel: student?.schoolLevel ?? '',
+        name: student?.name ?? '',
+      },
+      subject,
+      // NOTE: cardContent not persisted in ai_dialogues; mainline flow must pass it
+      // separately if needed (e.g., via TutoringRequest.cardId -> CardsRepository).
+      cardContent: undefined,
+      currentKnowledgePoint: record.knowledge_point_id
+        ? { id: record.knowledge_point_id.toString(), name: '', subject }
+        : undefined,
+      // NOTE: currentDifficulty and currentQuestion are NOT persisted in ai_dialogues.
+      // They return undefined here. TutoringCapability must tolerate this (model routing
+      // falls back to default difficulty when undefined).
+      currentDifficulty: undefined,
+      currentQuestion: undefined,
+      consecutiveFailCount: record.consecutive_fail_count,
       dialogueMetadata: {
         track: record.track,
-        createdAt: record.createdAt,
-        messageCount: record.messages.length,
+        createdAt: record.created_at,
+        messageCount: messages.length,
       },
     };
   }
 
-  saveMessages(request: SaveMessagesRequest): void {
-    const record = this.dialogues.get(request.dialogueId);
+  async saveMessages(request: SaveMessagesRequest): Promise<void> {
+    const id = Number(request.dialogueId);
+    if (!Number.isFinite(id)) throw new Error(`Invalid dialogueId: ${request.dialogueId}`);
+    const record = await this.dialoguesRepo.findById(id);
     if (!record) throw new Error(`Dialogue not found: ${request.dialogueId}`);
-    for (const msg of request.messages) {
-      record.messages.push({ role: msg.role, content: msg.content });
-    }
+
+    const rows = request.messages.map((msg) => ({
+      dialogue_id: id,
+      role: msg.role as 'system' | 'user' | 'assistant',
+      content: msg.content,
+      type: (msg.type ?? null) as 'socratic' | 'hint' | 'explain' | 'fallback' | 'block' | 'chat' | null,
+      attachments: null,
+      model: (msg.model ?? null) as string | null,
+      token_input: null,
+      token_output: null,
+      response_time_ms: null,
+      safety_flag: 0,
+    }));
+    await this.messagesRepo.createMany(rows);
   }
 
-  updateFailCount(request: UpdateFailCountRequest): void {
-    const record = this.dialogues.get(request.dialogueId);
+  async updateFailCount(request: UpdateFailCountRequest): Promise<void> {
+    const id = Number(request.dialogueId);
+    if (!Number.isFinite(id)) throw new Error(`Invalid dialogueId: ${request.dialogueId}`);
+    const record = await this.dialoguesRepo.findById(id);
     if (!record) throw new Error(`Dialogue not found: ${request.dialogueId}`);
-    if (request.increment) {
-      record.failCount += 1;
-    } else {
-      record.failCount = 0;
-    }
+    const next = request.increment ? record.consecutive_fail_count + 1 : 0;
+    await this.dialoguesRepo.updateFailCount(record.id, next);
   }
 
-  completeDialogue(request: CompleteDialogueRequest): void {
-    const record = this.dialogues.get(request.dialogueId);
-    if (!record) throw new Error(`Dialogue not found: ${request.dialogueId}`);
-    record.completedAt = new Date();
-    record.completeReason = request.reason;
-  }
-
-  _reset(): void {
-    this.dialogues.clear();
+  async completeDialogue(request: CompleteDialogueRequest): Promise<void> {
+    const id = Number(request.dialogueId);
+    if (!Number.isFinite(id)) return;
+    await this.dialoguesRepo.archive(id);
   }
 }

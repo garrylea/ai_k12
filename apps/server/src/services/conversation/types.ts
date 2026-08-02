@@ -1,24 +1,8 @@
-import type { Message, Difficulty, Track, Subject } from '../../ai-core/types.js';
-
-export interface DialogueRecord {
-  dialogueId: string;
-  messages: Message[];
-  failCount: number;
-  currentKnowledgePoint?: { id: string; name: string; subject: string };
-  currentDifficulty?: Difficulty;
-  currentQuestion?: { content: string; answer?: string };
-  student: { grade: string; gradeLevel: string; name: string };
-  subject: Subject;
-  cardContent?: string;
-  track: Track;
-  createdAt: Date;
-  completedAt?: Date;
-  completeReason?: string;
-}
+import type { SaveMessageEntry } from '../../ai-core/types.js';
 
 export interface SaveMessagesRequest {
   dialogueId: string;
-  messages: import('../../ai-core/types.js').SaveMessageEntry[];
+  messages: SaveMessageEntry[];
 }
 
 export interface UpdateFailCountRequest {

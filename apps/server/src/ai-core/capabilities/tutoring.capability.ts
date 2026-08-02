@@ -43,7 +43,7 @@ export class TutoringCapability {
     const dialogueId = request.dialogueId ?? `dialogue_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Step 1: Load context (used for safety history, fallback, and the prompt).
-    const context = this.conversationService.loadContext(dialogueId, 3000);
+    const context = await this.conversationService.loadContext(dialogueId, 3000);
     if (!context) {
       throw new Error(`Dialogue not found: ${dialogueId}`);
     }
@@ -69,15 +69,15 @@ export class TutoringCapability {
         track: request.mode,
       });
 
-      this.conversationService.saveMessages({
+      await this.conversationService.saveMessages({
         dialogueId,
         messages: [
           { role: 'user', content: request.message },
           { role: 'assistant', content: fallbackResult.content, type: 'fallback' },
         ],
       });
-      this.conversationService.updateFailCount({ dialogueId, increment: false });
-      this.conversationService.completeDialogue({ dialogueId, reason: 'fallback_triggered' });
+      await this.conversationService.updateFailCount({ dialogueId, increment: false });
+      await this.conversationService.completeDialogue({ dialogueId, reason: 'fallback_triggered' });
 
       return {
         dialogueId,
@@ -101,7 +101,7 @@ export class TutoringCapability {
 
     if (safetyResult.shouldBlock) {
       const blockResponse = safetyResult.blockResponse ?? '请专注于学习内容，有不懂的随时问老师。';
-      this.conversationService.saveMessages({
+      await this.conversationService.saveMessages({
         dialogueId,
         messages: [
           { role: 'user', content: request.message },
@@ -151,7 +151,7 @@ export class TutoringCapability {
     const content = parsed.rawText ?? chatResponse.content;
 
     // Step 8: Persist messages (user + assistant)
-    this.conversationService.saveMessages({
+    await this.conversationService.saveMessages({
       dialogueId,
       messages: [
         { role: 'user', content: request.message },
@@ -161,7 +161,7 @@ export class TutoringCapability {
 
     // Step 9: Update fail count
     const isAnswerWrong = this.detectWrongAnswer(content);
-    this.conversationService.updateFailCount({ dialogueId, increment: isAnswerWrong });
+    await this.conversationService.updateFailCount({ dialogueId, increment: isAnswerWrong });
 
     return {
       dialogueId,
