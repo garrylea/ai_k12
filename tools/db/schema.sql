@@ -415,7 +415,7 @@ CREATE TABLE IF NOT EXISTS aux_error_books (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   student_id BIGINT NOT NULL,
   subject_id BIGINT NOT NULL,
-  question_id BIGINT NOT NULL,
+  question_id BIGINT DEFAULT NULL,
   level SMALLINT NOT NULL DEFAULT 1,
   is_cleared TINYINT(1) NOT NULL DEFAULT 0,
   source VARCHAR(20) NOT NULL DEFAULT 'auxiliary',
@@ -426,7 +426,7 @@ CREATE TABLE IF NOT EXISTS aux_error_books (
   KEY idx_ae_student_subject (student_id, subject_id),
   CONSTRAINT fk_ae_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_ae_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
-  CONSTRAINT fk_ae_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
+  CONSTRAINT fk_ae_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS error_redo_logs (

@@ -129,12 +129,12 @@ export interface AiDialogueRow {
   track: 'mainline' | 'auxiliary';
   card_id: number | null;
   knowledge_point_id: number | null;
-  title: string;
+  title: string | null;
   status: 'active' | 'archived' | 'completed';
   consecutive_fail_count: number;
   created_at: Date;
   updated_at: Date;
-  completed_at: Date | null;
+  deleted_at: Date | null;
 }
 
 export interface AiMessageRow {
@@ -186,8 +186,10 @@ export interface SafetyAlertRow {
   message_id: number | null;
   type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
   level: 'info' | 'warning' | 'critical';
+  message: string;
   context: string | null;
   is_read: number;
+  read_at: Date | null;
   created_at: Date;
 }
 
@@ -219,7 +221,7 @@ import type { AiDialogueRow } from './types.js';
 export class AiDialoguesRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
-  async create(row: Omit<AiDialogueRow, 'id' | 'created_at' | 'updated_at' | 'completed_at'>): Promise<number> {
+  async create(row: Omit<AiDialogueRow, 'id' | 'created_at' | 'updated_at' | 'deleted_at'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO ai_dialogues
        (student_id, subject_id, track, card_id, knowledge_point_id, title, status, consecutive_fail_count)
@@ -428,12 +430,12 @@ import type { SafetyAlertRow } from './types.js';
 export class SafetyAlertsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
-  async create(row: Omit<SafetyAlertRow, 'id' | 'created_at' | 'is_read'>): Promise<number> {
+  async create(row: Omit<SafetyAlertRow, 'id' | 'created_at' | 'is_read' | 'read_at'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO safety_alerts
-       (parent_id, student_id, dialogue_id, message_id, type, level, context)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [row.parent_id, row.student_id, row.dialogue_id, row.message_id, row.type, row.level, row.context],
+       (parent_id, student_id, dialogue_id, message_id, type, level, message, context)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.parent_id, row.student_id, row.dialogue_id, row.message_id, row.type, row.level, row.message, row.context],
     );
     return result.insertId;
   }
@@ -506,11 +508,11 @@ import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 export interface UploadedFileRow {
   id: number;
   uploader_id: number;
-  source: string;
-  original_name: string;
-  storage_key: string;
+  uploader_type: string;
+  url: string;
   mime_type: string;
-  size: number;
+  size_bytes: number;
+  source: string;
   created_at: Date;
 }
 
@@ -520,9 +522,9 @@ export class UploadedFilesRepository {
 
   async create(row: Omit<UploadedFileRow, 'id' | 'created_at'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO uploaded_files (uploader_id, source, original_name, storage_key, mime_type, size)
+      `INSERT INTO uploaded_files (uploader_id, uploader_type, url, mime_type, size_bytes, source)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [row.uploader_id, row.source, row.original_name, row.storage_key, row.mime_type, row.size],
+      [row.uploader_id, row.uploader_type, row.url, row.mime_type, row.size_bytes, row.source],
     );
     return result.insertId;
   }
@@ -1129,11 +1131,11 @@ export class FilesService {
 
     const fileId = await this.filesRepo.create({
       uploader_id: uploaderId,
-      source,
-      original_name: file.originalname,
-      storage_key: key,
+      uploader_type: 'student',
+      url: `/uploads/${key}`,
       mime_type: file.mimetype,
-      size: file.size,
+      size_bytes: file.size,
+      source,
     });
 
     return { fileId, url: `/uploads/${key}` };
@@ -1268,6 +1270,7 @@ export class MinerUService {
 
 ```typescript
 import { Injectable, NotFoundException } from '@nestjs/common';
+import * as path from 'node:path';
 import { ExtractTasksRepository } from '../../database/repositories/extract-tasks.repo.js';
 import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
 import { MinerUService } from './mineru.service.js';
@@ -1302,7 +1305,9 @@ export class RefineryService {
   private async runExtraction(taskId: number, file: any): Promise<void> {
     await this.tasksRepo.updateStatus(taskId, 'processing');
     try {
-      const result = await this.mineru.extract(file.storage_key);
+      // file.url is '/uploads/<key>'; resolve to filesystem path for MinerU CLI
+      const filePath = path.join(process.env.UPLOAD_DIR ?? './uploads', file.url.replace(/^\/uploads\//, ''));
+      const result = await this.mineru.extract(filePath);
       const structured = await this.structuring.structure({
         rawInput: result.markdown,
         inputType: 'image_markdown',
