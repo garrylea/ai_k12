@@ -13,6 +13,9 @@ class FakeDialoguesRepo {
   async updateFailCount(id: number, count: number) {
     const r = this.rows.find((x) => x.id === id); if (r) r.consecutive_fail_count = count;
   }
+  async incrementFailCount(id: number) {
+    const r = this.rows.find((x) => x.id === id); if (r) r.consecutive_fail_count += 1;
+  }
   async archive(id: number) { const r = this.rows.find((x) => x.id === id); if (r) r.status = 'archived'; }
   async findByStudentAndTrack() { return []; }
   async updateTitle() {}
@@ -45,7 +48,6 @@ describe('ConversationService', () => {
     students = new FakeStudentsRepo();
     svc = new ConversationService(dialogues as any, messages as any, students as any);
     dialogueId = await svc.createDialogue({
-      dialogueId: '1',
       studentId: 1,
       subject: 'math',
       track: 'mainline',
@@ -96,7 +98,7 @@ describe('ConversationService', () => {
   });
 
   it('completeDialogue does not throw for existing dialogue', async () => {
-    await expect(svc.completeDialogue({ dialogueId: String(dialogueId), reason: 'fallback_triggered' })).resolves.toBeUndefined();
+    await expect(svc.completeDialogue({ dialogueId: String(dialogueId) })).resolves.toBeUndefined();
   });
 
   it('truncates long history to fit token budget (keeps last 4)', async () => {

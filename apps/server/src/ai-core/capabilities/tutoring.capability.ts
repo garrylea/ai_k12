@@ -40,7 +40,10 @@ export class TutoringCapability {
   }
 
   async tutor(request: TutoringRequest): Promise<TutoringResponse> {
-    const dialogueId = request.dialogueId ?? `dialogue_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (!request.dialogueId) {
+      throw new Error('dialogueId is required - call ConversationService.createDialogue first');
+    }
+    const dialogueId = request.dialogueId;
 
     // Step 1: Load context (used for safety history, fallback, and the prompt).
     const context = await this.conversationService.loadContext(dialogueId, 3000);
@@ -77,7 +80,7 @@ export class TutoringCapability {
         ],
       });
       await this.conversationService.updateFailCount({ dialogueId, increment: false });
-      await this.conversationService.completeDialogue({ dialogueId, reason: 'fallback_triggered' });
+      await this.conversationService.completeDialogue({ dialogueId });
 
       return {
         dialogueId,

@@ -56,4 +56,11 @@ export class AiDialoguesRepository {
       [count, id],
     );
   }
+
+  async incrementFailCount(id: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE ai_dialogues SET consecutive_fail_count = consecutive_fail_count + 1 WHERE id = ?`,
+      [id],
+    );
+  }
 }

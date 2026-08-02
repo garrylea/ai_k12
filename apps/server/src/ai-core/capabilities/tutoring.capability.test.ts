@@ -16,6 +16,9 @@ class FakeDialoguesRepo {
   async updateFailCount(id: number, count: number) {
     const r = this.rows.find((x) => x.id === id); if (r) r.consecutive_fail_count = count;
   }
+  async incrementFailCount(id: number) {
+    const r = this.rows.find((x) => x.id === id); if (r) r.consecutive_fail_count += 1;
+  }
   async archive(id: number) { const r = this.rows.find((x) => x.id === id); if (r) r.status = 'archived'; }
   async findByStudentAndTrack() { return []; }
   async updateTitle() {}
@@ -45,7 +48,6 @@ describe('TutoringCapability', () => {
     const students = new FakeStudentsRepo();
     convService = new ConversationService(dialogues as any, messages as any, students as any);
     dialogueId = await convService.createDialogue({
-      dialogueId: 'test_dialogue_1',
       studentId: 1,
       subject: 'math',
       track: 'mainline',

@@ -5,7 +5,6 @@ import { AiDialoguesRepository, AiMessagesRepository } from '../../database/repo
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 
 export interface CreateDialogueParams {
-  dialogueId: string;          // kept for compatibility; the DB id is what matters
   studentId: number;            // NEW: required for DB persistence
   subject: Subject;             // string union 'math' | 'chinese' | 'english'
   cardContent?: string;         // mainline only; NOT persisted in ai_dialogues (no column)
@@ -126,7 +125,7 @@ export class ConversationService {
       token_input: null,
       token_output: null,
       response_time_ms: null,
-      safety_flag: 0,
+      safety_flag: msg.type === 'block' ? 1 : 0,
     }));
     await this.messagesRepo.createMany(rows);
   }
@@ -134,15 +133,18 @@ export class ConversationService {
   async updateFailCount(request: UpdateFailCountRequest): Promise<void> {
     const id = Number(request.dialogueId);
     if (!Number.isFinite(id)) throw new Error(`Invalid dialogueId: ${request.dialogueId}`);
-    const record = await this.dialoguesRepo.findById(id);
-    if (!record) throw new Error(`Dialogue not found: ${request.dialogueId}`);
-    const next = request.increment ? record.consecutive_fail_count + 1 : 0;
-    await this.dialoguesRepo.updateFailCount(record.id, next);
+    if (request.increment) {
+      await this.dialoguesRepo.incrementFailCount(id);
+    } else {
+      await this.dialoguesRepo.updateFailCount(id, 0);
+    }
   }
 
   async completeDialogue(request: CompleteDialogueRequest): Promise<void> {
     const id = Number(request.dialogueId);
-    if (!Number.isFinite(id)) return;
+    if (!Number.isFinite(id)) throw new Error(`Invalid dialogueId: ${request.dialogueId}`);
+    const record = await this.dialoguesRepo.findById(id);
+    if (!record) throw new Error(`Dialogue not found: ${request.dialogueId}`);
     await this.dialoguesRepo.archive(id);
   }
 }

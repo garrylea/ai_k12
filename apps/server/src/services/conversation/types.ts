@@ -12,5 +12,4 @@ export interface UpdateFailCountRequest {
 
 export interface CompleteDialogueRequest {
   dialogueId: string;
-  reason: 'student_completed' | 'fallback_triggered' | 'timeout' | 'manual_end';
 }
