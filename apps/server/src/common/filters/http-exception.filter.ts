@@ -20,6 +20,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let code = 5000;
     let message = 'Internal server error';
+    // Extra fields from the exception response (e.g. dialogueId) that should
+    // be passed through to the client so the frontend can retry with context.
+    let extra: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -28,6 +31,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
         const r = res as Record<string, unknown>;
         code = (r.code as number) ?? this.httpStatusToCode(status);
         message = (r.message as string) ?? exception.message;
+        // Pass through any additional fields beyond code/message (e.g. dialogueId).
+        const { code: _code, message: _msg, ...rest } = r;
+        extra = rest;
       } else {
         message = String(res);
       }
@@ -40,6 +46,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       code,
       message,
       data: null,
+      ...extra,
     });
   }
 
