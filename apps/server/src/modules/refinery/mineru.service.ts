@@ -15,31 +15,48 @@ export class MinerUService {
   private readonly cli = 'mineru-open-api';
 
   async extract(inputPath: string): Promise<MinerUResult> {
-    const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mineru-'));
-    try {
-      await this.run(inputPath, outputDir);
-      return await this.parseOutput(outputDir);
-    } finally {
-      // Best-effort cleanup of temp dir
-      await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mineru-'));
+      try {
+        await this.run(inputPath, outputDir);
+        return await this.parseOutput(outputDir);
+      } catch (err) {
+        lastError = err as Error;
+        this.logger.warn(`MinerU attempt ${attempt} failed: ${(err as Error).message}`);
+      } finally {
+        // Best-effort cleanup of temp dir
+        await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
+    throw lastError ?? new Error('MinerU extraction failed');
   }
 
   private run(inputPath: string, outputDir: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(this.cli, ['extract', inputPath, '-o', outputDir]);
+      const proc = spawn(this.cli, ['extract', inputPath, '-o', outputDir], {
+        detached: true,
+      });
       let stderr = '';
       proc.stderr.on('data', (data) => { stderr += data.toString(); });
+      const timer = setTimeout(() => {
+        // Kill the entire process group (negative pid) so MinerU's child processes also die
+        try {
+          process.kill(-proc.pid!, 'SIGTERM');
+        } catch {
+          proc.kill('SIGTERM');
+        }
+        reject(new Error(`mineru-open-api timed out after 120s`));
+      }, 120_000);
       proc.on('close', (code) => {
+        clearTimeout(timer);
         if (code === 0) resolve();
         else reject(new Error(`mineru-open-api exited ${code}: ${stderr}`));
       });
-      proc.on('error', (err) => reject(err));
-      // 120s timeout
-      setTimeout(() => {
-        proc.kill('SIGTERM');
-        reject(new Error(`mineru-open-api timed out after 120s`));
-      }, 120_000);
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
     });
   }
 

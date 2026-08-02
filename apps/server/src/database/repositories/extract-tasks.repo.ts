@@ -29,4 +29,20 @@ export class ExtractTasksRepository {
       [status, result ?? null, errorMessage ?? null, id],
     );
   }
+
+  async findActiveByStudent(studentId: number): Promise<ExtractTaskRow[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM extract_tasks WHERE student_id = ? AND status IN ('pending', 'processing')`,
+      [studentId],
+    );
+    return rows as ExtractTaskRow[];
+  }
+
+  async markStaleProcessingAsFailed(): Promise<number> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE extract_tasks SET status = 'failed', error_message = 'process restart - stale task', updated_at = NOW(3)
+       WHERE status = 'processing' AND updated_at < NOW() - INTERVAL 5 MINUTE`,
+    );
+    return result.affectedRows;
+  }
 }
