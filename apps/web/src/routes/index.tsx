@@ -4,6 +4,7 @@ import SubjectSelectPage from '@/pages/auth/SubjectSelectPage';
 import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
 import CourseDetailPage from '@/pages/student/CourseDetailPage';
+import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 
@@ -73,7 +74,7 @@ const router = createBrowserRouter([
       { path: 'scores', element: <Placeholder title="成绩报告 P2.8" /> },
       { path: 'reward-unlock', element: <Placeholder title="闯关奖励 P2.9" /> },
 
-      { path: 'auxiliary', element: <Placeholder title="自由探索首页 P3.1" /> },
+      { path: 'auxiliary', element: <AuxiliaryHomePage /> },
       { path: 'auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
       { path: 'auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
       { path: 'auxiliary/chat', element: <Placeholder title="辅线对话 P3.4" /> },
