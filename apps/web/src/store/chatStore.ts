@@ -15,6 +15,7 @@ interface ChatState {
   setMessages: (msgs: ChatMessage[]) => void;
   appendMessage: (msg: ChatMessage) => void;
   updateLastAssistant: (content: string) => void;
+  appendToLastAssistant: (content: string) => void;
   setIsStreaming: (v: boolean) => void;
   setStreamingContent: (v: string) => void;
   reset: () => void;
@@ -32,6 +33,15 @@ export const useChatStore = create<ChatState>((set) => ({
       const last = messages[messages.length - 1];
       if (last && last.role === 'assistant') {
         last.content = content;
+      }
+      return { messages };
+    }),
+  appendToLastAssistant: (content) =>
+    set((s) => {
+      const messages = [...s.messages];
+      const last = messages[messages.length - 1];
+      if (last && last.role === 'assistant') {
+        last.content = last.content + content;
       }
       return { messages };
     }),
