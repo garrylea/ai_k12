@@ -14,8 +14,8 @@ export default function AuxChatPage() {
   const [params] = useSearchParams();
   const knowledgePointId = params.get('knowledgePointId');
   const { currentDialogueId, setCurrentDialogueId } = useAuxiliaryStore();
-  const { reset } = useChatStore();
-  const { send } = useAuxChat(currentDialogueId ?? 0);
+  const { reset, isStreaming } = useChatStore();
+  const { send, isLoadingHistory } = useAuxChat(currentDialogueId ?? 0);
 
   useEffect(() => {
     if (!currentDialogueId) {
@@ -53,9 +53,10 @@ export default function AuxChatPage() {
           </button>
         </div>
       </header>
-      <AuxChatPanel />
+      <AuxChatPanel isLoadingHistory={isLoadingHistory} />
       <AuxInputBar
         onSend={send}
+        isStreaming={isStreaming}
         onUpload={(file) => navigate('/student/auxiliary/ask', { state: { file } })}
       />
     </AuxiliaryLayout>

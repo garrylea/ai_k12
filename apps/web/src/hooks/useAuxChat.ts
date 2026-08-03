@@ -1,9 +1,10 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useChatStore } from '@/store/chatStore';
 import { tutor, getMessages, type MessageItem } from '@/services/api';
 
 export function useAuxChat(dialogueId: number) {
   const wsRef = useRef<WebSocket | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const {
     appendMessage,
     updateLastAssistant,
@@ -34,8 +35,12 @@ export function useAuxChat(dialogueId: number) {
   useEffect(() => {
     if (!dialogueId) return;
 
+    let isCurrent = true;
+
+    setIsLoadingHistory(true);
     getMessages(dialogueId)
       .then((items: MessageItem[]) => {
+        if (!isCurrent) return;
         setMessages(
           items
             .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -49,6 +54,9 @@ export function useAuxChat(dialogueId: number) {
       })
       .catch(() => {
         // ignore load errors - user can still send new messages
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingHistory(false);
       });
 
     const token = localStorage.getItem('token') ?? '';
@@ -59,7 +67,13 @@ export function useAuxChat(dialogueId: number) {
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
+      if (!isCurrent) return;
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
       if (msg.type === 'token') {
         appendToLastAssistant(msg.payload.content);
       } else if (msg.type === 'full') {
@@ -78,10 +92,14 @@ export function useAuxChat(dialogueId: number) {
     };
 
     ws.onclose = () => {
+      if (!isCurrent) return;
       setIsStreaming(false);
     };
 
-    return () => ws.close();
+    return () => {
+      isCurrent = false;
+      ws.close();
+    };
   }, [
     dialogueId,
     updateLastAssistant,
@@ -92,6 +110,11 @@ export function useAuxChat(dialogueId: number) {
 
   const send = useCallback(
     async (content: string) => {
+      if (!dialogueId) return;
+      const { isStreaming } = useChatStore.getState();
+      if (isStreaming) return;
+      if (!content.trim()) return;
+
       appendMessage({ role: 'user', content });
       appendMessage({ role: 'assistant', content: '', streaming: true });
       setIsStreaming(true);
@@ -103,8 +126,8 @@ export function useAuxChat(dialogueId: number) {
         await fallbackToRest(content);
       }
     },
-    [appendMessage, setIsStreaming, fallbackToRest],
+    [dialogueId, appendMessage, setIsStreaming, fallbackToRest],
   );
 
-  return { send };
+  return { send, isLoadingHistory };
 }
