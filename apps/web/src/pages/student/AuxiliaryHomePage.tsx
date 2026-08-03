@@ -2,11 +2,9 @@ import { useNavigate } from 'react-router-dom';
 import AuxiliaryLayout from '@/components/business/AuxiliaryLayout';
 import ConversationList from '@/components/business/ConversationList';
 import AuxEmptyState from '@/components/business/AuxEmptyState';
-import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 
 export default function AuxiliaryHomePage() {
   const navigate = useNavigate();
-  const { currentDialogueId } = useAuxiliaryStore();
 
   return (
     <AuxiliaryLayout sidebar={<ConversationList />}>
@@ -21,18 +19,14 @@ export default function AuxiliaryHomePage() {
           </button>
           <button
             onClick={() => navigate('/student/auxiliary/chat')}
-            className="px-4 py-2 rounded-lg text-sm bg-[#8B5A8E] text-white"
+            className="px-4 py-2 rounded-lg text-sm bg-[var(--aux)] text-white"
           >
             下一个问题
           </button>
         </div>
       </header>
       <div className="flex-1 overflow-auto">
-        {currentDialogueId ? (
-          <div className="p-6 text-[var(--text-secondary)]">已选择会话 #{currentDialogueId}</div>
-        ) : (
-          <AuxEmptyState onNew={() => navigate('/student/auxiliary/chat')} />
-        )}
+        <AuxEmptyState onNew={() => navigate('/student/auxiliary/chat')} />
       </div>
     </AuxiliaryLayout>
   );

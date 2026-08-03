@@ -44,6 +44,11 @@ const router = createBrowserRouter([
     path: '/student/course-detail',
     element: <CourseDetailPage />,
   },
+  // 辅线答疑轨（全屏沉浸层，独立于 StudentLayout，物理隔离）
+  { path: '/student/auxiliary', element: <AuxiliaryHomePage /> },
+  { path: '/student/auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
+  { path: '/student/auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
+  { path: '/student/auxiliary/chat', element: <Placeholder title="辅线对话 P3.4" /> },
   {
     path: '/parent',
     element: <ParentLayout />,
@@ -73,11 +78,6 @@ const router = createBrowserRouter([
       { path: 'exam', element: <Placeholder title="期中/期末 P2.7" /> },
       { path: 'scores', element: <Placeholder title="成绩报告 P2.8" /> },
       { path: 'reward-unlock', element: <Placeholder title="闯关奖励 P2.9" /> },
-
-      { path: 'auxiliary', element: <AuxiliaryHomePage /> },
-      { path: 'auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
-      { path: 'auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
-      { path: 'auxiliary/chat', element: <Placeholder title="辅线对话 P3.4" /> },
 
       { path: 'error-book', element: <Placeholder title="错题本 P4.1" /> },
       { path: 'error-book/redo', element: <Placeholder title="错题重做 P4.2" /> },
