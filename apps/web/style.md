@@ -217,15 +217,15 @@
 
 - 每个按钮包含：图标徽章、主标题。
 - 图标徽章：80×80px，圆角 16px，`bg-gradient-to-tr from-[#FF6B35] to-[#FF8C61]`，白色线性 SVG 图标，带 `shadow-sm`。
-- 主入口（学习，可选）：白色卡片 + `border-slate-200/80` + `--shadow-card`，hover 提升为 `--shadow-elevated`。
-- 辅入口/未开放入口（答疑）：白色卡片 + `opacity-55` + `bg-slate-50/30` + `border-slate-100`，图标徽章改用 `from-slate-100 to-slate-200` 渐变 + `text-slate-500`，`cursor-not-allowed`。
-- 标签：30px，字重 900，`tracking-tight`，可选态 `text-slate-900`，锁定态 `text-slate-500`。
+- 主入口（学习，可点击）：白色卡片 + `border-slate-200/80` + `--shadow-card`，hover 提升为 `--shadow-elevated`，`hover:-translate-y-1`、`focus:ring-4 focus:ring-[var(--brand-500)]/20`。
+- 辅入口（答疑，可点击）：与"学习"入口视觉一致——白色卡片 + `border-slate-200/80` + `--shadow-card` + 橘红渐变徽章（`from-[#FF6B35] to-[#FF8C61]`），`hover:-translate-y-1`、`focus:ring-4 focus:ring-[var(--brand-500)]/20`。两入口靠文字"学习"/"答疑"区分，无锁定态。
+- 标签：30px，字重 900，`tracking-tight`，`text-[var(--text-primary)]`。
 
 #### 2.6.3 禁用项
 
 - 不出现吉祥物、emoji、装饰性插画。
 - 不出现冗余标题、副标题或说明文字。
-- 禁用态不出现「暂未开放」等弹层前置提示，页面本身即表达锁定状态。
+- 两入口（学习/答疑）均为可点击态，靠文字标签区分；无锁定态、无「暂未开放」弹层提示。
 - 不使用 `.student-theme-container`，不启用夜间切换。
 
 ---
