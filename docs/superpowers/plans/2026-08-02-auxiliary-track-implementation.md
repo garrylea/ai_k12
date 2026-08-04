@@ -2728,7 +2728,23 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
-### Task 14: 前端 P3.2 知识点选择器与 P3.3 拍照答疑
+### Task 14: 辅助系统多模态答疑（实现调整：2026-08-03）
+
+> **实现调整说明**：原计划为 P3.2 知识点选择 + P3.3 拍照答疑独立页面。经头脑风暴调整如下：
+> - **跳过 P3.2**：进入辅线直接聊天，知识点由 AI 从问题推断（QuestionStructuringCapability 已输出知识点）
+> - **P3.3 集成到 P3.4 聊天栏**：图片粘贴/拖拽到 AuxInputBar，不做独立页面
+> - **放弃 MinerU OCR 方案**：直接把图片传给 Qwen-VL 多模态模型辅导（避免 OCR 对几何图形/手写公式的丢失）
+> - **HEIC 前端动态转换**：heic2any 动态 import，不进初始 bundle
+> - **辅导时一并输出结构化题目 JSON**：模型回复末尾输出 ```json 块，后端解析入 questions + aux_error_books
+>
+> 实际拆分为三个子任务：
+> - **Task 14a（后端 ai-core 多模态）**：commit a0ad196 + f0683d7。Message.content 扩展为 `string | ContentPart[]`；model-routes.yaml 加 qwen-vl-max；ModelRouter 有图片路由 qwen-vl-max；TutoringCapability 接线 attachments -> image_url part；auxiliary.md 加图片输入+结构化输出要求；ResponseParser extractJsonBlock/stripJsonBlock；AIService fileId->base64 data URL + 入库；ErrorBookService.createAuxFromStructured（DRY helper insertQuestionAndAux）；Zod 校验结构化输出；文件 ownership/mime/size 校验。106/106 测试通过。
+> - **Task 14b（前端图片粘贴）**：commit 154c49f + 805895c。AuxInputBar 去掉拍照按钮，加 paste/drop；image-convert.ts HEIC 动态转换；uploadFile 支持 AbortSignal；useAuxChat send 支持 attachments，有附件时强制 REST（不走 WS）；前端 5MB size 校验；requestRef 防竞态；unmount cleanup；key remount 防跨会话状态泄漏。heic2any code-split 独立 chunk。
+> - **Task 14c（入库）**：已包含在 14a（createAuxFromStructured，辅导时一并结构化入库）。
+>
+> 以下为原计划内容（保留作为历史参考，未按此实现）：
+
+### ~~Task 14（原计划）: 前端 P3.2 知识点选择器与 P3.3 拍照答疑~~
 
 **Files:**
 - Create: `apps/web/src/pages/student/KnowledgeSelectorPage.tsx`
