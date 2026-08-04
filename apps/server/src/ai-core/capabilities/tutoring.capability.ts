@@ -7,10 +7,27 @@ import { SafetyGuard } from '../infra/safety-guard.js';
 import { ResponseParser } from '../infra/response-parser.js';
 import { FallbackHandler } from '../infra/fallback-handler.js';
 import { ConversationService } from '../../services/conversation/index.js';
+import { z } from 'zod';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Review #4: Zod schema for validating model-output structured question JSON.
+const StructuredQuestionOutputSchema = z.object({
+  type: z.enum(['choice', 'fill_blank', 'true_false', 'short_answer', 'proof']),
+  difficulty: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  content: z.string().min(1),
+  options: z.array(z.object({
+    label: z.string(),
+    text: z.string(),
+    isCorrect: z.boolean(),
+  })).optional(),
+  answer: z.string(),
+  explanation: z.string(),
+  knowledgePoints: z.array(z.string()),
+  quality: z.enum(['good', 'poor']),
+});
 
 export interface TutoringCapabilityDeps {
   modelClient?: ModelClient;
@@ -174,22 +191,15 @@ export class TutoringCapability {
 
     // Step 7: Parse response. Task 14a: extract structured question JSON block
     // from the model's reply and strip it from the displayed content.
+    // Review #4: use Zod safeParse instead of unchecked `as` casts.
     const parsed = this.responseParser.parse({ rawContent: chatResponse.content, mode: 'text' });
     let content = parsed.rawText ?? chatResponse.content;
     let structuredQuestion: StructuredQuestionOutput | undefined;
     const jsonBlock = this.responseParser.extractJsonBlock(content);
-    if (jsonBlock && typeof jsonBlock === 'object') {
-      const obj = jsonBlock as Record<string, unknown>;
-      if (obj.type && obj.content && obj.answer) {
-        structuredQuestion = {
-          type: obj.type as StructuredQuestionOutput['type'],
-          difficulty: obj.difficulty as StructuredQuestionOutput['difficulty'],
-          content: String(obj.content),
-          answer: String(obj.answer),
-          explanation: String(obj.explanation ?? ''),
-          knowledgePoints: Array.isArray(obj.knowledgePoints) ? (obj.knowledgePoints as string[]) : [],
-          quality: (obj.quality as 'good' | 'poor') ?? 'good',
-        };
+    if (jsonBlock) {
+      const result = StructuredQuestionOutputSchema.safeParse(jsonBlock);
+      if (result.success) {
+        structuredQuestion = result.data;
         content = this.responseParser.stripJsonBlock(content);
       }
     }

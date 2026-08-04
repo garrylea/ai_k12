@@ -22,4 +22,13 @@ export class UploadedFilesRepository {
     );
     return (rows[0] as UploadedFileRow) ?? null;
   }
+
+  /** Task 14a review #1: ownership-scoped lookup to prevent authorization bypass. */
+  async findByIdAndOwner(id: number, uploaderId: number): Promise<UploadedFileRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM uploaded_files WHERE id = ? AND uploader_id = ?`,
+      [id, uploaderId],
+    );
+    return (rows[0] as UploadedFileRow) ?? null;
+  }
 }

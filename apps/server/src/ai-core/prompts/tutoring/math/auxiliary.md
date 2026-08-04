@@ -38,9 +38,9 @@ description: "数学辅线苏格拉底辅导 - 开放范围"
 ### 结构化题目输出
 在辅导回复之后，另起一行输出结构化题目，用 json 代码块包裹：
 ```json
-{ "type": "choice|fill_blank|true_false|short_answer|proof", "difficulty": 1, "content": "题干", "answer": "答案", "explanation": "解析", "knowledgePoints": ["知识点1"], "quality": "good" }
+{ "type": "choice|fill_blank|true_false|short_answer|proof", "difficulty": 1, "content": "题干", "options": [{"label":"A","text":"选项A","isCorrect":false}], "answer": "答案", "explanation": "解析", "knowledgePoints": ["知识点1"], "quality": "good" }
 ```
-仅当学生提出的是具体题目时输出；纯概念讨论不输出。难度 1=简单 2=中等 3=困难。
+仅当学生提出的是具体题目时输出；纯概念讨论不输出。难度 1=简单 2=中等 3=困难。选择题需填写 options（label/text/isCorrect），非选择题省略 options。
 
 ---
 

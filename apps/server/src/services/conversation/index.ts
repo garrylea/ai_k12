@@ -55,20 +55,23 @@ export class ConversationService {
     const messages = await this.messagesRepo.findByDialogue(id);
     const normalizedMessages: Message[] = messages.map((m) => ({ role: m.role, content: m.content }));
 
-    // Truncation (same algorithm as the in-memory version)
+    // Truncation (same algorithm as the in-memory version).
+    // Review #11: content may be string | ContentPart[]; use contentToText
+    // for length checks and slicing (DB content is always string, but the
+    // type union requires explicit coercion).
     let finalMessages = normalizedMessages;
-    const totalChars = normalizedMessages.reduce((sum, m) => sum + m.content.length, 0);
+    const totalChars = normalizedMessages.reduce((sum, m) => sum + contentToText(m.content).length, 0);
     const charBudget = tokenBudget * 2;
     if (totalChars > charBudget) {
       const last4 = normalizedMessages.slice(-4);
-      const last4Chars = last4.reduce((sum, m) => sum + m.content.length, 0);
+      const last4Chars = last4.reduce((sum, m) => sum + contentToText(m.content).length, 0);
       const remainingBudget = charBudget - last4Chars;
       const older = normalizedMessages.slice(0, -4);
       const summaries: Message[] = [];
       const batchCount = Math.max(1, Math.ceil(older.length / 6));
       for (let i = 0; i < older.length; i += 6) {
         const batch = older.slice(i, i + 6);
-        const summary = `[对话摘要] ${batch.map((m) => `${m.role}: ${m.content.slice(0, 30)}...`).join(' | ')}`;
+        const summary = `[对话摘要] ${batch.map((m) => `${m.role}: ${contentToText(m.content).slice(0, 30)}...`).join(' | ')}`;
         if (summary.length <= remainingBudget / batchCount) {
           summaries.push({ role: 'system', content: summary });
         }

@@ -3,7 +3,7 @@ import { AuxErrorBooksRepository, QuestionsRepository, ExtractTasksRepository, E
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { computeContentHash } from './content-hash.util.js';
 import type { CreateAuxErrorDto } from './dto/create-aux-error.dto.js';
-import type { StructuredQuestionOutput } from '../../ai-core/types.js';
+import type { StructuredQuestion, StructuredQuestionOutput, StructuredOption } from '../../ai-core/types.js';
 
 @Injectable()
 export class ErrorBookService {
@@ -47,45 +47,16 @@ export class ErrorBookService {
       subjectHint: 'math', // TODO: derive from dto.subjectId via SubjectsRepository
     });
 
-    let questionId: number | null = null;
-    let questionCreated = false;
-    if (structured.quality !== 'poor' && structured.content.trim().length > 0) {
-      const contentHash = computeContentHash(structured.content);
-      const result = await this.questionsRepo.findOrCreate({
-        subject_id: dto.subjectId,
-        type: structured.type,
-        difficulty: structured.difficulty,
-        content: structured.content,
-        options: structured.options ? JSON.stringify(structured.options) : null,
-        answer: structured.answer,
-        explanation: structured.explanation,
-        source: 'auxiliary',
-        content_hash: contentHash,
-      });
-      questionId = result.id;
-      questionCreated = result.created;
-      // TODO: bind knowledge points when KnowledgePointsRepository exists
-    }
-
-    try {
-      const errorId = await this.auxRepo.create({
-        student_id: studentId,
-        subject_id: dto.subjectId,
-        question_id: questionId,
-        level: 1,
-        is_cleared: 0,
-        source: dto.source,
-        wrong_answer_text: questionId === null ? rawInput : null,
-      });
-      return { errorId, questionId, structured };
-    } catch (err) {
-      // Compensation: if we just created the question but the aux_error_books insert failed,
-      // delete the orphan question (only if we created it, not if it was reused).
-      if (questionCreated && questionId !== null) {
-        await this.questionsRepo.deleteById(questionId).catch(() => {});
-      }
-      throw err;
-    }
+    // Review #6: shared dedup+insert+compensation helper.
+    const { errorId, questionId } = await this.insertQuestionAndAux(
+      studentId,
+      dto.subjectId,
+      structured,
+      dto.source,
+      rawInput,
+      structured.options,
+    );
+    return { errorId, questionId, structured };
   }
 
   /**
@@ -105,6 +76,38 @@ export class ErrorBookService {
     structured: StructuredQuestionOutput,
     source: 'photo' | 'auxiliary' = 'auxiliary',
   ): Promise<{ errorId: number; questionId: number | null }> {
+    // Review #6: shared dedup+insert+compensation helper.
+    return this.insertQuestionAndAux(
+      studentId,
+      subjectId,
+      structured,
+      source,
+      structured.content,
+      structured.options,
+    );
+  }
+
+  /**
+   * Review #6: Shared helper for dedup + question insert + aux_error_books insert
+   * + orphan compensation. Used by both createAux (from structuring capability)
+   * and createAuxFromStructured (from tutoring model output).
+   *
+   * @param studentId   numeric student ID
+   * @param subjectId   subject to bind the question to
+   * @param structured  structured question (StructuredQuestion or StructuredQuestionOutput)
+   * @param source      'auxiliary' or 'photo'
+   * @param rawText     text to store in wrong_answer_text when question_id is null
+   * @param options     optional choice options (StructuredOption[])
+   * @returns { errorId, questionId }
+   */
+  private async insertQuestionAndAux(
+    studentId: number,
+    subjectId: number,
+    structured: StructuredQuestion | StructuredQuestionOutput,
+    source: 'auxiliary' | 'photo',
+    rawText: string,
+    options?: StructuredOption[] | null,
+  ): Promise<{ errorId: number; questionId: number | null }> {
     let questionId: number | null = null;
     let questionCreated = false;
 
@@ -117,7 +120,7 @@ export class ErrorBookService {
         type: structured.type,
         difficulty: structured.difficulty,
         content: structured.content,
-        options: null,  // StructuredQuestionOutput has no options field (MVP simplification)
+        options: options ? JSON.stringify(options) : null,
         answer: structured.answer,
         explanation: structured.explanation,
         source: 'auxiliary',
@@ -137,12 +140,12 @@ export class ErrorBookService {
         level: 1,
         is_cleared: 0,
         source,
-        wrong_answer_text: questionId === null ? structured.content : null,
+        wrong_answer_text: questionId === null ? rawText : null,
       });
       return { errorId, questionId };
     } catch (err) {
       // Compensation: if we just created the question but the aux_error_books
-      // insert failed, delete the orphan question.
+      // insert failed, delete the orphan question (only if we created it).
       if (questionCreated && questionId !== null) {
         await this.questionsRepo.deleteById(questionId).catch(() => {});
       }

@@ -3,6 +3,7 @@ import {
   BadRequestException,
   HttpException,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { LLMClientError, InsufficientQuotaError } from '../../ai-core/types.js';
@@ -17,6 +18,9 @@ import type { TutorDto } from './dto/tutor.dto.js';
 
 @Injectable()
 export class AIService {
+  private readonly logger = new Logger(AIService.name);
+  private readonly MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
+
   constructor(
     private readonly tutoring: TutoringCapability,
     private readonly conversationsService: ConversationsService,
@@ -66,20 +70,29 @@ export class AIService {
     // avoid creating duplicate rows in ai_messages.
 
     // Task 14a: resolve attachment fileIds to base64 data URLs for multimodal input.
+    // Review #12: only process image attachments; non-image types are skipped.
     const attachments: Attachment[] = [];
     if (dto.attachments && dto.attachments.length > 0) {
       const uploadDir = process.env.UPLOAD_DIR ?? './uploads';
       for (const att of dto.attachments) {
+        if (att.type !== 'image') continue;  // #12: skip non-image attachments
         const fileIdNum = Number(att.fileId);
         if (!Number.isFinite(fileIdNum)) {
           throw new BadRequestException({ code: 1001, message: 'attachment.fileId 必须为数字' });
         }
-        const fileRow = await this.filesRepo.findById(fileIdNum);
+        // Review #1: ownership check - prevent authorization bypass.
+        const fileRow = await this.filesRepo.findByIdAndOwner(fileIdNum, userId);
         if (!fileRow) {
-          throw new BadRequestException({ code: 1001, message: `文件不存在: ${att.fileId}` });
+          throw new BadRequestException({ code: 1001, message: '文件不存在或无权访问' });
         }
-        // The url field is stored as /uploads/<key>; strip the prefix to get the
-        // storage key, then read from disk and encode as base64 data URL.
+        // Review #2: mime type validation - only images can be sent to Qwen-VL.
+        if (!fileRow.mime_type.startsWith('image/')) {
+          throw new BadRequestException({ code: 1001, message: '附件必须是图片' });
+        }
+        // Review #3: size limit - base64 inflates ~33%, cap before readFileSync.
+        if (fileRow.size_bytes > this.MAX_IMAGE_BYTES) {
+          throw new BadRequestException({ code: 1001, message: '图片过大（最大 5MB）' });
+        }
         const storageKey = fileRow.url.replace(/^\/uploads\//, '');
         const filePath = path.join(uploadDir, storageKey);
         let base64: string;
@@ -90,7 +103,7 @@ export class AIService {
         }
         const dataUrl = `data:${fileRow.mime_type};base64,${base64}`;
         attachments.push({
-          type: att.type === 'image' ? 'image' : 'formula',
+          type: 'image',
           url: fileRow.url,
           imageUrl: dataUrl,
           fileId: att.fileId,
@@ -136,7 +149,7 @@ export class AIService {
           // Ingestion failure should not block the tutoring response.
           // The user still gets their Socratic reply; the question just
           // doesn't get saved to the error book.
-          console.error('[AIService] structured question ingestion failed:', err);
+          this.logger.error('structured question ingestion failed:', err);
         });
       }
 

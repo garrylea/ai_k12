@@ -47,8 +47,8 @@ export class PromptBuilder {
       escape: (value: unknown) => (value == null ? '' : String(value)),
     });
 
-    // Build messages array. Pass the original dialogueHistory (not text-coerced)
-    // so multimodal content is preserved for the LLM API when present.
+    // Build messages array. Pass dialogueHistory as-is (always text from DB)
+    // for the LLM API. The text-coerced version above is only for Mustache rendering.
     const messages = this.buildMessages(rendered, request.context.dialogueHistory as ChatMessage[] | undefined);
 
     // Estimate tokens (rough: 1 token ≈ 2 chars for Chinese). Use text length

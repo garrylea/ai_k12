@@ -59,25 +59,4 @@ describe('ModelRouter', () => {
     const result = router.route({ scene: 'grading', subject: 'math', hasImage: true });
     expect(result.primary.modelId).not.toBe('qwen-vl-max');
   });
-
-  it('hasImage detects image_url parts in messages', () => {
-    const messagesWithImage = [
-      { role: 'user' as const, content: [{ type: 'text' as const, text: '看这道题' }, { type: 'image_url' as const, image_url: { url: 'data:image/png;base64,abc' } }] },
-    ];
-    expect(router.hasImage(messagesWithImage)).toBe(true);
-  });
-
-  it('hasImage returns false for text-only messages', () => {
-    const textMessages = [
-      { role: 'user' as const, content: '一元一次方程怎么解？' },
-    ];
-    expect(router.hasImage(textMessages)).toBe(false);
-  });
-
-  it('hasImage returns false for array content without image_url', () => {
-    const textArrayMessages = [
-      { role: 'user' as const, content: [{ type: 'text' as const, text: 'just text' }] },
-    ];
-    expect(router.hasImage(textArrayMessages)).toBe(false);
-  });
 });

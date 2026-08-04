@@ -372,14 +372,14 @@ export interface Attachment {
 
 /** Structured question output from the tutoring model (Task 14a). The model
  *  appends this as a JSON block at the end of its Socratic reply; the backend
- *  extracts it and ingests into questions + aux_error_books. Simpler than
- *  StructuredQuestion (no options/qualityIssues) since tutoring is the model's
- *  primary job, not detailed structuring.
+ *  extracts it and ingests into questions + aux_error_books. Uses the same
+ *  StructuredOption type as StructuredQuestion for choice questions.
  */
 export interface StructuredQuestionOutput {
   type: 'choice' | 'fill_blank' | 'true_false' | 'short_answer' | 'proof';
   difficulty: 1 | 2 | 3;
   content: string;
+  options?: StructuredOption[];
   answer: string;
   explanation: string;
   knowledgePoints: string[];
