@@ -201,7 +201,7 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
 
   return (
     <div
-      className={`p-4 bg-[var(--bg-card)] ${isDragging ? 'border-2 border-[var(--aux)]' : 'border-t border-[var(--bg-subtle)]'}`}
+      className={`p-4 bg-[var(--bg-card)] ${isDragging ? 'border-2 border-[var(--brand-500)]' : 'border-t border-[var(--bg-subtle)]'}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -244,13 +244,13 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
           onPaste={handlePaste}
           placeholder={isDragging ? '拖放图片到此处...' : '输入问题或粘贴/拖拽图片...'}
           aria-label="输入问题"
-          className="flex-1 px-4 py-3 rounded-xl bg-[var(--bg-form)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--aux)]/30"
+          className="flex-1 px-4 py-3 rounded-xl bg-[var(--bg-form)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30"
         />
         <button
           disabled={!canSend}
           onClick={doSend}
           aria-label="发送"
-          className="px-5 py-3 rounded-xl bg-[var(--aux)] text-white font-bold disabled:opacity-50"
+          className="px-5 py-3 rounded-xl bg-[var(--brand-500)] text-white font-bold disabled:opacity-50"
         >
           发送
         </button>

@@ -28,7 +28,7 @@ export default function AuxChatPanel({ isLoadingHistory = false }: Props) {
             <div
               className={`max-w-[70%] px-4 py-3 rounded-2xl text-sm ${
                 m.role === 'user'
-                  ? 'bg-[var(--aux)] text-white'
+                  ? 'bg-[var(--brand-500)] text-white'
                   : 'bg-[var(--bg-card)] text-[var(--text-primary)]'
               }`}
             >

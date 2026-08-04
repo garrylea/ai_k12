@@ -16,7 +16,7 @@ const variantStyles: Record<TagVariant, string> = {
   medium: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
   hard: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
   mainline: 'bg-[var(--brand-100)] text-[var(--brand-600)]',
-  auxiliary: 'bg-purple-100 text-[var(--aux-accent)] dark:bg-purple-900/30',
+  auxiliary: 'bg-[var(--brand-100)] text-[var(--brand-600)]',
   neutral: 'bg-[var(--bg-subtle)] text-[var(--text-secondary)]',
   source: 'bg-[var(--bg-subtle)] text-[var(--text-tertiary)]',
 };

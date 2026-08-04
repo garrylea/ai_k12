@@ -43,7 +43,7 @@ export default function ConversationList() {
           <p className="text-sm text-[var(--text-secondary)]">{error}</p>
           <button
             onClick={fetchConversations}
-            className="px-4 py-2 rounded-lg text-sm bg-[var(--aux)] text-white"
+            className="px-4 py-2 rounded-lg text-sm bg-[var(--brand-500)] text-white"
           >
             重试
           </button>
@@ -61,7 +61,7 @@ export default function ConversationList() {
                 aria-pressed={currentDialogueId === c.id}
                 className={`w-full text-left px-3 py-2 rounded-xl text-sm ${
                   currentDialogueId === c.id
-                    ? 'bg-[var(--aux)]/10 text-[var(--aux)]'
+                    ? 'bg-[var(--brand-500)]/10 text-[var(--brand-500)]'
                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)]'
                 }`}
               >
@@ -73,7 +73,7 @@ export default function ConversationList() {
             <button
               onClick={() => setExpanded(!expanded)}
               aria-expanded={expanded}
-              className="text-sm text-[var(--aux)] mt-2"
+              className="text-sm text-[var(--brand-500)] mt-2"
             >
               {expanded ? '收起' : '展开全部'}
             </button>
@@ -82,7 +82,7 @@ export default function ConversationList() {
       )}
       <Link
         to="/student/error-book"
-        className="mt-4 block text-center py-2 rounded-xl bg-[var(--aux)] text-white text-sm font-bold"
+        className="mt-4 block text-center py-2 rounded-xl bg-[var(--brand-500)] text-white text-sm font-bold"
       >
         辅线错题本
       </Link>

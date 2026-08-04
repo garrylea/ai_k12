@@ -66,9 +66,9 @@ Night mode only applies inside `.student-theme-container` (learning immersion pa
 ### Visual Distinction: Dual-track
 
 - Mainline: orange-red (`Brand-500 #ff6b35`, see `apps/web/style.md` §2.1)
-- Auxiliary: purple (`Aux #8B5A8E`, see `apps/web/style.md` §2.1)
+- Auxiliary: brand orange (same as mainline; previously purple `Aux #8B5A8E`, now deprecated/unused)
 
-These must be visually distinct in navigation, tags, and error books.
+Dual-track distinction is via TEXT labels (Tab titles, Tag text "辅线"/"主线"), not color. Physical isolation is ensured by routing (entry selection page, no cross-track links), not color contrast.
 
 ### Component Layers
 

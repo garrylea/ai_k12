@@ -50,29 +50,29 @@ export default function EntrySelectPage() {
             </span>
           </button>
 
-          {/* 答疑：锁定入口 */}
-          <div
-            className="flex-1 max-w-[17.5rem] min-w-[12.5rem] h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 cursor-not-allowed"
+          {/* 答疑：辅线入口（与主线同品牌橘红，靠文字标签区分） */}
+          <button
+            onClick={() => navigate('/student/auxiliary')}
+            className="flex-1 max-w-[17.5rem] min-w-[12.5rem] h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
-              border: '1px solid rgb(241, 245, 249)',
-              backgroundColor: 'rgba(248, 250, 252, 0.3)',
-              opacity: 0.55,
+              border: '1px solid rgba(226, 232, 240, 0.8)',
+              boxShadow: 'var(--shadow-card)',
             }}
-            aria-label="答疑暂未开放"
+            aria-label="进入答疑"
           >
             <div
-              className="w-20 h-20 rounded-2xl flex items-center justify-center text-slate-500 shadow-sm"
+              className="w-20 h-20 rounded-2xl flex items-center justify-center text-white shadow-sm"
               style={{
-                background: 'linear-gradient(to top right, #f1f5f9, #e2e8f0)',
+                background: 'linear-gradient(to top right, #FF6B35, #FF8C61)',
               }}
               aria-hidden="true"
             >
               <BookIcon />
             </div>
-            <span className="text-3xl font-black tracking-tight text-slate-500">
+            <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
               答疑
             </span>
-          </div>
+          </button>
         </div>
       </div>
     </div>

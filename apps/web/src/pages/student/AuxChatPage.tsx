@@ -47,7 +47,7 @@ export default function AuxChatPage() {
               setCurrentDialogueId(null);
               navigate('/student/auxiliary/chat');
             }}
-            className="px-4 py-2 rounded-lg text-sm bg-[var(--aux)] text-white"
+            className="px-4 py-2 rounded-lg text-sm bg-[var(--brand-500)] text-white"
           >
             下一个问题
           </button>
