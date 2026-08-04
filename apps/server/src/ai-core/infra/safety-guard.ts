@@ -3,6 +3,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 import type { SafetyCheckRequest, SafetyCheckResult, Message, Classification, AnomalyType, AlertLevel } from '../types.js';
+import { contentToText } from '../types.js';
 import { safetyConfig } from '../config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -125,7 +126,9 @@ export class SafetyGuard {
     for (let i = history.length - 1; i >= 0; i--) {
       const msg = history[i];
       if (msg.role !== 'user') continue;
-      if (LEARNING_PATTERNS.some(p => p.test(msg.content))) break;
+      // Task 14a: content may be string | ContentPart[]; coerce to text for regex test.
+      const text = contentToText(msg.content);
+      if (LEARNING_PATTERNS.some(p => p.test(text))) break;
       count++;
     }
     return count;

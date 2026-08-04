@@ -6,8 +6,13 @@ import {
 } from '@nestjs/common';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { LLMClientError, InsufficientQuotaError } from '../../ai-core/types.js';
+import type { TutoringRequest, Attachment } from '../../ai-core/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
-import type { TutoringRequest } from '../../ai-core/types.js';
+import { ErrorBookService } from '../error-book/error-book.service.js';
+import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
+import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { TutorDto } from './dto/tutor.dto.js';
 
 @Injectable()
@@ -15,6 +20,9 @@ export class AIService {
   constructor(
     private readonly tutoring: TutoringCapability,
     private readonly conversationsService: ConversationsService,
+    private readonly errorBookService: ErrorBookService,
+    private readonly filesRepo: UploadedFilesRepository,
+    private readonly subjectsRepo: SubjectsRepository,
   ) {}
 
   async tutor(dto: TutorDto, userId: number) {
@@ -57,10 +65,40 @@ export class AIService {
     // conversationsService.appendMessage() / appendAssistantMessage() here to
     // avoid creating duplicate rows in ai_messages.
 
+    // Task 14a: resolve attachment fileIds to base64 data URLs for multimodal input.
+    const attachments: Attachment[] = [];
+    if (dto.attachments && dto.attachments.length > 0) {
+      const uploadDir = process.env.UPLOAD_DIR ?? './uploads';
+      for (const att of dto.attachments) {
+        const fileIdNum = Number(att.fileId);
+        if (!Number.isFinite(fileIdNum)) {
+          throw new BadRequestException({ code: 1001, message: 'attachment.fileId 必须为数字' });
+        }
+        const fileRow = await this.filesRepo.findById(fileIdNum);
+        if (!fileRow) {
+          throw new BadRequestException({ code: 1001, message: `文件不存在: ${att.fileId}` });
+        }
+        // The url field is stored as /uploads/<key>; strip the prefix to get the
+        // storage key, then read from disk and encode as base64 data URL.
+        const storageKey = fileRow.url.replace(/^\/uploads\//, '');
+        const filePath = path.join(uploadDir, storageKey);
+        let base64: string;
+        try {
+          base64 = fs.readFileSync(filePath).toString('base64');
+        } catch {
+          throw new BadRequestException({ code: 1001, message: `文件读取失败: ${att.fileId}` });
+        }
+        const dataUrl = `data:${fileRow.mime_type};base64,${base64}`;
+        attachments.push({
+          type: att.type === 'image' ? 'image' : 'formula',
+          url: fileRow.url,
+          imageUrl: dataUrl,
+          fileId: att.fileId,
+        });
+      }
+    }
+
     // studentId comes from the JWT (user.sub), not the dto.
-    // TODO: attachments - dto uses {type, fileId} but ai-core Attachment expects
-    // {type: 'image'|'formula', url}. A file service is needed to resolve
-    // fileId -> url; omitting attachments for now.
     const request: TutoringRequest = {
       studentId: String(userId),
       mode: dto.mode,
@@ -68,6 +106,7 @@ export class AIService {
       knowledgeId: dto.knowledgeId,
       message: dto.message,
       dialogueId,
+      ...(attachments.length > 0 ? { attachments } : {}),
     };
 
     // TODO (mainline): ConversationService.loadContext() returns cardContent:
@@ -77,6 +116,29 @@ export class AIService {
 
     try {
       const response = await this.tutoring.tutor(request);
+
+      // Task 14a: if the model produced a structured question, ingest it into
+      // questions + aux_error_books. Use dto.subjectId or default to the math
+      // subject ID (MVP is math-only).
+      if (response.structuredQuestion) {
+        let subjectId = dto.subjectId;
+        if (!subjectId) {
+          const mathSubject = await this.subjectsRepo.findByCode('math');
+          subjectId = mathSubject?.id ?? 1;  // TODO: hardcode fallback, should not happen if DB seeded
+        }
+        const hasImage = attachments.some(a => a.type === 'image');
+        await this.errorBookService.createAuxFromStructured(
+          userId,
+          subjectId,
+          response.structuredQuestion,
+          hasImage ? 'photo' : 'auxiliary',
+        ).catch((err) => {
+          // Ingestion failure should not block the tutoring response.
+          // The user still gets their Socratic reply; the question just
+          // doesn't get saved to the error book.
+          console.error('[AIService] structured question ingestion failed:', err);
+        });
+      }
 
       return {
         dialogueId,

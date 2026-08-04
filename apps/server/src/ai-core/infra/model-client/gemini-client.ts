@@ -1,4 +1,5 @@
 import type { ChatRequest, ChatResponse, StreamChunk } from '../../types.js';
+import { contentToText } from '../../types.js';
 import type { ProviderAdapter } from './types.js';
 import { classifyError } from './errors.js';
 
@@ -10,12 +11,14 @@ export class GeminiClient implements ProviderAdapter {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     // Gemini has no 'system' role in `contents`; system prompts go in the
     // top-level systemInstruction field. Map the rest: user->user, assistant->model.
+    // Task 14a: content may be string | ContentPart[]; coerce to text (Gemini
+    // multimodal would need inline_data parts, not implemented for MVP).
     const systemMessages = request.messages.filter(m => m.role === 'system');
     const contents = request.messages
       .filter(m => m.role !== 'system')
       .map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
+        parts: [{ text: contentToText(m.content) }],
       }));
 
     let response: Response;
@@ -28,7 +31,7 @@ export class GeminiClient implements ProviderAdapter {
           body: JSON.stringify({
             contents,
             ...(systemMessages.length > 0
-              ? { systemInstruction: { parts: [{ text: systemMessages.map(m => m.content).join('\n\n') }] } }
+              ? { systemInstruction: { parts: [{ text: systemMessages.map(m => contentToText(m.content)).join('\n\n') }] } }
               : {}),
             generationConfig: {
               temperature: request.temperature ?? 0.7,

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { Message, LoadContextResponse, Subject, Track, Difficulty } from '../../ai-core/types.js';
+import type { Message, LoadContextResponse, Subject, Track, Difficulty, ContentPart } from '../../ai-core/types.js';
+import { contentToText } from '../../ai-core/types.js';
 import type { SaveMessagesRequest, UpdateFailCountRequest, CompleteDialogueRequest } from './types.js';
 import { AiDialoguesRepository, AiMessagesRepository } from '../../database/repositories/index.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
@@ -118,7 +119,9 @@ export class ConversationService {
     const rows = request.messages.map((msg) => ({
       dialogue_id: id,
       role: msg.role as 'system' | 'user' | 'assistant',
-      content: msg.content,
+      // Task 14a: content may be string | ContentPart[]; DB TEXT column stores
+      // text only (image URLs expire, don't persist). Coerce arrays to text.
+      content: contentToText(msg.content),
       type: (msg.type ?? null) as 'socratic' | 'hint' | 'explain' | 'fallback' | 'block' | 'chat' | null,
       attachments: null,
       model: (msg.model ?? null) as string | null,

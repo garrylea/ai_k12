@@ -2,6 +2,25 @@ import { z } from 'zod';
 import type { ParseRequest, ParseResult, ParseMode } from '../types.js';
 
 export class ResponseParser {
+  /**
+   * Task 14a: Extract a ```json fenced block from text. Returns parsed JSON
+   * or null if no valid block is found. Used by TutoringCapability to pull
+   * the structured question output from the model's Socratic reply.
+   */
+  extractJsonBlock(text: string): unknown | null {
+    const match = text.match(/```json\s*([\s\S]*?)```/);
+    if (!match) return null;
+    try { return JSON.parse(match[1].trim()); } catch { return null; }
+  }
+
+  /**
+   * Task 14a: Strip the ```json fenced block from text so the user doesn't
+   * see raw JSON in the displayed reply or persisted conversation history.
+   */
+  stripJsonBlock(text: string): string {
+    return text.replace(/```json\s*[\s\S]*?```\s*/g, '').trim();
+  }
+
   parse<T = unknown>(request: ParseRequest): ParseResult<T> {
     switch (request.mode) {
       case 'text':

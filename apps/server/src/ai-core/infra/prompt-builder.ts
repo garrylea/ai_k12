@@ -1,7 +1,8 @@
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import Mustache from 'mustache';
-import type { PromptBuildRequest, PromptBuildResult, ChatMessage, CapabilityType, Track, ExplanationMode } from '../types.js';
+import type { PromptBuildRequest, PromptBuildResult, ChatMessage, CapabilityType, Track, ExplanationMode, Message } from '../types.js';
+import { contentToText } from '../types.js';
 
 export class PromptBuilder {
   private templateCache = new Map<string, string>();
@@ -28,16 +29,31 @@ export class PromptBuilder {
     // not as top-level context keys). Disable HTML escaping: these are LLM prompts
     // (plain text/markdown), not HTML, so characters like = < > & in math content
     // must be preserved verbatim (default Mustache would turn "x=3" into "x&#x3D;3").
-    const view = { ...request.context, ...(request.context.customVariables ?? {}) };
+    //
+    // Task 14a: dialogueHistory messages may have array content (image_url parts).
+    // Mustache would toString the array (wrong); coerce to text-only before rendering.
+    const dialogueHistoryText: Message[] | undefined = request.context.dialogueHistory
+      ? request.context.dialogueHistory.map(m => ({
+          role: m.role,
+          content: contentToText(m.content),
+        }))
+      : undefined;
+    const view = {
+      ...request.context,
+      dialogueHistory: dialogueHistoryText,
+      ...(request.context.customVariables ?? {}),
+    };
     const rendered = Mustache.render(bodyOnly, view, partials, {
       escape: (value: unknown) => (value == null ? '' : String(value)),
     });
 
-    // Build messages array
+    // Build messages array. Pass the original dialogueHistory (not text-coerced)
+    // so multimodal content is preserved for the LLM API when present.
     const messages = this.buildMessages(rendered, request.context.dialogueHistory as ChatMessage[] | undefined);
 
-    // Estimate tokens (rough: 1 token ≈ 2 chars for Chinese)
-    const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+    // Estimate tokens (rough: 1 token ≈ 2 chars for Chinese). Use text length
+    // for array content (image parts don't count toward text token budget).
+    const totalChars = messages.reduce((sum, m) => sum + contentToText(m.content).length, 0);
     const estimatedTokens = Math.ceil(totalChars / 2);
 
     return { messages, estimatedTokens, templateVersion };

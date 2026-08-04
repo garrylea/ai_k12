@@ -1,5 +1,5 @@
 import { routeConfig } from '../config.js';
-import type { RouteRequest, RouteResult, ModelConfig, Scene, Subject } from '../types.js';
+import type { RouteRequest, RouteResult, ModelConfig, Scene, Subject, Message, ContentPart } from '../types.js';
 
 interface RouteRule {
   subject: string;
@@ -24,7 +24,27 @@ export class ModelRouter {
     this.defaultRule = routeConfig.default;
   }
 
+  /** Task 14a: detect if any message in the history has an image_url part. */
+  hasImage(messages: Message[]): boolean {
+    return messages.some(m => {
+      if (typeof m.content === 'string') return false;
+      return (m.content as ContentPart[]).some(p => p.type === 'image_url');
+    });
+  }
+
   route(request: RouteRequest): RouteResult {
+    // Task 14a: image-aware routing for tutoring. When the request has an image,
+    // override to qwen-vl-max (multimodal) for math. Other subjects still fall
+    // through to the normal route table (multimodal support may differ).
+    if (request.hasImage && request.scene === 'tutoring' && request.subject === 'math') {
+      const reason = `scene=${request.scene} subject=${request.subject} hasImage=true -> qwen-vl-max`;
+      return {
+        primary: this.models['qwen-vl-max'],
+        fallback: this.models['qwen3.7-max'],
+        reason,
+      };
+    }
+
     const rule = this.matchRule(request.scene, request.subject, request.difficulty);
     const reason = `scene=${request.scene} subject=${request.subject} difficulty=${request.difficulty ?? 'any'}`;
 

@@ -1,3 +1,15 @@
+// ========== Multimodal Content Parts (Task 14a) ==========
+
+export interface TextPart { type: 'text'; text: string; }
+export interface ImagePart { type: 'image_url'; image_url: { url: string }; }
+export type ContentPart = TextPart | ImagePart;
+
+/** Coerce Message/ChatMessage content (string | ContentPart[]) to plain text. */
+export function contentToText(content: string | ContentPart[]): string {
+  if (typeof content === 'string') return content;
+  return content.filter(p => p.type === 'text').map(p => (p as TextPart).text).join('\n');
+}
+
 // ========== Model Router Types (§3.1.2) ==========
 
 export type Scene = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring';
@@ -12,6 +24,7 @@ export interface RouteRequest {
   difficulty?: Difficulty;
   estimatedInputTokens?: number;
   requiresHeavyReasoning?: boolean;
+  hasImage?: boolean;  // Task 14a: when true, route to multimodal model (qwen-vl-max)
 }
 
 export interface ModelConfig {
@@ -94,10 +107,11 @@ export interface PromptBuildResult {
   templateVersion: string;
 }
 
-/** LLM API payload message (prompt sent to model). */
+/** LLM API payload message (prompt sent to model). content is string for text-only
+ *  or ContentPart[] for multimodal (image_url parts). */
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | ContentPart[];
 }
 
 // ========== Model Client Types (§3.3.3-§3.3.5) ==========
@@ -351,7 +365,25 @@ export interface TutoringRequest {
 export interface Attachment {
   type: 'image' | 'formula';
   url: string;
+  imageUrl?: string;        // resolved base64 data URL for multimodal LLM input
+  fileId?: string;          // reference to uploaded_files row
   extractedText?: string;
+}
+
+/** Structured question output from the tutoring model (Task 14a). The model
+ *  appends this as a JSON block at the end of its Socratic reply; the backend
+ *  extracts it and ingests into questions + aux_error_books. Simpler than
+ *  StructuredQuestion (no options/qualityIssues) since tutoring is the model's
+ *  primary job, not detailed structuring.
+ */
+export interface StructuredQuestionOutput {
+  type: 'choice' | 'fill_blank' | 'true_false' | 'short_answer' | 'proof';
+  difficulty: 1 | 2 | 3;
+  content: string;
+  answer: string;
+  explanation: string;
+  knowledgePoints: string[];
+  quality: 'good' | 'poor';
 }
 
 export interface TutoringResponse {
@@ -365,6 +397,7 @@ export interface TutoringResponse {
   safety: { isLearningRelated: boolean; alertLevel: AlertLevel };
   isFallback: boolean;
   consecutiveFailCount: number;
+  structuredQuestion?: StructuredQuestionOutput;  // Task 14a: extracted from model reply
 }
 
 // ========== Grading Types (§4.2.3) ==========
@@ -469,7 +502,7 @@ export interface LoadContextResponse {
 
 export interface SaveMessageEntry {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | ContentPart[];  // DB stores text only; ConversationService coerces arrays to text
   type?: 'socratic' | 'hint' | 'explain' | 'fallback' | 'block';
   model?: string;
   tokenInput?: number;
@@ -493,8 +526,10 @@ export interface AgentLog {
 
 // ========== Message Type (shared) ==========
 
-/** Stored dialogue history entry (conversation state). */
+/** Stored dialogue history entry (conversation state). content is string for
+ *  text-only messages or ContentPart[] for multimodal (image_url parts).
+ *  DB stores text only; ConversationService coerces arrays to text on save. */
 export interface Message {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | ContentPart[];
 }

@@ -1,5 +1,5 @@
-import type { TutoringRequest, TutoringResponse } from '../types.js';
-import { fallbackConfig, timeoutConfig } from '../config.js';
+import type { TutoringRequest, TutoringResponse, StructuredQuestionOutput, ContentPart } from '../types.js';
+import { timeoutConfig, fallbackConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
@@ -120,11 +120,14 @@ export class TutoringCapability {
       };
     }
 
-    // Step 4: Route model
+    // Step 4: Route model. Task 14a: when attachments contain images, route to
+    // qwen-vl-max (multimodal) instead of the text-only model.
+    const hasImage = !!(request.attachments && request.attachments.some(a => a.type === 'image' && a.imageUrl));
     const routeResult = await this.modelRouter.route({
       scene: 'tutoring',
       subject: context.subject,
       difficulty: context.currentDifficulty,
+      hasImage,
     });
 
     // Step 5: Build prompt
@@ -141,6 +144,26 @@ export class TutoringCapability {
       },
     });
 
+    // Task 14a: When image attachments are present, replace the last user
+    // message's content with a multimodal array (text + image_url parts).
+    // The prompt builder produces a text user message; we augment it with
+    // image_url parts so the OpenAI-compatible API receives the image.
+    if (hasImage && request.attachments) {
+      const lastUserMsg = [...promptResult.messages].reverse().find(m => m.role === 'user');
+      if (lastUserMsg) {
+        const textContent = typeof lastUserMsg.content === 'string'
+          ? lastUserMsg.content
+          : lastUserMsg.content.filter(p => p.type === 'text').map(p => (p as { text: string }).text).join('\n');
+        const parts: ContentPart[] = [{ type: 'text', text: textContent }];
+        for (const att of request.attachments) {
+          if (att.type === 'image' && att.imageUrl) {
+            parts.push({ type: 'image_url', image_url: { url: att.imageUrl } });
+          }
+        }
+        lastUserMsg.content = parts;
+      }
+    }
+
     // Step 6: Call model
     const chatResponse = await this.modelClient.chat({
       model: routeResult.primary,
@@ -149,11 +172,31 @@ export class TutoringCapability {
       timeout: timeoutConfig.timeout.tutoring ?? timeoutConfig.timeout.default,
     });
 
-    // Step 7: Parse response
+    // Step 7: Parse response. Task 14a: extract structured question JSON block
+    // from the model's reply and strip it from the displayed content.
     const parsed = this.responseParser.parse({ rawContent: chatResponse.content, mode: 'text' });
-    const content = parsed.rawText ?? chatResponse.content;
+    let content = parsed.rawText ?? chatResponse.content;
+    let structuredQuestion: StructuredQuestionOutput | undefined;
+    const jsonBlock = this.responseParser.extractJsonBlock(content);
+    if (jsonBlock && typeof jsonBlock === 'object') {
+      const obj = jsonBlock as Record<string, unknown>;
+      if (obj.type && obj.content && obj.answer) {
+        structuredQuestion = {
+          type: obj.type as StructuredQuestionOutput['type'],
+          difficulty: obj.difficulty as StructuredQuestionOutput['difficulty'],
+          content: String(obj.content),
+          answer: String(obj.answer),
+          explanation: String(obj.explanation ?? ''),
+          knowledgePoints: Array.isArray(obj.knowledgePoints) ? (obj.knowledgePoints as string[]) : [],
+          quality: (obj.quality as 'good' | 'poor') ?? 'good',
+        };
+        content = this.responseParser.stripJsonBlock(content);
+      }
+    }
 
-    // Step 8: Persist messages (user + assistant)
+    // Step 8: Persist messages (user + assistant). The user message is stored
+    // as text only (image URLs expire). The assistant content has the JSON
+    // block stripped so history doesn't contain raw JSON.
     await this.conversationService.saveMessages({
       dialogueId,
       messages: [
@@ -173,6 +216,7 @@ export class TutoringCapability {
       safety: { isLearningRelated: true, alertLevel: 'none' },
       isFallback: false,
       consecutiveFailCount: context.consecutiveFailCount + (isAnswerWrong ? 1 : 0),
+      structuredQuestion,
     };
   }
 

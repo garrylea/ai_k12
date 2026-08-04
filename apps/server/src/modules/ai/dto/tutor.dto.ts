@@ -10,4 +10,5 @@ export interface TutorDto {
   knowledgeId?: string;   // auxiliary optional
   dialogueId?: string;    // optional; if absent, a new dialogue is created
   attachments?: TutorAttachment[];
+  subjectId?: number;     // Task 14a: for structured question ingestion (defaults to math)
 }

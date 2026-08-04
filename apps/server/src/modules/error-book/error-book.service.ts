@@ -3,6 +3,7 @@ import { AuxErrorBooksRepository, QuestionsRepository, ExtractTasksRepository, E
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { computeContentHash } from './content-hash.util.js';
 import type { CreateAuxErrorDto } from './dto/create-aux-error.dto.js';
+import type { StructuredQuestionOutput } from '../../ai-core/types.js';
 
 @Injectable()
 export class ErrorBookService {
@@ -80,6 +81,68 @@ export class ErrorBookService {
     } catch (err) {
       // Compensation: if we just created the question but the aux_error_books insert failed,
       // delete the orphan question (only if we created it, not if it was reused).
+      if (questionCreated && questionId !== null) {
+        await this.questionsRepo.deleteById(questionId).catch(() => {});
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Task 14a: Ingest a structured question output from the tutoring model
+   * (multimodal Qwen-VL path). Skips QuestionStructuringCapability since the
+   * tutoring model already produced the structured JSON. Dedup via content_hash.
+   *
+   * @param studentId  numeric student ID (from JWT)
+   * @param subjectId  subject to bind the question to
+   * @param structured structured question from the tutoring model's reply
+   * @param source     'photo' if image attachment was present, 'auxiliary' for text
+   * @returns { errorId, questionId } where questionId is null if quality==='poor'
+   */
+  async createAuxFromStructured(
+    studentId: number,
+    subjectId: number,
+    structured: StructuredQuestionOutput,
+    source: 'photo' | 'auxiliary' = 'auxiliary',
+  ): Promise<{ errorId: number; questionId: number | null }> {
+    let questionId: number | null = null;
+    let questionCreated = false;
+
+    // Quality gate: if the model marked the question as 'poor', skip question
+    // insertion and only create an aux_error_books row with question_id=null.
+    if (structured.quality !== 'poor' && structured.content.trim().length > 0) {
+      const contentHash = computeContentHash(structured.content);
+      const result = await this.questionsRepo.findOrCreate({
+        subject_id: subjectId,
+        type: structured.type,
+        difficulty: structured.difficulty,
+        content: structured.content,
+        options: null,  // StructuredQuestionOutput has no options field (MVP simplification)
+        answer: structured.answer,
+        explanation: structured.explanation,
+        source: 'auxiliary',
+        content_hash: contentHash,
+      });
+      questionId = result.id;
+      questionCreated = result.created;
+      // TODO: bind knowledge points (resolve names to IDs via KnowledgePointsRepository)
+      // when the repo exists. For now, knowledgePoints names are discarded.
+    }
+
+    try {
+      const errorId = await this.auxRepo.create({
+        student_id: studentId,
+        subject_id: subjectId,
+        question_id: questionId,
+        level: 1,
+        is_cleared: 0,
+        source,
+        wrong_answer_text: questionId === null ? structured.content : null,
+      });
+      return { errorId, questionId };
+    } catch (err) {
+      // Compensation: if we just created the question but the aux_error_books
+      // insert failed, delete the orphan question.
       if (questionCreated && questionId !== null) {
         await this.questionsRepo.deleteById(questionId).catch(() => {});
       }
