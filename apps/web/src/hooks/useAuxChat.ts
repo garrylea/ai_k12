@@ -1,9 +1,20 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useChatStore } from '@/store/chatStore';
-import { tutor, getMessages, type AttachmentRequest, type MessageItem } from '@/services/api';
+import { useAuxiliaryStore } from '@/store/auxiliaryStore';
+import {
+  tutor,
+  getMessages,
+  createConversation,
+  type AttachmentRequest,
+  type MessageItem,
+} from '@/services/api';
 
 export function useAuxChat(dialogueId: number) {
   const wsRef = useRef<WebSocket | null>(null);
+  // Tracks a dialogue created mid-session so the history-load effect can
+  // skip fetching (no messages exist yet) and preserve messages appended
+  // by send().
+  const newlyCreatedRef = useRef<number | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const {
     appendMessage,
@@ -14,13 +25,13 @@ export function useAuxChat(dialogueId: number) {
   } = useChatStore();
 
   const fallbackToRest = useCallback(
-    async (message: string, attachments?: AttachmentRequest[]) => {
+    async (dlgId: number, message: string, attachments?: AttachmentRequest[]) => {
       setIsStreaming(true);
       try {
         const res = await tutor({
           mode: 'auxiliary',
           message,
-          dialogueId: dialogueId.toString(),
+          dialogueId: dlgId.toString(),
           attachments,
         });
         updateLastAssistant(res.message.content);
@@ -30,7 +41,7 @@ export function useAuxChat(dialogueId: number) {
         setIsStreaming(false);
       }
     },
-    [dialogueId, updateLastAssistant, setIsStreaming],
+    [updateLastAssistant, setIsStreaming],
   );
 
   useEffect(() => {
@@ -38,27 +49,34 @@ export function useAuxChat(dialogueId: number) {
 
     let isCurrent = true;
 
-    setIsLoadingHistory(true);
-    getMessages(dialogueId)
-      .then((items: MessageItem[]) => {
-        if (!isCurrent) return;
-        setMessages(
-          items
-            .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .map((m) => ({
-              id: m.id,
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              type: m.type ?? undefined,
-            })),
-        );
-      })
-      .catch(() => {
-        // ignore load errors - user can still send new messages
-      })
-      .finally(() => {
-        if (isCurrent) setIsLoadingHistory(false);
-      });
+    // Skip history load for dialogues created in the same session - there
+    // are no persisted messages yet, and calling setMessages([]) would wipe
+    // the messages just appended by send().
+    if (newlyCreatedRef.current === dialogueId) {
+      newlyCreatedRef.current = null;
+    } else {
+      setIsLoadingHistory(true);
+      getMessages(dialogueId)
+        .then((items: MessageItem[]) => {
+          if (!isCurrent) return;
+          setMessages(
+            items
+              .filter((m) => m.role === 'user' || m.role === 'assistant')
+              .map((m) => ({
+                id: m.id,
+                role: m.role as 'user' | 'assistant',
+                content: m.content,
+                type: m.type ?? undefined,
+              })),
+          );
+        })
+        .catch(() => {
+          // ignore load errors - user can still send new messages
+        })
+        .finally(() => {
+          if (isCurrent) setIsLoadingHistory(false);
+        });
+    }
 
     const token = localStorage.getItem('token') ?? '';
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -111,10 +129,24 @@ export function useAuxChat(dialogueId: number) {
 
   const send = useCallback(
     async (content: string, attachments?: AttachmentRequest[]) => {
-      if (!dialogueId) return;
       const { isStreaming } = useChatStore.getState();
       if (isStreaming) return;
       if (!content.trim() && !attachments?.length) return;
+
+      let dlgId = dialogueId;
+      if (!dlgId) {
+        // First send in a new session - create the dialogue now.
+        try {
+          const conv = await createConversation({ track: 'auxiliary' });
+          dlgId = conv.id;
+          newlyCreatedRef.current = conv.id;
+          const auxStore = useAuxiliaryStore.getState();
+          auxStore.setCurrentDialogueId(conv.id);
+          auxStore.prependConversation(conv);
+        } catch {
+          return;
+        }
+      }
 
       // When attachments are present, append a [图片] indicator so the
       // rendered user message reflects what was actually sent.
@@ -131,7 +163,7 @@ export function useAuxChat(dialogueId: number) {
       if (ws && ws.readyState === WebSocket.OPEN && !attachments?.length) {
         ws.send(JSON.stringify({ content }));
       } else {
-        await fallbackToRest(content, attachments);
+        await fallbackToRest(dlgId, content, attachments);
       }
     },
     [dialogueId, appendMessage, setIsStreaming, fallbackToRest],

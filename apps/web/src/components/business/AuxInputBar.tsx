@@ -139,7 +139,7 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
     setErrorMsg('');
   }, [text, imageStatus, isStreaming, onSend]);
 
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (let i = 0; i < items.length; i++) {
@@ -201,7 +201,7 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
 
   return (
     <div
-      className={`p-4 bg-[var(--bg-card)] ${isDragging ? 'border-2 border-[var(--brand-500)]' : 'border-t border-[var(--bg-subtle)]'}`}
+      className={isDragging ? 'rounded-xl ring-2 ring-[var(--brand-500)]' : ''}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -231,26 +231,28 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
           <span className="text-sm text-[var(--text-secondary)]">{errorMsg}</span>
         </div>
       )}
-      <div className="flex items-center gap-3">
-        <input
-          type="text"
+      <div className="relative">
+        <textarea
+          rows={3}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && canSend) {
+            if (e.key === 'Enter' && !e.shiftKey && canSend) {
+              e.preventDefault();
               doSend();
             }
           }}
           onPaste={handlePaste}
           placeholder={isDragging ? '拖放图片到此处...' : '输入问题或粘贴/拖拽图片...'}
           aria-label="输入问题"
-          className="flex-1 px-4 py-3 rounded-xl bg-[var(--bg-form)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30"
+          className="w-full px-4 py-3 pr-16 rounded-xl bg-[var(--bg-form)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30 resize-none"
         />
         <button
+          type="button"
           disabled={!canSend}
           onClick={doSend}
           aria-label="发送"
-          className="px-5 py-3 rounded-xl bg-[var(--brand-500)] text-white font-bold disabled:opacity-50"
+          className="absolute right-2 bottom-2 px-4 py-2 rounded-lg bg-[var(--brand-500)] text-white font-bold disabled:opacity-50 transition"
         >
           发送
         </button>

@@ -5,7 +5,6 @@ import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
 import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
-import AuxChatPage from '@/pages/student/AuxChatPage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 
@@ -49,7 +48,7 @@ const router = createBrowserRouter([
   { path: '/student/auxiliary', element: <AuxiliaryHomePage /> },
   { path: '/student/auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
   { path: '/student/auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
-  { path: '/student/auxiliary/chat', element: <AuxChatPage /> },
+  { path: '/student/auxiliary/chat', element: <Navigate to="/student/auxiliary" replace /> },
   {
     path: '/parent',
     element: <ParentLayout />,

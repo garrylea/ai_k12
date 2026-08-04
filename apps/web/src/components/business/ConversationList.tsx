@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import { listConversations } from '@/services/api';
 
 export default function ConversationList() {
   const { conversations, setConversations, currentDialogueId, setCurrentDialogueId } = useAuxiliaryStore();
-  const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,8 +30,7 @@ export default function ConversationList() {
   const visible = expanded ? conversations : conversations.slice(0, 10);
 
   return (
-    <div className="flex-1 flex flex-col p-4">
-      <h2 className="text-lg font-bold text-[var(--text-primary)] mb-3">历史答疑</h2>
+    <div className="flex-1 flex flex-col p-4 min-h-0">
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-sm text-[var(--text-secondary)]">
           加载中...
@@ -48,16 +45,17 @@ export default function ConversationList() {
             重试
           </button>
         </div>
+      ) : conversations.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-sm text-[var(--text-secondary)]">
+          暂无历史会话
+        </div>
       ) : (
         <>
-          <div className="flex-1 overflow-auto space-y-2">
+          <div className="flex-1 overflow-auto space-y-2 min-h-0">
             {visible.map((c) => (
               <button
                 key={c.id}
-                onClick={() => {
-                  setCurrentDialogueId(c.id);
-                  navigate('/student/auxiliary/chat');
-                }}
+                onClick={() => setCurrentDialogueId(c.id)}
                 aria-pressed={currentDialogueId === c.id}
                 className={`w-full text-left px-3 py-2 rounded-xl text-sm ${
                   currentDialogueId === c.id
@@ -80,12 +78,6 @@ export default function ConversationList() {
           )}
         </>
       )}
-      <Link
-        to="/student/error-book"
-        className="mt-4 block text-center py-2 rounded-xl bg-[var(--brand-500)] text-white text-sm font-bold"
-      >
-        辅线错题本
-      </Link>
     </div>
   );
 }
