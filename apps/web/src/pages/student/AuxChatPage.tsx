@@ -54,7 +54,7 @@ export default function AuxChatPage() {
         </div>
       </header>
       <AuxChatPanel isLoadingHistory={isLoadingHistory} />
-      <AuxInputBar onSend={send} isStreaming={isStreaming} />
+      <AuxInputBar key={currentDialogueId ?? 'new'} onSend={send} isStreaming={isStreaming} />
     </AuxiliaryLayout>
   );
 }

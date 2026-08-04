@@ -159,7 +159,7 @@ export interface UploadedFileResult {
   url: string;
 }
 
-export async function uploadFile(file: File): Promise<UploadedFileResult> {
+export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadedFileResult> {
   const token = localStorage.getItem('token');
   const form = new FormData();
   form.append('file', file);
@@ -168,6 +168,7 @@ export async function uploadFile(file: File): Promise<UploadedFileResult> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     // NOTE: do NOT set Content-Type - browser sets multipart boundary
     body: form,
+    signal,
   });
   const json: ApiResponse<UploadedFileResult> = await res.json();
   if (json.code !== 0) throw new ApiError(json.code, json.message);

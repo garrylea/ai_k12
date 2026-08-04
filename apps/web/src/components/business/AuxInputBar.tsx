@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { uploadFile, type AttachmentRequest } from '@/services/api';
 import { ensureJpeg } from '@/utils/image-convert';
 
@@ -14,13 +14,39 @@ interface PendingAttachment {
   previewUrl: string;
 }
 
+// Hoisted out of component to avoid re-creation every render (#8).
+const STATUS_TEXT: Record<ImageStatus, string> = {
+  converting: '转换中...',
+  uploading: '上传中...',
+  ready: '已就绪',
+  error: '失败',
+};
+
+// Match backend ai.service.ts image size limit (#4).
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
   const [text, setText] = useState('');
   const [imageStatus, setImageStatus] = useState<ImageStatus | null>(null);
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+
+  // Refs to avoid stale closures in async callbacks (#1) and cleanup (#2).
   const dragCounter = useRef(0);
+  const requestRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const pendingRef = useRef<PendingAttachment | null>(null);
+
+  // Cleanup on unmount: abort in-flight upload + revoke preview URL (#2).
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      if (pendingRef.current?.previewUrl) {
+        URL.revokeObjectURL(pendingRef.current.previewUrl);
+      }
+    };
+  }, []);
 
   const hasText = !!text.trim();
   const hasReadyImage = !!pendingAttachment && imageStatus === 'ready';
@@ -28,56 +54,90 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
   const canSend = (hasText || hasReadyImage) && !isBusy;
 
   const handleImageFile = useCallback(async (file: File) => {
-    // Reset any previous pending attachment
-    if (pendingAttachment?.previewUrl) {
-      URL.revokeObjectURL(pendingAttachment.previewUrl);
+    // File-size validation (#4) - matches backend /ai/tutor 5MB limit.
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageStatus('error');
+      setErrorMsg('图片过大（最大 5MB）');
+      return;
     }
+
+    // Abort any in-flight upload from a previous image (#2).
+    abortRef.current?.abort();
+
+    // Revoke previous preview URL and reset state (#1).
+    if (pendingRef.current?.previewUrl) {
+      URL.revokeObjectURL(pendingRef.current.previewUrl);
+    }
+    pendingRef.current = null;
     setPendingAttachment(null);
     setErrorMsg('');
 
+    // Race-condition guard: each invocation gets a unique ID (#1).
+    const myId = ++requestRef.current;
+
+    // Conversion step - separate try/catch for distinct error message (#9).
+    setImageStatus('converting');
+    let jpeg: File;
     try {
-      setImageStatus('converting');
-      const jpeg = await ensureJpeg(file);
-      setImageStatus('uploading');
-      const { fileId } = await uploadFile(jpeg);
+      jpeg = await ensureJpeg(file);
+    } catch {
+      if (requestRef.current !== myId) return; // superseded
+      setImageStatus('error');
+      setErrorMsg('图片格式不支持，请改用 JPG/PNG');
+      return;
+    }
+    if (requestRef.current !== myId) return; // superseded
+
+    // Upload step - pass AbortSignal so unmount/supersede can cancel (#2).
+    setImageStatus('uploading');
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const { fileId } = await uploadFile(jpeg, controller.signal);
+      if (requestRef.current !== myId) return; // superseded
       const previewUrl = URL.createObjectURL(jpeg);
+      pendingRef.current = { fileId: String(fileId), previewUrl };
       setPendingAttachment({ fileId: String(fileId), previewUrl });
       setImageStatus('ready');
     } catch {
+      if (requestRef.current !== myId) return; // superseded
       setImageStatus('error');
-      setErrorMsg('图片处理失败，请重试');
+      setErrorMsg('上传失败，请检查网络');
     }
-  }, [pendingAttachment]);
+  }, []);
 
   const clearAttachment = useCallback(() => {
-    if (pendingAttachment?.previewUrl) {
-      URL.revokeObjectURL(pendingAttachment.previewUrl);
+    if (pendingRef.current?.previewUrl) {
+      URL.revokeObjectURL(pendingRef.current.previewUrl);
     }
+    pendingRef.current = null;
     setPendingAttachment(null);
     setImageStatus(null);
     setErrorMsg('');
-  }, [pendingAttachment]);
+  }, []);
 
   const doSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed && !hasReadyImage) return;
+    const ready = !!pendingRef.current && imageStatus === 'ready';
+    if (!trimmed && !ready) return;
     if (isStreaming) return;
 
-    const attachments: AttachmentRequest[] | undefined = hasReadyImage
-      ? [{ type: 'image', fileId: pendingAttachment!.fileId }]
+    const attachments: AttachmentRequest[] | undefined = ready
+      ? [{ type: 'image', fileId: pendingRef.current!.fileId }]
       : undefined;
 
     onSend(trimmed, attachments);
 
-    // Clear after send
+    // Clear after send.
     setText('');
-    if (pendingAttachment?.previewUrl) {
-      URL.revokeObjectURL(pendingAttachment.previewUrl);
+    if (pendingRef.current?.previewUrl) {
+      URL.revokeObjectURL(pendingRef.current.previewUrl);
     }
+    pendingRef.current = null;
     setPendingAttachment(null);
     setImageStatus(null);
     setErrorMsg('');
-  }, [text, hasReadyImage, pendingAttachment, isStreaming, onSend]);
+  }, [text, imageStatus, isStreaming, onSend]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
     const items = e.clipboardData?.items;
@@ -139,16 +199,9 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
     }
   }, [handleImageFile]);
 
-  const statusText: Record<ImageStatus, string> = {
-    converting: '转换中...',
-    uploading: '上传中...',
-    ready: '已就绪',
-    error: '失败',
-  };
-
   return (
     <div
-      className={`p-4 border-t bg-[var(--bg-card)] ${isDragging ? 'border-2 border-[var(--aux)]' : 'border-[var(--bg-subtle)]'}`}
+      className={`p-4 bg-[var(--bg-card)] ${isDragging ? 'border-2 border-[var(--aux)]' : 'border-t border-[var(--bg-subtle)]'}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -162,7 +215,7 @@ export default function AuxInputBar({ onSend, isStreaming = false }: Props) {
             className="w-12 h-12 object-cover rounded-lg flex-shrink-0"
           />
           <span className="text-sm text-[var(--text-secondary)] flex-1">
-            {imageStatus && statusText[imageStatus]}
+            {imageStatus && STATUS_TEXT[imageStatus]}
           </span>
           <button
             onClick={clearAttachment}

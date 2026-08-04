@@ -126,8 +126,10 @@ export function useAuxChat(dialogueId: number) {
       setIsStreaming(true);
 
       const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ content, attachments }));
+      // WS gateway does not support attachments yet; force REST (which
+      // Task 14a backend handles) when attachments are present.
+      if (ws && ws.readyState === WebSocket.OPEN && !attachments?.length) {
+        ws.send(JSON.stringify({ content }));
       } else {
         await fallbackToRest(content, attachments);
       }

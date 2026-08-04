@@ -21,7 +21,8 @@ export async function ensureJpeg(file: File): Promise<File> {
   });
   // heic2any returns Blob | Blob[] depending on `multiple` flag (not set here,
   // so a single Blob is expected). Handle both defensively.
-  const blob: Blob = Array.isArray(result) ? result[0] : result;
+  const blob: Blob | undefined = Array.isArray(result) ? result[0] : result;
+  if (!blob) throw new Error('HEIC conversion returned empty result');
   const newName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
   return new File([blob], newName, { type: 'image/jpeg' });
 }
