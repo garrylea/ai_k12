@@ -216,6 +216,11 @@ export function getMessages(dialogueId: number, lastMessageId?: number): Promise
 
 // --- AI Tutor (auxiliary) ---
 
+export interface AttachmentRequest {
+  type: 'image';
+  fileId: string;
+}
+
 export interface TutorResponse {
   dialogueId: string;
   message: { role: string; content: string; type?: string };
@@ -230,6 +235,7 @@ export function tutor(req: {
   dialogueId?: string;
   knowledgeId?: string;
   cardId?: string;
+  attachments?: AttachmentRequest[];
 }): Promise<TutorResponse> {
   return fetchApi<TutorResponse>('/ai/tutor', {
     method: 'POST',

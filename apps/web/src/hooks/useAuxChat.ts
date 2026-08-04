@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useChatStore } from '@/store/chatStore';
-import { tutor, getMessages, type MessageItem } from '@/services/api';
+import { tutor, getMessages, type AttachmentRequest, type MessageItem } from '@/services/api';
 
 export function useAuxChat(dialogueId: number) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -14,13 +14,14 @@ export function useAuxChat(dialogueId: number) {
   } = useChatStore();
 
   const fallbackToRest = useCallback(
-    async (message: string) => {
+    async (message: string, attachments?: AttachmentRequest[]) => {
       setIsStreaming(true);
       try {
         const res = await tutor({
           mode: 'auxiliary',
           message,
           dialogueId: dialogueId.toString(),
+          attachments,
         });
         updateLastAssistant(res.message.content);
       } catch {
@@ -109,21 +110,26 @@ export function useAuxChat(dialogueId: number) {
   ]);
 
   const send = useCallback(
-    async (content: string) => {
+    async (content: string, attachments?: AttachmentRequest[]) => {
       if (!dialogueId) return;
       const { isStreaming } = useChatStore.getState();
       if (isStreaming) return;
-      if (!content.trim()) return;
+      if (!content.trim() && !attachments?.length) return;
 
-      appendMessage({ role: 'user', content });
+      // When attachments are present, append a [图片] indicator so the
+      // rendered user message reflects what was actually sent.
+      const userContent = attachments?.length
+        ? `${content}${content ? ' ' : ''}[图片]`.trim()
+        : content;
+      appendMessage({ role: 'user', content: userContent });
       appendMessage({ role: 'assistant', content: '', streaming: true });
       setIsStreaming(true);
 
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ content }));
+        ws.send(JSON.stringify({ content, attachments }));
       } else {
-        await fallbackToRest(content);
+        await fallbackToRest(content, attachments);
       }
     },
     [dialogueId, appendMessage, setIsStreaming, fallbackToRest],

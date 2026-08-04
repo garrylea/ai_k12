@@ -54,11 +54,7 @@ export default function AuxChatPage() {
         </div>
       </header>
       <AuxChatPanel isLoadingHistory={isLoadingHistory} />
-      <AuxInputBar
-        onSend={send}
-        isStreaming={isStreaming}
-        onUpload={(file) => navigate('/student/auxiliary/ask', { state: { file } })}
-      />
+      <AuxInputBar onSend={send} isStreaming={isStreaming} />
     </AuxiliaryLayout>
   );
 }
