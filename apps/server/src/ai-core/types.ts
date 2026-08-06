@@ -125,6 +125,7 @@ export interface ChatRequest {
   responseFormat?: 'text' | 'json_object';
   timeout?: number;
   stream?: boolean;
+  signal?: AbortSignal;  // caller-controlled abort (e.g. client disconnect) combined with timeout
 }
 
 export interface ChatResponse {
@@ -141,6 +142,19 @@ export interface StreamChunk {
   content: string;
   reasoningContent?: string;          // 增量 thinking delta(reasoning_content)
   finishReason?: 'stop' | 'length' | 'content_filter' | 'error';
+}
+
+// Streaming event yielded by capability streaming methods (e.g. tutorStream)
+// and forwarded to the frontend over SSE. `delta` appends; when `replace` is
+// true the frontend SETS content to `delta` (used to strip the structured-
+// question JSON block after the stream completes).
+export interface StreamEvent {
+  type: 'reasoning' | 'content' | 'done' | 'error';
+  delta?: string;
+  replace?: boolean;
+  fallback?: boolean;
+  structuredQuestion?: StructuredQuestionOutput;  // surfaced on `done` for ingestion
+  message?: string;                   // error detail
 }
 
 // ========== LLM Client Error Hierarchy (§3.3.4, based on ../llm-client.js) ==========
@@ -269,6 +283,10 @@ export interface SafetyCheckRequest {
   message: string;
   dialogueHistory: Message[];
   track: Track;
+  // True when an image attachment is present. A photo of a problem is
+  // inherently learning-related, so off_topic keyword classification is
+  // relaxed when this is true (anomaly/abuse text still blocks).
+  hasImage?: boolean;
 }
 
 export type Classification = 'learning' | 'off_topic' | 'anomaly';
@@ -503,11 +521,16 @@ export interface LoadContextResponse {
 export interface SaveMessageEntry {
   role: 'user' | 'assistant';
   content: string | ContentPart[];  // DB stores text only; ConversationService coerces arrays to text
+  reasoning?: string;               // thinking(reasoning_content) - persisted for history replay
   type?: 'socratic' | 'hint' | 'explain' | 'fallback' | 'block';
   model?: string;
   tokenInput?: number;
   tokenOutput?: number;
   latencyMs?: number;
+  // Durable attachment URLs (e.g. /uploads/xxx.jpg) to persist alongside the
+  // message so history can re-render images. Base64 data URLs are NOT stored
+  // here (too large) - only the server URL.
+  attachments?: { type: 'image'; url: string }[];
 }
 
 // ========== Logging Types (§9.1) ==========

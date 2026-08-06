@@ -38,7 +38,7 @@ export class GeminiClient implements ProviderAdapter {
               maxOutputTokens: request.maxTokens ?? request.model.maxOutputTokens,
             },
           }),
-          signal: AbortSignal.timeout(request.timeout ?? 30000),
+          signal: AbortSignal.any([AbortSignal.timeout(request.timeout ?? 30000), ...(request.signal ? [request.signal] : [])]),
         }
       );
     } catch (netErr) {

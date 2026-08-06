@@ -123,10 +123,14 @@ export class ConversationService {
       dialogue_id: id,
       role: msg.role as 'system' | 'user' | 'assistant',
       // Task 14a: content may be string | ContentPart[]; DB TEXT column stores
-      // text only (image URLs expire, don't persist). Coerce arrays to text.
+      // text only. Coerce arrays to text. Image URLs are persisted separately
+      // in the attachments column (as JSON) so history can re-render them.
       content: contentToText(msg.content),
+      reasoning: msg.reasoning ?? null,
       type: (msg.type ?? null) as 'socratic' | 'hint' | 'explain' | 'fallback' | 'block' | 'chat' | null,
-      attachments: null,
+      attachments: msg.attachments && msg.attachments.length > 0
+        ? JSON.stringify(msg.attachments)
+        : null,
       model: (msg.model ?? null) as string | null,
       token_input: null,
       token_output: null,

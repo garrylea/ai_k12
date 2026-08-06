@@ -5,6 +5,7 @@ import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
 import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
+import ConversationManagePage from '@/pages/student/ConversationManagePage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 
@@ -46,6 +47,7 @@ const router = createBrowserRouter([
   },
   // 辅线答疑轨（全屏沉浸层，独立于 StudentLayout，物理隔离）
   { path: '/student/auxiliary', element: <AuxiliaryHomePage /> },
+  { path: '/student/auxiliary/conversations', element: <ConversationManagePage /> },
   { path: '/student/auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
   { path: '/student/auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
   { path: '/student/auxiliary/chat', element: <Navigate to="/student/auxiliary" replace /> },

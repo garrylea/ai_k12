@@ -27,7 +27,11 @@ export class AiDialoguesRepository {
   async findByStudentAndTrack(studentId: number, track: AiDialogueRow['track'], limit: number, cursor?: number): Promise<AiDialogueRow[]> {
     const clause = cursor ? 'AND id < ?' : '';
     const params = cursor ? [studentId, track, cursor, limit] : [studentId, track, limit];
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    // Use pool.query (client-side escaping) instead of pool.execute (server-side
+    // prepared statements): MySQL rejects `LIMIT ?` as a prepared-statement
+    // placeholder with "Incorrect arguments to mysqld_stmt_execute". The `?`
+    // values are still parameterized/escaped by mysql2, so no injection risk.
+    const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT * FROM ai_dialogues
        WHERE student_id = ? AND track = ? AND deleted_at IS NULL ${clause}
        ORDER BY id DESC LIMIT ?`,
@@ -46,6 +50,13 @@ export class AiDialoguesRepository {
   async archive(id: number): Promise<void> {
     await this.pool.execute(
       `UPDATE ai_dialogues SET status = 'archived' WHERE id = ?`,
+      [id],
+    );
+  }
+
+  async softDelete(id: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE ai_dialogues SET deleted_at = NOW() WHERE id = ?`,
       [id],
     );
   }

@@ -488,6 +488,7 @@ CREATE TABLE IF NOT EXISTS ai_messages (
   dialogue_id BIGINT NOT NULL,
   role VARCHAR(10) NOT NULL,
   content TEXT NOT NULL,
+  reasoning TEXT DEFAULT NULL,
   type VARCHAR(20) DEFAULT NULL,
   attachments TEXT DEFAULT NULL,
   model VARCHAR(50) DEFAULT NULL,

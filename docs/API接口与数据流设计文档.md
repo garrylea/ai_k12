@@ -261,7 +261,8 @@
 | GET | `/api/conversations` | 查询会话列表（按学生/时间/类型过滤） | MVP |
 | POST | `/api/conversations` | 创建新会话 | MVP |
 | GET | `/api/conversations/{dialogueId}` | 会话元数据 | MVP |
-| PATCH | `/api/conversations/{dialogueId}` | 更新标题/归档 | MVP |
+| PATCH | `/api/conversations/{dialogueId}` | 更新会话标题 | MVP |
+| DELETE | `/api/conversations/{dialogueId}` | 软删除会话（deleted_at，列表自动排除） | MVP |
 | GET | `/api/conversations/{dialogueId}/messages` | 消息历史 | MVP |
 | POST | `/api/conversations/{dialogueId}/messages` | 发送用户消息（非流式兜底） | MVP |
 | GET | `/api/conversations/{dialogueId}/context` | 加载截断后的上下文（供 AI-Agent 内部使用） | P1 |

@@ -20,6 +20,7 @@ export interface AiMessageRow extends RowDataPacket {
   dialogue_id: number;
   role: 'system' | 'user' | 'assistant';
   content: string;
+  reasoning: string | null;
   type: 'socratic' | 'hint' | 'explain' | 'fallback' | 'block' | 'chat' | null;
   attachments: string | null;
   model: string | null;

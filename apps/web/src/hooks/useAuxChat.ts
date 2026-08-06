@@ -9,21 +9,30 @@ import {
   type MessageItem,
 } from '@/services/api';
 
+interface StreamEvent {
+  type: 'reasoning' | 'content' | 'done' | 'error';
+  delta?: string;
+  replace?: boolean;
+  message?: string;
+}
+
 export function useAuxChat(dialogueId: number) {
-  const wsRef = useRef<WebSocket | null>(null);
   // Tracks a dialogue created mid-session so the history-load effect can
   // skip fetching (no messages exist yet) and preserve messages appended
   // by send().
   const newlyCreatedRef = useRef<number | null>(null);
+  // AbortController for the in-flight stream so stop() can cancel it.
+  const abortRef = useRef<AbortController | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const {
     appendMessage,
     updateLastAssistant,
-    appendToLastAssistant,
+    appendLastAssistant,
     setIsStreaming,
     setMessages,
   } = useChatStore();
 
+  // Non-streaming fallback (used only if the SSE stream fails to start).
   const fallbackToRest = useCallback(
     async (dlgId: number, message: string, attachments?: AttachmentRequest[]) => {
       setIsStreaming(true);
@@ -34,7 +43,7 @@ export function useAuxChat(dialogueId: number) {
           dialogueId: dlgId.toString(),
           attachments,
         });
-        updateLastAssistant(res.message.content);
+        updateLastAssistant(res.message.content, res.reasoning);
       } catch {
         updateLastAssistant('[网络异常] 请稍后重试');
       } finally {
@@ -44,9 +53,81 @@ export function useAuxChat(dialogueId: number) {
     [updateLastAssistant, setIsStreaming],
   );
 
+  // Streaming tutor over SSE. Consumes reasoning + content deltas, then done.
+  // Throws only if the stream fails to START (network / no body); mid-stream
+  // errors arrive as `{type:'error'}` events and are handled inline. A user
+  // stop (AbortError) keeps the partial content and does NOT fall back to REST.
+  const streamTutor = useCallback(
+    async (dlgId: number, message: string, attachments?: AttachmentRequest[]) => {
+      const token = localStorage.getItem('token') ?? '';
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const res = await fetch('/api/ai/tutor/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            mode: 'auxiliary',
+            message,
+            dialogueId: dlgId.toString(),
+            attachments,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) throw new Error('stream unavailable');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data: ')) continue;
+            let event: StreamEvent;
+            try {
+              event = JSON.parse(trimmed.slice(6));
+            } catch {
+              continue;
+            }
+            if (event.type === 'reasoning' && event.delta) {
+              appendLastAssistant({ reasoning: event.delta });
+            } else if (event.type === 'content' && event.delta !== undefined) {
+              if (event.replace) updateLastAssistant(event.delta);
+              else appendLastAssistant({ content: event.delta });
+            } else if (event.type === 'error') {
+              updateLastAssistant(`[生成中断] ${event.message ?? '请重试'}`);
+            }
+            // done: isStreaming reset in finally
+          }
+        }
+      } catch (err) {
+        // User clicked stop -> keep partial content, no REST fallback.
+        if (err instanceof Error && err.name === 'AbortError') return;
+        throw err;  // real start error -> send() falls back to non-stream REST
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
+        setIsStreaming(false);
+      }
+    },
+    [appendLastAssistant, updateLastAssistant, setIsStreaming],
+  );
+
+  // Abort the in-flight stream (stop button). The backend aborts the upstream
+  // LLM fetch and best-effort persists the partial turn so context is retained.
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
   useEffect(() => {
     if (!dialogueId) return;
-
     let isCurrent = true;
 
     // Skip history load for dialogues created in the same session - there
@@ -62,12 +143,30 @@ export function useAuxChat(dialogueId: number) {
           setMessages(
             items
               .filter((m) => m.role === 'user' || m.role === 'assistant')
-              .map((m) => ({
-                id: m.id,
-                role: m.role as 'user' | 'assistant',
-                content: m.content,
-                type: m.type ?? undefined,
-              })),
+              .map((m) => {
+                // Parse persisted attachments (JSON string of {type,url}[]) back
+                // into display image URLs so history re-renders sent images.
+                let images: string[] | undefined;
+                if (m.attachments) {
+                  try {
+                    const parsed = JSON.parse(m.attachments) as Array<{ type: string; url: string }>;
+                    const urls = parsed
+                      .filter((a) => a.type === 'image' && !!a.url)
+                      .map((a) => a.url);
+                    if (urls.length) images = urls;
+                  } catch {
+                    // ignore malformed attachments JSON
+                  }
+                }
+                return {
+                  id: m.id,
+                  role: m.role as 'user' | 'assistant',
+                  content: m.content,
+                  reasoning: m.reasoning ?? undefined,
+                  type: m.type ?? undefined,
+                  images,
+                };
+              }),
           );
         })
         .catch(() => {
@@ -78,57 +177,13 @@ export function useAuxChat(dialogueId: number) {
         });
     }
 
-    const token = localStorage.getItem('token') ?? '';
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(
-      `${wsProtocol}//${window.location.host}/ws/ai/${dialogueId}?token=${token}`,
-    );
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
-      if (!isCurrent) return;
-      let msg;
-      try {
-        msg = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      if (msg.type === 'token') {
-        appendToLastAssistant(msg.payload.content);
-      } else if (msg.type === 'full') {
-        updateLastAssistant(msg.payload.content);
-        setIsStreaming(false);
-      } else if (msg.type === 'done' || msg.type === 'end') {
-        setIsStreaming(false);
-      } else if (msg.type === 'safety_alert') {
-        updateLastAssistant('[系统提示] 请保持学习相关话题');
-        setIsStreaming(false);
-      }
-    };
-
-    ws.onerror = () => {
-      ws.close();
-    };
-
-    ws.onclose = () => {
-      if (!isCurrent) return;
-      setIsStreaming(false);
-    };
-
     return () => {
       isCurrent = false;
-      ws.close();
     };
-  }, [
-    dialogueId,
-    updateLastAssistant,
-    appendToLastAssistant,
-    setIsStreaming,
-    setMessages,
-  ]);
+  }, [dialogueId, setMessages]);
 
   const send = useCallback(
-    async (content: string, attachments?: AttachmentRequest[]) => {
+    async (content: string, attachments?: AttachmentRequest[], images?: string[]) => {
       const { isStreaming } = useChatStore.getState();
       if (isStreaming) return;
       if (!content.trim() && !attachments?.length) return;
@@ -148,26 +203,29 @@ export function useAuxChat(dialogueId: number) {
         }
       }
 
-      // When attachments are present, append a [图片] indicator so the
-      // rendered user message reflects what was actually sent.
-      const userContent = attachments?.length
-        ? `${content}${content ? ' ' : ''}[图片]`.trim()
-        : content;
-      appendMessage({ role: 'user', content: userContent });
+      // Image-only sends still need a non-empty message for the backend
+      // (AIService rejects empty `message`). Use a default prompt; the
+      // rendered bubble shows the image itself, not this text.
+      const apiMessage = content.trim() || '帮我看一下这道题';
+      appendMessage({ role: 'user', content: content.trim(), images });
       appendMessage({ role: 'assistant', content: '', streaming: true });
       setIsStreaming(true);
 
-      const ws = wsRef.current;
-      // WS gateway does not support attachments yet; force REST (which
-      // Task 14a backend handles) when attachments are present.
-      if (ws && ws.readyState === WebSocket.OPEN && !attachments?.length) {
-        ws.send(JSON.stringify({ content }));
-      } else {
-        await fallbackToRest(dlgId, content, attachments);
+      try {
+        await streamTutor(dlgId, apiMessage, attachments);
+      } catch {
+        // Stream failed to start (network / no body) - fall back to non-stream REST.
+        await fallbackToRest(dlgId, apiMessage, attachments);
       }
+
+      // Refresh the conversation list: the backend names the conversation from
+      // the user's question (fire-and-forget, ~1-2s), so refresh now and again
+      // after a delay to pick up the new title.
+      useAuxiliaryStore.getState().fetchConversations();
+      setTimeout(() => useAuxiliaryStore.getState().fetchConversations(), 2000);
     },
-    [dialogueId, appendMessage, setIsStreaming, fallbackToRest],
+    [dialogueId, appendMessage, setIsStreaming, streamTutor, fallbackToRest],
   );
 
-  return { send, isLoadingHistory };
+  return { send, stop, isLoadingHistory };
 }

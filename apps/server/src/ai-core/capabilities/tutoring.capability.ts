@@ -1,4 +1,4 @@
-import type { TutoringRequest, TutoringResponse, StructuredQuestionOutput, ContentPart } from '../types.js';
+import type { TutoringRequest, TutoringResponse, StructuredQuestionOutput, ContentPart, ChatMessage, RouteResult, StreamEvent } from '../types.js';
 import { timeoutConfig, fallbackConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
@@ -33,6 +33,19 @@ export interface TutoringCapabilityDeps {
   modelClient?: ModelClient;
 }
 
+// Result of the shared pre-model prepare() step. shortCircuit = fallback/block
+// (persistence already done, ready to return/yield). stream = ready to call the
+// model (non-stream or streaming).
+type PreparedResult =
+  | { kind: 'shortCircuit'; content: string; response: TutoringResponse }
+  | {
+      kind: 'stream';
+      promptResult: { messages: ChatMessage[]; estimatedTokens: number; templateVersion: string };
+      routeResult: RouteResult;
+      context: { consecutiveFailCount: number };
+      userAttachments: { type: 'image'; url: string }[] | undefined;
+    };
+
 export class TutoringCapability {
   private modelRouter: ModelRouter;
   private promptBuilder: PromptBuilder;
@@ -57,10 +70,134 @@ export class TutoringCapability {
   }
 
   async tutor(request: TutoringRequest): Promise<TutoringResponse> {
+    const prepared = await this.prepare(request);
+    if (prepared.kind === 'shortCircuit') {
+      return prepared.response;
+    }
+    const dialogueId = request.dialogueId!;  // prepare() threw if missing
+
+    // Step 6: Call model (non-streaming; ModelClient.chat aggregates internally).
+    const chatResponse = await this.modelClient.chat({
+      model: prepared.routeResult.primary,
+      messages: prepared.promptResult.messages,
+      temperature: 0.7,
+      timeout: timeoutConfig.timeout.tutoring ?? timeoutConfig.timeout.default,
+    });
+
+    // Step 7: Parse + strip structured-question JSON block.
+    const { content, structuredQuestion } = this.parseContent(chatResponse.content);
+
+    // Step 8: Persist. Step 9: update fail count.
+    await this.conversationService.saveMessages({
+      dialogueId,
+      messages: [
+        { role: 'user', content: request.message, attachments: prepared.userAttachments },
+        { role: 'assistant', content, reasoning: chatResponse.reasoningContent, type: 'socratic', model: prepared.routeResult.primary.modelId },
+      ],
+    });
+    const isAnswerWrong = this.detectWrongAnswer(content);
+    await this.conversationService.updateFailCount({ dialogueId, increment: isAnswerWrong });
+
+    return {
+      dialogueId,
+      message: { role: 'assistant', content, type: 'socratic' },
+      reasoning: chatResponse.reasoningContent,
+      safety: { isLearningRelated: true, alertLevel: 'none' },
+      isFallback: false,
+      consecutiveFailCount: prepared.context.consecutiveFailCount + (isAnswerWrong ? 1 : 0),
+      structuredQuestion,
+    };
+  }
+
+  /**
+   * Streaming tutor: yields reasoning + content deltas as the model generates
+   * them, then a `done` event. Fallback/block short-circuits emit a single
+   * content chunk + done. The structured-question JSON block is stripped via a
+   * final `replace` content event so the UI never keeps the raw JSON.
+   */
+  async *tutorStream(request: TutoringRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
+    const prepared = await this.prepare(request);
+    if (prepared.kind === 'shortCircuit') {
+      yield { type: 'content', delta: prepared.content };
+      yield { type: 'done', fallback: prepared.response.isFallback };
+      return;
+    }
+    const dialogueId = request.dialogueId!;  // prepare() threw if missing
+
+    // streamChat is NOT wrapped in callWithRetry (mid-stream retry would
+    // duplicate tokens) - errors are handled here. `signal` lets the HTTP layer
+    // abort the upstream LLM fetch when the client disconnects (stop button).
+    let content = '';
+    let reasoning = '';
+    try {
+      for await (const chunk of this.modelClient.streamChat({
+        model: prepared.routeResult.primary,
+        messages: prepared.promptResult.messages,
+        temperature: 0.7,
+        timeout: timeoutConfig.timeout.tutoring ?? timeoutConfig.timeout.default,
+        signal,
+      })) {
+        if (chunk.reasoningContent) {
+          reasoning += chunk.reasoningContent;
+          yield { type: 'reasoning', delta: chunk.reasoningContent };
+        }
+        if (chunk.content) {
+          content += chunk.content;
+          yield { type: 'content', delta: chunk.content };
+        }
+      }
+    } catch (err) {
+      // Best-effort persist of partial content, then surface the error.
+      await this.conversationService.saveMessages({
+        dialogueId,
+        messages: [
+          { role: 'user', content: request.message, attachments: prepared.userAttachments },
+          { role: 'assistant', content: content || '[生成中断]', reasoning, type: 'socratic', model: prepared.routeResult.primary.modelId },
+        ],
+      }).catch(() => {});
+      yield { type: 'error', message: err instanceof Error ? err.message : '生成失败' };
+      return;
+    }
+
+    // Step 7: strip structured-question JSON block from displayed content.
+    const { content: finalContent, structuredQuestion } = this.parseContent(content);
+    if (finalContent !== content) {
+      // Replace the streamed (raw) content with the cleaned version.
+      yield { type: 'content', delta: finalContent, replace: true };
+    }
+
+    // Step 8-9: persist + fail count.
+    await this.conversationService.saveMessages({
+      dialogueId,
+      messages: [
+        { role: 'user', content: request.message, attachments: prepared.userAttachments },
+        { role: 'assistant', content: finalContent, reasoning, type: 'socratic', model: prepared.routeResult.primary.modelId },
+      ],
+    });
+    const isAnswerWrong = this.detectWrongAnswer(finalContent);
+    await this.conversationService.updateFailCount({ dialogueId, increment: isAnswerWrong });
+
+    yield { type: 'done', fallback: false, structuredQuestion };
+  }
+
+  // Shared pre-model steps (loadContext / fallback / safety / route / build
+  // prompt / multimodal augment). Returns a short-circuit result (fallback or
+  // block, persistence already done) or a "ready to call/stream" state.
+  private async prepare(request: TutoringRequest): Promise<PreparedResult> {
     if (!request.dialogueId) {
       throw new Error('dialogueId is required - call ConversationService.createDialogue first');
     }
     const dialogueId = request.dialogueId;
+
+    // Durable image URLs to persist with the user message (for history replay).
+    // Only the server URL is kept - base64 imageUrl is too large to store.
+    const userAttachments = request.attachments
+      ?.filter((a) => a.type === 'image' && !!a.url)
+      .map((a) => ({ type: 'image' as const, url: a.url }));
+
+    // True when an image attachment (with a resolved base64 data URL) is present.
+    // Used for multimodal routing and to relax the off-topic safety check.
+    const hasImage = !!(request.attachments && request.attachments.some(a => a.type === 'image' && a.imageUrl));
 
     // Step 1: Load context (used for safety history, fallback, and the prompt).
     const context = await this.conversationService.loadContext(dialogueId, 3000);
@@ -92,20 +229,24 @@ export class TutoringCapability {
       await this.conversationService.saveMessages({
         dialogueId,
         messages: [
-          { role: 'user', content: request.message },
-          { role: 'assistant', content: fallbackResult.content, type: 'fallback' },
+          { role: 'user', content: request.message, attachments: userAttachments },
+          { role: 'assistant', content: fallbackResult.content, reasoning: fallbackResult.reasoning, type: 'fallback' },
         ],
       });
       await this.conversationService.updateFailCount({ dialogueId, increment: false });
       await this.conversationService.completeDialogue({ dialogueId });
 
       return {
-        dialogueId,
-        message: { role: 'assistant', content: fallbackResult.content, type: 'fallback' },
-        reasoning: fallbackResult.reasoning,
-        safety: { isLearningRelated: true, alertLevel: 'none' },
-        isFallback: true,
-        consecutiveFailCount: 0,
+        kind: 'shortCircuit',
+        content: fallbackResult.content,
+        response: {
+          dialogueId,
+          message: { role: 'assistant', content: fallbackResult.content, type: 'fallback' },
+          reasoning: fallbackResult.reasoning,
+          safety: { isLearningRelated: true, alertLevel: 'none' },
+          isFallback: true,
+          consecutiveFailCount: 0,
+        },
       };
     }
 
@@ -117,6 +258,7 @@ export class TutoringCapability {
       message: request.message,
       dialogueHistory: context.messages,
       track: request.mode,
+      hasImage,
     });
 
     if (safetyResult.shouldBlock) {
@@ -124,22 +266,25 @@ export class TutoringCapability {
       await this.conversationService.saveMessages({
         dialogueId,
         messages: [
-          { role: 'user', content: request.message },
+          { role: 'user', content: request.message, attachments: userAttachments },
           { role: 'assistant', content: blockResponse, type: 'block' },
         ],
       });
       return {
-        dialogueId,
-        message: { role: 'assistant', content: blockResponse, type: 'block' },
-        safety: { isLearningRelated: false, alertLevel: safetyResult.alertLevel },
-        isFallback: false,
-        consecutiveFailCount: 0,
+        kind: 'shortCircuit',
+        content: blockResponse,
+        response: {
+          dialogueId,
+          message: { role: 'assistant', content: blockResponse, type: 'block' },
+          safety: { isLearningRelated: false, alertLevel: safetyResult.alertLevel },
+          isFallback: false,
+          consecutiveFailCount: 0,
+        },
       };
     }
 
     // Step 4: Route model. Task 14a: when attachments contain images, route to
-    // qwen-vl-max (multimodal) instead of the text-only model.
-    const hasImage = !!(request.attachments && request.attachments.some(a => a.type === 'image' && a.imageUrl));
+    // qwen-vl-max (multimodal) instead of the text-only model (hasImage computed above).
     const routeResult = await this.modelRouter.route({
       scene: 'tutoring',
       subject: context.subject,
@@ -181,19 +326,14 @@ export class TutoringCapability {
       }
     }
 
-    // Step 6: Call model
-    const chatResponse = await this.modelClient.chat({
-      model: routeResult.primary,
-      messages: promptResult.messages,
-      temperature: 0.7,
-      timeout: timeoutConfig.timeout.tutoring ?? timeoutConfig.timeout.default,
-    });
+    return { kind: 'stream', promptResult, routeResult, context, userAttachments };
+  }
 
-    // Step 7: Parse response. Task 14a: extract structured question JSON block
-    // from the model's reply and strip it from the displayed content.
-    // Review #4: use Zod safeParse instead of unchecked `as` casts.
-    const parsed = this.responseParser.parse({ rawContent: chatResponse.content, mode: 'text' });
-    let content = parsed.rawText ?? chatResponse.content;
+  // Step 7 helper: parse + strip the structured-question JSON block from the
+  // model reply so history doesn't contain raw JSON.
+  private parseContent(rawContent: string): { content: string; structuredQuestion?: StructuredQuestionOutput } {
+    const parsed = this.responseParser.parse({ rawContent, mode: 'text' });
+    let content = parsed.rawText ?? rawContent;
     let structuredQuestion: StructuredQuestionOutput | undefined;
     const jsonBlock = this.responseParser.extractJsonBlock(content);
     if (jsonBlock) {
@@ -203,31 +343,37 @@ export class TutoringCapability {
         content = this.responseParser.stripJsonBlock(content);
       }
     }
+    return { content, structuredQuestion };
+  }
 
-    // Step 8: Persist messages (user + assistant). The user message is stored
-    // as text only (image URLs expire). The assistant content has the JSON
-    // block stripped so history doesn't contain raw JSON.
-    await this.conversationService.saveMessages({
-      dialogueId,
-      messages: [
-        { role: 'user', content: request.message },
-        { role: 'assistant', content, type: 'socratic', model: routeResult.primary.modelId },
-      ],
-    });
-
-    // Step 9: Update fail count
-    const isAnswerWrong = this.detectWrongAnswer(content);
-    await this.conversationService.updateFailCount({ dialogueId, increment: isAnswerWrong });
-
-    return {
-      dialogueId,
-      message: { role: 'assistant', content, type: 'socratic' },
-      reasoning: chatResponse.reasoningContent,
-      safety: { isLearningRelated: true, alertLevel: 'none' },
-      isFallback: false,
-      consecutiveFailCount: context.consecutiveFailCount + (isAnswerWrong ? 1 : 0),
-      structuredQuestion,
-    };
+  /**
+   * Generate a short conversation title (<=15 chars) from the user's question
+   * + assistant reply, using a cheap model (deepseek-v4-flash). Returns null
+   * if the message is just a greeting / no clear question, so the caller keeps
+   * the default temp title and can retry on a later message.
+   */
+  async generateTitle(userMessage: string, assistantContent: string): Promise<string | null> {
+    const model = this.modelRouter.getModel('deepseek-v4-flash');
+    if (!model) return null;
+    const prompt = `根据学生的提问，生成一个不超过15字的对话标题，概括问题主题。
+- 只是打招呼、闲聊、或无法判断具体问题时，回复：NONE
+- 只返回标题文字，不要引号、不要解释、不要句号
+学生提问：${userMessage}
+助手回复摘要：${assistantContent.slice(0, 200)}`;
+    try {
+      const res = await this.modelClient.chat({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        maxTokens: 256,
+        timeout: 15000,
+      });
+      const title = (res.content || '').trim().replace(/^[\s"'""']+|[\s"'""']+$/g, '');
+      if (!title || title.toUpperCase() === 'NONE') return null;
+      return title.slice(0, 20);
+    } catch {
+      return null;
+    }
   }
 
   private isGiveUpMessage(message: string): boolean {

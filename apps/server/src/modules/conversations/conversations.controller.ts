@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ConversationsService } from './conversations.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { CreateConversationDto } from './dto/create-conversation.dto.js';
 import type { AppendMessageDto } from './dto/append-message.dto.js';
+import type { UpdateTitleDto } from './dto/update-title.dto.js';
 
 @Controller('api/conversations')
 @UseGuards(JwtAuthGuard)
@@ -41,5 +42,21 @@ export class ConversationsController {
   @Post(':dialogueId/messages')
   async append(@Param('dialogueId', ParseIntPipe) id: number, @Body() dto: AppendMessageDto, @CurrentUser() user: JwtUser) {
     await this.conversationsService.appendMessage(id, user.sub, dto.content);
+  }
+
+  @Patch(':dialogueId')
+  async updateTitle(
+    @Param('dialogueId', ParseIntPipe) id: number,
+    @Body() dto: UpdateTitleDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    await this.conversationsService.updateTitle(id, user.sub, dto.title);
+    return { ok: true };
+  }
+
+  @Delete(':dialogueId')
+  async delete(@Param('dialogueId', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
+    await this.conversationsService.delete(id, user.sub);
+    return { ok: true };
   }
 }

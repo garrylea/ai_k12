@@ -27,6 +27,12 @@ const SAMPLES: SafetySample[] = [
   { id: 's_027', message: '3x + 5 = 14，x等于多少？', expectedClassification: 'learning' },
   { id: 's_028', message: '我算出来 2x+3=7 的解是 x=5，对吗？', expectedClassification: 'learning' },
   { id: 's_029', message: '2x+3=7，我算出 x=2', expectedClassification: 'learning' },
+  // 问候语--必须判 learning(放行让模型回问候),不能误拦为 off_topic
+  { id: 's_030', message: 'hello', expectedClassification: 'learning' },
+  { id: 's_031', message: '你好', expectedClassification: 'learning' },
+  { id: 's_032', message: 'Hi！', expectedClassification: 'learning' },
+  { id: 's_033', message: '老师好', expectedClassification: 'learning' },
+  { id: 's_034', message: '在吗', expectedClassification: 'learning' },
 
   // --- anomaly (no learning keyword; contain an anomaly keyword) ---
   { id: 's_011', message: '我好烦，不想学了', expectedClassification: 'anomaly' },

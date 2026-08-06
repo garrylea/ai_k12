@@ -26,6 +26,16 @@ async function bootstrap() {
     console.warn(`[WARN] assets dir not found: ${assetsDir}`);
   }
 
+  // 用户上传图片静态服务：/uploads/* -> UPLOAD_DIR（默认 ./uploads）
+  // 答疑历史回放需要通过此 URL 重新展示用户发送过的图片。
+  const uploadsDir = path.resolve(process.env.UPLOAD_DIR ?? './uploads');
+  if (fs.existsSync(uploadsDir)) {
+    app.useStaticAssets(uploadsDir, { prefix: '/uploads/' });
+    console.log(`Serving uploads from ${uploadsDir} at /uploads/`);
+  } else {
+    console.warn(`[WARN] uploads dir not found: ${uploadsDir}`);
+  }
+
   const port = process.env.PORT || 3001;
   await app.listen(port);
   console.log(`K12 Server running on http://localhost:${port}`);

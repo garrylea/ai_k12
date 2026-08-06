@@ -24,6 +24,12 @@ export class ModelRouter {
     this.defaultRule = routeConfig.default;
   }
 
+  /** Look up a model config by id (apiKey stripped; ModelClient re-attaches it
+   * via the provider). Used for side tasks like title generation. */
+  getModel(id: string): ModelConfig | undefined {
+    return this.models[id];
+  }
+
   route(request: RouteRequest): RouteResult {
     // Task 14a: image-aware routing for tutoring. When the request has an image,
     // override to qwen-vl-max (multimodal) for math. Other subjects still fall

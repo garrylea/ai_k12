@@ -201,12 +201,43 @@ export function listConversations(track: 'auxiliary', cursor?: number): Promise<
   return fetchApi<ConversationItem[]>(`/conversations${qs}`);
 }
 
+// Fetch ALL conversations by walking the cursor-paginated list endpoint
+// (backend ConversationsService.PAGE_SIZE = 10, ORDER BY id DESC, cursor = id).
+// Used by the sidebar so the "展开全部" button can reveal history beyond the
+// first page. Capped at 50 pages (500 items) as a safety valve against a
+// runaway loop; a K12 student won't approach that.
+export async function listAllConversations(track: 'auxiliary'): Promise<ConversationItem[]> {
+  const PAGE = 10;
+  const all: ConversationItem[] = [];
+  let cursor: number | undefined;
+  for (let i = 0; i < 50; i++) {
+    const page = await listConversations(track, cursor);
+    all.push(...page);
+    if (page.length < PAGE) break;
+    cursor = page[page.length - 1].id;
+  }
+  return all;
+}
+
+export function renameConversation(id: number, title: string): Promise<void> {
+  return fetchApi<void>(`/conversations/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
+}
+
+export function deleteConversation(id: number): Promise<void> {
+  return fetchApi<void>(`/conversations/${id}`, { method: 'DELETE' });
+}
+
 export interface MessageItem {
   id: number;
   dialogue_id: number;
   role: 'system' | 'user' | 'assistant';
   content: string;
+  reasoning: string | null;
   type: string | null;
+  attachments: string | null;
   created_at: string;
 }
 
@@ -225,6 +256,7 @@ export interface AttachmentRequest {
 export interface TutorResponse {
   dialogueId: string;
   message: { role: string; content: string; type?: string };
+  reasoning?: string;
   safety: { isLearningRelated: boolean; alertLevel: string };
   fallback: boolean;
   consecutiveFailCount: number;

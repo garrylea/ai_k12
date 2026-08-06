@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { LLMClientError, InsufficientQuotaError } from '../../ai-core/types.js';
-import type { TutoringRequest, Attachment } from '../../ai-core/types.js';
+import type { TutoringRequest, Attachment, StreamEvent, StructuredQuestionOutput } from '../../ai-core/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { ErrorBookService } from '../error-book/error-book.service.js';
 import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
@@ -30,6 +30,71 @@ export class AIService {
   ) {}
 
   async tutor(dto: TutorDto, userId: number) {
+    this.validateDto(dto);
+    const dialogueId = await this.resolveDialogue(dto, userId);
+
+    // NOTE: TutoringCapability.tutor() internally persists BOTH the user message
+    // and the assistant reply via ConversationService.saveMessages() in all code
+    // paths (fallback / block / normal). We deliberately do NOT call
+    // conversationsService.appendMessage() / appendAssistantMessage() here to
+    // avoid creating duplicate rows in ai_messages.
+
+    const attachments = await this.resolveAttachments(dto, userId);
+    const request = this.buildRequest(dto, userId, dialogueId, attachments);
+
+    try {
+      const response = await this.tutoring.tutor(request);
+      if (response.structuredQuestion) {
+        await this.ingestStructuredQuestion(userId, dto, attachments, response.structuredQuestion);
+      }
+      // Fire-and-forget: name the conversation from the user's actual question.
+      this.maybeUpdateTitle(dialogueId, userId, dto.message, response.message.content).catch(() => {});
+      return {
+        dialogueId,
+        message: response.message,
+        reasoning: response.reasoning,
+        safety: response.safety,
+        fallback: response.isFallback,
+        consecutiveFailCount: response.consecutiveFailCount,
+      };
+    } catch (err) {
+      throw this.mapLLMError(err, dialogueId);
+    }
+  }
+
+  /**
+   * Streaming tutor. Yields reasoning + content deltas as the model generates,
+   * then a `done` event (with structuredQuestion for ingestion). Pre-stream
+   * errors (validation / dialogue / attachment resolution) throw HttpException;
+   * mid-stream model errors are yielded as `{type:'error'}` by the capability.
+   */
+  async *tutorStream(dto: TutorDto, userId: number, signal?: AbortSignal): AsyncIterable<StreamEvent> {
+    this.validateDto(dto);
+    const dialogueId = await this.resolveDialogue(dto, userId);
+    const attachments = await this.resolveAttachments(dto, userId);
+    const request = this.buildRequest(dto, userId, dialogueId, attachments);
+
+    let assistantContent = '';
+    try {
+      for await (const event of this.tutoring.tutorStream(request, signal)) {
+        if (event.type === 'content') {
+          // Track final assistant content (replace = JSON-stripped version) for title gen.
+          assistantContent = event.replace ? (event.delta ?? '') : assistantContent + (event.delta ?? '');
+        } else if (event.type === 'done' && event.structuredQuestion) {
+          await this.ingestStructuredQuestion(userId, dto, attachments, event.structuredQuestion);
+        }
+        yield event;
+      }
+    } catch (err) {
+      throw this.mapLLMError(err, dialogueId);
+    }
+    // Fire-and-forget: name the conversation from the user's actual question.
+    this.maybeUpdateTitle(dialogueId, userId, dto.message, assistantContent).catch(() => {});
+  }
+
+  // ---------- shared helpers ----------
+
+  private validateDto(dto: TutorDto) {
     if (!dto.message || dto.message.trim().length === 0) {
       throw new BadRequestException({ code: 1001, message: 'message 不能为空' });
     }
@@ -38,81 +103,81 @@ export class AIService {
     }
     // TODO: check controls.auxiliary_enabled via ControlsRepository (not yet created in Task 1).
     // For now, auxiliary access is not gated at the service layer.
+  }
 
-    let dialogueId = dto.dialogueId;
-    if (!dialogueId) {
-      let knowledgePointId: number | undefined;
-      if (dto.knowledgeId) {
-        knowledgePointId = Number(dto.knowledgeId);
-        if (!Number.isFinite(knowledgePointId)) {
-          throw new BadRequestException({ code: 1001, message: 'knowledgeId 必须为数字' });
-        }
-      }
-      const dialogue = await this.conversationsService.create(userId, {
-        track: dto.mode,
-        knowledgePointId,
-      });
-      if (!dialogue) {
-        throw new InternalServerErrorException({ code: 5000, message: '创建会话失败' });
-      }
-      dialogueId = String(dialogue.id);
-    } else {
+  private async resolveDialogue(dto: TutorDto, userId: number): Promise<string> {
+    if (dto.dialogueId) {
       // Critical: verify the dialogue belongs to the current user before proceeding.
       // ai-core ConversationService.loadContext uses findById (no student_id filter),
       // so without this check a student could read/tamper with another's dialogue.
-      await this.conversationsService.get(Number(dialogueId), userId);
+      await this.conversationsService.get(Number(dto.dialogueId), userId);
+      return dto.dialogueId;
     }
-
-    // NOTE: TutoringCapability.tutor() internally persists BOTH the user message
-    // and the assistant reply via ConversationService.saveMessages() in all code
-    // paths (fallback / block / normal). We deliberately do NOT call
-    // conversationsService.appendMessage() / appendAssistantMessage() here to
-    // avoid creating duplicate rows in ai_messages.
-
-    // Task 14a: resolve attachment fileIds to base64 data URLs for multimodal input.
-    // Review #12: only process image attachments; non-image types are skipped.
-    const attachments: Attachment[] = [];
-    if (dto.attachments && dto.attachments.length > 0) {
-      const uploadDir = process.env.UPLOAD_DIR ?? './uploads';
-      for (const att of dto.attachments) {
-        if (att.type !== 'image') continue;  // #12: skip non-image attachments
-        const fileIdNum = Number(att.fileId);
-        if (!Number.isFinite(fileIdNum)) {
-          throw new BadRequestException({ code: 1001, message: 'attachment.fileId 必须为数字' });
-        }
-        // Review #1: ownership check - prevent authorization bypass.
-        const fileRow = await this.filesRepo.findByIdAndOwner(fileIdNum, userId);
-        if (!fileRow) {
-          throw new BadRequestException({ code: 1001, message: '文件不存在或无权访问' });
-        }
-        // Review #2: mime type validation - only images can be sent to Qwen-VL.
-        if (!fileRow.mime_type.startsWith('image/')) {
-          throw new BadRequestException({ code: 1001, message: '附件必须是图片' });
-        }
-        // Review #3: size limit - base64 inflates ~33%, cap before readFileSync.
-        if (fileRow.size_bytes > this.MAX_IMAGE_BYTES) {
-          throw new BadRequestException({ code: 1001, message: '图片过大（最大 5MB）' });
-        }
-        const storageKey = fileRow.url.replace(/^\/uploads\//, '');
-        const filePath = path.join(uploadDir, storageKey);
-        let base64: string;
-        try {
-          base64 = fs.readFileSync(filePath).toString('base64');
-        } catch {
-          throw new BadRequestException({ code: 1001, message: `文件读取失败: ${att.fileId}` });
-        }
-        const dataUrl = `data:${fileRow.mime_type};base64,${base64}`;
-        attachments.push({
-          type: 'image',
-          url: fileRow.url,
-          imageUrl: dataUrl,
-          fileId: att.fileId,
-        });
+    let knowledgePointId: number | undefined;
+    if (dto.knowledgeId) {
+      knowledgePointId = Number(dto.knowledgeId);
+      if (!Number.isFinite(knowledgePointId)) {
+        throw new BadRequestException({ code: 1001, message: 'knowledgeId 必须为数字' });
       }
     }
+    const dialogue = await this.conversationsService.create(userId, {
+      track: dto.mode,
+      knowledgePointId,
+    });
+    if (!dialogue) {
+      throw new InternalServerErrorException({ code: 5000, message: '创建会话失败' });
+    }
+    return String(dialogue.id);
+  }
 
+  // Task 14a: resolve attachment fileIds to base64 data URLs for multimodal input.
+  // Review #12: only process image attachments; non-image types are skipped.
+  private async resolveAttachments(dto: TutorDto, userId: number): Promise<Attachment[]> {
+    const attachments: Attachment[] = [];
+    if (!dto.attachments || dto.attachments.length === 0) return attachments;
+
+    const uploadDir = process.env.UPLOAD_DIR ?? './uploads';
+    for (const att of dto.attachments) {
+      if (att.type !== 'image') continue;  // #12: skip non-image attachments
+      const fileIdNum = Number(att.fileId);
+      if (!Number.isFinite(fileIdNum)) {
+        throw new BadRequestException({ code: 1001, message: 'attachment.fileId 必须为数字' });
+      }
+      // Review #1: ownership check - prevent authorization bypass.
+      const fileRow = await this.filesRepo.findByIdAndOwner(fileIdNum, userId);
+      if (!fileRow) {
+        throw new BadRequestException({ code: 1001, message: '文件不存在或无权访问' });
+      }
+      // Review #2: mime type validation - only images can be sent to Qwen-VL.
+      if (!fileRow.mime_type.startsWith('image/')) {
+        throw new BadRequestException({ code: 1001, message: '附件必须是图片' });
+      }
+      // Review #3: size limit - base64 inflates ~33%, cap before readFileSync.
+      if (fileRow.size_bytes > this.MAX_IMAGE_BYTES) {
+        throw new BadRequestException({ code: 1001, message: '图片过大（最大 5MB）' });
+      }
+      const storageKey = fileRow.url.replace(/^\/uploads\//, '');
+      const filePath = path.join(uploadDir, storageKey);
+      let base64: string;
+      try {
+        base64 = fs.readFileSync(filePath).toString('base64');
+      } catch {
+        throw new BadRequestException({ code: 1001, message: `文件读取失败: ${att.fileId}` });
+      }
+      const dataUrl = `data:${fileRow.mime_type};base64,${base64}`;
+      attachments.push({
+        type: 'image',
+        url: fileRow.url,
+        imageUrl: dataUrl,
+        fileId: att.fileId,
+      });
+    }
+    return attachments;
+  }
+
+  private buildRequest(dto: TutorDto, userId: number, dialogueId: string, attachments: Attachment[]): TutoringRequest {
     // studentId comes from the JWT (user.sub), not the dto.
-    const request: TutoringRequest = {
+    return {
       studentId: String(userId),
       mode: dto.mode,
       cardId: dto.cardId,
@@ -121,76 +186,85 @@ export class AIService {
       dialogueId,
       ...(attachments.length > 0 ? { attachments } : {}),
     };
+  }
 
-    // TODO (mainline): ConversationService.loadContext() returns cardContent:
-    // undefined (not persisted in ai_dialogues). For mainline mode, cardContent
-    // should be loaded from CardsRepository via dto.cardId. Auxiliary mode does
-    // not need cardContent (open scope).
+  // Task 14a: ingest a structured question into questions + aux_error_books.
+  // Use dto.subjectId or default to the math subject ID (MVP is math-only).
+  private async ingestStructuredQuestion(
+    userId: number,
+    dto: TutorDto,
+    attachments: Attachment[],
+    structuredQuestion: StructuredQuestionOutput,
+  ): Promise<void> {
+    let subjectId = dto.subjectId;
+    if (!subjectId) {
+      const mathSubject = await this.subjectsRepo.findByCode('math');
+      subjectId = mathSubject?.id ?? 1;  // TODO: hardcode fallback, should not happen if DB seeded
+    }
+    const hasImage = attachments.some(a => a.type === 'image');
+    await this.errorBookService.createAuxFromStructured(
+      userId,
+      subjectId,
+      structuredQuestion,
+      hasImage ? 'photo' : 'auxiliary',
+    ).catch((err) => {
+      // Ingestion failure should not block the tutoring response.
+      this.logger.error('structured question ingestion failed:', err);
+    });
+  }
 
+  // Name the conversation from the user's actual question (replaces the static
+  // "辅线答疑" temp title). Only acts when the title is still the default; a
+  // greeting/ambiguous message yields no title (returns null) so the temp title
+  // stays and we retry on the next message. Fire-and-forget from tutor/stream.
+  private async maybeUpdateTitle(
+    dialogueId: string,
+    userId: number,
+    userMessage: string,
+    assistantContent: string,
+  ): Promise<void> {
     try {
-      const response = await this.tutoring.tutor(request);
-
-      // Task 14a: if the model produced a structured question, ingest it into
-      // questions + aux_error_books. Use dto.subjectId or default to the math
-      // subject ID (MVP is math-only).
-      if (response.structuredQuestion) {
-        let subjectId = dto.subjectId;
-        if (!subjectId) {
-          const mathSubject = await this.subjectsRepo.findByCode('math');
-          subjectId = mathSubject?.id ?? 1;  // TODO: hardcode fallback, should not happen if DB seeded
-        }
-        const hasImage = attachments.some(a => a.type === 'image');
-        await this.errorBookService.createAuxFromStructured(
-          userId,
-          subjectId,
-          response.structuredQuestion,
-          hasImage ? 'photo' : 'auxiliary',
-        ).catch((err) => {
-          // Ingestion failure should not block the tutoring response.
-          // The user still gets their Socratic reply; the question just
-          // doesn't get saved to the error book.
-          this.logger.error('structured question ingestion failed:', err);
-        });
-      }
-
-      return {
-        dialogueId,
-        message: response.message,
-        safety: response.safety,
-        fallback: response.isFallback,
-        consecutiveFailCount: response.consecutiveFailCount,
-      };
+      const dialogue = await this.conversationsService.get(Number(dialogueId), userId);
+      if (dialogue.title && dialogue.title !== '辅线答疑') return;  // already named
+      const topic = await this.tutoring.generateTitle(userMessage, assistantContent);
+      if (!topic) return;  // greeting/ambiguous - keep temp title
+      const d = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const time = `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      await this.conversationsService.updateTitle(Number(dialogueId), userId, `${topic} · ${time}`);
     } catch (err) {
-      // Re-throw HttpExceptions (BadRequest, NotFound from ownership check) as-is
-      // so they keep their original status code and payload.
-      if (err instanceof HttpException) throw err;
+      this.logger.error('title generation failed:', err);
+    }
+  }
 
-      // Map LLM errors to HTTP responses without leaking internal details.
-      // Include dialogueId so the frontend can retry against the same dialogue
-      // (no new orphan created on retry).
-      if (err instanceof InsufficientQuotaError) {
-        throw new HttpException(
-          { code: 1005, message: 'AI 服务额度不足，请稍后重试', dialogueId },
-          503,
-        );
-      }
-      if (err instanceof LLMClientError) {
-        throw new HttpException(
-          { code: 5001, message: 'AI 服务繁忙，请稍后重试', dialogueId },
-          503,
-        );
-      }
+  private mapLLMError(err: unknown, dialogueId: string): HttpException {
+    // Re-throw HttpExceptions (BadRequest, NotFound from ownership check) as-is
+    // so they keep their original status code and payload.
+    if (err instanceof HttpException) return err;
 
-      // TODO: user message is not persisted if tutoring.tutor() throws before saveMessages.
-      // TutoringCapability.saveMessages only runs on successful model call. For MVP, the
-      // frontend retries with the returned dialogueId; a fuller fix would persist the user
-      // message in AIService before calling tutor (requires TutoringCapability refactor).
-
-      // Unknown errors - don't leak internal message.
-      throw new HttpException(
-        { code: 5000, message: 'AI 服务异常', dialogueId },
-        500,
+    // Map LLM errors to HTTP responses without leaking internal details.
+    // Include dialogueId so the frontend can retry against the same dialogue
+    // (no new orphan created on retry).
+    if (err instanceof InsufficientQuotaError) {
+      return new HttpException(
+        { code: 1005, message: 'AI 服务额度不足，请稍后重试', dialogueId },
+        503,
       );
     }
+    if (err instanceof LLMClientError) {
+      return new HttpException(
+        { code: 5001, message: 'AI 服务繁忙，请稍后重试', dialogueId },
+        503,
+      );
+    }
+
+    // TODO: user message is not persisted if tutoring.tutor() throws before saveMessages.
+    // For MVP, the frontend retries with the returned dialogueId.
+
+    // Unknown errors - don't leak internal message.
+    return new HttpException(
+      { code: 5000, message: 'AI 服务异常', dialogueId },
+      500,
+    );
   }
 }

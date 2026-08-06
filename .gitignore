@@ -34,4 +34,8 @@ out/
 *.swp
 *.swo
 
+## Runtime artifacts (local test/upload outputs)
+.playwright-cli/
+apps/server/uploads/
+
 

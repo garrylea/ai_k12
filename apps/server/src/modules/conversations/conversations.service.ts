@@ -41,6 +41,22 @@ export class ConversationsService {
     return dialogue;
   }
 
+  async updateTitle(dialogueId: number, studentId: number, title: string) {
+    if (!title || typeof title !== 'string' || title.trim().length === 0) {
+      throw new BadRequestException({ code: 1001, message: 'title 不能为空' });
+    }
+    if (title.trim().length > 100) {
+      throw new BadRequestException({ code: 1001, message: 'title 过长（≤100 字）' });
+    }
+    await this.get(dialogueId, studentId);  // ownership check
+    await this.dialoguesRepo.updateTitle(dialogueId, title.trim());
+  }
+
+  async delete(dialogueId: number, studentId: number) {
+    await this.get(dialogueId, studentId);  // ownership check
+    await this.dialoguesRepo.softDelete(dialogueId);
+  }
+
   async getMessages(dialogueId: number, studentId: number, lastMessageId?: number) {
     await this.get(dialogueId, studentId);
     return this.messagesRepo.findByDialogue(dialogueId, lastMessageId);

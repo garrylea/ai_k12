@@ -24,7 +24,7 @@ export class KimiClient implements ProviderAdapter {
           stop: request.stopSequences,
           response_format: request.responseFormat === 'json_object' ? { type: 'json_object' } : undefined,
         }),
-        signal: AbortSignal.timeout(request.timeout ?? 30000),
+        signal: AbortSignal.any([AbortSignal.timeout(request.timeout ?? 30000), ...(request.signal ? [request.signal] : [])]),
       });
     } catch (netErr) {
       // 网络错误(DNS/连接失败/abort)归一为 status=0 -> TimeoutError
@@ -57,7 +57,12 @@ export class KimiClient implements ProviderAdapter {
       id: data.id,
       model: data.model,
       content: choice.message.content,
-      reasoningContent: choice.message.reasoning_content ?? undefined,
+      // qwen3.7-max / deepseek emit reasoning_content with literal "\n" (backslash
+      // + n) as line separators instead of real newlines. Normalize at source so
+      // streaming, persistence, and history all see real newlines.
+      reasoningContent: choice.message.reasoning_content
+        ? choice.message.reasoning_content.replace(/\\n/g, '\n')
+        : undefined,
       finishReason: choice.finish_reason,
       usage: {
         inputTokens: data.usage?.prompt_tokens ?? 0,
@@ -84,7 +89,7 @@ export class KimiClient implements ProviderAdapter {
           max_tokens: request.maxTokens ?? request.model.maxOutputTokens,
           stream: true,
         }),
-        signal: AbortSignal.timeout(request.timeout ?? 30000),
+        signal: AbortSignal.any([AbortSignal.timeout(request.timeout ?? 30000), ...(request.signal ? [request.signal] : [])]),
       });
     } catch (netErr) {
       // 网络错误(DNS/连接失败/abort)归一为 status=0 -> TimeoutError
@@ -134,7 +139,7 @@ export class KimiClient implements ProviderAdapter {
           const parsed = JSON.parse(data);
           const delta = parsed.choices?.[0]?.delta;
           if (delta?.reasoning_content) {
-            yield { content: '', reasoningContent: delta.reasoning_content };
+            yield { content: '', reasoningContent: delta.reasoning_content.replace(/\\n/g, '\n') };
           }
           if (delta?.content) {
             yield { content: delta.content };

@@ -1934,8 +1934,8 @@ paths:
                         $ref: '#/components/schemas/Conversation'
     patch:
       tags: [Conversations]
-      summary: 更新会话
-      operationId: updateConversation
+      summary: 更新会话标题
+      operationId: updateConversationTitle
       parameters:
         - name: dialogueId
           in: path
@@ -1948,14 +1948,30 @@ paths:
           application/json:
             schema:
               type: object
+              required: [title]
               properties:
                 title:
                   type: string
-                archived:
-                  type: boolean
       responses:
         '200':
           description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+    delete:
+      tags: [Conversations]
+      summary: 软删除会话（置 deleted_at，列表自动排除）
+      operationId: deleteConversation
+      parameters:
+        - name: dialogueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
           content:
             application/json:
               schema:

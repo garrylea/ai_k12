@@ -21,6 +21,10 @@ const LEARNING_PATTERNS = [
   // "方程/计算"等关键词--避免把"3x+5=14,x等于多少?"误判为 off_topic 而 block。
   // 用半角等号/变量项识别,不误伤"1+1等于几"(中文"等于",无半角=)这类 off_topic。
   /\d\s*[a-zA-Z]/, /[a-zA-Z]\s*[+\-*/=]/, /=\s*\d/,
+  // 问候语(hello/你好/hi/在吗/老师好/早上好…)不算 off_topic -- 放行让模型自然
+  // 回复问候(如"你好，有什么问题我可以帮你？"),而非被拦截回"专注学习"。
+  // 锚定整条消息(允许末尾标点/空格),避免误伤"你好烦"等非问候句。
+  /^(hello|hi|hey|嗨|哈喽|你好|你好呀|你好啊|在吗|在不在|老师好|早上好|上午好|中午好|下午好|晚上好)[~!！。.,， ]*$/i,
 ];
 
 interface GentleBlockPhrases {
@@ -39,6 +43,21 @@ export class SafetyGuard {
 
   async check(request: SafetyCheckRequest): Promise<SafetyCheckResult> {
     const classification = this.classifyByKeywords(request.message);
+
+    // Auxiliary (free-exploration) track supports all K12 subjects. Its keyword
+    // classifier is math-centric, so non-math subjects (语文/物理/英语…) and
+    // image captions would be false-positive off_topic. Delegate subject
+    // relevance to the model (the prompt's 学科范围 rule redirects genuinely
+    // non-K12 content); here we only block anomaly/abuse (handled below).
+    // hasImage is subsumed (images only arrive in auxiliary).
+    if (classification.classification === 'off_topic' && request.track === 'auxiliary') {
+      return {
+        isLearningRelated: true,
+        classification: 'learning',
+        alertLevel: 'none',
+        shouldBlock: false,
+      };
+    }
 
     if (classification.classification === 'learning') {
       return {
