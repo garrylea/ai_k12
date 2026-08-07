@@ -330,3 +330,27 @@ export function createAuxError(req: {
     body: JSON.stringify(req),
   });
 }
+
+// --- Practice (mainline 课堂练习判对错) ---
+
+export interface JudgeResult {
+  questionId: number | null;
+  isCorrect: boolean;
+  method: 'exact' | 'ai';
+  analysis: string | null;
+  errorType?: 'logic' | 'calculation' | 'format' | 'missing' | null;
+  errorBookId?: number;
+}
+
+export function judgePractice(payload: {
+  cardId: number;
+  lessonId: number;
+  subjectId: number;
+  questionText: string;
+  studentAnswer: string;
+}): Promise<JudgeResult> {
+  return fetchApi<JudgeResult>('/practice/judge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
