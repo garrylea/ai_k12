@@ -46,6 +46,21 @@ export interface AuxErrorBookRow extends RowDataPacket {
   updated_at: Date;
 }
 
+export interface MainErrorBookRow extends RowDataPacket {
+  id: number;
+  student_id: number;
+  subject_id: number;
+  question_id: number | null; // 可空：质量差仅存题面时为 null
+  level: number;
+  is_cleared: number;
+  source: string; // 'practice' | 'exam' | ... 主线来源多样，不收窄为字面量联合
+  source_ref_id: number | null;
+  wrong_answer_text: string | null;
+  cleared_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface ExtractTaskRow extends RowDataPacket {
   id: number;
   file_id: number;

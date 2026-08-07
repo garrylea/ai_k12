@@ -31,7 +31,7 @@
 - **前端**：`CourseDetailPage` 已有 `practice` 阶段概念；练习卡内容为行内 markdown，已用 ReactMarkdown + remark-math + remarkGfm + rehype-katex 渲染（KaTeX 已是依赖）。已有 `EXERCISE_ITEM_RE=/^\([1-9]\d?\)/`、`EXERCISE_STEM_RE=/[：:]$/`、`preprocessContent`（拆 `(1)(2)`、`（N）->(N)`）。
 - **ai-core**：`QuestionStructuringCapability.structure()` 已实现，输出 `{type,difficulty,content,options,answer,explanation,knowledgePoints,quality}`。`GradingCapability`（评分，返回 `totalScore/steps`）**保留给作业/考试打分，不用于练习**。
 - **题库**：`QuestionsRepository.findByContentHash` / `findOrCreate`（基于 `content_hash` 竞态安全去重）/ `create` / `deleteById` / `bindKnowledgePoint`。
-- **DB**：`questions`（type ∈ choice/fill_blank/true_false/short_answer/proof，answer NOT NULL，options，content_hash UNIQUE）、`main_error_books`（student/subject/question_id NOT NULL/source/source_ref_id/wrong_answer_text/level/is_cleared）、`cards.content_metadata`（TEXT JSON，已存在）。
+- **DB**：`questions`（type ∈ choice/fill_blank/true_false/short_answer/proof，answer NOT NULL，options，content_hash UNIQUE）、`main_error_books`（student/subject/question_id 可空/source/source_ref_id/wrong_answer_text/level/is_cleared）、`cards.content_metadata`（TEXT JSON，已存在）。
 - **错题本模块**：`error-book.service.insertQuestionAndAux()` 已有"去重+插题+入错题本+孤儿补偿"模式（辅线），可镜像到主线。
 
 ## 4. 缺口（需新建）
