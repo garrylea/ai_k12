@@ -39,6 +39,8 @@ tags:
     description: 家长端服务
   - name: Quota
     description: AI 额度与套餐
+  - name: Practice
+    description: 课堂练习判对错
 paths:
   # Auth
   /auth/register:
@@ -2603,6 +2605,52 @@ paths:
                       data:
                         $ref: '#/components/schemas/Quota'
 
+  # Practice
+  /practice/judge:
+    post:
+      tags: [Practice]
+      summary: 课堂练习判对错
+      description: >-
+        学生在 practice 卡片答题后调用。三路由判定：
+        (1) 题库命中 + 客观题（choice/true_false/fill_blank）-> exact 答案比对；
+        (2) 题库命中主观题（short_answer/proof）或未命中 -> AI JudgmentCapability 判定；
+        (3) 答错 -> 写入 main_error_books（未入库的题先经 QuestionStructuringCapability
+        结构化后插 questions 表，结构化失败则 question_id=NULL 仅存题面）。
+        AI 判定失败返回 503（code=5001，不写错题本，前端可区分处理）。
+      operationId: judgePractice
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JudgeRequest'
+      responses:
+        '200':
+          description: 判定结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/JudgeResult'
+        '503':
+          description: AI 判定失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 5001
+                  message:
+                    type: string
+                    example: 判定失败，请重试
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3336,7 +3384,7 @@ components:
           format: date-time
         source:
           type: string
-          enum: [homework, unit_test, midterm, final, auxiliary]
+          enum: [homework, unit_test, midterm, final, auxiliary, practice]
 
     RedoRequest:
       type: object
@@ -3637,6 +3685,53 @@ components:
         resetAt:
           type: string
           format: date-time
+
+    JudgeRequest:
+      type: object
+      required: [cardId, lessonId, subjectId, questionText, studentAnswer]
+      properties:
+        cardId:
+          type: integer
+          description: 当前 practice 卡片 ID
+        lessonId:
+          type: integer
+          description: 当前课程 ID
+        subjectId:
+          type: integer
+          description: 学科 ID
+        questionText:
+          type: string
+          description: 题面原文（取自 cards.content_metadata.questions[].text）
+        studentAnswer:
+          type: string
+          description: 学生提交的答案文本
+
+    JudgeResult:
+      type: object
+      properties:
+        questionId:
+          type: integer
+          nullable: true
+          description: 题库命中时的 questions.id；未命中且结构化失败时为 null（错题仅存题面）
+        isCorrect:
+          type: boolean
+        method:
+          type: string
+          enum: [exact, ai]
+          description: exact=客观题答案比对；ai=JudgmentCapability 判定
+        analysis:
+          type: string
+          nullable: true
+          description: 答错时的解析。method=ai 时为 AI 生成的分析；method=exact 答错时为标准答案文本
+        errorType:
+          type: string
+          nullable: true
+          enum: [logic, calculation, format, missing]
+          description: AI 判定的错误类型，仅 method=ai 时返回
+        errorBookId:
+          type: integer
+          nullable: true
+          description: 答错时写入 main_error_books 的 id；答对或 AI 判定失败时不返回
 
     RegisterRequest:
       type: object

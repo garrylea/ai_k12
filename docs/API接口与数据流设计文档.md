@@ -118,6 +118,7 @@
 | Parent | `/api/parent` | 报告、对话回放、目标、管控、预警 | ParentAdmin Service |
 | Quota | `/api/quota` | AI 套餐额度、消耗查询与订阅状态 | AI-Agent 中枢 |
 | Billing | `/api/billing` | 订单创建、支付、优惠券、续费 | Billing Service |
+| Practice | `/api/practice` | 课堂练习答题判对错（practice 卡片） | Practice Service |
 
 ---
 
@@ -323,6 +324,12 @@
 | GET | `/api/billing/coupons` | 可用优惠券列表 | P2 |
 | POST | `/api/billing/coupons/{code}/apply` | 应用优惠码（下单前校验折扣） | P2 |
 | POST | `/api/billing/subscription/renew` | 续费（创建续费订单） | P2 |
+
+### 4.16 Practice - `/api/practice`
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| POST | `/api/practice/judge` | 课堂练习判对错。学生在 practice 卡片答题后调用，返回对错、判定方法与解析；答错自动入主线错题本（`main_error_books.source='practice'`）。三路由：(1) 题库命中 + 客观题（choice/true_false/fill_blank）-> exact 答案比对；(2) 题库命中主观题（short_answer/proof）或未命中 -> AI JudgmentCapability 判定；(3) 答错 -> 写入 `main_error_books`（未入库的题先经 QuestionStructuringCapability 结构化后插 `questions` 表，结构化失败则 `question_id=NULL` 仅存题面到 `wrong_answer_text`）。AI 判定失败返回 503（`code=5001`，不写错题本）。请求体：`{cardId, lessonId, subjectId, questionText, studentAnswer}`；响应：`{questionId(nullable), isCorrect, method:'exact'|'ai', analysis(nullable), errorType(nullable, enum: logic/calculation/format/missing), errorBookId(nullable)}`。题面来源：`cards.content_metadata.questions[].text`（管线抽取）。 | MVP |
 
 ---
 
@@ -682,6 +689,57 @@ POST /api/ai/report（AI-Agent AnalyticsCapability 生成报告文本）
 家长端 GET /api/parent/students/{id}/reports/{reportId} 展示
 ```
 
+### 6.9 课堂练习判对错
+
+```text
+学生在主线课程浏览到 practice 卡片（card_type='practice'）
+  │
+  ▼
+前端读取 cards.content_metadata.questions[].text 渲染题面
+  │  ├─ content_metadata.needs_fallback=true -> 前端正则兜底切题（LLM 抽题校验失败）
+  │  └─ content_metadata.intro -> 题前说明（可选）
+  │
+  ▼
+学生提交答案 -> POST /api/practice/judge
+  │  请求体：{cardId, lessonId, subjectId, questionText, studentAnswer}
+  │
+  ▼
+Practice Service 计算 contentHash -> questionsRepo.findByContentHash
+  │
+  ├─ 路由 1：题库命中 + 客观题（choice/true_false/fill_blank）
+  │  ▼
+  │  exact 答案比对（options.isCorrect 优先，退化为归一化字符串相等）
+  │  method='exact'，答错 analysis 返回标准答案
+  │
+  └─ 路由 2：题库命中主观题（short_answer/proof）或未命中
+     ▼
+     AI JudgmentCapability.judge（questionType: proof/calculation）
+     ▼
+     ├─ 成功：method='ai'，返回 {isCorrect, analysis, errorType}
+     └─ 失败：HTTP 503 code=5001（不写错题本，前端可重试）
+  │
+  ▼
+答错（!isCorrect）-> 写入主线错题本
+  │  ├─ 题库未命中 -> QuestionStructuringCapability.structure
+  │  │  ├─ quality != poor && content 非空 -> questionsRepo.findOrCreate（含 content_hash 去重）
+  │  │  │  └─ question_id = 新建/已有 question.id
+  │  │  └─ quality == poor || structure 失败 -> question_id = NULL
+  │  ▼
+  │  mainErrorRepo.create({
+  │    student_id, subject_id, question_id,
+  │    source: 'practice',
+  │    source_ref_id: cardId,
+  │    wrong_answer_text: question_id===NULL ? questionText : NULL
+  │  })
+  │  ▼
+  │  返回 errorBookId（孤儿题补偿：若刚创建了 question 但 mainErrorRepo 失败，回滚删除 question）
+  │
+  ▼
+响应返回前端：{questionId, isCorrect, method, analysis, errorType, errorBookId}
+  │  ├─ isCorrect=true -> 前端展示正确反馈，不触发错题清零（practice 错题不影响解锁）
+  │  └─ isCorrect=false -> 前端展示解析，错题进入主线错题本（下次进入新课触发清零检查）
+```
+
 ---
 
 ## 7. API 与前端页面对照表
@@ -880,3 +938,4 @@ POST /api/error-book/items/{errorItemId}/redo
 |---|---|---|
 | v1.0 | 2026-06-26 | 初始版本，覆盖 MVP 核心接口与数据流 |
 | v1.1 | 2026-08-01 | 新增 `POST /api/progress/update` 进度更新接口；更新 P2.2 课程详情左侧栏为数据驱动的 2~3 项结构（错题+学习内容+可选练习）；修复完成课程后进入下一课的 race condition，接口返回 `currentLessonId` 供前端定位下一课 |
+| v1.2 | 2026-08-06 | 新增 `POST /api/practice/judge` 课堂练习判对错接口（MVP）；新增 Practice 服务分组；新增 §6.9 课堂练习判对错数据流；`main_error_books.source` 枚举补 `practice` 值 |
