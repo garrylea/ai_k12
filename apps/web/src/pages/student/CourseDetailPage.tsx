@@ -7,18 +7,17 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, updateProgress, type LessonCard, type LessonCardsData } from '@/services/api';
+import { fetchLessonCards, updateProgress, judgePractice, type LessonCard, type LessonCardsData } from '@/services/api';
+import { BackButton, LogoutButton } from '@/components/base';
+import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
+import { AnswerResultList } from '@/components/business/AnswerResultList';
+import { usePracticeStore } from '@/store/practiceStore';
 
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
 const resolveAsset = (p: string) =>
   /^https?:\/\//.test(p) ? p : `${ASSET_BASE}${p.replace(/^\/+/, '')}`;
 
 // --- Icons ---
-const ArrowLeftIcon = () => (
-  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="15 18 9 12 15 6" />
-  </svg>
-);
 const ChevronLeftIcon = () => (
   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="15 18 9 12 15 6" />
@@ -63,14 +62,6 @@ const LockIcon2 = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="11" width="18" height="11" rx="2" />
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-  </svg>
-);
-
-const LogOutIcon = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-    <polyline points="16 17 21 12 16 7" />
-    <line x1="21" y1="12" x2="9" y2="12" />
   </svg>
 );
 
@@ -132,8 +123,8 @@ function getNodeText(node: React.ReactNode): string {
   return '';
 }
 
-/** 练习题子项模式：(1) (2) ... (10) 等 */
-const EXERCISE_ITEM_RE = /^\([1-9]\d?\)/;
+/** 练习题子项模式：(1) (2) ... (10) 或 1. 2. 等 */
+const EXERCISE_ITEM_RE = /^\(?([1-9]\d?)[\.\)]/;
 /** 题干模式：以：或:结尾 */
 const EXERCISE_STEM_RE = /[：:]$/;
 
@@ -145,6 +136,8 @@ const EXERCISE_STEM_RE = /[：:]$/;
  */
 function preprocessContent(raw: string): string {
   let result = raw;
+  // 0. NFKC 归一：全角括号/数字/上标统一为半角（修 (2） 半全角混排）
+  result = result.normalize('NFKC');
   // 1. 转义行首 N. 防止有序列表
   result = result.replace(/^(\d+)\.\s/gm, '$1\\. ');
   // 1.5 全角括号数字统一为半角，避免（1）和(1)视觉上不对齐
@@ -215,6 +208,10 @@ export default function CourseDetailPage() {
   const [nextLessonId, setNextLessonId] = useState<number | null>(null);
   const [isSubjectCompleted, setIsSubjectCompleted] = useState(false);
   const [countdown, setCountdown] = useState(10);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalStart, setModalStart] = useState(0);
+  const [resultOpen, setResultOpen] = useState(false);
+  const { cardId: sessionCardId, setSession, record, answers, questions: sessionQuestions, reset } = usePracticeStore();
 
   useEffect(() => {
     autoToggleNightMode();
@@ -248,6 +245,12 @@ export default function CourseDetailPage() {
     setCountdown(10);
   }, [lessonId]);
 
+  // 翻页时关闭 modal / 结果列表
+  useEffect(() => {
+    setModalOpen(false);
+    setResultOpen(false);
+  }, [page]);
+
   useEffect(() => {
     if (!data || !subjectId || !lessonId) return;
     const card = data.cards[page];
@@ -270,6 +273,51 @@ export default function CourseDetailPage() {
 
   const total = data?.cards.length ?? 0;
   const card = useMemo(() => data?.cards[page] ?? null, [data, page]);
+
+  // 解析当前 practice 卡的 content_metadata（后端返回为 metadata 字段，已 parse 为对象）
+  const practiceMeta = useMemo(() => {
+    if (card?.cardType !== 'practice' || !card.metadata) return null;
+    const md = card.metadata;
+    if (md.questions?.length) return { intro: md.intro, questions: md.questions as PracticeQuestion[], needsFallback: false };
+    if (md.needs_fallback) return { intro: undefined as string | undefined, questions: [] as PracticeQuestion[], needsFallback: true };
+    return { intro: undefined as string | undefined, questions: [] as PracticeQuestion[], needsFallback: true };
+  }, [card]);
+
+  // needs_fallback 卡：从 content 中用正则提取可点题块
+  const fallbackPractice = useMemo<{ intro: string; questions: PracticeQuestion[] } | null>(() => {
+    if (card?.cardType !== 'practice' || !practiceMeta?.needsFallback) return null;
+    const processed = preprocessContent(card.content);
+    const paragraphs = processed.split('\n\n').map(p => p.trim()).filter(Boolean);
+    const introParts: string[] = [];
+    const qs: PracticeQuestion[] = [];
+    let n = 1;
+    let foundExercise = false;
+    for (const para of paragraphs) {
+      if (EXERCISE_ITEM_RE.test(para)) {
+        qs.push({ n, text: para });
+        n++;
+        foundExercise = true;
+      } else if (!foundExercise) {
+        introParts.push(para);
+      }
+    }
+    if (qs.length === 0) return null;
+    return { intro: introParts.join('\n\n'), questions: qs };
+  }, [card, practiceMeta]);
+
+  // 打开答题 modal：首次打开时初始化 session
+  const handleOpenModal = (index: number) => {
+    if (!card) return;
+    const questions = (practiceMeta && !practiceMeta.needsFallback)
+      ? practiceMeta.questions
+      : (fallbackPractice?.questions ?? []);
+    if (questions.length === 0) return;
+    if (sessionCardId !== card.id) {
+      setSession(card.id, questions);
+    }
+    setModalStart(index);
+    setModalOpen(true);
+  };
 
   const finishLesson = async () => {
     if (!data || !subjectId || !lessonId) return;
@@ -346,13 +394,7 @@ export default function CourseDetailPage() {
           style={{ width: 'var(--learn-sidebar-width)' }}
         >
           <div className="p-6 mt-4 pb-2">
-            <button
-              onClick={() => navigate('/student/star-map', { state: { subjectId } })}
-              className="flex items-center gap-1.5 text-xs font-semibold text-[var(--sidebar-text-secondary)] hover:text-[var(--sidebar-text-primary)] transition-colors mb-3 bg-[var(--bg-subtle)]/50 px-2.5 py-1.5 rounded-full border border-[var(--bg-subtle)] shadow-sm"
-            >
-              <ArrowLeftIcon />
-              <span>返回关卡星图</span>
-            </button>
+            <BackButton to="/student/star-map" label="返回关卡星图" state={{ subjectId }} className="mb-3" />
             <h2 className="text-sm font-medium text-[var(--sidebar-text-muted)] mb-1">今日任务</h2>
             <h1 className="text-xl font-bold tracking-tight text-[var(--sidebar-text-primary)] mb-3">
               {subjectName || '数学'} · {gradeName || '九年级上'}
@@ -423,19 +465,7 @@ export default function CourseDetailPage() {
                   <div className="text-xs text-[var(--sidebar-text-muted)]">专注学习中...</div>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  localStorage.removeItem('token');
-                  localStorage.removeItem('userId');
-                  localStorage.removeItem('username');
-                  localStorage.removeItem('userRole');
-                  navigate('/login');
-                }}
-                className="p-2 text-[var(--sidebar-text-secondary)] hover:text-red-500 hover:bg-white rounded-xl transition-colors"
-                title="退出登录"
-              >
-                <LogOutIcon className="w-4 h-4" />
-              </button>
+              <LogoutButton />
             </div>
           </div>
         </aside>
@@ -527,47 +557,92 @@ export default function CourseDetailPage() {
                         ) : null;
                       })()}
 
-                      {/* Markdown body */}
-                      <div className="learn-prose">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkMath, remarkGfm]}
-                          rehypePlugins={[rehypeKatex]}
-                          components={{
-                            p: ({ children, ...props }) => {
-                              // 1. 图片 + 图注
-                              const fig = extractFigureCaption(children);
-                              if (fig) {
+                      {/* Markdown body - practice 卡有结构化题目时渲染可点题块，否则走 ReactMarkdown */}
+                      {(() => {
+                        const questions = (practiceMeta && !practiceMeta.needsFallback)
+                          ? practiceMeta.questions
+                          : (fallbackPractice?.questions ?? []);
+                        const intro = (practiceMeta && !practiceMeta.needsFallback)
+                          ? practiceMeta.intro
+                          : fallbackPractice?.intro;
+                        const isStructured = card.cardType === 'practice' && questions.length > 0;
+                        if (isStructured) {
+                          return (
+                            <div className="learn-prose space-y-3">
+                              {intro && (
+                                <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                  {intro}
+                                </ReactMarkdown>
+                              )}
+                              {questions.map((q, i) => {
+                                const answered = answers[q.n];
                                 return (
-                                  <div className="figure-caption-wrap">
-                                    {fig.imgEl}
-                                    <span className="figure-caption-text">{fig.caption}</span>
-                                  </div>
+                                  <button
+                                    key={q.n}
+                                    onClick={() => handleOpenModal(i)}
+                                    className="block w-full text-left p-3 rounded-lg border border-[var(--learn-card-border)] hover:bg-[var(--bg-subtle)] transition-colors"
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <div className="flex-1">
+                                        <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                          {q.text}
+                                        </ReactMarkdown>
+                                      </div>
+                                      {answered && (
+                                        <span className={`shrink-0 font-semibold ${answered.isCorrect ? 'text-green-600' : 'text-red-600'}`}>
+                                          {answered.isCorrect ? '✓' : '✗'}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </button>
                                 );
-                              }
-                              // 2. 练习题子项 (1) (2) ...（仅在练习卡片中生效，避免误伤正文步骤编号）
-                              const text = getNodeText(children).trim();
-                              if (card.cardType === 'practice' && EXERCISE_ITEM_RE.test(text)) {
-                                return <p className="exercise-item" {...props}>{children}</p>;
-                              }
-                              // 3. 题干（以 ：或 : 结尾）
-                              if (EXERCISE_STEM_RE.test(text)) {
-                                return <p className="exercise-stem" {...props}>{children}</p>;
-                              }
-                              return <p {...props}>{children}</p>;
-                            },
-                            img: ({ src, alt }) => (
-                              <img
-                                src={src ? resolveAsset(src) : ''}
-                                alt={alt ?? ''}
-                                className="block mx-auto my-4 max-w-full max-h-[60vh] object-contain rounded-lg"
-                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                              />
-                            ),
-                          }}
-                        >
-                          {preprocessContent(card.content)}
-                        </ReactMarkdown>
-                      </div>
+                              })}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="learn-prose">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkMath, remarkGfm]}
+                              rehypePlugins={[rehypeKatex]}
+                              components={{
+                                p: ({ children, ...props }) => {
+                                  // 1. 图片 + 图注
+                                  const fig = extractFigureCaption(children);
+                                  if (fig) {
+                                    return (
+                                      <div className="figure-caption-wrap">
+                                        {fig.imgEl}
+                                        <span className="figure-caption-text">{fig.caption}</span>
+                                      </div>
+                                    );
+                                  }
+                                  // 2. 练习题子项 (1) (2) ...（仅在练习卡片中生效，避免误伤正文步骤编号）
+                                  const text = getNodeText(children).trim();
+                                  if (card.cardType === 'practice' && EXERCISE_ITEM_RE.test(text)) {
+                                    return <p className="exercise-item" {...props}>{children}</p>;
+                                  }
+                                  // 3. 题干（以 ：或 : 结尾）
+                                  if (EXERCISE_STEM_RE.test(text)) {
+                                    return <p className="exercise-stem" {...props}>{children}</p>;
+                                  }
+                                  return <p {...props}>{children}</p>;
+                                },
+                                img: ({ src, alt }) => (
+                                  <img
+                                    src={src ? resolveAsset(src) : ''}
+                                    alt={alt ?? ''}
+                                    className="block mx-auto my-4 max-w-full max-h-[60vh] object-contain rounded-lg"
+                                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                                  />
+                                ),
+                              }}
+                            >
+                              {preprocessContent(card.content)}
+                            </ReactMarkdown>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -732,6 +807,43 @@ export default function CourseDetailPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 答题 modal */}
+      {modalOpen && (() => {
+        const questions = (practiceMeta && !practiceMeta.needsFallback)
+          ? practiceMeta.questions
+          : (fallbackPractice?.questions ?? []);
+        if (questions.length === 0) return null;
+        return (
+          <AnswerModal
+            questions={questions}
+            startIndex={modalStart}
+            onSubmit={async (questionText, studentAnswer) => {
+              const res = await judgePractice({
+                cardId: card.id,
+                lessonId,
+                subjectId,
+                questionText,
+                studentAnswer,
+              });
+              const n = questions.find(q => q.text === questionText)?.n ?? 0;
+              record(n, studentAnswer, res);
+              return res;
+            }}
+            onFinish={() => { setModalOpen(false); setResultOpen(true); }}
+            onClose={() => setModalOpen(false)}
+          />
+        );
+      })()}
+
+      {/* 答题结果列表 */}
+      {resultOpen && (
+        <AnswerResultList
+          questions={sessionQuestions}
+          answers={answers}
+          onRetry={() => { setResultOpen(false); reset(); }}
+        />
+      )}
     </div>
   );
 }

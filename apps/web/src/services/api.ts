@@ -118,10 +118,19 @@ export interface CardImage {
   position?: string;
 }
 
+export interface PracticeQuestionMeta {
+  n: number;
+  text: string;
+}
+
 export interface CardMetadata {
   images?: CardImage[];
   layout_hint?: string;
   override_scroll?: 'allow' | 'disable';
+  /** Practice-specific fields (populated by data-refinery for practice cards) */
+  intro?: string;
+  questions?: PracticeQuestionMeta[];
+  needs_fallback?: boolean;
 }
 
 export interface LessonCard {
