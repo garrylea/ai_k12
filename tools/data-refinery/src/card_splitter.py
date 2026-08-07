@@ -97,7 +97,11 @@ def _is_question_starter(text: str) -> bool:
 
 
 def _split_first_sentence(text: str) -> tuple[str, str]:
-    """按首个句末标点切 [首句, 剩余]；无标点则 [text, '']。"""
+    """按首个句末标点切 [首句, 剩余]；无标点则 [text, '']。
+
+    注意：含分号「；」（_split_long_text 不含），因为补句只需拉一个子句，
+    在分号处切可避免拉入过多内容。
+    """
     m = re.search(r'[。！？；]', text)
     if not m:
         return text, ''

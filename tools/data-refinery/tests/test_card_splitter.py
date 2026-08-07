@@ -100,8 +100,24 @@ def test_question_paragraph_is_atomic_bundle():
 
 
 def test_same_section_fill_pulls_sentence_from_next():
-    # 当前 <300 且下一同节段落 -> 拉句子补；不同节 -> 不补
-    # （补句逻辑在 split_page 的合并循环里，此处验证 _make_bundles 标记同节）
+    # 验证 _make_bundles 为同节段落标记相同 heading
+    # （补句逻辑在 split_page 的合并循环里，见 test_split_page_fill_pulls_first_sentence_from_same_section）
     text = "## 练习\n\n短句一。\n\n短句二，补充内容。"
     bundles = _make_bundles(text, [])
     assert len(bundles) >= 2
+    assert all(b.heading == "练习" for b in bundles)
+
+
+def test_split_page_fill_pulls_first_sentence_from_same_section():
+    # 当前卡 <300 且下一同 heading 非题段落 -> 拉首句补入当前卡
+    heading = "## 练习"
+    para1 = "短句内容。" * 50   # _count_text_chars = 240
+    para2 = "这是补充内容。" * 40  # _count_text_chars = 240, same heading
+    text = f"{heading}\n\n{para1}\n\n{para2}"
+    cards = split_page(Path("page_001.md"), text, [])
+    # heading(48) + para1(240) = 288 < 300 -> fill triggers
+    # para2(240) 不 fits (288+240=528>400) -> 拉 para2 首句 "这是补充内容。"(48)
+    # Card 1 = 288 + 48 = 336; Card 2 = remaining para2 = 240
+    assert len(cards) == 2
+    assert "这是补充内容。" in cards[0].content  # fill pulled first sentence
+    assert cards[0].raw_text_char_count > 288    # more than heading(48)+para1(240)=288
