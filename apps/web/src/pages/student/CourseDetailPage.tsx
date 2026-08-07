@@ -136,8 +136,6 @@ const EXERCISE_STEM_RE = /[：:]$/;
  */
 function preprocessContent(raw: string): string {
   let result = raw;
-  // 0. NFKC 归一：全角括号/数字/上标统一为半角（修 (2） 半全角混排）
-  result = result.normalize('NFKC');
   // 1. 转义行首 N. 防止有序列表
   result = result.replace(/^(\d+)\.\s/gm, '$1\\. ');
   // 1.5 全角括号数字统一为半角，避免（1）和(1)视觉上不对齐
@@ -286,7 +284,9 @@ export default function CourseDetailPage() {
   // needs_fallback 卡：从 content 中用正则提取可点题块
   const fallbackPractice = useMemo<{ intro: string; questions: PracticeQuestion[] } | null>(() => {
     if (card?.cardType !== 'practice' || !practiceMeta?.needsFallback) return null;
-    const processed = preprocessContent(card.content);
+    // NFKC 归一仅用于 practice 兜底正则提取（修 (2） 半全角混排）；
+    // 不在全局 preprocessContent 做，避免影响非练习卡的中文全角标点渲染。
+    const processed = preprocessContent(card.content.normalize('NFKC'));
     const paragraphs = processed.split('\n\n').map(p => p.trim()).filter(Boolean);
     const introParts: string[] = [];
     const qs: PracticeQuestion[] = [];
