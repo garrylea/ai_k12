@@ -8,12 +8,14 @@
 卡片内容已经由程序拆分好，你不需要：
 - 不要合并或拆分卡片
 - 不要改写、润色、删减任何卡片内容
-- 不要在输出中包含 content 字段
+- 不要在输出中包含 content 字段（practice 卡的 questions[].text 是例外，见下）
 - 保持卡片数量与输入一致
 
 【输出格式 -- 必须严格遵守】
 只输出一个 JSON 对象，形如：
 {"page_type":"content","items":[{"card_type":"concept","lesson_id":"26.1 反比例函数","title":"反比例函数概念","textbook_page":"P8"}]}
+练习页示例：
+{"page_type":"practice","items":[{"card_type":"practice","lesson_id":null,"title":null,"textbook_page":"P11","intro":"解下列方程：","questions":[{"n":1,"text":"(1) $5x^{2}-1=4x$"},{"n":2,"text":"(2) $4x^{2}=81$"}]}]}
 - 不使用 ```json``` 代码块
 - items 数量必须等于输入的卡片数量
 - 第一个字符是 {，最后一个字符是 }
@@ -31,6 +33,16 @@
 - "explore": 探究/思考
 - "summary": 小结/总结
 - "reading": 阅读材料/章前综述
+
+【questions / intro -- 仅 practice 卡】
+当 card_type 为 "practice" 时，额外输出：
+- "intro"：题前的说明/要求文字（无则省略该字段）
+- "questions"：数组，枚举该卡每一道可作答的题，每项 {"n": 题号, "text": 题面原文}
+  - n：(N) 中的 N；无编号题用从 1 起的自然序
+  - text：该题完整 markdown，**逐字取自卡片原文**（含 $...$ LaTeX），不改写、不翻译、不补答案、不合并多题
+  - 同一行内多题（无论是否以 ; 分隔）必须拆成多个 questions 项
+  - 非题文字（说明/提示/图注）不得进入 questions
+其余 card_type 不输出 questions/intro 字段。
 
 【lesson_id -- 所属课节】
 - 如果卡片内容属于一个有编号的节标题（如 "26.1 反比例函数"、"26.1.1 反比例函数"），填入该标题原文
