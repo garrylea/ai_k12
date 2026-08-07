@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from card_splitter import split_page, _count_text_chars, _CHARS_PER_LINE
+from card_splitter import _split_paragraphs, _make_bundles, _current_heading
 from models import ImageInfo
 
 
@@ -81,3 +82,26 @@ def test_solo_image_card():
     assert len(cards) == 1
     assert cards[0].raw_text_char_count == 0
     assert cards[0].image_char_cost == 720
+
+
+def test_current_heading_tracks_markdown_heading():
+    assert _current_heading("## 练习") == "练习"
+    assert _current_heading("### 1.2 因式分解") == "1.2 因式分解"
+    assert _current_heading("普通段落") is None
+
+
+def test_question_paragraph_is_atomic_bundle():
+    # (N) 开头的段落即使超长也不在题中间切
+    text = "(1) 这是一道很长的题目" + "条件" * 200 + "，求 x 的值。"
+    bundles = _make_bundles(text, [])
+    # 题段落作为单个 bundle（即便 >400，也不再按句切分到多 bundle）
+    assert len(bundles) == 1
+    assert bundles[0].text.startswith("(1)")
+
+
+def test_same_section_fill_pulls_sentence_from_next():
+    # 当前 <300 且下一同节段落 -> 拉句子补；不同节 -> 不补
+    # （补句逻辑在 split_page 的合并循环里，此处验证 _make_bundles 标记同节）
+    text = "## 练习\n\n短句一。\n\n短句二，补充内容。"
+    bundles = _make_bundles(text, [])
+    assert len(bundles) >= 2

@@ -82,6 +82,28 @@ def _images_in_range(images: list[ImageInfo], start: int, end: int) -> list[Imag
     return [img for img in images if start <= img.position_in_text < end]
 
 
+_HEADING_RE = re.compile(r'^#{1,6}\s+(.+)$')
+
+
+def _current_heading(text: str) -> str | None:
+    """返回 markdown 标题文本（如 '## 练习' -> '练习'），非标题返回 None。"""
+    m = _HEADING_RE.match(text.strip())
+    return m.group(1).strip() if m else None
+
+
+def _is_question_starter(text: str) -> bool:
+    """是否以 (N) 题号开头（半/全角括号兼容）。"""
+    return bool(re.match(r'^[\(（]\s*[1-9]\d?\s*[\)）]', text.strip()))
+
+
+def _split_first_sentence(text: str) -> tuple[str, str]:
+    """按首个句末标点切 [首句, 剩余]；无标点则 [text, '']。"""
+    m = re.search(r'[。！？；]', text)
+    if not m:
+        return text, ''
+    return text[:m.end()], text[m.end():]
+
+
 @dataclass
 class _Bundle:
     """一个不可拆分的最小单元：一段文字 + 属于它的图片。"""
@@ -89,17 +111,29 @@ class _Bundle:
     images: list[ImageInfo]
     text_chars: int
     image_cost: int
+    heading: str | None = None
 
 
 def _make_bundles(text: str, images: list[ImageInfo]) -> list[_Bundle]:
-    """把 Markdown 拆分为 bundle 列表。若段落文字 >400，按句末标点切开。"""
+    """把 Markdown 拆分为 bundle 列表。若段落文字 >400，按句末标点切开。
+
+    例外：(N) 开头的题段落保持原子（不按句切），即便 >400。
+    每个 bundle 标记其所属的最近 markdown 标题 heading，供后续同节补句判断。
+    """
     paragraphs = _split_paragraphs(text)
     bundles: list[_Bundle] = []
+    current_heading: str | None = None
 
     pos = 0
     for para in paragraphs:
         if _is_page_number_header(para):
             continue
+
+        # 更新当前标题（遇到新标题时跟踪）
+        heading = _current_heading(para)
+        if heading is not None:
+            current_heading = heading
+
         para_start = text.index(para, pos) if para in text[pos:] else pos
         para_end = para_start + len(para)
         pos = para_end
@@ -107,7 +141,7 @@ def _make_bundles(text: str, images: list[ImageInfo]) -> list[_Bundle]:
         para_images = _images_in_range(images, para_start, para_end)
         para_text_chars = _count_text_chars(para)
 
-        if para_text_chars > _TEXT_LIMIT:
+        if para_text_chars > _TEXT_LIMIT and not _is_question_starter(para):
             # 按句末标点切开
             sub_texts = _split_long_text(para)
             for sub in sub_texts:
@@ -116,10 +150,10 @@ def _make_bundles(text: str, images: list[ImageInfo]) -> list[_Bundle]:
                 sub_images = _images_in_range(images, sub_start, sub_end)
                 sub_chars = _count_text_chars(sub)
                 sub_cost = sum(img.char_cost for img in sub_images)
-                bundles.append(_Bundle(text=sub, images=sub_images, text_chars=sub_chars, image_cost=sub_cost))
+                bundles.append(_Bundle(text=sub, images=sub_images, text_chars=sub_chars, image_cost=sub_cost, heading=current_heading))
         else:
             img_cost = sum(img.char_cost for img in para_images)
-            bundles.append(_Bundle(text=para, images=para_images, text_chars=para_text_chars, image_cost=img_cost))
+            bundles.append(_Bundle(text=para, images=para_images, text_chars=para_text_chars, image_cost=img_cost, heading=current_heading))
 
     return bundles
 
@@ -240,14 +274,45 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
         current_text_chars = 0
         current_total = 0
 
-    for bundle in remaining_bundles:
+    last_heading: str | None = None
+
+    i = 0
+    while i < len(remaining_bundles):
+        bundle = remaining_bundles[i]
+
         # 尝试直接放入当前卡
         if current_text_chars + bundle.text_chars <= _TEXT_LIMIT and current_total + bundle.text_chars + bundle.image_cost <= _TOTAL_LIMIT:
             current_texts.append(bundle.text)
             current_images.extend(bundle.images)
             current_text_chars += bundle.text_chars
             current_total += bundle.text_chars + bundle.image_cost
+            last_heading = bundle.heading
+            i += 1
             continue
+
+        # 放不下：检查同节补句条件
+        # 当前卡 <300 字且下一 bundle 同标题节且非题段落 -> 拉首句补入当前卡
+        if (0 < current_text_chars < _TEXT_LIMIT * 0.75
+                and last_heading is not None
+                and bundle.heading == last_heading
+                and not _is_question_starter(bundle.text)):
+            first_sent, rest = _split_first_sentence(bundle.text)
+            if rest:
+                first_sent_chars = _count_text_chars(first_sent)
+                if current_text_chars + first_sent_chars <= _TEXT_LIMIT and current_total + first_sent_chars <= _TOTAL_LIMIT:
+                    # 拉首句入当前卡
+                    current_texts.append(first_sent)
+                    current_text_chars += first_sent_chars
+                    current_total += first_sent_chars
+                    # 剩余部分作为新 bundle 替换当前位置，不递增 i
+                    rest_chars = _count_text_chars(rest)
+                    remaining_bundles[i] = _Bundle(
+                        text=rest, images=bundle.images,
+                        text_chars=rest_chars, image_cost=bundle.image_cost,
+                        heading=bundle.heading,
+                    )
+                    _close_card()
+                    continue
 
         # 放不下：先把当前卡封存
         _close_card()
@@ -299,6 +364,9 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
                         current_text_chars = sub_chars
                         current_total = sub_chars + sub_img_cost
                 sub_start = sub_end
+
+        last_heading = bundle.heading
+        i += 1
 
     _close_card()
 
