@@ -53,6 +53,56 @@ def content_hash(content: str | None) -> str:
     return hashlib.sha256(normalize_content(content).encode("utf-8")).hexdigest()
 
 
+# ---------- practice 题面子串校验 ----------
+
+def _normalize_for_match(s: str) -> str:
+    """与 content_hash 同口径的轻归一，用于子串校验（NFKC + 去空白 + lower）。"""
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"\s+", "", s)
+    return s.lower()
+
+
+def question_text_valid(text: str | None, card_content: str) -> bool:
+    """检查 question.text 是否是 card_content 的子串（NFKC 归一后）。
+
+    LLM 摘录的题面应逐字来自卡片正文；若 LLM 改写/幻觉则校验失败。
+    容全半角/空白差异（NFKC + 去空白 + lower 后做子串匹配）。
+    """
+    if not text:
+        return False
+    return _normalize_for_match(text) in _normalize_for_match(card_content)
+
+
+def build_content_metadata(intro: str | None, questions: list[dict] | None,
+                           card_content: str, existing: dict | None) -> dict:
+    """构建 content_metadata，合并 existing（如 images/override_scroll），
+    对 questions 逐条做子串校验，无效则丢弃并置 needs_fallback=True。
+
+    Args:
+        intro: practice 卡题前说明（None 表示不设置）
+        questions: [{n, text}] 列表（None 表示非 practice 卡，不处理）
+        card_content: 卡片正文（用于子串校验）
+        existing: 既有 content_metadata（如 publish 阶段写入的 images）
+
+    Returns:
+        合并后的 content_metadata dict
+    """
+    md = dict(existing or {})
+    if questions is not None:
+        valid_qs = [q for q in questions if question_text_valid(q.get("text", ""), card_content)]
+        if valid_qs:
+            md["questions"] = valid_qs
+            md["needs_fallback"] = False
+        else:
+            md.pop("questions", None)
+            md["needs_fallback"] = True
+    if intro is not None:
+        md["intro"] = intro
+    return md
+
+
 # ---------- rel_path 解析（教材 card） ----------
 
 def parse_book_rel_path(rel: str) -> dict | None:
@@ -616,6 +666,16 @@ class DbLoader:
 
     def _insert_card(self, lesson_id: int, sort_order: int, c: dict):
         cm = c.get("content_metadata")
+        card_content = c.get("content") or ""
+
+        # practice 卡：从 content_metadata 提取 intro/questions 做子串校验
+        # （extract_cli 写入 intro/questions，publish_cli 追加 images 等）
+        if cm and (cm.get("intro") is not None or cm.get("questions") is not None):
+            intro = cm.get("intro")
+            questions = cm.get("questions")
+            existing = {k: v for k, v in cm.items() if k not in ("intro", "questions")}
+            cm = build_content_metadata(intro, questions, card_content, existing)
+
         kp = c.get("knowledge_point_ids") or []
         self._exec(
             "INSERT INTO cards (lesson_id, sort_order, card_type, title, content, "

@@ -1,11 +1,13 @@
-"""db_loader 单元测试：纯函数（subject 归一、rel_path 解析、中文数字、lesson_id 解析、sort_order 重排）。"""
+"""db_loader 单元测试：纯函数（subject 归一、rel_path 解析、中文数字、lesson_id 解析、sort_order 重排、content_metadata 构建）。"""
 import pytest
 
 from db_loader import (
+    build_content_metadata,
     chinese_to_int,
     normalize_subject,
     parse_book_rel_path,
     parse_lesson_id,
+    question_text_valid,
     renumber_sort_order,
 )
 
@@ -89,3 +91,74 @@ class TestRenumberSortOrder:
 
     def test_empty(self):
         assert renumber_sort_order([]) == []
+
+
+class TestQuestionTextValid:
+    def test_substring_match(self):
+        card_content = "(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$ ;"
+        assert question_text_valid("(1) $5x^{2}-1=4x$", card_content) is True
+
+    def test_substring_no_match(self):
+        card_content = "(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$ ;"
+        assert question_text_valid("被改写的题面", card_content) is False
+
+    def test_empty_text(self):
+        assert question_text_valid("", "(1) $5x^{2}-1=4x$") is False
+
+    def test_none_text(self):
+        assert question_text_valid(None, "(1) $5x^{2}-1=4x$") is False
+
+    def test_whitespace_tolerant(self):
+        """全半角/空白差异应被 NFKC 归一后匹配。"""
+        card_content = "(1) 5x² - 1 = 4x"
+        assert question_text_valid("(1) 5x²-1=4x", card_content) is True
+
+
+class TestBuildContentMetadata:
+    def test_merges_and_marks_fallback(self):
+        card_content = "(1) $5x^{2}-1=4x$"
+        qs = [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]
+        md = build_content_metadata(intro="解方程：", questions=qs, card_content=card_content, existing=None)
+        assert md["questions"][0]["n"] == 1
+        assert md.get("needs_fallback") is False
+
+    def test_fallback_on_invalid_questions(self):
+        card_content = "(1) $5x^{2}-1=4x$"
+        # 改写题面 -> 校验失败 -> needs_fallback=True，questions 丢弃
+        md2 = build_content_metadata(
+            intro=None, questions=[{"n": 1, "text": "幻觉题面"}],
+            card_content=card_content, existing=None,
+        )
+        assert md2.get("needs_fallback") is True
+        assert md2.get("questions") in (None, [])
+
+    def test_preserves_existing_metadata(self):
+        """既有 metadata（如 images/override_scroll）不应被破坏。"""
+        card_content = "(1) $5x^{2}-1=4x$"
+        existing = {"images": [{"url": "foo.png"}], "override_scroll": True}
+        qs = [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]
+        md = build_content_metadata(intro="解方程：", questions=qs, card_content=card_content, existing=existing)
+        assert md["images"] == [{"url": "foo.png"}]
+        assert md["override_scroll"] is True
+        assert md["questions"][0]["n"] == 1
+        assert md["intro"] == "解方程："
+
+    def test_none_questions_preserves_existing(self):
+        """非 practice 卡（questions=None）不应改动 questions/needs_fallback。"""
+        existing = {"images": [{"url": "foo.png"}]}
+        md = build_content_metadata(intro=None, questions=None, card_content="x", existing=existing)
+        assert md == {"images": [{"url": "foo.png"}]}
+        assert "needs_fallback" not in md
+        assert "questions" not in md
+
+    def test_partial_valid_questions(self):
+        """部分题面有效 -> 仅保留有效的，needs_fallback=False。"""
+        card_content = "(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$"
+        qs = [
+            {"n": 1, "text": "(1) $5x^{2}-1=4x$"},
+            {"n": 2, "text": "幻觉题面"},
+        ]
+        md = build_content_metadata(intro=None, questions=qs, card_content=card_content, existing=None)
+        assert len(md["questions"]) == 1
+        assert md["questions"][0]["n"] == 1
+        assert md.get("needs_fallback") is False

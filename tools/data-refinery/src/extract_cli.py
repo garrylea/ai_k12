@@ -366,13 +366,25 @@ def main(argv=None):
                             content = content[len(f"{marker}{title}"):].lstrip("\n")
                             break
 
+                # practice 卡：把 intro/questions 放进 content_metadata，
+                # 后续 publish 追加 images，db_loader 做子串校验并落库。
+                content_metadata = None
+                if label.card_type == "practice":
+                    md_init: dict = {}
+                    if label.intro is not None:
+                        md_init["intro"] = label.intro
+                    if label.questions is not None:
+                        md_init["questions"] = [{"n": q.n, "text": q.text} for q in label.questions]
+                    if md_init:
+                        content_metadata = md_init
+
                 items.append(TextbookCard(
                     lesson_id=lesson_id,
                     sort_order=card.sort_order,
                     card_type=label.card_type,
                     title=title,
                     content=content,
-                    content_metadata=None,  # publish 阶段写入
+                    content_metadata=content_metadata,
                     knowledge_point_ids=[],
                     textbook_page=label.textbook_page or card.textbook_page,
                 ))
