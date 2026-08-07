@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek';
 export type Difficulty = 1 | 2 | 3;
@@ -45,7 +45,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry';
 
@@ -429,6 +429,24 @@ export interface GradingRequest {
   rubric?: string;
   maxScore: number;
   studentAnswer: string;
+}
+
+// ========== Judgment Types (对错判定, 非判分) ==========
+
+export interface JudgmentRequest {
+  questionContent: string;
+  standardAnswer: string;
+  reference: string;
+  studentAnswer: string;
+  subject: Subject;
+  questionType: 'proof' | 'calculation';
+}
+
+export interface JudgmentResult {
+  isCorrect: boolean;
+  analysis: string;
+  errorType?: 'logic' | 'calculation' | 'format' | 'missing' | null;
+  reasoning?: string;
 }
 
 // ========== Explanation Types (§4.3.3) ==========

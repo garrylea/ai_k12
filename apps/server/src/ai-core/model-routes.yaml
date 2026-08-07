@@ -91,6 +91,11 @@ routes:
       primary: kimi
       fallback: qwen3.7-max
 
+  judgment:
+    - subject: math
+      primary: qwen3.7-max
+      fallback: kimi
+
   explanation:
     - subject: math
       primary: qwen3.7-max

@@ -68,6 +68,11 @@ export class PromptBuilder {
       if (questionType === 'calculation') return `grading/math-calculation.md`;
       return `grading/${subject}-reading.md`;
     }
+    if (capability === 'judgment') {
+      if (questionType === 'proof') return `judgment/math-proof.md`;
+      if (questionType === 'calculation') return `judgment/math-calculation.md`;
+      return `judgment/math-calculation.md`;
+    }
     if (capability === 'explanation') {
       return mode === 'knowledge_retry' ? `explanation/knowledge-retry.md` : `explanation/error-analysis.md`;
     }
