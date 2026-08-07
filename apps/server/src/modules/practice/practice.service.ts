@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, HttpException } from '@nestjs/common';
 import { QuestionsRepository, MainErrorBooksRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
@@ -37,6 +37,8 @@ export interface JudgeInput {
   studentId: number;
   subjectId: number;
   cardId: number;
+  // TODO: lessonId 当前未用于入库（main_error_books 无 lesson_id 列），
+  // 后续若需按课时统计错题，可在此接入。
   lessonId: number;
   questionText: string;
   studentAnswer: string;
@@ -53,6 +55,8 @@ export interface JudgeOutput {
 
 @Injectable()
 export class PracticeService {
+  private readonly logger = new Logger(PracticeService.name);
+
   constructor(
     private readonly questionsRepo: QuestionsRepository,
     private readonly mainErrorRepo: MainErrorBooksRepository,
@@ -77,18 +81,28 @@ export class PracticeService {
     } else {
       // 路由 2：题库命中 short_answer/proof 或未命中 -> AI 判定
       const questionType = q?.type === 'proof' ? 'proof' : 'calculation';
-      const result = await this.judgment.judge({
-        questionContent: input.questionText,
-        standardAnswer: q?.answer ?? '',
-        reference: q?.explanation ?? '',
-        studentAnswer: input.studentAnswer,
-        subject: 'math',
-        questionType,
-      });
-      isCorrect = result.isCorrect;
+      // spec §11: AI 判定失败 -> 503，不进错题本，前端可区分处理。
+      // 参考 ai.service.ts mapLLMError 的错误风格（code 5001, HTTP 503）。
+      try {
+        const result = await this.judgment.judge({
+          questionContent: input.questionText,
+          standardAnswer: q?.answer ?? '',
+          reference: q?.explanation ?? '',
+          studentAnswer: input.studentAnswer,
+          subject: 'math',
+          questionType,
+        });
+        isCorrect = result.isCorrect;
+        analysis = isCorrect ? null : result.analysis;
+        errorType = result.errorType ?? null;
+      } catch (err) {
+        this.logger.error(`judgment.judge failed: ${err}`);
+        throw new HttpException(
+          { code: 5001, message: '判定失败，请重试' },
+          503,
+        );
+      }
       method = 'ai';
-      analysis = isCorrect ? null : result.analysis;
-      errorType = result.errorType ?? null;
     }
 
     let questionId: number | null = q?.id ?? null;
@@ -96,38 +110,57 @@ export class PracticeService {
 
     // 路由 3：答错 -> 入主线错题本（未入库的题先结构化 + 插题）
     if (!isCorrect) {
+      let questionCreated = false;
       if (!q) {
-        const structured = await this.structuring.structure({
-          rawInput: input.questionText,
-          inputType: 'text',
-          studentId: String(input.studentId),
-          subjectHint: 'math',
-        });
-        if (structured.quality !== 'poor' && structured.content.trim().length > 0) {
-          const created = await this.questionsRepo.findOrCreate({
-            subject_id: input.subjectId,
-            type: structured.type,
-            difficulty: structured.difficulty,
-            content: structured.content,
-            options: structured.options ? JSON.stringify(structured.options) : null,
-            answer: structured.answer,
-            explanation: structured.explanation,
-            source: 'practice',
-            content_hash: computeContentHash(structured.content),
+        // Important #1: structure/findOrCreate 失败不得阻断错题入库 --
+        // catch 里记日志、questionId=null，继续往下执行 mainErrorRepo.create
+        //（与 quality=poor 路径一致：wrong_answer_text 存题面）。
+        try {
+          const structured = await this.structuring.structure({
+            rawInput: input.questionText,
+            inputType: 'text',
+            studentId: String(input.studentId),
+            subjectHint: 'math',
           });
-          questionId = created.id;
-        } else {
+          if (structured.quality !== 'poor' && structured.content.trim().length > 0) {
+            const created = await this.questionsRepo.findOrCreate({
+              subject_id: input.subjectId,
+              type: structured.type,
+              difficulty: structured.difficulty,
+              content: structured.content,
+              options: structured.options ? JSON.stringify(structured.options) : null,
+              answer: structured.answer,
+              explanation: structured.explanation,
+              source: 'practice',
+              content_hash: computeContentHash(structured.content),
+            });
+            questionId = created.id;
+            questionCreated = created.created;
+          } else {
+            questionId = null;
+          }
+        } catch (err) {
+          this.logger.error(`structure/findOrCreate failed, falling back to questionId=null: ${err}`);
           questionId = null;
         }
       }
-      errorBookId = await this.mainErrorRepo.create({
-        student_id: input.studentId,
-        subject_id: input.subjectId,
-        question_id: questionId,
-        source: 'practice',
-        source_ref_id: input.cardId,
-        wrong_answer_text: questionId === null ? input.questionText : null,
-      });
+      // Important #2: 孤儿题补偿 -- mainErrorRepo.create 失败时若刚创建了题，
+      // 删除孤儿题再抛（镜像 ErrorBookService.insertQuestionAndAux）。
+      try {
+        errorBookId = await this.mainErrorRepo.create({
+          student_id: input.studentId,
+          subject_id: input.subjectId,
+          question_id: questionId,
+          source: 'practice',
+          source_ref_id: input.cardId,
+          wrong_answer_text: questionId === null ? input.questionText : null,
+        });
+      } catch (err) {
+        if (questionCreated && questionId !== null) {
+          await this.questionsRepo.deleteById(questionId).catch(() => {});
+        }
+        throw err;
+      }
     }
 
     return { questionId, isCorrect, method, analysis, errorType, errorBookId };
