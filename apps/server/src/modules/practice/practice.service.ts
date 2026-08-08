@@ -2,7 +2,7 @@ import { Injectable, Logger, HttpException } from '@nestjs/common';
 import { QuestionsRepository, MainErrorBooksRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
-import { computeContentHash } from '../error-book/content-hash.util.js';
+import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
 /** 客观题类型集合：命中题库时走 exact 比对，不调 AI。 */

@@ -32,20 +32,6 @@ export interface AiMessageRow extends RowDataPacket {
   deleted_at: Date | null;
 }
 
-export interface AuxErrorBookRow extends RowDataPacket {
-  id: number;
-  student_id: number;
-  subject_id: number;
-  question_id: number | null;
-  level: number;
-  is_cleared: number;
-  source: 'auxiliary' | 'photo';
-  wrong_answer_text: string | null;
-  cleared_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
-}
-
 export interface MainErrorBookRow extends RowDataPacket {
   id: number;
   student_id: number;

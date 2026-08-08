@@ -11,7 +11,6 @@ import { FilesModule } from './modules/files/files.module.js';
 import { ConversationsModule } from './modules/conversations/conversations.module.js';
 import { AIModule } from './modules/ai/ai.module.js';
 import { RefineryModule } from './modules/refinery/refinery.module.js';
-import { ErrorBookModule } from './modules/error-book/error-book.module.js';
 import { PracticeModule } from './modules/practice/practice.module.js';
 
 @Module({
@@ -25,7 +24,6 @@ import { PracticeModule } from './modules/practice/practice.module.js';
     ConversationsModule,
     AIModule,
     RefineryModule,
-    ErrorBookModule,
     PracticeModule,
   ],
   providers: [

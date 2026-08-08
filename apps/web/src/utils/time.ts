@@ -17,3 +17,13 @@ export function relativeTime(iso: string): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+// Strip the trailing " · MM-DD HH:MM" timestamp the backend appends to
+// auto-generated conversation titles (see apps/server ai.service.ts
+// maybeUpdateTitle: `${topic} · ${time}`). The relative time shown beneath
+// each list item already conveys recency, so this suffix is redundant in
+// the UI. Returns '' for null/empty so callers can fall back to a default.
+export function stripTitleDate(title: string | null | undefined): string {
+  if (!title) return '';
+  return title.replace(/\s*[·•]\s*\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\s*$/, '').trim();
+}

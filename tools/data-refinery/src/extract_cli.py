@@ -366,17 +366,12 @@ def main(argv=None):
                             content = content[len(f"{marker}{title}"):].lstrip("\n")
                             break
 
-                # practice 卡：把 intro/questions 放进 content_metadata，
+                # practice 卡：把 groups 放进 content_metadata，
                 # 后续 publish 追加 images，db_loader 做子串校验并落库。
                 content_metadata = None
                 if label.card_type == "practice":
-                    md_init: dict = {}
-                    if label.intro is not None:
-                        md_init["intro"] = label.intro
-                    if label.questions is not None:
-                        md_init["questions"] = [{"n": q.n, "text": q.text} for q in label.questions]
-                    if md_init:
-                        content_metadata = md_init
+                    if label.groups is not None:
+                        content_metadata = {"groups": label.groups}
 
                 items.append(TextbookCard(
                     lesson_id=lesson_id,

@@ -62,10 +62,28 @@ def _extract_page_number(md_path: Path) -> str:
     return ""
 
 
-def _split_paragraphs(text: str) -> list[str]:
-    """按双换行拆分段落，过滤纯空行。"""
-    parts = re.split(r"\n\n+", text)
+# 同行题拆行正则：(N) 前必须是句末标点或分号，排除正文续接如"与(2)类似"
+_INLINE_Q_SPLIT_RE = re.compile(r'[；;]\s*(?=\([1-9]\d?\))|[。！？]\s*(?=\([1-9]\d?\))')
+
+
+def _split_inline_questions(paragraph: str) -> list[str]:
+    """将同一段内的同行题按 (N) 边界拆成独立段。
+
+    正则覆盖 ; 和 。！？后的 (N)，防「与(2)类似」等正文括号误拆。
+    无拆分点时返回原段落（单元素列表）。
+    """
+    parts = _INLINE_Q_SPLIT_RE.split(paragraph)
     return [p.strip() for p in parts if p.strip()]
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """按双换行拆分段落，再对每段做同行题拆行，过滤纯空行。"""
+    parts = re.split(r"\n\n+", text)
+    flat: list[str] = []
+    for p in [p.strip() for p in parts if p.strip()]:
+        inline_parts = _split_inline_questions(p)
+        flat.extend(inline_parts)
+    return flat
 
 
 # 页码标注：如 "3 第二十一章 一元二次方程"，是页眉/页脚残留，非正文内容

@@ -8,6 +8,7 @@ from db_loader import (
     parse_book_rel_path,
     parse_lesson_id,
     question_text_valid,
+    rebuild_practice_content,
     renumber_sort_order,
 )
 
@@ -117,48 +118,131 @@ class TestQuestionTextValid:
 class TestBuildContentMetadata:
     def test_merges_and_marks_fallback(self):
         card_content = "(1) $5x^{2}-1=4x$"
-        qs = [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]
-        md = build_content_metadata(intro="解方程：", questions=qs, card_content=card_content, existing=None)
-        assert md["questions"][0]["n"] == 1
+        groups = [{"intro": "解方程：", "questions": [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]}]
+        md = build_content_metadata(groups=groups, card_content=card_content, existing=None)
+        assert md["groups"][0]["questions"][0]["n"] == 1
         assert md.get("needs_fallback") is False
 
     def test_fallback_on_invalid_questions(self):
         card_content = "(1) $5x^{2}-1=4x$"
-        # 改写题面 -> 校验失败 -> needs_fallback=True，questions 丢弃
-        md2 = build_content_metadata(
-            intro=None, questions=[{"n": 1, "text": "幻觉题面"}],
-            card_content=card_content, existing=None,
-        )
-        assert md2.get("needs_fallback") is True
-        assert md2.get("questions") in (None, [])
+        groups = [{"intro": None, "questions": [{"n": 1, "text": "幻觉题面"}]}]
+        md = build_content_metadata(groups=groups, card_content=card_content, existing=None)
+        assert md.get("needs_fallback") is True
+        assert md.get("groups") in (None, [])
 
     def test_preserves_existing_metadata(self):
-        """既有 metadata（如 images/override_scroll）不应被破坏。"""
         card_content = "(1) $5x^{2}-1=4x$"
         existing = {"images": [{"url": "foo.png"}], "override_scroll": True}
-        qs = [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]
-        md = build_content_metadata(intro="解方程：", questions=qs, card_content=card_content, existing=existing)
+        groups = [{"intro": "解方程：", "questions": [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]}]
+        md = build_content_metadata(groups=groups, card_content=card_content, existing=existing)
         assert md["images"] == [{"url": "foo.png"}]
         assert md["override_scroll"] is True
-        assert md["questions"][0]["n"] == 1
-        assert md["intro"] == "解方程："
+        assert md["groups"][0]["questions"][0]["n"] == 1
+        assert md["groups"][0]["intro"] == "解方程："
 
-    def test_none_questions_preserves_existing(self):
-        """非 practice 卡（questions=None）不应改动 questions/needs_fallback。"""
+    def test_none_groups_preserves_existing(self):
+        """非 practice 卡（groups=None）不应改动 groups/needs_fallback。"""
         existing = {"images": [{"url": "foo.png"}]}
-        md = build_content_metadata(intro=None, questions=None, card_content="x", existing=existing)
+        md = build_content_metadata(groups=None, card_content="x", existing=existing)
         assert md == {"images": [{"url": "foo.png"}]}
         assert "needs_fallback" not in md
-        assert "questions" not in md
+        assert "groups" not in md
 
     def test_partial_valid_questions(self):
         """部分题面有效 -> 仅保留有效的，needs_fallback=False。"""
         card_content = "(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$"
-        qs = [
+        groups = [{"intro": None, "questions": [
             {"n": 1, "text": "(1) $5x^{2}-1=4x$"},
             {"n": 2, "text": "幻觉题面"},
-        ]
-        md = build_content_metadata(intro=None, questions=qs, card_content=card_content, existing=None)
-        assert len(md["questions"]) == 1
-        assert md["questions"][0]["n"] == 1
+        ]}]
+        md = build_content_metadata(groups=groups, card_content=card_content, existing=None)
+        assert len(md["groups"][0]["questions"]) == 1
+        assert md["groups"][0]["questions"][0]["n"] == 1
         assert md.get("needs_fallback") is False
+
+    def test_multi_group_valid(self):
+        """两组都有效 -> 保留两组。"""
+        card_content = "(1) $5x^{2}-1=4x$\n\n(1) 列方程"
+        groups = [
+            {"intro": "解方程：", "questions": [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]},
+            {"intro": "列方程：", "questions": [{"n": 1, "text": "(1) 列方程"}]},
+        ]
+        md = build_content_metadata(groups=groups, card_content=card_content, existing=None)
+        assert len(md["groups"]) == 2
+        assert md.get("needs_fallback") is False
+
+    def test_one_group_invalid(self):
+        """一组无效一组有效 -> 仅保留有效组。"""
+        card_content = "(1) $5x^{2}-1=4x$"
+        groups = [
+            {"intro": "解方程：", "questions": [{"n": 1, "text": "(1) $5x^{2}-1=4x$"}]},
+            {"intro": "列方程：", "questions": [{"n": 1, "text": "幻觉题面"}]},
+        ]
+        md = build_content_metadata(groups=groups, card_content=card_content, existing=None)
+        assert len(md["groups"]) == 1
+        assert md["groups"][0]["intro"] == "解方程："
+        assert md.get("needs_fallback") is False
+
+
+class TestRebuildPracticeContent:
+    def test_single_group_with_intro_and_questions(self):
+        groups = [{
+            "intro": "解下列方程：",
+            "questions": [
+                {"n": 1, "text": "(1) $5x^{2}-1=4x$"},
+                {"n": 2, "text": "(2) $4x^{2}=81$"},
+            ],
+        }]
+        result = rebuild_practice_content(groups)
+        expected = "解下列方程：\n\n(1) $5x^{2}-1=4x$\n\n(2) $4x^{2}=81$"
+        assert result == expected
+
+    def test_single_group_no_intro(self):
+        groups = [{
+            "intro": None,
+            "questions": [
+                {"n": 1, "text": "(1) 计算 $2+3$"},
+                {"n": 2, "text": "(2) 计算 $5-1$"},
+            ],
+        }]
+        result = rebuild_practice_content(groups)
+        assert result == "(1) 计算 $2+3$\n\n(2) 计算 $5-1$"
+
+    def test_empty_questions(self):
+        groups = [{"intro": "题目：", "questions": []}]
+        result = rebuild_practice_content(groups)
+        assert result == "题目："
+
+    def test_empty_groups(self):
+        result = rebuild_practice_content([])
+        assert result == ""
+
+    def test_intro_whitespace_only(self):
+        groups = [{"intro": "   ", "questions": [{"n": 1, "text": "(1) $x=1$"}]}]
+        result = rebuild_practice_content(groups)
+        assert result == "(1) $x=1$"
+
+    def test_preserves_latex(self):
+        groups = [{"intro": None, "questions": [{"n": 1, "text": "(1) $\\frac{1}{2}x^{2}+3x-5=0$"}]}]
+        result = rebuild_practice_content(groups)
+        assert "$\\frac{1}{2}x^{2}+3x-5=0$" in result
+
+    def test_multi_group_rebuild(self):
+        """两组各有 intro+questions，组间用 \\n\\n 分隔。"""
+        groups = [
+            {"intro": "1. 解方程：", "questions": [
+                {"n": 1, "text": "(1) $x^{2}=4$"},
+                {"n": 2, "text": "(2) $y^{2}=9$"},
+            ]},
+            {"intro": "2. 列方程：", "questions": [
+                {"n": 1, "text": "(1) 4个正方形面积之和是25"},
+                {"n": 2, "text": "(2) 矩形长比宽多2"},
+            ]},
+        ]
+        result = rebuild_practice_content(groups)
+        expected = (
+            "1. 解方程：\n\n(1) $x^{2}=4$\n\n(2) $y^{2}=9$"
+            "\n\n"
+            "2. 列方程：\n\n(1) 4个正方形面积之和是25\n\n(2) 矩形长比宽多2"
+        )
+        assert result == expected

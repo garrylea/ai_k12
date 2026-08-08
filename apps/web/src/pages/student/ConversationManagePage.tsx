@@ -8,14 +8,9 @@ import {
   deleteConversation,
   type ConversationItem,
 } from '@/services/api';
-import { relativeTime } from '@/utils/time';
+import { relativeTime, stripTitleDate } from '@/utils/time';
+import { BackButton } from '@/components/base';
 
-const BackIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-    <path d="M19 12H5" />
-    <polyline points="12 19 5 12 12 5" />
-  </svg>
-);
 const SearchIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
     <circle cx="11" cy="11" r="8" />
@@ -93,13 +88,13 @@ export default function ConversationManagePage() {
 
   const filtered = query.trim()
     ? conversations.filter((c) =>
-        (c.title ?? '').toLowerCase().includes(query.trim().toLowerCase()),
+        stripTitleDate(c.title).toLowerCase().includes(query.trim().toLowerCase()),
       )
     : conversations;
 
   const startEdit = (c: ConversationItem) => {
     setEditingId(c.id);
-    setEditTitle(c.title ?? '');
+    setEditTitle(stripTitleDate(c.title));
   };
   const cancelEdit = () => {
     setEditingId(null);
@@ -121,7 +116,7 @@ export default function ConversationManagePage() {
     }
   };
   const handleDelete = async (c: ConversationItem) => {
-    if (!window.confirm(`确定删除会话「${c.title ?? '未命名'}」吗？删除后不可恢复。`)) return;
+    if (!window.confirm(`确定删除会话「${stripTitleDate(c.title) || '未命名'}」吗？删除后不可恢复。`)) return;
     setBusyId(c.id);
     try {
       await deleteConversation(c.id);
@@ -155,12 +150,7 @@ export default function ConversationManagePage() {
       >
         {/* header */}
         <div className="flex items-center gap-3 px-6 py-4 border-b border-[#E5E5E5]">
-          <button
-            onClick={() => navigate('/student/auxiliary')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-[#86868B] hover:bg-[#F9F9FB] hover:text-[#1D1D1F] transition"
-          >
-            <BackIcon /> 返回答疑
-          </button>
+          <BackButton to="/student/auxiliary" label="返回答疑" />
           <h1 className="text-lg font-bold text-[#1D1D1F]">会话管理</h1>
           <span className="ml-auto text-xs text-[#A0A0A5]">共 {conversations.length} 条</span>
         </div>
@@ -240,7 +230,7 @@ export default function ConversationManagePage() {
                         className="flex-1 text-left min-w-0"
                       >
                         <div className="text-sm text-[#1D1D1F] truncate">
-                          {c.title ?? '未命名会话'}
+                          {stripTitleDate(c.title) || '未命名会话'}
                         </div>
                         <div className="text-xs text-[#A0A0A5] mt-0.5">
                           {relativeTime(c.created_at)}

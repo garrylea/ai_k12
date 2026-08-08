@@ -1,8 +1,8 @@
-import { useNavigate } from 'react-router-dom';
 import AuxiliaryLayout from '@/components/business/AuxiliaryLayout';
 import ConversationList from '@/components/business/ConversationList';
 import AuxChatPanel from '@/components/business/AuxChatPanel';
 import AuxInputBar from '@/components/business/AuxInputBar';
+import { BackButton, LogoutButton } from '@/components/base';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import { useChatStore } from '@/store/chatStore';
 import { useAuxChat } from '@/hooks/useAuxChat';
@@ -36,24 +36,7 @@ const UserIcon = () => (
   </svg>
 );
 
-const ExitIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="w-5 h-5"
-  >
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-    <polyline points="16 17 21 12 16 7" />
-    <line x1="21" y1="12" x2="9" y2="12" />
-  </svg>
-);
-
 export default function AuxiliaryHomePage() {
-  const navigate = useNavigate();
   const { currentDialogueId, setCurrentDialogueId } = useAuxiliaryStore();
   const { messages, reset, isStreaming } = useChatStore();
   const { send, stop, isLoadingHistory } = useAuxChat(currentDialogueId ?? 0);
@@ -65,12 +48,11 @@ export default function AuxiliaryHomePage() {
     setCurrentDialogueId(null);
   };
 
-  const handleExit = () => navigate('/student/entry');
-
   const sidebar = (
     <>
-      {/* 顶部：新问题 */}
-      <div className="p-4 border-b border-[#E5E5E5]">
+      {/* 顶部：返回入口 + 新问题 */}
+      <div className="p-4 border-b border-[#E5E5E5] flex flex-col items-start gap-3">
+        <BackButton to="/student/entry" label="返回辅学入口" />
         <button
           onClick={handleNewQuestion}
           className="w-full px-4 py-2.5 rounded-xl bg-[#FF6B00] text-white font-bold flex items-center justify-center gap-2 hover:opacity-90 transition"
@@ -80,7 +62,7 @@ export default function AuxiliaryHomePage() {
       </div>
 
       {/* 中间：历史会话列表 */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden flex flex-col">
         <ConversationList />
       </div>
 
@@ -90,13 +72,7 @@ export default function AuxiliaryHomePage() {
           <UserIcon />
           <span className="text-sm text-[#1D1D1F] truncate">{username}</span>
         </div>
-        <button
-          onClick={handleExit}
-          aria-label="退出答疑"
-          className="p-2 rounded-lg text-[#86868B] hover:bg-[#F9F9FB] hover:text-[#1D1D1F] transition"
-        >
-          <ExitIcon />
-        </button>
+        <LogoutButton onLogout={() => { reset(); setCurrentDialogueId(null); }} />
       </div>
     </>
   );
