@@ -166,6 +166,7 @@ export function updateProgress(data: { subjectId: number; lessonId: number; card
 export interface UploadedFileResult {
   fileId: number;
   url: string;
+  taskId?: number;  // PDF extraction task ID returned by backend for PDF files
 }
 
 export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadedFileResult> {
