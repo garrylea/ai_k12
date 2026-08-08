@@ -25,7 +25,9 @@ function compareAnswer(studentAnswer: string, correctAnswer: string, options: st
     try {
       const opts = JSON.parse(options) as Array<{ label: string; isCorrect?: boolean }>;
       const picked = opts.find(o => normalizeAnswer(o.label) === a);
-      if (picked) return !!picked.isCorrect;
+      // 仅当 options 显式标注 isCorrect 时用它判定；否则退化为与 correctAnswer 标签比对
+      // （题库 choice 题常只存 answer="A" 而 options 无 isCorrect 标记）
+      if (picked && typeof picked.isCorrect === 'boolean') return picked.isCorrect;
     } catch {
       /* fallthrough to string compare */
     }

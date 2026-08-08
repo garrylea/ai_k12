@@ -53,6 +53,26 @@ describe('PracticeService.judge', () => {
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
   });
 
+  it('choice 题 options 无 isCorrect 标记 -> 退化为与 answer 标签比对（答对）', async () => {
+    // 题库 choice 题常只存 answer="A" 而 options 无 isCorrect 标记；
+    // 此前 bug：picked 命中但 isCorrect undefined -> !!undefined=false 误判错。
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({
+          id: 31, type: 'choice', answer: 'A',
+          options: '[{"label":"A","text":"氮气"},{"label":"B","text":"氧气"}]',
+        }),
+        findOrCreate: vi.fn(),
+        deleteById: vi.fn(),
+      },
+    });
+    const svc = new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any);
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '选择题', studentAnswer: 'A' });
+    expect(r.isCorrect).toBe(true);
+    expect(r.method).toBe('exact');
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+  });
+
   it('未命中 -> AI 判定，答错 -> 结构化 + 插题 + 入错题本', async () => {
     const deps = mk({
       judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: false, analysis: '错因', errorType: 'calculation' }) },
