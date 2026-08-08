@@ -27,8 +27,9 @@ export class FilesService {
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.writeFile(dest, file.buffer);
 
+    let fileId: number;
     try {
-      const fileId = await this.filesRepo.create({
+      fileId = await this.filesRepo.create({
         uploader_id: uploaderId,
         uploader_type: 'student',
         url: `/uploads/${key}`,
@@ -36,18 +37,19 @@ export class FilesService {
         size_bytes: file.size,
         source,
       });
-
-      // Auto-start PDF extraction via Refinery
-      let taskId: number | undefined;
-      if (file.mimetype === 'application/pdf') {
-        taskId = await this.refineryService.createTask(fileId, uploaderId, source);
-      }
-
-      return { fileId, url: `/uploads/${key}`, taskId };
     } catch (err) {
       // DB insert failed - clean up the orphaned file on disk
       await fs.unlink(dest).catch(() => {});
       throw err;
     }
+
+    // Auto-start PDF extraction via Refinery (outside the try/catch so
+    // task-creation failures don't delete the uploaded file or its DB row).
+    let taskId: number | undefined;
+    if (file.mimetype === 'application/pdf') {
+      taskId = await this.refineryService.createTask(fileId, uploaderId, source);
+    }
+
+    return { fileId, url: `/uploads/${key}`, taskId };
   }
 }
