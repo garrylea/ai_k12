@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, Logger, ConflictException, OnModuleInit } from '@nestjs/common';
+import { EventEmitter } from 'node:events';
 import * as path from 'node:path';
 import { ExtractTasksRepository } from '../../database/repositories/extract-tasks.repo.js';
 import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
@@ -9,6 +10,9 @@ import { QuestionStructuringCapability } from '../../ai-core/capabilities/questi
 @Injectable()
 export class RefineryService implements OnModuleInit {
   private readonly logger = new Logger(RefineryService.name);
+
+  /** Events emitted: task:{taskId} -> { type: 'done' | 'error', message?: string } */
+  readonly events = new EventEmitter();
 
   constructor(
     private readonly tasksRepo: ExtractTasksRepository,
@@ -81,9 +85,13 @@ export class RefineryService implements OnModuleInit {
         'completed',
         JSON.stringify({ markdown: result.markdown, structured }),
       );
+      // Notify any waiting SSE subscribers
+      this.events.emit(`task:${taskId}`, { type: 'done' });
     } catch (err: any) {
       try {
         await this.tasksRepo.updateStatus(taskId, 'failed', undefined, err.message);
+        // Notify any waiting SSE subscribers
+        this.events.emit(`task:${taskId}`, { type: 'error', message: (err as Error).message });
       } catch (updateErr: any) {
         this.logger.error(`Failed to mark task ${taskId} as failed: ${updateErr.message}`);
       }
