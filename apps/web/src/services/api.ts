@@ -337,6 +337,12 @@ export async function* streamExtraction(
       }
     }
   }
+  // Flush any final partial line + decoder state so we don't silently drop
+  // the last event (e.g. a { type: 'done' } not terminated by \n).
+  buffer += decoder.decode(); // flush decoder state
+  if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
+    try { yield JSON.parse(buffer.trim().slice(6)); } catch { /* skip */ }
+  }
 }
 
 // --- Practice (mainline 课堂练习判对错) ---
