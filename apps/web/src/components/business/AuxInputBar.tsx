@@ -43,7 +43,7 @@ const FILE_ACCEPT = 'image/png,image/jpeg,image/heic,.txt,.md,.pdf';
 function getFileCategory(file: File): 'image' | 'text' | 'pdf' {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type === 'application/pdf') return 'pdf';
-  if (file.type === 'text/plain' || file.name.endsWith('.md') || file.name.endsWith('.txt'))
+  if (file.type === 'text/plain' || file.type === 'text/markdown' || file.name.endsWith('.md') || file.name.endsWith('.txt'))
     return 'text';
   throw new Error('不支持的文件格式');
 }
@@ -145,6 +145,7 @@ export default function AuxInputBar({ onSend, onStop, isStreaming = false }: Pro
         }
       } catch {
         if (requestRef.current !== requestId) return;
+        if (controller.signal.aborted) return;  // unmount or abort
         clearExtractTimeout();
         updateFileState({
           status: 'error',
@@ -241,6 +242,7 @@ export default function AuxInputBar({ onSend, onStop, isStreaming = false }: Pro
         }
       } catch {
         if (requestRef.current !== myId) return;
+        if (controller.signal.aborted) return;  // unmount or new-file supersede
         updateFileState({
           status: 'error',
           fileId: '',
