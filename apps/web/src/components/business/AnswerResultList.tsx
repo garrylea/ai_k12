@@ -11,12 +11,12 @@ interface AnswerRecord {
 
 interface Props {
   questions: PracticeQuestion[];
-  answers: Record<number, AnswerRecord>;
+  answers: Record<string, AnswerRecord>;
   onRetry: () => void;
 }
 
 export function AnswerResultList({ questions, answers, onRetry }: Props) {
-  const [openN, setOpenN] = useState<number | null>(null);
+  const [openN, setOpenN] = useState<string | null>(null);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-[92vw] max-w-2xl max-h-[80vh] overflow-auto bg-[var(--bg-card)] rounded-2xl shadow-xl p-6">

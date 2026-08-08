@@ -7,11 +7,11 @@ interface AnswerRecord extends JudgeResult {
 
 interface PracticeState {
   cardId: number | null;
-  questions: { n: number; text: string }[];
-  answers: Record<number, AnswerRecord>;
+  questions: { n: string; text: string }[];
+  answers: Record<string, AnswerRecord>;
   currentIndex: number;
-  setSession: (cardId: number, questions: { n: number; text: string }[]) => void;
-  record: (n: number, studentAnswer: string, result: JudgeResult) => void;
+  setSession: (cardId: number, questions: { n: string; text: string }[]) => void;
+  record: (n: string, studentAnswer: string, result: JudgeResult) => void;
   reset: () => void;
 }
 

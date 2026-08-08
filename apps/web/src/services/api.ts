@@ -123,13 +123,17 @@ export interface PracticeQuestionMeta {
   text: string;
 }
 
+export interface PracticeGroupMeta {
+  intro?: string;
+  questions: PracticeQuestionMeta[];
+}
+
 export interface CardMetadata {
   images?: CardImage[];
   layout_hint?: string;
   override_scroll?: 'allow' | 'disable';
   /** Practice-specific fields (populated by data-refinery for practice cards) */
-  intro?: string;
-  questions?: PracticeQuestionMeta[];
+  groups?: PracticeGroupMeta[];
   needs_fallback?: boolean;
 }
 

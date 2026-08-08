@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, updateProgress, judgePractice, type LessonCard, type LessonCardsData } from '@/services/api';
+import { fetchLessonCards, updateProgress, judgePractice, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
 import { BackButton, LogoutButton } from '@/components/base';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
@@ -270,12 +270,21 @@ export default function CourseDetailPage() {
   const card = useMemo(() => data?.cards[page] ?? null, [data, page]);
 
   // 解析当前 practice 卡的 content_metadata（后端返回为 metadata 字段，已 parse 为对象）
+  // groups 结构：[{intro, questions:[{n,text}]}]，前端展平为 questions 数组并用 "groupIdx-n" 复合键
   const practiceMeta = useMemo(() => {
     if (card?.cardType !== 'practice' || !card.metadata) return null;
     const md = card.metadata;
-    if (md.questions?.length) return { intro: md.intro, questions: md.questions as PracticeQuestion[], needsFallback: false };
-    if (md.needs_fallback) return { intro: undefined as string | undefined, questions: [] as PracticeQuestion[], needsFallback: true };
-    return { intro: undefined as string | undefined, questions: [] as PracticeQuestion[], needsFallback: true };
+    if (md.groups?.length) {
+      const flatQuestions: PracticeQuestion[] = [];
+      md.groups.forEach((g, gi) => {
+        g.questions.forEach(q => {
+          flatQuestions.push({ n: `${gi}-${q.n}`, text: q.text });
+        });
+      });
+      return { groups: md.groups, questions: flatQuestions, needsFallback: false };
+    }
+    if (md.needs_fallback) return { groups: null as PracticeGroupMeta[] | null, questions: [] as PracticeQuestion[], needsFallback: true };
+    return { groups: null as PracticeGroupMeta[] | null, questions: [] as PracticeQuestion[], needsFallback: true };
   }, [card]);
 
   // needs_fallback 卡：从 content 中用正则提取可点题块
@@ -291,7 +300,7 @@ export default function CourseDetailPage() {
     let foundExercise = false;
     for (const para of paragraphs) {
       if (EXERCISE_ITEM_RE.test(para)) {
-        qs.push({ n, text: para });
+        qs.push({ n: `0-${n}`, text: para });
         n++;
         foundExercise = true;
       } else if (!foundExercise) {
@@ -559,11 +568,58 @@ export default function CourseDetailPage() {
                         const questions = (practiceMeta && !practiceMeta.needsFallback)
                           ? practiceMeta.questions
                           : (fallbackPractice?.questions ?? []);
-                        const intro = (practiceMeta && !practiceMeta.needsFallback)
-                          ? practiceMeta.intro
-                          : fallbackPractice?.intro;
+                        const groups = (practiceMeta && !practiceMeta.needsFallback)
+                          ? practiceMeta.groups
+                          : null;
+                        const fallbackIntro = fallbackPractice?.intro;
                         const isStructured = card.cardType === 'practice' && questions.length > 0;
                         if (isStructured) {
+                          // 多 group：每组渲染自己的 intro + 可点题块
+                          if (groups && groups.length > 1) {
+                            let flatIdx = 0;
+                            return (
+                              <div className="learn-prose space-y-6">
+                                {groups.map((g, gi) => (
+                                  <div key={gi} className="space-y-3">
+                                    {g.intro && (
+                                      <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                        {g.intro}
+                                      </ReactMarkdown>
+                                    )}
+                                    {g.questions.map((q) => {
+                                      const idx = flatIdx++;
+                                      const key = `${gi}-${q.n}`;
+                                      const answered = answers[key];
+                                      return (
+                                        <button
+                                          key={key}
+                                          onClick={() => handleOpenModal(idx)}
+                                          className="block w-full text-left p-3 rounded-lg border border-[var(--learn-card-border)] hover:bg-[var(--bg-subtle)] transition-colors"
+                                        >
+                                          <div className="flex items-start gap-2">
+                                            <div className="flex-1">
+                                              <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                                {q.text}
+                                              </ReactMarkdown>
+                                            </div>
+                                            {answered && (
+                                              <span className={`shrink-0 font-semibold ${answered.isCorrect ? 'text-green-600' : 'text-red-600'}`}>
+                                                {answered.isCorrect ? '✓' : '✗'}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          }
+                          // 单 group 或兜底：intro + 可点题块
+                          const intro = (practiceMeta && !practiceMeta.needsFallback && groups?.[0]?.intro)
+                            ? groups[0].intro
+                            : fallbackIntro;
                           return (
                             <div className="learn-prose space-y-3">
                               {intro && (
@@ -823,7 +879,7 @@ export default function CourseDetailPage() {
                 questionText,
                 studentAnswer,
               });
-              const n = questions.find(q => q.text === questionText)?.n ?? 0;
+              const n = questions.find(q => q.text === questionText)?.n ?? '0-0';
               record(n, studentAnswer, res);
               return res;
             }}

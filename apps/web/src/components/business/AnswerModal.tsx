@@ -7,7 +7,7 @@ import 'katex/dist/katex.min.css';
 import { LatexEditor } from './LatexEditor';
 import { LatexPreview } from './LatexPreview';
 
-export interface PracticeQuestion { n: number; text: string; }
+export interface PracticeQuestion { n: string; text: string; }
 
 interface Props {
   questions: PracticeQuestion[];
