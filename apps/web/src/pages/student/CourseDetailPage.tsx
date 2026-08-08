@@ -582,7 +582,8 @@ export default function CourseDetailPage() {
                                 {groups.map((g, gi) => (
                                   <div key={gi} className="space-y-3">
                                     {g.intro && (
-                                      <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                      <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}
+                                        components={{ p: ({ children }) => <p className="exercise-stem">{children}</p> }}>
                                         {g.intro}
                                       </ReactMarkdown>
                                     )}
@@ -623,7 +624,8 @@ export default function CourseDetailPage() {
                           return (
                             <div className="learn-prose space-y-3">
                               {intro && (
-                                <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}
+                                  components={{ p: ({ children }) => <p className="exercise-stem">{children}</p> }}>
                                   {intro}
                                 </ReactMarkdown>
                               )}
