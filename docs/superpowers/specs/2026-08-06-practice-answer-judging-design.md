@@ -44,6 +44,31 @@
 
 ## 5. 数据管线变更（方案 A）
 
+### 5.0 card_splitter 同行题拆行（正则）
+
+**当前问题**：`card_splitter._split_paragraphs` 只按 `\n\n` 拆段，同一段内 `(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$` 不拆，多道题挤在一行入库。前端 `preprocessContent` step 2.5 在运行时用正则拆，但只覆盖 `;` 分隔案，无 `;` 案（如 `(1) x²=4 (2) y²=9`）拆不开。
+
+**修法**：在 `_split_paragraphs` 后新增 `_split_inline_questions(paragraph)`，对每段按 `(N)` 边界拆成独立行——正则覆盖 `;` 和标点后的 `(N)`，防 `与(2)类似` 误拆。
+
+```python
+# (N) 前必须是句末标点或空格，排除正文续接如"与(2)类似"
+_INLINE_Q_SPLIT_RE = re.compile(r'(?<=[；;])s*(?=\([1-9]\d?\))|(?<=[。！？])s*(?=\([1-9]\d?\))')
+
+def _split_inline_questions(paragraph: str) -> list[str]:
+    parts = _INLINE_Q_SPLIT_RE.split(paragraph)
+    return [p.strip() for p in parts if p.strip()]
+
+def _split_paragraphs(text: str) -> list[str]:
+    parts = re.split(r"\n\n+", text)
+    flat: list[str] = []
+    for p in [p.strip() for p in parts if p.strip()]:
+        inline_parts = _split_inline_questions(p)
+        flat.extend(inline_parts)
+    return flat
+```
+
+正则拆不开的边缘案（无 `;`、LaTeX 挡拆分）由 LLM labeler 输出的 `questions[].text` 做 **content 重组**（兜底，见 §5.2）。
+
 ### 5.1 card_labeler 提示词（`tools/data-refinery/src/prompts/textbook_cards.txt`）
 
 > 遵循 [[incremental-edit-prompt-files]]：对已有提示词做**增量 Edit**，不整体重写。
@@ -74,11 +99,13 @@
 - **模型**：refinery LLM 用 DeepSeek `deepseek-v4-flash`（reasoner；Gemma 26B 质量不足已弃用）。`.env` 需切回 `LLM_MODEL=deepseek-v4-flash`（前置依赖）。DS v4 flash 做结构化题面抽取可靠，几乎不回退。
 - **校验**：`db_loader` 落库前校验每条 `question.text` 是 card content 的子串（容 NFKC/空白差）；不通过则丢弃该条并置 `content_metadata.needs_fallback=true`，前端对该卡走正则兜底。
 
-### 5.2 card_labeler.py / db_loader.py
+### 5.2 card_labeler.py / db_loader.py（含 LLM 兜底拆题）
 
 - `LabelResult` 增加 `intro: str | None` 与 `questions: list[QuestionMarker] | None`；`_parse_json_object` 解析后透传。
-- `db_loader` 写 `cards` 时，把 `intro`+`questions` 序列化为 JSON 写入 `content_metadata`（合并已有 metadata，不覆盖其它键）。
+- **practice 卡 content 重组**（LLM 兜底）：`db_loader` 写 cards 时，对于 practice 卡且 `questions` 不为空，用 `questions[].text` 把卡的 `content` **重组成**每题独立一行（`intro` 在前，每题 text 用 `\n\n` 分隔接在后面）。正则拆不开的边缘案（如无 `;` 同行题、LaTeX 挡拆分）由 LLM 的 `questions` 语义拆分兜底，重组后 DB 里的 content 每题独立成段。
+- 重组后 metadata 保留 `intro`+`questions`（供前端匹配可点题），子串校验（§5.1）在重组前对原文做，重组后 text 与 content 天然匹配。
 - 标注器目前只看 `content[:800]`；**practice 卡改为传完整 content**（去截断）保证题不漏，其余卡维持 800 截断。
+- **模型**：refinery LLM 用 DeepSeek `deepseek-v4-flash`（前置 `.env`）。
 
 ### 5.3 回填脚本
 
@@ -86,7 +113,7 @@
 
 ### 5.4 前端兜底
 
-若某练习卡 `content_metadata.questions` 缺失或 `needs_fallback=true`（旧卡未回填 / 标注失败 / text 校验不过），前端回落到增强正则识别（见 §6.1），保证可用。
+管线已保证每题独立成行（§5.0 + §5.2），前端 `preprocessContent` step 2.5（同行 `(N)` 拆段）**应删除**。若某练习卡 `content_metadata.questions` 缺失或 `needs_fallback=true`（旧卡未回填 / 标注失败 / text 校验不过），前端回落到增强正则识别（见 §6.1），保证可用。
 
 ### 5.5 card_splitter 增强（同节补句 + 题原子性）
 
@@ -102,8 +129,8 @@
 ### 6.1 练习卡结构化渲染（`CourseDetailPage.tsx`）
 
 - **主路径**：从 `card.content_metadata` 取 `{intro?, questions:[{n,text}]}`。渲染 `intro`（markdown，复用渲染栈）+ 逐题把 `question.text` 渲染为**独立可点块**（`button`/`role="button"`），点击 -> 打开 `AnswerModal` 定位该题。
-- 不再依赖 `preprocessContent` 正则拆同行题--`;`-less / 无空格场景已由 LLM 切分（§5.1）解决。
-- **正则兜底**（§5.4）：无 `questions` 或 `needs_fallback` 的卡，用增强 `EXERCISE_ITEM_RE`（兼容 `N.` 编号、无编号题；`preprocessContent` 对 `(N)` 标记做 NFKC 归一修 `(2）` 半全角混排）识别可点段落。
+- 管线已保证 card content 每题独立成行（§5.0 + §5.2），`preprocessContent` step 2.5 已删除。前端不再做运行时拆题。
+- **正则兜底**（§5.4）：无 `questions` 或 `needs_fallback` 的卡，用增强 `EXERCISE_ITEM_RE`（兼容 `N.` 编号、无编号题）识别可点段落。
 - 非题段落（说明/提示/图注）不可点。
 
 ### 6.2 解答窗口 `AnswerModal`（`components/business/`）
@@ -278,12 +305,12 @@
 
 ## 13. 任务分解（实施计划用）
 
-1. 管线：`textbook_cards.txt` 增量改（practice 输出 `intro`+`questions`，`text` 逐字）+ `card_labeler.py` 解析（practice 传完整 content）+ `db_loader.py` 持久化 + `text` 子串校验（失败置 `needs_fallback`）+ 回填脚本 + 单测；**card_splitter 增强**（§5.5：同节补句 + `(N)` 原子 bundle + 标题感知）；前置 `.env` 切回 `deepseek-v4-flash`。
+1. 管线：**card_splitter 新增 `_split_inline_questions`**（§5.0：同行题按 `(N)` 边界拆成独立段）；**db_loader practice 卡 content 重组**（§5.2：用 labeler 输出的 `questions[].text` 重组 content，每题独立成行，LLM 兜底正则拆不开的边缘案）；`textbook_cards.txt` 增量改（practice 输出 `intro`+`questions`，`text` 逐字）+ `card_labeler.py` 解析（practice 传完整 content）+ `text` 子串校验（失败置 `needs_fallback`）+ 回填脚本 + 单测；**card_splitter 增强**（§5.5：同节补句 + `(N)` 原子 bundle + 标题感知）；前置 `.env` 切回 `deepseek-v4-flash`。
 2. 后端-基础设施：`main-error-books.repo.ts`；`content-hash.util.ts` NFKC 对齐 + aux rehash 迁移脚本。
 3. 后端-判定能力：`judgment/math-judge.md` 提示词 + `JudgmentCapability` + `model-routes.yaml` 新增 `judgment` scene + Zod schema + 单测（mock ModelClient）。
 4. 后端-端点：`practice` 模块（controller/service/dto）+ `PracticeService.judge` 三路由 + 单测。
 5. 前端-组件：`LatexEditor`/`LatexPreview`/`SymbolPalette`/`AnswerModal`。
-6. 前端-集成：`CourseDetailPage` 练习卡**结构化渲染**（intro + 可点题块，正则兜底）+ `practiceStore` + 答题列表 + 解析 + `api.ts`。
+6. 前端-集成：**删除 `preprocessContent` step 2.5**（管线已保证每题独立成行）。`CourseDetailPage` 练习卡**结构化渲染**（intro + 可点题块，正则兜底）+ `practiceStore`（key by question.text）+ 答题列表 + 解析 + `api.ts`。
 7. 文档同步：openapi / API 设计文档 / DB 设计文档。
 
 ## 14. 不在本需求范围

@@ -459,3 +459,13 @@ try {
 }
 idList.map(id => id.trim()).filter(Boolean).forEach(id => kpSet.add(id));
 ```
+
+### 9.4 card_splitter 同行题拆行（2026-08-08 待实施）
+
+**问题**：`_split_paragraphs` 只按双换行拆段，`(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$` 不拆，多题挤一行入库。前端 `preprocessContent` step 2.5 在运行时拆，但只覆盖 `;` 案。
+
+**修法**：
+1. card_splitter 加 `_split_inline_questions()`——正则按 `(N)` 边界（前有标点或空格）拆同行题，防 `与(2)类似` 误拆。
+2. db_loader 对 practice 卡用 labeler 的 `questions[].text` 重组 content 为每题独立一行（LLM 兜底正则拆不开的边缘案）。
+3. 前端删除 `preprocessContent` step 2.5（管线已保证）。
+详见 `docs/superpowers/specs/2026-08-06-practice-answer-judging-design.md` §5.0/§5.2/§6.1。
