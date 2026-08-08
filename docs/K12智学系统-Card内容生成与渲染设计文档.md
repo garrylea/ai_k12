@@ -472,3 +472,43 @@ idList.map(id => id.trim()).filter(Boolean).forEach(id => kpSet.add(id));
 实施日期：2026-08-08；card_splitter._split_inline_questions ✅ / db_loader.rebuild_practice_content ✅ / 前端 step 2.5 已删除 ✅
 
 详见 `docs/superpowers/specs/2026-08-06-practice-answer-judging-design.md` §5.0/§5.2/§6.1。
+
+### 9.5 practice 卡 content_metadata 分组结构（2026-08-08 已实施）
+
+**问题**：原扁平结构 `{intro, questions:[{n,text}]}` 无法表达多题干练习卡--两个大题题干被塞进一个 `intro`，且跨大题题号 `n` 冲突（两组都有 1,2,3），前端 `practiceStore.answers` 用 `n` 做 key 会互相覆盖。
+
+**新结构**（groups 数组）：
+```json
+{
+  "groups": [
+    { "intro": "1. 将下列方程化成一般形式：", "questions": [{"n":1,"text":"(1) $5x^2$"}, {"n":2,"text":"(2) $y^2$"}] },
+    { "intro": "2. 根据下列问题列方程：", "questions": [{"n":1,"text":"(1) 4个正方形..."}] }
+  ],
+  "needs_fallback": false
+}
+```
+
+**变更点**：
+1. **labeler prompt**（`textbook_cards.txt`）：practice 卡输出 `groups` 数组，含正反例 + 醒目分组规则
+2. **card_labeler.py**：`LabelResult.groups` 替代扁平 `intro`/`questions`；新增 `_split_groups_if_needed` 程序化兜底
+3. **db_loader.py**：`build_content_metadata(groups, ...)` 逐 group 校验；`rebuild_practice_content(groups)` 重组 content
+4. **前端**：`practiceMeta` 提取 groups 并展平为复合键 `"groupIdx-n"`；多组渲染每组 intro（加粗）+ 可点题块；`practiceStore.answers` 改为 `Record<string, AnswerRecord>`
+5. **迁移脚本** `migrate_flat_to_groups.py`：一次性将旧扁平 metadata 包装为单 group
+
+**程序化分组兜底**（`_split_groups_if_needed`）：
+LLM 可能把多组题塞进一个 group。解析后检测两种场景并按原文位置自动拆分：
+- Case 1（ID=442 模式）：intro 含多个编号大题 `^\d+[.、]` -> 按大题位置拆
+- Case 2（ID=443 模式）：部分 question 在原文中出现在 intro 之前 -> 拆为无 intro 前组 + 有 intro 后组
+
+**端到端验证标准**（以 ID=441/442/443 为基准）：
+1. DB 中 practice 卡 `content` 每题独立成行（`\n\n` 分隔）
+2. `content_metadata.groups` 正确分组（多题干卡有多个 group）
+3. 前端渲染：每个 group 的 intro 加粗显示（`[&>*]:font-bold`），每道题为独立可点 button
+4. 点击题目 -> 打开 AnswerModal -> 提交 -> 对错记录到 `practiceStore`（复合键）
+
+**注意事项**：
+- intro 以 `N.` 开头时 remarkGfm 解析为 `<ol><li>` 而非 `<p>`，CSS 选择器须用 `[&>*]` 而非 `[&>p]`
+- `n` 在 DB metadata 中保持 `number`（组内题号），前端转为复合字符串键 `"groupIdx-n"`
+- 旧数据迁移：`migrate_flat_to_groups.py` 将 `{intro, questions}` 包装为 `{groups: [{intro, questions}]}`（幂等）
+
+详见 `docs/superpowers/specs/2026-08-06-practice-answer-judging-design.md` §5.1/§5.2/§6.1。
