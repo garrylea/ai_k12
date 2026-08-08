@@ -8,6 +8,7 @@ from db_loader import (
     parse_book_rel_path,
     parse_lesson_id,
     question_text_valid,
+    rebuild_practice_content,
     renumber_sort_order,
 )
 
@@ -162,3 +163,49 @@ class TestBuildContentMetadata:
         assert len(md["questions"]) == 1
         assert md["questions"][0]["n"] == 1
         assert md.get("needs_fallback") is False
+
+
+class TestRebuildPracticeContent:
+    def test_with_intro_and_questions(self):
+        result = rebuild_practice_content(
+            intro="解下列方程：",
+            questions=[
+                {"n": 1, "text": "(1) $5x^{2}-1=4x$"},
+                {"n": 2, "text": "(2) $4x^{2}=81$"},
+            ],
+        )
+        expected = "解下列方程：\n\n(1) $5x^{2}-1=4x$\n\n(2) $4x^{2}=81$"
+        assert result == expected
+
+    def test_no_intro(self):
+        result = rebuild_practice_content(
+            intro=None,
+            questions=[
+                {"n": 1, "text": "(1) 计算 $2+3$"},
+                {"n": 2, "text": "(2) 计算 $5-1$"},
+            ],
+        )
+        assert result == "(1) 计算 $2+3$\n\n(2) 计算 $5-1$"
+
+    def test_empty_questions(self):
+        result = rebuild_practice_content(intro="题目：", questions=[])
+        assert result == "题目："
+
+    def test_empty_intro_and_questions(self):
+        result = rebuild_practice_content(intro=None, questions=[])
+        assert result == ""
+
+    def test_intro_whitespace_only(self):
+        result = rebuild_practice_content(
+            intro="   ",
+            questions=[{"n": 1, "text": "(1) $x=1$"}],
+        )
+        assert result == "(1) $x=1$"
+
+    def test_preserves_latex(self):
+        """重组后的 content 保持 LaTeX 原样"""
+        result = rebuild_practice_content(
+            intro=None,
+            questions=[{"n": 1, "text": "(1) $\\frac{1}{2}x^{2}+3x-5=0$"}],
+        )
+        assert "$\\frac{1}{2}x^{2}+3x-5=0$" in result

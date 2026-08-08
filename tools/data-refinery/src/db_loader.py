@@ -103,6 +103,22 @@ def build_content_metadata(intro: str | None, questions: list[dict] | None,
     return md
 
 
+def rebuild_practice_content(intro: str | None, questions: list[dict]) -> str:
+    """用 labeler 输出的 questions[].text 重组 practice 卡的 content。
+
+    intro 在前（若有），每题 text 用 \\n\\n 分隔接在后面。
+    重组后每题独立成段，LLM 语义拆分兜底正则拆不开的边缘案（如无分号同行题）。
+    """
+    parts: list[str] = []
+    if intro and intro.strip():
+        parts.append(intro.strip())
+    for q in questions:
+        text = q.get("text", "")
+        if text.strip():
+            parts.append(text.strip())
+    return "\n\n".join(parts)
+
+
 # ---------- rel_path 解析（教材 card） ----------
 
 def parse_book_rel_path(rel: str) -> dict | None:
@@ -667,6 +683,7 @@ class DbLoader:
     def _insert_card(self, lesson_id: int, sort_order: int, c: dict):
         cm = c.get("content_metadata")
         card_content = c.get("content") or ""
+        card_type = c.get("card_type")
 
         # practice 卡：从 content_metadata 提取 intro/questions 做子串校验
         # （extract_cli 写入 intro/questions，publish_cli 追加 images 等）
@@ -674,14 +691,20 @@ class DbLoader:
             intro = cm.get("intro")
             questions = cm.get("questions")
             existing = {k: v for k, v in cm.items() if k not in ("intro", "questions")}
+            # 子串校验在重组前对原文做（§5.2）
             cm = build_content_metadata(intro, questions, card_content, existing)
+            # practice 卡 content 重组：用已验证的 questions[].text 重建 content
+            # 每题独立成行，LLM 兜底正则拆不开的边缘案
+            validated_qs = cm.get("questions") if cm else None
+            if card_type == "practice" and validated_qs:
+                card_content = rebuild_practice_content(cm.get("intro"), validated_qs)
 
         kp = c.get("knowledge_point_ids") or []
         self._exec(
             "INSERT INTO cards (lesson_id, sort_order, card_type, title, content, "
             "content_metadata, knowledge_point_ids, textbook_page) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (lesson_id, sort_order, c.get("card_type"), c.get("title"), c.get("content"),
+            (lesson_id, sort_order, card_type, c.get("title"), card_content,
              json.dumps(cm, ensure_ascii=False) if cm else None,
              json.dumps(kp, ensure_ascii=False),
              c.get("textbook_page")),
