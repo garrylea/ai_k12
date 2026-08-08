@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import { listAllConversations } from '@/services/api';
+import { relativeTime, stripTitleDate } from '@/utils/time';
 
 export default function ConversationList() {
   const { conversations, setConversations, currentDialogueId, setCurrentDialogueId } = useAuxiliaryStore();
@@ -28,9 +29,11 @@ export default function ConversationList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setConversations]);
 
-  // Sidebar = quick-switch of the 10 most recent. The full list (search /
+  // Sidebar = quick-switch of the 7 most recent. The full list (search /
   // rename / delete) lives on the dedicated 会话管理 page.
-  const visible = conversations.slice(0, 10);
+  const MAX_VISIBLE = 7;
+  const visible = conversations.slice(0, MAX_VISIBLE);
+  const hasMore = conversations.length > MAX_VISIBLE;
 
   return (
     <div className="flex-1 flex flex-col p-4 min-h-0">
@@ -66,16 +69,19 @@ export default function ConversationList() {
                     : 'text-[#86868B] hover:bg-[#F9F9FB] hover:text-[#1D1D1F]'
                 }`}
               >
-                {c.title ?? '未命名会话'}
+                <span className="block truncate">{stripTitleDate(c.title) || '未命名会话'}</span>
+                <span className="block text-xs text-[#A0A0A5] mt-0.5">
+                  {relativeTime(c.created_at)}
+                </span>
               </button>
             ))}
           </div>
-          {conversations.length > 0 && (
+          {hasMore && (
             <button
               onClick={() => navigate('/student/auxiliary/conversations')}
               className="text-sm text-[#FF6B00] mt-2 hover:underline"
             >
-              会话管理
+              全部展开
             </button>
           )}
         </>

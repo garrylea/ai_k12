@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchStarMap, type SectionData, type StarMapData } from '@/services/api';
+import { BackButton } from '@/components/base';
 
 // --- Loading skeleton ---
 function LoadingSkeleton() {
@@ -97,12 +98,6 @@ const LockIcon = () => (
 const CheckIcon = () => (
   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12" />
-  </svg>
-);
-
-const ArrowLeftIcon = () => (
-  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="15 18 9 12 15 6" />
   </svg>
 );
 
@@ -225,13 +220,7 @@ export default function StarMapPage() {
       <div className="max-w-6xl w-full mx-auto flex-1 flex flex-col justify-between">
         {/* Header */}
         <header className="flex items-center gap-4 border-b border-slate-100 pb-5">
-          <button
-            onClick={() => navigate('/student/subjects')}
-            className="p-2.5 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors text-slate-600"
-            title="返回学科选择"
-          >
-            <ArrowLeftIcon />
-          </button>
+          <BackButton to="/student/subjects" />
           <div>
             <div className="text-sm font-semibold tracking-wide text-[var(--brand-500)] uppercase">
               {data.subjectName}

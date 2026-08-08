@@ -411,24 +411,6 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   CONSTRAINT fk_me_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS aux_error_books (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  student_id BIGINT NOT NULL,
-  subject_id BIGINT NOT NULL,
-  question_id BIGINT DEFAULT NULL,
-  level SMALLINT NOT NULL DEFAULT 1,
-  is_cleared TINYINT(1) NOT NULL DEFAULT 0,
-  source VARCHAR(20) NOT NULL DEFAULT 'auxiliary',
-  wrong_answer_text TEXT DEFAULT NULL,
-  cleared_at DATETIME(3) DEFAULT NULL,
-  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  KEY idx_ae_student_subject (student_id, subject_id),
-  CONSTRAINT fk_ae_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
-  CONSTRAINT fk_ae_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
-  CONSTRAINT fk_ae_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS error_redo_logs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   error_book_type VARCHAR(10) NOT NULL,
@@ -746,12 +728,6 @@ SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 DROP TRIGGER IF EXISTS trg_main_error_books_updated_at;
 CREATE TRIGGER trg_main_error_books_updated_at
 BEFORE UPDATE ON main_error_books
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_aux_error_books_updated_at;
-CREATE TRIGGER trg_aux_error_books_updated_at
-BEFORE UPDATE ON aux_error_books
 FOR EACH ROW
 SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 

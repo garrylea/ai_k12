@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { Subject } from '@/types';
 import { fetchSubjects } from '@/services/api';
+import { BackButton } from '@/components/base';
 
 interface SubjectConfig {
   key: Subject;
@@ -64,12 +65,17 @@ export default function SubjectSelectPage() {
       className="min-h-screen flex flex-col items-center justify-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
-      <div className="w-full max-w-4xl px-4 sm:px-8 space-y-12">
-        <h1 className="text-4xl font-extrabold tracking-tight text-[var(--text-primary)]">
-          你好，{username}！
-        </h1>
+      <div className="w-full max-w-4xl px-4 sm:px-8">
+        {/* 返回按钮与问候语作为兄弟元素，参照 StarMapPage header 模式；
+            底边框即分割线（贴近标题、远离下方选科卡片） */}
+        <header className="flex items-center gap-4 border-b border-slate-200/80 pb-5">
+          <BackButton to="/student/entry" />
+          <h1 className="text-4xl font-extrabold tracking-tight text-[var(--text-primary)]">
+            你好，{username}！
+          </h1>
+        </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12">
           {subjects.map((subject) =>
             subject.available ? (
               <button
