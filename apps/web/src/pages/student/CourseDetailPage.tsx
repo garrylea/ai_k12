@@ -582,10 +582,11 @@ export default function CourseDetailPage() {
                                 {groups.map((g, gi) => (
                                   <div key={gi} className="space-y-3">
                                     {g.intro && (
-                                      <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}
-                                        components={{ p: ({ children }) => <p className="exercise-stem">{children}</p> }}>
-                                        {g.intro}
-                                      </ReactMarkdown>
+                                      <div className="[&>p]:font-bold [&>p]:text-[var(--learn-text-primary)]">
+                                        <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                          {g.intro}
+                                        </ReactMarkdown>
+                                      </div>
                                     )}
                                     {g.questions.map((q) => {
                                       const idx = flatIdx++;
@@ -624,10 +625,11 @@ export default function CourseDetailPage() {
                           return (
                             <div className="learn-prose space-y-3">
                               {intro && (
-                                <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}
-                                  components={{ p: ({ children }) => <p className="exercise-stem">{children}</p> }}>
-                                  {intro}
-                                </ReactMarkdown>
+                                <div className="[&>p]:font-bold [&>p]:text-[var(--learn-text-primary)]">
+                                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                                    {intro}
+                                  </ReactMarkdown>
+                                </div>
                               )}
                               {questions.map((q, i) => {
                                 const answered = answers[q.n];
