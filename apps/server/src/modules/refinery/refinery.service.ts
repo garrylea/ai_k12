@@ -83,7 +83,7 @@ export class RefineryService implements OnModuleInit {
       await this.tasksRepo.updateStatus(
         taskId,
         'completed',
-        JSON.stringify({ markdown: result.markdown, structured }),
+        JSON.stringify({ markdown: result.markdown, structured, images: result.images }),
       );
       // Notify any waiting SSE subscribers
       this.events.emit(`task:${taskId}`, { type: 'done' });
