@@ -1,7 +1,7 @@
 """卡片标注器：调用 LLM 对已拆分的卡片进行分类标注。
 
 LLM 只负责标注（page_type / card_type / lesson_id / title / textbook_page /
-intro / questions），不修改卡片正文（practice 卡 questions[].text 为逐字摘录，例外），
+groups），不修改卡片正文（practice 卡 groups[].questions[].text 为逐字摘录，例外），
 不拆分或合并卡片。
 """
 
@@ -16,13 +16,6 @@ from extract import _parse_json_object
 
 
 @dataclass
-class QuestionMarker:
-    """practice 卡的单题标记"""
-    n: int
-    text: str
-
-
-@dataclass
 class LabelResult:
     """LLM 标注产出"""
     page_type: str           # "front_matter" | "chapter_intro" | "content" | "practice"
@@ -30,8 +23,7 @@ class LabelResult:
     lesson_id: str | None    # 章节标题原文，或 null（继承）
     title: str | None        # 卡片标题
     textbook_page: str       # 如 "P8"
-    intro: str | None = None              # 仅 practice 卡：题前说明/要求文字
-    questions: list[QuestionMarker] | None = None  # 仅 practice 卡：可作答的题列表
+    groups: list[dict] | None = None  # 仅 practice 卡：[{"intro": str|None, "questions": [{"n": int, "text": str}]}]
 
 
 @dataclass
@@ -81,32 +73,42 @@ class CardLabeler:
         labels: list[LabelResult] = []
         for idx, item in enumerate(raw_items):
             card_type = str(item.get("card_type", "concept"))
-            raw_qs = item.get("questions")
-            questions = None
-            # 仅 practice 卡解析 questions/intro；非 practice 卡即使 LLM 误返也忽略
-            if card_type == "practice" and raw_qs is not None:
-                questions = []
-                for q in raw_qs:
-                    if not isinstance(q, dict):
+            raw_groups = item.get("groups")
+            groups = None
+            # 仅 practice 卡解析 groups；非 practice 卡即使 LLM 误返也忽略
+            if card_type == "practice" and isinstance(raw_groups, list):
+                groups = []
+                for g in raw_groups:
+                    if not isinstance(g, dict):
                         continue
-                    try:
-                        n = int(q.get("n", 0))
-                        if n < 1:
+                    g_intro = g.get("intro")
+                    if not (isinstance(g_intro, str) and g_intro):
+                        g_intro = None
+                    g_qs = []
+                    for q in g.get("questions") or []:
+                        if not isinstance(q, dict):
                             continue
-                        text = q.get("text")
-                        if not isinstance(text, str) or not text:
+                        try:
+                            n = int(q.get("n", 0))
+                            if n < 1:
+                                continue
+                            text = q.get("text")
+                            if not isinstance(text, str) or not text:
+                                continue
+                            g_qs.append({"n": n, "text": text})
+                        except (TypeError, ValueError):
                             continue
-                        questions.append(QuestionMarker(n=n, text=text))
-                    except (TypeError, ValueError, AttributeError):
-                        continue
+                    if g_qs:
+                        groups.append({"intro": g_intro, "questions": g_qs})
+                if not groups:
+                    groups = None
             labels.append(LabelResult(
                 page_type=page_type,
                 card_type=card_type,
                 lesson_id=item.get("lesson_id"),
                 title=item.get("title"),
                 textbook_page=item.get("textbook_page", page_number),
-                intro=item.get("intro") if card_type == "practice" else None,
-                questions=questions,
+                groups=groups,
             ))
 
         # 确保 labels 数量与 cards 数量一致
