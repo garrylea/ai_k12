@@ -197,7 +197,10 @@ export class TutoringCapability {
 
     // True when an image attachment (with a resolved base64 data URL) is present.
     // Used for multimodal routing and to relax the off-topic safety check.
-    const hasImage = !!(request.attachments && request.attachments.some(a => a.type === 'image' && a.imageUrl));
+    const hasImage = !!(request.attachments && request.attachments.some(a =>
+      (a.type === 'image' && a.imageUrl) ||
+      (a.type === 'file' && a.extractedImages && a.extractedImages.length > 0)
+    ));
 
     // Step 1: Load context (used for safety history, fallback, and the prompt).
     const context = await this.conversationService.loadContext(dialogueId, 3000);
@@ -292,7 +295,13 @@ export class TutoringCapability {
       hasImage,
     });
 
-    // Step 5: Build prompt
+    // Step 5: Build prompt. Augment user message with extracted text from
+    // file attachments so the LLM sees the attachment content inline.
+    let userMessage = request.message;
+    const fileAttachments = request.attachments?.filter(a => a.type === 'file' && a.extractedText) ?? [];
+    for (const fa of fileAttachments) {
+      userMessage += `\n\n---\n附件内容：\n${fa.extractedText}`;
+    }
     const promptResult = await this.promptBuilder.build({
       capability: 'tutoring',
       subject: context.subject,
@@ -302,7 +311,7 @@ export class TutoringCapability {
         cardContent: context.cardContent,
         knowledgePoint: context.currentKnowledgePoint,
         dialogueHistory: context.messages,
-        userMessage: request.message,
+        userMessage,
       },
     });
 
@@ -320,6 +329,11 @@ export class TutoringCapability {
         for (const att of request.attachments) {
           if (att.type === 'image' && att.imageUrl) {
             parts.push({ type: 'image_url', image_url: { url: att.imageUrl } });
+          }
+          if (att.type === 'file' && att.extractedImages && att.extractedImages.length > 0) {
+            for (const imgUrl of att.extractedImages) {
+              parts.push({ type: 'image_url', image_url: { url: imgUrl } });
+            }
           }
         }
         lastUserMsg.content = parts;

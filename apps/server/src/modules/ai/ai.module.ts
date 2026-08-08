@@ -4,13 +4,12 @@ import { AIService } from './ai.service.js';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
-import { ErrorBookModule } from '../error-book/error-book.module.js';
-import { AiDialoguesRepository, AiMessagesRepository, UploadedFilesRepository } from '../../database/repositories/index.js';
+import { AiDialoguesRepository, AiMessagesRepository, ExtractTasksRepository, QuestionsRepository, UploadedFilesRepository } from '../../database/repositories/index.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 
 @Module({
-  imports: [ConversationsModule, ErrorBookModule],
+  imports: [ConversationsModule],
   controllers: [AIController],
   providers: [
     AIService,
@@ -25,6 +24,10 @@ import { SubjectsRepository } from '../../database/repositories/subjects.repo.js
     // subjectId lookup (math subject ID for structured question ingestion).
     UploadedFilesRepository,
     SubjectsRepository,
+    // B1: direct question bank insertion (aux_error_books no longer used).
+    QuestionsRepository,
+    // Task 5: PDF extraction task lookup for file attachments.
+    ExtractTasksRepository,
     {
       provide: TutoringCapability,
       useFactory: (conversationService: ConversationService) =>
