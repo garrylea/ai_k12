@@ -381,17 +381,19 @@ export interface TutoringRequest {
 }
 
 export interface Attachment {
-  type: 'image' | 'formula';
+  type: 'image' | 'file';
   url: string;
-  imageUrl?: string;        // resolved base64 data URL for multimodal LLM input
-  fileId?: string;          // reference to uploaded_files row
-  extractedText?: string;
+  imageUrl?: string;          // base64 data URL for multimodal LLM input (image only)
+  extractedText?: string;     // text content for txt/md/pdf attachments
+  extractedImages?: string[]; // PDF extracted image paths (for routing to multimodal model)
+  fileId?: string;            // reference to uploaded_files row
+  fileName?: string;          // original file name (derived from uploaded_files.url basename)
 }
 
 /** Structured question output from the tutoring model (Task 14a). The model
  *  appends this as a JSON block at the end of its Socratic reply; the backend
- *  extracts it and ingests into questions + aux_error_books. Uses the same
- *  StructuredOption type as StructuredQuestion for choice questions.
+ *  extracts it and ingests into the questions bank (dedup via content_hash).
+ *  Uses the same StructuredOption type as StructuredQuestion for choice questions.
  */
 export interface StructuredQuestionOutput {
   type: 'choice' | 'fill_blank' | 'true_false' | 'short_answer' | 'proof';

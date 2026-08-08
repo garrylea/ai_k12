@@ -1,6 +1,7 @@
 export interface TutorAttachment {
   type: 'image' | 'file';
   fileId: string;
+  taskId?: number;  // PDF extraction task ID (from RefineryService.createTask)
 }
 
 export interface TutorDto {

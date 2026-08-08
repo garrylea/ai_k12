@@ -9,9 +9,10 @@ import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capabili
 import { LLMClientError, InsufficientQuotaError } from '../../ai-core/types.js';
 import type { TutoringRequest, Attachment, StreamEvent, StructuredQuestionOutput } from '../../ai-core/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
-import { ErrorBookService } from '../error-book/error-book.service.js';
+import { ExtractTasksRepository, QuestionsRepository } from '../../database/repositories/index.js';
 import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
+import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { TutorDto } from './dto/tutor.dto.js';
@@ -24,9 +25,10 @@ export class AIService {
   constructor(
     private readonly tutoring: TutoringCapability,
     private readonly conversationsService: ConversationsService,
-    private readonly errorBookService: ErrorBookService,
     private readonly filesRepo: UploadedFilesRepository,
     private readonly subjectsRepo: SubjectsRepository,
+    private readonly questionsRepo: QuestionsRepository,
+    private readonly extractTasksRepo: ExtractTasksRepository,
   ) {}
 
   async tutor(dto: TutorDto, userId: number) {
@@ -131,46 +133,107 @@ export class AIService {
   }
 
   // Task 14a: resolve attachment fileIds to base64 data URLs for multimodal input.
-  // Review #12: only process image attachments; non-image types are skipped.
+  // Task 5: also resolve file attachments (txt/md → text, pdf → MinerU extraction result).
   private async resolveAttachments(dto: TutorDto, userId: number): Promise<Attachment[]> {
     const attachments: Attachment[] = [];
     if (!dto.attachments || dto.attachments.length === 0) return attachments;
 
     const uploadDir = process.env.UPLOAD_DIR ?? './uploads';
     for (const att of dto.attachments) {
-      if (att.type !== 'image') continue;  // #12: skip non-image attachments
       const fileIdNum = Number(att.fileId);
       if (!Number.isFinite(fileIdNum)) {
         throw new BadRequestException({ code: 1001, message: 'attachment.fileId 必须为数字' });
       }
-      // Review #1: ownership check - prevent authorization bypass.
       const fileRow = await this.filesRepo.findByIdAndOwner(fileIdNum, userId);
       if (!fileRow) {
         throw new BadRequestException({ code: 1001, message: '文件不存在或无权访问' });
       }
-      // Review #2: mime type validation - only images can be sent to Qwen-VL.
-      if (!fileRow.mime_type.startsWith('image/')) {
-        throw new BadRequestException({ code: 1001, message: '附件必须是图片' });
+
+      if (att.type === 'image') {
+        if (!fileRow.mime_type.startsWith('image/')) {
+          throw new BadRequestException({ code: 1001, message: '附件必须是图片' });
+        }
+        if (fileRow.size_bytes > this.MAX_IMAGE_BYTES) {
+          throw new BadRequestException({ code: 1001, message: '图片过大（最大 5MB）' });
+        }
+        const storageKey = fileRow.url.replace(/^\/uploads\//, '');
+        const filePath = path.join(uploadDir, storageKey);
+        let base64: string;
+        try {
+          base64 = fs.readFileSync(filePath).toString('base64');
+        } catch {
+          throw new BadRequestException({ code: 1001, message: `文件读取失败: ${att.fileId}` });
+        }
+        const dataUrl = `data:${fileRow.mime_type};base64,${base64}`;
+        attachments.push({
+          type: 'image',
+          url: fileRow.url,
+          imageUrl: dataUrl,
+          fileId: att.fileId,
+          fileName: path.basename(fileRow.url),
+        });
+        continue;
       }
-      // Review #3: size limit - base64 inflates ~33%, cap before readFileSync.
-      if (fileRow.size_bytes > this.MAX_IMAGE_BYTES) {
-        throw new BadRequestException({ code: 1001, message: '图片过大（最大 5MB）' });
+
+      if (att.type === 'file') {
+        const isText = fileRow.mime_type.startsWith('text/') || fileRow.mime_type === 'text/markdown';
+        if (isText) {
+          const storageKey = fileRow.url.replace(/^\/uploads\//, '');
+          const filePath = path.join(uploadDir, storageKey);
+          let content: string;
+          try {
+            content = fs.readFileSync(filePath, 'utf-8');
+          } catch {
+            throw new BadRequestException({ code: 1001, message: `文件读取失败: ${att.fileId}` });
+          }
+          attachments.push({
+            type: 'file',
+            url: fileRow.url,
+            extractedText: content,
+            fileId: att.fileId,
+            fileName: path.basename(fileRow.url),
+          });
+          continue;
+        }
+
+        if (fileRow.mime_type === 'application/pdf') {
+          if (!att.taskId) {
+            throw new BadRequestException({ code: 1001, message: 'PDF 文件缺少 taskId' });
+          }
+          const task = await this.extractTasksRepo.findById(att.taskId);
+          if (!task || task.student_id !== userId) {
+            throw new BadRequestException({ code: 1001, message: 'PDF 提取任务不存在或无权访问' });
+          }
+          if (task.status !== 'completed') {
+            throw new BadRequestException({ code: 1001, message: `PDF 提取尚未完成（当前状态: ${task.status}）` });
+          }
+          if (!task.result) {
+            throw new BadRequestException({ code: 1001, message: 'PDF 提取结果为空' });
+          }
+          let parsedResult: { markdown?: string; images?: string[] };
+          try {
+            parsedResult = JSON.parse(task.result);
+          } catch {
+            throw new BadRequestException({ code: 1001, message: 'PDF 提取结果解析失败' });
+          }
+          if (!parsedResult.markdown) {
+            throw new BadRequestException({ code: 1001, message: 'PDF 提取结果缺少 markdown 内容' });
+          }
+          attachments.push({
+            type: 'file',
+            url: fileRow.url,
+            extractedText: parsedResult.markdown,
+            extractedImages: parsedResult.images,
+            fileId: att.fileId,
+            fileName: path.basename(fileRow.url),
+          });
+          continue;
+        }
+
+        throw new BadRequestException({ code: 1001, message: '不支持的文件类型' });
       }
-      const storageKey = fileRow.url.replace(/^\/uploads\//, '');
-      const filePath = path.join(uploadDir, storageKey);
-      let base64: string;
-      try {
-        base64 = fs.readFileSync(filePath).toString('base64');
-      } catch {
-        throw new BadRequestException({ code: 1001, message: `文件读取失败: ${att.fileId}` });
-      }
-      const dataUrl = `data:${fileRow.mime_type};base64,${base64}`;
-      attachments.push({
-        type: 'image',
-        url: fileRow.url,
-        imageUrl: dataUrl,
-        fileId: att.fileId,
-      });
+
+      throw new BadRequestException({ code: 1001, message: `未知的附件类型: ${(att as any).type}` });
     }
     return attachments;
   }
@@ -188,26 +251,36 @@ export class AIService {
     };
   }
 
-  // Task 14a: ingest a structured question into questions + aux_error_books.
+  // Task 14a / B1: ingest a structured question into the questions bank.
   // Use dto.subjectId or default to the math subject ID (MVP is math-only).
+  // Dedup via content_hash. Quality gate: poor questions are skipped.
   private async ingestStructuredQuestion(
     userId: number,
     dto: TutorDto,
-    attachments: Attachment[],
+    _attachments: Attachment[],
     structuredQuestion: StructuredQuestionOutput,
   ): Promise<void> {
+    // Quality gate: skip LLM-flagged poor-quality questions.
+    if (structuredQuestion.quality !== 'good' || !structuredQuestion.content.trim()) {
+      return;
+    }
     let subjectId = dto.subjectId;
     if (!subjectId) {
       const mathSubject = await this.subjectsRepo.findByCode('math');
-      subjectId = mathSubject?.id ?? 1;  // TODO: hardcode fallback, should not happen if DB seeded
+      subjectId = mathSubject?.id ?? 1;  // TODO: hardcode fallback, refined when multi-subject seed data matures
     }
-    const hasImage = attachments.some(a => a.type === 'image');
-    await this.errorBookService.createAuxFromStructured(
-      userId,
-      subjectId,
-      structuredQuestion,
-      hasImage ? 'photo' : 'auxiliary',
-    ).catch((err) => {
+    const contentHash = computeContentHash(structuredQuestion.content);
+    await this.questionsRepo.findOrCreate({
+      subject_id: subjectId,
+      type: structuredQuestion.type,
+      difficulty: structuredQuestion.difficulty,
+      content: structuredQuestion.content,
+      options: structuredQuestion.options ? JSON.stringify(structuredQuestion.options) : null,
+      answer: structuredQuestion.answer,
+      explanation: structuredQuestion.explanation,
+      source: 'auxiliary',
+      content_hash: contentHash,
+    }).catch((err) => {
       // Ingestion failure should not block the tutoring response.
       this.logger.error('structured question ingestion failed:', err);
     });

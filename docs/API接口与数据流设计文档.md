@@ -88,7 +88,7 @@
 
 ### 2.5 文件上传约定
 
-- 统一走 `POST /api/files/upload`，返回 `{ fileId, url }`
+- 统一走 `POST /api/files/upload`，返回 `{ fileId, url }`（PDF 上传额外返回 `taskId` 供 SSE 监听提取进度）
 - 其他接口通过 `fileId` 或 `url` 引用文件
 - 手写/拍照答案提交时，先上传文件，再在答案接口中传入 `attachmentFileIds`
 
@@ -228,6 +228,7 @@
 |---|---|---|---|
 | POST | `/api/refinery/extract` | 实时提取：图片/PDF → 结构化题目 | MVP |
 | GET | `/api/refinery/tasks/{taskId}` | 查询提取任务状态与结果 | MVP |
+| GET | `/api/refinery/tasks/{taskId}/stream` | SSE 提取进度推送（PDF 上传后自动连接） | MVP |
 | POST | `/api/refinery/batch/jobs` | 创建批量处理任务（离线/管理后台） | P1 |
 | GET | `/api/refinery/batch/jobs/{jobId}` | 批量任务状态 | P1 |
 
@@ -490,6 +491,29 @@ GET /api/assessment/submissions/{sid}/results
       选择知识点 → P3.4 辅线对话
 
 若辅线做题做错 → POST /api/error-book/aux（不影响主线）
+```
+
+### 6.2.1 PDF 上传→提取→SSE 通知时序
+
+```text
+前端 POST /api/files/upload (PDF)
+  │  返回 { fileId, url, taskId }
+  ▼
+后端自动启动 MinerU 提取（异步）
+  │
+  ▼
+前端连接 GET /api/refinery/tasks/{taskId}/stream (SSE)
+  │  事件: data: {"type":"done"} | data: {"type":"error","message":"..."} | data: [DONE]
+  │  超时: 120s
+  ▼
+提取完成 → 前端 POST /api/ai/tutor/stream
+  │  attachments: [{ type: "file", fileId, taskId }]
+  ▼
+后端 AIService.resolveAttachments:
+  │  TXT/MD → readFile UTF-8 string
+  │  PDF → extract_tasks.result.markdown + 图片资源
+  ▼
+文件内容拼入 LLM user message，PDF 图片路由到多模态模型
 ```
 
 ### 6.3 AI 辅导请求处理流
@@ -866,7 +890,8 @@ POST /api/ai/tutor
   "cardId": "card_xxx",
   "message": "这句话我没看懂",
   "attachments": [
-    { "type": "image", "fileId": "file_xxx" }
+    { "type": "image", "fileId": "file_xxx" },
+    { "type": "file", "fileId": "file_yyy", "taskId": 42 }
   ],
   "dialogueId": "dlg_xxx"
 }
