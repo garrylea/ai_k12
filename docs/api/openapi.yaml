@@ -1530,6 +1530,29 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/ExtractTask'
+  /refinery/tasks/{taskId}/stream:
+    get:
+      tags: [Refinery]
+      summary: SSE stream for PDF extraction progress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Events:
+                  - `data: {"type":"done"}` — extraction completed
+                  - `data: {"type":"error","message":"..."}` — extraction failed
+                  - `data: [DONE]` — stream end
 
   # Files
   /files/upload:
@@ -1592,31 +1615,6 @@ paths:
       tags: [ErrorBook]
       summary: 主线错题本
       operationId: listMainErrors
-      parameters:
-        - name: studentId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: 错题列表
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CommonResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ErrorItem'
-  /error-book/students/{studentId}/aux:
-    get:
-      tags: [ErrorBook]
-      summary: 辅线错题本
-      operationId: listAuxErrors
       parameters:
         - name: studentId
           in: path
@@ -1789,29 +1787,6 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/RedoResult'
-  /error-book/aux:
-    post:
-      tags: [ErrorBook]
-      summary: 创建辅线错题
-      operationId: createAuxError
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateAuxErrorRequest'
-      responses:
-        '200':
-          description: 创建成功
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CommonResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/ErrorItem'
   /error-book/students/{studentId}/stats:
     get:
       tags: [ErrorBook]
@@ -3178,8 +3153,12 @@ components:
             properties:
               type:
                 type: string
+                enum: [image, file]
               fileId:
                 type: string
+              taskId:
+                type: integer
+                description: PDF 提取任务 ID（type=file 且为 PDF 时传入）
         dialogueId:
           type: string
       required: [studentId, mode, message]
@@ -3359,6 +3338,9 @@ components:
           type: string
         size:
           type: integer
+        taskId:
+          type: integer
+          description: PDF 文件上传后自动触发的提取任务 ID（非 PDF 文件不返回此字段）
 
     ErrorItem:
       type: object
@@ -3520,8 +3502,12 @@ components:
             properties:
               type:
                 type: string
+                enum: [image, file]
               fileId:
                 type: string
+              taskId:
+                type: integer
+                description: PDF 提取任务 ID（type=file 且为 PDF 时传入）
 
     Reward:
       type: object

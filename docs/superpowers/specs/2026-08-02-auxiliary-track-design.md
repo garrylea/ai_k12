@@ -159,8 +159,8 @@ AppModule
 |---|---|
 | `ai_dialogues` | 会话头；`track='auxiliary'`，`card_id` 为空，`knowledge_point_id` 可选，`title`、`consecutive_fail_count`、`status`。 |
 | `ai_messages` | 所有用户/助手消息；含 `attachments` JSON、token 统计、`model`、`response_time_ms`、`safety_flag`。 |
-| `aux_error_books` | 辅线错题本；`source` ∈ (`auxiliary`, `photo`)，`level` L1-L5，`is_cleared`。 |
 | `questions` | 题库；`content_hash` 用于去重，`source='auxiliary'` 标记辅线入库题。 |
+| ~~`aux_error_books`~~ | **已移除（2026-08-07）**。辅学系统不需要专门错题本；历史对话记录（`ai_dialogues`+`ai_messages`）起"回看做过的题"的作用。主线错题本 `main_error_books` 独立保留。 |
 | `question_knowledge_points` | 题目与知识点的 M:N 映射。 |
 | `extract_tasks` | 实时 OCR/提取任务；`status` ∈ (`pending`, `processing`, `completed`, `failed`)，`result` JSON。 |
 | `uploaded_files` | 上传文件元数据；`source` ∈ (`auxiliary`, `ocr`, `answer`, `avatar`)。 |
@@ -409,41 +409,45 @@ Prompt：`apps/server/src/ai-core/prompts/structuring/question.md`（新建）�
 
 ### 7.1 完整流程
 
+支持文件类型：PNG、JPEG、HEIC 图片，TXT/MD 文本文件，PDF 文档。图片和文本文件直接作为附件传入 AI 对话；PDF 上传后自动触发 MinerU 提取。
+
 ```text
-学生上传图片/PDF
+学生上传图片/文件（粘贴/拖拽/点+按钮）
   │
-  ▼
-POST /api/files/upload → uploaded_files 记录 + 存储
+  ├─ 图片 (PNG/JPEG/HEIC) / 文本 (TXT/MD)
+  │    ▼
+  │   直接作为附件传入 POST /api/ai/tutor/stream
   │
-  ▼
-POST /api/refinery/extract { fileId, source: 'auxiliary' }
-  │
-  ▼
-RefineryService 创建 extract_tasks (status=pending)
-  │
-  ▼
-MinerUService 启动 mineru-open-api CLI
-  │
-  ▼
-extract_tasks status=processing
-  │
-  ▼
-CLI 完成 → Markdown + 图片资源
-  │
-  ▼
-MinerUService 更新 extract_tasks status=completed, result={markdown}
-  │
-  ▼
-前端轮询 GET /api/refinery/tasks/:taskId
-  │
-  ▼
-状态 completed → 学生预览/编辑提取内容
-  │
-  ▼
-学生确认 → POST /api/error-book/aux
-  │
-  ▼
-QuestionStructuringCapability → 去重 → questions + aux_error_books
+  └─ PDF
+       ▼
+      POST /api/files/upload → uploaded_files 记录 + 存储
+       │  响应: { fileId, url, taskId }
+       ▼
+      FilesService 自动创建 extract_tasks (status=pending)
+       ▼
+      MinerUService 启动 mineru-open-api CLI
+       │
+       ▼
+      extract_tasks status=processing
+       │
+       ▼
+      CLI 完成 → Markdown + 图片资源
+       │
+       ▼
+      MinerUService 更新 extract_tasks status=completed, result={markdown}
+       │
+       ▼
+      前端 SSE 监听 GET /api/refinery/tasks/{taskId}/stream
+       │  data: {"type":"done"} 或 data: {"type":"error","message":"..."}
+       ▼
+      状态 completed → 前端 POST /api/ai/tutor/stream
+       │  attachments: [{ type: "file", fileId, taskId }]
+       │
+       ▼
+      AIService.resolveAttachments 读取 MinerU 结果
+       │  TXT/MD → UTF-8 字符串；PDF → extract_tasks.result.markdown
+       ▼
+      拼入 LLM 输入，PDF 图片自动路由到多模态模型
 ```
 
 ### 7.2 任务队列与轮询
@@ -468,10 +472,12 @@ QuestionStructuringCapability → 去重 → questions + aux_error_books
 
 ### 8.1 触发条件
 
-1. **聊天中具体题目**：AI 在苏格拉底辅导中识别到学生消息是一道「有题干需作答」的具体题目（非纯概念讨论）。
-2. **拍照/输入答疑流程**：MinerU 提取 + 学生确认后。
+1. **聊天中具体题目**：辅导 LLM 在回复中内联输出结构化 JSON 块（`TutoringCapability.parseContent` 提取），由 `AIService` 直接写入 `questions` 题库（`content_hash` 去重）。**非具体题目（纯概念讨论、打招呼、多题澄清回复）不输出 JSON，不入库。**
+2. **拍照/输入答疑流程**：MinerU 提取 + 学生确认后（P3.3，当前前端为 Placeholder）。此路保留但未实现 UI。
 
-> 注：PRD §6.2 / §7.10 要求「每一道具体题目自动入库并进入辅线错题本，无需判错、无需确认」。实现上仍需在聊天流中增加「是否具体题目」的启发式判断（可由 `QuestionStructuringCapability` 的 `quality` 字段输出）。
+**多题澄清**（2026-08-07）：图文多题且未指明时，LLM 先编号转录各题并问"想先看哪道？一次只能选一道哟"，**强制单选**；学生说"全部"则温和拒绝。指明单题后正常辅导+入库。澄清过程不输出 JSON，不入库。
+
+> 注：`aux_error_books` 已移除（2026-08-07）。入库仅写 `questions` 题库。对话历史即起错题本作用。
 
 ### 8.2 归一化与 content_hash
 
@@ -527,12 +533,11 @@ function computeContentHash(content: string): string {
 - 服务层解析为 `knowledge_points.id`；未解析成功则标记未绑定，待人工/P1 处理。
 - 写入 `question_knowledge_points`，`role='primary'`。
 
-### 8.6 辅线错题本写入
+### 8.6 题库写入
 
-- 每道结构化具体题目自动进入 `aux_error_books`。
-- `source='auxiliary'`（文本）或 `'photo'`（图片）。
-- `level=1`，`is_cleared=0`。
-- 不影响主线 `clear-status`。
+- 每道结构化具体题目经 `content_hash` 去重后写入 `questions`（`source='auxiliary'`）。
+- 质量门控：`quality==='poor'` 时跳过，不写入 `questions`。
+- ~~无 `aux_error_books` 关联~~（表已移除，2026-08-07）。
 
 ---
 
@@ -555,7 +560,7 @@ function computeContentHash(content: string): string {
 - **左侧边栏**：历史答疑会话列表（默认显示最近 10 条，超出隐藏，点击「展开」查看全部），底部「辅线错题本」入口（紫色）。
 - **右侧主区**：当前聊天窗口或空状态；顶部提示带「答疑轨 · 限 K12 学科」。
 - **顶部右上**：「退出答疑」（返回 `/student/entry`，当前会话自动保存为历史）、「下一个问题」（结束当前会话并新建会话）。
-- **底部输入栏**：文字 / 公式编辑器 / 拍照 / 手写 四种输入入口。
+- **底部输入栏**（`AuxInputBar`）：文字 / 公式编辑器 / 文件上传（点「+」按钮选文件，支持 PNG/JPG/HEIC/TXT/MD/PDF）/ 手写 四种输入入口。PDF 上传后自动触发 MinerU 提取，通过 SSE（`GET /api/refinery/tasks/{taskId}/stream`）通知前端提取完成，随后以 `type: "file"` 附件传入 AI 对话。
 
 组件拆分：
 - `AuxiliaryLayout`（响应式左右分栏）
@@ -715,7 +720,7 @@ WebSocket 通道：`wss://host/ws/ai/{dialogueId}`。
 
 1. **MinerU 部署**：生产环境 Node.js 运行时是否已安装 `mineru-open-api` CLI？若否，需容器镜像更新或 sidecar 方案。
 2. **第三方 OCR 回退**：P1 是否必须引入 Mathpix / 讯飞作为 MinerU 失败时的回退？
-3. **聊天中具体题目触发**：是否每次学生消息都调用 `QuestionStructuringCapability` 做检测，还是仅当消息长度/格式符合题目特征时再调用？直接影响成本和延迟。
+3. **聊天中具体题目触发** ✅ 已结案（2026-08-07）。检测内联在辅导 LLM（不单独调 `QuestionStructuringCapability`）：辅导 prompt 末尾的"结构化题目输出"指令让 LLM 在正常辅导回复中顺带输出 JSON 块，`TutoringCapability.parseContent` 提取+剥离。多题场景触发澄清（force-single），不批量入库。与 2026-07-24 Task 14a 实现一致。
 4. **辅线错题重做评分**：MVP 是否允许学生自确认「做对了」即清零，还是必须接入 AI 批改？
 5. **LaTeX 公式归一**：`content_hash` 对公式的归一策略需精确到何种程度，以避免假阴性/假阳性？
 6. **额度消耗**：辅线聊天是否 consume 与主线相同 family 共享 AI 额度？
@@ -738,9 +743,23 @@ WebSocket 通道：`wss://host/ws/ai/{dialogueId}`。
 | 独立 `aux_error_books` Repository | 保证双轨物理隔离，杜绝影响主线解锁。 |
 | WebSocket 主路径 + SSE 降级 | 最佳流式体验，同时与 API 文档 §5.4 保持一致。 |
 | 紫色辅线主题 | UX-UI 强制要求，与主线橘红清晰区隔。 |
+| 多题澄清：force-single | 非逐题串行。图文多题未指明 → LLM 先问"哪道"、"全部"被拒（"一次只能选一道哟"）。逐题串行会导致 per-dialogue `consecutive_fail_count` 跨题污染（Q1 失败 3 次后 Q2 立刻误触发 fallback），且违背苏格拉底单焦点原则。force-single 零代码改动（仅 prompt），一道一道入库。 |
+| 移除 aux_error_books | 辅学系统不需要专门错题本。历史对话记录（`ConversationList` + 对话详情）已起"回看做过的题"的作用。入库仅写 `questions` 题库（答案/解析充实共享题库）。redo/clear 随之去掉。"无需判错、无需确认"（PRD §6.2）从一开始就意味着错题本不是真正的"错"题本。主线错题本（`main_error_books`）独立保留，服从闯关门控。 |
 
 ---
 
 ## 15. 待后续接入的 superpowers 流程
 
 本文档经用户 review 并批准后，下一步调用 `superpowers:writing-plans` skill，生成可执行的实施计划（任务拆分、文件级变更清单、测试与验收标准）。
+
+---
+
+## 16. Change Log
+
+### 2026-08-08 多文件上传
+
+- 文件上传通道扩展：支持 PNG/JPG/HEIC/TXT/MD/PDF
+- PDF 自动提取：上传后连接 MinerU → SSE 通知 → markdown 发给 LLM
+- 提取的图片自动路由到多模态模型
+- AuxInputBar: 统一 FileState 状态机、+ 按钮选文件、文件预览区、发送/停止 SVG 图标
+- 新增端点: `GET /api/refinery/tasks/{taskId}/stream` (SSE)
