@@ -125,20 +125,20 @@ def test_split_page_fill_pulls_first_sentence_from_same_section():
 
 class TestSplitInlineQuestions:
     def test_semicolon_separated(self):
-        """分号分隔的同行题拆为多段"""
+        """分号分隔的同行题拆为多段（分隔符被消费，不留尾随 ;）"""
         para = "(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$"
         result = _split_inline_questions(para)
         assert len(result) == 2
-        assert result[0].startswith("(1)")
-        assert result[1].startswith("(2)")
+        assert result[0] == "(1) $5x^{2}-1=4x$"
+        assert result[1] == "(2) $4x^{2}=81$"
 
     def test_period_separated(self):
-        """句号分隔的同行题拆为多段"""
+        """句号分隔的同行题拆为多段（分隔符被消费，不留尾随 。）"""
         para = "(1) 解方程 $x^{2}=4$。(2) 求 $y$ 的值。"
         result = _split_inline_questions(para)
         assert len(result) == 2
-        assert "(1)" in result[0]
-        assert "(2)" in result[1]
+        assert result[0] == "(1) 解方程 $x^{2}=4$"
+        assert result[1] == "(2) 求 $y$ 的值。"
 
     def test_no_split_on_text_ref(self):
         """正文引用 (2) 不误拆，如「与(2)类似」"""
@@ -162,14 +162,43 @@ class TestSplitInlineQuestions:
         assert result[0] == para
 
     def test_chinese_semicolon_separated(self):
-        """中文分号；分隔同行题"""
+        """中文分号；分隔同行题（分隔符被消费，不留尾随 ；）"""
         para = "(1) $x^{2}=9$；(2) $y^{2}=16$"
         result = _split_inline_questions(para)
         assert len(result) == 2
+        assert result[0] == "(1) $x^{2}=9$"
+        assert result[1] == "(2) $y^{2}=16$"
+
+    def test_triple_question_semicolon_separated(self):
+        """三个分号分隔的同行题拆为三段"""
+        para = "(1) $x^{2}=4$ ; (2) $y^{2}=9$ ; (3) $z^{2}=16$"
+        result = _split_inline_questions(para)
+        assert len(result) == 3
         assert "(1)" in result[0]
         assert "(2)" in result[1]
+        assert "(3)" in result[2]
 
-    def test_mixed_inline_and_newline_already_split(self):
-        """已换行分隔的题保持独立"""
+    def test_dollar_dollar_math_blocks_with_semicolon(self):
+        """$$ 数学块间分号分隔的同行题"""
+        para = "(1) $$x^{2}=4$$ ; (2) $$y^{2}=9$$"
+        result = _split_inline_questions(para)
+        assert len(result) == 2
+        assert result[0] == "(1) $$x^{2}=4$$"
+        assert result[1] == "(2) $$y^{2}=9$$"
+
+    def test_single_isolated_question_no_split(self):
+        """单个孤立题号无拆分点原样返回"""
         result = _split_inline_questions("(1) $x^{2}=9$")
         assert len(result) == 1
+        assert result[0] == "(1) $x^{2}=9$"
+
+
+def test_split_paragraphs_with_inline_questions():
+    """_split_paragraphs 组合双换行拆段 + 同行题拆行"""
+    text = "解下列方程：\n\n(1) $x^{2}=4$ ; (2) $y^{2}=9$\n\n(3) $z^{2}=16$"
+    result = _split_paragraphs(text)
+    assert len(result) == 4  # intro + (1) + (2) + (3)
+    assert result[0] == "解下列方程："
+    assert "(1)" in result[1]
+    assert "(2)" in result[2]
+    assert "(3)" in result[3]

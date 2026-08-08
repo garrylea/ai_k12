@@ -63,7 +63,7 @@ def _extract_page_number(md_path: Path) -> str:
 
 
 # 同行题拆行正则：(N) 前必须是句末标点或分号，排除正文续接如"与(2)类似"
-_INLINE_Q_SPLIT_RE = re.compile(r'(?<=[；;])\s*(?=\([1-9]\d?\))|(?<=[。！？])\s*(?=\([1-9]\d?\))')
+_INLINE_Q_SPLIT_RE = re.compile(r'[；;]\s*(?=\([1-9]\d?\))|[。！？]\s*(?=\([1-9]\d?\))')
 
 
 def _split_inline_questions(paragraph: str) -> list[str]:
