@@ -1,4 +1,4 @@
-from card_labeler import CardLabeler, LabelResult
+from card_labeler import CardLabeler, LabelResult, _split_groups_if_needed
 
 
 def test_label_result_parses_groups_for_practice():
@@ -173,3 +173,96 @@ def test_label_result_handles_non_dict_group_elements():
     assert len(groups) == 1
     assert groups[0]["intro"] == "有效"
     assert len(groups[0]["questions"]) == 1
+
+
+# ===== _split_groups_if_needed 程序化兜底测试 =====
+
+def test_split_groups_multiple_stems_in_intro():
+    """Case 1: intro 含两个编号大题 -> 按大题位置拆分（ID=442 模式）"""
+    content = (
+        "1. 将下列方程化成一元二次方程的一般形式：\n"
+        "(1) $3x^{2}+1=6x$ ; (2) $4x^{2}+5x=81$ ;\n"
+        "(3) $x(x+5)=0;$ (4) $(2x-2)(x-1)=0;$ (5) $x(x+5)=5x-10;$ (6) $(3x-2)(x+1)=x(2x-1).$\n\n"
+        "2. 根据下列问题列方程：\n\n"
+        "(1) 一个圆的面积是 $2\\pi \\, m^{2}$"
+    )
+    # LLM 把两组塞进一个 group
+    single_group = [{
+        "intro": "1. 将下列方程化成一元二次方程的一般形式：\n2. 根据下列问题列方程：",
+        "questions": [
+            {"n": 1, "text": "(1) $3x^{2}+1=6x$"},
+            {"n": 2, "text": "(2) $4x^{2}+5x=81$"},
+            {"n": 3, "text": "(3) $x(x+5)=0;$"},
+            {"n": 4, "text": "(4) $(2x-2)(x-1)=0;$"},
+            {"n": 5, "text": "(5) $x(x+5)=5x-10;$"},
+            {"n": 6, "text": "(6) $(3x-2)(x+1)=x(2x-1).$"},
+            {"n": 1, "text": "(1) 一个圆的面积是 $2\\pi \\, m^{2}$"},
+        ],
+    }]
+    result = _split_groups_if_needed(single_group, content)
+    assert len(result) == 2
+    assert "1. 将下列方程" in result[0]["intro"]
+    assert len(result[0]["questions"]) == 6
+    assert "2. 根据下列问题" in result[1]["intro"]
+    assert len(result[1]["questions"]) == 1
+
+
+def test_split_groups_questions_before_intro():
+    """Case 2: 部分 question 在原文中出现在 intro 之前 -> 拆为前组+后组（ID=443 模式）"""
+    content = (
+        "（2）一个直角三角形求较长的直角边的长.3.下列哪些数是方程 $x^{2} + x - 12 = 0$ 的根？\n\n"
+        "## 综合运用\n\n"
+        "根据下列问题列方程（第4～6题）：\n\n"
+        "4. 一个矩形的长比宽多 $1\\mathrm{cm}$\n\n"
+        "5. 有一根铁丝围成矩形\n\n"
+        "6. 参加聚会握手10次"
+    )
+    # LLM 把所有题塞进一个 group，intro 是第 4-6 题的说明
+    single_group = [{
+        "intro": "根据下列问题列方程（第4～6题）：",
+        "questions": [
+            {"n": 2, "text": "（2）一个直角三角形求较长的直角边的长."},
+            {"n": 3, "text": "3.下列哪些数是方程 $x^{2} + x - 12 = 0$ 的根？"},
+            {"n": 4, "text": "4. 一个矩形的长比宽多 $1\\mathrm{cm}$"},
+            {"n": 5, "text": "5. 有一根铁丝围成矩形"},
+            {"n": 6, "text": "6. 参加聚会握手10次"},
+        ],
+    }]
+    result = _split_groups_if_needed(single_group, content)
+    assert len(result) == 2
+    # 前组：无 intro，含 (2) 和 3
+    assert result[0]["intro"] is None
+    assert len(result[0]["questions"]) == 2
+    # 后组：有 intro，含 4, 5, 6
+    assert "根据下列问题" in result[1]["intro"]
+    assert len(result[1]["questions"]) == 3
+
+
+def test_split_groups_no_split_when_single_stem():
+    """单个大题不需要拆分"""
+    content = "解下列方程：\n(1) $x^{2}=4$\n(2) $y^{2}=9$"
+    single_group = [{
+        "intro": "解下列方程：",
+        "questions": [
+            {"n": 1, "text": "(1) $x^{2}=4$"},
+            {"n": 2, "text": "(2) $y^{2}=9$"},
+        ],
+    }]
+    result = _split_groups_if_needed(single_group, content)
+    assert len(result) == 1  # 原样返回
+
+
+def test_split_groups_no_split_when_already_multiple():
+    """已有多个 group 时不触发拆分"""
+    groups = [
+        {"intro": "1. 解方程：", "questions": [{"n": 1, "text": "(1) x=1"}]},
+        {"intro": "2. 列方程：", "questions": [{"n": 1, "text": "(1) y=2"}]},
+    ]
+    result = _split_groups_if_needed(groups, "some content")
+    assert result is groups  # 原样返回
+
+
+def test_split_groups_none_or_empty():
+    """None 或空 groups 原样返回"""
+    assert _split_groups_if_needed(None, "content") is None
+    assert _split_groups_if_needed([], "content") == []

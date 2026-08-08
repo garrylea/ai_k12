@@ -6,6 +6,7 @@ groups），不修改卡片正文（practice 卡 groups[].questions[].text 为�
 """
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,104 @@ from llm import LLMClient, LLMResponse
 
 # _parse_json_object 复用 extract.py 的 JSON 解析逻辑
 from extract import _parse_json_object
+
+# 编号大题模式：行首 N. 或 N、 后跟非空白字符
+_STEM_RE = re.compile(r'^(\d+)[.、]\s*\S', re.MULTILINE)
+
+
+def _find_in_content(text: str, content: str) -> int:
+    """在 content 中查找 text 位置，失败时退化为前 20 字符匹配。"""
+    pos = content.find(text)
+    if pos < 0 and len(text) > 20:
+        pos = content.find(text[:20])
+    return pos
+
+
+def _split_groups_if_needed(groups: list[dict] | None, card_content: str) -> list[dict] | None:
+    """程序化兜底：LLM 把多组题塞进一个 group 时，按原文位置拆分。
+
+    两种触发场景：
+    1. intro 含多个编号大题（如 "1. 解方程：\\n2. 列方程："）-> 按大题位置拆
+    2. 部分 question 在原文中出现在 intro 之前 -> 拆为无 intro 前组 + 有 intro 后组
+
+    Args:
+        groups: LLM 解析出的 groups（None 或多组时原样返回）
+        card_content: 卡片原文（用于定位 question/intro 位置）
+
+    Returns:
+        拆分后的 groups，或原 groups（无法拆分时）
+    """
+    if not groups or len(groups) != 1 or not card_content:
+        return groups
+
+    group = groups[0]
+    intro = group.get("intro") or ""
+    questions = group.get("questions") or []
+
+    if not questions:
+        return groups
+
+    # 定位每道题在原文中的位置
+    q_positions: list[tuple[int, dict]] = []
+    for q in questions:
+        pos = _find_in_content(q["text"], card_content)
+        if pos >= 0:
+            q_positions.append((pos, q))
+
+    if not q_positions:
+        return groups  # 无法定位题目，放弃拆分
+
+    q_positions.sort(key=lambda x: x[0])
+
+    # Case 1: intro 含多个编号大题 -> 按大题位置拆分
+    stem_matches = list(_STEM_RE.finditer(intro))
+    if len(stem_matches) >= 2:
+        stem_intros = []
+        for i, m in enumerate(stem_matches):
+            start = m.start()
+            end = stem_matches[i + 1].start() if i + 1 < len(stem_matches) else len(intro)
+            stem_intros.append(intro[start:end].strip())
+
+        # 定位每个大题题干在原文中的位置
+        stem_positions: list[tuple[int, str]] = []
+        for si in stem_intros:
+            pos = _find_in_content(si, card_content)
+            if pos >= 0:
+                stem_positions.append((pos, si))
+
+        if len(stem_positions) >= 2:
+            stem_positions.sort(key=lambda x: x[0])
+            split_groups: list[dict] = []
+
+            # 大题之前的题（如续页残留）-> 无 intro 组
+            first_stem_pos = stem_positions[0][0]
+            pre_qs = [q for pos, q in q_positions if pos < first_stem_pos]
+            if pre_qs:
+                split_groups.append({"intro": None, "questions": pre_qs})
+
+            # 每个大题的题
+            for i, (spos, si) in enumerate(stem_positions):
+                next_pos = stem_positions[i + 1][0] if i + 1 < len(stem_positions) else len(card_content) + 1
+                stem_qs = [q for pos, q in q_positions if spos <= pos < next_pos]
+                if stem_qs:
+                    split_groups.append({"intro": si, "questions": stem_qs})
+
+            if len(split_groups) >= 2:
+                return split_groups
+
+    # Case 2: 部分 question 在原文中出现在 intro 之前 -> 拆为前组（无 intro）+ 后组（有 intro）
+    if intro:
+        intro_pos = _find_in_content(intro[:30] if len(intro) > 30 else intro, card_content)
+        if intro_pos >= 0:
+            pre_qs = [q for pos, q in q_positions if pos < intro_pos]
+            post_qs = [q for pos, q in q_positions if pos >= intro_pos]
+            if pre_qs and post_qs:
+                return [
+                    {"intro": None, "questions": pre_qs},
+                    {"intro": intro, "questions": post_qs},
+                ]
+
+    return groups
 
 
 @dataclass
@@ -102,6 +201,9 @@ class CardLabeler:
                         groups.append({"intro": g_intro, "questions": g_qs})
                 if not groups:
                     groups = None
+                else:
+                    # 程序化兜底：LLM 把多组题塞进一个 group 时按原文位置拆分
+                    groups = _split_groups_if_needed(groups, cards_text[idx] if idx < len(cards_text) else "")
             labels.append(LabelResult(
                 page_type=page_type,
                 card_type=card_type,
