@@ -300,7 +300,9 @@ export class TutoringCapability {
     let userMessage = request.message;
     const fileAttachments = request.attachments?.filter(a => a.type === 'file' && a.extractedText) ?? [];
     for (const fa of fileAttachments) {
-      userMessage += `\n\n---\n附件内容：\n${fa.extractedText}`;
+      userMessage += fa.fileName
+        ? `\n\n---\n附件内容（${fa.fileName}）：\n${fa.extractedText}`
+        : `\n\n---\n附件内容：\n${fa.extractedText}`;
     }
     const promptResult = await this.promptBuilder.build({
       capability: 'tutoring',

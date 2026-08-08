@@ -170,6 +170,7 @@ export class AIService {
           url: fileRow.url,
           imageUrl: dataUrl,
           fileId: att.fileId,
+          fileName: path.basename(fileRow.url),
         });
         continue;
       }
@@ -190,6 +191,7 @@ export class AIService {
             url: fileRow.url,
             extractedText: content,
             fileId: att.fileId,
+            fileName: path.basename(fileRow.url),
           });
           continue;
         }
@@ -208,7 +210,7 @@ export class AIService {
           if (!task.result) {
             throw new BadRequestException({ code: 1001, message: 'PDF 提取结果为空' });
           }
-          let parsedResult: { markdown?: string; structured?: unknown };
+          let parsedResult: { markdown?: string; images?: string[] };
           try {
             parsedResult = JSON.parse(task.result);
           } catch {
@@ -221,7 +223,9 @@ export class AIService {
             type: 'file',
             url: fileRow.url,
             extractedText: parsedResult.markdown,
+            extractedImages: parsedResult.images,
             fileId: att.fileId,
+            fileName: path.basename(fileRow.url),
           });
           continue;
         }

@@ -387,6 +387,7 @@ export interface Attachment {
   extractedText?: string;     // text content for txt/md/pdf attachments
   extractedImages?: string[]; // PDF extracted image paths (for routing to multimodal model)
   fileId?: string;            // reference to uploaded_files row
+  fileName?: string;          // original file name (derived from uploaded_files.url basename)
 }
 
 /** Structured question output from the tutoring model (Task 14a). The model
