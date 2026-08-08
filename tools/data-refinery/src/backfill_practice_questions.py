@@ -83,8 +83,8 @@ def main():
                 skipped += 1
                 continue
 
-            # 幂等：已有 questions 或 needs_fallback 则跳过
-            if existing.get("questions") or existing.get("needs_fallback"):
+            # 幂等：已有 groups 或 needs_fallback 则跳过
+            if existing.get("groups") or existing.get("needs_fallback"):
                 skipped += 1
                 continue
 
@@ -98,9 +98,8 @@ def main():
                 continue
 
             # 构建 content_metadata（含子串校验：question_text_valid）
-            # label.questions 为 None 时转 []，使 build_content_metadata 置 needs_fallback=True
-            questions_data = [{"n": q.n, "text": q.text} for q in (label.questions or [])]
-            md = build_content_metadata(label.intro, questions_data, content, existing)
+            # label.groups 为 None 时转 []，使 build_content_metadata 置 needs_fallback=True
+            md = build_content_metadata(label.groups or [], content, existing)
 
             # 更新 DB
             with conn.cursor() as cur:
@@ -110,8 +109,9 @@ def main():
                 )
             conn.commit()
             updated += 1
-            n_qs = len(md.get("questions", []))
-            print(f"[ok] card id={card_id}: questions={n_qs}, "
+            groups = md.get("groups", [])
+            n_qs = sum(len(g.get("questions", [])) for g in groups)
+            print(f"[ok] card id={card_id}: groups={len(groups)}, questions={n_qs}, "
                   f"needs_fallback={md.get('needs_fallback')}", flush=True)
 
         print(
