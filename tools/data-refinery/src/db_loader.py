@@ -75,14 +75,14 @@ def question_text_valid(text: str | None, card_content: str) -> bool:
     return _normalize_for_match(text) in _normalize_for_match(card_content)
 
 
-def build_content_metadata(intro: str | None, questions: list[dict] | None,
-                           card_content: str, existing: dict | None) -> dict:
+def build_content_metadata(groups: list[dict] | None, card_content: str,
+                           existing: dict | None) -> dict:
     """构建 content_metadata，合并 existing（如 images/override_scroll），
-    对 questions 逐条做子串校验，无效则丢弃并置 needs_fallback=True。
+    对每个 group 的 questions 逐条做子串校验，无效则丢弃；
+    若某 group 无有效题则丢弃整个 group；全部 group 无效则置 needs_fallback=True。
 
     Args:
-        intro: practice 卡题前说明（None 表示不设置）
-        questions: [{n, text}] 列表（None 表示非 practice 卡，不处理）
+        groups: [{"intro": str|None, "questions": [{"n":int,"text":str}]}] 或 None
         card_content: 卡片正文（用于子串校验）
         existing: 既有 content_metadata（如 publish 阶段写入的 images）
 
@@ -90,32 +90,39 @@ def build_content_metadata(intro: str | None, questions: list[dict] | None,
         合并后的 content_metadata dict
     """
     md = dict(existing or {})
-    if questions is not None:
-        valid_qs = [q for q in questions if question_text_valid(q.get("text", ""), card_content)]
-        if valid_qs:
-            md["questions"] = valid_qs
+    if groups is not None:
+        valid_groups = []
+        for g in groups:
+            valid_qs = [q for q in g.get("questions", [])
+                        if question_text_valid(q.get("text", ""), card_content)]
+            if valid_qs:
+                g2: dict = {"questions": valid_qs}
+                if g.get("intro"):
+                    g2["intro"] = g["intro"]
+                valid_groups.append(g2)
+        if valid_groups:
+            md["groups"] = valid_groups
             md["needs_fallback"] = False
         else:
-            md.pop("questions", None)
+            md.pop("groups", None)
             md["needs_fallback"] = True
-    if intro is not None:
-        md["intro"] = intro
     return md
 
 
-def rebuild_practice_content(intro: str | None, questions: list[dict]) -> str:
-    """用 labeler 输出的 questions[].text 重组 practice 卡的 content。
+def rebuild_practice_content(groups: list[dict]) -> str:
+    """用 labeler 输出的 groups 重组 practice 卡的 content。
 
-    intro 在前（若有），每题 text 用 \\n\\n 分隔接在后面。
-    重组后每题独立成段，LLM 语义拆分兜底正则拆不开的边缘案（如无分号同行题）。
+    每个 group 的 intro 在前（若有），每题 text 用 \\n\\n 分隔；
+    group 之间也用 \\n\\n 分隔。重组后每题独立成段。
     """
     parts: list[str] = []
-    if intro and intro.strip():
-        parts.append(intro.strip())
-    for q in questions:
-        text = q.get("text", "")
-        if text.strip():
-            parts.append(text.strip())
+    for g in groups:
+        if g.get("intro") and g["intro"].strip():
+            parts.append(g["intro"].strip())
+        for q in g.get("questions", []):
+            text = q.get("text", "")
+            if text.strip():
+                parts.append(text.strip())
     return "\n\n".join(parts)
 
 
@@ -685,19 +692,18 @@ class DbLoader:
         card_content = c.get("content") or ""
         card_type = c.get("card_type")
 
-        # practice 卡：从 content_metadata 提取 intro/questions 做子串校验
-        # （extract_cli 写入 intro/questions，publish_cli 追加 images 等）
-        if cm and (cm.get("intro") is not None or cm.get("questions") is not None):
-            intro = cm.get("intro")
-            questions = cm.get("questions")
-            existing = {k: v for k, v in cm.items() if k not in ("intro", "questions")}
+        # practice 卡：从 content_metadata 提取 groups 做子串校验
+        # （extract_cli 写入 groups，publish_cli 追加 images 等）
+        if cm and cm.get("groups") is not None:
+            groups = cm.get("groups")
+            existing = {k: v for k, v in cm.items() if k != "groups"}
             # 子串校验在重组前对原文做（§5.2）
-            cm = build_content_metadata(intro, questions, card_content, existing)
-            # practice 卡 content 重组：用已验证的 questions[].text 重建 content
-            # 每题独立成行，LLM 兜底正则拆不开的边缘案
-            validated_qs = cm.get("questions") if cm else None
-            if card_type == "practice" and validated_qs:
-                card_content = rebuild_practice_content(cm.get("intro"), validated_qs)
+            cm = build_content_metadata(groups, card_content, existing)
+            # practice 卡 content 重组：用已验证的 groups 重建 content
+            # 每题独立成段，LLM 兜底正则拆不开的边缘案
+            validated_groups = cm.get("groups") if cm else None
+            if card_type == "practice" and validated_groups:
+                card_content = rebuild_practice_content(validated_groups)
 
         kp = c.get("knowledge_point_ids") or []
         self._exec(
