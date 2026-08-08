@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from card_splitter import split_page, _count_text_chars, _CHARS_PER_LINE
-from card_splitter import _split_paragraphs, _make_bundles, _current_heading
+from card_splitter import _split_paragraphs, _make_bundles, _current_heading, _split_inline_questions
 from models import ImageInfo
 
 
@@ -121,3 +121,55 @@ def test_split_page_fill_pulls_first_sentence_from_same_section():
     assert len(cards) == 2
     assert "这是补充内容。" in cards[0].content  # fill pulled first sentence
     assert cards[0].raw_text_char_count > 288    # more than heading(48)+para1(240)=288
+
+
+class TestSplitInlineQuestions:
+    def test_semicolon_separated(self):
+        """分号分隔的同行题拆为多段"""
+        para = "(1) $5x^{2}-1=4x$ ; (2) $4x^{2}=81$"
+        result = _split_inline_questions(para)
+        assert len(result) == 2
+        assert result[0].startswith("(1)")
+        assert result[1].startswith("(2)")
+
+    def test_period_separated(self):
+        """句号分隔的同行题拆为多段"""
+        para = "(1) 解方程 $x^{2}=4$。(2) 求 $y$ 的值。"
+        result = _split_inline_questions(para)
+        assert len(result) == 2
+        assert "(1)" in result[0]
+        assert "(2)" in result[1]
+
+    def test_no_split_on_text_ref(self):
+        """正文引用 (2) 不误拆，如「与(2)类似」"""
+        para = "由(1)可知，与(2)类似的方法也可解此题。"
+        result = _split_inline_questions(para)
+        assert len(result) == 1
+        assert result[0] == para
+
+    def test_single_question_no_split(self):
+        """单题无拆分点原样返回"""
+        para = "(1) $x^{2}+2x+1=0$"
+        result = _split_inline_questions(para)
+        assert len(result) == 1
+        assert result[0] == para
+
+    def test_no_numbered_items(self):
+        """无编号段落不拆分"""
+        para = "解下列方程："
+        result = _split_inline_questions(para)
+        assert len(result) == 1
+        assert result[0] == para
+
+    def test_chinese_semicolon_separated(self):
+        """中文分号；分隔同行题"""
+        para = "(1) $x^{2}=9$；(2) $y^{2}=16$"
+        result = _split_inline_questions(para)
+        assert len(result) == 2
+        assert "(1)" in result[0]
+        assert "(2)" in result[1]
+
+    def test_mixed_inline_and_newline_already_split(self):
+        """已换行分隔的题保持独立"""
+        result = _split_inline_questions("(1) $x^{2}=9$")
+        assert len(result) == 1
