@@ -258,8 +258,9 @@ export function getMessages(dialogueId: number, lastMessageId?: number): Promise
 // --- AI Tutor (auxiliary) ---
 
 export interface AttachmentRequest {
-  type: 'image';
+  type: 'image' | 'file';
   fileId: string;
+  taskId?: number;  // PDF extraction task ID
 }
 
 export interface TutorResponse {
@@ -305,39 +306,37 @@ export function getExtractTask(taskId: number): Promise<ExtractTaskResult> {
   return fetchApi<ExtractTaskResult>(`/refinery/tasks/${taskId}`);
 }
 
-// --- Error Book (auxiliary) ---
-
-export interface AuxErrorItem {
-  id: number;
-  question_id: number | null;
-  level: number;
-  is_cleared: number;
-  source: string;
-  created_at: string;
-}
-
-export function listAuxErrors(
-  studentId: number,
-  subjectId?: number,
-  includeCleared = false,
-): Promise<AuxErrorItem[]> {
-  const params = new URLSearchParams();
-  if (subjectId) params.set('subject', String(subjectId));
-  if (includeCleared) params.set('includeCleared', 'true');
-  const qs = params.toString() ? `?${params.toString()}` : '';
-  return fetchApi<AuxErrorItem[]>(`/error-book/students/${studentId}/aux${qs}`);
-}
-
-export function createAuxError(req: {
-  subjectId: number;
-  source: 'auxiliary' | 'photo';
-  rawContent?: string;
-  extractTaskId?: number;
-}): Promise<{ errorId: number; questionId: number | null; structured: unknown }> {
-  return fetchApi<{ errorId: number; questionId: number | null; structured: unknown }>('/error-book/aux', {
-    method: 'POST',
-    body: JSON.stringify(req),
+// SSE 监听 MinerU 提取结果（替代轮询 GET /api/refinery/tasks/:taskId）
+export async function* streamExtraction(
+  taskId: number,
+  signal?: AbortSignal,
+): AsyncIterable<{ type: 'done' | 'error'; message?: string }> {
+  const token = localStorage.getItem('token') ?? '';
+  const res = await fetch(`${API_BASE}/refinery/tasks/${taskId}/stream`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal,
   });
+  if (!res.ok || !res.body) throw new Error('extraction stream unavailable');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ') || trimmed === 'data: [DONE]') continue;
+      try {
+        yield JSON.parse(trimmed.slice(6));
+      } catch {
+        // skip non-JSON lines
+      }
+    }
+  }
 }
 
 // --- Practice (mainline 课堂练习判对错) ---
