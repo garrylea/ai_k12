@@ -129,13 +129,34 @@ const EXERCISE_ITEM_RE = /^\(?([1-9]\d?)[\.\)]/;
 const EXERCISE_STEM_RE = /[：:]$/;
 
 /**
+ * 在 metadata 小题列表里找与当前段落文本匹配的题。
+ * 归一化（NFKC+去空白+lower）后做子串匹配，容全半角/空白/尾随标点差异。
+ * text 长度 <2 不匹配（防"1"等短串误中）。
+ */
+function matchPracticeQuestion(
+  paragraphText: string,
+  questions: { n: number; text: string }[],
+): { n: number; text: string } | null {
+  if (!questions.length) return null;
+  const norm = (s: string) => s.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const p = norm(paragraphText);
+  if (!p) return null;
+  for (const q of questions) {
+    const qt = norm(q.text);
+    if (qt.length >= 2 && (p.includes(qt) || qt.includes(p))) return q;
+  }
+  return null;
+}
+
+/**
  * 预处理卡片内容 markdown：
  * 1. 转义行首 "N." 防止 markdown 解析为有序列表（保留题号文本）
  * 2. 同行/单换行分隔的子题 "；(N)" / "; (N)" / "$ (N)" 拆成独立段落
  * 3. 题干后确保段落分隔
  */
-function preprocessContent(raw: string): string {
-  let result = raw;
+function preprocessContent(raw: string, isPractice = false): string {
+  // practice 卡 NFKC 归一（修 (2） 半全角混排，便于拆分小题）；非 practice 不动，避免中文全角标点回归
+  let result = isPractice ? raw.normalize('NFKC') : raw;
   // 1. 转义行首 N. 防止有序列表
   result = result.replace(/^(\d+)\.\s/gm, '$1\\. ');
   // 1.5 全角括号数字统一为半角，避免（1）和(1)视觉上不对齐
@@ -284,9 +305,7 @@ export default function CourseDetailPage() {
   // needs_fallback 卡：从 content 中用正则提取可点题块
   const fallbackPractice = useMemo<{ intro: string; questions: PracticeQuestion[] } | null>(() => {
     if (card?.cardType !== 'practice' || !practiceMeta?.needsFallback) return null;
-    // NFKC 归一仅用于 practice 兜底正则提取（修 (2） 半全角混排）；
-    // 不在全局 preprocessContent 做，避免影响非练习卡的中文全角标点渲染。
-    const processed = preprocessContent(card.content.normalize('NFKC'));
+    const processed = preprocessContent(card.content, true);
     const paragraphs = processed.split('\n\n').map(p => p.trim()).filter(Boolean);
     const introParts: string[] = [];
     const qs: PracticeQuestion[] = [];
@@ -305,17 +324,20 @@ export default function CourseDetailPage() {
     return { intro: introParts.join('\n\n'), questions: qs };
   }, [card, practiceMeta]);
 
-  // 打开答题 modal：首次打开时初始化 session
-  const handleOpenModal = (index: number) => {
+  // 当前练习卡的可用小题（主路径 metadata 或兜底正则）
+  const practiceQuestions = (practiceMeta && !practiceMeta.needsFallback)
+    ? practiceMeta.questions
+    : (fallbackPractice?.questions ?? []);
+
+  // 打开答题 modal：首次打开时初始化 session；按 question.text 定位索引（n 跨大题会重置，不能用作 key）
+  const handleOpenModal = (question: { n: number; text: string }) => {
     if (!card) return;
-    const questions = (practiceMeta && !practiceMeta.needsFallback)
-      ? practiceMeta.questions
-      : (fallbackPractice?.questions ?? []);
-    if (questions.length === 0) return;
+    if (practiceQuestions.length === 0) return;
     if (sessionCardId !== card.id) {
-      setSession(card.id, questions);
+      setSession(card.id, practiceQuestions);
     }
-    setModalStart(index);
+    const index = practiceQuestions.findIndex(q => q.text === question.text);
+    setModalStart(index >= 0 ? index : 0);
     setModalOpen(true);
   };
 
@@ -557,92 +579,68 @@ export default function CourseDetailPage() {
                         ) : null;
                       })()}
 
-                      {/* Markdown body - practice 卡有结构化题目时渲染可点题块，否则走 ReactMarkdown */}
-                      {(() => {
-                        const questions = (practiceMeta && !practiceMeta.needsFallback)
-                          ? practiceMeta.questions
-                          : (fallbackPractice?.questions ?? []);
-                        const intro = (practiceMeta && !practiceMeta.needsFallback)
-                          ? practiceMeta.intro
-                          : fallbackPractice?.intro;
-                        const isStructured = card.cardType === 'practice' && questions.length > 0;
-                        if (isStructured) {
-                          return (
-                            <div className="learn-prose space-y-3">
-                              {intro && (
-                                <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                                  {intro}
-                                </ReactMarkdown>
-                              )}
-                              {questions.map((q, i) => {
-                                const answered = answers[q.n];
+                      {/* Markdown body - practice 卡在原内容上叠加可点小题（保留题干/小题层级与行级结构），其余卡正常渲染 */}
+                      <div className="learn-prose">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkMath, remarkGfm]}
+                          rehypePlugins={[rehypeKatex]}
+                          components={{
+                            p: ({ children, ...props }) => {
+                              // 1. 图片 + 图注
+                              const fig = extractFigureCaption(children);
+                              if (fig) {
                                 return (
-                                  <button
-                                    key={q.n}
-                                    onClick={() => handleOpenModal(i)}
-                                    className="block w-full text-left p-3 rounded-lg border border-[var(--learn-card-border)] hover:bg-[var(--bg-subtle)] transition-colors"
-                                  >
-                                    <div className="flex items-start gap-2">
-                                      <div className="flex-1">
-                                        <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                                          {q.text}
-                                        </ReactMarkdown>
-                                      </div>
+                                  <div className="figure-caption-wrap">
+                                    {fig.imgEl}
+                                    <span className="figure-caption-text">{fig.caption}</span>
+                                  </div>
+                                );
+                              }
+                              const text = getNodeText(children).trim();
+                              // 2. practice 卡：匹配 metadata 小题 -> 可点（保留原内容题干/小题层级与每行独立展示）
+                              if (card.cardType === 'practice' && practiceQuestions.length > 0) {
+                                const matched = matchPracticeQuestion(text, practiceQuestions);
+                                if (matched) {
+                                  const answered = answers[matched.text];
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenModal(matched)}
+                                      className="flex items-start gap-2 w-full text-left p-2 -mx-2 rounded-lg hover:bg-[var(--bg-subtle)] transition-colors"
+                                    >
+                                      <span className="flex-1">{children}</span>
                                       {answered && (
                                         <span className={`shrink-0 font-semibold ${answered.isCorrect ? 'text-green-600' : 'text-red-600'}`}>
                                           {answered.isCorrect ? '✓' : '✗'}
                                         </span>
                                       )}
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          );
-                        }
-                        return (
-                          <div className="learn-prose">
-                            <ReactMarkdown
-                              remarkPlugins={[remarkMath, remarkGfm]}
-                              rehypePlugins={[rehypeKatex]}
-                              components={{
-                                p: ({ children, ...props }) => {
-                                  // 1. 图片 + 图注
-                                  const fig = extractFigureCaption(children);
-                                  if (fig) {
-                                    return (
-                                      <div className="figure-caption-wrap">
-                                        {fig.imgEl}
-                                        <span className="figure-caption-text">{fig.caption}</span>
-                                      </div>
-                                    );
-                                  }
-                                  // 2. 练习题子项 (1) (2) ...（仅在练习卡片中生效，避免误伤正文步骤编号）
-                                  const text = getNodeText(children).trim();
-                                  if (card.cardType === 'practice' && EXERCISE_ITEM_RE.test(text)) {
-                                    return <p className="exercise-item" {...props}>{children}</p>;
-                                  }
-                                  // 3. 题干（以 ：或 : 结尾）
-                                  if (EXERCISE_STEM_RE.test(text)) {
-                                    return <p className="exercise-stem" {...props}>{children}</p>;
-                                  }
-                                  return <p {...props}>{children}</p>;
-                                },
-                                img: ({ src, alt }) => (
-                                  <img
-                                    src={src ? resolveAsset(src) : ''}
-                                    alt={alt ?? ''}
-                                    className="block mx-auto my-4 max-w-full max-h-[60vh] object-contain rounded-lg"
-                                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                                  />
-                                ),
-                              }}
-                            >
-                              {preprocessContent(card.content)}
-                            </ReactMarkdown>
-                          </div>
-                        );
-                      })()}
+                                    </button>
+                                  );
+                                }
+                              }
+                              // 3. 练习小题样式（无 metadata 或未匹配时）
+                              if (card.cardType === 'practice' && EXERCISE_ITEM_RE.test(text)) {
+                                return <p className="exercise-item" {...props}>{children}</p>;
+                              }
+                              // 4. 题干（以 ：或 : 结尾）
+                              if (EXERCISE_STEM_RE.test(text)) {
+                                return <p className="exercise-stem" {...props}>{children}</p>;
+                              }
+                              return <p {...props}>{children}</p>;
+                            },
+                            img: ({ src, alt }) => (
+                              <img
+                                src={src ? resolveAsset(src) : ''}
+                                alt={alt ?? ''}
+                                className="block mx-auto my-4 max-w-full max-h-[60vh] object-contain rounded-lg"
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                              />
+                            ),
+                          }}
+                        >
+                          {preprocessContent(card.content, card.cardType === 'practice')}
+                        </ReactMarkdown>
+                      </div>
                     </div>
                   </div>
 
@@ -809,32 +807,25 @@ export default function CourseDetailPage() {
       </AnimatePresence>
 
       {/* 答题 modal */}
-      {modalOpen && (() => {
-        const questions = (practiceMeta && !practiceMeta.needsFallback)
-          ? practiceMeta.questions
-          : (fallbackPractice?.questions ?? []);
-        if (questions.length === 0) return null;
-        return (
-          <AnswerModal
-            questions={questions}
-            startIndex={modalStart}
-            onSubmit={async (questionText, studentAnswer) => {
-              const res = await judgePractice({
-                cardId: card.id,
-                lessonId,
-                subjectId,
-                questionText,
-                studentAnswer,
-              });
-              const n = questions.find(q => q.text === questionText)?.n ?? 0;
-              record(n, studentAnswer, res);
-              return res;
-            }}
-            onFinish={() => { setModalOpen(false); setResultOpen(true); }}
-            onClose={() => setModalOpen(false)}
-          />
-        );
-      })()}
+      {modalOpen && practiceQuestions.length > 0 && (
+        <AnswerModal
+          questions={practiceQuestions}
+          startIndex={modalStart}
+          onSubmit={async (questionText, studentAnswer) => {
+            const res = await judgePractice({
+              cardId: card.id,
+              lessonId,
+              subjectId,
+              questionText,
+              studentAnswer,
+            });
+            record(questionText, studentAnswer, res);
+            return res;
+          }}
+          onFinish={() => { setModalOpen(false); setResultOpen(true); }}
+          onClose={() => setModalOpen(false)}
+        />
+      )}
 
       {/* 答题结果列表 */}
       {resultOpen && (
