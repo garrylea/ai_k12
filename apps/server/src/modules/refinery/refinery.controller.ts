@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Res, Req, UseGuards } from '@nestjs/common';
-import type { Response, Request } from 'express';
+import { Body, Controller, Get, Param, Post, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { RefineryService } from './refinery.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
@@ -35,7 +35,6 @@ export class RefineryController {
   async streamTask(
     @Param('taskId') taskId: string,
     @CurrentUser() user: JwtUser,
-    @Req() req: Request,
     @Res() res: Response,
   ) {
     const taskIdNum = Number(taskId);
@@ -47,16 +46,25 @@ export class RefineryController {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
-    // Check current status (also verifies task exists and belongs to user)
-    const task = await this.refineryService.getTask(taskIdNum, user.sub);
-    if (task.status === 'completed') {
-      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-      res.write('data: [DONE]\n\n');
-      res.end();
-      return;
-    }
-    if (task.status === 'failed') {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: task.errorMessage ?? '提取失败' })}\n\n`);
+    // Check current status (also verifies task exists and belongs to user).
+    // Wrapped in try/catch so exceptions after headers are flushed still produce
+    // a valid SSE error event rather than a broken HTTP response.
+    try {
+      const task = await this.refineryService.getTask(taskIdNum, user.sub);
+      if (task.status === 'completed') {
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+      if (task.status === 'failed') {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: task.errorMessage ?? '提取失败' })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+    } catch (err: any) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message: err.message ?? '任务不存在或无权访问' })}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
       return;
@@ -65,19 +73,20 @@ export class RefineryController {
     // Subscribe to EventEmitter for pending/processing tasks
     const eventKey = `task:${taskIdNum}`;
     const handler = (event: { type: string; message?: string }) => {
+      clearTimeout(timeout);
       res.write(`data: ${JSON.stringify(event)}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
     };
     this.refineryService.events.once(eventKey, handler);
 
-    // Timeout after 120s (matches MinerU CLI timeout)
+    // Timeout after 300s (covers MinerU 2-attempt retry window + structuring)
     const timeout = setTimeout(() => {
       res.write(`data: ${JSON.stringify({ type: 'error', message: '提取超时' })}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
       this.refineryService.events.off(eventKey, handler);
-    }, 120_000);
+    }, 300_000);
 
     // Client disconnect cleanup
     res.on('close', () => {
