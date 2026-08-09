@@ -89,7 +89,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, onSubmit,
               <div className="text-xs text-[var(--text-tertiary)] font-medium mb-2">
                 第 {idx + 1} / {questions.length} 题
               </div>
-              <div className="text-[17px] text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]">
+              <div className="text-xl text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]">
                 <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
                   {q.text}
                 </ReactMarkdown>

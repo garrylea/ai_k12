@@ -56,7 +56,7 @@
 ### 3.2 顶部题目区
 
 - **题号栏**：`11px` / `Text-Tertiary #9C8D80` / `font-weight: 500`，格式「第 N / M 题 · [题型]」
-- **题目正文**：`17px` / `font-weight: 700` / `Text-Primary #2A1F18` / `line-height: 1.7`
+- **题目正文**：`20px` / `font-weight: 700` / `Text-Primary #2A1F18` / `line-height: 1.7`
   - 通过 `ReactMarkdown` + `remarkMath` + `rehypeKatex` 渲染
   - 加粗用 `[&>*]:font-bold`（子选择器穿透）：`global.css` 的 `p{font-weight:normal}` 会覆盖父级继承的 `font-weight:700`，须用 `[&>*]:font-bold` 显式作用于 ReactMarkdown 渲染出的直接子元素（`<p>`/`<ol><li>`），与 `CourseDetailPage` 的 `exercise-stem` 同一方案
   - 题型标签（如「【证明题】」）使用 `Brand-500 #ff6b35` / `font-weight: 800`
@@ -84,7 +84,7 @@
   - 背景 `#FFFFFF`
   - `padding: 16px`
   - 空状态：`13px` / `Text-Tertiary #9C8D80` / italic
-  - 实时渲染：复用现有 `LatexPreview` 组件（150ms debounce，ReactMarkdown + KaTeX）
+  - 实时渲染：复用现有 `LatexPreview` 组件（150ms debounce，ReactMarkdown + `remark-breaks` + KaTeX；`remark-breaks` 把单个换行渲染为 `<br>`，与 textarea 回车行为一致）
 
 ### 3.4 底部操作栏
 

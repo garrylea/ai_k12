@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 
@@ -16,7 +17,7 @@ export function LatexPreview({ value }: { value: string }) {
     <div className="h-full overflow-auto p-4 text-[var(--text-primary)]">
       {debounced.trim() ? (
         <div className="prose prose-sm max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+          <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm, remarkBreaks]} rehypePlugins={[rehypeKatex]}>
             {debounced}
           </ReactMarkdown>
         </div>
