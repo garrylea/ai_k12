@@ -27,7 +27,7 @@ export function AnswerResultList({ questions, answers, onRetry }: Props) {
   const wrongCount = questions.length - correctCount;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
       <div className="w-[92vw] max-w-2xl max-h-[80vh] flex flex-col bg-[var(--bg-card)] rounded-2xl shadow-xl overflow-hidden">
 
         {/* ═══ Header: title + stats ═══ */}
@@ -58,11 +58,11 @@ export function AnswerResultList({ questions, answers, onRetry }: Props) {
                     {/* Status icon */}
                     <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${correct ? 'bg-[#E8F5EE]' : 'bg-[#FCE8E6]'}`}>
                       {correct ? (
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
                       ) : (
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--error)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--error)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <line x1="18" y1="6" x2="6" y2="18" />
                           <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
@@ -92,7 +92,7 @@ export function AnswerResultList({ questions, answers, onRetry }: Props) {
                   </div>
                   {/* Expanded analysis */}
                   {expanded && !correct && a?.analysis && (
-                    <div className="px-4 pb-3.5 pl-[52px]">
+                    <div className="px-4 pb-3.5 pl-[50px]">
                       <div className="p-3.5 bg-[var(--brand-100)] rounded-[10px] border-l-[3px] border-[var(--warning)]">
                         {a.errorType && (
                           <div className="text-xs font-semibold text-[var(--warning)] mb-1.5">错因：{a.errorType}</div>
