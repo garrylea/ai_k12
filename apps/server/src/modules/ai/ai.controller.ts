@@ -42,12 +42,20 @@ export class AIController {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
     } catch (err) {
-      // Pre-stream HttpException (validation / ownership / attachment) - surface
-      // as an error SSE event so the frontend can react (it has no JSON body).
+      // Pre-stream error (validation / ownership / attachment / mapped LLM
+      // error) - surface as a structured error SSE event so the frontend can
+      // render an error bubble with an optional retry button. retryable is
+      // true only when explicitly set true (network/timeout/server errors);
+      // validation/ownership/quota errors default to non-retryable.
       const payload = err instanceof HttpException
         ? (err.getResponse() as Record<string, unknown>)
-        : { code: 5000, message: 'AI 服务异常' };
-      res.write(`data: ${JSON.stringify({ type: 'error', message: (payload?.message as string) ?? 'AI 服务异常' })}\n\n`);
+        : { code: 5000, message: 'AI 服务异常', retryable: true };
+      res.write(`data: ${JSON.stringify({
+        type: 'error',
+        code: (payload?.code as number) ?? 5000,
+        message: (payload?.message as string) ?? 'AI 服务异常',
+        retryable: payload?.retryable === true,
+      })}\n\n`);
     } finally {
       finished = true;
       res.end();

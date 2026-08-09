@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
-import { LLMClientError, InsufficientQuotaError } from '../../ai-core/types.js';
+import { mapLLMErrorToClient } from '../../ai-core/infra/model-client/errors.js';
 import type { TutoringRequest, Attachment, StreamEvent, StructuredQuestionOutput } from '../../ai-core/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { ExtractTasksRepository, QuestionsRepository } from '../../database/repositories/index.js';
@@ -317,27 +317,12 @@ export class AIService {
 
     // Map LLM errors to HTTP responses without leaking internal details.
     // Include dialogueId so the frontend can retry against the same dialogue
-    // (no new orphan created on retry).
-    if (err instanceof InsufficientQuotaError) {
-      return new HttpException(
-        { code: 1005, message: 'AI 服务额度不足，请稍后重试', dialogueId },
-        503,
-      );
-    }
-    if (err instanceof LLMClientError) {
-      return new HttpException(
-        { code: 5001, message: 'AI 服务繁忙，请稍后重试', dialogueId },
-        503,
-      );
-    }
-
-    // TODO: user message is not persisted if tutoring.tutor() throws before saveMessages.
-    // For MVP, the frontend retries with the returned dialogueId.
-
-    // Unknown errors - don't leak internal message.
+    // (no new orphan created on retry). `retryable` lets the frontend decide
+    // whether to show a retry button (see mapLLMErrorToClient code table).
+    const info = mapLLMErrorToClient(err);
     return new HttpException(
-      { code: 5000, message: 'AI 服务异常', dialogueId },
-      500,
+      { code: info.code, message: info.message, retryable: info.retryable, dialogueId },
+      503,
     );
   }
 }

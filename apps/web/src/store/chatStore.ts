@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 
+export interface ChatError {
+  code: number;
+  message: string;
+  retryable: boolean;
+  stage?: 'transcribe' | 'tutor';  // which stage failed (for two-stage retry, P2)
+}
+
 export interface ChatMessage {
   id?: number;
   role: 'user' | 'assistant';
@@ -8,6 +15,7 @@ export interface ChatMessage {
   images?: string[];
   reasoning?: string;
   streaming?: boolean;
+  error?: ChatError;
 }
 
 interface ChatState {
@@ -17,6 +25,7 @@ interface ChatState {
   appendMessage: (msg: ChatMessage) => void;
   updateLastAssistant: (content: string, reasoning?: string) => void;
   appendLastAssistant: (opts: { content?: string; reasoning?: string }) => void;
+  setLastAssistantError: (err: ChatError) => void;
   setIsStreaming: (v: boolean) => void;
   reset: () => void;
 }
@@ -50,6 +59,23 @@ export const useChatStore = create<ChatState>((set) => ({
         messages[messages.length - 1] = updated;
       }
       return { messages };
+    }),
+  setLastAssistantError: (err) =>
+    set((s) => {
+      const messages = [...s.messages];
+      const last = messages[messages.length - 1];
+      if (last && last.role === 'assistant') {
+        // Replace the streaming placeholder with an error state: clear content
+        // (no partial leaked), stop streaming, attach the structured error.
+        messages[messages.length - 1] = {
+          ...last,
+          content: '',
+          reasoning: last.reasoning,  // keep any reasoning already streamed (for context)
+          streaming: false,
+          error: err,
+        };
+      }
+      return { messages, isStreaming: false };
     }),
   setIsStreaming: (v) => set({ isStreaming: v }),
   reset: () => set({ messages: [], isStreaming: false }),

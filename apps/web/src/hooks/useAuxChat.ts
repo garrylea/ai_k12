@@ -5,15 +5,23 @@ import {
   tutor,
   getMessages,
   createConversation,
+  ApiError,
   type AttachmentRequest,
   type MessageItem,
 } from '@/services/api';
+import { toast } from '@/components/base/Toast';
+
+// Severe non-retryable errors (quota / auth / permission) warrant a toast in
+// addition to the inline error bubble.
+const SEVERE_ERROR_CODES = [1005, 1006, 1007];
 
 interface StreamEvent {
   type: 'reasoning' | 'content' | 'done' | 'error';
   delta?: string;
   replace?: boolean;
   message?: string;
+  code?: number;
+  retryable?: boolean;
 }
 
 export function useAuxChat(dialogueId: number) {
@@ -28,6 +36,7 @@ export function useAuxChat(dialogueId: number) {
     appendMessage,
     updateLastAssistant,
     appendLastAssistant,
+    setLastAssistantError,
     setIsStreaming,
     setMessages,
   } = useChatStore();
@@ -44,13 +53,28 @@ export function useAuxChat(dialogueId: number) {
           attachments,
         });
         updateLastAssistant(res.message.content, res.reasoning);
-      } catch {
-        updateLastAssistant('[网络异常] 请稍后重试');
+      } catch (err) {
+        // Surface the structured error (don't swallow ApiError) so the user sees
+        // a specific reason (quota / auth / network) and a retry button.
+        let code: number;
+        let message: string;
+        let retryable: boolean;
+        if (err instanceof ApiError) {
+          code = err.code;
+          message = err.message;
+          retryable = err.retryable ?? false;
+        } else {
+          code = 1012;
+          message = '网络连接失败，请检查网络后重试';
+          retryable = true;
+        }
+        setLastAssistantError({ code, message, retryable, stage: 'tutor' });
+        if (SEVERE_ERROR_CODES.includes(code)) toast('error', message);
       } finally {
         setIsStreaming(false);
       }
     },
-    [updateLastAssistant, setIsStreaming],
+    [setLastAssistantError, setIsStreaming],
   );
 
   // Streaming tutor over SSE. Consumes reasoning + content deltas, then done.
@@ -103,7 +127,15 @@ export function useAuxChat(dialogueId: number) {
               if (event.replace) updateLastAssistant(event.delta);
               else appendLastAssistant({ content: event.delta });
             } else if (event.type === 'error') {
-              updateLastAssistant(`[生成中断] ${event.message ?? '请重试'}`);
+              const code = event.code ?? 5000;
+              const message = event.message ?? 'AI 服务异常，请稍后重试';
+              setLastAssistantError({
+                code,
+                message,
+                retryable: event.retryable ?? true,
+                stage: 'tutor',
+              });
+              if (SEVERE_ERROR_CODES.includes(code)) toast('error', message);
             }
             // done: isStreaming reset in finally
           }
@@ -117,7 +149,7 @@ export function useAuxChat(dialogueId: number) {
         setIsStreaming(false);
       }
     },
-    [appendLastAssistant, updateLastAssistant, setIsStreaming],
+    [appendLastAssistant, updateLastAssistant, setLastAssistantError, setIsStreaming],
   );
 
   // Abort the in-flight stream (stop button). The backend aborts the upstream

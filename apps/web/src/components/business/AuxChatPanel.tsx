@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { useChatStore } from '@/store/chatStore';
+import { useChatStore, type ChatError } from '@/store/chatStore';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
@@ -49,6 +49,34 @@ const ThinkingDots = () => (
     <span className="thinking-dot" />
     <span className="thinking-dot" />
   </span>
+);
+
+// Inline error bubble shown when an assistant turn failed (P3). Displays the
+// human-readable error reason. The retry button is added in P2 (retry).
+const ErrorBubble = ({ error }: { error: ChatError }) => (
+  <div className="flex items-start gap-2">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#E5484D"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="w-4 h-4 mt-0.5 flex-shrink-0"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[0.7rem] font-medium text-[#E5484D]">生成失败</span>
+      <span className="leading-relaxed text-[#1D1D1F]">{error.message}</span>
+      {error.retryable && (
+        <span className="text-[0.7rem] text-[#A0A0A5]">可点击下方重试重新生成</span>
+      )}
+    </div>
+  </div>
 );
 
 // Markdown + LaTeX (KaTeX) rendering for assistant replies. math via $...$ / $$...$$.
@@ -239,10 +267,13 @@ export default function AuxChatPanel({ isLoadingHistory = false }: Props) {
       ) : (
         messages.map((m, idx) => {
           const hasImages = !!m.images && m.images.length > 0;
-          const thinking = isStreaming && m.streaming && !m.content;
-          // Assistant replies render as markdown+LaTeX; user messages stay plain text.
-          const contentEl =
-            m.role === 'assistant'
+          const isError = !!m.error;
+          const thinking = isStreaming && m.streaming && !m.content && !isError;
+          // Error messages render a dedicated error bubble (P3). Assistant replies
+          // render as markdown+LaTeX; user messages stay plain text.
+          const contentEl = isError
+            ? <ErrorBubble error={m.error!} />
+            : m.role === 'assistant'
               ? m.content
                 ? <Markdown>{m.content}</Markdown>
                 : thinking ? <ThinkingDots /> : null
@@ -255,18 +286,20 @@ export default function AuxChatPanel({ isLoadingHistory = false }: Props) {
               {m.role === 'assistant' && <AIAvatar />}
               <div
                 className={`max-w-[70%] rounded-2xl text-sm overflow-hidden ${
-                  m.role === 'user'
-                    ? 'bg-[#FF6B00] text-white'
-                    : 'bg-[#F9F9FB] text-[#1D1D1F] border border-[#E5E5E5]'
-                } ${hasImages ? 'p-1.5' : 'px-4 py-3'}`}
+                  isError
+                    ? 'bg-[#FEF3F2] text-[#1D1D1F] border border-[#FDA29B]'
+                    : m.role === 'user'
+                      ? 'bg-[#FF6B00] text-white'
+                      : 'bg-[#F9F9FB] text-[#1D1D1F] border border-[#E5E5E5]'
+                } ${hasImages && !isError ? 'p-1.5' : 'px-4 py-3'}`}
               >
-                {m.role === 'assistant' && m.reasoning && (
+                {!isError && m.role === 'assistant' && m.reasoning && (
                   <ReasoningBlock
                     reasoning={m.reasoning}
                     live={isStreaming && idx === messages.length - 1}
                   />
                 )}
-                {hasImages && (
+                {!isError && hasImages && (
                   <div className={`flex flex-wrap gap-1 ${m.content ? 'mb-1' : ''}`}>
                     {m.images!.map((src, i) => (
                       <img
@@ -279,7 +312,7 @@ export default function AuxChatPanel({ isLoadingHistory = false }: Props) {
                     ))}
                   </div>
                 )}
-                {hasImages && m.content ? (
+                {hasImages && m.content && !isError ? (
                   <div className="px-2.5 py-1.5">{contentEl}</div>
                 ) : (
                   contentEl
