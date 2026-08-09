@@ -16,12 +16,24 @@ import { toast } from '@/components/base/Toast';
 const SEVERE_ERROR_CODES = [1005, 1006, 1007];
 
 interface StreamEvent {
-  type: 'reasoning' | 'content' | 'done' | 'error';
+  type: 'reasoning' | 'content' | 'done' | 'error' | 'flow';
   delta?: string;
   replace?: boolean;
   message?: string;
   code?: number;
   retryable?: boolean;
+  // flow event fields (P1 image two-stage):
+  stage?: 'select' | 'confirm' | 'unrecognizable';
+  question?: string;
+  problems?: { index: number; text: string }[];
+}
+
+// Cached send context so retry() can re-send the last user message without the
+// caller passing it again. Cleared implicitly when a new dialogue is loaded.
+interface SendContext {
+  dlgId: number;
+  message: string;
+  attachments?: AttachmentRequest[];
 }
 
 export function useAuxChat(dialogueId: number) {
@@ -31,19 +43,24 @@ export function useAuxChat(dialogueId: number) {
   const newlyCreatedRef = useRef<number | null>(null);
   // AbortController for the in-flight stream so stop() can cancel it.
   const abortRef = useRef<AbortController | null>(null);
+  // Last send context (message + attachments + dialogueId) so retry() can
+  // re-generate the last turn. Null after reload (rebuilt from store history).
+  const lastSendRef = useRef<SendContext | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const {
     appendMessage,
     updateLastAssistant,
     appendLastAssistant,
     setLastAssistantError,
+    setLastAssistantFlow,
+    resetLastAssistantToStreaming,
     setIsStreaming,
     setMessages,
   } = useChatStore();
 
   // Non-streaming fallback (used only if the SSE stream fails to start).
   const fallbackToRest = useCallback(
-    async (dlgId: number, message: string, attachments?: AttachmentRequest[]) => {
+    async (dlgId: number, message: string, attachments?: AttachmentRequest[], retry = false) => {
       setIsStreaming(true);
       try {
         const res = await tutor({
@@ -51,6 +68,7 @@ export function useAuxChat(dialogueId: number) {
           message,
           dialogueId: dlgId.toString(),
           attachments,
+          ...(retry ? { retry: true } : {}),
         });
         updateLastAssistant(res.message.content, res.reasoning);
       } catch (err) {
@@ -82,7 +100,7 @@ export function useAuxChat(dialogueId: number) {
   // errors arrive as `{type:'error'}` events and are handled inline. A user
   // stop (AbortError) keeps the partial content and does NOT fall back to REST.
   const streamTutor = useCallback(
-    async (dlgId: number, message: string, attachments?: AttachmentRequest[]) => {
+    async (dlgId: number, message: string, attachments?: AttachmentRequest[], retry = false, flowAction?: 'confirm' | 'reidentify' | 'correct') => {
       const token = localStorage.getItem('token') ?? '';
       const controller = new AbortController();
       abortRef.current = controller;
@@ -98,6 +116,8 @@ export function useAuxChat(dialogueId: number) {
             message,
             dialogueId: dlgId.toString(),
             attachments,
+            ...(retry ? { retry: true } : {}),
+            ...(flowAction ? { flowAction } : {}),
           }),
           signal: controller.signal,
         });
@@ -136,6 +156,17 @@ export function useAuxChat(dialogueId: number) {
                 stage: 'tutor',
               });
               if (SEVERE_ERROR_CODES.includes(code)) toast('error', message);
+            } else if (event.type === 'flow') {
+              // P1: image two-stage flow event. Populate the assistant bubble
+              // with the transcription/result and attach the flow UI state.
+              if (event.stage === 'confirm' && event.question) {
+                setLastAssistantFlow({ stage: 'confirm', question: event.question }, event.question);
+              } else if (event.stage === 'select' && event.problems) {
+                const list = event.problems.map(p => `第${p.index}题：${p.text}`).join('\n\n');
+                setLastAssistantFlow({ stage: 'select', problems: event.problems }, list);
+              } else if (event.stage === 'unrecognizable') {
+                setLastAssistantFlow({ stage: 'unrecognizable' }, '无法识别图片中的题目，请重新拍摄清晰的照片后上传。');
+              }
             }
             // done: isStreaming reset in finally
           }
@@ -149,7 +180,7 @@ export function useAuxChat(dialogueId: number) {
         setIsStreaming(false);
       }
     },
-    [appendLastAssistant, updateLastAssistant, setLastAssistantError, setIsStreaming],
+    [appendLastAssistant, updateLastAssistant, setLastAssistantError, setLastAssistantFlow, setIsStreaming],
   );
 
   // Abort the in-flight stream (stop button). The backend aborts the upstream
@@ -215,10 +246,14 @@ export function useAuxChat(dialogueId: number) {
   }, [dialogueId, setMessages]);
 
   const send = useCallback(
-    async (content: string, attachments?: AttachmentRequest[], images?: string[]) => {
-      const { isStreaming } = useChatStore.getState();
+    async (content: string, attachments?: AttachmentRequest[], images?: string[], explicitFlowAction?: 'confirm' | 'reidentify' | 'correct') => {
+      const { isStreaming, messages } = useChatStore.getState();
       if (isStreaming) return;
-      if (!content.trim() && !attachments?.length) return;
+      // P1: typing during the confirm step is a correction (flowAction='correct').
+      const last = messages[messages.length - 1];
+      const inConfirm = last?.role === 'assistant' && last.flow?.stage === 'confirm';
+      const flowAction = explicitFlowAction ?? (inConfirm && content.trim() ? 'correct' : undefined);
+      if (!content.trim() && !attachments?.length && !flowAction) return;
 
       let dlgId = dialogueId;
       if (!dlgId) {
@@ -238,16 +273,23 @@ export function useAuxChat(dialogueId: number) {
       // Image-only sends still need a non-empty message for the backend
       // (AIService rejects empty `message`). Use a default prompt; the
       // rendered bubble shows the image itself, not this text.
-      const apiMessage = content.trim() || '帮我看一下这道题';
-      appendMessage({ role: 'user', content: content.trim(), images });
+      const apiMessage = content.trim() || (flowAction ? '' : '帮我看一下这道题');
+      // Cache context so retry() can re-send this exact turn.
+      lastSendRef.current = { dlgId, message: apiMessage, attachments };
+      // User bubble: show the action label for confirm/reidentify, else the content.
+      const userDisplay = flowAction === 'confirm' ? '确认'
+        : flowAction === 'reidentify' ? '重新识别'
+        : content.trim();
+      appendMessage({ role: 'user', content: userDisplay, images });
       appendMessage({ role: 'assistant', content: '', streaming: true });
       setIsStreaming(true);
 
       try {
-        await streamTutor(dlgId, apiMessage, attachments);
+        await streamTutor(dlgId, apiMessage, attachments, false, flowAction);
       } catch {
         // Stream failed to start (network / no body) - fall back to non-stream REST.
-        await fallbackToRest(dlgId, apiMessage, attachments);
+        // Note: REST fallback does not support flow actions (rare; surfaces as error).
+        await fallbackToRest(dlgId, apiMessage || '帮我看一下这道题', attachments);
       }
 
       // Refresh the conversation list: the backend names the conversation from
@@ -259,5 +301,35 @@ export function useAuxChat(dialogueId: number) {
     [dialogueId, appendMessage, setIsStreaming, streamTutor, fallbackToRest],
   );
 
-  return { send, stop, isLoadingHistory };
+  // P1: image two-stage flow action shortcuts (confirm / re-identify buttons).
+  const confirmQuestion = useCallback(() => send('', undefined, undefined, 'confirm'), [send]);
+  const reidentify = useCallback(() => send('', undefined, undefined, 'reidentify'), [send]);
+
+  // Re-generate the last turn after an error (P2). Reuses the cached send
+  // context, or rebuilds from the last user message in the store (reload-after-
+  // error case). Passes retry:true so the backend skips re-persisting the
+  // (already-stored) user message - only the assistant reply is stored.
+  const retry = useCallback(async () => {
+    const { isStreaming, messages } = useChatStore.getState();
+    if (isStreaming) return;
+    let ctx = lastSendRef.current;
+    if (!ctx) {
+      // Reload case: last user message has no assistant reply yet.
+      const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+      if (lastUser) ctx = { dlgId: dialogueId, message: lastUser.content };
+    }
+    if (!ctx || !ctx.dlgId) return;
+    const apiMessage = ctx.message.trim() || '帮我看一下这道题';
+    // Replace the error bubble (or append a placeholder) with a fresh streaming
+    // placeholder, then re-call the model.
+    resetLastAssistantToStreaming();
+    try {
+      await streamTutor(ctx.dlgId, apiMessage, ctx.attachments, true);
+    } catch {
+      await fallbackToRest(ctx.dlgId, apiMessage, ctx.attachments, true);
+    }
+    useAuxiliaryStore.getState().fetchConversations();
+  }, [dialogueId, resetLastAssistantToStreaming, streamTutor, fallbackToRest]);
+
+  return { send, stop, retry, confirmQuestion, reidentify, isLoadingHistory };
 }

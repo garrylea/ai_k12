@@ -74,4 +74,18 @@ export class AiDialoguesRepository {
       [id],
     );
   }
+
+  /** P1: update the image two-stage flow state and the pending transcribed
+   *  question(s). Pass null to clear pending fields (e.g. on confirm -> idle). */
+  async updateFlowState(
+    id: number,
+    flowState: AiDialogueRow['flow_state'],
+    pendingQuestion: string | null = null,
+    pendingQuestions: string | null = null,
+  ): Promise<void> {
+    await this.pool.execute(
+      `UPDATE ai_dialogues SET flow_state = ?, pending_question = ?, pending_questions = ? WHERE id = ?`,
+      [flowState, pendingQuestion, pendingQuestions, id],
+    );
+  }
 }

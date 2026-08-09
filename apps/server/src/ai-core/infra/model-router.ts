@@ -31,19 +31,10 @@ export class ModelRouter {
   }
 
   route(request: RouteRequest): RouteResult {
-    // Task 14a: image-aware routing for tutoring. When the request has an image,
-    // override to qwen-vl-max (multimodal) for math. Other subjects still fall
-    // through to the normal route table (multimodal support may differ).
-    // TODO: generalize for non-math subjects when added.
-    if (request.hasImage && request.scene === 'tutoring' && request.subject === 'math') {
-      const reason = `scene=${request.scene} subject=${request.subject} hasImage=true -> qwen-vl-max`;
-      return {
-        primary: this.models['qwen-vl-max'],
-        fallback: this.models['qwen3.7-max'],
-        reason,
-      };
-    }
-
+    // P1: image tutoring is now two-stage. Images are transcribed by the
+    // `transcribe` scene (qwen3-vl-plus) FIRST; the confirmed text is then
+    // tutored by the normal text route (qwen3.7-max). So tutoring no longer
+    // overrides to a VL model on hasImage - it always uses the text route.
     const rule = this.matchRule(request.scene, request.subject, request.difficulty);
     const reason = `scene=${request.scene} subject=${request.subject} difficulty=${request.difficulty ?? 'any'}`;
 

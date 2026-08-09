@@ -287,6 +287,7 @@ export function tutor(req: {
   knowledgeId?: string;
   cardId?: string;
   attachments?: AttachmentRequest[];
+  retry?: boolean;  // P2: regenerate after error - skip re-persisting the user message
 }): Promise<TutorResponse> {
   return fetchApi<TutorResponse>('/ai/tutor', {
     method: 'POST',

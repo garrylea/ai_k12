@@ -8,6 +8,9 @@ import 'katex/dist/katex.min.css';
 
 interface Props {
   isLoadingHistory?: boolean;
+  onRetry?: () => void;  // P2: regenerate the last (errored / unanswered) turn
+  onConfirm?: () => void;  // P1: confirm the transcribed problem -> tutor
+  onReidentify?: () => void;  // P1: re-run image transcription
 }
 
 const UserAvatar = () => (
@@ -52,8 +55,8 @@ const ThinkingDots = () => (
 );
 
 // Inline error bubble shown when an assistant turn failed (P3). Displays the
-// human-readable error reason. The retry button is added in P2 (retry).
-const ErrorBubble = ({ error }: { error: ChatError }) => (
+// human-readable error reason. The retry button (P2) re-sends the last prompt.
+const ErrorBubble = ({ error, onRetry }: { error: ChatError; onRetry?: () => void }) => (
   <div className="flex items-start gap-2">
     <svg
       viewBox="0 0 24 24"
@@ -69,24 +72,48 @@ const ErrorBubble = ({ error }: { error: ChatError }) => (
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />
     </svg>
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
       <span className="text-[0.7rem] font-medium text-[#E5484D]">生成失败</span>
       <span className="leading-relaxed text-[#1D1D1F]">{error.message}</span>
-      {error.retryable && (
-        <span className="text-[0.7rem] text-[#A0A0A5]">可点击下方重试重新生成</span>
+      {error.retryable && onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="self-start mt-0.5 px-2.5 py-1 rounded-md bg-[#FF6B00] text-white text-xs hover:opacity-90 transition"
+        >
+          重试
+        </button>
       )}
     </div>
   </div>
 );
 
+// Hide the structured-question JSON block (```json ... ```) from the rendered
+// reply. The model appends it at the END of the formal answer for DB ingestion;
+// the backend strips it via a `replace` event once the full block arrives, but
+// during streaming the raw JSON would flash and widen the bubble.
+//
+// Precision (per user feedback): only strip the TRAILING ```json (the last one
+// = the structured question appended after the answer), so a legitimate ```json
+// code block in the answer body is preserved. This runs on the content stream
+// only - the reasoning/thinking chain is a separate stream and is NOT touched.
+// No-op for already-stripped history content (no fence present).
+function stripTrailingJson(content: string): string {
+  const idx = content.lastIndexOf('```json');
+  if (idx < 0) return content;
+  return content.slice(0, idx).replace(/\s+$/, '');
+}
+
 // Markdown + LaTeX (KaTeX) rendering for assistant replies. math via $...$ / $$...$$.
-const Markdown = ({ children }: { children: string }) => (
-  <div className="chat-prose">
+const Markdown = ({ children }: { children: string }) => {
+  const display = stripTrailingJson(children);
+  return (
+    <div className="chat-prose break-words">
     <ReactMarkdown
       remarkPlugins={[remarkMath, remarkGfm]}
       rehypePlugins={[rehypeKatex]}
       components={{
-        p: ({ children }) => <p className="leading-relaxed first:mt-0 last:mb-0">{children}</p>,
+        p: ({ children }) => <p className="leading-relaxed first:mt-0 last:mb-0 break-words">{children}</p>,
         ul: ({ children }) => <ul className="list-disc pl-5 my-1">{children}</ul>,
         ol: ({ children }) => <ol className="list-decimal pl-5 my-1">{children}</ol>,
         li: ({ children }) => <li className="leading-relaxed my-0.5">{children}</li>,
@@ -107,10 +134,11 @@ const Markdown = ({ children }: { children: string }) => (
         td: ({ children }) => <td className="border border-[#E5E5E5] px-2 py-1">{children}</td>,
       }}
     >
-      {children}
+      {display}
     </ReactMarkdown>
-  </div>
-);
+    </div>
+  );
+};
 
 const CloseIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
@@ -229,7 +257,7 @@ function ReasoningBlock({ reasoning, live }: { reasoning: string; live: boolean 
           </svg>
         )}
         {!open && (live ? livePreview : preview) && (
-          <span className="flex-1 truncate text-[#A0A0A5]">
+          <span className="flex-1 min-w-0 truncate text-[#A0A0A5]">
             {live ? livePreview : `${preview}…`}
           </span>
         )}
@@ -249,7 +277,7 @@ function ReasoningBlock({ reasoning, live }: { reasoning: string; live: boolean 
   );
 }
 
-export default function AuxChatPanel({ isLoadingHistory = false }: Props) {
+export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onConfirm, onReidentify }: Props) {
   const { messages, isStreaming } = useChatStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -272,7 +300,7 @@ export default function AuxChatPanel({ isLoadingHistory = false }: Props) {
           // Error messages render a dedicated error bubble (P3). Assistant replies
           // render as markdown+LaTeX; user messages stay plain text.
           const contentEl = isError
-            ? <ErrorBubble error={m.error!} />
+            ? <ErrorBubble error={m.error!} onRetry={onRetry} />
             : m.role === 'assistant'
               ? m.content
                 ? <Markdown>{m.content}</Markdown>
@@ -317,11 +345,52 @@ export default function AuxChatPanel({ isLoadingHistory = false }: Props) {
                 ) : (
                   contentEl
                 )}
+                {m.flow && !isError && !isStreaming && (
+                  <div className="mt-2 pt-2 border-t border-[#E5E5E5]/60">
+                    {m.flow.stage === 'confirm' && (
+                      <>
+                        <p className="text-xs text-[#86868B] mb-2">你问的是这道题吧？</p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={onConfirm}
+                            className="px-3 py-1.5 rounded-md bg-[#FF6B00] text-white text-xs hover:opacity-90 transition"
+                          >
+                            确认
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onReidentify}
+                            className="px-3 py-1.5 rounded-md border border-[#E5E5E5] text-[#86868B] text-xs hover:border-[#FF6B00] hover:text-[#FF6B00] transition"
+                          >
+                            重新识别
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {m.flow.stage === 'select' && (
+                      <p className="text-xs text-[#86868B]">你想解决哪道题?请告诉我</p>
+                    )}
+                  </div>
+                )}
               </div>
               {m.role === 'user' && <UserAvatar />}
             </div>
           );
         })
+      )}
+      {!isStreaming && !isLoadingHistory && messages.length > 0 &&
+        messages[messages.length - 1].role === 'user' && onRetry && (
+        <div className="flex justify-end items-center gap-2">
+          <span className="text-xs text-[#86868B]">未收到回复</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="px-3 py-1.5 rounded-md bg-[#FF6B00] text-white text-xs hover:opacity-90 transition"
+          >
+            重试
+          </button>
+        </div>
       )}
       <div ref={bottomRef} />
       {previewSrc && (

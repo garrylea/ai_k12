@@ -457,6 +457,9 @@ CREATE TABLE IF NOT EXISTS ai_dialogues (
   knowledge_point_id BIGINT DEFAULT NULL,
   title VARCHAR(200) DEFAULT NULL,
   status VARCHAR(10) NOT NULL DEFAULT 'active',
+  flow_state VARCHAR(30) NOT NULL DEFAULT 'idle',  -- P1 图片两阶段状态机: idle|awaiting_selection|awaiting_confirmation
+  pending_question TEXT DEFAULT NULL,              -- P1 已转录待确认的题干
+  pending_questions TEXT DEFAULT NULL,             -- P1 多题时的全部转录 JSON
   consecutive_fail_count SMALLINT NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
