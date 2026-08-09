@@ -3,6 +3,7 @@ import { timeoutConfig, fallbackConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
+import { mapLLMErrorToClient } from '../infra/model-client/errors.js';
 import { SafetyGuard } from '../infra/safety-guard.js';
 import { ResponseParser } from '../infra/response-parser.js';
 import { FallbackHandler } from '../infra/fallback-handler.js';
@@ -147,15 +148,31 @@ export class TutoringCapability {
         }
       }
     } catch (err) {
-      // Best-effort persist of partial content, then surface the error.
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      if (isAbort) {
+        // User clicked stop - persist partial content for context continuity,
+        // but do NOT surface an error (the user initiated the stop).
+        await this.conversationService.saveMessages({
+          dialogueId,
+          messages: [
+            { role: 'user', content: request.message, attachments: prepared.userAttachments },
+            { role: 'assistant', content: content || '[生成中断]', reasoning, type: 'socratic', model: prepared.routeResult.primary.modelId },
+          ],
+        }).catch(() => {});
+        return;
+      }
+      // Model error - persist ONLY the user message (decision 11: error replies
+      // are not persisted; on reload the last user message shows as awaiting
+      // retry). Surface a structured, human-readable error so the frontend can
+      // render an error bubble with an optional retry button.
       await this.conversationService.saveMessages({
         dialogueId,
         messages: [
           { role: 'user', content: request.message, attachments: prepared.userAttachments },
-          { role: 'assistant', content: content || '[生成中断]', reasoning, type: 'socratic', model: prepared.routeResult.primary.modelId },
         ],
       }).catch(() => {});
-      yield { type: 'error', message: err instanceof Error ? err.message : '生成失败' };
+      const info = mapLLMErrorToClient(err);
+      yield { type: 'error', code: info.code, message: info.message, retryable: info.retryable };
       return;
     }
 

@@ -154,7 +154,9 @@ export interface StreamEvent {
   replace?: boolean;
   fallback?: boolean;
   structuredQuestion?: StructuredQuestionOutput;  // surfaced on `done` for ingestion
-  message?: string;                   // error detail
+  message?: string;                   // error detail (human-readable)
+  code?: number;                      // error code (see mapLLMErrorToClient) - error events only
+  retryable?: boolean;                // whether the frontend should offer a retry button - error events only
 }
 
 // ========== LLM Client Error Hierarchy (§3.3.4, based on ../llm-client.js) ==========

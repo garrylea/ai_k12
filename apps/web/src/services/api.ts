@@ -4,13 +4,16 @@ export interface ApiResponse<T> {
   code: number;
   message: string;
   data: T;
+  retryable?: boolean;  // present on AI/LLM error responses (see mapLLMErrorToClient)
 }
 
 export class ApiError extends Error {
   code: number;
-  constructor(code: number, message: string) {
+  retryable?: boolean;
+  constructor(code: number, message: string, retryable?: boolean) {
     super(message);
     this.code = code;
+    this.retryable = retryable;
     this.name = 'ApiError';
   }
 }
@@ -29,7 +32,7 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const json: ApiResponse<T> = await res.json();
 
   if (json.code !== 0) {
-    throw new ApiError(json.code, json.message);
+    throw new ApiError(json.code, json.message, json.retryable);
   }
 
   return json.data;
@@ -185,7 +188,7 @@ export async function uploadFile(file: File, signal?: AbortSignal): Promise<Uplo
     signal,
   });
   const json: ApiResponse<UploadedFileResult> = await res.json();
-  if (json.code !== 0) throw new ApiError(json.code, json.message);
+  if (json.code !== 0) throw new ApiError(json.code, json.message, json.retryable);
   return json.data;
 }
 

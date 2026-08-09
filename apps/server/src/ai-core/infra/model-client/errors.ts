@@ -142,6 +142,71 @@ export function classifyError({ provider, status, body, headers, modelId }: Clas
 }
 
 /**
+ * Map an LLM error (or any thrown value) to a user-facing { code, message,
+ * retryable } triple for the frontend. Shared by the REST path (ai.service
+ * mapLLMError) and the streaming path (capability error events) so both
+ * surface the same human-readable error. Callers should skip AbortError
+ * (user-initiated stop) before calling this - it is not meant to be surfaced.
+ *
+ * Codes (see docs/superpowers/plans/2026-08-09-aux-image-two-stage-and-error-retry.md §4.1):
+ *   1005 欠费/额度不足(不可重试)   1006 鉴权失败(不可重试)
+ *   1007 无权限(不可重试)          1002 模型不存在(不可重试)
+ *   1010 内容违规(不可重试)        1011 请求过大(不可重试)
+ *   1001 参数有误(不可重试)        1008 限流(可重试)
+ *   1009 超时(可重试)              1012 网络不通(可重试)
+ *   5001 服务错误(可重试)          5000 未知异常(可重试)
+ */
+export interface ClientErrorInfo {
+  code: number;
+  message: string;
+  retryable: boolean;
+}
+
+export function mapLLMErrorToClient(err: unknown): ClientErrorInfo {
+  if (err instanceof InsufficientQuotaError) {
+    return { code: 1005, message: 'AI 服务额度已用完，请联系老师充值', retryable: false };
+  }
+  if (err instanceof AuthenticationError) {
+    return { code: 1006, message: 'AI 服务鉴权失败，请联系管理员', retryable: false };
+  }
+  if (err instanceof PermissionError) {
+    return { code: 1007, message: 'AI 服务无访问权限，请联系管理员', retryable: false };
+  }
+  if (err instanceof ResourceNotFoundError) {
+    return { code: 1002, message: 'AI 模型不存在，请联系管理员', retryable: false };
+  }
+  if (err instanceof ContentFilteredError) {
+    return { code: 1010, message: '内容不符合规范，请调整后重试', retryable: false };
+  }
+  if (err instanceof RequestTooLargeError) {
+    return { code: 1011, message: '请求内容过大，请精简后重试', retryable: false };
+  }
+  if (err instanceof ValidationFailedError) {
+    return { code: 1001, message: '请求参数有误，请检查后重试', retryable: false };
+  }
+  if (err instanceof RateLimitError) {
+    return { code: 1008, message: '请求过于频繁，请稍后重试', retryable: true };
+  }
+  if (err instanceof TimeoutError) {
+    // statusCode 0 = no HTTP response (DNS/connection failure normalized by
+    // classifyError) -> network; 408 = server-side timeout.
+    if (err.statusCode === 0) {
+      return { code: 1012, message: '网络连接失败，请检查网络后重试', retryable: true };
+    }
+    return { code: 1009, message: 'AI 响应超时，请重试', retryable: true };
+  }
+  if (err instanceof ServerError) {
+    return { code: 5001, message: 'AI 服务暂时不可用，请稍后重试', retryable: true };
+  }
+  if (err instanceof LLMClientError) {
+    // Unknown LLMClientError subclass - default to retryable.
+    return { code: 5000, message: 'AI 服务异常，请稍后重试', retryable: true };
+  }
+  // Non-LLM error (raw network/programming) - surface as generic retryable.
+  return { code: 5000, message: 'AI 服务异常，请稍后重试', retryable: true };
+}
+
+/**
  * Full-jitter exponential backoff: delay = random(0, min(maxBackoff, base * 2^attempt)).
  */
 export function jitteredBackoff(attempt: number, baseDelay: number, maxBackoff: number): number {

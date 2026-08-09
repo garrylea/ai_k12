@@ -40,3 +40,6 @@ apps/server/uploads/
 .superpowers/
 
 
+
+# Playwright MCP test artifacts
+.playwright-mcp/
