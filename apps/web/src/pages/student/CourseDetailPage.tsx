@@ -875,6 +875,8 @@ export default function CourseDetailPage() {
           <AnswerModal
             questions={questions}
             startIndex={modalStart}
+            cardId={card.id}
+            lessonId={lessonId}
             onSubmit={async (questionText, studentAnswer) => {
               const res = await judgePractice({
                 cardId: card.id,

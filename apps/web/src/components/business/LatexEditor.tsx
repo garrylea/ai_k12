@@ -17,12 +17,18 @@ export function LatexEditor({ value, onChange }: Props) {
     }
     const start = ta.selectionStart ?? value.length;
     const end = ta.selectionEnd ?? value.length;
-    const next = value.slice(0, start) + latex + value.slice(end);
+    // 光标在 $...$ 数学模式内时光标前 $ 为奇数个；
+    // $ 按钮直接插入裸 $；其余符号在数学模式外时自动用 $...$ 包裹，让预览的 KaTeX 能渲染
+    const isDollar = latex === '$';
+    const inMath = (value.slice(0, start).match(/\$/g) || []).length % 2 === 1;
+    const wrapped = !isDollar && !inMath;
+    const insertText = wrapped ? `$${latex}$` : latex;
+    const next = value.slice(0, start) + insertText + value.slice(end);
     onChange(next);
-    // 光标移到首个 {} 内
     requestAnimationFrame(() => {
+      const lead = wrapped ? 1 : 0; // 包裹时前面多一个 $
       const ph = latex.indexOf('{}');
-      const pos = ph >= 0 ? start + ph + 1 : start + latex.length;
+      const pos = ph >= 0 ? start + lead + ph + 1 : start + lead + latex.length;
       ta.focus();
       ta.setSelectionRange(pos, pos);
     });
