@@ -51,16 +51,23 @@ describe('ModelRouter', () => {
     expect(result.fallback?.modelId).toBe('qwen3.7-max');
   });
 
-  // Task 14a: image-aware routing
-  it('routes math tutoring with image to qwen-vl-max', () => {
+  // P1: image tutoring is two-stage. Tutoring no longer overrides to a VL model
+  // on hasImage - images are transcribed by the `transcribe` scene first, then
+  // the confirmed text is tutored by the normal text route (qwen3.7-max).
+  it('tutoring ignores hasImage and uses the text model (P1)', () => {
     const result = router.route({ scene: 'tutoring', subject: 'math', hasImage: true });
-    expect(result.primary.modelId).toBe('qwen-vl-max');
-    expect(result.fallback?.modelId).toBe('qwen3.7-max');
+    expect(result.primary.modelId).toBe('qwen3.7-max');
   });
 
   it('does not route to qwen-vl-max when hasImage is false', () => {
     const result = router.route({ scene: 'tutoring', subject: 'math', hasImage: false });
     expect(result.primary.modelId).not.toBe('qwen-vl-max');
+  });
+
+  it('transcribe scene routes to qwen3-vl-plus (P1)', () => {
+    const result = router.route({ scene: 'transcribe', subject: 'math' });
+    expect(result.primary.modelId).toBe('qwen3-vl-plus');
+    expect(result.fallback?.modelId).toBe('qwen-vl-max');
   });
 
   it('does not route to qwen-vl-max for non-tutoring scenes even with image', () => {

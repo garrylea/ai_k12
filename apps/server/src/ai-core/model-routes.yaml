@@ -62,8 +62,28 @@ models:
       output: 0.06
     supportsStreaming: true
 
+  # P1: VL model for image transcription (OCR + geometry description).
+  # qwen3-vl-plus supports JSON output reliably; thinking NOT enabled (decision 8).
+  qwen3-vl-plus:
+    provider: qwen
+    modelId: qwen3-vl-plus
+    baseUrl: ${QWEN_BASE_URL}
+    apiKey: ${QWEN_API_KEY}
+    contextWindow: 32768
+    maxOutputTokens: 8192
+    costPer1K:
+      input: 0.004
+      output: 0.012
+    supportsStreaming: true
+
 # Route rules (§3.1.3)
 routes:
+  # P1: image transcription -> qwen3-vl-plus (fallback qwen-vl-max). Pure OCR,
+  # no tutoring. Selection classification reuses the structuring route (deepseek-v4-flash).
+  transcribe:
+    - subject: "*"
+      primary: qwen3-vl-plus
+      fallback: qwen-vl-max
   tutoring:
     - subject: math
       difficulty: [1, 2]

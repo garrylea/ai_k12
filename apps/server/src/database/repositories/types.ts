@@ -9,6 +9,9 @@ export interface AiDialogueRow extends RowDataPacket {
   knowledge_point_id: number | null;
   title: string | null;
   status: 'active' | 'archived' | 'completed';
+  flow_state: 'idle' | 'awaiting_selection' | 'awaiting_confirmation';
+  pending_question: string | null;
+  pending_questions: string | null;
   consecutive_fail_count: number;
   created_at: Date;
   updated_at: Date;
