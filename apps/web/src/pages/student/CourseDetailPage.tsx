@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, updateProgress, judgePractice, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
+import { fetchLessonCards, updateProgress, judgePractice, getPracticeHint, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
 import { BackButton, LogoutButton } from '@/components/base';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
@@ -206,7 +206,7 @@ export default function CourseDetailPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStart, setModalStart] = useState(0);
   const [resultOpen, setResultOpen] = useState(false);
-  const { cardId: sessionCardId, setSession, record, answers, questions: sessionQuestions, reset } = usePracticeStore();
+  const { cardId: sessionCardId, setSession, record, answers, questions: sessionQuestions, reset, hints, setHint } = usePracticeStore();
 
   useEffect(() => {
     autoToggleNightMode();
@@ -380,12 +380,15 @@ export default function CourseDetailPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 答题弹窗 / 结果列表 / 庆祝覆盖层打开时，禁用左右键翻页：
+      // 否则会同时切卡并触发「翻页关闭 modal」effect，导致弹窗被误关
+      if (modalOpen || resultOpen || showCelebration) return;
       if (e.key === 'ArrowLeft') setPage(p => Math.max(0, p - 1));
       if (e.key === 'ArrowRight') setPage(p => Math.min(total - 1, p + 1));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [total]);
+  }, [total, modalOpen, resultOpen, showCelebration]);
 
   if (loading) return <LoadingSkeleton />;
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
@@ -703,14 +706,17 @@ export default function CourseDetailPage() {
                     </div>
                   </div>
 
-                  {/* 悬浮答疑按钮（柔和钢蓝，不分散学习注意力） */}
-                  <button
-                    onClick={() => navigate('/student/ai-discuss', { state: { cardId: card.id, lessonId } })}
-                    className="absolute right-6 bottom-20 w-14 h-14 rounded-full bg-[var(--learn-btn-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--learn-btn-primary-hover)] transition-colors z-10"
-                    title="思辨答疑"
-                  >
-                    <ChatIcon />
-                  </button>
+                  {/* 悬浮答疑按钮（柔和钢蓝，不分散学习注意力）
+                      practice 卡的答疑已移入 AnswerModal（提示 / 让 AI 讲一讲），此处不再渲染 */}
+                  {card.cardType !== 'practice' && (
+                    <button
+                      onClick={() => navigate('/student/ai-discuss', { state: { cardId: card.id, lessonId } })}
+                      className="absolute right-6 bottom-20 w-14 h-14 rounded-full bg-[var(--learn-btn-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--learn-btn-primary-hover)] transition-colors z-10"
+                      title="思辨答疑"
+                    >
+                      <ChatIcon />
+                    </button>
+                  )}
                 </div>
               </motion.div>
             </AnimatePresence>
@@ -877,17 +883,38 @@ export default function CourseDetailPage() {
             startIndex={modalStart}
             cardId={card.id}
             lessonId={lessonId}
+            hints={hints}
             onSubmit={async (questionText, studentAnswer) => {
-              const res = await judgePractice({
+              const n = questions.find(q => q.text === questionText)?.n ?? '0-0';
+              try {
+                const res = await judgePractice({
+                  cardId: card.id,
+                  lessonId,
+                  subjectId,
+                  questionText,
+                  studentAnswer,
+                });
+                record(n, studentAnswer, res);
+                return res;
+              } catch {
+                // 判定失败（超时/服务异常）：仍记录一条失败结果，重抛让 AnswerModal 标记该题 failed
+                record(
+                  n,
+                  studentAnswer,
+                  { questionId: null, isCorrect: false, method: 'ai', analysis: null, errorType: null },
+                  { failed: true },
+                );
+                throw new Error('判定失败');
+              }
+            }}
+            onRequestHint={async (questionText, n) => {
+              const res = await getPracticeHint({
                 cardId: card.id,
                 lessonId,
                 subjectId,
                 questionText,
-                studentAnswer,
               });
-              const n = questions.find(q => q.text === questionText)?.n ?? '0-0';
-              record(n, studentAnswer, res);
-              return res;
+              setHint(n, res.hint);
             }}
             onFinish={() => { setModalOpen(false); setResultOpen(true); }}
             onClose={() => setModalOpen(false)}

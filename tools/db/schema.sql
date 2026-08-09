@@ -175,6 +175,10 @@ CREATE TABLE IF NOT EXISTS cards (
   title VARCHAR(200) DEFAULT NULL,
   content TEXT NOT NULL,
   content_metadata TEXT DEFAULT NULL,
+  -- AI 生成的题目提示缓存（JSON 字符串：{ "<题目文本>": "<提示文本>", ... }）。
+  -- Card 级共享（不分学生）：同一题对所有人都用同一提示，省 AI。首次点提示时由
+  -- PracticeService.getHint 调 HintCapability 生成并写回，后续命中直返。
+  hints TEXT DEFAULT NULL,
   knowledge_point_ids TEXT DEFAULT NULL,
   textbook_page VARCHAR(20) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

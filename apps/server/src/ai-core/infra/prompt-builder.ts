@@ -76,6 +76,9 @@ export class PromptBuilder {
     if (capability === 'explanation') {
       return mode === 'knowledge_retry' ? `explanation/knowledge-retry.md` : `explanation/error-analysis.md`;
     }
+    if (capability === 'hint') {
+      return `hint/${subject}.md`;
+    }
     if (capability === 'variation') {
       return `variation/generate.md`;
     }

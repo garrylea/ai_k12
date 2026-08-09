@@ -20,7 +20,6 @@ const SYMBOLS: SymbolDef[] = [
   { group: '几何', label: '°', latex: '^{\\circ}' },
   { group: '其它', label: '->', latex: '\\rightarrow' },
   { group: '其它', label: 'π', latex: '\\pi' },
-  { group: '其它', label: '$', latex: '$$' },
 ];
 
 const GROUPS = ['运算', '幂根', '几何', '其它'];

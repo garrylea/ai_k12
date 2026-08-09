@@ -331,6 +331,7 @@
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
 | POST | `/api/practice/judge` | 课堂练习判对错。学生在 practice 卡片答题后调用，返回对错、判定方法与解析；答错自动入主线错题本（`main_error_books.source='practice'`）。三路由：(1) 题库命中 + 客观题（choice/true_false/fill_blank）-> exact 答案比对；(2) 题库命中主观题（short_answer/proof）或未命中 -> AI JudgmentCapability 判定；(3) 答错 -> 写入 `main_error_books`（未入库的题先经 QuestionStructuringCapability 结构化后插 `questions` 表，结构化失败则 `question_id=NULL` 仅存题面到 `wrong_answer_text`）。AI 判定失败返回 503（`code=5001`，不写错题本）。请求体：`{cardId, lessonId, subjectId, questionText, studentAnswer}`；响应：`{questionId(nullable), isCorrect, method:'exact'|'ai', analysis(nullable), errorType(nullable, enum: logic/calculation/format/missing), errorBookId(nullable)}`。题面来源：`cards.content_metadata.questions[].text`（管线抽取）。 | MVP |
+| POST | `/api/practice/hint` | 课堂练习提示（AI 生成 + Card 级缓存）。学生在 practice 卡片答题前点「提示」调用。先查 `cards.hints` 缓存（JSON：`{ "<题目文本>": "<提示文本>" }`，key 即「题目标题」）命中直返（不调 AI）；未命中则调 HintCapability 生成苏格拉底式提示（只启发不给答案，遵循 Socratic 原则）并写回 `cards.hints`，供后续复用（Card 级共享，不分学生，省 AI）。AI 生成失败返回 503（`code=5001`，前端降级显示静态文案，不阻断答题）。请求体：`{cardId, lessonId, subjectId, questionText}`；响应：`{hint, cached:boolean}`。 | MVP |
 
 ---
 
@@ -764,6 +765,40 @@ Practice Service 计算 contentHash -> questionsRepo.findByContentHash
   │  └─ isCorrect=false -> 前端展示解析，错题进入主线错题本（下次进入新课触发清零检查）
 ```
 
+### 6.10 课堂练习提示（AI 生成 + Card 级缓存）
+
+```text
+学生在 practice 卡片答题前点「提示」
+  │
+  ▼
+前端先查 session 缓存（practiceStore.hints[q.n]）命中 -> 直接展示，不请求后端
+  │  └─ 未命中 -> POST /api/practice/hint
+  │     请求体：{cardId, lessonId, subjectId, questionText}
+  │
+  ▼
+Practice Service.getHint -> cardsRepo.findHintsById(cardId)
+  │  读取 cards.hints（JSON：{ "<题目文本>": "<提示文本>" }）
+  │
+  ├─ 命中（hints[questionText] 存在）
+  │  ▼
+  │  直接返回 { hint, cached: true }（不调 AI）
+  │
+  └─ 未命中
+     ▼
+     AI HintCapability.generate（scene='hint'，苏格拉底式提示，只启发不给答案）
+     ▼
+     ├─ 成功：cardsRepo.upsertHint(cardId, questionText, hint) 写回 cards.hints
+     │        返回 { hint, cached: false }
+     └─ 失败：HTTP 503 code=5001（不写缓存，前端降级显示静态文案，不阻断答题）
+  │
+  ▼
+前端 setHint(n, hint) 写入 session 缓存，用 ReactMarkdown+KaTeX 渲染提示（含 $...$ 公式）
+  │  └─ 同题再次点提示 -> 命中 session 缓存，免请求
+```
+
+> 缓存是 Card 级共享（不分学生）：同一题对所有人都用同一提示，最大化省 AI。
+> key = 题目文本（即「题目标题」），与 judge 流程传的 questionText 一致，自洽。
+
 ---
 
 ## 7. API 与前端页面对照表
@@ -964,3 +999,4 @@ POST /api/error-book/items/{errorItemId}/redo
 | v1.0 | 2026-06-26 | 初始版本，覆盖 MVP 核心接口与数据流 |
 | v1.1 | 2026-08-01 | 新增 `POST /api/progress/update` 进度更新接口；更新 P2.2 课程详情左侧栏为数据驱动的 2~3 项结构（错题+学习内容+可选练习）；修复完成课程后进入下一课的 race condition，接口返回 `currentLessonId` 供前端定位下一课 |
 | v1.2 | 2026-08-06 | 新增 `POST /api/practice/judge` 课堂练习判对错接口（MVP）；新增 Practice 服务分组；新增 §6.9 课堂练习判对错数据流；`main_error_books.source` 枚举补 `practice` 值 |
+| v1.3 | 2026-08-09 | 新增 `POST /api/practice/hint` 课堂练习提示接口（MVP，AI 生成 + Card 级缓存）；`cards` 表新增 `hints` 字段（JSON 提示缓存，key=题目文本）；新增 §6.10 课堂练习提示数据流；ai-core 新增 `hint` 场景（HintCapability + prompts/hint/math.md，苏格拉底式提示不给答案） |

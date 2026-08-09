@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek';
 export type Difficulty = 1 | 2 | 3;
@@ -45,7 +45,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry';
 
@@ -461,6 +461,18 @@ export interface ExplanationRequest {
   wrongAnswer: string;
   errorHistory?: { question: string; wrongAnswer: string; attempts: number }[];
   knowledgePoint: { id: string; name: string };
+}
+
+// ========== Hint Types (课堂练习提示 - 苏格拉底式启发，不给答案) ==========
+
+export interface HintRequest {
+  questionContent: string;
+  subject: Subject;
+}
+
+export interface HintResponse {
+  content: string;
+  reasoning?: string;                // thinking(reasoning_content) for frontend display
 }
 
 // ========== Variation Types (§4.4.4) ==========

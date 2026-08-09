@@ -82,8 +82,10 @@ routes:
 
   grading:
     - subject: math
-      primary: qwen3.7-max
-      fallback: kimi
+      # deepseek-v4-flash 为主：qwen3.7-max 是 reasoner，难题判定常 >45s 超时
+      # （实测多步综合题 >90s），改用 deepseek-v4-flash（实测 ~19s，已用于 structuring）。
+      primary: deepseek-v4-flash
+      fallback: qwen3.7-max
     - subject: chinese
       primary: kimi
       fallback: qwen3.7-max
@@ -93,8 +95,9 @@ routes:
 
   judgment:
     - subject: math
-      primary: qwen3.7-max
-      fallback: kimi
+      # 同 grading：判对错是轻量任务，无需重 reasoner。deepseek-v4-flash 快且可靠。
+      primary: deepseek-v4-flash
+      fallback: qwen3.7-max
 
   explanation:
     - subject: math
@@ -105,6 +108,12 @@ routes:
       fallback: qwen3.7-max
     - subject: english
       primary: kimi
+      fallback: qwen3.7-max
+
+  hint:
+    # 课堂练习提示：轻量启发任务，用快模型（同 judgment/grading），无需重 reasoner。
+    - subject: math
+      primary: deepseek-v4-flash
       fallback: qwen3.7-max
 
   variation:

@@ -1,16 +1,25 @@
 import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { QuestionsRepository, MainErrorBooksRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
+import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
-/** 客观题类型集合：命中题库时走 exact 比对，不调 AI。 */
-const OBJECTIVE_TYPES = new Set(['choice', 'true_false', 'fill_blank']);
+/** 仅走 exact 比对的客观题：选项/判断标签形式固定，可靠，不等即判错。
+ *  fill_blank 答案形式多样（如 2/3 vs \frac{2}{3}），命中时单独处理：归一化相等走 exact，不等走 AI 复核。 */
+const EXACT_ONLY_TYPES = new Set(['choice', 'true_false']);
 
-/** 答案归一：NFKC 全半角归一 + 去空白 + 去 $ + 转小写。 */
+/** 答案归一：NFKC 全半角归一 + 去空白 + 去 $ + LaTeX \frac{a}{b}->a/b（递归）+ 转小写。 */
 function normalizeAnswer(s: string): string {
-  return (s || '').normalize('NFKC').replace(/\s+/g, '').replace(/\$+/g, '').toLowerCase();
+  let r = (s || '').normalize('NFKC').replace(/\s+/g, '').replace(/\$+/g, '');
+  // \frac{a}{b} / \dfrac{a}{b} -> a/b（递归处理嵌套，使 2/3 与 \frac{2}{3} 归一相同）
+  let prev: string;
+  do {
+    prev = r;
+    r = r.replace(/\\d?frac\{([^{}]*)\}\{([^{}]*)\}/g, '$1/$2');
+  } while (r !== prev);
+  return r.toLowerCase();
 }
 
 /**
@@ -55,6 +64,22 @@ export interface JudgeOutput {
   errorBookId: number | undefined;
 }
 
+export interface HintInput {
+  /** 当前未用于 getHint，保留以与 JudgeInput 对齐（未来按课时取知识点上下文）。 */
+  studentId: number;
+  subjectId: number;
+  cardId: number;
+  lessonId: number;
+  /** 题目文本，同时作为 cards.hints JSON 的 key（即「题目标题」）。 */
+  questionText: string;
+}
+
+export interface HintOutput {
+  hint: string;
+  /** true = 命中 cards.hints 缓存直返（未调 AI）；false = 本次新生成并已写回缓存。 */
+  cached: boolean;
+}
+
 @Injectable()
 export class PracticeService {
   private readonly logger = new Logger(PracticeService.name);
@@ -64,6 +89,8 @@ export class PracticeService {
     private readonly mainErrorRepo: MainErrorBooksRepository,
     private readonly structuring: QuestionStructuringCapability,
     private readonly judgment: JudgmentCapability,
+    private readonly cardsRepo: CardsRepository,
+    private readonly hint: HintCapability,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -75,13 +102,19 @@ export class PracticeService {
     let analysis: string | null = null;
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
 
-    if (q && OBJECTIVE_TYPES.has(q.type)) {
-      // 路由 1：题库命中 + 客观题 -> exact 比对
+    if (q && EXACT_ONLY_TYPES.has(q.type)) {
+      // 路由 1：choice/true_false 命中 -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
       method = 'exact';
       analysis = isCorrect ? null : `正确答案：${q.answer}`;
+    } else if (q && q.type === 'fill_blank' && compareAnswer(input.studentAnswer, q.answer, q.options)) {
+      // 路由 1b：fill_blank 命中且归一化相等 -> exact 判对（省 AI）。
+      // 不等则落到路由 2 走 AI，避免 2/3 vs \frac{2}{3} 等形式差异被误判错。
+      isCorrect = true;
+      method = 'exact';
+      analysis = null;
     } else {
-      // 路由 2：题库命中 short_answer/proof 或未命中 -> AI 判定
+      // 路由 2：fill_blank 不等 / short_answer / proof / 未命中 -> AI 判定
       const questionType = q?.type === 'proof' ? 'proof' : 'calculation';
       // spec §11: AI 判定失败 -> 503，不进错题本，前端可区分处理。
       // 参考 ai.service.ts mapLLMError 的错误风格（code 5001, HTTP 503）。
@@ -166,5 +199,48 @@ export class PracticeService {
     }
 
     return { questionId, isCorrect, method, analysis, errorType, errorBookId };
+  }
+
+  /**
+   * 课堂练习「提示」：先查 cards.hints 缓存（命中直返，省 AI），未命中则调
+   * HintCapability 生成苏格拉底式提示（不给答案）并写回 cards.hints，供后续复用。
+   * 缓存是 Card 级共享（不分学生）：同一题对所有人都用同一提示。
+   * AI 生成失败 -> 抛 503（code 5001），前端降级显示静态文案，不阻断答题。
+   */
+  async getHint(input: HintInput): Promise<HintOutput> {
+    // 1. 查缓存（key = 题目文本）
+    const hintsRaw = await this.cardsRepo.findHintsById(input.cardId);
+    if (hintsRaw) {
+      try {
+        const hintsObj = JSON.parse(hintsRaw) as Record<string, string>;
+        const cached = hintsObj[input.questionText];
+        if (cached) {
+          return { hint: cached, cached: true };
+        }
+      } catch {
+        // 损坏 JSON：忽略缓存，走生成路径（upsertHint 会覆写）
+      }
+    }
+
+    // 2. 未命中 -> AI 生成
+    try {
+      const result = await this.hint.generate({
+        questionContent: input.questionText,
+        subject: 'math',
+      });
+      // 3. 写回缓存（失败不阻断返回，仅记日志）
+      try {
+        await this.cardsRepo.upsertHint(input.cardId, input.questionText, result.content);
+      } catch (err) {
+        this.logger.error(`upsertHint failed (cardId=${input.cardId}): ${err}`);
+      }
+      return { hint: result.content, cached: false };
+    } catch (err) {
+      this.logger.error(`hint.generate failed: ${err}`);
+      throw new HttpException(
+        { code: 5001, message: '提示生成失败，请重试' },
+        503,
+      );
+    }
   }
 }

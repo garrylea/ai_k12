@@ -17,18 +17,13 @@ export function LatexEditor({ value, onChange }: Props) {
     }
     const start = ta.selectionStart ?? value.length;
     const end = ta.selectionEnd ?? value.length;
-    // 光标在 $...$ 数学模式内时光标前 $ 为奇数个；
-    // $ 按钮直接插入裸 $；其余符号在数学模式外时自动用 $...$ 包裹，让预览的 KaTeX 能渲染
-    const isDollar = latex === '$';
-    const inMath = (value.slice(0, start).match(/\$/g) || []).length % 2 === 1;
-    const wrapped = !isDollar && !inMath;
-    const insertText = wrapped ? `$${latex}$` : latex;
-    const next = value.slice(0, start) + insertText + value.slice(end);
+    // 左侧始终存放裸 LaTeX（不含 $）；预览侧按需自动补 $...$
+    const next = value.slice(0, start) + latex + value.slice(end);
     onChange(next);
     requestAnimationFrame(() => {
-      const lead = wrapped ? 1 : 0; // 包裹时前面多一个 $
+      // 含 {} 占位的模板（如 \frac{}{} \sqrt{}）光标落进第一个花括号内
       const ph = latex.indexOf('{}');
-      const pos = ph >= 0 ? start + lead + ph + 1 : start + lead + latex.length;
+      const pos = ph >= 0 ? start + ph + 1 : start + latex.length;
       ta.focus();
       ta.setSelectionRange(pos, pos);
     });
@@ -41,7 +36,7 @@ export function LatexEditor({ value, onChange }: Props) {
         ref={ref}
         value={value}
         onChange={e => onChange(e.target.value)}
-        placeholder="在此用 LaTeX 作答，用 $...$ 包裹数学公式"
+        placeholder="在此用 LaTeX 作答，数学公式无需输入 $，直接写 LaTeX 即可"
         className="flex-1 w-full p-3 resize-none outline-none bg-transparent text-[var(--text-primary)] font-mono text-sm leading-relaxed"
       />
     </div>
