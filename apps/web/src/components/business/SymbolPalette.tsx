@@ -9,9 +9,8 @@ const SYMBOLS: SymbolDef[] = [
   { group: '运算', label: '≤', latex: '\\leq' },
   { group: '运算', label: '≥', latex: '\\geq' },
   { group: '运算', label: '≠', latex: '\\neq' },
-  { group: '幂根', label: 'x²', latex: 'x^{2}' },
   { group: '幂根', label: '√', latex: '\\sqrt{}' },
-  { group: '幂根', label: '分式', latex: '\\frac{}{}' },
+  { group: '幂根', label: '½', latex: '\\frac{}{}' },
   { group: '几何', label: '∵', latex: '\\because' },
   { group: '几何', label: '∴', latex: '\\therefore' },
   { group: '几何', label: '△', latex: '\\triangle' },
@@ -28,9 +27,10 @@ const GROUPS = ['运算', '幂根', '几何', '其它'];
 
 export function SymbolPalette({ onInsert }: { onInsert: (latex: string) => void }) {
   return (
-    <div className="flex flex-wrap gap-1.5 p-2 border-b border-[var(--bg-subtle)]">
-      {GROUPS.map(g => (
+    <div className="flex flex-wrap items-center gap-1.5 p-2 border-b border-[var(--bg-subtle)]">
+      {GROUPS.map((g, gi) => (
         <div key={g} className="flex items-center gap-1">
+          {gi > 0 && <div className="w-px h-[22px] bg-[var(--bg-subtle)] mx-0.5" />}
           {SYMBOLS.filter(s => s.group === g).map(s => (
             <button
               key={s.label}
