@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -30,10 +30,19 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, onSubmit,
   const [submitting, setSubmitting] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advancing, setAdvancing] = useState(false);
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const q = questions[idx];
 
+  // 卸载时清理自动切题定时器，防止 onClose/Discuss 后仍触发 onFinish
+  useEffect(() => () => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+  }, []);
+
+  if (!q) return null;
+
   const handleSubmit = async () => {
-    if (!answer.trim() || submitting) return;
+    if (!answer.trim() || submitting || advancing) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -45,17 +54,20 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, onSubmit,
       }
       setAnswer('');
       setShowHint(false);
-      // 1.5s 后自动切题
-      setTimeout(() => {
+      setSubmitting(false);
+      setAdvancing(true);
+      // 1.5s 后自动切题；定时器存 ref 以便卸载时清理
+      advanceTimer.current = setTimeout(() => {
+        advanceTimer.current = null;
+        setAdvancing(false);
         if (idx + 1 < questions.length) {
           setIdx(idx + 1);
         } else {
           onFinish();
         }
       }, 1500);
-    } catch (e: any) {
-      setError(e?.message || '判对错失败，请重试');
-    } finally {
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '判对错失败，请重试');
       setSubmitting(false);
     }
   };
@@ -88,7 +100,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, onSubmit,
               {/* 提示 */}
               <button
                 onClick={() => setShowHint(!showHint)}
-                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--bg-card)] flex items-center justify-center text-[var(--warning)] shadow-sm hover:bg-[#FFF8F0] transition-colors"
+                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--bg-card)] flex items-center justify-center text-[var(--warning)] shadow-sm hover:bg-[var(--brand-100)] transition-colors"
                 title="提示"
                 aria-label="提示"
               >
@@ -101,7 +113,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, onSubmit,
               {/* 让 AI 讲一讲 */}
               <button
                 onClick={handleDiscuss}
-                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--bg-card)] flex items-center justify-center text-[var(--info)] shadow-sm hover:bg-[#F0F5FA] transition-colors"
+                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--bg-card)] flex items-center justify-center text-[var(--info)] shadow-sm hover:bg-[var(--bg-subtle)] transition-colors"
                 title="让 AI 讲一讲"
                 aria-label="让 AI 讲一讲"
               >
@@ -113,7 +125,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, onSubmit,
           </div>
           {/* 提示抽屉 */}
           {showHint && (
-            <div className="mt-3 p-3 rounded-lg bg-[#FFF8F0] border-l-[3px] border-[var(--warning)]">
+            <div className="mt-3 p-3 rounded-lg bg-[var(--brand-100)] border-l-[3px] border-[var(--warning)]">
               <p className="text-sm text-[var(--text-primary)] leading-relaxed">
                 仔细审题，从已知条件出发，逐步推理。如果需要更多帮助，可以点击右侧「让 AI 讲一讲」。
               </p>
@@ -150,7 +162,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, onSubmit,
           {/* 提交 */}
           <button
             onClick={handleSubmit}
-            disabled={!answer.trim() || submitting}
+            disabled={!answer.trim() || submitting || advancing}
             className="w-12 h-12 rounded-full bg-[var(--brand-500)] text-white flex items-center justify-center disabled:opacity-40 hover:bg-[var(--brand-600)] transition-all shadow-md"
             title="提交"
             aria-label="提交"
