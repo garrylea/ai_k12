@@ -7,9 +7,10 @@ timeout:
   default: 45000
   tutoring: 45000
   grading: 45000
-  judgment: 45000
+  judgment: 90000
   variation: 60000
   explanation: 60000
+  hint: 45000
   safety: 10000
   structuring: 45000
 

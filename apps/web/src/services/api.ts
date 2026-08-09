@@ -373,3 +373,23 @@ export function judgePractice(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+// --- Practice hint (课堂练习提示 - AI 生成 + Card 级缓存) ---
+
+export interface HintResult {
+  hint: string;
+  /** true = 命中后端 cards.hints 缓存直返；false = 本次 AI 新生成并已写回缓存。 */
+  cached: boolean;
+}
+
+export function getPracticeHint(payload: {
+  cardId: number;
+  lessonId: number;
+  subjectId: number;
+  questionText: string;
+}): Promise<HintResult> {
+  return fetchApi<HintResult>('/practice/hint', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

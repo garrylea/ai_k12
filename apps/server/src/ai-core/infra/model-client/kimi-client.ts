@@ -88,6 +88,9 @@ export class KimiClient implements ProviderAdapter {
           temperature: request.temperature ?? 0.7,
           max_tokens: request.maxTokens ?? request.model.maxOutputTokens,
           stream: true,
+          // 与非流式 chat() 对齐：流式路径同样下发 response_format，否则
+          // judgment/grading/structuring 的 json_object 约束会被静默丢弃。
+          response_format: request.responseFormat === 'json_object' ? { type: 'json_object' } : undefined,
         }),
         signal: AbortSignal.any([AbortSignal.timeout(request.timeout ?? 30000), ...(request.signal ? [request.signal] : [])]),
       });

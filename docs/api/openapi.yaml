@@ -2626,6 +2626,50 @@ paths:
                     type: string
                     example: 判定失败，请重试
 
+  /practice/hint:
+    post:
+      tags: [Practice]
+      summary: 课堂练习提示（AI 生成 + Card 级缓存）
+      description: >-
+        学生在 practice 卡片答题前点「提示」调用。先查 cards.hints 缓存（JSON：
+        { "<题目文本>": "<提示文本>" }）命中直返（不调 AI）；未命中则调
+        HintCapability 生成苏格拉底式提示（只启发不给答案）并写回 cards.hints，
+        供后续复用（Card 级共享，不分学生）。AI 生成失败返回 503（code=5001，
+        前端降级显示静态文案，不阻断答题）。
+      operationId: getPracticeHint
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HintRequest'
+      responses:
+        '200':
+          description: 提示内容
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/HintResult'
+        '503':
+          description: AI 提示生成失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 5001
+                  message:
+                    type: string
+                    example: 提示生成失败，请重试
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3718,6 +3762,33 @@ components:
           type: integer
           nullable: true
           description: 答错时写入 main_error_books 的 id；答对或 AI 判定失败时不返回
+
+    HintRequest:
+      type: object
+      required: [cardId, lessonId, subjectId, questionText]
+      properties:
+        cardId:
+          type: integer
+          description: 当前 practice 卡片 ID
+        lessonId:
+          type: integer
+          description: 当前课程 ID
+        subjectId:
+          type: integer
+          description: 学科 ID
+        questionText:
+          type: string
+          description: 题面原文，同时作为 cards.hints JSON 的 key（即「题目标题」）
+
+    HintResult:
+      type: object
+      properties:
+        hint:
+          type: string
+          description: 苏格拉底式提示文本（只启发不给答案，公式用 $...$ LaTeX）
+        cached:
+          type: boolean
+          description: true=命中 cards.hints 缓存直返（未调 AI）；false=本次 AI 新生成并已写回缓存
 
     RegisterRequest:
       type: object

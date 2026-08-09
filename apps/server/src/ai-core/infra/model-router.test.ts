@@ -40,7 +40,15 @@ describe('ModelRouter', () => {
 
   it('matches without difficulty (loose match)', () => {
     const result = router.route({ scene: 'grading', subject: 'math' });
-    expect(result.primary.modelId).toBe('qwen3.7-max');
+    expect(result.primary.modelId).toBe('deepseek-v4-flash');
+    expect(result.fallback?.modelId).toBe('qwen3.7-max');
+  });
+
+  it('routes math judgment to deepseek-v4-flash primary with qwen fallback', () => {
+    // qwen3.7-max (reasoner) 难题判定常超时 -> 改用 deepseek-v4-flash（同 grading）
+    const result = router.route({ scene: 'judgment', subject: 'math' });
+    expect(result.primary.modelId).toBe('deepseek-v4-flash');
+    expect(result.fallback?.modelId).toBe('qwen3.7-max');
   });
 
   // Task 14a: image-aware routing
