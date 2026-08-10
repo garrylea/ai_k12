@@ -2760,6 +2760,36 @@ paths:
                     type: string
                     example: 创建讨论会话失败
 
+  /practice/previous-errors:
+    get:
+      tags: [Practice]
+      summary: 查询当前课上一节课的未清零错题数
+      description: >-
+        用于课程详情页左侧阶段栏「错题清零」门禁。服务端按 units.sort_order /
+        lessons.sort_order 推导当前课的上一节课，再统计该学生在该课的未清零主线错题数。
+        若当前课是整本教材第一课，返回 count=0、lessonId=null。
+      operationId: getPreviousLessonErrors
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: lessonId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: 当前课 id
+      responses:
+        '200':
+          description: 上一课未清零错题数
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PreviousErrorsResult'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3498,9 +3528,17 @@ components:
         createdAt:
           type: string
           format: date-time
+        sourceRefId:
+          type: integer
+          nullable: true
+          description: 来源记录 ID（homework/assessment 的 submission_id；practice/discuss 时为 cards.id）
+        lessonId:
+          type: integer
+          nullable: true
+          description: 错题所属课时 id（冗余字段，用于快速定位上一节课是否有未清零错题）
         source:
           type: string
-          enum: [homework, unit_test, midterm, final, auxiliary, practice]
+          enum: [homework, unit_test, midterm, final, auxiliary, practice, discuss]
 
     RedoRequest:
       type: object
@@ -3931,6 +3969,18 @@ components:
         dialogueId:
           type: string
           description: mainline 对话 id（find-or-create：可能复用已有讨论），前端据此走 /ai/tutor/stream 做苏格拉底讨论
+
+    PreviousErrorsResult:
+      type: object
+      properties:
+        lessonId:
+          type: integer
+          nullable: true
+          description: 上一节课 id；若当前课是整本教材第一课则为 null
+        count:
+          type: integer
+          description: 上一节课未清零主线错题数
+      required: [lessonId, count]
 
     RegisterRequest:
       type: object

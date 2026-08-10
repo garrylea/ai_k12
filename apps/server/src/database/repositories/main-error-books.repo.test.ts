@@ -31,13 +31,15 @@ describe('MainErrorBooksRepository', () => {
       question_id: 2,
       source: 'practice',
       source_ref_id: 3,
+      lesson_id: 4,
       wrong_answer_text: null,
     });
     expect(id).toBe(7);
-    // 校验 SQL 含 source_ref_id 列（main_error_books 独有）
+    // 校验 SQL 含 source_ref_id、lesson_id 列（main_error_books 独有）
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('source_ref_id');
-    expect(params).toEqual([1, 1, 2, 'practice', 3, null]);
+    expect(sql).toContain('lesson_id');
+    expect(params).toEqual([1, 1, 2, 'practice', 3, 4, null]);
   });
 
   it('create 接受 question_id=null（质量差仅存题面）', async () => {
@@ -48,6 +50,7 @@ describe('MainErrorBooksRepository', () => {
       question_id: null,
       source: 'practice',
       source_ref_id: 3,
+      lesson_id: 4,
       wrong_answer_text: '原始题面',
     });
     expect(id).toBe(7);
@@ -120,6 +123,18 @@ describe('MainErrorBooksRepository', () => {
     await repo.findUnclearedByStudentQuestion(1, null, 5, '未入库题面');
     [, params] = pool.execute.mock.calls[1];
     expect(params).toEqual([1, null, null, 5, '未入库题面']);
+  });
+
+  it('countUnclearedByLesson 返回某节课未清零错题数', async () => {
+    const pool = mockPool([{ cnt: 3 }]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    const count = await repo.countUnclearedByLesson(10, 5);
+    expect(count).toBe(3);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('student_id = ?');
+    expect(sql).toContain('lesson_id = ?');
+    expect(sql).toContain('is_cleared = 0');
+    expect(params).toEqual([10, 5]);
   });
 
   it('updateDialogueId 把对话 id 回写到错题本记录', async () => {

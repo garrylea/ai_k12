@@ -161,6 +161,15 @@ export function fetchLessonCards(lessonId: number): Promise<LessonCardsData> {
   return fetchApi<LessonCardsData>(`/content/lessons/${lessonId}/cards`);
 }
 
+export interface PreviousErrorsResult {
+  lessonId: number | null;
+  count: number;
+}
+
+export function getPreviousLessonErrors(lessonId: number): Promise<PreviousErrorsResult> {
+  return fetchApi<PreviousErrorsResult>(`/practice/previous-errors?lessonId=${lessonId}`);
+}
+
 export function updateProgress(data: { subjectId: number; lessonId: number; cardSortOrder: number }): Promise<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number }> {
   return fetchApi<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number }>('/progress/update', {
     method: 'POST',

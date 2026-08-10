@@ -6,5 +6,6 @@ export { ExtractTasksRepository } from './extract-tasks.repo.js';
 export { MainErrorBooksRepository } from './main-error-books.repo.js';
 export { SafetyAlertsRepository } from './safety-alerts.repo.js';
 export { QuestionsRepository } from './questions.repo.js';
+export { LessonsRepository } from './lessons.repo.js';
 export { UploadedFilesRepository } from './uploaded-files.repo.js';
 export type { AiDialogueRow, AiMessageRow, ErrorRedoLogRow, ExtractTaskRow, MainErrorBookRow, SafetyAlertRow, QuestionRow, UploadedFileRow } from './types.js';

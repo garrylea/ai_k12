@@ -1,5 +1,5 @@
 import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { QuestionsRepository, MainErrorBooksRepository, CardsRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, LessonsRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
@@ -49,8 +49,6 @@ export interface JudgeInput {
   studentId: number;
   subjectId: number;
   cardId: number;
-  // TODO: lessonId 当前未用于入库（main_error_books 无 lesson_id 列），
-  // 后续若需按课时统计错题，可在此接入。
   lessonId: number;
   questionText: string;
   studentAnswer: string;
@@ -124,6 +122,7 @@ export class PracticeService {
     private readonly cardsRepo: CardsRepository,
     private readonly hint: HintCapability,
     private readonly conversationsService: ConversationsService,
+    private readonly lessonsRepo: LessonsRepository,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -221,6 +220,7 @@ export class PracticeService {
           question_id: questionId,
           source: 'practice',
           source_ref_id: input.cardId,
+          lesson_id: input.lessonId,
           wrong_answer_text: questionId === null ? input.questionText : null,
         });
       } catch (err) {
@@ -232,6 +232,22 @@ export class PracticeService {
     }
 
     return { questionId, isCorrect, method, analysis, errorType, errorBookId };
+  }
+
+  /**
+   * 查询「当前课的上一节课」是否还有未清零的主线错题。
+   * 返回上一课 id 与未清零数量；若当前课是整本教材第一课，count 为 0 且 lessonId 为 null。
+   */
+  async countUnclearedErrorsFromPreviousLesson(
+    studentId: number,
+    currentLessonId: number,
+  ): Promise<{ lessonId: number | null; count: number }> {
+    const previousLessonId = await this.lessonsRepo.findPreviousLessonId(currentLessonId);
+    if (!previousLessonId) {
+      return { lessonId: null, count: 0 };
+    }
+    const count = await this.mainErrorRepo.countUnclearedByLesson(studentId, previousLessonId);
+    return { lessonId: previousLessonId, count };
   }
 
   /**
@@ -311,6 +327,7 @@ export class PracticeService {
         question_id: questionId,
         source: 'discuss',
         source_ref_id: input.cardId,
+        lesson_id: input.lessonId,
         wrong_answer_text: questionId === null ? input.questionText : null,
       });
     }

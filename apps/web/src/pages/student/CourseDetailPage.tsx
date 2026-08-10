@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, updateProgress, judgePractice, getPracticeHint, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
+import { fetchLessonCards, getPreviousLessonErrors, updateProgress, judgePractice, getPracticeHint, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
 import { BackButton, LogoutButton } from '@/components/base';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
@@ -198,6 +198,7 @@ export default function CourseDetailPage() {
   const [data, setData] = useState<LessonCardsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previousErrorCount, setPreviousErrorCount] = useState(0);
   const [page, setPage] = useState(0);
   const prevPageRef = useRef(0);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -221,9 +222,13 @@ export default function CourseDetailPage() {
     setError(null);
     try {
       if (!lessonId) throw new Error('缺少课程信息，请从星图选择小节进入');
-      const result = await fetchLessonCards(lessonId);
+      const [result, previousErrors] = await Promise.all([
+        fetchLessonCards(lessonId),
+        getPreviousLessonErrors(lessonId).catch(() => ({ lessonId: null, count: 0 })),
+      ]);
       if (result.cards.length === 0) throw new Error('本节暂无卡片内容');
       setData(result);
+      setPreviousErrorCount(previousErrors.count);
       setPage(0);
     } catch (err: any) {
       setError(err.message || '加载失败');
@@ -419,13 +424,21 @@ export default function CourseDetailPage() {
               const hasPractice = practiceStartIndex >= 0;
               const isPracticePhase = hasPractice && page >= practiceStartIndex;
 
-              const tasks = [
-                { id: 1, title: '错题清零（前一课）', subtitle: '有 2 道错题未清', status: 'unlocked' as const },
-                { id: 2, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: isPracticePhase ? ('completed' as const) : ('current' as const) },
-                ...(hasPractice
-                  ? [{ id: 3, title: '课堂练习', subtitle: '思路提示', status: isPracticePhase ? ('current' as const) : ('locked' as const) }]
-                  : []),
-              ];
+              const hasPreviousErrors = previousErrorCount > 0;
+              const tasks = hasPreviousErrors
+                ? [
+                    { id: 1, title: '错题清零（前一课）', subtitle: `有 ${previousErrorCount} 道错题未清`, status: 'current' as const },
+                    { id: 2, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: 'locked' as const },
+                    ...(hasPractice
+                      ? [{ id: 3, title: '课堂练习', subtitle: '思路提示', status: 'locked' as const }]
+                      : []),
+                  ]
+                : [
+                    { id: 1, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: isPracticePhase ? ('completed' as const) : ('current' as const) },
+                    ...(hasPractice
+                      ? [{ id: 2, title: '课堂练习', subtitle: '思路提示', status: isPracticePhase ? ('current' as const) : ('locked' as const) }]
+                      : []),
+                  ];
               return tasks.map((task, index) => {
                 const isLocked = task.status === 'locked';
                 const isCurrent = task.status === 'current';
@@ -449,7 +462,6 @@ export default function CourseDetailPage() {
                         {isCompleted && <CheckCircleIcon className="w-6 h-6 text-green-600" />}
                         {isCurrent && <CircleIcon className="w-6 h-6 text-[var(--learn-btn-primary)]" />}
                         {isLocked && <LockIcon2 className="w-5 h-5 text-[var(--sidebar-text-muted)]/60" />}
-                        {task.status === 'unlocked' && <CircleIcon className="w-5 h-5 text-[var(--learn-btn-primary)]/60 mx-[2px]" />}
                       </div>
                       <div>
                         <div className={`text-sm font-medium ${isCurrent ? 'text-[var(--learn-btn-primary)] font-semibold' : 'text-[var(--sidebar-text-primary)]'} ${isLocked ? 'text-[var(--sidebar-text-muted)]' : ''}`}>

@@ -16,15 +16,29 @@ export class MainErrorBooksRepository {
     question_id: number | null;
     source: string;
     source_ref_id: number | null;
+    lesson_id: number | null;
     wrong_answer_text: string | null;
   }): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO main_error_books
-       (student_id, subject_id, question_id, source, source_ref_id, wrong_answer_text)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [row.student_id, row.subject_id, row.question_id, row.source, row.source_ref_id, row.wrong_answer_text],
+       (student_id, subject_id, question_id, source, source_ref_id, lesson_id, wrong_answer_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [row.student_id, row.subject_id, row.question_id, row.source, row.source_ref_id, row.lesson_id, row.wrong_answer_text],
     );
     return result.insertId;
+  }
+
+  /** 查询某节课的未清零错题数（用于「错题清零」门禁）。 */
+  async countUnclearedByLesson(
+    studentId: number,
+    lessonId: number,
+  ): Promise<number> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt FROM main_error_books
+       WHERE student_id = ? AND lesson_id = ? AND is_cleared = 0`,
+      [studentId, lessonId],
+    );
+    return (rows[0]?.cnt as number) ?? 0;
   }
 
   async findById(id: number): Promise<MainErrorBookRow | null> {

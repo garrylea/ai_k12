@@ -42,8 +42,10 @@ export interface MainErrorBookRow extends RowDataPacket {
   question_id: number | null; // 可空：质量差仅存题面时为 null
   level: number;
   is_cleared: number;
-  source: string; // 'practice' | 'exam' | ... 主线来源多样，不收窄为字面量联合
+  source: string; // 'practice' | 'discuss' | 'homework' | 'unit_test' | 'midterm' | 'final' | ...
   source_ref_id: number | null;
+  /** 错题所属课时 id（冗余字段，用于快速判断上一节课是否有未清零错题）。 */
+  lesson_id: number | null;
   wrong_answer_text: string | null;
   /** 关联的 mainline 讨论对话 id（B方案：跨刷新/跨设备续接同一讨论线）。软引用，可空。 */
   dialogue_id: number | null;
