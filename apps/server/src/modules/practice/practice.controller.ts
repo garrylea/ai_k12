@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { PracticeService } from './practice.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
@@ -54,5 +54,13 @@ export class PracticeController {
       cardId: dto.cardId,
       lessonId: dto.lessonId,
     });
+  }
+
+  @Get('previous-errors')
+  async previousErrors(
+    @Query('lessonId', ParseIntPipe) lessonId: number,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.practiceService.countUnclearedErrorsFromPreviousLesson(user.sub, lessonId);
   }
 }

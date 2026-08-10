@@ -1,5 +1,5 @@
 -- K12 智学系统 — 数据库初始化脚本
--- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.2）
+-- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.4）
 -- 范围：MVP 全部表（§3.1 ~ §3.9、§3.11），不含 P2 计费相关表（§3.10）
 -- 数据库：MySQL 9.7.1 LTS（文档约定）
 -- 字符集：utf8mb4
@@ -403,6 +403,10 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   is_cleared TINYINT(1) NOT NULL DEFAULT 0,
   source VARCHAR(20) NOT NULL,
   source_ref_id BIGINT DEFAULT NULL,
+  -- 错题归属课时：冗余字段，用于快速判断「上一节课是否有未清零错题」。
+  -- practice/discuss 来源取 cards.lesson_id；homework 取 homeworks.lesson_id；
+  -- unit_test/midterm/final 等无法精确归到单节课的场景可留 NULL。
+  lesson_id BIGINT DEFAULT NULL,
   wrong_answer_text TEXT DEFAULT NULL,
   -- B方案：关联的 mainline 讨论对话，跨刷新/跨设备续接同一讨论线。
   -- 错题本是「学生+题」的锚，dialogue_id 让重开讨论回到同一对话而非另起。
@@ -413,10 +417,12 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   KEY idx_me_student_subject (student_id, subject_id),
   KEY idx_me_student_cleared (student_id, is_cleared),
   KEY idx_me_student_level (student_id, is_cleared, level),
+  KEY idx_me_student_lesson_cleared (student_id, lesson_id, is_cleared),
   KEY idx_me_dialogue_id (dialogue_id),
   CONSTRAINT fk_me_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_me_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
-  CONSTRAINT fk_me_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
+  CONSTRAINT fk_me_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_me_lesson_id FOREIGN KEY (lesson_id) REFERENCES lessons (id) ON DELETE SET NULL
   -- 注：dialogue_id 不加 FK 约束（main_error_books 建表早于 ai_dialogues，无法前向引用）。
   -- 作软引用：dialogue 被删时由 PracticeService.startDiscuss 的 try/catch 兜底重建。
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

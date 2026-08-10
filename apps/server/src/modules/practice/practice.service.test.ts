@@ -8,7 +8,7 @@ const mk = (overrides: any = {}) => ({
     findOrCreate: vi.fn(),
     deleteById: vi.fn().mockResolvedValue(undefined),
   },
-  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), updateDialogueId: vi.fn().mockResolvedValue(undefined) },
+  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), updateDialogueId: vi.fn().mockResolvedValue(undefined), countUnclearedByLesson: vi.fn().mockResolvedValue(0) },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
   cardsRepo: {
@@ -21,12 +21,13 @@ const mk = (overrides: any = {}) => ({
     get: vi.fn().mockResolvedValue({ id: 100 }),
     findOrCreateMainlineByCard: vi.fn().mockResolvedValue({ id: 100 }),
   },
+  lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(null), findByUnitId: vi.fn(), findById: vi.fn() },
   ...overrides,
 });
 
-/** 用 mk() 构造的依赖实例化 PracticeService（8 个构造参数）。 */
+/** 用 mk() 构造的依赖实例化 PracticeService。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.lessonsRepo as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -181,6 +182,7 @@ describe('PracticeService.judge', () => {
     expect(r.errorBookId).toBe(42);
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
       question_id: null,
+      lesson_id: 9,
       wrong_answer_text: '难题',
     }));
   });
@@ -299,7 +301,7 @@ describe('PracticeService.startDiscuss', () => {
     expect(r.errorBookId).toBe(55);
     expect(r.questionId).toBe(10);
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
-      source: 'discuss', source_ref_id: 5, question_id: 10, wrong_answer_text: null,
+      source: 'discuss', source_ref_id: 5, question_id: 10, lesson_id: 9, wrong_answer_text: null,
     }));
     expect(deps.conversationsService.create).toHaveBeenCalledWith(1, { track: 'mainline', cardId: 5 });
     expect(deps.mainErrorRepo.updateDialogueId).toHaveBeenCalledWith(55, 200);
@@ -314,7 +316,7 @@ describe('PracticeService.startDiscuss', () => {
     const r = await svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '未入库题' });
     expect(r.questionId).toBeNull();
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
-      question_id: null, wrong_answer_text: '未入库题',
+      question_id: null, lesson_id: 9, wrong_answer_text: '未入库题',
     }));
   });
 
@@ -385,5 +387,36 @@ describe('PracticeService.startCardDiscuss', () => {
     const r = await svc.startCardDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9 });
     expect(r.dialogueId).toBe('888');
     expect(deps.conversationsService.findOrCreateMainlineByCard).toHaveBeenCalledWith(1, 5, 1);
+  });
+});
+
+describe('PracticeService.countUnclearedErrorsFromPreviousLesson', () => {
+  it('当前课是教材第一课 -> 无上一课，count 为 0', async () => {
+    const deps = mk({ lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(null) } });
+    const svc = mkSvc(deps);
+    const r = await svc.countUnclearedErrorsFromPreviousLesson(1, 100);
+    expect(r).toEqual({ lessonId: null, count: 0 });
+    expect(deps.mainErrorRepo.countUnclearedByLesson).not.toHaveBeenCalled();
+  });
+
+  it('上一课存在且无未清零错题 -> count 为 0', async () => {
+    const deps = mk({
+      lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(99) },
+      mainErrorRepo: { countUnclearedByLesson: vi.fn().mockResolvedValue(0) },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.countUnclearedErrorsFromPreviousLesson(1, 100);
+    expect(r).toEqual({ lessonId: 99, count: 0 });
+    expect(deps.mainErrorRepo.countUnclearedByLesson).toHaveBeenCalledWith(1, 99);
+  });
+
+  it('上一课存在且有未清零错题 -> 返回数量', async () => {
+    const deps = mk({
+      lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(99) },
+      mainErrorRepo: { countUnclearedByLesson: vi.fn().mockResolvedValue(3) },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.countUnclearedErrorsFromPreviousLesson(1, 100);
+    expect(r).toEqual({ lessonId: 99, count: 3 });
   });
 });
