@@ -73,7 +73,6 @@ const router = createBrowserRouter([
     element: <StudentLayout />,
     children: [
       { path: '', element: <Navigate to="/student/star-map" replace /> },
-      { path: 'ai-discuss', element: <Placeholder title="AI 讨论 P2.3" /> },
       { path: 'homework', element: <Placeholder title="课后作业 P2.4" /> },
       { path: 'homework-result', element: <Placeholder title="作业解析 P2.5" /> },
       { path: 'unit-test', element: <Placeholder title="单元检测 P2.6" /> },

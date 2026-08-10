@@ -4,7 +4,7 @@ import { AIService } from './ai.service.js';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
-import { AiDialoguesRepository, AiMessagesRepository, ExtractTasksRepository, QuestionsRepository, UploadedFilesRepository } from '../../database/repositories/index.js';
+import { AiDialoguesRepository, AiMessagesRepository, ExtractTasksRepository, QuestionsRepository, UploadedFilesRepository, CardsRepository } from '../../database/repositories/index.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 
@@ -20,6 +20,8 @@ import { SubjectsRepository } from '../../database/repositories/subjects.repo.js
     AiDialoguesRepository,
     AiMessagesRepository,
     StudentsRepository,
+    // mainline 对话按 card_id 解析卡片 content 作 prompt 范围边界（loadContext 用）。
+    CardsRepository,
     // Task 14a: for attachment resolution (fileId -> base64 data URL) and
     // subjectId lookup (math subject ID for structured question ingestion).
     UploadedFilesRepository,

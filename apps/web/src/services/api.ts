@@ -203,9 +203,10 @@ export interface ConversationItem {
 }
 
 export function createConversation(req: {
-  track: 'auxiliary';
+  track: 'mainline' | 'auxiliary';
   subjectId?: number;
   knowledgePointId?: number;
+  cardId?: number;
 }): Promise<ConversationItem> {
   return fetchApi<ConversationItem>('/conversations', {
     method: 'POST',
@@ -281,7 +282,7 @@ export interface TutorResponse {
 }
 
 export function tutor(req: {
-  mode: 'auxiliary';
+  mode: 'mainline' | 'auxiliary';
   message: string;
   dialogueId?: string;
   knowledgeId?: string;
@@ -293,6 +294,67 @@ export function tutor(req: {
     method: 'POST',
     body: JSON.stringify(req),
   });
+}
+
+// SSE 流式辅导（/ai/tutor/stream）。复用于辅线答疑（useAuxChat）与主线课堂讨论
+// （useDiscussChat）。消费 reasoning/content(含 replace)/done/error 事件。
+export interface TutorStreamRequest {
+  mode: 'mainline' | 'auxiliary';
+  message: string;
+  dialogueId?: string;
+  cardId?: string;
+  knowledgeId?: string;
+  attachments?: AttachmentRequest[];
+}
+
+export interface TutorStreamEvent {
+  type: 'reasoning' | 'content' | 'done' | 'error';
+  delta?: string;
+  replace?: boolean;
+  message?: string;
+}
+
+export async function* streamTutorEvents(
+  req: TutorStreamRequest,
+  signal?: AbortSignal,
+): AsyncIterable<TutorStreamEvent> {
+  const token = localStorage.getItem('token') ?? '';
+  const res = await fetch(`${API_BASE}/ai/tutor/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(req),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error('stream unavailable');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ')) continue;
+      try {
+        yield JSON.parse(trimmed.slice(6)) as TutorStreamEvent;
+      } catch {
+        // skip non-JSON lines
+      }
+    }
+  }
+  // Flush the final partial line so we don't silently drop the last event
+  // (e.g. a { type: 'done' } not terminated by \n).
+  buffer += decoder.decode();
+  if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
+    try { yield JSON.parse(buffer.trim().slice(6)) as TutorStreamEvent; } catch { /* skip */ }
+  }
 }
 
 // --- Refinery (auxiliary extraction) ---
@@ -393,6 +455,44 @@ export function getPracticeHint(payload: {
   questionText: string;
 }): Promise<HintResult> {
   return fetchApi<HintResult>('/practice/hint', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// --- Practice discuss (课堂练习「让 AI 讲一讲」- 苏格拉底讨论) ---
+// 打开讨论即：① 记入主线错题本（幂等）；② 创建带 card_id 的 mainline 对话。
+// 前端拿到 dialogueId 后走 streamTutorEvents（mode='mainline'）做苏格拉底讨论。
+
+export interface DiscussStartResult {
+  /** mainline 对话 id，喂给 streamTutorEvents。 */
+  dialogueId: string;
+  /** 本次命中或新建的错题本记录 id。 */
+  errorBookId: number;
+  /** 题库中的题目 id（未命中为 null）。 */
+  questionId: number | null;
+}
+
+export function startDiscuss(payload: {
+  cardId: number;
+  lessonId: number;
+  subjectId: number;
+  questionText: string;
+}): Promise<DiscussStartResult> {
+  return fetchApi<DiscussStartResult>('/practice/discuss', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// 卡片级「思辨答疑」：find-or-create 该学生在该卡片的 mainline 对话。
+// 与题目级区别：讨论整张卡片（非某题）、不入错题本，故只返回 dialogueId。
+export function startCardDiscuss(payload: {
+  cardId: number;
+  lessonId: number;
+  subjectId: number;
+}): Promise<{ dialogueId: string }> {
+  return fetchApi<{ dialogueId: string }>('/practice/discuss-card', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

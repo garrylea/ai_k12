@@ -93,7 +93,7 @@ async function runTutoringTests(): Promise<void> {
     const dialogues = new FakeDialoguesRepo();
     const messages = new FakeMessagesRepo();
     const students = new FakeStudentsRepo();
-    const convService = new ConversationService(dialogues as any, messages as any, students as any);
+    const convService = new ConversationService(dialogues as any, messages as any, students as any, { findContentById: async () => null } as any);
 
     const dialogueId = await convService.createDialogue({
       studentId: 1,

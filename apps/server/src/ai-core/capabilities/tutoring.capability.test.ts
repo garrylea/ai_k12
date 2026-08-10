@@ -47,7 +47,7 @@ describe('TutoringCapability', () => {
     const dialogues = new FakeDialoguesRepo();
     const messages = new FakeMessagesRepo();
     const students = new FakeStudentsRepo();
-    convService = new ConversationService(dialogues as any, messages as any, students as any);
+    convService = new ConversationService(dialogues as any, messages as any, students as any, { findContentById: async () => null } as any);
     dialogueId = await convService.createDialogue({
       studentId: 1,
       subject: 'math',

@@ -5,17 +5,21 @@ import { QuestionsRepository, MainErrorBooksRepository, CardsRepository } from '
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
+import { ConversationsModule } from '../conversations/conversations.module.js';
 
 /**
- * 课堂练习模块 - 主线练习判对错 + 提示。
+ * 课堂练习模块 - 主线练习判对错 + 提示 + 讨论。
  *
  * providers 镜像 ErrorBookModule 模式：
  * - repos（QuestionsRepository / MainErrorBooksRepository / CardsRepository）通过
  *   @Inject('DATABASE_POOL') 注入全局连接池（DatabaseModule 是 @Global）。
  * - capabilities（QuestionStructuringCapability / JudgmentCapability / HintCapability）
  *   构造函数的 modelClient 参数可选，默认 new ModelClient()，可直接实例化。
+ * - imports ConversationsModule：startDiscuss 创建带 card_id 的 mainline 对话
+ *   （复用 ConversationsService.create）。
  */
 @Module({
+  imports: [ConversationsModule],
   controllers: [PracticeController],
   providers: [
     PracticeService,

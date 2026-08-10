@@ -246,9 +246,17 @@ export class AIService {
         throw new BadRequestException({ code: 1001, message: 'knowledgeId 必须为数字' });
       }
     }
+    let cardIdNum: number | undefined;
+    if (dto.mode === 'mainline' && dto.cardId) {
+      cardIdNum = Number(dto.cardId);
+      if (!Number.isFinite(cardIdNum)) {
+        throw new BadRequestException({ code: 1001, message: 'cardId 必须为数字' });
+      }
+    }
     const dialogue = await this.conversationsService.create(userId, {
       track: dto.mode,
       knowledgePointId,
+      cardId: cardIdNum,
     });
     if (!dialogue) {
       throw new InternalServerErrorException({ code: 5000, message: '创建会话失败' });

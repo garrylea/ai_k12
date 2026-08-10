@@ -43,3 +43,6 @@ apps/server/uploads/
 
 # Playwright MCP test artifacts
 .playwright-mcp/
+
+## TypeScript
+*.tsbuildinfo

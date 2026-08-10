@@ -50,6 +50,15 @@ export class CardsRepository {
     return rows;
   }
 
+  /** Read a card's content text by id (for mainline tutoring scope / cardContent). */
+  async findContentById(cardId: number): Promise<{ content: string } | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT content FROM cards WHERE id = ?',
+      [cardId],
+    );
+    return (rows[0] as { content: string } | undefined) ?? null;
+  }
+
   /** Read a card's hints JSON text (null if never generated). */
   async findHintsById(cardId: number): Promise<string | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(

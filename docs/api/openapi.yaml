@@ -2670,6 +2670,96 @@ paths:
                     type: string
                     example: 提示生成失败，请重试
 
+  /practice/discuss:
+    post:
+      tags: [Practice]
+      summary: 课堂练习「让 AI 讲一讲」（苏格拉底讨论）
+      description: >-
+        学生在 practice 卡片答题前点「让 AI 讲一讲」调用。打开讨论即：① 记入主线错题本
+        （find-or-create 幂等，source='discuss'，无论后续答对答错都保留）；② 创建带 card_id
+        的 mainline 对话并返回 dialogueId。前端据此走 POST /ai/tutor/stream（mode=mainline）
+        做苏格拉底式多轮讨论——TutoringCapability 据 card_id 解析 cardContent 限定范围（只能
+        讨论该卡片内容，不能聊其它），3 次失败/放弃后兜底给完整解析。questionId 用
+        content_hash 快查（不调 AI 结构化），未命中则 question_id=null + wrong_answer_text 存题面。
+      operationId: startPracticeDiscuss
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscussRequest'
+      responses:
+        '200':
+          description: 错题本记录 + mainline 对话 dialogueId
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DiscussResult'
+        '500':
+          description: 创建讨论会话失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 5000
+                  message:
+                    type: string
+                    example: 创建讨论会话失败
+
+  /practice/discuss-card:
+    post:
+      tags: [Practice]
+      summary: 卡片级「思辨答疑」（苏格拉底讨论）
+      description: >-
+        学生在非 practice 知识卡片上点「思辨答疑」调用。与 `/practice/discuss` 区别：
+        scope=整张卡片（非某道题），**不入错题本**（讨论的是知识而非一道题）。
+        服务端按 (student, card_id, track='mainline') find-or-create 对话并返回 dialogueId；
+        前端据此走 POST /ai/tutor/stream（mode=mainline）做苏格拉底式多轮讨论——
+        TutoringCapability 据 card_id 解析 cardContent 限定范围（只能讨论该卡片内容）。
+        重开同一卡片的讨论会自动回到同一对话线。
+      operationId: startCardDiscuss
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscussCardRequest'
+      responses:
+        '200':
+          description: mainline 对话 dialogueId
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DiscussCardResult'
+        '500':
+          description: 创建讨论会话失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 5000
+                  message:
+                    type: string
+                    example: 创建讨论会话失败
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3789,6 +3879,58 @@ components:
         cached:
           type: boolean
           description: true=命中 cards.hints 缓存直返（未调 AI）；false=本次 AI 新生成并已写回缓存
+
+    DiscussRequest:
+      type: object
+      required: [cardId, lessonId, subjectId, questionText]
+      properties:
+        cardId:
+          type: integer
+          description: 当前 practice 卡片 ID（限定讨论范围 + 错题本 source_ref_id）
+        lessonId:
+          type: integer
+          description: 当前课程 ID
+        subjectId:
+          type: integer
+          description: 学科 ID
+        questionText:
+          type: string
+          description: 题面原文；question_id 为空时作为错题本去重键（wrong_answer_text）
+
+    DiscussResult:
+      type: object
+      properties:
+        dialogueId:
+          type: string
+          description: mainline 对话 id，前端据此走 /ai/tutor/stream 做苏格拉底讨论
+        errorBookId:
+          type: integer
+          description: 本次命中或新建的主线错题本记录 id
+        questionId:
+          type: integer
+          nullable: true
+          description: 题库中的题目 id（content_hash 未命中则为 null）
+
+    DiscussCardRequest:
+      type: object
+      required: [cardId, lessonId, subjectId]
+      properties:
+        cardId:
+          type: integer
+          description: 当前知识卡片 ID（限定讨论范围）
+        lessonId:
+          type: integer
+          description: 当前课程 ID
+        subjectId:
+          type: integer
+          description: 学科 ID
+
+    DiscussCardResult:
+      type: object
+      properties:
+        dialogueId:
+          type: string
+          description: mainline 对话 id（find-or-create：可能复用已有讨论），前端据此走 /ai/tutor/stream 做苏格拉底讨论
 
     RegisterRequest:
       type: object

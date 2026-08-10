@@ -40,6 +40,21 @@ export class AiDialoguesRepository {
     return rows as AiDialogueRow[];
   }
 
+  /**
+   * 卡片级讨论 find-or-create：查找该学生在某卡片上的最近一条 mainline 对话。
+   * 命中则复用（跨刷新/跨设备续接同一讨论线），未命中则由上层创建。
+   * idx_dlg_student_card(student_id, track, card_id) 支撑此查询。
+   */
+  async findMainlineByStudentAndCard(studentId: number, cardId: number): Promise<AiDialogueRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM ai_dialogues
+       WHERE student_id = ? AND track = 'mainline' AND card_id = ? AND deleted_at IS NULL
+       ORDER BY id DESC LIMIT 1`,
+      [studentId, cardId],
+    );
+    return (rows[0] as AiDialogueRow) ?? null;
+  }
+
   async updateTitle(id: number, title: string): Promise<void> {
     await this.pool.execute(
       `UPDATE ai_dialogues SET title = ? WHERE id = ?`,

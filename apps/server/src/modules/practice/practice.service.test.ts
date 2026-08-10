@@ -8,7 +8,7 @@ const mk = (overrides: any = {}) => ({
     findOrCreate: vi.fn(),
     deleteById: vi.fn().mockResolvedValue(undefined),
   },
-  mainErrorRepo: { create: vi.fn().mockResolvedValue(42) },
+  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), updateDialogueId: vi.fn().mockResolvedValue(undefined) },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
   cardsRepo: {
@@ -16,12 +16,17 @@ const mk = (overrides: any = {}) => ({
     upsertHint: vi.fn().mockResolvedValue(undefined),
   },
   hint: { generate: vi.fn() },
+  conversationsService: {
+    create: vi.fn().mockResolvedValue({ id: 100 }),
+    get: vi.fn().mockResolvedValue({ id: 100 }),
+    findOrCreateMainlineByCard: vi.fn().mockResolvedValue({ id: 100 }),
+  },
   ...overrides,
 });
 
-/** 用 mk() 构造的依赖实例化 PracticeService（6 个构造参数）。 */
+/** 用 mk() 构造的依赖实例化 PracticeService（8 个构造参数）。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -278,5 +283,107 @@ describe('PracticeService.getHint', () => {
     const r = await svc.getHint({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题面E' });
     expect(r.hint).toBe('提示');
     expect(r.cached).toBe(false);
+  });
+});
+
+describe('PracticeService.startDiscuss', () => {
+  it('首次打开 -> 记错题本(source=discuss) + 创建 mainline 对话 + 回写 dialogue_id', async () => {
+    const deps = mk({
+      questionsRepo: { findByContentHash: vi.fn().mockResolvedValue({ id: 10 }), findOrCreate: vi.fn(), deleteById: vi.fn() },
+      mainErrorRepo: { create: vi.fn().mockResolvedValue(55), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), updateDialogueId: vi.fn() },
+      conversationsService: { create: vi.fn().mockResolvedValue({ id: 200 }), get: vi.fn() },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题面' });
+    expect(r.dialogueId).toBe('200');
+    expect(r.errorBookId).toBe(55);
+    expect(r.questionId).toBe(10);
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'discuss', source_ref_id: 5, question_id: 10, wrong_answer_text: null,
+    }));
+    expect(deps.conversationsService.create).toHaveBeenCalledWith(1, { track: 'mainline', cardId: 5 });
+    expect(deps.mainErrorRepo.updateDialogueId).toHaveBeenCalledWith(55, 200);
+  });
+
+  it('题库未命中 -> questionId=null，wrong_answer_text 存题面', async () => {
+    const deps = mk({
+      questionsRepo: { findByContentHash: vi.fn().mockResolvedValue(null), findOrCreate: vi.fn(), deleteById: vi.fn() },
+      mainErrorRepo: { create: vi.fn().mockResolvedValue(56), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), updateDialogueId: vi.fn() },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '未入库题' });
+    expect(r.questionId).toBeNull();
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      question_id: null, wrong_answer_text: '未入库题',
+    }));
+  });
+
+  it('已有未清除错题记录 -> 幂等不重复插入，复用既有 errorBookId', async () => {
+    const deps = mk({
+      mainErrorRepo: {
+        create: vi.fn().mockResolvedValue(999),
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue({ id: 77 }),
+        updateDialogueId: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题面' });
+    expect(r.errorBookId).toBe(77);
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('B方案：错题本已绑 dialogue_id 且对话可用 -> 复用，不新建对话、不回写', async () => {
+    const deps = mk({
+      mainErrorRepo: {
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue({ id: 77, dialogue_id: 300 }),
+        create: vi.fn(),
+        updateDialogueId: vi.fn(),
+      },
+      conversationsService: { create: vi.fn(), get: vi.fn().mockResolvedValue({ id: 300 }) },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题面' });
+    expect(r.dialogueId).toBe('300');
+    expect(r.errorBookId).toBe(77);
+    expect(deps.conversationsService.create).not.toHaveBeenCalled();
+    expect(deps.mainErrorRepo.updateDialogueId).not.toHaveBeenCalled();
+  });
+
+  it('B方案兜底：绑定的 dialogue_id 已失效 -> 重建对话并回写', async () => {
+    const deps = mk({
+      mainErrorRepo: {
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue({ id: 77, dialogue_id: 300 }),
+        create: vi.fn(),
+        updateDialogueId: vi.fn(),
+      },
+      conversationsService: { create: vi.fn().mockResolvedValue({ id: 301 }), get: vi.fn().mockRejectedValue(new Error('not found')) },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题面' });
+    expect(r.dialogueId).toBe('301');
+    expect(deps.conversationsService.create).toHaveBeenCalledWith(1, { track: 'mainline', cardId: 5 });
+    expect(deps.mainErrorRepo.updateDialogueId).toHaveBeenCalledWith(77, 301);
+  });
+
+  it('对话创建失败 -> 抛 500', async () => {
+    const deps = mk({
+      conversationsService: { create: vi.fn().mockResolvedValue(null), get: vi.fn() },
+    });
+    const svc = mkSvc(deps);
+    await expect(
+      svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题面' }),
+    ).rejects.toThrow(HttpException);
+  });
+});
+
+describe('PracticeService.startCardDiscuss', () => {
+  it('find-or-create：复用 conversationsService.findOrCreateMainlineByCard 返回的对话 id', async () => {
+    const deps = mk({
+      conversationsService: { findOrCreateMainlineByCard: vi.fn().mockResolvedValue({ id: 888 }) },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.startCardDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9 });
+    expect(r.dialogueId).toBe('888');
+    expect(deps.conversationsService.findOrCreateMainlineByCard).toHaveBeenCalledWith(1, 5, 1);
   });
 });

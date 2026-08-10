@@ -11,6 +11,7 @@ import { fetchLessonCards, updateProgress, judgePractice, getPracticeHint, type 
 import { BackButton, LogoutButton } from '@/components/base';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
+import { DiscussDrawer } from '@/components/business/DiscussDrawer';
 import { usePracticeStore } from '@/store/practiceStore';
 
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
@@ -206,6 +207,7 @@ export default function CourseDetailPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStart, setModalStart] = useState(0);
   const [resultOpen, setResultOpen] = useState(false);
+  const [showCardDiscuss, setShowCardDiscuss] = useState(false);
   const { cardId: sessionCardId, setSession, record, answers, questions: sessionQuestions, reset, hints, setHint } = usePracticeStore();
 
   useEffect(() => {
@@ -240,10 +242,11 @@ export default function CourseDetailPage() {
     setCountdown(10);
   }, [lessonId]);
 
-  // 翻页时关闭 modal / 结果列表
+  // 翻页时关闭 modal / 结果列表 / 卡片讨论抽屉
   useEffect(() => {
     setModalOpen(false);
     setResultOpen(false);
+    setShowCardDiscuss(false);
   }, [page]);
 
   useEffect(() => {
@@ -480,7 +483,8 @@ export default function CourseDetailPage() {
         </aside>
 
         {/* 主内容区 — header / Card / footer 三块同宽对齐（与 Card 一致的 max-width 居中） */}
-        <main className="flex-1 min-w-0 flex flex-col">
+        {/* relative 让卡片级讨论抽屉 absolute 贴右时锚定在主内容区，不覆盖左侧阶段栏 */}
+        <main className="relative flex-1 min-w-0 flex flex-col">
           {/* Header — 顶部课本面包屑 + 进度 */}
           <header className="shrink-0 relative flex justify-center px-4 md:px-8 py-4">
             <div
@@ -707,10 +711,11 @@ export default function CourseDetailPage() {
                   </div>
 
                   {/* 悬浮答疑按钮（柔和钢蓝，不分散学习注意力）
-                      practice 卡的答疑已移入 AnswerModal（提示 / 让 AI 讲一讲），此处不再渲染 */}
+                      practice 卡的答疑已移入 AnswerModal（提示 / 让 AI 讲一讲），此处不再渲染。
+                      非练习卡走卡片级思辨答疑：scope=整张卡片，不入错题本（讨论知识非题目） */}
                   {card.cardType !== 'practice' && (
                     <button
-                      onClick={() => navigate('/student/ai-discuss', { state: { cardId: card.id, lessonId } })}
+                      onClick={() => setShowCardDiscuss(true)}
                       className="absolute right-6 bottom-20 w-14 h-14 rounded-full bg-[var(--learn-btn-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--learn-btn-primary-hover)] transition-colors z-10"
                       title="思辨答疑"
                     >
@@ -792,6 +797,18 @@ export default function CourseDetailPage() {
               })()}
             </div>
           </footer>
+
+          {/* 卡片级「思辨答疑」抽屉：贴右覆盖主内容区，放大封顶 w-[70%]，不盖左侧阶段栏 */}
+          {showCardDiscuss && card && (
+            <DiscussDrawer
+              mode="card"
+              cardId={card.id}
+              cardTitle={card.title || CARD_TYPE_LABEL[card.cardType] || 'AI 讨论'}
+              subjectId={subjectId}
+              lessonId={lessonId}
+              onClose={() => setShowCardDiscuss(false)}
+            />
+          )}
         </main>
       </div>
 
@@ -883,6 +900,7 @@ export default function CourseDetailPage() {
             startIndex={modalStart}
             cardId={card.id}
             lessonId={lessonId}
+            subjectId={subjectId}
             hints={hints}
             onSubmit={async (questionText, studentAnswer) => {
               const n = questions.find(q => q.text === questionText)?.n ?? '0-0';

@@ -52,6 +52,32 @@ export class MainErrorBooksRepository {
     return rows as MainErrorBookRow[];
   }
 
+  /**
+   * 幂等查找：该学生是否已有一条「未清除」的错题记录指向此题。
+   * 命中条件（OR）：
+   *   - question_id 非空且匹配（题库已入库的题）
+   *   - question_id 为空但 source_ref_id(=cardId) + wrong_answer_text(=题面) 匹配
+   *     （题库未入库、仅存题面的场景）
+   * 用于「打开讨论即入错题本」的 find-or-create：命中则跳过插入，避免重复。
+   */
+  async findUnclearedByStudentQuestion(
+    studentId: number,
+    questionId: number | null,
+    cardId: number,
+    questionText: string,
+  ): Promise<MainErrorBookRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM main_error_books
+       WHERE student_id = ? AND is_cleared = 0 AND (
+         (? IS NOT NULL AND question_id = ?) OR
+         (question_id IS NULL AND source_ref_id = ? AND wrong_answer_text = ?)
+       )
+       LIMIT 1`,
+      [studentId, questionId, questionId, cardId, questionText],
+    );
+    return (rows[0] as MainErrorBookRow) ?? null;
+  }
+
   async markCleared(id: number): Promise<void> {
     await this.pool.execute(
       `UPDATE main_error_books SET is_cleared = 1, cleared_at = NOW(3) WHERE id = ?`,
@@ -63,6 +89,17 @@ export class MainErrorBooksRepository {
     await this.pool.execute(
       `UPDATE main_error_books SET level = ? WHERE id = ?`,
       [level, id],
+    );
+  }
+
+  /**
+   * B方案：把新建的 mainline 对话 id 回写到错题本记录。
+   * 重开讨论时据此复用同一对话（跨刷新/跨设备续接），而非每次另起对话。
+   */
+  async updateDialogueId(id: number, dialogueId: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE main_error_books SET dialogue_id = ? WHERE id = ?`,
+      [dialogueId, id],
     );
   }
 }

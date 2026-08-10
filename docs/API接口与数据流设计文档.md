@@ -332,6 +332,8 @@
 |---|---|---|---|
 | POST | `/api/practice/judge` | 课堂练习判对错。学生在 practice 卡片答题后调用，返回对错、判定方法与解析；答错自动入主线错题本（`main_error_books.source='practice'`）。三路由：(1) 题库命中 + 客观题（choice/true_false/fill_blank）-> exact 答案比对；(2) 题库命中主观题（short_answer/proof）或未命中 -> AI JudgmentCapability 判定；(3) 答错 -> 写入 `main_error_books`（未入库的题先经 QuestionStructuringCapability 结构化后插 `questions` 表，结构化失败则 `question_id=NULL` 仅存题面到 `wrong_answer_text`）。AI 判定失败返回 503（`code=5001`，不写错题本）。请求体：`{cardId, lessonId, subjectId, questionText, studentAnswer}`；响应：`{questionId(nullable), isCorrect, method:'exact'|'ai', analysis(nullable), errorType(nullable, enum: logic/calculation/format/missing), errorBookId(nullable)}`。题面来源：`cards.content_metadata.questions[].text`（管线抽取）。 | MVP |
 | POST | `/api/practice/hint` | 课堂练习提示（AI 生成 + Card 级缓存）。学生在 practice 卡片答题前点「提示」调用。先查 `cards.hints` 缓存（JSON：`{ "<题目文本>": "<提示文本>" }`，key 即「题目标题」）命中直返（不调 AI）；未命中则调 HintCapability 生成苏格拉底式提示（只启发不给答案，遵循 Socratic 原则）并写回 `cards.hints`，供后续复用（Card 级共享，不分学生，省 AI）。AI 生成失败返回 503（`code=5001`，前端降级显示静态文案，不阻断答题）。请求体：`{cardId, lessonId, subjectId, questionText}`；响应：`{hint, cached:boolean}`。 | MVP |
+| POST | `/api/practice/discuss` | 课堂练习「让 AI 讲一讲」（苏格拉底讨论）。学生在 practice 卡片答题前点「让 AI 讲一讲」调用。打开讨论即：① 记入主线错题本（find-or-create 幂等，`main_error_books.source='discuss'`，无论后续答对答错都保留）；② **对话也 find-or-create**（B方案）：错题本记录加 `dialogue_id` 字段，重开时若该对话仍可用则复用，否则新建并回写。前端据 `dialogueId` 走 `POST /api/ai/tutor/stream`（mode=mainline）做苏格拉底式多轮讨论——TutoringCapability 据 `card_id` 解析 `cardContent` 限定范围（只能讨论该卡片内容，不能聊其它），3 次失败/放弃后兜底给完整解析。`questionId` 用 `content_hash` 快查（不调 AI 结构化），未命中则 `question_id=NULL` + `wrong_answer_text` 存题面。请求体：`{cardId, lessonId, subjectId, questionText}`；响应：`{dialogueId, errorBookId, questionId(nullable)}`。 | MVP |
+| POST | `/api/practice/discuss-card` | 卡片级「思辨答疑」（苏格拉底讨论）。学生在非 practice 知识卡片上点「思辨答疑」调用。与 `/practice/discuss` 区别：scope=整张卡片（非某道题），**不入错题本**（讨论知识非题目）；服务端按 `(student_id, card_id, track='mainline')` find-or-create mainline 对话，重开同一卡片自动回到同一讨论线。前端据 `dialogueId` 走 `POST /api/ai/tutor/stream`（mode=mainline）做苏格拉底讨论。请求体：`{cardId, lessonId, subjectId}`；响应：`{dialogueId}`。 | MVP |
 
 ---
 
@@ -801,6 +803,89 @@ Practice Service.getHint -> cardsRepo.findHintsById(cardId)
 
 ---
 
+### 6.11 课堂练习「让 AI 讲一讲」（苏格拉底讨论）
+
+```text
+学生在 practice 卡片答题前点「让 AI 讲一讲」
+  │
+  ▼
+前端检查 session 缓存（practiceStore.discussDialogues[questionText]）
+  │
+  ├─ 命中（已缓存 dialogueId）-> 续接：GET /api/conversations/{dialogueId}/messages 拉历史
+  │
+  └─ 未命中 -> POST /api/practice/discuss
+     请求体：{cardId, lessonId, subjectId, questionText}
+     │
+     ▼
+     Practice Service.startDiscuss
+     ├─ ① questionsRepo.findByContentHash(questionText) -> questionId（未命中 null，不调 AI）
+     ├─ ② mainErrorRepo.findUnclearedByStudentQuestion(...) 幂等查
+     │     ├─ 已有未清除记录 -> 复用 errorBookId，不重复插入
+     │     └─ 无 -> mainErrorRepo.create(source='discuss', source_ref_id=cardId, ...)
+     └─ ③ **B方案：对话也 find-or-create**
+           main_error_books.dialogue_id 为空/失效 -> conversationsService.create(track='mainline', cardId) 新建并回写 dialogue_id
+           main_error_books.dialogue_id 仍可用 -> 复用同一对话（跨刷新/跨设备续接）
+     ▼
+     返回 { dialogueId, errorBookId, questionId }
+  │
+  ▼
+前端缓存 dialogueId（practiceStore.discussDialogues[questionText]），自动发种子消息
+  │  种子：「我想请你带我思考这道题：…请用提问的方式一步步启发我找到思路。」
+  │  ⚠️ 避开 giveUpKeywords（不会/不懂/不知道…），否则首轮触发兜底直接给答案
+  │
+  ▼
+POST /api/ai/tutor/stream（mode=mainline, dialogueId, message）-> SSE 流式
+  │  TutoringCapability 据 card_id 解析 cardContent 限定范围（mainline.md 苏格拉底式）
+  │  3 次失败/放弃 -> 兜底给完整解析
+  ▼
+前端 ReactMarkdown+KaTeX 渲染（含 $...$ 公式），支持多轮追问、停止、放大/缩小抽屉
+```
+
+> 讨论范围 = 该卡片 content（card_id 解析）；种子消息携带当前题面让 AI 聚焦。
+> 错题本记录无论后续答对答错都保留（清除门禁尚未实现，`markCleared` 暂无调用方）。
+> 抽屉仅手动关闭（开/关/放大），不自动收起--多轮对话需稳定展示。
+
+### 6.12 卡片级「思辨答疑」（苏格拉底讨论）
+
+```text
+学生在非 practice 知识卡片上点「思辨答疑」
+  │
+  ▼
+前端检查 session 缓存（practiceStore.discussDialogues[`card:${cardId}`]）
+  │
+  ├─ 命中（已缓存 dialogueId）-> 续接：GET /api/conversations/{dialogueId}/messages 拉历史
+  │
+  └─ 未命中 -> POST /api/practice/discuss-card
+     请求体：{cardId, lessonId, subjectId}
+     │
+     ▼
+     Practice Service.startCardDiscuss
+     └─ conversationsService.findOrCreateMainlineByCard(studentId, cardId)
+        按 (student_id, card_id, track='mainline') 查最近可用对话：
+        ├─ 命中 -> 复用 dialogueId（跨刷新/跨设备续接同一讨论线）
+        └─ 未命中 -> conversationsService.create(track='mainline', cardId) 新建
+     ▼
+     返回 { dialogueId }
+  │
+  ▼
+前端缓存 dialogueId（practiceStore.setDiscussDialogue），自动发种子消息
+  │  种子：「我想和你一起讨论这张卡片里的知识。请用提问的方式带我梳理其中的关键内容。」
+  │  同样避开 giveUpKeywords
+  │
+  ▼
+POST /api/ai/tutor/stream（mode=mainline, dialogueId, message）-> SSE 流式
+  │  TutoringCapability 据 card_id 解析 cardContent 限定范围（整张卡片）
+  │  3 次失败/放弃 -> 兜底给完整解析
+  ▼
+前端 ReactMarkdown+KaTeX 渲染（含 $...$ 公式），支持多轮追问、停止、放大/缩小抽屉
+  │  抽屉宽度限定在右侧主内容区：缩小约 45%，放大封顶约 70%，不覆盖左侧阶段栏
+```
+
+> 与题目级区别：scope=整张卡片（非某题）；**不入错题本**（讨论知识非题目）；
+> 续接锚 = `(student_id, card_id, track='mainline')` 而非 `error_book.dialogue_id`。
+
+---
+
 ## 7. API 与前端页面对照表
 
 | 前端页面 | 路由 | 主要调用 API |
@@ -809,8 +894,8 @@ Practice Service.getHint -> cardsRepo.findHintsById(cardId)
 | 家长注册 | `/register` | `POST /api/auth/register` |
 | P1.5 学科选择 | `/student/subjects` | `GET /api/content/subjects` |
 | P2.1 星图导航 | `/student/star-map` | `GET /api/progress/students/{id}/star-map?subjectId=`（星图主数据）；`GET /api/progress/.../overview`（跨学科总览，可选） |
-| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`POST /api/progress/update`（翻页上报进度） |
-| P2.3 AI 讨论 | `/student/ai-discuss` | `POST /api/conversations`, WS `/ws/ai/{id}` |
+| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`POST /api/progress/update`（翻页上报进度）；卡片级讨论抽屉调 `POST /api/practice/discuss-card`；practice 卡「让 AI 讲一讲」抽屉调 `POST /api/practice/discuss` |
+| P2.3 AI 讨论 | 已合并为抽屉 | 题目级讨论在 AnswerModal 内（`POST /api/practice/discuss`）；卡片级讨论在 CourseDetailPage 内（`POST /api/practice/discuss-card`）。均走 `POST /api/ai/tutor/stream` 流式。 |
 | P2.4 课后作业 | `/student/homework` | `GET /api/assessment/homework/{id}`, `POST .../answers`, `POST .../hint` |
 | P2.5 作业解析 | `/student/homework-result` | `GET /api/assessment/submissions/{id}/results` |
 | P2.6 单元检测 | `/student/unit-test` | `GET /api/assessment/exams/{id}`, `POST .../submissions`, `POST .../save/submit` |
@@ -1000,3 +1085,5 @@ POST /api/error-book/items/{errorItemId}/redo
 | v1.1 | 2026-08-01 | 新增 `POST /api/progress/update` 进度更新接口；更新 P2.2 课程详情左侧栏为数据驱动的 2~3 项结构（错题+学习内容+可选练习）；修复完成课程后进入下一课的 race condition，接口返回 `currentLessonId` 供前端定位下一课 |
 | v1.2 | 2026-08-06 | 新增 `POST /api/practice/judge` 课堂练习判对错接口（MVP）；新增 Practice 服务分组；新增 §6.9 课堂练习判对错数据流；`main_error_books.source` 枚举补 `practice` 值 |
 | v1.3 | 2026-08-09 | 新增 `POST /api/practice/hint` 课堂练习提示接口（MVP，AI 生成 + Card 级缓存）；`cards` 表新增 `hints` 字段（JSON 提示缓存，key=题目文本）；新增 §6.10 课堂练习提示数据流；ai-core 新增 `hint` 场景（HintCapability + prompts/hint/math.md，苏格拉底式提示不给答案） |
+| v1.4 | 2026-08-09 | 新增 `POST /api/practice/discuss` 课堂练习「让 AI 讲一讲」接口（MVP，苏格拉底讨论）；打开讨论即记入主线错题本（`source='discuss'`，幂等 find-or-create）+ 创建带 `card_id` 的 mainline 对话；对话流复用 `POST /ai/tutor/stream`（mode=mainline）；接线 `card_id` 存储 + `loadContext` 解析 `cardContent`（修 mainline 范围 gap，auxiliary 不受影响）；新增 §6.11 数据流；前端 AnswerModal 内右侧抽屉（手动开关 + 放大缩小） |
+| v1.5 | 2026-08-10 | B方案：题目级讨论历史续接——`main_error_books` 表新增 `dialogue_id`，`POST /api/practice/discuss` 复用已绑对话、失效则重建并回写；新增 `POST /api/practice/discuss-card` 卡片级「思辨答疑」接口（MVP），find-or-create 该学生在该卡片的 mainline 对话（不入错题本，锚=(student,card)），新增 §6.12 数据流；卡片级改为 CourseDetailPage 内右侧抽屉，放大封顶不盖左侧阶段栏；`/student/ai-discuss` 独立页取消，合并到课程详情/答题弹窗抽屉。 |

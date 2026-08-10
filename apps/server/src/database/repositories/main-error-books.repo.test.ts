@@ -95,4 +95,39 @@ describe('MainErrorBooksRepository', () => {
     expect(sql).toContain('cleared_at = NOW(3)');
     expect(params).toEqual([42]);
   });
+
+  it('findUnclearedByStudentQuestion 命中返回行，否则 null', async () => {
+    const row = { id: 9, student_id: 1, question_id: 2, is_cleared: 0 };
+    const pool = mockPool([row]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    const found = await repo.findUnclearedByStudentQuestion(1, 2, 5, '题面');
+    expect(found).toEqual(row);
+
+    const repoEmpty = new MainErrorBooksRepository(mockPool([]) as any);
+    const notFound = await repoEmpty.findUnclearedByStudentQuestion(1, 2, 5, '题面');
+    expect(notFound).toBeNull();
+  });
+
+  it('findUnclearedByStudentQuestion 传 questionId 与 null 两种参数形态', async () => {
+    const pool = mockPool([]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    // questionId 非空
+    await repo.findUnclearedByStudentQuestion(1, 2, 5, '题面');
+    let [, params] = pool.execute.mock.calls[0];
+    expect(params).toEqual([1, 2, 2, 5, '题面']);
+
+    // questionId 为 null（题库未入库，按 source_ref_id + wrong_answer_text 匹配）
+    await repo.findUnclearedByStudentQuestion(1, null, 5, '未入库题面');
+    [, params] = pool.execute.mock.calls[1];
+    expect(params).toEqual([1, null, null, 5, '未入库题面']);
+  });
+
+  it('updateDialogueId 把对话 id 回写到错题本记录', async () => {
+    const pool = mockPool();
+    const repo = new MainErrorBooksRepository(pool as any);
+    await repo.updateDialogueId(77, 300);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('dialogue_id = ?');
+    expect(params).toEqual([300, 77]);
+  });
 });

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Message, LoadContextResponse, Subject, Track, Difficulty, ContentPart } from '../../ai-core/types.js';
 import { contentToText } from '../../ai-core/types.js';
 import type { SaveMessagesRequest, UpdateFailCountRequest, CompleteDialogueRequest } from './types.js';
-import { AiDialoguesRepository, AiMessagesRepository } from '../../database/repositories/index.js';
+import { AiDialoguesRepository, AiMessagesRepository, CardsRepository } from '../../database/repositories/index.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 
 export interface CreateDialogueParams {
@@ -21,6 +21,7 @@ export class ConversationService {
     private readonly dialoguesRepo: AiDialoguesRepository,
     private readonly messagesRepo: AiMessagesRepository,
     private readonly studentsRepo: StudentsRepository,
+    private readonly cardsRepo: CardsRepository,
   ) {}
 
   async createDialogue(params: CreateDialogueParams): Promise<number> {
@@ -93,9 +94,12 @@ export class ConversationService {
         name: student?.name ?? '',
       },
       subject,
-      // NOTE: cardContent not persisted in ai_dialogues; mainline flow must pass it
-      // separately if needed (e.g., via TutoringRequest.cardId -> CardsRepository).
-      cardContent: undefined,
+      // mainline 对话存了 card_id -> 解析卡片 content 作为 prompt 范围边界
+      //（mainline.md 的 <card_content>{{cardContent}}</card_content>）。
+      // auxiliary 无 card_id，cardContent 为 undefined（行为不变）。
+      cardContent: record.card_id
+        ? (await this.cardsRepo.findContentById(record.card_id))?.content ?? undefined
+        : undefined,
       currentKnowledgePoint: record.knowledge_point_id
         ? { id: record.knowledge_point_id.toString(), name: '', subject }
         : undefined,

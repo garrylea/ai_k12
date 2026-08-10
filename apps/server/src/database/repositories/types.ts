@@ -45,6 +45,8 @@ export interface MainErrorBookRow extends RowDataPacket {
   source: string; // 'practice' | 'exam' | ... 主线来源多样，不收窄为字面量联合
   source_ref_id: number | null;
   wrong_answer_text: string | null;
+  /** 关联的 mainline 讨论对话 id（B方案：跨刷新/跨设备续接同一讨论线）。软引用，可空。 */
+  dialogue_id: number | null;
   cleared_at: Date | null;
   created_at: Date;
   updated_at: Date;

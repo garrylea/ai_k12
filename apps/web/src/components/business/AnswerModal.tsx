@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
@@ -7,6 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { LatexEditor } from './LatexEditor';
 import { LatexPreview } from './LatexPreview';
+import { DiscussDrawer } from './DiscussDrawer';
 
 export interface PracticeQuestion { n: string; text: string; }
 
@@ -18,6 +18,7 @@ interface Props {
   startIndex: number;
   cardId: number;
   lessonId: number;
+  subjectId: number;
   /** 提示缓存（key = 复合题号 q.n）：session 内命中即直显，省一次后端请求 */
   hints: Record<string, string>;
   onSubmit: (questionText: string, studentAnswer: string) => Promise<{
@@ -29,11 +30,11 @@ interface Props {
   onClose: () => void;
 }
 
-export function AnswerModal({ questions, startIndex, cardId, lessonId, hints, onSubmit, onRequestHint, onFinish, onClose }: Props) {
-  const navigate = useNavigate();
+export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId, hints, onSubmit, onRequestHint, onFinish, onClose }: Props) {
   const [idx, setIdx] = useState(startIndex);
   const [answer, setAnswer] = useState('');
   const [showHint, setShowHint] = useState(false);
+  const [showDiscuss, setShowDiscuss] = useState(false);
   const [hintLoading, setHintLoading] = useState(false);
   const [hintError, setHintError] = useState(false);
   // answering：作答中；judging：末题已交，等待后台判题全部完成
@@ -49,6 +50,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, hints, on
     setShowHint(false);
     setHintLoading(false);
     setHintError(false);
+    setShowDiscuss(false);
   }, [idx]);
 
   if (!q) return null;
@@ -97,9 +99,9 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, hints, on
     onClose();
   };
 
+  // 让 AI 讲一讲：在弹窗内打开右侧抽屉做苏格拉底讨论（不再跳转占位页）。
   const handleDiscuss = () => {
-    handleClose();
-    navigate('/student/ai-discuss', { state: { cardId, lessonId } });
+    setShowDiscuss(true);
   };
 
   const doneCount = progress.filter(s => s === 'done' || s === 'failed').length;
@@ -172,7 +174,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, hints, on
   // ═══ 作答页 ═══
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
-      <div className="w-[92vw] max-w-5xl h-[88vh] bg-[var(--bg-card)] rounded-2xl shadow-xl flex flex-col overflow-hidden">
+      <div className="relative w-[92vw] max-w-5xl h-[88vh] bg-[var(--bg-card)] rounded-2xl shadow-xl flex flex-col overflow-hidden">
 
         {/* ═══ 顶部：题面 + 提示/讨论图标 ═══ */}
         <div className="shrink-0 p-4 border-b border-[var(--bg-subtle)]">
@@ -281,6 +283,18 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, hints, on
             </svg>
           </button>
         </div>
+
+        {/* 让 AI 讲一讲：右侧抽屉（仅手动关闭，覆盖右部/放大全屏） */}
+        {showDiscuss && (
+          <DiscussDrawer
+            mode="question"
+            cardId={cardId}
+            questionText={q.text}
+            subjectId={subjectId}
+            lessonId={lessonId}
+            onClose={() => setShowDiscuss(false)}
+          />
+        )}
       </div>
     </div>
   );

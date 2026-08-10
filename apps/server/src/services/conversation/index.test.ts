@@ -35,18 +35,24 @@ class FakeStudentsRepo {
   }
 }
 
+class FakeCardsRepo {
+  async findContentById(_cardId: number) { return null; }
+}
+
 describe('ConversationService', () => {
   let svc: ConversationService;
   let dialogues: FakeDialoguesRepo;
   let messages: FakeMessagesRepo;
   let students: FakeStudentsRepo;
+  let cards: FakeCardsRepo;
   let dialogueId: number;
 
   beforeEach(async () => {
     dialogues = new FakeDialoguesRepo();
     messages = new FakeMessagesRepo();
     students = new FakeStudentsRepo();
-    svc = new ConversationService(dialogues as any, messages as any, students as any);
+    cards = new FakeCardsRepo();
+    svc = new ConversationService(dialogues as any, messages as any, students as any, cards as any);
     dialogueId = await svc.createDialogue({
       studentId: 1,
       subject: 'math',

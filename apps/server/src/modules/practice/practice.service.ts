@@ -3,6 +3,7 @@ import { QuestionsRepository, MainErrorBooksRepository, CardsRepository } from '
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
+import { ConversationsService } from '../conversations/conversations.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
@@ -80,6 +81,37 @@ export interface HintOutput {
   cached: boolean;
 }
 
+export interface DiscussInput {
+  studentId: number;
+  subjectId: number;
+  cardId: number;
+  lessonId: number;
+  /** 题目文本：作为错题去重键（question_id 为空时按题面匹配）。 */
+  questionText: string;
+}
+
+export interface DiscussOutput {
+  /** mainline 对话 id，前端据此走 /api/ai/tutor/stream 做苏格拉底讨论。 */
+  dialogueId: string;
+  /** 本次命中或新建的错题本记录 id。 */
+  errorBookId: number;
+  /** 题库中的题目 id（未命中为 null）。 */
+  questionId: number | null;
+}
+
+/** 卡片级「思辨答疑」入参：讨论整张卡片的知识，无具体题目，不入错题本。 */
+export interface DiscussCardInput {
+  studentId: number;
+  subjectId: number;
+  cardId: number;
+  lessonId: number;
+}
+
+export interface DiscussCardOutput {
+  /** mainline 对话 id（find-or-create：复用该卡已有讨论，否则新建）。 */
+  dialogueId: string;
+}
+
 @Injectable()
 export class PracticeService {
   private readonly logger = new Logger(PracticeService.name);
@@ -91,6 +123,7 @@ export class PracticeService {
     private readonly judgment: JudgmentCapability,
     private readonly cardsRepo: CardsRepository,
     private readonly hint: HintCapability,
+    private readonly conversationsService: ConversationsService,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -242,5 +275,98 @@ export class PracticeService {
         503,
       );
     }
+  }
+
+  /**
+   * 课堂练习「让 AI 讲一讲」：打开讨论即
+   *   ① 记入主线错题本（find-or-create 幂等，source='discuss'）；
+   *   ② 创建带 card_id 的 mainline 对话并返回 dialogueId。
+   * 前端拿到 dialogueId 后走 /api/ai/tutor/stream（mode=mainline）做苏格拉底讨论，
+   * TutoringCapability 据 card_id 解析 cardContent 限定范围。
+   *
+   * questionId 解析用 content_hash 快查（不调 AI 结构化，避免开抽屉等待）；
+   * 未命中则 question_id=null + wrong_answer_text 存题面（与判题 quality=poor 路径一致）。
+   * 错题本记录无论后续答对答错都保留（清除门禁尚未实现，markCleared 暂无调用方）。
+   */
+  async startDiscuss(input: DiscussInput): Promise<DiscussOutput> {
+    // ① 解析 questionId（快查 content_hash，未命中 null）
+    const contentHash = computeContentHash(input.questionText);
+    const q: QuestionRow | null = await this.questionsRepo.findByContentHash(contentHash);
+    const questionId: number | null = q?.id ?? null;
+
+    // ② 错题本 find-or-create（幂等）
+    const existing = await this.mainErrorRepo.findUnclearedByStudentQuestion(
+      input.studentId,
+      questionId,
+      input.cardId,
+      input.questionText,
+    );
+    let errorBookId: number;
+    if (existing) {
+      errorBookId = existing.id;
+    } else {
+      errorBookId = await this.mainErrorRepo.create({
+        student_id: input.studentId,
+        subject_id: input.subjectId,
+        question_id: questionId,
+        source: 'discuss',
+        source_ref_id: input.cardId,
+        wrong_answer_text: questionId === null ? input.questionText : null,
+      });
+    }
+
+    // ③ B方案：对话也 find-or-create。错题本是「学生+题」的锚：
+    //    - 已绑 dialogue_id 且对话仍可用 -> 复用（跨刷新/跨设备续接同一讨论线）；
+    //    - 否则 -> 新建 mainline 对话并回写 dialogue_id。
+    //    TutoringCapability 据 card_id 解析 cardContent 限定范围。
+    const dialogueId = await this.resolveDiscussDialogue(input, existing?.dialogue_id ?? null, errorBookId);
+
+    return { dialogueId, errorBookId, questionId };
+  }
+
+  /**
+   * B方案核心：复用错题本上已绑的 dialogue_id；不可用则新建并回写。
+   * 抽出以便 startDiscuss 主流程清晰。
+   */
+  private async resolveDiscussDialogue(
+    input: DiscussInput,
+    boundDialogueId: number | null,
+    errorBookId: number,
+  ): Promise<string> {
+    if (boundDialogueId) {
+      try {
+        // 校验归属 + 对话仍存在（deleted_at 已过滤）。命中则复用，不另起对话。
+        await this.conversationsService.get(boundDialogueId, input.studentId);
+        return String(boundDialogueId);
+      } catch {
+        // 对话已删/不可达 -> 落到新建分支，重建并回写。
+      }
+    }
+    const dialogue = await this.conversationsService.create(input.studentId, {
+      track: 'mainline',
+      cardId: input.cardId,
+    });
+    if (!dialogue) {
+      throw new HttpException(
+        { code: 5000, message: '创建讨论会话失败' },
+        500,
+      );
+    }
+    await this.mainErrorRepo.updateDialogueId(errorBookId, dialogue.id);
+    return String(dialogue.id);
+  }
+
+  /**
+   * 卡片级「思辨答疑」：find-or-create 该学生在该卡片的 mainline 对话。
+   * 与题目级两点不同：scope=整张卡片（非某题）；**不入错题本**（讨论知识非题目），
+   * 故以 (student, card_id) 为锚而非 error_book.dialogue_id。重开回到同一对话。
+   */
+  async startCardDiscuss(input: DiscussCardInput): Promise<DiscussCardOutput> {
+    const dialogue = await this.conversationsService.findOrCreateMainlineByCard(
+      input.studentId,
+      input.cardId,
+      input.subjectId,
+    );
+    return { dialogueId: String(dialogue.id) };
   }
 }

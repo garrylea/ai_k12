@@ -404,15 +404,21 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   source VARCHAR(20) NOT NULL,
   source_ref_id BIGINT DEFAULT NULL,
   wrong_answer_text TEXT DEFAULT NULL,
+  -- B方案：关联的 mainline 讨论对话，跨刷新/跨设备续接同一讨论线。
+  -- 错题本是「学生+题」的锚，dialogue_id 让重开讨论回到同一对话而非另起。
+  dialogue_id BIGINT DEFAULT NULL,
   cleared_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_me_student_subject (student_id, subject_id),
   KEY idx_me_student_cleared (student_id, is_cleared),
   KEY idx_me_student_level (student_id, is_cleared, level),
+  KEY idx_me_dialogue_id (dialogue_id),
   CONSTRAINT fk_me_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_me_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
   CONSTRAINT fk_me_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
+  -- 注：dialogue_id 不加 FK 约束（main_error_books 建表早于 ai_dialogues，无法前向引用）。
+  -- 作软引用：dialogue 被删时由 PracticeService.startDiscuss 的 try/catch 兜底重建。
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS error_redo_logs (
