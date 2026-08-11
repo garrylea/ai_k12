@@ -1,5 +1,5 @@
 -- K12 智学系统 — 数据库初始化脚本
--- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.4）
+-- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.5）
 -- 范围：MVP 全部表（§3.1 ~ §3.9、§3.11），不含 P2 计费相关表（§3.10）
 -- 数据库：MySQL 9.7.1 LTS（文档约定）
 -- 字符集：utf8mb4
@@ -452,6 +452,7 @@ CREATE TABLE IF NOT EXISTS practice_results (
   KEY idx_pr_student_lesson (student_id, lesson_id),
   CONSTRAINT fk_pr_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_pr_card_id   FOREIGN KEY (card_id)   REFERENCES cards (id)    ON DELETE CASCADE,
+  CONSTRAINT fk_pr_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
   CONSTRAINT fk_pr_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
