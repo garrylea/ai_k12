@@ -119,3 +119,22 @@ export interface ErrorRedoLogRow extends RowDataPacket {
   error_level_after: number;
   created_at: Date;
 }
+
+export interface PracticeResultRow extends RowDataPacket {
+  id: number;
+  student_id: number;
+  subject_id: number;
+  card_id: number;
+  lesson_id: number;
+  question_id: number | null;
+  question_n: string;
+  question_text: string;
+  student_answer: string;
+  is_correct: number;
+  method: 'exact' | 'ai';
+  analysis: string | null;
+  error_type: 'logic' | 'calculation' | 'format' | 'missing' | null;
+  judged_at: Date;
+  created_at: Date;
+  updated_at: Date;
+}
