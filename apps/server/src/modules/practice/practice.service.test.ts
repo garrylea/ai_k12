@@ -8,7 +8,7 @@ const mk = (overrides: any = {}) => ({
     findOrCreate: vi.fn(),
     deleteById: vi.fn().mockResolvedValue(undefined),
   },
-  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), updateDialogueId: vi.fn().mockResolvedValue(undefined), countUnclearedByLesson: vi.fn().mockResolvedValue(0) },
+  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined), updateDialogueId: vi.fn().mockResolvedValue(undefined), countUnclearedByLesson: vi.fn().mockResolvedValue(0) },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
   cardsRepo: {
@@ -22,12 +22,18 @@ const mk = (overrides: any = {}) => ({
     findOrCreateMainlineByCard: vi.fn().mockResolvedValue({ id: 100 }),
   },
   lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(null), findByUnitId: vi.fn(), findById: vi.fn() },
+  practiceResultsRepo: {
+    upsert: vi.fn().mockResolvedValue(undefined),
+    findByStudentCard: vi.fn().mockResolvedValue([]),
+    deleteByStudentCard: vi.fn().mockResolvedValue(undefined),
+    deleteByStudentLesson: vi.fn().mockResolvedValue(undefined),
+  },
   ...overrides,
 });
 
 /** 用 mk() 构造的依赖实例化 PracticeService。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.lessonsRepo as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.lessonsRepo as any, deps.practiceResultsRepo as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -39,7 +45,7 @@ describe('PracticeService.judge', () => {
       },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题', studentAnswer: 'B' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'B' });
     expect(r.isCorrect).toBe(false);
     expect(r.method).toBe('exact');
     expect(r.errorBookId).toBe(42);
@@ -61,7 +67,7 @@ describe('PracticeService.judge', () => {
       },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '选择题', studentAnswer: 'A' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '选择题', studentAnswer: 'A' });
     expect(r.isCorrect).toBe(true);
     expect(r.method).toBe('exact');
     expect(deps.judgment.judge).not.toHaveBeenCalled();
@@ -82,7 +88,7 @@ describe('PracticeService.judge', () => {
       },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '选择题', studentAnswer: 'A' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '选择题', studentAnswer: 'A' });
     expect(r.isCorrect).toBe(true);
     expect(r.method).toBe('exact');
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
@@ -98,7 +104,7 @@ describe('PracticeService.judge', () => {
       },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '计算题', studentAnswer: '2/3' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '计算题', studentAnswer: '2/3' });
     expect(r.isCorrect).toBe(true);
     expect(r.method).toBe('exact');
     expect(deps.judgment.judge).not.toHaveBeenCalled();
@@ -116,7 +122,7 @@ describe('PracticeService.judge', () => {
       judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: false, analysis: '应为 1/2', errorType: 'calculation' }) },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '计算题', studentAnswer: '2/3' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '计算题', studentAnswer: '2/3' });
     expect(r.method).toBe('ai');
     expect(deps.judgment.judge).toHaveBeenCalled();
     expect(r.isCorrect).toBe(false);
@@ -133,7 +139,7 @@ describe('PracticeService.judge', () => {
       },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题', studentAnswer: '答' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: '答' });
     expect(r.isCorrect).toBe(false);
     expect(r.method).toBe('ai');
     expect(r.analysis).toBe('错因');
@@ -147,7 +153,7 @@ describe('PracticeService.judge', () => {
       judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: true, analysis: '', errorType: null }) },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题', studentAnswer: '答' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: '答' });
     expect(r.isCorrect).toBe(true);
     expect(r.errorBookId).toBeUndefined();
     expect(deps.structuring.structure).not.toHaveBeenCalled();
@@ -163,7 +169,7 @@ describe('PracticeService.judge', () => {
       judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: true, analysis: '', errorType: null }) },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '证明题', studentAnswer: '学生证明' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '证明题', studentAnswer: '学生证明' });
     expect(r.method).toBe('ai');
     expect(r.isCorrect).toBe(true);
     expect(deps.judgment.judge).toHaveBeenCalledWith(expect.objectContaining({ questionType: 'proof' }));
@@ -177,7 +183,7 @@ describe('PracticeService.judge', () => {
       judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: false, analysis: '错因', errorType: 'calculation' }) },
     });
     const svc = mkSvc(deps);
-    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '难题', studentAnswer: '错答' });
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '难题', studentAnswer: '错答' });
     expect(r.isCorrect).toBe(false);
     expect(r.errorBookId).toBe(42);
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -193,7 +199,7 @@ describe('PracticeService.judge', () => {
     });
     const svc = mkSvc(deps);
     await expect(
-      svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题', studentAnswer: '答' }),
+      svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: '答' }),
     ).rejects.toThrow(HttpException);
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
     expect(deps.structuring.structure).not.toHaveBeenCalled();
@@ -208,13 +214,89 @@ describe('PracticeService.judge', () => {
         findOrCreate: vi.fn().mockResolvedValue({ id: 88, created: true }),
         deleteById: vi.fn().mockResolvedValue(undefined),
       },
-      mainErrorRepo: { create: vi.fn().mockRejectedValue(new Error('DB down')) },
+      mainErrorRepo: { create: vi.fn().mockRejectedValue(new Error('DB down')), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null) },
     });
     const svc = mkSvc(deps);
     await expect(
-      svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题', studentAnswer: '错答' }),
+      svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: '错答' }),
     ).rejects.toThrow('DB down');
     expect(deps.questionsRepo.deleteById).toHaveBeenCalledWith(88);
+  });
+
+  it('judge 答对 -> upsert practice_results(is_correct=true) + clearUnclearedByStudentQuestion，不入错题本', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' }),
+        findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'A' });
+    expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      student_id: 1, card_id: 5, lesson_id: 9, question_id: 10, question_n: '0-1',
+      is_correct: true, method: 'exact', analysis: null,
+    }));
+    expect(deps.mainErrorRepo.clearUnclearedByStudentQuestion).toHaveBeenCalledWith(1, 10, 5, '题');
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('judge 答错 -> upsert practice_results(is_correct=false) + find-or-create 错题本', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' }),
+        findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'B' });
+    expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      is_correct: false, question_n: '0-1', analysis: expect.any(String),
+    }));
+    expect(deps.mainErrorRepo.findUnclearedByStudentQuestion).toHaveBeenCalledWith(1, 10, 5, '题');
+    expect(deps.mainErrorRepo.create).toHaveBeenCalled();
+  });
+
+  it('judge 答错且已有未清错题 -> find-or-create 复用，不重复 create', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' }),
+        findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue({ id: 77 }),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(), countUnclearedByLesson: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'B' });
+    expect(r.errorBookId).toBe(77);
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('judge AI 失败(503) -> 不 upsert practice_results', async () => {
+    const deps = mk({
+      judgment: { judge: vi.fn().mockRejectedValue(new Error('LLM timeout')) },
+    });
+    const svc = mkSvc(deps);
+    await expect(
+      svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: '答' }),
+    ).rejects.toThrow(HttpException);
+    expect(deps.practiceResultsRepo.upsert).not.toHaveBeenCalled();
+  });
+
+  it('practiceResultsRepo.upsert 失败 -> 不阻断判题返回（best-effort）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' }),
+        findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+      practiceResultsRepo: { upsert: vi.fn().mockRejectedValue(new Error('DB down')), findByStudentCard: vi.fn(), deleteByStudentCard: vi.fn(), deleteByStudentLesson: vi.fn() },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'A' });
+    expect(r.isCorrect).toBe(true);
   });
 });
 
@@ -418,5 +500,46 @@ describe('PracticeService.countUnclearedErrorsFromPreviousLesson', () => {
     const svc = mkSvc(deps);
     const r = await svc.countUnclearedErrorsFromPreviousLesson(1, 100);
     expect(r).toEqual({ lessonId: 99, count: 3 });
+  });
+});
+
+describe('PracticeService.getResults', () => {
+  it('返回 PracticeResultDto[]，is_correct TINYINT -> boolean', async () => {
+    const deps = mk({
+      practiceResultsRepo: {
+        upsert: vi.fn(),
+        findByStudentCard: vi.fn().mockResolvedValue([
+          { question_n: '0-1', question_text: '题1', student_answer: 'A', is_correct: 1, method: 'exact', analysis: null, error_type: null },
+          { question_n: '0-2', question_text: '题2', student_answer: 'B', is_correct: 0, method: 'ai', analysis: '错因', error_type: 'calculation' },
+        ]),
+        deleteByStudentCard: vi.fn(), deleteByStudentLesson: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    const out = await svc.getResults(1, 5);
+    expect(out).toEqual([
+      { questionN: '0-1', questionText: '题1', studentAnswer: 'A', isCorrect: true, method: 'exact', analysis: null, errorType: null },
+      { questionN: '0-2', questionText: '题2', studentAnswer: 'B', isCorrect: false, method: 'ai', analysis: '错因', errorType: 'calculation' },
+    ]);
+  });
+});
+
+describe('PracticeService.resetCard / resetLesson', () => {
+  it('resetCard -> deleteByStudentCard', async () => {
+    const deps = mk({
+      practiceResultsRepo: { upsert: vi.fn(), findByStudentCard: vi.fn(), deleteByStudentCard: vi.fn().mockResolvedValue(undefined), deleteByStudentLesson: vi.fn() },
+    });
+    const svc = mkSvc(deps);
+    await svc.resetCard(1, 5);
+    expect(deps.practiceResultsRepo.deleteByStudentCard).toHaveBeenCalledWith(1, 5);
+  });
+
+  it('resetLesson -> deleteByStudentLesson', async () => {
+    const deps = mk({
+      practiceResultsRepo: { upsert: vi.fn(), findByStudentCard: vi.fn(), deleteByStudentCard: vi.fn(), deleteByStudentLesson: vi.fn().mockResolvedValue(undefined) },
+    });
+    const svc = mkSvc(deps);
+    await svc.resetLesson(1, 9);
+    expect(deps.practiceResultsRepo.deleteByStudentLesson).toHaveBeenCalledWith(1, 9);
   });
 });

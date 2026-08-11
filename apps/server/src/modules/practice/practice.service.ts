@@ -1,5 +1,5 @@
 import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, LessonsRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, LessonsRepository, PracticeResultsRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
@@ -50,6 +50,7 @@ export interface JudgeInput {
   subjectId: number;
   cardId: number;
   lessonId: number;
+  questionN: string;
   questionText: string;
   studentAnswer: string;
 }
@@ -61,6 +62,16 @@ export interface JudgeOutput {
   analysis: string | null;
   errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
   errorBookId: number | undefined;
+}
+
+export interface PracticeResultDto {
+  questionN: string;
+  questionText: string;
+  studentAnswer: string;
+  isCorrect: boolean;
+  method: 'exact' | 'ai';
+  analysis: string | null;
+  errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
 }
 
 export interface HintInput {
@@ -123,6 +134,7 @@ export class PracticeService {
     private readonly hint: HintCapability,
     private readonly conversationsService: ConversationsService,
     private readonly lessonsRepo: LessonsRepository,
+    private readonly practiceResultsRepo: PracticeResultsRepository,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -175,7 +187,7 @@ export class PracticeService {
     let questionId: number | null = q?.id ?? null;
     let errorBookId: number | undefined;
 
-    // 路由 3：答错 -> 入主线错题本（未入库的题先结构化 + 插题）
+    // 路由 3：答错 -> 入主线错题本（find-or-create，避免重复答错堆积；未入库的题先结构化 + 插题）
     if (!isCorrect) {
       let questionCreated = false;
       if (!q) {
@@ -211,27 +223,94 @@ export class PracticeService {
           questionId = null;
         }
       }
-      // Important #2: 孤儿题补偿 -- mainErrorRepo.create 失败时若刚创建了题，
-      // 删除孤儿题再抛（镜像 ErrorBookService.insertQuestionAndAux）。
-      try {
-        errorBookId = await this.mainErrorRepo.create({
-          student_id: input.studentId,
-          subject_id: input.subjectId,
-          question_id: questionId,
-          source: 'practice',
-          source_ref_id: input.cardId,
-          lesson_id: input.lessonId,
-          wrong_answer_text: questionId === null ? input.questionText : null,
-        });
-      } catch (err) {
-        if (questionCreated && questionId !== null) {
-          await this.questionsRepo.deleteById(questionId).catch(() => {});
+      // find-or-create：命中既有未清错题则复用（不重复 create）；否则新建（孤儿题回滚补偿仅新建分支）
+      const existing = await this.mainErrorRepo.findUnclearedByStudentQuestion(
+        input.studentId,
+        questionId,
+        input.cardId,
+        input.questionText,
+      );
+      if (existing) {
+        errorBookId = existing.id;
+      } else {
+        // Important #2: 孤儿题补偿 -- mainErrorRepo.create 失败时若刚创建了题，
+        // 删除孤儿题再抛（镜像 ErrorBookService.insertQuestionAndAux）。
+        try {
+          errorBookId = await this.mainErrorRepo.create({
+            student_id: input.studentId,
+            subject_id: input.subjectId,
+            question_id: questionId,
+            source: 'practice',
+            source_ref_id: input.cardId,
+            lesson_id: input.lessonId,
+            wrong_answer_text: questionId === null ? input.questionText : null,
+          });
+        } catch (err) {
+          if (questionCreated && questionId !== null) {
+            await this.questionsRepo.deleteById(questionId).catch(() => {});
+          }
+          throw err;
         }
-        throw err;
+      }
+    } else {
+      // 答对 -> 清零该题未清错题记录（展示掌握，影响跨课门禁计数；best-effort，失败不阻断）
+      try {
+        await this.mainErrorRepo.clearUnclearedByStudentQuestion(
+          input.studentId,
+          questionId,
+          input.cardId,
+          input.questionText,
+        );
+      } catch (err) {
+        this.logger.error(`clearUnclearedByStudentQuestion failed: ${err}`);
       }
     }
 
+    // 对/错都持久化判题结果（best-effort，失败不阻断判题返回）
+    try {
+      await this.practiceResultsRepo.upsert({
+        student_id: input.studentId,
+        subject_id: input.subjectId,
+        card_id: input.cardId,
+        lesson_id: input.lessonId,
+        question_id: questionId,
+        question_n: input.questionN,
+        question_text: input.questionText,
+        student_answer: input.studentAnswer,
+        is_correct: isCorrect,
+        method,
+        analysis,
+        error_type: errorType,
+      });
+    } catch (err) {
+      this.logger.error(`practiceResultsRepo.upsert failed (student=${input.studentId}, card=${input.cardId}, qn=${input.questionN}): ${err}`);
+    }
+
     return { questionId, isCorrect, method, analysis, errorType, errorBookId };
+  }
+
+  /** 取该学生在该卡的持久化判题结果（is_correct TINYINT -> boolean）。 */
+  async getResults(studentId: number, cardId: number): Promise<PracticeResultDto[]> {
+    const rows = await this.practiceResultsRepo.findByStudentCard(studentId, cardId);
+    return rows.map((r) => ({
+      questionN: r.question_n,
+      questionText: r.question_text,
+      studentAnswer: r.student_answer,
+      isCorrect: !!r.is_correct,
+      method: r.method,
+      analysis: r.analysis,
+      errorType: r.error_type,
+    }));
+  }
+
+  /** 单卡 reset：删除该学生该卡的全部判题结果（不动 main_error_books）。 */
+  async resetCard(studentId: number, cardId: number): Promise<void> {
+    await this.practiceResultsRepo.deleteByStudentCard(studentId, cardId);
+  }
+
+  /** 课程级 reset：删除该学生该课全部卡片的判题结果（不动 main_error_books）。 */
+  async resetLesson(studentId: number, lessonId: number): Promise<void> {
+    await this.practiceResultsRepo.deleteByStudentLesson(studentId, lessonId);
   }
 
   /**

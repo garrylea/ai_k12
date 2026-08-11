@@ -19,6 +19,7 @@ export class PracticeController {
       subjectId: dto.subjectId,
       cardId: dto.cardId,
       lessonId: dto.lessonId,
+      questionN: dto.questionN,
       questionText: dto.questionText,
       studentAnswer: dto.studentAnswer,
     });

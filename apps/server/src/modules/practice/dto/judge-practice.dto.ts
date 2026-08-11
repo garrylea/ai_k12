@@ -9,6 +9,7 @@ export interface JudgePracticeDto {
   cardId: number;
   lessonId: number;
   subjectId: number;
+  questionN: string;
   questionText: string;
   studentAnswer: string;
 }
