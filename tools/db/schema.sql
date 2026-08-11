@@ -427,6 +427,34 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   -- 作软引用：dialogue 被删时由 PracticeService.startDiscuss 的 try/catch 兜底重建。
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ============================================================
+-- 课堂练习判题结果持久化（学生×卡×题，单题重做 upsert）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS practice_results (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id BIGINT NOT NULL,
+  subject_id BIGINT NOT NULL,
+  card_id BIGINT NOT NULL,
+  lesson_id BIGINT NOT NULL,
+  question_id BIGINT DEFAULT NULL,        -- 题库命中时填；未命中 null
+  question_n VARCHAR(20) NOT NULL,         -- 卡内复合题号（如 "0-1"），upsert 去重键
+  question_text TEXT NOT NULL,             -- 题面（question_id 为空时兜底身份 + 展示）
+  student_answer TEXT NOT NULL,
+  is_correct TINYINT(1) NOT NULL,
+  method VARCHAR(10) NOT NULL,             -- 'exact' | 'ai'
+  analysis TEXT DEFAULT NULL,              -- 题解（仅错题，复用判题 analysis）
+  error_type VARCHAR(20) DEFAULT NULL,     -- logic|calculation|format|missing|null
+  judged_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_pr_student_card_qn (student_id, card_id, question_n),
+  KEY idx_pr_student_card (student_id, card_id),
+  KEY idx_pr_student_lesson (student_id, lesson_id),
+  CONSTRAINT fk_pr_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
+  CONSTRAINT fk_pr_card_id   FOREIGN KEY (card_id)   REFERENCES cards (id)    ON DELETE CASCADE,
+  CONSTRAINT fk_pr_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS error_redo_logs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   error_book_type VARCHAR(10) NOT NULL,
@@ -747,6 +775,12 @@ SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 DROP TRIGGER IF EXISTS trg_main_error_books_updated_at;
 CREATE TRIGGER trg_main_error_books_updated_at
 BEFORE UPDATE ON main_error_books
+FOR EACH ROW
+SET NEW.updated_at = CURRENT_TIMESTAMP(3);
+
+DROP TRIGGER IF EXISTS trg_practice_results_updated_at;
+CREATE TRIGGER trg_practice_results_updated_at
+BEFORE UPDATE ON practice_results
 FOR EACH ROW
 SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 
