@@ -554,8 +554,8 @@ export default function CourseDetailPage() {
                 className="relative flex-1 min-h-0 w-full flex flex-col"
                 style={{ maxWidth: 'var(--learn-card-max-w)' }}
               >
-                {/* 小节标题（H1） */}
-                <div className="shrink-0 mb-3">
+                {/* 小节标题（H1） + 清空本课练习（仅 practice 卡，位于卡片上方） */}
+                <div className="shrink-0 mb-3 flex items-center justify-between gap-2">
                   <h1
                     className="font-bold"
                     style={{
@@ -566,6 +566,24 @@ export default function CourseDetailPage() {
                   >
                     {data.lessonName} 知识自学与概念理解
                   </h1>
+                  {card.cardType === 'practice' && (
+                    <button
+                      type="button"
+                      title="清空本课练习"
+                      aria-label="清空本课练习"
+                      onClick={() => {
+                        if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
+                        resetPracticeLesson(lessonId).then(() => reset());
+                      }}
+                      className="shrink-0 p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+                        <path d="M22 21H7" />
+                        <path d="m5 11 9 9" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
 
                 {/* 白卡 — 撑满视口 */}
@@ -582,46 +600,7 @@ export default function CourseDetailPage() {
                       {(() => {
                         const displayTitle = card.title || (CARD_TYPE_LABEL[card.cardType] ?? card.cardType);
                         const hasHeadingContent = contentStartsWithHeading(card.content);
-                        const showTitle = displayTitle && !hasHeadingContent;
-                        // practice 卡：标题左 + 「清空本课练习」图标按钮右（与小节名称对齐）
-                        if (card.cardType === 'practice') {
-                          return (
-                            <div className="flex items-center justify-between gap-2 mb-4">
-                              {showTitle ? (
-                                <h2
-                                  className="font-black leading-snug flex items-center gap-2"
-                                  style={{ fontSize: 'var(--fs-learn-h2)', color: 'var(--learn-heading-2)' }}
-                                >
-                                  <span
-                                    className="w-1.5 h-4 rounded-full shrink-0"
-                                    style={{ backgroundColor: 'var(--learn-heading-2)' }}
-                                  />
-                                  {displayTitle}
-                                </h2>
-                              ) : <span className="flex-1" />}
-                              <button
-                                type="button"
-                                title="清空本课练习"
-                                aria-label="清空本课练习"
-                                onClick={() => {
-                                  if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
-                                  resetPracticeLesson(lessonId).then(() => reset());
-                                }}
-                                className="shrink-0 p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--error)] hover:bg-[var(--bg-subtle)] transition-colors"
-                              >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                  <polyline points="3 6 5 6 21 6" />
-                                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                  <path d="M10 11v6" />
-                                  <path d="M14 11v6" />
-                                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                                </svg>
-                              </button>
-                            </div>
-                          );
-                        }
-                        // 非练习卡：保持原样（h2 + mb-4）
-                        return showTitle ? (
+                        return displayTitle && !hasHeadingContent ? (
                           <h2
                             className="font-black leading-snug mb-4 flex items-center gap-2"
                             style={{
@@ -795,8 +774,9 @@ export default function CourseDetailPage() {
 
                   {/* 悬浮答疑按钮（柔和钢蓝，不分散学习注意力）
                       practice 卡的答疑已移入 AnswerModal（提示 / 让 AI 讲一讲），此处不再渲染。
-                      非练习卡走卡片级思辨答疑：scope=整张卡片，不入错题本（讨论知识非题目） */}
-                  {card.cardType !== 'practice' && (
+                      非练习卡走卡片级思辨答疑：scope=整张卡片，不入错题本（讨论知识非题目）。
+                      抽屉打开时隐藏入口（抽屉自带关闭按钮），避免按钮 z-10 浮在抽屉之上。 */}
+                  {card.cardType !== 'practice' && !showCardDiscuss && (
                     <button
                       onClick={() => setShowCardDiscuss(true)}
                       className="absolute right-6 bottom-20 w-14 h-14 rounded-full bg-[var(--learn-btn-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--learn-btn-primary-hover)] transition-colors z-10"
