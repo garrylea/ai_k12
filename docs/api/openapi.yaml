@@ -2760,6 +2760,76 @@ paths:
                     type: string
                     example: 创建讨论会话失败
 
+  /practice/results:
+    get:
+      tags: [Practice]
+      summary: 取该练习卡持久化判题结果（✓/✗ 回显）
+      operationId: getPracticeResults
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: cardId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: practice 卡片 ID
+      responses:
+        '200':
+          description: 该卡全部持久化判题结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PracticeResult'
+    delete:
+      tags: [Practice]
+      summary: 重置练习记录（cardId 单卡 / lessonId 本课全部，互斥）
+      operationId: resetPracticeResults
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: cardId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: lessonId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        nullable: true
+        '400':
+          description: 参数错误（cardId/lessonId 同传或都缺）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 1001
+                  message:
+                    type: string
+                    example: 须指定 cardId 或 lessonId
+
   /practice/previous-errors:
     get:
       tags: [Practice]
@@ -3846,7 +3916,7 @@ components:
 
     JudgeRequest:
       type: object
-      required: [cardId, lessonId, subjectId, questionText, studentAnswer]
+      required: [cardId, lessonId, subjectId, questionN, questionText, studentAnswer]
       properties:
         cardId:
           type: integer
@@ -3857,6 +3927,9 @@ components:
         subjectId:
           type: integer
           description: 学科 ID
+        questionN:
+          type: string
+          description: 卡内复合题号（如 "0-1"），practice_results upsert 去重键
         questionText:
           type: string
           description: 题面原文（取自 cards.content_metadata.questions[].text）
@@ -3981,6 +4054,33 @@ components:
           type: integer
           description: 上一节课未清零主线错题数
       required: [lessonId, count]
+
+    PracticeResult:
+      type: object
+      properties:
+        questionN:
+          type: string
+          description: 卡内复合题号（如 "0-1"）
+        questionText:
+          type: string
+          description: 题面原文
+        studentAnswer:
+          type: string
+          description: 学生提交答案
+        isCorrect:
+          type: boolean
+          description: 对错
+        method:
+          type: string
+          enum: [exact, ai]
+        analysis:
+          type: string
+          nullable: true
+          description: 题解（仅错题，复用判题 analysis；对题为 null）
+        errorType:
+          type: string
+          nullable: true
+          enum: [logic, calculation, format, missing]
 
     RegisterRequest:
       type: object
