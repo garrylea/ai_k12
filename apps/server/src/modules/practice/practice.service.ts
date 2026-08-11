@@ -262,7 +262,7 @@ export class PracticeService {
           input.questionText,
         );
       } catch (err) {
-        this.logger.error(`clearUnclearedByStudentQuestion failed: ${err}`);
+        this.logger.error(`clearUnclearedByStudentQuestion failed (student=${input.studentId}, card=${input.cardId}, qn=${input.questionN}): ${err}`);
       }
     }
 

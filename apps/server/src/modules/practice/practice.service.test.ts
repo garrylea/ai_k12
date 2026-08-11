@@ -298,6 +298,43 @@ describe('PracticeService.judge', () => {
     const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'A' });
     expect(r.isCorrect).toBe(true);
   });
+
+  it('clearUnclearedByStudentQuestion 失败 -> 不阻断判题返回（best-effort）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' }),
+        findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn().mockRejectedValue(new Error('DB down')),
+        updateDialogueId: vi.fn(), countUnclearedByLesson: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'A' });
+    expect(r.isCorrect).toBe(true);
+  });
+
+  it('答错未入库题且已有未清错题（questionId=null，按题面匹配）-> find-or-create 复用，不重复 create', async () => {
+    const deps = mk({
+      judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: false, analysis: '错因', errorType: 'calculation' }) },
+      structuring: { structure: vi.fn().mockResolvedValue({ quality: 'poor', content: '', type: 'short_answer', difficulty: 2, answer: 'a', explanation: 'e', knowledgePoints: [] }) },
+      questionsRepo: { findByContentHash: vi.fn().mockResolvedValue(null), findOrCreate: vi.fn(), deleteById: vi.fn() },
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue({ id: 88 }),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(), countUnclearedByLesson: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '未入库题', studentAnswer: '错答' });
+    expect(r.errorBookId).toBe(88);
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.mainErrorRepo.findUnclearedByStudentQuestion).toHaveBeenCalledWith(1, null, 5, '未入库题');
+  });
 });
 
 describe('PracticeService.getHint', () => {
