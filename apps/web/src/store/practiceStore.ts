@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { JudgeResult } from '../services/api';
+import type { JudgeResult, PracticeResult } from '../services/api';
 
 interface AnswerRecord extends JudgeResult {
   studentAnswer: string;
@@ -17,6 +17,7 @@ interface PracticeState {
   discussDialogues: Record<string, string>;
   currentIndex: number;
   setSession: (cardId: number, questions: { n: string; text: string }[]) => void;
+  loadResults: (cardId: number, questions: { n: string; text: string }[], results: PracticeResult[]) => void;
   record: (n: string, studentAnswer: string, result: JudgeResult, opts?: { failed?: boolean }) => void;
   setHint: (n: string, hint: string) => void;
   setDiscussDialogue: (questionText: string, dialogueId: string) => void;
@@ -31,6 +32,29 @@ export const usePracticeStore = create<PracticeState>((set) => ({
   discussDialogues: {},
   currentIndex: 0,
   setSession: (cardId, questions) => set({ cardId, questions, answers: {}, hints: {}, discussDialogues: {}, currentIndex: 0 }),
+  loadResults: (cardId, questions, results) => set((s) => {
+    const dbAnswers: Record<string, AnswerRecord> = {};
+    for (const r of results) {
+      dbAnswers[r.questionN] = {
+        questionId: null,
+        isCorrect: r.isCorrect,
+        method: r.method,
+        analysis: r.analysis,
+        errorType: r.errorType ?? null,
+        studentAnswer: r.studentAnswer,
+      };
+    }
+    // 同卡重入（effect 在用户作答后才返回）：保留在途作答（current 优先），DB 仅填补空缺
+    const merged = s.cardId === cardId ? { ...dbAnswers, ...s.answers } : dbAnswers;
+    return {
+      cardId,
+      questions,
+      answers: merged,
+      hints: s.cardId === cardId ? s.hints : {},
+      discussDialogues: s.cardId === cardId ? s.discussDialogues : {},
+      currentIndex: 0,
+    };
+  }),
   record: (n, studentAnswer, result, opts) =>
     set((s) => ({ answers: { ...s.answers, [n]: { ...result, studentAnswer, failed: opts?.failed } } })),
   setHint: (n, hint) => set((s) => ({ hints: { ...s.hints, [n]: hint } })),

@@ -21,7 +21,7 @@ interface Props {
   subjectId: number;
   /** 提示缓存（key = 复合题号 q.n）：session 内命中即直显，省一次后端请求 */
   hints: Record<string, string>;
-  onSubmit: (questionText: string, studentAnswer: string) => Promise<{
+  onSubmit: (questionText: string, studentAnswer: string, n: string) => Promise<{
     isCorrect: boolean; method: string; analysis: string | null; errorType?: string | null;
   }>;
   /** 拉取提示：父层调 /practice/hint（后端查 cards.hints 缓存，未命中 AI 生成并写回）并 setHint 入 store */
@@ -77,7 +77,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
     // 标记该题判题中
     setProgress(p => p.map((s, i) => (i === submittedIdx ? 'judging' : s)));
     // fire-and-forget：不 await，判题在后台进行，学生立即切到下一题
-    const p = Promise.resolve(onSubmit(q.text, submittedAnswer))
+    const p = Promise.resolve(onSubmit(q.text, submittedAnswer, q.n))
       .then(() => setProgress(pr => pr.map((s, i) => (i === submittedIdx ? 'done' : s))))
       .catch(() => setProgress(pr => pr.map((s, i) => (i === submittedIdx ? 'failed' : s))));
     pendingRef.current.set(submittedIdx, p);

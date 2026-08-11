@@ -19,10 +19,10 @@ interface AnswerRecord {
 interface Props {
   questions: PracticeQuestion[];
   answers: Record<string, AnswerRecord>;
-  onRetry: () => void;
+  onClose: () => void;
 }
 
-export function AnswerResultList({ questions, answers, onRetry }: Props) {
+export function AnswerResultList({ questions, answers, onClose }: Props) {
   const [expandedN, setExpandedN] = useState<string | null>(null);
 
   const failedCount = questions.filter(q => answers[q.n]?.failed).length;
@@ -134,7 +134,7 @@ export function AnswerResultList({ questions, answers, onRetry }: Props) {
         {/* ═══ Footer ═══ */}
         <div className="shrink-0 px-5 py-3 border-t border-[var(--bg-subtle)] flex justify-center">
           <button
-            onClick={onRetry}
+            onClick={onClose}
             className="px-8 py-2.5 rounded-[10px] bg-[var(--brand-500)] text-white text-sm font-semibold hover:bg-[var(--brand-600)] transition-colors shadow-sm"
           >
             完成

@@ -440,6 +440,7 @@ export function judgePractice(payload: {
   cardId: number;
   lessonId: number;
   subjectId: number;
+  questionN: string;
   questionText: string;
   studentAnswer: string;
 }): Promise<JudgeResult> {
@@ -447,6 +448,30 @@ export function judgePractice(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+// --- Practice results（课堂练习判题结果持久化） ---
+
+export interface PracticeResult {
+  questionN: string;
+  questionText: string;
+  studentAnswer: string;
+  isCorrect: boolean;
+  method: 'exact' | 'ai';
+  analysis: string | null;
+  errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
+}
+
+export function getPracticeResults(cardId: number): Promise<PracticeResult[]> {
+  return fetchApi<PracticeResult[]>(`/practice/results?cardId=${cardId}`);
+}
+
+export function resetPracticeCard(cardId: number): Promise<void> {
+  return fetchApi<void>(`/practice/results?cardId=${cardId}`, { method: 'DELETE' });
+}
+
+export function resetPracticeLesson(lessonId: number): Promise<void> {
+  return fetchApi<void>(`/practice/results?lessonId=${lessonId}`, { method: 'DELETE' });
 }
 
 // --- Practice hint (课堂练习提示 - AI 生成 + Card 级缓存) ---

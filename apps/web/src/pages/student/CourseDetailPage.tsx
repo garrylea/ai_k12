@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, getPreviousLessonErrors, updateProgress, judgePractice, getPracticeHint, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
+import { fetchLessonCards, getPreviousLessonErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
 import { BackButton, LogoutButton } from '@/components/base';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
@@ -209,7 +209,7 @@ export default function CourseDetailPage() {
   const [modalStart, setModalStart] = useState(0);
   const [resultOpen, setResultOpen] = useState(false);
   const [showCardDiscuss, setShowCardDiscuss] = useState(false);
-  const { cardId: sessionCardId, setSession, record, answers, questions: sessionQuestions, reset, hints, setHint } = usePracticeStore();
+  const { cardId: sessionCardId, loadResults, record, answers, questions: sessionQuestions, reset, hints, setHint } = usePracticeStore();
 
   useEffect(() => {
     autoToggleNightMode();
@@ -319,6 +319,21 @@ export default function CourseDetailPage() {
     return { intro: introParts.join('\n\n'), questions: qs };
   }, [card, practiceMeta]);
 
+  // 进卡加载持久化判题结果 -> ✓/✗ 回显（跨设备/刷新）
+  const loadedResultsRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (card?.cardType !== 'practice') return;
+    if (loadedResultsRef.current === card.id) return;
+    loadedResultsRef.current = card.id;
+    const questions = (practiceMeta && !practiceMeta.needsFallback)
+      ? practiceMeta.questions
+      : (fallbackPractice?.questions ?? []);
+    if (questions.length === 0) return;
+    getPracticeResults(card.id)
+      .then((results) => loadResults(card.id, questions, results))
+      .catch(() => { /* 加载失败静默，store 保持占位空 answers */ });
+  }, [card?.id]);
+
   // 打开答题 modal：首次打开时初始化 session
   const handleOpenModal = (index: number) => {
     if (!card) return;
@@ -327,7 +342,9 @@ export default function CourseDetailPage() {
       : (fallbackPractice?.questions ?? []);
     if (questions.length === 0) return;
     if (sessionCardId !== card.id) {
-      setSession(card.id, questions);
+      // 首次进卡：DB 结果可能尚未加载，先放空 answers 占位（cardId+questions 就位即可开弹窗）；
+      // loadResults effect 随后会用持久化结果填补 answers。
+      loadResults(card.id, questions, []);
     }
     setModalStart(index);
     setModalOpen(true);
@@ -581,6 +598,32 @@ export default function CourseDetailPage() {
                           </h2>
                         ) : null;
                       })()}
+
+                      {/* 练习结果 reset 工具条（仅 practice 卡） */}
+                      {card.cardType === 'practice' && (
+                        <div className="flex items-center gap-3 px-1 py-2 text-xs text-[var(--text-tertiary)]">
+                          {Object.keys(answers).length > 0 && (
+                            <button
+                              onClick={() => {
+                                if (!window.confirm('确定重置本卡练习记录吗？该卡所有对错记录将被清除。')) return;
+                                resetPracticeCard(card.id).then(() => reset());
+                              }}
+                              className="underline hover:text-[var(--text-secondary)]"
+                            >
+                              重置本卡
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
+                              resetPracticeLesson(lessonId).then(() => reset());
+                            }}
+                            className="underline hover:text-[var(--text-secondary)]"
+                          >
+                            清空本课练习
+                          </button>
+                        </div>
+                      )}
 
                       {/* Markdown body - practice 卡有结构化题目时渲染可点题块，否则走 ReactMarkdown */}
                       {(() => {
@@ -914,13 +957,13 @@ export default function CourseDetailPage() {
             lessonId={lessonId}
             subjectId={subjectId}
             hints={hints}
-            onSubmit={async (questionText, studentAnswer) => {
-              const n = questions.find(q => q.text === questionText)?.n ?? '0-0';
+            onSubmit={async (questionText, studentAnswer, n) => {
               try {
                 const res = await judgePractice({
                   cardId: card.id,
                   lessonId,
                   subjectId,
+                  questionN: n,
                   questionText,
                   studentAnswer,
                 });
@@ -957,7 +1000,7 @@ export default function CourseDetailPage() {
         <AnswerResultList
           questions={sessionQuestions}
           answers={answers}
-          onRetry={() => { setResultOpen(false); reset(); }}
+          onClose={() => setResultOpen(false)}
         />
       )}
     </div>
