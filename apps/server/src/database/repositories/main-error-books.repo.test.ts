@@ -145,4 +145,27 @@ describe('MainErrorBooksRepository', () => {
     expect(sql).toContain('dialogue_id = ?');
     expect(params).toEqual([300, 77]);
   });
+
+  it('clearUnclearedByStudentQuestion 批量清零该题未清记录（questionId 非空）', async () => {
+    const pool = mockPool();
+    const repo = new MainErrorBooksRepository(pool as any);
+    await repo.clearUnclearedByStudentQuestion(1, 2, 5, '题面');
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('UPDATE main_error_books');
+    expect(sql).toContain('is_cleared = 1');
+    expect(sql).toContain('cleared_at = NOW(3)');
+    expect(sql).toContain('is_cleared = 0');
+    expect(sql).toContain('question_id = ?');
+    expect(sql).toContain('source_ref_id = ?');
+    expect(sql).toContain('wrong_answer_text = ?');
+    expect(params).toEqual([1, 2, 2, 5, '题面']);
+  });
+
+  it('clearUnclearedByStudentQuestion questionId=null 走题面匹配分支', async () => {
+    const pool = mockPool();
+    const repo = new MainErrorBooksRepository(pool as any);
+    await repo.clearUnclearedByStudentQuestion(1, null, 5, '未入库题面');
+    const [, params] = pool.execute.mock.calls[0];
+    expect(params).toEqual([1, null, null, 5, '未入库题面']);
+  });
 });
