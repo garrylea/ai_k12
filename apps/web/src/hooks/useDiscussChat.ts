@@ -4,6 +4,7 @@ import {
   startCardDiscuss,
   streamTutorEvents,
   getMessages,
+  deleteMessage,
   tutor,
   type MessageItem,
 } from '@/services/api';
@@ -36,20 +37,6 @@ type CardOpts = {
 };
 
 export type UseDiscussChatOpts = QuestionOpts | CardOpts;
-
-// 种子消息：打开讨论自动发起，让 AI 给出首条苏格拉底引导。
-// ⚠️ 必须避开 fallback.yaml 的 giveUpKeywords（不会/不懂/不知道/太难/放弃/算不出来/
-// 想不出来/完全不会），否则首轮即触发兜底直接给答案，违反"苏格拉底不直接给答案"。
-// 已知边角：若 questionText 本身含 giveUpKeyword（如应用题里出现"不知道"），首轮仍会
-// 触发兜底--可接受（学生仍能得到帮助，只是非苏格拉底），MVP 不另做转义。
-function buildSeed(opts: UseDiscussChatOpts): string {
-  if (opts.mode === 'question') {
-    return `我想请你带我思考这道题：\n\n${opts.questionText}\n\n请用提问的方式一步步启发我找到思路。`;
-  }
-  // 卡片级：scope 由 cardId->cardContent 注入 mainline prompt 限定，
-  // 种子请 AI 用提问方式带学生梳理卡片知识（不直接讲授）。
-  return '我想和你一起讨论这张卡片里的知识。请用提问的方式带我梳理其中的关键内容。';
-}
 
 // session 缓存键：题目级按题目文本，卡片级按 cardId 命名空间（避免与题目键冲突）。
 function cacheKey(opts: UseDiscussChatOpts): string {
@@ -147,8 +134,27 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     const dlgId = dialogueIdRef.current;
     if (!dlgId) return;
     setError(null);
-    await streamMessage(dlgId, content);
-  }, [isStreaming, streamMessage]);
+    // 题目级讨论：每条用户消息都附带题目文本，确保 AI 始终知道讨论主题。
+    // 卡片级讨论：卡片内容已通过服务端 loadContext -> cardContent 注入系统 prompt，
+    // 无需客户端重复。
+    const message = opts.mode === 'question'
+      ? `这道题目是：\n\n${opts.questionText}\n\n我的问题：${content}`
+      : content;
+    await streamMessage(dlgId, message);
+  }, [isStreaming, streamMessage, opts]);
+
+  /** 删除单条消息：前端立即移除 + 后台软删除 */
+  const deleteMsg = useCallback(async (messageId: number) => {
+    const dlgId = dialogueIdRef.current;
+    if (!dlgId) return;
+    // 前端先移除（乐观 UI）
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    try {
+      await deleteMessage(Number(dlgId), messageId);
+    } catch {
+      // 删除失败静默
+    }
+  }, []);
 
   // 挂载即初始化：续接缓存对话 or 首开（创建对话 + 种子消息）
   useEffect(() => {
@@ -180,7 +186,8 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
         }
         return;
       }
-      // 首开：创建 mainline 对话（题目级额外记错题本）
+      // 首开：创建 mainline 对话（题目级额外记错题本）。
+      // 服务端 find-or-create：即使缓存丢失，同一 student+card 始终返回同一个 dialogue。
       setIsStarting(true);
       try {
         let dialogueId: string;
@@ -193,8 +200,6 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
           });
           dialogueId = res.dialogueId;
         } else {
-          // 卡片级：find-or-create 该卡片的 mainline 对话（不入错题本，
-          // 服务端按 student+card 复用，跨刷新/跨设备续接同一讨论线）。
           const res = await startCardDiscuss({
             cardId: opts.cardId,
             lessonId: opts.lessonId,
@@ -211,11 +216,33 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
         return;
       }
       if (!cancelled) setIsStarting(false);
-      // 自动发种子消息
+
+      // 检查该 dialogue 是否已有历史消息（服务器 find-or-create 可能返回已有对话）。
       if (!cancelled && !seededRef.current) {
-        seededRef.current = true;
-        await streamMessage(dialogueIdRef.current!, buildSeed(opts));
+        setIsLoadingHistory(true);
+        try {
+          const items = await getMessages(Number(dialogueIdRef.current!));
+          if (cancelled) return;
+          const existing = items.filter((m) => m.role === 'user' || m.role === 'assistant');
+          if (existing.length > 0) {
+            seededRef.current = true;
+            setMessages(
+              existing.map((m: MessageItem) => ({
+                id: m.id,
+                role: m.role as 'user' | 'assistant',
+                content: m.content,
+                reasoning: m.reasoning ?? undefined,
+              })),
+            );
+          }
+        } catch {
+          // 拉取失败不阻断，后续仍发种子消息
+        } finally {
+          if (!cancelled) setIsLoadingHistory(false);
+        }
       }
+
+      // 不再自动发种子消息，由用户主动发起第一条。
     };
     init();
     return () => {
@@ -226,5 +253,5 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { messages, isStreaming, isLoadingHistory, isStarting, error, send, stop };
+  return { messages, isStreaming, isLoadingHistory, isStarting, error, send, stop, deleteMsg };
 }

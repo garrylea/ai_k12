@@ -49,13 +49,14 @@ export function DiscussDrawer(props: Props) {
     // 右侧抽屉：absolute 贴右覆盖父容器右部。实色背景（非半透明）保证 KaTeX 可读。
     // 仅手动关闭，不自动收起。父级需为 relative 定位容器。
     <div
-      className={`absolute top-0 right-0 bottom-0 flex flex-col bg-[var(--bg-card)] shadow-2xl border-l border-[var(--bg-subtle)] transition-[width] duration-200 ${widthClass}`}
+      className={`absolute top-0 right-0 bottom-0 flex flex-col bg-[var(--learn-card-bg)] border-l border-[var(--bg-subtle)] transition-[width] duration-200 ${widthClass}`}
+      style={{ boxShadow: 'var(--shadow-drawer)' }}
       role="dialog"
       aria-label={title}
     >
       {/* 头部：标题 + 放大/缩小 + 关闭 */}
       <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--bg-subtle)]">
-        <svg viewBox="0 0 24 24" fill="none" stroke="var(--brand-500)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
         <span className="text-sm font-bold text-[var(--text-primary)] flex-1">{title}</span>
@@ -117,6 +118,7 @@ export function DiscussDrawer(props: Props) {
         error={chat.error}
         onSend={chat.send}
         onStop={chat.stop}
+        onDelete={chat.deleteMsg}
         placeholder={placeholder}
       />
     </div>

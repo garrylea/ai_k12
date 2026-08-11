@@ -110,7 +110,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
   if (mode === 'judging') {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
-        <div className="w-[92vw] max-w-xl bg-[var(--bg-card)] rounded-2xl shadow-xl flex flex-col overflow-hidden">
+        <div className="w-[92vw] max-w-xl bg-[var(--learn-card-bg)] rounded-2xl shadow-xl flex flex-col overflow-hidden">
           <div className="p-6 flex flex-col items-center">
             {/* 旋转图标 */}
             <svg className="animate-spin text-[var(--brand-500)] mb-4" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -174,7 +174,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
   // ═══ 作答页 ═══
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
-      <div className="relative w-[92vw] max-w-5xl h-[88vh] bg-[var(--bg-card)] rounded-2xl shadow-xl flex flex-col overflow-hidden">
+      <div className="relative w-[92vw] max-w-5xl h-[88vh] bg-[var(--learn-card-bg)] rounded-2xl shadow-xl flex flex-col overflow-hidden">
 
         {/* ═══ 顶部：题面 + 提示/讨论图标 ═══ */}
         <div className="shrink-0 p-4 border-b border-[var(--bg-subtle)]">
@@ -195,7 +195,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
               {/* 提示 */}
               <button
                 onClick={handleHintClick}
-                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--bg-card)] flex items-center justify-center text-[var(--warning)] shadow-sm hover:bg-[var(--brand-100)] transition-colors"
+                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--warning)] shadow-sm hover:bg-[var(--brand-100)] transition-colors"
                 title="提示"
                 aria-label="提示"
               >
@@ -208,7 +208,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
               {/* 让 AI 讲一讲 */}
               <button
                 onClick={handleDiscuss}
-                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--bg-card)] flex items-center justify-center text-[var(--info)] shadow-sm hover:bg-[var(--bg-subtle)] transition-colors"
+                className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--info)] shadow-sm hover:bg-[var(--bg-subtle)] transition-colors"
                 title="让 AI 讲一讲"
                 aria-label="让 AI 讲一讲"
               >
@@ -260,7 +260,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
           {/* 关闭 */}
           <button
             onClick={handleClose}
-            className="w-10 h-10 rounded-full border border-[var(--bg-subtle)] bg-[var(--bg-card)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
+            className="w-10 h-10 rounded-full border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
             title="关闭"
             aria-label="关闭"
           >

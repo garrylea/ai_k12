@@ -4,6 +4,7 @@ import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import {
   tutor,
   getMessages,
+  deleteMessage,
   createConversation,
   ApiError,
   type AttachmentRequest,
@@ -56,6 +57,7 @@ export function useAuxChat(dialogueId: number) {
     resetLastAssistantToStreaming,
     setIsStreaming,
     setMessages,
+    removeMessage,
   } = useChatStore();
 
   // Non-streaming fallback (used only if the SSE stream fails to start).
@@ -331,5 +333,16 @@ export function useAuxChat(dialogueId: number) {
     useAuxiliaryStore.getState().fetchConversations();
   }, [dialogueId, resetLastAssistantToStreaming, streamTutor, fallbackToRest]);
 
-  return { send, stop, retry, confirmQuestion, reidentify, isLoadingHistory };
+  /** 删除单条消息：前端立即移除 + 后台软删除 */
+  const deleteMsg = useCallback(async (messageId: number) => {
+    if (!dialogueId) return;
+    removeMessage(messageId);
+    try {
+      await deleteMessage(dialogueId, messageId);
+    } catch {
+      // 删除失败静默
+    }
+  }, [dialogueId, removeMessage]);
+
+  return { send, stop, retry, confirmQuestion, reidentify, isLoadingHistory, deleteMsg };
 }

@@ -80,6 +80,12 @@ export class ConversationsService {
     await this.dialoguesRepo.softDelete(dialogueId);
   }
 
+  /** 软删除单条消息：校验 dialogue 归属 + 消息存在，写 deleted_at。 */
+  async deleteMessage(dialogueId: number, messageId: number, studentId: number) {
+    await this.get(dialogueId, studentId);
+    await this.messagesRepo.softDelete(messageId);
+  }
+
   async getMessages(dialogueId: number, studentId: number, lastMessageId?: number) {
     await this.get(dialogueId, studentId);
     return this.messagesRepo.findByDialogue(dialogueId, lastMessageId);

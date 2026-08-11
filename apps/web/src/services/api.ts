@@ -273,6 +273,10 @@ export function getMessages(dialogueId: number, lastMessageId?: number): Promise
   return fetchApi<MessageItem[]>(`/conversations/${dialogueId}/messages${qs}`);
 }
 
+export function deleteMessage(dialogueId: number, messageId: number): Promise<void> {
+  return fetchApi(`/conversations/${dialogueId}/messages/${messageId}`, { method: 'DELETE' });
+}
+
 // --- AI Tutor (auxiliary) ---
 
 export interface AttachmentRequest {

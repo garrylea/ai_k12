@@ -32,6 +32,7 @@ interface ChatState {
   isStreaming: boolean;
   setMessages: (msgs: ChatMessage[]) => void;
   appendMessage: (msg: ChatMessage) => void;
+  removeMessage: (messageId: number) => void;
   updateLastAssistant: (content: string, reasoning?: string) => void;
   appendLastAssistant: (opts: { content?: string; reasoning?: string }) => void;
   setLastAssistantError: (err: ChatError) => void;
@@ -46,6 +47,8 @@ export const useChatStore = create<ChatState>((set) => ({
   isStreaming: false,
   setMessages: (msgs) => set({ messages: msgs }),
   appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+  removeMessage: (messageId) =>
+    set((s) => ({ messages: s.messages.filter((m) => m.id !== messageId) })),
   updateLastAssistant: (content, reasoning) =>
     set((s) => {
       const messages = [...s.messages];

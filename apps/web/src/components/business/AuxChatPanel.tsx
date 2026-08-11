@@ -11,6 +11,7 @@ interface Props {
   onRetry?: () => void;  // P2: regenerate the last (errored / unanswered) turn
   onConfirm?: () => void;  // P1: confirm the transcribed problem -> tutor
   onReidentify?: () => void;  // P1: re-run image transcription
+  onDelete?: (messageId: number) => void;  // delete a user message
 }
 
 const UserAvatar = () => (
@@ -277,7 +278,7 @@ function ReasoningBlock({ reasoning, live }: { reasoning: string; live: boolean 
   );
 }
 
-export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onConfirm, onReidentify }: Props) {
+export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onConfirm, onReidentify, onDelete }: Props) {
   const { messages, isStreaming } = useChatStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -319,8 +320,21 @@ export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onConf
                     : m.role === 'user'
                       ? 'bg-[#FF6B00] text-white'
                       : 'bg-[#F9F9FB] text-[#1D1D1F] border border-[#E5E5E5]'
-                } ${hasImages && !isError ? 'p-1.5' : 'px-4 py-3'}`}
+                } ${hasImages && !isError ? 'p-1.5' : 'px-4 py-3'} ${m.role === 'user' ? 'relative group' : ''}`}
               >
+                {m.role === 'user' && onDelete && m.id && (
+                  <button
+                    onClick={() => onDelete(m.id!)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-white/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/30"
+                    title="删除"
+                    aria-label="删除消息"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" className="w-3 h-3">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                )}
                 {!isError && m.role === 'assistant' && m.reasoning && (
                   <ReasoningBlock
                     reasoning={m.reasoning}

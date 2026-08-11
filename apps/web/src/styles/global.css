@@ -52,6 +52,7 @@
   --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
   --shadow-elevated: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
   --shadow-card-strong: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-drawer: 0 0 0 1px rgba(0,0,0,0.06), 0 8px 40px rgba(0,0,0,0.12);
   --shadow-glow-brand: 0 0 16px rgba(255, 107, 53, 0.25);
   --shadow-glow-success: 0 0 12px rgba(74, 155, 110, 0.30);
 
@@ -132,8 +133,12 @@
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.4);
   --shadow-card-strong: 0 28px 70px rgba(0, 0, 0, 0.5), 0 10px 30px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-drawer: 0 0 0 1px rgba(0,0,0,0.15), 0 8px 40px rgba(0,0,0,0.35);
   --shadow-glow-brand: 0 0 16px rgba(201, 116, 62, 0.30);
   --shadow-glow-success: 0 0 12px rgba(92, 138, 106, 0.30);
+
+  /* 夜间学习卡片与教学区背景统一：浅色护眼，与日间一致 */
+  --learn-card-bg: #FDFCF8;
 }
 
 /* ===== Parent Mode (Business Blue, forced day) ===== */

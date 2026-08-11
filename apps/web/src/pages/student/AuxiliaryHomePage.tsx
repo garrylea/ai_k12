@@ -39,7 +39,7 @@ const UserIcon = () => (
 export default function AuxiliaryHomePage() {
   const { currentDialogueId, setCurrentDialogueId } = useAuxiliaryStore();
   const { messages, reset, isStreaming } = useChatStore();
-  const { send, stop, retry, confirmQuestion, reidentify, isLoadingHistory } = useAuxChat(currentDialogueId ?? 0);
+  const { send, stop, retry, confirmQuestion, reidentify, isLoadingHistory, deleteMsg } = useAuxChat(currentDialogueId ?? 0);
 
   const username = localStorage.getItem('username') ?? '同学';
 
@@ -95,7 +95,7 @@ export default function AuxiliaryHomePage() {
       ) : (
         // 对话态：对话窗口 + 底部输入框
         <>
-          <AuxChatPanel isLoadingHistory={isLoadingHistory} onRetry={retry} onConfirm={confirmQuestion} onReidentify={reidentify} />
+          <AuxChatPanel isLoadingHistory={isLoadingHistory} onRetry={retry} onConfirm={confirmQuestion} onReidentify={reidentify} onDelete={deleteMsg} />
           <div className="px-6 pb-6 pt-4 bg-white border-t border-[#E5E5E5]">
             <AuxInputBar key={currentDialogueId ?? 'new'} onSend={send} onStop={stop} isStreaming={isStreaming} />
           </div>

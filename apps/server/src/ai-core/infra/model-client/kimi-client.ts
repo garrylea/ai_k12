@@ -22,6 +22,7 @@ export class KimiClient implements ProviderAdapter {
           temperature: request.temperature ?? 0.7,
           max_tokens: request.maxTokens ?? request.model.maxOutputTokens,
           stop: request.stopSequences,
+          enable_thinking: true,
           response_format: request.responseFormat === 'json_object' ? { type: 'json_object' } : undefined,
         }),
         signal: AbortSignal.any([AbortSignal.timeout(request.timeout ?? 30000), ...(request.signal ? [request.signal] : [])]),
@@ -88,6 +89,9 @@ export class KimiClient implements ProviderAdapter {
           temperature: request.temperature ?? 0.7,
           max_tokens: request.maxTokens ?? request.model.maxOutputTokens,
           stream: true,
+          // Qwen 系列需要显式开启 thinking 模式才会在 SSE 流中输出
+          // reasoning_content。其他模型（Kimi/DeepSeek 等）忽略此字段。
+          enable_thinking: true,
           // 与非流式 chat() 对齐：流式路径同样下发 response_format，否则
           // judgment/grading/structuring 的 json_object 约束会被静默丢弃。
           response_format: request.responseFormat === 'json_object' ? { type: 'json_object' } : undefined,

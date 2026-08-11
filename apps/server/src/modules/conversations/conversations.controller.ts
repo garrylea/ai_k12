@@ -59,4 +59,14 @@ export class ConversationsController {
     await this.conversationsService.delete(id, user.sub);
     return { ok: true };
   }
+
+  @Delete(':dialogueId/messages/:messageId')
+  async deleteMessage(
+    @Param('dialogueId', ParseIntPipe) dialogueId: number,
+    @Param('messageId', ParseIntPipe) messageId: number,
+    @CurrentUser() user: JwtUser,
+  ) {
+    await this.conversationsService.deleteMessage(dialogueId, messageId, user.sub);
+    return { ok: true };
+  }
 }

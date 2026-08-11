@@ -80,6 +80,9 @@
   Bg-Elevated #2D2620
   Bg-Subtle   #211C16
 
+学习卡片（日间值不变，夜间保持浅色以维持阅读舒适度）
+  Learn-Card-Bg  #FDFCF8  教学卡片与抽屉/弹窗背景，日夜间统一，不与全局 Bg-Card 联动
+
 文字
   Text-Primary    #E8DCC2   沙暖金
   Text-Secondary  #B5A685
@@ -156,7 +159,7 @@
   Learn-Prose-W          48rem (768px)   正文栏宽度
 
 颜色
-  Learn-Card-Bg          #FDFCF8         白卡背景
+  Learn-Card-Bg          #FDFCF8         白卡背景（日夜间统一，教学区保持浅色护眼，不与全局 Bg-Card 联动）
   Learn-Card-Border      #E8EDE4         白卡边框（参考页实测，带 subtle border）
   Learn-Text-Primary     #3C4A35         正文/列表
   Learn-Heading-1        #333333         小节标题
@@ -286,6 +289,8 @@
                          0 2px 8px rgba(0, 0, 0, 0.02)    /* 非学习页主卡片 */
 --shadow-glow-brand:     0 0 16px rgba(255, 107, 53, 0.25)  /* 当前节点高亮 */
 --shadow-glow-success:   0 0 12px rgba(74, 155, 110, 0.30)   /* 已完成节点 */
+--shadow-drawer:         0 0 0 1px rgba(0,0,0,0.06), 0 8px 40px rgba(0,0,0,0.12)  /* 学习抽屉浮层 */
+夜间模式 --shadow-drawer 边缘加深至 rgba(0,0,0,0.35)，凸显浮层感
 夜间模式所有阴影 alpha 翻倍（黑底叠加需要更强投影感）
 ```
 

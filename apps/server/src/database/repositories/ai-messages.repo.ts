@@ -37,4 +37,11 @@ export class AiMessagesRepository {
     );
     return rows as AiMessageRow[];
   }
+
+  async softDelete(id: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE ai_messages SET deleted_at = NOW(3) WHERE id = ?`,
+      [id],
+    );
+  }
 }
