@@ -1,4 +1,4 @@
-import { Body, Controller, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { PracticeService } from './practice.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
@@ -55,6 +55,33 @@ export class PracticeController {
       cardId: dto.cardId,
       lessonId: dto.lessonId,
     });
+  }
+
+  @Get('results')
+  async getResults(@Query('cardId', ParseIntPipe) cardId: number, @CurrentUser() user: JwtUser) {
+    return this.practiceService.getResults(user.sub, cardId);
+  }
+
+  @Delete('results')
+  async resetResults(
+    @CurrentUser() user: JwtUser,
+    @Query('cardId') cardIdStr?: string,
+    @Query('lessonId') lessonIdStr?: string,
+  ) {
+    if (cardIdStr !== undefined && lessonIdStr !== undefined) {
+      throw new BadRequestException('cardId 与 lessonId 不可同时指定');
+    }
+    if (cardIdStr !== undefined) {
+      const cardId = parseInt(cardIdStr, 10);
+      if (Number.isNaN(cardId)) throw new BadRequestException('cardId 非法');
+      return this.practiceService.resetCard(user.sub, cardId);
+    }
+    if (lessonIdStr !== undefined) {
+      const lessonId = parseInt(lessonIdStr, 10);
+      if (Number.isNaN(lessonId)) throw new BadRequestException('lessonId 非法');
+      return this.practiceService.resetLesson(user.sub, lessonId);
+    }
+    throw new BadRequestException('须指定 cardId 或 lessonId');
   }
 
   @Get('previous-errors')
