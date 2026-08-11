@@ -582,7 +582,46 @@ export default function CourseDetailPage() {
                       {(() => {
                         const displayTitle = card.title || (CARD_TYPE_LABEL[card.cardType] ?? card.cardType);
                         const hasHeadingContent = contentStartsWithHeading(card.content);
-                        return displayTitle && !hasHeadingContent ? (
+                        const showTitle = displayTitle && !hasHeadingContent;
+                        // practice 卡：标题左 + 「清空本课练习」图标按钮右（与小节名称对齐）
+                        if (card.cardType === 'practice') {
+                          return (
+                            <div className="flex items-center justify-between gap-2 mb-4">
+                              {showTitle ? (
+                                <h2
+                                  className="font-black leading-snug flex items-center gap-2"
+                                  style={{ fontSize: 'var(--fs-learn-h2)', color: 'var(--learn-heading-2)' }}
+                                >
+                                  <span
+                                    className="w-1.5 h-4 rounded-full shrink-0"
+                                    style={{ backgroundColor: 'var(--learn-heading-2)' }}
+                                  />
+                                  {displayTitle}
+                                </h2>
+                              ) : <span className="flex-1" />}
+                              <button
+                                type="button"
+                                title="清空本课练习"
+                                aria-label="清空本课练习"
+                                onClick={() => {
+                                  if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
+                                  resetPracticeLesson(lessonId).then(() => reset());
+                                }}
+                                className="shrink-0 p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--error)] hover:bg-[var(--bg-subtle)] transition-colors"
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                  <path d="M10 11v6" />
+                                  <path d="M14 11v6" />
+                                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                                </svg>
+                              </button>
+                            </div>
+                          );
+                        }
+                        // 非练习卡：保持原样（h2 + mb-4）
+                        return showTitle ? (
                           <h2
                             className="font-black leading-snug mb-4 flex items-center gap-2"
                             style={{
@@ -599,28 +638,17 @@ export default function CourseDetailPage() {
                         ) : null;
                       })()}
 
-                      {/* 练习结果 reset 工具条（仅 practice 卡） */}
-                      {card.cardType === 'practice' && (
+                      {/* 练习结果单卡 reset（仅 practice 卡且有持久化结果） */}
+                      {card.cardType === 'practice' && Object.keys(answers).length > 0 && (
                         <div className="flex items-center gap-3 px-1 py-2 text-xs text-[var(--text-tertiary)]">
-                          {Object.keys(answers).length > 0 && (
-                            <button
-                              onClick={() => {
-                                if (!window.confirm('确定重置本卡练习记录吗？该卡所有对错记录将被清除。')) return;
-                                resetPracticeCard(card.id).then(() => reset());
-                              }}
-                              className="underline hover:text-[var(--text-secondary)]"
-                            >
-                              重置本卡
-                            </button>
-                          )}
                           <button
                             onClick={() => {
-                              if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
-                              resetPracticeLesson(lessonId).then(() => reset());
+                              if (!window.confirm('确定重置本卡练习记录吗？该卡所有对错记录将被清除。')) return;
+                              resetPracticeCard(card.id).then(() => reset());
                             }}
                             className="underline hover:text-[var(--text-secondary)]"
                           >
-                            清空本课练习
+                            重置本卡
                           </button>
                         </div>
                       )}
