@@ -8,7 +8,7 @@ const mk = (overrides: any = {}) => ({
     findOrCreate: vi.fn(),
     deleteById: vi.fn().mockResolvedValue(undefined),
   },
-  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined), updateDialogueId: vi.fn().mockResolvedValue(undefined), countUnclearedByLesson: vi.fn().mockResolvedValue(0) },
+  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined), updateDialogueId: vi.fn().mockResolvedValue(undefined), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]) },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
   cardsRepo: {
@@ -21,7 +21,6 @@ const mk = (overrides: any = {}) => ({
     get: vi.fn().mockResolvedValue({ id: 100 }),
     findOrCreateMainlineByCard: vi.fn().mockResolvedValue({ id: 100 }),
   },
-  lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(null), findByUnitId: vi.fn(), findById: vi.fn() },
   practiceResultsRepo: {
     upsert: vi.fn().mockResolvedValue(undefined),
     findByStudentCard: vi.fn().mockResolvedValue([]),
@@ -33,7 +32,7 @@ const mk = (overrides: any = {}) => ({
 
 /** 用 mk() 构造的依赖实例化 PracticeService。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.lessonsRepo as any, deps.practiceResultsRepo as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -509,34 +508,59 @@ describe('PracticeService.startCardDiscuss', () => {
   });
 });
 
-describe('PracticeService.countUnclearedErrorsFromPreviousLesson', () => {
-  it('当前课是教材第一课 -> 无上一课，count 为 0', async () => {
-    const deps = mk({ lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(null) } });
-    const svc = mkSvc(deps);
-    const r = await svc.countUnclearedErrorsFromPreviousLesson(1, 100);
-    expect(r).toEqual({ lessonId: null, count: 0 });
-    expect(deps.mainErrorRepo.countUnclearedByLesson).not.toHaveBeenCalled();
-  });
-
-  it('上一课存在且无未清零错题 -> count 为 0', async () => {
+describe('PracticeService.getUnclearedErrorDetails', () => {
+  it('返回学生某学科所有未清 practice 错题，按 (cardId, questionN) 去重保留最早', async () => {
     const deps = mk({
-      lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(99) },
-      mainErrorRepo: { countUnclearedByLesson: vi.fn().mockResolvedValue(0) },
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([
+          { id: 9, source_ref_id: 441, question_id: null, question_n: '0-1', questionText: '题A' },
+          { id: 11, source_ref_id: 441, question_id: 2775, question_n: '0-4', questionText: '解方程' },
+          // 重复 (441, 0-4) -> 去重，保留 id=11
+          { id: 15, source_ref_id: 441, question_id: null, question_n: '0-4', questionText: '(4) ...' },
+        ]),
+      },
     });
     const svc = mkSvc(deps);
-    const r = await svc.countUnclearedErrorsFromPreviousLesson(1, 100);
-    expect(r).toEqual({ lessonId: 99, count: 0 });
-    expect(deps.mainErrorRepo.countUnclearedByLesson).toHaveBeenCalledWith(1, 99);
+    const r = await svc.getUnclearedErrorDetails(2, 1);
+    expect(r.errors).toHaveLength(2);
+    expect(r.errors[0]).toEqual({ errorBookId: 9, cardId: 441, questionN: '0-1', questionText: '题A', questionId: null });
+    expect(r.errors[1]).toEqual({ errorBookId: 11, cardId: 441, questionN: '0-4', questionText: '解方程', questionId: 2775 });
   });
 
-  it('上一课存在且有未清零错题 -> 返回数量', async () => {
+  it('question_n 为 null 的历史行 -> 合成唯一键 cleanup 加 id', async () => {
     const deps = mk({
-      lessonsRepo: { findPreviousLessonId: vi.fn().mockResolvedValue(99) },
-      mainErrorRepo: { countUnclearedByLesson: vi.fn().mockResolvedValue(3) },
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([
+          { id: 8, source_ref_id: 1, question_id: null, question_n: null, questionText: '旧题' },
+        ]),
+      },
     });
     const svc = mkSvc(deps);
-    const r = await svc.countUnclearedErrorsFromPreviousLesson(1, 100);
-    expect(r).toEqual({ lessonId: 99, count: 3 });
+    const r = await svc.getUnclearedErrorDetails(1, 1);
+    expect(r.errors[0].questionN).toBe('cleanup-8');
+  });
+
+  it('无未清错题 -> errors 为空', async () => {
+    const deps = mk({
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.getUnclearedErrorDetails(1, 1);
+    expect(r.errors).toEqual([]);
   });
 });
 

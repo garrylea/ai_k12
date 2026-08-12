@@ -2,8 +2,10 @@ import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import { autoWrapMath } from './LatexPreview';
 import type { PracticeQuestion } from './AnswerModal';
 
 interface AnswerRecord {
@@ -91,7 +93,15 @@ export function AnswerResultList({ questions, answers, onClose }: Props) {
                       </div>
                       <div className="mt-2 px-3 py-2 bg-[var(--bg-base)] rounded-lg">
                         <span className="text-xs text-[var(--text-tertiary)]">你的答案：</span>
-                        <span className="text-[13px] text-[var(--text-primary)] font-mono">{a?.studentAnswer || '（未作答）'}</span>
+                        {a?.studentAnswer ? (
+                          <div className="text-[13px] text-[var(--text-primary)] leading-[1.6]">
+                            <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm, remarkBreaks]} rehypePlugins={[rehypeKatex]}>
+                              {autoWrapMath(a.studentAnswer)}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <span className="text-[13px] text-[var(--text-tertiary)]">（未作答）</span>
+                        )}
                       </div>
                       {/* 判定失败提示 */}
                       {failed && (
@@ -137,7 +147,7 @@ export function AnswerResultList({ questions, answers, onClose }: Props) {
             onClick={onClose}
             className="px-8 py-2.5 rounded-[10px] bg-[var(--brand-500)] text-white text-sm font-semibold hover:bg-[var(--brand-600)] transition-colors shadow-sm"
           >
-            完成
+            确认
           </button>
         </div>
       </div>

@@ -7,11 +7,12 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, getPreviousLessonErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
+import { fetchLessonCards, getUnclearedErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, type LessonCard, type LessonCardsData, type PracticeGroupMeta, type PreviousErrorDetail } from '@/services/api';
 import { BackButton, LogoutButton } from '@/components/base';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer } from '@/components/business/DiscussDrawer';
+import { CleanupPhase } from '@/components/business/CleanupPhase';
 import { usePracticeStore } from '@/store/practiceStore';
 
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
@@ -198,7 +199,9 @@ export default function CourseDetailPage() {
   const [data, setData] = useState<LessonCardsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [previousErrorCount, setPreviousErrorCount] = useState(0);
+  // 错题清零：进每节课前清空错题本里所有 practice 未清题（计数 = cleanupErrors.length）
+  const [cleanupErrors, setCleanupErrors] = useState<PreviousErrorDetail[]>([]);
+  const [cleanupDone, setCleanupDone] = useState(false);
   const [page, setPage] = useState(0);
   const prevPageRef = useRef(0);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -210,6 +213,7 @@ export default function CourseDetailPage() {
   const [resultOpen, setResultOpen] = useState(false);
   const [showCardDiscuss, setShowCardDiscuss] = useState(false);
   const { cardId: sessionCardId, loadResults, record, answers, questions: sessionQuestions, reset, hints, setHint } = usePracticeStore();
+  const loadedResultsRef = useRef<number | null>(null);
 
   useEffect(() => {
     autoToggleNightMode();
@@ -220,15 +224,20 @@ export default function CourseDetailPage() {
   const fetchData = async () => {
     setLoading(true);
     setError(null);
+    reset(); // 清空上一课的 practice store 状态
+    loadedResultsRef.current = null; // 强制重新加载持久化结果
     try {
       if (!lessonId) throw new Error('缺少课程信息，请从星图选择小节进入');
-      const [result, previousErrors] = await Promise.all([
+      const [result, uncleared] = await Promise.all([
         fetchLessonCards(lessonId),
-        getPreviousLessonErrors(lessonId).catch(() => ({ lessonId: null, count: 0 })),
+        subjectId
+          ? getUnclearedErrors(subjectId).catch(() => ({ errors: [] as PreviousErrorDetail[] }))
+          : Promise.resolve({ errors: [] as PreviousErrorDetail[] }),
       ]);
       if (result.cards.length === 0) throw new Error('本节暂无卡片内容');
       setData(result);
-      setPreviousErrorCount(previousErrors.count);
+      setCleanupErrors(uncleared.errors);
+      setCleanupDone(false);
       setPage(0);
     } catch (err: any) {
       setError(err.message || '加载失败');
@@ -320,7 +329,6 @@ export default function CourseDetailPage() {
   }, [card, practiceMeta]);
 
   // 进卡加载持久化判题结果 -> ✓/✗ 回显（跨设备/刷新）
-  const loadedResultsRef = useRef<number | null>(null);
   useEffect(() => {
     if (card?.cardType !== 'practice') return;
     if (loadedResultsRef.current === card.id) return;
@@ -405,9 +413,16 @@ export default function CourseDetailPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // 答题弹窗 / 结果列表 / 庆祝覆盖层打开时，禁用左右键翻页：
-      // 否则会同时切卡并触发「翻页关闭 modal」effect，导致弹窗被误关
+      // 答题弹窗 / 结果列表 / 庆祝覆盖层打开时，禁用左右键翻页
       if (modalOpen || resultOpen || showCelebration) return;
+      // 焦点在输入控件内时，不拦截左右键（让用户正常移动光标）
+      const tag = (document.activeElement?.tagName ?? '').toLowerCase();
+      const isEditable =
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        (document.activeElement as HTMLElement)?.isContentEditable;
+      if (isEditable) return;
       if (e.key === 'ArrowLeft') setPage(p => Math.max(0, p - 1));
       if (e.key === 'ArrowRight') setPage(p => Math.min(total - 1, p + 1));
     };
@@ -441,13 +456,13 @@ export default function CourseDetailPage() {
               const hasPractice = practiceStartIndex >= 0;
               const isPracticePhase = hasPractice && page >= practiceStartIndex;
 
-              const hasPreviousErrors = previousErrorCount > 0;
+              const hasPreviousErrors = cleanupErrors.length > 0;
               const tasks = hasPreviousErrors
                 ? [
-                    { id: 1, title: '错题清零（前一课）', subtitle: `有 ${previousErrorCount} 道错题未清`, status: 'current' as const },
-                    { id: 2, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: 'locked' as const },
+                    { id: 1, title: '错题清零', subtitle: cleanupDone ? '已完成' : `有 ${cleanupErrors.length} 道错题未清`, status: cleanupDone ? ('completed' as const) : ('current' as const) },
+                    { id: 2, title: data?.lessonName ?? '当前学习', subtitle: '核心知识', status: !cleanupDone ? ('locked' as const) : isPracticePhase ? ('completed' as const) : ('current' as const) },
                     ...(hasPractice
-                      ? [{ id: 3, title: '课堂练习', subtitle: '思路提示', status: 'locked' as const }]
+                      ? [{ id: 3, title: '课堂练习', subtitle: '思路提示', status: (cleanupDone && isPracticePhase) ? ('current' as const) : ('locked' as const) }]
                       : []),
                   ]
                 : [
@@ -542,8 +557,19 @@ export default function CourseDetailPage() {
             </button>
           </header>
 
-          {/* Card area — 视口固定：flex-1 撑满 header/footer 之间，内容垂直居中，禁止卡片内滚动 */}
+          {/* Card area — or CleanupPhase when previous lesson has errors */}
           <div className="flex-1 min-h-0 flex flex-col items-center px-4 md:px-8 py-2">
+            {cleanupErrors.length > 0 && !cleanupDone ? (
+              <CleanupPhase
+                errors={cleanupErrors}
+                lessonId={lessonId}
+                subjectId={subjectId}
+                onComplete={(allCleared: boolean) => {
+                  setCleanupDone(true);
+                  if (allCleared) setCleanupErrors([]);
+                }}
+              />
+            ) : (
             <AnimatePresence mode="wait">
               <motion.div
                 key={card.id}
@@ -788,9 +814,11 @@ export default function CourseDetailPage() {
                 </div>
               </motion.div>
             </AnimatePresence>
+            )}
           </div>
 
-          {/* 底部操作栏 — 上一页 / 进度点 / 下一页，与 Card 同宽居中 */}
+          {/* 底部操作栏 — 上一页 / 进度点 / 下一页，与 Card 同宽居中；清零时隐藏 */}
+          {!(cleanupErrors.length > 0 && !cleanupDone) && (
           <footer className="shrink-0 flex justify-center px-4 md:px-8 py-4">
             <div
               className="w-full flex items-center justify-between gap-4"
@@ -860,6 +888,7 @@ export default function CourseDetailPage() {
               })()}
             </div>
           </footer>
+          )}
 
           {/* 卡片级「思辨答疑」抽屉：贴右覆盖主内容区，放大封顶 w-[70%]，不盖左侧阶段栏 */}
           {showCardDiscuss && card && (

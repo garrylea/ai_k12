@@ -403,7 +403,10 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   is_cleared TINYINT(1) NOT NULL DEFAULT 0,
   source VARCHAR(20) NOT NULL,
   source_ref_id BIGINT DEFAULT NULL,
-  -- 错题归属课时：冗余字段，用于快速判断「上一节课是否有未清零错题」。
+  -- 卡内复合题号（如 "0-1"），错题清零时展示与判题复用所需。
+  -- practice/discuss 来源在 judge/startDiscuss 写入时带上；历史行由回填脚本补全。
+  question_n VARCHAR(20) DEFAULT NULL,
+  -- 错题归属课时：冗余字段，用于按课聚合/统计。
   -- practice/discuss 来源取 cards.lesson_id；homework 取 homeworks.lesson_id；
   -- unit_test/midterm/final 等无法精确归到单节课的场景可留 NULL。
   lesson_id BIGINT DEFAULT NULL,

@@ -44,7 +44,9 @@ export interface MainErrorBookRow extends RowDataPacket {
   is_cleared: number;
   source: string; // 'practice' | 'discuss' | 'homework' | 'unit_test' | 'midterm' | 'final' | ...
   source_ref_id: number | null;
-  /** 错题所属课时 id（冗余字段，用于快速判断上一节课是否有未清零错题）。 */
+  /** 卡内复合题号（如 "0-1"），错题清零展示与判题复用所需。可空（discuss/历史行）。 */
+  question_n: string | null;
+  /** 错题所属课时 id（冗余字段，用于按课聚合/统计）。 */
   lesson_id: number | null;
   wrong_answer_text: string | null;
   /** 关联的 mainline 讨论对话 id（B方案：跨刷新/跨设备续接同一讨论线）。软引用，可空。 */

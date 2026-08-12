@@ -31,15 +31,17 @@ describe('MainErrorBooksRepository', () => {
       question_id: 2,
       source: 'practice',
       source_ref_id: 3,
+      question_n: '0-1',
       lesson_id: 4,
       wrong_answer_text: null,
     });
     expect(id).toBe(7);
-    // 校验 SQL 含 source_ref_id、lesson_id 列（main_error_books 独有）
+    // 校验 SQL 含 source_ref_id、question_n、lesson_id 列
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('source_ref_id');
+    expect(sql).toContain('question_n');
     expect(sql).toContain('lesson_id');
-    expect(params).toEqual([1, 1, 2, 'practice', 3, 4, null]);
+    expect(params).toEqual([1, 1, 2, 'practice', 3, '0-1', 4, null]);
   });
 
   it('create 接受 question_id=null（质量差仅存题面）', async () => {
@@ -50,6 +52,7 @@ describe('MainErrorBooksRepository', () => {
       question_id: null,
       source: 'practice',
       source_ref_id: 3,
+      question_n: '0-2',
       lesson_id: 4,
       wrong_answer_text: '原始题面',
     });
@@ -125,16 +128,18 @@ describe('MainErrorBooksRepository', () => {
     expect(params).toEqual([1, null, null, 5, '未入库题面']);
   });
 
-  it('countUnclearedByLesson 返回某节课未清零错题数', async () => {
-    const pool = mockPool([{ cnt: 3 }]);
+  it('findUnclearedPracticeByStudentSubject 返回未清 practice 错题并 JOIN questions 题面', async () => {
+    const rows = [{ id: 9, source_ref_id: 441, question_id: null, question_n: '0-1', questionText: '题A' }];
+    const pool = mockPool(rows);
     const repo = new MainErrorBooksRepository(pool as any);
-    const count = await repo.countUnclearedByLesson(10, 5);
-    expect(count).toBe(3);
+    const out = await repo.findUnclearedPracticeByStudentSubject(2, 1);
+    expect(out).toEqual(rows);
     const [sql, params] = pool.execute.mock.calls[0];
-    expect(sql).toContain('student_id = ?');
-    expect(sql).toContain('lesson_id = ?');
+    expect(sql).toContain('source = \'practice\'');
     expect(sql).toContain('is_cleared = 0');
-    expect(params).toEqual([10, 5]);
+    expect(sql).toContain('LEFT JOIN questions q');
+    expect(sql).toContain('COALESCE(q.content, meb.wrong_answer_text)');
+    expect(params).toEqual([2, 1]);
   });
 
   it('updateDialogueId 把对话 id 回写到错题本记录', async () => {

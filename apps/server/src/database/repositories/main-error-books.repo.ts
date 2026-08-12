@@ -9,6 +9,7 @@ export class MainErrorBooksRepository {
   /**
    * 插入一条主线错题。level / is_cleared 走 DB 默认值（1 / 0）。
    * question_id 可为 null（题库无匹配、质量差仅存题面场景）。
+   * question_n 为卡内复合题号（practice 来源由 judge 传入；discuss 等可传 null）。
    */
   async create(row: {
     student_id: number;
@@ -16,29 +17,17 @@ export class MainErrorBooksRepository {
     question_id: number | null;
     source: string;
     source_ref_id: number | null;
+    question_n: string | null;
     lesson_id: number | null;
     wrong_answer_text: string | null;
   }): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO main_error_books
-       (student_id, subject_id, question_id, source, source_ref_id, lesson_id, wrong_answer_text)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [row.student_id, row.subject_id, row.question_id, row.source, row.source_ref_id, row.lesson_id, row.wrong_answer_text],
+       (student_id, subject_id, question_id, source, source_ref_id, question_n, lesson_id, wrong_answer_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.student_id, row.subject_id, row.question_id, row.source, row.source_ref_id, row.question_n, row.lesson_id, row.wrong_answer_text],
     );
     return result.insertId;
-  }
-
-  /** 查询某节课的未清零错题数（用于「错题清零」门禁）。 */
-  async countUnclearedByLesson(
-    studentId: number,
-    lessonId: number,
-  ): Promise<number> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS cnt FROM main_error_books
-       WHERE student_id = ? AND lesson_id = ? AND is_cleared = 0`,
-      [studentId, lessonId],
-    );
-    return (rows[0]?.cnt as number) ?? 0;
   }
 
   async findById(id: number): Promise<MainErrorBookRow | null> {
@@ -136,6 +125,52 @@ export class MainErrorBooksRepository {
     await this.pool.execute(
       `UPDATE main_error_books SET dialogue_id = ? WHERE id = ?`,
       [dialogueId, id],
+    );
+  }
+
+  /**
+   * 查询学生某学科所有未清零的课堂练习错题（source='practice' + is_cleared=0）。
+   * LEFT JOIN questions 补全题面：question_id 非空取 questions.content，否则用 wrong_answer_text 兜底。
+   * 用于「错题清零」门禁——进每节课前清空错题本里所有 practice 未清题（不限课时）。
+   */
+  async findUnclearedPracticeByStudentSubject(
+    studentId: number,
+    subjectId: number,
+  ): Promise<Array<{
+    id: number;
+    source_ref_id: number | null;
+    question_id: number | null;
+    question_n: string | null;
+    questionText: string | null;
+  }>> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT meb.id, meb.source_ref_id, meb.question_id, meb.question_n,
+              COALESCE(q.content, meb.wrong_answer_text) AS questionText
+       FROM main_error_books meb
+       LEFT JOIN questions q ON meb.question_id = q.id
+       WHERE meb.student_id = ? AND meb.subject_id = ? AND meb.source = 'practice' AND meb.is_cleared = 0
+       ORDER BY meb.id`,
+      [studentId, subjectId],
+    );
+    return rows as Array<{
+      id: number;
+      source_ref_id: number | null;
+      question_id: number | null;
+      question_n: string | null;
+      questionText: string | null;
+    }>;
+  }
+
+  /**
+   * 批量递增错题严重程度（level + 1）。
+   * 用于清零后仍有错误的题，标记未掌握。
+   */
+  async bumpLevels(ids: number[]): Promise<void> {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => '?').join(',');
+    await this.pool.execute(
+      `UPDATE main_error_books SET level = level + 1 WHERE id IN (${placeholders})`,
+      ids,
     );
   }
 }

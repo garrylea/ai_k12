@@ -161,13 +161,30 @@ export function fetchLessonCards(lessonId: number): Promise<LessonCardsData> {
   return fetchApi<LessonCardsData>(`/content/lessons/${lessonId}/cards`);
 }
 
-export interface PreviousErrorsResult {
-  lessonId: number | null;
-  count: number;
+// --- Uncleared Errors (错题清零：进每节课前清空错题本里所有 practice 未清题) ---
+
+export interface PreviousErrorDetail {
+  errorBookId: number;
+  cardId: number;
+  questionN: string;
+  questionText: string;
+  questionId: number | null;
 }
 
-export function getPreviousLessonErrors(lessonId: number): Promise<PreviousErrorsResult> {
-  return fetchApi<PreviousErrorsResult>(`/practice/previous-errors?lessonId=${lessonId}`);
+export interface UnclearedErrorsResult {
+  errors: PreviousErrorDetail[];
+}
+
+/** 取学生某学科所有未清 practice 错题（计数 = errors.length，与详情同源）。 */
+export function getUnclearedErrors(subjectId: number): Promise<UnclearedErrorsResult> {
+  return fetchApi<UnclearedErrorsResult>(`/practice/uncleared-errors?subjectId=${subjectId}`);
+}
+
+export function bumpErrorLevels(errorBookIds: number[]): Promise<void> {
+  return fetchApi<void>('/practice/bump-error-levels', {
+    method: 'POST',
+    body: JSON.stringify({ errorBookIds }),
+  });
 }
 
 export function updateProgress(data: { subjectId: number; lessonId: number; cardSortOrder: number }): Promise<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number }> {

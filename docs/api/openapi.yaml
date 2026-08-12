@@ -2830,26 +2830,27 @@ paths:
                     type: string
                     example: 须指定 cardId 或 lessonId
 
-  /practice/previous-errors:
+  /practice/uncleared-errors:
     get:
       tags: [Practice]
-      summary: 查询当前课上一节课的未清零错题数
+      summary: 查询学生某学科所有未清零课堂练习错题
       description: >-
-        用于课程详情页左侧阶段栏「错题清零」门禁。服务端按 units.sort_order /
-        lessons.sort_order 推导当前课的上一节课，再统计该学生在该课的未清零主线错题数。
-        若当前课是整本教材第一课，返回 count=0、lessonId=null。
-      operationId: getPreviousLessonErrors
+        用于「错题清零」门禁：进每节课前清空错题本里所有 source='practice' + is_cleared=0
+        的未清题（不限课时，兜住历史/跳过/写入失败的错题）。以 main_error_books 为唯一真相源，
+        LEFT JOIN questions 补全题面，不再依赖 practice_results。同一 (cardId, questionN)
+        的重复记录去重保留最早一条。计数 = errors.length，前端据此渲染阶段栏与清零界面。
+      operationId: getUnclearedErrors
       security: [{ bearerAuth: [] }]
       parameters:
-        - name: lessonId
+        - name: subjectId
           in: query
           required: true
           schema:
             type: integer
-          description: 当前课 id
+          description: 学科 id
       responses:
         '200':
-          description: 上一课未清零错题数
+          description: 未清零错题列表
           content:
             application/json:
               schema:
@@ -2858,7 +2859,35 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/PreviousErrorsResult'
+                        $ref: '#/components/schemas/UnclearedErrorsResult'
+
+  /practice/bump-error-levels:
+    post:
+      tags: [Practice]
+      summary: 批量递增错题严重程度
+      description: >-
+        错题清零后仍有错误的题，level + 1 标记未掌握。请求体为 main_error_books.id 列表。
+      operationId: bumpErrorLevels
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BumpErrorLevelsRequest'
+      responses:
+        '200':
+          description: 已递增
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        nullable: true
 
 components:
   securitySchemes:
@@ -4043,17 +4072,47 @@ components:
           type: string
           description: mainline 对话 id（find-or-create：可能复用已有讨论），前端据此走 /ai/tutor/stream 做苏格拉底讨论
 
-    PreviousErrorsResult:
+    PreviousErrorDetail:
       type: object
+      description: 一条未清零课堂练习错题（错题清零用）
       properties:
-        lessonId:
+        errorBookId:
+          type: integer
+          description: main_error_books.id，清零后仍错时用于 bump level
+        cardId:
+          type: integer
+          description: 卡片 id（main_error_books.source_ref_id），判题复用
+        questionN:
+          type: string
+          description: 卡内复合题号（如 "0-1"）；历史行未回填时合成 cleanup 加 id 的唯一键
+        questionText:
+          type: string
+          description: 题面（question_id 非空取 questions.content，否则取 wrong_answer_text）
+        questionId:
           type: integer
           nullable: true
-          description: 上一节课 id；若当前课是整本教材第一课则为 null
-        count:
-          type: integer
-          description: 上一节课未清零主线错题数
-      required: [lessonId, count]
+          description: 题库 id，未入库为 null
+      required: [errorBookId, cardId, questionN, questionText, questionId]
+
+    UnclearedErrorsResult:
+      type: object
+      properties:
+        errors:
+          type: array
+          description: 未清零错题列表（已按 cardId+questionN 去重）；计数 = errors.length
+          items:
+            $ref: '#/components/schemas/PreviousErrorDetail'
+      required: [errors]
+
+    BumpErrorLevelsRequest:
+      type: object
+      properties:
+        errorBookIds:
+          type: array
+          items:
+            type: integer
+          description: 清零后仍错的 main_error_books.id 列表
+      required: [errorBookIds]
 
     PracticeResult:
       type: object

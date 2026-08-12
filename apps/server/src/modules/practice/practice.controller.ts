@@ -84,11 +84,19 @@ export class PracticeController {
     throw new BadRequestException('须指定 cardId 或 lessonId');
   }
 
-  @Get('previous-errors')
-  async previousErrors(
-    @Query('lessonId', ParseIntPipe) lessonId: number,
+  @Get('uncleared-errors')
+  async unclearedErrors(
+    @Query('subjectId', ParseIntPipe) subjectId: number,
     @CurrentUser() user: JwtUser,
   ) {
-    return this.practiceService.countUnclearedErrorsFromPreviousLesson(user.sub, lessonId);
+    return this.practiceService.getUnclearedErrorDetails(user.sub, subjectId);
+  }
+
+  @Post('bump-error-levels')
+  async bumpErrorLevels(
+    @Body() dto: { errorBookIds: number[] },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.practiceService.bumpErrorLevels(dto.errorBookIds);
   }
 }

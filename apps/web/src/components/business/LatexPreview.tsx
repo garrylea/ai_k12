@@ -27,7 +27,7 @@ const LATEX_TRIGGER = /\\[a-zA-Z]|\^|_/;
  *     因为 x^2 所以 -> 因为 $x^2$ 所以；
  *     x^2和y^2 -> $x^2$和$y^2$
  */
-function autoWrapMath(text: string): string {
+export function autoWrapMath(text: string): string {
   if (text.includes('$')) return text;
   return text
     .split('\n')

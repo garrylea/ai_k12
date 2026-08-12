@@ -1,5 +1,5 @@
 import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, LessonsRepository, PracticeResultsRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
@@ -133,7 +133,6 @@ export class PracticeService {
     private readonly cardsRepo: CardsRepository,
     private readonly hint: HintCapability,
     private readonly conversationsService: ConversationsService,
-    private readonly lessonsRepo: LessonsRepository,
     private readonly practiceResultsRepo: PracticeResultsRepository,
   ) {}
 
@@ -242,6 +241,7 @@ export class PracticeService {
             question_id: questionId,
             source: 'practice',
             source_ref_id: input.cardId,
+            question_n: input.questionN,
             lesson_id: input.lessonId,
             wrong_answer_text: questionId === null ? input.questionText : null,
           });
@@ -314,19 +314,60 @@ export class PracticeService {
   }
 
   /**
-   * 查询「当前课的上一节课」是否还有未清零的主线错题。
-   * 返回上一课 id 与未清零数量；若当前课是整本教材第一课，count 为 0 且 lessonId 为 null。
+   * 查询学生某学科所有未清零的课堂练习错题详情（用于「错题清零」门禁）。
+   * 以 main_error_books（source='practice' + is_cleared=0）为唯一真相源，
+   * LEFT JOIN questions 补全题面--不再依赖 practice_results，避免两表数据不一致时漏检。
+   * 进每节课前清空错题本里所有 practice 未清题（不限课时，兜住历史/跳过/写入失败的错题）。
+   *
+   * 去重：同一 (cardId, question_n) 可能因并发判题或题面变体产生多条记录，
+   * 只保留最早一条；答对时 clearUnclearedByStudentQuestion 会清掉同 question_id 的所有行，
+   * 题面变体导致不同 question_id 的重复行在后续清零轮次逐步消除。
    */
-  async countUnclearedErrorsFromPreviousLesson(
+  async getUnclearedErrorDetails(
     studentId: number,
-    currentLessonId: number,
-  ): Promise<{ lessonId: number | null; count: number }> {
-    const previousLessonId = await this.lessonsRepo.findPreviousLessonId(currentLessonId);
-    if (!previousLessonId) {
-      return { lessonId: null, count: 0 };
+    subjectId: number,
+  ): Promise<{
+    errors: Array<{
+      errorBookId: number;
+      cardId: number;
+      questionN: string;
+      questionText: string;
+      questionId: number | null;
+    }>;
+  }> {
+    const rows = await this.mainErrorRepo.findUnclearedPracticeByStudentSubject(studentId, subjectId);
+    const seen = new Set<string>();
+    const errors: Array<{
+      errorBookId: number;
+      cardId: number;
+      questionN: string;
+      questionText: string;
+      questionId: number | null;
+    }> = [];
+    for (const r of rows) {
+      const cardId = r.source_ref_id ?? 0;
+      // question_n 缺失（历史行未回填）时合成唯一键，保证清零可用
+      const questionN = r.question_n ?? `cleanup-${r.id}`;
+      const key = `${cardId}-${questionN}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      errors.push({
+        errorBookId: r.id,
+        cardId,
+        questionN,
+        questionText: r.questionText ?? '',
+        questionId: r.question_id,
+      });
     }
-    const count = await this.mainErrorRepo.countUnclearedByLesson(studentId, previousLessonId);
-    return { lessonId: previousLessonId, count };
+    return { errors };
+  }
+
+  /**
+   * 批量递增错题严重程度（level + 1）。
+   * 用于清零后仍有错误的题。
+   */
+  async bumpErrorLevels(errorBookIds: number[]): Promise<void> {
+    await this.mainErrorRepo.bumpLevels(errorBookIds);
   }
 
   /**
@@ -406,6 +447,7 @@ export class PracticeService {
         question_id: questionId,
         source: 'discuss',
         source_ref_id: input.cardId,
+        question_n: null,
         lesson_id: input.lessonId,
         wrong_answer_text: questionId === null ? input.questionText : null,
       });

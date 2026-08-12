@@ -336,7 +336,8 @@
 | POST | `/api/practice/discuss-card` | 卡片级「思辨答疑」（苏格拉底讨论）。学生在非 practice 知识卡片上点「思辨答疑」调用。与 `/practice/discuss` 区别：scope=整张卡片（非某道题），**不入错题本**（讨论知识非题目）；服务端按 `(student_id, card_id, track='mainline')` find-or-create mainline 对话，重开同一卡片自动回到同一讨论线。前端据 `dialogueId` 走 `POST /api/ai/tutor/stream`（mode=mainline）做苏格拉底讨论。请求体：`{cardId, lessonId, subjectId}`；响应：`{dialogueId}`。 | MVP |
 | GET | `/api/practice/results?cardId={cardId}` | 取该练习卡持久化判题结果（对/错 + analysis 题解），驱动 ✓/✗ 跨设备/刷新回显。响应体：`[{questionN, questionText, studentAnswer, isCorrect, method, analysis, errorType}]`。 | MVP |
 | DELETE | `/api/practice/results?cardId={cardId}` 或 `?lessonId={lessonId}` | 重置练习记录：`cardId` 清单卡、`lessonId` 清本课全部练习卡（二者互斥，同传/都缺 400）。只删 `practice_results`，不动 `main_error_books`。 | MVP |
-| GET | `/api/practice/previous-errors?lessonId={lessonId}` | 查询当前课「上一节课」的未清零主线错题数，用于左侧阶段栏「错题清零」门禁。服务端按 `units.sort_order`/`lessons.sort_order` 推导上一课，再查 `main_error_books`（`student_id=当前学生, lesson_id=上一课, is_cleared=0`）。响应：`{lessonId(nullable): 上一课 id, count: number}`。当前课是整本教材第一课时返回 `{lessonId:null, count:0}`。 | MVP |
+| GET | `/api/practice/uncleared-errors?subjectId={subjectId}` | 查询学生某学科**所有**未清零课堂练习错题（`main_error_books` source='practice' + is_cleared=0），用于「错题清零」门禁。以 `main_error_books` 为唯一真相源，LEFT JOIN `questions` 补全题面，**不再依赖 `practice_results`**（避免两表数据不一致漏检）。进每节课前清空错题本里所有 practice 未清题（不限课时，兜住历史/跳过/写入失败的错题）。同一 `(cardId, questionN)` 重复记录去重保留最早一条。响应：`{errors: [{errorBookId, cardId, questionN, questionText, questionId}]}`，计数 = `errors.length`。 | MVP |
+| POST | `/api/practice/bump-error-levels` | 错题清零后仍有错误的题，`main_error_books.level` +1 标记未掌握。请求体：`{errorBookIds: number[]}`。 | MVP |
 
 ---
 
@@ -896,28 +897,33 @@ POST /api/ai/tutor/stream（mode=mainline, dialogueId, message）-> SSE 流式
 
 ---
 
-### 6.13 上一课错题清零门禁
+### 6.13 错题清零门禁（进每节课前清空错题本所有未清题）
 
 ```text
-CourseDetailPage 加载 / 切课
+CourseDetailPage 加载（fetchData，带 subjectId）
   │
   ▼
-GET /api/practice/previous-errors?lessonId={currentLessonId}
+GET /api/practice/uncleared-errors?subjectId={subjectId}
   │  JWT -> 取 studentId
   ▼
-PracticeService.countUnclearedErrorsFromPreviousLesson(studentId, currentLessonId)
-  ├─ LessonsRepository.findPreviousLessonId(currentLessonId)
-  │    按 units.sort_order + lessons.sort_order 推导上一节课 id
-  │    （同单元前一课 / 上一单元最后一课 / 跨学期类推；教材第一课返回 null）
-  └─ MainErrorBooksRepository.countUnclearedByLesson(studentId, previousLessonId)
-       查 main_error_books：student_id + lesson_id + is_cleared=0
+PracticeService.getUnclearedErrorDetails(studentId, subjectId)
+  └─ MainErrorBooksRepository.findUnclearedPracticeByStudentSubject(studentId, subjectId)
+       查 main_error_books：student_id + subject_id + source='practice' + is_cleared=0
+       LEFT JOIN questions 补全题面（COALESCE(q.content, wrong_answer_text)）
+       按 (cardId, questionN) 去重保留最早一条（并发判题/题面变体产生的重复行）
   ▼
-返回 { lessonId, count }
+返回 { errors: [...] }（计数 = errors.length）
   │
   ▼
-前端阶段栏：
-  count > 0 -> 显示「错题清零（前一课）」未解锁
-  count = 0 -> 隐藏该项或标记已完成
+前端阶段栏 + 主内容区：
+  errors.length > 0 -> 阶段栏显示「错题清零 / 有 N 道错题未清」；主内容区渲染 CleanupPhase
+  errors.length = 0 -> 走正常卡片学习
+  │
+  ▼
+CleanupPhase 逐题作答 -> 复用 POST /api/practice/judge 判题
+  ├─ 答对 -> judge 内 clearUnclearedByStudentQuestion 清掉该题未清记录
+  └─ 答错 -> find-or-create 保留错题本记录
+  全部判完 -> 仍错的调 POST /api/practice/bump-error-levels 递增 level -> 庆祝/对错表 -> 开始学习
 ```
 
 ### 6.14 课堂练习结果持久化与 reset
@@ -953,7 +959,7 @@ PracticeService.getResults -> PracticeResultsRepository.findByStudentCard
 | 家长注册 | `/register` | `POST /api/auth/register` |
 | P1.5 学科选择 | `/student/subjects` | `GET /api/content/subjects` |
 | P2.1 星图导航 | `/student/star-map` | `GET /api/progress/students/{id}/star-map?subjectId=`（星图主数据）；`GET /api/progress/.../overview`（跨学科总览，可选） |
-| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`GET /api/practice/previous-errors?lessonId=`（上一课未清零错题数，阶段栏门禁）；`POST /api/progress/update`（翻页上报进度）；卡片级讨论抽屉调 `POST /api/practice/discuss-card`；practice 卡「让 AI 讲一讲」抽屉调 `POST /api/practice/discuss` |
+| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`GET /api/practice/uncleared-errors?subjectId=`（错题清零门禁，进每节课前清空错题本所有 practice 未清题）；`POST /api/practice/bump-error-levels`（清零后仍错递增 level）；`POST /api/progress/update`（翻页上报进度）；卡片级讨论抽屉调 `POST /api/practice/discuss-card`；practice 卡「让 AI 讲一讲」抽屉调 `POST /api/practice/discuss` |
 | P2.3 AI 讨论 | 已合并为抽屉 | 题目级讨论在 AnswerModal 内（`POST /api/practice/discuss`）；卡片级讨论在 CourseDetailPage 内（`POST /api/practice/discuss-card`）。均走 `POST /api/ai/tutor/stream` 流式。 |
 | P2.4 课后作业 | `/student/homework` | `GET /api/assessment/homework/{id}`, `POST .../answers`, `POST .../hint` |
 | P2.5 作业解析 | `/student/homework-result` | `GET /api/assessment/submissions/{id}/results` |
@@ -1148,3 +1154,4 @@ POST /api/error-book/items/{errorItemId}/redo
 | v1.5 | 2026-08-10 | B方案：题目级讨论历史续接——`main_error_books` 表新增 `dialogue_id`，`POST /api/practice/discuss` 复用已绑对话、失效则重建并回写；新增 `POST /api/practice/discuss-card` 卡片级「思辨答疑」接口（MVP），find-or-create 该学生在该卡片的 mainline 对话（不入错题本，锚=(student,card)），新增 §6.12 数据流；卡片级改为 CourseDetailPage 内右侧抽屉，放大封顶不盖左侧阶段栏；`/student/ai-discuss` 独立页取消，合并到课程详情/答题弹窗抽屉。 |
 | v1.6 | 2026-08-10 | `main_error_books` 表新增 `lesson_id` 字段（冗余字段，用于按课快速定位未清零错题）；新增 `GET /api/practice/previous-errors?lessonId=` 查询当前课上一节课未清零错题数；新增 `LessonsRepository.findPreviousLessonId` + `PracticeService.countUnclearedErrorsFromPreviousLesson`；新增 §6.13 数据流；P2.2 课程详情页主要调用 API 补该端点；`main_error_books.source` 枚举补 `discuss`。
 | v1.7 | 2026-08-11 | 新增 `practice_results` 表（课堂练习判题结果持久化，UNIQUE(student_id,card_id,question_n) 支撑单题重做 upsert）；新增 `GET/DELETE /api/practice/results`（取持久化结果 + 单卡/课程级 reset，与错题本解耦）；`JudgeRequest` 加 `questionN`；`judge` 答错改 find-or-create 错题本、答对 `clearUnclearedByStudentQuestion` 清该题未清错题（影响跨课门禁）、对/错都落 `practice_results`；新增 §6.14 数据流；§6.9 judge 流程更新。 |
+| v1.8 | 2026-08-12 | 错题清零门禁重构为「进每节课前清空错题本所有 practice 未清题」。根因：原 `GET /api/practice/previous-errors`（计数读 `main_error_books`）与 `GET /api/practice/previous-error-details`（详情以 `practice_results` 驱动匹配 `main_error_books`）数据源不同，`practice_results` 缺失（历史数据/reset 清空/upsert 失败）时计数>0 但详情为空，清零界面不渲染。改为单一端点 `GET /api/practice/uncleared-errors?subjectId=`（计数与详情同源于 `main_error_books`，LEFT JOIN `questions` 补题面，不依赖 `practice_results`）；`main_error_books` 新增 `question_n` 列（迁移 + `backfill-error-question-n.ts` 按 card 元数据回填历史行）；新增 `POST /api/practice/bump-error-levels`；移除 `previous-errors`/`previous-error-details` 端点、`LessonsRepository.findPreviousLessonId` 依赖、`countUnclearedByLesson`/`findUnclearedByStudentLesson`/`findWrongByStudentLesson`；§6.13 重写、P2.2 调用更新。 |
