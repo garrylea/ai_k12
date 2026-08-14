@@ -67,6 +67,15 @@ const LockIcon2 = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const RefreshIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+    <path d="M3 21v-5h5" />
+  </svg>
+);
+
 const CARD_TYPE_LABEL: Record<LessonCard['cardType'], string> = {
   concept: '概念',
   example: '例题',
@@ -91,16 +100,16 @@ function extractFigureCaption(children: React.ReactNode): {
   caption: string;
 } | null {
   const kids = Children.toArray(children);
-  const imgKid = kids.find((c: any) => {
-    if (c === null || typeof c !== 'object') return false;
-    return !!c?.props?.src;
+  const imgKid = kids.find((c) => {
+    if (c === null || typeof c !== 'object' || !('props' in c)) return false;
+    return !!c.props?.src;
   });
   if (!imgKid) return null;
 
   const imgIdx = kids.indexOf(imgKid);
   const afterText = kids
     .slice(imgIdx + 1)
-    .map((c: any) => {
+    .map((c) => {
       if (typeof c === 'string') return c;
       if (typeof c === 'number') return String(c);
       return '';
@@ -120,13 +129,13 @@ function getNodeText(node: React.ReactNode): string {
   if (typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(getNodeText).join('');
   if (typeof node === 'object' && 'props' in node) {
-    return getNodeText((node as any).props?.children);
+    return getNodeText(node.props?.children);
   }
   return '';
 }
 
 /** 练习题子项模式：(1) (2) ... (10) 或 1. 2. 等 */
-const EXERCISE_ITEM_RE = /^\(?([1-9]\d?)[\.\)]/;
+const EXERCISE_ITEM_RE = /^\(?([1-9]\d?)[.)]/;
 /** 题干模式：以：或:结尾 */
 const EXERCISE_STEM_RE = /[：:]$/;
 
@@ -189,8 +198,7 @@ export default function CourseDetailPage() {
 
   const lessonId =
     (location.state as { lessonId?: number } | null)?.lessonId ??
-    Number(searchParams.get('lessonId')) ??
-    0;
+    Number(searchParams.get('lessonId'));
   const breadcrumb = (location.state as { breadcrumb?: string } | null)?.breadcrumb ?? '';
   const subjectName = (location.state as { subjectName?: string } | null)?.subjectName ?? '';
   const gradeName = (location.state as { gradeName?: string } | null)?.gradeName ?? '';
@@ -239,8 +247,8 @@ export default function CourseDetailPage() {
       setCleanupErrors(uncleared.errors);
       setCleanupDone(false);
       setPage(0);
-    } catch (err: any) {
-      setError(err.message || '加载失败');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? (err.message || '加载失败') : '加载失败');
     } finally {
       setLoading(false);
     }
@@ -510,7 +518,24 @@ export default function CourseDetailPage() {
             })()}
           </nav>
 
-          <div className="p-4 mt-auto">
+          {/* 重置本课错题 - 与上方阶段状态、下方用户信息用分割线区分；清零阶段隐藏 */}
+          {!(cleanupErrors.length > 0 && !cleanupDone) && (
+            <div className="mx-4 my-2 border-t border-b border-[var(--bg-subtle)] py-3">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
+                  resetPracticeLesson(lessonId).then(() => reset());
+                }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)]/40 hover:text-[var(--text-primary)] transition-colors"
+              >
+                <RefreshIcon className="w-4 h-4" />
+                <span>重置本课错题</span>
+              </button>
+            </div>
+          )}
+
+          <div className="p-4">
             <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-[var(--learn-btn-primary)] flex items-center justify-center text-white font-bold text-lg">
@@ -595,11 +620,11 @@ export default function CourseDetailPage() {
                   {card.cardType === 'practice' && (
                     <button
                       type="button"
-                      title="清空本课练习"
-                      aria-label="清空本课练习"
+                      title="重置本卡"
+                      aria-label="重置本卡"
                       onClick={() => {
-                        if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
-                        resetPracticeLesson(lessonId).then(() => reset());
+                        if (!window.confirm('确定重置本卡练习记录吗？该卡所有对错记录将被清除。')) return;
+                        resetPracticeCard(card.id).then(() => reset());
                       }}
                       className="shrink-0 p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
                     >
@@ -642,21 +667,6 @@ export default function CourseDetailPage() {
                           </h2>
                         ) : null;
                       })()}
-
-                      {/* 练习结果单卡 reset（仅 practice 卡且有持久化结果） */}
-                      {card.cardType === 'practice' && Object.keys(answers).length > 0 && (
-                        <div className="flex items-center gap-3 px-1 py-2 text-xs text-[var(--text-tertiary)]">
-                          <button
-                            onClick={() => {
-                              if (!window.confirm('确定重置本卡练习记录吗？该卡所有对错记录将被清除。')) return;
-                              resetPracticeCard(card.id).then(() => reset());
-                            }}
-                            className="underline hover:text-[var(--text-secondary)]"
-                          >
-                            重置本卡
-                          </button>
-                        </div>
-                      )}
 
                       {/* Markdown body - practice 卡有结构化题目时渲染可点题块，否则走 ReactMarkdown */}
                       {(() => {

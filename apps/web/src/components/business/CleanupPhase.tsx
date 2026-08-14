@@ -57,7 +57,6 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
   const resultsRef = useRef<Record<string, AnswerRecord>>({});
   const [finalResults, setFinalResults] = useState<Record<string, AnswerRecord> | null>(null);
   const pendingRef = useRef<Map<number, Promise<unknown>>>(new Map());
-  const cancelledRef = useRef(false);
 
   const questions: PracticeQuestion[] = errors.map((e) => ({
     n: e.questionN,
@@ -127,7 +126,6 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
       try {
         await Promise.allSettled([...pendingRef.current.values()]);
       } catch { /* ignore */ }
-      if (cancelledRef.current) return;
 
       const final = { ...resultsRef.current };
       setFinalResults(final);
@@ -161,11 +159,6 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
       }
     }
   }, [answer, idx, currentError, lessonId, subjectId, errors, totalErrors]);
-
-  const handleSkip = () => {
-    cancelledRef.current = true;
-    onComplete(false);
-  };
 
   // ========== ANSWERING 态 ==========
   if (phase === 'answering' && currentError) {
@@ -216,12 +209,6 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
               </svg>
             </button>
           </div>
-        </div>
-
-        <div className="shrink-0 text-center py-3">
-          <button onClick={handleSkip} className="text-xs text-[var(--text-tertiary)] underline hover:text-[var(--text-secondary)]">
-            跳过清零，开始学习
-          </button>
         </div>
       </div>
     );

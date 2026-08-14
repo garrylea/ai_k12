@@ -128,8 +128,8 @@ export default function StarMapPage() {
       setData(result);
       const current = result.chapters.find(c => c.status === 'current');
       setSelectedPlanetId(current?.id ?? result.chapters[0]?.id ?? null);
-    } catch (err: any) {
-      setError(err.message || '加载失败');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? (err.message || '加载失败') : '加载失败');
     } finally {
       setLoading(false);
     }

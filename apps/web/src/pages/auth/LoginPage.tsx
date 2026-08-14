@@ -29,8 +29,8 @@ export default function LoginPage() {
       } else {
         navigate('/student/entry');
       }
-    } catch (err: any) {
-      setError(err.message || '登录失败，请重试');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? (err.message || '登录失败，请重试') : '登录失败，请重试');
     } finally {
       setLoading(false);
     }
