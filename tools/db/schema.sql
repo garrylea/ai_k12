@@ -1,5 +1,5 @@
 -- K12 智学系统 — 数据库初始化脚本
--- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.5）
+-- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.7）
 -- 范围：MVP 全部表（§3.1 ~ §3.9、§3.11），不含 P2 计费相关表（§3.10）
 -- 数据库：MySQL 9.7.1 LTS（文档约定）
 -- 字符集：utf8mb4
@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS parents (
   password_hash VARCHAR(255) NOT NULL,
   name VARCHAR(50) DEFAULT NULL,
   avatar_url VARCHAR(500) DEFAULT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) DEFAULT NULL,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS students (
   age SMALLINT NOT NULL,
   grade VARCHAR(20) NOT NULL,
   school_level VARCHAR(10) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
   avatar_url VARCHAR(500) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -39,6 +41,18 @@ CREATE TABLE IF NOT EXISTS students (
   UNIQUE KEY uniq_students_username (username, deleted_at),
   KEY idx_students_parent_id (parent_id),
   CONSTRAINT fk_students_parent_id FOREIGN KEY (parent_id) REFERENCES parents (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admins (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(50) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  name VARCHAR(50) DEFAULT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  deleted_at DATETIME(3) DEFAULT NULL,
+  UNIQUE KEY uniq_admins_username (username, deleted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS student_settings (
