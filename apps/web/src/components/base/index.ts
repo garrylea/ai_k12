@@ -5,6 +5,7 @@ export { Input } from './Input';
 export { Tag } from './Tag';
 export { Card } from './Card';
 export { Modal } from './Modal';
+export { ConfirmDialog } from './ConfirmDialog';
 export { Banner } from './Banner';
 export { Progress } from './Progress';
 export { Skeleton } from './Skeleton';

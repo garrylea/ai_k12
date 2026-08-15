@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ProgressService } from './progress.service.js';
 
 /**
@@ -27,6 +27,7 @@ const UNITS_BY_VERSION: Record<number, any[]> = {
 function makeService(opts: {
   progress: any | null;
   student?: any | null;
+  practiceService?: any;
 }) {
   const progressRepo = {
     findByStudentAndSubject: async () => opts.progress,
@@ -43,7 +44,8 @@ function makeService(opts: {
     getUnits: async (versionId: number) => UNITS_BY_VERSION[versionId] ?? [],
     getLessons: async () => [],
   };
-  return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any);
+  const practiceService = opts.practiceService ?? {};
+  return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any, practiceService as any);
 }
 
 describe('ProgressService.getStarMap — semester/version selection', () => {
@@ -75,5 +77,108 @@ describe('ProgressService.getStarMap — semester/version selection', () => {
     // junior version 76's first semester in sort order is 九上
     expect(result.gradeName).toBe('九年级上册');
     expect(result.publisher).toBe('人教版');
+  });
+});
+
+// --- updateProgress 课程完成门禁（练习作答覆盖校验） ---
+
+/** 构造 updateProgress 专用依赖（mock repos + contentService + practiceService）。 */
+function makeUpdateService(opts: {
+  progress: any;
+  cards: any[];
+  nextLesson?: { id: number; unitId: number } | null;
+  practiceComplete?: boolean;
+  withPracticeService?: boolean;
+}) {
+  const progressRepo = {
+    findByStudentAndSubject: async () => opts.progress,
+    advanceLesson: vi.fn().mockResolvedValue(undefined),
+    markCompleted: vi.fn().mockResolvedValue(undefined),
+    updateCardSort: vi.fn().mockResolvedValue(undefined),
+  };
+  const contentService = {
+    getLessonCards: async () => ({ cards: opts.cards }),
+    getNextLesson: async () => opts.nextLesson ?? null,
+  };
+  // 非门禁场景（课程无练习卡）不需要 practiceService；传 true 时校验是否被调用
+  const practiceService = opts.withPracticeService
+    ? { isLessonPracticeComplete: vi.fn().mockResolvedValue(opts.practiceComplete ?? true) }
+    : {};
+  const svc = new ProgressService(
+    progressRepo as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    contentService as any,
+    practiceService as any,
+  );
+  return { svc, progressRepo, contentService, practiceService };
+}
+
+describe('ProgressService.updateProgress — practice gate', () => {
+  it('到达最后一张卡但练习未全部作答 -> 拒绝完成（practice_incomplete），不 advanceLesson', async () => {
+    const { svc, progressRepo, practiceService } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'practice' },
+      ],
+      practiceComplete: false,
+      withPracticeService: true,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+    expect(res).toEqual({ advanced: false, reason: 'practice_incomplete' });
+    expect(practiceService.isLessonPracticeComplete).toHaveBeenCalledWith(2, 9);
+    expect(progressRepo.advanceLesson).not.toHaveBeenCalled();
+    expect(progressRepo.updateCardSort).not.toHaveBeenCalled();
+  });
+
+  it('到达最后一张卡且练习全部作答 -> 正常 advanceLesson 到下一课', async () => {
+    const { svc, progressRepo, practiceService } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0, currentUnitId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'practice' },
+      ],
+      nextLesson: { id: 99, unitId: 1 },
+      practiceComplete: true,
+      withPracticeService: true,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+    expect(res).toEqual({ advanced: true, nextLessonId: 99 });
+    expect(practiceService.isLessonPracticeComplete).toHaveBeenCalledWith(2, 9);
+    expect(progressRepo.advanceLesson).toHaveBeenCalledWith(1, 99, null);
+  });
+
+  it('课程无练习卡 -> 不调 practiceService，到达最后一张卡正常完成', async () => {
+    const { svc, progressRepo, practiceService } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'summary' },
+      ],
+      nextLesson: null,
+      withPracticeService: true,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+    expect(res).toEqual({ advanced: true, completed: true });
+    expect(practiceService.isLessonPracticeComplete).not.toHaveBeenCalled();
+    expect(progressRepo.markCompleted).toHaveBeenCalledWith(1);
+  });
+
+  it('非最后一张卡 -> 不触发门禁，仅更新 cardSort', async () => {
+    const { svc, progressRepo, practiceService } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'practice' },
+      ],
+      withPracticeService: true,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 1);
+    expect(res).toEqual({ advanced: false, nextUnlockType: 'lesson' });
+    expect(practiceService.isLessonPracticeComplete).not.toHaveBeenCalled();
+    expect(progressRepo.updateCardSort).toHaveBeenCalledWith(1, 1, 'lesson');
   });
 });

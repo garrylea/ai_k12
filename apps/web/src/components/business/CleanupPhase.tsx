@@ -89,7 +89,10 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
     const p = Promise.resolve(
       judgePractice({
         cardId: error.cardId,
-        lessonId,
+        // 必须写错题来源卡「真正所属的课」：清零阶段会清到其他课的错题，
+        // 若传当前页 lessonId，practice_results.lesson_id 会与卡片所属课不一致，
+        // 导致课程级「重置课堂练习」（按 lesson_id 删）漏删该卡记录。取不到时回退当前页。
+        lessonId: error.lessonId ?? lessonId,
         subjectId,
         questionN: error.questionN,
         questionText: error.questionText,

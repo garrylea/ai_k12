@@ -6,6 +6,7 @@ import { QuestionStructuringCapability } from '../../ai-core/capabilities/questi
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
+import { ContentModule } from '../content/content.module.js';
 
 /**
  * 课堂练习模块 - 主线练习判对错 + 提示 + 讨论。
@@ -19,7 +20,7 @@ import { ConversationsModule } from '../conversations/conversations.module.js';
  *   （复用 ConversationsService.create）。
  */
 @Module({
-  imports: [ConversationsModule],
+  imports: [ConversationsModule, ContentModule],
   controllers: [PracticeController],
   providers: [
     PracticeService,

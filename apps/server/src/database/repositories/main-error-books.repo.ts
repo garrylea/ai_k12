@@ -131,6 +131,8 @@ export class MainErrorBooksRepository {
   /**
    * 查询学生某学科所有未清零的课堂练习错题（source='practice' + is_cleared=0）。
    * LEFT JOIN questions 补全题面：question_id 非空取 questions.content，否则用 wrong_answer_text 兜底。
+   * LEFT JOIN cards 补全卡片所属课的 lesson_id——清零阶段判题时必须写卡片真正所属的课，
+   * 否则 practice_results.lesson_id 会记成「判题时所在课」，导致课程级重置（按 lesson_id 删）漏删。
    * 用于「错题清零」门禁——进每节课前清空错题本里所有 practice 未清题（不限课时）。
    */
   async findUnclearedPracticeByStudentSubject(
@@ -142,12 +144,15 @@ export class MainErrorBooksRepository {
     question_id: number | null;
     question_n: string | null;
     questionText: string | null;
+    lesson_id: number | null;
   }>> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT meb.id, meb.source_ref_id, meb.question_id, meb.question_n,
-              COALESCE(q.content, meb.wrong_answer_text) AS questionText
+              COALESCE(q.content, meb.wrong_answer_text) AS questionText,
+              c.lesson_id AS lesson_id
        FROM main_error_books meb
        LEFT JOIN questions q ON meb.question_id = q.id
+       LEFT JOIN cards c ON c.id = meb.source_ref_id
        WHERE meb.student_id = ? AND meb.subject_id = ? AND meb.source = 'practice' AND meb.is_cleared = 0
        ORDER BY meb.id`,
       [studentId, subjectId],
@@ -158,6 +163,7 @@ export class MainErrorBooksRepository {
       question_id: number | null;
       question_n: string | null;
       questionText: string | null;
+      lesson_id: number | null;
     }>;
   }
 

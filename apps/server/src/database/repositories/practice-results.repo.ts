@@ -48,6 +48,15 @@ export class PracticeResultsRepository {
     return rows as PracticeResultRow[];
   }
 
+  /** 取该学生在该课全部卡片的判题结果（课程完成门禁用）。 */
+  async findByStudentLesson(studentId: number, lessonId: number): Promise<PracticeResultRow[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM practice_results WHERE student_id = ? AND lesson_id = ?`,
+      [studentId, lessonId],
+    );
+    return rows as PracticeResultRow[];
+  }
+
   /** 单卡 reset：删除该学生该卡的全部判题结果。 */
   async deleteByStudentCard(studentId: number, cardId: number): Promise<void> {
     await this.pool.execute(

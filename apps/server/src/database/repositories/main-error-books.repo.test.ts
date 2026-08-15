@@ -128,8 +128,8 @@ describe('MainErrorBooksRepository', () => {
     expect(params).toEqual([1, null, null, 5, '未入库题面']);
   });
 
-  it('findUnclearedPracticeByStudentSubject 返回未清 practice 错题并 JOIN questions 题面', async () => {
-    const rows = [{ id: 9, source_ref_id: 441, question_id: null, question_n: '0-1', questionText: '题A' }];
+  it('findUnclearedPracticeByStudentSubject 返回未清 practice 错题并 JOIN questions 题面 + cards 卡片所属课', async () => {
+    const rows = [{ id: 9, source_ref_id: 441, question_id: null, question_n: '0-1', questionText: '题A', lesson_id: 181 }];
     const pool = mockPool(rows);
     const repo = new MainErrorBooksRepository(pool as any);
     const out = await repo.findUnclearedPracticeByStudentSubject(2, 1);
@@ -139,6 +139,8 @@ describe('MainErrorBooksRepository', () => {
     expect(sql).toContain('is_cleared = 0');
     expect(sql).toContain('LEFT JOIN questions q');
     expect(sql).toContain('COALESCE(q.content, meb.wrong_answer_text)');
+    expect(sql).toContain('LEFT JOIN cards c ON c.id = meb.source_ref_id');
+    expect(sql).toContain('c.lesson_id AS lesson_id');
     expect(params).toEqual([2, 1]);
   });
 

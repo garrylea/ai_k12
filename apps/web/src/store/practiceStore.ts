@@ -21,6 +21,10 @@ interface PracticeState {
   record: (n: string, studentAnswer: string, result: JudgeResult, opts?: { failed?: boolean }) => void;
   setHint: (n: string, hint: string) => void;
   setDiscussDialogue: (questionText: string, dialogueId: string) => void;
+  /** 仅清空当前卡的 answers（单卡重置用）：保留 cardId/questions/hints/discussDialogues。
+   *  与 reset() 的区别：reset() 是「整课/换课」级清空，会连带清掉 session 级 hints/discussDialogues 缓存；
+   *  单卡橡皮擦只应清本卡答题状态，不应动其它卡或会话缓存。 */
+  clearAnswers: () => void;
   reset: () => void;
 }
 
@@ -60,5 +64,6 @@ export const usePracticeStore = create<PracticeState>((set) => ({
   setHint: (n, hint) => set((s) => ({ hints: { ...s.hints, [n]: hint } })),
   setDiscussDialogue: (questionText, dialogueId) =>
     set((s) => ({ discussDialogues: { ...s.discussDialogues, [questionText]: dialogueId } })),
+  clearAnswers: () => set({ answers: {}, currentIndex: 0 }),
   reset: () => set({ cardId: null, questions: [], answers: {}, hints: {}, discussDialogues: {}, currentIndex: 0 }),
 }));

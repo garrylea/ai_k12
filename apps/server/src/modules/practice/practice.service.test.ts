@@ -24,15 +24,19 @@ const mk = (overrides: any = {}) => ({
   practiceResultsRepo: {
     upsert: vi.fn().mockResolvedValue(undefined),
     findByStudentCard: vi.fn().mockResolvedValue([]),
+    findByStudentLesson: vi.fn().mockResolvedValue([]),
     deleteByStudentCard: vi.fn().mockResolvedValue(undefined),
     deleteByStudentLesson: vi.fn().mockResolvedValue(undefined),
+  },
+  contentService: {
+    getLessonCards: vi.fn().mockResolvedValue({ cards: [] }),
   },
   ...overrides,
 });
 
 /** 用 mk() 构造的依赖实例化 PracticeService。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -517,18 +521,18 @@ describe('PracticeService.getUnclearedErrorDetails', () => {
         clearUnclearedByStudentQuestion: vi.fn(),
         updateDialogueId: vi.fn(),
         findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([
-          { id: 9, source_ref_id: 441, question_id: null, question_n: '0-1', questionText: '题A' },
-          { id: 11, source_ref_id: 441, question_id: 2775, question_n: '0-4', questionText: '解方程' },
+          { id: 9, source_ref_id: 441, question_id: null, question_n: '0-1', questionText: '题A', lesson_id: 181 },
+          { id: 11, source_ref_id: 441, question_id: 2775, question_n: '0-4', questionText: '解方程', lesson_id: 182 },
           // 重复 (441, 0-4) -> 去重，保留 id=11
-          { id: 15, source_ref_id: 441, question_id: null, question_n: '0-4', questionText: '(4) ...' },
+          { id: 15, source_ref_id: 441, question_id: null, question_n: '0-4', questionText: '(4) ...', lesson_id: 181 },
         ]),
       },
     });
     const svc = mkSvc(deps);
     const r = await svc.getUnclearedErrorDetails(2, 1);
     expect(r.errors).toHaveLength(2);
-    expect(r.errors[0]).toEqual({ errorBookId: 9, cardId: 441, questionN: '0-1', questionText: '题A', questionId: null });
-    expect(r.errors[1]).toEqual({ errorBookId: 11, cardId: 441, questionN: '0-4', questionText: '解方程', questionId: 2775 });
+    expect(r.errors[0]).toEqual({ errorBookId: 9, cardId: 441, questionN: '0-1', questionText: '题A', questionId: null, lessonId: 181 });
+    expect(r.errors[1]).toEqual({ errorBookId: 11, cardId: 441, questionN: '0-4', questionText: '解方程', questionId: 2775, lessonId: 182 });
   });
 
   it('question_n 为 null 的历史行 -> 合成唯一键 cleanup 加 id', async () => {
@@ -602,5 +606,138 @@ describe('PracticeService.resetCard / resetLesson', () => {
     const svc = mkSvc(deps);
     await svc.resetLesson(1, 9);
     expect(deps.practiceResultsRepo.deleteByStudentLesson).toHaveBeenCalledWith(1, 9);
+  });
+});
+
+describe('PracticeService.isLessonPracticeComplete', () => {
+  it('课程无练习卡 -> 直接通过', async () => {
+    const deps = mk({
+      contentService: {
+        getLessonCards: vi.fn().mockResolvedValue({
+          cards: [
+            { id: 1, sortOrder: 0, cardType: 'concept', content: '知识', metadata: null },
+            { id: 2, sortOrder: 1, cardType: 'summary', content: '小结', metadata: null },
+          ],
+        }),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.isLessonPracticeComplete(1, 9)).resolves.toBe(true);
+    expect(deps.practiceResultsRepo.findByStudentLesson).not.toHaveBeenCalled();
+  });
+
+  it('结构化练习卡题目全部作答 -> 通过', async () => {
+    const deps = mk({
+      contentService: {
+        getLessonCards: vi.fn().mockResolvedValue({
+          cards: [
+            { id: 5, sortOrder: 0, cardType: 'practice', content: '练习', metadata: { groups: [{ questions: [{ n: 1 }, { n: 2 }] }] } },
+          ],
+        }),
+      },
+      practiceResultsRepo: {
+        findByStudentLesson: vi.fn().mockResolvedValue([
+          { card_id: 5, question_n: '0-1' },
+          { card_id: 5, question_n: '0-2' },
+        ]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.isLessonPracticeComplete(1, 9)).resolves.toBe(true);
+  });
+
+  it('多 group 复合键（"gi-n"）解析正确且全部作答 -> 通过', async () => {
+    const deps = mk({
+      contentService: {
+        getLessonCards: vi.fn().mockResolvedValue({
+          cards: [
+            { id: 5, sortOrder: 0, cardType: 'practice', content: '', metadata: { groups: [{ questions: [{ n: 1 }, { n: 2 }] }, { questions: [{ n: 3 }] }] } },
+          ],
+        }),
+      },
+      practiceResultsRepo: {
+        findByStudentLesson: vi.fn().mockResolvedValue([
+          { card_id: 5, question_n: '0-1' },
+          { card_id: 5, question_n: '0-2' },
+          { card_id: 5, question_n: '1-3' },
+        ]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.isLessonPracticeComplete(1, 9)).resolves.toBe(true);
+  });
+
+  it('存在未作答题目 -> 拦截', async () => {
+    const deps = mk({
+      contentService: {
+        getLessonCards: vi.fn().mockResolvedValue({
+          cards: [
+            { id: 5, sortOrder: 0, cardType: 'practice', content: '', metadata: { groups: [{ questions: [{ n: 1 }, { n: 2 }] }] } },
+          ],
+        }),
+      },
+      practiceResultsRepo: {
+        findByStudentLesson: vi.fn().mockResolvedValue([
+          { card_id: 5, question_n: '0-1' },
+        ]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.isLessonPracticeComplete(1, 9)).resolves.toBe(false);
+  });
+
+  it('两张练习卡其中一张未作答 -> 拦截', async () => {
+    const deps = mk({
+      contentService: {
+        getLessonCards: vi.fn().mockResolvedValue({
+          cards: [
+            { id: 5, sortOrder: 0, cardType: 'practice', content: '', metadata: { groups: [{ questions: [{ n: 1 }] }] } },
+            { id: 6, sortOrder: 1, cardType: 'practice', content: '', metadata: { groups: [{ questions: [{ n: 1 }] }] } },
+          ],
+        }),
+      },
+      practiceResultsRepo: {
+        findByStudentLesson: vi.fn().mockResolvedValue([
+          { card_id: 5, question_n: '0-1' },
+        ]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.isLessonPracticeComplete(1, 9)).resolves.toBe(false);
+  });
+
+  it('needs_fallback 卡按题号正则提取（0-n），全部作答 -> 通过', async () => {
+    const deps = mk({
+      contentService: {
+        getLessonCards: vi.fn().mockResolvedValue({
+          cards: [
+            { id: 7, sortOrder: 0, cardType: 'practice', content: '题组\n\n(1) 第一题\n\n(2) 第二题', metadata: { needs_fallback: true } },
+          ],
+        }),
+      },
+      practiceResultsRepo: {
+        findByStudentLesson: vi.fn().mockResolvedValue([
+          { card_id: 7, question_n: '0-1' },
+          { card_id: 7, question_n: '0-2' },
+        ]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.isLessonPracticeComplete(1, 9)).resolves.toBe(true);
+  });
+
+  it('解析不到题号的练习卡（无可作答项）-> 跳过不拦截', async () => {
+    const deps = mk({
+      contentService: {
+        getLessonCards: vi.fn().mockResolvedValue({
+          cards: [
+            { id: 8, sortOrder: 0, cardType: 'practice', content: '纯文本，没有题号', metadata: { needs_fallback: true } },
+          ],
+        }),
+      },
+      practiceResultsRepo: { findByStudentLesson: vi.fn().mockResolvedValue([]) },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.isLessonPracticeComplete(1, 9)).resolves.toBe(true);
   });
 });

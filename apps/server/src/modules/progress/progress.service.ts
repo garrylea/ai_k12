@@ -5,6 +5,7 @@ import { LessonsRepository } from '../../database/repositories/lessons.repo.js';
 import { UnitsRepository } from '../../database/repositories/units.repo.js';
 import { SemestersRepository } from '../../database/repositories/semesters.repo.js';
 import { ContentService } from '../content/content.service.js';
+import { PracticeService } from '../practice/practice.service.js';
 
 export interface SectionData {
   id: string;
@@ -43,6 +44,7 @@ export class ProgressService {
     private unitsRepo: UnitsRepository,
     private semestersRepo: SemestersRepository,
     private contentService: ContentService,
+    private practiceService: PracticeService,
   ) {}
 
   async getStarMap(studentId: number, subjectId: number): Promise<StarMapData> {
@@ -243,6 +245,12 @@ export class ProgressService {
     const isLastCard = currentCard.sortOrder === lastCard.sortOrder;
 
     if (isLastCard) {
+      // 门禁：本课含练习卡时，须全部练习题目已作答（practice_results 覆盖）才能完成课程。
+      // 防止学生跳过练习直接翻到最后一页 / 用 API 绕过前端直接完成；无练习卡则跳过（省一次查询）。
+      const hasPracticeCards = cards.some(c => c.cardType === 'practice');
+      if (hasPracticeCards && !(await this.practiceService.isLessonPracticeComplete(studentId, lessonId))) {
+        return { advanced: false, reason: 'practice_incomplete' };
+      }
       const nextLesson = await this.contentService.getNextLesson(lessonId);
       if (nextLesson) {
         const nextUnitId = nextLesson.unitId !== progress.currentUnitId ? nextLesson.unitId : null;

@@ -169,6 +169,8 @@ export interface PreviousErrorDetail {
   questionN: string;
   questionText: string;
   questionId: number | null;
+  /** 卡片所属课的 lesson_id（cards.lesson_id，可能为 null）。 */
+  lessonId: number | null;
 }
 
 export interface UnclearedErrorsResult {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, Children } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback, Children } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -7,8 +7,8 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, getUnclearedErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, type LessonCard, type LessonCardsData, type PracticeGroupMeta, type PreviousErrorDetail } from '@/services/api';
-import { BackButton, LogoutButton } from '@/components/base';
+import { fetchLessonCards, getUnclearedErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, fetchStarMap, type LessonCard, type LessonCardsData, type PracticeGroupMeta, type PreviousErrorDetail } from '@/services/api';
+import { BackButton, LogoutButton, ConfirmDialog } from '@/components/base';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer } from '@/components/business/DiscussDrawer';
@@ -210,6 +210,8 @@ export default function CourseDetailPage() {
   // 错题清零：进每节课前清空错题本里所有 practice 未清题（计数 = cleanupErrors.length）
   const [cleanupErrors, setCleanupErrors] = useState<PreviousErrorDetail[]>([]);
   const [cleanupDone, setCleanupDone] = useState(false);
+  // 本课是否已有课堂练习记录（practice_results）--决定侧栏「重置本课课堂练习」按钮显隐
+  const [hasLessonResults, setHasLessonResults] = useState(false);
   const [page, setPage] = useState(0);
   const prevPageRef = useRef(0);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -220,8 +222,11 @@ export default function CourseDetailPage() {
   const [modalStart, setModalStart] = useState(0);
   const [resultOpen, setResultOpen] = useState(false);
   const [showCardDiscuss, setShowCardDiscuss] = useState(false);
-  const { cardId: sessionCardId, loadResults, record, answers, questions: sessionQuestions, reset, hints, setHint } = usePracticeStore();
-  const loadedResultsRef = useRef<number | null>(null);
+  const { cardId: sessionCardId, loadResults, record, answers, questions: sessionQuestions, reset, clearAnswers, hints, setHint } = usePracticeStore();
+  // 浮层状态：门禁拦截提示 / 重置本课确认 / 重置本卡确认
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [resetLessonOpen, setResetLessonOpen] = useState(false);
+  const [resetCardOpen, setResetCardOpen] = useState(false);
 
   useEffect(() => {
     autoToggleNightMode();
@@ -233,12 +238,29 @@ export default function CourseDetailPage() {
     setLoading(true);
     setError(null);
     reset(); // 清空上一课的 practice store 状态
-    loadedResultsRef.current = null; // 强制重新加载持久化结果
     try {
       if (!lessonId) throw new Error('缺少课程信息，请从星图选择小节进入');
+      // 错题清零只出现在「新课」（当前学习进度指向的课）进入时；
+      // 复习已学过的课（star-map status !== 'current'）不再显示错题清零阶段。
+      let isCurrentLesson = true; // 无进度信息 / 拉取失败时保守按新课处理
+      const studentId = Number(localStorage.getItem('userId')) || 0;
+      if (studentId && subjectId) {
+        try {
+          const starMap = await fetchStarMap(studentId, subjectId);
+          for (const ch of starMap.chapters) {
+            const sec = ch.sections.find(s => String(s.id) === String(lessonId));
+            if (sec) {
+              isCurrentLesson = sec.status === 'current';
+              break;
+            }
+          }
+        } catch {
+          /* 拉取失败：保守按新课处理 */
+        }
+      }
       const [result, uncleared] = await Promise.all([
         fetchLessonCards(lessonId),
-        subjectId
+        subjectId && isCurrentLesson
           ? getUnclearedErrors(subjectId).catch(() => ({ errors: [] as PreviousErrorDetail[] }))
           : Promise.resolve({ errors: [] as PreviousErrorDetail[] }),
       ]);
@@ -247,6 +269,12 @@ export default function CourseDetailPage() {
       setCleanupErrors(uncleared.errors);
       setCleanupDone(false);
       setPage(0);
+      // 本课是否已有课堂练习记录（决定侧栏「重置本课课堂练习」按钮显隐）
+      const practiceCards = result.cards.filter(c => c.cardType === 'practice');
+      setHasLessonResults(
+        practiceCards.length > 0 &&
+          (await Promise.all(practiceCards.map(c => getPracticeResults(c.id).catch(() => [])))).some(r => r.length > 0),
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? (err.message || '加载失败') : '加载失败');
     } finally {
@@ -275,7 +303,9 @@ export default function CourseDetailPage() {
     if (!data || !subjectId || !lessonId) return;
     const card = data.cards[page];
     if (!card) return;
-    if (page > prevPageRef.current) {
+    // 仅向前翻且未到最后一页时上报进度（记住学习位置）。
+    // 最后一页的课程完成只由「完成」按钮触发，避免跳过练习直接翻到底就自动完成本课。
+    if (page > prevPageRef.current && page < data.cards.length - 1) {
       updateProgress({ subjectId, lessonId, cardSortOrder: card.sortOrder })
         .then((res) => {
           if (res.advanced) {
@@ -336,19 +366,71 @@ export default function CourseDetailPage() {
     return { intro: introParts.join('\n\n'), questions: qs };
   }, [card, practiceMeta]);
 
-  // 进卡加载持久化判题结果 -> ✓/✗ 回显（跨设备/刷新）
+  // 进卡加载持久化判题结果 -> ✓/✗ 回显（跨设备/刷新）。
+  // 每次进入练习卡都重新加载（loadResults 按卡清空旧 answers 并填充 DB 结果），
+  // 避免翻回已加载卡时 answers 残留上一卡内容、门禁误判"加载中"。
   useEffect(() => {
     if (card?.cardType !== 'practice') return;
-    if (loadedResultsRef.current === card.id) return;
-    loadedResultsRef.current = card.id;
     const questions = (practiceMeta && !practiceMeta.needsFallback)
       ? practiceMeta.questions
       : (fallbackPractice?.questions ?? []);
     if (questions.length === 0) return;
     getPracticeResults(card.id)
       .then((results) => loadResults(card.id, questions, results))
-      .catch(() => { /* 加载失败静默，store 保持占位空 answers */ });
+      .catch(() => loadResults(card.id, questions, [])); // 失败时也置空 session，避免门禁永久"加载中"
   }, [card?.id]);
+
+  // 重新计算本课是否有课堂练习记录（reset 后刷新侧栏「重置本课课堂练习」按钮显隐）
+  const refreshHasLessonResults = async () => {
+    if (!data) return;
+    const practiceCards = data.cards.filter(c => c.cardType === 'practice');
+    if (practiceCards.length === 0) { setHasLessonResults(false); return; }
+    try {
+      const all = await Promise.all(practiceCards.map(c => getPracticeResults(c.id).catch(() => [])));
+      setHasLessonResults(all.some(r => r.length > 0));
+    } catch { /* ignore */ }
+  };
+
+  // 学生在本课作答后（answers 非空），立即让侧栏「重置本课课堂练习」按钮显示
+  useEffect(() => {
+    if (card?.cardType === 'practice' && Object.keys(answers).length > 0) {
+      setHasLessonResults(true);
+    }
+  }, [answers, card]);
+
+  // --- 练习作答门禁：练习卡题目未全部作答时阻止翻页/完成 ---
+  // 依据 practiceStore.answers（进入练习卡时 loadResults 已用 DB 结果填充；
+  // sessionCardId 守卫消除"进入新卡瞬间残留上一卡 answers"的竞态）。
+  const practiceGateError = useCallback((): string | null => {
+    if (!card || card.cardType !== 'practice') return null;
+    const questions = (practiceMeta && !practiceMeta.needsFallback)
+      ? practiceMeta.questions
+      : (fallbackPractice?.questions ?? []);
+    if (questions.length === 0) return null; // 无可作答项，不拦截
+    if (sessionCardId !== card.id) return '练习记录加载中，请稍候再试';
+    const unanswered = questions.filter(q => !answers[q.n]);
+    if (unanswered.length > 0) return `还有 ${unanswered.length} 道练习未作答，请先完成本卡全部练习`;
+    return null;
+  }, [card, practiceMeta, fallbackPractice, sessionCardId, answers]);
+
+  // 供键盘 handler 读取最新闭包（避免频繁重注册 window listener）
+  const practiceGateRef = useRef<() => string | null>(() => null);
+  practiceGateRef.current = practiceGateError;
+
+  /** 练习卡未全部作答时阻止翻页/完成；返回 true 表示已拦截。 */
+  const blockIfPracticeIncomplete = (): boolean => {
+    const block = practiceGateRef.current();
+    if (block) {
+      setGateError(block);
+      return true;
+    }
+    return false;
+  };
+
+  const handleNext = () => {
+    if (blockIfPracticeIncomplete()) return;
+    setPage(p => Math.min(total - 1, p + 1));
+  };
 
   // 打开答题 modal：首次打开时初始化 session
   const handleOpenModal = (index: number) => {
@@ -368,6 +450,8 @@ export default function CourseDetailPage() {
 
   const finishLesson = async () => {
     if (!data || !subjectId || !lessonId) return;
+    // 门禁：最后一页若是练习卡，须全部作答才能完成
+    if (blockIfPracticeIncomplete()) return;
     const lastCard = data.cards[data.cards.length - 1];
     try {
       const res = await updateProgress({ subjectId, lessonId, cardSortOrder: lastCard.sortOrder });
@@ -378,6 +462,10 @@ export default function CourseDetailPage() {
       } else if (res.reason === 'not_current_lesson' && res.currentLessonId) {
         // Progress was already advanced by the page-turn effect
         setNextLessonId(res.currentLessonId);
+      } else if (res.reason === 'practice_incomplete') {
+        // 后端兜底：仍存在未作答的练习（绕过前端拦截时），阻止完成
+        setGateError('本课练习未完成，无法结束课程');
+        return;
       }
     } catch {
       // ignore
@@ -422,7 +510,8 @@ export default function CourseDetailPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // 答题弹窗 / 结果列表 / 庆祝覆盖层打开时，禁用左右键翻页
-      if (modalOpen || resultOpen || showCelebration) return;
+      // 浮层打开时禁用键盘翻页（答题 modal / 结果列表 / 庆祝层 / 门禁提示 / 重置确认）
+      if (modalOpen || resultOpen || showCelebration || gateError !== null || resetLessonOpen || resetCardOpen) return;
       // 焦点在输入控件内时，不拦截左右键（让用户正常移动光标）
       const tag = (document.activeElement?.tagName ?? '').toLowerCase();
       const isEditable =
@@ -432,11 +521,19 @@ export default function CourseDetailPage() {
         (document.activeElement as HTMLElement)?.isContentEditable;
       if (isEditable) return;
       if (e.key === 'ArrowLeft') setPage(p => Math.max(0, p - 1));
-      if (e.key === 'ArrowRight') setPage(p => Math.min(total - 1, p + 1));
+      if (e.key === 'ArrowRight') {
+        // 练习卡未全部作答时禁止向后翻页（经 ref 读取最新门禁，避免重注册 listener）
+        const block = practiceGateRef.current();
+        if (block) {
+          setGateError(block);
+          return;
+        }
+        setPage(p => Math.min(total - 1, p + 1));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [total, modalOpen, resultOpen, showCelebration]);
+  }, [total, modalOpen, resultOpen, showCelebration, gateError, resetLessonOpen, resetCardOpen]);
 
   if (loading) return <LoadingSkeleton />;
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
@@ -518,19 +615,20 @@ export default function CourseDetailPage() {
             })()}
           </nav>
 
-          {/* 重置本课错题 - 与上方阶段状态、下方用户信息用分割线区分；清零阶段隐藏 */}
-          {!(cleanupErrors.length > 0 && !cleanupDone) && (
-            <div className="mx-4 my-2 border-t border-b border-[var(--bg-subtle)] py-3">
+          {/* 重置本课课堂练习 - 仅在本课已有练习记录时显示；风格与下方用户信息卡一致；清零阶段隐藏 */}
+          {hasLessonResults && !(cleanupErrors.length > 0 && !cleanupDone) && (
+            <div className="px-4 pb-2">
               <button
                 type="button"
-                onClick={() => {
-                  if (!window.confirm('确定清空本课全部练习记录吗？本课所有练习卡的对错记录将被清除。')) return;
-                  resetPracticeLesson(lessonId).then(() => reset());
-                }}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)]/40 hover:text-[var(--text-primary)] transition-colors"
+                onClick={() => setResetLessonOpen(true)}
+                className="w-full flex items-center gap-3 p-3 rounded-xl bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] shadow-sm hover:bg-[var(--bg-subtle)]/40 transition-colors text-left"
               >
-                <RefreshIcon className="w-4 h-4" />
-                <span>重置本课错题</span>
+                <div className="w-10 h-10 rounded-full bg-[var(--learn-btn-primary)]/10 flex items-center justify-center shrink-0">
+                  <RefreshIcon className="w-5 h-5 text-[var(--learn-btn-primary)]" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-[var(--sidebar-text-primary)]">重置课堂练习</div>
+                </div>
               </button>
             </div>
           )}
@@ -617,15 +715,12 @@ export default function CourseDetailPage() {
                   >
                     {data.lessonName} 知识自学与概念理解
                   </h1>
-                  {card.cardType === 'practice' && (
+                  {card.cardType === 'practice' && Object.keys(answers).length > 0 && (
                     <button
                       type="button"
                       title="重置本卡"
                       aria-label="重置本卡"
-                      onClick={() => {
-                        if (!window.confirm('确定重置本卡练习记录吗？该卡所有对错记录将被清除。')) return;
-                        resetPracticeCard(card.id).then(() => reset());
-                      }}
+                      onClick={() => setResetCardOpen(true)}
                       className="shrink-0 p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -877,7 +972,7 @@ export default function CourseDetailPage() {
                 if (!isCurrentPractice && isNextPractice) {
                   return (
                     <button
-                      onClick={() => setPage(p => Math.min(total - 1, p + 1))}
+                      onClick={handleNext}
                       className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] text-white font-medium shadow-sm transition-colors bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)]"
                     >
                       <span>课堂练习</span>
@@ -888,7 +983,7 @@ export default function CourseDetailPage() {
 
                 return (
                   <button
-                    onClick={() => setPage(p => Math.min(total - 1, p + 1))}
+                    onClick={handleNext}
                     className="flex items-center gap-1.5 h-11 px-6 rounded-[var(--radius-button)] text-white font-medium shadow-sm transition-colors bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)]"
                   >
                     <span>下一页</span>
@@ -1050,6 +1145,43 @@ export default function CourseDetailPage() {
           onClose={() => setResultOpen(false)}
         />
       )}
+
+      {/* 练习作答门禁提示浮层（"提示"标题 + 一句提示 + 圆形 X 关闭） */}
+      <ConfirmDialog
+        open={gateError !== null}
+        title="提示"
+        message={gateError ?? ''}
+        showCancel={false}
+        onConfirm={() => setGateError(null)}
+        onCancel={() => setGateError(null)}
+      />
+
+      {/* 重置本课课堂练习确认（左上角「提示：」+ 圆形 X / 对勾） */}
+      <ConfirmDialog
+        open={resetLessonOpen}
+        title="提示："
+        message="你确定要清除本课全部课堂练习的对错状态吗？"
+        onConfirm={() => {
+          setResetLessonOpen(false);
+          resetPracticeLesson(lessonId).then(() => { reset(); refreshHasLessonResults(); });
+        }}
+        onCancel={() => setResetLessonOpen(false)}
+      />
+
+      {/* 重置本卡练习确认 */}
+      <ConfirmDialog
+        open={resetCardOpen}
+        title="提示："
+        message="你确定要清除本卡练习的对错状态吗？"
+        onConfirm={() => {
+          setResetCardOpen(false);
+          // 卡片级橡皮擦：仅删本卡 DB 结果 + 清本卡 answers。
+          // 注意用 clearAnswers() 而非 reset()——reset() 是整课级清空，
+          // 会连带清掉 session 级 hints/discussDialogues 缓存，且语义上像是「清空整课」。
+          resetPracticeCard(card.id).then(() => { clearAnswers(); refreshHasLessonResults(); });
+        }}
+        onCancel={() => setResetCardOpen(false)}
+      />
     </div>
   );
 }

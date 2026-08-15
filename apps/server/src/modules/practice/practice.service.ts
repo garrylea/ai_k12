@@ -4,6 +4,7 @@ import { QuestionStructuringCapability } from '../../ai-core/capabilities/questi
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
+import { ContentService } from '../content/content.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
@@ -134,6 +135,7 @@ export class PracticeService {
     private readonly hint: HintCapability,
     private readonly conversationsService: ConversationsService,
     private readonly practiceResultsRepo: PracticeResultsRepository,
+    private readonly contentService: ContentService,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -303,6 +305,73 @@ export class PracticeService {
     }));
   }
 
+  /** 兜底卡题号正则（与前端 CourseDetailPage.tsx 的 EXERCISE_ITEM_RE 保持一致）。 */
+  private static readonly FALLBACK_ITEM_RE = /^\(?([1-9]\d?)[.)]/;
+
+  /**
+   * 解析一张练习卡的应答题号集合。必须与前端 CourseDetailPage.tsx 的复合键规则一致：
+   * - 结构化卡（content_metadata.groups 非空）：groups[gi].questions[].n -> `${gi}-${n}`
+   * - 兜底卡（needs_fallback 或无 groups）：对 content 按题号正则提取 -> `0-${n}`（n 从 1 递增）
+   * 解析不出任何题号（无可作答项）时返回空数组，调用方跳过该卡不拦截。
+   */
+  private extractPracticeQuestionNs(card: { content: string; metadata: unknown }): string[] {
+    const md = card.metadata as
+      | { groups?: Array<{ questions: Array<{ n: number }> }>; needs_fallback?: boolean }
+      | null;
+    if (md?.groups?.length) {
+      const qns: string[] = [];
+      md.groups.forEach((g, gi) => g.questions.forEach(q => qns.push(`${gi}-${q.n}`)));
+      return qns;
+    }
+    // 兜底：近似前端 preprocessContent（NFKC 归一 + 分段）后按题号正则提取
+    const qns: string[] = [];
+    let n = 1;
+    let found = false;
+    for (const line of String(card.content ?? '')
+      .normalize('NFKC')
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)) {
+      if (PracticeService.FALLBACK_ITEM_RE.test(line)) {
+        qns.push(`0-${n++}`);
+        found = true;
+      } else if (!found) {
+        continue;
+      }
+    }
+    return qns;
+  }
+
+  /**
+   * 课程完成门禁：该课全部练习卡的题目是否都已作答（practice_results 覆盖）。
+   * 无练习卡直接返回 true；解析不到题号的练习卡（无可作答项）跳过不拦截。
+   * 供 ProgressService.updateProgress 在完成课程（advanceLesson）前兜底校验。
+   */
+  async isLessonPracticeComplete(studentId: number, lessonId: number): Promise<boolean> {
+    const { cards } = await this.contentService.getLessonCards(lessonId);
+    const practiceCards = cards.filter(c => c.cardType === 'practice');
+    if (practiceCards.length === 0) return true;
+
+    const rows = await this.practiceResultsRepo.findByStudentLesson(studentId, lessonId);
+    const answeredByCard = new Map<number, Set<string>>();
+    for (const r of rows) {
+      let set = answeredByCard.get(r.card_id);
+      if (!set) {
+        set = new Set();
+        answeredByCard.set(r.card_id, set);
+      }
+      set.add(r.question_n);
+    }
+
+    for (const card of practiceCards) {
+      const questionNs = this.extractPracticeQuestionNs(card);
+      if (questionNs.length === 0) continue;
+      const answered = answeredByCard.get(card.id) ?? new Set<string>();
+      if (!questionNs.every(qn => answered.has(qn))) return false;
+    }
+    return true;
+  }
+
   /** 单卡 reset：删除该学生该卡的全部判题结果（不动 main_error_books）。 */
   async resetCard(studentId: number, cardId: number): Promise<void> {
     await this.practiceResultsRepo.deleteByStudentCard(studentId, cardId);
@@ -333,6 +402,8 @@ export class PracticeService {
       questionN: string;
       questionText: string;
       questionId: number | null;
+      /** 卡片所属课的 lesson_id（cards.lesson_id，可能为 null：历史行 source_ref_id 无对应卡时）。 */
+      lessonId: number | null;
     }>;
   }> {
     const rows = await this.mainErrorRepo.findUnclearedPracticeByStudentSubject(studentId, subjectId);
@@ -343,6 +414,7 @@ export class PracticeService {
       questionN: string;
       questionText: string;
       questionId: number | null;
+      lessonId: number | null;
     }> = [];
     for (const r of rows) {
       const cardId = r.source_ref_id ?? 0;
@@ -357,6 +429,7 @@ export class PracticeService {
         questionN,
         questionText: r.questionText ?? '',
         questionId: r.question_id,
+        lessonId: r.lesson_id,
       });
     }
     return { errors };
