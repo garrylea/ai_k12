@@ -417,6 +417,13 @@ export default function CourseDetailPage() {
   const practiceGateRef = useRef<() => string | null>(() => null);
   practiceGateRef.current = practiceGateError;
 
+  // 渐进解锁：第 i 题可点当且仅当前面所有题均已作答（answers 以复合键 q.n 存储）。
+  // 保证只能顺序作答，末题提交时必然前面已全部完成 -> 对错表合法。
+  const isQuestionUnlocked = useCallback((i: number, questions: PracticeQuestion[]): boolean => {
+    if (i <= 0) return true;
+    return questions.slice(0, i).every(q => answers[q.n]);
+  }, [answers]);
+
   /** 练习卡未全部作答时阻止翻页/完成；返回 true 表示已拦截。 */
   const blockIfPracticeIncomplete = (): boolean => {
     const block = practiceGateRef.current();
@@ -444,7 +451,10 @@ export default function CourseDetailPage() {
       // loadResults effect 随后会用持久化结果填补 answers。
       loadResults(card.id, questions, []);
     }
-    setModalStart(index);
+    // 渐进解锁兜底：请求的题前面有未做题（未解锁）时，改开第一道未做题
+    const firstUnanswered = questions.findIndex(q => !answers[q.n]);
+    const target = (firstUnanswered !== -1 && index > firstUnanswered) ? firstUnanswered : index;
+    setModalStart(target);
     setModalOpen(true);
   };
 
@@ -792,11 +802,13 @@ export default function CourseDetailPage() {
                                       const idx = flatIdx++;
                                       const key = `${gi}-${q.n}`;
                                       const answered = answers[key];
+                                      const unlocked = isQuestionUnlocked(idx, questions);
                                       return (
                                         <button
                                           key={key}
-                                          onClick={() => handleOpenModal(idx)}
-                                          className="block w-full text-left p-3 rounded-lg border border-[var(--learn-card-border)] hover:bg-[var(--bg-subtle)] transition-colors"
+                                          onClick={unlocked ? () => handleOpenModal(idx) : undefined}
+                                          disabled={!unlocked}
+                                          className={`block w-full text-left p-3 rounded-lg border border-[var(--learn-card-border)] transition-colors ${unlocked ? 'hover:bg-[var(--bg-subtle)] cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
                                         >
                                           <div className="flex items-start gap-2">
                                             <div className="flex-1">
@@ -833,11 +845,13 @@ export default function CourseDetailPage() {
                               )}
                               {questions.map((q, i) => {
                                 const answered = answers[q.n];
+                                const unlocked = isQuestionUnlocked(i, questions);
                                 return (
                                   <button
                                     key={q.n}
-                                    onClick={() => handleOpenModal(i)}
-                                    className="block w-full text-left p-3 rounded-lg border border-[var(--learn-card-border)] hover:bg-[var(--bg-subtle)] transition-colors"
+                                    onClick={unlocked ? () => handleOpenModal(i) : undefined}
+                                    disabled={!unlocked}
+                                    className={`block w-full text-left p-3 rounded-lg border border-[var(--learn-card-border)] transition-colors ${unlocked ? 'hover:bg-[var(--bg-subtle)] cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
                                   >
                                     <div className="flex items-start gap-2">
                                       <div className="flex-1">
