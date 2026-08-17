@@ -27,8 +27,13 @@ async function main() {
   });
 
   // 1) 管理员
-  const username = process.env.ADMIN_INITIAL_USERNAME ?? 'admin';
-  const password = process.env.ADMIN_INITIAL_PASSWORD ?? 'admin123';
+  const username = process.env.ADMIN_INITIAL_USERNAME || 'admin';
+  const password = process.env.ADMIN_INITIAL_PASSWORD || 'admin123';
+  // 空字符串视为未设置：空密码会建出无法登录且无处改密的管理员，直接报错退出。
+  if (!password || password.length < 6) {
+    console.error('[seed] ADMIN_INITIAL_PASSWORD 未设置或长度 <6。生产必须显式设置（开发缺省 admin123 仅限本机）。');
+    process.exit(1);
+  }
   const [adminRows] = await pool.execute<mysql.RowDataPacket[]>(
     'SELECT id FROM admins WHERE username = ? AND deleted_at IS NULL',
     [username],

@@ -8,7 +8,8 @@ import { Roles } from '../../common/decorators/roles.js';
 
 const CreateStudentSchema = z.object({
   name: z.string().min(1).max(50),
-  username: z.string().min(2).max(50).regex(/^[a-zA-Z0-9_]+$/, '用户名仅限字母/数字/下划线'),
+  // 排除 11 位纯数字（会与家长手机号在统一登录里歧义，auth.service 按 admins->parents->students 级联）
+  username: z.string().min(2).max(50).regex(/^(?!\d{11}$)[a-zA-Z0-9_]+$/, '用户名仅限字母/数字/下划线，且不能是 11 位纯数字'),
   password: z.string().min(6).max(32),
   age: z.number().int().min(3).max(18),
   grade: z.string().min(1).max(20),

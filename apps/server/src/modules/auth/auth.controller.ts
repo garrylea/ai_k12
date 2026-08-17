@@ -27,6 +27,7 @@ export class AuthController {
 
   /** 家长注册（注册即登录）。学生自主注册已下线（PRD §7.8）。 */
   @Post('register')
+  @UseInterceptors(ThrottleInterceptor)
   async register(@Body() body: unknown) {
     const dto = ParentRegisterSchema.parse(body);
     return this.authService.register(dto);
