@@ -2,11 +2,14 @@ import { Body, Controller, Post, UseGuards, HttpException, Res } from '@nestjs/c
 import type { Response } from 'express';
 import { AIService } from './ai.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { TutorDto } from './dto/tutor.dto.js';
 
 @Controller('api/ai')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('student')
 export class AIController {
   constructor(private readonly aiService: AIService) {}
 

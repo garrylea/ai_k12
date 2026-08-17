@@ -1,6 +1,8 @@
 import { BadRequestException, Body, Controller, Delete, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { PracticeService } from './practice.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { JudgePracticeDto } from './dto/judge-practice.dto.js';
 import type { HintPracticeDto } from './dto/hint-practice.dto.js';
@@ -8,7 +10,8 @@ import type { DiscussPracticeDto } from './dto/discuss-practice.dto.js';
 import type { DiscussCardPracticeDto } from './dto/discuss-card-practice.dto.js';
 
 @Controller('api/practice')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('student')
 export class PracticeController {
   constructor(private readonly practiceService: PracticeService) {}
 
