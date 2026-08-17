@@ -10,6 +10,7 @@ export interface StudentRow extends RowDataPacket {
   age: number | null;
   grade: string | null;
   school_level: string | null;
+  is_active: number;
   deleted_at: Date | null;
 }
 
@@ -22,6 +23,7 @@ export interface Student {
   age: number | null;
   grade: string | null;
   schoolLevel: string | null;
+  isActive: boolean;
 }
 
 @Injectable()
@@ -62,6 +64,37 @@ export class StudentsRepository {
     return (result as any).insertId;
   }
 
+  /** 家长控制台列表：自己名下、未软删的学生，按创建时间倒序。 */
+  async findByParentId(parentId: number): Promise<Student[]> {
+    const [rows] = await this.pool.execute<StudentRow[]>(
+      'SELECT * FROM students WHERE parent_id = ? AND deleted_at IS NULL ORDER BY id DESC',
+      [parentId],
+    );
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  async updatePassword(id: number, passwordHash: string): Promise<void> {
+    await this.pool.execute(
+      'UPDATE students SET password_hash = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+      [passwordHash, id],
+    );
+  }
+
+  async setActive(id: number, isActive: boolean): Promise<void> {
+    await this.pool.execute(
+      'UPDATE students SET is_active = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+      [isActive ? 1 : 0, id],
+    );
+  }
+
+  /** 新建子账号时连带建默认 student_settings（school 随学段）。 */
+  async createDefaultSettings(studentId: number, schoolLevel: string): Promise<void> {
+    await this.pool.execute(
+      'INSERT INTO student_settings (student_id, school) VALUES (?, ?) ON DUPLICATE KEY UPDATE school = VALUES(school)',
+      [studentId, schoolLevel],
+    );
+  }
+
   private mapRow(row: StudentRow): Student {
     return {
       id: row.id,
@@ -72,6 +105,7 @@ export class StudentsRepository {
       age: row.age,
       grade: row.grade,
       schoolLevel: row.school_level,
+      isActive: row.is_active === 1,
     };
   }
 }
