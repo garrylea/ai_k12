@@ -40,15 +40,77 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 
 // --- Auth ---
 
+export type UserRole = 'admin' | 'parent' | 'student';
+
 export interface LoginResult {
   token: string;
-  user: { id: number; role: string; name: string; username: string; grade?: string };
+  user: {
+    id: number;
+    role: UserRole;
+    name: string | null;
+    username?: string;
+    grade?: string | null;
+    phone?: string;
+    parentId?: number;
+  };
 }
 
 export function login(username: string, password: string): Promise<LoginResult> {
   return fetchApi<LoginResult>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
+  });
+}
+
+/** 家长注册（注册即登录）。 */
+export function registerParent(phone: string, password: string, name?: string): Promise<LoginResult> {
+  return fetchApi<LoginResult>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ phone, password, name: name || undefined }),
+  });
+}
+
+// --- Parent: student accounts ---
+
+export interface MyStudentItem {
+  id: number;
+  parentId: number;
+  username: string;
+  name: string;
+  age: number | null;
+  grade: string | null;
+  schoolLevel: string | null;
+  isActive: boolean;
+}
+
+export function listMyStudents(): Promise<MyStudentItem[]> {
+  return fetchApi<MyStudentItem[]>('/parent/students');
+}
+
+export function createStudent(req: {
+  name: string;
+  username: string;
+  password: string;
+  age: number;
+  grade: string;
+}): Promise<{ id: number }> {
+  return fetchApi<{ id: number }>('/parent/students', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export function resetStudentPassword(id: number, newPassword: string): Promise<null> {
+  return fetchApi<null>(`/parent/students/${id}/reset-password`, {
+    method: 'PATCH',
+    body: JSON.stringify({ newPassword }),
+  });
+}
+
+export function setStudentStatus(id: number, isActive: boolean): Promise<null> {
+  return fetchApi<null>(`/parent/students/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive }),
   });
 }
 
