@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pymysql  # noqa: E402
 
 from config import RefineryConfig  # noqa: E402
-from llm import LLMClient  # noqa: E402
+from llm import create_llm_client  # noqa: E402
 from card_labeler import CardLabeler  # noqa: E402
 from db_loader import build_content_metadata  # noqa: E402
 
@@ -35,7 +35,7 @@ def main():
     cfg = RefineryConfig.from_env()
 
     # LLM 客户端（与 extract_cli.py 同款构造）
-    llm = LLMClient(
+    llm = create_llm_client(
         provider=cfg.llm_provider,
         api_key=cfg.llm_api_key or "",
         auth_token=cfg.llm_auth_token,
@@ -43,6 +43,9 @@ def main():
         base_url=cfg.llm_base_url,
         timeout=cfg.llm_timeout,
         max_tokens=cfg.llm_max_tokens,
+        max_retries=cfg.llm_max_retries,
+        thinking=cfg.llm_thinking,
+        enable_cache=cfg.llm_enable_cache,
     )
     prompt = _load_prompt("textbook_cards")
     labeler = CardLabeler(llm=llm, prompt_template=prompt)

@@ -18,6 +18,10 @@ tool_dir = module_dir.parent
 load_dotenv(tool_dir / ".env", override=False)
 
 
+def _env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass
 class RefineryConfig:
     input_dir: Path
@@ -33,6 +37,8 @@ class RefineryConfig:
     llm_timeout: int
     llm_max_retries: int
     llm_max_tokens: int
+    llm_thinking: bool
+    llm_enable_cache: bool
     db_host: str
     db_port: int
     db_user: str
@@ -50,13 +56,15 @@ class RefineryConfig:
             mineru_token=os.getenv("MINERU_TOKEN"),
             llm_provider=os.getenv("LLM_PROVIDER", "openai"),
             llm_model=os.getenv("LLM_MODEL", "gpt-4o"),
-            llm_api_key=os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
+            llm_api_key=os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
             # 优先用 refinery 专属变量，避免被 shell 里 Claude Code 的 ANTHROPIC_AUTH_TOKEN 覆盖
             llm_auth_token=os.getenv("LLM_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN"),
             llm_base_url=os.getenv("LLM_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL"),
             llm_timeout=int(os.getenv("LLM_TIMEOUT", "120")),
             llm_max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "16384")),
+            llm_thinking=_env_bool("LLM_THINKING"),
+            llm_enable_cache=_env_bool("LLM_ENABLE_CACHE"),
             db_host=os.getenv("DB_HOST", "localhost"),
             db_port=int(os.getenv("DB_PORT", "3306")),
             db_user=os.getenv("DB_USER", "ai_k12"),

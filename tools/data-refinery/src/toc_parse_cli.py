@@ -6,7 +6,7 @@ from pathlib import Path
 
 from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
-from llm import LLMClient
+from llm import create_llm_client
 from extract_cli import _load_prompt
 
 
@@ -283,11 +283,12 @@ def main(argv=None):
             print(f"[dry-run] {d.relative_to(md_dir)} {status}", flush=True)
         return
 
-    llm = LLMClient(
+    llm = create_llm_client(
         provider=config.llm_provider, api_key=config.llm_api_key or "",
         auth_token=config.llm_auth_token, model=config.llm_model,
         base_url=config.llm_base_url, timeout=config.llm_timeout,
-        max_tokens=config.llm_max_tokens,
+        max_tokens=config.llm_max_tokens, max_retries=config.llm_max_retries,
+        thinking=config.llm_thinking, enable_cache=config.llm_enable_cache,
     )
     prompt = _load_prompt("toc_parse")
 

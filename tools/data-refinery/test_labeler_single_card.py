@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 load_dotenv()
 
 from card_labeler import CardLabeler  # noqa: E402
-from llm import LLMClient  # noqa: E402
+from llm import create_llm_client  # noqa: E402
 
 
 def main():
@@ -57,7 +57,7 @@ def main():
     with open(prompt_path, encoding="utf-8") as f:
         prompt_template = f.read()
 
-    llm = LLMClient(
+    llm = create_llm_client(
         provider=os.getenv("LLM_PROVIDER", "openai"),
         api_key=os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or "",
         auth_token=os.getenv("LLM_AUTH_TOKEN") or os.getenv("ANTHROPIC_AUTH_TOKEN"),

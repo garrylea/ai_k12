@@ -15,7 +15,7 @@ from card_splitter import split_page
 from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from image_scan import scan_page
-from llm import LLMClient
+from llm import create_llm_client
 from markdown_scanner import MarkdownScanner, MarkdownSource
 from models import TextbookCard
 
@@ -223,7 +223,7 @@ def main(argv=None):
     checkpoint = RefineryCheckpoint(config.output_dir / ".checkpoint.json")
     checkpoint.load()
 
-    llm = LLMClient(
+    llm = create_llm_client(
         provider=config.llm_provider,
         api_key=config.llm_api_key or "",
         auth_token=config.llm_auth_token,
@@ -231,6 +231,9 @@ def main(argv=None):
         base_url=config.llm_base_url,
         timeout=config.llm_timeout,
         max_tokens=config.llm_max_tokens,
+        max_retries=config.llm_max_retries,
+        thinking=config.llm_thinking,
+        enable_cache=config.llm_enable_cache,
     )
     prompt = _load_prompt("textbook_cards")
     labeler = CardLabeler(llm=llm, prompt_template=prompt)
@@ -293,8 +296,8 @@ def main(argv=None):
                 extracted += 1
                 continue
 
-            # ② image_scan：获取图片尺寸 + 折算字数
-            images = scan_page(source.md_path)
+            # ② image_scan：获取图片尺寸 + 折算字数（小图标自动舍弃，text 已清洗）
+            images, text = scan_page(source.md_path)
 
             # ③ card_splitter：拆分卡片
             cards = split_page(source.md_path, text, images)

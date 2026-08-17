@@ -1,6 +1,7 @@
 """LLM 提取器：从 Markdown 提取题目或卡片。"""
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,11 @@ def _parse_json_object(content: str) -> dict:
     兼容本地模型常见的 ```json``` 围栏包裹与 LaTeX 反斜杠漏转义。
     """
     text = (content or "").strip()
+    if not text:
+        return {}
+
+    # 剥离 <think>...</think> 块（本地/推理模型 thinking 模式下可能直接输出思考标签）
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     if not text:
         return {}
 

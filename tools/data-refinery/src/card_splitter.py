@@ -109,6 +109,11 @@ def _current_heading(text: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def _is_pure_heading(text: str) -> bool:
+    """整段是否仅为 markdown 标题行（无正文），用于判断孤立标题卡。"""
+    return _HEADING_RE.match(text.strip()) is not None
+
+
 def _is_question_starter(text: str) -> bool:
     """是否以 (N) 题号开头（半/全角括号兼容）。"""
     return bool(re.match(r'^[\(（]\s*[1-9]\d?\s*[\)）]', text.strip()))
@@ -275,9 +280,10 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
     current_images: list[ImageInfo] = []
     current_text_chars = 0
     current_total = 0
+    current_has_body = False  # 当前卡是否已有正文（非纯标题行）
 
     def _close_card():
-        nonlocal current_texts, current_images, current_text_chars, current_total
+        nonlocal current_texts, current_images, current_text_chars, current_total, current_has_body
         if not current_texts:
             return
         content_text = "\n\n".join(current_texts)
@@ -295,6 +301,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
         current_images = []
         current_text_chars = 0
         current_total = 0
+        current_has_body = False
 
     last_heading: str | None = None
 
@@ -302,12 +309,22 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
     while i < len(remaining_bundles):
         bundle = remaining_bundles[i]
 
+        # 跨 heading 边界封卡（当前卡已有正文时）：
+        # 孤立标题（无正文）不封卡，与后续内容合并，避免产生只有标题的空卡
+        if (current_texts and bundle.heading is not None
+                and last_heading is not None
+                and bundle.heading != last_heading
+                and current_has_body):
+            _close_card()
+
         # 尝试直接放入当前卡
         if current_text_chars + bundle.text_chars <= _TEXT_LIMIT and current_total + bundle.text_chars + bundle.image_cost <= _TOTAL_LIMIT:
             current_texts.append(bundle.text)
             current_images.extend(bundle.images)
             current_text_chars += bundle.text_chars
             current_total += bundle.text_chars + bundle.image_cost
+            if not _is_pure_heading(bundle.text):
+                current_has_body = True
             last_heading = bundle.heading
             i += 1
             continue
@@ -326,6 +343,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
                     current_texts.append(first_sent)
                     current_text_chars += first_sent_chars
                     current_total += first_sent_chars
+                    current_has_body = True
                     # 剩余部分作为新 bundle 替换当前位置，不递增 i
                     rest_chars = _count_text_chars(rest)
                     remaining_bundles[i] = _Bundle(
@@ -345,6 +363,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
             current_images = list(bundle.images)
             current_text_chars = bundle.text_chars
             current_total = bundle.text_chars + bundle.image_cost
+            current_has_body = not _is_pure_heading(bundle.text)
         elif bundle.text_chars <= _TEXT_LIMIT:
             # 文字够但图超了：压缩图
             image_room = _TOTAL_LIMIT - bundle.text_chars
@@ -354,6 +373,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
             current_images = compressed_images
             current_text_chars = bundle.text_chars
             current_total = bundle.text_chars + new_image_cost
+            current_has_body = not _is_pure_heading(bundle.text)
         else:
             # 文字本身 >400（理论上 _make_bundles 已处理，兜底）
             sub_texts = _split_long_text(bundle.text)
@@ -371,6 +391,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
                     current_images.extend(sub_imgs)
                     current_text_chars += sub_chars
                     current_total += sub_chars + sub_img_cost
+                    current_has_body = True
                 else:
                     _close_card()
                     current_texts = [sub]
@@ -385,6 +406,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
                         current_images = list(sub_imgs)
                         current_text_chars = sub_chars
                         current_total = sub_chars + sub_img_cost
+                    current_has_body = True
                 sub_start = sub_end
 
         last_heading = bundle.heading

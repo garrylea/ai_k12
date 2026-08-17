@@ -174,6 +174,9 @@ class TestExtractCliMain:
                 llm_model="gpt-4o",
                 llm_base_url=None,
                 llm_timeout=120,
+                llm_max_retries=0,
+                llm_thinking=False,
+                llm_enable_cache=False,
             )
             mock_scanner.return_value.scan.return_value = [
                 MarkdownSource(md_path=sub / "试卷.md", rel_path=Path("数学/试卷"), kind="questions"),
@@ -203,6 +206,9 @@ class TestExtractCliFileFilter:
                 llm_model="gpt-4o",
                 llm_base_url=None,
                 llm_timeout=120,
+                llm_max_retries=0,
+                llm_thinking=False,
+                llm_enable_cache=False,
             )
             mock_scanner.return_value.scan.return_value = [
                 MarkdownSource(md_path=sub1 / "西城-试卷.md", rel_path=Path("数学/2024"), kind="questions"),
@@ -237,7 +243,7 @@ class TestExtractCliMultiPage:
         fake_result = ExtractionResult(items=[card], prompt_tokens=1, completion_tokens=1)
 
         with patch("extract_cli.RefineryConfig") as mock_config, \
-             patch("extract_cli.LLMClient"), \
+             patch("extract_cli.create_llm_client"), \
              patch("extract_cli.Extractor") as mock_extractor:
             mock_config.from_env.return_value = MagicMock(
                 input_dir=md_root,
@@ -265,7 +271,7 @@ class TestExtractCliLessonId:
     def _run(self, md_root, out_dir, page_results):
         """page_results: 按页顺序的 ExtractionResult 列表，对应 scanner 排序后的 card 页。"""
         with patch("extract_cli.RefineryConfig") as mock_config, \
-             patch("extract_cli.LLMClient"), \
+             patch("extract_cli.create_llm_client"), \
              patch("extract_cli.Extractor") as mock_extractor:
             mock_config.from_env.return_value = MagicMock(
                 input_dir=md_root,

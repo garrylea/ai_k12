@@ -202,3 +202,66 @@ def test_split_paragraphs_with_inline_questions():
     assert "(1)" in result[1]
     assert "(2)" in result[2]
     assert "(3)" in result[3]
+
+
+def test_heading_boundary_closes_card():
+    """不同 heading 的相邻段落必须分卡，避免"练习"被劈到上一节末。
+
+    场景：探究节+短内容+## 练习+短内容+## 探究；练习前段不超 400 字时，
+    splitter 不应把探究尾巴塞进练习卡，也不应把练习劈开。
+    """
+    text = (
+        "## 探究\n\n"
+        "探究段一内容。" * 5 + "\n\n" +   # ~60 字
+        "## 练习\n\n"
+        "解下列方程：\n\n"
+        "(1) $2x^{2}-8=0$\n\n"
+        "(2) $9x^{2}-5=3$\n\n"
+        "## 探究\n\n"
+        "探究段二内容。" * 5
+    )
+    cards = split_page(Path("page_001.md"), text, [])
+    # 期望：探究1、练习（完整）、探究2 至少 3 卡
+    assert len(cards) >= 3
+    # 找到含 ## 练习 的卡
+    practice_card = next(c for c in cards if "## 练习" in c.content)
+    # 练习卡应包含完整题干 + (1) + (2)
+    assert "解下列方程：" in practice_card.content
+    assert "(1)" in practice_card.content
+    assert "(2)" in practice_card.content
+    # 不应混入下一节 ## 探究 的内容
+    assert "探究段二" not in practice_card.content
+
+
+def test_image_only_bundle_does_not_trigger_heading_close():
+    """image-only bundle (heading=None) 不应触发封卡，归入下一标题节。"""
+    text = "## 练习\n\n练习内容。\n\n![](images/icon.jpg)\n\n继续练习。"
+    # 该场景下 image 不会被计入（无 ImageInfo），但 heading=None 不应误封卡
+    cards = split_page(Path("page_001.md"), text, [])
+    assert len(cards) == 1
+    assert "## 练习" in cards[0].content
+    assert "继续练习。" in cards[0].content
+
+
+def test_heading_without_body_merges_into_next_card():
+    """连续标题（无正文的孤立标题）应并入后续内容卡，不能单独成卡。
+
+    场景：## 21.2 解一元二次方程 后紧跟 ## 21.2.1 配方法 + 正文，
+    前一个标题没有正文，不应被 heading 边界规则封成孤立卡。
+    """
+    text = (
+        "## 21.2 解一元二次方程\n\n"
+        "## 21.2.1 配方法\n\n"
+        "问题1 一桶油漆可刷的面积。" * 6 + "\n\n" +
+        "## 练习\n\n解下列方程：\n\n(1) $x^{2}=4$"
+    )
+    cards = split_page(Path("page_001.md"), text, [])
+    # 第一张卡应同时含孤立标题与后续正文（标题并入正文卡）
+    first = cards[0]
+    assert "21.2 解一元二次方程" in first.content
+    assert "问题1" in first.content
+    # 每张卡都不能只有标题行没有正文（除整页仅标题的极端情况）
+    for c in cards:
+        body_lines = [l for l in c.content.splitlines()
+                      if l.strip() and not l.lstrip().startswith("#")]
+        assert body_lines, f"孤立标题卡不应存在: {c.content!r}"
