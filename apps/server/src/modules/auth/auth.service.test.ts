@@ -10,6 +10,7 @@ const mkDeps = (overrides: Record<string, any> = {}) => ({
   },
   parentsRepo: {
     findByPhone: vi.fn().mockResolvedValue(null),
+    create: vi.fn().mockResolvedValue(9),
   },
   adminsRepo: {
     findByUsername: vi.fn().mockResolvedValue(null),
