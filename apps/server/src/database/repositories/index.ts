@@ -1,9 +1,11 @@
 export { AiDialoguesRepository } from './ai-dialogues.repo.js';
 export { AiMessagesRepository } from './ai-messages.repo.js';
+export { AdminsRepository } from './admins.repo.js';
 export { CardsRepository } from './cards.repo.js';
 export { ErrorRedoLogsRepository } from './error-redo-logs.repo.js';
 export { ExtractTasksRepository } from './extract-tasks.repo.js';
 export { MainErrorBooksRepository } from './main-error-books.repo.js';
+export { ParentsRepository } from './parents.repo.js';
 export { PracticeResultsRepository } from './practice-results.repo.js';
 export { SafetyAlertsRepository } from './safety-alerts.repo.js';
 export { QuestionsRepository } from './questions.repo.js';
