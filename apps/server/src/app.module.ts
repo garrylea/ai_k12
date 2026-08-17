@@ -12,6 +12,7 @@ import { ConversationsModule } from './modules/conversations/conversations.modul
 import { AIModule } from './modules/ai/ai.module.js';
 import { RefineryModule } from './modules/refinery/refinery.module.js';
 import { PracticeModule } from './modules/practice/practice.module.js';
+import { ParentModule } from './modules/parent/parent.module.js';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PracticeModule } from './modules/practice/practice.module.js';
     AIModule,
     RefineryModule,
     PracticeModule,
+    ParentModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
