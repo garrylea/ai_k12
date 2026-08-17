@@ -2183,6 +2183,83 @@ paths:
                 $ref: '#/components/schemas/CommonResponse'
 
   # Parent
+  /parent/students:
+    get:
+      tags: [Parent]
+      summary: 当前家长名下学生子账号列表
+      operationId: listMyStudents
+      responses:
+        '200':
+          description: 列表（脱敏无密码哈希）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentAccountListResponse'
+    post:
+      tags: [Parent]
+      summary: 创建学生子账号（school_level 按年级推导，连带建 student_settings）
+      operationId: createStudentAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStudentAccountRequest'
+      responses:
+        '200':
+          description: 创建成功（返回学生 id）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /parent/students/{studentId}/reset-password:
+    patch:
+      tags: [Parent]
+      summary: 重置该学生登录密码（6-32 位）
+      operationId: resetStudentPassword
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetStudentPasswordRequest'
+      responses:
+        '200':
+          description: 重置成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /parent/students/{studentId}/status:
+    patch:
+      tags: [Parent]
+      summary: 停用/启用该学生（停用后登录被拒，数据保留）
+      operationId: setStudentStatus
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetStudentStatusRequest'
+      responses:
+        '200':
+          description: 状态更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
   /parent/dashboard:
     get:
       tags: [Parent]
@@ -2992,12 +3069,88 @@ components:
           type: string
         role:
           type: string
-          enum: [parent, student]
+          enum: [admin, parent, student]
         name:
           type: string
         phone:
           type: string
+        username:
+          type: string
+          description: 仅管理员/学生返回（家长用 phone）
+        grade:
+          type: string
+          description: 仅学生返回
+        parentId:
+          type: integer
+          description: 仅学生返回（归属家长 id，用于归属校验）
 
+    CreateStudentAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        username:
+          type: string
+          description: 仅限字母/数字/下划线，全局唯一
+        password:
+          type: string
+          description: 6-32 位初始密码
+        age:
+          type: integer
+          minimum: 3
+          maximum: 18
+        grade:
+          type: string
+          description: 全学段年级（如 小学三年级/初二/高三）
+      required: [name, username, password, age, grade]
+
+    ResetStudentPasswordRequest:
+      type: object
+      properties:
+        newPassword:
+          type: string
+          minLength: 6
+          maxLength: 32
+      required: [newPassword]
+
+    SetStudentStatusRequest:
+      type: object
+      properties:
+        isActive:
+          type: boolean
+      required: [isActive]
+
+    StudentAccountListResponse:
+      allOf:
+        - $ref: '#/components/schemas/CommonResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/StudentAccount'
+    StudentAccount:
+      type: object
+      properties:
+        id:
+          type: integer
+        parentId:
+          type: integer
+        username:
+          type: string
+        name:
+          type: string
+        age:
+          type: integer
+          nullable: true
+        grade:
+          type: string
+          nullable: true
+        schoolLevel:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
     Parent:
       allOf:
         - $ref: '#/components/schemas/User'

@@ -86,6 +86,8 @@
 | 1009 | 支付失败（第三方平台返回错误） |
 | 2001 | 学习无关内容（AI 阻断） |
 
+> **2026-08-14 实现注（auth/parent 端点现行语义，与上表历史规划并存）**：1003 = 未登录/token 失效/用户名或密码错误/账号已停用（auth 与角色守卫）；1004 = 该手机号已注册/用户名已存在；1005 = 无权访问该资源（角色守卫）/无权操作该学生（归属校验）；1008 = 请求过于频繁（登录限流 10 次/分/IP）。
+
 ### 2.5 文件上传约定
 
 - 统一走 `POST /api/files/upload`，返回 `{ fileId, url }`（PDF 上传额外返回 `taskId` 供 SSE 监听提取进度）
@@ -128,8 +130,8 @@
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| POST | `/api/auth/register` | 家长注册（手机号 + 密码 + 监护人协议同意） | MVP |
-| POST | `/api/auth/login` | 统一登录；按用户名格式分流（手机号→家长，否则→学生） | MVP |
+| POST | `/api/auth/register` | 家长注册（手机号 + 密码 + 可选姓名；**注册即登录**，直接返回 parent token） | MVP |
+| POST | `/api/auth/login` | **三角色统一登录**：按 admins(username) -> parents(手机号) -> students(username) 顺序查询命中，签发带 `role` 的 JWT；限流 10 次/分/IP（超限 1008） | MVP |
 | POST | `/api/auth/logout` | 登出，使当前 Token 失效 | MVP |
 | POST | `/api/auth/password/reset-request` | 请求重置密码（MVP 阶段发送短信验证码） | MVP |
 | POST | `/api/auth/password/reset` | 确认重置密码（验证码 + 新密码） | MVP |
@@ -141,8 +143,8 @@
 |---|---|---|---|
 | GET | `/api/users/parents/me` | 当前家长资料 | MVP |
 | PATCH | `/api/users/parents/me` | 更新家长资料 | MVP |
-| GET | `/api/users/students` | 当前家长下的学生子账号列表 | MVP |
-| POST | `/api/users/students` | 创建学生子账号（强制年龄/年级） | MVP |
+| GET | `/api/users/students` | 当前家长下的学生子账号列表（**已实现，路径为 `/api/parent/students`，见 §4.13**） | MVP |
+| POST | `/api/users/students` | 创建学生子账号（强制年龄/年级）（**已实现，路径为 `/api/parent/students`，见 §4.13**） | MVP |
 | GET | `/api/users/students/{studentId}` | 学生资料 | MVP |
 | PATCH | `/api/users/students/{studentId}` | 更新学生资料 | MVP |
 | DELETE | `/api/users/students/{studentId}` | 删除学生子账号 | P1 |
@@ -285,6 +287,10 @@
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
+| GET | `/api/parent/students` | 当前家长名下学生子账号列表（脱敏无密码哈希） | MVP |
+| POST | `/api/parent/students` | 创建学生子账号（姓名/用户名/初始密码/年龄/年级；`school_level` 后端按年级推导；连带建 `student_settings`） | MVP |
+| PATCH | `/api/parent/students/{studentId}/reset-password` | 重置该学生登录密码（6-32 位） | MVP |
+| PATCH | `/api/parent/students/{studentId}/status` | 停用/启用该学生（`isActive`；停用后登录被拒，数据保留，不提供删除） | MVP |
 | GET | `/api/parent/dashboard` | 家长仪表盘：按学科聚合的进度、正确率、薄弱点、异常预警 | MVP |
 | GET | `/api/parent/students/{studentId}/reports` | 学情报告列表（可按学科筛选） | MVP |
 | GET | `/api/parent/students/{studentId}/reports/{reportId}` | 单份报告详情 | MVP |
@@ -1146,6 +1152,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v1.9 | 2026-08-14 | 三角色账号体系：`POST /api/auth/login` 改为三角色统一登录（admins->parents->students 顺序查询，JWT 加 `role: admin\|parent\|student`）；`POST /api/auth/register` 家长注册（注册即登录），学生自主注册下线；新增 `GET/POST /api/parent/students` + `PATCH .../reset-password` + `PATCH .../status`（家长管理学生子账号：建/列表/重置密码/停用启用，归属校验 1005）；practice/ai/conversations/progress 学生接口全部套 `RolesGuard('student')` 防越权；登录限流 10 次/分/IP（1008）；DB 新增 `admins` 表 + `parents`/`students` `is_active` 字段（v1.7）；seed 脚本 `seed-admin.ts`。 |
 | v1.0 | 2026-06-26 | 初始版本，覆盖 MVP 核心接口与数据流 |
 | v1.1 | 2026-08-01 | 新增 `POST /api/progress/update` 进度更新接口；更新 P2.2 课程详情左侧栏为数据驱动的 2~3 项结构（错题+学习内容+可选练习）；修复完成课程后进入下一课的 race condition，接口返回 `currentLessonId` 供前端定位下一课 |
 | v1.2 | 2026-08-06 | 新增 `POST /api/practice/judge` 课堂练习判对错接口（MVP）；新增 Practice 服务分组；新增 §6.9 课堂练习判对错数据流；`main_error_books.source` 枚举补 `practice` 值 |
