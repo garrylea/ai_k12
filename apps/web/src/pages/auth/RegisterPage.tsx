@@ -25,7 +25,7 @@ export default function RegisterPage() {
     try {
       const result = await registerParent(phone, password, name || undefined);
       localStorage.setItem('token', result.token);
-      localStorage.setItem('username', '');
+      localStorage.setItem('username', result.user.phone ?? phone);
       localStorage.setItem('userId', String(result.user.id));
       localStorage.setItem('userRole', result.user.role);
       navigate('/parent/students');

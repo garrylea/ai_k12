@@ -20,7 +20,8 @@ export default function LoginPage() {
     try {
       const result = await login(username, password);
       localStorage.setItem('token', result.token);
-      localStorage.setItem('username', result.user.username ?? '');
+      // 家长无 username，存手机号供家长台头部展示（maskPhone 打码）
+      localStorage.setItem('username', result.user.username ?? result.user.phone ?? '');
       localStorage.setItem('userId', String(result.user.id));
       localStorage.setItem('userRole', result.user.role);
 
