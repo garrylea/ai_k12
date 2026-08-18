@@ -120,7 +120,8 @@ export interface ChatMessage {
 // ========== Model Client Types (§3.3.3-§3.3.5) ==========
 
 export interface ChatRequest {
-  model: ModelConfig;
+  /** 模型配置；apiKey 可选（DB/路由条目自带，ModelClient 优先于 env） */
+  model: RoutedModel;
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
