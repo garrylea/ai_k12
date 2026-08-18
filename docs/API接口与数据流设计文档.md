@@ -88,6 +88,8 @@
 
 > **2026-08-14 实现注（auth/parent 端点现行语义，与上表历史规划并存）**：1003 = 未登录/token 失效/用户名或密码错误/账号已停用（auth 与角色守卫）；1004 = 该手机号已注册/用户名已存在；1005 = 无权访问该资源（角色守卫）/无权操作该学生（归属校验）；1008 = 请求过于频繁（登录限流 10 次/分/IP）。
 
+> **2026-08-18 实现注（admin 端点现行语义）**：1009 = 连通性测试失败（`POST /api/admin/routes/validate-connection` 返回，message 含 provider 原始错误，HTTP 502）；上表 1009=支付失败 为 P2 Billing 设计占位（Billing 未实现），两者不冲突。
+
 ### 2.5 文件上传约定
 
 - 统一走 `POST /api/files/upload`，返回 `{ fileId, url }`（PDF 上传额外返回 `taskId` 供 SSE 监听提取进度）
@@ -308,6 +310,9 @@
 | PATCH | `/api/parent/alerts/{alertId}/read` | 标记预警已读 | MVP |
 | GET | `/api/parent/account` | 家长账号与订阅摘要 | MVP |
 | PATCH | `/api/parent/account` | 更新账号信息 | P1 |
+| GET | `/api/parent/messages` | 我的消息（定向 + 全员广播合并，倒序；广播已读回传） | MVP |
+| GET | `/api/parent/messages/unread-count` | 未读消息数（顶部铃铛徽章） | MVP |
+| PATCH | `/api/parent/messages/{id}/read` | 标记某条消息已读 | MVP |
 
 ### 4.14 Quota — `/api/quota`
 
@@ -344,6 +349,34 @@
 | DELETE | `/api/practice/results?cardId={cardId}` 或 `?lessonId={lessonId}` | 重置练习记录：`cardId` 清单卡、`lessonId` 清本课全部练习卡（二者互斥，同传/都缺 400）。只删 `practice_results`，不动 `main_error_books`。 | MVP |
 | GET | `/api/practice/uncleared-errors?subjectId={subjectId}` | 查询学生某学科**所有**未清零课堂练习错题（`main_error_books` source='practice' + is_cleared=0），用于「错题清零」门禁。以 `main_error_books` 为唯一真相源，LEFT JOIN `questions` 补全题面，**不再依赖 `practice_results`**（避免两表数据不一致漏检）。进每节课前清空错题本里所有 practice 未清题（不限课时，兜住历史/跳过/写入失败的错题）。同一 `(cardId, questionN)` 重复记录去重保留最早一条。响应：`{errors: [{errorBookId, cardId, questionN, questionText, questionId}]}`，计数 = `errors.length`。 | MVP |
 | POST | `/api/practice/bump-error-levels` | 错题清零后仍有错误的题，`main_error_books.level` +1 标记未掌握。请求体：`{errorBookIds: number[]}`。 | MVP |
+
+### 4.17 Admin — `/api/admin`
+
+管理员中枢，全部端点 `@Roles('admin')`（家长/学生 token 调用返回 403/1005）。**约定**：封家长=连带封其名下所有学生（`BanRegistry` 进程内即时生效，重启从 DB `is_active=0` 重建）；家长/学生列表 `passwordHash` 已脱敏；模型 `apiKey` AES-256-GCM 加密落库，接口只返回打码值。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| GET | `/api/admin/dashboard` | 总览统计：学生/家长/模型/今日对话四计数 + 最近注册家长 | MVP |
+| PATCH | `/api/admin/password` | 管理员改自己密码（`{oldPassword, newPassword}`，6-32 位） | MVP |
+| GET | `/api/admin/models` | 模型池列表（`apiKeyMasked` 打码返回） | MVP |
+| POST | `/api/admin/models` | 新增模型（`providerType` 枚举 `kimi/qwen/deepseek/gemini/openai_compatible`，`apiKey` 加密落库） | MVP |
+| PATCH | `/api/admin/models/{modelKey}` | 编辑模型（`apiKey` 留空=不修改；保存即 reload `ModelConfigRegistry` 生效，无需重启） | MVP |
+| PATCH | `/api/admin/models/{modelKey}/status` | 启用/停用模型（`{isEnabled}`） | MVP |
+| GET | `/api/admin/routes` | 场景路由表列表（含 `scenes`/`providerTypes` 枚举） | MVP |
+| PUT | `/api/admin/routes` | 全量保存路由表（事务替换，保存即生效） | MVP |
+| POST | `/api/admin/routes/validate-connection` | 模型连通性测试（探活，10s 超时，不落库；失败返回 `1009` 含 provider 原始错误） | MVP |
+| GET | `/api/admin/parents?search=` | 家长列表（搜索用户名/手机号，`passwordHash` 已脱敏） | MVP |
+| PATCH | `/api/admin/parents/{id}/status` | 封禁/解封家长（`{isActive}`；封=连带其名下所有学生即时被拒） | MVP |
+| GET | `/api/admin/students?search=` | 学生列表（搜索用户名，`passwordHash` 已脱敏） | MVP |
+| PATCH | `/api/admin/students/{id}/status` | 封禁/解封单个学生（`{isActive}`） | MVP |
+| GET | `/api/admin/messages` | 已发消息列表（含触达数/已读数） | MVP |
+| POST | `/api/admin/messages` | 发送消息（`{type: promo/learning/system, title, content, parentId?}`；`parentId` 缺省=全员广播） | MVP |
+| DELETE | `/api/admin/messages/{id}` | 撤回消息（连同已读记录一并删除） | MVP |
+| GET | `/api/admin/chat/dialogues` | 管理员会话列表（仅自己的） | MVP |
+| POST | `/api/admin/chat/dialogues` | 新建会话（指定 `{modelKey}`） | MVP |
+| DELETE | `/api/admin/chat/dialogues/{id}` | 删除会话（连带其消息） | MVP |
+| GET | `/api/admin/chat/messages?dialogueId=` | 会话历史消息 | MVP |
+| POST | `/api/admin/chat/stream` | SSE 流式对话（`{dialogueId, message}`；独立 `admin_dialogues`/`admin_messages` 表，**无 K12 学习边界**） | MVP |
 
 ---
 
@@ -1152,6 +1185,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.0 | 2026-08-18 | 管理员中枢：新增 Admin 分组（§4.17）——模型池 CRUD + 启停（`llm_models`/`llm_routes` 落库为运行时真源，`ModelConfigRegistry` 保存即 reload 生效，支持 `openai_compatible` 自定义 OpenAI 兼容模型，apiKey AES-256-GCM 加密落库 + 打码返回）；场景路由表 GET/PUT（事务替换）+ `validate-connection` 探活；家长/学生列表搜索 + 封禁/解封（`BanRegistry` 进程内即时生效，重启从 DB 重建，封家长连带封其名下学生）；站内消息中心（`parent_messages` 广播 + `message_reads` 已读，admin 发送/撤回 + 家长侧列表/未读/标已读）；管理员 AI 聊天（独立 `admin_dialogues`/`admin_messages` 表，无 K12 学习边界，SSE 流式 `POST /api/admin/chat/stream`）；总览 dashboard；管理员改自己密码。错误码实现注补 1009=连通性测试失败（§2.4）。 |
 | v1.9 | 2026-08-14 | 三角色账号体系：`POST /api/auth/login` 改为三角色统一登录（admins->parents->students 顺序查询，JWT 加 `role: admin\|parent\|student`）；`POST /api/auth/register` 家长注册（注册即登录），学生自主注册下线；新增 `GET/POST /api/parent/students` + `PATCH .../reset-password` + `PATCH .../status`（家长管理学生子账号：建/列表/重置密码/停用启用，归属校验 1005）；practice/ai/conversations/progress 学生接口全部套 `RolesGuard('student')` 防越权；登录限流 10 次/分/IP（1008）；DB 新增 `admins` 表 + `parents`/`students` `is_active` 字段（v1.7）；seed 脚本 `seed-admin.ts`。 |
 | v1.0 | 2026-06-26 | 初始版本，覆盖 MVP 核心接口与数据流 |
 | v1.1 | 2026-08-01 | 新增 `POST /api/progress/update` 进度更新接口；更新 P2.2 课程详情左侧栏为数据驱动的 2~3 项结构（错题+学习内容+可选练习）；修复完成课程后进入下一课的 race condition，接口返回 `currentLessonId` 供前端定位下一课 |

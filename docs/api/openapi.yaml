@@ -37,6 +37,8 @@ tags:
     description: 奖励服务
   - name: Parent
     description: 家长端服务
+  - name: Admin
+    description: 管理员中枢（模型配置/封禁/推送/AI 聊天）
   - name: Quota
     description: AI 额度与套餐
   - name: Practice
@@ -2638,6 +2640,394 @@ paths:
                       data:
                         $ref: '#/components/schemas/ParentAccount'
 
+  /parent/messages:
+    get:
+      tags: [Parent]
+      summary: 我的消息（定向+广播合并）
+      operationId: listMyMessages
+      responses:
+        '200':
+          description: OK
+  /parent/messages/unread-count:
+    get:
+      tags: [Parent]
+      summary: 未读消息数
+      operationId: getUnreadMessageCount
+      responses:
+        '200':
+          description: OK
+  /parent/messages/{id}/read:
+    patch:
+      tags: [Parent]
+      summary: 标已读
+      operationId: markMessageRead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+
+  # Admin（管理员中枢，全部 @Roles('admin')）
+  /admin/models:
+    get:
+      tags: [Admin]
+      summary: 模型池列表（apiKey 打码）
+      operationId: listAdminModels
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminModelItemList'
+    post:
+      tags: [Admin]
+      summary: 新增模型
+      operationId: createAdminModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminModelCreateRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/models/{modelKey}:
+    patch:
+      tags: [Admin]
+      summary: 编辑模型（apiKey 留空=不改）
+      operationId: updateAdminModel
+      parameters:
+        - name: modelKey
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminModelUpdateRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/models/{modelKey}/status:
+    patch:
+      tags: [Admin]
+      summary: 启用/停用模型
+      operationId: setAdminModelStatus
+      parameters:
+        - name: modelKey
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isEnabled: { type: boolean }
+              required: [isEnabled]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/routes:
+    get:
+      tags: [Admin]
+      summary: 场景路由表列表（含场景/供应商枚举）
+      operationId: listAdminRoutes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRoutesList'
+    put:
+      tags: [Admin]
+      summary: 全量保存路由表（事务替换，保存即生效）
+      operationId: saveAdminRoutes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                routes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/AdminRouteItem'
+              required: [routes]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/routes/validate-connection:
+    post:
+      tags: [Admin]
+      summary: 模型连通性测试（探活）
+      operationId: validateModelConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                modelKey: { type: string }
+              required: [modelKey]
+      responses:
+        '200':
+          description: OK
+  /admin/parents:
+    get:
+      tags: [Admin]
+      summary: 家长列表（搜索，passwordHash 已脱敏）
+      operationId: searchParents
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /admin/parents/{id}/status:
+    patch:
+      tags: [Admin]
+      summary: 封禁/解封家长（封=连带其名下所有学生）
+      operationId: setParentStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: { type: boolean }
+              required: [isActive]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/students:
+    get:
+      tags: [Admin]
+      summary: 学生列表（搜索，passwordHash 已脱敏）
+      operationId: searchStudents
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /admin/students/{id}/status:
+    patch:
+      tags: [Admin]
+      summary: 封禁/解封单个学生
+      operationId: setStudentStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: { type: boolean }
+              required: [isActive]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/messages:
+    get:
+      tags: [Admin]
+      summary: 已发消息列表（触达/已读数）
+      operationId: listAdminMessages
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Admin]
+      summary: 发送消息（parentId 缺省=全员广播）
+      operationId: sendAdminMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminMessageSendRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/messages/{id}:
+    delete:
+      tags: [Admin]
+      summary: 撤回消息（连同已读记录）
+      operationId: deleteAdminMessage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/chat/dialogues:
+    get:
+      tags: [Admin]
+      summary: 管理员会话列表（仅自己的）
+      operationId: listAdminDialogues
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Admin]
+      summary: 新建会话（指定模型）
+      operationId: createAdminDialogue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                modelKey: { type: string }
+              required: [modelKey]
+      responses:
+        '200':
+          description: OK
+  /admin/chat/dialogues/{id}:
+    delete:
+      tags: [Admin]
+      summary: 删除会话
+      operationId: deleteAdminDialogue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/chat/messages:
+    get:
+      tags: [Admin]
+      summary: 会话历史消息
+      operationId: listAdminChatMessages
+      parameters:
+        - name: dialogueId
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+  /admin/chat/stream:
+    post:
+      tags: [Admin]
+      summary: SSE 流式对话（无 K12 学习边界）
+      operationId: streamAdminChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dialogueId: { type: integer }
+                message: { type: string }
+              required: [dialogueId, message]
+      responses:
+        '200':
+          description: SSE 流
+  /admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: 总览统计（四计数 + 最近注册家长）
+      operationId: getAdminDashboard
+      responses:
+        '200':
+          description: OK
+  /admin/password:
+    patch:
+      tags: [Admin]
+      summary: 管理员改自己密码
+      operationId: changeAdminPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                oldPassword: { type: string }
+                newPassword: { type: string }
+              required: [oldPassword, newPassword]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+
   # Quota
   /quota/current:
     get:
@@ -3151,6 +3541,82 @@ components:
           nullable: true
         isActive:
           type: boolean
+
+    AdminModelItem:
+      type: object
+      properties:
+        modelKey: { type: string }
+        name: { type: string }
+        providerType: { type: string }
+        modelId: { type: string }
+        baseUrl: { type: string }
+        apiKeyMasked: { type: string }
+        contextWindow: { type: integer }
+        maxOutputTokens: { type: integer }
+        isEnabled: { type: boolean }
+    AdminModelItemList:
+      allOf:
+        - $ref: '#/components/schemas/CommonResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AdminModelItem'
+    AdminModelCreateRequest:
+      type: object
+      properties:
+        modelKey: { type: string }
+        name: { type: string }
+        providerType: { type: string, enum: [kimi, qwen, deepseek, gemini, openai_compatible] }
+        modelId: { type: string }
+        baseUrl: { type: string }
+        apiKey: { type: string }
+        contextWindow: { type: integer }
+        maxOutputTokens: { type: integer }
+      required: [modelKey, name, providerType, modelId, baseUrl, apiKey]
+    AdminModelUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        providerType: { type: string }
+        modelId: { type: string }
+        baseUrl: { type: string }
+        apiKey: { type: string, description: 留空=不修改 }
+    AdminRouteItem:
+      type: object
+      properties:
+        scene: { type: string }
+        subject: { type: string }
+        primaryModelKey: { type: string }
+        fallbackModelKey: { type: string, nullable: true }
+    AdminRoutesList:
+      allOf:
+        - $ref: '#/components/schemas/CommonResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                routes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/AdminRouteItem'
+                scenes:
+                  type: array
+                  items: { type: string }
+                providerTypes:
+                  type: array
+                  items: { type: string }
+    AdminMessageSendRequest:
+      type: object
+      properties:
+        type: { type: string, enum: [promo, learning, system] }
+        title: { type: string }
+        content: { type: string }
+        parentId: { type: integer, description: 缺省=全员广播 }
+      required: [type, title, content]
+
     Parent:
       allOf:
         - $ref: '#/components/schemas/User'
