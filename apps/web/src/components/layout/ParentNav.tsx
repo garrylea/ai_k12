@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { LogoutButton } from '@/components/base';
 
 const navItems = [
+  { to: '/parent/messages', label: '消息' },
   { to: '/parent/students', label: '学生账号' },
   { to: '/parent/dashboard', label: '仪表盘' },
   { to: '/parent/report', label: '学情报告' },

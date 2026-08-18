@@ -11,9 +11,11 @@ import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
+import ParentMessagesPage from '@/pages/parent/ParentMessagesPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
+import AdminMessagesPage from '@/pages/admin/AdminMessagesPage';
 import RequireRole from './RequireRole';
 
 const Placeholder = ({ title }: { title: string }) => (
@@ -57,7 +59,7 @@ const router = createBrowserRouter([
       { path: '', element: <AdminDashboardPage /> },
       { path: 'models', element: <AdminModelsPage /> },
       { path: 'accounts', element: <AdminAccountsPage /> },
-      { path: 'messages', element: <Placeholder title="消息推送" /> },
+      { path: 'messages', element: <AdminMessagesPage /> },
       { path: 'chat', element: <Placeholder title="AI 助手" /> },
       { path: 'security', element: <Placeholder title="账号安全" /> },
     ],
@@ -127,6 +129,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: '', element: <Navigate to="/parent/students" replace /> },
+      { path: 'messages', element: <ParentMessagesPage /> },
       { path: 'students', element: <ParentStudentsPage /> },
       { path: 'dashboard', element: <Placeholder title="家长仪表盘 P6.1" /> },
       { path: 'report', element: <Placeholder title="学情报告 P6.2" /> },
