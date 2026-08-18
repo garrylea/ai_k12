@@ -1,7 +1,8 @@
-import { Body, Controller, Get, HttpException, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AdminModelsService } from './admin-models.service.js';
 import { AdminAccountsService } from './admin-accounts.service.js';
+import { AdminMessagesService } from './admin-messages.service.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -27,6 +28,13 @@ const RoutesSchema = z.object({
   })),
 });
 
+const MessageSchema = z.object({
+  type: z.string().min(1).max(20),
+  title: z.string().min(1).max(100),
+  content: z.string().min(1).max(5000),
+  parentId: z.number().int().positive().optional(),
+});
+
 @Controller('api/admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
@@ -34,6 +42,7 @@ export class AdminController {
   constructor(
     private modelsService: AdminModelsService,
     private accountsService: AdminAccountsService,
+    private messagesService: AdminMessagesService,
   ) {}
 
   @Get('models') listModels() { return this.modelsService.list(); }
@@ -101,6 +110,17 @@ export class AdminController {
   @Patch('students/:id/status') async studentStatus(@Param('id', ParseIntPipe) id: number, @Body() b: unknown) {
     const { isActive } = z.object({ isActive: z.boolean() }).parse(b);
     await this.accountsService.setStudentStatus(id, isActive);
+    return null;
+  }
+
+  @Get('messages') listMessages() { return this.messagesService.listForAdmin(); }
+
+  @Post('messages') async sendMessage(@Body() b: unknown) {
+    return this.messagesService.send(MessageSchema.parse(b));
+  }
+
+  @Delete('messages/:id') async deleteMessage(@Param('id', ParseIntPipe) id: number) {
+    await this.messagesService.remove(id);
     return null;
   }
 }

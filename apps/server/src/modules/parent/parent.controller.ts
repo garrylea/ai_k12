@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards, Req
 import type { Request as ExpressRequest } from 'express';
 import { z } from 'zod';
 import { ParentService } from './parent.service.js';
+import { AdminMessagesService } from '../admin/admin-messages.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -18,26 +19,29 @@ const CreateStudentSchema = z.object({
 const ResetPasswordSchema = z.object({ newPassword: z.string().min(6).max(32) });
 const StatusSchema = z.object({ isActive: z.boolean() });
 
-@Controller('api/parent/students')
+@Controller('api/parent')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('parent')
 export class ParentController {
-  constructor(private parentService: ParentService) {}
+  constructor(
+    private parentService: ParentService,
+    private messagesService: AdminMessagesService,
+  ) {}
 
-  @Post()
+  @Post('students')
   async create(@Request() req: ExpressRequest, @Body() body: unknown) {
     const user = (req as ExpressRequest & { user?: JwtUser }).user!;
     const dto = CreateStudentSchema.parse(body);
     return this.parentService.createStudent(user.sub, dto);
   }
 
-  @Get()
+  @Get('students')
   async list(@Request() req: ExpressRequest) {
     const user = (req as ExpressRequest & { user?: JwtUser }).user!;
     return this.parentService.listStudents(user.sub);
   }
 
-  @Patch(':id/reset-password')
+  @Patch('students/:id/reset-password')
   async resetPassword(
     @Request() req: ExpressRequest,
     @Param('id', ParseIntPipe) id: number,
@@ -48,7 +52,7 @@ export class ParentController {
     return this.parentService.resetPassword(user.sub, id, newPassword);
   }
 
-  @Patch(':id/status')
+  @Patch('students/:id/status')
   async setStatus(
     @Request() req: ExpressRequest,
     @Param('id', ParseIntPipe) id: number,
@@ -57,5 +61,24 @@ export class ParentController {
     const user = (req as ExpressRequest & { user?: JwtUser }).user!;
     const { isActive } = StatusSchema.parse(body);
     return this.parentService.setStatus(user.sub, id, isActive);
+  }
+
+  @Get('messages')
+  async myMessages(@Request() req: ExpressRequest) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    return this.messagesService.listForParent(user.sub);
+  }
+
+  @Get('messages/unread-count')
+  async unread(@Request() req: ExpressRequest) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    return this.messagesService.unreadCount(user.sub);
+  }
+
+  @Patch('messages/:id/read')
+  async read(@Request() req: ExpressRequest, @Param('id', ParseIntPipe) id: number) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    await this.messagesService.markRead(user.sub, id);
+    return null;
   }
 }
