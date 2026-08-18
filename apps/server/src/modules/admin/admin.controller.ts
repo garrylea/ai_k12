@@ -15,7 +15,8 @@ const ModelSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
 });
-const ModelUpdateSchema = ModelSchema.partial().omit({ modelKey: true });
+// 更新时 apiKey 可传空串=不修改（service 层据此剔除该字段）
+const ModelUpdateSchema = ModelSchema.partial().omit({ modelKey: true }).extend({ apiKey: z.string().max(400) });
 const RoutesSchema = z.object({
   routes: z.array(z.object({
     scene: z.string().min(1).max(30),
