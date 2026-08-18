@@ -13,6 +13,7 @@ import AdminLayout from '@/components/layout/AdminLayout';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
+import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
 import RequireRole from './RequireRole';
 
 const Placeholder = ({ title }: { title: string }) => (
@@ -55,7 +56,7 @@ const router = createBrowserRouter([
     children: [
       { path: '', element: <AdminDashboardPage /> },
       { path: 'models', element: <AdminModelsPage /> },
-      { path: 'accounts', element: <Placeholder title="账号管理" /> },
+      { path: 'accounts', element: <AdminAccountsPage /> },
       { path: 'messages', element: <Placeholder title="消息推送" /> },
       { path: 'chat', element: <Placeholder title="AI 助手" /> },
       { path: 'security', element: <Placeholder title="账号安全" /> },
