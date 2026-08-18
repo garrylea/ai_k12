@@ -40,15 +40,77 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 
 // --- Auth ---
 
+export type UserRole = 'admin' | 'parent' | 'student';
+
 export interface LoginResult {
   token: string;
-  user: { id: number; role: string; name: string; username: string; grade?: string };
+  user: {
+    id: number;
+    role: UserRole;
+    name: string | null;
+    username?: string;
+    grade?: string | null;
+    phone?: string;
+    parentId?: number;
+  };
 }
 
 export function login(username: string, password: string): Promise<LoginResult> {
   return fetchApi<LoginResult>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
+  });
+}
+
+/** 家长注册（注册即登录）。 */
+export function registerParent(phone: string, password: string, name?: string): Promise<LoginResult> {
+  return fetchApi<LoginResult>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ phone, password, name: name || undefined }),
+  });
+}
+
+// --- Parent: student accounts ---
+
+export interface MyStudentItem {
+  id: number;
+  parentId: number;
+  username: string;
+  name: string;
+  age: number | null;
+  grade: string | null;
+  schoolLevel: string | null;
+  isActive: boolean;
+}
+
+export function listMyStudents(): Promise<MyStudentItem[]> {
+  return fetchApi<MyStudentItem[]>('/parent/students');
+}
+
+export function createStudent(req: {
+  name: string;
+  username: string;
+  password: string;
+  age: number;
+  grade: string;
+}): Promise<{ id: number }> {
+  return fetchApi<{ id: number }>('/parent/students', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export function resetStudentPassword(id: number, newPassword: string): Promise<null> {
+  return fetchApi<null>(`/parent/students/${id}/reset-password`, {
+    method: 'PATCH',
+    body: JSON.stringify({ newPassword }),
+  });
+}
+
+export function setStudentStatus(id: number, isActive: boolean): Promise<null> {
+  return fetchApi<null>(`/parent/students/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive }),
   });
 }
 
@@ -554,3 +616,95 @@ export function startCardDiscuss(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+// --- Admin: models & routes ---
+export interface AdminModelItem {
+  modelKey: string; name: string; providerType: string; modelId: string;
+  baseUrl: string; apiKeyMasked: string; contextWindow: number; maxOutputTokens: number; isEnabled: boolean;
+}
+export function listAdminModels(): Promise<AdminModelItem[]> { return fetchApi('/admin/models'); }
+export function createAdminModel(req: { modelKey: string; name: string; providerType: string; modelId: string; baseUrl: string; apiKey: string; contextWindow?: number; maxOutputTokens?: number }): Promise<null> {
+  return fetchApi('/admin/models', { method: 'POST', body: JSON.stringify(req) });
+}
+export function updateAdminModel(modelKey: string, req: Partial<{ name: string; providerType: string; modelId: string; baseUrl: string; apiKey: string }>): Promise<null> {
+  return fetchApi(`/admin/models/${modelKey}`, { method: 'PATCH', body: JSON.stringify(req) });
+}
+export function setAdminModelStatus(modelKey: string, isEnabled: boolean): Promise<null> {
+  return fetchApi(`/admin/models/${modelKey}/status`, { method: 'PATCH', body: JSON.stringify({ isEnabled }) });
+}
+export interface AdminRouteItem { scene: string; subject: string; primaryModelKey: string; fallbackModelKey: string | null; }
+export function listAdminRoutes(): Promise<{ routes: AdminRouteItem[]; scenes: string[]; providerTypes: string[] }> { return fetchApi('/admin/routes'); }
+export function saveAdminRoutes(routes: AdminRouteItem[]): Promise<null> {
+  return fetchApi('/admin/routes', { method: 'PUT', body: JSON.stringify({ routes }) });
+}
+export function validateModelConnection(modelKey: string): Promise<{ ok: boolean; latencyMs: number; sample: string }> {
+  return fetchApi('/admin/routes/validate-connection', { method: 'POST', body: JSON.stringify({ modelKey }) });
+}
+
+// --- Admin: accounts ---
+export interface AdminParentItem { id: number; phone: string; name: string | null; isActive: boolean; studentCount: number; createdAt: string; }
+export function searchParents(search: string): Promise<AdminParentItem[]> { return fetchApi(`/admin/parents?search=${encodeURIComponent(search)}`); }
+export function setParentStatus(id: number, isActive: boolean): Promise<null> {
+  return fetchApi(`/admin/parents/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+export interface AdminStudentItem { id: number; username: string; name: string; grade: string | null; isActive: boolean; parentId: number; }
+export function searchStudents(search: string): Promise<AdminStudentItem[]> { return fetchApi(`/admin/students?search=${encodeURIComponent(search)}`); }
+export function setStudentStatusAdmin(id: number, isActive: boolean): Promise<null> {
+  return fetchApi(`/admin/students/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+
+// --- Admin: messages ---
+export function sendAdminMessage(req: { type: string; title: string; content: string; parentId?: number }): Promise<null> {
+  return fetchApi('/admin/messages', { method: 'POST', body: JSON.stringify(req) });
+}
+export interface AdminMessageItem { id: number; type: string; title: string; isBroadcast: boolean; reachCount: number; readCount: number; createdAt: string; }
+export function listAdminMessages(): Promise<AdminMessageItem[]> { return fetchApi('/admin/messages'); }
+export function deleteAdminMessage(id: number): Promise<null> { return fetchApi(`/admin/messages/${id}`, { method: 'DELETE' }); }
+
+// --- Admin: chat ---
+export function createAdminDialogue(modelKey: string): Promise<{ id: number }> {
+  return fetchApi('/admin/chat/dialogues', { method: 'POST', body: JSON.stringify({ modelKey }) });
+}
+export function listAdminDialogues(): Promise<Array<{ id: number; modelKey: string; title: string | null; updatedAt: string }>> { return fetchApi('/admin/chat/dialogues'); }
+export function deleteAdminDialogue(id: number): Promise<null> { return fetchApi(`/admin/chat/dialogues/${id}`, { method: 'DELETE' }); }
+export interface AdminChatMessage { id: number; role: 'user' | 'assistant'; content: string; reasoning: string | null; }
+export function listAdminChatMessages(dialogueId: number): Promise<AdminChatMessage[]> {
+  return fetchApi(`/admin/chat/messages?dialogueId=${dialogueId}`);
+}
+export async function* streamAdminChat(dialogueId: number, message: string): AsyncGenerator<{ type: string; delta?: string; code?: number; message?: string }> {
+  const token = localStorage.getItem('token');
+  const res = await fetch('/api/admin/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ dialogueId, message }),
+  });
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop() ?? '';
+    for (const p of parts) {
+      if (p.startsWith('data: ')) yield JSON.parse(p.slice(6));
+    }
+  }
+}
+
+// --- Admin: dashboard & password ---
+export interface AdminDashboard {
+  parentCount: number; studentCount: number; todayAiCalls: number; enabledModelCount: number;
+  recentParents: AdminParentItem[];
+}
+export function fetchAdminDashboard(): Promise<AdminDashboard> { return fetchApi('/admin/dashboard'); }
+export function changeAdminPassword(oldPassword: string, newPassword: string): Promise<null> {
+  return fetchApi('/admin/password', { method: 'PATCH', body: JSON.stringify({ oldPassword, newPassword }) });
+}
+
+// --- Parent: messages ---
+export interface ParentMessageItem { id: number; type: string; title: string; content: string; isRead: boolean; isBroadcast: boolean; createdAt: string; }
+export function listMyMessages(): Promise<ParentMessageItem[]> { return fetchApi('/parent/messages'); }
+export function getUnreadMessageCount(): Promise<number> { return fetchApi('/parent/messages/unread-count'); }
+export function markMessageRead(id: number): Promise<null> { return fetchApi(`/parent/messages/${id}/read`, { method: 'PATCH' }); }

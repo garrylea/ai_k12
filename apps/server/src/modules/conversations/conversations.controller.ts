@@ -1,13 +1,16 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ConversationsService } from './conversations.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { CreateConversationDto } from './dto/create-conversation.dto.js';
 import type { AppendMessageDto } from './dto/append-message.dto.js';
 import type { UpdateTitleDto } from './dto/update-title.dto.js';
 
 @Controller('api/conversations')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('student')
 export class ConversationsController {
   constructor(private readonly conversationsService: ConversationsService) {}
 

@@ -1,10 +1,13 @@
 import { Controller, Get, Post, Param, Query, Body, ParseIntPipe, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ProgressService } from './progress.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 
 @Controller('api/progress')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('student')
 export class ProgressController {
   constructor(private progressService: ProgressService) {}
 

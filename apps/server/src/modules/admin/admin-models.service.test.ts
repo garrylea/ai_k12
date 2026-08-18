@@ -1,0 +1,69 @@
+import { describe, it, expect, vi } from 'vitest';
+import { AdminModelsService } from './admin-models.service';
+
+const mk = (o: any = {}) => ({
+  llmModelsRepo: {
+    listAll: vi.fn().mockResolvedValue([]), listEnabled: vi.fn().mockResolvedValue([]),
+    findByKey: vi.fn().mockResolvedValue(null), create: vi.fn(), update: vi.fn(), setEnabled: vi.fn(),
+  },
+  llmRoutesRepo: { listAll: vi.fn().mockResolvedValue([]), replaceAll: vi.fn(), existsReferenceTo: vi.fn().mockResolvedValue(false) },
+  registry: { reload: vi.fn().mockResolvedValue(undefined) },
+  ...o,
+});
+const svc = (d: any) => new AdminModelsService(d.llmModelsRepo, d.llmRoutesRepo, d.registry);
+
+const dbModel = (key: string) => ({ modelKey: key, name: key, providerType: 'kimi', modelId: key, baseUrl: 'https://x', apiKey: 'sk-secret123', contextWindow: 8, maxOutputTokens: 8, isEnabled: true });
+
+describe('AdminModelsService', () => {
+  it('列表 apiKey 打码且不含明文', async () => {
+    const d = mk({ llmModelsRepo: { ...mk().llmModelsRepo, listAll: vi.fn().mockResolvedValue([dbModel('m1')]) } });
+    const list = await svc(d).list();
+    expect(list[0].apiKeyMasked).toBe('sk-***123');
+    expect(JSON.stringify(list)).not.toContain('sk-secret123');
+  });
+
+  it('新增重复 modelKey -> 1004', async () => {
+    const d = mk({ llmModelsRepo: { ...mk().llmModelsRepo, findByKey: vi.fn().mockResolvedValue(dbModel('m1')) } });
+    await expect(svc(d).create({ modelKey: 'm1', name: 'x', providerType: 'kimi', modelId: 'm', baseUrl: 'https://x', apiKey: 'sk-1' }))
+      .rejects.toMatchObject({ response: { code: 1004 } });
+  });
+
+  it('新增非法 providerType -> 1001', async () => {
+    await expect(svc(mk()).create({ modelKey: 'm2', name: 'x', providerType: 'bad', modelId: 'm', baseUrl: 'https://x', apiKey: 'sk-1' }))
+      .rejects.toMatchObject({ response: { code: 1001 } });
+  });
+
+  it('停用被路由引用的模型 -> 1004', async () => {
+    const d = mk({
+      llmModelsRepo: { ...mk().llmModelsRepo, findByKey: vi.fn().mockResolvedValue(dbModel('m1')) },
+      llmRoutesRepo: { ...mk().llmRoutesRepo, existsReferenceTo: vi.fn().mockResolvedValue(true) },
+    });
+    await expect(svc(d).setEnabled('m1', false)).rejects.toMatchObject({ response: { code: 1004 } });
+  });
+
+  it('保存路由引用不存在/停用的模型 -> 1004 拒整批且不写库', async () => {
+    const d = mk({ llmModelsRepo: { ...mk().llmModelsRepo, listEnabled: vi.fn().mockResolvedValue([dbModel('m1')]) } });
+    await expect(svc(d).saveRoutes([{ scene: 'tutoring', subject: 'math', primaryModelKey: 'ghost', fallbackModelKey: null }]))
+      .rejects.toMatchObject({ response: { code: 1004 } });
+    expect(d.llmRoutesRepo.replaceAll).not.toHaveBeenCalled();
+  });
+
+  it('合法保存 -> 事务替换 + registry.reload', async () => {
+    const d = mk({ llmModelsRepo: { ...mk().llmModelsRepo, listEnabled: vi.fn().mockResolvedValue([dbModel('m1'), dbModel('m2')]) } });
+    await svc(d).saveRoutes([{ scene: 'tutoring', subject: 'math', primaryModelKey: 'm1', fallbackModelKey: 'm2' }]);
+    expect(d.llmRoutesRepo.replaceAll).toHaveBeenCalled();
+    expect(d.registry.reload).toHaveBeenCalled();
+  });
+
+  it('更新模型（apiKey 空串不改）-> repo.update + reload', async () => {
+    const d = mk({ llmModelsRepo: { ...mk().llmModelsRepo, findByKey: vi.fn().mockResolvedValue(dbModel('m1')) } });
+    await svc(d).update('m1', { name: '新名', apiKey: '' });
+    expect(d.llmModelsRepo.update).toHaveBeenCalledWith('m1', { name: '新名' });
+    expect(d.registry.reload).toHaveBeenCalled();
+  });
+
+  it('更新/停用不存在的模型 -> 1002', async () => {
+    await expect(svc(mk()).update('ghost', { name: 'x' })).rejects.toMatchObject({ response: { code: 1002 } });
+    await expect(svc(mk()).setEnabled('ghost', false)).rejects.toMatchObject({ response: { code: 1002 } });
+  });
+});

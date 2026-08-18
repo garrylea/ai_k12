@@ -1,6 +1,7 @@
 import type { TutoringRequest, TutoringResponse, StructuredQuestionOutput, ContentPart, ChatMessage, RouteResult, StreamEvent, TranscribeResult, SelectionClassification, TranscribedProblem, Subject, TextPart, Attachment } from '../types.js';
 import { timeoutConfig, fallbackConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
+import { getModelConfigRegistry } from '../infra/model-config-registry.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
 import { mapLLMErrorToClient } from '../infra/model-client/errors.js';
@@ -57,7 +58,7 @@ export class TutoringCapability {
   private conversationService: ConversationService;
 
   constructor(conversationService: ConversationService, deps?: TutoringCapabilityDeps) {
-    this.modelRouter = new ModelRouter();
+    this.modelRouter = new ModelRouter(getModelConfigRegistry());
     this.promptBuilder = new PromptBuilder(resolve(__dirname, '../prompts'));
     this.modelClient = deps?.modelClient ?? new ModelClient();
     this.safetyGuard = new SafetyGuard();

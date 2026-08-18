@@ -22,23 +22,26 @@ export class ModelClient {
     this.providerOverrides = opts?.providers;
   }
 
-  private getProvider(provider: string): ProviderAdapter {
-    if (this.providers.has(provider)) return this.providers.get(provider)!;
+  private getProvider(provider: string, apiKey?: string): ProviderAdapter {
+    // 缓存 key：provider + apiKey 指纹（同 provider 不同 key 共存；无 apiKey 走 env）
+    const cacheKey = apiKey ? `${provider}:${apiKey}` : provider;
+    if (this.providers.has(cacheKey)) return this.providers.get(cacheKey)!;
 
     let client: ProviderAdapter;
     if (this.providerOverrides?.has(provider)) {
       client = this.providerOverrides.get(provider)!;
     } else {
-      const apiKey = getApiKeyByProvider(provider);
+      // 优先用模型条目自带 apiKey（DB 自定义模型），env 兜底
+      const key = apiKey || getApiKeyByProvider(provider);
       switch (provider) {
-        case 'kimi': client = new KimiClient(apiKey); break;
-        case 'qwen': client = new QwenClient(apiKey); break;
-        case 'deepseek': client = new DeepSeekClient(apiKey); break;
-        case 'gemini': client = new GeminiClient(apiKey); break;
+        case 'kimi': client = new KimiClient(key, 'OpenAI-Compatible'); break;
+        case 'qwen': client = new QwenClient(key); break;
+        case 'deepseek': client = new DeepSeekClient(key); break;
+        case 'gemini': client = new GeminiClient(key); break;
         default: throw new Error(`Unknown provider: ${provider}`);
       }
     }
-    this.providers.set(provider, client);
+    this.providers.set(cacheKey, client);
     return client;
   }
 
@@ -52,7 +55,7 @@ export class ModelClient {
    * Retry-After + onRetry); non-retryable errors throw immediately.
    */
   async chat(request: ChatRequest): Promise<ChatResponse> {
-    const provider = this.getProvider(request.model.provider);
+    const provider = this.getProvider(request.model.provider, request.model.apiKey);
     const startTime = Date.now();
     const useStream = request.stream !== false && request.model.provider !== 'gemini';
 
@@ -100,7 +103,7 @@ export class ModelClient {
    * is the caller's (HTTP layer's) responsibility to handle stream errors.
    */
   streamChat(request: ChatRequest): AsyncIterable<StreamChunk> {
-    const provider = this.getProvider(request.model.provider);
+    const provider = this.getProvider(request.model.provider, request.model.apiKey);
     return provider.streamChat(request);
   }
 }

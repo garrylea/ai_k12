@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.js';
 import type { JwtUser } from './jwt-auth.guard.js';
@@ -16,10 +22,13 @@ export class RolesGuard implements CanActivate {
       return true;
     }
     const request = context.switchToHttp().getRequest();
-    const user = request.user as JwtUser;
+    const user = request.user as JwtUser | undefined;
     if (!user) {
-      return false;
+      throw new UnauthorizedException({ code: 1003, message: '未登录或 token 已过期' });
     }
-    return requiredRoles.includes(user.role);
+    if (!requiredRoles.includes(user.role)) {
+      throw new ForbiddenException({ code: 1005, message: '无权访问该资源' });
+    }
+    return true;
   }
 }

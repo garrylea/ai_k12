@@ -37,9 +37,12 @@ export interface ModelConfig {
   supportsStreaming: boolean;
 }
 
+/** 路由结果模型带 apiKey（registry 快照/新 YAML 路径不再剥离；供 ModelClient 直接取用） */
+export type RoutedModel = ModelConfig & { apiKey?: string };
+
 export interface RouteResult {
-  primary: ModelConfig;
-  fallback?: ModelConfig;
+  primary: RoutedModel;
+  fallback?: RoutedModel;
   reason: string;
 }
 
@@ -117,7 +120,8 @@ export interface ChatMessage {
 // ========== Model Client Types (§3.3.3-§3.3.5) ==========
 
 export interface ChatRequest {
-  model: ModelConfig;
+  /** 模型配置；apiKey 可选（DB/路由条目自带，ModelClient 优先于 env） */
+  model: RoutedModel;
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;

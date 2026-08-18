@@ -1,5 +1,6 @@
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import LoginPage from '@/pages/auth/LoginPage';
+import RegisterPage from '@/pages/auth/RegisterPage';
 import SubjectSelectPage from '@/pages/auth/SubjectSelectPage';
 import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
@@ -8,6 +9,16 @@ import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
 import ConversationManagePage from '@/pages/student/ConversationManagePage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
+import AdminLayout from '@/components/layout/AdminLayout';
+import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
+import ParentMessagesPage from '@/pages/parent/ParentMessagesPage';
+import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
+import AdminModelsPage from '@/pages/admin/AdminModelsPage';
+import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
+import AdminMessagesPage from '@/pages/admin/AdminMessagesPage';
+import AdminChatPage from '@/pages/admin/AdminChatPage';
+import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
+import RequireRole from './RequireRole';
 
 const Placeholder = ({ title }: { title: string }) => (
   <div className="p-8 text-[var(--text-primary)]">
@@ -16,46 +27,112 @@ const Placeholder = ({ title }: { title: string }) => (
   </div>
 );
 
+/** 根路径按登录角色分流：admin -> /admin，parent -> /parent/students，student -> 入口选择页。 */
+const RoleRedirect = () => {
+  const role = localStorage.getItem('userRole');
+  if (role === 'admin') return <Navigate to="/admin" replace />;
+  if (role === 'parent') return <Navigate to="/parent/students" replace />;
+  if (role === 'student') return <Navigate to="/student/entry" replace />;
+  return <Navigate to="/login" replace />;
+};
+
 const router = createBrowserRouter([
   {
     path: '/',
-    element: <Navigate to="/login" replace />,
+    element: <RoleRedirect />,
   },
   {
     path: '/login',
     element: <LoginPage />,
   },
+  {
+    path: '/register',
+    element: <RegisterPage />,
+  },
+  // 管理员中枢布局路由（子页面在后续 task 逐个替换为真页面）
+  {
+    path: '/admin',
+    element: (
+      <RequireRole role="admin">
+        <AdminLayout />
+      </RequireRole>
+    ),
+    children: [
+      { path: '', element: <AdminDashboardPage /> },
+      { path: 'models', element: <AdminModelsPage /> },
+      { path: 'accounts', element: <AdminAccountsPage /> },
+      { path: 'messages', element: <AdminMessagesPage /> },
+      { path: 'chat', element: <AdminChatPage /> },
+      { path: 'security', element: <AdminSecurityPage /> },
+    ],
+  },
   // 入口选择页（独立全屏，登录后落地，主轨/辅轨分流）
   {
     path: '/student/entry',
-    element: <EntrySelectPage />,
+    element: (
+      <RequireRole role="student">
+        <EntrySelectPage />
+      </RequireRole>
+    ),
   },
   // 学科选择（独立全屏页，不在布局内）
   {
     path: '/student/subjects',
-    element: <SubjectSelectPage />,
+    element: (
+      <RequireRole role="student">
+        <SubjectSelectPage />
+      </RequireRole>
+    ),
   },
   // 星图导航（独立全屏页，不在布局内）
   {
     path: '/student/star-map',
-    element: <StarMapPage />,
+    element: (
+      <RequireRole role="student">
+        <StarMapPage />
+      </RequireRole>
+    ),
   },
   // 课程详情/卡片阅读 P2.2（全屏沉浸层，隐藏侧边栏）
   {
     path: '/student/course-detail',
-    element: <CourseDetailPage />,
+    element: (
+      <RequireRole role="student">
+        <CourseDetailPage />
+      </RequireRole>
+    ),
   },
   // 辅线答疑轨（全屏沉浸层，独立于 StudentLayout，物理隔离）
-  { path: '/student/auxiliary', element: <AuxiliaryHomePage /> },
-  { path: '/student/auxiliary/conversations', element: <ConversationManagePage /> },
+  {
+    path: '/student/auxiliary',
+    element: (
+      <RequireRole role="student">
+        <AuxiliaryHomePage />
+      </RequireRole>
+    ),
+  },
+  {
+    path: '/student/auxiliary/conversations',
+    element: (
+      <RequireRole role="student">
+        <ConversationManagePage />
+      </RequireRole>
+    ),
+  },
   { path: '/student/auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
   { path: '/student/auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
   { path: '/student/auxiliary/chat', element: <Navigate to="/student/auxiliary" replace /> },
   {
     path: '/parent',
-    element: <ParentLayout />,
+    element: (
+      <RequireRole role="parent">
+        <ParentLayout />
+      </RequireRole>
+    ),
     children: [
-      { path: '', element: <Navigate to="/parent/dashboard" replace /> },
+      { path: '', element: <Navigate to="/parent/students" replace /> },
+      { path: 'messages', element: <ParentMessagesPage /> },
+      { path: 'students', element: <ParentStudentsPage /> },
       { path: 'dashboard', element: <Placeholder title="家长仪表盘 P6.1" /> },
       { path: 'report', element: <Placeholder title="学情报告 P6.2" /> },
       { path: 'errors', element: <Placeholder title="错题查看 P6.3" /> },
@@ -70,7 +147,11 @@ const router = createBrowserRouter([
   },
   {
     path: '/student',
-    element: <StudentLayout />,
+    element: (
+      <RequireRole role="student">
+        <StudentLayout />
+      </RequireRole>
+    ),
     children: [
       { path: '', element: <Navigate to="/student/star-map" replace /> },
       { path: 'homework', element: <Placeholder title="课后作业 P2.4" /> },

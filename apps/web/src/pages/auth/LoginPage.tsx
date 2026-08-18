@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/base';
 import { login } from '@/services/api';
 
@@ -20,12 +20,15 @@ export default function LoginPage() {
     try {
       const result = await login(username, password);
       localStorage.setItem('token', result.token);
-      localStorage.setItem('username', result.user.username);
+      // 家长无 username，存手机号供家长台头部展示（maskPhone 打码）
+      localStorage.setItem('username', result.user.username ?? result.user.phone ?? '');
       localStorage.setItem('userId', String(result.user.id));
       localStorage.setItem('userRole', result.user.role);
 
-      if (result.user.role === 'parent') {
-        navigate('/parent/dashboard');
+      if (result.user.role === 'admin') {
+        navigate('/admin');
+      } else if (result.user.role === 'parent') {
+        navigate('/parent/students');
       } else {
         navigate('/student/entry');
       }
@@ -153,9 +156,9 @@ export default function LoginPage() {
 
             {/* 底部链接 */}
             <div className="flex items-center justify-between text-sm text-[var(--text-secondary)]">
-              <button className="hover:text-[var(--brand-500)] hover:underline">
-                注册
-              </button>
+              <Link to="/register" className="hover:text-[var(--brand-500)] hover:underline">
+                注册家长账号
+              </Link>
               <button className="hover:text-[var(--brand-500)] hover:underline">
                 忘记密码？
               </button>
