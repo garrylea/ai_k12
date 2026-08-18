@@ -67,3 +67,4 @@ CREATE TABLE IF NOT EXISTS admin_messages (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_admin_messages_dialogue (dialogue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
