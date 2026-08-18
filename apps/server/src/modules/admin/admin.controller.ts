@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpException, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AdminModelsService } from './admin-models.service.js';
+import { AdminAccountsService } from './admin-accounts.service.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -30,7 +31,10 @@ const RoutesSchema = z.object({
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
 export class AdminController {
-  constructor(private modelsService: AdminModelsService) {}
+  constructor(
+    private modelsService: AdminModelsService,
+    private accountsService: AdminAccountsService,
+  ) {}
 
   @Get('models') listModels() { return this.modelsService.list(); }
 
@@ -78,5 +82,25 @@ export class AdminController {
       if (err instanceof HttpException) throw err;
       throw new HttpException({ code: 1009, message: `连通失败: ${err instanceof Error ? err.message : String(err)}` }, 502);
     }
+  }
+
+  @Get('parents') async parents(@Query('search') search?: string) {
+    return this.accountsService.searchParents((search ?? '').trim().slice(0, 50));
+  }
+
+  @Patch('parents/:id/status') async parentStatus(@Param('id', ParseIntPipe) id: number, @Body() b: unknown) {
+    const { isActive } = z.object({ isActive: z.boolean() }).parse(b);
+    await this.accountsService.setParentStatus(id, isActive);
+    return null;
+  }
+
+  @Get('students') async students(@Query('search') search?: string) {
+    return this.accountsService.searchStudents((search ?? '').trim().slice(0, 50));
+  }
+
+  @Patch('students/:id/status') async studentStatus(@Param('id', ParseIntPipe) id: number, @Body() b: unknown) {
+    const { isActive } = z.object({ isActive: z.boolean() }).parse(b);
+    await this.accountsService.setStudentStatus(id, isActive);
+    return null;
   }
 }

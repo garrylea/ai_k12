@@ -39,6 +39,38 @@ export class ParentsRepository {
     return (result as any).insertId;
   }
 
+  async findById(id: number): Promise<Parent | null> {
+    const [rows] = await this.pool.execute<ParentRow[]>(
+      'SELECT * FROM parents WHERE id = ? AND deleted_at IS NULL', [id]);
+    return rows.length > 0 ? this.mapRow(rows[0]) : null;
+  }
+
+  async setActive(id: number, isActive: boolean): Promise<void> {
+    await this.pool.execute(
+      'UPDATE parents SET is_active = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+      [isActive ? 1 : 0, id],
+    );
+  }
+
+  /** 管理台搜索：手机号/姓名模糊，附名下学生数。 */
+  async search(q: string): Promise<Array<Parent & { studentCount: number }>> {
+    const like = `%${q}%`;
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT p.*, (SELECT COUNT(*) FROM students s WHERE s.parent_id = p.id AND s.deleted_at IS NULL) AS studentCount
+       FROM parents p
+       WHERE p.deleted_at IS NULL AND (p.phone LIKE ? OR p.name LIKE ?)
+       ORDER BY p.id DESC LIMIT 50`, [like, like]);
+    return rows.map((r: any) => ({ ...this.mapRow(r), studentCount: Number(r.studentCount) }));
+  }
+
+  /** 启动重建封禁名单用：所有停用（未软删）家长。 */
+  async listInactive(): Promise<Parent[]> {
+    const [rows] = await this.pool.execute<ParentRow[]>(
+      'SELECT * FROM parents WHERE is_active = 0 AND deleted_at IS NULL',
+    );
+    return rows.map((r) => this.mapRow(r));
+  }
+
   private mapRow(row: ParentRow): Parent {
     return {
       id: row.id,

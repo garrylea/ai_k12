@@ -3,7 +3,7 @@ import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
 import { AuthMiddleware } from './common/middleware/auth.middleware.js';
-import { BanRegistry } from './common/guards/ban-registry.js';
+import { CommonModule } from './common/common.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ContentModule } from './modules/content/content.module.js';
@@ -20,6 +20,7 @@ import { AdminModule } from './modules/admin/admin.module.js';
 @Module({
   imports: [
     DatabaseModule,
+    CommonModule,
     AuthModule,
     ContentModule,
     ProgressModule,
@@ -34,7 +35,6 @@ import { AdminModule } from './modules/admin/admin.module.js';
     AdminModule,
   ],
   providers: [
-    BanRegistry,
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
   ],

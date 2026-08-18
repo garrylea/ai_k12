@@ -73,6 +73,23 @@ export class StudentsRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
+  /** 管理台搜索：用户名/姓名模糊。 */
+  async search(q: string): Promise<Student[]> {
+    const like = `%${q}%`;
+    const [rows] = await this.pool.execute<StudentRow[]>(
+      'SELECT * FROM students WHERE deleted_at IS NULL AND (username LIKE ? OR name LIKE ?) ORDER BY id DESC LIMIT 50',
+      [like, like]);
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  /** 启动重建封禁名单用：所有停用（未软删）学生。 */
+  async listInactive(): Promise<Student[]> {
+    const [rows] = await this.pool.execute<StudentRow[]>(
+      'SELECT * FROM students WHERE is_active = 0 AND deleted_at IS NULL',
+    );
+    return rows.map((r) => this.mapRow(r));
+  }
+
   async updatePassword(id: number, passwordHash: string): Promise<void> {
     await this.pool.execute(
       'UPDATE students SET password_hash = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
