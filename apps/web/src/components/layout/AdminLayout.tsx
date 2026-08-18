@@ -1,24 +1,21 @@
+import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
-import { LogoutButton } from '@/components/base';
+import { useThemeStore } from '@/store/themeStore';
+import { AdminNav } from './AdminNav';
 
-/** 管理员中枢占位壳：模型配置/封禁/消息推送等待后续子项目。 */
+/** 管理员中枢壳：左侧栏导航 + 右侧内容区（商务蓝 parent 主题）。 */
 export default function AdminLayout() {
+  const { setMode } = useThemeStore();
+  useEffect(() => { setMode('parent'); }, [setMode]);
+
   return (
     <div data-theme="parent" className="min-h-screen bg-[var(--bg-base)]">
-      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
-        <h1 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-          管理员中枢
-        </h1>
-        <LogoutButton />
-      </header>
-      <main className="p-8">
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 max-w-2xl">
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            管理员功能（模型配置 / 账号封禁 / 消息推送 / AI 对话）将在后续子项目中实现。
-          </p>
-        </div>
-        <Outlet />
-      </main>
+      <div className="flex h-screen overflow-hidden">
+        <AdminNav />
+        <main className="flex-1 overflow-y-auto bg-[var(--bg-base)] p-6">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

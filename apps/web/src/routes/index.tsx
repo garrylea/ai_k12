@@ -42,7 +42,7 @@ const router = createBrowserRouter([
     path: '/register',
     element: <RegisterPage />,
   },
-  // 管理员中枢占位壳（模型配置/封禁/推送等待后续子项目）
+  // 管理员中枢布局路由（子页面在后续 task 逐个替换为真页面）
   {
     path: '/admin',
     element: (
@@ -50,6 +50,14 @@ const router = createBrowserRouter([
         <AdminLayout />
       </RequireRole>
     ),
+    children: [
+      { path: '', element: <Placeholder title="管理台总览" /> },
+      { path: 'models', element: <Placeholder title="模型配置" /> },
+      { path: 'accounts', element: <Placeholder title="账号管理" /> },
+      { path: 'messages', element: <Placeholder title="消息推送" /> },
+      { path: 'chat', element: <Placeholder title="AI 助手" /> },
+      { path: 'security', element: <Placeholder title="账号安全" /> },
+    ],
   },
   // 入口选择页（独立全屏，登录后落地，主轨/辅轨分流）
   {
