@@ -16,6 +16,8 @@ import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
 import AdminMessagesPage from '@/pages/admin/AdminMessagesPage';
+import AdminChatPage from '@/pages/admin/AdminChatPage';
+import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
 import RequireRole from './RequireRole';
 
 const Placeholder = ({ title }: { title: string }) => (
@@ -60,8 +62,8 @@ const router = createBrowserRouter([
       { path: 'models', element: <AdminModelsPage /> },
       { path: 'accounts', element: <AdminAccountsPage /> },
       { path: 'messages', element: <AdminMessagesPage /> },
-      { path: 'chat', element: <Placeholder title="AI 助手" /> },
-      { path: 'security', element: <Placeholder title="账号安全" /> },
+      { path: 'chat', element: <AdminChatPage /> },
+      { path: 'security', element: <AdminSecurityPage /> },
     ],
   },
   // 入口选择页（独立全屏，登录后落地，主轨/辅轨分流）
