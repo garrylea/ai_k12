@@ -30,6 +30,21 @@ export class AdminsRepository {
     return rows.length > 0 ? this.mapRow(rows[0]) : null;
   }
 
+  async findById(id: number): Promise<Admin | null> {
+    const [rows] = await this.pool.execute<AdminRow[]>(
+      'SELECT * FROM admins WHERE id = ? AND deleted_at IS NULL',
+      [id],
+    );
+    return rows.length > 0 ? this.mapRow(rows[0]) : null;
+  }
+
+  async updatePassword(id: number, passwordHash: string): Promise<void> {
+    await this.pool.execute(
+      'UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+      [passwordHash, id],
+    );
+  }
+
   private mapRow(row: AdminRow): Admin {
     return {
       id: row.id,

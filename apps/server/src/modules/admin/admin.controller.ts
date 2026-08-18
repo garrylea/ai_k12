@@ -5,6 +5,7 @@ import { AdminModelsService } from './admin-models.service.js';
 import { AdminAccountsService } from './admin-accounts.service.js';
 import { AdminMessagesService } from './admin-messages.service.js';
 import { AdminChatService } from './admin-chat.service.js';
+import { AdminDashboardService } from './admin-dashboard.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -47,7 +48,20 @@ export class AdminController {
     private accountsService: AdminAccountsService,
     private messagesService: AdminMessagesService,
     private chatService: AdminChatService,
+    private dashboardService: AdminDashboardService,
   ) {}
+
+  @Get('dashboard') dashboard() { return this.dashboardService.get(); }
+
+  @Patch('password')
+  async changePassword(@CurrentUser() user: JwtUser, @Body() b: unknown) {
+    const { oldPassword, newPassword } = z.object({
+      oldPassword: z.string().min(1).max(100),
+      newPassword: z.string().min(6).max(32),
+    }).parse(b);
+    await this.dashboardService.changePassword(user.sub, oldPassword, newPassword);
+    return null;
+  }
 
   @Get('models') listModels() { return this.modelsService.list(); }
 
