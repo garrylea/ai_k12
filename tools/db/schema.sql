@@ -1,5 +1,5 @@
 -- K12 智学系统 — 数据库初始化脚本
--- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.7）
+-- 依据：docs/K12智学系统-数据库设计文档.md（版本 v1.8）
 -- 范围：MVP 全部表（§3.1 ~ §3.9、§3.11），不含 P2 计费相关表（§3.10）
 -- 数据库：MySQL 9.7.1 LTS（文档约定）
 -- 字符集：utf8mb4
@@ -679,7 +679,79 @@ CREATE TABLE IF NOT EXISTS extract_tasks (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
--- 11. updated_at 自动触发器
+-- 12. 管理员中枢
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS llm_models (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  model_key VARCHAR(50) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  provider_type VARCHAR(20) NOT NULL,
+  model_id VARCHAR(100) NOT NULL,
+  base_url VARCHAR(255) NOT NULL,
+  api_key VARCHAR(500) NOT NULL,
+  context_window INT NOT NULL DEFAULT 131072,
+  max_output_tokens INT NOT NULL DEFAULT 16384,
+  is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_llm_models_key (model_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS llm_routes (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  scene VARCHAR(30) NOT NULL,
+  subject VARCHAR(20) NOT NULL,
+  primary_model_key VARCHAR(50) NOT NULL,
+  fallback_model_key VARCHAR(50) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_llm_routes (scene, subject),
+  CONSTRAINT fk_llm_routes_primary FOREIGN KEY (primary_model_key) REFERENCES llm_models (model_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS parent_messages (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  parent_id BIGINT DEFAULT NULL,
+  type VARCHAR(20) NOT NULL,
+  title VARCHAR(100) NOT NULL,
+  content TEXT NOT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  read_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_parent_messages_parent (parent_id, is_read)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS message_reads (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  parent_id BIGINT NOT NULL,
+  message_id BIGINT NOT NULL,
+  read_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_message_reads (parent_id, message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admin_dialogues (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  admin_id BIGINT NOT NULL,
+  model_key VARCHAR(50) NOT NULL,
+  title VARCHAR(200) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_admin_dialogues_admin (admin_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admin_messages (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  dialogue_id BIGINT NOT NULL,
+  role VARCHAR(10) NOT NULL,
+  content TEXT NOT NULL,
+  reasoning TEXT DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_admin_messages_dialogue (dialogue_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 13. updated_at 自动触发器
 -- ============================================================
 
 DROP TRIGGER IF EXISTS trg_parents_updated_at;
@@ -829,6 +901,24 @@ SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 DROP TRIGGER IF EXISTS trg_extract_tasks_updated_at;
 CREATE TRIGGER trg_extract_tasks_updated_at
 BEFORE UPDATE ON extract_tasks
+FOR EACH ROW
+SET NEW.updated_at = CURRENT_TIMESTAMP(3);
+
+DROP TRIGGER IF EXISTS trg_llm_models_updated_at;
+CREATE TRIGGER trg_llm_models_updated_at
+BEFORE UPDATE ON llm_models
+FOR EACH ROW
+SET NEW.updated_at = CURRENT_TIMESTAMP(3);
+
+DROP TRIGGER IF EXISTS trg_llm_routes_updated_at;
+CREATE TRIGGER trg_llm_routes_updated_at
+BEFORE UPDATE ON llm_routes
+FOR EACH ROW
+SET NEW.updated_at = CURRENT_TIMESTAMP(3);
+
+DROP TRIGGER IF EXISTS trg_admin_dialogues_updated_at;
+CREATE TRIGGER trg_admin_dialogues_updated_at
+BEFORE UPDATE ON admin_dialogues
 FOR EACH ROW
 SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 
