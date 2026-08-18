@@ -1,11 +1,14 @@
-import { Body, Controller, Delete, Get, HttpException, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, Param, ParseIntPipe, Patch, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { AdminModelsService } from './admin-models.service.js';
 import { AdminAccountsService } from './admin-accounts.service.js';
 import { AdminMessagesService } from './admin-messages.service.js';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { AdminChatService } from './admin-chat.service.js';
+import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
+import { CurrentUser } from '../../common/decorators/current-user.js';
 
 const ModelSchema = z.object({
   modelKey: z.string().min(2).max(50).regex(/^[a-zA-Z0-9_-]+$/),
@@ -43,6 +46,7 @@ export class AdminController {
     private modelsService: AdminModelsService,
     private accountsService: AdminAccountsService,
     private messagesService: AdminMessagesService,
+    private chatService: AdminChatService,
   ) {}
 
   @Get('models') listModels() { return this.modelsService.list(); }
@@ -122,5 +126,44 @@ export class AdminController {
   @Delete('messages/:id') async deleteMessage(@Param('id', ParseIntPipe) id: number) {
     await this.messagesService.remove(id);
     return null;
+  }
+
+  @Post('chat/dialogues') async createDialogue(@CurrentUser() user: JwtUser, @Body() b: unknown) {
+    const { modelKey } = z.object({ modelKey: z.string().min(1) }).parse(b);
+    return this.chatService.createDialogue(user.sub, modelKey);
+  }
+
+  @Get('chat/dialogues') listDialogues(@CurrentUser() user: JwtUser) { return this.chatService.listDialogues(user.sub); }
+
+  @Delete('chat/dialogues/:id') async deleteDialogue(@CurrentUser() user: JwtUser, @Param('id', ParseIntPipe) id: number) {
+    await this.chatService.deleteDialogue(user.sub, id);
+    return null;
+  }
+
+  @Get('chat/messages') async listChatMessages(@CurrentUser() user: JwtUser, @Query('dialogueId', ParseIntPipe) dialogueId: number) {
+    return this.chatService.listMessages(user.sub, dialogueId);
+  }
+
+  @Post('chat/stream')
+  async chatStream(@CurrentUser() user: JwtUser, @Body() body: unknown, @Res() res: Response) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+    const { dialogueId, message } = z.object({ dialogueId: z.number().int(), message: z.string().min(1).max(4000) }).parse(body);
+    const abort = new AbortController();
+    let finished = false;
+    res.on('close', () => { if (!finished) abort.abort(); });
+    try {
+      for await (const event of this.chatService.chatStream({ dialogueId, message }, user.sub)) {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+    } catch (err) {
+      const payload = (err as any)?.getResponse?.() ?? { code: 5001, message: 'AI 服务异常' };
+      res.write(`data: ${JSON.stringify({ type: 'error', code: payload.code ?? 5001, message: payload.message ?? 'AI 服务异常' })}\n\n`);
+    } finally {
+      finished = true;
+      res.end();
+    }
   }
 }
