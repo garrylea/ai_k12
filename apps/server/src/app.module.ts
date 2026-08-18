@@ -15,6 +15,7 @@ import { RefineryModule } from './modules/refinery/refinery.module.js';
 import { PracticeModule } from './modules/practice/practice.module.js';
 import { ParentModule } from './modules/parent/parent.module.js';
 import { ConfigModule } from './modules/config/config.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ConfigModule } from './modules/config/config.module.js';
     PracticeModule,
     ParentModule,
     ConfigModule,
+    AdminModule,
   ],
   providers: [
     BanRegistry,
