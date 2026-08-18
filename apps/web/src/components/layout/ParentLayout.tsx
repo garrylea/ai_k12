@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useThemeStore } from '@/store/themeStore';
 import { ParentNav } from './ParentNav';
-import { Banner, LogoutButton } from '@/components/base';
+import { Banner } from '@/components/base';
 
 export default function ParentLayout() {
   const { setMode } = useThemeStore();
@@ -12,10 +12,6 @@ export default function ParentLayout() {
   }, [setMode]);
 
   const hasAlert = true;
-
-  /** 家长头部展示用：11 位手机号打码为 138****1234；非手机号原样返回。 */
-  const maskPhone = (s: string | null) =>
-    s && /^1\d{10}$/.test(s) ? `${s.slice(0, 3)}****${s.slice(7)}` : (s ?? '');
 
   return (
     <div data-theme="parent" className="min-h-screen bg-[var(--bg-base)]">
@@ -48,10 +44,7 @@ export default function ParentLayout() {
               </div>
             </div>
             <div className="flex items-center gap-3 text-sm">
-              <span className="text-[var(--text-tertiary)]">
-                家长账号 {maskPhone(localStorage.getItem('username'))}
-              </span>
-              <LogoutButton />
+              <span className="text-[var(--text-tertiary)]">家长端 · 监管空间</span>
             </div>
           </header>
 
