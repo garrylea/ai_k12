@@ -1,5 +1,6 @@
 import { routeConfig } from '../config.js';
 import type { RouteRequest, RouteResult, ModelConfig, Scene, Subject } from '../types.js';
+import type { ModelConfigRegistry } from './model-config-registry.js';
 
 interface RouteRule {
   subject: string;
@@ -9,28 +10,41 @@ interface RouteRule {
 }
 
 export class ModelRouter {
-  private models: Record<string, ModelConfig>;
+  private models: Record<string, ModelConfig & { apiKey?: string }>;
   private routes: Record<string, RouteRule[]>;
   private defaultRule: { primary: string; fallback: string };
+  private registry?: ModelConfigRegistry;
 
-  constructor() {
-    // Strip apiKey from model configs for public use
-    this.models = {};
-    for (const [id, config] of Object.entries(routeConfig.models)) {
-      const { apiKey, ...rest } = config as ModelConfig & { apiKey: string };
-      this.models[id] = rest;
+  constructor(registry?: ModelConfigRegistry) {
+    this.registry = registry;
+    if (registry) {
+      const snap = registry.getSnapshot();
+      this.models = snap.models;
+      this.routes = snap.routes;
+      this.defaultRule = snap.default;
+    } else {
+      // 无 registry：直接读 YAML（既有行为，兜底路径零变化）。
+      // 注意：不再剥离 apiKey（ModelClient 后续直接用 request.model.apiKey）。
+      this.models = routeConfig.models as Record<string, ModelConfig & { apiKey?: string }>;
+      this.routes = routeConfig.routes as Record<string, RouteRule[]>;
+      this.defaultRule = routeConfig.default;
     }
-    this.routes = routeConfig.routes as Record<string, RouteRule[]>;
-    this.defaultRule = routeConfig.default;
   }
 
-  /** Look up a model config by id (apiKey stripped; ModelClient re-attaches it
-   * via the provider). Used for side tasks like title generation. */
-  getModel(id: string): ModelConfig | undefined {
+  /** Look up a model config by id. Used for side tasks like title generation. */
+  getModel(id: string): (ModelConfig & { apiKey?: string }) | undefined {
     return this.models[id];
   }
 
   route(request: RouteRequest): RouteResult {
+    // registry 模式下每次 route 前刷新本地引用（reload 会整体替换快照对象）
+    if (this.registry) {
+      const snap = this.registry.getSnapshot();
+      this.models = snap.models;
+      this.routes = snap.routes;
+      this.defaultRule = snap.default;
+    }
+
     // P1: image tutoring is now two-stage. Images are transcribed by the
     // `transcribe` scene (qwen3-vl-plus) FIRST; the confirmed text is then
     // tutored by the normal text route (qwen3.7-max). So tutoring no longer

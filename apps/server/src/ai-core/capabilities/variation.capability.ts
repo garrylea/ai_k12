@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { VariationRequest, VariationResponse, VariationQuestion } from '../types.js';
 import { timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
+import { getModelConfigRegistry } from '../infra/model-config-registry.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
 import { ResponseParser } from '../infra/response-parser.js';
@@ -30,7 +31,7 @@ export interface VariationCapabilityDeps {
 }
 
 export class VariationCapability {
-  private modelRouter = new ModelRouter();
+  private modelRouter = new ModelRouter(getModelConfigRegistry());
   private promptBuilder: PromptBuilder;
   private modelClient: ModelClient;
   private responseParser = new ResponseParser();

@@ -37,9 +37,12 @@ export interface ModelConfig {
   supportsStreaming: boolean;
 }
 
+/** 路由结果模型带 apiKey（registry 快照/新 YAML 路径不再剥离；供 ModelClient 直接取用） */
+export type RoutedModel = ModelConfig & { apiKey?: string };
+
 export interface RouteResult {
-  primary: ModelConfig;
-  fallback?: ModelConfig;
+  primary: RoutedModel;
+  fallback?: RoutedModel;
   reason: string;
 }
 

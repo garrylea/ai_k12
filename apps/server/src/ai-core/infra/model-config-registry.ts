@@ -84,3 +84,14 @@ export class ModelConfigRegistry {
     }
   }
 }
+
+/** 模块级单例：capability 无 DI 场景取用（Nest 启动时由 ConfigModule 注入 repo 并 reload）。 */
+let globalRegistry: ModelConfigRegistry | null = null;
+
+export function getModelConfigRegistry(): ModelConfigRegistry | undefined {
+  return globalRegistry ?? undefined;
+}
+
+export function setModelConfigRegistry(reg: ModelConfigRegistry): void {
+  globalRegistry = reg;
+}
