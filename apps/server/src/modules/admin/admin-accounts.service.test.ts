@@ -52,3 +52,19 @@ describe('AdminAccountsService', () => {
     await expect(svc(mk()).setStudentStatus(99, false)).rejects.toMatchObject({ response: { code: 1002 } });
   });
 });
+
+describe('AdminAccountsService 脱敏', () => {
+  it('搜索家长/学生不泄漏 passwordHash', async () => {
+    const parentRow = { id: 1, phone: '13800000000', passwordHash: '$2b$10$secret', name: '甲', isActive: true, studentCount: 2 };
+    const d = mk({ parentsRepo: { ...mk().parentsRepo, search: vi.fn().mockResolvedValue([parentRow]) } });
+    const list = await svc(d).searchParents('138');
+    expect(JSON.stringify(list)).not.toContain('secret');
+    expect(list[0].studentCount).toBe(2);
+
+    const studentRow = { id: 5, parentId: 1, username: 's1', passwordHash: '$2b$10$secret2', name: '小', age: 13, grade: '初二', schoolLevel: 'junior', isActive: true };
+    const d2 = mk({ studentsRepo: { ...mk().studentsRepo, search: vi.fn().mockResolvedValue([studentRow]) } });
+    const list2 = await svc(d2).searchStudents('s1');
+    expect(JSON.stringify(list2)).not.toContain('secret2');
+    expect(list2[0].username).toBe('s1');
+  });
+});

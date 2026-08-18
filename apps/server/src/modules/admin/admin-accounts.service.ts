@@ -12,11 +12,15 @@ export class AdminAccountsService {
   ) {}
 
   async searchParents(q: string) {
-    return this.parentsRepo.search(q);
+    const rows = await this.parentsRepo.search(q);
+    // 脱敏：passwordHash 绝不外泄
+    return rows.map(({ passwordHash: _ph, ...rest }) => rest);
   }
 
   async searchStudents(q: string) {
-    return this.studentsRepo.search(q);
+    const rows = await this.studentsRepo.search(q);
+    // 脱敏：passwordHash 绝不外泄
+    return rows.map(({ passwordHash: _ph, ...rest }) => rest);
   }
 
   async setParentStatus(parentId: number, active: boolean) {
