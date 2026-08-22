@@ -19,6 +19,7 @@ import AdminMessagesPage from '@/pages/admin/AdminMessagesPage';
 import AdminChatPage from '@/pages/admin/AdminChatPage';
 import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
 import RequireRole from './RequireRole';
+import { clearAuth, isSessionValid } from '@/utils/auth';
 
 const Placeholder = ({ title }: { title: string }) => (
   <div className="p-8 text-[var(--text-primary)]">
@@ -29,6 +30,11 @@ const Placeholder = ({ title }: { title: string }) => (
 
 /** 根路径按登录角色分流：admin -> /admin，parent -> /parent/students，student -> 入口选择页。 */
 const RoleRedirect = () => {
+  // token 缺失或已过期：清掉残留角色，一律回登录页
+  if (!isSessionValid()) {
+    clearAuth();
+    return <Navigate to="/login" replace />;
+  }
   const role = localStorage.getItem('userRole');
   if (role === 'admin') return <Navigate to="/admin" replace />;
   if (role === 'parent') return <Navigate to="/parent/students" replace />;

@@ -27,28 +27,41 @@ async function main() {
     database: process.env.DB_NAME ?? 'ai_k12',
   });
 
+  // 已成功落库的 model_key 集合（含此前已存在行），路由导入时只允许引用这些模型。
+  const seededModelKeys = new Set<string>();
   let importedModels = 0;
+  let skippedModels = 0;
   for (const [key, m] of Object.entries(routeConfig.models)) {
     const [exists] = await pool.execute<mysql.RowDataPacket[]>(
       'SELECT id FROM llm_models WHERE model_key = ?', [key]);
-    if (exists.length > 0) continue;
+    if (exists.length > 0) {
+      seededModelKeys.add(key);
+      continue;
+    }
+    // 未配置的模型（缺 baseUrl 或 apiKey）不导入：环境变量未填时 YAML 插值会得到 null/空，
+    // 插入 NOT NULL 列会失败，且空凭据的模型没有任何用处。
+    if (!m.baseUrl || !m.apiKey) {
+      console.log(`[seed] 跳过未配置的模型 ${key}（缺少 baseUrl 或 apiKey）`);
+      skippedModels += 1;
+      continue;
+    }
     await pool.execute(
       `INSERT INTO llm_models (model_key, name, provider_type, model_id, base_url, api_key, context_window, max_output_tokens)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [key, key, m.provider, m.modelId, m.baseUrl, encryptApiKey(m.apiKey ?? ''),
+      [key, key, m.provider, m.modelId, m.baseUrl, encryptApiKey(m.apiKey),
        m.contextWindow ?? 131072, m.maxOutputTokens ?? 16384]);
+    seededModelKeys.add(key);
     importedModels += 1;
     console.log(`[seed] 模型 ${key} 已导入`);
   }
 
-  const modelKeys = new Set(Object.keys(routeConfig.models));
   let importedRoutes = 0;
   for (const [scene, rules] of Object.entries(routeConfig.routes)) {
     for (const r of rules) {
       const [exists] = await pool.execute<mysql.RowDataPacket[]>(
         'SELECT id FROM llm_routes WHERE scene = ? AND subject = ?', [scene, r.subject]);
       if (exists.length > 0) continue; // 同 scene+subject 第二条（difficulty 细分）在此合并跳过
-      if (!modelKeys.has(r.primary) || (r.fallback && !modelKeys.has(r.fallback))) continue;
+      if (!seededModelKeys.has(r.primary) || (r.fallback && !seededModelKeys.has(r.fallback))) continue;
       await pool.execute(
         'INSERT INTO llm_routes (scene, subject, primary_model_key, fallback_model_key) VALUES (?, ?, ?, ?)',
         [scene, r.subject, r.primary, r.fallback ?? null]);
@@ -56,7 +69,7 @@ async function main() {
       console.log(`[seed] 路由 ${scene}/${r.subject} -> ${r.primary} 已导入`);
     }
   }
-  console.log(`[seed] 完成：模型 +${importedModels}，路由 +${importedRoutes}（已存在的跳过）`);
+  console.log(`[seed] 完成：模型 +${importedModels}（跳过 ${skippedModels} 个未配置），路由 +${importedRoutes}（已存在的跳过）`);
   await pool.end();
 }
 
