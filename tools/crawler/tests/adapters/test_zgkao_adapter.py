@@ -104,6 +104,45 @@ class TestZgkaoAdapterInterface:
         result = adapter.download_item(items[0], ctx)
         assert result.files_downloaded == 1
 
+    def test_dry_run_does_not_pollute_checkpoint(self, tmp_path):
+        """回归：dry-run 只计数不落盘，也不能把 detail URL 写进 checkpoint--
+        否则后续真实爬取会因 is_downloaded(item.id) 整批跳过（PDF 实际未下载）。"""
+        fetcher = MockFetcher()
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        crawl_time = datetime(2026, 7, 4, 10, 0, 0, tzinfo=timezone.utc)
+        store = PdfStore(
+            base_dir=str(tmp_path),
+            entry_url="https://www.zgkao.com/shitiku/89047.html",
+            crawl_time=crawl_time,
+        )
+        checkpoint = Checkpoint(tmp_path / ".checkpoint.json")
+        checkpoint.load()
+
+        items = list(adapter.list_items({}))
+        ctx = DownloadContext(
+            fetcher=fetcher,
+            store=store,
+            checkpoint=checkpoint,
+            validator=PdfValidator(),
+            dry_run=True,
+        )
+        result = adapter.download_item(items[0], ctx)
+        assert result.files_downloaded == 1  # dry-run 计数照常
+        assert not checkpoint.is_downloaded(items[0].id)  # 但不标 checkpoint
+        assert not checkpoint.is_downloaded("https://cdn.zgkao.com/zixunzhan/test.pdf")
+
+        # 真实爬取（关掉 dry-run，新 adapter 实例模拟下一次运行）应能正常下载，
+        # 不被 dry-run 留下的 checkpoint 状态挡住
+        adapter_real = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        ctx_real = DownloadContext(
+            fetcher=fetcher,
+            store=store,
+            checkpoint=checkpoint,
+            validator=PdfValidator(),
+        )
+        result_real = adapter_real.download_item(items[0], ctx_real)
+        assert result_real.files_downloaded == 1
+
     def test_filter_excludes_non_matching(self):
         fetcher = MockFetcher()
         adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {"years": {"2025"}})

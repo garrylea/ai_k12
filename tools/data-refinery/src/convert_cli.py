@@ -12,7 +12,7 @@ from scanner import Material, MaterialScanner
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="将爬虫素材转换为 Markdown")
     parser.add_argument("--input-dir", help="素材输入目录（默认 tools/crawler/data）")
-    parser.add_argument("--output-dir", help="Markdown 输出目录（默认 tools/data-refinery/output/md）")
+    parser.add_argument("--output-dir", help="输出根目录（MD 落 {该目录}/md/ 下；默认 tools/data-refinery/output）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
     parser.add_argument("--force", action="store_true", help="跳过 checkpoint，尝试继续处理未转完的页")
     parser.add_argument("--reconvert", action="store_true", help="删除已有输出，重新转换所有页")

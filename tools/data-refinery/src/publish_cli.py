@@ -4,9 +4,9 @@
 ``![alt](images/xxx.jpg)`` 按 §9 规范名物化到 ``output/assets/``，改写为规范相对路径，
 填充 ``content_metadata.images[]`` / ``options[].image_url``，输出到 ``output/published/``。
 
-**暂不入库 MySQL**：资源路径用源相对稳定键（``questions/{subject}/{hash}/{idx}``、
-``textbooks/{subject}/{hash}/{sort_order}``），DB 入库与 lesson_id 映射后置
-（见 publish 计划 §5.2 方案 2、§8 #1）。
+资产路径用源相对稳定键（``questions/{subject}/{hash}/{idx}``、
+``textbooks/{subject}/{hash}/{sort_order}``）。subject 按文件相对路径首段
+（中文学科名，如 ``数学/``）推导；识别不了的学科回退 ``math``（MVP 兼容旧行为）。
 """
 
 import argparse
@@ -20,7 +20,25 @@ from config import RefineryConfig
 from image_rewrite import rewrite_item
 from models import ExamQuestion, TextbookCard
 
-SUBJECT_CODE = "math"  # MVP 仅数学
+# 中文学科名 -> subject code（与 db_loader._subject_code_by_name_fallback 一致）
+_SUBJECT_NAME_TO_CODE = {
+    "数学": "math", "语文": "chinese", "英语": "english",
+    "物理": "physics", "化学": "chemistry", "生物": "biology",
+    "历史": "history", "地理": "geography", "道德与法治": "politics",
+}
+_DEFAULT_SUBJECT_CODE = "math"  # 识别不出学科时回退（兼容旧资产路径）
+
+
+def _subject_code_for(rel_file: Path) -> str:
+    """从文件相对路径首段（中文学科名）推导 subject code。
+
+    rel 形如 ``数学/初中/.../page_001`` 或 ``化学/初中/second/2024/xxx-试卷``，
+    首段即学科。修复前 SUBJECT_CODE 硬编码 "math"，化学等学科资产路径被误标。
+    """
+    parts = rel_file.parts
+    if parts:
+        return _SUBJECT_NAME_TO_CODE.get(parts[0], _DEFAULT_SUBJECT_CODE)
+    return _DEFAULT_SUBJECT_CODE
 
 
 def parse_args(argv=None):
@@ -143,6 +161,7 @@ def main(argv=None):
             kind = _kind_for(rel_file)
             md_images_dir = md_dir / rel_file.parent  # 含 images/ 的目录
             source_key = _hash8(key)
+            subject_code = _subject_code_for(rel_file)
 
             raw_items = [
                 json.loads(line)
@@ -154,10 +173,10 @@ def main(argv=None):
             for idx, raw in enumerate(raw_items, start=1):
                 if kind == "questions":
                     item = ExamQuestion(**raw)
-                    asset_prefix = f"questions/{SUBJECT_CODE}/{source_key}/{idx}"
+                    asset_prefix = f"questions/{subject_code}/{source_key}/{idx}"
                 else:
                     item = TextbookCard(**raw)
-                    asset_prefix = f"textbooks/{SUBJECT_CODE}/{source_key}/{item.sort_order}"
+                    asset_prefix = f"textbooks/{subject_code}/{source_key}/{item.sort_order}"
                 rewrite_item(item, kind, md_images_dir, store, asset_prefix)
                 out_items.append(item.model_dump(mode="json"))
 

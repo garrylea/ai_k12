@@ -58,7 +58,7 @@ def is_front_matter(text: str, page_num: int) -> bool:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="从 Markdown 提取教材卡片")
     parser.add_argument("--input-dir", help="Markdown 输入目录（默认 output/md）")
-    parser.add_argument("--output-dir", help="提取结果输出目录（默认 output/extracted）")
+    parser.add_argument("--output-dir", help="输出根目录（JSONL 落 {该目录}/extracted/ 下；默认 output/extracted 所在的 output 根）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all")
     parser.add_argument("--file", help="只提取匹配的文件（相对路径子串匹配）")
     parser.add_argument("--pages", help="只提取指定页码，如 '1-6' 或 '1,3,5-8'")
@@ -112,6 +112,27 @@ def _match_pages(md_name: str, page_nums: set[int]) -> bool:
     if m:
         return int(m.group(1)) in page_nums
     return False
+
+
+def _last_lesson_id(jsonl_path: Path) -> str | None:
+    """读 jsonl 中最后一条非空 lesson_id，用于断点续传时回填 per-book 状态。
+
+    续跑时已抽页会被 skip，若不回填状态，其后续页的续页 card 会丢上下文。
+    """
+    if not jsonl_path.exists():
+        return None
+    last = None
+    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("lesson_id"):
+            last = obj["lesson_id"]
+    return last
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -282,6 +303,11 @@ def main(argv=None):
 
         if not args.force and not args.reconvert and checkpoint.is_extracted(file_key):
             skipped += 1
+            # 断点续传：从已抽页 jsonl 回填 per-book 状态，保证后续续页能继承
+            if source.kind == "cards":
+                last = _last_lesson_id(extracted_dir / rel_file.with_suffix(".jsonl"))
+                if last is not None:
+                    book_lesson[book_key] = last
             print(f"[skip] ({idx}/{total_processed}) {file_key}", flush=True)
             continue
 

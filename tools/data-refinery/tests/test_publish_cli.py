@@ -42,6 +42,36 @@ class TestPublishCli:
         asset_root = out / "assets" / "questions" / "math"
         assert any(asset_root.rglob("stem_01.jpg"))
 
+    def test_subject_code_derived_from_path_not_hardcoded(self, tmp_path):
+        """回归：化学试卷的资产路径应是 questions/chemistry/ 而不是硬编码的 math。"""
+        out = tmp_path / "out"
+        ext = out / "extracted" / "化学" / "初中" / "second" / "2024"
+        ext.mkdir(parents=True)
+        q = {
+            "subject_id": "chem",
+            "type": "short_answer",
+            "difficulty": 1,
+            "content": "如图 ![](images/fig1.jpg) 求质量分数",
+            "answer": "1",
+        }
+        (ext / "化学-试卷.jsonl").write_text(json.dumps(q, ensure_ascii=False) + "\n", encoding="utf-8")
+        md_images = out / "md" / "化学" / "初中" / "second" / "2024" / "images"
+        md_images.mkdir(parents=True)
+        (md_images / "fig1.jpg").write_bytes(b"\xff\xd8\xff" + b"fig1")
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+        published = out / "published" / "化学" / "初中" / "second" / "2024" / "化学-试卷.jsonl"
+        assert published.exists()
+        item = json.loads(published.read_text(encoding="utf-8").strip())
+        assert "questions/chemistry/" in item["content"]
+        assert "questions/math/" not in item["content"]
+        # 图片物化到 output/assets/questions/chemistry/
+        asset_root = out / "assets" / "questions" / "chemistry"
+        assert any(asset_root.rglob("stem_01.jpg"))
+
     def test_checkpoint_skips_on_rerun(self, tmp_path, capsys):
         out = _setup(tmp_path)
         with patch("publish_cli.RefineryConfig") as mock_config:

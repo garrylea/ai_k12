@@ -1,7 +1,7 @@
 # K12 数据管线使用手册
 
 > **适用于**：数据工程师、开发者
-> **最后更新**：2026-07-30
+> **最后更新**：2026-08-26
 > **关联文档**：[管线总结](./data-refinery-管线总结与后续.md) | [TOC 设计](./data-refinery-TOC目录优先管线设计.md) | [DB 设计](./K12智学系统-数据库设计文档.md)
 
 ---
@@ -41,15 +41,20 @@
 
 ```bash
 # === LLM 配置（extract / toc_parse 共用）===
-LLM_PROVIDER=openai                  # openai | anthropic
+LLM_PROVIDER=openai                  # openai | kimi | qwen | glm | deepseek | gemini | local | anthropic
 LLM_MODEL=deepseek-v4-flash          # 推荐 DeepSeek reasoner
 LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_AUTH_TOKEN=sk-xxx                # refinery 专属，勿用 ANTHROPIC_* 会被 shell 覆盖
-LLM_MAX_TOKENS=65536
-LLM_TIMEOUT=120
+LLM_AUTH_TOKEN=sk-xxx                # refinery 专属鉴权变量，勿用 ANTHROPIC_* 会被 shell 覆盖
+                                     #（fallback 链：LLM_API_KEY -> OPENAI_API_KEY -> ANTHROPIC_API_KEY；
+                                     #   token：LLM_AUTH_TOKEN -> ANTHROPIC_AUTH_TOKEN）
+LLM_MAX_TOKENS=65536                 # 默认 16384；DeepSeek reasoner 建议 65536
+LLM_TIMEOUT=120                      # 秒
+LLM_MAX_RETRIES=3                    # LLM 请求失败重试次数（默认 3）
+LLM_THINKING=false                   # 开启 thinking 模式（部分 provider 支持）
+LLM_ENABLE_CACHE=false               # 开启 provider 侧 prompt 缓存
 
 # === MinerU 配置（convert）===
-MINERU_BIN=mineru-open-api
+MINERU_BIN=mineru-open-api           # MinerU CLI 命令（外部依赖，需单独安装）
 MINERU_TIMEOUT=300
 MINERU_TOKEN=xxx                     # MinerU API token
 
@@ -61,8 +66,8 @@ DB_PASS=ai_k12
 DB_NAME=ai_k12
 
 # === 路径覆盖（可选）===
-REFINERY_INPUT_DIR=tools/crawler/data       # 默认
-REFINERY_OUTPUT_DIR=tools/data-refinery/output  # 默认
+REFINERY_INPUT_DIR=tools/crawler/data       # 默认（convert 的素材输入目录）
+REFINERY_OUTPUT_DIR=tools/data-refinery/output  # 默认（输出根：md/extracted/toc/published 都在其下）
 ```
 
 ### 2.2 依赖安装
@@ -74,6 +79,18 @@ cd tools/crawler && pip install -r requirements.txt
 # Data Refinery
 cd tools/data-refinery && pip install -r requirements.txt
 ```
+
+**MinerU CLI（convert 依赖，需单独安装）**：`convert_cli` 调用 `mineru-open-api`
+（MinerU 官方免费 CLI，文档转 Markdown）。安装与鉴权：
+
+```bash
+pip install mineru          # 安装（提供 mineru-open-api 命令）
+mineru-open-api auth         # 首次使用前登录鉴权（Precision Extraction 需要；
+                            #   token 写入 MINERU_TOKEN 或由 CLI 自行管理）
+```
+
+本项目用的是 `mineru-open-api extract <files> -o <dir>` 精确提取模式（批量上限见
+`convert.py` `_BATCH_SIZE`）。详见 https://mineru.net 。
 
 ### 2.3 数据库初始化
 
@@ -185,7 +202,7 @@ python src/convert_cli.py --dry-run
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--input-dir` | path | `tools/crawler/data` | 素材输入目录 |
-| `--output-dir` | path | `output/md` | Markdown 输出目录 |
+| `--output-dir` | path | `output`（输出根） | **输出根目录**：MD 落 `{该目录}/md/` 下，不是直接落该目录 |
 | `--source` | all / zgkao / smartedu | `all` | 按来源过滤 |
 | `--force` | flag | 否 | 忽略 checkpoint，处理所有未完成的 |
 | `--reconvert` | flag | 否 | 删除已有输出 + 清 checkpoint，全部重转 |
@@ -235,7 +252,7 @@ python src/toc_parse_cli.py --dry-run
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有 JSON，重新解析 |
 | `--dry-run` | flag | 否 | 只打印目录页不解析 |
 
-**输出**：`output/toc/{学科}/{版本}/{年级}/{书名}_toc.json`
+**输出**：`output/toc/{学科}/{学段}/{版本}/{年级}/{册次}/{书名}.json`（如 `output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json`）
 
 **TOC JSON 格式**：见 [TOC 设计文档](./data-refinery-TOC目录优先管线设计.md) §4.1。
 
@@ -270,7 +287,13 @@ python src/extract_cli.py --pages "8-20"
 python src/extract_cli.py --book "九年级/上册"
 
 # 带 TOC 校验 + 自动修正
-python src/extract_cli.py --toc output/toc/数学/人教版/九年级/九年级上册_toc.json
+python src/extract_cli.py --toc output/toc/数学/初中/人教版/九年级/上册/义务教育教科书·数学九年级上册.json
+
+# LLM 节流：每次 LLM 调用后间隔 2 秒
+python src/extract_cli.py --interval 2
+
+# LLM 节流：每 10 页一批，批次间停 60 秒（应对 API 限流）
+python src/extract_cli.py --batch-size 10 --batch-sleep 60
 
 # 重新提取指定页（清 checkpoint + 删 JSONL）
 python src/extract_cli.py --reconvert --pages "8-20"
@@ -282,7 +305,7 @@ python src/extract_cli.py --dry-run
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--input-dir` | path | `output/md` | MD 输入目录 |
-| `--output-dir` | path | `output/extracted` | JSONL 输出目录 |
+| `--output-dir` | path | `output`（输出根） | **输出根目录**：JSONL 落 `{该目录}/extracted/` 下，不是直接落该目录 |
 | `--source` | all / zgkao / smartedu | `all` | 来源过滤 |
 | `--file` | str | — | 文件名子串匹配 |
 | `--pages` | str | — | 页码过滤，如 `1-6` 或 `1,3,5-8` |
@@ -290,6 +313,9 @@ python src/extract_cli.py --dry-run
 | `--force` | flag | 否 | 忽略 checkpoint，不删已有输出 |
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有 JSONL，重新提取 |
 | `--toc` | path | — | TOC JSON 路径，启用 lesson_id 校验+修正 |
+| `--interval` | float | `0` | 每次 LLM 调用后 sleep 秒数（限速节流） |
+| `--batch-size` | int | `0` | 每处理 N 页（发生 LLM 调用的页）后进入批次间歇（`0`=不分批） |
+| `--batch-sleep` | float | `0` | 批次之间 sleep 秒数（配合 `--batch-size`） |
 | `--dry-run` | flag | 否 | 只打印不提取 |
 
 **输出**：`output/extracted/{学科}/…/page_001.jsonl …`  
@@ -346,7 +372,17 @@ python src/db_loader_cli.py --source smartedu
 
 # 试运行
 python src/db_loader_cli.py --dry-run
+
+# 库里有业务数据（错题本/answers/progress 等）时，显式清空后重载（不可恢复！）
+python src/db_loader_cli.py --purge-business-data
 ```
+
+**业务数据守卫（FK 保护）**：`answers`/`main_error_books`/`aux_error_books`/`variation_questions`
+等业务表对 `questions` 有 `ON DELETE RESTRICT` 外键，`progress`/`homework_submissions`
+会挡住 `textbook_versions` 级联删除。full-reload 会先预检这些表：有数据且未传
+`--purge-business-data` 时**报错退出**（防止误删学生数据），提示两条出路：
+1. 加 `--purge-business-data` 清空上述业务表后重载（学生侧数据不可恢复）
+2. 改用模式 C（`--load-cards`，增量入库，不动业务数据）
 
 #### 模式 B：仅建 TOC 骨架
 
@@ -354,7 +390,7 @@ python src/db_loader_cli.py --dry-run
 
 ```bash
 # 只建骨架，不入 card
-python src/db_loader_cli.py --load-toc --toc-path output/toc/数学/人教版/九年级/下册.json
+python src/db_loader_cli.py --load-toc --toc-path output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json
 ```
 
 #### 模式 C：仅 card 入库（TOC 模式下）
@@ -363,7 +399,7 @@ python src/db_loader_cli.py --load-toc --toc-path output/toc/数学/人教版/�
 
 ```bash
 # card 入库，不清表，带 TOC 匹配
-python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/人教版/九年级/下册.json
+python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json
 ```
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -373,6 +409,7 @@ python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/人教版/
 | `--load-toc` | flag | 否 | TOC 模式：只建骨架不入 card（需 `--toc-path`） |
 | `--load-cards` | flag | 否 | Card 模式：只入库 card，不 reset（可选 `--toc-path`） |
 | `--toc-path` | path | — | TOC JSON 路径 |
+| `--purge-business-data` | flag | 否 | full-reload 前清空引用 cards/questions 的业务数据（answers/错题本/变式题/作业提交/progress，**不可恢复**）；默认遇业务数据报错退出 |
 | `--dry-run` | flag | 否 | 只打印不入库 |
 
 **不传 `--load-*` 时**，行为与旧版完全一致（full-reload：DELETE + 重插）。
@@ -393,6 +430,9 @@ python src/refinery_cli.py --skip-load
 
 # 只入库（跳过 publish，要求 published 已存在）
 python src/refinery_cli.py --skip-publish
+
+# 库里有业务数据时，清空后全量重载（透传给 db_loader_cli，不可恢复！）
+python src/refinery_cli.py --purge-business-data
 ```
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -401,6 +441,7 @@ python src/refinery_cli.py --skip-publish
 | `--dry-run` | flag | 否 | publish + db_loader 都只打印 |
 | `--skip-publish` | flag | 否 | 跳过 publish，直接 db_loader |
 | `--skip-load` | flag | 否 | 跳过 db_loader，只 publish |
+| `--purge-business-data` | flag | 否 | 透传给 db_loader_cli：full-reload 前清空业务数据（否则遇业务数据报错） |
 
 ---
 
@@ -424,10 +465,10 @@ python src/toc_parse_cli.py --grade 九下
 
 # Step 4: 建 DB 骨架（整本书章节目录完整）
 python src/db_loader_cli.py --load-toc \
-  --toc-path output/toc/数学/人教版/九年级/义务教育教科书·数学九年级下册_toc.json
+  --toc-path output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json
 
 # Step 5: 提取卡片（可分批）
-python src/extract_cli.py --toc output/toc/数学/人教版/九年级/义务教育教科书·数学九年级下册_toc.json \
+python src/extract_cli.py --toc output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json \
   --pages "8-30"
 
 # Step 6: 发布 + 入库
@@ -438,7 +479,7 @@ python src/refinery_cli.py --source smartedu
 
 ```bash
 # 上回只转了 page_008~030，这次追加 page_031~049
-python src/extract_cli.py --toc output/toc/数学/人教版/九年级/...json --pages "31-49"
+python src/extract_cli.py --toc output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json --pages "31-49"
 python src/refinery_cli.py --source smartedu
 ```
 
@@ -486,8 +527,8 @@ tools/data-refinery/output/
 │       ├── page_008.jsonl ~ page_049.jsonl
 │       └── diff_report.json     # --toc 模式产出
 ├── toc/                         # toc_parse 产物
-│   └── 数学/人教版/九年级/
-│       └── 义务教育教科书·数学九年级下册_toc.json
+│   └── 数学/初中/人教版/九年级/下册/
+│       └── 义务教育教科书·数学九年级下册.json
 ├── published/                   # publish 产物
 │   └── 数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册/
 │       └── page_008.jsonl ~ page_049.jsonl
@@ -531,3 +572,17 @@ A: card 的 `lesson_id` 和 DB 中已有的 lesson name 不匹配。先跑 `toc_
 
 **Q: 如何只重做某一本教材？**
 A: 大部分 CLI 支持 `--book "九年级/下册"` 过滤，配合 `--reconvert` 只重做指定教材。
+
+**Q: db_loader 报「检测到业务数据引用，full-reload 会被外键挡住」？**
+A: 库里有学生侧业务数据（错题本/answers/progress 等对 questions/cards 的 FK 引用），
+full-reload 的 DELETE 被外键挡住。两种选择：① 确认可丢弃后加 `--purge-business-data`
+清空这些业务表再重载；② 改用 `--load-cards` 增量入库（不 reset，不动业务数据）。
+
+**Q: db_loader 报 MySQL ERROR 1451 (FK constraint)？**
+A: 通常是业务表手动造过数据或守卫未覆盖的新外键。先排查引用 questions/cards 的表
+（`information_schema.KEY_COLUMN_USAGE`），清空引用行或改用 `--load-cards`。
+
+**Q: extract_cli 报 "TOC file not found"？**
+A: `--toc` / `--toc-path` 传的路径不对。TOC 实际输出路径是
+`output/toc/{学科}/{学段}/{版本}/{年级}/{册次}/{书名}.json`（注意有学段、册次两层目录，
+文件名无 `_toc` 后缀），先用 `find output/toc -name "*.json"` 确认实际文件名。

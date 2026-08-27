@@ -32,7 +32,7 @@ def main():
         host=os.getenv("DB_HOST", "localhost"),
         port=int(os.getenv("DB_PORT", "3306")),
         user=os.getenv("DB_USER", "ai_k12"),
-        password=os.getenv("DB_PASSWORD", "ai_k12"),
+        password=os.getenv("DB_PASS", "ai_k12"),  # 与 config.py 一致用 DB_PASS（曾误用 DB_PASSWORD，仅默认值撞对才工作）
         database=os.getenv("DB_NAME", "ai_k12"),
         charset="utf8mb4",
     )

@@ -177,6 +177,17 @@ class TestSmartEduPageDownload:
         assert path is None
 
 
+class NoHeadFetcher:
+    """fetch_head 一律 404：让 _detect_max_page 的二分探测直接收敛到 preview 页数（min_page）。
+
+    _download_book -> _build_page_urls 会先 HEAD 二分探测真实总页数，测试 fake fetcher
+    需实现 fetch_head 才能走到下载逻辑；404 即"探测无更多页"，页数=preview Slide 数。
+    """
+
+    def fetch_head(self, url: str):
+        return (404, {})
+
+
 class TestSmartEduCircuitBreaker:
     def _preview(self, n):
         return {f"Slide{i}": f"https://example.com/{i}.jpg" for i in range(1, n + 1)}
@@ -185,7 +196,7 @@ class TestSmartEduCircuitBreaker:
         store = ImageStore(base_dir=str(tmp_path), entry_url="https://basic.smartedu.cn", crawl_time=datetime.now(timezone.utc), site_adapter="smartedu")
         adapter = SmartEduAdapter(fetcher=MagicMock())
 
-        class FailingFetcher:
+        class FailingFetcher(NoHeadFetcher):
             def fetch_bytes(self, url: str) -> bytes:
                 return b"bad"
 
@@ -200,7 +211,7 @@ class TestSmartEduCircuitBreaker:
         store = ImageStore(base_dir=str(tmp_path), entry_url="https://basic.smartedu.cn", crawl_time=datetime.now(timezone.utc), site_adapter="smartedu")
         adapter = SmartEduAdapter(fetcher=MagicMock())
 
-        class MixedFetcher:
+        class MixedFetcher(NoHeadFetcher):
             def fetch_bytes(self, url: str) -> bytes:
                 if url.endswith("/1.jpg") or url.endswith("/3.jpg"):
                     return b"bad"
@@ -222,7 +233,7 @@ class TestSmartEduDownloadItem:
         checkpoint.load()
         adapter = SmartEduAdapter(fetcher=MagicMock())
 
-        class OkFetcher:
+        class OkFetcher(NoHeadFetcher):
             def fetch_bytes(self, url: str) -> bytes:
                 return b"\xff\xd8\xffok"
 
@@ -262,7 +273,7 @@ class TestSmartEduEndToEnd:
 
         adapter = SmartEduAdapter(fetcher=MagicMock(), latest_only=True)
 
-        class EndToEndFetcher:
+        class EndToEndFetcher(NoHeadFetcher):
             def fetch_bytes(self, url: str) -> bytes:
                 return b"\xff\xd8\xffpage"
 

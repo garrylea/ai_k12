@@ -264,6 +264,9 @@ class DbLoader:
 
     幂等：textbook_versions/semesters/units/lessons 用 find-or-create（按唯一键查再插）；
     cards/questions 用 full-reload（reset_* 先 DELETE 再重插）。
+    full-reload 的 DELETE 会被业务表 FK（answers/错题本/variation_questions 等 ON DELETE
+    RESTRICT）挡住：business_data_summary() 预检、purge_business_data() 显式清空
+    （CLI 需传 --purge-business-data，否则遇业务数据直接报错退出）。
     """
 
     def __init__(self, host: str, port: int, user: str, password: str, db: str):
@@ -291,6 +294,67 @@ class DbLoader:
 
     def _count(self, table: str) -> int:
         return self._query(f"SELECT COUNT(*) FROM {table}")[0][0]
+
+    def _table_exists(self, table: str) -> bool:
+        """information_schema 查表是否存在（schema.sql 与线上库可能不同步，如 aux_error_books）。"""
+        return bool(self._query(
+            "SELECT 1 FROM information_schema.tables"
+            " WHERE table_schema=DATABASE() AND table_name=%s", (table,)))
+
+    def _delete(self, sql, args=None) -> int:
+        """执行 DELETE 并返回影响行数。"""
+        with self._conn.cursor() as cur:
+            cur.execute(sql, args)
+            return cur.rowcount
+
+    # --- full-reload 业务数据守卫 ---
+    # 会挡住 full-reload DELETE 的业务表（FK ON DELETE RESTRICT，或经 CASCADE 链传导）：
+    # - questions 的 RESTRICT 引用：answers / aux_error_books / main_error_books / variation_questions
+    #   （practice_questions 的 question_id 是 SET NULL、question_knowledge_points 是 CASCADE，不挡）
+    # - textbook_versions 级联链（semesters->units->lessons->cards）的阻挡：
+    #   progress.textbook_version_id RESTRICT；homeworks.lesson_id CASCADE 会连带删 homeworks，
+    #   再被 homework_submissions.homework_id RESTRICT 挡住。
+    QUESTIONS_BLOCKERS = ["answers", "aux_error_books", "main_error_books", "variation_questions"]
+    CARDS_BLOCKERS = ["homework_submissions"]  # progress 单独处理（只清 textbook_version_id 非空行）
+
+    def business_data_summary(self, reset_cards: bool, reset_questions: bool) -> dict[str, int]:
+        """统计会挡住本次 full-reload 的业务数据行数（>0 的表会让 DELETE 报 FK 1451）。"""
+        counts: dict[str, int] = {}
+        if reset_questions:
+            for t in self.QUESTIONS_BLOCKERS:
+                if self._table_exists(t):
+                    counts[t] = self._count(t)
+            # error_redo_logs 多态挂在错题本上，错题本清空时一并清
+            if self._table_exists("error_redo_logs"):
+                counts["error_redo_logs"] = self._count("error_redo_logs")
+        if reset_cards:
+            for t in self.CARDS_BLOCKERS:
+                if self._table_exists(t):
+                    counts[t] = self._count(t)
+            if self._table_exists("progress"):
+                counts["progress"] = self._query(
+                    "SELECT COUNT(*) FROM progress WHERE textbook_version_id IS NOT NULL")[0][0]
+        return counts
+
+    def purge_business_data(self, reset_cards: bool, reset_questions: bool) -> dict[str, int]:
+        """按 FK 安全顺序清空挡住 full-reload 的业务表（先子表后父表）。
+
+        显式破坏性操作：仅当 CLI 传了 --purge-business-data 才应调用。
+        """
+        deleted: dict[str, int] = {}
+        if reset_questions:
+            for t in ["error_redo_logs"] + self.QUESTIONS_BLOCKERS:
+                if self._table_exists(t):
+                    deleted[t] = self._delete(f"DELETE FROM {t}")
+        if reset_cards:
+            if self._table_exists("homework_submissions"):
+                deleted["homework_submissions"] = self._delete("DELETE FROM homework_submissions")
+            # homeworks 经 lessons CASCADE 自动清；只删绑定了旧教材结构的 progress 行
+            if self._table_exists("progress"):
+                deleted["progress"] = self._delete(
+                    "DELETE FROM progress WHERE textbook_version_id IS NOT NULL")
+        self._conn.commit()
+        return deleted
 
     # --- subject 查 ---
     def _subject_by_name(self, name: str):

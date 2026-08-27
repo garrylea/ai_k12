@@ -76,7 +76,9 @@ class ZgkaoAdapter(SiteAdapter):
             )
             for link in pdf_links:
                 self._download_pdf(ctx, paper, link, is_split, result)
-            if ctx.checkpoint and result.files_failed == 0 and result.files_downloaded > 0:
+            # dry-run 不落盘也不标 PDF URL，同样不能标 detail URL——否则后续真实爬取会把
+            # 整个 item 判成已下载而跳过（PDF URL 未标记，参见 _download_pdf 的 dry-run 分支）
+            if ctx.checkpoint and not ctx.dry_run and result.files_failed == 0 and result.files_downloaded > 0:
                 ctx.checkpoint.mark_downloaded(item.id)
             return result
 

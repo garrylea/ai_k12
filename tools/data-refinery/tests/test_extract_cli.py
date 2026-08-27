@@ -228,23 +228,27 @@ class TestExtractCliMultiPage:
         # 教材为扁平结构：书/page_001.md、page_002.md 共享同一目录（rel_path）。
         # 修复前：两页共享 checkpoint key（目录级），第二页被 skip，输出互相覆盖。
         # 修复后：每页有独立 checkpoint key 与输出文件。
-        from extract import ExtractionResult
+        # 注：md 内容须 >30 字符，否则被 is_front_matter 预过滤拦截（走不到 LLM 标注）。
+        from card_labeler import LabelResult, PageLabelResult
         from extract_cli import main
-        from models import TextbookCard
 
         md_root = tmp_path / "md"
         book_dir = md_root / "数学" / "书"
         book_dir.mkdir(parents=True)
-        (book_dir / "page_001.md").write_text("page1", encoding="utf-8")
-        (book_dir / "page_002.md").write_text("page2", encoding="utf-8")
+        body = "这是一段足够长的测试内容，超过三十个字符以避免被前置内容预过滤器拦截，用于验证多页输出。"
+        (book_dir / "page_001.md").write_text(body, encoding="utf-8")
+        (book_dir / "page_002.md").write_text(body, encoding="utf-8")
 
         out_dir = tmp_path / "out"
-        card = TextbookCard(sort_order=1, card_type="concept", content="c")
-        fake_result = ExtractionResult(items=[card], prompt_tokens=1, completion_tokens=1)
+        page_result = PageLabelResult(
+            page_type="content",
+            labels=[LabelResult(page_type="content", card_type="concept",
+                                lesson_id=None, title=None, textbook_page="P1")],
+        )
 
         with patch("extract_cli.RefineryConfig") as mock_config, \
              patch("extract_cli.create_llm_client"), \
-             patch("extract_cli.Extractor") as mock_extractor:
+             patch("extract_cli.CardLabeler") as mock_labeler_cls:
             mock_config.from_env.return_value = MagicMock(
                 input_dir=md_root,
                 output_dir=out_dir,
@@ -253,7 +257,7 @@ class TestExtractCliMultiPage:
                 llm_base_url=None,
                 llm_timeout=1,
             )
-            mock_extractor.return_value.run.return_value = fake_result
+            mock_labeler_cls.return_value.label.side_effect = [page_result, page_result]
             main(["--input-dir", str(md_root), "--output-dir", str(out_dir)])
 
         extracted_dir = out_dir / "extracted"
@@ -266,13 +270,21 @@ class TestExtractCliMultiPage:
 
 
 class TestExtractCliLessonId:
-    """lesson_id 跨页继承 + 前置内容跳过（LLM 给标识，CLI 维护 per-book 状态）。"""
+    """lesson_id 跨页继承 + 前置内容跳过（LLM 给标识，CLI 维护 per-book 状态）。
+
+    新架构：image_scan -> card_splitter -> CardLabeler（LLM 标注）。
+    测试 mock CardLabeler.label 返回 PageLabelResult；scan/split 真跑（内容 >30 字符
+    避免被 is_front_matter 预过滤，多卡片页用 ## 标题让 splitter 拆出多张卡）。
+    """
+
+    # 一段 >30 字符的正文（避免前置内容预过滤）
+    BODY = "这是一段足够长的测试内容，超过三十个字符以避免被前置内容预过滤器拦截，用于验证继承逻辑。"
 
     def _run(self, md_root, out_dir, page_results):
-        """page_results: 按页顺序的 ExtractionResult 列表，对应 scanner 排序后的 card 页。"""
+        """page_results: 按页顺序的 PageLabelResult 列表，对应 scanner 排序后的 card 页。"""
         with patch("extract_cli.RefineryConfig") as mock_config, \
              patch("extract_cli.create_llm_client"), \
-             patch("extract_cli.Extractor") as mock_extractor:
+             patch("extract_cli.CardLabeler") as mock_labeler_cls:
             mock_config.from_env.return_value = MagicMock(
                 input_dir=md_root,
                 output_dir=out_dir,
@@ -281,9 +293,20 @@ class TestExtractCliLessonId:
                 llm_base_url=None,
                 llm_timeout=1,
             )
-            mock_extractor.return_value.run.side_effect = page_results
+            mock_labeler_cls.return_value.label.side_effect = page_results
             from extract_cli import main
             main(["--input-dir", str(md_root), "--output-dir", str(out_dir)])
+
+    @staticmethod
+    def _label(lesson_id, card_type="concept"):
+        from card_labeler import LabelResult
+        return LabelResult(page_type="content", card_type=card_type,
+                           lesson_id=lesson_id, title=None, textbook_page="P1")
+
+    @staticmethod
+    def _page(labels):
+        from card_labeler import PageLabelResult
+        return PageLabelResult(page_type="content", labels=labels)
 
     def _read_jsonl(self, out_dir, rel):
         import json
@@ -292,55 +315,51 @@ class TestExtractCliLessonId:
 
     def test_cross_page_inheritance(self, tmp_path):
         # page_001 给 lesson_id="26.1..."；page_002 续页给 null，应继承 page_001 的值
-        from extract import ExtractionResult
-        from models import TextbookCard
         md_root = tmp_path / "md"
         book = md_root / "数学" / "书"
         book.mkdir(parents=True)
-        (book / "page_001.md").write_text("p1", encoding="utf-8")
-        (book / "page_002.md").write_text("p2", encoding="utf-8")
+        (book / "page_001.md").write_text(self.BODY, encoding="utf-8")
+        (book / "page_002.md").write_text(self.BODY, encoding="utf-8")
         out_dir = tmp_path / "out"
-        r1 = ExtractionResult(
-            items=[TextbookCard(sort_order=1, card_type="concept", content="c",
-                                 lesson_id="26.1 反比例函数")],
-            prompt_tokens=1, completion_tokens=1)
-        r2 = ExtractionResult(
-            items=[TextbookCard(sort_order=1, card_type="example", content="d",
-                                 lesson_id=None)],
-            prompt_tokens=1, completion_tokens=1)
-        self._run(md_root, out_dir, [r1, r2])
+        page_results = [
+            self._page([self._label("26.1 反比例函数")]),
+            self._page([self._label(None)]),
+        ]
+        self._run(md_root, out_dir, page_results)
         items2 = self._read_jsonl(out_dir, "数学/书/page_002.jsonl")
         assert items2[0]["lesson_id"] == "26.1 反比例函数"
 
     def test_one_page_multiple_sections(self, tmp_path):
         # 同一页跨两节：[26.1, null, 26.2] -> null 继承前一个 26.1
-        from extract import ExtractionResult
-        from models import TextbookCard
+        # 三个 ## 标题段让 splitter 拆出三张卡，labels 与卡片一一对应
         md_root = tmp_path / "md"
         book = md_root / "数学" / "书"
         book.mkdir(parents=True)
-        (book / "page_001.md").write_text("p1", encoding="utf-8")
+        (book / "page_001.md").write_text(
+            f"## 26.1 反比例函数\n\n{self.BODY}\n\n## 26.1 续\n\n{self.BODY}\n\n## 26.2 实际问题\n\n{self.BODY}",
+            encoding="utf-8")
         out_dir = tmp_path / "out"
-        cards = [
-            TextbookCard(sort_order=1, card_type="concept", content="a", lesson_id="26.1 反比例函数"),
-            TextbookCard(sort_order=2, card_type="example", content="b", lesson_id=None),
-            TextbookCard(sort_order=3, card_type="concept", content="c", lesson_id="26.2 实际问题与反比例函数"),
-        ]
-        self._run(md_root, out_dir, [ExtractionResult(items=cards, prompt_tokens=1, completion_tokens=1)])
+        page_results = [self._page([
+            self._label("26.1 反比例函数"),
+            self._label(None),
+            self._label("26.2 实际问题与反比例函数"),
+        ])]
+        self._run(md_root, out_dir, page_results)
         items = self._read_jsonl(out_dir, "数学/书/page_001.jsonl")
+        assert len(items) == 3, "三个标题段应拆出三张卡"
         assert [it["lesson_id"] for it in items] == [
             "26.1 反比例函数", "26.1 反比例函数", "26.2 实际问题与反比例函数",
         ]
 
     def test_front_matter_skipped(self, tmp_path, capsys):
-        # 整页是前置内容（封面/目录等）-> LLM 返回空 items -> 不写 jsonl、记 checkpoint、日志提示
-        from extract import ExtractionResult
+        # 整页是前置内容（封面/目录等）-> 预过滤直接跳过 -> 不写 jsonl、记 checkpoint、日志提示
         md_root = tmp_path / "md"
         book = md_root / "数学" / "书"
         book.mkdir(parents=True)
         (book / "page_001.md").write_text("cover", encoding="utf-8")
         out_dir = tmp_path / "out"
-        self._run(md_root, out_dir, [ExtractionResult(items=[], prompt_tokens=1, completion_tokens=1)])
+        # 预过滤在 LLM 之前，CardLabeler.label 不应被调用（仍需 patch 防真实 LLM 连接）
+        self._run(md_root, out_dir, page_results=[None])
         assert not (out_dir / "extracted" / "数学" / "书" / "page_001.jsonl").exists()
         assert "front matter" in capsys.readouterr().out.lower()
         from checkpoint import RefineryCheckpoint
@@ -349,16 +368,15 @@ class TestExtractCliLessonId:
         assert ckpt.is_extracted("数学/书/page_001.md")
 
     def test_resume_rebuilds_state_from_existing_jsonl(self, tmp_path):
-        # page_001 已抽（checkpoint + jsonl 末条 lesson_id="26.1..."）；page_002 续页 null 应继承
-        from extract import ExtractionResult
-        from models import TextbookCard
-        import json
+        # page_001 已抽（checkpoint + jsonl 末条 lesson_id="26.1..."）；page_002 续页 null 应继承。
+        # 回归：skip 分支曾丢失「从已抽页 jsonl 回填 per-book 状态」导致续页继承断档（重构丢失，2026-08-26 恢复）。
         from checkpoint import RefineryCheckpoint
+        import json
         md_root = tmp_path / "md"
         book = md_root / "数学" / "书"
         book.mkdir(parents=True)
-        (book / "page_001.md").write_text("p1", encoding="utf-8")
-        (book / "page_002.md").write_text("p2", encoding="utf-8")
+        (book / "page_001.md").write_text(self.BODY, encoding="utf-8")
+        (book / "page_002.md").write_text(self.BODY, encoding="utf-8")
         out_dir = tmp_path / "out"
         ckpt = RefineryCheckpoint(out_dir / ".checkpoint.json")
         ckpt.load()
@@ -370,9 +388,8 @@ class TestExtractCliLessonId:
                         "lesson_id": "26.1 反比例函数"}, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        r2 = ExtractionResult(
-            items=[TextbookCard(sort_order=1, card_type="example", content="d", lesson_id=None)],
-            prompt_tokens=1, completion_tokens=1)
-        self._run(md_root, out_dir, [r2])  # 仅 page_002 会调用 run（page_001 被跳过）
+        # 仅 page_002 会被 label（page_001 走 skip 分支）
+        page_results = [self._page([self._label(None)])]
+        self._run(md_root, out_dir, page_results)
         items2 = self._read_jsonl(out_dir, "数学/书/page_002.jsonl")
         assert items2[0]["lesson_id"] == "26.1 反比例函数"

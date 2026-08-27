@@ -289,4 +289,8 @@ REGISTRY: dict[str, type[LLMClient]] = {
 def create_llm_client(provider: str = "openai", **kwargs: Any) -> LLMClient:
     """工厂：按 provider 返回对应子类实例；未注册的 provider 回退 base（OpenAI 兼容）。"""
     cls = REGISTRY.get(provider, LLMClient)
+    # 本地 llama.cpp server 不校验鉴权，但 OpenAI SDK 要求非空 api_key；
+    # 未显式传 key 时补哑值，避免 "Missing credentials" 直接崩溃。
+    if provider == "local" and not kwargs.get("api_key"):
+        kwargs["api_key"] = "local_key"
     return cls(provider=provider, **kwargs)

@@ -22,6 +22,10 @@ def parse_args(argv=None):
     parser.add_argument("--load-toc", action="store_true", help="只 load_toc_structure()，不入库 card（需配合 --toc-path）")
     parser.add_argument("--load-cards", action="store_true", help="只 card/questions 入库，不建骨架")
     parser.add_argument("--toc-path", help="TOC JSON 路径（--load-toc 时必传；--load-cards 时可选）")
+    parser.add_argument("--purge-business-data", action="store_true",
+                        help="full-reload 前清空引用 cards/questions 的业务数据"
+                             "（answers/错题本/变式题/作业提交/progress，不可恢复）；"
+                             "默认遇业务数据报错退出，防止误删学生数据")
     parser.add_argument("--dry-run", action="store_true", help="只打印，不入库")
     return parser.parse_args(argv)
 
@@ -71,10 +75,29 @@ def main(argv=None):
     try:
         # When --load-cards is NOT specified, do full-reload (backward compatible default)
         if not args.load_cards:
-            if args.source in ("all", "smartedu"):
+            reset_cards = args.source in ("all", "smartedu")
+            reset_questions = args.source in ("all", "zgkao")
+
+            # full-reload 守卫：业务表 FK（RESTRICT）会挡住 DELETE，先预检再行动
+            blocking = {t: n for t, n in loader.business_data_summary(
+                reset_cards, reset_questions).items() if n > 0}
+            if blocking and not args.purge_business_data:
+                print("[ERROR] 检测到业务数据引用，full-reload 会被外键挡住：", flush=True)
+                for t, n in blocking.items():
+                    print(f"  - {t}: {n} 行", flush=True)
+                print("两种选择：", flush=True)
+                print("  1) 加 --purge-business-data 显式清空上述业务数据后继续（学生侧数据不可恢复）", flush=True)
+                print("  2) 改用 --load-cards 增量入库（不 reset，不动业务数据）", flush=True)
+                return
+            if blocking:
+                purged = loader.purge_business_data(reset_cards, reset_questions)
+                for t, n in purged.items():
+                    print(f"[purge] DELETE {t}: {n} 行", flush=True)
+
+            if reset_cards:
                 loader.reset_cards()
                 print("[reset] DELETE cards", flush=True)
-            if args.source in ("all", "zgkao"):
+            if reset_questions:
                 loader.reset_questions()
                 print("[reset] DELETE questions", flush=True)
 

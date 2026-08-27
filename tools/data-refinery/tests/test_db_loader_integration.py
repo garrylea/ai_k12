@@ -2,8 +2,12 @@
 
 每个测试前清空派生表（cards/questions/lessons/units/semesters/textbook_versions），保留 subjects seed。
 需要本机 MySQL 已用 install_mysql.sh 初始化、subjects 已 seed。
+
+dev 库若有业务数据（错题本/answers/progress 等 FK 引用 questions/cards）会挡住清理：
+默认 skip（防止测试悄悄清空业务数据）；显式传 REFINERY_TEST_PURGE=1 才允许先清业务表再跑。
 """
 import json
+import os
 from pathlib import Path
 
 import pymysql
@@ -36,6 +40,21 @@ def db():
         loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
     except Exception as e:
         pytest.skip(f"DB 不可用: {e}")
+    # 业务数据守卫：错题本/answers/progress 等的 FK（RESTRICT）会挡住 DELETE FROM questions/cards。
+    # 默认 skip 防止测试悄悄清空业务数据；REFINERY_TEST_PURGE=1 时显式清空后继续。
+    blocking = {t: n for t, n in loader.business_data_summary(
+        reset_cards=True, reset_questions=True).items() if n > 0}
+    if blocking:
+        if os.environ.get("REFINERY_TEST_PURGE") != "1":
+            loader.close()
+            detail = ", ".join(f"{t}={n}" for t, n in sorted(blocking.items()))
+            pytest.skip(
+                f"dev 库业务数据挡住清理（{detail}）："
+                "确认可清空后传 REFINERY_TEST_PURGE=1 重跑（会先 DELETE 这些业务表）")
+        purged = loader.purge_business_data(reset_cards=True, reset_questions=True)
+        for t, n in purged.items():
+            if n:
+                print(f"[purge] DELETE {t}: {n} 行")
     # 清派生表（子先父后），保留 subjects
     def _clean():
         for t in ("cards", "questions", "lessons", "units", "semesters", "textbook_versions"):
