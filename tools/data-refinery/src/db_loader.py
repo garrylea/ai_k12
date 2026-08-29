@@ -315,7 +315,9 @@ class DbLoader:
     #   progress.textbook_version_id RESTRICT；homeworks.lesson_id CASCADE 会连带删 homeworks，
     #   再被 homework_submissions.homework_id RESTRICT 挡住。
     QUESTIONS_BLOCKERS = ["answers", "aux_error_books", "main_error_books", "variation_questions"]
-    CARDS_BLOCKERS = ["homework_submissions"]  # progress 单独处理（只清 textbook_version_id 非空行）
+    # practice_results.card_id 是 ON DELETE CASCADE——不挡 DELETE 但会**静默连带删除**
+    # 学生练习记录，必须进守卫名单（与 homework_submissions 同理）
+    CARDS_BLOCKERS = ["homework_submissions", "practice_results"]  # progress 单独处理（只清 textbook_version_id 非空行）
 
     def business_data_summary(self, reset_cards: bool, reset_questions: bool) -> dict[str, int]:
         """统计会挡住本次 full-reload 的业务数据行数（>0 的表会让 DELETE 报 FK 1451）。"""
@@ -454,16 +456,85 @@ class DbLoader:
         return lid
 
     def _match_lesson_by_name(self, name: str) -> int | None:
-        """按 lesson name 查已有 lesson 的 DB id。"""
+        """按 lesson name 查已有 lesson 的 DB id（全局按名查，向后兼容旧调用）。"""
         row = self._query("SELECT id FROM lessons WHERE name=%s", (name,))
         if row:
             return row[0][0]
         return None
 
-    def _match_parent_lesson(self, name: str) -> int | None:
+    def _lookup_semester(self, info: dict) -> int | None:
+        """find-only：按 rel_path 信息查 semester id（不创建；查不到返回 None）。"""
+        subject_code = _subject_code_by_name_fallback(info["subject"])
+        gb = GRADE_BAND_MAP.get(info["grade_band"], "junior")
+        grade_code = grade_to_code(info["grade"])
+        term_code = TERM_MAP.get(info["term"], "first")
+        row = self._query(
+            "SELECT s.id FROM semesters s JOIN textbook_versions tv ON s.textbook_version_id=tv.id "
+            "WHERE tv.code=%s AND s.grade=%s AND s.term=%s",
+            (f"{subject_code}_{info['publisher']}_{gb}", grade_code, term_code),
+        )
+        return row[0][0] if row else None
+
+    def _lookup_unit(self, sem_id: int, chapter: int) -> int | None:
+        """find-only：按 (semester_id, sort_order=chapter) 查 unit id（不创建）。"""
+        row = self._query(
+            "SELECT id FROM units WHERE semester_id=%s AND sort_order=%s", (sem_id, chapter))
+        return row[0][0] if row else None
+
+    def _semester_card_stats(self, sem_id: int) -> tuple[int, int]:
+        """(该书已入库卡数, 其中被学生练习记录引用的卡数)。
+
+        practice_results.card_id ON DELETE CASCADE（删卡会连带删学生练习记录），
+        是按书替换前必须检查的业务数据；ai_dialogues.card_id 是 SET NULL 无损。
+        """
+        cards_n = self._query(
+            "SELECT COUNT(*) FROM cards c JOIN lessons l ON c.lesson_id=l.id "
+            "JOIN units u ON l.unit_id=u.id WHERE u.semester_id=%s", (sem_id,))[0][0]
+        practice_n = 0
+        if self._table_exists("practice_results"):
+            practice_n = self._query(
+                "SELECT COUNT(*) FROM practice_results pr JOIN cards c ON pr.card_id=c.id "
+                "JOIN lessons l ON c.lesson_id=l.id JOIN units u ON l.unit_id=u.id "
+                "WHERE u.semester_id=%s", (sem_id,))[0][0]
+        return cards_n, practice_n
+
+    def _replace_semester_cards(self, sem_id: int) -> int:
+        """删除该书已入库的卡（重插前调用，保证增量入库幂等）。
+
+        FK 语义：ai_dialogues.card_id ON DELETE SET NULL（无损）；
+        practice_results.card_id ON DELETE CASCADE —— 调用方必须先用
+        _semester_card_stats 确认练习记录为 0。
+        """
+        return self._delete(
+            "DELETE c FROM cards c JOIN lessons l ON c.lesson_id=l.id "
+            "JOIN units u ON l.unit_id=u.id WHERE u.semester_id=%s", (sem_id,))
+
+    def _match_lesson_scoped(self, name: str, semester_id: int | None) -> int | None:
+        """在书的 semester 作用域内按名匹配 lesson（修复跨书同名误匹配）。
+
+        优先 unit 精确匹配（label 可解析出章号时按 (semester, chapter) 定位 unit），
+        miss 再退到 semester 范围；semester_id 为 None 时退化为全局按名查（旧行为）。
+        """
+        if semester_id is None:
+            return self._match_lesson_by_name(name)
+        parsed = parse_lesson_id(name)
+        if parsed:
+            unit_id = self._lookup_unit(semester_id, parsed["chapter"])
+            if unit_id is not None:
+                row = self._query(
+                    "SELECT id FROM lessons WHERE unit_id=%s AND name=%s", (unit_id, name))
+                if row:
+                    return row[0][0]
+        row = self._query(
+            "SELECT l.id FROM lessons l JOIN units u ON l.unit_id=u.id "
+            "WHERE u.semester_id=%s AND l.name=%s", (semester_id, name))
+        return row[0][0] if row else None
+
+    def _match_parent_lesson(self, name: str, semester_id: int | None = None) -> int | None:
         """子节归并：'21.2.2 公式法' → 找父节 '21.2 解一元二次方程' 的 lesson id。
 
         仅当 name 形如 N.M.K 且有标题（节标题）时，逐级向上找 N.M 父节。
+        semester_id 给定时在作用域内匹配（前缀 LIKE 也限定作用域）。
         """
         m = re.match(r"^(\d+\.\d+)\.\d+\s+(.+)$", name.strip())
         if not m:
@@ -471,12 +542,19 @@ class DbLoader:
         parent_prefix, parent_title = m.group(1), m.group(2)
         # 1) 精确父节：21.2 + 标题 的后缀 2) 仅前缀匹配已存在的 lesson（如 '21.2 解一元二次方程'）
         parent_label = f"{parent_prefix} {parent_title}"
-        lid = self._match_lesson_by_name(parent_label)
+        lid = self._match_lesson_scoped(parent_label, semester_id)
         if lid is not None:
             return lid
-        # 前缀匹配：DB 里任何 name 以 '21.2 ' 开头的 lesson
-        row = self._query("SELECT id FROM lessons WHERE name LIKE %s ORDER BY sort_order LIMIT 1",
-                          (f"{parent_prefix} %",))
+        # 前缀匹配：作用域内任何 name 以 '21.2 ' 开头的 lesson
+        if semester_id is not None:
+            row = self._query(
+                "SELECT l.id FROM lessons l JOIN units u ON l.unit_id=u.id "
+                "WHERE u.semester_id=%s AND l.name LIKE %s ORDER BY l.sort_order LIMIT 1",
+                (semester_id, f"{parent_prefix} %"))
+        else:
+            row = self._query(
+                "SELECT id FROM lessons WHERE name LIKE %s ORDER BY sort_order LIMIT 1",
+                (f"{parent_prefix} %",))
         return row[0][0] if row else None
 
     # ---------- sort_order 防重复/重排 ----------
@@ -670,6 +748,26 @@ class DbLoader:
             # TOC 模式：不动态建结构，card 直接匹配已有 lesson
             # sort_order 按 DB lesson 内从 1 开始（与 full-reload 一致）；
             # 子节（如 21.2.2）归并到父节（21.2）后，同一 DB lesson 下连续编号。
+            # 注意：pipeline 应传 toc_merge 的 merged TOC（骨架已含补充小节，
+            # exact 匹配几乎全命中，坍缩只兜底漏网标签）。
+            # 作用域：按书的 rel_path 定位 semester，避免跨书同名 lesson 误匹配。
+            sem_id = self._lookup_semester(info)
+            if sem_id is None:
+                print(f"[WARN] {book_rel}: 未找到对应 semester（骨架未建？），"
+                      f"lesson 匹配退化为全局按名查", flush=True)
+            else:
+                # 按书替换：先删该书已入库的卡再重插，保证重复运行幂等
+                # （否则撞 uniq_cards_lesson_sort 唯一键）。
+                cards_n, practice_n = self._semester_card_stats(sem_id)
+                if practice_n > 0:
+                    raise RuntimeError(
+                        f"{book_rel}: 该书已有 {practice_n} 条学生练习记录引用旧卡片，"
+                        f"重插会级联删除这些数据。请改用全量重载"
+                        f"（pipeline --purge-business-data）或先人工处理业务数据")
+                if cards_n > 0:
+                    deleted = self._replace_semester_cards(sem_id)
+                    print(f"[replace] {book_rel}: 清除该书已入库的 {deleted} 张卡，重新插入",
+                          flush=True)
             lesson_sort: dict[int, int] = {}
             count = 0
             unmatched = 0
@@ -678,16 +776,16 @@ class DbLoader:
                 if not lid:
                     unmatched += 1
                     continue
-                lesson_id_db = self._match_lesson_by_name(lid)
+                lesson_id_db = self._match_lesson_scoped(lid, sem_id)
                 if lesson_id_db is None:
                     # 尝试去掉首尾空格
                     lid_stripped = lid.strip()
                     if lid_stripped != lid:
-                        lesson_id_db = self._match_lesson_by_name(lid_stripped)
+                        lesson_id_db = self._match_lesson_scoped(lid_stripped, sem_id)
                 if lesson_id_db is None:
                     # 子节归并：N.M.K 子节（如 21.2.2 公式法）归并到父节 N.M（21.2 解一元二次方程），
                     # 因为 DB 骨架按 TOC 只建到 N.M 一级
-                    lesson_id_db = self._match_parent_lesson(lid)
+                    lesson_id_db = self._match_parent_lesson(lid, sem_id)
                 if lesson_id_db is None:
                     print(f"[WARN] card lesson_id={lid!r} not found in DB, skipped", flush=True)
                     unmatched += 1

@@ -13,6 +13,135 @@ from db_loader import (
 )
 
 
+def _make_loader(query_results: dict):
+    """构造不连库的 DbLoader（stub _query/_delete；按 SQL 片段匹配返回预设）。"""
+    from db_loader import DbLoader
+    loader = DbLoader.__new__(DbLoader)
+    queries: list = []
+
+    def fake_query(sql, args=None):
+        queries.append((sql, args))
+        for frag, rows in query_results.items():
+            if frag in sql:
+                return rows
+        return []
+
+    def fake_delete(sql, args=None):
+        queries.append((sql, args))
+        for frag, rows in query_results.items():
+            if frag in sql:
+                return rows[0] if rows else 0
+        return 0
+
+    loader._query = fake_query
+    loader._delete = fake_delete
+    return loader, queries
+
+
+class TestScopedLessonMatching:
+    """_match_lesson_scoped / _match_parent_lesson / _lookup_*：按 semester 作用域匹配。"""
+
+    def test_lookup_semester(self):
+        loader, queries = _make_loader({"FROM semesters s JOIN textbook_versions": [(42,)]})
+        info = {"subject": "数学", "grade_band": "初中", "publisher": "人教版",
+                "grade": "九年级", "term": "上册", "book": "书"}
+        assert loader._lookup_semester(info) == 42
+        sql_args = [a for sql, a in queries if "semesters" in sql][0]
+        assert "math_人教版_junior" in sql_args
+
+    def test_lookup_semester_missing_returns_none(self):
+        loader, _ = _make_loader({})
+        info = {"subject": "数学", "grade_band": "初中", "publisher": "人教版",
+                "grade": "九年级", "term": "上册", "book": "书"}
+        assert loader._lookup_semester(info) is None
+
+    def test_unit_scope_preferred(self):
+        loader, queries = _make_loader({
+            "FROM units WHERE semester_id": [(10,)],          # _lookup_unit 命中
+            "WHERE unit_id=%s AND name=%s": [(99,)],          # unit 内 exact 命中
+        })
+        assert loader._match_lesson_scoped("26.1 反比例函数", 5) == 99
+        # 不应再退到 semester 范围查询
+        assert all("u.semester_id=%s AND l.name=%s" not in sql for sql, _ in queries)
+
+    def test_unit_miss_falls_to_semester_scope(self):
+        loader, _ = _make_loader({
+            "FROM units WHERE semester_id": [],               # unit 查不到
+            "u.semester_id=%s AND l.name=%s": [(88,)],        # semester 范围命中
+        })
+        assert loader._match_lesson_scoped("26.1 反比例函数", 5) == 88
+
+    def test_semester_none_falls_back_to_global(self):
+        loader, queries = _make_loader({
+            "SELECT id FROM lessons WHERE name=%s": [(7,)],
+        })
+        assert loader._match_lesson_scoped("26.1 反比例函数", None) == 7
+        assert all("JOIN units" not in sql for sql, _ in queries)
+
+    def test_cross_book_collision_avoided(self):
+        # semester 5 内没有该 lesson（即使其他书有同名）→ None 而非误匹配
+        loader, _ = _make_loader({
+            "FROM units WHERE semester_id": [],
+            "u.semester_id=%s AND l.name=%s": [],
+        })
+        assert loader._match_lesson_scoped("26.1 反比例函数", 5) is None
+
+    def test_unparsable_label_uses_semester_scope(self):
+        # 非编号标签解析不出章号 → 直接 semester 范围查询
+        loader, queries = _make_loader({
+            "u.semester_id=%s AND l.name=%s": [(66,)],
+        })
+        assert loader._match_lesson_scoped("小结", 5) == 66
+        assert all("FROM units" not in sql for sql, _ in queries)
+
+    def test_parent_lesson_scoped_prefix(self):
+        # 精确父节 miss → 作用域内前缀 LIKE 匹配
+        loader, queries = _make_loader({
+            "FROM units WHERE semester_id": [(10,)],
+            "WHERE unit_id=%s AND name=%s": [],
+            "u.semester_id=%s AND l.name=%s": [],
+            "l.name LIKE %s": [(55,)],
+        })
+        assert loader._match_parent_lesson("21.2.2 公式法", 5) == 55
+        like_sqls = [sql for sql, _ in queries if "LIKE" in sql]
+        assert like_sqls and all("semester_id" in sql for sql in like_sqls)
+
+    def test_parent_lesson_legacy_global(self):
+        loader, _ = _make_loader({
+            "SELECT id FROM lessons WHERE name=%s": [(31,)],
+        })
+        assert loader._match_parent_lesson("21.2.2 公式法") == 31
+
+
+class TestSemesterCardReplace:
+    """按书替换：增量入库幂等（重跑先删该书旧卡再插）。"""
+
+    def test_stats_queries(self):
+        loader, queries = _make_loader({
+            "FROM cards c JOIN lessons": [(42,)],       # 该书已有 42 张卡
+            "FROM practice_results pr JOIN cards": [(0,)],  # 无学生练习记录引用
+        })
+        # _table_exists 走 information_schema，fake 返回 []（falsy）→ 视为表不存在，练习计数为 0
+        assert loader._semester_card_stats(7) == (42, 0)
+
+    def test_stats_with_practice_results(self):
+        loader, _ = _make_loader({
+            "information_schema": [(1,)],                  # practice_results 表存在
+            "FROM cards c JOIN lessons": [(42,)],
+            "FROM practice_results pr JOIN cards": [(5,)],
+        })
+        assert loader._semester_card_stats(7) == (42, 5)
+
+    def test_replace_delete_scoped_to_semester(self):
+        loader, queries = _make_loader({
+            "DELETE c FROM cards c": [42],  # rowcount
+        })
+        assert loader._replace_semester_cards(7) == 42
+        sql, args = queries[0]
+        assert "u.semester_id=%s" in sql
+        assert args == (7,)
+
+
 class TestNormalizeSubject:
     def test_canonical(self):
         assert normalize_subject("math") == "math"

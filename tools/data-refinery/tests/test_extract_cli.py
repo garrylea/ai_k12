@@ -269,6 +269,144 @@ class TestExtractCliMultiPage:
         assert f2.read_text(encoding="utf-8").strip() != ""
 
 
+class TestTocDir:
+    """--toc-dir：TOC 缓存加载（排除 sidecar）、labeler 注入、逐书后置校验。"""
+
+    BODY = "这是一段足够长的测试内容，超过三十个字符以避免被前置内容预过滤器拦截，用于验证目录注入逻辑。"
+
+    @staticmethod
+    def _toc():
+        return {
+            "book": "test",
+            "chapters": [{
+                "number": 26, "title": "反比例函数", "label": "第二十六章 反比例函数",
+                "sections": [{
+                    "number": [26, 1], "title": "反比例函数", "label": "26.1 反比例函数",
+                    "subsections": [],
+                }],
+                "supplements": [],
+            }],
+        }
+
+    @staticmethod
+    def _write_toc(toc_dir, book_key="数学/书", toc=None):
+        import json
+        p = toc_dir / f"{book_key}.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(toc or TestTocDir._toc(), ensure_ascii=False), encoding="utf-8")
+
+    def test_load_toc_cache_excludes_sidecars(self, tmp_path):
+        from extract_cli import _load_toc_cache
+        toc_dir = tmp_path / "toc"
+        self._write_toc(toc_dir)
+        # toc_merge 的 sidecar 不应进入缓存
+        (toc_dir / "数学" / "书.merged.json").write_text("{}", encoding="utf-8")
+        (toc_dir / "数学" / "书.merge_report.json").write_text("{}", encoding="utf-8")
+        cache = _load_toc_cache(toc_dir)
+        assert "数学/书" in cache
+        assert len(cache) == 1
+
+    def test_load_toc_cache_missing_dir(self, tmp_path):
+        from extract_cli import _load_toc_cache
+        assert _load_toc_cache(tmp_path / "nope") == {}
+
+    def _run_with_toc_dir(self, md_root, out_dir, toc_dir, page_results):
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.create_llm_client"), \
+             patch("extract_cli.CardLabeler") as mock_labeler_cls:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=md_root, output_dir=out_dir,
+                llm_api_key="fake", llm_model="m", llm_base_url=None, llm_timeout=1,
+            )
+            mock_labeler_cls.return_value.label.side_effect = page_results
+            from extract_cli import main
+            main(["--input-dir", str(md_root), "--output-dir", str(out_dir),
+                  "--toc-dir", str(toc_dir)])
+
+    def test_labeler_receives_toc_labels(self, tmp_path):
+        from card_labeler import LabelResult, PageLabelResult
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        (book / "page_001.md").write_text(self.BODY, encoding="utf-8")
+        out_dir = tmp_path / "out"
+        toc_dir = out_dir / "toc"
+        self._write_toc(toc_dir)
+
+        page_result = PageLabelResult(page_type="content", labels=[LabelResult(
+            page_type="content", card_type="concept",
+            lesson_id="26.1 反比例函数", title=None, textbook_page="P1")])
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.create_llm_client"), \
+             patch("extract_cli.CardLabeler") as mock_labeler_cls:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=md_root, output_dir=out_dir,
+                llm_api_key="fake", llm_model="m", llm_base_url=None, llm_timeout=1,
+            )
+            mock_labeler_cls.return_value.label.return_value = page_result
+            from extract_cli import main
+            main(["--input-dir", str(md_root), "--output-dir", str(out_dir),
+                  "--toc-dir", str(toc_dir)])
+        kwargs = mock_labeler_cls.return_value.label.call_args.kwargs
+        assert kwargs.get("toc_labels") == ["第二十六章 反比例函数", "26.1 反比例函数"]
+
+    def test_correction_and_publish_checkpoint_clear(self, tmp_path, capsys):
+        import json
+        from card_labeler import LabelResult, PageLabelResult
+        from checkpoint import RefineryCheckpoint
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        (book / "page_001.md").write_text(self.BODY, encoding="utf-8")
+        out_dir = tmp_path / "out"
+        toc_dir = out_dir / "toc"
+        self._write_toc(toc_dir)
+
+        # 模拟上轮已 publish：本轮修正改写 jsonl 后应清除该标记
+        ckpt = RefineryCheckpoint(out_dir / ".checkpoint.json")
+        ckpt.load()
+        ckpt.mark_published("数学/书/page_001.md")
+
+        page_result = PageLabelResult(page_type="content", labels=[LabelResult(
+            page_type="content", card_type="concept",
+            lesson_id="26.1 反比利函数",  # typo，应被模糊修正
+            title=None, textbook_page="P1")])
+        self._run_with_toc_dir(md_root, out_dir, toc_dir, [page_result])
+
+        jsonl = out_dir / "extracted" / "数学" / "书" / "page_001.jsonl"
+        items = [json.loads(l) for l in jsonl.read_text(encoding="utf-8").splitlines() if l.strip()]
+        assert items[0]["lesson_id"] == "26.1 反比例函数"
+
+        ckpt2 = RefineryCheckpoint(out_dir / ".checkpoint.json")
+        ckpt2.load()
+        assert not ckpt2.is_published("数学/书/page_001.md")
+        out = capsys.readouterr().out
+        assert "[toc-dir]" in out
+        # 不写 diff_report（由 toc_merge 的 merge_report 取代）
+        assert not (out_dir / "extracted" / "diff_report.json").exists()
+
+    def test_book_without_toc_untouched(self, tmp_path):
+        import json
+        from card_labeler import LabelResult, PageLabelResult
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        (book / "page_001.md").write_text(self.BODY, encoding="utf-8")
+        out_dir = tmp_path / "out"
+        toc_dir = out_dir / "toc"
+        toc_dir.mkdir(parents=True)  # 空：没有该书的 toc
+
+        page_result = PageLabelResult(page_type="content", labels=[LabelResult(
+            page_type="content", card_type="concept",
+            lesson_id="自由发挥的标签", title=None, textbook_page="P1")])
+        self._run_with_toc_dir(md_root, out_dir, toc_dir, [page_result])
+
+        jsonl = out_dir / "extracted" / "数学" / "书" / "page_001.jsonl"
+        items = [json.loads(l) for l in jsonl.read_text(encoding="utf-8").splitlines() if l.strip()]
+        # 无 TOC 的书不做校验/修正
+        assert items[0]["lesson_id"] == "自由发挥的标签"
+
+
 class TestExtractCliLessonId:
     """lesson_id 跨页继承 + 前置内容跳过（LLM 给标识，CLI 维护 per-book 状态）。
 

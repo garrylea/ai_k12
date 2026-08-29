@@ -65,7 +65,8 @@ def parse_args(argv=None):
     parser.add_argument("--book", help="只提取指定教材（路径子串匹配，如'九年级/上册'）")
     parser.add_argument("--force", action="store_true", help="强制重新提取（忽略 checkpoint，但不删除已有输出）")
     parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 JSONL，重新提取匹配页")
-    parser.add_argument("--toc", help="TOC JSON 路径，用于校验 lesson_id + 自动修正")
+    parser.add_argument("--toc", help="TOC JSON 路径，用于校验 lesson_id + 自动修正（单文件模式）")
+    parser.add_argument("--toc-dir", help="TOC JSON 目录（如 output/toc）：按书自动匹配注入 labeler prompt + 逐书后置校验；优先于 --toc")
     parser.add_argument("--interval", type=float, default=0.0,
                         help="每次 LLM 调用后 sleep 秒数（默认 0）")
     parser.add_argument("--batch-size", type=int, default=0,
@@ -232,6 +233,28 @@ def validate_and_correct(cards_by_file: dict, toc: dict, output_dir: Path) -> di
     return diff_report
 
 
+def _load_toc_cache(toc_dir: Path) -> dict[str, dict]:
+    """扫描 TOC 目录，构建 book_key -> toc dict 缓存。
+
+    book_key 为 TOC 文件相对 toc_dir 的路径（去 .json 后缀，posix 分隔），
+    与 md 目录的书目录相对路径一致（toc_parse_cli 的输出命名规则）。
+    跳过 toc_merge 的 sidecar（.merged.json / .merge_report.json）。
+    """
+    cache: dict[str, dict] = {}
+    if not toc_dir.exists():
+        print(f"[WARN] TOC 目录不存在: {toc_dir}", flush=True)
+        return cache
+    for p in sorted(toc_dir.rglob("*.json")):
+        if p.name.endswith(".merged.json") or p.name.endswith(".merge_report.json"):
+            continue
+        key = p.relative_to(toc_dir).with_suffix("").as_posix()
+        try:
+            cache[key] = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"[WARN] 跳过无效 TOC 文件 {p}: {e}", flush=True)
+    return cache
+
+
 def main(argv=None):
     args = parse_args(argv)
     config = RefineryConfig.from_env(
@@ -239,6 +262,11 @@ def main(argv=None):
     )
     md_dir = Path(args.input_dir) if args.input_dir else config.output_dir / "md"
     extracted_dir = config.output_dir / "extracted"
+
+    # --toc-dir：按书匹配的 TOC 缓存（注入 labeler + 逐书后置校验）
+    toc_cache: dict[str, dict] = {}
+    if args.toc_dir:
+        toc_cache = _load_toc_cache(Path(args.toc_dir))
 
     scanner = MarkdownScanner(md_dir)
     checkpoint = RefineryCheckpoint(config.output_dir / ".checkpoint.json")
@@ -354,6 +382,8 @@ def main(argv=None):
                     [c.content for c in cards],
                     page_number=f"P{page_num}",
                     prev_lesson_id=prev,
+                    toc_labels=_flatten_toc_labels(toc_cache[book_key])
+                    if book_key in toc_cache else None,
                 )
             except Exception as e:
                 print(f"[WARN] ({idx}/{total_processed}) {file_key}: LLM label failed ({e}), using defaults", flush=True)
@@ -430,8 +460,43 @@ def main(argv=None):
             print(f"[ERROR] ({idx}/{total_processed}) {file_key}: {e}", flush=True)
             failed += 1
 
-    # --toc：校验 + 自动修正（在所有 JSONL 写入完成后）
-    if args.toc:
+    # --toc-dir：逐书后置校验（模糊修正写回 jsonl；不写 diff_report，
+    # 由 toc_merge 的 merge_report 取代；修正发生时清 publish checkpoint 让下轮重发）
+    if toc_cache:
+        book_keys: list[str] = []
+        for source in sources:
+            if source.kind == "cards":
+                bk = str(source.rel_path)
+                if bk in toc_cache and bk not in book_keys:
+                    book_keys.append(bk)
+        for bk in book_keys:
+            cards_by_file: dict[str, list] = {}
+            for source in sources:
+                if str(source.rel_path) != bk:
+                    continue
+                rel_file = source.rel_path / source.md_path.name
+                out_file = extracted_dir / rel_file.with_suffix(".jsonl")
+                if out_file.exists():
+                    items = [json.loads(l) for l in
+                             out_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+                    if items:
+                        cards_by_file[str(rel_file)] = items
+            if not cards_by_file:
+                continue
+            report = validate_and_correct(cards_by_file, toc_cache[bk], extracted_dir)
+            if report["corrected"]:
+                for file_key, cards in cards_by_file.items():
+                    out_file = extracted_dir / file_key.replace(".md", ".jsonl")
+                    with out_file.open("w", encoding="utf-8") as f:
+                        for item in cards:
+                            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+                    # jsonl 已改写：若已 publish 过需清除标记，下轮 publish 重发
+                    if checkpoint.is_published(file_key):
+                        checkpoint.unmark_published(file_key)
+            print(f"[toc-dir] {bk}: {report['summary']}", flush=True)
+
+    # --toc：校验 + 自动修正（在所有 JSONL 写入完成后；--toc-dir 优先，两者都给时忽略本参数）
+    if args.toc and not args.toc_dir:
         toc_path = Path(args.toc)
         if toc_path.exists():
             toc = json.loads(toc_path.read_text(encoding="utf-8"))

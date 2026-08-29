@@ -1,7 +1,7 @@
 # K12 数据管线使用手册
 
 > **适用于**：数据工程师、开发者
-> **最后更新**：2026-08-26
+> **最后更新**：2026-08-28
 > **关联文档**：[管线总结](./data-refinery-管线总结与后续.md) | [TOC 设计](./data-refinery-TOC目录优先管线设计.md) | [DB 设计](./K12智学系统-数据库设计文档.md)
 
 ---
@@ -17,8 +17,10 @@
                                          ↑                                 ↑
                                     toc_parse_cli                  db_loader_cli
                                     (目录→TOC JSON)                (JSONL→MySQL)
+                                          ↘ toc_merge ↗
+                                       (card标签合并进TOC)
 
-                              refinery_cli（串联 publish + db_loader）
+              pipeline_cli（总控：toc_parse → extract → publish → toc_merge → db_loader）
 ```
 
 | 步骤 | 工具 | 输入 | 输出 | 核心依赖 |
@@ -28,8 +30,10 @@
 | 1.5 | `toc_parse_cli` | 目录页 MD | TOC JSON | LLM |
 | 2 | `extract_cli` | Markdown (.md) | Cards JSONL | LLM |
 | 3 | `publish_cli` | Cards JSONL | Published JSONL + assets | — |
+| 3.5 | `toc_merge` | TOC JSON + published JSONL | merged TOC + merge report | — |
 | 4 | `db_loader_cli` | Published JSONL | MySQL (cards/questions) | pymysql |
-| — | `refinery_cli` | — | — | 串联 3+4 |
+| — | `pipeline_cli` | — | — | 总控 1.5~4（convert 之后一站式） |
+| — | `refinery_cli` | — | — | 串联 3+4（旧入口，保留） |
 
 ---
 
@@ -38,6 +42,14 @@
 ### 2.1 配置文件
 
 所有配置通过 `tools/data-refinery/.env` 设置：
+
+**首跑引导**：无需手写。若 `.env` 缺失，`pipeline_cli` 首次运行时会读取
+`apps/server/.env`（deploy.sh 生成，含各 provider 的 BASE_URL/API_KEY 和 DB_*）、
+`model-routes.yaml`（模型名）或 `tools/deploy/runtime/deploy.state.json`，
+列出已配置的 provider 让你选择一个，自动生成 `.env`（之后再运行不再询问）。
+没有这些源文件时会报错提示先运行 `tools/deploy.sh`，或参照
+`tools/data-refinery/.env.example` 手动配置。也可以设置环境变量
+`REFINERY_PROVIDER=kimi` 跳过交互直接指定。
 
 ```bash
 # === LLM 配置（extract / toc_parse 共用）===
@@ -312,14 +324,15 @@ python src/extract_cli.py --dry-run
 | `--book` | str | — | 教材路径子串匹配，如 `九年级/上册` |
 | `--force` | flag | 否 | 忽略 checkpoint，不删已有输出 |
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有 JSONL，重新提取 |
-| `--toc` | path | — | TOC JSON 路径，启用 lesson_id 校验+修正 |
+| `--toc` | path | — | TOC JSON 路径，启用 lesson_id 校验+修正（单文件模式） |
+| `--toc-dir` | path | — | TOC 目录（如 `output/toc`）：按书自动匹配，把合法章节列表注入 LLM prompt（减少标签漂移）+ 逐书后置校验。优先于 `--toc` |
 | `--interval` | float | `0` | 每次 LLM 调用后 sleep 秒数（限速节流） |
 | `--batch-size` | int | `0` | 每处理 N 页（发生 LLM 调用的页）后进入批次间歇（`0`=不分批） |
 | `--batch-sleep` | float | `0` | 批次之间 sleep 秒数（配合 `--batch-size`） |
 | `--dry-run` | flag | 否 | 只打印不提取 |
 
 **输出**：`output/extracted/{学科}/…/page_001.jsonl …`  
-**TOC 模式额外输出**：`output/extracted/diff_report.json`（差异报告）
+**TOC 模式额外输出**：`output/extracted/diff_report.json`（`--toc` 单文件模式的差异报告；`--toc-dir` 模式不写此文件，由 toc_merge 的 merge_report 取代）
 
 ### 4.4 publish_cli — 图片物化与路径改写
 
@@ -406,9 +419,10 @@ python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/初中/人
 |------|------|--------|------|
 | `--input-dir` | path | `output/published` | published 目录 |
 | `--source` | all / zgkao / smartedu | `all` | 来源过滤 |
-| `--load-toc` | flag | 否 | TOC 模式：只建骨架不入 card（需 `--toc-path`） |
-| `--load-cards` | flag | 否 | Card 模式：只入库 card，不 reset（可选 `--toc-path`） |
-| `--toc-path` | path | — | TOC JSON 路径 |
+| `--load-toc` | flag | 否 | TOC 模式：只建骨架不入 card（需 `--toc-path` 或 `--toc-dir`） |
+| `--load-cards` | flag | 否 | Card 模式：只入库 card，不 reset（可选 `--toc-path`/`--toc-dir`） |
+| `--toc-path` | path | — | TOC JSON 路径（单文件） |
+| `--toc-dir` | path | — | TOC 目录（如 `output/toc`）：按书自动匹配 merged TOC（优先 `.merged.json`，fallback 初始 `.json`）；`--load-cards` 时对命中的书先建骨架（幂等）再挂卡。优先于 `--toc-path` |
 | `--purge-business-data` | flag | 否 | full-reload 前清空引用 cards/questions 的业务数据（answers/错题本/变式题/作业提交/progress，**不可恢复**）；默认遇业务数据报错退出 |
 | `--dry-run` | flag | 否 | 只打印不入库 |
 
@@ -443,44 +457,94 @@ python src/refinery_cli.py --purge-business-data
 | `--skip-load` | flag | 否 | 跳过 db_loader，只 publish |
 | `--purge-business-data` | flag | 否 | 透传给 db_loader_cli：full-reload 前清空业务数据（否则遇业务数据报错） |
 
+> 旧入口，保留用于单跑后段。新工作流请用 `pipeline_cli`（§4.7）。
+
+### 4.7 pipeline_cli — 总控管线（推荐入口）
+
+convert 之后的一站式入口：`toc_parse → extract（目录注入）→ publish → toc_merge → db_loader`。
+
+```bash
+python src/pipeline_cli.py                          # 无参数：交互式向导（见下）
+python src/pipeline_cli.py --source all             # 直接执行全流程（增量入库）
+python src/pipeline_cli.py --source smartedu --book "九年级/下册" --pages "8-30"  # 部分提取
+python src/pipeline_cli.py --interval 2 --batch-size 10 --batch-sleep 60         # LLM 节流
+python src/pipeline_cli.py --purge-business-data   # 全量重载（清学生侧业务数据）
+python src/pipeline_cli.py --dry-run                # 试运行
+```
+
+**交互式向导**：不带参数运行时逐项询问——
+
+1. **素材来源**：全部 / 仅教材 / 仅试卷
+2. **目录提取**：是否跑 toc_parse（试卷来源自动跳过）
+3. **卡片范围**：全部 / 部分（列出已转 MD 的书目供选择，教材可再指定页码范围）/ 跳过；
+   未跳过时追问**是否强制重做**——选是则忽略已提取记录，重新切割 + LLM 标注 + 重新发布
+   （等价 `--reconvert`，仅作用 extract/publish，不动目录）
+4. **LLM 模型**：默认用 `.env` 当前配置；列出 deploy 产物（`apps/server/.env` /
+   `model-routes.yaml`）中已配置的其他 provider 可选；也可**手动输入自定义模型**
+   （provider + 模型名 + Key + Base URL，适合任何未配置的模型，如自建代理）。
+   选择**仅本次运行生效，不写入 .env**
+5. **入库模式**：增量（默认）/ 全量重载（需二次确认清业务数据）/ 跳过
+6. **执行计划**：显示完整计划，`Y` 执行 / `d` 仅试运行（dry-run）/ `n` 取消
+
+带任何参数运行时跳过向导直接执行（兼容脚本化调用）。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--source` | all / zgkao / smartedu | `all` | 来源过滤（zgkao 自动跳过 toc/merge——试卷无目录） |
+| `--book` | str | — | 只处理指定书目（rel_path 子串匹配），作用于 toc_parse 和 extract |
+| `--pages` | str | — | 只提取指定页码（如 `8-30`），作用于 extract 和 publish |
+| `--reconvert` | flag | 否 | 忽略已提取/已发布记录，重新切割 + 标注 + 发布（仅作用 extract/publish；作用域由 `--book`/`--pages` 限定，未限定则全量重做；目录重解析用 `toc_parse_cli --reconvert` 单独跑） |
+| `--dry-run` | flag | 否 | 所有步骤只打印 |
+| `--purge-business-data` | flag | 否 | 全量重载前清空业务数据（不可恢复）；默认增量入库（`--load-cards` + merged TOC 建骨架） |
+| `--skip-toc` | flag | 否 | 跳过 toc_parse |
+| `--skip-extract` | flag | 否 | 跳过 extract |
+| `--skip-publish` | flag | 否 | 跳过 publish |
+| `--skip-load` | flag | 否 | 跳过 toc_merge + db_loader |
+| `--interval` / `--batch-size` / `--batch-sleep` | float/int | `0` | extract 节流透传 |
+
+**内置的目录合并（toc_merge）**：extract 阶段 LLM 标注时已注入初始目录的合法章节列表；
+card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_merge` 在入库前合并进
+`output/toc/{书名}.merged.json`（不回写初始 `toc.json`），db_loader 用合并版建骨架后挂卡——
+新小节会建成自己的 lesson 行（不再是旧 TOC 模式的「折叠进父节/WARN 跳过」）。
+合并报告在同名 `.merge_report.json`（含新增小节/补齐章标题/未解析标签），其中
+`section_created_from_subsection`（子节补建父节）与 `unresolved` 项建议人工复核。
+
 ---
 
 ## 5. 推荐工作流
 
-### 5.1 完整教科书入库（TOC 优先）
+### 5.1 一站式（pipeline_cli，推荐）
+
+convert 之后只需一条命令，教材/试卷自动分流，各阶段断点续跑：
 
 ```bash
 cd tools/data-refinery
 
-# Step 1: 爬取教材图片
-cd ../crawler
-python src/cli.py --site smartedu --subject 数学 --level 初中 --grade 九年级 --semester 下册
-
-# Step 2: 转换全部 MD（可只转部分页）
-cd ../data-refinery
+# Step 1: 爬取素材（ crawler，见 §3）
+# Step 2: 转 MD
 python src/convert_cli.py --source smartedu
 
-# Step 3: 解析目录 → TOC JSON（简写）
-python src/toc_parse_cli.py --grade 九下
+# Step 3: 其余全部（目录→卡片→发布→合并→入库）
+python src/pipeline_cli.py --source smartedu
 
-# Step 4: 建 DB 骨架（整本书章节目录完整）
-python src/db_loader_cli.py --load-toc \
-  --toc-path output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json
-
-# Step 5: 提取卡片（可分批）
-python src/extract_cli.py --toc output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json \
-  --pages "8-30"
-
-# Step 6: 发布 + 入库
-python src/refinery_cli.py --source smartedu
+# 追加新页/新书后重跑同一条命令：checkpoint 自动跳过已完成部分
+python src/pipeline_cli.py --source smartedu
 ```
 
-### 5.2 增量卡片（已有骨架，追加新页）
+首跑时 `.env` 未配置会自动进入配置引导（从 deploy.sh 产物选择 provider，见 §2.1）。
+入库默认增量（不清业务数据）；需要重建全库时显式加 `--purge-business-data`。
+
+### 5.2 分步执行（调试或精细控制）
 
 ```bash
-# 上回只转了 page_008~030，这次追加 page_031~049
-python src/extract_cli.py --toc output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json --pages "31-49"
-python src/refinery_cli.py --source smartedu
+# 目录（仅教材）
+python src/toc_parse_cli.py --grade 九下
+
+# 卡片（--toc-dir 注入目录约束 + 后置校验）
+python src/extract_cli.py --source smartedu --toc-dir output/toc
+
+# 后段（发布 + 入库，merged TOC 建骨架 + 挂卡）
+python src/db_loader_cli.py --load-cards --source smartedu --toc-dir output/toc
 ```
 
 ### 5.3 试卷入库
@@ -490,11 +554,10 @@ python src/refinery_cli.py --source smartedu
 cd tools/crawler
 python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --year 2024,2025
 
-# 转换 → 提取 → 入库
+# 转换 → 一站式（zgkao 自动跳过 toc/merge）
 cd ../data-refinery
 python src/convert_cli.py --source zgkao
-python src/extract_cli.py --source zgkao
-python src/refinery_cli.py --source zgkao
+python src/pipeline_cli.py --source zgkao
 ```
 
 ### 5.4 重新处理（出错了或 prompt 更新）
@@ -510,6 +573,9 @@ python src/toc_parse_cli.py --reconvert --book "九年级/下册"
 python src/convert_cli.py --reconvert
 python src/toc_parse_cli.py --reconvert
 python src/extract_cli.py --reconvert
+
+# 重做后再跑总控（merge 是确定性重算，自动覆盖 merged sidecar）
+python src/pipeline_cli.py --source all
 ```
 
 ---
@@ -525,10 +591,12 @@ tools/data-refinery/output/
 ├── extracted/                   # extract 产物
 │   └── 数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册/
 │       ├── page_008.jsonl ~ page_049.jsonl
-│       └── diff_report.json     # --toc 模式产出
+│       └── diff_report.json     # --toc 单文件模式产出（--toc-dir 模式不写）
 ├── toc/                         # toc_parse 产物
 │   └── 数学/初中/人教版/九年级/下册/
-│       └── 义务教育教科书·数学九年级下册.json
+│       ├── 义务教育教科书·数学九年级下册.json            # 初始 TOC（toc_parse 产物）
+│       ├── 义务教育教科书·数学九年级下册.merged.json      # toc_merge 合并版（入库用）
+│       └── 义务教育教科书·数学九年级下册.merge_report.json  # 合并报告
 ├── published/                   # publish 产物
 │   └── 数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册/
 │       └── page_008.jsonl ~ page_049.jsonl
@@ -552,6 +620,7 @@ tools/data-refinery/output/
 | toc_parse | `.toc_checkpoint.json` → `toc_parsed` | 已解析 | `--reconvert` |
 | extract | `.checkpoint.json` → `extracted` | 已提取 | `--reconvert` |
 | publish | `.publish_checkpoint.json` → `published` | 已发布 | `--reconvert` |
+| toc_merge | —（无 checkpoint） | — | 不需要：确定性纯函数，每次全量重算（毫秒级） |
 
 **`--force` vs `--reconvert`**：
 - `--force`：跳过 checkpoint 检查，重新处理，但**不删除**已有输出文件
@@ -586,3 +655,19 @@ A: 通常是业务表手动造过数据或守卫未覆盖的新外键。先排�
 A: `--toc` / `--toc-path` 传的路径不对。TOC 实际输出路径是
 `output/toc/{学科}/{学段}/{版本}/{年级}/{册次}/{书名}.json`（注意有学段、册次两层目录，
 文件名无 `_toc` 后缀），先用 `find output/toc -name "*.json"` 确认实际文件名。
+更省事的方式：用 `--toc-dir output/toc` 按书自动匹配，不用拼路径。
+
+**Q: merge_report.json 里的 unresolved / section_created_from_subsection 是什么？**
+A: `unresolved` 是无法解析出编号的卡片标签（如非编号孤立标题），不参与合并，靠
+lesson 继承兜底；`section_created_from_subsection` 是目录页连 N.M 级节都没列、
+由子节标签反推补建的父节（标题用子节标题兜底），建议人工核对。
+
+**Q: pipeline_cli 首跑时卡在「数据管线 LLM 配置」选择？**
+A: 这是 `.env` 缺失时的配置引导（见 §2.1）：从 deploy.sh 已配置的 provider 中
+选一个即可；也可以预先 `export REFINERY_PROVIDER=kimi` 跳过交互。
+
+**Q: 在向导里选了页码范围，为什么 extract 还是全部 [skip]、没调 LLM？**
+A: checkpoint 增量语义（§7）：已提取过的页自动跳过以省 LLM 成本，`[skip]` 日志
+正是这个含义。要**重新生成**这些页：向导里对「强制重做已提取的页?」选 `y`
+（等价命令行加 `--reconvert`），会清掉对应页的提取/发布记录，重新切割 → 标注 →
+发布；入库按书替换，自动覆盖旧卡。

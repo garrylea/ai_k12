@@ -80,6 +80,54 @@ def test_label_result_groups_none_for_non_practice():
     assert result.labels[0].groups is None
 
 
+class TestTocLabelsInjection:
+    """toc_labels 注入：合法 lesson_id 列表拼进 user_message，LLM 优先逐字复制。"""
+
+    @staticmethod
+    def _make_labeler(captured):
+        fake_response = type("R", (), {"content": '{"page_type":"content","items":[{"card_type":"concept","lesson_id":"26.1 反比例函数","title":null,"textbook_page":"P8"}]}'})()
+
+        class FakeLLM:
+            def complete(self, system, user):
+                captured.append((system, user))
+                return fake_response
+
+        return CardLabeler(llm=FakeLLM(), prompt_template="p")
+
+    def test_toc_labels_appended_to_user_message(self):
+        captured = []
+        labeler = self._make_labeler(captured)
+        labeler.label(["概念文字"], "P8", toc_labels=["26.1 反比例函数", "26.1.1 反比例函数"])
+        assert len(captured) == 1
+        user = captured[0][1]
+        assert "Legal lesson_id list" in user
+        assert "- 26.1 反比例函数" in user
+        assert "- 26.1.1 反比例函数" in user
+
+    def test_no_toc_labels_no_list(self):
+        captured = []
+        labeler = self._make_labeler(captured)
+        labeler.label(["概念文字"], "P8")
+        user = captured[0][1]
+        assert "Legal lesson_id list" not in user
+
+    def test_empty_toc_labels_no_list(self):
+        captured = []
+        labeler = self._make_labeler(captured)
+        labeler.label(["概念文字"], "P8", toc_labels=[])
+        assert "Legal lesson_id list" not in captured[0][1]
+
+    def test_long_list_truncated(self):
+        captured = []
+        labeler = self._make_labeler(captured)
+        labels = [f"26.{i} 第{i}节" for i in range(1, 305)]
+        labeler.label(["概念文字"], "P8", toc_labels=labels)
+        user = captured[0][1]
+        assert "- 26.300 第300节" in user
+        assert "- 26.304 第304节" not in user
+        assert "已截断" in user
+
+
 def test_label_result_skips_question_with_null_text():
     """text:null 的题应跳过，不产出 'None' 字符串"""
     fake_response = type("R", (), {"content": '{"page_type":"practice","items":[{"card_type":"practice","lesson_id":null,"title":null,"textbook_page":"P11","groups":[{"intro":null,"questions":[{"n":1,"text":null},{"n":2,"text":"(2) $4x^{2}=81$"}]}]}]}'})()

@@ -94,3 +94,24 @@ class TestPublishCli:
         assert "试卷" in captured.out
         # dry-run 不应产出 published 文件
         assert not (out / "published").exists()
+
+    def test_book_filter_scopes_publish(self, tmp_path):
+        """--book：只发布匹配的书（rel_path 子串匹配，重发布不波及其他书）。"""
+        out = tmp_path / "out"
+        b1 = out / "extracted" / "数学/初中/人教版/九年级/上册/书A"
+        b2 = out / "extracted" / "数学/初中/人教版/九年级/上册/书B"
+        b1.mkdir(parents=True)
+        b2.mkdir(parents=True)
+        card = {"lesson_id": "26.1 X", "sort_order": 1, "card_type": "concept",
+                "title": None, "content": "c", "content_metadata": None,
+                "knowledge_point_ids": [], "textbook_page": "P1"}
+        for b in (b1, b2):
+            (b / "page_001.jsonl").write_text(
+                json.dumps(card, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--book", "书A"])
+
+        assert (out / "published/数学/初中/人教版/九年级/上册/书A/page_001.jsonl").exists()
+        assert not (out / "published/数学/初中/人教版/九年级/上册/书B/page_001.jsonl").exists()

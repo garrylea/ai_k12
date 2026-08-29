@@ -157,6 +157,11 @@ def _match_lesson_by_name(self, name: str) -> int | None:
 
 ### 4.4 修改 `extract_cli.py`
 
+> **状态：已实现**（2026-08-28）。单文件模式为 `--toc`；另实现了按书自动匹配的
+> `--toc-dir`（目录注入 + 逐书后置校验，不写 diff_report，由 toc_merge 的
+> merge_report 取代，见 §10）。目录注入 LLM prompt 即本节设计的
+> 「注入合法 lesson_id 列表」。
+
 新增 `--toc` 参数（可选）：
 
 ```
@@ -285,3 +290,40 @@ python src/db_loader_cli.py --load-cards
 - **教材目录页位置**：不同教材目录页位置可能不同（不总是第 5-6 页）。用"前 10 页内含 `目录` heading"来识别，不完全可靠时降级为 LLM 扫描所有页判断。
 - **目录与正文标题不一致**：极少情况目录写的"A"正文写的"B"——diff report 记录，需人工决策。
 - **非编号条目排序**：supplement（信息技术应用/阅读与思考等）排在章节最后，sort_order 紧随最后一节。
+
+## 10. 目录合并 toc_merge（已实现，2026-08-28）
+
+**问题**：初始 TOC 只来自前几页目录页，正文中的新小节（如 `26.1.1`）目录页可能没列；
+旧 db_loader 的 TOC 模式会把子节折叠进父节或 WARN 跳过，补充目录结构丢失。
+
+**方案**：入库前在文件层合并（pipeline_cli 第 4 步）。
+
+```
+toc.json（初始，toc_parse 产物，一次写入不回写）
+    + published/*.jsonl 中所有 card 的 lesson_id 标签
+    ↓ merge_toc()（纯函数，确定性重算，无 checkpoint）
+output/toc/{书名}.merged.json        # 合并版（唯一事实源，db_loader 用它建骨架）
+output/toc/{书名}.merge_report.json  # 合并报告
+```
+
+合并规则：
+- 章综述标签（`第N章 X`）→ 新建章或补齐已有章的 title/label
+- 节标签（`N.M X`）→ chapter.sections 按 M 有序插入
+- 子节标签（`N.M.K X`）→ subsections 按 K 有序插入；父节也缺时连父节一起补
+  （report 标注 `section_created_from_subsection`，标题用子节标题兜底，建议人工复核）
+- 无法解析编号的标签 → `unresolved`，不合并（靠 lesson 继承兜底）
+- 新增节点带 `"source": "card"` 标记；初始 `toc.json` 永不回写
+  （保护 toc_parse 的 LLM 原始产物与 `--reconvert` 语义）
+
+配套变更：
+- `db_loader_cli --toc-dir`：按书匹配 merged TOC（优先 `.merged.json`，fallback 初始
+  `.json`），`--load-cards` 时对命中的书先 `load_toc_structure`（幂等，补充小节建成
+  lesson 行）再挂卡
+- **增量入库 = 按书替换**：`load_book_cards` TOC 模式挂卡前先删除该书已入库的卡再重插
+  （幂等，重跑 pipeline 不撞 `uniq_cards_lesson_sort` 唯一键）；该书有学生练习记录
+  （practice_results）引用旧卡时拒绝并提示改用全量重载，不静默删学生数据；
+  practice_results 也已加入 full-reload 的业务数据守卫名单（其 card_id 是 CASCADE，
+  原本会被静默连带删除）
+- `db_loader.load_book_cards` TOC 模式的 lesson 匹配改为 semester 作用域
+  （修复跨书同名 lesson 误匹配）；子节坍缩路径保留作漏网兜底
+- `extract_cli --toc-dir`：标注时把初始 TOC 的合法章节列表注入 LLM prompt（本档 §4.4）

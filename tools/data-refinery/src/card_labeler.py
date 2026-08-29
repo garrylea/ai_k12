@@ -140,13 +140,16 @@ class CardLabeler:
         self._prompt = prompt_template
 
     def label(self, cards_text: list[str], page_number: str,
-              prev_lesson_id: str | None = None) -> PageLabelResult:
+              prev_lesson_id: str | None = None,
+              toc_labels: list[str] | None = None) -> PageLabelResult:
         """调用 LLM 对一页的卡片进行标注。
 
         Args:
             cards_text: 拆分后的卡片文本列表（splitter 输出）
             page_number: 页码字符串，如 "P8"
             prev_lesson_id: 上一页的 lesson_id（跨页继承）
+            toc_labels: 该书 TOC 的合法 lesson_id 列表（注入 prompt，
+                让 LLM 优先逐字复制目录条目，减少标签漂移）
 
         Returns:
             PageLabelResult，包含页类型和每张卡的标注
@@ -162,6 +165,16 @@ class CardLabeler:
             f"Previous lesson_id: {prev_lesson_id or '(none)'}\n\n"
             + "\n\n".join(card_snippets)
         )
+        if toc_labels:
+            shown = toc_labels[:300]
+            listing = "\n".join(f"- {l}" for l in shown)
+            if len(toc_labels) > len(shown):
+                listing += f"\n- ...（共 {len(toc_labels)} 条，已截断）"
+            user_message += (
+                "\n\n---\nLegal lesson_id list（标注 lesson_id 时优先从下列目录条目中"
+                "逐字复制；仅当页面确实出现列表中没有的编号节/子节标题时才输出页面原文）：\n"
+                + listing
+            )
 
         response: LLMResponse = self._llm.complete(self._prompt, user_message)
         data = _parse_json_object(response.content)

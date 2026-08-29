@@ -22,6 +22,8 @@ def parse_args(argv=None):
     parser.add_argument("--load-toc", action="store_true", help="只 load_toc_structure()，不入库 card（需配合 --toc-path）")
     parser.add_argument("--load-cards", action="store_true", help="只 card/questions 入库，不建骨架")
     parser.add_argument("--toc-path", help="TOC JSON 路径（--load-toc 时必传；--load-cards 时可选）")
+    parser.add_argument("--toc-dir", help="TOC 目录（如 output/toc）：--load-toc 遍历目录建骨架；"
+                        "--load-cards 时按书自动匹配 merged TOC（先建骨架再挂卡）；优先于 --toc-path")
     parser.add_argument("--purge-business-data", action="store_true",
                         help="full-reload 前清空引用 cards/questions 的业务数据"
                              "（answers/错题本/变式题/作业提交/progress，不可恢复）；"
@@ -32,6 +34,31 @@ def parse_args(argv=None):
 
 def _kind(name: str) -> str:
     return "questions" if ("试卷" in name or "答案" in name) else "cards"
+
+
+def _resolve_book_toc(toc_dir: Path, book_key: str) -> Path | None:
+    """按书匹配 TOC：优先 toc_merge 的 merged sidecar，fallback 初始 toc。"""
+    for suffix in (".merged.json", ".json"):
+        p = toc_dir / f"{book_key}{suffix}"
+        if p.exists():
+            return p
+    return None
+
+
+def _collect_toc_files(toc_dir: Path) -> list[Path]:
+    """收集目录下的 TOC 文件：merged 优先；同名初始 toc 在 merged 存在时跳过。
+
+    排除 merge_report（非 TOC 结构）。
+    """
+    files: list[Path] = []
+    for p in sorted(toc_dir.rglob("*.json")):
+        if p.name.endswith(".merge_report.json"):
+            continue
+        if p.name.endswith(".merged.json"):
+            files.append(p)
+        elif not p.with_suffix(".merged.json").exists():
+            files.append(p)
+    return files
 
 
 def _match_source(name: str, source: str) -> bool:
@@ -50,13 +77,28 @@ def main(argv=None):
 
     # === TOC mode: build skeleton only (needs DB) ===
     if args.load_toc:
-        if not args.toc_path:
-            print("[ERROR] --load-toc requires --toc-path", flush=True)
+        if not args.toc_path and not args.toc_dir:
+            print("[ERROR] --load-toc requires --toc-path or --toc-dir", flush=True)
+            return
+        if args.toc_dir and not Path(args.toc_dir).exists():
+            print(f"[ERROR] TOC 目录不存在: {args.toc_dir}", flush=True)
+            return
+        toc_files = _collect_toc_files(Path(args.toc_dir)) if args.toc_dir \
+            else [Path(args.toc_path)]
+        if args.dry_run:
+            for p in toc_files:
+                print(f"[dry-run] {p}", flush=True)
+            print(f"共 {len(toc_files)} 个 TOC 文件", flush=True)
             return
         loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
         try:
-            result = loader.load_toc_structure(args.toc_path)
-            print(f"[ok] TOC loaded: {result['chapters']} chapters, {result['lessons']} lessons", flush=True)
+            total_ch = total_ls = 0
+            for p in toc_files:
+                result = loader.load_toc_structure(str(p))
+                total_ch += result["chapters"]
+                total_ls += result["lessons"]
+                print(f"[ok] {p}: {result['chapters']} chapters, {result['lessons']} lessons", flush=True)
+            print(f"TOC loaded: {total_ch} chapters, {total_ls} lessons", flush=True)
         finally:
             loader.close()
         return
@@ -110,7 +152,12 @@ def main(argv=None):
             book_key = "/".join(p.relative_to(published_dir).parts[:-1])
             books.setdefault(book_key, []).append(p)
 
+        # --toc-dir：按书匹配 TOC（优先 merged sidecar）；命中则先建骨架（幂等
+        # find-or-create，把 merge 补出的节建成 lesson 行）再挂卡；未命中退回 --toc-path
+        toc_dir = Path(args.toc_dir) if args.toc_dir else None
+
         total_cards = 0
+        failed_books = 0
         for book_key in sorted(books):
             pages = sorted(books[book_key])
             cards = []
@@ -119,7 +166,24 @@ def main(argv=None):
                     if line.strip():
                         cards.append(json.loads(line))
             book_rel = f"{book_key}/{pages[0].name}"
-            n = loader.load_book_cards(book_rel, cards, toc_path=args.toc_path)
+            book_toc = args.toc_path
+            if toc_dir is not None:
+                matched = _resolve_book_toc(toc_dir, book_key)
+                if matched is not None:
+                    result = loader.load_toc_structure(str(matched))
+                    print(f"[toc] {book_key}: skeleton {result['chapters']} chapters, "
+                          f"{result['lessons']} lessons", flush=True)
+                    book_toc = str(matched)
+                else:
+                    book_toc = None
+                    print(f"[WARN] {book_key}: TOC 目录下未找到该书目录，走动态建结构", flush=True)
+            try:
+                n = loader.load_book_cards(book_rel, cards, toc_path=book_toc)
+            except RuntimeError as e:
+                # 业务数据守卫（如该书有学生 progress 引用旧卡）：报错跳过该书，不影响其他书
+                print(f"[ERROR] {e}", flush=True)
+                failed_books += 1
+                continue
             total_cards += n
             print(f"[ok] {book_key} -> {n} cards", flush=True)
 
@@ -130,7 +194,9 @@ def main(argv=None):
             total_q += n
             print(f"[ok] {p.relative_to(published_dir)} -> {n} questions", flush=True)
 
-        print(f"Loaded: {total_cards} cards, {total_q} questions", flush=True)
+        print(f"Loaded: {total_cards} cards, {total_q} questions"
+              + (f"（{failed_books} 本书因业务数据守卫被跳过）" if failed_books else ""),
+              flush=True)
     finally:
         loader.close()
 

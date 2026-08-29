@@ -19,12 +19,16 @@ tools/data-refinery/
 │   ├── extract.py            # LLM 提取器（试卷题目）
 │   ├── extract_cli.py        # extract 子命令
 │   ├── toc_parse_cli.py      # 目录页 -> TOC JSON 子命令
+│   ├── toc_merge.py           # card 标签合并进 TOC（产出 .merged.json sidecar）
+│   ├── env_bootstrap.py       # 首跑配置引导（从 deploy.sh 产物生成 .env）
 │   ├── image_rewrite.py      # 图片引用物化 + 路径改写
 │   ├── asset_store.py       # 资产存储
 │   ├── publish_cli.py        # publish 子命令
 │   ├── db_loader.py          # MySQL 入库（find-or-create 结构 + full-reload）
 │   ├── db_loader_cli.py      # db_loader 子命令
-│   ├── refinery_cli.py       # 串联 publish + db_loader 一键执行
+│   ├── refinery_cli.py       # 串联 publish + db_loader（旧入口，保留）
+│   ├── pipeline_cli.py       # 总控：toc_parse→extract→publish→toc_merge→db_loader
+│   ├── pipeline_wizard.py     # pipeline_cli 无参运行时的交互式向导
 │   ├── llm.py                # LLM 客户端（多 provider 工厂）
 │   ├── models.py             # Pydantic 数据模型
 │   ├── prompts/              # Prompt 模板
@@ -54,7 +58,34 @@ cp .env.example .env
 # 填入 LLM_AUTH_TOKEN（refinery 专属鉴权，勿用 ANTHROPIC_* 会被 shell 覆盖）、DB_* 等
 ```
 
+> **或者跳过手写**：先跑过 `tools/deploy.sh`（生成了 `apps/server/.env`）的话，
+> 直接运行 `pipeline_cli`，首跑会列出已配置的 provider 让你选一个并自动生成 `.env`。
+
 ## 使用
+
+### 0. pipeline：一站式总控（推荐）
+
+```bash
+python src/pipeline_cli.py                          # 无参数：交互式向导
+python src/convert_cli.py --source smartedu   # ① 素材 → MD（仍单独跑）
+python src/pipeline_cli.py --source all       # ② 其余全部：目录→卡片→发布→合并→入库
+python src/pipeline_cli.py --source all --dry-run
+python src/pipeline_cli.py --book "九年级/下册" --pages "8-30"    # 部分提取
+python src/pipeline_cli.py --book "九年级/下册" --pages "8-30" --reconvert   # 重新生成这些页
+python src/pipeline_cli.py --interval 2 --batch-size 10 --batch-sleep 60   # LLM 节流
+python src/pipeline_cli.py --purge-business-data   # 全量重载（清业务数据，不可恢复）
+```
+
+**无参数运行进入交互式向导**：逐项选择素材来源 → 是否提取目录 → 卡片范围
+（全部 / 选书目 + 页码，可强制重做已提取的页 = `--reconvert`）→ LLM 模型
+（当前配置 / deploy 已配置的其他 provider / 手动输入自定义模型，仅本次运行生效）→
+入库模式（增量 / 全量重载需二次确认 / 跳过）→ 显示执行计划确认（Y 执行 / d 试运行 /
+n 取消）。带参数运行时跳过向导直接执行。
+
+教材/试卷自动分流（试卷跳过目录提取与合并）；各阶段沿用原有 checkpoint，
+重复执行只处理新增/未完成部分；入库默认增量（`--load-cards` + merged TOC 建骨架）。
+card 分析发现的新小节由 `toc_merge` 在入库前合并进
+`output/toc/{书名}.merged.json`（不回写初始 toc.json），新小节会建成自己的 lesson 行。
 
 ### 1. convert：素材 → Markdown
 
@@ -127,7 +158,7 @@ python src/db_loader_cli.py --load-cards --toc-path output/toc/....json         
 
 > DB 初始化（含 `subjects` seed）由 `tools/db/install_mysql.sh` 完成；连接配置见下表 `DB_*`。
 
-### 5. refinery：一键串联 publish + db_loader
+### 5. refinery：一键串联 publish + db_loader（旧入口，保留）
 
 ```bash
 python src/refinery_cli.py --source all            # publish + db_loader
@@ -137,7 +168,7 @@ python src/refinery_cli.py --skip-load             # 只 publish
 python src/refinery_cli.py --purge-business-data   # 库里有业务数据时显式清空后全量重载
 ```
 
-把后段（extracted -> published -> MySQL）串起来一键跑。前段（`convert_cli` 素材->md、`extract_cli` md->extracted）仍单独执行。`--source` / `--dry-run` / `--purge-business-data` 透传给两步。
+把后段（extracted -> published -> MySQL）串起来一键跑。新工作流请用 `pipeline_cli`（总控，含目录注入与 toc_merge）。
 
 > 完整参数表与推荐工作流见 [使用手册](../../docs/data-refinery-使用手册.md)。
 

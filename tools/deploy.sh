@@ -11,7 +11,8 @@
 #   6. 后台启动服务，健康检查，打印使用信息。
 #   7. 断点续跑：配置与已完成步骤保存到 tools/deploy/runtime/，失败后重跑可从失败处继续。
 #
-# 业务数据导入不在此脚本范围内（由独立脚本处理）。
+# 业务数据导入不在此脚本范围内（由 tools/data-refinery 的 pipeline_cli 处理，
+# 其 .env 配置由 pipeline 首跑时从本脚本产物引导生成）。
 #
 # 用法：
 #   bash tools/deploy.sh          # 全新部署；若存在上次状态则询问是否续跑
@@ -585,7 +586,9 @@ print_summary() {
   停止:    kill \$(cat ${RUNTIME_DIR}/server.pid) \$(cat ${RUNTIME_DIR}/web.pid)
 
   提示:
-    - 业务数据导入请使用独立脚本。
+    - 业务数据导入请使用 tools/data-refinery 的总控脚本：
+      cd tools/data-refinery && python src/pipeline_cli.py --source all
+      （首跑会自动生成本目录的 .env，从上面配置的模型中选择）
     - 自定义模型可在管理台 /api/admin/models 调整。
     - 管理员登录后请尽快修改初始密码。
 ============================================================

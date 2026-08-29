@@ -46,6 +46,7 @@ def parse_args(argv=None):
     parser.add_argument("--input-dir", help="extract 产物目录（默认 output/extracted）")
     parser.add_argument("--output-dir", help="published 输出目录（默认 output/published）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
+    parser.add_argument("--book", help="只发布匹配的教材/试卷（rel_path 子串匹配，如'九年级/上册'）")
     parser.add_argument("--pages", help="页码过滤，如 '1-6' 或 '1,3,5-8'")
     parser.add_argument("--force", action="store_true", help="强制重新发布（忽略 checkpoint，但不删除已有输出）")
     parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 published 文件，重新发布")
@@ -134,6 +135,8 @@ def main(argv=None):
             rel_file = rel.with_suffix("")
             if not _match_source(rel_file, args.source):
                 continue
+            if args.book and args.book not in str(rel_file):
+                continue
             key = str(rel_file)
             if checkpoint.is_published(key):
                 checkpoint.unmark_published(key)
@@ -152,6 +155,8 @@ def main(argv=None):
         rel = jsonl_path.relative_to(extracted_dir)  # e.g. 数学/.../试卷/试卷.jsonl
         rel_file = rel.with_suffix("")  # 去掉 .jsonl
         if not _match_source(rel_file, args.source):
+            continue
+        if args.book and args.book not in str(rel_file):
             continue
         key = str(rel_file)
         if not args.force and not args.reconvert and checkpoint.is_published(key):
