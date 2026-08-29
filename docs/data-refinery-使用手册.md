@@ -608,6 +608,18 @@ tools/data-refinery/output/
 └── .toc_checkpoint.json         # toc_parse checkpoint
 ```
 
+### 6.1 图片的访问方式（无需单独起静态服务）
+
+`output/assets/` 里的物化图片由 **apps/server 直接托管**（`apps/server/src/main.ts`
+的 `useStaticAssets`：`/assets/*` -> `tools/data-refinery/output/assets/*`）：
+
+- 开发期：web 的 Vite dev server 已把 `/assets` 代理到 server（`apps/web/vite.config.ts`），
+  前端统一用相对路径 `/assets/...` 取图，不跨域；
+- 生产：server 一个进程同时提供 API + 图片，不需要额外的静态服务或 CDN；
+- 需要切 CDN/OSS 时，设前端的 `VITE_ASSET_BASE_URL` 环境变量即可，无需改代码。
+
+> 旧的「`python3 -m http.server 3000` + `ASSET_BASE_URL`」开发期方案已废弃。
+
 ---
 
 ## 7. Checkpoint 机制

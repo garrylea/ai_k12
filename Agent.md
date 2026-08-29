@@ -54,6 +54,21 @@
 - 原为远程 DeepSeek `deepseek-v4-flash`（anthropic 兼容路径），应用户要求切到**本地 llama.cpp `Qwen3.8-27B`**（`LLM_PROVIDER=local`、`LLM_BASE_URL=http://192.168.1.8:12345/v1`）。
 - `.env` 中原远程配置以注释保留，可切回。冒烟实测连通（回复正常）。
 
+## 后续进展（2026-08-28~29）
+
+1. **pipeline_cli 一键全流程**（他人/后续会话完成，已随本记录一并提交）：`pipeline_cli.py` 总控（toc_parse -> extract -> publish -> toc_merge -> db_loader）+ 交互式向导 `pipeline_wizard.py` + `env_bootstrap.py`（首次运行从 apps/server/.env 引导生成 refinery .env）+ `toc_merge.py`（card 发现的新小节入库前合并进 TOC，`*.merged.json` sidecar）。refinery 测试增至 350 个全绿。
+2. **静态图片服务架构澄清**：图片由 **apps/server 直接托管**（`apps/server/src/main.ts` 的 `useStaticAssets`：`/assets/*` -> `tools/data-refinery/output/assets/*`），web 的 Vite dev server 把 `/assets` 代理到 server（`vite.config.ts`，与 `/api`/`/uploads` 同一套代理），前端用相对路径 `/assets/...` 取图，不跨域。**无需单独起 python http.server**（旧方案已废弃，refinery README/使用手册 §6.1 已同步修正）。本地开发只需两个服务：web（:5173）+ server（:3001）。
+
+## Git 提交记录
+
+仓库：https://git.imooc.com/garrylee/ai_k12 （`master` 分支）
+
+| 提交 | 说明 | 链接 |
+|---|---|---|
+| `a56d6f0` | 数据管道一键导入数据（FK 守卫 + dry-run bug + 测试/手册修复，即本文档"修复清单"主体） | https://git.imooc.com/garrylee/ai_k12/commit/a56d6f0 |
+| `fed6376` | feat(data-refinery): pipeline_cli 一键全流程导入 + 向导 + TOC 合并 | https://git.imooc.com/garrylee/ai_k12/commit/fed6376 |
+| `933f64a` | docs(refinery): 修正图片静态服务说明--由 apps/server 托管，废弃 python http.server 旧方案 | https://git.imooc.com/garrylee/ai_k12/commit/933f64a |
+
 ## 遗留事项
 
 1. ⚠️ **业务数据备份文件丢失**：purge 前的备份写在 `/tmp/ai_k12_backup/business_tables_20260826_195502.sql`（28KB，含 main_error_books 23 行、aux_error_books 7 行、progress 2 行、practice_results 6 行等），已被系统 /tmp 清理删掉。**待办**：检查 MySQL binlog 是否可恢复被 purge 的行；今后备份一律放持久目录（勿用 /tmp）。
