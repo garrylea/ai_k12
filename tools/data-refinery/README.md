@@ -124,17 +124,16 @@ python src/publish_cli.py --source smartedu
 
 > 资源路径用源相对稳定键（`questions/{subject}/{hash}/{idx}`、`textbooks/{subject}/{hash}/{sort_order}`）。subject 按文件路径首段推导（2026-08-26 前曾硬编码 `math` 误标化学，已修）。
 
-#### 开发期静态服务（让 web 能取到图片）
+#### 图片静态服务（由 apps/server 提供，无需单独起服务）
 
-`output/assets/` 需以静态目录暴露，前端通过 `ASSET_BASE_URL` 拼接：
+`output/assets/` 的图片由 **apps/server 直接托管**（`src/main.ts` 的
+`app.useStaticAssets`：`/assets/*` -> `tools/data-refinery/output/assets/*`）：
 
-```bash
-# 临时静态服务（示例）
-cd tools/data-refinery/output && python3 -m http.server 3000
-# ASSET_BASE_URL=http://localhost:3000/assets/
-```
+- 开发期：web 的 Vite dev server 已把 `/assets` 代理到 server（`vite.config.ts`），前端按相对路径 `/assets/...` 取图即可；
+- 生产：server 与静态图同进程，无需额外静态服务或 CDN；
+- 前端构建产物用 `/static/` 前缀（`build.assetsDir`），避免与 `/assets` 代理冲突。
 
-前端 `resolveAssetUrl('questions/math/.../stem_01.jpg')` -> `http://localhost:3000/assets/questions/math/.../stem_01.jpg`。生产环境切换 CDN/OSS 只改 `ASSET_BASE_URL`。
+> 旧的「python -m http.server 3000 + ASSET_BASE_URL」方案已废弃（曾作为开发期临时方案）。
 
 ### 4. db_loader：published JSONL -> MySQL
 
