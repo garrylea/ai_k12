@@ -7,6 +7,7 @@ from pathlib import Path
 from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from llm import create_llm_client
+from extract import _parse_json_object
 from extract_cli import _load_prompt
 
 
@@ -321,37 +322,35 @@ def main(argv=None):
             print(f"[skip] {book_key}", flush=True)
             continue
 
+        # LLM 输出解析：_parse_json_object 已兜底代码块围栏 / <think> 标签 /
+        # LaTeX 反斜杠漏转义（本地模型常见，如 "\%"）；仍失败则重采样一次
+        data = None
         try:
             toc_text = "\n\n".join(p.read_text(encoding="utf-8") for p in toc_pages)
             response = llm.complete(prompt, toc_text)
-            data = json.loads(response.content)
-
-            out_file = toc_dir / f"{book_key}.json"
-            out_file.parent.mkdir(parents=True, exist_ok=True)
-            out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-            checkpoint.mark_toc_parsed(book_key)
-            chapters = len(data.get("chapters", []))
-            print(f"[ok] {book_key} -> {chapters} chapter(s)", flush=True)
-            parsed += 1
+            data = _parse_json_object(response.content)
+        except json.JSONDecodeError as e:
+            print(f"[WARN] {book_key}: LLM 输出 JSON 解析失败（{e}），重试一次", flush=True)
+            try:
+                response2 = llm.complete(prompt, toc_text)
+                data = _parse_json_object(response2.content)
+            except Exception as e2:
+                print(f"[ERROR] {book_key}: retry also failed: {e2}", flush=True)
         except Exception as e:
             print(f"[ERROR] {book_key}: {e}", flush=True)
-            if "json" in str(e).lower() or "decode" in str(e).lower():
-                try:
-                    response2 = llm.complete(prompt, toc_text)
-                    data2 = json.loads(response2.content)
-                    out_file = toc_dir / f"{book_key}.json"
-                    out_file.parent.mkdir(parents=True, exist_ok=True)
-                    out_file.write_text(json.dumps(data2, ensure_ascii=False, indent=2), encoding="utf-8")
-                    checkpoint.mark_toc_parsed(book_key)
-                    chapters = len(data2.get("chapters", []))
-                    print(f"[ok] {book_key} -> {chapters} chapter(s) (retry)", flush=True)
-                    parsed += 1
-                except Exception as e2:
-                    print(f"[ERROR] {book_key}: retry also failed: {e2}", flush=True)
-                    failed += 1
-            else:
-                failed += 1
+
+        if not isinstance(data, dict) or not data:
+            failed += 1
+            continue
+
+        out_file = toc_dir / f"{book_key}.json"
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        checkpoint.mark_toc_parsed(book_key)
+        chapters = len(data.get("chapters", []))
+        print(f"[ok] {book_key} -> {chapters} chapter(s)", flush=True)
+        parsed += 1
 
     print(f"TOC parsed: {parsed}, Skipped: {skipped}, Failed: {failed}", flush=True)
 

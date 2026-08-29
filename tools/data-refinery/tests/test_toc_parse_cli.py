@@ -264,3 +264,88 @@ class TestTocParseCliMain:
         out = capsys.readouterr().out
         assert "下册" in out
         assert "上册" not in out
+
+
+class TestTocParseLlmFlow:
+    """LLM 输出解析与重试：非法转义修复、坏 JSON 重采样、失败计数。"""
+
+    BOOK_REL = "数学/初中/人教版/九年级/上册/数学书"
+
+    def _run(self, tmp_path, llm):
+        from toc_parse_cli import main
+        book_dir = tmp_path / "md" / "数学" / "初中" / "人教版" / "九年级" / "上册" / "数学书"
+        book_dir.mkdir(parents=True)
+        (book_dir / "page_005.md").write_text(
+            "## 目录\n26.1 反比例函数 2\n小结 20\n", encoding="utf-8")
+        with patch("toc_parse_cli.RefineryConfig") as mock_config, \
+             patch("toc_parse_cli.create_llm_client", return_value=llm), \
+             patch("toc_parse_cli._load_prompt", return_value="prompt"):
+            mock_config.from_env.return_value = MagicMock(output_dir=tmp_path / "out")
+            main(["--input-dir", str(tmp_path / "md"),
+                  "--output-dir", str(tmp_path / "toc")])
+
+    def _toc_file(self, tmp_path) -> Path:
+        return tmp_path / "toc" / f"{self.BOOK_REL}.json"
+
+    def test_invalid_escape_repaired_without_retry(self, tmp_path, capsys):
+        """数学目录常见的 LaTeX 漏转义（如 "\\%"）应被修复，无需重试。"""
+        llm = MagicMock()
+        # Python 字符串中 \\% = 字面反斜杠 + %，在 JSON 中是非法转义
+        llm.complete.return_value = MagicMock(
+            content='{"chapters": [{"title": "21.2 解一元二次方程 \\%", "page": 12}]}')
+        self._run(tmp_path, llm)
+        out = capsys.readouterr().out
+        assert "[ok]" in out
+        assert "TOC parsed: 1" in out
+        assert llm.complete.call_count == 1  # 修复成功，不走重试
+        assert self._toc_file(tmp_path).exists()
+
+    def test_code_fence_stripped(self, tmp_path, capsys):
+        """本地模型常见的 ```json 围栏包裹应被剥离。"""
+        llm = MagicMock()
+        llm.complete.return_value = MagicMock(
+            content='```json\n{"chapters": [{"title": "26.1 反比例函数", "page": 2}]}\n```')
+        self._run(tmp_path, llm)
+        out = capsys.readouterr().out
+        assert "[ok]" in out
+        assert llm.complete.call_count == 1
+
+    def test_retry_on_unparseable_json(self, tmp_path, capsys):
+        """首次输出完全不是 JSON：重采样一次后成功。"""
+        llm = MagicMock()
+        llm.complete.side_effect = [
+            MagicMock(content="抱歉，我无法处理这个请求。"),
+            MagicMock(content='{"chapters": [{"title": "26.1 反比例函数", "page": 2}]}'),
+        ]
+        self._run(tmp_path, llm)
+        out = capsys.readouterr().out
+        assert "重试一次" in out
+        assert "[ok]" in out
+        assert "TOC parsed: 1" in out
+        assert llm.complete.call_count == 2
+        assert self._toc_file(tmp_path).exists()
+
+    def test_retry_also_fails(self, tmp_path, capsys):
+        """两次输出都无法解析：计为 Failed，不写 TOC 文件。"""
+        llm = MagicMock()
+        llm.complete.side_effect = [
+            MagicMock(content="垃圾输出"),
+            MagicMock(content="还是垃圾"),
+        ]
+        self._run(tmp_path, llm)
+        out = capsys.readouterr().out
+        assert "retry also failed" in out
+        assert "TOC parsed: 0" in out
+        assert "Failed: 1" in out
+        assert not self._toc_file(tmp_path).exists()
+
+    def test_llm_error_counted_failed_no_retry(self, tmp_path, capsys):
+        """网络等非 JSON 错误：直接计失败，不重试。"""
+        llm = MagicMock()
+        llm.complete.side_effect = RuntimeError("connection refused")
+        self._run(tmp_path, llm)
+        out = capsys.readouterr().out
+        assert "[ERROR]" in out
+        assert "connection refused" in out
+        assert "Failed: 1" in out
+        assert llm.complete.call_count == 1

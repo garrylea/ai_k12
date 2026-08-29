@@ -7,13 +7,18 @@ groups），不修改卡片正文（practice 卡 groups[].questions[].text 为�
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import get_args
 
 from llm import LLMClient, LLMResponse
+from models import TextbookCard
 
 # _parse_json_object 复用 extract.py 的 JSON 解析逻辑
 from extract import _parse_json_object
+
+# 合法 card_type 枚举，取自 TextbookCard 的 Literal 定义（单一来源，自动同步）
+VALID_CARD_TYPES = get_args(TextbookCard.model_fields["card_type"].annotation)
 
 # 编号大题模式：行首 N. 或 N、 后跟非空白字符
 _STEM_RE = re.compile(r'^(\d+)[.、]\s*\S', re.MULTILINE)
@@ -130,6 +135,9 @@ class PageLabelResult:
     """一页的标注结果"""
     page_type: str
     labels: list[LabelResult]  # 与 splitter 输出的卡片一一对应
+    # card_type 超出白名单的卡（已归一为 concept）：[(卡序号, 模型原始值)]
+    # 非空时调用方可触发分级重试（主模型重试 → 兜底模型）
+    invalid_card_types: list[tuple[int, str]] = field(default_factory=list)
 
 
 class CardLabeler:
@@ -138,6 +146,13 @@ class CardLabeler:
     def __init__(self, llm: LLMClient, prompt_template: str):
         self._llm = llm
         self._prompt = prompt_template
+        # 最近一次 LLM 原始输出（诊断日志用：card_type 非法时随失败记录落盘）
+        self.last_raw_content: str | None = None
+
+    @property
+    def model_name(self) -> str:
+        """当前使用的模型名（诊断日志用）。"""
+        return getattr(self._llm, "model", type(self._llm).__name__)
 
     def label(self, cards_text: list[str], page_number: str,
               prev_lesson_id: str | None = None,
@@ -177,14 +192,21 @@ class CardLabeler:
             )
 
         response: LLMResponse = self._llm.complete(self._prompt, user_message)
+        self.last_raw_content = response.content
         data = _parse_json_object(response.content)
 
         page_type = str(data.get("page_type", "content"))
         raw_items = data.get("items", [])
 
         labels: list[LabelResult] = []
+        invalid_card_types: list[tuple[int, str]] = []
         for idx, item in enumerate(raw_items):
             card_type = str(item.get("card_type", "concept"))
+            if card_type not in VALID_CARD_TYPES:
+                # 本地模型偶发把 page_type 枚举值（如 "content"）误填进 card_type；
+                # 先归一为 concept 保住本页，同时记录原始值供调用方分级重试
+                invalid_card_types.append((idx, card_type))
+                card_type = "concept"
             raw_groups = item.get("groups")
             groups = None
             # 仅 practice 卡解析 groups；非 practice 卡即使 LLM 误返也忽略
@@ -237,4 +259,5 @@ class CardLabeler:
             ))
         labels = labels[:len(cards_text)]
 
-        return PageLabelResult(page_type=page_type, labels=labels)
+        return PageLabelResult(page_type=page_type, labels=labels,
+                               invalid_card_types=invalid_card_types)

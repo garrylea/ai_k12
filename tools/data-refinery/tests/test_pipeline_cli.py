@@ -1,6 +1,8 @@
 """pipeline_cli 测试：验证各阶段调用顺序、参数透传与 --skip/--source 语义。"""
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def _run(tmp_path, argv, order=None):
     """在 mock 掉全部子入口的情况下运行 pipeline main；order 记录调用顺序。"""
@@ -220,7 +222,90 @@ class TestPipelineCliScope:
         # toc_parse 不收到 reconvert（目录重解析需单独跑 toc_parse_cli --reconvert）
         assert "--reconvert" not in toc.call_args.args[0]
 
+    def test_reconvert_toc_passthrough(self, tmp_path):
+        """--reconvert-toc 只透传给 toc_parse（转为 --reconvert），不影响 extract/publish。"""
+        import pipeline_cli
+        from unittest.mock import MagicMock
+
+        mock_config = MagicMock()
+        mock_config.from_env.return_value = MagicMock(output_dir=tmp_path)
+        with patch.object(pipeline_cli, "ensure_refinery_env"), \
+             patch.object(pipeline_cli, "RefineryConfig", mock_config), \
+             patch.object(pipeline_cli, "toc_parse_main") as toc, \
+             patch.object(pipeline_cli, "extract_main") as extract, \
+             patch.object(pipeline_cli, "publish_main") as publish, \
+             patch.object(pipeline_cli, "run_merge"), \
+             patch.object(pipeline_cli, "db_loader_main"):
+            pipeline_cli.main(["--source", "smartedu", "--book", self.BOOK,
+                               "--reconvert-toc"])
+        toc.assert_called_once_with(
+            ["--source", "smartedu", "--reconvert", "--book", self.BOOK])
+        assert "--reconvert" not in extract.call_args.args[0]
+        assert "--reconvert" not in publish.call_args.args[0]
+
+    def test_reconvert_and_reconvert_toc_combined(self, tmp_path):
+        """--reconvert 与 --reconvert-toc 可同时使用：目录和卡片各自重做。"""
+        import pipeline_cli
+        from unittest.mock import MagicMock
+
+        mock_config = MagicMock()
+        mock_config.from_env.return_value = MagicMock(output_dir=tmp_path)
+        with patch.object(pipeline_cli, "ensure_refinery_env"), \
+             patch.object(pipeline_cli, "RefineryConfig", mock_config), \
+             patch.object(pipeline_cli, "toc_parse_main") as toc, \
+             patch.object(pipeline_cli, "extract_main") as extract, \
+             patch.object(pipeline_cli, "publish_main") as publish, \
+             patch.object(pipeline_cli, "run_merge"), \
+             patch.object(pipeline_cli, "db_loader_main"):
+            pipeline_cli.main(["--source", "smartedu", "--book", self.BOOK,
+                               "--reconvert", "--reconvert-toc"])
+        assert "--reconvert" in toc.call_args.args[0]
+        assert "--reconvert" in extract.call_args.args[0]
+        assert "--reconvert" in publish.call_args.args[0]
+
     def test_no_reconvert_by_default(self, tmp_path):
         m = _run(tmp_path, ["--source", "all"])
         assert "--reconvert" not in m["extract"].call_args.args[0]
         assert "--reconvert" not in m["publish"].call_args.args[0]
+
+
+class TestPipelineCliInterrupt:
+    """Ctrl+C（KeyboardInterrupt）：优雅退出（退出码 130 + 提示），不甩 traceback。"""
+
+    def test_interrupt_in_stage_exits_cleanly(self, tmp_path, capsys):
+        import pipeline_cli
+
+        mock_config = MagicMock()
+        mock_config.from_env.return_value = MagicMock(output_dir=tmp_path)
+        with patch.object(pipeline_cli, "ensure_refinery_env"), \
+             patch.object(pipeline_cli, "RefineryConfig", mock_config), \
+             patch.object(pipeline_cli, "toc_parse_main"), \
+             patch.object(pipeline_cli, "extract_main",
+                          side_effect=KeyboardInterrupt), \
+             patch.object(pipeline_cli, "publish_main"), \
+             patch.object(pipeline_cli, "run_merge"), \
+             patch.object(pipeline_cli, "db_loader_main"):
+            with pytest.raises(SystemExit) as exc:
+                pipeline_cli.main(["--source", "all"])
+        assert exc.value.code == 130
+        out = capsys.readouterr().out
+        assert "Ctrl+C" in out
+        assert "checkpoint" in out
+
+    def test_interrupt_in_wizard_exits_cleanly(self, tmp_path, capsys):
+        import pipeline_cli
+
+        mock_config = MagicMock()
+        mock_config.from_env.return_value = MagicMock(output_dir=tmp_path)
+        with patch.object(pipeline_cli, "ensure_refinery_env"), \
+             patch.object(pipeline_cli, "RefineryConfig", mock_config), \
+             patch("pipeline_wizard.run_wizard",
+                   side_effect=KeyboardInterrupt), \
+             patch.object(pipeline_cli, "toc_parse_main") as toc, \
+             patch.object(pipeline_cli, "extract_main") as extract:
+            with pytest.raises(SystemExit) as exc:
+                pipeline_cli.main()
+        assert exc.value.code == 130
+        assert "Ctrl+C" in capsys.readouterr().out
+        toc.assert_not_called()
+        extract.assert_not_called()

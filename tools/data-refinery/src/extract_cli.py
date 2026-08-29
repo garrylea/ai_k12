@@ -7,7 +7,9 @@
 
 import argparse
 import json
+import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from card_labeler import CardLabeler
@@ -255,6 +257,86 @@ def _load_toc_cache(toc_dir: Path) -> dict[str, dict]:
     return cache
 
 
+def _log_labeling_error(log_path: Path, file_key: str, attempt: str,
+                        labeler, invalid: list | None = None,
+                        error: str | None = None) -> None:
+    """结构化记录标注失败（JSONL 追加），供事后分析原因。
+
+    记录：时间 / 页 / 尝试阶段 / 模型 / 非法 card_type 原始值 / 异常 / LLM 原始输出。
+    """
+    rec = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "file": file_key,
+        "attempt": attempt,
+        "model": getattr(labeler, "model_name", str(labeler)),
+        "invalid_card_types": [{"index": i, "value": v} for i, v in (invalid or [])],
+        "error": error,
+        "raw_response": getattr(labeler, "last_raw_content", None),
+    }
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def _label_with_escalation(labeler, fallback_labeler,
+                           cards_text: list[str], *, page_number: str,
+                           prev_lesson_id: str | None, toc_labels: list[str] | None,
+                           file_key: str, err_log_path: Path):
+    """标注一页，card_type 非法时分级重试：主模型 → 主模型重试 → 兜底模型。
+
+    每次失败（含网络/JSON 异常）都把详情记录到 err_log_path。
+
+    Returns:
+        (result, status)
+        - status: "ok" | "retry_ok" | "fallback_ok" | "exhausted" | "error"
+        - exhausted：所有尝试都返回非法 card_type；result 为最后一次结果
+          （非法值已归一为 concept，可由调用方决定是否沿用）
+        - error：所有尝试都抛异常；result=None，调用方走默认标注兜底
+    """
+    attempts = [("primary", labeler), ("primary-retry", labeler)]
+    if fallback_labeler is not None:
+        attempts.append(("fallback", fallback_labeler))
+
+    status_map = {"primary": "ok", "primary-retry": "retry_ok", "fallback": "fallback_ok"}
+    result = None
+    for attempt, lab in attempts:
+        try:
+            res = lab.label(cards_text, page_number=page_number,
+                            prev_lesson_id=prev_lesson_id, toc_labels=toc_labels)
+        except Exception as e:
+            _log_labeling_error(err_log_path, file_key, attempt, lab, error=str(e))
+            continue
+        if not res.invalid_card_types:
+            return res, status_map[attempt]
+        _log_labeling_error(err_log_path, file_key, attempt, lab, invalid=res.invalid_card_types)
+        result = res
+    return (result, "exhausted") if result is not None else (None, "error")
+
+
+def _ask_continue_on_exhausted(file_key: str, invalid: list, log_path: Path,
+                               input_fn=input) -> str:
+    """分级重试全部失败后的处置：交互模式暂停询问，非交互模式页面计失败。
+
+    Returns:
+        "continue"（交互，用户选继续：本页用归一化标签）
+        "stop"（交互，用户选停止：中断管线排查原因）
+        "fail"（非交互无 TTY：页面计失败，下轮重试）
+    """
+    desc = ", ".join(f"卡#{i + 1}={v!r}" for i, v in invalid)
+    print(f"[ERROR] {file_key}: card_type 超出允许范围（{desc}），"
+          f"主模型重试 + 兜底模型均失败", flush=True)
+    print(f"  详情与 LLM 原始输出已记录: {log_path}", flush=True)
+    if not sys.stdin.isatty():
+        return "fail"
+    while True:
+        raw = str(input_fn("继续吗? [c/回车=本页用归一化标签继续 / s=停止管线先排查原因]: ")).strip().lower()
+        if raw in ("", "c"):
+            return "continue"
+        if raw == "s":
+            return "stop"
+        print("  请输入 c 或 s")
+
+
 def main(argv=None):
     args = parse_args(argv)
     config = RefineryConfig.from_env(
@@ -286,6 +368,28 @@ def main(argv=None):
     )
     prompt = _load_prompt("textbook_cards")
     labeler = CardLabeler(llm=llm, prompt_template=prompt)
+
+    # 兜底模型：card_type 非法且主模型重试仍失败时再升级一次（LLM_FALLBACK_* 配置）
+    fallback_labeler = None
+    if config.llm_fallback_provider:
+        try:
+            fb_llm = create_llm_client(
+                provider=config.llm_fallback_provider,
+                api_key=config.llm_fallback_api_key or "",
+                model=config.llm_fallback_model,
+                base_url=config.llm_fallback_base_url,
+                timeout=config.llm_timeout,
+                max_tokens=config.llm_max_tokens,
+                max_retries=config.llm_max_retries,
+            )
+            fallback_labeler = CardLabeler(llm=fb_llm, prompt_template=prompt)
+            print(f"[fallback] 标注兜底模型就绪: "
+                  f"{config.llm_fallback_provider} / {config.llm_fallback_model}", flush=True)
+        except Exception as e:
+            print(f"[WARN] 兜底模型初始化失败（{e}），仅主模型重试", flush=True)
+
+    # 标注失败记录（结构化 JSONL，供分析偶发幻觉的原因）
+    err_log_path = config.output_dir / "labeling_errors.jsonl"
 
     sources = [s for s in scanner.scan() if _match_source(s, args.source)]
     if args.file:
@@ -377,17 +481,19 @@ def main(argv=None):
                     time.sleep(args.interval)
             llm_calls += 1
 
-            try:
-                result = labeler.label(
-                    [c.content for c in cards],
-                    page_number=f"P{page_num}",
-                    prev_lesson_id=prev,
-                    toc_labels=_flatten_toc_labels(toc_cache[book_key])
-                    if book_key in toc_cache else None,
-                )
-            except Exception as e:
-                print(f"[WARN] ({idx}/{total_processed}) {file_key}: LLM label failed ({e}), using defaults", flush=True)
-                # LLM 失败时用默认标注
+            cards_text = [c.content for c in cards]
+            toc_labels = (_flatten_toc_labels(toc_cache[book_key])
+                          if book_key in toc_cache else None)
+            result, status = _label_with_escalation(
+                labeler, fallback_labeler, cards_text,
+                page_number=f"P{page_num}", prev_lesson_id=prev,
+                toc_labels=toc_labels, file_key=file_key,
+                err_log_path=err_log_path)
+
+            if result is None:
+                # 所有尝试均异常（网络/JSON 等）：默认标注兜底（与旧版行为一致）
+                print(f"[WARN] ({idx}/{total_processed}) {file_key}: "
+                      f"LLM label failed (all attempts), using defaults", flush=True)
                 from card_labeler import LabelResult, PageLabelResult
                 result = PageLabelResult(
                     page_type="front_matter",
@@ -397,6 +503,24 @@ def main(argv=None):
                         textbook_page=f"P{page_num}",
                     ) for _ in cards],
                 )
+            elif status == "exhausted":
+                # 主模型 + 重试 + 兜底模型均返回非法 card_type：报错并交由用户/环境决定
+                action = _ask_continue_on_exhausted(
+                    file_key, result.invalid_card_types, err_log_path)
+                if action == "stop":
+                    print(f"[中断] 用户选择停止。失败详情见 {err_log_path}", flush=True)
+                    raise SystemExit(1)
+                if action == "fail":
+                    # 非交互：页面计失败（不写 jsonl / 不记 checkpoint，下轮重试）
+                    print(f"[ERROR] ({idx}/{total_processed}) {file_key}: "
+                          f"重试穷尽，本页计为失败", flush=True)
+                    failed += 1
+                    continue
+                print(f"[WARN] ({idx}/{total_processed}) {file_key}: "
+                      f"重试穷尽，用户选择以归一化标签继续本页", flush=True)
+            elif status != "ok":
+                print(f"[WARN] ({idx}/{total_processed}) {file_key}: "
+                      f"card_type 超范围，{status} 后成功", flush=True)
 
             # 前置内容跳过
             if result.page_type == "front_matter":

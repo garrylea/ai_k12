@@ -80,6 +80,37 @@ def test_label_result_groups_none_for_non_practice():
     assert result.labels[0].groups is None
 
 
+def test_invalid_card_type_falls_back_to_concept():
+    """LLM 偶发返回枚举外 card_type（如把 page_type 的 "content" 误填进来）：
+    白名单外回退 concept，不让单卡幻觉导致整页 pydantic 校验失败。"""
+    fake_response = type("R", (), {"content": '{"page_type":"content","items":[{"card_type":"content","lesson_id":"21.2.1 配方法","title":null,"textbook_page":"P16"},{"card_type":"practice","lesson_id":null,"title":"练习","textbook_page":"P16"}]}'})()
+
+    class FakeLLM:
+        def complete(self, system, user):
+            return fake_response
+
+    labeler = CardLabeler(llm=FakeLLM(), prompt_template="p")
+    result = labeler.label(["概念文字", "练习"], "P16")
+    assert result.labels[0].card_type == "concept"  # content -> concept
+    assert result.labels[1].card_type == "practice"  # 合法值不受影响
+    # 非法值记录（卡序号 + 原始值），供调用方分级重试判断
+    assert result.invalid_card_types == [(0, "content")]
+    # 原始输出留存，供失败时随诊断日志落盘
+    assert labeler.last_raw_content == fake_response.content
+    # 归一化后的 label 能通过 TextbookCard 校验（复现线上报错场景）
+    from models import TextbookCard
+    card = TextbookCard(sort_order=1, card_type=result.labels[0].card_type,
+                        content="概念文字", knowledge_point_ids=[], textbook_page="P16")
+    assert card.card_type == "concept"
+
+
+def test_valid_card_types_in_sync_with_model():
+    """VALID_CARD_TYPES 与 TextbookCard 的 Literal 定义保持同步。"""
+    from card_labeler import VALID_CARD_TYPES
+    assert set(VALID_CARD_TYPES) == {"concept", "example", "practice",
+                                     "explore", "summary", "reading"}
+
+
 class TestTocLabelsInjection:
     """toc_labels 注入：合法 lesson_id 列表拼进 user_message，LLM 优先逐字复制。"""
 

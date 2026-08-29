@@ -40,11 +40,11 @@ class TestListBooks:
 
 
 class TestWizardDefaults:
-    """输入序列：来源 / 目录 / 卡片 / 模型 / 入库 / 确认（模型问题总是出现）。"""
+    """输入序列：来源 / 目录 / 目录重做 / 卡片 / 卡片重做 / 模型 / 入库 / 确认。"""
 
     def test_all_defaults(self):
         argv, model_env = run_wizard(
-            input_fn=_inputs(["", "", "", "", "", "", ""]),
+            input_fn=_inputs(["", "", "", "", "", "", "", ""]),
             md_dir=None,
             current_provider="kimi",
             current_model="kimi-latest",
@@ -55,7 +55,7 @@ class TestWizardDefaults:
 
     def test_cancel_returns_none(self):
         result = run_wizard(
-            input_fn=_inputs(["", "", "", "", "", "", "n"]),
+            input_fn=_inputs(["", "", "", "", "", "", "", "n"]),
             md_dir=None,
             current_provider="kimi",
             current_model="kimi-latest",
@@ -114,6 +114,7 @@ class TestWizardPartial:
             input_fn=_inputs([
                 "2",          # 仅教材
                 "",           # 提取目录
+                "",           # 强制重做目录：默认否
                 "2",          # 部分提取 → 无书目，退化为全部
                 "",           # 强制重做：默认否
                 "",           # 模型：默认当前配置
@@ -136,7 +137,7 @@ class TestWizardModel:
 
     def test_choose_other_provider(self):
         argv, model_env = run_wizard(
-            input_fn=_inputs(["", "", "", "", "2", "", "", ""]),
+            input_fn=_inputs(["", "", "", "", "", "2", "", "", ""]),
             md_dir=None,
             current_provider="kimi",
             current_model="kimi-latest",
@@ -152,7 +153,7 @@ class TestWizardModel:
 
     def test_choose_other_provider_custom_model(self):
         argv, model_env = run_wizard(
-            input_fn=_inputs(["", "", "", "", "2", "qwen3.7-plus", "", ""]),
+            input_fn=_inputs(["", "", "", "", "", "2", "qwen3.7-plus", "", ""]),
             md_dir=None,
             current_provider="kimi",
             current_model="kimi-latest",
@@ -162,7 +163,7 @@ class TestWizardModel:
 
     def test_keep_current(self):
         argv, model_env = run_wizard(
-            input_fn=_inputs(["", "", "", "", "1", "", ""]),
+            input_fn=_inputs(["", "", "", "", "1", "", "", ""]),
             md_dir=None,
             current_provider="kimi",
             current_model="kimi-latest",
@@ -173,7 +174,7 @@ class TestWizardModel:
     def test_no_current_provider_model_still_asked(self):
         """无当前配置时模型问题仍出现（选项 = 其他 provider + 手动输入）。"""
         argv, model_env = run_wizard(
-            input_fn=_inputs(["", "", "", "", "1", "", "", ""]),
+            input_fn=_inputs(["", "", "", "", "1", "", "", "", ""]),
             md_dir=None,
             current_provider=None,
             providers=self.PROVIDERS,
@@ -192,7 +193,8 @@ class TestWizardModel:
         # 选项 = [当前配置, 手动输入]（providers 为空）→ 手动输入是 2
         argv, model_env = run_wizard(
             input_fn=_inputs([
-                "", "", "",      # 来源/目录/卡片：默认
+                "", "", "",      # 来源/目录/目录重做：默认
+                "",              # 卡片：默认全部提取
                 "",              # 强制重做：默认否
                 "2",             # 模型：手动输入
                 "5",             # provider：deepseek
@@ -217,7 +219,8 @@ class TestWizardModel:
         # local provider 必须给 Base URL：先给空（重问）再给有效值
         argv, model_env = run_wizard(
             input_fn=_inputs([
-                "", "", "",          # 来源/目录/卡片
+                "", "", "",          # 来源/目录/目录重做
+                "",                  # 卡片：默认全部提取
                 "",                  # 强制重做：默认否
                 "2",                 # 模型：手动输入
                 "7",                 # provider：local
@@ -242,8 +245,9 @@ class TestWizardModel:
     def test_manual_custom_model_with_base_url(self):
         argv, model_env = run_wizard(
             input_fn=_inputs([
-                "", "", "",
-                "",                          # 强制重做：默认否
+                "", "", "",   # 来源/目录/目录重做
+                "",           # 卡片：默认全部提取
+                "",           # 强制重做：默认否
                 "2",                        # 手动输入
                 "1",                        # provider：openai
                 "gpt-4o",                   # 模型名
@@ -269,6 +273,7 @@ class TestWizardReconvert:
             input_fn=_inputs([
                 "2",          # 仅教材
                 "",           # 提取目录
+                "",           # 强制重做目录：默认否
                 "2",          # 部分提取
                 "1",          # 选书
                 "8-30",       # 页码
@@ -288,7 +293,7 @@ class TestWizardReconvert:
 
     def test_all_extract_redo_yes(self):
         argv, _ = run_wizard(
-            input_fn=_inputs(["", "", "", "y", "", "", ""]),
+            input_fn=_inputs(["", "", "", "", "y", "", "", ""]),
             md_dir=None,
             current_provider="kimi",
             current_model="kimi-latest",
@@ -298,7 +303,7 @@ class TestWizardReconvert:
 
     def test_redo_default_no(self):
         argv, _ = run_wizard(
-            input_fn=_inputs(["", "", "", "", "", "", ""]),
+            input_fn=_inputs(["", "", "", "", "", "", "", ""]),
             md_dir=None,
             current_provider="kimi",
             current_model="kimi-latest",
@@ -318,17 +323,77 @@ class TestWizardReconvert:
         assert argv == ["--source", "zgkao", "--skip-toc", "--skip-extract"]
 
 
+class TestWizardReconvertToc:
+    """强制重做目录：选是带 --reconvert-toc；跳过目录时不问。"""
+
+    def test_toc_redo_yes(self, tmp_path):
+        md = _make_books(tmp_path)
+        argv, _ = run_wizard(
+            input_fn=_inputs([
+                "2",          # 仅教材
+                "",           # 提取目录
+                "y",          # 强制重做目录
+                "2",          # 部分提取
+                "1",          # 选书
+                "8-30",       # 页码
+                "",           # 强制重做（卡片）：默认否
+                "",           # 模型：默认
+                "3",          # 跳过入库
+                "y",          # 确认
+            ]),
+            md_dir=md,
+            current_provider="kimi",
+            current_model="kimi-latest",
+            providers={},
+        )
+        # --reconvert-toc 作用域与 --book 一致（只重解析所选教材）
+        assert argv == ["--source", "smartedu", "--reconvert-toc",
+                        "--book", BOOK, "--pages", "8-30", "--skip-load"]
+
+    def test_toc_redo_default_no(self):
+        argv, _ = run_wizard(
+            input_fn=_inputs(["", "", "", "", "", "", "", ""]),
+            md_dir=None,
+            current_provider="kimi",
+            current_model="kimi-latest",
+            providers={},
+        )
+        assert "--reconvert-toc" not in argv
+
+    def test_skip_toc_no_redo_question(self, tmp_path):
+        """跳过目录时不问目录重做（否则多问一个输入会 EOF）。"""
+        md = _make_books(tmp_path)
+        argv, _ = run_wizard(
+            input_fn=_inputs([
+                "2",          # 仅教材
+                "n",          # 不提取目录 → 不问重做
+                "2",          # 部分提取
+                "1",          # 选书
+                "8-30",       # 页码
+                "",           # 强制重做：默认否
+                "",           # 模型：默认
+                "3",          # 跳过入库
+                "y",          # 确认
+            ]),
+            md_dir=md,
+            current_provider="kimi",
+            current_model="kimi-latest",
+            providers={},
+        )
+        assert "--reconvert-toc" not in argv
+
+
 class TestWizardLoadMode:
     def test_full_reload_confirmed(self):
         argv, _ = run_wizard(
-            input_fn=_inputs(["", "", "", "", "", "2", "y", "y"]),
+            input_fn=_inputs(["", "", "", "", "", "", "2", "y", "y"]),
             md_dir=None, current_provider="kimi", current_model="m", providers={},
         )
         assert "--purge-business-data" in argv
 
     def test_full_reload_declined_falls_back(self):
         argv, _ = run_wizard(
-            input_fn=_inputs(["", "", "", "", "", "2", "n", "y"]),
+            input_fn=_inputs(["", "", "", "", "", "", "2", "n", "y"]),
             md_dir=None, current_provider="kimi", current_model="m", providers={},
         )
         assert "--purge-business-data" not in argv
@@ -336,14 +401,14 @@ class TestWizardLoadMode:
 
     def test_dry_run_choice(self):
         argv, _ = run_wizard(
-            input_fn=_inputs(["", "", "", "", "", "", "d"]),
+            input_fn=_inputs(["", "", "", "", "", "", "", "d"]),
             md_dir=None, current_provider="kimi", current_model="m", providers={},
         )
         assert argv == ["--source", "all", "--dry-run"]
 
     def test_skip_load(self):
         argv, _ = run_wizard(
-            input_fn=_inputs(["", "", "", "", "", "3", "y"]),
+            input_fn=_inputs(["", "", "", "", "", "", "3", "y"]),
             md_dir=None, current_provider="kimi", current_model="m", providers={},
         )
         assert "--skip-load" in argv

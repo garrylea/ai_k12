@@ -61,6 +61,11 @@ class LLMClient:
 
     # ---- hook：子类覆盖 ----
 
+    @property
+    def model(self) -> str:
+        """当前模型名（诊断日志用）。"""
+        return self._model
+
     def _thinking_param(self, enable: bool) -> dict:
         """thinking 开关 -> extra_body 参数。默认不支持，返回空。"""
         return {}
@@ -247,6 +252,11 @@ class AnthropicCompatClient(LLMClient):
         elif api_key:
             kwargs["api_key"] = api_key
         self._client = Anthropic(**kwargs)
+
+    @property
+    def model(self) -> str:
+        """当前模型名（诊断日志用）。"""
+        return self._model
 
     def complete(self, system_prompt: str, user_prompt: str) -> LLMResponse:
         system: str | list = system_prompt

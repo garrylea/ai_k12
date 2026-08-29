@@ -1,7 +1,7 @@
 """pipeline_cli 的交互式向导：无参数运行时逐项收集执行选项。
 
-流程：来源 → 目录提取 → 卡片范围（全部/部分：选书 + 页码）→ LLM 模型（仅本次
-运行，不写 .env）→ 入库模式 → 执行计划确认。
+流程：来源 → 目录提取（含强制重做）→ 卡片范围（全部/部分：选书 + 页码）→
+LLM 模型（仅本次运行，不写 .env）→ 入库模式 → 执行计划确认。
 
 返回 (argv, model_env)：
 - argv：传给 pipeline_cli.main 的参数列表
@@ -183,6 +183,10 @@ def run_wizard(input_fn=input, md_dir: Path | None = None,
         if not gen_toc:
             argv.append("--skip-toc")
             plan.append("目录:   跳过")
+        elif _ask_bool("强制重做已解析的目录?（忽略已解析记录，重新 LLM 解析；"
+                       "作用域 = 后面选的书目或全部教材）", input_fn, default=False):
+            argv.append("--reconvert-toc")
+            plan.append("目录:   强制重做（重新解析）")
     else:
         argv.append("--skip-toc")
         plan.append("目录:   跳过（试卷无目录）")

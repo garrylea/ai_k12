@@ -39,6 +39,10 @@ class RefineryConfig:
     llm_max_tokens: int
     llm_thinking: bool
     llm_enable_cache: bool
+    llm_fallback_provider: str | None
+    llm_fallback_model: str
+    llm_fallback_api_key: str | None
+    llm_fallback_base_url: str | None
     db_host: str
     db_port: int
     db_user: str
@@ -65,6 +69,11 @@ class RefineryConfig:
             llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "16384")),
             llm_thinking=_env_bool("LLM_THINKING"),
             llm_enable_cache=_env_bool("LLM_ENABLE_CACHE"),
+            # 标注兜底模型：card_type 非法且主模型重试仍失败时切换（如 deepseek）
+            llm_fallback_provider=os.getenv("LLM_FALLBACK_PROVIDER") or None,
+            llm_fallback_model=os.getenv("LLM_FALLBACK_MODEL", ""),
+            llm_fallback_api_key=os.getenv("LLM_FALLBACK_API_KEY"),
+            llm_fallback_base_url=os.getenv("LLM_FALLBACK_BASE_URL"),
             db_host=os.getenv("DB_HOST", "localhost"),
             db_port=int(os.getenv("DB_PORT", "3306")),
             db_user=os.getenv("DB_USER", "ai_k12"),

@@ -5,6 +5,150 @@ from extract_cli import _load_prompt, _match_source
 from markdown_scanner import MarkdownSource
 
 
+class _FakeLabeler:
+    """按调用顺序返回预设结果（PageLabelResult）或抛预设异常。"""
+
+    def __init__(self, outcomes):
+        self._outcomes = outcomes
+        self.calls = 0
+        self.model_name = "fake-model"
+        self.last_raw_content = None
+
+    def label(self, cards_text, page_number, prev_lesson_id=None, toc_labels=None):
+        out = self._outcomes[min(self.calls, len(self._outcomes) - 1)]
+        self.calls += 1
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+
+def _page(invalid=None):
+    from card_labeler import LabelResult, PageLabelResult
+    return PageLabelResult(
+        page_type="content",
+        labels=[LabelResult(page_type="content", card_type="concept",
+                            lesson_id=None, title=None, textbook_page="P1")],
+        invalid_card_types=invalid or [])
+
+
+class TestLabelEscalation:
+    """_label_with_escalation：主模型 → 主模型重试 → 兜底模型，失败详情落盘。"""
+
+    def _run(self, tmp_path, primary_outcomes, fallback_outcomes="__unset__"):
+        from extract_cli import _label_with_escalation
+        primary = _FakeLabeler(primary_outcomes)
+        fallback = (None if fallback_outcomes == "__unset__"
+                    else _FakeLabeler(fallback_outcomes))
+        log = tmp_path / "labeling_errors.jsonl"
+        result, status = _label_with_escalation(
+            primary, fallback, ["卡1"], page_number="P1",
+            prev_lesson_id=None, toc_labels=None,
+            file_key="数学/书/page_001.md", err_log_path=log)
+        return primary, fallback, result, status, log
+
+    @staticmethod
+    def _records(log):
+        import json
+        return [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
+
+    def test_primary_ok_no_retry_no_log(self, tmp_path):
+        primary, _, result, status, log = self._run(tmp_path, [_page()])
+        assert status == "ok"
+        assert primary.calls == 1
+        assert not log.exists()  # 无失败不落盘
+
+    def test_primary_retry_ok(self, tmp_path):
+        primary, _, result, status, log = self._run(
+            tmp_path, [_page(invalid=[(0, "content")]), _page()])
+        assert status == "retry_ok"
+        assert primary.calls == 2
+        recs = self._records(log)
+        assert len(recs) == 1
+        assert recs[0]["attempt"] == "primary"
+        assert recs[0]["invalid_card_types"] == [{"index": 0, "value": "content"}]
+        assert recs[0]["model"] == "fake-model"
+
+    def test_fallback_ok(self, tmp_path):
+        primary, fallback, result, status, log = self._run(
+            tmp_path,
+            [_page(invalid=[(0, "content")]), _page(invalid=[(1, "bad")])],
+            [_page()])
+        assert status == "fallback_ok"
+        assert primary.calls == 2
+        assert fallback.calls == 1
+        assert [r["attempt"] for r in self._records(log)] == ["primary", "primary-retry"]
+
+    def test_exhausted_with_fallback(self, tmp_path):
+        primary, fallback, result, status, log = self._run(
+            tmp_path,
+            [_page(invalid=[(0, "content")]), _page(invalid=[(0, "content")])],
+            [_page(invalid=[(0, "content")])])
+        assert status == "exhausted"
+        assert result is not None
+        assert result.labels[0].card_type == "concept"  # 归一化结果可沿用
+        assert [r["attempt"] for r in self._records(log)] == \
+            ["primary", "primary-retry", "fallback"]
+
+    def test_exhausted_without_fallback(self, tmp_path):
+        primary, fallback, result, status, log = self._run(
+            tmp_path,
+            [_page(invalid=[(0, "content")]), _page(invalid=[(0, "content")])])
+        assert fallback is None
+        assert status == "exhausted"
+        assert primary.calls == 2  # 无兜底模型：只到主模型重试
+        assert [r["attempt"] for r in self._records(log)] == ["primary", "primary-retry"]
+
+    def test_all_exceptions_return_error(self, tmp_path):
+        primary, fallback, result, status, log = self._run(
+            tmp_path, [RuntimeError("boom")], [RuntimeError("boom2")])
+        assert status == "error"
+        assert result is None  # 调用方据此走默认标注兜底
+        recs = self._records(log)
+        # 主模型异常也会先重试一次，再升级到兜底模型
+        assert [r["attempt"] for r in recs] == ["primary", "primary-retry", "fallback"]
+        assert recs[0]["error"] == "boom"
+        assert recs[2]["error"] == "boom2"
+        assert recs[0]["invalid_card_types"] == []
+
+    def test_exception_then_retry_ok(self, tmp_path):
+        """首次网络异常、重试成功：也走分级（异常不直接短路到默认标注）。"""
+        primary, _, result, status, log = self._run(
+            tmp_path, [RuntimeError("net down"), _page()])
+        assert status == "retry_ok"
+        assert primary.calls == 2
+        recs = self._records(log)
+        assert recs[0]["error"] == "net down"
+
+
+class TestAskContinueOnExhausted:
+    """分级重试穷尽后的处置：交互暂停（continue/stop）/ 非交互计失败（fail）。"""
+
+    def _ask(self, tmp_path, input_fn, monkeypatch, tty=True):
+        from extract_cli import _ask_continue_on_exhausted
+        fake_stdin = type("S", (), {"isatty": lambda self: tty})()
+        monkeypatch.setattr("sys.stdin", fake_stdin)
+        return _ask_continue_on_exhausted(
+            "数学/书/page_001.md", [(0, "content")],
+            tmp_path / "labeling_errors.jsonl", input_fn=input_fn)
+
+    def test_continue_on_enter_or_c(self, tmp_path, monkeypatch, capsys):
+        assert self._ask(tmp_path, lambda p: "", monkeypatch) == "continue"
+        assert self._ask(tmp_path, lambda p: "c", monkeypatch) == "continue"
+        out = capsys.readouterr().out
+        assert "card_type 超出允许范围" in out
+        assert "卡#1='content'" in out
+
+    def test_stop_on_s(self, tmp_path, monkeypatch):
+        assert self._ask(tmp_path, lambda p: "s", monkeypatch) == "stop"
+
+    def test_invalid_input_reasked(self, tmp_path, monkeypatch):
+        answers = iter(["x", "s"])
+        assert self._ask(tmp_path, lambda p: next(answers), monkeypatch) == "stop"
+
+    def test_non_tty_fails_page(self, tmp_path, monkeypatch):
+        assert self._ask(tmp_path, lambda p: "c", monkeypatch, tty=False) == "fail"
+
+
 class TestLoadPrompt:
     def test_loads_exam_questions_prompt(self):
         text = _load_prompt("exam_questions")

@@ -50,6 +50,9 @@ def parse_args(argv=None):
     parser.add_argument("--reconvert", action="store_true",
                         help="忽略已提取/已发布记录，重新切割 + LLM 标注 + 重新发布"
                              "（仅作用 extract/publish；作用域由 --book/--pages 限定，未限定则全量重做）")
+    parser.add_argument("--reconvert-toc", action="store_true",
+                        help="忽略已解析目录记录，重新 LLM 解析 TOC"
+                             "（仅作用 toc_parse；作用域由 --book 限定，未限定则全部教材重做）")
     parser.add_argument("--purge-business-data", action="store_true",
                         help="全量重载前清空业务数据（answers/错题本/变式题/作业提交/progress，"
                              "不可恢复）；默认增量入库（--load-cards）")
@@ -68,6 +71,19 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """总控入口：捕获 Ctrl+C（KeyboardInterrupt），优雅退出而非甩 traceback。
+
+    各阶段有 checkpoint，中断后重新运行会自动续跑，不丢已完成进度。
+    """
+    try:
+        _main(argv)
+    except KeyboardInterrupt:
+        print("\n[中断] 收到 Ctrl+C，本次运行已终止。"
+              "已完成的部分有 checkpoint，重新运行会自动续跑。", flush=True)
+        raise SystemExit(130)  # 128+SIGINT 惯例退出码
+
+
+def _main(argv=None):
     # 配置引导必须在任何 RefineryConfig 使用之前（首跑时生成 .env 并 override 加载）
     ensure_refinery_env()
 
@@ -92,14 +108,16 @@ def main(argv=None):
 
     dry = ["--dry-run"] if args.dry_run else []
     redo = ["--reconvert"] if args.reconvert else []
+    redo_toc = ["--reconvert"] if args.reconvert_toc else []
     scope = (["--book", args.book] if args.book else []) \
         + (["--pages", args.pages] if args.pages else [])
 
     # 1. toc_parse（仅教材；zgkao 试卷无目录；--reconvert 不连带目录重解析——
-    #    目录重解析有独立 LLM 成本，需要时用 toc_parse_cli --reconvert 单独跑）
+    #    目录重解析有独立 LLM 成本，需要重做时用 --reconvert-toc 或向导中的
+    #    "强制重做目录"选项，作用域由 --book 限定）
     if not args.skip_toc and args.source in ("all", "smartedu"):
         print("=== toc_parse（前几页目录 → toc.json） ===", flush=True)
-        toc_parse_main(["--source", "smartedu"] + dry
+        toc_parse_main(["--source", "smartedu"] + dry + redo_toc
                       + (["--book", args.book] if args.book else []))
 
     # 2. extract（教材+试卷；教材注入目录约束 + 逐书后置校验）
