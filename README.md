@@ -34,6 +34,21 @@ The goal is to move away from "blanket teaching" towards "precision learning" by
 - **MySQL 8.x**：Server 端连接所需。首次可用 `tools/db/install_mysql.sh` 初始化库（建 schema + seed 学科），库名/账号默认 `ai_k12/ai_k12@localhost/ai_k12`。
 - 各端依赖分别安装（monorepo 未统一装包）：在 `apps/web`、`apps/server` 目录下各执行一次 `npm install`。
 
+### 部署与日常启停
+
+- **首次部署**（全新机器，装环境 + 建库 + 构建 + seed + 启动）：`bash tools/deploy.sh`。
+- **部署完成后的日常启停**（不构建不安装，只管进程）：
+
+```bash
+bash tools/services.sh start    # 启动 server + web（已在运行则跳过），含健康检查
+bash tools/services.sh stop     # 停止
+bash tools/services.sh restart  # 重启
+bash tools/services.sh status   # 查看运行状态
+bash tools/services.sh log server  # 跟踪 server 日志（log web 同理）
+```
+
+PID/日志与 deploy.sh 共用 `tools/deploy/runtime/`；由 deploy.sh 启动的服务也可用本脚本停止/重启。
+
 ### Web 端 (`apps/web`)
 
 Vite + React + TypeScript 前端，所有命令在 `apps/web/` 下执行：

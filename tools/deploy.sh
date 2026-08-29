@@ -588,7 +588,7 @@ print_summary() {
   日志:    ${RUNTIME_DIR}/server.log
            ${RUNTIME_DIR}/web.log
   PID:     ${RUNTIME_DIR}/server.pid / web.pid
-  停止:    kill \$(cat ${RUNTIME_DIR}/server.pid) \$(cat ${RUNTIME_DIR}/web.pid)
+  停止:    bash tools/services.sh stop（启停/重启/状态见 bash tools/services.sh --help）
 
   提示:
     - 业务数据导入请使用 tools/data-refinery 的总控脚本：
