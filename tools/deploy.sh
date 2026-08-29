@@ -535,6 +535,11 @@ seed() {
 start_services() {
   mkdir -p "$RUNTIME_DIR"
 
+  # 物化图片目录：server 启动时按存在性挂载 /assets 静态服务（main.ts 的 useStaticAssets）。
+  # 全新部署时数据管线尚未跑过，必须先建目录，否则 /assets 被静默跳过挂载，
+  # 之后管线产出图片也要重启 server 才生效。
+  mkdir -p "$ROOT/tools/data-refinery/output/assets"
+
   if [ -f "$RUNTIME_DIR/server.pid" ] && kill -0 "$(cat "$RUNTIME_DIR/server.pid")" 2>/dev/null; then
     log "server 已在运行 (pid $(cat "$RUNTIME_DIR/server.pid"))"
   else
