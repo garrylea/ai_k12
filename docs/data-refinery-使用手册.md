@@ -384,6 +384,8 @@ python src/publish_cli.py --dry-run
 
 将 published JSONL 加载进 MySQL。支持三种模式。
 
+**版次（edition）维度**：同一出版社不同课标版次的教材（如人教版 2012 课标 vs「（根据2022年版课程标准修订）」2024 新版九上数学）会入库为**各自独立的 textbook_version**（4 元组 `(subject_id, publisher, grade_band, edition)` 唯一），互不覆盖、骨架不混淆。版次标记从**书名前导括号**自动提取（TOC 文件名/书的 rel_path 均可），无前导括号 = 旧版（edition=''）。九上/九下书名不同但前导括号相同 -> 归同一版次，无需为不同册建不同版次。
+
 #### 模式 A：全量重载（默认，向后兼容）
 
 ```bash

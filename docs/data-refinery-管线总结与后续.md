@@ -57,6 +57,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 ### db_loader
 - **subject 归一**：`SUBJECT_ALIASES`（`chem`->`chemistry` 等）-> canonical code -> subjects.id。cards 按 rel_path 学科名查、questions 按 jsonl subject_id 查。
 - **rel_path 解析**（cards）：`学科/学段/版本/年级/学期/书名` -> textbook_versions + semesters（find-or-create，幂等）。
+- **版次（edition）维度**（2026-08-31 加）：textbook_versions 按 `(subject_id, publisher, grade_band, edition)` 4 元组唯一；edition 从**书名前导括号**提取（`edition_from_book_name`，如「（根据2022年版课程标准修订）义务教育教科书·数学九年级上册」->「根据2022年版课程标准修订」，无标记 = 旧版 2012 课标）。同一出版社不同课标版次是各自独立的 textbook_version/semesters/cards，互不覆盖；九上/九下书名不同但前导括号相同 -> 归同一版次。存量 2012 行 edition='' 与旧书名推导兼容，无需迁移数据（仅 DDL 迁移 `2026-08-31_add_textbook_versions_edition.sql`）。
 - **lesson_id 解析**：`第N章 X`（中文数字转 int）-> unit + 章综述 lesson；`N.M[.K] X` -> unit + 节 lesson。find-or-create。
 - **cards sort_order 跨页全局重排**：每 lesson 内 1..N（抽取的页内序会碰撞 `uniq_cards_lesson_sort`）。
 - **full-reload 幂等**：`reset_cards()` 删 `textbook_versions`（级联清 cards/lessons/units/semesters）+ `reset_questions()` 删 questions，再重插。结构 find-or-create。每次跑都全量重载（无增量）。

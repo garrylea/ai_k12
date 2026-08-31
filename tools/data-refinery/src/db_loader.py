@@ -147,6 +147,26 @@ def parse_book_rel_path(rel: str) -> dict | None:
     }
 
 
+# ---------- 书名版次标记 ----------
+
+_EDITION_RE = re.compile(r"^[（(]([^）)]+)[）)]")
+
+
+def edition_from_book_name(book: str | None) -> str:
+    """从书名提取版次标记：前导括号内容。
+
+    如「（根据2022年版课程标准修订）义务教育教科书·数学九年级上册」
+    ->「根据2022年版课程标准修订」；无前导括号返回 ''（旧版，2012 课标）。
+
+    同一版次的九上/九下书名不同但前导括号相同 -> 归同一 textbook_version，
+    故只用括号内容、不能用完整书名做版次标识。
+    """
+    if not book:
+        return ""
+    m = _EDITION_RE.match(book.strip())
+    return m.group(1) if m else ""
+
+
 # ---------- 中文数字 ----------
 
 _CN_DIGITS = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
@@ -274,7 +294,7 @@ class DbLoader:
                                      password=password, database=db, charset="utf8mb4")
         self._subj_name: dict[str, tuple] = {}   # name -> (id, code)
         self._subj_code: dict[str, int] = {}     # code -> id
-        self._tv: dict[str, int] = {}            # code -> id
+        self._tv: dict[tuple, int] = {}          # (subject_code, publisher, gb, edition) -> id
         self._sem: dict[tuple, int] = {}         # (tv, grade, term) -> id
         self._unit: dict[tuple, int] = {}        # (sem, chapter) -> id
         self._lesson: dict[tuple, int] = {}      # (unit, name) -> id
@@ -382,21 +402,41 @@ class DbLoader:
         return self._subj_code[code]
 
     # --- find-or-create 结构 ---
-    def _find_or_create_textbook_version(self, subject_code: str, publisher: str, grade_band: str) -> int:
-        code = f"{subject_code}_{publisher}_{grade_band}"
-        if code in self._tv:
-            return self._tv[code]
-        row = self._query("SELECT id FROM textbook_versions WHERE code=%s", (code,))
+    def _find_or_create_textbook_version(self, subject_code: str, publisher: str,
+                                          grade_band: str, edition: str = "") -> int:
+        """按 (subject_id, publisher, grade_band, edition) 4 元组 find-or-create。
+
+        edition 为书名前导括号提取的版次标记（edition_from_book_name）：
+        ''=旧版（2012 课标），非空如「根据2022年版课程标准修订」。同一出版社
+        不同课标版次 -> 各自独立的 textbook_version/semesters/units/lessons/cards。
+        code 仅作展示/兜底唯一键（edition 非空时拼进 code 保证不撞 uniq_code）。
+        """
+        key = (subject_code, publisher, grade_band, edition)
+        if key in self._tv:
+            return self._tv[key]
+        row = self._query(
+            "SELECT id FROM textbook_versions WHERE subject_id=%s AND publisher=%s "
+            "AND grade_band=%s AND edition=%s",
+            (self._subject_id_by_code(subject_code), publisher, grade_band, edition))
         if row:
-            self._tv[code] = row[0][0]
+            self._tv[key] = row[0][0]
             return row[0][0]
+        if edition:
+            code = f"{subject_code}_{publisher}_{edition}_{grade_band}"
+            name = f"{publisher}（{edition}）"
+        else:
+            code = f"{subject_code}_{publisher}_{grade_band}"
+            name = publisher
         self._exec(
-            "INSERT INTO textbook_versions (subject_id, name, code, grade_band, publisher, is_active) "
-            "VALUES (%s,%s,%s,%s,%s,1)",
-            (self._subject_id_by_code(subject_code), publisher, code, grade_band, publisher),
+            "INSERT INTO textbook_versions (subject_id, name, code, grade_band, publisher, edition, is_active) "
+            "VALUES (%s,%s,%s,%s,%s,%s,1)",
+            (self._subject_id_by_code(subject_code), name, code, grade_band, publisher, edition),
         )
-        tid = self._query("SELECT id FROM textbook_versions WHERE code=%s", (code,))[0][0]
-        self._tv[code] = tid
+        tid = self._query(
+            "SELECT id FROM textbook_versions WHERE subject_id=%s AND publisher=%s "
+            "AND grade_band=%s AND edition=%s",
+            (self._subject_id_by_code(subject_code), publisher, grade_band, edition))[0][0]
+        self._tv[key] = tid
         return tid
 
     def _find_or_create_semester(self, tv_id: int, grade_code: str, term_code: str, name: str) -> int:
@@ -463,15 +503,18 @@ class DbLoader:
         return None
 
     def _lookup_semester(self, info: dict) -> int | None:
-        """find-only：按 rel_path 信息查 semester id（不创建；查不到返回 None）。"""
+        """find-only：按 rel_path 信息（含书名版次标记）查 semester id（不创建；查不到返回 None）。"""
         subject_code = _subject_code_by_name_fallback(info["subject"])
         gb = GRADE_BAND_MAP.get(info["grade_band"], "junior")
         grade_code = grade_to_code(info["grade"])
         term_code = TERM_MAP.get(info["term"], "first")
+        edition = edition_from_book_name(info.get("book"))
         row = self._query(
             "SELECT s.id FROM semesters s JOIN textbook_versions tv ON s.textbook_version_id=tv.id "
-            "WHERE tv.code=%s AND s.grade=%s AND s.term=%s",
-            (f"{subject_code}_{info['publisher']}_{gb}", grade_code, term_code),
+            "WHERE tv.subject_id=%s AND tv.publisher=%s AND tv.grade_band=%s AND tv.edition=%s "
+            "AND s.grade=%s AND s.term=%s",
+            (self._subject_id_by_code(subject_code), info["publisher"], gb, edition,
+             grade_code, term_code),
         )
         return row[0][0] if row else None
 
@@ -664,7 +707,13 @@ class DbLoader:
         grade_code = grade_to_code(grade)
         term_code = TERM_MAP.get(term, "first")
 
-        tv_id = self._find_or_create_textbook_version(subject_code, publisher, gb)
+        # 书名 = TOC 文件名（剥 .merged.json 后缀），用于提取版次标记
+        book = toc_file.stem
+        if book.endswith(".merged"):
+            book = book[: -len(".merged")]
+        edition = edition_from_book_name(book)
+
+        tv_id = self._find_or_create_textbook_version(subject_code, publisher, gb, edition)
         sem_name = f"{grade}{term}"
         sem_id = self._find_or_create_semester(tv_id, grade_code, term_code, sem_name)
 
@@ -802,7 +851,8 @@ class DbLoader:
         gb = GRADE_BAND_MAP[info["grade_band"]]
         grade_code = grade_to_code(info["grade"])
         term_code = TERM_MAP[info["term"]]
-        tv = self._find_or_create_textbook_version(subject_code, info["publisher"], gb)
+        edition = edition_from_book_name(info["book"])
+        tv = self._find_or_create_textbook_version(subject_code, info["publisher"], gb, edition)
         sem = self._find_or_create_semester(tv, grade_code, term_code, f"{info['grade']}{info['term']}")
 
         # 预扫章综述标签（章标题），用于 unit.name

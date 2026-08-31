@@ -119,10 +119,12 @@ CREATE TABLE IF NOT EXISTS textbook_versions (
   code VARCHAR(50) NOT NULL,
   grade_band VARCHAR(20) NOT NULL,
   publisher VARCHAR(100) DEFAULT NULL,
+  edition VARCHAR(50) NOT NULL DEFAULT '' COMMENT '版次标记：书名前导括号内容（如「根据2022年版课程标准修订」），空=旧版（2012 课标）',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_textbook_versions_code (code),
+  UNIQUE KEY uniq_textbook_versions_edition (subject_id, publisher, grade_band, edition),
   KEY idx_textbook_versions_subject_grade (subject_id, grade_band),
   CONSTRAINT fk_textbook_versions_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

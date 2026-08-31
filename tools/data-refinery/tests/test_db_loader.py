@@ -4,6 +4,7 @@ import pytest
 from db_loader import (
     build_content_metadata,
     chinese_to_int,
+    edition_from_book_name,
     normalize_subject,
     parse_book_rel_path,
     parse_lesson_id,
@@ -35,6 +36,9 @@ def _make_loader(query_results: dict):
 
     loader._query = fake_query
     loader._delete = fake_delete
+    # __new__ 跳过 __init__，手动补缓存字典（_find_or_create_* 系列会用到）
+    loader._subj_code, loader._tv = {}, {}
+    loader._sem, loader._unit, loader._lesson = {}, {}, {}
     return loader, queries
 
 
@@ -42,15 +46,32 @@ class TestScopedLessonMatching:
     """_match_lesson_scoped / _match_parent_lesson / _lookup_*：按 semester 作用域匹配。"""
 
     def test_lookup_semester(self):
-        loader, queries = _make_loader({"FROM semesters s JOIN textbook_versions": [(42,)]})
+        loader, queries = _make_loader({
+            "FROM subjects WHERE code": [(1,)],                 # subject_id
+            "FROM semesters s JOIN textbook_versions": [(42,)],
+        })
         info = {"subject": "数学", "grade_band": "初中", "publisher": "人教版",
                 "grade": "九年级", "term": "上册", "book": "书"}
         assert loader._lookup_semester(info) == 42
         sql_args = [a for sql, a in queries if "semesters" in sql][0]
-        assert "math_人教版_junior" in sql_args
+        # 4 元组定位：(subject_id, publisher, grade_band, edition, grade, term)
+        assert sql_args == (1, "人教版", "junior", "", "grade_9", "first")
+
+    def test_lookup_semester_with_edition(self):
+        """带版次标记的书名 -> edition 进 4 元组定位，两版教材互不串semester。"""
+        loader, queries = _make_loader({
+            "FROM subjects WHERE code": [(1,)],
+            "FROM semesters s JOIN textbook_versions": [(43,)],
+        })
+        info = {"subject": "数学", "grade_band": "初中", "publisher": "人教版",
+                "grade": "九年级", "term": "上册",
+                "book": "（根据2022年版课程标准修订）义务教育教科书·数学九年级上册"}
+        assert loader._lookup_semester(info) == 43
+        sql_args = [a for sql, a in queries if "semesters" in sql][0]
+        assert sql_args[3] == "根据2022年版课程标准修订"
 
     def test_lookup_semester_missing_returns_none(self):
-        loader, _ = _make_loader({})
+        loader, _ = _make_loader({"FROM subjects WHERE code": [(1,)]})
         info = {"subject": "数学", "grade_band": "初中", "publisher": "人教版",
                 "grade": "九年级", "term": "上册", "book": "书"}
         assert loader._lookup_semester(info) is None
@@ -152,6 +173,83 @@ class TestNormalizeSubject:
 
     def test_unknown_passthrough(self):
         assert normalize_subject("physics") == "physics"
+
+
+class TestEditionFromBookName:
+    def test_edition_marker_extracted(self):
+        assert edition_from_book_name(
+            "（根据2022年版课程标准修订）义务教育教科书·数学九年级上册"
+        ) == "根据2022年版课程标准修订"
+
+    def test_no_marker_returns_empty(self):
+        assert edition_from_book_name("义务教育教科书·数学九年级上册") == ""
+
+    def test_upper_lower_volume_share_edition(self):
+        """同一版次的九上/九下书名不同但前导括号相同 -> 同一版次。"""
+        up = edition_from_book_name("（根据2022年版课程标准修订）义务教育教科书·数学九年级上册")
+        down = edition_from_book_name("（根据2022年版课程标准修订）义务教育教科书·数学九年级下册")
+        assert up == down != ""
+
+    def test_half_width_parens(self):
+        assert edition_from_book_name("(2024修订)数学九年级上册") == "2024修订"
+
+    def test_marker_not_at_start_ignored(self):
+        """括号不在书名开头（如书名中间的括号注记）不算版次标记。"""
+        assert edition_from_book_name("义务教育教科书·数学九年级上册（2024）") == ""
+
+    def test_none_and_empty(self):
+        assert edition_from_book_name(None) == ""
+        assert edition_from_book_name("") == ""
+
+    def test_leading_whitespace(self):
+        assert edition_from_book_name("  （修订版）数学") == "修订版"
+
+
+class TestFindOrCreateTextbookVersion:
+    def test_edition_in_lookup_and_insert(self):
+        """带版次：查询走 4 元组、INSERT 带 edition，code/name 拼入版次。"""
+        from db_loader import DbLoader
+        loader = DbLoader.__new__(DbLoader)
+        loader._tv, loader._subj_code = {}, {}
+        queries: list = []
+
+        tv_queries = {"n": 0}
+
+        def fake_query(sql, args=None):
+            queries.append((sql, args))
+            if "FROM subjects WHERE code" in sql:
+                return [(1,)]
+            if "FROM textbook_versions WHERE subject_id" in sql:
+                tv_queries["n"] += 1
+                # 首次 find 查无 -> 触发 INSERT；insert 后回查 -> 新 id
+                return [] if tv_queries["n"] == 1 else [(1,)]
+            return []
+
+        loader._query = fake_query
+        loader._exec = lambda sql, args=None: queries.append((sql, args))
+
+        tid = loader._find_or_create_textbook_version(
+            "math", "人教版", "junior", "根据2022年版课程标准修订")
+        assert tid == 1
+        insert_sql, insert_args = [
+            (sql, a) for sql, a in queries if "INSERT INTO textbook_versions" in sql][0]
+        assert insert_args[1] == "人教版（根据2022年版课程标准修订）"          # name
+        assert insert_args[2] == "math_人教版_根据2022年版课程标准修订_junior"   # code
+        assert insert_args[5] == "根据2022年版课程标准修订"                     # edition
+        # find 查询按 4 元组（subject_id, publisher, grade_band, edition）
+        find_sql, find_args = [
+            (sql, a) for sql, a in queries if "SELECT id FROM textbook_versions" in sql][0]
+        assert find_args == (1, "人教版", "junior", "根据2022年版课程标准修订")
+        assert "edition=%s" in find_sql
+
+    def test_no_edition_backward_compatible(self):
+        """无版次：name=publisher、code 不拼 edition，与存量 2012 行兼容。"""
+        loader, queries = _make_loader({
+            "FROM subjects WHERE code": [(1,)],
+            "FROM textbook_versions WHERE subject_id": [(275,)],
+        })
+        assert loader._find_or_create_textbook_version("math", "人教版", "junior") == 275
+        assert not any("INSERT INTO textbook_versions" in sql for sql, _ in queries)
 
 
 class TestParseBookRelPath:

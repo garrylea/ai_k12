@@ -73,6 +73,15 @@ class TestFindOrCreate:
         b = db._find_or_create_textbook_version("math", "人教版", "junior")
         assert a == b and a > 0
 
+    def test_textbook_version_edition_distinct(self, db):
+        """同一 publisher 不同版次 -> 独立 textbook_version；同版次重跑幂等。"""
+        old = db._find_or_create_textbook_version("math", "人教版", "junior")
+        new = db._find_or_create_textbook_version(
+            "math", "人教版", "junior", "根据2022年版课程标准修订")
+        assert old != new
+        assert db._find_or_create_textbook_version(
+            "math", "人教版", "junior", "根据2022年版课程标准修订") == new
+
     def test_unit_lesson_idempotent(self, db):
         tv = db._find_or_create_textbook_version("math", "人教版", "junior")
         sem = db._find_or_create_semester(tv, "grade_9", "second", "九年级下册")

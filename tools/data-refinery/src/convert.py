@@ -30,6 +30,8 @@ class MineruRunner:
         if skipped:
             print(f"  [resume] {skipped}/{len(input_paths)} pages already converted, processing {len(pending)} remaining")
         # Batch to stay under MinerU API rate limit (~50 files/min)
+        # 页码用 input_paths 里的原始序号（全书第几页）；/后是本次剩余待转页数
+        page_no = {p: idx + 1 for idx, p in enumerate(input_paths)}
         for i in range(0, len(pending), self._BATCH_SIZE):
             batch = pending[i : i + self._BATCH_SIZE]
             cmd = [
@@ -40,7 +42,9 @@ class MineruRunner:
             ]
             self._run(cmd)
             if i + self._BATCH_SIZE < len(pending):
-                print(f"  [batch] {i+1}-{min(i+self._BATCH_SIZE, len(pending))}/{len(pending)}, pausing 15s...")
+                print(f"  [batch] pages {page_no[batch[0]]}-{page_no[batch[-1]]}/{len(pending)} done, pausing 15s...")
+            else:
+                print(f"  [batch] pages {page_no[batch[0]]}-{page_no[batch[-1]]}/{len(pending)} done")
                 time.sleep(15)
 
     def _run(self, cmd: list[str]) -> None:
