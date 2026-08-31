@@ -204,10 +204,16 @@ python src/convert_cli.py
 # 只转换 smartedu 教材
 python src/convert_cli.py --source smartedu
 
+# 只转换指定书目（子串匹配 rel_path，逗号分隔可多条；一条命中多本则全转）
+python src/convert_cli.py --source smartedu --materials "（根据2022年版课程标准修订）义务教育教科书·数学九年级上册"
+
+# 批量：列表文件，一行一个子串，# 注释，空行忽略
+python src/convert_cli.py --source smartedu --materials-file books.txt
+
 # 重新转换（删除已有输出 + 清 checkpoint）
 python src/convert_cli.py --reconvert
 
-# 试运行：查看待处理素材
+# 试运行：查看待处理素材（配合 --materials 可先确认命中哪些书）
 python src/convert_cli.py --dry-run
 ```
 
@@ -216,9 +222,13 @@ python src/convert_cli.py --dry-run
 | `--input-dir` | path | `tools/crawler/data` | 素材输入目录 |
 | `--output-dir` | path | `output`（输出根） | **输出根目录**：MD 落 `{该目录}/md/` 下，不是直接落该目录 |
 | `--source` | all / zgkao / smartedu | `all` | 按来源过滤 |
+| `--materials` | str | 空 | 只处理 rel_path 包含指定子串的素材，逗号分隔多条，与 `--materials-file` 取并集 |
+| `--materials-file` | path | 空 | 素材列表文件，一行一个子串，`#` 开头为注释，空行忽略 |
 | `--force` | flag | 否 | 忽略 checkpoint，处理所有未完成的 |
 | `--reconvert` | flag | 否 | 删除已有输出 + 清 checkpoint，全部重转 |
 | `--dry-run` | flag | 否 | 只打印不转换 |
+
+**未命中警告**：`--materials` / `--materials-file` 中命中 0 本的条目会打印 `[WARN] 未命中素材: <条目>`（防止拼写错误静默无操作）。列表内已转换的书仍按 checkpoint 跳过，需重转用 `--reconvert`。
 
 **输出**：`output/md/{学科}/{学段}/{版本}/{年级}/{册次}/{书名}/page_001.md …`
 
