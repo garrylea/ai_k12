@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards, Request } from '@nestjs/common';
 import type { Request as ExpressRequest } from 'express';
 import { z } from 'zod';
 import { ParentService } from './parent.service.js';
@@ -18,6 +18,12 @@ const CreateStudentSchema = z.object({
 
 const ResetPasswordSchema = z.object({ newPassword: z.string().min(6).max(32) });
 const StatusSchema = z.object({ isActive: z.boolean() });
+
+const SubjectConfigSchema = z.object({
+  gradeCode: z.string().min(1).max(20),
+  term: z.enum(['first', 'second']),
+  textbookVersionId: z.number().int().positive().optional(),
+});
 
 @Controller('api/parent')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -61,6 +67,24 @@ export class ParentController {
     const user = (req as ExpressRequest & { user?: JwtUser }).user!;
     const { isActive } = StatusSchema.parse(body);
     return this.parentService.setStatus(user.sub, id, isActive);
+  }
+
+  @Get('students/:id/subject-configs')
+  async getSubjectConfigs(@Request() req: ExpressRequest, @Param('id', ParseIntPipe) id: number) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    return this.parentService.getSubjectConfigs(user.sub, id);
+  }
+
+  @Put('students/:id/subject-configs/:subjectId')
+  async updateSubjectConfig(
+    @Request() req: ExpressRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('subjectId', ParseIntPipe) subjectId: number,
+    @Body() body: unknown,
+  ) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    const dto = SubjectConfigSchema.parse(body);
+    return this.parentService.updateSubjectConfig(user.sub, id, subjectId, dto);
   }
 
   @Get('messages')

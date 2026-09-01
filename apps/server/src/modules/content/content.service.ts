@@ -1,10 +1,32 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
-import { TextbookVersionsRepository } from '../../database/repositories/textbook-versions.repo.js';
+import { TextbookVersionsRepository, type TextbookVersion } from '../../database/repositories/textbook-versions.repo.js';
 import { SemestersRepository } from '../../database/repositories/semesters.repo.js';
 import { UnitsRepository } from '../../database/repositories/units.repo.js';
 import { LessonsRepository } from '../../database/repositories/lessons.repo.js';
 import { CardsRepository } from '../../database/repositories/cards.repo.js';
+import { gradeInfoByCode } from '../../common/utils/grade.js';
+
+export interface ConfigVersionOption {
+  id: number;
+  name: string;
+  publisher: string | null;
+  edition: string;
+  gradeBand: string;
+  terms: string[];
+}
+
+export interface ConfigGradeOption {
+  code: string;
+  label: string;
+  versions: ConfigVersionOption[];
+}
+
+export interface SubjectConfigOption {
+  subjectId: number;
+  subjectName: string;
+  grades: ConfigGradeOption[];
+}
 
 @Injectable()
 export class ContentService {
@@ -25,6 +47,60 @@ export class ContentService {
     const subject = await this.subjectsRepo.findById(subjectId);
     if (!subject) throw new NotFoundException({ code: 1002, message: '学科不存在' });
     return this.versionsRepo.findBySubjectId(subjectId);
+  }
+
+  /** 默认版本选择规则：同学段候选中 edition 非空优先（新课程标准修订版），
+   *  再按 id 降序（后入库=更新）；无 band 匹配时对全部版本应用同一规则。 */
+  pickDefaultVersion(versions: TextbookVersion[], band: string | null): TextbookVersion | null {
+    if (versions.length === 0) return null;
+    const matched = band ? versions.filter(v => v.gradeBand === band) : [];
+    const pool = matched.length > 0 ? matched : versions;
+    const sorted = [...pool].sort((a, b) => defaultVersionCompare(a.edition, a.id, b.edition, b.id));
+    return sorted[0];
+  }
+
+  /** 家长端配置页选项聚合：每学科 → 有数据的年级 → 每年级可用版本（含册别）。
+   *  年级内版本按默认规则排序（首个即推荐默认）。 */
+  async getSubjectConfigOptions(): Promise<SubjectConfigOption[]> {
+    const subjects = await this.subjectsRepo.findAll();
+    const result: SubjectConfigOption[] = [];
+    for (const subject of subjects) {
+      const versions = await this.versionsRepo.findBySubjectId(subject.id);
+      if (versions.length === 0) continue;
+
+      const gradeMap = new Map<string, ConfigGradeOption>();
+      for (const version of versions) {
+        const semesters = await this.semestersRepo.findByTextbookVersionId(version.id);
+        for (const sem of semesters) {
+          let entry = gradeMap.get(sem.grade);
+          if (!entry) {
+            entry = {
+              code: sem.grade,
+              label: gradeInfoByCode(sem.grade)?.label ?? sem.grade,
+              versions: [],
+            };
+            gradeMap.set(sem.grade, entry);
+          }
+          if (entry.versions.some(v => v.id === version.id)) continue;
+          entry.versions.push({
+            id: version.id,
+            name: version.name,
+            publisher: version.publisher,
+            edition: version.edition,
+            gradeBand: version.gradeBand,
+            terms: semesters.filter(s => s.grade === sem.grade).map(s => s.term),
+          });
+        }
+      }
+
+      const grades = [...gradeMap.values()].sort((a, b) => gradeSortKey(a.code) - gradeSortKey(b.code));
+      for (const g of grades) {
+        g.versions.sort((a, b) => defaultVersionCompare(a.edition, a.id, b.edition, b.id));
+      }
+      if (grades.length === 0) continue;
+      result.push({ subjectId: subject.id, subjectName: subject.name, grades });
+    }
+    return result;
   }
 
   async getUnits(versionId: number) {
@@ -122,4 +198,18 @@ function safeParse(json: string): unknown {
   } catch {
     return null;
   }
+}
+
+/** grade_N 排序键（grade_9 -> 9；未知格式排最后）。 */
+function gradeSortKey(code: string): number {
+  const m = /^grade_(\d+)$/.exec(code);
+  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+/** 默认版本比较器：edition 非空优先（新课程标准修订版），再按 id 降序（后入库=更新）。 */
+function defaultVersionCompare(editionA: string, idA: number, editionB: string, idB: number): number {
+  const ea = editionA ? 1 : 0;
+  const eb = editionB ? 1 : 0;
+  if (ea !== eb) return eb - ea;
+  return idB - idA;
 }

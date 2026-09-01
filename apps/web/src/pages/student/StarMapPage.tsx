@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchStarMap, type SectionData, type StarMapData } from '@/services/api';
 import { BackButton } from '@/components/base';
+import { useLearnContextStore } from '@/store/learnContextStore';
 
 // --- Loading skeleton ---
 function LoadingSkeleton() {
@@ -126,6 +127,11 @@ export default function StarMapPage() {
       }
       const result = await fetchStarMap(studentId, subjectId);
       setData(result);
+      useLearnContextStore.getState().setContext({
+        subjectName: result.subjectName,
+        gradeName: result.gradeName,
+        publisher: result.publisher || null,
+      });
       const current = result.chapters.find(c => c.status === 'current');
       setSelectedPlanetId(current?.id ?? result.chapters[0]?.id ?? null);
     } catch (err: unknown) {

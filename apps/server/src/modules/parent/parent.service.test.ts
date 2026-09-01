@@ -11,10 +11,28 @@ const mk = (overrides: Record<string, any> = {}) => ({
     setActive: vi.fn().mockResolvedValue(undefined),
     createDefaultSettings: vi.fn().mockResolvedValue(undefined),
   },
+  progressRepo: {
+    findByStudentAndSubject: vi.fn().mockResolvedValue(null),
+    createConfig: vi.fn().mockResolvedValue(1),
+    applyConfig: vi.fn().mockResolvedValue(undefined),
+  },
+  versionsRepo: {
+    findById: vi.fn().mockResolvedValue(null),
+    findBySubjectId: vi.fn().mockResolvedValue([]),
+  },
+  semestersRepo: {
+    findById: vi.fn().mockResolvedValue(null),
+    findByTextbookVersionId: vi.fn().mockResolvedValue([]),
+  },
+  contentService: {
+    getSubjectConfigOptions: vi.fn().mockResolvedValue([]),
+    pickDefaultVersion: vi.fn().mockImplementation((versions: any[]) => versions[0] ?? null),
+  },
   ...overrides,
 });
 
-const mkSvc = (d: ReturnType<typeof mk>) => new ParentService(d.studentsRepo as any);
+const mkSvc = (d: ReturnType<typeof mk>) =>
+  new ParentService(d.studentsRepo as any, d.progressRepo as any, d.versionsRepo as any, d.semestersRepo as any, d.contentService as any);
 
 const own = { id: 5, parentId: 3, username: 'xiaoming', passwordHash: 'h', name: '小明', age: 13, grade: '初二', schoolLevel: 'junior', isActive: true };
 
@@ -71,5 +89,174 @@ describe('ParentService 学生子账号管理', () => {
     const list = await mkSvc(d).listStudents(3);
     expect(list[0]).not.toHaveProperty('passwordHash');
     expect(list[0]).toMatchObject({ username: 'xiaoming', isActive: true });
+  });
+});
+
+describe('ParentService 教材配置', () => {
+  const mathOptions = [{
+    subjectId: 1,
+    subjectName: '数学',
+    grades: [{
+      code: 'grade_8',
+      label: '初二',
+      versions: [{ id: 9, name: '人教版', publisher: '人教版', edition: '', gradeBand: 'junior', terms: ['first', 'second'] }],
+    }],
+  }];
+  const semester77 = { id: 77, textbookVersionId: 9, name: '八年级下册', grade: 'grade_8', term: 'second', sortOrder: 15 };
+  const version9 = { id: 9, subjectId: 1, name: '人教版', code: 'math_人教版_junior', gradeBand: 'junior', publisher: '人教版', edition: '', isActive: true };
+  const version10 = { id: 10, subjectId: 1, name: '人教版（2024）', code: 'x', gradeBand: 'junior', publisher: '人教版', edition: '根据2022年版课程标准修订', isActive: true };
+
+  it('查询：未配置学科按学生年级推导默认（初二 -> grade_8），不落库', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      contentService: Object.assign(mk().contentService, { getSubjectConfigOptions: vi.fn().mockResolvedValue(mathOptions) }),
+    });
+    const res = await mkSvc(d).getSubjectConfigs(3, 5);
+    expect(res.subjects[0]).toMatchObject({
+      subjectId: 1, subjectName: '数学', configured: false, started: false,
+      gradeCode: 'grade_8', term: 'first', textbookVersionId: 9,
+    });
+    expect(d.progressRepo.findByStudentAndSubject).toHaveBeenCalledWith(5, 1);
+  });
+
+  it('查询：已配置学科读 progress + semester + version', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      contentService: Object.assign(mk().contentService, { getSubjectConfigOptions: vi.fn().mockResolvedValue(mathOptions) }),
+      progressRepo: Object.assign(mk().progressRepo, {
+        findByStudentAndSubject: vi.fn().mockResolvedValue({
+          id: 1, studentId: 5, subjectId: 1, textbookVersionId: 9, currentSemesterId: 77,
+          currentUnitId: 3, currentLessonId: 12, currentCardSort: 2,
+          nextUnlockType: 'lesson', isClear: true, status: 'in_progress',
+        }),
+      }),
+      semestersRepo: Object.assign(mk().semestersRepo, { findById: vi.fn().mockResolvedValue(semester77) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findById: vi.fn().mockResolvedValue(version9) }),
+    });
+    const res = await mkSvc(d).getSubjectConfigs(3, 5);
+    expect(res.subjects[0]).toMatchObject({
+      configured: true, started: true, gradeCode: 'grade_8', term: 'second', textbookVersionId: 9, publisher: '人教版',
+    });
+  });
+
+  it('查询：归属校验 1005', async () => {
+    const d = mk({ studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue({ ...own, parentId: 999 }) }) });
+    await expect(mkSvc(d).getSubjectConfigs(3, 5)).rejects.toMatchObject({ response: { code: 1005 } });
+  });
+
+  it('保存：非自己名下学生 -> 1005', async () => {
+    const d = mk({ studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue({ ...own, parentId: 999 }) }) });
+    await expect(mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_8', term: 'first' }))
+      .rejects.toMatchObject({ response: { code: 1005 } });
+  });
+
+  it('保存：显式版本不属于该学科 -> 1001', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findById: vi.fn().mockResolvedValue({ ...version9, subjectId: 2 }) }),
+    });
+    await expect(mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_8', term: 'first', textbookVersionId: 9 }))
+      .rejects.toMatchObject({ response: { code: 1001 } });
+  });
+
+  it('保存：版本不含该年级/册别 -> 1001 且不落库', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findById: vi.fn().mockResolvedValue(version9) }),
+      semestersRepo: Object.assign(mk().semestersRepo, {
+        findByTextbookVersionId: vi.fn().mockResolvedValue([{ id: 78, grade: 'grade_8', term: 'first' }]),
+      }),
+    });
+    await expect(mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_9', term: 'first', textbookVersionId: 9 }))
+      .rejects.toMatchObject({ response: { code: 1001 } });
+    expect(d.progressRepo.createConfig).not.toHaveBeenCalled();
+    expect(d.progressRepo.applyConfig).not.toHaveBeenCalled();
+  });
+
+  it('保存：首次配置 -> createConfig（not_started），reset=false', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findById: vi.fn().mockResolvedValue(version9) }),
+      semestersRepo: Object.assign(mk().semestersRepo, {
+        findByTextbookVersionId: vi.fn().mockResolvedValue([semester77, { id: 78, grade: 'grade_8', term: 'first' }]),
+      }),
+    });
+    const res = await mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_8', term: 'first', textbookVersionId: 9 });
+    expect(res).toMatchObject({ subjectId: 1, textbookVersionId: 9, semesterId: 78, reset: false });
+    expect(d.progressRepo.createConfig).toHaveBeenCalledWith({ studentId: 5, subjectId: 1, textbookVersionId: 9, semesterId: 78 });
+  });
+
+  it('保存：缺省版本走默认规则（pickDefaultVersion 按年级学段）', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findBySubjectId: vi.fn().mockResolvedValue([version9, version10]) }),
+      contentService: Object.assign(mk().contentService, { pickDefaultVersion: vi.fn().mockReturnValue(version10) }),
+      semestersRepo: Object.assign(mk().semestersRepo, {
+        findByTextbookVersionId: vi.fn().mockResolvedValue([{ id: 88, grade: 'grade_9', term: 'first' }]),
+      }),
+    });
+    const res = await mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_9', term: 'first' });
+    expect(d.contentService.pickDefaultVersion).toHaveBeenCalledWith([version9, version10], 'junior');
+    expect(res).toMatchObject({ textbookVersionId: 10, semesterId: 88, reset: false });
+  });
+
+  it('保存：已开始学习且切换版本 -> applyConfig reset=true', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findById: vi.fn().mockResolvedValue(version10) }),
+      semestersRepo: Object.assign(mk().semestersRepo, {
+        findByTextbookVersionId: vi.fn().mockResolvedValue([{ id: 88, grade: 'grade_9', term: 'first' }]),
+      }),
+      progressRepo: Object.assign(mk().progressRepo, {
+        findByStudentAndSubject: vi.fn().mockResolvedValue({
+          id: 1, studentId: 5, subjectId: 1, textbookVersionId: 9, currentSemesterId: 77,
+          currentUnitId: 3, currentLessonId: 12, currentCardSort: 2,
+          nextUnlockType: 'lesson', isClear: true, status: 'in_progress',
+        }),
+      }),
+    });
+    const res = await mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_9', term: 'first', textbookVersionId: 10 });
+    expect(res.reset).toBe(true);
+    expect(d.progressRepo.applyConfig).toHaveBeenCalledWith(1, { textbookVersionId: 10, semesterId: 88, reset: true });
+  });
+
+  it('保存：已开始但保存相同配置 -> reset=false', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findById: vi.fn().mockResolvedValue(version9) }),
+      semestersRepo: Object.assign(mk().semestersRepo, {
+        findByTextbookVersionId: vi.fn().mockResolvedValue([{ id: 77, grade: 'grade_8', term: 'first' }]),
+      }),
+      progressRepo: Object.assign(mk().progressRepo, {
+        findByStudentAndSubject: vi.fn().mockResolvedValue({
+          id: 1, studentId: 5, subjectId: 1, textbookVersionId: 9, currentSemesterId: 77,
+          currentUnitId: 3, currentLessonId: 12, currentCardSort: 2,
+          nextUnlockType: 'lesson', isClear: true, status: 'in_progress',
+        }),
+      }),
+    });
+    const res = await mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_8', term: 'first', textbookVersionId: 9 });
+    expect(res.reset).toBe(false);
+    expect(d.progressRepo.applyConfig).toHaveBeenCalledWith(1, { textbookVersionId: 9, semesterId: 77, reset: false });
+  });
+
+  it('保存：未开始（仅配置过）时修改 -> reset=false', async () => {
+    const d = mk({
+      studentsRepo: Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) }),
+      versionsRepo: Object.assign(mk().versionsRepo, { findById: vi.fn().mockResolvedValue(version10) }),
+      semestersRepo: Object.assign(mk().semestersRepo, {
+        findByTextbookVersionId: vi.fn().mockResolvedValue([{ id: 88, grade: 'grade_9', term: 'first' }]),
+      }),
+      progressRepo: Object.assign(mk().progressRepo, {
+        findByStudentAndSubject: vi.fn().mockResolvedValue({
+          id: 1, studentId: 5, subjectId: 1, textbookVersionId: 9, currentSemesterId: 77,
+          currentUnitId: null, currentLessonId: null, currentCardSort: null,
+          nextUnlockType: 'lesson', isClear: true, status: 'not_started',
+        }),
+      }),
+    });
+    const res = await mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_9', term: 'first', textbookVersionId: 10 });
+    expect(res.reset).toBe(false);
+    expect(d.progressRepo.applyConfig).toHaveBeenCalledWith(1, { textbookVersionId: 10, semesterId: 88, reset: false });
   });
 });

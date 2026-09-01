@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ProgressRepository } from '../../database/repositories/progress.repo.js';
-import { StudentsRepository } from '../../database/repositories/students.repo.js';
+import { StudentsRepository, type Student } from '../../database/repositories/students.repo.js';
 import { LessonsRepository } from '../../database/repositories/lessons.repo.js';
 import { UnitsRepository } from '../../database/repositories/units.repo.js';
 import { SemestersRepository } from '../../database/repositories/semesters.repo.js';
 import { ContentService } from '../content/content.service.js';
 import { PracticeService } from '../practice/practice.service.js';
+import { gradeCodeFromLabel } from '../../common/utils/grade.js';
 
 export interface SectionData {
   id: string;
@@ -56,19 +57,22 @@ export class ProgressService {
     const subject = subjects.find(s => s.id === subjectId);
     if (!subject) throw new NotFoundException({ code: 1002, message: '学科不存在' });
 
-    // Resolve textbook version. Prefer the one recorded in progress; otherwise
-    // pick a version matching the student's grade band (primary/junior/senior),
-    // so a grade-9 student gets the junior textbook — not versions[0] (primary).
+    // Resolve textbook version. Prefer the one recorded in progress (written by
+    // the parent when configuring the student); otherwise pick the default
+    // version for the student's grade band (newest edition first — see
+    // ContentService.pickDefaultVersion), so a 九年级 student gets the junior
+    // 人教(2024) textbook, not versions[0] (2012 old edition).
     const versions = await this.contentService.getVersions(subjectId);
     if (versions.length === 0) {
       throw new NotFoundException({ code: 1002, message: '该学科暂无教材版本' });
     }
     let versionId = progress?.textbookVersionId;
+    let student: Student | null = null;
+    if (!versionId || progress?.currentSemesterId == null) {
+      student = await this.studentsRepo.findById(studentId);
+    }
     if (!versionId) {
-      const student = await this.studentsRepo.findById(studentId);
-      const gradeBand = student?.schoolLevel ?? null;
-      const matched = gradeBand ? versions.find(v => v.gradeBand === gradeBand) : undefined;
-      versionId = (matched ?? versions[0]).id;
+      versionId = this.contentService.pickDefaultVersion(versions, student?.schoolLevel ?? null)!.id;
     }
 
     const version = versions.find(v => v.id === versionId);
@@ -89,12 +93,20 @@ export class ProgressService {
 
     // Select the semester. Honor progress.current_semester_id (set by the
     // parent when configuring the student) so 上册/下册 is chosen correctly.
-    // Without a progress row, fall back to the lowest sort_order (上册) — the
-    // semester list is already ordered by sort_order (SemestersRepository).
+    // Without one, match the student's grade (初三 -> grade_9) so a 九年级
+    // student lands on 九年级上册 instead of the lowest grade in the version;
+    // fall back to the first semester (ordered by sort_order).
+    const studentGradeCode = student?.grade
+      ? gradeCodeFromLabel(student.grade) ?? null
+      : null;
     const selectedSemester =
       (progress?.currentSemesterId != null
         ? semesterData.find(s => s.semester.id === progress.currentSemesterId)
-        : undefined) ?? semesterData[0];
+        : undefined)
+      ?? (studentGradeCode != null
+        ? semesterData.find(s => s.semester.grade === studentGradeCode)
+        : undefined)
+      ?? semesterData[0];
     const semesterName = selectedSemester.semester.name;
     const units = selectedSemester.units;
 
@@ -210,6 +222,23 @@ export class ProgressService {
 
       progress = await this.progressRepo.findByStudentAndSubject(studentId, subjectId);
       if (!progress) throw new NotFoundException({ code: 1002, message: '学习进度创建失败' });
+    }
+
+    // Row exists but no lesson yet (created by parent config createConfig, or
+    // reset via applyConfig): adopt the lesson being viewed as the starting
+    // point — same semantics as the auto-init above. Without this, every call
+    // falls into the not_current_lesson branch below and current_lesson_id
+    // stays NULL forever — the student can never complete any lesson.
+    if (progress.currentLessonId == null) {
+      const lesson = await this.lessonsRepo.findById(lessonId);
+      if (!lesson) throw new NotFoundException({ code: 1002, message: '课程不存在' });
+      await this.progressRepo.adoptLesson(progress.id, lesson.unitId, lesson.id);
+      progress = {
+        ...progress,
+        currentUnitId: lesson.unitId,
+        currentLessonId: lesson.id,
+        currentCardSort: 0,
+      };
     }
 
     // Only update progress for the current lesson; revisiting older lessons is a no-op

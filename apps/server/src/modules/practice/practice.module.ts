@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PracticeController } from './practice.controller.js';
 import { PracticeService } from './practice.service.js';
-import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository, ProgressRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
@@ -28,6 +28,7 @@ import { ContentModule } from '../content/content.module.js';
     MainErrorBooksRepository,
     CardsRepository,
     PracticeResultsRepository,
+    ProgressRepository,
     QuestionStructuringCapability,
     JudgmentCapability,
     HintCapability,

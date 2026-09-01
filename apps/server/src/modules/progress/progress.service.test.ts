@@ -28,6 +28,7 @@ function makeService(opts: {
   progress: any | null;
   student?: any | null;
   practiceService?: any;
+  versions?: any[];
 }) {
   const progressRepo = {
     findByStudentAndSubject: async () => opts.progress,
@@ -38,11 +39,24 @@ function makeService(opts: {
   const lessonsRepo = {} as any;
   const unitsRepo = {} as any;
   const semestersRepo = {} as any;
+  const versions = opts.versions ?? VERSIONS;
   const contentService = {
     getSubjects: async () => SUBJECTS,
-    getVersions: async () => VERSIONS,
+    getVersions: async () => versions,
     getUnits: async (versionId: number) => UNITS_BY_VERSION[versionId] ?? [],
     getLessons: async () => [],
+    // 默认规则 mock（与 ContentService.pickDefaultVersion 同规则）：edition 非空优先，id 大者优先
+    pickDefaultVersion: (list: any[], band: string | null) => {
+      const matched = band ? list.filter((v: any) => v.gradeBand === band) : [];
+      const pool = matched.length > 0 ? matched : list;
+      const sorted = [...pool].sort((a: any, b: any) => {
+        const ea = a.edition ? 1 : 0;
+        const eb = b.edition ? 1 : 0;
+        if (ea !== eb) return eb - ea;
+        return b.id - a.id;
+      });
+      return sorted[0] ?? null;
+    },
   };
   const practiceService = opts.practiceService ?? {};
   return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any, practiceService as any);
@@ -68,7 +82,7 @@ describe('ProgressService.getStarMap — semester/version selection', () => {
     expect(result.totalUnits).toBe(2);
   });
 
-  it('without progress, resolves version by student grade band (junior) and falls back to lowest sort_order semester (上册)', async () => {
+  it('without progress, resolves version by student grade band (junior) via default rule and falls back to lowest sort_order semester (上册)', async () => {
     const svc = makeService({
       progress: null,
       student: { id: 2, schoolLevel: 'junior' },
@@ -77,6 +91,41 @@ describe('ProgressService.getStarMap — semester/version selection', () => {
     // junior version 76's first semester in sort order is 九上
     expect(result.gradeName).toBe('九年级上册');
     expect(result.publisher).toBe('人教版');
+  });
+
+  it('without progress, matches semester by student grade (初三 -> grade_9) when the version spans grades', async () => {
+    // 临时给 junior version 76 挂八/九两个年级的册别，验证按学生年级命中九年级
+    const saved = UNITS_BY_VERSION[76];
+    UNITS_BY_VERSION[76] = [
+      { semester: { id: 50, name: '八年级上册', grade: 'grade_8', term: 'first' }, units: [{ id: 80, name: '八上U1', order: 11 }] },
+      ...saved,
+    ];
+    try {
+      const svc = makeService({
+        progress: null,
+        student: { id: 2, schoolLevel: 'junior', grade: '初三' },
+      });
+      const result = await svc.getStarMap(2, 1);
+      expect(result.gradeName).toBe('九年级上册');
+    } finally {
+      UNITS_BY_VERSION[76] = saved;
+    }
+  });
+
+  it('without progress, 同学段多版并存时默认规则取 edition 非空的新版（id 大者优先）', async () => {
+    const versions = [
+      ...VERSIONS,
+      { id: 90, subjectId: 1, name: '人教版（2024）', code: 'math_junior_2024', gradeBand: 'junior', publisher: '人教版', edition: '根据2022年版课程标准修订' },
+    ];
+    const svc = makeService({
+      versions,
+      progress: null,
+      student: { id: 2, schoolLevel: 'junior' },
+    });
+    const result = await svc.getStarMap(2, 1);
+    // 90 号版本无 units 数据 -> 选中新版后 chapters 为空、totalUnits 0
+    expect(result.publisher).toBe('人教版');
+    expect(result.totalUnits).toBe(0);
   });
 });
 
@@ -89,12 +138,17 @@ function makeUpdateService(opts: {
   nextLesson?: { id: number; unitId: number } | null;
   practiceComplete?: boolean;
   withPracticeService?: boolean;
+  lesson?: { id: number; unitId: number } | null;
 }) {
   const progressRepo = {
     findByStudentAndSubject: async () => opts.progress,
     advanceLesson: vi.fn().mockResolvedValue(undefined),
     markCompleted: vi.fn().mockResolvedValue(undefined),
     updateCardSort: vi.fn().mockResolvedValue(undefined),
+    adoptLesson: vi.fn().mockResolvedValue(undefined),
+  };
+  const lessonsRepo = {
+    findById: async (id: number) => opts.lesson === undefined ? null : (opts.lesson?.id === id ? opts.lesson : null),
   };
   const contentService = {
     getLessonCards: async () => ({ cards: opts.cards }),
@@ -107,7 +161,7 @@ function makeUpdateService(opts: {
   const svc = new ProgressService(
     progressRepo as any,
     {} as any,
-    {} as any,
+    lessonsRepo as any,
     {} as any,
     {} as any,
     contentService as any,
@@ -180,5 +234,43 @@ describe('ProgressService.updateProgress — practice gate', () => {
     expect(res).toEqual({ advanced: false, nextUnlockType: 'lesson' });
     expect(practiceService.isLessonPracticeComplete).not.toHaveBeenCalled();
     expect(progressRepo.updateCardSort).toHaveBeenCalledWith(1, 1, 'lesson');
+  });
+});
+
+// --- updateProgress 家长配置行（currentLessonId=NULL）首次学习收养 ---
+// 家长端 createConfig / applyConfig(reset) 创建的 progress 行 current_lesson_id 为
+// NULL。此前 updateProgress 只处理"行不存在"的自动初始化，行存在但 lesson 为空时
+// 每次 fall through 到 not_current_lesson，学生永远无法完成任何课程。
+
+describe('ProgressService.updateProgress — 家长配置行（currentLessonId=NULL）', () => {
+  it('行存在但 currentLessonId 为空 -> 收养当前课，最后一张卡正常 advanceLesson（不再卡在 not_current_lesson）', async () => {
+    const { svc, progressRepo } = makeUpdateService({
+      progress: { id: 6, currentLessonId: null, currentUnitId: null, currentCardSort: null },
+      cards: [
+        { id: 1, sortOrder: 1, cardType: 'reading' },
+        { id: 2, sortOrder: 2, cardType: 'reading' },
+      ],
+      nextLesson: { id: 1113, unitId: 310 },
+      lesson: { id: 1112, unitId: 310 },
+    });
+    const res = await svc.updateProgress(7, 1, 1112, 2);
+    expect(res).toEqual({ advanced: true, nextLessonId: 1113 });
+    expect(progressRepo.adoptLesson).toHaveBeenCalledWith(6, 310, 1112);
+    expect(progressRepo.advanceLesson).toHaveBeenCalledWith(6, 1113, null);
+  });
+
+  it('行存在但 currentLessonId 为空 -> 收养当前课，非最后一张卡仅更新 cardSort', async () => {
+    const { svc, progressRepo } = makeUpdateService({
+      progress: { id: 6, currentLessonId: null, currentUnitId: null, currentCardSort: null },
+      cards: [
+        { id: 1, sortOrder: 1, cardType: 'reading' },
+        { id: 2, sortOrder: 2, cardType: 'reading' },
+      ],
+      lesson: { id: 1112, unitId: 310 },
+    });
+    const res = await svc.updateProgress(7, 1, 1112, 1);
+    expect(res).toEqual({ advanced: false, nextUnlockType: 'lesson' });
+    expect(progressRepo.adoptLesson).toHaveBeenCalledWith(6, 310, 1112);
+    expect(progressRepo.updateCardSort).toHaveBeenCalledWith(6, 1, 'lesson');
   });
 });

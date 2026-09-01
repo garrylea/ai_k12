@@ -12,6 +12,7 @@ import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
 import ParentMessagesPage from '@/pages/parent/ParentMessagesPage';
+import StudentSubjectConfigPage from '@/pages/parent/StudentSubjectConfigPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -139,6 +140,7 @@ const router = createBrowserRouter([
       { path: '', element: <Navigate to="/parent/students" replace /> },
       { path: 'messages', element: <ParentMessagesPage /> },
       { path: 'students', element: <ParentStudentsPage /> },
+      { path: 'students/:id/config', element: <StudentSubjectConfigPage /> },
       { path: 'dashboard', element: <Placeholder title="家长仪表盘 P6.1" /> },
       { path: 'report', element: <Placeholder title="学情报告 P6.2" /> },
       { path: 'errors', element: <Placeholder title="错题查看 P6.3" /> },

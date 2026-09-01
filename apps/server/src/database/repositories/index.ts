@@ -11,6 +11,7 @@ export { MainErrorBooksRepository } from './main-error-books.repo.js';
 export { ParentMessagesRepository } from './parent-messages.repo.js';
 export { ParentsRepository } from './parents.repo.js';
 export { PracticeResultsRepository } from './practice-results.repo.js';
+export { ProgressRepository } from './progress.repo.js';
 export { SafetyAlertsRepository } from './safety-alerts.repo.js';
 export { QuestionsRepository } from './questions.repo.js';
 export { LessonsRepository } from './lessons.repo.js';

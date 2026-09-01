@@ -58,6 +58,59 @@ export class ProgressRepository {
     return (result as any).insertId;
   }
 
+  /** 家长端教材配置：首次为该学科创建配置行（未开始学习）。 */
+  async createConfig(data: {
+    studentId: number;
+    subjectId: number;
+    textbookVersionId: number;
+    semesterId: number;
+  }): Promise<number> {
+    const [result] = await this.pool.execute(
+      `INSERT INTO progress
+       (student_id, subject_id, textbook_version_id, current_semester_id, next_unlock_type, is_clear, status)
+       VALUES (?, ?, ?, ?, 'lesson', 1, 'not_started')`,
+      [data.studentId, data.subjectId, data.textbookVersionId, data.semesterId],
+    );
+    return (result as any).insertId;
+  }
+
+  /** 家长端教材配置切换：更新版本/册别；reset=true 时同时重置学习状态
+   *  （current_unit/lesson/card 置 NULL、status 回 not_started、时间戳清空）。 */
+  async applyConfig(
+    progressId: number,
+    data: { textbookVersionId: number; semesterId: number; reset: boolean },
+  ): Promise<void> {
+    if (data.reset) {
+      await this.pool.execute(
+        `UPDATE progress SET
+           textbook_version_id = ?, current_semester_id = ?,
+           current_unit_id = NULL, current_lesson_id = NULL, current_card_sort = NULL,
+           next_unlock_type = 'lesson', is_clear = 1, status = 'not_started',
+           started_at = NULL, last_active_at = NULL
+         WHERE id = ?`,
+        [data.textbookVersionId, data.semesterId, progressId],
+      );
+    } else {
+      await this.pool.execute(
+        `UPDATE progress SET textbook_version_id = ?, current_semester_id = ? WHERE id = ?`,
+        [data.textbookVersionId, data.semesterId, progressId],
+      );
+    }
+  }
+
+  /** 行存在但尚未开始学习（家长端 createConfig / applyConfig reset 创建的行，
+   *  current_lesson_id 为 NULL）：收养学生正在查看的课作为起点。 */
+  async adoptLesson(progressId: number, unitId: number, lessonId: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE progress SET
+         current_unit_id = ?, current_lesson_id = ?, current_card_sort = 0,
+         next_unlock_type = 'lesson', status = 'in_progress',
+         started_at = COALESCE(started_at, NOW(3)), last_active_at = NOW(3)
+       WHERE id = ?`,
+      [unitId, lessonId, progressId],
+    );
+  }
+
   async updateCardSort(progressId: number, currentCardSort: number, nextUnlockType: string): Promise<void> {
     await this.pool.execute(
       `UPDATE progress SET current_card_sort = ?, next_unlock_type = ? WHERE id = ?`,

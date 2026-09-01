@@ -1,10 +1,13 @@
 import { useEffect } from 'react';
 import { Outlet, Link } from 'react-router-dom';
 import { useThemeStore } from '@/store/themeStore';
+import { useLearnContextStore } from '@/store/learnContextStore';
 import { StudentNav } from './StudentNav';
 
 export default function StudentLayout() {
   const { mode, setMode, autoToggleNightMode } = useThemeStore();
+  const { subjectName, gradeName, publisher } = useLearnContextStore();
+  const contextLabel = [gradeName, subjectName, publisher].filter(Boolean).join(' · ');
 
   useEffect(() => {
     autoToggleNightMode();
@@ -25,7 +28,9 @@ export default function StudentLayout() {
           {/* 顶部全局栏 */}
           <header className="h-16 bg-[var(--bg-card)] border-b border-[var(--bg-subtle)] flex items-center justify-between px-6 shrink-0">
             <div className="flex items-center gap-4">
-              <span className="text-sm font-medium text-[var(--text-secondary)]">三年级 · 数学 人教版</span>
+              {contextLabel && (
+                <span className="text-sm font-medium text-[var(--text-secondary)]">{contextLabel}</span>
+              )}
               <Link to="/student/subjects" className="text-xs text-[var(--info)] hover:underline">
                 切换学科
               </Link>

@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v1.0
+> 版本：v2.1
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -171,7 +171,7 @@
 |---|---|---|---|
 | GET | `/api/content/subjects` | 学科列表 | MVP |
 | GET | `/api/content/subjects/{subjectId}` | 学科详情 | MVP |
-| GET | `/api/content/versions` | 教材版本列表（可按学科/学段过滤） | MVP |
+| GET | `/api/content/versions` | 教材版本列表（可按学科/学段过滤；响应含 `edition` 版次标记，空=2012 课标旧版） | MVP |
 | GET | `/api/content/versions/{versionId}` | 版本详情 | MVP |
 | GET | `/api/content/versions/{versionId}/units` | 单元列表 | MVP |
 | GET | `/api/content/versions/{versionId}/units/{unitId}` | 单元详情 | MVP |
@@ -293,6 +293,8 @@
 | POST | `/api/parent/students` | 创建学生子账号（姓名/用户名/初始密码/年龄/年级；`school_level` 后端按年级推导；连带建 `student_settings`） | MVP |
 | PATCH | `/api/parent/students/{studentId}/reset-password` | 重置该学生登录密码（6-32 位） | MVP |
 | PATCH | `/api/parent/students/{studentId}/status` | 停用/启用该学生（`isActive`；停用后登录被拒，数据保留，不提供删除） | MVP |
+| GET | `/api/parent/students/{studentId}/subject-configs` | 按学科教材配置视图：每学科当前配置（`configured`/`started`/`gradeCode`/`term`/`textbookVersionId`/`publisher`/`edition`，未配置学科为按学生年级推导的默认值，不落库）+ 可选项（有数据的年级 → 每年级可用版本含册别，版本按默认规则排序） | MVP |
+| PUT | `/api/parent/students/{studentId}/subject-configs/{subjectId}` | 写入/切换该学科教材配置：`{ gradeCode, term, textbookVersionId? }`；versionId 缺省按默认规则选（同学段 edition 非空优先、id 大者优先）；已开始学习且版本/册别变化时**重置该学科学习状态**并返回 `reset: true`（错题/作业记录保留在库，不再展示/不阻塞门禁） | MVP |
 | GET | `/api/parent/dashboard` | 家长仪表盘：按学科聚合的进度、正确率、薄弱点、异常预警 | MVP |
 | GET | `/api/parent/students/{studentId}/reports` | 学情报告列表（可按学科筛选） | MVP |
 | GET | `/api/parent/students/{studentId}/reports/{reportId}` | 单份报告详情 | MVP |
@@ -347,7 +349,7 @@
 | POST | `/api/practice/discuss-card` | 卡片级「思辨答疑」（苏格拉底讨论）。学生在非 practice 知识卡片上点「思辨答疑」调用。与 `/practice/discuss` 区别：scope=整张卡片（非某道题），**不入错题本**（讨论知识非题目）；服务端按 `(student_id, card_id, track='mainline')` find-or-create mainline 对话，重开同一卡片自动回到同一讨论线。前端据 `dialogueId` 走 `POST /api/ai/tutor/stream`（mode=mainline）做苏格拉底讨论。请求体：`{cardId, lessonId, subjectId}`；响应：`{dialogueId}`。 | MVP |
 | GET | `/api/practice/results?cardId={cardId}` | 取该练习卡持久化判题结果（对/错 + analysis 题解），驱动 ✓/✗ 跨设备/刷新回显。响应体：`[{questionN, questionText, studentAnswer, isCorrect, method, analysis, errorType}]`。 | MVP |
 | DELETE | `/api/practice/results?cardId={cardId}` 或 `?lessonId={lessonId}` | 重置练习记录：`cardId` 清单卡、`lessonId` 清本课全部练习卡（二者互斥，同传/都缺 400）。只删 `practice_results`，不动 `main_error_books`。 | MVP |
-| GET | `/api/practice/uncleared-errors?subjectId={subjectId}` | 查询学生某学科**所有**未清零课堂练习错题（`main_error_books` source='practice' + is_cleared=0），用于「错题清零」门禁。以 `main_error_books` 为唯一真相源，LEFT JOIN `questions` 补全题面，**不再依赖 `practice_results`**（避免两表数据不一致漏检）。进每节课前清空错题本里所有 practice 未清题（不限课时，兜住历史/跳过/写入失败的错题）。同一 `(cardId, questionN)` 重复记录去重保留最早一条。响应：`{errors: [{errorBookId, cardId, questionN, questionText, questionId}]}`，计数 = `errors.length`。 | MVP |
+| GET | `/api/practice/uncleared-errors?subjectId={subjectId}` | 查询学生某学科**所有**未清零课堂练习错题（`main_error_books` source='practice' + is_cleared=0），用于「错题清零」门禁。以 `main_error_books` 为唯一真相源，LEFT JOIN `questions` 补全题面，**不再依赖 `practice_results`**（避免两表数据不一致漏检）。进每节课前清空错题本里所有 practice 未清题（不限课时，兜住历史/跳过/写入失败的错题）。同一 `(cardId, questionN)` 重复记录去重保留最早一条。**按当前教材版本过滤**（`progress.textbook_version_id`，经 cards→lessons→units→semesters 链路；家长切换教材后旧版错题不计入门禁）。响应：`{errors: [{errorBookId, cardId, questionN, questionText, questionId}]}`，计数 = `errors.length`。 | MVP |
 | POST | `/api/practice/bump-error-levels` | 错题清零后仍有错误的题，`main_error_books.level` +1 标记未掌握。请求体：`{errorBookIds: number[]}`。 | MVP |
 
 ### 4.17 Admin — `/api/admin`
@@ -1185,6 +1187,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.1 | 2026-09-01 | 家长端按学科教材配置：新增 `GET/PUT /api/parent/students/{studentId}/subject-configs(/{subjectId})`（每学科 年级/册别/版本 配置，`progress.textbook_version_id + current_semester_id` 为事实源；已开始学习且切换 → 重置该学科学习状态并返回 `reset: true`）；`GET /api/content/versions` 响应补 `edition` 字段；`GET /api/practice/uncleared-errors` 按当前教材版本过滤（家长切换教材后旧版错题不计入清零门禁）；星链图版本回退规则改为「同学段 edition 非空优先、id 降序」、册别回退按学生年级匹配 `semesters.grade`。前端新增 `/parent/students/:id/config` 配置页 + 学生卡片「学习配置」入口；StudentLayout 顶栏硬编码「三年级·数学 人教版」改为星图真实数据。 |
 | v2.0 | 2026-08-18 | 管理员中枢：新增 Admin 分组（§4.17）——模型池 CRUD + 启停（`llm_models`/`llm_routes` 落库为运行时真源，`ModelConfigRegistry` 保存即 reload 生效，支持 `openai_compatible` 自定义 OpenAI 兼容模型，apiKey AES-256-GCM 加密落库 + 打码返回）；场景路由表 GET/PUT（事务替换）+ `validate-connection` 探活；家长/学生列表搜索 + 封禁/解封（`BanRegistry` 进程内即时生效，重启从 DB 重建，封家长连带封其名下学生）；站内消息中心（`parent_messages` 广播 + `message_reads` 已读，admin 发送/撤回 + 家长侧列表/未读/标已读）；管理员 AI 聊天（独立 `admin_dialogues`/`admin_messages` 表，无 K12 学习边界，SSE 流式 `POST /api/admin/chat/stream`）；总览 dashboard；管理员改自己密码。错误码实现注补 1009=连通性测试失败（§2.4）。 |
 | v1.9 | 2026-08-14 | 三角色账号体系：`POST /api/auth/login` 改为三角色统一登录（admins->parents->students 顺序查询，JWT 加 `role: admin\|parent\|student`）；`POST /api/auth/register` 家长注册（注册即登录），学生自主注册下线；新增 `GET/POST /api/parent/students` + `PATCH .../reset-password` + `PATCH .../status`（家长管理学生子账号：建/列表/重置密码/停用启用，归属校验 1005）；practice/ai/conversations/progress 学生接口全部套 `RolesGuard('student')` 防越权；登录限流 10 次/分/IP（1008）；DB 新增 `admins` 表 + `parents`/`students` `is_active` 字段（v1.7）；seed 脚本 `seed-admin.ts`。 |
 | v1.0 | 2026-06-26 | 初始版本，覆盖 MVP 核心接口与数据流 |

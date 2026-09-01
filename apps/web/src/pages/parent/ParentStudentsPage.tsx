@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, Modal, toast } from '@/components/base';
 import {
   listMyStudents,
@@ -16,6 +17,7 @@ const GRADES = [
 const emptyForm = { name: '', username: '', password: '', age: '', grade: '' };
 
 export default function ParentStudentsPage() {
+  const navigate = useNavigate();
   const [students, setStudents] = useState<MyStudentItem[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -211,13 +213,18 @@ export default function ParentStudentsPage() {
                 <span>{s.age ? `${s.age}岁 / ` : ''}{s.grade ?? '-'}</span>
               </div>
             </div>
-            <div className="flex gap-2 mt-5">
-              <Button variant="secondary" size="sm" className="flex-1" onClick={() => { setResetTarget(s); setNewPassword(''); setError(''); }}>
+            <div className="flex flex-col gap-2 mt-5">
+              <Button variant="secondary" size="sm" onClick={() => { setResetTarget(s); setNewPassword(''); setError(''); }}>
                 重置密码
               </Button>
-              <Button variant={s.isActive ? 'ghost' : 'primary'} size="sm" className="flex-1" onClick={() => handleToggleStatus(s)}>
-                {s.isActive ? '停用账号' : '启用账号'}
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" className="flex-1" onClick={() => handleToggleStatus(s)}>
+                  {s.isActive ? '停用账号' : '启用账号'}
+                </Button>
+                <Button variant="primary" size="sm" className="flex-1" onClick={() => navigate(`/parent/students/${s.id}/config`)}>
+                  学习配置
+                </Button>
+              </div>
             </div>
           </div>
         ))}

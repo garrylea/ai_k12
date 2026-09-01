@@ -8,6 +8,7 @@ export interface TextbookVersionRow extends RowDataPacket {
   code: string;
   grade_band: string;
   publisher: string | null;
+  edition: string;
   is_active: number;
 }
 
@@ -18,6 +19,7 @@ export interface TextbookVersion {
   code: string;
   gradeBand: string;
   publisher: string | null;
+  edition: string;
   isActive: boolean;
 }
 
@@ -49,6 +51,7 @@ export class TextbookVersionsRepository {
       code: row.code,
       gradeBand: row.grade_band,
       publisher: row.publisher,
+      edition: row.edition ?? '',
       isActive: row.is_active === 1,
     };
   }

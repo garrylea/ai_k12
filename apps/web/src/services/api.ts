@@ -114,6 +114,63 @@ export function setStudentStatus(id: number, isActive: boolean): Promise<null> {
   });
 }
 
+// --- Parent: student subject configs（按学科配置教材：年级/册别/版本） ---
+
+export interface SubjectConfigVersionOption {
+  id: number;
+  name: string;
+  publisher: string | null;
+  edition: string;
+  gradeBand: string;
+  terms: string[];
+}
+
+export interface SubjectConfigGradeOption {
+  code: string;
+  label: string;
+  versions: SubjectConfigVersionOption[];
+}
+
+export interface SubjectConfigOption {
+  subjectId: number;
+  subjectName: string;
+  grades: SubjectConfigGradeOption[];
+}
+
+export interface SubjectConfigState {
+  subjectId: number;
+  subjectName: string;
+  configured: boolean;
+  started: boolean;
+  gradeCode: string | null;
+  term: string | null;
+  textbookVersionId: number | null;
+  publisher: string | null;
+  edition: string;
+}
+
+export interface SubjectConfigsResponse {
+  studentId: number;
+  studentName: string | null;
+  subjects: SubjectConfigState[];
+  options: SubjectConfigOption[];
+}
+
+export function getStudentSubjectConfigs(studentId: number): Promise<SubjectConfigsResponse> {
+  return fetchApi<SubjectConfigsResponse>(`/parent/students/${studentId}/subject-configs`);
+}
+
+export function updateStudentSubjectConfig(
+  studentId: number,
+  subjectId: number,
+  req: { gradeCode: string; term: 'first' | 'second'; textbookVersionId?: number },
+): Promise<{ subjectId: number; textbookVersionId: number; semesterId: number; reset: boolean }> {
+  return fetchApi(`/parent/students/${studentId}/subject-configs/${subjectId}`, {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  });
+}
+
 // --- Content ---
 
 export interface SubjectItem {
@@ -133,6 +190,7 @@ export interface VersionItem {
   name: string;
   code: string;
   publisher: string | null;
+  edition: string;
 }
 
 export function fetchVersions(subjectId: number): Promise<VersionItem[]> {
