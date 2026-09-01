@@ -84,6 +84,29 @@ def test_solo_image_card():
     assert cards[0].image_char_cost == 720
 
 
+def test_solo_image_stays_in_document_order():
+    # page_008 场景：章标题 + 正文段落 + 末尾大图（cost > 700 触发独占卡）。
+    # 独占图卡必须按文档顺序排在最后（设计文档 §5.3 规则 3：图片保持原始位置），
+    # 不能前置到第一张——前置会导致 LLM 标注时该图卡先于章标题出现、
+    # lesson_id 被标为 null 而在入库时被丢弃。
+    text = (
+        "# 第二十五章 一元二次方程\n\n"
+        "方程是现实问题中含有未知数的等量关系的数学表达。\n\n"
+        "设雕像腰部以下的身长为 x 米，根据等量关系列出方程。\n\n"
+        "![](images/big.jpg)"
+    )
+    img = make_img(864, pos=text.index("![](images/big.jpg)"))
+    cards = split_page(Path("page_008.md"), text, [img])
+    assert len(cards) == 2
+    # 第一张是文字卡（含章标题），不含图
+    assert "第二十五章" in cards[0].content
+    assert cards[0].image_char_cost == 0
+    # 最后一张是纯图独占卡（不压缩，cost 保持原值）
+    assert cards[-1].content == "![](images/test.jpg)"
+    assert cards[-1].raw_text_char_count == 0
+    assert cards[-1].image_char_cost == 864
+
+
 def test_current_heading_tracks_markdown_heading():
     assert _current_heading("## 练习") == "练习"
     assert _current_heading("### 1.2 因式分解") == "1.2 因式分解"

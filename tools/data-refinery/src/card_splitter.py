@@ -253,27 +253,6 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
     page_label = _extract_page_number(md_path)
     bundles = _make_bundles(text, images)
 
-    # 先处理大图独占卡（单图 cost > 700）
-    solo_fragments: list[CardFragment] = []
-    remaining_bundles: list[_Bundle] = []
-    consumed_positions: set[int] = set()
-
-    for bundle in bundles:
-        if len(bundle.images) == 1 and bundle.text_chars < 50 and bundle.image_cost > _TOTAL_LIMIT:
-            img = bundle.images[0]
-            consumed_positions.add(img.position_in_text)
-            solo_fragments.append(CardFragment(
-                sort_order=0,
-                content=f"![]({img.ref_path})",
-                images=[img],
-                raw_text_char_count=0,
-                image_char_cost=img.char_cost,
-                total_char_cost=img.char_cost,
-                textbook_page=page_label,
-            ))
-        else:
-            remaining_bundles.append(bundle)
-
     # 贪心合并 bundle 为卡片
     fragments: list[CardFragment] = []
     current_texts: list[str] = []
@@ -287,14 +266,13 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
         if not current_texts:
             return
         content_text = "\n\n".join(current_texts)
-        frag_images = [img for img in current_images if img.position_in_text not in consumed_positions]
         fragments.append(CardFragment(
             sort_order=0,
             content=content_text,
-            images=frag_images,
+            images=list(current_images),
             raw_text_char_count=current_text_chars,
-            image_char_cost=sum(img.char_cost for img in frag_images),
-            total_char_cost=current_text_chars + sum(img.char_cost for img in frag_images),
+            image_char_cost=sum(img.char_cost for img in current_images),
+            total_char_cost=current_text_chars + sum(img.char_cost for img in current_images),
             textbook_page=page_label,
         ))
         current_texts = []
@@ -306,8 +284,25 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
     last_heading: str | None = None
 
     i = 0
-    while i < len(remaining_bundles):
-        bundle = remaining_bundles[i]
+    while i < len(bundles):
+        bundle = bundles[i]
+
+        # 大图独占卡（单图 cost > 700）：原地输出，保持文档顺序
+        # （设计文档 §5.3 规则 3：图片保持在其原始位置）
+        if len(bundle.images) == 1 and bundle.text_chars < 50 and bundle.image_cost > _TOTAL_LIMIT:
+            _close_card()
+            img = bundle.images[0]
+            fragments.append(CardFragment(
+                sort_order=0,
+                content=f"![]({img.ref_path})",
+                images=[img],
+                raw_text_char_count=0,
+                image_char_cost=img.char_cost,
+                total_char_cost=img.char_cost,
+                textbook_page=page_label,
+            ))
+            i += 1
+            continue
 
         # 跨 heading 边界封卡（当前卡已有正文时）：
         # 孤立标题（无正文）不封卡，与后续内容合并，避免产生只有标题的空卡
@@ -346,7 +341,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
                     current_has_body = True
                     # 剩余部分作为新 bundle 替换当前位置，不递增 i
                     rest_chars = _count_text_chars(rest)
-                    remaining_bundles[i] = _Bundle(
+                    bundles[i] = _Bundle(
                         text=rest, images=bundle.images,
                         text_chars=rest_chars, image_cost=bundle.image_cost,
                         heading=bundle.heading,
@@ -414,9 +409,8 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
 
     _close_card()
 
-    # 合并 solo fragments 和 merged fragments，统一编号
-    all_fragments = solo_fragments + fragments
-    for i, frag in enumerate(all_fragments, 1):
+    # 统一编号（solo 图卡已在主循环内按文档顺序原地输出）
+    for i, frag in enumerate(fragments, 1):
         frag.sort_order = i
 
-    return all_fragments
+    return fragments
