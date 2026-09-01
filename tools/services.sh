@@ -3,12 +3,18 @@
 # K12 智学系统 - 服务管理脚本（部署完成后日常使用）
 #
 # 前提：已通过 tools/deploy.sh 完成部署（依赖 apps/server/dist、apps/web/dist、
-# apps/server/.env、MySQL 已初始化）。本脚本不构建、不安装，只管进程生命周期。
+# apps/server/.env、MySQL 已初始化）。本脚本不安装依赖（依赖变更请重跑 deploy.sh）。
+#
+# start/restart 默认先重新构建（server tsc + 补拷 ai-core yaml/prompts、
+# web tsc+vite build）再启服务——改完代码 restart 即生效，不会跑旧 dist。
+# 构建失败则中止（restart 时服务保持运行中的旧进程不动）。
+# 纯重启不想等构建（如只改了 .env）：--no-build 或环境变量 SERVICES_NO_BUILD=1。
 #
 # 用法：
-#   bash tools/services.sh start      # 启动 server + web（已在运行则跳过）
+#   bash tools/services.sh start      # 构建 + 启动 server + web（已在运行则跳过）
 #   bash tools/services.sh stop       # 停止 server + web（未运行则跳过）
-#   bash tools/services.sh restart    # 重启
+#   bash tools/services.sh restart    # 构建 + 重启（构建失败不动运行中的服务）
+#   bash tools/services.sh build      # 只构建不启动
 #   bash tools/services.sh status     # 查看运行状态与健康检查
 #   bash tools/services.sh log server # 跟踪 server 日志（log web 同理）
 #
@@ -150,7 +156,29 @@ wait_healthy() { # $1=URL $2=名称 $3=超时秒
   return 1
 }
 
-cmd_start() {
+# ---------- 构建 ----------
+# 与 deploy.sh build_server 同款：tsc 不拷贝 ai-core 的 yaml/prompts 资产，
+# 构建后必须补拷，否则 ModelRouter/prompt 模板读不到（CLAUDE.md 已知限制）。
+cmd_build() {
+  log '构建 server（tsc + 补拷 ai-core yaml/prompts）...'
+  ( cd "$SERVER_DIR" && npm run build ) || die 'server 构建失败'
+  mkdir -p "$SERVER_DIR/dist/ai-core"
+  cp "$SERVER_DIR"/src/ai-core/*.yaml "$SERVER_DIR/dist/ai-core/"
+  cp -R "$SERVER_DIR/src/ai-core/prompts" "$SERVER_DIR/dist/ai-core/"
+  log '构建 web（tsc -b + vite build）...'
+  ( cd "$WEB_DIR" && npm run build ) || die 'web 构建失败'
+  log '构建完成'
+}
+
+_BUILT=0
+maybe_build() {
+  [ "$NO_BUILD" = 1 ] && return 0
+  [ "$_BUILT" = 1 ] && return 0
+  cmd_build
+  _BUILT=1
+}
+
+do_start() {
   start_server
   start_web
   log '健康检查...'
@@ -169,15 +197,22 @@ cmd_start() {
   echo "  Server: http://localhost:${SERVER_PORT}"
 }
 
+cmd_start() {
+  maybe_build
+  do_start
+}
+
 cmd_stop() {
   stop_one 'web' "$WEB_PID_FILE" "$WEB_PORT"
   stop_one 'server' "$SERVER_PID_FILE" "$SERVER_PORT"
 }
 
 cmd_restart() {
+  # 先构建后停止：构建失败时运行中的旧进程保持不动，不出现服务空窗
+  maybe_build
   cmd_stop
   sleep 1
-  cmd_start
+  do_start
 }
 
 cmd_status() {
@@ -207,13 +242,20 @@ cmd_log() { # $1=server|web
 }
 
 usage() {
-  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
 }
+
+# --no-build 逃生口：纯重启（只改了 .env / 崩溃恢复），跳过构建
+NO_BUILD="${SERVICES_NO_BUILD:-0}"
+for _arg in "$@"; do
+  [ "$_arg" = "--no-build" ] && NO_BUILD=1
+done
 
 case "${1:-}" in
   start)   cmd_start ;;
   stop)    cmd_stop ;;
   restart) cmd_restart ;;
+  build)   cmd_build ;;
   status)  cmd_status ;;
   log)     cmd_log "${2:-}" ;;
   -h|--help|'') usage ;;
