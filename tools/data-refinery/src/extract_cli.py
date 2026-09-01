@@ -84,6 +84,18 @@ def _load_prompt(kind: str) -> str:
     return prompt_path.read_text(encoding="utf-8")
 
 
+def normalize_fullwidth_parens(text: str) -> str:
+    """全角括号统一为半角（OCR 原文同一页混用 （1）/(1)，题号括号展示不一致）。
+
+    只替换 （）→()：1:1 字符替换，长度不变，image_scan 产出的
+    position_in_text 偏移量仍有效；content_hash 的 NFKC 归一对两者等价，
+    不影响 questions 去重。
+    其余全角标点（。，；！？）不动——。无 NFKC 映射会改变 content_hash；
+    。！？；是 card_splitter 的句末切分点，归一半角会破坏长段落切分。
+    """
+    return text.replace("（", "(").replace("）", ")")
+
+
 def _match_source(source: MarkdownSource, filter_value: str) -> bool:
     if filter_value == "all":
         return True
@@ -456,6 +468,10 @@ def main(argv=None):
 
             # ② image_scan：获取图片尺寸 + 折算字数（小图标自动舍弃，text 已清洗）
             images, text = scan_page(source.md_path)
+
+            # ②.5 全角括号统一半角（在 split_page 前，下游 splitter/labeler/
+            # publish/db_loader 全部吃到统一文本；长度不变，图片偏移仍有效）
+            text = normalize_fullwidth_parens(text)
 
             # ③ card_splitter：拆分卡片
             cards = split_page(source.md_path, text, images)

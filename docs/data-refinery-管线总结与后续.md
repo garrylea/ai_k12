@@ -41,6 +41,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 ### extract（教材 card）
 - **lesson_id 跨页继承**：LLM 每张 card 输出小节/章标题原文（标识），续页/续卡片填 `null`；CLI 维护 per-book running 状态继承 null（`extract_cli.py` 的 `book_lesson`）。**只有编号标题**（`N.M`/`N.M.K`/`第N章`）开新课；练习/习题/侧栏标题填 null 继承。章综述归该章"第 0 节"（lesson sort_order=0）。
 - **前置内容不抽取**：封面/书名/编委/版权/前言/目录（条目带页码）输出 `{items:[]}`，CLI 不写 jsonl 但记 checkpoint。
+- **全角括号统一半角**（2026-09-01）：extract_cli 读页 md 后（`scan_page` 之后、`split_page` 之前）做 `normalize_fullwidth_parens`——全角 `（）`→半角 `()`（OCR 原文同页混用 `（1）`/`(1)` 导致题号括号展示不一致）。1:1 字符替换不改长度（图片 `position_in_text` 偏移仍有效）；NFKC 对两者等价（`content_hash` 去重不受影响）。**其余全角标点（。，；！？）不动**：`。` U+3002 无 NFKC 映射会改变 content_hash；`。！？；` 是 card_splitter 的句末切分点，归一半角会破坏长段落切分。
 - **断点续传**：跳过的页从其 jsonl 末条 lesson_id 回填 `book_lesson`（`_last_lesson_id`）。
 - `--file` 单页不携带跨页状态（续页 card 的 lesson_id 可能为 null）。
 

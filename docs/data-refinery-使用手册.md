@@ -342,7 +342,8 @@ python src/extract_cli.py --dry-run
 | `--dry-run` | flag | 否 | 只打印不提取 |
 
 **输出**：`output/extracted/{学科}/…/page_001.jsonl …`  
-**TOC 模式额外输出**：`output/extracted/diff_report.json`（`--toc` 单文件模式的差异报告；`--toc-dir` 模式不写此文件，由 toc_merge 的 merge_report 取代）
+**TOC 模式额外输出**：`output/extracted/diff_report.json`（`--toc` 单文件模式的差异报告；`--toc-dir` 模式不写此文件，由 toc_merge 的 merge_report 取代）  
+**文本归一**：读取每页 MD 后自动把全角括号 `（）` 统一为半角 `()`（OCR 原文同页混用导致题号括号展示不一致；只动括号，`。，；！？` 等其它全角标点保留——详见管线总结 §3 extract 约定）。已抽取的旧 JSONL 不会自动重做，需 `--reconvert` 重抽才吃到归一。
 
 ### 4.4 publish_cli — 图片物化与路径改写
 

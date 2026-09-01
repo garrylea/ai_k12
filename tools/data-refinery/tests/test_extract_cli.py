@@ -199,6 +199,41 @@ class TestMatchSource:
         assert _match_source(s, "smartedu") is False
 
 
+class TestNormalizeFullwidthParens:
+    """normalize_fullwidth_parens：全角括号统一为半角，其余全角标点不动。
+
+    背景：OCR 原文同一页混用 （1）/(1)，题号括号展示不一致。
+    只做 1:1 字符替换，长度不变 → image_scan 的 position_in_text 仍有效。
+    """
+
+    def test_question_number_fullwidth_to_halfwidth(self):
+        from extract_cli import normalize_fullwidth_parens
+        assert normalize_fullwidth_parens("（1）一个圆的面积是 $2\\pi$ ，求半径 $r$") == \
+            "(1)一个圆的面积是 $2\\pi$ ，求半径 $r$"
+
+    def test_mixed_parens_same_page(self):
+        from extract_cli import normalize_fullwidth_parens
+        assert normalize_fullwidth_parens("（（1））") == "((1))"
+
+    def test_other_fullwidth_punct_untouched(self):
+        # 。，；必须保留：。无 NFKC 映射会影响 content_hash；
+        # 。！？；是 card_splitter 的句末切分点，归一会破坏长段落切分
+        from extract_cli import normalize_fullwidth_parens
+        assert normalize_fullwidth_parens("直田积（矩形面积）八百六十四步，问阔。") == \
+            "直田积(矩形面积)八百六十四步，问阔。"
+
+    def test_length_preserved(self):
+        # 1:1 替换不改长度（图片 position_in_text 依赖偏移量）
+        from extract_cli import normalize_fullwidth_parens
+        s = "（1）（2）（3）x（y）"
+        assert len(normalize_fullwidth_parens(s)) == len(s)
+
+    def test_no_parens_unchanged(self):
+        from extract_cli import normalize_fullwidth_parens
+        s = "25.1 一元二次方程的概念：$x^{2} + x - 12 = 0$"
+        assert normalize_fullwidth_parens(s) == s
+
+
 class TestLevenshtein:
     def test_identical(self):
         from extract_cli import _levenshtein
