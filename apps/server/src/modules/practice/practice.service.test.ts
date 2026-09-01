@@ -28,6 +28,9 @@ const mk = (overrides: any = {}) => ({
     deleteByStudentCard: vi.fn().mockResolvedValue(undefined),
     deleteByStudentLesson: vi.fn().mockResolvedValue(undefined),
   },
+  progressRepo: {
+    findByStudentAndSubject: vi.fn().mockResolvedValue(null),
+  },
   contentService: {
     getLessonCards: vi.fn().mockResolvedValue({ cards: [] }),
   },
@@ -36,7 +39,7 @@ const mk = (overrides: any = {}) => ({
 
 /** 用 mk() 构造的依赖实例化 PracticeService。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -565,6 +568,62 @@ describe('PracticeService.getUnclearedErrorDetails', () => {
     const svc = mkSvc(deps);
     const r = await svc.getUnclearedErrorDetails(1, 1);
     expect(r.errors).toEqual([]);
+  });
+
+  it('有 progress 时把 textbook_version_id 传给门禁查询（版本隔离）；无 progress 传 null', async () => {
+    const deps = mk({
+      progressRepo: { findByStudentAndSubject: vi.fn().mockResolvedValue({ textbookVersionId: 10, currentSemesterId: 88, status: 'in_progress', currentLessonId: 5 }) },
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await svc.getUnclearedErrorDetails(1, 1);
+    expect(deps.mainErrorRepo.findUnclearedPracticeByStudentSubject).toHaveBeenCalledWith(1, 1, 10);
+
+    const deps2 = mk({
+      progressRepo: { findByStudentAndSubject: vi.fn().mockResolvedValue(null) },
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]),
+      },
+    });
+    await mkSvc(deps2).getUnclearedErrorDetails(1, 1);
+    expect(deps2.mainErrorRepo.findUnclearedPracticeByStudentSubject).toHaveBeenCalledWith(1, 1, null);
+  });
+
+  it('传 currentLessonId 时只返回当前课之前的错题（本课/后续课排除，孤儿行保留）；不传不过滤', async () => {
+    const rows = [
+      { id: 1, source_ref_id: 10, question_id: null, question_n: '1', questionText: '前一课错题', lesson_id: 180 },
+      { id: 2, source_ref_id: 11, question_id: null, question_n: '2', questionText: '本课错题', lesson_id: 181 },
+      { id: 3, source_ref_id: 12, question_id: null, question_n: '3', questionText: '后续课错题', lesson_id: 182 },
+      { id: 4, source_ref_id: null, question_id: null, question_n: null, questionText: '孤儿历史行', lesson_id: null },
+    ];
+    const deps = mk({
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue(rows),
+      },
+    });
+    const svc = mkSvc(deps);
+
+    // 当前课 = 181：只保留 180（严格之前）与 null（孤儿历史行）
+    const r = await svc.getUnclearedErrorDetails(1, 1, 181);
+    expect(r.errors.map(e => e.errorBookId)).toEqual([1, 4]);
+
+    // 不传 currentLessonId：原行为，全部返回
+    const r2 = await svc.getUnclearedErrorDetails(1, 1);
+    expect(r2.errors.map(e => e.errorBookId)).toEqual([1, 2, 3, 4]);
   });
 });
 

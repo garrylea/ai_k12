@@ -90,9 +90,17 @@ export class PracticeController {
   @Get('uncleared-errors')
   async unclearedErrors(
     @Query('subjectId', ParseIntPipe) subjectId: number,
+    @Query('lessonId') lessonIdStr: string | undefined,
     @CurrentUser() user: JwtUser,
   ) {
-    return this.practiceService.getUnclearedErrorDetails(user.sub, subjectId);
+    // lessonId 可选：传入时只返回「当前课之前」的错题（本课刚产生的错题不触发清零门禁）
+    const lessonId = lessonIdStr !== undefined && lessonIdStr !== ''
+      ? parseInt(lessonIdStr, 10)
+      : null;
+    if (lessonIdStr !== undefined && lessonIdStr !== '' && Number.isNaN(lessonId)) {
+      throw new BadRequestException('lessonId 非法');
+    }
+    return this.practiceService.getUnclearedErrorDetails(user.sub, subjectId, lessonId);
   }
 
   @Post('bump-error-levels')

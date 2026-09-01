@@ -141,7 +141,20 @@ describe('MainErrorBooksRepository', () => {
     expect(sql).toContain('COALESCE(q.content, meb.wrong_answer_text)');
     expect(sql).toContain('LEFT JOIN cards c ON c.id = meb.source_ref_id');
     expect(sql).toContain('c.lesson_id AS lesson_id');
+    expect(sql).not.toContain('textbook_version_id');
     expect(params).toEqual([2, 1]);
+  });
+
+  it('findUnclearedPracticeByStudentSubject 带版本过滤：JOIN lessons/units/semesters 并按 textbook_version_id 过滤', async () => {
+    const pool = mockPool([]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    await repo.findUnclearedPracticeByStudentSubject(2, 1, 10);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('LEFT JOIN lessons l ON l.id = c.lesson_id');
+    expect(sql).toContain('LEFT JOIN units u ON u.id = l.unit_id');
+    expect(sql).toContain('LEFT JOIN semesters s ON s.id = u.semester_id');
+    expect(sql).toContain('AND s.textbook_version_id = ?');
+    expect(params).toEqual([2, 1, 10]);
   });
 
   it('updateDialogueId 把对话 id 回写到错题本记录', async () => {

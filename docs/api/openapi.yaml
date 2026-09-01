@@ -3302,10 +3302,13 @@ paths:
       tags: [Practice]
       summary: 查询学生某学科所有未清零课堂练习错题
       description: >-
-        用于「错题清零」门禁：进每节课前清空错题本里所有 source='practice' + is_cleared=0
-        的未清题（不限课时，兜住历史/跳过/写入失败的错题）。以 main_error_books 为唯一真相源，
+        用于「错题清零」门禁：进每节课前清空错题本里 source='practice' + is_cleared=0
+        的未清题（兜住历史/跳过/写入失败的错题）。以 main_error_books 为唯一真相源，
         LEFT JOIN questions 补全题面，不再依赖 practice_results。同一 (cardId, questionN)
         的重复记录去重保留最早一条。计数 = errors.length，前端据此渲染阶段栏与清零界面。
+        传 lessonId 时只返回「当前课之前」的错题（lesson_id < lessonId，星图同款 id
+        数值序）：本课练习刚产生的错题不触发清零门禁，留待进入下一课时再清；
+        不传则不限课时。lesson_id 为 null 的孤儿历史行保守保留。
       operationId: getUnclearedErrors
       security: [{ bearerAuth: [] }]
       parameters:
@@ -3315,6 +3318,13 @@ paths:
           schema:
             type: integer
           description: 学科 id
+        - name: lessonId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 当前课 id。传入时只返回该课之前（lesson_id < lessonId）的未清错题；
+            本课及后续课的错题不触发清零门禁。省略时返回全部未清错题。
       responses:
         '200':
           description: 未清零错题列表

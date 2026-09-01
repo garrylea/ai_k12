@@ -297,9 +297,12 @@ export interface UnclearedErrorsResult {
   errors: PreviousErrorDetail[];
 }
 
-/** 取学生某学科所有未清 practice 错题（计数 = errors.length，与详情同源）。 */
-export function getUnclearedErrors(subjectId: number): Promise<UnclearedErrorsResult> {
-  return fetchApi<UnclearedErrorsResult>(`/practice/uncleared-errors?subjectId=${subjectId}`);
+/** 取学生某学科所有未清 practice 错题（计数 = errors.length，与详情同源）。
+ * 传 lessonId 时只返回「当前课之前」的错题——本课练习刚产生的错题不触发清零门禁。 */
+export function getUnclearedErrors(subjectId: number, lessonId?: number | string): Promise<UnclearedErrorsResult> {
+  const lessonQuery = lessonId !== undefined && lessonId !== null && lessonId !== ''
+    ? `&lessonId=${lessonId}` : '';
+  return fetchApi<UnclearedErrorsResult>(`/practice/uncleared-errors?subjectId=${subjectId}${lessonQuery}`);
 }
 
 export function bumpErrorLevels(errorBookIds: number[]): Promise<void> {

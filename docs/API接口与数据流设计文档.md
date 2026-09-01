@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v2.1
+> 版本：v2.2
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -349,7 +349,7 @@
 | POST | `/api/practice/discuss-card` | 卡片级「思辨答疑」（苏格拉底讨论）。学生在非 practice 知识卡片上点「思辨答疑」调用。与 `/practice/discuss` 区别：scope=整张卡片（非某道题），**不入错题本**（讨论知识非题目）；服务端按 `(student_id, card_id, track='mainline')` find-or-create mainline 对话，重开同一卡片自动回到同一讨论线。前端据 `dialogueId` 走 `POST /api/ai/tutor/stream`（mode=mainline）做苏格拉底讨论。请求体：`{cardId, lessonId, subjectId}`；响应：`{dialogueId}`。 | MVP |
 | GET | `/api/practice/results?cardId={cardId}` | 取该练习卡持久化判题结果（对/错 + analysis 题解），驱动 ✓/✗ 跨设备/刷新回显。响应体：`[{questionN, questionText, studentAnswer, isCorrect, method, analysis, errorType}]`。 | MVP |
 | DELETE | `/api/practice/results?cardId={cardId}` 或 `?lessonId={lessonId}` | 重置练习记录：`cardId` 清单卡、`lessonId` 清本课全部练习卡（二者互斥，同传/都缺 400）。只删 `practice_results`，不动 `main_error_books`。 | MVP |
-| GET | `/api/practice/uncleared-errors?subjectId={subjectId}` | 查询学生某学科**所有**未清零课堂练习错题（`main_error_books` source='practice' + is_cleared=0），用于「错题清零」门禁。以 `main_error_books` 为唯一真相源，LEFT JOIN `questions` 补全题面，**不再依赖 `practice_results`**（避免两表数据不一致漏检）。进每节课前清空错题本里所有 practice 未清题（不限课时，兜住历史/跳过/写入失败的错题）。同一 `(cardId, questionN)` 重复记录去重保留最早一条。**按当前教材版本过滤**（`progress.textbook_version_id`，经 cards→lessons→units→semesters 链路；家长切换教材后旧版错题不计入门禁）。响应：`{errors: [{errorBookId, cardId, questionN, questionText, questionId}]}`，计数 = `errors.length`。 | MVP |
+| GET | `/api/practice/uncleared-errors?subjectId={subjectId}&lessonId={lessonId}` | 查询学生某学科未清零课堂练习错题（`main_error_books` source='practice' + is_cleared=0），用于「错题清零」门禁。以 `main_error_books` 为唯一真相源，LEFT JOIN `questions` 补全题面，**不再依赖 `practice_results`**（避免两表数据不一致漏检）。进每节课前清空错题本里的 practice 未清题（兜住历史/跳过/写入失败的错题）。同一 `(cardId, questionN)` 重复记录去重保留最早一条。**按当前教材版本过滤**（`progress.textbook_version_id`，经 cards→lessons→units→semesters 链路；家长切换教材后旧版错题不计入门禁）。**课时范围（2026-09-01）**：`lessonId` 可选——传入时只返回「当前课之前」的错题（`lesson_id < lessonId`，星图同款 id 数值序），**本课练习刚产生的错题不触发清零门禁**（刷新本课不弹出「错题清零」阶段，留待进入下一课时再清）；省略时不限课时。`lesson_id` 为 null 的孤儿历史行保守保留。响应：`{errors: [{errorBookId, cardId, questionN, questionText, questionId, lessonId}]}`，计数 = `errors.length`。 | MVP |
 | POST | `/api/practice/bump-error-levels` | 错题清零后仍有错误的题，`main_error_books.level` +1 标记未掌握。请求体：`{errorBookIds: number[]}`。 | MVP |
 
 ### 4.17 Admin — `/api/admin`
@@ -944,14 +944,17 @@ POST /api/ai/tutor/stream（mode=mainline, dialogueId, message）-> SSE 流式
 CourseDetailPage 加载（fetchData，带 subjectId）
   │
   ▼
-GET /api/practice/uncleared-errors?subjectId={subjectId}
-  │  JWT -> 取 studentId
+GET /api/practice/uncleared-errors?subjectId={subjectId}&lessonId={lessonId}
+  │  JWT -> 取 studentId；lessonId 可选（课程详情页传入当前课 id）
   ▼
-PracticeService.getUnclearedErrorDetails(studentId, subjectId)
+PracticeService.getUnclearedErrorDetails(studentId, subjectId, currentLessonId?)
   └─ MainErrorBooksRepository.findUnclearedPracticeByStudentSubject(studentId, subjectId)
        查 main_error_books：student_id + subject_id + source='practice' + is_cleared=0
        LEFT JOIN questions 补全题面（COALESCE(q.content, wrong_answer_text)）
        按 (cardId, questionN) 去重保留最早一条（并发判题/题面变体产生的重复行）
+       service 层课时过滤：currentLessonId 非空时只保留 lesson_id < currentLessonId
+       （星图同款 id 数值序）——本课练习刚产生的错题不触发清零门禁，
+       留待进入下一课时再清；lesson_id null 的孤儿历史行保守保留
   ▼
 返回 { errors: [...] }（计数 = errors.length）
   │
@@ -1000,7 +1003,7 @@ PracticeService.getResults -> PracticeResultsRepository.findByStudentCard
 | 家长注册 | `/register` | `POST /api/auth/register` |
 | P1.5 学科选择 | `/student/subjects` | `GET /api/content/subjects` |
 | P2.1 星图导航 | `/student/star-map` | `GET /api/progress/students/{id}/star-map?subjectId=`（星图主数据）；`GET /api/progress/.../overview`（跨学科总览，可选） |
-| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`GET /api/practice/uncleared-errors?subjectId=`（错题清零门禁，进每节课前清空错题本所有 practice 未清题）；`POST /api/practice/bump-error-levels`（清零后仍错递增 level）；`POST /api/progress/update`（翻页上报进度）；卡片级讨论抽屉调 `POST /api/practice/discuss-card`；practice 卡「让 AI 讲一讲」抽屉调 `POST /api/practice/discuss` |
+| P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`GET /api/practice/uncleared-errors?subjectId=&lessonId=`（错题清零门禁，只看当前课之前的未清题；本课刚产生的错题不触发）；`POST /api/practice/bump-error-levels`（清零后仍错递增 level）；`POST /api/progress/update`（翻页上报进度）；卡片级讨论抽屉调 `POST /api/practice/discuss-card`；practice 卡「让 AI 讲一讲」抽屉调 `POST /api/practice/discuss` |
 | P2.3 AI 讨论 | 已合并为抽屉 | 题目级讨论在 AnswerModal 内（`POST /api/practice/discuss`）；卡片级讨论在 CourseDetailPage 内（`POST /api/practice/discuss-card`）。均走 `POST /api/ai/tutor/stream` 流式。 |
 | P2.4 课后作业 | `/student/homework` | `GET /api/assessment/homework/{id}`, `POST .../answers`, `POST .../hint` |
 | P2.5 作业解析 | `/student/homework-result` | `GET /api/assessment/submissions/{id}/results` |
@@ -1187,6 +1190,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.2 | 2026-09-01 | 错题清零门禁加课时范围：`GET /api/practice/uncleared-errors` 新增可选 `lessonId` 参数——传入时只返回「当前课之前」的错题（`lesson_id < lessonId`，星图同款 id 数值序），修复「学生在本课练习中答错 → 刷新本课弹出错题清零阶段」的问题（本课刚产生的错题不触发清零，留待进入下一课时再清）；`lesson_id` null 的孤儿历史行保守保留；省略参数行为不变。前端 `getUnclearedErrors(subjectId, lessonId)`、CourseDetailPage 拉取时带当前 lessonId。 |
 | v2.1 | 2026-09-01 | 家长端按学科教材配置：新增 `GET/PUT /api/parent/students/{studentId}/subject-configs(/{subjectId})`（每学科 年级/册别/版本 配置，`progress.textbook_version_id + current_semester_id` 为事实源；已开始学习且切换 → 重置该学科学习状态并返回 `reset: true`）；`GET /api/content/versions` 响应补 `edition` 字段；`GET /api/practice/uncleared-errors` 按当前教材版本过滤（家长切换教材后旧版错题不计入清零门禁）；星链图版本回退规则改为「同学段 edition 非空优先、id 降序」、册别回退按学生年级匹配 `semesters.grade`。前端新增 `/parent/students/:id/config` 配置页 + 学生卡片「学习配置」入口；StudentLayout 顶栏硬编码「三年级·数学 人教版」改为星图真实数据。 |
 | v2.0 | 2026-08-18 | 管理员中枢：新增 Admin 分组（§4.17）——模型池 CRUD + 启停（`llm_models`/`llm_routes` 落库为运行时真源，`ModelConfigRegistry` 保存即 reload 生效，支持 `openai_compatible` 自定义 OpenAI 兼容模型，apiKey AES-256-GCM 加密落库 + 打码返回）；场景路由表 GET/PUT（事务替换）+ `validate-connection` 探活；家长/学生列表搜索 + 封禁/解封（`BanRegistry` 进程内即时生效，重启从 DB 重建，封家长连带封其名下学生）；站内消息中心（`parent_messages` 广播 + `message_reads` 已读，admin 发送/撤回 + 家长侧列表/未读/标已读）；管理员 AI 聊天（独立 `admin_dialogues`/`admin_messages` 表，无 K12 学习边界，SSE 流式 `POST /api/admin/chat/stream`）；总览 dashboard；管理员改自己密码。错误码实现注补 1009=连通性测试失败（§2.4）。 |
 | v1.9 | 2026-08-14 | 三角色账号体系：`POST /api/auth/login` 改为三角色统一登录（admins->parents->students 顺序查询，JWT 加 `role: admin\|parent\|student`）；`POST /api/auth/register` 家长注册（注册即登录），学生自主注册下线；新增 `GET/POST /api/parent/students` + `PATCH .../reset-password` + `PATCH .../status`（家长管理学生子账号：建/列表/重置密码/停用启用，归属校验 1005）；practice/ai/conversations/progress 学生接口全部套 `RolesGuard('student')` 防越权；登录限流 10 次/分/IP（1008）；DB 新增 `admins` 表 + `parents`/`students` `is_active` 字段（v1.7）；seed 脚本 `seed-admin.ts`。 |

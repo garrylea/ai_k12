@@ -260,8 +260,10 @@ export default function CourseDetailPage() {
       }
       const [result, uncleared] = await Promise.all([
         fetchLessonCards(lessonId),
+        // 错题清零门禁只看「当前课之前」的错题（lessonId 过滤）：
+        // 本课练习刚产生的错题不触发清零阶段，留待进入下一课时再清
         subjectId && isCurrentLesson
-          ? getUnclearedErrors(subjectId).catch(() => ({ errors: [] as PreviousErrorDetail[] }))
+          ? getUnclearedErrors(subjectId, lessonId).catch(() => ({ errors: [] as PreviousErrorDetail[] }))
           : Promise.resolve({ errors: [] as PreviousErrorDetail[] }),
       ]);
       if (result.cards.length === 0) throw new Error('本节暂无卡片内容');

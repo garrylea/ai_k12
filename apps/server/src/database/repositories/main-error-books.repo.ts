@@ -133,11 +133,17 @@ export class MainErrorBooksRepository {
    * LEFT JOIN questions 补全题面：question_id 非空取 questions.content，否则用 wrong_answer_text 兜底。
    * LEFT JOIN cards 补全卡片所属课的 lesson_id——清零阶段判题时必须写卡片真正所属的课，
    * 否则 practice_results.lesson_id 会记成「判题时所在课」，导致课程级重置（按 lesson_id 删）漏删。
-   * 用于「错题清零」门禁——进每节课前清空错题本里所有 practice 未清题（不限课时）。
+   * 用于「错题清零」门禁。本查询不限课时（返回该学科全部未清 practice 错题），
+   * 「只清当前课之前」的课时过滤由 PracticeService.getUnclearedErrorDetails 按
+   * currentLessonId 后置过滤（lesson_id null 的孤儿行在 service 层保留）。
+   *
+   * @param textbookVersionId 可选：按当前教材版本过滤（cards→lessons→units→semesters 链路）。
+   *   家长切换教材版本后，旧版错题保留在库但不再出现在清零门禁/列表中。为 null 时不过滤（无法确定版本时兜底全量）。
    */
   async findUnclearedPracticeByStudentSubject(
     studentId: number,
     subjectId: number,
+    textbookVersionId?: number | null,
   ): Promise<Array<{
     id: number;
     source_ref_id: number | null;
@@ -146,6 +152,13 @@ export class MainErrorBooksRepository {
     questionText: string | null;
     lesson_id: number | null;
   }>> {
+    const versionJoin = textbookVersionId != null
+      ? 'LEFT JOIN lessons l ON l.id = c.lesson_id\n        LEFT JOIN units u ON u.id = l.unit_id\n        LEFT JOIN semesters s ON s.id = u.semester_id'
+      : '';
+    const versionFilter = textbookVersionId != null ? 'AND s.textbook_version_id = ?' : '';
+    const params: any[] = textbookVersionId != null
+      ? [studentId, subjectId, textbookVersionId]
+      : [studentId, subjectId];
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT meb.id, meb.source_ref_id, meb.question_id, meb.question_n,
               COALESCE(q.content, meb.wrong_answer_text) AS questionText,
@@ -153,9 +166,11 @@ export class MainErrorBooksRepository {
        FROM main_error_books meb
        LEFT JOIN questions q ON meb.question_id = q.id
        LEFT JOIN cards c ON c.id = meb.source_ref_id
+       ${versionJoin}
        WHERE meb.student_id = ? AND meb.subject_id = ? AND meb.source = 'practice' AND meb.is_cleared = 0
+       ${versionFilter}
        ORDER BY meb.id`,
-      [studentId, subjectId],
+      params,
     );
     return rows as Array<{
       id: number;

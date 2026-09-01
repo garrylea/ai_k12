@@ -1,5 +1,5 @@
 import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository, ProgressRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
@@ -136,6 +136,7 @@ export class PracticeService {
     private readonly conversationsService: ConversationsService,
     private readonly practiceResultsRepo: PracticeResultsRepository,
     private readonly contentService: ContentService,
+    private readonly progressRepo: ProgressRepository,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -386,7 +387,16 @@ export class PracticeService {
    * 查询学生某学科所有未清零的课堂练习错题详情（用于「错题清零」门禁）。
    * 以 main_error_books（source='practice' + is_cleared=0）为唯一真相源，
    * LEFT JOIN questions 补全题面--不再依赖 practice_results，避免两表数据不一致时漏检。
-   * 进每节课前清空错题本里所有 practice 未清题（不限课时，兜住历史/跳过/写入失败的错题）。
+   * 进每节课前清空错题本里的 practice 未清题（兜住历史/跳过/写入失败的错题）。
+   *
+   * 课时范围（2026-09-01 修正）：传 currentLessonId 时只返回「当前课之前」的错题
+   * （lesson_id < currentLessonId，星图同款 id 数值序）；本课练习刚产生的错题不触发
+   * 清零阶段（刷新本课不弹出「错题清零」），留待进入下一课时再清。
+   * 不传 currentLessonId 时不过滤课时（兼容旧行为/无课时上下文的调用方）。
+   * lesson_id 为 null 的孤儿历史行无法归课，保守保留。
+   *
+   * 版本隔离：按 progress.textbook_version_id（家长配置/学习固化的当前教材版本）过滤，
+   * 家长切换教材后旧版错题保留在库但不再出现在门禁/列表。无 progress 记录时不过滤（兜底全量）。
    *
    * 去重：同一 (cardId, question_n) 可能因并发判题或题面变体产生多条记录，
    * 只保留最早一条；答对时 clearUnclearedByStudentQuestion 会清掉同 question_id 的所有行，
@@ -395,6 +405,7 @@ export class PracticeService {
   async getUnclearedErrorDetails(
     studentId: number,
     subjectId: number,
+    currentLessonId?: number | null,
   ): Promise<{
     errors: Array<{
       errorBookId: number;
@@ -406,7 +417,12 @@ export class PracticeService {
       lessonId: number | null;
     }>;
   }> {
-    const rows = await this.mainErrorRepo.findUnclearedPracticeByStudentSubject(studentId, subjectId);
+    const progress = await this.progressRepo.findByStudentAndSubject(studentId, subjectId);
+    const rows = await this.mainErrorRepo.findUnclearedPracticeByStudentSubject(
+      studentId,
+      subjectId,
+      progress?.textbookVersionId ?? null,
+    );
     const seen = new Set<string>();
     const errors: Array<{
       errorBookId: number;
@@ -417,6 +433,13 @@ export class PracticeService {
       lessonId: number | null;
     }> = [];
     for (const r of rows) {
+      // 「错题清零」门禁只清当前课之前产生的错题：本课（及后续课）练习刚产生的
+      // 错题不得触发清零阶段，留待进入下一课时再清。lesson_id 与星图同用
+      // id 数值序（db_loader 按书序插入，id 随教学顺序单调递增）；
+      // lesson_id 为 null 的孤儿历史行无法归课，保守保留（兜住历史数据）。
+      if (currentLessonId != null && r.lesson_id != null && r.lesson_id >= currentLessonId) {
+        continue;
+      }
       const cardId = r.source_ref_id ?? 0;
       // question_n 缺失（历史行未回填）时合成唯一键，保证清零可用
       const questionN = r.question_n ?? `cleanup-${r.id}`;
