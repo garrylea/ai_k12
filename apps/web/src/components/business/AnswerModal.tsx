@@ -5,8 +5,12 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { LatexEditor } from './LatexEditor';
-import { LatexPreview } from './LatexPreview';
+import { PreviewDraftPanel } from './PreviewDraftPanel';
+import { clearDraft } from './draft-store';
 import { DiscussDrawer } from './DiscussDrawer';
+
+/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用草稿白板 */
+const MATH_SUBJECT_ID = 1;
 
 export interface PracticeQuestion { n: string; text: string; }
 
@@ -72,6 +76,7 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
 
   const handleSubmit = () => {
     if (!answer.trim() || mode !== 'answering') return;
+    clearDraft(`card-${cardId}-q-${q.n}`);
     const submittedIdx = idx;
     const submittedAnswer = answer;
     // 标记该题判题中
@@ -250,8 +255,13 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
           <div className="w-1/2 border-r border-[var(--bg-subtle)] flex flex-col">
             <LatexEditor value={answer} onChange={setAnswer} />
           </div>
+          {/* 右半区：预览 / 草稿 tab（仅数学启用草稿，PRD §7.12） */}
           <div className="w-1/2">
-            <LatexPreview value={answer} />
+            <PreviewDraftPanel
+              answer={answer}
+              questionId={`card-${cardId}-q-${q.n}`}
+              enabled={subjectId === MATH_SUBJECT_ID}
+            />
           </div>
         </div>
 
