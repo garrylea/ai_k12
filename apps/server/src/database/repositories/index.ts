@@ -14,6 +14,7 @@ export { PracticeResultsRepository } from './practice-results.repo.js';
 export { ProgressRepository } from './progress.repo.js';
 export { SafetyAlertsRepository } from './safety-alerts.repo.js';
 export { QuestionsRepository } from './questions.repo.js';
+export { QuestionHintsRepository } from './question-hints.repo.js';
 export { LessonsRepository } from './lessons.repo.js';
 export { UploadedFilesRepository } from './uploaded-files.repo.js';
 export type { AiDialogueRow, AiMessageRow, ErrorRedoLogRow, ExtractTaskRow, MainErrorBookRow, PracticeResultRow, SafetyAlertRow, QuestionRow, UploadedFileRow } from './types.js';

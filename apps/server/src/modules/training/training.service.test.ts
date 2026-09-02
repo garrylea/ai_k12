@@ -8,10 +8,16 @@ const mk = (overrides: any = {}) => ({
   },
   judgeCore: { judgeQuestion: vi.fn() },
   questionsRepo: { findById: vi.fn(), findRandomByKpAndType: vi.fn() },
+  // Task 3（提示端点）依赖：占位，getHint 测试里按需覆盖。
+  questionHintsRepo: {
+    findByQuestionId: vi.fn().mockResolvedValue(null),
+    upsert: vi.fn().mockResolvedValue(undefined),
+  },
+  hint: { generate: vi.fn() },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new TrainingService(deps.mainErrorRepo, deps.judgeCore, deps.questionsRepo);
+  new TrainingService(deps.mainErrorRepo, deps.judgeCore, deps.questionsRepo, deps.questionHintsRepo, deps.hint);
 
 describe('TrainingService.getErrorBookEntries', () => {
   it('透传筛选参数给 repo', async () => {
@@ -52,5 +58,63 @@ describe('TrainingService.bumpErrorLevels', () => {
     const svc = mkSvc(deps);
     await svc.bumpErrorLevels([1, 2, 3]);
     expect(deps.mainErrorRepo.bumpLevels).toHaveBeenCalledWith([1, 2, 3]);
+  });
+});
+
+describe('TrainingService.getHint', () => {
+  it('缓存命中直返，不调 AI', async () => {
+    const deps = mk({
+      questionHintsRepo: { findByQuestionId: vi.fn().mockResolvedValue({ hint: '旧提示' }), upsert: vi.fn() },
+      hint: { generate: vi.fn() },
+      questionsRepo: { findById: vi.fn().mockResolvedValue({ id: 10, content: '题面', type: 'choice' }) },
+    });
+    const r = await mkSvc(deps).getHint({ questionId: 10 });
+    expect(r).toEqual({ hint: '旧提示', cached: true });
+    expect(deps.hint.generate).not.toHaveBeenCalled();
+  });
+
+  it('未命中 -> generate + upsert + cached:false', async () => {
+    const deps = mk({
+      questionHintsRepo: { findByQuestionId: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue(undefined) },
+      hint: { generate: vi.fn().mockResolvedValue({ content: '新提示', reasoning: null }) },
+      questionsRepo: { findById: vi.fn().mockResolvedValue({ id: 10, content: '题面', type: 'choice' }) },
+    });
+    const r = await mkSvc(deps).getHint({ questionId: 10 });
+    expect(r).toEqual({ hint: '新提示', cached: false });
+    expect(deps.hint.generate).toHaveBeenCalledWith({ questionContent: '题面', subject: 'math' });
+    expect(deps.questionHintsRepo.upsert).toHaveBeenCalledWith(10, '新提示');
+  });
+
+  it('upsert 失败不阻断返回（best-effort 写回）', async () => {
+    const deps = mk({
+      questionHintsRepo: {
+        findByQuestionId: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockRejectedValue(new Error('db down')),
+      },
+      hint: { generate: vi.fn().mockResolvedValue({ content: '新提示', reasoning: null }) },
+      questionsRepo: { findById: vi.fn().mockResolvedValue({ id: 10, content: '题面', type: 'choice' }) },
+    });
+    const r = await mkSvc(deps).getHint({ questionId: 10 });
+    expect(r).toEqual({ hint: '新提示', cached: false });
+  });
+
+  it('generate 抛错 -> HttpException 503 code 5001', async () => {
+    const deps = mk({
+      hint: { generate: vi.fn().mockRejectedValue(new Error('llm down')) },
+      questionsRepo: { findById: vi.fn().mockResolvedValue({ id: 10, content: '题面', type: 'choice' }) },
+    });
+    await expect(mkSvc(deps).getHint({ questionId: 10 })).rejects.toMatchObject({
+      status: 503,
+      response: { code: 5001 },
+    });
+    expect(deps.questionHintsRepo.upsert).not.toHaveBeenCalled();
+  });
+
+  it('题目不存在 -> 404', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(null) },
+    });
+    await expect(mkSvc(deps).getHint({ questionId: 999 })).rejects.toMatchObject({ status: 404 });
+    expect(deps.hint.generate).not.toHaveBeenCalled();
   });
 });

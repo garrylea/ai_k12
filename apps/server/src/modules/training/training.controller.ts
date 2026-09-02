@@ -55,4 +55,10 @@ export class TrainingController {
   ) {
     return this.trainingService.bumpErrorLevels(dto.errorBookIds);
   }
+
+  /** 训练「提示」：题级 question_hints 缓存（命中直返，未命中 AI 生成 + 写回）。 */
+  @Post('hint')
+  async hint(@Body() dto: { questionId: number }, @CurrentUser() user: JwtUser) {
+    return this.trainingService.getHint({ questionId: dto.questionId });
+  }
 }
