@@ -473,3 +473,228 @@ class TestRebuildPracticeContent:
             "2. 列方程：\n\n(1) 4个正方形面积之和是25\n\n(2) 矩形长比宽多2"
         )
         assert result == expected
+
+
+class TestAnchorCorrection:
+    """load_book_cards TOC 模式页码锚定修正（2026-09-02）。
+
+    锚定：卡片 textbook_page（md 页码）-> 偏移（同标签卡片 min md 页 - printed 众数）
+    -> TOC 章区间 -> 确定性章归属。规则：A 错章重写、B 同名消歧、C 复习题归一。
+    无锚（对不上/无 TOC）退化为既有匹配行为。
+    fake_query 按 (SQL 前缀, args) 精确分发，避免 SQL 片段混淆。
+    """
+
+    # rel_path 需 7 段（subject/grade_band/publisher/grade/term/book/page.jsonl）
+    BOOK_REL = "数学/初中/人教版/九年级/上册/测试书/page_001.jsonl"
+
+    TOC = {
+        "book": "测试书",
+        "chapters": [
+            {"number": 26, "title": "二次函数", "label": "第二十六章 二次函数",
+             "sections": [{"number": [26, 1], "title": "二次函数的概念",
+                           "label": "26.1 二次函数的概念", "printed_page": 30,
+                           "subsections": []}],
+             "supplements": []},
+            {"number": 27, "title": "反比例函数", "label": "第二十七章 反比例函数",
+             "sections": [{"number": [27, 1], "title": "反比例函数的概念",
+                           "label": "27.1 反比例函数的概念", "printed_page": 64,
+                           "subsections": []}],
+             "supplements": []},
+        ],
+    }
+
+    # unit 10 = 26 章（lessons 102 章综述/103 节/104 小结）；unit 11 = 27 章（105/106/107）
+    LESSONS = [
+        (102, "第二十六章 二次函数", 10, 0),
+        (103, "26.1 二次函数的概念", 10, 1),
+        (104, "小结", 10, 2),
+        (105, "第二十七章 反比例函数", 11, 0),
+        (106, "27.1 反比例函数的概念", 11, 1),
+        (107, "小结", 11, 2),
+    ]
+
+    def _make(self, scoped_name_rows=None):
+        """scoped_name_rows: semester 级按名匹配（退化路径）的返回行，默认 []。"""
+        import json as _json
+        from db_loader import DbLoader
+        loader = DbLoader.__new__(DbLoader)
+        inserted = []
+
+        def fake_query(sql, args=None):
+            s = sql.strip()
+            if s.startswith("SELECT id FROM subjects"):
+                return [(1,)]
+            if "FROM semesters s JOIN textbook_versions" in s:
+                return [(42,)]
+            if "FROM cards c JOIN lessons l ON c.lesson_id=l.id" in s:
+                return [(0,)]
+            if "FROM practice_results" in s:
+                return [(0,)]
+            if s.startswith("SELECT id, sort_order FROM units"):
+                return [(10, 26), (11, 27)]
+            if s.startswith("SELECT l.id, l.name, l.unit_id, l.sort_order"):
+                return self.LESSONS
+            if s.startswith("SELECT id FROM units WHERE semester_id"):
+                # args = (sem_id, chapter)
+                return [({26: 10, 27: 11}.get(args[1]),)]
+            if s.startswith("SELECT id FROM lessons WHERE unit_id"):
+                # args = (unit_id, name) —— unit 精确匹配
+                uid, name = args
+                for lid_db, lname, luid, _ in self.LESSONS:
+                    if luid == uid and lname == name:
+                        return [(lid_db,)]
+                return []
+            if "AND l.name=%s" in s:
+                return scoped_name_rows or []
+            return []
+
+        loader._query = fake_query
+        loader._delete = lambda sql, args=None: 0
+        loader._exec = lambda sql, args=None: inserted.append(args)
+        loader._conn = type("C", (), {"commit": staticmethod(lambda: None)})()
+        loader._subj_code, loader._tv = {}, {}
+        loader._sem, loader._unit, loader._lesson = {}, {}, {}
+        return loader, inserted
+
+    def _run(self, cards, scoped_name_rows=None):
+        import json as _json
+        import pathlib
+        import tempfile
+        loader, inserted = self._make(scoped_name_rows)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                         encoding="utf-8") as f:
+            _json.dump(self.TOC, f, ensure_ascii=False)
+            toc_path = f.name
+        try:
+            n = loader.load_book_cards(self.BOOK_REL, cards, toc_path=toc_path)
+        finally:
+            pathlib.Path(toc_path).unlink()
+        return n, inserted
+
+    # 对齐卡：26.1 printed 30 -> md 38；27.1 printed 64 -> md 72（偏移 8）
+    ALIGN_CARDS = [
+        {"lesson_id": "26.1 二次函数的概念", "textbook_page": "P38", "content": "x"},
+        {"lesson_id": "27.1 反比例函数的概念", "textbook_page": "P72", "content": "x"},
+    ]
+
+    def test_rule_a_wrong_chapter_with_review_heading(self):
+        # page_092 场景：复习题 27 卡被 LLM 标成 26 章 -> 重写到 27 章小结（lesson 107）
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": "第二十六章 二次函数", "textbook_page": "P92",
+             "content": "## 复习题 27\n\n1. 回顾本章内容。", "card_type": "concept"},
+        ]
+        n, inserted = self._run(cards)
+        assert n == 3
+        # 第三张卡的 lesson_id 应为 107（27 章小结），而非 26 章综述 102
+        assert inserted[2][0] == 107
+
+    def test_rule_a_wrong_chapter_falls_back_to_active_lesson(self):
+        # 错章且无复习题标题 -> 时间线活跃节（page 75 落在 27.1 区段，printed 64+8=72 起）
+        # -> 27.1 lesson（106）；活跃节解析不到再落章综述
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": "26.1 二次函数的概念", "textbook_page": "P75",
+             "content": "反比例函数的图象是双曲线。", "card_type": "concept"},
+        ]
+        n, inserted = self._run(cards)
+        assert n == 3
+        assert inserted[2][0] == 106
+
+    def test_rule_a_review_continuation_page_attaches_summary(self):
+        # page_119 场景：复习题 28 续页（无复习题标题，前章末尾）被标成 26 章综述；
+        # 综述卡锚定 27 章头=md 69、时间线活跃节=小结（printed 109+8=117 起）
+        # -> 27 章「小结」（107），而非 26 章综述
+        toc = {
+            "book": "测试书",
+            "chapters": [
+                {"number": 26, "title": "二次函数", "label": "第二十六章 二次函数",
+                 "sections": [{"number": [26, 1], "title": "二次函数的概念",
+                               "label": "26.1 二次函数的概念", "printed_page": 30,
+                               "subsections": []}],
+                 "supplements": [{"type": "supplement", "label": "小结",
+                                  "printed_page": 39}]},
+                {"number": 27, "title": "反比例函数", "label": "第二十七章 反比例函数",
+                 "sections": [{"number": [27, 1], "title": "反比例函数的概念",
+                               "label": "27.1 反比例函数的概念", "printed_page": 64,
+                               "subsections": []}],
+                 "supplements": [{"type": "supplement", "label": "小结",
+                                  "printed_page": 109}]},
+            ],
+        }
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": "第二十六章 二次函数", "textbook_page": "P35", "content": "x"},
+            {"lesson_id": "第二十七章 反比例函数", "textbook_page": "P69", "content": "x"},
+            {"lesson_id": "第二十六章 二次函数", "textbook_page": "P118",
+             "content": "10. 如图，有一张纸片……", "card_type": "practice"},
+        ]
+        import json as _json
+        import pathlib
+        import tempfile
+        loader, inserted = self._make()
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                         encoding="utf-8") as f:
+            _json.dump(toc, f, ensure_ascii=False)
+            toc_path = f.name
+        try:
+            n = loader.load_book_cards(self.BOOK_REL, cards, toc_path=toc_path)
+        finally:
+            pathlib.Path(toc_path).unlink()
+        assert n == 5
+        assert inserted[-1][0] == 107
+
+    def test_rule_b_same_name_disambiguation(self):
+        # 「小结」×2 章：page 91（27 章区间，起点 69）的小结卡挂 27 章小结（107），
+        # 而非 _match_lesson_scoped 同名匹配到的第一个（104）
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": "小结", "textbook_page": "P91",
+             "content": "一、本章知识结构图……", "card_type": "concept"},
+        ]
+        n, inserted = self._run(cards)
+        assert n == 3
+        assert inserted[2][0] == 107
+
+    def test_rule_b_page_in_first_chapter_attaches_first_chapter(self):
+        # page 40（26 章区间，起点 35）的小结卡挂 26 章小结（104）
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": "小结", "textbook_page": "P40",
+             "content": "一、本章知识结构图……", "card_type": "concept"},
+        ]
+        n, inserted = self._run(cards)
+        assert inserted[2][0] == 104
+
+    def test_rule_c_review_label_normalized_to_summary(self):
+        # 「复习题 27」标签（章号与锚定一致）-> 归一到该章「小结」（107），不新建 lesson
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": "复习题 27", "textbook_page": "P93",
+             "content": "## 复习题 27\n\n复习巩固 1. ……", "card_type": "practice"},
+        ]
+        n, inserted = self._run(cards)
+        assert n == 3
+        assert inserted[2][0] == 107
+
+    def test_correct_label_untouched_by_anchor(self):
+        # 正确标签（26 章综述卡在 26 章页）不受锚定影响，走既有匹配
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": "第二十六章 二次函数", "textbook_page": "P36",
+             "content": "章前图与引言。", "card_type": "reading"},
+        ]
+        n, inserted = self._run(cards)
+        assert n == 3
+        assert inserted[2][0] == 102
+
+    def test_no_anchor_degrades_to_existing_matching(self):
+        # 卡片标签与 TOC 全对不上 -> 锚定关闭 -> 「小结」仍按既有逻辑同名匹配
+        cards = [
+            {"lesson_id": "小结", "textbook_page": "P91",
+             "content": "一、本章知识结构图……", "card_type": "concept"},
+        ]
+        n, inserted = self._run(cards, scoped_name_rows=[(104,)])
+        assert n == 1
+        assert inserted[0][0] == 104
+
+    def test_null_lesson_id_skipped_as_before(self):
+        # lesson_id 为 None 的卡（锚定无意见）仍按既有行为跳过
+        cards = self.ALIGN_CARDS + [
+            {"lesson_id": None, "textbook_page": "P91", "content": "x"},
+        ]
+        n, inserted = self._run(cards)
+        assert n == 2  # 仅对齐卡入库

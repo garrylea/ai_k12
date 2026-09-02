@@ -421,7 +421,7 @@ python src/db_loader_cli.py --load-toc --toc-path output/toc/数学/初中/人�
 
 #### 模式 C：仅 card 入库（TOC 模式下）
 
-骨架已由 TOC 建好，此模式只把 card 挂到已有 lesson 下。
+骨架已由 TOC 建好，此模式只把 card 挂到已有 lesson 下。挂卡前会先做**页码锚定**（2026-09-02，`lesson_anchor.py`）：按卡片 `textbook_page`（md 页码）与 TOC 章区间确定性修正章归属（错章重写/「小结」等同名消歧/「复习题 N」归一到该章「小结」），日志输出 `[anchor] offset/corrected/disambiguated/normalized` 便于观测；无 TOC 或偏移推不出时退化为纯按标签匹配。
 
 ```bash
 # card 入库，不清表，带 TOC 匹配

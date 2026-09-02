@@ -278,6 +278,14 @@ import json  # noqa: E402
 
 import pymysql  # noqa: E402
 
+from lesson_anchor import (  # noqa: E402
+    LessonAnchor,
+    is_review_label,
+    md_page_of,
+    parse_chapter_from_content,
+    parse_chapter_from_label,
+)
+
 
 class DbLoader:
     """连 MySQL，find-or-create 教材结构，入库 cards/questions。
@@ -787,6 +795,116 @@ class DbLoader:
         self._exec("DELETE FROM questions")
         self._conn.commit()
 
+    # --- 页码锚定（2026-09-02）---
+
+    def _build_anchor_ctx(self, toc_path, cards: list[dict], sem_id: int | None):
+        """构建锚定上下文：TOC 章区间 + 该书 skeleton 的 unit/lesson 视图。
+
+        返回 (anchor, unit_by_chapter, lessons_by_unit, overview_by_unit,
+        ambiguous_names)；不可用（无 TOC/偏移推不出/查不到骨架）返回 None，
+        调用方退化为既有匹配行为。
+        """
+        if not toc_path or sem_id is None:
+            return None
+        try:
+            toc = json.loads(Path(toc_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        anchor = LessonAnchor.build(toc, cards)
+        if anchor is None:
+            return None
+        unit_rows = self._query(
+            "SELECT id, sort_order FROM units WHERE semester_id=%s", (sem_id,))
+        if not unit_rows:
+            return None
+        unit_by_chapter = {row[1]: row[0] for row in unit_rows}
+        lesson_rows = self._query(
+            "SELECT l.id, l.name, l.unit_id, l.sort_order FROM lessons l "
+            "JOIN units u ON l.unit_id=u.id WHERE u.semester_id=%s", (sem_id,))
+        if not lesson_rows:
+            return None
+        lessons_by_unit: dict[int, list[tuple[int, str, int]]] = {}
+        name_units: dict[str, set[int]] = {}
+        for lid_db, name, uid, sort_order in lesson_rows:
+            lessons_by_unit.setdefault(uid, []).append((lid_db, name, sort_order))
+            name_units.setdefault(name, set()).add(uid)
+        # 每章章综述 lesson（sort_order 最小者）作错章兜底
+        overview_by_unit = {uid: min(ls, key=lambda t: t[2])[0]
+                            for uid, ls in lessons_by_unit.items()}
+        # 同名歧义（小结/数学活动等在 >=2 个 unit 出现的名字）
+        ambiguous_names = {n for n, uids in name_units.items() if len(uids) >= 2}
+        return (anchor, unit_by_chapter, lessons_by_unit,
+                overview_by_unit, ambiguous_names)
+
+    def _anchor_lesson_id(self, c: dict, anchor_ctx) -> tuple[int | None, str | None]:
+        """页码锚定修正单卡：返回 (lesson_db_id, action)。
+
+        action: corrected（错章重写）/ disambiguated（同名消歧）/
+        normalized（复习题归一）；(None, None) 表示锚定无意见，走既有匹配。
+        """
+        (anchor, unit_by_chapter, lessons_by_unit,
+         overview_by_unit, ambiguous_names) = anchor_ctx
+        page = md_page_of(c.get("textbook_page"))
+        if page is None:
+            return None, None
+        page_ch = anchor.chapter_of(page)
+        if page_ch is None:
+            return None, None
+        lid = c.get("lesson_id")
+        content_ch = parse_chapter_from_content(c.get("content"))
+        label_ch = parse_chapter_from_label(lid) if lid else None
+        target_ch = content_ch or page_ch
+
+        def lesson_in(ch, name):
+            uid = unit_by_chapter.get(ch)
+            if uid is None:
+                return None
+            for lid_db, lname, _ in lessons_by_unit.get(uid, []):
+                if lname == name:
+                    return lid_db
+            return None
+
+        # 规则 A：标签章号与锚定章不符（LLM 错章）
+        if label_ch is not None and label_ch != target_ch:
+            if content_ch is not None:
+                ldb = lesson_in(content_ch, "小结")
+                if ldb:
+                    return ldb, "corrected"
+            else:
+                # 时间线活跃节优先（如错章卡落在小结/复习题区段 -> 该章小结）
+                label_t = anchor.active_label_at(page)
+                if label_t:
+                    ldb = lesson_in(target_ch, label_t)
+                    if ldb:
+                        return ldb, "corrected"
+                uid = unit_by_chapter.get(target_ch)
+                if uid is not None:
+                    # 标签标题部分在目标章内找（如错章节号同题），miss 落章综述
+                    p = parse_lesson_id(lid) if lid else None
+                    title = p["title"] if p else None
+                    if title:
+                        for lid_db, lname, _ in lessons_by_unit.get(uid, []):
+                            if lname == title or lname.endswith(f" {title}"):
+                                return lid_db, "corrected"
+                    ldb = overview_by_unit.get(uid)
+                    if ldb:
+                        return ldb, "corrected"
+            return None, None
+
+        # 规则 B：同名歧义标签（每章同名的小结/数学活动等）按页所在章消歧
+        if lid and label_ch is None and lid.strip() in ambiguous_names:
+            ldb = lesson_in(page_ch, lid.strip())
+            if ldb:
+                return ldb, "disambiguated"
+
+        # 规则 C：复习题标签归一到该章「小结」（不建「复习题 N」lesson）
+        if lid and is_review_label(lid):
+            ldb = lesson_in(target_ch, "小结")
+            if ldb:
+                return ldb, "normalized"
+
+        return None, None
+
     # --- 入库 ---
     def load_book_cards(self, book_rel: str, cards: list[dict], toc_path: str | None = None) -> int:
         info = parse_book_rel_path(book_rel)
@@ -820,12 +938,21 @@ class DbLoader:
             lesson_sort: dict[int, int] = {}
             count = 0
             unmatched = 0
+            # 页码锚定：确定性章归属（重处理任意页不影响结构；无锚退化）
+            anchor_ctx = self._build_anchor_ctx(toc_path, cards, sem_id)
+            anchor_stats = {"corrected": 0, "disambiguated": 0, "normalized": 0}
             for c in cards:
                 lid = c.get("lesson_id")
-                if not lid:
-                    unmatched += 1
-                    continue
-                lesson_id_db = self._match_lesson_scoped(lid, sem_id)
+                lesson_id_db = None
+                if anchor_ctx is not None:
+                    lesson_id_db, action = self._anchor_lesson_id(c, anchor_ctx)
+                    if action:
+                        anchor_stats[action] += 1
+                if lesson_id_db is None:
+                    if not lid:
+                        unmatched += 1
+                        continue
+                    lesson_id_db = self._match_lesson_scoped(lid, sem_id)
                 if lesson_id_db is None:
                     # 尝试去掉首尾空格
                     lid_stripped = lid.strip()
@@ -844,6 +971,11 @@ class DbLoader:
                 count += 1
             if unmatched:
                 print(f"[WARN] {unmatched} card(s) could not be matched to any lesson", flush=True)
+            if anchor_ctx is not None:
+                print(f"[anchor] {book_rel}: offset={anchor_ctx[0].offset}, "
+                      f"corrected={anchor_stats['corrected']}, "
+                      f"disambiguated={anchor_stats['disambiguated']}, "
+                      f"normalized={anchor_stats['normalized']}", flush=True)
             self._conn.commit()
             return count
 
