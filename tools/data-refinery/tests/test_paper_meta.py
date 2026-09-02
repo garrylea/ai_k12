@@ -1,5 +1,3 @@
-import pytest
-
 from paper_meta import parse_paper_meta
 
 

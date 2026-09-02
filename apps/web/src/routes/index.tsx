@@ -136,6 +136,7 @@ const router = createBrowserRouter([
       </RequireRole>
     ),
   },
+  { path: '/student/training/exam', element: <Placeholder title="考试（训练模块开发中）" /> },
   { path: '/student/auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
   { path: '/student/auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
   { path: '/student/auxiliary/chat', element: <Navigate to="/student/auxiliary" replace /> },

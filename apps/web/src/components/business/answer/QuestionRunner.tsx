@@ -81,6 +81,9 @@ export function QuestionRunner({
   // 本地追踪判题结果（避免父层闭包过期问题），onFinish 时快照交给父层
   const resultsRef = useRef<Record<string, RunnerAnswerRecord>>({});
   const pendingRef = useRef<Map<number, Promise<unknown>>>(new Map());
+  // 重交竞态防护：每次提交递增该题的序号，慢的旧 promise resolve 时序号不匹配即丢弃，
+  // 防止首次提交的慢 AI 判题结果覆盖学生重交后的新结果。
+  const seqRef = useRef<Record<string, number>>({});
 
   const total = questions.length;
   const q = questions[idx];
@@ -104,10 +107,14 @@ export function QuestionRunner({
     clearDraft(`${draftKeyPrefix}-${question.n}`);
     setAnswer('');
 
+    const seq = (seqRef.current[question.n] ?? 0) + 1;
+    seqRef.current[question.n] = seq;
+
     // fire-and-forget：不 await，判题在后台进行，学生立即切下一题。
     // showResultFeedback=false 时结果仍记入 resultsRef（供 onFinish），仅 UI 不显示对错。
     const p = Promise.resolve(onSubmit(question, submittedAnswer))
       .then((res: JudgeResult) => {
+        if (seqRef.current[question.n] !== seq) return res; // 过期结果（已被重交覆盖），丢弃
         resultsRef.current[question.n] = {
           isCorrect: res.isCorrect,
           method: res.method,
@@ -118,6 +125,7 @@ export function QuestionRunner({
         return res;
       })
       .catch(() => {
+        if (seqRef.current[question.n] !== seq) return; // 过期结果，丢弃
         resultsRef.current[question.n] = {
           isCorrect: false,
           method: 'ai',
@@ -135,9 +143,7 @@ export function QuestionRunner({
     } else {
       // 末题：进入等待态，等所有后台判题完成后交结果给父层
       setPhase('judging');
-      try {
-        await Promise.allSettled([...pendingRef.current.values()]);
-      } catch { /* ignore */ }
+      await Promise.allSettled([...pendingRef.current.values()]);
       onFinish({ ...resultsRef.current });
     }
   }, [answer, phase, q, idx, draftKeyPrefix, onSubmit, onFinish, total]);

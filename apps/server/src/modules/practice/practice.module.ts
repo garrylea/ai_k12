@@ -35,6 +35,6 @@ import { ContentModule } from '../content/content.module.js';
     JudgmentCapability,
     HintCapability,
   ],
-  exports: [PracticeService],
+  exports: [PracticeService, JudgeCoreService],
 })
 export class PracticeModule {}
