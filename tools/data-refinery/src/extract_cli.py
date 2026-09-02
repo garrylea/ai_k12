@@ -18,6 +18,7 @@ from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from image_scan import scan_page
 from llm import create_llm_client
+from page_chrome import compute_book_chrome, strip_chrome
 from markdown_scanner import MarkdownScanner, MarkdownSource
 from models import TextbookCard
 
@@ -25,9 +26,11 @@ import re
 
 
 def is_front_matter(text: str, page_num: int) -> bool:
-    """确定性预过滤：识别目录页、版权页、空页等前置内容。
+    """确定性预过滤：识别目录页、版权页、空页等前置内容，以及书尾非课程内容。
 
     在 LLM 标注之前调用，避免 gemma4 26B 误判。
+    调用前应已 strip_chrome 剥掉运行页眉/水印页脚（page_chrome.py），
+    否则「出版社」页眉/水印会误杀正文页（2026-09-01）。
     """
     lines = [l.strip() for l in text.splitlines() if l.strip()]
 
@@ -52,6 +55,27 @@ def is_front_matter(text: str, page_num: int) -> bool:
 
     # 4. 空页或前置空白页（前 10 页内极短内容）
     if len(text.strip()) < 30 and page_num <= 10:
+        return True
+
+    # 5. 书尾/封底确定性特征（后记、封底 ISBN、词汇索引等，2026-09-01）
+    if re.search(r'ISBN[\s ]*97[89][-\s\dXx]', text):
+        return True
+    if "绿色印刷产品" in text:
+        return True
+    if any(re.search(r'^#{1,3}\s*.*(后记|附录|词汇索引)', l) for l in lines):
+        return True
+    if "电话" in text and "邮箱" in text:  # 联系方式块（后记页的电话+邮箱）
+        return True
+
+    # 6. 纯组织说明页：综合与实践等活动的过程/评价说明（组建团队、展示交流等，
+    #    无数学任务）；标记命中 >=3 判 front matter，正常内容页最多顺带提到 1-2 个
+    org_markers = ["活动评价", "展示交流", "演示文稿", "组建合作团队",
+                   "研究小组", "研究报告", "方案构思", "自我反思"]
+    if sum(m in text for m in org_markers) >= 3:
+        return True
+
+    # 7. 剥离页眉后为空 → 版权尾页/空白页（不限页码；规则 4 只兜前 10 页）
+    if not text.strip():
         return True
 
     return False
@@ -433,6 +457,8 @@ def main(argv=None):
 
     # Per-book state: 跨页 lesson_id 继承
     book_lesson: dict[str, str | None] = {}
+    # Per-book chrome: 运行页眉/水印页脚集合（书目录级频率统计，lazy 计算）
+    chrome_cache: dict[str, set[str]] = {}
 
     total_processed = len(sources)
     extracted = 0
@@ -456,8 +482,13 @@ def main(argv=None):
             continue
 
         try:
+            # ⓪ 页眉/页脚剥离（书目录级频率统计；--pages/--book 过滤不影响统计）
+            if book_key not in chrome_cache:
+                chrome_cache[book_key] = compute_book_chrome(source.md_path.parent)
+            chrome = chrome_cache[book_key]
+
             # ① 前置页预过滤（确定性规则，避免 LLM 误判）
-            text = source.md_path.read_text(encoding="utf-8")
+            text = strip_chrome(source.md_path.read_text(encoding="utf-8"), chrome)
             _m = re.search(r"page_(\d+)", source.md_path.name)
             page_num = int(_m.group(1)) if _m else 0
             if is_front_matter(text, page_num):
@@ -468,6 +499,8 @@ def main(argv=None):
 
             # ② image_scan：获取图片尺寸 + 折算字数（小图标自动舍弃，text 已清洗）
             images, text = scan_page(source.md_path)
+            # scan_page 会重读文件，剥一次保证页眉不进卡片内容
+            text = strip_chrome(text, chrome)
 
             # ②.5 全角括号统一半角（在 split_page 前，下游 splitter/labeler/
             # publish/db_loader 全部吃到统一文本；长度不变，图片偏移仍有效）

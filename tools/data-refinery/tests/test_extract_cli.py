@@ -586,6 +586,98 @@ class TestTocDir:
         assert items[0]["lesson_id"] == "自由发挥的标签"
 
 
+class TestChromeStripping:
+    """主流程页眉剥离（2026-09-01）：OCR 运行页眉/水印页脚既不误杀正文页，
+    也不混进卡片内容。chrome 按书目录频率统计（>=3 页）自动发现。"""
+
+    BODY = "这是一段足够长的测试内容，超过三十个字符以避免被前置内容预过滤器拦截，用于验证剥离逻辑。"
+    FOOTER = "仅供个人学习使用，未经授权不得另做他用"
+
+    def _run(self, md_root, out_dir, page_results):
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.create_llm_client"), \
+             patch("extract_cli.CardLabeler") as mock_labeler_cls:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=md_root, output_dir=out_dir,
+                llm_api_key="fake", llm_model="m", llm_base_url=None, llm_timeout=1,
+            )
+            mock_labeler_cls.return_value.label.side_effect = page_results
+            from extract_cli import main
+            main(["--input-dir", str(md_root), "--output-dir", str(out_dir)])
+
+    def _read_jsonl(self, out_dir, rel):
+        import json
+        p = out_dir / "extracted" / rel
+        return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    def _label(self):
+        from card_labeler import LabelResult
+        return LabelResult(page_type="content", card_type="concept",
+                           lesson_id="26.1 反比例函数", title=None, textbook_page="P1")
+
+    def test_header_page_extracted_without_header(self, tmp_path):
+        # 回归（page_028）：3 页同页眉「人民教育出版社」→ 剥离后正常抽取，
+        # 页眉不进卡片内容（此前被 is_front_matter「出版社」子串误杀）
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        for i in (1, 2, 3):
+            (book / f"page_{i:03d}.md").write_text(
+                f"# 人民教育出版社\n\n{self.BODY}", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        from card_labeler import PageLabelResult
+        page_result = PageLabelResult(page_type="content", labels=[self._label()])
+        self._run(md_root, out_dir, [page_result, page_result, page_result])
+        items = self._read_jsonl(out_dir, "数学/书/page_001.jsonl")
+        assert len(items) == 1  # 3 页都应抽取，无 front matter 误杀
+        assert "人民教育出版社" not in items[0]["content"]
+        assert self.BODY[:10] in items[0]["content"]
+        assert (out_dir / "extracted" / "数学" / "书" / "page_003.jsonl").exists()
+
+    def test_watermark_footer_page_extracted(self, tmp_path):
+        # 回归（page_123 等）：页尾水印「仅供个人学习…」→ 剥离后正常抽取
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        for i in (1, 2, 3):
+            (book / f"page_{i:03d}.md").write_text(
+                f"{self.BODY}\n\n{self.FOOTER}", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        from card_labeler import PageLabelResult
+        page_result = PageLabelResult(page_type="content", labels=[self._label()])
+        self._run(md_root, out_dir, [page_result, page_result, page_result])
+        items = self._read_jsonl(out_dir, "数学/书/page_001.jsonl")
+        assert len(items) == 1
+        assert "仅供个人学习" not in items[0]["content"]
+
+    def test_chrome_computed_from_full_book_dir(self, tmp_path, capsys):
+        # --pages 只选 1 页时，chrome 仍按书目录全部页统计（频率不失真）：
+        # 书共 3 页同页眉，仅抽 page_002 也应剥掉页眉
+        md_root = tmp_path / "md"
+        book = md_root / "数学" / "书"
+        book.mkdir(parents=True)
+        for i in (1, 2, 3):
+            (book / f"page_{i:03d}.md").write_text(
+                f"## 人民教育出版社\n\n{self.BODY}", encoding="utf-8")
+        out_dir = tmp_path / "out"
+        from card_labeler import PageLabelResult
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.create_llm_client"), \
+             patch("extract_cli.CardLabeler") as mock_labeler_cls:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=md_root, output_dir=out_dir,
+                llm_api_key="fake", llm_model="m", llm_base_url=None, llm_timeout=1,
+            )
+            mock_labeler_cls.return_value.label.return_value = PageLabelResult(
+                page_type="content", labels=[self._label()])
+            from extract_cli import main
+            main(["--input-dir", str(md_root), "--output-dir", str(out_dir),
+                  "--pages", "2", "--force"])
+        items = self._read_jsonl(out_dir, "数学/书/page_002.jsonl")
+        assert len(items) == 1
+        assert "人民教育出版社" not in items[0]["content"]
+
+
 class TestExtractCliLessonId:
     """lesson_id 跨页继承 + 前置内容跳过（LLM 给标识，CLI 维护 per-book 状态）。
 
