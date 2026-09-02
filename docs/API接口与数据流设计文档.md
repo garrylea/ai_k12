@@ -123,6 +123,7 @@
 | Quota | `/api/quota` | AI 套餐额度、消耗查询与订阅状态 | AI-Agent 中枢 |
 | Billing | `/api/billing` | 订单创建、支付、优惠券、续费 | Billing Service |
 | Practice | `/api/practice` | 课堂练习答题判对错（practice 卡片） | Practice Service |
+| Training | `/api/training` | 错题练习与专项训练（辅线学习闭环：错题筛选/重做判题/提示/专项抽题） | Training Service |
 
 ---
 
@@ -379,6 +380,19 @@
 | DELETE | `/api/admin/chat/dialogues/{id}` | 删除会话（连带其消息） | MVP |
 | GET | `/api/admin/chat/messages?dialogueId=` | 会话历史消息 | MVP |
 | POST | `/api/admin/chat/stream` | SSE 流式对话（`{dialogueId, message}`；独立 `admin_dialogues`/`admin_messages` 表，**无 K12 学习边界**） | MVP |
+
+### 4.18 Training — `/api/training`
+
+错题练习与专项训练（辅线学习闭环）。全部端点 student JWT（`@Roles('student')`，家长/管理员 token 调用返回 403/1005）。判题复用 Practice 的 JudgeCore（题中心变体：训练题必来自题库，无「未命中 AI + 结构化入库」分支）。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| GET | `/api/training/error-book?subjectId={subjectId}&from={from}&to={to}&type={type}&kpId={kpId}` | 错题练习筛选列表。`subjectId` 必填 integer；`from`/`to` 可选 string（按 `created_at` 过滤，`to` 含当天即 `< to+1day`）；`type` 可选题型（JOIN `questions.type`）；`kpId` 可选 integer（EXISTS `question_knowledge_points`，非数字 400）。只返回**未清零**（`is_cleared=0`）记录；同一错题挂多 KP 时按 `errorBookId` 聚合 `kpIds` 数组。响应：`[{errorBookId, questionId(nullable), questionText, type(nullable), level, createdAt, kpIds: number[]}]`。 | MVP |
+| POST | `/api/training/judge` | 训练判题（题中心变体，JudgeCore 复用）。请求体：`{questionId, subjectId, studentAnswer, source}`；`source` 枚举 `targeted\|error_practice`（错题练习/专项练习来源，非法值 400，不透传客户端任意值）。三路由镜像 practice judge：(1) choice/true_false + fill_blank 归一化相等 -> exact 比对；(2) fill_blank 不等 / short_answer / proof -> AI JudgmentCapability 判定；(3) 答错 -> find-or-create 写入 `main_error_books`（`source` 落库为训练来源）；答对 -> 清零该题所有未清记录（不限 source）。题目不存在 400（`code=4004`）；AI 判定失败 503（`code=5001`，不写错题本）。响应：`{questionId, isCorrect, method:'exact'\|'ai', analysis(nullable), errorType(nullable, enum: logic/calculation/format/missing), errorBookId(nullable)}`。 | MVP |
+| POST | `/api/training/bump-error-levels` | 错题重做仍答错时递增严重程度（镜像 practice 的 bump-error-levels）。请求体：`{errorBookIds: number[]}`。 | MVP |
+| POST | `/api/training/hint` | 训练「提示」（AI 生成 + **题级** `question_hints` 缓存，区别于 practice 的 Card 级 `cards.hints` 缓存）。请求体：`{questionId}`；题目不存在 404。先查 `question_hints` 缓存命中直返（不调 AI）；未命中调 HintCapability 生成苏格拉底式提示（只启发不给答案）并写回缓存（题级共享，不分学生；写回失败不阻断返回）。AI 生成失败 503（`code=5001`）。响应：`{hint, cached:boolean}`。 | MVP |
+| GET | `/api/training/knowledge-points?subjectId={subjectId}` | 专项练习知识点平铺列表（`subjectId` 必填 integer；树形组装放前端，按 `parentKpId` 自行组树）。响应：`[{id, name, parentKpId(nullable), gradeBand}]`。 | MVP |
+| POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。 | MVP |
 
 ---
 
@@ -993,6 +1007,62 @@ PracticeService.getResults -> PracticeResultsRepository.findByStudentCard
   └─ reset 只删 practice_results，不碰 main_error_books（与错题本解耦）
 ```
 
+### 6.15 错题练习（训练模块）
+
+```text
+训练入口（TrainingSubjectPage）-> 错题练习
+  │
+  ▼
+ErrorPracticePage 加载 -> GET /api/training/error-book?subjectId={subjectId}
+  │  JWT -> 取 studentId；可选筛选 from/to（时间范围）/ type（题型）/ kpId（知识点）
+  ▼
+TrainingService.getErrorBookEntries
+  └─ MainErrorBooksRepository.findErrorBookEntries(studentId, subjectId, filters)
+       查 main_error_books：student_id + subject_id + is_cleared=0
+       LEFT JOIN questions 补题面（COALESCE(q.content, wrong_answer_text)）+ 题型过滤
+       kpId 过滤走 EXISTS question_knowledge_points
+       同一错题挂多 KP 出多行 -> service 层按 errorBookId 聚合 kpIds
+  ▼
+返回 [{errorBookId, questionId, questionText, type, level, createdAt, kpIds}]
+  │
+  ▼
+ErrorPracticeRunPage 逐题作答 -> POST /api/training/judge（source='error_practice'）
+  ├─ 客观题 -> exact 比对；主观题（fill_blank 不等/short_answer/proof）-> AI 判定
+  ├─ 答错 -> find-or-create 写 main_error_books（source='error_practice'）
+  └─ 答对 -> clearUnclearedByStudentQuestionId 清该题所有未清记录（不限 source）
+  答题前点「提示」-> POST /api/training/hint {questionId}
+  └─ question_hints 题级缓存命中直返；未命中 AI 生成苏格拉底式提示 + 写回
+  全部判完 -> 仍错的调 POST /api/training/bump-error-levels 递增 level
+```
+
+### 6.16 专项练习（训练模块）
+
+```text
+训练入口（TrainingSubjectPage）-> 专项练习
+  │
+  ▼
+TargetedConfigPage 加载 -> GET /api/training/knowledge-points?subjectId={subjectId}
+  └─ KnowledgePointsRepository.findBySubject 平铺列表，前端按 parentKpId 组树
+  ▼
+选知识点 + 题型（可选）+ 题数 -> POST /api/training/targeted/start
+  │  请求体 {subjectId, kpId, type, count}；count 1-20，type 白名单或 null
+  ▼
+TrainingService.startTargetedPractice
+  └─ QuestionsRepository.findRandomByKpAndType(subjectId, kpId, type?, count)
+       按 question_knowledge_points 关联 + 可选题型随机抽题（is_active=1；
+       choice/true_false 且 answer 为空的坏数据不进题单）
+  ▼
+返回 {questions: [{questionId, text, type, options}]}（白名单序列化，answer/explanation 剥离）
+  └─ 抽不到题返回空数组（前端判空显示提示）
+  │
+  ▼
+TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
+  ├─ 答错 -> find-or-create 写 main_error_books（source='targeted'）
+  └─ 答对 -> 清该题所有未清记录（与错题本清零语义一致）
+  答题前点「提示」-> POST /api/training/hint（题级缓存同 6.15）
+  （专项练习无 bump-error-levels：新错题首轮作答，无「重做仍错」语义）
+```
+
 ---
 
 ## 7. API 与前端页面对照表
@@ -1190,6 +1260,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.3 | 2026-09-03 | 新增 Training 服务分组（§4.18，MVP）：`GET /api/training/error-book`（错题练习筛选列表，未清零记录 + 多 KP 聚合）、`POST /api/training/judge`（训练判题，JudgeCore 题中心变体，source 枚举 targeted/error_practice）、`POST /api/training/bump-error-levels`（重做仍错 bump level，镜像 practice）、`POST /api/training/hint`（题级 question_hints 缓存）、`GET /api/training/knowledge-points`（专项练习 KP 平铺列表）、`POST /api/training/targeted/start`（专项随机抽题，白名单序列化防答案泄露）；`main_error_books.source` 枚举补 `targeted`/`error_practice` 训练来源；新增 §6.15 错题练习 / §6.16 专项练习数据流。openapi.yaml 同步收录 6 端点（/training/*，student JWT）。 |
 | v2.2 | 2026-09-01 | 错题清零门禁加课时范围：`GET /api/practice/uncleared-errors` 新增可选 `lessonId` 参数——传入时只返回「当前课之前」的错题（`lesson_id < lessonId`，星图同款 id 数值序），修复「学生在本课练习中答错 → 刷新本课弹出错题清零阶段」的问题（本课刚产生的错题不触发清零，留待进入下一课时再清）；`lesson_id` null 的孤儿历史行保守保留；省略参数行为不变。前端 `getUnclearedErrors(subjectId, lessonId)`、CourseDetailPage 拉取时带当前 lessonId。 |
 | v2.1 | 2026-09-01 | 家长端按学科教材配置：新增 `GET/PUT /api/parent/students/{studentId}/subject-configs(/{subjectId})`（每学科 年级/册别/版本 配置，`progress.textbook_version_id + current_semester_id` 为事实源；已开始学习且切换 → 重置该学科学习状态并返回 `reset: true`）；`GET /api/content/versions` 响应补 `edition` 字段；`GET /api/practice/uncleared-errors` 按当前教材版本过滤（家长切换教材后旧版错题不计入清零门禁）；星链图版本回退规则改为「同学段 edition 非空优先、id 降序」、册别回退按学生年级匹配 `semesters.grade`。前端新增 `/parent/students/:id/config` 配置页 + 学生卡片「学习配置」入口；StudentLayout 顶栏硬编码「三年级·数学 人教版」改为星图真实数据。 |
 | v2.0 | 2026-08-18 | 管理员中枢：新增 Admin 分组（§4.17）——模型池 CRUD + 启停（`llm_models`/`llm_routes` 落库为运行时真源，`ModelConfigRegistry` 保存即 reload 生效，支持 `openai_compatible` 自定义 OpenAI 兼容模型，apiKey AES-256-GCM 加密落库 + 打码返回）；场景路由表 GET/PUT（事务替换）+ `validate-connection` 探活；家长/学生列表搜索 + 封禁/解封（`BanRegistry` 进程内即时生效，重启从 DB 重建，封家长连带封其名下学生）；站内消息中心（`parent_messages` 广播 + `message_reads` 已读，admin 发送/撤回 + 家长侧列表/未读/标已读）；管理员 AI 聊天（独立 `admin_dialogues`/`admin_messages` 表，无 K12 学习边界，SSE 流式 `POST /api/admin/chat/stream`）；总览 dashboard；管理员改自己密码。错误码实现注补 1009=连通性测试失败（§2.4）。 |

@@ -43,6 +43,8 @@ tags:
     description: AI 额度与套餐
   - name: Practice
     description: 课堂练习判对错
+  - name: Training
+    description: 错题练习与专项训练（辅线学习闭环）
 paths:
   # Auth
   /auth/register:
@@ -3366,6 +3368,253 @@ paths:
                         type: object
                         nullable: true
 
+  # Training
+  /training/error-book:
+    get:
+      tags: [Training]
+      summary: 错题练习筛选列表
+      description: >-
+        训练模块错题列表（student JWT，@Roles('student')）。只返回未清零（is_cleared=0）
+        的 main_error_books 记录；from/to 按 created_at 过滤（to 含当天，即 < to+1day）；
+        type 过滤走 questions.type；kpId 过滤走 EXISTS question_knowledge_points。
+        同一错题挂多 KP 时按 errorBookId 聚合 kpIds 数组。
+      operationId: getTrainingErrorBook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: subjectId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: 学科 id（必填，非整数 400）
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 起始日期（含），按 created_at 过滤
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 截止日期（含当天，服务端按 < to+1day 处理）
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 题型过滤（choice/fill_blank/true_false/short_answer/proof）
+        - name: kpId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 知识点 id（专项筛选）；传非数字 400
+      responses:
+        '200':
+          description: 错题列表（未清零，多 KP 已聚合）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TrainingErrorBookEntry'
+
+  /training/judge:
+    post:
+      tags: [Training]
+      summary: 训练判题（题中心变体，JudgeCore 复用）
+      description: >-
+        错题练习/专项练习逐题判分（student JWT）。source 枚举 targeted|error_practice
+        （错题练习/专项练习来源，非法值 400，不透传客户端任意值）。三路由镜像
+        /practice/judge：(1) choice/true_false + fill_blank 归一化相等 -> exact 比对；
+        (2) fill_blank 不等 / short_answer / proof -> AI JudgmentCapability 判定；
+        (3) 答错 -> find-or-create 写 main_error_books（source 落库为训练来源）；
+        答对 -> 清零该题所有未清记录（不限 source）。训练题必来自题库（无「未命中
+        AI + 结构化入库」分支）：题目不存在 400（code=4004）；AI 判定失败 503
+        （code=5001，不写错题本）。
+      operationId: judgeTraining
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingJudgeRequest'
+      responses:
+        '200':
+          description: 判定结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/JudgeResult'
+        '400':
+          description: source 非法或题目不存在（code=4004）
+        '503':
+          description: AI 判定失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 5001
+                  message:
+                    type: string
+                    example: 判定失败，请重试
+
+  /training/bump-error-levels:
+    post:
+      tags: [Training]
+      summary: 批量递增错题严重程度（训练）
+      description: >-
+        错题重做仍答错时 level + 1 标记未掌握（镜像 /practice/bump-error-levels）。
+        请求体为 main_error_books.id 列表。
+      operationId: bumpTrainingErrorLevels
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BumpErrorLevelsRequest'
+      responses:
+        '200':
+          description: 已递增
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        nullable: true
+
+  /training/hint:
+    post:
+      tags: [Training]
+      summary: 训练提示（AI 生成 + 题级缓存）
+      description: >-
+        训练答题前点「提示」调用（student JWT）。与 /practice/hint 的 Card 级缓存
+        不同，这里走题级 question_hints 表缓存（题级共享，不分学生）：命中直返
+        （不调 AI）；未命中调 HintCapability 生成苏格拉底式提示（只启发不给答案）
+        并写回缓存（写回失败不阻断返回）。题目不存在 404；AI 生成失败 503
+        （code=5001）。
+      operationId: getTrainingHint
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingHintRequest'
+      responses:
+        '200':
+          description: 提示内容
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TrainingHintResult'
+        '404':
+          description: 题目不存在
+        '503':
+          description: AI 提示生成失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 5001
+                  message:
+                    type: string
+                    example: 提示生成失败，请重试
+
+  /training/knowledge-points:
+    get:
+      tags: [Training]
+      summary: 专项练习知识点平铺列表
+      description: >-
+        专项练习配置页的知识点数据（student JWT）。返回平铺列表，树形组装放前端
+        （按 parentKpId 自行组树）。
+      operationId: getTrainingKnowledgePoints
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: subjectId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: 学科 id
+      responses:
+        '200':
+          description: 知识点平铺列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TrainingKnowledgePoint'
+
+  /training/targeted/start:
+    post:
+      tags: [Training]
+      summary: 专项练习开练（按学科 + 知识点随机抽题）
+      description: >-
+        专项练习配置完成后开练（student JWT）。count 限 1-20 整数（越界/非整数 400）；
+        type 白名单 choice|fill_blank|true_false|short_answer|proof 或 null（不限题型，
+        非法 400）。题单白名单序列化：只出 questionId/text/type/options，
+        answer/explanation 等字段一律剥离（防答案泄露）；options 为 JSON 字符串
+        parse 后的数组（无/坏 JSON 为 null）。抽不到题返回空数组（空集合非错误，
+        前端判空显示提示）。
+      operationId: startTargetedPractice
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetedStartRequest'
+      responses:
+        '200':
+          description: 随机题单（可能为空数组）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TargetedStartResult'
+        '400':
+          description: count 越界或 type 非法
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4742,6 +4991,141 @@ components:
             type: integer
           description: 清零后仍错的 main_error_books.id 列表
       required: [errorBookIds]
+
+    TrainingErrorBookEntry:
+      type: object
+      description: 错题练习列表条目（未清零记录；同一错题挂多 KP 时按 errorBookId 聚合）
+      properties:
+        errorBookId:
+          type: integer
+          description: main_error_books.id
+        questionId:
+          type: integer
+          nullable: true
+          description: 题库题目 id（历史行未入库为 null）
+        questionText:
+          type: string
+          description: 题面（question_id 非空取 questions.content，否则取 wrong_answer_text）
+        type:
+          type: string
+          nullable: true
+          description: 题型（questions.type；题目未入库为 null）
+        level:
+          type: integer
+          description: 错题严重程度（重做仍错递增）
+        createdAt:
+          type: string
+          format: date-time
+          description: 入错题本时间（ISO 8601）
+        kpIds:
+          type: array
+          items:
+            type: integer
+          description: 该题关联的知识点 id 列表（无关联为空数组）
+      required: [errorBookId, questionId, questionText, type, level, createdAt, kpIds]
+
+    TrainingJudgeRequest:
+      type: object
+      required: [questionId, subjectId, studentAnswer, source]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（训练题必来自题库；题目不存在 400/code=4004）
+        subjectId:
+          type: integer
+          description: 学科 ID
+        studentAnswer:
+          type: string
+          description: 学生提交的答案文本
+        source:
+          type: string
+          enum: [targeted, error_practice]
+          description: 训练来源——targeted=专项练习；error_practice=错题练习（非法值 400）
+
+    TrainingHintRequest:
+      type: object
+      required: [questionId]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（题目不存在 404）
+
+    TrainingHintResult:
+      type: object
+      properties:
+        hint:
+          type: string
+          description: 苏格拉底式提示文本（只启发不给答案）
+        cached:
+          type: boolean
+          description: true=命中 question_hints 题级缓存直返（未调 AI）；false=本次 AI 新生成并已写回缓存
+
+    TrainingKnowledgePoint:
+      type: object
+      description: 专项练习知识点（平铺列表，树形组装放前端）
+      properties:
+        id:
+          type: integer
+          description: 知识点 id
+        name:
+          type: string
+          description: 知识点名称
+        parentKpId:
+          type: integer
+          nullable: true
+          description: 父知识点 id（顶级为 null，前端据此组树）
+        gradeBand:
+          type: string
+          description: 学段（primary/junior/senior）
+
+    TargetedStartRequest:
+      type: object
+      required: [subjectId, kpId, type, count]
+      properties:
+        subjectId:
+          type: integer
+          description: 学科 ID
+        kpId:
+          type: integer
+          description: 知识点 id
+        type:
+          type: string
+          nullable: true
+          enum: [choice, fill_blank, true_false, short_answer, proof]
+          description: 题型过滤；null=不限题型（白名单外取值 400）
+        count:
+          type: integer
+          minimum: 1
+          maximum: 20
+          description: 抽题数量，限 1-20 整数（越界/非整数 400）
+
+    TargetedStartResult:
+      type: object
+      properties:
+        questions:
+          type: array
+          description: 随机题单（白名单序列化，answer/explanation 剥离；抽不到题为空数组）
+          items:
+            $ref: '#/components/schemas/TargetedPracticeQuestion'
+      required: [questions]
+
+    TargetedPracticeQuestion:
+      type: object
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id
+        text:
+          type: string
+          description: 题面原文
+        type:
+          type: string
+          description: 题型（choice/fill_blank/true_false/short_answer/proof）
+        options:
+          type: array
+          items: {}
+          nullable: true
+          description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
 
     PracticeResult:
       type: object
