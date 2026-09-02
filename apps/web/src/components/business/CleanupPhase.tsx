@@ -6,10 +6,14 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { motion } from 'framer-motion';
 import { LatexEditor } from './LatexEditor';
-import { LatexPreview } from './LatexPreview';
+import { PreviewDraftPanel } from './PreviewDraftPanel';
+import { clearDraft } from './draft-store';
 import { AnswerResultList } from './AnswerResultList';
 import type { PracticeQuestion } from './AnswerModal';
 import { judgePractice, bumpErrorLevels, type PreviousErrorDetail, type JudgeResult } from '@/services/api';
+
+/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用草稿白板 */
+const MATH_SUBJECT_ID = 1;
 
 type Phase = 'answering' | 'judging' | 'allClear' | 'hasErrors';
 
@@ -84,6 +88,7 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
     const submittedAnswer = answer;
     const error = currentError;
 
+    clearDraft(`err-${error.errorBookId}`);
     setAnswer('');
 
     const p = Promise.resolve(
@@ -186,8 +191,13 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
             <div className="w-1/2 border-r border-[var(--bg-subtle)] flex flex-col">
               <LatexEditor value={answer} onChange={setAnswer} />
             </div>
+            {/* 右半区：预览 / 草稿 tab（仅数学启用草稿，PRD §7.12） */}
             <div className="w-1/2">
-              <LatexPreview value={answer} />
+              <PreviewDraftPanel
+                answer={answer}
+                questionId={`err-${currentError.errorBookId}`}
+                enabled={subjectId === MATH_SUBJECT_ID}
+              />
             </div>
           </div>
 
