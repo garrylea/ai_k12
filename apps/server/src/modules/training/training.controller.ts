@@ -1,4 +1,4 @@
-import { Controller, Get, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
 import { TrainingService } from './training.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
@@ -22,7 +22,11 @@ export class TrainingController {
     @Query('type') type?: string,
     @Query('kpId') kpIdStr?: string,
   ) {
-    const kpId = kpIdStr !== undefined && kpIdStr !== '' ? parseInt(kpIdStr, 10) : undefined;
+    let kpId: number | undefined;
+    if (kpIdStr !== undefined && kpIdStr !== '') {
+      kpId = parseInt(kpIdStr, 10);
+      if (Number.isNaN(kpId)) throw new BadRequestException('kpId 非法');
+    }
     const filters: ErrorBookQueryDto = { from, to, type, kpId };
     return this.trainingService.getErrorBookEntries(user.sub, subjectId, filters);
   }
