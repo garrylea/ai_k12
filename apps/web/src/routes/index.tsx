@@ -7,6 +7,7 @@ import StarMapPage from '@/pages/student/StarMapPage';
 import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
 import ConversationManagePage from '@/pages/student/ConversationManagePage';
+import TrainingSubjectPage from '@/pages/student/TrainingSubjectPage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
@@ -123,6 +124,15 @@ const router = createBrowserRouter([
     element: (
       <RequireRole role="student">
         <ConversationManagePage />
+      </RequireRole>
+    ),
+  },
+  // 训练轨（全屏沉浸层，独立于 StudentLayout，物理隔离；三轨入口之一）
+  {
+    path: '/student/training',
+    element: (
+      <RequireRole role="student">
+        <TrainingSubjectPage />
       </RequireRole>
     ),
   },

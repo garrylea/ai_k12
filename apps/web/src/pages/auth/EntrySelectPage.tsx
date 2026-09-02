@@ -33,6 +33,20 @@ const HelpCircleIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   </svg>
 );
 
+const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M6.5 6.5v11M17.5 6.5v11M3 9v6M21 9v6M6.5 12h11" />
+  </svg>
+);
+
 export default function EntrySelectPage() {
   const navigate = useNavigate();
   const reduceMotion = useReducedMotion();
@@ -62,9 +76,9 @@ export default function EntrySelectPage() {
         <LogoutButton username={username} />
       </header>
 
-      {/* 2. 中部：双入口大卡（两卡视觉一致，靠文字「学习/答疑」区分） */}
+      {/* 2. 中部：三入口大卡（三卡视觉一致，靠文字「学习/答疑/训练」区分） */}
       <main className="w-full max-w-3xl my-auto py-10 flex flex-col items-center">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
           {/* 学习：主入口 */}
           <motion.button
             initial={reduceMotion ? false : { opacity: 0, y: 12 }}
@@ -132,6 +146,40 @@ export default function EntrySelectPage() {
             </div>
             <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
               答疑
+            </span>
+          </motion.button>
+
+          {/* 训练：第三轨入口（品牌橘红系渐变，更亮，与学习卡同色系区分文字「训练」） */}
+          <motion.button
+            initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut', delay: 0.16 }}
+            whileHover={reduceMotion ? undefined : { y: -4 }}
+            onClick={() => navigate('/student/training')}
+            className="h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
+            style={{
+              border: '1px solid rgba(226, 232, 240, 0.8)',
+              boxShadow: 'var(--shadow-card)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = 'var(--shadow-card)';
+            }}
+            aria-label="进入训练"
+          >
+            <div
+              className="w-20 h-20 rounded-2xl flex items-center justify-center text-white shadow-sm"
+              style={{
+                background: 'linear-gradient(to top right, #FF6B35, #FFB25A)',
+              }}
+              aria-hidden="true"
+            >
+              <DumbbellIcon />
+            </div>
+            <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
+              训练
             </span>
           </motion.button>
         </div>
