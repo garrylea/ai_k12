@@ -25,6 +25,7 @@
 |---|---|
 | 入口结构 | 入口选择页由双轨改**三轨**：【学习】【答疑】【训练】；训练 → 学科选择（数学）→ 考试/专项/错题 |
 | 专项数据源 | 新增 LLM 题目知识点标注环节（管线目前只标题型+难度，无标注） |
+| KP 树来源 | 知识点树由 **LLM 整理总结**生成（非人工逐条编写），人工仅生成后快速过目纠偏 |
 | 错题入本 | 考试、专项练习答错的题**全部自动入错题本**（source 区分来源） |
 | 考试时长 | 用户选时长（60/90/120 分钟档，系统给推荐值） |
 | 判分方式 | 只算对错（X/Y 题 + 正确率），不算分数 |
@@ -54,6 +55,7 @@
 新目录 `apps/web/src/components/business/answer/`：
 
 - **`QuestionRunner.tsx`** — 从 AnswerModal / CleanupPhase 提取共同核心（题面 ReactMarkdown+KaTeX 渲染、LatexEditor + PreviewDraftPanel 双栏、fire-and-forget 判题 + pending 进度追踪、judging 等待态）。
+- **草稿能力内置于组件**：PreviewDraftPanel（预览/草稿白板 tab，含 `DraftWhiteboard`）作为 QuestionRunner 的一部分一并抽取，数学 subjectId 启用（与现有 AnswerModal 行为一致）；`draftKeyPrefix` 驱动草稿存储隔离（exam-3 / err-88 各自独立草稿，切题不丢、刷新可恢复），考试中途换题草稿保留、交卷后清理。
 
 ```ts
 interface RunnerQuestion { n: string; text: string; type?: string; options?: Array<{label: string; text: string}> }
@@ -116,7 +118,7 @@ ALTER TABLE questions ADD COLUMN paper_id BIGINT DEFAULT NULL,
 
 ### 6.2 知识点标注管线
 
-1. **KP 种子**：人工整理初中数学两级知识点树约 100–150 个（数与式/方程与不等式/函数/三角形/四边形/圆/图形变换/统计与概率…），落 `tools/db/seeds/math_knowledge_points.sql`（INSERT IGNORE，subject_id/parent_kp_id/name/code/grade_band='junior'），install_mysql.sh 追加执行。
+1. **KP 种子（LLM 生成）**：用大语言模型整理总结初中数学两级知识点树（prompt 按课程标准梳理：数与式/方程与不等式/函数/三角形/四边形/圆/图形变换/统计与概率等一级分类 + 二级展开，规模以 LLM 输出为准），由脚本将 LLM 输出转成 `tools/db/seeds/math_knowledge_points.sql`（INSERT IGNORE，subject_id/parent_kp_id/name/code/grade_band='junior'），install_mysql.sh 追加执行。生成流程走本地/远程 LLM（复用 `.env` 的 `LLM_BASE_URL`/`LLM_AUTH_TOKEN`），一次性离线任务，人工仅做生成后的快速过目纠偏，不做逐条人工编写。
 2. **标注脚本**：`tools/data-refinery/` 新增 `backfill_question_kps.py`——遍历 `question_knowledge_points` 无记录的题目，每批 ~10 题调本地 llama.cpp（`create_llm_client`，`LLM_BASE_URL`/`LLM_AUTH_TOKEN`，**勿用 ANTHROPIC_***），prompt 附 KP 白名单（id+name），每题输出 1–3 个 kp_id，白名单校验（非法丢弃/重试，复用 card_labeler 思路），`INSERT IGNORE` 写 `question_knowledge_points`（role='primary'）。
 3. **幂等**：已有 qkp 行的题跳过，重跑安全；失败题打印清单可重跑。存量题一次回填，新题增量重跑。
 4. **质量验收**：标注结果抽样人工校对后再开放专项筛选维度。
