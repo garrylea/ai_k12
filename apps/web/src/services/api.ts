@@ -823,3 +823,39 @@ export function getTrainingHint(questionId: number): Promise<HintResult> {
     body: JSON.stringify({ questionId }),
   });
 }
+
+// --- Training: targeted practice（专项练习，Task 8 端点） ---
+
+export interface TrainingKnowledgePoint {
+  id: number;
+  name: string;
+  parentKpId: number | null;
+  gradeBand: string;
+}
+
+/** 专项练习 KP 树：后端平铺透传（parentKpId 为 null 是一级），树形组装放前端。 */
+export function getKnowledgePoints(subjectId: number): Promise<TrainingKnowledgePoint[]> {
+  const qs = new URLSearchParams({ subjectId: String(subjectId) });
+  return fetchApi<TrainingKnowledgePoint[]>(`/training/knowledge-points?${qs.toString()}`);
+}
+
+/** 专项练习题单条目：白名单序列化（无 answer/explanation），options 为 JSON 数组（字符串选项）。 */
+export interface TargetedPracticeQuestion {
+  questionId: number;
+  text: string;
+  type: string;
+  options: unknown[] | null;
+}
+
+/** 专项练习开练：type 为 null 表示不限题型；抽不到题返回空数组（前端判空提示）。 */
+export function startTargetedPractice(payload: {
+  subjectId: number;
+  kpId: number;
+  type: string | null;
+  count: number;
+}): Promise<{ questions: TargetedPracticeQuestion[] }> {
+  return fetchApi<{ questions: TargetedPracticeQuestion[] }>('/training/targeted/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

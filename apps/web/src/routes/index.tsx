@@ -10,6 +10,8 @@ import ConversationManagePage from '@/pages/student/ConversationManagePage';
 import TrainingSubjectPage from '@/pages/student/TrainingSubjectPage';
 import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage';
+import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
+import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
@@ -153,6 +155,24 @@ const router = createBrowserRouter([
     element: (
       <RequireRole role="student">
         <ErrorPracticeRunPage />
+      </RequireRole>
+    ),
+  },
+  // 专项练习配置页（全屏沉浸层，独立于 StudentLayout，与 errors 同层）
+  {
+    path: '/student/training/targeted',
+    element: (
+      <RequireRole role="student">
+        <TargetedConfigPage />
+      </RequireRole>
+    ),
+  },
+  // 专项练习答题页（全屏沉浸层；题单经 sessionStorage 交接，空题单自动踢回配置页）
+  {
+    path: '/student/training/targeted/run',
+    element: (
+      <RequireRole role="student">
+        <TargetedRunPage />
       </RequireRole>
     ),
   },

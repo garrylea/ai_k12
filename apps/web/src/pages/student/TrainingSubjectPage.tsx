@@ -34,8 +34,8 @@ export default function TrainingSubjectPage() {
 
   const handleSelect = (subject: TrainingSubject) => {
     if (!subject.enabled) return;
-    // 考试为训练默认落地页；子路由由训练模块后续 task 挂载
-    navigate('/student/training/exam');
+    // 专项练习为训练默认落地页（考试入口在专项页顶栏，占位路由保留）
+    navigate('/student/training/targeted');
   };
 
   return (

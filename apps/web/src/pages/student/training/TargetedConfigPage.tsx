@@ -1,0 +1,320 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { BackButton, Button, Card, Skeleton } from '@/components/base';
+import {
+  getKnowledgePoints,
+  startTargetedPractice,
+  type TrainingKnowledgePoint,
+} from '@/services/api';
+import { useThemeStore } from '@/store/themeStore';
+
+/** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
+const MATH_SUBJECT_ID = 1;
+
+/** 题型枚举与后端 questions.type 一致；空串 = 全部（payload type 传 null）。 */
+const TYPE_OPTIONS = [
+  { value: '', label: '全部' },
+  { value: 'choice', label: '选择' },
+  { value: 'fill_blank', label: '填空' },
+  { value: 'true_false', label: '判断' },
+  { value: 'short_answer', label: '解答' },
+  { value: 'proof', label: '证明' },
+] as const;
+
+/** 题量档（后端限 1-20，取常用四档）。 */
+const COUNT_OPTIONS = [3, 5, 8, 10] as const;
+
+const selectClassName =
+  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] ' +
+  'bg-[var(--bg-card)] text-[var(--text-primary)] text-sm ' +
+  'focus:outline-none focus:ring-2 focus:ring-[var(--brand-100)]';
+
+/** 一级知识点 Chip（单选）。 */
+function KpChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        'h-10 px-4 rounded-full border text-sm font-medium transition-colors ' +
+        (active
+          ? 'border-[var(--brand-500)] bg-[var(--brand-500)] text-[var(--text-on-brand)]'
+          : 'border-[var(--bg-subtle)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-[var(--brand-500)]')
+      }
+    >
+      {label}
+    </button>
+  );
+}
+
+/** 二级知识点列表项（单选）。 */
+function KpListItem({
+  name,
+  active,
+  onClick,
+}: {
+  name: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        'flex items-center gap-3 rounded-[var(--radius-card)] border px-4 py-3 text-left text-sm transition-colors ' +
+        (active
+          ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--text-primary)]'
+          : 'border-[var(--bg-subtle)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:border-[var(--brand-500)]')
+      }
+    >
+      <span
+        className={
+          'w-4 h-4 shrink-0 rounded-full border-2 ' +
+          (active ? 'border-[var(--brand-500)] bg-[var(--brand-500)]' : 'border-[var(--bg-subtle)]')
+        }
+        aria-hidden="true"
+      />
+      <span className="min-w-0 truncate">{name}</span>
+    </button>
+  );
+}
+
+export default function TargetedConfigPage() {
+  const navigate = useNavigate();
+  const { mode, autoToggleNightMode } = useThemeStore();
+
+  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像 Task 4 错题练习页用法）
+  useEffect(() => {
+    autoToggleNightMode();
+    const t = setInterval(autoToggleNightMode, 60000);
+    return () => clearInterval(t);
+  }, [autoToggleNightMode]);
+
+  // KP 平铺列表（mount 拉一次）
+  const [kps, setKps] = useState<TrainingKnowledgePoint[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // 级联选择状态
+  const [parentKpId, setParentKpId] = useState<number | null>(null);
+  const [childKpId, setChildKpId] = useState<number | null>(null);
+
+  // 题型 / 题量
+  const [type, setType] = useState('');
+  const [count, setCount] = useState<number>(5);
+
+  // 开练状态
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [emptyHint, setEmptyHint] = useState(false);
+
+  const loadKps = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const data = await getKnowledgePoints(MATH_SUBJECT_ID);
+      setKps(data);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : '加载知识点失败');
+      setKps([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadKps();
+  }, [loadKps]);
+
+  // 平铺列表 -> 一级 / 当前一级的二级
+  const parentKps = useMemo(
+    () => (kps ?? []).filter((k) => k.parentKpId == null),
+    [kps],
+  );
+  const childKps = useMemo(
+    () => (kps ?? []).filter((k) => k.parentKpId === parentKpId),
+    [kps, parentKpId],
+  );
+
+  const selectParent = (id: number) => {
+    if (parentKpId === id) return;
+    setParentKpId(id);
+    // 切一级必清二级（不同一级下二级 id 不重叠，但语义上重置更明确）
+    setChildKpId(null);
+    setEmptyHint(false);
+  };
+
+  const canStart = parentKpId != null && childKpId != null && !starting;
+
+  const startPractice = async () => {
+    if (!canStart || childKpId == null) return;
+    setStarting(true);
+    setStartError(null);
+    setEmptyHint(false);
+    try {
+      const res = await startTargetedPractice({
+        subjectId: MATH_SUBJECT_ID,
+        kpId: childKpId,
+        type: type || null,
+        count,
+      });
+      if (res.questions.length === 0) {
+        // 空集合非错误：提示后留在配置页，学生可换专项/题型再试
+        setEmptyHint(true);
+        return;
+      }
+      // 题单交给 run 页（读后即删），避免 URL 超长
+      sessionStorage.setItem('training:targeted', JSON.stringify(res.questions));
+      navigate('/student/training/targeted/run');
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : '开练失败，请重试');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <div className="student-theme-container" data-theme={mode} data-school="junior">
+      <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
+        <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pb-16">
+          {/* 顶栏 */}
+          <header className="flex items-center gap-4 border-b border-[var(--bg-subtle)] py-5">
+            <BackButton to="/student/training" label="返回训练" />
+            <h1 className="text-2xl font-bold tracking-tight">专项练习</h1>
+            {/* 考试入口占位页保持可达（训练模块后续 task 替换为真考试页） */}
+            <Link
+              to="/student/training/exam"
+              className="ml-auto text-sm font-medium text-[var(--brand-500)] hover:underline"
+            >
+              考试
+            </Link>
+          </header>
+
+          {/* 配置区 */}
+          <Card className="mt-6 space-y-6">
+            {/* 知识点两级选择 */}
+            <section aria-label="知识点选择">
+              <h2 className="text-sm font-semibold text-[var(--text-secondary)] mb-3">知识点</h2>
+              {kps == null && !loadError ? (
+                <div className="space-y-3">
+                  <Skeleton width="40%" height={14} />
+                  <Skeleton height={40} />
+                </div>
+              ) : loadError ? (
+                <div className="flex items-center gap-4">
+                  <p className="text-sm text-[var(--text-secondary)]">{loadError}</p>
+                  <Button variant="secondary" size="sm" onClick={() => void loadKps()}>
+                    重试
+                  </Button>
+                </div>
+              ) : parentKps.length === 0 ? (
+                <p className="text-sm text-[var(--text-secondary)]">暂无可选知识点</p>
+              ) : (
+                <div className="space-y-4">
+                  {/* 一级 Chip 组（单选） */}
+                  <div className="flex flex-wrap gap-2">
+                    {parentKps.map((kp) => (
+                      <KpChip
+                        key={kp.id}
+                        label={kp.name}
+                        active={parentKpId === kp.id}
+                        onClick={() => selectParent(kp.id)}
+                      />
+                    ))}
+                  </div>
+                  {/* 二级列表（单选；未选一级时提示引导） */}
+                  {parentKpId != null &&
+                    (childKps.length === 0 ? (
+                      <p className="text-sm text-[var(--text-tertiary)]">
+                        该专项下暂无细分知识点
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {childKps.map((kp) => (
+                          <KpListItem
+                            key={kp.id}
+                            name={kp.name}
+                            active={childKpId === kp.id}
+                            onClick={() => setChildKpId(kp.id)}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </section>
+
+            {/* 题型 + 题量 */}
+            <section className="flex flex-wrap items-end gap-6" aria-label="题型与题量">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-[var(--text-secondary)]">题型</span>
+                <select
+                  value={type}
+                  onChange={(e) => {
+                    setType(e.target.value);
+                    setEmptyHint(false);
+                  }}
+                  className={selectClassName}
+                  aria-label="题型筛选"
+                >
+                  {TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-[var(--text-secondary)]">题量</span>
+                <div className="flex flex-wrap gap-2">
+                  {COUNT_OPTIONS.map((c) => (
+                    <KpChip
+                      key={c}
+                      label={`${c} 题`}
+                      active={count === c}
+                      onClick={() => {
+                        setCount(c);
+                        setEmptyHint(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* 开练 + 反馈 */}
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center gap-4">
+                <Button
+                  variant="primary"
+                  size="lg"
+                  loading={starting}
+                  disabled={!canStart}
+                  onClick={() => void startPractice()}
+                >
+                  开始练习
+                </Button>
+                {parentKpId != null && childKpId == null && !starting && (
+                  <span className="text-xs text-[var(--text-tertiary)]">
+                    请先选择细分知识点
+                  </span>
+                )}
+              </div>
+              {emptyHint && (
+                <p className="text-sm text-[var(--text-secondary)]">该专项暂无足够题目</p>
+              )}
+              {startError && (
+                <p className="text-sm text-[var(--error)]">{startError}</p>
+              )}
+            </section>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
