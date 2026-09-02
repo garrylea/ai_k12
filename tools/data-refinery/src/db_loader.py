@@ -285,6 +285,7 @@ from lesson_anchor import (  # noqa: E402
     parse_chapter_from_content,
     parse_chapter_from_label,
 )
+from paper_meta import PaperMeta  # noqa: E402
 
 
 class DbLoader:
@@ -1063,28 +1064,75 @@ class DbLoader:
              c.get("textbook_page")),
         )
 
-    def load_questions(self, questions: list[dict]) -> int:
+    def _find_or_create_paper(self, meta: PaperMeta, subject_id: int, source_key: str) -> int:
+        """按 source_key 唯一键 find-or-create exam_papers，返回 paper_id。
+
+        source_key = published JSONL 相对路径（去 .jsonl），幂等键（同 4 元组 edition 思路）。
+        """
+        row = self._query(
+            "SELECT id FROM exam_papers WHERE source_key=%s LIMIT 1", (source_key,))
+        if row:
+            return int(row[0][0])
+        self._exec(
+            "INSERT INTO exam_papers (subject_id, title, grade, grade_band, semester, "
+            "year, district, exam_type, source_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (subject_id, meta.title, meta.grade, meta.grade_band, meta.semester,
+             meta.year, meta.district, meta.exam_type, source_key),
+        )
+        return int(self._query("SELECT LAST_INSERT_ID()")[0][0])
+
+    def find_or_create_paper_from_meta(self, meta: PaperMeta, source_key: str) -> int:
+        """CLI 便捷入口：meta.subject（路径首段，中文学科名）归一到 code 再 find-or-create。"""
+        code = _subject_code_by_name_fallback(normalize_subject(meta.subject))
+        return self._find_or_create_paper(meta, self._subject_id_by_code(code), source_key)
+
+    def load_questions(self, questions: list[dict],
+                       paper: tuple[PaperMeta, int] | None = None) -> int:
+        """入库题目；paper 非 None 时同步按行序归组（写 paper_questions）。
+
+        - 去重：content_hash 命中已有题则复用（不动 questions 行），跨卷重复题
+          两卷共享同一 question 行（INSERT IGNORE paper_questions，主键 (paper_id,
+          question_id) 保证重跑幂等）。
+        - question_no = JSONL 行序 1..n（原卷全局题号，非 group_order）。
+        - paper=None：无试卷上下文的调用方，行为与旧版完全一致。
+        返回新插入题数（不含复用）。
+        """
         count = 0
-        for q in questions:
+        linked = 0
+        for i, q in enumerate(questions, 1):
             sid = self._subject_id_by_code(normalize_subject(q.get("subject_id")))
             opts = q.get("options")
             content = q.get("content") or ""
             chash = content_hash(content)
-            # 去重：content_hash 命中已有题则复用，跳过插入（PRD §7.10）
-            if self._query("SELECT id FROM questions WHERE content_hash=%s LIMIT 1", (chash,)):
-                continue
+            # 去重：content_hash 命中已有题则复用（PRD §7.10）
+            row = self._query("SELECT id FROM questions WHERE content_hash=%s LIMIT 1", (chash,))
+            if row:
+                qid = int(row[0][0])
+            else:
+                self._exec(
+                    "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, "
+                    "content, options, answer, explanation, material_text, material_url, "
+                    "grade_band, source, source_year, content_hash) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
+                     content,
+                     json.dumps(opts, ensure_ascii=False) if opts is not None else None,
+                     q.get("answer") or "", q.get("explanation"), q.get("material_text"),
+                     q.get("material_url"), q.get("grade_band"), q.get("source"), q.get("source_year"),
+                     chash),
+                )
+                qid = int(self._query("SELECT LAST_INSERT_ID()")[0][0])
+                count += 1
+            if paper is not None:
+                self._exec(
+                    "INSERT IGNORE INTO paper_questions "
+                    "(paper_id, question_id, question_no, group_id, group_order) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (paper[1], qid, i, q.get("group_id"), q.get("group_order")),
+                )
+                linked += 1
+        if paper is not None:
             self._exec(
-                "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, "
-                "content, options, answer, explanation, material_text, material_url, "
-                "grade_band, source, source_year, content_hash) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
-                 content,
-                 json.dumps(opts, ensure_ascii=False) if opts is not None else None,
-                 q.get("answer") or "", q.get("explanation"), q.get("material_text"),
-                 q.get("material_url"), q.get("grade_band"), q.get("source"), q.get("source_year"),
-                 chash),
-            )
-            count += 1
+                "UPDATE exam_papers SET question_count=%s WHERE id=%s", (linked, paper[1]))
         self._conn.commit()
         return count

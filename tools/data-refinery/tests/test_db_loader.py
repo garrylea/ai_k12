@@ -698,3 +698,123 @@ class TestAnchorCorrection:
         ]
         n, inserted = self._run(cards)
         assert n == 2  # 仅对齐卡入库
+
+
+# ---------- 试卷归组（exam_papers / paper_questions） ----------
+
+def _make_loader_seq(query_sequences: dict):
+    """同 _make_loader 思路，但 _query 按 SQL 片段匹配、依序弹出预设结果
+    （同一片段多次查询可返回不同结果，如 content_hash 先 miss 后 hit），
+    并额外 stub _exec / _conn.commit（load_questions 写路径需要）。"""
+    from collections import deque
+
+    from db_loader import DbLoader
+    loader = DbLoader.__new__(DbLoader)
+    queries: list = []
+    seqs = {frag: deque(rows) for frag, rows in query_sequences.items()}
+
+    def fake_query(sql, args=None):
+        queries.append((sql, args))
+        for frag, dq in seqs.items():
+            if frag in sql:
+                return dq.popleft() if dq else []
+        return []
+
+    def fake_exec(sql, args=None):
+        queries.append((sql, args))
+
+    loader._query = fake_query
+    loader._exec = fake_exec
+    loader._delete = lambda sql, args=None: 0
+    loader._subj_code, loader._subj_name, loader._tv = {}, {}, {}
+    loader._sem, loader._unit, loader._lesson = {}, {}, {}
+    loader._conn = type("C", (), {"commit": staticmethod(lambda: None)})()
+    return loader, queries
+
+
+def _paper_meta(**overrides):
+    from paper_meta import PaperMeta
+    kwargs = dict(subject="数学", grade="初三", grade_band="junior", semester="second",
+                  year=2024, district="海淀", exam_type="模拟二", file_type="试卷",
+                  title="2024 海淀 初三 模拟二")
+    kwargs.update(overrides)
+    return PaperMeta(**kwargs)
+
+
+class TestFindOrCreatePaper:
+    def test_inserts_when_missing(self):
+        loader, queries = _make_loader_seq({
+            "FROM exam_papers WHERE source_key": [[]],
+            "LAST_INSERT_ID": [[(99,)]],
+        })
+        meta = _paper_meta()
+        pid = loader._find_or_create_paper(meta, 1, "数学/初中/second/2024/xx-试卷")
+        assert pid == 99
+        inserts = [a for sql, a in queries if sql.startswith("INSERT INTO exam_papers")]
+        assert len(inserts) == 1
+        # 参数含 source_key 与元数据字段
+        assert inserts[0][-1] == "数学/初中/second/2024/xx-试卷"
+        assert inserts[0][0] == 1  # subject_id
+        assert inserts[0][1] == meta.title
+
+    def test_hit_returns_existing_without_insert(self):
+        loader, queries = _make_loader_seq({
+            "FROM exam_papers WHERE source_key": [[(7,)]],
+        })
+        pid = loader._find_or_create_paper(_paper_meta(), 1, "k")
+        assert pid == 7
+        assert all(not sql.startswith("INSERT INTO exam_papers") for sql, _ in queries)
+
+    def test_from_meta_maps_chinese_subject_to_code(self):
+        """meta.subject 是中文学科名（路径首段），须经 name->code 映射查 subjects。"""
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM exam_papers WHERE source_key": [[(7,)]],
+        })
+        pid = loader.find_or_create_paper_from_meta(_paper_meta(), "k")
+        assert pid == 7
+        subj_args = [a for sql, a in queries if "FROM subjects WHERE code" in sql]
+        assert subj_args == [("math",)]
+
+
+class TestLoadQuestionsPaperGrouping:
+    QS = [
+        {"subject_id": "math", "content": "题干一", "type": "choice",
+         "group_id": "一", "group_order": 1},
+        {"subject_id": "math", "content": "题干二", "type": "choice",
+         "group_id": "一", "group_order": 2},
+    ]
+
+    def test_new_and_reused_questions_linked_in_line_order(self):
+        # 题干一 hash miss -> INSERT questions + LAST_INSERT_ID；题干二 hash hit -> 复用 123
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],          # 之后走 _subj_code 缓存
+            "FROM questions WHERE content_hash": [[], [(123,)]],
+            "LAST_INSERT_ID": [[(501,)]],
+        })
+        n = loader.load_questions(self.QS, paper=(_paper_meta(), 9))
+        assert n == 1  # 返回值语义：新插入题数
+        # 新题只 INSERT questions 一次；命中题不动 questions 行
+        q_inserts = [sql for sql, _ in queries if sql.startswith("INSERT INTO questions ")]
+        assert len(q_inserts) == 1
+        # 两题都写 paper_questions，question_no 按 JSONL 行序 1..n
+        pq = [a for sql, a in queries if "INSERT IGNORE INTO paper_questions" in sql]
+        assert pq == [
+            (9, 501, 1, "一", 1),   # 新题：qid 来自 LAST_INSERT_ID
+            (9, 123, 2, "一", 2),   # 复用题：qid 来自 content_hash 命中
+        ]
+        # 结束时刷新 question_count（含复用题，共 2）
+        upd = [a for sql, a in queries if "UPDATE exam_papers SET question_count" in sql]
+        assert upd == [(2, 9)]
+
+    def test_paper_none_no_paper_sql(self):
+        """paper=None（无试卷上下文）：行为与旧版完全一致，零 paper SQL。"""
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM questions WHERE content_hash": [[]],
+            "LAST_INSERT_ID": [[(501,)]],
+        })
+        n = loader.load_questions(self.QS[:1])
+        assert n == 1
+        assert all("exam_papers" not in sql and "paper_questions" not in sql
+                   for sql, _ in queries)

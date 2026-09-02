@@ -13,6 +13,7 @@ from pathlib import Path
 
 from config import RefineryConfig
 from db_loader import DbLoader
+from paper_meta import parse_paper_meta
 
 
 def parse_args(argv=None):
@@ -190,9 +191,19 @@ def main(argv=None):
         total_q = 0
         for p in q_files:
             qs = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
-            n = loader.load_questions(qs)
+            rel = p.relative_to(published_dir).as_posix()
+            meta = parse_paper_meta(rel)
+            paper_ctx = None
+            if meta is not None and meta.file_type == "试卷":
+                source_key = rel[: -len(".jsonl")]
+                paper_id = loader.find_or_create_paper_from_meta(meta, source_key)
+                paper_ctx = (meta, paper_id)
+            elif meta is None:
+                print(f"[WARN] {rel}: 无法解析试卷元数据，题目照常入库但不归组", flush=True)
+            n = loader.load_questions(qs, paper=paper_ctx)
             total_q += n
-            print(f"[ok] {p.relative_to(published_dir)} -> {n} questions", flush=True)
+            print(f"[ok] {rel} -> {n} questions"
+                  + (f"（paper={paper_ctx[1]}）" if paper_ctx else ""), flush=True)
 
         print(f"Loaded: {total_cards} cards, {total_q} questions"
               + (f"（{failed_books} 本书因业务数据守卫被跳过）" if failed_books else ""),
