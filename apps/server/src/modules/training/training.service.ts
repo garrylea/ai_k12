@@ -2,6 +2,7 @@ import { Injectable, Logger, HttpException, NotFoundException } from '@nestjs/co
 import { JudgeCoreService } from '../practice/judge-core.service.js';
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
+import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
 import { QuestionHintsRepository } from '../../database/repositories/question-hints.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
@@ -9,7 +10,8 @@ import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-quer
 /**
  * 错题训练模块 service。
  *
- * 错题练习筛选列表（Task 1）+ 判题/仍错 bump（Task 2）+ 提示缓存（Task 3）。
+ * 错题练习筛选列表（Task 1）+ 判题/仍错 bump（Task 2）+ 提示缓存（Task 3）
+ * + 专项练习 KP 树 / 随机抽题（Task 8）。
  */
 @Injectable()
 export class TrainingService {
@@ -19,6 +21,7 @@ export class TrainingService {
     private readonly mainErrorRepo: MainErrorBooksRepository,
     private readonly judgeCore: JudgeCoreService,
     private readonly questionsRepo: QuestionsRepository,
+    private readonly knowledgePointsRepo: KnowledgePointsRepository,
     private readonly questionHintsRepo: QuestionHintsRepository,
     private readonly hint: HintCapability,
   ) {}
@@ -100,5 +103,51 @@ export class TrainingService {
         503,
       );
     }
+  }
+
+  /** 专项练习 KP 树：平铺列表透传（树形组装放前端）。 */
+  async getKnowledgePoints(
+    subjectId: number,
+  ): Promise<Array<{ id: number; name: string; parentKpId: number | null; gradeBand: string }>> {
+    return this.knowledgePointsRepo.findBySubject(subjectId);
+  }
+
+  /**
+   * 专项练习开练：按学科 + 知识点（可选题型）随机抽题。
+   * 题单做白名单序列化——只出 questionId/text/type/options，answer/explanation
+   * 等字段一律剥离（防答案泄露）；options 是 JSON 字符串，parse 成数组返回。
+   * 抽不到题返回空数组（空集合非错误，前端判空显示提示）。
+   */
+  async startTargetedPractice(input: {
+    subjectId: number;
+    kpId: number;
+    type: string | null;
+    count: number;
+  }): Promise<{ questions: Array<{ questionId: number; text: string; type: string; options: unknown[] | null }> }> {
+    const rows = await this.questionsRepo.findRandomByKpAndType(
+      input.subjectId,
+      input.kpId,
+      input.type,
+      input.count,
+    );
+    return {
+      questions: rows.map((q) => ({
+        questionId: q.id,
+        text: q.content,
+        type: q.type,
+        options: parseOptions(q.options),
+      })),
+    };
+  }
+}
+
+/** options JSON 字符串安全解析：null/空串/非数组/坏 JSON 一律返回 null。 */
+function parseOptions(raw: string | null): unknown[] | null {
+  if (raw == null || raw === '') return null;
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v : null;
+  } catch {
+    return null;
   }
 }

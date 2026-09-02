@@ -64,4 +64,26 @@ export class QuestionsRepository {
       [questionId, knowledgePointId, role],
     );
   }
+
+  /**
+   * 专项练习随机抽题（训练模块 Task 8）：按学科 + 知识点（JOIN qkp）随机取 count 题。
+   * type 传 null 时不过滤题型；choice/true_false 空答案题一律排除（终审备忘：
+   * 判不了对的题不进专项练习）。
+   */
+  async findRandomByKpAndType(
+    subjectId: number,
+    kpId: number,
+    type: string | null,
+    count: number,
+  ): Promise<QuestionRow[]> {
+    const typeFilter = type != null ? ' AND q.type = ?' : '';
+    const sql = `SELECT q.* FROM questions q
+      JOIN question_knowledge_points qkp ON qkp.question_id = q.id
+      WHERE q.subject_id = ? AND qkp.knowledge_point_id = ? AND q.is_active = 1${typeFilter}
+        AND NOT (q.type IN ('choice','true_false') AND q.answer = '')
+      ORDER BY RAND() LIMIT ?`;
+    const params = type != null ? [subjectId, kpId, type, count] : [subjectId, kpId, count];
+    const [rows] = await this.pool.execute<RowDataPacket[]>(sql, params);
+    return rows as QuestionRow[];
+  }
 }

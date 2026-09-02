@@ -7,6 +7,7 @@ export { ErrorRedoLogsRepository } from './error-redo-logs.repo.js';
 export { ExtractTasksRepository } from './extract-tasks.repo.js';
 export { LlmModelsRepository } from './llm-models.repo.js';
 export { LlmRoutesRepository } from './llm-routes.repo.js';
+export { KnowledgePointsRepository } from './knowledge-points.repo.js';
 export { MainErrorBooksRepository } from './main-error-books.repo.js';
 export { ParentMessagesRepository } from './parent-messages.repo.js';
 export { ParentsRepository } from './parents.repo.js';

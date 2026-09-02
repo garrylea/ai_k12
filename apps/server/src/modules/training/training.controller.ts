@@ -13,6 +13,9 @@ import type { JudgeTrainingDto } from './dto/judge-training.dto.js';
 export class TrainingController {
   constructor(private readonly trainingService: TrainingService) {}
 
+  /** 专项练习允许的题型白名单（null = 不过滤题型）。 */
+  private static readonly TARGETED_TYPES = ['choice', 'fill_blank', 'true_false', 'short_answer', 'proof'] as const;
+
   /** 错题练习筛选列表：subjectId 必填；from/to/type 可选 string，kpId 可选 number。 */
   @Get('error-book')
   async getErrorBookEntries(
@@ -60,5 +63,34 @@ export class TrainingController {
   @Post('hint')
   async hint(@Body() dto: { questionId: number }, @CurrentUser() user: JwtUser) {
     return this.trainingService.getHint({ questionId: dto.questionId });
+  }
+
+  /** 专项练习 KP 树：平铺列表（树形组装放前端）。 */
+  @Get('knowledge-points')
+  async getKnowledgePoints(@Query('subjectId', ParseIntPipe) subjectId: number) {
+    return this.trainingService.getKnowledgePoints(subjectId);
+  }
+
+  /** 专项练习开练：count 限 1-20 整数，type 限白名单六值（含 null），越界/非法 400。 */
+  @Post('targeted/start')
+  async startTargetedPractice(
+    @Body() dto: { subjectId: number; kpId: number; type: string | null; count: number },
+  ) {
+    const { count } = dto;
+    if (!Number.isInteger(count) || count < 1 || count > 20) {
+      throw new BadRequestException('count 仅允许 1-20 的整数');
+    }
+    const type = dto.type ?? null;
+    if (type !== null && !(TrainingController.TARGETED_TYPES as readonly string[]).includes(type)) {
+      throw new BadRequestException(
+        'type 仅允许 choice | fill_blank | true_false | short_answer | proof 或 null',
+      );
+    }
+    return this.trainingService.startTargetedPractice({
+      subjectId: dto.subjectId,
+      kpId: dto.kpId,
+      type,
+      count,
+    });
   }
 }
