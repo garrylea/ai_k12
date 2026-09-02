@@ -16,6 +16,7 @@ import { PracticeModule } from './modules/practice/practice.module.js';
 import { ParentModule } from './modules/parent/parent.module.js';
 import { ConfigModule } from './modules/config/config.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
+import { TrainingModule } from './modules/training/training.module.js';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AdminModule } from './modules/admin/admin.module.js';
     AIModule,
     RefineryModule,
     PracticeModule,
+    TrainingModule,
     ParentModule,
     ConfigModule,
     AdminModule,

@@ -206,6 +206,32 @@ export class MainErrorBooksRepository {
   }
 
   /**
+   * 错题练习筛选：时间范围（created_at）/题型（JOIN questions）/专项（EXISTS qkp）。
+   *  返回未清零记录，每行带 kp_id（同题多 KP 会出多行，service 层聚合）。
+   */
+  async findErrorBookEntries(studentId: number, subjectId: number, filters: {
+    from?: string; to?: string; type?: string; kpId?: number;
+  }): Promise<Array<{ id: number; question_id: number | null; questionText: string | null; type: string | null; level: number; created_at: Date; kp_id: number | null }>> {
+    const conditions = ['meb.student_id = ?', 'meb.subject_id = ?', 'meb.is_cleared = 0'];
+    const params: any[] = [studentId, subjectId];
+    if (filters.from) { conditions.push('meb.created_at >= ?'); params.push(filters.from); }
+    if (filters.to) { conditions.push('meb.created_at < DATE_ADD(?, INTERVAL 1 DAY)'); params.push(filters.to); }
+    if (filters.type) { conditions.push('q.type = ?'); params.push(filters.type); }
+    if (filters.kpId) { conditions.push('EXISTS (SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id AND qkp.knowledge_point_id = ?)'); params.push(filters.kpId); }
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT meb.id, meb.question_id, COALESCE(q.content, meb.wrong_answer_text) AS questionText,
+              q.type, meb.level, meb.created_at, qkp.knowledge_point_id AS kp_id
+       FROM main_error_books meb
+       LEFT JOIN questions q ON meb.question_id = q.id
+       LEFT JOIN question_knowledge_points qkp ON qkp.question_id = meb.question_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY meb.created_at DESC`,
+      params,
+    );
+    return rows as any[];
+  }
+
+  /**
    * 批量递增错题严重程度（level + 1）。
    * 用于清零后仍有错误的题，标记未掌握。
    */
