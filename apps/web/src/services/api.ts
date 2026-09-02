@@ -769,3 +769,57 @@ export interface ParentMessageItem { id: number; type: string; title: string; co
 export function listMyMessages(): Promise<ParentMessageItem[]> { return fetchApi('/parent/messages'); }
 export function getUnreadMessageCount(): Promise<number> { return fetchApi('/parent/messages/unread-count'); }
 export function markMessageRead(id: number): Promise<null> { return fetchApi(`/parent/messages/${id}/read`, { method: 'PATCH' }); }
+
+// --- Training（训练轨：错题练习 / 专项练习，P2 Task 1-3 端点） ---
+
+export interface TrainingErrorBookEntry {
+  errorBookId: number;
+  questionId: number | null;
+  questionText: string;
+  type: string | null;
+  level: number;
+  createdAt: string;
+  kpIds: number[];
+}
+
+export function getTrainingErrorBook(params: {
+  subjectId: number;
+  from?: string;
+  to?: string;
+  type?: string;
+  kpId?: number;
+}): Promise<TrainingErrorBookEntry[]> {
+  const qs = new URLSearchParams();
+  qs.set('subjectId', String(params.subjectId));
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  if (params.type) qs.set('type', params.type);
+  if (params.kpId != null) qs.set('kpId', String(params.kpId));
+  return fetchApi<TrainingErrorBookEntry[]>(`/training/error-book?${qs.toString()}`);
+}
+
+export function judgeTraining(payload: {
+  questionId: number;
+  subjectId: number;
+  studentAnswer: string;
+  source: 'targeted' | 'error_practice';
+}): Promise<JudgeResult> {
+  return fetchApi<JudgeResult>('/training/judge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bumpTrainingErrorLevels(errorBookIds: number[]): Promise<void> {
+  return fetchApi<void>('/training/bump-error-levels', {
+    method: 'POST',
+    body: JSON.stringify({ errorBookIds }),
+  });
+}
+
+export function getTrainingHint(questionId: number): Promise<HintResult> {
+  return fetchApi<HintResult>('/training/hint', {
+    method: 'POST',
+    body: JSON.stringify({ questionId }),
+  });
+}

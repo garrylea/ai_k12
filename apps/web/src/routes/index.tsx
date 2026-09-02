@@ -8,6 +8,7 @@ import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
 import ConversationManagePage from '@/pages/student/ConversationManagePage';
 import TrainingSubjectPage from '@/pages/student/TrainingSubjectPage';
+import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
@@ -133,6 +134,15 @@ const router = createBrowserRouter([
     element: (
       <RequireRole role="student">
         <TrainingSubjectPage />
+      </RequireRole>
+    ),
+  },
+  // 错题练习列表页（全屏沉浸层，独立于 StudentLayout，与 /student/training 同层）
+  {
+    path: '/student/training/errors',
+    element: (
+      <RequireRole role="student">
+        <ErrorPracticePage />
       </RequireRole>
     ),
   },
