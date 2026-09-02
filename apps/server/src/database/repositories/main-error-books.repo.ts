@@ -81,6 +81,29 @@ export class MainErrorBooksRepository {
     return (rows[0] as MainErrorBookRow) ?? null;
   }
 
+  /** 题中心变体：只按 question_id 匹配（训练模块用，训练题必来自题库、question_id 恒非空）。 */
+  async findUnclearedByStudentQuestionId(
+    studentId: number,
+    questionId: number,
+  ): Promise<MainErrorBookRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM main_error_books
+       WHERE student_id = ? AND is_cleared = 0 AND question_id = ?
+       LIMIT 1`,
+      [studentId, questionId],
+    );
+    return (rows[0] as MainErrorBookRow) ?? null;
+  }
+
+  /** 题中心变体清零：该学生此题所有未清行一次性 is_cleared=1（不限 source）。 */
+  async clearUnclearedByStudentQuestionId(studentId: number, questionId: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE main_error_books SET is_cleared = 1, cleared_at = NOW(3)
+       WHERE student_id = ? AND is_cleared = 0 AND question_id = ?`,
+      [studentId, questionId],
+    );
+  }
+
   async markCleared(id: number): Promise<void> {
     await this.pool.execute(
       `UPDATE main_error_books SET is_cleared = 1, cleared_at = NOW(3) WHERE id = ?`,

@@ -14,6 +14,15 @@ export class QuestionsRepository {
     return (rows[0] as QuestionRow) ?? null;
   }
 
+  /** 题中心定位：按主键取在用题目（训练模块用，训练题必来自题库）。 */
+  async findById(id: number): Promise<QuestionRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM questions WHERE id = ? AND is_active = 1`,
+      [id],
+    );
+    return (rows[0] as QuestionRow) ?? null;
+  }
+
   async create(row: Omit<QuestionRow, 'id' | 'created_at' | 'is_active'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO questions

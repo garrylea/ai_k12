@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PracticeService } from './practice.service';
+import { JudgeCoreService } from './judge-core.service';
 import { HttpException } from '@nestjs/common';
 
 const mk = (overrides: any = {}) => ({
@@ -37,9 +38,10 @@ const mk = (overrides: any = {}) => ({
   ...overrides,
 });
 
-/** 用 mk() 构造的依赖实例化 PracticeService。 */
+/** 用 mk() 构造的依赖实例化 PracticeService。
+ *  第 11 参 judgeCore 为新增依赖（判题核心抽取），由同一组 mock 构造——机械注入调整，不改测试语义。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any));
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
