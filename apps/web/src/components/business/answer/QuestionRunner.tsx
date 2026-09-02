@@ -1,0 +1,323 @@
+// apps/web/src/components/business/answer/QuestionRunner.tsx
+// 共享答题组件：布局与 fire-and-forget 判题取自 CleanupPhase，hint 交互取自
+// AnswerModal。variant 只影响外壳（modal 加 fixed 遮罩），内部答题区一致。
+// 不做（YAGNI，父层负责）：庆祝页、bumpErrorLevels、DiscussDrawer、结果列表渲染。
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+import { LatexEditor } from '../LatexEditor';
+import { PreviewDraftPanel } from '../PreviewDraftPanel';
+import { clearDraft } from '../draft-store';
+import { ChoiceOptionList } from './ChoiceOptionList';
+import type { RunnerAnswerRecord, RunnerQuestion } from './types';
+import type { JudgeResult } from '@/services/api';
+
+/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用草稿白板 */
+const MATH_SUBJECT_ID = 1;
+
+const SPINNER_SVG = (
+  <svg className="animate-spin text-[var(--brand-500)]" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+  </svg>
+);
+
+const ChevronLeftIcon = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
+
+export interface QuestionRunnerProps {
+  questions: RunnerQuestion[];
+  subjectId: number;
+  /** 单题草稿键 = `${draftKeyPrefix}-${q.n}` */
+  draftKeyPrefix: string;
+  variant: 'modal' | 'embedded';
+  /** 默认 'auto'：type=choice/true_false 且有 options 时点选作答，否则文本作答 */
+  answerMode?: 'auto' | 'text';
+  enableHint?: boolean;
+  /** 提示缓存（key = q.n），父层持有（session 缓存） */
+  hints?: Record<string, string>;
+  /** 拉取提示：父层请求后端并回写 hints；组件内部只管展示态（show/loading/error） */
+  onRequestHint?: (q: RunnerQuestion) => Promise<string>;
+  /** 默认 true；考试置 false（不渲染判题对错反馈，judging 文案用「正在提交」） */
+  showResultFeedback?: boolean;
+  onSubmit: (q: RunnerQuestion, answer: string) => Promise<JudgeResult>;
+  onFinish: (results: Record<string, RunnerAnswerRecord>) => void;
+  /** 考试倒计时等插槽：渲染在标题行右侧 */
+  headerExtra?: ReactNode;
+  /** 顶部标题（默认「第 {i+1}/{n} 题」） */
+  title?: string;
+}
+
+export function QuestionRunner({
+  questions,
+  subjectId,
+  draftKeyPrefix,
+  variant,
+  answerMode = 'auto',
+  enableHint = false,
+  hints,
+  onRequestHint,
+  showResultFeedback = true,
+  onSubmit,
+  onFinish,
+  headerExtra,
+  title,
+}: QuestionRunnerProps) {
+  const [idx, setIdx] = useState(0);
+  const [answer, setAnswer] = useState('');
+  // answering：作答中；judging：末题已交，等待后台判题全部完成
+  const [phase, setPhase] = useState<'answering' | 'judging'>('answering');
+  const [hintState, setHintState] = useState<{ show: boolean; loading: boolean; error: boolean }>({
+    show: false,
+    loading: false,
+    error: false,
+  });
+  // 本地追踪判题结果（避免父层闭包过期问题），onFinish 时快照交给父层
+  const resultsRef = useRef<Record<string, RunnerAnswerRecord>>({});
+  const pendingRef = useRef<Map<number, Promise<unknown>>>(new Map());
+
+  const total = questions.length;
+  const q = questions[idx];
+  const requestHint = enableHint ? onRequestHint : undefined;
+
+  // 切题时重置提示面板展示态（提示文本本身存于 props.hints，跨题保留）。
+  // 必须在 `if (!q) return null` 之前调用（hooks 不能条件性调用）。
+  useEffect(() => {
+    setHintState({ show: false, loading: false, error: false });
+  }, [idx]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!answer.trim() || phase !== 'answering' || !q) return;
+
+    const thisIdx = idx;
+    const submittedAnswer = answer;
+    const question = q;
+
+    clearDraft(`${draftKeyPrefix}-${question.n}`);
+    setAnswer('');
+
+    // fire-and-forget：不 await，判题在后台进行，学生立即切下一题。
+    // showResultFeedback=false 时结果仍记入 resultsRef（供 onFinish），仅 UI 不显示对错。
+    const p = Promise.resolve(onSubmit(question, submittedAnswer))
+      .then((res: JudgeResult) => {
+        resultsRef.current[question.n] = {
+          isCorrect: res.isCorrect,
+          method: res.method,
+          analysis: res.analysis,
+          errorType: res.errorType ?? null,
+          studentAnswer: submittedAnswer,
+        };
+        return res;
+      })
+      .catch(() => {
+        resultsRef.current[question.n] = {
+          isCorrect: false,
+          method: 'ai',
+          analysis: null,
+          errorType: null,
+          studentAnswer: submittedAnswer,
+          failed: true,
+        };
+      });
+
+    pendingRef.current.set(thisIdx, p);
+
+    if (thisIdx + 1 < total) {
+      setIdx(thisIdx + 1);
+    } else {
+      // 末题：进入等待态，等所有后台判题完成后交结果给父层
+      setPhase('judging');
+      try {
+        await Promise.allSettled([...pendingRef.current.values()]);
+      } catch { /* ignore */ }
+      onFinish({ ...resultsRef.current });
+    }
+  }, [answer, phase, q, idx, draftKeyPrefix, onSubmit, onFinish, total]);
+
+  if (!q) return null;
+
+  // ===== 选择题判定：auto 模式下 choice/true_false 走点选 =====
+  const choiceOptions: Array<{ label: string; text: string }> | null = (() => {
+    if (answerMode !== 'auto') return null;
+    if (q.type !== 'choice' && q.type !== 'true_false') return null;
+    if (q.options && q.options.length > 0) return q.options;
+    if (q.type === 'true_false') {
+      return [
+        { label: '对', text: '对' },
+        { label: '错', text: '错' },
+      ];
+    }
+    return null;
+  })();
+
+  const handleHintClick = async () => {
+    if (!requestHint) return;
+    if (hintState.show) {
+      setHintState((s) => ({ ...s, show: false })); // 已展开 -> 收起
+      return;
+    }
+    setHintState((s) => ({ ...s, show: true }));
+    if (hints?.[q.n] || hintState.loading) return; // 已缓存或正在拉取 -> 直显/等待
+    setHintState((s) => ({ ...s, loading: true, error: false }));
+    try {
+      await requestHint(q);
+    } catch {
+      setHintState((s) => ({ ...s, error: true }));
+    } finally {
+      setHintState((s) => ({ ...s, loading: false }));
+    }
+  };
+
+  // ========== JUDGING 态 ==========
+  const judgingView = (
+    <div className="flex-1 min-h-0 flex items-center justify-center">
+      <div className="text-center space-y-4 p-8 rounded-xl" style={{ backgroundColor: 'var(--learn-card-bg)' }}>
+        {SPINNER_SVG}
+        <h2 className="text-lg font-bold text-[var(--text-primary)]">
+          {showResultFeedback ? '判题中，请稍候…' : '正在提交，请稍候…'}
+        </h2>
+        <p className="text-sm text-[var(--text-tertiary)]">
+          {showResultFeedback ? 'AI 正在判定你的答案，请耐心等待' : '正在提交'}
+        </p>
+      </div>
+    </div>
+  );
+
+  // ========== ANSWERING 态 ==========
+  const answeringView = (
+    <div className="flex-1 min-h-0 flex flex-col gap-3">
+      {/* 标题行：默认「第 i/n 题」，headerExtra（考试倒计时等）靠右 */}
+      <div className="shrink-0 flex items-center justify-between gap-3">
+        <h1 className="font-bold" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
+          {title ?? `第 ${idx + 1}/${total} 题`}
+        </h1>
+        {headerExtra}
+      </div>
+
+      <div
+        className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[var(--learn-card-border)] shadow-sm"
+        style={{ backgroundColor: 'var(--learn-card-bg)' }}
+      >
+        {/* 题面 + 提示按钮 + 提示抽屉 */}
+        <div className="shrink-0 p-4 border-b border-[var(--bg-subtle)]">
+          <div className="flex gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-xl text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]">
+                <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                  {q.text}
+                </ReactMarkdown>
+              </div>
+            </div>
+            {requestHint && (
+              <button
+                onClick={handleHintClick}
+                className="shrink-0 w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--warning)] shadow-sm hover:bg-[var(--brand-100)] transition-colors"
+                title="提示"
+                aria-label="提示"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </button>
+            )}
+          </div>
+          {/* 提示抽屉 */}
+          {hintState.show && (
+            <div className="mt-3 p-3 rounded-lg bg-[var(--brand-100)] border-l-[3px] border-[var(--warning)]">
+              {hintState.loading ? (
+                <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  <svg className="animate-spin text-[var(--warning)]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  <span>正在生成提示…</span>
+                </div>
+              ) : hints?.[q.n] ? (
+                <div className="text-sm text-[var(--text-primary)] leading-relaxed">
+                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                    {hints[q.n]}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--text-primary)] leading-relaxed">
+                  {hintState.error ? '提示生成失败，请稍后再试。' : '仔细审题，从已知条件出发，逐步推理。'}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 作答区：选择题点选 / 文本作答（左编辑右预览草稿） */}
+        <div className="flex-1 min-h-0 flex">
+          {choiceOptions ? (
+            <div className="flex-1 min-h-0 overflow-auto">
+              <ChoiceOptionList options={choiceOptions} value={answer} onChange={setAnswer} />
+            </div>
+          ) : (
+            <>
+              <div className="w-1/2 border-r border-[var(--bg-subtle)] flex flex-col">
+                <LatexEditor value={answer} onChange={setAnswer} />
+              </div>
+              {/* 右半区：预览 / 草稿 tab（仅数学启用草稿，PRD §7.12） */}
+              <div className="w-1/2">
+                <PreviewDraftPanel
+                  answer={answer}
+                  questionId={`${draftKeyPrefix}-${q.n}`}
+                  enabled={subjectId === MATH_SUBJECT_ID}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* 底部：上一题 / 提交 */}
+        <div className="shrink-0 flex items-center justify-between p-3 border-t border-[var(--bg-subtle)]">
+          <button
+            onClick={() => setIdx((i) => Math.max(0, i - 1))}
+            disabled={idx <= 0}
+            className="flex items-center gap-1 h-10 px-4 rounded-lg border border-[var(--bg-subtle)] text-[var(--text-tertiary)] text-sm disabled:opacity-40 hover:bg-[var(--bg-base)] transition-colors"
+          >
+            <ChevronLeftIcon />
+            <span>上一题</span>
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!answer.trim()}
+            className="w-12 h-12 rounded-full bg-[var(--brand-500)] text-white flex items-center justify-center disabled:opacity-40 hover:bg-[var(--brand-600)] transition-all shadow-md"
+            title="提交"
+            aria-label="提交"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const view = phase === 'judging' ? judgingView : answeringView;
+
+  // ========== 外壳：variant 只影响这里，内部答题区完全一致 ==========
+  if (variant === 'modal') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
+        <div className="w-[92vw] max-w-5xl h-[88vh] flex flex-col p-3">{view}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col" style={{ maxWidth: 'var(--learn-card-max-w)', width: '100%', margin: '0 auto' }}>
+      {view}
+    </div>
+  );
+}
