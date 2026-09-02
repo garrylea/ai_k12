@@ -131,6 +131,25 @@ def test_build_sql_validates_input():
         build_kp_seed_sql(tree)
 
 
+def test_build_sql_allows_partially_existing_tree():
+    """回归锁定：filter_existing 过滤后的缩减树（一级 < 6 / 某级二级 < 5）不再触发完整校验。"""
+    tree = _valid_tree()
+    kept = filter_existing(tree, {"数与式", "方程与不等式-知识点03"})
+    assert len(kept) == 5  # 一级低于 MIN_L1
+    assert len(kept[0]["children"]) == 4  # 二级低于 MIN_L2
+    sql = build_kp_seed_sql(kept)  # 不抛即通过
+    assert "INSERT INTO knowledge_points" in sql
+    assert "'方程与不等式-知识点03'" not in sql  # 已存在的二级不出现
+    assert sql.count("WHERE NOT EXISTS") == 5 + 24
+
+
+def test_build_sql_escapes_backslash():
+    tree = _valid_tree()
+    tree[0]["children"][0]["name"] = "分式\\frac{a}{b}的约分"
+    sql = build_kp_seed_sql(tree)
+    assert "'分式\\\\frac{a}{b}的约分'" in sql  # \ 转义为 \\
+
+
 # ---------------------------------------------------------------------------
 # filter_existing（SELECT-then-INSERT 脚本内过滤）
 # ---------------------------------------------------------------------------

@@ -86,8 +86,8 @@ def validate_kp_tree(tree: object) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _sql_str(value: str) -> str:
-    """SQL 字符串字面量：单引号转义为两个单引号。"""
-    return "'" + value.replace("'", "''") + "'"
+    """SQL 字符串字面量：反斜杠 -> 两个反斜杠（先做），单引号 -> 两个单引号。"""
+    return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
 def build_kp_seed_sql(tree: list[dict], subject_id: int = DEFAULT_SUBJECT_ID,
@@ -101,8 +101,25 @@ def build_kp_seed_sql(tree: list[dict], subject_id: int = DEFAULT_SUBJECT_ID,
     - 二级先按 (subject_id, grade_band, parent IS NULL, 一级同名) 回查父 id
       （FROM 子查询，父不存在则整行不插入），再按 (parent, name) 防重。
     父 id 回查用名称而非 code：历史/人工行的 code 不可控，名称才是稳定键。
+
+    只做结构性安全检查（名称非空/全树去重/children 为列表）——数量边界
+    （6-12 / 5-20）属于 validate_kp_tree；main 流程在 filter_existing 过滤后
+    会对本函数传入「部分存在」的缩减树，此时一级/二级数量可低于完整校验下限。
     """
-    validate_kp_tree(tree)
+    if not isinstance(tree, list) or not tree:
+        raise ValueError("知识点树必须是非空数组")
+    seen: set[str] = set()
+    for i, node in enumerate(tree):
+        if not isinstance(node, dict):
+            raise ValueError(f"第 {i + 1} 个一级节点不是对象：{node!r}")
+        _check_name(node.get("name"), f"第 {i + 1} 个一级", seen)
+        children = node.get("children")
+        if not isinstance(children, list):
+            raise ValueError(f"一级「{node.get('name')}」缺少 children 列表")
+        for j, child in enumerate(children):
+            if not isinstance(child, dict):
+                raise ValueError(f"「{node.get('name')}」第 {j + 1} 个二级不是对象：{child!r}")
+            _check_name(child.get("name"), f"「{node.get('name')}」第 {j + 1} 个二级", seen)
 
     lines: list[str] = [
         "-- 初中数学知识点两级树种子（subject_id="
