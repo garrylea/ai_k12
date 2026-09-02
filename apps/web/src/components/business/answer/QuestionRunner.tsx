@@ -86,10 +86,12 @@ export function QuestionRunner({
   const q = questions[idx];
   const requestHint = enableHint ? onRequestHint : undefined;
 
-  // 切题时重置提示面板展示态（提示文本本身存于 props.hints，跨题保留）。
+  // 切题时重置提示面板展示态（提示文本本身存于 props.hints，跨题保留），
+  // 并清空作答内容——「上一题」不提交即切换时，防止上一题的答案泄漏到当前题。
   // 必须在 `if (!q) return null` 之前调用（hooks 不能条件性调用）。
   useEffect(() => {
     setHintState({ show: false, loading: false, error: false });
+    setAnswer('');
   }, [idx]);
 
   const handleSubmit = useCallback(async () => {
