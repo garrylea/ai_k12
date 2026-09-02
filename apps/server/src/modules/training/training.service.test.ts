@@ -36,3 +36,21 @@ describe('TrainingService.getErrorBookEntries', () => {
     expect(r[0].kpIds).toEqual([3, 5]);
   });
 });
+
+describe('TrainingService.judgeTraining', () => {
+  it('error_practice 来源透传 JudgeCore', async () => {
+    const deps = mk({ judgeCore: { judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: true, method: 'exact', analysis: null, errorType: null, errorBookId: undefined }) } });
+    const svc = mkSvc(deps);
+    await svc.judgeTraining({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice' });
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice', sourceRefId: null });
+  });
+});
+
+describe('TrainingService.bumpErrorLevels', () => {
+  it('透传 errorBookIds 给 repo.bumpLevels', async () => {
+    const deps = mk();
+    const svc = mkSvc(deps);
+    await svc.bumpErrorLevels([1, 2, 3]);
+    expect(deps.mainErrorRepo.bumpLevels).toHaveBeenCalledWith([1, 2, 3]);
+  });
+});

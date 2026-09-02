@@ -5,10 +5,10 @@ import { QuestionsRepository } from '../../database/repositories/questions.repo.
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
 
 /**
- * 错题训练模块 service（骨架，Task 1）。
+ * 错题训练模块 service。
  *
- * judgeCore / questionsRepo 本任务注入但尚未使用——Task 2/3（错题重做判题、
- * 变式题生成）会用到，先占位保证构造签名稳定。
+ * 错题练习筛选列表（Task 1）+ 判题/仍错 bump（Task 2）；
+ * questionsRepo 供 Task 3（变式题生成）使用，先占位保证构造签名稳定。
  */
 @Injectable()
 export class TrainingService {
@@ -44,5 +44,15 @@ export class TrainingService {
       });
     }
     return [...byId.values()];
+  }
+
+  /** 训练判题：JudgeCore 题中心变体的薄封装（source 由端点语义决定，不透传客户端任意值）。 */
+  async judgeTraining(input: { studentId: number; questionId: number; subjectId: number; studentAnswer: string; source: 'targeted' | 'error_practice' }) {
+    return this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
+  }
+
+  /** 仍错 bump：错题重做仍答错时提升 level（镜像 PracticeService.bumpErrorLevels）。 */
+  async bumpErrorLevels(errorBookIds: number[]): Promise<void> {
+    await this.mainErrorRepo.bumpLevels(errorBookIds);
   }
 }
