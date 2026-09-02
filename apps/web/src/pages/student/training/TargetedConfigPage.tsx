@@ -242,7 +242,10 @@ export default function TargetedConfigPage() {
                             key={kp.id}
                             name={kp.name}
                             active={childKpId === kp.id}
-                            onClick={() => setChildKpId(kp.id)}
+                            onClick={() => {
+                              setChildKpId(kp.id);
+                              setEmptyHint(false);
+                            }}
                           />
                         ))}
                       </div>
