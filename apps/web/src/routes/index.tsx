@@ -12,6 +12,7 @@ import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage';
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
+import ExamListPage from '@/pages/student/training/ExamListPage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
@@ -176,7 +177,33 @@ const router = createBrowserRouter([
       </RequireRole>
     ),
   },
-  { path: '/student/training/exam', element: <Placeholder title="考试（训练模块开发中）" /> },
+  // 考试试卷列表页（全屏沉浸层，独立于 StudentLayout，与 errors/targeted 同层）
+  {
+    path: '/student/training/exam',
+    element: (
+      <RequireRole role="student">
+        <ExamListPage />
+      </RequireRole>
+    ),
+  },
+  // 考试答题页（Task 5 替换；先注册占位避免列表页导航 404）
+  {
+    path: '/student/training/exam/run/:sessionId',
+    element: (
+      <RequireRole role="student">
+        <Placeholder title="考试答题（开发中）" />
+      </RequireRole>
+    ),
+  },
+  // 考试结果页（Task 5 替换）
+  {
+    path: '/student/training/exam/result/:sessionId',
+    element: (
+      <RequireRole role="student">
+        <Placeholder title="考试结果（开发中）" />
+      </RequireRole>
+    ),
+  },
   { path: '/student/auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
   { path: '/student/auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
   { path: '/student/auxiliary/chat', element: <Navigate to="/student/auxiliary" replace /> },

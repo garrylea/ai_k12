@@ -861,3 +861,118 @@ export function startTargetedPractice(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+// --- Exams（考试模块：试卷列表 / 会话生命周期 / 结果，字段以后端 exams 白名单序列化为准） ---
+
+export interface ExamPaper {
+  id: number;
+  title: string;
+  year: number | null;
+  district: string | null;
+  examType: string | null;
+  gradeBand: string | null;
+  questionCount: number;
+}
+
+/** 选择题选项为 JSON 数组（字符串选项或 {label,text} 对象选项），非选择题为 null。 */
+export type ExamQuestionOptions = Array<{ label: string; text: string }> | string[] | null;
+
+export interface ExamQuestion {
+  questionId: number;
+  questionNo: number;
+  text: string;
+  type: string;
+  options: ExamQuestionOptions;
+}
+
+/** 试卷详情：题目元数据 + 推荐时长（不含 answer/explanation，防答案泄露）。 */
+export interface ExamPaperDetail {
+  id: number;
+  title: string;
+  durationMinutes: number;
+  questions: ExamQuestion[];
+}
+
+/**
+ * 会话信息（create 与 getSession 响应的并集，差异字段可选）：
+ * create 返回 {sessionId, deadlineAt, remainingSeconds, questions}（无 status/answered）；
+ * getSession 返回 {sessionId, status, remainingSeconds, questions, answered}（无 deadlineAt）。
+ */
+export interface ExamSessionInfo {
+  sessionId: number;
+  status?: 'in_progress' | 'submitted';
+  deadlineAt?: string;
+  remainingSeconds: number;
+  questions: ExamQuestion[];
+  /** questionId（JSON 序列化后为字符串键）-> 作答文本；仅 getSession 返回。 */
+  answered?: Record<string, { answerText: string | null }>;
+}
+
+/** 交卷/收卷汇总（submit 响应；getResults 内嵌同构字段）。accuracy 为百分比一位小数。 */
+export interface ExamSummary {
+  correctCount: number;
+  totalCount: number;
+  accuracy: number;
+}
+
+export interface ExamResultItem {
+  questionId: number;
+  questionNo: number;
+  text: string;
+  type: string;
+  options: ExamQuestionOptions;
+  answerText: string | null;
+  isCorrect: number; // 0 | 1
+  analysis: string | null;
+  explanation: string | null;
+}
+
+export function getExamPapers(params: {
+  subjectId: number;
+  year?: number;
+  district?: string;
+  examType?: string;
+  gradeBand?: string;
+}): Promise<ExamPaper[]> {
+  const qs = new URLSearchParams();
+  qs.set('subjectId', String(params.subjectId));
+  if (params.year != null) qs.set('year', String(params.year));
+  if (params.district) qs.set('district', params.district);
+  if (params.examType) qs.set('examType', params.examType);
+  if (params.gradeBand) qs.set('gradeBand', params.gradeBand);
+  return fetchApi<ExamPaper[]>(`/exams/papers?${qs.toString()}`);
+}
+
+export function getExamPaperDetail(id: number): Promise<ExamPaperDetail> {
+  return fetchApi<ExamPaperDetail>(`/exams/papers/${id}`);
+}
+
+export function createExamSession(paperId: number, durationMinutes: number): Promise<ExamSessionInfo> {
+  return fetchApi<ExamSessionInfo>('/exams/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ paperId, durationMinutes }),
+  });
+}
+
+export function getExamSession(sessionId: number): Promise<ExamSessionInfo> {
+  return fetchApi<ExamSessionInfo>(`/exams/sessions/${sessionId}`);
+}
+
+export function submitExamAnswer(
+  sessionId: number,
+  questionId: number,
+  answerText: string,
+): Promise<{ saved: boolean }> {
+  return fetchApi<{ saved: boolean }>(`/exams/sessions/${sessionId}/answers`, {
+    method: 'POST',
+    body: JSON.stringify({ questionId, answerText }),
+  });
+}
+
+export function submitExamSession(sessionId: number): Promise<ExamSummary> {
+  return fetchApi<ExamSummary>(`/exams/sessions/${sessionId}/submit`, { method: 'POST' });
+}
+
+export function getExamResults(sessionId: number): Promise<ExamSummary & { items: ExamResultItem[] }> {
+  return fetchApi<ExamSummary & { items: ExamResultItem[] }>(`/exams/sessions/${sessionId}/results`);
+}
