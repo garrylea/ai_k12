@@ -11,8 +11,3 @@ export interface JudgeTrainingDto {
   studentAnswer: string;
   source: 'targeted' | 'error_practice';
 }
-
-/** POST /api/training/bump-error-levels 请求 DTO（仍错升 level，镜像 practice）。 */
-export interface BumpErrorLevelsDto {
-  errorBookIds: number[];
-}
