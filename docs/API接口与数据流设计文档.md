@@ -124,6 +124,7 @@
 | Billing | `/api/billing` | 订单创建、支付、优惠券、续费 | Billing Service |
 | Practice | `/api/practice` | 课堂练习答题判对错（practice 卡片） | Practice Service |
 | Training | `/api/training` | 错题练习与专项训练（辅线学习闭环：错题筛选/重做判题/提示/专项抽题） | Training Service |
+| Exams | `/api/exams` | 真题试卷考试（选卷/开考/逐题作答/交卷/结果，过期自动收卷） | Exams Service |
 
 ---
 
@@ -393,6 +394,20 @@
 | POST | `/api/training/hint` | 训练「提示」（AI 生成 + **题级** `question_hints` 缓存，区别于 practice 的 Card 级 `cards.hints` 缓存）。请求体：`{questionId}`；题目不存在 404。先查 `question_hints` 缓存命中直返（不调 AI）；未命中调 HintCapability 生成苏格拉底式提示（只启发不给答案）并写回缓存（题级共享，不分学生；写回失败不阻断返回）。AI 生成失败 503（`code=5001`）。响应：`{hint, cached:boolean}`。 | MVP |
 | GET | `/api/training/knowledge-points?subjectId={subjectId}` | 专项练习知识点平铺列表（`subjectId` 必填 integer；树形组装放前端，按 `parentKpId` 自行组树）。响应：`[{id, name, parentKpId(nullable), gradeBand}]`。 | MVP |
 | POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。 | MVP |
+
+### 4.19 Exams — `/api/exams`
+
+真题试卷考试（试卷库来自 data-refinery 抽取的真题卷，`exam_papers`/`paper_questions`）。全部端点 student JWT（`@Roles('student')`，家长/管理员 token 调用返回 403/1005）。判题复用 Practice 的 JudgeCore（`source='exam'`，`sourceRefId=sessionId`，答错入错题本与练习同语义）。**考试防作弊设计**：考试结束前的一切响应（试卷详情/会话状态/单题提交）均为白名单序列化——`answer`/`explanation` 与对错信息一律剥离，对错只在交卷后的 results 出现。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| GET | `/api/exams/papers?subjectId={subjectId}&year={year}&district={district}&examType={examType}&gradeBand={gradeBand}` | 试卷列表。`subjectId` 必填 integer；`year`（integer）/`district`/`examType`/`gradeBand`（string）可选叠加筛选；按 `year DESC, id DESC` 排序。响应：`[{id, title, year(nullable), district(nullable), examType(nullable), gradeBand(nullable), questionCount}]`。 | MVP |
+| GET | `/api/exams/papers/{id}` | 试卷详情：题目元数据 + 推荐时长。`durationMinutes` 按题型估算（choice/true_false 每题 1 分钟、其余每题 3 分钟），总和向上取整到 15 的倍数，clamp 到 [30, 180]。**白名单**：questions 只含 `questionId/questionNo/text/type/options`（`options` 为 JSON 字符串 parse 后的数组，无/坏 JSON 为 null），无 `answer`/`explanation`。试卷不存在 404。响应：`{id, title, durationMinutes, questions}`。 | MVP |
+| POST | `/api/exams/sessions` | 开考/续考。请求体：`{paperId, durationMinutes}`；`durationMinutes` 限 10-300 整数（越界/非整数 400）；试卷不存在 404。**续考语义**：同学生同卷已有 `in_progress` 会话直接返回既有会话（`deadlineAt` 不变、**不重置时长**），否则新建（deadline = now + duration）。响应（新建/续考同构）：`{sessionId, deadlineAt, remainingSeconds, questions}`。 | MVP |
+| GET | `/api/exams/sessions/{id}` | 会话状态（断线恢复）。会话不存在 404；非本人 403。响应：`{sessionId, status: 'in_progress'\|'submitted', remainingSeconds, questions, answered}`；`answered` 为 `questionId -> {answerText}` map（**只含作答文本，判题字段一律剥离**）。发现已超 deadline 的 `in_progress` 会话时服务端**自动收卷**（与手动交卷同一 finalize 逻辑）后返回 `status='submitted'`、`remainingSeconds=0`。 | MVP |
+| POST | `/api/exams/sessions/{id}/answers` | 单题提交（同步判题）。请求体：`{questionId, answerText}`；题目不在该卷题单 400；已交卷再提交 409（`code=4101`）；超 deadline **先自动收卷再 409**（`code=4102`，未作答按错计一并落库）。判题走 JudgeCore（客观题 exact 即返，AI 判定最长 90s per-scene timeout）；判题失败先落 `answerText`（在途，`is_correct` NULL，交卷时统一补判）、错误透传前端重试。响应（**白名单，不回传对错——考试防作弊设计**）：`{saved: true}`。 | MVP |
+| POST | `/api/exams/sessions/{id}/submit` | 交卷（**幂等**：已 submitted 直接重算汇总返回）。收卷三分支：未作答 -> 直接判错入错题本（`method='unanswered'`，无答案可判不走判题）；在途（有作答、无判题结果）-> JudgeCore 补判，失败按错计（`method='failed'`）仍入错题本；已判题 -> 跳过。响应：`{correctCount, totalCount, accuracy}`（`accuracy` 为百分比一位小数，如 33.3）。 | MVP |
+| GET | `/api/exams/sessions/{id}/results` | 结果页：仅 `submitted` 会话可查（`in_progress` 409，`code=4103`）。响应：`{correctCount, totalCount, accuracy, items: [{questionId, questionNo, text, type, options, answerText(nullable), isCorrect(0\|1), analysis(nullable), explanation(nullable)}]}`（items JOIN questions 带解析）。 | MVP |
 
 ---
 
@@ -1061,6 +1076,51 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
   └─ 答对 -> 清该题所有未清记录（与错题本清零语义一致）
   答题前点「提示」-> POST /api/training/hint（题级缓存同 6.15）
   （专项练习无 bump-error-levels：新错题首轮作答，无「重做仍错」语义）
+```
+
+### 6.17 真题考试（考试模块）
+
+```text
+考试入口（试卷列表页）-> GET /api/exams/papers?subjectId={subjectId}
+  └─ 可选筛选 year/district/examType/gradeBand；列表仅试卷元数据（不含题目）
+  ▼
+选卷 -> GET /api/exams/papers/{id}
+  └─ 题目元数据 + 推荐时长 durationMinutes（白名单：无 answer/explanation）
+  ▼
+选时长开考 -> POST /api/exams/sessions {paperId, durationMinutes}
+  ├─ durationMinutes 10-300 整数（非法 400）；试卷不存在 404
+  ├─ 同卷已有 in_progress 会话 -> 续考（deadline 不变，不重置时长）
+  └─ 否则新建（deadline = now + duration）
+  返回 {sessionId, deadlineAt, remainingSeconds, questions}
+  │
+  ▼
+考试进行页逐题作答 -> POST /api/exams/sessions/{id}/answers {questionId, answerText}
+  ├─ JudgeCore 同步判题（source='exam', sourceRefId=sessionId）
+  │    客观题 exact 即返；主观题 AI 判定（judgment per-scene 90s）
+  ├─ 判题结果全量落 exam_answers（is_correct 0|1 / method / analysis / errorType）
+  ├─ 答错 -> JudgeCore 写 main_error_books（source='exam'，与练习同语义）
+  ├─ 判题失败 -> 先落 answerText（在途，is_correct NULL），错误透传；交卷时补判
+  └─ 响应 {saved:true}——白名单不回传对错（考试防作弊：对错只在 results 出现）
+     超时点提交 -> 服务端先自动收卷再 409（code=4102）
+     已交卷再提交 -> 409（code=4101）
+  │
+  ▼
+断线刷新 -> GET /api/exams/sessions/{id} 恢复
+  └─ answered 只含 answerText（判题字段剥离）；超时的 in_progress 会话
+     被自动收卷后返回 status='submitted'、remainingSeconds=0
+  │
+  ▼
+交卷 -> POST /api/exams/sessions/{id}/submit（幂等：已交卷直接重算汇总返回）
+  └─ finalize 三分支（手动交卷与超时自动收卷共用）：
+       未作答 -> 直接判错（method='unanswered'）+ 写 main_error_books
+       在途（有作答、is_correct NULL）-> JudgeCore 补判；
+         失败按错计（method='failed'）仍入错题本
+       已判题 -> 跳过
+     markSubmitted + 汇总 {correctCount, totalCount, accuracy}
+  │
+  ▼
+结果页 -> GET /api/exams/sessions/{id}/results（in_progress 409/code=4103）
+  └─ 逐题对错（isCorrect 0|1）+ answerText/analysis/explanation
 ```
 
 ---

@@ -45,6 +45,8 @@ tags:
     description: 课堂练习判对错
   - name: Training
     description: 错题练习与专项训练（辅线学习闭环）
+  - name: Exams
+    description: 真题试卷考试（选卷/开考/逐题作答/交卷/结果）
 paths:
   # Auth
   /auth/register:
@@ -3615,6 +3617,315 @@ paths:
         '400':
           description: count 越界或 type 非法
 
+  # Exams
+  /exams/papers:
+    get:
+      tags: [Exams]
+      summary: 试卷列表
+      description: >-
+        真题试卷列表（student JWT，@Roles('student')）。subjectId 必填 integer；
+        year（integer）/district/examType/gradeBand（string）可选叠加筛选；
+        按 year DESC, id DESC 排序。列表仅试卷元数据（不含题目）。
+      operationId: listExamPapers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: subjectId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: 学科 id（必填，非整数 400）
+        - name: year
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 年份过滤（非数字忽略）
+        - name: district
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 地区过滤
+        - name: examType
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 试卷类型过滤
+        - name: gradeBand
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 学段过滤（primary/junior/senior）
+      responses:
+        '200':
+          description: 试卷列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ExamPaper'
+
+  /exams/papers/{id}:
+    get:
+      tags: [Exams]
+      summary: 试卷详情（题目元数据 + 推荐时长）
+      description: >-
+        试卷详情（student JWT）。durationMinutes 为推荐时长：choice/true_false
+        每题 1 分钟、其余每题 3 分钟，总和向上取整到 15 的倍数，clamp 到
+        [30, 180]。白名单序列化：questions 只含
+        questionId/questionNo/text/type/options（options 为 JSON 字符串
+        parse 后的数组，无/坏 JSON 为 null），answer/explanation 一律剥离
+        （考试防作弊）。试卷不存在 404。
+      operationId: getExamPaperDetail
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 试卷 id
+      responses:
+        '200':
+          description: 试卷详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExamPaperDetail'
+        '404':
+          description: 试卷不存在
+
+  /exams/sessions:
+    post:
+      tags: [Exams]
+      summary: 开考/续考
+      description: >-
+        开考或续考（student JWT）。durationMinutes 限 10-300 整数
+        （越界/非整数 400）；试卷不存在 404。续考语义：同学生同卷已有
+        in_progress 会话直接返回既有会话（deadlineAt 不变、不重置时长），
+        否则新建（deadline = now + duration）。新建/续考响应同构。
+      operationId: createExamSession
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExamSessionCreateRequest'
+      responses:
+        '200':
+          description: 会话已创建或续考（含题单与剩余秒数）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExamSessionCreated'
+        '400':
+          description: durationMinutes 越界（仅允许 10-300 的整数）
+        '404':
+          description: 试卷不存在
+
+  /exams/sessions/{id}:
+    get:
+      tags: [Exams]
+      summary: 会话状态（断线恢复）
+      description: >-
+        考试会话状态（student JWT）。会话不存在 404；非本人 403。
+        answered 为 questionId -> {answerText} map，只含作答文本，
+        判题字段（对错/题解）一律剥离（考试防作弊）。发现已超 deadline
+        的 in_progress 会话时服务端自动收卷（与手动交卷同一 finalize
+        逻辑）后返回 status='submitted'、remainingSeconds=0。
+      operationId: getExamSession
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 会话 id
+      responses:
+        '200':
+          description: 会话状态（可能已被自动收卷为 submitted）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExamSessionState'
+        '403':
+          description: 无权访问该考试会话（非本人）
+        '404':
+          description: 考试会话不存在
+
+  /exams/sessions/{id}/answers:
+    post:
+      tags: [Exams]
+      summary: 单题提交（同步判题，白名单响应）
+      description: >-
+        考试逐题作答（student JWT）。同步走 JudgeCore（source='exam',
+        sourceRefId=sessionId）：客观题 exact 即返，主观题 AI 判定
+        （judgment per-scene 90s）；判题结果全量落 exam_answers，
+        答错由 JudgeCore 写 main_error_books。判题失败先落 answerText
+        （在途，is_correct NULL，交卷时统一补判）、错误透传前端重试。
+        响应白名单 {saved:true}——不回传对错（考试防作弊设计，
+        对错只在交卷后的 results 出现）。错误：题目不在题单 400；
+        已交卷再提交 409（code=4101）；超 deadline 先自动收卷再 409
+        （code=4102，未作答按错计一并落库）。
+      operationId: submitExamAnswer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 会话 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExamSubmitAnswerRequest'
+      responses:
+        '200':
+          description: 已保存（白名单，不含对错）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExamAnswerSaved'
+        '400':
+          description: 题目不在该试卷题单中
+        '409':
+          description: 已交卷（code=4101）或超时已自动收卷（code=4102）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 4102
+                  message:
+                    type: string
+                    example: 考试时间已到，已自动收卷
+        '403':
+          description: 无权访问该考试会话（非本人）
+        '404':
+          description: 考试会话不存在
+
+  /exams/sessions/{id}/submit:
+    post:
+      tags: [Exams]
+      summary: 交卷（幂等）
+      description: >-
+        交卷（student JWT，幂等：已 submitted 直接重算汇总返回）。
+        收卷三分支（手动交卷与超时自动收卷共用 finalize）：未作答 ->
+        直接判错入错题本（method='unanswered'，无答案可判不走判题）；
+        在途（有作答、is_correct NULL）-> JudgeCore 补判，失败按错计
+        （method='failed'）仍入错题本；已判题 -> 跳过。最后
+        markSubmitted 并返回汇总（accuracy 为百分比一位小数）。
+      operationId: submitExam
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 会话 id
+      responses:
+        '200':
+          description: 交卷汇总（重复调用幂等返回）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExamSummary'
+        '403':
+          description: 无权访问该考试会话（非本人）
+        '404':
+          description: 考试会话不存在
+
+  /exams/sessions/{id}/results:
+    get:
+      tags: [Exams]
+      summary: 结果页（逐题对错 + 解析）
+      description: >-
+        考试结果（student JWT）：仅 submitted 会话可查，in_progress 409
+        （code=4103）。items JOIN questions 带解析：逐题
+        isCorrect（0|1）、answerText、analysis（判题题解）与
+        explanation（题库解析）；内嵌与交卷汇总同构的
+        correctCount/totalCount/accuracy。
+      operationId: getExamResults
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 会话 id
+      responses:
+        '200':
+          description: 逐题结果与汇总
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExamResults'
+        '409':
+          description: 考试尚未交卷，暂无成绩（code=4103）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 4103
+                  message:
+                    type: string
+                    example: 考试尚未交卷，暂无成绩
+        '403':
+          description: 无权访问该考试会话（非本人）
+        '404':
+          description: 考试会话不存在
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5126,6 +5437,232 @@ components:
           items: {}
           nullable: true
           description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
+
+    ExamPaper:
+      type: object
+      description: 试卷列表条目（仅元数据，不含题目）
+      properties:
+        id:
+          type: integer
+          description: 试卷 id
+        title:
+          type: string
+          description: 试卷标题
+        year:
+          type: integer
+          nullable: true
+          description: 年份（可空）
+        district:
+          type: string
+          nullable: true
+          description: 地区（可空）
+        examType:
+          type: string
+          nullable: true
+          description: 试卷类型（可空）
+        gradeBand:
+          type: string
+          nullable: true
+          description: 学段（可空）
+        questionCount:
+          type: integer
+          description: 题目数量
+      required: [id, title, year, district, examType, gradeBand, questionCount]
+
+    ExamQuestionMeta:
+      type: object
+      description: 试卷题单元数据（白名单：无 answer/explanation，防答案泄露）
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id
+        questionNo:
+          type: integer
+          description: 卷内题号（paper_questions.question_no）
+        text:
+          type: string
+          description: 题面原文
+        type:
+          type: string
+          description: 题型（choice/fill_blank/true_false/short_answer/proof）
+        options:
+          type: array
+          items: {}
+          nullable: true
+          description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
+      required: [questionId, questionNo, text, type, options]
+
+    ExamPaperDetail:
+      type: object
+      description: 试卷详情（题目元数据 + 推荐时长）
+      properties:
+        id:
+          type: integer
+          description: 试卷 id
+        title:
+          type: string
+          description: 试卷标题
+        durationMinutes:
+          type: integer
+          description: 推荐时长（分钟）——choice/true_false 每题 1 分钟、其余每题 3 分钟，总和向上取整到 15 的倍数，clamp [30, 180]
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExamQuestionMeta'
+      required: [id, title, durationMinutes, questions]
+
+    ExamSessionCreateRequest:
+      type: object
+      required: [paperId, durationMinutes]
+      properties:
+        paperId:
+          type: integer
+          description: 试卷 id（试卷不存在 404）
+        durationMinutes:
+          type: integer
+          minimum: 10
+          maximum: 300
+          description: 考试时长（分钟），限 10-300 整数（越界/非整数 400）
+
+    ExamSessionCreated:
+      type: object
+      description: 开考/续考响应（同构；续考不重置时长，deadlineAt 沿用既有会话）
+      properties:
+        sessionId:
+          type: integer
+          description: 考试会话 id
+        deadlineAt:
+          type: string
+          format: date-time
+          description: 截止时间（ISO 8601）
+        remainingSeconds:
+          type: integer
+          description: 剩余秒数（deadline - now）
+        questions:
+          type: array
+          description: 题单（白名单，无 answer/explanation）
+          items:
+            $ref: '#/components/schemas/ExamQuestionMeta'
+      required: [sessionId, deadlineAt, remainingSeconds, questions]
+
+    ExamSubmitAnswerRequest:
+      type: object
+      required: [questionId, answerText]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（不在该卷题单 400）
+        answerText:
+          type: string
+          description: 学生提交的答案文本
+
+    ExamAnswerSaved:
+      type: object
+      description: 单题提交白名单响应（不回传对错——考试防作弊设计，对错只在 results 出现）
+      properties:
+        saved:
+          type: boolean
+          description: 恒为 true（判题结果落库但不透出）
+      required: [saved]
+
+    ExamSessionState:
+      type: object
+      description: 会话状态（断线恢复；answered 只含作答文本，判题字段剥离）
+      properties:
+        sessionId:
+          type: integer
+          description: 考试会话 id
+        status:
+          type: string
+          enum: [in_progress, submitted]
+          description: in_progress=进行中；submitted=已交卷（含超时自动收卷）
+        remainingSeconds:
+          type: integer
+          description: 剩余秒数（submitted 为 0）
+        questions:
+          type: array
+          description: 题单（白名单，无 answer/explanation）
+          items:
+            $ref: '#/components/schemas/ExamQuestionMeta'
+        answered:
+          type: object
+          description: 已答 map——questionId（字符串键）-> {answerText}
+          additionalProperties:
+            type: object
+            properties:
+              answerText:
+                type: string
+                nullable: true
+                description: 学生作答文本（无判题字段，不泄露对错）
+      required: [sessionId, status, remainingSeconds, questions, answered]
+
+    ExamSummary:
+      type: object
+      description: 交卷汇总（submit 响应；results 内嵌同构字段）
+      properties:
+        correctCount:
+          type: integer
+          description: 答对题数（is_correct=1 计数；未作答/补判失败均按错计）
+        totalCount:
+          type: integer
+          description: 总题数（题单长度）
+        accuracy:
+          type: number
+          description: 正确率（百分比一位小数，如 33.3）
+      required: [correctCount, totalCount, accuracy]
+
+    ExamResultItem:
+      type: object
+      description: 结果页逐题条目（JOIN questions 带解析）
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id
+        questionNo:
+          type: integer
+          description: 卷内题号
+        text:
+          type: string
+          description: 题面原文
+        type:
+          type: string
+          description: 题型
+        options:
+          type: array
+          items: {}
+          nullable: true
+          description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
+        answerText:
+          type: string
+          nullable: true
+          description: 学生作答文本（未作答为 null）
+        isCorrect:
+          type: integer
+          enum: [0, 1]
+          description: 对错（0=错，1=对；number 而非 boolean——未作答按错计落 0）
+        analysis:
+          type: string
+          nullable: true
+          description: 判题题解（JudgeCore 分析）
+        explanation:
+          type: string
+          nullable: true
+          description: 题库解析
+      required: [questionId, questionNo, text, type, options, answerText, isCorrect, analysis, explanation]
+
+    ExamResults:
+      type: object
+      description: 结果页响应（仅 submitted 会话可查，in_progress 409/code=4103）
+      allOf:
+        - $ref: '#/components/schemas/ExamSummary'
+        - type: object
+          properties:
+            items:
+              type: array
+              description: 逐题对错与解析
+              items:
+                $ref: '#/components/schemas/ExamResultItem'
+          required: [items]
 
     PracticeResult:
       type: object
