@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v2.4
+> 版本：v2.5
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -403,9 +403,9 @@
 |---|---|---|---|
 | GET | `/api/exams/papers?subjectId={subjectId}&year={year}&district={district}&examType={examType}&gradeBand={gradeBand}` | 试卷列表。`subjectId` 必填 integer；`year`（integer）/`district`/`examType`/`gradeBand`（string）可选叠加筛选；按 `year DESC, id DESC` 排序。响应：`[{id, title, year(nullable), district(nullable), examType(nullable), gradeBand(nullable), questionCount}]`。 | MVP |
 | GET | `/api/exams/papers/{id}` | 试卷详情：题目元数据 + 推荐时长。`durationMinutes` 按题型估算（choice/true_false 每题 1 分钟、其余每题 3 分钟），总和向上取整到 15 的倍数，clamp 到 [30, 180]。**白名单**：questions 只含 `questionId/questionNo/text/type/options`（`options` 为 JSON 字符串 parse 后的数组，无/坏 JSON 为 null），无 `answer`/`explanation`。试卷不存在 404。响应：`{id, title, durationMinutes, questions}`。 | MVP |
-| POST | `/api/exams/sessions` | 开考/续考。请求体：`{paperId, durationMinutes}`；`durationMinutes` 限 10-300 整数（越界/非整数 400）；试卷不存在 404。**续考语义**：同学生同卷已有 `in_progress` 会话直接返回既有会话（`deadlineAt` 不变、**不重置时长**），否则新建（deadline = now + duration）。响应（新建/续考同构）：`{sessionId, deadlineAt, remainingSeconds, questions}`。 | MVP |
+| POST | `/api/exams/sessions` | 开考/续考。请求体：`{paperId, durationMinutes}`；`durationMinutes` 限 10-300 整数（越界/非整数 400）；试卷不存在 404。**续考语义**：同学生同卷已有 `in_progress` 会话直接返回既有会话（`deadlineAt` 不变、**不重置时长**），否则新建（deadline = now + duration）；命中的续考会话**已超时**则先自动收卷（与 GET 会话同语义）再返回 `status='submitted'`（不新建，前端据此直接踢结果页）。响应（新建/续考同构）：`{sessionId, status?('submitted' 仅命中超时会话时返回，缺省视为 in_progress), deadlineAt, remainingSeconds, questions}`。 | MVP |
 | GET | `/api/exams/sessions/{id}` | 会话状态（断线恢复）。会话不存在 404；非本人 403。响应：`{sessionId, status: 'in_progress'\|'submitted', remainingSeconds, questions, answered}`；`answered` 为 `questionId -> {answerText}` map（**只含作答文本，判题字段一律剥离**）。发现已超 deadline 的 `in_progress` 会话时服务端**自动收卷**（与手动交卷同一 finalize 逻辑）后返回 `status='submitted'`、`remainingSeconds=0`。 | MVP |
-| POST | `/api/exams/sessions/{id}/answers` | 单题提交（同步判题）。请求体：`{questionId, answerText}`；题目不在该卷题单 400；已交卷再提交 409（`code=4101`）；超 deadline **先自动收卷再 409**（`code=4102`，未作答按错计一并落库）。判题走 JudgeCore（客观题 exact 即返，AI 判定最长 90s per-scene timeout）；判题失败先落 `answerText`（在途，`is_correct` NULL，交卷时统一补判）、错误透传前端重试。响应（**白名单，不回传对错——考试防作弊设计**）：`{saved: true}`。 | MVP |
+| POST | `/api/exams/sessions/{id}/answers` | 单题提交（同步判题）。请求体：`{questionId, answerText}`；题目不在该卷题单 400；已交卷再提交 409（`code=4101`）；超 deadline **先自动收卷再 409**（`code=4102`，未作答按错计一并落库）。判题走 JudgeCore（客观题 exact 即返，AI 判定最长 90s per-scene timeout）；**先落「在途行」再判题**（`answerText` + `is_correct` NULL）——判题在途窗口内倒计时归零触发自动收卷时按「在途补判」而非「未作答」处理，判题失败时在途行已落库（交卷时统一补判）、错误透传前端重试。响应（**白名单，不回传对错——考试防作弊设计**）：`{saved: true}`。 | MVP |
 | POST | `/api/exams/sessions/{id}/submit` | 交卷（**幂等**：已 submitted 直接重算汇总返回）。收卷三分支：未作答 -> 直接判错入错题本（`method='unanswered'`，无答案可判不走判题）；在途（有作答、无判题结果）-> JudgeCore 补判，失败按错计（`method='failed'`）仍入错题本；已判题 -> 跳过。响应：`{correctCount, totalCount, accuracy}`（`accuracy` 为百分比一位小数，如 33.3）。 | MVP |
 | GET | `/api/exams/sessions/{id}/results` | 结果页：仅 `submitted` 会话可查（`in_progress` 409，`code=4103`）。响应：`{correctCount, totalCount, accuracy, items: [{questionId, questionNo, text, type, options, answerText(nullable), isCorrect(0\|1), analysis(nullable), explanation(nullable)}]}`（items JOIN questions 带解析）。 | MVP |
 
@@ -1320,6 +1320,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.5 | 2026-09-04 | 联调修正（§4.19 三处，openapi.yaml 同步）：① `POST /api/exams/sessions` 命中的续考会话已超时 -> 先自动收卷再返回 `status='submitted'`（不新建，前端直接踢结果页）；② `POST /api/exams/sessions/{id}/answers` 改为**先落在途行再判题**（判题在途窗口内倒计时归零自动收卷时走「在途补判」而非「未作答」）；③ 考试来源错题写入改 find-or-create（镜像 JudgeCore：该生该题已有未清错题时复用既有行，不重复建行）。 |
 | v2.4 | 2026-09-03 | 新增 Exams 服务分组（§4.19，MVP，真题试卷考试）：`GET /api/exams/papers`（试卷列表，year/district/examType/gradeBand 可选叠加筛选）、`GET /api/exams/papers/{id}`（试卷详情 + 按题型估算推荐时长 durationMinutes，clamp [30,180]）、`POST /api/exams/sessions`（开考/续考——同卷 in_progress 会话直接复用、不重置时长）、`GET /api/exams/sessions/{id}`（断线恢复，超时会话自动收卷）、`POST /api/exams/sessions/{id}/answers`（单题同步判题，考试结束前响应白名单剥离 answer/explanation 与对错——防作弊）、`POST /api/exams/sessions/{id}/submit`（交卷幂等，finalize 三分支：未作答判错/在途补判/已判跳过）、`GET /api/exams/sessions/{id}/results`（结果页，逐题对错 + 解析）。判题复用 JudgeCore（`source='exam'`、`sourceRefId=sessionId`，答错写 main_error_books 与练习同语义）；新增 §6.17 真题考试数据流。openapi.yaml 同步收录 7 端点（/exams/*，student JWT）。 |
 | v2.3 | 2026-09-03 | 新增 Training 服务分组（§4.18，MVP）：`GET /api/training/error-book`（错题练习筛选列表，未清零记录 + 多 KP 聚合）、`POST /api/training/judge`（训练判题，JudgeCore 题中心变体，source 枚举 targeted/error_practice）、`POST /api/training/bump-error-levels`（重做仍错 bump level，镜像 practice）、`POST /api/training/hint`（题级 question_hints 缓存）、`GET /api/training/knowledge-points`（专项练习 KP 平铺列表）、`POST /api/training/targeted/start`（专项随机抽题，白名单序列化防答案泄露）；`main_error_books.source` 枚举补 `targeted`/`error_practice` 训练来源；新增 §6.15 错题练习 / §6.16 专项练习数据流。openapi.yaml 同步收录 6 端点（/training/*，student JWT）。 |
 | v2.2 | 2026-09-01 | 错题清零门禁加课时范围：`GET /api/practice/uncleared-errors` 新增可选 `lessonId` 参数——传入时只返回「当前课之前」的错题（`lesson_id < lessonId`，星图同款 id 数值序），修复「学生在本课练习中答错 → 刷新本课弹出错题清零阶段」的问题（本课刚产生的错题不触发清零，留待进入下一课时再清）；`lesson_id` null 的孤儿历史行保守保留；省略参数行为不变。前端 `getUnclearedErrors(subjectId, lessonId)`、CourseDetailPage 拉取时带当前 lessonId。 |

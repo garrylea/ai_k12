@@ -26,9 +26,12 @@ export interface SessionQuestionDto {
   options: unknown[] | null;
 }
 
-/** POST /api/exams/sessions 响应（新建/续考同构；续考不重置时长）。 */
+/** POST /api/exams/sessions 响应（新建/续考同构；续考不重置时长）。
+ *  status 仅在「命中的续考会话已超时、服务端自动收卷后」返回 'submitted'
+ *  （前端据此直接踢结果页）；新建/正常续考缺省（前端视为 in_progress）。 */
 export interface SessionCreatedDto {
   sessionId: number;
+  status?: 'in_progress' | 'submitted';
   deadlineAt: Date;
   remainingSeconds: number;
   questions: SessionQuestionDto[];

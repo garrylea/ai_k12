@@ -3717,7 +3717,8 @@ paths:
         开考或续考（student JWT）。durationMinutes 限 10-300 整数
         （越界/非整数 400）；试卷不存在 404。续考语义：同学生同卷已有
         in_progress 会话直接返回既有会话（deadlineAt 不变、不重置时长），
-        否则新建（deadline = now + duration）。新建/续考响应同构。
+        否则新建（deadline = now + duration）。命中的续考会话已超时则
+        先自动收卷再返回 status='submitted'（不新建）。新建/续考响应同构。
       operationId: createExamSession
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -5526,11 +5527,18 @@ components:
 
     ExamSessionCreated:
       type: object
-      description: 开考/续考响应（同构；续考不重置时长，deadlineAt 沿用既有会话）
+      description: >-
+        开考/续考响应（同构；续考不重置时长，deadlineAt 沿用既有会话）。
+        status 仅在「命中的续考会话已超时、服务端自动收卷后」返回
+        'submitted'（前端据此直接踢结果页）；新建/正常续考缺省。
       properties:
         sessionId:
           type: integer
           description: 考试会话 id
+        status:
+          type: string
+          enum: [in_progress, submitted]
+          description: 缺省视为 in_progress；'submitted' 表示命中超时会话已自动收卷
         deadlineAt:
           type: string
           format: date-time

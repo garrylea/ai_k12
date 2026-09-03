@@ -85,6 +85,18 @@ export class ExamsService {
     const existing = await this.examSessionsRepo.findInProgressByStudentPaper(studentId, dto.paperId);
 
     if (existing) {
+      if (this.isExpired(existing)) {
+        // 命中的 in_progress 会话已超时：先自动收卷（与 getSession 同语义）再返回
+        // status='submitted'（前端 ExamRunPage 据此直接踢结果页），不新建会话
+        await this.finalizeSession(existing);
+        return {
+          sessionId: existing.id,
+          status: 'submitted',
+          deadlineAt: existing.deadline_at,
+          remainingSeconds: 0,
+          questions: await this.loadQuestions(existing.paper_id),
+        };
+      }
       // 续考：返回既有会话（deadline 不变）
       return {
         sessionId: existing.id,
@@ -138,9 +150,12 @@ export class ExamsService {
   }
 
   /**
-   * 单题提交（同步判题）：await judgeCore（exact 即返，AI 最长 judgment 90s per-scene）
-   * -> upsertAnswer 落完整判题结果 -> 白名单响应 {saved:true}（对错只在 results 出现）。
-   * 判题抛错时先落 answerText（is_correct NULL 在途），错误透传，交卷时统一补判。
+   * 单题提交（同步判题）：**先落「在途行」**（answerText + questionOrder，is_correct NULL）
+   * 再 await judgeCore（exact 即返，AI 最长 judgment 90s per-scene）——judge 在途窗口内
+   * 倒计时归零触发自动收卷时，finalizeSession 按「在途补判」而非「未作答」处理
+   * （Task 2 设计注释：提交后 answer 落库但判题 HTTP 尚未返回的窗口）。
+   * 判完 upsertAnswer 覆盖完整结果 -> 白名单响应 {saved:true}（对错只在 results 出现）。
+   * 判题抛错时在途行已落库（is_correct NULL），错误透传，交卷时统一补判。
    */
   async submitAnswer(studentId: number, sessionId: number, dto: SubmitAnswerDto): Promise<{ saved: true }> {
     const session = await this.loadOwnedSession(studentId, sessionId);
@@ -161,36 +176,33 @@ export class ExamsService {
       throw new HttpException({ code: 4102, message: '考试时间已到，已自动收卷' }, 409);
     }
 
-    try {
-      const out = await this.judgeCore.judgeQuestion({
-        studentId,
-        subjectId: session.subject_id,
-        questionId: dto.questionId,
-        studentAnswer: dto.answerText,
-        source: 'exam',
-        sourceRefId: sessionId,
-      });
-      await this.examSessionsRepo.upsertAnswer({
-        sessionId,
-        questionId: dto.questionId,
-        questionOrder: q.questionNo,
-        answerText: dto.answerText,
-        isCorrect: out.isCorrect ? 1 : 0,
-        method: out.method,
-        analysis: out.analysis,
-        errorType: out.errorType ?? null,
-        judgedAt: new Date(),
-      });
-    } catch (err) {
-      // 判题失败：保留作答文本（在途，is_correct NULL），交卷时补判；错误透传给前端重试
-      await this.examSessionsRepo.upsertAnswer({
-        sessionId,
-        questionId: dto.questionId,
-        questionOrder: q.questionNo,
-        answerText: dto.answerText,
-      });
-      throw err;
-    }
+    // 在途行：is_correct NULL。判题在途窗口内自动收卷 -> finalize 走补判分支，不误判未作答
+    await this.examSessionsRepo.upsertAnswer({
+      sessionId,
+      questionId: dto.questionId,
+      questionOrder: q.questionNo,
+      answerText: dto.answerText,
+    });
+
+    const out = await this.judgeCore.judgeQuestion({
+      studentId,
+      subjectId: session.subject_id,
+      questionId: dto.questionId,
+      studentAnswer: dto.answerText,
+      source: 'exam',
+      sourceRefId: sessionId,
+    });
+    await this.examSessionsRepo.upsertAnswer({
+      sessionId,
+      questionId: dto.questionId,
+      questionOrder: q.questionNo,
+      answerText: dto.answerText,
+      isCorrect: out.isCorrect ? 1 : 0,
+      method: out.method,
+      analysis: out.analysis,
+      errorType: out.errorType ?? null,
+      judgedAt: new Date(),
+    });
     return { saved: true };
   }
 
@@ -309,8 +321,17 @@ export class ExamsService {
     return this.summarize(questions.length, finalAnswers);
   }
 
-  /** 考试来源错题本写入（未作答按错计 / 补判失败兜底共用）。 */
+  /** 考试来源错题本写入（未作答按错计 / 补判失败兜底共用）。
+   *  find-or-create（镜像 judge-core）：该生该题已有未清错题（error_practice/前次考试等）
+   *  时复用既有行，不重复 create。 */
   private async writeExamErrorBook(session: ExamSessionRow, questionId: number): Promise<void> {
+    const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(
+      session.student_id,
+      questionId,
+    );
+    if (existing) {
+      return;
+    }
     await this.mainErrorRepo.create({
       student_id: session.student_id,
       subject_id: session.subject_id,
