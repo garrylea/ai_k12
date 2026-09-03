@@ -193,6 +193,25 @@ def filter_existing(tree: list[dict], existing_names: set[str]) -> list[dict]:
 # LLM 输出解析（纯函数）
 # ---------------------------------------------------------------------------
 
+def _normalize_children(tree: list) -> list:
+    """兼容 LLM 输出形状抖动：children 里的纯字符串归一为 {"name": str}。
+
+    本地 Qwen 即使 prompt 明确要求 [{"name": ...}]，仍会偶发输出
+    ["有理数的概念", ...] 形式；validate_kp_tree 只认 {name} 对象，
+    在解析出口统一归一（不认识的形状留给 validate 报错）。
+    """
+    for node in tree:
+        if not isinstance(node, dict):
+            continue
+        children = node.get("children")
+        if isinstance(children, list):
+            node["children"] = [
+                {"name": child} if isinstance(child, str) else child
+                for child in children
+            ]
+    return tree
+
+
 def parse_kp_tree(content: str) -> list[dict]:
     """从 LLM 输出中解析 JSON 数组（两级树）。
 
@@ -222,7 +241,7 @@ def parse_kp_tree(content: str) -> list[dict]:
                 continue
             if not isinstance(data, list):
                 raise ValueError(f"LLM 输出不是 JSON 数组：{type(data).__name__}")
-            return data
+            return _normalize_children(data)
     raise ValueError(f"无法从 LLM 输出中定位 JSON 数组：{last_err}")
 
 
@@ -309,7 +328,8 @@ def main() -> None:
         return
 
     # 3. 生成 SQL 写迁移文件（日期用执行日）
-    repo_root = Path(__file__).resolve().parents[2]
+    # __file__ = tools/data-refinery/src/xxx.py：parents[2] 是 tools/，parents[3] 才是仓库根
+    repo_root = Path(__file__).resolve().parents[3]
     out_path = (repo_root / "tools" / "db" / "migrations"
                 / f"{date.today().isoformat()}_add_math_knowledge_points.sql")
     header = (

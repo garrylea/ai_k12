@@ -186,10 +186,18 @@ def _load_prompt(name: str) -> str:
 
 
 def main():
+    import argparse
+
     import pymysql
 
     from config import RefineryConfig
     from llm import create_llm_client
+
+    # --limit N：小样本验证（如 --limit 5 先验证标注质量再全量跑）
+    parser = argparse.ArgumentParser(description="题目 KP 标注回填")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="只标注前 N 题（验证质量用；缺省全量）")
+    args = parser.parse_args()
 
     cfg = RefineryConfig.from_env()
 
@@ -244,6 +252,8 @@ def main():
             )
             rows = cur.fetchall()
 
+        if args.limit is not None:
+            rows = rows[:args.limit]
         total = len(rows)
         if total == 0:
             print("[done] 所有题均已标注，无需回填", flush=True)
