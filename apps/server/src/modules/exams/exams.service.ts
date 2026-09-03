@@ -79,15 +79,14 @@ export class ExamsService {
     }
 
     const existing = await this.examSessionsRepo.findInProgressByStudentPaper(studentId, dto.paperId);
-    const session = existing ?? null;
 
-    if (session) {
+    if (existing) {
       // 续考：返回既有会话（deadline 不变）
       return {
-        sessionId: session.id,
-        deadlineAt: session.deadline_at,
-        remainingSeconds: this.remainingSeconds(session),
-        questions: await this.loadQuestions(session.paper_id),
+        sessionId: existing.id,
+        deadlineAt: existing.deadline_at,
+        remainingSeconds: this.remainingSeconds(existing),
+        questions: await this.loadQuestions(existing.paper_id),
       };
     }
 
@@ -102,7 +101,7 @@ export class ExamsService {
     return {
       sessionId,
       deadlineAt,
-      remainingSeconds: this.remainingSeconds({ deadline_at: deadlineAt } as ExamSessionRow),
+      remainingSeconds: this.remainingSeconds({ deadline_at: deadlineAt }),
       questions: await this.loadQuestions(dto.paperId),
     };
   }
