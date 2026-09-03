@@ -1,30 +1,16 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+// CleanupPhase：错题清零阶段——答题核心已收敛到 QuestionRunner（variant='embedded'），
+// 本组件只保留父层职责（对外 props 不变）：
+//   - 4 态状态机（answering/judging/allClear/hasErrors；judging 覆盖 bumpErrorLevels 窗口）
+//   - bump 逻辑（仍错题递增级别）+ 庆祝页 + AnswerResultList
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { LatexEditor } from './LatexEditor';
-import { PreviewDraftPanel } from './PreviewDraftPanel';
-import { clearDraft } from './draft-store';
+import { QuestionRunner } from './answer/QuestionRunner';
+import type { RunnerAnswerRecord, RunnerQuestion } from './answer/types';
 import { AnswerResultList } from './AnswerResultList';
 import type { PracticeQuestion } from './AnswerModal';
 import { judgePractice, bumpErrorLevels, type PreviousErrorDetail, type JudgeResult } from '@/services/api';
 
-/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用草稿白板 */
-const MATH_SUBJECT_ID = 1;
-
 type Phase = 'answering' | 'judging' | 'allClear' | 'hasErrors';
-
-interface AnswerRecord {
-  isCorrect: boolean;
-  method: string;
-  analysis: string | null;
-  errorType?: string | null;
-  studentAnswer: string;
-  failed?: boolean;
-}
 
 interface Props {
   errors: PreviousErrorDetail[];
@@ -46,26 +32,27 @@ const CheckCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-const ChevronLeftIcon = () => (
-  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="15 18 9 12 15 6" />
-  </svg>
-);
-
 export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props) {
   const [phase, setPhase] = useState<Phase>('answering');
-  const [idx, setIdx] = useState(0);
-  const [answer, setAnswer] = useState('');
   const [countdown, setCountdown] = useState(5);
-  // 本地追踪判题结果（避免 store 闭包过期问题）
-  const resultsRef = useRef<Record<string, AnswerRecord>>({});
-  const [finalResults, setFinalResults] = useState<Record<string, AnswerRecord> | null>(null);
-  const pendingRef = useRef<Map<number, Promise<unknown>>>(new Map());
+  const [finalResults, setFinalResults] = useState<Record<string, RunnerAnswerRecord> | null>(null);
 
   const questions: PracticeQuestion[] = errors.map((e) => ({
     n: e.questionN,
     text: e.questionText,
   }));
+
+  // q.n -> 错题记录：onSubmit 需要 error.cardId / lessonId。questionN 可能跨卡撞号，
+  // 优先按题面文本精确匹配，取不到再回退首条。
+  const errorsByN = useMemo(() => {
+    const m = new Map<string, PreviousErrorDetail[]>();
+    for (const e of errors) {
+      const list = m.get(e.questionN) ?? [];
+      list.push(e);
+      m.set(e.questionN, list);
+    }
+    return m;
+  }, [errors]);
 
   // 庆祝倒计时
   useEffect(() => {
@@ -78,156 +65,70 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
     return () => clearInterval(t);
   }, [phase, countdown, onComplete]);
 
-  const currentError = errors[idx];
-  const totalErrors = errors.length;
+  const handleSubmit = useCallback(async (q: RunnerQuestion, studentAnswer: string): Promise<JudgeResult> => {
+    const candidates = errorsByN.get(q.n) ?? [];
+    const error = candidates.find((e) => e.questionText === q.text) ?? candidates[0];
+    if (!error) throw new Error('错题记录缺失');
 
-  const handleSubmit = useCallback(async () => {
-    if (!answer.trim() || !currentError) return;
+    return judgePractice({
+      cardId: error.cardId,
+      // 必须写错题来源卡「真正所属的课」：清零阶段会清到其他课的错题，
+      // 若传当前页 lessonId，practice_results.lesson_id 会与卡片所属课不一致，
+      // 导致课程级「重置课堂练习」（按 lesson_id 删）漏删该卡记录。取不到时回退当前页。
+      lessonId: error.lessonId ?? lessonId,
+      subjectId,
+      questionN: error.questionN,
+      questionText: error.questionText,
+      studentAnswer,
+    });
+  }, [errorsByN, lessonId, subjectId]);
 
-    const thisIdx = idx;
-    const submittedAnswer = answer;
-    const error = currentError;
+  const handleFinish = useCallback(async (results: Record<string, RunnerAnswerRecord>) => {
+    // 判题 Promise 已由 QuestionRunner 等待完毕；judging 态覆盖下方 bumpErrorLevels 窗口
+    setPhase('judging');
 
-    clearDraft(`err-${error.errorBookId}`);
-    setAnswer('');
-
-    const p = Promise.resolve(
-      judgePractice({
-        cardId: error.cardId,
-        // 必须写错题来源卡「真正所属的课」：清零阶段会清到其他课的错题，
-        // 若传当前页 lessonId，practice_results.lesson_id 会与卡片所属课不一致，
-        // 导致课程级「重置课堂练习」（按 lesson_id 删）漏删该卡记录。取不到时回退当前页。
-        lessonId: error.lessonId ?? lessonId,
-        subjectId,
-        questionN: error.questionN,
-        questionText: error.questionText,
-        studentAnswer: submittedAnswer,
-      }),
-    )
-      .then((res: JudgeResult) => {
-        resultsRef.current[error.questionN] = {
-          isCorrect: res.isCorrect,
-          method: res.method,
-          analysis: res.analysis,
-          errorType: res.errorType ?? null,
-          studentAnswer: submittedAnswer,
-        };
-        return res;
-      })
-      .catch(() => {
-        resultsRef.current[error.questionN] = {
-          isCorrect: false,
-          method: 'ai',
-          analysis: null,
-          errorType: null,
-          studentAnswer: submittedAnswer,
-          failed: true,
-        };
-      });
-
-    pendingRef.current.set(thisIdx, p);
-
-    if (thisIdx + 1 < totalErrors) {
-      setIdx(thisIdx + 1);
-    } else {
-      setPhase('judging');
-      try {
-        await Promise.allSettled([...pendingRef.current.values()]);
-      } catch { /* ignore */ }
-
-      const final = { ...resultsRef.current };
-      setFinalResults(final);
-
-      // 统计仍错的题
-      const stillWrongIds: number[] = [];
-      for (const err of errors) {
-        const a = final[err.questionN];
-        if (a && !a.isCorrect && !a.failed) {
-          stillWrongIds.push(err.errorBookId);
-        }
-      }
-
-      // 递增仍错题的级别
-      if (stillWrongIds.length > 0) {
-        try {
-          await bumpErrorLevels(stillWrongIds);
-        } catch { /* best-effort */ }
-      }
-
-      const allCorrect = stillWrongIds.length === 0
-        && errors.every((e) => {
-          const a = final[e.questionN];
-          return a && a.isCorrect;
-        });
-
-      if (allCorrect) {
-        setPhase('allClear');
-      } else {
-        setPhase('hasErrors');
+    // 统计仍错的题
+    const stillWrongIds: number[] = [];
+    for (const err of errors) {
+      const a = results[err.questionN];
+      if (a && !a.isCorrect && !a.failed) {
+        stillWrongIds.push(err.errorBookId);
       }
     }
-  }, [answer, idx, currentError, lessonId, subjectId, errors, totalErrors]);
 
-  // ========== ANSWERING 态 ==========
-  if (phase === 'answering' && currentError) {
+    // 递增仍错题的级别
+    if (stillWrongIds.length > 0) {
+      try {
+        await bumpErrorLevels(stillWrongIds);
+      } catch { /* best-effort */ }
+    }
+
+    const allCorrect = stillWrongIds.length === 0
+      && errors.every((e) => {
+        const a = results[e.questionN];
+        return a && a.isCorrect;
+      });
+
+    setFinalResults(results);
+    setPhase(allCorrect ? 'allClear' : 'hasErrors');
+  }, [errors]);
+
+  // ========== ANSWERING 态：答题核心收敛到 QuestionRunner（embedded）==========
+  if (phase === 'answering') {
     return (
-      <div className="flex-1 min-h-0 flex flex-col" style={{ maxWidth: 'var(--learn-card-max-w)', width: '100%', margin: '0 auto' }}>
-        <div className="shrink-0 mb-3">
-          <h1 className="font-bold" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
-            错题巩固 — 第 {idx + 1}/{totalErrors} 题
-          </h1>
-        </div>
-
-        <div className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[var(--learn-card-border)] shadow-sm" style={{ backgroundColor: 'var(--learn-card-bg)' }}>
-          <div className="shrink-0 p-4 border-b border-[var(--bg-subtle)]">
-            <div className="text-xl text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]">
-              <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                {currentError.questionText}
-              </ReactMarkdown>
-            </div>
-          </div>
-
-          <div className="flex-1 min-h-0 flex">
-            <div className="w-1/2 border-r border-[var(--bg-subtle)] flex flex-col">
-              <LatexEditor value={answer} onChange={setAnswer} />
-            </div>
-            {/* 右半区：预览 / 草稿 tab（仅数学启用草稿，PRD §7.12） */}
-            <div className="w-1/2">
-              <PreviewDraftPanel
-                answer={answer}
-                questionId={`err-${currentError.errorBookId}`}
-                enabled={subjectId === MATH_SUBJECT_ID}
-              />
-            </div>
-          </div>
-
-          <div className="shrink-0 flex items-center justify-between p-3 border-t border-[var(--bg-subtle)]">
-            <button
-              onClick={() => setIdx((i) => Math.max(0, i - 1))}
-              disabled={idx <= 0}
-              className="flex items-center gap-1 h-10 px-4 rounded-lg border border-[var(--bg-subtle)] text-[var(--text-tertiary)] text-sm disabled:opacity-40 hover:bg-[var(--bg-base)] transition-colors"
-            >
-              <ChevronLeftIcon />
-              <span>上一题</span>
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={!answer.trim()}
-              className="w-12 h-12 rounded-full bg-[var(--brand-500)] text-white flex items-center justify-center disabled:opacity-40 hover:bg-[var(--brand-600)] transition-all shadow-md"
-              title="提交"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="5" y1="12" x2="19" y2="12" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      <QuestionRunner
+        questions={questions}
+        subjectId={subjectId}
+        draftKeyPrefix="err-q"
+        variant="embedded"
+        title={(index, total) => `错题巩固 — 第 ${index + 1}/${total} 题`}
+        onSubmit={handleSubmit}
+        onFinish={handleFinish}
+      />
     );
   }
 
-  // ========== JUDGING 态 ==========
+  // ========== JUDGING 态（判题等待由 QuestionRunner 内置视图覆盖，此处为 bump 窗口）==========
   if (phase === 'judging') {
     return (
       <div className="flex-1 min-h-0 flex items-center justify-center" style={{ maxWidth: 'var(--learn-card-max-w)', width: '100%', margin: '0 auto' }}>

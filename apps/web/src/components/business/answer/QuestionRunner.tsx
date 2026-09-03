@@ -2,6 +2,8 @@
 // 共享答题组件：布局与 fire-and-forget 判题取自 CleanupPhase，hint 交互取自
 // AnswerModal。variant 只影响外壳（modal 加 fixed 遮罩），内部答题区一致。
 // 不做（YAGNI，父层负责）：庆祝页、bumpErrorLevels、DiscussDrawer、结果列表渲染。
+// 收敛扩展（AnswerModal/CleanupPhase 挂载用）：startIndex / onClose / showPrevButton /
+// headerActions / judgingSlot / modalExtras 均为可选，缺省时行为与扩展前完全一致。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -13,8 +15,7 @@ import { LatexEditor } from '../LatexEditor';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
 import { clearDraft } from '../draft-store';
 import { ChoiceOptionList } from './ChoiceOptionList';
-import type { RunnerAnswerRecord, RunnerQuestion } from './types';
-import type { JudgeResult } from '@/services/api';
+import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion } from './types';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用草稿白板 */
 const MATH_SUBJECT_ID = 1;
@@ -46,12 +47,24 @@ export interface QuestionRunnerProps {
   onRequestHint?: (q: RunnerQuestion) => Promise<string>;
   /** 默认 true；考试置 false（不渲染判题对错反馈，judging 文案用「正在提交」） */
   showResultFeedback?: boolean;
-  onSubmit: (q: RunnerQuestion, answer: string) => Promise<JudgeResult>;
+  onSubmit: (q: RunnerQuestion, answer: string) => Promise<RunnerJudgeOutcome>;
   onFinish: (results: Record<string, RunnerAnswerRecord>) => void;
   /** 考试倒计时等插槽：渲染在标题行右侧 */
   headerExtra?: ReactNode;
-  /** 顶部标题（默认「第 {i+1}/{n} 题」） */
-  title?: string;
+  /** 顶部标题：固定文案或随题位变化的函数（CleanupPhase「错题巩固 — 第 i/n 题」）；默认「第 {i+1}/{n} 题」 */
+  title?: string | ((index: number, total: number) => string);
+  /** 初始题位（AnswerModal 续答语义）；默认 0 */
+  startIndex?: number;
+  /** 提供时作答态底部左侧渲染关闭 X（判题等待态的关闭入口由父层 judgingSlot 自理） */
+  onClose?: () => void;
+  /** 默认 true；false 隐藏「上一题」（AnswerModal 旧行为无回退，行为保持） */
+  showPrevButton?: boolean;
+  /** 题面右侧操作插槽（hint 按钮旁），收到当前题——AnswerModal 的「让 AI 讲一讲」入口 */
+  headerActions?: (q: RunnerQuestion) => ReactNode;
+  /** 覆盖内置判题等待视图（AnswerModal 的逐题进度页外壳） */
+  judgingSlot?: ReactNode;
+  /** modal 外壳内追加浮层（DiscussDrawer 等 absolute 定位）；仅作答态渲染 */
+  modalExtras?: ReactNode;
 }
 
 export function QuestionRunner({
@@ -68,8 +81,14 @@ export function QuestionRunner({
   onFinish,
   headerExtra,
   title,
+  startIndex,
+  onClose,
+  showPrevButton = true,
+  headerActions,
+  judgingSlot,
+  modalExtras,
 }: QuestionRunnerProps) {
-  const [idx, setIdx] = useState(0);
+  const [idx, setIdx] = useState(startIndex ?? 0);
   const [answer, setAnswer] = useState('');
   // answering：作答中；judging：末题已交，等待后台判题全部完成
   const [phase, setPhase] = useState<'answering' | 'judging'>('answering');
@@ -113,7 +132,7 @@ export function QuestionRunner({
     // fire-and-forget：不 await，判题在后台进行，学生立即切下一题。
     // showResultFeedback=false 时结果仍记入 resultsRef（供 onFinish），仅 UI 不显示对错。
     const p = Promise.resolve(onSubmit(question, submittedAnswer))
-      .then((res: JudgeResult) => {
+      .then((res: RunnerJudgeOutcome) => {
         if (seqRef.current[question.n] !== seq) return res; // 过期结果（已被重交覆盖），丢弃
         resultsRef.current[question.n] = {
           isCorrect: res.isCorrect,
@@ -203,7 +222,7 @@ export function QuestionRunner({
       {/* 标题行：默认「第 i/n 题」，headerExtra（考试倒计时等）靠右 */}
       <div className="shrink-0 flex items-center justify-between gap-3">
         <h1 className="font-bold" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
-          {title ?? `第 ${idx + 1}/${total} 题`}
+          {typeof title === 'function' ? title(idx, total) : (title ?? `第 ${idx + 1}/${total} 题`)}
         </h1>
         {headerExtra}
       </div>
@@ -222,19 +241,24 @@ export function QuestionRunner({
                 </ReactMarkdown>
               </div>
             </div>
-            {requestHint && (
-              <button
-                onClick={handleHintClick}
-                className="shrink-0 w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--warning)] shadow-sm hover:bg-[var(--brand-100)] transition-colors"
-                title="提示"
-                aria-label="提示"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                </svg>
-              </button>
+            {(requestHint || headerActions) && (
+              <div className="flex flex-col gap-2 shrink-0">
+                {requestHint && (
+                  <button
+                    onClick={handleHintClick}
+                    className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--warning)] shadow-sm hover:bg-[var(--brand-100)] transition-colors"
+                    title="提示"
+                    aria-label="提示"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                  </button>
+                )}
+                {headerActions?.(q)}
+              </div>
             )}
           </div>
           {/* 提示抽屉 */}
@@ -255,7 +279,7 @@ export function QuestionRunner({
                 </div>
               ) : (
                 <p className="text-sm text-[var(--text-primary)] leading-relaxed">
-                  {hintState.error ? '提示生成失败，请稍后再试。' : '仔细审题，从已知条件出发，逐步推理。'}
+                  {hintState.error ? '提示生成失败，请稍后再试。' : '暂无提示'}
                 </p>
               )}
             </div>
@@ -285,16 +309,33 @@ export function QuestionRunner({
           )}
         </div>
 
-        {/* 底部：上一题 / 提交 */}
+        {/* 底部：关闭（可选）/ 上一题 / 提交 */}
         <div className="shrink-0 flex items-center justify-between p-3 border-t border-[var(--bg-subtle)]">
-          <button
-            onClick={() => setIdx((i) => Math.max(0, i - 1))}
-            disabled={idx <= 0}
-            className="flex items-center gap-1 h-10 px-4 rounded-lg border border-[var(--bg-subtle)] text-[var(--text-tertiary)] text-sm disabled:opacity-40 hover:bg-[var(--bg-base)] transition-colors"
-          >
-            <ChevronLeftIcon />
-            <span>上一题</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="w-10 h-10 rounded-full border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
+                title="关闭"
+                aria-label="关闭"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+            {showPrevButton && (
+              <button
+                onClick={() => setIdx((i) => Math.max(0, i - 1))}
+                disabled={idx <= 0}
+                className="flex items-center gap-1 h-10 px-4 rounded-lg border border-[var(--bg-subtle)] text-[var(--text-tertiary)] text-sm disabled:opacity-40 hover:bg-[var(--bg-base)] transition-colors"
+              >
+                <ChevronLeftIcon />
+                <span>上一题</span>
+              </button>
+            )}
+          </div>
           <button
             onClick={handleSubmit}
             disabled={!answer.trim()}
@@ -312,13 +353,17 @@ export function QuestionRunner({
     </div>
   );
 
-  const view = phase === 'judging' ? judgingView : answeringView;
+  const view = phase === 'judging' ? (judgingSlot ?? judgingView) : answeringView;
 
   // ========== 外壳：variant 只影响这里，内部答题区完全一致 ==========
   if (variant === 'modal') {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
-        <div className="w-[92vw] max-w-5xl h-[88vh] flex flex-col p-3">{view}</div>
+        {/* relative：modalExtras（DiscussDrawer 等 absolute 浮层）以本壳为定位容器 */}
+        <div className="relative w-[92vw] max-w-5xl h-[88vh] flex flex-col p-3">
+          {view}
+          {phase === 'answering' && modalExtras}
+        </div>
       </div>
     );
   }

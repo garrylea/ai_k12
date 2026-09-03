@@ -22,3 +22,11 @@ export interface RunnerAnswerRecord {
   /** 判题请求失败（网络/服务端错误），区别于答错 */
   failed?: boolean;
 }
+
+/** onSubmit 的最小返回契约（JudgeResult 的结构子集；method 宽化为 string 以兼容旧 AnswerModal 回调签名）。 */
+export interface RunnerJudgeOutcome {
+  isCorrect: boolean;
+  method: string;
+  analysis: string | null;
+  errorType?: string | null;
+}
