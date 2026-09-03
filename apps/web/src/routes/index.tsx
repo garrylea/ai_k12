@@ -13,6 +13,8 @@ import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage'
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
 import ExamListPage from '@/pages/student/training/ExamListPage';
+import ExamRunPage from '@/pages/student/training/ExamRunPage';
+import ExamResultPage from '@/pages/student/training/ExamResultPage';
 import StudentLayout from '@/components/layout/StudentLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
@@ -186,21 +188,21 @@ const router = createBrowserRouter([
       </RequireRole>
     ),
   },
-  // 考试答题页（Task 5 替换；先注册占位避免列表页导航 404）
+  // 考试答题页（全屏沉浸层；新开卷经 sessionStorage 交接，刷新走服务端续考恢复，已交卷自动跳结果页）
   {
     path: '/student/training/exam/run/:sessionId',
     element: (
       <RequireRole role="student">
-        <Placeholder title="考试答题（开发中）" />
+        <ExamRunPage />
       </RequireRole>
     ),
   },
-  // 考试结果页（Task 5 替换）
+  // 考试结果页（全屏沉浸层；mount 校验已交卷，未交卷踢回答题页）
   {
     path: '/student/training/exam/result/:sessionId',
     element: (
       <RequireRole role="student">
-        <Placeholder title="考试结果（开发中）" />
+        <ExamResultPage />
       </RequireRole>
     ),
   },

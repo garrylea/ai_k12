@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
@@ -22,9 +23,11 @@ interface Props {
   questions: PracticeQuestion[];
   answers: Record<string, AnswerRecord>;
   onClose: () => void;
+  /** 插入在头部与列表之间的内容（考试结果页的得分卡等）。 */
+  headerExtra?: ReactNode;
 }
 
-export function AnswerResultList({ questions, answers, onClose }: Props) {
+export function AnswerResultList({ questions, answers, onClose, headerExtra }: Props) {
   const [expandedN, setExpandedN] = useState<string | null>(null);
 
   const failedCount = questions.filter(q => answers[q.n]?.failed).length;
@@ -55,6 +58,10 @@ export function AnswerResultList({ questions, answers, onClose }: Props) {
             )}
           </div>
         </div>
+
+        {headerExtra && (
+          <div className="shrink-0 border-b border-[var(--bg-subtle)]">{headerExtra}</div>
+        )}
 
         {/* ═══ List ═══ */}
         <div className="flex-1 overflow-auto p-3">
