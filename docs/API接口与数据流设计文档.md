@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v2.2
+> 版本：v2.4
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -1320,6 +1320,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.4 | 2026-09-03 | 新增 Exams 服务分组（§4.19，MVP，真题试卷考试）：`GET /api/exams/papers`（试卷列表，year/district/examType/gradeBand 可选叠加筛选）、`GET /api/exams/papers/{id}`（试卷详情 + 按题型估算推荐时长 durationMinutes，clamp [30,180]）、`POST /api/exams/sessions`（开考/续考——同卷 in_progress 会话直接复用、不重置时长）、`GET /api/exams/sessions/{id}`（断线恢复，超时会话自动收卷）、`POST /api/exams/sessions/{id}/answers`（单题同步判题，考试结束前响应白名单剥离 answer/explanation 与对错——防作弊）、`POST /api/exams/sessions/{id}/submit`（交卷幂等，finalize 三分支：未作答判错/在途补判/已判跳过）、`GET /api/exams/sessions/{id}/results`（结果页，逐题对错 + 解析）。判题复用 JudgeCore（`source='exam'`、`sourceRefId=sessionId`，答错写 main_error_books 与练习同语义）；新增 §6.17 真题考试数据流。openapi.yaml 同步收录 7 端点（/exams/*，student JWT）。 |
 | v2.3 | 2026-09-03 | 新增 Training 服务分组（§4.18，MVP）：`GET /api/training/error-book`（错题练习筛选列表，未清零记录 + 多 KP 聚合）、`POST /api/training/judge`（训练判题，JudgeCore 题中心变体，source 枚举 targeted/error_practice）、`POST /api/training/bump-error-levels`（重做仍错 bump level，镜像 practice）、`POST /api/training/hint`（题级 question_hints 缓存）、`GET /api/training/knowledge-points`（专项练习 KP 平铺列表）、`POST /api/training/targeted/start`（专项随机抽题，白名单序列化防答案泄露）；`main_error_books.source` 枚举补 `targeted`/`error_practice` 训练来源；新增 §6.15 错题练习 / §6.16 专项练习数据流。openapi.yaml 同步收录 6 端点（/training/*，student JWT）。 |
 | v2.2 | 2026-09-01 | 错题清零门禁加课时范围：`GET /api/practice/uncleared-errors` 新增可选 `lessonId` 参数——传入时只返回「当前课之前」的错题（`lesson_id < lessonId`，星图同款 id 数值序），修复「学生在本课练习中答错 → 刷新本课弹出错题清零阶段」的问题（本课刚产生的错题不触发清零，留待进入下一课时再清）；`lesson_id` null 的孤儿历史行保守保留；省略参数行为不变。前端 `getUnclearedErrors(subjectId, lessonId)`、CourseDetailPage 拉取时带当前 lessonId。 |
 | v2.1 | 2026-09-01 | 家长端按学科教材配置：新增 `GET/PUT /api/parent/students/{studentId}/subject-configs(/{subjectId})`（每学科 年级/册别/版本 配置，`progress.textbook_version_id + current_semester_id` 为事实源；已开始学习且切换 → 重置该学科学习状态并返回 `reset: true`）；`GET /api/content/versions` 响应补 `edition` 字段；`GET /api/practice/uncleared-errors` 按当前教材版本过滤（家长切换教材后旧版错题不计入清零门禁）；星链图版本回退规则改为「同学段 edition 非空优先、id 降序」、册别回退按学生年级匹配 `semesters.grade`。前端新增 `/parent/students/:id/config` 配置页 + 学生卡片「学习配置」入口；StudentLayout 顶栏硬编码「三年级·数学 人教版」改为星图真实数据。 |
