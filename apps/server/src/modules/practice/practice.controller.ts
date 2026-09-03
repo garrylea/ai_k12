@@ -108,6 +108,6 @@ export class PracticeController {
     @Body() dto: { errorBookIds: number[] },
     @CurrentUser() user: JwtUser,
   ) {
-    return this.practiceService.bumpErrorLevels(dto.errorBookIds);
+    return this.practiceService.bumpErrorLevels(dto.errorBookIds, user.sub);
   }
 }

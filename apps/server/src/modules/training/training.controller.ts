@@ -50,13 +50,13 @@ export class TrainingController {
     });
   }
 
-  /** 仍错 bump：错题重做仍答错时提升 level（镜像 practice 的 bump-error-levels）。 */
+  /** 仍错 bump：错题重做仍答错时提升 level（镜像 practice 的 bump-error-levels）。传 user.sub 做归属校验（防 IDOR）。 */
   @Post('bump-error-levels')
   async bumpErrorLevels(
     @Body() dto: { errorBookIds: number[] },
     @CurrentUser() user: JwtUser,
   ) {
-    return this.trainingService.bumpErrorLevels(dto.errorBookIds);
+    return this.trainingService.bumpErrorLevels(dto.errorBookIds, user.sub);
   }
 
   /** 训练「提示」：题级 question_hints 缓存（命中直返，未命中 AI 生成 + 写回）。 */

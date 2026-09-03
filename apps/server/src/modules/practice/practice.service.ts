@@ -288,10 +288,10 @@ export class PracticeService {
 
   /**
    * 批量递增错题严重程度（level + 1）。
-   * 用于清零后仍有错误的题。
+   * 用于清零后仍有错误的题。studentId 为归属校验（防 IDOR）。
    */
-  async bumpErrorLevels(errorBookIds: number[]): Promise<void> {
-    await this.mainErrorRepo.bumpLevels(errorBookIds);
+  async bumpErrorLevels(errorBookIds: number[], studentId?: number): Promise<void> {
+    await this.mainErrorRepo.bumpLevels(errorBookIds, studentId);
   }
 
   /**

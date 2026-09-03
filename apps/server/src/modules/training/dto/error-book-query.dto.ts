@@ -21,4 +21,6 @@ export interface ErrorBookEntryDto {
   level: number;
   createdAt: string;
   kpIds: number[];
+  /** 选择题选项（questions.options 解析后的 JSON 数组：字符串选项或 {label,text}），非选择题/解析失败为 null。 */
+  options: unknown[] | null;
 }

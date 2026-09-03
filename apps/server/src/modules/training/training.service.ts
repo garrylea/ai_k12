@@ -49,6 +49,7 @@ export class TrainingService {
         level: row.level,
         createdAt: new Date(row.created_at).toISOString(),
         kpIds: row.kp_id != null ? [row.kp_id] : [],
+        options: parseOptions(row.options),
       });
     }
     return [...byId.values()];
@@ -59,9 +60,9 @@ export class TrainingService {
     return this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
   }
 
-  /** 仍错 bump：错题重做仍答错时提升 level（镜像 PracticeService.bumpErrorLevels）。 */
-  async bumpErrorLevels(errorBookIds: number[]): Promise<void> {
-    await this.mainErrorRepo.bumpLevels(errorBookIds);
+  /** 仍错 bump：错题重做仍答错时提升 level（镜像 PracticeService.bumpErrorLevels）。studentId 为归属校验（防 IDOR）。 */
+  async bumpErrorLevels(errorBookIds: number[], studentId?: number): Promise<void> {
+    await this.mainErrorRepo.bumpLevels(errorBookIds, studentId);
   }
 
   /**

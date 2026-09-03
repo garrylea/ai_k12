@@ -33,8 +33,8 @@ describe('TrainingService.getErrorBookEntries', () => {
     const deps = mk({
       mainErrorRepo: {
         findErrorBookEntries: vi.fn().mockResolvedValue([
-          { id: 1, question_id: 10, questionText: '题面', type: 'choice', level: 2, created_at: new Date('2026-09-01'), kp_id: 3 },
-          { id: 1, question_id: 10, questionText: '题面', type: 'choice', level: 2, created_at: new Date('2026-09-01'), kp_id: 5 },
+          { id: 1, question_id: 10, questionText: '题面', type: 'choice', level: 2, created_at: new Date('2026-09-01'), kp_id: 3, options: '["A. 1", "B. 2"]' },
+          { id: 1, question_id: 10, questionText: '题面', type: 'choice', level: 2, created_at: new Date('2026-09-01'), kp_id: 5, options: '["A. 1", "B. 2"]' },
         ]),
         bumpLevels: vi.fn(),
       },
@@ -43,6 +43,23 @@ describe('TrainingService.getErrorBookEntries', () => {
     const r = await svc.getErrorBookEntries(1, 1, {});
     expect(r).toHaveLength(1);
     expect(r[0].kpIds).toEqual([3, 5]);
+  });
+
+  it('options JSON 字符串解析进 DTO（多行聚合取首行，坏 JSON/缺省为 null）', async () => {
+    const deps = mk({
+      mainErrorRepo: {
+        findErrorBookEntries: vi.fn().mockResolvedValue([
+          { id: 1, question_id: 10, questionText: '题面', type: 'choice', level: 1, created_at: new Date('2026-09-01'), kp_id: null, options: '["A. 1", "B. 2"]' },
+          { id: 2, question_id: 11, questionText: '题面2', type: 'proof', level: 1, created_at: new Date('2026-09-01'), kp_id: null, options: 'not json' },
+          { id: 3, question_id: 12, questionText: '题面3', type: 'fill_blank', level: 1, created_at: new Date('2026-09-01'), kp_id: null, options: null },
+        ]),
+        bumpLevels: vi.fn(),
+      },
+    });
+    const r = await mkSvc(deps).getErrorBookEntries(1, 1, {});
+    expect(r[0].options).toEqual(['A. 1', 'B. 2']);
+    expect(r[1].options).toBeNull();
+    expect(r[2].options).toBeNull();
   });
 });
 
@@ -56,11 +73,11 @@ describe('TrainingService.judgeTraining', () => {
 });
 
 describe('TrainingService.bumpErrorLevels', () => {
-  it('透传 errorBookIds 给 repo.bumpLevels', async () => {
+  it('透传 errorBookIds + studentId（归属校验）给 repo.bumpLevels', async () => {
     const deps = mk();
     const svc = mkSvc(deps);
-    await svc.bumpErrorLevels([1, 2, 3]);
-    expect(deps.mainErrorRepo.bumpLevels).toHaveBeenCalledWith([1, 2, 3]);
+    await svc.bumpErrorLevels([1, 2, 3], 7);
+    expect(deps.mainErrorRepo.bumpLevels).toHaveBeenCalledWith([1, 2, 3], 7);
   });
 });
 
