@@ -10,6 +10,7 @@ import {
   type TargetedPracticeQuestion,
 } from '@/services/api';
 import { useThemeStore } from '@/store/themeStore';
+import { normalizeOptions } from './normalizeOptions';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
 const MATH_SUBJECT_ID = 1;
@@ -18,27 +19,6 @@ const MATH_SUBJECT_ID = 1;
 const SESSION_KEY = 'training:targeted';
 
 type Phase = 'answering' | 'result';
-
-/**
- * 后端 options 是字符串数组（如 "A. 1"），QuestionRunner 需要 {label, text}。
- * 提取前导字母作 label（判题/答案比对用字母），剩余作选项文本；
- * 无法解析时按序号补字母 label，保证选择题可点选。
- */
-function normalizeOptions(raw: unknown[] | null | undefined): Array<{ label: string; text: string }> | undefined {
-  if (!raw || raw.length === 0) return undefined;
-  return raw.map((item, i) => {
-    if (typeof item === 'string') {
-      const m = item.match(/^\(?([A-Za-z])[.、．)）]\s*(.*)$/);
-      if (m) return { label: m[1].toUpperCase(), text: m[2] || m[1].toUpperCase() };
-      return { label: String.fromCharCode(65 + i), text: item };
-    }
-    if (item != null && typeof item === 'object' && 'label' in item && 'text' in item) {
-      const o = item as { label: unknown; text: unknown };
-      if (typeof o.label === 'string' && typeof o.text === 'string') return { label: o.label, text: o.text };
-    }
-    return { label: String.fromCharCode(65 + i), text: String(item) };
-  });
-}
 
 export default function TargetedRunPage() {
   const navigate = useNavigate();

@@ -11,6 +11,7 @@ import {
   type TrainingErrorBookEntry,
 } from '@/services/api';
 import { useThemeStore } from '@/store/themeStore';
+import { normalizeOptions } from './normalizeOptions';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
 const MATH_SUBJECT_ID = 1;
@@ -80,6 +81,7 @@ export default function ErrorPracticeRunPage() {
         n: String(e.errorBookId),
         text: e.questionText,
         type: e.type ?? undefined,
+        options: normalizeOptions(e.options),
       })),
     [entries],
   );

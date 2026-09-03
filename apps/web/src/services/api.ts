@@ -780,6 +780,8 @@ export interface TrainingErrorBookEntry {
   level: number;
   createdAt: string;
   kpIds: number[];
+  /** 选择题选项（JSON 数组：字符串选项或 {label,text}），非选择题/无选项为 null。 */
+  options: unknown[] | null;
 }
 
 export function getTrainingErrorBook(params: {

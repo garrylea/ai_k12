@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BackButton, Button, Card, Skeleton, Tag } from '@/components/base';
-import { getTrainingErrorBook, type TrainingErrorBookEntry } from '@/services/api';
+import { getKnowledgePoints, getTrainingErrorBook, type TrainingErrorBookEntry } from '@/services/api';
 import { useThemeStore } from '@/store/themeStore';
 
 /** id 对应 subjects 表 seed（1=数学），与现有页一致。 */
@@ -76,7 +76,9 @@ export default function ErrorPracticePage() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [type, setType] = useState('');
-  const [kpId, setKpId] = useState(''); // 专项：KP 数据 Task 7 接入，先只有「全部」占位
+  const [kpId, setKpId] = useState('');
+  // 专项下拉：二级 KP 平铺（label 为「一级名 / 二级名」）
+  const [kpOptions, setKpOptions] = useState<Array<{ value: string; label: string }>>([]);
 
   const [entries, setEntries] = useState<TrainingErrorBookEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +112,30 @@ export default function ErrorPracticePage() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // mount 时拉 KP 树填专项下拉：只列二级 KP（parentKpId 非空），
+  // label 为「一级名 / 二级名」（一级自身是分组概念，不做筛选项）；失败静默（下拉退化为「全部」）。
+  useEffect(() => {
+    let cancelled = false;
+    getKnowledgePoints(MATH_SUBJECT_ID)
+      .then((kps) => {
+        if (cancelled) return;
+        const nameById = new Map(kps.map((k) => [k.id, k.name]));
+        const secondLevel = kps
+          .filter((k) => k.parentKpId != null)
+          .map((k) => ({
+            value: String(k.id),
+            label: `${nameById.get(k.parentKpId!) ?? '其他'} / ${k.name}`,
+          }));
+        setKpOptions(secondLevel);
+      })
+      .catch(() => {
+        // KP 拉取失败不阻断错题列表：专项下拉保持「全部」占位
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const toggle = (entry: TrainingErrorBookEntry) => {
@@ -191,8 +217,10 @@ export default function ErrorPracticePage() {
                   className={selectClassName}
                   aria-label="专项筛选"
                 >
-                  {/* KP 数据由训练模块后续 task 接入，先渲染「全部」占位 */}
                   <option value="">全部</option>
+                  {kpOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
               </label>
               <Button variant="primary" size="md" loading={loading} onClick={() => void load()}>
