@@ -5,6 +5,7 @@ import { QuestionsRepository } from '../../database/repositories/questions.repo.
 import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
 import { QuestionHintsRepository } from '../../database/repositories/question-hints.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
+import { parseOptions } from '../../common/utils/parse-options.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
 
 /**
@@ -139,16 +140,5 @@ export class TrainingService {
         options: parseOptions(q.options),
       })),
     };
-  }
-}
-
-/** options JSON 字符串安全解析：null/空串/非数组/坏 JSON 一律返回 null。 */
-function parseOptions(raw: string | null): unknown[] | null {
-  if (raw == null || raw === '') return null;
-  try {
-    const v = JSON.parse(raw);
-    return Array.isArray(v) ? v : null;
-  } catch {
-    return null;
   }
 }

@@ -4,6 +4,8 @@ export { AdminChatRepository } from './admin-chat.repo.js';
 export { AdminsRepository } from './admins.repo.js';
 export { CardsRepository } from './cards.repo.js';
 export { ErrorRedoLogsRepository } from './error-redo-logs.repo.js';
+export { ExamPapersRepository } from './exam-papers.repo.js';
+export type { ExamPaperRow, PaperQuestionRow } from './exam-papers.repo.js';
 export { ExtractTasksRepository } from './extract-tasks.repo.js';
 export { LlmModelsRepository } from './llm-models.repo.js';
 export { LlmRoutesRepository } from './llm-routes.repo.js';
