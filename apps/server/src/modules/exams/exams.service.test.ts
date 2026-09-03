@@ -7,9 +7,50 @@ const mk = (overrides: any = {}) => ({
     findById: vi.fn().mockResolvedValue(null),
     findQuestionsByPaperId: vi.fn().mockResolvedValue([]),
   },
+  // Task 2（会话生命周期）依赖。
+  examSessionsRepo: {
+    create: vi.fn().mockResolvedValue(1),
+    findById: vi.fn().mockResolvedValue(null),
+    findInProgressByStudentPaper: vi.fn().mockResolvedValue(null),
+    markSubmitted: vi.fn().mockResolvedValue(undefined),
+    upsertAnswer: vi.fn().mockResolvedValue(undefined),
+    findAnswersBySession: vi.fn().mockResolvedValue([]),
+    findAnswersWithQuestions: vi.fn().mockResolvedValue([]),
+  },
+  judgeCore: { judgeQuestion: vi.fn() },
+  mainErrorRepo: { create: vi.fn().mockResolvedValue(1) },
   ...overrides,
 });
-const mkSvc = (deps: ReturnType<typeof mk>) => new ExamsService(deps.examPapersRepo);
+const mkSvc = (deps: ReturnType<typeof mk>) =>
+  new ExamsService(deps.examPapersRepo, deps.examSessionsRepo, deps.judgeCore, deps.mainErrorRepo);
+
+/** 会话测试公共 fixtures。 */
+const paperRow = { id: 5, subject_id: 2, title: '2025 年期末卷', year: 2025, district: '海淀', exam_type: '期末', grade_band: 'junior', question_count: 3 };
+const paperQuestions = [
+  { questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: '["A. 1", "B. 2"]' },
+  { questionId: 11, questionNo: 2, text: '填空题', type: 'fill_blank', options: null },
+  { questionId: 12, questionNo: 3, text: '证明题', type: 'proof', options: null },
+];
+const sessionRow = (o: any = {}) => ({
+  id: 77,
+  student_id: 1,
+  paper_id: 5,
+  subject_id: 2,
+  status: 'in_progress',
+  duration_minutes: 30,
+  started_at: new Date(Date.now() - 60000),
+  deadline_at: new Date(Date.now() + 600000),
+  submitted_at: null,
+  created_at: new Date(Date.now() - 60000),
+  updated_at: new Date(Date.now() - 60000),
+  ...o,
+});
+/** papersRepo mock：试卷存在 + 题单 3 题。 */
+const papersRepoWithPaper = () => ({
+  findPapers: vi.fn().mockResolvedValue([]),
+  findById: vi.fn().mockResolvedValue(paperRow),
+  findQuestionsByPaperId: vi.fn().mockResolvedValue(paperQuestions),
+});
 
 describe('ExamsService.listPapers', () => {
   it('透传筛选参数给 repo', async () => {
@@ -146,5 +187,338 @@ describe('ExamsService.getPaperDetail', () => {
     });
     await expect(mkSvc(deps).getPaperDetail(999)).rejects.toMatchObject({ status: 404 });
     expect(deps.examPapersRepo.findQuestionsByPaperId).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// Task 2：考试会话生命周期
+// ============================================================
+
+describe('ExamsService.createSession', () => {
+  it('无 in_progress 会话 -> 新建：deadline = now + duration，返回题单 + remainingSeconds', async () => {
+    const deps = mk({ examPapersRepo: papersRepoWithPaper() });
+    const r = await mkSvc(deps).createSession(1, { paperId: 5, durationMinutes: 30 });
+    expect(deps.examSessionsRepo.findInProgressByStudentPaper).toHaveBeenCalledWith(1, 5);
+    expect(deps.examSessionsRepo.create).toHaveBeenCalledTimes(1);
+    const arg = deps.examSessionsRepo.create.mock.calls[0][0];
+    expect(arg).toMatchObject({ studentId: 1, paperId: 5, subjectId: 2, durationMinutes: 30 });
+    expect(arg.deadlineAt.getTime()).toBeGreaterThan(Date.now() + 29 * 60000);
+    expect(r.sessionId).toBe(1);
+    expect(r.questions).toHaveLength(3);
+    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'] });
+    expect(r.remainingSeconds).toBeGreaterThanOrEqual(1790);
+    expect(r.remainingSeconds).toBeLessThanOrEqual(1800);
+  });
+
+  it('已有 in_progress 会话 -> 续考：不新建、不重置时长', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findInProgressByStudentPaper: vi.fn().mockResolvedValue(sessionRow({ id: 77, deadline_at: new Date(Date.now() + 300000) })),
+      },
+    });
+    const r = await mkSvc(deps).createSession(1, { paperId: 5, durationMinutes: 30 });
+    expect(deps.examSessionsRepo.create).not.toHaveBeenCalled();
+    expect(r.sessionId).toBe(77);
+    expect(r.remainingSeconds).toBeGreaterThanOrEqual(290);
+    expect(r.remainingSeconds).toBeLessThanOrEqual(300);
+    expect(r.questions).toHaveLength(3);
+  });
+
+  it('durationMinutes 越界/非整数 -> 400（合法区间 10-300 整数）', async () => {
+    const deps = mk({ examPapersRepo: papersRepoWithPaper() });
+    await expect(mkSvc(deps).createSession(1, { paperId: 5, durationMinutes: 9 })).rejects.toMatchObject({ status: 400 });
+    await expect(mkSvc(deps).createSession(1, { paperId: 5, durationMinutes: 301 })).rejects.toMatchObject({ status: 400 });
+    await expect(mkSvc(deps).createSession(1, { paperId: 5, durationMinutes: 10.5 })).rejects.toMatchObject({ status: 400 });
+    expect(deps.examSessionsRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('试卷不存在 -> 404', async () => {
+    const deps = mk();
+    await expect(mkSvc(deps).createSession(1, { paperId: 999, durationMinutes: 30 })).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('ExamsService.submitAnswer', () => {
+  it('正常路径：judgeQuestion(source=exam, sourceRefId=sessionId) -> upsertAnswer 落完整判题结果 -> 白名单响应', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+      judgeCore: {
+        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: false, method: 'exact', analysis: '正确答案：B', errorType: null, errorBookId: 9 }),
+      },
+    });
+    const r = await mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' });
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
+      studentId: 1, subjectId: 2, questionId: 10, studentAnswer: 'A', source: 'exam', sourceRefId: 77,
+    });
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith({
+      sessionId: 77, questionId: 10, questionOrder: 1, answerText: 'A',
+      isCorrect: 0, method: 'exact', analysis: '正确答案：B', errorType: null, judgedAt: expect.any(Date),
+    });
+    // 白名单：只回 saved，不泄露对错
+    expect(Object.keys(r).sort()).toEqual(['saved']);
+    expect(r.saved).toBe(true);
+  });
+
+  it('超 deadline -> 409 + 自动收卷（未答题入 exam_answers + 错题本）', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ deadline_at: new Date(Date.now() - 1000) })),
+      },
+    });
+    await expect(mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' })).rejects.toMatchObject({ status: 409 });
+    expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 10, isCorrect: 0, method: 'unanswered',
+    }));
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledWith({
+      student_id: 1, subject_id: 2, question_id: 10, source: 'exam', source_ref_id: 77,
+      question_n: null, lesson_id: null, wrong_answer_text: null,
+    });
+  });
+
+  it('judgeCore 抛错 -> 先落 answerText（is_correct NULL 在途）再透传错误，交卷时补判', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+      judgeCore: { judgeQuestion: vi.fn().mockRejectedValue({ status: 503 }) },
+    });
+    await expect(mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' })).rejects.toMatchObject({ status: 503 });
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 10, questionOrder: 1, answerText: 'A',
+    }));
+    const call = deps.examSessionsRepo.upsertAnswer.mock.calls[0][0];
+    expect(call.isCorrect).toBeUndefined();
+    expect(call.method).toBeUndefined();
+  });
+
+  it('会话已 submitted -> 409，不再判题', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+      },
+    });
+    await expect(mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' })).rejects.toMatchObject({ status: 409 });
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+  });
+
+  it('题目不在该试卷题单 -> 400', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+    });
+    await expect(mkSvc(deps).submitAnswer(1, 77, { questionId: 999, answerText: 'A' })).rejects.toMatchObject({ status: 400 });
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+  });
+
+  it('非本人会话 -> 403', async () => {
+    const deps = mk({
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow({ student_id: 42 })) },
+    });
+    await expect(mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' })).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('ExamsService.submit', () => {
+  it('2 题未答 + 1 题已答对：未答题不走 judgeCore，直接 method=unanswered 判错 + 入错题本', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow()),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+        ]),
+      },
+    });
+    const r = await mkSvc(deps).submit(1, 77);
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+    // 未答题 11/12 -> upsertAnswer(unanswered) + mainErrorRepo.create
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 77, questionId: 11, questionOrder: 2, isCorrect: 0, method: 'unanswered' }));
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 77, questionId: 12, questionOrder: 3, isCorrect: 0, method: 'unanswered' }));
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(2);
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledWith({
+      student_id: 1, subject_id: 2, question_id: 11, source: 'exam', source_ref_id: 77,
+      question_n: null, lesson_id: null, wrong_answer_text: null,
+    });
+    expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
+    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 33.3 });
+  });
+
+  it('在途题（answer_text 非空、is_correct NULL）-> judgeCore 补判并落完整结果', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow()),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+          { id: 2, session_id: 77, question_id: 11, question_order: 2, answer_text: '2/3', is_correct: null, method: null, analysis: null, error_type: null, judged_at: null },
+        ]),
+      },
+      judgeCore: {
+        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 11, isCorrect: true, method: 'exact', analysis: null, errorType: null, errorBookId: undefined }),
+      },
+    });
+    const r = await mkSvc(deps).submit(1, 77);
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
+      studentId: 1, subjectId: 2, questionId: 11, studentAnswer: '2/3', source: 'exam', sourceRefId: 77,
+    });
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 11, answerText: '2/3', isCorrect: 1, method: 'exact',
+    }));
+    // q11 补判答对不入错题本；q12 未答入错题本（仅 1 次）
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(1);
+    expect(r.totalCount).toBe(3);
+  });
+
+  it('在途题补判失败 -> method=failed 按错计 + 入错题本', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow()),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 2, session_id: 77, question_id: 11, question_order: 2, answer_text: 'x', is_correct: null, method: null, analysis: null, error_type: null, judged_at: null },
+        ]),
+      },
+      judgeCore: { judgeQuestion: vi.fn().mockRejectedValue(new Error('LLM down')) },
+    });
+    const r = await mkSvc(deps).submit(1, 77);
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 11, answerText: 'x', isCorrect: 0, method: 'failed',
+    }));
+    // q10/q12 未答 + q11 failed -> 各入一次错题本（共 3 次）
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(3);
+    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0 });
+  });
+
+  it('幂等：已 submitted -> 直接重算汇总返回，不重复判题/落库', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+          { id: 2, session_id: 77, question_id: 11, question_order: 2, answer_text: 'x', is_correct: 0, method: 'ai', analysis: '错因', error_type: 'logic', judged_at: new Date() },
+          { id: 3, session_id: 77, question_id: 12, question_order: 3, answer_text: null, is_correct: 0, method: 'unanswered', analysis: null, error_type: null, judged_at: new Date() },
+        ]),
+      },
+    });
+    const r = await mkSvc(deps).submit(1, 77);
+    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 33.3 });
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+    expect(deps.examSessionsRepo.upsertAnswer).not.toHaveBeenCalled();
+    expect(deps.examSessionsRepo.markSubmitted).not.toHaveBeenCalled();
+  });
+
+  it('会话不存在 -> 404；非本人 -> 403', async () => {
+    const deps = mk();
+    await expect(mkSvc(deps).submit(1, 99)).rejects.toMatchObject({ status: 404 });
+    const deps2 = mk({
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow({ student_id: 42 })) },
+    });
+    await expect(mkSvc(deps2).submit(1, 77)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('ExamsService.getSession', () => {
+  it('进行中：返回 answered map（只有 answerText，无对错）+ remainingSeconds', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow()),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+        ]),
+      },
+    });
+    const r = await mkSvc(deps).getSession(1, 77);
+    expect(r.status).toBe('in_progress');
+    expect(r.remainingSeconds).toBeGreaterThan(0);
+    expect(r.questions).toHaveLength(3);
+    expect(r.answered).toEqual({ 10: { answerText: 'A' } });
+    // 白名单：不泄露判题结果
+    expect(JSON.stringify(r)).not.toContain('isCorrect');
+    expect(JSON.stringify(r)).not.toContain('is_correct');
+  });
+
+  it('deadline 已过 -> 自动收卷，status=submitted', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ deadline_at: new Date(Date.now() - 1000) })),
+      },
+    });
+    const r = await mkSvc(deps).getSession(1, 77);
+    expect(r.status).toBe('submitted');
+    expect(r.remainingSeconds).toBe(0);
+    expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 77, method: 'unanswered' }));
+  });
+
+  it('已 submitted：直接返回状态，不再收卷/判题', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersBySession: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const r = await mkSvc(deps).getSession(1, 77);
+    expect(r.status).toBe('submitted');
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+    expect(deps.examSessionsRepo.markSubmitted).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExamsService.getResults', () => {
+  it('in_progress -> 409', async () => {
+    const deps = mk({
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+    });
+    await expect(mkSvc(deps).getResults(1, 77)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('submitted：汇总 + items JOIN questions 带 explanation，options 解析', async () => {
+    const deps = mk({
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersWithQuestions: vi.fn().mockResolvedValue([
+          { question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, analysis: null, text: '选择题 1', type: 'choice', options: '["A. 1", "B. 2"]', explanation: '选 A 因为...' },
+          { question_id: 11, question_order: 2, answer_text: 'x', is_correct: 0, analysis: '移项符号错误', text: '填空题', type: 'fill_blank', options: null, explanation: '解析 2' },
+        ]),
+      },
+    });
+    const r = await mkSvc(deps).getResults(1, 77);
+    expect(r.correctCount).toBe(1);
+    expect(r.totalCount).toBe(2);
+    expect(r.accuracy).toBe(50);
+    expect(r.items[0]).toEqual({
+      questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'],
+      answerText: 'A', isCorrect: 1, analysis: null, explanation: '选 A 因为...',
+    });
+    expect(r.items[1].analysis).toBe('移项符号错误');
+    expect(r.items[1].explanation).toBe('解析 2');
+  });
+
+  it('会话不存在 -> 404；非本人 -> 403', async () => {
+    const deps = mk();
+    await expect(mkSvc(deps).getResults(1, 99)).rejects.toMatchObject({ status: 404 });
+    const deps2 = mk({
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow({ student_id: 42 })) },
+    });
+    await expect(mkSvc(deps2).getResults(1, 77)).rejects.toMatchObject({ status: 403 });
   });
 });

@@ -6,6 +6,8 @@ export { CardsRepository } from './cards.repo.js';
 export { ErrorRedoLogsRepository } from './error-redo-logs.repo.js';
 export { ExamPapersRepository } from './exam-papers.repo.js';
 export type { ExamPaperRow, PaperQuestionRow } from './exam-papers.repo.js';
+export { ExamSessionsRepository } from './exam-sessions.repo.js';
+export type { ExamSessionRow, ExamAnswerRow, UpsertAnswerRow, ExamResultRow } from './exam-sessions.repo.js';
 export { ExtractTasksRepository } from './extract-tasks.repo.js';
 export { LlmModelsRepository } from './llm-models.repo.js';
 export { LlmRoutesRepository } from './llm-routes.repo.js';

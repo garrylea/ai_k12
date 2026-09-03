@@ -1,9 +1,10 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 
-/** exam_papers 行（列表投影）。 */
+/** exam_papers 行（列表投影）。subject_id 仅 findById 投影携带（建会话需学科；列表映射不透出）。 */
 export interface ExamPaperRow {
   id: number;
+  subject_id?: number;
   title: string;
   year: number | null;
   district: string | null;
@@ -67,7 +68,7 @@ export class ExamPapersRepository {
 
   async findById(id: number): Promise<ExamPaperRow | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, title, year, district, exam_type, grade_band, question_count
+      `SELECT id, subject_id, title, year, district, exam_type, grade_band, question_count
        FROM exam_papers WHERE id = ?`,
       [id],
     );
