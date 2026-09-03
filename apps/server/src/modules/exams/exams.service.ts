@@ -1,9 +1,13 @@
 import { BadRequestException, ForbiddenException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import { ExamPapersRepository } from '../../database/repositories/exam-papers.repo.js';
-import type { ExamSessionsRepository, ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
-import type { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
-import type { JudgeCoreService } from '../practice/judge-core.service.js';
+// 注意：repo 类必须是值导入（非 import type）——NestJS DI 依赖
+// emitDecoratorMetadata 的设计时类型，type-only import 运行时被擦除会导致
+// 构造参数元数据退化为 Object、注入解析失败（ExamsModule 启动报错）。
+import { ExamSessionsRepository } from '../../database/repositories/exam-sessions.repo.js';
+import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
+import { JudgeCoreService } from '../practice/judge-core.service.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
+import type { ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
 import type { ExamPaperDto, PaperDetailDto, PaperQueryDto } from './dto/paper-query.dto.js';
 import type {
   ExamResultsDto, ExamSummaryDto, SessionCreatedDto, SessionCreateDto,
