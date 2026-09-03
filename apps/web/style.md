@@ -211,9 +211,9 @@
 
 #### 2.6.1 布局
 
-- 全屏三段式（顶栏 / 中部双卡 / 底部脚注），背景使用 `Bg-Page #F5F0E8`，`min-h-screen` + `flex flex-col justify-between`。
+- 全屏三段式（顶栏 / 中部三卡 / 底部脚注），背景使用 `Bg-Page #F5F0E8`，`min-h-screen` + `flex flex-col justify-between`。
 - **顶栏**：左侧品牌标识（`Brand-100` 底圆角徽章 + 白色线性书形 SVG + 「K12 智学系统」标题），右侧用户信息片（`Brand-500` 圆形头像首字 + 用户名）+ 复用 `LogoutButton`；下边框 `border-slate-200/80` 作分割线。用户名取自 `localStorage.getItem('username')`，缺省「同学」。
-- **中部**：两个入口为**独立的白色卡片**，直接漂浮在暖色背景上，不包外层大卡片；`my-auto` 上下居中。
+- **中部**：三个入口（学习/答疑/训练）为**等宽三卡 grid**（`grid grid-cols-1 md:grid-cols-3 gap-6`）的**独立白色卡片**，直接漂浮在暖色背景上，不包外层大卡片；`my-auto` 上下居中。
 - 卡片圆角 24px，高度约 256px，使用 `--shadow-card`，hover 提升为 `--shadow-elevated`。
 - 入场动效用 `framer-motion` 轻量 fade+rise（已是依赖），并以 `useReducedMotion` 守卫，尊重减少动效偏好。
 - 当图标 + 标签已能自解释时，中部卡片**不添加标题、副标题或说明文字**（顶栏品牌标识与底部脚注除外）。
@@ -224,13 +224,14 @@
 - 图标徽章：80×80px，圆角 16px，`bg-gradient-to-tr from-[#FF6B35] to-[#FF8C61]`，白色线性 SVG 图标，带 `shadow-sm`。
 - 主入口（学习，可点击）：白色卡片 + `border-slate-200/80` + `--shadow-card`，hover 提升为 `--shadow-elevated`、边框不变，`hover:-translate-y-1`、`focus:ring-4 focus:ring-[var(--brand-500)]/20`。徽章为橘红渐变（`from-[#FF6B35] to-[#FF8C61]`）+ 书本图标。
 - 辅入口（答疑，可点击）：与"学习"入口布局一致，但以蓝色徽章区分辅线——白色卡片 + `border-slate-200/80` + `--shadow-card`，hover 提升为 `--shadow-elevated` 且边框转 `blue-500/40`，`hover:-translate-y-1`、`focus:ring-4 focus:ring-blue-500/20`。徽章为蓝色渐变（`from-[#2563EB] to-[#6366F1]`，blue-600->indigo-500）+ 问号圆圈图标。无锁定态。
+- 训练入口（训练，可点击）：与"学习"入口布局一致，品牌橘红系徽章渐变 `from-[#FF6B35] to-[#FFB25A]`（端点 `#FFB25A` 更亮，与学习卡的 `#FF8C61` 区分）+ 哑铃线性图标——与学习卡同色系，靠文字「训练」与徽章渐变差异区分；白色卡片 + `border-slate-200/80` + `--shadow-card`，hover 提升为 `--shadow-elevated`、边框不变，`hover:-translate-y-1`、`focus:ring-4 focus:ring-[var(--brand-500)]/20`。无锁定态。
 - 标签：30px，字重 900，`tracking-tight`，`text-[var(--text-primary)]`。
 
 #### 2.6.3 禁用项
 
 - 不出现吉祥物、emoji、装饰性插画、装饰性渐变光斑。
-- 中部双卡不出现冗余标题、副标题或说明文字；顶栏品牌标识「K12 智学系统」与底部脚注「K12 智学系统 · 保护心流，助您独立掌控学习进度」为允许的功能性文案。
-- 两入口（学习/答疑）均为可点击态，靠文字标签区分；无锁定态、无「暂未开放」弹层提示。
+- 中部三卡不出现冗余标题、副标题或说明文字；顶栏品牌标识「K12 智学系统」与底部脚注「K12 智学系统 · 保护心流，助您独立掌控学习进度」为允许的功能性文案。
+- 三入口（学习/答疑/训练）均为可点击态，靠文字标签区分；无锁定态、无「暂未开放」弹层提示。
 - 不使用 `.student-theme-container`，不启用夜间切换。
 
 ---
