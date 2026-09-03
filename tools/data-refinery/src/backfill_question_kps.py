@@ -2,8 +2,9 @@
 
 流程（main，镜像 backfill_practice_questions.py）：
 1. 加载 KP 白名单（knowledge_points，subject_id=1 即数学）。
-2. SELECT 未标注题（LEFT JOIN question_knowledge_points qkp ... IS NULL）——幂等，
-   已有 qkp 记录的题不再处理。
+2. SELECT 未标注的数学题（LEFT JOIN question_knowledge_points qkp ... IS NULL，
+   且 q.subject_id=1 与白名单学科一致——库中含化学等他科题，不限定会把数学
+   KP 错标到他科题上）——幂等，已有 qkp 记录的题不再处理。
 3. 每批 10 题调 LLM（prompt 附白名单 id+name 清单 + 每题 qid/题面截断 500 字），
    要求输出 {"items": [{"qid": 123, "kps": [1, 17]}]}，按 qid 对回每题
    （LLM 漏答/输出非法的题记失败，可重跑补齐）。
@@ -229,14 +230,17 @@ def main():
                   "generate_kp_tree.py 种子", flush=True)
             return
 
-        # 2. 幂等：只取无 qkp 记录的题
+        # 2. 幂等：只取无 qkp 记录的数学题（subject 过滤与白名单一致——
+        #    KP 白名单是数学知识点，库中的化学等他科题不能参与标注）
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT q.id, q.content FROM questions q "
                 "LEFT JOIN question_knowledge_points qkp "
                 "  ON qkp.question_id = q.id "
                 "WHERE qkp.question_id IS NULL "
-                "ORDER BY q.id"
+                "  AND q.subject_id = %s "
+                "ORDER BY q.id",
+                (SUBJECT_ID_MATH,),
             )
             rows = cur.fetchall()
 
