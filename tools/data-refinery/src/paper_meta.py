@@ -1,6 +1,8 @@
 """从 published JSONL 相对路径解析试卷元数据（爬虫 classifier 命名规则的逆操作）。
 
-路径形如：数学/初中/second/2024/数学-初三(下)-202407-海淀-模拟二-试卷.jsonl
+支持两种布局：
+- 平面：数学/初中/second/2024/数学-初三(下)-202407-海淀-模拟二-试卷.jsonl
+- 嵌套：数学/初中/second/2024/数学-初三(下)-202407-海淀-模拟二-试卷/数学-初三(下)-202407-海淀-模拟二-试卷.jsonl
 db_loader_cli 据此 find-or-create exam_papers（source_key = 相对路径去 .jsonl）。
 """
 
@@ -31,14 +33,11 @@ class PaperMeta:
     title: str
 
 
-def parse_paper_meta(rel_path: str) -> PaperMeta | None:
-    parts = rel_path.replace("\\", "/").split("/")
-    if len(parts) < 5:
-        return None
-    level, semester, year_dir = parts[-4], parts[-3], parts[-2]
+def _parse_with_dirs(level: str, semester: str, year_dir: str, filename: str) -> PaperMeta | None:
+    """按目录段（level/semester/year_dir）+ 文件名解析；目录段不合法返回 None。"""
     if level not in _LEVEL_TO_BAND or semester not in ("first", "second") or not year_dir.isdigit():
         return None
-    m = _FILENAME_RE.match(parts[-1])
+    m = _FILENAME_RE.match(filename)
     if not m:
         return None
     year = int(m.group("year_code")[:4])
@@ -56,3 +55,21 @@ def parse_paper_meta(rel_path: str) -> PaperMeta | None:
         file_type=m.group("file_type"),
         title=f"{year} {m.group('district')} {m.group('grade')} {m.group('exam_type')}",
     )
+
+
+def parse_paper_meta(rel_path: str) -> PaperMeta | None:
+    parts = rel_path.replace("\\", "/").split("/")
+    if len(parts) < 5:
+        return None
+    # 平面布局：{subject}/{level}/{semester}/{year}/{文件}.jsonl
+    meta = _parse_with_dirs(parts[-4], parts[-3], parts[-2], parts[-1])
+    if meta is not None:
+        return meta
+    # 嵌套布局：{subject}/{level}/{semester}/{year}/{试卷名目录}/{文件}.jsonl
+    # 要求试卷名目录与文件名 stem 一致（不一致视为脏数据）。
+    if len(parts) >= 6 and parts[-1].endswith(".jsonl"):
+        stem = parts[-1][: -len(".jsonl")]
+        if parts[-2] != stem:
+            return None
+        return _parse_with_dirs(parts[-5], parts[-4], parts[-3], parts[-1])
+    return None

@@ -33,3 +33,42 @@ def test_parse_senior():
 def test_parse_invalid_returns_none():
     assert parse_paper_meta("random/file.jsonl") is None
     assert parse_paper_meta("") is None
+
+
+def test_parse_nested_layout_full_paper():
+    m = parse_paper_meta(
+        "数学/初中/second/2024/数学-初三(下)-202407-海淀-模拟二-试卷/"
+        "数学-初三(下)-202407-海淀-模拟二-试卷.jsonl"
+    )
+    assert m is not None
+    assert m.subject == "数学"
+    assert m.grade == "初三"
+    assert m.grade_band == "junior"
+    assert m.semester == "second"
+    assert m.year == 2024
+    assert m.district == "海淀"
+    assert m.exam_type == "模拟二"
+    assert m.file_type == "试卷"
+    assert m.title == "2024 海淀 初三 模拟二"
+
+
+def test_parse_nested_layout_answer():
+    m = parse_paper_meta(
+        "数学/初中/second/2024/数学-初三(下)-202407-海淀-模拟二-答案/"
+        "数学-初三(下)-202407-海淀-模拟二-答案.jsonl"
+    )
+    assert m is not None
+    assert m.file_type == "答案"
+    assert m.grade_band == "junior"
+    assert m.semester == "second"
+    assert m.year == 2024
+
+
+def test_parse_nested_dir_name_mismatch_returns_none():
+    assert (
+        parse_paper_meta(
+            "数学/初中/second/2024/数学-初三(下)-202407-海淀-模拟一-试卷/"
+            "数学-初三(下)-202407-海淀-模拟二-试卷.jsonl"
+        )
+        is None
+    )
