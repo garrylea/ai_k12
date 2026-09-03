@@ -83,7 +83,12 @@ export class QuestionsRepository {
         AND NOT (q.type IN ('choice','true_false') AND q.answer = '')
       ORDER BY RAND() LIMIT ?`;
     const params = type != null ? [subjectId, kpId, type, count] : [subjectId, kpId, count];
-    const [rows] = await this.pool.execute<RowDataPacket[]>(sql, params);
+    // Use pool.query (client-side escaping) instead of pool.execute (server-side
+    // prepared statements): MySQL rejects `LIMIT ?` as a prepared-statement
+    // placeholder with "Incorrect arguments to mysqld_stmt_execute"（联调实测；
+    // 与 ai-dialogues.repo.ts findByStudentAndTrack 同款处理）。? 值仍经 mysql2
+    // 转义，无注入风险。
+    const [rows] = await this.pool.query<RowDataPacket[]>(sql, params);
     return rows as QuestionRow[];
   }
 }

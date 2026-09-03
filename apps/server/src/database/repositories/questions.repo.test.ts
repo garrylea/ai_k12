@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { QuestionsRepository } from './questions.repo';
 
-/** mockPool：SELECT 一律返回 rows（main-error-books.repo.test.ts 同款形状）。 */
+/** mockPool：SELECT 一律返回 rows（main-error-books.repo.test.ts 同款形状）。
+ *  findRandomByKpAndType 用 pool.query（LIMIT ? 不能走 prepared statement，
+ *  联调实测 mysql2 execute 报 Incorrect arguments to mysqld_stmt_execute）。 */
 const mockPool = (rows: any[] = []) => ({
-  execute: vi.fn().mockResolvedValue([rows, []]),
+  execute: vi.fn().mockResolvedValue([[], []]),
+  query: vi.fn().mockResolvedValue([rows, []]),
 });
 
 describe('QuestionsRepository.findRandomByKpAndType', () => {
@@ -11,7 +14,8 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     const pool = mockPool([]);
     const repo = new QuestionsRepository(pool as any);
     await repo.findRandomByKpAndType(1, 3, 'proof', 5);
-    const [sql, params] = pool.execute.mock.calls[0];
+    expect(pool.execute).not.toHaveBeenCalled();
+    const [sql, params] = pool.query.mock.calls[0];
     expect(sql).toContain('JOIN question_knowledge_points qkp');
     expect(sql).toContain('qkp.knowledge_point_id = ?');
     expect(sql).toContain('q.subject_id = ?');
@@ -28,7 +32,7 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     const pool = mockPool([]);
     const repo = new QuestionsRepository(pool as any);
     await repo.findRandomByKpAndType(1, 3, null, 10);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.query.mock.calls[0];
     expect(sql).not.toContain('q.type = ?');
     expect(params).toEqual([1, 3, 10]);
   });
