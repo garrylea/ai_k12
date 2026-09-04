@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from '@/components/business/answer/types';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
+import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
   getTrainingHint,
@@ -27,6 +28,8 @@ export default function TargetedRunPage() {
   const [phase, setPhase] = useState<Phase>('answering');
   const [hints, setHints] = useState<Record<string, string>>({});
   const [finalResults, setFinalResults] = useState<Record<string, RunnerAnswerRecord> | null>(null);
+  // 「讲一讲」抽屉：打开时锚定当时题面（DiscussDrawer training 模式只需题面文本）
+  const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
   const [entries, setEntries] = useState<TargetedPracticeQuestion[] | null>(null);
 
@@ -133,7 +136,7 @@ export default function TargetedRunPage() {
 
   return (
     <div className="student-theme-container" data-theme={mode} data-school="junior">
-      <div className="h-screen flex flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
+      <div className="relative h-screen flex flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         {phase === 'result' ? (
           <AnswerResultList
             questions={resultQuestions}
@@ -141,17 +144,29 @@ export default function TargetedRunPage() {
             onClose={() => navigate('/student/training/targeted')}
           />
         ) : (
-          <QuestionRunner
-            questions={questions}
-            subjectId={MATH_SUBJECT_ID}
-            draftKeyPrefix="tp"
-            variant="embedded"
-            enableHint
-            hints={hints}
-            onRequestHint={handleRequestHint}
-            onSubmit={handleSubmit}
-            onFinish={handleFinish}
-          />
+          <>
+            <QuestionRunner
+              questions={questions}
+              subjectId={MATH_SUBJECT_ID}
+              draftKeyPrefix="tp"
+              variant="embedded"
+              enableHint
+              hints={hints}
+              onRequestHint={handleRequestHint}
+              headerActions={(q) => (
+                <DiscussIconButton onClick={() => setDiscussQ(q)} />
+              )}
+              onSubmit={handleSubmit}
+              onFinish={handleFinish}
+            />
+            {discussQ && phase === 'answering' && (
+              <DiscussDrawer
+                mode="training"
+                questionText={discussQ.text}
+                onClose={() => setDiscussQ(null)}
+              />
+            )}
+          </>
         )}
       </div>
     </div>

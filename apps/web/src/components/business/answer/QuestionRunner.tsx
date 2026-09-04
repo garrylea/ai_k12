@@ -259,7 +259,8 @@ export function QuestionRunner({
                     </svg>
                   </button>
                 )}
-                {headerActions?.(q)}
+                {/* 渐进式：提示开启时，「讲一讲」等 headerActions 仅在看过提示后出现（hints 有缓存即视为看过）；提示未开启时不 gate（向后兼容） */}
+                {headerActions && (!requestHint || hints?.[q.n]) && headerActions(q)}
               </div>
             )}
           </div>
