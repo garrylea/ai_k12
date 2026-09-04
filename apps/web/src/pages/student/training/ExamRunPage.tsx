@@ -225,7 +225,7 @@ export default function ExamRunPage() {
 
   return (
     <div className="student-theme-container" data-theme={mode} data-school="junior">
-      <div className="flex h-screen flex-col bg-[var(--bg-page)] text-[var(--text-primary)]">
+      <div className="flex h-screen flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         <QuestionRunner
           questions={questions}
           subjectId={MATH_SUBJECT_ID}

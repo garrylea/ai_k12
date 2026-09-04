@@ -153,7 +153,7 @@ export default function ErrorPracticeRunPage() {
 
   return (
     <div className="student-theme-container" data-theme={mode} data-school="junior">
-      <div className="h-screen flex flex-col bg-[var(--bg-page)] text-[var(--text-primary)]">
+      <div className="h-screen flex flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         {phase === 'result' ? (
           <AnswerResultList
             questions={resultQuestions}

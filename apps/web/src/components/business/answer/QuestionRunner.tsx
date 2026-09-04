@@ -232,10 +232,12 @@ export function QuestionRunner({
         style={{ backgroundColor: 'var(--learn-card-bg)' }}
       >
         {/* 题面 + 提示按钮 + 提示抽屉 */}
-        <div className="shrink-0 p-4 border-b border-[var(--bg-subtle)]">
+        <div className="shrink-0 max-h-[45vh] overflow-y-auto p-4 border-b border-[var(--bg-subtle)]">
           <div className="flex gap-3">
             <div className="flex-1 min-w-0">
-              <div className="text-xl text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]">
+              <div
+                className={`${variant === 'embedded' ? 'text-lg' : 'text-xl'} text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]`}
+              >
                 <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
                   {q.text}
                 </ReactMarkdown>
@@ -286,8 +288,8 @@ export function QuestionRunner({
           )}
         </div>
 
-        {/* 作答区：选择题点选 / 文本作答（左编辑右预览草稿） */}
-        <div className="flex-1 min-h-0 flex">
+        {/* 作答区：选择题点选 / 文本作答（左编辑右预览草稿）。保底高度：长题面滚动限高时不被挤没 */}
+        <div className="flex-1 min-h-[280px] flex">
           {choiceOptions ? (
             <div className="flex-1 min-h-0 overflow-auto">
               <ChoiceOptionList options={choiceOptions} value={answer} onChange={setAnswer} />
