@@ -8,6 +8,7 @@ import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
 import ConversationManagePage from '@/pages/student/ConversationManagePage';
 import TrainingSubjectPage from '@/pages/student/TrainingSubjectPage';
+import TrainingHomePage from '@/pages/student/training/TrainingHomePage';
 import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage';
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
@@ -140,6 +141,15 @@ const router = createBrowserRouter([
     element: (
       <RequireRole role="student">
         <TrainingSubjectPage />
+      </RequireRole>
+    ),
+  },
+  // 训练三卡选择页（PRD §6.3 三类训练并列：专项/考试/错题；选完学科后的落地页）
+  {
+    path: '/student/training/home',
+    element: (
+      <RequireRole role="student">
+        <TrainingHomePage />
       </RequireRole>
     ),
   },

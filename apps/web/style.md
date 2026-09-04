@@ -234,6 +234,17 @@
 - 三入口（学习/答疑/训练）均为可点击态，靠文字标签区分；无锁定态、无「暂未开放」弹层提示。
 - 不使用 `.student-theme-container`，不启用夜间切换。
 
+### 2.8 训练轨三卡选择页规范（/student/training/home）
+
+选完训练学科后的落地页（PRD §6.3 三类训练并列：专项/考试/错题），复用入口选择页（§2.7）的卡片语言。
+
+- **顶栏**：`BackButton`（返回选学科页 /student/training）+ 标题「数学 · 训练」，底边框 `border-slate-200/80` 分割线。
+- **中部三卡**：与 §2.7 等宽三卡 grid（`grid grid-cols-1 md:grid-cols-3 gap-6`）同构的独立白卡（圆角 24px、`--shadow-card`、hover `--shadow-elevated` + `hover:-translate-y-1`），卡片高约 256px。
+- **三入口**：专项练习（靶心线性 SVG）/ 真题考试（试卷线性 SVG）/ 错题练习（循环箭头线性 SVG），点击分别进入 `/student/training/targeted`、`/student/training/exam`、`/student/training/errors`。
+- **徽章**：三卡统一橘红渐变 `from-[#FF6B35] to-[#FFB25A]`（训练入口同款），靠图标与文字标签区分，不靠颜色区分功能。
+- **错题卡状态行**：错题卡是唯一带功能性状态文案的卡片——标题下方小字（`text-sm text-[var(--text-secondary)]`）实时显示未清零错题数（调 `GET /api/training/error-book`）：`未清零 N 题`；0 显示「暂无未清零错题」仍可点击；载入中/失败显示「未清零 -- 题」不阻塞。专项/考试卡不加副标题（§2.7 规则：图标+标签已自解释）。
+- 不使用 `.student-theme-container`，不启用夜间切换（浅停留页）。
+
 ---
 
 ## 3. 字体与字号

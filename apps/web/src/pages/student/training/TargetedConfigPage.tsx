@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { BackButton, Button, Card, Skeleton } from '@/components/base';
 import {
   getKnowledgePoints,
@@ -186,15 +186,8 @@ export default function TargetedConfigPage() {
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pb-16">
           {/* 顶栏 */}
           <header className="flex items-center gap-4 border-b border-[var(--bg-subtle)] py-5">
-            <BackButton to="/student/training" label="返回训练" />
+            <BackButton to="/student/training/home" label="返回训练" />
             <h1 className="text-2xl font-bold tracking-tight">专项练习</h1>
-            {/* 考试入口占位页保持可达（训练模块后续 task 替换为真考试页） */}
-            <Link
-              to="/student/training/exam"
-              className="ml-auto text-sm font-medium text-[var(--brand-500)] hover:underline"
-            >
-              考试
-            </Link>
           </header>
 
           {/* 配置区 */}

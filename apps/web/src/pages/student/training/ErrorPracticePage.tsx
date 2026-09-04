@@ -167,7 +167,7 @@ export default function ErrorPracticePage() {
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pb-32">
           {/* 顶栏 */}
           <header className="flex items-center gap-4 border-b border-[var(--bg-subtle)] py-5">
-            <BackButton to="/student/training" label="返回训练" />
+            <BackButton to="/student/training/home" label="返回训练" />
             <h1 className="text-2xl font-bold tracking-tight">错题练习</h1>
           </header>
 

@@ -34,8 +34,8 @@ export default function TrainingSubjectPage() {
 
   const handleSelect = (subject: TrainingSubject) => {
     if (!subject.enabled) return;
-    // 专项练习为训练默认落地页（考试入口在专项页顶栏，占位路由保留）
-    navigate('/student/training/targeted');
+    // 三卡选择页（专项/考试/错题并列，PRD §6.3）
+    navigate('/student/training/home');
   };
 
   return (
