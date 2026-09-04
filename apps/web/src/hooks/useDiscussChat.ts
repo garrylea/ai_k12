@@ -5,6 +5,7 @@ import {
   streamTutorEvents,
   getMessages,
   deleteMessage,
+  createConversation,
   tutor,
   type MessageItem,
 } from '@/services/api';
@@ -36,11 +37,21 @@ type CardOpts = {
   lessonId: number;
 };
 
-export type UseDiscussChatOpts = QuestionOpts | CardOpts;
+// 训练轨（答题页内抽屉）：不挂卡片/课时上下文，走辅线辅导链路——
+// createConversation({track:'auxiliary'}) + /ai/tutor/stream(mode auxiliary)。
+// 每条用户消息前缀题面（镜像题目级模式），AI 始终有上下文。
+type TrainingOpts = {
+  mode: 'training';
+  questionText: string;
+};
+
+export type UseDiscussChatOpts = QuestionOpts | CardOpts | TrainingOpts;
 
 // session 缓存键：题目级按题目文本，卡片级按 cardId 命名空间（避免与题目键冲突）。
 function cacheKey(opts: UseDiscussChatOpts): string {
-  return opts.mode === 'question' ? opts.questionText : `card:${opts.cardId}`;
+  if (opts.mode === 'question') return opts.questionText;
+  if (opts.mode === 'training') return `training-q:${opts.questionText}`;
+  return `card:${opts.cardId}`;
 }
 
 /**
@@ -90,6 +101,9 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     });
   }, []);
 
+  // training 模式挂的是 auxiliary 对话，流式请求的 mode 必须与其 track 一致
+  const tutorMode = opts.mode === 'training' ? 'auxiliary' : 'mainline';
+
   const streamMessage = useCallback(async (dialogueId: string, message: string) => {
     const controller = new AbortController();
     abortRef.current = controller;
@@ -97,7 +111,7 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     appendMessage({ role: 'user', content: message });
     appendMessage({ role: 'assistant', content: '', streaming: true });
     try {
-      for await (const event of streamTutorEvents({ mode: 'mainline', dialogueId, message }, controller.signal)) {
+      for await (const event of streamTutorEvents({ mode: tutorMode, dialogueId, message }, controller.signal)) {
         if (event.type === 'reasoning' && event.delta) {
           appendLastAssistant({ reasoning: event.delta });
         } else if (event.type === 'content' && event.delta !== undefined) {
@@ -113,7 +127,7 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
       if (err instanceof Error && err.name === 'AbortError') return;
       // 流启动失败 -> 降级非流式 REST
       try {
-        const res = await tutor({ mode: 'mainline', dialogueId, message });
+        const res = await tutor({ mode: tutorMode, dialogueId, message });
         updateLastAssistant(res.message.content, res.reasoning);
       } catch {
         updateLastAssistant('[网络异常] 请稍后重试');
@@ -122,7 +136,7 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
       if (abortRef.current === controller) abortRef.current = null;
       setIsStreaming(false);
     }
-  }, [appendMessage, appendLastAssistant, updateLastAssistant]);
+  }, [appendMessage, appendLastAssistant, updateLastAssistant, tutorMode]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -134,12 +148,12 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     const dlgId = dialogueIdRef.current;
     if (!dlgId) return;
     setError(null);
-    // 题目级讨论：每条用户消息都附带题目文本，确保 AI 始终知道讨论主题。
+    // 题目级/训练轨讨论：每条用户消息都附带题目文本，确保 AI 始终知道讨论主题。
     // 卡片级讨论：卡片内容已通过服务端 loadContext -> cardContent 注入系统 prompt，
     // 无需客户端重复。
-    const message = opts.mode === 'question'
-      ? `这道题目是：\n\n${opts.questionText}\n\n我的问题：${content}`
-      : content;
+    const message = opts.mode === 'card'
+      ? content
+      : `这道题目是：\n\n${opts.questionText}\n\n我的问题：${content}`;
     await streamMessage(dlgId, message);
   }, [isStreaming, streamMessage, opts]);
 
@@ -199,6 +213,10 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
             questionText: opts.questionText,
           });
           dialogueId = res.dialogueId;
+        } else if (opts.mode === 'training') {
+          // 辅线对话：无 cardId/错题本锚定，session 级缓存续接（刷新后是新对话，记待办）
+          const conv = await createConversation({ track: 'auxiliary' });
+          dialogueId = String(conv.id);
         } else {
           const res = await startCardDiscuss({
             cardId: opts.cardId,

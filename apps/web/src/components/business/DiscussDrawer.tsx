@@ -27,23 +27,32 @@ type CardProps = {
   onClose: () => void;
 };
 
-type Props = QuestionProps | CardProps;
+// 训练轨（答题页内抽屉）：同题目级（右抽屉，放大铺满），但不挂卡片上下文。
+type TrainingProps = {
+  mode: 'training';
+  questionText: string;
+  onClose: () => void;
+};
+
+type Props = QuestionProps | CardProps | TrainingProps;
 
 export function DiscussDrawer(props: Props) {
-  // useDiscussChat 按模式取不同入参（题目级需 questionText，卡片级不需）。
+  // useDiscussChat 按模式取不同入参（题目级/训练轨需 questionText，卡片级不需）。
   const chat = useDiscussChat(
     props.mode === 'question'
       ? { mode: 'question', cardId: props.cardId, questionText: props.questionText, subjectId: props.subjectId, lessonId: props.lessonId }
-      : { mode: 'card', cardId: props.cardId, subjectId: props.subjectId, lessonId: props.lessonId },
+      : props.mode === 'training'
+        ? { mode: 'training', questionText: props.questionText }
+        : { mode: 'card', cardId: props.cardId, subjectId: props.subjectId, lessonId: props.lessonId },
   );
   const [expanded, setExpanded] = useState(false);
 
-  // 宽度：题目级 w-[55%]/w-full（放大铺满 AnswerModal）；卡片级 w-[45%]/w-[70%]（封顶，不盖左侧栏）。
-  const widthClass = props.mode === 'question'
-    ? expanded ? 'w-full' : 'w-[55%]'
-    : expanded ? 'w-[70%]' : 'w-[45%]';
-  const title = props.mode === 'question' ? 'AI 讲一讲' : '思辨答疑';
-  const placeholder = props.mode === 'question' ? '说说你的想法或卡在哪里…' : '说说你的疑问或想法…';
+  // 宽度：题目级/训练轨 w-[55%]/w-full（放大铺满答题区）；卡片级 w-[45%]/w-[70%]（封顶，不盖左侧栏）。
+  const widthClass = props.mode === 'card'
+    ? expanded ? 'w-[70%]' : 'w-[45%]'
+    : expanded ? 'w-full' : 'w-[55%]';
+  const title = props.mode === 'card' ? '思辨答疑' : 'AI 讲一讲';
+  const placeholder = props.mode === 'card' ? '说说你的疑问或想法…' : '说说你的想法或卡在哪里…';
 
   return (
     // 右侧抽屉：absolute 贴右覆盖父容器右部。实色背景（非半透明）保证 KaTeX 可读。
@@ -97,14 +106,14 @@ export function DiscussDrawer(props: Props) {
         </button>
       </div>
 
-      {/* 上下文条：题目级显示当前题目，卡片级显示卡片标题（讨论时对照） */}
+      {/* 上下文条：题目级/训练轨显示当前题目，卡片级显示卡片标题（讨论时对照） */}
       <div className="shrink-0 px-4 py-2 border-b border-[var(--bg-subtle)] bg-[var(--bg-base)]">
         <div className="text-xs text-[var(--text-tertiary)] mb-0.5">
-          {props.mode === 'question' ? '当前题目' : '当前卡片'}
+          {props.mode === 'card' ? '当前卡片' : '当前题目'}
         </div>
         <div className="text-xs text-[var(--text-secondary)] line-clamp-2">
           <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-            {props.mode === 'question' ? props.questionText : (props.cardTitle || 'AI 讨论')}
+            {props.mode === 'card' ? (props.cardTitle || 'AI 讨论') : props.questionText}
           </ReactMarkdown>
         </div>
       </div>
@@ -122,5 +131,21 @@ export function DiscussDrawer(props: Props) {
         placeholder={placeholder}
       />
     </div>
+  );
+}
+
+/** 「让 AI 讲一讲」圆钮（题面右侧操作列）：AnswerModal 与训练轨答题页共用。 */
+export function DiscussIconButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--info)] shadow-sm hover:bg-[var(--bg-subtle)] transition-colors"
+      title="让 AI 讲一讲"
+      aria-label="让 AI 讲一讲"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    </button>
   );
 }
