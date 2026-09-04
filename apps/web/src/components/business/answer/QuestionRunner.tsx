@@ -55,8 +55,8 @@ export interface QuestionRunnerProps {
   title?: string | ((index: number, total: number) => string);
   /** 初始题位（AnswerModal 续答语义）；默认 0 */
   startIndex?: number;
-  /** 提供时作答态底部左侧渲染关闭 X（判题等待态的关闭入口由父层 judgingSlot 自理） */
-  onClose?: () => void;
+  /** 提供时作答态底部左侧渲染关闭 X，参数 answered = 已提交判题数（父层退出确认文案用；判题等待态的关闭入口由父层 judgingSlot 自理） */
+  onClose?: (answered: number) => void;
   /** 默认 true；false 隐藏「上一题」（AnswerModal 旧行为无回退，行为保持） */
   showPrevButton?: boolean;
   /** 题面右侧操作插槽（hint 按钮旁），收到当前题——AnswerModal 的「让 AI 讲一讲」入口 */
@@ -317,7 +317,7 @@ export function QuestionRunner({
           <div className="flex items-center gap-2">
             {onClose && (
               <button
-                onClick={onClose}
+                onClick={() => onClose(Object.keys(resultsRef.current).length)}
                 className="w-10 h-10 rounded-full border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
                 title="关闭"
                 aria-label="关闭"

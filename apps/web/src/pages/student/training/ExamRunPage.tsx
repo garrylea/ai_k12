@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
+import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 import {
   getExamSession,
@@ -58,6 +59,8 @@ export default function ExamRunPage() {
   const [answeredNs, setAnsweredNs] = useState<Set<string>>(new Set());
   /** 交卷去重：倒计时归零与 onFinish 可能并发触发。 */
   const submittingRef = useRef(false);
+  // 交卷成功跳结果页前放行导航（先置 false 再 navigate，绕开 RunExitGuard 拦截）
+  const [guardEnabled, setGuardEnabled] = useState(true);
   // StrictMode 下 effect 会跑两次：ref 守卫保证 sessionStorage「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无会话（走服务端拉取虽然也能恢复，但语义上应消费新开卷数据）。
   const bootstrappedRef = useRef(false);
@@ -142,6 +145,7 @@ export default function ExamRunPage() {
     setSubmitError(null);
     try {
       await submitExamSession(sid);
+      setGuardEnabled(false);
       navigate(`/student/training/exam/result/${sid}`, { replace: true });
     } catch (err) {
       submittingRef.current = false;
@@ -248,6 +252,16 @@ export default function ExamRunPage() {
           }
           onSubmit={handleSubmit}
           onFinish={handleFinish}
+        />
+
+        {/* 考试无页内退出；拦截浏览器返回/刷新（计时不停，可续考） */}
+        <RunExitGuard
+          enabled={guardEnabled}
+          blockBeforeUnload
+          title="离开考试"
+          message="离开后计时不会暂停，可从考试列表续考返回。确认离开吗？"
+          confirmLabel="确认离开"
+          cancelLabel="继续考试"
         />
 
         {/* 交卷失败重试层（QuestionRunner 此时停在提交等待态，交卷成功即跳结果页） */}

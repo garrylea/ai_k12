@@ -4,6 +4,8 @@ import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from '@/components/business/answer/types';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
+import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
+import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
   getTrainingHint,
@@ -30,6 +32,10 @@ export default function TargetedRunPage() {
   const [finalResults, setFinalResults] = useState<Record<string, RunnerAnswerRecord> | null>(null);
   // 「讲一讲」抽屉：打开时锚定当时题面（DiscussDrawer training 模式只需题面文本）
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
+  // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
+  const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({ open: false, answered: 0 });
+  // X 确认后放行导航（先置 false 再 navigate，绕开 RunExitGuard 二次拦截）
+  const [guardEnabled, setGuardEnabled] = useState(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
   const [entries, setEntries] = useState<TargetedPracticeQuestion[] | null>(null);
 
@@ -158,6 +164,7 @@ export default function TargetedRunPage() {
               )}
               onSubmit={handleSubmit}
               onFinish={handleFinish}
+              onClose={(answered) => setExitConfirm({ open: true, answered })}
             />
             {discussQ && phase === 'answering' && (
               <DiscussDrawer
@@ -168,6 +175,39 @@ export default function TargetedRunPage() {
             )}
           </>
         )}
+
+        {/* X 退出确认（带已答进度） */}
+        {exitConfirm.open && (
+          <Modal open onClose={() => setExitConfirm({ open: false, answered: 0 })} title="退出练习">
+            <p className="text-sm text-[var(--text-secondary)]">
+              已答 {exitConfirm.answered}/{questions.length} 题，退出后未作答的题目不再保留。确定退出吗？
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setExitConfirm({ open: false, answered: 0 })}
+                className="h-10 px-4 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-base)]"
+              >
+                继续答题
+              </button>
+              <button
+                onClick={() => {
+                  setGuardEnabled(false);
+                  navigate('/student/training/targeted', { replace: true });
+                }}
+                className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)]"
+              >
+                确认退出
+              </button>
+            </div>
+          </Modal>
+        )}
+        {/* 浏览器返回/路由跳转拦截（X 确认已 setGuardEnabled(false) 故不二次弹） */}
+        <RunExitGuard
+          enabled={guardEnabled}
+          title="离开练习"
+          message="退出后未作答的题目将不再保留，确定要离开吗？"
+          confirmLabel="确认离开"
+        />
       </div>
     </div>
   );
