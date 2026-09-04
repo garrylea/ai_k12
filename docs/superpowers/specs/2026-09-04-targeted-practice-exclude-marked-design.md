@@ -220,14 +220,16 @@ async startTargetedPractice(
 }
 ```
 
-新增 4 个端点（全部 `@Roles('student')`，归属由 JWT `user.sub` 决定，repo 层 WHERE 含 student_id 防 IDOR）：
+新增 4 个端点（全部 `@Roles('student')`，归属由 JWT `user.sub` 决定，repo 层 WHERE 含 student_id 防 IDOR）。
 
-| 方法 | 路径 | 入参 | 响应 |
+**响应信封**：后端 `ResponseInterceptor`（`apps/server/src/common/interceptors/response.interceptor.ts:22-28`）把所有返回包成 `{ code:0, message:'ok', data: data ?? null }`；前端 `fetchApi`（`apps/web/src/services/api.ts:32-38`）做 `await res.json()` 后只检查 `code`。因此**禁用 `@HttpCode(204)` / 空响应**——void 操作 return `undefined`，interceptor 产出 `{ code:0, data:null }`，HTTP 状态走 NestJS 默认（POST=201，GET/DELETE=200），前端 `fetchApi<void>` 收到 `data:null`。
+
+| 方法 | 路径 | 入参 | 响应 data |
 |---|---|---|---|
-| POST | `/api/training/hidden/mark` | `{ questionId: number, subjectId: number }` | `204 No Content`（幂等） |
+| POST | `/api/training/hidden/mark` | `{ questionId: number, subjectId: number }` | `null`（幂等；重复标记不报错） |
 | GET | `/api/training/hidden?subjectId=1` | query `subjectId` | `HiddenQuestionDto[]` |
-| DELETE | `/api/training/hidden/:questionId` | path `questionId` | `204 No Content` |
-| DELETE | `/api/training/hidden` | 无 | `204 No Content`（全部重置） |
+| DELETE | `/api/training/hidden/:questionId` | path `questionId` | `null`（幂等） |
+| DELETE | `/api/training/hidden` | 无 | `null`（全部重置） |
 
 DTO 校验：`questionId`/`subjectId` 为正整数；越界/非法 → 400。
 
@@ -347,8 +349,8 @@ export function unmarkAllTrainingHidden(): Promise<void> {
 
 | 场景 | 处理 |
 |---|---|
-| 重复标记同一题 | `INSERT IGNORE` 幂等，返回 204，不报错 |
-| 撤销不存在的标记 | `DELETE WHERE student_id=? AND question_id=?` 删 0 行也返回 204（幂等） |
+| 重复标记同一题 | `INSERT IGNORE` 幂等，返回 `{ code:0, data:null }`，不报错 |
+| 撤销不存在的标记 | `DELETE WHERE student_id=? AND question_id=?` 删 0 行也返回 `{ code:0, data:null }`（幂等） |
 | 标记已删题（`question_id` 不存在） | service 层 `findById` 校验 → 404 |
 | 题池排除后为空 | 后端返回 `{ questions: [] }`，前端配置页 `emptyHint` 提示"该专项题目已练完，可在清单页重置不再展示记录"（沿用现有 `emptyHint` 文案分支，文案略调） |
 | IDOR 攻击（A 生撤销 B 生的标记） | repo 层 `WHERE` 含 `student_id`，从 JWT 取，不接受 body 传 studentId |
