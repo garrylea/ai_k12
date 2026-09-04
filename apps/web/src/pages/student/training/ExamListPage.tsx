@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BackButton, Button, Card, Modal, Skeleton, Tag } from '@/components/base';
+import { Button, Card, Modal, PageHeader, Skeleton, Tag } from '@/components/base';
 import {
   createExamSession,
   getExamPaperDetail,
@@ -211,12 +211,9 @@ export default function ExamListPage() {
   return (
     <div className="student-theme-container" data-theme={mode} data-school="junior">
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
-        <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pb-16">
+        <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">
           {/* 顶栏 */}
-          <header className="flex items-center gap-4 border-b border-[var(--bg-subtle)] py-5">
-            <BackButton to="/student/training/home" label="返回训练" />
-            <h1 className="text-2xl font-bold tracking-tight">考试</h1>
-          </header>
+          <PageHeader to="/student/training/home" caption="返回训练" title="考试" />
 
           {/* 筛选区 */}
           <Card className="mt-6">

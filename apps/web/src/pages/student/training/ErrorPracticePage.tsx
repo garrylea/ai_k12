@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BackButton, Button, Card, Skeleton, Tag } from '@/components/base';
+import { Button, Card, PageHeader, Skeleton, Tag } from '@/components/base';
 import { getKnowledgePoints, getTrainingErrorBook, type TrainingErrorBookEntry } from '@/services/api';
 import { useThemeStore } from '@/store/themeStore';
 
@@ -164,12 +164,9 @@ export default function ErrorPracticePage() {
   return (
     <div className="student-theme-container" data-theme={mode} data-school="junior">
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
-        <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pb-32">
+        <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-32">
           {/* 顶栏 */}
-          <header className="flex items-center gap-4 border-b border-[var(--bg-subtle)] py-5">
-            <BackButton to="/student/training/home" label="返回训练" />
-            <h1 className="text-2xl font-bold tracking-tight">错题练习</h1>
-          </header>
+          <PageHeader to="/student/training/home" caption="返回训练" title="错题练习" />
 
           {/* 筛选区 */}
           <Card className="mt-6">
