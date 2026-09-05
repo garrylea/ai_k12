@@ -61,6 +61,8 @@ export interface QuestionRunnerProps {
   showPrevButton?: boolean;
   /** 题面右侧操作插槽（hint 按钮旁），收到当前题——AnswerModal 的「让 AI 讲一讲」入口 */
   headerActions?: (q: RunnerQuestion) => ReactNode;
+  /** 元动作插槽（如「不再展示」）：始终渲染，不 gate（区别于 headerActions 的「先看提示」门禁）。 */
+  questionMetaActions?: (q: RunnerQuestion) => ReactNode;
   /** 覆盖内置判题等待视图（AnswerModal 的逐题进度页外壳） */
   judgingSlot?: ReactNode;
   /** modal 外壳内追加浮层（DiscussDrawer 等 absolute 定位）；仅作答态渲染 */
@@ -85,6 +87,7 @@ export function QuestionRunner({
   onClose,
   showPrevButton = true,
   headerActions,
+  questionMetaActions,
   judgingSlot,
   modalExtras,
 }: QuestionRunnerProps) {
@@ -243,8 +246,10 @@ export function QuestionRunner({
                 </ReactMarkdown>
               </div>
             </div>
-            {(requestHint || headerActions) && (
+            {(requestHint || headerActions || questionMetaActions) && (
               <div className="flex flex-col gap-2 shrink-0">
+                {/* 元动作（始终可见，不 gate）：如「不再展示」按钮 */}
+                {questionMetaActions && questionMetaActions(q)}
                 {requestHint && (
                   <button
                     onClick={handleHintClick}
