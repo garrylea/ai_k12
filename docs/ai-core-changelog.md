@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-09-04 专项训练「不再展示」功能
+
+- 新增 `student_hidden_questions` 表（`student_id + question_id` 全局排除，不分知识点）
+- `QuestionsRepository.findRandomByKpAndType` 加 `LEFT JOIN ... IS NULL` 排除已标记题（**仅此一处**选题路径受影响；主线练习/错题重做/考试不动）
+- `TrainingController` 加 4 端点：`POST /training/hidden/mark`、`GET /training/hidden`、`DELETE /training/hidden/:questionId`、`DELETE /training/hidden`
+- 前端 `QuestionRunner` 加 ungated `questionMetaActions` 插槽；`TargetedRunPage` 答题页加「不再展示」按钮 + 确认 Modal
+- 新建 `HiddenQuestionsPage` 清单页（逐条撤销 + 全部重置），学生端自助管理
+- 设计 spec：`docs/superpowers/specs/2026-09-04-targeted-practice-exclude-marked-design.md`
+- 实施计划：`docs/superpowers/plans/2026-09-04-targeted-practice-exclude-marked.md`
+
+---
+
 **2026-07-24 修正**：① modelId 拼写 bug——`qwen-3.7-max` 改为 `qwen3.7-max`（dashscope 实际 ID，原配置多一短横线导致 404 model_not_found；全仓库含 model key/modelId/routes 引用/文档/测试统一替换）。② per-scene timeout 接线——`retry.yaml` 的 per-scene timeout 此前未接线（capability 调 chat 未传 timeout，走 kimi-client 硬编码 30000），现已在 tutoring/grading/explanation/variation/analytics + fallback-handler 的 chat 调用传 `timeoutConfig.timeout[scene] ?? timeoutConfig.timeout.default`，并调大取值（default 30000→45000、tutoring 15000→45000、variation 45000→60000、safety 5000→10000、新增 explanation:60000），解决 qwen3.7-max 生成长文本（如 fallback 完整解析）超时。③ SafetyGuard 误拦--`LEARNING_PATTERNS` 未覆盖含方程表达式但无学习关键词的消息（如「3x+5=14,x等于多少」），误判 off_topic 而 block；加代数方程识别正则（半角等号/变量项），不误伤「1+1等于几」（中文「等于」）。④ 错误模型 + 流式 + reasoning 重构--采用 `../llm-client.js` 错误体系（11 个错误子类 + `classifyError` + `callWithRetry` full-jitter 退避 + Retry-After + onRetry，替换 `ModelErrorCode`/`ModelClientError`/`RetryConfig`/`mapHttpError`）；`ModelClient.chat` 默认流式（聚合 `streamChat` 的 content + reasoningContent，gemini 降级非流式）；`kimi-client.streamChat` 读 `delta.reasoning_content`（thinking）；reasoning 透传到所有 capability 响应的 `reasoning` 字段。详见 `docs/superpowers/plans/2026-07-24-ai-core-error-streaming-refactor.md`。⑤ provider fetch 网络错误归一--`kimi`/`gemini`-client 的 `fetch` 加 try/catch，DNS/连接失败/abort 经 `classifyError(status=0)` 归一为 `TimeoutError`（此前 raw `TypeError` 逃逸未归一为 LLMClientError；用错误 baseurl 实测验证：重试 maxRetries 次后抛 `TimeoutError`，retryable=true，见 `__tests__/error-baseurl-test.ts`）。
 
 ---

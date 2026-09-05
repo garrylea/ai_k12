@@ -393,7 +393,11 @@
 | POST | `/api/training/bump-error-levels` | 错题重做仍答错时递增严重程度（镜像 practice 的 bump-error-levels）。请求体：`{errorBookIds: number[]}`。 | MVP |
 | POST | `/api/training/hint` | 训练「提示」（AI 生成 + **题级** `question_hints` 缓存，区别于 practice 的 Card 级 `cards.hints` 缓存）。请求体：`{questionId}`；题目不存在 404。先查 `question_hints` 缓存命中直返（不调 AI）；未命中调 HintCapability 生成苏格拉底式提示（只启发不给答案）并写回缓存（题级共享，不分学生；写回失败不阻断返回）。AI 生成失败 503（`code=5001`）。响应：`{hint, cached:boolean}`。 | MVP |
 | GET | `/api/training/knowledge-points?subjectId={subjectId}` | 专项练习知识点平铺列表（`subjectId` 必填 integer；树形组装放前端，按 `parentKpId` 自行组树）。响应：`[{id, name, parentKpId(nullable), gradeBand}]`。 | MVP |
-| POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。 | MVP |
+| POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。**选题基于 JWT user.sub（studentId）排除该生已标记的「不再展示」题**（LEFT JOIN `student_hidden_questions` ... IS NULL，请求体不变）；题池排除后为空时返回 `{ questions: [] }`。 | MVP |
+| POST | `/api/training/hidden/mark` | 标记某题不再展示（幂等：重复标记不报错）。请求体：`{questionId, subjectId}`（均 integer≥1）。**全局排除**——`student_id + question_id` 维度，不分知识点；标记后该题在 `targeted/start` 选题时被 LEFT JOIN ... IS NULL 排除。响应：`{code:0,message:'ok',data:null}`（void op 包装）。 | MVP |
+| GET | `/api/training/hidden?subjectId={subjectId}` | 不再展示清单（按标记时间倒序）。`subjectId` 必填 integer≥1。响应：`[{questionId, questionText(80字截断), type, kpName(nullable,首个 primary kp 名), markedAt}]`。 | MVP |
+| DELETE | `/api/training/hidden/:questionId` | 撤销单条标记（幂等：不存在/未标记不报错）。路径参数 `questionId` integer≥1。响应：`{code:0,message:'ok',data:null}`。 | MVP |
+| DELETE | `/api/training/hidden` | 全部重置（清空该生所有不再展示标记）。无请求体/参数（studentId 取自 JWT）。响应：`{code:0,message:'ok',data:null}`。 | MVP |
 
 ### 4.19 Exams — `/api/exams`
 
@@ -1077,6 +1081,18 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
   答题前点「提示」-> POST /api/training/hint（题级缓存同 6.15）
   （专项练习无 bump-error-levels：新错题首轮作答，无「重做仍错」语义）
 ```
+
+#### 6.16.1 专项训练选题排除已标记题
+
+```text
+学生开专项练习 -> POST /api/training/targeted/start（JWT studentId 透传）
+  -> QuestionsRepository.findRandomByKpAndType(studentId, ...)
+  -> LEFT JOIN student_hidden_questions shq ON shq.student_id=? WHERE shq.id IS NULL
+  -> 排除该生已标记不再展示的题，ORDER BY RAND() LIMIT count
+题池排除后为空 -> 返回 { questions: [] }，前端 emptyHint 提示「可在清单页重置」
+```
+
+**约束**：仅 `targeted/start` 选题路径受影响；**主线练习/错题重做/考试不动**（不复用此排除逻辑）。标记维度是 `student_id + question_id` 全局排除，不分知识点——同题挂多 KP 时，标记一次即对所有 KP 的专项抽题都排除。
 
 ### 6.17 真题考试（考试模块）
 
