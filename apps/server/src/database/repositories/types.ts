@@ -140,3 +140,21 @@ export interface PracticeResultRow extends RowDataPacket {
   created_at: Date;
   updated_at: Date;
 }
+
+export interface StudentHiddenQuestionRow extends RowDataPacket {
+  id: number;
+  student_id: number;
+  subject_id: number;
+  question_id: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** 不再展示清单展示用行（JOIN questions + qkp 聚合后）。 */
+export interface HiddenQuestionListRow extends RowDataPacket {
+  questionId: number;
+  questionText: string;
+  type: string;
+  kpName: string | null;
+  markedAt: Date;
+}
