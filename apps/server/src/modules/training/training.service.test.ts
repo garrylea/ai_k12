@@ -9,18 +9,26 @@ const mk = (overrides: any = {}) => ({
   },
   judgeCore: { judgeQuestion: vi.fn() },
   questionsRepo: { findById: vi.fn(), findRandomByKpAndType: vi.fn().mockResolvedValue([]) },
-  // Task 3（提示端点）依赖：占位，getHint 测试里按需覆盖。
   questionHintsRepo: {
     findByQuestionId: vi.fn().mockResolvedValue(null),
     upsert: vi.fn().mockResolvedValue(undefined),
   },
   hint: { generate: vi.fn() },
-  // Task 8（专项练习）依赖。
   knowledgePointsRepo: { findBySubject: vi.fn().mockResolvedValue([]) },
+  // 「不再展示」repo（2026-09-04）。
+  hiddenRepo: {
+    mark: vi.fn().mockResolvedValue(undefined),
+    unmark: vi.fn().mockResolvedValue(1),
+    unmarkAll: vi.fn().mockResolvedValue(0),
+    findAllByStudent: vi.fn().mockResolvedValue([]),
+  },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new TrainingService(deps.mainErrorRepo, deps.judgeCore, deps.questionsRepo, deps.knowledgePointsRepo, deps.questionHintsRepo, deps.hint);
+  new TrainingService(
+    deps.mainErrorRepo, deps.judgeCore, deps.questionsRepo, deps.knowledgePointsRepo,
+    deps.questionHintsRepo, deps.hint, deps.hiddenRepo,
+  );
 
 describe('TrainingService.getErrorBookEntries', () => {
   it('透传筛选参数给 repo', async () => {
@@ -168,27 +176,26 @@ describe('TrainingService.startTargetedPractice', () => {
     created_at: new Date('2026-09-01'),
   };
 
-  it('透传抽题参数给 repo（type=null 不过滤题型）', async () => {
+  it('透传抽题参数给 repo（studentId 首参 + type=null 不过滤题型）', async () => {
     const deps = mk();
-    await mkSvc(deps).startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 5 });
-    expect(deps.questionsRepo.findRandomByKpAndType).toHaveBeenCalledWith(1, 3, null, 5);
+    await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: null, count: 5 });
+    expect(deps.questionsRepo.findRandomByKpAndType).toHaveBeenCalledWith(7, 1, 3, null, 5);
   });
 
   it('透传非空 type', async () => {
     const deps = mk();
-    await mkSvc(deps).startTargetedPractice({ subjectId: 1, kpId: 3, type: 'proof', count: 10 });
-    expect(deps.questionsRepo.findRandomByKpAndType).toHaveBeenCalledWith(1, 3, 'proof', 10);
+    await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: 'proof', count: 10 });
+    expect(deps.questionsRepo.findRandomByKpAndType).toHaveBeenCalledWith(7, 1, 3, 'proof', 10);
   });
 
   it('白名单序列化：只出 questionId/text/type/options，剥离 answer/explanation/material', async () => {
     const deps = mk({
       questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([questionRow]) },
     });
-    const r = await mkSvc(deps).startTargetedPractice({ subjectId: 1, kpId: 3, type: 'choice', count: 5 });
+    const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: 'choice', count: 5 });
     expect(r.questions).toHaveLength(1);
     const q = r.questions[0];
     expect(q).toEqual({ questionId: 10, text: '题面文本', type: 'choice', options: ['A. 1', 'B. 2'] });
-    // 白名单之外的字段一律不出（防答案泄露）
     expect(Object.keys(q).sort()).toEqual(['options', 'questionId', 'text', 'type']);
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');
@@ -198,26 +205,27 @@ describe('TrainingService.startTargetedPractice', () => {
     const deps = mk({
       questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([{ ...questionRow, options: null }]) },
     });
-    const r = await mkSvc(deps).startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 5 });
+    const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: null, count: 5 });
     expect(r.questions[0].options).toBeNull();
   });
 
   it('抽不到题返回空数组（空集合非错误）', async () => {
     const deps = mk({ questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([]) } });
-    const r = await mkSvc(deps).startTargetedPractice({ subjectId: 1, kpId: 999, type: null, count: 5 });
+    const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 999, type: null, count: 5 });
     expect(r).toEqual({ questions: [] });
   });
 });
 
 describe('TrainingController.startTargetedPractice 校验', () => {
   const mkController = (service: any) => new TrainingController(service);
+  const user = { sub: 7, role: 'student' } as any;
 
   it('count 越界（0 / 21 / 非整数）-> 400', async () => {
     const svc: any = { startTargetedPractice: vi.fn() };
     const c = mkController(svc);
     for (const count of [0, 21, 1.5, NaN]) {
       await expect(
-        c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count }),
+        c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count }, user),
       ).rejects.toMatchObject({ status: 400 });
     }
     expect(svc.startTargetedPractice).not.toHaveBeenCalled();
@@ -227,18 +235,59 @@ describe('TrainingController.startTargetedPractice 校验', () => {
     const svc: any = { startTargetedPractice: vi.fn() };
     const c = mkController(svc);
     await expect(
-      c.startTargetedPractice({ subjectId: 1, kpId: 3, type: 'essay', count: 5 }),
+      c.startTargetedPractice({ subjectId: 1, kpId: 3, type: 'essay', count: 5 }, user),
     ).rejects.toMatchObject({ status: 400 });
     expect(svc.startTargetedPractice).not.toHaveBeenCalled();
   });
 
-  it('合法 type（含 null）与 count 1-20 透传 service', async () => {
+  it('合法 type（含 null）与 count 1-20 透传 service（含 studentId）', async () => {
     const svc: any = { startTargetedPractice: vi.fn().mockResolvedValue({ questions: [] }) };
     const c = mkController(svc);
-    await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 1 });
-    await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: 'proof', count: 20 });
+    await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 1 }, user);
+    await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: 'proof', count: 20 }, user);
     expect(svc.startTargetedPractice).toHaveBeenCalledTimes(2);
-    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(1, { subjectId: 1, kpId: 3, type: null, count: 1 });
-    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(2, { subjectId: 1, kpId: 3, type: 'proof', count: 20 });
+    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(1, { studentId: 7, subjectId: 1, kpId: 3, type: null, count: 1 });
+    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(2, { studentId: 7, subjectId: 1, kpId: 3, type: 'proof', count: 20 });
+  });
+});
+
+describe('TrainingService.markHidden', () => {
+  it('题目存在 -> repo.mark(studentId, subjectId, questionId)', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue({ id: 10, content: '题面', type: 'choice' }) },
+    });
+    await mkSvc(deps).markHidden(7, 1, 10);
+    expect(deps.hiddenRepo.mark).toHaveBeenCalledWith(7, 1, 10);
+  });
+  it('题目不存在 -> 404，不调 repo.mark', async () => {
+    const deps = mk({ questionsRepo: { findById: vi.fn().mockResolvedValue(null) } });
+    await expect(mkSvc(deps).markHidden(7, 1, 999)).rejects.toMatchObject({ status: 404 });
+    expect(deps.hiddenRepo.mark).not.toHaveBeenCalled();
+  });
+});
+
+describe('TrainingService.unmarkHidden', () => {
+  it('透传 (studentId, questionId) 给 repo.unmark', async () => {
+    const deps = mk();
+    await mkSvc(deps).unmarkHidden(7, 10);
+    expect(deps.hiddenRepo.unmark).toHaveBeenCalledWith(7, 10);
+  });
+});
+
+describe('TrainingService.unmarkAllHidden', () => {
+  it('透传 studentId 给 repo.unmarkAll', async () => {
+    const deps = mk();
+    await mkSvc(deps).unmarkAllHidden(7);
+    expect(deps.hiddenRepo.unmarkAll).toHaveBeenCalledWith(7);
+  });
+});
+
+describe('TrainingService.listHidden', () => {
+  it('透传 (studentId, subjectId) 给 repo.findAllByStudent', async () => {
+    const rows = [{ questionId: 10, questionText: '题面', type: 'choice', kpName: '有理数', markedAt: new Date('2026-09-04') }];
+    const deps = mk({ hiddenRepo: { findAllByStudent: vi.fn().mockResolvedValue(rows) } });
+    const r = await mkSvc(deps).listHidden(7, 1);
+    expect(deps.hiddenRepo.findAllByStudent).toHaveBeenCalledWith(7, 1);
+    expect(r).toEqual(rows);
   });
 });

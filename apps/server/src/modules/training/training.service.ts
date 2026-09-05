@@ -4,6 +4,7 @@ import { MainErrorBooksRepository } from '../../database/repositories/main-error
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
 import { QuestionHintsRepository } from '../../database/repositories/question-hints.repo.js';
+import { StudentHiddenQuestionsRepository } from '../../database/repositories/student-hidden-questions.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
@@ -25,6 +26,7 @@ export class TrainingService {
     private readonly knowledgePointsRepo: KnowledgePointsRepository,
     private readonly questionHintsRepo: QuestionHintsRepository,
     private readonly hint: HintCapability,
+    private readonly hiddenRepo: StudentHiddenQuestionsRepository,
   ) {}
 
   /** 错题练习筛选列表：调 repo 后按 errorBookId 聚合 kpIds，映射 DTO。 */
@@ -115,18 +117,20 @@ export class TrainingService {
   }
 
   /**
-   * 专项练习开练：按学科 + 知识点（可选题型）随机抽题。
+   * 专项练习开练：按学科 + 知识点（可选题型）随机抽题，排除该生已标记「不再展示」的题。
    * 题单做白名单序列化——只出 questionId/text/type/options，answer/explanation
    * 等字段一律剥离（防答案泄露）；options 是 JSON 字符串，parse 成数组返回。
-   * 抽不到题返回空数组（空集合非错误，前端判空显示提示）。
+   * 抽不到题（含该专项题池全部被标记）返回空数组（空集合非错误，前端判空显示提示）。
    */
   async startTargetedPractice(input: {
+    studentId: number;
     subjectId: number;
     kpId: number;
     type: string | null;
     count: number;
   }): Promise<{ questions: Array<{ questionId: number; text: string; type: string; options: unknown[] | null }> }> {
     const rows = await this.questionsRepo.findRandomByKpAndType(
+      input.studentId,
       input.subjectId,
       input.kpId,
       input.type,
@@ -140,5 +144,29 @@ export class TrainingService {
         options: parseOptions(q.options),
       })),
     };
+  }
+
+  /** 标记某题「不再展示」：校验题目存在（避免标记已删题），再 INSERT IGNORE 幂等写入。 */
+  async markHidden(studentId: number, subjectId: number, questionId: number): Promise<void> {
+    const q = await this.questionsRepo.findById(questionId);
+    if (!q) {
+      throw new NotFoundException(`题目不存在：${questionId}`);
+    }
+    await this.hiddenRepo.mark(studentId, subjectId, questionId);
+  }
+
+  /** 撤销单条标记（归属由 repo WHERE student_id 兜底）。 */
+  async unmarkHidden(studentId: number, questionId: number): Promise<void> {
+    await this.hiddenRepo.unmark(studentId, questionId);
+  }
+
+  /** 全部重置：清空该生所有不再展示标记。 */
+  async unmarkAllHidden(studentId: number): Promise<void> {
+    await this.hiddenRepo.unmarkAll(studentId);
+  }
+
+  /** 不再展示清单（按标记时间倒序）。 */
+  async listHidden(studentId: number, subjectId: number) {
+    return this.hiddenRepo.findAllByStudent(studentId, subjectId);
   }
 }
