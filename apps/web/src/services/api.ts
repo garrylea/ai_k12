@@ -862,6 +862,44 @@ export function startTargetedPractice(payload: {
   });
 }
 
+// --- 专项训练「不再展示」清单（2026-09-04） ---
+
+/** 不再展示清单条目：题面预览（80 字截断）+ 首个 primary kp 名 + 标记时间。 */
+export interface HiddenQuestion {
+  questionId: number;
+  questionText: string;
+  type: string;
+  kpName: string | null;
+  markedAt: string;
+}
+
+/** 标记某题不再展示（幂等：重复标记不报错）。 */
+export function markTrainingHidden(payload: {
+  questionId: number;
+  subjectId: number;
+}): Promise<void> {
+  return fetchApi<void>('/training/hidden/mark', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 拉取不再展示清单（按标记时间倒序）。 */
+export function listTrainingHidden(subjectId: number): Promise<HiddenQuestion[]> {
+  const qs = new URLSearchParams({ subjectId: String(subjectId) });
+  return fetchApi<HiddenQuestion[]>(`/training/hidden?${qs.toString()}`);
+}
+
+/** 撤销单条标记。 */
+export function unmarkTrainingHidden(questionId: number): Promise<void> {
+  return fetchApi<void>(`/training/hidden/${questionId}`, { method: 'DELETE' });
+}
+
+/** 全部重置：清空该生所有不再展示标记。 */
+export function unmarkAllTrainingHidden(): Promise<void> {
+  return fetchApi<void>('/training/hidden', { method: 'DELETE' });
+}
+
 // --- Exams（考试模块：试卷列表 / 会话生命周期 / 结果，字段以后端 exams 白名单序列化为准） ---
 
 export interface ExamPaper {
