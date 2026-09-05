@@ -530,6 +530,25 @@ CREATE TABLE IF NOT EXISTS main_error_books (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
+-- 学生「不再展示」清单（专项训练选题排除用）
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS student_hidden_questions (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id BIGINT NOT NULL,
+  subject_id BIGINT NOT NULL,
+  question_id BIGINT NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_shq_student_question (student_id, question_id),
+  KEY idx_shq_student (student_id),
+  KEY idx_shq_student_subject (student_id, subject_id),
+  CONSTRAINT fk_shq_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
+  CONSTRAINT fk_shq_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_shq_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
 -- 课堂练习判题结果持久化（学生×卡×题，单题重做 upsert）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS practice_results (
