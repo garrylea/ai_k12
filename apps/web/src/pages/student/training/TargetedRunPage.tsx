@@ -10,8 +10,10 @@ import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
   getTrainingHint,
   judgeTraining,
+  markTrainingHidden,
   type TargetedPracticeQuestion,
 } from '@/services/api';
+import { toast } from '@/components/base/Toast';
 import { useThemeStore } from '@/store/themeStore';
 import { normalizeOptions } from './normalizeOptions';
 
@@ -34,6 +36,11 @@ export default function TargetedRunPage() {
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({ open: false, answered: 0 });
+  // 「不再展示」确认 Modal：open 时锚定当前题 questionId
+  const [markConfirm, setMarkConfirm] = useState<{ open: boolean; questionId: number | null }>(
+    { open: false, questionId: null },
+  );
+  const [marking, setMarking] = useState(false);
   // X 确认后放行导航（先置 false 再 navigate，绕开 RunExitGuard 二次拦截）
   const [guardEnabled, setGuardEnabled] = useState(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
@@ -137,6 +144,20 @@ export default function TargetedRunPage() {
     setPhase('result');
   }, []);
 
+  const confirmMarkHidden = useCallback(async () => {
+    if (markConfirm.questionId == null) return;
+    setMarking(true);
+    try {
+      await markTrainingHidden({ questionId: markConfirm.questionId, subjectId: MATH_SUBJECT_ID });
+      toast('success', '已加入不再展示清单');
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : '标记失败，请重试');
+    } finally {
+      setMarking(false);
+      setMarkConfirm({ open: false, questionId: null });
+    }
+  }, [markConfirm.questionId]);
+
   // mount 读取中 / 空题单（正在被踢回配置页）：不渲染内容
   if (entries == null || entries.length === 0) return null;
 
@@ -162,6 +183,27 @@ export default function TargetedRunPage() {
               headerActions={(q) => (
                 <DiscussIconButton onClick={() => setDiscussQ(q)} />
               )}
+              questionMetaActions={(q) => {
+                const qid = Number(q.n);
+                return (
+                  <button
+                    type="button"
+                    disabled={marking}
+                    onClick={() => setMarkConfirm({ open: true, questionId: qid })}
+                    title="不再展示"
+                    aria-label="不再展示这道题"
+                    className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-secondary)] shadow-sm hover:bg-[var(--bg-base)] transition-colors"
+                  >
+                    {/* 眼斜杠图标（线性 SVG）——视觉权重低于提示/讲一讲 */}
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                      <line x1="2" y1="2" x2="22" y2="22" />
+                    </svg>
+                  </button>
+                );
+              }}
               onSubmit={handleSubmit}
               onFinish={handleFinish}
               onClose={(answered) => setExitConfirm({ open: true, answered })}
@@ -197,6 +239,33 @@ export default function TargetedRunPage() {
                 className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)]"
               >
                 确认退出
+              </button>
+            </div>
+          </Modal>
+        )}
+        {/* 「不再展示」确认 */}
+        {markConfirm.open && (
+          <Modal
+            open
+            onClose={() => setMarkConfirm({ open: false, questionId: null })}
+            title="不再展示"
+          >
+            <p className="text-sm text-[var(--text-secondary)]">
+              标记后，下次专项练习将不再抽到这道题。当前题仍可继续作答。可在「专项练习」配置页的「我的不再展示清单」中撤销。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setMarkConfirm({ open: false, questionId: null })}
+                className="h-10 px-4 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-base)]"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => void confirmMarkHidden()}
+                disabled={marking}
+                className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)] disabled:opacity-50"
+              >
+                {marking ? '提交中…' : '确认不再展示'}
               </button>
             </div>
           </Modal>
