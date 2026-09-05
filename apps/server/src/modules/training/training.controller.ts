@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { TrainingService } from './training.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
@@ -71,10 +71,12 @@ export class TrainingController {
     return this.trainingService.getKnowledgePoints(subjectId);
   }
 
-  /** 专项练习开练：count 限 1-20 整数，type 限白名单六值（含 null），越界/非法 400。 */
+  /** 专项练习开练：count 限 1-20 整数，type 限白名单六值（含 null），越界/非法 400。
+   *  studentId 从 JWT 取（用于排除该生已标记不再展示的题）。 */
   @Post('targeted/start')
   async startTargetedPractice(
     @Body() dto: { subjectId: number; kpId: number; type: string | null; count: number },
+    @CurrentUser() user: JwtUser,
   ) {
     const { count } = dto;
     if (!Number.isInteger(count) || count < 1 || count > 20) {
@@ -87,10 +89,51 @@ export class TrainingController {
       );
     }
     return this.trainingService.startTargetedPractice({
+      studentId: user.sub,
       subjectId: dto.subjectId,
       kpId: dto.kpId,
       type,
       count,
     });
+  }
+
+  // ==================== 「不再展示」清单（2026-09-04） ====================
+
+  /** 标记某题不再展示（幂等）。questionId/subjectId 非正整数 -> 400。 */
+  @Post('hidden/mark')
+  async markHidden(
+    @Body() dto: { questionId: number; subjectId: number },
+    @CurrentUser() user: JwtUser,
+  ) {
+    if (!Number.isInteger(dto.questionId) || dto.questionId < 1 ||
+        !Number.isInteger(dto.subjectId) || dto.subjectId < 1) {
+      throw new BadRequestException('questionId 与 subjectId 须为正整数');
+    }
+    await this.trainingService.markHidden(user.sub, dto.subjectId, dto.questionId);
+    // ResponseInterceptor 包成 { code:0, data:null }（void 返回 -> data:null）
+  }
+
+  /** 不再展示清单。 */
+  @Get('hidden')
+  async listHidden(
+    @Query('subjectId', ParseIntPipe) subjectId: number,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.trainingService.listHidden(user.sub, subjectId);
+  }
+
+  /** 撤销单条标记（归属由 repo WHERE student_id 兜底防 IDOR）。 */
+  @Delete('hidden/:questionId')
+  async unmarkHidden(
+    @Param('questionId', ParseIntPipe) questionId: number,
+    @CurrentUser() user: JwtUser,
+  ) {
+    await this.trainingService.unmarkHidden(user.sub, questionId);
+  }
+
+  /** 全部重置：清空该生所有不再展示标记。 */
+  @Delete('hidden')
+  async unmarkAllHidden(@CurrentUser() user: JwtUser) {
+    await this.trainingService.unmarkAllHidden(user.sub);
   }
 }

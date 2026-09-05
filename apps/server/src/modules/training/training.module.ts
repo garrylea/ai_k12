@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { TrainingController } from './training.controller.js';
 import { TrainingService } from './training.service.js';
 import { PracticeModule } from '../practice/practice.module.js';
-import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository } from '../../database/repositories/index.js';
+import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository } from '../../database/repositories/index.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 
 /**
@@ -15,6 +15,6 @@ import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 @Module({
   imports: [PracticeModule],
   controllers: [TrainingController],
-  providers: [TrainingService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, HintCapability],
+  providers: [TrainingService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, HintCapability],
 })
 export class TrainingModule {}
