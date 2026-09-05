@@ -69,8 +69,13 @@ export class QuestionsRepository {
    * 专项练习随机抽题（训练模块 Task 8）：按学科 + 知识点（JOIN qkp）随机取 count 题。
    * type 传 null 时不过滤题型；choice/true_false 空答案题一律排除（终审备忘：
    * 判不了对的题不进专项练习）。
+   *
+   * 「不再展示」排除（2026-09-04）：LEFT JOIN student_hidden_questions，
+   * 该生已标记的题 shq.id 非空 -> WHERE shq.id IS NULL 过滤掉。
+   * studentId 由 TrainingService 从 controller JWT user.sub 透传。
    */
   async findRandomByKpAndType(
+    studentId: number,
     subjectId: number,
     kpId: number,
     type: string | null,
@@ -79,10 +84,15 @@ export class QuestionsRepository {
     const typeFilter = type != null ? ' AND q.type = ?' : '';
     const sql = `SELECT q.* FROM questions q
       JOIN question_knowledge_points qkp ON qkp.question_id = q.id
+      LEFT JOIN student_hidden_questions shq
+        ON shq.question_id = q.id AND shq.student_id = ?
       WHERE q.subject_id = ? AND qkp.knowledge_point_id = ? AND q.is_active = 1${typeFilter}
         AND NOT (q.type IN ('choice','true_false') AND q.answer = '')
+        AND shq.id IS NULL
       ORDER BY RAND() LIMIT ?`;
-    const params = type != null ? [subjectId, kpId, type, count] : [subjectId, kpId, count];
+    const params = type != null
+      ? [studentId, subjectId, kpId, type, count]
+      : [studentId, subjectId, kpId, count];
     // Use pool.query (client-side escaping) instead of pool.execute (server-side
     // prepared statements): MySQL rejects `LIMIT ?` as a prepared-statement
     // placeholder with "Incorrect arguments to mysqld_stmt_execute"（联调实测；
