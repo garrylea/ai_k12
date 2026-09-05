@@ -310,7 +310,7 @@ export default function TargetedConfigPage() {
                 )}
               </div>
               {emptyHint && (
-                <p className="text-sm text-[var(--text-secondary)]">该专项暂无足够题目</p>
+                <p className="text-sm text-[var(--text-secondary)]">该专项题目已练完或全部标记不再展示。可更换专项/题型，或在「我的不再展示清单」中重置。</p>
               )}
               {startError && (
                 <p className="text-sm text-[var(--error)]">{startError}</p>
