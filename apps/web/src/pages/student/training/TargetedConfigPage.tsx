@@ -187,6 +187,17 @@ export default function TargetedConfigPage() {
           {/* 顶栏 */}
           <PageHeader to="/student/training/home" caption="返回训练" title="专项练习" />
 
+          {/* 工具条：不再展示清单入口 */}
+          <div className="flex justify-end mb-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => navigate('/student/training/targeted/hidden')}
+            >
+              我的不再展示清单
+            </Button>
+          </div>
+
           {/* 配置区 */}
           <Card className="mt-6 space-y-6">
             {/* 知识点两级选择 */}

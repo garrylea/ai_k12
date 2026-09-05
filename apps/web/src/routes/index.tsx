@@ -13,6 +13,7 @@ import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage';
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
+import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
 import ExamListPage from '@/pages/student/training/ExamListPage';
 import ExamRunPage from '@/pages/student/training/ExamRunPage';
 import ExamResultPage from '@/pages/student/training/ExamResultPage';
@@ -186,6 +187,15 @@ const router = createBrowserRouter([
     element: (
       <RequireRole role="student">
         <TargetedRunPage />
+      </RequireRole>
+    ),
+  },
+  // 专项练习「不再展示」清单页（全屏沉浸层，与 targeted 同层）
+  {
+    path: '/student/training/targeted/hidden',
+    element: (
+      <RequireRole role="student">
+        <HiddenQuestionsPage />
       </RequireRole>
     ),
   },
