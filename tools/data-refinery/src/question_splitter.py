@@ -17,12 +17,14 @@ _STEM_PREFIX_RE = re.compile(r'^\s*\d{1,2}\.')
 _INLINE_STEM_RE = re.compile(r'(?<!\d)(\d{1,2})\.\D')
 # 小问号：行首 (N) 或（N）
 _SUB_STEM_RE = re.compile(r'^\s*[\(（](\d{1,2})[\)）]')
-# 大题分组标题：行首 中文序号 + 、
-_GROUP_HEADER_RE = re.compile(r'^\s*([一二三四五六七八九十]+)、')
+# 大题分组标题：行首可选 markdown # 前缀 + 中文序号 + 、（兼容 "## 一、选择题"）
+_GROUP_HEADER_RE = re.compile(r'^#{0,6}\s*([一二三四五六七八九十]+)、')
 # 日期/页码陷阱：行首 4 位数字 + . + 数字（如 2026.5）
 _DATE_TRAP_RE = re.compile(r'^\s*\d{4}\.\d')
 # 答案关键字（行内搜索）
-_ANSWER_KEYWORD_RE = re.compile(r'参考答案|答案|评分参考')
+# 答案关键字（行内搜索）：不匹配单独的"答案"（"试题答案"会误匹配），
+# 只匹配"参考答案"/"答案及评分"/"评分参考"等标题特征
+_ANSWER_KEYWORD_RE = re.compile(r'参考答案|答案及评分|评分参考')
 
 
 def is_date_trap(line: str) -> bool:
@@ -63,7 +65,17 @@ def split_inline_stems(line: str) -> list[tuple[int, str]]:
     """紧凑格式：一行多题号（答案区 '9. xxx 10. yyy 11. zzz'）。
 
     返回 [(题号 N, 答案文本), ...]。无匹配返回空列表。
+
+    含 LaTeX 环境的行（\\begin{ / \\end{）不匹配（'x - 2. \\end{array}' 的 '2.'
+    会被误当作题号）。含解答题标志（解：/证明：/∵/∴/\\therefore/\\because）
+    的行也跳过——它们是展开格式，行内 LaTeX 小数 'b=2.' 不能当题号。
     """
+    if '\\begin{' in line or '\\end{' in line:
+        return []
+    if '![](' in line:  # 图片引用行：文件名里的 'a3.jpg' 会误匹配为题号 3
+        return []
+    if re.search(r'解[：:]|证明[：:]|∵|∴|\\therefore|\\because', line):
+        return []
     matches = list(_INLINE_STEM_RE.finditer(line))
     if not matches:
         return []
@@ -76,6 +88,29 @@ def split_inline_stems(line: str) -> list[tuple[int, str]]:
         text = line[start:end].strip()
         results.append((n, text))
     return results
+
+
+def parse_answer_table(line: str) -> dict[int, str]:
+    """解析 HTML 表格提取选择题答案（题号→答案）。
+
+    真实试卷选择题答案常在表格里：
+    <table><tr><td>题号</td><td>1</td>...<td>8</td></tr>
+           <tr><td>答案</td><td>A</td>...<td>D</td></tr></table>
+    """
+    import re as _re
+    rows = _re.findall(r'<tr>(.*?)</tr>', line, _re.DOTALL)
+    if len(rows) < 2:
+        return {}
+    header = _re.findall(r'<td[^>]*>(.*?)</td>', rows[0], _re.DOTALL)
+    answer_row = _re.findall(r'<td[^>]*>(.*?)</td>', rows[1], _re.DOTALL)
+    result: dict[int, str] = {}
+    for i in range(1, min(len(header), len(answer_row))):
+        try:
+            n = int(header[i].strip())
+            result[n] = answer_row[i].strip()
+        except ValueError:
+            continue
+    return result
 
 
 @dataclass
@@ -168,6 +203,16 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
         ok, n = is_main_stem(line)
 
         if in_answer_section:
+            # 表格格式选择题答案（<table>...<tr><td>题号</td>...<td>答案</td>...</table>）
+            if '<table>' in line or '<table ' in line:
+                _flush_answer()
+                table_answers = parse_answer_table(line)
+                for tn, tans in table_answers.items():
+                    current_answer_n = tn
+                    current_answer_lines = [tans]
+                    _flush_answer()
+                current_answer_n = None
+                continue
             if inline_stems:
                 # 紧凑格式：一行多题号答案
                 _flush_answer()  # 先把上一段答案塞入

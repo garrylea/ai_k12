@@ -59,7 +59,9 @@ def test_is_group_header():
 def test_is_answer_keyword():
     assert is_answer_keyword("参考答案")
     assert is_answer_keyword("数学答案及评分参考")
-    assert is_answer_keyword("二、答案")
+    assert is_answer_keyword("# 丰台区2025年...数学试卷参考答案")
+    assert not is_answer_keyword("二、答案")  # 单独"答案"不匹配（"试题答案"会误匹配）
+    assert not is_answer_keyword("3. 试题答案一律填涂或书写在答题卡上")  # 考生须知里的"答案"
     assert not is_answer_keyword("9. 若代数式")
 
 
