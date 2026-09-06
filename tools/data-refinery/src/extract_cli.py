@@ -99,6 +99,8 @@ def parse_args(argv=None):
                         help="每处理 N 页（发生 LLM 调用的页）后进入批次间歇（默认 0=不分批）")
     parser.add_argument("--batch-sleep", type=float, default=0.0,
                         help="批次之间 sleep 秒数（默认 0）")
+    parser.add_argument("--label-batch-size", type=int, default=1,
+                        help="仅 questions（试卷）：每 N 题一批调 LLM。0=全部一次，1=每题一次（默认）")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要处理的 Markdown")
     return parser.parse_args(argv)
 
@@ -407,6 +409,8 @@ def main(argv=None):
 
     # 兜底模型：card_type 非法且主模型重试仍失败时再升级一次（LLM_FALLBACK_* 配置）
     fallback_labeler = None
+    # questions（试卷）路径的双模型确认也用它（raw LLMClient）
+    fb_llm_client = None
     if config.llm_fallback_provider:
         try:
             fb_llm = create_llm_client(
@@ -418,6 +422,7 @@ def main(argv=None):
                 max_tokens=config.llm_max_tokens,
                 max_retries=config.llm_max_retries,
             )
+            fb_llm_client = fb_llm
             fallback_labeler = CardLabeler(llm=fb_llm, prompt_template=prompt)
             print(f"[fallback] 标注兜底模型就绪: "
                   f"{config.llm_fallback_provider} / {config.llm_fallback_model}", flush=True)
@@ -479,6 +484,32 @@ def main(argv=None):
                 if last is not None:
                     book_lesson[book_key] = last
             print(f"[skip] ({idx}/{total_processed}) {file_key}", flush=True)
+            continue
+
+        # 试卷题（questions）与教材卡（cards）分流：
+        # 文件名含"试卷" → 独立试卷切题路径（question_extract）
+        if "试卷" in source.md_path.name:
+            from question_extract import extract_questions_file
+            try:
+                count = extract_questions_file(
+                    source, config, llm, fb_llm_client,
+                    extracted_dir, args.label_batch_size,
+                )
+            except Exception as e:
+                print(f"[ERROR] ({idx}/{total_processed}) {file_key}: {e}", flush=True)
+                failed += 1
+                continue
+            checkpoint.mark_extracted(file_key)
+            print(f"[ok] ({idx}/{total_processed}) {file_key} -> {count} items (questions)", flush=True)
+            extracted += 1
+            continue
+
+        # 文件名含"答案" → 不单独切：答案内容由配对试卷的
+        # maybe_merge_answer_md 吸收（合并纯答案/选择有答案版），避免重复入库
+        if "答案" in source.md_path.name:
+            checkpoint.mark_extracted(file_key)
+            print(f"[skip] ({idx}/{total_processed}) {file_key} (答案文件，由配对试卷吸收)", flush=True)
+            skipped += 1
             continue
 
         try:
