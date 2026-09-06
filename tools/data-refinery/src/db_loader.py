@@ -1110,11 +1110,12 @@ class DbLoader:
                 qid = int(row[0][0])
             else:
                 self._exec(
-                    "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, "
+                    "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, full_score, "
                     "content, options, answer, explanation, material_text, material_url, "
                     "grade_band, source, source_year, content_hash) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
+                     q.get("full_score"),
                      content,
                      json.dumps(opts, ensure_ascii=False) if opts is not None else None,
                      q.get("answer") or "", q.get("explanation"), q.get("material_text"),

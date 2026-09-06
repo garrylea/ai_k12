@@ -90,6 +90,32 @@ def split_inline_stems(line: str) -> list[tuple[int, str]]:
     return results
 
 
+def parse_group_scores(header: str) -> tuple[str, object | None]:
+    """解析分组标题的每题分数。
+
+    返回 (kind, value)：
+    - ('unified', N)：组内每题统一 N 分（选择题/填空题 '每题2分'）
+    - ('map', {题号: 分数})：逐题给分（解答题 '第17-19题每题5分,第20题6分'）
+    - ('none', None)：标题没给分数（如 '解答题(共78分)'）
+
+    兼容全/半角括号、逗号，'第A-B题' 范围展开。
+    """
+    if re.search(r'第[\d-]+题', header):
+        result: dict[int, int] = {}
+        for nums, score in re.findall(r'第([\d-]+)题[^0-9]*?(\d+)\s*分', header):
+            score = int(score)
+            if '-' in nums:
+                a, b = nums.split('-')
+                result.update({n: score for n in range(int(a), int(b) + 1)})
+            else:
+                result[int(nums)] = score
+        return ('map', result) if result else ('none', None)
+    m = re.search(r'每题\s*(\d+)\s*分', header)
+    if m:
+        return ('unified', int(m.group(1)))
+    return ('none', None)
+
+
 def parse_answer_table(line: str) -> dict[int, str]:
     """解析 HTML 表格提取选择题答案（题号→答案）。
 
@@ -121,6 +147,7 @@ class RawQuestion:
     content: str                    # 题干原文（主题号"N."已剥离，小问号"(N)"保留）
     answer: str = ""                # 答案（答案对齐阶段填入）
     explanation: str | None = None  # 解析（答案对齐阶段填入）
+    score: int | None = None        # 每题满分（分组标题解析），无则为 None
 
 
 def _strip_main_stem_prefix(line: str) -> str:
@@ -151,6 +178,9 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
     questions: list[RawQuestion] = []
     current: RawQuestion | None = None
     current_group_id: str | None = None
+    # 当前分组的分数状态：unified（组内每题统一分）或 map（逐题给分）
+    current_unified_score: int | None = None
+    current_score_map: dict[int, int] | None = None
     in_answer_section = False
     current_answer_lines: list[str] = []  # 当前累积的答案文本（多行）
     current_answer_n: int | None = None  # 当前答案属于哪个题号
@@ -189,6 +219,17 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
                     questions.append(current)
                     current = None
             current_group_id = gid
+            # 解析每题分数（选择/填空'每题N分'统一分，解答题'第X题N分'逐题 map）
+            score_kind, score_val = parse_group_scores(line)
+            if score_kind == 'unified':
+                current_unified_score = score_val
+                current_score_map = None
+            elif score_kind == 'map':
+                current_unified_score = None
+                current_score_map = score_val
+            else:
+                current_unified_score = None
+                current_score_map = None
             continue
 
         if not in_answer_section and is_answer_keyword(line):
@@ -242,10 +283,18 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
         if ok:
             if current is not None:
                 questions.append(current)
+            # 从分组分数状态确定本题分数
+            if current_score_map is not None:
+                q_score = current_score_map.get(n)
+            elif current_unified_score is not None:
+                q_score = current_unified_score
+            else:
+                q_score = None
             current = RawQuestion(
                 group_order=n,
                 group_id=current_group_id,
                 content=_strip_main_stem_prefix(line),
+                score=q_score,
             )
             continue
 

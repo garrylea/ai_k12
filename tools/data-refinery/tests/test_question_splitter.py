@@ -254,3 +254,76 @@ def test_answer_keyword_only_section_header():
     assert len(result) == 1
     assert "参考答案" not in result[0].content
     assert "参考答案" not in result[0].answer
+
+
+# === 分数解析 ===
+
+from question_splitter import parse_group_scores
+
+
+def test_parse_group_scores_unified():
+    """'每题2分' → 组内统一分。"""
+    kind, val = parse_group_scores("## 一、选择题（共16分，每题2分）")
+    assert kind == "unified"
+    assert val == 2
+
+
+def test_parse_group_scores_unified_halfwidth():
+    """半角括号/逗号也能解析。"""
+    kind, val = parse_group_scores("## 一、选择题(共16分,每题2分)")
+    assert kind == "unified"
+    assert val == 2
+
+
+def test_parse_group_scores_map_range():
+    """'第17-19题每题5分' → 范围展开为逐题 map。"""
+    kind, val = parse_group_scores("三、解答题（共68分，第17-19题每题5分，第24题6分）")
+    assert kind == "map"
+    assert val[17] == 5 and val[18] == 5 and val[19] == 5
+    assert val[24] == 6
+
+
+def test_parse_group_scores_map_adjacent_range():
+    """'第20-21题每题6分，第22-23题每题5分' → 相邻题同分用范围。"""
+    kind, val = parse_group_scores(
+        "三、解答题（共68分，第17-19题每题5分，第20-21题每题6分，第22-23题每题5分，"
+        "第24题6分，第25题5分，第26题6分，第27-28题每题7分）"
+    )
+    assert kind == "map"
+    assert val[20] == 6 and val[21] == 6  # 20-21 每题 6 分
+    assert val[22] == 5 and val[23] == 5  # 22-23 每题 5 分
+    assert val[27] == 7 and val[28] == 7
+    assert sum(val.values()) == 68  # 解答题小计 68
+
+
+def test_parse_group_scores_none():
+    """'解答题(共78分)' 无逐题分 → none。"""
+    kind, val = parse_group_scores("## 三、解答题（共78分）")
+    assert kind == "none"
+    assert val is None
+
+
+def test_split_page_fills_score():
+    """切题时每题 score 从分组标题填入。"""
+    text = (
+        "## 一、选择题（共16分，每题2分）\n"
+        "1. 题干一 (A) (B)\n"
+        "2. 题干二\n"
+        "## 二、填空题（共16分，每题2分）\n"
+        "9. 填空一\n"
+        "## 三、解答题（共68分，第17-19题每题5分，第24题6分）\n"
+        "17. 解答一\n"
+        "24. 解答八\n"
+        "参考答案\n"
+        "1. A 2. B\n"
+        "9. 答案\n"
+        "17. 解：过程\n"
+        "24. 解：过程"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert by_order[1].score == 2
+    assert by_order[2].score == 2
+    assert by_order[9].score == 2
+    assert by_order[17].score == 5
+    assert by_order[24].score == 6

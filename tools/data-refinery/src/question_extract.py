@@ -97,6 +97,7 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 "group_order": q.group_order,
                 "type": q.type,
                 "difficulty": q.difficulty,
+                "full_score": q.score,  # 每题满分（分组标题解析），无则 null
                 "content": q.content,
                 "options": None,  # 本任务不切选项（留给后续）
                 "answer": q.answer,

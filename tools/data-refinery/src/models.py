@@ -10,7 +10,8 @@ class ExamQuestion(BaseModel):
     group_id: str | None = None
     group_order: int | None = None
     type: Literal["choice", "fill_blank", "true_false", "short_answer", "proof"]
-    difficulty: int = Field(..., ge=1, le=3)
+    difficulty: int = Field(..., ge=1, le=5)  # 难度 1-5
+    full_score: int | None = None          # 每题满分（试卷分组标题解析）
     content: str
     options: list[dict] | None = None
     answer: str

@@ -26,14 +26,30 @@ def test_exam_question_rejects_invalid_type():
 
 
 def test_exam_question_rejects_out_of_range_difficulty():
+    """难度合法范围 1-5（5 档），6 越界报错。"""
     with pytest.raises(ValueError):
         ExamQuestion(
             subject_id="math",
             type="choice",
-            difficulty=5,
+            difficulty=6,
             content="1+1=?",
             answer="2",
         )
+    with pytest.raises(ValueError):
+        ExamQuestion(
+            subject_id="math",
+            type="choice",
+            difficulty=0,
+            content="1+1=?",
+            answer="2",
+        )
+
+
+def test_exam_question_accepts_5_tier_difficulty():
+    """5 档难度边界值 1/5 合法。"""
+    q = ExamQuestion(subject_id="math", type="choice", difficulty=5,
+                     content="压轴题", answer="C")
+    assert q.difficulty == 5
 
 
 def test_textbook_card_validates_card_type():

@@ -17,6 +17,7 @@ class LabeledQuestion:
     content: str
     answer: str
     explanation: str | None
+    score: int | None = None                # 每题满分（分组标题解析）
     type: str = ""                       # choice/fill_blank/true_false/short_answer/proof
     difficulty: int = 2                  # 1-5，默认 2
     knowledge_points: list = None       # 已有 KP code 列表
@@ -32,6 +33,7 @@ class LabeledQuestion:
             content=q.content,
             answer=q.answer,
             explanation=q.explanation,
+            score=q.score,
             knowledge_points=[],
             suggested_new_kps=[],
             _confirmed_new_kps=[],

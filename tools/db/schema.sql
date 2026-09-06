@@ -213,6 +213,7 @@ CREATE TABLE IF NOT EXISTS questions (
   group_order SMALLINT DEFAULT NULL,
   type VARCHAR(20) NOT NULL,
   difficulty SMALLINT NOT NULL,
+  full_score SMALLINT DEFAULT NULL,
   content TEXT NOT NULL,
   options TEXT DEFAULT NULL,
   answer TEXT NOT NULL,
