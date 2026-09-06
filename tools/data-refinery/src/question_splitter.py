@@ -98,11 +98,13 @@ def _strip_main_stem_prefix(line: str) -> str:
     return _STEM_PREFIX_RE.sub('', line, count=1).strip()
 
 
-def split_page(text: str, md_path: Path) -> list[RawQuestion]:
-    """按题号切分试卷 MD，返回 RawQuestion 列表。
+def _strip_answer_prefix(text: str) -> str:
+    """剥离答案文本开头的'解：'/'证明：'等前缀，只留内容。"""
+    return re.sub(r'^\s*(解|证明|原式|原不等式组)[：:]\s*', '', text.strip())
 
-    本函数只完成题干切分；答案对齐由 align_answers 在调用方后续处理
-    （本任务先返回 answer="" 的题列表，Task 3 在此函数内补答案对齐）。
+
+def split_page(text: str, md_path: Path) -> list[RawQuestion]:
+    """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。
 
     Args:
         text: 试卷 MD 全文（已 strip_chrome + normalize_fullwidth_parens）
@@ -114,24 +116,46 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
     questions: list[RawQuestion] = []
     current: RawQuestion | None = None
     current_group_id: str | None = None
-    in_answer_section = False  # 本任务不处理答案区，标志位先占位
+    in_answer_section = False
+    current_answer_lines: list[str] = []  # 当前累积的答案文本（多行）
+    current_answer_n: int | None = None  # 当前答案属于哪个题号
+
+    def _flush_answer():
+        """把累积的答案塞入对应题。"""
+        nonlocal current_answer_lines, current_answer_n
+        if current_answer_n is None or not current_answer_lines:
+            current_answer_lines = []
+            current_answer_n = None
+            return
+        answer_text = _strip_answer_prefix("\n".join(current_answer_lines))
+        for q in questions:
+            if q.group_order == current_answer_n:
+                if q.answer:
+                    q.answer += "\n" + answer_text  # 多段答案合并
+                else:
+                    q.answer = answer_text
+                break
+        current_answer_lines = []
+        current_answer_n = None
 
     for line in text.split('\n'):
         if not line.strip():
-            continue  # 空行跳过（不进 content，保持题干干净）
+            continue
 
         if is_date_trap(line):
             continue
 
         ok, gid = is_group_header(line)
         if ok:
-            if current is not None:
-                questions.append(current)
-                current = None
+            if in_answer_section:
+                _flush_answer()
+            else:
+                if current is not None:
+                    questions.append(current)
+                    current = None
             current_group_id = gid
             continue
 
-        # 本任务不处理答案区，但保留检测逻辑占位（Task 3 启用）
         if not in_answer_section and is_answer_keyword(line):
             if current is not None:
                 questions.append(current)
@@ -139,7 +163,37 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
             in_answer_section = True
             continue
 
+        # 主题号处理（含紧凑格式一行多题号）
+        inline_stems = split_inline_stems(line) if in_answer_section else []
         ok, n = is_main_stem(line)
+
+        if in_answer_section:
+            if inline_stems:
+                # 紧凑格式：一行多题号答案
+                _flush_answer()  # 先把上一段答案塞入
+                if len(inline_stems) == 1:
+                    current_answer_n = inline_stems[0][0]
+                    current_answer_lines = [inline_stems[0][1]]
+                else:
+                    # 多个题号一行：每个题号独立成段，立即 flush
+                    for stem_n, stem_text in inline_stems:
+                        current_answer_n = stem_n
+                        current_answer_lines = [stem_text]
+                        _flush_answer()
+                    current_answer_n = None
+            elif ok:
+                # 展开格式：行首单题号，开始新答案段
+                _flush_answer()
+                rest = _strip_main_stem_prefix(line)
+                current_answer_n = n
+                current_answer_lines = [rest] if rest else []
+            else:
+                # 答案段的续行（含小问号行 (1)(2)）
+                if current_answer_n is not None:
+                    current_answer_lines.append(line)
+            continue
+
+        # 题干区
         if ok:
             if current is not None:
                 questions.append(current)
@@ -155,11 +209,12 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
                 current.content += "\n" + line
             continue
 
-        # 其他行（含图片引用行、说明文字）
         if current is not None:
             current.content += "\n" + line
-        # current 为 None 时丢弃（说明文字、孤立行）
 
+    # 末尾 flush 残留答案 + 残留题
+    if in_answer_section:
+        _flush_answer()
     if current is not None:
         questions.append(current)
 

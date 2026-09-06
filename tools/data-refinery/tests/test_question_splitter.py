@@ -165,3 +165,90 @@ def test_strip_main_stem_prefix_without_space():
 
 def test_strip_main_stem_prefix_with_formula():
     assert _strip_main_stem_prefix(r"9. $\frac{1}{x-3}$") == r"$\frac{1}{x-3}$"
+
+
+def test_answer_alignment_compact_format():
+    """紧凑格式：选择题/填空题答案一行多题号。"""
+    text = (
+        "9. 若代数式 $\\frac{1}{x-3}$ 有意义, 则实数 $x$ 的取值范围是 ____.\n"
+        "10. 分解因式: $3ax^{2} - 6ax + 3a = $ ____.\n"
+        "参考答案\n"
+        "9. $x \\neq 3$ 10. $3a(x - 1)^2$"
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 2
+    assert result[0].answer == r"$x \neq 3$"
+    assert result[1].answer == r"$3a(x - 1)^2$"
+
+
+def test_answer_alignment_expanded_format():
+    """展开格式：解答题答案一题一段，含'解：'前缀，剥离前缀只留内容。"""
+    text = (
+        "17. 计算: $(\\frac{1}{3})^{-1} + 4\\sin 45^{\\circ} - \\sqrt{18} - (\\pi - 2026)^{0}$.\n"
+        "参考答案\n"
+        "17. 解: $3 + 4 \\times \\frac{\\sqrt{2}}{2} - 3\\sqrt{2} - 1 = 2$."
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1
+    assert result[0].answer == r"$3 + 4 \times \frac{\sqrt{2}}{2} - 3\sqrt{2} - 1 = 2$."
+    assert "解:" not in result[0].answer  # "解："前缀剥离
+
+
+def test_answer_alignment_multiline_answer():
+    """答案跨多行，按下一题号起点切，自然包含多行。"""
+    text = (
+        "18. 解不等式组: $\\left\\{ ... \\right.$\n"
+        "参考答案\n"
+        "18. 解: 原不等式组为 $\\left\\{ ... \\right.$\n"
+        "由不等式①得 $x > -3$\n"
+        "由不等式②得 $x \\leq 2$\n"
+        "所以原不等式组的解集为 $-3 < x \\leq 2$."
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1
+    assert "原不等式组为" in result[0].answer
+    assert "解集为" in result[0].answer
+
+
+def test_answer_alignment_sub_questions_merged():
+    """一题多小问的答案（20题 (1)(2)(3)）合并到该题 answer。"""
+    text = (
+        "20. 如图, 在 Rt△ABC 中...\n"
+        "(1) 求证: 四边形 AEBD 是平行四边形\n"
+        "(2) 若 BE=2, 求 AB 的长\n"
+        "参考答案\n"
+        "20. (1) 证明: ∵ AE⊥AC, ...\n"
+        "(2) 解: ∵ 在 Rt△ABC 中, ..."
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1
+    assert "证明: ∵ AE⊥AC" in result[0].answer
+    assert "解: ∵ 在 Rt△ABC" in result[0].answer
+
+
+def test_answer_alignment_missing_answer_stays_empty():
+    """答案区没出现的题，answer 留空。"""
+    text = (
+        "9. 第一题\n"
+        "10. 第二题\n"
+        "参考答案\n"
+        "9. 第一题答案"
+        # 10 题没给答案
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 2
+    assert result[0].answer == "第一题答案"
+    assert result[1].answer == ""
+
+
+def test_answer_keyword_only_section_header():
+    """'参考答案' 关键字行本身丢弃，不进任何题 content。"""
+    text = (
+        "9. 题干\n"
+        "参考答案\n"
+        "9. 答案"
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1
+    assert "参考答案" not in result[0].content
+    assert "参考答案" not in result[0].answer
