@@ -1,7 +1,11 @@
+from pathlib import Path
+
 from question_splitter import (
     is_date_trap, is_group_header, is_main_stem,
     is_sub_stem, is_answer_keyword, split_inline_stems,
 )
+from question_splitter import split_page, RawQuestion
+from question_splitter import _strip_main_stem_prefix
 
 
 def test_is_date_trap_matches_year_dot_month():
@@ -73,3 +77,91 @@ def test_split_inline_stems_one_line_multiple():
 
 def test_split_inline_stems_no_match():
     assert split_inline_stems("无题号的纯文字") == []
+
+
+def test_split_page_single_question():
+    text = "9. 若代数式 $\\frac{1}{x-3}$ 有意义, 则实数 $x$ 的取值范围是 ____."
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1
+    assert result[0].group_order == 9
+    assert result[0].content.startswith("若代数式")  # 主题号"9."剥离
+    assert "9." not in result[0].content[:5]
+
+
+def test_split_page_two_questions():
+    text = (
+        "9. 若代数式 $\\frac{1}{x-3}$ 有意义, 则实数 $x$ 的取值范围是 ____.\n"
+        "10. 分解因式: $3ax^{2} - 6ax + 3a = $ ____."
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 2
+    assert result[0].group_order == 9
+    assert result[1].group_order == 10
+    assert result[0].content.startswith("若代数式")
+    assert result[1].content.startswith("分解因式")
+
+
+def test_split_page_sub_questions_merged_into_parent():
+    """小问号 (1)(2) 合并到上一个主题号 content。"""
+    text = (
+        "16. 某商店共有 $a$ 种不同型号的口罩...\n"
+        "(1) 若 m=69, n=71，则 a 的值为 ____\n"
+        "(2) 若丙购买的口罩包含三种颜色, 则丙用于购买白色和蓝色的口罩最多一共花费 ____ 元."
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1  # 小问没切分，合并到第 16 题
+    assert result[0].group_order == 16
+    assert "(1) 若 m=69" in result[0].content
+    assert "(2) 若丙购买" in result[0].content
+
+
+def test_split_page_group_header_assigns_group_id():
+    """大题分组标题行关闭当前题，记 group_id，标题行丢弃。"""
+    text = (
+        "8. 最后一道选择题 ...\n"
+        "二、填空题（本题共 8 小题）\n"
+        "9. 若代数式 ... 有意义 ..."
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 2
+    assert result[0].group_order == 8
+    assert result[0].group_id is None  # 第一题前面没分组标题
+    assert result[1].group_order == 9
+    assert result[1].group_id == "二"  # 第二题归属"二"组
+    assert "填空题" not in result[0].content  # 标题行没混进第 8 题
+    assert "填空题" not in result[1].content  # 也没混进第 9 题
+
+
+def test_split_page_date_trap_filtered():
+    """日期行 2026.5 不当作题号。"""
+    text = (
+        "2026.5\n"
+        "9. 若代数式 ..."
+    )
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1
+    assert result[0].group_order == 9
+
+
+def test_split_page_empty_text():
+    assert split_page("", Path("test.md")) == []
+
+
+def test_split_page_preserves_image_refs():
+    """图片引用 ![](path) 原样保留在 content。"""
+    text = "3. 如图 ![图形](images/abc.jpg) 所示, 直线 $AB$ 与 $CD$ 相交于点 $O$."
+    result = split_page(text, Path("test.md"))
+    assert len(result) == 1
+    assert "![图形](images/abc.jpg)" in result[0].content
+
+
+def test_strip_main_stem_prefix_with_space():
+    assert _strip_main_stem_prefix("9. 若代数式") == "若代数式"
+
+
+def test_strip_main_stem_prefix_without_space():
+    assert _strip_main_stem_prefix("9.若代数式") == "若代数式"
+
+
+def test_strip_main_stem_prefix_with_formula():
+    assert _strip_main_stem_prefix(r"9. $\frac{1}{x-3}$") == r"$\frac{1}{x-3}$"
