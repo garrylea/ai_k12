@@ -126,5 +126,59 @@ class QuestionLabeler:
         labeled.suggested_new_kps = list(item.get("suggested_new_kps", []) or [])
 
     def confirm_new_kps(self, labeled: list) -> list:
-        """双模型确认新增 KP（Task 6 实现，本任务 stub 返回原样）。"""
+        """双模型确认新增 KP（AND 逻辑，无人审核）。
+
+        - 主模型已标 suggested_new_kps（label 阶段）
+        - 对每个建议新增的 KP，调 fallback_labeler 确认
+        - 两个模型都认为 is_new=true → 填入 _confirmed_new_kps
+        - 兜底模型找到已有匹配 → 用 matched_existing_code 替换，加入 knowledge_points
+        - 任一认为不新增 → 不新增
+
+        无 fallback_labeler 时跳过（_confirmed_new_kps 保持空）。
+        """
+        if not self._fallback:
+            return labeled
+
+        # 收集所有 suggested_new_kps（去重）
+        all_suggested: list[str] = []
+        for q in labeled:
+            all_suggested.extend(q.suggested_new_kps or [])
+        all_suggested = list(set(all_suggested))
+        if not all_suggested:
+            return labeled
+
+        # 对每个调 fallback 确认
+        confirm_results: dict[str, dict] = {}
+        for kp_name in all_suggested:
+            confirm_results[kp_name] = self._ask_fallback_is_new(kp_name)
+
+        # 回填到每题
+        for q in labeled:
+            for kp_name in (q.suggested_new_kps or []):
+                result = confirm_results.get(kp_name, {})
+                if result.get("is_new"):
+                    q._confirmed_new_kps.append({"name": kp_name, "code": None})
+                else:
+                    # 不新增：若 fallback 找到已有匹配，加入 knowledge_points
+                    matched = result.get("matched_existing_code")
+                    if matched and matched not in (q.knowledge_points or []):
+                        q.knowledge_points.append(matched)
+                    q._suggested_new_kps.append({"name": kp_name, "status": "rejected"})
         return labeled
+
+    def _ask_fallback_is_new(self, kp_name: str) -> dict:
+        """调 fallback 模型确认一个 KP 是否为新增。"""
+        prompt = (
+            f"判断以下知识点是否在已有列表中。知识点名称：{kp_name}\n"
+            f"已有知识点列表：\n{self._kps_text}\n\n"
+            f"输出 JSON：{{\"is_new\": bool, \"matched_existing_code\": \"M01xx\" 或 null}}"
+        )
+        try:
+            resp = self._fallback._llm.complete(self._prompt, prompt)
+            data = _parse_json_object(resp.content)
+            return {
+                "is_new": bool(data.get("is_new", False)),
+                "matched_existing_code": data.get("matched_existing_code"),
+            }
+        except Exception:
+            return {"is_new": False, "matched_existing_code": None}

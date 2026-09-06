@@ -96,3 +96,73 @@ def test_label_llm_failure_returns_empty_fields():
     labeled = labeler.label([q], batch_size=1)
     assert labeled[0].type == ""
     assert labeled[0].knowledge_points == []
+
+
+# === Task 6: 双模型确认新增 KP ===
+
+def _confirm_llm(is_new: bool, matched: str | None = None):
+    """mock fallback LLM：返回 is_new/matched_existing_code。"""
+    class FakeLLM:
+        def complete(self, system, user):
+            import json
+            return _fake_response(json.dumps({"is_new": is_new, "matched_existing_code": matched}))
+    return FakeLLM()
+
+
+def _make_labeler_with_fallback(main_llm, fallback_llm):
+    """构造主+兜底 labeler。"""
+    fallback = QuestionLabeler(
+        llm=fallback_llm,
+        prompt="{{question}}\n{{knowledge_points}}",
+        knowledge_points=KPS,
+    )
+    return QuestionLabeler(
+        llm=main_llm,
+        prompt="{{question}}\n{{knowledge_points}}",
+        knowledge_points=KPS,
+        fallback_labeler=fallback,
+    )
+
+
+def test_confirm_new_kps_both_agree_new():
+    """两个模型都认为是新增 → 填入 _confirmed_new_kps。"""
+    labeler = _make_labeler_with_fallback(_fake_llm_with_suggested_new_kp(), _confirm_llm(True))
+    q = RawQuestion(group_order=1, group_id=None, content="题")
+    labeled = labeler.label([q], batch_size=1)
+    assert labeled[0].suggested_new_kps == ["新知识点X"]
+    confirmed = labeler.confirm_new_kps(labeled)
+    assert len(confirmed[0]._confirmed_new_kps) == 1
+    assert confirmed[0]._confirmed_new_kps[0]["name"] == "新知识点X"
+
+
+def test_confirm_new_kps_fallback_says_not_new():
+    """兜底认为不新增 → _confirmed_new_kps 为空，matched 加入 knowledge_points。"""
+    labeler = _make_labeler_with_fallback(_fake_llm_with_suggested_new_kp(), _confirm_llm(False, "M0101"))
+    q = RawQuestion(group_order=1, group_id=None, content="题")
+    labeled = labeler.label([q], batch_size=1)
+    confirmed = labeler.confirm_new_kps(labeled)
+    assert confirmed[0]._confirmed_new_kps == []
+    assert "M0101" in confirmed[0].knowledge_points
+
+
+def test_confirm_new_kps_no_suggested():
+    """没有 suggested_new_kps → confirm 不做任何事。"""
+    labeler = _make_labeler_with_fallback(_fake_llm_single_question(), _confirm_llm(True))
+    q = RawQuestion(group_order=1, group_id=None, content="题")
+    labeled = labeler.label([q], batch_size=1)
+    assert labeled[0].suggested_new_kps == []
+    confirmed = labeler.confirm_new_kps(labeled)
+    assert confirmed[0]._confirmed_new_kps == []
+
+
+def test_confirm_new_kps_no_fallback_skipped():
+    """无 fallback_labeler → 跳过确认。"""
+    labeler = QuestionLabeler(
+        llm=_fake_llm_with_suggested_new_kp(),
+        prompt="{{question}}\n{{knowledge_points}}",
+        knowledge_points=KPS,
+    )
+    q = RawQuestion(group_order=1, group_id=None, content="题")
+    labeled = labeler.label([q], batch_size=1)
+    confirmed = labeler.confirm_new_kps(labeled)
+    assert confirmed[0]._confirmed_new_kps == []
