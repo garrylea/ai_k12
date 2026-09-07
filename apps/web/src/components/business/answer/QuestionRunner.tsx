@@ -19,9 +19,6 @@ import { clearDraft } from '../draft-store';
 import { ChoiceOptionList } from './ChoiceOptionList';
 import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion } from './types';
 
-/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用草稿白板 */
-const MATH_SUBJECT_ID = 1;
-
 const SPINNER_SVG = (
   <svg className="animate-spin text-[var(--brand-500)]" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
@@ -79,11 +76,12 @@ export interface QuestionRunnerProps {
   judgingSlot?: ReactNode;
   /** modal 外壳内追加浮层（DiscussDrawer 等 absolute 定位）；仅作答态渲染 */
   modalExtras?: ReactNode;
+  /** 当前题变化时回调（父层追踪当前题，供页面级草稿抽屉做 key 触发清空）；首次 mount 也触发 */
+  onQuestionChange?: (q: RunnerQuestion, idx: number) => void;
 }
 
 export function QuestionRunner({
   questions,
-  subjectId,
   draftKeyPrefix,
   variant,
   answerMode = 'auto',
@@ -102,6 +100,7 @@ export function QuestionRunner({
   questionMetaActions,
   judgingSlot,
   modalExtras,
+  onQuestionChange,
 }: QuestionRunnerProps) {
   const [idx, setIdx] = useState(startIndex ?? 0);
   const [answer, setAnswer] = useState('');
@@ -121,6 +120,14 @@ export function QuestionRunner({
 
   const total = questions.length;
   const q = questions[idx];
+
+  // 当前题变化通知父层（页面级草稿抽屉依赖它拿 key 触发清空）；父层应 useCallback 稳定引用避免重跑
+  const onQuestionChangeRef = useRef(onQuestionChange);
+  onQuestionChangeRef.current = onQuestionChange;
+  useLayoutEffect(() => {
+    if (q) onQuestionChangeRef.current?.(q, idx);
+  }, [idx, q]);
+
   const requestHint = enableHint ? onRequestHint : undefined;
 
   // 作答按 q.n 持久化（事件回调写入）—— 切题时按 q.n 回填，避免「回看上一题
@@ -336,7 +343,7 @@ export function QuestionRunner({
                 <PreviewDraftPanel
                   answer={answer}
                   questionId={`${draftKeyPrefix}-${q.n}`}
-                  enabled={subjectId === MATH_SUBJECT_ID}
+                  enabled={false}   // 草稿 tab 下线（2026-09-07），页面级草稿抽屉替代；恢复时改回 subjectId === MATH_SUBJECT_ID
                 />
               </div>
             </>
