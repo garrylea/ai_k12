@@ -125,15 +125,7 @@ def main(argv=None):
             return
         loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
         try:
-            result = loader.delete_questions_by_source(source, purge_paper_data=args.purge_paper_data)
-            if result["blocked"]:
-                print("[ERROR] 该卷题被业务表引用，先处理或用 --purge-paper-data：", flush=True)
-                for t, n in result["blocked"].items():
-                    print(f"  - {t}: {n} 行", flush=True)
-                return
-            if result["deleted"]:
-                print(f"[reload] 删除旧题 {result['deleted']} 道", flush=True)
-            # 重插（含 paper 归组）
+            # 先建/找 paper（拿 paper_id），再按 paper_id 删关联（覆盖新旧 source 格式）
             rel = match[0].relative_to(published_dir).as_posix()
             meta = parse_paper_meta(rel)
             paper_ctx = None
@@ -141,6 +133,20 @@ def main(argv=None):
                 source_key = rel[: -len(".jsonl")]
                 paper_id = loader.find_or_create_paper_from_meta(meta, source_key)
                 paper_ctx = (meta, paper_id)
+                # 按 paper_id 删 paper_questions 关联 + 孤立 questions
+                result = loader.delete_paper(paper_id, purge_paper_data=args.purge_paper_data)
+                if result["blocked"]:
+                    print("[WARN] 该卷题被业务表引用，保留旧题行，仅清 paper_questions 关联后重插：", flush=True)
+                    for t, n in result["blocked"].items():
+                        print(f"  - {t}: {n} 行（旧题保留）", flush=True)
+                    print("  如需删旧题行，加 --purge-paper-data（学生数据不可恢复）", flush=True)
+                if result["deleted_pq"] or result["deleted_questions"]:
+                    print(f"[reload] 删 paper_questions {result['deleted_pq']} 行 + "
+                          f"孤立题 {result['deleted_questions']} 道"
+                          f"（跨卷共享保留 {result['shared_preserved']}）", flush=True)
+            else:
+                print(f"[WARN] 无法解析试卷元数据，跳过删除直接重插", flush=True)
+            # 重插（含 paper 归组）
             n = loader.load_questions(qs, paper=paper_ctx)
             print(f"[ok] {source} 重载完成：入库 {n} 题"
                   + (f"（paper={paper_ctx[1]}）" if paper_ctx else ""), flush=True)

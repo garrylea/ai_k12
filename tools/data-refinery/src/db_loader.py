@@ -1201,3 +1201,82 @@ class DbLoader:
             "DELETE FROM questions WHERE source=%s", (source,))
         self._conn.commit()
         return out
+
+    def delete_paper(self, paper_id: int, purge_paper_data: bool = False) -> dict:
+        """删该试卷的关联（paper_questions）+ 孤立 questions，供重载。
+
+        比 delete_questions_by_source 更准：按 paper_id 删 paper_questions 关联
+        （覆盖新旧 source 格式——旧题 source 是试卷标题、新题 source 是文件名，
+        按 source 删会漏旧题导致 paper_questions 残留重复）。
+
+        跨卷共享题（仍被别的 paper 关联）保留 question 行，只删该 paper 关联。
+        blockers（answers/错题本/变式题/exam_answers RESTRICT）引用时需
+        purge_paper_data=True 显式清。
+        """
+        out: dict = {"paper_id": paper_id, "qids": [], "shared_preserved": 0,
+                     "deleted_pq": 0, "deleted_questions": 0, "blocked": {}, "purged": {}}
+        rows = self._query(
+            "SELECT question_id FROM paper_questions WHERE paper_id=%s", (paper_id,))
+        qids = [int(r[0]) for r in rows]
+        out["qids"] = qids
+        if not qids:
+            return out
+        ph = ",".join(["%s"] * len(qids))
+
+        # 跨卷共享：仍被别的 paper 关联的 question（保留行，只删该 paper 关联）
+        shared = set(int(r[0]) for r in self._query(
+            f"SELECT DISTINCT question_id FROM paper_questions "
+            f"WHERE question_id IN ({ph}) AND paper_id != %s",
+            (*qids, paper_id)))
+        to_delete = [q for q in qids if q not in shared]
+        out["shared_preserved"] = len(shared)
+
+        # blockers 预检
+        blocking: dict[str, int] = {}
+        error_book_ids: set[int] = set()
+        for t in self.QUESTIONS_BLOCKERS:
+            if not self._table_exists(t):
+                continue
+            n = int(self._query(
+                f"SELECT COUNT(*) FROM {t} WHERE question_id IN ({ph})", qids)[0][0])
+            if n > 0:
+                blocking[t] = n
+                if t in ("main_error_books", "aux_error_books"):
+                    error_book_ids.update(
+                        int(r[0]) for r in self._query(
+                            f"SELECT id FROM {t} WHERE question_id IN ({ph})", qids))
+        if blocking and not purge_paper_data:
+            # 仍清 paper_questions 关联（不碰业务数据），只是保留被引用的旧 question 行
+            out["deleted_pq"] = self._delete(
+                "DELETE FROM paper_questions WHERE paper_id=%s", (paper_id,))
+            self._conn.commit()
+            out["blocked"] = blocking
+            return out
+
+        # purge（显式 flag）
+        if blocking:
+            if error_book_ids and self._table_exists("error_redo_logs"):
+                eb_ph = ",".join(["%s"] * len(error_book_ids))
+                for ebt in ("main", "aux"):
+                    n = self._delete(
+                        f"DELETE FROM error_redo_logs WHERE error_book_type=%s "
+                        f"AND error_item_id IN ({eb_ph})",
+                        (ebt, *sorted(error_book_ids)))
+                    out["purged"]["error_redo_logs"] = (
+                        out["purged"].get("error_redo_logs", 0) + n)
+            for t in ("exam_answers", "answers", "variation_questions",
+                      "aux_error_books", "main_error_books"):
+                if t in blocking and self._table_exists(t):
+                    out["purged"][t] = self._delete(
+                        f"DELETE FROM {t} WHERE question_id IN ({ph})", qids)
+
+        # 删该 paper 关联（CASCADE 不会自动清 paper_questions，手动删）
+        out["deleted_pq"] = self._delete(
+            "DELETE FROM paper_questions WHERE paper_id=%s", (paper_id,))
+        # 删孤立 questions（跨卷共享的保留；CASCADE 清 QKP/question_hints）
+        if to_delete:
+            dph = ",".join(["%s"] * len(to_delete))
+            out["deleted_questions"] = self._delete(
+                f"DELETE FROM questions WHERE id IN ({dph})", to_delete)
+        self._conn.commit()
+        return out
