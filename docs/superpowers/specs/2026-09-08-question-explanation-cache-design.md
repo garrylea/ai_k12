@@ -17,10 +17,12 @@
 ## 2. 设计决策（用户已确认）
 
 1. **判题响应只判对错**：`JudgeOutput` 删除 `analysis` 字段；主观题判题 prompt 简化为只输出 `{isCorrect, errorType}`（省输出 token，长 analysis 是输出大头）。客观题判错的「正确答案：X」一并去掉——学生答错即时只看到错，正确答案与解法在解析里展开才有（贴合苏格拉底原则）。`errorType` 保留（判题 LLM 顺带产出，零成本，错题统计在用）。
-2. **判错后台异步生成解析**：判题响应立即返回，解析生成在后台异步进行（不阻塞判题、不阻塞学生答题）。**末题后批量拉取时后端等待 in-flight 生成完成**（总超时 60s 兜底，避免 HTTP 挂死）——学生一次看全所有解析，无刷新交互；超时仍未完成的极少数题显示「解析生成中」。
+2. **判错后台异步生成解析**：判题响应立即返回，解析生成在后台异步进行（不阻塞判题、不阻塞学生答题）。**末题后批量拉取时后端等待 in-flight 生成完成**（总超时 60s 兜底，避免 HTTP 挂死）——学生一次看全所有解析；超时仍未完成的极少数题进入刷新兜底（见决策 6）。
 3. **长答案直接当题解**：`answer` 长度 ≥100 字符（过程性题解，试卷参考答案常如此）时直接 `UPDATE questions.explanation = answer`，不调 LLM。
 4. **载体选方案 A**：判题核心内嵌轻量缓存服务（进程内队列），不建任务表、不加 Redis。
 5. **思考模式维持现状**：`KimiClient` 无条件下发 `enable_thinking: true`（`kimi-client.ts:25` 非流式 / `:94` 流式，Qwen/DeepSeek 共用）。判题 19s 实测可用，本设计不动它；若后续判题慢成为瓶颈，再单独立项做 per-scene thinking 开关（需验证 DeepSeek 是否支持关闭）。
+6. **刷新兜底（全部结果页）**：解析仍为 null 的题显示「正在生成中…」+「刷新」按钮；点击后同步等待（120s 倒计时，前端展示 mm:ss）——in-flight 就等在途生成，曾失败的重新触发生成。超时/失败显示「获取解析失败」，同时后端写管理员通知（admin_notifications 新表，复刻 parent_messages 模式）。
+7. **管理员通知只给管理员**：学生端无推送机制，失败提示仅结果页内联文案。人工补题解入口本次不做，记为后续待办（见 §10）。
 
 ## 3. 架构与数据流
 
@@ -49,6 +51,7 @@
 - 接口：
   - `ensureExplanation(q: QuestionRow): void`——同步返回，内部 fire-and-forget（判错分支调用）。
   - `waitForExplanations(ids: number[], timeoutMs = 60_000): Promise<Record<number, string | null>>`——批量端点调用：对每个 id，DB 已有 → 返回；in-flight → await 该生成 promise（整体受 timeoutMs 上界约束）；既无 DB 也无 in-flight（从未触发或曾失败）→ null。
+  - `waitExplanation(id: number, timeoutMs = 120_000): Promise<string | null>`——刷新端点调用：DB 已有 → 返回；in-flight → await；无 in-flight 且 DB 无（曾失败）→ **重新触发生成** + await（retry 语义，与批量等待的差异点）。
 - 队列：进程内，并发上限 2（常量），同题 in-flight 去重（Set，promise 复用——waitForExplanations 等的就是这些 promise）。
 - 失败处理：LLM 失败 / 超时 / 解析失败 → 记日志、出队、**不入库**——幂等（explanation 空才会再生成），下次判错自然重试。`updateExplanation` 落库失败同记日志。
 - 已知局限（记入文档）：进程内队列，服务重启丢在途任务（下次判错重试）；多实例部署会重复生成（当前单实例）。将来多实例升级为 DB 任务表 + worker 时，判题 / 生成 / prompt 层不用动，只换触发载体。
@@ -93,37 +96,72 @@
 
 行为：对每个 id 调 `ExplanationCacheService.waitForExplanations`——已有直返，in-flight 的等待生成完成（总超时 60s 兜底，超时该题返回 null），前端一次拿全，无刷新交互。
 
+**新增单题刷新等待端点**：`GET /api/training/questions/:questionId/explanation-wait` → `{ explanation: string | null }`。固定 120s 等待上限（与 retry.yaml explanation 单次生成超时对齐）。逻辑（复用 `ExplanationCacheService`）：
+
+- DB 已有 → 直返
+- in-flight → await 该生成 promise（至多 120s）
+- 无 DB 也无 in-flight（曾失败出队）→ **重新触发生成** + await（至多 120s）
+- 超时/失败 → 返回 null，**同时写一条 admin_notifications**（见 5.4；同题存在未读失败通知则不重复插入，防刷屏）
+
+前端配合：刷新按钮点击 → 调本端点 → 页面展示 120s 倒计时（mm:ss），请求返回即停；返回解析则渲染，null 则显示「获取解析失败」。
+
 ### 5.2 前端变更
 
 - `JudgeResult` / `RunnerJudgeOutcome` / `PracticeResult` / `RunnerAnswerRecord` 等类型删 `analysis`（apps/web `services/api.ts`、`components/business/answer/types.ts`）。
-- **前端结果页编排**（专项 / 错题重做，AnswerResultList）：末题提交 → `Promise.allSettled` 等所有在途判题完成（QuestionRunner 现有行为）→ 父层收集全部错题（`isCorrect=false` 且非 failed）的 questionId → 一次性调 5.1 批量端点（后端等待 in-flight 生成）→ 拿全后渲染结果页：每题对错 + 错题解析。超时兜底返回 null 的题显示「解析生成中」；无 questionId 的孤儿题显示「暂无解析，试试让 AI 讲一讲」。不做手动刷新、不做自动轮询。
-- **考试结果页**（ExamResultPage）：解析展示改为 `explanation ?? analysis`（DB 题解优先，存量考试的历史 analysis 兜底）。考试判题发生在每题提交时（同步），解析在判错时即触发生成，交卷 → finalize 补判 → 进结果页时多数已就绪；mount 时对「错题且 explanation/analysis 皆空」的题调 5.1 批量端点等待 in-flight 补齐（`getExamResults` 契约不动，等待在前端编排）。
+- **前端结果页编排**（专项 / 错题重做，AnswerResultList）：末题提交 → `Promise.allSettled` 等所有在途判题完成（QuestionRunner 现有行为）→ 父层收集全部错题（`isCorrect=false` 且非 failed）的 questionId → 一次性调 5.1 批量端点（后端等待 in-flight 生成，60s）→ 拿全后渲染结果页：每题对错 + 错题解析。超时兜底返回 null 的题显示「正在生成中…」+ **「刷新」按钮**（点击走 5.1 单题 explanation-wait 端点，120s 倒计时，见 §2.6）；无 questionId 的孤儿题显示「暂无解析，试试让 AI 讲一讲」。不做自动轮询。
+- **考试结果页**（ExamResultPage）：解析展示改为 `explanation ?? analysis`（DB 题解优先，存量考试的历史 analysis 兜底）。考试判题发生在每题提交时（同步），解析在判错时即触发生成，交卷 → finalize 补判 → 进结果页时多数已就绪；mount 时对「错题且 explanation/analysis 皆空」的题调 5.1 批量端点等待 in-flight 补齐（`getExamResults` 契约不动，等待在前端编排）。仍为 null 的题同样给「正在生成中… + 刷新」（120s 倒计时）兜底。
 - 错题巩固（CleanupPhase）走 AnswerResultList，同上述编排逻辑。
+
+### 5.3 刷新兜底交互（全部结果页统一）
+
+- 解析为 null 的错题：「正在生成中…」+「刷新」按钮。
+- 点击刷新 → 调 `GET /api/training/questions/:questionId/explanation-wait`（120s 上限）→ 页面显示倒计时（mm:ss），请求返回即停。
+- 返回解析 → 渲染题解；null → 显示「获取解析失败」（后端此刻已写管理员通知）。
+- 不做自动轮询；刷新期间可再次点击取消重入（防重复请求，前端 disabled）。
+
+### 5.4 管理员通知（新）
+
+复刻 `parent_messages` + `AdminMessagesService` 的模式（方向相反：系统 → 管理员）：
+
+- **表 `admin_notifications`**（schema.sql 新增，照抄 parent_messages 列族）：`id, type VARCHAR(20)（'explanation_failed'）, question_id BIGINT NULL, title VARCHAR(100), content TEXT, is_read TINYINT(1), read_at DATETIME(3), created_at DATETIME(3)`，KEY `(question_id, is_read)`。
+- **写入方**：`explanation-wait` 端点超时/失败时插入（同题存在未读 `explanation_failed` 通知则跳过，防刷屏）。content 含题目 id 与失败原因摘要。
+- **Admin API**（admin 模块）：`GET /admin/notifications`（列表）、`GET /admin/notifications/unread-count`、`POST /admin/notifications/:id/read`——复刻 `AdminMessagesService` 的 listForAdmin/markRead 形态。
+- **Admin 前端**：Admin Dashboard 增加通知区（未读数徽标 + 列表 + 标记已读），照 AdminMessagesPage 的模式。
+- 学生端无推送；失败对学生只是结果页内联文案。
 
 ## 6. 错误处理汇总
 
 | 场景 | 行为 |
 |---|---|
 | LLM 生成失败 / 超时 / 解析失败 | 记日志、出队、不入库；下次判错重试 |
-| `waitForExplanations` 总超时（60s） | 该题返回 null，前端显示「解析生成中」 |
+| `waitForExplanations` 总超时（60s） | 该题返回 null，前端显示「正在生成中…」+ 刷新按钮 |
+| 刷新 `explanation-wait` 超时/失败（120s） | 返回 null，前端显示「获取解析失败」；写 admin_notifications（同题未读失败通知去重） |
 | `updateExplanation` 落库失败 | 记日志，不影响任何响应 |
 | 判题本身失败（503） | 现有行为不变（前端记 failed，不进错题收集） |
 | 长答案直写 | 纯 DB UPDATE，不可失败（按 MySQL 异常兜底记日志） |
+| 通知写入失败（admin_notifications 落库异常） | 记日志，不影响 explanation-wait 响应 |
 
 ## 7. 测试
 
-- vitest（apps/server）：ExplanationCacheService 单测（mock `ExplanationCapability` + `QuestionsRepository`）——已有解析跳过 / 长答案直写 / 短答案生成入库 / 失败不入库 / 同题并发去重 / `waitForExplanations` 等待 in-flight 与总超时返回 null。
+- vitest（apps/server）：ExplanationCacheService 单测（mock `ExplanationCapability` + `QuestionsRepository`）——已有解析跳过 / 长答案直写 / 短答案生成入库 / 失败不入库 / 同题并发去重 / `waitForExplanations` 等待 in-flight 与总超时返回 null / `waitExplanation` 失败重触发。
+- admin_notifications 写入与查询单测（同题未读去重）。
 - judge-core 现有测试更新：判错触发 ensureExplanation（mock 断言）；判题响应无 analysis；judgment prompt 只判对错。
 - apps/web 无测试框架，按 CLAUDE.md 手动验证 + `npm run lint`。
 
 ## 8. 文档同步
 
-- `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml`（互为对照，两份同步）：`/training/judge`、`/practice/judge`、exam answers 响应去 analysis；新增 explanations 批量端点。
+- `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml`（互为对照，两份同步）：`/training/judge`、`/practice/judge`、exam answers 响应去 analysis；新增 explanations 批量端点、explanation-wait 端点、admin/notifications 三端点。
 - `docs/ai-core-changelog.md` 记录本次变更（含已知局限）。
 
 ## 9. 明确不做（YAGNI）
 
-- 不做自动轮询「解析生成中」状态。
+- 不做自动轮询「解析生成中」状态（刷新兜底已是显式用户动作）。
 - 不做 per-scene thinking 开关（判题思考现状维持，见 §2.5）。
 - 不建任务表 / 不引 Redis / 不做多实例协调。
 - 不回填历史错题的解析（只在今后判错时按需生成）。
+- 不做学生端推送通知（失败仅结果页内联文案）。
+
+## 10. 后续待办（本次不做，写进实现计划备注）
+
+- **管理员人工补题解入口**：admin 通知列表点开 → 编辑模态框人工填写题解 → `POST /admin/questions/:id/explanation` 入库 `questions.explanation`。管理员拿到通知后当前需自行用数据库工具处理。
+- 人工处理后可考虑在通知上标记「已处理」（关联已补题解状态）。
