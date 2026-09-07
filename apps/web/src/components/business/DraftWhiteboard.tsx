@@ -1,28 +1,42 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import getStroke from 'perfect-freehand';
 import { useThemeStore } from '@/store/themeStore';
 import { getDraft, setDraft, clearDraft, type Stroke } from './draft-store';
 
 type Tool = 'pen' | 'eraser';
 
+/** 笔迹线宽（CSS px）：恒定线宽细线（钢笔感），无 thinning 粗细起伏 */
+const INK_WIDTH = 2;
+
 /**
- * perfect-freehand 轮廓 -> canvas 填充路径。
- * 2026-09-07 笔迹观感调优：size 减半（细）、thinning 降低（粗细更均匀）、
- * smoothing/streamline 调高（曲线与轨迹更平滑、去抖动）。stroke.size 存的是基础半径，
- * 实际线宽 ≈ size×2（即 PEN_BASE_SIZE×2）。
+ * 单条笔画平滑渲染（取代 perfect-freehand 填充轮廓画法）：
+ * - 统一细线宽 + 圆头圆角（lineCap/lineJoin round），细且均匀；
+ * - 用「顶点为控制点、相邻顶点中点为起止」的二次贝塞尔段串成连续曲线（C1 连续），
+ *   曲线天然穿过相邻点中点 = 渲染期低通（抑制手抖高频抖动）；
+ * - 输入侧不做 EWMA 前向平滑（之前 streamline 让笔尖滞后），最新采样点直接落笔 →
+ *   渲染零跟手延迟。stroke.size 即 INK_WIDTH（也作橡皮命中阈值基数）。
  */
 function strokePath(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
-  const outline = getStroke(stroke.points, {
-    size: stroke.size * 2,
-    thinning: 0.25,
-    smoothing: 0.7,
-    streamline: 0.7,
-  });
-  if (outline.length === 0) return;
+  const pts = stroke.points;
+  if (pts.length === 0) return;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = stroke.size;
+  if (pts.length === 1) {
+    // 单点（点一下）：画实心圆点
+    ctx.beginPath();
+    ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
   ctx.beginPath();
-  outline.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i].x + pts[i + 1].x) / 2;
+    const my = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+  }
+  ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+  ctx.stroke();
 }
 
 /** 点到线段距离平方（避免开方） */
@@ -53,8 +67,6 @@ function hitStroke(stroke: Stroke, x: number, y: number): boolean {
   return false;
 }
 
-/** 笔宽基数（CSS px，半径语义）：stroke.size×2 = 实际线宽。原 3 → 1.5（6px→3px 细一倍） */
-const PEN_BASE_SIZE = 1.5;
 /** scroll-y 模式画板高 = 容器可视高 × 该系数（纵向滚动条由此产生） */
 const SCROLL_Y_FACTOR = 1.6;
 
@@ -106,7 +118,9 @@ export function DraftWhiteboard({
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = (getComputedStyle(canvas).getPropertyValue('--text-primary') || '#333').trim();
+    const ink = (getComputedStyle(canvas).getPropertyValue('--text-primary') || '#333').trim();
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
     for (const s of strokesRef.current) strokePath(ctx, s);
   }, []);
 
@@ -203,7 +217,8 @@ export function DraftWhiteboard({
       return;
     }
     drawingRef.current = true;
-    strokesRef.current.push({ points: [p], size: PEN_BASE_SIZE });
+    strokesRef.current.push({ points: [p], size: INK_WIDTH });
+    redraw(); // 落笔即渲染：单点（点按）立即成点、连续笔画无"起笔延迟"
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
