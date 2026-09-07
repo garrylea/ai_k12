@@ -1137,3 +1137,67 @@ class DbLoader:
                 "UPDATE exam_papers SET question_count=%s WHERE id=%s", (linked, paper[1]))
         self._conn.commit()
         return count
+
+    def delete_questions_by_source(self, source: str, purge_paper_data: bool = False) -> dict:
+        """删除某 source（试卷文件名去扩展名）的题，供该卷幂等重载。
+
+        - question_knowledge_points / paper_questions / question_hints 对 questions
+          ON DELETE CASCADE，删题自动连带清。
+        - blockers（answers/aux_error_books/main_error_books/variation_questions/
+          exam_answers）对 questions ON DELETE RESTRICT——引用该卷题时：
+            purge_paper_data=True → 显式删这些业务记录后继续（学生数据不可恢复）
+            否则 → 返回 {"blocked": {...}}，不删除任何东西。
+
+        Returns:
+            {"question_ids": [...], "blocked": {...}, "purged": {...}, "deleted": n}
+        """
+        rows = self._query("SELECT id FROM questions WHERE source=%s", (source,))
+        qids = [int(r[0]) for r in rows]
+        out: dict = {"question_ids": qids, "blocked": {}, "purged": {}, "deleted": 0}
+        if not qids:
+            return out
+
+        ph = ",".join(["%s"] * len(qids))
+        inq = f"question_id IN ({ph})"
+
+        # 1. 预检 blockers（该卷题被业务表引用？）
+        blocking: dict[str, int] = {}
+        error_book_ids: set[int] = set()
+        for t in self.QUESTIONS_BLOCKERS:
+            if not self._table_exists(t):
+                continue
+            n = int(self._query(f"SELECT COUNT(*) FROM {t} WHERE {inq}", qids)[0][0])
+            if n > 0:
+                blocking[t] = n
+                if t in ("main_error_books", "aux_error_books"):
+                    eb_rows = self._query(f"SELECT id FROM {t} WHERE {inq}", qids)
+                    error_book_ids.update(int(r[0]) for r in eb_rows)
+        if blocking and not purge_paper_data:
+            out["blocked"] = blocking
+            return out
+
+        # 2. purge（显式 flag 时）：先子表后父表
+        if blocking:
+            # error_redo_logs 多态挂错题本（error_item_id=错题本行 id），先清避免孤儿
+            if error_book_ids and self._table_exists("error_redo_logs"):
+                eb_ph = ",".join(["%s"] * len(error_book_ids))
+                for ebt in ("main", "aux"):
+                    n = self._delete(
+                        f"DELETE FROM error_redo_logs WHERE error_book_type=%s "
+                        f"AND error_item_id IN ({eb_ph})",
+                        (ebt, *sorted(error_book_ids)),
+                    )
+                    out["purged"]["error_redo_logs"] = (
+                        out["purged"].get("error_redo_logs", 0) + n)
+            # exam_answers 先于 answers（若两者都引用）；其余按表删引用行
+            for t in ("exam_answers", "answers", "variation_questions",
+                      "aux_error_books", "main_error_books"):
+                if t in blocking and self._table_exists(t):
+                    out["purged"][t] = self._delete(
+                        f"DELETE FROM {t} WHERE {inq}", qids)
+
+        # 3. 删除该卷题（CASCADE 清 QKP/paper_questions/question_hints）
+        out["deleted"] = self._delete(
+            "DELETE FROM questions WHERE source=%s", (source,))
+        self._conn.commit()
+        return out

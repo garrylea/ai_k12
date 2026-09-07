@@ -29,6 +29,11 @@ def parse_args(argv=None):
                         help="full-reload 前清空引用 cards/questions 的业务数据"
                              "（answers/错题本/变式题/作业提交/progress，不可恢复）；"
                              "默认遇业务数据报错退出，防止误删学生数据")
+    parser.add_argument("--reload-source", help="只重载指定 source 的试卷题（文件名去扩展名）："
+                        "删该卷旧题（含 paper_questions/QKP 关联）后从 published 重插")
+    parser.add_argument("--purge-paper-data", action="store_true",
+                        help="配合 --reload-source：该卷题被 answers/错题本/变式题等业务表引用时，"
+                             "显式删这些业务记录后重载（学生数据不可恢复）")
     parser.add_argument("--dry-run", action="store_true", help="只打印，不入库")
     return parser.parse_args(argv)
 
@@ -100,6 +105,45 @@ def main(argv=None):
                 total_ls += result["lessons"]
                 print(f"[ok] {p}: {result['chapters']} chapters, {result['lessons']} lessons", flush=True)
             print(f"TOC loaded: {total_ch} chapters, {total_ls} lessons", flush=True)
+        finally:
+            loader.close()
+        return
+
+    # === Reload-source mode: 只重载某张试卷的题 ===
+    if args.reload_source:
+        cfg = RefineryConfig.from_env()
+        published_dir = Path(args.input_dir) if args.input_dir else cfg.output_dir / "published"
+        source = args.reload_source
+        # 从 published 找该 source 的 jsonl（stem = source）
+        match = [p for p in sorted(published_dir.rglob("*.jsonl")) if p.stem == source]
+        if not match:
+            print(f"[ERROR] published 下找不到 source='{source}' 的 jsonl（文件名去扩展名）", flush=True)
+            return
+        qs = [json.loads(l) for l in match[0].read_text(encoding="utf-8").splitlines() if l.strip()]
+        print(f"[reload] {match[0].relative_to(published_dir)}: {len(qs)} 题", flush=True)
+        if args.dry_run:
+            return
+        loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)
+        try:
+            result = loader.delete_questions_by_source(source, purge_paper_data=args.purge_paper_data)
+            if result["blocked"]:
+                print("[ERROR] 该卷题被业务表引用，先处理或用 --purge-paper-data：", flush=True)
+                for t, n in result["blocked"].items():
+                    print(f"  - {t}: {n} 行", flush=True)
+                return
+            if result["deleted"]:
+                print(f"[reload] 删除旧题 {result['deleted']} 道", flush=True)
+            # 重插（含 paper 归组）
+            rel = match[0].relative_to(published_dir).as_posix()
+            meta = parse_paper_meta(rel)
+            paper_ctx = None
+            if meta is not None and meta.file_type == "试卷":
+                source_key = rel[: -len(".jsonl")]
+                paper_id = loader.find_or_create_paper_from_meta(meta, source_key)
+                paper_ctx = (meta, paper_id)
+            n = loader.load_questions(qs, paper=paper_ctx)
+            print(f"[ok] {source} 重载完成：入库 {n} 题"
+                  + (f"（paper={paper_ctx[1]}）" if paper_ctx else ""), flush=True)
         finally:
             loader.close()
         return
