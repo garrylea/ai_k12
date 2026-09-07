@@ -30,7 +30,7 @@ tags:
   - name: Files
     description: 文件上传
   - name: ErrorBook
-    description: 双错题本
+    description: 主线错题本（全系统唯一）
   - name: Conversations
     description: 对话管理
   - name: Rewards

@@ -1095,7 +1095,7 @@ class FallbackHandler {
 | 触发入口 | 教材卡片页"讨论"按钮 | 探索首页 / 知识点选择 / 拍照上传 |
 | 知识范围 | **严格限定**当前卡片内容 | **不受限**，可跨知识点 |
 | 卡片原文 | **必传**（`cardId`） | 可选 |
-| 是否生成错题 | **否**（讨论不计错题） | **是**（做题场景的错题写入 `aux_error_books`） |
+| 是否生成错题 | **否**（讨论不计错题） | **是**（题目自动入主线错题本，source=auxiliary 不参与门禁，PRD §7.4） |
 | 上下文长度 | 较短（单卡片知识点集中） | 较长（可能跨多个知识点） |
 | Prompt 模板 | `tutoring/{subject}/mainline.md` | `tutoring/{subject}/auxiliary.md` |
 

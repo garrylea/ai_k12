@@ -165,3 +165,5 @@
 
 - **管理员人工补题解入口**：admin 通知列表点开 → 编辑模态框人工填写题解 → `POST /admin/questions/:id/explanation` 入库 `questions.explanation`。管理员拿到通知后当前需自行用数据库工具处理。
 - 人工处理后可考虑在通知上标记「已处理」（关联已补题解状态）。
+- **门禁语义实现跟进（独立于本设计）**：PRD §7.4 已修订为「课堂练习 + 训练轨（targeted/error_practice/exam）来源参与清零门禁」，当前实现 `getUnclearedErrorDetails` 只统计 `source='practice'`（`main-error-books.repo.ts:193`）——需扩门禁查询的 source 集合，属独立变更，随 PRD 修订记录在案。
+- **辅线答疑错题入主线错题本**：PRD §7.4 修订后辅线答疑题目应入 `main_error_books`（source='auxiliary'，不计数），当前 `ai.service.ts ingestStructuredQuestion` 只入 questions 表——属辅线答疑功能补全，独立实施。

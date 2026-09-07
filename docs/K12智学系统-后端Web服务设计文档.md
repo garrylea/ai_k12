@@ -89,7 +89,7 @@ apps/server/src/
 │   ├── progress/                    # 学习进度 + 星图聚合
 │   ├── ai/                          # AI 能力封装（待建）
 │   ├── assessment/                  # 测评考试（待建）
-│   ├── error-book/                  # 双错题本（待建）
+│   ├── error-book/                  # 主线错题本（全系统唯一，待建）
 │   ├── conversations/               # 对话管理（待建）
 │   ├── knowledge-graph/             # 知识点图谱（待建）
 │   ├── rewards/                     # 奖励（待建）

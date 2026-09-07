@@ -116,7 +116,7 @@
 | AI | `/api/ai` | 苏格拉底辅导、判题、组卷、解析、变式、报告 | AI-Agent 中枢 |
 | Refinery | `/api/refinery` | 图片/PDF 题目识别与提取 | Data Refinery |
 | Files | `/api/files` | 文件上传、签名 URL | 基础设施 |
-| ErrorBook | `/api/error-book` | 双错题本、重做、清零、薄弱点统计 | ErrorBook Service |
+| ErrorBook | `/api/error-book` | 主线错题本（全系统唯一，PRD §7.4）、重做、清零、薄弱点统计 | ErrorBook Service |
 | Conversations | `/api/conversations` | 会话创建、消息读写、上下文加载 | ConversationService |
 | Rewards | `/api/rewards` | 奖励发放、领取、兑现记录 | Reward Service |
 | Parent | `/api/parent` | 报告、对话回放、目标、管控、预警 | ParentAdmin Service |
@@ -251,14 +251,12 @@
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
 | GET | `/api/error-book/students/{studentId}/main` | 主线错题本列表（默认当前学科，可传 `?subject=` 筛选） | MVP |
-| GET | `/api/error-book/students/{studentId}/aux` | 辅线错题本列表（默认当前学科，可传 `?subject=` 筛选） | MVP |
 | GET | `/api/error-book/items/{errorItemId}` | 错题详情 | MVP |
 | POST | `/api/error-book/items/{errorItemId}/redo` | 提交错题重做答案 | MVP |
 | POST | `/api/error-book/items/{errorItemId}/clear` | 标记错题已清零 | MVP |
 | GET | `/api/error-book/items/{errorItemId}/explanation` | 获取 AI 解析 | MVP |
 | GET | `/api/error-book/items/{errorItemId}/variations` | 获取变式题列表 | MVP |
 | POST | `/api/error-book/items/{errorItemId}/variations/{variationId}/submit` | 提交变式题答案 | MVP |
-| POST | `/api/error-book/aux` | 创建辅线错题（拍照/输入确认后录入） | MVP |
 | GET | `/api/error-book/students/{studentId}/stats` | 错题统计与薄弱点（默认当前学科，可传 `?subject=` 筛选） | MVP |
 | GET | `/api/error-book/students/{studentId}/clear-status` | 当前待清零状态（默认当前学科，可传 `?subject=` 筛选；用于解锁判断） | MVP |
 
@@ -561,7 +559,7 @@ GET /api/assessment/submissions/{sid}/results
   │  ▼
   │  AI-Agent 中枢拆解知识点 + 讲解
   │  ▼
-  │  学生确认/编辑后 → POST /api/error-book/aux（写入辅线错题本）
+  │  学生确认/编辑后 → 写入主线错题本（source=auxiliary，不参与清零门禁，PRD §7.4）
   │  ▼
   │  可继续进入 P3.4 辅线对话或 P4.2 错题重做
   │
@@ -571,7 +569,7 @@ GET /api/assessment/submissions/{sid}/results
       ▼
       选择知识点 → P3.4 辅线对话
 
-若辅线做题做错 → POST /api/error-book/aux（不影响主线）
+若辅线做题做错 → 写入主线错题本（source 不参与门禁计数，不影响主线）
 ```
 
 ### 6.2.1 PDF 上传→提取→SSE 通知时序
@@ -1202,11 +1200,11 @@ ConversationsService.create（scene=aux_training + questionId）
 | P2.7 期中期末 | `/student/exam` | 同单元检测，scope 不同 |
 | P2.8 成绩报告 | `/student/scores` | `GET /api/assessment/submissions/{id}/results`, `GET /api/knowledge-graph/.../weak-points` |
 | P2.9 闯关奖励 | `/student/reward-unlock` | `GET /api/rewards/.../available`, `POST /api/rewards/.../claim/{id}` |
-| P3.1 辅线首页 | `/student/auxiliary` | `GET /api/conversations?track=aux`, `GET /api/error-book/.../aux` |
+| P3.1 辅线首页 | `/student/auxiliary` | `GET /api/conversations?track=aux` |
 | P3.2 知识点选择 | `/student/auxiliary/selector` | `GET /api/content/knowledge-points` |
 | P3.3 拍照/输入答疑 | `/student/auxiliary/ask` | `POST /api/files/upload`, `POST /api/refinery/extract` |
 | P3.4 辅线对话 | `/student/auxiliary/chat` | `POST /api/ai/tutor` (mode=auxiliary), WS `/ws/ai/{id}` |
-| P4.1 双错题本 | `/student/error-book` | `GET /api/error-book/.../main`, `GET /api/error-book/.../aux` |
+| P4.1 错题本 | `/student/error-book` | `GET /api/error-book/.../main` |
 | P4.2 错题重做 | `/student/error-book/redo` | `POST /api/error-book/items/{id}/redo` |
 | P4.3 解析与变式 | `/student/error-book/variant` | `GET /api/error-book/items/{id}/variations`, `POST .../variations/{vid}/submit` |
 | P5.1 个人中心 | `/student/profile` | `GET /api/users/students/{id}`, `GET /api/progress/.../overview` |
@@ -1236,7 +1234,7 @@ ConversationsService.create（scene=aux_training + questionId）
 - 内容查询：学科、版本、单元、课、卡片、知识点
 - 主线学习：星图导航、卡片浏览、AI 讨论（限定范围）、课后作业、单元检测
 - AI 辅导：苏格拉底式辅导、提示、讲解、主观题按步骤给分、兜底机制、温和阻断
-- 双错题本：自动录入、重做、清零、级别提升
+- 错题本（主线错题本，全系统唯一）：自动录入、重做、清零、级别提升
 - 家长端：仪表盘、报告、错题查看、对话回放、目标、管控、预警、奖励管理
 - 文件上传与实时识别（拍照解题）
 - AI 额度查询与预警

@@ -19,7 +19,7 @@
 // 已是合法节点不会被 raw 重解析，但若反过来 katex 渲染出的 HTML 会被 raw 当
 // 文本再解析一次，破坏 KaTeX 输出）。
 import { useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, SVGProps } from 'react';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -114,14 +114,25 @@ export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgPr
 }
 
 /**
- * 默认 components：img + 表格带 border（题面/题块/解析里 HTML 表格与 GFM 表格
+ * 默认 components：img + svg + 表格带 border（题面/题块/解析里 HTML 表格与 GFM 表格
  * 都画出表格线，clear 可读）。其余元素用 react-markdown 默认。多数调用方够用；
  * 聊天气泡（DiscussChat/AdminChat/AuxChatPanel）有自己的 components 自定义
  * table 样式，不用这套默认。border 用 var(--bg-subtle) 适配三套主题
  * （student-day/night/parent 都定义了 --bg-subtle）。
+ *
+ * svg 自定义：题面里常见的内联 `<svg viewBox="...">...</svg>` 标签文本经
+ * rehype-raw 解析为真实元素后，按 max-h-[60vh] / max-w-full 等比例缩放渲染
+ * （几何插图等矢量内容需完整尺寸，原默认 inline 渲染会偏小）。其余子元素
+ * （path/circle/rect/g 等）透传 react-markdown 默认渲染。
  */
 export const markdownComponents = {
   img: MarkdownImg,
+  svg: ({ node, className: cls, ...rest }: { node?: unknown } & SVGProps<SVGSVGElement>) => (
+    <svg
+      {...rest}
+      className={['block mx-auto my-2 max-h-[60vh] max-w-full h-auto w-auto', cls].filter(Boolean).join(' ')}
+    />
+  ),
   table: ({ children }: { children?: ReactNode }) => (
     <div className="my-2 overflow-x-auto">
       <table className="border-collapse w-full text-sm">{children}</table>
