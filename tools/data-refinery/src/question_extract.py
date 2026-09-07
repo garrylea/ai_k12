@@ -89,10 +89,31 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
     out_file = extracted_dir / rel_file.with_suffix(".jsonl")
     out_file.parent.mkdir(parents=True, exist_ok=True)
     source_name = source.md_path.stem  # 文件名去扩展名
+    issues_log: list[dict] = []  # 完整性缺陷日志（原始+修复后+issues），供人工复核
     with out_file.open("w", encoding="utf-8") as f:
         for q in labeled:
-            # Python 确定性拆选项：content 保留所有题干配图，options 切 (A)-(D)
-            stem, opts = split_options(q.content)
+            if q.is_complete:
+                # 正常路径：Python 确定性拆选项，content 保留所有题干配图
+                stem, opts = split_options(q.content)
+                item_content, item_options = stem, opts
+                item_material_text = None
+                item_answer = q.answer
+            else:
+                # 兜底路径：LLM 修复原题（regenerated），用修复后内容入库
+                regen = q.regenerated or {}
+                item_content = regen.get("content", q.content)
+                item_options = regen.get("options")
+                item_material_text = regen.get("material_text")
+                item_answer = regen.get("answer", q.answer) or q.answer
+                # 记日志：原始 content + 修复后 + issues，供人工复核
+                issues_log.append({
+                    "group_order": q.group_order,
+                    "issues": q.completeness_issues,
+                    "original_content": q.content,
+                    "regenerated": regen,
+                })
+                print(f"[WARN] 题{q.group_order} 完整性缺陷: {q.completeness_issues}"
+                      f" → 用 LLM 修复后内容入库（见 labeling_issues.jsonl）", flush=True)
             item = {
                 "subject_id": subject_code,
                 "group_id": q.group_id,
@@ -100,11 +121,11 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 "type": q.type,
                 "difficulty": q.difficulty,
                 "full_score": q.score,
-                "content": stem,                  # 纯题干（含所有题干图，不丢）
-                "options": opts,                  # 选择题 list[{label,text}] 或 None
-                "answer": q.answer,
+                "content": item_content,
+                "options": item_options,
+                "answer": item_answer,
                 "explanation": q.explanation,
-                "material_text": None,            # 数学不抽取（道法/物理后续 LLM 拆）
+                "material_text": item_material_text,
                 "grade_band": grade_band,
                 "source": source_name,
                 "source_year": source_year,
@@ -113,6 +134,15 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 "_suggested_new_kps": q._suggested_new_kps,
             }
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    # 写完整性缺陷日志（供人工复核）
+    if issues_log:
+        log_path = extracted_dir.parent / "labeling_issues.jsonl"
+        with log_path.open("a", encoding="utf-8") as lf:
+            for rec in issues_log:
+                rec["source"] = source_name
+                lf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        print(f"[issues] {len(issues_log)} 题有完整性缺陷，已用 LLM 修复后内容入库，"
+              f"原始+修复后见 {log_path}", flush=True)
     return out_file
 
 

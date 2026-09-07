@@ -11,30 +11,32 @@ from dataclasses import dataclass
 
 @dataclass
 class LabeledQuestion:
-    """标注后的题（RawQuestion 字段 + LLM 标注）。
+    """标注后的题（RawQuestion 字段 + LLM 标注 + 完整性检测/修复）。
 
     Python 切的（保留）：group_order/group_id/score/answer/explanation
-    LLM 输出的（格式化+标注）：content（纯题干）/options/material_text/type/difficulty/knowledge_points/suggested_new_kps
+    LLM 标注：type/difficulty/knowledge_points/suggested_new_kps
+    完整性兜底：is_complete/completeness_issues/regenerated（有缺陷时 LLM 修复原题）
+    content/options/material_text：由 question_extract 组装时 split_options 或 regenerated 填
     """
     group_order: int
     group_id: str | None
-    content: str                        # LLM 输出（纯题干，剥离选项/材料）
+    content: str                        # RawQuestion 原文（完整，含选项/材料）
     answer: str                         # Python 对齐的答案
     explanation: str | None             # Python 对齐的解析
-    score: int | None = None            # 每题满分（分组标题解析）
-    options: list = None                # 选择题选项 list[{label,text}]（LLM 拆）
-    material_text: str | None = None    # 材料题的共享材料（LLM 拆）
-    type: str = ""                       # choice/fill_blank/true_false/short_answer/proof
-    difficulty: int = 2                  # 1-5，默认 2
-    knowledge_points: list = None       # 已有 KP code 列表
-    suggested_new_kps: list = None      # 建议新增的 KP 名称
-    _confirmed_new_kps: list = None     # 双模型确认的新增 KP
-    _suggested_new_kps: list = None     # 未通过双模型确认的
+    score: int | None = None            # 每题满分
+    type: str = ""
+    difficulty: int = 2
+    knowledge_points: list = None
+    suggested_new_kps: list = None
+    _confirmed_new_kps: list = None
+    _suggested_new_kps: list = None
+    # 完整性兜底（LLM 检测+修复）
+    is_complete: bool = True
+    completeness_issues: list = None    # ["选项不足4个", "题干截断", ...]
+    regenerated: dict = None            # {content, options, material_text, answer} 修复后
 
     @classmethod
     def from_raw(cls, q: "RawQuestion") -> "LabeledQuestion":
-        # content 先占位为 RawQuestion 原文，_fill_from_item 时被 LLM 输出覆盖；
-        # answer/explanation 保留 Python 对齐的（LLM 不输出）
         return cls(
             group_order=q.group_order,
             group_id=q.group_id,
@@ -42,12 +44,11 @@ class LabeledQuestion:
             answer=q.answer,
             explanation=q.explanation,
             score=q.score,
-            options=None,
-            material_text=None,
             knowledge_points=[],
             suggested_new_kps=[],
             _confirmed_new_kps=[],
             _suggested_new_kps=[],
+            completeness_issues=[],
         )
 
 
@@ -146,9 +147,9 @@ class QuestionLabeler:
     def _fill_from_item(self, labeled, item: dict):
         """从 LLM 输出 item 填充 labeled 字段。
 
-        LLM 只标 type/difficulty/knowledge_points/suggested_new_kps；
-        content/answer/explanation 保留 Python 切的（from_raw）；
-        options/material_text 由 question_extract 组装时 Python split_options 拆（确定性，不丢图）。
+        LLM 标 type/difficulty/kp/suggested_new_kps + 完整性检测 + 修复（regenerated）。
+        content/answer/explanation 保留 Python 切的；options/material_text 由
+        question_extract 组装时 split_options 或 regenerated 填。
         """
         labeled.type = str(item.get("type", "") or "")
         try:
@@ -159,6 +160,13 @@ class QuestionLabeler:
             labeled.difficulty = 2
         labeled.knowledge_points = list(item.get("knowledge_points", []) or [])
         labeled.suggested_new_kps = list(item.get("suggested_new_kps", []) or [])
+        # 完整性检测 + 修复
+        comp = item.get("completeness") or {}
+        labeled.is_complete = bool(comp.get("is_complete", True))
+        labeled.completeness_issues = list(comp.get("issues", []) or [])
+        regen = item.get("regenerated")
+        if isinstance(regen, dict):
+            labeled.regenerated = regen
 
     def confirm_new_kps(self, labeled: list) -> list:
         """双模型确认新增 KP（AND 逻辑，无人审核）。
