@@ -5,8 +5,79 @@ LLM 只标注元数据，不改 content、不给答案（answer 由 question_spl
 """
 
 from extract import _parse_json_object  # 复用 JSON 解析逻辑
-from question_splitter import RawQuestion
+from question_splitter import RawQuestion, split_options
 from dataclasses import dataclass
+
+# 合法题型枚举（prompt 与 ExamQuestion 契约）
+_VALID_TYPES = {"choice", "fill_blank", "true_false", "short_answer", "proof"}
+# 选择题选项标签
+_VALID_LABELS = {"A", "B", "C", "D"}
+
+
+def _validate_item(item: dict, q: RawQuestion) -> list[str]:
+    """校验 LLM 返回标注 item 的必填字段，返回缺陷列表（空 = 通过）。
+
+    校验项（任一缺陷触发重试/换备选模型）：
+    - type：合法枚举（缺失/非法 = 缺陷，不兜底）
+    - difficulty：1-5 整数（缺失/非法 = 缺陷，不 clamp 掩盖）
+    - knowledge_points / suggested_new_kps：必须是列表（可空）
+    - completeness：必须存在；is_complete=false 时必须有 regenerated
+    - regenerated（存在时）：content 非空；choice 必须 4 项 options 且
+      label=={A,B,C,D}、text 非空；非 choice 不应有 options
+    - 一致性：Python 已确定性拆出完整 4 选项时，LLM 判 is_complete=false 或
+      重写 options 与 Python 拆分不一致 → 缺陷（防 LLM 重写丢内容）
+    """
+    issues: list[str] = []
+    t = item.get("type")
+    if t not in _VALID_TYPES:
+        issues.append(f"type 缺失或非法: {t!r}")
+    diff = item.get("difficulty")
+    if not isinstance(diff, int) or isinstance(diff, bool) or not 1 <= diff <= 5:
+        issues.append(f"difficulty 缺失或非法: {diff!r}")
+    if not isinstance(item.get("knowledge_points"), list):
+        issues.append("knowledge_points 缺失或非列表")
+    if not isinstance(item.get("suggested_new_kps"), list):
+        issues.append("suggested_new_kps 缺失或非列表")
+    comp = item.get("completeness")
+    regen = item.get("regenerated")
+    if not isinstance(comp, dict):
+        issues.append("completeness 缺失或非对象")
+    else:
+        is_complete = bool(comp.get("is_complete", True))
+        if not is_complete:
+            if not isinstance(regen, dict):
+                issues.append("is_complete=false 但缺 regenerated")
+            else:
+                if not (regen.get("content") or "").strip():
+                    issues.append("regenerated.content 为空")
+                r_opts = regen.get("options")
+                if t == "choice":
+                    if not isinstance(r_opts, list) or len(r_opts) != 4:
+                        issues.append(f"choice regenerated.options 非 4 项: {r_opts!r}")
+                    else:
+                        labels = [o.get("label") for o in r_opts]
+                        if set(labels) != _VALID_LABELS:
+                            issues.append(f"regenerated.options label 非法: {labels}")
+                        if any(not str(o.get("text") or "").strip() for o in r_opts):
+                            issues.append("regenerated.options 存在空 text")
+                elif r_opts is not None:
+                    issues.append("非 choice 题不应有 regenerated.options")
+    # 一致性：Python 拆出完整 4 选项时，完整性应依赖 Python 拆分结果
+    _, py_opts = split_options(q.content)
+    py_complete = py_opts is not None and all(o["text"].strip() for o in py_opts)
+    if py_complete and isinstance(comp, dict) and not bool(comp.get("is_complete", True)):
+        if isinstance(regen, dict):
+            r_opts = regen.get("options")
+            if not isinstance(r_opts, list) or len(r_opts) != 4:
+                issues.append("Python 已拆出完整选项，LLM 重写 options 非 4 项")
+            else:
+                py_map = {o["label"]: o["text"].strip() for o in py_opts}
+                r_map = {o.get("label"): str(o.get("text") or "").strip() for o in r_opts}
+                if py_map != r_map:
+                    issues.append("Python 已拆出完整选项，LLM 重写 options 与拆分不一致")
+        else:
+            issues.append("Python 已拆出完整选项，LLM 却判 is_complete=false")
+    return issues
 
 
 @dataclass
@@ -57,6 +128,20 @@ def _format_kp_list(kps: list[dict]) -> str:
     return "\n".join(f"- {kp['code']} {kp['name']}" for kp in kps)
 
 
+def _render_content(content: str) -> str:
+    """呈现给 LLM 的题目文本：split_options 拆分成功时用拆分形式
+    （题干：/选项A：.../选项D：...），完整性检测基于确定性拆分结果判，
+    避免对 content-above 等排版误判缺陷后用 regenerated 覆盖正确拆分；
+    拆分失败（非选择题/格式不符）时用原文。"""
+    stem, opts = split_options(content)
+    if not opts:
+        return content
+    parts = [f"题干：{stem}"]
+    for o in opts:
+        parts.append(f"选项{o['label']}：{o['text']}")
+    return "\n".join(parts)
+
+
 class QuestionLabeler:
     """LLM 标注器。
 
@@ -86,7 +171,7 @@ class QuestionLabeler:
         return result
 
     def _label_batch(self, batch: list) -> list:
-        """标注一批题（单题或多题）。"""
+        """标注一批题（单题或多题）。失败的题返回 None（跳过）。"""
         if len(batch) == 1:
             return [self._label_one(batch[0])]
         # 多题一次：prompt 里列多题，LLM 返回 {"items": [...]}
@@ -99,24 +184,50 @@ class QuestionLabeler:
             items = []
         result = []
         for i, q in enumerate(batch):
-            labeled = LabeledQuestion.from_raw(q)
-            if i < len(items):
-                self._fill_from_item(labeled, items[i])
-            result.append(labeled)
+            item = items[i] if i < len(items) else None
+            if item is not None and not _validate_item(item, q):
+                labeled = LabeledQuestion.from_raw(q)
+                self._fill_from_item(labeled, item)
+                result.append(labeled)
+            else:
+                # 批内该题 item 缺失/校验失败 → 降级单题走 重试+备选+跳过 流程
+                result.append(self._label_one(q))
         return result
 
-    def _label_one(self, q) -> "LabeledQuestion":
-        labeled = LabeledQuestion.from_raw(q)
+    def _label_one(self, q) -> "LabeledQuestion | None":
+        """标注单题：必填字段校验，失败同模型重试一次、再换备选模型试一次，
+        全部失败返回 None（调用方跳过不写 JSONL）并打印日志。
+
+        尝试顺序：主模型 → 主模型重试 → 备选模型（fallback_labeler 存在时）。
+        """
         user = self._build_single_prompt(q)
-        try:
-            resp = self._llm.complete(self._prompt, user)
-            data = _parse_json_object(resp.content)
-            # 单题 LLM 可能直接返回 {...} 或 {"items":[{...}]}
-            item = data.get("items", [{}])[0] if "items" in data else data
-            self._fill_from_item(labeled, item)
-        except Exception:
-            pass  # type=""、knowledge_points=[]，由 from_raw 默认值兜底
-        return labeled
+        attempts: list[tuple[str, object]] = [("main", self._llm), ("main-retry", self._llm)]
+        if self._fallback is not None:
+            attempts.append(("fallback", self._fallback._llm))
+        last_reason: list[str] = []
+        for tag, llm in attempts:
+            try:
+                resp = llm.complete(self._prompt, user)
+                data = _parse_json_object(resp.content)
+                # 单题 LLM 可能直接返回 {...} 或 {"items":[{...}]}
+                item = data.get("items", [{}])[0] if "items" in data else data
+            except Exception as e:
+                last_reason = [f"LLM 调用/解析失败: {e.__class__.__name__}"]
+                print(f"[WARN] 题{q.group_order} 标注失败({tag}): {last_reason[0]}，继续尝试",
+                      flush=True)
+                continue
+            issues = _validate_item(item, q)
+            if not issues:
+                labeled = LabeledQuestion.from_raw(q)
+                self._fill_from_item(labeled, item)
+                return labeled
+            last_reason = issues
+            if tag != "fallback":
+                print(f"[WARN] 题{q.group_order} 标注校验失败({tag}): {issues}，重试/换备选",
+                      flush=True)
+        print(f"[WARN] 题{q.group_order} 标注失败已跳过（尝试 {len(attempts)} 次）：{last_reason}",
+              flush=True)
+        return None
 
     def _build_single_prompt(self, q) -> str:
         """填 prompt 占位符：题号/分组/满分/题目原文/答案/KP 列表。"""
@@ -124,7 +235,7 @@ class QuestionLabeler:
                 .replace("{{group_order}}", str(q.group_order))
                 .replace("{{group_id}}", q.group_id or "(无)")
                 .replace("{{score}}", str(q.score) if q.score is not None else "(未给)")
-                .replace("{{content}}", q.content)
+                .replace("{{content}}", _render_content(q.content))
                 .replace("{{answer}}", q.answer or "(无)")
                 .replace("{{knowledge_points}}", self._kps_text))
 
@@ -134,7 +245,7 @@ class QuestionLabeler:
         for q in batch:
             parts.append(
                 f"## 题 {q.group_order}（分组 {q.group_id or '无'}，满分 {q.score or '未给'}）\n"
-                f"题目原文：{q.content}\n已对齐答案：{q.answer or '无'}"
+                f"题目：{_render_content(q.content)}\n已对齐答案：{q.answer or '无'}"
             )
         joined = "\n\n".join(parts)
         return (self._prompt.replace("{{knowledge_points}}", self._kps_text)
@@ -166,6 +277,11 @@ class QuestionLabeler:
         labeled.completeness_issues = list(comp.get("issues", []) or [])
         regen = item.get("regenerated")
         if isinstance(regen, dict):
+            # 原文无答案（Python 对齐 answer 为空）时清空 LLM 返回的答案：
+            # 无答案的题 answer 一律留空（设计约定，做题时大模型补），
+            # LLM 返回答案不影响其他字段，直接丢弃即可
+            if not (labeled.answer or "").strip():
+                regen["answer"] = ""
             labeled.regenerated = regen
 
     def confirm_new_kps(self, labeled: list) -> list:
@@ -182,9 +298,11 @@ class QuestionLabeler:
         if not self._fallback:
             return labeled
 
-        # 收集所有 suggested_new_kps（去重）
+        # 收集所有 suggested_new_kps（去重）；跳过标注失败的 None
         all_suggested: list[str] = []
         for q in labeled:
+            if q is None:
+                continue
             all_suggested.extend(q.suggested_new_kps or [])
         all_suggested = list(set(all_suggested))
         if not all_suggested:
@@ -197,6 +315,8 @@ class QuestionLabeler:
 
         # 回填到每题
         for q in labeled:
+            if q is None:
+                continue
             for kp_name in (q.suggested_new_kps or []):
                 result = confirm_results.get(kp_name, {})
                 if result.get("is_new"):

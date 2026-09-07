@@ -191,6 +191,22 @@ def extract_questions_file(source, config, llm, fb_llm,
     labeler = QuestionLabeler(llm=llm, prompt=prompt, knowledge_points=kps,
                                fallback_labeler=fb_labeler)
     labeled = labeler.label(questions, batch_size=label_batch_size)
+    # 标注失败（校验+重试+备选均败）的题返回 None：跳过不写 JSONL，记日志
+    skipped = [q.group_order for q, lab in zip(questions, labeled) if lab is None]
+    if skipped:
+        log_path = extracted_dir.parent / "labeling_issues.jsonl"
+        with log_path.open("a", encoding="utf-8") as lf:
+            for q in questions:
+                if q.group_order in skipped:
+                    lf.write(json.dumps({
+                        "source": source_name,
+                        "group_order": q.group_order,
+                        "type": "label_failed",
+                        "issues": ["LLM 标注失败已跳过（必填字段校验+重试+备选均失败）"],
+                    }, ensure_ascii=False) + "\n")
+        print(f"[WARN] {len(skipped)} 题标注失败已跳过（不写入 JSONL），题号 {skipped}，"
+              f"详见 {log_path}", flush=True)
+    labeled = [lab for lab in labeled if lab is not None]
     labeled = labeler.confirm_new_kps(labeled)
 
     # 6. 写 JSONL
