@@ -68,7 +68,7 @@ export default function ConversationManagePage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    listAllConversations('auxiliary')
+    listAllConversations('auxiliary', 'aux_qna')
       .then((items) => {
         if (!cancelled) {
           setConversations(items);

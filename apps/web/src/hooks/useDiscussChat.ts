@@ -38,11 +38,14 @@ type CardOpts = {
 };
 
 // 训练轨（答题页内抽屉）：不挂卡片/课时上下文，走辅线辅导链路——
-// createConversation({track:'auxiliary'}) + /ai/tutor/stream(mode auxiliary)。
-// 每条用户消息前缀题面（镜像题目级模式），AI 始终有上下文。
+// createConversation({track:'auxiliary', scene:'aux_training', questionId, questionText})
+// + /ai/tutor/stream(mode auxiliary)。会话按题锚定续接；题面在建会话时作为一条
+// assistant 题面锚消息写进历史（复用辅线拍照题“题目进历史、学生消息干净”的做法），
+// AI 每轮靠对话历史带题面，学生消息不前缀。
 type TrainingOpts = {
   mode: 'training';
   questionText: string;
+  questionId?: number;
 };
 
 export type UseDiscussChatOpts = QuestionOpts | CardOpts | TrainingOpts;
@@ -50,7 +53,8 @@ export type UseDiscussChatOpts = QuestionOpts | CardOpts | TrainingOpts;
 // session 缓存键：题目级按题目文本，卡片级按 cardId 命名空间（避免与题目键冲突）。
 function cacheKey(opts: UseDiscussChatOpts): string {
   if (opts.mode === 'question') return opts.questionText;
-  if (opts.mode === 'training') return `training-q:${opts.questionText}`;
+  // 训练轨按题锚定：优先用 questionId（同文本不同题不串会话），孤儿题退化用文本。
+  if (opts.mode === 'training') return `training-q:${opts.questionId ?? opts.questionText}`;
   return `card:${opts.cardId}`;
 }
 
@@ -101,6 +105,35 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     });
   }, []);
 
+  // 历史回放显示归一：仅 training 模式需要——
+  // ① 隐藏「题面锚」assistant 消息（建会话时写入，内容=当前题面；与抽屉顶部「当前题目」栏重复）；
+  // ② 剥离修复前旧会话里嵌在用户消息前的整段题面（`这道题目是：…我的问题：`），气泡只显示学生原话。
+  const discussMode = opts.mode;
+  const discussQuestionText = opts.mode === 'training' ? opts.questionText : '';
+  const mapHistoryToDisplay = useCallback((items: MessageItem[]): DiscussMessage[] => {
+    const stripped = items
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .filter((m) => {
+        if (discussMode !== 'training') return true;
+        if (m.role === 'assistant' && m.type === 'transcription' && m.content === discussQuestionText) return false;
+        return true;
+      })
+      .map((m: MessageItem) => {
+        let content = m.content;
+        if (discussMode === 'training' && m.role === 'user') {
+          const legacyPrefix = `这道题目是：\n\n${discussQuestionText}\n\n我的问题：`;
+          if (content.startsWith(legacyPrefix)) content = content.slice(legacyPrefix.length);
+        }
+        return {
+          id: m.id,
+          role: m.role as 'user' | 'assistant',
+          content,
+          reasoning: m.reasoning ?? undefined,
+        };
+      });
+    return stripped;
+  }, [discussMode, discussQuestionText]);
+
   // training 模式挂的是 auxiliary 对话，流式请求的 mode 必须与其 track 一致
   const tutorMode = opts.mode === 'training' ? 'auxiliary' : 'mainline';
 
@@ -148,12 +181,12 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     const dlgId = dialogueIdRef.current;
     if (!dlgId) return;
     setError(null);
-    // 题目级/训练轨讨论：每条用户消息都附带题目文本，确保 AI 始终知道讨论主题。
-    // 卡片级讨论：卡片内容已通过服务端 loadContext -> cardContent 注入系统 prompt，
-    // 无需客户端重复。
-    const message = opts.mode === 'card'
-      ? content
-      : `这道题目是：\n\n${opts.questionText}\n\n我的问题：${content}`;
+    // 题目级讨论（question 模式）：每条用户消息附带题目文本，确保 AI 聚焦当前题。
+    // 卡片级与训练轨：消息即学生原话——卡片级上下文走服务端 loadContext->cardContent，
+    // 训练轨题面在建会话时已作为题面锚消息写入历史（每轮靠对话历史带题面），无需重复。
+    const message = opts.mode === 'question'
+      ? `这道题目是：\n\n${opts.questionText}\n\n我的问题：${content}`
+      : content;
     await streamMessage(dlgId, message);
   }, [isStreaming, streamMessage, opts]);
 
@@ -183,16 +216,7 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
         try {
           const items = await getMessages(Number(cachedDialogueId));
           if (cancelled) return;
-          setMessages(
-            items
-              .filter((m) => m.role === 'user' || m.role === 'assistant')
-              .map((m: MessageItem) => ({
-                id: m.id,
-                role: m.role as 'user' | 'assistant',
-                content: m.content,
-                reasoning: m.reasoning ?? undefined,
-              })),
-          );
+          setMessages(mapHistoryToDisplay(items));
         } catch {
           // 拉取失败不阻断，学生仍可发新消息
         } finally {
@@ -214,8 +238,15 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
           });
           dialogueId = res.dialogueId;
         } else if (opts.mode === 'training') {
-          // 辅线对话：无 cardId/错题本锚定，session 级缓存续接（刷新后是新对话，记待办）
-          const conv = await createConversation({ track: 'auxiliary' });
+          // 训练讲一讲：走辅线会话 + scene=aux_training 按题锚定。
+          // 服务端 (student, track, scene, question_id) find-or-create：同题跨刷新续接同一对话；
+          // 仅新建时会把题面写成一条 assistant 题面锚消息（AI 靠历史带题面）。
+          const conv = await createConversation({
+            track: 'auxiliary',
+            scene: 'aux_training',
+            questionText: opts.questionText,
+            ...(opts.questionId != null ? { questionId: opts.questionId } : {}),
+          });
           dialogueId = String(conv.id);
         } else {
           const res = await startCardDiscuss({
@@ -244,14 +275,7 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
           const existing = items.filter((m) => m.role === 'user' || m.role === 'assistant');
           if (existing.length > 0) {
             seededRef.current = true;
-            setMessages(
-              existing.map((m: MessageItem) => ({
-                id: m.id,
-                role: m.role as 'user' | 'assistant',
-                content: m.content,
-                reasoning: m.reasoning ?? undefined,
-              })),
-            );
+            setMessages(mapHistoryToDisplay(existing));
           }
         } catch {
           // 拉取失败不阻断，后续仍发种子消息

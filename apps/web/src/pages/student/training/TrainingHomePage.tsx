@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BackButton } from '@/components/base';
+import { PageHeader } from '@/components/base';
 import { getTrainingErrorBook } from '@/services/api';
 
 /** id 对应 subjects 表 seed（1=数学），与训练轨各页一致。 */
@@ -96,13 +96,13 @@ export default function TrainingHomePage() {
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-4xl px-4 sm:px-8">
-        {/* 返回选学科页 + 标题（TrainingSubjectPage header 同款模式） */}
-        <header className="flex items-center gap-4 border-b border-slate-200/80 pb-5">
-          <BackButton to="/student/training" label="返回选学科" />
-          <h1 className="text-4xl font-extrabold tracking-tight text-[var(--text-primary)]">
-            数学 · 训练
-          </h1>
-        </header>
+        {/* 返回选学科页 + 标题（上下结构，StarMapPage header 同款模式） */}
+        <PageHeader
+          to="/student/training"
+          caption="返回选学科"
+          title="数学 · 训练"
+          titleClassName="text-4xl font-extrabold"
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
           {/* 专项练习 */}

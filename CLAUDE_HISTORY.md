@@ -1,35 +1,170 @@
-# CLAUDE.md 历史工作日志（迁出归档）
+# CLAUDE.md
 
-本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-01），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-- 各条目引用的任务级实现计划见 `docs/superpowers/plans/`
-- 仍生效的行为约束已提炼回 CLAUDE.md 的「关键约定」节，本文件仅作历史溯源
-- 阅读当前约定请以根 `CLAUDE.md` 为准；本文件内容可能包含已被后续条目修正的过时描述
+## Project Overview
 
----
+K12 智学系统 — an adaptive AI-powered K-12 education platform for Chinese students. MVP scope: Mathematics only. The platform uses a dual-track learning model (mainline structured progression + auxiliary free exploration) with Socratic AI tutoring.
 
-## 2026-09-07 会话场景分型（scene）与训练「讲一讲」重构
+## Monorepo Structure
 
-- **问题**：各系统聊天共用 `ai_dialogues` 一张表，只有 `track`（mainline/auxiliary）可区分；专项/错题训练里的「讲一讲」（track=auxiliary）与辅线答疑自由问答混在同一列表，历史互相污染。且训练讲一讲旧实现把整段题面前缀进每条学生消息，气泡显示成「题目+我的问题」。
-- **DB**：`ai_dialogues` 新增 `scene`（默认 `aux_qna`，枚举 aux_qna/aux_training/mainline_question/mainline_card）与 `question_id`（训练讲一讲按题锚）；索引 `idx_dlg_student_scene_question(student_id, track, scene, question_id)`。迁移 `tools/db/migrations/2026-09-07_add_ai_dialogues_scene.sql`（含存量回填：auxiliary 带「这道题目是：」前缀 -> aux_training；mainline 经 main_error_books.dialogue_id 关联 -> mainline_question，其余 mainline_card）。
-- **conversations**：`POST /api/conversations` 支持 `scene/questionId/questionText`；`scene=aux_training` 且带 questionId 按题 find-or-create（跨刷新续接同一对话），仅新建时把题面写一条 assistant 题面锚消息（type='transcription'）进历史；`GET /api/conversations` 支持 `scene` 过滤（辅线答疑列表只返回 aux_qna）。
-- **practice**：`startDiscuss` 新建 mainline 标 `mainline_question`；`startCardDiscuss`/findOrCreateMainlineByCard 标 `mainline_card`。
-- **前端**：训练讲一讲（useDiscussChat training 模式）改为锚定建会话 + `send` 只发学生原话（不再前缀题面）；历史回放隐藏题面锚消息、剥离旧会话前缀。辅线列表（ConversationList/会话管理/auxiliaryStore）按 `scene=aux_qna` 拉取。
-- 设计 spec：`docs/superpowers/specs/2026-09-04-training-run-ux-design.md`（已加 2026-09-07 变更注记）；API 数据流见设计文档 §6.18（v2.6）。**注**：课堂练习 question 模式仍保留前缀展示（本次只修 training 模式，将来统一时复用题面锚方案）。
+```
+apps/web/             — Active. React frontend (Vite + TypeScript + Tailwind)
+apps/server/          — Active (ai-core). Node.js backend; ai-core AI Agent Hub 已实现（见下文 ai-core 节），HTTP API 层待建
+apps/desktop/         — Planned. Electron wrapper
+packages/             — Planned. Shared configs/types
+tools/crawler/        — Active. 爬虫（zgkao 试卷 / smartedu 教材）
+tools/data-refinery/  — Active. 数据管线 convert->extract->publish->db_loader（见下文）
+tools/db/             — Active. MySQL schema + install_mysql.sh
+docs/                 — PRD, API 设计, UX/UI, DB 设计, 数据管线总结
+```
 
----
+`apps/web`、`apps/server/ai-core` 与 `tools/data-refinery`、`tools/db` 已有可运行代码；`apps/server` 的 HTTP API 层待建。
 
-## 2026-09-04 专项训练「不再展示」功能
+## Development Commands
 
-- 新增 `student_hidden_questions` 表（`student_id + question_id` 全局排除，不分知识点）
-- `QuestionsRepository.findRandomByKpAndType` 加 `LEFT JOIN ... IS NULL` 排除已标记题（**仅此一处**选题路径受影响；主线练习/错题重做/考试不动）
-- `TrainingController` 加 4 端点：`POST /training/hidden/mark`、`GET /training/hidden`、`DELETE /training/hidden/:questionId`、`DELETE /training/hidden`
-- 前端 `QuestionRunner` 加 ungated `questionMetaActions` 插槽；`TargetedRunPage` 答题页加「不再展示」按钮 + 确认 Modal
-- 新建 `HiddenQuestionsPage` 清单页（逐条撤销 + 全部重置），学生端自助管理
-- 设计 spec：`docs/superpowers/specs/2026-09-04-targeted-practice-exclude-marked-design.md`
-- 实施计划：`docs/superpowers/plans/2026-09-04-targeted-practice-exclude-marked.md`
+All commands run from `apps/web/`:
 
----
+```bash
+npm run dev      # Vite dev server at http://localhost:5173
+npm run build    # tsc -b + vite build (type-check then bundle)
+npm run preview  # Serve production build locally
+npm run lint     # ESLint for .ts/.tsx
+```
+
+No test framework is configured yet for `apps/web`.
+
+### apps/server (ai-core)
+
+Commands run from `apps/server/`:
+
+```bash
+npm test            # vitest run (72 tests across 14 files)
+npm run test:watch  # vitest watch mode
+npm run build       # tsc (type-check + emit). NOTE: does not copy YAML/prompt assets to dist/ - see ai-core known limitations
+npx tsx src/ai-core/__tests__/safety-classification.ts   # deterministic safety regression (no API keys needed)
+```
+
+`grading-accuracy.ts` and `tutoring-quality.ts` in `__tests__/` are LLM eval scripts (require API keys, run via `tsx`, not picked up by vitest).
+
+## Architecture (apps/web)
+
+### Theme System
+
+Three themes via CSS variables + `data-theme` attribute on containers. The canonical tokens live in `apps/web/style.md` §2 and are implemented in `apps/web/src/styles/global.css`.
+
+- `student-day` — warm orange-red palette (`Brand-500 #ff6b35`), `Bg-Page #F5F0E8` (default)
+- `student-night` — dark tea-gold, auto-activates 18:00–06:00 via Zustand themeStore
+- `parent` — business blue-white, forced day mode
+
+Night mode only applies inside `.student-theme-container` (learning immersion pages). Login, subject select, star map, and parent pages are physically excluded from night mode.
+
+### School-level Font Scaling
+
+`data-school` attribute (`primary`/`junior`/`senior`) adjusts font sizes only — colors and radii stay consistent across all levels.
+
+### Visual Distinction: Dual-track
+
+- Mainline: orange-red (`Brand-500 #ff6b35`, see `apps/web/style.md` §2.1)
+- Auxiliary: brand orange (same as mainline; previously purple `Aux #8B5A8E`, now deprecated/unused)
+
+Dual-track distinction is via TEXT labels (Tab titles, Tag text "辅线"/"主线"), not color. Physical isolation is ensured by routing (entry selection page, no cross-track links), not color contrast.
+
+### Component Layers
+
+- `src/components/base/` — Reusable UI primitives (Button, Input, Card, Modal, Toast, etc.)
+- `src/components/business/` — Domain components (PlanetNode, SectionCard, AIDialogue, TextbookCard, etc.)
+- `src/components/layout/` — Page shells (StudentLayout, ParentLayout with nav + header + outlet)
+
+### Routing
+
+React Router 6 with `createBrowserRouter`. Login auto-routes by username format: phone number → parent, otherwise → student.
+
+### State
+
+Zustand for theme/motion preferences. No API layer yet.
+
+### Design Tokens
+
+`src/tokens/` contains JSON files (colors, layout, typography) that are the source of truth for CSS variable generation.
+
+## Mandatory Design Constraints
+
+Before any UI work, read the authoritative docs:
+- `docs/K12智学系统-产品需求文档.md` — PRD (single source of truth for all features)
+- `docs/UX-UI设计文档.md` — Page specs and responsive rules
+- `apps/web/style.md` — Color palette, typography, spacing, shadows, and component specs (the only style reference). Key sections:
+  - §1 设计原则、§2 配色（统一一套，不分学段）
+  - §2.5 登录页规范、§2.6 入口选择页规范
+  - §8 学科选择页设计
+  - §11 实施清单
+
+Hard rules:
+1. No emoji in UI/components/copy. Icons must be linear SVG.
+2. No mascots or decorative elements (rainbows, balloons, stars).
+3. Single unified color palette from style.md — no per-school-level color variations.
+4. PRD overrides any design decision. Conflicts must be resolved with the user before implementation.
+5. iPad landscape (>=1024px) is the primary breakpoint; PC (>=1280px) secondary; mobile deferred.
+6. Socratic principle: "hint" and "discuss" buttons always more prominent than "show answer".
+7. Mainline progression requires error-clearing before unlock — never skip this gate.
+8. **No mini-program support**: the platform targets WebApp, PC App (Electron), and parent-facing Web only. Do not introduce WeChat mini-program, Alipay mini-program, or any other mini-program specific code, APIs, build targets, or documentation references.
+
+## API 文档同步规则
+
+`docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml` 互为对照，必须始终保持一致：
+
+1. **任何一方变更时，另一方必须同步更新**。新增、删除或修改端点（路径、方法、参数、响应结构）时，两份文档都要一并调整。
+2. **以 API 设计文档为主稿**：端点清单（§4）和数据流（§6）定义需求级别和业务语义；openapi.yaml 是其机器可读实现，用于代码生成和接口测试。
+3. **阶段标记**：openapi.yaml 当前仅收录 MVP 阶段端点。P1/P2 端点在 API 设计文档中标注阶段，待进入开发时再补入 openapi.yaml。
+4. **检查清单**：每次 API 变更后，运行 `grep` 或对比两文档的端点路径列表，确认无遗漏。
+
+## Data Refinery 数据管线
+
+`tools/data-refinery/` 是离线数据准备管线，四阶段顺序执行：
+
+```
+convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_loader_cli (MySQL)
+```
+
+`refinery_cli.py` 串联 publish + db_loader 一键执行；DB 由 `tools/db/install_mysql.sh` 初始化（schema + subjects seed）。
+
+**现状**：管线已端到端跑通（refinery 237 tests 全绿、crawler 200 tests；2026-08-26 实测 `refinery_cli --purge-business-data` 全量重载 342 cards + 447 questions 成功，含幂等重跑与守卫复验）。详细总结与后续见 `docs/data-refinery-管线总结与后续.md`，使用见 `docs/data-refinery-使用手册.md`。
+
+**改代码前必读的关键约定**（详见上述总结文档 §3）：
+- LLM 配置用 `.env` 的 `LLM_BASE_URL`/`LLM_AUTH_TOKEN`（refinery 专属），**不要用 `ANTHROPIC_*`**（会被 shell 里 Claude Code 覆盖）。当前用本地 llama.cpp `Qwen3.8-27B`（`LLM_PROVIDER=local`、`LLM_BASE_URL=http://192.168.1.8:12345/v1`，2026-08-26 起 Card 标注/目录解析走本地模型；`.env` 里注释保留了原远程 DeepSeek `deepseek-v4-flash` 配置可切回）。
+- extract：lesson_id 由 LLM 给标题标识 + CLI 跨页继承（per-book 状态）；只有编号标题（`N.M`/`N.M.K`/`第N章`）开新课；章综述归该章"第 0 节"；前置内容（封面/目录/版权/前言）不抽取；试卷答案只提取不生成（从参考答案按题号提取，无则空）；**全角括号统一半角**--读页 md 后 `normalize_fullwidth_parens`（`（）`→`()`，1:1 不改长度，NFKC 等价不影响 content_hash；其余全角标点 。，；！？ 不动——`。` 无 NFKC 映射会改 hash，`。！？；` 是 splitter 句末切分点，2026-09-01）。
+- publish：资产路径用源相对稳定键；subject 按文件路径首段推导（2026-08-26 前曾硬编码 "math" 误标化学，已修）。
+- db_loader：subject 别名归一（chem->chemistry）、rel_path/lesson_id 解析派生教材结构、cards sort_order 跨页全局重排、full-reload 幂等；**full-reload 有业务数据守卫**（见 2026-08-26 note）；**版次（edition）维度**--textbook_versions 按 `(subject_id, publisher, grade_band, edition)` 4 元组唯一，edition 从书名前导括号提取（见 2026-08-31 note）。
+- DB：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。
+
+**下一个大件**：`apps/server` 的 HTTP API 层（把已实现的 ai-core 接到前端 `apps/web`）——前端 `apps/web` 还连不上 DB。ai-core AI Agent Hub 已实现（见下文 ai-core 节）；HTTP 端点已设计（`docs/api/openapi.yaml` + `docs/API接口与数据流设计文档.md`），等实现接入。
+
+
+## apps/server - ai-core AI Agent Hub（已实现）
+
+分支 `feat/ai-agent-hub-mvp`（已推送 origin）。两层架构：infra 层 + capabilities 层。tsc 通过、72/72 测试绿。
+
+**目录** `apps/server/src/ai-core/`：
+- `infra/` — ModelRouter、PromptBuilder、ModelClient（+Kimi/Qwen/DeepSeek/Gemini 适配器）、ResponseParser、SafetyGuard、FallbackHandler、Logger、Metrics
+- `capabilities/` — Tutoring（9 步：loadContext->give-up/fallback->safety/block->route->build->call->parse->persist->failcount）、Grading、Explanation、Variation、Analytics
+- `prompts/` — Mustache 模板（system/tutoring/grading/explanation/variation/analytics/fallback/safety）
+- `*.yaml` — model-routes / retry / safety / fallback 配置
+- `__tests__/` — 回归脚本（safety-classification 确定 26/26；grading-accuracy、tutoring-quality 需 API Key）
+
+**技术栈**：Node.js + TypeScript ESM（`"type":"module"`）、Vitest、Zod、Mustache、prom-client、dotenv。
+
+**改代码前必读的关键约定**：
+- **ModelClient DI**：各 capability 构造函数接受 `opts?: { modelClient?: ModelClient }`，测试注入 mock（无 API Key 也能跑）。生产用 `new ModelClient()`。
+- **PromptBuilder**：`customVariables`（`Record<string, unknown>`）已展平进 Mustache 视图，可传对象/数组（如 AnalyticsCapability 传 `stats` 对象，配合 `{{stats.x}}` 与 `{{#stats.topWeakPoints}}`）；**已关闭 HTML 转义**（LLM prompt 非 HTML，数学符号 `=<>` 必须原样保留）；`{{> partial}}` 加载 `system/*.md` 并剥 frontmatter；模板用 `## System Prompt` / `## User Message` 分段。
+- **模型 ID（勿改）**：`kimi-latest`（Moonshot）、`qwen3.7-max`、`gemini-3.1-pro`、`deepseek-v4-flash`。配置里 kimi 的 key 是 `kimi` 但 modelId 是 `kimi-latest`。
+- **API Key**：用 `.env` 的 `KIMI_API_KEY`/`QWEN_API_KEY`/`GEMINI_API_KEY`/`DEEPSEEK_API_KEY` 及对应 `*_BASE_URL`（ai-core 专属，**不要用 `ANTHROPIC_*`**，会被 shell 里 Claude Code 覆盖）。
+- **错误处理**（基于 `../llm-client.js`）：provider 经 `classifyError`（`infra/model-client/errors.ts`）抛 11 个错误子类之一（`LLMClientError` 基类 + `AuthenticationError`401 / `InsufficientQuotaError`402·429-quota / `PermissionError`403 / `ResourceNotFoundError`404 / `RequestTooLargeError`413 / `ValidationFailedError`400·422 / `ContentFilteredError`406·SAFETY / `RateLimitError`429 / `ServerError`5xx / `TimeoutError`abort；retryable 由子类决定）；`ModelClient.chat` 用 `callWithRetry`（full-jitter 退避 + 遵守 Retry-After + onRetry 钩子）包装，非 retryable 立即抛。
+- **Gemini**：system prompt 走 `systemInstruction`（不是 user 角色）；finishReason 映射 MAX_TOKENS->length、SAFETY->content_filter。**流式暂未实现**（streamGenerateContent 待配 GEMINI_API_KEY），`ModelClient` 对 gemini 强制 `stream=false` 非流式降级。
+- **测试与文档同步铁律**：若测试断言与 config/types/设计文档的值冲突，**测试错**——改测试，勿改 config/设计文档。改代码或主文档时，同步更新所有引用该实现的设计/计划文档。
+
+**已知限制**（本次未修，记录待后续）：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断学生答错（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 字段（classifier.confidenceThreshold、outputStructure、streaming.firstTokenTimeoutMs/interTokenTimeoutMs）为声明式意图未接线；gemini 流式（streamGenerateContent）未实现（待配 GEMINI_API_KEY，当前非流式降级）；流式 usage 尽力收（Kimi 流式不返回 usage，cost 可能 0）；`npm run build` 不拷贝 YAML/prompts 到 dist（生产部署需另加 copy 步骤）。
+
+**实现记录**：计划草稿偏差与 code-review 修正详见 `docs/superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md` 末尾「实现修正记录」「代码审查后修正」两节。
 
 **2026-07-24 修正**：① modelId 拼写 bug——`qwen-3.7-max` 改为 `qwen3.7-max`（dashscope 实际 ID，原配置多一短横线导致 404 model_not_found；全仓库含 model key/modelId/routes 引用/文档/测试统一替换）。② per-scene timeout 接线——`retry.yaml` 的 per-scene timeout 此前未接线（capability 调 chat 未传 timeout，走 kimi-client 硬编码 30000），现已在 tutoring/grading/explanation/variation/analytics + fallback-handler 的 chat 调用传 `timeoutConfig.timeout[scene] ?? timeoutConfig.timeout.default`，并调大取值（default 30000→45000、tutoring 15000→45000、variation 45000→60000、safety 5000→10000、新增 explanation:60000），解决 qwen3.7-max 生成长文本（如 fallback 完整解析）超时。③ SafetyGuard 误拦--`LEARNING_PATTERNS` 未覆盖含方程表达式但无学习关键词的消息（如「3x+5=14,x等于多少」），误判 off_topic 而 block；加代数方程识别正则（半角等号/变量项），不误伤「1+1等于几」（中文「等于」）。④ 错误模型 + 流式 + reasoning 重构--采用 `../llm-client.js` 错误体系（11 个错误子类 + `classifyError` + `callWithRetry` full-jitter 退避 + Retry-After + onRetry，替换 `ModelErrorCode`/`ModelClientError`/`RetryConfig`/`mapHttpError`）；`ModelClient.chat` 默认流式（聚合 `streamChat` 的 content + reasoningContent，gemini 降级非流式）；`kimi-client.streamChat` 读 `delta.reasoning_content`（thinking）；reasoning 透传到所有 capability 响应的 `reasoning` 字段。详见 `docs/superpowers/plans/2026-07-24-ai-core-error-streaming-refactor.md`。⑤ provider fetch 网络错误归一--`kimi`/`gemini`-client 的 `fetch` 加 try/catch，DNS/连接失败/abort 经 `classifyError(status=0)` 归一为 `TimeoutError`（此前 raw `TypeError` 逃逸未归一为 LLMClientError；用错误 baseurl 实测验证：重试 maxRetries 次后抛 `TimeoutError`，retryable=true，见 `__tests__/error-baseurl-test.ts`）。
 
@@ -78,15 +213,3 @@
 - PRD/UX/DB/data-refinery 文档已同步，`global.css` 与 `style.md` 一致，前端页面遵循简约风格（图标+词，去冗余文字，问候语除外）。
 
 相关规范已写入 `apps/web/style.md` §2.5、§2.6、§8。
-
----
-
-**2026-09-02 修正（refinery：页眉剥离 + 书尾识别，extract 前置内容误判）**：现象--新书（2024 修订版九上）20 页正文被 `is_front_matter` 规则 1 整页子串「出版社」/「仅供个人学习」误杀（17 页 OCR 运行页眉「# 人民教育出版社」+ 4 页 PDF 水印页脚：028,029,050,056,064,067,092,097,119,124,132,156,159,177,179,182,123,133,154,181），静默丢 0 卡片；反向 183（综合与实践纯组织说明页）产出 7 张垃圾卡、186（封底 ISBN）产出 2 张垃圾卡。修复：① 新模块 `src/page_chrome.py`--`compute_book_chrome` 书级频率统计自动发现页眉/页脚行（每页开头/结尾各 2 非空行归一化计数，出现 ≥3 页 **且** 命中安全模式：含出版社/版权水印/纯 1-3 位数字页码/ISBN；「练习」8 页、「小结」6 页等高频内容标题因无安全模式永不剥离，题干偶现「某出版社」因频率 1 保留），`strip_chrome` 整行剥离；统计必须扫书目录全部页（--pages/--book 过滤会让频率失真）。② `extract_cli` 主流程两处剥行：read_text 后（is_front_matter 判定基于干净文本）+ scan_page 返回后（页眉不进卡片内容）。③ `is_front_matter` 新增书尾规则--ISBN 正则/绿色印刷产品/标题行 后记|附录|词汇索引/电话+邮箱同现/组织说明页标记（活动评价、展示交流、演示文稿、组建合作团队、研究小组、研究报告、方案构思、自我反思）命中 ≥3（183 命中 6，182 活动数学任务页命中 0 正确保留）/剥离后空页不限页码。④ 重跑方式--用 `RefineryCheckpoint.unmark_extracted` 解除目标页标记后正常跑（其余页走 skip 分支回填 per-book lesson_id 继承链），**不要用 --force/--pages**（绕过 skip 分支会断跨页继承回填）。⑤ 验证：refinery 423 tests 绿（新增 page_chrome 14 + back_matter 14 + 主流程接线 3）；真书 5 页实测 028→4 卡（25.3）/123→6 卡（29.1，继承回填生效）/181,182→综合与实践卡保留/183,186→front matter 跳过，页眉水印零泄漏。⑥ 遗留：DB 新书（version 277）仅第 25 章 50 卡入库、落后于 published；补抽后需 publish + db_loader 刷新。详见 `docs/superpowers/plans/2026-09-01-page-chrome-and-backmatter.md`。
-
----
-
-**2026-08-28~29 补录（迁自根目录 `Agent.md`，2026-09-02 迁移；08-26 修复清单主体见上方同日条目，此处只补独有内容）**：① pipeline_cli 一键全流程--`pipeline_cli.py` 总控（toc_parse -> extract -> publish -> toc_merge -> db_loader）+ 交互式向导 `pipeline_wizard.py` + `env_bootstrap.py`（首次运行从 apps/server/.env 引导生成 refinery .env）+ `toc_merge.py`（card 发现的新小节入库前合并进 TOC，`*.merged.json` sidecar）；refinery 测试增至 350 个全绿（commit `fed6376`）。② 静态图片服务架构澄清--图片由 apps/server 直接托管（`apps/server/src/main.ts` 的 `useStaticAssets`：`/assets/*` -> `tools/data-refinery/output/assets/*`），web 的 Vite dev server 把 `/assets` 代理到 server（与 `/api`/`/uploads` 同一套代理），前端用相对路径 `/assets/...` 取图，不跨域；**无需单独起 python http.server**（旧方案已废弃，refinery README/使用手册 §6.1 已同步修正）；本地开发只需两个服务：web（:5173）+ server（:3001）（commit `933f64a`）。③ ⚠️ **遗留（业务数据备份丢失）**：08-26 purge 前的备份写在 `/tmp/ai_k12_backup/business_tables_20260826_195502.sql`（28KB，含 main_error_books 23 行、aux_error_books 7 行、progress 2 行、practice_results 6 行等），已被系统 /tmp 清理删掉。**待办**：检查 MySQL binlog 是否可恢复被 purge 的行；今后备份一律放持久目录（勿用 /tmp）。④ 关联提交：`a56d6f0`（数据管道一键导入：FK 守卫 + dry-run bug + 测试/手册修复）、`fed6376`（pipeline_cli 一键全流程）、`933f64a`（图片静态服务说明修正）。
-
----
-
-**2026-09-02 新增（refinery：lesson_anchor 页码锚定，db_loader 章归属确定性判定）**：背景--LLM 标签三类归属错误：① 错章（page_092 复习题27 标成「第二十六章 二次函数」、page_119 复习题28 续页同，prompt 规定复习题/小结填 null 继承但 LLM 违规自选错章标签，CLI 无法防御「合法格式的错值」）；② 同名歧义（各章「小结」「数学活动」lesson 同名，`_match_lesson_scoped` 按名取第一个 → 26-30 章约 14 页小结/复习题卡全挂 25 章小结，老书同潜伏）；③ 非 TOC 标签（「复习题 30」会经 `_find_or_create` 建 TOC 外 lesson）。方案（业内标准做法：TOC 页码锚定，最强信号参与判定）--每张卡的章归属由「textbook_page（md 页码）→ TOC 章区间」独立确定，LLM lesson_id 降级为章内小节建议，冲突时锚定赢；**锚定只在 db_loader 挂卡时做**（零 LLM 成本、不动 extract/publish/toc_merge、直接修存量数据；每次 load 重算，重处理任意页不影响结构）。实现--① 新模块 `src/lesson_anchor.py`：章边界两级推导（首选综述卡锚定：每章「第N章」标签卡最小 md 页=章头页，md 空间直接锚零误差、取 min 免疫错章综述标签；兜底首节 printed+偏移众数−3 余量）+ 节时间线 `active_label_at`（错章卡兜底定位活跃节）；② `db_loader.load_book_cards` TOC 模式挂卡前修正（`_build_anchor_ctx` 预查 units/lessons/同名集合，`_anchor_lesson_id` 规则 A 错章重写（content「复习题 N」>时间线活跃节>标题匹配>章综述）/B 同名消歧（按页所在章）/C 复习题归一（挂该章「小结」，用户决策不建「复习题 N」lesson））+ `[anchor] offset/corrected/disambiguated/normalized` 观测日志；无 TOC/对不上整体退化既有匹配。实施修正--首版偏移法实测 P119 误入 29 章+老书 17 个假修正，综述卡锚定后 corrected 17→0、P119 归 28 章小结。验证--451 tests 绿（lesson_anchor 19 + TestAnchorCorrection 9 新增）；真库重载新书 799 卡（corrected=6/disambiguated=119/normalized=6），P92/P93→27 章小结、P119→28 章小结、P177/178/179→30 章小结，各章小结卡分布正常，幂等重跑一致；老书 313 卡重载无错章。数据修复顺带完成--删 7 条测试练习记录（学生 7）解锁新书入库。遗留--老书 9 个「复习题21-29」空壳 lesson（历史 load 遗留 0 卡可清理）；老书 39 张裸编号标签卡 skipped（既有数据质量项）。详见 `docs/superpowers/plans/2026-09-02-lesson-anchor-design.md`。

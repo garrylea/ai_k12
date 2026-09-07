@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchStarMap, type SectionData, type StarMapData } from '@/services/api';
-import { BackButton } from '@/components/base';
+import { PageHeader } from '@/components/base';
 import { useLearnContextStore } from '@/store/learnContextStore';
 
 // --- Loading skeleton ---
@@ -225,17 +225,11 @@ export default function StarMapPage() {
 
       <div className="max-w-6xl w-full mx-auto flex-1 flex flex-col justify-between">
         {/* Header */}
-        <header className="flex items-center gap-4 border-b border-slate-100 pb-5">
-          <BackButton to="/student/subjects" />
-          <div>
-            <div className="text-sm font-semibold tracking-wide text-[var(--brand-500)] uppercase">
-              {data.subjectName}
-            </div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-              {data.gradeName}{data.publisher ? ` · ${data.publisher}` : ''}
-            </h1>
-          </div>
-        </header>
+        <PageHeader
+          to="/student/subjects"
+          caption={data.subjectName}
+          title={`${data.gradeName}${data.publisher ? ` · ${data.publisher}` : ''}`}
+        />
 
         {/* Error toast */}
         <AnimatePresence>

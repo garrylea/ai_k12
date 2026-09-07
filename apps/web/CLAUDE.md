@@ -76,7 +76,7 @@ src/
 
 `data-theme` 在容器上挂载：
 - `student-day`：学生日间（橘红暖色）
-- `student-night`：学生夜间（暗茶金，18:00-06:00 自动）
+- `student-night`：学生夜间（浅灰底 auxiliary 风格，18:00-06:00 自动）
 - `parent`：家长端（商务白蓝，强制日间）
 
 学生学习沉浸层包裹 `.student-theme-container` 类。非沉浸层直接写死 `data-theme`。

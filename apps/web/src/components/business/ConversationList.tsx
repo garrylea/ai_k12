@@ -13,7 +13,7 @@ export default function ConversationList() {
   const fetchConversations = () => {
     setLoading(true);
     setError(null);
-    listAllConversations('auxiliary')
+    listAllConversations('auxiliary', 'aux_qna')
       .then((items) => {
         setConversations(items);
         setLoading(false);

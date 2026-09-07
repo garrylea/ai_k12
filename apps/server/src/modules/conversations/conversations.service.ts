@@ -1,6 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { AiDialoguesRepository, AiMessagesRepository } from '../../database/repositories/index.js';
-import type { AiMessageRow } from '../../database/repositories/types.js';
+import type { AiDialogueScene, AiMessageRow } from '../../database/repositories/types.js';
+import type { CreateConversationDto } from './dto/create-conversation.dto.js';
+
+const SCENE_BY_TRACK: Record<'mainline' | 'auxiliary', AiDialogueScene[]> = {
+  mainline: ['mainline_question', 'mainline_card'],
+  auxiliary: ['aux_qna', 'aux_training'],
+};
 
 @Injectable()
 export class ConversationsService {
@@ -11,30 +17,89 @@ export class ConversationsService {
     private readonly messagesRepo: AiMessagesRepository,
   ) {}
 
-  async create(
-    studentId: number,
-    dto: { track: 'mainline' | 'auxiliary'; subjectId?: number; knowledgePointId?: number; cardId?: number },
-  ) {
+  async create(studentId: number, dto: CreateConversationDto) {
     if (dto.track !== 'mainline' && dto.track !== 'auxiliary') {
       throw new BadRequestException({ code: 1001, message: 'track 必须为 mainline 或 auxiliary' });
     }
+
+    const scene = dto.scene ?? (dto.track === 'auxiliary' ? 'aux_qna' : 'mainline_card');
+    if (!SCENE_BY_TRACK[dto.track].includes(scene)) {
+      throw new BadRequestException({ code: 1001, message: `scene ${scene} 与 track ${dto.track} 不匹配` });
+    }
+    // questionId 仅用于 aux_training 按题锚；缺省时退化为“每次新建”（孤儿题等场景，仍按 scene 隔离）。
+    if (dto.questionId != null && !Number.isInteger(dto.questionId)) {
+      throw new BadRequestException({ code: 1001, message: 'questionId 必须为正整数' });
+    }
+
+    // 训练讲一讲：按题 find-or-create，命中复用（跨刷新/跨设备续接同一讨论线）。
+    if (scene === 'aux_training' && dto.questionId) {
+      const existing = await this.dialoguesRepo.findByStudentTrackSceneQuestion(
+        studentId,
+        'auxiliary',
+        'aux_training',
+        dto.questionId,
+      );
+      if (existing) {
+        // 兼容存量空锚会话（曾因题面锚写入失败只建了会话、无任何消息）：
+        // 复用时若会话还没有任何消息，则补写一次题面锚，避免 AI 首问缺上下文。
+        if (dto.questionText && dto.questionText.trim().length > 0) {
+          const msgs = await this.messagesRepo.findByDialogue(existing.id);
+          if (msgs.length === 0) {
+            await this.writeQuestionSeed(existing.id, dto.questionText.trim());
+          }
+        }
+        return existing;
+      }
+    }
+
     const id = await this.dialoguesRepo.create({
       student_id: studentId,
       subject_id: dto.subjectId ?? null,
       track: dto.track,
+      scene,
       // mainline 讨论按 cardId 限定范围（loadContext 据此解析 cardContent 作 prompt 边界）；
       // auxiliary 无卡片，保持 null。
       card_id: dto.cardId ?? null,
+      question_id: scene === 'aux_training' ? (dto.questionId ?? null) : null,
       knowledge_point_id: dto.knowledgePointId ?? null,
       title: dto.track === 'auxiliary' ? '辅线答疑' : '主线讨论',
       status: 'active',
       consecutive_fail_count: 0,
     });
+
+    // 新建（非复用）且提供题面时：写一条 assistant 题面锚消息进历史，
+    // AI 每轮靠对话历史带题面，学生消息保持干净（辅线拍照题转录同款做法）。
+    if (dto.questionText && dto.questionText.trim().length > 0) {
+      await this.writeQuestionSeed(id, dto.questionText.trim());
+    }
+
     return this.dialoguesRepo.findById(id);
   }
 
-  async list(studentId: number, track: 'mainline' | 'auxiliary', cursor?: number) {
-    return this.dialoguesRepo.findByStudentAndTrack(studentId, track, this.PAGE_SIZE, cursor);
+  /** 写一条 assistant 题面锚消息（role=assistant, type=transcription, content=题面）。 */
+  private async writeQuestionSeed(dialogueId: number, questionText: string): Promise<void> {
+    await this.messagesRepo.create({
+      dialogue_id: dialogueId,
+      role: 'assistant',
+      content: questionText,
+      type: 'transcription',
+      reasoning: null,
+      attachments: null,
+      model: null,
+      token_input: null,
+      token_output: null,
+      response_time_ms: null,
+      safety_flag: 0,
+    });
+  }
+
+  async list(
+    studentId: number,
+    track: 'mainline' | 'auxiliary',
+    cursor?: number,
+    scene?: AiDialogueScene,
+  ) {
+    return this.dialoguesRepo.findByStudentAndTrack(studentId, track, this.PAGE_SIZE, cursor, scene);
   }
 
   async get(dialogueId: number, studentId: number) {
@@ -55,7 +120,9 @@ export class ConversationsService {
       student_id: studentId,
       subject_id: subjectId ?? null,
       track: 'mainline',
+      scene: 'mainline_card',
       card_id: cardId,
+      question_id: null,
       knowledge_point_id: null,
       title: '主线讨论',
       status: 'active',
@@ -101,6 +168,7 @@ export class ConversationsService {
       role: 'user',
       content,
       type: 'socratic',
+      reasoning: null,
       attachments: null,
       model: null,
       token_input: null,
@@ -122,6 +190,7 @@ export class ConversationsService {
       role: 'assistant',
       content,
       type,
+      reasoning: null,
       attachments: null,
       model: null,
       token_input: null,

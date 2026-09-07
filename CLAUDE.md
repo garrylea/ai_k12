@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code and CodeBuddy Code when working with code in this repository. 根目录 `AGENTS.md` 是本文件的软链（CodeBuddy 及其他读 AGENTS.md 的 agent 工具经它加载同一内容）。
 
 ## Project Overview
 
@@ -46,6 +46,21 @@ npx tsx src/ai-core/__tests__/safety-classification.ts   # deterministic safety 
 ```
 
 `grading-accuracy.ts` and `tutoring-quality.ts` in `__tests__/` are LLM eval scripts (require API keys, run via `tsx`, not picked up by vitest).
+
+### Python tools（crawler / data-refinery / db）
+
+Commands run from each `tools/*` directory:
+
+```bash
+pip install -r requirements.txt
+pytest    # 测试在 tests/test_*.py，共享 fixtures 在 conftest.py；网络依赖测试标记 network，默认 skip
+```
+
+## Commit & PR Guidelines
+
+- Conventional Commits：`feat(scope): subject` / `fix` / `test` / `docs`；常用 scope：`web`、`server`、`aux`、`ai-core`、`data-refinery`、`toc_parse`、`db_loader`（例：`feat(web): refactor CourseDetailPage layout`）
+- TS 严格模式、2 空格缩进、组件/类 PascalCase、函数/变量 camelCase；Python PEP 8 snake_case；提交前跑 `npm run lint`（apps/web）
+- PR 描述变更、关联 issue、行为变更引用对应设计文档章节（如 PRD §7.10）；UI 变更附截图
 
 ## Architecture (apps/web)
 
@@ -132,9 +147,9 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 
 **改代码前必读的关键约定**（详见上述总结文档 §3）：
 - LLM 配置用 `.env` 的 `LLM_BASE_URL`/`LLM_AUTH_TOKEN`（refinery 专属），**不要用 `ANTHROPIC_*`**（会被 shell 里 Claude Code 覆盖）。当前用本地 llama.cpp `Qwen3.8-27B`（`LLM_PROVIDER=local`、`LLM_BASE_URL=http://192.168.1.8:12345/v1`，2026-08-26 起 Card 标注/目录解析走本地模型；`.env` 里注释保留了原远程 DeepSeek `deepseek-v4-flash` 配置可切回）。
-- extract：lesson_id 由 LLM 给标题标识 + CLI 跨页继承（per-book 状态）；只有编号标题（`N.M`/`N.M.K`/`第N章`）开新课；章综述归该章"第 0 节"；前置内容（封面/目录/版权/前言）不抽取；试卷答案只提取不生成（从参考答案按题号提取，无则空）；**全角括号统一半角**--读页 md 后 `normalize_fullwidth_parens`（`（）`→`()`，1:1 不改长度，NFKC 等价不影响 content_hash；其余全角标点 。，；！？ 不动——`。` 无 NFKC 映射会改 hash，`。！？；` 是 splitter 句末切分点，2026-09-01）。
+- extract：lesson_id 由 LLM 给标题标识 + CLI 跨页继承（per-book 状态）；只有编号标题（`N.M`/`N.M.K`/`第N章`）开新课；章综述归该章"第 0 节"；前置内容（封面/目录/版权/前言）不抽取；试卷答案只提取不生成（从参考答案按题号提取，无则空）；**全角括号统一半角**--读页 md 后 `normalize_fullwidth_parens`（`（）`→`()`，1:1 不改长度，NFKC 等价不影响 content_hash；其余全角标点 。，；！？ 不动——`。` 无 NFKC 映射会改 hash，`。！？；` 是 splitter 句末切分点，2026-09-01）；**页眉/页脚剥离 + 书尾识别**（2026-09-02）--`page_chrome.py` 书级频率统计自动发现运行页眉（≥3 页 + 安全模式：出版社/水印/纯页码/ISBN，「练习」等内容标题永不剥），`is_front_matter` 判定与 split 前都先 `strip_chrome`；`is_front_matter` 新增书尾规则（ISBN/绿色印刷/后记附录索引/电话+邮箱/组织说明页标记≥3/剥空页）。重抽目标页用 `unmark_extracted` 而非 `--force`（--force 绕过 skip 分支会断 lesson_id 跨页继承回填）。详见 `docs/superpowers/plans/2026-09-01-page-chrome-and-backmatter.md`。
 - publish：资产路径用源相对稳定键；subject 按文件路径首段推导（2026-08-26 前曾硬编码 "math" 误标化学，已修）。
-- db_loader：subject 别名归一（chem->chemistry）、rel_path/lesson_id 解析派生教材结构、cards sort_order 跨页全局重排、full-reload 幂等；**full-reload 有业务数据守卫**——库中存在业务数据（answers/error_books 等外键表）时默认报错退出，需显式 `--purge-business-data`（按 FK 安全序清空）或改用 `--load-cards` 增量；**版次（edition）维度**--textbook_versions 按 `(subject_id, publisher, grade_band, edition)` 4 元组唯一，edition 用 `edition_from_book_name` 从书名前导括号提取（只用括号内容不用完整书名，勿用随机值做 code 破坏幂等）。
+- db_loader：subject 别名归一（chem->chemistry）、rel_path/lesson_id 解析派生教材结构、cards sort_order 跨页全局重排、full-reload 幂等；**full-reload 有业务数据守卫**——库中存在业务数据（answers/error_books 等外键表）时默认报错退出，需显式 `--purge-business-data`（按 FK 安全序清空）或改用 `--load-cards` 增量；**版次（edition）维度**--textbook_versions 按 `(subject_id, publisher, grade_band, edition)` 4 元组唯一，edition 用 `edition_from_book_name` 从书名前导括号提取（只用括号内容不用完整书名，勿用随机值做 code 破坏幂等）；**页码锚定 lesson_anchor**（2026-09-02）——TOC 模式挂卡时 `load_book_cards` 先过 `LessonAnchor` 确定性修正：章边界首选综述卡锚定（每章「第N章」标签卡最小 md 页 = 章头页，无偏移误差；兜底首节 printed + 偏移众数 − 3 余量），规则 A 错章重写（content「复习题 N」> 时间线活跃节 > 标题匹配 > 章综述）/ B 同名消歧（「小结」「数学活动」按页所在章）/ C 复习题归一（挂该章「小结」，不建「复习题 N」lesson）；无 TOC/对不上 → 整体退化既有匹配。extract/publish/jsonl 不动，锚定每次 load 重算（重处理任意页不影响结构）。详见 `docs/superpowers/plans/2026-09-02-lesson-anchor-design.md`。
 - DB：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。
 
 **HTTP API 层已建成**（`apps/server/src/modules/`：practice/ai/conversations/progress/auth/parent/admin/content/files/refinery），前后端已接通。API 契约见 `docs/api/openapi.yaml` + `docs/API接口与数据流设计文档.md`（两份互为对照，见上文同步规则）。已知待办（详见 `docs/ai-core-changelog.md` 各条目「局限/待办」）：管理员角色细分、模型用量计费、BanRegistry 多实例（需 Redis）、refresh token。

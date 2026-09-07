@@ -48,6 +48,12 @@
 2. 每条用户消息前缀题面（镜像既有题目级模式 `这道题目是：\n\n{题面}\n\n我的问题：…`），AI 始终有上下文，无需种子消息。
 3. `DiscussDrawer` props 联合类型新增 `training` 变体（`questionText` + `onClose`），宽度/标题对齐题目级模式。
 
+> ⚠️ **2026-09-07 变更注记**：第 2 点「每条用户消息前缀题面」已废弃。改为——建会话时
+> `POST /api/conversations`（`scene='aux_training'` + `questionId`/`questionText`）按题 find-or-create，
+> 仅新建时把题面作为一条 assistant 题面锚消息写入历史；学生消息永远干净、AI 每轮靠对话历史带题面
+> （复用辅线拍照题“题目进历史、学生消息干净”的链路）。会话新增 `scene` 分型，训练讲一讲与辅线答疑
+> 按类型隔离，互不显示在对方历史列表。详见 API 设计文档 §6.18。
+
 ### 对 API 文档的影响
 
 无接口变更，openapi.yaml / API 设计文档不需要同步。

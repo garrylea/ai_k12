@@ -406,6 +406,7 @@ export class PracticeService {
     }
     const dialogue = await this.conversationsService.create(input.studentId, {
       track: 'mainline',
+      scene: 'mainline_question',
       cardId: input.cardId,
     });
     if (!dialogue) {

@@ -116,6 +116,7 @@ pytest tests/ -q                                # 105 passed
 4. **教材 card 覆盖不全**：只有下册 16 页（34 cards），整本下册 50 页 + 上册 + 其它学科教材未抽。
 5. **增量加载**：db_loader 用 full-reload，无 checkpoint 增量。
 6. **资产静态服务**：开发期用 `python -m http.server` 临时方案，生产需 CDN/OSS（`ASSET_BASE_URL`）。
+7. **`questions.content` 字面 `\n` 双转义未还原**（2026-09-04 发现）--LLM 输出 JSON 时把换行写成 `\\n`（双反斜杠+n），`json.loads` 解析后变成**字面 `\n` 两字符**（0x5C 0x6E，反斜杠+n），而非真换行 0x0A。`extract.py:_repair_json_escapes` 把 `\\` 当合法 JSON 转义跳过，没修正，字面 `\n` 一路进 DB。`react-markdown` 不认字面 `\n`（CommonMark 反斜杠转义只对 ASCII 标点生效），原样显示成可见文本。**MVP 阶段前端兼容处理**：`QuestionRunner`/`ChoiceOptionList` 的 `preprocessMarkdown` 把 `\n`（后非字母）还原成真换行，避开 LaTeX 命令（`\ne` `\newline` `\nonumber` `\nabla` `\neg` `\nu` 等）。将来在管线层统一修复（`_repair_json_escapes` 增加 `\\n` → `\n` 的规范化，或 LLM 提示词强调换行用真 0x0A），改完撤掉前端的 `preprocessMarkdown` 兼容层。
 
 ## 7. 下一步（最大缺口）
 

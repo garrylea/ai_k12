@@ -521,3 +521,77 @@ def test_split_options_content_above_with_caption():
     assert opts[1]["text"] == "![](images/b.jpg)\n日晷上呈现针的影子"
     assert opts[2]["text"] == "![](images/c.jpg)\n透过放大镜看到放大的图案"
     assert opts[3]["text"] == "![](images/d.jpg)\n人透过水球所成的像"
+
+
+def test_split_page_part_header_closes_question():
+    """'## 第二部分 非选择题' 部分标题：关闭当前题、标题行不混入题 content，
+    后续题归下一个大题分组。"""
+    text = (
+        "8. 以下四个结论：\n"
+        "(A) ①④ (B) ②③ (C) ①②④ (D) ①②③④\n"
+        "## 第二部分 非选择题\n"
+        "## 二、填空题（共16分，每题2分）\n"
+        "9. 若代数式有意义"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert len(result) == 2
+    # 题8 content 不带 '## 第二部分 非选择题' 污染
+    assert "第二部分" not in by_order[8].content
+    assert "## 第二部分" not in by_order[8].content
+    # 题9 归属大题分组"二"（部分标题不占用分组）
+    assert by_order[9].group_id == "二"
+
+
+def test_is_main_stem_year_after_dot():
+    """题号 + 年份格式 '6.2025年3月14日...'：. 后是 4 位年份+中文，当题号。"""
+    ok, n = is_main_stem("6.2025年3月14日是第六个国际数学日")
+    assert ok and n == 6
+
+
+def test_is_main_stem_colon_format():
+    """题号冒号格式 '21: 在平面直角坐标系...'：当题号。"""
+    ok, n = is_main_stem("21: 在平面直角坐标系 $xOy$ 中")
+    assert ok and n == 21
+
+
+def test_strip_main_stem_prefix_colon_and_year():
+    """剥离 '21:' 与 '6.2025年' 前缀。"""
+    assert _strip_main_stem_prefix("21: 在平面直角坐标系") == "在平面直角坐标系"
+    assert _strip_main_stem_prefix("6.2025年3月14日") == "2025年3月14日"
+
+
+def test_split_page_ambiguous_stem_state_machine():
+    """状态机：选择题区行首 '6.2025年3月14日...'（疑似小数）后跟 '7.' 题号
+    → 6.xxx 是题号，拆出题6。"""
+    text = (
+        "## 第一部分 选择题\n"
+        "## 一、选择题（共16分，每题2分）\n"
+        "5. 第五题 (A) 1 (B) 2 (C) 3 (D) 4\n"
+        "6.2025年3月14日是第六个国际数学日。某学校策划了三个挑战活动, 如果两人每人随机选择参加其中一个活动, 则她们恰好选到同一个活动的概率是\n"
+        "7. 第七题 (A) 甲 (B) 乙 (C) 丙 (D) 丁"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert 6 in by_order
+    assert by_order[6].content.startswith("2025年3月14日")
+    assert "概率是" in by_order[6].content
+    assert by_order[6].group_id == "一"
+
+
+def test_split_page_colon_stem():
+    """题号冒号格式 '21: 在平面直角坐标系...'：拆出题21（非选择题区）。"""
+    text = (
+        "## 第二部分 非选择题\n"
+        "## 三、解答题（共68分）\n"
+        "20. 第二十题\n"
+        "21: 在平面直角坐标系 $xOy$ 中, 一次函数\n"
+        "(1) 求 $k; b$ 的值;\n"
+        "22. 第二十二题"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert 21 in by_order
+    assert by_order[21].content.startswith("在平面直角坐标系")
+    assert "(1) 求" in by_order[21].content
+    assert "20. 第二十题" not in by_order[21].content

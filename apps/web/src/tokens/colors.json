@@ -8,11 +8,11 @@
       "aux": { "accent": "#7B68C9" }
     },
     "night": {
-      "brand": { "500": "#D88A35", "400": "#E09F5A", "600": "#C0782A", "100": "#3A2E1C" },
-      "bg": { "base": "#1C1812", "card": "#262017", "elevated": "#2F2820", "subtle": "#221C14" },
-      "text": { "primary": "#E8DCC2", "secondary": "#B5A685", "tertiary": "#7D7158", "onBrand": "#1C1812" },
-      "func": { "success": "#6B9E72", "warning": "#C89A3A", "error": "#B07060", "info": "#7898B0" },
-      "aux": { "accent": "#8A7BC9" }
+      "brand": { "500": "#C9743E", "400": "#D88E5E", "600": "#B06030", "100": "#C9D5E533" },
+      "bg": { "base": "#F5F5F7", "card": "#FFFFFF", "elevated": "#FFFFFF", "subtle": "#EFEFEF" },
+      "text": { "primary": "#2A1F18", "secondary": "#6B5D52", "tertiary": "#9C8D80", "onBrand": "#FFFFFF" },
+      "func": { "success": "#5C8A6A", "warning": "#C0904A", "error": "#A05A50", "info": "#6B8AA6" },
+      "aux": { "accent": "#7B5A8E" }
     }
   },
   "parent": {

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import {
+  markdownRemarkPlugins,
+  markdownRehypePlugins,
+  markdownComponents,
+} from '@/components/markdown';
 import { useDiscussChat } from '@/hooks/useDiscussChat';
 import { DiscussChat } from './DiscussChat';
 
@@ -28,9 +29,12 @@ type CardProps = {
 };
 
 // 训练轨（答题页内抽屉）：同题目级（右抽屉，放大铺满），但不挂卡片上下文。
+// questionId 用于按题锚定会话（scene=aux_training find-or-create），实现同题跨刷新续接。
 type TrainingProps = {
   mode: 'training';
   questionText: string;
+  // 按题锚定会话用（scene=aux_training find-or-create）；孤儿题等缺省时退化为每次新建。
+  questionId?: number;
   onClose: () => void;
 };
 
@@ -42,7 +46,7 @@ export function DiscussDrawer(props: Props) {
     props.mode === 'question'
       ? { mode: 'question', cardId: props.cardId, questionText: props.questionText, subjectId: props.subjectId, lessonId: props.lessonId }
       : props.mode === 'training'
-        ? { mode: 'training', questionText: props.questionText }
+        ? { mode: 'training', questionText: props.questionText, questionId: props.questionId }
         : { mode: 'card', cardId: props.cardId, subjectId: props.subjectId, lessonId: props.lessonId },
   );
   const [expanded, setExpanded] = useState(false);
@@ -112,7 +116,7 @@ export function DiscussDrawer(props: Props) {
           {props.mode === 'card' ? '当前卡片' : '当前题目'}
         </div>
         <div className="text-xs text-[var(--text-secondary)] line-clamp-2">
-          <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
+          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
             {props.mode === 'card' ? (props.cardTitle || 'AI 讨论') : props.questionText}
           </ReactMarkdown>
         </div>

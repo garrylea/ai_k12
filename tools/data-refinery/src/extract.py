@@ -56,6 +56,60 @@ def _repair_json_escapes(text: str) -> str:
     return "".join(out)
 
 
+_TAG_LT_RE = re.compile(r"<([a-zA-Z][a-zA-Z0-9]*)(?=<)")
+
+
+def repair_malformed_html(text: str | None) -> str | None:
+    """修 LLM 抽取题面时常见的 HTML 残缺：``<tr<td>`` 这种缺 ``>`` 的写法
+    修成 ``<tr><td>``。
+
+    Why: 本地量化模型在表格稠密的题面里偶发把 ``<tr><td>`` 的第一个 ``>``
+    漏掉，写成 ``<tr<td>``。前端的 ``rehype-raw``（用 parse5）和 Python 的
+    bs4+html.parser / bs4+lxml 都无法修这种残缺——parse5/html.parser 把
+    ``tr<td`` 当成 tag 名（React 渲染抛 ``Invalid tag: tr<td``），lxml 把
+    ``<tr<td>20</td>`` 解析成 ``<tr>20<td>21</td></tr>``（20 裸露在 tr 里
+    没被 td 包裹）。两者都破坏表格结构，故自己写正则。
+
+    规则：``<tag`` 后跟 ``<``（而非 ``>``）说明 tag 没闭合，补 ``>``。用
+    lookahead ``(?=<)`` 不消耗 ``<``，一次扫描能处理连续残缺
+    （``<table<tr<td>`` → ``<table><tr><td>``：``<table`` 匹配补 ``>``，
+    ``<`` 保留给下一轮 ``<tr`` 匹配）。只匹配 ``<字母序列`` 后跟 ``<``，
+    不误伤合法 ``a < b`` / ``$x < y$``（``<`` 后非字母或后续非 ``<``），
+    也不误伤合法 ``<table>``（``<table`` 后是 ``>`` 不匹配前瞻）。
+
+    调用点：``Extractor.run`` 在 LLM JSON 解析后、构造 dataclass 前，
+    对题面 markdown 字段（content / options[].text / answer / explanation /
+    material_text / title）调用。前端 ``apps/web/src/components/markdown.tsx``
+    有同名 ``repairHtml`` 兜底，已有库数据无需重跑管线即生效。
+    """
+    if not text or "<" not in text:
+        return text
+    return _TAG_LT_RE.sub(r"<\1>", text)
+
+
+# 含 markdown / HTML 表格的题面字段，需在 LLM 输出后调 repair_malformed_html。
+_MD_HTML_FIELDS_QUESTIONS = ("content", "answer", "explanation", "material_text")
+_MD_HTML_FIELDS_CARDS = ("content", "title")
+
+
+def _repair_item_html(item: dict, kind: str) -> dict:
+    """对单个 LLM 抽取条目的 markdown 字段修 HTML 残缺。原地修改并返回。"""
+    fields = (
+        _MD_HTML_FIELDS_QUESTIONS if kind == "questions" else _MD_HTML_FIELDS_CARDS
+    )
+    for f in fields:
+        v = item.get(f)
+        if isinstance(v, str):
+            item[f] = repair_malformed_html(v)
+    if kind == "questions":
+        opts = item.get("options")
+        if isinstance(opts, list):
+            for opt in opts:
+                if isinstance(opt, dict) and isinstance(opt.get("text"), str):
+                    opt["text"] = repair_malformed_html(opt["text"])
+    return item
+
+
 def _parse_json_object(content: str) -> dict:
     """从 LLM 输出中解析 JSON 对象。
 
@@ -119,6 +173,9 @@ class Extractor:
         raw_items = data.get("items", [])
         # 跳过 content 为 null/空 的条目（LLM 偶发对纯图片片段返回 null，避免整页失败）
         raw_items = [it for it in raw_items if it.get("content")]
+        # 修 LLM 输出题面里常见的 HTML 残缺（<tr<td> 缺 >）→ <tr><td>，
+        # 在构造 dataclass 前对所有 markdown 字段调用（见 repair_malformed_html）
+        raw_items = [_repair_item_html(it, self._kind) for it in raw_items]
 
         if self._kind == "questions":
             items = [ExamQuestion(**item) for item in raw_items]

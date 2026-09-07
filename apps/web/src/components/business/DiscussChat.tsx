@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import {
+  markdownRemarkPlugins,
+  markdownRehypePlugins,
+  MarkdownImg,
+} from '@/components/markdown';
 import type { DiscussMessage } from '@/hooks/useDiscussChat';
 
 // ── 消息身份图标 ──
@@ -35,8 +36,8 @@ const ThinkingDots = () => (
 const Markdown = ({ children }: { children: string }) => (
   <div className="chat-prose">
     <ReactMarkdown
-      remarkPlugins={[remarkMath, remarkGfm]}
-      rehypePlugins={[rehypeKatex]}
+      remarkPlugins={markdownRemarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
       components={{
         p: ({ children }) => <p className="leading-relaxed first:mt-0 last:mb-0">{children}</p>,
         ul: ({ children }) => <ul className="list-disc pl-5 my-1">{children}</ul>,
@@ -48,6 +49,9 @@ const Markdown = ({ children }: { children: string }) => (
           ) : (
             <code className="px-1 py-0.5 rounded bg-black/5 font-mono text-[0.85em]" {...props}>{children}</code>
           ),
+        img: (props: { src?: string; alt?: string }) => (
+          <MarkdownImg {...props} className="inline-block my-2 max-w-full max-h-[180px] object-contain rounded-lg align-middle" />
+        ),
       }}
     >
       {children}

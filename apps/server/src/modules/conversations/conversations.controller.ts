@@ -23,9 +23,15 @@ export class ConversationsController {
   async list(
     @Query('track') track: 'mainline' | 'auxiliary',
     @Query('cursor') cursor: string,
+    @Query('scene') scene: string,
     @CurrentUser() user: JwtUser,
   ) {
-    return this.conversationsService.list(user.sub, track, cursor ? Number(cursor) : undefined);
+    return this.conversationsService.list(
+      user.sub,
+      track,
+      cursor ? Number(cursor) : undefined,
+      scene as 'aux_qna' | 'aux_training' | 'mainline_question' | 'mainline_card' | undefined,
+    );
   }
 
   @Get(':dialogueId')

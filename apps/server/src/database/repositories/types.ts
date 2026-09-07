@@ -1,11 +1,16 @@
 import type { RowDataPacket } from 'mysql2/promise';
 
+/** 会话场景分型：按使用场景隔离各系统的对话历史（共用 ai_dialogues 一张表）。 */
+export type AiDialogueScene = 'aux_qna' | 'aux_training' | 'mainline_question' | 'mainline_card';
+
 export interface AiDialogueRow extends RowDataPacket {
   id: number;
   student_id: number;
   subject_id: number | null;
   track: 'mainline' | 'auxiliary';
+  scene: AiDialogueScene;
   card_id: number | null;
+  question_id: number | null;
   knowledge_point_id: number | null;
   title: string | null;
   status: 'active' | 'archived' | 'completed';
@@ -24,7 +29,7 @@ export interface AiMessageRow extends RowDataPacket {
   role: 'system' | 'user' | 'assistant';
   content: string;
   reasoning: string | null;
-  type: 'socratic' | 'hint' | 'explain' | 'fallback' | 'block' | 'chat' | null;
+  type: 'socratic' | 'hint' | 'explain' | 'fallback' | 'block' | 'chat' | 'transcription' | null;
   attachments: string | null;
   model: string | null;
   token_input: number | null;

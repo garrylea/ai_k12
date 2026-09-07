@@ -2,10 +2,13 @@ import { useEffect, useState, useMemo, useRef, useCallback, Children } from 'rea
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import {
+  markdownRemarkPlugins,
+  markdownRehypePlugins,
+  markdownComponents,
+  preprocessMarkdown,
+  MarkdownImg,
+} from '@/components/markdown';
 import { useThemeStore } from '@/store/themeStore';
 import { fetchLessonCards, getUnclearedErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, fetchStarMap, type LessonCard, type LessonCardsData, type PracticeGroupMeta, type PreviousErrorDetail } from '@/services/api';
 import { BackButton, LogoutButton, ConfirmDialog } from '@/components/base';
@@ -14,10 +17,6 @@ import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer } from '@/components/business/DiscussDrawer';
 import { CleanupPhase } from '@/components/business/CleanupPhase';
 import { usePracticeStore } from '@/store/practiceStore';
-
-const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
-const resolveAsset = (p: string) =>
-  /^https?:\/\//.test(p) ? p : `${ASSET_BASE}${p.replace(/^\/+/, '')}`;
 
 // --- Icons ---
 const ChevronLeftIcon = () => (
@@ -795,8 +794,8 @@ export default function CourseDetailPage() {
                                   <div key={gi} className="space-y-3">
                                     {g.intro && (
                                       <div className="[&>*]:font-bold [&>*]:text-[var(--learn-text-primary)]">
-                                        <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                                          {g.intro}
+                                        <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                                          {preprocessMarkdown(g.intro)}
                                         </ReactMarkdown>
                                       </div>
                                     )}
@@ -814,8 +813,8 @@ export default function CourseDetailPage() {
                                         >
                                           <div className="flex items-start gap-2">
                                             <div className="flex-1">
-                                              <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                                                {q.text}
+                                              <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                                                {preprocessMarkdown(q.text)}
                                               </ReactMarkdown>
                                             </div>
                                             {answered && (
@@ -840,8 +839,8 @@ export default function CourseDetailPage() {
                             <div className="learn-prose space-y-3">
                               {intro && (
                                 <div className="[&>*]:font-bold [&>*]:text-[var(--learn-text-primary)]">
-                                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                                    {intro}
+                                  <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                                    {preprocessMarkdown(intro)}
                                   </ReactMarkdown>
                                 </div>
                               )}
@@ -857,8 +856,8 @@ export default function CourseDetailPage() {
                                   >
                                     <div className="flex items-start gap-2">
                                       <div className="flex-1">
-                                        <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                                          {q.text}
+                                        <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                                          {preprocessMarkdown(q.text)}
                                         </ReactMarkdown>
                                       </div>
                                       {answered && (
@@ -876,8 +875,8 @@ export default function CourseDetailPage() {
                         return (
                           <div className="learn-prose">
                             <ReactMarkdown
-                              remarkPlugins={[remarkMath, remarkGfm]}
-                              rehypePlugins={[rehypeKatex]}
+                              remarkPlugins={markdownRemarkPlugins}
+                              rehypePlugins={markdownRehypePlugins}
                               components={{
                                 p: ({ children, ...props }) => {
                                   // 1. 图片 + 图注
@@ -901,13 +900,8 @@ export default function CourseDetailPage() {
                                   }
                                   return <p {...props}>{children}</p>;
                                 },
-                                img: ({ src, alt }) => (
-                                  <img
-                                    src={src ? resolveAsset(src) : ''}
-                                    alt={alt ?? ''}
-                                    className="block mx-auto my-4 max-w-full max-h-[60vh] object-contain rounded-lg"
-                                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                                  />
+                                img: (props: { src?: string; alt?: string }) => (
+                                  <MarkdownImg {...props} className="block mx-auto my-4 max-w-full max-h-[60vh] object-contain rounded-lg" />
                                 ),
                               }}
                             >

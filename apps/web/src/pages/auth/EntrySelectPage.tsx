@@ -77,7 +77,7 @@ export default function EntrySelectPage() {
       </header>
 
       {/* 2. 中部：三入口大卡（三卡视觉一致，靠文字「学习/答疑/训练」区分） */}
-      <main className="w-full max-w-3xl my-auto py-10 flex flex-col items-center">
+      <main className="w-full max-w-4xl my-auto py-10 flex flex-col items-center">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
           {/* 学习：主入口 */}
           <motion.button

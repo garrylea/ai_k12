@@ -345,9 +345,13 @@ export async function uploadFile(file: File, signal?: AbortSignal): Promise<Uplo
 
 // --- Conversations (auxiliary) ---
 
+// 会话场景分型：与后端 ai_dialogues.scene 对应，用于按系统隔离对话历史。
+export type AiConversationScene = 'aux_qna' | 'aux_training' | 'mainline_question' | 'mainline_card';
+
 export interface ConversationItem {
   id: number;
   track: 'mainline' | 'auxiliary';
+  scene: AiConversationScene;
   title: string | null;
   status: string;
   created_at: string;
@@ -355,9 +359,13 @@ export interface ConversationItem {
 
 export function createConversation(req: {
   track: 'mainline' | 'auxiliary';
+  scene?: AiConversationScene;
   subjectId?: number;
   knowledgePointId?: number;
   cardId?: number;
+  // 训练讲一讲：按题锚定 + 题面锚消息（scene='aux_training' 时用）
+  questionId?: number;
+  questionText?: string;
 }): Promise<ConversationItem> {
   return fetchApi<ConversationItem>('/conversations', {
     method: 'POST',
@@ -365,8 +373,12 @@ export function createConversation(req: {
   });
 }
 
-export function listConversations(track: 'auxiliary', cursor?: number): Promise<ConversationItem[]> {
-  const qs = cursor ? `?track=${track}&cursor=${cursor}` : `?track=${track}`;
+export function listConversations(
+  track: 'auxiliary',
+  scene: AiConversationScene,
+  cursor?: number,
+): Promise<ConversationItem[]> {
+  const qs = cursor ? `?track=${track}&scene=${scene}&cursor=${cursor}` : `?track=${track}&scene=${scene}`;
   return fetchApi<ConversationItem[]>(`/conversations${qs}`);
 }
 
@@ -375,12 +387,12 @@ export function listConversations(track: 'auxiliary', cursor?: number): Promise<
 // Used by the sidebar so the "展开全部" button can reveal history beyond the
 // first page. Capped at 50 pages (500 items) as a safety valve against a
 // runaway loop; a K12 student won't approach that.
-export async function listAllConversations(track: 'auxiliary'): Promise<ConversationItem[]> {
+export async function listAllConversations(track: 'auxiliary', scene: AiConversationScene): Promise<ConversationItem[]> {
   const PAGE = 10;
   const all: ConversationItem[] = [];
   let cursor: number | undefined;
   for (let i = 0; i < 50; i++) {
-    const page = await listConversations(track, cursor);
+    const page = await listConversations(track, scene, cursor);
     all.push(...page);
     if (page.length < PAGE) break;
     cursor = page[page.length - 1].id;

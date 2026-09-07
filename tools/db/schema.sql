@@ -616,7 +616,9 @@ CREATE TABLE IF NOT EXISTS ai_dialogues (
   student_id BIGINT NOT NULL,
   subject_id BIGINT DEFAULT NULL,
   track VARCHAR(10) NOT NULL,
+  scene VARCHAR(30) NOT NULL DEFAULT 'aux_qna',  -- 会话场景分型: aux_qna(辅线答疑)|aux_training(训练讲一讲)|mainline_question(课堂练习讲一讲)|mainline_card(卡片思辨答疑)
   card_id BIGINT DEFAULT NULL,
+  question_id BIGINT DEFAULT NULL,               -- 训练讲一讲按题锚（find-or-create）；question 级讨论由 main_error_books.dialogue_id 锚定
   knowledge_point_id BIGINT DEFAULT NULL,
   title VARCHAR(200) DEFAULT NULL,
   status VARCHAR(10) NOT NULL DEFAULT 'active',
@@ -629,9 +631,11 @@ CREATE TABLE IF NOT EXISTS ai_dialogues (
   deleted_at DATETIME(3) DEFAULT NULL,
   KEY idx_dlg_student_track (student_id, track),
   KEY idx_dlg_student_card (student_id, track, card_id),
+  KEY idx_dlg_student_scene_question (student_id, track, scene, question_id),
   CONSTRAINT fk_dlg_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_dlg_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE SET NULL,
   CONSTRAINT fk_dlg_card_id FOREIGN KEY (card_id) REFERENCES cards (id) ON DELETE SET NULL,
+  CONSTRAINT fk_dlg_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE SET NULL,
   CONSTRAINT fk_dlg_knowledge_point_id FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

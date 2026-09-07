@@ -9,9 +9,12 @@ export class AiDialoguesRepository {
   async create(row: Omit<AiDialogueRow, 'id' | 'created_at' | 'updated_at' | 'deleted_at'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO ai_dialogues
-       (student_id, subject_id, track, card_id, knowledge_point_id, title, status, consecutive_fail_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [row.student_id, row.subject_id, row.track, row.card_id, row.knowledge_point_id, row.title, row.status, row.consecutive_fail_count],
+       (student_id, subject_id, track, scene, card_id, question_id, knowledge_point_id, title, status, consecutive_fail_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.student_id, row.subject_id, row.track, row.scene, row.card_id, row.question_id,
+        row.knowledge_point_id, row.title, row.status, row.consecutive_fail_count,
+      ],
     );
     return result.insertId;
   }
@@ -24,20 +27,53 @@ export class AiDialoguesRepository {
     return (rows[0] as AiDialogueRow) ?? null;
   }
 
-  async findByStudentAndTrack(studentId: number, track: AiDialogueRow['track'], limit: number, cursor?: number): Promise<AiDialogueRow[]> {
-    const clause = cursor ? 'AND id < ?' : '';
-    const params = cursor ? [studentId, track, cursor, limit] : [studentId, track, limit];
-    // Use pool.query (client-side escaping) instead of pool.execute (server-side
-    // prepared statements): MySQL rejects `LIMIT ?` as a prepared-statement
-    // placeholder with "Incorrect arguments to mysqld_stmt_execute". The `?`
-    // values are still parameterized/escaped by mysql2, so no injection risk.
+  async findByStudentAndTrack(
+    studentId: number,
+    track: AiDialogueRow['track'],
+    limit: number,
+    cursor?: number,
+    scene?: AiDialogueRow['scene'],
+  ): Promise<AiDialogueRow[]> {
+    // 用池 query（客户端转义）而非 execute（服务端预处理）：MySQL 对预处理语句的
+    // `LIMIT ?` 报 "Incorrect arguments to mysqld_stmt_execute"。值仍经 mysql2 转义，无注入风险。
+    const conditions = ['student_id = ?', 'track = ?', 'deleted_at IS NULL'];
+    const params: Array<number | string> = [studentId, track];
+    if (cursor) {
+      conditions.push('id < ?');
+      params.push(cursor);
+    }
+    if (scene) {
+      conditions.push('scene = ?');
+      params.push(scene);
+    }
+    params.push(limit);
     const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT * FROM ai_dialogues
-       WHERE student_id = ? AND track = ? AND deleted_at IS NULL ${clause}
+       WHERE ${conditions.join(' AND ')}
        ORDER BY id DESC LIMIT ?`,
       params,
     );
     return rows as AiDialogueRow[];
+  }
+
+  /**
+   * 训练讲一讲 find-or-create：该学生该题（scene + question_id 锚）最近一条 active 会话。
+   * 命中则复用（跨刷新/跨设备续接同一讨论线），未命中则由上层创建。
+   * idx_dlg_student_scene_question(student_id, track, scene, question_id) 支撑此查询。
+   */
+  async findByStudentTrackSceneQuestion(
+    studentId: number,
+    track: AiDialogueRow['track'],
+    scene: AiDialogueRow['scene'],
+    questionId: number,
+  ): Promise<AiDialogueRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM ai_dialogues
+       WHERE student_id = ? AND track = ? AND scene = ? AND question_id = ? AND deleted_at IS NULL
+       ORDER BY id DESC LIMIT 1`,
+      [studentId, track, scene, questionId],
+    );
+    return (rows[0] as AiDialogueRow) ?? null;
   }
 
   /**

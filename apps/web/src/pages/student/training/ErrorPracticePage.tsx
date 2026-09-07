@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import {
+  markdownRemarkPlugins,
+  markdownRehypePlugins,
+  MarkdownImg,
+} from '@/components/markdown';
 import { Button, Card, PageHeader, Skeleton, Tag } from '@/components/base';
 import { getKnowledgePoints, getTrainingErrorBook, type TrainingErrorBookEntry } from '@/services/api';
-import { useThemeStore } from '@/store/themeStore';
 
 /** id 对应 subjects 表 seed（1=数学），与现有页一致。 */
 const MATH_SUBJECT_ID = 1;
@@ -30,7 +35,7 @@ const levelColor = ['#4A9B6E', '#D89844', '#C44A3F', '#A03020', '#7B1F1F'];
 
 const EmptyStateIcon = () => (
   <svg
-    className="w-14 h-14 text-[var(--text-tertiary)]"
+    className="w-14 h-14 text-[var(--learn-text-tertiary)]"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -46,13 +51,13 @@ const EmptyStateIcon = () => (
 );
 
 const selectClassName =
-  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] ' +
-  'bg-[var(--bg-card)] text-[var(--text-primary)] text-sm ' +
+  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
+  'bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] text-sm ' +
   'focus:outline-none focus:ring-2 focus:ring-[var(--brand-100)]';
 
 const dateInputClassName =
-  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] ' +
-  'bg-[var(--bg-card)] text-[var(--text-primary)] text-sm ' +
+  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
+  'bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] text-sm ' +
   'focus:outline-none focus:ring-2 focus:ring-[var(--brand-100)]';
 
 function formatDate(iso: string): string {
@@ -63,14 +68,6 @@ function formatDate(iso: string): string {
 
 export default function ErrorPracticePage() {
   const navigate = useNavigate();
-  const { mode, autoToggleNightMode } = useThemeStore();
-
-  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像 CourseDetailPage 的用法）
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
 
   // 筛选条件
   const [from, setFrom] = useState('');
@@ -162,17 +159,17 @@ export default function ErrorPracticePage() {
   };
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-32">
           {/* 顶栏 */}
           <PageHeader to="/student/training/home" caption="返回训练" title="错题练习" />
 
           {/* 筛选区 */}
-          <Card className="mt-6">
+          <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
             <div className="flex flex-wrap items-end gap-4">
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">错题时间从</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">错题时间从</span>
                 <input
                   type="date"
                   value={from}
@@ -183,7 +180,7 @@ export default function ErrorPracticePage() {
                 />
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">到</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">到</span>
                 <input
                   type="date"
                   value={to}
@@ -194,7 +191,7 @@ export default function ErrorPracticePage() {
                 />
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">题型</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题型</span>
                 <select
                   value={type}
                   onChange={(e) => setType(e.target.value)}
@@ -207,7 +204,7 @@ export default function ErrorPracticePage() {
                 </select>
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">专项</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">专项</span>
                 <select
                   value={kpId}
                   onChange={(e) => setKpId(e.target.value)}
@@ -231,7 +228,7 @@ export default function ErrorPracticePage() {
             {loading ? (
               // 加载骨架
               Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i} className="space-y-3 py-5">
+                <Card key={i} className="space-y-3 py-5 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
                   <Skeleton width="30%" height={14} />
                   <Skeleton height={40} />
                   <Skeleton width="20%" height={12} />
@@ -239,14 +236,14 @@ export default function ErrorPracticePage() {
               ))
             ) : error ? (
               <div className="flex flex-col items-center gap-4 py-16">
-                <p className="text-[var(--text-secondary)]">{error}</p>
+                <p className="text-[var(--learn-text-secondary)]">{error}</p>
                 <Button variant="secondary" size="md" onClick={() => void load()}>重试</Button>
               </div>
             ) : entries.length === 0 ? (
               // 空态
               <div className="flex flex-col items-center gap-4 py-16">
                 <EmptyStateIcon />
-                <p className="text-[var(--text-secondary)]">当前筛选下没有待练错题</p>
+                <p className="text-[var(--learn-text-secondary)]">当前筛选下没有待练错题</p>
               </div>
             ) : (
               entries.map((entry) => {
@@ -255,7 +252,7 @@ export default function ErrorPracticePage() {
                 return (
                   <Card
                     key={entry.errorBookId}
-                    className={isOrphan ? 'opacity-70' : 'cursor-pointer hover:shadow-[var(--shadow-elevated)]'}
+                    className={isOrphan ? 'opacity-70 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]' : 'cursor-pointer hover:shadow-[var(--shadow-elevated)] bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'}
                     onClick={isOrphan ? undefined : () => toggle(entry)}
                   >
                     <div className="flex items-start gap-4">
@@ -270,7 +267,7 @@ export default function ErrorPracticePage() {
                       />
                       <div className="flex-1 min-w-0 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Tag variant="knowledge">{entry.type ? (typeLabelMap[entry.type] ?? entry.type) : '未分类'}</Tag>
+                          <Tag variant="knowledge" className="!bg-[var(--learn-btn-primary)] !text-white">{entry.type ? (typeLabelMap[entry.type] ?? entry.type) : '未分类'}</Tag>
                           {entry.level >= 1 && entry.level <= 5 && (
                             <span
                               className="inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-bold"
@@ -280,16 +277,26 @@ export default function ErrorPracticePage() {
                               L{entry.level}
                             </span>
                           )}
-                          <span className="ml-auto text-xs text-[var(--text-tertiary)]">
+                          <span className="ml-auto text-xs text-[var(--learn-text-tertiary)]">
                             {formatDate(entry.createdAt)}
                           </span>
                         </div>
-                        {/* 题面是 Markdown：用 CSS line-clamp 截断两行，避免 JS 截断破坏语法 */}
-                        <div className="text-sm text-[var(--text-primary)] line-clamp-2 whitespace-pre-wrap">
-                          {entry.questionText}
+                        {/* 题面 Markdown + LaTeX 渲染：line-clamp 截两行，<p> 内联化以兼容 -webkit-line-clamp */}
+                        <div className="text-sm text-[var(--learn-text-primary)] line-clamp-2 [&_p]:inline [&_p]:m-0 [&_img]:inline-block [&_img]:h-[24px] [&_img]:align-middle">
+                          <ReactMarkdown
+                            remarkPlugins={markdownRemarkPlugins}
+                            rehypePlugins={markdownRehypePlugins}
+                            components={{
+                              img: (props: { src?: string; alt?: string }) => (
+                                <MarkdownImg {...props} className="inline-block my-1 max-w-full h-[24px] object-contain rounded align-middle" />
+                              ),
+                            }}
+                          >
+                            {entry.questionText}
+                          </ReactMarkdown>
                         </div>
                         {isOrphan && (
-                          <p className="text-xs text-[var(--text-tertiary)]">
+                          <p className="text-xs text-[var(--learn-text-tertiary)]">
                             该题未入库，暂不支持线上重做
                           </p>
                         )}
@@ -304,9 +311,9 @@ export default function ErrorPracticePage() {
 
         {/* 底部操作栏（固定） */}
         {entries.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--bg-subtle)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]">
+          <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] shadow-[var(--shadow-card)]">
             <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 py-4 flex items-center justify-between">
-              <span className="text-sm text-[var(--text-secondary)]">
+              <span className="text-sm text-[var(--learn-text-secondary)]">
                 已选 {selectedCount} / {entries.length} 题
               </span>
               <Button

@@ -430,7 +430,7 @@ describe('PracticeService.startDiscuss', () => {
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
       source: 'discuss', source_ref_id: 5, question_id: 10, lesson_id: 9, wrong_answer_text: null,
     }));
-    expect(deps.conversationsService.create).toHaveBeenCalledWith(1, { track: 'mainline', cardId: 5 });
+    expect(deps.conversationsService.create).toHaveBeenCalledWith(1, { track: 'mainline', scene: 'mainline_question', cardId: 5 });
     expect(deps.mainErrorRepo.updateDialogueId).toHaveBeenCalledWith(55, 200);
   });
 
@@ -490,7 +490,7 @@ describe('PracticeService.startDiscuss', () => {
     const svc = mkSvc(deps);
     const r = await svc.startDiscuss({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '题面' });
     expect(r.dialogueId).toBe('301');
-    expect(deps.conversationsService.create).toHaveBeenCalledWith(1, { track: 'mainline', cardId: 5 });
+    expect(deps.conversationsService.create).toHaveBeenCalledWith(1, { track: 'mainline', scene: 'mainline_question', cardId: 5 });
     expect(deps.mainErrorRepo.updateDialogueId).toHaveBeenCalledWith(77, 301);
   });
 

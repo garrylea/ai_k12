@@ -7,7 +7,6 @@ import {
   getExamPapers,
   type ExamPaper,
 } from '@/services/api';
-import { useThemeStore } from '@/store/themeStore';
 
 /** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
 const MATH_SUBJECT_ID = 1;
@@ -16,8 +15,8 @@ const MATH_SUBJECT_ID = 1;
 const DURATION_OPTIONS = [60, 90, 120] as const;
 
 const selectClassName =
-  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] ' +
-  'bg-[var(--bg-card)] text-[var(--text-primary)] text-sm ' +
+  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
+  'bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] text-sm ' +
   'focus:outline-none focus:ring-2 focus:ring-[var(--brand-100)]';
 
 /** 推荐时长 -> 最近的时长档（用于「推荐」徽标与默认选中）。 */
@@ -29,7 +28,7 @@ function nearestDuration(recommended: number): number {
 
 const EmptyStateIcon = () => (
   <svg
-    className="w-14 h-14 text-[var(--text-tertiary)]"
+    className="w-14 h-14 text-[var(--learn-text-tertiary)]"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -64,7 +63,7 @@ function DurationChip({
         'h-10 px-4 rounded-full border text-sm font-medium transition-colors inline-flex items-center gap-2 ' +
         (active
           ? 'border-[var(--brand-500)] bg-[var(--brand-500)] text-[var(--text-on-brand)]'
-          : 'border-[var(--bg-subtle)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-[var(--brand-500)]')
+          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-secondary)] hover:border-[var(--brand-500)]')
       }
     >
       {minutes} 分钟
@@ -73,7 +72,7 @@ function DurationChip({
           className={
             'px-1.5 py-0.5 rounded-[var(--radius-pill)] text-[10px] font-semibold leading-none ' +
             (active
-              ? 'bg-[var(--bg-card)] text-[var(--brand-600)]'
+              ? 'bg-[var(--learn-card-bg)] text-[var(--brand-600)]'
               : 'bg-[var(--brand-100)] text-[var(--brand-600)]')
           }
         >
@@ -94,14 +93,6 @@ interface SelectedPaper {
 
 export default function ExamListPage() {
   const navigate = useNavigate();
-  const { mode, autoToggleNightMode } = useThemeStore();
-
-  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像 ErrorPracticePage 用法）
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
 
   // 筛选条件
   const [year, setYear] = useState('');
@@ -209,17 +200,17 @@ export default function ExamListPage() {
   };
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">
           {/* 顶栏 */}
           <PageHeader to="/student/training/home" caption="返回训练" title="考试" />
 
           {/* 筛选区 */}
-          <Card className="mt-6">
+          <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
             <div className="flex flex-wrap items-end gap-4">
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">年份</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">年份</span>
                 <select
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
@@ -233,7 +224,7 @@ export default function ExamListPage() {
                 </select>
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">地区</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">地区</span>
                 <select
                   value={district}
                   onChange={(e) => setDistrict(e.target.value)}
@@ -247,7 +238,7 @@ export default function ExamListPage() {
                 </select>
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">考试类型</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">考试类型</span>
                 <select
                   value={examType}
                   onChange={(e) => setExamType(e.target.value)}
@@ -260,7 +251,12 @@ export default function ExamListPage() {
                   ))}
                 </select>
               </label>
-              <Button variant="primary" size="md" loading={loading} onClick={() => void load()}>
+              <Button
+                variant="primary"
+                size="md"
+                loading={loading}
+                onClick={() => void load()}
+              >
                 查询
               </Button>
             </div>
@@ -276,41 +272,53 @@ export default function ExamListPage() {
             {loading ? (
               // 加载骨架
               Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i} className="space-y-3 py-5">
+                <Card key={i} className="space-y-3 py-5 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
                   <Skeleton width="50%" height={14} />
                   <Skeleton width="30%" height={12} />
                 </Card>
               ))
             ) : error ? (
               <div className="flex flex-col items-center gap-4 py-16">
-                <p className="text-[var(--text-secondary)]">{error}</p>
+                <p className="text-[var(--learn-text-secondary)]">{error}</p>
                 <Button variant="secondary" size="md" onClick={() => void load()}>重试</Button>
               </div>
             ) : papers.length === 0 ? (
               // 空态
               <div className="flex flex-col items-center gap-4 py-16">
                 <EmptyStateIcon />
-                <p className="text-[var(--text-secondary)]">暂无试卷</p>
+                <p className="text-[var(--learn-text-secondary)]">暂无试卷</p>
               </div>
             ) : (
               papers.map((paper) => (
                 <Card
                   key={paper.id}
-                  className="cursor-pointer hover:shadow-[var(--shadow-elevated)]"
+                  className="cursor-pointer hover:shadow-[var(--shadow-elevated)] bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]"
                   onClick={() => void openDurationModal(paper)}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
-                      <h2 className="text-base font-medium text-[var(--text-primary)] truncate">
+                      <h2 className="text-base font-medium text-[var(--learn-text-primary)] truncate">
                         {paper.title}
                       </h2>
                       <div className="flex flex-wrap items-center gap-2">
-                        {paper.year != null && <Tag variant="neutral">{paper.year} 年</Tag>}
-                        {paper.district != null && <Tag variant="source">{paper.district}</Tag>}
-                        {paper.examType != null && <Tag variant="knowledge">{paper.examType}</Tag>}
+                        {paper.year != null && (
+                          <Tag variant="neutral" className="!bg-[var(--learn-btn-primary)] !text-white">
+                            {paper.year} 年
+                          </Tag>
+                        )}
+                        {paper.district != null && (
+                          <Tag variant="source" className="!bg-[var(--learn-btn-primary)] !text-white">
+                            {paper.district}
+                          </Tag>
+                        )}
+                        {paper.examType != null && (
+                          <Tag variant="knowledge" className="!bg-[var(--learn-btn-primary)] !text-white">
+                            {paper.examType}
+                          </Tag>
+                        )}
                       </div>
                     </div>
-                    <span className="shrink-0 text-sm text-[var(--text-secondary)]">
+                    <span className="shrink-0 text-sm text-[var(--learn-text-secondary)]">
                       {detailLoadingId === paper.id ? '加载中…' : `${paper.questionCount} 题`}
                     </span>
                   </div>
@@ -331,11 +339,11 @@ export default function ExamListPage() {
       >
         {selectedPaper && (
           <div className="space-y-5">
-            <p className="text-sm text-[var(--text-secondary)]">
+            <p className="text-sm text-[var(--learn-text-secondary)]">
               共 {selectedPaper.questionCount} 题 · 推荐时长 {selectedPaper.durationMinutes} 分钟
             </p>
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-[var(--text-secondary)]">考试时长</span>
+              <span className="text-xs font-medium text-[var(--learn-text-secondary)]">考试时长</span>
               <div className="flex flex-wrap gap-2">
                 {DURATION_OPTIONS.map((d) => (
                   <DurationChip

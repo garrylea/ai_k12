@@ -6,7 +6,6 @@ import {
   startTargetedPractice,
   type TrainingKnowledgePoint,
 } from '@/services/api';
-import { useThemeStore } from '@/store/themeStore';
 
 /** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
 const MATH_SUBJECT_ID = 1;
@@ -25,8 +24,8 @@ const TYPE_OPTIONS = [
 const COUNT_OPTIONS = [3, 5, 8, 10] as const;
 
 const selectClassName =
-  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] ' +
-  'bg-[var(--bg-card)] text-[var(--text-primary)] text-sm ' +
+  'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
+  'bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] text-sm ' +
   'focus:outline-none focus:ring-2 focus:ring-[var(--brand-100)]';
 
 /** 一级知识点 Chip（单选）。 */
@@ -48,7 +47,7 @@ function KpChip({
         'h-10 px-4 rounded-full border text-sm font-medium transition-colors ' +
         (active
           ? 'border-[var(--brand-500)] bg-[var(--brand-500)] text-[var(--text-on-brand)]'
-          : 'border-[var(--bg-subtle)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-[var(--brand-500)]')
+          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-secondary)] hover:border-[var(--brand-500)]')
       }
     >
       {label}
@@ -74,14 +73,14 @@ function KpListItem({
       className={
         'flex items-center gap-3 rounded-[var(--radius-card)] border px-4 py-3 text-left text-sm transition-colors ' +
         (active
-          ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--text-primary)]'
-          : 'border-[var(--bg-subtle)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:border-[var(--brand-500)]')
+          ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--learn-text-primary)]'
+          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] hover:border-[var(--brand-500)]')
       }
     >
       <span
         className={
           'w-4 h-4 shrink-0 rounded-full border-2 ' +
-          (active ? 'border-[var(--brand-500)] bg-[var(--brand-500)]' : 'border-[var(--bg-subtle)]')
+          (active ? 'border-[var(--brand-500)] bg-[var(--brand-500)]' : 'border-[var(--learn-card-border)]')
         }
         aria-hidden="true"
       />
@@ -92,14 +91,6 @@ function KpListItem({
 
 export default function TargetedConfigPage() {
   const navigate = useNavigate();
-  const { mode, autoToggleNightMode } = useThemeStore();
-
-  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像 Task 4 错题练习页用法）
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
 
   // KP 平铺列表（mount 拉一次）
   const [kps, setKps] = useState<TrainingKnowledgePoint[] | null>(null);
@@ -181,7 +172,7 @@ export default function TargetedConfigPage() {
   };
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">
           {/* 顶栏 */}
@@ -199,10 +190,10 @@ export default function TargetedConfigPage() {
           </div>
 
           {/* 配置区 */}
-          <Card className="mt-6 space-y-6">
+          <Card className="mt-6 space-y-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
             {/* 知识点两级选择 */}
             <section aria-label="知识点选择">
-              <h2 className="text-sm font-semibold text-[var(--text-secondary)] mb-3">知识点</h2>
+              <h2 className="text-sm font-semibold text-[var(--learn-text-secondary)] mb-3">知识点</h2>
               {kps == null && !loadError ? (
                 <div className="space-y-3">
                   <Skeleton width="40%" height={14} />
@@ -210,13 +201,13 @@ export default function TargetedConfigPage() {
                 </div>
               ) : loadError ? (
                 <div className="flex items-center gap-4">
-                  <p className="text-sm text-[var(--text-secondary)]">{loadError}</p>
+                  <p className="text-sm text-[var(--learn-text-secondary)]">{loadError}</p>
                   <Button variant="secondary" size="sm" onClick={() => void loadKps()}>
                     重试
                   </Button>
                 </div>
               ) : parentKps.length === 0 ? (
-                <p className="text-sm text-[var(--text-secondary)]">暂无可选知识点</p>
+                <p className="text-sm text-[var(--learn-text-secondary)]">暂无可选知识点</p>
               ) : (
                 <div className="space-y-4">
                   {/* 一级 Chip 组（单选） */}
@@ -233,7 +224,7 @@ export default function TargetedConfigPage() {
                   {/* 二级列表（单选；未选一级时提示引导） */}
                   {parentKpId != null &&
                     (childKps.length === 0 ? (
-                      <p className="text-sm text-[var(--text-tertiary)]">
+                      <p className="text-sm text-[var(--learn-text-tertiary)]">
                         该专项下暂无细分知识点
                       </p>
                     ) : (
@@ -258,7 +249,7 @@ export default function TargetedConfigPage() {
             {/* 题型 + 题量 */}
             <section className="flex flex-wrap items-end gap-6" aria-label="题型与题量">
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">题型</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题型</span>
                 <select
                   value={type}
                   onChange={(e) => {
@@ -274,7 +265,7 @@ export default function TargetedConfigPage() {
                 </select>
               </label>
               <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">题量</span>
+                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题量</span>
                 <div className="flex flex-wrap gap-2">
                   {COUNT_OPTIONS.map((c) => (
                     <KpChip
@@ -304,13 +295,13 @@ export default function TargetedConfigPage() {
                   开始练习
                 </Button>
                 {parentKpId != null && childKpId == null && !starting && (
-                  <span className="text-xs text-[var(--text-tertiary)]">
+                  <span className="text-xs text-[var(--learn-text-tertiary)]">
                     请先选择细分知识点
                   </span>
                 )}
               </div>
               {emptyHint && (
-                <p className="text-sm text-[var(--text-secondary)]">该专项题目已练完或全部标记不再展示。可更换专项/题型，或在「我的不再展示清单」中重置。</p>
+                <p className="text-sm text-[var(--learn-text-secondary)]">该专项题目已练完或全部标记不再展示。可更换专项/题型，或在「我的不再展示清单」中重置。</p>
               )}
               {startError && (
                 <p className="text-sm text-[var(--error)]">{startError}</p>

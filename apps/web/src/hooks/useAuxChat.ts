@@ -261,7 +261,7 @@ export function useAuxChat(dialogueId: number) {
       if (!dlgId) {
         // First send in a new session - create the dialogue now.
         try {
-          const conv = await createConversation({ track: 'auxiliary' });
+          const conv = await createConversation({ track: 'auxiliary', scene: 'aux_qna' });
           dlgId = conv.id;
           newlyCreatedRef.current = conv.id;
           const auxStore = useAuxiliaryStore.getState();

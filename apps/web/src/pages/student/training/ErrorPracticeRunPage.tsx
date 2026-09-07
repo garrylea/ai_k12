@@ -13,7 +13,6 @@ import {
   judgeTraining,
   type TrainingErrorBookEntry,
 } from '@/services/api';
-import { useThemeStore } from '@/store/themeStore';
 import { normalizeOptions } from './normalizeOptions';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
@@ -26,7 +25,6 @@ type Phase = 'answering' | 'result';
 
 export default function ErrorPracticeRunPage() {
   const navigate = useNavigate();
-  const { mode, autoToggleNightMode } = useThemeStore();
 
   const [phase, setPhase] = useState<Phase>('answering');
   const [hints, setHints] = useState<Record<string, string>>({});
@@ -35,8 +33,8 @@ export default function ErrorPracticeRunPage() {
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({ open: false, answered: 0 });
-  // X 确认后放行导航（先置 false 再 navigate，绕开 RunExitGuard 二次拦截）
-  const [guardEnabled, setGuardEnabled] = useState(true);
+  // X 确认后放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 二次拦截——ref 是同步生效的）
+  const guardRef = useRef(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
   const [entries, setEntries] = useState<TrainingErrorBookEntry[] | null>(null);
 
@@ -69,13 +67,6 @@ export default function ErrorPracticeRunPage() {
       navigate('/student/training/errors', { replace: true });
     }
   }, [entries, navigate]);
-
-  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像 Task 4 列表页用法）
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
 
   // n（= String(errorBookId)）-> 错题条目映射
   const entryByN = useMemo(() => {
@@ -161,7 +152,7 @@ export default function ErrorPracticeRunPage() {
   if (entries == null || entries.length === 0) return null;
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="relative h-screen flex flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         {phase === 'result' ? (
           <AnswerResultList
@@ -190,6 +181,8 @@ export default function ErrorPracticeRunPage() {
               <DiscussDrawer
                 mode="training"
                 questionText={discussQ.text}
+                // n = errorBookId，需经题单条目反查真实 questionId（孤儿题在列表页已禁选）
+                questionId={entryByN.get(discussQ.n)?.questionId ?? undefined}
                 onClose={() => setDiscussQ(null)}
               />
             )}
@@ -211,7 +204,7 @@ export default function ErrorPracticeRunPage() {
               </button>
               <button
                 onClick={() => {
-                  setGuardEnabled(false);
+                  guardRef.current = false;
                   navigate('/student/training/errors', { replace: true });
                 }}
                 className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)]"
@@ -221,9 +214,9 @@ export default function ErrorPracticeRunPage() {
             </div>
           </Modal>
         )}
-        {/* 浏览器返回/路由跳转拦截（X 确认已 setGuardEnabled(false) 故不二次弹） */}
+        {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard
-          enabled={guardEnabled}
+          guardRef={guardRef}
           title="离开练习"
           message="退出后未作答的题目将不再保留，确定要离开吗？"
           confirmLabel="确认离开"

@@ -79,6 +79,8 @@
   --learn-card-bg: #FDFCF8;
   --learn-card-border: #E8EDE4;         /* 卡片边框，参考页实测 */
   --learn-text-primary: #3C4A35;
+  --learn-text-secondary: #6B5D52;       /* 次级文字（题数、辅助说明），日夜间统一 */
+  --learn-text-tertiary: #9C8D80;        /* 辅助文字，日夜间统一 */
   --learn-heading-1: #333333;
   --learn-heading-2: #B0C4DE;
   /* 学习沉浸层按钮（不分散注意力，参考页 EyeButton 主色） */
@@ -96,28 +98,32 @@
   --sidebar-text-muted: #999999;
 }
 
-/* ===== Student Night Mode (Dark Tea Gold) ===== */
+/* ===== Student Night Mode (Light Auxiliary Style) =====
+   原暗茶金深色方案学生试用反馈"字看不清"，改为 auxiliary 浅灰底+白卡变体。
+   护眼性来自浅灰底降低反光，而非暗色降亮。整体观感对齐 /student/auxiliary。
+   详见 style.md §2.2 / project_night_mode_light_redesign.md。 */
 [data-theme='student-night'] {
   --brand-500: #C9743E;
-  /* 夜间学习按钮色（参考页夜间 --color-eye-accent-primary） */
-  --learn-btn-primary: #6E88A6;
-  --learn-btn-primary-hover: #829CB8;
   --brand-400: #D88E5E;
   --brand-600: #B06030;
-  --brand-100: #3A2818;
+  /* 选中态：浅灰蓝 20% 透明弱填充（替代原棕黑 #3A2818） */
+  --brand-100: rgba(201, 213, 229, 0.2);
 
-  --bg-base: #1A1612;
-  --bg-page: #FAFAFA;
-  --bg-card: #25201A;
-  --bg-elevated: #2D2620;
-  --bg-subtle: #211C16;
+  /* 背景层（auxiliary 浅灰底 + 白卡，非暗色） */
+  --bg-base: #F5F5F7;
+  --bg-page: #F5F5F7;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --bg-subtle: #EFEFEF;
 
-  --text-primary: #E8DCC2;
-  --text-secondary: #B5A685;
-  --text-tertiary: #7D7158;
-  --text-on-brand: #1A1612;
-  --text-placeholder: var(--text-tertiary);
+  /* 文字（与日间一致，暖黑系，浅底上可读） */
+  --text-primary: #2A1F18;
+  --text-secondary: #6B5D52;
+  --text-tertiary: #9C8D80;
+  --text-on-brand: #FFFFFF;
+  --text-placeholder: #A3A3A3;
 
+  /* 功能色保持低饱和版 */
   --success: #5C8A6A;
   --warning: #C0904A;
   --error: #A05A50;
@@ -125,20 +131,26 @@
 
   --aux: #7B5A8E;
 
-  /* 左侧栏护眼文字颜色 — 夜间（与参考页对齐） */
-  --sidebar-text-primary: #D1C4B0;
-  --sidebar-text-secondary: #AB9E89;
-  --sidebar-text-muted: #7E725F;
+  /* 学习沉浸层按钮（浅灰蓝，与日间同值；夜间不再加深为 #6E88A6） */
+  --learn-btn-primary: #B0C4DE;
+  --learn-btn-primary-hover: #9BB5D4;
 
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --shadow-card-strong: 0 28px 70px rgba(0, 0, 0, 0.5), 0 10px 30px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
-  --shadow-drawer: 0 0 0 1px rgba(0,0,0,0.15), 0 8px 40px rgba(0,0,0,0.35);
-  --shadow-glow-brand: 0 0 16px rgba(201, 116, 62, 0.30);
+  /* 教学白卡夜间与通用卡统一为白色（放弃 §2.5 原日夜间独立的 #FDFCF8） */
+  --learn-card-bg: #FFFFFF;
+  --learn-card-border: #E5E5E5;
+
+  /* 左侧栏文字（与日间一致） */
+  --sidebar-text-primary: #333333;
+  --sidebar-text-secondary: #666666;
+  --sidebar-text-muted: #999999;
+
+  /* 阴影（浅底上减弱，等同日间值；不再黑底翻倍） */
+  --shadow-card: 0 2px 8px rgba(42, 31, 24, 0.06);
+  --shadow-elevated: 0 8px 24px rgba(42, 31, 24, 0.10);
+  --shadow-card-strong: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-drawer: 0 0 0 1px rgba(0,0,0,0.06), 0 8px 40px rgba(0,0,0,0.12);
+  --shadow-glow-brand: 0 0 16px rgba(201, 116, 62, 0.25);
   --shadow-glow-success: 0 0 12px rgba(92, 138, 106, 0.30);
-
-  /* 夜间学习卡片与教学区背景统一：浅色护眼，与日间一致 */
-  --learn-card-bg: #FDFCF8;
 }
 
 /* ===== Parent Mode (Business Blue, forced day) ===== */

@@ -80,6 +80,11 @@ function cacheKey(opts: UseDiscussChatOpts): string {
 
 （question 与 training 模式结构相同，TS 收窄后都有 `questionText`；card 走原样。）
 
+> ⚠️ **2026-09-07 变更注记**：第 5 步的「training 前缀题面」做法已废弃。training 模式改为：
+> 建会话走 `createConversation({ track:'auxiliary', scene:'aux_training', questionId, questionText })`
+> 按题锚定续接；题面在建会话时写入历史（assistant 题面锚），`send` 只发学生原话（仅 question 模式保留前缀）。
+> `ai_dialogues` 新增 `scene/question_id`，训练讲一讲与辅线答疑按 scene 隔离历史。
+
 6. init effect（约 159 行起）「首开」分支（约 187-210 行）把创建对话的 if/else 扩为三分支：
 
 ```ts

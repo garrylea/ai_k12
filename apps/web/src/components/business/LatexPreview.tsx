@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import remarkBreaks from 'remark-breaks';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import {
+  markdownRemarkPluginsWithBreaks,
+  markdownRehypePlugins,
+  markdownComponents,
+} from '@/components/markdown';
 
 /** CJK 字符（含全角标点 / 全角符号）——必须留在数学模式外，KaTeX 无法渲染中文 */
 const CJK_CHAR = /[一-鿿　-〿＀-￯]/;
@@ -60,7 +60,7 @@ export function LatexPreview({ value }: { value: string }) {
     <div className="h-full overflow-auto p-4 text-[var(--text-primary)]">
       {wrapped.trim() ? (
         <div className="prose prose-sm max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm, remarkBreaks]} rehypePlugins={[rehypeKatex]}>
+          <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
             {wrapped}
           </ReactMarkdown>
         </div>

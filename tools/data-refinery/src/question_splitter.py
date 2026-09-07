@@ -9,16 +9,26 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# 主题号（行首）：1-2 位数字 + . + 非数字字符（不要求空格，兼容 9.xxx / 9. xxx / 9.$...$）
-_MAIN_STEM_RE = re.compile(r'^\s*(\d{1,2})\.\D')
-# 主题号前缀剥离：只消费 ^\s*\d{1,2}\.，不消费 . 后的内容字符（避免无空格格式 '9.若' 丢首字）
-_STEM_PREFIX_RE = re.compile(r'^\s*\d{1,2}\.')
+# 主题号（行首）：1-2 位数字 + . + 非数字字符（不要求空格，兼容 9.xxx / 9. xxx / 9.$...$），
+# 或 + 4 位年份+中文（'6.2025年...'，. 后是年份数字仍算题号），或 + :（'21: 在...' 冒号格式）。
+# 仍排除小数（9.5）与 4 位日期（2026.5）。
+_MAIN_STEM_RE = re.compile(
+    r'^\s*(\d{1,2})\.(?:\D|(?:19|20)\d{2}\s*[年月])'
+    r'|^\s*(\d{1,2}):\s*\S'
+)
+# 主题号前缀剥离：只消费 ^\s*\d{1,2}[.:]，不消费其后内容字符（避免无空格格式 '9.若' 丢首字）
+_STEM_PREFIX_RE = re.compile(r'^\s*\d{1,2}[.:]')
 # 紧凑格式（行内，答案区一行多题号）：(?<!\d) 防止把 19.5 的小数点误切
 _INLINE_STEM_RE = re.compile(r'(?<!\d)(\d{1,2})\.\D')
 # 小问号：行首 (N) 或（N）
 _SUB_STEM_RE = re.compile(r'^\s*[\(（](\d{1,2})[\)）]')
 # 大题分组标题：行首可选 markdown # 前缀 + 中文序号 + 、（兼容 "## 一、选择题"）
 _GROUP_HEADER_RE = re.compile(r'^#{0,6}\s*([一二三四五六七八九十]+)、')
+# 卷内部分标题：'## 第一部分 选择题' / '## 第二部分 非选择题'（关闭当前题，不进 content）
+_PART_HEADER_RE = re.compile(r'^#{0,6}\s*第[一二三四五六七八九十]+部分\s*[:：]?\s*(\S*)')
+# 疑似题号的小数/年份行：'数字.数字' 开头（题号+年份 '6.2025年' 或小数 '9.5'）——
+# 选择题区里靠前瞻判定是否题号（见 _has_next_stem）
+_AMBIGUOUS_NUM_RE = re.compile(r'^\s*(\d{1,2})\.\d')
 # 日期/页码陷阱：行首 4 位数字 + . + 数字（如 2026.5）
 _DATE_TRAP_RE = re.compile(r'^\s*\d{4}\.\d')
 # 答案关键字（行内搜索）
@@ -40,14 +50,57 @@ def is_group_header(line: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def is_main_stem(line: str) -> tuple[bool, int | None]:
-    """行首是否为主题号（如 '9.' '9. ' '9.$...$'）。返回 (是否, 题号 N)。
+def is_part_header(line: str) -> tuple[bool, str | None]:
+    """行首是否为卷内部分标题（如 '## 第二部分 非选择题'）。
 
-    排除 4 位年份（2026.5）和小数（9.5）—— . 后必须是非数字字符。
+    返回 (是否, 部分类型)：'choice'（选择题）/ 'non_choice'（非选择题）/
+    None（标题没带类型，如 '第3部分'）。部分标题是大分区（选择/非选择题），
+    不是大题分组：命中时关闭当前题、丢弃该行，不改变 group_id/分数状态
+    （大题分组由后续 '一、选择题' 决定）。部分类型供状态机判定「选择题区」
+    （选择题区里行首 '数字.数字' 大概率是题号而非小数）。
+    """
+    m = _PART_HEADER_RE.match(line)
+    if m:
+        tail = m.group(1)
+        if "选择" in tail:
+            return True, "choice"
+        if "填空" in tail or "解答" in tail or "判断" in tail or "计算" in tail:
+            return True, "non_choice"
+        return True, None
+    return False, None
+
+
+def _has_next_stem(lines: list[str], start: int, n: int) -> bool:
+    """lines[start:] 里（答案区/下一部分标题前）是否有比 n 更大的下一主题号。
+
+    状态机判定用：选择题区行首 '数字.数字'（如 '6.2025年' 或小数 '9.5'），
+    若后续能找到下一题号（'7.'/'7:' 等 >6 的行），则当前行是题号而非小数。
+    扫描在答案关键字/部分标题/大分组标题前停止（那些不是题干续行）。
+    """
+    for j in range(start, len(lines)):
+        line = lines[j].strip()
+        if not line:
+            continue
+        if is_answer_keyword(line) or is_part_header(line)[0] or is_group_header(line)[0]:
+            return False
+        if is_date_trap(line):
+            continue
+        m = re.match(r'^(\d{1,2})[.:]\S', line)
+        if m and int(m.group(1)) > n:
+            return True
+        # 该行是题干续行（非题号），继续找
+    return False
+
+
+def is_main_stem(line: str) -> tuple[bool, int | None]:
+    """行首是否为主题号（如 '9.' '9. ' '9.$...$' '6.2025年' '21: 在...'）。
+
+    排除 4 位年份（2026.5，见 is_date_trap）和纯小数（9.5，. 后数字非年份）。
+    返回 (是否, 题号 N)。
     """
     m = _MAIN_STEM_RE.match(line)
     if m:
-        return True, int(m.group(1))
+        return True, int(m.group(1) or m.group(2))
     return False, None
 
 
@@ -358,11 +411,25 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
         current_answer_lines = []
         current_answer_n = None
 
-    for line in text.split('\n'):
+    lines = text.split('\n')
+    current_part_kind: str | None = None  # 状态机：当前所在部分（'choice'/'non_choice'）
+    for i, line in enumerate(lines):
         if not line.strip():
             continue
 
         if is_date_trap(line):
+            continue
+
+        part_ok, part_kind = is_part_header(line)
+        if part_ok:
+            # 卷内部分标题（'## 第二部分 非选择题'）：关闭当前题、丢弃该行，
+            # 不改 group_id/分数状态（大题分组由后续 '一、选择题' 决定）
+            if in_answer_section:
+                _flush_answer()
+            elif current is not None:
+                questions.append(current)
+                current = None
+            current_part_kind = part_kind
             continue
 
         ok, gid = is_group_header(line)
@@ -397,6 +464,12 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
         # 主题号处理（含紧凑格式一行多题号）
         inline_stems = split_inline_stems(line) if in_answer_section else []
         ok, n = is_main_stem(line)
+        if not ok and not in_answer_section and current_part_kind == 'choice':
+            # 状态机：选择题区行首 '数字.数字'（题号+年份 '6.2025年' 或疑似小数
+            # '9.5'）——若后续存在更大题号（'7.'），说明当前行是题号而非小数
+            amb = _AMBIGUOUS_NUM_RE.match(line)
+            if amb and _has_next_stem(lines, i + 1, int(amb.group(1))):
+                ok, n = True, int(amb.group(1))
 
         if in_answer_section:
             # 表格格式选择题答案（<table>...<tr><td>题号</td>...<td>答案</td>...</table>）

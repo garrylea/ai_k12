@@ -1141,6 +1141,51 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
 
 ---
 
+### 6.18 会话场景分型（scene）与训练「讲一讲」按题续接（2026-09-07）
+
+> 各系统（辅线答疑 / 课堂练习讲一讲 / 卡片思辨答疑 / 训练讲一讲）共用 `ai_dialogues` + `ai_messages`
+> 同一套后端链路，但**按 `scene` 分型隔离历史列表**；对话不再混在辅线答疑列表里。
+
+`ai_dialogues.scene` 取值：
+
+| scene | track | 入口 | 建会话方式 |
+|---|---|---|---|
+| `aux_qna` | auxiliary | /student/auxiliary 自由问答（默认） | `POST /api/conversations`（每次新建） |
+| `aux_training` | auxiliary | 专项/错题 run 的「讲一讲」 | `POST /api/conversations` scene=aux_training（带 questionId 按题 find-or-create，不带则每次新建） |
+| `mainline_question` | mainline | 课堂练习 AnswerModal 题目级讲一讲 | `POST /api/practice/discuss`（error_book 锚定，默认值见旧库回填） |
+| `mainline_card` | mainline | CourseDetailPage 卡片思辨答疑 | `POST /api/practice/discuss-card`（student+card 锚定） |
+
+辅线答疑历史列表（`GET /api/conversations?track=auxiliary&scene=aux_qna`）只返回辅线自由问答；
+`GET /api/conversations` 可选 `scene` 过滤，缺省返回该 track 全部。
+
+**训练「讲一讲」数据流（复用辅线链路 + 题目锚，气泡不再前缀题面）**：
+
+```text
+专项/错题 run 点「让 AI 讲一讲」（DiscussDrawer mode=training）
+  ▼
+前端（useDiscussChat）首次打开或刷新后重开：
+  POST /api/conversations
+  { track:'auxiliary', scene:'aux_training', questionId, questionText }
+  ▼
+ConversationsService.create（scene=aux_training + questionId）
+  ├─ 命中该生该题既有 aux_training 会话（(student, track, scene, question_id) 索引）
+  │    └─ 直接返回（跨刷新/跨设备续接同一讨论线），不重复写题面锚
+  └─ 未命中 -> 新建会话 scene=aux_training + question_id
+      并写一条 assistant 题面锚消息（type='transcription'，content=题面）进历史
+  ▼
+学生逐条追问 -> POST /api/ai/tutor/stream（mode=auxiliary, dialogueId, message=学生原话）
+  │  TutoringCapability 每轮把整段对话历史（含题面锚）带进 prompt -> AI 始终知道题目
+  └─ 学生消息/气泡/持久化都只存原话，不再前缀「这道题目是：…」
+```
+
+- 展示归一：抽屉顶部「当前题目」栏展示题面；历史加载时隐藏题面锚 assistant 消息，并对修复前旧会话
+  里 `role=user` 带「`这道题目是：…我的问题：`」前缀的消息做剥离显示。
+- 存量迁移：旧 auxiliary 会话中带该前缀的归 `aux_training`；mainline 中能被 `main_error_books.dialogue_id`
+  锚定的归 `mainline_question`，其余归 `mainline_card`。详见
+  `tools/db/migrations/2026-09-07_add_ai_dialogues_scene.sql`。
+
+---
+
 ## 7. API 与前端页面对照表
 
 | 前端页面 | 路由 | 主要调用 API |
@@ -1336,6 +1381,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.6 | 2026-09-07 | 会话场景分型 + 训练「讲一讲」重构：`ai_dialogues` 新增 `scene`（aux_qna/aux_training/mainline_question/mainline_card）与 `question_id` 列（迁移 `2026-09-07_add_ai_dialogues_scene.sql`，含存量回填）；`POST /api/conversations` 支持 `scene/questionId/questionText`，`scene=aux_training` 时按题 find-or-create 续接、仅新建时把题面写成一条 assistant 题面锚消息；`GET /api/conversations` 支持 `scene` 过滤——辅线答疑列表只显示 `aux_qna`，训练讲一讲不再混入辅线历史；训练讲一讲学生消息不再前缀题面（气泡只显示原话）。`startDiscuss`/`startCardDiscuss` 分别标记 `mainline_question`/`mainline_card`。新增 §6.18 数据流。openapi.yaml 同步（Conversation/CreateConversationRequest/list query）。 |
 | v2.5 | 2026-09-04 | 联调修正（§4.19 三处，openapi.yaml 同步）：① `POST /api/exams/sessions` 命中的续考会话已超时 -> 先自动收卷再返回 `status='submitted'`（不新建，前端直接踢结果页）；② `POST /api/exams/sessions/{id}/answers` 改为**先落在途行再判题**（判题在途窗口内倒计时归零自动收卷时走「在途补判」而非「未作答」）；③ 考试来源错题写入改 find-or-create（镜像 JudgeCore：该生该题已有未清错题时复用既有行，不重复建行）。 |
 | v2.4 | 2026-09-03 | 新增 Exams 服务分组（§4.19，MVP，真题试卷考试）：`GET /api/exams/papers`（试卷列表，year/district/examType/gradeBand 可选叠加筛选）、`GET /api/exams/papers/{id}`（试卷详情 + 按题型估算推荐时长 durationMinutes，clamp [30,180]）、`POST /api/exams/sessions`（开考/续考——同卷 in_progress 会话直接复用、不重置时长）、`GET /api/exams/sessions/{id}`（断线恢复，超时会话自动收卷）、`POST /api/exams/sessions/{id}/answers`（单题同步判题，考试结束前响应白名单剥离 answer/explanation 与对错——防作弊）、`POST /api/exams/sessions/{id}/submit`（交卷幂等，finalize 三分支：未作答判错/在途补判/已判跳过）、`GET /api/exams/sessions/{id}/results`（结果页，逐题对错 + 解析）。判题复用 JudgeCore（`source='exam'`、`sourceRefId=sessionId`，答错写 main_error_books 与练习同语义）；新增 §6.17 真题考试数据流。openapi.yaml 同步收录 7 端点（/exams/*，student JWT）。 |
 | v2.3 | 2026-09-03 | 新增 Training 服务分组（§4.18，MVP）：`GET /api/training/error-book`（错题练习筛选列表，未清零记录 + 多 KP 聚合）、`POST /api/training/judge`（训练判题，JudgeCore 题中心变体，source 枚举 targeted/error_practice）、`POST /api/training/bump-error-levels`（重做仍错 bump level，镜像 practice）、`POST /api/training/hint`（题级 question_hints 缓存）、`GET /api/training/knowledge-points`（专项练习 KP 平铺列表）、`POST /api/training/targeted/start`（专项随机抽题，白名单序列化防答案泄露）；`main_error_books.source` 枚举补 `targeted`/`error_practice` 训练来源；新增 §6.15 错题练习 / §6.16 专项练习数据流。openapi.yaml 同步收录 6 端点（/training/*，student JWT）。 |

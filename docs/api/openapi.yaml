@@ -1856,6 +1856,12 @@ paths:
           schema:
             type: string
             enum: [mainline, auxiliary]
+        - name: scene
+          in: query
+          description: 场景分型过滤（缺省返回该 track 全部；辅线答疑列表传 aux_qna）
+          schema:
+            type: string
+            enum: [aux_qna, aux_training, mainline_question, mainline_card]
       responses:
         '200':
           description: 会话列表
@@ -4977,8 +4983,15 @@ components:
         track:
           type: string
           enum: [mainline, auxiliary]
+        scene:
+          type: string
+          description: 会话场景分型（各系统共用 ai_dialogues 一张表，列表按此过滤隔离历史）
+          enum: [aux_qna, aux_training, mainline_question, mainline_card]
         cardId:
           type: string
+        questionId:
+          type: string
+          description: 训练讲一讲按题锚（scene=aux_training find-or-create）
         title:
           type: string
         createdAt:
@@ -4996,8 +5009,18 @@ components:
         track:
           type: string
           enum: [mainline, auxiliary]
+        scene:
+          type: string
+          description: 会话场景分型（缺省：auxiliary->aux_qna / mainline->mainline_card）
+          enum: [aux_qna, aux_training, mainline_question, mainline_card]
         cardId:
           type: string
+        questionId:
+          type: string
+          description: scene=aux_training 时按题 find-or-create；缺省退化为每次新建
+        questionText:
+          type: string
+          description: 仅新建时把题面写成一条 assistant 题面锚消息进历史（AI 靠历史带题面，学生消息保持干净）
         knowledgeId:
           type: string
 

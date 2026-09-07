@@ -8,7 +8,6 @@ import {
   unmarkAllTrainingHidden,
   type HiddenQuestion,
 } from '@/services/api';
-import { useThemeStore } from '@/store/themeStore';
 
 const MATH_SUBJECT_ID = 1;
 
@@ -21,19 +20,11 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function HiddenQuestionsPage() {
-  const { mode, autoToggleNightMode } = useThemeStore();
-
   const [items, setItems] = useState<HiddenQuestion[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [unmarkingId, setUnmarkingId] = useState<number | null>(null);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
-
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -78,7 +69,7 @@ export default function HiddenQuestionsPage() {
   };
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">
           <PageHeader

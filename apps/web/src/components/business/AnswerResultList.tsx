@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import remarkBreaks from 'remark-breaks';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
 import { autoWrapMath } from './LatexPreview';
+import {
+  markdownRemarkPlugins,
+  markdownRemarkPluginsWithBreaks,
+  markdownRehypePlugins,
+  markdownComponents,
+  preprocessMarkdown,
+} from '@/components/markdown';
 import type { PracticeQuestion } from './AnswerModal';
 
 interface AnswerRecord {
@@ -94,16 +96,16 @@ export function AnswerResultList({ questions, answers, onClose, headerExtra }: P
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-[var(--text-primary)] leading-[1.6]">
-                        <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                          {q.text}
+                        <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                          {preprocessMarkdown(q.text)}
                         </ReactMarkdown>
                       </div>
                       <div className="mt-2 px-3 py-2 bg-[var(--bg-base)] rounded-lg">
                         <span className="text-xs text-[var(--text-tertiary)]">你的答案：</span>
                         {a?.studentAnswer ? (
                           <div className="text-[13px] text-[var(--text-primary)] leading-[1.6]">
-                            <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm, remarkBreaks]} rehypePlugins={[rehypeKatex]}>
-                              {autoWrapMath(a.studentAnswer)}
+                            <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                              {preprocessMarkdown(autoWrapMath(a.studentAnswer))}
                             </ReactMarkdown>
                           </div>
                         ) : (
@@ -135,8 +137,8 @@ export function AnswerResultList({ questions, answers, onClose, headerExtra }: P
                           <div className="text-xs font-semibold text-[var(--warning)] mb-1.5">错因：{a.errorType}</div>
                         )}
                         <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
-                          <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                            {a.analysis}
+                          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                            {preprocessMarkdown(a.analysis)}
                           </ReactMarkdown>
                         </div>
                       </div>

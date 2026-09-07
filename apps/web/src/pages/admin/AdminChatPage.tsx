@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import {
+  markdownRemarkPlugins,
+  markdownRehypePlugins,
+  MarkdownImg,
+} from '@/components/markdown';
 import { Button, ConfirmDialog, Modal, toast } from '@/components/base';
 import {
   createAdminDialogue,
@@ -114,8 +115,8 @@ const ThinkingDots = () => (
 const Markdown = ({ children }: { children: string }) => (
   <div className="chat-prose break-words">
     <ReactMarkdown
-      remarkPlugins={[remarkMath, remarkGfm]}
-      rehypePlugins={[rehypeKatex]}
+      remarkPlugins={markdownRemarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
       components={{
         p: ({ children }) => <p className="leading-relaxed first:mt-0 last:mb-0 break-words">{children}</p>,
         ul: ({ children }) => <ul className="list-disc pl-5 my-1">{children}</ul>,
@@ -136,6 +137,9 @@ const Markdown = ({ children }: { children: string }) => (
         table: ({ children }) => <table className="my-1 border-collapse">{children}</table>,
         th: ({ children }) => <th className="border border-[#E5E5E5] px-2 py-1 font-semibold">{children}</th>,
         td: ({ children }) => <td className="border border-[#E5E5E5] px-2 py-1">{children}</td>,
+        img: (props: { src?: string; alt?: string }) => (
+          <MarkdownImg {...props} className="inline-block my-2 max-w-full max-h-[200px] object-contain rounded-lg align-middle" />
+        ),
       }}
     >
       {children}

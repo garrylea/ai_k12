@@ -65,31 +65,37 @@
 
 ### 2.2 学生端 - 夜间模式（18:00-06:00 自动）
 
-暗茶金调，降低色温，保护用眼。品牌色由日间 `#ff6b35` 去饱和、降亮度得到。
+浅灰底 + 白卡片 + 浅灰蓝按钮的"auxiliary 风格"浅色变体。原暗茶金深色方案经学生试用反馈"好看但字看不清"已弃用——深底+深字对比度不足、长时间阅读疲劳；护眼性改由浅灰底降低反光提供，整体观感对齐 `/student/auxiliary` 页面。
 
 ```
-品牌主色
+品牌主色（保持低饱和橘红，与日间同系）
   Brand-500   #C9743E
   Brand-400   #D88E5E
   Brand-600   #B06030
-  Brand-100   #3A2818
+  Brand-100   rgba(201, 213, 229, 0.2)   选中弱填充（浅灰蓝 20%，替代原棕黑 #3A2818）
 
-背景层（深茶金，非纯黑）
-  Bg-Base     #1A1612
-  Bg-Card     #25201A
-  Bg-Elevated #2D2620
-  Bg-Subtle   #211C16
+背景层（auxiliary 浅灰底 + 白卡，非暗色）
+  Bg-Base     #F5F5F7   全局背景（与 /student/auxiliary 一致）
+  Bg-Page     #F5F5F7
+  Bg-Card     #FFFFFF   卡片
+  Bg-Elevated #FFFFFF   弹层 / 对话气泡
+  Bg-Subtle   #EFEFEF   次级区域 / 分隔区
 
-学习卡片（日间值不变，夜间保持浅色以维持阅读舒适度）
-  Learn-Card-Bg  #FDFCF8  教学卡片与抽屉/弹窗背景，日夜间统一，不与全局 Bg-Card 联动
+学习沉浸层按钮（浅灰蓝，与日间同值；夜间不再加深）
+  Learn-Btn-Primary       #B0C4DE
+  Learn-Btn-Primary-Hover #9BB5D4
 
-文字
-  Text-Primary    #E8DCC2   沙暖金
-  Text-Secondary  #B5A685
-  Text-Tertiary   #7D7158
-  Text-OnBrand    #1A1612
+学习卡片（夜间与通用卡统一为白色，放弃原"教学白卡独立"的日夜间区分）
+  Learn-Card-Bg  #FFFFFF
 
-功能色（低饱和抗蓝光）
+文字（与日间一致，暖黑系，浅底上可读）
+  Text-Primary    #2A1F18   正文（暖黑）
+  Text-Secondary  #6B5D52   次级
+  Text-Tertiary   #9C8D80   辅助 / 占位
+  Text-OnBrand    #FFFFFF   品牌色 / 按钮上的文字
+  Text-Placeholder #A3A3A3  输入框占位符
+
+功能色（保持低饱和版，与原夜间一致）
   Success  #5C8A6A
   Warning  #C0904A
   Error    #A05A50
@@ -139,12 +145,12 @@
 | 类型 | 典型页面 | 主题容器 | 背景 | 风格关键词 |
 |------|----------|----------|------|------------|
 | 非学习阶段学生页 | P1.1 登录、P1.2 入口选择、P1.5 学科选择、P2.1 章节星链图、P5.1 个人中心、P5.2 奖励册、P5.3 设置 | 无，强制 `student-day` | `Bg-Page #F5F0E8` | 卡片式、分栏、强阴影、简洁大气、暖米白背景 |
-| 学习沉浸阶段 | P2.2 课程详情、P2.3 AI 讨论、P2.4 课后作业、P2.5 判题、P2.6/P2.7 检测考试、P2.8 成绩报告、P3.x 辅线、P4.x 错题本 | 有，启用日夜切换 | `Bg-Base #FAF6EE` / `#1A1612` | 护眼、沉浸、低刺激、简洁大气 |
+| 学习沉浸阶段 | P2.2 课程详情、P2.3 AI 讨论、P2.4 课后作业、P2.5 判题、P2.6/P2.7 检测考试、P2.8 成绩报告、P3.x 辅线、P4.x 错题本 | 有，启用日夜切换 | `Bg-Base #FAF6EE` / `#F5F5F7` | 护眼、沉浸、低刺激、简洁大气 |
 | 家长端 | P6.1–P6.10 全部页面 | 无，强制 `parent` | `Bg-Base #F5F7FA` | 蓝白商务、与学生非学习页布局风格一致 |
 
 **非学习阶段学生页**禁用 `.student-theme-container`，直接写死 `data-theme="student-day"`，物理屏蔽夜间模式。此类页面以白色卡片为载体，橘红仅用于标题区、主按钮与当前状态，整体留白充足，不使用任何装饰元素。
 
-**学习沉浸阶段**必须包裹 `.student-theme-container`，按 18:00-06:00 自动切换日夜间。背景使用暖米白/暗茶金，组件阴影柔和，避免高对比与强装饰，优先保证长时间阅读与思考的舒适性。
+**学习沉浸阶段**必须包裹 `.student-theme-container`，按 18:00-06:00 自动切换日夜间。背景使用暖米白/浅灰底，组件阴影柔和，避免高对比与强装饰，优先保证长时间阅读与思考的舒适性。
 
 **家长端**全程强制 `data-theme="parent"`，禁用夜间。布局、卡片、阴影、留白与非学习学生页保持一致，仅将品牌色与功能色替换为商务白蓝。
 
@@ -159,8 +165,8 @@
   Learn-Prose-W          48rem (768px)   正文栏宽度
 
 颜色
-  Learn-Card-Bg          #FDFCF8         白卡背景（日夜间统一，教学区保持浅色护眼，不与全局 Bg-Card 联动）
-  Learn-Card-Border      #E8EDE4         白卡边框（参考页实测，带 subtle border）
+  Learn-Card-Bg          #FDFCF8         白卡背景（日间值；夜间覆盖为 #FFFFFF 与全局 Bg-Card 联动，见 §2.2）
+  Learn-Card-Border      #E8EDE4         白卡边框（日间值；夜间覆盖为 #E5E5E5，见 §2.2）
   Learn-Text-Primary     #3C4A35         正文/列表
   Learn-Heading-1        #333333         小节标题
   Learn-Heading-2        #B0C4DE         卡片内标题（H2，带左侧色条标记）
@@ -244,6 +250,27 @@
 - **徽章**：三卡统一橘红渐变 `from-[#FF6B35] to-[#FFB25A]`（训练入口同款），靠图标与文字标签区分，不靠颜色区分功能。
 - **错题卡状态行**：错题卡是唯一带功能性状态文案的卡片——标题下方小字（`text-sm text-[var(--text-secondary)]`）实时显示未清零错题数（调 `GET /api/training/error-book`）：`未清零 N 题`；0 显示「暂无未清零错题」仍可点击；载入中/失败显示「未清零 -- 题」不阻塞。专项/考试卡不加副标题（§2.7 规则：图标+标签已自解释）。
 - 不使用 `.student-theme-container`，不启用夜间切换（浅停留页）。
+
+### 2.9 训练模块主题统一约束（/student/training/* 全部子页）
+
+**规则**：`/student/training/*` 下全部页面（专项训练 / 考试 / 错题练习及其所有子页，含配置页、答题运行页、结果页、列表页、不再展示清单页等）固定使用 `student-day` 主题，**不分日间与夜间**，不响应系统时间、不调用 `useThemeStore.autoToggleNightMode`、不挂日夜轮询、不出现手动日夜切换按钮。
+
+**实现方式**：
+- 训练答题/列表/结果等"沉浸式布局"页：外壳保留 `.student-theme-container` className 作为 CSS 变量作用域容器（其 background/color/transition 样式仍需要），但 `data-theme` 属性**写死 `"student-day"`**，不绑定 `mode`。
+- 训练浅停留页（`TrainingSubjectPage` / `TrainingHomePage`）：原本已固定 `data-theme="student-day"` 且无 `.student-theme-container`，保持现状。
+- 严禁在训练页面文件里 `import useThemeStore` 或调用 `autoToggleNightMode` / `setInterval` 轮询。
+
+**共享答题组件的解耦铁律**：
+- `QuestionRunner` / `AnswerResultList` / `DiscussDrawer` / `AnswerModal` / `CleanupPhase` / `ChoiceOptionList` / `LatexEditor` / `PreviewDraftPanel` / `DraftWhiteboard` / `LatexPreview` / `SymbolPalette` / `DiscussChat` 等被训练与教学（`CourseDetailPage`）共享的组件，**必须**通过 `var(--xxx)` CSS 变量取色，**禁止**在组件内部硬编码 `data-theme` / `student-day` / `student-night` / `.student-theme-container` / `data-school`。
+- 这些组件的主题上下文由外层页面外壳注入：训练页注入 `student-day`，教学页注入 `mode`（日夜切换）。同一组件在不同 token 上下文下渲染不同颜色，互不干扰。
+
+**边界规则（不得越界）**：
+- **教学模块**（`/student/learn/*` 下的 `CourseDetailPage` 等）保留日夜切换，外壳仍写 `data-theme={mode}` + `.student-theme-container` + 18:00-06:00 自动轮询 + 手动切换按钮，**不在本次约束范围内**，不得改动。
+- **答疑系统**（`/student/auxiliary/*` 下的 `AuxiliaryLayout` / `ConversationManagePage`）已固定 `student-day`，与训练模块无耦合，不动。
+- **星图**（`StarMapPage`）无 wrapper 无 themeStore，恒为 `:root` day，不动。
+- **`themeStore` 本身不重构**：`autoToggleNightMode` 仍保留，供教学模块使用。
+
+**与 §2.4 三层视觉体系的关系**：训练答题页虽沿用"沉浸式布局"形态（白卡 + 暖米白背景 + `.student-theme-container`），但属本节约束的例外——不参与日夜切换，等同非学习阶段页固定 day。§2.4 表格中"学习沉浸阶段"行不适用于 `/student/training/*` 子树。
 
 ---
 
@@ -392,7 +419,7 @@
 | 措施 | 实现 |
 |------|------|
 | 暖米白背景 | 学习层默认 #FAF6EE，杜绝纯白 |
-| 暗茶金夜间模式 | 18:00-06:00 自动切，背景 #1A1612，文字 #E8DCC2 |
+| 浅灰夜间模式 | 18:00-06:00 自动切，背景 #F5F5F7，文字 #2A1F18（与日间同色系，浅底护眼；原暗茶金方案学生反馈字看不清已弃用，见 §2.2） |
 | 文字非纯黑 | 主文字 #2A1F18 暖黑 |
 | 字号宽行距 | 教材正文行距 1.6-1.8 |
 | 错误反馈非纯红 | 用 #C44A3F 暗红 |
@@ -413,7 +440,7 @@
 
 输入框占位符颜色按页面类型区分：
 - **非学习阶段学生页与家长端**：使用 `Text-Placeholder #A3A3A3`，中性冷灰，视觉上更清爽。
-- **学习沉浸阶段**：使用 `Text-Tertiary`（日间 `#9C8D80` / 夜间 `#7D7158`），暖调灰，与护眼背景色温保持一致。
+- **学习沉浸阶段**：使用 `Text-Tertiary`（日间 `#9C8D80` / 夜间 `#9C8D80`，夜间与日间一致），暖调灰，与护眼背景色温保持一致。
 
 实现上，非学习页与家长端直接读取 `--text-placeholder: #A3A3A3`；学习沉浸层包裹 `.student-theme-container` 后，该变量被覆盖为 `var(--text-tertiary)`，从而自动适配日夜间。
 
@@ -438,6 +465,7 @@
 - [ ] 输入框 placeholder 颜色区分页面类型：非学习页与家长端用 `Text-Placeholder #A3A3A3`，学习沉浸页用 `Text-Tertiary`
 - [ ] 家长端组件外观与学生非学习页布局一致，仅配色为商务白蓝
 - [ ] 页面文案简洁，不出现冗余说明文字（如「演示：…」「仅限家长」等）
+- [ ] `/student/training/*` 子页固定 `data-theme="student-day"`，不引入 `useThemeStore` / `autoToggleNightMode` / 日夜轮询（详见 §2.9）
 
 ---
 

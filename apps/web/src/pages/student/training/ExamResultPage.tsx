@@ -7,7 +7,6 @@ import {
   type ExamResultItem,
   type ExamSummary,
 } from '@/services/api';
-import { useThemeStore } from '@/store/themeStore';
 
 const SPINNER_SVG = (
   <svg
@@ -32,18 +31,10 @@ export default function ExamResultPage() {
   const { sessionId } = useParams();
   const sid = Number(sessionId);
   const navigate = useNavigate();
-  const { mode, autoToggleNightMode } = useThemeStore();
 
   const [summary, setSummary] = useState<ExamSummary | null>(null);
   const [items, setItems] = useState<ExamResultItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像答题页用法）
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +88,7 @@ export default function ExamResultPage() {
   // mount 读取中 / 加载失败：不渲染结果
   if (items == null) {
     return (
-      <div className="student-theme-container" data-theme={mode} data-school="junior">
+      <div className="student-theme-container" data-theme="student-day" data-school="junior">
         <div className="flex h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-page)] text-[var(--text-primary)]">
           {error ? (
             <>
@@ -121,7 +112,7 @@ export default function ExamResultPage() {
   }
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <AnswerResultList
           questions={resultQuestions}

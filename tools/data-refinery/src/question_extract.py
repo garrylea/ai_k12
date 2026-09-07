@@ -199,7 +199,7 @@ def extract_questions_file(source, config, llm, fb_llm,
             for q in questions:
                 if q.group_order in skipped:
                     lf.write(json.dumps({
-                        "source": source_name,
+                        "source": md_path.stem,
                         "group_order": q.group_order,
                         "type": "label_failed",
                         "issues": ["LLM 标注失败已跳过（必填字段校验+重试+备选均失败）"],

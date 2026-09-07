@@ -11,7 +11,7 @@ export default function AuxiliaryLayout({ sidebar, children }: Props) {
       className="min-h-screen flex items-center justify-center p-4 sm:p-6 lg:p-8"
       data-theme="student-day"
       data-school="junior"
-      style={{ backgroundColor: '#F5F5F7' }}
+      style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div
         className="w-full max-w-6xl h-[85vh] min-h-[600px] flex rounded-3xl overflow-hidden bg-white border border-[#E5E5E5]"

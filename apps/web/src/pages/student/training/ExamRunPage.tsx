@@ -10,7 +10,6 @@ import {
   type ExamSessionInfo,
   type JudgeResult,
 } from '@/services/api';
-import { useThemeStore } from '@/store/themeStore';
 import { normalizeOptions } from './normalizeOptions';
 
 /** 数学 subject_id（subjects seed 首行）——考试 MVP 仅数学。 */
@@ -49,7 +48,6 @@ export default function ExamRunPage() {
   const { sessionId } = useParams();
   const sid = Number(sessionId);
   const navigate = useNavigate();
-  const { mode, autoToggleNightMode } = useThemeStore();
 
   const [session, setSession] = useState<ExamSessionInfo | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
@@ -59,8 +57,8 @@ export default function ExamRunPage() {
   const [answeredNs, setAnsweredNs] = useState<Set<string>>(new Set());
   /** 交卷去重：倒计时归零与 onFinish 可能并发触发。 */
   const submittingRef = useRef(false);
-  // 交卷成功跳结果页前放行导航（先置 false 再 navigate，绕开 RunExitGuard 拦截）
-  const [guardEnabled, setGuardEnabled] = useState(true);
+  // 交卷成功跳结果页前放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 拦截——ref 是同步生效的）
+  const guardRef = useRef(true);
   // StrictMode 下 effect 会跑两次：ref 守卫保证 sessionStorage「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无会话（走服务端拉取虽然也能恢复，但语义上应消费新开卷数据）。
   const bootstrappedRef = useRef(false);
@@ -122,13 +120,6 @@ export default function ExamRunPage() {
     void boot();
   }, [sid, navigate]);
 
-  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像错题/考试列表页用法）
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
-
   // 倒计时：以服务端 remainingSeconds 为锚，本地每秒递减（不依赖本地时钟绝对值）；减到 0 停止
   useEffect(() => {
     if (session == null) return;
@@ -145,7 +136,7 @@ export default function ExamRunPage() {
     setSubmitError(null);
     try {
       await submitExamSession(sid);
-      setGuardEnabled(false);
+      guardRef.current = false;
       navigate(`/student/training/exam/result/${sid}`, { replace: true });
     } catch (err) {
       submittingRef.current = false;
@@ -202,7 +193,7 @@ export default function ExamRunPage() {
   // mount 读取中 / 加载失败：不渲染答题区
   if (session == null) {
     return (
-      <div className="student-theme-container" data-theme={mode} data-school="junior">
+      <div className="student-theme-container" data-theme="student-day" data-school="junior">
         <div className="flex h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-page)] text-[var(--text-primary)]">
           {loadError ? (
             <>
@@ -228,7 +219,7 @@ export default function ExamRunPage() {
   const remaining = remainingSeconds ?? 0;
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="flex h-screen flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         <QuestionRunner
           questions={questions}
@@ -256,7 +247,7 @@ export default function ExamRunPage() {
 
         {/* 考试无页内退出；拦截浏览器返回/刷新（计时不停，可续考） */}
         <RunExitGuard
-          enabled={guardEnabled}
+          guardRef={guardRef}
           blockBeforeUnload
           title="离开考试"
           message="离开后计时不会暂停，可从考试列表续考返回。确认离开吗？"

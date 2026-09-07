@@ -29,7 +29,7 @@ export const useAuxiliaryStore = create<AuxiliaryState>((set) => ({
     set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) })),
   fetchConversations: async () => {
     try {
-      const items = await listAllConversations('auxiliary');
+      const items = await listAllConversations('auxiliary', 'aux_qna');
       set({ conversations: items });
     } catch {
       // ignore - the list will retry on the next interaction

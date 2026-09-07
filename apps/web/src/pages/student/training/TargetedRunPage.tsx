@@ -14,7 +14,6 @@ import {
   type TargetedPracticeQuestion,
 } from '@/services/api';
 import { toast } from '@/components/base/Toast';
-import { useThemeStore } from '@/store/themeStore';
 import { normalizeOptions } from './normalizeOptions';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
@@ -27,7 +26,6 @@ type Phase = 'answering' | 'result';
 
 export default function TargetedRunPage() {
   const navigate = useNavigate();
-  const { mode, autoToggleNightMode } = useThemeStore();
 
   const [phase, setPhase] = useState<Phase>('answering');
   const [hints, setHints] = useState<Record<string, string>>({});
@@ -41,8 +39,8 @@ export default function TargetedRunPage() {
     { open: false, questionId: null },
   );
   const [marking, setMarking] = useState(false);
-  // X 确认后放行导航（先置 false 再 navigate，绕开 RunExitGuard 二次拦截）
-  const [guardEnabled, setGuardEnabled] = useState(true);
+  // X 确认后放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 二次拦截——ref 是同步生效的）
+  const guardRef = useRef(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
   const [entries, setEntries] = useState<TargetedPracticeQuestion[] | null>(null);
 
@@ -75,13 +73,6 @@ export default function TargetedRunPage() {
       navigate('/student/training/targeted', { replace: true });
     }
   }, [entries, navigate]);
-
-  // 沉浸层夜间模式：挂一次 + 每分钟检查（镜像 Task 4/5 页面用法）
-  useEffect(() => {
-    autoToggleNightMode();
-    const t = setInterval(autoToggleNightMode, 60000);
-    return () => clearInterval(t);
-  }, [autoToggleNightMode]);
 
   // n（= String(questionId)）-> 题单条目映射
   const entryByN = useMemo(() => {
@@ -162,7 +153,7 @@ export default function TargetedRunPage() {
   if (entries == null || entries.length === 0) return null;
 
   return (
-    <div className="student-theme-container" data-theme={mode} data-school="junior">
+    <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="relative h-screen flex flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         {phase === 'result' ? (
           <AnswerResultList
@@ -212,6 +203,7 @@ export default function TargetedRunPage() {
               <DiscussDrawer
                 mode="training"
                 questionText={discussQ.text}
+                questionId={Number(discussQ.n)}
                 onClose={() => setDiscussQ(null)}
               />
             )}
@@ -233,7 +225,7 @@ export default function TargetedRunPage() {
               </button>
               <button
                 onClick={() => {
-                  setGuardEnabled(false);
+                  guardRef.current = false;
                   navigate('/student/training/targeted', { replace: true });
                 }}
                 className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)]"
@@ -270,9 +262,9 @@ export default function TargetedRunPage() {
             </div>
           </Modal>
         )}
-        {/* 浏览器返回/路由跳转拦截（X 确认已 setGuardEnabled(false) 故不二次弹） */}
+        {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard
-          enabled={guardEnabled}
+          guardRef={guardRef}
           title="离开练习"
           message="退出后未作答的题目将不再保留，确定要离开吗？"
           confirmLabel="确认离开"
