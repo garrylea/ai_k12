@@ -99,10 +99,10 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 "difficulty": q.difficulty,
                 "full_score": q.score,  # 每题满分（分组标题解析），无则 null
                 "content": q.content,
-                "options": None,  # 本任务不切选项（留给后续）
+                "options": q.options,            # LLM 拆的选择题选项 list[{label,text}] 或 null
                 "answer": q.answer,
                 "explanation": q.explanation,
-                "material_text": None,  # 数学不抽取（道法/物理后续做）
+                "material_text": q.material_text,  # LLM 拆的材料题共享材料或 null
                 "grade_band": grade_band,
                 "source": source_name,
                 "source_year": source_year,

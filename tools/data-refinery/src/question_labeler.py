@@ -11,22 +11,30 @@ from dataclasses import dataclass
 
 @dataclass
 class LabeledQuestion:
-    """标注后的题（RawQuestion 字段 + LLM 标注）。"""
+    """标注后的题（RawQuestion 字段 + LLM 标注）。
+
+    Python 切的（保留）：group_order/group_id/score/answer/explanation
+    LLM 输出的（格式化+标注）：content（纯题干）/options/material_text/type/difficulty/knowledge_points/suggested_new_kps
+    """
     group_order: int
     group_id: str | None
-    content: str
-    answer: str
-    explanation: str | None
-    score: int | None = None                # 每题满分（分组标题解析）
+    content: str                        # LLM 输出（纯题干，剥离选项/材料）
+    answer: str                         # Python 对齐的答案
+    explanation: str | None             # Python 对齐的解析
+    score: int | None = None            # 每题满分（分组标题解析）
+    options: list = None                # 选择题选项 list[{label,text}]（LLM 拆）
+    material_text: str | None = None    # 材料题的共享材料（LLM 拆）
     type: str = ""                       # choice/fill_blank/true_false/short_answer/proof
     difficulty: int = 2                  # 1-5，默认 2
     knowledge_points: list = None       # 已有 KP code 列表
     suggested_new_kps: list = None      # 建议新增的 KP 名称
-    _confirmed_new_kps: list = None     # 双模型确认的新增 KP（Task 6 填）
-    _suggested_new_kps: list = None     # 未通过双模型确认的（Task 6 填）
+    _confirmed_new_kps: list = None     # 双模型确认的新增 KP
+    _suggested_new_kps: list = None     # 未通过双模型确认的
 
     @classmethod
     def from_raw(cls, q: "RawQuestion") -> "LabeledQuestion":
+        # content 先占位为 RawQuestion 原文，_fill_from_item 时被 LLM 输出覆盖；
+        # answer/explanation 保留 Python 对齐的（LLM 不输出）
         return cls(
             group_order=q.group_order,
             group_id=q.group_id,
@@ -34,6 +42,8 @@ class LabeledQuestion:
             answer=q.answer,
             explanation=q.explanation,
             score=q.score,
+            options=None,
+            material_text=None,
             knowledge_points=[],
             suggested_new_kps=[],
             _confirmed_new_kps=[],
@@ -96,7 +106,7 @@ class QuestionLabeler:
 
     def _label_one(self, q) -> "LabeledQuestion":
         labeled = LabeledQuestion.from_raw(q)
-        user = self._build_single_prompt(q.content)
+        user = self._build_single_prompt(q)
         try:
             resp = self._llm.complete(self._prompt, user)
             data = _parse_json_object(resp.content)
@@ -107,16 +117,56 @@ class QuestionLabeler:
             pass  # type=""、knowledge_points=[]，由 from_raw 默认值兜底
         return labeled
 
-    def _build_single_prompt(self, question_content: str) -> str:
-        return self._prompt.replace("{{knowledge_points}}", self._kps_text) \
-                            .replace("{{question}}", question_content)
+    def _build_single_prompt(self, q) -> str:
+        """填 prompt 占位符：题号/分组/满分/题目原文/答案/KP 列表。"""
+        return (self._prompt
+                .replace("{{group_order}}", str(q.group_order))
+                .replace("{{group_id}}", q.group_id or "(无)")
+                .replace("{{score}}", str(q.score) if q.score is not None else "(未给)")
+                .replace("{{content}}", q.content)
+                .replace("{{answer}}", q.answer or "(无)")
+                .replace("{{knowledge_points}}", self._kps_text))
 
     def _build_multi_prompt(self, batch: list) -> str:
-        q_text = "\n\n".join(f"## 题 {q.group_order}\n{q.content}" for q in batch)
-        return self._build_single_prompt(q_text)
+        """多题一批：把每题拼成带元数据的段落。"""
+        parts = []
+        for q in batch:
+            parts.append(
+                f"## 题 {q.group_order}（分组 {q.group_id or '无'}，满分 {q.score or '未给'}）\n"
+                f"题目原文：{q.content}\n已对齐答案：{q.answer or '无'}"
+            )
+        joined = "\n\n".join(parts)
+        return (self._prompt.replace("{{knowledge_points}}", self._kps_text)
+                .replace("{{group_order}}", "见上方")
+                .replace("{{group_id}}", "见上方")
+                .replace("{{score}}", "见上方")
+                .replace("{{content}}", joined)
+                .replace("{{answer}}", "见上方"))
 
     def _fill_from_item(self, labeled, item: dict):
-        """从 LLM 输出 item 填充 labeled 字段。"""
+        """从 LLM 输出 item 填充 labeled 字段。
+
+        content/options/material_text 由 LLM 格式化输出（覆盖 from_raw 的占位）；
+        answer/explanation 保留 Python 对齐的（不从 LLM 填）。
+        """
+        # LLM 格式化的纯题干（若空则保留原 content 占位，避免丢题）
+        new_content = item.get("content")
+        if new_content and isinstance(new_content, str) and new_content.strip():
+            labeled.content = new_content
+        # 选项（选择题 list[{label,text}]，非选择题 null）
+        opts = item.get("options")
+        if isinstance(opts, list):
+            labeled.options = [
+                {"label": str(o.get("label", "")).upper(),
+                 "text": str(o.get("text", "") or "")}
+                for o in opts if isinstance(o, dict)
+            ]
+        elif opts is None:
+            labeled.options = None
+        # 材料
+        mt = item.get("material_text")
+        if mt is not None:
+            labeled.material_text = str(mt) if mt else None
         labeled.type = str(item.get("type", "") or "")
         try:
             labeled.difficulty = int(item.get("difficulty", 2) or 2)
