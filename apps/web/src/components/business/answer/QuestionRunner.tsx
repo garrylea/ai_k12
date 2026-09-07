@@ -19,6 +19,9 @@ import { clearDraft } from '../draft-store';
 import { ChoiceOptionList } from './ChoiceOptionList';
 import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion } from './types';
 
+/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用内嵌草稿（PRD §7.12） */
+const MATH_SUBJECT_ID = 1;
+
 const SPINNER_SVG = (
   <svg className="animate-spin text-[var(--brand-500)]" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
@@ -43,10 +46,13 @@ const questionMarkdownComponents = {
 
 export interface QuestionRunnerProps {
   questions: RunnerQuestion[];
+  /** 学科 id（subjects seed 首行 = 数学）；与 draftDisabled 一起决定内嵌草稿 tab 是否启用 */
   subjectId: number;
   /** 单题草稿键 = `${draftKeyPrefix}-${q.n}` */
   draftKeyPrefix: string;
   variant: 'modal' | 'embedded';
+  /** 默认 false；训练轨答题页置 true——内嵌草稿由页面级草稿抽屉替代（主线 AnswerModal/CleanupPhase 保持草稿 tab） */
+  draftDisabled?: boolean;
   /** 默认 'auto'：type=choice/true_false 且有 options 时点选作答，否则文本作答 */
   answerMode?: 'auto' | 'text';
   enableHint?: boolean;
@@ -82,8 +88,10 @@ export interface QuestionRunnerProps {
 
 export function QuestionRunner({
   questions,
+  subjectId,
   draftKeyPrefix,
   variant,
+  draftDisabled = false,
   answerMode = 'auto',
   enableHint = false,
   hints,
@@ -338,12 +346,14 @@ export function QuestionRunner({
               <div className="w-1/2 border-r border-[var(--bg-subtle)] flex flex-col">
                 <LatexEditor value={answer} onChange={updateAnswer} />
               </div>
-              {/* 右半区：预览 / 草稿 tab（仅数学启用草稿，PRD §7.12） */}
+              {/* 右半区：预览 / 草稿 tab。主线保留数学草稿（PRD §7.12）；训练轨答题页传 draftDisabled
+                  关闭——页面级 DraftDrawer 取代内嵌草稿，其余上下文（AnswerModal 弹窗 / CleanupPhase
+                  错题巩固）不受影响，仍按 subjectId === MATH_SUBJECT_ID 启用 */}
               <div className="w-1/2">
                 <PreviewDraftPanel
                   answer={answer}
                   questionId={`${draftKeyPrefix}-${q.n}`}
-                  enabled={false}   // 草稿 tab 下线（2026-09-07），页面级草稿抽屉替代；恢复时改回 subjectId === MATH_SUBJECT_ID
+                  enabled={!draftDisabled && subjectId === MATH_SUBJECT_ID}
                 />
               </div>
             </>

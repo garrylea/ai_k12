@@ -230,6 +230,7 @@ export default function ExamRunPage() {
           subjectId={MATH_SUBJECT_ID}
           draftKeyPrefix={`exam-${sid}`}
           variant="embedded"
+          draftDisabled  // 内嵌草稿由页面级草稿抽屉替代（2026-09-07）
           showResultFeedback={false}
           headerExtra={
             <div className="flex shrink-0 items-center gap-4">

@@ -171,6 +171,7 @@ export default function ErrorPracticeRunPage() {
               subjectId={MATH_SUBJECT_ID}
               draftKeyPrefix="errp"
               variant="embedded"
+              draftDisabled  // 内嵌草稿由页面级草稿抽屉替代（2026-09-07）
               enableHint
               hints={hints}
               onRequestHint={handleRequestHint}
