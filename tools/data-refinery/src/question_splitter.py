@@ -118,33 +118,157 @@ def parse_group_scores(header: str) -> tuple[str, object | None]:
 
 # 选项标记：(A)/(a)/（A）/（a）
 _OPTION_MARK_RE = re.compile(r'[\(（]([A-Da-d])[\)）]')
+# 裸字母行内标记：'A. 文本'（点后须空格+内容——防 'A、B、C、D' 枚举误切，顿号后无空格）
+_BARE_INLINE_RE = re.compile(r'(?:^|(?<=\s))([A-D])[.．](?=\s*\S)')
+# 裸字母竖排行：行首单独 'A' / 'A.' / 'A、'（选项内容/配图在标记行之间）
+_BARE_LINE_RE = re.compile(r'^\s*([A-D])\s*[.、．]?\s*$')
+
+
+def _find_option_marks(content: str) -> list[tuple[int, int, str]] | None:
+    """找连续的 A,B,C,D 选项标记序列（括号式优先，裸字母式兜底）。
+
+    返回 4 个 (start, end, label)（content 内绝对偏移），找不到返回 None。
+    两种标记体系分开找（同一题不会混用括号式与裸字母式）：
+    - 括号式 (A)(B)(C)(D)：全/半角括号均兼容
+    - 裸字母式 'A. x B. y'（行内）或 'A' 单独成行（竖排，配图在标记行间）
+    """
+    for pattern in (_OPTION_MARK_RE, _BARE_INLINE_RE):
+        matches = list(pattern.finditer(content))
+        for i, m in enumerate(matches):
+            if m.group(1).upper() == 'A' and i + 3 < len(matches):
+                seq = [matches[j].group(1).upper() for j in range(i, i + 4)]
+                if seq == ['A', 'B', 'C', 'D']:
+                    return [(m.start(), m.end(), m.group(1).upper())
+                            for m in matches[i:i + 4]]
+    # 竖排裸字母：行级匹配（_BARE_INLINE_RE 匹配不到无点或行尾的标记）
+    # 标记 span 取整行（判别「纯标记行」用：行内除标记无其他内容）
+    line_marks: list[tuple[int, int, str]] = []  # (start_offset, end_offset, label)
+    offset = 0
+    for line in content.split('\n'):
+        m = _BARE_LINE_RE.match(line)
+        if m:
+            line_marks.append((offset, offset + len(line), m.group(1)))
+        offset += len(line) + 1
+    for i in range(len(line_marks) - 3):
+        if [mk[2] for mk in line_marks[i:i + 4]] == ['A', 'B', 'C', 'D']:
+            return line_marks[i:i + 4]
+    return None
+
+
+def _line_bounds(content: str) -> list[tuple[int, int]]:
+    """每行在 content 中的 (start, end) 偏移（不含换行符）。"""
+    bounds: list[tuple[int, int]] = []
+    off = 0
+    for line in content.split('\n'):
+        bounds.append((off, off + len(line)))
+        off += len(line) + 1
+    return bounds
+
+
+def _line_of(bounds: list[tuple[int, int]], pos: int) -> int:
+    """pos 所在行号。"""
+    for i, (s, e) in enumerate(bounds):
+        if s <= pos <= e:
+            return i
+    return len(bounds) - 1
+
+
+def _first_image_line_above(lines: list[str], li: int) -> int | None:
+    """li 行上方最近的图片行号（向上扫描到第一个图片行为止）；没有返回 None。"""
+    for j in range(li - 1, -1, -1):
+        if lines[j].strip().startswith('!['):
+            return j
+    return None
 
 
 def split_options(content: str) -> tuple[str, list[dict] | None]:
     """把选择题的题干与 4 个选项拆开（Python 确定性，不丢图）。
 
-    content 里找连续的 (A)(B)(C)(D) 选项标记序列：
-    - 找到：题干 = 第一个 (A) 前的内容（保留所有题干配图），options = 4 个 {label, text}
+    content 里找连续的 A,B,C,D 选项标记序列（括号式 (A)(B)(C)(D) 或裸字母式
+    'A. x B. y' / 竖排 'A' 单独成行）：
+    - 找到：题干 = 第一个标记前的内容（+ 行内布局时末标记行后的尾部内容），
+      options = 4 个 {label, text}
     - 找不到（非选择题或格式不符）：返回 (原 content, None)
 
-    兼容全角/半角括号、跨行选项（选项 text 含图引用 ![]() 也保留原样）。
+    布局按标记分布判别：
+    - 行内布局（4 个标记同一行，如西城模拟二 题3「题干+选项一行+图片下一行」）：
+      (D) 文本止于所在行行尾，行后的尾部内容（题干配图等）整体归题干，
+      D 行尾的 '[图]' 占位符一并剥掉（MinerU 的图片位置标记）
+    - 跨行布局 + 内容在标记上方（图选项标准排版：字母标在图/内容下方，
+      MinerU 线性化为 '图[+说明]\\nA\\n图\\nB\\n...\\nD'，标记独占行且 D 后
+      无内容）：B/C/D 取上一标记行与本标记行之间的所有行；A 取其上方最近的
+      图片行到 A 行之间的内容，更早的图归题干
+    - 跨行布局（默认，标记在上、内容/图在标记行之间，如 'A.\\n图\\nB.\\n图'）：
+      选项 = 标记间内容，D 取到 content 末尾（自配图不被截走归题干）
     """
-    matches = list(_OPTION_MARK_RE.finditer(content))
-    # 找从 'A' 起连续的 A,B,C,D（4 连）序列起点
-    for i, m in enumerate(matches):
-        if m.group(1).upper() == 'A' and i + 3 < len(matches):
-            seq = [matches[j].group(1).upper() for j in range(i, i + 4)]
-            if seq == ['A', 'B', 'C', 'D']:
-                stem = content[:m.start()].strip()
-                opts: list[dict] = []
-                for j in range(i, i + 4):
-                    end = matches[j + 1].start() if j + 1 < len(matches) else len(content)
-                    opts.append({
-                        "label": matches[j].group(1).upper(),
-                        "text": content[matches[j].end():end].strip(),
-                    })
-                return stem, opts
-    return content, None
+    marks = _find_option_marks(content)
+    if not marks:
+        return content, None
+    a_start, _, _ = marks[0]
+    d_start, d_end, _ = marks[3]
+    if '\n' not in content[a_start:d_end]:
+        # 行内布局：D 止于所在行行尾，尾部内容（题干配图等）归题干
+        d_line_end = content.find('\n', d_end)
+        if d_line_end == -1:
+            d_line_end = len(content)
+        trailing = content[d_line_end:].strip()
+        stem = content[:a_start].strip()
+        if trailing:
+            stem = (stem + "\n" + trailing) if stem else trailing
+        d_text = re.sub(r'\s*\[图\]\s*$', '', content[d_end:d_line_end])
+        opts: list[dict] = []
+        for j in range(4):
+            if j == 3:
+                text = d_text
+            else:
+                text = content[marks[j][1]:marks[j + 1][0]]
+            opts.append({"label": marks[j][2], "text": text.strip()})
+        return stem, opts
+
+    # 跨行布局
+    lines = content.split('\n')
+    bounds = _line_bounds(content)
+    mark_line = [_line_of(bounds, m[0]) for m in marks]
+    d_line = mark_line[3]
+    d_rest = content[d_end:bounds[d_line][1]].strip()      # D 行内剩余
+    after_d = '\n'.join(lines[d_line + 1:]).strip()        # D 行之后
+    # 纯标记行：行内除标记外无其他内容（'A'/'A.'/'(A)' 独占一行；
+    # '(A) 30°' 或行内 'A. x' 不算——那是标记在上内容在下的排版）
+    def _pure(k: int) -> bool:
+        s, _ = bounds[mark_line[k]]
+        line = lines[mark_line[k]]
+        rest = (line[:marks[k][0] - s] + line[marks[k][1] - s:]).strip()
+        return not rest
+
+    if all(_pure(k) for k in range(4)) and not d_rest and not after_d:
+        # 内容在标记上方（图选项标准排版：字母标在图/内容下方，MinerU 线性化
+        # 为 '内容\nA\n内容\nB\n...\nD'，D 后无内容）：
+        # B/C/D 取上一标记行与本标记行之间的所有行；A 取其上方最近的图片行
+        # 到 A 行之间的内容（更早的图归题干；无图则退化为 stem 全取）
+        a_img = _first_image_line_above(lines, mark_line[0])
+        if a_img is not None:
+            stem = '\n'.join(lines[:a_img]).strip()
+            a_text = '\n'.join(lines[a_img:mark_line[0]]).strip()
+        else:
+            stem = ''
+            a_text = '\n'.join(lines[:mark_line[0]]).strip()
+        opts = [{"label": marks[0][2], "text": a_text}]
+        for k in range(1, 4):
+            seg = '\n'.join(lines[mark_line[k - 1] + 1:mark_line[k]]).strip()
+            opts.append({"label": marks[k][2], "text": seg})
+        return stem, opts
+
+    # 默认（标记在上、内容/图在标记行之间，如 'A.\n图\nB.\n图'）：
+    # 选项 = 标记间内容，D 取到末尾（自配图不被截走）
+    stem = content[:a_start].strip()
+    opts = []
+    for j in range(4):
+        if j == 3:
+            text = content[d_end:]
+        else:
+            text = content[marks[j][1]:marks[j + 1][0]]
+        opts.append({"label": marks[j][2], "text": text.strip()})
+    return stem, opts
 
 
 def parse_answer_table(line: str) -> dict[int, str]:

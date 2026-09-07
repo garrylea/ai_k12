@@ -327,3 +327,197 @@ def test_split_page_fills_score():
     assert by_order[9].score == 2
     assert by_order[17].score == 5
     assert by_order[24].score == 6
+
+
+# ---------- split_options ----------
+
+from question_splitter import split_options
+
+
+def test_split_options_inline_no_trailing():
+    """纯行内选项（题干+ABCD 同一行）：无尾部内容，题干/选项原样拆开。"""
+    content = "下列结论中正确的是 (A) $c > a$ (B) $b + c > 0$ (C) 1 (D) 2"
+    stem, opts = split_options(content)
+    assert stem == "下列结论中正确的是"
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[0]["text"] == "$c > a$"
+    assert opts[3]["text"] == "2"
+
+
+def test_split_options_trailing_image_goes_to_stem():
+    """行内选项 + 尾部题干配图（西城模拟二 题3 真实格式）：
+    D 选项文本止于 (D) 所在行行尾，之后的尾部内容（图片等）归题干。"""
+    content = (
+        "如图, 直线 $AB$ 与直线 $CD$ 相交于点 $O$ , 则 $\\angle AOE$ 的大小为 "
+        "(A) $25^{\\circ}$ (B) $35^{\\circ}$ (C) $45^{\\circ}$ (D) $55^{\\circ}$\n"
+        "![](images/9630d93f.jpg)"
+    )
+    stem, opts = split_options(content)
+    assert opts[3]["text"] == "$55^{\\circ}$"  # D 不吞尾部图片
+    assert "![](images/9630d93f.jpg)" in stem  # 图片归题干
+    assert "$\\angle AOE$" in stem
+
+
+def test_split_options_trailing_multiline_to_stem():
+    """尾部内容多行（图片+文字）整体归题干，D 只取所在行剩余部分。"""
+    content = (
+        "主视图是 (A) 甲 (B) 乙 (C) 丙 (D) 丁\n"
+        "![](images/a.jpg)\n"
+        "备注文字"
+    )
+    stem, opts = split_options(content)
+    assert opts[3]["text"] == "丁"
+    assert "![](images/a.jpg)" in stem
+    assert "备注文字" in stem
+
+
+def test_split_options_vertical_option_images_stay():
+    """竖排选项（标记跨行，各选项自配图在标记行之间）：图留在各自选项内，
+    D 取到 content 末尾（自配图不被截走归题干）。"""
+    content = (
+        "主视图是\n"
+        "(A)\n![](images/opt_a.jpg)\n"
+        "(B)\n![](images/opt_b.jpg)\n"
+        "(C)\n![](images/opt_c.jpg)\n"
+        "(D)\n![](images/opt_d.jpg)"
+    )
+    stem, opts = split_options(content)
+    assert opts[0]["text"] == "![](images/opt_a.jpg)"
+    assert opts[1]["text"] == "![](images/opt_b.jpg)"
+    assert opts[2]["text"] == "![](images/opt_c.jpg)"
+    assert opts[3]["text"] == "![](images/opt_d.jpg)"
+    assert stem == "主视图是"
+
+
+def test_split_options_not_choice_returns_none():
+    """非选择题（无 ABCD 连续标记）：原样返回 (content, None)。"""
+    content = "解不等式组并写出解集"
+    stem, opts = split_options(content)
+    assert stem == content
+    assert opts is None
+
+
+# ---------- split_options：裸字母格式（A. / A 无括号） ----------
+
+
+def test_split_options_bare_inline():
+    """行内裸字母 '题干 A. x B. y C. z D. w'（东城卷格式）：拆开且无尾部。"""
+    content = "估计 $1 + \\sqrt{5}$ 的值在 A. 1 和 2 之间 B. 2 和 3 之间 C. 3 和 4 之间 D. 4 和 5 之间"
+    stem, opts = split_options(content)
+    assert stem == "估计 $1 + \\sqrt{5}$ 的值在"
+    assert opts[0]["text"] == "1 和 2 之间"
+    assert opts[3]["text"] == "4 和 5 之间"
+
+
+def test_split_options_bare_inline_trailing_image_to_stem():
+    """行内裸字母 + 尾部题干配图 + '[图]' 占位符（东城2025 题2 真实格式）：
+    图归题干，D 行尾的 '[图]' 占位符剥掉。"""
+    content = (
+        "如图, 直线 $AB, CD$ 交于点 $O$ , 则 $\\angle 2$ 的度数为 "
+        "A. $55^\\circ$ B. $45^\\circ$ C. $35^\\circ$ D. $30^\\circ$ [图]\n"
+        "![](images/94086eed.jpg)"
+    )
+    stem, opts = split_options(content)
+    assert opts[3]["text"] == "$30^\\circ$"  # '[图]' 剥掉
+    assert "![](images/94086eed.jpg)" in stem  # 图归题干
+
+
+def test_split_options_bare_vertical_image_above_label():
+    """竖排裸字母、图片在标记上方（东城2026 题1 真实格式：
+    '图\\nA\\n图\\nB\\n图\\nC\\n图\\nD'，D 后无内容）：字母标在图下方，
+    每个选项取它上方紧邻的图，stem 不吞 A 的图。"""
+    content = (
+        "下列几何图形中, 既是中心对称图形也是轴对称图形的是\n"
+        "![](images/opt_a.jpg)\nA\n"
+        "![](images/opt_b.jpg)\nB\n"
+        "![](images/opt_c.jpg)\nC\n"
+        "![](images/opt_d.jpg)\nD"
+    )
+    stem, opts = split_options(content)
+    assert stem == "下列几何图形中, 既是中心对称图形也是轴对称图形的是"
+    assert opts[0]["text"] == "![](images/opt_a.jpg)"
+    assert opts[1]["text"] == "![](images/opt_b.jpg)"
+    assert opts[2]["text"] == "![](images/opt_c.jpg)"
+    assert opts[3]["text"] == "![](images/opt_d.jpg)"
+
+
+def test_split_options_paren_vertical_image_above_label():
+    """括号竖排、图片在标记上方 + 题干自配图（西城2026 题1 真实格式：
+    '题干\\n题干图\\nA图\\n(A)\\nB图\\n(B)\\nC图\\n(C)\\nD图\\n(D)'）：
+    各选项取上方紧邻图，题干图留在 stem。"""
+    content = (
+        "如右图是喜庆集会时所击的鼓的立体图形, 则这个图形的主视图是\n"
+        "![](images/stem_drum.jpg)\n"
+        "![](images/opt_a.jpg)\n(A)\n"
+        "![](images/opt_b.jpg)\n(B)\n"
+        "![](images/opt_c.jpg)\n(C)\n"
+        "![](images/opt_d.jpg)\n(D)"
+    )
+    stem, opts = split_options(content)
+    assert "![](images/stem_drum.jpg)" in stem
+    assert "主视图是" in stem
+    assert opts[0]["text"] == "![](images/opt_a.jpg)"
+    assert opts[1]["text"] == "![](images/opt_b.jpg)"
+    assert opts[2]["text"] == "![](images/opt_c.jpg)"
+    assert opts[3]["text"] == "![](images/opt_d.jpg)"
+
+
+def test_split_options_bare_vertical_label_above_image():
+    """竖排裸字母带点、标记在上图在下（2024西城 题2 真实格式：
+    'A.\\n图\\nB.\\n图\\nC.\\n图\\nD.\\n图'，D 后有图）：标记后跟自配图。"""
+    content = (
+        "下列4个图形中，是中心对称图形的是( )\n"
+        "A.\n![](images/a.jpg)\n"
+        "B.\n![](images/b.jpg)\n"
+        "C.\n![](images/c.jpg)\n"
+        "D.\n![](images/d.jpg)"
+    )
+    stem, opts = split_options(content)
+    assert "是中心对称图形的是" in stem
+    assert opts[0]["text"] == "![](images/a.jpg)"
+    assert opts[1]["text"] == "![](images/b.jpg)"
+    assert opts[2]["text"] == "![](images/c.jpg)"
+    assert opts[3]["text"] == "![](images/d.jpg)"
+
+
+def test_split_options_bare_multiline_marks():
+    """裸字母跨行分布（'A. x B. y\\nC. z D. w'，东城2025 题4 格式）：
+    标记跨行 → D 取到末尾。"""
+    content = (
+        "一元二次方程 $2x^{2} - 3x + 1 = 0$ 的根的情况是\n"
+        "A. 有两个相等的实数根 B. 有两个不相等的实数根\n"
+        "C. 只有一个实数根 D. 没有实数根"
+    )
+    stem, opts = split_options(content)
+    assert stem.endswith("的根的情况是")
+    assert opts[0]["text"] == "有两个相等的实数根"
+    assert opts[1]["text"] == "有两个不相等的实数根"
+    assert opts[2]["text"] == "只有一个实数根"
+    assert opts[3]["text"] == "没有实数根"
+
+
+def test_split_options_enumeration_abcd_not_split():
+    """题干里的枚举 'A、B、C、D 四点'（顿号后无空格）不当作选项。"""
+    content = "如图, A、B、C、D 四点在圆上, 求证: 四边形 $ABCD$ 是正方形."
+    stem, opts = split_options(content)
+    assert stem == content
+    assert opts is None
+
+
+def test_split_options_content_above_with_caption():
+    """内容在标记上方 + 说明文字（物理昌平 题2 真实格式：
+    '图\\n说明文字\\nA\\n图\\n说明\\nB\\n...\\n图\\n说明\\nD'）：图+说明整体归
+    各自标记，stem 只留题干文本。"""
+    content = (
+        "如图所示的光现象中, 由于光的反射形成的是\n"
+        "![](images/a.jpg)\n桥在水中形成的倒影\nA\n"
+        "![](images/b.jpg)\n日晷上呈现针的影子\nB\n"
+        "![](images/c.jpg)\n透过放大镜看到放大的图案\nC\n"
+        "![](images/d.jpg)\n人透过水球所成的像\nD"
+    )
+    stem, opts = split_options(content)
+    assert stem == "如图所示的光现象中, 由于光的反射形成的是"
+    assert opts[0]["text"] == "![](images/a.jpg)\n桥在水中形成的倒影"
+    assert opts[1]["text"] == "![](images/b.jpg)\n日晷上呈现针的影子"
+    assert opts[2]["text"] == "![](images/c.jpg)\n透过放大镜看到放大的图案"
+    assert opts[3]["text"] == "![](images/d.jpg)\n人透过水球所成的像"
