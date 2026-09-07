@@ -4,13 +4,15 @@
 // 不做（YAGNI，父层负责）：庆祝页、bumpErrorLevels、DiscussDrawer、结果列表渲染。
 // 收敛扩展（AnswerModal/CleanupPhase 挂载用）：startIndex / onClose / showPrevButton /
 // headerActions / judgingSlot / modalExtras 均为可选，缺省时行为与扩展前完全一致。
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import {
+  markdownRemarkPlugins,
+  markdownRehypePlugins,
+  preprocessMarkdown,
+  MarkdownImg,
+} from '@/components/markdown';
 import { LatexEditor } from '../LatexEditor';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
 import { clearDraft } from '../draft-store';
@@ -31,6 +33,16 @@ const ChevronLeftIcon = () => (
     <polyline points="15 18 9 12 15 6" />
   </svg>
 );
+
+// 自定义 img：题面图走 MarkdownImg 的 bucketHeight 模式——按宽高比分桶固定高度
+// （[0.3,1.7]→100px / <0.3→160px / >1.7→30px，见 markdown.tsx MarkdownImg 注释），
+// resolveAsset / 破图隐藏仍由 MarkdownImg 处理。className 不带固定高（分桶算法给），
+// 保留 margin/居中/max-w-full/object-contain/圆角。
+const questionMarkdownComponents = {
+  img: (props: { src?: string; alt?: string }) => (
+    <MarkdownImg {...props} bucketHeight className="block mx-auto my-4 max-w-full object-contain rounded-lg" />
+  ),
+};
 
 export interface QuestionRunnerProps {
   questions: RunnerQuestion[];
@@ -111,13 +123,27 @@ export function QuestionRunner({
   const q = questions[idx];
   const requestHint = enableHint ? onRequestHint : undefined;
 
+  // 作答按 q.n 持久化（事件回调写入）—— 切题时按 q.n 回填，避免「回看上一题
+  // 答案消失」。currentNRef 在渲染期同步为当前 q.n，供 updateAnswer 在事件
+  // 回调里定位写入的键。resultsRef 仅记判题结果（onFinish 快照），不复用它
+  // 回填输入：判题 pending 期间 resultsRef 还没落 studentAnswer，会回填空。
+  const currentNRef = useRef<string>('');
+  currentNRef.current = q?.n ?? '';
+  const answerByNRef = useRef<Record<string, string>>({});
+  const updateAnswer = useCallback((next: string) => {
+    setAnswer(next);
+    if (currentNRef.current) answerByNRef.current[currentNRef.current] = next;
+  }, []);
+
   // 切题时重置提示面板展示态（提示文本本身存于 props.hints，跨题保留），
-  // 并清空作答内容——「上一题」不提交即切换时，防止上一题的答案泄漏到当前题。
-  // 必须在 `if (!q) return null` 之前调用（hooks 不能条件性调用）。
-  useEffect(() => {
+  // 并回填当前题已记录的作答（answerByNRef）——「上一题」回退时恢复之前
+  // 选中/填写的值，新题回填空串。useLayoutEffect 同步在 paint 前回填，
+  // 避免旧题答案在新题上闪一帧。
+  useLayoutEffect(() => {
     setHintState({ show: false, loading: false, error: false });
-    setAnswer('');
-  }, [idx]);
+    const nq = questions[idx];
+    setAnswer(nq ? (answerByNRef.current[nq.n] ?? '') : '');
+  }, [idx, questions]);
 
   const handleSubmit = useCallback(async () => {
     if (!answer.trim() || phase !== 'answering' || !q) return;
@@ -241,8 +267,8 @@ export function QuestionRunner({
               <div
                 className={`${variant === 'embedded' ? 'text-lg' : 'text-xl'} text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]`}
               >
-                <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                  {q.text}
+                <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
+                  {preprocessMarkdown(q.text)}
                 </ReactMarkdown>
               </div>
             </div>
@@ -281,8 +307,8 @@ export function QuestionRunner({
                 </div>
               ) : hints?.[q.n] ? (
                 <div className="text-sm text-[var(--text-primary)] leading-relaxed">
-                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                    {hints[q.n]}
+                  <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
+                    {preprocessMarkdown(hints[q.n])}
                   </ReactMarkdown>
                 </div>
               ) : (
@@ -298,12 +324,12 @@ export function QuestionRunner({
         <div className="flex-1 min-h-[280px] flex">
           {choiceOptions ? (
             <div className="flex-1 min-h-0 overflow-auto">
-              <ChoiceOptionList options={choiceOptions} value={answer} onChange={setAnswer} />
+              <ChoiceOptionList options={choiceOptions} value={answer} onChange={updateAnswer} />
             </div>
           ) : (
             <>
               <div className="w-1/2 border-r border-[var(--bg-subtle)] flex flex-col">
-                <LatexEditor value={answer} onChange={setAnswer} />
+                <LatexEditor value={answer} onChange={updateAnswer} />
               </div>
               {/* 右半区：预览 / 草稿 tab（仅数学启用草稿，PRD §7.12） */}
               <div className="w-1/2">
