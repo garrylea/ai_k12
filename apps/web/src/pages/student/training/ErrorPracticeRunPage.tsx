@@ -4,6 +4,7 @@ import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from '@/components/business/answer/types';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
+import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
@@ -31,6 +32,9 @@ export default function ErrorPracticeRunPage() {
   const [finalResults, setFinalResults] = useState<Record<string, RunnerAnswerRecord> | null>(null);
   // 「讲一讲」抽屉：打开时锚定当时题面（DiscussDrawer training 模式只需题面文本）
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
+  // 页面级草稿抽屉：始终可见图标，切题即清空（草稿不保存）
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({ open: false, answered: 0 });
   // X 确认后放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 二次拦截——ref 是同步生效的）
@@ -175,6 +179,7 @@ export default function ErrorPracticeRunPage() {
               )}
               onSubmit={handleSubmit}
               onFinish={handleFinish}
+              onQuestionChange={setCurrentQ}
               onClose={(answered) => setExitConfirm({ open: true, answered })}
             />
             {discussQ && phase === 'answering' && (
@@ -184,6 +189,16 @@ export default function ErrorPracticeRunPage() {
                 // n = errorBookId，需经题单条目反查真实 questionId（孤儿题在列表页已禁选）
                 questionId={entryByN.get(discussQ.n)?.questionId ?? undefined}
                 onClose={() => setDiscussQ(null)}
+              />
+            )}
+            {/* 草稿入口：页面背景层右上角，absolute 定位；DOM 排在抽屉前，抽屉打开时自然盖住图标 */}
+            <div className="absolute top-4 right-4">
+              <DraftIconButton onClick={() => setDraftOpen(true)} />
+            </div>
+            {draftOpen && currentQ && (
+              <DraftDrawer
+                questionId={currentQ.n}
+                onClose={() => setDraftOpen(false)}
               />
             )}
           </>
