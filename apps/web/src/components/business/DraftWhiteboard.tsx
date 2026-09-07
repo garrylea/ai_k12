@@ -89,6 +89,10 @@ export function DraftWhiteboard({
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  // 两指平移（仅 scroll-y 模式）：活动指针表（pointerId -> 该指针 clientY）+ 平移标志 + 上一帧质心 clientY
+  const activePointersRef = useRef<Map<number, { y: number }>>(new Map());
+  const panRef = useRef(false);
+  const panLastYRef = useRef(0);
   const themeMode = useThemeStore((s) => s.mode);
 
   const redraw = useCallback(() => {
@@ -127,7 +131,7 @@ export function DraftWhiteboard({
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [redraw, scrollMode, boardRef]);
+  }, [redraw, scrollMode]);
 
   // 主题变化：笔迹颜色自适应（不存色值，重绘时读 CSS 变量）
   useEffect(() => { redraw(); }, [themeMode, redraw]);
@@ -156,9 +160,37 @@ export function DraftWhiteboard({
     }
   };
 
+  // 平移质心 = 活动指针 clientY 均值（client 坐标，与滚动/手指位移一致）
+  const meanActiveY = () => {
+    const ptrs = activePointersRef.current;
+    let sum = 0;
+    for (const p of ptrs.values()) sum += p.y;
+    return ptrs.size === 0 ? 0 : sum / ptrs.size;
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    // scroll-y：每根落到画布的新指针都先记录（含第二根）；两指齐下进入平移，打断进行中的单指笔迹
+    if (scrollMode === 'scroll-y') {
+      const wasPanning = panRef.current;
+      const prevCount = activePointersRef.current.size;
+      activePointersRef.current.set(e.pointerId, { y: e.clientY });
+      if (!wasPanning && prevCount === 1 && activePointersRef.current.size === 2) {
+        panRef.current = true;
+        panLastYRef.current = meanActiveY();
+        if (drawingRef.current) {
+          // 取消进行中的单指笔画：只有刚按下未成形的单点笔迹才移除，已拖出的保留
+          drawingRef.current = false;
+          const strokes = strokesRef.current;
+          const last = strokes[strokes.length - 1];
+          if (last && last.points.length === 1) strokes.pop();
+          redraw();
+        }
+        return;
+      }
+      if (panRef.current) return; // 平移中（第三指及以上）：仅记录，不再起笔
+    }
     const p = pointFromEvent(e);
     if (tool === 'eraser') {
       eraseAt(p.x, p.y);
@@ -169,6 +201,16 @@ export function DraftWhiteboard({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (panRef.current) {
+      activePointersRef.current.set(e.pointerId, { y: e.clientY });
+      const meanY = meanActiveY();
+      const delta = meanY - panLastYRef.current;
+      panLastYRef.current = meanY;
+      // 内容跟随手指：wrap.scrollTop 实时读（边界由浏览器自动夹紧）
+      const wrap = wrapRef.current;
+      if (wrap) wrap.scrollTop -= delta;
+      return;
+    }
     const p = pointFromEvent(e);
     if (tool === 'eraser') {
       if (e.buttons === 0) return; // 未按下不擦
@@ -181,10 +223,26 @@ export function DraftWhiteboard({
     redraw();
   };
 
-  const handlePointerUp = () => {
+  const endPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (scrollMode !== 'scroll-y') return;
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) panRef.current = false;
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    endPointer(e);
     if (!drawingRef.current) return;
     drawingRef.current = false;
     if (persist) setDraft(questionId, strokesRef.current);
+  };
+
+  // 系统打断（来电/手势接管）或捕获丢失：指针从表中移除；中断单指笔迹，不落盘
+  const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    endPointer(e);
+    drawingRef.current = false;
+  };
+  const handleLostPointerCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    endPointer(e);
   };
 
   const handleClear = () => {
@@ -192,6 +250,21 @@ export function DraftWhiteboard({
     if (persist) clearDraft(questionId);
     redraw();
   };
+
+  // 画布元素：两种模式共用一份 JSX（refs/handlers/样式相同），差异只在套的外层容器
+  const canvasEl = (
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full"
+      style={{ touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onLostPointerCapture={handleLostPointerCapture}
+      onPointerLeave={handlePointerUp}
+    />
+  );
 
   const toolBtn = (t: Tool, label: string, icon: React.ReactNode) => (
     <button
@@ -229,28 +302,12 @@ export function DraftWhiteboard({
       {scrollMode === 'scroll-y' ? (
         <div ref={wrapRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           <div ref={boardRef} className="relative" style={{ width: '100%' }}>
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 w-full h-full"
-              style={{ touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerLeave={handlePointerUp}
-            />
+            {canvasEl}
           </div>
         </div>
       ) : (
         <div ref={wrapRef} className="flex-1 min-h-0 relative">
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full"
-            style={{ touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-          />
+          {canvasEl}
         </div>
       )}
     </div>
