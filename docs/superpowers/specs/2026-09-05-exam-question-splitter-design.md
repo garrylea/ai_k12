@@ -187,11 +187,13 @@ LLM 输出 JSON：
 }
 ```
 
-难度定义（在 prompt 里写清）：
+难度定义（在 prompt 里写清，5 档）：
 
 - **1 简单**：基础概念/直接套公式/一步计算
 - **2 中等**：综合应用/多步推理
-- **3 困难**：复杂证明/多知识点综合/开放探究
+- **3 有一定难度**：如选择题中的最后一题
+- **4 困难**：复杂证明/多知识点综合/开放探究
+- **5 超困难**：新定义题、几何压轴题
 
 ### 4.3 双模型确认新增知识点（重点）
 
@@ -377,7 +379,7 @@ for source in sources:
 - **道法/物理/化学等学科的切题算法**：当前实现数学。不同学科题号格式、材料题结构可能不同（如物理有实验题、道法有阅读理解材料题），需学科适配器。`--subject` 参数已预留扩展点
 - **`material_text` 抽取**：数学不抽（材料在 content）；道法/物理需要单独拆出共享材料（如阅读理解的多小题共享材料），后续做
 - **db_loader 处理 `_confirmed_new_kps`**：本次范围外，单独任务。db_loader 入库时把 `_confirmed_new_kps` 插入 `knowledge_points` 表（生成 code + parent 关系），用新 code 建立 `question_knowledge_points` 关联
-- **难度定义细化为学科相关**：当前 1/2/3 通用定义。未来不同学科可能有不同难度维度（如语文的阅读难度 vs 写作难度），留待学科适配时扩展
+- **难度定义细化为学科相关**：当前 5 档通用定义（1 简单/2 中等/3 有一定难度/4 困难/5 超困难）。未来不同学科可能有不同难度维度（如语文的阅读难度 vs 写作难度），留待学科适配时扩展
 - **遗留 `Extractor` 类和 `exam_questions.txt` prompt 的去留**：本次保留不动。后续若新路径稳定跑通，可考虑删除遗留代码（避免混淆）
 
 ## 11. 实现顺序建议
@@ -388,3 +390,60 @@ for source in sources:
 4. `extract_cli.py` 加 kind 分支 + 新参数
 5. 端到端验证（西城模拟二 → JSONL，检查正确性）
 6. 回归测试（教材卡路径不破坏）
+
+## 12. 实现修正记录（2026-09-05 → 09-07，真实数据验证后）
+
+以下偏离/补充均为实现中由真实数据（2026 西城/丰台模拟二、DB 结构）验证后确认，更新本文档作为设计真相：
+
+### 12.1 难度改为 5 档（用户追加）
+
+§4.2 已更新为 5 档：1 简单 / 2 中等 / 3 有一定难度（如选择题最后一题）/ 4 困难（复杂证明/多知识点综合/开放探究）/ 5 超困难（新定义、几何压轴题）。`ExamQuestion.difficulty` 校验范围 le=5。
+
+### 12.2 答案合并 Task 4 改为"内容判断"（非文件名）
+
+zgkao 命名反向："试卷.pdf"=有答案版，实际"答案.pdf"=无答案版试卷（纯题干）。文件名只用于配对（"-试卷"↔"-答案"），**是否含答案看内容**：
+
+- `_has_answer_section(text)`：末尾 500 字符含"参考答案/答案及评分/评分参考"关键字，或全文"解：/证明："≥5 次
+- `_is_pure_answer(text)`：有答案部分 且 无选择题选项 (A)-(D) 无题干词（如图/下列）
+
+`maybe_merge_answer_md` 5 case：
+1. 只有一份文件 → 用它
+2. 两份都有答案 → 留试卷，丢答案
+3. 试卷有答案 + 答案纯题干 → 留试卷，丢答案
+4. 试卷无答案 + 答案有答案 → 4a 纯答案则合并；4b 试卷+答案版则用答案文件
+5. 两份都无答案 → 用试卷（answer 留空，做题时大模型补）
+
+### 12.3 每题分数 full_score（用户追加）
+
+`parse_group_scores` 从分组标题解析每题满分：
+- "每题N分"（选择/填空）→ unified 组内统一分
+- "第A-B题每题N分，第C题M分"（解答题）→ 逐题 map，范围展开
+- 兼容全/半角括号逗号；"共78分"无逐题分 → none
+
+链路：`RawQuestion.score` → `LabeledQuestion.score` → JSONL `full_score` → `ExamQuestion.full_score` → DB `questions.full_score`（schema.sql 加列）。真实西城全卷 100 核对通过。
+
+### 12.4 真实数据暴露并修复的 bug（question_splitter）
+
+- `_GROUP_HEADER_RE` 需兼容 markdown `#` 前缀（真实标题 "## 一、选择题"）
+- `_ANSWER_KEYWORD_RE` 不匹配单独"答案"（"考生须知"里"试题答案"误触发答案区）
+- `split_inline_stems` 跳过含 `\begin{`/`\end{`、`![](`、`解：/证明：/∵/∴/\therefore` 的行——防 LaTeX 小数（"b=2."）、图片文件名（"a3.jpg"）误匹配为题号
+- 新增 `parse_answer_table`：选择题答案在 HTML `<table>` 里（非紧凑格式），解析行提取题号→答案
+
+### 12.5 双模型确认新增 KP 的真实行为
+
+主模型（本地 Qwen3.8-27B）多数遵守 prompt 约束（从已有 KP 选，suggested_new=[]）；偶发建议新增。DeepSeek 兜底确认——71 个 KP 缺相交线/平行线章时，双模型一致判"邻补角/对顶角/垂直的定义"为真新增（AND 逻辑触发）。已补 M09 章种子（见 12.7）。
+
+### 12.6 extract_cli kind 分支 + 按卷重载（接入验证新增）
+
+- `extract_cli.py` main 循环分流：文件名含"试卷"→ question_extract 新路径；含"答案"→ skip（内容由配对试卷 `maybe_merge_answer_md` 吸收，避免重复入库）；教材卡走原逻辑。
+- `question_extract.py`：试卷 MD → maybe_merge_answer_md → split_page → QuestionLabeler（+双模型确认）→ ExamQuestion JSONL。KP 列表每次从 DB 动态查（不写死）。
+- `db_loader_cli --reload-source "<source>"`：删该卷题（paper_questions/QKP CASCADE 连带）后重插；业务表（answers/错题本/变式题 RESTRICT）引用时需 `--purge-paper-data` 显式清理。
+- publish 物化图引用改写为相对路径 `questions/{subject}/{hash}/{idx}/stem_NN.jpg`（无 /assets/ 前缀，前端经 /assets 代理）。
+
+### 12.7 KP 种子补 M09 相交线与平行线（2026-09-06）
+
+71 个 KP 缺相交线与平行线整章。`tools/db/migrations/2026-09-06_add_kp_intersecting_parallel.sql` 补 M09（相交线/垂线/同位角内错角同旁内角/平行线的判定/平行线的性质/命题定理与证明/平行线间的距离），79 个。验证：西城题3（直线相交求角）标注从误标 M0403 修正为 M0901/M0902，suggested_new_kps 清空。
+
+### 12.8 JSONL 扩展字段确认
+
+下划线前缀字段 `_confirmed_new_kps` / `_suggested_new_kps` publish 原样保留；`full_score` 标准字段贯通到 DB。db_loader 处理 `_confirmed_new_kps` 入库 knowledge_points（code 生成 + parent 策略待定）**未实现**——本次西城无确认新 KP 数据（KP 补齐后 LLM 不再滥建），留待有实际触发时按 §10 待办实现。

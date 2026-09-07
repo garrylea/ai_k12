@@ -825,10 +825,12 @@ Create `tools/data-refinery/src/prompts/question_labeler.txt`:
 
 【每道题字段】
 - type: 只能是 "choice"（选择）、"fill_blank"（填空）、"true_false"（判断）、"short_answer"（简答）、"proof"（证明）
-- difficulty: 难度 1-3
+- difficulty: 难度 1-5
     1 简单：基础概念/直接套公式/一步计算
     2 中等：综合应用/多步推理
-    3 困难：复杂证明/多知识点综合/开放探究
+    3 有一定难度：如选择题中的最后一题
+    4 困难：复杂证明/多知识点综合/开放探究
+    5 超困难：新定义题、几何压轴题
 - knowledge_points: 知识点 code 列表（从下列已有知识点中选，0..N 个）
 - suggested_new_kps: 建议新增的知识点名称列表（仅当题目涉及下列列表中不存在的知识点时才填，否则空数组 []）
 
@@ -980,7 +982,7 @@ class LabeledQuestion:
     answer: str
     explanation: str | None
     type: str = ""                       # choice/fill_blank/true_false/short_answer/proof
-    difficulty: int = 2                  # 1-3，默认 2
+    difficulty: int = 2                  # 1-5，默认 2
     knowledge_points: list[str] = None   # 已有 KP code 列表
     suggested_new_kps: list[str] = None  # 建议新增的 KP 名称
     _confirmed_new_kps: list[dict] = None  # 双模型确认的新增 KP（Task 6 填）
@@ -1080,7 +1082,7 @@ class QuestionLabeler:
         labeled.type = str(item.get("type", "") or "")
         try:
             labeled.difficulty = int(item.get("difficulty", 2) or 2)
-            if not 1 <= labeled.difficulty <= 3:
+            if not 1 <= labeled.difficulty <= 5:
                 labeled.difficulty = 2
         except (TypeError, ValueError):
             labeled.difficulty = 2
@@ -1570,3 +1572,21 @@ git commit -m "test(data-refinery): 端到端验证西城模拟二切题正确
 - `split_page` 在 Task 2/3 扩展，Task 7 调用 ✓
 - `maybe_merge_answer_md` 在 Task 4 定义，Task 7 调用 ✓
 
+
+---
+
+## 实现状态（2026-09-07）
+
+本计划 8 任务已全部实现并端到端验证（真实西城模拟二 + 全套测试）。实现中的关键偏差，详见 spec §12：
+
+- **难度 5 档**（Task 5 prompt/QuestionLabeler/ExamQuestion le=5，超出本 plan 原 3 档）
+- **Task 4 改 5 case 内容判断**（本 plan Task 4 按文件名假设已过时，真实 zgkao 命名反向——按内容判断是否含答案，见 spec §12.2）
+- **分数 full_score 提取**（Task 4 后用户追加，见 spec §12.3）
+- **接入验证**：publish 图片物化 + db_loader full_score 入库 + `--reload-source` 按卷重载（见 spec §12.6）
+- **KP 种子补 M09**（见 spec §12.7）
+- 遗留 `_confirmed_new_kps` 入库 db_loader 未实现（本次无触发数据，见 spec §12.8）
+
+端到端验证摘要：
+- 西城模拟二切出 28 题，type/difficulty/kp 28/28 有值，26/28 答案对齐（题25/26 试卷本身没给），11 题含物化图引用
+- full_score 全卷 100 核对通过，reload 入库 24 题（4 题跨卷 content_hash 复用）
+- 全套 557+ passed，教材卡路径零回归
