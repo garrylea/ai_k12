@@ -17,7 +17,7 @@
 ## 2. 设计决策（用户已确认）
 
 1. **判题响应只判对错**：`JudgeOutput` 删除 `analysis` 字段；主观题判题 prompt 简化为只输出 `{isCorrect, errorType}`（省输出 token，长 analysis 是输出大头）。客观题判错的「正确答案：X」一并去掉——学生答错即时只看到错，正确答案与解法在解析里展开才有（贴合苏格拉底原则）。`errorType` 保留（判题 LLM 顺带产出，零成本，错题统计在用）。
-2. **判错后台异步生成解析**：判题响应立即返回，解析生成在后台异步进行（不阻塞判题、不阻塞学生答题）；结果页查看时若未生成完显示「解析生成中」+ 手动刷新（不做自动轮询）。
+2. **判错后台异步生成解析**：判题响应立即返回，解析生成在后台异步进行（不阻塞判题、不阻塞学生答题）。**末题后批量拉取时后端等待 in-flight 生成完成**（总超时 60s 兜底，避免 HTTP 挂死）——学生一次看全所有解析，无刷新交互；超时仍未完成的极少数题显示「解析生成中」。
 3. **长答案直接当题解**：`answer` 长度 ≥100 字符（过程性题解，试卷参考答案常如此）时直接 `UPDATE questions.explanation = answer`，不调 LLM。
 4. **载体选方案 A**：判题核心内嵌轻量缓存服务（进程内队列），不建任务表、不加 Redis。
 5. **思考模式维持现状**：`KimiClient` 无条件下发 `enable_thinking: true`（`kimi-client.ts:25` 非流式 / `:94` 流式，Qwen/DeepSeek 共用）。判题 19s 实测可用，本设计不动它；若后续判题慢成为瓶颈，再单独立项做 per-scene thinking 开关（需验证 DeepSeek 是否支持关闭）。
@@ -37,7 +37,8 @@
 判题响应立即返回：{ questionId, isCorrect, method, errorType, errorBookId }（不等解析生成）
 ```
 
-- 生成耗时 30-120s，判错时学生通常还在答后面的题——多数场景进结果页时解析已就绪或接近就绪。
+- 生成耗时 30-120s，判错时学生通常还在答后面的题——末题等判题 + 批量拉取时多数已就绪，剩余 in-flight 的由批量端点等待完成（§5.1）。
+- 完整时序（用户确认）：学生每答一题异步发后端（fire-and-forget）→ 后端判对错（DB 有答案则比对、无则 LLM）→ 对错返回前端记录；答错同时后台生成解析入库。末题提交后前端同步等待所有在途判题完成 → 收集全部错题 questionId 批量拉解析 → 展示最终结果页。
 - `answer` 为空的题也允许生成（prompt 参考答案为空则 LLM 自行解题；有解错风险，靠「讲一讲」苏格拉底讨论兜底）。
 
 ## 4. 组件设计
@@ -45,8 +46,10 @@
 ### 4.1 ExplanationCacheService（新）
 
 - 位置：`apps/server/src/modules/practice/explanation-cache.service.ts`（Nest injectable，被 `JudgeCoreService` 注入）。
-- 接口：`ensureExplanation(q: QuestionRow): void`——同步返回，内部 fire-and-forget。
-- 队列：进程内，并发上限 2（常量），同题 in-flight 去重（Set）。
+- 接口：
+  - `ensureExplanation(q: QuestionRow): void`——同步返回，内部 fire-and-forget（判错分支调用）。
+  - `waitForExplanations(ids: number[], timeoutMs = 60_000): Promise<Record<number, string | null>>`——批量端点调用：对每个 id，DB 已有 → 返回；in-flight → await 该生成 promise（整体受 timeoutMs 上界约束）；既无 DB 也无 in-flight（从未触发或曾失败）→ null。
+- 队列：进程内，并发上限 2（常量），同题 in-flight 去重（Set，promise 复用——waitForExplanations 等的就是这些 promise）。
 - 失败处理：LLM 失败 / 超时 / 解析失败 → 记日志、出队、**不入库**——幂等（explanation 空才会再生成），下次判错自然重试。`updateExplanation` 落库失败同记日志。
 - 已知局限（记入文档）：进程内队列，服务重启丢在途任务（下次判错重试）；多实例部署会重复生成（当前单实例）。将来多实例升级为 DB 任务表 + worker 时，判题 / 生成 / prompt 层不用动，只换触发载体。
 
@@ -88,25 +91,28 @@
 
 端点挂在 training 模块（题目元数据服务在该模块），但服务所有展示解析的结果页——专项 / 错题重做 / 考试结果页以及课堂练习的错题巩固（AnswerResultList 共享组件）都经它按 questionId 批量拉取。
 
+行为：对每个 id 调 `ExplanationCacheService.waitForExplanations`——已有直返，in-flight 的等待生成完成（总超时 60s 兜底，超时该题返回 null），前端一次拿全，无刷新交互。
+
 ### 5.2 前端变更
 
 - `JudgeResult` / `RunnerJudgeOutcome` / `PracticeResult` / `RunnerAnswerRecord` 等类型删 `analysis`（apps/web `services/api.ts`、`components/business/answer/types.ts`）。
-- **专项 / 错题结果页**（AnswerResultList）：展开解析时按 questionId 调 5.1 接口拉取；null 显示「解析生成中」+ 刷新按钮（手动刷新，YAGNI 不做轮询）；无 questionId 的孤儿题显示「暂无解析，试试让 AI 讲一讲」。
-- **考试结果页**（ExamResultPage）：解析展示改为 `explanation ?? analysis`（DB 题解优先，存量考试的历史 analysis 兜底）。
-- 错题巩固（CleanupPhase）走 AnswerResultList，同上述展示逻辑。
+- **前端结果页编排**（专项 / 错题重做，AnswerResultList）：末题提交 → `Promise.allSettled` 等所有在途判题完成（QuestionRunner 现有行为）→ 父层收集全部错题（`isCorrect=false` 且非 failed）的 questionId → 一次性调 5.1 批量端点（后端等待 in-flight 生成）→ 拿全后渲染结果页：每题对错 + 错题解析。超时兜底返回 null 的题显示「解析生成中」；无 questionId 的孤儿题显示「暂无解析，试试让 AI 讲一讲」。不做手动刷新、不做自动轮询。
+- **考试结果页**（ExamResultPage）：解析展示改为 `explanation ?? analysis`（DB 题解优先，存量考试的历史 analysis 兜底）。考试判题发生在每题提交时（同步），解析在判错时即触发生成，交卷 → finalize 补判 → 进结果页时多数已就绪；mount 时对「错题且 explanation/analysis 皆空」的题调 5.1 批量端点等待 in-flight 补齐（`getExamResults` 契约不动，等待在前端编排）。
+- 错题巩固（CleanupPhase）走 AnswerResultList，同上述编排逻辑。
 
 ## 6. 错误处理汇总
 
 | 场景 | 行为 |
 |---|---|
 | LLM 生成失败 / 超时 / 解析失败 | 记日志、出队、不入库；下次判错重试 |
+| `waitForExplanations` 总超时（60s） | 该题返回 null，前端显示「解析生成中」 |
 | `updateExplanation` 落库失败 | 记日志，不影响任何响应 |
-| 判题本身失败（503） | 现有行为不变 |
+| 判题本身失败（503） | 现有行为不变（前端记 failed，不进错题收集） |
 | 长答案直写 | 纯 DB UPDATE，不可失败（按 MySQL 异常兜底记日志） |
 
 ## 7. 测试
 
-- vitest（apps/server）：ExplanationCacheService 单测（mock `ExplanationCapability` + `QuestionsRepository`）——已有解析跳过 / 长答案直写 / 短答案生成入库 / 失败不入库 / 同题并发去重。
+- vitest（apps/server）：ExplanationCacheService 单测（mock `ExplanationCapability` + `QuestionsRepository`）——已有解析跳过 / 长答案直写 / 短答案生成入库 / 失败不入库 / 同题并发去重 / `waitForExplanations` 等待 in-flight 与总超时返回 null。
 - judge-core 现有测试更新：判错触发 ensureExplanation（mock 断言）；判题响应无 analysis；judgment prompt 只判对错。
 - apps/web 无测试框架，按 CLAUDE.md 手动验证 + `npm run lint`。
 
