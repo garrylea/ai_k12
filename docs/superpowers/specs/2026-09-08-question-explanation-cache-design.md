@@ -84,7 +84,9 @@
 
 ### 5.1 新增批量查解析端点
 
-`GET /api/training/questions/explanations?ids=1,2,3` → `{ explanations: { [questionId]: string | null } }`（training 模块）。
+`GET /api/training/questions/explanations?ids=1,2,3` → `{ explanations: { [questionId]: string | null } }`。
+
+端点挂在 training 模块（题目元数据服务在该模块），但服务所有展示解析的结果页——专项 / 错题重做 / 考试结果页以及课堂练习的错题巩固（AnswerResultList 共享组件）都经它按 questionId 批量拉取。
 
 ### 5.2 前端变更
 
