@@ -24,12 +24,14 @@ export function DraftDrawer({ questionId, onClose }: Props) {
     >
       {/* 头部：标题 + 放大/缩小 + 关闭（与 DiscussDrawer 同款） */}
       <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--bg-subtle)]">
-        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0">
+        {/* 装饰性笔图标：旁有「草稿」文字标题，纯装饰故对读屏隐藏 */}
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0" aria-hidden="true">
           <path d="M12 19l7-7 3 3-7 7-3-3z" />
           <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
         </svg>
         <span className="text-sm font-bold text-[var(--text-primary)] flex-1">草稿</span>
         <button
+          type="button"
           onClick={() => setExpanded((v) => !v)}
           className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
           title={expanded ? '缩小' : '放大'}
@@ -52,6 +54,7 @@ export function DraftDrawer({ questionId, onClose }: Props) {
           )}
         </button>
         <button
+          type="button"
           onClick={onClose}
           className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
           title="收起"
@@ -76,6 +79,7 @@ export function DraftDrawer({ questionId, onClose }: Props) {
 export function DraftIconButton({ onClick }: { onClick: () => void }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className="w-8 h-8 rounded-lg border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
       title="草稿"
