@@ -5,13 +5,18 @@ import { getDraft, setDraft, clearDraft, type Stroke } from './draft-store';
 
 type Tool = 'pen' | 'eraser';
 
-/** perfect-freehand 轮廓 -> canvas 填充路径 */
+/**
+ * perfect-freehand 轮廓 -> canvas 填充路径。
+ * 2026-09-07 笔迹观感调优：size 减半（细）、thinning 降低（粗细更均匀）、
+ * smoothing/streamline 调高（曲线与轨迹更平滑、去抖动）。stroke.size 存的是基础半径，
+ * 实际线宽 ≈ size×2（即 PEN_BASE_SIZE×2）。
+ */
 function strokePath(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   const outline = getStroke(stroke.points, {
     size: stroke.size * 2,
-    thinning: 0.5,
-    smoothing: 0.5,
-    streamline: 0.5,
+    thinning: 0.25,
+    smoothing: 0.7,
+    streamline: 0.7,
   });
   if (outline.length === 0) return;
   ctx.beginPath();
@@ -48,7 +53,8 @@ function hitStroke(stroke: Stroke, x: number, y: number): boolean {
   return false;
 }
 
-const PEN_BASE_SIZE = 3;
+/** 笔宽基数（CSS px，半径语义）：stroke.size×2 = 实际线宽。原 3 → 1.5（6px→3px 细一倍） */
+const PEN_BASE_SIZE = 1.5;
 /** scroll-y 模式画板高 = 容器可视高 × 该系数（纵向滚动条由此产生） */
 const SCROLL_Y_FACTOR = 1.6;
 
