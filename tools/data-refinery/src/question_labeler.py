@@ -146,27 +146,10 @@ class QuestionLabeler:
     def _fill_from_item(self, labeled, item: dict):
         """从 LLM 输出 item 填充 labeled 字段。
 
-        content/options/material_text 由 LLM 格式化输出（覆盖 from_raw 的占位）；
-        answer/explanation 保留 Python 对齐的（不从 LLM 填）。
+        LLM 只标 type/difficulty/knowledge_points/suggested_new_kps；
+        content/answer/explanation 保留 Python 切的（from_raw）；
+        options/material_text 由 question_extract 组装时 Python split_options 拆（确定性，不丢图）。
         """
-        # LLM 格式化的纯题干（若空则保留原 content 占位，避免丢题）
-        new_content = item.get("content")
-        if new_content and isinstance(new_content, str) and new_content.strip():
-            labeled.content = new_content
-        # 选项（选择题 list[{label,text}]，非选择题 null）
-        opts = item.get("options")
-        if isinstance(opts, list):
-            labeled.options = [
-                {"label": str(o.get("label", "")).upper(),
-                 "text": str(o.get("text", "") or "")}
-                for o in opts if isinstance(o, dict)
-            ]
-        elif opts is None:
-            labeled.options = None
-        # 材料
-        mt = item.get("material_text")
-        if mt is not None:
-            labeled.material_text = str(mt) if mt else None
         labeled.type = str(item.get("type", "") or "")
         try:
             labeled.difficulty = int(item.get("difficulty", 2) or 2)

@@ -116,6 +116,37 @@ def parse_group_scores(header: str) -> tuple[str, object | None]:
     return ('none', None)
 
 
+# 选项标记：(A)/(a)/（A）/（a）
+_OPTION_MARK_RE = re.compile(r'[\(（]([A-Da-d])[\)）]')
+
+
+def split_options(content: str) -> tuple[str, list[dict] | None]:
+    """把选择题的题干与 4 个选项拆开（Python 确定性，不丢图）。
+
+    content 里找连续的 (A)(B)(C)(D) 选项标记序列：
+    - 找到：题干 = 第一个 (A) 前的内容（保留所有题干配图），options = 4 个 {label, text}
+    - 找不到（非选择题或格式不符）：返回 (原 content, None)
+
+    兼容全角/半角括号、跨行选项（选项 text 含图引用 ![]() 也保留原样）。
+    """
+    matches = list(_OPTION_MARK_RE.finditer(content))
+    # 找从 'A' 起连续的 A,B,C,D（4 连）序列起点
+    for i, m in enumerate(matches):
+        if m.group(1).upper() == 'A' and i + 3 < len(matches):
+            seq = [matches[j].group(1).upper() for j in range(i, i + 4)]
+            if seq == ['A', 'B', 'C', 'D']:
+                stem = content[:m.start()].strip()
+                opts: list[dict] = []
+                for j in range(i, i + 4):
+                    end = matches[j + 1].start() if j + 1 < len(matches) else len(content)
+                    opts.append({
+                        "label": matches[j].group(1).upper(),
+                        "text": content[matches[j].end():end].strip(),
+                    })
+                return stem, opts
+    return content, None
+
+
 def parse_answer_table(line: str) -> dict[int, str]:
     """解析 HTML 表格提取选择题答案（题号→答案）。
 

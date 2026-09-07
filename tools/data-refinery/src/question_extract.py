@@ -16,7 +16,7 @@ from pathlib import Path
 import pymysql
 
 from answer_merger import maybe_merge_answer_md
-from question_splitter import split_page
+from question_splitter import split_page, split_options
 from question_labeler import QuestionLabeler, LabeledQuestion
 
 # 中文学科名 -> subject code（与 publish_cli._subject_code_for 一致）
@@ -91,18 +91,20 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
     source_name = source.md_path.stem  # 文件名去扩展名
     with out_file.open("w", encoding="utf-8") as f:
         for q in labeled:
+            # Python 确定性拆选项：content 保留所有题干配图，options 切 (A)-(D)
+            stem, opts = split_options(q.content)
             item = {
                 "subject_id": subject_code,
                 "group_id": q.group_id,
                 "group_order": q.group_order,
                 "type": q.type,
                 "difficulty": q.difficulty,
-                "full_score": q.score,  # 每题满分（分组标题解析），无则 null
-                "content": q.content,
-                "options": q.options,            # LLM 拆的选择题选项 list[{label,text}] 或 null
+                "full_score": q.score,
+                "content": stem,                  # 纯题干（含所有题干图，不丢）
+                "options": opts,                  # 选择题 list[{label,text}] 或 None
                 "answer": q.answer,
                 "explanation": q.explanation,
-                "material_text": q.material_text,  # LLM 拆的材料题共享材料或 null
+                "material_text": None,            # 数学不抽取（道法/物理后续 LLM 拆）
                 "grade_band": grade_band,
                 "source": source_name,
                 "source_year": source_year,
