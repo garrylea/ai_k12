@@ -182,6 +182,12 @@ export default function ErrorPracticeRunPage() {
               onQuestionChange={setCurrentQ}
               onClose={(answered) => setExitConfirm({ open: true, answered })}
             />
+            {/* 草稿入口：页面背景层右上角 absolute 定位。图标 DOM 必须排在各抽屉条件之前——同层兄弟
+                z-index 均为 auto（DOM 靠后者绘制在上层），抽屉后渲染才能盖住图标、关闭钮才可点；
+                DraftDrawer 条件保持最后，位于 DiscussDrawer 之上。 */}
+            <div className="absolute top-4 right-4">
+              <DraftIconButton onClick={() => setDraftOpen(true)} />
+            </div>
             {discussQ && phase === 'answering' && (
               <DiscussDrawer
                 mode="training"
@@ -191,10 +197,6 @@ export default function ErrorPracticeRunPage() {
                 onClose={() => setDiscussQ(null)}
               />
             )}
-            {/* 草稿入口：页面背景层右上角，absolute 定位；DOM 排在抽屉前，抽屉打开时自然盖住图标 */}
-            <div className="absolute top-4 right-4">
-              <DraftIconButton onClick={() => setDraftOpen(true)} />
-            </div>
             {draftOpen && currentQ && (
               <DraftDrawer
                 questionId={currentQ.n}
