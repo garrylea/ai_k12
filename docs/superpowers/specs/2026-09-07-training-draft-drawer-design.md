@@ -8,12 +8,12 @@
 
 用户要求：
 
-1. 三个答题页**页面背景层右上角**（不是答题框组件内）放一个**小且不起眼**的草稿图标，**始终显示**（作答态可见，不随答题框渲染与否变化）。
+1. 三个答题页**页面背景层右上角**（不是答题框组件内）放一个**小且不起眼**的草稿图标，**作答态期间一直显示**（不随答题框内部结构变化；结果页无当前题，不显示——2026-09-07 最终审查确认）。
 2. 点图标调出**右侧抽屉**草稿，功能与现有「计算答题窗口」草稿一致：手写笔 / 橙皮 / 清空 三按钮。
-3. 抽屉内画布**纵向可滚动**（上下滚，左右不滚）。
+3. 抽屉内画布**纵向可滚动**（上下滚，左右不滚）；iPad 触摸以**两指平移**滚动（2026-09-07 最终审查新增，画布 `touchAction:none` 下两指滚动仍可用）。
 4. 抽屉**两档宽度预设**切换 + **X 手动关闭**。
 5. **草稿不保存**：纯内存，切题即清空。关闭抽屉再开也是空的。不写 `draft-store`。
-6. **隐藏现有内嵌草稿**：`PreviewDraftPanel` 的草稿 tab 下线（`enabled=false`），抽屉草稿替代。将来恢复翻回 `enabled` 即可。
+6. **训练轨隐藏内嵌草稿**：`QuestionRunner` 新增 `draftDisabled` 可选 prop（默认 `false`），仅训练轨三个 run 页传 `draftDisabled` 隐藏 `PreviewDraftPanel` 草稿 tab（`enabled=false` 退化纯预览）；**主线**（AnswerModal 课堂练习 / CleanupPhase）维持数学草稿 tab（2026-09-07 最终审查修正——原全线下线会误伤主线）。
 7. **全题型覆盖**：图标在页面背景层，与 `QuestionRunner` 的作答区分支无关，选择/判断/填空/解答**所有题型**作答态都可见可用。
 
 ## 已确认的决策
@@ -22,12 +22,13 @@
 |---|---|
 | 图标位置 | 页面背景层右上角 `absolute top-4 right-4`，不进 `QuestionRunner` 的 `headerExtra` |
 | 图标样式 | 小尺寸（32×32）、低对比（`text-[var(--text-tertiary)]`）、不抢答题区视觉焦点 |
-| 图标可见性 | 始终显示（answering + result 阶段都可见；result 阶段无当前题，抽屉作纯草稿本用） |
+| 图标可见性 | 作答态显示（answering 阶段；result 阶段无当前题，不显示图标——2026-09-07 最终审查） |
 | 草稿持久化 | 不持久化：`DraftWhiteboard` 加 `persist?: boolean`（默认 `true` 保留原行为），抽屉用 `persist={false}`，不写 `draft-store` |
 | 切题清空 | 抽屉内 `<DraftWhiteboard key={questionId} persist={false} ... />`，questionId 变即 remount → 空白画布 |
 | 关闭抽屉 | 抽屉条件渲染（`{draftOpen && ...}`），unmount 即丢笔迹；再开为空（"不保存"） |
-| 隐藏内嵌草稿 | `QuestionRunner.tsx:339` `PreviewDraftPanel` 的 `enabled` 改 `false`（一行改动，`PreviewDraftPanel` 退化为 `<LatexPreview>` 无草稿 tab） |
-| 画布滚动 | `DraftWhiteboard` 加 `scrollMode?: 'fit' \| 'scroll-y'`（默认 `'fit'`，内嵌草稿——虽隐藏但保留原行为）；抽屉用 `'scroll-y'` |
+| 隐藏内嵌草稿 | **仅训练轨**：`QuestionRunner` 加 `draftDisabled?: boolean`（默认 `false`），`enabled={!draftDisabled && subjectId === MATH_SUBJECT_ID}`；三个 run 页传 `draftDisabled`；主线（AnswerModal/CleanupPhase）保留数学草稿（2026-09-07 最终审查修正） |
+| 画布滚动 | `DraftWhiteboard` 加 `scrollMode?: 'fit' \| 'scroll-y'`（默认 `'fit'`）；抽屉用 `'scroll-y'`。画板高 = 容器高 × 1.6（`SCROLL_Y_FACTOR`），外层 `overflow-y-auto overflow-x-hidden`；**两指平移**滚动画板（canvas `touchAction:none` 保留，指针事件跟踪多指，2026-09-07 最终审查新增） |
+| 抽屉叠放 | 图标 DOM 排在各抽屉条件**之前**（同层兄弟 z-auto，后渲染者在上），DiscussDrawer/DraftDrawer 打开时盖住图标、其关闭钮可点；DraftDrawer 条件保持最后（2026-09-07 最终审查修复） |
 | 宽度调整 | 两档预设 `w-[45%]` ↔ `w-[70%]`，点按切换，与 `DiscussDrawer` `card` 模式一致 |
 | 当前题追踪 | `QuestionRunner` 新增 `onQuestionChange?: (q: RunnerQuestion, idx: number) => void`；页存 `currentQ`，传 `currentQ.n` 给抽屉做 key |
 
@@ -179,12 +180,15 @@ useEffect(() => {
   ```tsx
   onQuestionChange={setCurrentQ}  // 或 useCallback 包裹
   ```
-- `QuestionRunner` 之后渲染图标（始终显示）+ 抽屉（open 时）：
+- `QuestionRunner` 之后、`DiscussDrawer` 条件**之前**渲染图标（作答态显示），`DiscussDrawer` 之后渲染抽屉（open 时）：
   ```tsx
-  {/* 草稿入口（页面背景层右上角，始终显示） */}
-  <DraftIconButton onClick={() => setDraftOpen(true)} />
-
-  {/* 草稿抽屉 */}
+  {/* 草稿入口：页面背景层右上角 absolute。图标 DOM 必须排在各抽屉条件之前——
+      同层兄弟 z-index 均为 auto（DOM 靠后者绘制在上层），抽屉后渲染才能盖住图标、关闭钮才可点；
+      DraftDrawer 条件保持最后，位于 DiscussDrawer 之上。 */}
+  <div className="absolute top-4 right-4">
+    <DraftIconButton onClick={() => setDraftOpen(true)} />
+  </div>
+  {discussQ && phase === 'answering' && <DiscussDrawer ... />}
   {draftOpen && currentQ && (
     <DraftDrawer
       questionId={currentQ.n}
@@ -192,9 +196,8 @@ useEffect(() => {
     />
   )}
   ```
-- `DraftIconButton` 的定位样式：`absolute top-4 right-4 z-20`（z-index 高于答题卡，低于 Modal/抽屉）。
 - 抽屉 `questionId={currentQ.n}`——切题时 `currentQ.n` 变，`DraftWhiteboard key` 变即 remount 清空。
-- `ErrorPracticeRunPage` 多阶段（cleanup phase）：`currentQ` 为 null 时抽屉不渲染（`currentQ && ...` gate）；图标仍显示（始终可见，cleanup 阶段点击无 currentQ 则抽屉不开——`currentQ &&` gate 保护）。
+- `ErrorPracticeRunPage` 多阶段（cleanup phase）：`currentQ` 为 null 时抽屉不渲染（`currentQ && ...` gate）；图标随作答分支一起渲染，作答态可见、结果页/清理态不显示（2026-09-07 最终审查）。
 
 ### 2.2 `ExamRunPage`
 
@@ -204,7 +207,7 @@ useEffect(() => {
 - 页容器加 `relative`：`flex h-screen flex-col` → `relative flex h-screen flex-col`。
 - `headerExtra` 不动（草稿图标不进 headerExtra，改走页面背景层）。
 - 其余同 §2.1：state + `onQuestionChange` + 图标 + 抽屉渲染。
-- 抽屉仅作答态有 currentQ 时可开（交卷后无 currentQ，图标仍可见但点击不开——`currentQ &&` gate）。
+- 抽屉仅作答态有 currentQ 时可开（交卷即跳结果路由、页面卸载，无结果页图标残留）。
 
 ## 3. 数据流与状态
 
@@ -226,7 +229,7 @@ run 页 draftOpen=true ─────────────→ <DraftDrawer q
 ## 4. 边界与错误处理
 
 - `currentQ` 为 null（mount 期 / cleanup 阶段 / 考试交卷后）：图标仍显示，但抽屉 `currentQ && ...` gate 不渲染，点击图标无效（不开抽屉）。可接受——无当前题时无草稿可言。
-- `phase` 切换：图标始终显示（answering + result）。抽屉仅在 `draftOpen && currentQ` 时渲染。
+- `phase` 切换：图标与抽屉都在作答分支内渲染，仅作答态显示（2026-09-07 最终审查——result 阶段无当前题，无意义图标不显示）。
 - 草稿按钮与"讲一讲"渐进式门禁无关——草稿是基础作答工具，不 gate。
 - 考试倒计时变红（< 5min）时草稿按钮不联动变色，保持自身中性低对比色。
 - 夜间模式：训练轨三个 run 页强制 `data-theme="student-day"`，夜间模式在 run 页不生效——图标与抽屉只在 day 主题下展示，无需额外处理。
@@ -235,27 +238,28 @@ run 页 draftOpen=true ─────────────→ <DraftDrawer q
 
 `apps/web` 无测试框架。手测清单：
 
-1. **三页右上角图标可见**：专项 / 考试 / 错题三页背景层右上角草稿图标小且不起眼，始终显示（作答态 + 结果页）。
+1. **三页右上角图标可见**：专项 / 考试 / 错题三页背景层右上角草稿图标小且不起眼，作答态一直显示。
 2. **点图标开抽屉**：右侧滑出，手写笔可画、橡皮可擦（点中笔画整笔删除）、清空可全清。
-3. **纵向滚动**：抽屉内画布纵向超出视口时出现纵向滚动条；横向不滚。
+3. **纵向滚动**：抽屉内画布纵向超出视口时出现纵向滚动条；横向不滚。iPad 触摸下**两指上推/下拉可滚动画板**到 1.6× 底部区域。
 4. **两档宽度**：放大/缩小按钮切换 `45% ↔ 70%`，过渡顺滑。
 5. **手动关闭**：X 关闭抽屉。
 6. **切题清空**：抽屉开 → 画几笔 → 切下一题 → 画布是空的；切回上一题 → 也是空的（不保存）。
 7. **关抽屉再开同题**：关 → 再开 → 画布是空的（不保存）。
 8. **全题型**：选择题 / 判断题 / 填空题 / 解答题 作答态都能看到图标、都能开抽屉画草稿。
-9. **内嵌草稿已隐藏**：填空/解答题作答区右半只有预览（无"草稿"tab）。
+9. **内嵌草稿仅训练轨隐藏**：专项/考试/错题三页填空/解答题作答区右半只有预览（无"草稿"tab）；主线课堂练习（AnswerModal 弹窗）数学题仍保留「预览/草稿」tab。
 10. **考试页布局**：草稿图标在页面右上角，不与倒计时重叠（倒计时在 `headerExtra` 标题行，图标在页面背景层 absolute，分层不冲突）。
-11. **结果页**：图标仍可见，点击无 currentQ 不开抽屉（或开空白——由 `currentQ &&` gate 决定，本 spec 规定不开）。
+11. **结果页**：专项/错题结果页（AnswerResultList）不显示草稿图标（作答分支外）；考试交卷自动跳结果路由、页面卸载无残留。
+12. **抽屉叠放**：讲一讲（DiscussDrawer）打开时盖住右上角草稿图标，其 X 关闭钮可点（不被图标拦截）；草稿抽屉打开时画板可用、X 可点关。
 
 ## 6. 不在本次范围
 
-- 不改 `draft-store.ts`（抽屉 `persist=false` 不用它；隐藏的内嵌草稿虽保留 `persist=true` 默认值但已 `enabled=false` 下线，不触发调用）。
+- 不改 `draft-store.ts`（抽屉 `persist=false` 不用它；主线内嵌草稿 `persist=true` 维持原行为，仅训练轨以 `draftDisabled` 关 tab）。
 - 不改 `DiscussDrawer`（独立组件，互不影响）。
-- 不改 `PreviewDraftPanel` 组件本身（只改 `QuestionRunner` 传给它的 `enabled` 值）。
+- 不改 `PreviewDraftPanel` 组件本身（只经 `QuestionRunner` 的 `enabled = !draftDisabled && subjectId === MATH_SUBJECT_ID` 取值）。
 - 不引入拖拽连续调宽（用两档预设）。
 - 不引入 `draft-store` 订阅同步（抽屉草稿不持久化，无同步需求）。
 - 不改后端 / API / openapi.yaml。
-- 不在结果页为草稿做特殊处理（图标可见但无 currentQ 不开抽屉）。
+- 不在结果页为草稿做特殊处理（图标随作答分支渲染，结果页不显示）。
 
 ## 7. 涉及文件清单
 
@@ -263,11 +267,11 @@ run 页 draftOpen=true ─────────────→ <DraftDrawer q
 - `apps/web/src/components/business/DraftDrawer.tsx`
 
 修改：
-- `apps/web/src/components/business/DraftWhiteboard.tsx`（加 `scrollMode` + `persist` 两个可选 prop）
-- `apps/web/src/components/business/answer/QuestionRunner.tsx`（`PreviewDraftPanel enabled=false` + 加 `onQuestionChange` 可选 prop + effect）
-- `apps/web/src/pages/student/training/TargetedRunPage.tsx`（state + onQuestionChange + 图标 + 抽屉渲染）
-- `apps/web/src/pages/student/training/ExamRunPage.tsx`（state + onQuestionChange + 页容器加 `relative` + 图标 + 抽屉渲染）
-- `apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx`（state + onQuestionChange + 图标 + 抽屉渲染）
+- `apps/web/src/components/business/DraftWhiteboard.tsx`（加 `scrollMode` + `persist` 可选 prop + 两指平移）
+- `apps/web/src/components/business/answer/QuestionRunner.tsx`（`enabled = !draftDisabled && subjectId===MATH_SUBJECT_ID` + 加 `onQuestionChange` 可选 prop + effect）
+- `apps/web/src/pages/student/training/TargetedRunPage.tsx`（state + onQuestionChange + draftDisabled + 图标 + 抽屉渲染，DOM 序前于 DiscussDrawer）
+- `apps/web/src/pages/student/training/ExamRunPage.tsx`（state + onQuestionChange + draftDisabled + 页容器加 `relative` + 图标 + 抽屉渲染）
+- `apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx`（state + onQuestionChange + draftDisabled + 图标 + 抽屉渲染，DOM 序前于 DiscussDrawer）
 
 不动：
 - `apps/web/src/components/business/draft-store.ts`

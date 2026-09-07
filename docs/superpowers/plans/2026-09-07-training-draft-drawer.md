@@ -653,12 +653,14 @@ Run: `npm run dev` 后浏览器打开三个 run 页（专项：`/student/trainin
 | 6 | 切题清空 | 开抽屉画几笔 → 切下一题 → 空；切回上一题 → 也空 |
 | 7 | 关抽屉再开 | 同题关→开画布是空的（不保存） |
 | 8 | 全题型 | 选择/判断/填空/解答作答态都能见图标、能开抽屉画 |
-| 9 | 内嵌草稿已隐藏 | 填空/解答题右半只有预览，无「草稿」tab |
+| 9 | 内嵌草稿仅训练轨隐藏 | 训练轨三页填空/解答右半只有预览无「草稿」tab；主线（AnswerModal 弹窗）数学题保留 tab |
 | 10 | 考试页布局 | 图标在页面角，不与倒计时重叠（倒计时在 headerExtra 标题行内） |
-| 11 | 结果态 | 专项/错题结果页图标仍在；考试交卷自动跳结果路由，页面卸载无图标残留 |
+| 11 | 结果态 | 专项/错题结果页无图标（作答分支外）；考试交卷自动跳结果路由，页面卸载无图标残留 |
 | 12 | 画布尺寸随抽屉宽度 | 45↔70% 切换时画布不模糊不变形（ResizeObserver 重算） |
+| 13 | 两指平移（iPad） | 触摸下两指上推/下拉可滚到画板 1.6× 底部；单指仍画不误触 |
+| 14 | 抽屉叠放 | 讲一讲（DiscussDrawer）打开时盖住图标、其 X 可点关（DOM 序前移后） |
 
-> 已知可接受行为（本次不做处理）：AI 讲一讲抽屉（DiscussDrawer）打开时盖住右上角草稿图标，需先关讲一讲再开草稿；两个抽屉可同时打开且后渲染者覆盖前者。若手测发现图标与答题内容在 <920px 宽屏重叠，属次要 UI 问题，记录后另行处理。
+> 已知可接受行为（本次不做处理）：讲一讲与草稿两个抽屉可同时打开且后渲染者（DraftDrawer，DOM 最后）覆盖前者；DiscussDrawer 打开时盖住右上角草稿图标是预期叠放（图标 DOM 前移后其 X 可点）。若手测发现图标与答题内容在 <920px 宽屏重叠，属次要 UI 问题，记录后另行处理。
 
 - [ ] **Step 3: 收尾提交（若手测有改动）**
 
@@ -671,8 +673,20 @@ git commit -m "fix(web): 草稿抽屉手测问题修复"
 
 ---
 
+## 实现修正记录（2026-09-07 最终审查后，取代上文 Task 3/4/5/6 相关片段）
+
+以下决策在最终 whole-branch 审查后由用户裁决，代码已按其落地，**上文各 Task 步骤以本记录为准**：
+
+1. **隐藏内嵌草稿范围修正（取代 Task 3 Step 4 的 `enabled={false}`）**：改为 `QuestionRunner` 新增可选 prop `draftDisabled?: boolean`（默认 `false`），`PreviewDraftPanel` 的 `enabled = !draftDisabled && subjectId === MATH_SUBJECT_ID`；**仅三个训练 run 页**传 `draftDisabled`。主线（AnswerModal `variant="modal"`、CleanupPhase）保留数学草稿 tab——原全线下线会误伤无抽屉替代的主线上下文。
+2. **图标 DOM 序（修正 Task 4/5 的 Step 4 位置）**：图标 `<div className="absolute top-4 right-4">` 必须排在各抽屉条件**之前**（QuestionRunner 之后、DiscussDrawer 条件之前），DraftDrawer 条件保持最后。同层兄弟 z-index 均为 auto、DOM 靠后者绘制在上层——抽屉后渲染才能盖住图标，其关闭 X 才不被图标拦截。
+3. **结果页图标**：图标与抽屉都只在作答分支渲染，专项/错题结果页（AnswerResultList）不显示图标（取代"始终显示"表述）。
+4. **两指平移（补充 Task 1 scroll-y）**：`DraftWhiteboard` scroll-y 模式加两指平移滚动画板（canvas `touchAction:none` 保留，指针事件表跟踪多指、第二指落下进平移并打断进行中单笔）；fit 模式与单指画/擦不受影响。canvas JSX 去重为单元素、`boardRef` 移出 resize effect deps。
+5. **DraftDrawer a11y**：装饰头部 SVG 加 `aria-hidden="true"`；全部按钮加 `type="button"`。
+
+---
+
 ## Self-Review 备注
 
-- **spec 覆盖**：图标位置（spec §2）→ Task 4/5/6；始终显示 + 全题型 → 图标挂页面容器且不在 QuestionRunner 内（Task 4-6），作答区分支无关；草稿不保存/切题清空/关抽屉丢 → DraftWhiteboard `persist=false` + 抽屉 `key=questionId`（Task 1/2）；隐藏内嵌草稿 → Task 3 Step 4；两档宽度 + X 关闭 + 纵向滚动 → Task 2 + Task 1 scroll-y；ExamRunPage 补 relative → Task 6 Step 3。
-- **类型一致性**：`scrollMode`/`persist` 签名在 Task 1 定义、Task 2 消费处与 spec 一致；`onQuestionChange` 在 Task 3 定义、Task 4-6 消费；`questionId={currentQ.n}` 在 Task 4-6 与 spec §2.1 一致。`DraftIconButton`/`DraftDrawer` 在 Task 2 定义、Task 4-6 消费，导出名一致。
+- **spec 覆盖**：图标位置（spec §2）→ Task 4/5/6；作答态显示 + 全题型 → 图标挂页面容器且不在 QuestionRunner 内（Task 4-6），作答区分支无关；草稿不保存/切题清空/关抽屉丢 → DraftWhiteboard `persist=false` + 抽屉 `key=questionId`（Task 1/2）；仅训练轨隐藏内嵌草稿 → Task 3 修正记录 1；两档宽度 + X 关闭 + 纵向滚动 + 两指平移 → Task 2 + Task 1 scroll-y + 修正记录 4；ExamRunPage 补 relative → Task 6 Step 3。
+- **类型一致性**：`scrollMode`/`persist` 签名在 Task 1 定义、Task 2 消费处与 spec 一致；`onQuestionChange`/`draftDisabled` 在 Task 3 定义、Task 4-6 消费；`questionId={currentQ.n}` 在 Task 4-6 与 spec §2.1 一致。`DraftIconButton`/`DraftDrawer` 在 Task 2 定义、Task 4-6 消费，导出名一致。
 - **无占位符**：每步含完整代码/命令/预期。
