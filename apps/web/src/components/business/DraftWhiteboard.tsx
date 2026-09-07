@@ -49,6 +49,8 @@ function hitStroke(stroke: Stroke, x: number, y: number): boolean {
 }
 
 const PEN_BASE_SIZE = 3;
+/** scroll-y 模式画板高 = 容器可视高 × 该系数（纵向滚动条由此产生） */
+const SCROLL_Y_FACTOR = 1.6;
 
 const PenIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -72,12 +74,21 @@ const TrashIcon = () => (
   </svg>
 );
 
-export function DraftWhiteboard({ questionId }: { questionId: string }) {
+export function DraftWhiteboard({
+  questionId,
+  scrollMode = 'fit',
+  persist = true,
+}: {
+  questionId: string;
+  scrollMode?: 'fit' | 'scroll-y';
+  persist?: boolean;
+}) {
   const [tool, setTool] = useState<Tool>('pen');
   const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
   const themeMode = useThemeStore((s) => s.mode);
 
   const redraw = useCallback(() => {
@@ -89,15 +100,25 @@ export function DraftWhiteboard({ questionId }: { questionId: string }) {
     for (const s of strokesRef.current) strokePath(ctx, s);
   }, []);
 
-  // 尺寸：DPR 适配 + ResizeObserver
+  // 尺寸：DPR 适配 + ResizeObserver。fit：canvas 贴合容器；scroll-y：画板高 = 容器高 × 1.6（纵向滚动）
   useEffect(() => {
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
+    const board = boardRef.current;
     if (!wrap || !canvas) return;
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.round(wrap.clientWidth * dpr));
-      canvas.height = Math.max(1, Math.round(wrap.clientHeight * dpr));
+      const w = Math.max(1, Math.round(wrap.clientWidth));
+      const h = Math.max(1, Math.round(wrap.clientHeight));
+      if (scrollMode === 'scroll-y') {
+        const boardH = Math.round(h * SCROLL_Y_FACTOR);
+        if (board) board.style.height = `${boardH}px`;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(boardH * dpr);
+      } else {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
       const ctx = canvas.getContext('2d');
       ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
       redraw();
@@ -106,16 +127,16 @@ export function DraftWhiteboard({ questionId }: { questionId: string }) {
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [redraw]);
+  }, [redraw, scrollMode, boardRef]);
 
   // 主题变化：笔迹颜色自适应（不存色值，重绘时读 CSS 变量）
   useEffect(() => { redraw(); }, [themeMode, redraw]);
 
-  // 切题：加载新题草稿并重绘
+  // 切题：persist 时加载该题草稿；persist=false 时清空本地笔迹（草稿不保存，切题即空）
   useEffect(() => {
-    strokesRef.current = getDraft(questionId);
+    strokesRef.current = persist ? getDraft(questionId) : [];
     redraw();
-  }, [questionId, redraw]);
+  }, [questionId, persist, redraw]);
 
   const pointFromEvent = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -130,7 +151,7 @@ export function DraftWhiteboard({ questionId }: { questionId: string }) {
     const before = strokesRef.current.length;
     strokesRef.current = strokesRef.current.filter((s) => !hitStroke(s, x, y));
     if (strokesRef.current.length !== before) {
-      setDraft(questionId, strokesRef.current);
+      if (persist) setDraft(questionId, strokesRef.current);
       redraw();
     }
   };
@@ -163,12 +184,12 @@ export function DraftWhiteboard({ questionId }: { questionId: string }) {
   const handlePointerUp = () => {
     if (!drawingRef.current) return;
     drawingRef.current = false;
-    setDraft(questionId, strokesRef.current);
+    if (persist) setDraft(questionId, strokesRef.current);
   };
 
   const handleClear = () => {
     strokesRef.current = [];
-    clearDraft(questionId);
+    if (persist) clearDraft(questionId);
     redraw();
   };
 
@@ -204,18 +225,34 @@ export function DraftWhiteboard({ questionId }: { questionId: string }) {
           <TrashIcon />
         </button>
       </div>
-      {/* 手写画布 */}
-      <div ref={wrapRef} className="flex-1 min-h-0 relative">
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 w-full h-full"
-          style={{ touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-        />
-      </div>
+      {/* 手写画布：fit 直接贴容器；scroll-y 包定高画板 div，外层 overflow-y-auto（仅纵向可滚） */}
+      {scrollMode === 'scroll-y' ? (
+        <div ref={wrapRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+          <div ref={boardRef} className="relative" style={{ width: '100%' }}>
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full"
+              style={{ touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}
+            />
+          </div>
+        </div>
+      ) : (
+        <div ref={wrapRef} className="flex-1 min-h-0 relative">
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full"
+            style={{ touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          />
+        </div>
+      )}
     </div>
   );
 }
