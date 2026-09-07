@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
+import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 import {
   getExamSession,
@@ -55,6 +56,9 @@ export default function ExamRunPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   /** 已答题号集合（n = String(questionNo)）：续考恢复的 answered + 本地成功提交（Set 去重，重交不重复计数）。 */
   const [answeredNs, setAnsweredNs] = useState<Set<string>>(new Set());
+  // 页面级草稿抽屉：考试中始终可见图标；交卷后（currentQ 不再更新）不渲染抽屉
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   /** 交卷去重：倒计时归零与 onFinish 可能并发触发。 */
   const submittingRef = useRef(false);
   // 交卷成功跳结果页前放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 拦截——ref 是同步生效的）
@@ -194,7 +198,7 @@ export default function ExamRunPage() {
   if (session == null) {
     return (
       <div className="student-theme-container" data-theme="student-day" data-school="junior">
-        <div className="flex h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-page)] text-[var(--text-primary)]">
+        <div className="relative flex h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-page)] text-[var(--text-primary)]">
           {loadError ? (
             <>
               <p className="text-sm text-[var(--text-secondary)]">{loadError}</p>
@@ -220,7 +224,7 @@ export default function ExamRunPage() {
 
   return (
     <div className="student-theme-container" data-theme="student-day" data-school="junior">
-      <div className="flex h-screen flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
+      <div className="relative flex h-screen flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         <QuestionRunner
           questions={questions}
           subjectId={MATH_SUBJECT_ID}
@@ -243,7 +247,19 @@ export default function ExamRunPage() {
           }
           onSubmit={handleSubmit}
           onFinish={handleFinish}
+          onQuestionChange={setCurrentQ}
         />
+
+        {/* 草稿入口：页面背景层右上角，absolute 定位；考试无「讲一讲」，仅本图标 + 倒计时在顶栏 */}
+        <div className="absolute top-4 right-4">
+          <DraftIconButton onClick={() => setDraftOpen(true)} />
+        </div>
+        {draftOpen && currentQ && (
+          <DraftDrawer
+            questionId={currentQ.n}
+            onClose={() => setDraftOpen(false)}
+          />
+        )}
 
         {/* 考试无页内退出；拦截浏览器返回/刷新（计时不停，可续考） */}
         <RunExitGuard
