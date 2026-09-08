@@ -26,8 +26,10 @@ export class ExplanationCacheService {
   private readonly logger = new Logger(ExplanationCacheService.name);
   private readonly queue: number[] = [];
   private running = 0;
-  /** questionId -> 在途生成 promise（waitForExplanations/waitExplanation 等的就是它） */
+  /** questionId -> 在途生成 promise（enqueue 时立即注册；waitFor/waitExplanation await 它） */
   private readonly inFlight = new Map<number, Promise<string | null>>();
+  /** questionId -> 启动器：drain 拿到并发名额时才真正执行 generate */
+  private readonly starters = new Map<number, () => void>();
 
   constructor(
     private readonly questionsRepo: QuestionsRepository,
@@ -62,9 +64,12 @@ export class ExplanationCacheService {
       const settled = await Promise.all(pending.map(async (id) => {
         const remaining = deadline - Date.now();
         if (remaining <= 0) return null;
-        return withTimeout(this.inFlight.get(id)!, remaining, null);
+        // 顺序 await 期间该题生成可能已完成并从 map 删除 -> 先取再判空，避免 `!` 解引用抛 TypeError
+        const p = this.inFlight.get(id);
+        return p ? withTimeout(p, remaining, null) : null;
       }));
-      pending.forEach((id, i) => { if (settled[i]) out[id] = settled[i]; });
+      // settled 里的 null（超时/生成失败）也要写回 out，避免遗留 undefined
+      pending.forEach((id, i) => { out[id] = settled[i] ?? null; });
     }
     return out;
   }
@@ -73,26 +78,33 @@ export class ExplanationCacheService {
   async waitExplanation(id: number, timeoutMs = 120_000): Promise<string | null> {
     const q = await this.questionsRepo.findById(id);
     if (q?.explanation?.trim()) return q.explanation;
-    if (!this.inFlight.has(id)) this.enqueue(id);
-    const p = this.inFlight.get(id);
-    if (!p) return null;
+    // enqueue 急切注册并返回 promise：队列饱和时也拿得到在途 promise，不会误判 null
+    const p = this.inFlight.get(id) ?? this.enqueue(id);
     return withTimeout(p, timeoutMs, null);
   }
 
-  private enqueue(id: number): void {
-    if (this.inFlight.has(id)) return;
+  private enqueue(id: number): Promise<string | null> {
+    const existing = this.inFlight.get(id);
+    if (existing) return existing;
+    let start!: () => void;
+    const p = new Promise<string | null>((resolve) => {
+      start = () => { this.starters.delete(id); void this.generate(id).then(resolve); };
+    });
+    this.inFlight.set(id, p);
+    this.starters.set(id, start);
     this.queue.push(id);
     void this.drain();
+    return p;
   }
 
   private async drain(): Promise<void> {
     while (this.running < QUEUE_CONCURRENCY && this.queue.length > 0) {
       const id = this.queue.shift()!;
-      if (this.inFlight.has(id)) continue;
+      const start = this.starters.get(id);
+      if (!start) continue;
       this.running++;
-      const p = this.generate(id);
-      this.inFlight.set(id, p);
-      void p.finally(() => {
+      start();
+      void this.inFlight.get(id)!.finally(() => {
         this.inFlight.delete(id);
         this.running--;
         void this.drain();

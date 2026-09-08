@@ -83,6 +83,20 @@ describe('ExplanationCacheService', () => {
     expect(deps.explanation.explain).not.toHaveBeenCalled(); // 批量不触发新生成
   });
 
+  it('waitForExplanations：in-flight 等待返回生成文本', async () => {
+    let resolve!: (v: any) => void;
+    deps.explanation.explain.mockImplementation(() => new Promise((r) => { resolve = r; }));
+    deps.questionsRepo.findById.mockResolvedValue(makeQuestion());
+    const svc = new ExplanationCacheService(deps.questionsRepo as any, deps.explanation as any);
+    svc.ensureExplanation(makeQuestion({ answer: 'B' })); // 触发在途生成，explain 挂起
+    await new Promise((r) => setTimeout(r, 0)); // 让 generate 到达 explain 挂起点
+    const waiting = svc.waitForExplanations([1], 5000); // 命中 in-flight -> 等待而非返回 null
+    resolve({ content: '题解', mode: 'solution' });
+    const out = await waiting;
+    expect(out[1]).toBe('题解');
+    expect(deps.explanation.explain).toHaveBeenCalledTimes(1);
+  });
+
   it('waitExplanation：无在途且无解析 -> 重新触发生成', async () => {
     deps.explanation.explain.mockResolvedValue({ content: '补的题解', mode: 'solution' });
     deps.questionsRepo.findById
