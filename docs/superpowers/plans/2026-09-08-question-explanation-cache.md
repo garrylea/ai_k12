@@ -1132,3 +1132,7 @@ git commit -m "docs(api): 判题响应去 analysis、新增解析批量/刷新�
 
 - **Spec 覆盖**：判题瘦身（T2/T5/T6）、后台异步生成（T4）、长答案直写（T4）、末题批量拉解析等 in-flight（T7/T11）、刷新 120s 倒计时 + 失败通知管理员（T7/T8/T12）、solution prompt/SVG（T1）、thinking 维持现状（不涉及）、admin 通知复刻 parent_messages（T8）、人工补题解入口（spec §10 明确不做）、门禁语义与辅线入本（spec §10 待办，本计划不实施）。
 - **类型一致性**：`ExplanationCacheService.ensureExplanation` 统一收 `Pick<QuestionRow,'id'|'answer'|'explanation'>`；`waitForExplanations`/`waitExplanation` 签名在 T4 定义、T7 消费一致；`AnswerResultList` 新 props 在 T10 定义、T11 消费一致。
+- **实现修正记录**（随任务执行更新）：
+  - T5：PracticeService 构造 mock 纠正——explanationCache 注入 JudgeCoreService 第 5 参而非 PracticeService（判错委托 judgeCore）；ExplanationCacheService 必须由 PracticeModule 导出供 TrainingModule 注入同一实例（防第二空队列）。
+  - T7：`getExplanations`/`waitForExplanation` 采用无 studentId 签名（解析为题级公开数据，防 IDOR 无意义，与 hint 端点一致）。
+  - T7：`explanation-wait` 存在成本滥用面（任意学生可枚举 id 触发强模型生成）——已加题目存在性检查缓解；平台级限流缺口与 hint 端点同源，记入 changelog 已知局限。
