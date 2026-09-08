@@ -496,6 +496,49 @@ def test_split_options_bare_multiline_marks():
     assert opts[3]["text"] == "没有实数根"
 
 
+def test_split_options_crossline_marks_trailing_image_to_stem():
+    """跨行括号标记（'(A)(B)' 一行、'(C)(D)' 下一行）+ D 行后题干配图
+    （海淀2026 模拟二 题1 真实格式）：A/B/C 都无图 → 尾部图归题干，不进 D。
+
+    原默认分支 'D 取到末尾' 会把这俩题干配图错送给 D。方案 B：A/B/C 同构
+    无图时，D 只吃本行剩余，尾部内容并入题干（镜像行内布局）。"""
+    content = (
+        "右图是某几何体的三视图，该几何体是\n"
+        "(A) 圆柱 (B) 圆锥\n"
+        "(C) 三棱柱 (D) 长方体\n"
+        "\n"
+        "![](images/stem1.jpg)\n"
+        "\n"
+        "![](images/stem2.jpg)"
+    )
+    stem, opts = split_options(content)
+    assert opts[0]["text"] == "圆柱"
+    assert opts[1]["text"] == "圆锥"
+    assert opts[2]["text"] == "三棱柱"
+    assert opts[3]["text"] == "长方体"  # D 不吞尾部图
+    assert "![](images/stem1.jpg)" in stem  # 图归题干
+    assert "![](images/stem2.jpg)" in stem
+    assert "右图是某几何体的三视图" in stem
+
+
+def test_split_options_crossline_marks_with_option_images_stay():
+    """跨行标记 + A/B/C 各含自配图 + D 自配图：D 自配图保留不送给题干
+    （方案 B 回归保护：A/B/C 含图时不动 D 的尾部，沿用默认 'D 取到末尾'）。"""
+    content = (
+        "主视图是\n"
+        "(A) 甲\n![](images/opt_a.jpg)\n"
+        "(B) 乙\n![](images/opt_b.jpg)\n"
+        "(C) 丙\n![](images/opt_c.jpg)\n"
+        "(D) 丁\n![](images/opt_d.jpg)"
+    )
+    stem, opts = split_options(content)
+    assert opts[0]["text"] == "甲\n![](images/opt_a.jpg)"
+    assert opts[1]["text"] == "乙\n![](images/opt_b.jpg)"
+    assert opts[2]["text"] == "丙\n![](images/opt_c.jpg)"
+    assert opts[3]["text"] == "丁\n![](images/opt_d.jpg)"  # D 自配图保留
+    assert stem == "主视图是"
+
+
 def test_split_options_enumeration_abcd_not_split():
     """题干里的枚举 'A、B、C、D 四点'（顿号后无空格）不当作选项。"""
     content = "如图, A、B、C、D 四点在圆上, 求证: 四边形 $ABCD$ 是正方形."

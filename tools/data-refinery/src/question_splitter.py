@@ -252,7 +252,9 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
       无内容）：B/C/D 取上一标记行与本标记行之间的所有行；A 取其上方最近的
       图片行到 A 行之间的内容，更早的图归题干
     - 跨行布局（默认，标记在上、内容/图在标记行之间，如 'A.\\n图\\nB.\\n图'）：
-      选项 = 标记间内容，D 取到 content 末尾（自配图不被截走归题干）
+      选项 = 标记间内容；若 A/B/C 三段都不含图（选项同构无图），D 行后的
+      尾部内容（题干配图等）归题干、D 只取本行剩余，否则 D 取到 content 末尾
+      （自配图不被截走归题干）
     """
     marks = _find_option_marks(content)
     if not marks:
@@ -313,11 +315,27 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
 
     # 默认（标记在上、内容/图在标记行之间，如 'A.\n图\nB.\n图'）：
     # 选项 = 标记间内容，D 取到末尾（自配图不被截走）
+    #
+    # 题内上下文修正（方案 B）：若 A/B/C 三段都不含图片引用 ![](，
+    # 则 D 行之后的尾部内容（题干配图等）不应归 D 而归题干——选项同构
+    # （A/B/C 都没图，D 凭空有图不合常理）。修复海淀2026 模拟二 题1
+    # 类排版：'(A) 圆柱 (B) 圆锥\n(C) 三棱柱 (D) 长方体\n\n![](图1)\n\n![](图2)'
+    # 否则保持原行为（各选项自配图，D 自配图不被截走）。
     stem = content[:a_start].strip()
-    opts = []
+    # 先算 A/B/C 三段文本，判定是否含图
+    abc_texts = [content[marks[j][1]:marks[j + 1][0]] for j in range(3)]
+    abc_has_image = any('![](' in t for t in abc_texts)
+    if not abc_has_image and after_d:
+        # A/B/C 都没图 + D 行后有尾部内容 → 尾部归题干，D 只吃本行剩余（d_rest）
+        stem = (stem + "\n" + after_d) if stem else after_d
+        d_text = d_rest
+    else:
+        # 默认：D 取到末尾（自配图不被截走）
+        d_text = content[d_end:]
+    opts: list[dict] = []
     for j in range(4):
         if j == 3:
-            text = content[d_end:]
+            text = d_text
         else:
             text = content[marks[j][1]:marks[j + 1][0]]
         opts.append({"label": marks[j][2], "text": text.strip()})
