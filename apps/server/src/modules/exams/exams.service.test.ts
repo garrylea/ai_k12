@@ -266,7 +266,7 @@ describe('ExamsService.submitAnswer', () => {
       examPapersRepo: papersRepoWithPaper(),
       examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
       judgeCore: {
-        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: false, method: 'exact', analysis: '正确答案：B', errorType: null, errorBookId: 9 }),
+        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: false, method: 'exact', errorType: null, errorBookId: 9 }),
       },
     });
     const r = await mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' });
@@ -275,7 +275,7 @@ describe('ExamsService.submitAnswer', () => {
     });
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith({
       sessionId: 77, questionId: 10, questionOrder: 1, answerText: 'A',
-      isCorrect: 0, method: 'exact', analysis: '正确答案：B', errorType: null, judgedAt: expect.any(Date),
+      isCorrect: 0, method: 'exact', errorType: null, judgedAt: expect.any(Date),
     });
     // I-1：判题前先落「在途行」（is_correct NULL）——判题在途窗口内自动收卷走补判而非未作答
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledTimes(2);
@@ -412,7 +412,7 @@ describe('ExamsService.submit', () => {
         ]),
       },
       judgeCore: {
-        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 11, isCorrect: true, method: 'exact', analysis: null, errorType: null, errorBookId: undefined }),
+        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 11, isCorrect: true, method: 'exact', errorType: null, errorBookId: undefined }),
       },
     });
     const r = await mkSvc(deps).submit(1, 77);

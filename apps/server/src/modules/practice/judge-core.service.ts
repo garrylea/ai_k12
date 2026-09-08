@@ -2,6 +2,7 @@ import { Injectable, Logger, HttpException } from '@nestjs/common';
 import { QuestionsRepository, MainErrorBooksRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
+import { ExplanationCacheService } from './explanation-cache.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
@@ -57,7 +58,6 @@ export interface JudgeOutput {
   questionId: number | null;
   isCorrect: boolean;
   method: 'exact' | 'ai';
-  analysis: string | null;
   errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
   errorBookId: number | undefined;
 }
@@ -85,6 +85,7 @@ export class JudgeCoreService {
     private readonly mainErrorRepo: MainErrorBooksRepository,
     private readonly structuring: QuestionStructuringCapability,
     private readonly judgment: JudgmentCapability,
+    private readonly explanationCache: ExplanationCacheService,
   ) {}
 
   /** 题中心判题（训练模块专用入口）。q 恒非空，无「未命中 AI+结构化」分支。 */
@@ -96,19 +97,16 @@ export class JudgeCoreService {
 
     let isCorrect: boolean;
     let method: 'exact' | 'ai';
-    let analysis: string | null = null;
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
 
     if (EXACT_ONLY_TYPES.has(q.type)) {
       // 路由 1：choice/true_false -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
       method = 'exact';
-      analysis = isCorrect ? null : `正确答案：${q.answer}`;
     } else if (q.type === 'fill_blank' && compareAnswer(input.studentAnswer, q.answer, q.options)) {
       // 路由 1b：fill_blank 归一化相等 -> exact 判对（省 AI）；不等走 AI 复核
       isCorrect = true;
       method = 'exact';
-      analysis = null;
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof -> AI 判定
       const questionType = q.type === 'proof' ? 'proof' : 'calculation';
@@ -123,7 +121,6 @@ export class JudgeCoreService {
           questionType,
         });
         isCorrect = result.isCorrect;
-        analysis = isCorrect ? null : result.analysis ?? null;
         errorType = result.errorType ?? null;
       } catch (err) {
         this.logger.error(`judgment.judge failed: ${err}`);
@@ -138,6 +135,8 @@ export class JudgeCoreService {
     let errorBookId: number | undefined;
 
     if (!isCorrect) {
+      // 答错 -> 触发解析缓存生成（fire-and-forget；q 必非空，explanation 已有/长答案直写，见 ExplanationCacheService）
+      this.explanationCache.ensureExplanation(q);
       // 答错 -> 入主线错题本（find-or-create，避免重复答错堆积）
       const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(
         input.studentId,
@@ -166,27 +165,24 @@ export class JudgeCoreService {
       }
     }
 
-    return { questionId: q.id, isCorrect, method, analysis, errorType, errorBookId };
+    return { questionId: q.id, isCorrect, method, errorType, errorBookId };
   }
 
   /** card 中心判题（PracticeService.judge 委托，行为保持）。q 可为 null -> AI + 结构化入库路径。 */
   async judgeForPractice(input: JudgeInput, q: QuestionRow | null): Promise<JudgeOutput> {
     let isCorrect: boolean;
     let method: 'exact' | 'ai';
-    let analysis: string | null = null;
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
 
     if (q && EXACT_ONLY_TYPES.has(q.type)) {
       // 路由 1：choice/true_false 命中 -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
       method = 'exact';
-      analysis = isCorrect ? null : `正确答案：${q.answer}`;
     } else if (q && q.type === 'fill_blank' && compareAnswer(input.studentAnswer, q.answer, q.options)) {
       // 路由 1b：fill_blank 命中且归一化相等 -> exact 判对（省 AI）。
       // 不等则落到路由 2 走 AI，避免 2/3 vs \frac{2}{3} 等形式差异被误判错。
       isCorrect = true;
       method = 'exact';
-      analysis = null;
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof / 未命中 -> AI 判定
       const questionType = q?.type === 'proof' ? 'proof' : 'calculation';
@@ -202,7 +198,6 @@ export class JudgeCoreService {
           questionType,
         });
         isCorrect = result.isCorrect;
-        analysis = isCorrect ? null : result.analysis ?? null;
         errorType = result.errorType ?? null;
       } catch (err) {
         this.logger.error(`judgment.judge failed: ${err}`);
@@ -219,6 +214,10 @@ export class JudgeCoreService {
 
     // 路由 3：答错 -> 入主线错题本（find-or-create，避免重复答错堆积；未入库的题先结构化 + 插题）
     if (!isCorrect) {
+      // 判错 -> 触发解析缓存生成（fire-and-forget；explanation 已有/长答案直写，见 ExplanationCacheService）
+      if (q) {
+        this.explanationCache.ensureExplanation(q);
+      }
       let questionCreated = false;
       if (!q) {
         // Important #1: structure/findOrCreate 失败不得阻断错题入库 --
@@ -244,6 +243,8 @@ export class JudgeCoreService {
               content_hash: computeContentHash(structured.content),
             });
             questionId = created.id;
+            // 结构化插题成功 -> 同样触发解析缓存生成（用结构化的答案/解析字段构造最小入参）
+            this.explanationCache.ensureExplanation({ id: created.id, answer: structured.answer, explanation: structured.explanation });
             questionCreated = created.created;
           } else {
             questionId = null;
@@ -297,6 +298,6 @@ export class JudgeCoreService {
       }
     }
 
-    return { questionId, isCorrect, method, analysis, errorType, errorBookId };
+    return { questionId, isCorrect, method, errorType, errorBookId };
   }
 }

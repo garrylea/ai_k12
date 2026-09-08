@@ -199,7 +199,6 @@ export class ExamsService {
       answerText: dto.answerText,
       isCorrect: out.isCorrect ? 1 : 0,
       method: out.method,
-      analysis: out.analysis,
       errorType: out.errorType ?? null,
       judgedAt: new Date(),
     });
@@ -296,7 +295,6 @@ export class ExamsService {
             answerText: a.answer_text,
             isCorrect: out.isCorrect ? 1 : 0,
             method: out.method,
-            analysis: out.analysis,
             errorType: out.errorType ?? null,
             judgedAt: new Date(),
           });

@@ -73,7 +73,7 @@ describe('TrainingService.getErrorBookEntries', () => {
 
 describe('TrainingService.judgeTraining', () => {
   it('error_practice 来源透传 JudgeCore', async () => {
-    const deps = mk({ judgeCore: { judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: true, method: 'exact', analysis: null, errorType: null, errorBookId: undefined }) } });
+    const deps = mk({ judgeCore: { judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: true, method: 'exact', errorType: null, errorBookId: undefined }) } });
     const svc = mkSvc(deps);
     await svc.judgeTraining({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice' });
     expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice', sourceRefId: null });

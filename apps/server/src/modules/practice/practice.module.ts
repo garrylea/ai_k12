@@ -6,6 +6,8 @@ import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, Practic
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
+import { ExplanationCapability } from '../../ai-core/capabilities/explanation.capability.js';
+import { ExplanationCacheService } from './explanation-cache.service.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
 import { ContentModule } from '../content/content.module.js';
 
@@ -34,6 +36,8 @@ import { ContentModule } from '../content/content.module.js';
     QuestionStructuringCapability,
     JudgmentCapability,
     HintCapability,
+    ExplanationCacheService,
+    ExplanationCapability,
   ],
   exports: [PracticeService, JudgeCoreService],
 })

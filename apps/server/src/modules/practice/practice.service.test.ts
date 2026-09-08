@@ -12,6 +12,7 @@ const mk = (overrides: any = {}) => ({
   mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined), updateDialogueId: vi.fn().mockResolvedValue(undefined), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]) },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
+  explanationCache: { ensureExplanation: vi.fn() },
   cardsRepo: {
     findHintsById: vi.fn().mockResolvedValue(null),
     upsertHint: vi.fn().mockResolvedValue(undefined),
@@ -39,9 +40,10 @@ const mk = (overrides: any = {}) => ({
 });
 
 /** 用 mk() 构造的依赖实例化 PracticeService。
- *  第 11 参 judgeCore 为新增依赖（判题核心抽取），由同一组 mock 构造——机械注入调整，不改测试语义。 */
+ *  第 11 参 judgeCore 为判题核心抽取新增依赖；explanationCache 注入判题核心内部
+ *  （判错解析缓存生成，PracticeService 不经手）——机械注入调整，不改测试语义。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any));
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any));
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -150,7 +152,6 @@ describe('PracticeService.judge', () => {
     const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: '答' });
     expect(r.isCorrect).toBe(false);
     expect(r.method).toBe('ai');
-    expect(r.analysis).toBe('错因');
     expect(r.errorBookId).toBe(42);
     expect(deps.structuring.structure).toHaveBeenCalled();
     expect(deps.questionsRepo.findOrCreate).toHaveBeenCalled();
@@ -258,7 +259,7 @@ describe('PracticeService.judge', () => {
     const svc = mkSvc(deps);
     await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'B' });
     expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      is_correct: false, question_n: '0-1', analysis: expect.any(String),
+      is_correct: false, question_n: '0-1', analysis: null,
     }));
     expect(deps.mainErrorRepo.findUnclearedByStudentQuestion).toHaveBeenCalledWith(1, 10, 5, '题');
     expect(deps.mainErrorRepo.create).toHaveBeenCalled();

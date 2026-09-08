@@ -15,11 +15,12 @@ const mk = (overrides: any = {}) => ({
   },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
+  explanationCache: { ensureExplanation: vi.fn() },
   ...overrides,
 });
 
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any);
+  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any);
 
 describe('JudgeCoreService.judgeQuestion', () => {
   it('choice 命中 -> exact 比对，答错入错题本（source 透传）', async () => {
@@ -37,6 +38,7 @@ describe('JudgeCoreService.judgeQuestion', () => {
     expect(r.method).toBe('exact');
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({ source: 'targeted', question_id: 10, source_ref_id: null }));
     expect(deps.judgment.judge).not.toHaveBeenCalled();
+    expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' });
   });
 
   it('答对 -> clearUnclearedByStudentQuestionId（不限 source 清零）', async () => {
@@ -53,6 +55,7 @@ describe('JudgeCoreService.judgeQuestion', () => {
     expect(r.isCorrect).toBe(true);
     expect(deps.mainErrorRepo.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(1, 10);
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
   });
 
   it('题目不存在 -> 400（训练题必来自题库）', async () => {

@@ -110,7 +110,9 @@ export class PracticeService {
         student_answer: input.studentAnswer,
         is_correct: result.isCorrect,
         method: result.method,
-        analysis: result.analysis,
+        // JudgeOutput 已无 analysis（判错解析改由 ExplanationCacheService 生成入 questions.explanation）；
+        // practice_results.analysis 落库侧清理留待后续任务。
+        analysis: null,
         error_type: result.errorType,
       });
     } catch (err) {
