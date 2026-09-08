@@ -3485,6 +3485,73 @@ paths:
                         items:
                           $ref: '#/components/schemas/TrainingErrorBookEntry'
 
+  /training/questions/explanations:
+    get:
+      tags: [Training]
+      summary: 批量拉取题目解析（结果页末题后）
+      description: >-
+        按题目 id 批量取 questions.explanation（student JWT）。ids 为逗号分隔的
+        questionId 列表；DB 已有直返；解析仍在后台生成中（判错触发的 in-flight）
+        则等待其完成（总超时 60s 兜底）；既无解析也无在途生成（从未触发或曾失败）
+        返回 null——不触发新生成。解析为题级公开数据（不分学生）。
+      operationId: getTrainingExplanations
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 逗号分隔的 questionId 列表（如 ids=1,2,3）
+      responses:
+        '200':
+          description: 解析映射
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        description: '{ questionId: 解析文本或 null }'
+
+  /training/questions/{questionId}/explanation-wait:
+    get:
+      tags: [Training]
+      summary: 单题刷新等待解析（120s 倒计时）
+      description: >-
+        结果页「解析生成中」的刷新入口（student JWT）。DB 已有直返；在途生成
+        等待；无在途且无解析（曾失败）则重新触发生成再等待，上限 120s。
+        题目不存在/停用返回 null（不触发生成）。超时或失败返回 null 并写
+        admin_notifications（type=explanation_failed，同题未读去重），管理员
+        需人工补题解。
+      operationId: waitTrainingExplanation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: questionId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 解析文本或 null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          explanation:
+                            type: string
+                            nullable: true
+
   /training/judge:
     post:
       tags: [Training]
@@ -3495,7 +3562,9 @@ paths:
         /practice/judge：(1) choice/true_false + fill_blank 归一化相等 -> exact 比对；
         (2) fill_blank 不等 / short_answer / proof -> AI JudgmentCapability 判定；
         (3) 答错 -> find-or-create 写 main_error_books（source 落库为训练来源）；
-        答对 -> 清零该题所有未清记录（不限 source）。训练题必来自题库（无「未命中
+        答对 -> 清零该题所有未清记录（不限 source）。判错同时后台异步生成解析
+        入 questions.explanation（ExplanationCacheService，不阻塞判题响应，详见
+        /training/questions/explanations）。训练题必来自题库（无「未命中
         AI + 结构化入库」分支）：题目不存在 400（code=4004）；AI 判定失败 503
         （code=5001，不写错题本）。
       operationId: judgeTraining
@@ -5315,10 +5384,6 @@ components:
           type: string
           enum: [exact, ai]
           description: exact=客观题答案比对；ai=JudgmentCapability 判定
-        analysis:
-          type: string
-          nullable: true
-          description: 答错时的解析。method=ai 时为 AI 生成的分析；method=exact 答错时为标准答案文本
         errorType:
           type: string
           nullable: true

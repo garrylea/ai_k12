@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-09-08 判题解析缓存化（ExplanationCacheService）
+
+- **判题只判对错**：judgment prompt（math-calculation/math-proof）去 `analysis` 输出，只留 `{isCorrect, errorType}`（省输出 token）；`JudgeOutput` 删 `analysis`，`/api/practice/judge`、`/api/training/judge` 响应瘦身（exam answers 落库 analysis 恒 null，列保留存历史）。客观题判错的「正确答案：X」一并移除——正确答案与解法在解析里。
+- **解析缓存**：判错后 `JudgeCoreService` fire-and-forget 调 `ExplanationCacheService`（practice 模块，进程内队列并发 ≤2 + in-flight 去重）：`questions.explanation` 已有跳过；`answer>=100` 字符直接当题解直写（不调 LLM）；否则 explanation 场景（qwen3.7-max 强模型，新 `solution` 模式 prompt——标准题解、可含内嵌 SVG，前端 rehype-raw 可渲染）生成后入库，一次生成全生命周期复用；失败不入库，下次判错自然重试（幂等）。`retry.yaml` explanation 超时 60s→120s。
+- **端点**：`GET /api/training/questions/explanations?ids=`（批量拉解析，等 in-flight 60s，不触发新生成）；`GET /api/training/questions/{id}/explanation-wait`（单题刷新等待 120s：无在途且无解析则重新触发；题目不存在/停用直接 null 不触发；超时后重读防误报；失败写 `admin_notifications` type=explanation_failed，同题未读去重）。`ExplanationCacheService` 由 PracticeModule 导出、TrainingModule 注入同一实例（防第二空队列）。
+- **admin 通知**：新表 `admin_notifications`（复刻 parent_messages 模式）+ 三端点（列表/未读数/已读，markRead 幂等——已读重复标返回 true）；Admin Dashboard 通知区（未读徽章+列表+标为已读）。
+- **前端**：结果页（专项/错题重做/考试/错题巩固）末题后收集错题 questionId 批量拉解析；解析为 null 显示「正在生成中…+刷新」（120s 倒计时，调 explanation-wait）；孤儿题显示「暂无解析，试试让 AI 讲一讲」；考试结果页 `explanation ?? 存量 analysis` 兜底 + mount 后台补拉。
+- **已知局限**：进程内队列，重启丢在途（下次判错重试）；多实例会重复生成（当前单实例）；`explanation-wait` 存在成本滥用面（任意学生可枚举 id 触发强模型生成——已加题目存在性检查缓解，平台级限流缺口与 hint 端点同源待统一治理）；管理员人工补题解入口未做（见 spec §10 待办）。
+- 设计 spec：`docs/superpowers/specs/2026-09-08-question-explanation-cache-design.md`；实施计划 `docs/superpowers/plans/2026-09-08-question-explanation-cache.md`；API 文档 v2.8。
+
+---
+
 ## 2026-09-07 会话场景分型（scene）与训练「讲一讲」重构
 
 - **问题**：各系统聊天共用 `ai_dialogues` 一张表，只有 `track`（mainline/auxiliary）可区分；专项/错题训练里的「讲一讲」（track=auxiliary）与辅线答疑自由问答混在同一列表，历史互相污染。且训练讲一讲旧实现把整段题面前缀进每条学生消息，气泡显示成「题目+我的问题」。
