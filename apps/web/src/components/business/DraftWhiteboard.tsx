@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useThemeStore } from '@/store/themeStore';
-import { getDraft, setDraft, clearDraft, getDraftImages, setDraftImages, type Stroke, type DraftImage } from './draft-store';
+import {
+  getDraft, setDraft, clearDraft, getDraftImages, setDraftImages, type Stroke, type DraftImage,
+} from './draft-store';
 import { DraftImageLayer } from './DraftImageLayer';
 import { fileToDraftImage, isEditableTarget } from './draft-image-utils';
 
@@ -126,6 +128,10 @@ export function DraftWhiteboard({
   const panLastYRef = useRef(0);
   const themeMode = useThemeStore((s) => s.mode);
 
+  // 切题竞态防护：在途图片解码（FileReader/Image，几百 ms）期间切题，放弃插入避免污染新题视图/覆写旧题 store
+  const questionIdRef = useRef(questionId);
+  useEffect(() => { questionIdRef.current = questionId; }, [questionId]);
+
   // 贴图：React state 渲染 + ref 镜像（异步插入/连续更新不拿旧闭包）；persist 时同步落 draft-store
   const [images, setImages] = useState<DraftImage[]>([]);
   const imagesRef = useRef<DraftImage[]>([]);
@@ -140,6 +146,7 @@ export function DraftWhiteboard({
   const insertImages = useCallback(async (files: File[]) => {
     const wrap = wrapRef.current;
     if (!wrap || files.length === 0) return;
+    const currentQ = questionIdRef.current;
     const viewport = {
       left: 0,
       top: scrollMode === 'scroll-y' ? wrap.scrollTop : 0,
@@ -148,6 +155,7 @@ export function DraftWhiteboard({
     };
     for (let i = 0; i < files.length; i++) {
       const img = await fileToDraftImage(files[i], wrap.clientWidth, viewport);
+      if (questionIdRef.current !== currentQ) return; // 切题了，放弃在途插入
       if (i > 0) { img.x += i * 16; img.y += i * 16; }
       updateImages((prev) => [...prev, img]);
     }
@@ -337,6 +345,7 @@ export function DraftWhiteboard({
     <canvas
       ref={canvasRef}
       className="absolute inset-0 w-full h-full"
+      // 移动档 canvas 穿透：贴图层接管交互；scroll-y 两指平移退化为浏览器原生滚动（有意为之）
       style={{ touchAction: 'none', pointerEvents: tool === 'move' ? 'none' : 'auto', cursor: tool === 'move' ? 'default' : tool === 'eraser' ? 'cell' : 'crosshair' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -392,13 +401,13 @@ export function DraftWhiteboard({
       {scrollMode === 'scroll-y' ? (
         <div ref={wrapRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           <div ref={boardRef} className="relative" style={{ width: '100%' }}>
-            <DraftImageLayer images={images} onImagesChange={updateImages} interactive={tool === 'move'} />
+            <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} interactive={tool === 'move'} />
             {canvasEl}
           </div>
         </div>
       ) : (
         <div ref={wrapRef} className="flex-1 min-h-0 relative">
-          <DraftImageLayer images={images} onImagesChange={updateImages} interactive={tool === 'move'} />
+          <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} interactive={tool === 'move'} />
           {canvasEl}
         </div>
       )}
