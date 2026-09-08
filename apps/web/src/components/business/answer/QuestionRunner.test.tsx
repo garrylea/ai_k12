@@ -45,7 +45,7 @@ function Wrapper({ textAnswer = false }: { textAnswer?: boolean }) {
       onRequestHint={async () => 'hint'}
       headerActions={() => null}
       onQuestionChange={() => force((x) => x + 1)}
-      onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact', analysis: null })}
+      onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
       onFinish={async () => {}}
     />
   );
@@ -72,7 +72,7 @@ function renderWithInitialAnswers(initialAnswers: Record<string, string>) {
       draftKeyPrefix="resume"
       variant="embedded"
       initialAnswers={initialAnswers}
-      onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact', analysis: null })}
+      onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
       onFinish={async () => {}}
     />,
   );

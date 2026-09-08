@@ -16,7 +16,6 @@ export interface RunnerQuestion {
 export interface RunnerAnswerRecord {
   isCorrect: boolean;
   method: string;
-  analysis: string | null;
   errorType?: string | null;
   studentAnswer: string;
   /** 判题请求失败（网络/服务端错误），区别于答错 */
@@ -27,6 +26,5 @@ export interface RunnerAnswerRecord {
 export interface RunnerJudgeOutcome {
   isCorrect: boolean;
   method: string;
-  analysis: string | null;
   errorType?: string | null;
 }

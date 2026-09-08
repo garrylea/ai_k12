@@ -43,7 +43,6 @@ export const usePracticeStore = create<PracticeState>((set) => ({
         questionId: null,
         isCorrect: r.isCorrect,
         method: r.method,
-        analysis: r.analysis,
         errorType: r.errorType ?? null,
         studentAnswer: r.studentAnswer,
       };

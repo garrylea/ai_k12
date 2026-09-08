@@ -14,7 +14,7 @@ import type { PracticeQuestion } from './AnswerModal';
 interface AnswerRecord {
   isCorrect: boolean;
   method: string;
-  analysis: string | null;
+  analysis?: string | null;
   errorType?: string | null;
   studentAnswer: string;
   /** 判定失败（超时/服务异常）的前端标记 */

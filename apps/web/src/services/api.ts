@@ -589,7 +589,6 @@ export interface JudgeResult {
   questionId: number | null;
   isCorrect: boolean;
   method: 'exact' | 'ai';
-  analysis: string | null;
   errorType?: 'logic' | 'calculation' | 'format' | 'missing' | null;
   errorBookId?: number;
 }
@@ -616,7 +615,6 @@ export interface PracticeResult {
   studentAnswer: string;
   isCorrect: boolean;
   method: 'exact' | 'ai';
-  analysis: string | null;
   errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
 }
 
@@ -734,6 +732,22 @@ export interface AdminMessageItem { id: number; type: string; title: string; isB
 export function listAdminMessages(): Promise<AdminMessageItem[]> { return fetchApi('/admin/messages'); }
 export function deleteAdminMessage(id: number): Promise<null> { return fetchApi(`/admin/messages/${id}`, { method: 'DELETE' }); }
 
+// --- Admin: notifications（系统通知，如题解生成失败待人工补） ---
+export interface AdminNotificationItem {
+  id: number;
+  type: string;
+  questionId: number | null;
+  title: string;
+  content: string;
+  isRead: boolean;
+  createdAt: string;
+}
+export function listAdminNotifications(): Promise<AdminNotificationItem[]> { return fetchApi('/admin/notifications'); }
+export function adminNotificationsUnreadCount(): Promise<number> { return fetchApi('/admin/notifications/unread-count'); }
+export function markAdminNotificationRead(id: number): Promise<null> {
+  return fetchApi(`/admin/notifications/${id}/read`, { method: 'POST' });
+}
+
 // --- Admin: chat ---
 export function createAdminDialogue(modelKey: string): Promise<{ id: number }> {
   return fetchApi('/admin/chat/dialogues', { method: 'POST', body: JSON.stringify({ modelKey }) });
@@ -836,6 +850,20 @@ export function getTrainingHint(questionId: number): Promise<HintResult> {
     method: 'POST',
     body: JSON.stringify({ questionId }),
   });
+}
+
+// --- Training: explanations（判题解析缓存化，2026-09-08） ---
+
+/** 批量拉解析（末题后结果页用）：ids 逗号分隔；后端等 in-flight 生成完成（60s 兜底），不触发新生成。
+ *  返回键为 questionId 的映射，未就绪的题值为 null。 */
+export function getTrainingExplanations(ids: number[]): Promise<{ explanations: Record<number, string | null> }> {
+  const qs = new URLSearchParams({ ids: ids.join(',') });
+  return fetchApi<{ explanations: Record<number, string | null> }>(`/training/questions/explanations?${qs.toString()}`);
+}
+
+/** 单题刷新等待（120s 倒计时）：DB 无解析且无在途 -> 重新触发生成；超时返回 null 并写管理员通知。 */
+export function waitTrainingExplanation(questionId: number): Promise<{ explanation: string | null }> {
+  return fetchApi<{ explanation: string | null }>(`/training/questions/${questionId}/explanation-wait`);
 }
 
 // --- Training: targeted practice（专项练习，Task 8 端点） ---

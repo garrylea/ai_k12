@@ -127,6 +127,7 @@ export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgPr
  */
 export const markdownComponents = {
   img: MarkdownImg,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- node 解构剥离，避免透传进 DOM <svg>
   svg: ({ node, className: cls, ...rest }: { node?: unknown } & SVGProps<SVGSVGElement>) => (
     <svg
       {...rest}

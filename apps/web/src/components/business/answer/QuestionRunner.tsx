@@ -187,7 +187,6 @@ export function QuestionRunner({
         resultsRef.current[question.n] = {
           isCorrect: res.isCorrect,
           method: res.method,
-          analysis: res.analysis,
           errorType: res.errorType ?? null,
           studentAnswer: submittedAnswer,
         };
@@ -198,7 +197,6 @@ export function QuestionRunner({
         resultsRef.current[question.n] = {
           isCorrect: false,
           method: 'ai',
-          analysis: null,
           errorType: null,
           studentAnswer: submittedAnswer,
           failed: true,

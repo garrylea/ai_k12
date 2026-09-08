@@ -1126,7 +1126,7 @@ export default function CourseDetailPage() {
                 record(
                   n,
                   studentAnswer,
-                  { questionId: null, isCorrect: false, method: 'ai', analysis: null, errorType: null },
+                  { questionId: null, isCorrect: false, method: 'ai', errorType: null },
                   { failed: true },
                 );
                 throw new Error('判定失败');
