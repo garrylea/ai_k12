@@ -57,6 +57,7 @@ export function DraftImageLayer({ images, onImagesChange, interactive }: Props) 
 
   // ---- 拖动 ----
   const startDrag = (e: React.PointerEvent<HTMLDivElement>, img: DraftImage) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     setSelectedId(img.id);
     dragRef.current = { id: img.id, dx: e.clientX - img.x, dy: e.clientY - img.y };
@@ -74,6 +75,7 @@ export function DraftImageLayer({ images, onImagesChange, interactive }: Props) 
 
   // ---- 缩放 ----
   const startResize = (e: React.PointerEvent<HTMLDivElement>, img: DraftImage, corner: Corner) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.stopPropagation(); // 不触发图片主体的拖动
     e.currentTarget.setPointerCapture(e.pointerId);
     resizeRef.current = {
@@ -84,13 +86,15 @@ export function DraftImageLayer({ images, onImagesChange, interactive }: Props) 
   const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = resizeRef.current;
     if (!r) return;
+    // 缩放只响应水平位移 dxTotal，垂直拖拽忽略——等比高度已由宽度决定，垂直位移只会造成抖动
     const dxTotal = e.clientX - r.startX;
     const east = r.corner === 'ne' || r.corner === 'se';
     const boardW = layerRef.current?.clientWidth ?? Infinity;
     const w = Math.min(Math.max(MIN_SIZE, Math.round(east ? r.origW + dxTotal : r.origW - dxTotal)), boardW);
     const h = Math.round((w / r.origW) * r.origH); // 等比
-    const x = east ? r.origX : r.origX + (r.origW - w);
-    const y = r.corner[0] === 'n' ? r.origY + (r.origH - h) : r.origY;
+    // 西/北角缩放会把 x/y 推向负值，夹到 0（与拖动侧一致，只在右/下溢出由 board 裁切）
+    const x = Math.max(0, east ? r.origX : r.origX + (r.origW - w));
+    const y = Math.max(0, r.corner[0] === 'n' ? r.origY + (r.origH - h) : r.origY);
     patchImage(r.id, { x, y, w, h });
   };
   const endResize = () => { resizeRef.current = null; };
@@ -116,12 +120,14 @@ export function DraftImageLayer({ images, onImagesChange, interactive }: Props) 
               position: 'absolute', left: img.x, top: img.y, width: img.w, height: img.h,
               pointerEvents: interactive ? 'auto' : 'none',
               cursor: interactive ? 'move' : 'default',
+              touchAction: 'none',
             }}
             className={`rounded-lg ${selected ? 'border-2 border-[var(--brand-500)]' : 'border border-[var(--bg-subtle)]'}`}
             onPointerDown={(e) => { if (interactive) startDrag(e, img); }}
             onPointerMove={(e) => { if (interactive) { onDragMove(e); } }}
             onPointerUp={endDrag}
             onPointerCancel={endDrag}
+            onLostPointerCapture={endDrag}
           >
             <img
               src={img.dataUrl}
@@ -140,6 +146,7 @@ export function DraftImageLayer({ images, onImagesChange, interactive }: Props) 
                     onPointerMove={onResizeMove}
                     onPointerUp={endResize}
                     onPointerCancel={endResize}
+                    onLostPointerCapture={endResize}
                   />
                 ))}
                 {/* 删除钮（右上角；阻止冒泡避免触发拖动） */}
