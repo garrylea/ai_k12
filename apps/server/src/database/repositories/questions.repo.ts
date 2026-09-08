@@ -23,6 +23,14 @@ export class QuestionsRepository {
     return (rows[0] as QuestionRow) ?? null;
   }
 
+  /** 判错解析缓存：LLM 生成/长答案直写后回写 questions.explanation。 */
+  async updateExplanation(id: number, explanation: string): Promise<void> {
+    await this.pool.execute(
+      'UPDATE questions SET explanation = ? WHERE id = ?',
+      [explanation, id],
+    );
+  }
+
   async create(row: Omit<QuestionRow, 'id' | 'created_at' | 'is_active'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO questions

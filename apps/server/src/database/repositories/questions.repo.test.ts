@@ -47,3 +47,15 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     expect(rows).toEqual([row]);
   });
 });
+
+describe('QuestionsRepository.updateExplanation', () => {
+  it('执行 UPDATE questions SET explanation = ? WHERE id = ? 回写解析缓存', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.updateExplanation(1, '标准题解');
+    expect(pool.query).not.toHaveBeenCalled();
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toBe('UPDATE questions SET explanation = ? WHERE id = ?');
+    expect(params).toEqual(['标准题解', 1]);
+  });
+});
