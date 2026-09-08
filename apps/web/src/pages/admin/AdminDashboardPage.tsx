@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react';
-import { fetchAdminDashboard, type AdminDashboard } from '@/services/api';
+import {
+  fetchAdminDashboard,
+  listAdminNotifications,
+  markAdminNotificationRead,
+  type AdminDashboard,
+  type AdminNotificationItem,
+} from '@/services/api';
 import { Skeleton, toast } from '@/components/base';
 
 export default function AdminDashboardPage() {
   const [data, setData] = useState<AdminDashboard | null>(null);
   const [error, setError] = useState('');
+  // 解析失败通知（系统 -> 管理员）：列表 + 未读徽章 + 标已读
+  const [notifications, setNotifications] = useState<AdminNotificationItem[] | null>(null);
+  const [notifError, setNotifError] = useState(false);
 
   useEffect(() => {
     fetchAdminDashboard()
@@ -15,6 +24,23 @@ export default function AdminDashboardPage() {
         toast('error', msg);
       });
   }, []);
+
+  useEffect(() => {
+    listAdminNotifications()
+      .then(setNotifications)
+      .catch(() => setNotifError(true));
+  }, []);
+
+  const unreadCount = (notifications ?? []).filter((n) => !n.isRead).length;
+
+  const handleMarkRead = async (id: number) => {
+    try {
+      await markAdminNotificationRead(id);
+      setNotifications((prev) => (prev ?? []).map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : '操作失败');
+    }
+  };
 
   const maskPhone = (phone: string) => (phone.length >= 11 ? `${phone.slice(0, 3)}****${phone.slice(7)}` : phone);
 
@@ -85,6 +111,49 @@ export default function AdminDashboardPage() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* 解析失败通知：判错后解析生成持续失败的题（spec §5.4），需人工补题解 */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+          <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>解析失败通知</h2>
+          {unreadCount > 0 && (
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600">{unreadCount} 未读</span>
+          )}
+        </div>
+        {notifications == null ? (
+          <div className="px-5 py-8 text-center text-sm text-[var(--text-secondary)]">
+            {notifError ? '通知加载失败，请稍后重试' : '加载中…'}
+          </div>
+        ) : notifications.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-[var(--text-secondary)]">暂无通知</div>
+        ) : (
+          <ul className="divide-y divide-gray-50">
+            {notifications.map((n) => (
+              <li key={n.id} className="px-5 py-3.5 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm ${n.isRead ? 'font-medium' : 'font-bold'}`} style={{ color: 'var(--text-primary)' }}>{n.title}</span>
+                    {n.questionId != null && (
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-100 text-[var(--text-secondary)]">题目 #{n.questionId}</span>
+                    )}
+                    {!n.isRead && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" aria-label="未读" />}
+                  </div>
+                  <p className="text-[13px] mt-1 text-[var(--text-secondary)] leading-relaxed">{n.content}</p>
+                  <p className="text-xs mt-1 text-[var(--text-secondary)]">{new Date(n.createdAt).toLocaleString('zh-CN')}</p>
+                </div>
+                {!n.isRead && (
+                  <button
+                    onClick={() => handleMarkRead(n.id)}
+                    className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-[var(--text-secondary)] hover:bg-gray-50 transition-colors"
+                  >
+                    标为已读
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
