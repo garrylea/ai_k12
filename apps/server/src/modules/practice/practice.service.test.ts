@@ -136,6 +136,8 @@ describe('PracticeService.judge', () => {
     expect(r.method).toBe('ai');
     expect(deps.judgment.judge).toHaveBeenCalled();
     expect(r.isCorrect).toBe(false);
+    // 判错且 q 非空 -> 触发解析缓存生成（传完整 q）
+    expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith({ id: 63, type: 'fill_blank', answer: '1/2', options: null });
   });
 
   it('未命中 -> AI 判定，答错 -> 结构化 + 插题 + 入错题本', async () => {
@@ -155,6 +157,25 @@ describe('PracticeService.judge', () => {
     expect(r.errorBookId).toBe(42);
     expect(deps.structuring.structure).toHaveBeenCalled();
     expect(deps.questionsRepo.findOrCreate).toHaveBeenCalled();
+    // 结构化真正新建（created:true）-> 触发解析缓存生成（合成最小对象）
+    expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith({ id: 77, answer: 'a', explanation: 'e' });
+  });
+
+  it('未命中 -> AI 判错且 findOrCreate 命中既有题（created:false）-> 不触发 ensureExplanation', async () => {
+    // 命中既有题时其解析由判错后对 DB 行 q 的 ensureExplanation 处理；此处 q 为 null 且 created:false，
+    // 不应走合成对象触发，避免长答案直写覆盖既有解析。
+    const deps = mk({
+      judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: false, analysis: '错因', errorType: 'calculation' }) },
+      structuring: { structure: vi.fn().mockResolvedValue({ quality: 'good', content: '题', type: 'short_answer', difficulty: 2, answer: 'a', explanation: 'e', knowledgePoints: [] }) },
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue(null),
+        findOrCreate: vi.fn().mockResolvedValue({ id: 77, created: false }),
+        deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: '答' });
+    expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
   });
 
   it('未命中 -> AI 判定答对 -> 不插题不入错题本', async () => {

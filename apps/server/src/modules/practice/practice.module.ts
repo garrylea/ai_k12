@@ -39,6 +39,6 @@ import { ContentModule } from '../content/content.module.js';
     ExplanationCacheService,
     ExplanationCapability,
   ],
-  exports: [PracticeService, JudgeCoreService],
+  exports: [PracticeService, JudgeCoreService, ExplanationCacheService],
 })
 export class PracticeModule {}

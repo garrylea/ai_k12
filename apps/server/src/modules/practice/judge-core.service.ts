@@ -243,8 +243,11 @@ export class JudgeCoreService {
               content_hash: computeContentHash(structured.content),
             });
             questionId = created.id;
-            // 结构化插题成功 -> 同样触发解析缓存生成（用结构化的答案/解析字段构造最小入参）
-            this.explanationCache.ensureExplanation({ id: created.id, answer: structured.answer, explanation: structured.explanation });
+            // 仅真正新建（created.created）时触发解析缓存生成：命中既有题时其解析由
+            // 判错后对 DB 行 q 的 ensureExplanation 处理，避免长答案直写覆盖既有解析。
+            if (created.created) {
+              this.explanationCache.ensureExplanation({ id: created.id, answer: structured.answer, explanation: structured.explanation });
+            }
             questionCreated = created.created;
           } else {
             questionId = null;
