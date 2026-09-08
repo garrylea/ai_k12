@@ -60,6 +60,16 @@ description: "知识点重讲"
 
 ## User Message
 {{userMessage}}`);
+  writeFileSync(resolve(testTemplateDir, 'explanation/solution.md'), `---
+version: "1.0"
+description: "标准题解"
+---
+
+## System Prompt
+标准题解模板。
+
+## User Message
+{{userMessage}}`);
   writeFileSync(resolve(testTemplateDir, 'grading/math-proof.md'), `---
 version: "1.0"
 description: "证明题批改"
@@ -155,6 +165,20 @@ describe('PromptBuilder', () => {
       },
     });
     expect(result.messages[0].content).toContain('错因分析模板');
+  });
+
+  it('selects solution template when mode is solution', async () => {
+    const result = await builder.build({
+      capability: 'explanation',
+      subject: 'math',
+      mode: 'solution',
+      context: {
+        student: { grade: '七年级', gradeLevel: 'junior' },
+        userMessage: '生成标准题解',
+      },
+    });
+    expect(result.templateVersion).toBe('1.0');
+    expect(result.messages[0].content).toContain('标准题解模板');
   });
 
   it('renders customVariables into template', async () => {

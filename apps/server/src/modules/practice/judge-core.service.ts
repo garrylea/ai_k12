@@ -123,7 +123,7 @@ export class JudgeCoreService {
           questionType,
         });
         isCorrect = result.isCorrect;
-        analysis = isCorrect ? null : result.analysis;
+        analysis = isCorrect ? null : result.analysis ?? null;
         errorType = result.errorType ?? null;
       } catch (err) {
         this.logger.error(`judgment.judge failed: ${err}`);
@@ -202,7 +202,7 @@ export class JudgeCoreService {
           questionType,
         });
         isCorrect = result.isCorrect;
-        analysis = isCorrect ? null : result.analysis;
+        analysis = isCorrect ? null : result.analysis ?? null;
         errorType = result.errorType ?? null;
       } catch (err) {
         this.logger.error(`judgment.judge failed: ${err}`);

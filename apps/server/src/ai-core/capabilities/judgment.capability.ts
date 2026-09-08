@@ -13,7 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const JudgmentResultSchema = z.object({
   isCorrect: z.boolean(),
-  analysis: z.string(),
+  analysis: z.string().nullable().optional(),
   errorType: z.enum(['logic', 'calculation', 'format', 'missing']).nullable().optional(),
 });
 

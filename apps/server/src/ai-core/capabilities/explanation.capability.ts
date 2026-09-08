@@ -55,7 +55,7 @@ export class ExplanationCapability {
         question: request.question,
         studentAnswer: request.wrongAnswer,
         knowledgePoint: request.knowledgePoint,
-        userMessage: request.mode === 'error_analysis' ? '帮我分析错因' : '帮我重新讲解这个知识点',
+        userMessage: request.mode === 'error_analysis' ? '帮我分析错因' : request.mode === 'knowledge_retry' ? '帮我重新讲解这个知识点' : '生成标准题解',
         customVariables,
       },
     });

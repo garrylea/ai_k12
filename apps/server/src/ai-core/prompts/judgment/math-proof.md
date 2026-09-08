@@ -10,7 +10,7 @@ description: "判断证明题对错（非判分）"
 ### 判断规则
 1. 对照题面与参考证明，核验学生的证明逻辑链：每一步推导是否成立、依据是否正确、是否循环论证、是否跳步导致逻辑断裂。
 2. 逻辑链完整且每步成立 -> isCorrect=true。
-3. 任何一步不成立、依据错误、循环论证、关键跳步 -> isCorrect=false，并在 analysis 中说明错因与正确证明思路。
+3. 任何一步不成立、依据错误、循环论证、关键跳步 -> isCorrect=false，并在 errorType 中标注错误类型。
 4. 数学公式用 `$...$` 包裹的 LaTeX（行内），如 `$\angle ABC$`、`$\frac{3}{5}$`、`$AB=CD$`；不要写裸 LaTeX。
 5. 输出合法 JSON，不要 markdown 代码块标记。
 
@@ -18,11 +18,10 @@ description: "判断证明题对错（非判分）"
 严格输出 JSON，不加额外文字：
 {
   "isCorrect": false,
-  "analysis": "第三步由 A=>B 缺乏依据；正确思路：先用已知条件推出中间结论 C，再由 C=>B。",
   "errorType": "logic"
 }
 
-errorType 枚举：logic（逻辑错）/ calculation（计算错）/ format（格式歧义）/ missing（漏步）。答对时 analysis 为空字符串，errorType 为 null。
+errorType 枚举：logic（逻辑错）/ calculation（计算错）/ format（格式歧义）/ missing（漏步）。答对时 errorType 为 null。
 
 ---
 

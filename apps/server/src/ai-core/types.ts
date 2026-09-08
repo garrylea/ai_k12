@@ -477,7 +477,7 @@ export interface JudgmentRequest {
 
 export interface JudgmentResult {
   isCorrect: boolean;
-  analysis: string;
+  analysis?: string | null;
   errorType?: 'logic' | 'calculation' | 'format' | 'missing' | null;
   reasoning?: string;
 }

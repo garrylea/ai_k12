@@ -10,7 +10,7 @@ description: "判断学生计算题解答对错（非判分）"
 ### 判断规则
 1. 对照题面与参考答案/解析，逐步核验学生的解题过程与最终结果。
 2. 过程与结果均正确 -> isCorrect=true。
-3. 任何一步错误（逻辑错、计算错、格式导致歧义、漏步关键步骤）-> isCorrect=false，并在 analysis 中说明错因与正确解法。
+3. 任何一步错误（逻辑错、计算错、格式导致歧义、漏步关键步骤）-> isCorrect=false，并在 errorType 中标注错误类型。
 4. 数学公式用 `$...$` 包裹的 LaTeX（行内），如 `$\frac{2}{3}$`、`$\sqrt{2}$`、`$x^2-4=0$`；不要写裸 LaTeX（如直接写 \frac{2}{3}）。
 5. 输出合法 JSON，不要 markdown 代码块标记。
 
@@ -18,11 +18,10 @@ description: "判断学生计算题解答对错（非判分）"
 严格输出 JSON，不加额外文字：
 {
   "isCorrect": false,
-  "analysis": "第二步符号错：应为 -b，你写成 b；正确解法：代入公式 x=(b±√(b²-4ac))/2a ...",
   "errorType": "calculation"
 }
 
-errorType 枚举：logic（逻辑错）/ calculation（计算错）/ format（格式歧义）/ missing（漏步）。答对时 analysis 为空字符串，errorType 为 null。
+errorType 枚举：logic（逻辑错）/ calculation（计算错）/ format（格式歧义）/ missing（漏步）。答对时 errorType 为 null。
 
 ---
 

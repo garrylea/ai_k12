@@ -6,9 +6,9 @@ const mockChat = vi.fn();
 const mockModelClient = { chat: mockChat } as unknown as ModelClient;
 
 describe('JudgmentCapability', () => {
-  it('答错返回 isCorrect=false + analysis', async () => {
+  it('答错返回 isCorrect=false + errorType（不再生成 analysis）', async () => {
     mockChat.mockResolvedValueOnce({
-      content: '{"isCorrect":false,"analysis":"第二步错","errorType":"calculation"}',
+      content: '{"isCorrect":false,"errorType":"calculation"}',
       reasoningContent: '',
     });
     const cap = new JudgmentCapability({ modelClient: mockModelClient });
@@ -21,13 +21,13 @@ describe('JudgmentCapability', () => {
       questionType: 'calculation',
     });
     expect(r.isCorrect).toBe(false);
-    expect(r.analysis).toBe('第二步错');
+    expect(r.analysis ?? null).toBeNull();
     expect(r.errorType).toBe('calculation');
   });
 
   it('答对返回 isCorrect=true', async () => {
     mockChat.mockResolvedValueOnce({
-      content: '{"isCorrect":true,"analysis":"","errorType":null}',
+      content: '{"isCorrect":true,"errorType":null}',
       reasoningContent: '',
     });
     const r = await new JudgmentCapability({ modelClient: mockModelClient }).judge({
