@@ -792,7 +792,9 @@ export class AdminNotificationsRepository {
 
 - [ ] **Step 7: training.module 提供新依赖**
 
-providers 加 `ExplanationCacheService`（import `../practice/explanation-cache.service.js`）、`ExplanationCapability`（`../../ai-core/capabilities/explanation.capability.js`）、`AdminNotificationsRepository`（`../../database/repositories/admin-notifications.repo.js`）。
+**重要**（T5 代码审查修正）：`ExplanationCacheService` 是有状态单例（in-flight 队列），必须由 `PracticeModule` **导出**、TrainingModule 经已 import 的 `PracticeModule` 注入同一实例——**不能**在 training.module 重复 provide（会产生第二个空队列实例，看不到判题侧 in-flight 生成）。故：
+- `PracticeModule` 在 T5 已 `exports` 加 `ExplanationCacheService`
+- training.module providers 只加 `AdminNotificationsRepository`（`../../database/repositories/admin-notifications.repo.js`），不再加 ExplanationCacheService/ExplanationCapability（随 PracticeModule 注入）
 
 - [ ] **Step 8: 验证**
 
