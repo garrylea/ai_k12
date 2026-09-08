@@ -45,8 +45,12 @@ export class AdminNotificationsRepository {
 
   async markRead(id: number): Promise<boolean> {
     const [r] = await this.pool.execute<ResultSetHeader>(
-      'UPDATE admin_notifications SET is_read = 1, read_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+      'UPDATE admin_notifications SET is_read = 1, read_at = IFNULL(read_at, CURRENT_TIMESTAMP(3)) WHERE id = ?',
       [id]);
-    return r.affectedRows > 0;
+    if (r.affectedRows > 0) return true;  // 首次标已读
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT id FROM admin_notifications WHERE id = ?',
+      [id]);
+    return rows.length > 0;               // 已读重复标 → 幂等 true；不存在 → false
   }
 }

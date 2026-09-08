@@ -29,12 +29,24 @@ describe('AdminNotificationsRepository', () => {
     expect(await repo.unreadCount()).toBe(2);
   });
 
-  it('markRead：affectedRows>0 返回 true，否则 false', async () => {
+  it('markRead：affectedRows>0 首次标已读返回 true', async () => {
     const pool = { execute: vi.fn().mockResolvedValueOnce([{ affectedRows: 1 }]) };
     const repo = new AdminNotificationsRepository(pool as any);
     expect(await repo.markRead(3)).toBe(true);
-    const pool2 = { execute: vi.fn().mockResolvedValueOnce([{ affectedRows: 0 }]) };
-    const repo2 = new AdminNotificationsRepository(pool2 as any);
-    expect(await repo2.markRead(3)).toBe(false);
+    expect(pool.execute).toHaveBeenCalledTimes(1); // 命中则不再 SELECT
+  });
+
+  it('markRead：已读重复标（UPDATE affectedRows=0 但行存在）幂等返回 true', async () => {
+    const pool = { execute: vi.fn().mockResolvedValueOnce([{ affectedRows: 0 }]).mockResolvedValueOnce([[{ id: 3 }]]) };
+    const repo = new AdminNotificationsRepository(pool as any);
+    expect(await repo.markRead(3)).toBe(true);
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('markRead：不存在（UPDATE affectedRows=0 且 SELECT 未命中）返回 false', async () => {
+    const pool = { execute: vi.fn().mockResolvedValueOnce([{ affectedRows: 0 }]).mockResolvedValueOnce([[]]) };
+    const repo = new AdminNotificationsRepository(pool as any);
+    expect(await repo.markRead(3)).toBe(false);
+    expect(pool.execute).toHaveBeenCalledTimes(2);
   });
 });
