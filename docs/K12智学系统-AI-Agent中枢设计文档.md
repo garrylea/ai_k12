@@ -401,8 +401,9 @@ prompts/
 │   ├── chinese-reading.md         # 语文阅读理解批改
 │   └── essay.md                   # 通用作文批改（语文/英语）
 ├── explanation/
-│   ├── math.md                    # 数学错题解析
-│   └── knowledge-retry.md         # 知识点重讲
+│   ├── error-analysis.md          # 错题解析
+│   ├── knowledge-retry.md         # 知识点重讲
+│   └── solution.md                # 标准题解（可入库复用）
 ├── variation/
 │   ├── math-generate.md           # 数学变式题生成
 │   └── math-validate.md           # 变式题校验（P1 实现）
@@ -1385,20 +1386,21 @@ class GradingCapability {
 
 #### 4.3.1 职责
 
-为错题本中的错题生成详细解析，或对学生反复做错的知识点进行重新讲解。被 ErrorBook Service 调用。
+为错题本中的错题生成详细解析，对学生反复做错的知识点进行重新讲解，或生成与具体学生作答无关、可入库复用的标准题解。被 ErrorBook Service / ExplanationCacheService 调用。
 
-#### 4.3.2 两种模式
+#### 4.3.2 三种模式
 
 | 模式 | 触发场景 | 输入 | 输出 |
 |------|----------|------|------|
 | 错题解析 | 查看错题解析 / 错题重做后首次做对 | 题目 + 学生错误答案 | 分步解析 + 错因分析 |
 | 知识点重讲 | 错题升级（再次做错） | 知识点 + 错题历史 | 知识点重新讲解 + 常见误区 |
+| 标准题解 | 判错后生成标准题解入库缓存复用 | 题目（+ 参考答案） | 标准题解（与具体学生作答无关） |
 
 #### 4.3.3 接口定义
 
 ```typescript
 interface ExplanationRequest {
-  mode: 'error_analysis' | 'knowledge_retry';
+  mode: 'error_analysis' | 'knowledge_retry' | 'solution';
   studentId: string;
   subject: string;
   question: QuestionContext;
@@ -1623,9 +1625,10 @@ prompts/
 │   ├── math-calculation.md
 │   ├── chinese-reading.md
 │   └── essay.md
-├── explanation/                    # 错题解析与重讲
+├── explanation/                    # 错题解析 / 知识点重讲 / 标准题解
 │   ├── error-analysis.md
-│   └── knowledge-retry.md
+│   ├── knowledge-retry.md
+│   └── solution.md
 ├── variation/                      # 变式题
 │   ├── generate.md
 │   └── validate.md                 # 校验模板（P1）
