@@ -10,8 +10,10 @@ import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
   bumpTrainingErrorLevels,
+  getTrainingExplanations,
   getTrainingHint,
   judgeTraining,
+  waitTrainingExplanation,
   type TrainingErrorBookEntry,
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
@@ -41,6 +43,8 @@ export default function ErrorPracticeRunPage() {
   const guardRef = useRef(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
   const [entries, setEntries] = useState<TrainingErrorBookEntry[] | null>(null);
+  // 结果页错题解析：末题后批量拉取（key = q.n）；孤儿题（questionId null）无解析不拉
+  const [explanations, setExplanations] = useState<Record<string, string | null>>({});
 
   // StrictMode 下 effect 会跑两次：ref 守卫保证「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无题单而踢回列表页。
@@ -147,6 +151,26 @@ export default function ErrorPracticeRunPage() {
         }
       }
 
+      // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉
+      const wrongQids: number[] = [];
+      for (const e of entries ?? []) {
+        const r = results[String(e.errorBookId)];
+        if (e.questionId != null && r && !r.isCorrect && !r.failed) wrongQids.push(e.questionId);
+      }
+      let expls: Record<number, string | null> = {};
+      if (wrongQids.length > 0) {
+        try {
+          expls = (await getTrainingExplanations(wrongQids)).explanations;
+        } catch {
+          // 拉取失败视为全部未生成，结果页显示「正在生成中 + 刷新」
+        }
+      }
+      const byN: Record<string, string | null> = {};
+      for (const e of entries ?? []) {
+        if (e.questionId != null && expls[e.questionId]) byN[String(e.errorBookId)] = expls[e.questionId];
+      }
+      setExplanations(byN);
+
       setPhase('result');
     },
     [entries],
@@ -162,6 +186,12 @@ export default function ErrorPracticeRunPage() {
           <AnswerResultList
             questions={resultQuestions}
             answers={finalResults ?? {}}
+            initialExplanations={explanations}
+            questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
+            onWaitExplanation={async (qid) => {
+              const res = await waitTrainingExplanation(qid);
+              return res.explanation;
+            }}
             onClose={() => navigate('/student/training/errors')}
           />
         ) : (

@@ -4,6 +4,8 @@ import { AnswerResultList } from '@/components/business/AnswerResultList';
 import {
   getExamResults,
   getExamSession,
+  getTrainingExplanations,
+  waitTrainingExplanation,
   type ExamResultItem,
   type ExamSummary,
 } from '@/services/api';
@@ -35,6 +37,9 @@ export default function ExamResultPage() {
   const [summary, setSummary] = useState<ExamSummary | null>(null);
   const [items, setItems] = useState<ExamResultItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 错题解析：初始为 getExamResults 的 explanation（存量历史 analysis 兜底）；
+  // mount 后对仍为空的错题后台补拉（等 in-flight 生成，60s 兜底），完成后合并。
+  const [explanations, setExplanations] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +56,34 @@ export default function ExamResultPage() {
         if (cancelled) return;
         setSummary(res);
         setItems(res.items);
+
+        // 初始解析：DB 题解优先，存量考试的历史 analysis 兜底（spec §5.2）
+        const base: Record<string, string | null> = {};
+        const missingIds: number[] = [];
+        for (const it of res.items) {
+          const text = it.explanation ?? it.analysis;
+          base[String(it.questionNo)] = text;
+          if (text == null && it.isCorrect === 0 && it.questionId != null) missingIds.push(it.questionId);
+        }
+        setExplanations(base);
+
+        // 后台补拉（不阻塞首屏）：批量端点等 in-flight 生成完成，合并非空结果
+        if (missingIds.length > 0) {
+          try {
+            const { explanations: fetched } = await getTrainingExplanations(missingIds);
+            if (cancelled) return;
+            setExplanations((prev) => {
+              const next = { ...prev };
+              for (const it of res.items) {
+                const v = fetched[it.questionId];
+                if (v != null && next[String(it.questionNo)] == null) next[String(it.questionNo)] = v;
+              }
+              return next;
+            });
+          } catch {
+            // 补拉失败：保持「正在生成中 + 刷新」兜底
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : '加载考试结果失败');
       }
@@ -66,18 +99,23 @@ export default function ExamResultPage() {
     [items],
   );
 
-  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1；
-  // 解析展示 analysis ?? explanation（判题解析优先，缺省落题目自带解析）
+  // q.n（= questionNo）-> questionId 映射（单题刷新解析用）
+  const questionIdByN = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of items ?? []) map.set(String(it.questionNo), it.questionId);
+    return map;
+  }, [items]);
+
+  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1；解析统一走 explanations prop
   const answers = useMemo(() => {
     const map: Record<
       string,
-      { isCorrect: boolean; method: string; analysis: string | null; studentAnswer: string; failed: boolean }
+      { isCorrect: boolean; method: string; studentAnswer: string; failed: boolean }
     > = {};
     for (const it of items ?? []) {
       map[String(it.questionNo)] = {
         isCorrect: it.isCorrect === 1,
         method: '',
-        analysis: it.analysis ?? it.explanation,
         studentAnswer: it.answerText ?? '',
         failed: false,
       };
@@ -117,6 +155,12 @@ export default function ExamResultPage() {
         <AnswerResultList
           questions={resultQuestions}
           answers={answers}
+          initialExplanations={explanations}
+          questionIdOf={(n) => questionIdByN.get(n) ?? null}
+          onWaitExplanation={async (qid) => {
+            const res = await waitTrainingExplanation(qid);
+            return res.explanation;
+          }}
           headerExtra={
             summary && (
               <div className="flex items-center justify-center gap-10 py-5">

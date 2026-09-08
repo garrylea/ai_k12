@@ -8,7 +8,14 @@ import { QuestionRunner } from './answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from './answer/types';
 import { AnswerResultList } from './AnswerResultList';
 import type { PracticeQuestion } from './AnswerModal';
-import { judgePractice, bumpErrorLevels, type PreviousErrorDetail, type JudgeResult } from '@/services/api';
+import {
+  judgePractice,
+  bumpErrorLevels,
+  getTrainingExplanations,
+  waitTrainingExplanation,
+  type PreviousErrorDetail,
+  type JudgeResult,
+} from '@/services/api';
 
 type Phase = 'answering' | 'judging' | 'allClear' | 'hasErrors';
 
@@ -36,6 +43,8 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
   const [phase, setPhase] = useState<Phase>('answering');
   const [countdown, setCountdown] = useState(5);
   const [finalResults, setFinalResults] = useState<Record<string, RunnerAnswerRecord> | null>(null);
+  // 结果页错题解析：末题后批量拉取（key = questionN）；孤儿题（questionId null）无解析不拉
+  const [explanations, setExplanations] = useState<Record<string, string | null>>({});
 
   const questions: PracticeQuestion[] = errors.map((e) => ({
     n: e.questionN,
@@ -102,6 +111,24 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
         await bumpErrorLevels(stillWrongIds);
       } catch { /* best-effort */ }
     }
+
+    // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉
+    const wrongQids: number[] = [];
+    for (const e of errors) {
+      const a = results[e.questionN];
+      if (e.questionId != null && a && !a.isCorrect && !a.failed) wrongQids.push(e.questionId);
+    }
+    let expls: Record<number, string | null> = {};
+    if (wrongQids.length > 0) {
+      try {
+        expls = (await getTrainingExplanations(wrongQids)).explanations;
+      } catch { /* 拉取失败：结果页显示「正在生成中 + 刷新」 */ }
+    }
+    const byN: Record<string, string | null> = {};
+    for (const e of errors) {
+      if (e.questionId != null && expls[e.questionId]) byN[e.questionN] = expls[e.questionId];
+    }
+    setExplanations(byN);
 
     const allCorrect = stillWrongIds.length === 0
       && errors.every((e) => {
@@ -206,6 +233,13 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
         <AnswerResultList
           questions={questions}
           answers={finalResults ?? {}}
+          initialExplanations={explanations}
+          // questionN 可能跨卡撞号：取首个有 questionId 的候选（判题 handleSubmit 用题面匹配，此处题面不可得）
+          questionIdOf={(n) => (errorsByN.get(n) ?? []).find((e) => e.questionId != null)?.questionId ?? null}
+          onWaitExplanation={async (qid) => {
+            const res = await waitTrainingExplanation(qid);
+            return res.explanation;
+          }}
           onClose={() => onComplete(false)}
         />
       </div>

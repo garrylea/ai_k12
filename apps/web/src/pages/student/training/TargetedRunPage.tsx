@@ -9,9 +9,11 @@ import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
+  getTrainingExplanations,
   getTrainingHint,
   judgeTraining,
   markTrainingHidden,
+  waitTrainingExplanation,
   type TargetedPracticeQuestion,
 } from '@/services/api';
 import { toast } from '@/components/base/Toast';
@@ -43,6 +45,8 @@ export default function TargetedRunPage() {
     { open: false, questionId: null },
   );
   const [marking, setMarking] = useState(false);
+  // 结果页错题解析：末题后批量拉取（key = q.n）；null = 生成中/未生成
+  const [explanations, setExplanations] = useState<Record<string, string | null>>({});
   // X 确认后放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 二次拦截——ref 是同步生效的）
   const guardRef = useRef(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
@@ -134,10 +138,34 @@ export default function TargetedRunPage() {
 
   const handleFinish = useCallback(async (results: Record<string, RunnerAnswerRecord>) => {
     setFinalResults(results);
+
+    // 末题判题完成后：收集错题 questionId 批量拉解析（后端等 in-flight 生成，60s 兜底）。
+    // 解析为题级公开数据，题单条目必来自题库（questionId 非空）。
+    const wrongIds: number[] = [];
+    for (const q of questions ?? []) {
+      const qid = entryByN.get(q.n)?.questionId;
+      const r = results[q.n];
+      if (qid != null && r && !r.isCorrect && !r.failed) wrongIds.push(qid);
+    }
+    let expls: Record<number, string | null> = {};
+    if (wrongIds.length > 0) {
+      try {
+        expls = (await getTrainingExplanations(wrongIds)).explanations;
+      } catch {
+        // 拉取失败视为全部未生成，结果页显示「正在生成中 + 刷新」
+      }
+    }
+    const byN: Record<string, string | null> = {};
+    for (const q of questions ?? []) {
+      const qid = entryByN.get(q.n)?.questionId;
+      if (qid != null && expls[qid]) byN[q.n] = expls[qid];
+    }
+    setExplanations(byN);
+
     // 与错题重做的差异点：专项练习答错已由后端 judge 端点自动入错题本，
     // 收尾无需 bump，直接进结果页。
     setPhase('result');
-  }, []);
+  }, [entryByN, questions]);
 
   const confirmMarkHidden = useCallback(async () => {
     if (markConfirm.questionId == null) return;
@@ -163,6 +191,12 @@ export default function TargetedRunPage() {
           <AnswerResultList
             questions={resultQuestions}
             answers={finalResults ?? {}}
+            initialExplanations={explanations}
+            questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
+            onWaitExplanation={async (qid) => {
+              const res = await waitTrainingExplanation(qid);
+              return res.explanation;
+            }}
             onClose={() => navigate('/student/training/targeted')}
           />
         ) : (

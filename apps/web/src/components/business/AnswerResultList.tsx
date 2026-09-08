@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { autoWrapMath } from './LatexPreview';
@@ -27,10 +27,75 @@ interface Props {
   onClose: () => void;
   /** 插入在头部与列表之间的内容（考试结果页的得分卡等）。 */
   headerExtra?: ReactNode;
+  /** 批量拉取的解析（父层末题后调 getTrainingExplanations 获得），key = q.n；缺省 {} */
+  initialExplanations?: Record<string, string | null>;
+  /** q.n -> 题库 questionId（孤儿题返回 null，不渲染刷新按钮）。 */
+  questionIdOf?: (n: string) => number | null;
+  /** 单题刷新等待（父层注入 waitTrainingExplanation），120s 倒计时。 */
+  onWaitExplanation?: (questionId: number) => Promise<string | null>;
 }
 
-export function AnswerResultList({ questions, answers, onClose, headerExtra }: Props) {
+/** 刷新等待上限（秒），与后端 explanation-wait 端点 120s 对齐。 */
+const REFRESH_TIMEOUT_SECONDS = 120;
+
+function formatCountdown(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = String(s % 60).padStart(2, '0');
+  return `${m}:${sec}`;
+}
+
+export function AnswerResultList({
+  questions,
+  answers,
+  onClose,
+  headerExtra,
+  initialExplanations = {},
+  questionIdOf,
+  onWaitExplanation,
+}: Props) {
   const [expandedN, setExpandedN] = useState<string | null>(null);
+  // 解析缓存：初值来自父层末题后批量拉取；单题刷新后回写。
+  const [explanations, setExplanations] = useState<Record<string, string | null>>(initialExplanations);
+  const [refreshingN, setRefreshingN] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
+
+  // 刷新倒计时（mm:ss），请求返回即停。
+  useEffect(() => {
+    if (countdown == null) return;
+    const t = setInterval(() => setCountdown((c) => (c == null || c <= 1 ? null : c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [countdown]);
+
+  // 父层异步补拉（如考试结果页 mount 后等 in-flight）到达时合并：只接受非空值，
+  // 不覆盖已展示/已刷新的解析。父层须 memoize/set-once 保持引用稳定，避免每渲染重置。
+  useEffect(() => {
+    setExplanations((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [k, v] of Object.entries(initialExplanations)) {
+        if (v != null && next[k] !== v) {
+          next[k] = v;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [initialExplanations]);
+
+  const handleRefresh = async (q: PracticeQuestion) => {
+    if (!onWaitExplanation || refreshingN) return;
+    const qid = questionIdOf?.(q.n) ?? null;
+    if (qid == null) return;
+    setRefreshingN(q.n);
+    setCountdown(REFRESH_TIMEOUT_SECONDS);
+    try {
+      const text = await onWaitExplanation(qid);
+      setExplanations((prev) => ({ ...prev, [q.n]: text }));
+    } finally {
+      setRefreshingN(null);
+      setCountdown(null);
+    }
+  };
 
   const failedCount = questions.filter(q => answers[q.n]?.failed).length;
   const correctCount = questions.filter(q => answers[q.n]?.isCorrect && !answers[q.n]?.failed).length;
@@ -73,6 +138,8 @@ export function AnswerResultList({ questions, answers, onClose, headerExtra }: P
               const failed = a?.failed;
               const correct = !!a?.isCorrect && !failed;
               const expanded = expandedN === q.n;
+              const explanation = explanations[q.n] ?? null;
+              const hasQuestionId = (questionIdOf?.(q.n) ?? null) != null;
               return (
                 <div key={q.n} className="bg-[var(--bg-card)] rounded-xl border border-[var(--bg-subtle)] overflow-hidden">
                   <div className="p-3.5 flex items-start gap-3">
@@ -118,19 +185,37 @@ export function AnswerResultList({ questions, answers, onClose, headerExtra }: P
                           <span className="text-xs text-[var(--text-tertiary)]">AI 判定失败，请稍后重试</span>
                         </div>
                       )}
-                      {/* 查看解析 button (wrong only, non-failed) */}
-                      {!correct && !failed && a?.analysis && (
-                        <button
-                          onClick={() => setExpandedN(expanded ? null : q.n)}
-                          className="mt-2.5 px-4 py-1.5 rounded-lg border border-[var(--warning)] bg-[var(--brand-100)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors"
-                        >
-                          {expanded ? '收起解析' : '查看解析'}
-                        </button>
+                      {/* 解析（wrong only, non-failed）：有解析看解析 / 无解析有 questionId 可刷新 / 孤儿题暂无 */}
+                      {!correct && !failed && (
+                        <div className="mt-2.5 flex items-center gap-2">
+                          {explanation ? (
+                            <button
+                              onClick={() => setExpandedN(expanded ? null : q.n)}
+                              className="px-4 py-1.5 rounded-lg border border-[var(--warning)] bg-[var(--brand-100)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors"
+                            >
+                              {expanded ? '收起解析' : '查看解析'}
+                            </button>
+                          ) : hasQuestionId ? (
+                            <>
+                              <span className="text-xs text-[var(--text-tertiary)]">正在生成中…</span>
+                              <button
+                                onClick={() => handleRefresh(q)}
+                                disabled={refreshingN != null}
+                                className="px-3 py-1.5 rounded-lg border border-[var(--warning)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors disabled:opacity-40"
+                                aria-label="刷新解析"
+                              >
+                                {refreshingN === q.n && countdown != null ? formatCountdown(countdown) : '刷新'}
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-xs text-[var(--text-tertiary)]">暂无解析，试试让 AI 讲一讲</span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
-                  {/* Expanded analysis */}
-                  {expanded && !correct && !failed && a?.analysis && (
+                  {/* Expanded explanation */}
+                  {expanded && !correct && !failed && explanation && (
                     <div className="px-4 pb-3.5 pl-[50px]">
                       <div className="p-3.5 bg-[var(--brand-100)] rounded-[10px] border-l-[3px] border-[var(--warning)]">
                         {a.errorType && (
@@ -138,7 +223,7 @@ export function AnswerResultList({ questions, answers, onClose, headerExtra }: P
                         )}
                         <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
                           <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
-                            {preprocessMarkdown(a.analysis)}
+                            {preprocessMarkdown(explanation)}
                           </ReactMarkdown>
                         </div>
                       </div>
