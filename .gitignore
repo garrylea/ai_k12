@@ -45,6 +45,10 @@ tools/runtime/
 # Playwright MCP test artifacts
 .playwright-mcp/
 
+## KaTeX 字体（由 scripts/setup-katex-fonts.cjs 从 node_modules 生成，dev/build 时自动创建）
+apps/web/public/katex-fonts/
+apps/web/src/styles/katex-fonts.css
+
 ## TypeScript
 *.tsbuildinfo
 

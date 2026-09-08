@@ -177,6 +177,12 @@ cmd_build() {
   mkdir -p "$SERVER_DIR/dist/ai-core"
   cp "$SERVER_DIR"/src/ai-core/*.yaml "$SERVER_DIR/dist/ai-core/"
   cp -R "$SERVER_DIR/src/ai-core/prompts" "$SERVER_DIR/dist/ai-core/"
+  # KaTeX 字体：node_modules CSS 中的 url(fonts/...) 在 Vite dev/build 模式下
+  # 无法正确解析为可访问的静态资源，导致数学公式（如 \sqrt{}）字体 404、
+  # 渲染错位（根号横线缺失，显示为 /8）。通过脚本复制字体到 public/katex-fonts/
+  # 并生成修正路径后的 CSS（src/styles/katex-fonts.css），由 markdown.tsx 引用。
+  log '设置 KaTeX 字体（复制到 public/katex-fonts/ + 生成修正路径 CSS）...'
+  ( cd "$WEB_DIR" && node scripts/setup-katex-fonts.cjs ) || die 'KaTeX 字体设置失败'
   log '构建 web（tsc -b + vite build）...'
   ( cd "$WEB_DIR" && npm run build ) || die 'web 构建失败'
   log '构建完成'

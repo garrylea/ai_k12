@@ -10,6 +10,9 @@
 //      markdown 语法；rehype-raw 把 HAST 里的 raw 节点解析为真实元素。
 //   3. 数学公式：remark-math + rehype-katex 渲染 $...$ / $$...$$。
 //   4. GFM 表格/删除线：remark-gfm。
+//   5. 块级 HTML 吞并修复：CommonMark 把「行首块级 HTML 标签」当 HTML 块一直吃到下一个
+//      空行；LLM 题面常在 </table> 后直接接 markdown（无空行），后续内容会被吞进同一个
+//      raw html 节点变成纯文本。remarkSplitHtmlBlocks 插件在 mdast 阶段切分修复（见下）。
 //
 // 改 ReactMarkdown 渲染相关 bug 时，先确认调用方用的是这里的导出，不要在各
 // 页面再自定义一份 resolveAsset / plugins / img，否则又会漂移。
@@ -19,13 +22,24 @@
 // 已是合法节点不会被 raw 重解析，但若反过来 katex 渲染出的 HTML 会被 raw 当
 // 文本再解析一次，破坏 KaTeX 输出）。
 import { useState } from 'react';
-import type { ReactNode, SVGProps } from 'react';
+import type { ReactNode } from 'react';
+import type { Options } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import remarkParse from 'remark-parse';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
+import { unified } from 'unified';
+import { visit } from 'unist-util-visit';
+import type { Content, Root } from 'mdast';
+// KaTeX 字体通过 scripts/setup-katex-fonts.cjs 复制到 public/katex-fonts/，
+// 并生成 src/styles/katex-fonts.css（修正 @font-face 路径为绝对路径 /katex-fonts/）。
+// 先加载完整 CSS（含 .katex/.katex-html 等布局样式），再加载修正路径后的 @font-face
+// 覆盖原 CSS 中的字体声明，解决 Vite dev 模式下 url(fonts/...) 解析失败导致的字体 404
+// 和数学公式渲染错位（根号横线缺失）。
 import 'katex/dist/katex.min.css';
+import '@/styles/katex-fonts.css';
 
 // 静态资产前缀。优先取 env（生产部署可能改到 CDN），缺省 /assets/ 走 Vite proxy。
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
@@ -56,14 +70,83 @@ export const preprocessMarkdown = (s: string | undefined | null): string => {
   return repairHtml(s.replace(/\\n(?![a-zA-Z])/g, '\n'));
 };
 
-/** 标准 remark 插件集：数学 + GFM（表格/删除线/任务列表）。 */
-export const markdownRemarkPlugins = [remarkMath, remarkGfm];
+// ── CommonMark HTML 块吞并修复（remarkSplitHtmlBlocks）──
+// CommonMark 规则：行首为块级 HTML 标签（<table> 等）时会进入「HTML 块」解析，一直吃到
+// 下一个空行。LLM 抽取/生成的题面常在 </table> 等闭合标签后直接接 markdown 段落（无空行），
+// 导致其后的 markdown/LaTeX 全部被吞进同一个 raw html 节点，rehype-raw 只会把它当普通文本
+// 输出（<p>、**加粗**、$..$ 全部失效）。
+// 此插件在 mdast 阶段把这类 html 节点按「最后一个块级闭合标签行」切分：闭合标签之后的
+// 非空且非 < 开头的内容视为新的 markdown 段落，用嵌套 remark 处理器（tailPlugins 与主管线
+// 一致）重新解析后插回树中，恢复后续内容的正常渲染。
+const BLOCK_HTML_CLOSE_END_RE =
+  /<\/(?:table|div|p|ul|ol|li|h[1-6]|pre|blockquote|section|article|figure|details|summary|tbody|thead|tfoot|tr|td|th|caption|colgroup|dl|dt|dd|address|aside|center|fieldset|figcaption|footer|form|header|main|nav)(?:\s[^>]*)?>\s*$/;
+const STANDALONE_HR_LINE_RE = /^[ \t]*<hr(?:\s[^>]*)?\/?>\s*$/;
+const HTML_LINE_START_RE = /^\s*</;
+
+function splitGreedyHtmlBlock(value: string): { html: string; md: string } | null {
+  const lines = value.split('\n');
+  // 最后一个「块级闭合标签行」下标；之后第一个非空、非 < 开头的行即为 markdown 起点。
+  let lastClose = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (BLOCK_HTML_CLOSE_END_RE.test(lines[i]) || STANDALONE_HR_LINE_RE.test(lines[i])) {
+      lastClose = i;
+    }
+  }
+  if (lastClose === -1) return null; // 无块级闭合标签（纯行内 HTML），不切分
+  let mdStart = -1;
+  for (let i = lastClose + 1; i < lines.length; i++) {
+    if (lines[i].trim() !== '') {
+      mdStart = i;
+      break;
+    }
+  }
+  if (mdStart === -1) return null; // 纯 HTML 块，无需切分
+  if (HTML_LINE_START_RE.test(lines[mdStart])) return null; // 后续仍是未闭合 HTML，不切分
+  return { html: lines.slice(0, mdStart).join('\n'), md: lines.slice(mdStart).join('\n') };
+}
+
+/** remark 插件：切分被 CommonMark HTML 块吞并的 markdown 尾部（见上注释）。 */
+function remarkSplitHtmlBlocks(tailPlugins: NonNullable<Options['remarkPlugins']>) {
+  // 尾部重新解析用的嵌套处理器（与主管线同款插件，保证 $..$/表格等规则一致）
+  const tailProcessor = unified().use(remarkParse).use(tailPlugins);
+  return () => (tree: Root) => {
+    visit(tree, 'html', (node, index, parent) => {
+      if (parent == null || index == null) return;
+      const parts = splitGreedyHtmlBlock(node.value);
+      if (!parts) return;
+      const tail = tailProcessor.parse(parts.md);
+      // 原 html 节点截为纯 HTML 部分，尾部按 markdown 重新解析后插入其后
+      parent.children.splice(index, 1, { ...node, value: parts.html }, ...(tail.children as Content[]));
+    });
+  };
+}
+
+/** 标准 remark 插件集：数学 + GFM（表格/删除线/任务列表）+ 块级 HTML 吞并修复。 */
+export const markdownRemarkPlugins: NonNullable<Options['remarkPlugins']> = [
+  remarkMath,
+  remarkGfm,
+  remarkSplitHtmlBlocks([remarkMath, remarkGfm]),
+];
 
 /** remark 插件集（带换行保留）：草稿预览 / 学生作答等需要尊重软换行的场景。 */
-export const markdownRemarkPluginsWithBreaks = [remarkMath, remarkGfm, remarkBreaks];
+export const markdownRemarkPluginsWithBreaks: NonNullable<Options['remarkPlugins']> = [
+  remarkMath,
+  remarkGfm,
+  remarkBreaks,
+  remarkSplitHtmlBlocks([remarkMath, remarkGfm, remarkBreaks]),
+];
 
-/** 标准 rehype 插件集：原生 HTML 解析 + KaTeX 数学渲染。顺序见文件头注释。 */
-export const markdownRehypePlugins = [rehypeRaw, rehypeKatex];
+/** 标准 rehype 插件集：原生 HTML 解析 + KaTeX 数学渲染。顺序见文件头注释。
+ *
+ * KaTeX 默认 output: 'htmlAndMathml'，同时输出 HTML 视觉层 + MathML 语义层。
+ * Chrome 109+ 开始原生支持 MathML，其渲染可能与 KaTeX 的 CSS 定位冲突，
+ * 导致根号横线错位（如 \sqrt{8} 显示为 /8）。强制 output: 'html' 只保留
+ * CSS 视觉渲染，彻底规避 MathML 与 HTML 层的重叠/错位问题。
+ */
+export const markdownRehypePlugins: NonNullable<Options['rehypePlugins']> = [
+  rehypeRaw,
+  [rehypeKatex, { output: 'html' }],
+];
 
 interface MarkdownImgProps {
   src?: string;
@@ -72,9 +155,9 @@ interface MarkdownImgProps {
    *  启用 bucketHeight 时 className 不要带固定高——高度由分桶算法给（见下）。 */
   className?: string;
   /** 题面图按宽高比分桶固定高度（仅题面图启用）：
-   *  ratio = naturalWidth / naturalHeight；∈ [0.3,1.7] → 100px（近正方形）；
-   *  < 0.3 → 160px（竖高图）；> 1.7 → 30px（宽矩形）。
-   *  onLoad 后按自然尺寸落桶；默认 100px（中间桶）避免首屏过高。宽按比例自适应（max-w-full 兜底）。 */
+   *  ratio = naturalWidth / naturalHeight；> 5 → 60px（超宽矩形）；
+   *  其它 → 120px。
+   *  onLoad 后按自然尺寸落桶；默认 120px（常见桶）避免首屏过高。宽按比例自适应（max-w-full 兜底）。 */
   bucketHeight?: boolean;
 }
 
@@ -87,7 +170,7 @@ interface MarkdownImgProps {
 export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgProps) {
   // 分桶高度状态：bucketHeight=true 时生效，null 表示不参与 className 拼装。
   // 必须无条件调 useState（hooks 规则）——bucketHeight 在调用点是常量，不会切换。
-  const [bucketClass, setBucketClass] = useState<string | null>(bucketHeight ? 'h-[100px]' : null);
+  const [bucketClass, setBucketClass] = useState<string | null>(bucketHeight ? 'h-[120px]' : null);
   const finalClass = bucketHeight
     ? `${className ?? ''} ${bucketClass ?? ''}`.trim()
     : (className ?? 'block mx-auto my-2 max-w-full h-[50px] object-contain rounded-lg');
@@ -104,7 +187,7 @@ export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgPr
               const h = img.naturalHeight;
               if (!w || !h) return;
               const ratio = w / h;
-              setBucketClass(ratio < 0.3 ? 'h-[160px]' : ratio > 1.7 ? 'h-[30px]' : 'h-[100px]');
+              setBucketClass(ratio > 5 ? 'h-[60px]' : 'h-[120px]');
             }
           : undefined
       }
@@ -114,26 +197,15 @@ export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgPr
 }
 
 /**
- * 默认 components：img + svg + 表格带 border（题面/题块/解析里 HTML 表格与 GFM 表格
- * 都画出表格线，clear 可读）。其余元素用 react-markdown 默认。多数调用方够用；
- * 聊天气泡（DiscussChat/AdminChat/AuxChatPanel）有自己的 components 自定义
- * table 样式，不用这套默认。border 用 var(--bg-subtle) 适配三套主题
- * （student-day/night/parent 都定义了 --bg-subtle）。
+ * 默认 components：img + 表格带 border（题面/题块/解析里 HTML 表格与 GFM 表格
+ * 都画出表格线，clear 可读）。其余元素用 react-markdown 默认。
  *
- * svg 自定义：题面里常见的内联 `<svg viewBox="...">...</svg>` 标签文本经
- * rehype-raw 解析为真实元素后，按 max-h-[60vh] / max-w-full 等比例缩放渲染
- * （几何插图等矢量内容需完整尺寸，原默认 inline 渲染会偏小）。其余子元素
- * （path/circle/rect/g 等）透传 react-markdown 默认渲染。
+ * ⚠️ 不覆盖 <svg>：KaTeX 数学公式（\sqrt{}、分数线等）内部使用 SVG 绘制符号，
+ * 若全局覆盖 svg 的 className（如加 h-auto/w-auto），会破坏 KaTeX 的 SVG 尺寸
+ * 计算，导致根号横线缺失、公式错位。几何插图 SVG 的缩放问题后续另行处理。
  */
 export const markdownComponents = {
   img: MarkdownImg,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- node 解构剥离，避免透传进 DOM <svg>
-  svg: ({ node, className: cls, ...rest }: { node?: unknown } & SVGProps<SVGSVGElement>) => (
-    <svg
-      {...rest}
-      className={['block mx-auto my-2 max-h-[60vh] max-w-full h-auto w-auto', cls].filter(Boolean).join(' ')}
-    />
-  ),
   table: ({ children }: { children?: ReactNode }) => (
     <div className="my-2 overflow-x-auto">
       <table className="border-collapse w-full text-sm">{children}</table>

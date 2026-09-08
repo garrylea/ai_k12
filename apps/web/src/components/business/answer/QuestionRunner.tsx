@@ -35,7 +35,7 @@ const ChevronLeftIcon = () => (
 );
 
 // 自定义 img：题面图走 MarkdownImg 的 bucketHeight 模式——按宽高比分桶固定高度
-// （[0.3,1.7]→100px / <0.3→160px / >1.7→30px，见 markdown.tsx MarkdownImg 注释），
+// （>5→60px / 其它→120px，见 markdown.tsx MarkdownImg 注释），
 // resolveAsset / 破图隐藏仍由 MarkdownImg 处理。className 不带固定高（分桶算法给），
 // 保留 margin/居中/max-w-full/object-contain/圆角。
 const questionMarkdownComponents = {
