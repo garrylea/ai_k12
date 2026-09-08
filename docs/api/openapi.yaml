@@ -2935,6 +2935,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommonResponse'
+  /admin/notifications:
+    get:
+      tags: [Admin]
+      summary: 系统通知列表（判错解析缓存失败等异步告警，倒序最多 200 条）
+      operationId: listAdminNotifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    type: { type: string }
+                    questionId: { type: integer, nullable: true }
+                    title: { type: string }
+                    content: { type: string }
+                    isRead: { type: boolean }
+                    createdAt: { type: string, format: date-time }
+  /admin/notifications/unread-count:
+    get:
+      tags: [Admin]
+      summary: 未读通知数
+      operationId: getAdminNotificationsUnreadCount
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: integer
+  /admin/notifications/{id}/read:
+    post:
+      tags: [Admin]
+      summary: 标记通知已读（不存在返回 1002）
+      operationId: markAdminNotificationRead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
   /admin/chat/dialogues:
     get:
       tags: [Admin]

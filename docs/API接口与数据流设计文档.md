@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v2.5
+> 版本：v2.7
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -374,6 +374,9 @@
 | GET | `/api/admin/messages` | 已发消息列表（含触达数/已读数） | MVP |
 | POST | `/api/admin/messages` | 发送消息（`{type: promo/learning/system, title, content, parentId?}`；`parentId` 缺省=全员广播） | MVP |
 | DELETE | `/api/admin/messages/{id}` | 撤回消息（连同已读记录一并删除） | MVP |
+| GET | `/api/admin/notifications` | 系统通知列表（判错解析缓存失败等异步告警，`admin_notifications` 表，含 `isRead`，按时间倒序最多 200 条） | MVP |
+| GET | `/api/admin/notifications/unread-count` | 未读通知数（顶部铃铛徽章） | MVP |
+| POST | `/api/admin/notifications/{id}/read` | 标记通知已读（不存在返回 `1002`） | MVP |
 | GET | `/api/admin/chat/dialogues` | 管理员会话列表（仅自己的） | MVP |
 | POST | `/api/admin/chat/dialogues` | 新建会话（指定 `{modelKey}`） | MVP |
 | DELETE | `/api/admin/chat/dialogues/{id}` | 删除会话（连带其消息） | MVP |
@@ -1379,6 +1382,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.7 | 2026-09-08 | Admin 通知中心：新增 `GET /api/admin/notifications`（系统通知列表——判题解析缓存失败等异步告警，`admin_notifications` 表，含 `isRead`，按时间倒序最多 200 条）、`GET /api/admin/notifications/unread-count`（未读数）、`POST /api/admin/notifications/{id}/read`（标记已读，不存在 `1002`）。openapi.yaml 同步收录 3 端点（/admin/notifications*，admin JWT）。 |
 | v2.6 | 2026-09-07 | 会话场景分型 + 训练「讲一讲」重构：`ai_dialogues` 新增 `scene`（aux_qna/aux_training/mainline_question/mainline_card）与 `question_id` 列（迁移 `2026-09-07_add_ai_dialogues_scene.sql`，含存量回填）；`POST /api/conversations` 支持 `scene/questionId/questionText`，`scene=aux_training` 时按题 find-or-create 续接、仅新建时把题面写成一条 assistant 题面锚消息；`GET /api/conversations` 支持 `scene` 过滤——辅线答疑列表只显示 `aux_qna`，训练讲一讲不再混入辅线历史；训练讲一讲学生消息不再前缀题面（气泡只显示原话）。`startDiscuss`/`startCardDiscuss` 分别标记 `mainline_question`/`mainline_card`。新增 §6.18 数据流。openapi.yaml 同步（Conversation/CreateConversationRequest/list query）。 |
 | v2.5 | 2026-09-04 | 联调修正（§4.19 三处，openapi.yaml 同步）：① `POST /api/exams/sessions` 命中的续考会话已超时 -> 先自动收卷再返回 `status='submitted'`（不新建，前端直接踢结果页）；② `POST /api/exams/sessions/{id}/answers` 改为**先落在途行再判题**（判题在途窗口内倒计时归零自动收卷时走「在途补判」而非「未作答」）；③ 考试来源错题写入改 find-or-create（镜像 JudgeCore：该生该题已有未清错题时复用既有行，不重复建行）。 |
 | v2.4 | 2026-09-03 | 新增 Exams 服务分组（§4.19，MVP，真题试卷考试）：`GET /api/exams/papers`（试卷列表，year/district/examType/gradeBand 可选叠加筛选）、`GET /api/exams/papers/{id}`（试卷详情 + 按题型估算推荐时长 durationMinutes，clamp [30,180]）、`POST /api/exams/sessions`（开考/续考——同卷 in_progress 会话直接复用、不重置时长）、`GET /api/exams/sessions/{id}`（断线恢复，超时会话自动收卷）、`POST /api/exams/sessions/{id}/answers`（单题同步判题，考试结束前响应白名单剥离 answer/explanation 与对错——防作弊）、`POST /api/exams/sessions/{id}/submit`（交卷幂等，finalize 三分支：未作答判错/在途补判/已判跳过）、`GET /api/exams/sessions/{id}/results`（结果页，逐题对错 + 解析）。判题复用 JudgeCore（`source='exam'`、`sourceRefId=sessionId`，答错写 main_error_books 与练习同语义）；新增 §6.17 真题考试数据流。openapi.yaml 同步收录 7 端点（/exams/*，student JWT）。 |
