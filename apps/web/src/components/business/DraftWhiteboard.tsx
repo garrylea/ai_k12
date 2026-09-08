@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useThemeStore } from '@/store/themeStore';
-import { getDraft, setDraft, clearDraft, type Stroke } from './draft-store';
+import { getDraft, setDraft, clearDraft, getDraftImages, setDraftImages, type Stroke, type DraftImage } from './draft-store';
+import { DraftImageLayer } from './DraftImageLayer';
+import { fileToDraftImage, isEditableTarget } from './draft-image-utils';
 
-type Tool = 'pen' | 'eraser';
+type Tool = 'pen' | 'eraser' | 'move';
 
 /** 笔迹线宽（CSS px）：恒定线宽细线（钢笔感），无 thinning 粗细起伏 */
 const INK_WIDTH = 2;
@@ -92,6 +94,17 @@ const TrashIcon = () => (
   </svg>
 );
 
+const MoveIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="5 9 2 12 5 15" />
+    <polyline points="9 5 12 2 15 5" />
+    <polyline points="15 19 12 22 9 19" />
+    <polyline points="19 9 22 12 19 15" />
+    <line x1="2" y1="12" x2="22" y2="12" />
+    <line x1="12" y1="2" x2="12" y2="22" />
+  </svg>
+);
+
 export function DraftWhiteboard({
   questionId,
   scrollMode = 'fit',
@@ -112,6 +125,49 @@ export function DraftWhiteboard({
   const panRef = useRef(false);
   const panLastYRef = useRef(0);
   const themeMode = useThemeStore((s) => s.mode);
+
+  // 贴图：React state 渲染 + ref 镜像（异步插入/连续更新不拿旧闭包）；persist 时同步落 draft-store
+  const [images, setImages] = useState<DraftImage[]>([]);
+  const imagesRef = useRef<DraftImage[]>([]);
+  const updateImages = useCallback((updater: (prev: DraftImage[]) => DraftImage[]) => {
+    const next = updater(imagesRef.current);
+    imagesRef.current = next;
+    setImages(next);
+    if (persist) setDraftImages(questionId, next);
+  }, [persist, questionId]);
+
+  // 粘贴/拖入入口：可视区中央落点，多张级联偏移 16px 防完全重叠
+  const insertImages = useCallback(async (files: File[]) => {
+    const wrap = wrapRef.current;
+    if (!wrap || files.length === 0) return;
+    const viewport = {
+      left: 0,
+      top: scrollMode === 'scroll-y' ? wrap.scrollTop : 0,
+      width: wrap.clientWidth,
+      height: wrap.clientHeight,
+    };
+    for (let i = 0; i < files.length; i++) {
+      const img = await fileToDraftImage(files[i], wrap.clientWidth, viewport);
+      if (i > 0) { img.x += i * 16; img.y += i * 16; }
+      updateImages((prev) => [...prev, img]);
+    }
+  }, [scrollMode, updateImages]);
+
+  // 剪贴板粘贴：组件随抽屉/面板条件挂载，监听生命周期 = 草稿可见期；
+  // 焦点在输入框时放行（正常粘贴文本），只拦图片文件
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      const file = Array.from(e.clipboardData?.items ?? [])
+        .find((it) => it.kind === 'file' && it.type.startsWith('image/'))
+        ?.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      void insertImages([file]);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [insertImages]);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -159,6 +215,8 @@ export function DraftWhiteboard({
   // 切题：persist 时加载该题草稿；persist=false 时清空本地笔迹（草稿不保存，切题即空）
   useEffect(() => {
     strokesRef.current = persist ? getDraft(questionId) : [];
+    imagesRef.current = persist ? getDraftImages(questionId) : [];
+    setImages(imagesRef.current);
     redraw();
   }, [questionId, persist, redraw]);
 
@@ -268,7 +326,9 @@ export function DraftWhiteboard({
 
   const handleClear = () => {
     strokesRef.current = [];
-    if (persist) clearDraft(questionId);
+    imagesRef.current = [];
+    setImages([]);
+    if (persist) clearDraft(questionId); // store 层双清笔迹 + 贴图
     redraw();
   };
 
@@ -277,7 +337,7 @@ export function DraftWhiteboard({
     <canvas
       ref={canvasRef}
       className="absolute inset-0 w-full h-full"
-      style={{ touchAction: 'none', cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
+      style={{ touchAction: 'none', pointerEvents: tool === 'move' ? 'none' : 'auto', cursor: tool === 'move' ? 'default' : tool === 'eraser' ? 'cell' : 'crosshair' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -304,11 +364,20 @@ export function DraftWhiteboard({
   );
 
   return (
-    <div className="h-full flex flex-col">
+    <div
+      className="h-full flex flex-col"
+      onDragOver={(e) => { e.preventDefault(); }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
+        void insertImages(files);
+      }}
+    >
       {/* 工具条 */}
       <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-[var(--bg-subtle)]">
         {toolBtn('pen', '手写笔', <PenIcon />)}
         {toolBtn('eraser', '橡皮', <EraserIcon />)}
+        {toolBtn('move', '移动', <MoveIcon />)}
         <div className="flex-1" />
         <button
           onClick={handleClear}
@@ -323,11 +392,13 @@ export function DraftWhiteboard({
       {scrollMode === 'scroll-y' ? (
         <div ref={wrapRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           <div ref={boardRef} className="relative" style={{ width: '100%' }}>
+            <DraftImageLayer images={images} onImagesChange={updateImages} interactive={tool === 'move'} />
             {canvasEl}
           </div>
         </div>
       ) : (
         <div ref={wrapRef} className="flex-1 min-h-0 relative">
+          <DraftImageLayer images={images} onImagesChange={updateImages} interactive={tool === 'move'} />
           {canvasEl}
         </div>
       )}
