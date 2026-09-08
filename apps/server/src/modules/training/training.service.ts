@@ -181,12 +181,23 @@ export class TrainingService {
     return { explanations };
   }
 
-  /** 单题刷新等待：DB 无解析且无在途 -> 重新触发生成；120s 超时；失败写管理员通知（同题未读去重）。 */
+  /** 单题刷新等待：DB 无解析且无在途 -> 重新触发生成；120s 超时；失败写管理员通知（同题同 type 未读去重）。
+   *  题目不存在/停用 -> 不触发生成不写通知直接返回 null（findById 已按 is_active=1 过滤，
+   *  防枚举不存在 id 触发强模型生成、也防对已删题误发失败通知）。 */
   async waitForExplanation(questionId: number): Promise<{ explanation: string | null }> {
+    const q = await this.questionsRepo.findById(questionId);
+    if (!q) {
+      return { explanation: null };
+    }
     const explanation = await this.explanationCache.waitExplanation(questionId, 120_000);
     if (explanation == null) {
+      // 超时后重读一次：生成恰在 120s 窗口外完成 -> 直接返回，不写「持续失败」通知（防误报）。
+      const after = await this.questionsRepo.findById(questionId);
+      if (after?.explanation?.trim()) {
+        return { explanation: after.explanation };
+      }
       try {
-        const hasUnread = await this.notificationsRepo.hasUnreadByQuestion(questionId);
+        const hasUnread = await this.notificationsRepo.hasUnreadByQuestion(questionId, 'explanation_failed');
         if (!hasUnread) {
           await this.notificationsRepo.create({
             type: 'explanation_failed',

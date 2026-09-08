@@ -2,11 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { AdminNotificationsRepository } from './admin-notifications.repo.js';
 
 describe('AdminNotificationsRepository', () => {
-  it('hasUnreadByQuestion：无未读时 false，有未读时 true', async () => {
+  it('hasUnreadByQuestion：无未读时 false，有未读时 true（按 question_id + type 精确去重）', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([[{ c: 0 }]]) };
     const repo = new AdminNotificationsRepository(pool as any);
-    expect(await repo.hasUnreadByQuestion(5)).toBe(false);
-    expect(pool.execute).toHaveBeenCalledWith(expect.stringContaining('is_read = 0'), [5]);
+    expect(await repo.hasUnreadByQuestion(5, 'explanation_failed')).toBe(false);
+    expect(pool.execute).toHaveBeenCalledWith(expect.stringContaining('is_read = 0'), [5, 'explanation_failed']);
   });
 
   it('create 返回 insertId', async () => {
@@ -23,9 +23,18 @@ describe('AdminNotificationsRepository', () => {
     expect(list[0].isRead).toBe(true);
   });
 
-  it('unreadCount 与 markRead', async () => {
+  it('unreadCount', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([[{ c: 2 }]]) };
     const repo = new AdminNotificationsRepository(pool as any);
     expect(await repo.unreadCount()).toBe(2);
+  });
+
+  it('markRead：affectedRows>0 返回 true，否则 false', async () => {
+    const pool = { execute: vi.fn().mockResolvedValueOnce([{ affectedRows: 1 }]) };
+    const repo = new AdminNotificationsRepository(pool as any);
+    expect(await repo.markRead(3)).toBe(true);
+    const pool2 = { execute: vi.fn().mockResolvedValueOnce([{ affectedRows: 0 }]) };
+    const repo2 = new AdminNotificationsRepository(pool2 as any);
+    expect(await repo2.markRead(3)).toBe(false);
   });
 });

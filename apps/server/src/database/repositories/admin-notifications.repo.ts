@@ -22,11 +22,11 @@ export class AdminNotificationsRepository {
     return r.insertId;
   }
 
-  /** 同题未读失败通知去重（防刷屏）：explanation-wait 超时前先查。 */
-  async hasUnreadByQuestion(questionId: number): Promise<boolean> {
+  /** 同题同 type 未读失败通知去重（防刷屏）：explanation-wait 超时前先查。 */
+  async hasUnreadByQuestion(questionId: number, type: string): Promise<boolean> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      'SELECT COUNT(*) AS c FROM admin_notifications WHERE question_id = ? AND is_read = 0',
-      [questionId]);
+      'SELECT COUNT(*) AS c FROM admin_notifications WHERE question_id = ? AND type = ? AND is_read = 0',
+      [questionId, type]);
     return Number(rows[0].c) > 0;
   }
 

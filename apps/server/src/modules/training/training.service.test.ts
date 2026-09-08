@@ -339,8 +339,19 @@ describe('TrainingService.getExplanations', () => {
 });
 
 describe('TrainingService.waitForExplanation', () => {
+  const activeQuestion = { id: 10, explanation: '' };
+
+  it('题目不存在/停用 -> 不触发生成不写通知，返回 null', async () => {
+    const deps = mk({ questionsRepo: { findById: vi.fn().mockResolvedValue(null), findRandomByKpAndType: vi.fn() } });
+    const r = await mkSvc(deps).waitForExplanation(999);
+    expect(r).toEqual({ explanation: null });
+    expect(deps.explanationCache.waitExplanation).not.toHaveBeenCalled();
+    expect(deps.notificationsRepo.create).not.toHaveBeenCalled();
+  });
+
   it('解析成功 -> 返回 explanation，不写通知', async () => {
     const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(activeQuestion), findRandomByKpAndType: vi.fn() },
       explanationCache: { waitForExplanations: vi.fn(), waitExplanation: vi.fn().mockResolvedValue('题解') },
     });
     const r = await mkSvc(deps).waitForExplanation(10);
@@ -348,12 +359,14 @@ describe('TrainingService.waitForExplanation', () => {
     expect(deps.notificationsRepo.create).not.toHaveBeenCalled();
   });
 
-  it('超时 null -> 写 explanation_failed 通知（先查 hasUnread 去重）', async () => {
-    const deps = mk();
+  it('超时 null -> 重读确认无解析后写 explanation_failed 通知（按 question_id+type 去重）', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(activeQuestion), findRandomByKpAndType: vi.fn() },
+    });
     const r = await mkSvc(deps).waitForExplanation(10);
     expect(r).toEqual({ explanation: null });
     expect(deps.explanationCache.waitExplanation).toHaveBeenCalledWith(10, 120_000);
-    expect(deps.notificationsRepo.hasUnreadByQuestion).toHaveBeenCalledWith(10);
+    expect(deps.notificationsRepo.hasUnreadByQuestion).toHaveBeenCalledWith(10, 'explanation_failed');
     expect(deps.notificationsRepo.create).toHaveBeenCalledWith({
       type: 'explanation_failed',
       questionId: 10,
@@ -362,14 +375,35 @@ describe('TrainingService.waitForExplanation', () => {
     });
   });
 
+  it('超时后重读发现解析已生成 -> 直接返回该解析，不写通知（防误报）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findById: vi.fn()
+          .mockResolvedValueOnce(activeQuestion)                              // 存在性检查
+          .mockResolvedValueOnce({ id: 10, explanation: '迟到题解' }),        // 超时后重读
+        findRandomByKpAndType: vi.fn(),
+      },
+    });
+    const r = await mkSvc(deps).waitForExplanation(10);
+    expect(r).toEqual({ explanation: '迟到题解' });
+    expect(deps.notificationsRepo.create).not.toHaveBeenCalled();
+  });
+
   it('同题已有未读 -> 不再重复写', async () => {
-    const deps = mk({ notificationsRepo: { hasUnreadByQuestion: vi.fn().mockResolvedValue(true), create: vi.fn() } });
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(activeQuestion), findRandomByKpAndType: vi.fn() },
+      notificationsRepo: { hasUnreadByQuestion: vi.fn().mockResolvedValue(true), create: vi.fn() },
+    });
     await mkSvc(deps).waitForExplanation(10);
+    expect(deps.notificationsRepo.hasUnreadByQuestion).toHaveBeenCalledWith(10, 'explanation_failed');
     expect(deps.notificationsRepo.create).not.toHaveBeenCalled();
   });
 
   it('通知写入失败不阻断返回（best-effort）', async () => {
-    const deps = mk({ notificationsRepo: { hasUnreadByQuestion: vi.fn().mockRejectedValue(new Error('db down')), create: vi.fn() } });
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(activeQuestion), findRandomByKpAndType: vi.fn() },
+      notificationsRepo: { hasUnreadByQuestion: vi.fn().mockRejectedValue(new Error('db down')), create: vi.fn() },
+    });
     const r = await mkSvc(deps).waitForExplanation(10);
     expect(r).toEqual({ explanation: null });
   });
