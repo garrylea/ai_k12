@@ -45,6 +45,9 @@ tools/runtime/
 # Playwright MCP test artifacts
 .playwright-mcp/
 
+# Playwright MCP 快照（login.yml / targeted.yml 等）——仓库无已跟踪 *.yml，全局忽略安全
+*.yml
+
 ## KaTeX 字体（由 scripts/setup-katex-fonts.cjs 从 node_modules 生成，dev/build 时自动创建）
 apps/web/public/katex-fonts/
 apps/web/src/styles/katex-fonts.css
