@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AdminModelsService } from './admin-models.service.js';
 import { AdminAccountsService } from './admin-accounts.service.js';
 import { AdminMessagesService } from './admin-messages.service.js';
+import { AdminNotificationsService } from './admin-notifications.service.js';
 import { AdminChatService } from './admin-chat.service.js';
 import { AdminDashboardService } from './admin-dashboard.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
@@ -47,6 +48,7 @@ export class AdminController {
     private modelsService: AdminModelsService,
     private accountsService: AdminAccountsService,
     private messagesService: AdminMessagesService,
+    private notificationsService: AdminNotificationsService,
     private chatService: AdminChatService,
     private dashboardService: AdminDashboardService,
   ) {}
@@ -139,6 +141,15 @@ export class AdminController {
 
   @Delete('messages/:id') async deleteMessage(@Param('id', ParseIntPipe) id: number) {
     await this.messagesService.remove(id);
+    return null;
+  }
+
+  @Get('notifications') notifications() { return this.notificationsService.list(); }
+
+  @Get('notifications/unread-count') unreadNotifications() { return this.notificationsService.unreadCount(); }
+
+  @Post('notifications/:id/read') async markNotificationRead(@Param('id', ParseIntPipe) id: number) {
+    await this.notificationsService.markRead(id);
     return null;
   }
 
