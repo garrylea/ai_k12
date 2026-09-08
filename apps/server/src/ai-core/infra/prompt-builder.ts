@@ -74,7 +74,9 @@ export class PromptBuilder {
       return `judgment/math-calculation.md`;
     }
     if (capability === 'explanation') {
-      return mode === 'knowledge_retry' ? `explanation/knowledge-retry.md` : `explanation/error-analysis.md`;
+      if (mode === 'knowledge_retry') return `explanation/knowledge-retry.md`;
+      if (mode === 'solution') return `explanation/solution.md`;
+      return `explanation/error-analysis.md`;
     }
     if (capability === 'hint') {
       return `hint/${subject}.md`;

@@ -50,7 +50,7 @@ export interface RouteResult {
 
 export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'transcribe';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
-export type ExplanationMode = 'error_analysis' | 'knowledge_retry';
+export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
 // ========== Question Structuring Types ==========
 
@@ -485,7 +485,7 @@ export interface JudgmentResult {
 // ========== Explanation Types (§4.3.3) ==========
 
 export interface ExplanationRequest {
-  mode: 'error_analysis' | 'knowledge_retry';
+  mode: 'error_analysis' | 'knowledge_retry' | 'solution';
   studentId: string;
   subject: Subject;
   question: { content: string; answer?: string };

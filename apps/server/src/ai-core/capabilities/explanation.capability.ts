@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface ExplanationResponse {
   content: string;
-  mode: 'error_analysis' | 'knowledge_retry';
+  mode: 'error_analysis' | 'knowledge_retry' | 'solution';
   reasoning?: string;                // thinking(reasoning_content) for frontend display
 }
 
