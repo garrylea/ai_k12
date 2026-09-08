@@ -84,6 +84,9 @@ export interface QuestionRunnerProps {
   modalExtras?: ReactNode;
   /** 当前题变化时回调（父层追踪当前题，供页面级草稿抽屉做 key 触发清空）；首次 mount 也触发 */
   onQuestionChange?: (q: RunnerQuestion, idx: number) => void;
+  /** 初始作答映射（key = q.n）：续考/恢复场景传入后端已存的作答文本，首次 mount 时写入本地
+   *  作答映射（answerByNRef），回看已答题目即恢复。仅在挂载时生效一次。 */
+  initialAnswers?: Record<string, string>;
 }
 
 export function QuestionRunner({
@@ -109,6 +112,7 @@ export function QuestionRunner({
   judgingSlot,
   modalExtras,
   onQuestionChange,
+  initialAnswers,
 }: QuestionRunnerProps) {
   const [idx, setIdx] = useState(startIndex ?? 0);
   const [answer, setAnswer] = useState('');
@@ -144,7 +148,9 @@ export function QuestionRunner({
   // 回填输入：判题 pending 期间 resultsRef 还没落 studentAnswer，会回填空。
   const currentNRef = useRef<string>('');
   currentNRef.current = q?.n ?? '';
-  const answerByNRef = useRef<Record<string, string>>({});
+  // 初始作答（续考恢复）在挂载时并入映射：首次 mount 的 initialAnswers 即为最终数据
+  // （父层都是数据就绪后才挂载本组件），之后切题回填即可取到已答内容。
+  const answerByNRef = useRef<Record<string, string>>(initialAnswers ?? {});
   const updateAnswer = useCallback((next: string) => {
     setAnswer(next);
     if (currentNRef.current) answerByNRef.current[currentNRef.current] = next;

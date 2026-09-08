@@ -552,7 +552,8 @@ start_services() {
     log "web 已在运行 (pid $(cat "$RUNTIME_DIR/web.pid"))"
   else
     ensure_port_free "$WEB_PORT" 'Web'
-    ( cd "$WEB_DIR" && K12_API_PROXY="http://localhost:${SERVER_PORT}" nohup npx vite preview --host 0.0.0.0 --port "$WEB_PORT" >> "$RUNTIME_DIR/web.log" 2>&1 & echo $! > "$RUNTIME_DIR/web.pid" )
+    # node 直跑 vite（不经 npx/npm exec），使 web.pid 记录真实服务进程，stop/restart 才能可靠结束
+    ( cd "$WEB_DIR" && K12_API_PROXY="http://localhost:${SERVER_PORT}" nohup node node_modules/vite/bin/vite.js preview --host 0.0.0.0 --port "$WEB_PORT" >> "$RUNTIME_DIR/web.log" 2>&1 & echo $! > "$RUNTIME_DIR/web.pid" )
     log "web 已启动 (pid $(cat "$RUNTIME_DIR/web.pid"))，日志: $RUNTIME_DIR/web.log"
   fi
 }

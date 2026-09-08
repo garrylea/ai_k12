@@ -113,8 +113,11 @@ start_server() {
 
 start_web() {
   [ -f "$WEB_DIR/dist/index.html" ] || die "未找到 apps/web/dist 构建产物，请先运行 bash tools/deploy.sh 完成部署/构建"
+  # 用 node 直跑 vite（不经 npx/npm exec 包装），使 $! 记录的 PID 就是真正提供服务的进程：
+  # 若记录包装进程（npm exec）的 PID，stop 只会杀掉包装层，真正的 vite 子进程可能成孤儿
+  # 继续占着端口，后续 start 误报"端口被其他进程占用"，而页面仍由旧进程在服务。
   start_one 'web' "$WEB_PID_FILE" "$WEB_LOG" "$WEB_PORT" \
-    "K12_API_PROXY='http://localhost:${SERVER_PORT}' nohup npx vite preview --host 0.0.0.0 --port '$WEB_PORT' >> '$WEB_LOG' 2>&1 & echo \$! > '$WEB_PID_FILE'" \
+    "K12_API_PROXY='http://localhost:${SERVER_PORT}' nohup node node_modules/vite/bin/vite.js preview --host 0.0.0.0 --port '$WEB_PORT' >> '$WEB_LOG' 2>&1 & echo \$! > '$WEB_PID_FILE'" \
     "$WEB_DIR"
 }
 
@@ -139,6 +142,15 @@ stop_one() { # $1=名称 $2=pid文件 $3=端口
     sleep 1
   fi
   rm -f "$pidfile"
+  if port_in_use "$port"; then
+    # PID 记录为包装进程（旧版 npx 启动方式）时，子进程可能未随包装退出而成孤儿占端口；
+    # 该端口由本脚本管理，兜底强制结束端口持有者。
+    local opid
+    opid="$(port_pid "$port")"
+    log "⚠ 端口 ${port} 仍被占用 (pid ${opid:-?})，视为本服务残留进程，kill -9 兜底"
+    [ -n "${opid:-}" ] && kill -9 "$opid" 2>/dev/null || true
+    sleep 1
+  fi
   if port_in_use "$port"; then
     log "⚠ 端口 ${port} 仍被占用，可能被其他进程持有"
   else

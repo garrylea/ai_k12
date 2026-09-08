@@ -172,6 +172,20 @@ export default function ExamRunPage() {
     return map;
   }, [session]);
 
+  // 续考/刷新恢复：后端 getSession 的 answered 以 questionId 为键存作答文本，
+  // 转成 q.n（= questionNo）为键的初始作答映射喂给 QuestionRunner，回看已答题目才不为空。
+  // 新开卷（sessionStorage 会话）无 answered，返回 undefined。
+  const initialAnswers = useMemo<Record<string, string> | undefined>(() => {
+    const info = session;
+    if (!info?.answered) return undefined;
+    const map: Record<string, string> = {};
+    for (const q of info.questions) {
+      const a = info.answered[String(q.questionId)];
+      if (a?.answerText) map[String(q.questionNo)] = a.answerText;
+    }
+    return Object.keys(map).length > 0 ? map : undefined;
+  }, [session]);
+
   const handleSubmit = useCallback(
     (q: RunnerQuestion, answer: string) => {
       const questionId = questionIdMap.get(q.n);
@@ -249,6 +263,7 @@ export default function ExamRunPage() {
           onSubmit={handleSubmit}
           onFinish={handleFinish}
           onQuestionChange={setCurrentQ}
+          initialAnswers={initialAnswers}
         />
 
         {/* 草稿入口：页面背景层右上角，absolute 定位；考试无「讲一讲」，仅本图标 + 倒计时在顶栏 */}
