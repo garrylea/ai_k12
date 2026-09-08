@@ -108,7 +108,7 @@ export function DraftDrawer({ questionId, onClose }: Props) {
         aria-orientation="vertical"
         aria-label="调整草稿宽度"
         draggable={false}
-        className="absolute left-0 top-0 bottom-0 w-[6px] cursor-col-resize touch-none flex items-center justify-center group"
+        className="absolute left-0 top-0 bottom-0 w-[10px] z-10 cursor-grab touch-none flex items-center justify-center group"
         onPointerDown={handleResizePointerDown}
         onPointerMove={handleResizePointerMove}
         onPointerUp={endResize}
@@ -170,7 +170,30 @@ export function DraftDrawer({ questionId, onClose }: Props) {
     </div>
   );
 }
+
+/** 草稿入口按钮（页面背景层右上角，absolute 定位由调用方包装；小尺寸低对比，不起眼） */
+export function DraftIconButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-8 h-8 rounded-lg border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-base)] transition-colors"
+      title="草稿"
+      aria-label="草稿"
+    >
+      {/* 笔 + 纸（线性 SVG，草稿入口语义；与 DraftWhiteboard 内部 PenIcon 略作区分） */}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+      </svg>
+    </button>
+  );
+}
 ```
+
+> 执行修正：初版计划代码块漏掉了原文件末尾的 `DraftIconButton` 导出（三个训练页均 import 使用），已补回——TS 构建会以 TS2305 报错兜底此疏漏。
+
+> 执行修正（浏览器实测发现）：拖拽条需 `z-10` 且命中区加到 10px——白板 canvas/贴图层同为 `absolute inset-0`、DOM 靠后，无 z 会绘制在拖拽条之上吃掉指针事件（`elementFromPoint` 实测落到 canvas，光标不变、拖拽无效）。光标按用户要求用 `cursor-grab` 抓手而非 `col-resize`。
 
 关键点核对：
 - 拖拽数学：`widthPct = startPct + (startX − clientX) / baseW × 100`，`baseW = offsetParent 的 border-box 宽 − paddingLeft − paddingRight`。三个训练页容器都是 `relative h-screen flex flex-col p-4 sm:p-6`（padding box = `width: X%` 的基准，与 CSS 百分比一致）。

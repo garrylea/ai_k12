@@ -36,9 +36,10 @@
 
 ### 3.2 拖拽条
 
-- JSX：抽屉内 `absolute left-0 top-0 bottom-0 w-[6px]` 的 div：
-  - `cursor: col-resize`、`touchAction: 'none'`、`role="separator"`、`aria-orientation="vertical"`、`aria-label="调整草稿宽度"`。
+- JSX：抽屉内 `absolute left-0 top-0 bottom-0 w-[10px] z-10` 的 div：
+  - `cursor: grab`（抓手，用户指定；非 col-resize）、`touchAction: 'none'`、`role="separator"`、`aria-orientation="vertical"`、`aria-label="调整草稿宽度"`。
   - 握把视觉：居中一条 2px 圆角细竖线（`bg-[var(--bg-subtle)]`，hover 加深）——功能性提示，非装饰。
+  - **z-10 必须**：白板 canvas 与贴图层同为 `absolute inset-0` 且 DOM 靠后，无 z-index 会绘制在拖拽条之上、吃掉指针事件（实测 `elementFromPoint` 落到 canvas，光标显示画笔十字而非抓手，拖拽不生效）。10px 命中区配合 z-10 覆盖画布区域左缘。
 - 交互：
   - `onPointerDown`（仅左键/主键）：`e.currentTarget.setPointerCapture(e.pointerId)`；记录
     `dragging = true`；容器 rect 取 `e.currentTarget.offsetParent?.getBoundingClientRect()`。
