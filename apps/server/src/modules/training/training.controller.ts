@@ -71,6 +71,22 @@ export class TrainingController {
     return this.trainingService.getKnowledgePoints(subjectId);
   }
 
+  // ==================== 解析拉取（2026-09-08，判题解析缓存化） ====================
+
+  /** 批量拉解析（末题后结果页）：ids 逗号分隔；后端等 in-flight（60s 兜底）。
+   *  注意：须声明在 questions/:questionId/explanation-wait 之前（Nest 按声明顺序匹配，防 'explanations' 被 ':questionId' 吞掉）。 */
+  @Get('questions/explanations')
+  async getExplanations(@Query('ids') idsStr: string) {
+    const ids = (idsStr ?? '').split(',').map((s) => parseInt(s, 10)).filter((n) => !Number.isNaN(n));
+    return this.trainingService.getExplanations(ids);
+  }
+
+  /** 单题刷新等待（120s 倒计时）：超时返回 null + 写管理员通知。 */
+  @Get('questions/:questionId/explanation-wait')
+  async waitForExplanation(@Param('questionId', ParseIntPipe) questionId: number) {
+    return this.trainingService.waitForExplanation(questionId);
+  }
+
   /** 专项练习开练：count 限 1-20 整数，type 限白名单六值（含 null），越界/非法 400。
    *  studentId 从 JWT 取（用于排除该生已标记不再展示的题）。 */
   @Post('targeted/start')

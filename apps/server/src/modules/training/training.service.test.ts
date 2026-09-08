@@ -22,12 +22,22 @@ const mk = (overrides: any = {}) => ({
     unmarkAll: vi.fn().mockResolvedValue(0),
     findAllByStudent: vi.fn().mockResolvedValue([]),
   },
+  // 解析拉取（Task 7）。
+  explanationCache: {
+    waitForExplanations: vi.fn().mockResolvedValue({}),
+    waitExplanation: vi.fn().mockResolvedValue(null),
+  },
+  notificationsRepo: {
+    hasUnreadByQuestion: vi.fn().mockResolvedValue(false),
+    create: vi.fn().mockResolvedValue(1),
+  },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
   new TrainingService(
     deps.mainErrorRepo, deps.judgeCore, deps.questionsRepo, deps.knowledgePointsRepo,
     deps.questionHintsRepo, deps.hint, deps.hiddenRepo,
+    deps.explanationCache, deps.notificationsRepo,
   );
 
 describe('TrainingService.getErrorBookEntries', () => {
@@ -251,6 +261,31 @@ describe('TrainingController.startTargetedPractice 校验', () => {
   });
 });
 
+describe('TrainingController 解析拉取端点', () => {
+  const mkController = (service: any) => new TrainingController(service);
+
+  it('getExplanations：ids 逗号分隔字符串 -> 数字数组（空/坏值过滤后由 service 再兜底）', async () => {
+    const svc: any = { getExplanations: vi.fn().mockResolvedValue({ explanations: {} }) };
+    const c = mkController(svc);
+    await c.getExplanations('10,11,abc,');
+    expect(svc.getExplanations).toHaveBeenCalledWith([10, 11]);
+  });
+
+  it('getExplanations：ids 缺省/空字符串 -> 空数组透传', async () => {
+    const svc: any = { getExplanations: vi.fn().mockResolvedValue({ explanations: {} }) };
+    const c = mkController(svc);
+    await c.getExplanations('');
+    expect(svc.getExplanations).toHaveBeenCalledWith([]);
+  });
+
+  it('waitForExplanation：透传 questionId 给 service', async () => {
+    const svc: any = { waitForExplanation: vi.fn().mockResolvedValue({ explanation: null }) };
+    const c = mkController(svc);
+    await c.waitForExplanation(10);
+    expect(svc.waitForExplanation).toHaveBeenCalledWith(10);
+  });
+});
+
 describe('TrainingService.markHidden', () => {
   it('题目存在 -> repo.mark(studentId, subjectId, questionId)', async () => {
     const deps = mk({
@@ -289,5 +324,53 @@ describe('TrainingService.listHidden', () => {
     const r = await mkSvc(deps).listHidden(7, 1);
     expect(deps.hiddenRepo.findAllByStudent).toHaveBeenCalledWith(7, 1);
     expect(r).toEqual(rows);
+  });
+});
+
+describe('TrainingService.getExplanations', () => {
+  it('过滤非正整数 id 后透传 explanationCache.waitForExplanations', async () => {
+    const deps = mk({
+      explanationCache: { waitForExplanations: vi.fn().mockResolvedValue({ 10: '题解' }), waitExplanation: vi.fn() },
+    });
+    const r = await mkSvc(deps).getExplanations([10, 0, -1, 11]);
+    expect(deps.explanationCache.waitForExplanations).toHaveBeenCalledWith([10, 11]);
+    expect(r).toEqual({ explanations: { 10: '题解' } });
+  });
+});
+
+describe('TrainingService.waitForExplanation', () => {
+  it('解析成功 -> 返回 explanation，不写通知', async () => {
+    const deps = mk({
+      explanationCache: { waitForExplanations: vi.fn(), waitExplanation: vi.fn().mockResolvedValue('题解') },
+    });
+    const r = await mkSvc(deps).waitForExplanation(10);
+    expect(r).toEqual({ explanation: '题解' });
+    expect(deps.notificationsRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('超时 null -> 写 explanation_failed 通知（先查 hasUnread 去重）', async () => {
+    const deps = mk();
+    const r = await mkSvc(deps).waitForExplanation(10);
+    expect(r).toEqual({ explanation: null });
+    expect(deps.explanationCache.waitExplanation).toHaveBeenCalledWith(10, 120_000);
+    expect(deps.notificationsRepo.hasUnreadByQuestion).toHaveBeenCalledWith(10);
+    expect(deps.notificationsRepo.create).toHaveBeenCalledWith({
+      type: 'explanation_failed',
+      questionId: 10,
+      title: '题解生成失败',
+      content: expect.stringContaining('#10'),
+    });
+  });
+
+  it('同题已有未读 -> 不再重复写', async () => {
+    const deps = mk({ notificationsRepo: { hasUnreadByQuestion: vi.fn().mockResolvedValue(true), create: vi.fn() } });
+    await mkSvc(deps).waitForExplanation(10);
+    expect(deps.notificationsRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('通知写入失败不阻断返回（best-effort）', async () => {
+    const deps = mk({ notificationsRepo: { hasUnreadByQuestion: vi.fn().mockRejectedValue(new Error('db down')), create: vi.fn() } });
+    const r = await mkSvc(deps).waitForExplanation(10);
+    expect(r).toEqual({ explanation: null });
   });
 });

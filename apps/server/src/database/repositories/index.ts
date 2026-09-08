@@ -2,6 +2,8 @@ export { AiDialoguesRepository } from './ai-dialogues.repo.js';
 export { AiMessagesRepository } from './ai-messages.repo.js';
 export { AdminChatRepository } from './admin-chat.repo.js';
 export { AdminsRepository } from './admins.repo.js';
+export { AdminNotificationsRepository } from './admin-notifications.repo.js';
+export type { AdminNotificationRow } from './admin-notifications.repo.js';
 export { CardsRepository } from './cards.repo.js';
 export { ErrorRedoLogsRepository } from './error-redo-logs.repo.js';
 export { ExamPapersRepository } from './exam-papers.repo.js';

@@ -1,10 +1,12 @@
 import { Injectable, Logger, HttpException, NotFoundException } from '@nestjs/common';
 import { JudgeCoreService } from '../practice/judge-core.service.js';
+import { ExplanationCacheService } from '../practice/explanation-cache.service.js';
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
 import { QuestionHintsRepository } from '../../database/repositories/question-hints.repo.js';
 import { StudentHiddenQuestionsRepository } from '../../database/repositories/student-hidden-questions.repo.js';
+import { AdminNotificationsRepository } from '../../database/repositories/admin-notifications.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
@@ -27,6 +29,8 @@ export class TrainingService {
     private readonly questionHintsRepo: QuestionHintsRepository,
     private readonly hint: HintCapability,
     private readonly hiddenRepo: StudentHiddenQuestionsRepository,
+    private readonly explanationCache: ExplanationCacheService,
+    private readonly notificationsRepo: AdminNotificationsRepository,
   ) {}
 
   /** 错题练习筛选列表：调 repo 后按 errorBookId 聚合 kpIds，映射 DTO。 */
@@ -168,5 +172,33 @@ export class TrainingService {
   /** 不再展示清单（按标记时间倒序）。 */
   async listHidden(studentId: number, subjectId: number) {
     return this.hiddenRepo.findAllByStudent(studentId, subjectId);
+  }
+
+  /** 批量拉解析：等 in-flight 生成完成（60s），不触发新生成。 */
+  async getExplanations(ids: number[]): Promise<{ explanations: Record<number, string | null> }> {
+    const clean = ids.filter((x) => Number.isInteger(x) && x > 0);
+    const explanations = await this.explanationCache.waitForExplanations(clean);
+    return { explanations };
+  }
+
+  /** 单题刷新等待：DB 无解析且无在途 -> 重新触发生成；120s 超时；失败写管理员通知（同题未读去重）。 */
+  async waitForExplanation(questionId: number): Promise<{ explanation: string | null }> {
+    const explanation = await this.explanationCache.waitExplanation(questionId, 120_000);
+    if (explanation == null) {
+      try {
+        const hasUnread = await this.notificationsRepo.hasUnreadByQuestion(questionId);
+        if (!hasUnread) {
+          await this.notificationsRepo.create({
+            type: 'explanation_failed',
+            questionId,
+            title: '题解生成失败',
+            content: `题目 #${questionId} 判错后解析生成持续失败（LLM 超时/不可用），请人工补题解。`,
+          });
+        }
+      } catch (err) {
+        this.logger.error(`admin notification write failed (questionId=${questionId}): ${err}`);
+      }
+    }
+    return { explanation };
   }
 }

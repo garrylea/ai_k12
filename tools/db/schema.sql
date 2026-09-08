@@ -859,6 +859,19 @@ CREATE TABLE IF NOT EXISTS admin_messages (
   KEY idx_admin_messages_dialogue (dialogue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 系统 -> 管理员通知（判题解析生成失败等；复刻 parent_messages 模式，question_id 定位题目）
+CREATE TABLE IF NOT EXISTS admin_notifications (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  type VARCHAR(20) NOT NULL,
+  question_id BIGINT DEFAULT NULL,
+  title VARCHAR(100) NOT NULL,
+  content TEXT NOT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  read_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_an_question_read (question_id, is_read)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================
 -- 13. updated_at 自动触发器
 -- ============================================================
