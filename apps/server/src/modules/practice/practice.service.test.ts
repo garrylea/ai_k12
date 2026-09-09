@@ -333,6 +333,31 @@ describe('PracticeService.judge', () => {
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
   });
 
+  it('choice 空答案题 -> noStandardAnswer 分支：只落一行 method=unanswered（主 upsert 不触发）', async () => {
+    // T3 契约：judgeForPractice 路由 0 对空答案 choice 早退 noStandardAnswer，
+    // PracticeService 仍落 practice_results 行（method='unanswered'，is_correct=false）
+    // 保证课程完成门禁的作答覆盖计数不缺行。
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: '', options: '[{"label":"A","isCorrect":false}]' }),
+        findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'A' });
+    expect(r.noStandardAnswer).toBe(true);
+    expect(r.isCorrect).toBeNull();
+    expect(r.method).toBe('unanswered');
+    // 恰好一次（noStandardAnswer 分支），主 upsert 分支不触发
+    expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledTimes(1);
+    expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      question_id: 10, question_n: '0-1', is_correct: false, method: 'unanswered', analysis: null, error_type: null,
+    }));
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.judgment.judge).not.toHaveBeenCalled();
+    expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
+  });
+
   it('judge AI 失败(503) -> 不 upsert practice_results', async () => {
     const deps = mk({
       judgment: { judge: vi.fn().mockRejectedValue(new Error('LLM timeout')) },

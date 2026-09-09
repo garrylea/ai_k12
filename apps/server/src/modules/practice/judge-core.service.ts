@@ -118,6 +118,14 @@ export class JudgeCoreService {
     let method: JudgeOutput['method'];
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
 
+    // 路由 0（判题体系重构）：空答案守卫（与 judgeForPractice 路由 0 条件一字不差）——
+    // 训练抽题虽已过滤空答案（Task 4），但 error_practice 从错题本重抽不过滤：
+    // 空答案题落到 AI 判定会产生无依据判错 + 错题 level 提升；主观题空答案则无
+    // 参考答案可自评。不计对错、不入错题本、不触发解析生成。
+    if (!q.answer || !q.answer.trim()) {
+      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true };
+    }
+
     if (EXACT_ONLY_TYPES.has(q.type)) {
       // 路由 1：choice/true_false -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
@@ -206,10 +214,12 @@ export class JudgeCoreService {
     let method: JudgeOutput['method'];
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
 
-    // 路由 0（判题体系重构）：客观题空答案守卫——该题暂无标准答案，不计对错、
-    // 不入错题本、不触发解析生成。practice_results 由 PracticeService 以
-    // method='unanswered' 落行（保证课程完成门禁的作答覆盖计数不缺行）。
-    if (q && (EXACT_ONLY_TYPES.has(q.type) || q.type === 'fill_blank' || q.type === 'calculation') && !q.answer) {
+    // 路由 0（判题体系重构）：空答案守卫（全题型，条件与 judgeQuestion 路由 0 一字不差）——
+    // 客观题空答案会被判错污染错题本；主观题（short_answer/proof）空答案进路由 1c 只会
+    // 返回空参考答案，学生无从自评。故统一不计对错、不入错题本、不触发解析生成。
+    // practice_results 由 PracticeService 以 method='unanswered' 落行（保证课程完成
+    // 门禁的作答覆盖计数不缺行）。
+    if (q && (!q.answer || !q.answer.trim())) {
       return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true };
     }
 

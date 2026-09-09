@@ -125,6 +125,9 @@ export class PracticeService {
       return result;
     }
 
+    // 防御性检查：类型系统防不住 future 路由新增 isCorrect=null 的早退，非空断言换防御
+    if (result.isCorrect === null) return result;
+
     // 对/错都持久化判题结果（best-effort，失败不阻断判题返回）。
     // practice_results 是 card 中心概念（card_id NOT NULL），留在 PracticeService。
     try {
@@ -137,8 +140,8 @@ export class PracticeService {
         question_n: input.questionN,
         question_text: input.questionText,
         student_answer: input.studentAnswer,
-        // 上面两个早退（self_assess/noStandardAnswer）已滤掉 isCorrect=null，此处恒为 boolean
-        is_correct: result.isCorrect!,
+        // 上面三个早退（self_assess/noStandardAnswer/null 防御）已滤掉 isCorrect=null，此处恒为 boolean
+        is_correct: result.isCorrect,
         method: result.method,
         // JudgeOutput 已无 analysis（判错解析改由 ExplanationCacheService 生成入 questions.explanation）；
         // practice_results.analysis 落库侧清理留待后续任务。

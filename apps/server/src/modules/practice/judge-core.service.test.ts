@@ -71,12 +71,13 @@ describe('JudgeCoreService.judgeQuestion', () => {
   });
 
   it('AI 判定失败 -> 503，不入错题本', async () => {
-    // 判题体系重构（2026-09-09）：proof 默认 self_assess 早退，AI 失败路径须显式切回（finally 复原防泄漏）
+    // 判题体系重构（2026-09-09）：proof 默认 self_assess 早退，AI 失败路径须显式切回（finally 复原防泄漏）。
+    // answer 须非空：路由 0 空答案守卫（Task 3 code review）会先于 AI 路径早退。
     process.env.JUDGE_SUBJECTIVE_MODE = 'ai';
     try {
       const deps = mk({
         questionsRepo: {
-          findById: vi.fn().mockResolvedValue({ id: 10, type: 'proof', answer: '', options: null }),
+          findById: vi.fn().mockResolvedValue({ id: 10, type: 'proof', answer: '证明过程', options: null }),
           findByContentHash: vi.fn(),
           findOrCreate: vi.fn(),
           deleteById: vi.fn(),
@@ -159,6 +160,41 @@ describe('judgeQuestion 四路由（self_assess 模式）', () => {
     const out = await svc.judgeQuestion({ studentId: 7, subjectId: 1, questionId: 10, studentAnswer: 'ans', source: 'targeted' });
     expect(out).toMatchObject({ isCorrect: true, method: 'ai' });
     expect((svc as any).judgment.judge).toHaveBeenCalledWith(expect.objectContaining({ questionType: 'calculation' }));
+  });
+
+  it('calculation 归一化不等（0.5 vs 1/2）-> 落路由 2 AI 复核，questionType=calculation', async () => {
+    // 归一后 '0.5' vs '1/2' 不等（路由 1b 不命中），交 AI 复核等价性
+    //（0.5 与 1/2 数值相等，AI 判对是合理转换，非 exact 误判错）。
+    const { svc } = makeService({
+      questions: { findById: vi.fn(async () => q('calculation', '1/2')) },
+    });
+    (svc as any).judgment = { judge: vi.fn(async () => ({ isCorrect: true, errorType: null })) };
+    const out = await svc.judgeQuestion({ studentId: 7, subjectId: 1, questionId: 10, studentAnswer: '0.5', source: 'targeted' });
+    expect(out).toMatchObject({ isCorrect: true, method: 'ai' });
+    expect((svc as any).judgment.judge).toHaveBeenCalledWith(expect.objectContaining({ questionType: 'calculation', standardAnswer: '1/2', studentAnswer: '0.5' }));
+  });
+});
+
+describe('judgeQuestion 空答案守卫（路由 0）', () => {
+  it('空答案题（error_practice 重抽不过滤）-> 不计对错早退，不入错题本不触发解析', async () => {
+    const { svc, mainError } = makeService({
+      questions: { findById: vi.fn(async () => q('choice', '')) },
+    });
+    (svc as any).explanationCache = { ensureExplanation: vi.fn() };
+    const out = await svc.judgeQuestion({ studentId: 7, subjectId: 1, questionId: 10, studentAnswer: 'A', source: 'error_practice' });
+    expect(out).toMatchObject({ questionId: 10, isCorrect: null, method: 'unanswered', noStandardAnswer: true });
+    expect(mainError.create).not.toHaveBeenCalled();
+    expect((svc as any).explanationCache.ensureExplanation).not.toHaveBeenCalled();
+  });
+
+  it('纯空白答案（trim 后空）同样早退——守卫条件与 judgeForPractice 一字不差', async () => {
+    const { svc } = makeService({
+      questions: { findById: vi.fn(async () => q('calculation', '  ')) },
+    });
+    (svc as any).judgment = { judge: vi.fn() };
+    const out = await svc.judgeQuestion({ studentId: 7, subjectId: 1, questionId: 10, studentAnswer: '1', source: 'targeted' });
+    expect(out).toMatchObject({ isCorrect: null, method: 'unanswered', noStandardAnswer: true });
+    expect((svc as any).judgment.judge).not.toHaveBeenCalled();
   });
 });
 
