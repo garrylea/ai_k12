@@ -1,14 +1,18 @@
 // apps/web/src/components/business/DraftDrawer.tsx
-// 训练轨答题页页面级草稿抽屉：右侧 absolute 滑出，内含 DraftWhiteboard（scroll-y 纵向可滚 + persist=false 不保存）。
-// 草稿不持久化：key=questionId 切题即 remount 清空；关抽屉 unmount 即丢。仅手动关闭（X），不点外部收起。
+// 训练轨答题页页面级草稿抽屉：右侧 absolute 滑出，内含 DraftWhiteboard（scroll-y 纵向可滚 + persist 落 draft-store）。
+// 草稿持久化（PRD §7.12 随题存在）：store key 与 QuestionRunner 提交清理同键（`${draftKeyPrefix}-${q.n}`）——
+// 关抽屉再开内容保留；提交时 QuestionRunner 的 clearDraft 一并清空；切题换 key 天然隔离。
+// 仅手动关闭（X），不点外部收起。
 // 宽度：左缘拖拽条鼠标连续调宽（40–85%）+ 右上「放大/缩小」两档快照（45↔70%）。
 // 拖拽宽度模块级会话记忆：本会话内跨页、跨开关抽屉保持，刷新回默认 45%。
 import { useCallback, useRef, useState } from 'react';
 import { DraftWhiteboard } from './DraftWhiteboard';
 
 interface Props {
-  /** 当前题 q.n：作 DraftWhiteboard 的 key，切题即 remount 清空画布 */
+  /** 当前题 q.n：与 draftKeyPrefix 拼成 DraftWhiteboard 的 store key，切题换 key 天然隔离 */
   questionId: string;
+  /** 草稿键前缀（与同页 QuestionRunner 一致：tp / errp / exam-${sid}），提交后 clearDraft 同键清空 */
+  draftKeyPrefix: string;
   onClose: () => void;
 }
 
@@ -23,7 +27,7 @@ const WIDTH_DEFAULT = 45;
 const WIDTH_SMALL = 45;
 const WIDTH_LARGE = 70;
 
-export function DraftDrawer({ questionId, onClose }: Props) {
+export function DraftDrawer({ questionId, draftKeyPrefix, onClose }: Props) {
   // 放大/缩小按钮态：仅作两档快照基准；拖拽连续调宽不更新它（按钮行为保持可预测）
   const [expanded, setExpanded] = useState(false);
   const [widthPct, setWidthPct] = useState<number>(() => lastWidthPct ?? WIDTH_DEFAULT);
@@ -143,9 +147,13 @@ export function DraftDrawer({ questionId, onClose }: Props) {
         </button>
       </div>
 
-      {/* 画布：scroll-y + persist=false；key=questionId 切题即 remount 清空 */}
+      {/* 画布：scroll-y + persist；key 与 QuestionRunner 草稿键同构——关开保留、提交清空、切题隔离 */}
       <div className="flex-1 min-h-0">
-        <DraftWhiteboard key={questionId} questionId={questionId} scrollMode="scroll-y" persist={false} />
+        <DraftWhiteboard
+          key={`${draftKeyPrefix}-${questionId}`}
+          questionId={`${draftKeyPrefix}-${questionId}`}
+          scrollMode="scroll-y"
+        />
       </div>
     </div>
   );

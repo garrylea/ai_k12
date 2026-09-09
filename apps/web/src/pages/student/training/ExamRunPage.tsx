@@ -273,6 +273,7 @@ export default function ExamRunPage() {
         {draftOpen && currentQ && (
           <DraftDrawer
             questionId={currentQ.n}
+            draftKeyPrefix={`exam-${sid}`}
             onClose={() => setDraftOpen(false)}
           />
         )}

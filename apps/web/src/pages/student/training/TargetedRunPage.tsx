@@ -256,6 +256,7 @@ export default function TargetedRunPage() {
             {draftOpen && currentQ && (
               <DraftDrawer
                 questionId={currentQ.n}
+                draftKeyPrefix="tp"
                 onClose={() => setDraftOpen(false)}
               />
             )}

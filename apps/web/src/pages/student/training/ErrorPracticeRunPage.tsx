@@ -231,6 +231,7 @@ export default function ErrorPracticeRunPage() {
             {draftOpen && currentQ && (
               <DraftDrawer
                 questionId={currentQ.n}
+                draftKeyPrefix="errp"
                 onClose={() => setDraftOpen(false)}
               />
             )}

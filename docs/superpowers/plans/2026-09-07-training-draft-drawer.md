@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **修订记录（2026-09-09）**：本计划原文「草稿不持久化（切题/关闭即清空）」与 PRD §7.12「随题存在：关开保留、提交后清空」冲突，已按用户反馈修正——`DraftDrawer` 改 `persist` 落 draft-store，store key 与同页 `QuestionRunner` 提交清理同键（`${draftKeyPrefix}-${q.n}`，新增 `draftKeyPrefix` prop：tp / errp / exam-${sid}）。行为变为：**关抽屉再开内容保留；提交答案时 QuestionRunner 既有 `clearDraft` 一并清空；切题换 key 天然隔离**（回退上一题会恢复该题未提交草稿）。下文涉及 persist=false / 关抽屉即丢 的描述均为历史方案，以本修订为准。
+
 **Goal:** 在三个训练轨答题页（专项/考试/错题）页面背景层右上角加一个始终显示的不起眼草稿图标，点击弹出右侧草稿抽屉（手写笔/橡皮/清空 + 纵向滚动 + 两档宽度 + X 关闭），草稿不持久化（切题/关闭即清空）；同时下线 QuestionRunner 内嵌草稿（PreviewDraftPanel `enabled=false`）。
 
 **Architecture:** 草稿图标用 `absolute` 挂在每个 run 页 `relative` 容器右上角（页面背景层，不塞进 QuestionRunner 插槽）；抽屉 `DraftDrawer` 复用 `DiscussDrawer` 的右侧 absolute 抽屉样式，内含改造成支持 `scrollMode`/`persist` 的 `DraftWhiteboard`。`QuestionRunner` 新增 `onQuestionChange` 回调，run 页用 `currentQ` 追踪当前题并把 `currentQ.n` 传给抽屉做 `key`——切题即 remount 清空画布。现有 `PreviewDraftPanel` 草稿 tab 通过把传给它的 `enabled` 改 `false` 下线（组件本身不动，将来恢复翻回即可）。
