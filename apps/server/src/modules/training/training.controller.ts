@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { ErrorBookQueryDto } from './dto/error-book-query.dto.js';
 import type { JudgeTrainingDto } from './dto/judge-training.dto.js';
+import type { SelfAssessTrainingDto } from './dto/self-assess.dto.js';
 
 @Controller('api/training')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -47,6 +48,29 @@ export class TrainingController {
       subjectId: dto.subjectId,
       studentAnswer: dto.studentAnswer,
       source: dto.source,
+    });
+  }
+
+  /** 主观题学生自评（self_assess 模式）：incorrect 入错题本 / correct 清零；每次自评留痕。
+   *  考试结果页自评 source='exam' + sourceRefId=sessionId。 */
+  @Post('self-assess')
+  async selfAssess(@Body() dto: SelfAssessTrainingDto, @CurrentUser() user: JwtUser) {
+    if (dto.source !== 'targeted' && dto.source !== 'error_practice' && dto.source !== 'exam') {
+      throw new BadRequestException('source 仅允许 targeted | error_practice | exam');
+    }
+    if (dto.assessment !== 'correct' && dto.assessment !== 'incorrect') {
+      throw new BadRequestException('assessment 仅允许 correct | incorrect');
+    }
+    if (!Number.isInteger(dto.questionId) || dto.questionId < 1 || !Number.isInteger(dto.subjectId) || dto.subjectId < 1) {
+      throw new BadRequestException('questionId 与 subjectId 须为正整数');
+    }
+    return this.trainingService.selfAssess({
+      studentId: user.sub,
+      questionId: dto.questionId,
+      subjectId: dto.subjectId,
+      assessment: dto.assessment,
+      source: dto.source,
+      sourceRefId: dto.sourceRefId ?? null,
     });
   }
 

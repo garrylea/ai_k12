@@ -3603,6 +3603,50 @@ paths:
                     type: string
                     example: 判定失败，请重试
 
+  /training/self-assess:
+    post:
+      tags: [Training]
+      summary: 主观题学生自评（self_assess 模式）
+      description: >-
+        主观题学生对照参考答案自评对错（student JWT）。请求体：
+        {questionId, subjectId, assessment, source, sourceRefId?}；
+        assessment 枚举 correct|incorrect；source 枚举
+        targeted|error_practice|exam（非法值 400）；sourceRefId 仅
+        source='exam' 时传 sessionId，其余来源不传。每次自评写入
+        question_self_assessments 留痕；incorrect 写入/复用
+        main_error_books（source 落库为训练/考试来源）并触发解析缓存兜底生成；
+        correct 清零该题所有未清记录。题目不存在 404。
+      operationId: selfAssessTraining
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingSelfAssessRequest'
+      responses:
+        '200':
+          description: 自评结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          errorBookId:
+                            type: integer
+                            nullable: true
+                            description: correct 清零无错题本 id 时为 null
+                        required: [errorBookId]
+        '400':
+          description: source/assessment 非法或 questionId/subjectId 非正整数
+        '404':
+          description: 题目不存在
+
   /training/bump-error-levels:
     post:
       tags: [Training]
@@ -5564,6 +5608,29 @@ components:
           type: string
           enum: [targeted, error_practice]
           description: 训练来源——targeted=专项练习；error_practice=错题练习（非法值 400）
+
+    TrainingSelfAssessRequest:
+      type: object
+      required: [questionId, subjectId, assessment, source]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（题目不存在 404）
+        subjectId:
+          type: integer
+          description: 学科 ID
+        assessment:
+          type: string
+          enum: [correct, incorrect]
+          description: correct=学生自评做对；incorrect=学生自评做错（非法值 400）
+        source:
+          type: string
+          enum: [targeted, error_practice, exam]
+          description: 自评来源——targeted=专项练习；error_practice=错题练习；exam=考试结果页自评（非法值 400）
+        sourceRefId:
+          type: integer
+          nullable: true
+          description: 考试来源传 sessionId；其余来源不传或传 null
 
     TrainingHintRequest:
       type: object

@@ -67,6 +67,25 @@ export class TrainingService {
     return this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
   }
 
+  /** 主观题自评：校验题目存在后委托 JudgeCore.recordSelfAssessment（留痕 + 错题本写入/清零）。
+   *  自评 incorrect 与其他判错路径对齐：触发解析缓存兜底生成（题缺解析时）。 */
+  async selfAssess(input: {
+    studentId: number; questionId: number; subjectId: number;
+    assessment: 'correct' | 'incorrect';
+    source: 'targeted' | 'error_practice' | 'exam';
+    sourceRefId?: number | null;
+  }) {
+    const q = await this.questionsRepo.findById(input.questionId);
+    if (!q) {
+      throw new NotFoundException(`题目不存在：${input.questionId}`);
+    }
+    const result = await this.judgeCore.recordSelfAssessment({ ...input, sourceRefId: input.sourceRefId ?? null });
+    if (input.assessment === 'incorrect') {
+      this.explanationCache.ensureExplanation(q);
+    }
+    return result;
+  }
+
   /** 仍错 bump：错题重做仍答错时提升 level（镜像 PracticeService.bumpErrorLevels）。studentId 为归属校验（防 IDOR）。 */
   async bumpErrorLevels(errorBookIds: number[], studentId?: number): Promise<void> {
     await this.mainErrorRepo.bumpLevels(errorBookIds, studentId);

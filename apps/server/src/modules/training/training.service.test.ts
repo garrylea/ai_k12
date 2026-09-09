@@ -7,7 +7,7 @@ const mk = (overrides: any = {}) => ({
     findErrorBookEntries: vi.fn().mockResolvedValue([]),
     bumpLevels: vi.fn().mockResolvedValue(undefined),
   },
-  judgeCore: { judgeQuestion: vi.fn() },
+  judgeCore: { judgeQuestion: vi.fn(), recordSelfAssessment: vi.fn() },
   questionsRepo: { findById: vi.fn(), findRandomByKpAndType: vi.fn().mockResolvedValue([]) },
   questionHintsRepo: {
     findByQuestionId: vi.fn().mockResolvedValue(null),
@@ -22,10 +22,11 @@ const mk = (overrides: any = {}) => ({
     unmarkAll: vi.fn().mockResolvedValue(0),
     findAllByStudent: vi.fn().mockResolvedValue([]),
   },
-  // 解析拉取（Task 7）。
+  // 解析拉取（Task 7）+ 自评 incorrect 触发解析缓存兜底。
   explanationCache: {
     waitForExplanations: vi.fn().mockResolvedValue({}),
     waitExplanation: vi.fn().mockResolvedValue(null),
+    ensureExplanation: vi.fn(),
   },
   notificationsRepo: {
     hasUnreadByQuestion: vi.fn().mockResolvedValue(false),
@@ -87,6 +88,82 @@ describe('TrainingService.judgeTraining', () => {
     const svc = mkSvc(deps);
     await svc.judgeTraining({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice' });
     expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice', sourceRefId: null });
+  });
+});
+
+describe('TrainingService.selfAssess', () => {
+  const userQ = { id: 10, content: '题面', type: 'short_answer' };
+
+  it('题目不存在 -> 404，不调 JudgeCore', async () => {
+    const deps = mk({ questionsRepo: { findById: vi.fn().mockResolvedValue(null) } });
+    await expect(
+      mkSvc(deps).selfAssess({ studentId: 1, questionId: 999, subjectId: 1, assessment: 'incorrect', source: 'targeted' }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(deps.judgeCore.recordSelfAssessment).not.toHaveBeenCalled();
+  });
+
+  it('incorrect -> 调 recordSelfAssessment 并 fire-and-forget 触发 ensureExplanation', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+      judgeCore: { recordSelfAssessment: vi.fn().mockResolvedValue({ errorBookId: 42 }) },
+    });
+    const r = await mkSvc(deps).selfAssess({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'targeted' });
+    expect(deps.judgeCore.recordSelfAssessment).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'targeted', sourceRefId: null });
+    expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith(userQ);
+    expect(r.errorBookId).toBe(42);
+  });
+
+  it('correct -> 调 recordSelfAssessment 但不触发 ensureExplanation', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+      judgeCore: { recordSelfAssessment: vi.fn().mockResolvedValue({ errorBookId: undefined }) },
+    });
+    await mkSvc(deps).selfAssess({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct', source: 'exam', sourceRefId: 5 });
+    expect(deps.judgeCore.recordSelfAssessment).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct', source: 'exam', sourceRefId: 5 });
+    expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
+  });
+});
+
+describe('TrainingController.selfAssess 校验', () => {
+  const mkController = (service: any) => new TrainingController(service);
+  const user = { sub: 7, role: 'student' } as any;
+
+  it('source 越界 -> 400', async () => {
+    const svc: any = { selfAssess: vi.fn() };
+    const c = mkController(svc);
+    await expect(
+      c.selfAssess({ questionId: 10, subjectId: 1, assessment: 'correct', source: 'practice' } as any, user),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(svc.selfAssess).not.toHaveBeenCalled();
+  });
+
+  it('assessment 越界 -> 400', async () => {
+    const svc: any = { selfAssess: vi.fn() };
+    const c = mkController(svc);
+    await expect(
+      c.selfAssess({ questionId: 10, subjectId: 1, assessment: 'maybe' as any, source: 'targeted' }, user),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(svc.selfAssess).not.toHaveBeenCalled();
+  });
+
+  it('questionId/subjectId 非正整数 -> 400', async () => {
+    const svc: any = { selfAssess: vi.fn() };
+    const c = mkController(svc);
+    for (const payload of [
+      { questionId: 0, subjectId: 1, assessment: 'correct', source: 'targeted' },
+      { questionId: 10, subjectId: -1, assessment: 'correct', source: 'targeted' },
+      { questionId: 1.5, subjectId: 1, assessment: 'correct', source: 'targeted' },
+    ] as any[]) {
+      await expect(c.selfAssess(payload, user)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(svc.selfAssess).not.toHaveBeenCalled();
+  });
+
+  it('合法请求透传 service（sourceRefId 缺省转 null）', async () => {
+    const svc: any = { selfAssess: vi.fn().mockResolvedValue({ errorBookId: 42 }) };
+    const c = mkController(svc);
+    await c.selfAssess({ questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5 }, user);
+    expect(svc.selfAssess).toHaveBeenCalledWith({ studentId: 7, questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5 });
   });
 });
 

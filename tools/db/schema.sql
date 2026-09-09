@@ -318,7 +318,7 @@ CREATE TABLE IF NOT EXISTS exam_answers (
   question_order SMALLINT NOT NULL,
   answer_text TEXT,
   is_correct TINYINT(1) DEFAULT NULL,
-  method VARCHAR(10) DEFAULT NULL,
+  method VARCHAR(20) DEFAULT NULL,         -- 折回自 migrations/2026-09-09_widen_method_columns.sql：容纳 'self_assess'（11 字符）
   analysis TEXT,
   error_type VARCHAR(20) DEFAULT NULL,
   judged_at DATETIME(3) DEFAULT NULL,
@@ -563,7 +563,7 @@ CREATE TABLE IF NOT EXISTS practice_results (
   question_text TEXT NOT NULL,             -- 题面（question_id 为空时兜底身份 + 展示）
   student_answer TEXT NOT NULL,
   is_correct TINYINT(1) NOT NULL,
-  method VARCHAR(10) NOT NULL,             -- 'exact' | 'ai'
+  method VARCHAR(20) NOT NULL,             -- 'exact' | 'ai' | 'self_assess' | 'unanswered'；折回自 migrations/2026-09-09_widen_method_columns.sql
   analysis TEXT DEFAULT NULL,              -- 题解（仅错题，复用判题 analysis）
   error_type VARCHAR(20) DEFAULT NULL,     -- logic|calculation|format|missing|null
   judged_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
