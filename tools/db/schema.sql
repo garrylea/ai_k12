@@ -310,7 +310,7 @@ CREATE TABLE IF NOT EXISTS exam_sessions (
   CONSTRAINT fk_es_paper FOREIGN KEY (paper_id) REFERENCES exam_papers (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 考试逐题作答（is_correct NULL = 在途/未判；method: exact|ai|unanswered|failed）
+-- 考试逐题作答（is_correct NULL = 在途/未判；method: exact|ai|self_assess|unanswered|failed）
 CREATE TABLE IF NOT EXISTS exam_answers (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   session_id BIGINT NOT NULL,
@@ -576,6 +576,21 @@ CREATE TABLE IF NOT EXISTS practice_results (
   CONSTRAINT fk_pr_card_id   FOREIGN KEY (card_id)   REFERENCES cards (id)    ON DELETE CASCADE,
   CONSTRAINT fk_pr_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
   CONSTRAINT fk_pr_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 学生主观题自评留痕（判题体系重构 2026-09-09）：short_answer/proof 在 self_assess 模式下
+-- 由学生对照参考答案自评对错；每次自评留痕（学情分析 / 自评 vs AI 一致率数据源）。
+-- 折回自 migrations/2026-09-09_add_question_self_assessments.sql。
+CREATE TABLE IF NOT EXISTS question_self_assessments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id BIGINT NOT NULL,
+  question_id BIGINT NOT NULL,
+  assessment VARCHAR(10) NOT NULL,        -- 'correct' | 'incorrect'
+  source VARCHAR(20) NOT NULL,            -- 'targeted' | 'error_practice' | 'exam' | 'practice'
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_qsa_student_question (student_id, question_id),
+  CONSTRAINT fk_qsa_student FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
+  CONSTRAINT fk_qsa_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS error_redo_logs (
