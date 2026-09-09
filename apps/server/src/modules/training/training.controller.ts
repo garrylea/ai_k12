@@ -14,7 +14,7 @@ export class TrainingController {
   constructor(private readonly trainingService: TrainingService) {}
 
   /** 专项练习允许的题型白名单（null = 不过滤题型）。 */
-  private static readonly TARGETED_TYPES = ['choice', 'fill_blank', 'true_false', 'short_answer', 'proof'] as const;
+  private static readonly TARGETED_TYPES = ['choice', 'fill_blank', 'true_false', 'short_answer', 'proof', 'calculation'] as const;
 
   /** 错题练习筛选列表：subjectId 必填；from/to/type 可选 string，kpId 可选 number。 */
   @Get('error-book')
@@ -101,7 +101,7 @@ export class TrainingController {
     const type = dto.type ?? null;
     if (type !== null && !(TrainingController.TARGETED_TYPES as readonly string[]).includes(type)) {
       throw new BadRequestException(
-        'type 仅允许 choice | fill_blank | true_false | short_answer | proof 或 null',
+        'type 仅允许 choice | fill_blank | true_false | short_answer | proof | calculation 或 null',
       );
     }
     return this.trainingService.startTargetedPractice({

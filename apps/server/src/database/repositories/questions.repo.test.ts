@@ -24,11 +24,20 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     expect(sql).toContain('q.subject_id = ?');
     expect(sql).toContain('q.is_active = 1');
     expect(sql).toContain('q.type = ?');
-    // 终审备忘：choice/true_false 空答案题不出现在专项练习
-    expect(sql).toContain("NOT (q.type IN ('choice','true_false') AND q.answer = '')");
+    // 判题体系重构 2026-09-09：空答案题一律排除
+    expect(sql).toContain("q.answer <> ''");
     expect(sql).toContain('RAND()');
     expect(sql).toContain('LIMIT ?');
     expect(params).toEqual([7, 1, 3, 'proof', 5]);
+  });
+
+  it('findRandomByKpAndType：空答案题全题型排除（q.answer <> \'\'）', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findRandomByKpAndType(7, 1, 5, null, 10);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain("q.answer <> ''");
+    expect(sql).not.toContain('NOT (q.type IN');
   });
 
   it('type=null 时 SQL 不含题型过滤，参数省略 type', async () => {
