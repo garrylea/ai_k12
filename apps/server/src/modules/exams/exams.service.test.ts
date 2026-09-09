@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ExamsService, computeRecommendedDuration } from './exams.service';
 
 const mk = (overrides: any = {}) => ({
@@ -23,10 +23,20 @@ const mk = (overrides: any = {}) => ({
     // I-2 find-or-create：缺省「无既有未清错题」走 create 分支
     findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
   },
+  // 判题体系重构：主观题 self_assess 结果页恢复最近一次自评
+  selfAssessRepo: {
+    findLatestByStudentAndQuestionIds: vi.fn().mockResolvedValue(new Map()),
+  },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new ExamsService(deps.examPapersRepo, deps.examSessionsRepo, deps.judgeCore, deps.mainErrorRepo);
+  new ExamsService(deps.examPapersRepo, deps.examSessionsRepo, deps.judgeCore, deps.mainErrorRepo, deps.selfAssessRepo);
+
+// 判题体系重构：subjectiveJudgeMode 读 JUDGE_SUBJECTIVE_MODE（缺省 self_assess）。
+// 设过 ai 的用例在 afterEach 清理，避免污染其它用例（铁律：模式间互不串扰）。
+afterEach(() => {
+  delete process.env.JUDGE_SUBJECTIVE_MODE;
+});
 
 /** 会话测试公共 fixtures。 */
 const paperRow = { id: 5, subject_id: 2, title: '2025 年期末卷', year: 2025, district: '海淀', exam_type: '期末', grade_band: 'junior', question_count: 3 };
@@ -289,6 +299,41 @@ describe('ExamsService.submitAnswer', () => {
     expect(r.saved).toBe(true);
   });
 
+  it('主观题 self_assess 模式（缺省）：不调 judgeCore，落 is_correct=NULL + method=self_assess 即返', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+    });
+    const r = await mkSvc(deps).submitAnswer(1, 77, { questionId: 12, answerText: '因为 AB 平行...' });
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+    // 在途行 -> self_assess 行共 2 次 upsert，最终一次带 method/isCorrect
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledTimes(2);
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenLastCalledWith({
+      sessionId: 77, questionId: 12, questionOrder: 3, answerText: '因为 AB 平行...',
+      isCorrect: null, method: 'self_assess', judgedAt: expect.any(Date),
+    });
+    expect(r).toEqual({ saved: true });
+  });
+
+  it('主观题 ai 模式：行为与旧版一致——judgeQuestion 正常判题并落完整结果', async () => {
+    process.env.JUDGE_SUBJECTIVE_MODE = 'ai';
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+      judgeCore: {
+        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 12, isCorrect: true, method: 'ai', errorType: null, errorBookId: undefined }),
+      },
+    });
+    const r = await mkSvc(deps).submitAnswer(1, 77, { questionId: 12, answerText: '因为 AB 平行...' });
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
+      studentId: 1, subjectId: 2, questionId: 12, studentAnswer: '因为 AB 平行...', source: 'exam', sourceRefId: 77,
+    });
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenLastCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 12, isCorrect: 1, method: 'ai',
+    }));
+    expect(r).toEqual({ saved: true });
+  });
+
   it('超 deadline -> 409 + 自动收卷（未答题入 exam_answers + 错题本）', async () => {
     const deps = mk({
       examPapersRepo: papersRepoWithPaper(),
@@ -353,29 +398,41 @@ describe('ExamsService.submitAnswer', () => {
 });
 
 describe('ExamsService.submit', () => {
-  it('2 题未答 + 1 题已答对：未答题不走 judgeCore，直接 method=unanswered 判错 + 入错题本', async () => {
+  it('1 题未答（客观）+ 1 题主观未答 + 1 题已答对：客观未答按错计 + 入错题本；主观统一 self_assess 行', async () => {
+    // 收卷前只查到 q10 已答；markSubmitted 后复查返回三题终态（q11 unanswered / q12 self_assess）
+    const answeredRow = (qid: number, order: number, answer: string | null, isCorrect: number | null, method: string | null) => ({
+      id: qid, session_id: 77, question_id: qid, question_order: order, answer_text: answer,
+      is_correct: isCorrect, method, analysis: null, error_type: null, judged_at: isCorrect == null && method == null ? null : new Date(),
+    });
     const deps = mk({
       examPapersRepo: papersRepoWithPaper(),
       examSessionsRepo: {
         ...mk().examSessionsRepo,
         findById: vi.fn().mockResolvedValue(sessionRow()),
-        findAnswersBySession: vi.fn().mockResolvedValue([
-          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
-        ]),
+        findAnswersBySession: vi.fn()
+          .mockResolvedValueOnce([answeredRow(10, 1, 'A', 1, 'exact')])
+          .mockResolvedValue([
+            answeredRow(10, 1, 'A', 1, 'exact'),
+            answeredRow(11, 2, null, 0, 'unanswered'),
+            answeredRow(12, 3, null, null, 'self_assess'),
+          ]),
       },
     });
     const r = await mkSvc(deps).submit(1, 77);
     expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
-    // 未答题 11/12 -> upsertAnswer(unanswered) + mainErrorRepo.create
+    // q11 客观未答 -> upsertAnswer(unanswered) + mainErrorRepo.create
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 77, questionId: 11, questionOrder: 2, isCorrect: 0, method: 'unanswered' }));
-    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 77, questionId: 12, questionOrder: 3, isCorrect: 0, method: 'unanswered' }));
-    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(2);
+    // q12 主观（proof）未答 -> self_assess 行（is_correct NULL，不按错计）
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 77, questionId: 12, questionOrder: 3, answerText: null, isCorrect: null, method: 'self_assess' }));
+    // 错题本只入 q11（主观题不写错题本）
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(1);
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith({
       student_id: 1, subject_id: 2, question_id: 11, source: 'exam', source_ref_id: 77,
       question_n: null, lesson_id: null, wrong_answer_text: null,
     });
     expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
-    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 33.3 });
+    // 汇总只算客观题：1/2 = 50，主观 1 题单列
+    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 50, subjectiveCount: 1 });
   });
 
   it('I-2 find-or-create：已有未清错题（error_practice/前次考试）-> 复用既有行，不重复 create', async () => {
@@ -394,8 +451,8 @@ describe('ExamsService.submit', () => {
       },
     });
     await mkSvc(deps).submit(1, 77);
-    // 未答题 11/12 各查一次既有行，均命中 -> 不 create
-    expect(deps.mainErrorRepo.findUnclearedByStudentQuestionId).toHaveBeenCalledTimes(2);
+    // 客观未答 q11 查一次既有行（q12 主观走 self_assess 不查错题本），命中 -> 不 create
+    expect(deps.mainErrorRepo.findUnclearedByStudentQuestionId).toHaveBeenCalledTimes(1);
     expect(deps.mainErrorRepo.findUnclearedByStudentQuestionId).toHaveBeenCalledWith(1, 11);
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
   });
@@ -422,9 +479,10 @@ describe('ExamsService.submit', () => {
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 77, questionId: 11, answerText: '2/3', isCorrect: 1, method: 'exact',
     }));
-    // q11 补判答对不入错题本；q12 未答入错题本（仅 1 次）
-    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(1);
+    // q11 补判答对不入错题本；q12 主观（proof）未答走 self_assess 不入错题本（0 次）
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
     expect(r.totalCount).toBe(3);
+    expect(r.subjectiveCount).toBe(1);
   });
 
   it('在途题补判失败 -> method=failed 按错计 + 入错题本', async () => {
@@ -443,9 +501,13 @@ describe('ExamsService.submit', () => {
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 77, questionId: 11, answerText: 'x', isCorrect: 0, method: 'failed',
     }));
-    // q10/q12 未答 + q11 failed -> 各入一次错题本（共 3 次）
-    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(3);
-    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0 });
+    // q10 未答 + q11 failed -> 各入一次错题本；q12 主观走 self_assess 不入（共 2 次）
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(2);
+    // q12 落 self_assess 行（is_correct NULL 不按错计）
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 12, isCorrect: null, method: 'self_assess',
+    }));
+    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0, subjectiveCount: 1 });
   });
 
   it('幂等：已 submitted -> 直接重算汇总返回，不重复判题/落库', async () => {
@@ -462,10 +524,43 @@ describe('ExamsService.submit', () => {
       },
     });
     const r = await mkSvc(deps).submit(1, 77);
-    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 33.3 });
+    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 33.3, subjectiveCount: 0 });
     expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
     expect(deps.examSessionsRepo.upsertAnswer).not.toHaveBeenCalled();
     expect(deps.examSessionsRepo.markSubmitted).not.toHaveBeenCalled();
+  });
+
+  it('ai 模式：主观题未答按错计 + 入错题本、在途主观题走 judgeCore 补判（与旧版一致）', async () => {
+    process.env.JUDGE_SUBJECTIVE_MODE = 'ai';
+    // 收卷前 q12 在途；markSubmitted 后复查返回 q12 补判后的终态（is_correct 0）
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow()),
+        findAnswersBySession: vi.fn()
+          .mockResolvedValueOnce([
+            { id: 1, session_id: 77, question_id: 12, question_order: 3, answer_text: '因为...', is_correct: null, method: null, analysis: null, error_type: null, judged_at: null },
+          ])
+          .mockResolvedValue([
+            { id: 1, session_id: 77, question_id: 12, question_order: 3, answer_text: '因为...', is_correct: 0, method: 'ai', analysis: null, error_type: 'logic', judged_at: new Date() },
+          ]),
+      },
+      judgeCore: {
+        judgeQuestion: vi.fn().mockResolvedValue({ questionId: 12, isCorrect: false, method: 'ai', errorType: 'logic', errorBookId: 9 }),
+      },
+    });
+    const r = await mkSvc(deps).submit(1, 77);
+    // q12 在途主观题 -> ai 补判；q10/q11 未答 -> unanswered 入错题本
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
+      studentId: 1, subjectId: 2, questionId: 12, studentAnswer: '因为...', source: 'exam', sourceRefId: 77,
+    });
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 12, isCorrect: 0, method: 'ai',
+    }));
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(2);
+    // ai 模式主观题计入对错：0/3 = 0，subjectiveCount 0
+    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0, subjectiveCount: 0 });
   });
 
   it('会话不存在 -> 404；非本人 -> 403', async () => {
@@ -539,14 +634,14 @@ describe('ExamsService.getResults', () => {
     await expect(mkSvc(deps).getResults(1, 77)).rejects.toMatchObject({ status: 409 });
   });
 
-  it('submitted：汇总 + items JOIN questions 带 explanation，options 解析', async () => {
+  it('submitted：汇总 + items JOIN questions 带 explanation/answer，options 解析；客观题不带自评标记', async () => {
     const deps = mk({
       examSessionsRepo: {
         ...mk().examSessionsRepo,
         findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
         findAnswersWithQuestions: vi.fn().mockResolvedValue([
-          { question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, analysis: null, text: '选择题 1', type: 'choice', options: '["A. 1", "B. 2"]', explanation: '选 A 因为...' },
-          { question_id: 11, question_order: 2, answer_text: 'x', is_correct: 0, analysis: '移项符号错误', text: '填空题', type: 'fill_blank', options: null, explanation: '解析 2' },
+          { question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, analysis: null, text: '选择题 1', type: 'choice', options: '["A. 1", "B. 2"]', explanation: '选 A 因为...', answer: 'A' },
+          { question_id: 11, question_order: 2, answer_text: 'x', is_correct: 0, analysis: '移项符号错误', text: '填空题', type: 'fill_blank', options: null, explanation: '解析 2', answer: '2' },
         ]),
       },
     });
@@ -554,12 +649,44 @@ describe('ExamsService.getResults', () => {
     expect(r.correctCount).toBe(1);
     expect(r.totalCount).toBe(2);
     expect(r.accuracy).toBe(50);
+    expect(r.subjectiveCount).toBe(0);
     expect(r.items[0]).toEqual({
       questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'],
       answerText: 'A', isCorrect: 1, analysis: null, explanation: '选 A 因为...',
+      answer: 'A', needsSelfAssessment: false, selfAssessment: null,
     });
     expect(r.items[1].analysis).toBe('移项符号错误');
     expect(r.items[1].explanation).toBe('解析 2');
+    // 全客观（无 NULL）-> 自评查询空列表不发 SQL
+    expect(deps.selfAssessRepo.findLatestByStudentAndQuestionIds).toHaveBeenCalledWith(1, []);
+  });
+
+  it('主观题（is_correct NULL）：needsSelfAssessment=true + 参考答案 + 恢复最近一次自评；汇总只算客观题', async () => {
+    const deps = mk({
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersWithQuestions: vi.fn().mockResolvedValue([
+          { question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, analysis: null, text: '选择题 1', type: 'choice', options: null, explanation: '解析 1', answer: 'A' },
+          { question_id: 12, question_order: 3, answer_text: '因为...', is_correct: null, analysis: null, text: '证明题', type: 'proof', options: null, explanation: null, answer: '参考证明' },
+        ]),
+      },
+      selfAssessRepo: {
+        findLatestByStudentAndQuestionIds: vi.fn().mockResolvedValue(new Map([[12, 'correct']])),
+      },
+    });
+    const r = await mkSvc(deps).getResults(1, 77);
+    // 自评查询只带 is_correct NULL 的题
+    expect(deps.selfAssessRepo.findLatestByStudentAndQuestionIds).toHaveBeenCalledWith(1, [12]);
+    const subjective = r.items.find((i) => i.questionId === 12)!;
+    expect(subjective.isCorrect).toBeNull();
+    expect(subjective.needsSelfAssessment).toBe(true);
+    expect(subjective.answer).toBe('参考证明');
+    expect(subjective.selfAssessment).toBe('correct');
+    // 汇总：correctCount 只数 1，subjectiveCount 数 NULL，accuracy 分母为客观题数（1/1=100）
+    expect(r.correctCount).toBe(1);
+    expect(r.subjectiveCount).toBe(1);
+    expect(r.accuracy).toBe(100);
   });
 
   it('会话不存在 -> 404；非本人 -> 403', async () => {

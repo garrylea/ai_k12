@@ -5,7 +5,8 @@ import { ExamPapersRepository } from '../../database/repositories/exam-papers.re
 // 构造参数元数据退化为 Object、注入解析失败（ExamsModule 启动报错）。
 import { ExamSessionsRepository } from '../../database/repositories/exam-sessions.repo.js';
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
-import { JudgeCoreService } from '../practice/judge-core.service.js';
+import { QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
+import { JudgeCoreService, subjectiveJudgeMode, SUBJECTIVE_TYPES } from '../practice/judge-core.service.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import type { ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
 import type { ExamPaperDto, PaperDetailDto, PaperQueryDto } from './dto/paper-query.dto.js';
@@ -36,6 +37,7 @@ export class ExamsService {
     private readonly examSessionsRepo: ExamSessionsRepository,
     private readonly judgeCore: JudgeCoreService,
     private readonly mainErrorRepo: MainErrorBooksRepository,
+    private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
   ) {}
 
   /** 试卷列表：透传筛选参数给 repo，行 -> ExamPaperDto 映射。 */
@@ -184,6 +186,20 @@ export class ExamsService {
       answerText: dto.answerText,
     });
 
+    // 主观题 self_assess 模式（判题体系重构）：不判题，作答已落库；结果页对照参考答案自评。
+    if (subjectiveJudgeMode() === 'self_assess' && SUBJECTIVE_TYPES.has(q.type)) {
+      await this.examSessionsRepo.upsertAnswer({
+        sessionId,
+        questionId: dto.questionId,
+        questionOrder: q.questionNo,
+        answerText: dto.answerText,
+        isCorrect: null,
+        method: 'self_assess',
+        judgedAt: new Date(),
+      });
+      return { saved: true };
+    }
+
     const out = await this.judgeCore.judgeQuestion({
       studentId,
       subjectId: session.subject_id,
@@ -223,6 +239,11 @@ export class ExamsService {
       throw new HttpException({ code: 4103, message: '考试尚未交卷，暂无成绩' }, 409);
     }
     const rows = await this.examSessionsRepo.findAnswersWithQuestions(sessionId);
+    // 自评状态恢复：is_correct NULL（主观题 self_assess）的题查该生最近一次自评
+    const selfAssessed = await this.selfAssessRepo.findLatestByStudentAndQuestionIds(
+      studentId,
+      rows.filter((r) => r.is_correct === null).map((r) => r.question_id),
+    );
     const items = rows.map((row) => ({
       questionId: row.question_id,
       questionNo: row.question_order,
@@ -230,9 +251,12 @@ export class ExamsService {
       type: row.type,
       options: parseOptions(row.options),
       answerText: row.answer_text,
-      isCorrect: row.is_correct ?? 0,
+      isCorrect: row.is_correct,               // null = 主观题待自评
       analysis: row.analysis,
       explanation: row.explanation,
+      answer: row.answer,                       // 参考答案（自评展示）
+      needsSelfAssessment: row.is_correct === null,
+      selfAssessment: selfAssessed.get(row.question_id) ?? null,
     }));
     const summary = this.summarize(items.length, items.map((i) => ({ is_correct: i.isCorrect }) as ExamAnswerRow));
     return { ...summary, items };
@@ -264,6 +288,21 @@ export class ExamsService {
     const byQuestion = new Map(answers.map((a) => [a.question_id, a]));
 
     for (const q of questions) {
+      // 主观题 self_assess 模式：不判题不按错计（无论是否作答），统一落
+      // is_correct=NULL + method='self_assess'，结果页对照参考答案自评。
+      if (subjectiveJudgeMode() === 'self_assess' && SUBJECTIVE_TYPES.has(q.type)) {
+        const a0 = byQuestion.get(q.questionId);
+        await this.examSessionsRepo.upsertAnswer({
+          sessionId: session.id,
+          questionId: q.questionId,
+          questionOrder: q.questionNo,
+          answerText: a0?.answer_text ?? null,
+          isCorrect: null,
+          method: 'self_assess',
+          judgedAt: new Date(),
+        });
+        continue;
+      }
       const a = byQuestion.get(q.questionId);
       if (!a || (a.answer_text == null && a.is_correct == null)) {
         // 未作答：按错计 + 入错题本（直接 mainErrorRepo.create，JudgeCore 不处理未作答场景）
@@ -342,11 +381,14 @@ export class ExamsService {
     });
   }
 
-  /** 汇总：correctCount（is_correct=1 计数）/ totalCount（题单长度）/ accuracy（百分比一位小数）。 */
+  /** 汇总：主观题（is_correct NULL，self_assess 模式）不计入对错——correctCount/accuracy
+   *  只算客观题，subjectiveCount 单列（结果页展示「客观题 X/Y · 主观题 N 题」）。 */
   private summarize(totalCount: number, answers: Array<Pick<ExamAnswerRow, 'is_correct'>>): ExamSummaryDto {
+    const subjectiveCount = answers.filter((a) => a.is_correct === null).length;
+    const objectiveTotal = totalCount - subjectiveCount;
     const correctCount = answers.filter((a) => a.is_correct === 1).length;
-    const accuracy = totalCount > 0 ? Math.round((correctCount / totalCount) * 1000) / 10 : 0;
-    return { correctCount, totalCount, accuracy };
+    const accuracy = objectiveTotal > 0 ? Math.round((correctCount / objectiveTotal) * 1000) / 10 : 0;
+    return { correctCount, totalCount, accuracy, subjectiveCount };
   }
 
   /** 剩余秒数（deadline - now；超时为 0 或负值，由调用方决定收卷语义）。 */

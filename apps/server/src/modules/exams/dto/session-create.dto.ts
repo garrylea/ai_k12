@@ -50,7 +50,8 @@ export interface SessionStateDto {
 export interface ExamSummaryDto {
   correctCount: number;
   totalCount: number;
-  accuracy: number; // 百分比，一位小数（如 33.3）
+  accuracy: number; // 百分比，一位小数（如 33.3）；分母只算客观题
+  subjectiveCount: number; // 主观题题数（self_assess 模式不判对错，单独计数）
 }
 
 /** GET /api/exams/sessions/:id/results 响应条目（JOIN questions 带 explanation）。 */
@@ -61,9 +62,12 @@ export interface ExamResultItemDto {
   type: string;
   options: unknown[] | null;
   answerText: string | null;
-  isCorrect: number; // 0 | 1
+  isCorrect: number | null; // 0 | 1；null = 主观题待自评（self_assess 模式不判对错）
   analysis: string | null;
   explanation: string | null;
+  answer?: string | null; // 参考答案（主观题自评对照展示）
+  needsSelfAssessment?: boolean; // true = is_correct NULL，结果页待自评
+  selfAssessment?: 'correct' | 'incorrect' | null; // 该生该题最近一次自评（恢复自评状态）
 }
 
 /** GET /api/exams/sessions/:id/results 响应（仅 submitted 可查）。 */

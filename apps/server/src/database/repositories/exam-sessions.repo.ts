@@ -32,20 +32,21 @@ export interface ExamAnswerRow {
   updated_at: Date;
 }
 
-/** upsertAnswer 入参（isCorrect/method 等判题字段可缺省——在途作答只落 answerText）。 */
+/** upsertAnswer 入参（isCorrect/method 等判题字段可缺省——在途作答只落 answerText；
+ *  isCorrect 传 null = 主观题 self_assess 模式落「不判对错」终态行）。 */
 export interface UpsertAnswerRow {
   sessionId: number;
   questionId: number;
   questionOrder: number;
   answerText: string | null;
-  isCorrect?: number;
+  isCorrect?: number | null;
   method?: string;
   analysis?: string | null;
   errorType?: string | null;
   judgedAt?: Date;
 }
 
-/** 结果页行：exam_answers JOIN questions（带 explanation）。 */
+/** 结果页行：exam_answers JOIN questions（带 explanation + answer 参考答案）。 */
 export interface ExamResultRow {
   question_id: number;
   question_order: number;
@@ -56,6 +57,7 @@ export interface ExamResultRow {
   type: string;
   options: string | null;
   explanation: string | null;
+  answer: string | null; // 参考答案（主观题 self_assess 模式结果页自评展示）
 }
 
 /**
@@ -145,7 +147,7 @@ export class ExamSessionsRepository {
   async findAnswersWithQuestions(sessionId: number): Promise<ExamResultRow[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT ea.question_id, ea.question_order, ea.answer_text, ea.is_correct, ea.analysis,
-              q.content AS text, q.type, q.options, q.explanation
+              q.content AS text, q.type, q.options, q.explanation, q.answer AS answer
        FROM exam_answers ea JOIN questions q ON q.id = ea.question_id
        WHERE ea.session_id = ?
        ORDER BY ea.question_order`,

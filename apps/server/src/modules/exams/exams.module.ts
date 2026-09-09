@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ExamsController } from './exams.controller.js';
 import { ExamsService } from './exams.service.js';
-import { ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository } from '../../database/repositories/index.js';
+import { ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
 import { PracticeModule } from '../practice/practice.module.js';
 
 /**
@@ -9,11 +9,12 @@ import { PracticeModule } from '../practice/practice.module.js';
  *
  * imports PracticeModule：复用其导出的 JudgeCoreService（单题提交/在途补判，
  * source='exam'）。repos 通过 @Inject('DATABASE_POOL') 注入全局连接池
- * （DatabaseModule 是 @Global）。
+ * （DatabaseModule 是 @Global）。QuestionSelfAssessmentsRepository：
+ * 主观题 self_assess 模式结果页恢复该生最近一次自评（判题体系重构）。
  */
 @Module({
   imports: [PracticeModule],
   controllers: [ExamsController],
-  providers: [ExamsService, ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository],
+  providers: [ExamsService, ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository],
 })
 export class ExamsModule {}
