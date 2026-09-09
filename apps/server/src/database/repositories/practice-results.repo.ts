@@ -20,7 +20,8 @@ export class PracticeResultsRepository {
     question_text: string;
     student_answer: string;
     is_correct: boolean;
-    method: 'exact' | 'ai';
+    /** 判题体系重构（2026-09-09）：self_assess（主观题自评补写）/ unanswered（空答案守卫）。 */
+    method: 'exact' | 'ai' | 'self_assess' | 'unanswered';
     analysis: string | null;
     error_type: string | null;
   }): Promise<void> {

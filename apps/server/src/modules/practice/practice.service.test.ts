@@ -33,6 +33,9 @@ const mk = (overrides: any = {}) => ({
   progressRepo: {
     findByStudentAndSubject: vi.fn().mockResolvedValue(null),
   },
+  selfAssessRepo: {
+    create: vi.fn().mockResolvedValue(1),
+  },
   contentService: {
     getLessonCards: vi.fn().mockResolvedValue({ cards: [] }),
   },
@@ -41,9 +44,10 @@ const mk = (overrides: any = {}) => ({
 
 /** 用 mk() 构造的依赖实例化 PracticeService。
  *  第 11 参 judgeCore 为判题核心抽取新增依赖；explanationCache 注入判题核心内部
- *  （判错解析缓存生成，PracticeService 不经手）——机械注入调整，不改测试语义。 */
+ *  （判错解析缓存生成，PracticeService 不经手）——机械注入调整，不改测试语义。
+ *  judgeCore 第 6 参 selfAssessRepo 为判题体系重构（2026-09-09）新增（recordSelfAssessment 用）。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any));
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any));
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -190,21 +194,45 @@ describe('PracticeService.judge', () => {
   });
 
   it('proof 题命中 -> AI 路径，questionType=proof 传给 judgment，不插题', async () => {
+    // 判题体系重构（2026-09-09）：proof 默认 self_assess 早退，AI 路径须显式切回（finally 复原防泄漏）
+    process.env.JUDGE_SUBJECTIVE_MODE = 'ai';
+    try {
+      const deps = mk({
+        questionsRepo: {
+          findByContentHash: vi.fn().mockResolvedValue({ id: 20, type: 'proof', answer: '证明过程', explanation: '提示', options: null }),
+          findOrCreate: vi.fn(),
+          deleteById: vi.fn(),
+        },
+        judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: true, analysis: '', errorType: null }) },
+      });
+      const svc = mkSvc(deps);
+      const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '证明题', studentAnswer: '学生证明' });
+      expect(r.method).toBe('ai');
+      expect(r.isCorrect).toBe(true);
+      expect(deps.judgment.judge).toHaveBeenCalledWith(expect.objectContaining({ questionType: 'proof' }));
+      expect(deps.questionsRepo.findOrCreate).not.toHaveBeenCalled();
+      expect(deps.structuring.structure).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.JUDGE_SUBJECTIVE_MODE;
+    }
+  });
+
+  it('proof 题默认（self_assess 模式）-> 不判对错早退，返回参考答案/解析且不落 practice_results', async () => {
+    // 判题体系重构（2026-09-09）：judgeForPractice 路由 1c 镜像 judgeQuestion
+    delete process.env.JUDGE_SUBJECTIVE_MODE;
     const deps = mk({
       questionsRepo: {
         findByContentHash: vi.fn().mockResolvedValue({ id: 20, type: 'proof', answer: '证明过程', explanation: '提示', options: null }),
         findOrCreate: vi.fn(),
         deleteById: vi.fn(),
       },
-      judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: true, analysis: '', errorType: null }) },
     });
     const svc = mkSvc(deps);
     const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '证明题', studentAnswer: '学生证明' });
-    expect(r.method).toBe('ai');
-    expect(r.isCorrect).toBe(true);
-    expect(deps.judgment.judge).toHaveBeenCalledWith(expect.objectContaining({ questionType: 'proof' }));
-    expect(deps.questionsRepo.findOrCreate).not.toHaveBeenCalled();
-    expect(deps.structuring.structure).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ questionId: 20, isCorrect: null, method: 'self_assess', needsSelfAssessment: true, referenceAnswer: '证明过程', explanation: '提示' });
+    expect(deps.judgment.judge).not.toHaveBeenCalled();
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.practiceResultsRepo.upsert).not.toHaveBeenCalled();
   });
 
   it('structure 失败 -> 仍入错题本（questionId=null, wrong_answer_text=题面）', async () => {

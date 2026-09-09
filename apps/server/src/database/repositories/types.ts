@@ -138,7 +138,8 @@ export interface PracticeResultRow extends RowDataPacket {
   question_text: string;
   student_answer: string;
   is_correct: number;
-  method: 'exact' | 'ai';
+  /** 判题体系重构（2026-09-09）：新增 self_assess / unanswered（见 JudgeOutput.method）。 */
+  method: 'exact' | 'ai' | 'self_assess' | 'unanswered';
   analysis: string | null;
   error_type: 'logic' | 'calculation' | 'format' | 'missing' | null;
   judged_at: Date;

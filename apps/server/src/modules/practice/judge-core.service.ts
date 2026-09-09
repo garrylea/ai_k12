@@ -1,5 +1,5 @@
 import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { QuestionsRepository, MainErrorBooksRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
@@ -9,6 +9,16 @@ import type { QuestionRow } from '../../database/repositories/types.js';
 /** 仅走 exact 比对的客观题：选项/判断标签形式固定，可靠，不等即判错。
  *  fill_blank 答案形式多样（如 2/3 vs \frac{2}{3}），命中时单独处理：归一化相等走 exact，不等走 AI 复核。 */
 const EXACT_ONLY_TYPES = new Set(['choice', 'true_false']);
+
+/** 主观题（解答/证明）：self_assess 模式下不判对错，学生对照参考答案自评。 */
+export const SUBJECTIVE_TYPES = new Set(['short_answer', 'proof']);
+
+/** 主观题判题模式：self_assess（默认，学生自评）| ai（现有 JudgmentCapability 判对错，
+ *  预留国产模型能力提升后切回——只改环境变量，代码路径全保留）。 */
+export type SubjectiveJudgeMode = 'self_assess' | 'ai';
+export function subjectiveJudgeMode(): SubjectiveJudgeMode {
+  return process.env.JUDGE_SUBJECTIVE_MODE === 'ai' ? 'ai' : 'self_assess';
+}
 
 /** 答案归一：NFKC 全半角归一 + 去空白 + 去 $ + LaTeX \frac{a}{b}->a/b（递归）+ 转小写。 */
 export function normalizeAnswer(s: string): string {
@@ -56,10 +66,18 @@ export interface JudgeInput {
 
 export interface JudgeOutput {
   questionId: number | null;
-  isCorrect: boolean;
-  method: 'exact' | 'ai';
+  /** null = 未判定（主观题 self_assess 待自评 / 客观题空答案不计对错） */
+  isCorrect: boolean | null;
+  method: 'exact' | 'ai' | 'self_assess' | 'unanswered';
   errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
   errorBookId: number | undefined;
+  /** 主观题 self_assess 模式：前端据此渲染自评 UI。 */
+  needsSelfAssessment?: boolean;
+  /** 自评展示用（判题时一并带回，省一次往返）。 */
+  referenceAnswer?: string | null;
+  explanation?: string | null;
+  /** 客观题空答案：该题暂无标准答案，不计对错（课堂练习守卫）。 */
+  noStandardAnswer?: boolean;
 }
 
 export interface JudgeCoreQuestionInput {
@@ -86,6 +104,7 @@ export class JudgeCoreService {
     private readonly structuring: QuestionStructuringCapability,
     private readonly judgment: JudgmentCapability,
     private readonly explanationCache: ExplanationCacheService,
+    private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
   ) {}
 
   /** 题中心判题（训练模块专用入口）。q 恒非空，无「未命中 AI+结构化」分支。 */
@@ -95,18 +114,31 @@ export class JudgeCoreService {
       throw new HttpException({ code: 4004, message: '题目不存在' }, 400);
     }
 
-    let isCorrect: boolean;
-    let method: 'exact' | 'ai';
+    let isCorrect: boolean | null;
+    let method: JudgeOutput['method'];
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
 
     if (EXACT_ONLY_TYPES.has(q.type)) {
       // 路由 1：choice/true_false -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
       method = 'exact';
-    } else if (q.type === 'fill_blank' && compareAnswer(input.studentAnswer, q.answer, q.options)) {
-      // 路由 1b：fill_blank 归一化相等 -> exact 判对（省 AI）；不等走 AI 复核
+    } else if ((q.type === 'fill_blank' || q.type === 'calculation') && compareAnswer(input.studentAnswer, q.answer, q.options)) {
+      // 路由 1b：fill_blank/calculation 归一化相等 -> exact 判对（省 AI）；不等走 AI 复核
       isCorrect = true;
       method = 'exact';
+    } else if (SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess') {
+      // 路由 1c（判题体系重构 2026-09-09）：主观题 self_assess 模式 -> 不判对错。
+      // 参考答案/解析随判题返回（前端当场展开自评）；错题本与清零由自评端点处理。
+      return {
+        questionId: q.id,
+        isCorrect: null,
+        method: 'self_assess',
+        errorType: null,
+        errorBookId: undefined,
+        needsSelfAssessment: true,
+        referenceAnswer: q.answer,
+        explanation: q.explanation,
+      };
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof -> AI 判定
       const questionType = q.type === 'proof' ? 'proof' : 'calculation';
@@ -170,19 +202,39 @@ export class JudgeCoreService {
 
   /** card 中心判题（PracticeService.judge 委托，行为保持）。q 可为 null -> AI + 结构化入库路径。 */
   async judgeForPractice(input: JudgeInput, q: QuestionRow | null): Promise<JudgeOutput> {
-    let isCorrect: boolean;
-    let method: 'exact' | 'ai';
+    let isCorrect: boolean | null;
+    let method: JudgeOutput['method'];
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
+
+    // 路由 0（判题体系重构）：客观题空答案守卫——该题暂无标准答案，不计对错、
+    // 不入错题本、不触发解析生成。practice_results 由 PracticeService 以
+    // method='unanswered' 落行（保证课程完成门禁的作答覆盖计数不缺行）。
+    if (q && (EXACT_ONLY_TYPES.has(q.type) || q.type === 'fill_blank' || q.type === 'calculation') && !q.answer) {
+      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true };
+    }
 
     if (q && EXACT_ONLY_TYPES.has(q.type)) {
       // 路由 1：choice/true_false 命中 -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
       method = 'exact';
-    } else if (q && q.type === 'fill_blank' && compareAnswer(input.studentAnswer, q.answer, q.options)) {
-      // 路由 1b：fill_blank 命中且归一化相等 -> exact 判对（省 AI）。
+    } else if (q && (q.type === 'fill_blank' || q.type === 'calculation') && compareAnswer(input.studentAnswer, q.answer, q.options)) {
+      // 路由 1b：fill_blank/calculation 命中且归一化相等 -> exact 判对（省 AI）。
       // 不等则落到路由 2 走 AI，避免 2/3 vs \frac{2}{3} 等形式差异被误判错。
       isCorrect = true;
       method = 'exact';
+    } else if (q && SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess') {
+      // 路由 1c（判题体系重构 2026-09-09）：主观题 self_assess 模式 -> 不判对错。
+      // 参考答案/解析随判题返回（前端当场展开自评）；错题本与清零由自评端点处理。
+      return {
+        questionId: q.id,
+        isCorrect: null,
+        method: 'self_assess',
+        errorType: null,
+        errorBookId: undefined,
+        needsSelfAssessment: true,
+        referenceAnswer: q.answer,
+        explanation: q.explanation,
+      };
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof / 未命中 -> AI 判定
       const questionType = q?.type === 'proof' ? 'proof' : 'calculation';
@@ -302,5 +354,48 @@ export class JudgeCoreService {
     }
 
     return { questionId, isCorrect, method, errorType, errorBookId };
+  }
+
+  /**
+   * 主观题自评落库（self_assess 模式，训练/考试/课堂练习自评端点共用）：
+   * 自评留痕（question_self_assessments）+ 错题本写入/清零——镜像判题的答错/答对路径，
+   * 「错题清零」门禁因此零改动（主观题错题与客观题错题在 main_error_books 形态一致）。
+   */
+  async recordSelfAssessment(input: {
+    studentId: number;
+    subjectId: number;
+    questionId: number;
+    assessment: 'correct' | 'incorrect';
+    source: string;
+    sourceRefId?: number | null;
+  }): Promise<{ errorBookId: number | undefined }> {
+    await this.selfAssessRepo.create({
+      studentId: input.studentId,
+      questionId: input.questionId,
+      assessment: input.assessment,
+      source: input.source,
+    });
+    if (input.assessment === 'incorrect') {
+      const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(input.studentId, input.questionId);
+      if (existing) return { errorBookId: existing.id };
+      const errorBookId = await this.mainErrorRepo.create({
+        student_id: input.studentId,
+        subject_id: input.subjectId,
+        question_id: input.questionId,
+        source: input.source,
+        source_ref_id: input.sourceRefId ?? null,
+        question_n: null,
+        lesson_id: null,
+        wrong_answer_text: null,
+      });
+      return { errorBookId };
+    }
+    // 自评对 -> 清零（best-effort，失败不阻断）
+    try {
+      await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
+    } catch (err) {
+      this.logger.error(`clearUnclearedByStudentQuestionId failed (self-assess, student=${input.studentId}, question=${input.questionId}): ${err}`);
+    }
+    return { errorBookId: undefined };
   }
 }

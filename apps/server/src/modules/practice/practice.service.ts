@@ -19,7 +19,8 @@ export interface PracticeResultDto {
   questionText: string;
   studentAnswer: string;
   isCorrect: boolean;
-  method: 'exact' | 'ai';
+  /** 判题体系重构（2026-09-09）：新增 self_assess（主观题自评补写）与 unanswered（空答案守卫）。 */
+  method: 'exact' | 'ai' | 'self_assess' | 'unanswered';
   analysis: string | null;
   errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
 }
@@ -96,6 +97,34 @@ export class PracticeService {
     // 判题三路由 + 错题本写入/清零委托 JudgeCore（单一实现，训练模块复用）
     const result = await this.judgeCore.judgeForPractice(input, q);
 
+    // 主观题 self_assess 模式：practice_results.is_correct NOT NULL，落行推迟到自评端点
+    // （POST /practice/self-assess 补写 method='self_assess' 的完整行）。
+    if (result.needsSelfAssessment) {
+      return result;
+    }
+    // 客观题空答案：不计对错但仍落行（method='unanswered'），课程完成门禁按行覆盖计数不缺行。
+    if (result.noStandardAnswer) {
+      try {
+        await this.practiceResultsRepo.upsert({
+          student_id: input.studentId,
+          subject_id: input.subjectId,
+          card_id: input.cardId,
+          lesson_id: input.lessonId,
+          question_id: result.questionId,
+          question_n: input.questionN,
+          question_text: input.questionText,
+          student_answer: input.studentAnswer,
+          is_correct: false,
+          method: 'unanswered',
+          analysis: null,
+          error_type: null,
+        });
+      } catch (err) {
+        this.logger.error(`practiceResultsRepo.upsert (noStandardAnswer) failed (student=${input.studentId}, card=${input.cardId}, qn=${input.questionN}): ${err}`);
+      }
+      return result;
+    }
+
     // 对/错都持久化判题结果（best-effort，失败不阻断判题返回）。
     // practice_results 是 card 中心概念（card_id NOT NULL），留在 PracticeService。
     try {
@@ -108,7 +137,8 @@ export class PracticeService {
         question_n: input.questionN,
         question_text: input.questionText,
         student_answer: input.studentAnswer,
-        is_correct: result.isCorrect,
+        // 上面两个早退（self_assess/noStandardAnswer）已滤掉 isCorrect=null，此处恒为 boolean
+        is_correct: result.isCorrect!,
         method: result.method,
         // JudgeOutput 已无 analysis（判错解析改由 ExplanationCacheService 生成入 questions.explanation）；
         // practice_results.analysis 落库侧清理留待后续任务。
