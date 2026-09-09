@@ -178,24 +178,13 @@ export class JudgeCoreService {
       // 答错 -> 触发解析缓存生成（fire-and-forget；q 必非空，explanation 已有/长答案直写，见 ExplanationCacheService）
       this.explanationCache.ensureExplanation(q);
       // 答错 -> 入主线错题本（find-or-create，避免重复答错堆积）
-      const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(
-        input.studentId,
-        input.questionId,
-      );
-      if (existing) {
-        errorBookId = existing.id;
-      } else {
-        errorBookId = await this.mainErrorRepo.create({
-          student_id: input.studentId,
-          subject_id: input.subjectId,
-          question_id: input.questionId,
-          source: input.source,
-          source_ref_id: input.sourceRefId ?? null,
-          question_n: null,
-          lesson_id: null,
-          wrong_answer_text: null,
-        });
-      }
+      errorBookId = await this.writeErrorBookOrReuse({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        questionId: input.questionId,
+        source: input.source,
+        sourceRefId: input.sourceRefId,
+      });
     } else {
       // 答对 -> 清零该题所有未清错题记录（不限 source；best-effort，失败不阻断）
       try {
@@ -366,6 +355,25 @@ export class JudgeCoreService {
     return { questionId, isCorrect, method, errorType, errorBookId };
   }
 
+  /** 错题本 find-or-create（题中心：命中未清行复用，否则新建）。judgeQuestion 答错与自评 incorrect 共用。 */
+  private async writeErrorBookOrReuse(input: {
+    studentId: number; subjectId: number; questionId: number;
+    source: string; sourceRefId?: number | null;
+  }): Promise<number> {
+    const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(input.studentId, input.questionId);
+    if (existing) return existing.id;
+    return this.mainErrorRepo.create({
+      student_id: input.studentId,
+      subject_id: input.subjectId,
+      question_id: input.questionId,
+      source: input.source,
+      source_ref_id: input.sourceRefId ?? null,
+      question_n: null,
+      lesson_id: null,
+      wrong_answer_text: null,
+    });
+  }
+
   /**
    * 主观题自评落库（self_assess 模式，训练/考试/课堂练习自评端点共用）：
    * 自评留痕（question_self_assessments）+ 错题本写入/清零——镜像判题的答错/答对路径，
@@ -386,17 +394,12 @@ export class JudgeCoreService {
       source: input.source,
     });
     if (input.assessment === 'incorrect') {
-      const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(input.studentId, input.questionId);
-      if (existing) return { errorBookId: existing.id };
-      const errorBookId = await this.mainErrorRepo.create({
-        student_id: input.studentId,
-        subject_id: input.subjectId,
-        question_id: input.questionId,
+      const errorBookId = await this.writeErrorBookOrReuse({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        questionId: input.questionId,
         source: input.source,
-        source_ref_id: input.sourceRefId ?? null,
-        question_n: null,
-        lesson_id: null,
-        wrong_answer_text: null,
+        sourceRefId: input.sourceRefId,
       });
       return { errorBookId };
     }

@@ -1,5 +1,5 @@
 import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository, ProgressRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository, ProgressRepository, QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
@@ -7,6 +7,7 @@ import { ConversationsService } from '../conversations/conversations.service.js'
 import { ContentService } from '../content/content.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { JudgeCoreService } from './judge-core.service.js';
+import { ExplanationCacheService } from './explanation-cache.service.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
 // JudgeInput/JudgeOutput 定义已随判题核心迁至 judge-core.service.ts，
@@ -88,6 +89,8 @@ export class PracticeService {
     private readonly contentService: ContentService,
     private readonly progressRepo: ProgressRepository,
     private readonly judgeCore: JudgeCoreService,
+    private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
+    private readonly explanationCache: ExplanationCacheService,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -153,6 +156,81 @@ export class PracticeService {
     }
 
     return result;
+  }
+
+  /**
+   * 课堂练习主观题自评（self_assess 模式）：补写 practice_results（判题时因 is_correct
+   * NOT NULL 推迟到此处，method='self_assess'）+ 自评留痕 + 错题本写入/清零。
+   * questionId 可为 null（孤儿题：题库未命中、仅存题面）——留痕跳过、错题本走
+   * card+题面变体匹配（镜像 judgeForPractice 既有模式）。
+   */
+  async selfAssess(input: {
+    studentId: number; subjectId: number; cardId: number; lessonId: number;
+    questionN: string; questionText: string; questionId: number | null;
+    studentAnswer: string; assessment: 'correct' | 'incorrect';
+  }): Promise<void> {
+    if (input.questionId != null) {
+      await this.selfAssessRepo.create({
+        studentId: input.studentId,
+        questionId: input.questionId,
+        assessment: input.assessment,
+        source: 'practice',
+      });
+    }
+    // practice_results 补行（best-effort，与 judge() 同款容错）
+    try {
+      await this.practiceResultsRepo.upsert({
+        student_id: input.studentId,
+        subject_id: input.subjectId,
+        card_id: input.cardId,
+        lesson_id: input.lessonId,
+        question_id: input.questionId,
+        question_n: input.questionN,
+        question_text: input.questionText,
+        student_answer: input.studentAnswer,
+        is_correct: input.assessment === 'correct',
+        method: 'self_assess',
+        analysis: null,
+        error_type: null,
+      });
+    } catch (err) {
+      this.logger.error(`practiceResultsRepo.upsert (self-assess) failed (student=${input.studentId}, card=${input.cardId}, qn=${input.questionN}): ${err}`);
+    }
+    // 自评 incorrect 与其他判错路径对齐：有题时触发解析缓存兜底生成
+    if (input.questionId != null) {
+      const q = await this.questionsRepo.findById(input.questionId);
+      if (q && input.assessment === 'incorrect') {
+        this.explanationCache.ensureExplanation(q);
+      }
+    }
+    // 错题本写入/清零（questionId 中心 vs card+题面变体）
+    if (input.assessment === 'incorrect') {
+      const existing = input.questionId != null
+        ? await this.mainErrorRepo.findUnclearedByStudentQuestionId(input.studentId, input.questionId)
+        : await this.mainErrorRepo.findUnclearedByStudentQuestion(input.studentId, null, input.cardId, input.questionText);
+      if (!existing) {
+        await this.mainErrorRepo.create({
+          student_id: input.studentId,
+          subject_id: input.subjectId,
+          question_id: input.questionId,
+          source: 'practice',
+          source_ref_id: input.cardId,
+          question_n: input.questionN,
+          lesson_id: input.lessonId,
+          wrong_answer_text: input.questionId === null ? input.questionText : null,
+        });
+      }
+    } else {
+      try {
+        if (input.questionId != null) {
+          await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
+        } else {
+          await this.mainErrorRepo.clearUnclearedByStudentQuestion(input.studentId, null, input.cardId, input.questionText);
+        }
+      } catch (err) {
+        this.logger.error(`clearUncleared (self-assess) failed (student=${input.studentId}, card=${input.cardId}, qn=${input.questionN}): ${err}`);
+      }
+    }
   }
 
   /** 取该学生在该卡的持久化判题结果（is_correct TINYINT -> boolean）。 */

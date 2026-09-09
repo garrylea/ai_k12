@@ -6,10 +6,11 @@ import { HttpException } from '@nestjs/common';
 const mk = (overrides: any = {}) => ({
   questionsRepo: {
     findByContentHash: vi.fn().mockResolvedValue(null),
+    findById: vi.fn().mockResolvedValue(null),
     findOrCreate: vi.fn(),
     deleteById: vi.fn().mockResolvedValue(undefined),
   },
-  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined), updateDialogueId: vi.fn().mockResolvedValue(undefined), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]) },
+  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined), findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(undefined), updateDialogueId: vi.fn().mockResolvedValue(undefined), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]) },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
   explanationCache: { ensureExplanation: vi.fn() },
@@ -45,9 +46,10 @@ const mk = (overrides: any = {}) => ({
 /** 用 mk() 构造的依赖实例化 PracticeService。
  *  第 11 参 judgeCore 为判题核心抽取新增依赖；explanationCache 注入判题核心内部
  *  （判错解析缓存生成，PracticeService 不经手）——机械注入调整，不改测试语义。
- *  judgeCore 第 6 参 selfAssessRepo 为判题体系重构（2026-09-09）新增（recordSelfAssessment 用）。 */
+ *  judgeCore 第 6 参 selfAssessRepo 为判题体系重构（2026-09-09）新增（recordSelfAssessment 用）；
+  PracticeService 第 12 参 selfAssessRepo、第 13 参 explanationCache 为 POST /self-assess 新增。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any));
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any), deps.selfAssessRepo as any, deps.explanationCache as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -742,6 +744,84 @@ describe('PracticeService.resetCard / resetLesson', () => {
     const svc = mkSvc(deps);
     await svc.resetLesson(1, 9);
     expect(deps.practiceResultsRepo.deleteByStudentLesson).toHaveBeenCalledWith(1, 9);
+  });
+});
+
+describe('PracticeService.selfAssess', () => {
+  it('incorrect + 有 questionId：留痕/upsert/错题本/解析缓存均按契约触发', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn(),
+        findById: vi.fn().mockResolvedValue({ id: 99, type: 'short_answer', answer: '答案' }),
+        findOrCreate: vi.fn(),
+        deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    await svc.selfAssess({
+      studentId: 1, subjectId: 2, cardId: 5, lessonId: 9,
+      questionN: '0-1', questionText: '主观题', questionId: 99,
+      studentAnswer: '学生答', assessment: 'incorrect',
+    });
+    expect(deps.selfAssessRepo.create).toHaveBeenCalledWith({ studentId: 1, questionId: 99, assessment: 'incorrect', source: 'practice' });
+    expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledTimes(1);
+    expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      student_id: 1, subject_id: 2, card_id: 5, lesson_id: 9, question_id: 99,
+      question_n: '0-1', question_text: '主观题', student_answer: '学生答',
+      is_correct: false, method: 'self_assess', analysis: null, error_type: null,
+    }));
+    expect(deps.mainErrorRepo.findUnclearedByStudentQuestionId).toHaveBeenCalledWith(1, 99);
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      student_id: 1, subject_id: 2, question_id: 99, source: 'practice',
+      source_ref_id: 5, question_n: '0-1', lesson_id: 9, wrong_answer_text: null,
+    }));
+    expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith({ id: 99, type: 'short_answer', answer: '答案' });
+  });
+
+  it('correct + 孤儿题（questionId null）：留痕不调、走 card+题面变体清零', async () => {
+    const deps = mk();
+    const svc = mkSvc(deps);
+    await svc.selfAssess({
+      studentId: 1, subjectId: 2, cardId: 5, lessonId: 9,
+      questionN: '0-1', questionText: '未入库主观题', questionId: null,
+      studentAnswer: '学生答', assessment: 'correct',
+    });
+    expect(deps.selfAssessRepo.create).not.toHaveBeenCalled();
+    expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      student_id: 1, subject_id: 2, card_id: 5, lesson_id: 9, question_id: null,
+      question_n: '0-1', question_text: '未入库主观题', student_answer: '学生答',
+      is_correct: true, method: 'self_assess', analysis: null, error_type: null,
+    }));
+    expect(deps.mainErrorRepo.clearUnclearedByStudentQuestion).toHaveBeenCalledWith(1, null, 5, '未入库主观题');
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
+  });
+
+  it('incorrect + 已有未清错题 -> find-or-create 复用，不重复 create', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn(),
+        findById: vi.fn().mockResolvedValue({ id: 99, type: 'short_answer', answer: '答案' }),
+        findOrCreate: vi.fn(),
+        deleteById: vi.fn(),
+      },
+      mainErrorRepo: {
+        create: vi.fn().mockResolvedValue(42),
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null),
+        clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined),
+        findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue({ id: 77 }),
+        clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(undefined),
+        updateDialogueId: vi.fn().mockResolvedValue(undefined),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await svc.selfAssess({
+      studentId: 1, subjectId: 2, cardId: 5, lessonId: 9,
+      questionN: '0-1', questionText: '主观题', questionId: 99,
+      studentAnswer: '学生答', assessment: 'incorrect',
+    });
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
   });
 });
 

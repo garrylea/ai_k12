@@ -28,6 +28,41 @@ export class PracticeController {
     });
   }
 
+  /** 课堂练习主观题自评（self_assess 模式）：补写 practice_results + 留痕 + 错题本写入/清零。 */
+  @Post('self-assess')
+  async selfAssess(@Body() dto: {
+    cardId: number; lessonId: number; subjectId: number;
+    questionN: string; questionText: string; questionId: number | null;
+    studentAnswer: string; assessment: 'correct' | 'incorrect';
+  }, @CurrentUser() user: JwtUser) {
+    if (!Number.isInteger(dto.cardId) || dto.cardId < 1 ||
+        !Number.isInteger(dto.lessonId) || dto.lessonId < 1 ||
+        !Number.isInteger(dto.subjectId) || dto.subjectId < 1) {
+      throw new BadRequestException('cardId/lessonId/subjectId 须为正整数');
+    }
+    if (!dto.questionN || !dto.questionText) {
+      throw new BadRequestException('questionN 与 questionText 必填');
+    }
+    if (dto.questionId != null && (!Number.isInteger(dto.questionId) || dto.questionId < 1)) {
+      throw new BadRequestException('questionId 须为正整数或 null');
+    }
+    if (dto.assessment !== 'correct' && dto.assessment !== 'incorrect') {
+      throw new BadRequestException('assessment 仅允许 correct | incorrect');
+    }
+    await this.practiceService.selfAssess({
+      studentId: user.sub,
+      cardId: dto.cardId,
+      lessonId: dto.lessonId,
+      subjectId: dto.subjectId,
+      questionN: dto.questionN,
+      questionText: dto.questionText,
+      questionId: dto.questionId ?? null,
+      studentAnswer: dto.studentAnswer ?? '',
+      assessment: dto.assessment,
+    });
+    return null; // ResponseInterceptor 包成 { code: 0, data: null }
+  }
+
   @Post('hint')
   async hint(@Body() dto: HintPracticeDto, @CurrentUser() user: JwtUser) {
     return this.practiceService.getHint({
