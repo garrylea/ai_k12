@@ -34,7 +34,8 @@ answer 与 explanation 只能从原文“参考答案/答案”部分原样提�
 
 【每道题字段】
 - subject_id: 学科标识，如 "math"
-- type: 只能是 "choice"（选择）、"fill_blank"（填空）、"true_false"（判断）、"short_answer"（简答）、"proof"（证明）
+- type: 只能是 "choice"（选择）、"fill_blank"（填空）、"true_false"（判断）、"short_answer"（简答）、"proof"（证明）、"calculation"（计算）
+  - calculation：计算题——答案是一个简短最终结果（数值/表达式/坐标），过程性论述或证明不归此类（归 short_answer/proof）
 - difficulty: 难度 1-3
 - content: 题干，保留 Markdown 和 LaTeX；同一题号的 (1)(2)(3) 小问都放在这里
 - options: 选择题选项数组，每项 {"label": "A", "text": "..."}；非选择题为 null

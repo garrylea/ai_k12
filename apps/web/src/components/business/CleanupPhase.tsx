@@ -207,7 +207,7 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
           `}</style>
           <div className="relative h-32 overflow-hidden">
             {Array.from({ length: 12 }).map((_, i) => {
-              const shapes = ['🌸', '✨', '🎉', '🌟'];
+              const shapes = ['✦', '✧', '＊', '·'];
               const shape = shapes[i % shapes.length];
               const delay = (i * 0.1).toFixed(2);
               const left = ((i * 9) % 90).toFixed(0);

@@ -6,7 +6,7 @@ export interface RunnerQuestion {
   n: string;
   /** 题面（Markdown+LaTeX） */
   text: string;
-  /** 'choice' | 'true_false' | 'fill_blank' | 'short_answer' | 'proof' */
+  /** 'choice' | 'true_false' | 'fill_blank' | 'short_answer' | 'proof' | 'calculation' */
   type?: string;
   /** 选择题选项；true_false 可缺省，缺省时组件渲染 对/错 两个选项 */
   options?: Array<{ label: string; text: string }>;

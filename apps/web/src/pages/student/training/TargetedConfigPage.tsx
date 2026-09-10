@@ -18,6 +18,7 @@ const TYPE_OPTIONS = [
   { value: 'true_false', label: '判断' },
   { value: 'short_answer', label: '解答' },
   { value: 'proof', label: '证明' },
+  { value: 'calculation', label: '计算' },
 ] as const;
 
 /** 题量档（后端限 1-20，取常用四档）。 */

@@ -20,6 +20,7 @@ const TYPE_OPTIONS = [
   { value: 'true_false', label: '判断' },
   { value: 'short_answer', label: '解答' },
   { value: 'proof', label: '证明' },
+  { value: 'calculation', label: '计算' },
 ] as const;
 
 const typeLabelMap: Record<string, string> = {
@@ -28,6 +29,7 @@ const typeLabelMap: Record<string, string> = {
   true_false: '判断',
   short_answer: '解答',
   proof: '证明',
+  calculation: '计算',
 };
 
 /** level 圆点配色与 ErrorBookCard 一致（L1-L5 绿→深红）。 */

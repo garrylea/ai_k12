@@ -17,6 +17,7 @@ const TYPE_LABEL: Record<string, string> = {
   true_false: '判断',
   short_answer: '解答',
   proof: '证明',
+  calculation: '计算',
 };
 
 export default function HiddenQuestionsPage() {

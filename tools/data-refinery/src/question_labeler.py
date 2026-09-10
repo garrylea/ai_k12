@@ -9,7 +9,7 @@ from question_splitter import RawQuestion, split_options
 from dataclasses import dataclass
 
 # 合法题型枚举（prompt 与 ExamQuestion 契约）
-_VALID_TYPES = {"choice", "fill_blank", "true_false", "short_answer", "proof"}
+_VALID_TYPES = {"choice", "fill_blank", "true_false", "short_answer", "proof", "calculation"}
 # 选择题选项标签
 _VALID_LABELS = {"A", "B", "C", "D"}
 

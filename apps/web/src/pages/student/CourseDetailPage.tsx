@@ -1040,7 +1040,7 @@ export default function CourseDetailPage() {
             {/* 撒花动效 */}
             <div className="absolute inset-x-0 top-0 pointer-events-none overflow-hidden z-20 h-full">
               {Array.from({ length: 20 }).map((_, i) => {
-                const shapes = ['🌸', '✨', '🎉', '🌟', '🎈'];
+                const shapes = ['✦', '✧', '＊', '·', '◇'];
                 const shape = shapes[i % shapes.length];
                 const delay = (i * 0.12).toFixed(2);
                 const duration = (1.8 + (i % 3) * 0.4).toFixed(2);
@@ -1075,7 +1075,7 @@ export default function CourseDetailPage() {
             {/* 恭喜文字 */}
             <div className="space-y-3 max-w-xl text-center z-10">
               <h2 className="text-3xl md:text-4xl font-extrabold text-[var(--text-primary)] tracking-tight leading-snug">
-                {isSubjectCompleted ? '🎉 恭喜你，本学科全部完成！' : '🎉 恭喜你，本节学习完成！'}
+                {isSubjectCompleted ? '恭喜你，本学科全部完成！' : '恭喜你，本节学习完成！'}
               </h2>
               <p className="text-[var(--text-secondary)] text-sm font-semibold">
                 {countdown > 0 ? `${countdown} 秒后自动进入下一课` : '正在进入...'}
