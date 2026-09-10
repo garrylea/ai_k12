@@ -13,6 +13,7 @@ import {
   getTrainingExplanations,
   getTrainingHint,
   judgeTraining,
+  selfAssessTraining,
   waitTrainingExplanation,
   type TrainingErrorBookEntry,
 } from '@/services/api';
@@ -151,11 +152,13 @@ export default function ErrorPracticeRunPage() {
         }
       }
 
-      // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉
+      // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉。
+      // 客观题答错 + 主观题（self_assess，无论自评对错）都要解析。
       const wrongQids: number[] = [];
       for (const e of entries ?? []) {
         const r = results[String(e.errorBookId)];
-        if (e.questionId != null && r && !r.isCorrect && !r.failed) wrongQids.push(e.questionId);
+        if (e.questionId == null || !r || r.failed) continue;
+        if (!r.isCorrect || r.method === 'self_assess') wrongQids.push(e.questionId);
       }
       let expls: Record<number, string | null> = {};
       if (wrongQids.length > 0) {
@@ -209,6 +212,17 @@ export default function ErrorPracticeRunPage() {
                 <DiscussIconButton onClick={() => setDiscussQ(q)} />
               )}
               onSubmit={handleSubmit}
+              onSelfAssess={async (q, assessment) => {
+                const entry = entryByN.get(q.n);
+                // 与判题同款守卫：孤儿题（questionId 为空）进不了自评落库
+                if (!entry || entry.questionId == null) throw new Error('该题未入库，无法自评');
+                await selfAssessTraining({
+                  questionId: entry.questionId,
+                  subjectId: MATH_SUBJECT_ID,
+                  assessment,
+                  source: 'error_practice',
+                });
+              }}
               onFinish={handleFinish}
               onQuestionChange={setCurrentQ}
               onClose={(answered) => setExitConfirm({ open: true, answered })}

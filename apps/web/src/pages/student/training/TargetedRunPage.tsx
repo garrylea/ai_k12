@@ -13,6 +13,7 @@ import {
   getTrainingHint,
   judgeTraining,
   markTrainingHidden,
+  selfAssessTraining,
   waitTrainingExplanation,
   type TargetedPracticeQuestion,
 } from '@/services/api';
@@ -139,13 +140,15 @@ export default function TargetedRunPage() {
   const handleFinish = useCallback(async (results: Record<string, RunnerAnswerRecord>) => {
     setFinalResults(results);
 
-    // 末题判题完成后：收集错题 questionId 批量拉解析（后端等 in-flight 生成，60s 兜底）。
+    // 末题判题完成后：收集需要解析的 questionId 批量拉取（后端等 in-flight 生成，60s 兜底）。
     // 解析为题级公开数据，题单条目必来自题库（questionId 非空）。
     const wrongIds: number[] = [];
     for (const q of questions ?? []) {
       const qid = entryByN.get(q.n)?.questionId;
       const r = results[q.n];
-      if (qid != null && r && !r.isCorrect && !r.failed) wrongIds.push(qid);
+      if (qid == null || !r || r.failed) continue;
+      // 客观题答错 + 主观题（self_assess，无论自评对错）都要解析
+      if (!r.isCorrect || r.method === 'self_assess') wrongIds.push(qid);
     }
     let expls: Record<number, string | null> = {};
     if (wrongIds.length > 0) {
@@ -235,6 +238,16 @@ export default function TargetedRunPage() {
                 );
               }}
               onSubmit={handleSubmit}
+              onSelfAssess={async (q, assessment) => {
+                const entry = entryByN.get(q.n);
+                if (!entry) throw new Error('题单条目缺失，无法自评');
+                await selfAssessTraining({
+                  questionId: entry.questionId,
+                  subjectId: MATH_SUBJECT_ID,
+                  assessment,
+                  source: 'targeted',
+                });
+              }}
               onFinish={handleFinish}
               onQuestionChange={setCurrentQ}
               onClose={(answered) => setExitConfirm({ open: true, answered })}

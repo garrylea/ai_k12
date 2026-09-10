@@ -83,7 +83,7 @@ export interface QuestionRunnerProps {
   questionMetaActions?: (q: RunnerQuestion) => ReactNode;
   /** 覆盖内置判题等待视图（AnswerModal 的逐题进度页外壳） */
   judgingSlot?: ReactNode;
-  /** modal 外壳内追加浮层（DiscussDrawer 等 absolute 定位）；仅作答态渲染 */
+  /** modal 外壳内追加浮层（DiscussDrawer 等 absolute 定位）；作答态与自评态渲染 */
   modalExtras?: ReactNode;
   /** 当前题变化时回调（父层追踪当前题，供页面级草稿抽屉做 key 触发清空）；首次 mount 也触发 */
   onQuestionChange?: (q: RunnerQuestion, idx: number) => void;
@@ -282,7 +282,7 @@ export function QuestionRunner({
   }, [answer, phase, q, idx, draftKeyPrefix, showResultFeedback, onSubmit, advance]);
 
   // 自评提交：学生点「我做对了/我做错了」——先经父层落库（onSelfAssess 可缺省），
-  // 成功后本地记录布尔结果并放行；落库失败留在自评视图可重点。
+  // 成功后本地记录布尔结果并放行；落库失败留在自评视图可重试。
   const handleSelfAssess = useCallback(async (assessment: 'correct' | 'incorrect') => {
     if (!selfAssess || selfAssess.assessing) return;
     setSelfAssess((s) => (s ? { ...s, assessing: true, error: false } : s));
@@ -292,7 +292,7 @@ export function QuestionRunner({
         await onSelfAssess(question, assessment, { questionId, studentAnswer: submittedAnswer });
       }
     } catch {
-      // 落库失败：留在自评视图可重点（结果已本地记录，不重复入 resultsRef）
+      // 落库失败：留在自评视图可重试（尚未写入 resultsRef，重试成功后一次性写入）
       setSelfAssess((s) => (s ? { ...s, assessing: false, error: true } : s));
       return;
     }

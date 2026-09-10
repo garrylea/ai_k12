@@ -1151,7 +1151,12 @@ export default function CourseDetailPage() {
       {resultOpen && (
         <AnswerResultList
           questions={sessionQuestions}
-          answers={answers}
+          // 本地窄化：store 的 AnswerRecord 继承 JudgeResult（isCorrect 可空，主观题待自评为 null），
+          // AnswerResultList 只吃 boolean——主观题（method 'self_assess'/'unanswered'）的展示与
+          // 对错统计均按 method 分流，不依赖 isCorrect，null 收敛为 false 不影响语义。
+          answers={Object.fromEntries(
+            Object.entries(answers).map(([n, r]) => [n, { ...r, isCorrect: r.isCorrect === true }]),
+          )}
           onClose={() => setResultOpen(false)}
         />
       )}

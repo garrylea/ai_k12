@@ -7,6 +7,7 @@ import { useRef, useState } from 'react';
 import { QuestionRunner } from './answer/QuestionRunner';
 import type { RunnerJudgeOutcome, RunnerQuestion } from './answer/types';
 import { DiscussDrawer, DiscussIconButton } from './DiscussDrawer';
+import { selfAssessPractice } from '@/services/api';
 
 export interface PracticeQuestion { n: string; text: string; }
 
@@ -152,6 +153,19 @@ export function AnswerModal({ questions, startIndex, cardId, lessonId, subjectId
         />
       )}
       onSubmit={handleRunnerSubmit}
+      // 主观题自评落库：补写 practice_results + 留痕 + 错题本写入/清零（失败留在自评视图可重试）
+      onSelfAssess={async (q, assessment, ctx) => {
+        await selfAssessPractice({
+          cardId,
+          lessonId,
+          subjectId,
+          questionN: q.n,
+          questionText: q.text,
+          questionId: ctx.questionId,
+          studentAnswer: ctx.studentAnswer,
+          assessment,
+        });
+      }}
       onFinish={() => {
         if (!cancelledRef.current) onFinish();
       }}

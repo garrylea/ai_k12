@@ -5,10 +5,14 @@ import {
   getExamResults,
   getExamSession,
   getTrainingExplanations,
+  selfAssessTraining,
   waitTrainingExplanation,
   type ExamResultItem,
   type ExamSummary,
 } from '@/services/api';
+
+/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
+const MATH_SUBJECT_ID = 1;
 
 const SPINNER_SVG = (
   <svg
@@ -63,7 +67,14 @@ export default function ExamResultPage() {
         for (const it of res.items) {
           const text = it.explanation ?? it.analysis;
           base[String(it.questionNo)] = text;
-          if (text == null && it.isCorrect === 0 && it.questionId != null) missingIds.push(it.questionId);
+          // 客观题答错 + 自评做错的主观题都要补拉解析
+          if (
+            text == null &&
+            it.questionId != null &&
+            (it.isCorrect === 0 || (it.isCorrect === null && it.selfAssessment === 'incorrect'))
+          ) {
+            missingIds.push(it.questionId);
+          }
         }
         setExplanations(base);
 
@@ -106,22 +117,57 @@ export default function ExamResultPage() {
     return map;
   }, [items]);
 
-  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1；解析统一走 explanations prop
+  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1|null（null = 主观题待自评）；
+  // 解析统一走 explanations prop
   const answers = useMemo(() => {
     const map: Record<
       string,
-      { isCorrect: boolean; method: string; studentAnswer: string; failed: boolean }
+      {
+        isCorrect: boolean;
+        method: string;
+        studentAnswer: string;
+        failed: boolean;
+        needsSelfAssess: boolean;
+        selfAssessment: 'correct' | 'incorrect' | null;
+      }
     > = {};
     for (const it of items ?? []) {
       map[String(it.questionNo)] = {
         isCorrect: it.isCorrect === 1,
-        method: '',
+        method: it.isCorrect === null ? 'self_assess' : '',
         studentAnswer: it.answerText ?? '',
         failed: false,
+        needsSelfAssess: it.isCorrect === null && it.selfAssessment == null,
+        selfAssessment: it.selfAssessment ?? null,
       };
     }
     return map;
   }, [items]);
+
+  // 参考答案映射（key = q.n）：主观题自评时对照展示
+  const referenceAnswers = useMemo(() => {
+    const map: Record<string, string | null> = {};
+    for (const it of items ?? []) map[String(it.questionNo)] = it.answer ?? null;
+    return map;
+  }, [items]);
+
+  // 自评提交后更新本地态（消除 needsSelfAssess / 记录 selfAssessment），未自评横幅随之消失
+  const handleSelfAssess = async (n: string, assessment: 'correct' | 'incorrect') => {
+    const qid = questionIdByN.get(n);
+    if (qid == null) return;
+    await selfAssessTraining({
+      questionId: qid,
+      subjectId: MATH_SUBJECT_ID,
+      assessment,
+      source: 'exam',
+      sourceRefId: sid,
+    });
+    setItems((prev) =>
+      (prev ?? []).map((it) =>
+        String(it.questionNo) === n ? { ...it, selfAssessment: assessment, needsSelfAssessment: false } : it,
+      ),
+    );
+  };
 
   // mount 读取中 / 加载失败：不渲染结果
   if (items == null) {
@@ -161,28 +207,54 @@ export default function ExamResultPage() {
             const res = await waitTrainingExplanation(qid);
             return res.explanation;
           }}
+          referenceAnswers={referenceAnswers}
+          onSelfAssess={handleSelfAssess}
           headerExtra={
             summary && (
-              <div className="flex items-center justify-center gap-10 py-5">
-                <div className="text-center">
-                  <div className="font-mono text-4xl font-bold leading-none text-[var(--success)]">
-                    {summary.correctCount}
+              <div>
+                {(() => {
+                  // 未自评横幅：主观题尚未完成自评时提示（自评提交后 items 更新，横幅消失）
+                  const unassessed = (items ?? []).filter((it) => it.isCorrect === null && it.selfAssessment == null).length;
+                  if (unassessed > 0) {
+                    return (
+                      <div className="flex items-center justify-center gap-2 py-2 bg-[var(--brand-100)] text-[13px] text-[var(--warning)]">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="M12 8v4" />
+                          <path d="M12 16h.01" />
+                        </svg>
+                        还有 {unassessed} 题未自评，请在下方列表完成自评
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+                <div className="flex items-center justify-center gap-10 py-5">
+                  <div className="text-center">
+                    <div className="font-mono text-4xl font-bold leading-none text-[var(--success)]">{summary.correctCount}</div>
+                    <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题答对</div>
                   </div>
-                  <div className="mt-1.5 text-xs text-[var(--text-secondary)]">答对题数</div>
-                </div>
-                <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
-                <div className="text-center">
-                  <div className="font-mono text-4xl font-bold leading-none text-[var(--text-primary)]">
-                    {summary.totalCount}
+                  <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
+                  <div className="text-center">
+                    <div className="font-mono text-4xl font-bold leading-none text-[var(--text-primary)]">
+                      {summary.totalCount - (summary.subjectiveCount ?? 0)}
+                    </div>
+                    <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题总数</div>
                   </div>
-                  <div className="mt-1.5 text-xs text-[var(--text-secondary)]">总题数</div>
-                </div>
-                <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
-                <div className="text-center">
-                  <div className="font-mono text-4xl font-bold leading-none text-[var(--brand-500)]">
-                    {summary.accuracy}%
+                  <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
+                  <div className="text-center">
+                    <div className="font-mono text-4xl font-bold leading-none text-[var(--brand-500)]">{summary.accuracy}%</div>
+                    <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题正确率</div>
                   </div>
-                  <div className="mt-1.5 text-xs text-[var(--text-secondary)]">正确率</div>
+                  {(summary.subjectiveCount ?? 0) > 0 && (
+                    <>
+                      <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
+                      <div className="text-center">
+                        <div className="font-mono text-4xl font-bold leading-none text-[var(--brand-500)]">{summary.subjectiveCount}</div>
+                        <div className="mt-1.5 text-xs text-[var(--text-secondary)]">主观题（自评）</div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )

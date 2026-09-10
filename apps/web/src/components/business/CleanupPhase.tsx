@@ -12,6 +12,7 @@ import {
   judgePractice,
   bumpErrorLevels,
   getTrainingExplanations,
+  selfAssessPractice,
   waitTrainingExplanation,
   type PreviousErrorDetail,
   type JudgeResult,
@@ -112,11 +113,13 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
       } catch { /* best-effort */ }
     }
 
-    // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉
+    // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉。
+    // 客观题答错 + 主观题（self_assess，无论自评对错）都要解析。
     const wrongQids: number[] = [];
     for (const e of errors) {
       const a = results[e.questionN];
-      if (e.questionId != null && a && !a.isCorrect && !a.failed) wrongQids.push(e.questionId);
+      if (e.questionId == null || !a || a.failed) continue;
+      if (!a.isCorrect || a.method === 'self_assess') wrongQids.push(e.questionId);
     }
     let expls: Record<number, string | null> = {};
     if (wrongQids.length > 0) {
@@ -150,6 +153,23 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
         variant="embedded"
         title={(index, total) => `错题巩固 — 第 ${index + 1}/${total} 题`}
         onSubmit={handleSubmit}
+        // 主观题自评落库：与 handleSubmit 同款错题记录定位（题面精确匹配优先，回退首条）
+        onSelfAssess={async (q, assessment, ctx) => {
+          const candidates = errorsByN.get(q.n) ?? [];
+          const err = candidates.find((e) => e.questionText === q.text) ?? candidates[0];
+          if (!err) throw new Error('错题记录缺失，无法自评');
+          await selfAssessPractice({
+            cardId: err.cardId,
+            // 与判题同款：写错题来源卡真正所属的课，取不到回退当前页
+            lessonId: err.lessonId ?? lessonId,
+            subjectId,
+            questionN: q.n,
+            questionText: q.text,
+            questionId: ctx.questionId,
+            studentAnswer: ctx.studentAnswer,
+            assessment,
+          });
+        }}
         onFinish={handleFinish}
       />
     );
