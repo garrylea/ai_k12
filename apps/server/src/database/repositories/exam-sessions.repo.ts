@@ -24,7 +24,7 @@ export interface ExamAnswerRow {
   question_order: number;
   answer_text: string | null;
   is_correct: number | null;
-  method: string | null; // 'exact' | 'ai' | 'unanswered' | 'failed'
+  method: string | null; // 'exact' | 'ai' | 'self_assess' | 'unanswered' | 'failed'
   analysis: string | null;
   error_type: string | null;
   judged_at: Date | null;

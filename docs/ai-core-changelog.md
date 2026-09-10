@@ -8,6 +8,15 @@
 
 ---
 
+## 2026-09-10 判题体系重构（四路由 + 主观题自评）
+
+- **变更摘要**：`JudgeCoreService` 判题四路由——choice/true_false 程序比对；fill_blank/calculation 归一化比对 + AI 等价判断；short_answer/proof 由 `JUDGE_SUBJECTIVE_MODE` 控制（默认 `self_assess` 不判对错，学生自评；`ai` 保留原 JudgmentCapability 逻辑可切回）。calculation 为新增题型（结果型计算题，从 short_answer 拆出）。自评端点 ×2：`POST /api/training/self-assess`（题中心：留痕 + 错题本写入/清零）与 `POST /api/practice/self-assess`（卡中心：补写 practice_results method='self_assess'）。考试主观题不判（`exam_answers.is_correct=NULL`、method='self_assess'），成绩只算客观题，结果页带 `answer`/`needsSelfAssessment`/`selfAssessment`/`subjectiveCount`；空答案题守卫（method='unanswered' 不计对错）+ 抽题过滤 `answer <> ''`。DB：新增 `question_self_assessments` 表，`practice_results.method`/`exam_answers.method` 列加宽 VARCHAR(20) 容纳 `self_assess`。
+- **动机**：国产模型对主观题判题准确率不足（同题同答多次判定结果漂移，误判直接伤学生信任）；主观题改为学生对照参考答案自评，AI 退出判错位。参考答案补全（错题缺答案无法自评）转离线人工 + AI 批量导入，见 answer_importer 计划（`docs/superpowers/plans/`）。
+- **局限/待办**：存量 short_answer→calculation 拆分依赖答案导入批次回写（导入前 calculation 题池空）；考试结果页自评失败无 toast 提示；AnswerModal 本地 store 不回写自评态，重进后自评状态从留痕表恢复。
+- 设计 spec：`docs/superpowers/specs/2026-09-09-judging-rework-design.md`；API 文档 v2.9/v3.0；DB 设计文档 v2.1。
+
+---
+
 ## 2026-09-08 判题解析缓存化（ExplanationCacheService）
 
 - **判题只判对错**：judgment prompt（math-calculation/math-proof）去 `analysis` 输出，只留 `{isCorrect, errorType}`（省输出 token）；`JudgeOutput` 删 `analysis`，`/api/practice/judge`、`/api/training/judge` 响应瘦身（exam answers 落库 analysis 恒 null，列保留存历史）。客观题判错的「正确答案：X」一并移除——正确答案与解法在解析里。

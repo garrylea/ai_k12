@@ -1,5 +1,6 @@
 -- 2026-09-09 判题体系重构：主观题学生自评留痕表
 -- 设计：docs/superpowers/specs/2026-09-09-judging-rework-design.md §7.2
+-- 执行：mysql -u ai_k12 -p ai_k12 < tools/db/migrations/2026-09-09_add_question_self_assessments.sql
 CREATE TABLE IF NOT EXISTS question_self_assessments (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   student_id BIGINT NOT NULL,

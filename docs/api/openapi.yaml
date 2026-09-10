@@ -3154,6 +3154,72 @@ paths:
                     type: string
                     example: 判定失败，请重试
 
+  /practice/self-assess:
+    post:
+      tags: [Practice]
+      summary: 课堂练习主观题自评（self_assess 模式）
+      description: >-
+        课堂练习主观题学生对照参考答案自评对错（student JWT）。判题时主观题
+        因 practice_results.is_correct NOT NULL 推迟落行，此处补写
+        practice_results（method='self_assess'）+ 自评留痕
+        （question_self_assessments，source='practice'）+ 错题本写入/清零。
+        questionId 可为 null（孤儿题：题库未命中仅存题面——留痕跳过、错题本按
+        card+题面变体匹配）。assessment=incorrect 写入/复用 main_error_books
+        （source 落库为 practice 来源）并触发解析缓存兜底生成；correct 清零
+        该题所有未清记录。cardId/lessonId/subjectId 非正整数或
+        questionN/questionText 缺失或 assessment 非法 400。
+      operationId: selfAssessPractice
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cardId, lessonId, subjectId, questionN, questionText, assessment]
+              properties:
+                cardId:
+                  type: integer
+                  description: 当前 practice 卡片 ID
+                lessonId:
+                  type: integer
+                  description: 当前课程 ID
+                subjectId:
+                  type: integer
+                  description: 学科 ID
+                questionN:
+                  type: string
+                  description: 卡内复合题号（如 "0-1"），practice_results upsert 去重键
+                questionText:
+                  type: string
+                  description: 题面原文（孤儿题错题本按 card+题面匹配）
+                questionId:
+                  type: integer
+                  nullable: true
+                  description: 题库命中时的 questions.id；未命中为 null
+                studentAnswer:
+                  type: string
+                  description: 学生提交的答案文本（缺省空串）
+                assessment:
+                  type: string
+                  enum: [correct, incorrect]
+                  description: correct=学生自评做对；incorrect=学生自评做错
+      responses:
+        '200':
+          description: 自评已落库
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        nullable: true
+        '400':
+          description: cardId/lessonId/subjectId/questionId 非正整数、questionN/questionText 缺失或 assessment 非法
+
   /practice/hint:
     post:
       tags: [Practice]
@@ -3640,8 +3706,7 @@ paths:
                           errorBookId:
                             type: integer
                             nullable: true
-                            description: correct 清零无错题本 id 时为 null
-                        required: [errorBookId]
+                            description: incorrect 时返回写入/复用的错题本 id；correct 清零时省略该键（缺键按 null 理解）
         '400':
           description: source/assessment 非法或 questionId/subjectId 非正整数
         '404':
@@ -4127,9 +4192,14 @@ paths:
       description: >-
         考试结果（student JWT）：仅 submitted 会话可查，in_progress 409
         （code=4103）。items JOIN questions 带解析：逐题
-        isCorrect（0|1）、answerText、analysis（判题题解）与
-        explanation（题库解析）；内嵌与交卷汇总同构的
-        correctCount/totalCount/accuracy。
+        isCorrect（0|1|null，null=主观题待自评）、answerText、
+        answer（参考答案，自评对照展示）、needsSelfAssessment（主观题待自评）、
+        selfAssessment（该生最近一次自评 correct|incorrect|null）、
+        analysis（判题题解）与 explanation（题库解析）；内嵌与交卷汇总同构的
+        correctCount/totalCount/accuracy/subjectiveCount——主观题
+        （self_assess 模式 is_correct=NULL）不计对错，correctCount/accuracy
+        只算客观题。跨模式口径：subjectiveCount 按 is_correct NULL 推断，
+        遗留 ai 模式已判主观行（is_correct 非 NULL）计为客观错题。
       operationId: getExamResults
       security: [{ bearerAuth: [] }]
       parameters:
@@ -5893,7 +5963,7 @@ components:
 
     ExamSummary:
       type: object
-      description: 交卷汇总（submit 响应；results 内嵌同构字段）
+      description: 交卷汇总（submit 响应；results 内嵌同构字段）——主观题不计对错，correctCount/accuracy 只算客观题
       properties:
         correctCount:
           type: integer
@@ -5903,8 +5973,11 @@ components:
           description: 总题数（题单长度）
         accuracy:
           type: number
-          description: 正确率（百分比一位小数，如 33.3）
-      required: [correctCount, totalCount, accuracy]
+          description: 正确率（百分比一位小数，如 33.3；分母为客观题数，客观题为 0 时取 0）
+        subjectiveCount:
+          type: integer
+          description: 主观题数（is_correct NULL 计数，self_assess 模式不判对错；遗留 ai 模式已判主观行按客观错题计）
+      required: [correctCount, totalCount, accuracy, subjectiveCount]
 
     ExamResultItem:
       type: object
@@ -5933,8 +6006,21 @@ components:
           description: 学生作答文本（未作答为 null）
         isCorrect:
           type: integer
+          nullable: true
           enum: [0, 1]
-          description: 对错（0=错，1=对；number 而非 boolean——未作答按错计落 0）
+          description: 对错（0=错，1=对；number 而非 boolean——未作答按错计落 0；null=主观题待自评）
+        answer:
+          type: string
+          nullable: true
+          description: 参考答案（主观题自评对照展示）
+        needsSelfAssessment:
+          type: boolean
+          description: true=主观题待自评（is_correct NULL）
+        selfAssessment:
+          type: string
+          nullable: true
+          enum: [correct, incorrect]
+          description: 该生最近一次自评（question_self_assessments 留痕）；未自评为 null
         analysis:
           type: string
           nullable: true
@@ -5943,7 +6029,7 @@ components:
           type: string
           nullable: true
           description: 题库解析
-      required: [questionId, questionNo, text, type, options, answerText, isCorrect, analysis, explanation]
+      required: [questionId, questionNo, text, type, options, answerText, isCorrect, answer, needsSelfAssessment, selfAssessment, analysis, explanation]
 
     ExamResults:
       type: object
