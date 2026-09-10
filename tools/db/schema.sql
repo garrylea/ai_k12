@@ -218,12 +218,14 @@ CREATE TABLE IF NOT EXISTS questions (
   options TEXT DEFAULT NULL,
   answer TEXT NOT NULL,
   explanation TEXT DEFAULT NULL,
+  approach TEXT DEFAULT NULL,                       -- 解题思路（方法/切入点概述；折回自 migrations/2026-09-10_add_questions_approach_verified.sql）
   material_text TEXT DEFAULT NULL,
   material_url TEXT DEFAULT NULL,
   grade_band VARCHAR(20) DEFAULT NULL,
   source VARCHAR(200) DEFAULT NULL,
   source_year SMALLINT DEFAULT NULL,
   content_hash CHAR(64) DEFAULT NULL,
+  answer_verified TINYINT(1) NOT NULL DEFAULT 0,    -- 人工/AI 核验导入标记（answer_importer 置 1）
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
