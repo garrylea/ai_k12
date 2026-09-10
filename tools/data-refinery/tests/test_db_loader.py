@@ -845,7 +845,7 @@ class TestBusinessDataSummaryVerifiedGuard:
     def test_column_missing_not_counted(self):
         from db_loader import DbLoader
         loader, _ = _make_loader_seq({})
-        loader._table_exists = lambda t: False
+        loader._table_exists = lambda t: t == "questions"
         loader._column_exists = lambda t, c: False
         summary = loader.business_data_summary(reset_cards=False, reset_questions=True)
         assert DbLoader.VERIFIED_QUESTIONS_KEY not in summary
