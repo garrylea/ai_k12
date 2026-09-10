@@ -581,7 +581,7 @@ python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty -
 
 **回写语义**：`answer`/`approach`/`explanation` 提供了非空值即覆盖；`type` 仅在标注且与原值不同时改；任一字段实际写入 → `answer_verified=1`（人工/AI 核验标记）；无变化的记录不发 UPDATE（幂等）。
 
-**安全须知**：默认 dry-run；`--apply` 需交互输 `yes`；`--limit` 默认 500（超出拒绝）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。
+**安全须知**：默认 dry-run；`--apply` 需交互输 `yes`；`--limit` 默认 500——**导入**时超过即拒绝，**导出**时取前 N 条（达到上限会打印截断警告，需调大后重导）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。另注：`db_loader` 的 full-reload 会把 `answer_verified=1` 计入守卫，未被 purge 时中止，不会静默覆盖已核验内容。
 
 ## 5. 推荐工作流
 

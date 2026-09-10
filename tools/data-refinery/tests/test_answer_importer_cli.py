@@ -28,6 +28,10 @@ class TestArgs:
         with pytest.raises(SystemExit):
             parse_args(["--records", "a.jsonl", "--doc", "b.md"])
 
+    def test_export_records_mutually_exclusive(self):
+        with pytest.raises(SystemExit):
+            parse_args(["--export", "--records", "a.jsonl"])
+
 
 class TestParseIntSet:
     def test_list_and_range(self):

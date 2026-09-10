@@ -44,13 +44,13 @@ def parse_args(argv=None):
     src = p.add_mutually_exclusive_group()
     src.add_argument("--records", help="JSONL 输入路径")
     src.add_argument("--doc", help="Markdown 按卷答案文档路径")
-    p.add_argument("--export", action="store_true", help="导出待补模板（配合 --where/--out）")
+    src.add_argument("--export", action="store_true", help="导出待补模板（配合 --where/--out）")
     p.add_argument("--out", help="导出目标路径（--export 必填）")
     p.add_argument("--paper-id", type=int, default=None, help="试卷 id（重名时直接指定）")
     p.add_argument("--paper-title", default=None,
                    help="试卷标题（唯一命中则解析为 paper_id；--records/--doc 均可配合）")
     p.add_argument("--question-id", default=None, help="主键选择器，如 1,2,10-20")
-    p.add_argument("--question-no", default=None, help="印刷题号（须配合 --paper-id）")
+    p.add_argument("--question-no", default=None, help="印刷题号（须配合 --paper-id 或可唯一命中的 --paper-title）")
     p.add_argument("--where", dest="where", default=None,
                    help="缺口条件，逗号分隔：" + "/".join(GAP_CHOICES))
     p.add_argument("--source", default=None, help="来源关键词（LIKE）")
@@ -289,6 +289,8 @@ def _run(conn, args) -> int:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(build_export_jsonl(rows))
         print(f"已导出 {len(rows)} 题 -> {args.out}")
+        if len(rows) >= args.limit:
+            print(f"[警告] 导出达到 --limit {args.limit} 上限，可能被截断；如需完整缺口请调大 --limit 后重导。")
         return 0
 
     if args.records:
@@ -324,7 +326,11 @@ def _run(conn, args) -> int:
         print("（无变化，未写入——幂等重跑。）")
         return 0
 
-    answer = input(f"确认写入 {len(diff)} 题？输入 yes 执行：").strip()
+    try:
+        answer = input(f"确认写入 {len(diff)} 题？输入 yes 执行：").strip()
+    except EOFError:
+        print("已取消（未收到确认输入；交互式终端输入 yes，或先 `echo yes |` 再执行）。")
+        return 1
     if answer != "yes":
         print("已取消。")
         return 1
@@ -352,7 +358,7 @@ def main(argv=None) -> int:
     try:
         try:
             return _run(conn, args)
-        except (AnswerRecordError, AnswerDocError, ValueError) as e:
+        except (AnswerRecordError, AnswerDocError, ValueError, OSError) as e:
             print(f"错误：{e}", file=sys.stderr)
             return 2
     finally:
