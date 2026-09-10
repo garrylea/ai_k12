@@ -22,7 +22,7 @@ interface Props {
   /** 提示缓存（key = 复合题号 q.n）：session 内命中即直显，省一次后端请求 */
   hints: Record<string, string>;
   onSubmit: (questionText: string, studentAnswer: string, n: string) => Promise<{
-    isCorrect: boolean; method: string; analysis?: string | null; errorType?: string | null;
+    isCorrect: boolean | null; method: string; analysis?: string | null; errorType?: string | null;
   }>;
   /** 拉取提示：父层调 /practice/hint（后端查 cards.hints 缓存，未命中 AI 生成并写回）并 setHint 入 store */
   onRequestHint: (questionText: string, n: string) => Promise<void>;

@@ -1,8 +1,8 @@
 // apps/web/src/components/business/answer/QuestionRunner.repro.test.tsx
 // 复现测试：切题（上一题回退）后，之前已作答的答案应被回填，不丢失。
 // 场景对应 bug 报告：专项训练/考试/错题练习时回到上一题看到作答空白。
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useMemo, useState } from 'react';
 
@@ -157,3 +157,78 @@ describe('QuestionRunner 回看上一题保留作答（bug 复现）', () => {
   });
 });
 
+
+// 主观题同步提交 + 强制自评（self_assess 模式）：提交后判题即时返回 needsSelfAssessment，
+// 进入自评视图（参考答案+解析+我做对了/我做错了），必须自评后才放行。
+// 题目数组用模块级常量（真实页面 entries/session 不变即引用稳定，等价 useMemo）。
+const SA_PROOF_QUESTIONS: RunnerQuestion[] = [
+  { n: '1', text: '证明题题干', type: 'proof' },
+  { n: '2', text: '第二题题干', type: 'proof' },
+];
+
+const SA_SHORT_QUESTIONS: RunnerQuestion[] = [
+  { n: '1', text: '解答题题干', type: 'short_answer' },
+];
+
+describe('主观题自评（self_assess 模式）', () => {
+  it('提交后进入自评视图，点「我做对了」才放行下一题', async () => {
+    const user = userEvent.setup();
+    const onSelfAssess = vi.fn(async () => {});
+    render(
+      <QuestionRunner
+        questions={SA_PROOF_QUESTIONS}
+        subjectId={1}
+        draftKeyPrefix="sa"
+        variant="embedded"
+        draftDisabled
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({
+          isCorrect: null, method: 'self_assess', needsSelfAssessment: true,
+          referenceAnswer: '参考证明过程', explanation: '解析内容',
+        })}
+        onSelfAssess={onSelfAssess}
+        onFinish={() => {}}
+      />,
+    );
+    await user.type(screen.getByRole('textbox'), '我的证明');
+    await user.click(screen.getByTitle('提交'));
+    // 自评视图出现：参考答案 + 自评按钮，未自评前不放行下一题
+    expect(await screen.findByText('参考证明过程')).toBeTruthy();
+    expect(screen.queryByText('第二题题干')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '我做对了' }));
+    expect(onSelfAssess).toHaveBeenCalledWith(
+      expect.objectContaining({ n: '1' }),
+      'correct',
+      expect.objectContaining({ studentAnswer: '我的证明' }),
+    );
+    expect(await screen.findByText('第二题题干')).toBeTruthy();
+  });
+
+  it('未提供 onSelfAssess 也强制选择（自评不落库但不可跳过）', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    render(
+      <QuestionRunner
+        questions={SA_SHORT_QUESTIONS}
+        subjectId={1}
+        draftKeyPrefix="sa2"
+        variant="embedded"
+        draftDisabled
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({
+          isCorrect: null, method: 'self_assess', needsSelfAssessment: true, referenceAnswer: 'x=1',
+        })}
+        onFinish={onFinish}
+      />,
+    );
+    await user.type(screen.getByRole('textbox'), '解答');
+    await user.click(screen.getByTitle('提交'));
+    // 进入自评视图；不做选择时 onFinish 不触发
+    expect(await screen.findByText('x=1')).toBeTruthy();
+    expect(onFinish).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '我做错了' }));
+    await waitFor(() => {
+      expect(onFinish).toHaveBeenCalledWith(
+        expect.objectContaining({ '1': expect.objectContaining({ isCorrect: false, method: 'self_assess' }) }),
+      );
+    });
+  });
+});
