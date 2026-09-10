@@ -19,6 +19,10 @@ interface AnswerRecord {
   studentAnswer: string;
   /** 判定失败（超时/服务异常）的前端标记 */
   failed?: boolean;
+  /** 主观题待自评（考试结果页）：渲染自评按钮 */
+  needsSelfAssess?: boolean;
+  /** 已有自评结果（重进结果页恢复）：'correct' | 'incorrect' */
+  selfAssessment?: 'correct' | 'incorrect' | null;
 }
 
 interface Props {
@@ -33,6 +37,10 @@ interface Props {
   questionIdOf?: (n: string) => number | null;
   /** 单题刷新等待（父层注入 waitTrainingExplanation），120s 倒计时。 */
   onWaitExplanation?: (questionId: number) => Promise<string | null>;
+  /** 主观题参考答案（key = q.n；考试结果页传，训练结果页不传——自评时已看过） */
+  referenceAnswers?: Record<string, string | null>;
+  /** 结果页自评提交（考试结果页传）；返回后父层更新 answers 消除 needsSelfAssess */
+  onSelfAssess?: (n: string, assessment: 'correct' | 'incorrect') => Promise<void>;
 }
 
 /** 刷新等待上限（秒），与后端 explanation-wait 端点 120s 对齐。 */
@@ -52,12 +60,15 @@ export function AnswerResultList({
   initialExplanations = {},
   questionIdOf,
   onWaitExplanation,
+  referenceAnswers,
+  onSelfAssess,
 }: Props) {
   const [expandedN, setExpandedN] = useState<string | null>(null);
   // 解析缓存：初值来自父层末题后批量拉取；单题刷新后回写。
   const [explanations, setExplanations] = useState<Record<string, string | null>>(initialExplanations);
   const [refreshingN, setRefreshingN] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [assessingN, setAssessingN] = useState<string | null>(null);
 
   // 刷新倒计时（mm:ss），请求返回即停。
   useEffect(() => {
@@ -97,9 +108,20 @@ export function AnswerResultList({
     }
   };
 
+  const handleSelfAssess = async (n: string, assessment: 'correct' | 'incorrect') => {
+    if (!onSelfAssess || assessingN) return;
+    setAssessingN(n);
+    try {
+      await onSelfAssess(n, assessment);
+    } finally {
+      setAssessingN(null);
+    }
+  };
+
   const failedCount = questions.filter(q => answers[q.n]?.failed).length;
-  const correctCount = questions.filter(q => answers[q.n]?.isCorrect && !answers[q.n]?.failed).length;
-  const wrongCount = questions.length - correctCount - failedCount;
+  const subjectiveCount = questions.filter(q => answers[q.n]?.method === 'self_assess' || answers[q.n]?.needsSelfAssess || answers[q.n]?.method === 'unanswered').length;
+  const correctCount = questions.filter(q => answers[q.n]?.isCorrect && !answers[q.n]?.failed && answers[q.n]?.method !== 'self_assess' && !answers[q.n]?.needsSelfAssess && answers[q.n]?.method !== 'unanswered').length;
+  const wrongCount = questions.length - correctCount - failedCount - subjectiveCount;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
@@ -123,6 +145,12 @@ export function AnswerResultList({
                 <span className="text-[13px] text-[var(--text-secondary)]">未判定 {failedCount}</span>
               </div>
             )}
+            {subjectiveCount > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[var(--brand-500)]" />
+                <span className="text-[13px] text-[var(--text-secondary)]">主观 {subjectiveCount}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -140,14 +168,23 @@ export function AnswerResultList({
               const expanded = expandedN === q.n;
               const explanation = explanations[q.n] ?? null;
               const hasQuestionId = (questionIdOf?.(q.n) ?? null) != null;
+              const rec = a;
+              const subjective = !!rec?.needsSelfAssess || rec?.method === 'self_assess';
+              const noAnswer = rec?.method === 'unanswered';
               return (
                 <div key={q.n} className="bg-[var(--bg-card)] rounded-xl border border-[var(--bg-subtle)] overflow-hidden">
                   <div className="p-3.5 flex items-start gap-3">
                     {/* Status icon */}
-                    <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${failed ? 'bg-[var(--bg-subtle)]' : correct ? 'bg-[#E8F5EE]' : 'bg-[#FCE8E6]'}`}>
+                    <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${failed ? 'bg-[var(--bg-subtle)]' : subjective || noAnswer ? 'bg-[var(--brand-100)]' : correct ? 'bg-[#E8F5EE]' : 'bg-[#FCE8E6]'}`}>
                       {failed ? (
                         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="3" strokeLinecap="round">
                           <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                      ) : subjective || noAnswer ? (
+                        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--brand-500)" strokeWidth="2.5" strokeLinecap="round">
+                          <circle cx="12" cy="12" r="8" />
+                          <path d="M12 8v4" />
+                          <path d="M12 16h.01" />
                         </svg>
                       ) : correct ? (
                         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -179,6 +216,47 @@ export function AnswerResultList({
                           <span className="text-[13px] text-[var(--text-tertiary)]">（未作答）</span>
                         )}
                       </div>
+                      {/* 主观题：无对错状态；参考答案/解析展开 + （待自评时）自评按钮 */}
+                      {subjective && !failed && (
+                        <div className="mt-2.5 flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setExpandedN(expanded ? null : q.n)}
+                              className="px-4 py-1.5 rounded-lg border border-[var(--warning)] bg-[var(--brand-100)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors"
+                            >
+                              {expanded ? '收起解析' : '查看解析'}
+                            </button>
+                            {rec?.selfAssessment && (
+                              <span className="text-xs text-[var(--text-tertiary)]">已自评：{rec.selfAssessment === 'correct' ? '做对了' : '做错了'}</span>
+                            )}
+                          </div>
+                          {rec?.needsSelfAssess && onSelfAssess && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-[var(--text-secondary)]">对照参考答案，这题你做对了还是做错了？</span>
+                              <button
+                                onClick={() => void handleSelfAssess(q.n, 'incorrect')}
+                                disabled={assessingN != null}
+                                className="px-3 py-1.5 rounded-lg border border-[var(--error)] text-[var(--error)] text-xs font-medium hover:bg-[#FCE8E6] transition-colors disabled:opacity-40"
+                              >
+                                我做错了
+                              </button>
+                              <button
+                                onClick={() => void handleSelfAssess(q.n, 'correct')}
+                                disabled={assessingN != null}
+                                className="px-3 py-1.5 rounded-lg border border-[var(--success)] text-[var(--success)] text-xs font-medium hover:bg-[#E8F5EE] transition-colors disabled:opacity-40"
+                              >
+                                我做对了
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {/* 空答案守卫：不计对错 */}
+                      {noAnswer && !failed && !subjective && (
+                        <div className="mt-2.5">
+                          <span className="text-xs text-[var(--text-tertiary)]">该题暂无标准答案，不计入对错</span>
+                        </div>
+                      )}
                       {/* 判定失败提示 */}
                       {failed && (
                         <div className="mt-2 px-3 py-2 bg-[var(--bg-base)] rounded-lg">
@@ -186,7 +264,7 @@ export function AnswerResultList({
                         </div>
                       )}
                       {/* 解析（wrong only, non-failed）：有解析看解析 / 无解析有 questionId 可刷新 / 孤儿题暂无 */}
-                      {!correct && !failed && (
+                      {!correct && !failed && !subjective && !noAnswer && (
                         <div className="mt-2.5 flex items-center gap-2">
                           {explanation ? (
                             <button
@@ -214,8 +292,21 @@ export function AnswerResultList({
                       )}
                     </div>
                   </div>
+                  {/* 主观题展开：参考答案在上 */}
+                  {expanded && subjective && referenceAnswers?.[q.n] && (
+                    <div className="px-4 pb-1 pt-3.5 pl-[50px]">
+                      <div className="p-3.5 bg-[var(--bg-base)] rounded-[10px]">
+                        <div className="text-xs font-semibold text-[var(--text-tertiary)] mb-1.5">参考答案</div>
+                        <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
+                          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                            {preprocessMarkdown(referenceAnswers[q.n]!)}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {/* Expanded explanation */}
-                  {expanded && !correct && !failed && explanation && (
+                  {expanded && !failed && (subjective ? !!explanation : (!correct && explanation)) && (
                     <div className="px-4 pb-3.5 pl-[50px]">
                       <div className="p-3.5 bg-[var(--brand-100)] rounded-[10px] border-l-[3px] border-[var(--warning)]">
                         {a.errorType && (
