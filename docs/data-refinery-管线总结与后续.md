@@ -63,6 +63,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - **页码锚定 lesson_anchor**（2026-09-02 加）：TOC 模式挂卡前 `load_book_cards` 用 `LessonAnchor` 确定性修正章归属——章边界首选综述卡锚定（每章「第N章」标签卡最小 md 页 = 章头页，零偏移误差、取 min 免疫错章综述标签；兜底首节 printed + 偏移众数 − 3 余量）；规则 A 错章重写（content「复习题 N」> 时间线活跃节 > 标题匹配 > 章综述兜底）/ B 同名消歧（「小结」「数学活动」按页所在章，修各章同名 lesson 全挂第一个的 bug）/ C 复习题归一（「复习题 N」挂该章「小结」，不建 TOC 外 lesson）。无 TOC/对不上整体退化纯标签匹配。extract/publish/jsonl 不动；锚定每次 load 重算，重处理任意页不影响结构。观测日志 `[anchor] offset/corrected/disambiguated/normalized`。
 - **cards sort_order 跨页全局重排**：每 lesson 内 1..N（抽取的页内序会碰撞 `uniq_cards_lesson_sort`）。
 - **full-reload 幂等**：`reset_cards()` 删 `textbook_versions`（级联清 cards/lessons/units/semesters）+ `reset_questions()` 删 questions，再重插。结构 find-or-create。每次跑都全量重载（无增量）。
+- **full-reload 守卫**：`business_data_summary` 额外把 `questions.answer_verified=1`（answer_importer 写入的人工/AI 核验内容）计入 blocking——未加 `--purge-business-data` 时 full-reload 会中止而非静默丢弃；确认要丢弃再显式 purge。
 
 ### DB
 - `ai_k12` 库，业务用户 `ai_k12/ai_k12`（`.env` 的 `DB_*`）。

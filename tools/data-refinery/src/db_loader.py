@@ -330,6 +330,13 @@ class DbLoader:
             "SELECT 1 FROM information_schema.tables"
             " WHERE table_schema=DATABASE() AND table_name=%s", (table,)))
 
+    def _column_exists(self, table: str, column: str) -> bool:
+        """information_schema 查列是否存在（老库可能未跑迁移，如 questions.answer_verified）。"""
+        return bool(self._query(
+            "SELECT 1 FROM information_schema.columns"
+            " WHERE table_schema=DATABASE() AND table_name=%s AND column_name=%s",
+            (table, column)))
+
     def _delete(self, sql, args=None) -> int:
         """执行 DELETE 并返回影响行数。"""
         with self._conn.cursor() as cur:
@@ -344,6 +351,8 @@ class DbLoader:
     #   progress.textbook_version_id RESTRICT；homeworks.lesson_id CASCADE 会连带删 homeworks，
     #   再被 homework_submissions.homework_id RESTRICT 挡住。
     QUESTIONS_BLOCKERS = ["answers", "aux_error_books", "main_error_books", "variation_questions", "exam_answers"]
+    # 人工/AI 核验内容（answer_importer 写入）的守卫计数键（非真实表名，purge 不按其删表）
+    VERIFIED_QUESTIONS_KEY = "questions(answer_verified=1)"
     # practice_results.card_id 是 ON DELETE CASCADE——不挡 DELETE 但会**静默连带删除**
     # 学生练习记录，必须进守卫名单（与 homework_submissions 同理）
     CARDS_BLOCKERS = ["homework_submissions", "practice_results"]  # progress 单独处理（只清 textbook_version_id 非空行）
@@ -358,6 +367,14 @@ class DbLoader:
             # error_redo_logs 多态挂在错题本上，错题本清空时一并清
             if self._table_exists("error_redo_logs"):
                 counts["error_redo_logs"] = self._count("error_redo_logs")
+            # 人工/AI 核验内容（answer_importer 写入）无 FK 挡，但 full-reload 会静默丢弃；
+            # 计入守卫，让用户显式走 --purge-business-data 或改用增量入库
+            if (self._table_exists("questions")
+                    and self._column_exists("questions", "answer_verified")):
+                verified = self._query(
+                    "SELECT COUNT(*) FROM questions WHERE answer_verified=1")[0][0]
+                if verified:
+                    counts[self.VERIFIED_QUESTIONS_KEY] = verified
         if reset_cards:
             for t in self.CARDS_BLOCKERS:
                 if self._table_exists(t):

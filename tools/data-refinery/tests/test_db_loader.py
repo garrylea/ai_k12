@@ -818,3 +818,34 @@ class TestLoadQuestionsPaperGrouping:
         assert n == 1
         assert all("exam_papers" not in sql and "paper_questions" not in sql
                    for sql, _ in queries)
+
+
+class TestBusinessDataSummaryVerifiedGuard:
+    def test_verified_rows_counted(self):
+        from db_loader import DbLoader
+        loader, _ = _make_loader_seq({
+            "SELECT COUNT(*) FROM questions WHERE answer_verified=1": [[(5,)]],
+        })
+        # 仅 questions 表存在（blockers 表不存在），_column_exists 恒真
+        loader._table_exists = lambda t: t == "questions"
+        loader._column_exists = lambda t, c: True
+        summary = loader.business_data_summary(reset_cards=False, reset_questions=True)
+        assert summary.get(DbLoader.VERIFIED_QUESTIONS_KEY) == 5
+
+    def test_verified_zero_not_counted(self):
+        from db_loader import DbLoader
+        loader, _ = _make_loader_seq({
+            "SELECT COUNT(*) FROM questions WHERE answer_verified=1": [[(0,)]],
+        })
+        loader._table_exists = lambda t: t == "questions"
+        loader._column_exists = lambda t, c: True
+        summary = loader.business_data_summary(reset_cards=False, reset_questions=True)
+        assert DbLoader.VERIFIED_QUESTIONS_KEY not in summary
+
+    def test_column_missing_not_counted(self):
+        from db_loader import DbLoader
+        loader, _ = _make_loader_seq({})
+        loader._table_exists = lambda t: False
+        loader._column_exists = lambda t, c: False
+        summary = loader.business_data_summary(reset_cards=False, reset_questions=True)
+        assert DbLoader.VERIFIED_QUESTIONS_KEY not in summary

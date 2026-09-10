@@ -175,7 +175,7 @@ def main(argv=None):
             blocking = {t: n for t, n in loader.business_data_summary(
                 reset_cards, reset_questions).items() if n > 0}
             if blocking and not args.purge_business_data:
-                print("[ERROR] 检测到业务数据引用，full-reload 会被外键挡住：", flush=True)
+                print("[ERROR] 检测到业务数据/人工核验内容，full-reload 会丢弃（业务数据还会被外键挡住）：", flush=True)
                 for t, n in blocking.items():
                     print(f"  - {t}: {n} 行", flush=True)
                 print("两种选择：", flush=True)
