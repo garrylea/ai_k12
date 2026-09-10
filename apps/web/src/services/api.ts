@@ -587,10 +587,17 @@ export async function* streamExtraction(
 
 export interface JudgeResult {
   questionId: number | null;
-  isCorrect: boolean;
-  method: 'exact' | 'ai';
+  /** null = 未判定（主观题待自评 / 客观题空答案不计对错） */
+  isCorrect: boolean | null;
+  method: 'exact' | 'ai' | 'self_assess' | 'unanswered';
   errorType?: 'logic' | 'calculation' | 'format' | 'missing' | null;
   errorBookId?: number;
+  /** 主观题 self_assess 模式：渲染自评 UI，参考答案/解析随判题返回 */
+  needsSelfAssessment?: boolean;
+  referenceAnswer?: string | null;
+  explanation?: string | null;
+  /** 客观题空答案：不计对错（中性展示） */
+  noStandardAnswer?: boolean;
 }
 
 export function judgePractice(payload: {
@@ -866,6 +873,37 @@ export function waitTrainingExplanation(questionId: number): Promise<{ explanati
   return fetchApi<{ explanation: string | null }>(`/training/questions/${questionId}/explanation-wait`);
 }
 
+/** 主观题学生自评（self_assess 模式）：incorrect 入错题本 / correct 清零。 */
+export function selfAssessTraining(payload: {
+  questionId: number;
+  subjectId: number;
+  assessment: 'correct' | 'incorrect';
+  source: 'targeted' | 'error_practice' | 'exam';
+  sourceRefId?: number;
+}): Promise<{ errorBookId?: number }> {
+  return fetchApi<{ errorBookId?: number }>('/training/self-assess', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 课堂练习主观题自评：补写 practice_results + 留痕 + 错题本写入/清零。 */
+export function selfAssessPractice(payload: {
+  cardId: number;
+  lessonId: number;
+  subjectId: number;
+  questionN: string;
+  questionText: string;
+  questionId: number | null;
+  studentAnswer: string;
+  assessment: 'correct' | 'incorrect';
+}): Promise<void> {
+  return fetchApi<void>('/practice/self-assess', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // --- Training: targeted practice（专项练习，Task 8 端点） ---
 
 export interface TrainingKnowledgePoint {
@@ -991,6 +1029,8 @@ export interface ExamSummary {
   correctCount: number;
   totalCount: number;
   accuracy: number;
+  /** 主观题题数（self_assess 模式不判对错） */
+  subjectiveCount?: number;
 }
 
 export interface ExamResultItem {
@@ -1000,9 +1040,14 @@ export interface ExamResultItem {
   type: string;
   options: ExamQuestionOptions;
   answerText: string | null;
-  isCorrect: number; // 0 | 1
+  /** null = 主观题待自评 */
+  isCorrect: number | null;
   analysis: string | null;
   explanation: string | null;
+  /** 参考答案 */
+  answer?: string | null;
+  needsSelfAssessment?: boolean;
+  selfAssessment?: 'correct' | 'incorrect' | null;
 }
 
 export function getExamPapers(params: {
