@@ -524,6 +524,65 @@ card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_mer
 
 ---
 
+### 4.8 answer_importer — 题目内容回写（答案/解题思路/解析/题型）
+
+把人工或 AI 产出的题目内容回写 `questions` 表：`answer`（答案）、`approach`（解题思路）、`explanation`（详细解析）、`type`（题型）。默认 dry-run 只出 diff 报告，`--apply` 才写入；幂等可重跑。
+
+**输入一：JSONL（推荐，可编程批量）** 每行一条记录：
+
+```jsonl
+{"question_id": 12345, "answer": "B", "approach": "先配方求顶点，再取对称轴处最值", "explanation": "完整过程…"}
+{"paper_id": 3, "question_no": 17, "approach": "利用相似三角形转化", "type": "calculation"}
+{"content_hash": "ab12…（64 位十六进制）", "explanation": "……"}
+```
+
+- 定位键三选一：`question_id` ｜ `paper_id` + `question_no` ｜ `content_hash`。
+- 内容字段至少一个：`answer` / `approach` / `explanation` / `type`；`note` 可选（只回显报告）。
+- `null`/空串=不改（不提供「清空字段」）。
+
+**输入二：Markdown 按卷文档**
+
+```markdown
+# 试卷：2024 海淀 初三 模拟二
+
+## 1
+答案：B
+思路：由顶点式 $y=(x-2)^2+3$ 知顶点为 $(2,3)$，开口向上故在对称轴处取最小值。
+解析：完整分步过程……
+
+## 17
+答案：解：设……所以 $x=2$。
+题型：calculation
+```
+
+每题必写「答案」；「思路」「解析」「题型」可选；多行直接换行续写（空行断开）；公式用 `$...$`。
+
+**常用命令**：
+
+```bash
+python src/answer_importer_cli.py --records edits.jsonl                 # dry-run：diff 报告，不写库
+python src/answer_importer_cli.py --records edits.jsonl --apply         # 确认后写入（输 yes）
+python src/answer_importer_cli.py --doc 答案.md --paper-id 3
+python src/answer_importer_cli.py --export --where answer_empty --out to_fill.jsonl
+python src/answer_importer_cli.py --list-papers 海淀                    # 标题重名时列候选
+```
+
+**选择器 `--where`（只圈范围，不承载内容）**：`--question-id 1,2,10-20`、`--paper-id` / `--paper-title`（+`--question-no`）、`--where answer_empty,approach_empty,explanation_empty`、`--source`（LIKE）/`--type`/`--difficulty`/`--content-hash`。
+
+**导出待补模板 → 填写 → 回导**（批量补缺口的两步法）：
+
+```bash
+python src/answer_importer_cli.py --export --where answer_empty --out to_fill.jsonl
+# 填写 to_fill.jsonl 顶层的 answer/approach/explanation（_ref 是只读参考，不要改）
+python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty --apply
+```
+
+导入时 `--where` 会校验每条记录的目标题仍满足条件，不满足的跳过并报告。
+
+**回写语义**：`answer`/`approach`/`explanation` 提供了非空值即覆盖；`type` 仅在标注且与原值不同时改；任一字段实际写入 → `answer_verified=1`（人工/AI 核验标记）；无变化的记录不发 UPDATE（幂等）。
+
+**安全须知**：默认 dry-run；`--apply` 需交互输 `yes`；`--limit` 默认 500（超出拒绝）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。
+
 ## 5. 推荐工作流
 
 ### 5.1 一站式（pipeline_cli，推荐）

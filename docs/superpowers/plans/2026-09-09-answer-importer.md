@@ -1,5 +1,7 @@
 # answer_importer 答案补全导入工具实现计划
 
+> **已扩展取代**：本计划的三层架构、dry-run/幂等约定已并入 `docs/superpowers/specs/2026-09-10-question-content-importer-design.md`（新增 `questions.approach` 解题思路列、JSONL 主输入、`--where` 选择器与 `--export` 模板）。实现以新 spec 对应的计划为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** data-refinery 新增 `answer_importer` CLI——把「人工+AI 产出的试卷答案 Markdown 文档」匹配到库内试卷题目并回写 `questions.answer/explanation/type`，dry-run 出 diff、确认后写入、幂等可重跑。

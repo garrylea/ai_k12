@@ -143,7 +143,7 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 
 `refinery_cli.py` 串联 publish + db_loader 一键执行；DB 由 `tools/db/install_mysql.sh` 初始化（schema + subjects seed）。
 
-**现状**：管线已端到端跑通（refinery 237 tests 全绿、crawler 200 tests；2026-08-26 实测 `refinery_cli --purge-business-data` 全量重载 342 cards + 447 questions 成功，含幂等重跑与守卫复验）。详细总结与后续见 `docs/data-refinery-管线总结与后续.md`，使用见 `docs/data-refinery-使用手册.md`。
+**现状**：管线已端到端跑通（refinery 237 tests 全绿、crawler 200 tests；2026-08-26 实测 `refinery_cli --purge-business-data` 全量重载 342 cards + 447 questions 成功，含幂等重跑与守卫复验）。详细总结与后续见 `docs/data-refinery-管线总结与后续.md`，使用见 `docs/data-refinery-使用手册.md`。题目内容回写工具 `answer_importer`（2026-09-10）在 `tools/data-refinery/src/`：JSONL/Markdown 输入，按单题/批量/按卷/按缺口回写 questions 的 answer/approach/explanation/type（`--export` 导出待补模板，`--apply` 幂等写入）。
 
 **改代码前必读的关键约定**（详见上述总结文档 §3）：
 - LLM 配置用 `.env` 的 `LLM_BASE_URL`/`LLM_AUTH_TOKEN`（refinery 专属），**不要用 `ANTHROPIC_*`**（会被 shell 里 Claude Code 覆盖）。当前用本地 llama.cpp `Qwen3.8-27B`（`LLM_PROVIDER=local`、`LLM_BASE_URL=http://192.168.1.8:12345/v1`，2026-08-26 起 Card 标注/目录解析走本地模型；`.env` 里注释保留了原远程 DeepSeek `deepseek-v4-flash` 配置可切回）。
