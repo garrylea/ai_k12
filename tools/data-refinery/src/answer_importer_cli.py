@@ -47,7 +47,8 @@ def parse_args(argv=None):
     p.add_argument("--export", action="store_true", help="导出待补模板（配合 --where/--out）")
     p.add_argument("--out", help="导出目标路径（--export 必填）")
     p.add_argument("--paper-id", type=int, default=None, help="试卷 id（重名时直接指定）")
-    p.add_argument("--paper-title", default=None, help="试卷标题（--doc 未带 --paper-id 时定位用）")
+    p.add_argument("--paper-title", default=None,
+                   help="试卷标题（唯一命中则解析为 paper_id；--records/--doc 均可配合）")
     p.add_argument("--question-id", default=None, help="主键选择器，如 1,2,10-20")
     p.add_argument("--question-no", default=None, help="印刷题号（须配合 --paper-id）")
     p.add_argument("--where", dest="where", default=None,
@@ -80,12 +81,13 @@ def parse_int_set(spec: str) -> set[int]:
     return result
 
 
-def build_scope(args) -> ScopeFilter:
+def build_scope(args, paper_id: int | None = None) -> ScopeFilter:
     scope = ScopeFilter()
     if args.question_id:
         scope.question_ids = parse_int_set(args.question_id)
-    if args.paper_id:
-        scope.paper_ids = [args.paper_id]
+    pid = paper_id if paper_id is not None else args.paper_id
+    if pid:
+        scope.paper_ids = [pid]
     if args.question_no:
         scope.question_nos = parse_int_set(args.question_no)
     if args.where:
@@ -246,16 +248,14 @@ def load_export_rows(conn, scope: ScopeFilter, limit: int) -> list[ExportRow]:
     return rows
 
 
-def _records_from_doc(conn, args):
+def _records_from_doc(conn, args, paper_id: int | None):
     """解析 Markdown 并定位试卷。返回 (records, target_label) 或 (None, None)。"""
     doc = parse_answer_doc(open(args.doc, encoding="utf-8").read())
-    paper_id = args.paper_id
     if paper_id is None:
-        keyword = args.paper_title or doc.title
-        papers = list(load_papers(conn, keyword))
-        paper_id, candidates = locate_paper(keyword, papers)
+        papers = list(load_papers(conn, doc.title))
+        paper_id, candidates = locate_paper(doc.title, papers)
         if paper_id is None:
-            print(f"试卷「{keyword}」无法唯一定位，候选如下（用 --paper-id 指定）：")
+            print(f"试卷「{doc.title}」无法唯一定位，候选如下（用 --paper-id 指定）：")
             for title, pid, count in (candidates or papers):
                 print(f"  #{pid}\t{count} 题\t{title}")
             return None, None
@@ -268,7 +268,18 @@ def _run(conn, args) -> int:
             print(f"  #{pid}\t{count} 题\t{title}")
         return 0
 
-    scope = build_scope(args)
+    # 解析试卷范围：--paper-id 优先；否则 --paper-title 经 DB 唯一命中解析为 paper_id
+    resolved_paper_id = args.paper_id
+    if resolved_paper_id is None and args.paper_title:
+        papers = list(load_papers(conn, args.paper_title))
+        resolved_paper_id, candidates = locate_paper(args.paper_title, papers)
+        if resolved_paper_id is None:
+            print(f"试卷「{args.paper_title}」无法唯一定位，候选如下（用 --paper-id 指定）：")
+            for title, pid, count in (candidates or papers):
+                print(f"  #{pid}\t{count} 题\t{title}")
+            return 2
+
+    scope = build_scope(args, paper_id=resolved_paper_id)
 
     if args.export:
         if not args.out:
@@ -284,7 +295,7 @@ def _run(conn, args) -> int:
         records = parse_answer_records(open(args.records, encoding="utf-8").read())
         target = args.records
     elif args.doc:
-        records, target = _records_from_doc(conn, args)
+        records, target = _records_from_doc(conn, args, resolved_paper_id)
         if records is None:
             return 2
     else:

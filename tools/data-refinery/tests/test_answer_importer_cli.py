@@ -104,3 +104,20 @@ class TestExportSql:
             ScopeFilter(paper_ids=[3], gaps={"answer_empty"}), limit=5)
         assert "LEFT JOIN paper_questions" in sql
         assert params == [3, 3, 5]
+
+
+class TestBuildScopePaperResolution:
+    def test_resolved_paper_id_used(self):
+        args = parse_args(["--records", "a.jsonl"])
+        assert build_scope(args, paper_id=7).paper_ids == [7]
+
+    def test_paper_title_then_question_no(self):
+        # --paper-title 解析出 paper_id 后，--question-no 才能生效
+        args = parse_args(["--records", "a.jsonl", "--question-no", "1,3"])
+        scope = build_scope(args, paper_id=9)
+        assert scope.paper_ids == [9]
+        assert scope.question_nos == {1, 3}
+
+    def test_args_paper_id_still_used_without_param(self):
+        args = parse_args(["--records", "a.jsonl", "--paper-id", "3"])
+        assert build_scope(args).paper_ids == [3]
