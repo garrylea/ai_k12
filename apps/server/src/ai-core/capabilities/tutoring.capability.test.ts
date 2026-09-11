@@ -173,10 +173,8 @@ describe('TutoringCapability', () => {
   });
 
   // Task 14a: multimodal tutoring with image attachments
-  // P1: image tutoring is two-stage. capability.tutor() no longer overrides to
-  // a VL model on hasImage - images are transcribed separately (transcribeImage)
-  // and the confirmed text is tutored by the normal text model (qwen3.7-max).
-  it('tutoring uses the text model even with an image (P1)', async () => {
+  // 图片直接作为 image_url 部件送入辅导模型（不再两阶段）
+  it('tutoring uses the multimodal model even with an image', async () => {
     let capturedModel: string | undefined;
     const mockModelClient = {
       chat: async (req: any): Promise<ChatResponse> => {
@@ -198,7 +196,7 @@ describe('TutoringCapability', () => {
       attachments: [{ type: 'image', url: '/uploads/test.png', imageUrl: 'data:image/png;base64,abc123' }],
     });
 
-    expect(capturedModel).toBe('qwen3.7-max');
+    expect(capturedModel).toBe('qwen3.8-max');
     expect(result.message.type).toBe('socratic');
   });
 
@@ -208,7 +206,7 @@ describe('TutoringCapability', () => {
       chat: async (req: any): Promise<ChatResponse> => {
         capturedMessages = req.messages;
         return {
-          id: 'resp_vl2', model: 'qwen-vl-max',
+          id: 'resp_vl2', model: 'qwen3.8-max',
           content: '题目识别正确，我们一起解。',
           finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
         };

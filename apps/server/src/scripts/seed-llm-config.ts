@@ -3,7 +3,7 @@
  *
  * YAML 的 difficulty 细分规则合并：同 scene+subject 只保留第一条（DB 不存难度维度）。
  * 如 tutoring/math 有 difficulty [1,2] 与 [3] 两条，循环里第二条被 EXISTS 跳过，
- * 保留第一条（qwen3.7-max 主路由），符合"DB 不存难度"的合并决策。
+ * 保留第一条（qwen3.8-max 主路由），符合"DB 不存难度"的合并决策。
  *
  * 路由降级：若某条路由的 primary 模型未成功 seed（如 .env 缺 LOCAL_LLM_* 导致 local
  * 未配置），但 fallback 已 seed，则该路由以 fallback 顶上当 primary 落库并打 warning，

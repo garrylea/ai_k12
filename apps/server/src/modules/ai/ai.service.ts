@@ -7,8 +7,7 @@ import {
 } from '@nestjs/common';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { mapLLMErrorToClient } from '../../ai-core/infra/model-client/errors.js';
-import type { TutoringRequest, Attachment, StreamEvent, StructuredQuestionOutput, TranscribedProblem } from '../../ai-core/types.js';
-import { ConversationService } from '../../services/conversation/index.js';
+import type { TutoringRequest, Attachment, StreamEvent, StructuredQuestionOutput } from '../../ai-core/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { ExtractTasksRepository, QuestionsRepository } from '../../database/repositories/index.js';
 import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
@@ -26,7 +25,6 @@ export class AIService {
   constructor(
     private readonly tutoring: TutoringCapability,
     private readonly conversationsService: ConversationsService,
-    private readonly conversationService: ConversationService,
     private readonly filesRepo: UploadedFilesRepository,
     private readonly subjectsRepo: SubjectsRepository,
     private readonly questionsRepo: QuestionsRepository,
@@ -67,14 +65,9 @@ export class AIService {
   }
 
   /**
-   * Streaming tutor (P1: image two-stage flow). Branches by the dialogue's
-   * flow_state:
-   *   idle + image        -> transcribe (VL) -> confirm / select / unrecognizable
-   *   awaiting_selection  -> classify reply -> confirm (or reject "all" / unclear)
-   *   awaiting_confirmation + confirm     -> tutor on the pending question (qwen3.7-max)
-   *   awaiting_confirmation + reidentify  -> re-transcribe
-   *   awaiting_confirmation + correct     -> update pending question, re-confirm
-   *   idle + text (no image)              -> normal Socratic tutoring
+   * Streaming tutor. `idle + image` and `idle + text` both go straight to the
+   * Socratic tutoring path; images are attached to the user message as
+   * `image_url` parts by the capability (no transcription stage).
    * Pre-stream errors throw HttpException; mid-stream model errors are yielded
    * as `{type:'error'}` by the capability.
    */
@@ -84,32 +77,7 @@ export class AIService {
     const attachments = await this.resolveAttachments(dto, userId);
     const request = this.buildRequest(dto, userId, dialogueId, attachments);
 
-    const context = await this.conversationService.loadContext(dialogueId);
-    if (!context) throw new BadRequestException({ code: 1002, message: '会话不存在' });
-    const hasImage = attachments.some(a => !!a.imageUrl || (a.extractedImages && a.extractedImages.length > 0));
-
     try {
-      if (context.flowState === 'idle' && hasImage) {
-        yield* this.transcribeStage(dto, userId, request, context, attachments, signal);
-        return;
-      }
-      if (context.flowState === 'awaiting_selection') {
-        yield* this.selectionStage(dto, userId, request, context, signal);
-        return;
-      }
-      if (context.flowState === 'awaiting_confirmation') {
-        if (dto.flowAction === 'reidentify') {
-          yield* this.transcribeStage(dto, userId, request, context, attachments, signal);
-          return;
-        }
-        if (dto.flowAction === 'correct') {
-          yield* this.correctStage(dto, userId, request);
-          return;
-        }
-        // confirm (default): tutor on the pending (confirmed) question
-        request.message = context.pendingQuestion ?? request.message;
-      }
-      // Normal tutoring (idle + text, or awaiting_confirmation + confirm)
       yield* this.tutorStage(dto, userId, request, signal);
     } catch (err) {
       this.logger.error('tutorStream stage failed:', err instanceof Error ? err.stack ?? err.message : err);
@@ -117,87 +85,8 @@ export class AIService {
     }
   }
 
-  /** P1 stage 1: VL transcription. Persists user(image)+assistant(transcription),
-   *  sets flow_state, yields a flow event. */
-  private async *transcribeStage(dto: TutorDto, _userId: number, request: TutoringRequest, context: { student: { grade: string; gradeLevel: string }; subject: 'math' | 'chinese' | 'english' }, attachments: Attachment[], signal?: AbortSignal): AsyncIterable<StreamEvent> {
-    const dialogueId = request.dialogueId!;
-    const result = await this.tutoring.transcribeImage({
-      attachments: request.attachments ?? [],
-      userMessage: request.message,
-      student: context.student,
-      subject: context.subject,
-      signal,
-    });
-    const userAttachments = attachments.filter(a => a.type === 'image' && a.url).map(a => ({ type: 'image' as const, url: a.url }));
-    if (!result.recognizable || result.problems.length === 0) {
-      const msg = '无法识别图片中的题目，请重新拍摄清晰的照片后上传。';
-      await this.conversationService.saveMessages({ dialogueId, messages: [
-        { role: 'user', content: request.message, attachments: userAttachments },
-        { role: 'assistant', content: msg, type: 'transcription' },
-      ]});
-      // flow_state stays idle
-      yield { type: 'flow', stage: 'unrecognizable' };
-      return;
-    }
-    const transcriptionText = result.problems.map(p => `第${p.index}题：${p.text}`).join('\n\n');
-    await this.conversationService.saveMessages({ dialogueId, messages: [
-      { role: 'user', content: request.message, attachments: userAttachments },
-      { role: 'assistant', content: transcriptionText, type: 'transcription' },
-    ]});
-    if (result.problems.length === 1) {
-      const q = result.problems[0].text;
-      await this.conversationService.updateFlowState(dialogueId, 'awaiting_confirmation', q, null);
-      yield { type: 'flow', stage: 'confirm', question: q };
-    } else {
-      await this.conversationService.updateFlowState(dialogueId, 'awaiting_selection', null, JSON.stringify(result.problems));
-      yield { type: 'flow', stage: 'select', problems: result.problems };
-    }
-    this.maybeUpdateTitle(dialogueId, _userId, dto.message, transcriptionText).catch(() => {});
-  }
-
-  /** P1: classify the student's selection reply. */
-  private async *selectionStage(dto: TutorDto, _userId: number, request: TutoringRequest, context: { pendingQuestions: string | null; subject: 'math' | 'chinese' | 'english' }, signal?: AbortSignal): AsyncIterable<StreamEvent> {
-    const dialogueId = request.dialogueId!;
-    const problems: TranscribedProblem[] = JSON.parse(context.pendingQuestions ?? '[]');
-    const classification = await this.tutoring.classifySelection({
-      reply: request.message, problems, subject: context.subject, signal,
-    });
-    if (classification.intent === 'select' && classification.index) {
-      const selected = problems.find(p => p.index === classification.index) ?? problems[classification.index - 1];
-      const q = selected.text;
-      await this.conversationService.saveMessages({ dialogueId, messages: [
-        { role: 'user', content: request.message },
-        { role: 'assistant', content: `第${selected.index}题：${q}`, type: 'transcription' },
-      ]});
-      await this.conversationService.updateFlowState(dialogueId, 'awaiting_confirmation', q, null);
-      yield { type: 'flow', stage: 'confirm', question: q };
-      return;
-    }
-    const replyText = classification.intent === 'all'
-      ? '每次只能帮你解决一道题哟，还是来选一道吧！'
-      : '没听清，请告诉老师题号（如第1题）。';
-    await this.conversationService.saveMessages({ dialogueId, messages: [
-      { role: 'user', content: request.message },
-      { role: 'assistant', content: replyText },
-    ]});
-    // flow_state stays awaiting_selection
-    yield { type: 'content', delta: replyText };
-    yield { type: 'done', fallback: false };
-  }
-
-  /** P1: student corrected the transcription - update the pending question. */
-  private async *correctStage(dto: TutorDto, _userId: number, request: TutoringRequest): AsyncIterable<StreamEvent> {
-    const dialogueId = request.dialogueId!;
-    const corrected = request.message;
-    await this.conversationService.saveMessages({ dialogueId, messages: [
-      { role: 'user', content: corrected },
-      { role: 'assistant', content: corrected, type: 'transcription' },
-    ]});
-    await this.conversationService.updateFlowState(dialogueId, 'awaiting_confirmation', corrected, null);
-    yield { type: 'flow', stage: 'confirm', question: corrected };
-  }
-
-  /** P1: normal Socratic tutoring (qwen3.7-max) - the existing streaming path. */
+  /** Socratic tutoring (multimodal qwen3.8-max when images are attached) - the
+   *  existing streaming path. */
   private async *tutorStage(dto: TutorDto, userId: number, request: TutoringRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     const dialogueId = request.dialogueId!;
     let assistantContent = '';
@@ -209,19 +98,15 @@ export class AIService {
       }
       yield event;
     }
-    // Return to idle (no-op for normal text; clears awaiting_confirmation for the confirm case).
-    await this.conversationService.updateFlowState(dialogueId, 'idle', null, null).catch(() => {});
     this.maybeUpdateTitle(dialogueId, userId, dto.message, assistantContent).catch(() => {});
   }
 
   // ---------- shared helpers ----------
 
   private validateDto(dto: TutorDto) {
-    // P1: message may be empty for image-only sends or flow actions (confirm/
-    // reidentify). Require a message only when there are no attachments and no
-    // flow action.
+    // 图片-only 发送允许空 message；其余必须有 message。
     const hasMessage = !!dto.message && dto.message.trim().length > 0;
-    if (!hasMessage && !dto.flowAction && !dto.attachments?.length) {
+    if (!hasMessage && !dto.attachments?.length) {
       throw new BadRequestException({ code: 1001, message: 'message 不能为空' });
     }
     if (dto.mode !== 'mainline' && dto.mode !== 'auxiliary') {
@@ -381,7 +266,6 @@ export class AIService {
       dialogueId,
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(dto.retry ? { retry: true } : {}),
-      ...(dto.flowAction ? { flowAction: dto.flowAction } : {}),
     };
   }
 

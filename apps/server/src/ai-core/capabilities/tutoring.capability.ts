@@ -1,4 +1,4 @@
-import type { TutoringRequest, TutoringResponse, StructuredQuestionOutput, ContentPart, ChatMessage, RouteResult, StreamEvent, TranscribeResult, SelectionClassification, TranscribedProblem, Subject, TextPart, Attachment } from '../types.js';
+import type { TutoringRequest, TutoringResponse, StructuredQuestionOutput, ContentPart, ChatMessage, RouteResult, StreamEvent, TextPart, Attachment } from '../types.js';
 import { timeoutConfig, fallbackConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { getModelConfigRegistry } from '../infra/model-config-registry.js';
@@ -203,60 +203,8 @@ export class TutoringCapability {
     yield { type: 'done', fallback: false, structuredQuestion };
   }
 
-  // ---------- P1: image two-stage primitives ----------
-
-  /** Stage 1: transcribe an image to text (+ geometry description) via the VL
-   *  model (qwen3-vl-plus). Returns structured problems or {recognizable:false}. */
-  async transcribeImage(params: {
-    attachments: Attachment[];
-    userMessage: string;
-    student: { grade: string; gradeLevel: string };
-    subject: Subject;
-    signal?: AbortSignal;
-  }): Promise<TranscribeResult> {
-    const routeResult = this.modelRouter.route({ scene: 'transcribe', subject: params.subject });
-    const promptResult = await this.promptBuilder.build({
-      capability: 'transcribe',
-      subject: params.subject,
-      context: { student: params.student, userMessage: params.userMessage },
-    });
-    this.augmentWithImages(promptResult.messages, params.attachments);
-    const response = await this.modelClient.chat({
-      model: routeResult.primary,
-      messages: promptResult.messages,
-      temperature: 0.1,
-      responseFormat: 'json_object',
-      timeout: timeoutConfig.timeout.transcribe ?? timeoutConfig.timeout.default,
-      signal: params.signal,
-    });
-    return this.parseTranscribeResult(response.content);
-  }
-
-  /** Multi-problem selection: classify the student's free-text reply into
-   *  select+index / all / unclear via deepseek-v4-flash (structuring route). */
-  async classifySelection(params: {
-    reply: string;
-    problems: TranscribedProblem[];
-    subject: Subject;
-    signal?: AbortSignal;
-  }): Promise<SelectionClassification> {
-    const routeResult = this.modelRouter.route({ scene: 'structuring', subject: params.subject });
-    const list = params.problems.map(p => `第${p.index}题：${p.text}`).join('\n');
-    const sys = '你是题号选择分类器。学生在多道题中选一道，回复了一段话。判断意图，只输出 JSON：{"intent":"select","index":<1..N>} 或 {"intent":"all"} 或 {"intent":"unclear"}。index 为 1-based 题号。';
-    const user = `共有 ${params.problems.length} 道题：\n${list}\n\n学生回复："${params.reply}"\n判断意图。`;
-    const response = await this.modelClient.chat({
-      model: routeResult.primary,
-      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      temperature: 0,
-      responseFormat: 'json_object',
-      timeout: timeoutConfig.timeout.structuring ?? timeoutConfig.timeout.default,
-      signal: params.signal,
-    });
-    return this.parseSelectionResult(response.content, params.problems.length);
-  }
-
   /** Replace the last user message's content with a multimodal array (text +
-   *  image_url parts). Shared by transcribeImage (and formerly prepare). */
+   *  image_url parts) so the tutoring model receives images directly. */
   private augmentWithImages(messages: ChatMessage[], attachments: Attachment[]): void {
     const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
     if (!lastUserMsg) return;
@@ -275,49 +223,6 @@ export class TutoringCapability {
       }
     }
     lastUserMsg.content = parts;
-  }
-
-  private parseTranscribeResult(raw: string): TranscribeResult {
-    const json = this.extractJsonObject(raw);
-    if (!json) return { recognizable: false, problems: [] };
-    try {
-      const recognizable = !!json.recognizable;
-      const problems: TranscribedProblem[] = Array.isArray(json.problems)
-        ? json.problems.map((p: { index?: number; text?: string }, i: number) => ({
-            index: typeof p.index === 'number' ? p.index : i + 1,
-            text: String(p.text ?? ''),
-          })).filter((p: TranscribedProblem) => p.text)
-        : [];
-      return { recognizable, problems };
-    } catch {
-      return { recognizable: false, problems: [] };
-    }
-  }
-
-  private parseSelectionResult(raw: string, count: number): SelectionClassification {
-    const json = this.extractJsonObject(raw);
-    if (!json) return { intent: 'unclear' };
-    const intent = json.intent;
-    if (intent === 'all') return { intent: 'all' };
-    if (intent === 'select') {
-      const idx = Number(json.index);
-      if (Number.isInteger(idx) && idx >= 1 && idx <= count) return { intent: 'select', index: idx };
-      return { intent: 'unclear' };
-    }
-    return { intent: 'unclear' };
-  }
-
-  /** Best-effort JSON object extraction: raw JSON, or the first {...} block. */
-  private extractJsonObject(raw: string): Record<string, unknown> | null {
-    if (!raw) return null;
-    const trimmed = raw.trim();
-    try { return JSON.parse(trimmed); } catch { /* not pure JSON */ }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      try { return JSON.parse(trimmed.slice(start, end + 1)); } catch { /* malformed */ }
-    }
-    return null;
   }
 
   // Shared pre-model steps (loadContext / fallback / safety / route / build
@@ -426,8 +331,8 @@ export class TutoringCapability {
       };
     }
 
-    // Step 4: Route model. Task 14a: when attachments contain images, route to
-    // qwen-vl-max (multimodal) instead of the text-only model (hasImage computed above).
+    // Step 4: Route model. The tutoring route is multimodal (qwen3.8-max), so
+    // hasImage no longer switches models; it is only forwarded for uniformity.
     const routeResult = await this.modelRouter.route({
       scene: 'tutoring',
       subject: context.subject,
@@ -458,28 +363,11 @@ export class TutoringCapability {
     });
 
     // Task 14a: When image attachments are present, replace the last user
-    // message's content with a multimodal array (text + image_url parts).
-    // The prompt builder produces a text user message; we augment it with
-    // image_url parts so the OpenAI-compatible API receives the image.
+    // message's content with a multimodal array (text + image_url parts) so the
+    // OpenAI-compatible API receives the image and the multimodal tutoring model
+    // (qwen3.8-max) handles it directly.
     if (hasImage && request.attachments) {
-      const lastUserMsg = [...promptResult.messages].reverse().find(m => m.role === 'user');
-      if (lastUserMsg) {
-        const textContent = typeof lastUserMsg.content === 'string'
-          ? lastUserMsg.content
-          : lastUserMsg.content.filter(p => p.type === 'text').map(p => (p as { text: string }).text).join('\n');
-        const parts: ContentPart[] = [{ type: 'text', text: textContent }];
-        for (const att of request.attachments) {
-          if (att.type === 'image' && att.imageUrl) {
-            parts.push({ type: 'image_url', image_url: { url: att.imageUrl } });
-          }
-          if (att.type === 'file' && att.extractedImages && att.extractedImages.length > 0) {
-            for (const imgUrl of att.extractedImages) {
-              parts.push({ type: 'image_url', image_url: { url: imgUrl } });
-            }
-          }
-        }
-        lastUserMsg.content = parts;
-      }
+      this.augmentWithImages(promptResult.messages, request.attachments);
     }
 
     return { kind: 'stream', promptResult, routeResult, context, userAttachments };

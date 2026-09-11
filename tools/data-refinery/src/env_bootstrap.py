@@ -32,10 +32,10 @@ DEPLOY_STATE = project_root / "tools" / "deploy" / "runtime" / "deploy.state.jso
 
 PROVIDERS = ("kimi", "qwen", "gemini", "deepseek")
 # model-routes.yaml 中各 provider 主模型块的 yaml key
-# （与 tools/deploy/apply-llm-config.mjs 的 MODEL_KEY 对齐）
+# （应与 tools/deploy/apply-llm-config.mjs 的 MODEL_KEY 保持同步，含 qwen3.8-max 改名）
 YAML_MAIN_KEY = {
     "kimi": "kimi",
-    "qwen": "qwen3.7-max",
+    "qwen": "qwen3.8-max",
     "gemini": "gemini-3.1-pro",
     "deepseek": "deepseek-v4-flash",
 }
