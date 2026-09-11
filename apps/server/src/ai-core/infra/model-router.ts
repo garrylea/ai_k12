@@ -45,10 +45,9 @@ export class ModelRouter {
       this.defaultRule = snap.default;
     }
 
-    // P1: image tutoring is now two-stage. Images are transcribed by the
-    // `transcribe` scene (qwen3-vl-plus) FIRST; the confirmed text is then
-    // tutored by the normal text route (qwen3.7-max). So tutoring no longer
-    // overrides to a VL model on hasImage - it always uses the text route.
+    // Image tutoring is direct now: the tutoring route is multimodal
+    // (qwen3.8-max) and receives images as image_url parts, so there is no
+    // hasImage branch here - always use the scene/subject route.
     const rule = this.matchRule(request.scene, request.subject, request.difficulty);
     const reason = `scene=${request.scene} subject=${request.subject} difficulty=${request.difficulty ?? 'any'}`;
 

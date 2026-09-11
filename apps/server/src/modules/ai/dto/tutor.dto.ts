@@ -14,5 +14,4 @@ export interface TutorDto {
   subjectId?: number;     // Task 14a: for structured question ingestion (defaults to math)
   retry?: boolean;        // P2: true when regenerating after an error - the user
                           // message is already persisted, so skip re-persisting it.
-  flowAction?: 'confirm' | 'reidentify' | 'correct';  // P1: image two-stage actions
 }

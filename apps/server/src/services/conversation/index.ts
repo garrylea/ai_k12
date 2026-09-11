@@ -111,9 +111,6 @@ export class ConversationService {
       currentDifficulty: undefined,
       currentQuestion: undefined,
       consecutiveFailCount: record.consecutive_fail_count,
-      flowState: record.flow_state,
-      pendingQuestion: record.pending_question,
-      pendingQuestions: record.pending_questions,
       dialogueMetadata: {
         track: record.track,
         createdAt: record.created_at,
@@ -157,18 +154,6 @@ export class ConversationService {
     } else {
       await this.dialoguesRepo.updateFailCount(id, 0);
     }
-  }
-
-  /** P1: update the image two-stage flow state + pending transcribed question(s). */
-  async updateFlowState(
-    dialogueId: string,
-    flowState: 'idle' | 'awaiting_selection' | 'awaiting_confirmation',
-    pendingQuestion: string | null = null,
-    pendingQuestions: string | null = null,
-  ): Promise<void> {
-    const id = Number(dialogueId);
-    if (!Number.isFinite(id)) throw new Error(`Invalid dialogueId: ${dialogueId}`);
-    await this.dialoguesRepo.updateFlowState(id, flowState, pendingQuestion, pendingQuestions);
   }
 
   async completeDialogue(request: CompleteDialogueRequest): Promise<void> {

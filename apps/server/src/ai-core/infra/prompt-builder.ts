@@ -93,9 +93,6 @@ export class PromptBuilder {
     if (capability === 'structuring') {
       return `structuring/question.md`;
     }
-    if (capability === 'transcribe') {
-      return `transcribe/${subject}.md`;
-    }
     throw new Error(`Unknown capability: ${capability}`);
   }
 

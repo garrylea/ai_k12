@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'transcribe';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
@@ -24,7 +24,8 @@ export interface RouteRequest {
   difficulty?: Difficulty;
   estimatedInputTokens?: number;
   requiresHeavyReasoning?: boolean;
-  hasImage?: boolean;  // Task 14a: when true, route to multimodal model (qwen-vl-max)
+  hasImage?: boolean;  // 仅供 SafetyGuard 放宽 off_topic 判定；路由不再据此切模型
+  // （图片直接作为 image_url 部件送给辅导模型）
 }
 
 export interface ModelConfig {
@@ -48,7 +49,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'transcribe';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
@@ -155,7 +156,7 @@ export interface StreamChunk {
 // true the frontend SETS content to `delta` (used to strip the structured-
 // question JSON block after the stream completes).
 export interface StreamEvent {
-  type: 'reasoning' | 'content' | 'done' | 'error' | 'flow';
+  type: 'reasoning' | 'content' | 'done' | 'error';
   delta?: string;
   replace?: boolean;
   fallback?: boolean;
@@ -163,28 +164,6 @@ export interface StreamEvent {
   message?: string;                   // error detail (human-readable)
   code?: number;                      // error code (see mapLLMErrorToClient) - error events only
   retryable?: boolean;                // whether the frontend should offer a retry button - error events only
-  // flow event fields (P1 image two-stage):
-  stage?: 'select' | 'confirm' | 'unrecognizable';  // flow step
-  problems?: TranscribedProblem[];                  // stage='select' - the transcribed problems
-  question?: string;                                // stage='confirm' - the transcribed problem text
-}
-
-/** P1: a problem transcribed from an image by the VL model. */
-export interface TranscribedProblem {
-  index: number;  // 1-based
-  text: string;   // problem text (geometry figure descriptions in parentheses)
-}
-
-/** P1: VL transcription output (JSON from qwen3-vl-plus). */
-export interface TranscribeResult {
-  recognizable: boolean;
-  problems: TranscribedProblem[];
-}
-
-/** P1: selection classification (JSON from deepseek-v4-flash). */
-export interface SelectionClassification {
-  intent: 'select' | 'all' | 'unclear';
-  index?: number;  // 1-based, when intent='select'
 }
 
 // ========== LLM Client Error Hierarchy (§3.3.4, based on ../llm-client.js) ==========
@@ -410,7 +389,6 @@ export interface TutoringRequest {
   dialogueId?: string;
   retry?: boolean;        // P2: true when regenerating after an error - skip
                           // re-persisting the (already-stored) user message.
-  flowAction?: 'confirm' | 'reidentify' | 'correct';  // P1: image two-stage actions
 }
 
 export interface Attachment {
@@ -576,9 +554,6 @@ export interface LoadContextResponse {
   currentDifficulty?: Difficulty;
   currentQuestion?: { content: string; answer?: string };
   consecutiveFailCount: number;
-  flowState: 'idle' | 'awaiting_selection' | 'awaiting_confirmation';
-  pendingQuestion: string | null;
-  pendingQuestions: string | null;
   dialogueMetadata: {
     track: Track;
     createdAt: Date;
