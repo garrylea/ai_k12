@@ -44,11 +44,11 @@ describe('ModelRouter', () => {
     expect(result.fallback?.modelId).toBe('qwen3.7-max');
   });
 
-  it('routes math judgment to deepseek-v4-flash primary with qwen fallback', () => {
-    // qwen3.7-max (reasoner) 难题判定常超时 -> 改用 deepseek-v4-flash（同 grading）
+  it('routes math judgment to local primary with ds-v4-flash fallback', () => {
+    // 训练模块判题默认走本地 llama.cpp Qwen3.8-27B；本地不可用回退 deepseek-v4-flash
     const result = router.route({ scene: 'judgment', subject: 'math' });
-    expect(result.primary.modelId).toBe('deepseek-v4-flash');
-    expect(result.fallback?.modelId).toBe('qwen3.7-max');
+    expect(result.primary.modelId).toBe('Qwen3.8-27B');
+    expect(result.fallback?.modelId).toBe('deepseek-v4-flash');
   });
 
   // P1: image tutoring is two-stage. Tutoring no longer overrides to a VL model

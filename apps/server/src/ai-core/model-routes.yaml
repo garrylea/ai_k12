@@ -48,6 +48,20 @@ models:
       output: 0.004
     supportsStreaming: true
 
+  # 训练模块判题主模型：本地 llama.cpp 服务（OpenAI 兼容）。modelId 写字面量
+  # （测试与无 .env 的全新克隆结果确定）；baseUrl/apiKey 走 env。
+  local:
+    provider: local
+    modelId: Qwen3.8-27B
+    baseUrl: ${LOCAL_LLM_BASE_URL}
+    apiKey: ${LOCAL_LLM_API_KEY}
+    contextWindow: 32768
+    maxOutputTokens: 4096
+    costPer1K:
+      input: 0
+      output: 0
+    supportsStreaming: true
+
   # Task 14a: multimodal model for image-based tutoring. Reuses QWEN_API_KEY/QWEN_BASE_URL.
   # modelId is the dashscope model ID; if it differs (e.g. qwen2.5-vl-72b-instruct), adjust here.
   qwen-vl-max:
@@ -115,9 +129,10 @@ routes:
 
   judgment:
     - subject: math
-      # 同 grading：判对错是轻量任务，无需重 reasoner。deepseek-v4-flash 快且可靠。
-      primary: deepseek-v4-flash
-      fallback: qwen3.7-max
+      # 训练模块（专项/考试/错题）判题默认走本地 Qwen3.8-27B；
+      # 本地不可用回退 deepseek-v4-flash（快模型，实测同题 ~19s 判对）。
+      primary: local
+      fallback: deepseek-v4-flash
 
   explanation:
     - subject: math
