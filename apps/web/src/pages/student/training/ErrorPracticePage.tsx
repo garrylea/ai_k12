@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import {
   markdownRemarkPlugins,
   markdownRehypePlugins,
+  markdownComponents,
   MarkdownImg,
 } from '@/components/markdown';
 import { Button, Card, PageHeader, Skeleton, Tag } from '@/components/base';
@@ -289,6 +290,9 @@ export default function ErrorPracticePage() {
                             remarkPlugins={markdownRemarkPlugins}
                             rehypePlugins={markdownRehypePlugins}
                             components={{
+                              // 继承 markdownComponents 的 table/th/td 边框样式（题干 HTML 表格画表格线），
+                              // 仅 override img：列表题面小图 inline 尺寸（配合 line-clamp）。
+                              ...markdownComponents,
                               img: (props: { src?: string; alt?: string }) => (
                                 <MarkdownImg {...props} className="inline-block my-1 max-w-full h-[24px] object-contain rounded align-middle" />
                               ),

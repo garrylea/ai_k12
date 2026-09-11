@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import {
   markdownRemarkPlugins,
   markdownRehypePlugins,
+  markdownComponents,
   preprocessMarkdown,
   MarkdownImg,
 } from '@/components/markdown';
@@ -39,6 +40,9 @@ const ChevronLeftIcon = () => (
 // resolveAsset / 破图隐藏仍由 MarkdownImg 处理。className 不带固定高（分桶算法给），
 // 保留 margin/居中/max-w-full/object-contain/圆角。
 const questionMarkdownComponents = {
+  // 继承 markdownComponents 的 table/th/td 边框样式（题干里的 HTML 表格画表格线），
+  // 仅 override img：题面图走 MarkdownImg 的 bucketHeight 模式（按宽高比分桶固定高度）。
+  ...markdownComponents,
   img: (props: { src?: string; alt?: string }) => (
     <MarkdownImg {...props} bucketHeight className="block mx-auto my-4 max-w-full object-contain rounded-lg" />
   ),
