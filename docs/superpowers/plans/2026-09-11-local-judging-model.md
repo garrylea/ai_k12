@@ -129,16 +129,21 @@ export class OpenAICompatibleClient implements ProviderAdapter {
   /** Request body for /v1/chat/completions. Subclasses override to add or drop
    *  provider-specific fields (e.g. LocalClient omits enable_thinking). */
   protected buildRequestBody(request: ChatRequest, stream: boolean): Record<string, unknown> {
-    return {
+    const body: Record<string, unknown> = {
       model: request.model.modelId,
       messages: request.messages,
       temperature: request.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? request.model.maxOutputTokens,
-      stop: request.stopSequences,
-      enable_thinking: true,
-      ...(stream ? { stream: true } : {}),
-      response_format: request.responseFormat === 'json_object' ? { type: 'json_object' } : undefined,
     };
+    // 逐字段复刻改动前的两个请求体：非流式带 stop、流式带 stream。
+    if (stream) {
+      body.stream = true;
+    } else {
+      body.stop = request.stopSequences;
+    }
+    body.enable_thinking = true;
+    body.response_format = request.responseFormat === 'json_object' ? { type: 'json_object' } : undefined;
+    return body;
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
@@ -281,7 +286,7 @@ export class OpenAICompatibleClient implements ProviderAdapter {
 }
 ```
 
-> 唯一有意保留的差异：流式请求体现在也带 `stop`（原 streamChat 不含）。`stop` 为 `undefined` 时 `JSON.stringify` 丢弃；现有调用方均不传 `stopSequences`，行为等价。
+> 请求体逐字段复刻改动前：非流式 `{model, messages, temperature, max_tokens, stop, enable_thinking, response_format}`，流式 `{model, messages, temperature, max_tokens, stream, enable_thinking, response_format}`。
 
 - [ ] **Step 4: 把 KimiClient 改成薄子类**
 
