@@ -65,9 +65,42 @@ export function repairHtml(text: string | undefined | null): string {
   return text.replace(TAG_LT_RE, '<$1>');
 }
 
+// ── 富文本归一化（真实入库内容兜底）──
+// 1) $$…$$ 公式：remark-math 只把「$$ 独占一行」识别为块级（display）公式；管线/LLM
+//    产出的 `$$\begin{aligned}…\end{aligned}$$`（$$ 后紧跟内容）会被当行内 math 解析并
+//    抛 KaTeX parse error。这里把每处 $$ 规整到独占一行，恢复 display。
+// 2) 内嵌 <svg> 的围栏代码块：几何题解常写成 ```xml\n<svg…>…</svg>\n```，围栏会被渲染成
+//    <pre><code>（转义文本）而非图形；这里解包「内容以 <svg 开头」的围栏，交给 rehype-raw
+//    当真实 SVG 元素渲染。
+// 归一化必须避开代码区（围栏块 / 行内 code），否则会破坏真正的代码示例。
+const FENCED_CODE_RE = /(```[\s\S]*?```)/g;
+const INLINE_CODE_RE = /(`[^`]*`)/g;
+const SVG_FENCE_RE = /```[a-zA-Z0-9_-]*[ \t]*\r?\n([\s\S]*?)```/g;
+
+/** 解包「内容为 <svg>」的围栏代码块：去掉 ``` 外壳，保留原始 SVG。 */
+const unwrapSvgFences = (s: string): string =>
+  s.replace(SVG_FENCE_RE, (m, body: string) =>
+    /^\s*<svg[\s>]/i.test(body) ? `\n${body.trim()}\n` : m,
+  );
+
+/** 把 $$ 规整为独占一行（跳过行内 code）。函数 replacer 避免 `$$` 被当替换模式。 */
+const normalizeMathDelimiters = (s: string): string =>
+  s
+    .split(INLINE_CODE_RE)
+    .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(/\$\$/g, () => '\n$$\n')))
+    .join('');
+
+/** 对围栏代码块之外的文本应用 fn（代码块原样保留）。 */
+const mapOutsideFences = (s: string, fn: (t: string) => string): string =>
+  s
+    .split(FENCED_CODE_RE)
+    .map((seg, i) => (i % 2 === 1 ? seg : fn(seg)))
+    .join('');
+
 export const preprocessMarkdown = (s: string | undefined | null): string => {
   if (!s) return '';
-  return repairHtml(s.replace(/\\n(?![a-zA-Z])/g, '\n'));
+  const restored = repairHtml(s.replace(/\\n(?![a-zA-Z])/g, '\n'));
+  return mapOutsideFences(unwrapSvgFences(restored), normalizeMathDelimiters);
 };
 
 // ── CommonMark HTML 块吞并修复（remarkSplitHtmlBlocks）──
@@ -143,9 +176,52 @@ export const markdownRemarkPluginsWithBreaks: NonNullable<Options['remarkPlugins
  * 导致根号横线错位（如 \sqrt{8} 显示为 /8）。强制 output: 'html' 只保留
  * CSS 视觉渲染，彻底规避 MathML 与 HTML 层的重叠/错位问题。
  */
+// 原始几何示意图 <svg>（rehype-raw 从题解 HTML 解析而来）带 SVG 连字符属性
+// （font-size / stroke-width …）。react-markdown 对 SVG 命名空间识别有限，连字符属性
+// 直接透传会触发 React "Invalid DOM property `font-size`" 警告。统一转成 camelCase
+// （React 对 SVG 属性两种写法都接受，camelCase 为惯用）。KaTeX 输出已是 camelCase，不受影响。
+const SVG_ATTR_CAMEL: Record<string, string> = {
+  'font-size': 'fontSize',
+  'font-weight': 'fontWeight',
+  'font-family': 'fontFamily',
+  'text-anchor': 'textAnchor',
+  'dominant-baseline': 'dominantBaseline',
+  'stroke-width': 'strokeWidth',
+  'stroke-dasharray': 'strokeDasharray',
+  'stroke-dashoffset': 'strokeDashoffset',
+  'stroke-linecap': 'strokeLinecap',
+  'stroke-linejoin': 'strokeLinejoin',
+  'fill-opacity': 'fillOpacity',
+  'stroke-opacity': 'strokeOpacity',
+  'fill-rule': 'fillRule',
+  'clip-rule': 'clipRule',
+  'clip-path': 'clipPath',
+  'marker-width': 'markerWidth',
+  'marker-height': 'markerHeight',
+  'marker-end': 'markerEnd',
+  'marker-start': 'markerStart',
+  'marker-mid': 'markerMid',
+};
+
+function rehypeSvgAttrNames() {
+  return (tree: Root) => {
+    visit(tree, 'element', (node) => {
+      const props = (node as { properties?: Record<string, unknown> }).properties;
+      if (!props) return;
+      for (const [kebab, camel] of Object.entries(SVG_ATTR_CAMEL)) {
+        if (kebab in props) {
+          props[camel] = props[kebab];
+          delete props[kebab];
+        }
+      }
+    });
+  };
+}
+
 export const markdownRehypePlugins: NonNullable<Options['rehypePlugins']> = [
   rehypeRaw,
   [rehypeKatex, { output: 'html' }],
+  rehypeSvgAttrNames,
 ];
 
 interface MarkdownImgProps {
