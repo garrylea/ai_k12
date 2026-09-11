@@ -66,12 +66,12 @@ training.service / exams.service
 # 本地 llama.cpp 判题模型（训练模块判题主模型；不可用回退 deepseek-v4-flash）
 LOCAL_LLM_BASE_URL=http://192.168.1.8:12345
 LOCAL_LLM_API_KEY=local
-LOCAL_LLM_MODEL=Qwen3.8-27B
 ```
 
 `ai-core/model-routes.yaml`：
 
-- `models` 新增 `local`（`provider: local`，`modelId/baseUrl/apiKey` 走上面 env，`costPer1K` 0，`supportsStreaming: true`，`contextWindow: 32768`，`maxOutputTokens: 4096`）；
+- `models` 新增 `local`（`provider: local`，`modelId: Qwen3.8-27B` 写字面量，`baseUrl/apiKey` 走上面 env，`costPer1K` 0，`supportsStreaming: true`，`contextWindow: 32768`，`maxOutputTokens: 4096`）；
+  - `modelId` 不走 env：让 `model-router.test.ts` 与无 `.env` 的全新克隆结果确定；只有 `baseUrl`（LAN 地址）与 `apiKey`（占位）是部署相关。
 - `routes.judgment` 改为：
 
 ```yaml
@@ -141,6 +141,7 @@ prompt 只构建一次，primary 与 fallback 复用。回退是**一次**尝试
 | 回退位置 | `JudgmentCapability` 内 | 不改共享 `ModelClient`（避免波及所有场景），改动面小、易测 |
 | 客户端结构 | 抽 `OpenAICompatibleClient` 基类 | 对齐"一基类 + 各 provider 子类"，本地模型有独立类可裁剪参数 |
 | 配置落地 | YAML + upsert 脚本 | 新装靠 YAML，当前已 seed 的库靠脚本；可复现、可追溯 |
+| local modelId | 字面量 `Qwen3.8-27B` | 测试与全新克隆（无 `.env`）结果确定；只有 baseUrl/apiKey 属部署相关 |
 | 重试 | 沿用全局 `retry.yaml`（2 次 + 退避） | 不因 local 改全局策略；本地挂时多等约 1–3s 后回退，可接受 |
 
 ## 5. 影响文件清单
