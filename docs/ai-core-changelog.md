@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-09-11 训练模块判题默认走本地模型（失败回退 ds v4 flash）
+
+- **变更摘要**：`judgment` 场景 primary 由 `deepseek-v4-flash` 改为 `local`（本地 llama.cpp `Qwen3.8-27B`，OpenAI 兼容，`LOCAL_LLM_BASE_URL`/`LOCAL_LLM_API_KEY`），fallback 改为 `deepseek-v4-flash`。`JudgmentCapability` 新增失败回退：primary 任何失败（连接拒绝/超时/4xx/5xx/返回解析不了）→ fallback 重试一次；两者皆败才抛错（`JudgeCoreService` 仍映射 503 不变）。覆盖训练模块专项/考试/错题全部模型判题（三者同走 `judgeQuestion → JudgmentCapability`）；课堂练习共用该场景，一并切到本地模型。Provider 层抽出 `OpenAICompatibleClient` 基类（原 `KimiClient` 一直兼任基类但命名误导），`KimiClient`/`QwenClient`/`DeepSeekClient`/新增 `LocalClient` 各自为其薄子类；`LocalClient` 去掉 `enable_thinking`（llama.cpp 非 DashScope 端点），保留 `response_format`。`Provider` 联合类型与后台 provider 下拉新增 `local`。后台 `PROVIDER_TYPES` 与 `admin.controller.ts` 的 `providerType` zod 枚举均新增 `'local'`，后台可创建/辨识本地模型。
+- **动机**：训练模块判题量大，走本地模型省调用成本；本地不可用时必须自动兜底，学生判题不能因本地服务挂掉而失败。
+- **落地**：`model-routes.yaml` 新增 `local` 模型 + judgment 路由；`npx tsx src/scripts/set-judging-local.ts` 幂等 upsert 到已 seed 的库（`seed-llm-config.ts` 是 skip-if-exists，无法更新既有行）；运行后需重启后端或后台保存路由触发 `registry.reload()`。
+- **局限/待办**：本地不可用时 `ModelClient` 内置重试（2 次 + 退避）后才回退，单次判题多约 1–3s（未为 local 单独调 `retry.yaml`）；llama.cpp 对 `response_format: json_object` 的兼容性与本地 27B 判题准确率待实测；无本地健康检查/preflight。
+- 设计 spec：`docs/superpowers/specs/2026-09-11-local-judging-model-design.md`；实施计划 `docs/superpowers/plans/2026-09-11-local-judging-model.md`。
+
+---
+
 ## 2026-09-10 判题体系重构（四路由 + 主观题自评）
 
 - **变更摘要**：`JudgeCoreService` 判题四路由——choice/true_false 程序比对；fill_blank/calculation 归一化比对 + AI 等价判断；short_answer/proof 由 `JUDGE_SUBJECTIVE_MODE` 控制（默认 `self_assess` 不判对错，学生自评；`ai` 保留原 JudgmentCapability 逻辑可切回）。calculation 为新增题型（结果型计算题，从 short_answer 拆出）。自评端点 ×2：`POST /api/training/self-assess`（题中心：留痕 + 错题本写入/清零）与 `POST /api/practice/self-assess`（卡中心：补写 practice_results method='self_assess'）。考试主观题不判（`exam_answers.is_correct=NULL`、method='self_assess'），成绩只算客观题，结果页带 `answer`/`needsSelfAssessment`/`selfAssessment`/`subjectiveCount`；空答案题守卫（method='unanswered' 不计对错）+ 抽题过滤 `answer <> ''`。DB：新增 `question_self_assessments` 表，`practice_results.method`/`exam_answers.method` 列加宽 VARCHAR(20) 容纳 `self_assess`。

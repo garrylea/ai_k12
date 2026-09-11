@@ -163,6 +163,7 @@ prompt 只构建一次，primary 与 fallback 复用。回退是**一次**尝试
 - `apps/server/src/ai-core/infra/model-client/index.ts`（local case + 导入）
 - `apps/server/src/ai-core/capabilities/judgment.capability.ts`（fallback）
 - `apps/server/src/modules/admin/admin-models.service.ts`（PROVIDER_TYPES）
+- `apps/server/src/modules/admin/admin.controller.ts`（zod `providerType` enum 加 `'local'`）
 - `apps/web/src/pages/admin/AdminModelsPage.tsx`（PROVIDER_TYPES）
 - `apps/server/src/ai-core/infra/model-router.test.ts`（judgment 断言）
 - `apps/server/src/ai-core/capabilities/judgment.capability.test.ts`（回退用例）
