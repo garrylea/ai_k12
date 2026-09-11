@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
@@ -389,6 +389,8 @@ export interface TutoringRequest {
   dialogueId?: string;
   retry?: boolean;        // P2: true when regenerating after an error - skip
                           // re-persisting the (already-stored) user message.
+  forceFallback?: boolean; // 学生明确索要完整解析但题库查不到 -> 直接走 AI 兜底
+                           // （完整解析），不再苏格拉底式追问。
 }
 
 export interface Attachment {
@@ -412,6 +414,7 @@ export interface StructuredQuestionOutput {
   content: string;
   options?: StructuredOption[];
   answer: string;
+  approach?: string;                // 解题思路（存 questions.approach，供「详细解析」复用）
   explanation: string;
   knowledgePoints: string[];
   quality: 'good' | 'poor';

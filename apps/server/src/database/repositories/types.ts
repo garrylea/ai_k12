@@ -96,6 +96,7 @@ export interface QuestionRow extends RowDataPacket {
   content: string;
   options: string | null;
   answer: string;
+  approach?: string | null;
   explanation: string | null;
   source: string | null;
   content_hash: string | null;

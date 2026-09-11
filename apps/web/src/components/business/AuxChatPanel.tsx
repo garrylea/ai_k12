@@ -104,6 +104,45 @@ function stripTrailingJson(content: string): string {
   return content.slice(0, idx).replace(/\s+$/, '');
 }
 
+// qwen3.8-max's reasoning_content is unstructured prose: real-newline
+// separated paragraphs whose lines almost all end with 。/., with NO markdown
+// headings and NO colon-terminated title lines (the qwen3.7-era pattern the old
+// heuristic matched no longer exists). The only real block boundary is the
+// paragraph, so the "current thinking stage" is the last paragraph that has a
+// completed leading label/clause:
+//   - a `标签：` prefix with a short (<=12 char) label, or
+//   - the first sentence/clause up to the first 。！？；, capped at 20 chars.
+// A paragraph whose first sentence has not finished streaming yet yields no
+// title, so the previous block's title stays put instead of flickering as the
+// new paragraph grows. The trailing structured-question ```json block is cut
+// first (it is not thinking).
+function titleForParagraph(paragraph: string): string {
+  const s = paragraph
+    .replace(/^[-*•]\s+/, '')
+    .replace(/^\(?\d+[.)、]\s*/, '')
+    .replace(/^[（(]\d+[）)]\s*/, '');
+  const label = s.match(/^([^\s：:。！？，、（(]{2,12})[：:]/);
+  if (label) return label[1];
+  const sentence = s.match(/^([^。！？；]*)[。！？；]/);
+  if (!sentence) return ''; // first sentence not finished yet -> keep previous
+  const clause = sentence[1].split(/[，、（(]/, 1)[0].trim().replace(/[：:]+$/, '');
+  const text = clause || sentence[1].trim().replace(/[：:]+$/, '');
+  return text.length > 20 ? text.slice(0, 20) : text;
+}
+
+function deriveStageTitle(reasoning: string): string {
+  const paragraphs = stripTrailingJson(reasoning)
+    .split('\n')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  let title = '';
+  for (const p of paragraphs) {
+    const t = titleForParagraph(p);
+    if (t) title = t;
+  }
+  return title;
+}
+
 // Markdown + LaTeX (KaTeX) rendering for assistant replies. math via $...$ / $$...$$.
 const Markdown = ({ children }: { children: string }) => {
   const display = stripTrailingJson(children);
@@ -199,32 +238,11 @@ function ReasoningBlock({ reasoning, live }: { reasoning: string; live: boolean 
   // split/render work; no-op for records that already use real newlines.
   const normalized = reasoning.replace(/\\n/g, '\n');
 
-  // Collapsed preview while streaming: show the CURRENT THINKING STAGE title.
-  // The model's CoT marks section headers with a trailing colon (： or :), e.g.
-  // "分析用户的问题：" / "解题思路通常包括：" / "草稿：". A header line is:
-  //   - ends with ： or :
-  //   - contains no sentence-internal punctuation (。！？) -- a long sentence
-  //     that happens to end with ： (e.g. the model posing a question in the
-  //     draft) is rejected
-  //   - short (<= 24 chars)
-  // Key-value lines like "年级：9年级。" end with 。 (not ：) so they're excluded
-  // too. Pick the most recent header as the current stage; before the first
-  // header arrives, fall back to the last non-empty line. Once streaming ends,
-  // show a static 48-char head preview instead.
-  const livePreview = (() => {
-    const isHeader = (t: string) =>
-      /[:：]$/.test(t) && !/[。！？]/.test(t) && t.length <= 24;
-    const lines = normalized.split('\n');
-    let stage = '';
-    let last = '';
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t) continue;
-      last = t;
-      if (isHeader(t)) stage = t;
-    }
-    return stage || last;
-  })();
+  // Collapsed preview while streaming: the current paragraph's derived title
+  // (paragraph-based, see deriveStageTitle), which changes only when a new
+  // thinking paragraph starts instead of showing one ever-growing line. Once
+  // streaming ends, show a static 48-char head preview instead.
+  const livePreview = deriveStageTitle(normalized);
   const preview = normalized.replace(/\s+/g, ' ').trim().slice(0, 48);
 
   // Auto-scroll the expanded view to the bottom as thinking streams in.
@@ -300,10 +318,16 @@ export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onDele
           const hasImages = !!m.images && m.images.length > 0;
           const isError = !!m.error;
           const thinking = isStreaming && m.streaming && !m.content && !isError;
-          // Error messages render a dedicated error bubble (P3). Assistant replies
+          // Error messages render a dedicated error bubble (P3), with any
+          // already-streamed partial reply kept above it. Assistant replies
           // render as markdown+LaTeX; user messages stay plain text.
           const contentEl = isError
-            ? <ErrorBubble error={m.error!} onRetry={onRetry} />
+            ? (
+              <div className="flex flex-col gap-2">
+                {m.content ? <Markdown>{m.content}</Markdown> : null}
+                <ErrorBubble error={m.error!} onRetry={onRetry} />
+              </div>
+            )
             : m.role === 'assistant'
               ? m.content
                 ? <Markdown>{m.content}</Markdown>
@@ -337,7 +361,7 @@ export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onDele
                     </svg>
                   </button>
                 )}
-                {!isError && m.role === 'assistant' && m.reasoning && (
+                {m.role === 'assistant' && m.reasoning && (
                   <ReasoningBlock
                     reasoning={m.reasoning}
                     live={isStreaming && idx === messages.length - 1}

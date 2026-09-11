@@ -4,7 +4,7 @@ import { AIService } from './ai.service.js';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
-import { AiDialoguesRepository, AiMessagesRepository, ExtractTasksRepository, QuestionsRepository, UploadedFilesRepository, CardsRepository } from '../../database/repositories/index.js';
+import { AiDialoguesRepository, AiMessagesRepository, ExtractTasksRepository, MainErrorBooksRepository, QuestionsRepository, UploadedFilesRepository, CardsRepository } from '../../database/repositories/index.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 
@@ -28,6 +28,8 @@ import { SubjectsRepository } from '../../database/repositories/subjects.repo.js
     SubjectsRepository,
     // B1: direct question bank insertion (aux_error_books no longer used).
     QuestionsRepository,
+    // 辅线入库的题要确保进主线错题本（source='auxiliary'）。
+    MainErrorBooksRepository,
     // Task 5: PDF extraction task lookup for file attachments.
     ExtractTasksRepository,
     {

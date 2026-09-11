@@ -14,3 +14,18 @@ fallback:
     - 分步解析
     - 知识点总结
     - 学习建议
+  # 辅线答疑：学生已来回 N 轮后明确索要详细解析 -> 优先用题库
+  # (questions.answer/approach/explanation) 直接答复，不调模型；缺解析再走 AI。
+  detailedExplanationAfterRounds: 2
+  detailedExplanationKeywords:
+    - 详细解析
+    - 完整解析
+    - 详细讲解
+    - 完整讲解
+    - 详细解答
+    - 直接讲
+    - 给我答案
+    - 告诉我答案
+    - 直接给答案
+    - 别提示了
+    - 讲解一下

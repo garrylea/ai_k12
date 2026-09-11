@@ -136,6 +136,13 @@ routes:
       primary: deepseek-v4-flash
       fallback: qwen3.8-max
 
+  # 会话标题生成：本地模型优先（省调用、无外部依赖），本地不可用才用
+  # deepseek-v4-flash；两者都不可用则不生成标题（保留默认标题，学生可手动改）。
+  title:
+    - subject: "*"
+      primary: local
+      fallback: deepseek-v4-flash
+
 default:
   primary: qwen3.8-max
   fallback: deepseek-v4-flash

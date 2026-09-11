@@ -5,7 +5,7 @@ import type { LlmRoute } from '../../database/repositories/llm-routes.repo.js';
 import { ModelConfigRegistry } from '../../ai-core/infra/model-config-registry.js';
 
 export const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible', 'local'] as const;
-export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation', 'variation', 'structuring'] as const;
+export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation', 'variation', 'structuring', 'title'] as const;
 
 @Injectable()
 export class AdminModelsService {

@@ -27,6 +27,18 @@ export class AiDialoguesRepository {
     return (rows[0] as AiDialogueRow) ?? null;
   }
 
+  /**
+   * 辅线答疑：AI 首次把该题结构化入库后，把题库 question_id 锚到会话上，
+   * 便于后续「学生明确索要详细解析」时按 ID 取题库解析。幂等：仅当当前为
+   * NULL 时写入，不覆盖已有锚（避免多题会话被后续题覆盖）。
+   */
+  async updateQuestionId(dialogueId: number, questionId: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE ai_dialogues SET question_id = ? WHERE id = ? AND question_id IS NULL`,
+      [questionId, dialogueId],
+    );
+  }
+
   async findByStudentAndTrack(
     studentId: number,
     track: AiDialogueRow['track'],

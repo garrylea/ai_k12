@@ -481,6 +481,15 @@ Prompt：`apps/server/src/ai-core/prompts/structuring/question.md`（新建）�
 
 > 注：`aux_error_books` 已移除（2026-08-07）。入库仅写 `questions` 题库。对话历史即起错题本作用。
 
+### 8.1.1 会话题目锚定与「详细解析」复用（2026-09-11 新增）
+
+- 结构化输出新增 `approach`（解题思路）字段，与 `answer`/`explanation` 一起写库到 `questions`（`questions.approach`）。
+- **入库去重**：先 `content_hash`，未命中再用**「归一化去标点后的前 20 个字」**匹配（模型常改写同一道题致 hash 不同），命中即复用已有题、**不再插入重复题**；随后**确保该学生错题本有这道题**（`main_error_books`，`source='auxiliary'`，已存在则跳过）。
+- AI 首次把该题结构化入库后，把复用的/新建的 `question_id` 回填到会话 `ai_dialogues.question_id`（`AiDialoguesRepository.updateQuestionId`，幂等，仅当前为 NULL 时写），建立稳定锚点。
+- 后续**学生已与 AI 来回 ≥2 轮、且明确索要详细解析**时（关键词表 `fallback.yaml.detailedExplanationKeywords`），`AIService` 从题库取 **答案 + 解题思路 + 解析** 输出，**不调用大模型**。题目定位：锚点优先；老会话无锚点时用首条用户消息的题干匹配 —— `content_hash` 优先、**前 20 字兜底**（多命中取最新）。
+- **题库查不到题、或没有可用内容 → 直接强制 AI 完整解析兜底**（`TutoringRequest.forceFallback`，走 `FallbackHandler`），**不再回到苏格拉底式追问**。（详见 PRD §7.9、`docs/superpowers/plans/2026-08-04-aux-streaming-thinking.md`。）
+- **输入框提示**：会话已够 ≥2 轮时，`AuxInputBar`（由 `AuxiliaryHomePage` 传入 `showAnswerHint`）在输入框上方提示学生「输入『详细解析』或『给我答案』即可获得 答案 + 解题思路 + 解析」，让学生知道有这条快路径。
+
 ### 8.2 归一化与 content_hash
 
 在 `QuestionsRepository` 或 `ErrorBookService` 中实现：

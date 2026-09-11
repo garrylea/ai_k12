@@ -8,6 +8,62 @@
 
 ---
 
+## 2026-09-11 辅线答疑：输入框 ≥2 轮后提示「输入关键词可要答案+思路+解析」
+
+- **变更摘要**：辅线对话已够 **≥2 条 assistant 回复**时，在输入框上方提示「想直接看答案？输入『详细解析』或『给我答案』，即可获得 答案 + 解题思路 + 解析」，让学生知道后端这条快路径存在。`AuxiliaryHomePage` 统计 `messages` 中 assistant 条数 → 传 `showAnswerHint` 给 `AuxInputBar`；`AuxInputBar` 新增 `showAnswerHint` prop，在非 busy 时渲染该提示。
+- **动机**：后端已实现「≥2 轮 + 关键词 → 题库解析 / AI 兜底」，但学生无从知道该输入什么关键词，入口不可发现（此前讨论时只落定了后端触发规则，UI 提示漏做）。
+- **落地**：`apps/web/src/components/business/AuxInputBar.tsx`（+`showAnswerHint`）、`apps/web/src/pages/student/AuxiliaryHomePage.tsx`（阈值 2，与后端 `fallback.yaml.fallback.detailedExplanationAfterRounds` 对齐）。web tsc/vite build 通过、eslint 0 error。
+- **局限/待办**：阈值在前端硬编码为 2（未从后端下发，改后端配置需同步前端）；提示文案里的关键词为示例（后端关键词表更全）；学生在提示出现前就问也照样触发（提示只是可发现性）。
+- 文档：PRD §7.9；辅线设计 `docs/superpowers/specs/2026-08-02-auxiliary-track-design.md` §8.1.1；CLAUDE.md。
+
+---
+
+## 2026-09-11 辅线答疑：前20字兜底匹配 + 查不到强制 AI 解析 + 入库去重/错题本 + 会话管理入口常显
+
+- **变更摘要**：
+  1. **题库匹配加「前 20 字」兜底**：`QuestionsRepository.findByContentPrefix`（NFKC + 去空白/标点后取前 20 字；先 6 字 LIKE 粗筛再 JS 精确比对，按 id 倒序取最新）。`maybeStoredExplanation` 定位题目改为：锚点 `question_id` 优先 → 首条题干 `content_hash` → **前 20 字兜底**。
+  2. **查不到题强制 AI 完整解析**：`maybeStoredExplanation` 返回 `{kind:'stored'} | {kind:'forceFallback'} | null`；题库查不到或内容全空 → `TutoringRequest.forceFallback=true`，`TutoringCapability.prepare` 据此走 `FallbackHandler` 的 AI 完整解析，**不再回到苏格拉底式追问**。
+  3. **入库去重 + 错题本**：`ingestStructuredQuestion` 先 hash、再前 20 字，命中即复用已有题、**不再插入重复题**；随后 `ensureErrorBook` 确保该学生 `main_error_books` 有这道题（`source='auxiliary'`，新增 `existsByStudentAndQuestionId` 幂等跳过，含已清零；新建后回填 `dialogue_id`）。`AIModule` 注入 `MainErrorBooksRepository`。
+  4. **会话管理入口常显**：`ConversationList` 原先进入「会话管理」页（改名/删除）的入口只在会话数 >7 时才渲染，导致会话少的学生进不去、像功能消失；改为**常显**。
+  5. **标题不随话题更新**：明确**不做**（首次设定后固定）。
+- **动机**：用户实测「已超 2 轮 + 明确要求输出答案」仍不出解析——老会话 `question_id` 为 NULL 且 `content_hash` 对不上（实测首条消息 hash `64e8e188…` 与题库 4 条都不等）；同一道题被模型改写致重复入库 3 次（5005/5006/5007）；会话管理入口被条件藏住。
+- **落地**：`common/utils/content-hash.util.ts`（+`normalizeForPrefix`/`contentPrefix`）、`questions.repo.ts`（+`findByContentPrefix`）、`main-error-books.repo.ts`（+`existsByStudentAndQuestionId`）、`ai-core/types.ts`（`TutoringRequest.forceFallback`）、`tutoring.capability.ts`（prepare 认 forceFallback）、`modules/ai/ai.service.ts`（匹配/兜底/入库去重/错题本）、`ai.module.ts`、`ConversationList.tsx`。测试 8 个（含前缀兜底、forceFallback、入库去重复用 id、错题本幂等），全套 **433 tests** 通过。
+- **E2E 实测**：① 复刻 dialogue 76（`question_id` NULL + 2 条 assistant + 真实题干）→ **0.03s 命中** 题库 5005，返回答案+解析、`done.fallback=true`、无模型调用；② 题库无匹配 → 触发 AI 兜底，63.6s 输出 3385 字完整解析（温和开场+分步解析）、`fallback:true`。
+- **局限/待办**：存量辅线题（如 5005/5006/5007）**没有 `approach`**，快路径只给答案+解析，需后续重生成/回填；关键词仍是子串匹配（`不要给我答案` 会误命中 `给答案`）；前 20 字匹配对同开头但不同题的极端情况可能误判（现按最新取）；`标题随话题更新` 明确不做。
+- 文档：PRD §7.9/§7.10；辅线设计 `docs/superpowers/specs/2026-08-02-auxiliary-track-design.md` §8.1.1；中枢设计文档 §3.6.2.1；CLAUDE.md。
+
+---
+
+## 2026-09-11 会话标题生成改「本地优先」+ 新增 title 场景
+
+- **变更摘要**：会话标题由 `TutoringCapability.generateTitle` 生成，原来**硬编码 `deepseek-v4-flash`**。新增 `title` 场景路由，**primary=`local`、fallback=`deepseek-v4-flash`**（本地优先，不依赖外部余额）；`generateTitle` 改走 `modelRouter.route({scene:'title'})`，primary 失败自动回退 fallback；**两者都失败则不生成标题**（保留默认「辅线答疑」，由学生手动重命名，明确不做文本兜底），并 `console.warn` 留痕（原先 `catch { return null }` 完全静默）。`ai-core/types.ts` 的 `Scene` 联合 + `model-routes.yaml` routes + 后台 `SCENES` 增加 `title`；新增 `src/scripts/set-title-route.ts` 幂等 upsert `llm_routes`（已 seed 库用）。
+- **动机**：用户反馈「会话标题时有时无」。实测根因是 `deepseek-v4-flash` 账号 **HTTP 402 Insufficient Balance**（env key 与 DB 解密 key 均 402，`qwen3.8-max` 正常 200），标题生成失败又被静默吞掉 → 有余额时（09-07、今天 16:24 前）的会话有标题，之后全部停在默认标题。改为本地优先可绕开外部余额依赖。
+- **落地**：`tutoring.capability.ts`（generateTitle 路由+回退+日志）、`types.ts`（Scene）、`model-routes.yaml`、`admin-models.service.ts`（SCENES）、`scripts/set-title-route.ts`。新增 4 个单测（本地可用用本地、本地失败回退 deepseek、两者皆败返回 null、返回 NONE 不改标题）；全套 **430 tests** 通过。迁移脚本已在 dev 库执行，`llm_routes` 新增 `title/* -> local / deepseek-v4-flash`。
+- **局限/待办**：写此条时本地 llama.cpp（`192.168.1.8:12345`）连接超时、DeepSeek 余额不足——**两个模型都不可用，标题会保持默认**（符合预期，学生可手动改）。`title` 路由改动需重启后端或后台保存一次路由才进内存 registry（`registry.reload()`）。标题仍是**首次设定后不再随话题变化**。另：`deepseek-v4-flash` 还是 grading(math)/hint/structuring 的 primary，DeepSeek 欠费会影响这些场景，需一并关注（safety 实际走本地关键词、不受影响）。
+- 文档：中枢设计文档 §7.1 路由决策树（新增 judgment/hint/structuring/title 并修正 grading math）+ `title` 场景说明 + §3.1 Scene 联合；CLAUDE.md「会话标题路由」。
+
+---
+
+## 2026-09-11 辅线答疑：明确索要详细解析走题库 + 引导必须给关键信息
+
+- **变更摘要**：① **详细解析走题库，不调模型**——辅线答疑（`mode='auxiliary'`）中，学生已与 AI 来回 ≥2 轮、且当前消息命中「详细解析/完整解析/给我答案/告诉我答案」等关键词时，`AIService.maybeStoredExplanation` 直接从题库取该题的 **答案 + 解题思路 + 解析**（`questions.answer/approach/explanation`）输出并落库（`type='fallback'`），**不调用大模型**；未命中题或题库无解析内容才退回正常苏格拉底流程。② **题目锚定**——结构化题目输出新增 `approach`（解题思路）字段，与 answer/explanation 一起入 `questions`；AI 首次结构化入库后把 `question_id` 回填会话 `ai_dialogues.question_id`（`AiDialoguesRepository.updateQuestionId`，幂等仅当 NULL），老会话无锚点则用首条用户消息题干 `content_hash` 匹配兜底。③ **引导必须给关键信息**——辅线 prompt（`prompts/tutoring/math/auxiliary.md`）新增硬性要求：每次回复至少给出一个关键已知条件/方法公式/下一步具体操作，不能只抛问题让学生干想；仍不给最终答案。
+- **动机**：用户实测反馈——(a) 学生明确要解析时不应再耗 AI 生成、题库里已有该题解析可复用；(b) 提示太绕，只让学生「想一想」而没有任何关键抓手。
+- **落地**：`fallback.yaml` 新增 `detailedExplanationAfterRounds: 2` + `detailedExplanationKeywords`（`config.ts` 类型同步）；`ai-core/types.ts` `StructuredQuestionOutput.approach?`；`tutoring.capability.ts` Zod schema 加 `approach`；`questions.repo.ts` create INSERT `approach`；`database/repositories/types.ts` `QuestionRow.approach?`；`ai-dialogues.repo.ts` +`updateQuestionId`；`ai.service.ts` +`maybeStoredExplanation`/`composeStoredExplanation`/`persistStoredExplanation`/`isDetailedExplanationRequest`/`linkDialogueQuestion`（注入 `ConversationService`+`AiDialoguesRepository`，`tutor()` 与 `tutorStream()` 双路短路）。新增 5 个单测（命中短路不调模型、未满 2 轮/无解析/非 aux 回退 AI、入库回填 question_id）。E2E（临时实例 3003 + 种入 question_id/2 条历史）实测：**0.02s 命中**，返回答案+思路+解析、`done.fallback=true`、无模型调用。
+- **局限/待办**：`content_hash` 兜底匹配的是**原始题干文本**，与题库里模型结构化后的 `content` 很可能对不上（故以 `question_id` 回填为主路径）；存量辅线题（旧数据）没有 `approach`，快路径只会给答案+解析，需后续重生成/回填；关键词表为硬编码子串匹配，可能误触发（如「不要给我答案」含「给答案」语义相反），待观察。
+- 设计文档：PRD §7.9/§7.10；辅线设计 `docs/superpowers/specs/2026-08-02-auxiliary-track-design.md` §8.1.1；中枢设计文档 §3.6.2.1。
+
+---
+
+## 2026-09-11 辅线答疑流式空闲超时 + 思考链分段标题 + 出错保留已流出思考
+
+- **变更摘要**：修 qwen3.8-max 换代后暴露的两个辅线答疑缺陷。① `OpenAICompatibleClient.streamChat` 原本用 `AbortSignal.timeout(per-scene)`（tutoring=45s）做**从请求开始的墙钟硬超时**，reasoner 难题思考 >45s 被拦腰砍断（实测第 45.0s 断流，reasoning 已吐 444 片、content=0），且 `AbortSignal.timeout` 抛的 `DOMException(name='TimeoutError')` 不被 capability 的 `isAbort` 识别、也不被 `mapLLMErrorToClient` 识别 → 兜底成 `code:5000 "AI 服务异常"`。改为**空闲超时**：每收到数据就重置计时器，阈值取 `retry.yaml` 的 `streaming.firstTokenTimeoutMs`（首字节前 3s）/ `interTokenTimeoutMs`（首字节后 10s）（这两个字段原为声明式未接线），空闲触发抛 `TimeoutError`（statusCode 408）→ 前端 1009「AI 响应超时」；外部 `request.signal`（用户停止）仍保持 `AbortError` 语义。② 前端 `ReasoningBlock` 的折叠标题启发式是照 qwen3.7-max 的「冒号短标题」写的，对 qwen3.8-max 的散文式 CoT 命中 0 条 → 标题恒空、回退成不断变长的整行。改为**按段落切块**：砍掉末尾 ```json 块，取最后一个「首句已完成」段落的 `标签：`（标签≤12字）或首句/首分句（≤20字）作当前阶段标题，段内稳定、换段才变。③ 出错/超时不再丢弃已流出的思考：前端 `setLastAssistantError` 保留 content/reasoning、错误气泡叠在思考下方；后端 `tutoring.capability.tutorStream` catch 在已有 reasoning/content 时 best-effort 落库部分 assistant（content 空填 `[生成中断]`）。
+- **动机**：用户实测辅线答疑「模型回复后最终报 AI 服务异常」且「思考链所有内容拼到一起、不按标题」。
+- **落地**：`apps/server/src/ai-core/infra/model-client/openai-compatible-client.ts`（空闲超时 + `idleTimeoutError`）、`apps/server/src/ai-core/capabilities/tutoring.capability.ts`（部分落库）、`apps/web/src/components/business/AuxChatPanel.tsx`（`titleForParagraph`/`deriveStageTitle` + 错误态渲染思考）、`apps/web/src/store/chatStore.ts`（保留已流出内容）。新增 3 个回归测试（空闲超时→TimeoutError、用户停止→AbortError、持续有数据不超时）。实测：同一道背包题旧代码 45.0s 断流报错，新代码 86.9s 完整走完（reasoning 848 片 + content 113 片 + done 带 structuredQuestion，无 error）。文档：CLAUDE.md 增「流式用空闲超时」约束、更新「错误映射与对话持久化」、从已知限制移除 streaming.* 未接线。
+- **局限/待办**：qwen3.8-max 的 CoT 无显式标题语法，标题是**启发式合成**（取段落首句/标签），质量受模型措辞影响；简单题整条思考链只有 1 个段落，没有「阶段变化」属模型真实行为；空闲阈值 10s 相对实测最大分片间隔 1.13s 余量充足，但本地模型（llama.cpp）是否适用未单独调参。
+- 设计文档：`docs/superpowers/plans/2026-08-04-aux-streaming-thinking.md`（思考链折叠标题的原始设计）。
+
+---
+
 ## 2026-09-11 qwen3.8-max 改名 + 多模态替代 VL / 去掉两阶段图片流程
 
 - **变更摘要**：`qwen3.7-max` 全局改名 `qwen3.8-max`（YAML 模型定义/所有路由/`default`/DB/deploy 脚本）。因 `qwen3.8-max` 支持多模态（实测 OpenAI 兼容模式 `image_url` 可用），删除 `qwen-vl-max`/`qwen3-vl-plus` 两个模型与 `transcribe` 场景，图片+文本直接送给辅导模型（`TutoringCapability.augmentWithImages` 把最后一条 user 消息改为 text+image_url 部件）。删除图片两阶段流程：`TutoringCapability` 的 `transcribeImage`/`classifySelection`/`parseTranscribeResult`/`parseSelectionResult`、`AIService` 的 `transcribeStage`/`selectionStage`/`correctStage` 与 flow 分支、`TutorDto.flowAction`、`ConversationService.updateFlowState`、前端 `chatStore` 的 `ChatFlow`/`ChatMessage.flow`、`useAuxChat` 的 flowAction/flow 事件、`AuxChatPanel` 的「确认/重新识别」UI；一图多题交给 `prompts/tutoring/math/auxiliary.md` 已有的图片/多题处理段。新增请求级 thinking 开关（`ChatRequest.thinking?: boolean`，`buildRequestBody` 下发 `enable_thinking = thinking !== false`），`JudgmentCapability` 判题两次调用都传 `false`（不建 `qwen3.8-max-nothink` 模型条目）。`judgment` 路由 fallback 由 `deepseek-v4-flash` 改为 `qwen3.8-max`（统一运行时回退与新装降级目标）。后台 `SCENES` 与 `admin.controller` 相关枚举去 `transcribe`。

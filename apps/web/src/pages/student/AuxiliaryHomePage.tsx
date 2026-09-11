@@ -41,6 +41,10 @@ export default function AuxiliaryHomePage() {
   const { messages, reset, isStreaming } = useChatStore();
   const { send, stop, retry, isLoadingHistory, deleteMsg } = useAuxChat(currentDialogueId ?? 0);
 
+  // 已够轮次（≥2 条 assistant 回复）时，输入框提示可用关键词直接要「答案+思路+解析」。
+  // 阈值与后端 fallback.yaml.fallback.detailedExplanationAfterRounds（默认 2）对齐。
+  const showAnswerHint = messages.filter((m) => m.role === 'assistant').length >= 2;
+
   const username = localStorage.getItem('username') ?? '同学';
 
   const handleNewQuestion = () => {
@@ -89,7 +93,7 @@ export default function AuxiliaryHomePage() {
             输入数学问题，或粘贴题目图片
           </p>
           <div className="w-full max-w-2xl">
-            <AuxInputBar onSend={send} onStop={stop} isStreaming={isStreaming} />
+            <AuxInputBar onSend={send} onStop={stop} isStreaming={isStreaming} showAnswerHint={showAnswerHint} />
           </div>
         </div>
       ) : (
@@ -97,7 +101,7 @@ export default function AuxiliaryHomePage() {
         <>
           <AuxChatPanel isLoadingHistory={isLoadingHistory} onRetry={retry} onDelete={deleteMsg} />
           <div className="px-6 pb-6 pt-4 bg-white border-t border-[#E5E5E5]">
-            <AuxInputBar key={currentDialogueId ?? 'new'} onSend={send} onStop={stop} isStreaming={isStreaming} />
+            <AuxInputBar key={currentDialogueId ?? 'new'} onSend={send} onStop={stop} isStreaming={isStreaming} showAnswerHint={showAnswerHint} />
           </div>
         </>
       )}

@@ -54,6 +54,8 @@ interface FallbackConfig {
     consecutiveFailThreshold: number;
     giveUpKeywords: string[];
     outputStructure: string[];
+    detailedExplanationAfterRounds: number;
+    detailedExplanationKeywords: string[];
   };
 }
 

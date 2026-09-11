@@ -21,6 +21,8 @@ interface Props {
   onSend: (text: string, attachments?: AttachmentRequest[], images?: string[]) => void;
   onStop?: () => void;
   isStreaming?: boolean;
+  /** 已够轮次（≥2 轮）时提示学生：可用关键词直接要「答案+解题思路+解析」。 */
+  showAnswerHint?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +69,7 @@ function couldBeSupportedFile(item: DataTransferItem): boolean {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function AuxInputBar({ onSend, onStop, isStreaming = false }: Props) {
+export default function AuxInputBar({ onSend, onStop, isStreaming = false, showAnswerHint = false }: Props) {
   const [text, setText] = useState('');
   const [fileState, setFileState] = useState<FileState | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -525,6 +527,15 @@ export default function AuxInputBar({ onSend, onStop, isStreaming = false }: Pro
       {fs?.status === 'error' && !fs.url && (
         <div className="px-3 pt-2">
           <span className="text-sm text-[#86868B]">{fs.errorMsg}</span>
+        </div>
+      )}
+
+      {/* 轮次够了（≥2 轮）：提示可用关键词直接要「答案+思路+解析」。
+          对应后端 AIService 的「≥detailedExplanationAfterRounds 轮 + 关键词」快路径。 */}
+      {showAnswerHint && !isBusy && (
+        <div className="px-3 pt-2 text-xs text-[#86868B]">
+          想直接看答案？输入「<span className="text-[#FF6B00]">详细解析</span>」或「
+          <span className="text-[#FF6B00]">给我答案</span>」，即可获得 答案 + 解题思路 + 解析。
         </div>
       )}
 

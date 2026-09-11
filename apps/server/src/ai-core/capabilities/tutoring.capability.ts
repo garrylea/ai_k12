@@ -26,6 +26,7 @@ const StructuredQuestionOutputSchema = z.object({
     isCorrect: z.boolean(),
   })).optional(),
   answer: z.string(),
+  approach: z.string().optional(),
   explanation: z.string(),
   knowledgePoints: z.array(z.string()),
   quality: z.enum(['good', 'poor']),
@@ -167,12 +168,21 @@ export class TutoringCapability {
         }).catch(() => {});
         return;
       }
-      // Model error - persist ONLY the user message (decision 11: error replies
-      // are not persisted; on reload the last user message shows as awaiting
-      // retry). On retry the user message is already stored, so persist nothing.
-      // Surface a structured, human-readable error so the frontend can render an
-      // error bubble with an optional retry button.
-      if (userMessage) {
+      // Model error - on reload the last user message shows as awaiting retry
+      // (decision 11: error replies are not persisted as a final answer). BUT if
+      // the model already streamed reasoning/partial content before failing
+      // (e.g. an idle timeout mid-thinking), keep that partial assistant turn so
+      // the student can still read it and the next question retains context.
+      // On retry the user message is already stored, so persist nothing extra.
+      const partialAssistant = reasoning || content
+        ? { role: 'assistant' as const, content: content || '[生成中断]', reasoning, type: 'socratic' as const, model: prepared.routeResult.primary.modelId }
+        : null;
+      if (partialAssistant) {
+        await this.conversationService.saveMessages({
+          dialogueId,
+          messages: userMessage ? [userMessage, partialAssistant] : [partialAssistant],
+        }).catch(() => {});
+      } else if (userMessage) {
         await this.conversationService.saveMessages({
           dialogueId,
           messages: [userMessage],
@@ -258,6 +268,7 @@ export class TutoringCapability {
     // fallback full-explanation, not be blocked as off_topic by the keyword
     // classifier (those keywords don't match any learning pattern).
     if (
+      request.forceFallback ||
       context.consecutiveFailCount >= fallbackConfig.fallback.consecutiveFailThreshold ||
       this.isGiveUpMessage(request.message)
     ) {
@@ -392,32 +403,47 @@ export class TutoringCapability {
 
   /**
    * Generate a short conversation title (<=15 chars) from the user's question
-   * + assistant reply, using a cheap model (deepseek-v4-flash). Returns null
-   * if the message is just a greeting / no clear question, so the caller keeps
-   * the default temp title and can retry on a later message.
+   * + assistant reply. Routed via the `title` scene: local model first (no
+   * external dependency), falling back to deepseek-v4-flash. If BOTH fail the
+   * title is left unchanged (the student renames it manually) - deliberately
+   * no text-derived fallback. Returns null for a greeting / no clear question
+   * so a later turn can retry.
    */
   async generateTitle(userMessage: string, assistantContent: string): Promise<string | null> {
-    const model = this.modelRouter.getModel('deepseek-v4-flash');
-    if (!model) return null;
+    const route = this.modelRouter.route({ scene: 'title', subject: 'math' });
+    const candidates = [route.primary, route.fallback].filter(
+      (m): m is NonNullable<typeof route.primary> => !!m,
+    );
+    if (candidates.length === 0) return null;
     const prompt = `根据学生的提问，生成一个不超过15字的对话标题，概括问题主题。
 - 只是打招呼、闲聊、或无法判断具体问题时，回复：NONE
 - 只返回标题文字，不要引号、不要解释、不要句号
 学生提问：${userMessage}
 助手回复摘要：${assistantContent.slice(0, 200)}`;
-    try {
-      const res = await this.modelClient.chat({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        maxTokens: 256,
-        timeout: 15000,
-      });
+    let lastErr: unknown;
+    for (const model of candidates) {
+      try {
+        const res = await this.modelClient.chat({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          maxTokens: 256,
+          timeout: 15000,
+        });
       const title = (res.content || '').trim().replace(/^[\s"'""']+|[\s"'""']+$/g, '');
       if (!title || title.toUpperCase() === 'NONE') return null;
       return title.slice(0, 20);
-    } catch {
-      return null;
+      } catch (err) {
+        lastErr = err;
+      }
     }
+    // Both title-route models failed: leave the title unchanged (caller keeps
+    // the default; the student can rename it manually). No text fallback.
+    console.warn(
+      '[tutoring] title generation failed on all title-route models:',
+      lastErr instanceof Error ? lastErr.message : lastErr,
+    );
+    return null;
   }
 
   private isGiveUpMessage(message: string): boolean {

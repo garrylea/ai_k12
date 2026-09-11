@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { QuestionRow } from './types.js';
+import { contentPrefix } from '../../common/utils/content-hash.util.js';
 
 @Injectable()
 export class QuestionsRepository {
@@ -12,6 +13,23 @@ export class QuestionsRepository {
       [contentHash],
     );
     return (rows[0] as QuestionRow) ?? null;
+  }
+
+  /**
+   * 题目前缀兜底匹配：hash 未命中时，用「归一化去标点后的前 20 字」比对，
+   * 解决同一道题因文字/格式微调导致 hash 不一致的问题。先用前 6 字做
+   * LIKE 粗筛（needle 无标点，能穿过题库内容的标点），再在 JS 里精确比对
+   * 前缀；返回按 id 倒序（最新优先）的候选。
+   */
+  async findByContentPrefix(content: string, limit = 20): Promise<QuestionRow[]> {
+    const prefix = contentPrefix(content);
+    if (prefix.length < 4) return [];
+    const needle = prefix.slice(0, Math.min(6, prefix.length));
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM questions WHERE is_active = 1 AND content LIKE CONCAT('%', ?, '%') ORDER BY id DESC LIMIT 50`,
+      [needle],
+    );
+    return (rows as QuestionRow[]).filter((r) => contentPrefix(r.content) === prefix).slice(0, limit);
   }
 
   /** 题中心定位：按主键取在用题目（训练模块用，训练题必来自题库）。 */
@@ -34,9 +52,9 @@ export class QuestionsRepository {
   async create(row: Omit<QuestionRow, 'id' | 'created_at' | 'is_active'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO questions
-       (subject_id, type, difficulty, content, options, answer, explanation, source, content_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [row.subject_id, row.type, row.difficulty, row.content, row.options, row.answer, row.explanation, row.source, row.content_hash],
+       (subject_id, type, difficulty, content, options, answer, approach, explanation, source, content_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.subject_id, row.type, row.difficulty, row.content, row.options, row.answer, row.approach ?? null, row.explanation, row.source, row.content_hash],
     );
     return result.insertId;
   }

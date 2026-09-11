@@ -95,6 +95,15 @@ export class MainErrorBooksRepository {
     return (rows[0] as MainErrorBookRow) ?? null;
   }
 
+  /** 该学生此题是否已有错题本行（不限 source、含已清零）。用于幂等补写。 */
+  async existsByStudentAndQuestionId(studentId: number, questionId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM main_error_books WHERE student_id = ? AND question_id = ? LIMIT 1`,
+      [studentId, questionId],
+    );
+    return rows.length > 0;
+  }
+
   /** 题中心变体清零：该学生此题所有未清行一次性 is_cleared=1（不限 source）。 */
   async clearUnclearedByStudentQuestionId(studentId: number, questionId: number): Promise<void> {
     await this.pool.execute(

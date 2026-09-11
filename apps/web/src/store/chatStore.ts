@@ -69,10 +69,10 @@ export const useChatStore = create<ChatState>((set) => ({
       const messages = [...s.messages];
       const last = messages[messages.length - 1];
       if (last && last.role === 'assistant') {
+        // Keep whatever already streamed (reasoning and/or partial content) so
+        // an error/timeout doesn't wipe the thinking the student just read.
         messages[messages.length - 1] = {
           ...last,
-          content: '',
-          reasoning: last.reasoning,
           streaming: false,
           error: err,
         };

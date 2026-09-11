@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TutoringCapability } from './tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
 import { ModelClient } from '../infra/model-client/index.js';
@@ -310,5 +310,45 @@ describe('TutoringCapability', () => {
     const assistantMsg = persisted!.messages.find(m => m.role === 'assistant' && contentToText(m.content).includes('好题目'));
     expect(assistantMsg).toBeDefined();
     expect(contentToText(assistantMsg!.content)).not.toContain('```json');
+  });
+});
+
+describe('TutoringCapability.generateTitle（title 路由：local -> deepseek）', () => {
+  const localModel = { provider: 'local', modelId: 'Qwen3.8-27B', baseUrl: 'http://x', contextWindow: 1, maxOutputTokens: 1, costPer1K: { input: 0, output: 0 }, supportsStreaming: true };
+  const dsModel = { provider: 'deepseek', modelId: 'deepseek-v4-flash', baseUrl: 'http://y', contextWindow: 1, maxOutputTokens: 1, costPer1K: { input: 0, output: 0 }, supportsStreaming: true };
+
+  function mk(chatImpl: (req: any) => Promise<{ content: string }>) {
+    const modelClient = { chat: vi.fn(chatImpl) };
+    const cap: any = new TutoringCapability({} as any, { modelClient: modelClient as any });
+    cap.modelRouter = { route: () => ({ primary: localModel, fallback: dsModel, reason: 'test' }) };
+    return { cap, modelClient };
+  }
+
+  it('本地可用时用本地模型（不碰兜底）', async () => {
+    const { cap, modelClient } = mk(async ({ model }: any) => ({
+      content: model.modelId === 'Qwen3.8-27B' ? '本地标题' : '兜底标题',
+    }));
+    expect(await cap.generateTitle('问题', '回复')).toBe('本地标题');
+    expect(modelClient.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('本地失败时回退 deepseek-v4-flash', async () => {
+    const { cap, modelClient } = mk(async ({ model }: any) => {
+      if (model.modelId === 'Qwen3.8-27B') throw new Error('local down');
+      return { content: '兜底标题' };
+    });
+    expect(await cap.generateTitle('问题', '回复')).toBe('兜底标题');
+    expect(modelClient.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it('两个模型都失败时返回 null（不改标题）', async () => {
+    const { cap, modelClient } = mk(async () => { throw new Error('down'); });
+    await expect(cap.generateTitle('问题', '回复')).resolves.toBeNull();
+    expect(modelClient.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it('模型返回 NONE 时不改标题', async () => {
+    const { cap } = mk(async () => ({ content: 'NONE' }));
+    await expect(cap.generateTitle('问题', '回复')).resolves.toBeNull();
   });
 });

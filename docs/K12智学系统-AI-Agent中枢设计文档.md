@@ -225,7 +225,7 @@ apps/server/
 ```typescript
 interface RouteRequest {
   /** 业务场景 */
-  scene: 'tutoring' | 'grading' | 'explanation' | 'variation' | 'analysis' | 'safety';
+  scene: 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title';
   /** 学科 */
   subject: 'math' | 'chinese' | 'english';
   /** 难度等级 1=易 2=中 3=难 */
@@ -713,6 +713,8 @@ class ModelClient {
 - `reasoningContent` 透传到各 capability 响应(TutoringResponse/GradingResult/ExplanationResponse/VariationResponse/AnalyticsResponse/FallbackResponse 的 `reasoning` 字段)，供前端展示思考过程；**前端如何显示是前端的事，但 Agent 必须捕获并透传**
 - gemini 流式(streamGenerateContent)暂未实现(待配 GEMINI_API_KEY)，ModelClient 对 gemini 强制非流式降级
 - `streamChat()` 不套 `callWithRetry`--mid-stream 重试会重复生成 token，流错误由调用方(HTTP 层)处理
+- `streamChat()` 用**空闲超时**（`streaming.firstTokenTimeoutMs`/`interTokenTimeoutMs`，每收到数据即重置，见 C.2），空闲触发抛 `TimeoutError`(408)；用户主动停止（外部 `AbortSignal`）抛 `AbortError`，不当作失败
+- 流式**中途失败/超时**已产出部分时，capability 会 best-effort 落库已聚合的 `reasoning`/`content`（assistant content 为空时填 `[生成中断]`）连同用户消息，刷新后仍可回看；若尚无任何产出则只落用户消息（刷新回到「末条 user 待重试」）
 - 流式 usage 尽力收(部分 provider 如 Kimi 流式不返回 usage，此时 cost=0)
 - 流式响应首个 chunk 应包含 `role: 'assistant'`，供 ConversationService 预分配消息记录
 - 流式传输中断时，已接收的内容持久化不丢失，客户端重连后从 `lastMessageId` 续传
@@ -987,6 +989,14 @@ class ResponseParser {
 3. **兜底后恢复**：兜底完成后重置失败计数，学生继续下一知识点
 
 **注意**：失败计数按**知识点**维度，而非对话维度。切换到新知识点时重置计数。
+
+#### 3.6.2.1 辅线答疑「明确索要详细解析」走题库（2026-09-11 新增）
+
+辅线答疑场景（`mode='auxiliary'`）多一条**不经过 FallbackHandler / 不调用模型**的快路径，实现在 `AIService.maybeStoredExplanation`：学生已与 AI 来回 ≥ `fallback.yaml.fallback.detailedExplanationAfterRounds`（默认 2）轮、且当前消息命中 `detailedExplanationKeywords` 时，直接从题库取该题的 **答案 + 解题思路 + 解析**（`questions.answer/approach/explanation`）返回。
+
+- 题目定位：会话 `ai_dialogues.question_id`（AI 首次结构化入库时回填）优先；老会话无锚点则用首条用户消息的题干匹配——`content_hash` 优先、**「归一化去标点后的前 20 个字」兜底**（同一题文字/格式微调也能命中），多命中取最新。
+- **命中** -> 直接输出题库内容（不调模型）；**查不到题或题库无可用内容** -> `TutoringRequest.forceFallback=true` 强制走 `FallbackHandler` 的 **AI 完整解析**，**不再回到苏格拉底式追问**。
+- 结构化题目输出新增 `approach`（解题思路）字段，与 answer/explanation 一起入库，供该快路径复用；入库时按 hash / 前 20 字去重（不重复插入），并确保该学生错题本有这道题（`source='auxiliary'`）。详见 PRD §7.9/§7.10、辅线设计 §8.1.1。
 
 #### 3.6.3 接口定义
 
@@ -2351,7 +2361,7 @@ route(scene, subject, difficulty) → RouteResult
   │   └─ subject=english ─────────────► Kimi / Qwen-3.8-Max
 
   ├─ scene=grading ───►
-  │   ├─ subject=math ──────► Qwen-3.8-Max / Kimi
+  │   ├─ subject=math ──────► DeepSeek-V4-Flash / Qwen-3.8-Max
   │   ├─ subject=chinese ───► Kimi / Qwen-3.8-Max
   │   └─ subject=english ───► Kimi / Qwen-3.8-Max
 
@@ -2360,10 +2370,16 @@ route(scene, subject, difficulty) → RouteResult
   │   ├─ subject=chinese ───► Kimi / Qwen-3.8-Max
   │   └─ subject=english ───► Kimi / Qwen-3.8-Max
 
+  ├─ scene=judgment ───► local（本地 llama.cpp Qwen3.8-27B）/ Qwen-3.8-Max
+  ├─ scene=hint ───────► DeepSeek-V4-Flash / Qwen-3.8-Max
+  ├─ scene=structuring ► DeepSeek-V4-Flash / Qwen-3.8-Max
+  ├─ scene=title ──────► local / DeepSeek-V4-Flash
   ├─ scene=variation ──► Qwen-3.8-Max / Gemini-3.1-Pro
 
   └─ scene=analysis ───► Kimi / Qwen-3.8-Max
 ```
+
+**`title` 场景（会话标题生成，2026-09-11 新增）**：辅线首条消息后由 `TutoringCapability.generateTitle` 生成 ≤15 字标题。路由 **本地模型优先**（不依赖外部余额）、本地不可用才回退 `deepseek-v4-flash`；**两者都失败则不生成标题**（保留默认「辅线答疑」，由学生自行手动重命名，无文本兜底）。已 seed 的库执行 `npx tsx src/scripts/set-title-route.ts` 补 `title/*` 路由。
 
 ### 7.2 模型配置
 
@@ -3038,17 +3054,23 @@ retry:
   baseDelayMs: 1000
   maxBackoffMs: 60000
 
-timeout:
-  default: 30000          # 默认 30s
-  tutoring: 15000         # 辅导场景 15s（需流式首字 < 3s）
-  grading: 30000          # 批改 30s
-  variation: 45000        # 变式题生成 45s（复杂）
-  safety: 5000            # 安全分类 5s（快速模型）
+timeout:                      # 非流式 per-scene 请求超时（provider.chat / gemini 走这条）
+  default: 45000
+  tutoring: 45000
+  grading: 45000
+  judgment: 90000
+  explanation: 120000
+  variation: 60000
+  hint: 45000
+  safety: 10000
+  structuring: 45000
 
-streaming:
-  firstTokenTimeoutMs: 3000   # 首字超时 3s
-  interTokenTimeoutMs: 10000  # token 间隔超时 10s
+streaming:                    # OpenAI 兼容流式的「空闲超时」（收到数据即重置）
+  firstTokenTimeoutMs: 3000   # 首字节到达前允许的等待
+  interTokenTimeoutMs: 10000  # 收到首字节后，两次数据间的最大间隔
 ```
+
+**超时语义（2026-09-11 起）**：`ModelClient.chat` 默认流式（聚合 `provider.streamChat`），`streamChat` 用的是 `streaming.*` 的**空闲超时**——每收到一块数据就把倒计时重置，**不是从请求开始算的墙钟硬超时**（早前用 `AbortSignal.timeout(per-scene)`，会把 reasoner（qwen3.8-max）难题的长时间思考在 45s 处拦腰砍断）。空闲超时抛 `TimeoutError`(statusCode 408)，`mapLLMErrorToClient` 映射为「AI 响应超时」；用户主动停止（外部 `AbortSignal`）仍走 `AbortError` 语义、不报错兜底。`timeout.*` 仍是各非流式调用（`provider.chat`、gemini 非流式降级）的硬超时。
 
 ### C.3 安全检测配置（safety.yaml）
 
