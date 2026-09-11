@@ -63,6 +63,44 @@ class TestParseBasic:
         doc = parse_answer_doc("# 试卷：X\n## 3\n答案：第一行\n\n答案：第二行\n")
         assert doc.items[0].answer == "第二行"
 
+    def test_解析内嵌围栏块跨空行保留(self):
+        doc = parse_answer_doc(
+            "# 试卷：X\n"
+            "## 24\n"
+            "答案：A\n"
+            "解析：过程如下。\n"
+            "\n"
+            "```xml\n"
+            "<svg viewBox=\"0 0 10 10\">\n"
+            "\n"
+            "  <circle cx=\"1\" cy=\"1\" r=\"1\"/>\n"
+            "</svg>\n"
+            "```\n"
+        )
+        expl = doc.items[0].explanation
+        assert expl.startswith("过程如下。")
+        assert "```xml" in expl
+        assert "</svg>" in expl
+        assert "<circle cx=\"1\"" in expl
+
+    def test_解析空行后的普通续段保留(self):
+        doc = parse_answer_doc("# 试卷：X\n## 1\n答案：A\n解析：第一段。\n\n第二段。\n")
+        assert doc.items[0].explanation == "第一段。\n\n第二段。"
+
+    def test_题间分隔线不进入解析(self):
+        doc = parse_answer_doc(
+            "# 试卷：X\n## 1\n答案：A\n解析：只此一句。\n\n---\n\n## 2\n答案：B\n"
+        )
+        assert doc.items[0].explanation == "只此一句。"
+        assert doc.items[1].answer == "B"
+
+    def test_答案多行含空行保留(self):
+        doc = parse_answer_doc(
+            "# 试卷：X\n## 3\n答案：\n(1) 甲\n\n(2) 乙\n思路：x\n题型：calculation\n"
+        )
+        assert doc.items[0].answer == "(1) 甲\n\n(2) 乙"
+        assert doc.items[0].type_override == "calculation"
+
 
 class TestValidation:
     def test_缺答案报错(self):

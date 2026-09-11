@@ -9,7 +9,9 @@
     解析：<内容，可多行>         —— 可选；写入 questions.explanation
     题型：calculation           —— 可选；仅需改标时写
 
-多行续接：字段行之后的非空行接续到该字段（换行拼接），空行断开。
+多行续接：字段行之后的行（含空行）接续到该字段；空行被保留，字段以
+「下一字段行 / `## 题号` / `---` 分隔线 / 文件结束」结束。围栏代码块
+（```）内的内容原样保留（含空行与缩进），用于内嵌 `<svg>` 图示。
 """
 
 import re
@@ -20,6 +22,7 @@ from answer_records import AnswerRecord, VALID_TYPES
 HEADING_PAPER_RE = re.compile(r"^#\s*试卷[:：]\s*(.+?)\s*$")
 HEADING_ITEM_RE = re.compile(r"^##\s*(\d+)\s*$")
 FIELD_RE = re.compile(r"^(答案|思路|解析|题型)[:：]\s*(.*)$")
+_HR_RE = re.compile(r"^(---|\*\*\*|___)\s*$")
 _FIELD_ATTR = {"答案": "answer", "思路": "approach", "解析": "explanation"}
 _MULTILINE_FIELDS = ("答案", "思路", "解析")
 
@@ -48,14 +51,27 @@ def parse_answer_doc(text: str) -> AnswerDoc:
     by_no: dict[int, AnswerDocItem] = {}
     current: AnswerDocItem | None = None
     field_name: str | None = None
+    pending_blanks = 0
+    in_fence = False
 
     for raw in text.splitlines():
         line = raw.rstrip()
+        stripped = line.strip()
+
+        # 围栏代码块内：原样保留（含空行与缩进），直到闭合围栏
+        if in_fence:
+            if current is not None and field_name in _MULTILINE_FIELDS:
+                attr = _FIELD_ATTR[field_name]
+                old = getattr(current, attr)
+                setattr(current, attr, f"{old}\n{line}" if old else line)
+            if stripped.startswith("```"):
+                in_fence = False
+            continue
 
         m = HEADING_PAPER_RE.match(line)
         if m:
             doc.title = m.group(1)
-            current, field_name = None, None
+            current, field_name, pending_blanks = None, None, 0
             continue
 
         m = HEADING_ITEM_RE.match(line)
@@ -67,6 +83,7 @@ def parse_answer_doc(text: str) -> AnswerDoc:
                 by_no[no] = current
                 doc.items.append(current)
             field_name = None
+            pending_blanks = 0
             continue
 
         if current is None:
@@ -76,19 +93,30 @@ def parse_answer_doc(text: str) -> AnswerDoc:
         if m:
             field_name = m.group(1)
             value = m.group(2).strip()
+            pending_blanks = 0
             if field_name == "题型":
                 current.type_override = value or None
             elif value:
                 setattr(current, _FIELD_ATTR[field_name], value)
             continue
 
-        if line.strip():
-            if field_name in _MULTILINE_FIELDS:
-                attr = _FIELD_ATTR[field_name]
-                old = getattr(current, attr)
-                setattr(current, attr, f"{old}\n{line.strip()}" if old else line.strip())
-        else:
-            field_name = None  # 空行断开续接
+        if _HR_RE.match(line):
+            field_name = None  # 分隔线结束当前字段，自身不进入内容
+            pending_blanks = 0
+            continue
+
+        if field_name in _MULTILINE_FIELDS:
+            if not stripped:
+                pending_blanks += 1  # 空行保留为字段内空行，不断开续接
+                continue
+            attr = _FIELD_ATTR[field_name]
+            old = getattr(current, attr)
+            sep = "\n" * (pending_blanks + 1) if old else ""
+            setattr(current, attr, f"{old}{sep}{stripped}")
+            pending_blanks = 0
+            if stripped.startswith("```"):
+                in_fence = True
+            continue
 
     _validate(doc)
     return doc
