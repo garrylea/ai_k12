@@ -312,7 +312,7 @@ configure_llm_provider() { # $1=provider
   local p="$1" def_url def_model
   case "$p" in
     kimi)    def_url='https://api.moonshot.cn'                        def_model='kimi-latest' ;;
-    qwen)    def_url='https://dashscope.aliyuncs.com/compatible-mode' def_model='qwen3.7-max' ;;
+    qwen)    def_url='https://dashscope.aliyuncs.com/compatible-mode' def_model='qwen3.8-max' ;;
     gemini)  def_url='https://generativelanguage.googleapis.com'      def_model='gemini-3.1-pro' ;;
     deepseek) def_url='https://api.deepseek.com'                      def_model='deepseek-v4-flash' ;;
     *) die "未知 provider: $p" ;;

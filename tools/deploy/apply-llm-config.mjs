@@ -7,7 +7,7 @@
  *
  * provider -> modelKey 映射（主文本模型）：
  *   kimi    -> kimi
- *   qwen    -> qwen3.7-max      （qwen-vl-max / qwen3-vl-plus 等专用模型不在此列）
+ *   qwen    -> qwen3.8-max      （qwen-vl-max / qwen3-vl-plus 等专用模型不在此列）
  *   gemini  -> gemini-3.1-pro
  *   deepseek-> deepseek-v4-flash
  *
@@ -19,7 +19,7 @@ import fs from 'node:fs';
 
 const MODEL_KEY = {
   kimi: 'kimi',
-  qwen: 'qwen3.7-max',
+  qwen: 'qwen3.8-max',
   gemini: 'gemini-3.1-pro',
   deepseek: 'deepseek-v4-flash',
 };
