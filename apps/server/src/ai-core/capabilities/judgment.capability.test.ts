@@ -80,6 +80,7 @@ describe('JudgmentCapability', () => {
     const r = await cap.judge(judgeRequest);
     expect(r.isCorrect).toBe(true);
     expect(mockChat).toHaveBeenCalledTimes(2);
+    expect(mockChat.mock.calls[1][0].model.modelId).toBe('deepseek-v4-flash');
   });
 
   it('primary 成功时不调用 fallback', async () => {
@@ -96,5 +97,14 @@ describe('JudgmentCapability', () => {
     const cap = new JudgmentCapability({ modelClient: mockModelClient, modelRouter: routerWith(primaryModel) });
     await expect(cap.judge(judgeRequest)).rejects.toThrow('local down');
     expect(mockChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('primary 与 fallback 都失败时抛组合错误（点名两个模型）', async () => {
+    mockChat
+      .mockRejectedValueOnce(new Error('local down'))
+      .mockRejectedValueOnce(new Error('ds down'));
+    const cap = new JudgmentCapability({ modelClient: mockModelClient, modelRouter: routerWith(primaryModel, fallbackModel) });
+    await expect(cap.judge(judgeRequest)).rejects.toThrow(/primary\(Qwen3\.8-27B\).*fallback\(deepseek-v4-flash\)/s);
+    expect(mockChat).toHaveBeenCalledTimes(2);
   });
 });

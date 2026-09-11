@@ -13,7 +13,7 @@
 - **变更摘要**：`judgment` 场景 primary 由 `deepseek-v4-flash` 改为 `local`（本地 llama.cpp `Qwen3.8-27B`，OpenAI 兼容，`LOCAL_LLM_BASE_URL`/`LOCAL_LLM_API_KEY`），fallback 改为 `deepseek-v4-flash`。`JudgmentCapability` 新增失败回退：primary 任何失败（连接拒绝/超时/4xx/5xx/返回解析不了）→ fallback 重试一次；两者皆败才抛错（`JudgeCoreService` 仍映射 503 不变）。覆盖训练模块专项/考试/错题全部模型判题（三者同走 `judgeQuestion → JudgmentCapability`）；课堂练习共用该场景，一并切到本地模型。Provider 层抽出 `OpenAICompatibleClient` 基类（原 `KimiClient` 一直兼任基类但命名误导），`KimiClient`/`QwenClient`/`DeepSeekClient`/新增 `LocalClient` 各自为其薄子类；`LocalClient` 去掉 `enable_thinking`（llama.cpp 非 DashScope 端点），保留 `response_format`。`Provider` 联合类型与后台 provider 下拉新增 `local`。后台 `PROVIDER_TYPES` 与 `admin.controller.ts` 的 `providerType` zod 枚举均新增 `'local'`，后台可创建/辨识本地模型。
 - **动机**：训练模块判题量大，走本地模型省调用成本；本地不可用时必须自动兜底，学生判题不能因本地服务挂掉而失败。
 - **落地**：`model-routes.yaml` 新增 `local` 模型 + judgment 路由；`npx tsx src/scripts/set-judging-local.ts` 幂等 upsert 到已 seed 的库（`seed-llm-config.ts` 是 skip-if-exists，无法更新既有行）；运行后需重启后端或后台保存路由触发 `registry.reload()`。
-- **局限/待办**：本地不可用时 `ModelClient` 内置重试（2 次 + 退避）后才回退，单次判题多约 1–3s（未为 local 单独调 `retry.yaml`）；llama.cpp 对 `response_format: json_object` 的兼容性与本地 27B 判题准确率待实测；无本地健康检查/preflight。
+- **局限/待办**：本地不可用时 `ModelClient` 内置重试（2 次 + 退避）后才回退——「多约 1–3s」仅适用于连接被立即拒绝（ECONNREFUSED）的情形；若本地主机 blackhole/不可达，请求会一直阻塞到 90s 的 judgment 超时 × 内置 2 次重试（≈4.5 分钟）后才触发 fallback，本次有意不为 `local` 单独调 `retry.yaml` 的重试/超时（留待后续）；llama.cpp 对 `response_format: json_object` 的兼容性与本地 27B 判题准确率待实测；无本地健康检查/preflight。
 - 设计 spec：`docs/superpowers/specs/2026-09-11-local-judging-model-design.md`；实施计划 `docs/superpowers/plans/2026-09-11-local-judging-model.md`。
 
 ---

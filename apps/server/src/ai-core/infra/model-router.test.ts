@@ -48,6 +48,7 @@ describe('ModelRouter', () => {
     // 训练模块判题默认走本地 llama.cpp Qwen3.8-27B；本地不可用回退 deepseek-v4-flash
     const result = router.route({ scene: 'judgment', subject: 'math' });
     expect(result.primary.modelId).toBe('Qwen3.8-27B');
+    expect(result.primary.provider).toBe('local');
     expect(result.fallback?.modelId).toBe('deepseek-v4-flash');
   });
 

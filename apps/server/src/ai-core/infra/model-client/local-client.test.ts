@@ -27,4 +27,11 @@ describe('LocalClient', () => {
     const body = (new KimiClient('sk-x') as any).buildRequestBody(request, false);
     expect(body.enable_thinking).toBe(true);
   });
+
+  it('流式请求体同样不含 enable_thinking、保留 response_format（判题走流式）', () => {
+    const body = (new LocalClient('local') as any).buildRequestBody(request, true);
+    expect(body.enable_thinking).toBeUndefined();
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.stream).toBe(true);
+  });
 });

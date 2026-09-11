@@ -9,6 +9,7 @@ const request = {
   },
   messages: [{ role: 'user' as const, content: 'hi' }],
   responseFormat: 'json_object' as const,
+  stopSequences: ['END'],
 };
 
 describe('OpenAICompatibleClient.buildRequestBody', () => {
@@ -17,10 +18,12 @@ describe('OpenAICompatibleClient.buildRequestBody', () => {
     expect(body.enable_thinking).toBe(true);
     expect(body.response_format).toEqual({ type: 'json_object' });
     expect(body.stream).toBeUndefined();
+    expect(body.stop).toEqual(['END']);
   });
 
   it('流式请求体带 stream: true', () => {
     const body = (new OpenAICompatibleClient('sk-x') as any).buildRequestBody(request, true);
     expect(body.stream).toBe(true);
+    expect(body.stop).toBeUndefined();
   });
 });
