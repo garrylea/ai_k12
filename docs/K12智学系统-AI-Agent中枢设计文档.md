@@ -246,7 +246,7 @@ interface RouteResult {
 }
 
 interface ModelConfig {
-  /** 模型标识（如 'qwen3.7-max'） */
+  /** 模型标识（如 'qwen3.8-max'） */
   modelId: string;
   /** 厂商 */
   provider: 'kimi' | 'qwen' | 'gemini' | 'deepseek';
@@ -271,38 +271,38 @@ interface ModelConfig {
 
 | 学科 | 难度 | 首选模型 | 备选模型 | 说明 |
 |------|------|----------|----------|------|
-| math | 1-2（易/中） | Qwen-3.7-Max | DeepSeek-V4-Flash | 中文数学推理强、响应快 |
-| math | 3（难） | Gemini-3.1-Pro | Qwen-3.7-Max | 长推理链、多步证明 |
+| math | 1-2（易/中） | Qwen-3.8-Max | DeepSeek-V4-Flash | 中文数学推理强、响应快 |
+| math | 3（难） | Gemini-3.1-Pro | Qwen-3.8-Max | 长推理链、多步证明 |
 | chinese | 任意 | Kimi | DeepSeek-V4-Flash | 中文表达自然，文学素养好 |
-| english | 任意 | Kimi | Qwen-3.7-Max | 双语能力强 |
+| english | 任意 | Kimi | Qwen-3.8-Max | 双语能力强 |
 
 **批改场景（grading）**：
 
 | 学科 | 首选模型 | 备选模型 | 说明 |
 |------|----------|----------|------|
-| math | Qwen-3.7-Max | Kimi | 数学逻辑强，按步骤判分准确 |
-| chinese | Kimi | Qwen-3.7-Max | 语文阅读理解、作文批改需语义理解 |
-| english | Kimi | Qwen-3.7-Max | 英语写作批改 |
+| math | Qwen-3.8-Max | Kimi | 数学逻辑强，按步骤判分准确 |
+| chinese | Kimi | Qwen-3.8-Max | 语文阅读理解、作文批改需语义理解 |
+| english | Kimi | Qwen-3.8-Max | 英语写作批改 |
 
 **解析/重讲（explanation）**：
 
 | 学科 | 首选模型 | 备选模型 |
 |------|----------|----------|
-| math | Qwen-3.7-Max | DeepSeek-V4-Flash |
-| chinese | Kimi | Qwen-3.7-Max |
-| english | Kimi | Qwen-3.7-Max |
+| math | Qwen-3.8-Max | DeepSeek-V4-Flash |
+| chinese | Kimi | Qwen-3.8-Max |
+| english | Kimi | Qwen-3.8-Max |
 
 **变式题生成（variation）**：
 
 | 学科 | 首选模型 | 备选模型 | 说明 |
 |------|----------|----------|------|
-| math | Qwen-3.7-Max | Gemini-3.1-Pro | 需结构化输出，数学严谨性高 |
+| math | Qwen-3.8-Max | Gemini-3.1-Pro | 需结构化输出，数学严谨性高 |
 
 **学情分析（analysis）**：
 
 | 学科 | 首选模型 | 备选模型 | 说明 |
 |------|----------|----------|------|
-| 任意 | Kimi | Qwen-3.7-Max | 中文总结自然，报告可读性好 |
+| 任意 | Kimi | Qwen-3.8-Max | 中文总结自然，报告可读性好 |
 
 **安全检测（safety）**：
 
@@ -562,7 +562,7 @@ class PromptBuilder {
 | 厂商 | 模型 | API 协议 | 流式支持 |
 |------|------|----------|----------|
 | Kimi（月之暗面） | kimi-latest | OpenAI 兼容 | ✅ SSE |
-| Qwen（通义千问） | qwen3.7-max | OpenAI 兼容 | ✅ SSE |
+| Qwen（通义千问） | qwen3.8-max | OpenAI 兼容 | ✅ SSE |
 | Gemini（Google） | gemini-3.1-pro | Gemini API | ✅ SSE |
 | DeepSeek | deepseek-v4-flash | OpenAI 兼容 | ✅ SSE |
 
@@ -1282,6 +1282,10 @@ class TutoringCapability {
 }
 ```
 
+#### 4.1.6 图片直送多模态（2026-09-11 起）
+
+图片不再走「VL 模型转录 → 学生确认/多题选择」的两阶段流程，而是由 `augmentWithImages` 直接作为 `image_url` 部件随最后一条 user 消息送给辅导模型（`qwen3.8-max` 多模态），无转录/确认两阶段；一图多题交给辅导 prompt 的图片/多题处理段按编号列表逐题处理。`qwen-vl-max`/`qwen3-vl-plus` 两个 VL 模型与 `transcribe` 场景已删除，不再存在。
+
 ---
 
 ### 4.2 GradingCapability — 主观题按步骤给分
@@ -1437,7 +1441,7 @@ interface ExplanationRequest {
 
 | 阶段 | 说明 | MVP 实现 | P1 实现 |
 |------|------|----------|---------|
-| **生成** | Qwen-3.7-Max 生成变式题 | ✅ 实现 | — |
+| **生成** | Qwen-3.8-Max 生成变式题 | ✅ 实现 | — |
 | **校验** | Gemini-3.1-Pro 校验逻辑自洽性 | ❌ 跳过（MVP 直接信任生成结果） | ✅ 实现 |
 
 #### 4.4.3 变式类型
@@ -1768,7 +1772,7 @@ description: "数学辅线苏格拉底辅导 — 开放范围"
 ### 辅线特点
 这是辅线自由探索模式，学生可以自由提问任意数学问题。你可以：
 - 讨论任意年级的数学知识
-- 回答学生拍照上传的题目（先确认识别结果是否准确）
+- 回答学生拍照上传的题目（图片直接随消息送达并识别题干；一图多题按编号列表逐题处理）
 - 主动询问想深入哪个知识点
 - 建议相关知识点供学生选择
 
@@ -2341,24 +2345,24 @@ route(scene, subject, difficulty) → RouteResult
   ┌─ scene=safety ────► DeepSeek-V4-Flash（快速分类，固定路由）
 
   ├─ scene=tutoring ──►
-  │   ├─ subject=math, difficulty≤2 ──► Qwen-3.7-Max / DeepSeek-V4-Flash
-  │   ├─ subject=math, difficulty=3 ──► Gemini-3.1-Pro / Qwen-3.7-Max
+  │   ├─ subject=math, difficulty≤2 ──► Qwen-3.8-Max / DeepSeek-V4-Flash
+  │   ├─ subject=math, difficulty=3 ──► Gemini-3.1-Pro / Qwen-3.8-Max
   │   ├─ subject=chinese ─────────────► Kimi / DeepSeek-V4-Flash
-  │   └─ subject=english ─────────────► Kimi / Qwen-3.7-Max
+  │   └─ subject=english ─────────────► Kimi / Qwen-3.8-Max
 
   ├─ scene=grading ───►
-  │   ├─ subject=math ──────► Qwen-3.7-Max / Kimi
-  │   ├─ subject=chinese ───► Kimi / Qwen-3.7-Max
-  │   └─ subject=english ───► Kimi / Qwen-3.7-Max
+  │   ├─ subject=math ──────► Qwen-3.8-Max / Kimi
+  │   ├─ subject=chinese ───► Kimi / Qwen-3.8-Max
+  │   └─ subject=english ───► Kimi / Qwen-3.8-Max
 
   ├─ scene=explanation ─►
-  │   ├─ subject=math ──────► Qwen-3.7-Max / DeepSeek-V4-Flash
-  │   ├─ subject=chinese ───► Kimi / Qwen-3.7-Max
-  │   └─ subject=english ───► Kimi / Qwen-3.7-Max
+  │   ├─ subject=math ──────► Qwen-3.8-Max / DeepSeek-V4-Flash
+  │   ├─ subject=chinese ───► Kimi / Qwen-3.8-Max
+  │   └─ subject=english ───► Kimi / Qwen-3.8-Max
 
-  ├─ scene=variation ──► Qwen-3.7-Max / Gemini-3.1-Pro
+  ├─ scene=variation ──► Qwen-3.8-Max / Gemini-3.1-Pro
 
-  └─ scene=analysis ───► Kimi / Qwen-3.7-Max
+  └─ scene=analysis ───► Kimi / Qwen-3.8-Max
 ```
 
 ### 7.2 模型配置
@@ -2375,9 +2379,9 @@ models:
     supportsStreaming: true
     features: [chat, reasoning]
 
-  qwen3.7-max:
+  qwen3.8-max:
     provider: qwen
-    modelId: qwen3.7-max
+    modelId: qwen3.8-max
     contextWindow: 131072
     maxOutputTokens: 32768
     costPer1K: { input: 0.007, output: 0.028 }
@@ -2926,9 +2930,9 @@ models:
     supportsStreaming: true
     features: [chat, reasoning]
 
-  qwen3.7-max:
+  qwen3.8-max:
     provider: qwen
-    modelId: qwen3.7-max
+    modelId: qwen3.8-max
     baseUrl: ${QWEN_BASE_URL}
     apiKey: ${QWEN_API_KEY}
     contextWindow: 131072
@@ -2970,50 +2974,50 @@ routes:
   tutoring:
     - subject: math
       difficulty: [1, 2]
-      primary: qwen3.7-max
+      primary: qwen3.8-max
       fallback: deepseek-v4-flash
     - subject: math
       difficulty: [3]
       primary: gemini-3.1-pro
-      fallback: qwen3.7-max
+      fallback: qwen3.8-max
     - subject: chinese
       primary: kimi
       fallback: deepseek-v4-flash
     - subject: english
       primary: kimi
-      fallback: qwen3.7-max
+      fallback: qwen3.8-max
 
   grading:
     - subject: math
-      primary: qwen3.7-max
+      primary: qwen3.8-max
       fallback: kimi
     - subject: chinese
       primary: kimi
-      fallback: qwen3.7-max
+      fallback: qwen3.8-max
     - subject: english
       primary: kimi
-      fallback: qwen3.7-max
+      fallback: qwen3.8-max
 
   explanation:
     - subject: math
-      primary: qwen3.7-max
+      primary: qwen3.8-max
       fallback: deepseek-v4-flash
     - subject: chinese
       primary: kimi
-      fallback: qwen3.7-max
+      fallback: qwen3.8-max
     - subject: english
       primary: kimi
-      fallback: qwen3.7-max
+      fallback: qwen3.8-max
 
   variation:
     - subject: math
-      primary: qwen3.7-max
+      primary: qwen3.8-max
       fallback: gemini-3.1-pro
 
   analysis:
     - subject: "*"
       primary: kimi
-      fallback: qwen3.7-max
+      fallback: qwen3.8-max
 
   safety:
     - subject: "*"
@@ -3022,7 +3026,7 @@ routes:
 
 # 默认模型（路由表未匹配时使用）
 default:
-  primary: qwen3.7-max
+  primary: qwen3.8-max
   fallback: deepseek-v4-flash
 ```
 

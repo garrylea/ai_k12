@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-09-11 qwen3.8-max 改名 + 多模态替代 VL / 去掉两阶段图片流程
+
+- **变更摘要**：`qwen3.7-max` 全局改名 `qwen3.8-max`（YAML 模型定义/所有路由/`default`/DB/deploy 脚本）。因 `qwen3.8-max` 支持多模态（实测 OpenAI 兼容模式 `image_url` 可用），删除 `qwen-vl-max`/`qwen3-vl-plus` 两个模型与 `transcribe` 场景，图片+文本直接送给辅导模型（`TutoringCapability.augmentWithImages` 把最后一条 user 消息改为 text+image_url 部件）。删除图片两阶段流程：`TutoringCapability` 的 `transcribeImage`/`classifySelection`/`parseTranscribeResult`/`parseSelectionResult`、`AIService` 的 `transcribeStage`/`selectionStage`/`correctStage` 与 flow 分支、`TutorDto.flowAction`、`ConversationService.updateFlowState`、前端 `chatStore` 的 `ChatFlow`/`ChatMessage.flow`、`useAuxChat` 的 flowAction/flow 事件、`AuxChatPanel` 的「确认/重新识别」UI；一图多题交给 `prompts/tutoring/math/auxiliary.md` 已有的图片/多题处理段。新增请求级 thinking 开关（`ChatRequest.thinking?: boolean`，`buildRequestBody` 下发 `enable_thinking = thinking !== false`），`JudgmentCapability` 判题两次调用都传 `false`（不建 `qwen3.8-max-nothink` 模型条目）。`judgment` 路由 fallback 由 `deepseek-v4-flash` 改为 `qwen3.8-max`（统一运行时回退与新装降级目标）。后台 `SCENES` 与 `admin.controller` 相关枚举去 `transcribe`。
+- **动机**：单多模态模型替代「文本模型 + VL 模型 + 两阶段确认」，减复杂度与一次模型往返；`qwen3.8-max` 全面替代 `qwen3.7-max`；判题不带 thinking 保速度。
+- **落地**：`npx tsx src/scripts/migrate-qwen38-multimodal.ts` 幂等迁移已 seed 的库（顺序：插新模型 → 改路由 → 改判题路由 → 删 transcribe 路由 → 删旧模型行 → 重置遗留 flow 状态；受 primary FK 约束）；`tools/deploy/apply-llm-config.mjs`/`deploy.sh` 默认模型改名；重启后端或后台保存路由生效。
+- **局限/待办**：`ai_dialogues.flow_state/pending_question(s)` 三列保留为死数据（未做破坏性迁移）；本地 llama.cpp 判题仍带 thinking（llama.cpp 忽略 `enable_thinking`，需 `chat_template_kwargs`，另议）；多模态替代两阶段后学生失去「识别对不对」确认，靠识别质量与 prompt 兜底；Qwen 账号曾欠费，公网模型可用性依赖账号状态。
+- 设计 spec：`docs/superpowers/specs/2026-09-11-qwen38-multimodal-design.md`；实施计划 `docs/superpowers/plans/2026-09-11-qwen38-multimodal.md`。
+
+---
+
 ## 2026-09-11 训练模块判题默认走本地模型（失败回退 ds v4 flash）
 
 - **变更摘要**：`judgment` 场景 primary 由 `deepseek-v4-flash` 改为 `local`（本地 llama.cpp `Qwen3.8-27B`，OpenAI 兼容，`LOCAL_LLM_BASE_URL`/`LOCAL_LLM_API_KEY`），fallback 改为 `deepseek-v4-flash`。`JudgmentCapability` 新增失败回退：primary 任何失败（连接拒绝/超时/4xx/5xx/返回解析不了）→ fallback 重试一次；两者皆败才抛错（`JudgeCoreService` 仍映射 503 不变）。覆盖训练模块专项/考试/错题全部模型判题（三者同走 `judgeQuestion → JudgmentCapability`）；课堂练习共用该场景，一并切到本地模型。Provider 层抽出 `OpenAICompatibleClient` 基类（原 `KimiClient` 一直兼任基类但命名误导），`KimiClient`/`QwenClient`/`DeepSeekClient`/新增 `LocalClient` 各自为其薄子类；`LocalClient` 去掉 `enable_thinking`（llama.cpp 非 DashScope 端点），保留 `response_format`。`Provider` 联合类型与后台 provider 下拉新增 `local`。后台 `PROVIDER_TYPES` 与 `admin.controller.ts` 的 `providerType` zod 枚举均新增 `'local'`，后台可创建/辨识本地模型。
