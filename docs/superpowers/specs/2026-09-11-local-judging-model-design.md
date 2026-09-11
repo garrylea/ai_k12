@@ -130,7 +130,13 @@ prompt 只构建一次，primary 与 fallback 复用。回退是**一次**尝试
 - `llm_routes`：按 `(scene='judgment', subject='math')` 存在则 UPDATE `primary_model_key='local', fallback_model_key='deepseek-v4-flash'`，否则 INSERT；
 - 打印变更摘要；运行后需重启后端（或后台保存路由触发 `registry.reload()`）方生效。
 
-不改 `seed-llm-config.ts`（它 skip-if-exists，无法更新已存在行）。
+`seed-llm-config.ts` 的 skip-if-exists 语义本身不改（仍按 `model_key` / `(scene,subject)` EXISTS 跳过已存在行）。但它新增了**路由按模型可用性降级**：抽出 helper `apps/server/src/scripts/llm-route-seed.util.ts` 的 `resolveSeedRoute`（覆盖于 `llm-route-seed.util.test.ts`），在「已成功 seed 的模型集合」下解析每条 YAML 路由的落库形态——
+
+- primary 已 seed：直接用；fallback 未 seed 时该路由仍落库，但 `fallback=null`（warning）；
+- primary 未 seed 但 fallback 已 seed：降级，把 fallback 顶上当 primary 落库（warning），避免整条路由缺失后 `ModelRouter` 静默落到全局 default；如 `.env` 缺 `LOCAL_LLM_*` 使 `local` 未配置时，`judgment/math` 即以 `deepseek-v4-flash` 为 primary 落库；
+- primary 与 fallback 均未 seed：整条路由跳过（warning）。
+
+本点**取代**原「不改 `seed-llm-config.ts`」的非目标表述（仅保留其 skip-if-exists 幂等语义本身不改）。
 
 ## 4. 关键决策与取舍
 
@@ -142,15 +148,18 @@ prompt 只构建一次，primary 与 fallback 复用。回退是**一次**尝试
 | 客户端结构 | 抽 `OpenAICompatibleClient` 基类 | 对齐"一基类 + 各 provider 子类"，本地模型有独立类可裁剪参数 |
 | 配置落地 | YAML + upsert 脚本 | 新装靠 YAML，当前已 seed 的库靠脚本；可复现、可追溯 |
 | local modelId | 字面量 `Qwen3.8-27B` | 测试与全新克隆（无 `.env`）结果确定；只有 baseUrl/apiKey 属部署相关 |
-| 重试 | 沿用全局 `retry.yaml`（2 次 + 退避） | 不因 local 改全局策略；本地挂时多等约 1–3s 后回退，可接受 |
+| 重试 | 沿用全局 `retry.yaml`（2 次 + 退避） | 不因 local 改全局策略；连接被立即拒绝（ECONNREFUSED）时快速失败，回退仅多约 1–3s，但本地主机 blackhole/不可达时请求会阻塞到 90s 的 `judgment` 超时（`retry.yaml`）× 内置 2 次重试 ≈ 4.5 分钟后才回退；per-`local` 超时/重试调优本次有意延后 |
 
 ## 5. 影响文件清单
 
 **新增**
 
 - `apps/server/src/ai-core/infra/model-client/openai-compatible-client.ts`
+- `apps/server/src/ai-core/infra/model-client/openai-compatible-client.test.ts`
 - `apps/server/src/ai-core/infra/model-client/local-client.ts`
 - `apps/server/src/scripts/set-judging-local.ts`
+- `apps/server/src/scripts/llm-route-seed.util.ts`
+- `apps/server/src/scripts/llm-route-seed.util.test.ts`
 - `apps/server/src/ai-core/infra/model-client/local-client.test.ts`（可选，见 §6）
 
 **修改**
@@ -161,8 +170,10 @@ prompt 只构建一次，primary 与 fallback 复用。回退是**一次**尝试
 - `apps/server/src/ai-core/infra/model-client/kimi-client.ts`（改薄子类）
 - `apps/server/src/ai-core/infra/model-client/qwen-client.ts`、`deepseek-client.ts`（换基类）
 - `apps/server/src/ai-core/infra/model-client/index.ts`（local case + 导入）
+- `apps/server/src/scripts/seed-llm-config.ts`（路由按模型可用性降级）
 - `apps/server/src/ai-core/capabilities/judgment.capability.ts`（fallback）
 - `apps/server/src/modules/admin/admin-models.service.ts`（PROVIDER_TYPES）
+- `apps/server/src/modules/admin/admin.controller.ts`（zod `providerType` enum 加 `'local'`）
 - `apps/web/src/pages/admin/AdminModelsPage.tsx`（PROVIDER_TYPES）
 - `apps/server/src/ai-core/infra/model-router.test.ts`（judgment 断言）
 - `apps/server/src/ai-core/capabilities/judgment.capability.test.ts`（回退用例）
@@ -189,6 +200,6 @@ prompt 只构建一次，primary 与 fallback 复用。回退是**一次**尝试
 ## 7. 风险与待验证
 
 1. **llama.cpp 参数兼容**：本地服务是否接受 `response_format: {type:'json_object'}` 未实测（探测 `:12345` 当时无响应）。若稳定拒绝，`LocalClient.buildRequestBody` 改为不下发该字段，改为依赖 prompt 约束 + `ResponseParser` 从文本提取 JSON；有回退兜底不至于中断。
-2. **延迟**：本地不可用时，`ModelClient` 内置重试（2 次 + 退避）后才回退，单次判题多约 1–3s。
+2. **延迟**：本地不可用时，`ModelClient` 内置重试（2 次 + 退避）后才回退——「多约 1–3s」仅适用于连接被立即拒绝（ECONNREFUSED）的情形；若本地主机 blackhole/不可达，请求会阻塞到 90s 的 `judgment` 超时 × 内置 2 次重试（≈4.5 分钟）后才触发 fallback（per-`local` 超时/重试调优本次有意延后）。
 3. **`Qwen3.8-27B` 判题质量**：27B 本地模型判题准确率未经本项目评测；本设计只切路由，质量评估另跑 `grading-accuracy`/`tutoring-quality` 类脚本。
 4. **全局 registry 与测试隔离**：judgment 测试通过注入 mock router 避免受全局 `ModelConfigRegistry` 影响。

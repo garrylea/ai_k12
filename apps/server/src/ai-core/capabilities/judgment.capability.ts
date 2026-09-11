@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { JudgmentRequest, JudgmentResult } from '../types.js';
+import type { JudgmentRequest, JudgmentResult, RoutedModel, PromptBuildResult } from '../types.js';
 import { timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { getModelConfigRegistry } from '../infra/model-config-registry.js';
@@ -19,15 +19,22 @@ const JudgmentResultSchema = z.object({
 
 export interface JudgmentCapabilityDeps {
   modelClient?: ModelClient;
+  /** 可测性：测试注入 mock router，避免依赖全局 ModelConfigRegistry / YAML。 */
+  modelRouter?: ModelRouter;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export class JudgmentCapability {
-  private modelRouter = new ModelRouter(getModelConfigRegistry());
+  private modelRouter: ModelRouter;
   private promptBuilder: PromptBuilder;
   private modelClient: ModelClient;
   private responseParser = new ResponseParser();
 
   constructor(deps?: JudgmentCapabilityDeps) {
+    this.modelRouter = deps?.modelRouter ?? new ModelRouter(getModelConfigRegistry());
     this.promptBuilder = new PromptBuilder(resolve(__dirname, '../prompts'));
     this.modelClient = deps?.modelClient ?? new ModelClient();
   }
@@ -54,8 +61,25 @@ export class JudgmentCapability {
       },
     });
 
+    // primary（本地模型）任何失败 -> 回退 fallback（ds v4 flash）一次。
+    try {
+      return await this.callModel(routeResult.primary, promptResult);
+    } catch (primaryErr) {
+      if (!routeResult.fallback) throw primaryErr;
+      try {
+        return await this.callModel(routeResult.fallback, promptResult);
+      } catch (fallbackErr) {
+        throw new Error(
+          `Judgment failed: primary(${routeResult.primary.modelId})=${errorMessage(primaryErr)}; ` +
+          `fallback(${routeResult.fallback.modelId})=${errorMessage(fallbackErr)}`,
+        );
+      }
+    }
+  }
+
+  private async callModel(model: RoutedModel, promptResult: PromptBuildResult): Promise<JudgmentResult> {
     const chatResponse = await this.modelClient.chat({
-      model: routeResult.primary,
+      model,
       messages: promptResult.messages,
       responseFormat: 'json_object',
       timeout: timeoutConfig.timeout.judgment ?? timeoutConfig.timeout.default,

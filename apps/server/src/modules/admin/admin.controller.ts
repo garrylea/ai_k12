@@ -15,7 +15,7 @@ import { CurrentUser } from '../../common/decorators/current-user.js';
 const ModelSchema = z.object({
   modelKey: z.string().min(2).max(50).regex(/^[a-zA-Z0-9_-]+$/),
   name: z.string().min(1).max(100),
-  providerType: z.enum(['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible']),
+  providerType: z.enum(['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible', 'local']),
   modelId: z.string().min(1).max(100),
   baseUrl: z.string().url(),
   apiKey: z.string().min(1).max(400),

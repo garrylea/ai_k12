@@ -3,6 +3,7 @@ import { timeoutConfig, getApiKeyByProvider } from '../../config.js';
 import type { ProviderAdapter } from './types.js';
 import { callWithRetry } from './errors.js';
 import { KimiClient } from './kimi-client.js';
+import { LocalClient } from './local-client.js';
 import { QwenClient } from './qwen-client.js';
 import { DeepSeekClient } from './deepseek-client.js';
 import { GeminiClient } from './gemini-client.js';
@@ -38,6 +39,7 @@ export class ModelClient {
         case 'qwen': client = new QwenClient(key); break;
         case 'deepseek': client = new DeepSeekClient(key); break;
         case 'gemini': client = new GeminiClient(key); break;
+        case 'local': client = new LocalClient(key); break;
         default: throw new Error(`Unknown provider: ${provider}`);
       }
     }
