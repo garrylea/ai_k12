@@ -90,6 +90,7 @@ describe('JudgmentCapability', () => {
     expect(r.isCorrect).toBe(false);
     expect(mockChat).toHaveBeenCalledTimes(1);
     expect(mockChat.mock.calls[0][0].model.modelId).toBe('Qwen3.8-27B');
+    expect(mockChat.mock.calls[0][0].thinking).toBe(false);
   });
 
   it('无 fallback 时 primary 失败直接抛错', async () => {

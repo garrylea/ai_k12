@@ -129,6 +129,8 @@ export interface ChatRequest {
   responseFormat?: 'text' | 'json_object';
   timeout?: number;
   stream?: boolean;
+  /** 是否启用模型 thinking；false 时请求体下发 enable_thinking:false（默认 true）。 */
+  thinking?: boolean;
   signal?: AbortSignal;  // caller-controlled abort (e.g. client disconnect) combined with timeout
 }
 

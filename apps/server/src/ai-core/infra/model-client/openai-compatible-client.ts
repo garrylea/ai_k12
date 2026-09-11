@@ -23,7 +23,7 @@ export class OpenAICompatibleClient implements ProviderAdapter {
     } else {
       body.stop = request.stopSequences;
     }
-    body.enable_thinking = true;
+    body.enable_thinking = request.thinking !== false;
     // 与非流式 chat() 对齐：流式路径同样下发 response_format，否则
     // judgment/grading/structuring 的 json_object 约束会被静默丢弃。
     body.response_format = request.responseFormat === 'json_object' ? { type: 'json_object' } : undefined;

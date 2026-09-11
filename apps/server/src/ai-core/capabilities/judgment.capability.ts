@@ -82,6 +82,7 @@ export class JudgmentCapability {
       model,
       messages: promptResult.messages,
       responseFormat: 'json_object',
+      thinking: false,
       timeout: timeoutConfig.timeout.judgment ?? timeoutConfig.timeout.default,
     });
 

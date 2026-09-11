@@ -26,4 +26,14 @@ describe('OpenAICompatibleClient.buildRequestBody', () => {
     expect(body.stream).toBe(true);
     expect(body.stop).toBeUndefined();
   });
+
+  it('thinking:false 时下发 enable_thinking:false', () => {
+    const body = (new OpenAICompatibleClient('sk-x') as any).buildRequestBody({ ...request, thinking: false }, false);
+    expect(body.enable_thinking).toBe(false);
+  });
+
+  it('不传 thinking 时仍下发 enable_thinking:true（默认行为不变）', () => {
+    const body = (new OpenAICompatibleClient('sk-x') as any).buildRequestBody(request, false);
+    expect(body.enable_thinking).toBe(true);
+  });
 });
