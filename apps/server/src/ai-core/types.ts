@@ -14,7 +14,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'transcribe';
 export type Subject = 'math' | 'chinese' | 'english';
-export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek';
+export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
 export type Track = 'mainline' | 'auxiliary';
 

@@ -12,7 +12,7 @@ import {
   type AdminRouteItem,
 } from '@/services/api';
 
-const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible'];
+const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible', 'local'];
 const SUBJECTS = ['math', 'chinese', 'english', '*'];
 
 interface ModelFormState {
