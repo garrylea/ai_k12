@@ -40,6 +40,15 @@ async function main() {
     database: process.env.DB_NAME ?? 'ai_k12',
   });
 
+  // 守卫：judgment/math 的 primary 指向 local，而 primary_model_key 有 FK（RESTRICT），
+  // 缺 'local' 行会在步骤 3 更新路由时报外键错。提前显式失败给出可操作提示。
+  // 幂等安全：只读检查，不改变任何状态。
+  const [localRows] = await pool.execute<mysql.RowDataPacket[]>(
+    'SELECT id FROM llm_models WHERE model_key = ?', ['local']);
+  if (localRows.length === 0) {
+    throw new Error("llm_models 缺少 'local' 行：请先运行 set-judging-local.ts 再跑本脚本");
+  }
+
   // 1) upsert 新模型
   const [mRows] = await pool.execute<mysql.RowDataPacket[]>(
     'SELECT id FROM llm_models WHERE model_key = ?', [NEW_QWEN]);

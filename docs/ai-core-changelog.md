@@ -1,6 +1,6 @@
 # CLAUDE.md 历史工作日志（迁出归档）
 
-本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-01），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
+本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-11），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
 
 - 各条目引用的任务级实现计划见 `docs/superpowers/plans/`
 - 仍生效的行为约束已提炼回 CLAUDE.md 的「关键约定」节，本文件仅作历史溯源
@@ -12,7 +12,7 @@
 
 - **变更摘要**：`qwen3.7-max` 全局改名 `qwen3.8-max`（YAML 模型定义/所有路由/`default`/DB/deploy 脚本）。因 `qwen3.8-max` 支持多模态（实测 OpenAI 兼容模式 `image_url` 可用），删除 `qwen-vl-max`/`qwen3-vl-plus` 两个模型与 `transcribe` 场景，图片+文本直接送给辅导模型（`TutoringCapability.augmentWithImages` 把最后一条 user 消息改为 text+image_url 部件）。删除图片两阶段流程：`TutoringCapability` 的 `transcribeImage`/`classifySelection`/`parseTranscribeResult`/`parseSelectionResult`、`AIService` 的 `transcribeStage`/`selectionStage`/`correctStage` 与 flow 分支、`TutorDto.flowAction`、`ConversationService.updateFlowState`、前端 `chatStore` 的 `ChatFlow`/`ChatMessage.flow`、`useAuxChat` 的 flowAction/flow 事件、`AuxChatPanel` 的「确认/重新识别」UI；一图多题交给 `prompts/tutoring/math/auxiliary.md` 已有的图片/多题处理段。新增请求级 thinking 开关（`ChatRequest.thinking?: boolean`，`buildRequestBody` 下发 `enable_thinking = thinking !== false`），`JudgmentCapability` 判题两次调用都传 `false`（不建 `qwen3.8-max-nothink` 模型条目）。`judgment` 路由 fallback 由 `deepseek-v4-flash` 改为 `qwen3.8-max`（统一运行时回退与新装降级目标）。后台 `SCENES` 与 `admin.controller` 相关枚举去 `transcribe`。
 - **动机**：单多模态模型替代「文本模型 + VL 模型 + 两阶段确认」，减复杂度与一次模型往返；`qwen3.8-max` 全面替代 `qwen3.7-max`；判题不带 thinking 保速度。
-- **落地**：`npx tsx src/scripts/migrate-qwen38-multimodal.ts` 幂等迁移已 seed 的库（顺序：插新模型 → 改路由 → 改判题路由 → 删 transcribe 路由 → 删旧模型行 → 重置遗留 flow 状态；受 primary FK 约束）；`tools/deploy/apply-llm-config.mjs`/`deploy.sh` 默认模型改名；重启后端或后台保存路由生效。
+- **落地**：`npx tsx src/scripts/migrate-qwen38-multimodal.ts` 幂等迁移已 seed 的库（顺序：插新模型 → 改路由 → 改判题路由 → 删 transcribe 路由 → 删旧模型行 → 重置遗留 flow 状态；受 primary FK 约束）；`tools/deploy/apply-llm-config.mjs`/`deploy.sh` 默认模型改名；重启后端或后台保存路由生效。`npm run build` 现经 `scripts/copy-assets.mjs` 把 `src/ai-core/*.yaml` 与 `prompts/` 复制进 `dist/ai-core`，修掉此前「build 不拷资源致 dist YAML 陈旧」的局限。
 - **局限/待办**：`ai_dialogues.flow_state/pending_question(s)` 三列保留为死数据（未做破坏性迁移）；本地 llama.cpp 判题仍带 thinking（llama.cpp 忽略 `enable_thinking`，需 `chat_template_kwargs`，另议）；多模态替代两阶段后学生失去「识别对不对」确认，靠识别质量与 prompt 兜底；Qwen 账号曾欠费，公网模型可用性依赖账号状态。端到端手动验收（辅线直送图片 / 一图多题 / 判题回退）待实测，结论由后续手动验收补记。
 - 设计 spec：`docs/superpowers/specs/2026-09-11-qwen38-multimodal-design.md`；实施计划 `docs/superpowers/plans/2026-09-11-qwen38-multimodal.md`。
 

@@ -184,7 +184,7 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 - **错误映射与对话持久化**：`mapLLMErrorToClient`（`infra/model-client/errors.ts`）把 11 个错误子类映射为人类可读错误码（1001-1012/5000/5001 + retryable 标志）透传给前端；对话中模型错误只持久化 user 消息、不落 assistant 错误（刷新回到「末条 user 待重试」），重试请求带 `retry:true` 只追加 assistant、不重复落 user。
 - **测试与文档同步铁律**：若测试断言与 config/types/设计文档的值冲突，**测试错**——改测试，勿改 config/设计文档。改代码或主文档时，同步更新所有引用该实现的设计/计划文档。
 
-**已知限制**（本次未修，记录待后续）：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断学生答错（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 字段（classifier.confidenceThreshold、outputStructure、streaming.firstTokenTimeoutMs/interTokenTimeoutMs）为声明式意图未接线；gemini 流式（streamGenerateContent）未实现（待配 GEMINI_API_KEY，当前非流式降级）；流式 usage 尽力收（Kimi 流式不返回 usage，cost 可能 0）；`npm run build` 不拷贝 YAML/prompts 到 dist（生产部署需另加 copy 步骤）。
+**已知限制**（本次未修，记录待后续）：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断学生答错（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 字段（classifier.confidenceThreshold、outputStructure、streaming.firstTokenTimeoutMs/interTokenTimeoutMs）为声明式意图未接线；gemini 流式（streamGenerateContent）未实现（待配 GEMINI_API_KEY，当前非流式降级）；流式 usage 尽力收（Kimi 流式不返回 usage，cost 可能 0）；`npm run build` 会通过 `scripts/copy-assets.mjs` 把 `src/ai-core/*.yaml`（model-routes/retry/safety/fallback）与 `prompts/` 复制进 `dist/ai-core`，`node dist/main.js` 与 `tsx src/...` 读到同一份配置。
 
 **实现记录**：计划草稿偏差与 code-review 修正详见 `docs/superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md` 末尾「实现修正记录」「代码审查后修正」两节。
 

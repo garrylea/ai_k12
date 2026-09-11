@@ -61,7 +61,7 @@ export class JudgmentCapability {
       },
     });
 
-    // primary（本地模型）任何失败 -> 回退 fallback（ds v4 flash）一次。
+    // primary（本地模型）任何失败 -> 回退 fallback（qwen3.8-max）一次。
     try {
       return await this.callModel(routeResult.primary, promptResult);
     } catch (primaryErr) {

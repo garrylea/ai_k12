@@ -225,19 +225,6 @@ export class TutoringCapability {
     lastUserMsg.content = parts;
   }
 
-  /** Best-effort JSON object extraction: raw JSON, or the first {...} block. */
-  private extractJsonObject(raw: string): Record<string, unknown> | null {
-    if (!raw) return null;
-    const trimmed = raw.trim();
-    try { return JSON.parse(trimmed); } catch { /* not pure JSON */ }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      try { return JSON.parse(trimmed.slice(start, end + 1)); } catch { /* malformed */ }
-    }
-    return null;
-  }
-
   // Shared pre-model steps (loadContext / fallback / safety / route / build
   // prompt / multimodal augment). Returns a short-circuit result (fallback or
   // block, persistence already done) or a "ready to call/stream" state.

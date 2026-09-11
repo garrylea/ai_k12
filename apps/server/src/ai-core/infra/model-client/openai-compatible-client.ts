@@ -73,7 +73,7 @@ export class OpenAICompatibleClient implements ProviderAdapter {
       id: data.id,
       model: data.model,
       content: choice.message.content,
-      // qwen3.7-max / deepseek emit reasoning_content with literal "\n" (backslash
+      // qwen3.8-max / deepseek emit reasoning_content with literal "\n" (backslash
       // + n) as line separators instead of real newlines. Normalize at source so
       // streaming, persistence, and history all see real newlines.
       reasoningContent: choice.message.reasoning_content

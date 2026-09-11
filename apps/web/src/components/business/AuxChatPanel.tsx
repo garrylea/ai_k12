@@ -194,7 +194,7 @@ function ReasoningBlock({ reasoning, live }: { reasoning: string; live: boolean 
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  // The model (qwen3.7-max) emits reasoning_content with literal "\n" (backslash
+  // The model (qwen3.8-max) emits reasoning_content with literal "\n" (backslash
   // + n, two chars) as line separators instead of real newlines. Normalize so
   // split/render work; no-op for records that already use real newlines.
   const normalized = reasoning.replace(/\\n/g, '\n');
