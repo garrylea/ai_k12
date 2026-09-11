@@ -13,7 +13,6 @@ timeout:
   hint: 45000
   safety: 10000
   structuring: 45000
-  transcribe: 60000   # P1: VL image transcription (qwen3-vl-plus)
 
 streaming:
   firstTokenTimeoutMs: 3000

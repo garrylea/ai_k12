@@ -198,7 +198,7 @@ describe('TutoringCapability', () => {
       attachments: [{ type: 'image', url: '/uploads/test.png', imageUrl: 'data:image/png;base64,abc123' }],
     });
 
-    expect(capturedModel).toBe('qwen3.7-max');
+    expect(capturedModel).toBe('qwen3.8-max');
     expect(result.message.type).toBe('socratic');
   });
 
