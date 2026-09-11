@@ -68,7 +68,7 @@
 - 删 `apps/server/src/ai-core/prompts/transcribe/math.md`（整个 `transcribe/` 目录）；
   - ⚠️ `prompt-builder.resolveTemplatePath`（`99`）对未知 capability 直接抛错——`Scene`/`CapabilityType` 去掉 `'transcribe'`、`prompt-builder` 去掉分支、删 prompt 文件**三者必须同一步完成**，否则中间状态运行即抛错。
 - `modules/admin/admin-models.service.ts`：`SCENES`（`8`）去 `'transcribe'`（后台场景下拉随之少一项）；
-- `services/conversation/index.ts`：删 `updateFlowState()`（`162–172`）与 load 时的 flow 字段（`114–116`）；`database/repositories/ai-dialogues.repo.ts`：删 `updateFlowState()`（`129–141`）；`repositories/types.ts` 的 `flow_state` 字段类型保留（列仍在）但不再被读取——**保守起见一并删除类型字段与仓库方法**，DB 列保留。
+- `services/conversation/index.ts`：删 `updateFlowState()`（`162–172`）与 load 时的 flow 字段（`114–116`）；`database/repositories/ai-dialogues.repo.ts`：删 `updateFlowState()`（`129–141`）；`repositories/types.ts` 的 `flow_state` 字段**保留**（它忠实镜像仍在的 DB 列，删了反而要改 `mapRow`），DB 列保留为死数据。
 
 > 一图多题：交给 `prompts/tutoring/math/auxiliary.md` 既有的「图片输入处理 / 多题处理」段，无需改 prompt。
 
@@ -138,7 +138,7 @@
 - `apps/server/src/modules/ai/ai.service.ts`、`dto/tutor.dto.ts`
 - `apps/server/src/modules/admin/admin-models.service.ts`（SCENES）
 - `apps/server/src/services/conversation/index.ts`
-- `apps/server/src/database/repositories/ai-dialogues.repo.ts`、`types.ts`
+- `apps/server/src/database/repositories/ai-dialogues.repo.ts`（`types.ts` 的 `flow_state` 字段保留以镜像 DB 列，不改）
 - 测试：`model-router.test.ts`、`model-router-dynamic.test.ts`、`tutoring.capability.test.ts`、`judgment.capability.test.ts`、`openai-compatible-client.test.ts`、其余 mock 标签
 
 **修改（前端）**
