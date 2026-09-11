@@ -426,8 +426,8 @@ export function QuestionRunner({
         className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[var(--learn-card-border)] shadow-sm"
         style={{ backgroundColor: 'var(--learn-card-bg)' }}
       >
-        {/* 题面 + 提示按钮 + 提示抽屉 */}
-        <div className="shrink-0 max-h-[45vh] overflow-y-auto p-4 border-b border-[var(--bg-subtle)]">
+        {/* 题面 + 提示按钮 + 提示抽屉：最多占卡片 1/3，超出滚动，给下方作答区留出 2/3 */}
+        <div className="shrink-0 max-h-[33%] overflow-y-auto p-4 border-b border-[var(--bg-subtle)]">
           <div className="flex gap-3">
             <div className="flex-1 min-w-0">
               <div
@@ -486,8 +486,9 @@ export function QuestionRunner({
           )}
         </div>
 
-        {/* 作答区：选择题点选 / 文本作答（左编辑右预览草稿）。保底高度：长题面滚动限高时不被挤没 */}
-        <div className="flex-1 min-h-[280px] flex">
+        {/* 作答区：选择题点选 / 文本作答（左编辑右预览草稿）。占卡片 2/3：flex-[2] + 保底高度
+            （题面限高 1/3 时不被挤没；题面更短时本区继续吃满剩余空间） */}
+        <div className="flex-[2] min-h-[280px] flex">
           {choiceOptions ? (
             <div className="flex-1 min-h-0 overflow-auto">
               <ChoiceOptionList options={choiceOptions} value={answer} onChange={updateAnswer} />
