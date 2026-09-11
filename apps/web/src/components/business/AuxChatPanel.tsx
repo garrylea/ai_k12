@@ -10,8 +10,6 @@ import {
 interface Props {
   isLoadingHistory?: boolean;
   onRetry?: () => void;  // P2: regenerate the last (errored / unanswered) turn
-  onConfirm?: () => void;  // P1: confirm the transcribed problem -> tutor
-  onReidentify?: () => void;  // P1: re-run image transcription
   onDelete?: (messageId: number) => void;  // delete a user message
 }
 
@@ -282,7 +280,7 @@ function ReasoningBlock({ reasoning, live }: { reasoning: string; live: boolean 
   );
 }
 
-export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onConfirm, onReidentify, onDelete }: Props) {
+export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onDelete }: Props) {
   const { messages, isStreaming } = useChatStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -362,34 +360,6 @@ export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onConf
                   <div className="px-2.5 py-1.5">{contentEl}</div>
                 ) : (
                   contentEl
-                )}
-                {m.flow && !isError && !isStreaming && (
-                  <div className="mt-2 pt-2 border-t border-[#E5E5E5]/60">
-                    {m.flow.stage === 'confirm' && (
-                      <>
-                        <p className="text-xs text-[#86868B] mb-2">你问的是这道题吧？</p>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={onConfirm}
-                            className="px-3 py-1.5 rounded-md bg-[#FF6B00] text-white text-xs hover:opacity-90 transition"
-                          >
-                            确认
-                          </button>
-                          <button
-                            type="button"
-                            onClick={onReidentify}
-                            className="px-3 py-1.5 rounded-md border border-[#E5E5E5] text-[#86868B] text-xs hover:border-[#FF6B00] hover:text-[#FF6B00] transition"
-                          >
-                            重新识别
-                          </button>
-                        </div>
-                      </>
-                    )}
-                    {m.flow.stage === 'select' && (
-                      <p className="text-xs text-[#86868B]">你想解决哪道题?请告诉我</p>
-                    )}
-                  </div>
                 )}
               </div>
               {m.role === 'user' && <UserAvatar />}
