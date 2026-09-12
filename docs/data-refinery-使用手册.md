@@ -1,7 +1,7 @@
 # K12 数据管线使用手册
 
 > **适用于**：数据工程师、开发者
-> **最后更新**：2026-08-28
+> **最后更新**：2026-09-12
 > **关联文档**：[管线总结](./data-refinery-管线总结与后续.md) | [TOC 设计](./data-refinery-TOC目录优先管线设计.md) | [DB 设计](./K12智学系统-数据库设计文档.md)
 
 ---
@@ -152,6 +152,20 @@ python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047
 | `--grade` | 年级过滤，逗号分隔（zgkao 用 初一/初二/初三/高一/高二/高三） |
 
 **输出结构**：`data/{学科}/初中/{first|second}/{年份}/{试卷名}.pdf`（学期由页面自动识别，判不出时交互询问）
+
+> **迁移提示（破坏性变更，2026-09-12）**：本管线默认输入 `tools/crawler/data`。2026-09-12 前
+> 抓取的数据把初三（上）期末错归档到 `second/`、文件名带 `--2025学年-`。**爬虫 checkpoint
+> 以 PDF URL 为键、与落盘路径无关，直接重跑会跳过所有旧 PDF**，必须先清理：
+>
+> ```bash
+> cd tools/crawler
+> rm -rf data/*/*/second                                  # 错误学期目录
+> find data -type f -name '*--20*学年-*' -delete          # 错区县文件名
+> rm -f data/.checkpoint.json                             # 否则静默跳过旧 PDF（或 --force 单次忽略）
+> ```
+>
+> 目录契约 `{base}/{subject}/{level}/{semester}/{year}/` 不变，仅学期归类更正确；
+> `src/toc_parse_cli.py` 同时接受 `first` 与 `second` 作为学期路径段，**下游无需改代码**。
 
 ### 3.3 smartedu — 教材下载
 

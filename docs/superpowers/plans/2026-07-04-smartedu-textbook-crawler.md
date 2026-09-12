@@ -1,5 +1,9 @@
 # smartedu 教材爬虫改造实施计划
 
+> **变更说明（2026-09-12）**：入口已合并为 `src/crawler_cli.py`（原 `main.py` / `cli.py` 已删除），
+> 本文正文保留为历史计划记录，其中的 `python src/main.py --site smartedu` 等命令均已失效；
+> 最新设计见 `docs/superpowers/specs/2026-09-12-crawler-entry-merge-and-semester-classification-design.md`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将现有 `tools/crawler/` 从单一 zgkao 试卷爬虫改造为多站点统一框架，新增 smartedu.cn 教材页面预览图抓取，同时保持 zgkao 140 个测试行为不变。

@@ -26,6 +26,22 @@ pip install -r requirements.txt
 
 > 2026-09-12 起 `src/main.py` 与 `src/cli.py` 已合并为 `src/crawler_cli.py`，
 > 旧命令 `python src/main.py --url ...` 不再可用。
+>
+> **迁移提示（破坏性变更，2026-09-12）**：此前下载的数据里，初三（上）期末被错归档到
+> `second/`，文件名带 `--2025学年-`。**checkpoint 以 PDF URL 为键、与落盘路径无关**，
+> 所以直接重跑会静默跳过所有旧 PDF、产出 0 个修正文件。按下面顺序清理后再抓：
+>
+> ```bash
+> # 1) 清掉错误的学期目录与错区县文件名（示例 output 为 ./data，按实际调整）
+> rm -rf data/*/*/second
+> find data -type f -name '*--20*学年-*' -delete
+>
+> # 2) 清空 checkpoint，否则旧 PDF 全被跳过（也可改用 --force 单次忽略）
+> rm -f data/.checkpoint.json
+> ```
+>
+> 下游 `tools/data-refinery` 默认读取 `tools/crawler/data`，其 `src/toc_parse_cli.py`
+> 同时接受 `first` 与 `second` 作为学期路径段——**清掉旧数据即可，下游无需改代码**。
 
 ```bash
 python src/crawler_cli.py --site <zgkao|smartedu> [options]

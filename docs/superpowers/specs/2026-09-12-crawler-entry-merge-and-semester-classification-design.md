@@ -276,7 +276,8 @@ README 与用户手册同步更新。
 
 ## 实现结果
 
-分支 `feat/crawler-entry-merge`，基线 `f012333`，共 23 个提交（含计划/设计文档更新）。
+分支 `feat/crawler-entry-merge`，基线 `f012333`。截至终审修复前共 **24** 个提交（含计划/设计文档更新）；
+终审修复波次另加 2 个提交（代码/测试 1 个、文档 1 个），见文末「终审修复」小节。
 
 ### 各 Task 提交号
 
@@ -294,7 +295,7 @@ README 与用户手册同步更新。
 
 ### 自动化测试
 
-`cd tools/crawler && python -m pytest -q` → **224 passed, 1 deselected**（基线 200 passed；净 +24，期间因入口合并删除约 40 个冗余/已迁移用例、新增 13 个 CLI 用例与若干学期判定用例）。
+`cd tools/crawler && python -m pytest -q` → **227 passed, 1 deselected**（基线 200 passed；净 +27——期间因入口合并删除约 40 个冗余/已迁移用例、新增 13 个 CLI 用例与若干学期判定用例，终审修复波次再 +3：I-1/I-4 checkpoint 门禁 2 个、学年度区县解析 1 个）。
 
 ### 真实站点验收（2026-09-12）
 
@@ -354,3 +355,17 @@ CLI 的 `TestMainSemesterContract`（非 TTY → 退出码 2 且去重汇总；T
 - 文件名里的考试类型是表头原文，初三上期末会得到 `…-海淀-（上）期末考-试卷.pdf`，与文件名中的学期 `(上)` 有冗余。属 `normalize_exam_type` 只映射一/二/三模的既有行为，本次未动。
 - `PdfValidator` 校验部分站方 PDF 时 pypdf 会打印 `Ignoring wrong pointing object …`（源文件 xref 不规范），属既有行为。
 - `year_code` 仍是 `年份 + "07"`；上学期期末实际上应体现为 01 月，本次按非目标未改。
+
+### 终审修复（2026-09-12，whole-branch review）
+
+- **未决跳过成为一等结果**：`DownloadResult.files_unresolved` / `CrawlResult.items_unresolved` 计数，
+  `mark_downloaded(item.id)` 增加 `files_unresolved == 0` 门禁——避免「试卷成功、答案学期未决」时
+  整项被标已下载、漏档 PDF 无法在后续重跑中补回（此前重跑静默成功、退出码 0）。
+  `main()` 汇总行补 `Unresolved(files): N`；既有去重 `Unresolved: N（无法判断学期，已跳过）` 块保留
+  （前者 per-file、后者 per-group）。
+- **补回 checkpoint 覆盖**：`TestZgkaoCheckpointMarking`（部分未决不标 item、全落地标 item），
+  修复随入口合并删除 `test_marks_both_pdfs_in_checkpoint` 留下的空白。
+- **区县解析认「学年度」**：`re.split(r"学年度?", mid, 1)`，`2024-2025学年度海淀区初三期末试卷` 不再产出 `度海淀`。
+- **文档**：README 与用户手册新增迁移提示（旧 `second/` 目录、`--2025学年-` 文件名、
+  checkpoint 按 PDF URL 键需清空，下游 `toc_parse_cli.py` 无需改）；历史计划
+  `docs/superpowers/plans/2026-07-04-smartedu-textbook-crawler.md` 补变更说明。
