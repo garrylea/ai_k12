@@ -127,14 +127,21 @@ class IndexParser:
         表头有两种形态：
         - 区县在前：`海淀区2024-2025学年初三（上）期末...` → 学年之后为空，回退到年份前缀
         - 学年在前：`2025-2026学年海淀区初二期末...` → 区县在「学年」之后
+        最后统一去掉末尾「区」，让 `海淀区` 与 `海淀` 两种站点写法落到同一个值
+        （`--district` 与文件名都是精确匹配，不统一会漏匹配）。
         """
-        mid = match.group(2)
+        mid = match.group(2).strip()
         if "学年" not in mid:
-            return mid.strip()
+            return IndexParser._strip_trailing_qu(mid)
         district = mid.split("学年", 1)[1].strip()
         if not district:
             district = text[: match.start(1)].strip()
-        return re.sub(r"^[（(][^）)]*[）)]", "", district).strip()
+        district = re.sub(r"^[（(][^）)]*[）)]", "", district).strip()
+        return IndexParser._strip_trailing_qu(district)
+
+    @staticmethod
+    def _strip_trailing_qu(district: str) -> str:
+        return district[:-1] if district.endswith("区") else district
 
     @staticmethod
     def _extract_year(text: str) -> str | None:
