@@ -854,7 +854,15 @@ git commit -m "feat(crawler): zgkao 适配器接入学期判定与年级过滤"
 
 import pytest
 
-from crawler_cli import parse_args
+from crawler_cli import _unique_keep_order, parse_args
+
+
+class TestUniqueKeepOrder:
+    def test_dedups_and_preserves_order(self):
+        assert _unique_keep_order(["b", "a", "b", "c", "a"]) == ["b", "a", "c"]
+
+    def test_empty(self):
+        assert _unique_keep_order([]) == []
 
 
 class TestCrawlerCliParseArgs:
@@ -1003,6 +1011,11 @@ def _stdin_prompt(label: str) -> str:
     return input(f"无法从页面判断学期：{label}，请填写学期 [上/下]：")
 
 
+def _unique_keep_order(items):
+    """去重但保持原顺序（同一份试卷的「试卷/答案」都判不出时 identity 会重复）。"""
+    return list(dict.fromkeys(items))
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
 
@@ -1067,8 +1080,9 @@ def main(argv=None) -> int:
     )
 
     if resolver and resolver.unresolved:
-        print(f"Unresolved: {len(resolver.unresolved)}（无法判断学期，已跳过）")
-        for identity in resolver.unresolved:
+        unresolved = _unique_keep_order(resolver.unresolved)
+        print(f"Unresolved: {len(unresolved)}（无法判断学期，已跳过）")
+        for identity in unresolved:
             print(f"  - {identity}")
         return _UNRESOLVED_EXIT_CODE
     return 0

@@ -220,7 +220,7 @@ README 与用户手册同步更新。
 学期判定统一由 `classifier.py` 提供：
 
 - `resolve_semester(exam_type, title=None, filename=None) -> str | None`：纯函数，无副作用，便于单测
-- `SemesterResolver(prompt_fn=None, interactive=None)`：负责缓存与询问；
+- `SemesterResolver(prompt_fn=None)`：负责两层缓存与询问；`prompt_fn=None` 即非交互
   `prompt_fn` 可注入（默认读 stdin），测试传 stub
 - `ZgkaoAdapter` 接受 `semester_resolver` 参数，在 `_download_pdf` 构建分类前解析学期；
   返回 `None` 且非 dry-run 时，交互模式询问，非交互模式跳过并记录
