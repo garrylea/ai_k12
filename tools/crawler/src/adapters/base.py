@@ -19,11 +19,13 @@ class DownloadResult:
     files_downloaded: int = 0
     files_skipped: int = 0
     files_failed: int = 0
+    files_unresolved: int = 0
 
     def __iadd__(self, other):
         self.files_downloaded += other.files_downloaded
         self.files_skipped += other.files_skipped
         self.files_failed += other.files_failed
+        self.files_unresolved += other.files_unresolved
         return self
 
 
@@ -44,6 +46,7 @@ class CrawlResult:
     items_downloaded: int = 0
     items_skipped: int = 0
     items_failed: int = 0
+    items_unresolved: int = 0
     robots_blocked: bool = False
 
 

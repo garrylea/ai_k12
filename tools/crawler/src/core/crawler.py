@@ -58,5 +58,6 @@ class Crawler:
             result.items_downloaded += download_result.files_downloaded
             result.items_skipped += download_result.files_skipped
             result.items_failed += download_result.files_failed
+            result.items_unresolved += download_result.files_unresolved
 
         return result

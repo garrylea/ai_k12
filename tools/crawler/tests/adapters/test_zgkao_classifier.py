@@ -10,7 +10,7 @@
 
 import pytest
 
-from classifier import Classification, Classifier
+from classifier import Classification, Classifier, SemesterResolver, resolve_semester
 
 
 def make_classification(**overrides) -> Classification:
@@ -115,3 +115,98 @@ class TestClassificationFields:
     def test_level_uses_explicit_value_when_provided(self):
         cls = make_classification(grade="初三", level="自定义")
         assert cls.level == "自定义"
+
+
+class TestResolveSemester:
+    @pytest.mark.parametrize("exam_type,filename,expected", [
+        # ① 表头标记优先
+        ("（上）期末考", "", "first"),
+        ("（下）期末考", "", "second"),
+        ("上学期期末", "", "first"),
+        ("第二学期期末", "", "second"),
+        # ② 文件名标记
+        ("期末", "2025北京海淀初二（上）期末数学.pdf", "first"),
+        ("期末", "2026北京海淀初一(下)期末数学.pdf", "second"),
+        # ③ 模拟考约定
+        ("二模", "2026北京海淀初三二模数学 无答案.pdf", "second"),
+        ("一模", "", "second"),
+        ("三模", "", "second"),
+        ("模拟二", "2026北京海淀初三二模数学.pdf", "second"),      # 规范化写法也要认
+        ("二模", "2026.09海淀初三二模数学.pdf", "second"),         # ③ 优先于 ④ 月份
+        # ④ 文件名月份
+        ("期末", "2026.01海淀区初三期末数学.pdf", "first"),
+        ("期末", "202507海淀初三期末数学.pdf", "second"),
+        # ⑤ 判不出
+        ("月考", "", None),
+        ("期中", "", None),
+        ("期末", "", None),
+        ("期末", "2026.02海淀初三期末数学.pdf", None),   # 2 月跨学期
+        ("期末", "2026.08海淀初三期末数学.pdf", None),   # 8 月跨学期
+        ("期末", "2025北京海淀初三期末数学.pdf", None),  # 年份不能被当成月份
+    ])
+    def test_resolve_semester(self, exam_type, filename, expected):
+        assert resolve_semester(exam_type, filename=filename) == expected
+
+    def test_exam_type_marker_beats_filename_month(self):
+        assert resolve_semester("（上）期末考", filename="202506海淀初三期末.pdf") == "first"
+
+    def test_title_marker_used_when_header_and_filename_have_none(self):
+        assert resolve_semester("月考", title="2025海淀初三（下）月考数学.pdf") == "second"
+
+    def test_bare_up_char_is_not_a_marker(self):
+        # 「上海」不应被当成「上」学期
+        assert resolve_semester("期末", filename="2025上海初三期末数学.pdf") is None
+
+
+class TestSemesterResolver:
+    def test_returns_auto_detected_semester_without_prompting(self):
+        prompts = []
+        resolver = SemesterResolver(prompt_fn=lambda label: prompts.append(label) or "下")
+        assert resolver.resolve(exam_type="（上）期末考") == "first"
+        assert prompts == []
+
+    def test_prompts_when_unresolved(self):
+        resolver = SemesterResolver(prompt_fn=lambda label: "上")
+        assert resolver.resolve(exam_type="月考", key=("初三", "月考", "2024"), label="初三-月考-2024") == "first"
+        assert resolver.unresolved == []
+
+    def test_accepts_first_and_second_words(self):
+        assert SemesterResolver(prompt_fn=lambda label: "second").resolve(exam_type="月考") == "second"
+
+    def test_caches_prompted_answer_for_same_group(self):
+        prompts = []
+        resolver = SemesterResolver(prompt_fn=lambda label: prompts.append(label) or "下")
+        group = ("初三", "月考", "2024")
+        assert resolver.resolve(exam_type="月考", key="paper-a", group=group, label="初三-月考-2024") == "second"
+        assert resolver.resolve(exam_type="月考", key="paper-b", group=group, label="初三-月考-2024") == "second"
+        assert prompts == ["初三-月考-2024"]
+
+    def test_auto_detected_value_does_not_leak_across_papers(self):
+        """自动推断值只按同一份试卷复用：A 卷的推断结果不能静默套到 B 卷。"""
+        resolver = SemesterResolver(prompt_fn=lambda label: "下")
+        group = ("初三", "月考", "2024")
+        # A 卷有月份证据 → 推断 first，写入文件缓存
+        assert resolver.resolve(
+            exam_type="月考", filename="2026.10海淀初三月考数学.pdf", key="paper-a", group=group,
+        ) == "first"
+        # B 卷无任何证据 → 不能继承 A 的 first，必须去问用户（stub 答「下」）
+        assert resolver.resolve(
+            exam_type="月考", filename="2026西城初三月考数学.pdf", key="paper-b", group=group,
+        ) == "second"
+
+    def test_caches_auto_detected_answer_so_sibling_file_reuses_it(self):
+        """同一份试卷的「试卷」文件判出学期后，「答案」文件没标记也应复用，不能落到别的学期。"""
+        resolver = SemesterResolver(prompt_fn=lambda label: "下")
+        key = "https://www.zgkao.com/shitiku/87761.html"
+        assert resolver.resolve(exam_type="期末", filename="2024海淀初三（上）期末数学.pdf", key=key) == "first"
+        assert resolver.resolve(exam_type="期末", filename="2024海淀初三期末数学答案.pdf", key=key) == "first"
+
+    def test_invalid_answer_falls_back_to_unresolved(self):
+        resolver = SemesterResolver(prompt_fn=lambda label: "不知道")
+        assert resolver.resolve(exam_type="月考", label="初三-月考-2024") is None
+        assert resolver.unresolved == ["初三-月考-2024"]
+
+    def test_non_interactive_records_unresolved(self):
+        resolver = SemesterResolver()
+        assert resolver.resolve(exam_type="月考", filename="x.pdf", label="初三-月考-2024") is None
+        assert resolver.unresolved == ["初三-月考-2024"]

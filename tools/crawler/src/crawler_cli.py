@@ -1,11 +1,17 @@
-"""CLI 入口：按 --site 选择 adapter 并运行通用 Crawler。"""
+"""CLI 入口：按 --site 选择 adapter 并运行通用 Crawler。
+
+zgkao 线在下载前解析学期：优先从页面/文件名识别，判不出时交互询问；
+非交互场景判不出则跳过该文件并在结束时以退出码 2 报告。
+"""
 
 import argparse
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from adapters.smartedu import SmartEduAdapter
 from adapters.zgkao import ZgkaoAdapter
+from classifier import SemesterResolver
 from core.checkpoint import Checkpoint
 from core.crawler import Crawler
 from core.fetcher import Fetcher
@@ -20,9 +26,11 @@ _ADAPTERS = {
 
 _ADAPTER_REQUIRED = {"zgkao": {"url"}, "smartedu": set()}
 _ADAPTER_FILTERS = {
-    "zgkao": {"years", "subjects", "districts"},
+    "zgkao": {"years", "subjects", "districts", "grades"},
     "smartedu": {"subject", "level", "grade", "semester", "publisher"},
 }
+
+_UNRESOLVED_EXIT_CODE = 2
 
 
 def parse_args(argv=None):
@@ -34,7 +42,7 @@ def parse_args(argv=None):
     parser.add_argument("--year", help="年份过滤（zgkao）")
     parser.add_argument("--district", help="区县过滤（zgkao）")
     parser.add_argument("--level", help="学段过滤（smartedu）")
-    parser.add_argument("--grade", help="年级过滤（smartedu）")
+    parser.add_argument("--grade", help="年级过滤（zgkao: 初一/初二/初三/高一/高二/高三；smartedu: 九年级）")
     parser.add_argument("--semester", help="册次过滤（smartedu）")
     parser.add_argument("--publisher", help="版本过滤（smartedu）")
     parser.add_argument("--latest-only", action="store_true", default=True, help="smartedu 同书只取最新")
@@ -76,7 +84,16 @@ def _build_filters(args):
     return filters
 
 
-def main(argv=None):
+def _stdin_prompt(label: str) -> str:
+    return input(f"无法从页面判断学期：{label}，请填写学期 [上/下]：")
+
+
+def _unique_keep_order(items):
+    """去重但保持原顺序（同一份试卷的「试卷/答案」都判不出时 identity 会重复）。"""
+    return list(dict.fromkeys(items))
+
+
+def main(argv=None) -> int:
     args = parse_args(argv)
 
     crawl_time = datetime.now(timezone.utc)
@@ -91,7 +108,11 @@ def main(argv=None):
     fetcher = Fetcher(crawl_delay=crawl_delay)
     filters = _build_filters(args)
 
+    resolver = None
     if args.site == "zgkao":
+        # 非 TTY（管道/CI）不询问：判不出就跳过，结束时报未决并以非零码退出
+        prompt_fn = _stdin_prompt if sys.stdin.isatty() else None
+        resolver = SemesterResolver(prompt_fn=prompt_fn)
         store = PdfStore(
             base_dir=str(output_path),
             entry_url=args.url,
@@ -103,6 +124,7 @@ def main(argv=None):
             fetcher=fetcher,
             entry_url=args.url,
             filters=filters,
+            semester_resolver=resolver,
         )
     else:
         store = ImageStore(
@@ -131,9 +153,18 @@ def main(argv=None):
     result = crawler.run(filters)
     print(
         f"Total: {result.items_total}, Downloaded: {result.items_downloaded}, "
-        f"Skipped: {result.items_skipped}, Failed: {result.items_failed}"
+        f"Skipped: {result.items_skipped}, Failed: {result.items_failed}, "
+        f"Unresolved(files): {result.items_unresolved}"
     )
+
+    if resolver and resolver.unresolved:
+        unresolved = _unique_keep_order(resolver.unresolved)
+        print(f"Unresolved: {len(unresolved)}（无法判断学期，已跳过）")
+        for identity in unresolved:
+            print(f"  - {identity}")
+        return _UNRESOLVED_EXIT_CODE
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

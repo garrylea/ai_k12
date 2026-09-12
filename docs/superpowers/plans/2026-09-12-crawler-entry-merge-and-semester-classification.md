@@ -17,9 +17,9 @@
 - 学期判定优先级：① 表头 `exam_type` 的（上）/（下）标记 → ② PDF 文件名/标题的标记 → ③ 一模/二模/三模 → `second` → ④ 文件名月份 → ⑤ 无法判定返回 `None`
 - 标记只接受 `（上）` / `(上)` / `上学期` / `第一学期`（「下」同理）；**不匹配裸「上/下」字**（避免「上海」误伤）
 - 月份映射：`9、10、11、12、1` 月 → `first`；`3、4、5、6、7` 月 → `second`；`2、8` 月不判（继续走 ⑤）
-- 学期缓存键 = `(年级, 考试类型, 年份)`；同一组只询问一次，自动判定成功的组也要写入缓存（保证同一份试卷的「试卷/答案」落在同一学期）
+- **两层学期缓存**：文件级 `key`（试卷详情页 URL）只复用**自动推断**结果——保证同一份试卷的「试卷/答案」同学期，但不跨试卷传播推断值；组级 `group` = `(年级, 考试类型, 年份)` 只在**用户亲自回答后**写入并整组复用，同组只询问一次
 - `--dry-run` 不询问、不报错；非交互（stdin 非 TTY）判不出 → 跳过该文件 + 逐条警告 + 运行结束非零退出
-- 区县解析：中间片段含「学年」→ 取「学年」之后；为空则回退到年份之前的前缀
+- 区县解析：中间片段含「学年」→ 取「学年」之后；为空则回退到年份之前的前缀；**最后去掉末尾的「区」**（统一 `海淀区` / `海淀` 两种站点写法，否则精确匹配的 `--district 海淀` 会漏掉带「学年」的那批）
 - zgkao `--grade` 取值用站点原生写法：`初一` / `初二` / `初三` / `高一` / `高二` / `高三`（smartedu 仍为 `九年级` 等）
 - 所有命令在 `tools/crawler/` 下执行；测试命令 `pytest`
 - 提交信息用 Conventional Commits，scope 用 `crawler`
@@ -46,21 +46,21 @@ class TestParseHeaderDistrict:
         # 海淀区2024-2025学年初三（上）期末考试卷和答案汇总
         header = "海淀区2024-2025学年初三（上）期末考试卷和答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "海淀区"
+        assert info["district"] == "海淀"
         assert info["grade"] == "初三"
         assert info["exam_type"] == "（上）期末考"
 
     def test_district_after_academic_year_range(self):
         header = "2025-2026学年海淀区初二期末试卷&答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "海淀区"
+        assert info["district"] == "海淀"
         assert info["grade"] == "初二"
         assert info["exam_type"] == "期末"
 
     def test_district_after_academic_year_range_with_city_prefix(self):
         header = "2025-2026学年北京海淀区初一期末试卷&答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "北京海淀区"
+        assert info["district"] == "北京海淀"
 
     def test_district_without_academic_year_range_unchanged(self):
         header = "2026海淀初三二模试卷&答案"
@@ -70,7 +70,13 @@ class TestParseHeaderDistrict:
     def test_district_strips_semester_marker_after_academic_year(self):
         header = "2025-2026学年（上）海淀区初二期末试卷&答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "海淀区"
+        assert info["district"] == "海淀"
+
+    def test_district_trailing_qu_stripped_for_both_spellings(self):
+        """带「区」与不带「区」的表头必须落到同一个区县值（精确匹配的 --district 才能命中）。"""
+        with_qu = IndexParser._parse_header("海淀区2024-2025学年初三（上）期末考试卷和答案汇总")
+        without_qu = IndexParser._parse_header("2026海淀初三二模试卷&答案")
+        assert with_qu["district"] == without_qu["district"] == "海淀"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -101,14 +107,21 @@ Expected: 前两个用例 FAIL（实际得到 `-2025学年` / `-2026学年海淀
         表头有两种形态：
         - 区县在前：`海淀区2024-2025学年初三（上）期末...` → 学年之后为空，回退到年份前缀
         - 学年在前：`2025-2026学年海淀区初二期末...` → 区县在「学年」之后
+        最后统一去掉末尾「区」，让 `海淀区` 与 `海淀` 两种站点写法落到同一个值
+        （`--district` 与文件名都是精确匹配，不统一会漏匹配）。
         """
-        mid = match.group(2)
+        mid = match.group(2).strip()
         if "学年" not in mid:
-            return mid.strip()
+            return IndexParser._strip_trailing_qu(mid)
         district = mid.split("学年", 1)[1].strip()
         if not district:
             district = text[: match.start(1)].strip()
-        return re.sub(r"^[（(][^）)]*[）)]", "", district).strip()
+        district = re.sub(r"^[（(][^）)]*[）)]", "", district).strip()
+        return IndexParser._strip_trailing_qu(district)
+
+    @staticmethod
+    def _strip_trailing_qu(district: str) -> str:
+        return district[:-1] if district.endswith("区") else district
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -135,7 +148,7 @@ git commit -m "fix(crawler): 修正 zgkao 索引页区县解析，学年不再�
 **Interfaces:**
 - Consumes: `Classifier.normalize_exam_type()`（`tools/crawler/src/classifier.py:57-59`）
 - Produces:
-  - `_SIMULATION_EXAM_TYPES: set[str]` = `{"一模", "二模", "三模"}`
+  - `_SIMULATION_EXAM_TYPES: set[str]` = `{"模拟一", "模拟二", "模拟三"}`（规范化后的写法；判定时对入参调用 `normalize_exam_type`，因此原始写法 `二模` 与规范化写法 `模拟二` 都能命中）
   - `_FIRST_SEMESTER_MONTHS: set[int]`、`_SECOND_SEMESTER_MONTHS: set[int]`
   - `resolve_semester(exam_type: str, title: str = "", filename: str = "") -> str | None`（返回 `"first"` / `"second"` / `None`）
 
@@ -158,6 +171,8 @@ class TestResolveSemester:
         ("二模", "2026北京海淀初三二模数学 无答案.pdf", "second"),
         ("一模", "", "second"),
         ("三模", "", "second"),
+        ("模拟二", "2026北京海淀初三二模数学.pdf", "second"),      # 规范化写法也要认
+        ("二模", "2026.09海淀初三二模数学.pdf", "second"),         # ③ 优先于 ④ 月份
         # ④ 文件名月份
         ("期末", "2026.01海淀区初三期末数学.pdf", "first"),
         ("期末", "202507海淀初三期末数学.pdf", "second"),
@@ -166,6 +181,7 @@ class TestResolveSemester:
         ("期中", "", None),
         ("期末", "", None),
         ("期末", "2026.02海淀初三期末数学.pdf", None),   # 2 月跨学期
+        ("期末", "2026.08海淀初三期末数学.pdf", None),   # 8 月跨学期
         ("期末", "2025北京海淀初三期末数学.pdf", None),  # 年份不能被当成月份
     ])
     def test_resolve_semester(self, exam_type, filename, expected):
@@ -201,7 +217,7 @@ from typing import Optional
 在文件末尾追加：
 
 ```python
-_SIMULATION_EXAM_TYPES = {"一模", "二模", "三模"}
+_SIMULATION_EXAM_TYPES = {"模拟一", "模拟二", "模拟三"}
 
 _FIRST_SEMESTER_MONTHS = {9, 10, 11, 12, 1}
 _SECOND_SEMESTER_MONTHS = {3, 4, 5, 6, 7}
@@ -245,12 +261,15 @@ def resolve_semester(exam_type: str, title: str = "", filename: str = "") -> Opt
 
     月考/期中/期末在上下两个学期都有，不能靠考试类型推断，只认显式标记或月份；
     一模/二模/三模是约定性的下学期考试，可直接判定。
+
+    exam_type 既接受站点原始写法（`二模`），也接受规范化后的写法（`模拟二`）——
+    调用方可能来自 parser（原始），也可能来自 Classification（规范化），两者都不能漏判。
     """
     for source in (exam_type, title, filename):
         marked = _semester_from_markers(source)
         if marked is not None:
             return marked
-    if exam_type in _SIMULATION_EXAM_TYPES:
+    if Classifier.normalize_exam_type(exam_type) in _SIMULATION_EXAM_TYPES:
         return "second"
     return _semester_from_month(filename) or _semester_from_month(title)
 ```
@@ -280,7 +299,8 @@ git commit -m "feat(crawler): 新增学期判定纯函数 resolve_semester"
 - Consumes: `resolve_semester()`（Task 2）
 - Produces:
   - `SemesterResolver(prompt_fn: Optional[Callable[[str], str]] = None)`
-  - `SemesterResolver.resolve(*, exam_type: str, filename: str = "", title: str = "", key: object = None, label: str = "") -> Optional[str]`
+  - `SemesterResolver.resolve(*, exam_type: str, filename: str = "", title: str = "", key: object = None, group: object = None, label: str = "") -> Optional[str]`
+    （`key` = 单份试卷标识，`group` = 组标识；两者都可为 None）
   - `SemesterResolver.unresolved: list[str]`（判不出且未询问时的条目；追加 label）
 
 - [ ] **Step 1: 写失败测试**
@@ -303,18 +323,31 @@ class TestSemesterResolver:
     def test_accepts_first_and_second_words(self):
         assert SemesterResolver(prompt_fn=lambda label: "second").resolve(exam_type="月考") == "second"
 
-    def test_caches_prompted_answer_for_same_key(self):
+    def test_caches_prompted_answer_for_same_group(self):
         prompts = []
         resolver = SemesterResolver(prompt_fn=lambda label: prompts.append(label) or "下")
-        key = ("初三", "月考", "2024")
-        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
-        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
+        group = ("初三", "月考", "2024")
+        assert resolver.resolve(exam_type="月考", key="paper-a", group=group, label="初三-月考-2024") == "second"
+        assert resolver.resolve(exam_type="月考", key="paper-b", group=group, label="初三-月考-2024") == "second"
         assert prompts == ["初三-月考-2024"]
+
+    def test_auto_detected_value_does_not_leak_across_papers(self):
+        """自动推断值只按同一份试卷复用：A 卷的推断结果不能静默套到 B 卷。"""
+        resolver = SemesterResolver(prompt_fn=lambda label: "下")
+        group = ("初三", "月考", "2024")
+        # A 卷有月份证据 → 推断 first，写入文件缓存
+        assert resolver.resolve(
+            exam_type="月考", filename="2026.10海淀初三月考数学.pdf", key="paper-a", group=group,
+        ) == "first"
+        # B 卷无任何证据 → 不能继承 A 的 first，必须去问用户（stub 答「下」）
+        assert resolver.resolve(
+            exam_type="月考", filename="2026西城初三月考数学.pdf", key="paper-b", group=group,
+        ) == "second"
 
     def test_caches_auto_detected_answer_so_sibling_file_reuses_it(self):
         """同一份试卷的「试卷」文件判出学期后，「答案」文件没标记也应复用，不能落到别的学期。"""
         resolver = SemesterResolver(prompt_fn=lambda label: "下")
-        key = ("初三", "期末", "2024")
+        key = "https://www.zgkao.com/shitiku/87761.html"
         assert resolver.resolve(exam_type="期末", filename="2024海淀初三（上）期末数学.pdf", key=key) == "first"
         assert resolver.resolve(exam_type="期末", filename="2024海淀初三期末数学答案.pdf", key=key) == "first"
 
@@ -357,14 +390,20 @@ def _parse_prompt_answer(answer: str) -> Optional[str]:
 
 
 class SemesterResolver:
-    """学期解析：先自动推断，判不出时询问用户（带 (年级,考试类型,年份) 分组缓存）。
+    """学期解析：先自动推断，判不出时询问用户。
 
+    两层缓存，缺一不可：
+    - 文件级 `key`（同一份试卷）：自动推断成功的值只在这一层复用，保证「试卷/答案」同学期；
+    - 组级 `group`（(年级,考试类型,年份)）：只有用户亲自回答过才写入，同组只问一次。
+
+    不能把自动推断值写进组缓存——那会让无证据的 B 卷静默继承 A 卷的推断（月考上下学期都有）。
     prompt_fn 为 None 表示非交互场景：判不出就记入 unresolved，由调用方跳过该文件。
     """
 
     def __init__(self, prompt_fn: Optional[Callable[[str], str]] = None) -> None:
         self._prompt_fn = prompt_fn
-        self._cache: dict = {}
+        self._file_cache: dict = {}
+        self._group_cache: dict = {}
         self.unresolved: list[str] = []
 
     def resolve(
@@ -374,16 +413,23 @@ class SemesterResolver:
         filename: str = "",
         title: str = "",
         key: object = None,
+        group: object = None,
         label: str = "",
     ) -> Optional[str]:
         identity = label or filename or exam_type
 
         semester = resolve_semester(exam_type, title=title, filename=filename)
-        if semester is None and key is not None:
-            semester = self._cache.get(key)
         if semester is not None:
-            self._remember(key, semester)
+            self._remember_file(key, semester)
             return semester
+
+        if group is not None and group in self._group_cache:
+            semester = self._group_cache[group]
+            self._remember_file(key, semester)
+            return semester
+
+        if key is not None and key in self._file_cache:
+            return self._file_cache[key]
 
         if self._prompt_fn is None:
             self.unresolved.append(identity)
@@ -393,12 +439,14 @@ class SemesterResolver:
         if semester is None:
             self.unresolved.append(identity)
             return None
-        self._remember(key, semester)
+        if group is not None:
+            self._group_cache[group] = semester
+        self._remember_file(key, semester)
         return semester
 
-    def _remember(self, key: object, semester: str) -> None:
+    def _remember_file(self, key: object, semester: str) -> None:
         if key is not None:
-            self._cache[key] = semester
+            self._file_cache[key] = semester
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -488,7 +536,9 @@ class TestZgkaoSemesterWiring:
         adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
         assert stub.last_kwargs["exam_type"] == "二模"
         assert stub.last_kwargs["filename"] == "2026北京西城初三二模数学 有答案.pdf"
-        assert stub.last_kwargs["key"] == ("初三", "二模", "2026")
+        assert stub.last_kwargs["key"] == "https://www.zgkao.com/shitiku/90304.html"
+        assert stub.last_kwargs["group"] == ("初三", "二模", "2026")
+        assert stub.last_kwargs["label"] == "初三-二模-2026"
 
     def test_uses_resolved_semester_for_directory(self, tmp_path):
         fetcher = MockFetcher()
@@ -701,7 +751,8 @@ class ZgkaoAdapter(SiteAdapter):
         semester = self._semester_resolver.resolve(
             exam_type=paper.exam_type,
             filename=link.filename,
-            key=(paper.grade, paper.exam_type, paper.year),
+            key=paper.detail_url,
+            group=(paper.grade, paper.exam_type, paper.year),
             label=f"{paper.grade}-{paper.exam_type}-{paper.year}",
         )
         if semester is None:
@@ -799,11 +850,20 @@ git commit -m "feat(crawler): zgkao 适配器接入学期判定与年级过滤"
 创建 `tools/crawler/tests/test_crawler_cli.py`：
 
 ```python
-"""crawler_cli.py 参数解析与学期未决退出码测试。"""
+"""crawler_cli.py 参数解析、学期未决退出码与 TTY 接线测试。"""
 
 import pytest
 
-from crawler_cli import parse_args
+import crawler_cli
+from crawler_cli import _unique_keep_order, parse_args
+
+
+class TestUniqueKeepOrder:
+    def test_dedups_and_preserves_order(self):
+        assert _unique_keep_order(["b", "a", "b", "c", "a"]) == ["b", "a", "c"]
+
+    def test_empty(self):
+        assert _unique_keep_order([]) == []
 
 
 class TestCrawlerCliParseArgs:
@@ -850,6 +910,128 @@ class TestCrawlerCliParseArgs:
     def test_crawl_delay_default_is_none(self):
         # 具体默认值（zgkao 0 / smartedu 0.5）在 main() 里按站点解析，parse_args 只保留 None
         assert parse_args(["--site", "zgkao", "--url", "https://e.com"]).crawl_delay is None
+
+
+class TestBuildFilters:
+    def test_maps_grade_and_subject_to_plural_keys(self):
+        args = parse_args([
+            "--site", "zgkao", "--url", "https://e.com", "--grade", "初三", "--subject", "数学",
+        ])
+        assert crawler_cli._build_filters(args) == {"grades": {"初三"}, "subjects": {"数学"}}
+
+    def test_empty_when_no_filters(self):
+        args = parse_args(["--site", "zgkao", "--url", "https://e.com"])
+        assert crawler_cli._build_filters(args) == {}
+
+
+class _FakeResult:
+    items_total = 1
+    items_downloaded = 1
+    items_skipped = 0
+    items_failed = 0
+
+
+class _FakeCrawler:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def run(self, filters):
+        return _FakeResult()
+
+
+class _FakeCheckpoint:
+    def __init__(self, path):
+        self.path = path
+
+    def load(self):
+        pass
+
+
+class _FakeStdin:
+    def __init__(self, tty: bool):
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def _stub_main_collaborators(monkeypatch, resolver_cls):
+    monkeypatch.setattr(crawler_cli, "Checkpoint", _FakeCheckpoint)
+    monkeypatch.setattr(crawler_cli, "Fetcher", lambda **kwargs: object())
+    monkeypatch.setattr(crawler_cli, "PdfStore", lambda **kwargs: object())
+    monkeypatch.setattr(crawler_cli, "PdfValidator", lambda: object())
+    monkeypatch.setattr(crawler_cli, "ZgkaoAdapter", lambda **kwargs: object())
+    monkeypatch.setattr(crawler_cli, "Crawler", _FakeCrawler)
+    monkeypatch.setattr(crawler_cli, "SemesterResolver", resolver_cls)
+
+
+class TestMainSemesterContract:
+    """spec 验收标准：非交互判不出 → 跳过 + 警告 + 退出码 2；TTY 才接线 stdin 询问。"""
+
+    def test_returns_exit_code_2_and_dedups_unresolved(self, monkeypatch, capsys):
+        class StubResolver:
+            def __init__(self, prompt_fn=None):
+                self.prompt_fn = prompt_fn
+                # 同一份试卷的「试卷/答案」都判不出 → identity 重复
+                self.unresolved = ["初三-月考-2024", "初三-月考-2024"]
+
+        _stub_main_collaborators(monkeypatch, StubResolver)
+        monkeypatch.setattr(crawler_cli.sys, "stdin", _FakeStdin(tty=False))
+
+        code = crawler_cli.main(["--site", "zgkao", "--url", "https://e.com"])
+
+        assert code == 2
+        out = capsys.readouterr().out
+        assert "Unresolved: 1" in out
+        assert out.count("初三-月考-2024") == 1
+
+    def test_returns_zero_when_nothing_unresolved(self, monkeypatch):
+        class StubResolver:
+            def __init__(self, prompt_fn=None):
+                self.prompt_fn = prompt_fn
+                self.unresolved = []
+
+        _stub_main_collaborators(monkeypatch, StubResolver)
+        monkeypatch.setattr(crawler_cli.sys, "stdin", _FakeStdin(tty=False))
+
+        assert crawler_cli.main(["--site", "zgkao", "--url", "https://e.com"]) == 0
+
+    def test_wires_stdin_prompt_only_for_tty(self, monkeypatch):
+        seen = {}
+
+        class StubResolver:
+            def __init__(self, prompt_fn=None):
+                self.prompt_fn = prompt_fn
+                self.unresolved = []
+                seen["prompt_fn"] = prompt_fn
+
+        _stub_main_collaborators(monkeypatch, StubResolver)
+
+        monkeypatch.setattr(crawler_cli.sys, "stdin", _FakeStdin(tty=False))
+        crawler_cli.main(["--site", "zgkao", "--url", "https://e.com"])
+        assert seen["prompt_fn"] is None
+
+        monkeypatch.setattr(crawler_cli.sys, "stdin", _FakeStdin(tty=True))
+        crawler_cli.main(["--site", "zgkao", "--url", "https://e.com"])
+        assert seen["prompt_fn"] is crawler_cli._stdin_prompt
+
+    def test_smartedu_never_builds_a_resolver(self, monkeypatch):
+        seen = {}
+
+        class StubResolver:
+            def __init__(self, prompt_fn=None):
+                seen["built"] = True
+
+        monkeypatch.setattr(crawler_cli, "Checkpoint", _FakeCheckpoint)
+        monkeypatch.setattr(crawler_cli, "Fetcher", lambda **kwargs: object())
+        monkeypatch.setattr(crawler_cli, "ImageStore", lambda **kwargs: object())
+        monkeypatch.setattr(crawler_cli, "ImageValidator", lambda: object())
+        monkeypatch.setattr(crawler_cli, "SmartEduAdapter", lambda **kwargs: object())
+        monkeypatch.setattr(crawler_cli, "Crawler", _FakeCrawler)
+        monkeypatch.setattr(crawler_cli, "SemesterResolver", StubResolver)
+
+        assert crawler_cli.main(["--site", "smartedu", "--subject", "数学"]) == 0
+        assert seen == {}
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -952,6 +1134,11 @@ def _stdin_prompt(label: str) -> str:
     return input(f"无法从页面判断学期：{label}，请填写学期 [上/下]：")
 
 
+def _unique_keep_order(items):
+    """去重但保持原顺序（同一份试卷的「试卷/答案」都判不出时 identity 会重复）。"""
+    return list(dict.fromkeys(items))
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
 
@@ -1016,8 +1203,9 @@ def main(argv=None) -> int:
     )
 
     if resolver and resolver.unresolved:
-        print(f"Unresolved: {len(resolver.unresolved)}（无法判断学期，已跳过）")
-        for identity in resolver.unresolved:
+        unresolved = _unique_keep_order(resolver.unresolved)
+        print(f"Unresolved: {len(unresolved)}（无法判断学期，已跳过）")
+        for identity in unresolved:
             print(f"  - {identity}")
         return _UNRESOLVED_EXIT_CODE
     return 0
@@ -1191,9 +1379,9 @@ python src/crawler_cli.py --site zgkao \
 在「输出结构」之前插入：
 
 ```markdown
-### 学期判定（first / second）
+### 学期判定（first / second，仅 zgkao）
 
-学期由程序从页面自动识别，**无需命令行指定**，优先级：
+学期由程序从页面自动识别，**无需命令行指定**（smartedu 教材线仍用 `--semester` 指定上册/下册），优先级：
 
 1. 索引页表头的（上）/（下）标记，如 `海淀区2024-2025学年初三（上）期末考试卷和答案汇总`
 2. PDF 文件名 / 试卷标题里的标记，如 `2025北京海淀初三（上）期末数学.pdf`
@@ -1222,9 +1410,11 @@ data/
         └── first/
             └── 2026/
                 ├── meta.json
-                ├── 数学-初三(上)-202607-海淀区-期末-试卷.pdf
-                └── 数学-初三(上)-202607-海淀区-期末-答案.pdf
+                ├── 数学-初三(上)-202607-海淀-期末-试卷.pdf
+                └── 数学-初三(上)-202607-海淀-期末-答案.pdf
 ```
+
+（区县写成 `海淀` 而非 `海淀区`：解析时已统一去掉末尾「区」，与 README 参数表里的 `--district 海淀,西城` 一致。）
 
 - [ ] **Step 5: 更新「测试」小节**
 
@@ -1234,9 +1424,11 @@ data/
 - `tests/test_crawler_cli.py` - CLI 参数解析测试
 ```
 
-- [ ] **Step 6: 校验无残留引用**
+- [ ] **Step 6: 校验无残留用法引用**
 
-Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "src/main\.py\|src/cli\.py\|test_cli\.py" tools/crawler/README.md`
+注意：Step 1 要求的变更说明里会**故意**写出旧命令 `python src/main.py ...`，所以校验时要排除引用块（`>` 开头）的那一行。
+
+Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/main\.py\|python src/cli\.py\|python -m pytest tests/test_cli\.py" tools/crawler/README.md | grep -v '^[0-9]*:>'`
 Expected: 无输出
 
 - [ ] **Step 7: 提交**
@@ -1303,10 +1495,17 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 （实现完成后填写：各 Task 提交号、`pytest` 通过数、87761 与 89047 两个入口页的真实落盘路径抽查结果。）
 ```
 
-- [ ] **Step 4: 校验无残留引用**
+- [ ] **Step 4: 校验无残留用法引用**
 
-Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -rn "src/cli\.py\|src/main\.py" tools/crawler/README.md docs/data-refinery-使用手册.md`
-Expected: 无输出
+注意：README 的变更说明里会**故意**写出旧命令 `python src/main.py ...`，并且单文件 grep 的输出没有文件名前缀，所以用 `^[0-9]*:>` 排除引用块那行。两个文件分开跑，避免多文件 grep 加上文件名前缀导致过滤失效。
+
+Run:
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12
+grep -n "python src/cli\.py\|python src/main\.py" tools/crawler/README.md | grep -v '^[0-9]*:>'
+grep -n "python src/cli\.py\|python src/main\.py" docs/data-refinery-使用手册.md
+```
+Expected: 两条命令都无输出（第一条在 Task 7 完成后即应为空；第二条在本任务完成后为空）
 
 - [ ] **Step 5: 提交**
 
@@ -1353,8 +1552,8 @@ cd tools/crawler && rm -rf /tmp/crawler-acceptance && python src/crawler_cli.py 
   --subject 数学 --grade 初三 --output /tmp/crawler-acceptance --crawl-delay 1
 ls /tmp/crawler-acceptance/数学/初中/first/*/
 ```
-Expected: 目录为 `first`（不是 `second`）；文件名形如 `数学-初三(上)-202607-海淀区-期末-试卷.pdf`
-（学期 `(上)`、区县 `海淀区`，不再出现 `--2025学年`）
+Expected: 目录为 `first`（不是 `second`）；文件名形如 `数学-初三(上)-202607-海淀-期末-试卷.pdf`
+（学期 `(上)`、区县 `海淀`，不再出现 `--2025学年`）
 
 - [ ] **Step 4: 检查初一/初二也正确落在 first**
 
