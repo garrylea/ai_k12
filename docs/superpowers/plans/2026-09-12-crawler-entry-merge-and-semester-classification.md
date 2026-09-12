@@ -1497,10 +1497,15 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 
 - [ ] **Step 4: 校验无残留用法引用**
 
-注意：README 的变更说明里会**故意**写出旧命令 `python src/main.py ...`，所以要排除引用块（`>` 开头）的那一行；不排除的话这条校验永远不可能为空。
+注意：README 的变更说明里会**故意**写出旧命令 `python src/main.py ...`，并且单文件 grep 的输出没有文件名前缀，所以用 `^[0-9]*:>` 排除引用块那行。两个文件分开跑，避免多文件 grep 加上文件名前缀导致过滤失效。
 
-Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/cli\.py\|python src/main\.py" tools/crawler/README.md docs/data-refinery-使用手册.md | grep -v '^[0-9]*:>'`
-Expected: 无输出
+Run:
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12
+grep -n "python src/cli\.py\|python src/main\.py" tools/crawler/README.md | grep -v '^[0-9]*:>'
+grep -n "python src/cli\.py\|python src/main\.py" docs/data-refinery-使用手册.md
+```
+Expected: 两条命令都无输出（第一条在 Task 7 完成后即应为空；第二条在本任务完成后为空）
 
 - [ ] **Step 5: 提交**
 
