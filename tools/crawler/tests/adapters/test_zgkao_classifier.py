@@ -173,18 +173,31 @@ class TestSemesterResolver:
     def test_accepts_first_and_second_words(self):
         assert SemesterResolver(prompt_fn=lambda label: "second").resolve(exam_type="月考") == "second"
 
-    def test_caches_prompted_answer_for_same_key(self):
+    def test_caches_prompted_answer_for_same_group(self):
         prompts = []
         resolver = SemesterResolver(prompt_fn=lambda label: prompts.append(label) or "下")
-        key = ("初三", "月考", "2024")
-        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
-        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
+        group = ("初三", "月考", "2024")
+        assert resolver.resolve(exam_type="月考", key="paper-a", group=group, label="初三-月考-2024") == "second"
+        assert resolver.resolve(exam_type="月考", key="paper-b", group=group, label="初三-月考-2024") == "second"
         assert prompts == ["初三-月考-2024"]
+
+    def test_auto_detected_value_does_not_leak_across_papers(self):
+        """自动推断值只按同一份试卷复用：A 卷的推断结果不能静默套到 B 卷。"""
+        resolver = SemesterResolver(prompt_fn=lambda label: "下")
+        group = ("初三", "月考", "2024")
+        # A 卷有月份证据 → 推断 first，写入文件缓存
+        assert resolver.resolve(
+            exam_type="月考", filename="2026.10海淀初三月考数学.pdf", key="paper-a", group=group,
+        ) == "first"
+        # B 卷无任何证据 → 不能继承 A 的 first，必须去问用户（stub 答「下」）
+        assert resolver.resolve(
+            exam_type="月考", filename="2026西城初三月考数学.pdf", key="paper-b", group=group,
+        ) == "second"
 
     def test_caches_auto_detected_answer_so_sibling_file_reuses_it(self):
         """同一份试卷的「试卷」文件判出学期后，「答案」文件没标记也应复用，不能落到别的学期。"""
         resolver = SemesterResolver(prompt_fn=lambda label: "下")
-        key = ("初三", "期末", "2024")
+        key = "https://www.zgkao.com/shitiku/87761.html"
         assert resolver.resolve(exam_type="期末", filename="2024海淀初三（上）期末数学.pdf", key=key) == "first"
         assert resolver.resolve(exam_type="期末", filename="2024海淀初三期末数学答案.pdf", key=key) == "first"
 

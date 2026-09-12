@@ -100,7 +100,8 @@ class ZgkaoAdapter(SiteAdapter):
         semester = self._semester_resolver.resolve(
             exam_type=paper.exam_type,
             filename=link.filename,
-            key=(paper.grade, paper.exam_type, paper.year),
+            key=paper.detail_url,
+            group=(paper.grade, paper.exam_type, paper.year),
             label=f"{paper.grade}-{paper.exam_type}-{paper.year}",
         )
         if semester is None:

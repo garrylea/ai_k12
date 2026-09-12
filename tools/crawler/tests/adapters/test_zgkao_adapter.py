@@ -240,7 +240,9 @@ class TestZgkaoSemesterWiring:
         adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
         assert stub.last_kwargs["exam_type"] == "二模"
         assert stub.last_kwargs["filename"] == "2026北京西城初三二模数学 有答案.pdf"
-        assert stub.last_kwargs["key"] == ("初三", "二模", "2026")
+        assert stub.last_kwargs["key"] == "https://www.zgkao.com/shitiku/90304.html"
+        assert stub.last_kwargs["group"] == ("初三", "二模", "2026")
+        assert stub.last_kwargs["label"] == "初三-二模-2026"
 
     def test_uses_resolved_semester_for_directory(self, tmp_path):
         fetcher = MockFetcher()
