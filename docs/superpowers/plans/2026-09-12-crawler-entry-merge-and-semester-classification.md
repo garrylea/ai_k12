@@ -148,7 +148,7 @@ git commit -m "fix(crawler): 修正 zgkao 索引页区县解析，学年不再�
 **Interfaces:**
 - Consumes: `Classifier.normalize_exam_type()`（`tools/crawler/src/classifier.py:57-59`）
 - Produces:
-  - `_SIMULATION_EXAM_TYPES: set[str]` = `{"一模", "二模", "三模"}`
+  - `_SIMULATION_EXAM_TYPES: set[str]` = `{"模拟一", "模拟二", "模拟三"}`（规范化后的写法；判定时对入参调用 `normalize_exam_type`，因此原始写法 `二模` 与规范化写法 `模拟二` 都能命中）
   - `_FIRST_SEMESTER_MONTHS: set[int]`、`_SECOND_SEMESTER_MONTHS: set[int]`
   - `resolve_semester(exam_type: str, title: str = "", filename: str = "") -> str | None`（返回 `"first"` / `"second"` / `None`）
 
