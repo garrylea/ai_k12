@@ -19,7 +19,7 @@
 - 月份映射：`9、10、11、12、1` 月 → `first`；`3、4、5、6、7` 月 → `second`；`2、8` 月不判（继续走 ⑤）
 - 学期缓存键 = `(年级, 考试类型, 年份)`；同一组只询问一次，自动判定成功的组也要写入缓存（保证同一份试卷的「试卷/答案」落在同一学期）
 - `--dry-run` 不询问、不报错；非交互（stdin 非 TTY）判不出 → 跳过该文件 + 逐条警告 + 运行结束非零退出
-- 区县解析：中间片段含「学年」→ 取「学年」之后；为空则回退到年份之前的前缀
+- 区县解析：中间片段含「学年」→ 取「学年」之后；为空则回退到年份之前的前缀；**最后去掉末尾的「区」**（统一 `海淀区` / `海淀` 两种站点写法，否则精确匹配的 `--district 海淀` 会漏掉带「学年」的那批）
 - zgkao `--grade` 取值用站点原生写法：`初一` / `初二` / `初三` / `高一` / `高二` / `高三`（smartedu 仍为 `九年级` 等）
 - 所有命令在 `tools/crawler/` 下执行；测试命令 `pytest`
 - 提交信息用 Conventional Commits，scope 用 `crawler`
@@ -46,21 +46,21 @@ class TestParseHeaderDistrict:
         # 海淀区2024-2025学年初三（上）期末考试卷和答案汇总
         header = "海淀区2024-2025学年初三（上）期末考试卷和答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "海淀区"
+        assert info["district"] == "海淀"
         assert info["grade"] == "初三"
         assert info["exam_type"] == "（上）期末考"
 
     def test_district_after_academic_year_range(self):
         header = "2025-2026学年海淀区初二期末试卷&答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "海淀区"
+        assert info["district"] == "海淀"
         assert info["grade"] == "初二"
         assert info["exam_type"] == "期末"
 
     def test_district_after_academic_year_range_with_city_prefix(self):
         header = "2025-2026学年北京海淀区初一期末试卷&答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "北京海淀区"
+        assert info["district"] == "北京海淀"
 
     def test_district_without_academic_year_range_unchanged(self):
         header = "2026海淀初三二模试卷&答案"
@@ -70,7 +70,13 @@ class TestParseHeaderDistrict:
     def test_district_strips_semester_marker_after_academic_year(self):
         header = "2025-2026学年（上）海淀区初二期末试卷&答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "海淀区"
+        assert info["district"] == "海淀"
+
+    def test_district_trailing_qu_stripped_for_both_spellings(self):
+        """带「区」与不带「区」的表头必须落到同一个区县值（精确匹配的 --district 才能命中）。"""
+        with_qu = IndexParser._parse_header("海淀区2024-2025学年初三（上）期末考试卷和答案汇总")
+        without_qu = IndexParser._parse_header("2026海淀初三二模试卷&答案")
+        assert with_qu["district"] == without_qu["district"] == "海淀"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -101,14 +107,21 @@ Expected: 前两个用例 FAIL（实际得到 `-2025学年` / `-2026学年海淀
         表头有两种形态：
         - 区县在前：`海淀区2024-2025学年初三（上）期末...` → 学年之后为空，回退到年份前缀
         - 学年在前：`2025-2026学年海淀区初二期末...` → 区县在「学年」之后
+        最后统一去掉末尾「区」，让 `海淀区` 与 `海淀` 两种站点写法落到同一个值
+        （`--district` 与文件名都是精确匹配，不统一会漏匹配）。
         """
-        mid = match.group(2)
+        mid = match.group(2).strip()
         if "学年" not in mid:
-            return mid.strip()
+            return IndexParser._strip_trailing_qu(mid)
         district = mid.split("学年", 1)[1].strip()
         if not district:
             district = text[: match.start(1)].strip()
-        return re.sub(r"^[（(][^）)]*[）)]", "", district).strip()
+        district = re.sub(r"^[（(][^）)]*[）)]", "", district).strip()
+        return IndexParser._strip_trailing_qu(district)
+
+    @staticmethod
+    def _strip_trailing_qu(district: str) -> str:
+        return district[:-1] if district.endswith("区") else district
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -1353,8 +1366,8 @@ cd tools/crawler && rm -rf /tmp/crawler-acceptance && python src/crawler_cli.py 
   --subject 数学 --grade 初三 --output /tmp/crawler-acceptance --crawl-delay 1
 ls /tmp/crawler-acceptance/数学/初中/first/*/
 ```
-Expected: 目录为 `first`（不是 `second`）；文件名形如 `数学-初三(上)-202607-海淀区-期末-试卷.pdf`
-（学期 `(上)`、区县 `海淀区`，不再出现 `--2025学年`）
+Expected: 目录为 `first`（不是 `second`）；文件名形如 `数学-初三(上)-202607-海淀-期末-试卷.pdf`
+（学期 `(上)`、区县 `海淀`，不再出现 `--2025学年`）
 
 - [ ] **Step 4: 检查初一/初二也正确落在 first**
 
