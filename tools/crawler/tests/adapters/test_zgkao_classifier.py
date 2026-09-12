@@ -131,6 +131,8 @@ class TestResolveSemester:
         ("二模", "2026北京海淀初三二模数学 无答案.pdf", "second"),
         ("一模", "", "second"),
         ("三模", "", "second"),
+        ("模拟二", "2026北京海淀初三二模数学.pdf", "second"),      # 规范化写法也要认
+        ("二模", "2026.09海淀初三二模数学.pdf", "second"),         # ③ 优先于 ④ 月份
         # ④ 文件名月份
         ("期末", "2026.01海淀区初三期末数学.pdf", "first"),
         ("期末", "202507海淀初三期末数学.pdf", "second"),
@@ -139,6 +141,7 @@ class TestResolveSemester:
         ("期中", "", None),
         ("期末", "", None),
         ("期末", "2026.02海淀初三期末数学.pdf", None),   # 2 月跨学期
+        ("期末", "2026.08海淀初三期末数学.pdf", None),   # 8 月跨学期
         ("期末", "2025北京海淀初三期末数学.pdf", None),  # 年份不能被当成月份
     ])
     def test_resolve_semester(self, exam_type, filename, expected):

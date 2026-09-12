@@ -61,7 +61,7 @@ class Classifier:
         return _EXAM_TYPE_MAP.get(exam_type, exam_type)
 
 
-_SIMULATION_EXAM_TYPES = {"一模", "二模", "三模"}
+_SIMULATION_EXAM_TYPES = {"模拟一", "模拟二", "模拟三"}
 
 _FIRST_SEMESTER_MONTHS = {9, 10, 11, 12, 1}
 _SECOND_SEMESTER_MONTHS = {3, 4, 5, 6, 7}
@@ -105,11 +105,14 @@ def resolve_semester(exam_type: str, title: str = "", filename: str = "") -> Opt
 
     月考/期中/期末在上下两个学期都有，不能靠考试类型推断，只认显式标记或月份；
     一模/二模/三模是约定性的下学期考试，可直接判定。
+
+    exam_type 既接受站点原始写法（`二模`），也接受规范化后的写法（`模拟二`）——
+    调用方可能来自 parser（原始），也可能来自 Classification（规范化），两者都不能漏判。
     """
     for source in (exam_type, title, filename):
         marked = _semester_from_markers(source)
         if marked is not None:
             return marked
-    if exam_type in _SIMULATION_EXAM_TYPES:
+    if Classifier.normalize_exam_type(exam_type) in _SIMULATION_EXAM_TYPES:
         return "second"
     return _semester_from_month(filename) or _semester_from_month(title)
