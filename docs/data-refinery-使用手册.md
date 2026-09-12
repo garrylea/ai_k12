@@ -115,7 +115,7 @@ cd tools/db && bash install_mysql.sh
 ## 3. 爬虫（Crawler）
 
 **位置**：`tools/crawler/`  
-**入口**：`python src/cli.py --site <zgkao|smartedu> [options]`
+**入口**：`python src/crawler_cli.py --site <zgkao|smartedu> [options]`
 
 ### 3.1 通用参数
 
@@ -132,7 +132,7 @@ cd tools/db && bash install_mysql.sh
 
 ```bash
 # 下载 2024-2025 年海淀区数学试卷
-python src/cli.py --site zgkao \
+python src/crawler_cli.py --site zgkao \
   --url https://www.zgkao.com/shitiku/89047.html \
   --subject 数学 \
   --year 2024,2025 \
@@ -140,7 +140,7 @@ python src/cli.py --site zgkao \
   --output ./data
 
 # 试运行：查看可下载内容
-python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --dry-run
+python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --dry-run
 ```
 
 | 参数 | 说明 |
@@ -149,8 +149,9 @@ python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --
 | `--subject` | 学科过滤（如 数学、英语、语文） |
 | `--year` | 年份过滤，逗号分隔（如 2024,2025） |
 | `--district` | 区县过滤（如 海淀、西城、东城、朝阳） |
+| `--grade` | 年级过滤，逗号分隔（zgkao 用 初一/初二/初三/高一/高二/高三） |
 
-**输出结构**：`data/{学科}/初中/second/{年份}/{试卷名}.pdf`
+**输出结构**：`data/{学科}/初中/{first|second}/{年份}/{试卷名}.pdf`（学期由页面自动识别，判不出时交互询问）
 
 ### 3.3 smartedu — 教材下载
 
@@ -158,7 +159,7 @@ python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --
 
 ```bash
 # 下载人教版九年级上册数学教材
-python src/cli.py --site smartedu \
+python src/crawler_cli.py --site smartedu \
   --subject 数学 \
   --level 初中 \
   --grade 九年级 \
@@ -167,7 +168,7 @@ python src/cli.py --site smartedu \
   --output ./data
 
 # 只打印不下载
-python src/cli.py --site smartedu --subject 数学 --level 初中 --dry-run
+python src/crawler_cli.py --site smartedu --subject 数学 --level 初中 --dry-run
 ```
 
 | 参数 | 说明 |
@@ -624,7 +625,7 @@ python src/db_loader_cli.py --load-cards --source smartedu --toc-dir output/toc
 ```bash
 # 爬虫
 cd tools/crawler
-python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --year 2024,2025
+python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --year 2024,2025
 
 # 转换 → 一站式（zgkao 自动跳过 toc/merge）
 cd ../data-refinery

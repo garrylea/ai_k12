@@ -1,5 +1,9 @@
 # smartedu 教材爬虫改造设计
 
+> **变更说明（2026-09-12）**：入口已合并为 `src/crawler_cli.py`（原 `main.py` / `cli.py` 已删除），
+> 详见 `docs/superpowers/specs/2026-09-12-crawler-entry-merge-and-semester-classification-design.md`。
+> 本文正文保留为当时的设计记录。
+
 **日期**：2026-07-04
 **状态**：已通过头脑风暴，待写实现计划
 **关联模块**：`tools/crawler/`
@@ -294,13 +298,13 @@ zgkao 的 meta.json 沿用现有 schema，仅补 `site_adapter: "zgkao"` 字段�
 
 ```bash
 # zgkao（保持现有行为）
-python src/main.py --site zgkao \
+python src/crawler_cli.py --site zgkao \
   --url https://www.zgkao.com/shitiku/89047.html \
   --year 2024,2025 \
   --output ./data
 
 # smartedu
-python src/main.py --site smartedu \
+python src/crawler_cli.py --site smartedu \
   --subject 数学 \
   --level 初中 \
   --grade 九年级 \
