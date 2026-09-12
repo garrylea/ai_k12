@@ -1424,9 +1424,9 @@ data/
 
 - [ ] **Step 6: 校验无残留用法引用**
 
-注意：Step 1 要求的变更说明里会**故意**提到 `src/main.py` / `src/cli.py`，所以校验的是「命令用法」而不是「任何提及」——用 `python ` 前缀区分。
+注意：Step 1 要求的变更说明里会**故意**写出旧命令 `python src/main.py ...`，所以校验时要排除引用块（`>` 开头）的那一行。
 
-Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/main\.py\|python src/cli\.py\|python -m pytest tests/test_cli\.py" tools/crawler/README.md`
+Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/main\.py\|python src/cli\.py\|python -m pytest tests/test_cli\.py" tools/crawler/README.md | grep -v '^[0-9]*:>'`
 Expected: 无输出
 
 - [ ] **Step 7: 提交**
