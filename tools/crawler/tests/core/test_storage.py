@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from classifier import Classification
-from core.storage import ImageStore, Storage
+from classifier import Classification, Classifier
+from core.storage import ImageStore, PdfStore
 
 
 @pytest.fixture
@@ -43,39 +43,59 @@ def crawl_time():
 
 @pytest.fixture
 def storage(tmp_path, crawl_time):
-    return Storage(
+    return PdfStore(
         base_dir=str(tmp_path),
         entry_url="https://www.zgkao.com/shitiku/89047.html",
         crawl_time=crawl_time,
     )
 
 
+_FILE_TYPE_MAP = {"试卷": "paper", "答案": "answer"}
+
+
+def save_pdf(store, cls, content=b"fake-pdf-content", source_url="https://cdn.zgkao.com/x.pdf"):
+    """等价于被删除的 Storage.save_pdf：按分类推导目录/文件名/类型。"""
+    return store.save(
+        dir_relpath=Classifier.storage_dir(cls, ""),
+        filename=Classifier.filename(cls),
+        content=content,
+        source_url=source_url,
+        file_type=_FILE_TYPE_MAP[cls.file_type],
+        classification={
+            "subject": cls.subject,
+            "level": cls.level,
+            "semester": cls.semester,
+            "year": cls.year,
+        },
+    )
+
+
 class TestSavePdfCreatesStructure:
     def test_creates_directory_tree(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         expected_dir = tmp_path / "数学" / "初中" / "first" / "2026"
         assert expected_dir.is_dir()
 
     def test_writes_file_with_normalized_name(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         expected_file = tmp_path / "数学" / "初中" / "first" / "2026" / "数学-初三(上)-202607-西城-期末-试卷.pdf"
         assert expected_file.is_file()
         assert expected_file.read_bytes() == b"fake-pdf-content"
 
     def test_returns_saved_path(self, storage, classification, tmp_path):
-        path = storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        path = save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         assert Path(path).is_file()
         assert "数学-初三(上)-202607-西城-期末-试卷.pdf" in str(path)
 
 
 class TestMetaJsonCreation:
     def test_creates_meta_json(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         meta_path = tmp_path / "数学" / "初中" / "first" / "2026" / "meta.json"
         assert meta_path.is_file()
 
     def test_meta_has_classification_section(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         meta = _read_meta(tmp_path, classification)
         assert meta["classification"] == {
             "subject": "数学",
@@ -85,64 +105,64 @@ class TestMetaJsonCreation:
         }
 
     def test_meta_has_source_section(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         meta = _read_meta(tmp_path, classification)
         assert meta["source"]["site"] == "zgkao.com"
         assert meta["source"]["entry_url"] == "https://www.zgkao.com/shitiku/89047.html"
         assert meta["source"]["crawl_time"] == "2026-06-29T10:30:00Z"
 
     def test_meta_has_config_section(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         meta = _read_meta(tmp_path, classification)
-        assert meta["config"]["crawler_version"] == "1.0.0"
+        assert meta["config"]["crawler_version"] == "2.0.0"
         assert meta["config"]["robots_txt_checked"] is True
 
     def test_meta_has_files_array_with_one_record(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         meta = _read_meta(tmp_path, classification)
         assert len(meta["files"]) == 1
 
 
 class TestFileRecord:
     def test_record_has_filename(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         record = _read_meta(tmp_path, classification)["files"][0]
         assert record["filename"] == "数学-初三(上)-202607-西城-期末-试卷.pdf"
 
     def test_record_has_type_paper_for_试卷(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"fake-pdf-content", "https://cdn.zgkao.com/x.pdf")
         record = _read_meta(tmp_path, classification)["files"][0]
         assert record["type"] == "paper"
 
     def test_record_has_type_answer_for_答案(self, tmp_path, crawl_time):
-        storage = Storage(base_dir=str(tmp_path), entry_url="https://www.zgkao.com/s.html", crawl_time=crawl_time)
+        storage = PdfStore(base_dir=str(tmp_path), entry_url="https://www.zgkao.com/s.html", crawl_time=crawl_time)
         cls = Classification(
             subject="数学", semester="first", grade="初三", year="2026",
             year_code="202607", district="西城", exam_type="期末", file_type="答案",
         )
-        storage.save_pdf(cls, b"content", "https://cdn.zgkao.com/a.pdf")
+        save_pdf(storage, cls, b"content", "https://cdn.zgkao.com/a.pdf")
         record = _read_meta(tmp_path, cls)["files"][0]
         assert record["type"] == "answer"
 
     def test_record_has_source_url(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"content", "https://cdn.zgkao.com/specific.pdf")
+        save_pdf(storage, classification, b"content", "https://cdn.zgkao.com/specific.pdf")
         record = _read_meta(tmp_path, classification)["files"][0]
         assert record["source_url"] == "https://cdn.zgkao.com/specific.pdf"
 
     def test_record_has_download_time(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"content", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, b"content", "https://cdn.zgkao.com/x.pdf")
         record = _read_meta(tmp_path, classification)["files"][0]
         assert record["download_time"] == "2026-06-29T10:30:00Z"
 
     def test_record_has_size_bytes(self, storage, classification, tmp_path):
         content = b"hello-pdf"
-        storage.save_pdf(classification, content, "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, content, "https://cdn.zgkao.com/x.pdf")
         record = _read_meta(tmp_path, classification)["files"][0]
         assert record["size_bytes"] == len(content)
 
     def test_record_has_md5(self, storage, classification, tmp_path):
         content = b"hello-pdf"
-        storage.save_pdf(classification, content, "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, classification, content, "https://cdn.zgkao.com/x.pdf")
         record = _read_meta(tmp_path, classification)["files"][0]
         expected_md5 = hashlib.md5(content).hexdigest()
         assert record["md5"] == expected_md5
@@ -150,12 +170,12 @@ class TestFileRecord:
 
 class TestAppendBehavior:
     def test_second_save_keeps_first_record(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"paper", "https://cdn.zgkao.com/p1.pdf")
+        save_pdf(storage, classification, b"paper", "https://cdn.zgkao.com/p1.pdf")
         answer_cls = Classification(
             subject="数学", semester="first", grade="初三", year="2026",
             year_code="202607", district="西城", exam_type="期末", file_type="答案",
         )
-        storage.save_pdf(answer_cls, b"answer", "https://cdn.zgkao.com/a1.pdf")
+        save_pdf(storage, answer_cls, b"answer", "https://cdn.zgkao.com/a1.pdf")
         meta = _read_meta(tmp_path, classification)
         assert len(meta["files"]) == 2
         filenames = [f["filename"] for f in meta["files"]]
@@ -163,12 +183,12 @@ class TestAppendBehavior:
         assert "数学-初三(上)-202607-西城-期末-答案.pdf" in filenames
 
     def test_second_save_does_not_overwrite_first_file(self, storage, classification, tmp_path):
-        storage.save_pdf(classification, b"paper", "https://cdn.zgkao.com/p1.pdf")
+        save_pdf(storage, classification, b"paper", "https://cdn.zgkao.com/p1.pdf")
         answer_cls = Classification(
             subject="数学", semester="first", grade="初三", year="2026",
             year_code="202607", district="西城", exam_type="期末", file_type="答案",
         )
-        storage.save_pdf(answer_cls, b"answer", "https://cdn.zgkao.com/a1.pdf")
+        save_pdf(storage, answer_cls, b"answer", "https://cdn.zgkao.com/a1.pdf")
         base = tmp_path / "数学" / "初中" / "first" / "2026"
         assert (base / "数学-初三(上)-202607-西城-期末-试卷.pdf").read_bytes() == b"paper"
         assert (base / "数学-初三(上)-202607-西城-期末-答案.pdf").read_bytes() == b"answer"
@@ -176,7 +196,7 @@ class TestAppendBehavior:
 
 class TestRobotsCheckedFlag:
     def test_robots_checked_false_reflected_in_config(self, tmp_path, crawl_time):
-        storage = Storage(
+        storage = PdfStore(
             base_dir=str(tmp_path),
             entry_url="https://www.zgkao.com/s.html",
             crawl_time=crawl_time,
@@ -186,7 +206,7 @@ class TestRobotsCheckedFlag:
             subject="数学", semester="first", grade="初三", year="2026",
             year_code="202607", district="西城", exam_type="期末", file_type="试卷",
         )
-        storage.save_pdf(cls, b"x", "https://cdn.zgkao.com/x.pdf")
+        save_pdf(storage, cls, b"x", "https://cdn.zgkao.com/x.pdf")
         meta = _read_meta(tmp_path, cls)
         assert meta["config"]["robots_txt_checked"] is False
 

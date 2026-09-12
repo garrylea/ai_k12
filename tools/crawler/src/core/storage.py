@@ -8,11 +8,6 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
-from classifier import Classification, Classifier
-
-
-_FILE_TYPE_MAP = {"试卷": "paper", "答案": "answer"}
-
 
 def _iso_format(dt: datetime) -> str:
     if dt.tzinfo is not None:
@@ -199,43 +194,3 @@ class ImageStore(BaseStore):
             page = int(path.stem.split("_")[-1])
             files.append(self._file_record(path.name, "image", "", content, page=page))
         return files
-
-
-class Storage:
-    """向后兼容的旧 Storage 包装，实际委托给 PdfStore。"""
-
-    def __init__(
-        self,
-        base_dir: str,
-        entry_url: str,
-        crawl_time: datetime,
-        crawler_version: str = "1.0.0",
-        robots_checked: bool = True,
-    ) -> None:
-        self._store = PdfStore(
-            base_dir=base_dir,
-            entry_url=entry_url,
-            crawl_time=crawl_time,
-            crawler_version=crawler_version,
-            robots_checked=robots_checked,
-            site_adapter="zgkao",
-        )
-        self._entry_url = entry_url
-        self._crawl_time = crawl_time
-
-    def save_pdf(self, classification: Classification, content: bytes, source_url: str) -> Path:
-        dir_relpath = Classifier.storage_dir(classification, "")
-        filename = Classifier.filename(classification)
-        return self._store.save(
-            dir_relpath=dir_relpath,
-            filename=filename,
-            content=content,
-            source_url=source_url,
-            file_type=_FILE_TYPE_MAP[classification.file_type],
-            classification={
-                "subject": classification.subject,
-                "level": classification.level,
-                "semester": classification.semester,
-                "year": classification.year,
-            },
-        )
