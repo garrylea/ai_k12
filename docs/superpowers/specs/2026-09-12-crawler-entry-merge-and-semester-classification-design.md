@@ -276,4 +276,81 @@ README 与用户手册同步更新。
 
 ## 实现结果
 
-（实现完成后填写：各 Task 提交号、`pytest` 通过数、87761 与 89047 两个入口页的真实落盘路径抽查结果。）
+分支 `feat/crawler-entry-merge`，基线 `f012333`，共 23 个提交（含计划/设计文档更新）。
+
+### 各 Task 提交号
+
+| Task | 提交 | 说明 |
+| --- | --- | --- |
+| 1 区县解析 | `32a3acf` + `69885ad`(文档) + `e052043`(修复) | 学年不再被当区县；按裁决统一去掉末尾「区」 |
+| 2 学期判定纯函数 | `3b2e85c` + `1e4b172`(文档) + `a4b8a6a`(修复) + `2fd951c`(文档) | 原始与规范化模拟考写法都要认 |
+| 3 SemesterResolver | `0875706` | 缓存 + 询问；缓存分层在 Task 4 评审后由 `a102743` 改为双层 |
+| 4 适配器接入 | `366d051` + `a92f12e`(文档) + `a102743`(修复) | 删 `_EXAM_TYPE_SEMESTER`、接 resolver、`grades` 过滤；学期缓存改双层 |
+| 5 入口合并 | `8782830` + `ea0c7eb`(文档) + `2e0ce4f`(测试) | 新建 `crawler_cli.py`，删 `main.py`/`cli.py` 与各自测试；补 `main()` 契约测试 |
+| 6 删 Storage 壳 | `95826c6` | 测试迁到 `PdfStore.save` + 测试内局部 helper |
+| 7 README | `115fdcf` + `f5dde48`/`88ecb12`/`29b97b5`(计划校验修正) + `e50e37a` | 新入口、`--grade`、学期判定、输出结构 |
+| 8 用户手册与设计文档 | `cf77657` | 手册 §3 同步；历史 spec 只加变更说明 |
+| 9 端到端验收 | 本节 | 见下 |
+
+### 自动化测试
+
+`cd tools/crawler && python -m pytest -q` → **224 passed, 1 deselected**（基线 200 passed；净 +24，期间因入口合并删除约 40 个冗余/已迁移用例、新增 13 个 CLI 用例与若干学期判定用例）。
+
+### 真实站点验收（2026-09-12）
+
+**验收 1 — 87761 只下初三**
+```bash
+python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/87761.html \
+  --subject 数学 --grade 初三 --output /tmp/crawler-acceptance --crawl-delay 1
+```
+`Total: 77, Downloaded: 6, Skipped: 0, Failed: 0`，退出码 0，无 `Unresolved`。落盘：
+
+```
+/tmp/crawler-acceptance/数学/初中/first/2024/数学-初三(上)-202407-海淀-（上）期末考-试卷.pdf
+/tmp/crawler-acceptance/数学/初中/first/2024/数学-初三(上)-202407-海淀-（上）期末考-答案.pdf
+（2025、2026 同构）
+```
+✅ 目录为 `first`（不再是 `second`）；文件名学期 `(上)`；区县 `海淀`（不再是 `--2025学年`）；只有初三。
+
+**验收 2 — 去掉 `--grade` 后初一/初二也正确**
+```bash
+python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/87761.html \
+  --subject 数学 --output /tmp/crawler-acceptance2 --crawl-delay 1
+```
+`Downloaded: 11`，`数学/初中/` 下**只有 `first`**：
+
+```
+数学-初一(上)-202407-北京海淀-期末-试卷.pdf     ← 表头无标记，靠 PDF 文件名「（上）」命中 ②
+数学-初二(上)-202407-海淀-期末-试卷.pdf         ← 同上
+数学-初三(上)-202407-海淀-（上）期末考-试卷.pdf  ← 表头「（上）」命中 ①
+```
+✅ 未触发任何询问、无 `Unresolved`、退出码 0。
+
+**验收 3 — 89047 二模行为不变**
+```bash
+python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html \
+  --subject 数学 --grade 初三 --output /tmp/crawler-acceptance3 --crawl-delay 1
+```
+`Total: 221, Downloaded: 46`，`数学/初中/` 下**只有 `second`**，文件名形如
+`数学-初三(下)-202607-东城-模拟二-试卷.pdf`。✅ 与改动前一致，未触发询问、退出码 0。
+
+**验收 4 — 判不出学期的行为**
+
+站点上没有「无任何标记的期末页」可实测（真实页面表头或 PDF 名至少带一处标记），因此该项由自动化测试覆盖而非实站：
+`classifier` 的 `test_auto_detected_value_does_not_leak_across_papers` / `test_prompts_when_unresolved`、
+适配器的 `test_skips_file_when_semester_unresolved` / `test_dry_run_does_not_ask_resolver`、
+CLI 的 `TestMainSemesterContract`（非 TTY → 退出码 2 且去重汇总；TTY → 接线 `_stdin_prompt`）。
+
+**验收 5** — 全量 pytest 全绿；README、`docs/data-refinery-使用手册.md`、本设计文档均已同步。
+
+### 实施中发现并修正的设计问题
+
+- **学期缓存不能按组复用推断值**（Task 4 评审）：原设计把自动推断结果也写进 `(年级,考试类型,年份)` 组缓存，会让同页无证据的 B 卷静默继承 A 卷的推断值（初三月考上下学期都有）。经裁决改为双层缓存——推断值只按单份试卷复用，仅**用户回答过**的组才整组复用。
+- **`resolve_semester` 的模拟考判定写法**（Task 2 评审）：计划声明它消费 `normalize_exam_type()`，参考实现却用原始名，导致传入规范化 `模拟二` 时静默返回 `None`。改为两者都认。
+- **区县口径**（Task 1 评审）：`海淀区` 与 `海淀` 并存会让精确匹配的 `--district 海淀` 漏掉带「学年」的那批；经裁决统一去掉末尾「区」。
+
+### 遗留观察（不阻断）
+
+- 文件名里的考试类型是表头原文，初三上期末会得到 `…-海淀-（上）期末考-试卷.pdf`，与文件名中的学期 `(上)` 有冗余。属 `normalize_exam_type` 只映射一/二/三模的既有行为，本次未动。
+- `PdfValidator` 校验部分站方 PDF 时 pypdf 会打印 `Ignoring wrong pointing object …`（源文件 xref 不规范），属既有行为。
+- `year_code` 仍是 `年份 + "07"`；上学期期末实际上应体现为 01 月，本次按非目标未改。
