@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,25 @@ def _extract_site(url: str) -> str:
     return host
 
 
+def _origin_suffix(origin: Optional[str], source_url: str) -> str:
+    """由来源确定的稳定后缀：优先 origin 末尾数字段，否则退回 md5 前 6 位。
+
+    不用随机值/time：同一个来源重跑必须得到同一个名字，否则 `--force` 会不断堆积文件。
+    """
+    digits = re.findall(r"\d+", origin or "")
+    if digits:
+        return digits[-1]
+    return hashlib.md5((origin or source_url).encode("utf-8")).hexdigest()[:6]
+
+
+def _insert_suffix(filename: str, suffix: str) -> str:
+    """在扩展名前插入后缀：`数学-…-试卷.pdf` -> `数学-…-试卷-76320.pdf`。"""
+    stem, dot, ext = filename.rpartition(".")
+    if not dot:
+        return f"{filename}-{suffix}"
+    return f"{stem}-{suffix}{dot}{ext}"
+
+
 class ResourceStore(ABC):
     @abstractmethod
     def save(
@@ -32,6 +52,7 @@ class ResourceStore(ABC):
         source_url: str,
         file_type: str,
         classification: dict,
+        origin: Optional[str] = None,
     ) -> Path:
         ...
 
@@ -120,17 +141,46 @@ class PdfStore(BaseStore):
         source_url: str,
         file_type: str,
         classification: dict,
+        origin: Optional[str] = None,
     ) -> Path:
+        meta = self.read_meta(dir_relpath) or self._init_meta(classification)
+        filename = self._resolve_filename(meta, filename, source_url, origin)
+
         target_dir = self._abs_dir(dir_relpath)
         target_dir.mkdir(parents=True, exist_ok=True)
         file_path = target_dir / filename
         file_path.write_bytes(content)
 
-        meta = self.read_meta(dir_relpath) or self._init_meta(classification)
         meta["files"] = [f for f in meta["files"] if f["filename"] != filename]
         meta["files"].append(self._file_record(filename, file_type, source_url, content))
         self.write_meta(dir_relpath, meta)
         return file_path
+
+    def _resolve_filename(self, meta: dict, filename: str, source_url: str, origin: Optional[str]) -> str:
+        """防覆盖兜底：同名但来自不同 source_url 必须改名，否则会静默丢掉先前下载的文件。
+
+        同名且同 source_url 仍原样覆盖（重复下载保持幂等）。
+        """
+        if not self._has_conflict(meta, filename, source_url):
+            return filename
+
+        suffix = _origin_suffix(origin, source_url)
+        candidate = _insert_suffix(filename, suffix)
+        if self._has_conflict(meta, candidate, source_url):
+            # 兜底的兜底：后缀也被另一个来源占了，再叠加 source_url 的 hash
+            candidate = _insert_suffix(
+                filename, f"{suffix}-{hashlib.md5(source_url.encode('utf-8')).hexdigest()[:6]}",
+            )
+        print(f"警告：文件名冲突，改名保存 {filename} → {candidate}（来源 {source_url}）")
+        return candidate
+
+    @staticmethod
+    def _has_conflict(meta: dict, filename: str, source_url: str) -> bool:
+        """meta 里该文件名是否已被另一个来源占用（来源缺失值也视为不同来源）。"""
+        return any(
+            record["filename"] == filename and record.get("source_url") != source_url
+            for record in meta["files"]
+        )
 
 
 class ImageStore(BaseStore):
@@ -142,6 +192,7 @@ class ImageStore(BaseStore):
         source_url: str,
         file_type: str,
         classification: dict,
+        origin: Optional[str] = None,
     ) -> Path:
         raise NotImplementedError("ImageStore does not support generic save; use save_page()")
 
