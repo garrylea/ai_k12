@@ -10,7 +10,7 @@
 
 import pytest
 
-from classifier import Classification, Classifier, resolve_semester
+from classifier import Classification, Classifier, SemesterResolver, resolve_semester
 
 
 def make_classification(**overrides) -> Classification:
@@ -156,3 +156,44 @@ class TestResolveSemester:
     def test_bare_up_char_is_not_a_marker(self):
         # 「上海」不应被当成「上」学期
         assert resolve_semester("期末", filename="2025上海初三期末数学.pdf") is None
+
+
+class TestSemesterResolver:
+    def test_returns_auto_detected_semester_without_prompting(self):
+        prompts = []
+        resolver = SemesterResolver(prompt_fn=lambda label: prompts.append(label) or "下")
+        assert resolver.resolve(exam_type="（上）期末考") == "first"
+        assert prompts == []
+
+    def test_prompts_when_unresolved(self):
+        resolver = SemesterResolver(prompt_fn=lambda label: "上")
+        assert resolver.resolve(exam_type="月考", key=("初三", "月考", "2024"), label="初三-月考-2024") == "first"
+        assert resolver.unresolved == []
+
+    def test_accepts_first_and_second_words(self):
+        assert SemesterResolver(prompt_fn=lambda label: "second").resolve(exam_type="月考") == "second"
+
+    def test_caches_prompted_answer_for_same_key(self):
+        prompts = []
+        resolver = SemesterResolver(prompt_fn=lambda label: prompts.append(label) or "下")
+        key = ("初三", "月考", "2024")
+        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
+        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
+        assert prompts == ["初三-月考-2024"]
+
+    def test_caches_auto_detected_answer_so_sibling_file_reuses_it(self):
+        """同一份试卷的「试卷」文件判出学期后，「答案」文件没标记也应复用，不能落到别的学期。"""
+        resolver = SemesterResolver(prompt_fn=lambda label: "下")
+        key = ("初三", "期末", "2024")
+        assert resolver.resolve(exam_type="期末", filename="2024海淀初三（上）期末数学.pdf", key=key) == "first"
+        assert resolver.resolve(exam_type="期末", filename="2024海淀初三期末数学答案.pdf", key=key) == "first"
+
+    def test_invalid_answer_falls_back_to_unresolved(self):
+        resolver = SemesterResolver(prompt_fn=lambda label: "不知道")
+        assert resolver.resolve(exam_type="月考", label="初三-月考-2024") is None
+        assert resolver.unresolved == ["初三-月考-2024"]
+
+    def test_non_interactive_records_unresolved(self):
+        resolver = SemesterResolver()
+        assert resolver.resolve(exam_type="月考", filename="x.pdf", label="初三-月考-2024") is None
+        assert resolver.unresolved == ["初三-月考-2024"]

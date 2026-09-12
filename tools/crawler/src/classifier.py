@@ -6,7 +6,7 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 _SEMESTER_CN = {"first": "上", "second": "下"}
@@ -116,3 +116,59 @@ def resolve_semester(exam_type: str, title: str = "", filename: str = "") -> Opt
     if Classifier.normalize_exam_type(exam_type) in _SIMULATION_EXAM_TYPES:
         return "second"
     return _semester_from_month(filename) or _semester_from_month(title)
+
+
+def _parse_prompt_answer(answer: str) -> Optional[str]:
+    text = (answer or "").strip().lower()
+    if not text:
+        return None
+    if text.startswith("上") or text in {"first", "1"}:
+        return "first"
+    if text.startswith("下") or text in {"second", "2"}:
+        return "second"
+    return None
+
+
+class SemesterResolver:
+    """学期解析：先自动推断，判不出时询问用户（带 (年级,考试类型,年份) 分组缓存）。
+
+    prompt_fn 为 None 表示非交互场景：判不出就记入 unresolved，由调用方跳过该文件。
+    """
+
+    def __init__(self, prompt_fn: Optional[Callable[[str], str]] = None) -> None:
+        self._prompt_fn = prompt_fn
+        self._cache: dict = {}
+        self.unresolved: list[str] = []
+
+    def resolve(
+        self,
+        *,
+        exam_type: str,
+        filename: str = "",
+        title: str = "",
+        key: object = None,
+        label: str = "",
+    ) -> Optional[str]:
+        identity = label or filename or exam_type
+
+        semester = resolve_semester(exam_type, title=title, filename=filename)
+        if semester is None and key is not None:
+            semester = self._cache.get(key)
+        if semester is not None:
+            self._remember(key, semester)
+            return semester
+
+        if self._prompt_fn is None:
+            self.unresolved.append(identity)
+            return None
+
+        semester = _parse_prompt_answer(self._prompt_fn(identity))
+        if semester is None:
+            self.unresolved.append(identity)
+            return None
+        self._remember(key, semester)
+        return semester
+
+    def _remember(self, key: object, semester: str) -> None:
+        if key is not None:
+            self._cache[key] = semester
