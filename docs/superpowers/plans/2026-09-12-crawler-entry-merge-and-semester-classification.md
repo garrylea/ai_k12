@@ -17,7 +17,7 @@
 - 学期判定优先级：① 表头 `exam_type` 的（上）/（下）标记 → ② PDF 文件名/标题的标记 → ③ 一模/二模/三模 → `second` → ④ 文件名月份 → ⑤ 无法判定返回 `None`
 - 标记只接受 `（上）` / `(上)` / `上学期` / `第一学期`（「下」同理）；**不匹配裸「上/下」字**（避免「上海」误伤）
 - 月份映射：`9、10、11、12、1` 月 → `first`；`3、4、5、6、7` 月 → `second`；`2、8` 月不判（继续走 ⑤）
-- 学期缓存键 = `(年级, 考试类型, 年份)`；同一组只询问一次，自动判定成功的组也要写入缓存（保证同一份试卷的「试卷/答案」落在同一学期）
+- **两层学期缓存**：文件级 `key`（试卷详情页 URL）只复用**自动推断**结果——保证同一份试卷的「试卷/答案」同学期，但不跨试卷传播推断值；组级 `group` = `(年级, 考试类型, 年份)` 只在**用户亲自回答后**写入并整组复用，同组只询问一次
 - `--dry-run` 不询问、不报错；非交互（stdin 非 TTY）判不出 → 跳过该文件 + 逐条警告 + 运行结束非零退出
 - 区县解析：中间片段含「学年」→ 取「学年」之后；为空则回退到年份之前的前缀；**最后去掉末尾的「区」**（统一 `海淀区` / `海淀` 两种站点写法，否则精确匹配的 `--district 海淀` 会漏掉带「学年」的那批）
 - zgkao `--grade` 取值用站点原生写法：`初一` / `初二` / `初三` / `高一` / `高二` / `高三`（smartedu 仍为 `九年级` 等）
@@ -299,7 +299,8 @@ git commit -m "feat(crawler): 新增学期判定纯函数 resolve_semester"
 - Consumes: `resolve_semester()`（Task 2）
 - Produces:
   - `SemesterResolver(prompt_fn: Optional[Callable[[str], str]] = None)`
-  - `SemesterResolver.resolve(*, exam_type: str, filename: str = "", title: str = "", key: object = None, label: str = "") -> Optional[str]`
+  - `SemesterResolver.resolve(*, exam_type: str, filename: str = "", title: str = "", key: object = None, group: object = None, label: str = "") -> Optional[str]`
+    （`key` = 单份试卷标识，`group` = 组标识；两者都可为 None）
   - `SemesterResolver.unresolved: list[str]`（判不出且未询问时的条目；追加 label）
 
 - [ ] **Step 1: 写失败测试**
@@ -322,18 +323,31 @@ class TestSemesterResolver:
     def test_accepts_first_and_second_words(self):
         assert SemesterResolver(prompt_fn=lambda label: "second").resolve(exam_type="月考") == "second"
 
-    def test_caches_prompted_answer_for_same_key(self):
+    def test_caches_prompted_answer_for_same_group(self):
         prompts = []
         resolver = SemesterResolver(prompt_fn=lambda label: prompts.append(label) or "下")
-        key = ("初三", "月考", "2024")
-        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
-        assert resolver.resolve(exam_type="月考", key=key, label="初三-月考-2024") == "second"
+        group = ("初三", "月考", "2024")
+        assert resolver.resolve(exam_type="月考", key="paper-a", group=group, label="初三-月考-2024") == "second"
+        assert resolver.resolve(exam_type="月考", key="paper-b", group=group, label="初三-月考-2024") == "second"
         assert prompts == ["初三-月考-2024"]
+
+    def test_auto_detected_value_does_not_leak_across_papers(self):
+        """自动推断值只按同一份试卷复用：A 卷的推断结果不能静默套到 B 卷。"""
+        resolver = SemesterResolver(prompt_fn=lambda label: "下")
+        group = ("初三", "月考", "2024")
+        # A 卷有月份证据 → 推断 first，写入文件缓存
+        assert resolver.resolve(
+            exam_type="月考", filename="2026.10海淀初三月考数学.pdf", key="paper-a", group=group,
+        ) == "first"
+        # B 卷无任何证据 → 不能继承 A 的 first，必须去问用户（stub 答「下」）
+        assert resolver.resolve(
+            exam_type="月考", filename="2026西城初三月考数学.pdf", key="paper-b", group=group,
+        ) == "second"
 
     def test_caches_auto_detected_answer_so_sibling_file_reuses_it(self):
         """同一份试卷的「试卷」文件判出学期后，「答案」文件没标记也应复用，不能落到别的学期。"""
         resolver = SemesterResolver(prompt_fn=lambda label: "下")
-        key = ("初三", "期末", "2024")
+        key = "https://www.zgkao.com/shitiku/87761.html"
         assert resolver.resolve(exam_type="期末", filename="2024海淀初三（上）期末数学.pdf", key=key) == "first"
         assert resolver.resolve(exam_type="期末", filename="2024海淀初三期末数学答案.pdf", key=key) == "first"
 
@@ -376,14 +390,20 @@ def _parse_prompt_answer(answer: str) -> Optional[str]:
 
 
 class SemesterResolver:
-    """学期解析：先自动推断，判不出时询问用户（带 (年级,考试类型,年份) 分组缓存）。
+    """学期解析：先自动推断，判不出时询问用户。
 
+    两层缓存，缺一不可：
+    - 文件级 `key`（同一份试卷）：自动推断成功的值只在这一层复用，保证「试卷/答案」同学期；
+    - 组级 `group`（(年级,考试类型,年份)）：只有用户亲自回答过才写入，同组只问一次。
+
+    不能把自动推断值写进组缓存——那会让无证据的 B 卷静默继承 A 卷的推断（月考上下学期都有）。
     prompt_fn 为 None 表示非交互场景：判不出就记入 unresolved，由调用方跳过该文件。
     """
 
     def __init__(self, prompt_fn: Optional[Callable[[str], str]] = None) -> None:
         self._prompt_fn = prompt_fn
-        self._cache: dict = {}
+        self._file_cache: dict = {}
+        self._group_cache: dict = {}
         self.unresolved: list[str] = []
 
     def resolve(
@@ -393,16 +413,23 @@ class SemesterResolver:
         filename: str = "",
         title: str = "",
         key: object = None,
+        group: object = None,
         label: str = "",
     ) -> Optional[str]:
         identity = label or filename or exam_type
 
         semester = resolve_semester(exam_type, title=title, filename=filename)
-        if semester is None and key is not None:
-            semester = self._cache.get(key)
         if semester is not None:
-            self._remember(key, semester)
+            self._remember_file(key, semester)
             return semester
+
+        if group is not None and group in self._group_cache:
+            semester = self._group_cache[group]
+            self._remember_file(key, semester)
+            return semester
+
+        if key is not None and key in self._file_cache:
+            return self._file_cache[key]
 
         if self._prompt_fn is None:
             self.unresolved.append(identity)
@@ -412,12 +439,14 @@ class SemesterResolver:
         if semester is None:
             self.unresolved.append(identity)
             return None
-        self._remember(key, semester)
+        if group is not None:
+            self._group_cache[group] = semester
+        self._remember_file(key, semester)
         return semester
 
-    def _remember(self, key: object, semester: str) -> None:
+    def _remember_file(self, key: object, semester: str) -> None:
         if key is not None:
-            self._cache[key] = semester
+            self._file_cache[key] = semester
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -507,7 +536,9 @@ class TestZgkaoSemesterWiring:
         adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
         assert stub.last_kwargs["exam_type"] == "二模"
         assert stub.last_kwargs["filename"] == "2026北京西城初三二模数学 有答案.pdf"
-        assert stub.last_kwargs["key"] == ("初三", "二模", "2026")
+        assert stub.last_kwargs["key"] == "https://www.zgkao.com/shitiku/90304.html"
+        assert stub.last_kwargs["group"] == ("初三", "二模", "2026")
+        assert stub.last_kwargs["label"] == "初三-二模-2026"
 
     def test_uses_resolved_semester_for_directory(self, tmp_path):
         fetcher = MockFetcher()
@@ -720,7 +751,8 @@ class ZgkaoAdapter(SiteAdapter):
         semester = self._semester_resolver.resolve(
             exam_type=paper.exam_type,
             filename=link.filename,
-            key=(paper.grade, paper.exam_type, paper.year),
+            key=paper.detail_url,
+            group=(paper.grade, paper.exam_type, paper.year),
             label=f"{paper.grade}-{paper.exam_type}-{paper.year}",
         )
         if semester is None:
