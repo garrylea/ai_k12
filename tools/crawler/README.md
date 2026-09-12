@@ -22,10 +22,13 @@ pip install -r requirements.txt
 
 ## 用法
 
-### 多站点 CLI（推荐）
+### CLI
+
+> 2026-09-12 起 `src/main.py` 与 `src/cli.py` 已合并为 `src/crawler_cli.py`，
+> 旧命令 `python src/main.py --url ...` 不再可用。
 
 ```bash
-python src/cli.py --site <zgkao|smartedu> [options]
+python src/crawler_cli.py --site <zgkao|smartedu> [options]
 ```
 
 `--site` 之外，`--output`/`--force`/`--dry-run`/`--crawl-delay` 为两站通用参数；
@@ -34,22 +37,29 @@ python src/cli.py --site <zgkao|smartedu> [options]
 #### zgkao 试卷
 
 ```bash
-python src/cli.py --site zgkao \
+python src/crawler_cli.py --site zgkao \
   --url https://www.zgkao.com/shitiku/89047.html \
   --year 2024,2025 \
   --output ./data
 
 # 学科 + 区县过滤（多值用逗号分隔）
-python src/cli.py --site zgkao \
+python src/crawler_cli.py --site zgkao \
   --url https://www.zgkao.com/shitiku/89047.html \
   --subject 数学 \
   --district 海淀,西城
 
 # 试运行：只列出会下载的内容，不落盘、不写 checkpoint
-python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --dry-run
+python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --dry-run
 
 # 忽略断点记录，强制重新下载
-python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --force
+python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --force
+```
+
+```bash
+# 只下载初三的试卷
+python src/crawler_cli.py --site zgkao \
+  --url https://www.zgkao.com/shitiku/87761.html \
+  --subject 数学 --grade 初三
 ```
 
 | 参数 | 说明 | 默认值 |
@@ -59,6 +69,7 @@ python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --
 | `--subject` | 学科过滤，逗号分隔多值（如 `数学,英语`） | 不限 |
 | `--year` | 年份过滤，逗号分隔多值（如 `2024,2025`） | 不限 |
 | `--district` | 区县过滤，逗号分隔多值（如 `海淀,西城`） | 不限 |
+| `--grade` | 年级过滤，逗号分隔多值。取值用站点原生写法：`初一`/`初二`/`初三`/`高一`/`高二`/`高三` | 不限 |
 | `--crawl-delay` | 重试间隔延时（秒）。两站通用；zgkao 默认 0 | `0` |
 | `--force` | 强制重新下载 | 否 |
 | `--dry-run` | 只检查不下载 | 否 |
@@ -66,7 +77,7 @@ python src/cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047.html --
 #### smartedu 教材
 
 ```bash
-python src/cli.py --site smartedu \
+python src/crawler_cli.py --site smartedu \
   --subject 数学 \
   --level 初中 \
   --grade 九年级 \
@@ -74,16 +85,16 @@ python src/cli.py --site smartedu \
   --output ./data
 
 # 出版社过滤
-python src/cli.py --site smartedu --subject 数学 --publisher 人教版
+python src/crawler_cli.py --site smartedu --subject 数学 --publisher 人教版
 
 # 试运行
-python src/cli.py --site smartedu --subject 数学 --dry-run
+python src/crawler_cli.py --site smartedu --subject 数学 --dry-run
 
 # 同一书名保留所有版本（默认只取最新版）
-python src/cli.py --site smartedu --subject 数学 --no-latest-only
+python src/crawler_cli.py --site smartedu --subject 数学 --no-latest-only
 
 # 礼貌延时：每 2 秒一次
-python src/cli.py --site smartedu --subject 数学 --crawl-delay 2
+python src/crawler_cli.py --site smartedu --subject 数学 --crawl-delay 2
 ```
 
 | 参数 | 说明 | 默认值 |
@@ -100,24 +111,18 @@ python src/cli.py --site smartedu --subject 数学 --crawl-delay 2
 | `--force` | 强制重新下载 | 否 |
 | `--dry-run` | 只检查不下载 | 否 |
 
-### 旧版 CLI（仅 zgkao，向后兼容）
+### 学期判定（first / second）
 
-```bash
-# 与新版 zgkao 等价（不含 smartedu 过滤参数与 crawl-delay）
-python src/main.py --url https://www.zgkao.com/shitiku/89047.html \
-  --subject 数学 --year 2024,2025 --district 海淀 \
-  --output ./data --force --dry-run
-```
+学期由程序从页面自动识别，**无需命令行指定**，优先级：
 
-| 参数 | 说明 | 默认值 |
-| --- | --- | --- |
-| `--url` | 入口页 URL（必填） | - |
-| `--output` | 输出目录 | `./data` |
-| `--subject` | 学科过滤，逗号分隔多值 | 不限 |
-| `--year` | 年份过滤，逗号分隔多值 | 不限 |
-| `--district` | 区县过滤，逗号分隔多值 | 不限 |
-| `--force` | 强制重新下载 | 否 |
-| `--dry-run` | 只检查不下载 | 否 |
+1. 索引页表头的（上）/（下）标记，如 `海淀区2024-2025学年初三（上）期末考试卷和答案汇总`
+2. PDF 文件名 / 试卷标题里的标记，如 `2025北京海淀初三（上）期末数学.pdf`
+3. 一模 / 二模 / 三模 —— 约定属下学期
+4. 文件名里的月份：9-12、1 月 → 上学期；3-7 月 → 下学期（2、8 月跨学期，不判）
+5. 以上都判不出 → 交互式终端会提示 `请填写学期 [上/下]`（同一「年级-考试类型-年份」只问一次）；
+   非交互环境（管道 / CI）则跳过该文件并逐条警告，结束时以退出码 2 报告
+
+`--dry-run` 不询问、不因判不出报错。
 
 ## 输出结构
 
@@ -127,11 +132,11 @@ python src/main.py --url https://www.zgkao.com/shitiku/89047.html \
 data/
 └── 数学/
     └── 初中/
-        └── second/
-            └── 2025/
+        └── first/
+            └── 2026/
                 ├── meta.json
-                ├── 数学-初三(下)-202507-海淀-模拟二-试卷.pdf
-                └── 数学-初三(下)-202507-海淀-模拟二-答案.pdf
+                ├── 数学-初三(上)-202607-海淀区-期末-试卷.pdf
+                └── 数学-初三(上)-202607-海淀区-期末-答案.pdf
 ```
 
 ### smartedu
@@ -184,8 +189,7 @@ src/
 │   └── smartedu.py     # smartedu.cn 教材适配器
 ├── parser.py           # zgkao 索引/详情页解析
 ├── classifier.py       # zgkao 分类维度与规范化文件名
-├── main.py             # 旧版 zgkao CLI（向后兼容）
-└── cli.py              # 新版多站点 CLI 入口
+└── crawler_cli.py      # 唯一 CLI 入口（zgkao 试卷 / smartedu 教材）
 ```
 
 ## 测试
@@ -199,7 +203,7 @@ pytest -m network   # 运行真实网络烟雾测试
 
 - `tests/core/` - fetcher、robots、checkpoint、validator、storage、crawler 测试
 - `tests/adapters/` - zgkao 和 smartedu 适配器测试
-- `tests/test_cli.py` - CLI 参数解析测试
+- `tests/test_crawler_cli.py` - CLI 参数解析测试
 
 ## 设计要点
 
