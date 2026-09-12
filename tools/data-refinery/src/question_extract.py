@@ -4,7 +4,7 @@ extract_cli 的 kind=questions 分支调用本模块，与教材卡（cards）�
 链路：maybe_merge_answer_md（4 case 答案合并/选择）→ split_page（切题+答案对齐）
 → question_labeler（LLM 标 type/difficulty/KP + 双模型确认新增 KP）→ ExamQuestion JSONL。
 
-不跑 image_scan（保留所有图）、不跑 card_splitter（不按字数切）。
+不跑 image_scan（保留所有图，额外按 qr_detect 剔除二维码图）、不跑 card_splitter（不按字数切）。
 知识点列表动态从 DB 查（不写死 prompt）。详见
 docs/superpowers/specs/2026-09-05-exam-question-splitter-design.md。
 """
@@ -18,6 +18,7 @@ import pymysql
 from answer_merger import maybe_merge_answer_md
 from question_splitter import split_page, split_options
 from question_labeler import QuestionLabeler, LabeledQuestion
+from qr_detect import strip_qr_images
 
 # 中文学科名 -> subject code（与 publish_cli._subject_code_for 一致）
 _SUBJECT_NAME_TO_CODE = {
@@ -171,6 +172,11 @@ def extract_questions_file(source, config, llm, fb_llm,
 
     # 2. 答案合并检测（4 case）
     text = maybe_merge_answer_md(md_path, text)
+
+    # 2.5 二维码过滤（切题前，页级）：试卷页脚的公众号二维码会被当作题干/选项配图，
+    # 在切题前删掉，避免被 split_options 的"上方最近图片"规则误挂到选项上。
+    # 放在答案合并之后，使题干/选项/解析（来自答案 md）三条链路一次性清掉。
+    text = strip_qr_images(text, md_path.parent)
 
     # 3. 题号切分 + 答案对齐（一次扫描）
     questions = split_page(text, md_path)

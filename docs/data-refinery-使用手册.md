@@ -316,6 +316,14 @@ python src/toc_parse_cli.py --reconvert --grade 九下 --dry-run
 
 从 MD 正文页拆分卡片，LLM 标注 card_type/lesson_id/title，输出 JSONL。
 
+> 文件名含「试卷」的走独立切题路径（`question_extract`，按题号切分而非按字数）。
+> 该路径在切题前会剔除页面里的公众号二维码图片（`qr_detect.strip_qr_images`）：
+> 二维码独占一行则删行，与正文同行则只摘掉引用本身。判定规则是
+> `cv2.QRCodeDetector` 解码成功 **且** 二维码占图面积 ≥ 0.3——护栏用于避免
+> 「真实配图角落里恰好有一个二维码」被整张误删（实测这类图二维码仅占 0.014）。
+> 教材卡路径不走这个过滤器（实测 733 张卡片资源里零二维码）。
+> 详见 `docs/superpowers/specs/2026-09-12-qr-code-image-filter-design.md`。
+
 ```bash
 # 提取所有已转 MD
 python src/extract_cli.py
