@@ -11,7 +11,7 @@ import {
 import { DraftImageLayer } from './DraftImageLayer';
 import { fileToDraftImage, isEditableTarget } from './draft-image-utils';
 
-type Tool = 'pen' | 'eraser' | 'select' | 'compass' | 'line' | 'rect' | 'ellipse' | 'triangle';
+type Tool = 'pen' | 'dot' | 'eraser' | 'select' | 'compass' | 'line' | 'rect' | 'ellipse' | 'triangle';
 
 /** 拖拽成形的图形工具（直线/矩形/椭圆），共用同一手势骨架 */
 type ShapeKind = 'line' | 'rect' | 'ellipse';
@@ -20,13 +20,20 @@ const SHAPE_TOOLS: ReadonlySet<Tool> = new Set<Tool>(['line', 'rect', 'ellipse']
 /** 笔迹线宽（CSS px）：恒定线宽细线（钢笔感），无 thinning 粗细起伏 */
 const INK_WIDTH = 2;
 
+/** 圆心标记点半径（CSS px）：与圆规参考层的圆心锚点同尺寸，保持「画的圆心」和「预览的圆心」观感一致 */
+const CENTER_DOT_R = 3;
+
+/** 「点」工具直径（CSS px）：落点是一根单点笔迹，渲染半径 = DOT_SIZE / 2（strokePath 对单点笔迹按 size/2 画实心圆） */
+const DOT_SIZE = 10;
+
 /**
  * 单条笔画平滑渲染（取代 perfect-freehand 填充轮廓画法）：
  * - 统一细线宽 + 圆头圆角（lineCap/lineJoin round），细且均匀；
  * - 用「顶点为控制点、相邻顶点中点为起止」的二次贝塞尔段串成连续曲线（C1 连续），
  *   曲线天然穿过相邻点中点 = 渲染期低通（抑制手抖高频抖动）；
  * - 输入侧不做 EWMA 前向平滑（之前 streamline 让笔尖滞后），最新采样点直接落笔 →
- *   渲染零跟手延迟。stroke.size 即 INK_WIDTH（也作橡皮命中阈值基数）。
+ *   渲染零跟手延迟。stroke.size 通常为 INK_WIDTH（「点」工具为 DOT_SIZE，单点笔迹取它当直径）。
+ * - stroke.center 存在时（正圆）在轮廓之上补一个实心圆心点。
  */
 function strokePath(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   const pts = stroke.points;
@@ -50,6 +57,12 @@ function strokePath(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   }
   ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
   ctx.stroke();
+  if (stroke.center) {
+    // 正圆圆心标记：实心点（颜色取调用方设的 fillStyle，与笔迹同色）
+    ctx.beginPath();
+    ctx.arc(stroke.center.x, stroke.center.y, CENTER_DOT_R, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 /** 点到线段距离平方（避免开方） */
@@ -89,6 +102,11 @@ function strokeBounds(s: Stroke): { x0: number; y0: number; x1: number; y1: numb
     if (p.y < y0) y0 = p.y;
     if (p.y > y1) y1 = p.y;
   }
+  // 单点笔迹（点工具/手写笔点按）没有长度，按墨迹半径 size/2 外扩，否则「点」会被选中虚线框切掉
+  if (s.points.length === 1) {
+    const r = s.size / 2;
+    x0 -= r; y0 -= r; x1 += r; y1 += r;
+  }
   return { x0, y0, x1, y1 };
 }
 
@@ -124,6 +142,13 @@ const TrashIcon = () => (
 const SelectIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+  </svg>
+);
+
+/** 点工具（实心圆点 = 几何作图里的「点」标记） */
+const DotIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="4" fill="currentColor" />
   </svg>
 );
 
@@ -240,25 +265,36 @@ function sampleEllipse(x0: number, y0: number, x1: number, y1: number): DraftPoi
   return points;
 }
 
-/** 图形手势（直线/矩形/椭圆共用骨架）的预览与提交点列：Shift 约束在此统一生效 */
+/** 图形手势（直线/矩形/椭圆共用骨架）的预览与提交点列：Shift 约束在此统一生效。
+ *  center 仅椭圆按住 Shift（包围盒被修正为正方形 = 正圆）时给出——未按 Shift 的椭圆、直线、矩形都不标圆心。 */
 function shapeCommitPoints(
   kind: 'line' | 'rect' | 'ellipse',
   g: { x0: number; y0: number; x1: number; y1: number; shift: boolean },
-): DraftPoint[] {
+): { points: DraftPoint[]; center?: DraftPoint } {
   if (kind === 'line') {
     const end = g.shift ? snapLineAngle(g.x0, g.y0, g.x1, g.y1) : { x: g.x1, y: g.y1 };
-    return [
-      { x: g.x0, y: g.y0, pressure: 0.5 },
-      { x: end.x, y: end.y, pressure: 0.5 },
-    ];
+    return {
+      points: [
+        { x: g.x0, y: g.y0, pressure: 0.5 },
+        { x: end.x, y: end.y, pressure: 0.5 },
+      ],
+    };
   }
   const corner = g.shift ? squareBox(g.x0, g.y0, g.x1, g.y1) : { x: g.x1, y: g.y1 };
-  return kind === 'rect'
-    ? sampleClosedPolygon([
-      { x: g.x0, y: g.y0 }, { x: corner.x, y: g.y0 },
-      { x: corner.x, y: corner.y }, { x: g.x0, y: corner.y },
-    ])
-    : sampleEllipse(g.x0, g.y0, corner.x, corner.y);
+  if (kind === 'rect') {
+    return {
+      points: sampleClosedPolygon([
+        { x: g.x0, y: g.y0 }, { x: corner.x, y: g.y0 },
+        { x: corner.x, y: corner.y }, { x: g.x0, y: corner.y },
+      ]),
+    };
+  }
+  const points = sampleEllipse(g.x0, g.y0, corner.x, corner.y);
+  if (!g.shift) return { points };
+  return {
+    points,
+    center: { x: (g.x0 + corner.x) / 2, y: (g.y0 + corner.y) / 2, pressure: 0.5 },
+  };
 }
 
 /** 圆规（制图双脚圆规：顶部铰链 + 双腿 + 底部画出的弧） */
@@ -299,9 +335,9 @@ function drawCompassOverlay(
   ctx.lineTo(h.x, h.y);
   ctx.stroke();
   ctx.setLineDash([]);
-  // 圆心与半径手柄锚点（ink 色实心点）
+  // 圆心与半径手柄锚点（ink 色实心点）；圆心点尺寸与提交后笔迹上的圆心标记一致
   ctx.beginPath();
-  ctx.arc(c.cx, c.cy, 3, 0, Math.PI * 2);
+  ctx.arc(c.cx, c.cy, CENTER_DOT_R, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
   ctx.arc(h.x, h.y, 4.5, 0, Math.PI * 2);
@@ -479,9 +515,12 @@ export function DraftWhiteboard({
       );
     }
     if (SHAPE_TOOLS.has(toolRef.current)) {
-      // 图形实时预览：与最终提交同款实线（WYSIWYG），Shift 约束同步生效
+      // 图形实时预览：与最终提交同款实线（WYSIWYG），Shift 约束与圆心标记同步生效
       const g = shapeGestureRef.current;
-      if (g && g.moved) strokePath(ctx, { points: shapeCommitPoints(g.kind, g), size: INK_WIDTH });
+      if (g && g.moved) {
+        const out = shapeCommitPoints(g.kind, g);
+        strokePath(ctx, { points: out.points, size: INK_WIDTH, center: out.center });
+      }
     }
     if (toolRef.current === 'triangle') {
       drawTriangleOverlay(ctx, canvas, triangleRef.current, ink);
@@ -551,8 +590,9 @@ export function DraftWhiteboard({
   }, [redraw]);
 
   // 图形工具产出（弧/整圆/直线，后续矩形/椭圆/三角形同）提交：与手写笔迹同管道（渲染/橡皮/持久化）
-  const commitShapeStroke = useCallback((points: DraftPoint[]) => {
-    strokesRef.current.push({ points, size: INK_WIDTH });
+  // center 仅正圆传入（圆规整圆 / Shift 正圆），其余图形不传
+  const commitShapeStroke = useCallback((points: DraftPoint[], center?: DraftPoint) => {
+    strokesRef.current.push(center ? { points, size: INK_WIDTH, center } : { points, size: INK_WIDTH });
     if (persist) setDraft(questionId, strokesRef.current);
     redraw();
   }, [persist, questionId, redraw]);
@@ -600,8 +640,8 @@ export function DraftWhiteboard({
     const ang = angleAt(c.cx, c.cy, x, y);
     const sweep = c.sweep + normalizeAngle(ang - (c.a0 + c.sweep));
     if (Math.abs(sweep) >= 2 * Math.PI) {
-      // 扫满一周：自动闭合成整圆并提交
-      commitShapeStroke(sampleCircle(c));
+      // 扫满一周：自动闭合成整圆并提交（整圆带圆心标记）
+      commitShapeStroke(sampleCircle(c), { x: c.cx, y: c.cy, pressure: 0.5 });
       updateCompass({ ...c, phase: 'ready' });
       return;
     }
@@ -670,7 +710,8 @@ export function DraftWhiteboard({
     const g = shapeGestureRef.current;
     shapeGestureRef.current = null;
     if (g && g.moved) {
-      commitShapeStroke(shapeCommitPoints(g.kind, g));
+      const out = shapeCommitPoints(g.kind, g);
+      commitShapeStroke(out.points, out.center);
     } else {
       redraw(); // 未成形（点按）：清掉可能的空预览
     }
@@ -858,9 +899,11 @@ export function DraftWhiteboard({
     const dy = y - g.lastY;
     if (dx === 0 && dy === 0) return;
     g.lastX = x; g.lastY = y;
-    // 笔画：点列原位平移（浮点增量，无取整误差）；贴图：快照 + 总位移绝对定位（负方向夹 0）
+    // 笔画：点列原位平移（浮点增量，无取整误差；圆心标记随之一并平移）；
+    // 贴图：快照 + 总位移绝对定位（负方向夹 0）
     for (const s of selectedStrokesRef.current) {
       for (const p of s.points) { p.x += dx; p.y += dy; }
+      if (s.center) { s.center.x += dx; s.center.y += dy; }
     }
     if (g.origImages.size) {
       const dxTotal = x - g.startX;
@@ -1062,6 +1105,15 @@ export function DraftWhiteboard({
       triangleDown(p.x, p.y, e.shiftKey);
       return;
     }
+    if (tool === 'dot') {
+      // 点：按下即落一个点（单点笔迹，size = 直径，渲染半径 size/2）。
+      // 复用 drawingRef → 两指平移会撤销这个还没抬手落定的点（与手写笔点按同策略）。
+      drawingRef.current = true;
+      strokesRef.current.push({ points: [p], size: DOT_SIZE });
+      if (persist) setDraft(questionId, strokesRef.current);
+      redraw();
+      return;
+    }
     drawingRef.current = true;
     strokesRef.current.push({ points: [p], size: INK_WIDTH });
     redraw(); // 落笔即渲染：单点（点按）立即成点、连续笔画无"起笔延迟"
@@ -1100,6 +1152,7 @@ export function DraftWhiteboard({
       triangleMove(p.x, p.y, e.shiftKey);
       return;
     }
+    if (tool === 'dot') return; // 点工具：落点已定，拖动不追加新点、也不连成线
     if (!drawingRef.current) return;
     const stroke = strokesRef.current[strokesRef.current.length - 1];
     stroke.points.push(p);
@@ -1205,11 +1258,11 @@ export function DraftWhiteboard({
     return () => document.removeEventListener('keydown', onKey);
   }, [tool, confirmTriangle, resetTriangle]);
 
-  // 圆规控制条操作：整圆（以当前圆心半径一键画整圆）/ 重置（回未放置）
+  // 圆规控制条操作：整圆（以当前圆心半径一键画整圆，带圆心标记）/ 重置（回未放置）
   const drawFullCircle = () => {
     const c = compassRef.current;
     if (c.phase !== 'ready') return;
-    commitShapeStroke(sampleCircle(c));
+    commitShapeStroke(sampleCircle(c), { x: c.cx, y: c.cy, pressure: 0.5 });
   };
   const resetCompass = () => updateCompass({ phase: 'idle' });
 
@@ -1260,6 +1313,7 @@ export function DraftWhiteboard({
       <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-[var(--bg-subtle)]">
         {toolBtn('pen', '手写笔', <PenIcon />)}
         {toolBtn('compass', '圆规', <CompassIcon />)}
+        {toolBtn('dot', '点（点按放置一个点）', <DotIcon />)}
         {toolBtn('line', '直线（按住 Shift 吸附 45° 方向）', <LineIcon />)}
         {toolBtn('rect', '矩形（按住 Shift 画正方形）', <RectIcon />)}
         {toolBtn('ellipse', '椭圆（按住 Shift 画正圆）', <EllipseIcon />)}

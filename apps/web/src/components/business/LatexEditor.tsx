@@ -6,10 +6,17 @@ interface Props {
   onChange: (v: string) => void;
 }
 
+/** 模板光标标记：插入后光标落在此处，标记本身不写入文本框。
+ *  用于「插入位置不在末尾」的多行模板（如 SymbolPalette 的分类讨论模板）。 */
+const CARET_MARKER = '$0';
+
 export function LatexEditor({ value, onChange }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  const insertAtCursor = (latex: string) => {
+  const insertAtCursor = (template: string) => {
+    // 先摘掉光标标记，再算落点——标记位置即模板内偏移，与插入位置相加得绝对光标位。
+    const markerAt = template.indexOf(CARET_MARKER);
+    const latex = markerAt >= 0 ? template.replace(CARET_MARKER, '') : template;
     const ta = ref.current;
     if (!ta) {
       onChange(value + latex);
@@ -21,9 +28,9 @@ export function LatexEditor({ value, onChange }: Props) {
     const next = value.slice(0, start) + latex + value.slice(end);
     onChange(next);
     requestAnimationFrame(() => {
-      // 含 {} 占位的模板（如 \frac{}{} \sqrt{}）光标落进第一个花括号内
+      // 光标落点优先级：$0 标记 > 首个 {} 占位内（如 \frac{}{}）> 插入末尾
       const ph = latex.indexOf('{}');
-      const pos = ph >= 0 ? start + ph + 1 : start + latex.length;
+      const pos = markerAt >= 0 ? start + markerAt : ph >= 0 ? start + ph + 1 : start + latex.length;
       ta.focus();
       ta.setSelectionRange(pos, pos);
     });

@@ -11,6 +11,9 @@ export interface Stroke {
   points: DraftPoint[];
   /** 基准笔画宽（CSS px），压感 0.5x~1.5x 映射 */
   size: number;
+  /** 圆心标记（仅正圆：圆规整圆 / Shift 正圆）：轮廓之上补一个实心圆点，随笔迹一起平移/擦除。
+   *  不参与橡皮与选中的命中判定（命中仍是「整条擦除」语义）。 */
+  center?: DraftPoint;
 }
 
 const store = new Map<string, Stroke[]>();
@@ -30,7 +33,7 @@ export function clearDraft(key: string): void {
 
 /** 草稿贴图：坐标/尺寸相对 board（与笔迹同坐标系；scroll-y 模式 y 可超一屏） */
 export interface DraftImage {
-  id: string;      // crypto.randomUUID()
+  id: string;      // 前端唯一标识，见 draft-image-utils.newImageId()
   dataUrl: string; // 压缩后的 data URL（最大边 ≤1600，见 draft-image-utils）
   x: number;
   y: number;

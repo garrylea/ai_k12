@@ -42,6 +42,15 @@ async function loadImage(file: File): Promise<{ dataUrl: string; w: number; h: n
   return { dataUrl: canvas.toDataURL(type), w: canvas.width, h: canvas.height };
 }
 
+/** 生成贴图 id。crypto.randomUUID 仅安全上下文（HTTPS / localhost）可用，
+ *  经局域网 IP 走 HTTP 访问时为 undefined（Mac 之间联调常见），故降级到随机串。
+ *  id 只用于前端身份识别（React key / 选中集合），无需真 UUID。 */
+function newImageId(): string {
+  const c: Crypto | undefined = globalThis.crypto;
+  if (typeof c?.randomUUID === 'function') return c.randomUUID();
+  return `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /** 图片文件 → 待插入 DraftImage：初始宽 board 宽 × 0.6（原图更小按原图），等比，
  *  落在可视区域中央（scroll-y 模式 viewport.top = wrap.scrollTop；负坐标夹到 0）。 */
 export async function fileToDraftImage(
@@ -54,5 +63,5 @@ export async function fileToDraftImage(
   const h = Math.round((w / nw) * nh);
   const x = Math.max(0, Math.round(viewport.left + (viewport.width - w) / 2));
   const y = Math.max(0, Math.round(viewport.top + (viewport.height - h) / 2));
-  return { id: crypto.randomUUID(), dataUrl, x, y, w, h };
+  return { id: newImageId(), dataUrl, x, y, w, h };
 }
