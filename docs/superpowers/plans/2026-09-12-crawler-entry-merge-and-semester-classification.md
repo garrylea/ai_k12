@@ -171,6 +171,8 @@ class TestResolveSemester:
         ("二模", "2026北京海淀初三二模数学 无答案.pdf", "second"),
         ("一模", "", "second"),
         ("三模", "", "second"),
+        ("模拟二", "2026北京海淀初三二模数学.pdf", "second"),      # 规范化写法也要认
+        ("二模", "2026.09海淀初三二模数学.pdf", "second"),         # ③ 优先于 ④ 月份
         # ④ 文件名月份
         ("期末", "2026.01海淀区初三期末数学.pdf", "first"),
         ("期末", "202507海淀初三期末数学.pdf", "second"),
@@ -179,6 +181,7 @@ class TestResolveSemester:
         ("期中", "", None),
         ("期末", "", None),
         ("期末", "2026.02海淀初三期末数学.pdf", None),   # 2 月跨学期
+        ("期末", "2026.08海淀初三期末数学.pdf", None),   # 8 月跨学期
         ("期末", "2025北京海淀初三期末数学.pdf", None),  # 年份不能被当成月份
     ])
     def test_resolve_semester(self, exam_type, filename, expected):
@@ -214,7 +217,7 @@ from typing import Optional
 在文件末尾追加：
 
 ```python
-_SIMULATION_EXAM_TYPES = {"一模", "二模", "三模"}
+_SIMULATION_EXAM_TYPES = {"模拟一", "模拟二", "模拟三"}
 
 _FIRST_SEMESTER_MONTHS = {9, 10, 11, 12, 1}
 _SECOND_SEMESTER_MONTHS = {3, 4, 5, 6, 7}
@@ -258,12 +261,15 @@ def resolve_semester(exam_type: str, title: str = "", filename: str = "") -> Opt
 
     月考/期中/期末在上下两个学期都有，不能靠考试类型推断，只认显式标记或月份；
     一模/二模/三模是约定性的下学期考试，可直接判定。
+
+    exam_type 既接受站点原始写法（`二模`），也接受规范化后的写法（`模拟二`）——
+    调用方可能来自 parser（原始），也可能来自 Classification（规范化），两者都不能漏判。
     """
     for source in (exam_type, title, filename):
         marked = _semester_from_markers(source)
         if marked is not None:
             return marked
-    if exam_type in _SIMULATION_EXAM_TYPES:
+    if Classifier.normalize_exam_type(exam_type) in _SIMULATION_EXAM_TYPES:
         return "second"
     return _semester_from_month(filename) or _semester_from_month(title)
 ```
