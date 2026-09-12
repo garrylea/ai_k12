@@ -5,18 +5,9 @@ from typing import Iterator
 from urllib.parse import urlsplit
 
 from adapters.base import DownloadContext, DownloadResult, Item, SiteAdapter
-from classifier import Classification, Classifier
+from classifier import Classification, Classifier, SemesterResolver
 from parser import DetailParser, IndexParser
 
-
-_EXAM_TYPE_SEMESTER = {
-    "一模": "second",
-    "二模": "second",
-    "三模": "second",
-    "期末": "second",
-    "期中": "first",
-    "月考": "first",
-}
 
 _FILE_TYPE_MAP = {"试卷": "paper", "答案": "answer"}
 
@@ -24,10 +15,11 @@ _FILE_TYPE_MAP = {"试卷": "paper", "答案": "answer"}
 class ZgkaoAdapter(SiteAdapter):
     name = "zgkao"
 
-    def __init__(self, fetcher, entry_url: str, filters: dict):
+    def __init__(self, fetcher, entry_url: str, filters: dict, semester_resolver: SemesterResolver = None):
         self._fetcher = fetcher
         self._entry_url = entry_url
         self._filters = filters
+        self._semester_resolver = semester_resolver or SemesterResolver()
         self._visited: set[str] = set()
 
     @property
@@ -39,7 +31,7 @@ class ZgkaoAdapter(SiteAdapter):
         return [f"{parts.scheme}://{parts.netloc}/robots.txt"]
 
     def supported_filters(self) -> set[str]:
-        return {"years", "subjects", "districts"}
+        return {"years", "subjects", "districts", "grades"}
 
     def required_args(self) -> set[str]:
         return {"url"}
@@ -105,8 +97,18 @@ class ZgkaoAdapter(SiteAdapter):
             result.files_downloaded += 1
             return
 
+        semester = self._semester_resolver.resolve(
+            exam_type=paper.exam_type,
+            filename=link.filename,
+            key=(paper.grade, paper.exam_type, paper.year),
+            label=f"{paper.grade}-{paper.exam_type}-{paper.year}",
+        )
+        if semester is None:
+            print(f"警告：无法判断学期，已跳过 {paper.grade}-{paper.exam_type}-{paper.year}（{link.filename}）")
+            return
+
         content = ctx.fetcher.fetch_bytes(link.url)
-        classification = self._build_classification(paper, link, is_split)
+        classification = self._build_classification(paper, link, is_split, semester)
         dir_relpath = Classifier.storage_dir(classification, base_dir="")
         filename = Classifier.filename(classification)
 
@@ -136,8 +138,7 @@ class ZgkaoAdapter(SiteAdapter):
         result.files_downloaded += 1
 
     @staticmethod
-    def _build_classification(item, link, is_split: bool) -> Classification:
-        semester = _EXAM_TYPE_SEMESTER.get(item.exam_type, "second")
+    def _build_classification(item, link, is_split: bool, semester: str) -> Classification:
         if is_split:
             file_type = "答案" if link.has_answer else "试卷"
         else:
@@ -159,5 +160,7 @@ class ZgkaoAdapter(SiteAdapter):
         if "subjects" in self._filters and item.subject not in self._filters["subjects"]:
             return False
         if "districts" in self._filters and item.district not in self._filters["districts"]:
+            return False
+        if "grades" in self._filters and item.grade not in self._filters["grades"]:
             return False
         return True
