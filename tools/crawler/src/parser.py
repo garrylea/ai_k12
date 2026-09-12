@@ -115,10 +115,26 @@ class IndexParser:
         if not match:
             return None
         return {
-            "district": match.group(2),
+            "district": IndexParser._extract_district(text, match),
             "grade": match.group(3),
             "exam_type": match.group(4),
         }
+
+    @staticmethod
+    def _extract_district(text: str, match) -> str:
+        """从表头取区县。
+
+        表头有两种形态：
+        - 区县在前：`海淀区2024-2025学年初三（上）期末...` → 学年之后为空，回退到年份前缀
+        - 学年在前：`2025-2026学年海淀区初二期末...` → 区县在「学年」之后
+        """
+        mid = match.group(2)
+        if "学年" not in mid:
+            return mid.strip()
+        district = mid.split("学年", 1)[1].strip()
+        if not district:
+            district = text[: match.start(1)].strip()
+        return re.sub(r"^[（(][^）)]*[）)]", "", district).strip()
 
     @staticmethod
     def _extract_year(text: str) -> str | None:

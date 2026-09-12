@@ -278,3 +278,35 @@ class TestPaperItemShape:
         assert hasattr(item, "exam_type")
         assert hasattr(item, "year")
         assert hasattr(item, "detail_url")
+
+
+class TestParseHeaderDistrict:
+    def test_district_before_academic_year_range(self):
+        # 海淀区2024-2025学年初三（上）期末考试卷和答案汇总
+        header = "海淀区2024-2025学年初三（上）期末考试卷和答案汇总"
+        info = IndexParser._parse_header(header)
+        assert info["district"] == "海淀区"
+        assert info["grade"] == "初三"
+        assert info["exam_type"] == "（上）期末考"
+
+    def test_district_after_academic_year_range(self):
+        header = "2025-2026学年海淀区初二期末试卷&答案汇总"
+        info = IndexParser._parse_header(header)
+        assert info["district"] == "海淀区"
+        assert info["grade"] == "初二"
+        assert info["exam_type"] == "期末"
+
+    def test_district_after_academic_year_range_with_city_prefix(self):
+        header = "2025-2026学年北京海淀区初一期末试卷&答案汇总"
+        info = IndexParser._parse_header(header)
+        assert info["district"] == "北京海淀区"
+
+    def test_district_without_academic_year_range_unchanged(self):
+        header = "2026海淀初三二模试卷&答案"
+        info = IndexParser._parse_header(header)
+        assert info["district"] == "海淀"
+
+    def test_district_strips_semester_marker_after_academic_year(self):
+        header = "2025-2026学年（上）海淀区初二期末试卷&答案汇总"
+        info = IndexParser._parse_header(header)
+        assert info["district"] == "海淀区"
