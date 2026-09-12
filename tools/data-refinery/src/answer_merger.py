@@ -6,13 +6,11 @@ zgkao 命名反向：'试卷.pdf' 通常是有答案版，'答案.pdf' 通常是
 
 import re
 from pathlib import Path
-from question_splitter import is_answer_keyword
+from question_splitter import _find_option_marks, is_answer_keyword
 
 _SOLUTION_RE = re.compile(r'解[：:]|证明[：:]')
-# 选择题选项特征（题干标志）
-_CHOICE_OPTION_RE = re.compile(r'\([A-D]\)|（[A-D]）')
-# 题干常见词
-_STEM_WORD_RE = re.compile(r'如图|下列|下面图形中|下列运算中')
+# case 4a 合并纯答案时补的答案区标题（无标题的答案文件，见 maybe_merge_answer_md）
+_ANSWER_SECTION_HEADER = "# 参考答案\n\n"
 
 
 def _has_answer_section(text: str) -> bool:
@@ -30,20 +28,42 @@ def _has_answer_section(text: str) -> bool:
 def _is_pure_answer(text: str) -> bool:
     """文件是否为纯答案（无题干）。
 
-    纯答案 = 有答案部分 且 无题干特征（无选择题选项、无'如图/下列'等题干词）。
+    纯答案 = 有答案部分 且 不含完整的选择题选项序列。
+
+    「有题干」的判据是**连续 A,B,C,D 选项标记**（复用 question_splitter 的
+    选项探测器 `_find_option_marks`），而不是「出现过任意一个 (A) 括号」——
+    后者会被解析正文里的概率记号误命中（`\\therefore P (A) = \\frac{8}{12}`）；
+    同理也不用「如图/下列」关键词：解析正文里的「如图所示」「如图，连接 OC」
+    同样会误命中。误判会让纯答案被当成「试卷+答案版」，走 case 4b 丢弃真试卷
+    （2026-09-12 修，海淀/朝阳/西城 三份真实答案文件）。
     """
     if not _has_answer_section(text):
         return False
-    if _CHOICE_OPTION_RE.search(text):
-        return False
-    if _STEM_WORD_RE.search(text):
+    if _find_option_marks(text) is not None:
         return False
     return True
 
 
 def _derive_answer_path(md_path: Path) -> Path:
-    """配对：文件名 '-试卷' 替换为 '-答案'（只用于配对，不判断内容）。"""
-    return md_path.with_name(md_path.name.replace("-试卷", "-答案"))
+    """配对答案 md 路径（只用于配对，不判断内容）。
+
+    两种布局都要支持（2026-09-12 修第二种子目录布局）：
+    - 同目录：文件名 '-试卷' 替换为 '-答案'
+    - 兄弟目录：convert 对每个 PDF 生成同名子目录，试卷与答案 PDF 各自成目录
+      （'X-试卷/X-试卷.md' 与 'X-答案/X-答案.md'）。旧实现只用 `with_name`
+      （只换文件名、父目录不变），永远找不到兄弟目录里的答案 md，
+      导致答案静默丢弃。
+    """
+    same_dir = md_path.with_name(md_path.name.replace("-试卷", "-答案"))
+    if same_dir.exists():
+        return same_dir
+    parent = md_path.parent
+    if parent.name.endswith("-试卷"):
+        answer_dir = parent.with_name(parent.name.replace("-试卷", "-答案"))
+        sibling = answer_dir / md_path.name.replace("-试卷", "-答案")
+        if sibling.exists():
+            return sibling
+    return same_dir
 
 
 def maybe_merge_answer_md(md_path: Path, text: str) -> str:
@@ -77,7 +97,14 @@ def maybe_merge_answer_md(md_path: Path, text: str) -> str:
     # case 4: 试卷无答案 + 答案文件有答案
     if not paper_has and answer_has:
         if _is_pure_answer(answer_text):
-            # case 4a: 答案是纯答案 → 合并到试卷末尾
+            # case 4a: 答案是纯答案 → 合并到试卷末尾。
+            # split_page 只在「参考答案/答案及评分/评分参考」关键字处进入答案区
+            # （question_splitter._ANSWER_KEYWORD_RE），而 _has_answer_section 还会用
+            # 「≥5 次解：」认答案区——两者口径不同。答案文件没有这类标题时
+            # （海淀202507：直接 '## 一、选择题' + 答案表），不补标题的话合并结果会被
+            # 当成更多题干（题号重复、答案全空）。补一个规范化答案区标题对齐口径。
+            if not any(is_answer_keyword(line) for line in answer_text.split("\n")):
+                answer_text = _ANSWER_SECTION_HEADER + answer_text
             return text + "\n\n" + answer_text
         # case 4b: 答案是试卷+答案版本 → 用答案文件（它有完整题干+答案），丢弃试卷
         return answer_text

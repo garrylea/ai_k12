@@ -231,6 +231,16 @@ python src/convert_cli.py --source smartedu --materials "（根据2022年版课�
 # 批量：列表文件，一行一个子串，# 注释，空行忽略
 python src/convert_cli.py --source smartedu --materials-file books.txt
 
+# 按维度精确筛：2025 年 · 下学期 · 全部试卷
+python src/convert_cli.py --source zgkao --year 2025 --term 下
+
+# 多值逗号分隔（同参数内取并集）：2026 与 2024 两年
+python src/convert_cli.py --source zgkao --year 2026,2024
+
+# 再叠学科/学段；--reconvert 只重转筛出的素材
+python src/convert_cli.py --source zgkao --subject 物理 --year 2026 --reconvert
+python src/convert_cli.py --source smartedu --stage junior --term 下册
+
 # 重新转换（删除已有输出 + 清 checkpoint）
 python src/convert_cli.py --reconvert
 
@@ -245,11 +255,28 @@ python src/convert_cli.py --dry-run
 | `--source` | all / zgkao / smartedu | `all` | 按来源过滤 |
 | `--materials` | str | 空 | 只处理 rel_path 包含指定子串的素材，逗号分隔多条，与 `--materials-file` 取并集 |
 | `--materials-file` | path | 空 | 素材列表文件，一行一个子串，`#` 开头为注释，空行忽略 |
+| `--subject` | str | 空 | 学科过滤，精确匹配目录第 1 段（如 `数学`、`语文`），逗号分隔多个 |
+| `--stage` | str | 空 | 学段过滤，第 2 段（`初中`/`小学`/`高中`，或 `junior`/`primary`/`senior`），逗号分隔多个 |
+| `--term` | str | 空 | 学期过滤：试卷用 `first`/`second`（可写 `上`/`下`），教材用 `上册`/`下册`，逗号分隔多个 |
+| `--year` | str | 空 | 年份过滤（4 位，仅试卷，如 `2025`），逗号分隔多个（如 `2026,2024`） |
 | `--force` | flag | 否 | 忽略 checkpoint，处理所有未完成的 |
 | `--reconvert` | flag | 否 | 删除已有输出 + 清 checkpoint，全部重转 |
 | `--dry-run` | flag | 否 | 只打印不转换 |
 
-**未命中警告**：`--materials` / `--materials-file` 中命中 0 本的条目会打印 `[WARN] 未命中素材: <条目>`（防止拼写错误静默无操作）。列表内已转换的书仍按 checkpoint 跳过，需重转用 `--reconvert`。
+**维度过滤（`--subject`/`--stage`/`--term`/`--year`）**：按素材 rel_path 的目录段精确匹配
+（试卷 `{学科}/{学段}/{first|second}/{年份}/{试卷名}`，教材 `{学科}/{学段}/{出版社}/{年级}/{上册|下册}/{书名}`），
+与 `--materials` 子串过滤**取交集**。每个参数都可用逗号分隔多个值——**同参数内取并集，参数之间取交集**，
+如 `--year 2026,2024 --subject 数学,物理` = 这两年的数学和物理试卷。学期中英文互通
+（`下` = `second` = `下册`，`上` = `first` = `上册`），学段中英文互通（`初中` = `junior`）。
+`--year` 只对试卷有效——教材路径不含年份，带 `--year` 筛教材必为空。
+`--reconvert` 只作用于筛出的素材，所以「只重转 2025 年下学期的试卷」= `--year 2025 --term 下 --reconvert`。
+几个组合的实测命中（2026-09-12，本仓数据，zgkao 共 123 份）：`--year 2025` → 26、
+`--year 2026,2024` → 97（26+97=123 互不重叠）；`--term 上`/`--term 下` → 77/46。
+
+**未命中警告**：`--materials` / `--materials-file` 中命中 0 本的条目会打印 `[WARN] 未命中素材: <条目>`
+（判定基于全量扫描结果，因此条目只是被 `--source` 排除时不会误报）；任何过滤条件（含 `--source`）
+叠加后一个素材都不剩时打印 `[WARN] 过滤条件未命中任何素材`。列表内已转换的书仍按 checkpoint 跳过，
+需重转用 `--reconvert`。
 
 **输出**：`output/md/{学科}/{学段}/{版本}/{年级}/{册次}/{书名}/page_001.md …`
 
@@ -385,6 +412,9 @@ python src/publish_cli.py
 # 只发布 smartedu
 python src/publish_cli.py --source smartedu
 
+# 只发布某一卷试卷 / 某一本教材（rel_path 子串匹配）
+python src/publish_cli.py --book "数学-初三(上)-202507-海淀-（上）期末考-试卷"
+
 # 只发布指定页（如教材第 8-20 页）
 python src/publish_cli.py --pages "8-20"
 
@@ -403,16 +433,17 @@ python src/publish_cli.py --dry-run
 | `--input-dir` | path | `output/extracted` | extracted JSONL 目录 |
 | `--output-dir` | path | `output/published` | published 输出目录 |
 | `--source` | all / zgkao / smartedu | `all` | 来源过滤 |
+| `--book` | str | — | 教材/试卷路径子串匹配，如 `数学-初三(上)-202507-海淀-（上）期末考-试卷` |
 | `--pages` | str | — | 页码过滤，如 `1-6` 或 `1,3,5-8`（仅 page_*.jsonl，试卷/答案聚合文件不受影响） |
 | `--force` | flag | 否 | 忽略 checkpoint |
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有输出 |
-| `--dry-run` | flag | 否 | 只打印不发布 |
+| `--dry-run` | flag | 否 | 只打印不发布（**只按 `--source`/`--pages` 过滤，不响应 `--book`**，会列出全部文件） |
 
 **输出**：`output/published/…`（JSONL，图片路径已改写）+ `output/assets/…`（物化图片）
 
 ### 4.5 db_loader_cli — MySQL 入库
 
-将 published JSONL 加载进 MySQL。支持三种模式。
+将 published JSONL 加载进 MySQL。支持四种模式。
 
 **版次（edition）维度**：同一出版社不同课标版次的教材（如人教版 2012 课标 vs「（根据2022年版课程标准修订）」2024 新版九上数学）会入库为**各自独立的 textbook_version**（4 元组 `(subject_id, publisher, grade_band, edition)` 唯一），互不覆盖、骨架不混淆。版次标记从**书名前导括号**自动提取（TOC 文件名/书的 rel_path 均可），无前导括号 = 旧版（edition=''）。九上/九下书名不同但前导括号相同 -> 归同一版次，无需为不同册建不同版次。
 
@@ -457,6 +488,25 @@ python src/db_loader_cli.py --load-toc --toc-path output/toc/数学/初中/人�
 python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册.json
 ```
 
+#### 模式 D：单卷重载（试卷）
+
+只重载某一张试卷的题——新增一张卷、或改卷后重发时用（试卷没有像 TOC 骨架那样的增量入口）。
+
+```bash
+# 按文件名 stem 找 output/published/ 下的该卷 jsonl，删旧题后重插
+python src/db_loader_cli.py --reload-source "数学-初三(上)-202507-海淀-（上）期末考-试卷"
+
+# 试运行：只打印题数，不入库
+python src/db_loader_cli.py --reload-source "数学-初三(上)-202507-海淀-（上）期末考-试卷" --dry-run
+```
+
+流程：文件名去扩展名匹配 `published/**/<stem>.jsonl` → `parse_paper_meta` 解析卷元数据并 find-or-create `exam_papers`（source_key = 相对路径去 `.jsonl`）→ 按 `paper_id` 删该卷 `paper_questions` 关联 + 孤立 `questions` → 重插。
+
+- **不 reset 其他表**：不像模式 A 那样 `DELETE questions` 全量，其余卷与教材骨架都不受影响。
+- **业务数据保护**：该卷题被 `answers`/错题本/变式题引用时，默认**保留旧题行**（仅清 `paper_questions` 关联后重插，日志会列出被挡住的表与行数，跨卷共享的题也保留）；要连旧题行一起删再加 `--purge-paper-data`（学生数据不可恢复）。
+- 元数据解析失败时会打印 `[WARN] 无法解析试卷元数据，跳过删除直接重插`——题照样入库但不归组，此时重复跑会产生重复题。
+- **不能替代单卷重载**：模式 C 的 `--load-cards` 会遍历 `published/` 下所有文件逐题入库（`content_hash` 相同的题复用、不会重复插），但改过内容的题会**新插一行、旧行留在库里成脏数据**；单卷更新必须走 `--reload-source`。
+
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--input-dir` | path | `output/published` | published 目录 |
@@ -465,6 +515,8 @@ python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/初中/人
 | `--load-cards` | flag | 否 | Card 模式：只入库 card，不 reset（可选 `--toc-path`/`--toc-dir`） |
 | `--toc-path` | path | — | TOC JSON 路径（单文件） |
 | `--toc-dir` | path | — | TOC 目录（如 `output/toc`）：按书自动匹配 merged TOC（优先 `.merged.json`，fallback 初始 `.json`）；`--load-cards` 时对命中的书先建骨架（幂等）再挂卡。优先于 `--toc-path` |
+| `--reload-source` | str | — | 模式 D：只重载该卷（文件名去扩展名）；published 下找不到则报错退出 |
+| `--purge-paper-data` | flag | 否 | 配合 `--reload-source`：该卷题被业务表引用时，显式删这些业务记录后重载（**不可恢复**） |
 | `--purge-business-data` | flag | 否 | full-reload 前清空引用 cards/questions 的业务数据（answers/错题本/变式题/作业提交/progress，**不可恢复**）；默认遇业务数据报错退出 |
 | `--dry-run` | flag | 否 | 只打印不入库 |
 
@@ -754,6 +806,14 @@ A: card 的 `lesson_id` 和 DB 中已有的 lesson name 不匹配。先跑 `toc_
 
 **Q: 如何只重做某一本教材？**
 A: 大部分 CLI 支持 `--book "九年级/下册"` 过滤，配合 `--reconvert` 只重做指定教材。
+
+**Q: 如何只转换/重转某一年、某一学期的试卷？**
+A: 用 `convert_cli` 的维度参数：`--year 2025 --term 下 --source zgkao`
+（`--subject 物理`、`--stage 初中` 可再叠加）。学期中英文互通，`下` = `second` = 下册。
+多个年份/学科用逗号分隔：`--year 2026,2024 --subject 数学,物理`（同参数取并集）。
+只想重转这部分就加 `--reconvert`（只作用于筛出的素材），例如
+`python src/convert_cli.py --source zgkao --year 2025 --term 下 --reconvert`。
+不确定命中哪些先加 `--dry-run`。注意 `--year` 只对试卷有效（教材路径没有年份维度）。
 
 **Q: db_loader 报「检测到业务数据引用，full-reload 会被外键挡住」？**
 A: 库里有学生侧业务数据（错题本/answers/progress 等对 questions/cards 的 FK 引用），
