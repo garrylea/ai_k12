@@ -59,6 +59,19 @@ DETAIL_HTML_NO_PDF = """
 </body></html>
 """
 
+# 双 PDF 链接：一份文件名显式写「无答案」，另一份是「答案」
+DETAIL_HTML_SPLIT_WITH_NO_ANSWER = """
+<html><body>
+<script id="__NUXT_DATA__" type="application/json">
+["Reactive",
+ "2024北京四中初三（上）期中数学   无答案.pdf",
+ "https://cdn.zgkao.com/zixunzhan/202411/76387.pdf",
+ "2024北京四中初三（上）期中数学答案.pdf",
+ "https://cdn.zgkao.com/zixunzhan/202411/76387-answer.pdf"]
+</script>
+</body></html>
+"""
+
 # 2024 页面结构：__NUXT_DATA__ 不含 PDF URL，PDF 在 <a class="download" href="..."> 中
 DETAIL_HTML_2024 = """
 <html><body>
@@ -266,6 +279,34 @@ class TestDetailParser:
         assert links[1].filename == "2023海淀初三二模语文试卷答案.pdf"
         assert links[0].has_answer is False
         assert links[1].has_answer is True
+
+
+class TestHasAnswerNegativeMarkers:
+    """负向标记优先：文件名说「无答案/无解析」时不得被子串「答案/解析」误判为有答案。"""
+
+    @pytest.mark.parametrize(
+        "filename, expected",
+        [
+            ("2024北京四中初三（上）期中数学   无答案.pdf", False),
+            ("2024北京四中初三（上）期中数学无解析.pdf", False),
+            ("2024北京四中初三（上）期中数学无参考答案.pdf", False),
+            ("2024北京四中初三（上）期中数学不含答案.pdf", False),
+            ("2024北京四中初三（上）期中数学有答案.pdf", True),
+            ("2024北京四中初三（上）期中数学答案.pdf", True),
+            ("2024北京四中初三（上）期中数学（教师版）.pdf", True),
+            ("2024北京四中初三（上）期中数学解析.pdf", True),
+            ("2024北京四中初三（上）期中数学试卷.pdf", False),
+        ],
+    )
+    def test_marker_classification(self, filename, expected):
+        assert DetailParser._has_answer(filename) is expected
+
+    def test_split_pair_marks_no_answer_side_as_paper(self):
+        links = DetailParser.parse(DETAIL_HTML_SPLIT_WITH_NO_ANSWER)
+        assert len(links) == 2
+        by_filename = {link.filename: link.has_answer for link in links}
+        assert by_filename["2024北京四中初三（上）期中数学   无答案.pdf"] is False
+        assert by_filename["2024北京四中初三（上）期中数学答案.pdf"] is True
 
 
 class TestPaperItemShape:

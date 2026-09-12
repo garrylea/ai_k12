@@ -73,6 +73,33 @@ DOWNLOAD_PAGE_HTML = """
 </body></html>
 """
 
+# 详情页有两个 PDF，其中一个文件名显式写「无答案」——is_split 仍须成立（一个 paper 一个 answer）
+NO_ANSWER_INDEX_HTML = """
+<html><body>
+<table>
+  <tr><td colspan="3"><strong>2024-2025学年北京各区初三（上）期中试卷&答案汇总</strong></td></tr>
+  <tr><td>区</td><td>科目</td><td>2024年</td></tr>
+  <tr>
+    <td>北京四中</td>
+    <td>数学</td>
+    <td><a href="https://www.zgkao.com/shitiku/76387.html">试卷</a></td>
+  </tr>
+</table>
+</body></html>
+"""
+
+NO_ANSWER_DETAIL_HTML = """
+<html><body>
+<script id="__NUXT_DATA__" type="application/json">
+["Reactive",
+ "2024北京四中初三（上）期中数学   无答案.pdf",
+ "https://cdn.zgkao.com/zixunzhan/202411/76387.pdf",
+ "2024北京四中初三（上）期中数学答案.pdf",
+ "https://cdn.zgkao.com/zixunzhan/202411/76387-answer.pdf"]
+</script>
+</body></html>
+"""
+
 # 复现「表头区县对整表相同」的撞车场景：两行同区县/年级/考试/年份，但详情页不同
 COLLISION_INDEX_HTML = """
 <html><body>
@@ -154,6 +181,18 @@ def build_collision_fetcher() -> MockFetcher:
         **{url: ("text", html) for url, html in COLLISION_DETAIL_HTML.items()},
         "https://cdn.zgkao.com/zixunzhan/202401/76320.pdf": ("bytes", make_pdf_bytes()),
         "https://cdn.zgkao.com/zixunzhan/202401/76319.pdf": ("bytes", make_pdf_bytes()),
+    })
+    return fetcher
+
+
+def build_no_answer_split_fetcher() -> MockFetcher:
+    """一个详情页含两个 PDF：`…无答案.pdf` 与 `…答案.pdf`（前者必须落成 paper）。"""
+    fetcher = MockFetcher()
+    fetcher._routes.update({
+        "https://www.zgkao.com/shitiku/89047.html": ("text", NO_ANSWER_INDEX_HTML),
+        "https://www.zgkao.com/shitiku/76387.html": ("text", NO_ANSWER_DETAIL_HTML),
+        "https://cdn.zgkao.com/zixunzhan/202411/76387.pdf": ("bytes", make_pdf_bytes()),
+        "https://cdn.zgkao.com/zixunzhan/202411/76387-answer.pdf": ("bytes", make_pdf_bytes()),
     })
     return fetcher
 
@@ -354,6 +393,26 @@ class TestZgkaoSecondaryIndex:
         names = {p.name for p in pdf_dir.glob("*.pdf")}
         assert "数学-初三(下)-202307-海淀-模拟二-试卷.pdf" in names
         assert "数学-初三(下)-202307-海淀-模拟二-答案.pdf" in names
+
+
+class TestZgkaoSplitWithNoAnswerMarker:
+    """双链接里一个文件名写「无答案」时，is_split 仍须成立并落成一 paper 一 answer。"""
+
+    def test_no_answer_link_lands_as_paper(self, tmp_path):
+        fetcher = build_no_answer_split_fetcher()
+        adapter = ZgkaoAdapter(
+            fetcher, "https://www.zgkao.com/shitiku/89047.html", {},
+            semester_resolver=StubResolver("first"),
+        )
+        items = list(adapter.list_items({}))
+
+        result = adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
+
+        assert result.files_downloaded == 2
+        pdf_dir = tmp_path / "数学" / "初中" / "first" / "2024"
+        assert len(list(pdf_dir.glob("*.pdf"))) == 2
+        meta = json.loads((pdf_dir / "meta.json").read_text(encoding="utf-8"))
+        assert sorted(f["type"] for f in meta["files"]) == ["answer", "paper"]
 
 
 class FilenameKeyedResolver:

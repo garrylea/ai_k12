@@ -238,6 +238,14 @@ class DetailParser:
 
     @staticmethod
     def _has_answer(filename: str) -> bool:
+        """文件名是否指向答案（而非试卷）。
+
+        负向标记必须先判：`无答案`/`无解析` 里含正向子串「答案」/「解析」，
+        若先走正向匹配会被子串误判成「有答案」。
+        """
+        negative_markers = ("无答案", "无解析", "无参考答案", "不含答案")
+        if any(m in filename for m in negative_markers):
+            return False
         markers = ("有答案", "答案", "教师版", "解析", "答案解析")
         return any(m in filename for m in markers)
 
