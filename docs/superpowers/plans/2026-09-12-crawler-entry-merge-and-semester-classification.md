@@ -1422,9 +1422,11 @@ data/
 - `tests/test_crawler_cli.py` - CLI 参数解析测试
 ```
 
-- [ ] **Step 6: 校验无残留引用**
+- [ ] **Step 6: 校验无残留用法引用**
 
-Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "src/main\.py\|src/cli\.py\|test_cli\.py" tools/crawler/README.md`
+注意：Step 1 要求的变更说明里会**故意**提到 `src/main.py` / `src/cli.py`，所以校验的是「命令用法」而不是「任何提及」——用 `python ` 前缀区分。
+
+Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/main\.py\|python src/cli\.py\|python -m pytest tests/test_cli\.py" tools/crawler/README.md`
 Expected: 无输出
 
 - [ ] **Step 7: 提交**
@@ -1491,9 +1493,11 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 （实现完成后填写：各 Task 提交号、`pytest` 通过数、87761 与 89047 两个入口页的真实落盘路径抽查结果。）
 ```
 
-- [ ] **Step 4: 校验无残留引用**
+- [ ] **Step 4: 校验无残留用法引用**
 
-Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -rn "src/cli\.py\|src/main\.py" tools/crawler/README.md docs/data-refinery-使用手册.md`
+注意：README 的变更说明里会**故意**提到 `src/main.py` / `src/cli.py`，用 `python ` 前缀区分「命令用法」与「提及」。
+
+Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/cli\.py\|python src/main\.py" tools/crawler/README.md docs/data-refinery-使用手册.md`
 Expected: 无输出
 
 - [ ] **Step 5: 提交**
