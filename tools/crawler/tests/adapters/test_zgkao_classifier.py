@@ -10,7 +10,7 @@
 
 import pytest
 
-from classifier import Classification, Classifier
+from classifier import Classification, Classifier, resolve_semester
 
 
 def make_classification(**overrides) -> Classification:
@@ -115,3 +115,41 @@ class TestClassificationFields:
     def test_level_uses_explicit_value_when_provided(self):
         cls = make_classification(grade="初三", level="自定义")
         assert cls.level == "自定义"
+
+
+class TestResolveSemester:
+    @pytest.mark.parametrize("exam_type,filename,expected", [
+        # ① 表头标记优先
+        ("（上）期末考", "", "first"),
+        ("（下）期末考", "", "second"),
+        ("上学期期末", "", "first"),
+        ("第二学期期末", "", "second"),
+        # ② 文件名标记
+        ("期末", "2025北京海淀初二（上）期末数学.pdf", "first"),
+        ("期末", "2026北京海淀初一(下)期末数学.pdf", "second"),
+        # ③ 模拟考约定
+        ("二模", "2026北京海淀初三二模数学 无答案.pdf", "second"),
+        ("一模", "", "second"),
+        ("三模", "", "second"),
+        # ④ 文件名月份
+        ("期末", "2026.01海淀区初三期末数学.pdf", "first"),
+        ("期末", "202507海淀初三期末数学.pdf", "second"),
+        # ⑤ 判不出
+        ("月考", "", None),
+        ("期中", "", None),
+        ("期末", "", None),
+        ("期末", "2026.02海淀初三期末数学.pdf", None),   # 2 月跨学期
+        ("期末", "2025北京海淀初三期末数学.pdf", None),  # 年份不能被当成月份
+    ])
+    def test_resolve_semester(self, exam_type, filename, expected):
+        assert resolve_semester(exam_type, filename=filename) == expected
+
+    def test_exam_type_marker_beats_filename_month(self):
+        assert resolve_semester("（上）期末考", filename="202506海淀初三期末.pdf") == "first"
+
+    def test_title_marker_used_when_header_and_filename_have_none(self):
+        assert resolve_semester("月考", title="2025海淀初三（下）月考数学.pdf") == "second"
+
+    def test_bare_up_char_is_not_a_marker(self):
+        # 「上海」不应被当成「上」学期
+        assert resolve_semester("期末", filename="2025上海初三期末数学.pdf") is None
