@@ -27,21 +27,30 @@ pip install -r requirements.txt
 > 2026-09-12 起 `src/main.py` 与 `src/cli.py` 已合并为 `src/crawler_cli.py`，
 > 旧命令 `python src/main.py --url ...` 不再可用。
 >
-> **迁移提示（破坏性变更，2026-09-12）**：此前下载的数据里，初三（上）期末被错归档到
-> `second/`，文件名带 `--2025学年-`。**checkpoint 以 PDF URL 为键、与落盘路径无关**，
-> 所以直接重跑会静默跳过所有旧 PDF、产出 0 个修正文件。按下面顺序清理后再抓：
+> **迁移提示（破坏性变更，2026-09-12）**：2026-09-12 之前抓取的数据里，初三（上）期末被错归档到
+> `second/`，文件名带 `--2025学年-`。修正分两步——**先删错名的旧文件，再用 `--force` 重抓**：
 >
 > ```bash
-> # 1) 清掉错误的学期目录与错区县文件名（示例 output 为 ./data，按实际调整）
-> rm -rf data/*/*/second
-> find data -type f -name '*--20*学年-*' -delete
+> # 1) 先列出来确认（本仓库遗留数据是 11 个，名字里都带 `--20xx学年`）
+> find data -type f -name '*--20*学年*'
+> # 确认无误后删除
+> find data -type f -name '*--20*学年*' -delete
 >
-> # 2) 清空 checkpoint，否则旧 PDF 全被跳过（也可改用 --force 单次忽略）
-> rm -f data/.checkpoint.json
+> # 2) 重抓受影响的页面。checkpoint 以 PDF URL 为键、与落盘路径无关，
+> #    不加 --force 会静默跳过旧 PDF、产出 0 个修正文件
+> python src/crawler_cli.py --site zgkao \
+>   --url https://www.zgkao.com/shitiku/87761.html \
+>   --subject 数学 --output ./data --force
 > ```
 >
+> `--force` 只作用于本次运行，比清空 `data/.checkpoint.json` 更精准——后者会让之后**每个**页面的
+> 抓取都重新下载。删文件后各目录的 `meta.json` 会残留已删文件的记录；下游管线按 `*.pdf` 扫描、
+> 不读 `meta.json`，不影响流程。
+>
+> 不要图省事 `rm -rf data/*/*/second`：`second/` 里还有本来就正确的一模/二模数据。
+>
 > 下游 `tools/data-refinery` 默认读取 `tools/crawler/data`，其 `src/toc_parse_cli.py`
-> 同时接受 `first` 与 `second` 作为学期路径段——**清掉旧数据即可，下游无需改代码**。
+> 同时接受 `first` 与 `second` 作为学期路径段——**清掉旧文件即可，下游无需改代码**。
 
 ```bash
 python src/crawler_cli.py --site <zgkao|smartedu> [options]

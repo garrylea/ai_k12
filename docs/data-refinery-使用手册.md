@@ -154,15 +154,21 @@ python src/crawler_cli.py --site zgkao --url https://www.zgkao.com/shitiku/89047
 **输出结构**：`data/{学科}/初中/{first|second}/{年份}/{试卷名}.pdf`（学期由页面自动识别，判不出时交互询问）
 
 > **迁移提示（破坏性变更，2026-09-12）**：本管线默认输入 `tools/crawler/data`。2026-09-12 前
-> 抓取的数据把初三（上）期末错归档到 `second/`、文件名带 `--2025学年-`。**爬虫 checkpoint
-> 以 PDF URL 为键、与落盘路径无关，直接重跑会跳过所有旧 PDF**，必须先清理：
+> 抓取的数据把初三（上）期末错归档到 `second/`、文件名带 `--2025学年-`。修正两步：
 >
 > ```bash
 > cd tools/crawler
-> rm -rf data/*/*/second                                  # 错误学期目录
-> find data -type f -name '*--20*学年-*' -delete          # 错区县文件名
-> rm -f data/.checkpoint.json                             # 否则静默跳过旧 PDF（或 --force 单次忽略）
+> # 1) 先列出来确认，再删（名字里的 `--20xx学年` 是这个 bug 留下的痕迹）
+> find data -type f -name '*--20*学年*'
+> find data -type f -name '*--20*学年*' -delete
+> # 2) 重抓受影响页面。checkpoint 以 PDF URL 为键、与落盘路径无关，
+> #    不加 --force 会静默跳过旧 PDF、产出 0 个修正文件
+> python src/crawler_cli.py --site zgkao \
+>   --url https://www.zgkao.com/shitiku/87761.html --subject 数学 --output ./data --force
 > ```
+>
+> `--force` 只作用于本次运行，比清空 `data/.checkpoint.json` 更精准（后者会让之后每个页面都重下）。
+> 也别 `rm -rf data/*/*/second`——`second/` 里还有本来就正确的一模/二模数据。
 >
 > 目录契约 `{base}/{subject}/{level}/{semester}/{year}/` 不变，仅学期归类更正确；
 > `src/toc_parse_cli.py` 同时接受 `first` 与 `second` 作为学期路径段，**下游无需改代码**。
