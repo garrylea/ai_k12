@@ -1379,9 +1379,9 @@ python src/crawler_cli.py --site zgkao \
 在「输出结构」之前插入：
 
 ```markdown
-### 学期判定（first / second）
+### 学期判定（first / second，仅 zgkao）
 
-学期由程序从页面自动识别，**无需命令行指定**，优先级：
+学期由程序从页面自动识别，**无需命令行指定**（smartedu 教材线仍用 `--semester` 指定上册/下册），优先级：
 
 1. 索引页表头的（上）/（下）标记，如 `海淀区2024-2025学年初三（上）期末考试卷和答案汇总`
 2. PDF 文件名 / 试卷标题里的标记，如 `2025北京海淀初三（上）期末数学.pdf`
@@ -1410,9 +1410,11 @@ data/
         └── first/
             └── 2026/
                 ├── meta.json
-                ├── 数学-初三(上)-202607-海淀区-期末-试卷.pdf
-                └── 数学-初三(上)-202607-海淀区-期末-答案.pdf
+                ├── 数学-初三(上)-202607-海淀-期末-试卷.pdf
+                └── 数学-初三(上)-202607-海淀-期末-答案.pdf
 ```
+
+（区县写成 `海淀` 而非 `海淀区`：解析时已统一去掉末尾「区」，与 README 参数表里的 `--district 海淀,西城` 一致。）
 
 - [ ] **Step 5: 更新「测试」小节**
 
@@ -1495,9 +1497,9 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 
 - [ ] **Step 4: 校验无残留用法引用**
 
-注意：README 的变更说明里会**故意**提到 `src/main.py` / `src/cli.py`，用 `python ` 前缀区分「命令用法」与「提及」。
+注意：README 的变更说明里会**故意**写出旧命令 `python src/main.py ...`，所以要排除引用块（`>` 开头）的那一行；不排除的话这条校验永远不可能为空。
 
-Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/cli\.py\|python src/main\.py" tools/crawler/README.md docs/data-refinery-使用手册.md`
+Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/cli\.py\|python src/main\.py" tools/crawler/README.md docs/data-refinery-使用手册.md | grep -v '^[0-9]*:>'`
 Expected: 无输出
 
 - [ ] **Step 5: 提交**
