@@ -133,7 +133,7 @@ class IndexParser:
         mid = match.group(2).strip()
         if "学年" not in mid:
             return IndexParser._strip_trailing_qu(mid)
-        district = mid.split("学年", 1)[1].strip()
+        district = re.split(r"学年度?", mid, 1)[1].strip()
         if not district:
             district = text[: match.start(1)].strip()
         district = re.sub(r"^[（(][^）)]*[）)]", "", district).strip()

@@ -99,6 +99,19 @@ class MockFetcher:
         return content
 
 
+def build_secondary_fetcher() -> MockFetcher:
+    """两级索引页 + 一个含「试卷/答案」两个 PDF 链接的下载页。"""
+    fetcher = MockFetcher()
+    fetcher._routes.update({
+        "https://www.zgkao.com/shitiku/89047.html": ("text", SECONDARY_A_INDEX_HTML),
+        "https://www.zgkao.com/zk/202304/60347.html": ("text", SECONDARY_B_INDEX_HTML),
+        "https://www.zgkao.com/zk/202305/61551.html": ("text", DOWNLOAD_PAGE_HTML),
+        "https://cdn.zgkao.com/zixunzhan/202401/abc.pdf": ("bytes", make_pdf_bytes()),
+        "https://cdn.zgkao.com/zixunzhan/202401/def.pdf": ("bytes", make_pdf_bytes()),
+    })
+    return fetcher
+
+
 class TestZgkaoAdapterInterface:
     def test_name(self):
         adapter = ZgkaoAdapter(MockFetcher(), "https://www.zgkao.com/shitiku/89047.html", {})
@@ -277,15 +290,7 @@ class TestZgkaoSecondaryIndex:
     """迁移自 tests/adapters/test_zgkao.py 的二级索引递归用例。"""
 
     def _fetcher(self):
-        fetcher = MockFetcher()
-        fetcher._routes.update({
-            "https://www.zgkao.com/shitiku/89047.html": ("text", SECONDARY_A_INDEX_HTML),
-            "https://www.zgkao.com/zk/202304/60347.html": ("text", SECONDARY_B_INDEX_HTML),
-            "https://www.zgkao.com/zk/202305/61551.html": ("text", DOWNLOAD_PAGE_HTML),
-            "https://cdn.zgkao.com/zixunzhan/202401/abc.pdf": ("bytes", make_pdf_bytes()),
-            "https://cdn.zgkao.com/zixunzhan/202401/def.pdf": ("bytes", make_pdf_bytes()),
-        })
-        return fetcher
+        return build_secondary_fetcher()
 
     def test_recurses_into_secondary_index_page(self, tmp_path):
         fetcher = self._fetcher()
@@ -303,3 +308,79 @@ class TestZgkaoSecondaryIndex:
         names = {p.name for p in pdf_dir.glob("*.pdf")}
         assert "数学-初三(下)-202307-海淀-模拟二-试卷.pdf" in names
         assert "数学-初三(下)-202307-海淀-模拟二-答案.pdf" in names
+
+
+class FilenameKeyedResolver:
+    """按文件名返回学期的桩：构造「同一 item 内一个 link 可判、另一个判不出」。"""
+
+    def __init__(self, semesters: dict):
+        self._semesters = semesters
+        self.unresolved = []
+
+    def resolve(self, **kwargs):
+        semester = self._semesters.get(kwargs.get("filename"))
+        if semester is None:
+            self.unresolved.append(kwargs.get("label", ""))
+        return semester
+
+
+class TestZgkaoCheckpointMarking:
+    """I-1/I-4：checkpoint 的 PDF URL 标记与 item 级「全链接落地」门禁。
+
+    恢复自已删除 test_zgkao.py 的 test_marks_both_pdfs_in_checkpoint 覆盖：
+    此前 _make_ctx 一律传 checkpoint=None，标记行为从未断言。
+    """
+
+    DETAIL_URL = "https://www.zgkao.com/zk/202305/61551.html"
+    PAPER_URL = "https://cdn.zgkao.com/zixunzhan/202401/abc.pdf"
+    ANSWER_URL = "https://cdn.zgkao.com/zixunzhan/202401/def.pdf"
+
+    def _ctx(self, tmp_path, fetcher):
+        store = PdfStore(
+            base_dir=str(tmp_path),
+            entry_url="https://www.zgkao.com/shitiku/89047.html",
+            crawl_time=datetime(2026, 7, 4, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        checkpoint = Checkpoint(tmp_path / ".checkpoint.json")
+        checkpoint.load()
+        return DownloadContext(
+            fetcher=fetcher, store=store, checkpoint=checkpoint, validator=PdfValidator(),
+        ), checkpoint
+
+    def test_partial_unresolved_does_not_mark_item(self, tmp_path):
+        """一个 link 判不出学期时，item 不能被标已下载，否则该 PDF 再也补不上。"""
+        fetcher = build_secondary_fetcher()
+        resolver = FilenameKeyedResolver({
+            "2023海淀初三二模数学试卷.pdf": "second",
+            "2023海淀初三二模数学试卷答案.pdf": None,
+        })
+        adapter = ZgkaoAdapter(
+            fetcher, "https://www.zgkao.com/shitiku/89047.html", {}, semester_resolver=resolver,
+        )
+        items = list(adapter.list_items({}))
+        ctx, checkpoint = self._ctx(tmp_path, fetcher)
+
+        result = adapter.download_item(items[0], ctx)
+
+        assert result.files_downloaded == 1
+        assert result.files_unresolved == 1
+        assert checkpoint.is_downloaded(self.PAPER_URL)
+        assert not checkpoint.is_downloaded(self.ANSWER_URL)
+        assert not checkpoint.is_downloaded(self.DETAIL_URL)
+
+    def test_all_resolved_marks_item(self, tmp_path):
+        fetcher = build_secondary_fetcher()
+        adapter = ZgkaoAdapter(
+            fetcher, "https://www.zgkao.com/shitiku/89047.html", {},
+            semester_resolver=StubResolver("second"),
+        )
+        items = list(adapter.list_items({}))
+        ctx, checkpoint = self._ctx(tmp_path, fetcher)
+
+        result = adapter.download_item(items[0], ctx)
+
+        assert result.files_downloaded == 2
+        assert result.files_unresolved == 0
+        assert checkpoint.is_downloaded(self.PAPER_URL)
+        assert checkpoint.is_downloaded(self.ANSWER_URL)
+        assert checkpoint.is_downloaded(self.DETAIL_URL)

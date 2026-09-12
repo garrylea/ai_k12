@@ -77,6 +77,7 @@ class _FakeResult:
     items_downloaded = 1
     items_skipped = 0
     items_failed = 0
+    items_unresolved = 0
 
 
 class _FakeCrawler:

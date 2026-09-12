@@ -306,6 +306,14 @@ class TestParseHeaderDistrict:
         info = IndexParser._parse_header(header)
         assert info["district"] == "海淀"
 
+    def test_district_after_academic_year_degree_spelling(self):
+        # 「学年度」也是站点写法之一，不能把「度」留在区县里（度海淀）
+        header = "2024-2025学年度海淀区初三期末试卷"
+        info = IndexParser._parse_header(header)
+        assert info["district"] == "海淀"
+        assert info["grade"] == "初三"
+        assert info["exam_type"] == "期末"
+
     def test_district_strips_semester_marker_after_academic_year(self):
         header = "2025-2026学年（上）海淀区初二期末试卷&答案汇总"
         info = IndexParser._parse_header(header)

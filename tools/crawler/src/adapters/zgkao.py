@@ -1,7 +1,6 @@
 """zgkao.com 试卷站点适配器。"""
 
-from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 from urllib.parse import urlsplit
 
 from adapters.base import DownloadContext, DownloadResult, Item, SiteAdapter
@@ -15,7 +14,7 @@ _FILE_TYPE_MAP = {"试卷": "paper", "答案": "answer"}
 class ZgkaoAdapter(SiteAdapter):
     name = "zgkao"
 
-    def __init__(self, fetcher, entry_url: str, filters: dict, semester_resolver: SemesterResolver = None):
+    def __init__(self, fetcher, entry_url: str, filters: dict, semester_resolver: Optional[SemesterResolver] = None):
         self._fetcher = fetcher
         self._entry_url = entry_url
         self._filters = filters
@@ -70,7 +69,15 @@ class ZgkaoAdapter(SiteAdapter):
                 self._download_pdf(ctx, paper, link, is_split, result)
             # dry-run 不落盘也不标 PDF URL，同样不能标 detail URL——否则后续真实爬取会把
             # 整个 item 判成已下载而跳过（PDF URL 未标记，参见 _download_pdf 的 dry-run 分支）
-            if ctx.checkpoint and not ctx.dry_run and result.files_failed == 0 and result.files_downloaded > 0:
+            # files_unresolved > 0 表示 item 内有 link 因学期未决被跳过，此时也不能标 item：
+            # 否则 core/crawler.py 后续整项跳过，那个 PDF 再也补不上（--force 之外）
+            if (
+                ctx.checkpoint
+                and not ctx.dry_run
+                and result.files_failed == 0
+                and result.files_unresolved == 0
+                and result.files_downloaded > 0
+            ):
                 ctx.checkpoint.mark_downloaded(item.id)
             return result
 
@@ -106,6 +113,7 @@ class ZgkaoAdapter(SiteAdapter):
         )
         if semester is None:
             print(f"警告：无法判断学期，已跳过 {paper.grade}-{paper.exam_type}-{paper.year}（{link.filename}）")
+            result.files_unresolved += 1
             return
 
         content = ctx.fetcher.fetch_bytes(link.url)

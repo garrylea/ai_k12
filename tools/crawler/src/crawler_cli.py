@@ -153,7 +153,8 @@ def main(argv=None) -> int:
     result = crawler.run(filters)
     print(
         f"Total: {result.items_total}, Downloaded: {result.items_downloaded}, "
-        f"Skipped: {result.items_skipped}, Failed: {result.items_failed}"
+        f"Skipped: {result.items_skipped}, Failed: {result.items_failed}, "
+        f"Unresolved(files): {result.items_unresolved}"
     )
 
     if resolver and resolver.unresolved:
