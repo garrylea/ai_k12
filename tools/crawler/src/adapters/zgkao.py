@@ -133,6 +133,7 @@ class ZgkaoAdapter(SiteAdapter):
                 "semester": classification.semester,
                 "year": classification.year,
             },
+            origin=paper.detail_url,
         )
 
         if ctx.validator:

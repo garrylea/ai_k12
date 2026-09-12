@@ -1,6 +1,7 @@
 """ZgkaoAdapter 适配器接口测试。"""
 
 import io
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -72,6 +73,39 @@ DOWNLOAD_PAGE_HTML = """
 </body></html>
 """
 
+# 复现「表头区县对整表相同」的撞车场景：两行同区县/年级/考试/年份，但详情页不同
+COLLISION_INDEX_HTML = """
+<html><body>
+<table>
+  <tr><td colspan="3"><strong>2024-2025学年北京各区初三（上）期中试卷&答案汇总</strong></td></tr>
+  <tr><td>区</td><td>科目</td><td>2024年</td></tr>
+  <tr><td>北京各区</td><td>数学</td>
+    <td><a href="https://www.zgkao.com/shitiku/76320.html">试卷</a></td></tr>
+  <tr><td>北京各区</td><td>数学</td>
+    <td><a href="https://www.zgkao.com/shitiku/76319.html">试卷</a></td></tr>
+</table>
+</body></html>
+"""
+
+COLLISION_DETAIL_HTML = {
+    "https://www.zgkao.com/shitiku/76320.html": """
+<html><body>
+<script id="__NUXT_DATA__" type="application/json">
+["Reactive", "2024北京各区初三（上）期中数学试卷.pdf",
+ "https://cdn.zgkao.com/zixunzhan/202401/76320.pdf"]
+</script>
+</body></html>
+""",
+    "https://www.zgkao.com/shitiku/76319.html": """
+<html><body>
+<script id="__NUXT_DATA__" type="application/json">
+["Reactive", "2024北京各区初三（上）期中数学试卷.pdf",
+ "https://cdn.zgkao.com/zixunzhan/202401/76319.pdf"]
+</script>
+</body></html>
+""",
+}
+
 
 def make_pdf_bytes() -> bytes:
     writer = PdfWriter()
@@ -108,6 +142,18 @@ def build_secondary_fetcher() -> MockFetcher:
         "https://www.zgkao.com/zk/202305/61551.html": ("text", DOWNLOAD_PAGE_HTML),
         "https://cdn.zgkao.com/zixunzhan/202401/abc.pdf": ("bytes", make_pdf_bytes()),
         "https://cdn.zgkao.com/zixunzhan/202401/def.pdf": ("bytes", make_pdf_bytes()),
+    })
+    return fetcher
+
+
+def build_collision_fetcher() -> MockFetcher:
+    """同表头区县（`北京各`）的两个详情页 —— 若 store 不防覆盖，只会剩 1 个文件。"""
+    fetcher = MockFetcher()
+    fetcher._routes.update({
+        "https://www.zgkao.com/shitiku/89047.html": ("text", COLLISION_INDEX_HTML),
+        **{url: ("text", html) for url, html in COLLISION_DETAIL_HTML.items()},
+        "https://cdn.zgkao.com/zixunzhan/202401/76320.pdf": ("bytes", make_pdf_bytes()),
+        "https://cdn.zgkao.com/zixunzhan/202401/76319.pdf": ("bytes", make_pdf_bytes()),
     })
     return fetcher
 
@@ -384,3 +430,55 @@ class TestZgkaoCheckpointMarking:
         assert checkpoint.is_downloaded(self.PAPER_URL)
         assert checkpoint.is_downloaded(self.ANSWER_URL)
         assert checkpoint.is_downloaded(self.DETAIL_URL)
+
+
+class RecordingStore:
+    """只记录 save 调用参数的假 store。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def save(self, **kwargs) -> Path:
+        self.calls.append(kwargs)
+        return Path(kwargs["filename"])
+
+
+class TestZgkaoOriginPropagation:
+    """文件名撞车兜底：适配器要把详情页 URL 作为 origin 传给 store。"""
+
+    DETAIL_URL = "https://www.zgkao.com/shitiku/90304.html"
+    PDF_URL = "https://cdn.zgkao.com/zixunzhan/test.pdf"
+
+    def test_passes_detail_url_as_origin(self):
+        fetcher = MockFetcher()
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        store = RecordingStore()
+        ctx = DownloadContext(fetcher=fetcher, store=store, checkpoint=None, validator=None)
+
+        items = list(adapter.list_items({}))
+        adapter.download_item(items[0], ctx)
+
+        assert len(store.calls) == 1
+        assert store.calls[0]["origin"] == self.DETAIL_URL
+        assert store.calls[0]["source_url"] == self.PDF_URL
+
+    def test_same_name_different_detail_pages_land_as_two_files(self, tmp_path, capsys):
+        fetcher = build_collision_fetcher()
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        items = list(adapter.list_items({}))
+        assert len(items) == 2
+
+        ctx = _make_ctx(tmp_path, fetcher)
+        result = DownloadResult()
+        for item in items:
+            result += adapter.download_item(item, ctx)
+
+        assert result.files_downloaded == 2
+        pdf_dir = tmp_path / "数学" / "初中" / "first" / "2024"
+        assert sorted(p.name for p in pdf_dir.glob("*.pdf")) == [
+            "数学-初三(上)-202407-北京各-（上）期中-试卷-76319.pdf",
+            "数学-初三(上)-202407-北京各-（上）期中-试卷.pdf",
+        ]
+        meta = json.loads((pdf_dir / "meta.json").read_text(encoding="utf-8"))
+        assert len(meta["files"]) == 2
+        assert "警告：文件名冲突" in capsys.readouterr().out

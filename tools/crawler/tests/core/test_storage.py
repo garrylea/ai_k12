@@ -53,7 +53,9 @@ def storage(tmp_path, crawl_time):
 _FILE_TYPE_MAP = {"试卷": "paper", "答案": "answer"}
 
 
-def save_pdf(store, cls, content=b"fake-pdf-content", source_url="https://cdn.zgkao.com/x.pdf"):
+def save_pdf(
+    store, cls, content=b"fake-pdf-content", source_url="https://cdn.zgkao.com/x.pdf", origin=None,
+):
     """等价于被删除的 Storage.save_pdf：按分类推导目录/文件名/类型。"""
     return store.save(
         dir_relpath=Classifier.storage_dir(cls, ""),
@@ -67,6 +69,7 @@ def save_pdf(store, cls, content=b"fake-pdf-content", source_url="https://cdn.zg
             "semester": cls.semester,
             "year": cls.year,
         },
+        origin=origin,
     )
 
 
@@ -192,6 +195,118 @@ class TestAppendBehavior:
         base = tmp_path / "数学" / "初中" / "first" / "2026"
         assert (base / "数学-初三(上)-202607-西城-期末-试卷.pdf").read_bytes() == b"paper"
         assert (base / "数学-初三(上)-202607-西城-期末-答案.pdf").read_bytes() == b"answer"
+
+
+class TestFilenameCollisionGuard:
+    """同名不同来源必须改名保存——否则不同详情页会静默覆盖，磁盘只剩最后一个。
+
+    实例：表头区县对整表相同（`北京各`）时，71 个 item 只生成 2 个目标文件名。
+    """
+
+    BASE = "数学-初三(上)-202607-西城-期末-试卷.pdf"
+    RENAMED = "数学-初三(上)-202607-西城-期末-试卷-76319.pdf"
+
+    def _pdf_dir(self, tmp_path):
+        return tmp_path / "数学" / "初中" / "first" / "2026"
+
+    def test_different_origin_keeps_both_files_and_warns(self, storage, classification, tmp_path, capsys):
+        save_pdf(
+            storage, classification, b"paper-a", "https://cdn.zgkao.com/a.pdf",
+            origin="https://www.zgkao.com/shitiku/76320.html",
+        )
+        save_pdf(
+            storage, classification, b"paper-b", "https://cdn.zgkao.com/b.pdf",
+            origin="https://www.zgkao.com/shitiku/76319.html",
+        )
+
+        base = self._pdf_dir(tmp_path)
+        assert (base / self.BASE).read_bytes() == b"paper-a"
+        assert (base / self.RENAMED).read_bytes() == b"paper-b"
+        assert sorted(p.name for p in base.glob("*.pdf")) == sorted([self.BASE, self.RENAMED])
+
+        meta = _read_meta(tmp_path, classification)
+        assert {f["filename"] for f in meta["files"]} == {self.BASE, self.RENAMED}
+
+        out = capsys.readouterr().out
+        assert "警告：文件名冲突" in out
+        assert self.BASE in out
+        assert self.RENAMED in out
+
+    def test_same_source_url_still_overwrites_in_place(self, storage, classification, tmp_path, capsys):
+        save_pdf(
+            storage, classification, b"v1", "https://cdn.zgkao.com/a.pdf",
+            origin="https://www.zgkao.com/shitiku/76320.html",
+        )
+        path = save_pdf(
+            storage, classification, b"v2", "https://cdn.zgkao.com/a.pdf",
+            origin="https://www.zgkao.com/shitiku/76320.html",
+        )
+
+        base = self._pdf_dir(tmp_path)
+        assert Path(path) == base / self.BASE
+        assert (base / self.BASE).read_bytes() == b"v2"
+        assert sorted(p.name for p in base.glob("*.pdf")) == [self.BASE]
+        assert len(_read_meta(tmp_path, classification)["files"]) == 1
+        assert capsys.readouterr().out == ""
+
+    def test_resaving_second_origin_is_idempotent(self, storage, classification, tmp_path):
+        save_pdf(
+            storage, classification, b"a", "https://cdn.zgkao.com/a.pdf",
+            origin="https://www.zgkao.com/shitiku/76320.html",
+        )
+        first = save_pdf(
+            storage, classification, b"b", "https://cdn.zgkao.com/b.pdf",
+            origin="https://www.zgkao.com/shitiku/76319.html",
+        )
+        second = save_pdf(
+            storage, classification, b"b", "https://cdn.zgkao.com/b.pdf",
+            origin="https://www.zgkao.com/shitiku/76319.html",
+        )
+
+        base = self._pdf_dir(tmp_path)
+        assert Path(first) == Path(second)
+        assert sorted(p.name for p in base.glob("*.pdf")) == sorted([self.BASE, self.RENAMED])
+        assert len(_read_meta(tmp_path, classification)["files"]) == 2
+
+    def test_origin_without_digits_falls_back_to_hash_suffix(self, storage, classification, tmp_path):
+        origin = "https://www.zgkao.com/shitiku/paper.html"
+        digest = hashlib.md5(origin.encode("utf-8")).hexdigest()[:6]
+        expected = f"数学-初三(上)-202607-西城-期末-试卷-{digest}.pdf"
+
+        save_pdf(
+            storage, classification, b"a", "https://cdn.zgkao.com/a.pdf",
+            origin="https://www.zgkao.com/shitiku/76320.html",
+        )
+        save_pdf(storage, classification, b"b", "https://cdn.zgkao.com/b.pdf", origin=origin)
+
+        base = self._pdf_dir(tmp_path)
+        assert (base / expected).read_bytes() == b"b"
+        assert sorted(p.name for p in base.glob("*.pdf")) == sorted([self.BASE, expected])
+
+    def test_suffix_taken_by_another_source_appends_hash(self, storage, classification, tmp_path):
+        """兜底的兜底：三个来源的 origin 数字段相同 → 第三个再叠加 source_url 的 hash。"""
+        third_url = "https://cdn.zgkao.com/c.pdf"
+        digest = hashlib.md5(third_url.encode("utf-8")).hexdigest()[:6]
+        expected = f"数学-初三(上)-202607-西城-期末-试卷-76320-{digest}.pdf"
+
+        save_pdf(
+            storage, classification, b"a", "https://cdn.zgkao.com/a.pdf",
+            origin="https://www.zgkao.com/shitiku/76320.html",
+        )
+        save_pdf(
+            storage, classification, b"b", "https://cdn.zgkao.com/b.pdf",
+            origin="https://other.example.com/shitiku/76320.html",
+        )
+        save_pdf(
+            storage, classification, b"c", third_url,
+            origin="https://third.example.com/shitiku/76320.html",
+        )
+
+        base = self._pdf_dir(tmp_path)
+        assert sorted(p.name for p in base.glob("*.pdf")) == sorted(
+            [self.BASE, "数学-初三(上)-202607-西城-期末-试卷-76320.pdf", expected]
+        )
+        assert (base / expected).read_bytes() == b"c"
 
 
 class TestRobotsCheckedFlag:
