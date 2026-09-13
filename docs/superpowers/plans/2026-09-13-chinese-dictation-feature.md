@@ -301,8 +301,10 @@ describe('diffChinese', () => {
 
   it('顺序颠倒不算全对', () => {
     const ops = diffChinese('明月', '月明');
+    // 顺序颠倒时 LCS 仍会保留一个公共字（LCS('明月','月明') = 1），
+    // 所以 diff 里出现 equal 是正常的；关键是它不能是「完全一致」那一种结果。
+    expect(ops).not.toEqual([{ type: 'equal', text: '月明' }]);
     expect(ops.some((o) => o.type === 'wrong' || o.type === 'missing' || o.type === 'extra')).toBe(true);
-    expect(ops.some((o) => o.type === 'equal')).toBe(false);
   });
 });
 ```
