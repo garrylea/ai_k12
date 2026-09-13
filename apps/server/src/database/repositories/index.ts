@@ -5,6 +5,8 @@ export { AdminsRepository } from './admins.repo.js';
 export { AdminNotificationsRepository } from './admin-notifications.repo.js';
 export type { AdminNotificationRow } from './admin-notifications.repo.js';
 export { CardsRepository } from './cards.repo.js';
+export { DictationPassagesRepository } from './dictation-passages.repo.js';
+export type { DictationPassageRow, DictationListRow, DictationUpsertInput } from './dictation-passages.repo.js';
 export { ErrorRedoLogsRepository } from './error-redo-logs.repo.js';
 export { ExamPapersRepository } from './exam-papers.repo.js';
 export type { ExamPaperRow, PaperQuestionRow } from './exam-papers.repo.js';
