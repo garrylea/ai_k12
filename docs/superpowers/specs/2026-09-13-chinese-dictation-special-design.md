@@ -86,13 +86,14 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
   body TEXT NOT NULL,                    -- 正文（权威原文，含标点）
   grade_band VARCHAR(20) NOT NULL,       -- 'junior'
   grade VARCHAR(20) DEFAULT NULL,        -- '九年级'
-  semester VARCHAR(20) DEFAULT NULL,     -- '上册' / '下册'
+  semester VARCHAR(20) NOT NULL,         -- '上册' / '下册'（篇目必来自某册，故 NOT NULL）
   sort_order SMALLINT NOT NULL DEFAULT 0,
   source_ref VARCHAR(200) DEFAULT NULL,  -- 教材来源（书名 + 页码）
   verified TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_dp_question (question_id),
+  UNIQUE KEY uniq_dp_work (work_title, semester),
   KEY idx_dp_filter (grade_band, semester, sort_order),
   CONSTRAINT fk_dp_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

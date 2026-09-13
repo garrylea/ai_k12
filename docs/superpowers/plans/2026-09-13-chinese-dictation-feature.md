@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
   body TEXT NOT NULL,
   grade_band VARCHAR(20) NOT NULL,
   grade VARCHAR(20) DEFAULT NULL,
-  semester VARCHAR(20) DEFAULT NULL,
+  semester VARCHAR(20) NOT NULL,
   sort_order SMALLINT NOT NULL DEFAULT 0,
   source_ref VARCHAR(200) DEFAULT NULL,
   verified TINYINT(1) NOT NULL DEFAULT 0,
@@ -170,6 +170,10 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 ```
 
 > `uniq_dp_work (work_title, semester)` 是**业务主键**：导入脚本据此 upsert，正文修正后重跑仍幂等更新同一行（spec §4.1.1 问题 1 的解法）。
+>
+> **`semester` 必须是 `NOT NULL`**（2026-09-13 用户裁决）：MySQL 唯一索引把 NULL 当作互不相等，若 `semester` 可空，两条「同篇名 + NULL 册次」都能插入，业务主键就形同虚设。篇目必来自九上或九下，册次永远知道，故无需要可空。注意：查询侧的「全部」范围是 `WHERE semester = ?` 不加条件（传 null 不过滤），与本列 NOT NULL 不冲突。
+>
+> **若本地库已按旧的可空 DDL 建过表**：`CREATE TABLE IF NOT EXISTS` 不会修改已存在的表，必须先 `DROP TABLE dictation_passages`（该表此时无数据）再重跑 `schema.sql`。
 
 - [ ] **Step 2: 在本地库执行建表**
 
@@ -547,7 +551,7 @@ export interface DictationPassageRow extends RowDataPacket {
   body: string;
   grade_band: string;
   grade: string | null;
-  semester: string | null;
+  semester: string;
   sort_order: number;
   source_ref: string | null;
   verified: number;
@@ -565,7 +569,7 @@ export interface DictationUpsertInput {
   body: string;
   gradeBand: string;
   grade: string | null;
-  semester: string | null;
+  semester: string;
   sortOrder: number;
   sourceRef: string | null;
   verified: number;
@@ -1577,7 +1581,7 @@ export interface DictationPassageListItem {
   workTitle: string;
   author: string;
   dynasty: string;
-  semester: string | null;
+  semester: string;
 }
 
 /** 开练题项（不含作者/朝代/正文答案，防答案泄露）。 */
@@ -1585,7 +1589,7 @@ export interface DictationQuestionItem {
   questionId: number;
   prompt: string;
   workTitle: string;
-  semester: string | null;
+  semester: string;
 }
 
 export interface DictationJudgeResult {
@@ -1978,8 +1982,8 @@ git commit -m "feat(server): 新增语文默写三端点（篇目清单/开练/�
 
 **Interfaces:**
 - Produces:
-  - `interface DictationPassageItem { questionId; workTitle; author; dynasty; semester: string | null }`
-  - `interface DictationQuestionItem { questionId; prompt; workTitle; semester: string | null }`
+  - `interface DictationPassageItem { questionId; workTitle; author; dynasty; semester: string }`
+  - `interface DictationQuestionItem { questionId; prompt; workTitle; semester: string }`
   - `type DictationDiffOp`（与后端同形）
   - `interface DictationJudgeResult { questionId; isCorrect; fields; bodyDiff; reference; feedback: string | null; errorBookId? }`
   - `fetchDictationPassages()`
@@ -1996,14 +2000,14 @@ export interface DictationPassageItem {
   workTitle: string;
   author: string;
   dynasty: string;
-  semester: string | null;
+  semester: string;
 }
 
 export interface DictationQuestionItem {
   questionId: number;
   prompt: string;
   workTitle: string;
-  semester: string | null;
+  semester: string;
 }
 
 export type DictationDiffOp =
