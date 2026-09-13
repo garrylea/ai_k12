@@ -17,8 +17,10 @@ export default function DictationDiffView({ ops, className = '' }: Props) {
           return <span key={i}>{op.text}</span>;
         }
         if (op.type === 'wrong') {
+          // 不包 inline-flex：wrong 可能是后端合并出的多字长串（如 expected:'AB', actual:'C'），
+          // inline-flex 会变成不可换行的原子盒而横向溢出；顺序内联 span 可自然折行。
           return (
-            <span key={i} className="inline-flex items-baseline">
+            <span key={i}>
               <span className="text-[var(--error)] font-bold underline decoration-wavy">{op.actual}</span>
               <span className="mx-0.5 text-xs text-[var(--text-secondary)]">应为</span>
               <span className="text-[var(--success)] font-bold">{op.expected}</span>
@@ -33,10 +35,12 @@ export default function DictationDiffView({ ops, className = '' }: Props) {
             </span>
           );
         }
+        // 「多」标签必须放在被删除线穿过的 span **外面**：text-decoration:none 无法撤销
+        // 祖先传播下来的 line-through，放在里面会被一并划掉。
         return (
-          <span key={i} className="text-[var(--warning)] line-through">
-            <span className="text-xs text-[var(--text-secondary)] mr-0.5 no-underline">多</span>
-            {op.text}
+          <span key={i}>
+            <span className="text-xs text-[var(--text-secondary)] mr-0.5">多</span>
+            <span className="text-[var(--warning)] line-through">{op.text}</span>
           </span>
         );
       })}
