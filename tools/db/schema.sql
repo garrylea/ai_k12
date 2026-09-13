@@ -307,7 +307,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
   body TEXT NOT NULL,
   grade_band VARCHAR(20) NOT NULL,
   grade VARCHAR(20) DEFAULT NULL,
-  semester VARCHAR(20) DEFAULT NULL,
+  semester VARCHAR(20) NOT NULL,
   sort_order SMALLINT NOT NULL DEFAULT 0,
   source_ref VARCHAR(200) DEFAULT NULL,
   verified TINYINT(1) NOT NULL DEFAULT 0,
