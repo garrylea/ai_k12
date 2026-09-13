@@ -1343,79 +1343,89 @@ export function DraftWhiteboard({
           <TrashIcon />
         </button>
       </div>
-      {/* 圆规控制条（工具条下条件渲染的第二行）：状态提示 + 半径读数 + 整圆/重置 */}
-      {tool === 'compass' && (
-        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--bg-subtle)] text-xs text-[var(--text-tertiary)]">
-          <span className="flex-1 min-w-0 truncate">
-            {compass.phase === 'idle' ? '点按放置圆规，按住拖动调整半径' : '拖动画弧，点按移动圆心，拖动手柄调半径'}
-          </span>
-          {compass.phase !== 'idle' && (
-            <>
-              <span className="shrink-0 tabular-nums">半径 {Math.round(compass.r)}</span>
+      {/* 画布区：相对定位容器——圆规/三角形的状态提示与操作以浮条压在其顶部。
+          浮条不占布局高度，所以切工具、切换状态时画布尺寸不变，草稿区不会跳动。 */}
+      <div className="flex-1 min-h-0 relative">
+        {/* 圆规浮条：状态提示 + 半径读数 + 整圆/重置 */}
+        {tool === 'compass' && (
+          <div
+            className="absolute top-2 left-2 right-2 z-20 flex items-center gap-2 rounded-lg border border-[var(--bg-subtle)] px-2.5 py-1.5 text-xs text-[var(--text-tertiary)]"
+            style={{ backgroundColor: 'var(--learn-card-bg)', boxShadow: 'var(--shadow-card)' }}
+          >
+            <span className="flex-1 min-w-0 truncate">
+              {compass.phase === 'idle' ? '点按放置圆规，按住拖动调整半径' : '拖动画弧，点按移动圆心，拖动手柄调半径'}
+            </span>
+            {compass.phase !== 'idle' && (
+              <>
+                <span className="shrink-0 tabular-nums">半径 {Math.round(compass.r)}</span>
+                <button
+                  type="button"
+                  onClick={drawFullCircle}
+                  title="以当前圆心和半径画整圆"
+                  className="shrink-0 h-[28px] px-2.5 rounded-lg border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] hover:bg-[var(--bg-subtle)] transition-colors"
+                >
+                  整圆
+                </button>
+                <button
+                  type="button"
+                  onClick={resetCompass}
+                  title="重新放置圆规"
+                  className="shrink-0 h-[28px] px-2.5 rounded-lg border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] hover:bg-[var(--bg-subtle)] transition-colors"
+                >
+                  重置
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {/* 三角形浮条：状态提示 + 确认/重置（三点齐后才可确认） */}
+        {tool === 'triangle' && (
+          <div
+            className="absolute top-2 left-2 right-2 z-20 flex items-center gap-2 rounded-lg border border-[var(--bg-subtle)] px-2.5 py-1.5 text-xs text-[var(--text-tertiary)]"
+            style={{ backgroundColor: 'var(--learn-card-bg)', boxShadow: 'var(--shadow-card)' }}
+          >
+            <span className="flex-1 min-w-0 truncate">
+              {triangle.phase === 'idle' && '依次点按放置三个顶点（按住拖动可微调落点）'}
+              {triangle.phase === 'placing' && `已放 ${triangle.verts.length}/3 个顶点，继续点按（第三点按住 Shift = 等边）`}
+              {triangle.phase === 'adjust' && '拖动顶点调整形状（Shift = 等边），Enter 或「确认」提交'}
+            </span>
+            {triangle.phase === 'adjust' && (
               <button
                 type="button"
-                onClick={drawFullCircle}
-                title="以当前圆心和半径画整圆"
-                className="shrink-0 h-[28px] px-2.5 rounded-lg border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] hover:bg-[var(--bg-subtle)] transition-colors"
+                onClick={confirmTriangle}
+                title="提交当前三角形"
+                className="shrink-0 h-[28px] px-2.5 rounded-lg border border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--brand-500)] hover:opacity-80 transition-colors"
               >
-                整圆
+                确认
               </button>
+            )}
+            {triangle.phase !== 'idle' && (
               <button
                 type="button"
-                onClick={resetCompass}
-                title="重新放置圆规"
+                onClick={resetTriangle}
+                title="重新放置顶点"
                 className="shrink-0 h-[28px] px-2.5 rounded-lg border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] hover:bg-[var(--bg-subtle)] transition-colors"
               >
                 重置
               </button>
-            </>
-          )}
-        </div>
-      )}
-      {/* 三角形控制条：状态提示 + 确认/重置（三点齐后才可确认） */}
-      {tool === 'triangle' && (
-        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--bg-subtle)] text-xs text-[var(--text-tertiary)]">
-          <span className="flex-1 min-w-0 truncate">
-            {triangle.phase === 'idle' && '依次点按放置三个顶点（按住拖动可微调落点）'}
-            {triangle.phase === 'placing' && `已放 ${triangle.verts.length}/3 个顶点，继续点按（第三点按住 Shift = 等边）`}
-            {triangle.phase === 'adjust' && '拖动顶点调整形状（Shift = 等边），Enter 或「确认」提交'}
-          </span>
-          {triangle.phase === 'adjust' && (
-            <button
-              type="button"
-              onClick={confirmTriangle}
-              title="提交当前三角形"
-              className="shrink-0 h-[28px] px-2.5 rounded-lg border border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--brand-500)] hover:opacity-80 transition-colors"
-            >
-              确认
-            </button>
-          )}
-          {triangle.phase !== 'idle' && (
-            <button
-              type="button"
-              onClick={resetTriangle}
-              title="重新放置顶点"
-              className="shrink-0 h-[28px] px-2.5 rounded-lg border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] hover:bg-[var(--bg-subtle)] transition-colors"
-            >
-              重置
-            </button>
-          )}
-        </div>
-      )}
-      {/* 手写画布：fit 直接贴容器；scroll-y 包定高画板 div，外层 overflow-y-auto（仅纵向可滚） */}
-      {scrollMode === 'scroll-y' ? (
-        <div ref={wrapRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          <div ref={boardRef} className="relative" style={{ width: '100%' }}>
+            )}
+          </div>
+        )}
+        {/* 手写画布：fit 直接贴容器；scroll-y 包定高画板 div，外层 overflow-y-auto（仅纵向可滚） */}
+        {scrollMode === 'scroll-y' ? (
+          <div ref={wrapRef} className="absolute inset-0 overflow-y-auto overflow-x-hidden">
+            <div ref={boardRef} className="relative" style={{ width: '100%' }}>
+              <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} />
+              {canvasEl}
+            </div>
+          </div>
+        ) : (
+          <div ref={wrapRef} className="absolute inset-0">
             <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} />
             {canvasEl}
           </div>
-        </div>
-      ) : (
-        <div ref={wrapRef} className="flex-1 min-h-0 relative">
-          <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} />
-          {canvasEl}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
