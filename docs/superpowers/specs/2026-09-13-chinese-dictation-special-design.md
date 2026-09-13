@@ -61,7 +61,18 @@
 - `content_hash = computeContentHash(content)`（`uniq_q_content_hash` 唯一约束）
 - `answer_verified` = 校验闸门标记
 
-> 被否方案：不建表、把三字段以 JSON 存进 `questions.answer`（`options` 已有 JSON 先例），篇名从 `content` 正则抠。少一张表，但「按篇选练」的列表与筛选要靠解析文本，脆弱。
+### 4.1.1 为什么不把篇名/作者/正文全塞进 `questions`（被否方案）
+
+可行性上，「把篇名、作者、正文以 markdown 存进 `content`」是能跑通的。之所以不采用，是因为它带来四条持续存在的代价：
+
+1. **丢掉稳定身份，重导入不幂等（最关键）**。篇名是稳定身份，正文会因校对而修正；而 `content` 上挂着 `uniq_q_content_hash`，`content_hash` 由 `content` 算出。正文改一个字 → hash 变 → 重新导入匹配不上旧行 → 插重复题或静默新增，而错题本 / 隐藏题 / 提示缓存都挂在旧 `question_id` 上，学生数据成孤儿。独立表以 `work_title`（+ 册次）作业务主键，正文可任意修正而重导入仍是幂等更新同一行。
+2. **「按篇选练」的列表 / 筛选 / 排序做不了**。配置页要列出全部篇目、按册次筛、按顺序排；markdown 里没有册次字段，只能塞进 `group_id` / `source` 这类语义不符的列，或用 `LIKE '%《岳阳楼记》%'` 匹配篇名——等于拿字符串当主键，书名号或异体字写法一变就静默失配。
+3. **判题要三字段，必须先反解析**。判题输出是 `fields:{author,dynasty,body}` + diff；存 markdown 意味着「存进去 → 解析回三字段 → 判 → 再拼装展示」，来回转换每一跳都可能出错，且 markdown 无 schema，格式一漂即崩。
+4. **`content` 语义被污染**。`content` 现在被 `content_hash`、详细解析、`answer_importer` 一致当作「题干」使用。塞入篇名/作者/朝代/正文后，同一字段同时承担题面与数据；后续想改题面（如「请默写《岳阳楼记》第 3 段」）会与存储格式冲突。后续「古诗文解释」专项要复用同一份正文，也会被迫再解析或重复存。
+
+被否的折中方案：给 `questions` 加 `dictation_author` / `dictation_dynasty` / `dictation_body` 三个可空列，免去 JOIN。但其代价是——篇名、册次、排序、校验状态仍无处安放、还得继续加列，`questions` 会逐渐变成语文专属表；第 1 条的稳定身份问题依旧；且该表数学侧也在读，属于跨学科污染。
+
+**成本对比**：独立表的一次性成本是「一张表 + 一个 repo + 一次 JOIN」；塞 `content` 的一次性成本为 0，但换来上述四条持续脆弱性。故选择独立表。
 
 ### 4.2 新表 `dictation_passages`
 
