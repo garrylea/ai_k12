@@ -137,6 +137,60 @@ export class TrainingController {
     });
   }
 
+  // ==================== 语文古诗文默写（2026-09-13） ====================
+
+  /** 语文默写篇目清单（配置页用；只出已校验篇目，不含正文）。 */
+  @Get('dictation/passages')
+  async listDictationPassages() {
+    return this.trainingService.listDictationPassages();
+  }
+
+  /** 语文默写开练：count 限 1-20；semester 限 上册|下册|null；
+   *  questionIds 非空时按指定篇目出题（忽略 semester）。 */
+  @Post('dictation/start')
+  async startDictation(
+    @Body() dto: { semester: string | null; questionIds: number[] | null; count: number },
+    @CurrentUser() user: JwtUser,
+  ) {
+    const { count } = dto;
+    if (!Number.isInteger(count) || count < 1 || count > 20) {
+      throw new BadRequestException('count 仅允许 1-20 的整数');
+    }
+    const semester = dto.semester ?? null;
+    if (semester !== null && semester !== '上册' && semester !== '下册') {
+      throw new BadRequestException('semester 仅允许 上册 | 下册 | null');
+    }
+    const questionIds = dto.questionIds ?? null;
+    if (questionIds !== null &&
+        (!Array.isArray(questionIds) || questionIds.some((id) => !Number.isInteger(id) || id < 1))) {
+      throw new BadRequestException('questionIds 须为正整数数组或 null');
+    }
+    return this.trainingService.startDictation({
+      studentId: user.sub,
+      semester,
+      questionIds,
+      count,
+    });
+  }
+
+  /** 语文默写判题：三字段作答；程序判对错 + LLM 写错因（LLM 失败不影响判题）。 */
+  @Post('dictation/judge')
+  async judgeDictation(
+    @Body() dto: { questionId: number; author: string; dynasty: string; body: string },
+    @CurrentUser() user: JwtUser,
+  ) {
+    if (!Number.isInteger(dto.questionId) || dto.questionId < 1) {
+      throw new BadRequestException('questionId 须为正整数');
+    }
+    return this.trainingService.judgeDictation({
+      studentId: user.sub,
+      questionId: dto.questionId,
+      author: dto.author ?? '',
+      dynasty: dto.dynasty ?? '',
+      body: dto.body ?? '',
+    });
+  }
+
   // ==================== 「不再展示」清单（2026-09-04） ====================
 
   /** 标记某题不再展示（幂等）。questionId/subjectId 非正整数 -> 400。 */
