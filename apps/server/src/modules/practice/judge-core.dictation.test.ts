@@ -54,7 +54,11 @@ describe('JudgeCoreService.judgeDictation', () => {
     expect(res.fields.body.match).toBe(false);
     expect(res.fields.author.match).toBe(true);
     expect(res.bodyDiff).toContainEqual({ type: 'wrong', expected: '光', actual: '先' });
-    expect(mainErrorRepo.create).toHaveBeenCalled();
+    // 默写错题必须以 source='dictation' 落 main_error_books——这是与主线错题
+    // （清零门禁只查 source='practice'）隔离的唯一依据，钉住防回归。
+    expect(mainErrorRepo.create.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ question_id: 100, source: 'dictation' }),
+    );
     expect(res.errorBookId).toBe(555);
   });
 
@@ -69,13 +73,19 @@ describe('JudgeCoreService.judgeDictation', () => {
     expect(res.fields.dynasty.match).toBe(false);
   });
 
-  it('三项全空 → isCorrect=false（不同于客观题的空答案守卫）', async () => {
-    const { service } = makeService();
+  it('三项全空 → isCorrect=false（不同于客观题的空答案守卫），且照常写错题本', async () => {
+    const { service, mainErrorRepo } = makeService();
     const res = await service.judgeDictation({
       studentId: 7, subjectId: 2, questionId: 100,
       expected: EXPECTED, student: { author: '', dynasty: '', body: '' },
     });
     expect(res.isCorrect).toBe(false);
+    // 客观题空答案走「unanswered 守卫」不计对错、不写错题本；默写没有该守卫，
+    // 空答即答错并写入错题本（source='dictation'）——此处钉住该差异。
+    expect(mainErrorRepo.create.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ question_id: 100, source: 'dictation' }),
+    );
+    expect(res.errorBookId).toBe(555);
   });
 
   it('题目不存在 → 抛 4004', async () => {

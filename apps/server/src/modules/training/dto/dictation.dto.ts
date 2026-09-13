@@ -1,11 +1,12 @@
 import type { DictationDiffOp } from '../../../common/utils/normalize-chinese.util.js';
 
-/** 配置页篇目清单项（不含正文，防答案泄露）。 */
+/**
+ * 配置页篇目清单项。
+ * 只出篇名 + 册次：作者/朝代/正文是学生要作答的三个字段，故意不下发（防答案泄露）。
+ */
 export interface DictationPassageListItem {
   questionId: number;
   workTitle: string;
-  author: string;
-  dynasty: string;
   semester: string;
 }
 

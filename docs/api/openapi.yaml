@@ -3862,12 +3862,13 @@ paths:
       description: >-
         语文默写配置页的篇目数据（student JWT）。仅返回 questions.is_active=1 且
         dictation_passages.verified=1 的已校验篇目，按 sort_order, id 排序。
-        不含正文（防答案泄露）。
+        只出篇名 + 册次——作者/朝代/正文是学生要作答的三个判题字段，一律不下发
+        （防答案泄露）。本清单不排除该生已标记「不再展示」的篇目。
       operationId: listDictationPassages
       security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: 已校验篇目清单（不含正文）
+          description: 已校验篇目清单（只含篇名与册次）
           content:
             application/json:
               schema:
@@ -3886,10 +3887,12 @@ paths:
         语文默写开练（student JWT）。count 限 1-20 整数（越界/非整数 400）；
         semester 限 上册|下册|null（null=全部册次，非法 400）；questionIds 为正整数
         数组或 null——非空时按指定篇目出题（忽略 semester，仅保留已校验篇目），
-        否则按册次随机抽题。题项白名单序列化：只出 questionId/prompt/workTitle/semester，
+        否则按册次随机抽题。        题项白名单序列化：只出 questionId/prompt/workTitle/semester，
         author/dynasty/正文一律剥离（防答案泄露，与 targeted/start 同规矩）。
-        选题时基于 JWT user.sub（studentId）排除该生已标记的「不再展示」题
-        （LEFT JOIN student_hidden_questions ... IS NULL）；题池为空返回 { questions: [] }。
+        「不再展示」排除仅作用于随机抽题路径——按册次随机抽题时基于 JWT
+        user.sub（studentId）LEFT JOIN student_hidden_questions ... IS NULL 排除
+        该生已标记的篇目；按 questionIds 指定篇目的路径不做该排除。
+        题池为空返回 { questions: [] }。
       operationId: startDictation
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -5897,7 +5900,9 @@ components:
 
     DictationPassage:
       type: object
-      description: 默写篇目元数据（配置页展示篇目信息，不含正文）
+      description: >-
+        默写篇目元数据（配置页选篇用）。只含篇名与册次；作者/朝代/正文是学生要
+        作答的三个判题字段，故意不下发。
       properties:
         questionId:
           type: integer
@@ -5905,16 +5910,10 @@ components:
         workTitle:
           type: string
           description: 篇名（如「静夜思」）
-        author:
-          type: string
-          description: 作者
-        dynasty:
-          type: string
-          description: 朝代
         semester:
           type: string
           description: 册次（上册/下册）
-      required: [questionId, workTitle, author, dynasty, semester]
+      required: [questionId, workTitle, semester]
 
     DictationStartRequest:
       type: object

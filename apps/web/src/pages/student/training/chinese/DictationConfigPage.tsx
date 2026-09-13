@@ -159,9 +159,6 @@ export default function DictationConfigPage() {
                         />
                         <span className="text-sm text-[var(--text-primary)]">
                           《{p.workTitle}》
-                          <span className="text-[var(--text-secondary)]">
-                            {' '}{p.author} · {p.dynasty}
-                          </span>
                         </span>
                       </label>
                     </li>

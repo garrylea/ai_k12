@@ -983,8 +983,6 @@ export function unmarkAllTrainingHidden(): Promise<void> {
 export interface DictationPassageItem {
   questionId: number;
   workTitle: string;
-  author: string;
-  dynasty: string;
   semester: string;
 }
 

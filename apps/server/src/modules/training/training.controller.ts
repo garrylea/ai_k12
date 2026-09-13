@@ -173,7 +173,9 @@ export class TrainingController {
     });
   }
 
-  /** 语文默写判题：三字段作答；程序判对错 + LLM 写错因（LLM 失败不影响判题）。 */
+  /** 语文默写判题：三字段作答；程序判对错 + LLM 写错因（LLM 失败不影响判题）。
+   *  非字符串字段（如 {"author":123}）降级为空串——否则会带着 number 进
+   *  normalizeChineseAnswer 触发 TypeError 变 500。 */
   @Post('dictation/judge')
   async judgeDictation(
     @Body() dto: { questionId: number; author: string; dynasty: string; body: string },
@@ -185,9 +187,9 @@ export class TrainingController {
     return this.trainingService.judgeDictation({
       studentId: user.sub,
       questionId: dto.questionId,
-      author: dto.author ?? '',
-      dynasty: dto.dynasty ?? '',
-      body: dto.body ?? '',
+      author: typeof dto.author === 'string' ? dto.author : '',
+      dynasty: typeof dto.dynasty === 'string' ? dto.dynasty : '',
+      body: typeof dto.body === 'string' ? dto.body : '',
     });
   }
 

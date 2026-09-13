@@ -49,13 +49,14 @@ describe('renderBodyDiff', () => {
 });
 
 describe('TrainingService.listDictationPassages', () => {
-  it('只返回白名单字段，不泄露正文', async () => {
+  it('只返回篇名 + 册次，不泄露作者/朝代/正文', async () => {
     const { service } = makeService();
     const res = await service.listDictationPassages();
     expect(res.passages).toEqual([
-      { questionId: 100, workTitle: '静夜思', author: '李白', dynasty: '唐', semester: '上册' },
+      { questionId: 100, workTitle: '静夜思', semester: '上册' },
     ]);
     expect(JSON.stringify(res)).not.toContain('床前明月光');
+    expect(JSON.stringify(res)).not.toContain('李白');
   });
 });
 

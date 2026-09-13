@@ -67,4 +67,15 @@ describe('TrainingController dictation 端点', () => {
       studentId: 7, questionId: 100, author: '', dynasty: '', body: '',
     });
   });
+
+  it('POST dictation/judge：非字符串字段降级为空串（不把 number 透传给 service）', async () => {
+    const { controller, service } = makeController();
+    await controller.judgeDictation(
+      { questionId: 100, author: 123, dynasty: null, body: {} } as never,
+      USER,
+    );
+    expect(service.judgeDictation).toHaveBeenCalledWith({
+      studentId: 7, questionId: 100, author: '', dynasty: '', body: '',
+    });
+  });
 });

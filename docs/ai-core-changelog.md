@@ -24,9 +24,9 @@
 - **验证**：本任务（Task 16）以本地起 server（`:3000`）+ 手工签发 student JWT 做 HTTP 端到端——篇目清单出 2 篇 fixture、开练题项确认无正文/作者泄露、故意错一字判 `isCorrect=false` 且 `bodyDiff` 定位该错字并写入 `main_error_books(source='dictation')`、全对（标点/空格不同）判 `isCorrect=true` 且清零该错题行；验证后清理了本次产生的错题行。**浏览器点击手测未做**（见下）。
 - **局限/待办**：
   - **九年级必背篇目全量内容未做**：库中仅两篇 `source_ref='DEV-FIXTURE'` 开发假数据，真实篇目（九年级上下册教材背诵/默写篇目全量 + 逐字校验）待**内容管线**（爬 smartedu 教材 + 逐篇校验）按 `dictation_passages` 导入，见 spec §6；当前三端点与判题链路已通，但内容覆盖为零。
-  - **语文错题练习页未做**：默写错题已进 `main_error_books(source='dictation')` 且被错题清零门禁计入，但语文的错题练习前端页未建（数学错题练习按 `subjectId` 过滤，不会误显示默写题）。
+  - **语文错题练习页未做**：默写错题已进 `main_error_books(source='dictation')`，但**不计入**错题清零门禁（门禁 `findUnclearedPracticeByStudentSubject` 只查 `source='practice'`），故默写错题不阻塞主线推进（见 spec §4.3）；语文的错题练习前端页亦未建（数学错题练习按 `subjectId` 过滤，不会误显示默写题）。
   - **开发假数据待清理**：两篇 `DEV-FIXTURE` 篇目（含其 `questions`/`dictation_passages`/可能产生的错题行）在生产内容上线后需清理。
-- 文档：API 设计文档 §4.18 / §6.20 / 版本日志 v3.1；`docs/api/openapi.yaml`（3 路径 + 8 schema）；spec `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md`；plan `docs/superpowers/plans/2026-09-13-chinese-dictation-feature.md`。
+- 文档：API 设计文档 §4.18 / §6.20 / 版本日志 v3.1；`docs/api/openapi.yaml`（3 路径 + 10 schema）；spec `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md`；plan `docs/superpowers/plans/2026-09-13-chinese-dictation-feature.md`。
 
 ---
 
