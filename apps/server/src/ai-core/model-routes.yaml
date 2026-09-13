@@ -143,6 +143,13 @@ routes:
       primary: local
       fallback: deepseek-v4-flash
 
+  # 语文古诗文默写错因文案：本地模型优先（与 judgment 同策略，不依赖外部余额），
+  # 本地不可用回退 deepseek-v4-flash；两者都失败则无错因文案（不阻断判题）。
+  dictation_feedback:
+    - subject: "*"
+      primary: local
+      fallback: deepseek-v4-flash
+
 default:
   primary: qwen3.8-max
   fallback: deepseek-v4-flash

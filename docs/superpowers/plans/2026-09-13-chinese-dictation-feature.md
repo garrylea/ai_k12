@@ -17,6 +17,7 @@
 - TS 严格模式、2 空格缩进；组件/类 PascalCase，函数/变量 camelCase。
 - **UI 硬规则**（`CLAUDE.md`）：禁止 emoji；图标必须线性 SVG；禁止吉祥物/装饰元素；单一配色取自 `apps/web/style.md`，不得按学段变色。
 - iPad 横屏（>=1024px）为主断点，PC（>=1280px）次之，移动端暂缓。
+- **训练页根元素必须是 `className="student-theme-container" data-theme="student-day" data-school="junior"`**（与 `TargetedConfigPage` / `ExamRunPage` / `ErrorPracticePage` / `HiddenQuestionsPage` 等全部既有训练页一致）。`data-theme` 单独就能激活日间配色，但 `.student-theme-container` 还提供基础文字色、`--text-placeholder` 与背景过渡；`data-school='junior'`（`global.css:196`）提供字号缩放——**漏了 `data-school` 会让本页字号与其它训练页不一致**。
 - 后端 API Key 用 `.env` 的 `KIMI_API_KEY` / `QWEN_API_KEY` / `DEEPSEEK_API_KEY` 及对应 `*_BASE_URL`，**不要用 `ANTHROPIC_*`**。
 - 模型 ID 是字面量，**勿改**：`kimi-latest`、`qwen3.8-max`、`gemini-3.1-pro`、`deepseek-v4-flash`、`Qwen3.8-27B`（`local` provider）。
 - **API 文档同步铁律**：`docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml` 必须同时更新（Task 16）。
@@ -64,6 +65,8 @@
 | `apps/server/src/modules/training/training.controller.ts` | 新增三个端点 |
 | `apps/server/src/modules/training/training.module.ts` | provide 新 repo + 新 capability |
 | `apps/server/src/modules/training/dto/dictation.dto.ts` | 新 DTO 类型 |
+| `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql` | **新建**：幂等迁移，修复老库 `content_hash` 唯一索引漂移（Task 17） |
+| `apps/server/src/scripts/seed-dictation-fixture.ts` | Task 17 追加 `assertContentHashUniqueIndex` 守卫 |
 
 ### 前端新增
 
@@ -156,7 +159,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
   body TEXT NOT NULL,
   grade_band VARCHAR(20) NOT NULL,
   grade VARCHAR(20) DEFAULT NULL,
-  semester VARCHAR(20) DEFAULT NULL,
+  semester VARCHAR(20) NOT NULL,
   sort_order SMALLINT NOT NULL DEFAULT 0,
   source_ref VARCHAR(200) DEFAULT NULL,
   verified TINYINT(1) NOT NULL DEFAULT 0,
@@ -170,11 +173,15 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 ```
 
 > `uniq_dp_work (work_title, semester)` 是**业务主键**：导入脚本据此 upsert，正文修正后重跑仍幂等更新同一行（spec §4.1.1 问题 1 的解法）。
+>
+> **`semester` 必须是 `NOT NULL`**（2026-09-13 用户裁决）：MySQL 唯一索引把 NULL 当作互不相等，若 `semester` 可空，两条「同篇名 + NULL 册次」都能插入，业务主键就形同虚设。篇目必来自九上或九下，册次永远知道，故无需要可空。注意：查询侧的「全部」范围是 `WHERE semester = ?` 不加条件（传 null 不过滤），与本列 NOT NULL 不冲突。
+>
+> **若本地库已按旧的可空 DDL 建过表**：`CREATE TABLE IF NOT EXISTS` 不会修改已存在的表，必须先 `DROP TABLE dictation_passages`（该表此时无数据）再重跑 `schema.sql`。
 
 - [ ] **Step 2: 在本地库执行建表**
 
 ```bash
-mysql -u ai_k12 -p'ai_k12' ai_k12 < tools/db/schema.sql
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/schema.sql
 ```
 
 Expected: 无报错（`CREATE TABLE IF NOT EXISTS` 对既有表幂等）。
@@ -182,7 +189,7 @@ Expected: 无报错（`CREATE TABLE IF NOT EXISTS` 对既有表幂等）。
 - [ ] **Step 3: 验证表结构**
 
 ```bash
-mysql -u ai_k12 -p'ai_k12' ai_k12 -e "SHOW CREATE TABLE dictation_passages\G"
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SHOW CREATE TABLE dictation_passages;"
 ```
 
 Expected: 输出含 `uniq_dp_question`、`uniq_dp_work`、`idx_dp_filter`，以及外键 `fk_dp_question` 指向 `questions(id)`。
@@ -221,8 +228,10 @@ const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()（）\[\
 改为（`export` + 补 `「」『』〈〉…～`）：
 
 ```ts
-export const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()（）\[\]【】{}<>《》「」『』〈〉…～\-—_/\\|]/g;
+export const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()（）\[\]【】{}<>《》「」『』〈〉…～~〜\-—_/\\|]/g;
 ```
+
+**为什么还要 ASCII `~` 与 `〜`**：`normalizeChineseAnswer` 是**先 NFKC 再去标点**，而 NFKC 会把全角 `～`(U+FF5E) 映射成半角 `~`(U+007E)。只加 `～` 的话，它永远匹配不到任何字符（NFKC 已把它变走），等于死条目。`〜`(U+301C) 则不被 NFKC 映射，需单独列。三者都覆盖才能真正忽略波浪号。（对照：`…`(U+2026) 经 NFKC 展开为 `...`，由集合里的 `.` 兜住，无需单独处理。）
 
 **为什么直接扩展而不另建一套**：写两套标点表迟早漂移（spec §5「归一化标点集」要求单一来源）。本改动让 `normalizeForPrefix` 更宽松（多剥几种中文标点），只影响 `findByContentPrefix` 模糊匹配，方向是「更能匹配上」，无破坏性。
 
@@ -259,6 +268,14 @@ describe('normalizeChineseAnswer', () => {
   it('空值安全', () => {
     expect(normalizeChineseAnswer('')).toBe('');
     expect(normalizeChineseAnswer(undefined as unknown as string)).toBe('');
+  });
+
+  it('波浪号三种写法都忽略（全角 U+FF5E / 半角 U+007E / 波浪线 U+301C）', () => {
+    // 归一化先 NFKC 再去标点：全角 ～ 会被 NFKC 变成半角 ~，
+    // 故集合里必须同时有 ~ 与 〜，否则这个「忽略波浪号」的意图不会生效。
+    expect(normalizeChineseAnswer('床前明月光～')).toBe('床前明月光');
+    expect(normalizeChineseAnswer('床前明月光~')).toBe('床前明月光');
+    expect(normalizeChineseAnswer('床前明月光〜')).toBe('床前明月光');
   });
 });
 
@@ -297,8 +314,10 @@ describe('diffChinese', () => {
 
   it('顺序颠倒不算全对', () => {
     const ops = diffChinese('明月', '月明');
+    // 顺序颠倒时 LCS 仍会保留一个公共字（LCS('明月','月明') = 1），
+    // 所以 diff 里出现 equal 是正常的；关键是它不能是「完全一致」那一种结果。
+    expect(ops).not.toEqual([{ type: 'equal', text: '月明' }]);
     expect(ops.some((o) => o.type === 'wrong' || o.type === 'missing' || o.type === 'extra')).toBe(true);
-    expect(ops.some((o) => o.type === 'equal')).toBe(false);
   });
 });
 ```
@@ -408,7 +427,7 @@ export function diffChinese(expected: string, actual: string): DictationDiffOp[]
 cd apps/server && npx vitest run src/common/utils/normalize-chinese.util.test.ts
 ```
 
-Expected: PASS，12 个用例全绿。
+Expected: PASS，13 个用例全绿。
 
 - [ ] **Step 6: 跑全量测试确认没打破 prefix 匹配**
 
@@ -482,6 +501,10 @@ describe('DictationPassagesRepository', () => {
     expect(sql).toContain('LEFT JOIN student_hidden_questions shq');
     expect(sql).toContain('shq.question_id = dp.question_id AND shq.student_id = ?');
     expect(sql).toContain('shq.id IS NULL');
+    // 抽题池守卫（spec §6）：未校验篇目与已停用题绝不能进抽题池——若这两条守卫
+    // 被误删，其余断言仍会全绿，故必须显式钉住
+    expect(sql).toContain('dp.verified = 1');
+    expect(sql).toContain('q.is_active = 1');
     expect(sql).toContain('dp.semester = ?');
     expect(sql).toContain('ORDER BY RAND()');
     expect(sql).toContain('LIMIT ?');
@@ -505,7 +528,27 @@ describe('DictationPassagesRepository', () => {
     expect(pool.execute).not.toHaveBeenCalled();
   });
 
-  it('upsert：按 (work_title, semester) 业务主键 upsert', async () => {
+  it('findVerifiedByQuestionIds：非空时 IN 占位符数量与参数顺序正确', async () => {
+    const pool = mockPool([]);
+    const repo = new DictationPassagesRepository(pool as any);
+    await repo.findVerifiedByQuestionIds(2, [10, 11]);
+    const [sql, params] = pool.execute.mock.calls[0];
+    // 只测空数组短路的话，subjectId 与 ids 顺序写反也不会被发现
+    expect(sql).toContain('dp.question_id IN (?,?)');
+    expect(params).toEqual([2, 10, 11]);
+  });
+
+  it('findByQuestionId：按题 id 查单篇（供判题内部使用，不设 verified/is_active 守卫）', async () => {
+    const pool = mockPool([]);
+    const repo = new DictationPassagesRepository(pool as any);
+    await repo.findByQuestionId(100);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('WHERE dp.question_id = ?');
+    expect(sql).toContain('LIMIT 1');
+    expect(params).toEqual([100]);
+  });
+
+  it('upsert：按 (work_title, semester) 业务主键 upsert，且 verified 由入参决定', async () => {
     const pool = mockPool([]);
     const repo = new DictationPassagesRepository(pool as any);
     await repo.upsert({
@@ -517,7 +560,8 @@ describe('DictationPassagesRepository', () => {
     expect(sql).toContain('INSERT INTO dictation_passages');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
     expect(sql).toContain('work_title');
-    expect(params[0]).toBe(100);
+    // 全参断言：若 verified 被写死成 1（覆盖导入器的校验闸门决定），只断 params[0] 不会发现
+    expect(params).toEqual([100, '静夜思', '李白', '唐', '床前明月光', 'junior', '九年级', '上册', 1, 'DEV-FIXTURE', 0]);
   });
 });
 ```
@@ -547,7 +591,7 @@ export interface DictationPassageRow extends RowDataPacket {
   body: string;
   grade_band: string;
   grade: string | null;
-  semester: string | null;
+  semester: string;
   sort_order: number;
   source_ref: string | null;
   verified: number;
@@ -565,7 +609,7 @@ export interface DictationUpsertInput {
   body: string;
   gradeBand: string;
   grade: string | null;
-  semester: string | null;
+  semester: string;
   sortOrder: number;
   sourceRef: string | null;
   verified: number;
@@ -674,7 +718,7 @@ export type { DictationPassageRow, DictationListRow, DictationUpsertInput } from
 cd apps/server && npx vitest run src/database/repositories/dictation-passages.repo.test.ts
 ```
 
-Expected: PASS，5 个用例全绿。
+Expected: PASS，7 个用例全绿。
 
 - [ ] **Step 6: Commit**
 
@@ -742,7 +786,7 @@ async function main() {
   const pool = mysql.createPool({
     host: process.env.DB_HOST ?? 'localhost',
     user: process.env.DB_USER ?? 'ai_k12',
-    password: process.env.DB_PASSWORD ?? 'ai_k12',
+    password: process.env.DB_PASS ?? 'ai_k12',
     database: process.env.DB_NAME ?? 'ai_k12',
   });
   const repo = new DictationPassagesRepository(pool as never);
@@ -803,7 +847,7 @@ Expected: 打印两行 `seeded questionId=... 《静夜思》` / `《登鹳雀�
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
-mysql -u ai_k12 -p'ai_k12' ai_k12 -e "SELECT COUNT(*) AS p FROM dictation_passages WHERE source_ref='DEV-FIXTURE'; SELECT COUNT(*) AS q FROM questions WHERE source='DEV-FIXTURE';"
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT COUNT(*) AS p FROM dictation_passages WHERE source_ref='DEV-FIXTURE'; SELECT COUNT(*) AS q FROM questions WHERE source='DEV-FIXTURE';"
 ```
 
 Expected: 第二次打印的 questionId 与第一次相同；两个计数都是 `2`（不是 4）。
@@ -826,6 +870,7 @@ git commit -m "chore(server): 新增语文默写开发假数据种子脚本（�
 - Test: `apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts`
 - Modify: `apps/server/src/ai-core/infra/prompt-builder.ts`（`resolveTemplatePath`）
 - Modify: `apps/server/src/ai-core/model-routes.yaml`、`apps/server/src/ai-core/retry.yaml`
+- Modify: `apps/server/src/modules/admin/admin-models.service.ts:8`（`SCENES` 加入 `dictation_feedback`，否则后台模型管理页看不到新场景）
 - Create: `apps/server/src/scripts/seed-dictation-feedback-route.ts`
 
 **Interfaces:**
@@ -1099,64 +1144,98 @@ Expected: PASS，4 个用例全绿。
 
 - [ ] **Step 10: 写补路由脚本（给已 seed 的库）**
 
-先确认真实列名与唯一键：
+**先读既有的同型脚本**：`apps/server/src/scripts/set-title-route.ts` —— 它就是「给已 seed 的库补一个场景路由」的范例，与本步需求一字不差。**注意 `llm_routes` 的列是 `primary_model_key` / `fallback_model_key` 两个模型 key 字符串，不是模型 id 外键**；写法是「先按 `(scene, subject)` 查，有则 UPDATE、无则 INSERT」，且主模型不在库时降级用 fallback 顶上。下面脚本按此镜像。
 
-```bash
-grep -n "CREATE TABLE IF NOT EXISTS llm_routes" -A 15 tools/db/schema.sql
-```
-
-按实际 schema 创建 `apps/server/src/scripts/seed-dictation-feedback-route.ts`（下列代码按 `llm_routes(scene, subject, primary_model_id, fallback_model_id, is_active)` 与 `llm_models(model_key)` 编写；**若与实际不符，按实际改脚本，不要改 schema**）：
+创建 `apps/server/src/scripts/seed-dictation-feedback-route.ts`：
 
 ```ts
 /**
- * 给已 seed llm_routes 的库补 dictation_feedback 路由（YAML 只服务新装 / DB 空时）。
- * 幂等：按 (scene, subject) upsert。先例：set-judging-local.ts / set-title-route.ts。
- * 运行：npx tsx src/scripts/seed-dictation-feedback-route.ts
+ * 语文默写错因路由：`dictation_feedback` 场景 = 本地模型优先、deepseek-v4-flash 兜底。
+ * 读 YAML routes.dictation_feedback，幂等写进 llm_routes（已 seed 的库靠本脚本补路由；
+ * seed-llm-config.ts 是 skip-if-exists，不会更新既有行）。
+ * 镜像 set-title-route.ts（llm_routes 存的是 model_key 字符串，不是模型 id）。
+ *
+ * 运行：cd apps/server && npx tsx src/scripts/seed-dictation-feedback-route.ts
+ * 生效：脚本不改内存 registry —— 重启后端，或后台保存一次路由触发 reload。
  */
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import mysql from 'mysql2/promise';
+import { routeConfig } from '../ai-core/config.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: join(__dirname, '../../.env') });
+
+const SCENE = 'dictation_feedback';
 
 async function main() {
+  const rule = routeConfig.routes.dictation_feedback?.find((r) => r.subject === '*')
+    ?? routeConfig.routes.dictation_feedback?.[0];
+  if (!rule) throw new Error('YAML 缺少 routes.dictation_feedback');
+
   const pool = mysql.createPool({
     host: process.env.DB_HOST ?? 'localhost',
+    port: Number(process.env.DB_PORT ?? 3306),
     user: process.env.DB_USER ?? 'ai_k12',
-    password: process.env.DB_PASSWORD ?? 'ai_k12',
+    password: process.env.DB_PASS ?? 'ai_k12',
     database: process.env.DB_NAME ?? 'ai_k12',
   });
 
-  const [models] = await pool.query<any[]>('SELECT id, model_key FROM llm_models');
-  const idOf = new Map<string, number>(models.map((m) => [m.model_key as string, m.id as number]));
-  const primaryId = idOf.get('local');
-  const fallbackId = idOf.get('deepseek-v4-flash');
-  if (!primaryId || !fallbackId) {
-    throw new Error('llm_models 缺少 local 或 deepseek-v4-flash，请先跑 seed-llm-config');
+  // 主模型缺失时降级用 fallback 顶上（与 set-title-route.ts 同策略），避免选到不存在的模型
+  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+    'SELECT model_key FROM llm_models WHERE is_enabled = 1 AND model_key IN (?, ?)',
+    [rule.primary, rule.fallback ?? ''],
+  );
+  const present = new Set(rows.map((r) => r.model_key as string));
+  let primary = rule.primary;
+  let fallback: string | null = rule.fallback ?? null;
+  if (!present.has(primary)) {
+    if (fallback && present.has(fallback)) {
+      console.warn(`[${SCENE}] 主模型 ${primary} 不在库中，降级用 ${fallback} 作 primary`);
+      primary = fallback;
+      fallback = null;
+    } else {
+      throw new Error(`[${SCENE}] 主模型 ${primary} 与 fallback 都不在库中，先 seed 模型`);
+    }
   }
 
-  await pool.execute(
-    `INSERT INTO llm_routes (scene, subject, primary_model_id, fallback_model_id, is_active)
-     VALUES ('dictation_feedback', '*', ?, ?, 1)
-     ON DUPLICATE KEY UPDATE primary_model_id = VALUES(primary_model_id),
-       fallback_model_id = VALUES(fallback_model_id), is_active = 1`,
-    [primaryId, fallbackId],
-  );
-  console.log('dictation_feedback route upserted');
+  const [routeRows] = await pool.execute<mysql.RowDataPacket[]>(
+    'SELECT id FROM llm_routes WHERE scene = ? AND subject = ?', [SCENE, '*']);
+  if (routeRows.length > 0) {
+    await pool.execute(
+      `UPDATE llm_routes
+         SET primary_model_key = ?, fallback_model_key = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE scene = ? AND subject = ?`,
+      [primary, fallback, SCENE, '*']);
+    console.log(`[${SCENE}] 路由 ${SCENE}/* 已更新 -> ${primary} / ${fallback ?? '-'}`);
+  } else {
+    await pool.execute(
+      'INSERT INTO llm_routes (scene, subject, primary_model_key, fallback_model_key) VALUES (?, ?, ?, ?)',
+      [SCENE, '*', primary, fallback]);
+    console.log(`[${SCENE}] 路由 ${SCENE}/* 已插入 -> ${primary} / ${fallback ?? '-'}`);
+  }
+
+  console.log(`[${SCENE}] 完成。重启后端（或后台保存路由）后生效。`);
   await pool.end();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch((e) => { console.error(`[${SCENE}] 失败:`, e); process.exit(1); });
 ```
+
+再同步两处，缺一则后台看不到该场景、或 TS 直接报错：
+
+1. `apps/server/src/modules/admin/admin-models.service.ts:8` 的 `SCENES` 数组加入 `'dictation_feedback'`（后台模型管理页按它渲染场景下拉，不加则新场景在后台不可见）。
+2. 确认 `routeConfig.routes` 的类型来源（`grep -n "routes" apps/server/src/ai-core/config.ts`）。若是**手写**的 interface/type（而非从 YAML 推断的宽松类型），补上 `dictation_feedback` 字段，否则上面 `routeConfig.routes.dictation_feedback` 会 TS 报错。
 
 - [ ] **Step 11: 跑脚本并验证**
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-feedback-route.ts
-mysql -u ai_k12 -p'ai_k12' ai_k12 -e "SELECT scene, subject, primary_model_id, fallback_model_id FROM llm_routes WHERE scene='dictation_feedback';"
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT scene, subject, primary_model_key, fallback_model_key FROM llm_routes WHERE scene='dictation_feedback';"
 ```
 
-Expected: 打印 `dictation_feedback route upserted`，并查到 1 行路由。
+Expected: 打印 `[dictation_feedback] 路由 dictation_feedback/* 已插入 -> local / deepseek-v4-flash`（若 `local` 未 seed 则为降级后的输出），并查到 1 行路由。**再跑一次脚本验证幂等**：第二次应打印「已更新」且 `llm_routes` 仍只有 1 行。
 
 - [ ] **Step 12: 跑全量测试**
 
@@ -1169,7 +1248,7 @@ Expected: 全绿。
 - [ ] **Step 13: Commit**
 
 ```bash
-git add apps/server/src/ai-core/types.ts apps/server/src/ai-core/prompts/dictation/feedback.md apps/server/src/ai-core/capabilities/dictation-feedback.capability.ts apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts apps/server/src/ai-core/infra/prompt-builder.ts apps/server/src/ai-core/model-routes.yaml apps/server/src/ai-core/retry.yaml apps/server/src/scripts/seed-dictation-feedback-route.ts
+git add apps/server/src/ai-core/types.ts apps/server/src/ai-core/prompts/dictation/feedback.md apps/server/src/ai-core/capabilities/dictation-feedback.capability.ts apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts apps/server/src/ai-core/infra/prompt-builder.ts apps/server/src/ai-core/model-routes.yaml apps/server/src/ai-core/retry.yaml apps/server/src/modules/admin/admin-models.service.ts apps/server/src/scripts/seed-dictation-feedback-route.ts
 git commit -m "feat(ai-core): 新增语文默写错因能力 dictation_feedback（本地优先，ds 兜底）"
 ```
 
@@ -1188,16 +1267,22 @@ git commit -m "feat(ai-core): 新增语文默写错因能力 dictation_feedback�
   - `interface JudgeDictationOutput { questionId: number; isCorrect: boolean; method: 'exact'; fields: { author: {match:boolean}; dynasty: {match:boolean}; body: {match:boolean} }; bodyDiff: DictationDiffOp[]; errorBookId?: number }`
   - `JudgeCoreService.judgeDictation(input: JudgeDictationInput): Promise<JudgeDictationOutput>`
 
-- [ ] **Step 1: 确认 `writeErrorBookOrReuse` 的真实签名与它调用的 repo 方法名**
+- [ ] **Step 1: 确认 `writeErrorBookOrReuse` 的真实形状（已核实，按此写）**
 
-```bash
-cd apps/server && grep -n "writeErrorBookOrReuse" -A 22 src/modules/practice/judge-core.service.ts
+已读源码核实（`judge-core.service.ts:359-375`）：
+
+```ts
+private async writeErrorBookOrReuse(input: {
+  studentId: number; subjectId: number; questionId: number;
+  source: string; sourceRefId?: number | null;
+}): Promise<number> {
+  const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(input.studentId, input.questionId);
+  if (existing) return existing.id;
+  return this.mainErrorRepo.create({ student_id, subject_id, question_id, source, source_ref_id, question_n: null, lesson_id: null, wrong_answer_text: null });
+}
 ```
 
-必须看清两件事，并据此调整下面 Step 2 测试里的 mock 与 Step 5 的调用：
-
-1. **参数形状**：是否含 `sourceRefId`（下面代码假设为 `{ studentId, subjectId, questionId, source, sourceRefId }`）；
-2. **它内部调用的仓储方法名**（下面测试 mock 的是 `mainErrorRepo.findOrCreate`）。若实际方法名不同（例如 `findOrCreateByStudentQuestion`），**把测试 mock 的方法名改成实际名**，否则 `errorBookId` 会是 `undefined`，Step 6 的断言会失败。
+要点：参数含 `sourceRefId`（可省）；返回 `Promise<number>`（错题本行 id）；它内部调的是 **`findUnclearedByStudentQuestionId`**（命中则复用）与 **`create`**。因此下面测试必须 mock 这两个方法——**不是** `findOrCreate`。
 
 **不要改 `judge-core.service.ts` 里既有的 `writeErrorBookOrReuse` 与其调用方**——本任务只新增 `judgeDictation`。
 
@@ -1220,7 +1305,10 @@ function makeService() {
   const questionsRepo = { findById: vi.fn().mockResolvedValue(QUESTION) };
   const mainErrorRepo = {
     clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(undefined),
-    findOrCreate: vi.fn().mockResolvedValue({ id: 555 }),
+    // writeErrorBookOrReuse 的真实依赖：先 findUnclearedByStudentQuestionId（未命中→null），
+    // 再 create（返回错题本行 id）。mock 错名字会让 errorBookId 变 undefined。
+    findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
+    create: vi.fn().mockResolvedValue(555),
   };
   const service = new JudgeCoreService(
     questionsRepo as never,
@@ -1259,7 +1347,7 @@ describe('JudgeCoreService.judgeDictation', () => {
     expect(res.fields.body.match).toBe(false);
     expect(res.fields.author.match).toBe(true);
     expect(res.bodyDiff).toContainEqual({ type: 'wrong', expected: '光', actual: '先' });
-    expect(mainErrorRepo.findOrCreate).toHaveBeenCalled();
+    expect(mainErrorRepo.create).toHaveBeenCalled();
     expect(res.errorBookId).toBe(555);
   });
 
@@ -1577,7 +1665,7 @@ export interface DictationPassageListItem {
   workTitle: string;
   author: string;
   dynasty: string;
-  semester: string | null;
+  semester: string;
 }
 
 /** 开练题项（不含作者/朝代/正文答案，防答案泄露）。 */
@@ -1585,7 +1673,7 @@ export interface DictationQuestionItem {
   questionId: number;
   prompt: string;
   workTitle: string;
-  semester: string | null;
+  semester: string;
 }
 
 export interface DictationJudgeResult {
@@ -1978,8 +2066,8 @@ git commit -m "feat(server): 新增语文默写三端点（篇目清单/开练/�
 
 **Interfaces:**
 - Produces:
-  - `interface DictationPassageItem { questionId; workTitle; author; dynasty; semester: string | null }`
-  - `interface DictationQuestionItem { questionId; prompt; workTitle; semester: string | null }`
+  - `interface DictationPassageItem { questionId; workTitle; author; dynasty; semester: string }`
+  - `interface DictationQuestionItem { questionId; prompt; workTitle; semester: string }`
   - `type DictationDiffOp`（与后端同形）
   - `interface DictationJudgeResult { questionId; isCorrect; fields; bodyDiff; reference; feedback: string | null; errorBookId? }`
   - `fetchDictationPassages()`
@@ -1996,14 +2084,14 @@ export interface DictationPassageItem {
   workTitle: string;
   author: string;
   dynasty: string;
-  semester: string | null;
+  semester: string;
 }
 
 export interface DictationQuestionItem {
   questionId: number;
   prompt: string;
   workTitle: string;
-  semester: string | null;
+  semester: string;
 }
 
 export type DictationDiffOp =
@@ -2117,7 +2205,8 @@ export default function ChineseSpecialPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center justify-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center justify-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-4xl px-4 sm:px-8">
@@ -2313,7 +2402,8 @@ export default function DictationConfigPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
@@ -2409,7 +2499,7 @@ export default function DictationConfigPage() {
           )}
         </section>
 
-        {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
+        {error && <p className="mt-6 text-sm text-[var(--error)]">{error}</p>}
 
         <button
           onClick={handleStart}
@@ -2506,26 +2596,30 @@ export default function DictationDiffView({ ops, className = '' }: Props) {
           return <span key={i}>{op.text}</span>;
         }
         if (op.type === 'wrong') {
+          // 不包 inline-flex：wrong 可能是后端合并出的多字长串（如 expected:'AB', actual:'C'），
+          // inline-flex 会变成不可换行的原子盒而横向溢出；顺序内联 span 可自然折行。
           return (
-            <span key={i} className="inline-flex items-baseline">
-              <span className="text-red-500 font-bold underline decoration-wavy">{op.actual}</span>
+            <span key={i}>
+              <span className="text-[var(--error)] font-bold underline decoration-wavy">{op.actual}</span>
               <span className="mx-0.5 text-xs text-[var(--text-secondary)]">应为</span>
-              <span className="text-green-600 font-bold">{op.expected}</span>
+              <span className="text-[var(--success)] font-bold">{op.expected}</span>
             </span>
           );
         }
         if (op.type === 'missing') {
           return (
-            <span key={i} className="text-red-500 font-bold">
+            <span key={i} className="text-[var(--error)] font-bold">
               <span className="text-xs text-[var(--text-secondary)] mr-0.5">漏</span>
               {op.text}
             </span>
           );
         }
+        // 「多」标签必须放在被删除线穿过的 span **外面**：text-decoration:none 无法撤销
+        // 祖先传播下来的 line-through，放在里面会被一并划掉。
         return (
-          <span key={i} className="text-orange-500 line-through">
-            <span className="text-xs text-[var(--text-secondary)] mr-0.5 no-underline">多</span>
-            {op.text}
+          <span key={i}>
+            <span className="text-xs text-[var(--text-secondary)] mr-0.5">多</span>
+            <span className="text-[var(--warning)] line-through">{op.text}</span>
           </span>
         );
       })}
@@ -2723,7 +2817,8 @@ export default function DictationRunPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
@@ -2744,7 +2839,7 @@ export default function DictationRunPage() {
           <DictationAnswerForm value={answer} onChange={setAnswer} disabled={result != null} />
         </div>
 
-        {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+        {error && <p className="mt-4 text-sm text-[var(--error)]">{error}</p>}
 
         {result == null ? (
           <button
@@ -2757,7 +2852,7 @@ export default function DictationRunPage() {
           </button>
         ) : (
           <div className="mt-8 rounded-2xl bg-white p-6" style={{ border: '1px solid rgba(226, 232, 240, 0.8)' }}>
-            <p className={`text-xl font-black ${result.isCorrect ? 'text-green-600' : 'text-red-500'}`}>
+            <p className={`text-xl font-black ${result.isCorrect ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
               {result.isCorrect ? '全部正确' : '有错误'}
             </p>
 
@@ -2993,6 +3088,167 @@ Expected: 全部通过。
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml docs/ai-core-changelog.md
 git commit -m "docs(api): 同步语文默写三端点与数据流，记录变更日志"
 ```
+
+---
+
+## Task 17: 修复 `questions.content_hash` 唯一索引漂移 + 种子脚本加守卫
+
+> **执行时机：Task 5 之后立刻执行**（编号靠后是因为它是评审追加的任务，避免打乱既有 Task 6–16 的编号与简报缓存）。
+
+**背景（Task 5 评审发现）**：`questions` 表由 `CREATE TABLE IF NOT EXISTS` 创建，对**早已存在**的库是空操作——因此 `schema.sql` 后来新增的键永远补不到老库。实测本机开发库缺少 `uniq_q_content_hash`（只有同列的非唯一索引），导致 Task 5 种子脚本的 `ON DUPLICATE KEY UPDATE` 静默插重复行（第二次运行 `questions` 计数变 4）。
+
+影响面不只本功能：`apps/server/src/database/repositories/questions.repo.ts` 的 `findOrCreate` 靠捕获 `ER_DUP_ENTRY` 兜并发竞态，索引缺失时该保护静默失效；`docs/K12智学系统-数据库设计文档.md` 也写着同一条唯一性假设。
+
+**用户裁决**：迁移修环境 + 种子脚本启动时断言索引存在（缺失则报错退出，不静默重复）。
+
+**Files:**
+- Create: `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql`
+- Modify: `apps/server/src/scripts/seed-dictation-fixture.ts`
+
+**Interfaces:**
+- Consumes: `tools/db/migrations/` 既有约定（纯 SQL、手动执行、文件名 `YYYY-MM-DD_描述.sql`；`install_mysql.sh` **不**执行 migrations）
+- Produces: 幂等迁移 + 种子脚本的 `assertContentHashUniqueIndex(pool): Promise<void>` 守卫（缺失时抛错）
+
+- [ ] **Step 1: 写幂等迁移**
+
+创建 `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql`：
+
+```sql
+-- 2026-09-13 修复 questions.content_hash 唯一索引漂移。
+--
+-- 成因：questions 由 CREATE TABLE IF NOT EXISTS 创建，对早已存在的库是空操作，
+-- 故 schema.sql 新增的键（含 UNIQUE KEY uniq_q_content_hash）永远补不到老库。
+-- 后果：answer_importer / 种子脚本的 ON DUPLICATE KEY UPDATE 静默插重复；
+-- questions.repo.ts::findOrCreate 依赖 ER_DUP_ENTRY 兜并发竞态的保护失效。
+--
+-- 幂等：先查 information_schema 是否已有覆盖 content_hash 的**唯一**索引，没有才建。
+-- 不 DROP 同列上遗留的非唯一索引（冗余但无害，避免破坏性操作）。
+-- 注意：若库中已存在重复 content_hash，本迁移会以 ER_DUP_ENTRY 报错——这是**期望的**
+-- 响亮失败。先跑下面注释里的诊断查询清理重复，再重跑本迁移。
+--
+--   SELECT content_hash, COUNT(*) c FROM questions
+--   WHERE content_hash IS NOT NULL GROUP BY content_hash HAVING c > 1;
+
+SET @has_uniq := (
+  SELECT COUNT(*) FROM (
+    SELECT INDEX_NAME
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'questions'
+      AND NON_UNIQUE = 0
+    GROUP BY INDEX_NAME
+    -- COUNT(*)=1 且唯一列就是 content_hash：即「**单列**唯一索引」。
+    -- 不能用「某行 NON_UNIQUE=0」判定——复合唯一索引（如 UNIQUE (content_hash, source)）
+    -- 在 STATISTICS 里每一列都记 NON_UNIQUE=0，但并不让 content_hash 单独唯一，
+    -- 那样会静默跳过本迁移、漏洞照旧。
+    HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'
+  ) AS uniq_single_col
+);
+
+SET @ddl := IF(
+  @has_uniq = 0,
+  'ALTER TABLE questions ADD UNIQUE KEY uniq_q_content_hash (content_hash)',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+```
+
+> **为什么用「查 information_schema + 动态 SQL」而不是单条 DDL**：MySQL 8 不支持 `CREATE UNIQUE INDEX IF NOT EXISTS`；而存储过程在 `log_bin=ON` 且 `log_bin_trust_function_creators=OFF` 的环境需要 SUPER 权限（本机 `schema.sql` 的 `CREATE TRIGGER` 段正是因此报 `ERROR 1419`）。`PREPARE/EXECUTE` 可执行的语句清单包含 `ALTER TABLE` 与 `SELECT`，故用 `'SELECT 1'` 作无操作分支（`DO 0` **不可** PREPARE）。
+>
+> **为什么按「是否存在**单列**唯一索引」判定，而不是按索引名、也不是按「某列 NON_UNIQUE=0」**：漂移库里的遗留索引名是 `idx_q_content_hash`（非唯一），与目标名不同，按名判定会误建重复键名；而复合唯一索引（如 `UNIQUE (content_hash, source)`）在 `information_schema.STATISTICS` 里**每一列**都记 `NON_UNIQUE=0`，只按行判定会误以为 `content_hash` 已唯一而静默跳过——那正是本迁移要堵的洞。故用 `GROUP BY INDEX_NAME + COUNT(*)=1 + MIN(COLUMN_NAME)='content_hash'` 锁定「单列且列名正确」。
+
+- [ ] **Step 2: 执行迁移（两次，验证幂等）**
+
+```bash
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql
+```
+
+Expected: 两次都不报错。第一次会真正建索引（若无），第二次走 `SELECT 1` 无操作分支。
+
+- [ ] **Step 3: 验证索引已是唯一**
+
+```bash
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='ai_k12' AND TABLE_NAME='questions' AND COLUMN_NAME='content_hash';"
+```
+
+Expected: 至少一行 `NON_UNIQUE: 0`（唯一索引存在）。
+
+- [ ] **Step 4: 给种子脚本加守卫**
+
+在 `apps/server/src/scripts/seed-dictation-fixture.ts` 中，`main()` 开头（建 pool 之后、写数据之前）插入守卫，并新增该函数：
+
+```ts
+/**
+ * 守卫：本脚本的幂等性完全依赖 uniq_q_content_hash（ON DUPLICATE KEY UPDATE 要有东西可冲突）。
+ * 老库可能因为 CREATE TABLE IF NOT EXISTS 的语义缺这个键——那时 INSERT 会静默插重复行。
+ * 故启动时先断言它存在，缺了直接报错退出，而不是安静地产生脏数据。
+ */
+async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
+  const [rows] = await pool.execute<any[]>(
+    `SELECT COUNT(*) AS c FROM (
+       SELECT INDEX_NAME FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions' AND NON_UNIQUE = 0
+       GROUP BY INDEX_NAME
+       HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'
+     ) AS uniq_single_col`,
+  );
+  if (Number(rows[0]?.c ?? 0) === 0) {
+    throw new Error(
+      'questions.content_hash 缺少唯一索引 uniq_q_content_hash——' +
+      '本脚本的幂等依赖它，继续跑会插重复行。' +
+      '请先执行 tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql。',
+    );
+  }
+}
+```
+
+`main()` 里在 `const repo = new DictationPassagesRepository(pool as never);` 之前加：
+
+```ts
+  await assertContentHashUniqueIndex(pool);
+```
+
+- [ ] **Step 5: 验证守卫的失败路径（非破坏性 RED）**
+
+不要为了验证而真的删索引（那是破坏性操作）。改为**临时把守卫的判定条件改成必然不成立**：
+
+把 `HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'` 临时改成 `HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = '__nonexistent__'`（必然匹配不到任何索引），运行：
+
+```bash
+cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
+```
+
+Expected: 报错退出（exit code 1），错误信息含 `缺少唯一索引`。**随后还原**，并确认 `git diff` 里没有遗留这个临时改动。
+
+- [ ] **Step 6: 还原后跑通 + 幂等复验**
+
+```bash
+cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts && npx tsx src/scripts/seed-dictation-fixture.ts
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT COUNT(*) AS passages FROM dictation_passages WHERE source_ref='DEV-FIXTURE'; SELECT COUNT(*) AS q FROM questions WHERE source='DEV-FIXTURE';"
+```
+
+Expected: 两次都打印同样的 `questionId`；计数恒为 `2` / `2`。
+
+- [ ] **Step 7: 全量测试**
+
+```bash
+cd apps/server && npm test
+```
+
+Expected: 全绿。
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql apps/server/src/scripts/seed-dictation-fixture.ts
+git commit -m "fix(db): 补幂等迁移修复 content_hash 唯一索引漂移，种子脚本加守卫"
+```
+
+> 迁移已折回 `schema.sql`（`uniq_q_content_hash` 本来就在 `schema.sql:235`），故本次**不需要**再改 `schema.sql`。
 
 ---
 

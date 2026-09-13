@@ -14,6 +14,9 @@ import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage'
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
 import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
+import ChineseSpecialPage from '@/pages/student/training/chinese/ChineseSpecialPage';
+import DictationConfigPage from '@/pages/student/training/chinese/DictationConfigPage';
+import DictationRunPage from '@/pages/student/training/chinese/DictationRunPage';
 import ExamListPage from '@/pages/student/training/ExamListPage';
 import ExamRunPage from '@/pages/student/training/ExamRunPage';
 import ExamResultPage from '@/pages/student/training/ExamResultPage';
@@ -196,6 +199,33 @@ const router = createBrowserRouter([
     element: (
       <RequireRole role="student">
         <HiddenQuestionsPage />
+      </RequireRole>
+    ),
+  },
+  // 语文专项页（全屏沉浸层，独立于 StudentLayout；仅「古诗文默写」开放）
+  {
+    path: '/student/training/chinese/special',
+    element: (
+      <RequireRole role="student">
+        <ChineseSpecialPage />
+      </RequireRole>
+    ),
+  },
+  // 语文默写配置页（全屏沉浸层；题单经 sessionStorage 交接）
+  {
+    path: '/student/training/chinese/dictation',
+    element: (
+      <RequireRole role="student">
+        <DictationConfigPage />
+      </RequireRole>
+    ),
+  },
+  // 语文默写答题页（全屏沉浸层；空题单自动踢回配置页）
+  {
+    path: '/student/training/chinese/dictation/run',
+    element: (
+      <RequireRole role="student">
+        <DictationRunPage />
       </RequireRole>
     ),
   },

@@ -1,10 +1,32 @@
 # CLAUDE.md 历史工作日志（迁出归档）
 
-本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-11），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
+本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-13），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
 
 - 各条目引用的任务级实现计划见 `docs/superpowers/plans/`
 - 仍生效的行为约束已提炼回 CLAUDE.md 的「关键约定」节，本文件仅作历史溯源
 - 阅读当前约定请以根 `CLAUDE.md` 为准；本文件内容可能包含已被后续条目修正的过时描述
+
+---
+
+## 2026-09-13 新增（训练 → 语文 → 专项：古诗文默写）
+
+- **变更摘要**：
+  1. **新题型 `poem_dictation`**：`questions.type` 新增语文古诗文默写题型（整篇默写，`questions.answer` 以「作者：…/朝代：…/正文：…」存参考答案，`questions` 行作错题本/隐藏/提示的锚点）。
+  2. **新表 `dictation_passages`**：承载篇目级结构化字段（`question_id` FK / `work_title` / `author` / `dynasty` / `body` / `grade_band` / `grade` / `semester` / `sort_order` / `source_ref` / `verified`）。业务主键 `uniq_dp_work (work_title, semester)` + `uniq_dp_question (question_id)`；`semester VARCHAR(20) NOT NULL`（册次为必填维度，参与唯一键与抽题过滤，不允许空值）。校验闸门 `verified`：只有 `verified=1` 的篇目进抽题池；导入侧可先落全量再逐篇校验放行。schema 见 `tools/db/schema.sql`。
+  3. **`JudgeCoreService.judgeDictation`（纯程序化，不调用任何 LLM）**：三字段各自 `normalizeChineseAnswer`（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写，复用语料库唯一标点表 `PREFIX_STRIP`）后全等，**三项全对才判对**；正文不等时用 `diffChinese`（LCS 最长公共子序列回溯）做逐字差异，相邻「漏写 + 多写」合并为一个 `wrong`（写错字）、连续同类项合并成段。答错 find-or-create 写 `main_error_books`（**新增 `source='dictation'`**）；答对清零该题所有未清记录（不限 source）。**刻意不触发 `ExplanationCacheService`**——其「`answer>=100` 字直写解析」规则会让长文言文的解析变成「解析 = 正文」。
+  4. **新场景 `dictation_feedback` + `DictationFeedbackCapability`**：只写错因 prose，不参与判对错。路由 `model-routes.yaml` primary=`local`（本地 llama.cpp `Qwen3.8-27B`）、fallback=`deepseek-v4-flash`；`retry.yaml` per-scene timeout 30s；`Scene` / `CapabilityType` 联合类型补 `dictation_feedback`。模型不可达/超时/解析失败 → `feedback=null`，**判题结果与错题本写入照常返回，不阻断**。
+  5. **三端点**（`TrainingController`，student JWT）：`GET /api/training/dictation/passages`（已校验篇目清单，作者/朝代/正文均不下发）、`POST /api/training/dictation/start`（`semester: 上册|下册|null` + `questionIds: number[]|null` + `count: 1-20`；题项白名单只出 `questionId/prompt/workTitle/semester`，作者/朝代/正文一律剥离防答案泄露；随机抽题路径按 `student_hidden_questions` 排除该生已标记『不再展示』的篇目，按 `questionIds` 指定篇目的路径不做该排除）、`POST /api/training/dictation/judge`（返回 `{questionId, isCorrect, fields, bodyDiff, reference, feedback, errorBookId?}`）。新增仓库 `DictationPassagesRepository`（`findVerifiedBySubject` / `findRandomVerified` / `findVerifiedByQuestionIds` / `upsert`）。
+  6. **`questions.content_hash` 唯一索引漂移修复迁移** `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql`：老库 `questions` 由 `CREATE TABLE IF NOT EXISTS` 创建，`uniq_q_content_hash` 从未补上，导致种子/`answer_importer` 的 `ON DUPLICATE KEY UPDATE` 静默插重复行、`findOrCreate` 的并发兜底失效。迁移幂等（查 `information_schema` 无单列唯一索引才 `ALTER`）；库中已有重复 `content_hash` 时以 `ER_DUP_ENTRY` 响亮失败（先诊断清理再重跑）。种子脚本 `seed-dictation-fixture.ts` 启动时断言该索引存在，缺失即报错退出。
+  7. **前端**：`TrainingSubjectPage` 开放语文入口 → `ChineseSpecialPage`（两卡：古诗文默写可点 / 古诗文解释灰化「敬请期待」）→ `DictationConfigPage`（范围 + 题量）→ `DictationRunPage`（三字段作答 + `DictationDiffView` 差异高亮 + 错因提醒）；`DictationAnswerForm` / `DictationDiffView` 为业务组件；`api.ts` 加三接口。
+  8. **开发种子**：`src/scripts/seed-dictation-fixture.ts` 以 `source_ref='DEV-FIXTURE'` 播种《静夜思》《登鹳雀楼》两篇（幂等：questions 走 `content_hash`，passages 走 `(work_title, semester)` upsert）。
+- **动机**：训练轨「专项练习」此前全链路写死数学（`TrainingSubjectPage` 语文 `enabled:false`），语文学科除模拟卷 Markdown 外无任何入库内容。默写适合程序化判题（答案确定、无需 AI 判对错），且能顺带补上语文第一份结构化题库，故作为语文第一个专项打通链路。设计见 `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md`。
+- **落地关键文件**：`modules/practice/judge-core.service.ts`（+`judgeDictation`）、`modules/training/training.{controller,service}.ts`（+3 端点/3 方法）、`modules/training/dto/dictation.dto.ts`、`database/repositories/dictation-passages.repo.ts`、`common/utils/normalize-chinese.util.ts`（`normalizeChineseAnswer`+`diffChinese`）、`ai-core/capabilities/dictation-feedback.capability.ts`、`ai-core/{model-routes,retry}.yaml`、`ai-core/types.ts`、`ai-core/prompts/`；DB `tools/db/schema.sql` + 迁移；web 3 页 + 2 组件。server 测试 478 绿（新增 judge-core 默写 / repo / service / controller 各测试），web tsc + lint + build 通过。
+- **验证**：本任务（Task 16）以本地起 server（`:3000`）+ 手工签发 student JWT 做 HTTP 端到端——篇目清单出 2 篇 fixture、开练题项确认无正文/作者泄露、故意错一字判 `isCorrect=false` 且 `bodyDiff` 定位该错字并写入 `main_error_books(source='dictation')`、全对（标点/空格不同）判 `isCorrect=true` 且清零该错题行；验证后清理了本次产生的错题行。**浏览器点击手测未做**（见下）。
+- **局限/待办**：
+  - **九年级必背篇目全量内容未做**：库中仅两篇 `source_ref='DEV-FIXTURE'` 开发假数据，真实篇目（九年级上下册教材背诵/默写篇目全量 + 逐字校验）待**内容管线**（爬 smartedu 教材 + 逐篇校验）按 `dictation_passages` 导入，见 spec §6；当前三端点与判题链路已通，但内容覆盖为零。
+  - **语文错题练习页未做**：默写错题已进 `main_error_books(source='dictation')`，但**不计入**错题清零门禁（门禁 `findUnclearedPracticeByStudentSubject` 只查 `source='practice'`），故默写错题不阻塞主线推进（见 spec §4.3）；语文的错题练习前端页亦未建（数学错题练习按 `subjectId` 过滤，不会误显示默写题）。
+  - **开发假数据待清理**：两篇 `DEV-FIXTURE` 篇目（含其 `questions`/`dictation_passages`/可能产生的错题行）在生产内容上线后需清理。
+- 文档：API 设计文档 §4.18 / §6.20 / 版本日志 v3.1；`docs/api/openapi.yaml`（3 路径 + 10 schema）；spec `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md`；plan `docs/superpowers/plans/2026-09-13-chinese-dictation-feature.md`。
 
 ---
 

@@ -978,6 +978,65 @@ export function unmarkAllTrainingHidden(): Promise<void> {
   return fetchApi<void>('/training/hidden', { method: 'DELETE' });
 }
 
+// --- Training · 语文古诗文默写（2026-09-13） ---
+
+export interface DictationPassageItem {
+  questionId: number;
+  workTitle: string;
+  semester: string;
+}
+
+export interface DictationQuestionItem {
+  questionId: number;
+  prompt: string;
+  workTitle: string;
+  semester: string;
+}
+
+export type DictationDiffOp =
+  | { type: 'equal'; text: string }
+  | { type: 'wrong'; expected: string; actual: string }
+  | { type: 'missing'; text: string }
+  | { type: 'extra'; text: string };
+
+export interface DictationJudgeResult {
+  questionId: number;
+  isCorrect: boolean;
+  fields: { author: { match: boolean }; dynasty: { match: boolean }; body: { match: boolean } };
+  bodyDiff: DictationDiffOp[];
+  reference: { author: string; dynasty: string; body: string };
+  /** LLM 生成的错因文案；模型不可用时为 null（判题结果仍有效）。 */
+  feedback: string | null;
+  errorBookId?: number;
+}
+
+export function fetchDictationPassages(): Promise<{ passages: DictationPassageItem[] }> {
+  return fetchApi<{ passages: DictationPassageItem[] }>('/training/dictation/passages');
+}
+
+export function startDictation(payload: {
+  semester: string | null;
+  questionIds: number[] | null;
+  count: number;
+}): Promise<{ questions: DictationQuestionItem[] }> {
+  return fetchApi<{ questions: DictationQuestionItem[] }>('/training/dictation/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function judgeDictation(payload: {
+  questionId: number;
+  author: string;
+  dynasty: string;
+  body: string;
+}): Promise<DictationJudgeResult> {
+  return fetchApi<DictationJudgeResult>('/training/dictation/judge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // --- Exams（考试模块：试卷列表 / 会话生命周期 / 结果，字段以后端 exams 白名单序列化为准） ---
 
 export interface ExamPaper {

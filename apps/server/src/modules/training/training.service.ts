@@ -8,8 +8,31 @@ import { QuestionHintsRepository } from '../../database/repositories/question-hi
 import { StudentHiddenQuestionsRepository } from '../../database/repositories/student-hidden-questions.repo.js';
 import { AdminNotificationsRepository } from '../../database/repositories/admin-notifications.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
+import { DictationPassagesRepository } from '../../database/repositories/dictation-passages.repo.js';
+import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
+import type { DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
+import type {
+  DictationPassageListItem,
+  DictationQuestionItem,
+  DictationJudgeResult,
+} from './dto/dictation.dto.js';
+
+/** 语文学科 id（subjects seed：1=数学, 2=语文, 3=英语）。 */
+export const CHINESE_SUBJECT_ID = 2;
+
+/** 把 diff 渲染成一行可读文本，作为 LLM 错因输入：床前明月[光→先][漏:疑][多:啊]。 */
+export function renderBodyDiff(ops: DictationDiffOp[]): string {
+  return ops
+    .map((op) => {
+      if (op.type === 'equal') return op.text;
+      if (op.type === 'wrong') return `[${op.expected}→${op.actual}]`;
+      if (op.type === 'missing') return `[漏:${op.text}]`;
+      return `[多:${op.text}]`;
+    })
+    .join('');
+}
 
 /**
  * 错题训练模块 service。
@@ -31,6 +54,8 @@ export class TrainingService {
     private readonly hiddenRepo: StudentHiddenQuestionsRepository,
     private readonly explanationCache: ExplanationCacheService,
     private readonly notificationsRepo: AdminNotificationsRepository,
+    private readonly dictationRepo: DictationPassagesRepository,
+    private readonly dictationFeedback: DictationFeedbackCapability,
   ) {}
 
   /** 错题练习筛选列表：调 repo 后按 errorBookId 聚合 kpIds，映射 DTO。 */
@@ -65,6 +90,103 @@ export class TrainingService {
   /** 训练判题：JudgeCore 题中心变体的薄封装（source 由端点语义决定，不透传客户端任意值）。 */
   async judgeTraining(input: { studentId: number; questionId: number; subjectId: number; studentAnswer: string; source: 'targeted' | 'error_practice' }) {
     return this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
+  }
+
+  /** 语文默写：配置页篇目清单（只出 verified=1，已停用的题不出）。
+   *  只出篇名 + 册次——作者/朝代/正文都是判题答案字段，一律不下发。 */
+  async listDictationPassages(): Promise<{ passages: DictationPassageListItem[] }> {
+    const rows = await this.dictationRepo.findVerifiedBySubject(CHINESE_SUBJECT_ID);
+    return {
+      passages: rows.map((r) => ({
+        questionId: r.question_id,
+        workTitle: r.work_title,
+        semester: r.semester,
+      })),
+    };
+  }
+
+  /**
+   * 语文默写开练：指定篇目则按篇目出题（忽略册次），否则按册次（null=全部）随机抽。
+   * 题项做白名单序列化——只出 questionId/prompt/workTitle/semester，作者/朝代/正文
+   * 一律剥离（防答案泄露，与 startTargetedPractice 同规矩）。
+   */
+  async startDictation(input: {
+    studentId: number;
+    semester: string | null;
+    questionIds: number[] | null;
+    count: number;
+  }): Promise<{ questions: DictationQuestionItem[] }> {
+    const rows = input.questionIds && input.questionIds.length > 0
+      ? await this.dictationRepo.findVerifiedByQuestionIds(CHINESE_SUBJECT_ID, input.questionIds)
+      : await this.dictationRepo.findRandomVerified(
+          input.studentId, CHINESE_SUBJECT_ID, input.semester, input.count,
+        );
+    return {
+      questions: rows.slice(0, input.count).map((r) => ({
+        questionId: r.question_id,
+        prompt: r.questionContent,
+        workTitle: r.work_title,
+        semester: r.semester,
+      })),
+    };
+  }
+
+  /**
+   * 语文默写判题：程序判对错（JudgeCore.judgeDictation）+ 错因文案（LLM，可选）。
+   * LLM 失败只丢文案、不丢判题结果（设计 spec §5 第 5 步）。
+   */
+  async judgeDictation(input: {
+    studentId: number;
+    questionId: number;
+    author: string;
+    dynasty: string;
+    body: string;
+  }): Promise<DictationJudgeResult> {
+    const passage = await this.dictationRepo.findByQuestionId(input.questionId);
+    if (!passage) {
+      throw new NotFoundException(`默写篇目不存在：${input.questionId}`);
+    }
+
+    const expected = { author: passage.author, dynasty: passage.dynasty, body: passage.body };
+    const judged = await this.judgeCore.judgeDictation({
+      studentId: input.studentId,
+      subjectId: CHINESE_SUBJECT_ID,
+      questionId: input.questionId,
+      expected,
+      student: { author: input.author, dynasty: input.dynasty, body: input.body },
+    });
+
+    let feedback: string | null = null;
+    if (!judged.isCorrect) {
+      try {
+        const result = await this.dictationFeedback.generate({
+          workTitle: passage.work_title,
+          expected,
+          student: { author: input.author, dynasty: input.dynasty, body: input.body },
+          fieldMatch: {
+            author: judged.fields.author.match,
+            dynasty: judged.fields.dynasty.match,
+            body: judged.fields.body.match,
+          },
+          bodyDiffText: renderBodyDiff(judged.bodyDiff),
+        });
+        feedback = result.content || null;
+      } catch (err) {
+        this.logger.warn(`dictationFeedback.generate failed (questionId=${input.questionId}): ${err}`);
+      }
+    }
+
+    // 显式构造返回，不用 spread：judged 带 method 字段，spread 进对象字面量会触发
+    // TS 多余属性检查（DictationJudgeResult 未声明 method）。
+    return {
+      questionId: judged.questionId,
+      isCorrect: judged.isCorrect,
+      fields: judged.fields,
+      bodyDiff: judged.bodyDiff,
+      errorBookId: judged.errorBookId,
+      reference: expected,
+      feedback,
+    };
   }
 
   /** 主观题自评：校验题目存在后委托 JudgeCore.recordSelfAssessment（留痕 + 错题本写入/清零）。

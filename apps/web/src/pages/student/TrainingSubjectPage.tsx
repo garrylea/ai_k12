@@ -8,10 +8,10 @@ interface TrainingSubject {
   desc: string;
 }
 
-// id 对应 subjects 表 seed（1=数学）；MVP 仅数学开放训练，语文/英语后续解锁
+// id 对应 subjects 表 seed（1=数学, 2=语文, 3=英语）；语文已开放古诗文默写专项
 const SUBJECTS: TrainingSubject[] = [
   { id: 1, name: '数学', enabled: true, desc: '考试 / 专项练习 / 错题练习' },
-  { id: 2, name: '语文', enabled: false, desc: '敬请期待' },
+  { id: 2, name: '语文', enabled: true, desc: '古诗文默写' },
   { id: 3, name: '英语', enabled: false, desc: '敬请期待' },
 ];
 
@@ -34,7 +34,11 @@ export default function TrainingSubjectPage() {
 
   const handleSelect = (subject: TrainingSubject) => {
     if (!subject.enabled) return;
-    // 三卡选择页（专项/考试/错题并列，PRD §6.3）
+    // 数学 → 三卡选择页（专项/考试/错题，PRD §6.3）；语文 → 语文专项页
+    if (subject.id === 2) {
+      navigate('/student/training/chinese/special');
+      return;
+    }
     navigate('/student/training/home');
   };
 

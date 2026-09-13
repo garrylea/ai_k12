@@ -39,7 +39,7 @@
 |---|---|---|
 | 1 | 篇目范围 | 古诗词 + 文言文，均整篇默写 |
 | 2 | 内容来源 | 爬国家中小学智慧教育平台（smartedu）教材作权威源 |
-| 3 | 教材版本 | **先跑 `crawler --dry-run` 列出平台语文所有版本，用户过目后再定**（平台语文出版社标签是「统编版」；平台无「部编版」标签，也无「人教版·语文」标签——语文这一科统编版即人教社统编教材） |
+| 3 | 教材版本 | 已闸门确认（2026-09-13）：**统编版 · 初中（六三制） · 九年级 上册 + 下册**，共 2 本。平台语文出版社标签只有「统编版」——无「部编版」标签，也无「人教版·语文」标签；语文这一科统编版即人教社统编教材（= 常说的部编版）。平台上另有 `初中（五•四学制）` 副本，本项目不取。爬取参数：`--site smartedu --subject 语文 --publisher 统编版 --level 初中 --grade 九年级 --semester 上册`（下册同理；`--level 初中` 须精确匹配才能排除五四学制） |
 | 4 | 年级 × 筛选 | 九年级上/下册，且只收教材课后标注需「背诵/默写」的篇目 |
 | 5 | 作答形态 | 三个独立字段：作者 / 朝代 / 正文 |
 | 6 | 判题 | 程序归一化比对定对错 + diff 定位错处；LLM 只写错因文案 |
@@ -86,13 +86,14 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
   body TEXT NOT NULL,                    -- 正文（权威原文，含标点）
   grade_band VARCHAR(20) NOT NULL,       -- 'junior'
   grade VARCHAR(20) DEFAULT NULL,        -- '九年级'
-  semester VARCHAR(20) DEFAULT NULL,     -- '上册' / '下册'
+  semester VARCHAR(20) NOT NULL,         -- '上册' / '下册'（篇目必来自某册，故 NOT NULL）
   sort_order SMALLINT NOT NULL DEFAULT 0,
   source_ref VARCHAR(200) DEFAULT NULL,  -- 教材来源（书名 + 页码）
   verified TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_dp_question (question_id),
+  UNIQUE KEY uniq_dp_work (work_title, semester),
   KEY idx_dp_filter (grade_band, semester, sort_order),
   CONSTRAINT fk_dp_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -109,6 +110,8 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 入口：`POST /api/training/dictation/judge { questionId, author, dynasty, body }`
 
 1. **归一化**：NFKC 全半角归一 → 去所有空白 → 去中英文标点 → 转小写。即用户要求的「不算标点符号和空格」。标点集直接复用并扩展 `apps/server/src/common/utils/content-hash.util.ts` 的 `PREFIX_STRIP`，实现放同目录 `normalize-chinese.util.ts`，两边共用同一常量，避免出现两套标点表。
+
+   > **NFKC 顺序陷阱（2026-09-13 评审发现并修复）**：因为是「先 NFKC 再去标点」，全角字符会先被 NFKC 改写。只往集合里加全角 `～`(U+FF5E) 是无效的——它会被 NFKC 变成半角 `~`(U+007E)，所以集合里必须同时有半角 `~` 与不被 NFKC 映射的 `〜`(U+301C)，才能真正忽略波浪号。**新增任何标点条目都要按「NFKC 之后是什么」来核对，否则会写下永不匹配的死条目。**（对照：`…`(U+2026) 经 NFKC 展开为 `...`，由集合里的 `.` 兜住，无需单列。）
 2. **逐字段比对**：作者 / 朝代 / 正文分别比对（归一化后全等）。
 3. **正文差异定位**：LCS 求最小编辑序列，标注「错字 / 漏写 / 多写」及位置，输出结构化 diff 供前端高亮。
 4. **对错**：三项全对 → `isCorrect=true`；任一不符 → `false`。
@@ -125,7 +128,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 
 | 步骤 | 做法 | 新/旧 |
 |---|---|---|
-| 0. 验版本（**闸门**） | `python src/crawler_cli.py --site smartedu --subject 语文 --dry-run` 列出所有版本/年级 → 用户确认后再继续 | 旧工具 |
+| 0. 验版本（**闸门**，已完成 2026-09-13） | 结论：平台有统编版六三制九年级上/下册（详见 §3 决策 3）。爬取参数：`--site smartedu --subject 语文 --publisher 统编版 --level 初中 --grade 九年级 --semester 上册`（下册同理） | 旧工具 |
 | 1. 爬教材 | 抓九年级上/下册 → 逐页 JPEG | 旧工具 |
 | 2. 图转 Markdown | `convert_cli`（MinerU），学科无关 | 旧工具 |
 | 3. 抽篇目 | 新建脚本：按「必背篇目清单」在教材 MD 中定位每篇，抽 {篇名, 作者, 朝代, 正文, 册次, 页码} → JSONL | **新建** |
@@ -134,6 +137,8 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 
 - **篇目清单来源**：教材课后习题的「背诵/默写」标注；抽不出来则回退到公开必背清单人工确认。
 - **抽题池守卫**：`verified=0` 的篇目不进抽题池。
+
+  > **守卫的适用范围（2026-09-13 裁决）**：`verified` 门禁只作用于**抽题池**（三条查询全部卡 `verified = 1 AND is_active = 1`）。判定路径按题 id 取篇目时**有意不设门禁**——实测影响面为：非默写题无 `dictation_passages` 行（404，跨学科无泄露）、已停用题由 `judgeCore` 内部的 `questions.findById`（过滤 `is_active = 1`）拦下、残留可达的只有 `verified = 0` 的默写题，而古诗文正文属公开内容、且学生在任何一次提交后都会看到参考答案，故不构成实际新增能力。**不要为该路径补门禁**——那会误伤后续「按 ID 直接练某篇」等合法用法。
 - **不做**：不走数学那套 `extract_cli → publish_cli → db_loader_cli`（其卡/题模型与篇目级数据不匹配，改动会波及数学）。仅复用 `convert_cli`。
 
 ## 7. 前端设计
