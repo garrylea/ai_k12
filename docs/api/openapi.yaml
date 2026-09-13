@@ -3854,6 +3854,104 @@ paths:
         '400':
           description: count 越界或 type 非法
 
+  # 语文古诗文默写（2026-09-13）
+  /training/dictation/passages:
+    get:
+      tags: [Training]
+      summary: 语文默写篇目清单（配置页用）
+      description: >-
+        语文默写配置页的篇目数据（student JWT）。仅返回 questions.is_active=1 且
+        dictation_passages.verified=1 的已校验篇目，按 sort_order, id 排序。
+        不含正文（防答案泄露）。
+      operationId: listDictationPassages
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 已校验篇目清单（不含正文）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DictationPassageListResult'
+
+  /training/dictation/start:
+    post:
+      tags: [Training]
+      summary: 语文默写开练（按册次随机抽题或按指定篇目出题）
+      description: >-
+        语文默写开练（student JWT）。count 限 1-20 整数（越界/非整数 400）；
+        semester 限 上册|下册|null（null=全部册次，非法 400）；questionIds 为正整数
+        数组或 null——非空时按指定篇目出题（忽略 semester，仅保留已校验篇目），
+        否则按册次随机抽题。题项白名单序列化：只出 questionId/prompt/workTitle/semester，
+        author/dynasty/正文一律剥离（防答案泄露，与 targeted/start 同规矩）。
+        选题时基于 JWT user.sub（studentId）排除该生已标记的「不再展示」题
+        （LEFT JOIN student_hidden_questions ... IS NULL）；题池为空返回 { questions: [] }。
+      operationId: startDictation
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DictationStartRequest'
+      responses:
+        '200':
+          description: 默写题单（可能为空数组）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DictationStartResult'
+        '400':
+          description: count 越界、semester 非法或 questionIds 非法
+
+  /training/dictation/judge:
+    post:
+      tags: [Training]
+      summary: 语文默写判题（纯程序化判对错 + 可选 LLM 错因）
+      description: >-
+        语文默写判题（student JWT）。判对错**纯程序化，不调用 LLM**：三字段各自
+        normalizeChineseAnswer（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后
+        全等，三项全对才 isCorrect=true（故正文带不带标点/空格/全半角不影响判定）。
+        正文不等时由 diffChinese（LCS 逐字差异）定位，相邻「漏写+多写」合并为一个
+        wrong（写错字）、连续同类项合并成段。questionId 须正整数（非法 400），
+        篇目不存在 404。答错 find-or-create 写 main_error_books（source='dictation'）；
+        答对清零该题所有未清记录。错因文案由 dictation_feedback 场景 LLM 生成
+        （primary=local，fallback=deepseek-v4-flash，timeout 30s），失败只丢文案
+        不丢判题结果（feedback=null）。
+      operationId: judgeDictation
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DictationJudgeRequest'
+      responses:
+        '200':
+          description: 判题结果（含程序化差异定位与可选错因文案）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DictationJudgeResult'
+        '400':
+          description: questionId 非法
+        '404':
+          description: 默写篇目不存在
+
   /api/training/hidden/mark:
     post:
       tags: [training]
@@ -5786,6 +5884,179 @@ components:
           items: {}
           nullable: true
           description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
+
+    DictationPassageListResult:
+      type: object
+      description: 语文默写篇目清单（仅已校验篇目，不含正文）
+      properties:
+        passages:
+          type: array
+          items:
+            $ref: '#/components/schemas/DictationPassage'
+      required: [passages]
+
+    DictationPassage:
+      type: object
+      description: 默写篇目元数据（配置页展示篇目信息，不含正文）
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（questions 行作锚点）
+        workTitle:
+          type: string
+          description: 篇名（如「静夜思」）
+        author:
+          type: string
+          description: 作者
+        dynasty:
+          type: string
+          description: 朝代
+        semester:
+          type: string
+          description: 册次（上册/下册）
+      required: [questionId, workTitle, author, dynasty, semester]
+
+    DictationStartRequest:
+      type: object
+      required: [semester, questionIds, count]
+      properties:
+        semester:
+          type: string
+          nullable: true
+          enum: [上册, 下册]
+          description: 册次范围；null=全部册次（白名单外取值 400）
+        questionIds:
+          type: array
+          nullable: true
+          items:
+            type: integer
+            minimum: 1
+          description: 指定篇目 id 列表；非空时按指定篇目出题并忽略 semester；null=按册次随机抽题
+        count:
+          type: integer
+          minimum: 1
+          maximum: 20
+          description: 抽题数量，限 1-20 整数（越界/非整数 400）
+
+    DictationStartResult:
+      type: object
+      properties:
+        questions:
+          type: array
+          description: 默写题单（白名单序列化，author/dynasty/正文剥离；题池为空时为空数组）
+          items:
+            $ref: '#/components/schemas/DictationQuestion'
+      required: [questions]
+
+    DictationQuestion:
+      type: object
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id
+        prompt:
+          type: string
+          description: 题面（如「请默写《静夜思》（并写出作者与朝代）」）
+        workTitle:
+          type: string
+          description: 篇名
+        semester:
+          type: string
+          description: 册次（上册/下册）
+      required: [questionId, prompt, workTitle, semester]
+
+    DictationJudgeRequest:
+      type: object
+      required: [questionId, author, dynasty, body]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（须正整数，非法 400；篇目不存在 404）
+        author:
+          type: string
+          description: 学生作答的作者
+        dynasty:
+          type: string
+          description: 学生作答的朝代
+        body:
+          type: string
+          description: 学生作答的正文（标点/空格/全半角不参与判对错）
+
+    DictationJudgeResult:
+      type: object
+      description: 默写判题结果（程序化对错 + LCS 差异 + 可选 LLM 错因）
+      properties:
+        questionId:
+          type: integer
+        isCorrect:
+          type: boolean
+          description: 三项全对才为 true（程序化判定，不调用 LLM）
+        fields:
+          type: object
+          description: 三字段各自的匹配结果
+          properties:
+            author:
+              $ref: '#/components/schemas/DictationFieldMatch'
+            dynasty:
+              $ref: '#/components/schemas/DictationFieldMatch'
+            body:
+              $ref: '#/components/schemas/DictationFieldMatch'
+          required: [author, dynasty, body]
+        bodyDiff:
+          type: array
+          description: 正文逐字差异（全对时为空数组；相邻漏写+多写合并为 wrong）
+          items:
+            $ref: '#/components/schemas/DictationDiffOp'
+        reference:
+          $ref: '#/components/schemas/DictationReference'
+        feedback:
+          type: string
+          nullable: true
+          description: LLM 生成的可选错因文案（dictation_feedback 场景）；模型不可达/失败时为 null，不影响判题
+        errorBookId:
+          type: integer
+          description: 答错时写入/复用的 main_error_books id；答对时该键省略
+      required: [questionId, isCorrect, fields, bodyDiff, reference, feedback]
+
+    DictationFieldMatch:
+      type: object
+      properties:
+        match:
+          type: boolean
+          description: 该字段归一化后是否与参考答案全等
+      required: [match]
+
+    DictationDiffOp:
+      type: object
+      description: >-
+        正文差异片段。type=equal 带 text；type=missing 带被漏写的 text；
+        type=extra 带学生多写的 text；type=wrong 带 expected/actual（写错字）。
+      properties:
+        type:
+          type: string
+          enum: [equal, wrong, missing, extra]
+        text:
+          type: string
+          description: equal/missing/extra 片段的文本
+        expected:
+          type: string
+          description: wrong 片段的参考答案字符
+        actual:
+          type: string
+          description: wrong 片段的学生作答字符
+      required: [type]
+
+    DictationReference:
+      type: object
+      description: 参考答案三字段
+      properties:
+        author:
+          type: string
+        dynasty:
+          type: string
+        body:
+          type: string
+      required: [author, dynasty, body]
 
     HiddenQuestion:
       type: object
