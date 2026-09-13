@@ -35,6 +35,26 @@ const FIXTURES = [
   },
 ];
 
+/**
+ * 守卫：本脚本的幂等性完全依赖 uniq_q_content_hash（ON DUPLICATE KEY UPDATE 要有东西可冲突）。
+ * 老库可能因为 CREATE TABLE IF NOT EXISTS 的语义缺这个键——那时 INSERT 会静默插重复行。
+ * 故启动时先断言它存在，缺了直接报错退出，而不是安静地产生脏数据。
+ */
+async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
+  const [rows] = await pool.execute<any[]>(
+    `SELECT COUNT(*) AS c FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions'
+       AND COLUMN_NAME = 'content_hash' AND NON_UNIQUE = 0`,
+  );
+  if (Number(rows[0]?.c ?? 0) === 0) {
+    throw new Error(
+      'questions.content_hash 缺少唯一索引 uniq_q_content_hash——' +
+      '本脚本的幂等依赖它，继续跑会插重复行。' +
+      '请先执行 tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql。',
+    );
+  }
+}
+
 async function main() {
   const pool = mysql.createPool({
     host: process.env.DB_HOST ?? 'localhost',
@@ -42,6 +62,7 @@ async function main() {
     password: process.env.DB_PASS ?? 'ai_k12',
     database: process.env.DB_NAME ?? 'ai_k12',
   });
+  await assertContentHashUniqueIndex(pool);
   const repo = new DictationPassagesRepository(pool as never);
 
   for (const f of FIXTURES) {
