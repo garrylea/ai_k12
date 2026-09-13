@@ -742,7 +742,7 @@ async function main() {
   const pool = mysql.createPool({
     host: process.env.DB_HOST ?? 'localhost',
     user: process.env.DB_USER ?? 'ai_k12',
-    password: process.env.DB_PASSWORD ?? 'ai_k12',
+    password: process.env.DB_PASS ?? 'ai_k12',
     database: process.env.DB_NAME ?? 'ai_k12',
   });
   const repo = new DictationPassagesRepository(pool as never);
@@ -1120,7 +1120,7 @@ async function main() {
   const pool = mysql.createPool({
     host: process.env.DB_HOST ?? 'localhost',
     user: process.env.DB_USER ?? 'ai_k12',
-    password: process.env.DB_PASSWORD ?? 'ai_k12',
+    password: process.env.DB_PASS ?? 'ai_k12',
     database: process.env.DB_NAME ?? 'ai_k12',
   });
 
