@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 入口：`POST /api/training/dictation/judge { questionId, author, dynasty, body }`
 
 1. **归一化**：NFKC 全半角归一 → 去所有空白 → 去中英文标点 → 转小写。即用户要求的「不算标点符号和空格」。标点集直接复用并扩展 `apps/server/src/common/utils/content-hash.util.ts` 的 `PREFIX_STRIP`，实现放同目录 `normalize-chinese.util.ts`，两边共用同一常量，避免出现两套标点表。
+
+   > **NFKC 顺序陷阱（2026-09-13 评审发现并修复）**：因为是「先 NFKC 再去标点」，全角字符会先被 NFKC 改写。只往集合里加全角 `～`(U+FF5E) 是无效的——它会被 NFKC 变成半角 `~`(U+007E)，所以集合里必须同时有半角 `~` 与不被 NFKC 映射的 `〜`(U+301C)，才能真正忽略波浪号。**新增任何标点条目都要按「NFKC 之后是什么」来核对，否则会写下永不匹配的死条目。**（对照：`…`(U+2026) 经 NFKC 展开为 `...`，由集合里的 `.` 兜住，无需单列。）
 2. **逐字段比对**：作者 / 朝代 / 正文分别比对（归一化后全等）。
 3. **正文差异定位**：LCS 求最小编辑序列，标注「错字 / 漏写 / 多写」及位置，输出结构化 diff 供前端高亮。
 4. **对错**：三项全对 → `isCorrect=true`；任一不符 → `false`。

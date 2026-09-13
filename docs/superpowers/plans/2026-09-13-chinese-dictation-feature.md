@@ -225,8 +225,10 @@ const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()（）\[\
 改为（`export` + 补 `「」『』〈〉…～`）：
 
 ```ts
-export const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()（）\[\]【】{}<>《》「」『』〈〉…～\-—_/\\|]/g;
+export const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()（）\[\]【】{}<>《》「」『』〈〉…～~〜\-—_/\\|]/g;
 ```
+
+**为什么还要 ASCII `~` 与 `〜`**：`normalizeChineseAnswer` 是**先 NFKC 再去标点**，而 NFKC 会把全角 `～`(U+FF5E) 映射成半角 `~`(U+007E)。只加 `～` 的话，它永远匹配不到任何字符（NFKC 已把它变走），等于死条目。`〜`(U+301C) 则不被 NFKC 映射，需单独列。三者都覆盖才能真正忽略波浪号。（对照：`…`(U+2026) 经 NFKC 展开为 `...`，由集合里的 `.` 兜住，无需单独处理。）
 
 **为什么直接扩展而不另建一套**：写两套标点表迟早漂移（spec §5「归一化标点集」要求单一来源）。本改动让 `normalizeForPrefix` 更宽松（多剥几种中文标点），只影响 `findByContentPrefix` 模糊匹配，方向是「更能匹配上」，无破坏性。
 
@@ -263,6 +265,14 @@ describe('normalizeChineseAnswer', () => {
   it('空值安全', () => {
     expect(normalizeChineseAnswer('')).toBe('');
     expect(normalizeChineseAnswer(undefined as unknown as string)).toBe('');
+  });
+
+  it('波浪号三种写法都忽略（全角 U+FF5E / 半角 U+007E / 波浪线 U+301C）', () => {
+    // 归一化先 NFKC 再去标点：全角 ～ 会被 NFKC 变成半角 ~，
+    // 故集合里必须同时有 ~ 与 〜，否则这个「忽略波浪号」的意图不会生效。
+    expect(normalizeChineseAnswer('床前明月光～')).toBe('床前明月光');
+    expect(normalizeChineseAnswer('床前明月光~')).toBe('床前明月光');
+    expect(normalizeChineseAnswer('床前明月光〜')).toBe('床前明月光');
   });
 });
 
@@ -414,7 +424,7 @@ export function diffChinese(expected: string, actual: string): DictationDiffOp[]
 cd apps/server && npx vitest run src/common/utils/normalize-chinese.util.test.ts
 ```
 
-Expected: PASS，12 个用例全绿。
+Expected: PASS，13 个用例全绿。
 
 - [ ] **Step 6: 跑全量测试确认没打破 prefix 匹配**
 
