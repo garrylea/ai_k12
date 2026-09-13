@@ -692,3 +692,7 @@ git commit -m "fix(web): 草稿抽屉手测问题修复"
 - **spec 覆盖**：图标位置（spec §2）→ Task 4/5/6；作答态显示 + 全题型 → 图标挂页面容器且不在 QuestionRunner 内（Task 4-6），作答区分支无关；草稿不保存/切题清空/关抽屉丢 → DraftWhiteboard `persist=false` + 抽屉 `key=questionId`（Task 1/2）；仅训练轨隐藏内嵌草稿 → Task 3 修正记录 1；两档宽度 + X 关闭 + 纵向滚动 + 两指平移 → Task 2 + Task 1 scroll-y + 修正记录 4；ExamRunPage 补 relative → Task 6 Step 3。
 - **类型一致性**：`scrollMode`/`persist` 签名在 Task 1 定义、Task 2 消费处与 spec 一致；`onQuestionChange`/`draftDisabled` 在 Task 3 定义、Task 4-6 消费；`questionId={currentQ.n}` 在 Task 4-6 与 spec §2.1 一致。`DraftIconButton`/`DraftDrawer` 在 Task 2 定义、Task 4-6 消费，导出名一致。
 - **无占位符**：每步含完整代码/命令/预期。
+
+---
+
+**2026-09-13 后续**：草稿已由「右侧浮层抽屉」改为「与答题区并排的占位面板」（`DraftDrawer` → `DraftPanel`，见 `plans/2026-09-13-training-draft-inline-panel.md`）；本文描述的外壳/宽度/持久化条目按当时实现记录保留，不再与现状一致。

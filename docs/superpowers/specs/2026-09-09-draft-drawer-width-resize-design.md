@@ -4,6 +4,8 @@
 - 范围：`apps/web/src/components/business/DraftDrawer.tsx`（仅此一个文件）
 - 关联：`2026-09-07-training-draft-drawer-design.md`（草稿抽屉初版）、`2026-09-08-draft-paste-image-design.md`（贴图）
 
+> **2026-09-13 修订（已被取代）**：草稿改「并排占位面板」后，本文的**范围（仅 DraftDrawer.tsx）/ 宽度区间 40–85% / 相对 `offsetParent` padding-box 的拖拽基准 / 「放大缩小」两档按钮**全部变更，且「三页父层零改动」也不成立。当前为：`DraftPanel.tsx`、25–55%（默认 35%）、相对所在**并排行**宽、双击分割条复位（两档按钮移除）、三页各自新增并排行。见 `specs/2026-09-13-training-draft-inline-panel-design.md` 与 `plans/2026-09-13-training-draft-inline-panel.md`。
+
 ## 1. 背景与动机
 
 训练轨答题页（ErrorPracticeRunPage / ExamRunPage / TargetedRunPage）的页面级草稿抽屉

@@ -252,3 +252,7 @@ git commit -m "feat(web): 草稿抽屉左缘拖拽连续调宽（40-85%）+ 两�
 - [ ] **Step 2: 同步设计/计划文档（仓库铁律）**
 
 设计文档已先于本计划提交；本计划不改任何 API/数据流，无需再同步 openapi.yaml 或 API 设计文档。若实现过程偏离设计文档（如夹紧范围/交互），回到 `docs/superpowers/specs/2026-09-09-draft-drawer-width-resize-design.md` 同步。
+
+---
+
+**2026-09-13 后续**：草稿抽屉已改为并排占位面板（宽度 25–55%/默认 35%、双击分割条复位、两档按钮移除、三页新增并排行），本文的「40–85% 拖拽」实现已被 `plans/2026-09-13-training-draft-inline-panel.md` 取代。

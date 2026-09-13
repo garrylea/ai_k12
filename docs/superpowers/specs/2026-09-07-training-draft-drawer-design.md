@@ -2,6 +2,8 @@
 
 日期：2026-09-07 ｜ 分支：`feat/training-draft-drawer` ｜ 状态：已与用户对齐（2026-09-07 二次澄清）
 
+> **2026-09-13 修订（形态已被取代）**：草稿由「右侧浮层抽屉」改为「与答题区并排的占位面板」——`DraftDrawer.tsx` → `DraftPanel.tsx`，宽度 25–55%（默认 35%）、双击分割条复位、去掉两档宽度按钮、图标仅面板收起时显示。本文以下关于**浮层外壳 / 两档宽度 / `persist={false}` 不持久化**的描述均已过时（草稿自 2026-09-09 起落 `draft-store`，键 `${draftKeyPrefix}-${questionId}`）。当前实现与验证以 `docs/superpowers/specs/2026-09-13-training-draft-inline-panel-design.md` 与代码为准。
+
 ## 背景与目标
 
 训练轨三个答题页（`TargetedRunPage` / `ExamRunPage` / `ErrorPracticeRunPage`）当前只在「计算答题窗口」（`QuestionRunner` 内嵌的 `PreviewDraftPanel`）里有草稿手绘功能，且仅数学填空/解答题有（选择题/判断题无草稿，见 `QuestionRunner.tsx:323-343` 作答区分支）。

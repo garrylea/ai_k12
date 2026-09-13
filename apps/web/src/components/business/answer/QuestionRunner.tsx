@@ -497,13 +497,15 @@ export function QuestionRunner({
             </div>
           ) : (
             <>
-              <div className="w-1/2 border-r border-[var(--bg-subtle)] flex flex-col">
+              {/* min-w-0：训练轨草稿面板并排占位后答题列会窄到 ~440px，两个 50% 分栏默认
+                  min-width:auto 会被内容撑破、把面板顶出可视区 */}
+              <div className="w-1/2 min-w-0 border-r border-[var(--bg-subtle)] flex flex-col">
                 <LatexEditor value={answer} onChange={updateAnswer} />
               </div>
               {/* 右半区：预览 / 草稿 tab。主线保留数学草稿（PRD §7.12）；训练轨答题页传 draftDisabled
-                  关闭——页面级 DraftDrawer 取代内嵌草稿，其余上下文（AnswerModal 弹窗 / CleanupPhase
+                  关闭——页面级 DraftPanel 取代内嵌草稿，其余上下文（AnswerModal 弹窗 / CleanupPhase
                   错题巩固）不受影响，仍按 subjectId === MATH_SUBJECT_ID 启用 */}
-              <div className="w-1/2">
+              <div className="w-1/2 min-w-0">
                 <PreviewDraftPanel
                   answer={answer}
                   questionId={`${draftKeyPrefix}-${q.n}`}

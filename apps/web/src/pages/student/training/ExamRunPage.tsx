@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
-import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer';
+import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 import {
   getExamSession,
@@ -239,43 +239,53 @@ export default function ExamRunPage() {
   return (
     <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="relative flex h-screen flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
-        <QuestionRunner
-          questions={questions}
-          subjectId={MATH_SUBJECT_ID}
-          draftKeyPrefix={`exam-${sid}`}
-          variant="embedded"
-          draftDisabled  // 内嵌草稿由页面级草稿抽屉替代（2026-09-07）
-          showResultFeedback={false}
-          headerExtra={
-            <div className="flex shrink-0 items-center gap-4">
-              <span className="text-sm text-[var(--text-secondary)]">
-                已答 {answeredNs.size}/{questions.length}
-              </span>
-              <span
-                className="font-mono text-2xl font-bold tabular-nums"
-                style={{ color: remaining < LOW_TIME_SECONDS ? 'var(--error)' : 'var(--text-primary)' }}
-                aria-label="剩余时间"
-              >
-                {pad2(Math.floor(remaining / 60))}:{pad2(remaining % 60)}
-              </span>
-            </div>
-          }
-          onSubmit={handleSubmit}
-          onFinish={handleFinish}
-          onQuestionChange={setCurrentQ}
-          initialAnswers={initialAnswers}
-        />
-
-        {/* 草稿入口：页面背景层右上角，absolute 定位；考试无「讲一讲」，仅本图标 + 倒计时在顶栏 */}
-        <div className="absolute top-4 right-4">
-          <DraftIconButton onClick={() => setDraftOpen(true)} />
+        {/* 答题区与草稿面板并排：草稿占真实空间（不再是浮层遮挡），答题列随之被挤窄 */}
+        <div className="flex-1 min-h-0 flex">
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            <QuestionRunner
+              questions={questions}
+              subjectId={MATH_SUBJECT_ID}
+              draftKeyPrefix={`exam-${sid}`}
+              variant="embedded"
+              draftDisabled  // 内嵌草稿由页面级草稿面板替代（2026-09-07）
+              showResultFeedback={false}
+              headerExtra={
+                <div className="flex shrink-0 items-center gap-4">
+                  <span className="text-sm text-[var(--text-secondary)]">
+                    已答 {answeredNs.size}/{questions.length}
+                  </span>
+                  <span
+                    className="font-mono text-2xl font-bold tabular-nums"
+                    style={{ color: remaining < LOW_TIME_SECONDS ? 'var(--error)' : 'var(--text-primary)' }}
+                    aria-label="剩余时间"
+                  >
+                    {pad2(Math.floor(remaining / 60))}:{pad2(remaining % 60)}
+                  </span>
+                </div>
+              }
+              onSubmit={handleSubmit}
+              onFinish={handleFinish}
+              onQuestionChange={setCurrentQ}
+              initialAnswers={initialAnswers}
+            />
+          </div>
+          {draftOpen && currentQ && (
+            <DraftPanel
+              questionId={currentQ.n}
+              draftKeyPrefix={`exam-${sid}`}
+              onClose={() => setDraftOpen(false)}
+            />
+          )}
         </div>
-        {draftOpen && currentQ && (
-          <DraftDrawer
-            questionId={currentQ.n}
-            draftKeyPrefix={`exam-${sid}`}
-            onClose={() => setDraftOpen(false)}
-          />
+
+        {/* 草稿入口：页面背景层右上角 absolute 定位，仅面板收起时显示（展开时面板头部自带收起按钮）；
+            考试无「讲一讲」，仅本图标 + 倒计时在顶栏。DOM 顺序：DraftPanel 内里的 canvas 是 absolute，
+            同层 z-index:auto 的定位元素按 DOM 序绘制，故草稿这行排在最前，交卷失败层（fixed z-[60]）等
+            浮层才能盖住它。 */}
+        {!draftOpen && (
+          <div className="absolute top-4 right-4">
+            <DraftIconButton onClick={() => setDraftOpen(true)} />
+          </div>
         )}
 
         {/* 考试无页内退出；拦截浏览器返回/刷新（计时不停，可续考） */}

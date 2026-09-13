@@ -4,7 +4,7 @@ import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from '@/components/business/answer/types';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
-import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer';
+import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
@@ -204,73 +204,81 @@ export default function TargetedRunPage() {
           />
         ) : (
           <>
-            <QuestionRunner
-              questions={questions}
-              subjectId={MATH_SUBJECT_ID}
-              draftKeyPrefix="tp"
-              variant="embedded"
-              draftDisabled  // 内嵌草稿由页面级草稿抽屉替代（2026-09-07）
-              enableHint
-              hints={hints}
-              onRequestHint={handleRequestHint}
-              headerActions={(q) => (
-                <DiscussIconButton onClick={() => setDiscussQ(q)} />
+            {/* 答题区与草稿面板并排：草稿占真实空间（不再是浮层遮挡），答题列随之被挤窄 */}
+            <div className="flex-1 min-h-0 flex">
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+                <QuestionRunner
+                  questions={questions}
+                  subjectId={MATH_SUBJECT_ID}
+                  draftKeyPrefix="tp"
+                  variant="embedded"
+                  draftDisabled  // 内嵌草稿由页面级草稿面板替代（2026-09-07）
+                  enableHint
+                  hints={hints}
+                  onRequestHint={handleRequestHint}
+                  headerActions={(q) => (
+                    <DiscussIconButton onClick={() => setDiscussQ(q)} />
+                  )}
+                  questionMetaActions={(q) => {
+                    const qid = Number(q.n);
+                    return (
+                      <button
+                        type="button"
+                        disabled={marking}
+                        onClick={() => setMarkConfirm({ open: true, questionId: qid })}
+                        title="不再展示"
+                        aria-label="不再展示这道题"
+                        className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-secondary)] shadow-sm hover:bg-[var(--bg-base)] transition-colors"
+                      >
+                        {/* 眼斜杠图标（线性 SVG）——视觉权重低于提示/讲一讲 */}
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                          <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                          <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                          <line x1="2" y1="2" x2="22" y2="22" />
+                        </svg>
+                      </button>
+                    );
+                  }}
+                  onSubmit={handleSubmit}
+                  onSelfAssess={async (q, assessment) => {
+                    const entry = entryByN.get(q.n);
+                    if (!entry) throw new Error('题单条目缺失，无法自评');
+                    await selfAssessTraining({
+                      questionId: entry.questionId,
+                      subjectId: MATH_SUBJECT_ID,
+                      assessment,
+                      source: 'targeted',
+                    });
+                  }}
+                  onFinish={handleFinish}
+                  onQuestionChange={setCurrentQ}
+                  onClose={(answered) => setExitConfirm({ open: true, answered })}
+                />
+              </div>
+              {draftOpen && currentQ && (
+                <DraftPanel
+                  questionId={currentQ.n}
+                  draftKeyPrefix="tp"
+                  onClose={() => setDraftOpen(false)}
+                />
               )}
-              questionMetaActions={(q) => {
-                const qid = Number(q.n);
-                return (
-                  <button
-                    type="button"
-                    disabled={marking}
-                    onClick={() => setMarkConfirm({ open: true, questionId: qid })}
-                    title="不再展示"
-                    aria-label="不再展示这道题"
-                    className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-secondary)] shadow-sm hover:bg-[var(--bg-base)] transition-colors"
-                  >
-                    {/* 眼斜杠图标（线性 SVG）——视觉权重低于提示/讲一讲 */}
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                      <line x1="2" y1="2" x2="22" y2="22" />
-                    </svg>
-                  </button>
-                );
-              }}
-              onSubmit={handleSubmit}
-              onSelfAssess={async (q, assessment) => {
-                const entry = entryByN.get(q.n);
-                if (!entry) throw new Error('题单条目缺失，无法自评');
-                await selfAssessTraining({
-                  questionId: entry.questionId,
-                  subjectId: MATH_SUBJECT_ID,
-                  assessment,
-                  source: 'targeted',
-                });
-              }}
-              onFinish={handleFinish}
-              onQuestionChange={setCurrentQ}
-              onClose={(answered) => setExitConfirm({ open: true, answered })}
-            />
-            {/* 草稿入口：页面背景层右上角 absolute 定位。图标 DOM 必须排在各抽屉条件之前——同层兄弟
-                z-index 均为 auto（DOM 靠后者绘制在上层），抽屉后渲染才能盖住图标、关闭钮才可点；
-                DraftDrawer 条件保持最后，位于 DiscussDrawer 之上。 */}
-            <div className="absolute top-4 right-4">
-              <DraftIconButton onClick={() => setDraftOpen(true)} />
             </div>
+            {/* 草稿入口：页面背景层右上角 absolute 定位，仅面板收起时显示（展开时面板头部自带收起按钮）。
+                DOM 顺序：草稿这行必须排在 DiscussDrawer 之前——DraftPanel 内里的 canvas 是 absolute，
+                同层 z-index:auto 的定位元素按 DOM 序绘制，排在后面的一方才压在上面（讨论抽屉要盖住面板）；
+                图标则在 DiscussDrawer 之前，抽屉才能盖住它、关闭钮才可点。 */}
+            {!draftOpen && (
+              <div className="absolute top-4 right-4">
+                <DraftIconButton onClick={() => setDraftOpen(true)} />
+              </div>
+            )}
             {discussQ && phase === 'answering' && (
               <DiscussDrawer
                 mode="training"
                 questionText={discussQ.text}
                 questionId={Number(discussQ.n)}
                 onClose={() => setDiscussQ(null)}
-              />
-            )}
-            {draftOpen && currentQ && (
-              <DraftDrawer
-                questionId={currentQ.n}
-                draftKeyPrefix="tp"
-                onClose={() => setDraftOpen(false)}
               />
             )}
           </>
