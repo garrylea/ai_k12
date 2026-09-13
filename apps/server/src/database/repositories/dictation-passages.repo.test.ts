@@ -29,6 +29,10 @@ describe('DictationPassagesRepository', () => {
     expect(sql).toContain('LEFT JOIN student_hidden_questions shq');
     expect(sql).toContain('shq.question_id = dp.question_id AND shq.student_id = ?');
     expect(sql).toContain('shq.id IS NULL');
+    // 抽题池守卫（spec §6）：未校验篇目与已停用题绝不能进抽题池——若这两条守卫
+    // 被误删，其余断言仍会全绿，故必须显式钉住
+    expect(sql).toContain('dp.verified = 1');
+    expect(sql).toContain('q.is_active = 1');
     expect(sql).toContain('dp.semester = ?');
     expect(sql).toContain('ORDER BY RAND()');
     expect(sql).toContain('LIMIT ?');
@@ -52,7 +56,27 @@ describe('DictationPassagesRepository', () => {
     expect(pool.execute).not.toHaveBeenCalled();
   });
 
-  it('upsert：按 (work_title, semester) 业务主键 upsert', async () => {
+  it('findVerifiedByQuestionIds：非空时 IN 占位符数量与参数顺序正确', async () => {
+    const pool = mockPool([]);
+    const repo = new DictationPassagesRepository(pool as any);
+    await repo.findVerifiedByQuestionIds(2, [10, 11]);
+    const [sql, params] = pool.execute.mock.calls[0];
+    // 只测空数组短路的话，subjectId 与 ids 顺序写反也不会被发现
+    expect(sql).toContain('dp.question_id IN (?,?)');
+    expect(params).toEqual([2, 10, 11]);
+  });
+
+  it('findByQuestionId：按题 id 查单篇（供判题内部使用，不设 verified/is_active 守卫）', async () => {
+    const pool = mockPool([]);
+    const repo = new DictationPassagesRepository(pool as any);
+    await repo.findByQuestionId(100);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('WHERE dp.question_id = ?');
+    expect(sql).toContain('LIMIT 1');
+    expect(params).toEqual([100]);
+  });
+
+  it('upsert：按 (work_title, semester) 业务主键 upsert，且 verified 由入参决定', async () => {
     const pool = mockPool([]);
     const repo = new DictationPassagesRepository(pool as any);
     await repo.upsert({
@@ -64,6 +88,7 @@ describe('DictationPassagesRepository', () => {
     expect(sql).toContain('INSERT INTO dictation_passages');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
     expect(sql).toContain('work_title');
-    expect(params[0]).toBe(100);
+    // 全参断言：若 verified 被写死成 1（覆盖导入器的校验闸门决定），只断 params[0] 不会发现
+    expect(params).toEqual([100, '静夜思', '李白', '唐', '床前明月光', 'junior', '九年级', '上册', 1, 'DEV-FIXTURE', 0]);
   });
 });
