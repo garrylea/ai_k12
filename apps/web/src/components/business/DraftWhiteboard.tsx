@@ -65,6 +65,16 @@ function strokePath(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   }
 }
 
+/** 橡皮命中容差（CSS px）：笔迹基准线宽之外再放宽 8px（沿用原 `size + 8`，宽松好擦）。
+ *  注意：这是「够不够得着」的擦除手感，不要拿它当选中起手的容差，见下。 */
+const ERASER_HIT_SLOP = 8;
+
+/** 选中工具的起手命中容差（CSS px）：从墨迹边缘只外扩 3px（手写笔线宽 2px → 共 4px 判定）。
+ *  起手判定要严格：手写笔迹短促密集，容差一宽（曾与橡皮共用 10px），贴着笔画拖框会被判成
+ *  「抓住这条笔画」，整个手势变成拖动那条笔画，框选矩形根本不出现、一条笔迹也框不住。
+ *  橡皮的宽松判定不受影响。 */
+const SELECT_HIT_SLOP = 3;
+
 /** 点到线段距离平方（避免开方） */
 function distToSegmentSq(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
   const dx = x2 - x1;
@@ -77,9 +87,11 @@ function distToSegmentSq(px: number, py: number, x1: number, y1: number, x2: num
   return ex * ex + ey * ey;
 }
 
-/** 橡皮命中：点到某笔画折线的最近距离是否在阈值内 */
-function hitStroke(stroke: Stroke, x: number, y: number): boolean {
-  const threshold = stroke.size + 8;
+/** 是否命中某条笔迹：点到笔迹中心线的最近距离 ≤ threshold。
+ *  容差由调用方给，两处语义不同：
+ *  - 橡皮：`stroke.size + ERASER_HIT_SLOP`（宽松，好擦）；
+ *  - 选中起手（点选/起手拖框）：`stroke.size / 2 + SELECT_HIT_SLOP`（严格，见常量注释）。 */
+function hitStroke(stroke: Stroke, x: number, y: number, threshold: number): boolean {
   const pts = stroke.points;
   if (pts.length === 1) {
     const d = (pts[0].x - x) ** 2 + (pts[0].y - y) ** 2;
@@ -819,11 +831,12 @@ export function DraftWhiteboard({
     redraw();
   }, [redraw]);
 
-  /** 命中检测：笔画优先（canvas 恒绘制在贴图之上，视觉上层先命中），均从末位（最上层）向前找 */
+  /** 命中检测：笔画优先（canvas 恒绘制在贴图之上，视觉上层先命中），均从末位（最上层）向前找。
+   *  笔迹用严格的起手容差（SELECT_HIT_SLOP）——宽判定会把「拖框框选」抢成「抓住这条笔画」。 */
   const hitElement = (x: number, y: number): { stroke: Stroke } | { imageId: string } | null => {
     for (let i = strokesRef.current.length - 1; i >= 0; i--) {
       const s = strokesRef.current[i];
-      if (hitStroke(s, x, y)) return { stroke: s };
+      if (hitStroke(s, x, y, s.size / 2 + SELECT_HIT_SLOP)) return { stroke: s };
     }
     for (let i = imagesRef.current.length - 1; i >= 0; i--) {
       const im = imagesRef.current[i];
@@ -1026,7 +1039,7 @@ export function DraftWhiteboard({
 
   const eraseAt = (x: number, y: number) => {
     const before = strokesRef.current.length;
-    strokesRef.current = strokesRef.current.filter((s) => !hitStroke(s, x, y));
+    strokesRef.current = strokesRef.current.filter((s) => !hitStroke(s, x, y, s.size + ERASER_HIT_SLOP));
     if (strokesRef.current.length !== before) {
       // 被擦掉的笔画若在选区内，同步移出（防选中框残留）
       const sel = selectedStrokesRef.current;
