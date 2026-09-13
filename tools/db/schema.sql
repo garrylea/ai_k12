@@ -295,6 +295,30 @@ CREATE TABLE IF NOT EXISTS question_hints (
   CONSTRAINT fk_qh_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 语文古诗文默写篇目（2026-09-13）。questions 行作锚点（错题本/隐藏/提示都挂 question_id），
+-- 本表承载篇目级结构化字段：篇名（稳定业务主键）/作者/朝代/正文/册次/排序/校验闸门。
+-- 设计见 docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md §4
+CREATE TABLE IF NOT EXISTS dictation_passages (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  question_id BIGINT NOT NULL,
+  work_title VARCHAR(100) NOT NULL,
+  author VARCHAR(50) NOT NULL,
+  dynasty VARCHAR(20) NOT NULL,
+  body TEXT NOT NULL,
+  grade_band VARCHAR(20) NOT NULL,
+  grade VARCHAR(20) DEFAULT NULL,
+  semester VARCHAR(20) DEFAULT NULL,
+  sort_order SMALLINT NOT NULL DEFAULT 0,
+  source_ref VARCHAR(200) DEFAULT NULL,
+  verified TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_dp_question (question_id),
+  UNIQUE KEY uniq_dp_work (work_title, semester),
+  KEY idx_dp_filter (grade_band, semester, sort_order),
+  CONSTRAINT fk_dp_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 考试会话（服务器权威计时：deadline_at；状态 in_progress | submitted）
 CREATE TABLE IF NOT EXISTS exam_sessions (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
