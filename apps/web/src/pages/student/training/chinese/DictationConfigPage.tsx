@@ -82,7 +82,7 @@ export default function DictationConfigPage() {
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
         <PageHeader
           to="/student/training/chinese/special"
-          caption="返回语文专项"
+          caption="返回"
           title="古诗文默写"
           titleClassName="text-4xl font-extrabold"
         />

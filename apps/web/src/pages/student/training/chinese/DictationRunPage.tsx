@@ -92,7 +92,7 @@ export default function DictationRunPage() {
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
         <PageHeader
           to="/student/training/chinese/dictation"
-          caption="退出本次练习"
+          caption="退出"
           title="古诗文默写"
           titleClassName="text-4xl font-extrabold"
         />
