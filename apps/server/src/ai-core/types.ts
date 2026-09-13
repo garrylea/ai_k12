@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
@@ -49,7 +49,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
@@ -601,4 +601,21 @@ export interface AgentLog {
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string | ContentPart[];
+}
+
+// ========== Dictation Feedback Types（语文古诗文默写错因，2026-09-13） ==========
+
+export interface DictationFeedbackRequest {
+  workTitle: string;
+  expected: { author: string; dynasty: string; body: string };
+  student: { author: string; dynasty: string; body: string };
+  /** 三字段各自是否匹配（程序已判好传入；模型只解释，不判对错） */
+  fieldMatch: { author: boolean; dynasty: boolean; body: boolean };
+  /** 已渲染成可读文本的正文差异，如 床前明月[光→先] */
+  bodyDiffText: string;
+}
+
+export interface DictationFeedbackResponse {
+  content: string;
+  reasoning?: string;
 }
