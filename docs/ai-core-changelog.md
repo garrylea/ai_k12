@@ -8,6 +8,15 @@
 
 ---
 
+## 2026-09-13 修正（语文默写：题面去噪 + 种子脚本改按篇目业务键幂等）
+
+- **题面去掉「（并写出作者与朝代）」**：该文字出现在答题页标题上（用户实测反馈「不应该出现」），来源是库里的 `questions.content`——题干由 `seed-dictation-fixture.ts` 按模板生成，前端只是原样渲染 `prompt`，并非前端硬编码。作者/朝代/正文三者都是要学生默写的**答案**，已由答题页三个字段承载，题面重复一遍纯属噪音。约定改为 **`questions.content` 只放「请默写《篇名》」**，已写入 spec §4.1（内容管线生成题面时须遵守），同步更新 `docs/api/openapi.yaml` 的题面描述示例、种子脚本与两处测试夹具。
+- **种子脚本幂等键由 `content_hash` 改为篇目业务键**：原实现按 `content_hash`（由题面算出）去重，**题面模板一改 hash 就变** → 重跑会 `INSERT` 出**新行**并把旧行变孤儿（旧行仍占 `content_hash` 唯一键，且 `main_error_books.question_id` 外键为 `RESTRICT`，删旧行还可能被拦住）。现改为先按 `dictation_passages` 的业务键 `(work_title, semester)` 定位已有 `question_id`，有则**原地 `UPDATE`** `questions`（保住 `question_id`，错题本/隐藏题等挂在它上面的数据不受影响），无则插入。
+- **新增安全阀**：若目标篇目已存在且其 `questions.source` 不是 `DEV-FIXTURE`（即已由内容管线导入的真实题库），脚本**跳过并告警**，绝不覆盖真题——避免这个开发假数据脚本在内容上线后误伤生产数据。
+- **实测**：本地库 `questions` 5036/5037 被原地改写为新题面（`请默写《静夜思》` / `请默写《登鹳雀楼》`），连续两次运行打印的 `questionId` 不变、`questions` 与 `dictation_passages` 计数恒为 2/2，无孤儿行、无重复行。
+
+---
+
 ## 2026-09-13 新增（训练 → 语文 → 专项：古诗文默写）
 
 - **变更摘要**：

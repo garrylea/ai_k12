@@ -792,7 +792,7 @@ async function main() {
   const repo = new DictationPassagesRepository(pool as never);
 
   for (const f of FIXTURES) {
-    const content = `请默写《${f.workTitle}》（并写出作者与朝代）`;
+    const content = `请默写《${f.workTitle}》`;
     const answer = `作者：${f.author}\n朝代：${f.dynasty}\n正文：${f.body}`;
     const hash = computeContentHash(content);
 
@@ -1296,7 +1296,7 @@ import { JudgeCoreService } from './judge-core.service';
 
 const QUESTION = {
   id: 100, subject_id: 2, type: 'poem_dictation', difficulty: 2,
-  content: '请默写《静夜思》（并写出作者与朝代）',
+  content: '请默写《静夜思》',
   options: null, answer: '作者：李白\n朝代：唐\n正文：床前明月光，疑是地上霜。',
   explanation: null, source: 'DEV-FIXTURE', content_hash: 'x', is_active: 1, created_at: new Date(),
 };
@@ -1524,7 +1524,7 @@ const PASSAGE = {
   id: 1, question_id: 100, work_title: '静夜思', author: '李白', dynasty: '唐',
   body: '床前明月光，疑是地上霜。', grade_band: 'junior', grade: '九年级',
   semester: '上册', sort_order: 1, source_ref: 'DEV-FIXTURE', verified: 1,
-  questionContent: '请默写《静夜思》（并写出作者与朝代）',
+  questionContent: '请默写《静夜思》',
 };
 
 const WRONG_JUDGE = {
@@ -1584,7 +1584,7 @@ describe('TrainingService.startDictation', () => {
     const res = await service.startDictation({ studentId: 7, semester: '上册', questionIds: null, count: 5 });
     expect(dictationRepo.findRandomVerified).toHaveBeenCalledWith(7, CHINESE_SUBJECT_ID, '上册', 5);
     expect(res.questions).toEqual([
-      { questionId: 100, prompt: '请默写《静夜思》（并写出作者与朝代）', workTitle: '静夜思', semester: '上册' },
+      { questionId: 100, prompt: '请默写《静夜思》', workTitle: '静夜思', semester: '上册' },
     ]);
     expect(JSON.stringify(res)).not.toContain('李白');
     expect(JSON.stringify(res)).not.toContain('床前明月光');

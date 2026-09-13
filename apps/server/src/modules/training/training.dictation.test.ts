@@ -5,7 +5,7 @@ const PASSAGE = {
   id: 1, question_id: 100, work_title: '静夜思', author: '李白', dynasty: '唐',
   body: '床前明月光，疑是地上霜。', grade_band: 'junior', grade: '九年级',
   semester: '上册', sort_order: 1, source_ref: 'DEV-FIXTURE', verified: 1,
-  questionContent: '请默写《静夜思》（并写出作者与朝代）',
+  questionContent: '请默写《静夜思》',
 };
 
 const WRONG_JUDGE = {
@@ -66,7 +66,7 @@ describe('TrainingService.startDictation', () => {
     const res = await service.startDictation({ studentId: 7, semester: '上册', questionIds: null, count: 5 });
     expect(dictationRepo.findRandomVerified).toHaveBeenCalledWith(7, CHINESE_SUBJECT_ID, '上册', 5);
     expect(res.questions).toEqual([
-      { questionId: 100, prompt: '请默写《静夜思》（并写出作者与朝代）', workTitle: '静夜思', semester: '上册' },
+      { questionId: 100, prompt: '请默写《静夜思》', workTitle: '静夜思', semester: '上册' },
     ]);
     expect(JSON.stringify(res)).not.toContain('李白');
     expect(JSON.stringify(res)).not.toContain('床前明月光');

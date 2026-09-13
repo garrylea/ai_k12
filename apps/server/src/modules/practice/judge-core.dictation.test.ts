@@ -3,7 +3,7 @@ import { JudgeCoreService } from './judge-core.service';
 
 const QUESTION = {
   id: 100, subject_id: 2, type: 'poem_dictation', difficulty: 2,
-  content: '请默写《静夜思》（并写出作者与朝代）',
+  content: '请默写《静夜思》',
   options: null, answer: '作者：李白\n朝代：唐\n正文：床前明月光，疑是地上霜。',
   explanation: null, source: 'DEV-FIXTURE', content_hash: 'x', is_active: 1, created_at: new Date(),
 };

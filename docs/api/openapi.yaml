@@ -5955,7 +5955,7 @@ components:
           description: 题库题目 id
         prompt:
           type: string
-          description: 题面（如「请默写《静夜思》（并写出作者与朝代）」）
+          description: 题面（如「请默写《静夜思》」；只放篇名，不含任何提示性文字）
         workTitle:
           type: string
           description: 篇名

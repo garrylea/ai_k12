@@ -56,7 +56,7 @@
 
 - `type = 'poem_dictation'`（新题型值；`questions.type` 是自由 `VARCHAR(20)`，DB 无 CHECK 约束）
 - `subject_id = 2`（chinese）
-- `content = '请默写《岳阳楼记》（并写出作者与朝代）'`
+- `content = '请默写《岳阳楼记》'` —— **题面只放篇名，不要写「（并写出作者与朝代）」之类的提示**：作者/朝代/正文都是要学生默写的**答案**，由答题页的三个字段承载，题面重复一遍只是噪音（2026-09-13 用户实测反馈后确定；内容管线生成题面时须遵守同一约定）
 - `answer` = 可读合成答案（作者 / 朝代 / 正文），供通用展示路径使用
 - `content_hash = computeContentHash(content)`（`uniq_q_content_hash` 唯一约束）
 - `answer_verified` = 校验闸门标记

@@ -69,23 +69,55 @@ async function main() {
   const repo = new DictationPassagesRepository(pool as never);
 
   for (const f of FIXTURES) {
-    const content = `请默写《${f.workTitle}》（并写出作者与朝代）`;
+    // 题面只放「请默写《篇名》」：作者/朝代/正文都是要学生默写的**答案**，
+    // 由答题页的三个字段承载，题面里再写一遍「（并写出作者与朝代）」是重复噪音。
+    const content = `请默写《${f.workTitle}》`;
     const answer = `作者：${f.author}\n朝代：${f.dynasty}\n正文：${f.body}`;
     const hash = computeContentHash(content);
 
-    await pool.execute(
-      `INSERT INTO questions
-         (subject_id, type, difficulty, content, answer, grade_band, source, content_hash, answer_verified, is_active)
-       VALUES (?, 'poem_dictation', 2, ?, ?, 'junior', 'DEV-FIXTURE', ?, 0, 1)
-       ON DUPLICATE KEY UPDATE
-         answer = VALUES(answer), source = VALUES(source), is_active = 1`,
-      [CHINESE_SUBJECT_ID, content, answer, hash],
+    // 以「篇名 + 册次」——dictation_passages 的业务键——作为身份，而不是 content_hash。
+    // 原因：题面模板一旦调整，content_hash 就变，按 hash 去重会**插出一条新题**并把旧行变孤儿
+    // （且 main_error_books.question_id 外键是 RESTRICT，删旧行还可能被拦）。
+    // 原地更新能保住 question_id，错题本/隐藏题等挂在它上面的数据不受影响。
+    const [existing] = await pool.execute<any[]>(
+      `SELECT dp.question_id, q.source FROM dictation_passages dp
+         JOIN questions q ON q.id = dp.question_id
+        WHERE dp.work_title = ? AND dp.semester = ? LIMIT 1`,
+      [f.workTitle, f.semester],
     );
-    const [rows] = await pool.execute<any[]>(
-      'SELECT id FROM questions WHERE content_hash = ? LIMIT 1',
-      [hash],
-    );
-    const questionId = rows[0].id as number;
+
+    // 安全阀：若该篇目已属真实题库（内容管线导入的），绝不覆盖——本脚本只碰自己的假数据。
+    if (existing.length > 0 && existing[0].source !== 'DEV-FIXTURE') {
+      console.warn(
+        `[seed-dictation-fixture] 跳过《${f.workTitle}》：该篇目已存在且 source=${existing[0].source}，非开发假数据`,
+      );
+      continue;
+    }
+
+    let questionId: number;
+    if (existing.length > 0) {
+      questionId = existing[0].question_id as number;
+      await pool.execute(
+        `UPDATE questions
+            SET content = ?, answer = ?, content_hash = ?, type = 'poem_dictation',
+                subject_id = ?, grade_band = 'junior', source = 'DEV-FIXTURE',
+                answer_verified = 0, is_active = 1
+          WHERE id = ?`,
+        [content, answer, hash, CHINESE_SUBJECT_ID, questionId],
+      );
+    } else {
+      await pool.execute(
+        `INSERT INTO questions
+           (subject_id, type, difficulty, content, answer, grade_band, source, content_hash, answer_verified, is_active)
+         VALUES (?, 'poem_dictation', 2, ?, ?, 'junior', 'DEV-FIXTURE', ?, 0, 1)`,
+        [CHINESE_SUBJECT_ID, content, answer, hash],
+      );
+      const [rows] = await pool.execute<any[]>(
+        'SELECT id FROM questions WHERE content_hash = ? LIMIT 1',
+        [hash],
+      );
+      questionId = rows[0].id as number;
+    }
 
     await repo.upsert({
       questionId,
