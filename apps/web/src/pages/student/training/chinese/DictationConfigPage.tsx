@@ -171,7 +171,7 @@ export default function DictationConfigPage() {
           )}
         </section>
 
-        {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
+        {error && <p className="mt-6 text-sm text-[var(--error)]">{error}</p>}
 
         <button
           onClick={handleStart}
