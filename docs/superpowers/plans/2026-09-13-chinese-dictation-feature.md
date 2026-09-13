@@ -869,6 +869,7 @@ git commit -m "chore(server): 新增语文默写开发假数据种子脚本（�
 - Test: `apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts`
 - Modify: `apps/server/src/ai-core/infra/prompt-builder.ts`（`resolveTemplatePath`）
 - Modify: `apps/server/src/ai-core/model-routes.yaml`、`apps/server/src/ai-core/retry.yaml`
+- Modify: `apps/server/src/modules/admin/admin-models.service.ts:8`（`SCENES` 加入 `dictation_feedback`，否则后台模型管理页看不到新场景）
 - Create: `apps/server/src/scripts/seed-dictation-feedback-route.ts`
 
 **Interfaces:**
@@ -1142,64 +1143,98 @@ Expected: PASS，4 个用例全绿。
 
 - [ ] **Step 10: 写补路由脚本（给已 seed 的库）**
 
-先确认真实列名与唯一键：
+**先读既有的同型脚本**：`apps/server/src/scripts/set-title-route.ts` —— 它就是「给已 seed 的库补一个场景路由」的范例，与本步需求一字不差。**注意 `llm_routes` 的列是 `primary_model_key` / `fallback_model_key` 两个模型 key 字符串，不是模型 id 外键**；写法是「先按 `(scene, subject)` 查，有则 UPDATE、无则 INSERT」，且主模型不在库时降级用 fallback 顶上。下面脚本按此镜像。
 
-```bash
-grep -n "CREATE TABLE IF NOT EXISTS llm_routes" -A 15 tools/db/schema.sql
-```
-
-按实际 schema 创建 `apps/server/src/scripts/seed-dictation-feedback-route.ts`（下列代码按 `llm_routes(scene, subject, primary_model_id, fallback_model_id, is_active)` 与 `llm_models(model_key)` 编写；**若与实际不符，按实际改脚本，不要改 schema**）：
+创建 `apps/server/src/scripts/seed-dictation-feedback-route.ts`：
 
 ```ts
 /**
- * 给已 seed llm_routes 的库补 dictation_feedback 路由（YAML 只服务新装 / DB 空时）。
- * 幂等：按 (scene, subject) upsert。先例：set-judging-local.ts / set-title-route.ts。
- * 运行：npx tsx src/scripts/seed-dictation-feedback-route.ts
+ * 语文默写错因路由：`dictation_feedback` 场景 = 本地模型优先、deepseek-v4-flash 兜底。
+ * 读 YAML routes.dictation_feedback，幂等写进 llm_routes（已 seed 的库靠本脚本补路由；
+ * seed-llm-config.ts 是 skip-if-exists，不会更新既有行）。
+ * 镜像 set-title-route.ts（llm_routes 存的是 model_key 字符串，不是模型 id）。
+ *
+ * 运行：cd apps/server && npx tsx src/scripts/seed-dictation-feedback-route.ts
+ * 生效：脚本不改内存 registry —— 重启后端，或后台保存一次路由触发 reload。
  */
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import mysql from 'mysql2/promise';
+import { routeConfig } from '../ai-core/config.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: join(__dirname, '../../.env') });
+
+const SCENE = 'dictation_feedback';
 
 async function main() {
+  const rule = routeConfig.routes.dictation_feedback?.find((r) => r.subject === '*')
+    ?? routeConfig.routes.dictation_feedback?.[0];
+  if (!rule) throw new Error('YAML 缺少 routes.dictation_feedback');
+
   const pool = mysql.createPool({
     host: process.env.DB_HOST ?? 'localhost',
+    port: Number(process.env.DB_PORT ?? 3306),
     user: process.env.DB_USER ?? 'ai_k12',
     password: process.env.DB_PASS ?? 'ai_k12',
     database: process.env.DB_NAME ?? 'ai_k12',
   });
 
-  const [models] = await pool.query<any[]>('SELECT id, model_key FROM llm_models');
-  const idOf = new Map<string, number>(models.map((m) => [m.model_key as string, m.id as number]));
-  const primaryId = idOf.get('local');
-  const fallbackId = idOf.get('deepseek-v4-flash');
-  if (!primaryId || !fallbackId) {
-    throw new Error('llm_models 缺少 local 或 deepseek-v4-flash，请先跑 seed-llm-config');
+  // 主模型缺失时降级用 fallback 顶上（与 set-title-route.ts 同策略），避免选到不存在的模型
+  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+    'SELECT model_key FROM llm_models WHERE is_enabled = 1 AND model_key IN (?, ?)',
+    [rule.primary, rule.fallback ?? ''],
+  );
+  const present = new Set(rows.map((r) => r.model_key as string));
+  let primary = rule.primary;
+  let fallback: string | null = rule.fallback ?? null;
+  if (!present.has(primary)) {
+    if (fallback && present.has(fallback)) {
+      console.warn(`[${SCENE}] 主模型 ${primary} 不在库中，降级用 ${fallback} 作 primary`);
+      primary = fallback;
+      fallback = null;
+    } else {
+      throw new Error(`[${SCENE}] 主模型 ${primary} 与 fallback 都不在库中，先 seed 模型`);
+    }
   }
 
-  await pool.execute(
-    `INSERT INTO llm_routes (scene, subject, primary_model_id, fallback_model_id, is_active)
-     VALUES ('dictation_feedback', '*', ?, ?, 1)
-     ON DUPLICATE KEY UPDATE primary_model_id = VALUES(primary_model_id),
-       fallback_model_id = VALUES(fallback_model_id), is_active = 1`,
-    [primaryId, fallbackId],
-  );
-  console.log('dictation_feedback route upserted');
+  const [routeRows] = await pool.execute<mysql.RowDataPacket[]>(
+    'SELECT id FROM llm_routes WHERE scene = ? AND subject = ?', [SCENE, '*']);
+  if (routeRows.length > 0) {
+    await pool.execute(
+      `UPDATE llm_routes
+         SET primary_model_key = ?, fallback_model_key = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE scene = ? AND subject = ?`,
+      [primary, fallback, SCENE, '*']);
+    console.log(`[${SCENE}] 路由 ${SCENE}/* 已更新 -> ${primary} / ${fallback ?? '-'}`);
+  } else {
+    await pool.execute(
+      'INSERT INTO llm_routes (scene, subject, primary_model_key, fallback_model_key) VALUES (?, ?, ?, ?)',
+      [SCENE, '*', primary, fallback]);
+    console.log(`[${SCENE}] 路由 ${SCENE}/* 已插入 -> ${primary} / ${fallback ?? '-'}`);
+  }
+
+  console.log(`[${SCENE}] 完成。重启后端（或后台保存路由）后生效。`);
   await pool.end();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch((e) => { console.error(`[${SCENE}] 失败:`, e); process.exit(1); });
 ```
+
+再同步两处，缺一则后台看不到该场景、或 TS 直接报错：
+
+1. `apps/server/src/modules/admin/admin-models.service.ts:8` 的 `SCENES` 数组加入 `'dictation_feedback'`（后台模型管理页按它渲染场景下拉，不加则新场景在后台不可见）。
+2. 确认 `routeConfig.routes` 的类型来源（`grep -n "routes" apps/server/src/ai-core/config.ts`）。若是**手写**的 interface/type（而非从 YAML 推断的宽松类型），补上 `dictation_feedback` 字段，否则上面 `routeConfig.routes.dictation_feedback` 会 TS 报错。
 
 - [ ] **Step 11: 跑脚本并验证**
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-feedback-route.ts
-MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT scene, subject, primary_model_id, fallback_model_id FROM llm_routes WHERE scene='dictation_feedback';"
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT scene, subject, primary_model_key, fallback_model_key FROM llm_routes WHERE scene='dictation_feedback';"
 ```
 
-Expected: 打印 `dictation_feedback route upserted`，并查到 1 行路由。
+Expected: 打印 `[dictation_feedback] 路由 dictation_feedback/* 已插入 -> local / deepseek-v4-flash`（若 `local` 未 seed 则为降级后的输出），并查到 1 行路由。**再跑一次脚本验证幂等**：第二次应打印「已更新」且 `llm_routes` 仍只有 1 行。
 
 - [ ] **Step 12: 跑全量测试**
 
@@ -1212,7 +1247,7 @@ Expected: 全绿。
 - [ ] **Step 13: Commit**
 
 ```bash
-git add apps/server/src/ai-core/types.ts apps/server/src/ai-core/prompts/dictation/feedback.md apps/server/src/ai-core/capabilities/dictation-feedback.capability.ts apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts apps/server/src/ai-core/infra/prompt-builder.ts apps/server/src/ai-core/model-routes.yaml apps/server/src/ai-core/retry.yaml apps/server/src/scripts/seed-dictation-feedback-route.ts
+git add apps/server/src/ai-core/types.ts apps/server/src/ai-core/prompts/dictation/feedback.md apps/server/src/ai-core/capabilities/dictation-feedback.capability.ts apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts apps/server/src/ai-core/infra/prompt-builder.ts apps/server/src/ai-core/model-routes.yaml apps/server/src/ai-core/retry.yaml apps/server/src/modules/admin/admin-models.service.ts apps/server/src/scripts/seed-dictation-feedback-route.ts
 git commit -m "feat(ai-core): 新增语文默写错因能力 dictation_feedback（本地优先，ds 兜底）"
 ```
 
