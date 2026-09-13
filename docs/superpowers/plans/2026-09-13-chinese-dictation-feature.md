@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 - [ ] **Step 2: 在本地库执行建表**
 
 ```bash
-mysql -u ai_k12 -p'ai_k12' ai_k12 < tools/db/schema.sql
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/schema.sql
 ```
 
 Expected: 无报错（`CREATE TABLE IF NOT EXISTS` 对既有表幂等）。
@@ -186,7 +186,7 @@ Expected: 无报错（`CREATE TABLE IF NOT EXISTS` 对既有表幂等）。
 - [ ] **Step 3: 验证表结构**
 
 ```bash
-mysql -u ai_k12 -p'ai_k12' ai_k12 -e "SHOW CREATE TABLE dictation_passages\G"
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SHOW CREATE TABLE dictation_passages;"
 ```
 
 Expected: 输出含 `uniq_dp_question`、`uniq_dp_work`、`idx_dp_filter`，以及外键 `fk_dp_question` 指向 `questions(id)`。
@@ -807,7 +807,7 @@ Expected: 打印两行 `seeded questionId=... 《静夜思》` / `《登鹳雀�
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
-mysql -u ai_k12 -p'ai_k12' ai_k12 -e "SELECT COUNT(*) AS p FROM dictation_passages WHERE source_ref='DEV-FIXTURE'; SELECT COUNT(*) AS q FROM questions WHERE source='DEV-FIXTURE';"
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT COUNT(*) AS p FROM dictation_passages WHERE source_ref='DEV-FIXTURE'; SELECT COUNT(*) AS q FROM questions WHERE source='DEV-FIXTURE';"
 ```
 
 Expected: 第二次打印的 questionId 与第一次相同；两个计数都是 `2`（不是 4）。
@@ -1157,7 +1157,7 @@ main().catch((err) => {
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-feedback-route.ts
-mysql -u ai_k12 -p'ai_k12' ai_k12 -e "SELECT scene, subject, primary_model_id, fallback_model_id FROM llm_routes WHERE scene='dictation_feedback';"
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT scene, subject, primary_model_id, fallback_model_id FROM llm_routes WHERE scene='dictation_feedback';"
 ```
 
 Expected: 打印 `dictation_feedback route upserted`，并查到 1 行路由。
