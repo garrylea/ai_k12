@@ -33,7 +33,8 @@ export default function ChineseSpecialPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center justify-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center justify-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-4xl px-4 sm:px-8">

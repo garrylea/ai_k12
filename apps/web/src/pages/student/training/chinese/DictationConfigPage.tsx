@@ -75,7 +75,8 @@ export default function DictationConfigPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
