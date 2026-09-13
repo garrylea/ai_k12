@@ -27,6 +27,14 @@ describe('normalizeChineseAnswer', () => {
     expect(normalizeChineseAnswer('')).toBe('');
     expect(normalizeChineseAnswer(undefined as unknown as string)).toBe('');
   });
+
+  it('波浪号三种写法都忽略（全角 U+FF5E / 半角 U+007E / 波浪线 U+301C）', () => {
+    // 归一化先 NFKC 再去标点：全角 ～ 会被 NFKC 变成半角 ~，
+    // 故集合里必须同时有 ~ 与 〜，否则这个「忽略波浪号」的意图不会生效。
+    expect(normalizeChineseAnswer('床前明月光～')).toBe('床前明月光');
+    expect(normalizeChineseAnswer('床前明月光~')).toBe('床前明月光');
+    expect(normalizeChineseAnswer('床前明月光〜')).toBe('床前明月光');
+  });
 });
 
 describe('diffChinese', () => {
