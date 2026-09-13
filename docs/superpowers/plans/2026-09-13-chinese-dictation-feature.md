@@ -1266,16 +1266,22 @@ git commit -m "feat(ai-core): 新增语文默写错因能力 dictation_feedback�
   - `interface JudgeDictationOutput { questionId: number; isCorrect: boolean; method: 'exact'; fields: { author: {match:boolean}; dynasty: {match:boolean}; body: {match:boolean} }; bodyDiff: DictationDiffOp[]; errorBookId?: number }`
   - `JudgeCoreService.judgeDictation(input: JudgeDictationInput): Promise<JudgeDictationOutput>`
 
-- [ ] **Step 1: 确认 `writeErrorBookOrReuse` 的真实签名与它调用的 repo 方法名**
+- [ ] **Step 1: 确认 `writeErrorBookOrReuse` 的真实形状（已核实，按此写）**
 
-```bash
-cd apps/server && grep -n "writeErrorBookOrReuse" -A 22 src/modules/practice/judge-core.service.ts
+已读源码核实（`judge-core.service.ts:359-375`）：
+
+```ts
+private async writeErrorBookOrReuse(input: {
+  studentId: number; subjectId: number; questionId: number;
+  source: string; sourceRefId?: number | null;
+}): Promise<number> {
+  const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(input.studentId, input.questionId);
+  if (existing) return existing.id;
+  return this.mainErrorRepo.create({ student_id, subject_id, question_id, source, source_ref_id, question_n: null, lesson_id: null, wrong_answer_text: null });
+}
 ```
 
-必须看清两件事，并据此调整下面 Step 2 测试里的 mock 与 Step 5 的调用：
-
-1. **参数形状**：是否含 `sourceRefId`（下面代码假设为 `{ studentId, subjectId, questionId, source, sourceRefId }`）；
-2. **它内部调用的仓储方法名**（下面测试 mock 的是 `mainErrorRepo.findOrCreate`）。若实际方法名不同（例如 `findOrCreateByStudentQuestion`），**把测试 mock 的方法名改成实际名**，否则 `errorBookId` 会是 `undefined`，Step 6 的断言会失败。
+要点：参数含 `sourceRefId`（可省）；返回 `Promise<number>`（错题本行 id）；它内部调的是 **`findUnclearedByStudentQuestionId`**（命中则复用）与 **`create`**。因此下面测试必须 mock 这两个方法——**不是** `findOrCreate`。
 
 **不要改 `judge-core.service.ts` 里既有的 `writeErrorBookOrReuse` 与其调用方**——本任务只新增 `judgeDictation`。
 
@@ -1298,7 +1304,10 @@ function makeService() {
   const questionsRepo = { findById: vi.fn().mockResolvedValue(QUESTION) };
   const mainErrorRepo = {
     clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(undefined),
-    findOrCreate: vi.fn().mockResolvedValue({ id: 555 }),
+    // writeErrorBookOrReuse 的真实依赖：先 findUnclearedByStudentQuestionId（未命中→null），
+    // 再 create（返回错题本行 id）。mock 错名字会让 errorBookId 变 undefined。
+    findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
+    create: vi.fn().mockResolvedValue(555),
   };
   const service = new JudgeCoreService(
     questionsRepo as never,
@@ -1337,7 +1346,7 @@ describe('JudgeCoreService.judgeDictation', () => {
     expect(res.fields.body.match).toBe(false);
     expect(res.fields.author.match).toBe(true);
     expect(res.bodyDiff).toContainEqual({ type: 'wrong', expected: '光', actual: '先' });
-    expect(mainErrorRepo.findOrCreate).toHaveBeenCalled();
+    expect(mainErrorRepo.create).toHaveBeenCalled();
     expect(res.errorBookId).toBe(555);
   });
 
