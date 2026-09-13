@@ -139,7 +139,7 @@ export class TrainingController {
 
   // ==================== 语文古诗文默写（2026-09-13） ====================
 
-  /** 语文默写篇目清单（配置页用；只出已校验篇目，不含正文）。 */
+  /** 语文默写篇目清单（配置页用；只出已校验篇目，作者/朝代/正文均不下发）。 */
   @Get('dictation/passages')
   async listDictationPassages() {
     return this.trainingService.listDictationPassages();

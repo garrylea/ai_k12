@@ -3887,7 +3887,7 @@ paths:
         语文默写开练（student JWT）。count 限 1-20 整数（越界/非整数 400）；
         semester 限 上册|下册|null（null=全部册次，非法 400）；questionIds 为正整数
         数组或 null——非空时按指定篇目出题（忽略 semester，仅保留已校验篇目），
-        否则按册次随机抽题。        题项白名单序列化：只出 questionId/prompt/workTitle/semester，
+        否则按册次随机抽题。 题项白名单序列化：只出 questionId/prompt/workTitle/semester，
         author/dynasty/正文一律剥离（防答案泄露，与 targeted/start 同规矩）。
         「不再展示」排除仅作用于随机抽题路径——按册次随机抽题时基于 JWT
         user.sub（studentId）LEFT JOIN student_hidden_questions ... IS NULL 排除
@@ -5890,7 +5890,7 @@ components:
 
     DictationPassageListResult:
       type: object
-      description: 语文默写篇目清单（仅已校验篇目，不含正文）
+      description: 语文默写篇目清单（仅已校验篇目，作者/朝代/正文均不下发）
       properties:
         passages:
           type: array
