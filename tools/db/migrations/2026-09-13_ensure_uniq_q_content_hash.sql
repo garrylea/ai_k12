@@ -19,9 +19,14 @@ SET @has_uniq := (
     FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'questions'
-      AND COLUMN_NAME = 'content_hash'
       AND NON_UNIQUE = 0
-  ) AS uniq_idx
+    GROUP BY INDEX_NAME
+    -- COUNT(*)=1 且唯一列就是 content_hash：即「**单列**唯一索引」。
+    -- 不能用「某行 NON_UNIQUE=0」判定——复合唯一索引（如 UNIQUE (content_hash, source)）
+    -- 在 STATISTICS 里每一列都记 NON_UNIQUE=0，但并不让 content_hash 单独唯一，
+    -- 那样会静默跳过本迁移、漏洞照旧。
+    HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'
+  ) AS uniq_single_col
 );
 
 SET @ddl := IF(

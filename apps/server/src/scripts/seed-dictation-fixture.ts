@@ -42,9 +42,12 @@ const FIXTURES = [
  */
 async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
   const [rows] = await pool.execute<any[]>(
-    `SELECT COUNT(*) AS c FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions'
-       AND COLUMN_NAME = 'content_hash' AND NON_UNIQUE = 0`,
+    `SELECT COUNT(*) AS c FROM (
+       SELECT INDEX_NAME FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions' AND NON_UNIQUE = 0
+       GROUP BY INDEX_NAME
+       HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'
+     ) AS uniq_single_col`,
   );
   if (Number(rows[0]?.c ?? 0) === 0) {
     throw new Error(
