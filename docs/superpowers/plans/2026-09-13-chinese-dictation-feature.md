@@ -64,6 +64,8 @@
 | `apps/server/src/modules/training/training.controller.ts` | 新增三个端点 |
 | `apps/server/src/modules/training/training.module.ts` | provide 新 repo + 新 capability |
 | `apps/server/src/modules/training/dto/dictation.dto.ts` | 新 DTO 类型 |
+| `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql` | **新建**：幂等迁移，修复老库 `content_hash` 唯一索引漂移（Task 17） |
+| `apps/server/src/scripts/seed-dictation-fixture.ts` | Task 17 追加 `assertContentHashUniqueIndex` 守卫 |
 
 ### 前端新增
 
@@ -3034,6 +3036,159 @@ Expected: 全部通过。
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml docs/ai-core-changelog.md
 git commit -m "docs(api): 同步语文默写三端点与数据流，记录变更日志"
 ```
+
+---
+
+## Task 17: 修复 `questions.content_hash` 唯一索引漂移 + 种子脚本加守卫
+
+> **执行时机：Task 5 之后立刻执行**（编号靠后是因为它是评审追加的任务，避免打乱既有 Task 6–16 的编号与简报缓存）。
+
+**背景（Task 5 评审发现）**：`questions` 表由 `CREATE TABLE IF NOT EXISTS` 创建，对**早已存在**的库是空操作——因此 `schema.sql` 后来新增的键永远补不到老库。实测本机开发库缺少 `uniq_q_content_hash`（只有同列的非唯一索引），导致 Task 5 种子脚本的 `ON DUPLICATE KEY UPDATE` 静默插重复行（第二次运行 `questions` 计数变 4）。
+
+影响面不只本功能：`apps/server/src/database/repositories/questions.repo.ts` 的 `findOrCreate` 靠捕获 `ER_DUP_ENTRY` 兜并发竞态，索引缺失时该保护静默失效；`docs/K12智学系统-数据库设计文档.md` 也写着同一条唯一性假设。
+
+**用户裁决**：迁移修环境 + 种子脚本启动时断言索引存在（缺失则报错退出，不静默重复）。
+
+**Files:**
+- Create: `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql`
+- Modify: `apps/server/src/scripts/seed-dictation-fixture.ts`
+
+**Interfaces:**
+- Consumes: `tools/db/migrations/` 既有约定（纯 SQL、手动执行、文件名 `YYYY-MM-DD_描述.sql`；`install_mysql.sh` **不**执行 migrations）
+- Produces: 幂等迁移 + 种子脚本的 `assertContentHashUniqueIndex(pool): Promise<void>` 守卫（缺失时抛错）
+
+- [ ] **Step 1: 写幂等迁移**
+
+创建 `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql`：
+
+```sql
+-- 2026-09-13 修复 questions.content_hash 唯一索引漂移。
+--
+-- 成因：questions 由 CREATE TABLE IF NOT EXISTS 创建，对早已存在的库是空操作，
+-- 故 schema.sql 新增的键（含 UNIQUE KEY uniq_q_content_hash）永远补不到老库。
+-- 后果：answer_importer / 种子脚本的 ON DUPLICATE KEY UPDATE 静默插重复；
+-- questions.repo.ts::findOrCreate 依赖 ER_DUP_ENTRY 兜并发竞态的保护失效。
+--
+-- 幂等：先查 information_schema 是否已有覆盖 content_hash 的**唯一**索引，没有才建。
+-- 不 DROP 同列上遗留的非唯一索引（冗余但无害，避免破坏性操作）。
+-- 注意：若库中已存在重复 content_hash，本迁移会以 ER_DUP_ENTRY 报错——这是**期望的**
+-- 响亮失败。先跑下面注释里的诊断查询清理重复，再重跑本迁移。
+--
+--   SELECT content_hash, COUNT(*) c FROM questions
+--   WHERE content_hash IS NOT NULL GROUP BY content_hash HAVING c > 1;
+
+SET @has_uniq := (
+  SELECT COUNT(*) FROM (
+    SELECT INDEX_NAME
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'questions'
+      AND COLUMN_NAME = 'content_hash'
+      AND NON_UNIQUE = 0
+  ) AS uniq_idx
+);
+
+SET @ddl := IF(
+  @has_uniq = 0,
+  'ALTER TABLE questions ADD UNIQUE KEY uniq_q_content_hash (content_hash)',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+```
+
+> **为什么用「查 information_schema + 动态 SQL」而不是单条 DDL**：MySQL 8 不支持 `CREATE UNIQUE INDEX IF NOT EXISTS`；而存储过程在 `log_bin=ON` 且 `log_bin_trust_function_creators=OFF` 的环境需要 SUPER 权限（本机 `schema.sql` 的 `CREATE TRIGGER` 段正是因此报 `ERROR 1419`）。`PREPARE/EXECUTE` 可执行的语句清单包含 `ALTER TABLE` 与 `SELECT`，故用 `'SELECT 1'` 作无操作分支（`DO 0` **不可** PREPARE）。
+>
+> **为什么按「是否存在覆盖该列的唯一索引」判定而不是按索引名**：漂移库里的遗留索引名是 `idx_q_content_hash`（非唯一），与目标名不同；按名判定会在已有其它唯一索引时误建重复键名。
+
+- [ ] **Step 2: 执行迁移（两次，验证幂等）**
+
+```bash
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql
+```
+
+Expected: 两次都不报错。第一次会真正建索引（若无），第二次走 `SELECT 1` 无操作分支。
+
+- [ ] **Step 3: 验证索引已是唯一**
+
+```bash
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='ai_k12' AND TABLE_NAME='questions' AND COLUMN_NAME='content_hash';"
+```
+
+Expected: 至少一行 `NON_UNIQUE: 0`（唯一索引存在）。
+
+- [ ] **Step 4: 给种子脚本加守卫**
+
+在 `apps/server/src/scripts/seed-dictation-fixture.ts` 中，`main()` 开头（建 pool 之后、写数据之前）插入守卫，并新增该函数：
+
+```ts
+/**
+ * 守卫：本脚本的幂等性完全依赖 uniq_q_content_hash（ON DUPLICATE KEY UPDATE 要有东西可冲突）。
+ * 老库可能因为 CREATE TABLE IF NOT EXISTS 的语义缺这个键——那时 INSERT 会静默插重复行。
+ * 故启动时先断言它存在，缺了直接报错退出，而不是安静地产生脏数据。
+ */
+async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
+  const [rows] = await pool.execute<any[]>(
+    `SELECT COUNT(*) AS c FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions'
+       AND COLUMN_NAME = 'content_hash' AND NON_UNIQUE = 0`,
+  );
+  if (Number(rows[0]?.c ?? 0) === 0) {
+    throw new Error(
+      'questions.content_hash 缺少唯一索引 uniq_q_content_hash——' +
+      '本脚本的幂等依赖它，继续跑会插重复行。' +
+      '请先执行 tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql。',
+    );
+  }
+}
+```
+
+`main()` 里在 `const repo = new DictationPassagesRepository(pool as never);` 之前加：
+
+```ts
+  await assertContentHashUniqueIndex(pool);
+```
+
+- [ ] **Step 5: 验证守卫的失败路径（非破坏性 RED）**
+
+不要为了验证而真的删索引（那是破坏性操作）。改为**临时把守卫的判定条件改成必然不成立**：
+
+把 `AND NON_UNIQUE = 0` 临时改成 `AND NON_UNIQUE = 1`（唯一的索引 NON_UNIQUE 是 0，故改成 1 后必查不到），运行：
+
+```bash
+cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
+```
+
+Expected: 报错退出（exit code 1），错误信息含 `缺少唯一索引`。**随后还原为 `AND NON_UNIQUE = 0`**，并确认 `git diff` 里没有遗留这个临时改动。
+
+- [ ] **Step 6: 还原后跑通 + 幂等复验**
+
+```bash
+cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts && npx tsx src/scripts/seed-dictation-fixture.ts
+MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT COUNT(*) AS passages FROM dictation_passages WHERE source_ref='DEV-FIXTURE'; SELECT COUNT(*) AS q FROM questions WHERE source='DEV-FIXTURE';"
+```
+
+Expected: 两次都打印同样的 `questionId`；计数恒为 `2` / `2`。
+
+- [ ] **Step 7: 全量测试**
+
+```bash
+cd apps/server && npm test
+```
+
+Expected: 全绿。
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql apps/server/src/scripts/seed-dictation-fixture.ts
+git commit -m "fix(db): 补幂等迁移修复 content_hash 唯一索引漂移，种子脚本加守卫"
+```
+
+> 迁移已折回 `schema.sql`（`uniq_q_content_hash` 本来就在 `schema.sql:235`），故本次**不需要**再改 `schema.sql`。
 
 ---
 
