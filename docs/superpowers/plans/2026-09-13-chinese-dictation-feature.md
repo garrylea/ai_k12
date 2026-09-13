@@ -2496,7 +2496,7 @@ export default function DictationConfigPage() {
           )}
         </section>
 
-        {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
+        {error && <p className="mt-6 text-sm text-[var(--error)]">{error}</p>}
 
         <button
           onClick={handleStart}
@@ -2595,22 +2595,22 @@ export default function DictationDiffView({ ops, className = '' }: Props) {
         if (op.type === 'wrong') {
           return (
             <span key={i} className="inline-flex items-baseline">
-              <span className="text-red-500 font-bold underline decoration-wavy">{op.actual}</span>
+              <span className="text-[var(--error)] font-bold underline decoration-wavy">{op.actual}</span>
               <span className="mx-0.5 text-xs text-[var(--text-secondary)]">应为</span>
-              <span className="text-green-600 font-bold">{op.expected}</span>
+              <span className="text-[var(--success)] font-bold">{op.expected}</span>
             </span>
           );
         }
         if (op.type === 'missing') {
           return (
-            <span key={i} className="text-red-500 font-bold">
+            <span key={i} className="text-[var(--error)] font-bold">
               <span className="text-xs text-[var(--text-secondary)] mr-0.5">漏</span>
               {op.text}
             </span>
           );
         }
         return (
-          <span key={i} className="text-orange-500 line-through">
+          <span key={i} className="text-[var(--warning)] line-through">
             <span className="text-xs text-[var(--text-secondary)] mr-0.5 no-underline">多</span>
             {op.text}
           </span>
@@ -2831,7 +2831,7 @@ export default function DictationRunPage() {
           <DictationAnswerForm value={answer} onChange={setAnswer} disabled={result != null} />
         </div>
 
-        {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+        {error && <p className="mt-4 text-sm text-[var(--error)]">{error}</p>}
 
         {result == null ? (
           <button
@@ -2844,7 +2844,7 @@ export default function DictationRunPage() {
           </button>
         ) : (
           <div className="mt-8 rounded-2xl bg-white p-6" style={{ border: '1px solid rgba(226, 232, 240, 0.8)' }}>
-            <p className={`text-xl font-black ${result.isCorrect ? 'text-green-600' : 'text-red-500'}`}>
+            <p className={`text-xl font-black ${result.isCorrect ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
               {result.isCorrect ? '全部正确' : '有错误'}
             </p>
 
