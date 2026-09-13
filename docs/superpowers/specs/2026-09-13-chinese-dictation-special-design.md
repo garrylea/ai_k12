@@ -137,6 +137,8 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 
 - **篇目清单来源**：教材课后习题的「背诵/默写」标注；抽不出来则回退到公开必背清单人工确认。
 - **抽题池守卫**：`verified=0` 的篇目不进抽题池。
+
+  > **守卫的适用范围（2026-09-13 裁决）**：`verified` 门禁只作用于**抽题池**（三条查询全部卡 `verified = 1 AND is_active = 1`）。判定路径按题 id 取篇目时**有意不设门禁**——实测影响面为：非默写题无 `dictation_passages` 行（404，跨学科无泄露）、已停用题由 `judgeCore` 内部的 `questions.findById`（过滤 `is_active = 1`）拦下、残留可达的只有 `verified = 0` 的默写题，而古诗文正文属公开内容、且学生在任何一次提交后都会看到参考答案，故不构成实际新增能力。**不要为该路径补门禁**——那会误伤后续「按 ID 直接练某篇」等合法用法。
 - **不做**：不走数学那套 `extract_cli → publish_cli → db_loader_cli`（其卡/题模型与篇目级数据不匹配，改动会波及数学）。仅复用 `convert_cli`。
 
 ## 7. 前端设计
