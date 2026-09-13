@@ -17,6 +17,7 @@
 - TS 严格模式、2 空格缩进；组件/类 PascalCase，函数/变量 camelCase。
 - **UI 硬规则**（`CLAUDE.md`）：禁止 emoji；图标必须线性 SVG；禁止吉祥物/装饰元素；单一配色取自 `apps/web/style.md`，不得按学段变色。
 - iPad 横屏（>=1024px）为主断点，PC（>=1280px）次之，移动端暂缓。
+- **训练页根元素必须是 `className="student-theme-container" data-theme="student-day" data-school="junior"`**（与 `TargetedConfigPage` / `ExamRunPage` / `ErrorPracticePage` / `HiddenQuestionsPage` 等全部既有训练页一致）。`data-theme` 单独就能激活日间配色，但 `.student-theme-container` 还提供基础文字色、`--text-placeholder` 与背景过渡；`data-school='junior'`（`global.css:196`）提供字号缩放——**漏了 `data-school` 会让本页字号与其它训练页不一致**。
 - 后端 API Key 用 `.env` 的 `KIMI_API_KEY` / `QWEN_API_KEY` / `DEEPSEEK_API_KEY` 及对应 `*_BASE_URL`，**不要用 `ANTHROPIC_*`**。
 - 模型 ID 是字面量，**勿改**：`kimi-latest`、`qwen3.8-max`、`gemini-3.1-pro`、`deepseek-v4-flash`、`Qwen3.8-27B`（`local` provider）。
 - **API 文档同步铁律**：`docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml` 必须同时更新（Task 16）。
@@ -2204,7 +2205,8 @@ export default function ChineseSpecialPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center justify-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center justify-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-4xl px-4 sm:px-8">
@@ -2400,7 +2402,8 @@ export default function DictationConfigPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
@@ -2810,7 +2813,8 @@ export default function DictationRunPage() {
   return (
     <div
       data-theme="student-day"
-      className="min-h-screen flex flex-col items-center p-4"
+      data-school="junior"
+      className="student-theme-container min-h-screen flex flex-col items-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
