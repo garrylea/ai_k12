@@ -3083,9 +3083,14 @@ SET @has_uniq := (
     FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'questions'
-      AND COLUMN_NAME = 'content_hash'
       AND NON_UNIQUE = 0
-  ) AS uniq_idx
+    GROUP BY INDEX_NAME
+    -- COUNT(*)=1 且唯一列就是 content_hash：即「**单列**唯一索引」。
+    -- 不能用「某行 NON_UNIQUE=0」判定——复合唯一索引（如 UNIQUE (content_hash, source)）
+    -- 在 STATISTICS 里每一列都记 NON_UNIQUE=0，但并不让 content_hash 单独唯一，
+    -- 那样会静默跳过本迁移、漏洞照旧。
+    HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'
+  ) AS uniq_single_col
 );
 
 SET @ddl := IF(
@@ -3101,7 +3106,7 @@ DEALLOCATE PREPARE stmt;
 
 > **为什么用「查 information_schema + 动态 SQL」而不是单条 DDL**：MySQL 8 不支持 `CREATE UNIQUE INDEX IF NOT EXISTS`；而存储过程在 `log_bin=ON` 且 `log_bin_trust_function_creators=OFF` 的环境需要 SUPER 权限（本机 `schema.sql` 的 `CREATE TRIGGER` 段正是因此报 `ERROR 1419`）。`PREPARE/EXECUTE` 可执行的语句清单包含 `ALTER TABLE` 与 `SELECT`，故用 `'SELECT 1'` 作无操作分支（`DO 0` **不可** PREPARE）。
 >
-> **为什么按「是否存在覆盖该列的唯一索引」判定而不是按索引名**：漂移库里的遗留索引名是 `idx_q_content_hash`（非唯一），与目标名不同；按名判定会在已有其它唯一索引时误建重复键名。
+> **为什么按「是否存在**单列**唯一索引」判定，而不是按索引名、也不是按「某列 NON_UNIQUE=0」**：漂移库里的遗留索引名是 `idx_q_content_hash`（非唯一），与目标名不同，按名判定会误建重复键名；而复合唯一索引（如 `UNIQUE (content_hash, source)`）在 `information_schema.STATISTICS` 里**每一列**都记 `NON_UNIQUE=0`，只按行判定会误以为 `content_hash` 已唯一而静默跳过——那正是本迁移要堵的洞。故用 `GROUP BY INDEX_NAME + COUNT(*)=1 + MIN(COLUMN_NAME)='content_hash'` 锁定「单列且列名正确」。
 
 - [ ] **Step 2: 执行迁移（两次，验证幂等）**
 
@@ -3132,9 +3137,12 @@ Expected: 至少一行 `NON_UNIQUE: 0`（唯一索引存在）。
  */
 async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
   const [rows] = await pool.execute<any[]>(
-    `SELECT COUNT(*) AS c FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions'
-       AND COLUMN_NAME = 'content_hash' AND NON_UNIQUE = 0`,
+    `SELECT COUNT(*) AS c FROM (
+       SELECT INDEX_NAME FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions' AND NON_UNIQUE = 0
+       GROUP BY INDEX_NAME
+       HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'
+     ) AS uniq_single_col`,
   );
   if (Number(rows[0]?.c ?? 0) === 0) {
     throw new Error(
@@ -3156,13 +3164,13 @@ async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
 
 不要为了验证而真的删索引（那是破坏性操作）。改为**临时把守卫的判定条件改成必然不成立**：
 
-把 `AND NON_UNIQUE = 0` 临时改成 `AND NON_UNIQUE = 1`（唯一的索引 NON_UNIQUE 是 0，故改成 1 后必查不到），运行：
+把 `HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'` 临时改成 `HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = '__nonexistent__'`（必然匹配不到任何索引），运行：
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
 ```
 
-Expected: 报错退出（exit code 1），错误信息含 `缺少唯一索引`。**随后还原为 `AND NON_UNIQUE = 0`**，并确认 `git diff` 里没有遗留这个临时改动。
+Expected: 报错退出（exit code 1），错误信息含 `缺少唯一索引`。**随后还原**，并确认 `git diff` 里没有遗留这个临时改动。
 
 - [ ] **Step 6: 还原后跑通 + 幂等复验**
 
