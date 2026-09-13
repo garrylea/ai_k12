@@ -4,6 +4,7 @@ import { QuestionStructuringCapability } from '../../ai-core/capabilities/questi
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
+import { normalizeChineseAnswer, diffChinese, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
 /** 仅走 exact 比对的客观题：选项/判断标签形式固定，可靠，不等即判错。
@@ -87,6 +88,23 @@ export interface JudgeCoreQuestionInput {
   studentAnswer: string;
   source: string;            // 'targeted' | 'error_practice' | 'exam' | 'practice'
   sourceRefId?: number | null; // 考试传 session_id；practice 沿用现结构不经过此变体
+}
+
+export interface JudgeDictationInput {
+  studentId: number;
+  subjectId: number;
+  questionId: number;
+  expected: { author: string; dynasty: string; body: string };
+  student: { author: string; dynasty: string; body: string };
+}
+
+export interface JudgeDictationOutput {
+  questionId: number;
+  isCorrect: boolean;
+  method: 'exact';
+  fields: { author: { match: boolean }; dynasty: { match: boolean }; body: { match: boolean } };
+  bodyDiff: DictationDiffOp[];
+  errorBookId?: number;
 }
 
 /**
@@ -195,6 +213,51 @@ export class JudgeCoreService {
     }
 
     return { questionId: q.id, isCorrect, method, errorType, errorBookId };
+  }
+
+  /**
+   * 语文古诗文默写判题（2026-09-13）：**纯程序化**，不调用任何 LLM。
+   *
+   * 对错完全由「归一化后逐字段全等」决定（三项全对才算对）；正文错处由 LCS 差异定位。
+   * 错因文案由调用方（TrainingService）在判题之后单独调 DictationFeedbackCapability，
+   * 失败不影响本方法返回值。
+   *
+   * 不调用 ExplanationCacheService.ensureExplanation：它的「answer >= 100 字直写解析」
+   * 规则会让长文言文的解析变成「解析 = 正文」（设计 spec §5 第 6 步）。
+   */
+  async judgeDictation(input: JudgeDictationInput): Promise<JudgeDictationOutput> {
+    const q = await this.questionsRepo.findById(input.questionId);
+    if (!q) {
+      throw new HttpException({ code: 4004, message: '题目不存在' }, 400);
+    }
+
+    const author = { match: normalizeChineseAnswer(input.student.author) === normalizeChineseAnswer(input.expected.author) };
+    const dynasty = { match: normalizeChineseAnswer(input.student.dynasty) === normalizeChineseAnswer(input.expected.dynasty) };
+    const expBody = normalizeChineseAnswer(input.expected.body);
+    const stuBody = normalizeChineseAnswer(input.student.body);
+    const body = { match: expBody === stuBody };
+    const bodyDiff = body.match ? [] : diffChinese(expBody, stuBody);
+
+    const isCorrect = author.match && dynasty.match && body.match;
+
+    let errorBookId: number | undefined;
+    if (!isCorrect) {
+      errorBookId = await this.writeErrorBookOrReuse({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        questionId: input.questionId,
+        source: 'dictation',
+        sourceRefId: null,
+      });
+    } else {
+      try {
+        await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
+      } catch (err) {
+        this.logger.error(`clearUnclearedByStudentQuestionId failed (student=${input.studentId}, question=${input.questionId}): ${err}`);
+      }
+    }
+
+    return { questionId: q.id, isCorrect, method: 'exact', fields: { author, dynasty, body }, bodyDiff, errorBookId };
   }
 
   /** card 中心判题（PracticeService.judge 委托，行为保持）。q 可为 null -> AI + 结构化入库路径。 */
