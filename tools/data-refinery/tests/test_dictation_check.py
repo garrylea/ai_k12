@@ -87,3 +87,38 @@ class TestReviewFlags:
                 "羹饭一时熟，不知贻阿谁。出门东向看，泪落沾我衣。")
         r = check_body(body, "十五从军征", "shi", set())
         assert r.errors == [], r.errors
+
+
+class TestCiMetre:
+    """词的格律判错：这是「程序切不出来的篇目」的**确定性出口**。
+
+    典型是《沁园春·雪》——教材把上半阙/写作背景/下半阙/课后题逐行插花，
+    任何连续子串都取不到正确的词，正文会把编者说明与课后题一起吞进来
+    （实测 376 字 vs 词牌正体 114 字）。判错后由调用方转模型重写 + 人工过目。
+    """
+
+    def test_ci_length_mismatch_is_error(self):
+        # 词牌 114 字，实际远超 → 判错（不是复核）
+        r = check_body("北国风光，" * 60, "沁园春·雪", "ci", set())
+        assert any("词牌正体 114 字" in e for e in r.errors)
+
+    def test_ci_length_match_passes(self):
+        # 水调歌头 正体 95 字（无标点）
+        body = "明" * 95
+        r = check_body(body, "水调歌头(明月几时有)", "ci", set())
+        assert not any("词牌正体" in e for e in r.errors)
+
+    def test_punctuation_is_not_counted(self):
+        # 标点不计入：95 字 + 任意标点仍应通过
+        body = "、".join("明" * 95)
+        r = check_body(body, "水调歌头", "ci", set())
+        assert not any("词牌正体" in e for e in r.errors)
+
+    def test_unknown_ci_title_is_not_checked(self):
+        # 不在 CI_PATTERNS 里的词牌不判（宁可不判，不可误判）
+        r = check_body("甲" * 200, "某不认识的词牌", "ci", set())
+        assert not any("词牌正体" in e for e in r.errors)
+
+    def test_shi_is_not_affected(self):
+        r = check_body("甲" * 200, "沁园春·雪", "shi", set())
+        assert not any("词牌正体" in e for e in r.errors)

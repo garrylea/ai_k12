@@ -23,6 +23,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from dictation_locate import ci_pattern_of
+
 # 注释体例标记：出现在正文里说明切多了（把注释切进正文）
 _ANNOTATION_MARKS = ("注释", "其：", "〔", "〕", "题解", "【注释】")
 
@@ -111,5 +113,18 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
             f"声明为诗但字数 {_char_count(body)} 不在绝句/律诗常见字数 {sorted(REGULATED_SHI_LENS)} 内"
             "（古体诗属正常，请人工确认）"
         )
+
+    # 词的格律**判错**（不是复核）：词牌字数是有定数的，对不上就是切错了。
+    # 这条是「程序切不出来的篇目」的**确定性出口**——典型是《沁园春·雪》：
+    # 教材把上半阙/写作背景/下半阙/课后题**逐行插花**，任何连续子串都取不到正确的词，
+    # 表现为正文把编者说明与课后题一起吞进来（实测 376 字 vs 词牌 114 字）。
+    # 判错 → 调用方转 `dictation_repair` 让模型重写（用户 2026-09-14 裁决的路径）+ 人工过目。
+    if genre == "ci":
+        pattern = ci_pattern_of(work_title)
+        if pattern and _char_count(body) != pattern:
+            r.errors.append(
+                f"词牌正体 {pattern} 字，实际 {_char_count(body)} 字"
+                "（正文可能混入了编者说明/课后题，或切多切少）"
+            )
 
     return r
