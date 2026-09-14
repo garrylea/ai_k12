@@ -9,6 +9,7 @@ from config import RefineryConfig
 from llm import create_llm_client
 from extract import _parse_json_object
 from extract_cli import _load_prompt
+from textbook_profile import TextbookProfile, get_profile, profile_for_md_path
 
 
 # ---- 教材目录识别 ----
@@ -91,21 +92,16 @@ def _expand_grade_term(raw: str) -> tuple[str | None, str | None]:
 
 import re
 
-# 目录行模式：编号标题 + 行末数字（教材页码）
-_TOC_LINE_RE = re.compile(
-    r'^\s*(第[一二三四五六七八九十百零]+章.*\d+\s*$'   # 第N章 X 页码
-    r'|\d+\.\d+.*\d+\s*$'                             # N.M X 页码
-    r'|.*(小结|复习题|数学活动|阅读与思考).*\d+\s*$)'    # 非编号条目+页码
-)
 # 正文页标志：长段落、教学模块标题
+# （目录行模式随学科而异，由 textbook_profile 的学科档案提供，见该模块）
 _BODY_MARKER_RE = re.compile(
     r'^[^#\d!].{60,}$'              # 60字符以上的非标题非图片行
     r'|##\s*(思考|练习|例\d|习题|复习巩固|探究|问题)'
 )
 
 
-def _is_toc_like_page(page_path: Path) -> bool:
-    """判断一页是否像目录页：
+def _is_toc_like_page(page_path: Path, profile: TextbookProfile) -> bool:
+    """判断一页是否像目录页（按学科版式档案判定）：
     - 多数行是短行，带编号标题+行末页码
     - 没有长正文段落
     - 没有教学模块标题（思考/练习/例/习题等）
@@ -115,7 +111,7 @@ def _is_toc_like_page(page_path: Path) -> bool:
              if l.strip() and not l.startswith("!")]
     if not lines:
         return False
-    toc_lines = sum(1 for l in lines if _TOC_LINE_RE.search(l))
+    toc_lines = sum(1 for l in lines if profile.is_toc_line(l))
     body_lines = sum(1 for l in lines if _BODY_MARKER_RE.search(l))
     if body_lines > 0:
         return False
@@ -123,13 +119,14 @@ def _is_toc_like_page(page_path: Path) -> bool:
     return toc_lines >= len(lines) * 0.3
 
 
-def _find_toc_pages(book_dir: Path, max_pages: int = 10) -> list[Path]:
+def _find_toc_pages(book_dir: Path, profile: TextbookProfile,
+                    max_pages: int = 10) -> list[Path]:
     """在教材 MD 目录中找所有目录页（含跨页续页）。
 
     策略：
     1. 前 max_pages 页中找包含"目录"标题的页（锚点）
     2. 从最后一个锚点向后扫描，收集连续的目录续页
-    3. 续页判断：内容模式匹配（编号+页码），非正文
+    3. 续页判断：内容模式匹配（按学科档案判定），非正文
     4. 前 10 页找不到锚点则扩展到 20 页
     """
     mds = sorted(book_dir.glob("page_*.md"))
@@ -141,7 +138,7 @@ def _find_toc_pages(book_dir: Path, max_pages: int = 10) -> list[Path]:
 
     if not anchors:
         if max_pages == 10:
-            return _find_toc_pages(book_dir, max_pages=20)
+            return _find_toc_pages(book_dir, profile, max_pages=20)
         return []
 
     # 从最后一个锚点开始，向后收集续页
@@ -149,12 +146,22 @@ def _find_toc_pages(book_dir: Path, max_pages: int = 10) -> list[Path]:
     toc_pages = [candidates[start]]
 
     for p in candidates[start + 1:]:
-        if _is_toc_like_page(p):
+        if _is_toc_like_page(p, profile):
             toc_pages.append(p)
         else:
             break  # 遇到非目录页即停止
 
     return toc_pages
+
+
+def _profile_for_book(subject: str | None, book_dir: Path) -> TextbookProfile:
+    """取一本书的版式档案。
+
+    ``--subject`` 只是过滤器，可能缺省。缺省时**不能**退化成保守基类：基类的
+    「行末任意 1-3 位数字」比数学档宽松得多，会让既有数学教材的续页扫描多收页面
+    （行为漂移）。缺省时按路径推学科，推不出时 profile_for_md_path 已回退数学档。
+    """
+    return get_profile(subject) if subject else profile_for_md_path(book_dir)
 
 
 # ---- CLI ----
@@ -279,7 +286,7 @@ def main(argv=None):
             print(f"  共扫描 {len(sorted(md_dir.glob('*/*/*/*/*')))} 个目录，"
                   f"其中教材 {len(book_dirs)} 个", flush=True)
         for d in book_dirs:
-            pages = _find_toc_pages(d)
+            pages = _find_toc_pages(d, _profile_for_book(args.subject, d))
             status = f"→ {len(pages)} toc page(s)" if pages else "→ 未找到目录页"
             print(f"[dry-run] {d.relative_to(md_dir)} {status}", flush=True)
         return
@@ -310,7 +317,7 @@ def main(argv=None):
             print(f"[reconvert] cleared checkpoint for {cleared} book(s)", flush=True)
 
     for book_dir in book_dirs:
-        toc_pages = _find_toc_pages(book_dir)
+        toc_pages = _find_toc_pages(book_dir, _profile_for_book(args.subject, book_dir))
         if not toc_pages:
             print(f"[WARN] {book_dir.relative_to(md_dir)}: no toc pages found", flush=True)
             continue

@@ -7,7 +7,12 @@ from toc_parse_cli import (
     _expand_grade_term,
     _build_textbook_list,
     _is_toc_like_page,
+    _profile_for_book,
 )
+from textbook_profile import ChineseTextbookProfile, MathTextbookProfile
+
+# 本文件原有用例全部描述数学教材，显式传数学档案以保持原判定
+_MATH = MathTextbookProfile()
 
 
 class TestIsTextbookDir:
@@ -65,7 +70,7 @@ class TestFindTocPages:
         (book_dir / "page_001.md").write_text("# 封面", encoding="utf-8")
         (book_dir / "page_002.md").write_text("## 目录\n26.1 反比例函数 2", encoding="utf-8")
         (book_dir / "page_003.md").write_text("# 第二十六章", encoding="utf-8")
-        pages = _find_toc_pages(book_dir)
+        pages = _find_toc_pages(book_dir, _MATH)
         assert len(pages) == 1
         assert "page_002" in pages[0].name
 
@@ -74,7 +79,7 @@ class TestFindTocPages:
         book_dir.mkdir()
         (book_dir / "page_001.md").write_text("# 封面", encoding="utf-8")
         (book_dir / "page_002.md").write_text("# 第二十六章", encoding="utf-8")
-        assert _find_toc_pages(book_dir, max_pages=10) == []
+        assert _find_toc_pages(book_dir, _MATH, max_pages=10) == []
 
     def test_multi_page_toc(self, tmp_path):
         """跨页目录：page_005 有'目录'锚点，page_006 是续页，page_007 是正文。"""
@@ -104,7 +109,7 @@ class TestFindTocPages:
             "反比例函数是初中数学的重要内容之一。\n",
             encoding="utf-8",
         )
-        pages = _find_toc_pages(book_dir)
+        pages = _find_toc_pages(book_dir, _MATH)
         assert len(pages) == 2
         assert "page_005" in pages[0].name
         assert "page_006" in pages[1].name
@@ -118,7 +123,7 @@ class TestFindTocPages:
         (book_dir / "page_006.md").write_text(
             "## 思考\n\n请同学们思考以下问题：反比例函数的图象有什么特点？\n", encoding="utf-8"
         )
-        pages = _find_toc_pages(book_dir)
+        pages = _find_toc_pages(book_dir, _MATH)
         assert len(pages) == 1
         assert "page_005" in pages[0].name
 
@@ -127,7 +132,7 @@ class TestIsTocLikePage:
     def test_toc_page_identified(self, tmp_path):
         p = tmp_path / "toc.md"
         p.write_text("26.1 反比例函数 2\n28.1 锐角三角函数 61\n小结 83\n", encoding="utf-8")
-        assert _is_toc_like_page(p) is True
+        assert _is_toc_like_page(p, _MATH) is True
 
     def test_body_page_rejected(self, tmp_path):
         p = tmp_path / "body.md"
@@ -137,17 +142,37 @@ class TestIsTocLikePage:
             "本章将学习反比例函数的定义、图象和性质。\n",
             encoding="utf-8",
         )
-        assert _is_toc_like_page(p) is False
+        assert _is_toc_like_page(p, _MATH) is False
 
     def test_practice_page_rejected(self, tmp_path):
         p = tmp_path / "practice.md"
         p.write_text("## 练习\n\n1. 画出下列函数的图象：\n(1) y=1/x\n(2) y=2/x\n", encoding="utf-8")
-        assert _is_toc_like_page(p) is False
+        assert _is_toc_like_page(p, _MATH) is False
 
     def test_empty_page_rejected(self, tmp_path):
         p = tmp_path / "empty.md"
         p.write_text("", encoding="utf-8")
-        assert _is_toc_like_page(p) is False
+        assert _is_toc_like_page(p, _MATH) is False
+
+
+class TestProfileForBook:
+    """按书取版式档案：--subject 显式给出用它，缺省则按路径推且**不得**退化成基类。"""
+
+    def test_explicit_subject_wins(self, tmp_path):
+        book = tmp_path / "md" / "语文" / "初中" / "统编版" / "九年级" / "上册" / "书"
+        assert isinstance(_profile_for_book("语文", book), ChineseTextbookProfile)
+        assert isinstance(_profile_for_book("数学", book), MathTextbookProfile)
+
+    def test_missing_subject_derives_from_path(self, tmp_path):
+        cn = tmp_path / "语文" / "初中" / "统编版" / "九年级" / "上册" / "书"
+        math = tmp_path / "数学" / "初中" / "人教版" / "九年级" / "上册" / "书"
+        assert isinstance(_profile_for_book(None, cn), ChineseTextbookProfile)
+        assert isinstance(_profile_for_book(None, math), MathTextbookProfile)
+
+    def test_missing_subject_never_falls_back_to_base(self, tmp_path):
+        """基类的「行末任意 1-3 位数字」比数学档宽松，缺省时必须拿到数学档而非基类。"""
+        book = tmp_path / "数学" / "初中" / "人教版" / "九年级" / "上册" / "书"
+        assert type(_profile_for_book(None, book)) is MathTextbookProfile
 
 
 class TestBuildTextbookList:

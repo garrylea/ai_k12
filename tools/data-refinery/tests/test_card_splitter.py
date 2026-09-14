@@ -3,6 +3,10 @@ from pathlib import Path
 from card_splitter import split_page, _count_text_chars, _CHARS_PER_LINE
 from card_splitter import _split_paragraphs, _make_bundles, _current_heading, _split_inline_questions
 from models import ImageInfo
+from textbook_profile import MathTextbookProfile
+
+# 本文件原有用例全部描述数学教材，显式传数学档案以保持原判定
+_MATH = MathTextbookProfile()
 
 
 def make_img(cost: int, pos: int = 0, scaled_w: int = 400, scaled_h: int = 100) -> ImageInfo:
@@ -116,7 +120,7 @@ def test_current_heading_tracks_markdown_heading():
 def test_question_paragraph_is_atomic_bundle():
     # (N) 开头的段落即使超长也不在题中间切
     text = "(1) 这是一道很长的题目" + "条件" * 200 + "，求 x 的值。"
-    bundles = _make_bundles(text, [])
+    bundles = _make_bundles(text, [], _MATH)
     # 题段落作为单个 bundle（即便 >400，也不再按句切分到多 bundle）
     assert len(bundles) == 1
     assert bundles[0].text.startswith("(1)")
@@ -126,7 +130,7 @@ def test_same_section_fill_pulls_sentence_from_next():
     # 验证 _make_bundles 为同节段落标记相同 heading
     # （补句逻辑在 split_page 的合并循环里，见 test_split_page_fill_pulls_first_sentence_from_same_section）
     text = "## 练习\n\n短句一。\n\n短句二，补充内容。"
-    bundles = _make_bundles(text, [])
+    bundles = _make_bundles(text, [], _MATH)
     assert len(bundles) >= 2
     assert all(b.heading == "练习" for b in bundles)
 

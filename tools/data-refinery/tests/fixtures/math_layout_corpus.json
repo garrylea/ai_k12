@@ -1,0 +1,2472 @@
+[
+ {
+  "line": "# $P(\\text{抽到偶数}) = \\frac{2}{5}.$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "# 第二十六章 反比例函数",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 13.3.1 三角形的内角",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 22.1 二次函数的图象和性质",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 24.1.3 弧、弦、圆心角",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 25.2.3 因式分解法",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 27.1 反比例函数的概念",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 29.2 圆的有关性质",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## \\*21.2.4 一元二次方程的根与系数的关系",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 习题 25.2",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 习题 30.2",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 习题25.2",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 后记",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 13",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 19",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 25",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 26",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 27",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 28",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 29",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题 30",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题21",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题22",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题23",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题24",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题25",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 复习题26",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "## 探究2",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 概率与中奖",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 活动2 刹车距离与刹车时车速的关系",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 活动准备",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 第二十一章 一元二次方程",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "## 第十四章 全等三角形",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "$OP$ 叫作半径. 以点 $O$ 为圆心的圆, 记作 $\\odot O$ , 读作 “圆 $O$ ”.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "$\\therefore OD \\perp AB.$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) $(\\sqrt{12}+5\\sqrt{8})\\times\\sqrt{3}$ ; (2) $(2\\sqrt{3}+3\\sqrt{2})(2\\sqrt{3}-3\\sqrt{2})$ ;",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) $3x^{2}+1=6x$ ; (2) $4x^{2}+5x=81$ ;",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) $\\sqrt{14} \\times \\sqrt{7}$ ; (2) $3\\sqrt{5} \\times 2\\sqrt{10}$ ; (3) $\\sqrt{3x} \\cdot \\sqrt{\\frac{1}{3}xy}$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) $\\sqrt{\\frac{7}{36}}$ ; (2) $\\sqrt{\\frac{64}{9}}$ ; (3) $\\sqrt{\\frac{16b}{25a^{2}}}$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) $x^{2} - 3x + 2 = 0$ (2） $-x^{2} - 6x - 9 = 0.$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) $x^{2}-6x+7=0$ ; (2) $-x^{2}+3x+1=0$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) $y=3x^{2}-6x+9$ ; (2) $y=2x^{2}-4x-6$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) 一个三角形的各边长扩大为原来的 5 倍，这个三角形的角平分线也扩大为原来的 5 倍；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) 列表. 写出几组 x 与 y 的对应值（填空）:",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) 当 a > 0 时，开口向上；当 a < 0 时，开口向下.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(1) 画出上述函数的图象；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2)",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) $5x^{2} + x - 5 = 0;$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) $a = 2, b = -2\\sqrt{2}, c = 1.$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) $y = x^{2} - 8x + 16$ ;",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 两辆车向右转，一辆车向左转；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 反比例函数 $y=\\frac{k}{x}$ 的图象如图所示，则 k \\_\\_\\_\\_ 0；在图象的每一支上，y 随 x 的增大而 \\_\\_\\_\\_.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 如图所示的图象对应的函数解析式为（）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 它是 Q 的概率是多少?",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 当 -3 < x < -1 时，求反比例函数 $y = \\frac{k}{x}$ 的取值范围.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 抛物线 $y=2x^{2}+1$ ， $y=2x^{2}-1$ 与抛物线 $y=2x^{2}$ 有什么关系？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 点 $B(-3, 4)$ ， $C(-2, 6)$ ， $D(3, 4)$ 是否在这个函数的图象上？为什么？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 能围成有一边的长是 $4 \\, cm$ 的等腰三角形吗？为什么？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(2) 这个用电器的功率 P 的范围是多少?",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(3) $3x(x-1)=2(x-1)$ ;",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(3) $5x^{2} - 1 = 4x^{2} - x;$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(3) $x^{2} + 5x + \\_) = (x + \\_)^{2}$ ; (4) $x^{2} - \\frac{2}{3} x + \\_) = (x - \\_)^{2}$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(3) $y=2\\left(x+\\frac{3}{2}\\right)^{2}-5,\\quad y=2\\left(x-\\frac{1}{2}\\right)^{2}+1.$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(3) 把长为 $1 \\mathrm{~m}$ 的木条分成两段，使较短一段的长与木条全长的积，等于较长一段长的平方，求较短一段的长.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(4) $3(x - 1)^{2} - 6 = 0$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(4) $x(x - 1) = 3x + 7.$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(5) $3(x - 1)^{2} - 6 = 0;$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(6) $\\left(\\frac{3}{2}\\sqrt{\\frac{5}{3}}-\\sqrt{\\frac{5}{4}}\\right)^{2}$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(A) $y = \\frac{1}{x^{2}}$ (B) $yx = -\\sqrt{3}$ (C) $y=5x+6$ (D) $\\sqrt{x}=\\frac{1}{y}$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(C)能作出直角三角形 (D)能作出钝角三角形",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(x + n) ^ {2} = p",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "(第11题)",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "- 2 = a \\times 2 ^ {2},",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1 3 2 = \\frac {1 9 9 7}{V}.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 下列图形是由一个基本的图形经过旋转得到的，分别指出它们的旋转中心和旋转角：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 你能举出一些平面图形旋转的实例吗？平面图形的旋转有哪些性质？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 各边相等的圆内接多边形是正多边形吗？各角相等的圆内接多边形呢？如果是，说明理由；如果不是，举出反例.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 在数轴上画出表示 $\\sqrt{17}$ 的点.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 如图， $CD$ 所在的直线垂直平分线段 $AB$ ，怎样用这样的工具找到圆形工件的圆心？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 如图，小明坐在秋千上，秋千旋转了 $80^{\\circ}$ 。请在图中小明身上任意选一点 $P$ ，利用旋转性质，标出点 $P$ 的对应点。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 已知点 $A$ ， $B$ 在 $\\odot O_1$ 上，点 $C$ ， $D$ 在 $\\odot O_2$ 上，判断下列说法是否正确：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 某商场一月份的销售额为50万元，二、三月份每月销售额的平均增长率为 $x$ ，写出三月份的销售额 $y$ （单位：万元）关于 $x$ 的函数解析式.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1. 直线与圆有怎样的位置关系？你能举出这些位置关系的一些实例吗？你能用哪些方法刻画这些位置关系？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "1.（1）下列图象中是反比例函数图象的是（ ）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "10. 如图，在一道长为 $12\\mathrm{m}$ 的墙一侧，用长为 $33\\mathrm{m}$ 的篱笆，围成一个一边靠墙、中间隔有一道篱笆的矩形花圃。当 $AB$ ， $BC$ 各为多少时，花圃的面积最大？最大面积是多少？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "11. 如图， $AB$ ， $CD$ 是 $\\odot O$ 的两条平行弦， $MN$ 是 $AB$ 的垂直平分线. 求证： $MN$ 垂直平分 $CD$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "12. 如图， $AB$ 为 $\\odot O$ 的直径， $C$ 为 $\\odot O$ 上一点， $AD$ 和过点 $C$ 的切线互相垂直，垂足为 $D$ . 求证： $AC$ 平分 $\\angle DAB$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "13.1 三角形的概念 2",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "13.2 与三角形有关的线段 5",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "13.3 三角形的内角与外角 11",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "14. 一个小球以 $5\\mathrm{m / s}$ 的速度开始向前滚动，并且均匀减速， $4\\mathrm{s}$ 后小球停止滚动。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "14.1 全等三角形及其性质 29",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "14.2 三角形全等的判定 32",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "14.3 角的平分线 48",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "15.1 图形的轴对称 62",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "15.2 画轴对称的图形 72",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "15.3 等腰三角形 78",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "16.1 幂的运算 98",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "16.2 整式的乘法 103",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "16.3 乘法公式 112",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "17.1 用提公因式法分解因式 124",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "17.2 用公式法分解因式 128",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "18.1 分式及其基本性质 138",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "18.2 分式的乘法与除法 146",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "18.3 分式的加法与减法 152",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "18.4 整数指数幂 158",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "18.5 分式方程 164",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "19.1 二次根式及其性质 2",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "19.2 二次根式的乘法与除法 6",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "19.3 二次根式的加法与减法 13",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "2 x ^ {2} - 3 x = - 1.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 两个相邻偶数的积是168. 求这两个偶数.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 分别在同一平面直角坐标系中，画出下列各组二次函数的图象，并写出其对称轴和顶点：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 垂直于弦的直径有什么性质？在同圆或等圆中，两个圆心角以及它们所",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 如图，一根直立于地面的木杆在离地面 $3\\mathrm{m}$ 处折断，木杆顶端落在离木杆底端 $4\\mathrm{m}$ 处。木杆折断之前有多高？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 如图，在 $\\triangle ABC$ 中， $\\angle A = 40^{\\circ}$ ，求 $\\angle B + \\angle C + \\angle ADE + \\angle AED$ 的度数.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 如图，矩形绿地的长、宽各增加 $x\\mathrm{m}$ ，写出扩充后的绿地的面积 $y$ 与 $x$ 的关系式.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 某农业大学计划修建一块面积为 $2 \\times 10^{6} \\mathrm{~m}^{2}$ 的矩形试验田.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 用前面抛掷硬币的试验方法，全班同学分组做掷骰子的试验，估计掷一次骰子时“点数是1”的概率.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "2. 资料学习",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "20.1 勾股定理及其应用 23",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "20.2 勾股定理的逆定理及其应用 34",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "21.1 一元二次方程 2",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "21.1 四边形及多边形 46",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "21.2 平行四边形 55",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "21.2 解一元二次方程 5",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "21.3 实际问题与一元二次方程 19",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "21.3 特殊的平行四边形 68",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "22.1 二次函数的图象和性质 28",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "22.1 函数的概念 90",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "22.2 二次函数与一元二次方程 43",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "22.2 函数的表示 100",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "22.3 实际问题与二次函数 49",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "23.1 一次函数的概念 114",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "23.1 图形的旋转 59",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "23.2 一次函数的图象和性质 117信息技术应用 探究函数的图象和性质 125",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "23.2 中心对称 64",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "23.3 一次函数与方程（组）、不等式 127",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "23.3 课题学习 图案设计 72",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "23.4 实际问题与一次函数 131",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.1 圆的有关性质 79",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.1 数据的集中趋势 149信息技术应用 利用统计软件求统计量 166",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.2 数据的离散程度 168",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.2 点和圆、直线和圆的位置关系 92",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.3 数据的四分位数 176",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.3 正多边形和圆 105",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.4 弧长和扇形面积 111",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "24.4 数据的分组 182阅读与思考 大数据及其应用 186",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "25.1 一元二次方程的概念 2",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "25.1 随机事件与概率 127",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "25.2 用列举法求概率 136",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "25.2 降次——解一元二次方程 5",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "25.3 实际问题与一元二次方程 20",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "25.3 用频率估计概率 142",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "26.1 二次函数的概念 30",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "26.1 反比例函数 2",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "26.2 二次函数的图象和性质 33",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "26.2 实际问题与反比例函数 12",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "26.3 二次函数与一元二次方程 46",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "26.4 实际问题与二次函数 51",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "27.1 反比例函数的概念 64",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "27.1 图形的相似 24",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "27.2 反比例函数的图象和性质 67",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "27.2 相似三角形 29",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "27.3 位似 47",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "27.3 实际问题与反比例函数 74",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "28.1 图形的旋转 92",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "28.1 锐角三角函数 61",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "28.2 中心对称 99",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "28.2 解直角三角形及其应用 72",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "29.1 圆的有关概念 114",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "29.1 投影 87",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "29.2 三视图 94",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "29.2 圆的有关性质 123",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "29.3 弧长和扇形面积 134",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "29.3 课题学习 制作立体模型 105",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "3 张扑克牌中只有 1 张黑桃，3 位同学依次抽取，他们抽到黑桃的概率跟抽取的顺序有关吗？请同学们通过试验，试着用频率估计每位同学抽到黑桃的概率.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "3 第二十一章 一元二次方程",
+  "toc": false,
+  "furniture": true
+ },
+ {
+  "line": "3. 中心对称图形有什么特点？你能举出一些中心对称图形的例子吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "3. 在同一直角坐标系中，画出下列函数的图象：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "3. 如图，两个圆的圆心相同，它们的面积分别是 62.8 和 141.3. 求圆环的宽度 $d$ （ $\\pi$ 取 3.14）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "3. 如图，点 $O$ 是正方形ABCD的中心.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "3. 李明需要制作一个底面积为 $20\\mathrm{cm}^2$ 的长方体无盖纸盒，底面矩形的一边长 $y$ （单位：cm）与其邻边长 $x$ （单位：cm）之间的关系可以用图象大致表示为（ ）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "3. 请你分别举例说明二次根式的加、减、乘、除运算法则.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "30.1 直线与圆 148",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "30.2 三角形的内切圆 158",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "30.3 正多边形与圆 161",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "4. 三角形的三个内角之间有怎样的关系？如何证明这个结论？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "4. 回顾应用反比例函数解决实际问题的过程，总结建立函数模型解决实际问题的步骤.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "4. 如图，你能用三角尺确定一张圆形纸片的圆心吗？有几种方法？与同学交流一下.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "4. 已知直角三角形两条直角边的和等于8，两条直角边各为多少时，这个直角三角形的面积最大？最大值是多少？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "4. 认识路程随时间均匀变化（一次函数），速度随时间均匀变化（一次函数），以及路程随时间非均匀变化（二次函数）的数学模型.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "5. 分别在同一直角坐标系中，描点画出下列各组二次函数的图象，并写出对称轴和顶点：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "5. 如图，四边形ABCD的两条对角线AC，BD互相垂直， $AC + BD = 10$ 。当AC，BD的长是多少时，四边形ABCD的面积最大？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "5. 已知抛物线 $y = -\\frac{1}{2} x^2 + bx + c$ 的顶点为 $\\left(5, \\frac{17}{2}\\right)$ ，求 $b, c$ 的值. 综合运用",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "5. 矩形 $ABCD$ 的对角线 $AC, BD$ 相交于点 $O$ , 点 $E, F, G, H$ 分别是 $OA, OB, OC, OD$ 的中点. 求证: $E, F, G, H$ 四个点在以点 $O$ 为圆心的同一个圆上.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "6. 先确定下列抛物线的开口方向、对称轴和顶点，再描点画图：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "6. 如图，大半圆中有 $n$ 个小半圆，大半圆的弧长为 $L_{1}$ ， $n$ 个小半圆的弧长和为 $L_{2}$ ，探索 $L_{1}$ 和 $L_{2}$ 的关系并证明你的结论.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "6. 我们知道 3, 4, 5 是一组勾股数，那么 $3k, 4k, 5k$ （ $k$ 是正整数）也是一组勾股数吗？一般地，如果 $a, b, c$ 是一组勾股数，那么 $ak, bk, ck$ （ $k$ 是正整数）也是一组勾股数吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "7. 填空：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "7. 如图，草坪上的自动喷水装置能旋转 $220^{\\circ}$ ，它的喷灌区域是一个扇形，这个扇形的半径是 $20 \\mathrm{~m}$ 。求它能喷灌的草坪的面积。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "7. 求证：圆内接平行四边形是矩形.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "8. 在同一直角坐标系中，函数 $y = kx$ 与 $y = \\frac{k}{x} (k \\neq 0)$ 的图象大致是（）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "8. 如图，过菱形对角线交点的一条直线，把菱形分成了两个梯形，这两个梯形全等吗？为什么？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "81 第二十六章 反比例函数",
+  "toc": false,
+  "furniture": true
+ },
+ {
+  "line": "9 0 1 \\times 9 9 9, 9 0 2 \\times 9 9 8, \\dots , 9 9 8 \\times 9 0 2, 9 9 9 \\times 9 0 1.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "9. 如图，在 $\\triangle ABC$ 中， $\\angle A = 100^{\\circ}$ ， $\\angle 1 = \\angle 2$ ， $\\angle 3 = \\angle 4$ 。求 $x$ 的值。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "9. 要组织一次篮球联赛，赛制为单循环形式，计划安排15场比赛，应邀请多少支球队参加比赛？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "A C: B C = B C: 5, \\text {即} B C ^ {2} = 5 A C.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "E H = 8 (\\mathrm{m}).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "P (3 \\text {个元音}) = \\frac {1}{1 2}.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "P = \\frac {2 2 0 ^ {2}}{2 2 0} = 2 2 0 (\\mathrm{W}).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "S = \\sqrt {p (p - a) (p - b) (p - c)},\\tag{①}",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\* 7. 求下列方程两个根的和与积：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\angle A B E = 1 8 0 ^ {\\circ} - \\angle B A D = 1 8 0 ^ {\\circ} - 8 0 ^ {\\circ} = 1 0 0 ^ {\\circ},",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\because \\quad C D \\text {平分} \\angle A C B,",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\begin{array}{r l} y & = \\frac {1}{2} x ^ {2} - 6 x + 2 1 \\\\ & = \\frac {1}{2} (x - 6) ^ {2} + 3. \\end{array}",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\frac {P Q}{P Q + Q S} = \\frac {Q R}{S T}, \\frac {P Q}{P Q + 4 5} = \\frac {6 0}{9 0},",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\sqrt {a} \\geqslant 0 (a \\geqslant 0).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\therefore B C = B ^ {\\prime} C ^ {\\prime}.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\therefore \\angle A D B = 9 0 ^ {\\circ}.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\therefore \\frac {A D}{A ^ {\\prime} D ^ {\\prime}} = \\frac {A B}{A ^ {\\prime} B ^ {\\prime}} = k.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "\\therefore \\quad \\triangle A B C \\cong \\triangle A ^ {\\prime} B ^ {\\prime} C ^ {\\prime} (\\text { S   S   S }).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "a = 5, b = - 4, c = - 1.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "l = \\frac {1 0 0 \\times 9 0 0 \\times \\pi}{1 8 0} = 5 0 0 \\pi \\approx 1 5 7 0 (\\mathrm{mm}).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "p = \\frac {F}{S},",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "x (1 0 - 4. 9 x) = 0.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "x - \\frac {3}{4} = \\pm \\frac {1}{4},",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "x ^ {2} + (x + 1) ^ {2} = (x + 2) ^ {2}.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "x ^ {2} - 8 x + 4 ^ {2} = - 1 + 4 ^ {2},",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "x _ {1} = - 3 + \\sqrt {5}, x _ {2} = - 3 - \\sqrt {5}.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "x _ {1} = 3, x _ {2} = - 1 (\\text {不符合题意，舍去}).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "y = - \\frac {3}{4} (x - 1. 6) ^ {2} + 3 (0 \\leqslant x \\leqslant 3. 6).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "y = a \\left(x + \\frac {b}{2 a}\\right) ^ {2} + \\frac {4 a c - b ^ {2}}{4 a}.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "∴ $\\angle ACD = \\angle BCD.$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "∴ A, B, C, D 四个点在以点 O 为圆心，OA 为半径的圆上（图 24.1-4）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "∵ $\\triangle ABC$ 的边 BC 上的高为 6，面积为 $12\\sqrt{5}$ ，",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "① 如图2，若 $E$ ， $F$ 分别是长边 $AD$ ， $BC$ 的中点，将纸片ABCD沿直线 $EF$ 对折，得到的长方形ABFE是否仍为“长与宽的比值为 $\\sqrt{2}$ 的长方形”？为什么？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "《原本》第一卷的命题47即勾股定理：在直角三角形中，直角所对边上的正方形面积等于两直角边上的正方形面积之和．命题48是勾股定理的逆定理，欧几里得对这两个定理都进行了严格的证明.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "一座抛物线形拱桥如图26.4-3所示，当拱顶离水面 $4\\mathrm{m}$ 时，水面宽 $10\\mathrm{m}$ . 突降暴雨后水面上升 $1\\mathrm{m}$ ，此时水面宽为多少（结果保留小数点后一位）？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "一般地，如果三条线段中任意两条线段的和大于第三条线段，那么这三条线段能组成三角形；如果三条线段中有两条线段的和小于或等于第三条线段，那么这三条线段不能组成三角形.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "一般地，我们有平行线分线段成比例的基本事实：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "三角形的中线、角平分线、高",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "上册",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "上面证明“经过同一条直线上的三个点不能作圆”的方法与我们以前学过的证明不同，它不是直接去证明",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "下面，利用三角形全等的判定方法，我们再来研究一些尺规作图问题.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "与对一次函数的研究一样，需要对反比例函数解析式 $y = \\frac{k}{x}$ （ $k$ 为常数， $k \\neq 0$ ）中的 $k$ 分情况讨论，即分 $k > 0, k < 0$ 两种情况.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "两年前生产1t甲种食品的成本是10000元，生产1t乙种食品的成本是12000元。随着生产技术的进步，现在生产1t甲种食品的成本是6000元，生产1t乙种食品的成本是7200元。哪种食品成本的年平均下降率较大？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "为了判断点 $A^{\\prime}$ 与点 $A$ 是否重合，我们讨论射线 $CA$ 上除点 $C$ ， $A$ 外的点与点 $B$ 的连线和边 $AB$ 的大小关系.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "义务教育教科书 数学 九年级 下册",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "二次函数 $y = ax^{2} + bx + c$ 的图象与 $x$ 轴的公共点的情况，与一元二次方程 $ax^{2} + bx + c = 0$ 的根的情况联系密切。如果函数图象与 $x$ 轴有公共点，",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "人们把 $\\frac{\\sqrt{5} - 1}{2}$ 这个数叫作黄金分割数。如果",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "从地面竖直向上抛出一小球，小球的高度 $h$ 随小球运动时间 $t$ 的变化而变化， $h$ 与 $t$ 之间有什么关系？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "任何一个一元二次方程都可以写成一般形式",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "任务3 类比上述解决圆柱体产品包装箱表面积最小问题的方法，研究长方体产品的包装箱表面积最小的问题。（选做。）",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "你将要学习的这本书是我们根据《义务教育数学课程标准（2011年版）》编写的教科书，这是你在七～九年级要学习的六册数学教科书中的第五册。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "你能结合图22.2-1指出为什么只在一个时间小球的高度为 $20\\mathrm{m}$ 吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "例 2 如图 24.2-17， $\\triangle ABC$ 的内切圆 $\\odot O$ 与 BC，CA，AB 分别相切于点 D，E，F，且 AB=9，BC=14，CA=13。求 AF，BD，CE 的长。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "例1 在同一直角坐标系中，画出函数 $y = \\frac{1}{2} x^2$ ， $y = 2x^2$ 的图象.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "例1（1）如图23.2-4，选择点 $O$ 为对称中心，画出点 $A$ 关于点 $O$ 的对称点 $A^{\\prime}$ ；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "例2如图28.1-6， $E$ 是正方形ABCD的边 $CD$ 上任意一点，以点 $A$ 为旋转中心，把 $\\triangle ADE$ 顺时针旋转 $90^{\\circ}$ ，画出旋转后的图形.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "例3 解下列方程：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "例5 根据一元二次方程的根与系数的关系，求下列方程两个根 $x_{1}$ ， $x_{2}$ 的和与积：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "例（1）一个圆柱的高等于底面半径，写出它的表面积 $S$ 关于半径 $r$ 的函数解析式.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "像上面那样，通过配成完全平方形式来解一元二次方程的方法，叫作配方法.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "全等三角形有这样的性质：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "其中二次项系数为3，一次项系数为-8，常数项为-10.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "出版 人民教育出版社",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "分别测量上面各四边形的内角，如果过某个四边形的四个顶点能作一个圆，那么其相对的两个内角之间有什么关系？证明你的发现.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "分析：在图20.2-3中可以看到，由于“远航”号的航向已知，如果能求出两艘轮船的航向所成的角，就能知道“海天”号的航向了.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "分析：若能求出 $AC$ 的长，就可以根据勾股定理或其逆定理判断 $\\triangle ACD$ 是不是直角三角形，从而判断 $AC$ 是否垂直于 $AD$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "刘徽创割圆术计算圆周率，他在利用圆的内接正192边形计算圆的面积时，得到圆周率的近似值为 $\\frac{157}{50} = 3.14$ ，该值被称为徽率.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "利用信息技术工具，画反比例函数 $y = \\frac{k}{x} (k > 0)$ 的 $k$ 取不同值时的图象（图27.2-2），考虑问题(1)(2)，你能得出同样的结论吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "前面我们学习了二次根式的乘法与除法运算，接下来研究怎样进行二次根式的加法与减法运算.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "勾股定理有广泛的应用，下面我们用它解决两个问题.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "又 $OA = OB$ ， $OP = OP$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "又在 $\\mathrm{Rt}\\triangle ABD$ 中，",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "可以借助函数图象解决这个问题. 画出函数 $h = 30t - 5t^2 (0 \\leqslant t \\leqslant 6)$ 的图象（图22.3-1）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "可以看出，这个比与地球半径无关. 这样，只要知道 $h_1, h_2$ ，就可以求出比值. 由此你能回答本章引言中开始提出的问题吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "同圆或等圆中，两个圆心角、两条弧、两条弦中如果有一组量相等，则它们所对应的其余各组量有什么关系？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "回到本章引言中列出的一元二次方程",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "因为 $60 \\leqslant v \\leqslant 120$ ，并且平均速度 $v$ 随着行驶全程所用时间 $t$ 的增大而减小，所以 $2 \\leqslant t \\leqslant 4$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "因为这个函数的图象位于第一、第三象限，所以",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "因此，可以用这块木板按要求截出两个面积分别是 $8\\mathrm{dm}^2$ 和 $18\\mathrm{dm}^2$ 的正方形木板.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "因此，比赛组织者应邀请8支球队参赛.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图13.1-3",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图13.3-7",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图14.2-17",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图19.3-1",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图20.1-9",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图22.1-6",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图23.1-6",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图23.2-6",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图24.1-17",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图24.2-15",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图24.3-4",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图25.3-1",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图26.2-6",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图27.1-3是一个女孩儿从平面镜和哈哈镜里看到的自己的形象，这些镜中的形象相似吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图27.2-5",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图28.1-4",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图28.2-7",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图29.2-10",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图29.3-5",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图30.1-2",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图30.3-4",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "图说数学史 函数概念的探索之路 98",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "圆是轴对称图形，任何一条直径所在直线都是圆的对称轴.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "在 $\\triangle ABD$ 和 $\\triangle ACD$ 中，",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "在上面的解法中，由方程①得到②，实质上是根据平方根的意义，把一个一元二次方程“降次”，转化为两个一元一次方程。这样就把方程①转化为我们会解的方程了。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "在同圆或等圆中，如果两条弦相等，那么它们所对的圆心角相等，所对的优弧和劣弧分别相等.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "在小学，我们学过圆的周长和面积的计算。本节将结合圆的性质，学习弧长和扇形面积的计算。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "在日常生活中，三角形的形状随处可见，并且工程建筑中经常采用三角形的结构，如图13.2-2中的屋顶钢架结构等，其中的道理是什么？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "在解决有关圆的切线问题时，常常需要作过切点的半径.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "复习题21 25",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题22 56",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题23 76",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题24 122",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题25 152",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题26 21",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题27 57",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题28 84",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "复习题29 109",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "大于半圆的弧（用三个点表示，如图24.1-5中的 $\\widehat{ABC}$ ）叫做优弧；小于半圆的弧（如图24.1-5中的 $\\widehat{AC}$ ）叫做劣弧.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "如图14.2-12，已知三条线段 $a, b, c$ （其中任意两条线段的和大于第三条线段），求作 $\\triangle ABC$ ，使其三边分别为 $a, b, c$ .",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "如图24.2-8(3)，直线和圆没有公共点，这时我们说这条直线和圆相离.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "如图29.1-3，在一个平面内，线段 $OP$ 绕它固定的一个端点 $O$ 旋转一周，另一个端点 $P$ 所形成的图形叫作圆（circle）。其固定的端点 $O$ 叫作圆心，线段",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "如果 $a < 0$ 呢？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "如果把储存室的底面积定为 $500\\mathrm{m}^2$ ，施工时应向地下掘进 $20\\mathrm{m}$ 深",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "如果车轮是正方形的，情况会怎样呢？剪一个正方形纸板，让它沿直尺在桌面上滚动，用笔“跟踪”其中心的运动轨迹，你得到了什么（图2）？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "实验与探究 圆和圆的位置关系 103",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "对于某些实际问题，如果其中变量之间的关系可以用二次函数来刻画，那么就可以利用二次函数的图象和性质对其进行研究.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "小组成员进行充分的讨论与交流，集思广益，形成解决上述任务的方案.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "小结 108",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 109",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 111",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 120",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 121",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 135",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 139",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 142",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 151",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 169",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 171",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 189",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 19",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 20",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 24",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 26",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 42",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 55",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 56",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 57",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 59",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 75",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 83",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 84",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 85",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "小结 90",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "平行于三角形一边的直线截其他两边（或两边的延长线），所得的对应线段成比例.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "当 $x < 1$ 时， $y$ 随 $x$ 的增大而减小，当 $x > 1$ 时， $y$ 随 $x$ 的增大而增大.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "当水面下降 $1\\mathrm{m}$ 时，水面的纵坐标为一3.请你根据上面的函数解析式求出这时的水面宽度.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "成活率的估计值.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "我们学过三角形的外接圆，知道这个圆经过三角形的三个顶点。类似地，我们来研究是否存在与三角形的三条边都相切的圆。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "我们按照条件由少到多的顺序进行研究.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "我们知道，如果一个三角形是直角三角形，那么这个三角形有两个角互余。反过来，有两个角互余的三角形是直角三角形吗？试说明理由。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "我国南宋时期的数学家秦九韶，在他的著作《数书九章》中，也曾提出利用三角形的三边求面积的公式",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "所以，三角形三边的长分别为 3.6 cm，7.2 cm，7.2 cm.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "把方程 $(x - x_{1})(x - x_{2}) = 0$ 的左边展开，化成一般形式，得方程",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "探究",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "提示：正方形AGEF的面积 $+$ 正方形HJDG的面积 $=$ 正方形ABCD的面积.关于勾股定理，刘徽、达·芬奇等人都给出过巧妙的证法，请查阅资料了解．你能给出其他证明方法吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 107",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 108",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 110",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 118",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 119",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 134",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 138",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 140",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 150",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 168",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 170",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 18",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 188",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 19",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 23",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 25",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 41",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 54",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 56",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 58",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 74",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 81",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 83",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "数学活动 88",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "方程",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "既方之",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "有了前面的知识储备，我们换一个角度，从反比例函数的解析式出发，思考它的图象形状，运用数形结合的方法研究其性质.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "本章我们将在前面学习的基础上，进一步认识圆，学习与圆有关的线段和角的性质，研究点和圆、直线和圆、圆和正多边形之间的关系，并用圆的有关知识解决一些实际问题.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "某农科所在相同条件下做某作物种子发芽率的试验，结果如下表所示：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "根据下列问题列方程，并将所列方程化成一元二次方程的一般形式（第4～6题）：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "根据表中 $x$ ， $y$ 的值在平面直角坐标系中描点 $(x,y)$ （图26.2-1），再用平滑曲线顺次连接各点，就得到 $y = x^{2}$ 的图象（图26.2-2).",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "正正，正反，反正，反反.所有可能的结果共有4种，并且这4种结果出现的可能性相等.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "求根公式表达了用配方法解一般形式的一元二次方程 $ax^2 + bx + c = 0$ 的结果. 解一个具体的一元二次方程时, 把各系数代入求根公式, 可以直接得出方程的根, 这种解一元二次方程的方法叫作公式法.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "然后描点画图，得 $y = -\\frac{1}{2} (x + 1)^2$ ， $y = -\\frac{1}{2} (x - 1)^2$ 的图象（图22.1-7）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "现在，请你用数学的眼光来发现生活中的抛物线，以及应用抛物线性质设计的物品吧！",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "用树状图列举的结果看起来一目了然，当事件要经过多个步骤（三步或三步以上）完成时，用画树状图法求事件的概率很有效.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "由上可得，线段、平行四边形都是中心对称图形.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "由勾股定理，得",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "由探究4可以得到以下基本事实，用它可以判定两个三角形全等：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "由此，你能说说方程",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "电话：010-58758318",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "直线 l 与 $\\odot O$ 相离 $\\Leftrightarrow d > r$ ;",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "祖冲之（429—500）是第一位将圆周率精确到小数点后第7位的数学家，早于西方1000多年。他还给出了圆周率的两个近似值 $\\frac{22}{7}$ （约率）和 $\\frac{355}{113}$ （密率），后者被称为祖率。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "第三十章 直线与圆的位置关系 147",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第三步，移开三角尺.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "第二十一章 四边形 45",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十七章 反比例函数 63",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十三章 一次函数 113",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十九章 圆 113",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十二章 函数 89",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十五章 一元二次方程 1",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十八章 旋转 91",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十六章 二次函数 29",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十四章 数据的分析 148",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第二十章 勾股定理 22",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第十七章 因式分解 123",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第十三章 三角形 1",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第十九章 二次根式 1",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第十五章 轴对称 61",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第十八章 分式 137",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第十六章 整式的乘法 97",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "第十四章 全等三角形 28",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "类似地，可以证明相似三角形对应中线的比、对应角平分线的比也等于 $k$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "经过某十字路口的汽车，可能直行，也可能向左转或向右转。如果这三种可能性大小相同，求三辆汽车经过这个十字路口时，下列事件的概率：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "综合与实践 音乐与数学 143",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "能否通过改变袋子中某种颜色的球的数量，使“摸出黑球”和“摸出白球”的可能性大小相同？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "表25-4",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "观察上面几题的结果，你能发现什么规律？用你发现的规律直接写出下题的结果：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解得",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解： $A$ 区域的方格共有8个，标号3表示在这8个方格中有3个方格各埋藏有1颗地雷．因此，点击 $A$ 区域的任一方格，遇到地雷的概率是 $\\frac{3}{8}$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解：因为四边形ABCD和EFGH相似，所以它们的对应角相等，由此可得",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解：如图29.2-9，连接 $OD$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解：由三角形的一个外角等于与它不相邻的两个内角的和，得",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解：（1） $\\sqrt{14} \\times \\sqrt{7} = \\sqrt{14 \\times 7} = \\sqrt{7^2 \\times 2} = \\sqrt{7^2} \\times \\sqrt{2} = 7\\sqrt{2}$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解：（1）因式分解，得",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "解：（1）设底边长为 $x\\mathrm{cm}$ ，则腰长为 $2x\\mathrm{cm}$ ，则",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "设其中一个盒子的棱长为 $x\\mathrm{dm}$ ，则这个盒子的表面积为 $6x^{2}\\mathrm{dm}^{2}$ 。根据一桶油漆可刷的面积，列出方程",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "证明这个猜想的方法有很多，下面介绍我国古代数学家赵爽（约3世纪）的证法.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "说出下列各图形中 $\\angle 1$ 和 $\\angle 2$ 的度数：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "责任编辑：张劲松",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "运用二次函数解决实际问题，首先要用二次函数表示问题中变量之间的关系，然后利用二次函数的图象与性质求解，从而获得实际问题的答案。对此，可以结合本章知识结构图加以体会。",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "这些结果出现的可能性相等.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "这样，就得到圆周角定理：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "这说明，当自变量 $t = 2$ 时，二次函数 $h = 20t - 5t^2$ 的函数值为20，即当小球飞行 $2\\mathrm{s}$ 时，它的飞行高度为 $20\\mathrm{m}$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "通过分析实际问题中的变量关系，我们抽象出了一类形如 $y = ax^{2} + bx + c$ ( $a \\neq 0$ ) 的函数，即二次函数，认识到二次函数是描述现实世界中变量关系和变化规律的数学模型.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "配方可得：",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "问题1 $n$ 支球队参加比赛，每两队之间进行1场比赛．比赛的场次数 $m$ 与球队数 $n$ 之间有什么关系？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 $x^{2} + (p + q)x + pq$ 型式子的因式分解 133",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 一元二次方程与黄金分割数 18",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 一张古老的“三角函数表” 70",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 为什么要证明 18",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 全等变换 97",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 勾股定理的证明 32",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 圆周率 $\\pi$ 109",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 容器中的水能倒完吗 157",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 山坡的高度 80",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 推测滑行距离与滑行时间的关系 52",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 旋转对称 73",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 旋转对称图形 106",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 杨辉三角 118",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 概率与中奖 141",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 海伦-秦九韶公式 17",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 生活中的反比例关系 17",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 生活中的反比例函数 82",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 生活中的抛物线 56",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 视图的产生与应用 104",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "阅读与思考 黄金分割数 18",
+  "toc": true,
+  "furniture": false
+ },
+ {
+  "line": "随着我国经济、社会的快速发展，快递业务实现了跨越式发展，物品寄送变得方便、快捷、安全，成为人们日常生活的重要组成部分，几乎与每个人的生活息息相关.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）下列各点中，在抛物线 $y = x^{2} - 4x - 4$ 上的是（）.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）你选择的是什么图形？能否根据它的形状确定其重心位置？如果能，你的依据是什么？如何验证你找到的重心位置的准确性？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）函数图象的两支分别位于第二、第四象限；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）圆上各点到定点（圆心 $O$ ）的距离都等于定长（半径 $r$ ）；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）如图28.2-1，把其中一个图案绕点 $O$ 旋转 $180^{\\circ}$ ，你有什么发现？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）当 $k > 0$ 时，双曲线的两支分别位于第一、第三象限，在每一个象限内， $y$ 随 $x$ 的增大而减小；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）指针指向红色(记为事件 $A$ )的结果有3种，即红1，红2，红3，因此",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）画出一个以这条线段为一边的正方形；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）试着将一个四边形、五边形、六边形进行三角剖分，分别能剖分出多少个三角形？ $n$ 边形呢？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（1）通常加热到 $100^{\\circ}\\mathrm{C}$ 时，水沸腾；",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（2）作一条射线 $O^{\\prime}A^{\\prime}$ ，以点 $O^{\\prime}$ 为圆心， $OC$ 为半径作弧，交 $O^{\\prime}A^{\\prime}$ 于点 $C^\\prime$",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（2）在 Rt△DEF 中，根据勾股定理， $DE^{2} + EF^{2} = DF^{2}$ ，从而 $DE^{2} = DF^{2} - EF^{2} = 17^{2} - 15^{2} = 64$ ，所以 DE = 8.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（2）如图24.2-7(2)，在纸上画一条直线 $l$ ，把钥匙环看作一个圆.在纸上移动钥匙环，你能发现在移动钥匙环的过程中，它与直线 $l$ 的公共点个数的变化情况吗？",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（2）当 $-3 < x < -1$ 时，求反比例函数 $y = \\frac{k}{x}$ 的取值范围.",
+  "toc": false,
+  "furniture": false
+ },
+ {
+  "line": "（2）方程的二次项系数为2，为了便于配方，可把二次项系数化为1．为此，方程的两边都除以2.",
+  "toc": false,
+  "furniture": false
+ }
+]

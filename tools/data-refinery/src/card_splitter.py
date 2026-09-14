@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from models import CardFragment, ImageInfo
+from textbook_profile import TextbookProfile, profile_for_md_path
 
 _TEXT_LIMIT = 400          # 单卡文字上限
 _TOTAL_LIMIT = 700         # 单卡总上限（文字+图片折算）
@@ -86,13 +87,12 @@ def _split_paragraphs(text: str) -> list[str]:
     return flat
 
 
-# 页码标注：如 "3 第二十一章 一元二次方程"，是页眉/页脚残留，非正文内容
-_PAGE_NUMBER_HEADER_RE = re.compile(r'^\d+\s+第[一二三四五六七八九十百零]+章\s+\S+.*$')
+def _is_page_number_header(text: str, profile: TextbookProfile) -> bool:
+    """判断是否为页眉/页脚残留（形态因学科而异，规则见 textbook_profile）。
 
-
-def _is_page_number_header(text: str) -> bool:
-    """判断是否为页码标注（页眉/页脚残留），如 '3 第二十一章 一元二次方程'。"""
-    return bool(_PAGE_NUMBER_HEADER_RE.match(text.strip()))
+    数学如 '3 第二十一章 一元二次方程'，语文如 '60 | 阅读 | 第三单元'。
+    """
+    return profile.is_page_furniture(text)
 
 
 def _images_in_range(images: list[ImageInfo], start: int, end: int) -> list[ImageInfo]:
@@ -141,7 +141,8 @@ class _Bundle:
     heading: str | None = None
 
 
-def _make_bundles(text: str, images: list[ImageInfo]) -> list[_Bundle]:
+def _make_bundles(text: str, images: list[ImageInfo],
+                  profile: TextbookProfile) -> list[_Bundle]:
     """把 Markdown 拆分为 bundle 列表。若段落文字 >400，按句末标点切开。
 
     例外：(N) 开头的题段落保持原子（不按句切），即便 >400。
@@ -153,7 +154,7 @@ def _make_bundles(text: str, images: list[ImageInfo]) -> list[_Bundle]:
 
     pos = 0
     for para in paragraphs:
-        if _is_page_number_header(para):
+        if _is_page_number_header(para, profile):
             continue
 
         # 更新当前标题（遇到新标题时跟踪）
@@ -251,7 +252,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
         return []
 
     page_label = _extract_page_number(md_path)
-    bundles = _make_bundles(text, images)
+    bundles = _make_bundles(text, images, profile_for_md_path(md_path))
 
     # 贪心合并 bundle 为卡片
     fragments: list[CardFragment] = []
