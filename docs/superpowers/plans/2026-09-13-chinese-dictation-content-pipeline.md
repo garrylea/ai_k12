@@ -339,8 +339,10 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 - Consumes: `llm.LLMClient.complete(system_prompt, user_prompt) -> LLMResponse(content, ...)`；`extract._parse_json_object(content) -> dict`；`extract_cli._load_prompt(name) -> str`（读 `src/prompts/<name>.txt`）
 - Produces:
   - `LocatedPassage`（pydantic BaseModel）：`is_classical: bool`、`work_title: str`、`author: str`、`dynasty: str`、`genre: Literal['shi','ci','qu','wen','other']`、`body_start_anchor: str`、`body_end_anchor: str`、`reason: str`
-  - `LocateResult`：`passages: list[LocatedPassage]`
+  - `LocateResult`：`passages: list[LocatedPassage]`、**`rejected: list[str]`**（逐条校验失败的原始条目与原因；Task 7 必须把它们写进 unresolved，不能静默丢）
   - `locate_unit(llm: LLMClient, unit_label: str, unit_text: str, prompt: str) -> LocateResult`
+
+> **逐条容错（Task 4 评审 Important，必须实现）**：`LocateResult.model_validate` 是**整体**校验，模型返回一条畸形数据（如 `genre: "诗"`、`is_classical` 缺失、裸数组顶层）就会让**整个单元**被 Task 7 的 `except Exception` 丢掉——实测一次坏 token 可损失 10 篇（第三单元的全部）。故本模块必须**逐条独立校验**：好的留下、坏的进 `rejected` 并带上原因；`genre` 白名单外**归一到 `other`**（与默认值同义，不让单条幻觉毁掉整页）；`is_classical` 缺失/非法则**只丢该条**（**不得默认 True**，那会静默放宽收录范围）。仓库既有同款先例：`card_labeler.py:207-209`「白名单外回退 concept，不让单卡幻觉导致整页 pydantic 校验失败」。
 
 - [ ] **Step 1: 写 prompt 模板**
 
@@ -363,7 +365,7 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 - 两个锚点都必须**在页文本中逐字出现**（程序会用它们做字符串查找）。不要改写、不要补全、不要规范化标点。
 - 不要给「注释」的起始位置——末句锚点之后自然就是注释或下一篇课文。
 - **「阅读提示」不是正文**：教材常在正文前放一段编者导语（`## 阅读提示` + 一段白话说明，实测九上 9 页如此）。正文从**作品的第一个字**开始，不要把导语算进去。
-- 正文里指向注释的角标（如 `崇祯五年 $^{②}$ 十二月` 里的 `$^{②}$`）**不要写进锚点**：锚点要取不含角标的连续文字（上例应取 `崇祯五年` 或 `十二月，余住西湖。`），角标由程序在规范化时删除。
+- 正文里指向注释的角标（如 `崇祯五年 $^{②}$ 十二月` 里的 `$^{②}$`）**不要写进锚点**：锚点要取不含角标的**连续**文字。但**首句锚点必须从该篇正文的第一个字开始**——上例只能取 `崇祯五年`（从首字起、到角标前止），**不许**取 `十二月，余住西湖。`（那是从角标之后起，会把开头 `崇祯五年` 截掉，而文言文缺开头不易被字数下限查出）。角标由程序在规范化时删除。
 - 若正文跨页断开，锚点仍照抄原文（首句可能在前一页、末句可能在后一页）。
 - **找不到正文起止就整篇不要返回**，不要猜。
 
@@ -1183,6 +1185,10 @@ def run_extract(args, config) -> int:
         except Exception as e:                        # LLM 失败不阻断整册
             unresolved.append((unit_label, "LLM 定位失败", str(e)[:200]))
             continue
+
+        # 逐条校验失败的条目（Task 4 的 LocateResult.rejected）——必须暴露，不能静默丢
+        for reason in located.rejected:
+            unresolved.append((unit_label, "条目校验失败被跳过", reason))
 
         found_titles: set[str] = set()
         for p in located.passages:
