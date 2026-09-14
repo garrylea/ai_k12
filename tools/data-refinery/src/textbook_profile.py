@@ -114,8 +114,9 @@ def profile_for_md_path(md_path: Path) -> TextbookProfile:
     """从 MD 路径推学科（路径首段即学科目录，如 `语文/初中/…`）。
 
     **推不出学科时回退数学档**——这是刻意为之的兼容默认：重构不得改变既有调用方的行为，
-    而既有调用方（教材卡与试卷切题）服务的是数学。已登记为 ``generic`` 的学科
-    （英语）同样走到这个回退。
+    而既有调用方（教材卡路径 ``extract_cli`` 经 ``card_splitter``、以及 ``toc_parse_cli``）
+    服务的是数学。试卷切题走 ``question_splitter``/``question_extract``，不经过本模块。
+    已登记为 ``generic`` 的学科（英语）同样走到这个回退。
     """
     for part in Path(md_path).parts:
         key = _ALIASES.get(part.strip())

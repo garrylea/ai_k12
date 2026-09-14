@@ -160,8 +160,16 @@ def _profile_for_book(subject: str | None, book_dir: Path) -> TextbookProfile:
     ``--subject`` 只是过滤器，可能缺省。缺省时**不能**退化成保守基类：基类的
     「行末任意 1-3 位数字」比数学档宽松得多，会让既有数学教材的续页扫描多收页面
     （行为漂移）。缺省时按路径推学科，推不出时 profile_for_md_path 已回退数学档。
+
+    同理，``--subject`` 显式给出**未注册学科**（如 ``英语``，注册表里映射到 generic）时
+    也走路径推导：基类只是占位的通用规则，宽松尾号规则会造成同样的行为漂移。
+    只有显式给出**已注册且有专属档案**的学科才直接用注册表结果（显式优先于路径）。
     """
-    return get_profile(subject) if subject else profile_for_md_path(book_dir)
+    if subject:
+        profile = get_profile(subject)
+        if type(profile) is not TextbookProfile:
+            return profile
+    return profile_for_md_path(book_dir)
 
 
 # ---- CLI ----

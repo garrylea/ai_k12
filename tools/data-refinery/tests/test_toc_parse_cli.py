@@ -174,6 +174,22 @@ class TestProfileForBook:
         book = tmp_path / "数学" / "初中" / "人教版" / "九年级" / "上册" / "书"
         assert type(_profile_for_book(None, book)) is MathTextbookProfile
 
+    def test_unregistered_subject_never_falls_back_to_base(self, tmp_path):
+        """--subject 显式给了**未注册**学科（英语在注册表里是 generic）时同样不得退化基类。
+
+        基类的宽松尾号规则会把数学档下不是目录行的行（如「26.1」）判成目录行，
+        显式未注册学科必须与缺省一样改走路径推导，拿到数学档。
+        """
+        book = tmp_path / "英语" / "初中" / "人教版" / "七年级" / "上册" / "书"
+        p = _profile_for_book("英语", book)
+        assert type(p) is MathTextbookProfile
+        assert p.is_toc_line("26.1") is False    # 基类会因行末的 1 误判为 True
+
+    def test_unregistered_subject_follows_book_path(self, tmp_path):
+        """未注册学科下路径推导仍按书目录生效：语文书即便 --subject 传英语也走语文档。"""
+        book = tmp_path / "语文" / "初中" / "统编版" / "九年级" / "上册" / "书"
+        assert isinstance(_profile_for_book("英语", book), ChineseTextbookProfile)
+
 
 class TestBuildTextbookList:
     def test_filters_out_exam_dirs(self, tmp_path):
