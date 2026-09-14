@@ -385,6 +385,50 @@ def run_extract(args, config) -> int:
     return 0
 
 
+def _jsonl_path(args, config) -> Path:
+    """定位 `--extract` 已落盘的 JSONL。"""
+    out_root = Path(args.output_dir) if args.output_dir else config.output_dir / "dictation"
+    md_root = Path(args.input_dir) if args.input_dir else config.output_dir / "md"
+    book_md_dir = _find_book_dir(md_root, args.book)
+    if book_md_dir is None:
+        raise FileNotFoundError(f"没找到含 page_*.md 的教材目录（--book {args.book}）")
+    return out_root / SUBJECT_DIR / args.term / f"{book_md_dir.name}.jsonl"
+
+
+def run_load(args, config) -> int:
+    """把 `--extract` 的 JSONL 入库（幂等）。
+
+    **刻意不重跑抽取**：只吃已落盘的 JSONL，这样人工过目可以发生在入库**之前**——
+    用户否决的篇目直接从 JSONL 里删掉即可。
+    """
+    from dictation_loader import DictationLoader
+
+    try:
+        path = _jsonl_path(args, config)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}", flush=True)
+        return 1
+    if not path.exists():
+        print(f"[ERROR] JSONL 不存在：{path}（先跑 --extract）", flush=True)
+        return 1
+
+    items = DictationLoader.read_jsonl(path)
+    if not items:
+        print(f"[WARN] {path} 没有可入库的篇目", flush=True)
+        return 1
+
+    loader = DictationLoader(config.db_host, config.db_port, config.db_user,
+                             config.db_pass, config.db_name)
+    try:
+        stats = loader.load_passages(items)
+    finally:
+        loader.close()
+
+    print(f"[ok] 入库完成：新增题 {stats['inserted']}、复用并更新 {stats['updated']}、"
+          f"篇目 upsert {stats['passages_upserted']}", flush=True)
+    return 0
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     if not (args.extract or args.load or args.all):
@@ -398,9 +442,7 @@ def main(argv=None) -> int:
             return rc
 
     if args.load or args.all:
-        # 入库（Task 9）：读 JSONL + 走 dictation_passages 幂等写入，本任务未接线
-        print("[ERROR] --load（入库）由后续任务实现，当前 CLI 未接线", flush=True)
-        return 1
+        return run_load(args, config)
     return 0
 
 
