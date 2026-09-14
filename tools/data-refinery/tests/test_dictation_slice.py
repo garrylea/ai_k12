@@ -1,4 +1,4 @@
-from dictation_slice import join_pages, normalize_body, slice_body
+from dictation_slice import cut_page_annotations, join_pages, normalize_body, slice_body
 
 PAGE = """# 人民教育出版社
 
@@ -86,3 +86,43 @@ class TestNormalizeBody:
 class TestJoinPages:
     def test_orders_as_given(self):
         assert join_pages(["甲", "乙"]) == "甲\n乙"
+
+
+class TestCutPageAnnotations:
+    """实测驱动：长文言文每页「上半页正文 + 下半页注释」，注释必须按页切掉。"""
+
+    PAGE = (
+        "环滁 $^{②}$ 皆山也。其西南诸峰，林壑尤美。\n"
+        "作亭者谁？山之僧智仙也。\n"
+        "⑦〔意〕意趣，情趣。\n"
+        "⑧〔山水之乐，得之心而寓之酒也〕欣赏山水的乐趣，领会于心间，寄托在酒中。"
+    )
+
+    def test_cuts_from_first_annotation_line(self):
+        out = cut_page_annotations(self.PAGE)
+        assert "环滁" in out and "作亭者谁" in out
+        assert "〔" not in out and "⑦" not in out
+
+    def test_page_without_annotations_is_unchanged(self):
+        page = "庆历四年 $^{②}$ 春，滕子京谪守巴陵郡。\n越明年，政通人和。"
+        assert cut_page_annotations(page) == page
+
+    def test_all_annotation_page_becomes_empty(self):
+        page = "⑥〔太守自谓也〕太守用自己的别号（醉翁）来命名。\n⑧〔谓〕为，是。"
+        assert cut_page_annotations(page).strip() == ""
+
+    def test_figure_caption_with_bracket_is_cut(self):
+        # 实测 page_061 的图注「《醉翁亭图》（局部）〔清〕顾符稹作」也带 〔 〕，属页尾版面
+        page = "若夫日出而林霏开。\n《醉翁亭图》（局部）〔清〕顾符稹作"
+        assert cut_page_annotations(page).strip() == "若夫日出而林霏开。"
+
+    def test_end_to_end_removes_interleaved_annotations(self):
+        # 两页拼接：每页都有注释尾巴 → 切片结果不得含 〔〕
+        p1 = "环滁 $^{②}$ 皆山也。\n⑦〔意〕意趣。"
+        p2 = "太守谓 $^{⑧}$ 谁？庐陵 $^{⑨}$ 欧阳修也。\n⑨〔庐陵〕庐陵郡。"
+        joined = join_pages([cut_page_annotations(p1), cut_page_annotations(p2)])
+        body = slice_body(joined, "环滁 $^{②}$ 皆山也。", "太守谓 $^{⑧}$ 谁？庐陵 $^{⑨}$ 欧阳修也。")
+        assert body is not None
+        nb = normalize_body(body)
+        assert "〔" not in nb and "⑦" not in nb and "⑨" not in nb
+        assert nb == "环滁皆山也。太守谓谁？庐陵欧阳修也。"

@@ -53,3 +53,24 @@ def normalize_body(raw: str) -> str:
     标点只在判题时被忽略（normalizeChineseAnswer），存储保留原文便于展示。
     """
     return _WS_RE.sub("", _INLINE_MARKER_RE.sub("", raw))
+
+
+#: 注释式行：行首圈号（①-⑳ 及 ㉑+ 扩展），或含〔…〕（注释与图注都用它）。
+#: 实测长文言文每一页是「上半页正文 + 下半页注释」，注释块必须按页切掉，
+#: 否则跨页篇目按锚点取原始子串时会把中间各页的注释一起吃进来
+#: （实测醉翁亭记 775 字含 〔〕与圈号；切后 584 字干净；对本来干净的篇目零影响）。
+_PAGE_ANNOTATION_RE = re.compile(r"^\s*(?:[①-⑳㉑-㉟㊱-㊿]|〔)|〔[^〕]*〕")
+
+
+def cut_page_annotations(page_text: str) -> str:
+    """把**单页**文本从第一行注释式内容起截断（注释都在该页页尾）。
+
+    逐页调用后再 `join_pages`。若某页整页都是注释，截断后为空——无妨，正文不在该页。
+    若正文里恰好出现 〔（罕见，〔 多用于注释与图注），会截早、末句锚点找不到 →
+    `slice_body` 返回 None → 该篇进人工复核（fail closed，安全方向）。
+    """
+    lines = page_text.splitlines()
+    for i, line in enumerate(lines):
+        if _PAGE_ANNOTATION_RE.search(line):
+            return "\n".join(lines[:i])
+    return page_text

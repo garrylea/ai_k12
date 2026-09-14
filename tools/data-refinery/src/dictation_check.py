@@ -72,12 +72,13 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
     if "|" in body or "｜" in body:
         r.errors.append("正文含竖线 |／｜（页码页脚残留）")
 
-    # 篇名检查只看正文**开头**：篇名出现在前 len(篇名)+6 字内，才说明「把标题切进了正文」。
-    # 不能只做 substring 判断——实测《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」），
-    # substring 会把一篇完全正确的正文误杀、让它永远进不了题库。+6 是给前导的
-    # 「N 」编号/书名号/换行留余量。
+    # 篇名检查只看正文**开头**，且**只标复核、不判错**（两种真实情形都必须能入库）：
+    # ①《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」）——substring 会误杀正确正文；
+    # ②《十五从军征》的首行**就是篇名本身**（该诗题目为后人所加）——「开头出现篇名」对它是正常现象。
+    # 故留作 needs_review：人工能看见「疑似把标题切进了正文」，但不阻断入库。
     if work_title and work_title in body[: len(work_title) + 6]:
-        r.errors.append(f"正文开头出现篇名「{work_title}」，疑似把标题切进了正文")
+        r.needs_review = True
+        r.review_reasons.append(f"正文开头出现篇名「{work_title}」，疑似把标题切进了正文")
 
     for line in chrome:
         if line and line in body:
