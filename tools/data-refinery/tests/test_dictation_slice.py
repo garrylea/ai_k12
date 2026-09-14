@@ -73,8 +73,9 @@ class TestNormalizeBody:
         assert normalize_body("崇祯五年 $^{②}$ 十二月") == "崇祯五年十二月"
         assert normalize_body("春和景 $^{⑰}$ 明") == "春和景明"
 
-    def test_marker_stripped_before_space_collapse(self):
-        # 顺序关键：先删角标再收空白。反过来会让 `$^{②}` 与正文粘连、更难清理
+    def test_markers_and_whitespace_both_removed(self):
+        # 当前角标正则不含空白，先删角标 / 先收空白结果相同，本用例钉的是**输出**而非次序
+        # （次序为何仍保持「先删角标」见 dictation_slice 模块 normalize_body docstring）
         assert normalize_body("大雪三日 $^{③}$ ，湖中人鸟声俱绝") == "大雪三日，湖中人鸟声俱绝"
 
     def test_keeps_legitimate_fullwidth_punctuation_only(self):
