@@ -92,7 +92,7 @@ export class TrainingService {
     return this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
   }
 
-  /** 语文默写：配置页篇目清单（只出 verified=1，已停用的题不出）。
+  /** 语文默写：配置页篇目清单（只出 verified=1 且 memorize_required=1 的篇目，已停用的题不出）。
    *  只出篇名 + 册次——作者/朝代/正文都是判题答案字段，一律不下发。 */
   async listDictationPassages(): Promise<{ passages: DictationPassageListItem[] }> {
     const rows = await this.dictationRepo.findVerifiedBySubject(CHINESE_SUBJECT_ID);

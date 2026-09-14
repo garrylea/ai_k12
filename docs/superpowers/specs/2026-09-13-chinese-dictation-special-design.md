@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
   sort_order SMALLINT NOT NULL DEFAULT 0,
   source_ref VARCHAR(200) DEFAULT NULL,  -- 教材来源（书名 + 页码）
   verified TINYINT(1) NOT NULL DEFAULT 0,
+  -- 教学上是否要求背诵。与 verified 是**两道正交的闸门**（2026-09-13 追加）：
+  --   verified           = 内容是否已校验（正文准确）—— 内容管线自检通过后置 1
+  --   memorize_required  = 教学上是否要求背 —— 由人后续标定
+  -- 抽题池 = verified = 1 AND memorize_required = 1。
+  memorize_required TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_dp_question (question_id),

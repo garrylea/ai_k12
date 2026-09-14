@@ -125,3 +125,66 @@ pytest tests/ -q                                # 105 passed
 **后端 API（`apps/server`）**--当前系统还没真正可用：前端 `apps/web` 已存在，但**没有后端可连**（`apps/server` 未建）。API 已设计好（`docs/api/openapi.yaml` + `docs/API接口与数据流设计文档.md`），就等实现。做了它前端才能查 cards/questions、学习进度等，系统才闭环。
 
 建议顺序：先做两个小修（1、2），再进入后端 API；数据重抽（3、4）可后台并行。
+
+---
+
+## 8. 旁路管线：语文古诗文默写（2026-09-14 新增）
+
+四阶段主管线（convert → extract → publish → db_loader）服务的是**数学/化学教材卡片与试卷
+题目**，产物进 `textbook_cards` / `questions`。语文默写是**另一条独立旁路**，产物进
+`dictation_passages`——它刻意不接进四阶段，避免动到主链路的表结构与幂等语义。
+
+### 为什么独立
+
+- 目标不同：主管线抽「卡片/题目」，这条抽「**整篇古诗文正文**」（学生要逐字默写，
+  错一个字就判错，故对正文准确性的要求比卡片高得多）。
+- 产物不同：`dictation_passages` 是篇目级结构（篇名/作者/朝代/正文/册次/必背标志），
+  与 `questions` 的题面/答案语义不重合（详见 `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md` §4.1.1 的「为什么另建表」）。
+- 复用但不动：前 3 步直接用现成 CLI（`crawler_cli` / `convert_cli` / `toc_parse_cli`），
+  后 3 步是本管线新建。
+
+### 三段复用 + 三段新建
+
+| 步骤 | 命令 | 说明 |
+|---|---|---|
+| 1. 爬 | `cd tools/crawler && python src/crawler_cli.py --site smartedu --subject 语文 --publisher 统编版 --level 初中 --grade 九年级 --semester 下册` | 复用 |
+| 2. 转 | `cd tools/data-refinery && python src/convert_cli.py --source smartedu --subject 语文 --term 下册` | 复用（MinerU） |
+| 3. 目录 | `python src/toc_parse_cli.py --source smartedu --subject 语文 --publisher 统编版 --grade 九下` | 复用（产物即候选清单） |
+| 4. 抽取 | `python src/dictation_cli.py --extract --book "九年级/上册" --term 上册` | **新建** |
+| 5. 入库 | `python src/dictation_cli.py --load --book "九年级/上册" --term 上册` | **新建** |
+| 6. 串联 | `python src/dictation_cli.py --all --book "九年级/上册" --term 上册` | **新建** |
+
+产物落在 `output/dictation/语文/<册次>/`：`<书名>.jsonl`（入库候选）、
+`<书名>-review.md`（人工过目清单 + 定位留痕 + 已纠正篇目）、`<书名>-unresolved.md`（待人工处理）。
+
+### 分工（用户 2026-09-14 裁决后定型，改代码前必读）
+
+| 环节 | 谁做 |
+|---|---|
+| 哪些篇目、在第几页 | **程序**（目录 + 印刷页偏移） |
+| 正文起止 | **程序**（`dictation_locate` 版面规则） |
+| 尾部编者赏析 / 词前小序 | **程序**（`trim_to_form` 按格律切） |
+| 作者 / 朝代 / 体裁 | **LLM**（`ask_identity`，每次只问一个篇名） |
+| 正文纠正 | **LLM**（`dictation_repair`，本地优先、ds flash 兜底） |
+| 通过与否 | **程序**（`dictation_check` 纯程序自检，含词牌格律） |
+
+> **曾走过的弯路（别再回去）**：最初让 LLM 返回「正文首末句锚点」、且**一次调用喂一整个
+> 单元**（第六单元 30 页 1.45 万字、一次找 13 篇）。因为 `llm.py` 不传 `temperature`，
+> 同代码同输入连跑 3 次得 **23 / 22 / 20 篇**，每次漏的还不一样。改为纯程序定位后实测
+> **24/24 篇、0 未解决、连跑两次完全一致**。详见 spec §5.2/§5.3。
+
+### 实测结论（九上，170 页）
+
+- 24 篇全部入库，偏移众数可靠（+7）。
+- 《沁园春·雪》的正文在教材里被**写作背景与课后思考题逐行插花**、还跨页拆开——
+  **任何连续子串都取不到正确的词**。它由「词牌格律判错 → 交模型重写」这条通道修好
+  （376 字错稿 → 139 字正确的词）。这是「程序切不出来」的确定性出口，见 spec §6.1。
+- 入库的篇目一律 `verified=1`、`memorize_required=0`——**必背标定留给后续人工步骤**，
+  故此时抽题池里仍只有开发假数据（门禁生效的证据）。
+
+### 后续（不在本次）
+
+- **必背标定**：读教材课后背诵要求标 `memorize_required=1`（含人工确认）。
+- **古诗文解释专项**：需要本管线丢弃的教材注释（图片留在本地，重跑第 2–5 步即可）。
+- **开发假数据清理**：真篇目必背标定完成后清理两篇 `DEV-FIXTURE`。
+

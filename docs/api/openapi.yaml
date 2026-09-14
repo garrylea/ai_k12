@@ -3861,9 +3861,10 @@ paths:
       summary: 语文默写篇目清单（配置页用）
       description: >-
         语文默写配置页的篇目数据（student JWT）。仅返回 questions.is_active=1 且
-        dictation_passages.verified=1 的已校验篇目，按 sort_order, id 排序。
-        只出篇名 + 册次——作者/朝代/正文是学生要作答的三个判题字段，一律不下发
-        （防答案泄露）。本清单不排除该生已标记「不再展示」的篇目。
+        dictation_passages.verified=1 且 memorize_required=1 的篇目（两道闸门：
+        verified 是内容已校验，memorize_required 是教学上要求背诵），按
+        sort_order, id 排序。只出篇名 + 册次——作者/朝代/正文是学生要作答的三个
+        判题字段，一律不下发（防答案泄露）。本清单不排除该生已标记「不再展示」的篇目。
       operationId: listDictationPassages
       security: [{ bearerAuth: [] }]
       responses:
@@ -3887,7 +3888,9 @@ paths:
         语文默写开练（student JWT）。count 限 1-20 整数（越界/非整数 400）；
         semester 限 上册|下册|null（null=全部册次，非法 400）；questionIds 为正整数
         数组或 null——非空时按指定篇目出题（忽略 semester，仅保留已校验篇目），
-        否则按册次随机抽题。 题项白名单序列化：只出 questionId/prompt/workTitle/semester，
+        否则按册次随机抽题。两条路径都**只从抽题池取题**：verified=1 且
+        memorize_required=1（内容已校验 + 教学上要求背诵，两道闸门）。
+        题项白名单序列化：只出 questionId/prompt/workTitle/semester，
         author/dynasty/正文一律剥离（防答案泄露，与 targeted/start 同规矩）。
         「不再展示」排除仅作用于随机抽题路径——按册次随机抽题时基于 JWT
         user.sub（studentId）LEFT JOIN student_hidden_questions ... IS NULL 排除

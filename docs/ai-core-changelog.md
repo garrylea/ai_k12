@@ -8,6 +8,23 @@
 
 ---
 
+## 2026-09-14 新增（语文默写内容管线：九年级教材 → 题库）
+
+- **变更摘要**：
+  1. **新增旁路管线**（`tools/data-refinery`，不接进四阶段主线，避免动到 `textbook_cards`/`questions` 的既有语义）：爬 + 转 + 目录三步复用现成 CLI，抽取/入库/串联三步新建（`dictation_cli.py` + `dictation_locate.py` / `dictation_slice.py` / `dictation_check.py` / `dictation_repair.py` / `dictation_loader.py`）。产物落 `output/dictation/语文/<册次>/`。
+  2. **定位改纯程序**（**本节最关键的修正**）：原设计让 LLM 返回「正文首末句锚点」且**一次调用喂一整个单元**（实测第六单元 30 页 1.45 万字、一次找 13 篇）；因 `llm.py` 不传 `temperature`，**同代码同输入连跑 3 次得 23 / 22 / 20 篇**、每次漏的还不同。用户指出「篇目在目录里、按页码定位是程序的事」后改为纯程序版面规则（标题行 → 跳过编者导语/作者/题解/图片 → 终止符 → 按格律收尾）。改后实测 **24/24 篇、0 未解决、连跑两次完全一致**。
+  3. **LLM 只留两件事**：`ask_identity`（每篇一次极小调用，只要作者/朝代/体裁——目录 label 只有「篇名/作者」、没朝代）与 `dictation_repair`（正文纠正）。**LLM 不再产出锚点、不参与判断正文起止**。
+  4. **词牌格律作「切不出来」的确定性出口**：教材里《沁园春·雪》的正文被写作背景与课后思考题**逐行插花**、还跨页拆开，任何连续子串都取不到正确的词（实测切出 376 字 vs 词牌 114 字，且旧实现一直把这个错稿入库）。新增 `CI_PATTERNS` 词牌字数表与 `check_body` 的格律判错项 → 转模型重写 + 人工过目（376 → 139 字正确的词）。
+  5. **`memorize_required` 字段与抽题池两道闸门**：抽题池 = `verified=1` **且** `memorize_required=1`（前者是内容已校验、后者是教学上要求背诵）。三条查询全部收紧，与 `questions.is_active` 共同作用；`findByQuestionId`（判题路径）**有意不设门禁**。
+  6. **入库器按业务键幂等**（`dictation_loader.py`）：身份是 `(work_title, semester)`，命中既有篇目就**原地 UPDATE 复用其 `question_id`**。**刻意不用 `content_hash` 去重**（题面模板一改 hash 就变，会插新行、把旧行变孤儿，而 `main_error_books.question_id` 外键是 RESTRICT）。`memorize_required` 只在 INSERT 写死 0、**不在冲突分支出现**（否则重跑会把用户标好的必背刷回 0）。
+  7. **小作文案约定**：题面只放篇名（`请默写《X》`），作者/朝代/正文进 `answer` 三行——三者都是学生要默写的答案，写进题面等于泄题。
+- **动机**：训练轨「专项练习」此前全链路写死数学，语文学科除模拟卷 Markdown 外无任何入库内容。默写适合程序化判题（答案确定、无需 AI 判对错），且能顺带补上语文第一份结构化题库。设计见 `docs/superpowers/specs/2026-09-13-chinese-dictation-content-pipeline-design.md`（§5.2/§5.3 已按纯程序定位重写，§13 为实现结果）。
+- **实测（九上，170 页）**：候选 24 篇 → 命中标题行 24/24 → 入库 24 篇、**待人工处理 0 项**；其中 2 篇由模型纠正（《醉翁亭记》《沁园春·雪》）；偏移众数可靠（+7，未退化滑窗）；首轮入库 `新增题 24/复用 0`、二次 `新增题 0/复用 24`（幂等）、26 行 26 个不同题号、孤儿默写题 0；**抽题池仍只有两篇 `DEV-FIXTURE`**（真篇目 `verified=1` 但 `memorize_required=0`，门禁生效的证据）。
+- **落地关键文件**：`tools/data-refinery/src/dictation_{cli,locate,slice,check,repair,loader}.py` + `prompts/dictation_{locate,identity,repair}.txt`；测试 `tests/test_dictation_*.py`（refinery 全量 **885 passed / 10 skipped**）。`apps/server` 侧为 Task 1 已有的三端点 + 仓储门禁，本次仅改两处陈旧注释与仓储 `upsert` 的一致性说明。
+- **遗留**：**必背标定未做**（全部 `memorize_required=0`，真篇目暂不进抽题池）；九下已爬取（158 页）待转换/抽取/入库；`llm.py` 不传 `temperature` 仍使 `ask_identity`/`dictation_repair` 不可复现（定位已绕开）。
+
+---
+
 ## 2026-09-14 新增（语文默写内容管线：自检未过的正文交模型纠正）
 
 - **变更摘要**：
@@ -24,6 +41,7 @@
 
 ---
 
+## 2026-09-14 修正（DeepSeek 模型改名：`deepseek-v4-flash` → `deepseek-flash`）
 
 - **变更摘要**：
   1. **DeepSeek 端点现状（实测确认）**：`GET /v1/chat/completions` 只接受**两个**模型名——`deepseek-flash`、`deepseek-v4-pro`；传其它名字直接 400 并在错误体里列出支持列表（`"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed X"`）。`deepseek-v4-flash` 目前**仍能解析**（响应 `model` 字段已回落成 `deepseek-flash`、`deepseek-chat`/`deepseek-reasoner`/`deepseek-coder` 同样回落），但已不在支持列表里，属不再保证的旧别名，故全面改名。
