@@ -15,6 +15,7 @@ describe('DictationPassagesRepository', () => {
     expect(sql).toContain('FROM dictation_passages dp');
     expect(sql).toContain('JOIN questions q ON q.id = dp.question_id');
     expect(sql).toContain('dp.verified = 1');
+    expect(sql).toContain('dp.memorize_required = 1');
     expect(sql).toContain('q.is_active = 1');
     expect(sql).toContain('q.subject_id = ?');
     expect(sql).toContain('ORDER BY dp.sort_order');
@@ -32,6 +33,7 @@ describe('DictationPassagesRepository', () => {
     // 抽题池守卫（spec §6）：未校验篇目与已停用题绝不能进抽题池——若这两条守卫
     // 被误删，其余断言仍会全绿，故必须显式钉住
     expect(sql).toContain('dp.verified = 1');
+    expect(sql).toContain('dp.memorize_required = 1');
     expect(sql).toContain('q.is_active = 1');
     expect(sql).toContain('dp.semester = ?');
     expect(sql).toContain('ORDER BY RAND()');
@@ -63,6 +65,7 @@ describe('DictationPassagesRepository', () => {
     const [sql, params] = pool.execute.mock.calls[0];
     // 只测空数组短路的话，subjectId 与 ids 顺序写反也不会被发现
     expect(sql).toContain('dp.question_id IN (?,?)');
+    expect(sql).toContain('dp.memorize_required = 1');
     expect(params).toEqual([2, 10, 11]);
   });
 
@@ -82,13 +85,13 @@ describe('DictationPassagesRepository', () => {
     await repo.upsert({
       questionId: 100, workTitle: '静夜思', author: '李白', dynasty: '唐',
       body: '床前明月光', gradeBand: 'junior', grade: '九年级', semester: '上册',
-      sortOrder: 1, sourceRef: 'DEV-FIXTURE', verified: 0,
+      sortOrder: 1, sourceRef: 'DEV-FIXTURE', verified: 0, memorizeRequired: 0,
     });
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('INSERT INTO dictation_passages');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
     expect(sql).toContain('work_title');
     // 全参断言：若 verified 被写死成 1（覆盖导入器的校验闸门决定），只断 params[0] 不会发现
-    expect(params).toEqual([100, '静夜思', '李白', '唐', '床前明月光', 'junior', '九年级', '上册', 1, 'DEV-FIXTURE', 0]);
+    expect(params).toEqual([100, '静夜思', '李白', '唐', '床前明月光', 'junior', '九年级', '上册', 1, 'DEV-FIXTURE', 0, 0]);
   });
 });

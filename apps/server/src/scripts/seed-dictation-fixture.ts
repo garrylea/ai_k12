@@ -4,6 +4,8 @@
  * 警告：这里的数据**不是生产题库**，仅为打通「训练 → 语文 → 专项 → 默写」链路。
  * 生产篇目由内容管线（爬 smartedu 教材 + 逐篇校验）导入，见
  * docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md §6。
+ * 真篇目入库时 memorizeRequired=0（内容对的未必要求背），待用户标定必背后才进抽题池；
+ * 本脚本的假数据则直接置 memorizeRequired=1，好让专项在标定前仍有题可练。
  * 两条记录以 source_ref = 'DEV-FIXTURE' 标记，便于后续清理。
  *
  * 幂等：questions 走 content_hash 去重，dictation_passages 走 (work_title, semester) upsert。
@@ -131,6 +133,9 @@ async function main() {
       sortOrder: f.sortOrder,
       sourceRef: 'DEV-FIXTURE',
       verified: 1,
+      // 假数据置「必背」：否则抽题池（verified AND memorize_required）会空掉，
+      // 管线落地到真篇目标定必背之前，专项将无可练之题。
+      memorizeRequired: 1,
     });
     console.log(`seeded questionId=${questionId} 《${f.workTitle}》`);
   }

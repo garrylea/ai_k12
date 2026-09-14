@@ -14,6 +14,7 @@ export interface DictationPassageRow extends RowDataPacket {
   sort_order: number;
   source_ref: string | null;
   verified: number;
+  memorize_required: number;
 }
 
 export interface DictationListRow extends DictationPassageRow {
@@ -32,10 +33,12 @@ export interface DictationUpsertInput {
   sortOrder: number;
   sourceRef: string | null;
   verified: number;
+  memorizeRequired: number;
 }
 
 const SELECT_COLS = `dp.id, dp.question_id, dp.work_title, dp.author, dp.dynasty, dp.body,
   dp.grade_band, dp.grade, dp.semester, dp.sort_order, dp.source_ref, dp.verified,
+  dp.memorize_required,
   q.content AS questionContent`;
 
 /**
@@ -60,7 +63,7 @@ export class DictationPassagesRepository {
     const [rows] = await this.pool.execute<DictationListRow[]>(
       `SELECT ${SELECT_COLS} FROM dictation_passages dp
        JOIN questions q ON q.id = dp.question_id
-       WHERE q.subject_id = ? AND q.is_active = 1 AND dp.verified = 1
+       WHERE q.subject_id = ? AND q.is_active = 1 AND dp.verified = 1 AND dp.memorize_required = 1
        ORDER BY dp.sort_order, dp.id`,
       [subjectId],
     );
@@ -74,11 +77,12 @@ export class DictationPassagesRepository {
     count: number,
   ): Promise<DictationListRow[]> {
     const params: unknown[] = [studentId, subjectId];
+    // 抽题池 = 已校验 且 必背：verified 只说内容对，memorize_required 才是教学上要背的。
     let sql = `SELECT ${SELECT_COLS} FROM dictation_passages dp
        JOIN questions q ON q.id = dp.question_id
        LEFT JOIN student_hidden_questions shq
          ON shq.question_id = dp.question_id AND shq.student_id = ?
-       WHERE q.subject_id = ? AND q.is_active = 1 AND dp.verified = 1
+       WHERE q.subject_id = ? AND q.is_active = 1 AND dp.verified = 1 AND dp.memorize_required = 1
          AND shq.id IS NULL`;
     if (semester != null) {
       sql += ' AND dp.semester = ?';
@@ -97,7 +101,7 @@ export class DictationPassagesRepository {
     const [rows] = await this.pool.execute<DictationListRow[]>(
       `SELECT ${SELECT_COLS} FROM dictation_passages dp
        JOIN questions q ON q.id = dp.question_id
-       WHERE q.subject_id = ? AND q.is_active = 1 AND dp.verified = 1
+       WHERE q.subject_id = ? AND q.is_active = 1 AND dp.verified = 1 AND dp.memorize_required = 1
          AND dp.question_id IN (${placeholders})`,
       [subjectId, ...questionIds],
     );
@@ -109,15 +113,17 @@ export class DictationPassagesRepository {
     await this.pool.execute(
       `INSERT INTO dictation_passages
          (question_id, work_title, author, dynasty, body, grade_band, grade, semester,
-          sort_order, source_ref, verified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sort_order, source_ref, verified, memorize_required)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          question_id = VALUES(question_id), author = VALUES(author), dynasty = VALUES(dynasty),
          body = VALUES(body), grade_band = VALUES(grade_band), grade = VALUES(grade),
-         sort_order = VALUES(sort_order), source_ref = VALUES(source_ref), verified = VALUES(verified)`,
+         sort_order = VALUES(sort_order), source_ref = VALUES(source_ref), verified = VALUES(verified),
+         memorize_required = VALUES(memorize_required)`,
       [
         row.questionId, row.workTitle, row.author, row.dynasty, row.body,
         row.gradeBand, row.grade, row.semester, row.sortOrder, row.sourceRef, row.verified,
+        row.memorizeRequired,
       ],
     );
   }

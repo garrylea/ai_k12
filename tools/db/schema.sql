@@ -311,6 +311,9 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
   sort_order SMALLINT NOT NULL DEFAULT 0,
   source_ref VARCHAR(200) DEFAULT NULL,
   verified TINYINT(1) NOT NULL DEFAULT 0,
+  -- 教学上是否要求背诵（与 verified 语义不同：verified 是内容是否已校验）。
+  -- 抽题池 = verified = 1 AND memorize_required = 1。
+  memorize_required TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_dp_question (question_id),
