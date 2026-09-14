@@ -135,24 +135,35 @@ ALTER TABLE dictation_passages
 
 ## 8. 运行方式
 
-新增独立 CLI：`tools/data-refinery/src/dictation_cli.py`。**只服务语文默写，不改动既有管线路径。**
+**第 1–3 步直接使用既有 CLI**（不包装、不改造，避免与四阶段工具耦合）：
 
 ```bash
-# 分步（可各自重跑）
-python src/dictation_cli.py --crawl   --subject 语文 --grade 九年级 --term 上册
-python src/dictation_cli.py --convert --subject 语文 --grade 九年级 --term 上册
-python src/dictation_cli.py --toc     --subject 语文 --grade 九年级 --term 上册   # 产出候选清单供人工确认
-python src/dictation_cli.py --extract --book "九年级/上册"                        # 定位 + 切片 + 自检 + 出清单
-python src/dictation_cli.py --load                                                # 入库
-python src/dictation_cli.py --all                                                 # 串起来
+cd tools/crawler    && python src/crawler_cli.py  --site smartedu --subject 语文 --publisher 统编版 --grade 九年级 --semester 上册
+cd tools/data-refinery && python src/convert_cli.py   --source smartedu --subject 语文 --term 上册
+cd tools/data-refinery && python src/toc_parse_cli.py --source smartedu --subject 语文 --publisher 统编版 --grade 九上
 ```
 
+**第 4–6 步是本次新建的独立 CLI**：`tools/data-refinery/src/dictation_cli.py`。
+
+```bash
+# 定位 + 切片 + 自检 → 出 JSONL、人工过目清单、待人工处理报告
+python src/dictation_cli.py --extract --book "九年级/上册" --term 上册
+# 入库（幂等）
+python src/dictation_cli.py --load --book "九年级/上册" --term 上册
+# 两步串起来
+python src/dictation_cli.py --all --book "九年级/上册" --term 上册
+```
+
+> 说明：第 1–3 步刻意**不**收进 `dictation_cli.py`——`crawler_cli` 是 `tools/crawler` 的独立工具，`convert_cli`/`toc_parse_cli` 属四阶段管线；包装它们会引入跨工具耦合，而这三步本身就是可独立重跑、自带 checkpoint 的现成命令。
+
 - 幂等：入库按 `dictation_passages` 业务键 `(work_title, semester)` upsert；`questions` 行的定位沿用种子脚本已采用的「按业务键找已有 `question_id` → 原地 UPDATE」策略（题面模板变化时不会插重复行）；
-- 输出目录独立于数学管线（`output/dictation/`），互不干扰。
+- 产物目录独立于数学管线（`output/dictation/`），互不干扰。
 
 ## 9. 测试与验收
 
-**pytest 单测**（与既有 `tools/data-refinery/tests/` 同风格，网络与 LLM 依赖用例默认 skip）
+**pytest 单测**（与既有 `tools/data-refinery/tests/` 同风格）
+
+> **测试惯例修正（写计划时核实）**：`tools/data-refinery/pytest.ini` **没有** `network` marker——那是 `tools/crawler/pytest.ini` 专属。该工具的既有惯例是：**LLM 调用在单测里 mock SDK**（见 `tests/test_llm.py` 的 `_mock_client`），**DB 集成测试在 fixture 里运行时 skip**（见 `tests/test_db_loader_integration.py`）。本管线沿用同一惯例，不新增 marker。
 
 - 切片：锚点定位、跨页拼接、标点保留、换行/空格规范化；
 - 自检：字数不符、含注释标记、含页眉残留、与篇名重复 → 各自被拦下；
