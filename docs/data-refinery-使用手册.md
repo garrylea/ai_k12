@@ -54,7 +54,7 @@
 ```bash
 # === LLM 配置（extract / toc_parse 共用）===
 LLM_PROVIDER=openai                  # openai | kimi | qwen | glm | deepseek | gemini | local | anthropic
-LLM_MODEL=deepseek-v4-flash          # 推荐 DeepSeek reasoner
+LLM_MODEL=deepseek-flash             # 推荐 DeepSeek reasoner
 LLM_BASE_URL=https://api.deepseek.com/v1
 LLM_AUTH_TOKEN=sk-xxx                # refinery 专属鉴权变量，勿用 ANTHROPIC_* 会被 shell 覆盖
                                      #（fallback 链：LLM_API_KEY -> OPENAI_API_KEY -> ANTHROPIC_API_KEY；

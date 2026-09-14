@@ -64,8 +64,8 @@ class TestThinkingParam:
         # deepseek-reasoner 恒思考：thinking=False 时内部切换为 deepseek-chat
         c = DeepSeekClient(api_key="fake", model="deepseek-reasoner")
         assert c._model == "deepseek-chat"
-        c2 = DeepSeekClient(api_key="fake", model="deepseek-v4-flash", thinking=True)
-        assert c2._model == "deepseek-v4-flash"  # 非 reasoner 不切换
+        c2 = DeepSeekClient(api_key="fake", model="deepseek-flash", thinking=True)
+        assert c2._model == "deepseek-flash"  # 非 reasoner 不切换
 
     def test_gemini(self):
         c = self._make(GeminiClient)

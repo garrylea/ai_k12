@@ -23,7 +23,7 @@
 2. 题库覆盖九年级上/下册教材要求「背诵/默写」的古诗词与文言文，均**整篇**默写；
 3. 学生分**三个字段**作答（作者 / 朝代 / 正文）；
 4. 判题程序化：归一化比对定对错 + diff 定位错处，三项全对才算整题对；
-5. LLM 只为错题写「错因文案」，本地模型优先、`deepseek-v4-flash` 兜底，模型不可用不阻断判题。
+5. LLM 只为错题写「错因文案」，本地模型优先、`deepseek-flash` 兜底，模型不可用不阻断判题。
 
 **非目标**
 
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 2. **逐字段比对**：作者 / 朝代 / 正文分别比对（归一化后全等）。
 3. **正文差异定位**：LCS 求最小编辑序列，标注「错字 / 漏写 / 多写」及位置，输出结构化 diff 供前端高亮。
 4. **对错**：三项全对 → `isCorrect=true`；任一不符 → `false`。
-5. **错因（LLM，可选）**：新增 `DictationFeedbackCapability` + 新场景 `dictation_feedback`，primary=`local`（`Qwen3.8-27B`）、fallback=`deepseek-v4-flash`；输入「学生答案 + 正确答案 + diff 点位」，输出给学生看的提醒文案。
+5. **错因（LLM，可选）**：新增 `DictationFeedbackCapability` + 新场景 `dictation_feedback`，primary=`local`（`Qwen3.8-27B`）、fallback=`deepseek-flash`；输入「学生答案 + 正确答案 + diff 点位」，输出给学生看的提醒文案。
    - 两个模型都失败 → **不阻断判题**，照常返回对错 + diff，`feedback=null`。
    - 错因与具体作答绑定，不做缓存。
 6. **落库**：对 → `clearUnclearedByStudentQuestionId`；错 → `writeErrorBookOrReuse`（`source='dictation'`）。
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 | `common/utils/normalize-chinese.util.ts` | **新建**：`normalizeChineseAnswer` + LCS diff；标点常量与 `content-hash.util.ts` 共用 |
 | `ai-core/capabilities/dictation-feedback.capability.ts` | **新建**：场景 `dictation_feedback`，文本输出 |
 | `ai-core/prompts/dictation/feedback.md` | **新建** |
-| `ai-core/model-routes.yaml` | 新增 `dictation_feedback` 路由（primary `local`，fallback `deepseek-v4-flash`） |
+| `ai-core/model-routes.yaml` | 新增 `dictation_feedback` 路由（primary `local`，fallback `deepseek-flash`） |
 | `ai-core/retry.yaml` | 新增 `dictation_feedback` 超时 |
 | `ai-core/types.ts` | `Scene` 加入 `'dictation_feedback'`；新增结果类型接口 |
 | `ai-core/infra/prompt-builder.ts` | `resolveTemplatePath` 支持 dictation feedback 模板 |

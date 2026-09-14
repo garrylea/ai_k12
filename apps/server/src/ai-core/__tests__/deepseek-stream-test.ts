@@ -6,7 +6,7 @@ import { DeepSeekClient } from '../infra/model-client/deepseek-client.js';
 import type { ProviderAdapter } from '../infra/model-client/types.js';
 
 async function main() {
-  const model = getModelConfig('deepseek-v4-flash');
+  const model = getModelConfig('deepseek-flash');
   console.log('baseurl:', model.baseUrl, '| model:', model.modelId, '| provider:', model.provider);
 
   const real = new DeepSeekClient(getApiKeyByProvider('deepseek'));

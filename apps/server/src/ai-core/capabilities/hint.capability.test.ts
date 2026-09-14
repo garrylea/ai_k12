@@ -15,7 +15,7 @@ describe('HintCapability', () => {
       chat: async (req: { messages: { role: string; content: string }[] }): Promise<ChatResponse> => {
         capturedMessages = req.messages;
         return {
-          id: 'r1', model: 'deepseek-v4-flash',
+          id: 'r1', model: 'deepseek-flash',
           content: '先想想：能不能把这个方程化成一般形式 $ax^2+bx+c=0$？试试把所有项移到左边。',
           finishReason: 'stop',
           usage: { inputTokens: 10, outputTokens: 5, cost: 0 },

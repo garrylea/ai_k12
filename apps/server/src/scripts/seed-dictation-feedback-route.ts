@@ -1,5 +1,5 @@
 /**
- * 语文默写错因路由：`dictation_feedback` 场景 = 本地模型优先、deepseek-v4-flash 兜底。
+ * 语文默写错因路由：`dictation_feedback` 场景 = 本地模型优先、deepseek-flash 兜底。
  * 读 YAML routes.dictation_feedback，幂等写进 llm_routes（已 seed 的库靠本脚本补路由；
  * seed-llm-config.ts 是 skip-if-exists，不会更新既有行）。
  * 镜像 set-title-route.ts（llm_routes 存的是 model_key 字符串，不是模型 id）。

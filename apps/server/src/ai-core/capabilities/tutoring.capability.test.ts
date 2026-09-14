@@ -315,7 +315,7 @@ describe('TutoringCapability', () => {
 
 describe('TutoringCapability.generateTitle（title 路由：local -> deepseek）', () => {
   const localModel = { provider: 'local', modelId: 'Qwen3.8-27B', baseUrl: 'http://x', contextWindow: 1, maxOutputTokens: 1, costPer1K: { input: 0, output: 0 }, supportsStreaming: true };
-  const dsModel = { provider: 'deepseek', modelId: 'deepseek-v4-flash', baseUrl: 'http://y', contextWindow: 1, maxOutputTokens: 1, costPer1K: { input: 0, output: 0 }, supportsStreaming: true };
+  const dsModel = { provider: 'deepseek', modelId: 'deepseek-flash', baseUrl: 'http://y', contextWindow: 1, maxOutputTokens: 1, costPer1K: { input: 0, output: 0 }, supportsStreaming: true };
 
   function mk(chatImpl: (req: any) => Promise<{ content: string }>) {
     const modelClient = { chat: vi.fn(chatImpl) };
@@ -332,7 +332,7 @@ describe('TutoringCapability.generateTitle（title 路由：local -> deepseek）
     expect(modelClient.chat).toHaveBeenCalledTimes(1);
   });
 
-  it('本地失败时回退 deepseek-v4-flash', async () => {
+  it('本地失败时回退 deepseek-flash', async () => {
     const { cap, modelClient } = mk(async ({ model }: any) => {
       if (model.modelId === 'Qwen3.8-27B') throw new Error('local down');
       return { content: '兜底标题' };

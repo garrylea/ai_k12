@@ -36,9 +36,9 @@ models:
       output: 0.01
     supportsStreaming: true
 
-  deepseek-v4-flash:
+  deepseek-flash:
     provider: deepseek
-    modelId: deepseek-v4-flash
+    modelId: deepseek-flash
     baseUrl: ${DEEPSEEK_BASE_URL}
     apiKey: ${DEEPSEEK_API_KEY}
     contextWindow: 131072
@@ -68,23 +68,23 @@ routes:
     - subject: math
       difficulty: [1, 2]
       primary: qwen3.8-max
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
     - subject: math
       difficulty: [3]
       primary: gemini-3.1-pro
       fallback: qwen3.8-max
     - subject: chinese
       primary: kimi
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
     - subject: english
       primary: kimi
       fallback: qwen3.8-max
 
   grading:
     - subject: math
-      # deepseek-v4-flash 为主：qwen3.8-max 是 reasoner，难题判定常 >45s 超时
-      # （实测多步综合题 >90s），改用 deepseek-v4-flash（实测 ~19s，已用于 structuring）。
-      primary: deepseek-v4-flash
+      # deepseek-flash 为主：qwen3.8-max 是 reasoner，难题判定常 >45s 超时
+      # （实测多步综合题 >90s），改用 deepseek-flash（实测 ~19s，已用于 structuring）。
+      primary: deepseek-flash
       fallback: qwen3.8-max
     - subject: chinese
       primary: kimi
@@ -103,7 +103,7 @@ routes:
   explanation:
     - subject: math
       primary: qwen3.8-max
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
     - subject: chinese
       primary: kimi
       fallback: qwen3.8-max
@@ -114,7 +114,7 @@ routes:
   hint:
     # 课堂练习提示：轻量启发任务，用快模型（同 judgment/grading），无需重 reasoner。
     - subject: math
-      primary: deepseek-v4-flash
+      primary: deepseek-flash
       fallback: qwen3.8-max
 
   variation:
@@ -129,27 +129,27 @@ routes:
 
   safety:
     - subject: "*"
-      primary: deepseek-v4-flash
+      primary: deepseek-flash
 
   structuring:
     - subject: "*"
-      primary: deepseek-v4-flash
+      primary: deepseek-flash
       fallback: qwen3.8-max
 
   # 会话标题生成：本地模型优先（省调用、无外部依赖），本地不可用才用
-  # deepseek-v4-flash；两者都不可用则不生成标题（保留默认标题，学生可手动改）。
+  # deepseek-flash；两者都不可用则不生成标题（保留默认标题，学生可手动改）。
   title:
     - subject: "*"
       primary: local
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
 
   # 语文古诗文默写错因文案：本地模型优先（与 judgment 同策略，不依赖外部余额），
-  # 本地不可用回退 deepseek-v4-flash；两者都失败则无错因文案（不阻断判题）。
+  # 本地不可用回退 deepseek-flash；两者都失败则无错因文案（不阻断判题）。
   dictation_feedback:
     - subject: "*"
       primary: local
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
 
 default:
   primary: qwen3.8-max
-  fallback: deepseek-v4-flash
+  fallback: deepseek-flash

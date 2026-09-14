@@ -1,5 +1,5 @@
 /**
- * 会话标题生成路由：`title` 场景 = 本地模型优先、deepseek-v4-flash 兜底。
+ * 会话标题生成路由：`title` 场景 = 本地模型优先、deepseek-flash 兜底。
  * 读 YAML routes.title，幂等 upsert 进 llm_routes。已 seed 的库靠本脚本补路由
  * （seed-llm-config.ts 是 skip-if-exists，不会更新既有行）。
  *

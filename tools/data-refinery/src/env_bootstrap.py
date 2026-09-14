@@ -37,7 +37,7 @@ YAML_MAIN_KEY = {
     "kimi": "kimi",
     "qwen": "qwen3.8-max",
     "gemini": "gemini-3.1-pro",
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": "deepseek-flash",
 }
 
 # deploy.sh configure_llm_provider 的默认 Base URL（deploy.sh:313-316）。

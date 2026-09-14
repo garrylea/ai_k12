@@ -5,7 +5,7 @@ import { getModelConfig, timeoutConfig } from '../config.js';
 import { LLMClientError, TimeoutError, ServerError } from '../types.js';
 
 async function main() {
-  const base = getModelConfig('deepseek-v4-flash');
+  const base = getModelConfig('deepseek-flash');
   const model = { ...base, baseUrl: 'https://invalid-host.example.invalid' };
   console.log('baseurl:', model.baseUrl, '| provider:', model.provider);
 

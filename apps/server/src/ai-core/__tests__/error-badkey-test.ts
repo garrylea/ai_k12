@@ -6,7 +6,7 @@ import { LLMClientError, AuthenticationError, TimeoutError } from '../types.js';
 import { DeepSeekClient } from '../infra/model-client/deepseek-client.js';
 
 async function main() {
-  const model = getModelConfig('deepseek-v4-flash'); // 真实 baseurl
+  const model = getModelConfig('deepseek-flash'); // 真实 baseurl
   console.log('baseurl:', model.baseUrl, '(正确) | provider:', model.provider, '| key: sk-wrong-key-invalid (错误)');
 
   let retries = 0;

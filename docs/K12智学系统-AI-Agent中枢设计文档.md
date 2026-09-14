@@ -564,7 +564,7 @@ class PromptBuilder {
 | Kimi（月之暗面） | kimi-latest | OpenAI 兼容 | ✅ SSE |
 | Qwen（通义千问） | qwen3.8-max | OpenAI 兼容 | ✅ SSE |
 | Gemini（Google） | gemini-3.1-pro | Gemini API | ✅ SSE |
-| DeepSeek | deepseek-v4-flash | OpenAI 兼容 | ✅ SSE |
+| DeepSeek | deepseek-flash | OpenAI 兼容 | ✅ SSE |
 
 #### 3.3.3 接口定义
 
@@ -2379,7 +2379,7 @@ route(scene, subject, difficulty) → RouteResult
   └─ scene=analysis ───► Kimi / Qwen-3.8-Max
 ```
 
-**`title` 场景（会话标题生成，2026-09-11 新增）**：辅线首条消息后由 `TutoringCapability.generateTitle` 生成 ≤15 字标题。路由 **本地模型优先**（不依赖外部余额）、本地不可用才回退 `deepseek-v4-flash`；**两者都失败则不生成标题**（保留默认「辅线答疑」，由学生自行手动重命名，无文本兜底）。已 seed 的库执行 `npx tsx src/scripts/set-title-route.ts` 补 `title/*` 路由。
+**`title` 场景（会话标题生成，2026-09-11 新增）**：辅线首条消息后由 `TutoringCapability.generateTitle` 生成 ≤15 字标题。路由 **本地模型优先**（不依赖外部余额）、本地不可用才回退 `deepseek-flash`；**两者都失败则不生成标题**（保留默认「辅线答疑」，由学生自行手动重命名，无文本兜底）。已 seed 的库执行 `npx tsx src/scripts/set-title-route.ts` 补 `title/*` 路由。
 
 ### 7.2 模型配置
 
@@ -2413,9 +2413,9 @@ models:
     supportsStreaming: true
     features: [chat, reasoning, long_context]
 
-  deepseek-v4-flash:
+  deepseek-flash:
     provider: deepseek
-    modelId: deepseek-v4-flash
+    modelId: deepseek-flash
     contextWindow: 131072
     maxOutputTokens: 65536
     costPer1K: { input: 0.001, output: 0.004 }
@@ -2972,9 +2972,9 @@ models:
     supportsStreaming: true
     features: [chat, reasoning, long_context]
 
-  deepseek-v4-flash:
+  deepseek-flash:
     provider: deepseek
-    modelId: deepseek-v4-flash
+    modelId: deepseek-flash
     baseUrl: ${DEEPSEEK_BASE_URL}
     apiKey: ${DEEPSEEK_API_KEY}
     contextWindow: 131072
@@ -2991,14 +2991,14 @@ routes:
     - subject: math
       difficulty: [1, 2]
       primary: qwen3.8-max
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
     - subject: math
       difficulty: [3]
       primary: gemini-3.1-pro
       fallback: qwen3.8-max
     - subject: chinese
       primary: kimi
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
     - subject: english
       primary: kimi
       fallback: qwen3.8-max
@@ -3017,7 +3017,7 @@ routes:
   explanation:
     - subject: math
       primary: qwen3.8-max
-      fallback: deepseek-v4-flash
+      fallback: deepseek-flash
     - subject: chinese
       primary: kimi
       fallback: qwen3.8-max
@@ -3037,13 +3037,13 @@ routes:
 
   safety:
     - subject: "*"
-      primary: deepseek-v4-flash
+      primary: deepseek-flash
       fallback: ~   # 无备选，这是最简单的分类任务
 
 # 默认模型（路由表未匹配时使用）
 default:
   primary: qwen3.8-max
-  fallback: deepseek-v4-flash
+  fallback: deepseek-flash
 ```
 
 ### C.2 重试与超时配置（retry.yaml）
@@ -3077,7 +3077,7 @@ streaming:                    # OpenAI 兼容流式的「空闲超时」（收�
 ```yaml
 safety:
   classifier:
-    model: deepseek-v4-flash
+    model: deepseek-flash
     confidenceThreshold: 0.7   # 低于此置信度视为 learning（宁可漏判不误杀）
     
   off_topic:

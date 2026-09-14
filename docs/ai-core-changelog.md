@@ -1,6 +1,6 @@
 # CLAUDE.md 历史工作日志（迁出归档）
 
-本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-13），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
+本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-14；迁出后的新条目继续追加在顶部），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
 
 - 各条目引用的任务级实现计划见 `docs/superpowers/plans/`
 - 仍生效的行为约束已提炼回 CLAUDE.md 的「关键约定」节，本文件仅作历史溯源
@@ -8,7 +8,20 @@
 
 ---
 
-## 2026-09-13 修正（语文默写：题面去噪 + 种子脚本改按篇目业务键幂等）
+## 2026-09-14 修正（DeepSeek 模型改名：`deepseek-v4-flash` → `deepseek-flash`）
+
+- **变更摘要**：
+  1. **DeepSeek 端点现状（实测确认）**：`GET /v1/chat/completions` 只接受**两个**模型名——`deepseek-flash`、`deepseek-v4-pro`；传其它名字直接 400 并在错误体里列出支持列表（`"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed X"`）。`deepseek-v4-flash` 目前**仍能解析**（响应 `model` 字段已回落成 `deepseek-flash`、`deepseek-chat`/`deepseek-reasoner`/`deepseek-coder` 同样回落），但已不在支持列表里，属不再保证的旧别名，故全面改名。
+  2. **配置与代码改名**：`ai-core/model-routes.yaml`（模型块 key + `modelId` + 13 处路由 primary/fallback 引用）、`ai-core/safety.yaml`（classifier）、`ai-core/infra/model-router.test.ts`、`capabilities/{judgment,hint,tutoring}.capability.test.ts`、`scripts/llm-route-seed.util.test.ts`、三个 `__tests__/` 联调脚本（`error-baseurl`/`error-badkey`/`deepseek-stream`）、若干注释，以及工具侧 `tools/deploy.sh` 默认模型名、`tools/deploy/apply-llm-config.mjs` 的 `MODEL_KEY`、`tools/data-refinery/src/env_bootstrap.py` 的 `YAML_MAIN_KEY`、`apps/server/.env.example`、refinery `.env` 的 `LLM_FALLBACK_MODEL`。
+  3. **存量库迁移** `tools/db/migrations/2026-09-14_rename_deepseek_flash_model_key.sql`：`llm_routes.primary_model_key` 对 `llm_models.model_key` 有外键（`fk_llm_routes_primary`，`UPDATE_RULE=NO ACTION`），**直接 UPDATE 主表会因「子表仍引用旧值」失败**；故按「① 建新行（复制旧行连接参数与 api_key 密文、`model_id` 对齐新名）→ ② 改 `llm_routes` 的 fallback 与 primary 引用 → ③ 删旧行」三步走，且第 ③ 步要**同时**满足「替代行已在库」+「无任何路由仍引用旧 key」才执行（拒绝在替代行缺失时误删）。幂等：旧 key 不存在时全为 no-op。
+  4. **路由表已 seed 的库不必重跑 seed 脚本**：改名只动 key 与引用，路由指向关系不变（`judgment/math` 仍是 `local / qwen3.8-max`）。
+- **动机**：用户反馈「DeepSeek 推出了新模型、模型名统一改成了 deepseek-flash」，要求实测确认并同步 ai-core。改名前 `deepseek-v4-flash` 是唯一写死的 DeepSeek 名字，散落在配置、测试断言、部署脚本与 refinery 引导逻辑里；一旦官方下线该别名，报错面会横跨 ai-core 与部署链路。趁别名尚可用时改到规范名，代价最低。
+- **实测**：迁移对 dev 库跑两遍——第 1 遍 `llm_models` 5 行（`deepseek-flash` 就位、旧行删除）、17 条路由 `deepseek-flash` 全覆盖；第 2 遍全 no-op（输出 4 个 `SELECT 1` 占位）。孤儿检查（路由指向不存在的 `model_key`，含 fallback）返回 0 行。`apps/server` 478 tests 全绿；`tools/data-refinery` 824 passed / 10 skipped。
+- **落地关键文件**：`apps/server/src/ai-core/{model-routes,safety}.yaml`、`ai-core/**/*.test.ts`、`ai-core/__tests__/*.ts`、`src/scripts/*.ts`（注释）、`tools/db/migrations/2026-09-14_rename_deepseek_flash_model_key.sql`、`tools/deploy.sh`、`tools/deploy/apply-llm-config.mjs`、`tools/data-refinery/src/env_bootstrap.py`、`tools/data-refinery/tests/{test_env_bootstrap,test_llm}.py`；文档 `CLAUDE.md`、`docs/K12智学系统-AI-Agent中枢设计文档.md`、`docs/K12智学系统-数据库设计文档.md`、`docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml`、`docs/data-refinery-{使用手册,管线总结与后续}.md`。历史计划/旧 spec 中的旧名**未回改**（保历史原貌）。
+- **遗留（未改，待后续）**：`tools/data-refinery/src/llm.py` 的 `DeepSeekClient.__init__` 里有一段「`thinking=False` 且模型名是 `deepseek-reasoner`/`deepseek-r*` 时切成 `deepseek-chat`」的旧适配——新端点下 `deepseek-reasoner` 与 `deepseek-chat` **都**回落到 `deepseek-flash`，这段切换已无实际意义（当前也无配置走 `deepseek-r*`，故未触发）；`deepseek-v4-pro` 是本次新出现的模型，尚未纳入任何路由。
+
+---
+
 
 - **题面去掉「（并写出作者与朝代）」**：该文字出现在答题页标题上（用户实测反馈「不应该出现」），来源是库里的 `questions.content`——题干由 `seed-dictation-fixture.ts` 按模板生成，前端只是原样渲染 `prompt`，并非前端硬编码。作者/朝代/正文三者都是要学生默写的**答案**，已由答题页三个字段承载，题面重复一遍纯属噪音。约定改为 **`questions.content` 只放「请默写《篇名》」**，已写入 spec §4.1（内容管线生成题面时须遵守），同步更新 `docs/api/openapi.yaml` 的题面描述示例、种子脚本与两处测试夹具。
 - **种子脚本幂等键由 `content_hash` 改为篇目业务键**：原实现按 `content_hash`（由题面算出）去重，**题面模板一改 hash 就变** → 重跑会 `INSERT` 出**新行**并把旧行变孤儿（旧行仍占 `content_hash` 唯一键，且 `main_error_books.question_id` 外键为 `RESTRICT`，删旧行还可能被拦住）。现改为先按 `dictation_passages` 的业务键 `(work_title, semester)` 定位已有 `question_id`，有则**原地 `UPDATE`** `questions`（保住 `question_id`，错题本/隐藏题等挂在它上面的数据不受影响），无则插入。

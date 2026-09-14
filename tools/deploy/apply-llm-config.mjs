@@ -9,7 +9,7 @@
  *   kimi    -> kimi
  *   qwen    -> qwen3.8-max      （qwen-vl-max / qwen3-vl-plus 等专用模型不在此列）
  *   gemini  -> gemini-3.1-pro
- *   deepseek-> deepseek-v4-flash
+ *   deepseek-> deepseek-flash
  *
  * 用法：
  *   node apply-llm-config.mjs <model-routes.yaml> <provider>=<modelId> [<provider>=<modelId> ...]
@@ -21,7 +21,7 @@ const MODEL_KEY = {
   kimi: 'kimi',
   qwen: 'qwen3.8-max',
   gemini: 'gemini-3.1-pro',
-  deepseek: 'deepseek-v4-flash',
+  deepseek: 'deepseek-flash',
 };
 
 const yamlPath = process.argv[2];

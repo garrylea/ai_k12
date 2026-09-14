@@ -34,7 +34,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 ## 3. 关键实现决策（gotchas，改代码前必读）
 
 ### LLM 配置
-- 走 **DeepSeek**（Anthropic 兼容端点 `https://api.deepseek.com/anthropic`，模型 `deepseek-v4-flash`，reasoner，需 `LLM_MAX_TOKENS=65536`）。
+- 走 **DeepSeek**（Anthropic 兼容端点 `https://api.deepseek.com/anthropic`，模型 `deepseek-flash`，reasoner，需 `LLM_MAX_TOKENS=65536`）。
 - `.env` 用 **`LLM_BASE_URL` / `LLM_AUTH_TOKEN`**（refinery 专属），**不要用 `ANTHROPIC_*`**--shell 里 Claude Code 的 `ANTHROPIC_*` 会通过 `load_dotenv(override=False)` 覆盖 refinery 的配置。`config.py` 已优先读 `LLM_*`。
 - `llm.py` 支持 `openai` / `anthropic` 两种 provider（`LLM_PROVIDER`）。
 

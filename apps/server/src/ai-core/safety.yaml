@@ -1,6 +1,6 @@
 safety:
   classifier:
-    model: deepseek-v4-flash
+    model: deepseek-flash
     confidenceThreshold: 0.7
 
   off_topic:

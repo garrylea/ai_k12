@@ -12,7 +12,7 @@ const primaryModel: RoutedModel = {
   contextWindow: 32768, maxOutputTokens: 4096, costPer1K: { input: 0, output: 0 }, supportsStreaming: true,
 };
 const fallbackModel: RoutedModel = {
-  provider: 'deepseek', modelId: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com', apiKey: 'sk-x',
+  provider: 'deepseek', modelId: 'deepseek-flash', baseUrl: 'https://api.deepseek.com', apiKey: 'sk-x',
   contextWindow: 131072, maxOutputTokens: 65536, costPer1K: { input: 0.001, output: 0.004 }, supportsStreaming: true,
 };
 
@@ -69,7 +69,7 @@ describe('JudgmentCapability', () => {
     expect(r.isCorrect).toBe(true);
     expect(mockChat).toHaveBeenCalledTimes(2);
     expect(mockChat.mock.calls[0][0].model.modelId).toBe('Qwen3.8-27B');
-    expect(mockChat.mock.calls[1][0].model.modelId).toBe('deepseek-v4-flash');
+    expect(mockChat.mock.calls[1][0].model.modelId).toBe('deepseek-flash');
   });
 
   it('primary 返回不可解析内容时也回退（任何失败都回退）', async () => {
@@ -80,7 +80,7 @@ describe('JudgmentCapability', () => {
     const r = await cap.judge(judgeRequest);
     expect(r.isCorrect).toBe(true);
     expect(mockChat).toHaveBeenCalledTimes(2);
-    expect(mockChat.mock.calls[1][0].model.modelId).toBe('deepseek-v4-flash');
+    expect(mockChat.mock.calls[1][0].model.modelId).toBe('deepseek-flash');
   });
 
   it('primary 成功时不调用 fallback', async () => {
@@ -105,7 +105,7 @@ describe('JudgmentCapability', () => {
       .mockRejectedValueOnce(new Error('local down'))
       .mockRejectedValueOnce(new Error('ds down'));
     const cap = new JudgmentCapability({ modelClient: mockModelClient, modelRouter: routerWith(primaryModel, fallbackModel) });
-    await expect(cap.judge(judgeRequest)).rejects.toThrow(/primary\(Qwen3\.8-27B\).*fallback\(deepseek-v4-flash\)/s);
+    await expect(cap.judge(judgeRequest)).rejects.toThrow(/primary\(Qwen3\.8-27B\).*fallback\(deepseek-flash\)/s);
     expect(mockChat).toHaveBeenCalledTimes(2);
   });
 });

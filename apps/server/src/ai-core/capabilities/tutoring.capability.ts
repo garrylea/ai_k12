@@ -404,7 +404,7 @@ export class TutoringCapability {
   /**
    * Generate a short conversation title (<=15 chars) from the user's question
    * + assistant reply. Routed via the `title` scene: local model first (no
-   * external dependency), falling back to deepseek-v4-flash. If BOTH fail the
+   * external dependency), falling back to deepseek-flash. If BOTH fail the
    * title is left unchanged (the student renames it manually) - deliberately
    * no text-derived fallback. Returns null for a greeting / no clear question
    * so a later turn can retry.

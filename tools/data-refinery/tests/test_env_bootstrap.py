@@ -34,9 +34,9 @@ models:
     baseUrl: ${QWEN_BASE_URL}
     apiKey: ${QWEN_API_KEY}
 
-  deepseek-v4-flash:
+  deepseek-flash:
     provider: deepseek
-    modelId: deepseek-v4-flash
+    modelId: deepseek-flash
     baseUrl: ${DEEPSEEK_BASE_URL}
     apiKey: ${DEEPSEEK_API_KEY}
 
@@ -102,7 +102,7 @@ class TestParseModelYaml:
         # qwen 有两个块（qwen3.7-max 主模型 + qwen-vl-max），必须选主 key
         assert models["qwen"] == "qwen3.7-max"
         assert models["kimi"] == "kimi-latest"
-        assert models["deepseek"] == "deepseek-v4-flash"
+        assert models["deepseek"] == "deepseek-flash"
 
     def test_fallback_to_first_block_when_main_key_missing(self, tmp_path):
         yaml_text = """models:
@@ -137,7 +137,7 @@ class TestCollectProviders:
         yaml_models = {"kimi": "kimi-latest"}
         state = {
             "LLM_KIMI_API_KEY": "sk-state",           # 应被 server_env 覆盖
-            "LLM_DEEPSEEK_MODEL": "deepseek-v4-flash",  # state 兜底
+            "LLM_DEEPSEEK_MODEL": "deepseek-flash",  # state 兜底
             "LLM_DEEPSEEK_BASE_URL": "https://api.deepseek.com",
             "LLM_DEEPSEEK_API_KEY": "sk-ds",
         }
@@ -146,7 +146,7 @@ class TestCollectProviders:
             "model": "kimi-latest", "base_url": "https://api.moonshot.cn", "api_key": "sk-a",
         }
         assert providers["deepseek"]["api_key"] == "sk-ds"
-        assert providers["deepseek"]["model"] == "deepseek-v4-flash"
+        assert providers["deepseek"]["model"] == "deepseek-flash"
         # qwen/gemini 完全未配置
         assert providers["qwen"]["api_key"] == ""
 
@@ -233,7 +233,7 @@ class TestEnsureRefineryEnv:
         server_env, yaml_file, state_file = _setup_sources(
             tmp_path,
             server_env_text="KIMI_BASE_URL=https://api.moonshot.cn\nKIMI_API_KEY=sk-kimi-xxx\n",
-            state={"LLM_DEEPSEEK_MODEL": "deepseek-v4-flash",
+            state={"LLM_DEEPSEEK_MODEL": "deepseek-flash",
                    "LLM_DEEPSEEK_BASE_URL": "https://api.deepseek.com",
                    "LLM_DEEPSEEK_API_KEY": "sk-ds"})
         refinery_env = tmp_path / "refinery.env"

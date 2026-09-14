@@ -3928,7 +3928,7 @@ paths:
         wrong（写错字）、连续同类项合并成段。questionId 须正整数（非法 400），
         篇目不存在 404。答错 find-or-create 写 main_error_books（source='dictation'）；
         答对清零该题所有未清记录。错因文案由 dictation_feedback 场景 LLM 生成
-        （primary=local，fallback=deepseek-v4-flash，timeout 30s），失败只丢文案
+        （primary=local，fallback=deepseek-flash，timeout 30s），失败只丢文案
         不丢判题结果（feedback=null）。
       operationId: judgeDictation
       security: [{ bearerAuth: [] }]

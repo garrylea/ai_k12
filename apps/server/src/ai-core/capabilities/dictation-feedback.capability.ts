@@ -19,7 +19,7 @@ export interface DictationFeedbackCapabilityDeps {
  *
  * 与 JudgmentCapability 的区别：本能力**不判对错**——对错由 JudgeCoreService.judgeDictation
  * 程序化判定，这里只把程序定位出的错处翻译成学生看得懂的提醒（设计 spec §5 第 5 步）。
- * 场景 dictation_feedback：primary=local（Qwen3.8-27B），fallback=deepseek-v4-flash；
+ * 场景 dictation_feedback：primary=local（Qwen3.8-27B），fallback=deepseek-flash；
  * 两者都失败时抛错，由调用方（TrainingService）兜底为 feedback=null，不阻断判题。
  */
 export class DictationFeedbackCapability {
