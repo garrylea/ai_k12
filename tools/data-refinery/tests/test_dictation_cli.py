@@ -23,6 +23,7 @@ from dictation_cli import (
     run_extract,
 )
 from dictation_locate import LocateResult, LocatedPassage
+from dictation_repair import RepairResult
 from dictation_slice import join_pages, slice_body
 
 # —— 假教材：封面 + 正文首页（下半页注释）+ 正文次页（末句与注释）——
@@ -40,6 +41,17 @@ PAGE_2 = """乃重修岳阳楼，增其旧制。
 
 START = "庆历四年春，滕子京谪守巴陵郡。"
 END = "时六年九月十五日。"
+
+# —— 假教材（正文过短版）：切片成功但自检报「正文过短」，用来触发模型纠正 ——
+PAGE_SHORT = """## 10 岳阳楼记 $^{①}$
+
+庆历四年春，滕子京谪守巴陵郡。越明年。"""
+SHORT_START = "庆历四年春，滕子京谪守巴陵郡。"
+SHORT_END = "越明年。"
+#: 模型纠正稿（比原文长很多——正是「过短」要补内容的情形，不得被长度规则拦住）
+FIXED = ("庆历四年春，滕子京谪守巴陵郡。越明年，政通人和，百废具兴。"
+         "乃重修岳阳楼，增其旧制，刻唐贤今人诗赋于其上。属予作文以记之。"
+         "时六年九月十五日。")
 
 
 def _make_book(root: Path, name: str, pages: list[str]) -> Path:
@@ -204,6 +216,9 @@ class TestRunExtract:
         output_dir=Path("."), llm_provider="local", llm_model="m", llm_api_key=None,
         llm_auth_token=None, llm_base_url=None, llm_timeout=1, llm_max_tokens=1,
         llm_max_retries=0, llm_thinking=False, llm_enable_cache=False,
+        # 纠正兜底模型；置 None 表示未配置（只试主模型）
+        llm_fallback_provider=None, llm_fallback_model="", llm_fallback_api_key=None,
+        llm_fallback_base_url=None,
     )
 
     def _args(self, md_root: Path, out_root: Path):
@@ -311,6 +326,89 @@ class TestRunExtract:
         assert (book_out / "书.jsonl").read_text(encoding="utf-8") == ""
         unresolved = (book_out / "书-unresolved.md").read_text(encoding="utf-8")
         assert "锚点未找到" in unresolved
+
+    def _patch_locate_short(self, monkeypatch):
+        """定位到「岳阳楼记」，但页文本只够切出**过短**的正文 → 触发自检 errors。"""
+        monkeypatch.setattr(
+            "dictation_cli.locate_unit",
+            lambda llm, label, text, prompt: LocateResult(passages=[LocatedPassage(
+                is_classical=True, work_title="岳阳楼记", author="范仲淹", dynasty="宋",
+                genre="wen", body_start_anchor=SHORT_START, body_end_anchor=SHORT_END,
+                reason="测试用",
+            )]),
+        )
+
+    def _short_book_setup(self, tmp_path, monkeypatch):
+        md_root = tmp_path / "md"
+        _make_book(md_root / "语文" / "初中" / "统编版" / "九年级" / "上册", "书",
+                   [PAGE_COVER, PAGE_SHORT])
+        out_root = tmp_path / "dictation"
+        self._candidates(out_root)
+        self._patch_llm(monkeypatch, [])
+        self._patch_locate_short(monkeypatch)
+        return md_root, out_root
+
+    def test_self_check_failure_repaired_and_adopted(self, tmp_path, monkeypatch):
+        md_root, out_root = self._short_book_setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "dictation_cli.repair_body",
+            lambda *a, **kw: RepairResult(
+                body=FIXED, source="local:fake", attempts=["local:fake 已采用"],
+                note="local:fake（21 -> 76 字）"),
+        )
+
+        assert run_extract(self._args(md_root, out_root), self._FAKE_CONFIG) == 0
+
+        book_out = out_root / "语文" / "上册"
+        rows = [json.loads(line) for line in
+                (book_out / "书.jsonl").read_text(encoding="utf-8").splitlines()]
+        # 模型纠正稿被**直接采用**（用户 2026-09-14 裁决：不设采纳闸门），verified=1 进抽题池
+        assert len(rows) == 1
+        assert rows[0]["body"] == FIXED and rows[0]["verified"] == 1
+
+        # 原文与纠正稿必须都摆进过目清单供人比对
+        review = (book_out / "书-review.md").read_text(encoding="utf-8")
+        assert "已由模型纠正" in review
+        assert "纠正前" in review and "纠正后" in review
+        assert FIXED in review and "越明年。" in review
+        assert "自检未通过" not in (book_out / "书-unresolved.md").read_text(encoding="utf-8")
+
+    def test_self_check_failure_unresolved_when_models_give_nothing(self, tmp_path, monkeypatch):
+        # 两个模型都拿不出非空输出 → 维持 fail-closed，绝不把原文当「已纠正」放行
+        md_root, out_root = self._short_book_setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "dictation_cli.repair_body",
+            lambda *a, **kw: RepairResult(
+                body=None, source=None, attempts=["local:x 调用失败：boom"],
+                note="所有模型均未给出非空输出，维持 fail-closed"),
+        )
+
+        assert run_extract(self._args(md_root, out_root), self._FAKE_CONFIG) == 0
+
+        book_out = out_root / "语文" / "上册"
+        assert (book_out / "书.jsonl").read_text(encoding="utf-8") == ""
+        unresolved = (book_out / "书-unresolved.md").read_text(encoding="utf-8")
+        assert "纠正未成" in unresolved and "boom" in unresolved
+
+    def test_repair_not_called_when_check_passes(self, tmp_path, monkeypatch):
+        # 触发范围只限「致命错误」档：自检通过的篇目不得送去纠正（用户明确裁决）
+        md_root = tmp_path / "md"
+        _make_book(md_root / "语文" / "初中" / "统编版" / "九年级" / "上册", "书",
+                   [PAGE_COVER, PAGE_1, PAGE_2])
+        out_root = tmp_path / "dictation"
+        self._candidates(out_root)
+        self._patch_llm(monkeypatch, [])
+        calls: list[int] = []
+        monkeypatch.setattr("dictation_cli.repair_body", lambda *a, **kw: calls.append(1))
+
+        assert run_extract(self._args(md_root, out_root), self._FAKE_CONFIG) == 0
+        assert calls == []
+
+        book_out = out_root / "语文" / "上册"
+        rows = [json.loads(line) for line in
+                (book_out / "书.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert rows[0]["_original_body"] is None
+        assert rows[0]["_repair_residual"] == []
 
     def test_missing_candidates_file_returns_1(self, tmp_path, capsys):
         md_root = tmp_path / "md"

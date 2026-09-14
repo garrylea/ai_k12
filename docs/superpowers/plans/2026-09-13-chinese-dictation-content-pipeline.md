@@ -2326,6 +2326,47 @@ git commit -m "refactor(data-refinery): 版面规则学科化（基类 + 数学/
 
 ---
 
+## Task 13: 正文纠正（用户 2026-09-14 插入，**已完成**）
+
+> 本任务不在原计划里，是执行期间用户追加的需求。已实现并真机验证，记在此处备查。
+
+**需求（用户原话）**：「如果判定这道古诗，古文内容可能存在问题，调用本地大模型进行纠正。
+如果调用本地大模型失败，则调用 ds flash 进行更正。」
+
+**这是对 spec §5.2「LLM 不产出正文」的显式例外**，设计已写入 spec §5.4。
+
+- [x] **Step 1: 模块 + prompt**
+  - `src/dictation_repair.py`（`RepairResult` / `repair_body` / `build_user_prompt`）
+  - `src/prompts/dictation_repair.txt`
+  - 触发范围**只限 `errors`**，`needs_review` 不触发（用户裁决）
+  - 模型：本地优先、`LLM_FALLBACK_*` 兜底；不硬编码模型名
+  - 输出经 `normalize_body` 清理后**直接采用**（用户裁决：不设采纳闸门）
+
+- [x] **Step 2: 接线 `run_extract`**
+  - 未过自检 → 纠正 → 采纳则入库（`verified=1`）并留痕；两模型都无数值输出才 fail-closed
+  - `{book}-review.md` 新增「已由模型纠正」节（纠正前/后全文 + 残留自检问题）；清单加「已纠正」列
+
+- [x] **Step 3: 测试**
+  - `tests/test_dictation_repair.py` 25 例（全 mock）
+  - `tests/test_dictation_cli.py` +3 集成例（采纳 / fail-closed / 自检通过时不触发）
+  - **845 passed / 10 skipped**
+
+- [x] **Step 4: 真机验证（真书 + 真本地模型）**
+  - 《醉翁亭记》从「被拦下」变为「纠正后入库」：584 → 478 字，
+    剔除了注释 ⑤ 的丢头续行 `起）像鸟张开翅膀一样…` 与行内图片 `![](images/a9ee…jpg)`，
+    纠正后自检通过
+
+- [x] **Step 5: 文档同步**
+  - spec §5.4 新增；§6.3/§6.4 改为反映纠正后的分流
+  - `docs/ai-core-changelog.md` 2026-09-14 条目
+
+> ⚠️ **同时暴露的既有缺陷（与 Task 13 无关，需另行处理）**：`locate` 不可复现——同代码同输入
+> 连跑 3 次得 23 / 22 / 20 篇。根因是 `llm.py` 不传 `temperature`（走服务端默认采样），
+> 而「第六单元」页窗 30 页（末单元的 `hi` 延伸到书尾），本地 27B 在长窗口里不稳定地漏掉尾部
+> 那组 `课外古诗词诵读`（印刷页 159）。**这条会直接影响本计划「完成标准 2：全部入库」**。
+
+---
+
 ## 完成标准
 
 1. `tools/data-refinery` 的 `pytest` 全绿；`apps/server` 的 `npm test` + `npm run build` 全绿；

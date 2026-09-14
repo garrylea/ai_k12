@@ -7,7 +7,10 @@
 
 本模块只编排，不做判断：篇目由 `dictation_locate`（LLM 只给锚点）、正文由 `dictation_slice`
 （按锚点从 MD 原样切）、通过与否由 `dictation_check`（纯程序自检）决定。自检有 `errors`
-的篇目**不进 JSONL**（只进 unresolved 报告），故入库的必是自检通过的、`verified` 恒为 1。
+的篇目先交给 `dictation_repair` 试着纠正（本地模型优先、ds flash 兜底），**纠正稿重跑
+自检通过才采纳**；纠正不成的仍**不进 JSONL**（只进 unresolved 报告）。故入库的必是
+自检通过的、`verified` 恒为 1——区别只在于正文是切片原样还是模型纠正稿（后者在
+`{book}-review.md` 里留了原文与纠正稿供比对）。
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from pathlib import Path
 from config import RefineryConfig
 from dictation_check import check_body
 from dictation_locate import locate_unit
+from dictation_repair import repair_body
 from dictation_slice import cut_page_annotations, join_pages, normalize_body, slice_body
 from extract_cli import _load_prompt
 from llm import create_llm_client
@@ -266,6 +270,26 @@ def run_extract(args, config) -> int:
         thinking=config.llm_thinking, enable_cache=config.llm_enable_cache,
     )
     prompt = _load_prompt("dictation_locate")
+    repair_prompt = _load_prompt("dictation_repair")
+
+    # 正文纠正的兜底模型（用户 2026-09-14 指定：本地优先、ds flash 兜底）。
+    # 未配置 LLM_FALLBACK_* 时只试主模型，不报错——纠正本就是尽力而为的一步。
+    fb_llm = None
+    if config.llm_fallback_provider:
+        try:
+            fb_llm = create_llm_client(
+                provider=config.llm_fallback_provider,
+                api_key=config.llm_fallback_api_key or "",
+                model=config.llm_fallback_model,
+                base_url=config.llm_fallback_base_url,
+                timeout=config.llm_timeout,
+                max_tokens=config.llm_max_tokens,
+                max_retries=config.llm_max_retries,
+            )
+            print(f"[ok] 正文纠正兜底模型就绪："
+                  f"{config.llm_fallback_provider} / {config.llm_fallback_model}", flush=True)
+        except Exception as e:                        # 兜底不可用不阻断抽取
+            print(f"[WARN] 纠正兜底模型初始化失败（{e}），仅用主模型纠正", flush=True)
 
     rows: list[dict] = []
     unresolved: list[tuple[str, str, str]] = []      # (篇名或单元, 原因, 细节)
@@ -310,9 +334,34 @@ def run_extract(args, config) -> int:
                 continue
             body = normalize_body(body)
             checked = check_body(body, title, p.genre, chrome)
+            # 自检未过 → 交给模型纠正（本地优先、ds flash 兜底），**模型输出即采用**
+            # （用户 2026-09-14 裁决：不设采纳闸门）。只有两个模型都拿不出非空输出时
+            # 才维持 fail-closed（不进 JSONL，进待人工处理清单）。
+            original_body: str | None = None
+            repair_note = ""
+            repair_errors: list[str] = []
+            residual: list[str] = []
             if checked.errors:
-                unresolved.append((title, "自检未通过", "；".join(checked.errors)))
-                continue
+                repaired = repair_body(
+                    llm, fb_llm,
+                    body=body, work_title=title,
+                    author=p.author.strip(), dynasty=p.dynasty.strip(),
+                    genre=p.genre, errors=checked.errors,
+                    chrome=chrome, prompt=repair_prompt,
+                )
+                if repaired.body is None:
+                    unresolved.append((
+                        title, "自检未通过（纠正未成）",
+                        "；".join(checked.errors) + "｜" + "｜".join(repaired.attempts),
+                    ))
+                    continue
+                repair_errors = checked.errors
+                original_body = body
+                repair_note = repaired.note
+                residual = repaired.residual
+                body = repaired.body
+                # 复核标记按**纠正稿**重算：纠正可能消掉或引入 needs_review
+                checked = check_body(body, title, p.genre, chrome)
 
             seen_titles.add(title)
             rows.append({
@@ -326,6 +375,10 @@ def run_extract(args, config) -> int:
                 "_needs_review": checked.needs_review,
                 "_review_reasons": checked.review_reasons,
                 "_reason": p.reason,
+                "_repair_note": repair_note,
+                "_original_body": original_body,
+                "_repair_errors": repair_errors,
+                "_repair_residual": residual,
             })
 
         # 目录里列了、但本单元没被 LLM 找出来的 → 漏收信号，必须让用户看到
@@ -344,15 +397,32 @@ def run_extract(args, config) -> int:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     review_path = book_out / f"{book_name}-review.md"
+    repaired_rows = [r for r in rows if r["_original_body"] is not None]
     with review_path.open("w", encoding="utf-8") as f:
         f.write(f"# 人工过目清单：{book_name}\n\n")
         f.write("按「需复核优先」排序。抽看长文言文与标了需复核的行即可。\n\n")
-        f.write("| 需复核 | 篇名 | 作者 | 朝代 | 体裁 | 字数 | 正文首 20 字 | 正文末 20 字 |\n")
-        f.write("|---|---|---|---|---|---|---|---|\n")
+        f.write("| 需复核 | 已纠正 | 篇名 | 作者 | 朝代 | 体裁 | 字数 | 正文首 20 字 | 正文末 20 字 |\n")
+        f.write("|---|---|---|---|---|---|---|---|---|\n")
         for r in sorted(rows, key=lambda x: (not x["_needs_review"], x["_sort_order"])):
             b = r["body"]
             flag = "⚠ " + "；".join(r["_review_reasons"]) if r["_needs_review"] else ""
-            f.write(f"| {flag} | {r['work_title']} | {r['author']} | {r['dynasty']} | {r['_genre']} | {len(b)} | {b[:20]} | {b[-20:]} |\n")
+            fixed = r["_repair_note"] if r["_original_body"] is not None else ""
+            f.write(f"| {flag} | {fixed} | {r['work_title']} | {r['author']} | {r['dynasty']} | {r['_genre']} | {len(b)} | {b[:20]} | {b[-20:]} |\n")
+
+        # 纠正过的篇目单独展开原文与纠正稿：模型改写是「可能改对也可能改错」的一步，
+        # 只看纠正后无法判断，必须把两者的差异摆到人眼前。
+        if repaired_rows:
+            f.write("\n## 已由模型纠正（**请逐篇比对**）\n\n")
+            f.write("下列篇目的切片正文未通过确定性自检，已由模型改写后**直接采用**。\n")
+            f.write("纠正**可能改对、也可能改错**（例如把生僻字改成常见字）——务必对照原文复核。\n\n")
+            for r in repaired_rows:
+                orig = r["_original_body"]
+                f.write(f"### {r['work_title']}（{r['_repair_note']}）\n\n")
+                f.write(f"- 自检问题：{'；'.join(r['_repair_errors'])}\n")
+                if r["_repair_residual"]:
+                    f.write(f"- **纠正后自检仍报**：{'；'.join(r['_repair_residual'])}\n")
+                f.write(f"- 纠正前（{len(orig)} 字）：{orig}\n")
+                f.write(f"- 纠正后（{len(r['body'])} 字）：{r['body']}\n\n")
 
     unresolved_path = book_out / f"{book_name}-unresolved.md"
     with unresolved_path.open("w", encoding="utf-8") as f:
@@ -362,7 +432,8 @@ def run_extract(args, config) -> int:
         for name, reason, detail in unresolved:
             f.write(f"- **{name}** —— {reason}：{detail}\n")
 
-    print(f"[ok] {book_name}：入库候选 {len(rows)} 篇，待人工处理 {len(unresolved)} 项", flush=True)
+    print(f"[ok] {book_name}：入库候选 {len(rows)} 篇（其中模型纠正 {len(repaired_rows)} 篇），"
+          f"待人工处理 {len(unresolved)} 项", flush=True)
     print(f"[ok] JSONL -> {jsonl_path}", flush=True)
     print(f"[ok] 过目清单 -> {review_path}", flush=True)
     print(f"[ok] 待处理 -> {unresolved_path}", flush=True)

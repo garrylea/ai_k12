@@ -8,7 +8,22 @@
 
 ---
 
-## 2026-09-14 修正（DeepSeek 模型改名：`deepseek-v4-flash` → `deepseek-flash`）
+## 2026-09-14 新增（语文默写内容管线：自检未过的正文交模型纠正）
+
+- **变更摘要**：
+  1. **新模块 `tools/data-refinery/src/dictation_repair.py` + `prompts/dictation_repair.txt`**：这是本管线**唯一允许模型产出正文字符**的环节。`dictation_cli --extract` 切片后 `check_body` 报 `errors` 的篇目，不再直接丢进待人工处理清单，而是先把正文与自检问题交给模型纠正，**模型输出经 `normalize_body` 清理后直接采用**（用户裁决：不设采纳闸门）。
+  2. **模型选择**：本地模型优先（`.env` 的 `LLM_PROVIDER`，当前 `Qwen3.8-27B`），本地失败或拿不出非空输出 → 回退 `LLM_FALLBACK_*`（当前 `deepseek-flash`）。两者都拿不出非空输出才维持 fail-closed（不进 JSONL）。**不硬编码任何模型名**。
+  3. **触发范围只限致命档**：`needs_review` **不触发**纠正——后者故意装着正常情况（《十五从军征》首行即篇名、古体诗字数不在常见值内），送去纠正只会改坏正确正文。
+  4. **`normalize_body` 这步不能省**：模型常把角标 `$^{①}$` 原样抄回，不清理就进库，而学生不会打角标 → 判题必然不等（已加测试钉住）。
+  5. **留痕**：`{book}-review.md` 新增「已由模型纠正」一节，逐篇并列**纠正前 / 纠正后**全文、原自检问题、以及「纠正后自检仍报什么」（只提示、不阻断）。清单表也加了「已纠正」列。CLI 末行打印「其中模型纠正 N 篇」。
+- **动机**：用户 2026-09-14 指示「如果判定这道古诗、古文内容可能存在问题，调用本地大模型进行纠正；本地失败则用 ds flash 更正」。加它是因为有一类错误**在页面上就是错的**——OCR 认错字、注释碎片混进正文——不存在「原样可切的正确源」，程序修不了。这是对管线原设计原则「LLM 只做判断、不产出正文」的**显式例外**。
+- **实测（真书 + 真本地模型，非 mock）**：九上实跑把原先被拦下的《醉翁亭记》救回来——原文 584 字里混着注释 ⑤ 的续行 `起）像鸟张开翅膀一样，高踞于泉水之上。临，居高面下。`（起始行 OCR 丢失，浅切抓不到）与行内图片 `![](images/a9ee…jpg)`；模型纠正稿 478 字把两者都剔净，语句自然衔接，且纠正后自检通过（`residual` 为空）。
+- **中途回退的设计（重要教训，勿改回去）**：曾实现 `[0.7, 1.5]` 的**长度比护栏**（本意是拦「纠正实为截断」）。实测发现它与最常见的一类错误**「正文过短」自相矛盾**——修「过短」本来就**必须**让正文变长，而任何长到能让 `check_body` 通过的长度都会超出上界，于是把最需要它修的情形全部拒掉。用户裁决「直接用 LLM 输出就可以」后去除。**残留风险如实记录**：模型凭记忆补写古文可能补出「形式干净但内容不对」的文字，而自检**只看格式看不懂内容**，抓不到——这正是留痕要把原文与纠正稿并列、须人工比对的原因。设计见 `docs/superpowers/specs/2026-09-13-chinese-dictation-content-pipeline-design.md` §5.4。
+- **落地关键文件**：`tools/data-refinery/src/dictation_repair.py`、`src/prompts/dictation_repair.txt`、`src/dictation_cli.py`（`run_extract` 接线 + 报告节）、`tests/test_dictation_repair.py`（25 例，全 mock）、`tests/test_dictation_cli.py`（+3 集成例：纠正采纳 / 两者皆空 fail-closed / 自检通过时不触发纠正）。**845 passed / 10 skipped**。
+- **⚠️ 同时暴露的既有缺陷（与本次改动无关，已单独立项）**：`locate` 环节**不可复现**——同代码同输入连跑 3 次得 23 / 22 / 20 篇。根因：`llm.py` 不传 `temperature`（走服务端默认采样），且「第六单元」页窗 30 页（全书最大，末单元的 `hi` 一路延伸到书尾），本地 27B 在长窗口里不稳定地漏掉尾部那组 `课外古诗词诵读`（印刷页 159）。漏收在 `{book}-unresolved.md` 里有记录、非静默，但**记录在案 ≠ 收全**。
+
+---
+
 
 - **变更摘要**：
   1. **DeepSeek 端点现状（实测确认）**：`GET /v1/chat/completions` 只接受**两个**模型名——`deepseek-flash`、`deepseek-v4-pro`；传其它名字直接 400 并在错误体里列出支持列表（`"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed X"`）。`deepseek-v4-flash` 目前**仍能解析**（响应 `model` 字段已回落成 `deepseek-flash`、`deepseek-chat`/`deepseek-reasoner`/`deepseek-coder` 同样回落），但已不在支持列表里，属不再保证的旧别名，故全面改名。
