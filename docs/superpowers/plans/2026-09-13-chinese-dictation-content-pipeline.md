@@ -973,6 +973,14 @@ def _title_of(label: str) -> str:
     return parts[1].strip() if len(parts) == 2 else label.strip()
 
 
+def _find_book_dir(md_root: Path, book: str) -> Path | None:
+    """在 MD 根目录下找含 page_*.md 的教材目录（--book 为路径子串）。找不到返回 None。"""
+    for d in sorted(md_root.rglob("*")):
+        if d.is_dir() and book in str(d) and list(d.glob("page_*.md")):
+            return d
+    return None
+
+
 def _md_pages(book_md_dir: Path) -> list[tuple[int, str]]:
     """按页序返回 (页号, 文本)。页号取自文件名 page_NNN.md。"""
     out: list[tuple[int, str]] = []
@@ -1066,12 +1074,10 @@ def run_extract(args, config) -> int:
     md_root = Path(args.input_dir) if args.input_dir else config.output_dir / "md"
     out_root = Path(args.output_dir) if args.output_dir else config.output_dir / "dictation"
 
-    book_dirs = [d for d in md_root.rglob("*")
-                 if d.is_dir() and args.book in str(d) and list(d.glob("page_*.md"))]
-    if not book_dirs:
+    book_md_dir = _find_book_dir(md_root, args.book)
+    if book_md_dir is None:
         print(f"[ERROR] 没找到含 page_*.md 的教材目录（--book {args.book}）", flush=True)
         return 1
-    book_md_dir = book_dirs[0]
     book_name = book_md_dir.name
 
     cand_path = Path(args.candidates) if args.candidates else out_root / SUBJECT_DIR / args.term / "candidates.json"
@@ -1198,7 +1204,15 @@ def run_extract(args, config) -> int:
 ```python
 from pathlib import Path
 
-from dictation_cli import _md_pages, _offset_mode, _offset_pairs, _title_of, _unit_windows, parse_args
+from dictation_cli import (
+    _find_book_dir,
+    _md_pages,
+    _offset_mode,
+    _offset_pairs,
+    _title_of,
+    _unit_windows,
+    parse_args,
+)
 
 
 def _make_book(root: Path, name: str, pages: list[str]) -> Path:
@@ -1207,6 +1221,17 @@ def _make_book(root: Path, name: str, pages: list[str]) -> Path:
     for i, text in enumerate(pages, 1):
         (d / f"page_{i:03d}.md").write_text(text, encoding="utf-8")
     return d
+
+
+class TestFindBookDir:
+    def test_finds_book_by_substring(self, tmp_path):
+        _make_book(tmp_path / "语文" / "初中" / "统编版" / "九年级" / "上册", "书", ["甲"])
+        found = _find_book_dir(tmp_path, "九年级/上册")
+        assert found is not None and found.name == "书"
+
+    def test_returns_none_when_absent(self, tmp_path):
+        _make_book(tmp_path / "语文" / "九年级" / "下册", "书", ["甲"])
+        assert _find_book_dir(tmp_path, "九年级/上册") is None
 
 
 class TestMdPages:
@@ -1571,11 +1596,10 @@ git commit -m "feat(data-refinery): 新增语文默写入库器（按篇目业�
 def _jsonl_path(args, config) -> Path:
     out_root = Path(args.output_dir) if args.output_dir else config.output_dir / "dictation"
     md_root = Path(args.input_dir) if args.input_dir else config.output_dir / "md"
-    book_dirs = [d for d in md_root.rglob("*")
-                 if d.is_dir() and args.book in str(d) and list(d.glob("page_*.md"))]
-    if not book_dirs:
+    book_md_dir = _find_book_dir(md_root, args.book)
+    if book_md_dir is None:
         raise FileNotFoundError(f"没找到含 page_*.md 的教材目录（--book {args.book}）")
-    return out_root / SUBJECT_DIR / args.term / f"{book_dirs[0].name}.jsonl"
+    return out_root / SUBJECT_DIR / args.term / f"{book_md_dir.name}.jsonl"
 
 
 def run_load(args, config) -> int:
