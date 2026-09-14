@@ -567,6 +567,7 @@ git commit -m "feat(data-refinery): 新增语文默写篇目定位模块（LLM �
 **Interfaces:**
 - Produces:
   - `join_pages(texts: list[str]) -> str` —— 同单元页文本按页序拼成一整段
+  - `cut_page_annotations(page_text: str) -> str` —— **逐页**从第一行注释式内容起截断（注释在页尾；跨页文言文必须此步，否则注释混入正文）
   - `slice_body(full_text: str, start_anchor: str, end_anchor: str) -> str | None` —— 含两端锚点取中间原文；任一锚点缺失/找不到返回 `None`
   - `normalize_body(raw: str) -> str` —— 去换行与空白，保留标点
 
@@ -575,7 +576,7 @@ git commit -m "feat(data-refinery): 新增语文默写篇目定位模块（LLM �
 创建 `tools/data-refinery/tests/test_dictation_slice.py`：
 
 ```python
-from dictation_slice import join_pages, normalize_body, slice_body
+from dictation_slice import cut_page_annotations, join_pages, normalize_body, slice_body
 
 PAGE = """# 人民教育出版社
 
@@ -653,6 +654,46 @@ class TestNormalizeBody:
 class TestJoinPages:
     def test_orders_as_given(self):
         assert join_pages(["甲", "乙"]) == "甲\n乙"
+
+
+class TestCutPageAnnotations:
+    """实测驱动：长文言文每页「上半页正文 + 下半页注释」，注释必须按页切掉。"""
+
+    PAGE = (
+        "环滁 $^{②}$ 皆山也。其西南诸峰，林壑尤美。\n"
+        "作亭者谁？山之僧智仙也。\n"
+        "⑦〔意〕意趣，情趣。\n"
+        "⑧〔山水之乐，得之心而寓之酒也〕欣赏山水的乐趣，领会于心间，寄托在酒中。"
+    )
+
+    def test_cuts_from_first_annotation_line(self):
+        out = cut_page_annotations(self.PAGE)
+        assert "环滁" in out and "作亭者谁" in out
+        assert "〔" not in out and "⑦" not in out
+
+    def test_page_without_annotations_is_unchanged(self):
+        page = "庆历四年 $^{②}$ 春，滕子京谪守巴陵郡。\n越明年，政通人和。"
+        assert cut_page_annotations(page) == page
+
+    def test_all_annotation_page_becomes_empty(self):
+        page = "⑥〔太守自谓也〕太守用自己的别号（醉翁）来命名。\n⑧〔谓〕为，是。"
+        assert cut_page_annotations(page).strip() == ""
+
+    def test_figure_caption_with_bracket_is_cut(self):
+        # 实测 page_061 的图注「《醉翁亭图》（局部）〔清〕顾符稹作」也带 〔 〕，属页尾版面
+        page = "若夫日出而林霏开。\n《醉翁亭图》（局部）〔清〕顾符稹作"
+        assert cut_page_annotations(page).strip() == "若夫日出而林霏开。"
+
+    def test_end_to_end_removes_interleaved_annotations(self):
+        # 两页拼接：每页都有注释尾巴 → 切片结果不得含 〔〕
+        p1 = "环滁 $^{②}$ 皆山也。\n⑦〔意〕意趣。"
+        p2 = "太守谓 $^{⑧}$ 谁？庐陵 $^{⑨}$ 欧阳修也。\n⑨〔庐陵〕庐陵郡。"
+        joined = join_pages([cut_page_annotations(p1), cut_page_annotations(p2)])
+        body = slice_body(joined, "环滁 $^{②}$ 皆山也。", "太守谓 $^{⑧}$ 谁？庐陵 $^{⑨}$ 欧阳修也。")
+        assert body is not None
+        nb = normalize_body(body)
+        assert "〔" not in nb and "⑦" not in nb and "⑨" not in nb
+        assert nb == "环滁皆山也。太守谓谁？庐陵欧阳修也。"
 ```
 
 > 注意：切片结果的「去尾部注释」是靠**末句锚点**（正文内的最后一句）实现的，不是靠找「注释」二字——这正是设计里修正过的点。
@@ -687,6 +728,27 @@ _WS_RE = re.compile(r"\s+")
 def join_pages(texts: list[str]) -> str:
     """把同一单元的页文本按页序拼成一整段，便于跨页篇目的锚点定位。"""
     return "\n".join(texts)
+
+
+#: 注释式行：行首圈号（①-⑳ 及 ㉑+ 扩展），或含〔…〕（注释与图注都用它）。
+#: 实测长文言文每一页是「上半页正文 + 下半页注释」，注释块必须按页切掉，
+#: 否则跨页篇目按锚点取原始子串时会把中间各页的注释一起吃进来
+#: （实测醉翁亭记 775 字含 〔〕与圈号；切后 584 字干净；对本来干净的篇目零影响）。
+_PAGE_ANNOTATION_RE = re.compile(r"^\s*(?:[①-⑳㉑-㉟㊱-㊿]|〔)|〔[^〕]*〕")
+
+
+def cut_page_annotations(page_text: str) -> str:
+    """把**单页**文本从第一行注释式内容起截断（注释都在该页页尾）。
+
+    逐页调用后再 `join_pages`。若某页整页都是注释，截断后为空——无妨，正文不在该页。
+    若正文里恰好出现 〔（罕见，〔 多用于注释与图注），会截早、末句锚点找不到 →
+    `slice_body` 返回 None → 该篇进人工复核（fail closed，安全方向）。
+    """
+    lines = page_text.splitlines()
+    for i, line in enumerate(lines):
+        if _PAGE_ANNOTATION_RE.search(line):
+            return "\n".join(lines[:i])
+    return page_text
 
 
 def slice_body(full_text: str, start_anchor: str, end_anchor: str) -> str | None:
@@ -783,15 +845,25 @@ class TestErrors:
         r = check_body(WEN + "注释〔1〕选自《范仲淹全集》。", "岳阳楼记", "wen", set())
         assert any("注释" in e for e in r.errors)
 
-    def test_title_inside_body_is_error(self):
+    def test_title_at_body_start_flags_review_not_error(self):
+        # 标题被切进正文开头 → 只标复核（不阻断入库），人工仍能看见
         r = check_body("岳阳楼记" + WEN, "岳阳楼记", "wen", set())
-        assert any("篇名" in e for e in r.errors)
+        assert r.errors == [], r.errors
+        assert r.needs_review is True
+        assert any("篇名" in x for x in r.review_reasons)
 
-    def test_title_mid_body_is_not_error(self):
-        # 实测回归：《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」），
-        # 只做 substring 判断会误杀一篇完全正确的正文。只有正文**开头**出现篇名才算切多了。
+    def test_title_mid_body_is_not_flagged(self):
+        # 实测回归①：《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」）
         body = "崇祯五年十二月，余住西湖。大雪三日，独往湖心亭看雪。莫说相公痴，更有痴似相公者。"
         r = check_body(body, "湖心亭看雪", "wen", set())
+        assert r.errors == [] and r.needs_review is False
+
+    def test_poem_whose_first_line_is_its_title(self):
+        # 实测回归②：《十五从军征》首行即篇名（题目为后人所加），必须仍能入库
+        body = ("十五从军征，八十始得归。道逢乡里人：家中有阿谁？遥看是君家，松柏冢累累。"
+                "兔从狗窦入，雉从梁上飞。中庭生旅谷，井上生旅葵。舂谷持作饭，采葵持作羹。"
+                "羹饭一时熟，不知贻阿谁。出门东向看，泪落沾我衣。")
+        r = check_body(body, "十五从军征", "shi", set())
         assert r.errors == [], r.errors
 
     def test_chrome_residue_is_error(self):
@@ -906,12 +978,13 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
     if "|" in body or "｜" in body:
         r.errors.append("正文含竖线 |／｜（页码页脚残留）")
 
-    # 篇名检查只看正文**开头**：篇名出现在前 len(篇名)+6 字内，才说明「把标题切进了正文」。
-    # 不能只做 substring 判断——实测《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」），
-    # substring 会把一篇完全正确的正文误杀、让它永远进不了题库。+6 是给前导的
-    # 「N 」编号/书名号/换行留余量。
+    # 篇名检查只看正文**开头**，且**只标复核、不判错**（两种真实情形都必须能入库）：
+    # ①《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」）——substring 会误杀正确正文；
+    # ②《十五从军征》的首行**就是篇名本身**（该诗题目为后人所加）——「开头出现篇名」对它是正常现象。
+    # 故留作 needs_review：人工能看见「疑似把标题切进了正文」，但不阻断入库。
     if work_title and work_title in body[: len(work_title) + 6]:
-        r.errors.append(f"正文开头出现篇名「{work_title}」，疑似把标题切进了正文")
+        r.needs_review = True
+        r.review_reasons.append(f"正文开头出现篇名「{work_title}」，疑似把标题切进了正文")
 
     for line in chrome:
         if line and line in body:
@@ -996,7 +1069,7 @@ from urllib.parse import unquote
 from config import RefineryConfig
 from dictation_check import check_body
 from dictation_locate import locate_unit
-from dictation_slice import join_pages, normalize_body, slice_body
+from dictation_slice import cut_page_annotations, join_pages, normalize_body, slice_body
 from extract_cli import _load_prompt
 from llm import create_llm_client
 from page_chrome import compute_book_chrome, strip_chrome
@@ -1173,7 +1246,9 @@ def run_extract(args, config) -> int:
 
     pages = _md_pages(book_md_dir)
     chrome = compute_book_chrome(book_md_dir)
-    clean = [(n, strip_chrome(t, chrome)) for n, t in pages]
+    # 逐页：剥运行页眉 → 切掉页尾注释块。两步都必须在 join_pages 之前按页做，
+    # 否则跨页文言文的中间各页注释会落进切片区间（实测醉翁亭记 775 字含 〔〕）。
+    clean = [(n, cut_page_annotations(strip_chrome(t, chrome))) for n, t in pages]
 
     offset = _offset_mode(_offset_pairs(candidates, clean))
     mode = "印刷页偏移" if offset is not None else "整书滑窗（偏移不可靠）"
