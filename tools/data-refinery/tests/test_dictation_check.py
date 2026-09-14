@@ -39,6 +39,17 @@ class TestErrors:
         r = check_body(WEN + "![](images/a9ee.jpg)", "岳阳楼记", "wen", set())
         assert any("图片" in e for e in r.errors)
 
+    def test_unbalanced_bracket_is_error(self):
+        # 实测新增：醉翁亭记的注释 ⑤ 起始行在 OCR 里丢失，只剩续行带一个落单的 ），
+        # 浅切按设计抓不到它 —— 靠括号配平兜住（进人工复核，不静默）
+        r = check_body(WEN + "起）像鸟张开翅膀一样，高踞于泉水之上。", "醉翁亭记", "wen", set())
+        assert any("不配平" in e for e in r.errors)
+
+    def test_balanced_brackets_are_fine(self):
+        # 正文里有成对括号（如注音）不得误报
+        r = check_body(WEN + "（其一）", "岳阳楼记", "wen", set())
+        assert not any("不配平" in e for e in r.errors)
+
 
 class TestReviewFlags:
     def test_rare_char_flagged_for_review(self):

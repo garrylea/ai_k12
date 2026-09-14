@@ -93,8 +93,9 @@ class TestCutPageAnnotations:
 
     PAGE = (
         "环滁 $^{②}$ 皆山也。其西南诸峰，林壑尤美。\n"
-        # 正文行都带角标（实测如此）；若这里不带，切点前移会把紧邻注释的正文行一并吃掉
-        "作亭者谁 $^{④}$ ？山之僧智仙也 $^{⑤}$ 。\n"
+        # 第二行**刻意不带角标**：全书注释行以上的非空行有 66% 不带角标（诗类正文常无角标），
+        # 所以「切点前移」在这里会把紧邻注释的正文行一并吃掉——浅切必须原样保留它。
+        "作亭者谁？山之僧智仙也。\n"
         "⑦〔意〕意趣，情趣。\n"
         "⑧〔山水之乐，得之心而寓之酒也〕欣赏山水的乐趣，领会于心间，寄托在酒中。"
     )
@@ -113,38 +114,35 @@ class TestCutPageAnnotations:
         assert cut_page_annotations(page).strip() == ""
 
     def test_figure_caption_with_bracket_is_cut(self):
-        # 实测 page_061 的图注「《醉翁亭图》（局部）〔清〕顾符稹作」也带 〔 〕，属页尾版面
-        # （正文行带角标，否则会被「切点前移」一并吃掉）
-        page = "若夫日出而林霏开 $^{①}$ 。\n《醉翁亭图》（局部）〔清〕顾符稹作"
-        assert cut_page_annotations(page).strip() == "若夫日出而林霏开 $^{①}$ 。"
+        # 实测 page_061 的图注「《醉翁亭图》（局部）〔清〕顾符稹作」也带 〔 〕，属页尾版面；
+        # 图注行**本身**就命中 _PAGE_ANNOTATION_RE，浅切在它处截断即可，无需前移
+        # （正文行即便不带角标也必须保留——见上一条 PAGE 夹具的说明）。
+        page = "若夫日出而林霏开。\n《醉翁亭图》（局部）〔清〕顾符稹作"
+        assert cut_page_annotations(page).strip() == "若夫日出而林霏开。"
 
-    def test_cut_point_moves_back_over_markerless_annotation_continuation(self):
-        # 实测 page_060 的真实形状：注释 ⑤ 的**起始行在 OCR 里丢了**，只剩续行；
-        # 续行不以圈号开头、不含 〔〕，必须靠「向前扩到连续无角标行」吃掉它。
+    def test_keeps_markerless_body_line_above_annotation(self):
+        # **回归护栏**：曾经试过让切点前移（理由是「正文行都带角标」），实测该前提不成立——
+        # 全书注释行以上的非空行有 66% 不带角标，前移会把诗的正文行一起切掉（4 篇丢锚点、
+        # 周总理你在哪里被静默删掉整页）。此用例钉住「注释行以上一律保留」。
         page = (
-            "环滁 $^{②}$ 皆山也。望之蔚然而深秀者，琅琊也 $^{③}$ 。\n"   # 正文（带角标）
-            "起）像鸟张开翅膀一样，高踞于泉水之上。临，居高面下。\n"          # ⑤ 的续行（无角标）
-            "⑥〔太守自谓也〕太守用自己的别号（醉翁）来命名。\n"                # ⑥ 起始行
-            "⑦〔意〕意趣，情趣。"
+            "望长城内外，惟余莽莽；大河上下，顿失滔滔。\n"   # 无角标的正文行
+            "还看今朝。\n"                                   # 无角标的正文行（曾是前移的受害者）
+            "①②③④⑤⑥⑦⑧⑨⑩〔俱往矣〕都过去了。"
         )
         out = cut_page_annotations(page)
-        assert "环滁" in out and "望之蔚然" in out
-        assert "像鸟张开翅膀" not in out, out
-        assert "⑥" not in out and "〔" not in out
+        assert "望长城内外" in out and "还看今朝" in out, out
+        assert "俱往矣" not in out
 
-    def test_image_line_before_annotations_is_cut(self):
-        # 实测 page_061：正文两行 → 图片行 → 图注（含〔清〕）→ 注释续行 → ⑩
+    def test_image_above_first_annotation_is_left_for_checker(self):
+        # 浅切**有意**不动注释行以上的内容：图片行若落在锚点区间内，由自检的
+        # 图片语法检查判错（进人工复核），而不是靠切点前移去猜（上一条的教训）。
         page = (
             "若夫日出而林霏开 $^{①}$ ，云归而岩穴暝 $^{②}$ 。\n"
-            "至于负者 $^{⑦}$ 歌于途，行者休于树 $^{⑧}$ 。\n"
             "![](images/a9ee.jpg)\n"
-            "《醉翁亭图》（局部）〔清〕顾符稹作\n"
-            "子由大人领着走，这里指老老少少的行人。\n"
             "⑩〔洌（liè）〕清。"
         )
         out = cut_page_annotations(page)
-        assert "至于负者" in out
-        assert "![" not in out and "顾符稹" not in out and "子由大人" not in out
+        assert "若夫日出" in out and "![" in out and "⑩" not in out
 
     def test_end_to_end_removes_interleaved_annotations(self):
         # 两页拼接：每页都有注释尾巴 → 切片结果不得含 〔〕

@@ -76,6 +76,15 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
     if "![" in body or "](" in body:
         r.errors.append("正文含 markdown 图片语法（版面元素混入）")
 
+    # 括号配平：文言/诗词正文里编辑性括号极少。配平不上说明有注释碎片混入——
+    # 实测醉翁亭记的注释 ⑤ **起始行在 OCR 里丢失**，只剩续行「起）像鸟张开翅膀…」，
+    # 带一个落单的 ）；浅切按设计抓不到它，靠这条兜住（判错 → 进人工复核，不静默）。
+    for left, right, label in (("（", "）", "圆括号"), ("〔", "〕", "六角括号"), ("【", "】", "方头括号")):
+        if body.count(left) != body.count(right):
+            r.errors.append(
+                f"正文{label}不配平（{left}×{body.count(left)} vs {right}×{body.count(right)}），疑似注释碎片混入"
+            )
+
     # 篇名检查只看正文**开头**，且**只标复核、不判错**（两种真实情形都必须能入库）：
     # ①《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」）——substring 会误杀正确正文；
     # ②《十五从军征》的首行**就是篇名本身**（该诗题目为后人所加）——「开头出现篇名」对它是正常现象。
