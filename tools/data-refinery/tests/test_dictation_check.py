@@ -24,6 +24,13 @@ class TestErrors:
         r = check_body("岳阳楼记" + WEN, "岳阳楼记", "wen", set())
         assert any("篇名" in e for e in r.errors)
 
+    def test_title_mid_body_is_not_error(self):
+        # 实测回归：《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」），
+        # 只做 substring 判断会误杀一篇完全正确的正文。只有正文**开头**出现篇名才算切多了。
+        body = "崇祯五年十二月，余住西湖。大雪三日，独往湖心亭看雪。莫说相公痴，更有痴似相公者。"
+        r = check_body(body, "湖心亭看雪", "wen", set())
+        assert r.errors == [], r.errors
+
     def test_chrome_residue_is_error(self):
         r = check_body(WEN + "人民教育出版社", "岳阳楼记", "wen", {"人民教育出版社"})
         assert any("页眉" in e for e in r.errors)
