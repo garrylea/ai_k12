@@ -72,10 +72,13 @@ _WS_RE = re.compile(r"\s+")
 #: 词牌副题分隔：`水调歌头(明月几时有)` -> `水调歌头`
 _SUBTITLE_RE = re.compile(r"[（(·].*$")
 
-#: 词牌 -> 正文字数（去标点）。只收本册实际出现的词牌，新增册次时补。取通行正体字数。
+#: 词牌 -> 正文字数（去标点）。只收**字数经过核对**的词牌，新增册次时补。
+#: 收不全没关系：不在表里的会退化为 `_drop_trailing_prose` 的尾部白话行剔除，
+#: 只是「词前小序」切不掉（没有定数就没有判据）。取通行正体字数。
 CI_PATTERNS: dict[str, int] = {
     "沁园春": 114,
     "水调歌头": 95,
+    "定风波": 62,
     "浣溪沙": 42,
     "丑奴儿": 44,
     "采桑子": 44,
@@ -392,22 +395,34 @@ def _char_count(text: str) -> int:
     return len(_PUNCT_ONLY_RE.sub("", _TITLE_MARKER_RE.sub("", text)))
 
 
+def _drop_trailing_prose(lines: list[str]) -> tuple[list[str], int]:
+    """从尾部丢掉「编者白话行」，返回 (保留的行, 丢掉几行)。
+
+    判据是**单行字数 ≥ `PROSE_LINE_MIN`**：实测诗文行都 ≤ 44 字（词整首写一行时最长 44），
+    而编者赏析段都 ≥ 119 字，分界很宽。这个规则不需要知道词牌/曲牌的定数，
+    故能兜住 `CI_PATTERNS` 没收录的篇目——实测《定风波》《临江仙》《太常引》
+    《山坡羊·骊山怀古》《朝天子·咏喇叭》的编者赏析正是这样漏下的。
+    """
+    cut = len(lines)
+    while cut > 1 and _char_count(lines[cut - 1]) >= PROSE_LINE_MIN:
+        cut -= 1
+    return lines[:cut], len(lines) - cut
+
+
 def trim_to_form(body: str, work_title: str, genre: str) -> tuple[str, list[str]]:
-    """按**格律**把尾部编者赏析（以及词前小序）切掉，返回 (正文, 留痕)。
+    """按**格律/版面**切掉尾部编者赏析（以及词前小序），返回 (正文, 留痕)。
 
-    实测「课外古诗词诵读」的篇目，正文后面紧跟一段编者白话赏析，
+    实测「课外古诗词诵读」等处的篇目，正文后面紧跟一段编者白话赏析，
     结构规则看不出边界（它不是注释、也不是下一个标题行），表现为
-    《月夜忆舍弟》切出 205 字（正文只有 40 字）。格律能确定性地解决它：
+    《月夜忆舍弟》切出 205 字而正文只有 40 字。两条规则解决它：
 
-    - **词**：字数有定数（`CI_PATTERNS`）。取长度恰好等于词牌字数的那个**连续行段**——
-      这一步同时干掉**词前的编者小序**（《水调歌头》的「丙辰中秋…兼怀子由」）
-      与词后的赏析。
-    - **诗**：只要**尾部若干行是长白话行**（≥ `PROSE_LINE_MIN` 字）就丢掉；
-      仅在「行普遍很短」（中位数 ≤ 20）时才做，避免误伤文言文那种整段长行。
-      古体/乐府（《十五从军征》96、《白雪歌》144）尾部是诗句、不是白话，
-      天然不受影响（它们的尾巴已被「下一篇标题行」收住）。
+    - **词**：词牌字数有定数时（`CI_PATTERNS`），取长度恰好等于词牌字数的那个**连续行段**
+      ——这一步同时干掉**词前的编者小序**（《水调歌头》的「丙辰中秋…兼怀子由」，
+      用户裁决**不算正文**）与词后的赏析。
+    - **尾部编者白话行**（对 诗/词/曲 通用）：词牌没收录、或体裁是曲（曲有衬字、字数不固定，
+      不能用定数）时，退化为「从尾部丢掉长白话行」。
 
-    切不出确定结果时**原样返回**，交给 `dictation_check` 的格律项去报错。
+    切不出确定结果时**原样返回**，交给 `dictation_check` 去报错。
     """
     lines = [line for line in body.splitlines() if line.strip()]
     if not lines:
@@ -432,26 +447,34 @@ def trim_to_form(body: str, work_title: str, genre: str) -> tuple[str, list[str]
                         return "\n".join(lines[i:j + 1]), notes
                     if total > pattern:
                         break
+            # 词牌没匹配上（不收在表里 / 该篇是变体）→ 退化为尾部白话行剔除
+        kept, dropped = _drop_trailing_prose(lines)
+        if dropped:
+            return "\n".join(kept), [f"切掉尾部编者赏析 {dropped} 行（词牌不在字数表内）"]
+        return body, []
+
+    if genre == "qu":
+        # 曲有衬字、字数不固定，不能用定数 → 只能靠尾部白话行剔除
+        kept, dropped = _drop_trailing_prose(lines)
+        if dropped:
+            return "\n".join(kept), [f"切掉尾部编者赏析 {dropped} 行"]
         return body, []
 
     if genre == "shi":
-        counts = [_char_count(line) for line in lines]
         if len(lines) <= 1:
             return body, []
-        short_lines = sorted(counts)
-        median = short_lines[len(short_lines) // 2]
+        counts = sorted(_char_count(line) for line in lines)
+        median = counts[len(counts) // 2]
         if median > 20:                     # 整段长行 → 像文言文，不敢动
             return body, []
-        cut = len(lines)
-        while cut > 1 and _char_count(lines[cut - 1]) >= PROSE_LINE_MIN:
-            cut -= 1
-        if cut == len(lines):
+        kept, dropped = _drop_trailing_prose(lines)
+        if not dropped:
             return body, []
-        kept = sum(_char_count(line) for line in lines[:cut])
-        if kept not in REGULATED_SHI_LENS:
+        kept_total = sum(_char_count(line) for line in kept)
+        if kept_total not in REGULATED_SHI_LENS:
             # 切完不是常见近体诗字数（古体诗）→ 宁可不切，交给自检报错
             return body, []
-        return "\n".join(lines[:cut]), [f"切掉尾部编者赏析 {len(lines) - cut} 行（正文 {kept} 字）"]
+        return "\n".join(kept), [f"切掉尾部编者赏析 {dropped} 行（正文 {kept_total} 字）"]
 
     return body, []
 
@@ -461,24 +484,46 @@ class PieceIdentity(BaseModel):
 
     它们是事实性短字段、可人工核对；目录 label 里只有「篇名/作者」、**没有朝代**，
     交给模型补最省事。**模型不参与定位**：正文起止一律由上面的版面规则切。
+
+    `model_author` 是**模型自己答的作者**（未采用），只用于和教材目录比对时留痕——
+    实测模型在 4/48 篇上答错了作者（《南安军》→「韩偓」、《临江仙》→「陈廷焯」等），
+    把这个分歧摆出来才能看见。
     """
 
     author: str = ""
     dynasty: str = ""
     genre: str = "other"
+    model_author: str = ""
 
 
-def ask_identity(llm: LLMClient, work_title: str, prompt: str) -> PieceIdentity:
-    """问一篇的作者/朝代/体裁。请求与响应都极小（输入只有篇名），失败由调用方兜住。"""
-    response = llm.complete(
-        prompt,
-        f"【篇名】{work_title}\n\n请给出这篇作品的作者、朝代、体裁。",
-    )
+def ask_identity(llm: LLMClient, work_title: str, prompt: str,
+                 known_author: str = "") -> PieceIdentity:
+    """问一篇的朝代/体裁（作者已知时只问这两项）。
+
+    **`known_author` 非空时把它写进请求**（调用方通常传教材目录里的作者）：
+    否则模型会先自己猜一个作者、再据那个错作者给朝代——实测就是这样错的：
+    《南安军》模型猜作者「韩偓」→ 朝代给了「唐」，而正确是**文天祥/宋**；
+    《临江仙》猜「陈廷焯」→ 朝代给「清」，正确是**陈与义/宋**；
+    《唐雎不辱使命》猜「刘向」→ 朝代给「汉」，正确是**《战国策》/先秦**。
+    把作者钉住后，朝代就只剩一个事实性问题。
+
+    请求与响应都极小（输入只有篇名 + 作者），失败由调用方兜住。
+    """
+    user_prompt = f"【篇名】{work_title}\n"
+    if known_author:
+        user_prompt += f"【作者】{known_author}（已确定，不要改动作者）\n"
+    user_prompt += "\n请给出这篇作品的" + ("朝代、体裁。" if known_author else "作者、朝代、体裁。")
+    response = llm.complete(prompt, user_prompt)
     data = _parse_json_object(response.content)
     if not isinstance(data, dict):
         return PieceIdentity()
     if data.get("genre") not in _GENRES:
         data = {**data, "genre": "other"}
+    if known_author:
+        # 作者以调用方给的为准（模型正是错在作者上，它给的朝代也跟着错）；
+        # 但把**模型自己的答复**留在 model_author 里供调用方比对留痕。
+        data = {**data, "author": known_author,
+                "model_author": str(data.get("author") or "")}
     try:
         return PieceIdentity.model_validate(
             {k: v for k, v in data.items() if k in PieceIdentity.model_fields}

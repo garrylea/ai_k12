@@ -93,6 +93,18 @@ def _title_of(label: str) -> str:
     return _NUM_PREFIX_RE.sub("", label.strip()).split("/")[0].strip()
 
 
+def _author_of(label: str) -> str:
+    """从 TOC 的 label 取**作者**（`南安军 / 文天祥` → `文天祥`）；没有则返回空串。
+
+    **作者以教材目录为准，不交给 LLM**（2026-09-14 实测教训）：九下《南安军》的目录
+    白纸黑字写着「/ 文天祥」，`ask_identity` 却回了「韩偓 / 唐」（韩偓是唐代诗人，张冠李戴）。
+    教材目录是权威且免费的，凡它给了作者就用它；LLM 只在目录没写时才补（如《十五从军征》
+    在目录里没有作者）。两者不一致时**留痕进复核**，不静默采用。
+    """
+    parts = _NUM_PREFIX_RE.sub("", label.strip()).split("/")
+    return parts[1].strip() if len(parts) >= 2 else ""
+
+
 def _same_work(a: str, b: str) -> bool:
     """两个篇名是否指同一篇作品（去空白 + 全半角括号，相等或一方含另一方）。"""
     x = _WS_RE.sub("", a).replace("（", "(").replace("）", ")")
@@ -164,18 +176,23 @@ def _compute_offset(candidates: list[dict], pages: list[tuple[int, str]]) -> int
 
 
 def _ordered_candidates(candidates: list[dict], pages: list[tuple[int, str]],
-                        offset: int | None) -> list[tuple[str, int | None, int, str]]:
-    """返回按锚点页排序的 [(篇名, 印刷页, 锚点页, 单元标题)]（锚点找不到的丢弃，另行报告）。"""
-    rows: list[tuple[str, int | None, int, str]] = []
+                        offset: int | None) -> list[tuple[str, int | None, int, str, str]]:
+    """返回按锚点页排序的 [(篇名, 印刷页, 锚点页, 单元标题, 目录里的作者)]。
+
+    锚点找不到的丢弃（调用方另行报告）。
+    """
+    rows: list[tuple[str, int | None, int, str, str]] = []
     for c in candidates:
-        title = _title_of(c.get("label", ""))
+        label = c.get("label", "")
+        title = _title_of(label)
         printed = c.get("printed_page")
         if not title:
             continue
         anchor = find_anchor_page(title, printed, pages, offset)
         if anchor is None:
             continue
-        rows.append((title, printed, anchor, c.get("unit_label") or "（未分单元）"))
+        rows.append((title, printed, anchor,
+                     c.get("unit_label") or "（未分单元）", _author_of(label)))
     rows.sort(key=lambda r: r[2])
     return rows
 
@@ -251,7 +268,7 @@ def run_extract(args, config) -> int:
         except Exception as e:                        # 兜底不可用不阻断抽取
             print(f"[WARN] 纠正兜底模型初始化失败（{e}），仅用主模型纠正", flush=True)
 
-    for index, (title, printed, anchor, unit_label) in enumerate(ordered):
+    for index, (title, printed, anchor, unit_label, toc_author) in enumerate(ordered):
         if title in seen_titles:
             continue
         next_anchor = ordered[index + 1][2] if index + 1 < len(ordered) else None
@@ -263,18 +280,24 @@ def run_extract(args, config) -> int:
                                f"锚点页 {anchor}｜印刷页 {printed}"))
             continue
 
-        # 作者/朝代/体裁（LLM）；失败不阻断，但留痕进复核
+        # 朝代/体裁问 LLM；**作者优先取教材目录**，并把目录的作者**告诉模型**——
+        # 否则模型会先猜错作者再据错作者给朝代（实测《南安军》猜「韩偓」→朝代「唐」，
+        # 正确是 文天祥/宋；《临江仙》猜「陈廷焯」→「清」，正确是 陈与义/宋）。
         review_reasons_extra: list[str] = []
         try:
-            identity = ask_identity(llm, title, identity_prompt)
+            identity = ask_identity(llm, title, identity_prompt, known_author=toc_author)
         except Exception as e:
             identity = None
-            print(f"[WARN] 《{title}》作者/朝代获取失败：{e}", flush=True)
-            review_reasons_extra.append(f"作者/朝代获取失败（{str(e)[:80]}）")
+            print(f"[WARN] 《{title}》朝代/体裁获取失败：{e}", flush=True)
+            review_reasons_extra.append(f"朝代/体裁获取失败（{str(e)[:80]}）")
 
         genre = identity.genre if identity else "other"
-        author = identity.author if identity else ""
         dynasty = identity.dynasty if identity else ""
+        author = toc_author or (identity.author if identity else "")
+        if toc_author and identity and identity.model_author and identity.model_author != toc_author:
+            # 即使把作者告诉了模型，仍比对它自己的答复——实测 4/48 篇模型答错过作者
+            review_reasons_extra.append(
+                f"作者分歧：目录作「{toc_author}」，模型作「{identity.model_author}」，已采用目录")
 
         # 按格律切掉尾部编者赏析 / 词前小序（程序，确定性）
         body, trim_notes = trim_to_form(located.body, title, genre)

@@ -122,3 +122,29 @@ class TestCiMetre:
     def test_shi_is_not_affected(self):
         r = check_body("甲" * 200, "沁园春·雪", "shi", set())
         assert not any("词牌正体" in e for e in r.errors)
+
+
+class TestNoPunctuationRun:
+    """连续长串无标点 → 判错。
+
+    实测《邹忌讽齐王纳谏》（九上）正文中间混进了约 260 字**繁体、无标点**的文字
+    （`窥镜而美於徐公今齊地方千里百二十城宮婦左右莫不私王…`，来自插图/书法页的 OCR）：
+    它不含 `$`、不含括号、字数也在下限之上，原有检查全都放过了。
+    中/文言文的句子再长也有句读断开，故「连续 30 字无标点」是极强的异常信号。
+    """
+
+    def test_long_run_without_punctuation_is_error(self):
+        body = "邹忌修八尺有余，而形貌昳丽。" + "美於徐公今齊地方千里百二十城宮婦左右莫不私王" * 5 + "。"
+        r = check_body(body, "邹忌讽齐王纳谏", "wen", set())
+        assert any("无标点" in e for e in r.errors)
+
+    def test_normal_classical_prose_passes(self):
+        body = ("庆历四年春，滕子京谪守巴陵郡。越明年，政通人和，百废具兴，"
+                "乃重修岳阳楼，增其旧制，刻唐贤今人诗赋于其上，属予作文以记之。")
+        r = check_body(body, "岳阳楼记", "wen", set())
+        assert not any("无标点" in e for e in r.errors)
+
+    def test_verse_with_punctuation_passes(self):
+        body = "十五从军征，八十始得归。道逢乡里人，家中有阿谁？遥看是君家，松柏冢累累。"
+        r = check_body(body, "十五从军征", "shi", set())
+        assert not any("无标点" in e for e in r.errors)

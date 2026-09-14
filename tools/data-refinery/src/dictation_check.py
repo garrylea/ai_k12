@@ -35,6 +35,10 @@ CHECK_MIN_LEN: dict[str, int] = {"shi": 20, "ci": 20, "qu": 20, "wen": 30, "othe
 REGULATED_SHI_LENS: set[int] = {20, 28, 40, 56}
 
 _PUNCT_RE = re.compile(r"[，。！？；：、（）《》〈〉“”‘’\s]")
+#: 连续「非标点、非空白」的汉字串。中/文言文的句子再长也有句读断开，
+#: 连续 30 字无标点即为异常（实测九上邹忌混入 ~260 字繁体无标点文字块）。
+NO_PUNCT_RUN_MIN = 30
+_NO_PUNCT_RUN_RE = re.compile(r"[^，。！？；：、（）《》〈〉“”‘’\s]{30,}")
 # CJK 基本区；之外的汉字（扩展 A/B/C…）视为可疑生僻字
 _HAN_IN_BASIC_RE = re.compile(r"[\u4e00-\u9fff]")
 _HAN_ANY_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U0003ffff]")
@@ -126,5 +130,16 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
                 f"词牌正体 {pattern} 字，实际 {_char_count(body)} 字"
                 "（正文可能混入了编者说明/课后题，或切多切少）"
             )
+
+    # 连续长串无标点：实测《邹忌讽齐王纳谏》（九上）正文中间混进了一段**繁体、无标点**的文字
+    # （`美於徐公今齊地方百二十城宮婦左右莫不私王…`，约 260 字，来自插图/书法页的 OCR），
+    # 而它不含 `$`、不含括号、长度也在下限之上，原有检查全都放过了。
+    # 中/文言文的句子再长也会有 `，。；：` 断开，连续 30 字无标点是极强的异常信号。
+    match = _NO_PUNCT_RUN_RE.search(body)
+    if match:
+        r.errors.append(
+            f"正文含连续 {len(match.group(0))} 字无标点（疑似混入插图/书法页的文字块）："
+            "…" + match.group(0)[:20] + "…"
+        )
 
     return r

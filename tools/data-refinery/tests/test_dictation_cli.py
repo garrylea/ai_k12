@@ -172,11 +172,12 @@ class TestRunExtract:
             encoding="utf-8")
         return p
 
-    def _setup(self, tmp_path, monkeypatch, body=None, identity=None, repair=None):
+    def _setup(self, tmp_path, monkeypatch, body=None, identity=None, repair=None,
+               label="10 岳阳楼记/范仲淹"):
         md_root = tmp_path / "md"
         _make_book(md_root / "语文" / "初中" / "统编版" / "九年级" / "上册", "书", [PAGE_1])
         out_root = tmp_path / "dictation"
-        self._candidates(out_root)
+        self._candidates(out_root, label=label)
         monkeypatch.setattr("dictation_cli.create_llm_client", lambda **kw: object())
         monkeypatch.setattr("dictation_cli._load_prompt", lambda name: "PROMPT")
         monkeypatch.setattr(
@@ -184,11 +185,15 @@ class TestRunExtract:
             lambda *a, **kw: LocatedBody(work_title="a", body=body if body is not None else GOOD_BODY,
                                          start_page=1, end_page=1, notes=["终止于编者栏目（预习）"]),
         )
-        monkeypatch.setattr(
-            "dictation_cli.ask_identity",
-            lambda llm, title, prompt: identity or PieceIdentity(
-                author="范仲淹", dynasty="宋", genre="wen"),
-        )
+        # 复刻 ask_identity 的真实契约：known_author 非空时作者以它为准，
+        # 模型自己的答复留在 model_author 供比对留痕
+        def _fake_identity(llm, title, prompt, known_author=""):
+            base = identity or PieceIdentity(author="范仲淹", dynasty="宋", genre="wen")
+            return base.model_copy(update={
+                "author": known_author or base.author,
+                "model_author": base.author if known_author else "",
+            })
+        monkeypatch.setattr("dictation_cli.ask_identity", _fake_identity)
         if repair is not None:
             monkeypatch.setattr("dictation_cli.repair_body", lambda *a, **kw: repair)
         return md_root, out_root
@@ -267,16 +272,38 @@ class TestRunExtract:
 
     def test_identity_failure_does_not_block_but_flags_review(self, tmp_path, monkeypatch):
         md_root, out_root = self._setup(tmp_path, monkeypatch)
-        def boom(llm, title, prompt):
+        def boom(llm, title, prompt, known_author=""):
             raise RuntimeError("identity down")
         monkeypatch.setattr("dictation_cli.ask_identity", boom)
 
         assert run_extract(self._args(md_root, out_root), self._FAKE_CONFIG) == 0
         rows = self._rows(out_root)
         assert len(rows) == 1
-        assert rows[0]["author"] == "" and rows[0]["_genre"] == "other"
+        # 作者来自**教材目录**（`10 岳阳楼记/范仲淹`），不依赖 LLM —— 所以模型挂了也拿得到
+        assert rows[0]["author"] == "范仲淹"
+        assert rows[0]["_genre"] == "other"           # 体裁只能问模型，失败即降级
         assert rows[0]["_needs_review"] is True
-        assert any("作者/朝代获取失败" in reason for reason in rows[0]["_review_reasons"])
+        assert any("朝代/体裁获取失败" in reason for reason in rows[0]["_review_reasons"])
+
+    def test_toc_author_wins_over_llm_and_divergence_is_logged(self, tmp_path, monkeypatch):
+        # 回归：九下《南安军》目录写「/ 文天祥」，模型回了「韩偓」——必须采用目录的，并留痕
+        md_root, out_root = self._setup(
+            tmp_path, monkeypatch,
+            identity=PieceIdentity(author="韩偓", dynasty="唐", genre="shi"),
+        )
+        assert run_extract(self._args(md_root, out_root), self._FAKE_CONFIG) == 0
+        rows = self._rows(out_root)
+        assert rows[0]["author"] == "范仲淹"          # 目录 label 的作者
+        assert any("作者分歧" in reason for reason in rows[0]["_review_reasons"])
+
+    def test_llm_author_used_when_toc_has_none(self, tmp_path, monkeypatch):
+        # 目录没写作者（label 里没有 `/作者`，如《十五从军征》）时才用模型的
+        md_root, out_root = self._setup(
+            tmp_path, monkeypatch, label="10 岳阳楼记",
+            identity=PieceIdentity(author="佚名", dynasty="汉", genre="shi"),
+        )
+        assert run_extract(self._args(md_root, out_root), self._FAKE_CONFIG) == 0
+        assert self._rows(out_root)[0]["author"] == "佚名"
 
     def test_missing_candidates_file_returns_1(self, tmp_path):
         md_root = tmp_path / "md"

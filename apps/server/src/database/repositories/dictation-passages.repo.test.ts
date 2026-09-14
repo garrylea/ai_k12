@@ -50,6 +50,30 @@ describe('DictationPassagesRepository', () => {
     expect(params).toEqual([7, 2, 5]);
   });
 
+  it('findRandomVerified：「全部册次」时按篇名去重（MIN(id) 子查询）', async () => {
+    // 实测九上/九下有 9 篇重复收录（同一篇在两册各印一次，业务键含 semester 故各存一行）：
+    // 不过滤册次时同一篇会被抽到两次，故必须按 work_title 去重。
+    const pool = mockPool([]);
+    const repo = new DictationPassagesRepository(pool as any);
+    await repo.findRandomVerified(7, 2, null, 5);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain('MIN(dp2.id)');
+    expect(sql).toContain('dp2.work_title = dp.work_title');
+    // 子查询也必须守抽题池门禁，否则会挑到一个未校验/未标必背的同名行
+    expect(sql).toContain('dp2.verified = 1');
+    expect(sql).toContain('dp2.memorize_required = 1');
+  });
+
+  it('findRandomVerified：指定册次时**不**加去重子查询', async () => {
+    // 关键：子查询跨册取 MIN(id)，若外层已按册过滤会把该册的行整体排除掉
+    // （上册行 id 更小 → 下册行 != 它）。单册内不会同名重复，无需去重。
+    const pool = mockPool([]);
+    const repo = new DictationPassagesRepository(pool as any);
+    await repo.findRandomVerified(7, 2, '下册', 5);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).not.toContain('MIN(dp2.id)');
+  });
+
   it('findVerifiedByQuestionIds：空数组直接返回空，不查库', async () => {
     const pool = mockPool([]);
     const repo = new DictationPassagesRepository(pool as any);

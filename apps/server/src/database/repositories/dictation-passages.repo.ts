@@ -89,6 +89,20 @@ export class DictationPassagesRepository {
     if (semester != null) {
       sql += ' AND dp.semester = ?';
       params.push(semester);
+    } else {
+      // 「全部册次」时按**篇名**去重：实测九上/九下有 9 篇重复收录（两册的第六单元都是
+      // 文言文单元，同一篇各印一次，如《出师表》上册第 26 课、下册第 23 课），
+      // 业务键含 semester 故会各存一行 → 不过滤册次时同一篇可能被抽到两次。
+      // 每个篇名只取一行（最小 id，确定性）。
+      // ⚠️ 只在无册次过滤时加：子查询跨册取 MIN(id)，若外层已按册过滤会把该册的行
+      // 整体排除掉（上册行 id 更小 → 下册行不等于它）。
+      sql += ` AND dp.id = (
+        SELECT MIN(dp2.id) FROM dictation_passages dp2
+          JOIN questions q2 ON q2.id = dp2.question_id
+          WHERE dp2.work_title = dp.work_title
+            AND q2.subject_id = q.subject_id AND q2.is_active = 1
+            AND dp2.verified = 1 AND dp2.memorize_required = 1
+      )`;
     }
     sql += ' ORDER BY RAND() LIMIT ?';
     params.push(count);

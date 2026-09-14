@@ -284,3 +284,38 @@ class TestLocateBody:
 @pytest.mark.parametrize("length", sorted(REGULATED_SHI_LENS))
 def test_regulated_lens_are_the_expected_set(length):
     assert length in {20, 28, 40, 56}
+
+
+class TestTrimToFormQuAndUnlistedCi:
+    """尾部编者赏析的**通用**剔除（不依赖词牌定数）。
+
+    九下暴露的坑：`CI_PATTERNS` 只收了部分词牌，且原来只管 `ci` 不管 `qu`，
+    于是《定风波》《临江仙》《太常引》（词牌没收录）与《山坡羊·骊山怀古》
+    《朝天子·咏喇叭》（曲，有衬字、字数不固定）的编者赏析全被当成正文收了进来
+    （实测 323 / 254 / 307 / 216 / 267 字）。
+    """
+
+    def test_unlisted_ci_drops_trailing_prose(self):
+        # 临江仙 不在 CI_PATTERNS 里（正体有 58/60 两种变体，不敢收）→ 走通用剔除
+        ci = "忆" * 60
+        body, notes = trim_to_form(f"{ci}\n" + "编" * 200, "临江仙·夜登小阁,忆洛中旧游", "ci")
+        assert body == ci
+        assert any("词牌不在字数表内" in n for n in notes)
+
+    def test_qu_drops_trailing_prose(self):
+        # 曲有衬字、字数不固定 → 只能靠尾部白话行剔除
+        qu = "峰峦如聚，波涛如怒"
+        body, notes = trim_to_form(f"{qu}\n" + "作" * 170, "山坡羊·骊山怀古", "qu")
+        assert body == qu
+        assert any("编者赏析" in n for n in notes)
+
+    def test_qu_untouched_when_last_line_is_verse(self):
+        qu = "峰峦如聚，波涛如怒。\n山河表里潼关路。"
+        body, notes = trim_to_form(qu, "山坡羊·潼关怀古", "qu")
+        assert body == qu and notes == []
+
+    def test_listed_ci_still_uses_pattern(self):
+        ci = "少" * 44
+        body, notes = trim_to_form(f"{ci}\n" + "编" * 119, "丑奴儿·书博山道中壁", "ci")
+        assert body == ci
+        assert any("按词牌字数" in n for n in notes)
