@@ -312,6 +312,8 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 
 - [ ] **Step 3: 生成候选清单交用户确认**
 
+**候选必须同时收 `sections` 与 `supplements`**（Task 12 实测发现：「课外古诗词诵读」下的诗题落在 `supplements` 里而不是 `sections`，只收 sections 会整块丢掉）。另外**把栏目行本身也作为候选**（如 `课外古诗词诵读 159`）——它带印刷页码，能给该单元一个页锚点；否则「课外古诗词诵读」这一组的候选全无 `printed_page`，Task 7 算不出页窗、整组会被丢掉。
+
 把全部 `sections` + `supplements` 的标题列成清单，并**初判**哪些是古诗文/文言文（依据：单元标题含「古诗文」/ 标题形如「N 篇名」的经典篇目 / 「课外古诗词诵读」区块；明显是现代文的如《我爱这土地》《乡愁》排除），标注「收 / 不收 / 待你定」。
 
 **向用户确认后才能进入 Task 4。** 这一步的意义是：目录解析质量决定了候选是否漏收，而漏收意味着学生练不到。
@@ -1107,6 +1109,23 @@ def _unit_windows(
             hi = max(nos) + WINDOW_TAIL
         out.append((unit, [t for n, t in pages if lo <= n <= hi]))
     return out
+
+
+def _units_without_page(candidates: list[dict]) -> list[str]:
+    """返回「候选全无 printed_page」的单元——这类单元算不出页窗，须在候选阶段避免。
+
+    Task 12 实测发现：「课外古诗词诵读」下的诗题落在 supplements 里且没有页码；
+    若该组的栏目行（如 `课外古诗词诵读 159`，带页码）没被收进候选，整组会被 `_unit_windows`
+    的 `ordered` 过滤掉、彻底丢掉。`run_extract` 应在开头调用本函数，非空即打印 `[WARN]`
+    并把这些单元列进 unresolved 报告（宁可让人看见，也不要静默丢一篇）。
+    """
+    seen: dict[str, bool] = {}
+    for c in candidates:
+        label = c.get("unit_label") or "（未分单元）"
+        seen.setdefault(label, False)
+        if c.get("printed_page") is not None:
+            seen[label] = True
+    return [u for u, has_page in seen.items() if not has_page]
 ```
 
 - [ ] **Step 3: 实现 --extract 主流程与产物写出**
