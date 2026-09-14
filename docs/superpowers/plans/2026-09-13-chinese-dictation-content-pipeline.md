@@ -14,7 +14,8 @@
 
 ## Global Constraints
 
-- **不改动既有四阶段工具**：`convert_cli.py` / `extract_cli.py` / `publish_cli.py` / `db_loader_cli.py` 的既有行为一律不动（用户明确要求 `convert_cli` 不要动）。新代码放新文件。
+- **不改动既有四阶段工具的行为**：`convert_cli.py` / `extract_cli.py` / `publish_cli.py` / `db_loader_cli.py`（用户明确要求 `convert_cli` 不要动）。新代码放新文件。
+  - **例外（用户指示）**：`toc_parse_cli.py` 与 `card_splitter.py` 里那两条**硬编码数学形态**的版面规则，按 Task 12 重构为「基类 + 每学科实现」；重构时**数学行为必须零变化**（新实现默认走数学档，且配黄金回归用例），见 Task 12。
 - 库内 LLM 配置用 `.env` 的 `LLM_BASE_URL` / `LLM_AUTH_TOKEN` / `LLM_PROVIDER` / `LLM_MODEL`，**不要用 `ANTHROPIC_*`**（会被 shell 里 Claude Code 覆盖）；DB 用 `DB_HOST/DB_PORT/DB_USER/DB_PASS/DB_NAME`。
 - 一律通过 `RefineryConfig.from_env(input_dir=None, output_dir=None)` 读配置，不新增 env 变量。
 - **正文必须逐字来自教材 MD**：LLM 不得产出正文字符。切片后只做「去换行/去空白」规范化，**标点与全角符号原样保留**。
@@ -273,6 +274,8 @@ sed -n '1,40p' "$(ls "$D"/*/page_001.md | head -1)"
 
 ## Task 3: 目录候选（**中途闸门，需用户确认**）
 
+> **前置：Task 12 必须先完成**——`toc_parse_cli` 原本只认数学目录形态，对语文完全失效（实测只认出目录首页 page_004，丢掉第三单元与「课外古诗词诵读」）。Task 12 把版面规则学科化后才可用。
+
 **Files:** 无代码改动（纯执行既有 CLI）
 
 **Interfaces:**
@@ -352,6 +355,8 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 - `body_end_anchor`：该篇正文的**最后一句**，逐字照抄原文（含标点），长度 6-20 字。
 - 两个锚点都必须**在页文本中逐字出现**（程序会用它们做字符串查找）。不要改写、不要补全、不要规范化标点。
 - 不要给「注释」的起始位置——末句锚点之后自然就是注释或下一篇课文。
+- **「阅读提示」不是正文**：教材常在正文前放一段编者导语（`## 阅读提示` + 一段白话说明，实测九上 9 页如此）。正文从**作品的第一个字**开始，不要把导语算进去。
+- 正文里指向注释的角标（如 `崇祯五年 $^{②}$ 十二月` 里的 `$^{②}$`）**不要写进锚点**：锚点要取不含角标的连续文字（上例应取 `崇祯五年` 或 `十二月，余住西湖。`），角标由程序在规范化时删除。
 - 若正文跨页断开，锚点仍照抄原文（首句可能在前一页、末句可能在后一页）。
 - **找不到正文起止就整篇不要返回**，不要猜。
 
@@ -620,6 +625,19 @@ class TestNormalizeBody:
     def test_keeps_fullwidth_punctuation(self):
         assert normalize_body("床前明月光，疑是地上霜。") == "床前明月光，疑是地上霜。"
 
+    def test_strips_inline_annotation_markers(self):
+        # 实测九上 79/170 页正文含此类行内角标（指向注释，不是正文）
+        assert normalize_body("崇祯五年 $^{②}$ 十二月") == "崇祯五年十二月"
+        assert normalize_body("春和景 $^{⑰}$ 明") == "春和景明"
+
+    def test_marker_stripped_before_space_collapse(self):
+        # 顺序关键：先删角标再收空白。反过来会让 `$^{②}` 与正文粘连、更难清理
+        assert normalize_body("大雪三日 $^{③}$ ，湖中人鸟声俱绝") == "大雪三日，湖中人鸟声俱绝"
+
+    def test_keeps_legitimate_fullwidth_punctuation_only(self):
+        # 不能把「——」「·」这类正文标点当残留删掉（语文正文常见）
+        assert normalize_body("你是人间的四月天 ——一句爱的赞颂") == "你是人间的四月天——一句爱的赞颂"
+
 
 class TestJoinPages:
     def test_orders_as_given(self):
@@ -679,12 +697,19 @@ def slice_body(full_text: str, start_anchor: str, end_anchor: str) -> str | None
     return tail[: end + len(end_anchor)]
 
 
-def normalize_body(raw: str) -> str:
-    """规范化正文：去掉 OCR 插入的换行与空白，**保留全部标点与全角符号**。
+#: 行内注释角标：实测九上 79/170 页的正文含 `$^{①}$` 这类指向注释的标记（如
+#: 「崇祯五年 $^{②}$ 十二月」）。它不是正文，必须删掉，否则入库正文夹带 `$^{②}$` 垃圾。
+_INLINE_MARKER_RE = re.compile(r"\$\^\{[^}]*\}\$")
 
+
+def normalize_body(raw: str) -> str:
+    """规范化正文：**先删行内注释角标，再收空白**；**保留全部标点与全角符号**。
+
+    顺序不可颠倒：实测所有「汉字-空格-汉字」都由被删角标留下（`春和景 $^{⑰}$ 明`），
+    若先收空白会把角标与正文粘在一起、更难清理。
     标点只在判题时被忽略（normalizeChineseAnswer），存储保留原文便于展示。
     """
-    return _WS_RE.sub("", raw)
+    return _WS_RE.sub("", _INLINE_MARKER_RE.sub("", raw))
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -750,6 +775,16 @@ class TestErrors:
     def test_chrome_residue_is_error(self):
         r = check_body(WEN + "人民教育出版社", "岳阳楼记", "wen", {"人民教育出版社"})
         assert any("页眉" in e for e in r.errors)
+
+    def test_latex_marker_residue_is_error(self):
+        # 实测新增：角标没删净（normalize_body 漏删）会在正文留下 $
+        r = check_body(WEN + " $^{②}$", "岳阳楼记", "wen", set())
+        assert any("$" in e for e in r.errors)
+
+    def test_pipe_furniture_residue_is_error(self):
+        # 实测新增：页码页脚「60 | 阅读 | 第三单元」混进正文
+        r = check_body(WEN + "60 | 阅读 | 第三单元", "岳阳楼记", "wen", set())
+        assert any("竖线" in e for e in r.errors)
 
 
 class TestReviewFlags:
@@ -841,6 +876,13 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
     for mark in _ANNOTATION_MARKS:
         if mark in body:
             r.errors.append(f"正文含注释体例标记「{mark}」，疑似切多")
+
+    # 版面／标记残留（实测新增，原清单抓不到）：$ 说明 `$^{①}$` 角标没删净；
+    # 竖线说明页码页脚混了进来（实测全书仅 2 行，属兜底）。
+    if "$" in body:
+        r.errors.append("正文含 $（行内注释角标未删净）")
+    if "|" in body or "｜" in body:
+        r.errors.append("正文含竖线 |／｜（页码页脚残留）")
 
     if work_title and work_title in body:
         r.errors.append(f"正文含篇名「{work_title}」，疑似把标题切进了正文")
@@ -1780,6 +1822,323 @@ cd apps/server && npm test && npm run build            # TS 全量绿（抽题�
 ```bash
 git add docs/
 git commit -m "docs: 记录语文默写内容管线落地结果（篇目数/遗留项/已知局限）"
+```
+
+---
+
+## Task 12: 学科版式档案重构（基类 + 每学科实现）
+
+> **执行时机：Task 2 之后、Task 3 之前**（编号靠后是为了不打乱既有 Task 3–11 的编号与简报缓存，沿用上一份计划 Task 17 的先例）。**Task 3 依赖本任务**。
+
+**为什么做**：`toc_parse_cli._TOC_LINE_RE` 与 `card_splitter._PAGE_NUMBER_HEADER_RE` 都把**数学版式**写死了，实测 `toc_parse_cli` 对语文**完全失效**（只认出目录首页 page_004，丢掉第三单元与「课外古诗词诵读」）。用户指示：**写一个基类，不同学科各自实现**，并要求「一定要做好测试，不要出现纰漏」。
+
+**Files:**
+- Create: `tools/data-refinery/src/textbook_profile.py`
+- Create: `tools/data-refinery/tests/test_textbook_profile.py`
+- Modify: `tools/data-refinery/src/toc_parse_cli.py`（`_is_toc_like_page` / `_find_toc_pages` 改为按 profile 判定）
+- Modify: `tools/data-refinery/src/card_splitter.py`（`_is_page_number_header` 改为按 profile 判定）
+- Modify: `tools/data-refinery/tests/`（`toc_parse_cli` 与 `card_splitter` 的既有测试若因签名变化而失败，按「行为不变」原则同步）
+
+**Interfaces:**
+- Produces:
+  - `class TextbookProfile`：`name: str`、`is_toc_line(line: str) -> bool`、`is_page_furniture(line: str) -> bool`
+  - `class MathTextbookProfile(TextbookProfile)`、`class ChineseTextbookProfile(TextbookProfile)`
+  - `get_profile(subject: str | None) -> TextbookProfile`（未注册学科回退 `TextbookProfile`）
+  - `profile_for_md_path(md_path: Path) -> TextbookProfile`（从 MD 路径首段推学科：`语文/初中/…` → chinese；推不出则回退数学档以保持既有行为）
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `tools/data-refinery/tests/test_textbook_profile.py`。**最重要的一组是数学黄金回归**——重构后数学判定必须与重构前逐条一致：
+
+```python
+from textbook_profile import (
+    ChineseTextbookProfile,
+    MathTextbookProfile,
+    TextbookProfile,
+    get_profile,
+)
+
+# 数学黄金用例：前半「是否目录行」、后半「是否版面残留」
+MATH_TOC_POSITIVE = [
+    "第二十六章 反比例函数 1",
+    "26.1 反比例函数 2",
+    "小结 12",
+    "复习题26 15",
+    "数学活动 9",
+    "阅读与思考 生活中的反比例关系 17",
+]
+MATH_TOC_NEGATIVE = [
+    "## 练习",
+    "第N单元",
+    "1 沁园春·雪/毛泽东 3",
+    "把一根长 3 米的绳子剪成两段，每段长多少？",
+    "26.1",
+]
+MATH_FURNITURE_POSITIVE = ["3 第二十一章 一元二次方程", "81 第二十六章 反比例函数"]
+MATH_FURNITURE_NEGATIVE = [
+    "## 练习",
+    "60 | 阅读 | 第三单元",
+    "第二十六章 反比例函数",
+    "在 Rt△ABC 中，∠C=90°，AC=3。",
+]
+
+
+class TestMathProfileUnchanged:
+    """黄金回归：重构不得改变数学判定。"""
+
+    def setup_method(self):
+        self.p = MathTextbookProfile()
+
+    def test_toc_positive(self):
+        for line in MATH_TOC_POSITIVE:
+            assert self.p.is_toc_line(line) is True, line
+
+    def test_toc_negative(self):
+        for line in MATH_TOC_NEGATIVE:
+            assert self.p.is_toc_line(line) is False, line
+
+    def test_furniture_positive(self):
+        for line in MATH_FURNITURE_POSITIVE:
+            assert self.p.is_page_furniture(line) is True, line
+
+    def test_furniture_negative(self):
+        for line in MATH_FURNITURE_NEGATIVE:
+            assert self.p.is_page_furniture(line) is False, line
+
+
+# 语文用例全部取自九上真实目录页与版面实测（spec §4.1/§4.2）
+CN_TOC_POSITIVE = [
+    "第一单元 活动·探究 1",
+    "任务一 学习鉴赏 2",
+    "1 沁园春·雪/毛泽东 3",
+    "阅读 7 培养德智体美劳全面发展的社会主义建设者和接班人/习近平 22",
+    r"9\*谈骨气/吴晗 33",
+    "课外古诗词诵读 159",
+    "月夜忆舍弟/杜甫",          # 无页码的诗题行：靠「含 /」命中
+    "写作 观点要明确 43",
+]
+CN_TOC_NEGATIVE = [
+    "## 目录",
+    "第二单元",
+    "注：阅读单元的课文分“教读”和“自读”两类，篇名前标有*的为“自读”课文。",
+    "仅供个人学习使用，未经授权不得另做他用",
+]
+CN_FURNITURE_POSITIVE = ["60 | 阅读 | 第三单元", "九年级 | 上册"]
+CN_FURNITURE_NEGATIVE = [
+    "庆历四年春，滕子京谪守巴陵郡。",
+    "## 阅读提示",
+    "1 沁园春·雪/毛泽东 3",
+]
+
+
+class TestChineseProfile:
+    def setup_method(self):
+        self.p = ChineseTextbookProfile()
+
+    def test_toc_positive(self):
+        for line in CN_TOC_POSITIVE:
+            assert self.p.is_toc_line(line) is True, line
+
+    def test_toc_negative(self):
+        for line in CN_TOC_NEGATIVE:
+            assert self.p.is_toc_line(line) is False, line
+
+    def test_furniture(self):
+        for line in CN_FURNITURE_POSITIVE:
+            assert self.p.is_page_furniture(line) is True, line
+        for line in CN_FURNITURE_NEGATIVE:
+            assert self.p.is_page_furniture(line) is False, line
+
+
+class TestRegistry:
+    def test_resolves_by_chinese_and_code(self):
+        assert isinstance(get_profile("语文"), ChineseTextbookProfile)
+        assert isinstance(get_profile("chinese"), ChineseTextbookProfile)
+        assert isinstance(get_profile("数学"), MathTextbookProfile)
+
+    def test_unknown_falls_back_to_base(self):
+        p = get_profile("物理")
+        assert type(p) is TextbookProfile
+        assert p.is_page_furniture("60 | 阅读 | 第三单元") is False   # 基类不猜
+```
+
+> 若 `MATH_TOC_NEGATIVE` 里的某条在重构**前**其实为 True（说明我举的例子不对），**以实现为准改用例并在报告里说明**——黄金回归的意义是「与重构前一致」，不是「与我举的例子一致」。落笔前请先用重构前的两条正则跑一遍这些用例确认预期。
+
+- [ ] **Step 2: 运行测试确认失败**
+
+```bash
+cd tools/data-refinery && python -m pytest tests/test_textbook_profile.py -v
+```
+
+Expected: FAIL —— `ModuleNotFoundError: No module named 'textbook_profile'`。
+
+- [ ] **Step 3: 实现 textbook_profile.py**
+
+创建 `tools/data-refinery/src/textbook_profile.py`：
+
+```python
+"""教材版式档案：把「学科相关」的版面识别规则收敛到一处。
+
+背景：MinerU 转出的 MD 里，目录行与页眉/页脚残留的形态**因学科而异**——数学是
+「3 第二十一章 一元二次方程」「第N章 X 页码」，语文是「1 沁园春·雪/毛泽东 3」
+「60 | 阅读 | 第三单元」。原先这两条规则分别硬编码在 card_splitter 与 toc_parse_cli 里，
+只能服务数学：实测 toc_parse_cli 对语文完全失效（只认出目录首页，丢掉第三单元与
+课外古诗词诵读）。
+
+本模块用「基类 + 每学科实现 + 注册表」承载，调用方按 subject 取用。
+数学实现**逐字保留**原正则，保证行为零变化。
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+
+class TextbookProfile:
+    """一个学科的版面规则。基类只给保守的通用规则，**不猜学科专属形态**。"""
+
+    name = "generic"
+
+    #: 通用目录行：行末为 1-3 位数字（学科可在此基础上叠加）
+    _TOC_TAIL_RE = re.compile(r"\d{1,3}\s*$")
+
+    def is_toc_line(self, line: str) -> bool:
+        """该行是否像目录条目（标题 + 行末页码）。"""
+        return bool(self._TOC_TAIL_RE.search(line.strip()))
+
+    def is_page_furniture(self, line: str) -> bool:
+        """该行是否为页眉/页脚残留。基类不猜学科形态，一律 False。"""
+        return False
+
+
+class MathTextbookProfile(TextbookProfile):
+    """数学教材。两条正则与重构前**逐字一致**（见 test_textbook_profile 黄金回归）。"""
+
+    name = "math"
+
+    _TOC_LINE_RE = re.compile(
+        r'^\s*(第[一二三四五六七八九十百零]+章.*\d+\s*$'      # 第N章 X 页码
+        r'|\d+\.\d+.*\d+\s*$'                                # N.M X 页码
+        r'|.*(小结|复习题|数学活动|阅读与思考).*\d+\s*$)'       # 非编号条目+页码
+    )
+    _PAGE_NUMBER_HEADER_RE = re.compile(r'^\d+\s+第[一二三四五六七八九十百零]+章\s+\S+.*$')
+
+    def is_toc_line(self, line: str) -> bool:
+        return bool(self._TOC_LINE_RE.search(line))
+
+    def is_page_furniture(self, line: str) -> bool:
+        return bool(self._PAGE_NUMBER_HEADER_RE.match(line.strip()))
+
+
+class ChineseTextbookProfile(TextbookProfile):
+    """语文教材。形态由九上目录页（page_004–007）与版面实测推导（spec §4.1/§4.2）。"""
+
+    name = "chinese"
+
+    #: 行末 1-3 位数字：课文行「1 沁园春·雪/毛泽东 3」、栏目行「课外古诗词诵读 159」
+    _TOC_TAIL_RE = re.compile(r"\d{1,3}\s*$")
+    #: 篇名/作者形式（「月夜忆舍弟/杜甫」）——「课外古诗词诵读」下的诗题行没有页码，
+    #: 只能靠这个特征计入，否则 page_007 的匹配率不足 30% 会被误判为非目录页
+    _TITLE_AUTHOR_RE = re.compile(r"[/／]")
+    #: 页码 + 栏目 + 单元 的页脚（实测全书仅 2 行，属兜底）
+    _PAGE_FURNITURE_RE = re.compile(r"^\s*\d+\s*[|｜]")
+
+    def is_toc_line(self, line: str) -> bool:
+        s = line.strip()
+        if not s:
+            return False
+        return bool(self._TOC_TAIL_RE.search(s) or self._TITLE_AUTHOR_RE.search(s))
+
+    def is_page_furniture(self, line: str) -> bool:
+        return bool(self._PAGE_FURNITURE_RE.match(line))
+
+
+_PROFILES: dict[str, type[TextbookProfile]] = {
+    "math": MathTextbookProfile,
+    "chinese": ChineseTextbookProfile,
+}
+_ALIASES: dict[str, str] = {
+    "数学": "math", "语文": "chinese", "英语": "generic",
+    "math": "math", "chinese": "chinese", "english": "generic",
+}
+
+
+def get_profile(subject: str | None) -> TextbookProfile:
+    """按学科取版式档案；未注册学科（含 None）回退保守的基类。"""
+    key = _ALIASES.get((subject or "").strip())
+    return (_PROFILES[key] if key else TextbookProfile)()
+
+
+def profile_for_md_path(md_path: Path) -> TextbookProfile:
+    """从 MD 路径推学科（路径首段即学科目录，如 `语文/初中/…`）。
+
+    **推不出学科时回退数学档**——这是刻意为之的兼容默认：重构不得改变既有调用方的行为，
+    而既有调用方（教材卡与试卷切题）服务的是数学。
+    """
+    for part in Path(md_path).parts:
+        key = _ALIASES.get(part.strip())
+        if key and key != "generic":
+            return _PROFILES[key]()
+    return MathTextbookProfile()
+```
+
+- [ ] **Step 4: 运行测试确认通过（含黄金回归）**
+
+```bash
+cd tools/data-refinery && python -m pytest tests/test_textbook_profile.py -v
+```
+
+Expected: PASS。**特别注意数学黄金回归必须全绿**——它是本次重构的安全绳。
+
+- [ ] **Step 5: 接进 toc_parse_cli**
+
+`toc_parse_cli.py` 的三处改动：
+
+1. 顶部 import：`from textbook_profile import get_profile`；
+2. `_is_toc_like_page(page_path: Path)` → `_is_toc_like_page(page_path: Path, profile)`，内部把 `_TOC_LINE_RE.search(l)` 换成 `profile.is_toc_line(l)`；
+3. `_find_toc_pages(book_dir: Path, profile, max_pages: int = 10)` 同上透传（含递归调用处）；`main()` 里按 `args.subject` 取 `profile = get_profile(args.subject)` 并传入。
+
+> 数学路径取到 `MathTextbookProfile`，两条判定与改前一致；语文路径取到 `ChineseTextbookProfile`。
+
+- [ ] **Step 6: 接进 card_splitter**
+
+`card_splitter.py`：
+
+1. 顶部 import：`from textbook_profile import TextbookProfile, profile_for_md_path`；
+2. `_is_page_number_header(text: str, profile: TextbookProfile) -> bool` → `return profile.is_page_furniture(text)`；
+3. `_make_bundles(text, images, profile)` 透传；`split_page(md_path, text, images)` 内部改为
+   `profile = profile_for_md_path(md_path)` 后传入；
+4. 删除文件内的 `_PAGE_NUMBER_HEADER_RE` 常量（避免留下两处真相），其注释里那句「页码标注：如 "3 第二十一章 一元二次方程"」迁到 `MathTextbookProfile` 的文档串。
+
+- [ ] **Step 7: 跑全量 Python 测试（数学行为回归的最终证据）**
+
+```bash
+cd tools/data-refinery && python -m pytest -q
+```
+
+Expected: 全绿。**若有既有用例失败，先判断是「签名变化需同步调用」还是「行为被改坏」**——后者必须修实现，不许改断言。
+
+- [ ] **Step 8: 真数据端到端验语文目录（本任务的验收核心）**
+
+```bash
+cd tools/data-refinery && python src/toc_parse_cli.py --source smartedu --subject 语文 --publisher 统编版 --grade 九上
+python3 -c "
+import json,glob
+f=glob.glob('output/toc/语文/初中/统编版/九年级/上册/*.json')[0]
+d=json.load(open(f))
+print('chapters:', len(d.get('chapters',[])))
+for ch in d.get('chapters',[]): print(' ', ch.get('label'))
+"
+```
+
+Expected: 解析出语文的**多个单元**（至少含第三单元「古诗文」与第六单元），而不是像重构前只出 page_004 一个单元。把输出贴进报告。
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add tools/data-refinery/src/textbook_profile.py tools/data-refinery/tests/test_textbook_profile.py tools/data-refinery/src/toc_parse_cli.py tools/data-refinery/src/card_splitter.py tools/data-refinery/tests
+git commit -m "refactor(data-refinery): 版面规则学科化（基类 + 数学/语文实现 + 数学黄金回归）"
 ```
 
 ---
