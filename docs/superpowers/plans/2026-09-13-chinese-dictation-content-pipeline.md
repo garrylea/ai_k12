@@ -701,7 +701,9 @@ def slice_body(full_text: str, start_anchor: str, end_anchor: str) -> str | None
     if start < 0:
         return None
     tail = full_text[start:]
-    # 末句锚点只在首句锚点之后搜索：避免正文内重复出现的句子（如标题重复）把区间截断
+    # tail 已保证不回退到首句之前；这里 offset 的**真正用途**是：当末句锚点恰好嵌在首句
+    # 锚点内部时（嵌套），带 offset 才会判为「找不到」→ 返回 None（宁可送人工，也不切出
+    # 一个被截断的正文）。不要因为「tail 已经限制了范围」就把 offset 删掉。
     end = tail.find(end_anchor, len(start_anchor))
     if end < 0:
         return None
@@ -716,8 +718,10 @@ _INLINE_MARKER_RE = re.compile(r"\$\^\{[^}]*\}\$")
 def normalize_body(raw: str) -> str:
     """规范化正文：**先删行内注释角标，再收空白**；**保留全部标点与全角符号**。
 
-    顺序不可颠倒：实测所有「汉字-空格-汉字」都由被删角标留下（`春和景 $^{⑰}$ 明`），
-    若先收空白会把角标与正文粘在一起、更难清理。
+    实测量到：「汉字-空格-汉字」都由被删角标留下（`春和景 $^{⑰}$ 明`）。
+    就当前角标正则（不含空白）而言，两条操作**其实可交换**——实测 170 页里没有一页
+    结果不同。保持「先删角标」次序是因为：一旦将来角标正则允许内部空白，这个次序
+    就成为必需（先收空白会把角标与正文粘连）。**不要**据此认为次序无关紧要而调换。
     标点只在判题时被忽略（normalizeChineseAnswer），存储保留原文便于展示。
     """
     return _WS_RE.sub("", _INLINE_MARKER_RE.sub("", raw))
