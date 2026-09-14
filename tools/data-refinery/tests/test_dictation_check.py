@@ -34,6 +34,11 @@ class TestErrors:
         r = check_body(WEN + "60 | 阅读 | 第三单元", "岳阳楼记", "wen", set())
         assert any("竖线" in e for e in r.errors)
 
+    def test_markdown_image_residue_is_error(self):
+        # 实测新增：page_061 的图片行会落进正文区间（版面元素混入）
+        r = check_body(WEN + "![](images/a9ee.jpg)", "岳阳楼记", "wen", set())
+        assert any("图片" in e for e in r.errors)
+
 
 class TestReviewFlags:
     def test_rare_char_flagged_for_review(self):

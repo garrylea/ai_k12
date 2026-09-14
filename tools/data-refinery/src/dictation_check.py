@@ -72,6 +72,10 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
     if "|" in body or "｜" in body:
         r.errors.append("正文含竖线 |／｜（页码页脚残留）")
 
+    # 图片语法：正文里绝不该有 markdown 图片（实测 page_061 的图片行会落进正文区间）
+    if "![" in body or "](" in body:
+        r.errors.append("正文含 markdown 图片语法（版面元素混入）")
+
     # 篇名检查只看正文**开头**，且**只标复核、不判错**（两种真实情形都必须能入库）：
     # ①《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」）——substring 会误杀正确正文；
     # ②《十五从军征》的首行**就是篇名本身**（该诗题目为后人所加）——「开头出现篇名」对它是正常现象。

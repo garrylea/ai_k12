@@ -93,7 +93,8 @@ class TestCutPageAnnotations:
 
     PAGE = (
         "环滁 $^{②}$ 皆山也。其西南诸峰，林壑尤美。\n"
-        "作亭者谁？山之僧智仙也。\n"
+        # 正文行都带角标（实测如此）；若这里不带，切点前移会把紧邻注释的正文行一并吃掉
+        "作亭者谁 $^{④}$ ？山之僧智仙也 $^{⑤}$ 。\n"
         "⑦〔意〕意趣，情趣。\n"
         "⑧〔山水之乐，得之心而寓之酒也〕欣赏山水的乐趣，领会于心间，寄托在酒中。"
     )
@@ -113,8 +114,37 @@ class TestCutPageAnnotations:
 
     def test_figure_caption_with_bracket_is_cut(self):
         # 实测 page_061 的图注「《醉翁亭图》（局部）〔清〕顾符稹作」也带 〔 〕，属页尾版面
-        page = "若夫日出而林霏开。\n《醉翁亭图》（局部）〔清〕顾符稹作"
-        assert cut_page_annotations(page).strip() == "若夫日出而林霏开。"
+        # （正文行带角标，否则会被「切点前移」一并吃掉）
+        page = "若夫日出而林霏开 $^{①}$ 。\n《醉翁亭图》（局部）〔清〕顾符稹作"
+        assert cut_page_annotations(page).strip() == "若夫日出而林霏开 $^{①}$ 。"
+
+    def test_cut_point_moves_back_over_markerless_annotation_continuation(self):
+        # 实测 page_060 的真实形状：注释 ⑤ 的**起始行在 OCR 里丢了**，只剩续行；
+        # 续行不以圈号开头、不含 〔〕，必须靠「向前扩到连续无角标行」吃掉它。
+        page = (
+            "环滁 $^{②}$ 皆山也。望之蔚然而深秀者，琅琊也 $^{③}$ 。\n"   # 正文（带角标）
+            "起）像鸟张开翅膀一样，高踞于泉水之上。临，居高面下。\n"          # ⑤ 的续行（无角标）
+            "⑥〔太守自谓也〕太守用自己的别号（醉翁）来命名。\n"                # ⑥ 起始行
+            "⑦〔意〕意趣，情趣。"
+        )
+        out = cut_page_annotations(page)
+        assert "环滁" in out and "望之蔚然" in out
+        assert "像鸟张开翅膀" not in out, out
+        assert "⑥" not in out and "〔" not in out
+
+    def test_image_line_before_annotations_is_cut(self):
+        # 实测 page_061：正文两行 → 图片行 → 图注（含〔清〕）→ 注释续行 → ⑩
+        page = (
+            "若夫日出而林霏开 $^{①}$ ，云归而岩穴暝 $^{②}$ 。\n"
+            "至于负者 $^{⑦}$ 歌于途，行者休于树 $^{⑧}$ 。\n"
+            "![](images/a9ee.jpg)\n"
+            "《醉翁亭图》（局部）〔清〕顾符稹作\n"
+            "子由大人领着走，这里指老老少少的行人。\n"
+            "⑩〔洌（liè）〕清。"
+        )
+        out = cut_page_annotations(page)
+        assert "至于负者" in out
+        assert "![" not in out and "顾符稹" not in out and "子由大人" not in out
 
     def test_end_to_end_removes_interleaved_annotations(self):
         # 两页拼接：每页都有注释尾巴 → 切片结果不得含 〔〕

@@ -63,14 +63,28 @@ _PAGE_ANNOTATION_RE = re.compile(r"^\s*(?:[①-⑳㉑-㉟㊱-㊿]|〔)|〔[^〕]
 
 
 def cut_page_annotations(page_text: str) -> str:
-    """把**单页**文本从第一行注释式内容起截断（注释都在该页页尾）。
+    """把**单页**文本从注释区起点起截断（注释在页尾），并**前移切点**吃掉注释续行。
 
-    逐页调用后再 `join_pages`。若某页整页都是注释，截断后为空——无妨，正文不在该页。
-    若正文里恰好出现 〔（罕见，〔 多用于注释与图注），会截早、末句锚点找不到 →
-    `slice_body` 返回 None → 该篇进人工复核（fail closed，安全方向）。
+    为什么需要前移：实测 page_060 的注释 ⑤ 的**起始行在 OCR 里丢了**，只剩续行
+    「起）像鸟张开翅膀一样…」——它不以圈号开头、也不含 〔〕，按行首判据抓不到，
+    会留在正文里（人工过目清单只看首尾 20 字，也看不出来 → 静默污染正文）。
+
+    所以切点定为：先找第一个注释式行（行首圈号或含 〔…〕），再**向前扩**到连续
+    「不含 `$^{…}$` 角标」的行为止。实测三页均正确（page_060 切在注释续行前、
+    page_061/062 连同图片行与习题块一起切掉），且正文段落都带角标故不受影响。
+
+    **切过头的代价是安全的**：若某篇正文末尾恰有无角标的段落紧邻注释，会被一并切掉 →
+    末句锚点找不到 → `slice_body` 返回 None → 该篇进人工复核（可见，不静默）。若切得不够，
+    残留会污染正文——故本函数宁可切早。
     """
     lines = page_text.splitlines()
+    cut_at: int | None = None
     for i, line in enumerate(lines):
         if _PAGE_ANNOTATION_RE.search(line):
-            return "\n".join(lines[:i])
-    return page_text
+            cut_at = i
+            break
+    if cut_at is None:
+        return page_text
+    while cut_at > 0 and not _INLINE_MARKER_RE.search(lines[cut_at - 1]):
+        cut_at -= 1
+    return "\n".join(lines[:cut_at])
