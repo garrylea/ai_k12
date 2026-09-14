@@ -1744,6 +1744,13 @@ git commit -m "fix(data-refinery): 语文默写管线适配九下版式差异"
 - Modify: `docs/ai-core-changelog.md`
 - Modify: `docs/data-refinery-管线总结与后续.md`（新增本管线小节）
 - Modify: `docs/superpowers/specs/2026-09-13-chinese-dictation-content-pipeline-design.md`（末尾加「实现结果」小节，记录实际篇目数、未处理项、踩到的坑）
+- Modify: `docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml`（**Task 1 评审发现**：两份文档仍写 passages 端点「只出 verified=1 的已校验篇目」，而实际已收紧为 `verified AND memorize_required`。仓库铁律要求这两份**互为对照、同时更新**）
+- Modify: `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md` §4.2（其 DDL 块早于 `memorize_required`，需补上该列并与 §4.3 口径一致）
+- Modify: `apps/server/src/modules/training/training.service.ts:95`（注释仍写「只出 verified=1」）与 `apps/server/src/database/repositories/dictation-passages.repo.ts:46`（类注释同上）——两处 Task 1 评审记下的陈旧注释
+
+- [ ] **Step 0: 清掉 Task 1 遗留的两处陈旧注释**
+
+`training.service.ts` 的 `listDictationPassages` 注释与 `dictation-passages.repo.ts` 的类注释都还写着「只出 verified=1 / 只向抽题池暴露 verified=1」，现已多加 `memorize_required` 门禁。改准（并顺带在仓储 `upsert` 的冲突分支加一行注释说明：**此处按入参覆盖 `memorize_required`，而管线的 loader 有意不在冲突分支动它**——否则将来有人「统一」两处写法，重跑管线就会把用户标好的必背刷回 0）。
 
 - [ ] **Step 1: 数学管线回归**
 
@@ -1754,9 +1761,11 @@ cd apps/server && npm test && npm run build            # TS 全量绿（抽题�
 
 再手工确认数学专项抽题仍可用：`GET /api/training/targeted/start` 用数学 KP 抽一次题（或跑既有数学相关用例——门禁只加在 `dictation_passages` 的三条查询上，数学走的是 `questions.findRandomByKpAndType`，理论上无交集，但要有证据）。
 
-- [ ] **Step 2: 更新 changelog**
+- [ ] **Step 2: 更新 changelog + 同步两份 API 文档**
 
 在 `docs/ai-core-changelog.md` 顶部加一条 `## 2026-09-13 新增（语文默写内容管线：九年级教材 → 题库）`，写清：新增 CLI 与模块、`memorize_required` 字段与抽题池收紧、实际入库篇目数、自检与人工过目的结论、以及「必背标定与注释抽取留给后续」。
+
+再同步**互为对照的两份 API 文档**（仓库铁律，任何一方变更另一方必须同时改）：`docs/API接口与数据流设计文档.md` §4.18 与 `docs/api/openapi.yaml` 里 `GET /api/training/dictation/passages` 的说明——把「只出 `verified=1` 的已校验篇目」改为「只出 `verified=1` **且** `memorize_required=1` 的篇目」；并确认 `POST /dictation/start` 的三条抽题路径描述也提到该门禁。改完用 grep 交叉核对两份文档的端点路径与措辞一致。最后把 `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md` §4.2 的建表 DDL 补上 `memorize_required` 列（该块早于本列，现与实现不符）。
 
 - [ ] **Step 3: 更新管线总结文档**
 
