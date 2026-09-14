@@ -320,7 +320,11 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 
 - [ ] **Step 4: 记录确认结果**
 
-把用户确认后的最终候选清单写入 `output/dictation/语文/初中/统编版/九年级/上册/candidates.json`（数组，每项 `{label, printed_page, unit_label, unit_index}`），作为 Task 4 的输入。该文件是人工确认的产物，不提交进 git（`output/` 已在 gitignore 内）。
+把用户确认后的最终候选清单写入 `output/dictation/语文/上册/candidates.json`（**路径须与 Task 7 的默认值一致**：`out_root / SUBJECT_DIR / args.term / "candidates.json"`），数组，每项 `{label, printed_page, unit_label, unit_index}`，作为 Task 4/7 的输入。`output/` 在 gitignore 内，故**同时把确认后的范围记进 spec**（§4 第 3 步闸门注记）。
+
+**九上已确认范围（2026-09-13）**：24 篇（第三单元 10 + 第六单元 13 + 破例收录《沁园春·雪》1）。两条约定：
+1. **容器标题不收**——「14 诗词三首」「27 诗词曲五首」「课外古诗词诵读」本身不是篇目，只收其下单篇；
+2. TOC 合并已把父栏目页码继承给子条目，故单篇都有 `printed_page`。
 
 ---
 
