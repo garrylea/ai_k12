@@ -787,6 +787,13 @@ class TestErrors:
         r = check_body("岳阳楼记" + WEN, "岳阳楼记", "wen", set())
         assert any("篇名" in e for e in r.errors)
 
+    def test_title_mid_body_is_not_error(self):
+        # 实测回归：《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」），
+        # 只做 substring 判断会误杀一篇完全正确的正文。只有正文**开头**出现篇名才算切多了。
+        body = "崇祯五年十二月，余住西湖。大雪三日，独往湖心亭看雪。莫说相公痴，更有痴似相公者。"
+        r = check_body(body, "湖心亭看雪", "wen", set())
+        assert r.errors == [], r.errors
+
     def test_chrome_residue_is_error(self):
         r = check_body(WEN + "人民教育出版社", "岳阳楼记", "wen", {"人民教育出版社"})
         assert any("页眉" in e for e in r.errors)
@@ -899,8 +906,12 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
     if "|" in body or "｜" in body:
         r.errors.append("正文含竖线 |／｜（页码页脚残留）")
 
-    if work_title and work_title in body:
-        r.errors.append(f"正文含篇名「{work_title}」，疑似把标题切进了正文")
+    # 篇名检查只看正文**开头**：篇名出现在前 len(篇名)+6 字内，才说明「把标题切进了正文」。
+    # 不能只做 substring 判断——实测《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」），
+    # substring 会把一篇完全正确的正文误杀、让它永远进不了题库。+6 是给前导的
+    # 「N 」编号/书名号/换行留余量。
+    if work_title and work_title in body[: len(work_title) + 6]:
+        r.errors.append(f"正文开头出现篇名「{work_title}」，疑似把标题切进了正文")
 
     for line in chrome:
         if line and line in body:
