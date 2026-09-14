@@ -694,6 +694,34 @@ class TestCutPageAnnotations:
         nb = normalize_body(body)
         assert "〔" not in nb and "⑦" not in nb and "⑨" not in nb
         assert nb == "环滁皆山也。太守谓谁？庐陵欧阳修也。"
+
+    def test_cut_point_moves_back_over_markerless_annotation_continuation(self):
+        # 实测 page_060 的真实形状：注释 ⑤ 的**起始行在 OCR 里丢了**，只剩续行；
+        # 续行不以圈号开头、不含 〔〕，必须靠「向前扩到连续无角标行」吃掉它。
+        page = (
+            "环滁 $^{②}$ 皆山也。望之蔚然而深秀者，琅琊也 $^{③}$ 。\n"   # 正文（带角标）
+            "起）像鸟张开翅膀一样，高踞于泉水之上。临，居高面下。\n"          # ⑤ 的续行（无角标）
+            "⑥〔太守自谓也〕太守用自己的别号（醉翁）来命名。\n"                # ⑥ 起始行
+            "⑦〔意〕意趣，情趣。"
+        )
+        out = cut_page_annotations(page)
+        assert "环滁" in out and "望之蔚然" in out
+        assert "像鸟张开翅膀" not in out, out
+        assert "⑥" not in out and "〔" not in out
+
+    def test_image_line_before_annotations_is_cut(self):
+        # 实测 page_061：正文两行 → 图片行 → 图注（含〔清〕）→ 注释续行 → ⑩
+        page = (
+            "若夫日出而林霏开 $^{①}$ ，云归而岩穴暝 $^{②}$ 。\n"
+            "至于负者 $^{⑦}$ 歌于途，行者休于树 $^{⑧}$ 。\n"
+            "![](images/a9ee.jpg)\n"
+            "《醉翁亭图》（局部）〔清〕顾符稹作\n"
+            "子由大人领着走，这里指老老少少的行人。\n"
+            "⑩〔洌（liè）〕清。"
+        )
+        out = cut_page_annotations(page)
+        assert "至于负者" in out
+        assert "![" not in out and "顾符稹" not in out and "子由大人" not in out
 ```
 
 > 注意：切片结果的「去尾部注释」是靠**末句锚点**（正文内的最后一句）实现的，不是靠找「注释」二字——这正是设计里修正过的点。
@@ -736,19 +764,36 @@ def join_pages(texts: list[str]) -> str:
 #: （实测醉翁亭记 775 字含 〔〕与圈号；切后 584 字干净；对本来干净的篇目零影响）。
 _PAGE_ANNOTATION_RE = re.compile(r"^\s*(?:[①-⑳㉑-㉟㊱-㊿]|〔)|〔[^〕]*〕")
 
+#: 正文行都带行内角标（`$^{…}$`）；注释续行/图片行/习题行都不带。用于把切点**前移**。
+_INLINE_MARKER_RE = re.compile(r"\$\^\{[^}]*\}\$")
+
 
 def cut_page_annotations(page_text: str) -> str:
-    """把**单页**文本从第一行注释式内容起截断（注释都在该页页尾）。
+    """把**单页**文本从注释区起点起截断（注释在页尾），并**前移切点**吃掉注释续行。
 
-    逐页调用后再 `join_pages`。若某页整页都是注释，截断后为空——无妨，正文不在该页。
-    若正文里恰好出现 〔（罕见，〔 多用于注释与图注），会截早、末句锚点找不到 →
-    `slice_body` 返回 None → 该篇进人工复核（fail closed，安全方向）。
+    为什么需要前移：实测 page_060 的注释 ⑤ 的**起始行在 OCR 里丢了**，只剩续行
+    「起）像鸟张开翅膀一样…」——它不以圈号开头、也不含 〔〕，按行首判据抓不到，
+    会留在正文里（人工过目清单只看首尾 20 字，也看不出来 → 静默污染正文）。
+
+    所以切点定为：先找第一个注释式行（行首圈号或含 〔…〕），再**向前扩**到连续
+    「不含 `$^{…}$` 角标」的行为止。实测三页均正确（page_060 切在注释续行前、
+    page_061/062 连同图片行与习题块一起切掉），且正文段落都带角标故不受影响。
+
+    **切过头的代价是安全的**：若某篇正文末尾恰有无角标的段落紧邻注释，会被一并切掉 →
+    末句锚点找不到 → `slice_body` 返回 None → 该篇进人工复核（可见，不静默）。若切得不够，
+    残留会污染正文——故本函数宁可切早。
     """
     lines = page_text.splitlines()
+    cut_at: int | None = None
     for i, line in enumerate(lines):
         if _PAGE_ANNOTATION_RE.search(line):
-            return "\n".join(lines[:i])
-    return page_text
+            cut_at = i
+            break
+    if cut_at is None:
+        return page_text
+    while cut_at > 0 and not _INLINE_MARKER_RE.search(lines[cut_at - 1]):
+        cut_at -= 1
+    return "\n".join(lines[:cut_at])
 
 
 def slice_body(full_text: str, start_anchor: str, end_anchor: str) -> str | None:
@@ -880,6 +925,11 @@ class TestErrors:
         r = check_body(WEN + "60 | 阅读 | 第三单元", "岳阳楼记", "wen", set())
         assert any("竖线" in e for e in r.errors)
 
+    def test_markdown_image_residue_is_error(self):
+        # 实测新增：page_061 的图片行会落进正文区间（版面元素混入）
+        r = check_body(WEN + "![](images/a9ee.jpg)", "岳阳楼记", "wen", set())
+        assert any("图片" in e for e in r.errors)
+
 
 class TestReviewFlags:
     def test_rare_char_flagged_for_review(self):
@@ -977,6 +1027,9 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
         r.errors.append("正文含 $（行内注释角标未删净）")
     if "|" in body or "｜" in body:
         r.errors.append("正文含竖线 |／｜（页码页脚残留）")
+    # 图片语法：正文里绝不该有 markdown 图片（实测 page_061 的图片行会落进正文区间）
+    if "![" in body or "](" in body:
+        r.errors.append("正文含 markdown 图片语法（版面元素混入）")
 
     # 篇名检查只看正文**开头**，且**只标复核、不判错**（两种真实情形都必须能入库）：
     # ①《湖心亭看雪》正文里本来就含篇名（末段「独往湖心亭看雪」）——substring 会误杀正确正文；
