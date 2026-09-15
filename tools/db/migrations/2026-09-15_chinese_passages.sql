@@ -1,8 +1,11 @@
 -- 2026-09-15 语文古诗文专项独立化：dictation_passages → chinese_passages，摘除 question_id。
 --
 -- 用法：mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-15_chinese_passages.sql
---   （本脚本全程依赖 DATABASE()，**必须先选库**；不选库会静默跳过 1–4 步、到第 5 步才报
---     No database selected，错误信息具有误导性。）
+--   **不要加 --force / -f**：下面第 0 步的两道中止闸门靠「语句报错让 mysql 停下」实现，
+--   --force 会忽略错误继续往下执行，等于把闸门拆掉（实测：加 --force 后闸门报 1146，
+--   脚本仍继续执行到删除步骤）。不加 --force 时首错即停、退出码 1。
+--   **必须先选库**（脚本全程依赖 DATABASE()）：不选库时闸门 0a 静默通过、
+--   0b 在 DELETE 之前就报 ERROR 1046 停下（行为是安全的，只是错误信息不够直白）。
 --
 -- 背景：默写专项当初「贴着 questions 表」建（每篇挂一行 questions，错题本/隐藏题/提示缓存
 -- 都挂 question_id）。2026-09-15 用户裁决：古诗文专项是**独立子系统**——不挂 questions、
@@ -135,7 +138,7 @@ SET @has_fk := (
     AND CONSTRAINT_NAME = 'fk_dp_question'
 );
 SET @ddl := IF(
-  @has_fk = 1,
+  @has_fk > 0,
   'ALTER TABLE chinese_passages DROP FOREIGN KEY fk_dp_question',
   'SELECT 1'
 );
@@ -147,8 +150,11 @@ SET @has_uniq_qid := (
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chinese_passages'
     AND INDEX_NAME = 'uniq_dp_question'
 );
+-- ⚠️ 判据用 > 0 而不是 = 1：information_schema.STATISTICS 对索引是**每列一行**，
+-- 复合索引会返回多行（uniq_dp_work 2 行、idx_dp_filter 3 行），写 = 1 会静默跳过。
+-- 本仓 2026-09-13_ensure_uniq_q_content_hash.sql 已记过同一个坑。
 SET @ddl := IF(
-  @has_uniq_qid = 1,
+  @has_uniq_qid > 0,
   'ALTER TABLE chinese_passages DROP INDEX uniq_dp_question',
   'SELECT 1'
 );
@@ -161,7 +167,7 @@ SET @has_col_qid := (
     AND COLUMN_NAME = 'question_id'
 );
 SET @ddl := IF(
-  @has_col_qid = 1,
+  @has_col_qid > 0,
   'ALTER TABLE chinese_passages DROP COLUMN question_id',
   'SELECT 1'
 );
@@ -173,8 +179,9 @@ SET @has_idx_work := (
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chinese_passages'
     AND INDEX_NAME = 'uniq_dp_work'
 );
+-- ⚠️ > 0，不是 = 1：uniq_dp_work 是复合索引，在 STATISTICS 里有 2 行（work_title, semester）。
 SET @ddl := IF(
-  @has_idx_work = 1,
+  @has_idx_work > 0,
   'ALTER TABLE chinese_passages RENAME INDEX uniq_dp_work TO uniq_chinese_passages_work',
   'SELECT 1'
 );
@@ -185,8 +192,9 @@ SET @has_idx_filter := (
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chinese_passages'
     AND INDEX_NAME = 'idx_dp_filter'
 );
+-- ⚠️ > 0，不是 = 1：idx_dp_filter 有 3 列（grade_band, semester, sort_order）→ 3 行。
 SET @ddl := IF(
-  @has_idx_filter = 1,
+  @has_idx_filter > 0,
   'ALTER TABLE chinese_passages RENAME INDEX idx_dp_filter TO idx_chinese_passages_filter',
   'SELECT 1'
 );
