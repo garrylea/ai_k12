@@ -23,6 +23,10 @@
 
 - `memorize_required` 只在 INSERT 时写死 `0`，**`ON DUPLICATE KEY UPDATE` 里绝不出现它**：
   否则管线重跑会把用户已标好的「必背」刷回 0。
+- **`is_active` 同理，整条语句从不提及它**：新篇目靠 schema 默认值 `1` 落库，既有篇目则
+  **保持人工设定的停用状态**——重跑管线不会把被停用的篇目悄悄复活。
+  （与 `memorize_required` 是同一条原则：**管线不覆盖人工标定**。旧实现曾借 questions 的
+  UPDATE 顺带置 `is_active=1`，独立化后那一路径整条消失，此处行为有意保持一致。）
 - `verified` 由 JSONL 决定（自检结果），不写死。
 
 ## 与 TS 种子脚本的关系

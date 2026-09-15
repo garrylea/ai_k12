@@ -130,6 +130,16 @@ class TestIdempotency:
         assert "memorize_required=VALUES" not in upsert.replace(" ", "")
         assert "ON DUPLICATE KEY UPDATE" in upsert
 
+    def test_is_active_never_touched(self):
+        # 与 memorize_required 同一条原则：管线不覆盖人工标定。
+        # 整条语句不得提及 is_active —— 新篇目靠 schema 默认值 1，
+        # 既有篇目保持人工设定的停用状态（重跑不会把停用篇目悄悄复活）。
+        scripted = [("FROM chinese_passages", [(5036, "PIPELINE")])]
+        loader = _loader(scripted)
+        loader.load_passages([ITEM])
+        upsert = [s for s in _sqls(loader) if "INSERT INTO chinese_passages" in s][0]
+        assert "is_active" not in upsert
+
     def test_verified_is_written_from_item(self):
         scripted = [("FROM chinese_passages", [])]
         loader = _loader(scripted)
