@@ -965,11 +965,20 @@ import { ChinesePassagesRepository, buildDictationPrompt } from '../../database/
 3. 错误文案：`throw new NotFoundException(\`默写篇目不存在：${input.questionId}\`);` → `` `默写篇目不存在：${input.passageId}` ``
 4. 方法头注释里那句「判题与错题本已由 judgeDictation 落定，这里重复调 judgeDictation 会二次写 main_error_books」
    → 「独立化后判题**不写任何学生状态**，本方法同样只读篇目、只算差异」
+5. **`catch` 块里的日志也要改**：`this.logger.warn(\`... failed (questionId=${input.questionId}): ${err}\`)`
+   里的 `questionId` → `passageId`（含日志文案前缀）。
+   > ⚠️ 本步初版写的「`catch` 块一字不动」是**错的** —— 不改必然 TS2339，直接破坏本任务的验收标准。
+   > 兜底语义（`return { feedback: null }`）保持不动，只改名。
+
+> **验收标准的修正**：本任务结束时 `training.service.ts` 仍会有 **3 条** tsc 错误，全部由**尚未改名的
+> `dictation.dto.ts`**（Task 5 整文件重写）引起 —— service 现在返回 `passageId`，而 DTO 仍声明
+> `questionId`。在「只动 2 个文件」的约束下这 3 条不可能消除，属**跨任务依赖**，不是本任务失败。
+> 真正该消失的是初版那 6 条（import 旧路径 + `studentId`/`questionId`/`errorBookId`）。
 
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.dictation.test.ts`
-Expected: PASS（11 个）
+Expected: PASS（**12 个** —— `renderBodyDiff` 1 + `listDictationPassages` 1 + `startDictation` 2 + `judgeDictation` 4 + `generateDictationFeedback` 4；初版写「11 个」是数错了）
 
 - [ ] **Step 6: Commit**
 
