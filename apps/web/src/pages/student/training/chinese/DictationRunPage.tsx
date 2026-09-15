@@ -76,7 +76,7 @@ export default function DictationRunPage() {
   const handleSubmit = async () => {
     if (!current) return;
     const token = ++feedbackToken.current;
-    const payload = { questionId: current.questionId, ...answer };
+    const payload = { passageId: current.passageId, ...answer };
     setSubmitting(true);
     setError(null);
     setFeedback(null);

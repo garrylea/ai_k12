@@ -43,9 +43,9 @@ export default function DictationConfigPage() {
     [passages, range],
   );
 
-  const togglePick = (questionId: number) => {
+  const togglePick = (passageId: number) => {
     setPicked((prev) =>
-      prev.includes(questionId) ? prev.filter((x) => x !== questionId) : [...prev, questionId],
+      prev.includes(passageId) ? prev.filter((x) => x !== passageId) : [...prev, passageId],
     );
   };
 
@@ -56,7 +56,7 @@ export default function DictationConfigPage() {
       const usePicked = picked.length > 0;
       const res = await startDictation({
         semester: usePicked ? null : range,
-        questionIds: usePicked ? picked : null,
+        passageIds: usePicked ? picked : null,
         count,
       });
       if (res.questions.length === 0) {
@@ -149,12 +149,12 @@ export default function DictationConfigPage() {
               ) : (
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {visible.map((p) => (
-                    <li key={p.questionId}>
+                    <li key={p.passageId}>
                       <label className="flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer hover:bg-[var(--bg-subtle)]">
                         <input
                           type="checkbox"
-                          checked={picked.includes(p.questionId)}
-                          onChange={() => togglePick(p.questionId)}
+                          checked={picked.includes(p.passageId)}
+                          onChange={() => togglePick(p.passageId)}
                           className="w-4 h-4"
                         />
                         <span className="text-sm text-[var(--text-primary)]">

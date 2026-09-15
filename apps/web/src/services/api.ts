@@ -981,13 +981,13 @@ export function unmarkAllTrainingHidden(): Promise<void> {
 // --- Training · 语文古诗文默写（2026-09-13） ---
 
 export interface DictationPassageItem {
-  questionId: number;
+  passageId: number;
   workTitle: string;
   semester: string;
 }
 
 export interface DictationQuestionItem {
-  questionId: number;
+  passageId: number;
   prompt: string;
   workTitle: string;
   semester: string;
@@ -1000,7 +1000,7 @@ export type DictationDiffOp =
   | { type: 'extra'; text: string };
 
 export interface DictationJudgeResult {
-  questionId: number;
+  passageId: number;
   isCorrect: boolean;
   fields: { author: { match: boolean }; dynasty: { match: boolean }; body: { match: boolean } };
   bodyDiff: DictationDiffOp[];
@@ -1009,7 +1009,6 @@ export interface DictationJudgeResult {
   feedback: string | null;
   /** true=判错且错因待补（应另调 fetchDictationFeedback）；答对恒 false。 */
   feedbackPending: boolean;
-  errorBookId?: number;
 }
 
 export function fetchDictationPassages(): Promise<{ passages: DictationPassageItem[] }> {
@@ -1018,7 +1017,7 @@ export function fetchDictationPassages(): Promise<{ passages: DictationPassageIt
 
 export function startDictation(payload: {
   semester: string | null;
-  questionIds: number[] | null;
+  passageIds: number[] | null;
   count: number;
 }): Promise<{ questions: DictationQuestionItem[] }> {
   return fetchApi<{ questions: DictationQuestionItem[] }>('/training/dictation/start', {
@@ -1028,7 +1027,7 @@ export function startDictation(payload: {
 }
 
 export function judgeDictation(payload: {
-  questionId: number;
+  passageId: number;
   author: string;
   dynasty: string;
   body: string;
@@ -1041,7 +1040,7 @@ export function judgeDictation(payload: {
 
 /** 错因文案（LLM，可选）：与判题解耦，判错后单独取；失败回 feedback=null。 */
 export function fetchDictationFeedback(payload: {
-  questionId: number;
+  passageId: number;
   author: string;
   dynasty: string;
   body: string;
