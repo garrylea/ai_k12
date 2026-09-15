@@ -53,6 +53,17 @@ describe('TrainingController dictation 端点', () => {
     });
   });
 
+  it('POST dictation/start：合法**非空** passageIds 原样透传（指定篇目路径）', async () => {
+    // 上面那条只覆盖 passageIds=null（随机抽）。指定篇目是「展开清单勾选」的主路径，
+    // 而校验分支那条用的是 [0]（走 400）。若有人把转发写成恒 null 或过滤掉元素，
+    // 只有这条会红。
+    const { controller, service } = makeController();
+    await controller.startDictation({ semester: null, passageIds: [3, 5], count: 5 });
+    expect(service.startDictation).toHaveBeenCalledWith({
+      semester: null, passageIds: [3, 5], count: 5,
+    });
+  });
+
   it('POST dictation/judge：passageId 非正整数 → 400', async () => {
     const { controller } = makeController();
     await expect(
