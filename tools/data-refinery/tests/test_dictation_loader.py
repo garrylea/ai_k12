@@ -1,10 +1,11 @@
 """dictation_loader 单测：用假连接，不碰真库。
 
-核心是钉住**幂等策略**：以 `dictation_passages` 的业务键 `(work_title, semester)` 为身份，
-命中既有篇目就**复用其 question_id 并原地 UPDATE**（不插重复行）。
-另钉两条容易被后续改动破坏的约定：
+核心是钉住**幂等策略**：以 `chinese_passages` 的业务键 `(work_title, semester)` 为身份，
+命中既有篇目就**原地 UPDATE**（不插重复行）。
+另钉三条容易被后续改动破坏的约定：
+- **不写 `questions` 表**（2026-09-15 独立化：古诗文专项不挂 questions）；
 - `memorize_required` **不得**被 upsert 覆盖（否则重跑会把用户标好的必背刷回 0）；
-- 题面只放篇名（`请默写《X》`），作者/朝代/正文放 `answer`。
+- `verified` 由 JSONL 决定，不写死。
 """
 
 import json
@@ -78,47 +79,43 @@ def _sqls(loader):
     return [s for s, _ in loader._conn.cur.executed]
 
 
-class TestIdempotency:
-    def test_existing_passage_reuses_question_and_updates_in_place(self):
-        scripted = [
-            ("FROM subjects", [(2,)]),
-            ("FROM dictation_passages dp", [(5036, "PIPELINE")]),
-        ]
-        loader = _loader(scripted)
-        stats = loader.load_passages([ITEM])
+class TestNoQuestionsWrites:
+    """独立化的核心：整条链路不得再碰 questions。"""
 
-        sqls = _sqls(loader)
-        assert any(s.strip().upper().startswith("UPDATE QUESTIONS") for s in sqls)
-        assert not any("INSERT INTO questions" in s for s in sqls)
-        assert stats == {"inserted": 0, "updated": 1, "passages_upserted": 1}
-        assert loader._conn.committed >= 1
-
-    def test_existing_question_id_is_reused_in_passage_upsert(self):
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", [(5036, "PIPELINE")])]
+    def test_never_writes_questions(self):
+        scripted = [("FROM chinese_passages", [])]
         loader = _loader(scripted)
         loader.load_passages([ITEM])
-        upsert = [a for s, a in loader._conn.cur.executed if "INSERT INTO dictation_passages" in s][0]
-        assert upsert[0] == 5036          # 复用既有 question_id，没新建
+        sqls = _sqls(loader)
+        assert not any("questions" in s for s in sqls), sqls
 
-    def test_new_passage_inserts_question_then_upserts_passage(self):
-        scripted = [
-            ("FROM subjects", [(2,)]),
-            ("FROM dictation_passages dp", []),        # 业务键未命中
-            ("LAST_INSERT_ID", [(7001,)]),
-        ]
+    def test_never_reads_subjects(self):
+        # subject_id 谓词随独立化取消（表本身就是语文），故不必再查 subjects
+        scripted = [("FROM chinese_passages", [])]
+        loader = _loader(scripted)
+        loader.load_passages([ITEM])
+        assert not any("FROM subjects" in s for s in _sqls(loader))
+
+
+class TestIdempotency:
+    def test_existing_passage_updates_in_place(self):
+        scripted = [("FROM chinese_passages", [(5036, "PIPELINE")])]
         loader = _loader(scripted)
         stats = loader.load_passages([ITEM])
+        assert any("INSERT INTO chinese_passages" in s for s in _sqls(loader))
+        assert stats == {"passages_upserted": 1}
+        assert loader._conn.committed >= 1
 
-        sqls = _sqls(loader)
-        assert any("INSERT INTO questions" in s for s in sqls)
-        assert any("INSERT INTO dictation_passages" in s for s in sqls)
-        assert stats == {"inserted": 1, "updated": 0, "passages_upserted": 1}
-        upsert = [a for s, a in loader._conn.cur.executed if "INSERT INTO dictation_passages" in s][0]
-        assert upsert[0] == 7001
+    def test_upsert_has_no_question_id(self):
+        scripted = [("FROM chinese_passages", [(5036, "PIPELINE")])]
+        loader = _loader(scripted)
+        loader.load_passages([ITEM])
+        upsert = [s for s in _sqls(loader) if "INSERT INTO chinese_passages" in s][0]
+        assert "question_id" not in upsert
 
-    def test_dev_fixture_row_is_warned_and_overwritten(self, capsys):
+    def test_dev_fixture_row_is_warned(self, capsys):
         # 开发假数据必须能被真实内容覆盖，且明确告警（不能静默覆盖）
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", [(5036, "DEV-FIXTURE")])]
+        scripted = [("FROM chinese_passages", [(5036, "DEV-FIXTURE")])]
         loader = _loader(scripted)
         loader.load_passages([ITEM])
         out = capsys.readouterr().out
@@ -126,67 +123,28 @@ class TestIdempotency:
 
     def test_memorize_required_never_overwritten(self):
         # 重跑不得把用户已标的必背刷回 0
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", [(5036, "PIPELINE")])]
+        scripted = [("FROM chinese_passages", [(5036, "PIPELINE")])]
         loader = _loader(scripted)
         loader.load_passages([ITEM])
-        upsert = [s for s in _sqls(loader) if "INSERT INTO dictation_passages" in s][0]
+        upsert = [s for s in _sqls(loader) if "INSERT INTO chinese_passages" in s][0]
         assert "memorize_required=VALUES" not in upsert.replace(" ", "")
         assert "ON DUPLICATE KEY UPDATE" in upsert
 
     def test_verified_is_written_from_item(self):
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", []),
-                    ("LAST_INSERT_ID", [(7001,)])]
+        scripted = [("FROM chinese_passages", [])]
         loader = _loader(scripted)
         loader.load_passages([{**ITEM, "verified": 0}])
-        upsert = [a for s, a in loader._conn.cur.executed if "INSERT INTO dictation_passages" in s][0]
-        # verified 在参数里的倒数第二位（memorize_required 固定 0 在 SQL 字面量中）
-        assert 0 in upsert
+        upsert = [a for s, a in loader._conn.cur.executed if "INSERT INTO chinese_passages" in s][0]
+        # 参数顺序：[work_title, author, dynasty, body, grade_band, grade, semester,
+        #           sort_order, source_ref, verified]
+        assert upsert[9] == 0
 
-
-class TestContentConvention:
-    def test_question_content_uses_prompt_convention(self):
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", []),
-                    ("LAST_INSERT_ID", [(7001,)])]
+    def test_business_key_lookup_uses_title_and_semester(self):
+        scripted = [("FROM chinese_passages", [])]
         loader = _loader(scripted)
         loader.load_passages([ITEM])
-        ins = [a for s, a in loader._conn.cur.executed if "INSERT INTO questions" in s][0]
-        assert "请默写《岳阳楼记》" in ins
-        assert "并写出" not in str(ins)          # 上一阶段删掉的噪音文案不得回归
-
-    def test_answer_has_three_labelled_lines(self):
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", []),
-                    ("LAST_INSERT_ID", [(7001,)])]
-        loader = _loader(scripted)
-        loader.load_passages([ITEM])
-        ins = [a for s, a in loader._conn.cur.executed if "INSERT INTO questions" in s][0]
-        assert any(str(x).startswith("作者：范仲淹") for x in ins)
-        assert any("朝代：宋" in str(x) for x in ins)
-        assert any("正文：庆历四年春" in str(x) for x in ins)
-
-    def test_empty_author_dynasty_do_not_crash(self):
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", []),
-                    ("LAST_INSERT_ID", [(7001,)])]
-        loader = _loader(scripted)
-        loader.load_passages([{**ITEM, "author": "", "dynasty": ""}])
-        ins = [a for s, a in loader._conn.cur.executed if "INSERT INTO questions" in s][0]
-        assert any(str(x).startswith("作者：") for x in ins)
-
-    def test_question_type_is_poem_dictation(self):
-        scripted = [("FROM subjects", [(2,)]), ("FROM dictation_passages dp", []),
-                    ("LAST_INSERT_ID", [(7001,)])]
-        loader = _loader(scripted)
-        loader.load_passages([ITEM])
-        ins_sql = [s for s in _sqls(loader) if "INSERT INTO questions" in s][0]
-        assert "poem_dictation" in ins_sql
-
-    def test_unknown_subject_code_raises(self):
-        loader = _loader([("FROM subjects", [])])
-        try:
-            loader.load_passages([ITEM])
-        except ValueError as e:
-            assert "chinese" in str(e)
-        else:
-            raise AssertionError("未在 subjects 找到 code 时应抛 ValueError")
+        lookup = [a for s, a in loader._conn.cur.executed if "FROM chinese_passages" in s][0]
+        assert lookup == ("岳阳楼记", "上册")
 
 
 class TestReadJsonl:

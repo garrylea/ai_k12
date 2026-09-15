@@ -68,7 +68,7 @@ def parse_args(argv=None):
         """,
     )
     parser.add_argument("--book", required=True, help="教材路径子串，如 '九年级/上册'")
-    parser.add_argument("--term", required=True, choices=["上册", "下册"], help="册次（写入 dictation_passages.semester）")
+    parser.add_argument("--term", required=True, choices=["上册", "下册"], help="册次（写入 chinese_passages.semester）")
     parser.add_argument("--input-dir", help="MD 根目录（默认 output/md）")
     parser.add_argument("--output-dir", help="产物根目录（默认 output/dictation）")
     parser.add_argument("--candidates", help="候选清单 JSON 路径（默认 output/dictation/<book 同名>/candidates.json）")
@@ -447,8 +447,7 @@ def run_load(args, config) -> int:
     finally:
         loader.close()
 
-    print(f"[ok] 入库完成：新增题 {stats['inserted']}、复用并更新 {stats['updated']}、"
-          f"篇目 upsert {stats['passages_upserted']}", flush=True)
+    print(f"[ok] 入库完成：篇目 upsert {stats['passages_upserted']}", flush=True)
     return 0
 
 
