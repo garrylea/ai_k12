@@ -8,15 +8,15 @@
  * 本脚本的假数据则直接置 memorizeRequired=1，好让专项在标定前仍有题可练。
  * 两条记录以 source_ref = 'DEV-FIXTURE' 标记，便于后续清理。
  *
- * 幂等：questions 走 content_hash 去重，dictation_passages 走 (work_title, semester) upsert。
+ * 2026-09-15 独立化：**不再写 questions 行**——古诗文专项已是独立子系统
+ * （不挂 questions、不进错题本，PRD §6.3 / §7.4），表 chinese_passages 就是全部。
+ *
+ * 幂等：走 (work_title, semester) 业务键 upsert。
  * 运行：npx tsx src/scripts/seed-dictation-fixture.ts
  */
 import 'dotenv/config';
 import mysql from 'mysql2/promise';
-import { computeContentHash } from '../common/utils/content-hash.util.js';
-import { DictationPassagesRepository } from '../database/repositories/dictation-passages.repo.js';
-
-const CHINESE_SUBJECT_ID = 2;
+import { ChinesePassagesRepository } from '../database/repositories/chinese-passages.repo.js';
 
 const FIXTURES = [
   {
@@ -37,29 +37,6 @@ const FIXTURES = [
   },
 ];
 
-/**
- * 守卫：本脚本的幂等性完全依赖 uniq_q_content_hash（ON DUPLICATE KEY UPDATE 要有东西可冲突）。
- * 老库可能因为 CREATE TABLE IF NOT EXISTS 的语义缺这个键——那时 INSERT 会静默插重复行。
- * 故启动时先断言它存在，缺了直接报错退出，而不是安静地产生脏数据。
- */
-async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
-  const [rows] = await pool.execute<any[]>(
-    `SELECT COUNT(*) AS c FROM (
-       SELECT INDEX_NAME FROM information_schema.STATISTICS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'questions' AND NON_UNIQUE = 0
-       GROUP BY INDEX_NAME
-       HAVING COUNT(*) = 1 AND MIN(COLUMN_NAME) = 'content_hash'
-     ) AS uniq_single_col`,
-  );
-  if (Number(rows[0]?.c ?? 0) === 0) {
-    throw new Error(
-      'questions.content_hash 缺少唯一索引 uniq_q_content_hash——' +
-      '本脚本的幂等依赖它，继续跑会插重复行。' +
-      '请先执行 tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql。',
-    );
-  }
-}
-
 async function main() {
   const pool = mysql.createPool({
     host: process.env.DB_HOST ?? 'localhost',
@@ -67,62 +44,23 @@ async function main() {
     password: process.env.DB_PASS ?? 'ai_k12',
     database: process.env.DB_NAME ?? 'ai_k12',
   });
-  await assertContentHashUniqueIndex(pool);
-  const repo = new DictationPassagesRepository(pool as never);
+  const repo = new ChinesePassagesRepository(pool as never);
 
   for (const f of FIXTURES) {
-    // 题面只放「请默写《篇名》」：作者/朝代/正文都是要学生默写的**答案**，
-    // 由答题页的三个字段承载，题面里再写一遍「（并写出作者与朝代）」是重复噪音。
-    const content = `请默写《${f.workTitle}》`;
-    const answer = `作者：${f.author}\n朝代：${f.dynasty}\n正文：${f.body}`;
-    const hash = computeContentHash(content);
-
-    // 以「篇名 + 册次」——dictation_passages 的业务键——作为身份，而不是 content_hash。
-    // 原因：题面模板一旦调整，content_hash 就变，按 hash 去重会**插出一条新题**并把旧行变孤儿
-    // （且 main_error_books.question_id 外键是 RESTRICT，删旧行还可能被拦）。
-    // 原地更新能保住 question_id，错题本/隐藏题等挂在它上面的数据不受影响。
+    // 安全阀：若该篇目已属真实内容（内容管线导入的），绝不覆盖——本脚本只碰自己的假数据。
     const [existing] = await pool.execute<any[]>(
-      `SELECT dp.question_id, q.source FROM dictation_passages dp
-         JOIN questions q ON q.id = dp.question_id
-        WHERE dp.work_title = ? AND dp.semester = ? LIMIT 1`,
+      `SELECT id, source_ref FROM chinese_passages
+        WHERE work_title = ? AND semester = ? LIMIT 1`,
       [f.workTitle, f.semester],
     );
-
-    // 安全阀：若该篇目已属真实题库（内容管线导入的），绝不覆盖——本脚本只碰自己的假数据。
-    if (existing.length > 0 && existing[0].source !== 'DEV-FIXTURE') {
+    if (existing.length > 0 && existing[0].source_ref !== 'DEV-FIXTURE') {
       console.warn(
-        `[seed-dictation-fixture] 跳过《${f.workTitle}》：该篇目已存在且 source=${existing[0].source}，非开发假数据`,
+        `[seed-dictation-fixture] 跳过《${f.workTitle}》：该篇目已存在且 source_ref=${existing[0].source_ref}，非开发假数据`,
       );
       continue;
     }
 
-    let questionId: number;
-    if (existing.length > 0) {
-      questionId = existing[0].question_id as number;
-      await pool.execute(
-        `UPDATE questions
-            SET content = ?, answer = ?, content_hash = ?, type = 'poem_dictation',
-                subject_id = ?, grade_band = 'junior', source = 'DEV-FIXTURE',
-                answer_verified = 0, is_active = 1
-          WHERE id = ?`,
-        [content, answer, hash, CHINESE_SUBJECT_ID, questionId],
-      );
-    } else {
-      await pool.execute(
-        `INSERT INTO questions
-           (subject_id, type, difficulty, content, answer, grade_band, source, content_hash, answer_verified, is_active)
-         VALUES (?, 'poem_dictation', 2, ?, ?, 'junior', 'DEV-FIXTURE', ?, 0, 1)`,
-        [CHINESE_SUBJECT_ID, content, answer, hash],
-      );
-      const [rows] = await pool.execute<any[]>(
-        'SELECT id FROM questions WHERE content_hash = ? LIMIT 1',
-        [hash],
-      );
-      questionId = rows[0].id as number;
-    }
-
     await repo.upsert({
-      questionId,
       workTitle: f.workTitle,
       author: f.author,
       dynasty: f.dynasty,
@@ -137,7 +75,7 @@ async function main() {
       // 管线落地到真篇目标定必背之前，专项将无可练之题。
       memorizeRequired: 1,
     });
-    console.log(`seeded questionId=${questionId} 《${f.workTitle}》`);
+    console.log(`seeded 《${f.workTitle}》（${f.semester}）`);
   }
 
   await pool.end();
