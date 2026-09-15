@@ -8,7 +8,7 @@ import { QuestionHintsRepository } from '../../database/repositories/question-hi
 import { StudentHiddenQuestionsRepository } from '../../database/repositories/student-hidden-questions.repo.js';
 import { AdminNotificationsRepository } from '../../database/repositories/admin-notifications.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
-import { DictationPassagesRepository } from '../../database/repositories/dictation-passages.repo.js';
+import { ChinesePassagesRepository, buildDictationPrompt } from '../../database/repositories/chinese-passages.repo.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
@@ -18,9 +18,6 @@ import type {
   DictationQuestionItem,
   DictationJudgeResult,
 } from './dto/dictation.dto.js';
-
-/** 语文学科 id（subjects seed：1=数学, 2=语文, 3=英语）。 */
-export const CHINESE_SUBJECT_ID = 2;
 
 /** 把 diff 渲染成一行可读文本，作为 LLM 错因输入：床前明月[光→先][漏:疑][多:啊]。 */
 export function renderBodyDiff(ops: DictationDiffOp[]): string {
@@ -54,7 +51,7 @@ export class TrainingService {
     private readonly hiddenRepo: StudentHiddenQuestionsRepository,
     private readonly explanationCache: ExplanationCacheService,
     private readonly notificationsRepo: AdminNotificationsRepository,
-    private readonly dictationRepo: DictationPassagesRepository,
+    private readonly dictationRepo: ChinesePassagesRepository,
     private readonly dictationFeedback: DictationFeedbackCapability,
   ) {}
 
@@ -92,13 +89,13 @@ export class TrainingService {
     return this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
   }
 
-  /** 语文默写：配置页篇目清单（只出 verified=1 且 memorize_required=1 的篇目，已停用的题不出）。
+  /** 语文默写：配置页篇目清单（抽题池 = verified=1 且 memorize_required=1 且 is_active=1）。
    *  只出篇名 + 册次——作者/朝代/正文都是判题答案字段，一律不下发。 */
   async listDictationPassages(): Promise<{ passages: DictationPassageListItem[] }> {
-    const rows = await this.dictationRepo.findVerifiedBySubject(CHINESE_SUBJECT_ID);
+    const rows = await this.dictationRepo.findVerifiedForDictation();
     return {
       passages: rows.map((r) => ({
-        questionId: r.question_id,
+        passageId: r.id,
         workTitle: r.work_title,
         semester: r.semester,
       })),
@@ -107,24 +104,22 @@ export class TrainingService {
 
   /**
    * 语文默写开练：指定篇目则按篇目出题（忽略册次），否则按册次（null=全部）随机抽。
-   * 题项做白名单序列化——只出 questionId/prompt/workTitle/semester，作者/朝代/正文
+   * 题项做白名单序列化——只出 passageId/prompt/workTitle/semester，作者/朝代/正文
    * 一律剥离（防答案泄露，与 startTargetedPractice 同规矩）。
+   * 题面由篇名生成（`buildDictationPrompt`），**不再从 questions.content 取**。
    */
   async startDictation(input: {
-    studentId: number;
     semester: string | null;
-    questionIds: number[] | null;
+    passageIds: number[] | null;
     count: number;
   }): Promise<{ questions: DictationQuestionItem[] }> {
-    const rows = input.questionIds && input.questionIds.length > 0
-      ? await this.dictationRepo.findVerifiedByQuestionIds(CHINESE_SUBJECT_ID, input.questionIds)
-      : await this.dictationRepo.findRandomVerified(
-          input.studentId, CHINESE_SUBJECT_ID, input.semester, input.count,
-        );
+    const rows = input.passageIds && input.passageIds.length > 0
+      ? await this.dictationRepo.findVerifiedByIds(input.passageIds)
+      : await this.dictationRepo.findRandomVerified(input.semester, input.count);
     return {
       questions: rows.slice(0, input.count).map((r) => ({
-        questionId: r.question_id,
-        prompt: r.questionContent,
+        passageId: r.id,
+        prompt: buildDictationPrompt(r.work_title),
         workTitle: r.work_title,
         semester: r.semester,
       })),
@@ -132,7 +127,8 @@ export class TrainingService {
   }
 
   /**
-   * 语文默写判题：**纯程序**判对错（JudgeCore.judgeDictation），不等 LLM。
+   * 语文默写判题：**纯程序**判对错（JudgeCore.judgeDictation），不等 LLM，
+   * 且**不写任何学生状态**（独立化后不入错题本、不清零）。
    *
    * 2026-09-14 起错因文案与判题解耦：本方法只回判题结果（~25ms），
    * 答错时带 `feedbackPending=true`，由前端另调 generateDictationFeedback 取文案。
@@ -140,22 +136,18 @@ export class TrainingService {
    * 一次错答要等 13–16 秒才看到对错，学生以为卡死。
    */
   async judgeDictation(input: {
-    studentId: number;
-    questionId: number;
+    passageId: number;
     author: string;
     dynasty: string;
     body: string;
   }): Promise<DictationJudgeResult> {
-    const passage = await this.dictationRepo.findByQuestionId(input.questionId);
+    const passage = await this.dictationRepo.findById(input.passageId);
     if (!passage) {
-      throw new NotFoundException(`默写篇目不存在：${input.questionId}`);
+      throw new NotFoundException(`默写篇目不存在：${input.passageId}`);
     }
 
     const expected = { author: passage.author, dynasty: passage.dynasty, body: passage.body };
     const judged = await this.judgeCore.judgeDictation({
-      studentId: input.studentId,
-      subjectId: CHINESE_SUBJECT_ID,
-      questionId: input.questionId,
       expected,
       student: { author: input.author, dynasty: input.dynasty, body: input.body },
     });
@@ -163,11 +155,10 @@ export class TrainingService {
     // 显式构造返回，不用 spread：judged 带 method 字段，spread 进对象字面量会触发
     // TS 多余属性检查（DictationJudgeResult 未声明 method）。
     return {
-      questionId: judged.questionId,
+      passageId: passage.id,
       isCorrect: judged.isCorrect,
       fields: judged.fields,
       bodyDiff: judged.bodyDiff,
-      errorBookId: judged.errorBookId,
       reference: expected,
       feedback: null,
       feedbackPending: !judged.isCorrect,
@@ -177,19 +168,18 @@ export class TrainingService {
   /**
    * 语文默写错因文案（LLM，可选；判题后异步补取）。
    *
-   * 只生成话术，**不写错题本、不碰判题**——判题与错题本已由 judgeDictation 落定，
-   * 这里重复调 judgeDictation 会二次写 main_error_books。故本方法只读篇目 + 纯函数算差异。
+   * 只生成话术，**不碰判题**——独立化后判题不写任何学生状态，本方法同样只读篇目、只算差异。
    * 模型不可达/超时/两个模型都失败一律回 `feedback=null`，由前端显示兜底文案。
    */
   async generateDictationFeedback(input: {
-    questionId: number;
+    passageId: number;
     author: string;
     dynasty: string;
     body: string;
   }): Promise<{ feedback: string | null }> {
-    const passage = await this.dictationRepo.findByQuestionId(input.questionId);
+    const passage = await this.dictationRepo.findById(input.passageId);
     if (!passage) {
-      throw new NotFoundException(`默写篇目不存在：${input.questionId}`);
+      throw new NotFoundException(`默写篇目不存在：${input.passageId}`);
     }
 
     const expected = { author: passage.author, dynasty: passage.dynasty, body: passage.body };
@@ -210,7 +200,7 @@ export class TrainingService {
       });
       return { feedback: result.content || null };
     } catch (err) {
-      this.logger.warn(`dictationFeedback.generate failed (questionId=${input.questionId}): ${err}`);
+      this.logger.warn(`dictationFeedback.generate failed (passageId=${input.passageId}): ${err}`);
       return { feedback: null };
     }
   }
