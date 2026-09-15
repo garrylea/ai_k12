@@ -1912,15 +1912,20 @@ git commit -m "refactor(web): 默写接口字段 questionId->passageId，去掉 
 
 **Files:** 无（只跑命令）
 
-- [ ] **Step 1: 备份**
+- [ ] **Step 1: 备份（**必须放持久目录**）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
+mkdir -p tools/db/backups
 mysqldump -u ai_k12 -pai_k12 ai_k12 main_error_books questions dictation_passages \
-  > /tmp/backup_20260915_chinese_passages.sql
-wc -l /tmp/backup_20260915_chinese_passages.sql
+  > tools/db/backups/20260915_chinese_passages.sql
+wc -l tools/db/backups/20260915_chinese_passages.sql
 ```
 Expected: 文件非空（改造前 50 题 + 50 篇目 + 7 错题行）
+
+> ⚠️ **不要写 `/tmp`**。本仓 2026-08-26 已经吃过一次：purge 前的备份写在 `/tmp/ai_k12_backup/`，被系统清理删掉、业务数据丢失（见 `docs/ai-core-changelog.md` 2026-08-28~29 条目 ③「今后备份一律放持久目录」）。这是整个迁移唯一的安全网。
+
+> ⚠️ **从 Task 1 到本步之间，不要重放 `tools/db/schema.sql`，也不要跑 `tools/db/install_mysql.sh`**。`install_mysql.sh` 的 `apply_schema()` 对**已有库也会无脑重放** `schema.sql`，而 `schema.sql` 现在已含 `CREATE TABLE IF NOT EXISTS chinese_passages` —— 那会在 populated 的 `dictation_passages` 旁边建出一张**空** `chinese_passages`，让迁移第 3 步 `RENAME` 报 1050 且无法自愈（迁移脚本第 0a 步的闸门会在**任何删除之前**中止，正是为这个场景准备的）。
 
 - [ ] **Step 2: 前置检查（**执行迁移前必跑**）**
 
@@ -1937,6 +1942,10 @@ SELECT
   (SELECT COUNT(*) FROM ai_dialogues         WHERE question_id IN (SELECT id FROM questions WHERE type='poem_dictation')) AS ai_dialogues;"
 ```
 Expected: `0 0 0 0 0 0`（2026-09-15 实测已确认）。**任一列非 0 就停下来**——前三列会让迁移中断，后三列会被静默置空（`practice_results`/`ai_dialogues` 是 `ON DELETE SET NULL`）。
+
+> **两条注意**：
+> - `aux_error_books` 只存在于线上库、**不在 `tools/db/schema.sql` 里**（漂移表）。按 `schema.sql` 新建的库上这一列会报 `ERROR 1146` 而不是返回 0 —— 那种库上本迁移无事可做。
+> - 上面六列之外，迁移脚本**自己**还有两道中止闸门会在任何删除之前拦住：① 两表并存；② 挂在默写题上却 `source<>'dictation'` 的错题行（第 1 步按 source 删、不是按 question_id 删，这类行会漏删并让第 2 步被 RESTRICT 拦停）。两者实测均为安全值（1 / 0）。
 
 - [ ] **Step 3: 执行迁移**
 
@@ -1988,17 +1997,23 @@ Expected: 三条全绿
 1. 配置页能看到篇目清单、能按册次筛、能勾选指定篇目；
 2. 开练后三字段作答、提交 → 立刻出对错 + 带标点的正文对比；
 3. 答错时错因区转圈后填充文案（或超时显示兜底文案）；
-4. **确认 `main_error_books` 无新增行**（答错也不写）：
+4. **确认答错默写不写错题本**——注意：迁移后 `source='dictation'` 恒为 0，直接断言它是**空断言**（写不写都是 0）。要看**错题本总行数**在手测前后不变：
    ```bash
-   mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) FROM main_error_books WHERE source='dictation';"
+   # 手测前记下 N
+   mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) AS 总行数 FROM main_error_books;"
+   # → 回到页面，故意把一篇默写答错并提交，等错因文案出来
+   # 再取一次，应与 N 相同
+   mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) AS 总行数 FROM main_error_books;"
    ```
-   Expected: 0，且手测前后不变
+   Expected: 两次数字相同（答错不新增行）。若变大，说明错题本写入被改回来了。
 5. 数学专项页无回归（`训练 → 数学 → 专项练习` 仍可正常抽题判题）。
 
 - [ ] **Step 8: Commit（若有零星修正）**
 
+**只能 `git add` 本次任务实际改到的文件路径。严禁 `git add -A` / `git add .`** —— 工作区还有一批与本次改造无关的未提交改动（2026-09-14 的代码改动 + 更早的文档），卷进来会把两个不相干的变更集混进同一段历史。
+
 ```bash
-git add -A
+git add <本次实际改动的文件...>
 git commit -m "test: 独立化改造后全链路验证修正"
 ```
 
