@@ -137,7 +137,7 @@ export class TrainingController {
     });
   }
 
-  // ==================== 语文古诗文默写（2026-09-13） ====================
+  // ==================== 语文古诗文专项：默写（2026-09-13） ====================
 
   /** 语文默写篇目清单（配置页用；只出已校验篇目，作者/朝代/正文均不下发）。 */
   @Get('dictation/passages')
@@ -146,11 +146,10 @@ export class TrainingController {
   }
 
   /** 语文默写开练：count 限 1-20；semester 限 上册|下册|null；
-   *  questionIds 非空时按指定篇目出题（忽略 semester）。 */
+   *  passageIds 非空时按指定篇目出题（忽略 semester）。 */
   @Post('dictation/start')
   async startDictation(
-    @Body() dto: { semester: string | null; questionIds: number[] | null; count: number },
-    @CurrentUser() user: JwtUser,
+    @Body() dto: { semester: string | null; passageIds: number[] | null; count: number },
   ) {
     const { count } = dto;
     if (!Number.isInteger(count) || count < 1 || count > 20) {
@@ -160,34 +159,28 @@ export class TrainingController {
     if (semester !== null && semester !== '上册' && semester !== '下册') {
       throw new BadRequestException('semester 仅允许 上册 | 下册 | null');
     }
-    const questionIds = dto.questionIds ?? null;
-    if (questionIds !== null &&
-        (!Array.isArray(questionIds) || questionIds.some((id) => !Number.isInteger(id) || id < 1))) {
-      throw new BadRequestException('questionIds 须为正整数数组或 null');
+    const passageIds = dto.passageIds ?? null;
+    if (passageIds !== null &&
+        (!Array.isArray(passageIds) || passageIds.some((id) => !Number.isInteger(id) || id < 1))) {
+      throw new BadRequestException('passageIds 须为正整数数组或 null');
     }
-    return this.trainingService.startDictation({
-      studentId: user.sub,
-      semester,
-      questionIds,
-      count,
-    });
+    return this.trainingService.startDictation({ semester, passageIds, count });
   }
 
   /** 语文默写判题：三字段作答；**纯程序判对错、不等 LLM**（~25ms），
    *  答错时返回 `feedbackPending=true`，错因另调 dictation/feedback。
+   *  **不写任何学生状态**（独立化后不入错题本）。
    *  非字符串字段（如 {"author":123}）降级为空串——否则会带着 number 进
    *  normalizeChineseAnswer 触发 TypeError 变 500。 */
   @Post('dictation/judge')
   async judgeDictation(
-    @Body() dto: { questionId: number; author: string; dynasty: string; body: string },
-    @CurrentUser() user: JwtUser,
+    @Body() dto: { passageId: number; author: string; dynasty: string; body: string },
   ) {
-    if (!Number.isInteger(dto.questionId) || dto.questionId < 1) {
-      throw new BadRequestException('questionId 须为正整数');
+    if (!Number.isInteger(dto.passageId) || dto.passageId < 1) {
+      throw new BadRequestException('passageId 须为正整数');
     }
     return this.trainingService.judgeDictation({
-      studentId: user.sub,
-      questionId: dto.questionId,
+      passageId: dto.passageId,
       author: typeof dto.author === 'string' ? dto.author : '',
       dynasty: typeof dto.dynasty === 'string' ? dto.dynasty : '',
       body: typeof dto.body === 'string' ? dto.body : '',
@@ -195,16 +188,16 @@ export class TrainingController {
   }
 
   /** 语文默写错因文案（LLM，可选）：判题后单独取，失败回 feedback=null 不报错。
-   *  入参与 judge 相同——服务端据此重算差异喂给模型，但**不写错题本**。 */
+   *  入参与 judge 相同——服务端据此重算差异喂给模型，但**不写任何学生状态**。 */
   @Post('dictation/feedback')
   async generateDictationFeedback(
-    @Body() dto: { questionId: number; author: string; dynasty: string; body: string },
+    @Body() dto: { passageId: number; author: string; dynasty: string; body: string },
   ) {
-    if (!Number.isInteger(dto.questionId) || dto.questionId < 1) {
-      throw new BadRequestException('questionId 须为正整数');
+    if (!Number.isInteger(dto.passageId) || dto.passageId < 1) {
+      throw new BadRequestException('passageId 须为正整数');
     }
     return this.trainingService.generateDictationFeedback({
-      questionId: dto.questionId,
+      passageId: dto.passageId,
       author: typeof dto.author === 'string' ? dto.author : '',
       dynasty: typeof dto.dynasty === 'string' ? dto.dynasty : '',
       body: typeof dto.body === 'string' ? dto.body : '',

@@ -88,6 +88,7 @@ describe('TrainingService.judgeDictation（判题：纯程序、不等 LLM、不
     expect(res.isCorrect).toBe(false);
     expect(res.feedback).toBeNull();
     expect(res.feedbackPending).toBe(true);
+    expect(res.passageId).toBe(1);
     expect(res.reference).toEqual({ author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。' });
     // 解耦的核心断言：判题链路里不能再出现 LLM 调用，否则学生又要等十几秒
     expect(dictationFeedback.generate).not.toHaveBeenCalled();

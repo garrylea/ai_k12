@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { TrainingController } from './training.controller.js';
 import { TrainingService } from './training.service.js';
 import { PracticeModule } from '../practice/practice.module.js';
-import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, DictationPassagesRepository } from '../../database/repositories/index.js';
+import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository } from '../../database/repositories/index.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 
@@ -18,6 +18,6 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 @Module({
   imports: [PracticeModule],
   controllers: [TrainingController],
-  providers: [TrainingService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, DictationPassagesRepository, DictationFeedbackCapability],
+  providers: [TrainingService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability],
 })
 export class TrainingModule {}
