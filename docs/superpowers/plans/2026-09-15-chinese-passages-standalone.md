@@ -1247,7 +1247,7 @@ export interface DictationFeedbackResult {
 - [ ] **Step 6: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.controller.dictation.test.ts`
-Expected: PASS（10 个）
+Expected: PASS（**11 个** —— 计划给出的测试文件内容本身就是 11 个 `it`；初版写「10 个」是数错了）
 
 - [ ] **Step 7: 全量服务器测试**
 
