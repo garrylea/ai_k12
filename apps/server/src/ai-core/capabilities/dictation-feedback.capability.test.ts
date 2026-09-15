@@ -39,4 +39,12 @@ describe('DictationFeedbackCapability', () => {
     const res = await cap.generate(baseRequest);
     expect(res.content).toBe('');
   });
+
+  it('本地 provider → 下发关 thinking 的 chat_template_kwargs（错因秒回）', async () => {
+    const chat = vi.fn().mockResolvedValue({ content: '错因' });
+    const cap = new DictationFeedbackCapability({ modelClient: { chat } as never });
+    await cap.generate(baseRequest);
+    // 路由 dictation_feedback 的 primary 是 local（见 model-routes.yaml）
+    expect(chat.mock.calls[0][0].extraBody).toEqual({ chat_template_kwargs: { enable_thinking: false } });
+  });
 });

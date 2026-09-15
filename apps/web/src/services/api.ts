@@ -1005,8 +1005,10 @@ export interface DictationJudgeResult {
   fields: { author: { match: boolean }; dynasty: { match: boolean }; body: { match: boolean } };
   bodyDiff: DictationDiffOp[];
   reference: { author: string; dynasty: string; body: string };
-  /** LLM 生成的错因文案；模型不可用时为 null（判题结果仍有效）。 */
+  /** 判题接口恒为 null——错因已与判题解耦，改由 fetchDictationFeedback 单独取。 */
   feedback: string | null;
+  /** true=判错且错因待补（应另调 fetchDictationFeedback）；答对恒 false。 */
+  feedbackPending: boolean;
   errorBookId?: number;
 }
 
@@ -1032,6 +1034,19 @@ export function judgeDictation(payload: {
   body: string;
 }): Promise<DictationJudgeResult> {
   return fetchApi<DictationJudgeResult>('/training/dictation/judge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 错因文案（LLM，可选）：与判题解耦，判错后单独取；失败回 feedback=null。 */
+export function fetchDictationFeedback(payload: {
+  questionId: number;
+  author: string;
+  dynasty: string;
+  body: string;
+}): Promise<{ feedback: string | null }> {
+  return fetchApi<{ feedback: string | null }>('/training/dictation/feedback', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

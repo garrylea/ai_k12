@@ -3,7 +3,7 @@ import { timeoutConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { getModelConfigRegistry } from '../infra/model-config-registry.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
-import { ModelClient } from '../infra/model-client/index.js';
+import { ModelClient, LLAMA_CPP_NO_THINKING_BODY } from '../infra/model-client/index.js';
 import { ResponseParser } from '../infra/response-parser.js';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -58,6 +58,10 @@ export class DictationFeedbackCapability {
         model,
         messages: promptResult.messages,
         timeout,
+        // 错因文案是短提示词写作任务，不需要 thinking。本地端点靠 chat_template_kwargs
+        // 才关得掉（`thinking: false` 对 llama.cpp 无效），实测 13–16s -> 1–2s。
+        // 只对本地 provider 下发：fallback 是云端 deepseek，收到未知字段可能直接 400。
+        ...(model.provider === 'local' ? { extraBody: LLAMA_CPP_NO_THINKING_BODY } : {}),
       });
       const parsed = this.responseParser.parse({ rawContent: chatResponse.content, mode: 'text' });
       return {

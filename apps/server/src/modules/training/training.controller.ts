@@ -173,7 +173,8 @@ export class TrainingController {
     });
   }
 
-  /** 语文默写判题：三字段作答；程序判对错 + LLM 写错因（LLM 失败不影响判题）。
+  /** 语文默写判题：三字段作答；**纯程序判对错、不等 LLM**（~25ms），
+   *  答错时返回 `feedbackPending=true`，错因另调 dictation/feedback。
    *  非字符串字段（如 {"author":123}）降级为空串——否则会带着 number 进
    *  normalizeChineseAnswer 触发 TypeError 变 500。 */
   @Post('dictation/judge')
@@ -186,6 +187,23 @@ export class TrainingController {
     }
     return this.trainingService.judgeDictation({
       studentId: user.sub,
+      questionId: dto.questionId,
+      author: typeof dto.author === 'string' ? dto.author : '',
+      dynasty: typeof dto.dynasty === 'string' ? dto.dynasty : '',
+      body: typeof dto.body === 'string' ? dto.body : '',
+    });
+  }
+
+  /** 语文默写错因文案（LLM，可选）：判题后单独取，失败回 feedback=null 不报错。
+   *  入参与 judge 相同——服务端据此重算差异喂给模型，但**不写错题本**。 */
+  @Post('dictation/feedback')
+  async generateDictationFeedback(
+    @Body() dto: { questionId: number; author: string; dynasty: string; body: string },
+  ) {
+    if (!Number.isInteger(dto.questionId) || dto.questionId < 1) {
+      throw new BadRequestException('questionId 须为正整数');
+    }
+    return this.trainingService.generateDictationFeedback({
       questionId: dto.questionId,
       author: typeof dto.author === 'string' ? dto.author : '',
       dynasty: typeof dto.dynasty === 'string' ? dto.dynasty : '',

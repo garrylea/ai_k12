@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/base';
 import {
   judgeDictation,
+  fetchDictationFeedback,
   type DictationJudgeResult,
   type DictationQuestionItem,
 } from '@/services/api';
@@ -11,9 +12,29 @@ import DictationDiffView from '@/components/business/dictation/DictationDiffView
 
 const EMPTY: DictationAnswerValue = { author: '', dynasty: '', body: '' };
 
+/** 与 QuestionRunner 判题等待视图同款转圈（线性 SVG，无 emoji）。 */
+const Spinner = ({ size = 16 }: { size?: number }) => (
+  <svg
+    className="animate-spin text-[var(--brand-500)] shrink-0"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+  >
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+  </svg>
+);
+
 /**
  * 古诗文默写答题页。题单经 sessionStorage 交接（镜像 TargetedRunPage）；
- * 空题单直接踢回配置页。判题由后端程序比对，错因文案来自 LLM（可能为 null）。
+ * 空题单直接踢回配置页。
+ *
+ * 判题与错因已解耦：`judgeDictation` 纯程序判对错（~25ms），回来即出对错 + 正文对比；
+ * 答错才另调 `fetchDictationFeedback` 取 LLM 错因文案，错因区先转圈后填充，
+ * 文案失败显示兜底提示，**不影响已出的对错结果**。
  */
 export default function DictationRunPage() {
   const navigate = useNavigate();
@@ -24,6 +45,10 @@ export default function DictationRunPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [correctCount, setCorrectCount] = useState(0);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  // 在途错因请求的令牌：换题后迟到的响应不许写回，否则会把上一题的错因贴到下一题
+  const feedbackToken = useRef(0);
 
   // 读题单（StrictMode 下 effect 会跑两次，读后即删须防第二次读到空）
   useEffect(() => {
@@ -50,12 +75,30 @@ export default function DictationRunPage() {
 
   const handleSubmit = async () => {
     if (!current) return;
+    const token = ++feedbackToken.current;
+    const payload = { questionId: current.questionId, ...answer };
     setSubmitting(true);
     setError(null);
+    setFeedback(null);
+    setFeedbackLoading(false);
     try {
-      const res = await judgeDictation({ questionId: current.questionId, ...answer });
+      const res = await judgeDictation(payload);
+      // 判题回来即出结果——错因还在路上也不等它
       setResult(res);
       if (res.isCorrect) setCorrectCount((n) => n + 1);
+      if (res.feedbackPending) {
+        setFeedbackLoading(true);
+        fetchDictationFeedback(payload)
+          .then((r) => {
+            if (feedbackToken.current === token) setFeedback(r.feedback);
+          })
+          .catch(() => {
+            if (feedbackToken.current === token) setFeedback(null);
+          })
+          .finally(() => {
+            if (feedbackToken.current === token) setFeedbackLoading(false);
+          });
+      }
     } catch {
       setError('判题失败，请重试');
     } finally {
@@ -64,6 +107,9 @@ export default function DictationRunPage() {
   };
 
   const handleNext = () => {
+    feedbackToken.current++; // 作废在途错因请求
+    setFeedback(null);
+    setFeedbackLoading(false);
     if (!isLast) {
       setIndex((i) => i + 1);
       setAnswer(EMPTY);
@@ -113,9 +159,10 @@ export default function DictationRunPage() {
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="mt-8 w-full h-14 rounded-2xl text-white text-lg font-bold disabled:opacity-60"
+            className="mt-8 w-full h-14 rounded-2xl text-white text-lg font-bold disabled:opacity-60 inline-flex items-center justify-center gap-2"
             style={{ backgroundColor: 'var(--brand-500)' }}
           >
+            {submitting && <Spinner size={18} />}
             {submitting ? '正在判题…' : '提交'}
           </button>
         ) : (
@@ -140,7 +187,9 @@ export default function DictationRunPage() {
 
                 {!result.fields.body.match && (
                   <div className="mt-5">
-                    <p className="text-sm font-bold text-[var(--text-primary)]">正文对比（忽略标点与空格）</p>
+                    <p className="text-sm font-bold text-[var(--text-primary)]">
+                      正文对比（判对错忽略标点与空格）
+                    </p>
                     <div className="mt-2">
                       <DictationDiffView ops={result.bodyDiff} />
                     </div>
@@ -152,9 +201,16 @@ export default function DictationRunPage() {
 
                 <div className="mt-5 border-t border-[var(--bg-subtle)] pt-4">
                   <p className="text-sm font-bold text-[var(--text-primary)]">错因提醒</p>
-                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                    {result.feedback ?? '暂时无法生成错因提醒，先对照上面的正文对比改一改。'}
-                  </p>
+                  {feedbackLoading ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Spinner />
+                      <p className="text-sm text-[var(--text-secondary)]">AI 正在生成错因提醒…</p>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                      {feedback ?? '暂时无法生成错因提醒，先对照上面的正文对比改一改。'}
+                    </p>
+                  )}
                 </div>
               </>
             )}

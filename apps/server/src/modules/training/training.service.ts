@@ -11,7 +11,7 @@ import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationPassagesRepository } from '../../database/repositories/dictation-passages.repo.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
-import type { DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
+import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
 import type {
   DictationPassageListItem,
@@ -132,8 +132,12 @@ export class TrainingService {
   }
 
   /**
-   * 语文默写判题：程序判对错（JudgeCore.judgeDictation）+ 错因文案（LLM，可选）。
-   * LLM 失败只丢文案、不丢判题结果（设计 spec §5 第 5 步）。
+   * 语文默写判题：**纯程序**判对错（JudgeCore.judgeDictation），不等 LLM。
+   *
+   * 2026-09-14 起错因文案与判题解耦：本方法只回判题结果（~25ms），
+   * 答错时带 `feedbackPending=true`，由前端另调 generateDictationFeedback 取文案。
+   * 解耦前错因 LLM 调用在关键路径上——本地 Qwen3.8-27B 是思考模型，
+   * 一次错答要等 13–16 秒才看到对错，学生以为卡死。
    */
   async judgeDictation(input: {
     studentId: number;
@@ -156,26 +160,6 @@ export class TrainingService {
       student: { author: input.author, dynasty: input.dynasty, body: input.body },
     });
 
-    let feedback: string | null = null;
-    if (!judged.isCorrect) {
-      try {
-        const result = await this.dictationFeedback.generate({
-          workTitle: passage.work_title,
-          expected,
-          student: { author: input.author, dynasty: input.dynasty, body: input.body },
-          fieldMatch: {
-            author: judged.fields.author.match,
-            dynasty: judged.fields.dynasty.match,
-            body: judged.fields.body.match,
-          },
-          bodyDiffText: renderBodyDiff(judged.bodyDiff),
-        });
-        feedback = result.content || null;
-      } catch (err) {
-        this.logger.warn(`dictationFeedback.generate failed (questionId=${input.questionId}): ${err}`);
-      }
-    }
-
     // 显式构造返回，不用 spread：judged 带 method 字段，spread 进对象字面量会触发
     // TS 多余属性检查（DictationJudgeResult 未声明 method）。
     return {
@@ -185,8 +169,50 @@ export class TrainingService {
       bodyDiff: judged.bodyDiff,
       errorBookId: judged.errorBookId,
       reference: expected,
-      feedback,
+      feedback: null,
+      feedbackPending: !judged.isCorrect,
     };
+  }
+
+  /**
+   * 语文默写错因文案（LLM，可选；判题后异步补取）。
+   *
+   * 只生成话术，**不写错题本、不碰判题**——判题与错题本已由 judgeDictation 落定，
+   * 这里重复调 judgeDictation 会二次写 main_error_books。故本方法只读篇目 + 纯函数算差异。
+   * 模型不可达/超时/两个模型都失败一律回 `feedback=null`，由前端显示兜底文案。
+   */
+  async generateDictationFeedback(input: {
+    questionId: number;
+    author: string;
+    dynasty: string;
+    body: string;
+  }): Promise<{ feedback: string | null }> {
+    const passage = await this.dictationRepo.findByQuestionId(input.questionId);
+    if (!passage) {
+      throw new NotFoundException(`默写篇目不存在：${input.questionId}`);
+    }
+
+    const expected = { author: passage.author, dynasty: passage.dynasty, body: passage.body };
+    const student = { author: input.author, dynasty: input.dynasty, body: input.body };
+    const { fields, bodyDiff } = evaluateDictation(expected, student);
+
+    try {
+      const result = await this.dictationFeedback.generate({
+        workTitle: passage.work_title,
+        expected,
+        student,
+        fieldMatch: {
+          author: fields.author.match,
+          dynasty: fields.dynasty.match,
+          body: fields.body.match,
+        },
+        bodyDiffText: renderBodyDiff(bodyDiff),
+      });
+      return { feedback: result.content || null };
+    } catch (err) {
+      this.logger.warn(`dictationFeedback.generate failed (questionId=${input.questionId}): ${err}`);
+      return { feedback: null };
+    }
   }
 
   /** 主观题自评：校验题目存在后委托 JudgeCore.recordSelfAssessment（留痕 + 错题本写入/清零）。

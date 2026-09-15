@@ -4,6 +4,8 @@ import type { ProviderAdapter } from './types.js';
 import { callWithRetry } from './errors.js';
 import { KimiClient } from './kimi-client.js';
 import { LocalClient } from './local-client.js';
+
+export { LLAMA_CPP_NO_THINKING_BODY } from './local-client.js';
 import { QwenClient } from './qwen-client.js';
 import { DeepSeekClient } from './deepseek-client.js';
 import { GeminiClient } from './gemini-client.js';

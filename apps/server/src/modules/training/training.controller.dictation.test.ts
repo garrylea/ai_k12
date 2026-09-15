@@ -7,6 +7,7 @@ function makeController() {
     listDictationPassages: vi.fn().mockResolvedValue({ passages: [] }),
     startDictation: vi.fn().mockResolvedValue({ questions: [] }),
     judgeDictation: vi.fn().mockResolvedValue({ isCorrect: true, feedback: null }),
+    generateDictationFeedback: vi.fn().mockResolvedValue({ feedback: null }),
   };
   return { controller: new TrainingController(service as never), service };
 }
@@ -76,6 +77,33 @@ describe('TrainingController dictation 端点', () => {
     );
     expect(service.judgeDictation).toHaveBeenCalledWith({
       studentId: 7, questionId: 100, author: '', dynasty: '', body: '',
+    });
+  });
+
+  it('POST dictation/feedback：questionId 非正整数 → 400', async () => {
+    const { controller } = makeController();
+    await expect(
+      controller.generateDictationFeedback({ questionId: -1, author: '', dynasty: '', body: '' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('POST dictation/feedback：合法入参 → 透传三字段（不带 studentId）', async () => {
+    const { controller, service } = makeController();
+    await controller.generateDictationFeedback({
+      questionId: 100, author: '李白', dynasty: '唐', body: '床前明月先',
+    });
+    expect(service.generateDictationFeedback).toHaveBeenCalledWith({
+      questionId: 100, author: '李白', dynasty: '唐', body: '床前明月先',
+    });
+  });
+
+  it('POST dictation/feedback：非字符串字段同样降级为空串', async () => {
+    const { controller, service } = makeController();
+    await controller.generateDictationFeedback(
+      { questionId: 100, author: 123, dynasty: null, body: {} } as never,
+    );
+    expect(service.generateDictationFeedback).toHaveBeenCalledWith({
+      questionId: 100, author: '', dynasty: '', body: '',
     });
   });
 });

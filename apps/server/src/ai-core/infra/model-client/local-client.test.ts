@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { LocalClient } from './local-client.js';
+import { LocalClient, LLAMA_CPP_NO_THINKING_BODY } from './local-client.js';
 import { KimiClient } from './kimi-client.js';
 
 const request = {
@@ -33,5 +33,24 @@ describe('LocalClient', () => {
     expect(body.enable_thinking).toBeUndefined();
     expect(body.response_format).toEqual({ type: 'json_object' });
     expect(body.stream).toBe(true);
+  });
+
+  it('extraBody 原样并入请求体（本地端点靠它关 thinking）', () => {
+    const body = (new LocalClient('local') as any).buildRequestBody(
+      { ...request, extraBody: LLAMA_CPP_NO_THINKING_BODY },
+      true,
+    );
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+    // enable_thinking 仍被删掉：llama.cpp 不认 DashScope 那个字段，关 thinking 只能走 kwargs
+    expect(body.enable_thinking).toBeUndefined();
+    expect(body.response_format).toEqual({ type: 'json_object' });
+  });
+
+  it('extraBody 可覆盖默认字段（逃生舱语义）', () => {
+    const body = (new LocalClient('local') as any).buildRequestBody(
+      { ...request, extraBody: { response_format: { type: 'text' } } },
+      false,
+    );
+    expect(body.response_format).toEqual({ type: 'text' });
   });
 });

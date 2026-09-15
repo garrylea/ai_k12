@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeChineseAnswer, diffChinese } from './normalize-chinese.util.js';
+import {
+  normalizeChineseAnswer,
+  diffChinese,
+  diffChineseInOriginalText,
+  evaluateDictation,
+} from './normalize-chinese.util.js';
 
 describe('normalizeChineseAnswer', () => {
   it('去掉中文标点', () => {
@@ -76,5 +81,71 @@ describe('diffChinese', () => {
     // 所以 diff 里出现 equal 是正常的；关键是它不能是「完全一致」那一种结果。
     expect(ops).not.toEqual([{ type: 'equal', text: '月明' }]);
     expect(ops.some((o) => o.type === 'wrong' || o.type === 'missing' || o.type === 'extra')).toBe(true);
+  });
+});
+
+describe('diffChineseInOriginalText（展示带标点）', () => {
+  it('相等段带上标点，错字段保持单字干净（标点不重复出现）', () => {
+    const ops = diffChineseInOriginalText('床前明月光，疑是地上霜。', '床前明月先，疑是地上霜。');
+    expect(ops).toEqual([
+      { type: 'equal', text: '床前明月' },
+      { type: 'wrong', expected: '光', actual: '先' },
+      { type: 'equal', text: '，疑是地上霜。' },
+    ]);
+  });
+
+  it('学生整篇不打标点，展示仍用 expected 侧的规范标点', () => {
+    // 需求来源：判对错可以忽略标点，但给学生看的对比必须有标点，否则读不出句子。
+    const ops = diffChineseInOriginalText('床前明月光，疑是地上霜。', '床前明月光疑是地上霜');
+    expect(ops).toEqual([{ type: 'equal', text: '床前明月光，疑是地上霜。' }]);
+  });
+
+  it('整段漏写保留段内与段尾标点', () => {
+    const ops = diffChineseInOriginalText(
+      '塞下秋来风景异，衡阳雁去无留意。浊酒一杯家万里，燕然未勒归无计。',
+      '塞下秋来风景异，衡阳雁去无留意。',
+    );
+    expect(ops).toEqual([
+      { type: 'equal', text: '塞下秋来风景异，衡阳雁去无留意。' },
+      { type: 'missing', text: '浊酒一杯家万里，燕然未勒归无计。' },
+    ]);
+  });
+
+  it('多写字只展示多写的字本身，标点不重复出现在 equal 段与 extra 段', () => {
+    const ops = diffChineseInOriginalText('床前明月光。', '床前明月光，啊。');
+    expect(ops).toEqual([
+      { type: 'equal', text: '床前明月光。' },
+      { type: 'extra', text: '啊' },
+    ]);
+  });
+
+  it('判对错口径不变：带不带标点都不影响 equal 判定', () => {
+    const ops = diffChineseInOriginalText('床前明月光，疑是地上霜。', '床前明月光疑是地上霜');
+    expect(ops.every((o) => o.type === 'equal')).toBe(true);
+  });
+});
+
+describe('evaluateDictation', () => {
+  const expected = { author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。' };
+
+  it('三项全对（忽略标点与空格）→ isCorrect=true，bodyDiff 为空', () => {
+    const res = evaluateDictation(expected, { author: '李白', dynasty: '唐', body: '床前明月光疑是地上霜' });
+    expect(res.isCorrect).toBe(true);
+    expect(res.fields).toEqual({ author: { match: true }, dynasty: { match: true }, body: { match: true } });
+    expect(res.bodyDiff).toEqual([]);
+  });
+
+  it('仅正文错一个字 → 定位到该字，且展示带标点', () => {
+    const res = evaluateDictation(expected, { author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。' });
+    expect(res.isCorrect).toBe(false);
+    expect(res.fields.body.match).toBe(false);
+    expect(res.bodyDiff).toContainEqual({ type: 'wrong', expected: '光', actual: '先' });
+  });
+
+  it('仅作者错 → body 仍算对，bodyDiff 为空', () => {
+    const res = evaluateDictation(expected, { author: '杜甫', dynasty: '唐', body: '床前明月光，疑是地上霜。' });
+    expect(res.isCorrect).toBe(false);
+    expect(res.fields).toEqual({ author: { match: false }, dynasty: { match: true }, body: { match: true } });
+    expect(res.bodyDiff).toEqual([]);
   });
 });

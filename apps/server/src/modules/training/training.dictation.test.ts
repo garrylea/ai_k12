@@ -80,19 +80,21 @@ describe('TrainingService.startDictation', () => {
   });
 });
 
-describe('TrainingService.judgeDictation', () => {
-  it('判错 → 附带 LLM 错因与参考答案', async () => {
+describe('TrainingService.judgeDictation（判题：纯程序、不等 LLM）', () => {
+  it('判错 → 回判题结果 + feedbackPending=true，且**不调用 LLM**', async () => {
     const { service, dictationFeedback } = makeService();
     const res = await service.judgeDictation({
       studentId: 7, questionId: 100, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
     });
     expect(res.isCorrect).toBe(false);
-    expect(res.feedback).toBe('注意「月光」的「光」');
+    expect(res.feedback).toBeNull();
+    expect(res.feedbackPending).toBe(true);
     expect(res.reference).toEqual({ author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。' });
-    expect(dictationFeedback.generate).toHaveBeenCalledOnce();
+    // 解耦的核心断言：判题链路里不能再出现 LLM 调用，否则学生又要等十几秒
+    expect(dictationFeedback.generate).not.toHaveBeenCalled();
   });
 
-  it('判对 → 不调用 LLM，feedback=null', async () => {
+  it('判对 → feedbackPending=false', async () => {
     const { service, dictationFeedback } = makeService({
       judgeResult: {
         questionId: 100, isCorrect: true, method: 'exact',
@@ -105,22 +107,51 @@ describe('TrainingService.judgeDictation', () => {
     });
     expect(res.isCorrect).toBe(true);
     expect(res.feedback).toBeNull();
+    expect(res.feedbackPending).toBe(false);
     expect(dictationFeedback.generate).not.toHaveBeenCalled();
-  });
-
-  it('LLM 两个模型都失败 → 不阻断判题，feedback=null', async () => {
-    const { service } = makeService({ feedback: new Error('all down') });
-    const res = await service.judgeDictation({
-      studentId: 7, questionId: 100, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
-    });
-    expect(res.isCorrect).toBe(false);
-    expect(res.feedback).toBeNull();
   });
 
   it('篇目不存在 → 404', async () => {
     const { service } = makeService({ passage: null });
     await expect(
       service.judgeDictation({ studentId: 7, questionId: 999, author: '', dynasty: '', body: '' }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('TrainingService.generateDictationFeedback（错因：可选、失败降级）', () => {
+  it('判错入参 → 返回 LLM 错因', async () => {
+    const { service, dictationFeedback } = makeService();
+    const res = await service.generateDictationFeedback({
+      questionId: 100, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
+    });
+    expect(res.feedback).toBe('注意「月光」的「光」');
+    expect(dictationFeedback.generate).toHaveBeenCalledOnce();
+  });
+
+  it('喂给模型的差异文本与错处字段一致（服务端自己重算，不依赖判题接口）', async () => {
+    const { service, dictationFeedback } = makeService();
+    await service.generateDictationFeedback({
+      questionId: 100, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
+    });
+    const arg = dictationFeedback.generate.mock.calls[0][0];
+    expect(arg.workTitle).toBe('静夜思');
+    expect(arg.fieldMatch).toEqual({ author: true, dynasty: true, body: false });
+    expect(arg.bodyDiffText).toBe('床前明月[光→先]，疑是地上霜。');
+  });
+
+  it('LLM 两个模型都失败 → feedback=null（不抛错，不阻断前端）', async () => {
+    const { service } = makeService({ feedback: new Error('all down') });
+    const res = await service.generateDictationFeedback({
+      questionId: 100, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
+    });
+    expect(res.feedback).toBeNull();
+  });
+
+  it('篇目不存在 → 404', async () => {
+    const { service } = makeService({ passage: null });
+    await expect(
+      service.generateDictationFeedback({ questionId: 999, author: '', dynasty: '', body: '' }),
     ).rejects.toThrow();
   });
 });
