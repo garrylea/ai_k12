@@ -666,16 +666,11 @@ python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty -
 
 ### 4.9 dictation_cli — 语文古诗文默写采集入库（旁路管线）
 
-> **这条旁路只服务「训练 → 语文 → 专项 → 古诗文默写」**，产物进 `chinese_passages`，
+> **这条旁路只服务「训练 → 语文 → 专项 → 古诗文默写」**，产物进 `chinese_passages`
+> （2026-09-15 独立化改造已实施：由 `dictation_passages` 改名而来、摘除 `question_id`），
 > **既不接进 4.1–4.5 的四阶段主线，也不写 `questions` 表**（避免动到 cards/questions 的既有语义）。
 > 前 3 步（爬 / 转 / 目录）复用 §3.3、§4.1、§4.2；后 3 步是本 CLI 新建。
 > 设计与实测结论见 `docs/superpowers/specs/2026-09-13-chinese-dictation-content-pipeline-design.md`。
->
-> ⚠️ **改造待实施（2026-09-15）**：本节按「古诗文专项是独立子系统」的**目标形态**描述——
-> 表名 `dictation_passages` → `chinese_passages`、摘除 `question_id` 及 `questions` 上的对应行
-> （改造见 `docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md` §6）。
-> **改造实施前，实际表名仍是 `dictation_passages`、且仍会写 `questions` 行**；
-> 下面命令里的 `chinese_passages` 在那之前请读作 `dictation_passages`。
 
 **先看清分工**（决定了哪些步骤要人工介入）：
 

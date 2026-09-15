@@ -3860,11 +3860,11 @@ paths:
       tags: [Training]
       summary: 语文默写篇目清单（配置页用）
       description: >-
-        语文默写配置页的篇目数据（student JWT）。仅返回 questions.is_active=1 且
-        dictation_passages.verified=1 且 memorize_required=1 的篇目（两道闸门：
-        verified 是内容已校验，memorize_required 是教学上要求背诵），按
-        sort_order, id 排序。只出篇名 + 册次——作者/朝代/正文是学生要作答的三个
-        判题字段，一律不下发（防答案泄露）。本清单不排除该生已标记「不再展示」的篇目。
+        语文默写配置页的篇目数据（student JWT）。仅返回 chinese_passages 中
+        verified=1 且 memorize_required=1 且 is_active=1 的篇目（三道闸门：
+        verified 是内容已校验，memorize_required 是教学上要求背诵，is_active
+        是停用开关），按 sort_order, id 排序。只出篇名 + 册次——作者/朝代/正文
+        是学生要作答的三个判题字段，一律不下发（防答案泄露）。
       operationId: listDictationPassages
       security: [{ bearerAuth: [] }]
       responses:
@@ -3886,16 +3886,14 @@ paths:
       summary: 语文默写开练（按册次随机抽题或按指定篇目出题）
       description: >-
         语文默写开练（student JWT）。count 限 1-20 整数（越界/非整数 400）；
-        semester 限 上册|下册|null（null=全部册次，非法 400）；questionIds 为正整数
-        数组或 null——非空时按指定篇目出题（忽略 semester，仅保留已校验篇目），
+        semester 限 上册|下册|null（null=全部册次，非法 400）；passageIds 为正整数
+        数组或 null——非空时按指定篇目出题（忽略 semester，仅保留抽题池内篇目），
         否则按册次随机抽题。两条路径都**只从抽题池取题**：verified=1 且
-        memorize_required=1（内容已校验 + 教学上要求背诵，两道闸门）。
-        题项白名单序列化：只出 questionId/prompt/workTitle/semester，
-        author/dynasty/正文一律剥离（防答案泄露，与 targeted/start 同规矩）。
-        「不再展示」排除仅作用于随机抽题路径——按册次随机抽题时基于 JWT
-        user.sub（studentId）LEFT JOIN student_hidden_questions ... IS NULL 排除
-        该生已标记的篇目；按 questionIds 指定篇目的路径不做该排除。
-        题池为空返回 { questions: [] }。
+        memorize_required=1 且 is_active=1（三道闸门）；「全部册次」随机抽时按
+        篇名去重（九上/九下有 9 篇重复收录，跨册取 MIN(id)）。题面由篇名服务端
+        生成（请默写《X》，不落库）。题项白名单序列化：只出
+        passageId/prompt/workTitle/semester，author/dynasty/正文一律剥离
+        （防答案泄露，与 targeted/start 同规矩）。题池为空返回 { questions: [] }。
       operationId: startDictation
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -3917,12 +3915,12 @@ paths:
                       data:
                         $ref: '#/components/schemas/DictationStartResult'
         '400':
-          description: count 越界、semester 非法或 questionIds 非法
+          description: count 越界、semester 非法或 passageIds 非法
 
   /training/dictation/judge:
     post:
       tags: [Training]
-      summary: 语文默写判题（纯程序化判对错，不等 LLM）
+      summary: 语文默写判题（纯程序化判对错，不等 LLM，不写任何学生状态）
       description: >-
         语文默写判题（student JWT）。判对错**纯程序化，不调用 LLM**：三字段各自
         normalizeChineseAnswer（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后
@@ -3930,15 +3928,12 @@ paths:
         正文不等时由 diffChineseInOriginalText（LCS 逐字差异 + 原文标点回投）定位，
         相邻「漏写+多写」合并为一个 wrong（写错字）、连续同类项合并成段；
         判对错口径仍忽略标点，但 bodyDiff 的展示文本带原文标点（学生要能读成句）。
-        questionId 须正整数（非法 400），篇目不存在 404。答错 find-or-create 写
-        main_error_books（source='dictation'）；答对清零该题所有未清记录。
+        passageId 须正整数（非法 400），篇目不存在 404。
+        **不入错题本、不清零**（2026-09-15 独立化：古诗文专项是独立子系统，
+        PRD §6.3 / §7.4 例外——判题不写任何学生状态）。
         **错因文案与判题解耦（2026-09-14）**：本端点只回判题结果（~25ms），
         答错时 feedbackPending=true，错因由 POST /training/dictation/feedback 另取。
         解耦前错因 LLM 在关键路径上（本地思考模型 13–16s），学生会以为卡死。
-        **【2026-09-15 设计变更，待实施】古诗文专项已定案为独立子系统**：
-        questionId 将改为 passageId，判题**不再写 main_error_books / 不清零**，
-        errorBookId 取消（PRD §6.3 / §7.4 例外）。本描述对应当前已实现的形态，
-        改造落地时同步更新。见 docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md
       operationId: judgeDictation
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -3960,7 +3955,7 @@ paths:
                       data:
                         $ref: '#/components/schemas/DictationJudgeResult'
         '400':
-          description: questionId 非法
+          description: passageId 非法
         '404':
           description: 默写篇目不存在
 
@@ -3970,11 +3965,11 @@ paths:
       summary: 语文默写错因文案（LLM 可选，与判题解耦）
       description: >-
         语文默写错因文案（student JWT）。判题端点判错后由前端单独调用；
-        服务端按入参重算差异（纯函数，**不写错题本、不重复判题**）后喂给
-        dictation_feedback 场景（primary=local 本地 llama.cpp、fallback=deepseek-flash）。
+        服务端按入参重算差异（纯函数，**只读篇目、只算差异，不写任何学生状态**）后
+        喂给 dictation_feedback 场景（primary=local 本地 llama.cpp、fallback=deepseek-flash）。
         本地端点靠 chat_template_kwargs 关掉 thinking（`thinking: false` 对 llama.cpp
         无效），实测 13–16s → 2s 量级。模型不可达/超时/两个模型都失败一律返回
-        feedback=null（HTTP 200，不报错），由前端显示兜底文案。questionId 须正整数
+        feedback=null（HTTP 200，不报错），由前端显示兜底文案。passageId 须正整数
         （非法 400），篇目不存在 404。
       operationId: generateDictationFeedback
       security: [{ bearerAuth: [] }]
@@ -3997,7 +3992,7 @@ paths:
                       data:
                         $ref: '#/components/schemas/DictationFeedbackResult'
         '400':
-          description: questionId 非法
+          description: passageId 非法
         '404':
           description: 默写篇目不存在
 
@@ -5950,27 +5945,27 @@ components:
         默写篇目元数据（配置页选篇用）。只含篇名与册次；作者/朝代/正文是学生要
         作答的三个判题字段，故意不下发。
       properties:
-        questionId:
+        passageId:
           type: integer
-          description: 题库题目 id（questions 行作锚点）
+          description: 篇目 id（chinese_passages.id，独立子系统不挂 questions）
         workTitle:
           type: string
           description: 篇名（如「静夜思」）
         semester:
           type: string
           description: 册次（上册/下册）
-      required: [questionId, workTitle, semester]
+      required: [passageId, workTitle, semester]
 
     DictationStartRequest:
       type: object
-      required: [semester, questionIds, count]
+      required: [semester, passageIds, count]
       properties:
         semester:
           type: string
           nullable: true
           enum: [上册, 下册]
           description: 册次范围；null=全部册次（白名单外取值 400）
-        questionIds:
+        passageIds:
           type: array
           nullable: true
           items:
@@ -5996,27 +5991,27 @@ components:
     DictationQuestion:
       type: object
       properties:
-        questionId:
+        passageId:
           type: integer
-          description: 题库题目 id
+          description: 篇目 id（chinese_passages.id）
         prompt:
           type: string
-          description: 题面（如「请默写《静夜思》」；只放篇名，不含任何提示性文字）
+          description: 题面（由篇名服务端生成，如「请默写《静夜思》」；不落库）
         workTitle:
           type: string
           description: 篇名
         semester:
           type: string
           description: 册次（上册/下册）
-      required: [questionId, prompt, workTitle, semester]
+      required: [passageId, prompt, workTitle, semester]
 
     DictationJudgeRequest:
       type: object
-      required: [questionId, author, dynasty, body]
+      required: [passageId, author, dynasty, body]
       properties:
-        questionId:
+        passageId:
           type: integer
-          description: 题库题目 id（须正整数，非法 400；篇目不存在 404）
+          description: 篇目 id（须正整数，非法 400；篇目不存在 404）
         author:
           type: string
           description: 学生作答的作者
@@ -6029,9 +6024,9 @@ components:
 
     DictationJudgeResult:
       type: object
-      description: 默写判题结果（程序化对错 + LCS 差异 + 可选 LLM 错因）
+      description: 默写判题结果（程序化对错 + LCS 差异；不写任何学生状态，无 errorBookId）
       properties:
-        questionId:
+        passageId:
           type: integer
         isCorrect:
           type: boolean
@@ -6063,10 +6058,7 @@ components:
         feedbackPending:
           type: boolean
           description: true=判错且错因待补（前端应另调 dictation/feedback）；答对恒 false
-        errorBookId:
-          type: integer
-          description: 答错时写入/复用的 main_error_books id；答对时该键省略
-      required: [questionId, isCorrect, fields, bodyDiff, reference, feedback, feedbackPending]
+      required: [passageId, isCorrect, fields, bodyDiff, reference, feedback, feedbackPending]
 
     DictationFeedbackResult:
       type: object

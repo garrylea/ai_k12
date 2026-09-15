@@ -132,14 +132,16 @@ pytest tests/ -q                                # 105 passed
 
 四阶段主管线（convert → extract → publish → db_loader）服务的是**数学/化学教材卡片与试卷
 题目**，产物进 `textbook_cards` / `questions`。语文默写是**另一条独立旁路**，产物进
-`dictation_passages`——它刻意不接进四阶段，避免动到主链路的表结构与幂等语义。
+`chinese_passages`（2026-09-15 独立化改名，原名 `dictation_passages`、已摘除 `question_id`）——
+它刻意不接进四阶段，避免动到主链路的表结构与幂等语义。
 
 ### 为什么独立
 
 - 目标不同：主管线抽「卡片/题目」，这条抽「**整篇古诗文正文**」（学生要逐字默写，
   错一个字就判错，故对正文准确性的要求比卡片高得多）。
-- 产物不同：`dictation_passages` 是篇目级结构（篇名/作者/朝代/正文/册次/必背标志），
-  与 `questions` 的题面/答案语义不重合（详见 `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md` §4.1.1 的「为什么另建表」）。
+- 产物不同：`chinese_passages` 是篇目级结构（篇名/作者/朝代/正文/册次/必背标志），
+  与 `questions` 的题面/答案语义不重合（详见 `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md` §4.1.1 的「为什么另建表」；2026-09-15 起进一步**完全不挂 `questions`**，见
+  `docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md` §2）。
 - 复用但不动：前 3 步直接用现成 CLI（`crawler_cli` / `convert_cli` / `toc_parse_cli`），
   后 3 步是本管线新建。
 
