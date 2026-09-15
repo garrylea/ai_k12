@@ -8,7 +8,18 @@
 -- 步骤（顺序不可换，由 FK 约束决定）：
 --   1. 清 main_error_books(source='dictation') —— 它的 question_id 是 ON DELETE RESTRICT，
 --      不先删会挡住第 2 步
---   2. 删 questions(type='poem_dictation')   —— 其余引用表都是 ON DELETE CASCADE，跟着清
+--   2. 删 questions(type='poem_dictation')
+--      引用 questions(id) 的外键分三类，**第 2 步能否成功取决于数据，而不只是 schema**：
+--        ON DELETE CASCADE（跟着自动清，无风险）：
+--          question_hints / student_hidden_questions / question_self_assessments /
+--          paper_questions / question_knowledge_points
+--        ON DELETE RESTRICT（**有行就会被拦、整个脚本中断**）：
+--          main_error_books（第 1 步已清）、answers、aux_error_books、exam_answers、
+--          variation_questions
+--        ON DELETE SET NULL（有行则静默把外键置空，不报错但会改数据）：
+--          practice_results、ai_dialogues
+--      ✅ 2026-09-15 执行前实测（本库）：上述 RESTRICT 四张 + SET NULL 两张对这 50 行**全部 0 行**。
+--      ⚠️ 换库执行前，先跑下面的「前置检查」确认，别默认安全。
 --   3. dictation_passages 改名 chinese_passages
 --   4. 摘 question_id 列 + 它的唯一键与外键，并改名其余索引
 --   5. 加 is_active（取代原 questions.is_active）
@@ -17,6 +28,15 @@
 -- ⚠️ 不可恢复（第 1、2 步删的是学生数据与题库行）。执行前先备份：
 --   mysqldump -u ai_k12 -pai_k12 ai_k12 main_error_books questions dictation_passages \
 --     > backup_20260915.sql
+--
+-- 前置检查（每次执行前跑，六列应全为 0）：
+--   SELECT
+--     (SELECT COUNT(*) FROM answers              WHERE question_id IN (SELECT id FROM questions WHERE type='poem_dictation')) AS answers,
+--     (SELECT COUNT(*) FROM aux_error_books      WHERE question_id IN (SELECT id FROM questions WHERE type='poem_dictation')) AS aux_error_books,
+--     (SELECT COUNT(*) FROM exam_answers         WHERE question_id IN (SELECT id FROM questions WHERE type='poem_dictation')) AS exam_answers,
+--     (SELECT COUNT(*) FROM variation_questions  WHERE question_id IN (SELECT id FROM questions WHERE type='poem_dictation')) AS variation_questions,
+--     (SELECT COUNT(*) FROM practice_results     WHERE question_id IN (SELECT id FROM questions WHERE type='poem_dictation')) AS practice_results,
+--     (SELECT COUNT(*) FROM ai_dialogues         WHERE question_id IN (SELECT id FROM questions WHERE type='poem_dictation')) AS ai_dialogues;
 
 -- 是否首次执行：老表还在 = 还没跑过。跑过之后老表已改名，存量清理不再重复。
 SET @first_run := (
