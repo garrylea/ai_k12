@@ -991,6 +991,13 @@ git commit -m "refactor(training): 默写 questionId->passageId，题面由篇�
 
 ## Task 5: Controller + DTO 字段改名
 
+> **承接 Task 4 评审的一处 Minor（必做）**：Task 4 的 12 个用例里**没有一条断言 `judgeDictation` 返回的
+> `passageId`** —— 那行（如今是 `passageId: passage.id`）若写成 `passageId: 0` 或取自别处，12 条仍会全绿
+> （`PASSAGE.id === 1` 与列表/题项里的 `1` 撞值，其它断言间接区分不了）。
+> Task 4 时 DTO 还没改，加这条断言会多出第 4 条 tsc 错误、破坏验收标准，故延后到这里。
+> **本任务里请在 `apps/server/src/modules/training/training.dictation.test.ts` 的 `judgeDictation` 用例中补上**
+> `expect(res.passageId).toBe(1);`（放在 `expect(res.reference)` 附近），并确认它确实有牙。
+
 **Files:**
 - Modify: `apps/server/src/modules/training/dto/dictation.dto.ts`（整文件重写）
 - Modify: `apps/server/src/modules/training/training.controller.ts:140-205`
