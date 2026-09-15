@@ -1668,7 +1668,7 @@ class DictationLoader:
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_dictation_loader.py -q`
-Expected: PASS（9 个）
+Expected: PASS（**10 个** —— `TestNoQuestionsWrites` 2 + `TestIdempotency` 6 + `TestReadJsonl` 2；初版写「9 个」是数错了）
 
 - [ ] **Step 5: 改 CLI 输出**
 
@@ -1693,7 +1693,7 @@ Expected: PASS（9 个）
 - [ ] **Step 6: 全量 pytest**
 
 Run: `cd tools/data-refinery && python -m pytest -q`
-Expected: 全绿（改造前 237 passed）
+Expected: 全绿（2026-09-15 实测基线 **891 passed, 10 skipped**；初版写的「237 passed」是过期数字）
 
 - [ ] **Step 7: Commit**
 
