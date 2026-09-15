@@ -295,31 +295,32 @@ CREATE TABLE IF NOT EXISTS question_hints (
   CONSTRAINT fk_qh_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 语文古诗文默写篇目（2026-09-13）。questions 行作锚点（错题本/隐藏/提示都挂 question_id），
--- 本表承载篇目级结构化字段：篇名（稳定业务主键）/作者/朝代/正文/册次/排序/校验闸门。
--- 设计见 docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md §4
-CREATE TABLE IF NOT EXISTS dictation_passages (
+-- 语文古诗文专项篇目（2026-09-13 建；2026-09-15 独立化——改名自 dictation_passages、
+-- 摘除 question_id）。**独立子系统**：不挂 questions、不进错题本、不参与主线清零门禁
+-- （PRD §6.3 / §7.4）。**无外键**——本表不指向任何表，也不被任何表指向，表即完整边界。
+-- 默写抽题池 = verified = 1 AND memorize_required = 1 AND is_active = 1。
+-- 设计见 docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md §6
+CREATE TABLE IF NOT EXISTS chinese_passages (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  question_id BIGINT NOT NULL,
-  work_title VARCHAR(100) NOT NULL,
-  author VARCHAR(50) NOT NULL,
-  dynasty VARCHAR(20) NOT NULL,
-  body TEXT NOT NULL,
-  grade_band VARCHAR(20) NOT NULL,
-  grade VARCHAR(20) DEFAULT NULL,
-  semester VARCHAR(20) NOT NULL,
+  work_title VARCHAR(100) NOT NULL,      -- 篇名，如《岳阳楼记》；业务键之一
+  author VARCHAR(50) NOT NULL,           -- 作者
+  dynasty VARCHAR(20) NOT NULL,          -- 朝代
+  body TEXT NOT NULL,                    -- 正文（权威原文，含标点）
+  grade_band VARCHAR(20) NOT NULL,       -- 'junior'
+  grade VARCHAR(20) DEFAULT NULL,        -- '九年级'
+  semester VARCHAR(20) NOT NULL,         -- '上册' / '下册'；业务键之一
   sort_order SMALLINT NOT NULL DEFAULT 0,
-  source_ref VARCHAR(200) DEFAULT NULL,
+  source_ref VARCHAR(200) DEFAULT NULL,  -- 教材来源（书名 + 页码）
   verified TINYINT(1) NOT NULL DEFAULT 0,
-  -- 教学上是否要求背诵（与 verified 语义不同：verified 是内容是否已校验）。
-  -- 抽题池 = verified = 1 AND memorize_required = 1。
+  -- 教学上是否要求背诵。与 verified 是**两道正交的闸门**：
+  --   verified           = 内容是否已校验（正文准确）—— 内容管线自检通过后置 1
+  --   memorize_required  = 教学上是否要求背 —— 由人后续标定
   memorize_required TINYINT(1) NOT NULL DEFAULT 0,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,  -- 停用开关（取代原 questions.is_active）
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-  UNIQUE KEY uniq_dp_question (question_id),
-  UNIQUE KEY uniq_dp_work (work_title, semester),
-  KEY idx_dp_filter (grade_band, semester, sort_order),
-  CONSTRAINT fk_dp_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
+  UNIQUE KEY uniq_chinese_passages_work (work_title, semester),
+  KEY idx_chinese_passages_filter (grade_band, semester, sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 考试会话（服务器权威计时：deadline_at；状态 in_progress | submitted）
