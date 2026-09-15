@@ -105,6 +105,13 @@ describe('ChinesePassagesRepository', () => {
     expect(sql).toContain('WHERE dp.id = ?');
     expect(sql).toContain('LIMIT 1');
     expect(params).toEqual([100]);
+    // 反面断言，防日后「顺手补门禁」：spec §6 明确裁决判定路径**有意不设门禁**
+    // （不要为该路径补——那会误伤「按 ID 直接练某篇」等合法用法）。
+    // 只有正面断言时，给 WHERE 加上 AND dp.verified = 1 测试仍会全绿。
+    // 注意断言的是 `AND dp.xxx` 而非 `dp.xxx`——后者在 SELECT_COLS 里本来就出现。
+    expect(sql).not.toContain('AND dp.verified');
+    expect(sql).not.toContain('AND dp.is_active');
+    expect(sql).not.toContain('AND dp.memorize_required');
   });
 
   it('upsert：按 (work_title, semester) 业务主键 upsert，verified 由入参决定', async () => {
