@@ -15,24 +15,29 @@
 -- 步骤：
 --   0. 两道中止闸门（见下，**在任何删除之前**）
 --   1. 清 main_error_books(source='dictation')
+--   1.5 摘 dictation_passages 自己的 CASCADE 外键（**必须在 2 之前**，见 1.5 步的警告）
 --   2. 删 questions(type='poem_dictation')
 --   3. dictation_passages 改名 chinese_passages
---   4. 摘 question_id 列 + 它的唯一键与外键，并改名其余索引
+--   4. 摘 question_id 的唯一键与列，并改名其余索引
 --   5. 加 is_active
 --
--- **步骤顺序里只有两处是硬约束，其余是选择**（别照抄成「全是 FK 逼的」）：
+-- **步骤顺序里有三处硬约束，其余是选择**（别照抄成「全是 FK 逼的」）：
 --   · 1 → 2：硬约束。main_error_books.question_id 是 ON DELETE RESTRICT，不先清就被拦。
---   · 4a → 4b → 4c：硬约束。MySQL 不允许在 FK 仍使用该索引时 DROP INDEX，
---     所以必须先摘外键、再摘唯一键、最后摘列。
+--   · 1.5 → 2：**最要命的硬约束**。dictation_passages 自己的 fk_dp_question 是
+--     ON DELETE CASCADE，不先摘掉，第 2 步删题会把全部篇目行**级联清空**（静默数据丢失，
+--     2026-09-15 实库踩过，靠备份恢复——详见 1.5 步的注释）。
+--   · 4a → 4b：硬约束。MySQL 不允许在 FK 仍使用该索引时 DROP INDEX（1.5 已在改名前
+--     摘掉了外键，故改名后只剩唯一键→列这一个顺序约束）。
 --   · 1/2 排在 3 之前：**选择**（先清数据再改名更直观）。代价是下面的 @first_run
 --     把「清理」与「改名」耦合成同一个开关。
 --
--- 引用 questions(id) 的外键分三类 —— **第 2 步能否成功取决于数据，而不只是 schema**：
---   ON DELETE CASCADE（跟着自动清，无风险）：
+-- 引用 questions(id) 的外键分三类：
+--   ON DELETE CASCADE（第 2 步删题时跟着自动清）：
+--     **dictation_passages 自己（fk_dp_question）← 必须先摘，见 1.5，否则篇目全丢**
 --     question_hints / student_hidden_questions / question_self_assessments /
---     paper_questions / question_knowledge_points
---   ON DELETE RESTRICT（**有行就被拦、整个脚本中断**）：
---     main_error_books / answers / aux_error_books / exam_answers / variation_questions
+--     paper_questions / question_knowledge_points（这些本来就该跟着清，无风险）
+--   ON DELETE RESTRICT（**有行就被拦、整个脚本中断**——「能否成功取决于数据而非 schema」）：
+--     main_error_books（第 1 步已清）/ answers / aux_error_books / exam_answers / variation_questions
 --   ON DELETE SET NULL（有行则静默把外键置空，不报错但会改数据）：
 --     practice_results / ai_dialogues
 -- 实测（2026-09-15，本库）：这 50 行在上列 RESTRICT 四张与 SET NULL 两张里**全部 0 行**。
@@ -53,9 +58,10 @@
 -- 本库实测 50 行的 questions.is_active 全为 1，故影响为 0；换库前请确认：
 --   SELECT COUNT(*) FROM questions WHERE type='poem_dictation' AND is_active = 0;
 --
--- 幂等：每步先查 information_schema。跑第二遍时 @first_run=0 → 1/2/3 跳过；
---   表内已无 fk_dp_question / uniq_dp_question / question_id，索引已改名，is_active 已在
---   → 4a–5 全跳过。**唯一不能自愈的是下面第 0 步的闸门一**（表名撞车）。
+-- 幂等：每步先查 information_schema。跑第二遍时 @first_run=0 → 1/1.5/2/3 跳过；
+--   1.5 的守卫查 dictation_passages（已不存在）→ 0 → 跳过；
+--   表内已无 uniq_dp_question / question_id，索引已改名，is_active 已在 → 4–5 全跳过。
+--   **唯一不能自愈的是下面第 0 步的闸门一**（表名撞车）。
 --
 -- ⚠️ 不可恢复（第 1、2 步删的是学生数据与题库行）。执行前先备份到**持久目录**：
 --   mkdir -p tools/db/backups
@@ -114,8 +120,28 @@ SET @ddl := IF(
 );
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- ==== 1.5 摘 dictation_passages 自己的外键（**必须在第 2 步删题之前**） ====
+-- ⚠️⚠️ 这是本迁移最重要的顺序约束，2026-09-15 在实库上真的踩过：
+--   dictation_passages.question_id 的外键 fk_dp_question 是 **ON DELETE CASCADE**
+--   （它就是「引用 questions 的表」之一，和 student_hidden_questions 同类）。
+--   若先执行第 2 步 DELETE FROM questions，级联会把 dictation_passages 的全部篇目行
+--   **一起清空**——表结构迁移成功、数据全丢、无任何报错。初版迁移正是这样丢的 50 行，
+--   靠备份才恢复。此步骤必须排在任何对 questions 的 DELETE 之前。
+SET @has_fk := (
+  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dictation_passages'
+    AND CONSTRAINT_NAME = 'fk_dp_question'
+);
+SET @ddl := IF(
+  @has_fk > 0,
+  'ALTER TABLE dictation_passages DROP FOREIGN KEY fk_dp_question',
+  'SELECT 1'
+);
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- ==== 2. 删 poem_dictation 题行 ====
--- student_hidden_questions / question_hints / question_self_assessments 由 CASCADE 跟着清。
+-- 前置：第 1.5 步已摘掉 dictation_passages 的 CASCADE 外键，本步不会再级联清篇目。
+-- student_hidden_questions / question_hints / question_self_assessments 仍由 CASCADE 跟着清（这些表本来就该清）。
 SET @ddl := IF(
   @first_run = 1,
   "DELETE FROM questions WHERE type = 'poem_dictation'",
@@ -131,20 +157,7 @@ SET @ddl := IF(
 );
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- ==== 4a. 摘外键（必须在摘唯一键之前：FK 还在用该索引时不能 DROP INDEX） ====
-SET @has_fk := (
-  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chinese_passages'
-    AND CONSTRAINT_NAME = 'fk_dp_question'
-);
-SET @ddl := IF(
-  @has_fk > 0,
-  'ALTER TABLE chinese_passages DROP FOREIGN KEY fk_dp_question',
-  'SELECT 1'
-);
-PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
--- ==== 4b. 摘 question_id 上的唯一键 ====
+-- ==== 4a. 摘 question_id 上的唯一键（外键已在 1.5 摘掉，改名后直接摘键） ====
 SET @has_uniq_qid := (
   SELECT COUNT(*) FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chinese_passages'
@@ -160,7 +173,7 @@ SET @ddl := IF(
 );
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- ==== 4c. 摘列 ====
+-- ==== 4b. 摘列 ====
 SET @has_col_qid := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chinese_passages'
@@ -173,7 +186,7 @@ SET @ddl := IF(
 );
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- ==== 4d. 索引改名（跟新表名对齐；旧名留着会误导后来人以为还挂着 questions） ====
+-- ==== 4c. 索引改名（跟新表名对齐；旧名留着会误导后来人以为还挂着 questions） ====
 SET @has_idx_work := (
   SELECT COUNT(*) FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chinese_passages'

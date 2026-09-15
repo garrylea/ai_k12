@@ -1835,6 +1835,20 @@ git commit -m "refactor(web): 默写接口字段 questionId->passageId，去掉 
 
 ## Task 9: 执行迁移 + 全量验证
 
+> ## ⚠️ 执行记录（2026-09-15，含一次数据丢失与恢复）
+>
+> **迁移首跑发生了静默数据丢失**：`chinese_passages` 改名成功、题与错题删净、索引/列全部正确，**但篇目 0 行（应 50）**。
+>
+> **根因**：`dictation_passages.question_id` 的外键 `fk_dp_question` 是 **`ON DELETE CASCADE`**（它本身就是「引用 questions 的表」之一）。迁移初版的步骤顺序是「1 清错题 → 2 删题 → 3 改名 → 4 摘外键」——第 2 步 `DELETE FROM questions WHERE type='poem_dictation'` 在外键还挂着的时候执行，级联把 `dictation_passages` 的 50 行篇目**一并清空**。无报错、无警告，结构迁移完全「成功」。
+>
+> 最讽刺的是迁移头部注释当时写的正是「ON DELETE CASCADE（跟着自动清，无风险）：question_hints / student_hidden_questions / …」——**列了一串 CASCADE 表，却没意识到要迁移的这张表自己就在 CASCADE 名单里**。六列前置检查也没有覆盖它（前置检查查的是「别的表引用这 50 行题」，而 dictation_passages 被当成了「被迁移的表」而不是「引用表」——两个视角都对，合起来就漏了）。
+>
+> **恢复**：Step 1 的备份（`tools/db/backups/20260915_chinese_passages.sql`，含三张表全量）救了回来。从备份提取 `dictation_passages` 的 INSERT（去掉外键建临时表 `_dp_restore` → 搬进 `chinese_passages`（跳过 `question_id`，`is_active` 走默认 1）→ 删临时表）。恢复后核验：50 篇目 / 抽题池 50 / 种子 2 行 / 上 26 下 24 / 正文抽查无误，与原库一致。
+>
+> **脚本修正**（同日）：新增 **步骤 1.5「摘 dictation_passages 自己的外键」**，排**在任何对 questions 的 DELETE 之前**；原 4a（摘外键）删除，4b/4c/4d 顺位前移；头部注释重写（CASCADE 名单把 dictation_passages 列为第一条并标「必须先摘」）。修正后的脚本对已迁移的库重跑为纯空转。
+>
+> **教训（写给以后的所有迁移）**：写「删父表行」的迁移时，**先枚举子表的外键行为，再把「要保留数据的子表」的外键摘掉，最后才删父行**。本仓已经两次栽在 `information_schema` 与外键语义上（复合索引每列一行 → `= 1` 静默跳过；CASCADE 子表 → 删父静默清子）——迁移脚本的每一行顺序都要能回答「这一步失败或成功后，重跑会怎样」。
+
 **Files:** 无（只跑命令）
 
 - [ ] **Step 1: 备份（**必须放持久目录**）**

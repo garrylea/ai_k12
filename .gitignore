@@ -57,3 +57,6 @@ apps/web/src/styles/katex-fonts.css
 
 ## 部署/服务运行时产物（日志、PID、含密码的 deploy.state.json）
 tools/deploy/runtime/
+
+## 数据库备份（含学生数据，勿入库）
+tools/db/backups/
