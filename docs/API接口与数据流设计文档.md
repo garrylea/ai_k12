@@ -388,6 +388,8 @@
 
 错题练习与专项训练（辅线学习闭环）。全部端点 student JWT（`@Roles('student')`，家长/管理员 token 调用返回 403/1005）。判题复用 Practice 的 JudgeCore（题中心变体：训练题必来自题库，无「未命中 AI + 结构化入库」分支）。
 
+> **语文古诗文专项（`/dictation/*` 四个端点）独立于上述体系**：它不进错题本、不参与清零门禁、不挂 `questions`（PRD §6.3 / §7.4 例外；架构文档 §4.2.13）。下表这几行**描述当前已实现的形态**，2026-09-15 已定案的改造（`questionId` → `passageId`、判题不写学生状态）**尚未实施**，落地时同步更新。
+
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
 | GET | `/api/training/error-book?subjectId={subjectId}&from={from}&to={to}&type={type}&kpId={kpId}` | 错题练习筛选列表。`subjectId` 必填 integer；`from`/`to` 可选 string（按 `created_at` 过滤，`to` 含当天即 `< to+1day`）；`type` 可选题型（JOIN `questions.type`）；`kpId` 可选 integer（EXISTS `question_knowledge_points`，非数字 400）。只返回**未清零**（`is_cleared=0`）记录；同一错题挂多 KP 时按 `errorBookId` 聚合 `kpIds` 数组。响应：`[{errorBookId, questionId(nullable), questionText, type(nullable), level, createdAt, kpIds: number[]}]`。 | MVP |
@@ -401,7 +403,8 @@
 | POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。**选题基于 JWT user.sub（studentId）排除该生已标记的「不再展示」题**（LEFT JOIN `student_hidden_questions` ... IS NULL，请求体不变）；题池排除后为空时返回 `{ questions: [] }`。 | MVP |
 | GET | `/api/training/dictation/passages` | 语文默写篇目清单（配置页用）。仅返回 `questions.is_active=1` 且 `dictation_passages.verified=1` **且 `memorize_required=1`** 的篇目（两道闸门：`verified` 是内容已校验、`memorize_required` 是教学上要求背诵），按 `sort_order, id` 排序。**只出篇名 + 册次**——作者/朝代/正文是学生要作答的三个判题字段，一律不下发（防答案泄露）。响应：`{passages: [{questionId, workTitle, semester}]}`。本清单不排除该生已标记「不再展示」的篇目。 | MVP |
 | POST | `/api/training/dictation/start` | 语文默写开练。请求体：`{semester, questionIds, count}`；`count` 限 1-20 整数（越界/非整数 400）；`semester` 限 `上册\|下册\|null`（`null`=全部册次，非法 400）；`questionIds` 为正整数数组或 `null`——非空时按指定篇目出题（**忽略 `semester`**，仅保留已校验篇目），否则按册次随机抽题。**两条路径都只从抽题池取题**（`verified=1` 且 `memorize_required=1`：内容已校验 + 教学上要求背诵，两道闸门）。响应：`{questions: [{questionId, prompt, workTitle, semester}]}`——**白名单序列化**，`author`/`dynasty`/正文一律剥离（防答案泄露，与 `targeted/start` 同规矩）。**「不再展示」排除仅作用于随机抽题路径**——按册次随机抽题时基于 JWT user.sub（studentId）LEFT JOIN `student_hidden_questions` ... IS NULL 排除该生已标记的篇目；按 `questionIds` 指定篇目的路径不做该排除。题池为空返回 `{questions: []}`。 | MVP |
-| POST | `/api/training/dictation/judge` | 语文默写判题（**纯程序化判对错，不调用 LLM**）。请求体：`{questionId, author, dynasty, body}`；`questionId` 须正整数（非法 400），篇目不存在 404。判对错口径：三字段各自 `normalizeChineseAnswer`（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后全等，**三项全对才 `isCorrect=true`**（故学生正文带不带标点、全半角、空格不影响判定）；正文不等时由 `diffChinese`（LCS 逐字差异）定位错处，相邻「漏写+多写」合并为一个 `wrong`（写错字）、连续同类项合并成段。答错 find-or-create 写 `main_error_books`（`source='dictation'`）；答对清零该题所有未清记录（不限 source）。错因文案由 `dictation_feedback` 场景 LLM 生成（primary=`local` 本地模型，fallback=`deepseek-flash`，per-scene timeout 30s），**失败只丢文案不丢判题结果**（`feedback=null`）。响应：`{questionId, isCorrect, fields: {author: {match}, dynasty: {match}, body: {match}}, bodyDiff: [{type:'equal'\|'wrong'\|'missing'\|'extra', ...}], reference: {author, dynasty, body}, feedback(string\|null), errorBookId?(仅答错时返回，答对省略该键)}`。 | MVP |
+| POST | `/api/training/dictation/judge` | 语文默写判题（**纯程序化判对错，不调用 LLM**）。请求体：`{questionId, author, dynasty, body}`；`questionId` 须正整数（非法 400），篇目不存在 404。判对错口径：三字段各自 `normalizeChineseAnswer`（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后全等，**三项全对才 `isCorrect=true`**（故学生正文带不带标点、全半角、空格不影响判定）；正文不等时由 `diffChineseInOriginalText`（LCS 逐字差异 + 原文标点回投）定位错处，相邻「漏写+多写」合并为一个 `wrong`（写错字）、连续同类项合并成段——**判对错仍忽略标点，但 `bodyDiff` 各段文本回投原文标点**（学生要能读成整句，见 §6.20）。答错 find-or-create 写 `main_error_books`（`source='dictation'`）；答对清零该题所有未清记录（不限 source）。**错因与判题解耦**：本端点不等 LLM（实测 ~25ms），答错时回 `feedbackPending=true`，错因由 `POST /training/dictation/feedback` 另取。响应：`{questionId, isCorrect, fields: {author: {match}, dynasty: {match}, body: {match}}, bodyDiff: [{type:'equal'\|'wrong'\|'missing'\|'extra', ...}], reference: {author, dynasty, body}, feedback(恒 null), feedbackPending(bool), errorBookId?(仅答错时返回，答对省略该键)}`。**【2026-09-15 设计变更，待实施】** 古诗文专项已定案为**独立子系统**：`questionId` → `passageId`，判题**不再写 `main_error_books` / 不清零**，`errorBookId` 字段取消（PRD §6.3 / §7.4 例外）。**本行描述的是当前已实现的形态**，改造落地时同步更新本节。见 `docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md` §2 / §10。 | MVP |
+| POST | `/api/training/dictation/feedback` | 语文默写错因文案（LLM 可选，**与判题解耦**，2026-09-14 新增）。请求体同 `judge`：`{questionId, author, dynasty, body}`；`questionId` 须正整数（非法 400），篇目不存在 404。服务端按入参用纯函数 `evaluateDictation` 重算三字段匹配与差异（**不写错题本、不重复判题**——重复调 `judgeDictation` 会二次写 `main_error_books`），再喂 `dictation_feedback` 场景（primary=`local` 本地 llama.cpp，fallback=`deepseek-flash`）。本地端点靠 `chat_template_kwargs:{enable_thinking:false}` 关 thinking（**`thinking:false` 对 llama.cpp 无效**，它不认 DashScope 的 `enable_thinking`），实测错因耗时 13–16s → 2s 量级。模型不可达/超时/两个模型都失败一律 **HTTP 200 + `feedback=null`**（不报错），前端显示兜底文案。响应：`{feedback: string\|null}`。 | MVP |
 | POST | `/api/training/hidden/mark` | 标记某题不再展示（幂等：重复标记不报错）。请求体：`{questionId, subjectId}`（均 integer≥1）。**全局排除**——`student_id + question_id` 维度，不分知识点；标记后该题在 `targeted/start` 选题时被 LEFT JOIN ... IS NULL 排除。响应：`{code:0,message:'ok',data:null}`（void op 包装）。 | MVP |
 | GET | `/api/training/hidden?subjectId={subjectId}` | 不再展示清单（按标记时间倒序）。`subjectId` 必填 integer≥1。响应：`[{questionId, questionText(80字截断), type, kpName(nullable,首个 primary kp 名), markedAt}]`。 | MVP |
 | DELETE | `/api/training/hidden/:questionId` | 撤销单条标记（幂等：不存在/未标记不报错）。路径参数 `questionId` integer≥1。响应：`{code:0,message:'ok',data:null}`。 | MVP |
@@ -1232,27 +1235,37 @@ TrainingService.startDictation
   ▼
 DictationRunPage 逐篇三字段作答（作者/朝代/正文）-> POST /api/training/dictation/judge
   ├─ JudgeCoreService.judgeDictation（**纯程序化，不调用任何 LLM**）
-  │    ├─ 三字段各自 normalizeChineseAnswer 后全等
+  │    ├─ evaluateDictation(expected, student)：三字段各自 normalizeChineseAnswer 后全等
   │    │     （NFKC 全半角归一 -> 去空白 -> 去中英文标点 -> 小写）
   │    │     —— 学生正文带不带标点/空格/全半角均不影响判对错
-  │    ├─ 正文不等 -> diffChinese(expected, actual) LCS 逐字差异
+  │    ├─ 正文不等 -> diffChineseInOriginalText(expected, student) LCS 逐字差异
   │    │     相邻「漏写+多写」合并为 wrong（写错字）；连续同类项合并成段
+  │    │     差异在归一文上算，再**把标点回投到原文**（标点归其后那个字，串尾标点归末字）：
+  │    │     equal 段带前后标点、wrong 段保持单字、整段漏写保留段内段尾标点
+  │    │     —— 判对错口径不变，学生看到的对比是带标点的整句
   │    └─ isCorrect = author.match && dynasty.match && body.match（三项全对才算对）
   ├─ 答错 -> find-or-create 写 main_error_books（source='dictation'，sourceRefId=null）
   │     └─ 不触发 ExplanationCacheService（避免长文言文 answer>=100 字被直写成「解析=正文」）
   ├─ 答对 -> clearUnclearedByStudentQuestionId 清零该题所有未清记录（不限 source）
-  └─ 答错且模型可用 -> DictationFeedbackCapability.generate（scene=dictation_feedback）
-       primary=local（本地 llama.cpp Qwen3.8-27B）-> fallback=deepseek-flash；timeout 30s
-       成功 -> feedback=错因 prose；失败/不可达 -> feedback=null（判题结果照常返回，不阻断）
+  └─ 立即返回（实测 ~25ms，**不等错因**）
   ▼
-返回 {questionId, isCorrect, fields, bodyDiff, reference, feedback, errorBookId?}
-  └─ 前端正文差异视图按 bodyDiff 高亮（wrong=错字、missing=漏写、extra=多写），
-     错因提醒展示 feedback（为空时显示兜底文案）；全部答完点「完成」回语文专项页
+返回 {questionId, isCorrect, fields, bodyDiff, reference, feedback(恒 null), feedbackPending, errorBookId?}
+  ├─ 前端立刻渲染对错 + 正文对比（带标点）
+  └─ feedbackPending=true（答错）-> 前端另调 POST /api/training/dictation/feedback
+       ├─ 服务端纯函数重算差异（**不写错题本、不重复判题**）
+       ├─ DictationFeedbackCapability.generate（scene=dictation_feedback）
+       │    primary=local（本地 llama.cpp Qwen3.8-27B，靠 chat_template_kwargs 关 thinking）
+       │    -> fallback=deepseek-flash
+       └─ 成功 -> feedback=错因 prose（实测 ~2s）；失败/不可达 -> feedback=null（不报错）
+  └─ 错因区在等待期间显示转圈 +「AI 正在生成错因提醒…」，到位后替换为文案
+     （为 null 时显示兜底文案）；全部答完点「完成」回语文专项页
 ```
 
 **跨学科隔离**：默写题题型为 `poem_dictation`，不在 `targeted/start` 的 `TARGETED_TYPES` 白名单内，且不挂知识点，故数学/语文专项练习都抽不到；错题练习按 `subjectId` 过滤，语文默写错题（`subject_id=2`）不会出现在数学错题练习（`subjectId=1`）。
 
 **判题与错因解耦**：对错完全由程序决定，`dictation_feedback` 场景只负责生成可选的错因话术——LLM 超时、无 key、本地模型不可达都只让 `feedback=null`，判题响应与错题本写入不受影响。
+
+**2026-09-14 解耦动因**：解耦前错因 LLM 调用挂在 `judge` 的关键路径上，而本地 `Qwen3.8-27B` 是**思考模型**（先出 `reasoning_content` 再出正文），一次错答要等 13–16 秒才看到对错，且前端全程只有一个变灰的「正在判题…」按钮——学生以为卡死。现在判题 25ms 出结果、错因异步补取、等待期间有转圈动画；同时错因调用关掉 thinking（2s 量级）。
 
 ---
 
@@ -1451,6 +1464,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v3.2 | 2026-09-14 | 默写判题与错因解耦 + 差异视图回投标点：① 新增 `POST /api/training/dictation/feedback`（错因文案单独取，服务端纯函数重算差异——**不写错题本、不重复判题**；模型失败 HTTP 200 + `feedback=null`）；② `POST /api/training/dictation/judge` 不再等 LLM（实测 12.6s → 25ms），响应新增 `feedbackPending`，`feedback` 恒 null；③ 正文差异由 `diffChinese` 换 `diffChineseInOriginalText`——判对错口径仍忽略标点，但 `bodyDiff` 各段文本**回投原文标点**（标点归其后那个字、串尾标点归末字；equal 段带前后标点、wrong 段保持单字、整段漏写保留段内段尾标点），学生能看到带标点的整句；④ 错因调用对本地 llama.cpp 下发 `chat_template_kwargs:{enable_thinking:false}` 关 thinking（`thinking:false` 对本地端点无效），错因耗时 13–16s → 2s 量级。前端 `DictationRunPage` 提交后立即出对错，错因区转圈 +「AI 正在生成错因提醒…」等待文案。新增 `ChatRequest.extraBody`（provider 专有参数逃生舱）。openapi.yaml 同步（新增 1 端点、DictationJudgeResult 加 `feedbackPending`、新增 DictationFeedbackResult schema）。 |
 | v3.1 | 2026-09-13 | 新增语文古诗文默写专项（Training 分组 §4.18 增 3 端点）：`GET /api/training/dictation/passages`（已校验篇目清单，只出篇名 + 册次——作者/朝代/正文为判题字段不下发）、`POST /api/training/dictation/start`（`semester` 上册/下册/null + `questionIds` + `count` 1-20，题项白名单剥离作者/朝代/正文）、`POST /api/training/dictation/judge`（三字段作答，`JudgeCoreService.judgeDictation` **纯程序化**判对错 + `diffChinese` LCS 差异定位，答错写 `main_error_books.source='dictation'`、答对清零；错因文案 `dictation_feedback` 场景 local 优先/deepseek 兜底，失败降级 `feedback=null` 不阻断）。新增 §6.20 数据流。DB 新增 `poem_dictation` 题型与 `dictation_passages` 表（业务键 `uniq_dp_work (work_title, semester)`），迁移 `2026-09-13_ensure_uniq_q_content_hash.sql` 修 `questions.content_hash` 唯一索引漂移。openapi.yaml 同步收录 3 端点。 |
 | v3.0 | 2026-09-10 | 判题体系重构（文档同步批）：① 新增 `POST /api/practice/self-assess` 课堂练习主观题自评端点（卡中心变体：补写 `practice_results` method='self_assess' + 留痕 + 错题本写入/清零，`questionId` 可 null 走 card+题面匹配）；② `GET /api/exams/sessions/{id}/results` 响应新字段——items 加 `answer`（参考答案）/`needsSelfAssessment`/`selfAssessment`、`isCorrect` 增 null（主观题待自评），summary 加 `subjectiveCount`（主观题不计对错，`correctCount`/`accuracy` 只算客观题；跨模式口径按 `is_correct NULL` 推断，遗留 ai 模式已判主观行计为客观错题）；③ 新增 §6.19 主观题自评数据流（judge 返回 needsSelfAssessment+参考答案 → 前端展开自评 → self-assess 端点落库 → 考试成绩只算客观题）；④ 训练 self-assess 响应契约修正——`correct` 时省略 `errorBookId` 键（缺键按 null 理解）。openapi.yaml 同步（`/practice/self-assess` 端点、ExamResultItem/ExamSummary schema、training self-assess 响应去 required）。 |
 | v2.9 | 2026-09-10 | 判题体系重构（5/14）：新增 `POST /api/training/self-assess` 主观题学生自评端点（`assessment` 枚举 correct/incorrect，`source` 枚举 targeted/error_practice/exam，考试来源带 `sourceRefId=sessionId`）；自评 incorrect 入错题本/留痕并触发解析缓存兜底生成，correct 清零该题未清错题。DB `practice_results.method` 与 `exam_answers.method` 由 `VARCHAR(10)` 加宽至 `VARCHAR(20)`（容纳 `self_assess` 11 字符），迁移文件 `migrations/2026-09-09_widen_method_columns.sql`。openapi.yaml 同步（新增 `/training/self-assess` 端点与 `TrainingSelfAssessRequest` schema）。 |

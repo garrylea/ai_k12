@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-09-14 修正（默写判题与错因解耦 + 本地端点关 thinking + 差异回投标点）
+
+- **变更摘要**：
+  1. **错因移出判题关键路径**：`TrainingService.judgeDictation` 不再 `await` LLM（实测 12.6s → **25ms**），响应加 `feedbackPending`、`feedback` 恒 `null`；错因改由新端点 `POST /api/training/dictation/feedback` 单独取（实测 ~2s）。前端 `DictationRunPage` 提交后**立刻**渲染对错 + 正文对比，错因区转圈 +「AI 正在生成错因提醒…」。
+  2. **新增 `ChatRequest.extraBody`**（`ai-core/types.ts` + `OpenAICompatibleClient.buildRequestBody` 末尾 `Object.assign`）：provider 专有参数逃生舱，允许覆盖默认字段。
+  3. **本地端点关 thinking 的正确姿势**：`LocalClient` 导出 `LLAMA_CPP_NO_THINKING_BODY = { chat_template_kwargs: { enable_thinking: false } }`；`DictationFeedbackCapability` 只对 `provider === 'local'` 下发。**`thinking: false` 对 llama.cpp 完全无效**——它不认 DashScope 的 `enable_thinking`，而 `LocalClient` 会把这个字段删掉。
+  4. **差异视图回投原文标点**：新增 `diffChineseInOriginalText`（`diffChinese` 保持归一文语义不变），`judgeDictation` 改用它。判对错口径**未变**（仍忽略标点与空格）。
+  5. **新增纯函数 `evaluateDictation`**：判题逻辑从 `judgeDictation` 抽出，判题与错因两条路径共用，避免重复实现。
+- **动机**：学生答错后要盯着一个变灰的「正在判题…」按钮等 13–16 秒（本地 `Qwen3.8-27B` 是思考模型，先出 `reasoning_content` 再出正文），全程无任何等待反馈，用户报「一直处理等待状态，不给对错结果……也应该有一个等待的动画呀」。同时用户报「判对错时显示错误点为什么没有标点符号」——判题忽略标点是设计，但**展示不该跟着去标点**。
+- **实测**：`extraBody` 关 thinking 三组对照——什么都不传 `reasoning_content` 45 字、prompt 末尾加 `/no_think` 49 字（软开关无效）、`chat_template_kwargs` **0 字**（1.2s 直接出正文）。全链路：判题 25ms（答对/答错同）、错因 2.3s、浏览器端「正在判题…」→ 13ms 后出结果 → 错因转圈 1949ms 后填充。
+- **验证**：`apps/server` vitest **497 passed**（新增 12 个：标点回投 5、`evaluateDictation` 3、解耦 2、`extraBody` 3 等）；openapi.yaml 与 `API接口与数据流设计文档.md` 端点清单对齐（dictation 4 端点）。
+- **遗留**：`retry.yaml` 的 `dictation_feedback: 30000` 仍是**死配置**——流式调用只认 `streaming.firstTokenTimeoutMs`(3s)/`interTokenTimeoutMs`(10s)，`request.timeout` 仅在 `streaming.*` 缺失时兜底；而每收到字节都会重置空闲计时器，故持续吐思考 token 的调用**没有墙钟上限**。本次未改（解耦后它已不在关键路径上）。
+- **落地关键文件**：`modules/training/{training.service,training.controller}.ts`、`modules/training/dto/dictation.dto.ts`、`modules/practice/judge-core.service.ts`、`common/utils/normalize-chinese.util.ts`、`ai-core/{types.ts,infra/model-client/{local-client,openai-compatible-client,index}.ts,capabilities/dictation-feedback.capability.ts}`、`apps/web/src/{services/api.ts,pages/student/training/chinese/DictationRunPage.tsx}`。
+
+---
+
 ## 2026-09-14 新增（语文默写内容管线：九年级教材 → 题库）
 
 - **变更摘要**：

@@ -3922,17 +3922,23 @@ paths:
   /training/dictation/judge:
     post:
       tags: [Training]
-      summary: 语文默写判题（纯程序化判对错 + 可选 LLM 错因）
+      summary: 语文默写判题（纯程序化判对错，不等 LLM）
       description: >-
         语文默写判题（student JWT）。判对错**纯程序化，不调用 LLM**：三字段各自
         normalizeChineseAnswer（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后
         全等，三项全对才 isCorrect=true（故正文带不带标点/空格/全半角不影响判定）。
-        正文不等时由 diffChinese（LCS 逐字差异）定位，相邻「漏写+多写」合并为一个
-        wrong（写错字）、连续同类项合并成段。questionId 须正整数（非法 400），
-        篇目不存在 404。答错 find-or-create 写 main_error_books（source='dictation'）；
-        答对清零该题所有未清记录。错因文案由 dictation_feedback 场景 LLM 生成
-        （primary=local，fallback=deepseek-flash，timeout 30s），失败只丢文案
-        不丢判题结果（feedback=null）。
+        正文不等时由 diffChineseInOriginalText（LCS 逐字差异 + 原文标点回投）定位，
+        相邻「漏写+多写」合并为一个 wrong（写错字）、连续同类项合并成段；
+        判对错口径仍忽略标点，但 bodyDiff 的展示文本带原文标点（学生要能读成句）。
+        questionId 须正整数（非法 400），篇目不存在 404。答错 find-or-create 写
+        main_error_books（source='dictation'）；答对清零该题所有未清记录。
+        **错因文案与判题解耦（2026-09-14）**：本端点只回判题结果（~25ms），
+        答错时 feedbackPending=true，错因由 POST /training/dictation/feedback 另取。
+        解耦前错因 LLM 在关键路径上（本地思考模型 13–16s），学生会以为卡死。
+        **【2026-09-15 设计变更，待实施】古诗文专项已定案为独立子系统**：
+        questionId 将改为 passageId，判题**不再写 main_error_books / 不清零**，
+        errorBookId 取消（PRD §6.3 / §7.4 例外）。本描述对应当前已实现的形态，
+        改造落地时同步更新。见 docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md
       operationId: judgeDictation
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -3943,7 +3949,7 @@ paths:
               $ref: '#/components/schemas/DictationJudgeRequest'
       responses:
         '200':
-          description: 判题结果（含程序化差异定位与可选错因文案）
+          description: 判题结果（程序化差异定位；错因待前端另取）
           content:
             application/json:
               schema:
@@ -3953,6 +3959,43 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/DictationJudgeResult'
+        '400':
+          description: questionId 非法
+        '404':
+          description: 默写篇目不存在
+
+  /training/dictation/feedback:
+    post:
+      tags: [Training]
+      summary: 语文默写错因文案（LLM 可选，与判题解耦）
+      description: >-
+        语文默写错因文案（student JWT）。判题端点判错后由前端单独调用；
+        服务端按入参重算差异（纯函数，**不写错题本、不重复判题**）后喂给
+        dictation_feedback 场景（primary=local 本地 llama.cpp、fallback=deepseek-flash）。
+        本地端点靠 chat_template_kwargs 关掉 thinking（`thinking: false` 对 llama.cpp
+        无效），实测 13–16s → 2s 量级。模型不可达/超时/两个模型都失败一律返回
+        feedback=null（HTTP 200，不报错），由前端显示兜底文案。questionId 须正整数
+        （非法 400），篇目不存在 404。
+      operationId: generateDictationFeedback
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DictationJudgeRequest'
+      responses:
+        '200':
+          description: 错因文案（失败时为 null）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DictationFeedbackResult'
         '400':
           description: questionId 非法
         '404':
@@ -6006,7 +6049,9 @@ components:
           required: [author, dynasty, body]
         bodyDiff:
           type: array
-          description: 正文逐字差异（全对时为空数组；相邻漏写+多写合并为 wrong）
+          description: >-
+            正文逐字差异（全对时为空数组；相邻漏写+多写合并为 wrong）。
+            判对错口径忽略标点，但各段 text/expected/actual 已回投原文标点，供学生读成整句
           items:
             $ref: '#/components/schemas/DictationDiffOp'
         reference:
@@ -6014,11 +6059,23 @@ components:
         feedback:
           type: string
           nullable: true
-          description: LLM 生成的可选错因文案（dictation_feedback 场景）；模型不可达/失败时为 null，不影响判题
+          description: 恒为 null——错因已与判题解耦，改由 POST /training/dictation/feedback 取
+        feedbackPending:
+          type: boolean
+          description: true=判错且错因待补（前端应另调 dictation/feedback）；答对恒 false
         errorBookId:
           type: integer
           description: 答错时写入/复用的 main_error_books id；答对时该键省略
-      required: [questionId, isCorrect, fields, bodyDiff, reference, feedback]
+      required: [questionId, isCorrect, fields, bodyDiff, reference, feedback, feedbackPending]
+
+    DictationFeedbackResult:
+      type: object
+      properties:
+        feedback:
+          type: string
+          nullable: true
+          description: LLM 生成的错因文案；模型不可达/超时/两个模型都失败时为 null（前端显示兜底文案）
+      required: [feedback]
 
     DictationFieldMatch:
       type: object

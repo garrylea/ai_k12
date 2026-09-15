@@ -664,6 +664,125 @@ python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty -
 
 **安全须知**：默认 dry-run；`--apply` 需交互输 `yes`；`--limit` 默认 500——**导入**时超过即拒绝，**导出**时取前 N 条（达到上限会打印截断警告，需调大后重导）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。另注：`db_loader` 的 full-reload 会把 `answer_verified=1` 计入守卫，未被 purge 时中止，不会静默覆盖已核验内容。
 
+### 4.9 dictation_cli — 语文古诗文默写采集入库（旁路管线）
+
+> **这条旁路只服务「训练 → 语文 → 专项 → 古诗文默写」**，产物进 `chinese_passages`，
+> **既不接进 4.1–4.5 的四阶段主线，也不写 `questions` 表**（避免动到 cards/questions 的既有语义）。
+> 前 3 步（爬 / 转 / 目录）复用 §3.3、§4.1、§4.2；后 3 步是本 CLI 新建。
+> 设计与实测结论见 `docs/superpowers/specs/2026-09-13-chinese-dictation-content-pipeline-design.md`。
+>
+> ⚠️ **改造待实施（2026-09-15）**：本节按「古诗文专项是独立子系统」的**目标形态**描述——
+> 表名 `dictation_passages` → `chinese_passages`、摘除 `question_id` 及 `questions` 上的对应行
+> （改造见 `docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md` §6）。
+> **改造实施前，实际表名仍是 `dictation_passages`、且仍会写 `questions` 行**；
+> 下面命令里的 `chinese_passages` 在那之前请读作 `dictation_passages`。
+
+**先看清分工**（决定了哪些步骤要人工介入）：
+
+| 环节 | 谁做 |
+|---|---|
+| 哪些篇目、在第几页 | **程序**（目录 + 印刷页偏移，自动算） |
+| 正文起止 | **程序**（版面规则：标题行 → 跳过编者导语/作者/题解/图片 → 终止符） |
+| 尾部编者赏析 / 词前小序 | **程序**（按格律/版面切） |
+| 作者 | **程序**（取目录 label 里的「/作者」——教材权威源） |
+| 朝代 / 体裁 | **LLM**（目录没有；会把作者钉住再问） |
+| 正文纠正 | **LLM**（本地模型优先、`LLM_FALLBACK_*` 兜底） |
+| 通过与否 | **程序**（纯程序自检，含词牌格律） |
+
+#### 采集一本新书（6 步）
+
+以 **七年级上册** 为例（七/八年级、上下册完全同理，只换参数）：
+
+```bash
+# ── 第 1 步：爬教材（自动）────────────────────────────────
+cd tools/crawler
+python src/crawler_cli.py --site smartedu --subject 语文 --publisher 统编版 \
+       --level 初中 --grade 七年级 --semester 上册
+# 先加 --dry-run 确认命中（七上实测 166 页、八上 174 页）
+
+# ── 第 2 步：转 Markdown（自动，调 MinerU）──────────────────
+cd tools/data-refinery
+python src/convert_cli.py --source smartedu --subject 语文 --term 上册 \
+       --materials "七年级/上册"
+# ★ --materials 是关键：不加会把所有年级所有册都转一遍
+
+# ── 第 3 步：解析目录（自动，LLM）──────────────────────────
+python src/toc_parse_cli.py --source smartedu --subject 语文 --publisher 统编版 \
+       --book "七年级/上册"
+
+# ── 第 4 步：建候选清单（★ 目前需人工，见下）────────────────
+
+# ── 第 5 步：抽取（自动）──────────────────────────────────
+python src/dictation_cli.py --extract --book "七年级/上册" --term 上册
+
+# ── 第 6 步：入库（自动，幂等）────────────────────────────
+python src/dictation_cli.py --load --book "七年级/上册" --term 上册
+# 或两步合一：--all
+```
+
+#### 第 4 步：候选清单 `candidates.json`（目前人工）
+
+程序读这份清单才知道「要收哪些篇目、各在第几页」。路径（可 `--candidates` 覆盖）：
+
+```
+output/dictation/语文/<册次>/candidates.json
+```
+
+内容从**教材目录页**（MD 里的 `page_004`~`page_007` 左右）逐条抄出来：
+
+```json
+[
+  {"label": "9 鱼我所欲也/《孟子》",        "printed_page": 48, "unit_label": "第三单元", "unit_index": 3},
+  {"label": "定风波(莫听穿林打叶声)/苏轼",   "printed_page": 69, "unit_label": "第三单元", "unit_index": 3},
+  {"label": "20 曹刿论战 /《左传》",         "printed_page": 124, "unit_label": "第六单元", "unit_index": 6}
+]
+```
+
+三个字段的三个要点：
+
+1. **`label` 写「篇名/作者」**——那一半作者很重要，程序拿它当**权威作者**（LLM 在 48 篇里答错过 4 篇作者，故不采信模型）。
+2. **`printed_page` 是书上印的页码**，不是 MD 页号——程序自己算「MD 页 − 印刷页」的偏移众数（九上/九下实测都是 +7）。
+3. **只收古诗文**（现代文/现代诗单元不收）；`词四首`、`诗词曲五首`、`课外古诗词诵读` 这类**组合标题要展开成一首一条**，页码都填**所属组的页码**。
+
+#### 产物三份（`output/dictation/语文/<册次>/`）
+
+| 文件 | 用途 |
+|---|---|
+| `<书名>.jsonl` | 入库候选（`--load` 读它） |
+| `<书名>-review.md` | **人工过目清单**：需复核篇目 / 定位留痕 / **已由模型纠正的篇目（原文与纠正稿并列）** |
+| `<书名>-unresolved.md` | 待人工处理（切不出来、自检不过且纠正未成） |
+
+> **过目可以发生在入库之前**：`--load` **只读 JSONL、不重跑抽取**。不认可的篇目直接从
+> JSONL 删掉再入库即可。
+
+#### 入库后怎么验
+
+```bash
+cd apps/server && mysql -u ai_k12 -p ai_k12 -e "
+-- 各册篇目数与必背数
+SELECT semester, COUNT(*) AS 篇目, SUM(memorize_required) AS 必背 FROM chinese_passages GROUP BY semester WITH ROLLUP;
+-- 抽题池（应只有标了必背的）
+SELECT work_title, semester FROM chinese_passages WHERE verified=1 AND memorize_required=1;
+-- 业务键重复检查（(篇名, 册次) 唯一，应为 0 行）
+SELECT work_title, semester, COUNT(*) c FROM chinese_passages GROUP BY work_title, semester HAVING c > 1;"
+```
+
+#### 三个必须知道的行为
+
+- **幂等**：`--extract` 覆盖产物、不追加；`--load` 按 `(篇名, 册次)` 这个业务键 **原地更新同一行**（不用 `content_hash` 去重——题面一改 hash 就变、会插重复行；该表也因此**不需要 `question_id`**）。重跑**不会**把已标的 `memorize_required` 刷回 0。
+- **两道闸门**：抽题池 = `verified=1`（内容已校验）**且** `memorize_required=1`（教学上要求背诵）。**新采集的篇目 `memorize_required=0`，所以默认抽不到**——要能练必须另外标必背。
+- **两册重复**：九上/九下有两册各印一次的篇目（业务键含 `semester` 故各存一行）。抽题在**不筛册次**时按篇名去重，筛了册次则不去重（去重子查询跨册取 `MIN(id)`，筛册时会把该册行整体排除）。
+
+#### 换新书时可能要改的两处代码
+
+实测九下**零改动**即泛化（24/24），但低年级仍可能撞到这两种：
+
+1. **`CI_PATTERNS`（词牌字数表）** 在 `src/dictation_locate.py`。出现新词牌可补。**不补也能跑**——会退化成「丢掉尾部 ≥60 字的长白话行」，只是**词前小序切不掉**（没有定数就没有判据）。
+2. **`_GUIDE_HEADINGS`（编者导语标题）** 现为 `预习` / `阅读提示`。低年级若用别的栏目名（如「预习提示」）要补进去，否则那段编者导语会被当正文收进来。
+
+> 跑完 `--extract` 后看 `-unresolved.md` 与 `-review.md` **就知道要不要改**：程序是
+> fail-closed 的，切不出来会明确报出来，不会静默塞错的进库。
+
 ## 5. 推荐工作流
 
 ### 5.1 一站式（pipeline_cli，推荐）
@@ -753,6 +872,12 @@ tools/data-refinery/output/
 ├── published/                   # publish 产物
 │   └── 数学/初中/人教版/九年级/下册/义务教育教科书·数学九年级下册/
 │       └── page_008.jsonl ~ page_049.jsonl
+├── dictation/                   # dictation_cli 产物（语文默写旁路，见 §4.9）
+│   └── 语文/上册/
+│       ├── candidates.json                    # 候选清单（目前需人工建，见 §4.9）
+│       ├── <书名>.jsonl                        # 入库候选
+│       ├── <书名>-review.md                    # 人工过目清单 + 定位留痕 + 已纠正篇目
+│       └── <书名>-unresolved.md                # 待人工处理
 ├── assets/                      # 物化图片
 │   ├── textbooks/{subject}/{hash}/{sort_order}/
 │   └── questions/{subject}/{hash}/{idx}/
