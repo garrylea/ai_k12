@@ -8,6 +8,13 @@ export { CardsRepository } from './cards.repo.js';
 export { ChinesePassagesRepository, buildDictationPrompt } from './chinese-passages.repo.js';
 export type { ChinesePassageRow, ChinesePassageUpsertInput } from './chinese-passages.repo.js';
 export { ErrorRedoLogsRepository } from './error-redo-logs.repo.js';
+export { EnglishWordsRepository, toMeanings, toRootAffixes } from './english-words.repo.js';
+export type { EnglishWordRow, EnglishWordPoolRow, VocabularyPoolFilter } from './english-words.repo.js';
+export { StudentWordProgressRepository } from './student-word-progress.repo.js';
+export type {
+  StudentWordProgressRow,
+  RecordWordResultInput,
+} from './student-word-progress.repo.js';
 export { ExamPapersRepository } from './exam-papers.repo.js';
 export type { ExamPaperRow, PaperQuestionRow } from './exam-papers.repo.js';
 export { ExamSessionsRepository } from './exam-sessions.repo.js';

@@ -72,6 +72,24 @@ export type VocabularyVerdict =
 /** 判定方式。`exact` = 程序短路命中；`ai` = LLM 判定。 */
 export type VocabularyJudgeMethod = 'exact' | 'ai';
 
+/**
+ * 判题结论 → 进度增量。**全系统唯一一处记账规则**，仓储层只收增量、不含规则。
+ *
+ * 只有 `correct` 置 learned、只有 `wrong` 加错次；`off_target`（答成常见义，学生答的没错
+ * 只是没答到考点）、`unanswered`（显式点「不认识」）、`undetermined`（LLM 判题失败）
+ * **三者全都不计错**——「不会」不等于「易错」，判题失败更不该让学生背锅。
+ * 全局 `english_words.error_count` 用同一个 `wrongDelta` 决定是否自增，两处口径必须一致。
+ */
+export function progressDelta(verdict: VocabularyVerdict): {
+  learned: 0 | 1;
+  wrongDelta: 0 | 1;
+} {
+  return {
+    learned: verdict === 'correct' ? 1 : 0,
+    wrongDelta: verdict === 'wrong' ? 1 : 0,
+  };
+}
+
 // ---------------------------------------------------------------- 归一化
 
 /** 词性缩写。要求后面跟 `.` 或空白才算，避免把 `no` 的 n、`art` 的 art 误当词性剥掉。 */

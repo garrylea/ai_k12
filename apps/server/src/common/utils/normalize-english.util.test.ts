@@ -13,6 +13,7 @@ import {
   primaryGloss,
   computeHasExtendedSense,
   levelsForPool,
+  progressDelta,
   diffWordChars,
   type EnglishWordMeaning,
 } from './normalize-english.util.js';
@@ -363,6 +364,31 @@ describe('levelsForPool', () => {
     const first = levelsForPool('all');
     first.push('junior');
     expect(levelsForPool('all').length).toBe(4);
+  });
+});
+
+describe('progressDelta（全系统唯一一处记账规则）', () => {
+  it('只有 correct 置 learned', () => {
+    expect(progressDelta('correct')).toEqual({ learned: 1, wrongDelta: 0 });
+    for (const v of ['off_target', 'wrong', 'unanswered', 'undetermined'] as const) {
+      expect(progressDelta(v).learned).toBe(0);
+    }
+  });
+
+  it('只有 wrong 加错次', () => {
+    expect(progressDelta('wrong')).toEqual({ learned: 0, wrongDelta: 1 });
+    for (const v of ['correct', 'off_target', 'unanswered', 'undetermined'] as const) {
+      expect(progressDelta(v).wrongDelta).toBe(0);
+    }
+  });
+
+  it('off_target / unanswered / undetermined 三者都不计错（核心口径）', () => {
+    // off_target = 学生答的没错、只是没答到考点；unanswered = 显式点「不认识」；
+    // undetermined = LLM 判题失败。三者都不该进错误统计——「不会」不等于「易错」，
+    // 判题失败更不该让学生背锅。
+    for (const v of ['off_target', 'unanswered', 'undetermined'] as const) {
+      expect(progressDelta(v)).toEqual({ learned: 0, wrongDelta: 0 });
+    }
   });
 });
 
