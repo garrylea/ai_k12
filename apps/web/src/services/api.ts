@@ -1147,6 +1147,181 @@ export function judgeInterpretation(payload: {
   });
 }
 
+// --- Training · 英语背单词（2026-09-16） ---
+//
+// 独立子系统（不挂 questions、不进错题本、不参与主线清零门禁）。
+// 字段与后端 modules/training/dto/vocabulary.dto.ts 一一对应，改一边要同步另一边。
+
+/** 词库范围档位。存储是四层（小学/初中/高中必修/高中选择性必修），页面只暴露这三档。 */
+export type VocabularyLevelPool = 'junior' | 'senior' | 'all';
+
+/** 出题顺序。`letter` = 按 `letter` 指定字母开头的词，按字母序出。 */
+export type VocabularyOrder = 'random' | 'alpha' | 'alpha_desc' | 'letter';
+
+/** 出题方向。`random` = 逐题随机（熟词僻义题恒为英→中，方向选择对它无效）。 */
+export type VocabularyDirection = 'en2cn' | 'cn2en' | 'random';
+
+/** 题面类型（`random` 已在服务端落定）：`en2cn` 给单词问中文，`cn2en` 给中文问单词。 */
+export type VocabularyPromptKind = 'en2cn' | 'cn2en';
+
+/**
+ * 判定结论五档。
+ * - `off_target`：**答成常见义**——学生答的没错，只是没答到本题考的僻义。不计错。
+ * - `unanswered`：学生点了「不认识」。不计错。
+ * - `undetermined`：判题模型失败。不计错，也不算对。
+ */
+export type VocabularyVerdict = 'correct' | 'off_target' | 'wrong' | 'unanswered' | 'undetermined';
+
+export type VocabularyJudgeMethod = 'exact' | 'ai';
+
+/** 逐字符差异（仅中→英答错时给），供高亮「你差在哪」。 */
+export type VocabularyCharDiffOp =
+  | { type: 'equal'; text: string }
+  | { type: 'wrong'; actual: string; expected: string };
+
+export interface VocabularyPoolOption {
+  key: VocabularyLevelPool;
+  label: string;
+  count: number;
+}
+
+export interface VocabularyOptions {
+  pools: VocabularyPoolOption[];
+  /** 今日已背（答对/答错/不认识/判题失败都算「见过」） */
+  todayAnswered: number;
+  counts: {
+    notLearned: number;
+    myWrong: number;
+    commonWrong: number;
+    extended: number;
+  };
+}
+
+export interface VocabularyQuestionItem {
+  wordId: number;
+  senseIndex: number;
+  promptKind: VocabularyPromptKind;
+  /** 题面。`en2cn` 是英文单词；`cn2en` 是中文释义 */
+  prompt: string;
+  /** **`cn2en` 下恒为 null**（给了等于提示答案） */
+  phonetic: string | null;
+  /** 锁定僻义的搭配（如 `address the problem`）；`cn2en` 下恒为 null */
+  context: string | null;
+  /** 熟词僻义题（题面会给「熟词僻义」标记） */
+  isExtendedSense: boolean;
+  /**
+   * 是否有词根族可展开。**必须 `promptKind === 'en2cn' && hasFamily` 才渲染「+」号**——
+   * 族树里必然包含单词本身，中→英题点开就等于直接看答案。
+   */
+  hasFamily: boolean;
+}
+
+export interface VocabularyStartResult {
+  questions: VocabularyQuestionItem[];
+  /** 抽题池命中数。为 0 时 questions 为空（提示「当前筛选下没有词」） */
+  poolSize: number;
+}
+
+export interface VocabularyStandardMeaning {
+  pos: string;
+  gloss: string;
+  extended: boolean;
+  context?: string;
+}
+
+export interface VocabularyJudgeResult {
+  wordId: number;
+  senseIndex: number;
+  verdict: VocabularyVerdict;
+  method: VocabularyJudgeMethod;
+  standard: {
+    word: string;
+    phonetic: string | null;
+    /** 该词全部义项（判完就该让学生看见） */
+    meanings: VocabularyStandardMeaning[];
+    /** 本题考的那一个义项 */
+    target: { pos: string; gloss: string; extended: boolean; context?: string };
+  };
+  spellingDiff: VocabularyCharDiffOp[] | null;
+  /** 判错/未答到考点时的提示（模型给；程序判错时为 null） */
+  comment: string | null;
+  familyAvailable: boolean;
+  progress: { learned: boolean; wrongCount: number };
+}
+
+export interface VocabularyAffix {
+  type: 'prefix' | 'suffix';
+  code: string;
+  gloss: string;
+  posHint?: string;
+}
+
+export interface WordFamilyMember {
+  word: string;
+  phonetic: string | null;
+  gloss: string;
+  pos: string;
+  affixes: VocabularyAffix[];
+  isHead: boolean;
+  level: string;
+}
+
+export interface WordFamilyResult {
+  root: { word: string; phonetic: string | null; gloss: string };
+  members: WordFamilyMember[];
+}
+
+export function fetchVocabularyOptions(): Promise<VocabularyOptions> {
+  return fetchApi<VocabularyOptions>('/training/vocabulary/options');
+}
+
+export function startVocabulary(payload: {
+  levelPool: VocabularyLevelPool;
+  count: number;
+  order: VocabularyOrder;
+  /** 仅 order='letter' 时给，单字母 a-z */
+  letter?: string | null;
+  direction: VocabularyDirection;
+  onlyNotLearned?: boolean;
+  onlyMyWrong?: boolean;
+  onlyCommonWrong?: boolean;
+  onlyExtendedSense?: boolean;
+}): Promise<VocabularyStartResult> {
+  return fetchApi<VocabularyStartResult>('/training/vocabulary/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 判一个词。服务端中→英是纯程序比对、英→中先程序短路再可能调模型，
+ * 所以耗时不固定——前端**不要等它**：提交即翻下一个词，判定回来再写进累积清单。
+ */
+export function judgeVocabularyWord(payload: {
+  wordId: number;
+  senseIndex: number;
+  promptKind: VocabularyPromptKind;
+  answer: string;
+}): Promise<VocabularyJudgeResult> {
+  return fetchApi<VocabularyJudgeResult>('/training/vocabulary/judge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 「移除易错标记」：只清该学生自己的错次，不动 learned、不动全平台统计。 */
+export function clearVocabularyWordProgress(wordId: number): Promise<{ ok: boolean }> {
+  return fetchApi<{ ok: boolean }>('/training/vocabulary/progress/clear', {
+    method: 'POST',
+    body: JSON.stringify({ wordId }),
+  });
+}
+
+/** 词根族（点「+」号懒加载）。没有族的词后端回 404，调用方按「无族」处理。 */
+export function fetchWordFamily(wordId: number): Promise<WordFamilyResult> {
+  return fetchApi<WordFamilyResult>(`/training/vocabulary/words/${wordId}/family`);
+}
+
 // --- Exams（考试模块：试卷列表 / 会话生命周期 / 结果，字段以后端 exams 白名单序列化为准） ---
 
 export interface ExamPaper {
