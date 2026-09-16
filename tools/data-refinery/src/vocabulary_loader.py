@@ -28,6 +28,22 @@ import vocabulary_book as vb  # noqa: E402
 _POS = r"(?:modal\s+v|n|v|vt|vi|adj|adv|prep|conj|pron|num|interj|art|aux|det)"
 EMBEDDED_POS_RE = re.compile(rf"(?:^|(?<=\s))({_POS})\s*\.", re.IGNORECASE)
 
+# ---- 小写化的**正字法例外**（用户 2026-09-16 裁决）----
+# 统一小写，但「写小了在英文里就是错的」保留原形。人名地名不在内（写小了只是不规范，
+# 不影响学词）。与同形小写词冲突的例外无法保留（唯一键大小写不敏感），见 migrations 注释。
+CASE_EXCEPTIONS = {
+    "I",
+    "UK", "USA", "PRC", "PLA", "HSK", "DDT", "VR", "BCE", "CE", "UN", "PM", "PE", "OK",
+    "Mr", "Ms", "Dr",
+    "X-ray", "T-shirt", "Wi-Fi",
+}
+
+
+def normalize_case(word: str) -> str:
+    """统一小写；命中正字法例外则保留原形。"""
+    return word if word in CASE_EXCEPTIONS else word.lower()
+
+
 LEVEL_BY_DIR = (
     ("选择性必修", "senior_elective"),
     ("必修", "senior_required"),
@@ -112,7 +128,7 @@ def collect(md_root: pathlib.Path) -> tuple[list[dict], dict]:
             if e.flags and "bad_word_charset" in e.flags:
                 stats["flagged"] += 1
                 continue                       # 词形不合法（含省略号/乱码）不进库
-            key = e.word.lower()
+            key = normalize_case(e.word).lower()
             if key in seen:
                 stats["duplicated"] += 1
                 seen[key]["_sources"].append(f"{label} p.{e.page}")
@@ -128,7 +144,7 @@ def collect(md_root: pathlib.Path) -> tuple[list[dict], dict]:
                         existing_glosses.add(x["gloss"])
                 continue
             seen[key] = {
-                "word": e.word,
+                "word": normalize_case(e.word),
                 "phonetic": f"/{e.phonetic}/" if e.phonetic else None,
                 "level": level,
                 "senses": split_senses(e.pos, e.gloss),
