@@ -125,6 +125,16 @@ class TestNormalizeHead:
         # `3D`：把 3 当符号剥掉会剩下一个单词 `d` 混进题库
         assert vb.normalize_head("3D /ˌθriː ˈdiː/ adj.")[0] == "3D"
 
+    def test_sb_sth_placeholder_keeps_slash(self):
+        # 课标缩写短语带斜杠（`make up ground on sb/sth`）。不含斜杠就会整条丢掉，
+        # 而且它的释义会挂到上一个词身上（实测 magazine/smooth 各多了一段「逼近…」）
+        assert vb.normalize_head("make up ground on sb/sth")[0] == "make up ground on sb/sth"
+        assert vb.normalize_head("even if/though")[0] == "even if/though"
+
+    def test_two_spellings_take_the_first(self):
+        # `a lot of / lots of`（空格包围的斜杠）取第一个写法，与 `sb/sth` 区别对待
+        assert vb.normalize_head("a lot of / lots of")[0] == "a lot of"
+
     def test_unit_noise_prefix_is_dropped(self):
         assert vb.normalize_head("Unit 7 doll")[0] == "doll"
 

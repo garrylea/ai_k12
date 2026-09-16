@@ -95,10 +95,14 @@ POS_CONNECTOR_RE = re.compile(r"\s*&\s*")
 # MinerU 的双栏还原偶尔会把小节标题/页码并进词里（`Unit 5 p.46 club`、`Unit 7 doll`），
 # 前缀里这些噪音必须剥掉，否则整条被丢（doll 就是这么丢的）
 WORD_NOISE_PREFIX_RE = re.compile(r"^(?:(?:Starter\s+)?Unit\s*\d+|[pP][.．]?\s*\d{1,3})\s+")
-# 词条的合法形态。允许**数字开头**：课本有 `3D`（`3D /ˌθriː ˈdiː/ adj. 三维的`）这类词，
-# 只认字母开头的第一版把它当非法词形丢掉（或者更糟：剥前缀符号时把 `3` 一起剥掉，
-# 剩下一个单词 `d` 混进题库）。
-WORD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9'\- ]*$")
+# 词条的合法形态。两点与直觉不同，都是实测踩出来的：
+#   · 允许**数字开头**：课本有 `3D`（`3D /ˌθriː ˈdiː/ adj. 三维的`），只认字母开头会
+#     把它整条丢掉（或者更糟：剥前缀符号时把 `3` 一起剥掉，剩下一个单词 `d` 混进题库）
+#   · 允许**斜杠**：课本用课标缩写 `sb`/`sth` 写短语（`make up ground on sb/sth`、
+#     `remind sb of sb/sth`、`even if/though`），不含斜杠就会把这些短语整条丢掉，
+#     而且**丢掉的那条释义还会挂到上一个词身上**（实测 magazine/smooth 因此都多了
+#     一段 `逼近正在向前的人或物`）
+WORD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9'/\- ]*$")
 # 行内「词条头」：ASCII 词（允许一个空格连接的第二段）+ 音标，如 `shop /ʃɒp/`。
 # 见 split_glued —— 行中间出现它就说明这里其实是下一条词条的开头。
 GLUED_HEAD_RE = re.compile(r"[A-Za-z][A-Za-z'’\-]*(?:\s+[A-Za-z][A-Za-z'’\-]*)?\s*/[^/]{1,60}/")
