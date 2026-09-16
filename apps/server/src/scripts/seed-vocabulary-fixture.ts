@@ -4,7 +4,7 @@
  * 警告：这里的数据**不是生产词库**，仅为打通「训练 → 英语 → 背单词」链路。
  * 生产词库由内容管线导入（课标官方 PDF 附录词汇表：义务教育 2022 版 1600 词 +
  * 高中 2017 版 2020 修订 3000 词），见
- * docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md §7。
+ * docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md §6。
  * 每条以 `source_ref = 'DEV-FIXTURE'` 标记，便于后续清理。
  *
  * 覆盖到手工验证需要的全部形态：
