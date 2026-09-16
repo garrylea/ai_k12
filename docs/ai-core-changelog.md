@@ -8,6 +8,24 @@
 
 ---
 
+## 2026-09-16 新增（英语背单词子系统：表 + 端点 + 前端三页，内容管线待落地）
+
+- **变更摘要**：
+  1. **新子系统**：训练 → 英语 → 背单词（入口 `TrainingSubjectPage` 的英语由「敬请期待」翻成可点）。与语文古诗文专项同形——独立表、独立端点 `/api/training/vocabulary/*`、独立页面；**不挂 `questions`、不进错题本、不参与主线清零门禁、不用「不再展示」/提示缓存/自评**。
+  2. **DB 两张表**（迁移 `2026-09-16_english_vocabulary.sql`，纯 `CREATE TABLE IF NOT EXISTS` 故重跑天然幂等；`schema.sql` 同步收录，两处 DDL 逐字节一致，已脚本校验）：`english_words`（**无外键**，表即完整边界；`word` 业务键；`level` 四层；`meanings` JSON；`root_key` 自关联表词根族；`root_affixes` JSON 存词缀注记；`error_count` 全平台累计错次**只增**）与 `student_word_progress`（唯一外键 `student_id→students(id)`；`word_id` **故意不设外键**——否则内容表全量重灌会被入向外键卡死）。
+  3. **判题三条路由**：中→英**纯程序**（归一化 + 人工拼写变体组 + 逐字符差异，不调 LLM）；英→中·常见义（gloss 拆原子程序短路 → 未命中调 `english_word_judge`，二档）；英→中·熟词僻义（三档，多一档 `off_target` = 答成常见义）。
+  4. **新场景 `english_word_judge`**：primary `local` / fallback `deepseek-flash`；本地端点靠 `chat_template_kwargs:{enable_thinking:false}` 关 thinking（`thinking:false` 对 llama.cpp 是空操作）。两个模式共用一份模板，靠调用方传的 `isExtended` 布尔标志分段。
+  5. **前端**：`VocabularyConfigPage`（范围/数量/顺序/方向/四个筛选）+ `VocabularyRunPage`（提交即翻下一个词、判定异步回填）+ 四个业务组件（`WordPromptCard`/`WordFamilyTree`/`AnswerFeedList`/`SpellingDiffView`）。
+- **动机**：用户要求「每天背 10-20 个单词（可选）」「可随机给中文或英文」「**特别特别重要的是熟词另意**（中高考阅读完型常考）」「词库要含初中 1600 词与高中 3000 词」「有词根的词点小 + 号看词之间关系和意思」。经头脑风暴逐项定案：词源用**课标官方 PDF 附录**（不用文库转载版，实测有 AI 生成副本）、分层存四层页面暴露三档、熟词僻义内嵌标记 + 配置页勾选（不另开专项入口页）、易错计数**两处都存**（词表全局只增 + 学生自己的可清除）、异步判定**落在前端**（后端 judge 单题同步，不引 job 队列）、词根族**不建新表**（`root_key` 自关联）、词根族 UI 用**就地展开缩进树**（不用放射图/图形库）。
+- **实测**：起真服务 + 真 JWT + 真本地模型跑 **58 项端到端手测全绿**。其中僻义三档判题实得 `off_target`，模型给出的提示为「本题 address 在 address the problem 里是「处理；对付」；它更常见的义是「地址」」，与设计一致；中→英拼错走纯程序并给出逐字符差异；`off_target`/`unanswered` 确实未动两份错次。
+- **验证**：`apps/server` vitest **748 passed**（本子系统新增 **185** 条：`normalize-english.util` 62、两个仓储 44、`english-word-judge` capability 18、`vocabulary.service` 45、`vocabulary.controller` 14、管理员 SCENES 漂移守卫 2；基线 563）；`apps/web` vitest **107 passed**（新增 30 条渲染用例）；两端 tsc 干净、web lint 0 error；`npm run build` 后 dist 资源与产物 bundle 均含新路由与文案。
+- **踩坑（已记录进代码注释）**：① `VocabularyService` 带 `@Injectable()` 会发 `design:paramtypes`，**接口类型**的 `deps` 参数被写成 `Object`，Nest 当成真 token 去容器找、找不到就**启动直接失败**，必须 `@Optional()`；对照 `ai-core/capabilities/*` 故意不写 `@Injectable()` 才一直没踩到。② 拼写变体组**刻意排除** `storey/story`、`metre/meter`、`tyre/tire`、`kerb/curb`、`draught/draft`——它们看着像英式/美式变体，但其中一个成员多出别的义项，收进来就会把错答案判对。③ 抽题绕开 `ORDER BY RAND() + LIMIT ?`（mysql2 的 `execute` 不能传 `LIMIT ?`），改「取候选 id 池 → 服务层洗牌切 N」。
+- **顺手修既有漂移**：管理员 `SCENES` 白名单漏了 `interpretation_judge`，写漂移守卫用例时又发现 `analysis`、`safety` 也漏（下拉里选不到 = 那条路由存得进却改不了），三条一起补齐并加用例把「YAML routes 的每个场景都必须在 SCENES 里」钉住。
+- **待办**：**词库内容未灌入**——库里只有 16 条 `source_ref='DEV-FIXTURE'` 假数据（`npx tsx src/scripts/seed-vocabulary-fixture.ts`）。真实词库（课标官方 PDF → 1600/3000 词表 + 熟词僻义审校 + 词根族审校）与内容管线（`vocabulary_cli`/`vocabulary_loader`/`vocabulary_check`）**尚未开工**，见计划 §7。另：义务教育课标附录**可能不带音标**（2011 版就不带），实现管线时先确认，没有就让 `phonetic` 留空、UI 隐藏该位置——**不要用 LLM 补音标**。
+- **落地关键文件**：`tools/db/{schema.sql,migrations/2026-09-16_english_vocabulary.sql}`、`apps/server/src/{common/utils/normalize-english.util.ts,database/repositories/{english-words,student-word-progress}.repo.ts,modules/training/{vocabulary.service.ts,vocabulary.controller.ts,dto/vocabulary.dto.ts},ai-core/{capabilities/english-word-judge.capability.ts,prompts/english/word-judge.md},scripts/{seed-english-word-judge-route.ts,seed-vocabulary-fixture.ts}}`、`apps/web/src/{pages/student/training/english/*,components/business/vocabulary/*,services/api.ts,routes/index.tsx}`。
+
+---
+
 ## 2026-09-16 新增（语文古诗文解释（翻译）专项 + 内容管线）
 
 - **变更摘要**：

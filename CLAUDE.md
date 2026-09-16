@@ -173,6 +173,18 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 - **解释专项的三条口径（勿「统一」掉）**：① 判题是**逐句**的（用户 2026-09-16 裁决，原设计为整篇批量）——`judge` 入参带 `sentenceIndex`，答完一句立即出对错；② 抽题池 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`，与默写的 `verified=1 AND memorize_required=1 AND is_active=1` **有意不同**（不设「必背」，加「内容就绪」）；③ `key_terms` 每项带 `sentenceIndex` 指向 `sentences` 下标——答题页「三行对译」的第 2 行（该句有哪些关键字词）靠它渲染。API 字段契约见 `docs/api/openapi.yaml`；设计依据 `docs/superpowers/plans/2026-09-16-chinese-interpretation-special.md`。
 
 
+## 英语背单词（独立子系统）
+
+训练轨「**训练 → 英语 → 背单词**」。与语文古诗文专项同形的**独立子系统**：自己的表、自己的端点（`/api/training/vocabulary/*`）、自己的页面。**不挂 `questions`、不进错题本、不参与主线清零门禁、不用「不再展示」/提示缓存/自评**——作答单位是「词 / 义项」，标准答案是词条自带属性，不接主线、没有「重做—清零」对象。
+
+- **两张表**（迁移 `tools/db/migrations/2026-09-16_english_vocabulary.sql`，纯 CREATE TABLE 故重跑幂等；`schema.sql` 同步收录，两处 DDL 逐字节一致）：`english_words`（**无外键**，表即完整边界；`word` 业务键；`level` 存四层 `primary`/`junior`/`senior_required`/`senior_elective`，页面只暴露「仅初中/仅高中/全部」三档；`meanings` JSON 承载义项与熟词僻义 `extended`+`context`；`root_key` 自关联表达词根族、`root_affixes` JSON 存词缀注记；`error_count` 全平台累计错次**只增**）与 `student_word_progress`（本子系统唯一外键 `student_id→students(id)`；`word_id` **故意不设外键**，否则内容表全量重灌会被入向外键卡死）。
+- **判题三条路由**：中→英**纯程序比对**（归一化 + 人工拼写变体组，拼错给逐字符差异，**不调 LLM**）；英→中·常见义先拆 gloss 原子程序短路、未命中才调 `english_word_judge` 场景（二档）；英→中·熟词僻义同前但**三档**（多一档 `off_target` = 答成常见义）。**计错口径（勿「统一」掉）**：只有 `wrong` 同时给学生 `wrong_count` 与全局 `error_count` 各 +1；`off_target` / `unanswered`（空作答）/ `undetermined`（判题失败）**三者都不计错**——「不会」不等于「易错」，判题失败更不该让学生背锅。记账规则唯一实现在 `normalize-english.util.ts` 的 `progressDelta`，仓储只收增量。
+- **两条防泄漏铁律**：① `promptKind='cn2en'` 的题（题面是中文释义、答案是英文单词）**后端不下发** `word`/`phonetic`/`context`/`hasFamily`；② **`+` 号只在 `promptKind==='en2cn' && hasFamily` 时渲染**——词根族树里必然包含单词本身，中→英题点开等于直接看答案（前端有专门的渲染钉子用例）。
+- **抽题**：不走 `ORDER BY RAND() + LIMIT ?`，改「先取候选 id 池 → 服务层洗牌/排序切 N → 按 id 取详情」，四种顺序模式（随机/字母序/倒序/指定字母开头）共用一条 SQL。**一个词只出一道题**（会话长度 == count，用户要的是「每天背 10-20 个**词**」）。**普通模式下也会抽到熟词僻义题**（候选里等概率抽），勾「只出熟词僻义」的作用是「只留」僻义，且此时**方向强制英→中**（三档口径的前提）。
+- **内容管线（尚未落地）**：词库为课标官方 PDF 附录词汇表（义务教育 2022 版 1600 词 + 高中 2017 版 2020 修订 3000 词），**必须用官方 PDF 原文、不用文库转载版**；熟词僻义与词根族走「我出草稿 + 程序硬校验 + 人工审」。**loader 的 `ON DUPLICATE KEY UPDATE` 必须显式排除 `error_count`**，否则一次全量重灌抹掉全平台易错统计。当前库里只有 16 条 `source_ref='DEV-FIXTURE'` 假数据（`npx tsx src/scripts/seed-vocabulary-fixture.ts`）。
+- **DI 坑（踩过）**：`VocabularyService` 带 `@Injectable()` 会发 `design:paramtypes`，接口类型的 `deps` 参数被写成 `Object`，Nest 当成真 token 去容器找、找不到就**启动直接失败**，必须加 `@Optional()`。对照 `ai-core/capabilities/*` 那些类**故意不写 `@Injectable()`**（零参实例化）才一直没踩到。
+- 场景 `english_word_judge` = primary `local` / fallback `deepseek-flash`（本地端点靠 `chat_template_kwargs` 关 thinking）。契约见 `docs/api/openapi.yaml` + §4.18/§6.22。
+
 ## apps/server - ai-core AI Agent Hub（已实现）
 
 分支 `feat/ai-agent-hub-mvp`（已推送 origin）。两层架构：infra 层 + capabilities 层。tsc 通过、72/72 测试绿。

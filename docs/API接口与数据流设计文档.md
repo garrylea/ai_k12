@@ -71,6 +71,12 @@
 - `code = 0` 表示成功；非 0 为业务错误码
 - HTTP 状态码：200 成功，400 参数错误，401 未认证，403 无权限，404 资源不存在，429 限流，500 服务端错误
 
+> **2026-09-16 实现注（POST 的成功码是 201，不是 200）**：NestJS 的 `@Post` 默认返回 **201**，
+> 本仓没有端点用 `@HttpCode(200)` 覆盖，所以**所有 POST 成功时实际是 201**（实测
+> `/api/training/vocabulary/*` 的三个 POST 均返回 201）。§4 端点清单里历史行写「200 成功」属笔误。
+> `openapi.yaml` 中 2026-09-16 之后新增的 POST 端点按实际行为记 `'201'`；历史端点未逐个回改
+> （改动面大、且不影响调用方——前端一律只看 `code` 字段）。以 `2xx` 判断成功即可。
+
 ### 2.4 错误码
 
 | 错误码 | 说明 |
@@ -412,6 +418,11 @@
 | GET | `/api/training/hidden?subjectId={subjectId}` | 不再展示清单（按标记时间倒序）。`subjectId` 必填 integer≥1。响应：`[{questionId, questionText(80字截断), type, kpName(nullable,首个 primary kp 名), markedAt}]`。 | MVP |
 | DELETE | `/api/training/hidden/:questionId` | 撤销单条标记（幂等：不存在/未标记不报错）。路径参数 `questionId` integer≥1。响应：`{code:0,message:'ok',data:null}`。 | MVP |
 | DELETE | `/api/training/hidden` | 全部重置（清空该生所有不再展示标记）。无请求体/参数（studentId 取自 JWT）。响应：`{code:0,message:'ok',data:null}`。 | MVP |
+| GET | `/api/training/vocabulary/options` | 英语**背单词**配置页数据（2026-09-16 新增）。`pools` 是三档词库范围及词数：`junior`=「仅初中」（含小学二级词，即义务教育课标 2022 版 1600 词口径）、`senior`=「仅高中」（= 高中课标 3000 词表中不在 1600 词表里的部分）、`all`=两者之和；存储层其实是四层 `primary`/`junior`/`senior_required`/`senior_elective`，页面只暴露这三档。`counts` 是四个筛选项各自可用的词数（`notLearned`=总数-已背过、含从无进度行的词；`myWrong`=该学生错过的词；`commonWrong`=全平台答错过即 `error_count>0` 的词；`extended`=有熟词僻义的词）。`todayAnswered` 按**服务器本地时区**当日 00:00 起算，「见过就算」（答对/答错/不认识/判题失败都计入）。响应：`{pools: [{key, label, count}], todayAnswered, counts: {notLearned, myWrong, commonWrong, extended}}`。 | MVP |
+| POST | `/api/training/vocabulary/start` | 背单词开练（2026-09-16 新增）。请求体：`{levelPool, count, order, letter, direction, onlyNotLearned, onlyMyWrong, onlyCommonWrong, onlyExtendedSense}`；`count` 限 **10-20** 整数（非法 400）；`levelPool` ∈ `junior\|senior\|all`；`order` ∈ `random\|alpha\|alpha_desc\|letter`；`direction` ∈ `en2cn\|cn2en\|random`；**`order=letter` 时必须给单个 a-z 字母的 `letter`，非 letter 模式给了 `letter` 则 400**（静默忽略会让学生以为筛选生效了）。服务端把 `direction` 落定成实际方向（`random` 逐题掷）；**勾 `onlyExtendedSense` 时方向强制 `en2cn`**——三档判题口径（含「答成常见义」那一档）建立在「题面给单词 + 语境、学生答中文」之上，中→英下这一档失去意义。**普通模式下也会抽到熟词僻义题**（在该词候选里等概率抽），勾选的作用是「只留」僻义；一个词只出一道题，会话长度 == `count`。**防泄漏**：`promptKind=cn2en` 的题响应里**不含** `word`/`phonetic`/`context`/`hasFamily`——题面是中文释义、答案是英文单词，且词根族树里必然含单词本身。响应：`{questions: [{wordId, senseIndex, promptKind, prompt, phonetic, context, isExtendedSense, hasFamily}], poolSize}`；题池为空返回 `{questions: [], poolSize: 0}`。 | MVP |
+| POST | `/api/training/vocabulary/judge` | 背单词判题（2026-09-16 新增）。请求体：`{wordId, senseIndex, promptKind, answer}`；`wordId` 须正整数（非法 400）、不存在 404；`senseIndex` 须非负整数（非法 400）；`promptKind` ∈ `en2cn\|cn2en`；`answer` 非字符串降级空串（防 number 混进去变 500）。**三条路由**：① **中→英**——纯程序比对（归一化后相等，或命中人工整理的拼写变体组，或正确答案含连字符/空格时忽略其差异），**不调 LLM**，答错时给 `spellingDiff` 逐字符差异；② **英→中·常见义**——先把该词全部常见义的 gloss 按 `；,、/` 拆成原子做归一化比对（命中即 `exact`、不调模型），未命中才调 `english_word_judge` 场景（primary=`local`、fallback=`deepseek-flash`，本地端点下发 `chat_template_kwargs:{enable_thinking:false}` 关 thinking），二档 `correct\|wrong`；③ **英→中·熟词僻义**——同上但只认目标僻义义项，且调模型时**必须带上锁定僻义的语境搭配**（「在搭配里认那个僻义」正是考点），模型判**三档** `correct\|off_target\|wrong`；`common` 模式下模型若输出 `off_target` 会收敛成 `wrong`。`senseIndex` 越界（内容重灌后下标漂移）时按「全义项都接受」判——宁放过不错杀。判题失败 → `verdict='undetermined'`，**不抛错**。**记账**：`correct` 置 `learned`、`wrong` 同时给学生 `wrong_count` 与全局 `error_count` 各加一；**`off_target` / `unanswered`（空作答）/ `undetermined` 三者都不计错**（「不会」不等于「易错」，判题失败更不该让学生背锅）。响应：`{wordId, senseIndex, verdict, method, standard: {word, phonetic, meanings, target}, spellingDiff, comment, familyAvailable, progress: {learned, wrongCount}}`；`verdict` 五值 `correct\|off_target\|wrong\|unanswered\|undetermined`，`method` 二值 `exact\|ai`。 | MVP |
+| POST | `/api/training/vocabulary/progress/clear` | 「移除易错标记」（2026-09-16 新增）。请求体：`{wordId}`（整数 ≥1，非法 400）。只把 `student_word_progress.wrong_count` 清零——**不动 `learned`**（背过就是背过），也**不动 `english_words.error_count`**（那是全平台的统计，不该被单个学生抹掉）。该学生没有这条进度行时是正常的空操作。响应：`{ok: true}`。 | MVP |
+| GET | `/api/training/vocabulary/words/{wordId}/family` | 词根族（2026-09-16 新增，点「+」号懒加载）。族的定义是「`root_key` 指向同一个中心词」，**不建新表**——`WHERE root_key = ?` 一句取全族，中心词自己也带 `root_key`=自己的 `word`（该不变式由内容管线的 check 保证）。返回 `root`（中心词）+ `members`（中心词排最前，其余按课标原序），每个成员带相对中心词的**词缀注记**（如 `-less 无…的 → 形容词`）与第一顺位中文释义，供前端渲染缩进树。**本端点不按题面类型设限**（成绩单复盘时也要能看），但**前端必须只在英→中题上渲染「+」号入口**——族树里必然包含单词本身，中→英题点开等于直接看答案。路径参数 `wordId`（ParseIntPipe）；单词不存在 404，该词没有族（族内不足 2 行）亦 404。响应：`{root: {word, phonetic, gloss}, members: [{word, phonetic, gloss, pos, affixes: [{type, code, gloss, posHint}], isHead, level}]}`。 | MVP |
 
 ### 4.19 Exams — `/api/exams`
 
@@ -1309,6 +1320,53 @@ InterpretationRunPage 逐句作答（三行对译）：
 
 **内容从哪来**：`start` 一次给全「原文 + 该句有哪些关键字词」；**标准释义与标准译文只在该句判题返回时逐句下发**——这是本设计与默写最大的口径差别，防的是「还没答就看见答案」。字词由用户整理后交 `tools/data-refinery/src/interpretation_cli.py` 入库（`key_terms` 每项带 `sentenceIndex` 指出该词属于哪一句）；译文为**混合模式**——输入给了就用输入的，没给由管线调本地 LLM 生成。
 
+### 6.22 英语背单词（训练模块，2026-09-16）
+
+```text
+VocabularyConfigPage 加载 -> GET /api/training/vocabulary/options
+     └─ 三档词库范围（仅初中 / 仅高中 / 全部，各带词数）+ 今日已背 + 四个筛选的池子大小
+选范围 + 背几个（10/15/20）+ 顺序（随机/字母序/倒序/指定字母开头）+ 方向 + 四个筛选
+     -> POST /api/training/vocabulary/start
+        ├─ 服务端把 direction 落定（random 逐题掷）；勾 onlyExtendedSense 时强制 en2cn
+        ├─ 仓储先取候选池（只取 id 等索引列，**不取 meanings**），服务层洗牌/排序切 N
+        │     —— 绕开 ORDER BY RAND() + LIMIT ? 的坑，四种顺序模式共用一条 SQL
+        ├─ 再按 id 取完整词条，逐词造一道题（会话长度 == count）
+        └─ **防泄漏**：promptKind=cn2en 的题不下发 word/phonetic/context/hasFamily
+              （题面是中文释义、答案是英文单词；且词根族树里必然含单词本身）
+  └─ 题单写 sessionStorage('training:vocabulary') -> 跳答题页
+  └─ 题池为空 -> 就地提示「换个范围或取消几个筛选」，不跳转
+
+VocabularyRunPage：题面 -> 作答 -> **提交即翻下一个词，不等判定回来**
+     -> POST /api/training/vocabulary/judge（fire-and-forget）
+        ├─ 路由① 中→英：纯程序比对（拼写变体表），答错给 spellingDiff  ——**不调 LLM**
+        ├─ 路由② 英→中·常见义：gloss 拆原子归一化比对命中即 exact
+        │     未命中 -> scene=english_word_judge（primary=local，靠 chat_template_kwargs 关 thinking）
+        │                  -> fallback=deepseek-flash，二档 correct|wrong
+        ├─ 路由③ 英→中·熟词僻义：只认目标僻义义项（**带锁定僻义的语境搭配**喂模型）
+        │     未命中 -> 同一场景，三档 correct|off_target|wrong
+        │                 （common 模式下模型若输出 off_target 会收敛成 wrong）
+        ├─ senseIndex 越界（内容重灌后下标漂移）-> 按「全义项都接受」判，宁放过不错杀
+        ├─ 判题失败 -> verdict='undetermined'（不抛错）
+        └─ 记账：correct 置 learned；wrong 给学生 wrong_count 与全局 error_count 各 +1
+              **off_target / unanswered / failed 三者都不计错**
+  └─ 判定回来 -> 回填底部累积清单（✓ 答对了 / △ 未答到考点 / ✗ 答错了 + 标准释义）
+  └─ 点「+」号 -> GET /api/training/vocabulary/words/{wordId}/family
+       ↑ **只在英→中题上渲染入口**——族树里必然包含单词本身，中→英题点开等于看答案
+  └─ 答错的词可点「移除易错标记」-> POST /api/training/vocabulary/progress/clear
+       （只清该学生自己的 wrong_count，不动 learned、不动全局 error_count）
+  └─ 答完最后一个词 -> 本轮成绩（对 / 未答到考点 / 错）+ 完整清单，清 sessionStorage 回配置页
+
+判题**不写错题本、不清零、不写隐藏题/提示缓存/自评**——独立子系统，PRD §6.3 / §7.4 例外。
+只写两张自己的表：`english_words.error_count`（全平台累计错次，只增）与
+`student_word_progress`（学生自己的 learned / wrong_count / last_seen_at）。
+```
+
+**异步判定落在前端，不在后端**：后端 `judge` 是单题同步（服务端照常等 LLM），前端提交后立刻翻词、结果回来再回填。这样不需要 job 队列或任务表，刷新即丢也可接受——进度已落库，「今日已背」不会丢。
+
+**词根族的数据形态**：`english_words.root_key` 指向族中心词（中心词自己也填自己的 `word`，该不变式由内容管线 check 保证），`root_affixes` JSON 存成员相对中心词的词缀注记。**不建新表**——`WHERE root_key = ?` 一句取全族。不规则派生（`decide → decision`）以「成员 + 词缀注记」表达，族中心必须是词表内已核对的词，这样不会出现 LLM 编造的词根。
+
+**内容从哪来**：词库为课标官方 PDF 附录词汇表（义务教育 2022 版 1600 词 + 高中 2017 版 2020 修订 3000 词），熟词僻义与词根族由「我出草稿 + 程序硬校验 + 人工审」产出，走 data-refinery 旁路管线（见 `docs/data-refinery-使用手册.md`）；**本期以 DEV-FIXTURE 假数据打通链路，真实词库待内容管线导入**（`npx tsx src/scripts/seed-vocabulary-fixture.ts`）。
+
 ---
 
 ## 7. API 与前端页面对照表
@@ -1506,6 +1564,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v3.5 | 2026-09-16 | 英语**背单词**子系统（Training 分组 §4.18 增 5 端点，**独立子系统**：不挂 `questions`、不进错题本、不参与主线清零门禁，同语文古诗文专项的独立化论证——作答单位是「词 / 义项」、标准答案是词条自带属性、不接主线无「重做—清零」对象）。① `GET /api/training/vocabulary/options`（三档词库范围 + 今日已背 + 四个筛选的池子大小）；② `POST /api/training/vocabulary/start`（`count` 10-20；`order` 随机/字母序/倒序/指定字母开头；`direction` 英→中/中→英/随机；四个筛选；**`promptKind=cn2en` 的题不下发 `word`/`phonetic`/`context`/`hasFamily`**）；③ `POST /api/training/vocabulary/judge`（**三条路由**：中→英纯程序比对不调 LLM；英→中常见义程序短路 + LLM 二档；英→中熟词僻义程序短路 + LLM **三档**含 `off_target`；`off_target`/`unanswered`/`undetermined` **都不计错**）；④ `POST /api/training/vocabulary/progress/clear`（只清学生自己的 `wrong_count`，不动 `learned`、不动全局 `error_count`）；⑤ `GET /api/training/vocabulary/words/{wordId}/family`（词根族，`root_key` 自关联、**不建新表**）。新增 §6.22 数据流。DB 新增 `english_words`（**无外键**，表即完整边界；`meanings` JSON 承载义项与熟词僻义 `extended`+`context`；`root_key` 自关联表达词根族；`error_count` 为全平台累计错次**只增**）与 `student_word_progress`（本子系统唯一外键 `student_id→students(id)`，`word_id` 故意不设外键以免内容表重灌被入向外键卡死），迁移 `2026-09-16_english_vocabulary.sql`（纯 CREATE TABLE，重跑天然幂等；`schema.sql` 同步收录、两处 DDL 逐字节一致）。ai-core 新增 `english_word_judge` 场景（primary=`local`、fallback=`deepseek-flash`；本地端点靠 `chat_template_kwargs` 关 thinking）；顺带修正管理员 `SCENES` 白名单漂移（漏 `interpretation_judge`/`analysis`/`safety`，并加漂移守卫用例）。前端新增 `VocabularyConfigPage`/`VocabularyRunPage` 与 `WordPromptCard`/`WordFamilyTree`/`AnswerFeedList`/`SpellingDiffView` 组件，训练入口英语由「敬请期待」改为可点。**词库内容（课标官方 PDF：义务教育 2022 版 1600 词 + 高中 2017 版 2020 修订 3000 词）与熟词僻义、词根族数据由后续内容管线导入，本期以 DEV-FIXTURE 假数据打通链路**。openapi.yaml 同步（5 端点 + 12 schema）。 |
 | v3.4 | 2026-09-16 | 语文古诗文**解释（翻译）专项**（Training 分组 §4.18 增 3 端点）：`GET /api/training/interpretation/passages`（抽题池 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`，只出篇名 + 册次）、`POST /api/training/interpretation/start`（`count` **1-3**；一次下发整篇所有句子，含 `index`/`text`/`terms` 词名，剥离 `gloss`/`translation`/`full_translation`）、`POST /api/training/interpretation/judge`（**逐句**判：程序短路 → 剩余项一次 LLM 调用 → 漏项/失败逐项 `undetermined`；`method` 四值 `exact\|ai\|unanswered\|undetermined`；`fullTranslation` 仅最后一句下发）。新增 §6.21 数据流。**判题粒度经用户 2026-09-16 裁决由「整篇一次批量」改为「逐句」**（学生答完一句立即知道对错）；**答题形态定为「三行对译」**（原文 → 该句关键字词 → 整句翻译），故 `chinese_passages.key_terms` 每项新增 `sentenceIndex` 指向 `sentences` 下标。解释抽题池与默写**口径有意不同**（不设 `memorize_required`、加「内容就绪」）。DB 迁移 `2026-09-16_chinese_interpretation_columns.sql`（纯 ADD COLUMN）。ai-core 新增 `interpretation_judge` 场景（primary=local、fallback=deepseek-flash，实测整个判题 ~1.3s）。前端新增 `InterpretationConfigPage` / `InterpretationRunPage` 与 `SentenceBlock` / `ItemResultLine` 组件，语文专项页第二张卡由「敬请期待」改为可点。openapi.yaml 同步。 |
 | v3.3 | 2026-09-15 | 古诗文专项**独立子系统**改造（`questions` 体系摘除）：① 四个 `/training/dictation/*` 端点字段 `questionId`→`passageId`（`questionIds`→`passageIds`）、`judge`/`start` 不再需要 JWT `studentId` 参与抽题；② **判题不写任何学生状态**——`judge` 响应删 `errorBookId`，不再 find-or-create 写 `main_error_books`（`source='dictation'`）、答对不再清零（PRD §6.3 / §7.4 例外）；③ 篇目清单/抽题改查 `chinese_passages`（三道闸门 `verified=1 AND memorize_required=1 AND is_active=1`），题面由篇名服务端生成（`请默写《X》`，不落库）；④「不再展示」排除（`LEFT JOIN student_hidden_questions`）随独立化移除，「全部册次」随机抽按篇名去重（跨册 `MIN(id)`）；⑤ DB：`dictation_passages` 改名 `chinese_passages`、摘 `question_id` 列及其 FK/唯一键、新增 `is_active`，删 `questions` 的 50 行 `poem_dictation` 与 7 行 `main_error_books(source='dictation')`（迁移 `2026-09-15_chinese_passages.sql`；**迁移首跑因 CASCADE 外键静默清空篇目、已从备份恢复**，脚本补步骤 1.5 先摘外键再删题，事故记录见计划文档 Task 9）。前端 `api.ts`/`DictationConfigPage`/`DictationRunPage` 字段同步。openapi.yaml 同步。 |
 | v3.2 | 2026-09-14 | 默写判题与错因解耦 + 差异视图回投标点：① 新增 `POST /api/training/dictation/feedback`（错因文案单独取，服务端纯函数重算差异——**不写错题本、不重复判题**；模型失败 HTTP 200 + `feedback=null`）；② `POST /api/training/dictation/judge` 不再等 LLM（实测 12.6s → 25ms），响应新增 `feedbackPending`，`feedback` 恒 null；③ 正文差异由 `diffChinese` 换 `diffChineseInOriginalText`——判对错口径仍忽略标点，但 `bodyDiff` 各段文本**回投原文标点**（标点归其后那个字、串尾标点归末字；equal 段带前后标点、wrong 段保持单字、整段漏写保留段内段尾标点），学生能看到带标点的整句；④ 错因调用对本地 llama.cpp 下发 `chat_template_kwargs:{enable_thinking:false}` 关 thinking（`thinking:false` 对本地端点无效），错因耗时 13–16s → 2s 量级。前端 `DictationRunPage` 提交后立即出对错，错因区转圈 +「AI 正在生成错因提醒…」等待文案。新增 `ChatRequest.extraBody`（provider 专有参数逃生舱）。openapi.yaml 同步（新增 1 端点、DictationJudgeResult 加 `feedbackPending`、新增 DictationFeedbackResult schema）。 |

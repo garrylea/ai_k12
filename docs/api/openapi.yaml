@@ -4105,6 +4105,194 @@ paths:
         '404':
           description: 解释篇目不存在
 
+  # 英语背单词（2026-09-16）——独立子系统：不挂 questions、不进错题本、不参与主线清零门禁
+  /training/vocabulary/options:
+    get:
+      tags: [Training]
+      summary: 背单词配置页数据（词库规模 / 今日已背 / 四个筛选各自的池子大小）
+      description: >-
+        英语背单词配置页数据（student JWT）。pools 是三档可选词库范围及词数：
+        junior=「仅初中」（含小学二级词，课标 2022 版 1600 词口径）、senior=「仅高中」
+        （= 3000 词表中不在 1600 词表里的部分）、all=两者之和。存储层其实是四层
+        （primary/junior/senior_required/senior_elective），页面只暴露这三档。
+        counts 是四个筛选项各自可用的词数：notLearned=总数-已背过（含从无进度行的词）、
+        myWrong=该学生错过的词、commonWrong=全平台答错过（error_count>0）的词、
+        extended=有熟词僻义的词。todayAnswered 按**服务器本地时区**当日 00:00 起算，
+        「见过就算」（答对/答错/不认识/判题失败都计入）。
+      operationId: getVocabularyOptions
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 配置页数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/VocabularyOptionsResult'
+
+  /training/vocabulary/start:
+    post:
+      tags: [Training]
+      summary: 背单词开练（抽题）
+      description: >-
+        背单词开练（student JWT）。**返回 201**（Nest `@Post` 默认码，本仓既有 POST 端点同此，
+        历史文档标 200 属笔误）。校验：count 限 **10-20** 整数（非法 400）；levelPool ∈
+        junior|senior|all；order ∈ random|alpha|alpha_desc|letter；direction ∈
+        en2cn|cn2en|random；**order=letter 时必须给单个 a-z 字母的 letter，非 letter 模式给了
+        letter 则 400**（静默忽略会让学生以为筛选生效了）。
+        服务端会把 direction 落定成实际方向（random 逐题掷）；**勾了 onlyExtendedSense 时
+        方向强制 en2cn**——三档判题口径（含「答成常见义」那一档）建立在「题面给单词 + 语境、
+        学生答中文」之上，中→英下这一档失去意义。**普通模式下也会抽到熟词僻义题**（在候选里
+        等概率抽），勾选的作用是「只留」僻义。一个词只出一道题，会话长度 == count。
+        **防泄漏**：promptKind=cn2en 的题响应里**不含** word/phonetic/context/hasFamily
+        ——题面是中文释义、答案是英文单词，且词根族树里必然含单词本身。
+        题池为空返回 { questions: [], poolSize: 0 }。
+      operationId: startVocabulary
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VocabularyStartRequest'
+      responses:
+        '201':
+          description: 题单（cn2en 题不含单词/音标/语境/词根族提示）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/VocabularyStartResult'
+        '400':
+          description: count 越界 / 三个枚举非法 / letter 缺失或在非 letter 模式下误传
+
+  /training/vocabulary/judge:
+    post:
+      tags: [Training]
+      summary: 背单词判题（三条路由：中→英纯程序 / 英→中常见义 / 英→中熟词僻义）
+      description: >-
+        背单词判题（student JWT）。**返回 201**。请求校验：wordId 须正整数（非法 400）、
+        不存在 404；senseIndex 须非负整数（非法 400）；promptKind ∈ en2cn|cn2en；
+        answer 非字符串降级空串（防 number 混进去变 500）。
+        三条路由：① **中→英**——纯程序比对（归一化后相等，或命中人工整理的拼写变体组，
+        或正确答案含连字符/空格时忽略其差异），**不调 LLM**，答错时给 spellingDiff
+        逐字符差异；② **英→中·常见义**——先把该词全部常见义的 gloss 按 `；,、/` 拆成原子
+        做归一化比对（命中即 exact，不调模型），未命中才调 english_word_judge 场景
+        （primary=local、fallback=deepseek-flash，本地端点下发 chat_template_kwargs 关
+        thinking），二档 correct|wrong；③ **英→中·熟词僻义**——同上但只认目标僻义义项，
+        且调模型时**必须带上锁定僻义的语境搭配**（「在搭配里认那个僻义」正是考点），
+        模型判三档 correct|off_target|wrong；common 模式下模型若输出 off_target 会收敛成
+        wrong。senseIndex 越界（内容重灌后下标漂移）时按「全义项都接受」判——宁放过不错杀。
+        判题失败 → verdict=undetermined，**不抛错**。
+        记账：correct 置 learned、wrong 同时给学生错次与全局 error_count 各加一；
+        **off_target / unanswered（空作答） / undetermined 三者都不计错**
+        （「不会」不等于「易错」，判题失败更不该让学生背锅）。
+      operationId: judgeVocabularyWord
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VocabularyJudgeRequest'
+      responses:
+        '201':
+          description: 判定结果（含标准答案与可选拼写差异）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/VocabularyJudgeResult'
+        '400':
+          description: wordId / senseIndex / promptKind 非法
+        '404':
+          description: 单词不存在
+
+  /training/vocabulary/progress/clear:
+    post:
+      tags: [Training]
+      summary: 移除易错标记（只清该学生自己的错次）
+      description: >-
+        「移除易错标记」（student JWT）。**返回 201**。wordId 须正整数（非法 400）。
+        只把 student_word_progress.wrong_count 清零——**不动 learned**（背过就是背过），
+        也**不动 english_words.error_count**（那是全平台的统计，不该被单个学生抹掉）。
+        该学生没有这条进度行时是正常的空操作，仍返回 ok。
+      operationId: clearVocabularyWordProgress
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [wordId]
+              properties:
+                wordId: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '201':
+          description: 清除成功（幂等）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          ok: { type: boolean }
+                        required: [ok]
+        '400':
+          description: wordId 非法
+
+  /training/vocabulary/words/{wordId}/family:
+    get:
+      tags: [Training]
+      summary: 词根族（点「+」号懒加载）
+      description: >-
+        词根族（student JWT，点「+」号时懒加载）。族的定义是「root_key 指向同一个中心词」，
+        不建新表——`WHERE root_key = ?` 一句取全族，中心词自己也带 root_key=自己的 word
+        （该不变式由内容管线的 check 保证）。返回 root（中心词）+ members（中心词排最前，
+        其余按课标原序），每个成员带相对中心词的词缀注记（如 `-less 无…的 → 形容词`）
+        与第一顺位中文释义，供前端渲染缩进树。
+        **本端点不按题面类型设限**（成绩单复盘时也要能看），但**前端必须只在英→中题上
+        渲染「+」号入口**——族树里必然包含单词本身，中→英题点开等于直接看答案。
+        wordId 不存在 404；该词没有族（族内不足 2 行）亦 404。
+      operationId: getWordFamily
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: wordId
+          in: path
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: 词根族
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WordFamilyResult'
+        '404':
+          description: 单词不存在 / 该词没有词根族
+
   /api/training/hidden/mark:
     post:
       tags: [training]
@@ -6361,6 +6549,214 @@ components:
       description: >-
         exact=归一化后与标准答案全等；ai=LLM 判定「意思到位」；
         unanswered=学生留空；undetermined=模型漏项或整次调用失败（correct 为 null）
+
+    # ===== 英语背单词（2026-09-16）=====
+    VocabularyPoolOption:
+      type: object
+      description: 配置页的一档词库范围
+      properties:
+        key: { type: string, enum: [junior, senior, all] }
+        label: { type: string, description: 展示名（如「仅初中」） }
+        count: { type: integer, description: 该档位的词数 }
+      required: [key, label, count]
+
+    VocabularyOptionsResult:
+      type: object
+      properties:
+        pools:
+          type: array
+          items: { $ref: '#/components/schemas/VocabularyPoolOption' }
+        todayAnswered:
+          type: integer
+          description: 今日已背（按服务器本地时区当日 00:00 起算，见过就算）
+        counts:
+          type: object
+          description: 四个筛选项各自可用的词数
+          properties:
+            notLearned: { type: integer, description: 还没背过的（含从无进度行的词） }
+            myWrong: { type: integer, description: 该学生错过的词 }
+            commonWrong: { type: integer, description: 全平台答错过（error_count>0）的词 }
+            extended: { type: integer, description: 有熟词僻义的词 }
+          required: [notLearned, myWrong, commonWrong, extended]
+      required: [pools, todayAnswered, counts]
+
+    VocabularyStartRequest:
+      type: object
+      required: [levelPool, count, order, direction]
+      properties:
+        levelPool: { type: string, enum: [junior, senior, all] }
+        count: { type: integer, minimum: 10, maximum: 20 }
+        order:
+          type: string
+          enum: [random, alpha, alpha_desc, letter]
+          description: letter=按 letter 指定字母开头的词、按字母序出
+        letter:
+          type: string
+          nullable: true
+          description: 仅 order=letter 时可用，单个 a-z 字母；非 letter 模式下传入即 400
+        direction:
+          type: string
+          enum: [en2cn, cn2en, random]
+          description: random=逐题掷；勾 onlyExtendedSense 时服务端强制 en2cn
+        onlyNotLearned: { type: boolean, description: 只出没背过的 }
+        onlyMyWrong: { type: boolean, description: 只出我错过的词 }
+        onlyCommonWrong: { type: boolean, description: 只出全平台高频易错词 }
+        onlyExtendedSense:
+          type: boolean
+          description: 只出熟词僻义（会把 direction 强制成 en2cn）
+
+    VocabularyQuestionItem:
+      type: object
+      description: >-
+        一道题。promptKind=cn2en 时 phonetic/context 恒为 null、hasFamily 恒为 false
+        ——这几项都足以顺出英文答案。
+      properties:
+        wordId: { type: integer, format: int64 }
+        senseIndex: { type: integer, description: 目标义项在 meanings 里的下标 }
+        promptKind: { type: string, enum: [en2cn, cn2en] }
+        prompt:
+          type: string
+          description: 题面。en2cn 是英文单词；cn2en 是中文释义
+        phonetic: { type: string, nullable: true }
+        context:
+          type: string
+          nullable: true
+          description: 锁定僻义的搭配（如 address the problem）；普通义题与 cn2en 题为 null
+        isExtendedSense: { type: boolean, description: 是否熟词僻义题（题面会给标记） }
+        hasFamily:
+          type: boolean
+          description: >-
+            是否有词根族可展开。**前端必须配合 promptKind==='en2cn' 才渲染「+」号**；
+            cn2en 下后端恒为 false。
+      required: [wordId, senseIndex, promptKind, prompt, phonetic, context, isExtendedSense, hasFamily]
+
+    VocabularyStartResult:
+      type: object
+      properties:
+        questions:
+          type: array
+          items: { $ref: '#/components/schemas/VocabularyQuestionItem' }
+        poolSize: { type: integer, description: 抽题池命中数；为 0 时 questions 为空 }
+      required: [questions, poolSize]
+
+    VocabularyJudgeRequest:
+      type: object
+      required: [wordId, senseIndex, promptKind, answer]
+      properties:
+        wordId: { type: integer, format: int64, minimum: 1 }
+        senseIndex: { type: integer, minimum: 0 }
+        promptKind: { type: string, enum: [en2cn, cn2en] }
+        answer:
+          type: string
+          description: 学生作答原文；空/纯空白走 unanswered（不计对错）
+
+    VocabularyStandardMeaning:
+      type: object
+      properties:
+        pos: { type: string }
+        gloss: { type: string }
+        extended: { type: boolean, description: 是否熟词僻义义项 }
+        context: { type: string, description: 僻义项才有的锁定搭配 }
+      required: [pos, gloss, extended]
+
+    VocabularyCharDiffOp:
+      type: object
+      description: 逐字符差异（仅中→英答错时给），供前端高亮
+      properties:
+        type: { type: string, enum: [equal, wrong] }
+        text: { type: string, description: type=equal 时的原文片段 }
+        actual: { type: string, description: type=wrong 时学生写的字符（漏写为空串） }
+        expected: { type: string, description: type=wrong 时正确的字符（多写为空串） }
+      required: [type]
+
+    VocabularyJudgeResult:
+      type: object
+      properties:
+        wordId: { type: integer, format: int64 }
+        senseIndex: { type: integer }
+        verdict:
+          type: string
+          enum: [correct, off_target, wrong, unanswered, undetermined]
+          description: >-
+            off_target=答成常见义（学生答的没错，只是没答到本题考的僻义，**不计错**）；
+            unanswered=空作答；undetermined=判题失败（**都不计错**）
+        method: { type: string, enum: [exact, ai], description: exact=程序短路命中 }
+        standard:
+          type: object
+          properties:
+            word: { type: string }
+            phonetic: { type: string, nullable: true }
+            meanings:
+              type: array
+              items: { $ref: '#/components/schemas/VocabularyStandardMeaning' }
+            target:
+              type: object
+              description: 本题考的那一个义项
+              properties:
+                pos: { type: string }
+                gloss: { type: string }
+                extended: { type: boolean }
+                context: { type: string }
+              required: [pos, gloss, extended]
+          required: [word, phonetic, meanings, target]
+        spellingDiff:
+          type: array
+          nullable: true
+          description: 仅中→英答错时非 null
+          items: { $ref: '#/components/schemas/VocabularyCharDiffOp' }
+        comment:
+          type: string
+          nullable: true
+          description: 判错/未答到考点时的一句提示（模型给；程序判错时为 null）
+        familyAvailable: { type: boolean, description: 该词是否有词根族可复盘 }
+        progress:
+          type: object
+          description: 落库后读回的进度
+          properties:
+            learned: { type: boolean }
+            wrongCount: { type: integer }
+          required: [learned, wrongCount]
+      required: [wordId, senseIndex, verdict, method, standard, spellingDiff, comment, familyAvailable, progress]
+
+    VocabularyAffix:
+      type: object
+      properties:
+        type: { type: string, enum: [prefix, suffix] }
+        code: { type: string, description: 词缀形态，如 -less / re- }
+        gloss: { type: string, description: 词缀含义，如「无…的」 }
+        posHint: { type: string, description: 构词提示，如「→ 形容词」 }
+      required: [type, code, gloss]
+
+    WordFamilyMember:
+      type: object
+      properties:
+        word: { type: string }
+        phonetic: { type: string, nullable: true }
+        gloss: { type: string, description: 第一顺位中文释义 }
+        pos: { type: string }
+        affixes:
+          type: array
+          description: 相对族中心的词缀注记；中心词为空数组
+          items: { $ref: '#/components/schemas/VocabularyAffix' }
+        isHead: { type: boolean }
+        level: { type: string }
+      required: [word, phonetic, gloss, pos, affixes, isHead, level]
+
+    WordFamilyResult:
+      type: object
+      properties:
+        root:
+          type: object
+          properties:
+            word: { type: string }
+            phonetic: { type: string, nullable: true }
+            gloss: { type: string }
+          required: [word, phonetic, gloss]
+        members:
+          type: array
+          description: 中心词排最前（isHead=true），其余保持课标原序
+          items: { $ref: '#/components/schemas/WordFamilyMember' }
+      required: [root, members]
 
     HiddenQuestion:
       type: object
