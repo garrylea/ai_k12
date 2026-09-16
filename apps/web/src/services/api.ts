@@ -1158,11 +1158,17 @@ export type VocabularyLevelPool = 'junior' | 'senior' | 'all';
 /** 出题顺序。`letter` = 按 `letter` 指定字母开头的词，按字母序出。 */
 export type VocabularyOrder = 'random' | 'alpha' | 'alpha_desc' | 'letter';
 
-/** 出题方向。`random` = 逐题随机（熟词僻义题恒为英→中，方向选择对它无效）。 */
-export type VocabularyDirection = 'en2cn' | 'cn2en' | 'random';
+/**
+ * 出题方向。`random` = 逐题随机（熟词僻义题恒为英→中，方向选择对它无效）；
+ * `ph2en` = 看音标写单词（题面是音标，答案是英文单词）。
+ */
+export type VocabularyDirection = 'en2cn' | 'cn2en' | 'random' | 'ph2en';
 
-/** 题面类型（`random` 已在服务端落定）：`en2cn` 给单词问中文，`cn2en` 给中文问单词。 */
-export type VocabularyPromptKind = 'en2cn' | 'cn2en';
+/**
+ * 题面类型（`random` 已在服务端落定）：`en2cn` 给单词问中文，`cn2en` 给中文问单词，
+ * `ph2en` 给音标问单词。
+ */
+export type VocabularyPromptKind = 'en2cn' | 'cn2en' | 'ph2en';
 
 /**
  * 判定结论五档。
@@ -1174,7 +1180,7 @@ export type VocabularyVerdict = 'correct' | 'off_target' | 'wrong' | 'unanswered
 
 export type VocabularyJudgeMethod = 'exact' | 'ai';
 
-/** 逐字符差异（仅中→英答错时给），供高亮「你差在哪」。 */
+/** 逐字符差异（答案是英文单词的方向答错时给：中→英、看音标写单词），供高亮「你差在哪」。 */
 export type VocabularyCharDiffOp =
   | { type: 'equal'; text: string }
   | { type: 'wrong'; actual: string; expected: string };
@@ -1201,17 +1207,17 @@ export interface VocabularyQuestionItem {
   wordId: number;
   senseIndex: number;
   promptKind: VocabularyPromptKind;
-  /** 题面。`en2cn` 是英文单词；`cn2en` 是中文释义 */
+  /** 题面。`en2cn` 是英文单词；`cn2en` 是中文释义；`ph2en` 是音标 */
   prompt: string;
-  /** **`cn2en` 下恒为 null**（给了等于提示答案） */
+  /** **`cn2en` 与 `ph2en` 下恒为 null**（前者给了等于提示答案，后者的音标已经在 `prompt` 里） */
   phonetic: string | null;
-  /** 锁定僻义的搭配（如 `address the problem`）；`cn2en` 下恒为 null */
+  /** 锁定僻义的搭配（如 `address the problem`）；`cn2en` / `ph2en` 下恒为 null */
   context: string | null;
   /** 熟词僻义题（题面会给「熟词僻义」标记） */
   isExtendedSense: boolean;
   /**
    * 是否有词根族可展开。**必须 `promptKind === 'en2cn' && hasFamily` 才渲染「+」号**——
-   * 族树里必然包含单词本身，中→英题点开就等于直接看答案。
+   * 族树里必然包含单词本身，答案是英文单词的题（中→英、看音标写单词）点开就等于直接看答案。
    */
   hasFamily: boolean;
 }

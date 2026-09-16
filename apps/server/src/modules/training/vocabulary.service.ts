@@ -10,6 +10,7 @@ import {
   extendedSenseIndexes,
   isEnglishWordMatch,
   isGlossMatch,
+  isUsablePhonetic,
   levelsForPool,
   primaryGloss,
   progressDelta,
@@ -78,9 +79,12 @@ export interface VocabularyServiceDeps {
  * 作答单位是「词的一个义项」，标准答案是词条自带属性。
  *
  * 三条判题路由（全部收敛在 judge 里，纯函数口径见 normalize-english.util.ts）：
- *   1. 中→英：纯程序比对 + 拼写变体表，**不调 LLM**（答案是唯一的英文单词）
+ *   1. 答案是英文单词的方向（中→英、看音标写单词）：纯程序比对 + 拼写变体表，**不调 LLM**
  *   2. 英→中 · 常见义：程序短路（与释义原子归一化相等）→ 未命中才调 LLM（二档）
  *   3. 英→中 · 熟词僻义：程序短路（与目标僻义义项相等）→ 未命中才调 LLM（三档，多一档 off_target）
+ *
+ * 四个出题方向（`en2cn` / `cn2en` / `ph2en` / `random`）见 buildQuestion：
+ * 前三个是显式方向，`random` 逐题在**本词出得了的方向**里等概率掷。
  *
  * 设计见 docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md
  */
@@ -142,9 +146,10 @@ export class VocabularyService {
   // ==================== 开练（抽题） ====================
 
   /**
-   * 抽题。**防泄漏在这里落地**：`cn2en` 题的题面是中文释义、答案是英文单词，
-   * 所以该题**不返回** `word` / `phonetic` / `context` / `hasFamily`——
-   * 词根族树里必然包含单词本身，`word` 与 `hasFamily` 都可能直接把答案递出去。
+   * 抽题。**防泄漏在这里落地**：凡是**答案等于英文单词**的题（`cn2en` 与 `ph2en`）
+   * **不返回** `word` / `phonetic` / `context` / `hasFamily`——词根族树里必然包含单词本身，
+   * `word` 与 `hasFamily` 都可能直接把答案递出去。
+   * `ph2en` 的音标只出现在 `prompt` 一处（`phonetic` 留 null），免得两处内容打架。
    */
   async start(input: VocabularyStartInput, studentId: number): Promise<VocabularyStartResult> {
     const count = this.normalizeCount(input.count);
@@ -265,34 +270,89 @@ export class VocabularyService {
     const picked = usable[Math.floor(this.random() * usable.length) % usable.length];
 
     if (picked.extended) {
-      // 僻义题恒为英→中：三档判题口径要求题面给出单词与锁定僻义的搭配
+      // 僻义题恒为英→中：三档判题口径要求题面给出单词与锁定僻义的搭配。
+      // 看音标写单词同样不行——题面只有音标，学生既看不到单词也看不到搭配，
+      // 而「在搭配里认出那个不常见的意思」正是这道题的考点。
       return this.en2CnQuestion(row, picked.senseIndex, meanings);
     }
 
     // 常见义题：方向由用户选择决定（random 则逐题掷）
-    const kind: VocabularyPromptKind =
-      direction === 'random' ? (this.random() < 0.5 ? 'en2cn' : 'cn2en') : direction;
+    const kind = this.resolvePromptKind(row, meanings, direction);
 
     if (kind === 'cn2en') {
-      const gloss = primaryGloss(meanings);
-      if (gloss !== '') {
-        return {
-          wordId: row.id,
-          senseIndex: picked.senseIndex,
-          promptKind: 'cn2en',
-          prompt: gloss,
-          // 中→英题不给单词、音标、语境、词根族提示——每一项都足以顺出答案
-          phonetic: null,
-          context: null,
-          isExtendedSense: false,
-          hasFamily: false,
-        };
-      }
-      // 这个词没有可用中文释义，出不了中→英题：退化成英→中，而不是把词丢掉
-      this.logger.warn(`[vocabulary] word#${row.id} 无可用释义，中→英退化为英→中`);
+      return {
+        wordId: row.id,
+        senseIndex: picked.senseIndex,
+        promptKind: 'cn2en',
+        prompt: primaryGloss(meanings),
+        // 中→英题不给单词、音标、语境、词根族提示——每一项都足以顺出答案
+        phonetic: null,
+        context: null,
+        isExtendedSense: false,
+        hasFamily: false,
+      };
+    }
+
+    if (kind === 'ph2en') {
+      return this.ph2EnQuestion(row, picked.senseIndex);
     }
 
     return this.en2CnQuestion(row, picked.senseIndex, meanings);
+  }
+
+  /**
+   * 落定本题的题面类型。**只有常见义题会走到这里**（僻义题恒为英→中，见 buildQuestion）。
+   *
+   * 出不了的方向**退化成英→中，而不是把这个词丢掉**——词被静默跳过，学生会以为筛选坏了：
+   *   - 中→英要一个可用的中文释义
+   *   - 看音标写单词要一个可用的音标（`phonetic` 列可空，也可能是空音标 `/` / `//`）
+   *
+   * `random` 只在**本词真出得了的方向**里等概率掷：否则掷出一个再退化，
+   * 学生看到的是「选了随机却总出英→中」，与「随机」这个承诺不符。
+   */
+  private resolvePromptKind(
+    row: EnglishWordRow,
+    meanings: EnglishWordMeaning[],
+    direction: VocabularyDirection,
+  ): VocabularyPromptKind {
+    const canCn2en = primaryGloss(meanings) !== '';
+    const canPh2en = isUsablePhonetic(row.phonetic);
+
+    if (direction === 'random') {
+      const kinds: VocabularyPromptKind[] = ['en2cn'];
+      if (canCn2en) kinds.push('cn2en');
+      if (canPh2en) kinds.push('ph2en');
+      return kinds[Math.floor(this.random() * kinds.length) % kinds.length];
+    }
+
+    if (direction === 'cn2en' && !canCn2en) {
+      this.logger.warn(`[vocabulary] word#${row.id} 无可用释义，中→英退化为英→中`);
+      return 'en2cn';
+    }
+    if (direction === 'ph2en' && !canPh2en) {
+      this.logger.warn(`[vocabulary] word#${row.id} 无可用音标，看音标写单词退化为英→中`);
+      return 'en2cn';
+    }
+    return direction;
+  }
+
+  /**
+   * 看音标写单词题：题面是音标，答案是英文单词。
+   *
+   * 与中→英同属「一个字都不能多给」的一类：不给单词、不给语境、不给词根族
+   * （族树里必然含单词本身），音标只出现在 `prompt` 一处、`phonetic` 留 null。
+   */
+  private ph2EnQuestion(row: EnglishWordRow, senseIndex: number): VocabularyQuestionItem {
+    return {
+      wordId: row.id,
+      senseIndex,
+      promptKind: 'ph2en',
+      prompt: (row.phonetic ?? '').trim(),
+      phonetic: null,
+      context: null,
+      isExtendedSense: false,
+      hasFamily: false,
+    };
   }
 
   private en2CnQuestion(
@@ -391,10 +451,10 @@ export class VocabularyService {
     llmContext: string | null;
     otherGlosses: string[];
   } {
-    if (promptKind === 'cn2en') {
-      // 中→英不调 LLM，这里的目标义项只为返回时展示
+    if (promptKind === 'cn2en' || promptKind === 'ph2en') {
+      // 这两个方向的答案都是英文单词，纯程序比对、不调 LLM；这里的目标义项只为返回时展示
       return {
-        kind: 'cn2en',
+        kind: promptKind,
         acceptableGlosses: [],
         llmMode: 'common',
         llmTarget: { pos: '', gloss: '' },
@@ -455,13 +515,13 @@ export class VocabularyService {
     comment: string | null;
   }> {
     // 空作答守卫：显式「不认识」不计对错（也不进任何错误统计）——「不会」不等于「易错」。
-    // 中→英方向下学生可能只打了个空格，也算没答。
+    // 答案是英文单词的方向下学生可能只打了个空格，也算没答。
     if (answer.trim() === '') {
       return { verdict: 'unanswered', method: 'exact', spellingDiff: null, comment: null };
     }
 
-    // ---- 路由 1：中→英，纯程序比对，不调 LLM ----
-    if (route.kind === 'cn2en') {
+    // ---- 路由 1：答案是英文单词（中→英 / 看音标写单词），纯程序比对，不调 LLM ----
+    if (route.kind === 'cn2en' || route.kind === 'ph2en') {
       const ok = isEnglishWordMatch(answer, expectedWord);
       return {
         verdict: ok ? 'correct' : 'wrong',

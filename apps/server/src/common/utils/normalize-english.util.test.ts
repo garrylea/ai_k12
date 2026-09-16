@@ -7,6 +7,7 @@ import {
   splitGlossAtoms,
   isGlossMatch,
   normalizeChineseGloss,
+  isUsablePhonetic,
   commonMeanings,
   extendedMeanings,
   extendedSenseIndexes,
@@ -324,6 +325,19 @@ describe('义项分组', () => {
     ];
     expect(primaryGloss(onlyExtended)).toBe('处理');
     expect(primaryGloss([])).toBe('');
+  });
+
+  it('isUsablePhonetic：真音标可用，null/空串/空音标（/ 与 //）不可用', () => {
+    expect(isUsablePhonetic('/ˈkʌntri/')).toBe(true);
+    expect(isUsablePhonetic("'kʌntri")).toBe(true);
+    // 课本抽取会产出这些：空音标当题面等于让学生对着 `//` 猜单词
+    expect(isUsablePhonetic(null)).toBe(false);
+    expect(isUsablePhonetic(undefined)).toBe(false);
+    expect(isUsablePhonetic('')).toBe(false);
+    expect(isUsablePhonetic('   ')).toBe(false);
+    expect(isUsablePhonetic('/')).toBe(false);
+    expect(isUsablePhonetic('//')).toBe(false);
+    expect(isUsablePhonetic('/ /')).toBe(false);
   });
 });
 

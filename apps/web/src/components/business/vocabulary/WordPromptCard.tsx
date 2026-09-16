@@ -1,6 +1,19 @@
 import { useEffect, useRef } from 'react';
-import type { VocabularyQuestionItem, WordFamilyResult } from '@/services/api';
+import type { VocabularyPromptKind, VocabularyQuestionItem, WordFamilyResult } from '@/services/api';
 import WordFamilyTree from './WordFamilyTree';
+
+/** 作答提示。三种题面各一句，别用嵌套三元——加第四种方向时会漏改一处。 */
+const ANSWER_HINT: Record<VocabularyPromptKind, string> = {
+  en2cn: '写出它的中文意思',
+  cn2en: '写出对应的英文单词',
+  ph2en: '根据音标写出英文单词',
+};
+
+const ANSWER_PLACEHOLDER: Record<VocabularyPromptKind, string> = {
+  en2cn: '中文意思',
+  cn2en: '英文单词',
+  ph2en: '英文单词',
+};
 
 interface Props {
   question: VocabularyQuestionItem;
@@ -21,9 +34,9 @@ interface Props {
  * 题面卡：题面 + 作答输入 + 词根族开关。
  *
  * **防泄漏铁律**：`+` 号只在 `promptKind === 'en2cn' && hasFamily` 时渲染。
- * 词根族树里必然包含单词本身（care 是 careful 的族中心），中→英题的答案是英文单词，
- * 点开 `+` 就等于直接把答案递给学生。后端在 cn2en 题上也不会返回 hasFamily，
- * 这里是第二道闸门。
+ * 词根族树里必然包含单词本身（care 是 careful 的族中心），而**答案等于英文单词**的题
+ * （中→英、看音标写单词）点开 `+` 就等于直接把答案递给学生。
+ * 后端在这两种题上也不会返回 hasFamily，这里是第二道闸门。
  *
  * 回车即提交（背单词是快节奏过词，不该要求每词都去点按钮）。
  */
@@ -48,6 +61,15 @@ export default function WordPromptCard({
 
   const showFamilyToggle = question.promptKind === 'en2cn' && question.hasFamily;
 
+  // 音标不能按「大号橙色词头」排版：那是英文单词的待遇，音标是记号不是词；
+  // 给它等宽字体 + 浅底的条状样式，与英文/中文题面一眼可分。
+  const promptClassName =
+    question.promptKind === 'en2cn'
+      ? 'text-3xl font-extrabold text-[var(--brand-500)]'
+      : question.promptKind === 'ph2en'
+        ? 'rounded-lg bg-[var(--bg-subtle)] px-3 py-1.5 font-mono text-2xl font-semibold text-[var(--text-primary)]'
+        : 'text-2xl font-bold text-[var(--text-primary)]';
+
   return (
     <div
       className="rounded-2xl bg-white p-5"
@@ -64,14 +86,7 @@ export default function WordPromptCard({
       )}
 
       <div className="mt-2 flex items-baseline gap-3">
-        <span
-          className={
-            question.promptKind === 'en2cn'
-              ? 'text-3xl font-extrabold text-[var(--brand-500)]'
-              : 'text-2xl font-bold text-[var(--text-primary)]'
-          }
-          data-testid="prompt-text"
-        >
+        <span className={promptClassName} data-testid="prompt-text">
           {question.prompt}
         </span>
         {question.phonetic && (
@@ -99,7 +114,7 @@ export default function WordPromptCard({
       )}
 
       <p className="mt-3 text-sm text-[var(--text-secondary)]">
-        {question.promptKind === 'en2cn' ? '写出它的中文意思' : '写出对应的英文单词'}
+        {ANSWER_HINT[question.promptKind]}
       </p>
 
       <input
@@ -109,7 +124,7 @@ export default function WordPromptCard({
         onKeyDown={(e) => {
           if (e.key === 'Enter') onSubmit();
         }}
-        placeholder={question.promptKind === 'en2cn' ? '中文意思' : '英文单词'}
+        placeholder={ANSWER_PLACEHOLDER[question.promptKind]}
         data-testid="answer-input"
         className="mt-2 w-full rounded-xl px-4 py-3 text-lg outline-none"
         style={{ border: '1px solid rgba(226, 232, 240, 0.9)' }}

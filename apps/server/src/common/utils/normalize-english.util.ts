@@ -4,7 +4,7 @@ import { PREFIX_STRIP } from './content-hash.util.js';
  * 英语背单词判题口径（纯函数，无 IO）。
  *
  * 三条判题路由都收敛到这里，服务层只负责挑路由、调 LLM、记账：
- *   1. 中→英：`isEnglishWordMatch` —— 纯程序，答案唯一，不调 LLM
+ *   1. 答案是英文单词的方向（中→英、看音标写单词）：`isEnglishWordMatch` —— 纯程序，答案唯一，不调 LLM
  *   2. 英→中（普通）：`isGlossMatch` 对**非僻义义项组**做程序短路，未命中才调 LLM
  *   3. 英→中（僻义）：`isGlossMatch` 对**单个 extended 义项**做程序短路，未命中调 LLM 判三档
  *
@@ -348,6 +348,17 @@ export function extendedSenseIndexes(meanings: readonly EnglishWordMeaning[]): n
  */
 export function primaryGloss(meanings: readonly EnglishWordMeaning[]): string {
   return commonMeanings(meanings)[0]?.gloss ?? meanings[0]?.gloss ?? '';
+}
+
+/**
+ * 音标是否可用于出「看音标写单词」题。
+ *
+ * `phonetic` 列可空，且课本抽取会产出 **空音标**（只有一对斜杠）——那种音标当题面等于
+ * 让学生对着 `//` 猜单词。判据：去掉斜杠与空白后还有内容才算可用。
+ * 返回 false 时调用方要**退化成别的方向**，而不是把这个词丢掉（同「没有可用中文释义」的处理）。
+ */
+export function isUsablePhonetic(phonetic: string | null | undefined): boolean {
+  return (phonetic ?? '').replace(/[/\s]/g, '') !== '';
 }
 
 /**

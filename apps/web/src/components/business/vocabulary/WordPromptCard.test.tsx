@@ -90,6 +90,36 @@ describe('WordPromptCard — 防泄漏（「+」号的显示条件）', () => {
   });
 });
 
+describe('WordPromptCard — 看音标写单词（ph2en）', () => {
+  const ph2en = (over: Partial<VocabularyQuestionItem> = {}) =>
+    question({ promptKind: 'ph2en', prompt: '/ˈkʌntri/', phonetic: null, hasFamily: false, ...over });
+
+  it('音标作为题面渲染，提示与占位符都是「写英文单词」', () => {
+    renderCard({ question: ph2en() });
+    expect(screen.getByTestId('prompt-text')).toHaveTextContent('/ˈkʌntri/');
+    expect(screen.getByText('根据音标写出英文单词')).toBeInTheDocument();
+    expect(screen.getByTestId('answer-input')).toHaveAttribute('placeholder', '英文单词');
+  });
+
+  it('音标**不套用英文单词那套大号橙色词头样式**（音标不是词，得一眼可分）', () => {
+    renderCard({ question: ph2en() });
+    const cls = screen.getByTestId('prompt-text').className;
+    expect(cls).toContain('font-mono');
+    expect(cls).not.toContain('text-[var(--brand-500)]');
+  });
+
+  it('**即使 hasFamily=true 也不渲染「+」号**（音标题的答案就是英文单词，点开等于看答案）', () => {
+    // 后端 ph2en 题本就不返回 hasFamily；这条是前端第二道闸门。
+    renderCard({ question: ph2en({ hasFamily: true }) });
+    expect(screen.queryByTestId('family-toggle')).toBeNull();
+  });
+
+  it('ph2en 不会给僻义徽标（它是常见义专属方向）', () => {
+    renderCard({ question: ph2en() });
+    expect(screen.queryByTestId('extended-badge')).toBeNull();
+  });
+});
+
 describe('WordPromptCard — 题面与作答', () => {
   it('英→中：显示单词、音标与「写中文意思」提示', () => {
     renderCard();

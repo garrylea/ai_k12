@@ -40,11 +40,14 @@ export interface VocabularyOptionsResult {
 /** 出题顺序。`letter` = 按 `letter` 过滤后按字母序。 */
 export type VocabularyOrder = 'random' | 'alpha' | 'alpha_desc' | 'letter';
 
-/** 出题方向。`random` 表示逐题随机（僻义题恒为英→中，见服务层）。 */
-export type VocabularyDirection = 'en2cn' | 'cn2en' | 'random';
+/**
+ * 出题方向。`random` 表示逐题随机（僻义题恒为英→中，见服务层）；
+ * `ph2en` = 看音标写单词（题面是音标，答案是英文单词）。
+ */
+export type VocabularyDirection = 'en2cn' | 'cn2en' | 'random' | 'ph2en';
 
 /** 题面类型。与 direction 的区别：这是**实际**方向，`random` 已在服务层落定。 */
-export type VocabularyPromptKind = 'en2cn' | 'cn2en';
+export type VocabularyPromptKind = 'en2cn' | 'cn2en' | 'ph2en';
 
 export interface VocabularyStartInput {
   levelPool: LevelPool;
@@ -65,15 +68,20 @@ export interface VocabularyQuestionItem {
   /** 目标义项在 meanings 里的下标。服务层据它判断走哪条判题路由。 */
   senseIndex: number;
   promptKind: VocabularyPromptKind;
-  /** 题面。`en2cn` 是英文单词；`cn2en` 是中文释义 */
+  /**
+   * 题面。`en2cn` 是英文单词；`cn2en` 是中文释义；`ph2en` 是音标。
+   */
   prompt: string;
-  /** 音标。**`cn2en` 下恒为 null**（否则等于给答案提示） */
+  /**
+   * 音标。**`cn2en` 下恒为 null**（否则等于给答案提示）；
+   * **`ph2en` 下也恒为 null**——音标已经在 `prompt` 里，一处就够，不给两处留「哪个才是题面」的歧义。
+   */
   phonetic: string | null;
-  /** 锁定僻义的搭配。**`cn2en` 下恒为 null**；普通义题也为 null */
+  /** 锁定僻义的搭配。**`cn2en` / `ph2en` 下恒为 null**；普通义题也为 null */
   context: string | null;
-  /** 是否是熟词僻义题（题面会给「熟词僻义」标记）。`cn2en` 下恒为 false */
+  /** 是否是熟词僻义题（题面会给「熟词僻义」标记）。**`cn2en` / `ph2en` 下恒为 false** */
   isExtendedSense: boolean;
-  /** 是否有词根族可展开（前端据此决定要不要画「+」号）。`cn2en` 下恒为 false */
+  /** 是否有词根族可展开（前端据此决定要不要画「+」号）。**`cn2en` / `ph2en` 下恒为 false** */
   hasFamily: boolean;
 }
 
@@ -112,7 +120,7 @@ export interface VocabularyJudgeResult {
     /** 本题考的义项（学生对着它看自己差在哪） */
     target: { pos: string; gloss: string; extended: boolean; context?: string };
   };
-  /** 仅中→英答错时有值：逐字符差异，供前端高亮「你差在哪」 */
+  /** 仅「答案是英文单词」的方向（中→英、看音标写单词）答错时有值：逐字符差异，供前端高亮「你差在哪」 */
   spellingDiff: WordCharDiffOp[] | null;
   /** 判错/未答到考点时的一句提示（LLM 给；程序判错时为 null） */
   comment: string | null;

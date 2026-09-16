@@ -296,6 +296,83 @@ describe('VocabularyService.start — 熟词僻义', () => {
   });
 });
 
+// ---------------------------------------------------------------- 开练：看音标写单词
+
+// 音标用真实的课本记号（`/${word}/` 那种占位音标里含单词本身，验不出泄漏）
+const COUNTRY_MEANINGS = [{ pos: 'n.', gloss: '国家；乡村', extended: false }];
+const COUNTRY = word(5, 'country', COUNTRY_MEANINGS, { phonetic: '/ˈkʌntri/' });
+/** 课本抽取会产出 null 音标，也会产出**只有一对斜杠的空音标**，两者都出不了 ph2en 题。 */
+const NO_PHONETIC = word(6, 'tele', CARE_MEANINGS, { phonetic: null });
+const BARE_SLASH = word(7, 'slashonly', CARE_MEANINGS, { phonetic: '/' });
+const DOUBLE_SLASH = word(8, 'slashpair', CARE_MEANINGS, { phonetic: '//' });
+
+describe('VocabularyService.start — 看音标写单词（ph2en）', () => {
+  it('题面是音标；**不返回** word / phonetic / context / hasFamily（答案就是那个单词）', async () => {
+    const { service } = harness({ rows: [COUNTRY] });
+    const { questions } = await service.start(startInput({ direction: 'ph2en' }), 9);
+    const q = questions[0];
+    expect(q.promptKind).toBe('ph2en');
+    expect(q.prompt).toBe('/ˈkʌntri/');
+    // 音标只出现在 prompt 一处，phonetic 留 null（两处给会留「哪个才是题面」的歧义）
+    expect(q.phonetic).toBeNull();
+    expect(q.context).toBeNull();
+    expect(q.hasFamily).toBe(false);
+    expect(q.isExtendedSense).toBe(false);
+    // 整个对象里不能出现英文单词本身（族树与 hasFamily 都会把它递出去）
+    expect(JSON.stringify(q)).not.toContain('country');
+  });
+
+  it('无音标的词退化成英→中，而不是把这个词丢掉（丢掉学生会以为筛选坏了）', async () => {
+    const { service } = harness({ rows: [NO_PHONETIC] });
+    const { questions } = await service.start(startInput({ direction: 'ph2en' }), 9);
+    expect(questions).toHaveLength(1);
+    expect(questions[0].promptKind).toBe('en2cn');
+    expect(questions[0].prompt).toBe('tele');
+  });
+
+  it('空音标（`/` 与 `//`）等同于无音标，同样退化', async () => {
+    for (const row of [BARE_SLASH, DOUBLE_SLASH]) {
+      const { service } = harness({ rows: [row] });
+      const { questions } = await service.start(startInput({ direction: 'ph2en' }), 9);
+      expect(questions[0].promptKind, row.word).toBe('en2cn');
+    }
+  });
+
+  it('random 能掷到 ph2en（否则「随机」永远出不了音标题）', async () => {
+    // 常见义候选只有 1 个，抽义项不吃随机源；0.99 → 在 [en2cn, cn2en, ph2en] 里取第 2 个
+    const { service } = harness({ rows: [COUNTRY], random: () => 0.99 });
+    const { questions } = await service.start(startInput({ direction: 'random' }), 9);
+    expect(questions[0].promptKind).toBe('ph2en');
+  });
+
+  it('random 只在**本词出得了的方向**里掷：无音标的词永远掷不到 ph2en', async () => {
+    // 有释义、无音标 → 候选只有 [en2cn, cn2en]；0.99 落在第 1 个 = cn2en。
+    // 若把出不了的 ph2en 也塞进候选（3 个），这里会掷到第 2 个 = ph2en，用例即红。
+    const { service } = harness({ rows: [NO_PHONETIC], random: () => 0.99 });
+    const { questions } = await service.start(startInput({ direction: 'random' }), 9);
+    expect(questions[0].promptKind).toBe('cn2en');
+  });
+
+  it('僻义题恒为英→中：即便请求方向是 ph2en（题面只有音标就认不出那个僻义）', async () => {
+    const { service } = harness({ rows: [ADDRESS], random: () => 0.99 });
+    const { questions } = await service.start(startInput({ direction: 'ph2en' }), 9);
+    expect(questions[0].isExtendedSense).toBe(true);
+    expect(questions[0].promptKind).toBe('en2cn');
+    expect(questions[0].prompt).toBe('address');
+    expect(questions[0].context).toBe('address the problem');
+  });
+
+  it('勾「只出熟词僻义」时方向仍是英→中（ph2en 不得绕过这条约束）', async () => {
+    const { service } = harness({ rows: [ADDRESS, COUNTRY], random: () => 0.99 });
+    const { questions } = await service.start(
+      startInput({ onlyExtendedSense: true, direction: 'ph2en' }),
+      9,
+    );
+    expect(questions.map((q) => q.wordId)).toEqual([1]);
+    expect(questions[0].promptKind).toBe('en2cn');
+  });
+});
+
 // ---------------------------------------------------------------- 判题：三条路由
 
 const judgeInput = (over: Partial<Parameters<VocabularyService['judge']>[0]> = {}) => ({
@@ -336,6 +413,48 @@ describe('VocabularyService.judge — 路由 1：中→英纯程序', () => {
   it('答对时 spellingDiff 为 null（没错就不用高亮）', async () => {
     const h = harness();
     expect((await h.service.judge(judgeInput({ promptKind: 'cn2en', answer: 'address' }), 9)).spellingDiff).toBeNull();
+  });
+});
+
+describe('VocabularyService.judge — 路由 1b：看音标写单词（答案同样是英文单词，纯程序）', () => {
+  it('拼对即对，method=exact，且**绝不调 LLM**', async () => {
+    const h = harness({ rows: [COUNTRY] });
+    const res = await h.service.judge(
+      judgeInput({ wordId: 5, promptKind: 'ph2en', answer: 'country' }),
+      9,
+    );
+    expect(res.verdict).toBe('correct');
+    expect(res.method).toBe('exact');
+    expect(res.spellingDiff).toBeNull();
+    expect(h.judge.generate).not.toHaveBeenCalled();
+  });
+
+  it('大小写/首尾空白/末尾句号/拼写变体都宽容（与中→英同一套口径）', async () => {
+    for (const answer of ['Country', ' country ', 'country.', 'contry']) {
+      const h = harness({ rows: [COUNTRY] });
+      const res = await h.service.judge(judgeInput({ wordId: 5, promptKind: 'ph2en', answer }), 9);
+      expect(res.verdict, `answer=${answer}`).toBe(answer === 'contry' ? 'wrong' : 'correct');
+    }
+  });
+
+  it('拼错 → wrong + 逐字符差异（学生要看到差在哪一个字母），仍不调 LLM', async () => {
+    const h = harness({ rows: [COUNTRY] });
+    const res = await h.service.judge(
+      judgeInput({ wordId: 5, promptKind: 'ph2en', answer: 'contry' }),
+      9,
+    );
+    expect(res.verdict).toBe('wrong');
+    expect(res.method).toBe('exact');
+    expect(res.spellingDiff && res.spellingDiff.length > 0).toBe(true);
+    expect(res.spellingDiff?.some((op) => op.type === 'wrong')).toBe(true);
+    expect(h.judge.generate).not.toHaveBeenCalled();
+  });
+
+  it('空作答 → unanswered（不调 LLM、不计错）', async () => {
+    const h = harness({ rows: [COUNTRY] });
+    const res = await h.service.judge(judgeInput({ wordId: 5, promptKind: 'ph2en', answer: '  ' }), 9);
+    expect(res.verdict).toBe('unanswered');
+    expect(h.judge.generate).not.toHaveBeenCalled();
   });
 });
 

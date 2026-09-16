@@ -82,6 +82,12 @@ describe('VocabularyController — start 入参校验', () => {
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('direction=ph2en（看音标写单词）在白名单里，原样透传', async () => {
+    const { controller, service } = makeController();
+    await controller.start(okStart({ direction: 'ph2en' }) as never, STUDENT);
+    expect(service.start.mock.calls[0][0].direction).toBe('ph2en');
+  });
+
   it('四个筛选布尔值：只认严格 true，其它一律 false（防 "true" 字符串这类脏值）', async () => {
     const { controller, service } = makeController();
     await controller.start(
@@ -116,6 +122,14 @@ describe('VocabularyController — judge 入参校验', () => {
     const { controller } = makeController();
     await expect(controller.judge({ wordId: 1, senseIndex: 0, promptKind: 'cn2cn' }, STUDENT))
       .rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('promptKind=ph2en 在白名单里，原样透传', async () => {
+    const { controller, service } = makeController();
+    await controller.judge({ wordId: 1, senseIndex: 0, promptKind: 'ph2en', answer: 'country' }, STUDENT);
+    expect(service.judge.mock.calls[0][0].promptKind).toBe('ph2en');
+    // 答案是英文单词，服务层会走纯程序路由（不调 LLM）
+    expect(service.judge.mock.calls[0][0].answer).toBe('country');
   });
 
   it('answer 非字符串 → 降级为空串（否则会带着 number 进归一化函数变 500）', async () => {

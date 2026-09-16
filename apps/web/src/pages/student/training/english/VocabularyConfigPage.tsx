@@ -23,6 +23,7 @@ const ORDER_OPTIONS: Array<{ label: string; value: VocabularyOrder }> = [
 const DIRECTION_OPTIONS: Array<{ label: string; value: VocabularyDirection }> = [
   { label: '英 → 中', value: 'en2cn' },
   { label: '中 → 英', value: 'cn2en' },
+  { label: '看音标写单词', value: 'ph2en' },
   { label: '随机', value: 'random' },
 ];
 

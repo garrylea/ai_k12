@@ -38,8 +38,8 @@ import type {
 export class VocabularyController {
   private static readonly LEVEL_POOLS: readonly LevelPool[] = ['junior', 'senior', 'all'];
   private static readonly ORDERS: readonly VocabularyOrder[] = ['random', 'alpha', 'alpha_desc', 'letter'];
-  private static readonly DIRECTIONS: readonly VocabularyDirection[] = ['en2cn', 'cn2en', 'random'];
-  private static readonly PROMPT_KINDS: readonly VocabularyPromptKind[] = ['en2cn', 'cn2en'];
+  private static readonly DIRECTIONS: readonly VocabularyDirection[] = ['en2cn', 'cn2en', 'random', 'ph2en'];
+  private static readonly PROMPT_KINDS: readonly VocabularyPromptKind[] = ['en2cn', 'cn2en', 'ph2en'];
 
   constructor(private readonly vocabularyService: VocabularyService) {}
 
@@ -108,7 +108,8 @@ export class VocabularyController {
   }
 
   /**
-   * 判题。中→英纯程序比对（不调 LLM）；英→中先程序短路、未命中才调模型。
+   * 判题。答案是英文单词的方向（中→英、看音标写单词）纯程序比对（不调 LLM）；
+   * 英→中先程序短路、未命中才调模型。
    * 判题失败回 `verdict='undetermined'`（不计对错、不写错题统计），不抛错。
    */
   @Post('judge')
