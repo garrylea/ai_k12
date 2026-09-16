@@ -44,11 +44,11 @@ const MARK: Record<string, { icon: string; className: string; label: string }> =
  * 但仍列出，让学生知道那道题没判成。
  */
 /**
- * 「移除易错标记」图标：圆形对勾（线性 SVG —— 项目硬规则禁 emoji、图标必须线性 SVG）。
+ * 「移除易错标记」图标：垃圾桶（线性 SVG —— 项目硬规则禁 emoji、图标必须线性 SVG）。
  *
- * 用**对勾**而不是叉：这个动作的语义是「这个词我已掌握，别再算我易错」，
- * **不是删除数据**（全局错次与学生自己的 learned 都不动），叉会让人以为在删记录。
- * 圆形把它与行首那个纯字符状态标记（✓ / △ / ✗）区分开。
+ * 图标按用户要求用垃圾桶。注意动作的语义**并不是删数据**：全局 `error_count` 与学生自己的
+ * `learned` 都不动，只把该学生该词的 `wrong_count` 清零。所以两个状态**都配了 title 悬停说明**
+ * （「移除易错标记」/「已移除易错标记」），把含义讲清楚，不靠图形去猜。
  */
 const ClearMarkIcon = () => (
   <svg
@@ -61,8 +61,10 @@ const ClearMarkIcon = () => (
     className="h-4 w-4"
     aria-hidden="true"
   >
-    <circle cx="12" cy="12" r="9" />
-    <path d="M8 12.5l2.5 2.5L16 9.5" />
+    <path d="M4 7h16" />
+    <path d="M9.5 7V4.5h5V7" />
+    <path d="M6.5 7l1 12.5h9L17.5 7" />
+    <path d="M10.5 10.5v6M13.5 10.5v6" />
   </svg>
 );
 
@@ -144,11 +146,11 @@ export default function AnswerFeedList({
                       <ClearMarkIcon />
                     </button>
                   )}
-                  {/* 已清除状态也用同一个图标（变绿、半透明）而不是文字：
-                      文字在清一色的图标行里显得突兀。悬停用 title 说明它是什么。 */}
+                  {/* 已清除状态也用同一个图标（变灰淡化）而不是文字：文字在清一色的图标行里显得突兀。
+                      用灰而不是绿——垃圾桶不是「成功」符号，淡化表达「已做过、不再可点」。 */}
                   {cleared[e.question.wordId] && (
                     <span
-                      className="ml-auto text-[var(--success)] opacity-70"
+                      className="ml-auto text-[var(--text-secondary)] opacity-50"
                       title="已移除易错标记"
                       aria-label="已移除易错标记"
                       data-testid={`mark-cleared-${e.question.wordId}`}

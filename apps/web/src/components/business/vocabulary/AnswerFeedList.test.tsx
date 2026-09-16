@@ -135,7 +135,7 @@ describe('AnswerFeedList', () => {
     expect(screen.getByTestId('clear-mark-3')).toBeInTheDocument();
   });
 
-  it('图标是线性 SVG（项目硬规则：禁 emoji）', () => {
+  it('图标是线性 SVG 垃圾桶（项目硬规则：禁 emoji）', () => {
     render(
       <AnswerFeedList
         entries={[entry({ question: question({ wordId: 3 }), result: judgeResult({ wordId: 3, verdict: 'wrong' }) })]}
@@ -148,8 +148,9 @@ describe('AnswerFeedList', () => {
     const btn = screen.getByTestId('clear-mark-3');
     const svg = btn.querySelector('svg');
     expect(svg).not.toBeNull();
-    expect(svg?.getAttribute('fill')).toBe('none');       // 线性而非实心
-    expect(svg?.querySelector('circle')).not.toBeNull();  // 对勾在圆内
+    expect(svg?.getAttribute('fill')).toBe('none');          // 线性而非实心
+    expect(svg?.querySelectorAll('path').length).toBe(4);    // 桶盖/提手/桶身/两道竖条
+    expect(svg?.querySelector('circle')).toBeNull();         // 确认已从对勾换成垃圾桶
   });
 
   it('行按**倒序**显示：最近答的在最前，最早的在最后', () => {
