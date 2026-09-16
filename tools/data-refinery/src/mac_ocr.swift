@@ -30,6 +30,10 @@ let scale: CGFloat = args.count >= 5 ? CGFloat(Double(args[4]) ?? 3.0) : 3.0
 let languages: [String] = args.count >= 6
     ? args[5].split(separator: ",").map(String.init)
     : ["zh-Hans", "en-US"]
+// 语言纠正开关（第 7 个参数，默认开）。**音标必须关掉**：
+// usesLanguageCorrection=true 时 Vision 会把 IPA 往「像英文的样子」纠正，
+// 于是 /mɪ'steɪk/ 变 /mi'steik/、/ˈkʌntri/ 变 /kAntri/ —— 几乎行行都错。
+let useCorrection: Bool = args.count >= 7 ? (args[6] != "0") : true
 
 // 用 fileURLWithPath 而不是拼 "file://" 字符串：相对路径、中文名、空格都能正确处理
 let url = URL(fileURLWithPath: pdfPath) as CFURL
@@ -69,7 +73,7 @@ for p in from...to {
     let request = VNRecognizeTextRequest()
     request.recognitionLevel = .accurate
     request.recognitionLanguages = languages
-    request.usesLanguageCorrection = true
+    request.usesLanguageCorrection = useCorrection
     // 单词表里 `*` / `**` 是分层标记、`（）` 里是美式拼写，别让语言模型当噪声清掉
     request.automaticallyDetectsLanguage = false
     if #available(macOS 13.0, *) { request.revision = VNRecognizeTextRequestRevision3 }
