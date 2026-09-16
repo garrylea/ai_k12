@@ -141,9 +141,10 @@ export default function InterpretationRunPage() {
   const payloadOf = (idx: number) => ({
     passageId: passage!.passageId,
     sentenceIndex: idx,
+    // 传回的是 `term`（带注音原样）——服务端按存储的 term 精确配对
     terms: passage!.sentences[idx].terms.map((t) => ({
-      term: t,
-      answer: answers[idx]?.terms[t] ?? '',
+      term: t.term,
+      answer: answers[idx]?.terms[t.term] ?? '',
     })),
     translation: answers[idx]?.translation ?? '',
   });

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,13 +71,22 @@ _ENUM_RE = re.compile(
 #: 词与解释的分隔：中文冒号 / 英文冒号 / 全角等号 / 半角等号
 _SEP_RE = re.compile(r"[:：=＝]")
 
+#: 课本注释的原样形式：词由括号界定，**不需要分隔符**——`〔北国〕指我国北方。`
+#: 只认 〔〕[]【】 三种：圆括号太容易是词的一部分（`行路难（其一）`），不做界定符。
+_WRAPPED_RE = re.compile(r"^\s*[〔\[【]\s*([^〕\]】]+?)\s*[〕\]】]\s*[:：=＝]?\s*(.*)$")
+
+#: Markdown 水平线（`---` / `***` / `___`）：整行跳过
+_HR_RE = re.compile(r"^\s*([-*_])\1{2,}\s*$")
+
+#: 标题行（含级别）
+_HEADING_RE = re.compile(r"^\s*(#{1,6})\s+(.*)$")
+
 #: 包裹 term 的括号（写成 〔谪守〕 也对）
 _WRAP_CHARS = "〔〕[]（）()【】"
 
 _SEMESTER_VALUES = ("上册", "下册")
 
 _BLOCKQUOTE_RE = re.compile(r"^\s*>\s?(.*)$")
-_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.*)$")
 _SEMESTER_LINE_RE = re.compile(r"^\s*(?:semester|册次|册)\s*[:：=＝]?\s*(.+?)\s*$")
 
 
@@ -124,11 +134,29 @@ def _strip_wrap(s: str) -> str:
     return s
 
 
+def norm_title(s: str) -> str:
+    """篇名归一：全角括号→半角（NFKC）+ 去掉所有空白。
+
+    **extract 与 load 必须共用这一套**（曾经只有 extract 归一、loader 精确匹配，
+    结果《满江红》《水调歌头》这类「用户写法 ≠ 库里写法」的篇目 extract 通过、
+    load 却报「在库里找不到」而跳过）。库里的写法本来就不统一：
+    `行路难(其一)` 半角、`山坡羊 · 潼关怀古` 的 `·` 两侧有空格、`丑奴儿·书博山道中壁` 没有。
+    """
+    return unicodedata.normalize("NFKC", s or "").replace(" ", "").strip()
+
+
 def _split_term_line(line: str) -> tuple[str, str] | None:
-    """把一行拆成 (term, gloss)。拆不出返回 None。"""
+    """把一行拆成 (term, gloss)。拆不出返回 None。
+
+    先认**课本注释的原样形式**（`〔北国〕指我国北方。`——词由括号界定，无分隔符），
+    再退回「分隔符」形式（`谪守：因罪贬谪流放`）。
+    """
     body = _ENUM_RE.sub("", line, count=1).strip()
     if not body:
         return None
+    wrapped = _WRAPPED_RE.match(body)
+    if wrapped and wrapped.group(2).strip():
+        return wrapped.group(1), wrapped.group(2)
     m = _SEP_RE.search(body)
     if m:
         return body[: m.start()], body[m.end():]
@@ -270,10 +298,25 @@ def parse_json(text: str) -> ParseResult:
 
 
 def parse_markdown(text: str) -> ParseResult:
-    """`#` 标题分篇；`册次：上册` 定册；`>` 两行一组表逐句；其余非空行表字词。"""
+    """`#` / `##` 标题分篇；`册次：上册` 定册；`>` 两行一组表逐句；其余非空行表字词。
+
+    **标题级别**（两条输入习惯都照顾到）：文件里若存在 level≥2 的标题，则 level 1 当**文档标题**
+    跳过、level≥2 才是篇目（`# 古诗文重点字词解释` + `## 岳阳楼记` 这种写法）；
+    若全篇只有 level 1 标题，则 `#` 本身就是篇目（单篇/纯清单文件）。
+    有文档标题时，第一个篇目标题之前的内容（说明、`---`）一并静默跳过。
+
+    `<!-- … -->` HTML 注释、`---` 水平线整段跳过：手写/半自动生成的输入稿里常留批注，
+    若不跳过会被当成字词行，拆出垃圾词再报「定位不到」的告警，把真问题淹掉。
+    """
     res = ParseResult()
     current: PassageInput | None = None
     pending_quote: str | None = None
+    in_comment = False
+
+    levels = [len(m.group(1)) for m in
+              (_HEADING_RE.match(l) for l in text.splitlines()) if m]
+    has_sub = any(lv >= 2 for lv in levels)
+    in_preface = has_sub          # 有子标题时，第一个 ## 之前都是文档前言
 
     def flush_quote() -> None:
         """落单的 `>` 行（奇数个）——没有配对译文，按「无译文」丢弃并告警。"""
@@ -286,15 +329,42 @@ def parse_markdown(text: str) -> ParseResult:
 
     for lineno, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.rstrip()
+
+        # HTML 注释：整段跳过（含跨行）
+        if in_comment:
+            if "-->" in line:
+                in_comment = False
+            continue
+        if "<!--" in line:
+            if "-->" not in line[line.index("<!--") + 4:]:
+                in_comment = True
+            # 注释前后的内容一并按本行忽略（输入稿里从不把字词与注释放同一行）
+            continue
+
         if not line.strip():
+            continue
+
+        # 水平线：整行跳过
+        if _HR_RE.match(line):
+            flush_quote()
             continue
 
         heading = _HEADING_RE.match(line)
         if heading:
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            if has_sub and level == 1:
+                # 文档标题：跳过，并把它之后的说明区一并静默（直到第一个篇目）
+                flush_quote()
+                in_preface = True
+                continue
             flush_quote()
-            title = heading.group(1).strip()
+            in_preface = False
             current = PassageInput(work_title=title, semester=None)
             res.passages.append(current)
+            continue
+
+        if in_preface:
             continue
 
         if current is None:

@@ -13,7 +13,7 @@ import interpretation_cli as cli
 from interpretation_input import InputKeyTerm, InputSentence, PassageInput
 
 BODY = "庆历四年春，滕子京谪守巴陵郡。越明年，政通人和。"
-ROW = (11, "上册", BODY, "PIPELINE")
+ROW = (11, "上册", BODY, "PIPELINE", "岳阳楼记")
 
 
 class _FakeCursor:
@@ -117,7 +117,7 @@ class TestResolveSentences:
 
 class TestProcessPassage:
     def _run(self, p, conn_rows, translate=None):
-        conn = _FakeConn([("SELECT id, semester, body, source_ref", conn_rows)])
+        conn = _FakeConn([("SELECT id, semester, body, source_ref, work_title", conn_rows)])
         calls = []
 
         def fake_translate(primary, fallback, **kwargs):
@@ -170,7 +170,7 @@ class TestProcessPassage:
     def test_missing_title_yields_error(self):
         conn = _FakeConn([
             ("LIKE", [("岳阳楼记",)]),
-            ("SELECT id, semester, body, source_ref", []),
+            ("SELECT id, semester, body, source_ref, work_title", []),
         ])
         items, errors, _ = cli.process_passage(
             conn, _passage(work_title="岳阳"), primary_llm=None, fallback_llm=None, translate_prompt="P",
@@ -190,13 +190,13 @@ class TestProcessPassage:
     def test_two_rows_without_semester_produce_two_items(self):
         p = _passage(semester=None)
         items, errors, warns, _ = self._run(
-            p, [(11, "上册", BODY, "P"), (12, "下册", BODY, "P")],
+            p, [(11, "上册", BODY, "P", "岳阳楼记"), (12, "下册", BODY, "P", "岳阳楼记")],
         )
         assert [i["semester"] for i in items] == ["上册", "下册"]
         assert any("逐行分别处理" in w for w in warns)
 
     def test_dev_fixture_overwrite_warned(self):
-        items, _, warns, _ = self._run(_passage(), [(11, "上册", BODY, "DEV-FIXTURE")])
+        items, _, warns, _ = self._run(_passage(), [(11, "上册", BODY, "DEV-FIXTURE", "岳阳楼记")])
         assert len(items) == 1
         assert any("DEV-FIXTURE" in w for w in warns)
 
@@ -310,6 +310,45 @@ class TestExportApply:
         cli._connect = lambda config: conn
         assert cli.run_apply(args, _config()) == 0
         assert [s for s, _ in conn.cur.executed if s.startswith("UPDATE")] == []
+
+
+class TestTitleMatching:
+    """篇名匹配（库里格式不统一，人手写几乎不可能全对）。
+
+    实测：库里 `行路难(其一)` 是半角、`山坡羊 · 潼关怀古` 的 `·` 两侧有空格、
+    用户输入稿写的是 `行路难（其一）`（全角）、`水调歌头`（只给词牌名）。
+    """
+
+    ROWS = [
+        (1, "上册", BODY, "P", "行路难(其一)"),
+        (2, "上册", BODY, "P", "山坡羊 · 潼关怀古"),
+        (3, "上册", BODY, "P", "水调歌头(明月几时有)"),
+        (4, "下册", BODY, "P", "水调歌头(明月几时有)"),
+        (5, "上册", BODY, "P", "丑奴儿·书博山道中壁"),
+    ]
+
+    def _conn(self):
+        return _FakeConn([("SELECT id, semester, body, source_ref, work_title", self.ROWS)])
+
+    def test_fullwidth_parens_match_halfwidth(self):
+        hits = cli._find_rows(self._conn(), "行路难（其一）", None)
+        assert [h[0] for h in hits] == [1]
+
+    def test_spaces_around_middle_dot_ignored(self):
+        assert [h[0] for h in cli._find_rows(self._conn(), "山坡羊·潼关怀古", None)] == [2]
+
+    def test_cipai_only_matches_title_with_subtitle(self):
+        # 用户只给词牌名，库里带题目括号
+        assert [h[0] for h in cli._find_rows(self._conn(), "水调歌头", None)] == [3, 4]
+
+    def test_cipai_only_respects_semester(self):
+        assert [h[0] for h in cli._find_rows(self._conn(), "水调歌头", "下册")] == [4]
+
+    def test_unknown_title_returns_empty(self):
+        assert cli._find_rows(self._conn(), "不存在的篇目", None) == []
+
+    def test_near_titles_lists_same_initial(self):
+        assert "水调歌头(明月几时有)" in cli._near_titles(self._conn(), "水调阁")
 
 
 class TestMainDispatch:

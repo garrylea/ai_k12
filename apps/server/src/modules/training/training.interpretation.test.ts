@@ -116,7 +116,27 @@ describe('TrainingService — 解释专项 startInterpretation', () => {
       }],
     });
     const res = await service.startInterpretation({ semester: null, passageIds: null, count: 1 });
-    expect(res.passages[0].sentences.map((s) => s.terms)).toEqual([['谪守'], ['越明年']]);
+    expect(res.passages[0].sentences.map((s) => s.terms.map((t) => t.term)))
+      .toEqual([['谪守'], ['越明年']]);
+  });
+
+  it('字词带注音时同时给「原样 term」与「去注音 plain」两个形式', async () => {
+    // 展示用 term（带拼音，学生要看得见读音）；高亮用 plain——正文里没有注音，
+    // 前端拿 term 去原文里 indexOf 永远找不到。
+    const { service } = makeService({
+      random: [{
+        ...PASSAGE,
+        key_terms: [{ term: '滕子京谪（zhé）守巴陵郡', gloss: 'g', sentenceIndex: 0 }],
+      }],
+    });
+    const res = await service.startInterpretation({ semester: null, passageIds: null, count: 1 });
+    expect(res.passages[0].sentences[0].terms).toEqual([
+      { term: '滕子京谪（zhé）守巴陵郡', plain: '滕子京谪守巴陵郡' },
+    ]);
+    // plain 必须真能在该句原文里找到（否则前端高亮不上）
+    expect(res.passages[0].sentences[0].text).toContain(
+      res.passages[0].sentences[0].terms[0].plain,
+    );
   });
 
   it('响应是白名单序列化：不含 gloss / translation / full_translation / author / dynasty', async () => {

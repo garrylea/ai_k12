@@ -46,7 +46,7 @@ import pymysql
 from config import RefineryConfig
 from extract_cli import _load_prompt
 from interpretation_check import check_passage
-from interpretation_input import PassageInput, dedupe_passages, load_input
+from interpretation_input import PassageInput, dedupe_passages, load_input, norm_title
 from interpretation_split import attribute_terms, split_sentences
 from interpretation_translate import translate_passage
 from llm import create_llm_client
@@ -108,31 +108,42 @@ def _connect(config: RefineryConfig):
                            password=config.db_pass, database=config.db_name, charset="utf8mb4")
 
 
-def _find_rows(conn, work_title: str, semester: str | None) -> list[tuple]:
-    """定位目标行 → [(id, semester, body, source_ref)]。册次给了就精确到册。"""
+def _all_rows(conn) -> list[tuple]:
+    """整表取回（50 行，代价可忽略）——篇名要按归一形式比对，SQL 里做不划算。"""
     with conn.cursor() as cur:
-        if semester:
-            cur.execute(
-                "SELECT id, semester, body, source_ref FROM chinese_passages "
-                "WHERE work_title=%s AND semester=%s ORDER BY id",
-                (work_title, semester),
-            )
-        else:
-            cur.execute(
-                "SELECT id, semester, body, source_ref FROM chinese_passages "
-                "WHERE work_title=%s ORDER BY id",
-                (work_title,),
-            )
+        cur.execute(
+            "SELECT id, semester, body, source_ref, work_title FROM chinese_passages ORDER BY semester, sort_order, id"
+        )
         return list(cur.fetchall())
 
 
+def _find_rows(conn, work_title: str, semester: str | None) -> list[tuple]:
+    """定位目标行 → [(id, semester, body, source_ref)]。册次给了就精确到册。
+
+    匹配顺序（先精确后宽松，避免误配）：
+      1. 归一后**完全相等**；
+      2. 归一后等于「库中篇名 + `(` 的前缀」——用户常只给词牌名（`水调歌头`），
+         而库里带题目（`水调歌头(明月几时有)`）；
+      3. 都没有 → 空（调用方报错并列相近篇名）。
+    """
+    rows = _all_rows(conn)
+    target = norm_title(work_title)
+    hits = [r for r in rows if norm_title(r[4]) == target]
+    if not hits:
+        hits = [r for r in rows if norm_title(r[4]).startswith(target + "(")]
+    if semester:
+        hits = [r for r in hits if r[1] == semester]
+    return [(r[0], r[1], r[2], r[3]) for r in hits]
+
+
 def _near_titles(conn, work_title: str, limit: int = 5) -> list[str]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT DISTINCT work_title FROM chinese_passages WHERE work_title LIKE %s LIMIT %s",
-            (f"%{work_title[:2]}%", limit),
-        )
-        return [r[0] for r in cur.fetchall()]
+    """报错时给相近篇名，防错字。按「首字相同」先给，再补「首字相近」。"""
+    rows = _all_rows(conn)
+    target = norm_title(work_title)
+    head = target[:2]
+    same = [r[4] for r in rows if norm_title(r[4])[:2] == head]
+    other = [r[4] for r in rows if norm_title(r[4])[:2] != head and head[:1] and head[:1] in r[4]]
+    return list(dict.fromkeys(same + other))[:limit]
 
 
 # ==================== 单篇处理 ====================

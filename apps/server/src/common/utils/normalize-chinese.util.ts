@@ -10,6 +10,23 @@ export function normalizeChineseAnswer(s: string): string {
   return (s ?? '').normalize('NFKC').toLowerCase().replace(PREFIX_STRIP, '');
 }
 
+/**
+ * 去掉字词里的**注音括号**：`谪（zhé）守` → `谪守`、`妖娆（ráo）` → `妖娆`。
+ *
+ * 为什么要有这个：教材注释的词常带注音（学生要看得见读音，故**入库与展示都保留拼音**），
+ * 但正文里写的是不带注音的「谪守」——前端要在原文里高亮该词，就得拿去注音的形式去找位置。
+ * 与 refinery 侧 `interpretation_split.term_plain` **同一套规则**，改一边要同步另一边。
+ *
+ * 只当括号内**全是**拼音字符时才剥，避免误伤 `行路难（其一）`、`（前259—前210）`
+ * 这类真括号（它们是词的一部分，剥掉就找不到了）。
+ */
+const PINYIN_INNER = "A-Za-z0-9āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜüńňǹ\\s,·．.";
+const PINYIN_PAREN_RE = new RegExp(`[（(][${PINYIN_INNER}]+[）)]`, 'g');
+
+export function stripPinyinAnnotation(term: string): string {
+  return (term ?? '').replace(PINYIN_PAREN_RE, '').trim();
+}
+
 export type DictationDiffOp =
   | { type: 'equal'; text: string }
   | { type: 'wrong'; expected: string; actual: string }

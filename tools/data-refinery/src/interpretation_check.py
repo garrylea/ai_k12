@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from interpretation_split import join_sentences
+from interpretation_split import join_sentences, term_plain
 
 
 @dataclass
@@ -76,8 +76,9 @@ def check_passage(
             r.errors.append(f"字词「{term}」的 sentenceIndex 不是整数")
         elif idx < 0 or idx >= len(sentences):
             r.errors.append(f"字词「{term}」的 sentenceIndex={idx} 越界（共 {len(sentences)} 句）")
-        elif term and term not in sentences[idx]:
-            # 归属算法保证这条成立；不成立说明上游被改坏了
+        elif term and term_plain(term) not in sentences[idx] and term not in sentences[idx]:
+            # 归属算法保证这条成立；不成立说明上游被改坏了。
+            # 判据用去注音形式：词本身带拼音（`谪（zhé）守`），正文里只有「谪守」。
             r.errors.append(f"字词「{term}」不在它所归属的第 {idx} 句里")
 
     # ---- 3. 译文（混合模式：输入给了用输入的，没给由模型生成）----

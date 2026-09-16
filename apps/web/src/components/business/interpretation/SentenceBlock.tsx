@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type {
   InterpretationJudgeResult,
   InterpretationSentenceItem,
+  InterpretationTermItem,
 } from '@/services/api';
 import ItemResultLine from './ItemResultLine';
 
@@ -40,23 +41,24 @@ const Spinner = () => (
 /**
  * 把原文里出现的字词高亮（下划线 + 主色）。
  *
- * 每个词只标**首次出现**处，且**不重叠**：同一个词在后文再次出现不重复标
- * （后端归属也取首次，两边口径一致）。找不到的词直接跳过——不报错，也不硬塞。
+ * 用 `plain`（去注音）去找位置——正文里没有注音，用带拼音的 `term` 永远找不着。
+ * 每个词只标**首次出现**处，且**不重叠**（同一个词在后文再次出现不重复标）；
+ * 找不到的词直接跳过——不报错，也不硬塞。
  */
-function highlightTerms(text: string, terms: string[]): ReactNode[] {
+function highlightTerms(text: string, terms: InterpretationTermItem[]): ReactNode[] {
   const spans: Array<{ start: number; end: number }> = [];
   const taken = new Array<boolean>(text.length).fill(false);
-  for (const term of terms) {
-    if (!term) continue;
-    const idx = text.indexOf(term);
+  for (const { plain } of terms) {
+    if (!plain) continue;
+    const idx = text.indexOf(plain);
     if (idx < 0) continue;
     let overlap = false;
-    for (let i = idx; i < idx + term.length; i++) {
+    for (let i = idx; i < idx + plain.length; i++) {
       if (taken[i]) { overlap = true; break; }
     }
     if (overlap) continue;
-    for (let i = idx; i < idx + term.length; i++) taken[i] = true;
-    spans.push({ start: idx, end: idx + term.length });
+    for (let i = idx; i < idx + plain.length; i++) taken[i] = true;
+    spans.push({ start: idx, end: idx + plain.length });
   }
   spans.sort((a, b) => a.start - b.start);
 
@@ -117,7 +119,7 @@ export default function SentenceBlock({
       {/* 行 2：关键字词（没有则整行不渲染） */}
       {sentence.terms.length > 0 && (
         <div className="mt-4 flex flex-col gap-3">
-          {sentence.terms.map((term) => {
+          {sentence.terms.map(({ term }) => {
             const r = termResultOf(term);
             return (
               <div key={term} className="flex flex-col gap-1.5">

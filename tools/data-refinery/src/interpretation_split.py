@@ -21,12 +21,28 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from interpretation_input import InputKeyTerm
 
 #: 句末标点。只有这些断句，`，`/`、`/`：` 不断。
 SENTENCE_END_CHARS = "。！？；"
+
+#: 只当括号内**全是**这些字符时才算「注音」——避免误剥 `（其一）`、`（前259—前210）`、
+#: `（醉翁）` 这类真括号（它们是词的一部分，剥掉就去正文里找不到了）。
+_PINYIN_CHARS = "A-Za-z0-9" + "āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜüńňǹ" + r"\s,·．."
+_PINYIN_PAREN_RE = re.compile(r"[（(][" + _PINYIN_CHARS + r"]+[）)]")
+
+
+def term_plain(term: str) -> str:
+    """去掉注音括号后的形式——**只用于在正文里定位**。
+
+    用户 2026-09-16 裁决：字词**保留拼音**（学生要看得见读音，如 `谪（zhé）守`），
+    所以入库与展示都用原样；但正文里写的是「谪守」，拿带注音的形式去 `in` 永远找不到
+    —— 于是定位这一步单独用去注音形式。
+    """
+    return _PINYIN_PAREN_RE.sub("", term).strip()
 
 
 @dataclass
@@ -56,17 +72,24 @@ def split_sentences(body: str) -> list[str]:
 
 
 def attribute_terms(sentences: list[str], terms: list[InputKeyTerm]) -> AttributionResult:
-    """把每个字词挂到「首个包含它的句子」上。挂不到的丢弃并记进 `dropped_terms`。"""
+    """把每个字词挂到「首个包含它的句子」上。挂不到的丢弃并记进 `dropped_terms`。
+
+    定位用 `term_plain`（去注音）——词本身保留拼音入库/展示，但正文里没有拼音。
+    若去注音后仍找不到，再拿原样试一次（万一某条注音其实是词的一部分）。
+    """
     result = AttributionResult()
     for t in terms:
-        hit = next((i for i, s in enumerate(sentences) if t.term in s), None)
+        plain = term_plain(t.term)
+        hit = next((i for i, s in enumerate(sentences) if plain and plain in s), None)
+        if hit is None:
+            hit = next((i for i, s in enumerate(sentences) if t.term in s), None)
         if hit is None:
             result.dropped_terms.append(t.term)
             continue
         result.key_terms.append({
-            "term": t.term,
+            "term": t.term,          # 原样（带拼音）——展示用
             "gloss": t.gloss,
-            "src": "user",          # 词由人整理提供（区别于旧的 textbook/llm 抽取）
+            "src": "user",           # 词由人整理提供（区别于旧的 textbook/llm 抽取）
             "sentenceIndex": hit,
         })
     return result

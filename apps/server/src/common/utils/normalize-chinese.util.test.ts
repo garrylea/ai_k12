@@ -4,6 +4,7 @@ import {
   diffChinese,
   diffChineseInOriginalText,
   evaluateDictation,
+  stripPinyinAnnotation,
 } from './normalize-chinese.util.js';
 
 describe('normalizeChineseAnswer', () => {
@@ -147,5 +148,32 @@ describe('evaluateDictation', () => {
     expect(res.isCorrect).toBe(false);
     expect(res.fields).toEqual({ author: { match: false }, dynasty: { match: true }, body: { match: true } });
     expect(res.bodyDiff).toEqual([]);
+  });
+});
+
+describe('stripPinyinAnnotation（去注音，前端高亮定位用）', () => {
+  it('剥掉纯拼音括号', () => {
+    expect(stripPinyinAnnotation('谪（zhé）守')).toBe('谪守');
+    expect(stripPinyinAnnotation('妖娆（ráo）')).toBe('妖娆');
+    expect(stripPinyinAnnotation('成吉思汗（hán）')).toBe('成吉思汗');
+    expect(stripPinyinAnnotation('雾凇（sōng）沆砀（hàng dàng）')).toBe('雾凇沆砀');
+    expect(stripPinyinAnnotation('蔚然(láng yá)深秀')).toBe('蔚然深秀');
+  });
+
+  it('词中间与词尾的注音都剥，词本身保留', () => {
+    expect(stripPinyinAnnotation('滕子京谪（zhé）守巴陵郡')).toBe('滕子京谪守巴陵郡');
+    expect(stripPinyinAnnotation('浩浩汤（shāng）汤')).toBe('浩浩汤汤');
+  });
+
+  it('**不**误剥真括号（它们是词的一部分，剥了就找不到了）', () => {
+    expect(stripPinyinAnnotation('行路难（其一）')).toBe('行路难（其一）');
+    expect(stripPinyinAnnotation('水调歌头(明月几时有)')).toBe('水调歌头(明月几时有)');
+    expect(stripPinyinAnnotation('秦皇汉武（前259—前210）')).toBe('秦皇汉武（前259—前210）');
+  });
+
+  it('无注音时原样返回（首尾空白去掉）', () => {
+    expect(stripPinyinAnnotation('谪守')).toBe('谪守');
+    expect(stripPinyinAnnotation('  谪守  ')).toBe('谪守');
+    expect(stripPinyinAnnotation('')).toBe('');
   });
 });

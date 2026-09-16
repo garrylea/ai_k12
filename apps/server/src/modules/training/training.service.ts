@@ -20,6 +20,7 @@ import { parseOptions } from '../../common/utils/parse-options.util.js';
 import {
   evaluateDictation,
   normalizeChineseAnswer,
+  stripPinyinAnnotation,
   type DictationDiffOp,
 } from '../../common/utils/normalize-chinese.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
@@ -269,7 +270,12 @@ export class TrainingService {
         sentences: sentences.map((s, index) => ({
           index, // 用数组下标，不用存储值——存储的 sentenceIndex 只用于「term 挂哪句」
           text: s.text,
-          terms: terms.filter((t) => t.sentenceIndex === index).map((t) => t.term),
+          terms: terms
+            .filter((t) => t.sentenceIndex === index)
+            .map((t) => ({
+              term: t.term,                            // 原样（带注音），展示用
+              plain: stripPinyinAnnotation(t.term),    // 去注音，前端高亮定位用
+            })),
         })),
       });
     }

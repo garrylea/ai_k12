@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pymysql
 
+from interpretation_input import norm_title
 from interpretation_split import join_sentences
 
 
@@ -54,6 +55,22 @@ class InterpretationLoader:
 
     # ---- 主流程 ----
 
+    def _resolve_rows(self, work_title: str, semester: str | None) -> list[tuple]:
+        """按**归一后**的篇名定位目标行 → [(id, body, source_ref)]。
+
+        与 `interpretation_cli._find_rows` **同一套规则**（共用 `norm_title`）：
+        先归一后完全相等，再退到「库中篇名 = 输入 + `(`」的前缀匹配（词牌名 vs 带题目）。
+        库里的写法不统一（半角/全角括号、`·` 有无空格），精确匹配会把 extract 通过的篇目挡在门外。
+        """
+        rows = self._query("SELECT id, semester, body, source_ref, work_title FROM chinese_passages")
+        target = norm_title(work_title)
+        hits = [r for r in rows if norm_title(r[4]) == target]
+        if not hits:
+            hits = [r for r in rows if norm_title(r[4]).startswith(target + "(")]
+        if semester:
+            hits = [r for r in hits if r[1] == semester]
+        return [(r[0], r[2], r[3]) for r in hits]
+
     def load_passages(self, items: list[dict]) -> dict:
         updated = 0
         skipped: list[str] = []
@@ -64,18 +81,8 @@ class InterpretationLoader:
             semester = it.get("semester")
             sentences = [s["text"] for s in it.get("sentences", [])]
 
-            # 1. 定位目标行（册次给了就精确到册；没给就按篇名匹配）
-            if semester:
-                rows = self._query(
-                    "SELECT id, body, source_ref FROM chinese_passages "
-                    "WHERE work_title=%s AND semester=%s",
-                    (work_title, semester),
-                )
-            else:
-                rows = self._query(
-                    "SELECT id, body, source_ref FROM chinese_passages WHERE work_title=%s",
-                    (work_title,),
-                )
+            # 1. 定位目标行（册次给了就精确到册；没给就按篇名匹配两册）
+            rows = self._resolve_rows(work_title, semester)
 
             if not rows:
                 near = self._query(
@@ -90,9 +97,9 @@ class InterpretationLoader:
                 )
                 continue
 
-            if len(rows) > 1:
+            if len(rows) > 1 and not semester:
                 warnings.append(
-                    f"《{work_title}》未给册次且匹配到 {len(rows)} 行（九上/九下重复收录），两行都写"
+                    f"《{work_title}》未给册次且匹配到 {len(rows)} 行（九上/九下重复收录），逐行都写"
                 )
 
             for row_id, body, source_ref in rows:

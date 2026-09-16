@@ -1064,12 +1064,22 @@ export interface InterpretationPassageItem {
   semester: string;
 }
 
+/**
+ * 一个关键字词。**两个形式**（别合并）：
+ *   `term`  原样带注音（`谪（zhé）守`）——展示用，学生要看得见读音
+ *   `plain` 去注音（`谪守`）——在原文里高亮定位用；正文没有注音，用 term 去找永远找不到
+ */
+export interface InterpretationTermItem {
+  term: string;
+  plain: string;
+}
+
 export interface InterpretationSentenceItem {
   index: number;
   /** 该句原文 */
   text: string;
-  /** 该句的关键字词（只有词，没有释义） */
-  terms: string[];
+  /** 该句的关键字词（只有词名，没有释义） */
+  terms: InterpretationTermItem[];
 }
 
 export interface InterpretationPassageDetail {

@@ -73,8 +73,9 @@ def _sqls(loader):
     return [s for s, _ in loader._conn.cur.executed]
 
 
-def _row(source_ref="PIPELINE"):
-    return [(11, BODY, source_ref)]
+def _row(source_ref="PIPELINE", semester="上册", title="岳阳楼记", row_id=11, body=None):
+    """`_resolve_rows` 的取行语句选 5 列：(id, semester, body, source_ref, work_title)。"""
+    return [(row_id, semester, BODY if body is None else body, source_ref, title)]
 
 
 class TestOnlyContentColumns:
@@ -126,24 +127,32 @@ class TestJsonSerialization:
 
 
 class TestLookup:
-    def test_with_semester_uses_both_keys(self):
-        loader = _loader([("FROM chinese_passages", _row())])
-        loader.load_passages([ITEM])
-        lookup = [a for s, a in loader._conn.cur.executed if "FROM chinese_passages" in s][0]
-        assert lookup == ("岳阳楼记", "上册")
+    def test_resolves_by_normalized_title(self):
+        # 库里 `行路难(其一)` 是半角，输入稿常写全角 `行路难（其一）`
+        loader = _loader([("FROM chinese_passages", _row(title="行路难(其一)"))])
+        stats = loader.load_passages([{**ITEM, "work_title": "行路难（其一）"}])
+        assert stats["updated"] == 1
 
-    def test_without_semester_matches_by_title_only(self):
-        loader = _loader([("FROM chinese_passages", _row())])
-        loader.load_passages([{**ITEM, "semester": None}])
-        lookup = [a for s, a in loader._conn.cur.executed if "FROM chinese_passages" in s][0]
-        assert lookup == ("岳阳楼记",)
+    def test_cipai_only_matches_title_with_subtitle(self):
+        # 用户只给词牌名（水调歌头），库里带题目括号（水调歌头(明月几时有)）
+        loader = _loader([("FROM chinese_passages", _row(title="水调歌头(明月几时有)"))])
+        stats = loader.load_passages([{**ITEM, "work_title": "水调歌头"}])
+        assert stats["updated"] == 1
+
+    def test_semester_filters_to_that_row(self):
+        rows = _row(row_id=11, semester="上册") + _row(row_id=12, semester="下册")
+        loader = _loader([("FROM chinese_passages", rows)])
+        loader.load_passages([ITEM])          # ITEM.semester == 上册
+        updates = [a for s, a in loader._conn.cur.executed if s.startswith("UPDATE")]
+        assert len(updates) == 1 and updates[0][3] == 11
 
     def test_two_rows_without_semester_both_written_with_warning(self):
         # 九上/九下重复收录 9 篇：未给册次时两行都写（各自正文可能不同）
-        loader = _loader([("FROM chinese_passages", [(11, BODY, "P"), (12, BODY, "P")])])
+        rows = _row(row_id=11, semester="上册") + _row(row_id=12, semester="下册")
+        loader = _loader([("FROM chinese_passages", rows)])
         stats = loader.load_passages([{**ITEM, "semester": None}])
         assert stats["updated"] == 2
-        assert any("两行都写" in w for w in stats["warnings"])
+        assert any("逐行都写" in w for w in stats["warnings"])
 
     def test_missing_title_skipped_with_near_titles(self):
         loader = _loader([
@@ -159,7 +168,7 @@ class TestLookup:
 class TestGuards:
     def test_join_mismatch_against_db_body_refuses(self):
         # 切句拼不回**这一行**的正文 → 拒绝写入（可能册次给错了：句子来自另一册）
-        loader = _loader([("FROM chinese_passages", [(11, "完全不同的正文。", "P")])])
+        loader = _loader([("FROM chinese_passages", _row(body="完全不同的正文。"))])
         stats = loader.load_passages([ITEM])
         assert stats["updated"] == 0
         assert any("拼不回该行正文" in s for s in stats["skipped"])

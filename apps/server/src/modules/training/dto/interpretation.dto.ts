@@ -18,11 +18,23 @@ export interface InterpretationPassageListItem {
   semester: string;
 }
 
+/**
+ * 答题页的一个关键字词。
+ *
+ * **两个形式并存**，各司其职（不要合并成一个）：
+ *   `term`  —— 原样，**带注音**（`谪（zhé）守`）：展示用，学生要看得见读音
+ *   `plain` —— 去注音（`谪守`）：前端在原文里高亮用；正文里没有注音，拿 `term` 去找永远找不到
+ */
+export interface InterpretationTermItem {
+  term: string;
+  plain: string;
+}
+
 /** 答题页的一句骨架：原文 + 该句有哪些关键字词（只有词名，没有释义）。 */
 export interface InterpretationSentenceItem {
   index: number;
   text: string;
-  terms: string[];
+  terms: InterpretationTermItem[];
 }
 
 /** 开练下发的篇目：整篇所有句子一次给全（前端才能把整篇铺出来、看见上下文）。 */

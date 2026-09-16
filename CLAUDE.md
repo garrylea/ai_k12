@@ -32,7 +32,11 @@ npm run preview  # Serve production build locally
 npm run lint     # ESLint for .ts/.tsx
 ```
 
-No test framework is configured yet for `apps/web`.
+前端有测试基建：**vitest + @testing-library/react + jsdom**（`npm test` / `npm run test:watch`，配置在 `vitest.config.ts`，setup 在 `src/test/setup.ts`）。测试文件放被测文件同目录 `*.test.tsx`。
+
+⚠️ `globals: false`：`@testing-library/react` **不会自动注册 `afterEach(cleanup)`**，多用例文件必须自己写 `afterEach(() => cleanup())`，否则上个用例的 DOM 泄漏导致选择器重复命中（见 `QuestionRunner.test.tsx` 顶部注释）。
+
+⚠️ **组件改动必须补一条渲染测试**，别只靠 `tsc + lint + build`：类型检查抓不到「运行时数据形状」问题。2026-09-16 就栽过——`SentenceBlock` 的 `terms` 从 `string[]` 改成 `{term, plain}` 对象后只跑了类型检查，线上旧 bundle 配新接口把对象当 React child 渲染，直接报 **React #31**（`SentenceBlock.test.tsx` 就是那个回归钉子）。
 
 ### apps/server (ai-core)
 
