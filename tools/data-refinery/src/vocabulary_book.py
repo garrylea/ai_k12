@@ -295,11 +295,14 @@ def check_monotonic(entries: list[Entry]) -> int:
             key = SORT_KEY_RE.sub("", e.word.lower())
             if not key:
                 continue
+            # ⚠️ `prev` 必须**无条件**更新为当前词。第一版只在「没违规」时才更新，
+            # 于是一旦某词违规，`prev` 就卡在旧值，后面所有词都比它小 → **级联误报**
+            # （实测把 `alike→almost→alone→along…` 这一串本来就正确的顺序全标成了违规，
+            # 83 条里绝大多数是这么来的）。与**紧邻的前一个词**比较才只标出真正的断点。
             if key < prev:
                 e.flags.append("order_violation")
                 violations += 1
-            else:
-                prev = key
+            prev = key
     return violations
 
 

@@ -116,6 +116,16 @@ def collect(md_root: pathlib.Path) -> tuple[list[dict], dict]:
             if key in seen:
                 stats["duplicated"] += 1
                 seen[key]["_sources"].append(f"{label} p.{e.page}")
+                # **合并义项而不是丢弃**。原先这里直接 continue，于是「同一个词的不同义项」
+                # 只留首次出现的那个 —— 而 `word` 的唯一键是**大小写不敏感**的，
+                # 所以 `IT`（信息技术）与 `it`（它）、`US`/`us`、`WHO`/`who`、`Bill`/`bill`
+                # 本来就是同一行，后者会把前者的释义覆盖掉，**代词 it/us/who 直接消失**。
+                # 现在按 gloss 去重后合并，两种意思都留下。
+                existing_glosses = {x["gloss"] for x in seen[key]["senses"]}
+                for x in split_senses(e.pos, e.gloss):
+                    if x["gloss"] not in existing_glosses:
+                        seen[key]["senses"].append(x)
+                        existing_glosses.add(x["gloss"])
                 continue
             seen[key] = {
                 "word": e.word,
