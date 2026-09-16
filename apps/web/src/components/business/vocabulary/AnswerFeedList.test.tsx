@@ -190,7 +190,7 @@ describe('AnswerFeedList', () => {
     expect(onClearMark).toHaveBeenCalledWith(7);
   });
 
-  it('已清过标记的词改显示「已移除标记」，不再给按钮（防重复请求）', () => {
+  it('已清过标记的词：换成绿色图标 + 悬停说明，不再给可点按钮（防重复请求）', () => {
     render(
       <AnswerFeedList
         entries={[entry({ question: question({ wordId: 7 }), result: judgeResult({ wordId: 7, verdict: 'wrong' }) })]}
@@ -200,8 +200,10 @@ describe('AnswerFeedList', () => {
         cleared={{ 7: true }}
       />,
     );
-    expect(screen.getByText('已移除标记')).toBeInTheDocument();
-    expect(screen.queryByTestId('clear-mark-7')).toBeNull();
+    const done = screen.getByTestId('mark-cleared-7');
+    expect(done.getAttribute('title')).toBe('已移除易错标记');   // 悬停能看到功能
+    expect(done.querySelector('svg')).not.toBeNull();            // 是图标而非文字
+    expect(screen.queryByTestId('clear-mark-7')).toBeNull();     // 不再可点
   });
 
   it('判题失败/未作答也列出（让学生知道那道题没判成），但不进错误统计', () => {

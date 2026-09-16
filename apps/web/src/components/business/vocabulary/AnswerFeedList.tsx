@@ -144,8 +144,17 @@ export default function AnswerFeedList({
                       <ClearMarkIcon />
                     </button>
                   )}
+                  {/* 已清除状态也用同一个图标（变绿、半透明）而不是文字：
+                      文字在清一色的图标行里显得突兀。悬停用 title 说明它是什么。 */}
                   {cleared[e.question.wordId] && (
-                    <span className="ml-auto text-xs text-[var(--text-secondary)]">已移除标记</span>
+                    <span
+                      className="ml-auto text-[var(--success)] opacity-70"
+                      title="已移除易错标记"
+                      aria-label="已移除易错标记"
+                      data-testid={`mark-cleared-${e.question.wordId}`}
+                    >
+                      <ClearMarkIcon />
+                    </span>
                   )}
                 </div>
 
