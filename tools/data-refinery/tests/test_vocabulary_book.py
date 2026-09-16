@@ -182,13 +182,16 @@ class TestParseEntries:
                    "/juːs/ n. 使用;用途")
         assert es[0].gloss == "使用;利用 n. 使用;用途"
 
-    def test_entry_without_gloss_is_dropped(self, tmp_path):
-        # 书后「阅读书目」页的书名、练答案页的 `a price`、OCR 掉了释义的真词 —— 都不能进库
+    def test_entry_without_gloss_is_flagged(self, tmp_path):
+        # 书后「阅读书目」页的书名、练答案页的 `a price`、OCR 掉了释义的真词 ——
+        # 解析阶段只**打标记**（loader 才丢），因为双栏交错被抢走释义的真词
+        # （catch/grandfather）也走这条路，得留着让人工修正表把它们救回来
         es = parse(tmp_path, HEADING,
                    "doll /dɒl/ n. 玩偶",
                    "Oliver Twist",
                    "a price")
-        assert [e.word for e in es] == ["doll"]
+        assert [(e.word, e.flags) for e in es] == [
+            ("doll", []), ("Oliver Twist", ["no_gloss"]), ("a price", ["no_gloss"])]
 
     def test_line_outside_wordlist_is_ignored(self, tmp_path):
         es = parse(tmp_path, HEADING, "doll /dɒl/ n. 玩偶", "## Unit 3", "## 语法聚焦",
@@ -267,6 +270,76 @@ class TestSplitSenses:
         assert vl.split_senses("", "(= organisation)") == []
         assert vl.split_senses("n.", "组织;机构 (= organisation)") == [
             {"pos": "n.", "extended": False, "gloss": "组织;机构 (= organisation)"}]
+
+
+class TestSuspectForeignGlossFlag:
+    """双栏交错：另一栏的整条插进「词头行」和「释义行」之间 → 释义挂错。"""
+
+    def test_flags_when_gloss_lands_on_the_wrong_word(self, tmp_path):
+        # `catch /kætʃ/ v. (caught /kɔːt/)` ⏎ `money … p.60` ⏎ `捕捉；接住 p.58`
+        # catch 的释义落到了 money 上（money 那一行以页码收尾，本身已写完）
+        es = parse(tmp_path, HEADING,
+                   "catch /kætʃ/ v. (caught /kɔːt/)",
+                   "money /'mʌni/ n. 钱；财富 p.60",
+                   "捕捉；接住 p.58")
+        got = {e.word: e.flags for e in es}
+        assert "suspect_foreign_gloss" in got["money"]
+        assert "no_gloss" in got["catch"]
+
+    def test_multi_pos_continuation_is_not_flagged(self, tmp_path):
+        # 正常的一词多词性折行：`clean adj. 干净的` ⏎ `v. 使……干净`
+        # 续行给了上一条还没有的词性，且上一条那行没有页码
+        es = parse(tmp_path, HEADING,
+                   "clean /kliːn/ adj. 干净的",
+                   "v. 使......干净;打扫 p.40")
+        assert es[0].flags == []
+
+    def test_folded_gloss_after_page_ref_is_not_flagged(self, tmp_path):
+        # `answer /'ɑːnsə(r)/ v. 回答；答复` 那行**没有**页码（页码在续行末尾）→ 正常折行
+        es = parse(tmp_path, HEADING,
+                   "answer /'ɑːnsə(r)/ v. 回答；答复",
+                   "n. 答案 p.40")
+        assert es[0].flags == []
+
+    def test_second_continuation_is_not_flagged(self, tmp_path):
+        # 已经并过续行的条目，后面每一行都是正常的多行释义（`speed` 那种三行词条）
+        es = parse(tmp_path, HEADING,
+                   "speed /spiːd/ n. 速度 p.23",
+                   "v. (sped/sped/, sped; speeded, speeded)",
+                   "加速；促进 p.23")
+        assert es[0].flags == []
+
+
+class TestGlossFixes:
+    """人工修正表的机制（`vocabulary_gloss_fixes.jsonl`，由 loader 应用）。"""
+
+    def test_drop_trims_the_sense_not_the_whole_sense(self):
+        # 双栏交错会把两段释义并成**一个**义项（中间没有词性标记，split_senses 切不开），
+        # 所以要摘掉那一小段而不是整条删（整条删会让 money 变成 0 义项的词条）
+        stats: dict = {}
+        got = vl.apply_fix([{"pos": "n.", "gloss": "钱;财富 捕捉;接住"}],
+                           {"word": "money", "drop": ["捕捉;接住"]}, stats)
+        assert got == [{"pos": "n.", "gloss": "钱;财富", "extended": False}]
+
+    def test_drop_removes_the_sense_when_it_is_the_whole_gloss(self):
+        stats: dict = {}
+        got = vl.apply_fix([{"pos": "v.", "gloss": "听到"}, {"pos": "v.", "gloss": "逛商店;在商店购物"}],
+                           {"word": "hear", "drop": ["逛商店;在商店购物"]}, stats)
+        assert got == [{"pos": "v.", "gloss": "听到", "extended": False}]
+
+    def test_add_is_idempotent_and_dedupes_after_drop(self):
+        stats: dict = {}
+        # 同一个词在多册出现：干净那册给「喜悦;乐趣」，脏那册给「喜悦;乐趣 (使)远离…」
+        # 先按 gloss 去重合并、再摘片段 → 会撞成两条一模一样的，必须再去重
+        got = vl.apply_fix([{"pos": "n.", "gloss": "喜悦;乐趣"},
+                            {"pos": "n.", "gloss": "喜悦;乐趣 (使)远离;避免......靠近"}],
+                           {"word": "joy", "drop": ["(使)远离;避免......靠近"],
+                            "add": [{"pos": "n.", "gloss": "喜悦;乐趣"}]}, stats)
+        assert got == [{"pos": "n.", "gloss": "喜悦;乐趣", "extended": False}]
+
+    def test_add_rejects_gloss_without_cjk(self):
+        with pytest.raises(RuntimeError, match="没有中文"):
+            vl.apply_fix([], {"word": "x", "add": [{"pos": "n.", "gloss": "(= organisation)"}]}, {})
 
 
 class TestCaseFold:

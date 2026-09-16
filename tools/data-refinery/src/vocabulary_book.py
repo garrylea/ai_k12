@@ -286,6 +286,42 @@ def split_glued(line: str) -> list[str]:
     return [p for p in parts if p]
 
 
+def _flag_suspect_merge(entries: list[Entry], piece: str) -> None:
+    """续行并入上一条**之前**，判断这行是不是别人丢掉的释义。
+
+    两栏被 MinerU 交错输出时，右栏的一整条会插进左栏「词头行」和「释义行」之间，
+    那行释义就落到了插进来的那条上 —— `money` 因此拿到 `捕捉;接住`，
+    而被抢释义的 `catch` 因为始终没释义被整条丢弃。
+
+    三条判据**全部满足**才打标记（任何一条不满足都说明是正常折行）：
+      1. 上一条**只有自己那一行**（还没并过续行）—— 一旦并过，后面正常的多行释义
+         都会被误判（`speed` 的 `速度` + `v. (sped…)` + `加速；促进` 就是这么误报的）
+      2. 上一条那一行**以页码引用收尾** —— 课本里页码总是在整条词条的最后，
+         带页码说明这条已经写完了，那它就不该再有续行
+         （`admit /əd'mɪt/ vi. & vt. 承认` 没有页码，`vt. 准许进入（或加入）` 是它的
+         第二个义项，正常）
+      3. 续行**没有给出上一条缺的词性** —— 一词多词性折行
+         （`clean /kliːn/ adj. 干净的` ⏎ `v. 使……干净；打扫`）
+
+    只做**标记**，不改数据：这类挂错**没有确定性判据**能自动区分 ——
+    同一本书里 `catch`（该给前面那个空释义的词头）和 `admit`（该给紧邻的上一条）
+    结构完全一样（都是「空释义词头 + 完整词条 + 一行释义」），程序只能猜，
+    猜错就是把正常词条改坏。所以标记出来交人工，见 `vocabulary_gloss_fixes.jsonl`。
+    """
+    if not entries:
+        return
+    e = entries[-1]
+    if " ⏎ " in e.raw:                     # 已经并过续行 → 后面都是正常的多行释义
+        return
+    if not PAGE_REF_TAIL_RE.search(e.raw):  # 自己那行没页码 → 本来就没写完
+        return
+    piece_pos = {m.group(0).strip() for m in POS_TOKEN_RE.finditer(piece)}
+    if piece_pos - set(e.pos.split()):
+        return
+    if "suspect_foreign_gloss" not in e.flags:
+        e.flags.append("suspect_foreign_gloss")
+
+
 def parse_entries(md_dir: Path, source: str) -> list[Entry]:
     entries: list[Entry] = []
     skipped: list[str] = []
@@ -336,6 +372,7 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             # ---- 续行 1：直接以释义开头（中文或左括号；释义折行） ----
             if GLOSS_START_RE.match(piece):
                 if entries:
+                    _flag_suspect_merge(entries, piece)
                     gl = entries[-1].gloss
                     entries[-1].gloss = gl + (piece if piece.startswith(("（", "("))
                                              else (" " if gl else "") + piece)
@@ -354,6 +391,7 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             # 词形永远在行首，所以行首就是词性的只能是折行。
             pm = POS_TOKEN_RE.match(piece)
             if pm and entries:
+                _flag_suspect_merge(entries, piece)
                 e = entries[-1]
                 if not e.pos:
                     e.pos = piece[:pm.end()].strip()
@@ -412,6 +450,7 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             # 「释义：使用;利用 /juːs/ n. 使用;用途」这种带读音的释义（实测 71 条）。
             if not word:
                 if entries:
+                    _flag_suspect_merge(entries, piece)
                     rest = LEADING_STRAY_PAREN_RE.sub("", PHONETIC_HEAD_RE.sub("", piece)).strip()
                     if rest:
                         entries[-1].gloss += (" " if entries[-1].gloss else "") + rest
@@ -433,17 +472,17 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             entries.append(Entry(word, phonetic, " ".join(pos_tokens), gloss, source, page, raw,
                                  flags, current_section, current_group))
 
-    # **释义是空的词条一律丢弃**。走到这里还没释义的只有一类：折行的词头后面没有跟到释义
-    # （书后「阅读书目」页的书名、练习册答案页的 `a price`/`b speed`、OCR 掉了释义的真词
-    # 如 ethnic/dominant）。留着它们等于往题库里灌「只有词、没有意思」的词条 ——
-    # 学生抽到就只能干瞪眼，所以宁可少一个词也不留。
-    kept = []
+    # **释义为空的词条打标记但不在这里丢**。走到这里还没释义的只有一类：折行的词头后面
+    # 没有跟到释义（书后「阅读书目」页的书名、练习册答案页的 `a price`/`b speed`、
+    # OCR 掉了释义的真词 ethnic/dominant）。留着它们等于往题库里灌「只有词、没有意思」的词条
+    # —— 学生抽到只能干瞪眼，所以 loader 会把它们丢掉；
+    # **但要在这里保留并打标记**：双栏交错时被抢走释义的真词（`catch`/`grandfather`）
+    # 走的也是这条路，人工修正表要靠这条记录才能把它们连词形带音标一起救回来
+    # （见 vocabulary_gloss_fixes.jsonl）。第一版直接在这里删掉，那些词就再也回不来了。
     for e in entries:
-        if e.gloss.strip():
-            kept.append(e)
-        else:
+        if not e.gloss.strip():
+            e.flags.append("no_gloss")
             dropped.append(f"{e.word}\t{e.raw}")
-    entries = kept
 
     if skipped:
         (md_dir / "_skipped_lines.txt").write_text("\n".join(skipped), encoding="utf-8")

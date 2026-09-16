@@ -1,0 +1,18 @@
+{"word": "money", "drop": ["捕捉;接住"], "src": "双栏交错：右栏的 money 插进了左栏 catch 的「词头行」与「释义行」之间，catch 的释义落到了 money 上（七下 p.126）"}
+{"word": "catch", "add": [{"pos": "v.", "gloss": "捕捉;接住"}], "src": "承上：释义被 money 抢走后 catch 因无释义被整条丢弃，这里补回（七下 p.126，词形与音标 /kætʃ/ 由解析提供）"}
+{"word": "dress", "drop": ["逛商店;在商店购物"], "src": "同一行塞了两栏：`dress … p.60 v. 逛商店；在商店购物 p.69`，后半段是 shop 的动词义项（七上 p.134）"}
+{"word": "hear", "drop": ["逛商店;在商店购物"], "src": "同一行塞了两栏：`shop … n. 商店 hear … v. 听到 p.72` ⏎ `v. 逛商店；在商店购物 …`，后半段是 shop 的动词义项（七上 p.134）"}
+{"word": "shop", "add": [{"pos": "v.", "gloss": "逛商店;在商店购物"}], "src": "承上：shop 的动词义项被 dress/hear 抢走，这里补回（七上 p.134）"}
+{"word": "juice", "drop": ["提前;在早期"], "src": "双栏交错：`early … juice … p.70` ⏎ `adv. 提前；在早期 …`，这段是 early 的（七上 p.134；early 自己那册已有该义项，无需补）"}
+{"word": "month", "replace": [{"pos": "n.", "gloss": "月份"}], "src": "双栏交错：Mrs 的释义 `夫人；太太` 被并进了 month（七上 p.134）；Mrs 单独修在下一条"}
+{"word": "mrs", "replace": [{"pos": "", "gloss": "夫人;太太"}], "src": "课本原文 `Mrs /'mɪsɪz/(对已婚妇女的礼貌称呼) 夫人；太太`：括号注释与释义被折行打散，解析出来成了两条脏义项（七上 p.134）。课本没给词性，pos 留空"}
+{"word": "many", "drop": ["爷爷;外公"], "src": "双栏交错：`many … p.14` ⏎ `/'grænfɑːðə(r)/ ) n. 爷爷;外公` —— 词头 grandfather 被 OCR 吃掉，释义挂到了 many 上（七上 p.133）"}
+{"word": "grandfather", "create": {"phonetic": "/'grænfɑːðə(r)/", "level": "junior", "src": "初中 七上 p.133（修正表建行）"}, "add": [{"pos": "n.", "gloss": "爷爷;外公"}], "src": "承上：grandfather 的词头整行被 OCR 吃掉（原文只剩 `/'grænfɑːðə(r)/ ) n. 爷爷;外公`），释义被 many 抢走而整条消失，这里连词形带音标补回；音标取自原文、学段取自该书目录"}
+{"word": "japan", "replace": [{"pos": "n.", "gloss": "日本"}], "src": "双栏交错：`Japan … 日本 p.48` ⏎ `/ˈʃeɪkən/) 与(某人)握手;摇动` ⏎ `n. 摇动;奶昔` —— 那两段是 shake 的（八上；shake 自己那册已有，无需补）"}
+{"word": "trust", "drop": ["(使)远离;避免......靠近"], "src": "`trust … 信任；相信 p.78` ⏎ `(使)远离;避免……靠近` —— 后半段是 keep away (from) 的释义，该短语未进库（九上 p.124/p.130）"}
+{"word": "joy", "drop": ["(使)远离;避免......靠近"], "src": "同 trust：keep away (from) 的释义挂到了 joy 上（九上 p.124/p.130）"}
+{"word": "nosebleed", "drop": ["不但......而且......"], "src": "`nosebleed … 鼻出血 p.13` ⏎ `不但……而且……` —— 后半段是 not only … but also … 的释义，该短语未进库（九上 p.124/p.130）"}
+{"word": "remain", "drop": ["不但......而且......"], "src": "同 nosebleed：not only … but also … 的释义挂到了 remain 上（九上 p.124/p.130）"}
+{"word": "in the end", "drop": ["某个人 他本人"], "src": "`in the end 最后；终究 p.63` ⏎ `某个人` ⏎ `他本人` —— 那是 somebody / himself 的释义（两词本册已有，无需补）（七上 p.133）"}
+{"word": "cut up", "drop": ["交流;沟通"], "src": "`p.36 cut up 切碎；剁碎` ⏎ `v. 交流;沟通` —— 后半段是 communicate 的（communicate 本册已有，无需补）（八上 p.134）"}
+{"word": "intelligence", "drop": ["人工智能"], "src": "跨行括号注释：`AI /…/ (= artificial /…/` ⏎ `intelligence /…/) 人工智能`，`人工智能` 是 AI 的释义（八上 p.132）"}

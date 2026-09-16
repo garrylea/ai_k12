@@ -1,6 +1,6 @@
 """把课本抽出的词条写进 `english_words`。
 
-配套 `vocabulary_book.py`（md → 词条）。本模块负责三件事，都是**入库前必须做对**的：
+配套 `vocabulary_book.py`（md → 词条）。本模块负责四件事，都是**入库前必须做对**的：
 
 1. **分层映射**：level 由**书的目录**决定，不是猜的
    `初中/...` → `junior`；`高中/.../必修 X` → `senior_required`；`选择性必修 X` → `senior_elective`
@@ -8,6 +8,10 @@
    按嵌入的词性标记切成 `meanings` 数组的多个元素 —— 这是 `meanings` 该有的形状
 3. **跨书去重**：同一个词在多册都出现（教材会复现）。`word` 是唯一业务键，
    故按**先初中后高中、册次从低到高**的顺序保留**首次出现**，并记下全部来源。
+4. **应用人工修正表**（`vocabulary_gloss_fixes.jsonl`）：OCR/MinerU 造成的「释义挂到了别的词上」
+   没有确定性判据能自动修（详见 `vocabulary_book._flag_suspect_merge`），只能人工定，
+   所以把人工结论落成数据文件，由本模块在入库前应用 —— 这样**每次重灌都不会丢**，
+   每条改动也都留了 `src` 可追溯。
 
 ⚠️ **`error_count` 绝不能出现在 `ON DUPLICATE KEY UPDATE` 子句里** —— 它是全平台累计错次，
 一次全量重灌抹掉它就再也回不来了（同内容管线 loader 的规则，见 schema 注释）。
@@ -151,8 +155,77 @@ def split_senses(pos: str, gloss: str) -> list[dict]:
     return senses
 
 
-def collect(md_root: pathlib.Path) -> tuple[list[dict], dict]:
+FIXES_PATH = pathlib.Path(__file__).parent / "vocabulary_gloss_fixes.jsonl"
+
+
+def load_fixes(path: pathlib.Path | None = None) -> dict[str, dict]:
+    """读人工修正表（按小写词形索引）。"""
+    p = path or FIXES_PATH
+    if not p.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            r = json.loads(line)
+            out[r["word"].lower()] = r
+    return out
+
+
+def apply_fix(senses: list[dict], fix: dict, stats: dict) -> list[dict]:
+    """对一条词条的义项应用修正：`replace` > `drop` + `add`。
+
+    ⚠️ `drop` **只删匹配得上的**，匹配不上不算错 —— 同一个词在多册出现，
+    只有被交错的那一册的义项是脏的（`dress` 在七上 p.134 脏、在另一册干净），
+    而「首次出现」留哪一册由册次顺序决定。所以这里宽松处理，
+    最后再由 `collect()` 统一校验「每条 drop 至少命中过一次」，避免修正悄悄失效。
+    """
+    if "replace" in fix:
+        stats["fix_replace"] = stats.get("fix_replace", 0) + 1
+        return [{"pos": s.get("pos", ""), "gloss": s["gloss"], "extended": False}
+                for s in fix["replace"]]
+    out = list(senses)
+    for bad in fix.get("drop", []):
+        for i, s in enumerate(out):
+            if bad not in s["gloss"]:
+                continue
+            stats.setdefault("fix_drop_hit", set()).add(f"{fix['word']}:{bad}")
+            stats["fix_drop"] = stats.get("fix_drop", 0) + 1
+            # **摘掉那一小段，不是整条义项删掉**：双栏交错时两段释义会被并成**一个**义项
+            # （`money` → `n. 钱;财富 捕捉;接住`，中间没有词性标记，split_senses 切不开），
+            # 整条删掉会把 `钱;财富` 也一起删掉（实测 money 因此变成 0 义项的词条）。
+            # 摘完只剩空白（`dress` → `逛商店;在商店购物`）才整条丢。
+            rest = s["gloss"].replace(bad, "").strip(" ;；")
+            if rest:
+                s["gloss"] = rest
+            else:
+                out[i] = None
+        out = [s for s in out if s]
+    for add in fix.get("add", []):
+        if any(s["gloss"] == add["gloss"] for s in out):
+            continue                        # 幂等：多册重复时同一修正会走到多次
+        if not CJK_RE.search(add["gloss"]):
+            raise RuntimeError(f"修正表要加的释义没有中文：{fix['word']} {add['gloss']!r}")
+        out.append({"pos": add.get("pos", ""), "gloss": add["gloss"], "extended": False})
+        stats["fix_add"] = stats.get("fix_add", 0) + 1
+    # **摘掉多余片段后可能和另一条撞车**：同一个词在多册出现，干净的那册给
+    # `喜悦;乐趣`，脏的那册给 `喜悦;乐趣 (使)远离…`，先按 gloss 去重合并、再摘片段
+    # → 两条变成一模一样（实测 joy 3 条、trust/nosebleed 各 2 条）。
+    # 同词性同释义的义项对用户没有任何差别，去重。顺便把形状归一（pos/gloss/extended），
+    # 免得改过的义项和没改过的字段不一致。
+    uniq: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for s in out:
+        k = (s.get("pos", ""), s["gloss"])
+        if k not in seen_pairs:
+            seen_pairs.add(k)
+            uniq.append({"pos": s.get("pos", ""), "gloss": s["gloss"],
+                         "extended": bool(s.get("extended"))})
+    return uniq
+
+
+def collect(md_root: pathlib.Path, fixes: dict[str, dict] | None = None) -> tuple[list[dict], dict]:
     """遍历所有书的 md 目录 → 去重后的词条列表 + 统计。"""
+    fixes = fixes if fixes is not None else load_fixes()
     books = sorted(md_root.iterdir(), key=lambda p: grade_order(p.name))
     seen: dict[str, dict] = {}
     stats = {"books": 0, "raw": 0, "duplicated": 0, "unleveled": 0, "flagged": 0}
@@ -187,30 +260,77 @@ def collect(md_root: pathlib.Path) -> tuple[list[dict], dict]:
                 stats["flagged"] += 1
                 continue                       # 词形不合法（含省略号/乱码）不进库
             key = normalize_case(e.word).lower()
+            fix = fixes.get(key)
+            # **释义为空的词条丢掉**（书名、练习答案页的选项行、OCR 掉了释义的词）。
+            # 但走这条路的不止垃圾：双栏交错时被抢走释义的真词（`catch`/`grandfather`）
+            # 也是这样 —— 所以**修正表里点名的词要放行**，由 apply_fix 给它补上释义。
+            if e.flags and "no_gloss" in e.flags and not fix:
+                stats["no_gloss"] = stats.get("no_gloss", 0) + 1
+                continue
             if key in seen:
                 stats["duplicated"] += 1
                 seen[key]["_sources"].append(f"{label} p.{e.page}")
                 # **合并义项而不是丢弃**。原先这里直接 continue，于是「同一个词的不同义项」
                 # 只留首次出现的那个 —— 而 `word` 的唯一键是**大小写不敏感**的，
                 # 所以 `IT`（信息技术）与 `it`（它）、`US`/`us`、`WHO`/`who`、`Bill`/`bill`
-                # 本来就是同一行，后者会把前者的释义覆盖掉，**代词 it/us/who 直接消失**。
+                # 本来就是同一行，后者会把它的释义覆盖掉，**代词 it/us/who 直接消失**。
                 # 现在按 gloss 去重后合并，两种意思都留下。
+                if "no_gloss" in e.flags:
+                    continue                   # 空借义项不参与合并
                 existing_glosses = {x["gloss"] for x in seen[key]["senses"]}
                 for x in split_senses(e.pos, e.gloss):
                     if x["gloss"] not in existing_glosses:
                         seen[key]["senses"].append(x)
                         existing_glosses.add(x["gloss"])
+                if fix:
+                    seen[key]["senses"] = apply_fix(seen[key]["senses"], fix, stats)
+                    stats.setdefault("fixed_words", set()).add(key)
+                    seen[key]["_flags"] = [f for f in seen[key]["_flags"]
+                                           if f != "suspect_foreign_gloss"]
                 continue
+            senses = split_senses(e.pos, e.gloss)
+            if fix:
+                senses = apply_fix(senses, fix, stats)
+                stats.setdefault("fixed_words", set()).add(key)
             seen[key] = {
                 "word": normalize_case(e.word),
                 "phonetic": f"/{e.phonetic}/" if e.phonetic else None,
                 "level": level,
-                "senses": split_senses(e.pos, e.gloss),
+                "senses": senses,
                 "_page": e.page,
-                "_flags": e.flags,
+                # `no_gloss` 是「本该丢掉」的标记、`suspect_foreign_gloss` 是「等人工判断」的标记，
+                # 修正表点过名就说明这两件事都已处理完了，别再挂在复核清单里占位。
+                "_flags": [f for f in e.flags
+                           if f not in ("no_gloss",) and not (fix and f == "suspect_foreign_gloss")],
                 "_sources": [f"{label} p.{e.page}"],
                 "_order": len(seen),
             }
+    # 修正表里带 `create` 的词允许**凭空建行**：OCR 把整行词头都吃掉时
+    # （`/'grænfɑːðə(r)/ ) n. 爷爷;外公` —— 词形没了），解析结果里连词形都找不到，
+    # 只能由修正表给出音标与学段（两项都取自课本原文与该书目录，不是编的）。
+    for w, f in fixes.items():
+        if w in seen or "create" not in f:
+            continue
+        c = f["create"]
+        senses = apply_fix([], f, stats)
+        if not senses:
+            raise RuntimeError(f"修正表 create 了 {w} 但没同时给释义（add 为空）")
+        seen[w] = {
+            "word": f["word"], "phonetic": c["phonetic"], "level": c["level"],
+            "senses": senses, "_page": 0, "_flags": [],
+            "_sources": [c.get("src", "人工修正表 create")], "_order": len(seen),
+        }
+    # 修正表里点名但一条都没匹配上的词 → 报错（见 apply_fix 的同理注释）
+    missed = sorted(set(fixes) - set(seen))
+    if missed:
+        raise RuntimeError(f"修正表里有 {len(missed)} 个词在解析结果里完全没出现：{missed[:8]}")
+    # 每条 drop 至少要命中过一次，否则说明课本/解析变了而修正表没跟着更新 ——
+    # 静默放过会让修正悄悄失效（比报错糟得多）
+    hit = stats.get("fix_drop_hit", set())
+    stale = [f"{w}:{bad}" for w, f in fixes.items() for bad in f.get("drop", [])
+             if f"{w}:{bad}" not in hit]
+    if stale:
+        raise RuntimeError(f"修正表的 drop 有 {len(stale)} 条一次都没命中，说明数据已变：{stale[:5]}")
     return list(seen.values()), stats
 
 
@@ -345,15 +465,22 @@ def main(argv=None) -> int:
         # 但也可能是词表本身把词组排在了别处；只靠计数看不出该改哪个，必须逐条看。
         for w, prev, src, sec in stats.get("order_violation_items", []):
             print(f"    [order_violation] {prev!r} → {w!r}  （{sec} 段）← {src}")
+    print(f"无释义丢弃: {stats.get('no_gloss', 0)}")
+    if stats.get("fix_drop") or stats.get("fix_add") or stats.get("fix_replace"):
+        print(f"人工修正表（{FIXES_PATH.name}）: 摘掉多余片段 {stats.get('fix_drop', 0)} 处、"
+              f"补义项 {stats.get('fix_add', 0)} 处、整体替换 {stats.get('fix_replace', 0)} 处")
     bad = [r for r in rows if r["_flags"]]
     print(f"仍带标记（需人工看）: {len(bad)}")
+    # 释义留空兜底：真实数据里不该再有 0 义项的词条（有的话下面这行会 IndexError 把 dump 也带崩）
+    def _first_gloss(r: dict) -> str:
+        return r["senses"][0]["gloss"][:30] if r["senses"] else "(无释义)"
     if args.list_issues:
         for r in bad:
-            print(f"    [{','.join(r['_flags'])}] {r['word']!r}  {r['senses'][0]['gloss'][:30]}"
+            print(f"    [{','.join(r['_flags'])}] {r['word']!r}  {_first_gloss(r)}"
                   f"  ← {r['_sources'][0]}")
     else:
         for r in bad[:8]:
-            print(f"    [{','.join(r['_flags'])}] {r['word'][:30]!r} {r['senses'][0]['gloss'][:26]}")
+            print(f"    [{','.join(r['_flags'])}] {r['word'][:30]!r} {_first_gloss(r)}")
 
     if args.dump:
         with open(args.dump, "w", encoding="utf-8") as f:
