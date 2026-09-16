@@ -41,7 +41,8 @@
 | 11 | 词根族数据 | 我出草稿 + 程序硬校验 + 人工审一遍（`--extract` / `--load` 两阶段） |
 | 12 | 词根族 UI | **就地展开缩进树**（点「+」号），不用放射图、不引图形库 |
 | 13 | 词根族交付 | 独立懒加载端点 `GET .../words/{wordId}/family` |
-| 14 | 中→英判题 | 纯程序比对 + 拼写变体组，**不调 LLM** |
+| 14 | 答案是英文单词的方向（中→英、看音标写单词） | 纯程序比对 + 拼写变体组，**不调 LLM** |
+| 16 | 出题方向 | 四个：`en2cn` 给单词 / `cn2en` 给中文 / **`ph2en` 看音标写单词** / `random` 逐题掷。`ph2en` 要求词有可用音标（`/`、`//` 算没有）否则退化成 en2cn 不丢词；熟词僻义题恒为 en2cn |
 | 15 | LLM 场景 | 新增 `english_word_judge`：primary=`local`、fallback=`deepseek-flash` |
 
 ### 2.1 一处已知的口径瑕疵（保留，未修）
@@ -117,7 +118,7 @@ SELECT ... FROM english_words WHERE root_key = ? AND verified = 1 AND is_active 
 
 | 题面 | 目标义项 | 路径 | 方式 |
 |---|---|---|---|
-| 中→英 | — | 归一化比对 `word` → 未命中查拼写变体组 | **纯程序**（`method:'exact'`），不调 LLM |
+| 中→英 / 看音标写单词（答案都是英文单词） | — | 归一化比对 `word` → 未命中查拼写变体组 | **纯程序**（`method:'exact'`），不调 LLM |
 | 英→中 | 非僻义组 | 全部常见义 gloss 按 `；,、/` 拆原子归一化比对 → 未命中调 LLM | 程序短路 + LLM 二档 |
 | 英→中 | 单个 `extended` 义项 | 与目标僻义义项原子比对 → 未命中调 LLM | 程序短路 + LLM **三档** |
 
@@ -156,11 +157,13 @@ SELECT ... FROM english_words WHERE root_key = ? AND verified = 1 AND is_active 
 
 ### 5.1 两条防泄漏铁律
 
-1. **`promptKind='cn2en'` 的题，后端不下发** `word` / `phonetic` / `context` / `hasFamily`。
+1. **凡是答案等于英文单词的题（`promptKind` 为 `cn2en` 或 `ph2en`），后端不下发**
+   `word` / `phonetic` / `context` / `hasFamily`。`ph2en` 的音标只出现在 `prompt` 一处
+   （`phonetic` 留 null，免得两处内容打架）。
    题面是中文释义、答案是英文单词——这四项每一项都足以顺出答案。
 2. **「+」号只在 `promptKind === 'en2cn' && hasFamily` 时渲染**。
    词根族树里**必然包含单词本身**（`care` 是 `careful` 的族中心），
-   中→英题点开 `+` 就等于把答案递给学生。后端在 cn2en 题上本就不返回 `hasFamily`，
+   中→英题点开 `+` 就等于把答案递给学生。后端在 cn2en / ph2en 题上本就不返回 `hasFamily`，
    这里是前端第二道闸门，并有专门的渲染钉子用例
    （`WordPromptCard.test.tsx`：中→英即使 `hasFamily=true` 也不得渲染按钮）。
 

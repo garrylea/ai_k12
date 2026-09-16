@@ -4142,14 +4142,20 @@ paths:
         背单词开练（student JWT）。**返回 201**（Nest `@Post` 默认码，本仓既有 POST 端点同此，
         历史文档标 200 属笔误）。校验：count 限 **10-20** 整数（非法 400）；levelPool ∈
         junior|senior|all；order ∈ random|alpha|alpha_desc|letter；direction ∈
-        en2cn|cn2en|random；**order=letter 时必须给单个 a-z 字母的 letter，非 letter 模式给了
+        en2cn|cn2en|ph2en|random；**order=letter 时必须给单个 a-z 字母的 letter，非 letter 模式给了
         letter 则 400**（静默忽略会让学生以为筛选生效了）。
-        服务端会把 direction 落定成实际方向（random 逐题掷）；**勾了 onlyExtendedSense 时
+        `ph2en` = 看音标写单词（题面是音标、答案是英文单词）；词没有可用音标时**退化成英→中
+        而不是把这个词丢掉**（静默丢词会让学生以为筛选坏了），`/`、`//` 这类空音标算作没有。
+        服务端会把 direction 落定成实际方向（random 逐题在**本词出得了的方向**里等概率掷）；
+        **勾了 onlyExtendedSense 时
         方向强制 en2cn**——三档判题口径（含「答成常见义」那一档）建立在「题面给单词 + 语境、
-        学生答中文」之上，中→英下这一档失去意义。**普通模式下也会抽到熟词僻义题**（在候选里
+        学生答中文」之上，中→英下这一档失去意义；**熟词僻义题恒为 en2cn**（`ph2en` 只有音标，
+        学生既看不到单词也看不到搭配，而「在搭配里认出那个不常见的意思」正是考点）。
+        **普通模式下也会抽到熟词僻义题**（在候选里
         等概率抽），勾选的作用是「只留」僻义。一个词只出一道题，会话长度 == count。
-        **防泄漏**：promptKind=cn2en 的题响应里**不含** word/phonetic/context/hasFamily
-        ——题面是中文释义、答案是英文单词，且词根族树里必然含单词本身。
+        **防泄漏**：凡是**答案等于英文单词**的题（`cn2en` 与 `ph2en`）响应里**不含**
+        word/phonetic/context/hasFamily——词根族树里必然含单词本身；`ph2en` 的音标只出现在
+        `prompt` 一处（`phonetic` 为 null）。
         题池为空返回 { questions: [], poolSize: 0 }。
       operationId: startVocabulary
       security: [{ bearerAuth: [] }]
@@ -4180,9 +4186,10 @@ paths:
       summary: 背单词判题（三条路由：中→英纯程序 / 英→中常见义 / 英→中熟词僻义）
       description: >-
         背单词判题（student JWT）。**返回 201**。请求校验：wordId 须正整数（非法 400）、
-        不存在 404；senseIndex 须非负整数（非法 400）；promptKind ∈ en2cn|cn2en；
+        不存在 404；senseIndex 须非负整数（非法 400）；promptKind ∈ en2cn|cn2en|ph2en；
         answer 非字符串降级空串（防 number 混进去变 500）。
-        三条路由：① **中→英**——纯程序比对（归一化后相等，或命中人工整理的拼写变体组，
+        三条路由：① **答案是英文单词的两条**（中→英 `cn2en`、看音标写单词 `ph2en`）
+        ——纯程序比对（归一化后相等，或命中人工整理的拼写变体组，
         或正确答案含连字符/空格时忽略其差异），**不调 LLM**，答错时给 spellingDiff
         逐字符差异；② **英→中·常见义**——先把该词全部常见义的 gloss 按 `；,、/` 拆成原子
         做归一化比对（命中即 exact，不调模型），未命中才调 english_word_judge 场景
@@ -6596,8 +6603,11 @@ components:
           description: 仅 order=letter 时可用，单个 a-z 字母；非 letter 模式下传入即 400
         direction:
           type: string
-          enum: [en2cn, cn2en, random]
-          description: random=逐题掷；勾 onlyExtendedSense 时服务端强制 en2cn
+          enum: [en2cn, cn2en, ph2en, random]
+          description: >-
+            en2cn=给单词答中文；cn2en=给中文答单词；ph2en=给音标答单词；
+            random=逐题在**本词出得了的方向**里等概率掷（没音标的词不会有 ph2en 题）。
+            勾 onlyExtendedSense 时服务端强制 en2cn；熟词僻义题恒为 en2cn（见 start 说明）
         onlyNotLearned: { type: boolean, description: 只出没背过的 }
         onlyMyWrong: { type: boolean, description: 只出我错过的词 }
         onlyCommonWrong: { type: boolean, description: 只出全平台高频易错词 }
@@ -6613,21 +6623,23 @@ components:
       properties:
         wordId: { type: integer, format: int64 }
         senseIndex: { type: integer, description: 目标义项在 meanings 里的下标 }
-        promptKind: { type: string, enum: [en2cn, cn2en] }
+        promptKind: { type: string, enum: [en2cn, cn2en, ph2en] }
         prompt:
           type: string
-          description: 题面。en2cn 是英文单词；cn2en 是中文释义
+          description: >-
+            题面。en2cn 是英文单词；cn2en 是中文释义；
+            ph2en 是音标（如 `/ˈkʌntri/`，此时 `phonetic` 为 null，避免两处内容打架）
         phonetic: { type: string, nullable: true }
         context:
           type: string
           nullable: true
-          description: 锁定僻义的搭配（如 address the problem）；普通义题与 cn2en 题为 null
+          description: 锁定僻义的搭配（如 address the problem）；普通义题与 cn2en/ph2en 题为 null
         isExtendedSense: { type: boolean, description: 是否熟词僻义题（题面会给标记） }
         hasFamily:
           type: boolean
           description: >-
             是否有词根族可展开。**前端必须配合 promptKind==='en2cn' 才渲染「+」号**；
-            cn2en 下后端恒为 false。
+            cn2en 与 ph2en（答案都是英文单词）下后端恒为 false。
       required: [wordId, senseIndex, promptKind, prompt, phonetic, context, isExtendedSense, hasFamily]
 
     VocabularyStartResult:
@@ -6645,10 +6657,12 @@ components:
       properties:
         wordId: { type: integer, format: int64, minimum: 1 }
         senseIndex: { type: integer, minimum: 0 }
-        promptKind: { type: string, enum: [en2cn, cn2en] }
+        promptKind: { type: string, enum: [en2cn, cn2en, ph2en] }
         answer:
           type: string
-          description: 学生作答原文；空/纯空白走 unanswered（不计对错）
+          description: >-
+            学生作答原文；空/纯空白走 unanswered（不计对错）。
+            注意 ph2en 的作答是英文单词，判题与 cn2en 同路（纯程序比对，不调 LLM）
 
     VocabularyStandardMeaning:
       type: object
