@@ -5,6 +5,7 @@ import { PracticeModule } from '../practice/practice.module.js';
 import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository } from '../../database/repositories/index.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
+import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 
 /**
  * 错题训练模块（Task 1 骨架 + Task 2 判题 + Task 3 提示缓存 + Task 8 专项练习 + Task 7 解析拉取）。
@@ -18,6 +19,6 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 @Module({
   imports: [PracticeModule],
   controllers: [TrainingController],
-  providers: [TrainingService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability],
+  providers: [TrainingService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability],
 })
 export class TrainingModule {}

@@ -150,6 +150,14 @@ routes:
       primary: local
       fallback: deepseek-flash
 
+  # 语文古诗文解释（翻译）判题：逐句判定字词释义与整句翻译是否「意思到位」。
+  # 与 dictation_feedback 同策略（本地优先、云端兜底）；能确定的对错已由程序短路，
+  # 走到这里的只有非语义判断不可的项。两者都失败 → 逐项 undetermined，不阻断学生看已判项。
+  interpretation_judge:
+    - subject: "*"
+      primary: local
+      fallback: deepseek-flash
+
 default:
   primary: qwen3.8-max
   fallback: deepseek-flash

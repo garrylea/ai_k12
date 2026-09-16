@@ -39,7 +39,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
     deps.mainErrorRepo, deps.judgeCore, deps.questionsRepo, deps.knowledgePointsRepo,
     deps.questionHintsRepo, deps.hint, deps.hiddenRepo,
     deps.explanationCache, deps.notificationsRepo,
-    {} as never, {} as never,
+    {} as never, {} as never, {} as never,
   );
 
 describe('TrainingService.getErrorBookEntries', () => {

@@ -298,14 +298,25 @@ CREATE TABLE IF NOT EXISTS question_hints (
 -- 语文古诗文专项篇目（2026-09-13 建；2026-09-15 独立化——改名自 dictation_passages、
 -- 摘除 question_id）。**独立子系统**：不挂 questions、不进错题本、不参与主线清零门禁
 -- （PRD §6.3 / §7.4）。**无外键**——本表不指向任何表，也不被任何表指向，表即完整边界。
--- 默写抽题池 = verified = 1 AND memorize_required = 1 AND is_active = 1。
+--
+-- 两个专项共用本表，一篇一行，各取各的列：
+--   默写抽题池 = verified = 1 AND memorize_required = 1 AND is_active = 1
+--   解释抽题池 = verified = 1 AND is_active = 1 AND JSON_LENGTH(sentences) > 0
+--                （不设 memorize_required——要背诵不是要理解翻译的必要条件；
+--                 多一条「内容就绪」——没切过句的篇目点进去没题目）
 -- 设计见 docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md §6
+-- 与 docs/superpowers/plans/2026-09-16-chinese-interpretation-special.md
 CREATE TABLE IF NOT EXISTS chinese_passages (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   work_title VARCHAR(100) NOT NULL,      -- 篇名，如《岳阳楼记》；业务键之一
   author VARCHAR(50) NOT NULL,           -- 作者
   dynasty VARCHAR(20) NOT NULL,          -- 朝代
   body TEXT NOT NULL,                    -- 正文（权威原文，含标点）
+  -- ---- 解释专项内容（2026-09-16）；字词由人整理后经 interpretation_cli 入库 ----
+  key_terms JSON DEFAULT NULL,           -- [{"term":"谪守","gloss":"…","src":"…","sentenceIndex":0}]
+                                         -- sentenceIndex 指向 sentences 下标（字词属于哪一句）
+  sentences JSON DEFAULT NULL,           -- [{"text":"…","translation":"…"}]；不变式 ''.join(text) == body
+  full_translation TEXT DEFAULT NULL,    -- 整篇译文
   grade_band VARCHAR(20) NOT NULL,       -- 'junior'
   grade VARCHAR(20) DEFAULT NULL,        -- '九年级'
   semester VARCHAR(20) NOT NULL,         -- '上册' / '下册'；业务键之一

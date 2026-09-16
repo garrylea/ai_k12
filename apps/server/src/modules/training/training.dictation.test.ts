@@ -31,7 +31,7 @@ function makeService(overrides: { passage?: unknown; judgeResult?: unknown; feed
   const service = new TrainingService(
     {} as never, judgeCore as never, {} as never, {} as never, {} as never,
     {} as never, {} as never, {} as never, {} as never,
-    dictationRepo as never, dictationFeedback as never,
+    dictationRepo as never, dictationFeedback as never, {} as never,
   );
   return { service, dictationRepo, judgeCore, dictationFeedback };
 }

@@ -93,6 +93,9 @@ export class PromptBuilder {
     if (capability === 'dictation_feedback') {
       return `dictation/feedback.md`;
     }
+    if (capability === 'interpretation_judge') {
+      return `interpretation/judge.md`;
+    }
     if (capability === 'structuring') {
       return `structuring/question.md`;
     }

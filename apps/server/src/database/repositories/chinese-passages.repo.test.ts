@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ChinesePassagesRepository, buildDictationPrompt } from './chinese-passages.repo';
+import {
+  ChinesePassagesRepository,
+  buildDictationPrompt,
+  toSentences,
+  toKeyTerms,
+} from './chinese-passages.repo';
 
 const mockPool = (rows: any[] = []) => ({
   execute: vi.fn().mockResolvedValue([rows, []]),
@@ -128,5 +133,130 @@ describe('ChinesePassagesRepository', () => {
     expect(sql).not.toContain('question_id');
     // 全参断言：若 verified 被写死成 1（覆盖导入器的校验闸门决定），只断 params[0] 不会发现
     expect(params).toEqual(['静夜思', '李白', '唐', '床前明月光', 'junior', '九年级', '上册', 1, 'DEV-FIXTURE', 0, 0]);
+  });
+});
+
+// ==================== 解释（翻译）专项（2026-09-16） ====================
+
+describe('ChinesePassagesRepository — 解释专项抽题池', () => {
+  it('findVerifiedForInterpretation：三道闸门 = verified + is_active + 内容就绪，**不含** memorize_required', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findVerifiedForInterpretation();
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain('FROM chinese_passages dp');
+    expect(sql).not.toContain('questions');
+    expect(sql).toContain('dp.verified = 1');
+    expect(sql).toContain('dp.is_active = 1');
+    expect(sql).toContain('JSON_LENGTH(dp.sentences) > 0');
+    // 与默写门禁的关键差别：「要背诵」不是「要理解翻译」的必要条件
+    expect(sql).not.toContain('memorize_required = 1');
+    expect(sql).toContain('ORDER BY dp.sort_order');
+  });
+
+  it('findRandomVerifiedForInterpretation：带册次过滤 + LIMIT + 解释门禁', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findRandomVerifiedForInterpretation('上册', 3);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('dp.verified = 1');
+    expect(sql).toContain('dp.is_active = 1');
+    expect(sql).toContain('JSON_LENGTH(dp.sentences) > 0');
+    expect(sql).not.toContain('memorize_required = 1');
+    expect(sql).toContain('dp.semester = ?');
+    expect(sql).toContain('ORDER BY RAND()');
+    expect(sql).toContain('LIMIT ?');
+    expect(params).toEqual(['上册', 3]);
+  });
+
+  it('findRandomVerifiedForInterpretation：semester=null 时按篇名去重，子查询同样守解释门禁', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findRandomVerifiedForInterpretation(null, 3);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).not.toContain('dp.semester = ?');
+    expect(sql).toContain('MIN(dp2.id)');
+    expect(sql).toContain('dp2.work_title = dp.work_title');
+    expect(sql).toContain('JSON_LENGTH(dp2.sentences) > 0');
+    expect(sql).not.toContain('memorize_required = 1');
+    expect(params).toEqual([3]);
+  });
+
+  it('findRandomVerifiedForInterpretation：指定册次时**不**加去重子查询', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findRandomVerifiedForInterpretation('下册', 3);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).not.toContain('MIN(dp2.id)');
+  });
+
+  it('findVerifiedByIdsForInterpretation：空数组直接返回空，不查库', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    expect(await repo.findVerifiedByIdsForInterpretation([])).toEqual([]);
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('findVerifiedByIdsForInterpretation：IN 占位符与参数顺序正确 + 解释门禁', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findVerifiedByIdsForInterpretation([7, 8]);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('dp.id IN (?,?)');
+    expect(sql).toContain('JSON_LENGTH(dp.sentences) > 0');
+    expect(sql).not.toContain('memorize_required = 1');
+    expect(params).toEqual([7, 8]);
+  });
+
+  it('两条门禁确实不同：默写查询含 memorize_required 且不含内容就绪', async () => {
+    // 反向对照，防日后有人「顺手统一」两条抽题池
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findVerifiedForDictation();
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain('dp.memorize_required = 1');
+    expect(sql).not.toContain('JSON_LENGTH');
+  });
+});
+
+describe('toSentences / toKeyTerms（JSON 列 → 强类型，坏形状降级不抛错）', () => {
+  it('toSentences：正常数组原样映射，缺 translation 补空串', () => {
+    expect(toSentences([{ text: '庆历四年春。', translation: '庆历四年的春天。' }, { text: '越明年。' }]))
+      .toEqual([
+        { text: '庆历四年春。', translation: '庆历四年的春天。' },
+        { text: '越明年。', translation: '' },
+      ]);
+  });
+
+  it('toSentences：null / 非数组 / 元素非对象 / text 为空 → 逐项丢弃而非抛错', () => {
+    // 手工改库或迁移中途都可能留下半截数据，让它把接口 500 掉不值得
+    expect(toSentences(null)).toEqual([]);
+    expect(toSentences('not-an-array')).toEqual([]);
+    expect(toSentences({})).toEqual([]);
+    expect(toSentences([null, 42, 'x', {}, { text: '' }, { text: 123 }])).toEqual([]);
+  });
+
+  it('toKeyTerms：正常项原样映射，含可选 src', () => {
+    expect(toKeyTerms([
+      { term: '谪守', gloss: '因罪贬谪流放', src: 'textbook', sentenceIndex: 0 },
+      { term: '越明年', gloss: '到了第二年', sentenceIndex: 1 },
+    ])).toEqual([
+      { term: '谪守', gloss: '因罪贬谪流放', src: 'textbook', sentenceIndex: 0 },
+      { term: '越明年', gloss: '到了第二年', sentenceIndex: 1 },
+    ]);
+  });
+
+  it('toKeyTerms：sentenceIndex 不是整数的项**丢弃**（挂不到句子 = 学生没处填）', () => {
+    expect(toKeyTerms([
+      { term: '谪守', gloss: 'g', sentenceIndex: 0 },
+      { term: '无归属', gloss: 'g' },              // 缺 sentenceIndex
+      { term: '字符串下标', gloss: 'g', sentenceIndex: '0' },
+      { term: '小数', gloss: 'g', sentenceIndex: 1.5 },
+      { term: '', gloss: 'g', sentenceIndex: 0 },  // 空 term
+    ])).toEqual([{ term: '谪守', gloss: 'g', sentenceIndex: 0 }]);
+  });
+
+  it('toKeyTerms：gloss 缺省补空串（不因缺解释就丢掉整个词）', () => {
+    expect(toKeyTerms([{ term: '则', sentenceIndex: 2 }])).toEqual([{ term: '则', gloss: '', sentenceIndex: 2 }]);
   });
 });

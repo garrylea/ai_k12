@@ -24,7 +24,7 @@ const CARD_CLASS =
   'h-64 rounded-3xl bg-white p-8 flex flex-col items-center justify-center gap-4 transition-all duration-300';
 
 /**
- * 语文专项页：两张卡并列，古诗文默写已开放，古诗文解释敬请期待。
+ * 语文专项页：两张卡并列，古诗文默写与古诗文解释均已开放。
  * 样式复刻 TrainingHomePage 的卡片语言（style.md §2.7）。
  */
 export default function ChineseSpecialPage() {
@@ -65,24 +65,24 @@ export default function ChineseSpecialPage() {
             <span className="text-sm text-[var(--text-secondary)]">整篇默写 · 自动判对错</span>
           </button>
 
-          <div
-            className={`relative ${CARD_CLASS} opacity-50 cursor-not-allowed`}
-            style={{ border: '1px solid rgb(241, 245, 249)', backgroundColor: 'rgba(248, 250, 252, 0.3)' }}
-            aria-label="古诗文解释暂未开放"
+          <button
+            onClick={() => navigate('/student/training/chinese/interpretation')}
+            className={`${CARD_CLASS} hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20`}
+            style={{ border: '1px solid rgba(226, 232, 240, 0.8)', boxShadow: 'var(--shadow-card)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-elevated)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-card)'; }}
+            aria-label="进入古诗文解释"
           >
-            <span className="absolute top-4 right-4 px-2.5 py-1 text-xs font-medium rounded-full text-[var(--text-secondary)] bg-[var(--bg-subtle)]">
-              敬请期待
-            </span>
             <div
-              className="w-20 h-20 rounded-2xl flex items-center justify-center text-slate-500 shadow-sm"
-              style={{ background: 'linear-gradient(to top right, #f1f5f9, #e2e8f0)' }}
+              className="w-20 h-20 rounded-2xl flex items-center justify-center text-white shadow-sm"
+              style={{ background: 'linear-gradient(to top right, #3B82F6, #7CB3FF)' }}
               aria-hidden="true"
             >
               <AnnotateIcon />
             </div>
-            <span className="text-3xl font-black tracking-tight text-slate-500">古诗文解释</span>
-            <span className="text-sm text-slate-400">字词释义 · 情感分析</span>
-          </div>
+            <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">古诗文解释</span>
+            <span className="text-sm text-[var(--text-secondary)]">重点字词 · 逐句翻译</span>
+          </button>
         </div>
       </div>
     </div>

@@ -778,6 +778,86 @@ SELECT work_title, semester, COUNT(*) c FROM chinese_passages GROUP BY work_titl
 > 跑完 `--extract` 后看 `-unresolved.md` 与 `-review.md` **就知道要不要改**：程序是
 > fail-closed 的，切不出来会明确报出来，不会静默塞错的进库。
 
+### 4.10 interpretation_cli — 语文古诗文解释（翻译）入库（旁路管线，2026-09-16）
+
+**与 §4.9 默写的根本差别：不碰教材页 MD。** 默写的正文要从扫描页里「定位 + 切出来」，
+所以有爬虫 / convert / toc_parse / 候选清单一整套；解释管线的**正文用的是库里已校验的
+`chinese_passages.body`**，**字词由用户手工整理**后直接交进来。所以它没有第 1-4 步：
+
+```
+# 一条龙：解析输入 → 切句 → 字词归属 → 出译文 → 自检 → 入库
+python src/interpretation_cli.py --all --input path/to/words.md
+
+# 分两步（推荐：人工过目可以发生在入库之前）
+python src/interpretation_cli.py --extract --input path/to/words.md   # 只落 JSONL + 过目清单
+python src/interpretation_cli.py --load    --input path/to/words.md   # 入库（幂等）
+
+# 校对闭环（改了模型生成的译文后回写）
+python src/interpretation_cli.py --export  --input path/to/words.md   # 导出可编辑稿
+python src/interpretation_cli.py --apply   --input path/to/words.md   # 只回写被改过的行
+```
+
+`--limit N` 只处理前 N 篇（打样用）。四个动作**互斥**，只给一个就只跑那一个。
+
+#### 输入格式（**字词由人整理**）
+
+只需三样：**篇名** + **册次** + **重点字词（词 + 解释）**。**正文不用给**（库里已有）。
+字段名**中英文都认**，两种格式任选：
+
+```markdown
+# 岳阳楼记
+
+册次：上册
+
+1. 谪守：因罪贬谪流放，出任外官
+2. 越明年：到了第二年
+```
+
+```jsonl
+{"work_title":"岳阳楼记","semester":"上册","key_terms":[{"term":"谪守","gloss":"因罪贬谪流放，出任外官"}]}
+```
+
+Markdown 行写法全部容错：行首编号可有可无（`1.` / `1、` / `①` / `-` / `*` / `（1）`）、
+词可带括号（`〔谪守〕`）、分隔符 `：`/`:`/`＝`/`=` 或首个空白都认
+（`1 则:那么` → `term=则`，`gloss=那么`）。
+
+**译文是可选的**（混合模式）：输入给了 `sentences`（Markdown 里用 `>` 两行一组，
+第一行原文第二行译文；JSON 里 `sentences:[{text,translation}]`）就以输入的为准、**不调模型**；
+没给才由管线调本地模型生成（primary=local，fallback=deepseek-flash）。
+
+#### 管线做的事
+
+| 步骤 | 说明 |
+|---|---|
+| 切句 | 按 `。！？；` 切，标点留句尾；**断言 `''.join(text) == body` 逐字相等**，拼不回就拒绝该篇 |
+| 字词归属 | 每个词挂到「首个包含它的句子」，记 `sentenceIndex`（答题页三行对译的第 2 行靠它） |
+| 丢弃 | **在正文里定位不到的词一律丢弃并告警**（挂不到句子，学生没处填） |
+| 出译文 | 见上方混合模式 |
+| 自检 | 拼接恒等 / 译文非空 / 解释非空 / `sentenceIndex` 在界内——**不过不放行** |
+| 入库 | 按业务键 `(work_title, semester)` 先查后 **UPDATE**，**只 SET 三列内容列**（`key_terms`/`sentences`/`full_translation`），语句里不出现 `verified`/`memorize_required`/`is_active` |
+
+**不 INSERT 新篇目**：篇名在库里找不到时**报错并列出相近篇名**（防错字），不是新建——
+正文以库为准，凭空 Insert 会造出没有正文的行。
+
+#### 产物与验收
+
+`output/interpretation/语文/<输入文件名>.jsonl`（入库项）+ `-review.md`（过目清单：
+篇名/册次/句数/字词数/被丢弃的词及原因/首尾样例/未通过项/告警）。
+
+入库后建议两条 SQL：
+
+```sql
+-- ① 谁已经有内容了（抽题池口径：verified + is_active + 内容就绪）
+SELECT id, work_title, semester, JSON_LENGTH(sentences) AS n_sent, JSON_LENGTH(key_terms) AS n_terms
+FROM chinese_passages
+WHERE verified = 1 AND is_active = 1 AND JSON_LENGTH(sentences) > 0;
+
+-- ② 三列有没有半截数据（有句无译 / 有词无释）
+SELECT id, work_title FROM chinese_passages
+WHERE JSON_LENGTH(sentences) > 0
+  AND (JSON_SEARCH(sentences, 'one', NULL) IS NOT NULL OR JSON_LENGTH(key_terms) = 0);
+```
+
 ## 5. 推荐工作流
 
 ### 5.1 一站式（pipeline_cli，推荐）
@@ -873,6 +953,10 @@ tools/data-refinery/output/
 │       ├── <书名>.jsonl                        # 入库候选
 │       ├── <书名>-review.md                    # 人工过目清单 + 定位留痕 + 已纠正篇目
 │       └── <书名>-unresolved.md                # 待人工处理
+├── interpretation/              # interpretation_cli 产物（语文解释旁路，见 §4.10）
+│   └── 语文/
+│       ├── <输入文件名>.jsonl                   # 入库项（--extract 产出 / --load 消费 / 校对闭环载体）
+│       └── <输入文件名>-review.md               # 过目清单：句数/字词数/被丢弃的词/未通过/告警
 ├── assets/                      # 物化图片
 │   ├── textbooks/{subject}/{hash}/{sort_order}/
 │   └── questions/{subject}/{hash}/{idx}/

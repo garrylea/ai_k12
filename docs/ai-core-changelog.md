@@ -1,10 +1,29 @@
 # CLAUDE.md 历史工作日志（迁出归档）
 
-本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-14；迁出后的新条目继续追加在顶部），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
+本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-16；迁出后的新条目继续追加在顶部），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
 
 - 各条目引用的任务级实现计划见 `docs/superpowers/plans/`
 - 仍生效的行为约束已提炼回 CLAUDE.md 的「关键约定」节，本文件仅作历史溯源
 - 阅读当前约定请以根 `CLAUDE.md` 为准；本文件内容可能包含已被后续条目修正的过时描述
+
+---
+
+## 2026-09-16 新增（语文古诗文解释（翻译）专项 + 内容管线）
+
+- **变更摘要**：
+  1. **新专项落地**：训练 → 语文 → 专项 的第二张卡（古诗文解释）由「敬请期待」改为开放。**逐句判题**：学生按「三行对译」作答（原文 → 该句关键字词 → 整句翻译），点「下一句」即把该句送去判题（**异步不阻塞**，不等 LLM 回来就展开下一句；结果回填到该句卡片原位）。判题粒度经**用户 2026-09-16 裁决由「整篇一次批量」改为逐句**——学生答完一句立即知道对错，好及时纠正。
+  2. **新场景 `interpretation_judge`**：`prompts/interpretation/judge.md` + `InterpretationJudgeCapability`（JSON 输出，`ResponseParser.parse({mode:'json'})` + Zod）。路由 primary=`local`（Qwen3.8-27B）、fallback=`deepseek-flash`；**只对 local 下发 `extraBody: LLAMA_CPP_NO_THINKING_BODY` 关 thinking**（与 `dictation_feedback` 同策略），**不传 `thinking:false`**（对本地是空操作、对云端 fallback 会拉低判题质量）。`retry.yaml` 加 `interpretation_judge: 30000`。
+  3. **判题流程三段**：① 程序短路（空白 → `unanswered`；`normalizeChineseAnswer` 全等 → `exact`），**不进 LLM**；② 剩余待判项**打包一次**调用；③ 模型漏项 / 整次失败 → 那些项 `correct: null, method: 'undetermined'`，**不抛错、已判项不清空**。
+  4. **不写任何学生状态**：无错题本 / 隐藏项 / 提示缓存 / 自评（古诗文专项是独立子系统，PRD §6.3 / §7.4 例外）。
+  5. **DB**：`chinese_passages` 加 `key_terms`(JSON) / `sentences`(JSON) / `full_translation`(TEXT)，迁移 `tools/db/migrations/2026-09-16_chinese_interpretation_columns.sql`（**纯 ADD COLUMN，无 DELETE/DROP**）。`key_terms` 每项带 `sentenceIndex` 指向 `sentences` 下标。
+  6. **内容管线**：`interpretation_cli` + `interpretation_input`（JSON/Markdown 解析，字段名中英文都认）/ `interpretation_split`（切句 + 字词归属）/ `interpretation_check`（自检）/ `interpretation_translate`（译文生成）/ `interpretation_loader`（幂等入库，只 SET 三列）。**字词由用户手工整理**，管线不碰教材页 MD。
+- **动机**：用户要求「可以随机选，也可以指定篇目练习，每一篇完了才能下一篇」，并要求按「原文 → 该句关键字词 → 整句翻译」的三行对译逐句作答、每句答完立即判。字词内容用户自己整理，故原 spec §5 的「从教材页抽注释 + LLM 补字词 + 注释归属」整块作废。
+- **实测**：判题响应——全空 0 次 LLM 调用（全 `unanswered`）、归一化全等 0 次调用（全 `exact`）、需语义判断的项走本地模型**整句判题 ~1.3s**（含字词 + 整句，一次调用）。curl 手测：`err_books=0 / hidden=0`（判题零学生状态）、越界 400、篇目不存在 404、`count=4` 400、非法 `semester` 400。
+- **验证**：`apps/server` vitest **558 passed**（新增 46：repo 12 + capability 11 + service 24 + controller 11，含「两条抽题池口径不同」的反向对照）；`tools/data-refinery` pytest **994 passed**（新增 103）；`apps/web` lint 0 error + build 通过；openapi.yaml 解析通过（150 端点 / 136 schema，新增 3 端点 11 schema）。
+- **抓到的 bug（已修）**：`interpretation_cli.main` 只给 `--extract` 时**没 return，穿透到 `run_apply`**——一次性违反了「只出 JSONL 不写库」的承诺。已改为四个动作各自显式 return，并加 5 条 dispatch 单测钉住。
+- **抽题池口径有意不同（勿统一）**：默写 = `verified=1 AND memorize_required=1 AND is_active=1`；解释 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`（**不设必背、加内容就绪**——「要背诵」不是「要理解翻译」的必要条件；没切过句的篇目点进去没题目）。
+- **落地关键文件**：`database/repositories/chinese-passages.repo.ts`、`ai-core/{types.ts,capabilities/interpretation-judge.capability.ts,prompts/interpretation/judge.md,model-routes.yaml,retry.yaml,infra/prompt-builder.ts}`、`modules/training/{training.service,training.controller,training.module}.ts` + `dto/interpretation.dto.ts`、`scripts/seed-interpretation-{judge-route,fixture}.ts`、`tools/data-refinery/src/interpretation_*.py`、`apps/web/src/{services/api.ts,routes/index.tsx,pages/student/training/chinese/{ChineseSpecialPage,InterpretationConfigPage,InterpretationRunPage}.tsx,components/business/interpretation/*}`、`tools/db/{schema.sql,migrations/2026-09-16_chinese_interpretation_columns.sql}`。
+- **待办**：内容未灌入（库里仅 2 篇 `DEV-FIXTURE` 假数据供手测）。用户整理好字词后跑 `interpretation_cli --all --input <file>` 即可，**不需改任何代码**。
 
 ---
 

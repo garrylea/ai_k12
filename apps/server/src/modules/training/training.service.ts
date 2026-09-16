@@ -1,4 +1,4 @@
-import { Injectable, Logger, HttpException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, HttpException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { JudgeCoreService } from '../practice/judge-core.service.js';
 import { ExplanationCacheService } from '../practice/explanation-cache.service.js';
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
@@ -8,16 +8,34 @@ import { QuestionHintsRepository } from '../../database/repositories/question-hi
 import { StudentHiddenQuestionsRepository } from '../../database/repositories/student-hidden-questions.repo.js';
 import { AdminNotificationsRepository } from '../../database/repositories/admin-notifications.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
-import { ChinesePassagesRepository, buildDictationPrompt } from '../../database/repositories/chinese-passages.repo.js';
+import {
+  ChinesePassagesRepository,
+  buildDictationPrompt,
+  toSentences,
+  toKeyTerms,
+} from '../../database/repositories/chinese-passages.repo.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
+import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
-import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
+import {
+  evaluateDictation,
+  normalizeChineseAnswer,
+  type DictationDiffOp,
+} from '../../common/utils/normalize-chinese.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
 import type {
   DictationPassageListItem,
   DictationQuestionItem,
   DictationJudgeResult,
 } from './dto/dictation.dto.js';
+import type {
+  InterpretationPassageListItem,
+  InterpretationPassageItem,
+  InterpretationJudgeResult,
+  InterpretationMethod,
+  InterpretationTermJudgeItem,
+  InterpretationSentenceJudgeItem,
+} from './dto/interpretation.dto.js';
 
 /** 把 diff 渲染成一行可读文本，作为 LLM 错因输入：床前明月[光→先][漏:疑][多:啊]。 */
 export function renderBodyDiff(ops: DictationDiffOp[]): string {
@@ -53,6 +71,7 @@ export class TrainingService {
     private readonly notificationsRepo: AdminNotificationsRepository,
     private readonly dictationRepo: ChinesePassagesRepository,
     private readonly dictationFeedback: DictationFeedbackCapability,
+    private readonly interpretationJudge: InterpretationJudgeCapability,
   ) {}
 
   /** 错题练习筛选列表：调 repo 后按 errorBookId 聚合 kpIds，映射 DTO。 */
@@ -203,6 +222,175 @@ export class TrainingService {
       this.logger.warn(`dictationFeedback.generate failed (passageId=${input.passageId}): ${err}`);
       return { feedback: null };
     }
+  }
+
+  // ==================== 语文古诗文专项：解释（翻译）（2026-09-16） ====================
+
+  /** 解释专项配置页篇目清单（抽题池 = verified=1 且 is_active=1 且**内容就绪**）。
+   *  只出篇名 + 册次——释义/译文都是判题答案，一律不下发。 */
+  async listInterpretationPassages(): Promise<{ passages: InterpretationPassageListItem[] }> {
+    const rows = await this.dictationRepo.findVerifiedForInterpretation();
+    return {
+      passages: rows.map((r) => ({
+        passageId: r.id,
+        workTitle: r.work_title,
+        semester: r.semester,
+      })),
+    };
+  }
+
+  /**
+   * 解释专项开练：指定篇目则按篇目出题（忽略册次），否则按册次（null=全部）随机抽。
+   *
+   * **整篇所有句子一次下发**——前端才能把整篇铺出来、让学生看见上下文（三行对译不换页）。
+   * 题项做白名单序列化：只出 passageId/workTitle/semester/sentences[].{index,text,terms}，
+   * `gloss`（释义）/`translation`（译文）/`full_translation` 全部剥离（防答案泄露）。
+   */
+  async startInterpretation(input: {
+    semester: string | null;
+    passageIds: number[] | null;
+    count: number;
+  }): Promise<{ passages: InterpretationPassageItem[] }> {
+    const rows = input.passageIds && input.passageIds.length > 0
+      ? await this.dictationRepo.findVerifiedByIdsForInterpretation(input.passageIds)
+      : await this.dictationRepo.findRandomVerifiedForInterpretation(input.semester, input.count);
+
+    const passages: InterpretationPassageItem[] = [];
+    for (const r of rows) {
+      const sentences = toSentences(r.sentences);
+      // 防御：抽题池已按内容就绪过滤，但手工改库仍可能留下空句集；
+      // 下发一篇没有任何句子的篇目会让前端渲染出空白卡片。
+      if (sentences.length === 0) continue;
+      const terms = toKeyTerms(r.key_terms);
+      passages.push({
+        passageId: r.id,
+        workTitle: r.work_title,
+        semester: r.semester,
+        sentences: sentences.map((s, index) => ({
+          index, // 用数组下标，不用存储值——存储的 sentenceIndex 只用于「term 挂哪句」
+          text: s.text,
+          terms: terms.filter((t) => t.sentenceIndex === index).map((t) => t.term),
+        })),
+      });
+    }
+    // 指定篇目路径可能勾选多于 count 个，兜底截断（与 startDictation 同规矩）
+    return { passages: passages.slice(0, input.count) };
+  }
+
+  /**
+   * 解释专项判题：**逐句**判（字词 + 整句翻译），**纯读**、不写任何学生状态
+   * （独立子系统：无错题本、无隐藏题、无提示缓存、无自评）。
+   *
+   * 顺序是刻意的：
+   *   1. 程序短路掉能确定的项（空答案 → unanswered；归一化全等 → exact），**不进 LLM**；
+   *   2. 剩下的待判项**打包一次**调用（同一句的字词 + 整句合成一次请求，省往返）；
+   *   3. 模型漏项 / 整次失败 → 逐项 `undetermined`，**已判项不清空、不抛错**
+   *      ——判题服务不可用不该让学生连「哪些已经对了」都看不到。
+   */
+  async judgeInterpretation(input: {
+    passageId: number;
+    sentenceIndex: number;
+    terms: Array<{ term: string; answer: string }>;
+    translation: string;
+  }): Promise<InterpretationJudgeResult> {
+    const passage = await this.dictationRepo.findById(input.passageId);
+    if (!passage) {
+      throw new NotFoundException(`解释篇目不存在：${input.passageId}`);
+    }
+
+    const sentences = toSentences(passage.sentences);
+    const std = sentences[input.sentenceIndex];
+    if (!std) {
+      throw new BadRequestException(`sentenceIndex 越界：${input.sentenceIndex}`);
+    }
+    const stdTerms = toKeyTerms(passage.key_terms).filter((t) => t.sentenceIndex === input.sentenceIndex);
+
+    // 学生答案配对：同名取最后一条，多传的 term 忽略（服务端只认该句「应有」的字词）
+    const answerByTerm = new Map<string, string>();
+    for (const t of input.terms) answerByTerm.set(t.term.trim(), t.answer);
+    const answerOf = (term: string) => answerByTerm.get(term.trim()) ?? '';
+
+    // ---- 1. 程序短路 ----
+    type TermSlot = InterpretationTermJudgeItem & { pending: boolean };
+    const slots: TermSlot[] = stdTerms.map((t) => {
+      const stu = answerOf(t.term);
+      if (stu.trim() === '') {
+        return { term: t.term, correct: false, method: 'unanswered', standard: t.gloss, comment: null, pending: false };
+      }
+      if (normalizeChineseAnswer(stu) === normalizeChineseAnswer(t.gloss)) {
+        return { term: t.term, correct: true, method: 'exact', standard: t.gloss, comment: null, pending: false };
+      }
+      // 先占位为 undetermined：LLM 补判成功会覆盖，漏项/失败就保持 undetermined
+      return { term: t.term, correct: null, method: 'undetermined', standard: t.gloss, comment: null, pending: true };
+    });
+
+    type SentenceSlot = InterpretationSentenceJudgeItem & { pending: boolean };
+    let sentSlot: SentenceSlot;
+    if (input.translation.trim() === '') {
+      sentSlot = { correct: false, method: 'unanswered', standard: std.translation, comment: null, pending: false };
+    } else if (normalizeChineseAnswer(input.translation) === normalizeChineseAnswer(std.translation)) {
+      sentSlot = { correct: true, method: 'exact', standard: std.translation, comment: null, pending: false };
+    } else {
+      sentSlot = { correct: null, method: 'undetermined', standard: std.translation, comment: null, pending: true };
+    }
+
+    // ---- 2. 待判项打包一次调用 ----
+    const pendingTerms = slots.filter((s) => s.pending);
+    if (pendingTerms.length > 0 || sentSlot.pending) {
+      try {
+        const judged = await this.interpretationJudge.generate({
+          workTitle: passage.work_title,
+          sentence: std.text,
+          standardTranslation: std.translation,
+          studentTranslation: sentSlot.pending ? input.translation : null,
+          terms: pendingTerms.map((s) => ({ term: s.term, gloss: s.standard, answer: answerOf(s.term) })),
+        });
+
+        for (const s of pendingTerms) {
+          const hit = judged.terms.find((r) => r.term.trim() === s.term.trim());
+          if (hit) {
+            s.correct = hit.correct;
+            s.method = 'ai';
+            s.comment = hit.comment ?? null;
+          }
+          s.pending = false; // 漏项保持 undetermined
+        }
+        if (sentSlot.pending) {
+          if (judged.sentence) {
+            sentSlot.correct = judged.sentence.correct;
+            sentSlot.method = 'ai';
+            sentSlot.comment = judged.sentence.comment ?? null;
+          }
+          sentSlot.pending = false;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `interpretationJudge.generate failed (passageId=${input.passageId}, sentenceIndex=${input.sentenceIndex}): ${err}`,
+        );
+        // 兜底：待判项全部保持 undetermined；**短路判出的项不受影响**
+        for (const s of pendingTerms) s.pending = false;
+        sentSlot.pending = false;
+      }
+    }
+
+    const termItems: InterpretationTermJudgeItem[] = slots.map(({ pending: _pending, ...rest }) => rest);
+
+    return {
+      passageId: passage.id,
+      sentenceIndex: input.sentenceIndex,
+      allCorrect: termItems.every((t) => t.correct === true) && sentSlot.correct === true,
+      terms: termItems,
+      sentence: {
+        correct: sentSlot.correct,
+        method: sentSlot.method,
+        standard: sentSlot.standard,
+        comment: sentSlot.comment,
+      },
+      // 整篇译文只在最后一句判完时给——提前给等于把整篇答案交出去
+      fullTranslation: input.sentenceIndex === sentences.length - 1
+        ? (passage.full_translation ?? null)
+        : null,
+    };
   }
 
   /** 主观题自评：校验题目存在后委托 JudgeCore.recordSelfAssessment（留痕 + 错题本写入/清零）。

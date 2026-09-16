@@ -1051,6 +1051,92 @@ export function fetchDictationFeedback(payload: {
   });
 }
 
+// --- Training · 语文古诗文解释（翻译）专项（2026-09-16） ---
+//
+// 三行对译 + **逐句判题**：
+//   start 一次给全「原文 + 该句有哪些关键字词」（不含释义/译文——那是答案）
+//   judge 判**一句**，回来才有标准释义/标准译文
+//   fullTranslation 只在最后一句判完时下发
+
+export interface InterpretationPassageItem {
+  passageId: number;
+  workTitle: string;
+  semester: string;
+}
+
+export interface InterpretationSentenceItem {
+  index: number;
+  /** 该句原文 */
+  text: string;
+  /** 该句的关键字词（只有词，没有释义） */
+  terms: string[];
+}
+
+export interface InterpretationPassageDetail {
+  passageId: number;
+  workTitle: string;
+  semester: string;
+  sentences: InterpretationSentenceItem[];
+}
+
+/** 判定方式。`undetermined` 时 `correct` 为 `null`（模型没判出来 → 前端显示「未判定」）。 */
+export type InterpretationMethod = 'exact' | 'ai' | 'unanswered' | 'undetermined';
+
+export interface InterpretationTermResultItem {
+  term: string;
+  correct: boolean | null;
+  method: InterpretationMethod;
+  /** 标准释义 */
+  standard: string;
+  comment: string | null;
+}
+
+export interface InterpretationSentenceResultItem {
+  correct: boolean | null;
+  method: InterpretationMethod;
+  /** 标准译文 */
+  standard: string;
+  comment: string | null;
+}
+
+export interface InterpretationJudgeResult {
+  passageId: number;
+  sentenceIndex: number;
+  allCorrect: boolean;
+  terms: InterpretationTermResultItem[];
+  sentence: InterpretationSentenceResultItem;
+  /** **仅当被判的是最后一句时**非 null——整篇译文提前下发等于泄题。 */
+  fullTranslation: string | null;
+}
+
+export function fetchInterpretationPassages(): Promise<{ passages: InterpretationPassageItem[] }> {
+  return fetchApi<{ passages: InterpretationPassageItem[] }>('/training/interpretation/passages');
+}
+
+export function startInterpretation(payload: {
+  semester: string | null;
+  passageIds: number[] | null;
+  count: number;
+}): Promise<{ passages: InterpretationPassageDetail[] }> {
+  return fetchApi<{ passages: InterpretationPassageDetail[] }>('/training/interpretation/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 判**一句**（该句的字词 + 整句翻译）。模型不可用时相关项回 correct=null + method=undetermined。 */
+export function judgeInterpretation(payload: {
+  passageId: number;
+  sentenceIndex: number;
+  terms: Array<{ term: string; answer: string }>;
+  translation: string;
+}): Promise<InterpretationJudgeResult> {
+  return fetchApi<InterpretationJudgeResult>('/training/interpretation/judge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // --- Exams（考试模块：试卷列表 / 会话生命周期 / 结果，字段以后端 exams 白名单序列化为准） ---
 
 export interface ExamPaper {

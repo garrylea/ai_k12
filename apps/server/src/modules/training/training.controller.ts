@@ -204,6 +204,69 @@ export class TrainingController {
     });
   }
 
+  // ==================== 语文古诗文专项：解释（翻译）（2026-09-16） ====================
+
+  /** 解释专项篇目清单（配置页「指定篇目」用；只出篇名 + 册次）。 */
+  @Get('interpretation/passages')
+  async listInterpretationPassages() {
+    return this.trainingService.listInterpretationPassages();
+  }
+
+  /** 解释专项开练：count 限 1-3（每篇逐句判，3 篇已是长会话）；
+   *  semester 限 上册|下册|null；passageIds 非空时按指定篇目出题（忽略 semester）。 */
+  @Post('interpretation/start')
+  async startInterpretation(
+    @Body() dto: { semester: string | null; passageIds: number[] | null; count: number },
+  ) {
+    const { count } = dto;
+    if (!Number.isInteger(count) || count < 1 || count > 3) {
+      throw new BadRequestException('count 仅允许 1-3 的整数');
+    }
+    const semester = dto.semester ?? null;
+    if (semester !== null && semester !== '上册' && semester !== '下册') {
+      throw new BadRequestException('semester 仅允许 上册 | 下册 | null');
+    }
+    const passageIds = dto.passageIds ?? null;
+    if (passageIds !== null &&
+        (!Array.isArray(passageIds) || passageIds.some((id) => !Number.isInteger(id) || id < 1))) {
+      throw new BadRequestException('passageIds 须为正整数数组或 null');
+    }
+    return this.trainingService.startInterpretation({ semester, passageIds, count });
+  }
+
+  /** 解释专项判题：**逐句**判（该句的字词 + 整句翻译），**不写任何学生状态**。
+   *  模型漏项/不可用时那些项回 `correct: null` + `method: 'undetermined'`（不报错）。
+   *  非字符串字段静默规范化（镜像 dictation/judge）——否则 number 混进去会变 500。 */
+  @Post('interpretation/judge')
+  async judgeInterpretation(
+    @Body() dto: {
+      passageId: number;
+      sentenceIndex: number;
+      terms?: Array<{ term: string; answer: string }>;
+      translation?: string;
+    },
+  ) {
+    if (!Number.isInteger(dto.passageId) || dto.passageId < 1) {
+      throw new BadRequestException('passageId 须为正整数');
+    }
+    if (!Number.isInteger(dto.sentenceIndex) || dto.sentenceIndex < 0) {
+      throw new BadRequestException('sentenceIndex 须为非负整数');
+    }
+    const terms: Array<{ term: string; answer: string }> = [];
+    for (const raw of Array.isArray(dto.terms) ? dto.terms : []) {
+      if (raw == null || typeof raw !== 'object') continue;
+      const { term, answer } = raw as { term?: unknown; answer?: unknown };
+      if (typeof term !== 'string') continue; // term 不是字符串 → 丢弃该条（answer 非字符串降级空串）
+      terms.push({ term, answer: typeof answer === 'string' ? answer : '' });
+    }
+    return this.trainingService.judgeInterpretation({
+      passageId: dto.passageId,
+      sentenceIndex: dto.sentenceIndex,
+      terms,
+      translation: typeof dto.translation === 'string' ? dto.translation : '',
+    });
+  }
+
   // ==================== 「不再展示」清单（2026-09-04） ====================
 
   /** 标记某题不再展示（幂等）。questionId/subjectId 非正整数 -> 400。 */

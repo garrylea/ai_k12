@@ -3996,6 +3996,115 @@ paths:
         '404':
           description: 默写篇目不存在
 
+  # 语文古诗文解释（翻译）（2026-09-16）
+  /training/interpretation/passages:
+    get:
+      tags: [Training]
+      summary: 语文解释（翻译）篇目清单（配置页「指定篇目」用）
+      description: >-
+        语文解释专项配置页的篇目数据（student JWT）。抽题池 =
+        chinese_passages 中 verified=1 且 is_active=1 且 JSON_LENGTH(sentences) > 0
+        ——**不设 memorize_required**（「要背诵」不是「要理解翻译」的必要条件），
+        但多一道「内容就绪」闸门（没切过句的篇目点进去没题目）。按 sort_order, id
+        排序。只出篇名 + 册次——标准释义/标准译文是判题答案，一律不下发。
+      operationId: listInterpretationPassages
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 解释专项篇目清单（只含篇名与册次）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/InterpretationPassageListResult'
+
+  /training/interpretation/start:
+    post:
+      tags: [Training]
+      summary: 语文解释开练（按册次随机抽或按指定篇目出题）
+      description: >-
+        语文解释专项开练（student JWT）。count 限 **1-3** 整数（每篇逐句判，
+        3 篇已是长会话；越界/非整数 400）；semester 限 上册|下册|null（非法 400）；
+        passageIds 为正整数数组或 null——非空时按指定篇目出题（忽略 semester，
+        仅保留抽题池内篇目），否则按册次随机抽题；「全部册次」随机抽时按篇名去重
+        （九上/九下有 9 篇重复收录，跨册取 MIN(id)）。
+        **一次下发整篇所有句子**——前端才能把整篇铺出来、让学生看见上下文
+        （三行对译不换页）。白名单序列化：只出
+        passageId/workTitle/semester/sentences[].{index,text,terms}，
+        gloss（释义）/translation（译文）/full_translation 与 author/dynasty/body
+        一律剥离（防答案泄露）；terms 只出**词名**，是该句需要学生作答的关键字词。
+        题池为空返回 { passages: [] }。
+      operationId: startInterpretation
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterpretationStartRequest'
+      responses:
+        '200':
+          description: 开练题单（整篇句子 + 该句关键字词名，无释义/译文）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/InterpretationStartResult'
+        '400':
+          description: count 越界 / semester 非法 / passageIds 非法
+
+  /training/interpretation/judge:
+    post:
+      tags: [Training]
+      summary: 语文解释判题（逐句：该句关键字词 + 整句翻译）
+      description: >-
+        语文解释判题（student JWT）——**逐句**判。设计原为「整篇一次批量」，
+        经用户 2026-09-16 裁决改为逐句：学生答完一句立即知道对错，好及时纠正。
+        请求：passageId 须正整数（非法 400）、篇目不存在 404；sentenceIndex 须非负整数
+        （非法 400）、越界 400；translation 非字符串降级空串；terms 非数组视作 []，
+        元素 term 非字符串丢弃该条、answer 非字符串降级空串（防 number 混进去变 500）。
+        流程：① **程序短路**（不进 LLM）——学生答案空白 → correct=false,
+        method=unanswered；normalizeChineseAnswer 后与标准答案全等 → correct=true,
+        method=exact；② 剩余待判项**打包一次**喂 interpretation_judge 场景
+        （primary=local，fallback=deepseek-flash，本地端点下发 chat_template_kwargs
+        关 thinking，实测整个判题 ~1.3s）；③ 模型漏项 / 整次调用失败 → 那些项
+        correct=null, method=undetermined（**不抛错、已判项不清空**）。
+        **不写任何学生状态**（不入错题本、不清零、无隐藏题/提示缓存/自评）。
+        standard（标准释义/译文）只在判题响应里下发；fullTranslation 仅当被判的是
+        最后一句时非 null（提前下发整篇译文等于泄题）。
+      operationId: judgeInterpretation
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterpretationJudgeRequest'
+      responses:
+        '200':
+          description: 该句判定结果（含标准答案与点评）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/InterpretationJudgeResult'
+        '400':
+          description: passageId / sentenceIndex 非法或越界
+        '404':
+          description: 解释篇目不存在
+
   /api/training/hidden/mark:
     post:
       tags: [training]
@@ -6108,6 +6217,150 @@ components:
         body:
           type: string
       required: [author, dynasty, body]
+
+    # ==================== 语文古诗文解释（翻译）专项（2026-09-16） ====================
+
+    InterpretationPassageListResult:
+      type: object
+      description: 解释专项篇目清单（只含篇名与册次，标准释义/译文不下发）
+      properties:
+        passages:
+          type: array
+          items:
+            $ref: '#/components/schemas/InterpretationPassage'
+      required: [passages]
+
+    InterpretationPassage:
+      type: object
+      properties:
+        passageId: { type: integer, format: int64 }
+        workTitle: { type: string }
+        semester: { type: string, enum: ['上册', '下册'] }
+      required: [passageId, workTitle, semester]
+
+    InterpretationStartRequest:
+      type: object
+      properties:
+        semester:
+          type: string
+          nullable: true
+          enum: ['上册', '下册', null]
+          description: null=全部册次
+        passageIds:
+          type: array
+          nullable: true
+          items: { type: integer, format: int64 }
+          description: 非空时按指定篇目出题（忽略 semester）
+        count:
+          type: integer
+          minimum: 1
+          maximum: 3
+          description: 篇数，限 1-3（每篇逐句判，3 篇已是长会话）
+      required: [count]
+
+    InterpretationStartResult:
+      type: object
+      properties:
+        passages:
+          type: array
+          items:
+            $ref: '#/components/schemas/InterpretationPassageDetail'
+      required: [passages]
+
+    InterpretationPassageDetail:
+      type: object
+      description: 整篇句子一次下发（前端才能把整篇铺出来、看见上下文）
+      properties:
+        passageId: { type: integer, format: int64 }
+        workTitle: { type: string }
+        semester: { type: string }
+        sentences:
+          type: array
+          items:
+            $ref: '#/components/schemas/InterpretationSentence'
+      required: [passageId, workTitle, semester, sentences]
+
+    InterpretationSentence:
+      type: object
+      description: 一句骨架。terms 只出**词名**，释义是答案不下发
+      properties:
+        index: { type: integer, description: 句序（从 0 起，与判题请求的 sentenceIndex 对应） }
+        text: { type: string, description: 原文（含标点） }
+        terms:
+          type: array
+          items: { type: string }
+          description: 该句的关键字词（词名）
+      required: [index, text, terms]
+
+    InterpretationJudgeRequest:
+      type: object
+      properties:
+        passageId: { type: integer, format: int64 }
+        sentenceIndex: { type: integer, minimum: 0 }
+        terms:
+          type: array
+          items:
+            type: object
+            properties:
+              term: { type: string }
+              answer: { type: string, description: 学生写的释义 }
+            required: [term, answer]
+        translation: { type: string, description: 学生的整句翻译 }
+      required: [passageId, sentenceIndex]
+
+    InterpretationJudgeResult:
+      type: object
+      properties:
+        passageId: { type: integer, format: int64 }
+        sentenceIndex: { type: integer }
+        allCorrect:
+          type: boolean
+          description: 该句所有项（字词 + 整句）全 correct===true 才是 true；有 null（未判定）即 false
+        terms:
+          type: array
+          items:
+            $ref: '#/components/schemas/InterpretationTermResult'
+        sentence:
+          $ref: '#/components/schemas/InterpretationSentenceResult'
+        fullTranslation:
+          type: string
+          nullable: true
+          description: 整篇译文。**仅当被判的是最后一句时非 null**（提前下发等于泄题）
+      required: [passageId, sentenceIndex, allCorrect, terms, sentence, fullTranslation]
+
+    InterpretationTermResult:
+      type: object
+      properties:
+        term: { type: string }
+        correct:
+          type: boolean
+          nullable: true
+          description: null=未判定（模型没判出来）
+        method:
+          $ref: '#/components/schemas/InterpretationMethod'
+        standard: { type: string, description: 标准释义（只在判题响应里下发） }
+        comment: { type: string, nullable: true, description: 判错时的改进提示 }
+      required: [term, correct, method, standard, comment]
+
+    InterpretationSentenceResult:
+      type: object
+      properties:
+        correct:
+          type: boolean
+          nullable: true
+          description: null=未判定
+        method:
+          $ref: '#/components/schemas/InterpretationMethod'
+        standard: { type: string, description: 标准译文（只在判题响应里下发） }
+        comment: { type: string, nullable: true }
+      required: [correct, method, standard, comment]
+
+    InterpretationMethod:
+      type: string
+      enum: [exact, ai, unanswered, undetermined]
+      description: >-
+        exact=归一化后与标准答案全等；ai=LLM 判定「意思到位」；
+        unanswered=学生留空；undetermined=模型漏项或整次调用失败（correct 为 null）
 
     HiddenQuestion:
       type: object

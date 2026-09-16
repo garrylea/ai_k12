@@ -1,8 +1,28 @@
 # 训练 → 语文 → 专项：古诗文解释（翻译）+ 古诗文专项独立化改造
 
 - 日期：2026-09-15
-- 状态：设计已与用户逐节确认
+- 状态：设计已与用户逐节确认；**§4 / §5 / §7 / §8 已被 2026-09-16 的修订覆盖**（见下方横幅）
 - 关联文档：`docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md`（第一个专项，本次要**改造它**）、`docs/superpowers/specs/2026-09-13-chinese-dictation-content-pipeline-design.md`（默写内容管线）、`docs/superpowers/specs/2026-09-10-question-content-importer-design.md`（`--export`/`--apply` 校对闭环先例）、`docs/K12智学系统-产品需求文档.md` §6.3
+
+> ## ⚠️ 修订说明（2026-09-16）
+>
+> **架构归位那半已按本文实施完毕**（2026-09-15，见 §10 底部的实施进度）；
+> **解释专项那半在实施时被用户裁决改了三处**，改造方案见
+> `docs/superpowers/plans/2026-09-16-chinese-interpretation-special.md`（该计划是解释专项的**现行依据**）。
+>
+> | 本文位置 | 原设计 | 现行结论（用户 2026-09-16 裁决） |
+> |---|---|---|
+> | §4 决策 4 / 5 | 区段一「全部字词」+ 区段二「全部句子」一次答完 | **三行对译**：行1 原文 → 行2 该句的关键字词 → 行3 整句翻译。不再是「两个字词区段」 |
+> | §4 决策 9 / §7 全文 | 整篇**一次批量** LLM 调用判题 | **逐句判**：答完一句立即调 LLM、立即出对错，学生当场改。`judge` 端点入参改为 `{passageId, sentenceIndex, terms, translation}` |
+> | §4 决策 9 / §7 第 3 条 | 判题失败 → 逐项 `undetermined`（不变） | 不变，但**新增前端合并语义**：重判时保留已判定项（对齐「已判定的项不清空」） |
+> | §5.1 / §5.2 步骤 2-3 / §5.3 | 从教材页 MD 抽注释 + LLM 补字词 + 注释归属（页窗 / 圈号序列重启） | **整块作废**。字词改由**用户手工整理**后交管线（`--input`，JSON 或 Markdown），管线不再碰教材页 MD、不再用 LLM 补字词、不做注释归属 |
+> | §5.2 步骤 4 | 逐句 / 全文翻译由 LLM 生成 | **混合模式**：输入给了 `sentences` 就用输入的（不调模型），没给才由 LLM 生成 |
+> | §6.1 `key_terms` 形状 | `[{"term","gloss","src":"textbook"\|"llm"}]` | 每项**新增 `sentenceIndex`**（指向 `sentences` 下标）——三行对译的第 2 行要知道「这一句有哪些词」；`src` 现恒为 `user` |
+> | §6.1 抽题池 | 解释 = `verified=1 AND is_active=1` | 解释 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`（**加「内容就绪」闸门**：没切过句的篇目点进去没题目。默写抽题池一字未动） |
+> | §8 前端 | 配置页只有「范围 + 篇数」 | **加「指定篇目」**（用户 2026-09-16 要求可随机也可指定），配置页篇数档为 1/2/3、勾选上限 = 篇数；答题页为**逐句卡片列表**（不换页，前面答过的句子留在页面上、结果就地回填） |
+> | §11 测试 / §13 实施顺序 | — | 以计划文档为准（本文的验收条目仍有参考价值） |
+>
+> **未被推翻、仍然有效**：§1 背景、§2 核心原则（古诗文专项是独立子系统：不挂 `questions`、不进错题本、不参与清零门禁）、§3 目标与非目标、「判题不写任何学生状态」、§6.4 JSON 类型与两侧驱动差异、§10 文档更新清单（已执行）。
 
 ## 1. 背景与问题
 
@@ -306,7 +326,7 @@ ALTER TABLE chinese_passages
 
 > **实施进度（2026-09-15）**：**架构归位部分已完成**——`chinese_passages` 改名、`question_id` 摘除、存量 50 题 + 7 行错题已清、判题不再写学生状态、API 字段 `questionId`→`passageId` 已生效、两份 API 文档已同步、全链路验证通过（server 500 / refinery 892 测试全绿，curl 手测：判错错题本零新增、错因 2.3s 出文案、数学专项无回归）。
 > **迁移事故记录**：迁移首跑因 `dictation_passages` 自身的 CASCADE 外键被第 2 步删题级联、50 行篇目静默清空，从备份恢复；脚本已补「删题前先摘外键」的步骤 1.5。详见 `docs/superpowers/plans/2026-09-15-chinese-passages-standalone.md` Task 9。
-> **古诗文解释专项（§5 / §7 / §8 及三列 JSON 字段）尚未开始**。
+> **古诗文解释专项（§5 / §7 / §8 及三列 JSON 字段）已于 2026-09-16 实施完毕**（按修订后的方案，见顶部横幅与 `docs/superpowers/plans/2026-09-16-chinese-interpretation-special.md`）：三列已加、3 个端点已通、`interpretation_judge` 场景已配、前端两页已上线（专项页第二张卡已启用）。**内容尚未灌入**——字词由用户整理后交 `tools/data-refinery/src/interpretation_cli.py`；库里现仅 2 篇 DEV-FIXTURE 开发假数据（`静夜思` / `登鹳雀楼`）。
 
 ## 11. 测试与验收
 

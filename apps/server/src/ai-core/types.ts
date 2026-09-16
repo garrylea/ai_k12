@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
@@ -49,7 +49,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
@@ -623,5 +623,48 @@ export interface DictationFeedbackRequest {
 
 export interface DictationFeedbackResponse {
   content: string;
+  reasoning?: string;
+}
+
+// ========== Interpretation Judge Types（语文古诗文解释判题，2026-09-16） ==========
+
+/** 待判的一个字词（**只含需要模型判的**——程序短路掉的项不进这里） */
+export interface InterpretationJudgeTermInput {
+  term: string;
+  /** 标准释义 */
+  gloss: string;
+  /** 学生作答 */
+  answer: string;
+}
+
+/**
+ * 逐句判题请求。
+ *
+ * `studentTranslation` 为 `null` 表示**整句翻译无需模型判**（已由程序短路判对/判空），
+ * prompt 模板据此跳过整句段；`terms` 为空数组同理。
+ * 两者都空时调用方**不该发起本请求**（判题服务里已短路，见 TrainingService.judgeInterpretation）。
+ */
+export interface InterpretationJudgeRequest {
+  workTitle: string;
+  /** 该句原文 */
+  sentence: string;
+  /** 该句标准译文 */
+  standardTranslation: string;
+  studentTranslation: string | null;
+  terms: InterpretationJudgeTermInput[];
+}
+
+export interface InterpretationJudgeTermResult {
+  term: string;
+  correct: boolean;
+  /** 判错时的改进提示；判对可不给 */
+  comment?: string | null;
+}
+
+/** 模型输出。`terms` 允许少于请求项数（漏项由调用方标 undetermined），故用 default([])。 */
+export interface InterpretationJudgeResponse {
+  terms: InterpretationJudgeTermResult[];
+  /** 请求未含整句翻译时为 null/缺省 */
+  sentence?: { correct: boolean; comment?: string | null } | null;
   reasoning?: string;
 }

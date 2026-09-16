@@ -14,6 +14,7 @@ timeout:
   safety: 10000
   structuring: 45000
   dictation_feedback: 30000
+  interpretation_judge: 30000
 
 streaming:
   firstTokenTimeoutMs: 3000
