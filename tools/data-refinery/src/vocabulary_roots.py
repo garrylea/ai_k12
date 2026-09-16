@@ -6,7 +6,12 @@
   · **释义不新造**：每个成员的释义就是它自己那行的 gloss，族树渲染时现取——本脚本只产出**边与词缀注记**
   · 纯前缀匹配会产生假阳性（`car → card` 毫无关系），所以**要求差异部分必须是已知词缀**
 
-产物是**待审草稿**（JSONL），不是最终数据；审核后才由 loader 落库。
+**草稿是离线审查产物，不进仓库**（默认写到 `output/`，已被 .gitignore）：
+  · 真正的源数据是下面 `AFFIXES`（词缀表）与 `EXCLUDE_EDGES`（人工审核排除的假阳性）这两段代码；
+  · 审查时跑 `python3 -m src.vocabulary_roots`（不传 `--apply`），打开草稿看；
+  · 审完跑 `--apply`，`load()` 会先**清空全表 root_key/root_affixes 再重写**，所以草稿不会留成脏数据。
+  之前默认写到 `src/` 里、还被 git 跟踪，结果审查完它就成了「既非源数据、又非当前数据」的死文件，
+  把人带偏过两次（看它以为内容是当前提案，其实是上一轮已入库的）。
 """
 
 from __future__ import annotations
@@ -234,7 +239,8 @@ def load(fam: dict[str, list[dict]], apply: bool) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="生成词根族待审草稿")
     ap.add_argument("--apply", action="store_true", help="写库（默认只出草稿）")
-    ap.add_argument("--out", default=str(pathlib.Path(__file__).parent / "vocabulary_roots_draft.jsonl"))
+    ap.add_argument("--out", default=str(pathlib.Path(__file__).parent.parent / "output" / "vocabulary_roots_draft.jsonl"),
+                    help="草稿输出路径（默认写到 output/，被 .gitignore；不要写进 src/ 当源数据）")
     args = ap.parse_args(argv)
 
     from config import RefineryConfig
@@ -253,6 +259,7 @@ def main(argv=None) -> int:
         fam.setdefault(d["root"], []).append(d)  # 上溯后 root 已是真正的族根
 
     # 单成员族也算族（中心词 + 1 个派生词就是一族，前端树能画）
+    pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         for d in draft:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
