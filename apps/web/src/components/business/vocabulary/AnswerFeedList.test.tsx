@@ -130,8 +130,49 @@ describe('AnswerFeedList', () => {
         cleared={{}}
       />,
     );
-    expect(screen.getAllByText('移除易错标记')).toHaveLength(1);
+    // 按钮现在只显示图标（线性 SVG），靠 aria-label 找而不是文本
+    expect(screen.getAllByLabelText('移除易错标记')).toHaveLength(1);
     expect(screen.getByTestId('clear-mark-3')).toBeInTheDocument();
+  });
+
+  it('图标是线性 SVG（项目硬规则：禁 emoji）', () => {
+    render(
+      <AnswerFeedList
+        entries={[entry({ question: question({ wordId: 3 }), result: judgeResult({ wordId: 3, verdict: 'wrong' }) })]}
+        collapsed={false}
+        onToggleCollapsed={vi.fn()}
+        onClearMark={vi.fn()}
+        cleared={{}}
+      />,
+    );
+    const btn = screen.getByTestId('clear-mark-3');
+    const svg = btn.querySelector('svg');
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute('fill')).toBe('none');       // 线性而非实心
+    expect(svg?.querySelector('circle')).not.toBeNull();  // 对勾在圆内
+  });
+
+  it('行按**倒序**显示：最近答的在最前，最早的在最后', () => {
+    // 数据本身是时间顺序，组件负责倒序展示 —— 学生刚答完最关心刚才那条。
+    render(
+      <AnswerFeedList
+        entries={[
+          entry({ question: question({ wordId: 1, prompt: 'aaa' }), result: judgeResult({ wordId: 1, verdict: 'correct' }) }),
+          entry({ question: question({ wordId: 2, prompt: 'bbb' }), result: judgeResult({ wordId: 2, verdict: 'correct' }) }),
+          entry({ question: question({ wordId: 3, prompt: 'ccc' }), result: judgeResult({ wordId: 3, verdict: 'correct' }) }),
+        ]}
+        collapsed={false}
+        onToggleCollapsed={vi.fn()}
+        onClearMark={vi.fn()}
+        cleared={{}}
+      />,
+    );
+    const rows = screen.getAllByTestId(/^feed-row-/);
+    expect(rows.map((r) => r.getAttribute('data-testid'))).toEqual([
+      'feed-row-3',
+      'feed-row-2',
+      'feed-row-1',
+    ]);
   });
 
   it('点「移除易错标记」回调 wordId', () => {

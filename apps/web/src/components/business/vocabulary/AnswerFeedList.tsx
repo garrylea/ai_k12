@@ -43,6 +43,29 @@ const MARK: Record<string, { icon: string; className: string; label: string }> =
  * 判题失败/未作答**不显示**错误统计口径的标记（它们不计错，见服务端口径），
  * 但仍列出，让学生知道那道题没判成。
  */
+/**
+ * 「移除易错标记」图标：圆形对勾（线性 SVG —— 项目硬规则禁 emoji、图标必须线性 SVG）。
+ *
+ * 用**对勾**而不是叉：这个动作的语义是「这个词我已掌握，别再算我易错」，
+ * **不是删除数据**（全局错次与学生自己的 learned 都不动），叉会让人以为在删记录。
+ * 圆形把它与行首那个纯字符状态标记（✓ / △ / ✗）区分开。
+ */
+const ClearMarkIcon = () => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="h-4 w-4"
+    aria-hidden="true"
+  >
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8 12.5l2.5 2.5L16 9.5" />
+  </svg>
+);
+
 export default function AnswerFeedList({
   entries,
   collapsed,
@@ -86,7 +109,9 @@ export default function AnswerFeedList({
 
       {!collapsed && (
         <ul className="border-t border-[var(--bg-subtle)] px-4 py-2">
-          {answered.map((e) => {
+          {/* **倒序显示**：最近答的排最前（刚答完最关心的就是刚才那条），最早的在最后。
+              数据本身仍是时间顺序 —— 汇总计数与「本轮 N/M」都不受显示顺序影响。 */}
+          {answered.slice().reverse().map((e) => {
             const m = e.result ? MARK[e.result.verdict] : null;
             return (
               <li
@@ -111,10 +136,12 @@ export default function AnswerFeedList({
                   {e.result?.verdict === 'wrong' && !cleared[e.question.wordId] && (
                     <button
                       onClick={() => onClearMark(e.question.wordId)}
-                      className="ml-auto text-xs text-[var(--text-secondary)] underline"
+                      aria-label="移除易错标记"
+                      title="移除易错标记"
+                      className="ml-auto text-[var(--text-secondary)] transition-colors hover:text-[var(--brand-500)]"
                       data-testid={`clear-mark-${e.question.wordId}`}
                     >
-                      移除易错标记
+                      <ClearMarkIcon />
                     </button>
                   )}
                   {cleared[e.question.wordId] && (
