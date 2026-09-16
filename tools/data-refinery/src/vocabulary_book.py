@@ -26,6 +26,29 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# 单词表小节的标题。**必须据它限定范围**：书末那几十页除了词表还有语法说明、
+# 用法对比表、Conversation 等正文，不加限定会把它们一起当词条吃进来
+# （实测吃出过 `'could' 也可表示请求,但比 can 的语气更委婉。例如:` 这种）。
+WORDLIST_HEADING_RE = re.compile(
+    # ⚠️ 结尾**不能**加 `\b`：人教版的标题是英文中文黏在一起的
+    # （`Words and Expressions in Each Unit各单元生词和习惯用语`），
+    # 而 Python 里中文也算 \w，`Unit各` 之间没有词边界 → 加 \b 就永远匹配不上（踩过）。
+    r"^(?:Vocabulary(?:\s+in\s+Each\s+Unit|\s+A-Z|\s+from\s+Primary\s+School)?"
+    r"|Words\s+and\s+Expressions(?:\s+in\s+Each\s+Unit)?"
+    r"|Using\s+Words\s+and\s+Expressions)",
+    re.IGNORECASE,
+)
+ANY_HEADING_RE = re.compile(r"^#{1,6}\s")
+# **噪声标题**：页眉/水印会出现在每一页开头（实测 `## 人民教育出版社` 出现 116 次）。
+# 它们绝不能参与「是否在词表小节内」的状态判断 —— 否则每翻一页都会把状态关掉，
+# 结果一个词条都抽不出来（踩过）。
+NOISE_HEADING_RE = re.compile(r"出版社|教科书|课程标准|书名|定价")
+# **词表内部的分段标题**：单词表自己就带 `## Starter Unit 1` / `## Unit 3`（按单元分组）
+# 与 `## A` / `## B`（Vocabulary A-Z 按字母分组）。它们**不表示离开词表**。
+# ⚠️ 判断顺序很关键：这些行以 `##` 开头，必须先于「其它标题=离开词表」判断，
+# 否则一遇到 `## Unit 1` 就把状态关掉，一个词条都抽不出来（踩过）。
+IN_LIST_HEADING_RE = re.compile(r"^(?:Starter\s+|Welcome\s+)?Unit\s*\d*$|^[A-Z]$")
+
 # 行尾页码引用（`p.21` / `P.21`）
 PAGE_REF_TAIL_RE = re.compile(r"\s*[pP][.．]?\s*\d{1,3}\s*$")
 # 小节标题：`## Unit 2` / `Starter Unit 1` / `## 人民教育出版社`
@@ -111,12 +134,31 @@ def _split_head_gloss(line: str) -> tuple[str, str] | None:
 def parse_entries(md_dir: Path, source: str) -> list[Entry]:
     entries: list[Entry] = []
     skipped: list[str] = []
+    in_wordlist = False
+    saw_wordlist_heading = False
 
     for page, raw in iter_lines(md_dir):
         line = PAGE_REF_TAIL_RE.sub("", _norm(raw)).strip()
-        if not line or MD_HEADING_RE.match(line) or UNIT_HEADER_RE.match(line):
+        if not line:
             continue
-        # 整行只有页码/出版社之类的噪声
+        # ---- 小节切换：只在单词表小节内解析词条 ----
+        if ANY_HEADING_RE.match(line):
+            heading = ANY_HEADING_RE.sub("", line).strip()
+            if WORDLIST_HEADING_RE.match(heading):
+                in_wordlist = True
+                saw_wordlist_heading = True
+            elif NOISE_HEADING_RE.search(heading):
+                pass                            # 页眉/水印：不改变状态
+            elif in_wordlist and IN_LIST_HEADING_RE.match(heading):
+                pass                            # 词表内部的 Unit / 字母分段：仍在词表里
+            else:
+                in_wordlist = False
+            continue
+        if UNIT_HEADER_RE.match(line):          # 词表内部还要按 Unit 分段，但仍是词表
+            if in_wordlist:
+                continue
+        if not in_wordlist:
+            continue
         head_gloss = _split_head_gloss(line)
 
         # ---- 续行 1：直接以释义开头（中文或左括号；释义折行） ----
@@ -184,6 +226,11 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
 
     if skipped:
         (md_dir / "_skipped_lines.txt").write_text("\n".join(skipped), encoding="utf-8")
+    # 一段词表标题都没找到 → 说明书的分节标题与预期不符，明确报出来（否则会静默返回空）
+    if not saw_wordlist_heading:
+        raise RuntimeError(
+            f"{source}: 没找到单词表小节标题（Vocabulary in Each Unit / A-Z / Using Words and Expressions）"
+        )
     return entries
 
 
