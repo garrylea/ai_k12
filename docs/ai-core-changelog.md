@@ -8,6 +8,67 @@
 
 ---
 
+## 2026-09-16 归档（CLAUDE.md 瘦身：32.3KB → 18.6KB，迁出的稳定细节存此处）
+
+**动作**：按用户要求把根 `CLAUDE.md` 收敛成「基本原则 + 文档索引 + 最新需特别注意的问题」三段式。
+**所有「勿 / 必须 / 铁律」类约束一条都没删**（已按 26 个关键词逐条核验仍在），迁出的都是**长篇实现细节与已稳定行为**的叙述。以下为该次迁出的原文/要点，按主题归拢。
+
+### 一、Data Refinery 细节（CLAUDE.md 现只留三条必读 + 指针）
+
+`tools/data-refinery/` 是离线数据准备管线，四阶段顺序执行：
+`convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_loader_cli (MySQL)`。
+`refinery_cli.py` 串联 publish + db_loader 一键执行；DB 由 `tools/db/install_mysql.sh` 初始化（schema + subjects seed）。
+
+**现状**：管线已端到端跑通（refinery 237 tests 全绿、crawler 200 tests；2026-08-26 实测 `refinery_cli --purge-business-data` 全量重载 342 cards + 447 questions 成功，含幂等重跑与守卫复验）。题目内容回写工具 `answer_importer`（2026-09-10）在 `tools/data-refinery/src/`：JSONL/Markdown 输入，按单题/批量/按卷/按缺口回写 questions 的 answer/approach/explanation/type（`--export` 导出待补模板，`--apply` 幂等写入）。
+
+**LLM 配置**：用 `.env` 的 `LLM_BASE_URL`/`LLM_AUTH_TOKEN`（refinery 专属），**不要用 `ANTHROPIC_*`**（会被 shell 里 Claude Code 覆盖）。当前用本地 llama.cpp `Qwen3.8-27B`（`LLM_PROVIDER=local`、`LLM_BASE_URL=http://192.168.1.8:12345/v1`，2026-08-26 起 Card 标注/目录解析走本地模型；`.env` 里注释保留了原远程 DeepSeek `deepseek-flash` 配置可切回）。
+
+**extract 的细则**：lesson_id 由 LLM 给标题标识 + CLI 跨页继承（per-book 状态）；只有编号标题（`N.M`/`N.M.K`/`第N章`）开新课；章综述归该章"第 0 节"；前置内容（封面/目录/版权/前言）不抽取；试卷答案只提取不生成（从参考答案按题号提取，无则空）；
+**全角括号统一半角**（2026-09-01）——读页 md 后 `normalize_fullwidth_parens`（`（）`→`()`，1:1 不改长度，NFKC 等价不影响 content_hash；其余全角标点 。，；！？ 不动——`。` 无 NFKC 映射会改 hash，`。！？；` 是 splitter 句末切分点）；
+**页眉/页脚剥离 + 书尾识别**（2026-09-02）——`page_chrome.py` 书级频率统计自动发现运行页眉（≥3 页 + 安全模式：出版社/水印/纯页码/ISBN，「练习」等内容标题永不剥），`is_front_matter` 判定与 split 前都先 `strip_chrome`；`is_front_matter` 新增书尾规则（ISBN/绿色印刷/后记附录索引/电话+邮箱/组织说明页标记≥3/剥空页）。详见 `docs/superpowers/plans/2026-09-01-page-chrome-and-backmatter.md`；
+**试卷路径二维码过滤**（2026-09-12）——`question_extract` 在答案合并后、`split_page` 前调 `qr_detect.strip_qr_images` 剔除公众号二维码图（`cv2.QRCodeDetector` 解码成功 + 二维码占图面积 ≥ `_MIN_QR_AREA_RATIO`=0.3；护栏防误删"角落带二维码的真实配图"，实测占图仅 0.014 vs 真二维码 0.86+）；二维码独占一行则删行，与正文同行则只摘引用保正文；教材卡路径不受影响（实测 733 张零二维码）。详见 `docs/superpowers/specs/2026-09-12-qr-code-image-filter-design.md`。
+
+**publish**：资产路径用源相对稳定键；subject 按文件路径首段推导（2026-08-26 前曾硬编码 "math" 误标化学，已修）。
+
+**db_loader 的细则**：subject 别名归一（chem->chemistry）、rel_path/lesson_id 解析派生教材结构、cards sort_order 跨页全局重排、full-reload 幂等；
+**版次（edition）维度**——textbook_versions 按 `(subject_id, publisher, grade_band, edition)` 4 元组唯一，edition 用 `edition_from_book_name` 从书名前导括号提取（只用括号内容不用完整书名，勿用随机值做 code 破坏幂等）；
+**页码锚定 lesson_anchor**（2026-09-02）——TOC 模式挂卡时 `load_book_cards` 先过 `LessonAnchor` 确定性修正：章边界首选综述卡锚定（每章「第N章」标签卡最小 md 页 = 章头页，无偏移误差；兜底首节 printed + 偏移众数 − 3 余量），规则 A 错章重写（content「复习题 N」> 时间线活跃节 > 标题匹配 > 章综述）/ B 同名消歧（「小结」「数学活动」按页所在章）/ C 复习题归一（挂该章「小结」，不建「复习题 N」lesson）；无 TOC/对不上 → 整体退化既有匹配。extract/publish/jsonl 不动，锚定每次 load 重算（重处理任意页不影响结构）。详见 `docs/superpowers/plans/2026-09-02-lesson-anchor-design.md`。
+
+### 二、语文古诗文专项的实施状态（CLAUDE.md 现只留原则/边界/三条口径）
+
+- 独立化改造**已完成**（2026-09-15）：表为 `chinese_passages`（无 `question_id`、无外键、含 `is_active`），`questions` 上的 `poem_dictation` 行与 `main_error_books(source='dictation')` 已清，四端点对外字段为 `passageId`，判题不写任何学生状态。
+- **解释专项已实施**（2026-09-16）：三列 `key_terms`/`sentences`/`full_translation` 已加（迁移 `2026-09-16_chinese_interpretation_columns.sql`，纯 ADD COLUMN），`/training/interpretation/{passages,start,judge}` 三端点已通，`interpretation_judge` 场景已配，前端两页已上线。
+- 内容生产走旁路：默写只看 `convert_cli` 一步；解释连 `convert_cli` 都不用——字词由用户手工整理后交 `interpretation_cli --input`（JSON/Markdown，字段名中英文都认），正文用库里已校验的 `body`，管线只做「解析 → 切句 → 字词归属 → 出译文 → 自检 → 幂等入库」。译文**混合模式**：输入给了 `sentences` 就用输入的（不调模型），没给才由 LLM 生成。
+- **内容尚未灌入**（库里仅 2 篇 `DEV-FIXTURE` 假数据供手测）。
+- 「不进错题本」的判据：错题本本质是**接主线清零门禁的待办队列**，不是「错过的题的统一记事本」。篇目级作答没有「重做—清零」的对象（专项不接主线，无解锁可放行）、没有变式生成物（§7.10 的变式以知识点为轴，篇目无知识点维度）、拉进错题练习也只是「再默一遍」（与专项自己的配置页重复）。**依据**：PRD §6.3 / §7.4 例外说明、架构文档 §4.2.13、spec §2。
+
+### 三、apps/web 主题系统的细节（CLAUDE.md 现只留硬规则）
+
+Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/global.css`。
+- `student-day` —— 暖橙红（`Brand-500 #ff6b35`）、`Bg-Page #F5F0E8`（默认）
+- `student-night` —— 现已改为**浅灰底 + 白卡 + 浅灰蓝按钮**（学生反馈原「暗茶金」太暗字看不清），18:00–06:00 由 Zustand themeStore 自动激活
+- `parent` —— 商务蓝白，强制白天
+
+切换入口只有两处：`StudentLayout` 顶栏的「日间/夜间」按钮 + `CourseDetailPage`（两者也跑 `autoToggleNightMode` 每分钟一次）。训练轨内 22 个页面**全部硬编码 `student-day`**，无切换、无自动切换。
+
+### 四、ai-core 的其他实现细节（CLAUDE.md 现只留仍需遵守的约定）
+
+- **ModelClient DI**：各 capability 构造函数接受 `opts?: { modelClient?: ModelClient }`，测试注入 mock（无 API Key 也能跑）。生产用 `new ModelClient()`。
+- **错误处理**（基于 `../llm-client.js`）：provider 经 `classifyError`（`infra/model-client/errors.ts`）抛 11 个错误子类之一（`LLMClientError` 基类 + `AuthenticationError`401 / `InsufficientQuotaError`402·429-quota / `PermissionError`403 / `ResourceNotFoundError`404 / `RequestTooLargeError`413 / `ValidationFailedError`400·422 / `ContentFilteredError`406·SAFETY / `RateLimitError`429 / `ServerError`5xx / `TimeoutError`abort；retryable 由子类决定）；`ModelClient.chat` 用 `callWithRetry`（full-jitter 退避 + 遵守 Retry-After + onRetry 钩子）包装，非 retryable 立即抛。
+- **错误映射与对话持久化**：`mapLLMErrorToClient` 把 11 个错误子类映射为人类可读错误码（1001-1012/5000/5001 + retryable 标志）透传给前端；对话中模型错误若**尚未产出任何 reasoning/content**只持久化 user 消息（刷新回到「末条 user 待重试」），若**已流出部分思考/正文**（如空闲超时打断思考）则 best-effort 一并落库（assistant content 空时填 `[生成中断]`），刷新后仍可回看；重试请求带 `retry:true` 只追加 assistant、不重复落 user。前端 `setLastAssistantError` 不再清空已流出的内容/思考，错误气泡叠在思考过程下方。
+- **Gemini**：system prompt 走 `systemInstruction`（不是 user 角色）；finishReason 映射 MAX_TOKENS->length、SAFETY->content_filter。**流式暂未实现**（streamGenerateContent 待配 GEMINI_API_KEY），`ModelClient` 对 gemini 强制 `stream=false` 非流式降级。
+- **会话标题路由**（2026-09-11 起）：`title` 场景 primary=`local`、fallback=`deepseek-flash`。`TutoringCapability.generateTitle` 走 `modelRouter.route({scene:'title'})`（**不再硬编码 deepseek**）：primary 失败回退 fallback，**两者都失败则不生成标题**（保留默认「辅线答疑」，由学生手动重命名，明确不做文本兜底）；两个模型都失败时 `console.warn` 留痕。已 seed 的库执行 `npx tsx src/scripts/set-title-route.ts`。
+- **多模态与图片**（2026-09-11 起）：`qwen3.8-max` 支持多模态，图片直接作为 `image_url` 部件随最后一条 user 消息送给辅导模型（`TutoringCapability.augmentWithImages`），无转录/确认两阶段（一图多题由 `prompts/tutoring/math/auxiliary.md` 的图片/多题处理段兜底）；`qwen-vl-max`/`qwen3-vl-plus` 两个 VL 模型与 `transcribe` 场景已删除。`ai_dialogues.flow_state`/`pending_question`/`pending_questions` 为遗留死数据（未做破坏性迁移，勿再读写）。
+- **判题与解析分离**（2026-09-08 起）：判题（judgment）只判对错（isCorrect/errorType），prompt 勿加回 analysis 输出；判错解析由 `ExplanationCacheService`（practice 模块，**PracticeModule 导出供 TrainingModule 注入同一实例——勿重复 provide，会分裂 in-flight 队列**）后台生成入 `questions.explanation` 一次性复用（`answer>=100` 字符直写不调 LLM；否则 explanation 场景 `solution` 模式强模型生成，可含 SVG）。结果页批量拉解析走 `GET /training/questions/explanations`（等 in-flight 60s），刷新走 `explanation-wait`（120s，失败写 admin_notifications）。
+- **辅线答疑「详细解析」走题库**（2026-09-11 起）：`AIService.maybeStoredExplanation` 在 `mode='auxiliary'` 且满足「学生已与助手来回 ≥ `fallback.yaml` 的 `detailedExplanationAfterRounds`（默认 2）轮 + 当前消息命中 `detailedExplanationKeywords`」时，**直接从题库取 答案+解题思路+解析**（`questions.answer/approach/explanation`）输出，**不调用模型**。题目定位：优先会话 `ai_dialogues.question_id`（AI 首次结构化入库时由 `AiDialoguesRepository.updateQuestionId` 回填，幂等仅当 NULL）；老会话无锚点则用首条用户消息题干匹配——**`content_hash` 优先、`QuestionRepository.findByContentPrefix` 的「归一化去标点前 20 字」兜底**，多命中取最新。**查不到题或题库无可用内容 → `TutoringRequest.forceFallback=true` 强制走 AI 完整解析兜底，不再回到苏格拉底追问。** 入库侧（`ingestStructuredQuestion`）：hash/前 20 字命中即复用、不重复插入，并确保该学生 `main_error_books` 有这道题（`source='auxiliary'`，`existsByStudentAndQuestionId` 幂等）。结构化输出新增 `approach` 字段。辅线 prompt 要求**每次引导必须给出关键信息**（关键已知条件/公式定理/下一步操作），不能只抛问题，但仍不得给最终答案。前端可发现性：`AuxiliaryHomePage` 在会话 ≥2 条 assistant 消息时给 `AuxInputBar` 传 `showAnswerHint`，提示「输入『详细解析』/『给我答案』即可获得 答案+思路+解析」（阈值 2 与后端配置对齐，前端硬编码，改后端需同步）。
+- **测试与文档同步铁律**：若测试断言与 config/types/设计文档的值冲突，**测试错**——改测试，勿改 config/设计文档。（此条已保留在 CLAUDE.md。）
+
+**已知限制（当时未修）**：metrics/logger 模块已实现但尚未在 capability 层接入；`detectWrongAnswer` 用正则推断学生答错（plan 设计，脆弱）；ConversationService 内存存储无 TTL/容量上限；缺 essay/reading/translation 评分模板（MVP 仅数学 proof/calculation）；部分 YAML 字段（classifier.confidenceThreshold、outputStructure）为声明式意图未接线；gemini 流式未实现；流式 usage 尽力收（Kimi 流式不返回 usage，cost 可能 0）。
+
+**实现记录**：计划草稿偏差与 code-review 修正详见 `docs/superpowers/plans/2026-07-23-ai-agent-hub-mvp-implementation.md` 末尾「实现修正记录」「代码审查后修正」两节。
+
+---
+
 ## 2026-09-16 新增（英语背单词子系统：表 + 端点 + 前端三页，内容管线待落地）
 
 - **变更摘要**：
