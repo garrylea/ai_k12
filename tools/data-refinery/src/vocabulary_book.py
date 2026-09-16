@@ -51,6 +51,8 @@ IN_LIST_HEADING_RE = re.compile(r"^(?:Starter\s+|Welcome\s+)?Unit\s*\d*$|^[A-Z]$
 
 # 行尾页码引用（`p.21` / `P.21`）
 PAGE_REF_TAIL_RE = re.compile(r"\s*[pP][.．]?\s*\d{1,3}\s*$")
+# 页码引用也会出现在**行首**（实测 `p.42 long-term`），不能只剥行尾
+PAGE_REF_HEAD_RE = re.compile(r"^[pP][.．]?\s*\d{1,3}\s+")
 # 小节标题：`## Unit 2` / `Starter Unit 1` / `## 人民教育出版社`
 MD_HEADING_RE = re.compile(r"^#{1,6}\s")
 UNIT_HEADER_RE = re.compile(r"^(?:Starter\s+)?Unit\s*\d+\s*$", re.IGNORECASE)
@@ -80,6 +82,8 @@ IPA_LETTERS = set("abcdefghijklmnopqrstuvwxyzæɑɒɔəɜɛɪʊʌθðʃʒŋɹɡ�
 IPA_PUNCT = set(" ,;:.'’\"()-ˈˌːˑ̟̩͡")
 
 PAREN_GROUP_RE = re.compile(r"[（(][^）)]*[）)]")
+# 未配对的残留括号：MinerU 折行时可能丢掉开括号，只剩 `intelligence )`
+STRAY_PAREN_RE = re.compile(r"\s*[（()）]\s*")
 
 
 @dataclass
@@ -92,6 +96,13 @@ class Entry:
     page: int            # 书内页序（来自文件名）
     raw: str
     flags: list[str] = field(default_factory=list)
+    # 词表内部的分段（`Unit 3` / `Welcome Unit` / `A`）。**字母序校验必须按段比**：
+    # 每段的词各自从 a 排到 z，跨段比较会误报（下一段又从 a 开始）。
+    section: str = ""
+    # 顶层词表段落名（`Vocabulary in Each Unit` / `Vocabulary A-Z` / `Words and Expressions…`）。
+    # **只有 Vocabulary A-Z 是字母序**；`in Each Unit` 是按课文出现顺序排的，
+    # 拿字母序去校验它会产生 100% 的假阳性（实测踩过：5662 条报了 3365 条「违规」）。
+    group: str = ""
 
 
 def _norm(s: str) -> str:
@@ -136,9 +147,12 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
     skipped: list[str] = []
     in_wordlist = False
     saw_wordlist_heading = False
+    current_section = ""
+    current_group = ""
 
     for page, raw in iter_lines(md_dir):
         line = PAGE_REF_TAIL_RE.sub("", _norm(raw)).strip()
+        line = PAGE_REF_HEAD_RE.sub("", line).strip()
         if not line:
             continue
         # ---- 小节切换：只在单词表小节内解析词条 ----
@@ -147,10 +161,12 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             if WORDLIST_HEADING_RE.match(heading):
                 in_wordlist = True
                 saw_wordlist_heading = True
+                current_group = heading
+                current_section = ""
             elif NOISE_HEADING_RE.search(heading):
                 pass                            # 页眉/水印：不改变状态
             elif in_wordlist and IN_LIST_HEADING_RE.match(heading):
-                pass                            # 词表内部的 Unit / 字母分段：仍在词表里
+                current_section = heading       # 词表内部的 Unit / 字母分段：仍在词表里
             else:
                 in_wordlist = False
             continue
@@ -199,7 +215,14 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
         if " / " in word:
             word = word.split(" / ")[0].strip()
         word = POS_CONNECTOR_RE.sub("", word)
-        word = PAREN_GROUP_RE.sub(" ", word)
+        # 词尾单独一个**大写字母**要并给释义：课本印的是 `T-shirt T恤衫`（字母与中文黏连），
+        # 切点落在 `恤` 之前，会把 `T` 留在词里。只处理大写字母，避免误伤 `as a` 这类。
+        tm = re.match(r"^(.*\S)\s+([A-Z])$", word)
+        if tm:
+            word = tm.group(1)
+            gloss = tm.group(2) + gloss
+        word = PAREN_GROUP_RE.sub(" ", word)   # 成对的括号注释（`would ('d) like to`）
+        word = STRAY_PAREN_RE.sub(" ", word)   # 剩下的未配对括号
         word = re.sub(r"\s+", " ", word).strip()
 
         flags: list[str] = []
@@ -222,7 +245,8 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             flags.append("no_phonetic_no_pos")
         if phonetic and set(phonetic) - IPA_LETTERS - IPA_PUNCT:
             flags.append("suspicious_ipa")
-        entries.append(Entry(word, phonetic, " ".join(pos_tokens), gloss, source, page, raw, flags))
+        entries.append(Entry(word, phonetic, " ".join(pos_tokens), gloss, source, page, raw,
+                             flags, current_section, current_group))
 
     if skipped:
         (md_dir / "_skipped_lines.txt").write_text("\n".join(skipped), encoding="utf-8")
@@ -234,21 +258,49 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
     return entries
 
 
-def check_monotonic(entries: list[Entry]) -> None:
-    """字母序单调性检查：单词表按字母序排，乱码词几乎必然破坏单调性。
+# 排序键：去掉连字符与撇号，**但保留空格**。
+# 课本的两条排序规则实测为：
+#   · 连字符按「视作不存在」处理 —— `eastern` 排在 `e-book` 之前（e-book 视作 ebook，ea < eb）
+#   · **空格按字符参与比较** —— `a lot of` 排在 `ability` 之前（`a␣` < `ab`）、
+#     `go to bed` 在 `good at` 之前（`go␣` < `goo`）、`act out` 在 `activity` 之前
+# 第一版把空格也去掉了，结果 137 条**全部**是假阳性；保留空格后即归零。
+SORT_KEY_RE = re.compile(r"[-'’]")
 
-    只在**同一个小节内**比较（不同 Unit 之间会回退到 a，属正常）。
-    结果写到条目的 flags 里，不改动顺序。
+
+def is_alphabetical_group(group: str) -> bool:
+    """只有 `Vocabulary A-Z` 这类段落是字母序；`in Each Unit` 是按出现顺序排的。"""
+    g = group.lower()
+    return "a-z" in g or "a—z" in g or "a - z" in g
+
+
+def check_monotonic(entries: list[Entry]) -> int:
+    """字母序单调性检查：词表按字母序排，**乱码词几乎必然破坏单调性**。
+
+    这是本管线最主要的**确定性**校验（MinerU 的 md 不带逐行置信度）。
+    必须**按 (书, 分段) 分组**比：每段的词各自从 a 排到 z，跨段比会全是误报。
+
+    返回违规条数；违规项加 `order_violation` 标记（不改变顺序、不丢弃）。
     """
-    prev = ""
+    groups: dict[tuple[str, str, str], list[Entry]] = {}
     for e in entries:
-        key = e.word.lower()
-        if not key:
+        # ⚠️ **只校验字母序段落**（Vocabulary A-Z）。`in Each Unit` 是按课文出现顺序排的，
+        # 拿字母序去比它会产生 100% 假阳性（实测踩过）。
+        if not is_alphabetical_group(e.group):
             continue
-        if key < prev:
-            e.flags.append("order_violation")
-        else:
-            prev = key
+        groups.setdefault((e.source, e.group, e.section), []).append(e)
+    violations = 0
+    for group in groups.values():
+        prev = ""
+        for e in group:
+            key = SORT_KEY_RE.sub("", e.word.lower())
+            if not key:
+                continue
+            if key < prev:
+                e.flags.append("order_violation")
+                violations += 1
+            else:
+                prev = key
+    return violations
 
 
 def write_jsonl(entries: list[Entry], dest: Path) -> None:

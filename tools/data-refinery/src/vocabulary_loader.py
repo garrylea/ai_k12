@@ -106,6 +106,7 @@ def collect(md_root: pathlib.Path) -> tuple[list[dict], dict]:
             stats.setdefault("skipped_books", []).append(str(err))
             print(f"  [跳过整本] {err}")
             continue
+        stats["order_violations"] = stats.get("order_violations", 0) + vb.check_monotonic(book_entries)
         for e in book_entries:
             stats["raw"] += 1
             if e.flags and "bad_word_charset" in e.flags:
@@ -204,6 +205,7 @@ def main(argv=None) -> int:
     print("分层分布: " + "  ".join(f"{k}={v}" for k, v in Counter(r["level"] for r in rows).most_common()))
     nsense = Counter(len(r["senses"]) for r in rows)
     print("义项数分布: " + "  ".join(f"{k}个义项:{v}" for k, v in sorted(nsense.items())))
+    print(f"字母序单调性违规（按书+分段比，应接近 0）: {stats.get('order_violations', 0)}")
     bad = [r for r in rows if r["_flags"]]
     print(f"仍带标记（需人工看）: {len(bad)}")
     for r in bad[:8]:
