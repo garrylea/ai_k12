@@ -334,6 +334,81 @@ CREATE TABLE IF NOT EXISTS chinese_passages (
   KEY idx_chinese_passages_filter (grade_band, semester, sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 英语背单词词库（2026-09-17 建）。**独立子系统**，与 chinese_passages 同形论证：
+-- 作答单位是「词 / 义项」，标准答案是词条自带属性，不接主线、没有「重做—清零」对象
+-- ——因此不挂 questions、不进错题本、不参与主线清零门禁、不用「不再展示」/提示缓存/自评。
+-- **无外键**：本表不指向任何表，也不被任何表指向（进度表不反向约束它），表即完整边界。
+--
+-- 词源（必须用课标官方 PDF 原文，不用文库转载版）：
+--   义务教育英语课程标准（2022 年版）附录词汇表          → 1600 词
+--   普通高中英语课程标准（2017 年版 2020 年修订）附录词汇表 → 3000 词
+-- level 存四层，与课标原文一一对应，页面只暴露「仅初中 / 仅高中 / 全部」三档：
+--   primary 小学二级(505) / junior 初中三级(~1095)
+--   senior_required 高中必修(500) / senior_elective 高中选择性必修(1000)
+-- 两表都收录的词 level 归 junior；「仅高中」= 3000 表中不在 1600 表中的词。
+--
+-- meanings 是不变式约束的核心：必须至少有一个 extended=false 义项；任一 extended=true
+-- 义项必须有非空 context（熟词僻义靠「单词 + 锁定僻义的搭配」出题）。has_extended_sense
+-- 是冗余列，存在的唯一理由是 MySQL 搜不了 JSON 里的布尔值（JSON_SEARCH 只搜字符串、
+-- JSON_CONTAINS 走不了索引），抽题池过滤需要一条能走索引的 WHERE。
+--
+-- error_count 是**全局**累计错次（只增），供全平台「易错词」排序；学生自己的错次另存
+-- student_word_progress.wrong_count（可被学生清除）。内容管线 loader 的
+-- ON DUPLICATE KEY UPDATE 子句**必须显式排除 error_count**，否则一次全量重灌会抹掉
+-- 全平台的易错统计（同 dictation_loader 特意不更新 memorize_required/is_active 的理据）。
+--
+-- 设计见 docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md
+CREATE TABLE IF NOT EXISTS english_words (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  word VARCHAR(64) NOT NULL,              -- 官方原文大小写；业务键（幂等 upsert 键）
+  phonetic VARCHAR(64) DEFAULT NULL,      -- 音标；官方课标附录未必收录，允许 NULL（勿用 LLM 补）
+  level VARCHAR(20) NOT NULL,             -- primary|junior|senior_required|senior_elective
+  meanings JSON NOT NULL,                 -- [{"pos":"n.","gloss":"地址","extended":false},
+                                          --  {"pos":"v.","gloss":"处理；对付（问题）","extended":true,
+                                          --   "context":"address the problem","note":"…"}]
+  has_extended_sense TINYINT(1) NOT NULL DEFAULT 0,  -- 管线维护；须与 meanings 一致（check 第 6 条）
+  root_key VARCHAR(64) DEFAULT NULL,      -- 词根族中心词（= 另一行的 word）；NULL = 无族
+                                          -- 不变式：非 NULL 时必须存在 word = root_key 且 verified = 1 的行
+  root_affixes JSON DEFAULT NULL,         -- [{"type":"suffix","code":"-less",
+                                          --   "gloss":"无…的；没有…的","posHint":"→ 形容词"}]
+  error_count INT NOT NULL DEFAULT 0,     -- 全局累计错次，只增；loader 重灌不得触碰
+  sort_order INT NOT NULL DEFAULT 0,      -- 课标附录原序
+  source_ref VARCHAR(200) DEFAULT NULL,   -- 出处（课标名 + 附录 + 序号），供人工核对
+  verified TINYINT(1) NOT NULL DEFAULT 0, -- 内容是否已校验通过
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_english_words_word (word),
+  KEY idx_english_words_pool (level, is_active, verified, sort_order),
+  KEY idx_english_words_root (root_key),
+  KEY idx_english_words_extended (has_extended_sense)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 学生背词进度（轻量，不做艾宾浩斯排程）。唯一的目的是让「只出没背过的」「我错过的词」
+-- 「今日已背 N/15」三个筛选成立——没有它，「每天背 10-20 个」就是每天在 1600 词里重抽。
+--
+-- word_id 上**故意不设外键**：内容表必须能被内容管线随时全量重灌，入向外键会让
+-- full-reload 的业务数据守卫跟重灌互相卡死。完整性由管线的 check 与后端测试保证。
+-- student_id 则照既有约定挂 students(id)（同 practice_results）。
+--
+-- wrong_count 是学生自己的累计错次，「移除易错标记」清零的是它——不动 learned，
+-- 也不动 english_words.error_count（那是全平台统计，不该被单个学生抹掉）。
+CREATE TABLE IF NOT EXISTS student_word_progress (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id BIGINT NOT NULL,
+  word_id BIGINT NOT NULL,
+  learned TINYINT(1) NOT NULL DEFAULT 0,  -- 答对过即置 1（「只出没背过的」靠它）
+  wrong_count INT NOT NULL DEFAULT 0,     -- 学生自己的累计错次，可被「移除易错标记」清零
+  last_result VARCHAR(20) DEFAULT NULL,   -- correct|off_target|wrong|unanswered|undetermined
+  last_seen_at DATETIME(3) DEFAULT NULL,  -- 「今日已背 N」靠它
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_swp_student_word (student_id, word_id),
+  KEY idx_swp_student_seen (student_id, last_seen_at),
+  KEY idx_swp_student_wrong (student_id, wrong_count),
+  CONSTRAINT fk_swp_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 考试会话（服务器权威计时：deadline_at；状态 in_progress | submitted）
 CREATE TABLE IF NOT EXISTS exam_sessions (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
