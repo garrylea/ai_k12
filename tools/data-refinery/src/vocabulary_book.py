@@ -51,6 +51,8 @@ IN_LIST_HEADING_RE = re.compile(r"^(?:Starter\s+|Welcome\s+)?Unit\s*\d*$|^[A-Z]$
 
 # 行尾页码引用（`p.21` / `P.21`）
 PAGE_REF_TAIL_RE = re.compile(r"\s*[pP][.．]?\s*\d{1,3}\s*$")
+# **行内**页码引用（`… 帽子 p.32have fun 玩得高兴`），见 split_glued
+PAGE_REF_MID_RE = re.compile(r"[pP][.．]?\s?\d{1,3}")
 # 页码引用也会出现在**行首**（实测 `p.42 long-term`），不能只剥行尾
 PAGE_REF_HEAD_RE = re.compile(r"^[pP][.．]?\s*\d{1,3}\s+")
 # 小节标题：`## Unit 2` / `Starter Unit 1` / `## 人民教育出版社`
@@ -58,8 +60,20 @@ MD_HEADING_RE = re.compile(r"^#{1,6}\s")
 UNIT_HEADER_RE = re.compile(r"^(?:Starter\s+)?Unit\s*\d+\s*$", re.IGNORECASE)
 # 音标：`/.../`（内容允许空）
 PHONETIC_RE = re.compile(r"/([^/]{1,60})/")
-# 词性
-_POS = r"(?:modal\s+v|n|v|vt|vi|adj|adv|prep|conj|pron|num|interj|art|aux|det)"
+# 出现在**行首**的音标。续行常以另一个读音的音标开头
+# （`use /juːz/ v. 使用；利用` ⏎ `/juːs/ n. 使用;用途`），音标属于词条头不属于释义。
+PHONETIC_HEAD_RE = re.compile(r"^\s*/[^/]{1,60}/\s*")
+# 续行开头的孤立右括号（`many … 许多` ⏎ `/'grænfɑːðə(r)/ ) n. 爷爷;外公`，
+# 前一条的词形被 OCR 吃掉后只剩一个 `)`）
+LEADING_STRAY_PAREN_RE = re.compile(r"^\s*[)）]\s*")
+# 词性。**必须覆盖课标词表实际出现的全部写法**，漏一个的后果不是「少标一个词性」，
+# 而是那个词性**残留在词形里**，整条被 WORD_RE 判非法丢掉，或者变成 `do aux` 这种垃圾词条：
+#   · `aux v.`（实测 2 处：`do /duː; də/ aux v. & v.…` —— 少了它 `do` 直接变成 `do aux`）
+#   · `pl.`（156 处，`grandchild … n. (pl. grandchildren /…/)`）
+#   · `abbr.`（26 处）· `sing.`（3 处）
+# 长写法排在前面（`modal v` 必须在 `n`/`v` 之前，否则先匹配到 `v` 再要求 `.` 会失配）。
+_POS = (r"(?:modal\s+v|aux\s+v|link\s+v|abbr|pl|sing"
+        r"|n|v|vt|vi|adj|adv|prep|conj|pron|num|interj|art|aux|det)")
 POS_TOKEN_RE = re.compile(rf"{_POS}\s*\.", re.IGNORECASE)
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 # 释义的起始边界：**中文，或全角左括号 `（`**。
@@ -69,9 +83,20 @@ CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 GLOSS_START_RE = re.compile(r"[\u4e00-\u9fff（]")
 # 剥掉词性之后残留在词尾的词性连接符（`both /bəʊθ/ adj. & pron.` → 剥完剩 `both &`）；
 # OCR 还会把 & 认成 d/8
-POS_CONNECTOR_RE = re.compile(r"(?:\s+[&d8]\s*)+$")
-# 词条的合法形态（与后端 english_words 的校验一致）
-WORD_RE = re.compile(r"^[A-Za-z][A-Za-z'\- ]*$")
+# 词性连接符。⚠️ `&` **永远不会出现在英文词内部**，所以直接全删；
+# 第一版只删「前面带空白」的 `&`，于是 `& pron. 自己的` 剥完词性后剩一个孤立的 `&`，
+# 整条被当非法词形丢弃 —— 实测因此丢了 than/out/do/orange/exercise 这些常用词。
+POS_CONNECTOR_RE = re.compile(r"\s*&\s*")
+# MinerU 的双栏还原偶尔会把小节标题/页码并进词里（`Unit 5 p.46 club`、`Unit 7 doll`），
+# 前缀里这些噪音必须剥掉，否则整条被丢（doll 就是这么丢的）
+WORD_NOISE_PREFIX_RE = re.compile(r"^(?:(?:Starter\s+)?Unit\s*\d+|[pP][.．]?\s*\d{1,3})\s+")
+# 词条的合法形态。允许**数字开头**：课本有 `3D`（`3D /ˌθriː ˈdiː/ adj. 三维的`）这类词，
+# 只认字母开头的第一版把它当非法词形丢掉（或者更糟：剥前缀符号时把 `3` 一起剥掉，
+# 剩下一个单词 `d` 混进题库）。
+WORD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9'\- ]*$")
+# 行内「词条头」：ASCII 词（允许一个空格连接的第二段）+ 音标，如 `shop /ʃɒp/`。
+# 见 split_glued —— 行中间出现它就说明这里其实是下一条词条的开头。
+GLUED_HEAD_RE = re.compile(r"[A-Za-z][A-Za-z'’\-]*(?:\s+[A-Za-z][A-Za-z'’\-]*)?\s*/[^/]{1,60}/")
 # IPA 字符集（用于形态检查：出现 A/0/ze 这类「像拉丁字母的误识」即可疑）
 # IPA 字母（含元音/辅音的扩展字符）
 IPA_LETTERS = set("abcdefghijklmnopqrstuvwxyzæɑɒɔəɜɛɪʊʌθðʃʒŋɹɡɐɞɘɵʉɨɾɳʈɖɟɢχʁħʕɦɬɮʔʘǀǁǂǃɓɗʄɠʛʼ")
@@ -142,9 +167,115 @@ def _split_head_gloss(line: str) -> tuple[str, str] | None:
     return line[:idx].strip(), line[idx:].strip()
 
 
+def normalize_head(head: str) -> tuple[str, str, list[str], str]:
+    """把「词条头」（音标 + 词性 + 括号注释 + 页码的那一段）拆成
+    `(词形, 音标, 词性列表, 词尾剥下的大写字母)`。
+
+    **两条路径共用**：正常词条（`bæt n. 球棒`）与「词头与释义折成两行」的词头
+    （`across /ə'krɒs/ adv. & prep.` ⏎ `在（……）对面；横过`）。第一版只在正常路径里
+    做了这套剥离，词头路径只剥音标就去比 WORD_RE，于是
+    `across /ə'krɒs/ adv. & prep.`（剥完还剩 `adv. & prep.`）判非法整条丢掉，
+    **它的释义还挂到了上一个词身上**（实测 building/dark/ability 的释义尾部都多了别的词的释义）。
+
+    ⚠️ 顺序是硬要求，每一步都对应实测踩过的坑：
+      1. **先剥音标** —— 不剥的话 `/` 过不了 WORD_RE（orange/across/understand 都死在这）
+      2. 再剥词性 —— 剥完 `&` 才是独立符号，才能安全全删（`aux v. & v.` 剩的那个 `&`）
+      3. 括号注释、行内页码引用放最后
+    """
+    phonetic_m = PHONETIC_RE.search(head)
+    phonetic = phonetic_m.group(1).strip() if phonetic_m else ""
+    body = PHONETIC_RE.sub(" ", head)
+    pos_tokens = [m.group(0).strip() for m in POS_TOKEN_RE.finditer(body)]
+    word = POS_TOKEN_RE.sub(" ", body).strip()
+    # `a lot of / lots of` 这类「两个写法」取第一个；`would ('d) like to` 去掉括号注释
+    if " / " in word:
+        word = word.split(" / ")[0].strip()
+    word = POS_CONNECTOR_RE.sub(" ", word)
+    # MinerU 的双栏还原偶尔会把小节标题/页码并进词里（`Unit 5 p.46 club`、`Unit 7 doll`）
+    while WORD_NOISE_PREFIX_RE.match(word):
+        word = WORD_NOISE_PREFIX_RE.sub("", word).strip()
+    # 词尾单独一个**大写字母**要并给释义：课本印的是 `T-shirt T恤衫`（字母与中文黏连），
+    # 切点落在 `恤` 之前，会把 `T` 留在词里。只处理大写字母，避免误伤 `as a` 这类。
+    tail_letter = ""
+    tm = re.match(r"^(.*\S)\s+([A-Z])$", word)
+    if tm:
+        word, tail_letter = tm.group(1), tm.group(2)
+    word = PAREN_GROUP_RE.sub(" ", word)   # 成对的括号注释（`would ('d) like to`）
+    # 课本用符号标注「不要求掌握」的词（`△ the Eiffel Tower /…/ 埃菲尔铁塔`），
+    # 符号会跟着词形一起被切进来，不剥掉整条就过不了 WORD_RE 而被丢。
+    # ⚠️ 必须在 PAREN_GROUP_RE 之后做：`(at) first hand` 靠它去掉 `(at)`，
+    # 先剥符号会把 `(` 单独吃掉，剩下 `at) first hand` → 词形变成 `at first hand`。
+    # ⚠️ 数字不算符号：`3D` 的 `3` 不能被剥掉（踩过，剥完只剩 `d`）。
+    word = re.sub(r"^[^A-Za-z0-9]+", "", word)
+    word = STRAY_PAREN_RE.sub(" ", word)   # 剩下的未配对括号
+    word = re.sub(r"\s*[pP][.．]?\s*\d{1,3}\s*", " ", word)
+    return re.sub(r"\s+", " ", word).strip(), phonetic, pos_tokens, tail_letter
+
+
+def split_glued(line: str) -> list[str]:
+    """一行里塞了两条（有时更多）词条时拆开。
+
+    实测三种形态（都是 MinerU 漏断行）：
+      · 靠行内页码引用粘连：`everyday /'evrideɪ/ adj. 每天的；日常的 p.64prepare /prɪˈpeə(r)/`
+      · 靠空格粘连：      `half /hɑːf/ n. 一半；半 pron. 半数 p.60 shop /ʃɒp/ n. 商店`
+      · 完全无分隔粘连：  `bark /bɑːk/ n. 树皮certain /'sɜːtn/ adj. 某些；确定的`
+    统一判据：**行中间出现「ASCII 词 + 音标」就是下一条词条的开头** ——
+    课本每条词条的词形后面必跟音标，而释义里不会凭空出现这种组合。
+    三种例外不算切点：行首（那是本行自己的词形）、括号组内（`(=ad/æd/)广告`、
+    `(pl. media /'miːdiə/)` 是词条自带的注释）、紧跟在 `=` 或 `/` 后面
+    （`record /rɪˈkɔːd/ v. 记录 /'rekɔːd/ n. 记录` 是同一条的两个读音，不是两条）。
+
+    ⚠️ 不拆的后果是**两条都坏**：前一条的释义被后一条的词形污染，后一条整个消失
+    （实测 everyday/prepare、half/shop、bark/certain、use/record… 一口气吃掉几十个常用词）。
+    """
+    depth_at: list[int] = []
+    depth = 0
+    for ch in line:
+        depth_at.append(depth)
+        if ch in "(（":
+            depth += 1
+        elif ch in ")）":
+            depth = max(0, depth - 1)
+
+    cuts: list[int] = []
+    for m in GLUED_HEAD_RE.finditer(line):
+        if m.start() == 0 or depth_at[m.start()] > 0:
+            continue
+        if line[m.start() - 1] in "=/":
+            continue
+        # ⚠️ 还要确认**前面真的是上一条词条的释义**（中文/`）`/页码引用结尾），否则会
+        # 把「音标夹在中间的专名」切成两半：`the Western Regions /'riːdʒəns/ 西域` 会被切在
+        # `Western` 前（前一段只剩 `the`），`Guglielmo /g/ Marconi /m/ 古列尔莫·马科尼`
+        # 会被切成两个名字（实测丢了 the Western Regions / Robert Louis Stevenson /
+        # the Eiffel Tower / Guglielmo Marconi / Bank of Canton 这些词表里的人名地名）。
+        before = line[:m.start()].rstrip()
+        if not (before and (CJK_RE.search(before[-1]) or before[-1] in ")）"
+                             or PAGE_REF_TAIL_RE.search(before))):
+            continue
+        cuts.append(m.start())
+    # **词组没有音标**，上面那条规则抓不到它们（`帽子 p.32have fun 玩得高兴`、
+    # `月份 p.68 Mrs`、`现在;此刻 p.34at the start 开始;起初`）。
+    # 课本里页码引用永远在行尾，所以行中的页码引用后面跟着字母 ⇒ 下一条词条被并进来了。
+    for m in PAGE_REF_MID_RE.finditer(line):
+        rest = line[m.end():].lstrip()
+        if rest and rest[0].isalpha():
+            cuts.append(m.end())
+    if not cuts:
+        return [line]
+
+    parts: list[str] = []
+    start = 0
+    for c in sorted(set(cuts)):
+        parts.append(line[start:c].strip())
+        start = c
+    parts.append(line[start:].strip())
+    return [p for p in parts if p]
+
+
 def parse_entries(md_dir: Path, source: str) -> list[Entry]:
     entries: list[Entry] = []
     skipped: list[str] = []
+    dropped: list[str] = []
     in_wordlist = False
     saw_wordlist_heading = False
     current_section = ""
@@ -175,81 +306,117 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
                 continue
         if not in_wordlist:
             continue
-        head_gloss = _split_head_gloss(line)
 
-        # ---- 续行 1：直接以释义开头（中文或左括号；释义折行） ----
-        if GLOSS_START_RE.match(line):
-            if entries:
-                gl = entries[-1].gloss
-                entries[-1].gloss = gl + (line if line.startswith(("（", "(")) else (" " if gl else "") + line)
-                entries[-1].raw += " ⏎ " + line
-            else:
-                skipped.append(raw)
-            continue
-
-        # ---- 续行 2：以词性开头（词性与释义折到下一行） ----
-        pm = POS_TOKEN_RE.match(line)
-        if pm and entries and not entries[-1].gloss:
-            # 例：`information /ˌɪnfəˈmeɪʃn/` 下一行是 `n. 信息；消息`
-            rest = line[pm.end():].strip()
-            if not entries[-1].pos:
-                entries[-1].pos = line[:pm.end()].strip()
-            entries[-1].gloss += rest
-            entries[-1].raw += " ⏎ " + line
-            continue
-
-        if head_gloss is None:
-            skipped.append(raw)
-            continue
-
-        head, gloss = head_gloss
-
-        # ---- 新词条 ----
-        phonetic_m = PHONETIC_RE.search(head)
-        phonetic = phonetic_m.group(1).strip() if phonetic_m else ""
-        head_wo_ph = PHONETIC_RE.sub(" ", head).strip()
-        # 词性可能在 head 里（`n.` 紧跟在音标后）
-        pos_tokens = [m.group(0).strip() for m in POS_TOKEN_RE.finditer(head_wo_ph)]
-        word = POS_TOKEN_RE.sub(" ", head_wo_ph).strip()
-        # `a lot of / lots of` 这类「两个写法」取第一个；`would ('d) like to` 去掉括号注释
-        if " / " in word:
-            word = word.split(" / ")[0].strip()
-        word = POS_CONNECTOR_RE.sub("", word)
-        # 词尾单独一个**大写字母**要并给释义：课本印的是 `T-shirt T恤衫`（字母与中文黏连），
-        # 切点落在 `恤` 之前，会把 `T` 留在词里。只处理大写字母，避免误伤 `as a` 这类。
-        tm = re.match(r"^(.*\S)\s+([A-Z])$", word)
-        if tm:
-            word = tm.group(1)
-            gloss = tm.group(2) + gloss
-        word = PAREN_GROUP_RE.sub(" ", word)   # 成对的括号注释（`would ('d) like to`）
-        word = STRAY_PAREN_RE.sub(" ", word)   # 剩下的未配对括号
-        word = re.sub(r"\s+", " ", word).strip()
-
-        flags: list[str] = []
-        # 剥完音标/词性后词为空 → 这行其实是**上一条的续行**（例：`(外)孙子;(外)孙女`
-        # 会被切成 head=`(`，因为半角括号不算边界），并回去而不是产出一条空词条。
-        if not word:
-            if entries:
-                entries[-1].gloss += (" " if entries[-1].gloss else "") + line
-                entries[-1].raw += " ⏎ " + line
+        # 一行可能塞着两条词条（`…日常的 p.64prepare /prɪˈpeə(r)/`），先拆再逐条处理
+        for piece in split_glued(line):
+            # 拆出来的前半条，行尾会留下**自己的**页码引用（`…球拍 p.29`）——
+            # 行首那次 PAGE_REF_TAIL_RE 只剥到了整行末尾那个，所以这里要再剥一次。
+            piece = PAGE_REF_TAIL_RE.sub("", piece).strip()
+            if not piece:
                 continue
-            skipped.append(raw)
-            continue
-        if not WORD_RE.match(word):
-            flags.append("bad_word_charset")
-        if not CJK_RE.search(gloss):
-            flags.append("no_cjk_gloss")
-        # 词组（`listen to` / `in the future`）在课本词表里本来就没有音标与词性，
-        # 那不是问题；只对**单个词**缺音标且缺词性时报警。
-        if " " not in word and not phonetic and not pos_tokens:
-            flags.append("no_phonetic_no_pos")
-        if phonetic and set(phonetic) - IPA_LETTERS - IPA_PUNCT:
-            flags.append("suspicious_ipa")
-        entries.append(Entry(word, phonetic, " ".join(pos_tokens), gloss, source, page, raw,
-                             flags, current_section, current_group))
+            head_gloss = _split_head_gloss(piece)
+
+            # ---- 续行 1：直接以释义开头（中文或左括号；释义折行） ----
+            if GLOSS_START_RE.match(piece):
+                if entries:
+                    gl = entries[-1].gloss
+                    entries[-1].gloss = gl + (piece if piece.startswith(("（", "("))
+                                             else (" " if gl else "") + piece)
+                    entries[-1].raw += " ⏎ " + piece
+                else:
+                    skipped.append(raw)
+                continue
+
+            # ---- 续行 2：以词性开头（词性与释义折到下一行） ----
+            # ⚠️ 条件是「**有上一条**」，不是「上一条的释义还空着」。课本一条词条常有多组
+            # 词性各占一行（实测 `speed /spiːd/ n. 速度` ⏎ `v. (sped/sped/, sped; speeded,
+            # speeded)` ⏎ `加速；促进`）。第一版要求上一条释义为空，于是 `v. …` 那行被当成
+            # 新词条的**词头**，还把下一行的中文吸成自己的释义 —— 产出了
+            # `'v. (sped/sped/, sped; speeded, speeded)'` 这种垃圾词条，同时 `speed`
+            # 少了动词义项。反过来「行首是词性 ⇒ 一定是续行」在本词表里成立：正常词条的
+            # 词形永远在行首，所以行首就是词性的只能是折行。
+            pm = POS_TOKEN_RE.match(piece)
+            if pm and entries:
+                e = entries[-1]
+                if not e.pos:
+                    e.pos = piece[:pm.end()].strip()
+                # 整行并进去（连词性一起）：loader 的 split_senses 会按内嵌词性再切成多个义项
+                e.gloss += (" " if e.gloss else "") + piece
+                e.raw += " ⏎ " + piece
+                continue
+
+            if head_gloss is None:
+                # **无中文的行不等于噪声 —— 它多半是「词头与释义被分到两行」的词头**。
+                # MinerU 偶尔把词头与释义断成两行（`across /ə'krɒs/ adv. & prep.` ⏎ 释义、
+                # `orange /'ɒrɪndʒ/` ⏎ `adj. & n. …`）。第一版把无中文的行直接丢掉，于是
+                # 词头丢失、**它的释义还挂到了上一个词身上**（实测 building/dark/ability/
+                # intense 的释义尾部都多出了后面那条词条的释义）。
+                # 这里当作「待补释义的词头」，下一行的中文会被上面的续行规则补进来。
+                word, phonetic, pos_tokens, _ = normalize_head(piece)
+                if WORD_RE.match(word):
+                    entries.append(Entry(
+                        word=word, phonetic=phonetic, pos=" ".join(pos_tokens), gloss="",
+                        source=source, page=page, raw=raw,
+                        section=current_section, group=current_group,
+                    ))
+                else:
+                    # 剥不出词形（`v. (sped/sped/, sped; speeded, speeded)` 这种纯词性行）→
+                    # 丢弃。绝不能收下：它会把下一行的中文吸成自己的释义，变成有释义的垃圾词条。
+                    skipped.append(raw)
+                continue
+
+            head, gloss = head_gloss
+
+            # ---- 新词条 ----
+            word, phonetic, pos_tokens, tail_letter = normalize_head(head)
+            if tail_letter:
+                gloss = tail_letter + gloss
+
+            flags: list[str] = []
+            # 剥完音标/词性后词为空 → 这行其实是**上一条的续行**。两种常见来源：
+            #   · `(外)孙子;(外)孙女` 被切成 head=`(`（半角括号不算释义边界）
+            #   · 续行以**另一个读音的音标**开头（`use /juːz/ v. 使用；利用` ⏎
+            #     `/juːs/ n. 使用;用途`）—— 音标属于词条头，不属于释义
+            # 所以并回去时要先把行首的音标与孤立括号摘掉，否则 UI 上会出现
+            # 「释义：使用;利用 /juːs/ n. 使用;用途」这种带读音的释义（实测 71 条）。
+            if not word:
+                if entries:
+                    rest = LEADING_STRAY_PAREN_RE.sub("", PHONETIC_HEAD_RE.sub("", piece)).strip()
+                    if rest:
+                        entries[-1].gloss += (" " if entries[-1].gloss else "") + rest
+                    entries[-1].raw += " ⏎ " + piece
+                    continue
+                skipped.append(raw)
+                continue
+            if not WORD_RE.match(word):
+                flags.append("bad_word_charset")
+            if not CJK_RE.search(gloss):
+                flags.append("no_cjk_gloss")
+            # 词组（`listen to` / `in the future`）在课本词表里本来就没有音标与词性，
+            # 那不是问题；只对**单个词**缺音标且缺词性时报警。
+            if " " not in word and not phonetic and not pos_tokens:
+                flags.append("no_phonetic_no_pos")
+            if phonetic and set(phonetic) - IPA_LETTERS - IPA_PUNCT:
+                flags.append("suspicious_ipa")
+            entries.append(Entry(word, phonetic, " ".join(pos_tokens), gloss, source, page, raw,
+                                 flags, current_section, current_group))
+
+    # **释义是空的词条一律丢弃**。走到这里还没释义的只有一类：折行的词头后面没有跟到释义
+    # （书后「阅读书目」页的书名、练习册答案页的 `a price`/`b speed`、OCR 掉了释义的真词
+    # 如 ethnic/dominant）。留着它们等于往题库里灌「只有词、没有意思」的词条 ——
+    # 学生抽到就只能干瞪眼，所以宁可少一个词也不留。
+    kept = []
+    for e in entries:
+        if e.gloss.strip():
+            kept.append(e)
+        else:
+            dropped.append(f"{e.word}\t{e.raw}")
+    entries = kept
 
     if skipped:
         (md_dir / "_skipped_lines.txt").write_text("\n".join(skipped), encoding="utf-8")
+    if dropped:
+        (md_dir / "_dropped_no_gloss.txt").write_text("\n".join(dropped), encoding="utf-8")
     # 一段词表标题都没找到 → 说明书的分节标题与预期不符，明确报出来（否则会静默返回空）
     if not saw_wordlist_heading:
         raise RuntimeError(
@@ -273,13 +440,19 @@ def is_alphabetical_group(group: str) -> bool:
     return "a-z" in g or "a—z" in g or "a - z" in g
 
 
-def check_monotonic(entries: list[Entry]) -> int:
+def check_monotonic(entries: list[Entry]) -> list[tuple[str, Entry]]:
     """字母序单调性检查：词表按字母序排，**乱码词几乎必然破坏单调性**。
 
     这是本管线最主要的**确定性**校验（MinerU 的 md 不带逐行置信度）。
     必须**按 (书, 分段) 分组**比：每段的词各自从 a 排到 z，跨段比会全是误报。
 
-    返回违规条数；违规项加 `order_violation` 标记（不改变顺序、不丢弃）。
+    返回 `(紧邻的前一个词, 违规条目)` 列表；违规项加 `order_violation` 标记
+    （不改变顺序、不丢弃）。返回前一个词是为了**人工复核时能一眼看到断点**
+    （只知道「这一条违规」看不出该改谁）。
+
+    ⚠️ **必须返回条目本身而不是个数**：同一个词往往在多本书里出现，去重时只留首次出现的
+    那一条并连它的 flags 一起留 —— 只报个数的话，调用方拿到的是「20 条违规」却一条都找不到
+    （违规的那条很可能在去重时被丢掉了，实测 20 条违规一条都没出现在最终的标记清单里）。
     """
     groups: dict[tuple[str, str, str], list[Entry]] = {}
     for e in entries:
@@ -288,9 +461,10 @@ def check_monotonic(entries: list[Entry]) -> int:
         if not is_alphabetical_group(e.group):
             continue
         groups.setdefault((e.source, e.group, e.section), []).append(e)
-    violations = 0
+    violations: list[tuple[str, Entry]] = []
     for group in groups.values():
         prev = ""
+        prev_word = ""
         for e in group:
             key = SORT_KEY_RE.sub("", e.word.lower())
             if not key:
@@ -301,8 +475,9 @@ def check_monotonic(entries: list[Entry]) -> int:
             # 83 条里绝大多数是这么来的）。与**紧邻的前一个词**比较才只标出真正的断点。
             if key < prev:
                 e.flags.append("order_violation")
-                violations += 1
+                violations.append((prev_word, e))
             prev = key
+            prev_word = e.word
     return violations
 
 
