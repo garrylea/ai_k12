@@ -107,6 +107,19 @@ SELECT ... FROM english_words WHERE root_key = ? AND verified = 1 AND is_active 
 （词表内、已核对），成员 `decision` 的词缀注记写 `-sion（decide → decision，拼写有变化）`。
 
 **族中心必须在词表内**这一点由管线硬校验保证 —— 这样永远不会出现 LLM 编造的词根。
+
+**实现补充（2026-09-16，两条易踩的规则）**：
+1. **必须上溯到真正的族根，不能只连「一级父节点」**。`interaction → action → act` 若只连一级，
+   `action` 会**既是成员又是族中心**，而 `root_key` 只能有一个值 —— 族中心就会从自己的族里消失
+   （族查询是 `WHERE root_key = ?`，前端族树又要求中心词在族人里）。做法：每个词沿父指针走到顶，
+   词缀沿链累积（`interaction` → 根 `act`，词缀 `inter-` + `-ion`）。
+2. **词缀读序**：前缀由外向内、后缀由内向外（`actively` 要显示 `-ive` + `-ly`，不是 `-ly` + `-ive`），
+   上溯收集到的顺序是由内向外的，所以两边都要反转。
+
+**族只在已核对词表内连边**，且**专名（大写开头的词）不参与构词分析** —— 否则会出现
+`bad → Badal`（人名）这种把词根挂到专名上的荒谬边。`-er`/`-or` 后缀与前缀派生两类**必须逐条人工审**
+（`career ≠ care+er`、`display ≠ dis+play`），脚本会给它们打 `_review` 标记，
+审核结果固化在 `vocabulary_roots.py` 的 `EXCLUDE_EDGES` 里（每条带排除理由）。
 代价是放弃「族级」属性（如给整个族写一句词根说明）；需要时二期加一个只放
 `root_key` + `root_gloss` 两列的小表即可。
 
