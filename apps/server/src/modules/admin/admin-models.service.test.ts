@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AdminModelsService } from './admin-models.service';
+import { AdminModelsService, SCENES } from './admin-models.service';
 
 const mk = (o: any = {}) => ({
   llmModelsRepo: {
@@ -65,5 +65,22 @@ describe('AdminModelsService', () => {
   it('更新/停用不存在的模型 -> 1002', async () => {
     await expect(svc(mk()).update('ghost', { name: 'x' })).rejects.toMatchObject({ response: { code: 1002 } });
     await expect(svc(mk()).setEnabled('ghost', false)).rejects.toMatchObject({ response: { code: 1002 } });
+  });
+});
+
+describe('SCENES 白名单漂移守卫', () => {
+  it('YAML routes 里每个场景都必须出现在 SCENES 中', async () => {
+    // 漏一个的后果是「后台存了路由但下拉里选不到」（用却不显）。saveRoutes 不校验 scene，
+    // 所以漏项不报错、只悄悄少一个选项——interpretation_judge 曾漏过一段时间。
+    // Scene 是 TS 类型、运行时枚举不出来，但 YAML 的路由键是运行时真值，足够当哨兵。
+    const { routeConfig } = await import('../../ai-core/config.js');
+    const yamlScenes = Object.keys(routeConfig.routes);
+    const missing = yamlScenes.filter((s) => !(SCENES as readonly string[]).includes(s));
+    expect(missing).toEqual([]);
+  });
+
+  it('背词判题场景已在白名单内（新场景接线别漏这一步）', () => {
+    expect(SCENES as readonly string[]).toContain('english_word_judge');
+    expect(SCENES as readonly string[]).toContain('interpretation_judge');
   });
 });

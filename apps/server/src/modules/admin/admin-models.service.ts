@@ -5,7 +5,12 @@ import type { LlmRoute } from '../../database/repositories/llm-routes.repo.js';
 import { ModelConfigRegistry } from '../../ai-core/infra/model-config-registry.js';
 
 export const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible', 'local'] as const;
-export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation', 'variation', 'structuring', 'title', 'dictation_feedback'] as const;
+// 管理员路由页的场景下拉白名单。**必须覆盖 model-routes.yaml 里所有已存在的场景**——
+// 漏一个的后果是「那条路由在表里看得到，却没法用下拉新建/改场景」（用却不显）。
+// saveRoutes 不校验 scene，所以漏项不会报错，只会悄悄少一个选项；
+// interpretation_judge / analysis / safety 都曾漏过（2026-09-16 一次性补齐）。
+// admin-models.service.test.ts 里有一条漂移守卫用例：YAML routes 的每个键都必须在这里。
+export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation', 'variation', 'structuring', 'title', 'dictation_feedback', 'interpretation_judge', 'english_word_judge', 'analysis', 'safety'] as const;
 
 @Injectable()
 export class AdminModelsService {

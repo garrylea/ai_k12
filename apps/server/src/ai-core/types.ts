@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
@@ -49,7 +49,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
@@ -666,5 +666,41 @@ export interface InterpretationJudgeResponse {
   terms: InterpretationJudgeTermResult[];
   /** 请求未含整句翻译时为 null/缺省 */
   sentence?: { correct: boolean; comment?: string | null } | null;
+  reasoning?: string;
+}
+
+// ========== English Word Judge Types（英语背单词判题，2026-09-16） ==========
+
+/**
+ * 背单词判题模式。
+ * - `common`   题面只有单词，问**常见义**；答到该词任一真实义项就算对（两档）。
+ * - `extended` 题面是单词 + 锁定**僻义**的搭配（如 `address the problem`）；三档，
+ *              多一档 `off_target` = 答成该词的常见义（学生答的没错，只是没答到考点）。
+ *
+ * 中→英方向**不走本能力**——那个方向答案是唯一的英文单词，纯程序比对即可（含拼写变体表）。
+ */
+export type EnglishWordJudgeMode = 'common' | 'extended';
+
+export interface EnglishWordJudgeRequest {
+  word: string;
+  phonetic?: string | null;
+  /** **本题**要考的那一个义项（由调用方选定，不让模型挑） */
+  target: { pos: string; gloss: string };
+  /** 僻义题的语境搭配；`common` 模式为 null */
+  context: string | null;
+  mode: EnglishWordJudgeMode;
+  /** 该词的其他真实义项释义，供模型判断学生是不是答成了别的义项 */
+  otherGlosses: string[];
+  studentAnswer: string;
+}
+
+export interface EnglishWordJudgeResponse {
+  /**
+   * 三档之一。`common` 模式下**不应**出现 `off_target`（没有「考哪个义项」的问题），
+   * 能力层会把模型误输出的 `off_target` 收敛成 `wrong`。
+   */
+  verdict: 'correct' | 'off_target' | 'wrong';
+  /** 判错/判 off_target 时的具体提示；判对可为空 */
+  comment?: string | null;
   reasoning?: string;
 }

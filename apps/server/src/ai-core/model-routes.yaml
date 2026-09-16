@@ -158,6 +158,14 @@ routes:
       primary: local
       fallback: deepseek-flash
 
+  # 英语背单词判题：英→中「意思对不对」的语义判定（中→英方向是纯程序比对，不走模型）。
+  # 与 dictation_feedback / interpretation_judge 同策略（本地优先、云端兜底）；
+  # 两者都失败 → 该题 undetermined，不计对错、不写错题统计（判题失败不该让学生背锅）。
+  english_word_judge:
+    - subject: "*"
+      primary: local
+      fallback: deepseek-flash
+
 default:
   primary: qwen3.8-max
   fallback: deepseek-flash
