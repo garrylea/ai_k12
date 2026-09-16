@@ -19,6 +19,8 @@ import DictationConfigPage from '@/pages/student/training/chinese/DictationConfi
 import DictationRunPage from '@/pages/student/training/chinese/DictationRunPage';
 import InterpretationConfigPage from '@/pages/student/training/chinese/InterpretationConfigPage';
 import InterpretationRunPage from '@/pages/student/training/chinese/InterpretationRunPage';
+import VocabularyConfigPage from '@/pages/student/training/english/VocabularyConfigPage';
+import VocabularyRunPage from '@/pages/student/training/english/VocabularyRunPage';
 import ExamListPage from '@/pages/student/training/ExamListPage';
 import ExamRunPage from '@/pages/student/training/ExamRunPage';
 import ExamResultPage from '@/pages/student/training/ExamResultPage';
@@ -249,11 +251,28 @@ const router = createBrowserRouter([
       </RequireRole>
     ),
   },
+  // 英语背单词配置页（全屏沉浸层；题单经 sessionStorage 交接）
+  {
+    path: '/student/training/english/vocabulary',
+    element: (
+      <RequireRole role="student">
+        <VocabularyConfigPage />
+      </RequireRole>
+    ),
+  },
+  // 英语背单词答题页（全屏沉浸层；提交即翻下一个词、判定异步回填，空题单自动踢回配置页）
+  {
+    path: '/student/training/english/vocabulary/run',
+    element: (
+      <RequireRole role="student">
+        <VocabularyRunPage />
+      </RequireRole>
+    ),
+  },
   // 考试试卷列表页（全屏沉浸层，独立于 StudentLayout，与 errors/targeted 同层）
   {
     path: '/student/training/exam',
-    element: (
-      <RequireRole role="student">
+    element: (      <RequireRole role="student">
         <ExamListPage />
       </RequireRole>
     ),

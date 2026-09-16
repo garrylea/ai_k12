@@ -8,11 +8,11 @@ interface TrainingSubject {
   desc: string;
 }
 
-// id 对应 subjects 表 seed（1=数学, 2=语文, 3=英语）；语文已开放古诗文默写专项
+// id 对应 subjects 表 seed（1=数学, 2=语文, 3=英语）；语文已开放古诗文专项，英语已开放背单词
 const SUBJECTS: TrainingSubject[] = [
   { id: 1, name: '数学', enabled: true, desc: '考试 / 专项练习 / 错题练习' },
-  { id: 2, name: '语文', enabled: true, desc: '古诗文默写' },
-  { id: 3, name: '英语', enabled: false, desc: '敬请期待' },
+  { id: 2, name: '语文', enabled: true, desc: '古诗文默写 / 古诗文解释' },
+  { id: 3, name: '英语', enabled: true, desc: '背单词' },
 ];
 
 const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
@@ -34,9 +34,15 @@ export default function TrainingSubjectPage() {
 
   const handleSelect = (subject: TrainingSubject) => {
     if (!subject.enabled) return;
-    // 数学 → 三卡选择页（专项/考试/错题，PRD §6.3）；语文 → 语文专项页
+    // 数学 → 三卡选择页（专项/考试/错题，PRD §6.3）；语文 → 语文专项页；英语 → 背单词配置页
     if (subject.id === 2) {
       navigate('/student/training/chinese/special');
+      return;
+    }
+    // 英语目前只有背单词一个功能，故不建二选一的 special 页（语文那页是因为有两个专项），
+    // 直接进配置页；以后加了听写/语法再补。
+    if (subject.id === 3) {
+      navigate('/student/training/english/vocabulary');
       return;
     }
     navigate('/student/training/home');
