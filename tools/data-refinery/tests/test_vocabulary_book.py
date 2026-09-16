@@ -185,6 +185,28 @@ class TestParseEntries:
                    "could /kʊd/ modal v. 能")
         assert [e.word for e in es] == ["doll"]
 
+    def test_continuation_with_unclosed_paren(self, tmp_path):
+        # `app /æp/ (= application /…/)` ⏎ `(application 的缩略形式)`：
+        # ⚠️ `_norm` 走 NFKC 会把全角 `（` 变成半角 `(`，所以「以全角左括号开头算续行」
+        # 这条规则**永远不可能命中**；靠 GLOSS_START_RE 漏到了词条路径上，
+        # 于是 `application` 被当成了词形、释义变成 `的缩略形式)`。
+        es = parse(tmp_path, HEADING,
+                   "app /æp/ (= application /ˌæplɪˈkeɪʃn/)",
+                   "n. 应用程序",
+                   "(application 的缩略形式)")
+        assert [e.word for e in es] == ["app"]
+        assert es[0].gloss == "n. 应用程序 (application 的缩略形式)"
+
+    def test_line_with_closed_paren_is_still_an_entry(self, tmp_path):
+        # 反例：`(at) first hand 第一手；亲自` 是完整词条，括号是闭合的
+        es = parse(tmp_path, HEADING, "(at) first hand 第一手；亲自")
+        assert [e.word for e in es] == ["first hand"]
+
+    def test_ipa_variant_annotation_is_not_suspicious(self, tmp_path):
+        # 高中课本的音标带 `; NAmE …` 变体标注，`NAmE` 是英文词但不该报警
+        es = parse(tmp_path, HEADING, "clerk /klɑːk; NAmE klɜːrk/ n. 职员")
+        assert es[0].flags == []
+
     def test_missing_wordlist_heading_raises(self, tmp_path):
         (tmp_path / "page_101.md").write_text("doll /dɒl/ n. 玩偶", encoding="utf-8")
         with pytest.raises(RuntimeError, match="没找到单词表小节标题"):

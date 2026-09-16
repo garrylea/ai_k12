@@ -105,6 +105,11 @@ IPA_LETTERS = set("abcdefghijklmnopqrstuvwxyzæɑɒɔəɜɛɪʊʌθðʃʒŋɹɡ�
 # 括号（可选音）、省略点。⚠️ 主重音 `ˈ`(U+02C8) 与次重音 `ˌ`(U+02CC) 是**两个不同字符**，
 # 第一版只写了后一个，导致 mɪˈsteɪk / ˌjuːˈkeɪ 这类全被误判 suspicious_ipa。
 IPA_PUNCT = set(" ,;:.'’\"()-ˈˌːˑ̟̩͡")
+# 高中课本的音标带**变体标注**（`/ˈɪʃuː; BrE also 'ɪsjuː/`、`/klɑːk; NAmE klɜːrk/`），
+# 里面的 `NAmE`/`BrE` 是英文词，会被字符集检查判成「像拉丁字母的误识」——
+# 实测 16 条 suspicious_ipa **全是**这么来的假阳性（真的可疑音标一个都没有）。
+# 检查前先把标注摘掉，别让 16 条假警报把人工复核的清单淹掉。
+IPA_VARIANT_RE = re.compile(r"\b(?:NAmE|BrE)\b")
 
 PAREN_GROUP_RE = re.compile(r"[（(][^）)]*[）)]")
 # 未配对的残留括号：MinerU 折行时可能丢掉开括号，只剩 `intelligence )`
@@ -367,6 +372,20 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
 
             head, gloss = head_gloss
 
+            # ---- 续行 3：以**未闭合的左括号**开头（`(application 的缩略形式)`）----
+            # 这种行是上一条词条的括号注释折到了下一行，不是新词条。
+            # ⚠️ 不能简单按「以 `(` 开头就是续行」判：`(at) first hand 第一手；亲自`
+            # 就是一条完整词条。区别在**括号有没有闭合** —— 注释折行必然是断在括号中间的。
+            # 另外 `AI /…/ (= artificial /…/`（词在前、括号未闭合）也不能算续行，
+            # 它后面跟着的是 `intelligence …) 人工智能`，那是同一个括号注释的另一半。
+            if head.lstrip().startswith("(") and head.count("(") > head.count(")"):
+                if entries:
+                    entries[-1].gloss += (" " if entries[-1].gloss else "") + piece
+                    entries[-1].raw += " ⏎ " + piece
+                    continue
+                skipped.append(raw)
+                continue
+
             # ---- 新词条 ----
             word, phonetic, pos_tokens, tail_letter = normalize_head(head)
             if tail_letter:
@@ -396,7 +415,8 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             # 那不是问题；只对**单个词**缺音标且缺词性时报警。
             if " " not in word and not phonetic and not pos_tokens:
                 flags.append("no_phonetic_no_pos")
-            if phonetic and set(phonetic) - IPA_LETTERS - IPA_PUNCT:
+            # 音标形态检查：摘掉 `; NAmE` / `; BrE` 变体标注后再看字符集（见 IPA_VARIANT_RE）
+            if phonetic and set(IPA_VARIANT_RE.sub("", phonetic)) - IPA_LETTERS - IPA_PUNCT:
                 flags.append("suspicious_ipa")
             entries.append(Entry(word, phonetic, " ".join(pos_tokens), gloss, source, page, raw,
                                  flags, current_section, current_group))
