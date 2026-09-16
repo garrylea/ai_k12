@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { TrainingController } from './training.controller.js';
 import { TrainingService } from './training.service.js';
+import { VocabularyController } from './vocabulary.controller.js';
+import { VocabularyService } from './vocabulary.service.js';
 import { PracticeModule } from '../practice/practice.module.js';
-import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository } from '../../database/repositories/index.js';
+import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository, EnglishWordsRepository, StudentWordProgressRepository } from '../../database/repositories/index.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
+import { EnglishWordJudgeCapability } from '../../ai-core/capabilities/english-word-judge.capability.js';
 
 /**
  * 错题训练模块（Task 1 骨架 + Task 2 判题 + Task 3 提示缓存 + Task 8 专项练习 + Task 7 解析拉取）。
@@ -15,10 +18,14 @@ import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interp
  * 勿在 providers 重复 provide——会产生第二个空队列实例）。
  * repos 通过 @Inject('DATABASE_POOL') 注入全局连接池（DatabaseModule 是 @Global）。
  * HintCapability 构造函数的 modelClient 参数可选，可直接实例化（镜像 practice.module）。
+ *
+ * 英语背单词（2026-09-16）走**独立的 controller/service**（`/api/training/vocabulary`），
+ * 不塞进 TrainingController/TrainingService——那两个已被数学 + 语文撑到数百行，
+ * 模块归属不变，只是文件划分更清楚。`EnglishWordJudgeCapability` 同理可直接实例化。
  */
 @Module({
   imports: [PracticeModule],
-  controllers: [TrainingController],
-  providers: [TrainingService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability],
+  controllers: [TrainingController, VocabularyController],
+  providers: [TrainingService, VocabularyService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability],
 })
 export class TrainingModule {}
