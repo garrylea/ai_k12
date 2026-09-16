@@ -49,6 +49,11 @@ NOISE_HEADING_RE = re.compile(r"出版社|教科书|课程标准|书名|定价")
 # 否则一遇到 `## Unit 1` 就把状态关掉，一个词条都抽不出来（踩过）。
 IN_LIST_HEADING_RE = re.compile(r"^(?:Starter\s+|Welcome\s+)?Unit\s*\d*$|^[A-Z]$")
 
+# **正文说明行**（不是词条、也不是释义）。课本词表里有一条编辑说明反复出现：
+#   `注：依据《义务教育英语课程标准（2022年版）》，本词表中的重点词汇用粗体显示。`
+# 它以中文开头，会被「以中文开头 = 上一条的释义折行」这条规则吃进去，挂到**上一行的词**上
+# （实测 Clark / Jones / Philippines 的释义尾部都拖着这条说明）。
+NOTE_LINE_RE = re.compile(r"^[（(]?\s*注\s*[:：]")
 # 行尾页码引用（`p.21` / `P.21`）
 PAGE_REF_TAIL_RE = re.compile(r"\s*[pP][.．]?\s*\d{1,3}\s*$")
 # **行内**页码引用（`… 帽子 p.32have fun 玩得高兴`），见 split_glued
@@ -310,6 +315,9 @@ def parse_entries(md_dir: Path, source: str) -> list[Entry]:
             if in_wordlist:
                 continue
         if not in_wordlist:
+            continue
+        if NOTE_LINE_RE.match(line):            # 编辑说明，不是词条也不是释义
+            skipped.append(raw)
             continue
 
         # 一行可能塞着两条词条（`…日常的 p.64prepare /prɪˈpeə(r)/`），先拆再逐条处理

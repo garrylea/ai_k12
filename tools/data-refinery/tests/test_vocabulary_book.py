@@ -207,6 +207,14 @@ class TestParseEntries:
         es = parse(tmp_path, HEADING, "clerk /klɑːk; NAmE klɜːrk/ n. 职员")
         assert es[0].flags == []
 
+    def test_note_line_is_not_a_gloss(self, tmp_path):
+        # 词表里反复出现的编辑说明以中文开头，会被「中文开头 = 释义折行」吃进去，
+        # 挂到上一行的词上（Clark/Jones/Philippines 的释义尾部都拖过这条）
+        note = "注：依据《义务教育英语课程标准（2022年版）》，本词表中的重点词汇用粗体显示。"
+        es = parse(tmp_path, HEADING, "Clark /klɑːk/ 克拉克 p.72", note)
+        assert [e.word for e in es] == ["Clark"]
+        assert es[0].gloss == "克拉克"
+
     def test_missing_wordlist_heading_raises(self, tmp_path):
         (tmp_path / "page_101.md").write_text("doll /dɒl/ n. 玩偶", encoding="utf-8")
         with pytest.raises(RuntimeError, match="没找到单词表小节标题"):
