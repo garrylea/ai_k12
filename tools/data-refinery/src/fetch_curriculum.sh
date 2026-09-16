@@ -22,7 +22,7 @@ UA="Mozilla/5.0"
 echo "[1/2] 义务教育英语课程标准（2022年版）"
 # 来源：教育部《关于印发义务教育课程方案和课程标准（2022年版）的通知》
 #       https://www.moe.gov.cn/srcsite/A26/s8001/202204/t20220420_619921.html
-# 注意：这一份是**扫描件**（201 页无文字层），必须 OCR。用 src/mac_ocr.swift。
+# 注意：这一份是**扫描件**（201 页无文字层），必须 OCR。走 convert_cli / mineru-open-api。
 curl -sSL -A "$UA" -o "义务教育英语课程标准2022.pdf" \
   "http://www.moe.gov.cn/srcsite/A26/s8001/202204/W020220420582349487953.pdf"
 echo "      -> $(du -h 义务教育英语课程标准2022.pdf | cut -f1)"
@@ -61,4 +61,4 @@ PY
 
 echo
 echo "完成。两份原件都在 $OUT_DIR"
-echo "下一步：用 src/mac_ocr.swift 抽出附录词汇表（义务教育版是扫描件，必须 OCR）。"
+echo "下一步：走 convert_cli (MinerU) 抽附录词汇表（义务教育版是扫描件，必须 --ocr）。"
