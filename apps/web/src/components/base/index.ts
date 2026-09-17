@@ -11,3 +11,5 @@ export { Banner } from './Banner';
 export { Progress } from './Progress';
 export { Skeleton } from './Skeleton';
 export { ToastContainer, toast } from './Toast';
+export { LevelIcon } from './LevelIcon';
+export type { LevelCode } from './LevelIcon';
