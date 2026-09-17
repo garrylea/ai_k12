@@ -4,6 +4,7 @@ import {
   buildDictationPrompt,
   toSentences,
   toKeyTerms,
+  toSentenceMeanings,
 } from './chinese-passages.repo';
 
 const mockPool = (rows: any[] = []) => ({
@@ -219,7 +220,79 @@ describe('ChinesePassagesRepository — 解释专项抽题池', () => {
   });
 });
 
-describe('toSentences / toKeyTerms（JSON 列 → 强类型，坏形状降级不抛错）', () => {
+// ==================== 含义专项（2026-09-17） ====================
+
+describe('ChinesePassagesRepository — 含义专项抽题池', () => {
+  it('findVerifiedForMeaning：四道闸门 = verified + is_active + 内容就绪 + 有含义数据，**不含** memorize_required', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findVerifiedForMeaning();
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain('FROM chinese_passages dp');
+    expect(sql).not.toContain('questions');
+    expect(sql).toContain('dp.verified = 1');
+    expect(sql).toContain('dp.is_active = 1');
+    expect(sql).toContain('JSON_LENGTH(dp.sentences) > 0');
+    // 含义专项比解释专项多的一道闸门：没灌过含义数据的篇目点进去没题目
+    expect(sql).toContain('dp.sentence_meanings IS NOT NULL');
+    // 与默写门禁的关键差别：「要背诵」不是「要理解深层含义」的必要条件
+    expect(sql).not.toContain('memorize_required = 1');
+    expect(sql).toContain('ORDER BY dp.sort_order');
+  });
+
+  it('findRandomVerifiedForMeaning：semester=null 时按篇名去重，子查询同样守含义门禁', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findRandomVerifiedForMeaning(null, 3);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).not.toContain('dp.semester = ?');
+    expect(sql).toContain('MIN(dp2.id)');
+    expect(sql).toContain('dp2.work_title = dp.work_title');
+    expect(sql).toContain('dp2.verified = 1');
+    expect(sql).toContain('dp2.is_active = 1');
+    expect(sql).toContain('JSON_LENGTH(dp2.sentences) > 0');
+    // 去重子查询漏掉这道闸门就会挑到「同名的另一册没有含义数据」那一行，整篇被判无题
+    expect(sql).toContain('dp2.sentence_meanings IS NOT NULL');
+    expect(sql).not.toContain('memorize_required = 1');
+    expect(params).toEqual([3]);
+  });
+
+  it('findRandomVerifiedForMeaning：指定册次时**不**加去重子查询', async () => {
+    // 同解释专项：子查询跨册取 MIN(id)，外层若已按册过滤会把该册的行整体排除掉
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findRandomVerifiedForMeaning('上册', 3);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).not.toContain('MIN(dp2.id)');
+    expect(sql).toContain('dp.semester = ?');
+    expect(params).toEqual(['上册', 3]);
+  });
+
+  it('findVerifiedByIdsForMeaning：空数组直接返回空，不查库', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    expect(await repo.findVerifiedByIdsForMeaning([])).toEqual([]);
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('两条门禁确实不同：默写含 memorize_required，含义不含', async () => {
+    // 反向对照，防日后有人「顺手统一」三条抽题池
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findVerifiedForMeaning();
+    await repo.findVerifiedForDictation();
+    const [meaningSql] = pool.execute.mock.calls[0];
+    const [dictationSql] = pool.execute.mock.calls[1];
+    expect(dictationSql).toContain('dp.memorize_required = 1');
+    expect(meaningSql).not.toContain('memorize_required = 1');
+    // 含义比默写多两道「内容就绪」闸门；默写反过来两道都不要
+    expect(meaningSql).toContain('JSON_LENGTH(dp.sentences) > 0');
+    expect(meaningSql).toContain('dp.sentence_meanings IS NOT NULL');
+    expect(dictationSql).not.toContain('JSON_LENGTH');
+  });
+});
+
+describe('toSentences / toKeyTerms / toSentenceMeanings（JSON 列 → 强类型，坏形状降级不抛错）', () => {
   it('toSentences：正常数组原样映射，缺 translation 补空串', () => {
     expect(toSentences([{ text: '庆历四年春。', translation: '庆历四年的春天。' }, { text: '越明年。' }]))
       .toEqual([
@@ -258,5 +331,31 @@ describe('toSentences / toKeyTerms（JSON 列 → 强类型，坏形状降级不
 
   it('toKeyTerms：gloss 缺省补空串（不因缺解释就丢掉整个词）', () => {
     expect(toKeyTerms([{ term: '则', sentenceIndex: 2 }])).toEqual([{ term: '则', gloss: '', sentenceIndex: 2 }]);
+  });
+
+  it('toSentenceMeanings：下标与 sentences 严格对齐——空洞留在原下标，**绝不压缩**', () => {
+    // 最重要的不变式：entry i 描述 sentences[i]。压缩掉 null 会让后面每一句整体错位，
+    // 学生答的是「第 3 句的含义」，判题却拿第 1 句的标准答案去比。
+    const out = toSentenceMeanings([
+      { meaning: '写凄凉。', emotion: '辛酸' },
+      null,
+      { meaning: 42, emotion: '辛酸' }, // 形状坏 → 降级为 null，但位置必须留着
+    ]);
+    expect(out).toHaveLength(3);
+    expect(out[0]).toEqual({ meaning: '写凄凉。', emotion: '辛酸' });
+    expect(out[1]).toBeNull();
+    expect(out[2]).toBeNull();
+    expect(out).toEqual([{ meaning: '写凄凉。', emotion: '辛酸' }, null, null]);
+
+    // 缺 emotion / 全空白：同样降级为 null，占位不丢
+    expect(toSentenceMeanings([{ meaning: '写凄凉。' }, { meaning: '　', emotion: '' }, {}])).toEqual([null, null, null]);
+  });
+
+  it('toSentenceMeanings：null / 非数组 / 垃圾输入 → 空数组（不抛错）', () => {
+    expect(toSentenceMeanings(null)).toEqual([]);
+    expect(toSentenceMeanings(undefined)).toEqual([]);
+    expect(toSentenceMeanings('not-an-array')).toEqual([]);
+    expect(toSentenceMeanings({ 0: { meaning: 'x', emotion: 'y' } })).toEqual([]);
+    expect(toSentenceMeanings(42)).toEqual([]);
   });
 });
