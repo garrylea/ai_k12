@@ -83,12 +83,16 @@ export class PointRulesRepository {
    * 这里能只看匹配行数、不受「值没变」影响：mysql2 默认带 `FOUND_ROWS` 标志，
    * 因此 UPDATE 的 affectedRows 是**匹配行数**而非改动行数（`changedRows` 才是后者）。
    * 家长提交与库里完全相同的值，行存在时仍返回 1。
+   *
+   * @param conn 可选：家长批量保存必须传自己的事务连接，让「逐条 UPDATE + 失败回滚」原子生效
+   *   （不传则每条 UPDATE 各自独立提交，回滚撤不回来）。
    */
   async updateOne(
     studentId: number,
     taskCode: string,
     tierKey: string,
     patch: UpdatePointRuleInput,
+    conn?: PoolConnection,
   ): Promise<number> {
     const sets: string[] = [];
     const params: Array<number | string | null> = [];
@@ -106,7 +110,7 @@ export class PointRulesRepository {
     }
     if (sets.length === 0) return 0;
     params.push(studentId, taskCode, tierKey);
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await (conn ?? this.pool).execute<ResultSetHeader>(
       `UPDATE point_rules SET ${sets.join(', ')}
        WHERE student_id = ? AND task_code = ? AND tier_key = ?`,
       params,

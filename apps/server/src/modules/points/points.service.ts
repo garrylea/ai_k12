@@ -128,12 +128,14 @@ export class PointsService {
     };
   }
 
-  /** 服务器本地时区的当日 00:00。刻意不用 SQL 的 CURDATE()（DB 会话时区可能与应用不一致）。 */
-  private startOfToday(now = this.now()): Date {
+  /** 服务器本地时区的当日 00:00。刻意不用 SQL 的 CURDATE()（DB 会话时区可能与应用不一致）。
+   *  **公开**——`PointRulesService` 的每日计数复用这两个边界，不要在别处重写一份日期格式化。 */
+  startOfToday(now = this.now()): Date {
     return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   }
 
-  private startOfTomorrow(now = this.now()): Date {
+  /** 服务器本地时区的次日 00:00（与 `startOfToday` 配对成半开区间 `>= start && < end`）。 */
+  startOfTomorrow(now = this.now()): Date {
     const d = this.startOfToday(now);
     d.setDate(d.getDate() + 1);
     return d;

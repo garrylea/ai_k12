@@ -120,6 +120,17 @@ describe('PointRulesRepository.updateOne', () => {
     expect(await repo.updateOne(10, 'math_targeted', '3', {})).toBe(0);
     expect(pool.execute).not.toHaveBeenCalled();
   });
+
+  it('传入 conn 时走 conn.execute，供家长批量保存在同一事务里跑', async () => {
+    const pool = mockPool();
+    const repo = new PointRulesRepository(pool as any);
+    const conn = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+
+    expect(await repo.updateOne(10, 'math_targeted', '3', { points: 9 }, conn as any)).toBe(1);
+
+    expect(conn.execute).toHaveBeenCalledTimes(1);
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
 });
 
 describe('PointRulesRepository.findOne', () => {
