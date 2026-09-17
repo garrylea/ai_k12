@@ -15,12 +15,13 @@ const REQ = {
 /** 模型客户端桩：第 n 次调用可给不同返回（用来测 primary 失败 → fallback 顶上）。 */
 function makeClient(impl: (call: number) => Promise<{ content: string; reasoningContent?: string }>) {
   let n = 0;
-  return { chat: vi.fn().mockImplementation(() => impl(++n)) } as never;
+  const chat = vi.fn().mockImplementation(() => impl(++n));
+  return { client: { chat } as never, chat };
 }
 
 describe('ChineseMeaningJudgeCapability', () => {
   it('模型成功时返回三项判定', async () => {
-    const client = makeClient(async () => ({
+    const { client } = makeClient(async () => ({
       content: JSON.stringify({
         terms: [{ term: '沉舟', correct: true, comment: null }],
         meaning: { correct: true, comment: null },
@@ -38,7 +39,7 @@ describe('ChineseMeaningJudgeCapability', () => {
     const ok = JSON.stringify({
       terms: [], meaning: { correct: false, comment: '偏了' }, emotion: { correct: true, comment: null },
     });
-    const client = makeClient(async (call) => {
+    const { client, chat } = makeClient(async (call) => {
       if (call === 1) throw new Error('local down');
       return { content: ok };
     });
@@ -46,10 +47,38 @@ describe('ChineseMeaningJudgeCapability', () => {
     const res = await cap.generate(REQ);
     expect(res.meaning?.correct).toBe(false);
     expect(res.meaning?.comment).toBe('偏了');
+    // 证明真的走了 fallback：先 primary 失败，再用 fallback 模型调一次
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(chat.mock.calls[1][0].model.modelId).toBe('deepseek-flash');
+    // fallback 是云端模型，不能带本地端点专用的 extraBody（会被 400）
+    expect('extraBody' in chat.mock.calls[1][0]).toBe(false);
+  });
+
+  it('关 thinking 只对本地端点下发：local 带 extraBody 无 thinking，非 local 两者都不', async () => {
+    const ok = JSON.stringify({ terms: [], meaning: { correct: true }, emotion: { correct: true } });
+    // 第一次失败是为了逼出 fallback——路由里只有 fallback 是非 local 模型
+    const { client, chat } = makeClient(async (call) => {
+      if (call === 1) throw new Error('local down');
+      return { content: ok };
+    });
+    const cap = new ChineseMeaningJudgeCapability({ modelClient: client });
+    await cap.generate(REQ);
+
+    // primary=local：只认 chat_template_kwargs（`thinking: false` 对 llama.cpp 是空操作）
+    const localCall = chat.mock.calls[0][0];
+    expect(localCall.model.provider).toBe('local');
+    expect(localCall.extraBody).toEqual({ chat_template_kwargs: { enable_thinking: false } });
+    expect('thinking' in localCall).toBe(false);
+
+    // 非 local（云端 fallback）：extraBody 会 400；thinking 有意留着（判题质量更好）
+    const cloudCall = chat.mock.calls[1][0];
+    expect(cloudCall.model.provider).not.toBe('local');
+    expect('extraBody' in cloudCall).toBe(false);
+    expect('thinking' in cloudCall).toBe(false);
   });
 
   it('解析失败时抛错（不静默返回空）', async () => {
-    const client = makeClient(async () => ({ content: '不是 JSON' }));
+    const { client } = makeClient(async () => ({ content: '不是 JSON' }));
     const cap = new ChineseMeaningJudgeCapability({ modelClient: client });
     await expect(cap.generate(REQ)).rejects.toThrow(/parse failed/);
   });

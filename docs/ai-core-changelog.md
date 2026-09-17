@@ -8,6 +8,15 @@
 
 ---
 
+## 2026-09-17 新增（ai-core 场景 `chinese_meaning_judge`：语文古诗文「含义/情感」判题）
+
+- `ChineseMeaningJudgeCapability` + `prompts/meaning/judge.md`（JSON 输出 + Zod：字词 / 整体含义 / 情感三项，模型漏项不视为解析失败，由调用方标 `undetermined`）。路由 primary=`local`（Qwen3.8-27B）、fallback=`deepseek-flash`，`retry.yaml` 加 `chinese_meaning_judge`。
+- 与 `interpretation_judge` 同策略：**只对 `provider==='local'` 下发 `extraBody: LLAMA_CPP_NO_THINKING_BODY`**，且**不传 `thinking:false`**（对 llama.cpp 是空操作，对云端 fallback 会拉低判题质量）。已有测试钉住这条（本地带 extraBody 无 thinking / 非本地两者都不带）。
+- 新场景按约定改了 8 处：`types.ts` 两个 union、`model-routes.yaml`、`retry.yaml`、`prompts/meaning/judge.md`、`prompt-builder.ts` 的 `resolveTemplatePath` 分支、capability 类、`seed-chinese-meaning-judge-route.ts`、**`admin-models.service.ts` 的 `SCENES` 白名单**。
+- 已 seed 的库需跑 `npx tsx src/scripts/seed-chinese-meaning-judge-route.ts` 幂等补路由（YAML 只服务新装 / DB 空时）。
+
+---
+
 ## 2026-09-16 归档（CLAUDE.md 瘦身：32.3KB → 18.6KB，迁出的稳定细节存此处）
 
 **动作**：按用户要求把根 `CLAUDE.md` 收敛成「基本原则 + 文档索引 + 最新需特别注意的问题」三段式。
