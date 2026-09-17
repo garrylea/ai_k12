@@ -444,7 +444,11 @@ export const LEVELS = [
 | PUT | `/api/parent/students/:id/reward-catalog` | 批量保存（含增删改，无 `id` 视为新增） |
 | POST | `/api/parent/students/:id/points/redeem` | 201。body `{type:'cash', points}` 或 `{type:'reward', catalogId}` |
 | GET | `/api/parent/students/:id/redemptions` | 兑换记录 |
-| PATCH | `/api/parent/redemptions/:id` | `{status:'fulfilled'\|'pending'}`（只改状态，不动积分） |
+| PATCH | `/api/parent/redemptions/:id` | `{status:'fulfilled'\|'pending'}`（只改状态，不动积分）。**路径里没有 `studentId`**：先按 `id` 查出该兑换单的 `student_id` 再做归属校验；不存在 ⇒ 404 `1002` |
+| GET | `/api/parent/students/:id/points/settings` | `{ pointsPerYuan, rewardRedemptionEnabled }`（读 `controls`） |
+| PUT | `/api/parent/students/:id/points/settings` | 至少给一个字段，否则 400；`pointsPerYuan` 1..9999 |
+
+> 家长端共 **11** 个端点（不是 9 个）。`points/settings` 与 rules 批量保存**分开**——汇率和分值是两个关注点。
 
 **错误码**：`3001` 余额不足 / `3002` 未达段位门槛 / `3003` 奖励已下架 / `3004` 兑换已关闭（`reward_redemption_enabled = 0`）。
 

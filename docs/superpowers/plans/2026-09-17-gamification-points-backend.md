@@ -844,7 +844,8 @@ async completeSession(@Param('id', ParseIntPipe) id: number, @CurrentUser() user
 - **不用 LLM 猜体裁**（spec §4.1：不猜、不默认）。工具只负责读写。
 
 **文档要点**：
-- API 文档新增 §4.19（学生端积分 4 个端点）+ §4.20（家长端积分 9 个端点）+ §4.21（训练会话 complete）+ §6.23 数据流；openapi.yaml 同步（**记 `'201'` 给 POST**）。
+- API 文档新增 §4.19（学生端积分 **4** 个端点）+ §4.20（家长端积分 **11** 个端点——不是 9 个，含 `points/settings` 的 GET/PUT）+ §4.21（训练会话 complete）+ §6.23 数据流；openapi.yaml 同步（**记 `'201'` 给 POST**）。
+  - ⚠️ 错误码要全：`3001` 余额不足 / `3002` 未达段位 / `3003` 奖励已下架 / `3004` 兑换已关闭 / **`3005` 档位不存在**（spec 原文只列了前四个，漏了 3005）。
 - PRD §7.13 写清：8 个任务的分值口径、段位表、每日上限语义、兑换规则、**兑换不可撤销**这个已知限制。
 - `changelog` 记：本次做了什么、每日上限为何不用 `CURDATE()`、为什么 `error_fix` 排除 exam source、为什么 `cn_meaning` 用最后一个 answerable 句。
 
