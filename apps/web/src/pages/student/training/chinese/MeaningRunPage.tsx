@@ -52,17 +52,22 @@ export default function MeaningRunPage() {
   const currentSentence = passage?.sentences.find((s) => s.index === currentIndex) ?? null;
   const finished = answerableIdx.length > 0 && cursor >= answerableIdx.length;
 
-  const runJudge = async (sentenceIndex: number, answer: MeaningAnswerPayload, replace: boolean) => {
+  const runJudge = async (sentenceIndex: number, answer: MeaningAnswerPayload) => {
     const passageId = passage!.passageId;
     const token = (tokens.current[sentenceIndex] ?? 0) + 1;
     tokens.current[sentenceIndex] = token;
     const key = `${sentenceIndex}-${token}`;
     const text = passage!.sentences.find((s) => s.index === sentenceIndex)?.text ?? '';
 
-    // 新项 unshift 到头部 → 最新的一次排在最前（设计 spec §7.3「倒序」）
+    // 新项 unshift 到头部 → 最新的一次排在最前（设计 spec §7.3「倒序」）。
+    // 该句已经在栈里（重新判题）则**原地替换** —— 挪到头部会把句子顺序打乱。
     setStack((prev) => {
-      const base = replace ? prev.filter((it) => it.sentenceIndex !== sentenceIndex) : prev;
-      return [{ kind: 'pending', key, sentenceIndex, text, answer }, ...base];
+      const at = prev.findIndex((it) => it.sentenceIndex === sentenceIndex);
+      const fresh: StackItem = { kind: 'pending', key, sentenceIndex, text, answer };
+      if (at < 0) return [fresh, ...prev];
+      const next = [...prev];
+      next[at] = fresh;
+      return next;
     });
 
     try {
@@ -81,14 +86,14 @@ export default function MeaningRunPage() {
 
   const handleSubmit = (answer: MeaningAnswerPayload) => {
     if (currentIndex < 0) return;
-    void runJudge(currentIndex, answer, false);
+    void runJudge(currentIndex, answer);
     setCursor((c) => c + 1);          // 送判但**不等它回来**，立刻推进
   };
 
   const handleRetry = (sentenceIndex: number) => {
     const item = stack.find((it) => it.sentenceIndex === sentenceIndex);
     if (!item) return;
-    void runJudge(sentenceIndex, item.answer, true);
+    void runJudge(sentenceIndex, item.answer);
   };
 
   const resetForNextPassage = () => {
@@ -108,8 +113,9 @@ export default function MeaningRunPage() {
     navigate('/student/training/chinese/special', { replace: true });
   };
 
-  const judgedIndexes = useMemo(
-    () => new Set(stack.filter((it) => it.kind === 'judged').map((it) => it.sentenceIndex)),
+  /** 已作答的句子（含还在判定的 pending 与 failed —— 答过了，只是还没判出来）→ 原文条置灰 */
+  const answeredIndexes = useMemo(
+    () => new Set(stack.map((it) => it.sentenceIndex)),
     [stack],
   );
 
@@ -168,7 +174,7 @@ export default function MeaningRunPage() {
           <PassageOverviewBar
             sentences={passage.sentences}
             currentIndex={currentIndex}
-            judgedIndexes={judgedIndexes}
+            judgedIndexes={answeredIndexes}
           />
         </div>
 

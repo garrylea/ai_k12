@@ -5,6 +5,7 @@ interface Props {
   /** 全部句子（含 answerable:false 的——诗要完整显示） */
   sentences: MeaningSentenceItem[];
   currentIndex: number;
+  /** 已作答的句子下标（含提交后仍在判定中的）——用于置灰 */
   judgedIndexes: Set<number>;
 }
 
