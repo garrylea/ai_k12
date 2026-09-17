@@ -14,7 +14,8 @@ const mk = (overrides: any = {}) => ({
   mainErrorRepo: {
     create: vi.fn().mockResolvedValue(42),
     findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
-    clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(undefined),
+    // 清零返回值即 affectedRows，发布分判决的依据（0 = 没清到未清行）
+    clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(0),
   },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
@@ -108,7 +109,7 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
   const mainError = overrides.mainError ?? {
     findUnclearedByStudentQuestionId: vi.fn(async () => null),
     create: vi.fn(async () => 101),
-    clearUnclearedByStudentQuestionId: vi.fn(async () => {}),
+    clearUnclearedByStudentQuestionId: vi.fn(async () => 0),
   };
   const selfAssess = overrides.selfAssess ?? { create: vi.fn(async () => 1) };
   const pointsService = overrides.points ?? { award: vi.fn(async () => ({ pointsAwarded: 3 })), todayKey: vi.fn(() => '2026-09-17') };
@@ -266,6 +267,21 @@ describe('judgeQuestion error_fix 发分（错题订正）', () => {
     expect(out.awardReason).toBe('daily_limit');
   });
 
+  it('award 返回 reason=duplicate（同日重判的幂等命中）-> pointsAwarded 归 0，不报假分', async () => {
+    // Finding C1：PointsService.award 幂等命中时回的是**首次**分值（3）而不是 0，
+    // 直接透传会让前端弹一个账本/余额都没动过的「+3 分」。只有干净成功才认这个值。
+    const points = {
+      award: vi.fn(async () => ({ pointsAwarded: 3, reason: 'duplicate' })),
+      todayKey: vi.fn(() => '2026-09-17'),
+    };
+    const { svc } = svcWith(1, points);
+    const out = await svc.judgeQuestion(input('error_practice'));
+    expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(0);
+    expect(out.awardReason).toBeUndefined();
+    expect(points.award).toHaveBeenCalledTimes(1);
+  });
+
   it('cleared > 0 + source = exam（交卷补判）-> 不发分（考试分只由 math_paper 给）', async () => {
     const { svc, points } = svcWith(1);
     const out = await svc.judgeQuestion(input('exam'));
@@ -298,26 +314,78 @@ describe('judgeQuestion error_fix 发分（错题订正）', () => {
   });
 });
 
-describe('judgeForPractice 不发分（card 中心入口）', () => {
+describe('judgeForPractice error_fix 发分（card 中心 / 主线清零入口）', () => {
   const input = { studentId: 7, subjectId: 1, cardId: 3, lessonId: 5, questionN: '0-1', questionText: '题面', studentAnswer: 'A' };
   const correctQ = { id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' };
-
-  it('答对（清零命中）仍回 pointsAwarded=0、无 awardReason，award 不被调用', async () => {
-    const { svc, pointsService } = makeService({
-      questions: {} as any,
+  const mkPoints = () => ({
+    award: vi.fn(async () => ({ pointsAwarded: 3 })),
+    todayKey: vi.fn(() => '2026-09-17'),
+  });
+  /** clearedNb = clearUnclearedByStudentQuestion 的 affectedRows。 */
+  const svcWith = (clearedNb: number, points = mkPoints(), q: any = correctQ) => {
+    const { svc } = makeService({
       mainError: {
         findUnclearedByStudentQuestion: vi.fn(async () => null),
         findUnclearedByStudentQuestionId: vi.fn(async () => null),
         create: vi.fn(async () => 101),
-        clearUnclearedByStudentQuestion: vi.fn(async () => 1),
-        clearUnclearedByStudentQuestionId: vi.fn(async () => 1),
+        clearUnclearedByStudentQuestion: vi.fn(async () => clearedNb),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => clearedNb),
       },
+      points,
     });
+    // q=null 时走路由 2 AI；测试里固定判对以便到达发分分支
+    (svc as any).judgment = { judge: vi.fn(async () => ({ isCorrect: true, errorType: null })) };
+    return { svc, points, q };
+  };
+
+  it('affectedRows > 0 + questionId 非空 -> 发一次，幂等键 err:<sid>:<qid>:<date>，响应带 pointsAwarded', async () => {
+    const { svc, points } = svcWith(1);
+    const out = await svc.judgeForPractice(input, correctQ as any);
+    expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(3);
+    expect(out.awardReason).toBeUndefined();
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award).toHaveBeenCalledWith({
+      studentId: 7,
+      taskCode: 'error_fix',
+      dedupeKey: 'err:7:10:2026-09-17',
+      refType: 'question',
+      refId: 10,
+    });
+    expect(points.todayKey).toHaveBeenCalled();
+  });
+
+  it('affectedRows === 0（本无未清错题）-> 不发分，awardReason=not_cleared', async () => {
+    const { svc, points } = svcWith(0);
     const out = await svc.judgeForPractice(input, correctQ as any);
     expect(out.isCorrect).toBe(true);
     expect(out.pointsAwarded).toBe(0);
+    expect(out.awardReason).toBe('not_cleared');
+    expect(points.award).not.toHaveBeenCalled();
+  });
+
+  it('questionId === null（仅存题面的孤儿题）-> 即使 affectedRows > 0 也不发分', async () => {
+    // 仅存题面的错题没有稳定幂等身份：题面可被无关编辑改掉，题面派生 key 会发第二次分。
+    const { svc, points } = svcWith(1);
+    const out = await svc.judgeForPractice(input, null);
+    expect(out.questionId).toBeNull();
+    expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(0);
     expect(out.awardReason).toBeUndefined();
-    expect(pointsService.award).not.toHaveBeenCalled();
+    expect(points.award).not.toHaveBeenCalled();
+  });
+
+  it('award 抛错 -> 判题结果照常返回（points 失败绝不阻断判题），pointsAwarded=0', async () => {
+    const points = {
+      award: vi.fn(async () => { throw new Error('points down'); }),
+      todayKey: vi.fn(() => '2026-09-17'),
+    };
+    const { svc } = svcWith(1, points);
+    const out = await svc.judgeForPractice(input, correctQ as any);
+    expect(out).toMatchObject({ questionId: 10, isCorrect: true, method: 'exact' });
+    expect(out.pointsAwarded).toBe(0);
+    expect(out.awardReason).toBeUndefined();
+    expect(points.award).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -349,5 +417,34 @@ describe('recordSelfAssessment', () => {
     await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'correct', source: 'exam', sourceRefId: 55 });
     expect(mainError.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(7, 10);
     expect(mainError.create).not.toHaveBeenCalled();
+  });
+
+  it('correct + 真正清掉未清错题（非 exam）-> 走同一 error_fix 判决发分', async () => {
+    const { svc, pointsService } = makeService({
+      mainError: {
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        create: vi.fn(async () => 101),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => 1),
+      },
+    });
+    await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'correct', source: 'error_practice' });
+    expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
+      taskCode: 'error_fix',
+      dedupeKey: 'err:7:10:2026-09-17',
+      refType: 'question',
+      refId: 10,
+    }));
+  });
+
+  it('correct + source=exam -> 清零但不发分（考试分只由 math_paper 一次性给）', async () => {
+    const { svc, pointsService } = makeService({
+      mainError: {
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        create: vi.fn(async () => 101),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => 1),
+      },
+    });
+    await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'correct', source: 'exam', sourceRefId: 55 });
+    expect(pointsService.award).not.toHaveBeenCalled();
   });
 });

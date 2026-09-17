@@ -128,17 +128,22 @@ export class MainErrorBooksRepository {
   }
 
   /**
-   * 答对清零：把该学生此题所有「未清」错题记录一次性 is_cleared=1（兼容历史重复记录）。
-   * 匹配条件镜像 findUnclearedByStudentQuestion（question_id 或 题面+cardId），不限 source。
-   * best-effort：调用方（PracticeService.judge 答对路径）负责 try/catch。
+   * 答对清零（card+题面变体）：把该学生此题所有「未清」错题记录一次性 is_cleared=1
+   * （兼容历史重复记录）。匹配条件镜像 findUnclearedByStudentQuestion
+   * （question_id 或 题面+cardId），不限 source。
+   *
+   * **返回 `affectedRows`**——与题中心变体 `clearUnclearedByStudentQuestionId` 同义：
+   * 积分体系据此判定「确实清掉了一条未清零的错题」，`> 0` 才发 `error_fix` 分
+   * （spec §6.5）。返回值从 `void` 改为 `number` 对既有 `await` 调用方兼容。
+   * best-effort：调用方（PracticeService / JudgeCoreService 答对路径）负责 try/catch。
    */
   async clearUnclearedByStudentQuestion(
     studentId: number,
     questionId: number | null,
     cardId: number,
     questionText: string,
-  ): Promise<void> {
-    await this.pool.execute(
+  ): Promise<number> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE main_error_books
        SET is_cleared = 1, cleared_at = NOW(3)
        WHERE student_id = ? AND is_cleared = 0 AND (
@@ -147,6 +152,7 @@ export class MainErrorBooksRepository {
        )`,
       [studentId, questionId, questionId, cardId, questionText],
     );
+    return result.affectedRows;
   }
 
   async updateLevel(id: number, level: number): Promise<void> {

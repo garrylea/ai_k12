@@ -10,7 +10,7 @@ const mk = (overrides: any = {}) => ({
     findOrCreate: vi.fn(),
     deleteById: vi.fn().mockResolvedValue(undefined),
   },
-  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(undefined), findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(undefined), updateDialogueId: vi.fn().mockResolvedValue(undefined), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]) },
+  mainErrorRepo: { create: vi.fn().mockResolvedValue(42), findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(0), findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null), clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(0), updateDialogueId: vi.fn().mockResolvedValue(undefined), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]) },
   structuring: { structure: vi.fn() },
   judgment: { judge: vi.fn() },
   explanationCache: { ensureExplanation: vi.fn() },
@@ -40,6 +40,11 @@ const mk = (overrides: any = {}) => ({
   contentService: {
     getLessonCards: vi.fn().mockResolvedValue({ cards: [] }),
   },
+  // Task 10 error_fix：JudgeCoreService 第 7 参（card 路径清零后发分同一实现）
+  pointsService: {
+    award: vi.fn().mockResolvedValue({ pointsAwarded: 3 }),
+    todayKey: vi.fn(() => '2026-09-17'),
+  },
   ...overrides,
 });
 
@@ -49,7 +54,7 @@ const mk = (overrides: any = {}) => ({
  *  judgeCore 第 6 参 selfAssessRepo 为判题体系重构（2026-09-09）新增（recordSelfAssessment 用）；
   PracticeService 第 12 参 selfAssessRepo、第 13 参 explanationCache 为 POST /self-assess 新增。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, { award: vi.fn(), todayKey: vi.fn(() => '2026-09-17') } as any), deps.selfAssessRepo as any, deps.explanationCache as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any), deps.selfAssessRepo as any, deps.explanationCache as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -298,6 +303,35 @@ describe('PracticeService.judge', () => {
     }));
     expect(deps.mainErrorRepo.clearUnclearedByStudentQuestion).toHaveBeenCalledWith(1, 10, 5, '题');
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('judge 答对且确实清掉未清错题 -> 发 error_fix，HTTP 响应（judge 返回值）带 pointsAwarded', async () => {
+    // 主线清零阶段走的正是这条 card 路径（CleanupPhase -> judgePractice），必须发分。
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' }),
+        findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+      mainErrorRepo: {
+        create: vi.fn().mockResolvedValue(42),
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null),
+        findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
+        clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(1),
+        clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
+        updateDialogueId: vi.fn(), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionN: '0-1', questionText: '题', studentAnswer: 'A' });
+    expect(r.pointsAwarded).toBe(3);
+    expect(r.awardReason).toBeUndefined();
+    expect(deps.pointsService.award).toHaveBeenCalledWith({
+      studentId: 1,
+      taskCode: 'error_fix',
+      dedupeKey: 'err:1:10:2026-09-17',
+      refType: 'question',
+      refId: 10,
+    });
   });
 
   it('judge 答错 -> upsert practice_results(is_correct=false) + find-or-create 错题本', async () => {
@@ -795,6 +829,40 @@ describe('PracticeService.selfAssess', () => {
     expect(deps.mainErrorRepo.clearUnclearedByStudentQuestion).toHaveBeenCalledWith(1, null, 5, '未入库主观题');
     expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
     expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
+    // 孤儿题无稳定幂等身份 -> 即便清零命中也不发分（与判题 card 路径同规则）
+    expect(deps.pointsService.award).not.toHaveBeenCalled();
+  });
+
+  it('correct + 确实清掉未清错题（questionId 非空）-> 按 error_fix 发分', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findByContentHash: vi.fn(),
+        findById: vi.fn().mockResolvedValue({ id: 99, type: 'short_answer', answer: '答案' }),
+        findOrCreate: vi.fn(),
+        deleteById: vi.fn(),
+      },
+      mainErrorRepo: {
+        create: vi.fn().mockResolvedValue(42),
+        findUnclearedByStudentQuestion: vi.fn().mockResolvedValue(null),
+        findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
+        clearUnclearedByStudentQuestion: vi.fn().mockResolvedValue(0),
+        clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
+        updateDialogueId: vi.fn(), findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await svc.selfAssess({
+      studentId: 1, subjectId: 2, cardId: 5, lessonId: 9,
+      questionN: '0-1', questionText: '主观题', questionId: 99,
+      studentAnswer: '学生答', assessment: 'correct',
+    });
+    expect(deps.mainErrorRepo.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(1, 99);
+    expect(deps.pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
+      taskCode: 'error_fix',
+      dedupeKey: 'err:1:99:2026-09-17',
+      refType: 'question',
+      refId: 99,
+    }));
   });
 
   it('incorrect + 已有未清错题 -> find-or-create 复用，不重复 create', async () => {

@@ -160,9 +160,11 @@ export class PracticeService {
 
   /**
    * 课堂练习主观题自评（self_assess 模式）：补写 practice_results（判题时因 is_correct
-   * NOT NULL 推迟到此处，method='self_assess'）+ 自评留痕 + 错题本写入/清零。
+   * NOT NULL 推迟到此处，method='self_assess'）+ 自评留痕 + 错题本写入/清零（自评对且
+   * 确实清掉未清错题时按 error_fix 发分）。
    * questionId 可为 null（孤儿题：题库未命中、仅存题面）——留痕跳过、错题本走
-   * card+题面变体匹配（镜像 judgeForPractice 既有模式）。
+   * card+题面变体匹配（镜像 judgeForPractice 既有模式）；此时清零照做但不发分
+   * （无稳定幂等身份，见 JudgeCoreService.awardErrorFixOnClear）。
    */
   async selfAssess(input: {
     studentId: number; subjectId: number; cardId: number; lessonId: number;
@@ -222,11 +224,12 @@ export class PracticeService {
       }
     } else {
       try {
-        if (input.questionId != null) {
-          await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
-        } else {
-          await this.mainErrorRepo.clearUnclearedByStudentQuestion(input.studentId, null, input.cardId, input.questionText);
-        }
+        // 清零 + 按需发 error_fix（同一判决在 JudgeCoreService.awardErrorFixOnClear）。
+        // questionId 为 null 的孤儿题：清零仍做，但 helper 刻意不发分（无稳定幂等身份）。
+        const cleared = input.questionId != null
+          ? await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId)
+          : await this.mainErrorRepo.clearUnclearedByStudentQuestion(input.studentId, null, input.cardId, input.questionText);
+        await this.judgeCore.awardErrorFixOnClear(input.studentId, input.questionId, cleared);
       } catch (err) {
         this.logger.error(`clearUncleared (self-assess) failed (student=${input.studentId}, card=${input.cardId}, qn=${input.questionN}): ${err}`);
       }

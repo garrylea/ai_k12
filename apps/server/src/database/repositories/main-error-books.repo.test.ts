@@ -166,10 +166,12 @@ describe('MainErrorBooksRepository', () => {
     expect(params).toEqual([300, 77]);
   });
 
-  it('clearUnclearedByStudentQuestion 批量清零该题未清记录（questionId 非空）', async () => {
+  it('clearUnclearedByStudentQuestion 批量清零该题未清记录（questionId 非空）并返回 affectedRows', async () => {
     const pool = mockPool();
     const repo = new MainErrorBooksRepository(pool as any);
-    await repo.clearUnclearedByStudentQuestion(1, 2, 5, '题面');
+    const affected = await repo.clearUnclearedByStudentQuestion(1, 2, 5, '题面');
+    // 返回 affectedRows 供 error_fix 发分判定（与题中心变体同义，spec §6.5）
+    expect(affected).toBe(1);
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('UPDATE main_error_books');
     expect(sql).toContain('is_cleared = 1');
@@ -201,11 +203,18 @@ describe('MainErrorBooksRepository', () => {
     expect(await repo.clearUnclearedByStudentQuestionId(1, 2)).toBe(0);
   });
 
-  it('clearUnclearedByStudentQuestion questionId=null 走题面匹配分支', async () => {
+  it('clearUnclearedByStudentQuestion questionId=null 走题面匹配分支，同样返回 affectedRows', async () => {
     const pool = mockPool();
     const repo = new MainErrorBooksRepository(pool as any);
-    await repo.clearUnclearedByStudentQuestion(1, null, 5, '未入库题面');
+    const affected = await repo.clearUnclearedByStudentQuestion(1, null, 5, '未入库题面');
+    expect(affected).toBe(1);
     const [, params] = pool.execute.mock.calls[0];
     expect(params).toEqual([1, null, null, 5, '未入库题面']);
+  });
+
+  it('clearUnclearedByStudentQuestion 无未清行时返回 0（首次就答对）', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
+    const repo = new MainErrorBooksRepository(pool as any);
+    expect(await repo.clearUnclearedByStudentQuestion(1, 2, 5, '题面')).toBe(0);
   });
 });
