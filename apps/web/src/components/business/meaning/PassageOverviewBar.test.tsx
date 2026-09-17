@@ -13,7 +13,7 @@ const SENTENCES = [
 
 describe('PassageOverviewBar', () => {
   it('answerable:false 的句子也渲染（含义依赖上下文，全诗都要看得见）', () => {
-    render(<PassageOverviewBar sentences={SENTENCES} currentIndex={0} judgedIndexes={new Set()} />);
+    render(<PassageOverviewBar sentences={SENTENCES} currentIndex={0} answeredIndexes={new Set()} />);
     expect(screen.getByText('金樽清酒斗十千')).toBeTruthy();
     expect(screen.getByText('停杯投箸不能食')).toBeTruthy();
     expect(screen.getByText('拔剑四顾心茫然')).toBeTruthy();
@@ -21,7 +21,7 @@ describe('PassageOverviewBar', () => {
 
   it('当前句加粗、已答句置灰', () => {
     const { container } = render(
-      <PassageOverviewBar sentences={SENTENCES} currentIndex={0} judgedIndexes={new Set([2])} />,
+      <PassageOverviewBar sentences={SENTENCES} currentIndex={0} answeredIndexes={new Set([2])} />,
     );
     const items = Array.from(container.querySelectorAll('li'));
     expect(items[0].className).toContain('font-bold');

@@ -82,4 +82,24 @@ describe('ChineseMeaningJudgeCapability', () => {
     const cap = new ChineseMeaningJudgeCapability({ modelClient: client });
     await expect(cap.generate(REQ)).rejects.toThrow(/parse failed/);
   });
+
+  it('三类待判项全空 → 渲染「无需判定」反向分支，不得同时要求判定', async () => {
+    const ok = JSON.stringify({ terms: [], meaning: null, emotion: null });
+    const { client, chat } = makeClient(async () => ({ content: ok }));
+    const cap = new ChineseMeaningJudgeCapability({ modelClient: client });
+    await cap.generate({ ...REQ, terms: [], studentMeaning: null, studentEmotion: null });
+
+    const messages = chat.mock.calls[0][0].messages as Array<{ content: string }>;
+    const prompt = messages.map((m) => m.content).join('\n');
+
+    // {{^x}} 反向分支必须命中——否则模型一边被告知「本句没有需要判定的字词」，
+    // 一边仍被要求输出判定，判题质量静默下降且没有任何失败信号。
+    expect(prompt).toContain('（本句没有需要判定的字词）');
+    expect(prompt).toContain('（本句的深层含义无需判定）');
+    expect(prompt).toContain('（本句的作者情感无需判定）');
+    // 对应的正向分支不得出现
+    expect(prompt).not.toContain('**需要判定的字词**');
+    expect(prompt).not.toContain('**学生的「深层含义」作答**');
+    expect(prompt).not.toContain('**学生的「作者情感」作答**');
+  });
 });

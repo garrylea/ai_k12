@@ -30,6 +30,12 @@ const DashIcon = () => (
   </svg>
 );
 
+/**
+ * 标准答案兜底：`toKeyTerms` 把缺失的 `gloss` 降级成 `''`，直接渲染会剩下
+ * 「应为：」这种悬空标签。题库本来就可能没有标准释义，明说比留白好。
+ */
+const standardOf = (standard: string) => (standard.trim() !== '' ? standard : '（题库无标准释义）');
+
 /** 单块（含义 / 情感）的结果行：勾=正确 / 叉=错误（附你的 vs 标准）/ 横杠=未判定。 */
 function PartLine({ label, part, mine }: { label: string; part: MeaningPartResult; mine: string }) {
   if (part.correct === true) {
@@ -51,7 +57,7 @@ function PartLine({ label, part, mine }: { label: string; part: MeaningPartResul
     <div className="mt-1">
       <p className="flex items-start gap-1.5 text-sm text-[var(--error)]">
         <span className="mt-0.5"><CrossIcon /></span>
-        <span>{label}：{part.method === 'unanswered' ? '未作答，应为：' : '错误，应为：'}{part.standard}</span>
+        <span>{label}：{part.method === 'unanswered' ? '未作答，应为：' : '错误，应为：'}{standardOf(part.standard)}</span>
       </p>
       {mine.trim() !== '' && (
         <p className="mt-1 pl-[22px] text-sm text-[var(--text-secondary)]">你的：{mine}</p>
@@ -84,7 +90,7 @@ function TermLines({ items }: { items: MeaningTermResultItem[] }) {
             <div>
               <p className="flex items-start gap-1.5 text-sm text-[var(--error)]">
                 <span className="mt-0.5"><CrossIcon /></span>
-                <span>〔{t.term}〕{t.method === 'unanswered' ? '未作答，应为：' : '应为：'}{t.standard}</span>
+                <span>〔{t.term}〕{t.method === 'unanswered' ? '未作答，应为：' : '应为：'}{standardOf(t.standard)}</span>
               </p>
               {t.comment && (
                 <p className="mt-1 pl-[22px] text-sm text-[var(--text-secondary)]">{t.comment}</p>

@@ -125,6 +125,7 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 - 表 `chinese_passages`。迁移 `tools/db/migrations/2026-09-15_chinese_passages.sql`（**改它之前记住**：删 `questions` 行前必须先摘掉 `dictation_passages` 的 CASCADE 外键——首跑曾因级联静默清空篇目、从备份恢复，事故记录见 `plans/2026-09-15-chinese-passages-standalone.md` Task 9）。
 - 内容走 data-refinery **旁路**（`dictation_cli` / `interpretation_cli`），**不接**四阶段主线，不产出 `cards`、不写 `questions`。解释专项连 `convert_cli` 都不用：字词由**用户手工整理**后交 `interpretation_cli --input`。
 - **解释专项的三条口径（勿「统一」掉）**：① 判题是**逐句**的——`judge` 入参带 `sentenceIndex`，答完一句立即出对错；② 抽题池 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`，与默写的 `verified=1 AND memorize_required=1 AND is_active=1` **有意不同**（不设「必背」，加「内容就绪」）；③ `key_terms` 每项带 `sentenceIndex` 指向 `sentences` 下标——答题页「三行对译」第 2 行靠它渲染。
+- **含义专项的两条口径（勿「统一」掉）**：① `method` 枚举**不含 `exact`**——含义/情感是理解性作答，一律过 LLM、无归一化全等短路；② 抽题池在解释专项基础上**再加「内容就绪」第四道闸门 `sentence_meanings IS NOT NULL`**。
 - 契约见 `docs/api/openapi.yaml`；设计见 `docs/superpowers/plans/2026-09-16-chinese-interpretation-special.md`。
 
 ### 英语背单词

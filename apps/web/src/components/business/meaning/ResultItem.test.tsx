@@ -42,4 +42,20 @@ describe('ResultItem', () => {
     render(<ResultItem item={{ ...BASE, kind: 'failed' }} isNewest onRetry={vi.fn()} />);
     expect(screen.getByText(/判定失败/)).toBeTruthy();
   });
+
+  it('标准答案为空 → 兜底文案，不留悬空「应为：」', () => {
+    const item: StackItem = {
+      ...BASE,
+      kind: 'judged',
+      result: {
+        passageId: 12, sentenceIndex: 1, allCorrect: false,
+        // toKeyTerms 把缺失的 gloss 降级成 ''，这里模拟题库没有标准释义
+        terms: [{ term: '舟', correct: false, method: 'ai', standard: '', comment: null }],
+        meaning: { correct: true, method: 'ai', standard: '含哲理', comment: null },
+        emotion: { correct: true, method: 'ai', standard: '豁达乐观', comment: null },
+      },
+    };
+    render(<ResultItem item={item} isNewest onRetry={vi.fn()} />);
+    expect(screen.getByText('〔舟〕应为：（题库无标准释义）')).toBeTruthy();
+  });
 });

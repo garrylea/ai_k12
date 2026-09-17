@@ -174,7 +174,7 @@ export default function MeaningRunPage() {
           <PassageOverviewBar
             sentences={passage.sentences}
             currentIndex={currentIndex}
-            judgedIndexes={answeredIndexes}
+            answeredIndexes={answeredIndexes}
           />
         </div>
 

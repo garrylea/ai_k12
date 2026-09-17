@@ -6,7 +6,7 @@ interface Props {
   sentences: MeaningSentenceItem[];
   currentIndex: number;
   /** 已作答的句子下标（含提交后仍在判定中的）——用于置灰 */
-  judgedIndexes: Set<number>;
+  answeredIndexes: Set<number>;
 }
 
 /**
@@ -14,7 +14,7 @@ interface Props {
  * 要看前面「心茫然」才知道是转振作），所以未答的句子也要看得见。
  * 当前句高亮、已答的置灰；可折叠。
  */
-export default function PassageOverviewBar({ sentences, currentIndex, judgedIndexes }: Props) {
+export default function PassageOverviewBar({ sentences, currentIndex, answeredIndexes }: Props) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -32,14 +32,14 @@ export default function PassageOverviewBar({ sentences, currentIndex, judgedInde
         <ol className="mt-3 flex flex-col gap-1.5">
           {sentences.map((s) => {
             const isCurrent = s.index === currentIndex;
-            const judged = judgedIndexes.has(s.index);
+            const answered = answeredIndexes.has(s.index);
             const color = isCurrent
               ? 'var(--text-primary)'
-              : judged ? 'var(--text-tertiary, var(--text-secondary))' : 'var(--text-secondary)';
+              : answered ? 'var(--text-tertiary, var(--text-secondary))' : 'var(--text-secondary)';
             return (
               <li
                 key={s.index}
-                className={`text-sm leading-relaxed ${isCurrent ? 'font-bold' : ''} ${judged ? 'opacity-50' : ''}`}
+                className={`text-sm leading-relaxed ${isCurrent ? 'font-bold' : ''} ${answered ? 'opacity-50' : ''}`}
                 style={{ color }}
               >
                 {s.text}

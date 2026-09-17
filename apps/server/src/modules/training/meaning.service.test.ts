@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { BadRequestException } from '@nestjs/common';
 import { MeaningService } from './meaning.service.js';
 
 const PASSAGE = {
@@ -83,6 +84,30 @@ describe('MeaningService.startMeaning', () => {
     expect(res.passages[0]?.sentences[1]?.answerable).toBe(false);
     expect(res.passages[0]?.sentences[1]?.text).toBe('沉舟侧畔千帆过，病树前头万木春。');
   });
+
+  it('sentence_meanings 与 sentences 长度不一致 → 整篇不下发（宁可少判，不能串句）', async () => {
+    // sentences 2 句、sentence_meanings 只有 1 项：错位对齐时 meanings[i] 描述的是另一句
+    const mismatched = { ...PASSAGE, sentence_meanings: [{ meaning: '写凄凉。', emotion: '辛酸' }] };
+    const { service } = makeService({ random: [mismatched] });
+    const res = await service.startMeaning({ semester: null, passageIds: null, count: 1 });
+    expect(res.passages).toEqual([]);
+    // 对不上就一句都不判，标准含义更不能泄露出去
+    expect(JSON.stringify(res)).not.toContain('写凄凉');
+  });
+
+  it('指定篇目走 byIds 路径并按 count 截断，不碰随机抽题', async () => {
+    const byIds = [
+      { ...PASSAGE, id: 1, work_title: '篇一' },
+      { ...PASSAGE, id: 2, work_title: '篇二' },
+      { ...PASSAGE, id: 3, work_title: '篇三' },
+    ];
+    const { service, repo } = makeService({ byIds });
+    const res = await service.startMeaning({ semester: null, passageIds: [1, 2, 3], count: 2 });
+    expect(repo.findVerifiedByIdsForMeaning).toHaveBeenCalledWith([1, 2, 3]);
+    expect(repo.findRandomVerifiedForMeaning).not.toHaveBeenCalled();
+    expect(res.passages).toHaveLength(2);
+    expect(res.passages.map((p) => p.passageId)).toEqual([1, 2]);
+  });
 });
 
 describe('MeaningService.judgeMeaning', () => {
@@ -94,6 +119,16 @@ describe('MeaningService.judgeMeaning', () => {
       meaning: '旧事物会被新事物取代', emotion: '乐观',
     });
     expect(judge.generate).toHaveBeenCalledTimes(1);
+    expect(judge.generate).toHaveBeenCalledWith({
+      workTitle: '酬乐天扬州初逢席上见赠',
+      sentence: '沉舟侧畔千帆过，病树前头万木春。',
+      standardTranslation: '沉船旁边千帆竞发。',
+      standardMeaning: '比喻新事物必将取代旧事物。',
+      standardEmotion: '豁达乐观、积极进取',
+      studentMeaning: '旧事物会被新事物取代',
+      studentEmotion: '乐观',
+      terms: [{ term: '沉（chén）舟', gloss: '沉没的船', answer: '沉了的船' }],
+    });
     expect(res.terms[0]).toMatchObject({ correct: true, method: 'ai', standard: '沉没的船' });
     expect(res.meaning).toMatchObject({ correct: false, method: 'ai', standard: '比喻新事物必将取代旧事物。' });
     expect(res.emotion).toMatchObject({ correct: true, method: 'ai' });
@@ -176,5 +211,16 @@ describe('MeaningService.judgeMeaning', () => {
     }).service;
     await expect(s3.judgeMeaning({ passageId: 12, sentenceIndex: 1, terms: [], meaning: 'a', emotion: 'b' }))
       .rejects.toThrow(/无标准含义/);
+  });
+
+  it('sentence_meanings 与 sentences 长度不一致 → 判题 400，不得按错位答案判分', async () => {
+    // 2 句 vs 1 含义：取下标 0 时若不做长度守卫，会拿「另一句」的标准答案去判
+    const mismatched = { ...PASSAGE, sentence_meanings: [{ meaning: '写凄凉。', emotion: '辛酸' }] };
+    const { service, judge } = makeService({ passage: mismatched });
+    await expect(service.judgeMeaning({ passageId: 12, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.judgeMeaning({ passageId: 12, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
+      .rejects.toThrow(/无标准含义/);
+    expect(judge.generate).not.toHaveBeenCalled();
   });
 });
