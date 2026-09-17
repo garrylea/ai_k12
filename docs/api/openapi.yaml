@@ -5051,6 +5051,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/PointLedgerPage'
+        '400':
+          description: page / pageSize 非法（code=1001）
 
   /parent/students/{studentId}/reward-catalog:
     get:
@@ -5165,7 +5167,9 @@ paths:
     get:
       tags: [ParentPoints]
       summary: 兑换记录分页
-      description: page 从 1 起，pageSize 由服务端取默认 20（查询类宽容回落，不抛错）。
+      description: >-
+        page 从 1 起；越界/非正整数 400（code=1001，不静默钳制）。响应里的 pageSize
+        恒为服务端默认 20——该端点**不接收** pageSize，它只是响应字段。
       operationId: listRedemptions
       security: [{ bearerAuth: [] }]
       parameters:
@@ -5192,6 +5196,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/RedemptionList'
+        '400':
+          description: page 非法（code=1001）
 
   /parent/redemptions/{id}:
     patch:

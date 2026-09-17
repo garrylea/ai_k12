@@ -103,6 +103,10 @@ def parse_args(argv=None):
     # 体裁标定只碰数据库，不需要教材定位参数；抽取/入库缺一不可（旧行为保留）。
     if any(actions) and (not args.book or not args.term):
         parser.error("--extract / --load / --all 必须同时给 --book 与 --term")
+    # 体裁标定专属参数不得脱离 --set-genre 单独出现：`--extract --genre poem` 能通过上面的
+    # 动作互斥检查，然后 --genre 被静默丢弃（操作者以为已标定、实际没写库）。宁可报错。
+    if not args.set_genre and (args.id is not None or args.genre is not None or args.input is not None):
+        parser.error("--id / --genre / --input 仅能与 --set-genre 同时使用")
     return args
 
 

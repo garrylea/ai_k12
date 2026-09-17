@@ -130,6 +130,20 @@ class TestGenreArgs:
         with pytest.raises(SystemExit):
             cli.parse_args(["--all", "--book", "b", "--term", "上册", "--export-genre"])
 
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["--extract", "--book", "b", "--term", "上册", "--genre", "poem"],
+            ["--extract", "--book", "b", "--term", "上册", "--id", "11"],
+            ["--extract", "--book", "b", "--term", "上册", "--input", "genre.tsv"],
+            ["--export-genre", "--genre", "poem"],
+        ],
+    )
+    def test_genre_only_flags_require_set_genre(self, argv):
+        # --id / --genre / --input 只有 --set-genre 认；脱离它出现时必须报错，不能被静默丢弃
+        with pytest.raises(SystemExit):
+            cli.parse_args(argv)
+
 
 class TestRunSetGenre:
     def _patch(self, monkeypatch, exists):
