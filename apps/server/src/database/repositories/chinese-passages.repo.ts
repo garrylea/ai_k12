@@ -78,6 +78,28 @@ export function toKeyTerms(raw: unknown): PassageKeyTerm[] {
   return out;
 }
 
+/** 含义专项：一句的深层含义与作者情感。 */
+export interface PassageSentenceMeaning {
+  meaning: string;
+  emotion: string;
+}
+
+/**
+ * JSON 列 → 含义数组，**下标与 sentences 严格对齐**。
+ * 位置上的 `null` 表示「这句没有含义数据」——**不能压缩掉**，否则后面整体错位。
+ * 形状坏的项降级为 `null`（安全的降级方向：该句不出题，但仍在原文条里显示）。
+ */
+export function toSentenceMeanings(raw: unknown): Array<PassageSentenceMeaning | null> {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    if (item == null || typeof item !== 'object') return null;
+    const { meaning, emotion } = item as Record<string, unknown>;
+    if (typeof meaning !== 'string' || typeof emotion !== 'string') return null;
+    if (meaning.trim() === '' && emotion.trim() === '') return null;
+    return { meaning, emotion };
+  });
+}
+
 export interface ChinesePassageUpsertInput {
   workTitle: string;
   author: string;
@@ -93,7 +115,7 @@ export interface ChinesePassageUpsertInput {
 }
 
 const SELECT_COLS = `dp.id, dp.work_title, dp.author, dp.dynasty, dp.body,
-  dp.key_terms, dp.sentences, dp.full_translation,
+  dp.key_terms, dp.sentences, dp.sentence_meanings, dp.full_translation,
   dp.grade_band, dp.grade, dp.semester, dp.sort_order, dp.source_ref, dp.verified,
   dp.memorize_required, dp.is_active`;
 
@@ -237,6 +259,68 @@ export class ChinesePassagesRepository {
     const [rows] = await this.pool.execute<ChinesePassageRow[]>(
       `SELECT ${SELECT_COLS} FROM chinese_passages dp
        WHERE ${INTERPRETATION_GATE}
+         AND dp.id IN (${placeholders})`,
+      [...passageIds],
+    );
+    return rows;
+  }
+
+  // ==================== 含义专项（2026-09-17） ====================
+  //
+  // 抽题池在解释专项的基础上多一道闸门：**必须有 sentence_meanings**。
+  // 只给诗词篇目灌数据，所以「只做诗词」由数据有无天然实现，不需要体裁标记列。
+
+  /** 含义专项抽题池：已校验 + 未停用 + 内容就绪 + 有含义数据 */
+  private static readonly MEANING_GATE_SQL =
+    `dp.verified = 1 AND dp.is_active = 1 AND JSON_LENGTH(dp.sentences) > 0 AND dp.sentence_meanings IS NOT NULL`;
+
+  /** 配置页清单：含义专项抽题池 */
+  async findVerifiedForMeaning(): Promise<ChinesePassageRow[]> {
+    const [rows] = await this.pool.execute<ChinesePassageRow[]>(
+      `SELECT ${SELECT_COLS} FROM chinese_passages dp
+       WHERE ${ChinesePassagesRepository.MEANING_GATE_SQL}
+       ORDER BY dp.sort_order, dp.id`,
+    );
+    return rows;
+  }
+
+  /** 含义专项随机抽篇（semester=null 即「全部册次」） */
+  async findRandomVerifiedForMeaning(
+    semester: string | null,
+    count: number,
+  ): Promise<ChinesePassageRow[]> {
+    const params: unknown[] = [];
+    let sql = `SELECT ${SELECT_COLS} FROM chinese_passages dp
+       WHERE ${ChinesePassagesRepository.MEANING_GATE_SQL}`;
+    if (semester != null) {
+      sql += ' AND dp.semester = ?';
+      params.push(semester);
+    } else {
+      // 「全部册次」按**篇名**去重（同 findRandomVerifiedForInterpretation）：
+      // 九上/九下有 9 篇重复收录，不过滤册次时同一篇会被抽到两次。
+      // ⚠️ 只在无册次过滤时加：子查询跨册取 MIN(id)，外层若已按册过滤会把该册的行整体排除掉。
+      sql += ` AND dp.id = (
+        SELECT MIN(dp2.id) FROM chinese_passages dp2
+          WHERE dp2.work_title = dp.work_title
+            AND dp2.verified = 1 AND dp2.is_active = 1
+            AND JSON_LENGTH(dp2.sentences) > 0
+            AND dp2.sentence_meanings IS NOT NULL
+      )`;
+    }
+    sql += ' ORDER BY RAND() LIMIT ?';
+    params.push(count);
+    // LIMIT ? 不能走 prepared statement（mysql2 execute 报 Incorrect arguments），用 query
+    const [rows] = await this.pool.query<ChinesePassageRow[]>(sql, params);
+    return rows;
+  }
+
+  /** 含义专项指定篇目出题（按 id 批量取，忽略册次） */
+  async findVerifiedByIdsForMeaning(passageIds: number[]): Promise<ChinesePassageRow[]> {
+    if (passageIds.length === 0) return [];
+    const placeholders = passageIds.map(() => '?').join(',');
+    const [rows] = await this.pool.execute<ChinesePassageRow[]>(
+      `SELECT ${SELECT_COLS} FROM chinese_passages dp
+       WHERE ${ChinesePassagesRepository.MEANING_GATE_SQL}
          AND dp.id IN (${placeholders})`,
       [...passageIds],
     );
