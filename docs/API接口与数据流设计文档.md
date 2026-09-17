@@ -394,7 +394,7 @@
 
 错题练习与专项训练（辅线学习闭环）。全部端点 student JWT（`@Roles('student')`，家长/管理员 token 调用返回 403/1005）。判题复用 Practice 的 JudgeCore（题中心变体：训练题必来自题库，无「未命中 AI + 结构化入库」分支）。
 
-> **语文古诗文专项（`/dictation/*` 四个 + `/interpretation/*` 三个端点）独立于上述体系**：它不进错题本、不参与清零门禁、不挂 `questions`（PRD §6.3 / §7.4 例外；架构文档 §4.2.13）。**独立化改造已于 2026-09-15 实施**：篇目身份是 `chinese_passages.id`（对外 `passageId`），判题不写任何学生状态。**解释（翻译）专项于 2026-09-16 新增**：三行对译（原文 → 该句关键字词 → 整句翻译）、**逐句判题**（答完一句立即出对错），抽题池比默写多一道「内容就绪」闸门、少一道「必背」闸门（见下表）。
+> **语文古诗文专项（`/dictation/*` 四个 + `/interpretation/*` 三个 + `/meaning/*` 三个端点）独立于上述体系**：它不进错题本、不参与清零门禁、不挂 `questions`（PRD §6.3 / §7.4 例外；架构文档 §4.2.13）。**独立化改造已于 2026-09-15 实施**：篇目身份是 `chinese_passages.id`（对外 `passageId`），判题不写任何学生状态。**解释（翻译）专项于 2026-09-16 新增**：三行对译（原文 → 该句关键字词 → 整句翻译）、**逐句判题**（答完一句立即出对错），抽题池比默写多一道「内容就绪」闸门、少一道「必背」闸门（见下表）。**含义专项于 2026-09-17 新增**：答「深层含义 + 作者情感」，同样逐句判，抽题池在解释专项之上再加一道「有 `sentence_meanings`」闸门；**判题纯 LLM、无归一化短路**（`method` 只有 `ai|unanswered|undetermined`，**没有 `exact`**）。
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
@@ -414,6 +414,9 @@
 | GET | `/api/training/interpretation/passages` | 语文古诗文**解释（翻译）**专项篇目清单（配置页「指定篇目」用，2026-09-16 新增）。抽题池 = `chinese_passages` 中 `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`——**不设 `memorize_required`**（「要背诵」不是「要理解翻译」的必要条件），但多一道**「内容就绪」**闸门（没切过句的篇目点进去没题目）。按 `sort_order, id` 排序。**只出篇名 + 册次**——标准释义/标准译文是判题答案，一律不下发。响应：`{passages: [{passageId, workTitle, semester}]}`。 | MVP |
 | POST | `/api/training/interpretation/start` | 语文解释开练（2026-09-16 新增）。请求体：`{semester, passageIds, count}`；`count` 限 **1-3** 整数（每篇逐句判，3 篇已是长会话；越界/非整数 400）；`semester` 限 `上册\|下册\|null`（非法 400）；`passageIds` 为正整数数组或 `null`——非空时按指定篇目出题（**忽略 `semester`**，仅保留抽题池内篇目），否则按册次随机抽题。**「全部册次」随机抽时按篇名去重**（九上/九下有 9 篇重复收录，跨册取 `MIN(id)`）。**一次下发整篇所有句子**——前端才能把整篇铺出来、让学生看见上下文（三行对译不换页）。响应：`{passages: [{passageId, workTitle, semester, sentences: [{index, text, terms: [词名]}]}]}`——**白名单序列化**，`gloss`（释义）/`translation`（译文）/`full_translation` 与 `author`/`dynasty`/`body` 一律剥离（防答案泄露）；`terms` 只出**词名**，是该句需要学生作答的关键字词。题池为空返回 `{passages: []}`。 | MVP |
 | POST | `/api/training/interpretation/judge` | 语文解释判题——**逐句**判（2026-09-16 新增；设计原为「整篇一次批量」，经用户 2026-09-16 裁决改为逐句：学生答完一句立即知道对错，好及时纠正）。请求体：`{passageId, sentenceIndex, terms: [{term, answer}], translation}`；`passageId` 须正整数（非法 400）、篇目不存在 404，`sentenceIndex` 须非负整数（非法 400）、越界 400；`translation` 非字符串降级 `''`；`terms` 非数组视作 `[]`，元素 `term` 非字符串丢弃该条、`answer` 非字符串降级 `''`（防 number 混进去触发 TypeError 变 500）。**流程**：① **程序短路**（不进 LLM）——学生答案空白 → `correct:false, method:'unanswered'`；`normalizeChineseAnswer` 后与标准答案全等 → `correct:true, method:'exact'`；② 剩余待判项**打包一次**喂 `interpretation_judge` 场景（primary=`local`，fallback=`deepseek-flash`，本地端点下发 `chat_template_kwargs:{enable_thinking:false}` 关 thinking，实测整个判题 ~1.3s）；③ 模型漏项 / 整次调用失败 → 那些项 `correct:null, method:'undetermined'`（**不抛错、已判项不清空**）。**不写任何学生状态**（不入错题本、不清零、无隐藏题/提示缓存/自评——独立子系统，PRD §6.3 / §7.4 例外）。响应：`{passageId, sentenceIndex, allCorrect, terms: [{term, correct(bool\|null), method, standard, comment}], sentence: {correct, method, standard, comment}, fullTranslation}`；`method` 四值 `exact\|ai\|unanswered\|undetermined`；`standard`（标准释义/译文）**只在判题响应里下发**（`start` 不出——那是答案）；`fullTranslation` **仅当被判的是最后一句时非 null**（提前下发整篇译文等于泄题）。 | MVP |
+| GET | `/api/training/meaning/passages` | 语文古诗文**含义**专项篇目清单（配置页「指定篇目」用，2026-09-17 新增）。抽题池 = `chinese_passages` 中 `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0 AND sentence_meanings IS NOT NULL`——在解释专项那三道闸门之上多一道**「有含义数据」**（只给诗词篇目灌 `sentence_meanings`，「只做诗词」由数据有无天然实现，**不设体裁标记列**）。按 `sort_order, id` 排序。**只出篇名 + 册次**——深层含义与作者情感是判题答案，一律不下发。响应：`{passages: [{passageId, workTitle, semester}]}`。 | MVP |
+| POST | `/api/training/meaning/start` | 语文含义开练（2026-09-17 新增）。**返回 201**（Nest `@Post` 默认）。请求体 `{semester, passageIds, count}`，形状与解释专项 `start` 完全一致：`count` 限 **1-3** 整数（越界/非整数 400）；`semester` 限 `上册\|下册\|null`；`passageIds` 为正整数数组或 `null`——非空时按指定篇目出题（**忽略 `semester`**，仅保留抽题池内篇目），否则按册次随机抽题；「全部册次」随机抽时**按篇名去重**（跨册取 `MIN(id)`），指定篇目多于 `count` 时截断。**整篇句子的 `text` 一次给全**（顶部原文条要渲染完整一首诗），**`answerable` 区分「显示」与「出题」**：该句没有标准含义时 `answerable:false`，前端仍显示在顶部原文条里、但**永不进作答队列**（`judge` 该句会 400）。响应：`{passages: [{passageId, workTitle, semester, sentences: [{index, text, terms: [{term, plain}], answerable}]}]}`——**白名单序列化**，`meaning`（深层含义）/`emotion`（作者情感）/`translation`/`full_translation` 与 `author`/`dynasty`/`body` 一律剥离；`terms` 每项两式：`term` 原样**带注音**（`谪（zhé）守`，展示用）、`plain` 去注音（`谪守`，前端在原文里高亮用）。整篇一个 `answerable` 句子都没有的篇目**不下发**（避免空白卡）；题池为空返回 `{passages: []}`。 | MVP |
+| POST | `/api/training/meaning/judge` | 语文含义判题——**逐句**判（2026-09-17 新增）。**返回 201**。请求体：`{passageId, sentenceIndex, terms: [{term, answer}], meaning, emotion}`；`passageId` 须正整数（非法 400）、篇目不存在 404；`sentenceIndex` 须非负整数（非法 400）、越界 400、**该句无标准含义 400**（`answerable:false` 的句子本就不该被提交）；`meaning`/`emotion` 非字符串降级 `''`；`terms` 非数组视作 `[]`，元素 `term` 非字符串丢弃该条、`answer` 非字符串降级 `''`。**流程只有两段**（照解释专项的三段式但**去掉归一化短路**）：① **空答案短路**（本专项唯一的程序判断）→ `correct:false, method:'unanswered'`；② 剩余待判项**打包一次**喂 `chinese_meaning_judge` 场景（primary=`local`，fallback=`deepseek-flash`，本地端点下发 `chat_template_kwargs:{enable_thinking:false}` 关 thinking）；③ 模型漏项 / 整次调用失败 → 那些项 `correct:null, method:'undetermined'`（**不抛错、已判项不清空**）。**`method` 只有 `ai\|unanswered\|undetermined` 三值，刻意没有 `exact`**——含义与情感是理解性作答，学生答得跟标准答案逐字相同也不能靠字符串相等判「对」，一律过 LLM（有用例钉着，勿「顺手补上」）。**不写任何学生状态**（不入错题本、不清零、无隐藏题/提示缓存/自评）。响应：`{passageId, sentenceIndex, allCorrect, terms: [{term, correct(bool\|null), method, standard, comment}], meaning: {correct, method, standard, comment}, emotion: {correct, method, standard, comment}}`；`standard`（标准含义/标准情感）**只在判题响应里下发**；`terms` 顺序与「该句应有的字词」一致，学生多传的 `term` 忽略、同名取最后一条。 | MVP |
 | POST | `/api/training/hidden/mark` | 标记某题不再展示（幂等：重复标记不报错）。请求体：`{questionId, subjectId}`（均 integer≥1）。**全局排除**——`student_id + question_id` 维度，不分知识点；标记后该题在 `targeted/start` 选题时被 LEFT JOIN ... IS NULL 排除。响应：`{code:0,message:'ok',data:null}`（void op 包装）。 | MVP |
 | GET | `/api/training/hidden?subjectId={subjectId}` | 不再展示清单（按标记时间倒序）。`subjectId` 必填 integer≥1。响应：`[{questionId, questionText(80字截断), type, kpName(nullable,首个 primary kp 名), markedAt}]`。 | MVP |
 | DELETE | `/api/training/hidden/:questionId` | 撤销单条标记（幂等：不存在/未标记不报错）。路径参数 `questionId` integer≥1。响应：`{code:0,message:'ok',data:null}`。 | MVP |
@@ -1370,6 +1373,51 @@ VocabularyRunPage：题面 -> 作答 -> **提交即翻下一个词，不等判�
 
 **内容从哪来**：词库为课标官方 PDF 附录词汇表（义务教育 2022 版 1600 词 + 高中 2017 版 2020 修订 3000 词），熟词僻义与词根族由「我出草稿 + 程序硬校验 + 人工审」产出，走 data-refinery 旁路管线（见 `docs/data-refinery-使用手册.md`）；**本期以 DEV-FIXTURE 假数据打通链路，真实词库待内容管线导入**（`npx tsx src/scripts/seed-vocabulary-fixture.ts`）。
 
+### 6.23 语文古诗含义（深层含义 + 作者情感，2026-09-17）
+
+```text
+MeaningConfigPage 加载 -> GET /api/training/meaning/passages
+     └─ 抽题池：verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0
+                AND sentence_meanings IS NOT NULL
+        （比解释专项多「有含义数据」；只出篇名 + 册次）
+选范围（全部/上册/下册）+ 篇数（1/2/3）+ 可选指定篇目 -> POST /api/training/meaning/start
+     └─ 服务端查 chinese_passages，**一次返回整篇所有句子**
+          {passages: [{passageId, workTitle, semester,
+                       sentences: [{index, text,
+                                    terms: [{term:"谪（zhé）守", plain:"谪守"}],
+                                    answerable: true}]}]}
+          ↑ meaning（深层含义）/ emotion（作者情感）/ translation /
+            full_translation / author / dynasty / body 一律剥离
+     └─ 存 sessionStorage('training:meaning') -> MeaningRunPage 一次性读入
+     └─ 顶部原文条渲染**整首诗**（含 answerable:false 的句子），当前句高亮、已答置灰
+        ↑ answerable:false = 该句没填标准含义：**只显示、不进作答队列**
+
+MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
+  行1 该句关键字词 → 每词一个释义输入框（该句无字词则整行不渲染）
+  行2 本句深层含义 textarea
+  行3 作者情感 textarea
+  └─ 点「提交」-> 立即在结果栈顶插「判定中…」占位 -> 作答区推进下一句（**异步，不等回来**）
+       POST /api/training/meaning/judge
+        ├─ ① 空答案短路（唯一的程序判断）-> correct=false, method='unanswered'
+        ├─ ② 剩余待判项（该句字词 + 含义 + 情感）打包**一次**调用
+        │     scene=chinese_meaning_judge
+        │     primary=local（Qwen3.8-27B，靠 chat_template_kwargs 关 thinking）-> fallback=deepseek-flash
+        └─ ③ 模型漏项 / 整次失败 -> 那些项 correct=null, method='undetermined'
+              （不抛错；**已判项不清空**）
+  └─ LLM 回来 -> 原地替换占位：字词 / 含义 / 情感 各自 ✓✗，判错的并列「你的」与「标准」+ comment
+        `undetermined` 显示「未判定」+ 「重新判题」
+  └─ 一首答完 -> 该首小结卡（字词 x/y · 含义 x/y · 情感 x/y）->「下一首」（结果栈每首清空）
+     全部答完 -> 总结，清 sessionStorage 回语文专项页
+
+判题**不写任何学生状态**（无错题本 / 隐藏题 / 提示缓存 / 自评）——独立子系统，PRD §6.3 / §7.4 例外。
+```
+
+**与解释专项最关键的差别：判题没有程序短路**。`method` 只有 `ai|unanswered|undetermined`，**刻意没有 `exact`**——含义与情感是理解性作答，拿 `normalizeChineseAnswer` 全等去判「对」不成立（学生逐字抄对也不代表理解了），一律过 LLM；唯一的程序判断是「空答案 → `unanswered`」。有用例钉住 `method` 不会出现 `exact`，勿「顺手补上」。
+
+**`answerable` 是「显示」与「出题」的分界**：`start` 把整篇句子的 `text` 全给（诗要完整显示），但 `sentence_meanings` 对应下标为空的句子标 `answerable:false`——前端只把它显示在顶部原文条里、不进作答队列，`judge` 提交这样的句子返回 400。此外 `sentence_meanings` 与 `sentences` **长度不一致时整个按无含义数据处理**（`toSentences` 丢项、`toSentenceMeanings` 保位置，两者不等时 `meanings[i]` 描述的是另一句，静默串句比少判一句糟）。
+
+**内容从哪来**：`sentence_meanings`（每句的含义 + 情感）由**人工填写**——`tools/data-refinery` 的 `meaning_cli.py` 复用 `answer_importer` 的 `--export` / `--apply` 两步：导出带原文的空模板（人工只填「含义」「情感」两个空），再**按原文在 `sentences` 里定位下标**幂等写回（不按行号、不做整体长度断言；定位不到的句子写进 `-review.md` 并跳过；只 `UPDATE` `sentence_meanings` 一列，绝不刷掉 `verified`/`is_active`/`memorize_required` 的人工标定）。本管线**不调 LLM**。⚠️ **该 CLI 尚未实现**（计划 Task 11）——在它落地前，`sentence_meanings` 由人工直接入库，故抽题池里「有含义数据」的篇目数量取决于手工灌了多少。
+
 ---
 
 ## 7. API 与前端页面对照表
@@ -1567,6 +1615,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v3.6 | 2026-09-17 | 语文古诗文**含义专项**（Training 分组 §4.18 增 3 端点，均为 student JWT、POST 按 Nest 默认返回 **201**）：`GET /api/training/meaning/passages`（抽题池 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0 AND sentence_meanings IS NOT NULL`——比解释专项多「有含义数据」，只出篇名 + 册次）、`POST /api/training/meaning/start`（`count` **1-3**；一次下发整篇所有句子，含 `index`/`text`/`terms[{term,plain}]`/`answerable`，剥离 `meaning`/`emotion`/`translation`/`full_translation`；**`answerable:false` = 无标准含义，只显示在顶部原文条、不出题**）、`POST /api/training/meaning/judge`（**逐句**判该句字词 + 深层含义 + 作者情感，**纯 LLM、无归一化短路**，故 `method` 只有 `ai\|unanswered\|undetermined` 三值、**刻意没有 `exact`**，有用例钉住；漏项/失败逐项 `undetermined`；该句无标准含义 400）。新增 §6.23 数据流。DB 迁移 `2026-09-17_chinese_sentence_meanings.sql`（`chinese_passages` 加 `sentence_meanings` 列）。ai-core 新增 `chinese_meaning_judge` 场景（primary=`local`、fallback=`deepseek-flash`）。**内容管线 `meaning_cli.py` 尚未实现**（计划 Task 11），`sentence_meanings` 暂由人工入库。openapi.yaml 同步（3 端点 + 11 schema）。 |
 | v3.5 | 2026-09-16 | 英语**背单词**子系统（Training 分组 §4.18 增 5 端点，**独立子系统**：不挂 `questions`、不进错题本、不参与主线清零门禁，同语文古诗文专项的独立化论证——作答单位是「词 / 义项」、标准答案是词条自带属性、不接主线无「重做—清零」对象）。① `GET /api/training/vocabulary/options`（三档词库范围 + 今日已背 + 四个筛选的池子大小）；② `POST /api/training/vocabulary/start`（`count` 10-20；`order` 随机/字母序/倒序/指定字母开头；`direction` 英→中/中→英/随机；四个筛选；**`promptKind=cn2en` 的题不下发 `word`/`phonetic`/`context`/`hasFamily`**）；③ `POST /api/training/vocabulary/judge`（**三条路由**：中→英纯程序比对不调 LLM；英→中常见义程序短路 + LLM 二档；英→中熟词僻义程序短路 + LLM **三档**含 `off_target`；`off_target`/`unanswered`/`undetermined` **都不计错**）；④ `POST /api/training/vocabulary/progress/clear`（只清学生自己的 `wrong_count`，不动 `learned`、不动全局 `error_count`）；⑤ `GET /api/training/vocabulary/words/{wordId}/family`（词根族，`root_key` 自关联、**不建新表**）。新增 §6.22 数据流。DB 新增 `english_words`（**无外键**，表即完整边界；`meanings` JSON 承载义项与熟词僻义 `extended`+`context`；`root_key` 自关联表达词根族；`error_count` 为全平台累计错次**只增**）与 `student_word_progress`（本子系统唯一外键 `student_id→students(id)`，`word_id` 故意不设外键以免内容表重灌被入向外键卡死），迁移 `2026-09-16_english_vocabulary.sql`（纯 CREATE TABLE，重跑天然幂等；`schema.sql` 同步收录、两处 DDL 逐字节一致）。ai-core 新增 `english_word_judge` 场景（primary=`local`、fallback=`deepseek-flash`；本地端点靠 `chat_template_kwargs` 关 thinking）；顺带修正管理员 `SCENES` 白名单漂移（漏 `interpretation_judge`/`analysis`/`safety`，并加漂移守卫用例）。前端新增 `VocabularyConfigPage`/`VocabularyRunPage` 与 `WordPromptCard`/`WordFamilyTree`/`AnswerFeedList`/`SpellingDiffView` 组件，训练入口英语由「敬请期待」改为可点。**词库内容（课标官方 PDF：义务教育 2022 版 1600 词 + 高中 2017 版 2020 修订 3000 词）与熟词僻义、词根族数据由后续内容管线导入，本期以 DEV-FIXTURE 假数据打通链路**。openapi.yaml 同步（5 端点 + 12 schema）。 |
 | v3.4 | 2026-09-16 | 语文古诗文**解释（翻译）专项**（Training 分组 §4.18 增 3 端点）：`GET /api/training/interpretation/passages`（抽题池 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`，只出篇名 + 册次）、`POST /api/training/interpretation/start`（`count` **1-3**；一次下发整篇所有句子，含 `index`/`text`/`terms` 词名，剥离 `gloss`/`translation`/`full_translation`）、`POST /api/training/interpretation/judge`（**逐句**判：程序短路 → 剩余项一次 LLM 调用 → 漏项/失败逐项 `undetermined`；`method` 四值 `exact\|ai\|unanswered\|undetermined`；`fullTranslation` 仅最后一句下发）。新增 §6.21 数据流。**判题粒度经用户 2026-09-16 裁决由「整篇一次批量」改为「逐句」**（学生答完一句立即知道对错）；**答题形态定为「三行对译」**（原文 → 该句关键字词 → 整句翻译），故 `chinese_passages.key_terms` 每项新增 `sentenceIndex` 指向 `sentences` 下标。解释抽题池与默写**口径有意不同**（不设 `memorize_required`、加「内容就绪」）。DB 迁移 `2026-09-16_chinese_interpretation_columns.sql`（纯 ADD COLUMN）。ai-core 新增 `interpretation_judge` 场景（primary=local、fallback=deepseek-flash，实测整个判题 ~1.3s）。前端新增 `InterpretationConfigPage` / `InterpretationRunPage` 与 `SentenceBlock` / `ItemResultLine` 组件，语文专项页第二张卡由「敬请期待」改为可点。openapi.yaml 同步。 |
 | v3.3 | 2026-09-15 | 古诗文专项**独立子系统**改造（`questions` 体系摘除）：① 四个 `/training/dictation/*` 端点字段 `questionId`→`passageId`（`questionIds`→`passageIds`）、`judge`/`start` 不再需要 JWT `studentId` 参与抽题；② **判题不写任何学生状态**——`judge` 响应删 `errorBookId`，不再 find-or-create 写 `main_error_books`（`source='dictation'`）、答对不再清零（PRD §6.3 / §7.4 例外）；③ 篇目清单/抽题改查 `chinese_passages`（三道闸门 `verified=1 AND memorize_required=1 AND is_active=1`），题面由篇名服务端生成（`请默写《X》`，不落库）；④「不再展示」排除（`LEFT JOIN student_hidden_questions`）随独立化移除，「全部册次」随机抽按篇名去重（跨册 `MIN(id)`）；⑤ DB：`dictation_passages` 改名 `chinese_passages`、摘 `question_id` 列及其 FK/唯一键、新增 `is_active`，删 `questions` 的 50 行 `poem_dictation` 与 7 行 `main_error_books(source='dictation')`（迁移 `2026-09-15_chinese_passages.sql`；**迁移首跑因 CASCADE 外键静默清空篇目、已从备份恢复**，脚本补步骤 1.5 先摘外键再删题，事故记录见计划文档 Task 9）。前端 `api.ts`/`DictationConfigPage`/`DictationRunPage` 字段同步。openapi.yaml 同步。 |

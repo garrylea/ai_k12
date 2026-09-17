@@ -4105,6 +4105,123 @@ paths:
         '404':
           description: 解释篇目不存在
 
+  # 语文古诗文含义（深层含义 + 作者情感，2026-09-17）
+  /training/meaning/passages:
+    get:
+      tags: [Training]
+      summary: 语文含义专项篇目清单（配置页「指定篇目」用）
+      description: >-
+        语文含义专项配置页的篇目数据（student JWT）。抽题池 = chinese_passages 中
+        verified=1 且 is_active=1 且 JSON_LENGTH(sentences) > 0 且 sentence_meanings IS NOT NULL
+        ——在解释专项那三道闸门之上多一道「有含义数据」。只给诗词篇目灌 sentence_meanings，
+        「只做诗词」由**数据有无**天然实现，**不设体裁标记列**（以后想让文言文也进这个专项，
+        灌数据即可，代码一行不用动）。按 sort_order, id 排序。
+        只出篇名 + 册次——深层含义与作者情感是判题答案，一律不下发（防答案泄露）。
+      operationId: listMeaningPassages
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 含义专项篇目清单（只含篇名与册次）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MeaningPassageListResult'
+
+  /training/meaning/start:
+    post:
+      tags: [Training]
+      summary: 语文含义开练（按册次随机抽或按指定篇目出题）
+      description: >-
+        语文含义专项开练（student JWT）。**返回 201**（Nest `@Post` 默认码）。入参形状与解释专项
+        `start` 完全一致：count 限 **1-3** 整数（每篇逐句判，3 篇已是长会话；越界/非整数 400）；
+        semester 限 上册|下册|null（非法 400）；passageIds 为正整数数组或 null——非空时按指定篇目
+        出题（忽略 semester，仅保留抽题池内篇目），否则按册次随机抽题；「全部册次」随机抽时按篇名
+        去重（九上/九下有 9 篇重复收录，跨册取 MIN(id)），指定篇目多于 count 时截断。
+        **整篇句子的 text 一次给全**（顶部原文条要渲染完整一首诗），**answerable 区分「显示」与
+        「出题」**：该句没有标准含义时 answerable=false，前端仍把它显示在顶部原文条里、
+        但**永不进作答队列**（判题端点也会拒，400）。
+        白名单序列化：只出 passageId/workTitle/semester/sentences[].{index,text,terms,answerable}，
+        meaning（深层含义）/emotion（作者情感）/translation/full_translation 与 author/dynasty/body
+        一律剥离（防答案泄露）。terms 每项给两个形式：`term` 原样**带注音**（展示用）、
+        `plain` 去注音（前端在原文里高亮定位用）。
+        整篇一个 answerable 句子都没有的篇目**不下发**（避免前端渲染空白卡）；题池为空返回
+        { passages: [] }。
+      operationId: startMeaning
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeaningStartRequest'
+      responses:
+        '201':
+          description: 开练题单（整篇句子 + 该句关键字词，无含义/情感）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MeaningStartResult'
+        '400':
+          description: count 越界 / semester 非法 / passageIds 非法
+
+  /training/meaning/judge:
+    post:
+      tags: [Training]
+      summary: 语文含义判题（逐句：该句字词 + 深层含义 + 作者情感）
+      description: >-
+        语文含义判题（student JWT）——**逐句**判，**返回 201**。一次请求判一句：该句的关键字词 +
+        深层含义 + 作者情感**打包成一次 LLM 调用**（scene=chinese_meaning_judge，primary=local
+        本地 llama.cpp、fallback=deepseek-flash，本地端点同样靠 chat_template_kwargs 关 thinking）。
+        请求校验：passageId 须正整数（非法 400）、篇目不存在 404；sentenceIndex 须非负整数
+        （非法 400）、越界 400、**该句没有标准含义 400**（`answerable:false` 的句子本来就
+        不该被提交）；meaning/emotion 非字符串降级空串；terms 非数组视作 []，元素 term 非字符串
+        丢弃该条、answer 非字符串降级空串（防 number 混进去变 500）。
+        **判题流程只有两段，没有解释专项那个「归一化全等短路」**：① 学生答案空白 →
+        correct=false, method=unanswered（本专项唯一的程序判断）；
+        ② 其余待判项**一次**喂给 LLM，命中回 correct + method=ai + comment。
+        **method 只有 ai / unanswered / undetermined 三种，刻意没有 exact**——含义与情感是
+        理解性作答，学生答得跟标准答案逐字相同也不能靠字符串相等判「对」，一律过 LLM
+        （有测试用例钉着 method 不会出现 exact，勿「顺手补上」）。
+        模型漏项或整次调用失败 → 那些项保持 correct=null, method=undetermined
+        （**不抛错、已判项不清空**）。
+        **不写任何学生状态**（不入错题本、不清零、无隐藏题/提示缓存/自评）。
+        standard（标准含义/标准情感）只在判题响应里下发；terms 顺序与「该句应有的字词」一致，
+        学生多传的 term 忽略、同名取最后一条。
+      operationId: judgeMeaning
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeaningJudgeRequest'
+      responses:
+        '201':
+          description: 该句判定结果（含标准答案与点评）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MeaningJudgeResult'
+        '400':
+          description: passageId / sentenceIndex 非法或越界，或该句无标准含义
+        '404':
+          description: 含义篇目不存在
+
   # 英语背单词（2026-09-16）——独立子系统：不挂 questions、不进错题本、不参与主线清零门禁
   /training/vocabulary/options:
     get:
@@ -6556,6 +6673,167 @@ components:
       description: >-
         exact=归一化后与标准答案全等；ai=LLM 判定「意思到位」；
         unanswered=学生留空；undetermined=模型漏项或整次调用失败（correct 为 null）
+
+    # ==================== 语文古诗文含义（深层含义 + 作者情感）专项（2026-09-17） ====================
+
+    MeaningPassageListResult:
+      type: object
+      description: 含义专项篇目清单（只含篇名与册次，标准含义/情感不下发）
+      properties:
+        passages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeaningPassage'
+      required: [passages]
+
+    MeaningPassage:
+      type: object
+      properties:
+        passageId: { type: integer, format: int64 }
+        workTitle: { type: string }
+        semester: { type: string, enum: ['上册', '下册'] }
+      required: [passageId, workTitle, semester]
+
+    MeaningStartRequest:
+      type: object
+      properties:
+        semester:
+          type: string
+          nullable: true
+          enum: ['上册', '下册', null]
+          description: null=全部册次
+        passageIds:
+          type: array
+          nullable: true
+          items: { type: integer, format: int64 }
+          description: 非空时按指定篇目出题（忽略 semester）
+        count:
+          type: integer
+          minimum: 1
+          maximum: 3
+          description: 篇数，限 1-3（每篇逐句判，3 篇已是长会话）
+      required: [count]
+
+    MeaningStartResult:
+      type: object
+      properties:
+        passages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeaningPassageDetail'
+      required: [passages]
+
+    MeaningPassageDetail:
+      type: object
+      description: 整篇句子一次下发（前端才能把整首诗铺在顶部原文条里）
+      properties:
+        passageId: { type: integer, format: int64 }
+        workTitle: { type: string }
+        semester: { type: string }
+        sentences:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeaningSentence'
+      required: [passageId, workTitle, semester, sentences]
+
+    MeaningSentence:
+      type: object
+      description: 一句骨架。含义/情感是答案，一律不下发
+      properties:
+        index: { type: integer, description: 句序（从 0 起，与判题请求的 sentenceIndex 对应） }
+        text: { type: string, description: 原文（含标点） }
+        terms:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeaningTerm'
+          description: 该句的关键字词（带注音原样 + 去注音两式）
+        answerable:
+          type: boolean
+          description: >-
+            false=该句没有标准含义（人工没填）：**只显示在顶部原文条里、不出题**，
+            judge 该句会 400。诗要完整显示，所以 false 的句子也下发 text
+      required: [index, text, terms, answerable]
+
+    MeaningTerm:
+      type: object
+      description: 一个关键字词的两种形式（不要合并：展示要注音、高亮不要注音）
+      properties:
+        term: { type: string, description: 原样，**带注音**（如「谪（zhé）守」），展示用 }
+        plain: { type: string, description: 去注音（如「谪守」），前端在原文里高亮定位用 }
+      required: [term, plain]
+
+    MeaningJudgeRequest:
+      type: object
+      properties:
+        passageId: { type: integer, format: int64 }
+        sentenceIndex: { type: integer, minimum: 0 }
+        terms:
+          type: array
+          items:
+            type: object
+            properties:
+              term: { type: string }
+              answer: { type: string, description: 学生写的释义 }
+            required: [term, answer]
+        meaning: { type: string, description: 学生写的本句深层含义 }
+        emotion: { type: string, description: 学生写的作者情感 }
+      required: [passageId, sentenceIndex]
+
+    MeaningJudgeResult:
+      type: object
+      properties:
+        passageId: { type: integer, format: int64 }
+        sentenceIndex: { type: integer }
+        allCorrect:
+          type: boolean
+          description: 该句所有项（字词 + 含义 + 情感）全 correct===true 才是 true；有 null（未判定）即 false
+        terms:
+          type: array
+          description: 顺序与「该句应有的字词」一致
+          items:
+            $ref: '#/components/schemas/MeaningTermResult'
+        meaning:
+          $ref: '#/components/schemas/MeaningPartResult'
+        emotion:
+          $ref: '#/components/schemas/MeaningPartResult'
+      required: [passageId, sentenceIndex, allCorrect, terms, meaning, emotion]
+
+    MeaningTermResult:
+      type: object
+      properties:
+        term: { type: string }
+        correct:
+          type: boolean
+          nullable: true
+          description: null=未判定（模型没判出来）
+        method:
+          $ref: '#/components/schemas/MeaningMethod'
+        standard: { type: string, description: 标准释义（只在判题响应里下发） }
+        comment: { type: string, nullable: true, description: 判错时的改进提示 }
+      required: [term, correct, method, standard, comment]
+
+    MeaningPartResult:
+      type: object
+      description: 含义 / 情感其中一块的判定结果
+      properties:
+        correct:
+          type: boolean
+          nullable: true
+          description: null=未判定
+        method:
+          $ref: '#/components/schemas/MeaningMethod'
+        standard: { type: string, description: 标准含义 / 标准情感（只在判题响应里下发） }
+        comment: { type: string, nullable: true }
+      required: [correct, method, standard, comment]
+
+    MeaningMethod:
+      type: string
+      enum: [ai, unanswered, undetermined]
+      description: >-
+        **没有 exact**——本专项不做字符串归一化全等短路（含义/情感是理解性作答，
+        逐字答对也必须过 LLM），有测试用例钉着，勿「顺手补上」。
+        ai=LLM 判定「意思到位」；unanswered=学生留空（唯一的程序判断）；
+        undetermined=模型漏项或整次调用失败（correct 为 null）
 
     # ===== 英语背单词（2026-09-16）=====
     VocabularyPoolOption:
