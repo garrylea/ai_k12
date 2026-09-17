@@ -44,8 +44,16 @@ export function pointsToNextLevel(totalEarned: number): number | null {
 }
 
 /**
- * 当前档内进度百分比 0-100（整数，四舍五入）。
+ * 当前档内进度百分比，0-100 整数（向下取整）。
  * 分母 = next.threshold - cur.threshold；满级直接 100，避免除零。
+ *
+ * 取整必须用 floor 而不是 round：因为 levelOf 在 earned >= next.threshold 时
+ * 就已经晋级，所以进到这里必然有 done < span，floor 的结果上界是 99，
+ * 绝不可能在未达阈值时给出满格进度条。round 则会在 done / span >= 99.5% 时
+ * 报 100，与同模块的 pointsToNextLevel「还差 N 分」自相矛盾
+ * （例：星耀→王者 span 8000，19980 分会显示 100% 但实际还差 20 分）。
+ *
+ * 契约：本函数返回 100 **仅**经过 next === null（真满级王者）或 span <= 0 兜底分支。
  */
 export function progressPercent(totalEarned: number): number {
   const cur = levelOf(totalEarned);
@@ -54,7 +62,7 @@ export function progressPercent(totalEarned: number): number {
   const span = next.threshold - cur.threshold;
   if (span <= 0) return 100;
   const done = Math.max(0, totalEarned) - cur.threshold;
-  return Math.min(100, Math.max(0, Math.round((done / span) * 100)));
+  return Math.min(100, Math.max(0, Math.floor((done / span) * 100)));
 }
 
 /** 用 totalEarned 反查是否跨档：award 前 oldEarned → award 后 newEarned。 */

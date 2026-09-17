@@ -103,8 +103,17 @@ describe('progressPercent', () => {
     expect(progressPercent(0)).toBe(0);
   });
 
-  it('750 分在铸铁档（500→1200）走了 250/700 → 36（四舍五入）', () => {
-    expect(progressPercent(750)).toBe(36);
+  it('750 分在铸铁档（500→1200）走了 250/700 → 35（向下取整）', () => {
+    expect(progressPercent(750)).toBe(35);
+  });
+
+  it('1199 分（差 1 分到青铜）不能报 100，必须是 99', () => {
+    expect(progressPercent(1199)).toBe(99);
+    expect(progressPercent(1199)).not.toBe(100);
+  });
+
+  it('19999 分（差 1 分到王者，span 8000）必须 < 100', () => {
+    expect(progressPercent(19999)).toBeLessThan(100);
   });
 });
 

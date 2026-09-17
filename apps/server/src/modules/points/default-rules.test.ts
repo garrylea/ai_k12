@@ -51,4 +51,24 @@ describe('DEFAULT_RULES', () => {
       expect(tiersOf(code)).toEqual(['default']);
     }
   });
+
+  it('全表 15 行黄金值（taskCode/tierKey/points/dailyLimit，Task 4 发币直接读 points）', () => {
+    expect(DEFAULT_RULES.map((r) => [r.taskCode, r.tierKey, r.points, r.dailyLimit])).toEqual([
+      ['mainline_lesson', 'default', 10, null],
+      ['math_paper', 'default', 50, null],
+      ['math_targeted', '1', 2, null],
+      ['math_targeted', '3', 8, null],
+      ['math_targeted', '5', 15, null],
+      ['math_targeted', '10', 35, null],
+      ['error_fix', 'default', 3, null],
+      ['cn_dictation', 'poem', 2, null],
+      ['cn_dictation', 'prose', 5, null],
+      ['cn_interpretation', 'poem', 3, null],
+      ['cn_interpretation', 'prose', 6, null],
+      ['cn_meaning', 'default', 4, null],
+      ['en_vocabulary', '10', 2, 2],
+      ['en_vocabulary', '15', 4, 2],
+      ['en_vocabulary', '20', 7, 2],
+    ]);
+  });
 });
