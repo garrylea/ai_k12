@@ -30,7 +30,7 @@ const DashIcon = () => (
   </svg>
 );
 
-/** 单块（含义 / 情感）的结果行：✓ 正确 / ✗ 错误（附你的 vs 标准）/ — 未判定。 */
+/** 单块（含义 / 情感）的结果行：勾=正确 / 叉=错误（附你的 vs 标准）/ 横杠=未判定。 */
 function PartLine({ label, part, mine }: { label: string; part: MeaningPartResult; mine: string }) {
   if (part.correct === true) {
     return (
