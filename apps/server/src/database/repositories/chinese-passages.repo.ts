@@ -10,6 +10,8 @@ export interface ChinesePassageRow extends RowDataPacket {
   // mysql2 读 JSON 列**已自动 parse**（拿到的是数组/对象，不是字符串）——不要再 JSON.parse。
   key_terms: unknown;
   sentences: unknown;
+  /** mysql2 读 JSON 列已自动 parse——不要再 JSON.parse */
+  sentence_meanings: unknown;
   full_translation: string | null;
   grade_band: string;
   grade: string | null;
