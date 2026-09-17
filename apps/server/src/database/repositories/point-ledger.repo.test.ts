@@ -52,6 +52,16 @@ describe('PointLedgerRepository.insert', () => {
     expect(pool.execute).toHaveBeenCalledTimes(1);
   });
 
+  it('传 conn 时走 conn.execute（发分引擎要流水与快照同事务）', async () => {
+    const pool = mockPool();
+    const repo = new PointLedgerRepository(pool as any);
+    const conn = { execute: vi.fn().mockResolvedValue([{ insertId: 88, affectedRows: 1 }, []]) };
+    const out = await repo.insert(insertRow(), conn as any);
+    expect(out).toEqual({ id: 88, duplicate: false });
+    expect(conn.execute).toHaveBeenCalledTimes(1);
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
   it('tier_key 缺省时写 default，可空字段缺省写 null', async () => {
     const pool = mockPool();
     const repo = new PointLedgerRepository(pool as any);

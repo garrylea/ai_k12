@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 export interface PointLedgerRow extends RowDataPacket {
   id: number;
@@ -47,25 +47,30 @@ export class PointLedgerRepository {
    * `duplicate = affectedRows === 0`（撞 dedupe_key）。
    * ⚠️ 重复路径下返回的 `id` 来自 `insertId`，**不是**既有那行的 id（MySQL 在 INSERT IGNORE
    * 跳过时不会给出命中的行 id）。调用方必须用 `findByDedupeKey` 回查首次结果，别拿这个 id 当流水主键。
+   *
+   * @param conn 可选：发分引擎必须传自己的事务连接，让「写流水 + 更新快照」原子提交
+   *   （spec §4.3：student_points 与流水同事务；不传则这条 INSERT 独立提交）。
    */
-  async insert(row: PointLedgerInsertInput): Promise<{ id: number; duplicate: boolean }> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
-      `INSERT IGNORE INTO point_ledger
+  async insert(
+    row: PointLedgerInsertInput,
+    conn?: PoolConnection,
+  ): Promise<{ id: number; duplicate: boolean }> {
+    const sql = `INSERT IGNORE INTO point_ledger
          (student_id, kind, task_code, tier_key, points, dedupe_key, title, ref_type, ref_id, redemption_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        row.student_id,
-        row.kind,
-        row.task_code,
-        row.tier_key ?? 'default',
-        row.points,
-        row.dedupe_key,
-        row.title,
-        row.ref_type ?? null,
-        row.ref_id ?? null,
-        row.redemption_id ?? null,
-      ],
-    );
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const params = [
+      row.student_id,
+      row.kind,
+      row.task_code,
+      row.tier_key ?? 'default',
+      row.points,
+      row.dedupe_key,
+      row.title,
+      row.ref_type ?? null,
+      row.ref_id ?? null,
+      row.redemption_id ?? null,
+    ];
+    const [result] = await (conn ?? this.pool).execute<ResultSetHeader>(sql, params);
     return { id: result.insertId, duplicate: result.affectedRows === 0 };
   }
 
