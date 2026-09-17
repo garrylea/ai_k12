@@ -448,7 +448,11 @@ export const LEVELS = [
 
 **错误码**：`3001` 余额不足 / `3002` 未达段位门槛 / `3003` 奖励已下架 / `3004` 兑换已关闭（`reward_redemption_enabled = 0`）。
 
-**兑换规则**：`points = round(cashAmount * pointsPerYuan)`，`pointsPerYuan` 默认 20、家长可配。兑换前校验 `balance >= points_spent` 且（若 `min_level_code` 非空）已达该段位；**同事务**写 `point_redemptions` + 负流水 + 更新快照。
+**兑换规则**：家长输入要花掉的**积分**数，金额由汇率推导——`cashAmount = round(points / pointsPerYuan, 2)`，`pointsPerYuan` 默认 20（即 20 积分 = 1 元）、家长可配。
+
+> 方向不要写反：是「**积分 → 钱**」（用户原话「将积分换成钱」），不是「输入金额再算需要多少积分」。家长端的输入框是积分，展示的金额是推算结果。
+>
+> 兑换前校验 `balance >= points` 且（若 `min_level_code` 非空）已达该段位；**同事务**写 `point_redemptions` + 负流水 + 更新快照。**流水只写负的 `kind='redeem'` 行、快照只动 `balance`（`earnedDelta = 0`）**——`total_earned` 绝不能被兑换影响，否则「段位只升不降」立刻破。
 
 **已知限制（本期不做）**：兑换**不可撤销**。家长点错只能再兑回去或手工补偿。`point_redemptions.status` 已为后续撤销留了状态位。
 
