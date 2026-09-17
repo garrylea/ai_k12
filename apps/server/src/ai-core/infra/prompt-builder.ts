@@ -96,6 +96,9 @@ export class PromptBuilder {
     if (capability === 'interpretation_judge') {
       return `interpretation/judge.md`;
     }
+    if (capability === 'chinese_meaning_judge') {
+      return `meaning/judge.md`;
+    }
     if (capability === 'english_word_judge') {
       // 两个判题模式（common 两档 / extended 三档）共用一份模板，靠 `{{#isExtended}}`
       // 分段——Mustache 没有字符串比较，所以由调用方显式传布尔标志，不在这里按 mode 分文件。

@@ -10,7 +10,7 @@ export const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_com
 // saveRoutes 不校验 scene，所以漏项不会报错，只会悄悄少一个选项；
 // interpretation_judge / analysis / safety 都曾漏过（2026-09-16 一次性补齐）。
 // admin-models.service.test.ts 里有一条漂移守卫用例：YAML routes 的每个键都必须在这里。
-export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation', 'variation', 'structuring', 'title', 'dictation_feedback', 'interpretation_judge', 'english_word_judge', 'analysis', 'safety'] as const;
+export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation', 'variation', 'structuring', 'title', 'dictation_feedback', 'interpretation_judge', 'english_word_judge', 'chinese_meaning_judge', 'analysis', 'safety'] as const;
 
 @Injectable()
 export class AdminModelsService {

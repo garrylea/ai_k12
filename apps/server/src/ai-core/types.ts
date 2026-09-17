@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge';
 export type Subject = 'math' | 'chinese' | 'english';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
@@ -49,7 +49,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
@@ -666,6 +666,52 @@ export interface InterpretationJudgeResponse {
   terms: InterpretationJudgeTermResult[];
   /** 请求未含整句翻译时为 null/缺省 */
   sentence?: { correct: boolean; comment?: string | null } | null;
+  reasoning?: string;
+}
+
+// ========== Chinese Meaning Judge Types（古诗含义判题，2026-09-17） ==========
+
+/** 含义专项待判的一个字词。 */
+export interface ChineseMeaningJudgeTermInput {
+  term: string;
+  /** 标准释义（服务端从 key_terms 取，不下发给前端） */
+  gloss: string;
+  /** 学生作答 */
+  answer: string;
+}
+
+export interface ChineseMeaningJudgeRequest {
+  workTitle: string;
+  /** 该句原文 */
+  sentence: string;
+  /** 该句字面译文——只作判「深层含义」的参考上下文，服务端内部用，不下发前端 */
+  standardTranslation: string;
+  standardMeaning: string;
+  standardEmotion: string;
+  /** 学生没作答时为 null（该项不判） */
+  studentMeaning: string | null;
+  studentEmotion: string | null;
+  terms: ChineseMeaningJudgeTermInput[];
+}
+
+export interface ChineseMeaningJudgePartResult {
+  correct: boolean;
+  /** 判错时的改进提示；判对可不给 */
+  comment?: string | null;
+}
+
+export interface ChineseMeaningJudgeTermResult {
+  term: string;
+  correct: boolean;
+  comment?: string | null;
+}
+
+/** 模型输出。`terms` 允许少于请求项数（漏项由调用方标 undetermined）。 */
+export interface ChineseMeaningJudgeResponse {
+  terms: ChineseMeaningJudgeTermResult[];
+  /** 请求未含该项时为 null/缺省 */
+  meaning?: ChineseMeaningJudgePartResult | null;
+  emotion?: ChineseMeaningJudgePartResult | null;
   reasoning?: string;
 }
 

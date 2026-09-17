@@ -166,6 +166,14 @@ routes:
       primary: local
       fallback: deepseek-flash
 
+  # 语文古诗文「含义」判题：判定每句的深层含义与作者情感是否到位。
+  # 与 interpretation_judge 同策略（本地优先、云端兜底）；两者都失败 → 逐项 undetermined，
+  # 不阻断学生看到已判的项。
+  chinese_meaning_judge:
+    - subject: "*"
+      primary: local
+      fallback: deepseek-flash
+
 default:
   primary: qwen3.8-max
   fallback: deepseek-flash
