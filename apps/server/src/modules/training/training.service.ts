@@ -358,7 +358,7 @@ export class TrainingService {
   /**
    * 解释专项判题：**逐句**判（字词 + 整句翻译），**纯读**、不写任何学生状态
    * （独立子系统：无错题本、无隐藏题、无提示缓存、无自评）——唯一的写入是积分流水
-   * （甲类发分 `cn_interpretation`，2026-09-17 起按体裁分档，一篇一天一次）。
+   * （甲类发分 `cn_interpretation`，2026-09-17 起按体裁分档、**整篇最后一句判完才发**一篇一次）。
    *
    * 顺序是刻意的：
    *   1. 程序短路掉能确定的项（空答案 → unanswered；归一化全等 → exact），**不进 LLM**；
@@ -455,15 +455,20 @@ export class TrainingService {
 
     const termItems: InterpretationTermJudgeItem[] = slots.map(({ pending: _pending, ...rest }) => rest);
 
-    // 甲类发分（2026-09-17）：一篇一天一次、按体裁分档。判题是**逐句**的，
-    // 所以首句判完即发；同日后续句子会命中幂等键（duplicate → 归 0 静默）。
-    const award = await this.awardByPassageGenre({
-      studentId: input.studentId,
-      taskCode: 'cn_interpretation',
-      dedupePrefix: 'interp',
-      passageId: passage.id,
-      genre: passage.genre,
-    });
+    // 甲类发分（2026-09-17）：一篇一天一次、按体裁分档，且**整篇答完才发**。
+    // 解释专项每句都可作答（管线为每句生成译文），所以触发点是**最后一句**；
+    // 中间句返回 0 分且不设 reason（与含义专项的非末句语义一致）。若首句判完就发，
+    // 学生只答第一句即可拿走整篇的分、再换一篇照做——幂等键只挡同篇重复，挡不住这种速刷。
+    const isLastSentence = input.sentenceIndex === sentences.length - 1;
+    const award = isLastSentence
+      ? await this.awardByPassageGenre({
+          studentId: input.studentId,
+          taskCode: 'cn_interpretation',
+          dedupePrefix: 'interp',
+          passageId: passage.id,
+          genre: passage.genre,
+        })
+      : null;
 
     return {
       passageId: passage.id,
@@ -477,11 +482,11 @@ export class TrainingService {
         comment: sentSlot.comment,
       },
       // 整篇译文只在最后一句判完时给——提前给等于把整篇答案交出去
-      fullTranslation: input.sentenceIndex === sentences.length - 1
+      fullTranslation: isLastSentence
         ? (passage.full_translation ?? null)
         : null,
-      pointsAwarded: award.pointsAwarded,
-      awardReason: award.awardReason,
+      pointsAwarded: award?.pointsAwarded ?? 0,
+      awardReason: award?.awardReason,
     };
   }
 

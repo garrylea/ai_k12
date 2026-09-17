@@ -420,9 +420,9 @@ describe('TrainingService — 解释专项 judgeInterpretation：边界与副作
 describe('TrainingService — 解释专项 judgeInterpretation：甲类发分（cn_interpretation，按体裁取档）', () => {
   const ANS = { terms: [], translation: '' };
 
-  it('genre=prose → 按 prose 档发一次，幂等键含 todayKey()，响应带 pointsAwarded', async () => {
-    const { service, points } = makeService(); // PASSAGE.genre === 'prose'
-    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+  it('genre=prose → 最后一句判完按 prose 档发一次，幂等键含 todayKey()，响应带 pointsAwarded', async () => {
+    const { service, points } = makeService(); // PASSAGE.genre === 'prose'，sentences.length === 2
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 1, ...ANS });
     expect(points.todayKey).toHaveBeenCalled();
     expect(points.award).toHaveBeenCalledTimes(1);
     expect(points.award).toHaveBeenCalledWith({
@@ -445,26 +445,30 @@ describe('TrainingService — 解释专项 judgeInterpretation：甲类发分（
     );
   });
 
-  it('逐句判：第一句判完就发分（同日后续句子靠幂等键不再发）', async () => {
-    // 一篇 = 一次分：判题是逐句的，所以首句判完即发，后几句 award 会回 duplicate
+  it('整篇答完才发分：中间句不调 award、pointsAwarded=0 且无 awardReason；最后一句才调一次', async () => {
+    // 「一篇 3 分 / 一篇 6 分」= 一篇的分换一篇的活儿。只答第一句不发分，
+    // 否则换一篇重复「只答一句」就能速刷（幂等键只挡同篇重复，挡不住换篇）。
     const { service, points } = makeService();
-    await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
-    await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 1, ...ANS });
-    expect(points.award).toHaveBeenCalledTimes(2);
-    const [first, second] = points.award.mock.calls.map((c) => c[0].dedupeKey);
-    expect(first).toBe(second); // 同一篇同一天 → 同键，第二次必然 duplicate
+    const mid = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    expect(points.award).not.toHaveBeenCalled();
+    expect(mid.pointsAwarded).toBe(0);
+    expect(mid.awardReason).toBeUndefined();
+
+    const last = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award.mock.calls[0][0].dedupeKey).toBe('interp:7:12:2026-09-17');
+    expect(last.pointsAwarded).toBe(3);
   });
 
-  it('genre=null（未标定）→ award 不被调用，awardReason=genre_unset', async () => {
+  it('genre=null（未标定）→ 最后一句也不调 award，awardReason=genre_unset', async () => {
     const { service, points } = makeService({ passage: { ...PASSAGE, genre: null } });
-    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 1, ...ANS });
     expect(points.award).not.toHaveBeenCalled();
     expect(res.pointsAwarded).toBe(0);
     expect(res.awardReason).toBe('genre_unset');
     // 判题本身不受体裁未标定影响
-    expect(res.terms).toEqual([
-      { term: '谪守', correct: false, method: 'unanswered', standard: '因罪贬谪流放，出任外官', comment: null },
-    ]);
+    expect(res.terms[0]).toMatchObject({ term: '越明年', method: 'unanswered' });
+    expect(res.fullTranslation).toBe(PASSAGE.full_translation);
   });
 
   it('award 抛错 → 判题照常返回（含 fullTranslation），pointsAwarded=0', async () => {
@@ -480,14 +484,15 @@ describe('TrainingService — 解释专项 judgeInterpretation：甲类发分（
 
   it('award 回 daily_limit → pointsAwarded=0 + awardReason 透传', async () => {
     const { service } = makeService({ award: { pointsAwarded: 0, reason: 'daily_limit' } });
-    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 1, ...ANS });
     expect(res.pointsAwarded).toBe(0);
     expect(res.awardReason).toBe('daily_limit');
   });
 
-  it('award 回 duplicate（同日重判同一篇）→ 归 0 且静默，不弹假「+N 分」', async () => {
-    const { service } = makeService({ award: { pointsAwarded: 3, reason: 'duplicate' } });
-    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+  it('最后一句 award 回 duplicate（同日重判同一篇）→ 归 0 且静默，不弹假「+N 分」', async () => {
+    const { service, points } = makeService({ award: { pointsAwarded: 3, reason: 'duplicate' } });
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(points.award).toHaveBeenCalledTimes(1);
     expect(res.pointsAwarded).toBe(0);
     expect(res.awardReason).toBeUndefined();
   });

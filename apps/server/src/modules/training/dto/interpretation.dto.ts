@@ -76,8 +76,8 @@ export interface InterpretationJudgeResult {
   /** **仅当被判的是最后一句时**非 null——整篇译文提前下发等于泄题。 */
   fullTranslation: string | null;
   /** 本次**实际入账**的积分（甲类逐目标发分，`cn_interpretation`，一篇一天一次；
-   *  判题是逐句的，所以首句判完即发，同日后续句子靠幂等键命中而不再入账）。
-   *  0 = 体裁未标定 / 同日重判 / 达上限 / 停用 / 失败。 */
+   *  **整篇最后一句判完才发**，中间句一律 0）。
+   *  0 = 中间句未答完 / 体裁未标定 / 同日重判 / 达上限 / 停用 / 失败。 */
   pointsAwarded: number;
   /** 未发分原因（无值=静默）；`duplicate` 刻意不在枚举内，见 `PointsAwardReason`。 */
   awardReason?: PointsAwardReason;
