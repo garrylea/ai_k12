@@ -24,7 +24,7 @@
 ## 2. 调研结论（决定了工程难度）
 
 1. **积分/段位/奖励在代码里完全不存在**。后端无表无端点；前端 `RewardCard.tsx` 是死组件；`/student/profile`、`/student/rewards`、`/parent/rewards` 三个路由全是 `Placeholder`（`routes/index.tsx:339/366/367`）。
-2. **7 个训练任务里只有「数学卷子」有真正的完成事件**。`exams.service.ts:356 markSubmitted` 天然幂等。其余 6 项（专项/错题/默写/解释/含义/背单词）后端既无会话表也无完成事件——**连「这一轮做完了」都判断不出来**。
+2. **7 个训练任务里只有「数学卷子」有会话级的完成事件**（`exams.service.ts:356 markSubmitted`，天然幂等）。其余 6 项没有会话概念——但**只有 2 项真的需要**（`math_targeted` / `en_vocabulary`，因为它们是「档位打包价」）；另外 4 项（错题订正、默写、解释、含义）的判题函数本身就是天然的逐目标发分点，见 §6.1。
 3. **单元检测、期中考试、期末考试在代码里不存在**。只有 `units.is_midterm_boundary`（`units.repo.ts:45`）和 `next_unlock_type` 字段，而 `nextUnlockType` 实际只会是 `'lesson'` / `'practice'`（`progress.service.ts:294`）。→ **本期不给这三个节点发分**。
 4. **家长端缺「当前查看哪个孩子」的上下文**。`ParentLayout.tsx:56` 的下拉是硬编码假数据。→ 动工前必须先补。
 5. **`chinese_passages` 没有体裁列**（`schema.sql:309`，当初特意「不加体裁列」）。要分古诗/古文必须新增 `genre`。
@@ -47,10 +47,10 @@
 | 7 | 档位匹配 | **档位即可选项**：学生开练只能在家长配的档位里选，不许自由填数 |
 | 8 | 古诗文单位 | 三类专项统一按「**一篇**」给分（含义专项选 3 首 = 3×分值） |
 | 9 | 主线范围 | 纳入，但**只给「学完一课」**发分（单元检测/期中期末未实现，见 §2.3） |
-| 10 | 错题口径 | 两条路径共用一条规则 `error_fix`，靠 `main_error_books` 清零影响行数去重（见 §6.4） |
+| 10 | 错题口径 | 两条路径共用一条规则 `error_fix`，靠 `main_error_books` 清零影响行数去重（见 §6.5） |
 | 11 | 分段位阈值 | **全局固定**，家长不可调 |
 | 12 | 庆祝动画 | **Canvas 粒子烟花**，约 3 秒自动结束（不用 `✦✧` 装饰字符、不用图片素材） |
-| 13 | 分期 | 「古诗含义」专项**先单独实施**，之后积分体系一次性接全 8 类任务 |
+| 13 | 分期 | 「古诗含义」专项先实施（**代码已完成**，见 §10 前置 A），之后积分体系一次性接全 8 类任务 |
 
 ### 3.1 段位表（固定，不可配）
 
@@ -223,7 +223,9 @@ CREATE TABLE IF NOT EXISTS point_redemptions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-#### `training_sessions` — 通用训练会话（解决「完成事件」缺口）
+#### `training_sessions` — 训练会话（只服务 `math_targeted` / `en_vocabulary`）
+
+> 只给「档位打包价」的两个任务用——原因见 §6.1/§6.2。其余 6 个任务各有天然发分点，**不写这张表**。
 
 ```sql
 CREATE TABLE IF NOT EXISTS training_sessions (
@@ -287,42 +289,75 @@ export const LEVELS = [
 
 ---
 
-## 6. 完成事件与埋点（最大工程风险）
+## 6. 完成事件与埋点
 
-### 6.1 方案：通用训练会话表
+### 6.1 先按「发分粒度」把 8 个任务分两类
 
-- 各训练任务的 `start` 端点建一条 `training_sessions`（`status='in_progress'`）。
-- 新增 `POST /api/training/sessions/:id/complete`，把 `status` 置 `completed` 并调 `PointsService.award()`。
+这是本节的关键切分——**大部分任务根本不需要新的「完成事件」基建**。
+
+**甲类 · 逐目标发分**（每完成一个「目标物」发一次分，有天然事件点，**不需要会话表**）：
+
+| 任务 | 目标物 | 发分事件点 | 单次分值 |
+|---|---|---|---|
+| `cn_dictation` | 一篇 | `training.controller.ts:175 dictation/judge` 判完 | 按该篇 `genre` 取档 |
+| `cn_interpretation` | 一篇 | `training.controller.ts:240` 判完 | 按该篇 `genre` 取档 |
+| `cn_meaning` | 一篇（整篇答完） | 该篇最后一句判完时（`meaning.controller.ts:57`） | `default` 档 |
+| `error_fix` | 一题 | `judge-core.service.ts:204` 清零成功 | `default` 档 |
+
+- 分值是「**篇数/题数 × 单位分**」——所以`cn_meaning` 一次选 3 首就是 3 × 4 = 12 分，`dictation` 一轮 5 篇就按各自体裁累加。
+- 判题端点**直接把 `pointsAwarded` 放进响应**，前端立刻弹轻反馈，不用等会话收尾。
+- 幂等由 `dedupe_key`（带 `passageId`/`questionId`）保证，重判同一篇不会重复给分。
+
+**乙类 · 按会话整批发分**（分值由学生开练时选的**档位**决定，需要会话表）：
+
+| 任务 | 为什么要会话表 |
+|---|---|
+| `math_targeted` | 档位（1/3/5/10 题）决定总分——「3 题 8 分」是**打包价**，逐题发分就退化成线性「每题 2 分」，把溢价设计抵消掉。必须整批发。 |
+| `en_vocabulary` | 同理（10/15/20 词三档）。 |
+
+**丙类 · 既有完整事件点，直接埋**：
+
+| 任务 | 埋点 |
+|---|---|
+| `math_paper` | `exams.service.ts:356 markSubmitted` 之后（`exam_sessions.id` 当 ref） |
+| `mainline_lesson` | `progress.service.ts:283-291` 两个 return 分支都要发 |
+
+### 6.2 会话表只服务两个任务
+
+`training_sessions` 仅由 `math_targeted` 与 `en_vocabulary` 使用：
+
+- 对应 `start` 端点（`training.controller.ts:116`、`vocabulary.controller.ts:56`）建一条 `status='in_progress'`，**把后端实际生成的题单规模写进 `expected_count`**。
+- 前端做完调 `POST /api/training/sessions/:id/complete` 发分。
 - **幂等**：`UPDATE ... SET status='completed' WHERE id=? AND student_id=? AND status='in_progress'`；`affectedRows === 0` 时回查 `point_ledger` 返回首次结果（**不报错**——前端重试要能拿到同样的返回）。
+- **防伪造的关键**：发分按**会话里记录的档位**算，不按前端传来的档位算。学生改不了自己开练时后端实际发了多少题。
 
 对比过的另两个方案：
 
 - **各模块自建状态**：规则分散，家长改分值要动六个模块；幂等各写各的必漏。
 - **纯前端上报**：后端改动最小，但「完成即给分」意味着上报即得分，没有第二道闸。
 
-### 6.2 逐任务埋点位置
+**为什么甲类不用会话表却依然安全**：甲类的分值是「单位分 × 实际篇数」，而发分点就在判题函数里——判了几篇就发几份，**没有可以虚报的空间**。会话表解决的是「档位打包价」特有的信任问题，甲类不存在。
 
-| 任务 | 建会话（开练） | 完成发分 |
-|---|---|---|
-| 英语背单词 | `vocabulary.controller.ts:56 start` | 前端背完最后一词 → `complete` |
-| 数学专项 | `training.controller.ts:116 startTargetedPractice` | 题单走完 → `complete` |
-| 错题专项 | `training.controller.ts:21` 附近的开练端点 | 同上 |
-| 语文默写 | `training.controller.ts:150 startDictation` | 提交后 → `complete` |
-| 语文解释 | `training.controller.ts:217` | 同上 |
-| 语文含义 | `meaning.controller.ts:33` | 同上 |
-| 数学卷子 | 已有 `exams.service.ts createSession` | **直埋 `exams.service.ts:356`** 之后（用 `exam_sessions.id` 当 ref，不走新会话表） |
-| 学完一课 | — | **`progress.service.ts:283-291`** 两个 return 分支（`advanceLesson` / `markCompleted`）都要发分 |
-| 错题订正 | — | **`judge-core.service.ts:204`** 之后，条件见 §6.4 |
+### 6.3 每日上限的统一口径
 
-`error_fix` 与 `mainline_lesson` 不需要会话表（有天然事件点 + 幂等键）。
+**每日上限 = 当天该 `task_code` 的 `kind='earn'` 流水条数上限。**
 
-### 6.3 防伪造
+- `en_vocabulary` 一轮 = 1 条 → 家长填 2 = 每天最多两轮 ✓
+- `cn_dictation` 一篇 = 1 条 → 家长填 5 = 每天最多 5 篇
+- `math_targeted` 一个会话 = 1 条
 
-- `complete` 校验：会话属于本人 + `status='in_progress'` + `expected_count` 与建会话时一致。防住「随便 POST 一个假 task_code 刷分」。
-- **审计留痕**：`POST /api/training/judge` 加**可选** `sessionId`；带了且属于本人且 `in_progress` 时 `judged_count++`。`complete` 时把 `judged_count` 与 `expected_count` 一起存进流水备注，**不阻断发分**（因为「完成即给分」，做了 1 题就该得 1 题的分），家长端可在流水里看到异常。
-- **明确记录为已知限制**：因为「完成即给分、不看对错」，「开一个 N 题会话立刻 complete」在语义上就等于「做完 N 题」，给分是**正确行为**。每日上限是唯一且主要的防刷手段。
+一句话给孩子解释：「今天这个任务最多拿 N 次分」。三种档位维度共用同一套计数，不需要额外状态。
 
-### 6.4 `error_fix` 的精确定义
+### 6.4 防伪造
+
+只对乙类（`math_targeted` / `en_vocabulary`）有意义，因为只有它们听前端一句「我做完了」。
+
+- `complete` 校验：会话属于本人 + `status='in_progress'`。防住「随便 POST 一个假 task_code 刷分」。
+- **分值取自会话记录，不取前端入参**——`expected_count` 与档位在建会话时由后端写入，学生改不了自己实际做了几题/几个词。
+- **审计留痕**：`complete` 时把 `judged_count`（判题次数，由 `/api/training/judge` 带 `sessionId` 时累加）与 `expected_count` 一起存进流水备注，**不阻断发分**（因为「完成即给分」，做了 1 题就该得 1 题的分），家长端可在流水里看到异常。
+- **明确记录为已知限制**：因为「完成即给分、不看对错」，「开一个 N 题会话立刻 complete」在语义上就等于「做完 N 题」，给分是**正确行为**。每日上限（§6.3）是主要防刷手段。
+
+### 6.5 `error_fix` 的精确定义
 
 用户认为「主线清零的错题」和「错题专项的错题」是两回事。实际按 PRD §7.4/§6.3，**错题专项拉取的正是主线错题本里未清零的题**——同一个池子，靠 `source` 区分来源但共享清零状态。
 
@@ -360,13 +395,26 @@ export const LEVELS = [
 - `remainingToday`：`dailyLimit == null` 时为 `null`。
 - `me/rules` 是**档位即可选项**的实现基础——各训练配置页靠它渲染可选档位，学生端**不再硬编码** `COUNT_OPTIONS`。
 
-### 7.2 训练会话 / 发分
+### 7.2 训练发分
+
+**乙类 · 整批发分**（只 `math_targeted` / `en_vocabulary`）：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/training/sessions/:id/complete` | 201。返回 `{ pointsAwarded, balance, totalEarned, levelUp:{from,to}\|null, reason? }`。`reason` ∈ `'daily_limit'`（`pointsAwarded=0`，**不报错**）\| `'already_completed'` \| `'no_rule'` \| `'genre_unset'` |
+| POST | `/api/training/sessions/:id/complete` | 201。返回 `{ pointsAwarded, balance, totalEarned, levelUp:{from,to}\|null, reason? }`。`reason` ∈ `'daily_limit'`（`pointsAwarded=0`，**不报错**）\| `'already_completed'` \| `'no_rule'` \| `'tier_inactive'` |
 
-各 `start` 端点的返回体加 `sessionId`。`POST /api/training/judge` 加可选入参 `sessionId`。
+- 这两个任务的 `start` 端点返回体加 `sessionId`。
+- `POST /api/training/judge` 加**可选**入参 `sessionId`（只用于累加 `judged_count` 审计，不传也能判题）。
+
+**甲类 · 逐目标发分**（`cn_dictation` / `cn_interpretation` / `cn_meaning` / `error_fix`）：**不新增端点**，在既有判题响应里追加两个字段：
+
+```ts
+{ ...原有判题结果, pointsAwarded: number, awardReason?: 'daily_limit' | 'no_rule' | 'genre_unset' | 'not_cleared' }
+```
+
+前端拿到 `pointsAwarded > 0` 就弹轻反馈；`= 0` 且带 `awardReason` 时静默或显示「今日该任务积分已达上限」。`error_fix` 的 `pointsAwarded` 要透传到 `judge-core` 的各调用方（`training.controller.ts`、`practice` 的判题入口、`exams` 的补判路径——补判路径**不参与发分**，避免考试补判冒出积分）。
+
+**`cn_meaning` 的「整篇答完」判定**：该篇最后一句判完（`sentenceIndex === sentences.length - 1`）时发分。前端不需要额外调用——`judge` 响应里自然带上。
 
 ### 7.3 家长端（`@Roles('parent')`，全部复用 `ParentService.requireOwnedStudent`）
 
@@ -405,7 +453,10 @@ export const LEVELS = [
 | `pages/student/ProfilePage.tsx` | **新建**，替换 `routes/index.tsx:366` 的 Placeholder。段位大卡 + 积分概览 + 流水列表（分页）+ 兑换记录 |
 | `pages/student/RewardsPage.tsx` | **新建**，替换 `routes/index.tsx:367`。奖励卡片 + 还差多少 + 「找家长兑换」提示 |
 | `services/api.ts` | 加 `getMyPoints / getMyLedger / getMyPointRules / getMyRewards / completeTrainingSession` |
-| 各训练 run 页 | `TargetedRunPage` / `ErrorPracticeRunPage` / `ExamResultPage` / `chinese/DictationRunPage` / `chinese/InterpretationRunPage` / `chinese/MeaningRunPage` / `english/VocabularyRunPage`：完成时调 `completeTrainingSession`，按返回决定轻反馈 or 全屏庆祝 |
+| `TargetedRunPage` / `english/VocabularyRunPage` | 题单/词单走完时调 `completeTrainingSession(sessionId)`，按返回决定轻反馈 or 全屏庆祝（**只有这两个走会话**） |
+| `ErrorPracticeRunPage` / `chinese/DictationRunPage` / `chinese/InterpretationRunPage` / `chinese/MeaningRunPage` | **不调完成接口**——判题响应里已带 `pointsAwarded`，读它弹轻反馈即可 |
+| `ExamResultPage` | 交卷后由后端发分；页面读交卷响应里的积分字段，用**全屏庆祝**（大任务） |
+| `CourseDetailPage` | `finishLesson` 的响应加积分字段，用全屏庆祝 |
 | `TargetedConfigPage.tsx:25` | **删除** `COUNT_OPTIONS` 常量，改读 `/api/points/me/rules` 渲染档位 |
 | `english/VocabularyConfigPage.tsx:14` | 同上（默认档位与现有一致，视觉不变） |
 
@@ -434,7 +485,8 @@ export const LEVELS = [
 
 - `points.service.test.ts`：段位边界（0/499/500/1199/1200/…/19999/20000）、幂等（同 `dedupe_key` 二次 award 不重复加分且返回首次结果）、每日上限（第 N+1 次 `pointsAwarded=0, reason='daily_limit'`）、余额不足、**兑换后段位不降**。
 - `point-rules.test.ts`：懒初始化补齐缺失档位、家长改值后学生读到新值、`genre IS NULL` 不发分。
-- `training-sessions.test.ts`：`complete` 重复调用幂等、非本人会话 404。
+- `training-sessions.test.ts`：`complete` 重复调用幂等、非本人会话 404、**分值取自会话记录而非前端入参**。
+- 甲类发分：`error_fix` 只在 `affectedRows > 0` 时发分（首次答对不发）、同日同题重判不重复发；`cn_dictation` 按 `genre` 分档、`genre IS NULL` 时 `pointsAwarded=0 + awardReason='genre_unset'`。
 - `main-error-books.repo.test.ts`：`clearUnclearedByStudentQuestionId` 返回 `affectedRows`。
 - `parent.controller.test.ts`：新增端点角色守卫 + 归属校验。
 
@@ -449,11 +501,15 @@ export const LEVELS = [
 
 ## 10. 实施顺序
 
-1. **前置 A**：「古诗含义」专项（`2026-09-17-chinese-meaning-special-design.md`，独立 spec + plan）。
+1. **前置 A**：「古诗含义」专项——**代码已完成**（`meaning.controller/service` + `MeaningRunPage` 及各自测试，内容管线 `meaning_cli.py` 见 commit `25c6975`/`02b031f`）。**剩余阻塞只有内容**：Task 12 需用户跑 `--export` 拿模板 → 人工填 `sentence_meanings` → `--apply`。未灌内容的篇目抽不到题，但**不阻塞积分体系的开发**（埋点位置不依赖数据）。
 2. **前置 B**：`chinese_passages.genre` 迁移 + 标定工具 + 人工标定。
+   - 顺带修 `meaning_cli.py` 的导出范围：它现在「含文言文、留空即可」，有了 `genre` 后可按体裁过滤。
 3. **前置 C**：家长端 `parentStudentStore` + `ParentLayout` 真实切换。
 4. **后端**：`points` 模块（5 表 + 迁移 + 常量 + 懒初始化 + 发分/兑换）+ `training_sessions` 表。
-5. **埋点**：8 个任务逐个接。先做 `mainline_lesson` / `error_fix` / `math_paper` 这三个有天然事件点的，再做 6 个会话型。
+5. **埋点**（按 §6.1 的三类推进，由易到难）：
+   - **丙类**（`mainline_lesson` / `math_paper`）——既有事件点直接埋，无新基建，先做来打通「发分 → 落流水 → 段位变化」这条链路。
+   - **甲类**（`error_fix` + 语文三个专项）——在既有判题函数/端点里发分，响应加 `pointsAwarded`。
+   - **乙类**（`math_targeted` / `en_vocabulary`）——最后做，要动 `training_sessions` + `complete` 端点 + 两个 `start` 端点。
 6. **前端学生端**：`LevelIcon` → `UserBadge` / `LevelPanel` → `PointsToast` → `CelebrationOverlay` + `FireworksCanvas` → `ProfilePage` / `RewardsPage` → 各 run 页接完成回调。
 7. **前端家长端**：`ParentPointsPage`（配置 + 兑换）。
 8. **文档**：PRD 新增 §7.13「闯关积分与段位」；`docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml` **同步更新**（硬规则）；`docs/ai-core-changelog.md` 记日期流水。
@@ -465,7 +521,7 @@ export const LEVELS = [
 | 风险 | 处置 |
 |---|---|
 | 单元检测/期中期末未实现 | 本期不发分；`point_rules` 懒初始化让以后加两行配置即可，**零迁移** |
-| 前端 `complete` 可伪造 | 会话归属 + 一次性 + `judged_count` 留痕；每日上限是主防线；已知限制明记 |
+| 前端 `complete` 可伪造 | **只影响乙类两个任务**；分值取自会话记录而非前端入参 + 一次性 + `judged_count` 留痕；每日上限是主防线；已知限制明记 |
 | 抽公共庆祝组件会动主线现有流程 | 补 `CelebrationOverlay.test.tsx` 渲染测试；主线那段的撒花字符一并换成烟花 |
 | `genre` 未标定的篇目 | 不发分 + 日志留痕，**不猜、不默认** |
 | 家长误把分值调成 0 或超大 | 后端校验 `0 <= points <= 9999` |
