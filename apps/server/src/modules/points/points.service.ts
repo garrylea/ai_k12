@@ -61,7 +61,14 @@ function toLedgerEntry(row: PointLedgerRow): PointLedgerEntry {
  *
  * **安全**：`dedupeKey` 是必填参数、**只能由服务端从已知 id 拼**（如 `paper:<sessionId>`）。
  * `findByDedupeKey` 没有 `student_id` 过滤，而 key 里嵌了自增 id——若 key 可来自请求体，
- * 客户端就能枚举/构造别人的 key。任何埋点都必须调 `todayKey()`，不要接受外部字符串。
+ * 客户端就能枚举/构造别人的 key，**任何埋点都不要接受外部字符串**。
+ *
+ * **注意 key 分两种，别一律套 `todayKey()`**：
+ * - **带日期**（跨天可再得分）：`err:` / `dict:` / `interp:` / `meaning:` 四个甲类埋点，
+ *   由 `todayKey()`（服务器本地时区的 YYYY-MM-DD）拼进 key；
+ * - **不带日期**（一次性）：`mainline_lesson`（`lesson:<sid>:<lid>`，主线单向、一课只算一次）
+ *   与 `math_paper`（`paper:<sid>`）——`updateProgress` 对同一张末卡可能被重复调用、
+ *   `finalizeSession` 也会被超时自动收卷再次调用，幂等键是唯一防重复发分的东西。
  */
 @Injectable()
 export class PointsService {

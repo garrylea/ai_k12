@@ -1065,6 +1065,9 @@ CREATE TABLE IF NOT EXISTS point_ledger (
   points     INT NOT NULL,                  -- earn 正数 / redeem 负数
   dedupe_key VARCHAR(120) NOT NULL,
   title      VARCHAR(60) NOT NULL,          -- 展示文案快照，如「英语背单词 · 10 词」
+  -- 来源类型（埋点实际写入的值，勿凭印象改）：
+  --   'lesson'（mainline_lesson）| 'exam_session'（math_paper）| 'training_session'（乙类）
+  --   | 'passage'（语文三专项）| 'question'（error_fix）；kind='redeem' 时为 NULL
   ref_type   VARCHAR(24) DEFAULT NULL,
   ref_id     BIGINT DEFAULT NULL,
   redemption_id BIGINT DEFAULT NULL,
@@ -1139,7 +1142,9 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   expected_count SMALLINT NOT NULL DEFAULT 1,   -- 本次应完成的目标数（题数）
   judged_count   SMALLINT NOT NULL DEFAULT 0,   -- 审计留痕：实际判过几题
   status     VARCHAR(16) NOT NULL DEFAULT 'in_progress',  -- in_progress | completed | abandoned
-  ref_type   VARCHAR(24) DEFAULT NULL,          -- 'question' | 'passage' | 'paper'
+  -- 目标物类型：当前两个乙类任务（math_targeted / en_vocabulary）都写 'question'
+  -- （注意与 point_ledger.ref_type 是两套值，那边才有 'exam_session'/'passage' 等）
+  ref_type   VARCHAR(24) DEFAULT NULL,
   ref_id     BIGINT DEFAULT NULL,
   started_at   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   completed_at DATETIME(3) DEFAULT NULL,

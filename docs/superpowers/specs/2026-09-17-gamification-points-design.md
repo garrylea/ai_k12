@@ -97,7 +97,7 @@ ALTER TABLE chinese_passages
 ```
 
 - 迁移 `tools/db/migrations/2026-09-17_gamification_points.sql`（`information_schema` + `PREPARE` 幂等包裹），**同时折回 `tools/db/schema.sql:309`**。
-- 标定方式：写一个 `--set-genre` 子命令挂到 `tools/data-refinery/src/dictation_cli.py`，支持 `--id` / `--work-title` + `--genre poem|prose`，`--export` 出待标定清单。
+- 标定方式：在 `tools/data-refinery/src/dictation_cli.py` 加两个扁平 flag——`--export-genre` 出待标定清单（Markdown，空体裁标「待定」）、`--set-genre` 写回（`--id <n> --genre poem|prose` 单篇，或 `--input <file>` 批量，每行 `id<TAB>poem|prose`）。**工具只读写、不用 LLM 猜**。
 - **`genre IS NULL` 的篇目 → 不发分**（不是猜、也不是默认按古诗处理）。发分前校验，日志留痕。
 - 刻意**不复用** `sentence_meanings` 的有无来推体裁：那是「含义数据是否就绪」，和体裁是两件事（`schema.sql:319-321` 已明记「只做诗词」由该列实现，勿混）。
 
@@ -319,7 +319,7 @@ export const LEVELS = [
 |---|---|---|---|
 | `cn_dictation` | 一篇 | `training.controller.ts:175 dictation/judge` 判完 | 按该篇 `genre` 取档 |
 | `cn_interpretation` | 一篇 | `training.controller.ts:240` 判完 | 按该篇 `genre` 取档 |
-| `cn_meaning` | 一篇（整篇答完） | 该篇最后一句判完时（`meaning.controller.ts:57`） | `default` 档 |
+| `cn_meaning` | 一篇（整篇答完） | 该篇**最后一个可作答句**判完时（`meaning.controller.ts:57`；不是 `sentences.length - 1`，见 §7.2） | `default` 档 |
 | `error_fix` | 一题 | `judge-core.service.ts:204` 清零成功 | `default` 档 |
 
 - 分值是「**篇数/题数 × 单位分**」——所以`cn_meaning` 一次选 3 首就是 3 × 4 = 12 分，`dictation` 一轮 5 篇就按各自体裁累加。
@@ -429,14 +429,21 @@ export const LEVELS = [
 **甲类 · 逐目标发分**（`cn_dictation` / `cn_interpretation` / `cn_meaning` / `error_fix`）：**不新增端点**，在既有判题响应里追加两个字段：
 
 ```ts
-{ ...原有判题结果, pointsAwarded: number, awardReason?: 'daily_limit' | 'no_rule' | 'genre_unset' | 'not_cleared' }
+{ ...原有判题结果, pointsAwarded: number,
+  awardReason?: 'daily_limit' | 'no_rule' | 'tier_inactive' | 'genre_unset' | 'not_cleared' }
 ```
+
+> `tier_inactive`（家长停用了该档位）**必须在枚举里**：`award()` 的第 3 步会返回它，
+> 漏掉就得往枚举外塞一个值。`duplicate` 则**刻意不在枚举内**——幂等命中本次未入账，
+> 一律静默、`pointsAwarded=0`，报出去前端会弹假 `+N 分`。
 
 前端拿到 `pointsAwarded > 0` 就弹轻反馈；`= 0` 且带 `awardReason` 时静默或显示「今日该任务积分已达上限」。`error_fix` 的 `pointsAwarded` 要透传到 `judge-core` 的各调用方（`training.controller.ts`、`practice` 的判题入口、`exams` 的补判路径——补判路径**不参与发分**，避免考试补判冒出积分）。
 
 **`cn_meaning` 的「整篇答完」判定**：该篇**最后一个可作答句**判完时发分。前端不需要额外调用——`judge` 响应里自然带上。
 
 > ⚠️ 「最后一个可作答句」**不是** `sentences.length - 1`：末句可能没有标准含义（`sentence_meanings[i] == null`，`answerable:false`、根本不出题），按下标 `length - 1` 判定会让这类篇目**永远拿不到分**。正确口径是「最大的 `i` 使 `meanings[i] != null`」，实现在 `meaning.service.ts`（`task-11` 落实时修正本条，原写法有误）。
+
+**`cn_interpretation` 的「整篇答完」判定**：与含义专项同理，发分点绑定「被判的是**最后一句**」（`interpretation.service` 据 `sentenceIndex` 与该篇最大句下标比较），中间句一律 `pointsAwarded=0`——否则学生只答第一句就能拿一整篇的分。同一判定也是 `fullTranslation` 只在最后一句下发的原因（提前给整篇译文等于泄题）；判题本身仍是**逐句**的，学生答完一句立即知道对错。
 
 ### 7.3 家长端（`@Roles('parent')`，全部复用 `ParentService.requireOwnedStudent`）
 

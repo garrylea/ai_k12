@@ -74,7 +74,10 @@ export interface ExamResultItemDto {
   selfAssessment?: 'correct' | 'incorrect' | null; // 该生该题最近一次自评（恢复自评状态）
 }
 
-/** GET /api/exams/sessions/:id/results 响应（仅 submitted 可查）。 */
+/** GET /api/exams/sessions/:id/results 响应（仅 submitted 可查）。
+ *  ⚠️ 继承 `ExamSummaryDto` 只是复用汇总字段——**`points` 仅 submit 响应带**：
+ *  发分发生在 `finalizeSession`（交卷路径），`getResults` 只读已交卷汇总、不补发分，
+ *  故本响应运行时不填 `points`（此处继承来的可选字段是类型层面的已知不精确）。 */
 export interface ExamResultsDto extends ExamSummaryDto {
   items: ExamResultItemDto[];
 }
