@@ -3,6 +3,7 @@ import { ExamsController } from './exams.controller.js';
 import { ExamsService } from './exams.service.js';
 import { ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
 import { PracticeModule } from '../practice/practice.module.js';
+import { PointsModule } from '../points/points.module.js';
 
 /**
  * 考试模块（Task 1 试卷列表/详情 + Task 2 会话生命周期）。
@@ -11,9 +12,10 @@ import { PracticeModule } from '../practice/practice.module.js';
  * source='exam'）。repos 通过 @Inject('DATABASE_POOL') 注入全局连接池
  * （DatabaseModule 是 @Global）。QuestionSelfAssessmentsRepository：
  * 主观题 self_assess 模式结果页恢复该生最近一次自评（判题体系重构）。
+ * imports PointsModule：交卷发分（Task 9，math_paper）注入其导出的 PointsService。
  */
 @Module({
-  imports: [PracticeModule],
+  imports: [PracticeModule, PointsModule],
   controllers: [ExamsController],
   providers: [ExamsService, ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository],
 })

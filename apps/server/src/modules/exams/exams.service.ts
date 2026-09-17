@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ExamPapersRepository } from '../../database/repositories/exam-papers.repo.js';
 // 注意：repo 类必须是值导入（非 import type）——NestJS DI 依赖
 // emitDecoratorMetadata 的设计时类型，type-only import 运行时被擦除会导致
@@ -7,6 +7,9 @@ import { ExamSessionsRepository } from '../../database/repositories/exam-session
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 import { QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
 import { JudgeCoreService, subjectiveJudgeMode, SUBJECTIVE_TYPES } from '../practice/judge-core.service.js';
+import { PointsService } from '../points/points.service.js';
+import type { AwardResult } from '../points/points.service.js';
+import { toPointsAwardDto } from '../points/dto/points.dto.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import type { ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
 import type { ExamPaperDto, PaperDetailDto, PaperQueryDto } from './dto/paper-query.dto.js';
@@ -32,12 +35,15 @@ const MAX_DURATION = 300;
  */
 @Injectable()
 export class ExamsService {
+  private readonly logger = new Logger(ExamsService.name);
+
   constructor(
     private readonly examPapersRepo: ExamPapersRepository,
     private readonly examSessionsRepo: ExamSessionsRepository,
     private readonly judgeCore: JudgeCoreService,
     private readonly mainErrorRepo: MainErrorBooksRepository,
     private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
+    private readonly pointsService: PointsService,
   ) {}
 
   /** 试卷列表：透传筛选参数给 repo，行 -> ExamPaperDto 映射。 */
@@ -354,8 +360,27 @@ export class ExamsService {
     }
 
     await this.examSessionsRepo.markSubmitted(session.id);
+    const points = toPointsAwardDto(await this.awardPaperPoints(session.student_id, session.id));
     const finalAnswers = await this.examSessionsRepo.findAnswersBySession(session.id);
-    return this.summarize(questions.length, finalAnswers);
+    return { ...this.summarize(questions.length, finalAnswers), points };
+  }
+
+  /** 交卷发分（学完一张卷）。刻意吞掉异常：积分是激励层，发分失败绝不能挡住交卷。
+   *  `submit()` 已有「已 submitted 直接重算」的幂等判重，但本方法所在的 `finalizeSession`
+   *  也会被超时自动收卷路径调用——`dedupe_key`（一个会话只能发一次）是第二道保险。 */
+  private async awardPaperPoints(studentId: number, sessionId: number): Promise<AwardResult | null> {
+    try {
+      return await this.pointsService.award({
+        studentId,
+        taskCode: 'math_paper',
+        dedupeKey: `paper:${sessionId}`,
+        refType: 'exam_session',
+        refId: sessionId,
+      });
+    } catch (err) {
+      this.logger.warn(`awardPaperPoints failed (student=${studentId}, session=${sessionId}): ${err}`);
+      return null;
+    }
   }
 
   /** 考试来源错题本写入（未作答按错计 / 补判失败兜底共用）。

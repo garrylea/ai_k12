@@ -59,7 +59,7 @@ function makeService(opts: {
     },
   };
   const practiceService = opts.practiceService ?? {};
-  return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any, practiceService as any);
+  return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any, practiceService as any, {} as any);
 }
 
 describe('ProgressService.getStarMap — semester/version selection', () => {
@@ -139,6 +139,7 @@ function makeUpdateService(opts: {
   practiceComplete?: boolean;
   withPracticeService?: boolean;
   lesson?: { id: number; unitId: number } | null;
+  pointsService?: any;
 }) {
   const progressRepo = {
     findByStudentAndSubject: async () => opts.progress,
@@ -158,6 +159,8 @@ function makeUpdateService(opts: {
   const practiceService = opts.withPracticeService
     ? { isLessonPracticeComplete: vi.fn().mockResolvedValue(opts.practiceComplete ?? true) }
     : {};
+  // 缺省发分 mock：返回 null（未发分）——老用例的响应形状保持不变（points 走 undefined）
+  const pointsService = opts.pointsService ?? { award: vi.fn().mockResolvedValue(null) };
   const svc = new ProgressService(
     progressRepo as any,
     {} as any,
@@ -166,8 +169,9 @@ function makeUpdateService(opts: {
     {} as any,
     contentService as any,
     practiceService as any,
+    pointsService as any,
   );
-  return { svc, progressRepo, contentService, practiceService };
+  return { svc, progressRepo, contentService, practiceService, pointsService };
 }
 
 describe('ProgressService.updateProgress — practice gate', () => {
@@ -272,5 +276,122 @@ describe('ProgressService.updateProgress — 家长配置行（currentLessonId=N
     expect(res).toEqual({ advanced: false, nextUnlockType: 'lesson' });
     expect(progressRepo.adoptLesson).toHaveBeenCalledWith(6, 310, 1112);
     expect(progressRepo.updateCardSort).toHaveBeenCalledWith(6, 1, 'lesson');
+  });
+});
+
+// --- updateProgress 发分埋点（Task 9：mainline_lesson） ---
+// 学完一课（advanceLesson 与 markCompleted 两条 return）各发一次分；
+// dedupeKey 不带日期（主线单向，一课只能算一次）；积分故障绝不能阻塞推进。
+
+/** 一条完整 AwardResult；levelUp 里是 LevelInfo 对象，wire 形状要求压成 code 字符串。 */
+const awardResult = (overrides: any = {}) => ({
+  pointsAwarded: 10,
+  balance: 60,
+  totalEarned: 510,
+  levelUp: {
+    from: { code: 'pichai', name: '劈柴', index: 0, threshold: 0 },
+    to: { code: 'zhutie', name: '铸铁', index: 1, threshold: 500 },
+  },
+  ...overrides,
+});
+
+describe('ProgressService.updateProgress — 学完一课发分（mainline_lesson）', () => {
+  it('学完最后一卡（有下一课）-> award 一次：taskCode/dedupeKey 正确，响应 points 段位是 code 字符串', async () => {
+    const pointsService = { award: vi.fn().mockResolvedValue(awardResult()) };
+    const { svc } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0, currentUnitId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'summary' },
+      ],
+      nextLesson: { id: 99, unitId: 1 },
+      pointsService,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+
+    expect(pointsService.award).toHaveBeenCalledTimes(1);
+    expect(pointsService.award).toHaveBeenCalledWith({
+      studentId: 2,
+      taskCode: 'mainline_lesson',
+      dedupeKey: 'lesson:2:9',
+      refType: 'lesson',
+      refId: 9,
+    });
+    // wire 形状：from/to 是段位 code 字符串，不是 LevelInfo 对象（前端拿 code 查图标）
+    expect(res.points).toEqual({ awarded: 10, balance: 60, levelUp: { from: 'pichai', to: 'zhutie' } });
+    expect(typeof (res.points as any)?.levelUp?.from).toBe('string');
+  });
+
+  it('学完最后一课（无下一课，markCompleted 分支）-> 同样发分', async () => {
+    const pointsService = { award: vi.fn().mockResolvedValue(awardResult({ levelUp: null })) };
+    const { svc, progressRepo } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0, currentUnitId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'summary' },
+      ],
+      nextLesson: null,
+      pointsService,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+
+    expect(progressRepo.markCompleted).toHaveBeenCalledWith(1);
+    expect(pointsService.award).toHaveBeenCalledTimes(1);
+    expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 2, taskCode: 'mainline_lesson', dedupeKey: 'lesson:2:9',
+    }));
+    // 未跨档：levelUp 保持 null（不发明字段）
+    expect(res.points).toEqual({ awarded: 10, balance: 60, levelUp: null });
+  });
+
+  it('advanced:false（reviewing）-> 不发分，响应不带 points 字段', async () => {
+    const pointsService = { award: vi.fn() };
+    const { svc } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 5, currentUnitId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'summary' },
+      ],
+      pointsService,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 1);
+
+    expect(res).toEqual({ advanced: false, reason: 'reviewing' });
+    expect('points' in res).toBe(false);
+    expect(pointsService.award).not.toHaveBeenCalled();
+  });
+
+  it('advanced:false（not_current_lesson）-> 不发分，响应不带 points 字段', async () => {
+    const pointsService = { award: vi.fn() };
+    const { svc } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0, currentUnitId: 1 },
+      cards: [],
+      nextLesson: null,
+      pointsService,
+    });
+    const res = await svc.updateProgress(2, 1, 5, 1);
+
+    expect(res).toEqual({ advanced: false, reason: 'not_current_lesson', currentLessonId: 9 });
+    expect('points' in res).toBe(false);
+    expect(pointsService.award).not.toHaveBeenCalled();
+  });
+
+  it('award 抛错 -> updateProgress 仍正常返回（积分故障不阻塞主线推进）', async () => {
+    const pointsService = { award: vi.fn().mockRejectedValue(new Error('ledger down')) };
+    const { svc, progressRepo } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0, currentUnitId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'summary' },
+      ],
+      nextLesson: { id: 99, unitId: 1 },
+      pointsService,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+
+    expect(res).toEqual({ advanced: true, nextLessonId: 99 });
+    expect(res.points).toBeUndefined();
+    expect(progressRepo.advanceLesson).toHaveBeenCalledWith(1, 99, null);
+    expect(pointsService.award).toHaveBeenCalledTimes(1);
   });
 });

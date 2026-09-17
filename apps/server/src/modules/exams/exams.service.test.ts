@@ -27,10 +27,14 @@ const mk = (overrides: any = {}) => ({
   selfAssessRepo: {
     findLatestByStudentAndQuestionIds: vi.fn().mockResolvedValue(new Map()),
   },
+  // Task 9 发分埋点（math_paper）。缺省返回 null（未发分）——老用例响应形状保持不变
+  pointsService: {
+    award: vi.fn().mockResolvedValue(null),
+  },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new ExamsService(deps.examPapersRepo, deps.examSessionsRepo, deps.judgeCore, deps.mainErrorRepo, deps.selfAssessRepo);
+  new ExamsService(deps.examPapersRepo, deps.examSessionsRepo, deps.judgeCore, deps.mainErrorRepo, deps.selfAssessRepo, deps.pointsService);
 
 // 判题体系重构：subjectiveJudgeMode 读 JUDGE_SUBJECTIVE_MODE（缺省 self_assess）。
 // 设过 ai 的用例在 afterEach 清理，避免污染其它用例（铁律：模式间互不串扰）。
@@ -570,6 +574,75 @@ describe('ExamsService.submit', () => {
       examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow({ student_id: 42 })) },
     });
     await expect(mkSvc(deps2).submit(1, 77)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+// ============================================================
+// Task 9：交卷发分（math_paper）
+// ============================================================
+
+/** 完整 AwardResult；levelUp 是 LevelInfo 对象，wire 形状要求压成 code 字符串。 */
+const awardResult = (overrides: any = {}) => ({
+  pointsAwarded: 10,
+  balance: 60,
+  totalEarned: 510,
+  levelUp: {
+    from: { code: 'pichai', name: '劈柴', index: 0, threshold: 0 },
+    to: { code: 'zhutie', name: '铸铁', index: 1, threshold: 500 },
+  },
+  ...overrides,
+});
+
+describe('ExamsService.submit — 交卷发分（math_paper）', () => {
+  it('收卷后发分一次：taskCode=math_paper、dedupeKey=paper:<sessionId>，响应 points 段位是 code 字符串', async () => {
+    const pointsService = { award: vi.fn().mockResolvedValue(awardResult()) };
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+      pointsService,
+    });
+    const r = await mkSvc(deps).submit(1, 77);
+
+    expect(pointsService.award).toHaveBeenCalledTimes(1);
+    expect(pointsService.award).toHaveBeenCalledWith({
+      studentId: 1, taskCode: 'math_paper', dedupeKey: 'paper:77', refType: 'exam_session', refId: 77,
+    });
+    // 发分在 markSubmitted 之后（会话已终态）
+    expect(deps.examSessionsRepo.markSubmitted.mock.invocationCallOrder[0])
+      .toBeLessThan(pointsService.award.mock.invocationCallOrder[0]);
+    expect(r.points).toEqual({ awarded: 10, balance: 60, levelUp: { from: 'pichai', to: 'zhutie' } });
+  });
+
+  it('award 抛错 -> 交卷汇总照常返回（积分故障不阻塞交卷）', async () => {
+    const pointsService = { award: vi.fn().mockRejectedValue(new Error('ledger down')) };
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow()) },
+      pointsService,
+    });
+    const r = await mkSvc(deps).submit(1, 77);
+
+    expect(r).toMatchObject({ correctCount: 0, totalCount: 3 });
+    expect(r.points).toBeUndefined();
+    // 发分确实被尝试过（异常被吞掉，而不是压根没调）
+    expect(pointsService.award).toHaveBeenCalledTimes(1);
+    expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
+  });
+
+  it('超时自动收卷路径（getSession）同样发分 —— dedupeKey 是幂等第二道保险', async () => {
+    const pointsService = { award: vi.fn().mockResolvedValue(awardResult()) };
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ deadline_at: new Date(Date.now() - 1000) })),
+      },
+      pointsService,
+    });
+    await mkSvc(deps).getSession(1, 77);
+    expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 1, taskCode: 'math_paper', dedupeKey: 'paper:77',
+    }));
   });
 });
 

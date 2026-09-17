@@ -1,4 +1,5 @@
 import type { LevelInfo } from '../levels.js';
+import type { AwardResult } from '../points.service.js';
 
 /**
  * 学生端积分查询端点的响应类型（`GET /api/points/me*`，spec §7.1）。
@@ -6,6 +7,32 @@ import type { LevelInfo } from '../levels.js';
  * 放 dto/ 而不是 points.service.ts：这几个形状是**端点契约**，Task 9–12 的埋点只调
  * `award()`、不碰它们；集中在这里便于与 `docs/api/openapi.yaml` 对照。
  */
+
+/** 埋点端点的响应里回带的发分结果（wire 形状，**与 `AwardResult` 不同**）。
+ *  `levelUp.from/to` 是段位 code 字符串（`'pichai'` / `'zhutie'`）而不是 `LevelInfo`
+ *  对象——前端只需要 code 去查图标。 */
+export interface PointsAwardDto {
+  awarded: number;
+  balance: number;
+  levelUp: { from: string; to: string } | null;
+}
+
+/**
+ * `AwardResult` -> wire 形状：段位对象压成 code。**所有埋点端点共用这一处映射**
+ * （Task 9 起），不要在各自的 service 里再写一份。
+ *
+ * 未发分（helper 吞掉异常返回 null，或 `award` 尚未被调用）时返回 `undefined`——
+ * JSON 序列化会直接丢掉该字段；正常业务结果（duplicate/no_rule/daily_limit）仍带
+ * `awarded: 0` 的对象，形状稳定，前端不必按 presence 分支。
+ */
+export function toPointsAwardDto(result: AwardResult | null | undefined): PointsAwardDto | undefined {
+  if (!result) return undefined;
+  return {
+    awarded: result.pointsAwarded,
+    balance: result.balance,
+    levelUp: result.levelUp ? { from: result.levelUp.from.code, to: result.levelUp.to.code } : null,
+  };
+}
 
 /** `GET /api/points/me` —— 概览。 */
 export interface PointsOverview {

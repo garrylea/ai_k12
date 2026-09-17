@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ProgressRepository } from '../../database/repositories/progress.repo.js';
 import { StudentsRepository, type Student } from '../../database/repositories/students.repo.js';
 import { LessonsRepository } from '../../database/repositories/lessons.repo.js';
@@ -6,6 +6,9 @@ import { UnitsRepository } from '../../database/repositories/units.repo.js';
 import { SemestersRepository } from '../../database/repositories/semesters.repo.js';
 import { ContentService } from '../content/content.service.js';
 import { PracticeService } from '../practice/practice.service.js';
+import { PointsService } from '../points/points.service.js';
+import type { AwardResult } from '../points/points.service.js';
+import { toPointsAwardDto } from '../points/dto/points.dto.js';
 import { gradeCodeFromLabel } from '../../common/utils/grade.js';
 
 export interface SectionData {
@@ -38,6 +41,8 @@ export interface StarMapData {
 
 @Injectable()
 export class ProgressService {
+  private readonly logger = new Logger(ProgressService.name);
+
   constructor(
     private progressRepo: ProgressRepository,
     private studentsRepo: StudentsRepository,
@@ -46,6 +51,7 @@ export class ProgressService {
     private semestersRepo: SemestersRepository,
     private contentService: ContentService,
     private practiceService: PracticeService,
+    private pointsService: PointsService,
   ) {}
 
   async getStarMap(studentId: number, subjectId: number): Promise<StarMapData> {
@@ -284,15 +290,35 @@ export class ProgressService {
       if (nextLesson) {
         const nextUnitId = nextLesson.unitId !== progress.currentUnitId ? nextLesson.unitId : null;
         await this.progressRepo.advanceLesson(progress.id, nextLesson.id, nextUnitId);
-        return { advanced: true, nextLessonId: nextLesson.id };
+        const points = toPointsAwardDto(await this.awardLessonPoints(studentId, lessonId));
+        return { advanced: true, nextLessonId: nextLesson.id, points };
       }
       // No more lessons: mark subject completed
       await this.progressRepo.markCompleted(progress.id);
-      return { advanced: true, completed: true };
+      const points = toPointsAwardDto(await this.awardLessonPoints(studentId, lessonId));
+      return { advanced: true, completed: true, points };
     }
 
     const nextUnlockType = currentCard.cardType === 'practice' ? 'practice' : 'lesson';
     await this.progressRepo.updateCardSort(progress.id, cardSortOrder, nextUnlockType);
     return { advanced: false, nextUnlockType };
+  }
+
+  /** 学完一课发分。刻意吞掉异常：积分是激励层，发分失败绝不能挡住主线推进。
+   *  `dedupe_key` 不带日期 —— 主线单向，一课只能算一次；`updateProgress` 对同一张
+   *  末卡可能被重复调用，幂等键是唯一防重复发分的东西。 */
+  private async awardLessonPoints(studentId: number, lessonId: number): Promise<AwardResult | null> {
+    try {
+      return await this.pointsService.award({
+        studentId,
+        taskCode: 'mainline_lesson',
+        dedupeKey: `lesson:${studentId}:${lessonId}`,
+        refType: 'lesson',
+        refId: lessonId,
+      });
+    } catch (err) {
+      this.logger.warn(`awardLessonPoints failed (student=${studentId}, lesson=${lessonId}): ${err}`);
+      return null;
+    }
   }
 }

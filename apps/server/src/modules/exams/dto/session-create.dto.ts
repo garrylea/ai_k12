@@ -5,6 +5,8 @@
  * 数值/区间校验在 service 层（createSession 的 durationMinutes 10-300 整数）。
  */
 
+import type { PointsAwardDto } from '../../points/dto/points.dto.js';
+
 /** POST /api/exams/sessions 请求体。 */
 export interface SessionCreateDto {
   paperId: number;
@@ -46,12 +48,14 @@ export interface SessionStateDto {
   answered: Record<number, { answerText: string | null }>;
 }
 
-/** 交卷/收卷汇总（submit 响应；getResults 内嵌同构字段）。 */
+/** 交卷/收卷汇总（submit 响应；getResults 内嵌同构字段）。
+ *  `points` 为 Task 9 交卷发分结果（`math_paper`）；发分故障时为 undefined（JSON 里无该字段）。 */
 export interface ExamSummaryDto {
   correctCount: number;
   totalCount: number;
   accuracy: number; // 百分比，一位小数（如 33.3）；分母只算客观题
   subjectiveCount: number; // 主观题题数（self_assess 模式不判对错，单独计数）
+  points?: PointsAwardDto;
 }
 
 /** GET /api/exams/sessions/:id/results 响应条目（JOIN questions 带 explanation）。 */
