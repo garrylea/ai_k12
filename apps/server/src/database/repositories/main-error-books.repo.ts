@@ -104,13 +104,20 @@ export class MainErrorBooksRepository {
     return rows.length > 0;
   }
 
-  /** 题中心变体清零：该学生此题所有未清行一次性 is_cleared=1（不限 source）。 */
-  async clearUnclearedByStudentQuestionId(studentId: number, questionId: number): Promise<void> {
-    await this.pool.execute(
+  /**
+   * 题中心变体清零：该学生此题所有未清行一次性 is_cleared=1（不限 source）。
+   *
+   * **返回 `affectedRows`**——积分体系据此判定「确实清掉了一条未清零的错题」：
+   * `> 0` 才发 `error_fix` 分，首次就答对（本无未清行）为 `0`、不发分（spec §6.5）。
+   * 返回值从 `void` 改为 `number` 对既有 `await` 调用方兼容（它们忽略返回值）。
+   */
+  async clearUnclearedByStudentQuestionId(studentId: number, questionId: number): Promise<number> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE main_error_books SET is_cleared = 1, cleared_at = NOW(3)
        WHERE student_id = ? AND is_cleared = 0 AND question_id = ?`,
       [studentId, questionId],
     );
+    return result.affectedRows;
   }
 
   async markCleared(id: number): Promise<void> {

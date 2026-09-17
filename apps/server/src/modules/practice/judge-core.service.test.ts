@@ -21,11 +21,13 @@ const mk = (overrides: any = {}) => ({
   explanationCache: { ensureExplanation: vi.fn() },
   // 判题体系重构（2026-09-09）新增第 6 参（recordSelfAssessment 用）
   selfAssessRepo: { create: vi.fn().mockResolvedValue(1) },
+  // Task 10 新增第 7 参：错题订正发分（error_fix）
+  pointsService: { award: vi.fn().mockResolvedValue({ pointsAwarded: 3 }), todayKey: vi.fn(() => '2026-09-17') },
   ...overrides,
 });
 
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any);
+  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any);
 
 describe('JudgeCoreService.judgeQuestion', () => {
   it('choice 命中 -> exact 比对，答错入错题本（source 透传）', async () => {
@@ -95,7 +97,7 @@ describe('JudgeCoreService.judgeQuestion', () => {
 });
 
 /** 构造带 mock 依赖的 JudgeCoreService（capabilities 不会被 self_assess 路径触达，占位即可）。 */
-function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess', any>> = {}) {
+function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess' | 'points', any>> = {}) {
   const questions = overrides.questions ?? {
     findById: vi.fn(async () => null),
   };
@@ -105,6 +107,7 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
     clearUnclearedByStudentQuestionId: vi.fn(async () => {}),
   };
   const selfAssess = overrides.selfAssess ?? { create: vi.fn(async () => 1) };
+  const pointsService = overrides.points ?? { award: vi.fn(async () => ({ pointsAwarded: 3 })), todayKey: vi.fn(() => '2026-09-17') };
   const svc = new JudgeCoreService(
     questions as unknown as QuestionsRepository,
     mainError as unknown as MainErrorBooksRepository,
@@ -112,8 +115,9 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
     {} as any, // JudgmentCapability（self_assess 路径不触达）
     {} as any, // ExplanationCacheService（self_assess 路径不触达）
     selfAssess as unknown as QuestionSelfAssessmentsRepository,
+    pointsService as any, // PointsService（Task 10 错题订正发分）
   );
-  return { svc, questions, mainError, selfAssess };
+  return { svc, questions, mainError, selfAssess, pointsService };
 }
 
 const q = (type: string, answer = 'B', explanation: string | null = '解析文本') => ({
@@ -195,6 +199,79 @@ describe('judgeQuestion 空答案守卫（路由 0）', () => {
     const out = await svc.judgeQuestion({ studentId: 7, subjectId: 1, questionId: 10, studentAnswer: '1', source: 'targeted' });
     expect(out).toMatchObject({ isCorrect: null, method: 'unanswered', noStandardAnswer: true });
     expect((svc as any).judgment.judge).not.toHaveBeenCalled();
+  });
+});
+
+describe('judgeQuestion error_fix 发分（错题订正）', () => {
+  const correctQ = { id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' };
+  const input = (source: string) => ({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'A', source });
+  const mkPoints = () => ({
+    award: vi.fn(async () => ({ pointsAwarded: 3 })),
+    todayKey: vi.fn(() => '2026-09-17'),
+  });
+
+  /** clearedNb = clearUnclearedByStudentQuestionId 的 affectedRows。 */
+  const svcWith = (clearedNb: number, points = mkPoints()) => {
+    const { svc } = makeService({
+      questions: { findById: vi.fn(async () => correctQ) },
+      mainError: {
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        create: vi.fn(async () => 101),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => clearedNb),
+      },
+      points,
+    });
+    return { svc, points };
+  };
+
+  it('cleared = 0（首次就答对）-> 不发分', async () => {
+    const { svc, points } = svcWith(0);
+    const out = await svc.judgeQuestion(input('error_practice'));
+    expect(out.isCorrect).toBe(true);
+    expect(points.award).not.toHaveBeenCalled();
+  });
+
+  it('cleared > 0 + error_practice -> 发一次，dedupeKey/refType/refId 精确匹配', async () => {
+    const { svc, points } = svcWith(1);
+    await svc.judgeQuestion(input('error_practice'));
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award).toHaveBeenCalledWith({
+      studentId: 1,
+      taskCode: 'error_fix',
+      dedupeKey: 'err:1:10:2026-09-17',
+      refType: 'question',
+      refId: 10,
+    });
+    // 日期后缀只来自 PointsService.todayKey()（单一真源，不在 judge-core 重写格式化）
+    expect(points.todayKey).toHaveBeenCalled();
+  });
+
+  it('cleared > 0 + source = exam（交卷补判）-> 不发分（考试分只由 math_paper 给）', async () => {
+    const { svc, points } = svcWith(1);
+    const out = await svc.judgeQuestion(input('exam'));
+    expect(out.isCorrect).toBe(true);
+    expect(points.award).not.toHaveBeenCalled();
+  });
+
+  it('award 抛错 -> 判题结果照常返回（不冒泡，不阻断）', async () => {
+    const points = {
+      award: vi.fn(async () => { throw new Error('points down'); }),
+      todayKey: vi.fn(() => '2026-09-17'),
+    };
+    const { svc } = svcWith(1, points);
+    const out = await svc.judgeQuestion(input('error_practice'));
+    expect(out).toMatchObject({ questionId: 10, isCorrect: true, method: 'exact' });
+    expect(points.award).toHaveBeenCalledTimes(1);
+  });
+
+  it('同日两次订正同题 -> dedupeKey 相同（重复调用不会二次计分）', async () => {
+    const { svc, points } = svcWith(1);
+    await svc.judgeQuestion(input('error_practice'));
+    await svc.judgeQuestion(input('error_practice'));
+    expect(points.award).toHaveBeenCalledTimes(2);
+    const keys = points.award.mock.calls.map((c: any[]) => c[0].dedupeKey);
+    expect(keys[0]).toBe('err:1:10:2026-09-17');
+    expect(keys[1]).toBe(keys[0]);
   });
 });
 

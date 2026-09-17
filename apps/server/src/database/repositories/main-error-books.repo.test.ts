@@ -181,6 +181,26 @@ describe('MainErrorBooksRepository', () => {
     expect(params).toEqual([1, 2, 2, 5, '题面']);
   });
 
+  it('clearUnclearedByStudentQuestionId 返回 affectedRows（error_fix 发分判定依据）', async () => {
+    // 发分规则：affectedRows > 0 = 确实清掉了一条未清零的错题（spec §6.5）。
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 2 }, []]) };
+    const repo = new MainErrorBooksRepository(pool as any);
+    const affected = await repo.clearUnclearedByStudentQuestionId(1, 2);
+    expect(affected).toBe(2);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('UPDATE main_error_books');
+    expect(sql).toContain('is_cleared = 1');
+    expect(sql).toContain('is_cleared = 0');
+    expect(sql).toContain('question_id = ?');
+    expect(params).toEqual([1, 2]);
+  });
+
+  it('clearUnclearedByStudentQuestionId 无未清行时返回 0（首次就答对）', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
+    const repo = new MainErrorBooksRepository(pool as any);
+    expect(await repo.clearUnclearedByStudentQuestionId(1, 2)).toBe(0);
+  });
+
   it('clearUnclearedByStudentQuestion questionId=null 走题面匹配分支', async () => {
     const pool = mockPool();
     const repo = new MainErrorBooksRepository(pool as any);

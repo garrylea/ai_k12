@@ -49,7 +49,7 @@ const mk = (overrides: any = {}) => ({
  *  judgeCore 第 6 参 selfAssessRepo 为判题体系重构（2026-09-09）新增（recordSelfAssessment 用）；
   PracticeService 第 12 参 selfAssessRepo、第 13 参 explanationCache 为 POST /self-assess 新增。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any), deps.selfAssessRepo as any, deps.explanationCache as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, { award: vi.fn(), todayKey: vi.fn(() => '2026-09-17') } as any), deps.selfAssessRepo as any, deps.explanationCache as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {

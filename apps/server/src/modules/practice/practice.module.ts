@@ -10,6 +10,7 @@ import { ExplanationCapability } from '../../ai-core/capabilities/explanation.ca
 import { ExplanationCacheService } from './explanation-cache.service.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
 import { ContentModule } from '../content/content.module.js';
+import { PointsModule } from '../points/points.module.js';
 
 /**
  * 课堂练习模块 - 主线练习判对错 + 提示 + 讨论。
@@ -21,9 +22,11 @@ import { ContentModule } from '../content/content.module.js';
  *   构造函数的 modelClient 参数可选，默认 new ModelClient()，可直接实例化。
  * - imports ConversationsModule：startDiscuss 创建带 card_id 的 mainline 对话
  *   （复用 ConversationsService.create）。
+ * - imports PointsModule：Task 10 起 JudgeCoreService 注入 PointsService，
+ *   答对清零「确实清掉未清错题」时发 `error_fix` 分（PointsModule 已 exports PointsService）。
  */
 @Module({
-  imports: [ConversationsModule, ContentModule],
+  imports: [ConversationsModule, ContentModule, PointsModule],
   controllers: [PracticeController],
   providers: [
     PracticeService,

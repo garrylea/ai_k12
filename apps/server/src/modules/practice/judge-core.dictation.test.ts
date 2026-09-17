@@ -14,6 +14,7 @@ function makeService() {
     {} as never, // judgment
     { ensureExplanation: vi.fn() } as never,
     {} as never, // selfAssessRepo
+    {} as never, // pointsService（judgeDictation 纯程序判题，不触达）
   );
   return { service, mainErrorRepo };
 }

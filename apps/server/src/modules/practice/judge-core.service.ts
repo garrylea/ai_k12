@@ -3,6 +3,7 @@ import { QuestionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsR
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
+import { PointsService } from '../points/points.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
@@ -118,6 +119,7 @@ export class JudgeCoreService {
     private readonly judgment: JudgmentCapability,
     private readonly explanationCache: ExplanationCacheService,
     private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
+    private readonly pointsService: PointsService,
   ) {}
 
   /** 题中心判题（训练模块专用入口）。q 恒非空，无「未命中 AI+结构化」分支。 */
@@ -201,7 +203,13 @@ export class JudgeCoreService {
     } else {
       // 答对 -> 清零该题所有未清错题记录（不限 source；best-effort，失败不阻断）
       try {
-        await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
+        const cleared = await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
+        // affectedRows > 0 = 确实清掉了一条未清零的错题 -> 发「错题订正」分。
+        // 首次就答对（本无错题行）affectedRows=0，不发分；已清零后再做对同样为 0。
+        // source='exam' 排除：交卷补判在途题不得额外发订正分（考试分只由 math_paper 一次性给）。
+        if (cleared > 0 && input.source !== 'exam') {
+          await this.awardErrorFix(input.studentId, input.questionId);
+        }
       } catch (err) {
         this.logger.error(`clearUnclearedByStudentQuestionId failed (student=${input.studentId}, question=${input.questionId}): ${err}`);
       }
@@ -387,6 +395,30 @@ export class JudgeCoreService {
     }
 
     return { questionId, isCorrect, method, errorType, errorBookId };
+  }
+
+  /**
+   * 错题订正发分（`error_fix`）。**仅在清零确实影响到未清行时由 judgeQuestion 调用**——
+   * 判定依据是 `clearUnclearedByStudentQuestionId` 的 affectedRows（spec §6.5）。
+   *
+   * 幂等键带日期 `err:<studentId>:<questionId>:<YYYY-MM-DD>`：同日同题重判不重复发分，
+   * 跨天可再次订正同题得分。日期只取 `PointsService.todayKey()`，**不在此重写日期格式化**
+   * （单一真源；spec §4.4 要求所有埋点从它取 key）。
+   *
+   * 刻意吞异常：积分是激励层，发分失败绝不能挡住判题（镜像 exams 的 awardPaperPoints）。
+   */
+  private async awardErrorFix(studentId: number, questionId: number): Promise<void> {
+    try {
+      await this.pointsService.award({
+        studentId,
+        taskCode: 'error_fix',
+        dedupeKey: `err:${studentId}:${questionId}:${this.pointsService.todayKey()}`,
+        refType: 'question',
+        refId: questionId,
+      });
+    } catch (err) {
+      this.logger.warn(`awardErrorFix failed (student=${studentId}, question=${questionId}): ${err}`);
+    }
   }
 
   /** 错题本 find-or-create（题中心：命中未清行复用，否则新建）。judgeQuestion 答错与自评 incorrect 共用。 */
