@@ -450,7 +450,7 @@ export const LEVELS = [
 
 > 家长端共 **11** 个端点（不是 9 个）。`points/settings` 与 rules 批量保存**分开**——汇率和分值是两个关注点。
 
-**错误码**：`3001` 余额不足 / `3002` 未达段位门槛 / `3003` 奖励已下架 / `3004` 兑换已关闭（`reward_redemption_enabled = 0`）。
+**错误码**：`3001` 余额不足 / `3002` 未达段位门槛 / `3003` 奖励已下架 / `3004` 兑换已关闭（`reward_redemption_enabled = 0`）/ `3005` 档位不存在（家长批量保存时某个 `(taskCode, tierKey)` 查不到）。
 
 **兑换规则**：家长输入要花掉的**积分**数，金额由汇率推导——`cashAmount = round(points / pointsPerYuan, 2)`，`pointsPerYuan` 默认 20（即 20 积分 = 1 元）、家长可配。
 
