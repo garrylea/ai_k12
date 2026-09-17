@@ -87,6 +87,21 @@ export class PointRedemptionsRepository {
   }
 
   /**
+   * 按主键反查（**不带 student_id 过滤**）。
+   *
+   * 只服务「路径里没有 studentId、必须先知道它属于谁」的端点——
+   * `PATCH /api/parent/redemptions/:id`（spec §7.3）。归属判定**不在这一层**：拿回行后由
+   * `RedemptionService` / `requireOwnedStudent` 决定，查到别人的行不是泄漏（调用方会 403）。
+   */
+  async findById(id: number): Promise<PointRedemptionRow | null> {
+    const [rows] = await this.pool.execute<PointRedemptionRow[]>(
+      `SELECT * FROM point_redemptions WHERE id = ? LIMIT 1`,
+      [id],
+    );
+    return rows[0] ?? null;
+  }
+
+  /**
    * 分页（id 倒序，最新在前）。用池 `query`（客户端转义）而非 `execute`：MySQL 对预处理语句的
    * `LIMIT ?` 报 "Incorrect arguments to mysqld_stmt_execute"（同 `point-ledger.repo.ts`）。
    */

@@ -18,5 +18,8 @@ import { ContentModule } from '../content/content.module.js';
     TextbookVersionsRepository,
     SemestersRepository,
   ],
+  // PointsModule 的家长端 controller（Task 8）注入 ParentService 做归属校验；
+  // 不导出的话 Nest 启动时就报「can't resolve dependencies」。
+  exports: [ParentService],
 })
 export class ParentModule {}

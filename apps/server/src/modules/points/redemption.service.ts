@@ -393,6 +393,22 @@ export class RedemptionService {
   }
 
   /**
+   * 按兑换单 id 反查**归属学生**。给 `PATCH /api/parent/redemptions/:id` 用：那条路径里没有
+   * `studentId`，必须先拿到 `student_id` 才能跑 `ParentService.requireOwnedStudent`。
+   *
+   * 查不到 → 404 `1002`。**只回学生 id、不回整行**：归属判定是调用方的事，也不让 controller
+   * 接触到仓储行。刻意不在这里做「存在但非本人」的区分（调用方拿 id 去比对 parent_id，
+   * 不会泄漏更多信息）。
+   */
+  async findStudentIdByRedemptionId(id: number): Promise<number> {
+    const row = await this.redemptionsRepo.findById(id);
+    if (row === null) {
+      throw new NotFoundException({ code: 1002, message: '兑换单不存在' });
+    }
+    return Number(row.student_id);
+  }
+
+  /**
    * 只改兑换单状态（pending ⇄ fulfilled），**绝不动积分**——本期兑换不可撤销。
    * `fulfilled_at` 用服务器时间；回到 pending 时清空。归属校验在 repo 的 `WHERE student_id = ?`。
    */

@@ -9,6 +9,12 @@ export interface ControlsSnapshot {
   rewardRedemptionEnabled: boolean;
 }
 
+/** 家长可改的控制项（缺省 = 不动该列）。范围校验在 API 层（Zod），这里只做白名单拼 SQL。 */
+export interface ControlsPatch {
+  pointsPerYuan?: number;
+  rewardRedemptionEnabled?: boolean;
+}
+
 /**
  * 家长控制项（`controls`）。本任务只用到兑换两项：`points_per_yuan` / `reward_redemption_enabled`。
  *
@@ -56,5 +62,33 @@ export class ControlsRepository {
       pointsPerYuan: Number(row?.points_per_yuan ?? 20),
       rewardRedemptionEnabled: Number(row?.reward_redemption_enabled ?? 1) === 1,
     };
+  }
+
+  /**
+   * 部分更新控制项（家长端 `PUT /api/parent/students/:id/points/settings`）。
+   *
+   * 只拼**白名单列**（`points_per_yuan` / `reward_redemption_enabled`），列名不来自入参，
+   * 因此不存在 SQL 注入面。空 patch 是 no-op（调用方是用例的 400 闸门）。
+   * 返回是否真的命中该生那一行——调用方必须先 `ensure()`，否则 UPDATE 会静默影响 0 行。
+   */
+  async update(studentId: number, patch: ControlsPatch): Promise<number> {
+    const sets: string[] = [];
+    const params: Array<number | string> = [];
+    if (patch.pointsPerYuan !== undefined) {
+      sets.push('points_per_yuan = ?');
+      params.push(patch.pointsPerYuan);
+    }
+    if (patch.rewardRedemptionEnabled !== undefined) {
+      sets.push('reward_redemption_enabled = ?');
+      params.push(patch.rewardRedemptionEnabled ? 1 : 0);
+    }
+    if (sets.length === 0) return 0;
+
+    params.push(studentId);
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE controls SET ${sets.join(', ')} WHERE student_id = ?`,
+      params,
+    );
+    return result.affectedRows;
   }
 }

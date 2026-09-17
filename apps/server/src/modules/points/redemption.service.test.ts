@@ -68,6 +68,7 @@ function harness(startNow = new Date(2026, 8, 17, 12, 0, 0)) {
     insert: vi.fn().mockResolvedValue(55),
     setLedgerId: vi.fn().mockResolvedValue(1),
     findOne: vi.fn().mockResolvedValue(null),
+    findById: vi.fn().mockResolvedValue(null),
     listByStudent: vi.fn().mockResolvedValue([] as PointRedemptionRow[]),
     countByStudent: vi.fn().mockResolvedValue(0),
     updateStatus: vi.fn().mockResolvedValue(1),
@@ -644,6 +645,26 @@ describe('RedemptionService — 兑换记录', () => {
     h.redemptionsRepo.updateStatus.mockResolvedValue(0);
 
     await expect(h.service.setRedemptionStatus(1, 55, 'fulfilled')).rejects.toMatchObject({
+      response: { code: 1002 },
+    });
+  });
+});
+
+describe('RedemptionService.findStudentIdByRedemptionId — PATCH redemptions/:id 的归属锚点', () => {
+  it('按 id 反查拿到 student_id（不写任何数据）', async () => {
+    const h = harness();
+    h.redemptionsRepo.findById.mockResolvedValue(redemptionRow({ id: 55, student_id: 7 }));
+
+    await expect(h.service.findStudentIdByRedemptionId(55)).resolves.toBe(7);
+    expect(h.redemptionsRepo.findById).toHaveBeenCalledWith(55);
+    expect(h.pool.getConnection).not.toHaveBeenCalled();
+  });
+
+  it('查不到 → 404 1002', async () => {
+    const h = harness();
+    h.redemptionsRepo.findById.mockResolvedValue(null);
+
+    await expect(h.service.findStudentIdByRedemptionId(999)).rejects.toMatchObject({
       response: { code: 1002 },
     });
   });

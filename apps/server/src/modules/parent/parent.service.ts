@@ -191,8 +191,9 @@ export class ParentService {
     return { subjectId, textbookVersionId: version.id, semesterId: semester.id, reset };
   }
 
-  /** 归属校验：先查存在（1002），再比对 parent_id（1005，不泄漏存在性）。 */
-  private async requireOwnedStudent(parentId: number, studentId: number) {
+  /** 归属校验：先查存在（1002），再比对 parent_id（1005，不泄漏存在性）。
+   *  **public**：`PointsModule` 的家长端 controller（Task 8）跨模块复用这一份判定，勿另写一套。 */
+  async requireOwnedStudent(parentId: number, studentId: number) {
     const student = await this.studentsRepo.findById(studentId);
     if (!student) {
       throw new NotFoundException({ code: 1002, message: '学生不存在' });
