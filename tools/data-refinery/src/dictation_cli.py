@@ -20,6 +20,16 @@
 （实测「第六单元」30 页 1.45 万字、一次找 13 篇），又不传 `temperature`，
 于是同代码同输入连跑 3 次得 **23 / 22 / 20 篇**。现已改为纯程序定位，可复现。
 
+## 体裁标定（2026-09-17，服务闯关积分的发分档位）
+
+`chinese_passages.genre` 决定默写/翻译按哪一档发分（诗 2 分 / 文言文 5 分）。本 CLI 提供
+两个**只读写、不猜**的入口（spec §4.1：**不用 LLM 猜体裁**——《木兰诗》是诗、《出师表》是文，
+但《陋室铭》这类边界确实有争议，猜错就按错的档位发分）：
+
+  python src/dictation_cli.py --export-genre                       # 出待标定清单（Markdown）
+  python src/dictation_cli.py --set-genre --id 12 --genre poem     # 单篇
+  python src/dictation_cli.py --set-genre --input genre.tsv        # 批量（id<TAB>poem|prose）
+
 自检有 `errors` 的篇目仍先交 `dictation_repair`，**模型输出即采用**（用户裁决：
 不设采纳闸门）；两个模型都拿不出非空输出才**不进 JSONL**（只进 unresolved 报告）。
 入库的 `verified` 恒为 1——区别只在于正文是程序原样切片还是模型纠正稿
@@ -32,6 +42,8 @@ import argparse
 import json
 import re
 from pathlib import Path
+
+import pymysql
 
 from config import RefineryConfig
 from dictation_check import check_body
@@ -67,15 +79,31 @@ def parse_args(argv=None):
   python src/dictation_cli.py --all     --book "九年级/上册" --term 上册
         """,
     )
-    parser.add_argument("--book", required=True, help="教材路径子串，如 '九年级/上册'")
-    parser.add_argument("--term", required=True, choices=["上册", "下册"], help="册次（写入 chinese_passages.semester）")
+    parser.add_argument("--book", help="教材路径子串，如 '九年级/上册'（--extract / --load / --all 必填）")
+    parser.add_argument("--term", choices=["上册", "下册"], help="册次（写入 chinese_passages.semester；--extract / --load / --all 必填）")
     parser.add_argument("--input-dir", help="MD 根目录（默认 output/md）")
     parser.add_argument("--output-dir", help="产物根目录（默认 output/dictation）")
     parser.add_argument("--candidates", help="候选清单 JSON 路径（默认 output/dictation/<book 同名>/candidates.json）")
     parser.add_argument("--extract", action="store_true", help="定位 + 切片 + 自检，出 JSONL 与两份清单")
     parser.add_argument("--load", action="store_true", help="把 JSONL 入库（幂等）")
     parser.add_argument("--all", action="store_true", help="等价于 --extract --load")
-    return parser.parse_args(argv)
+    parser.add_argument("--export-genre", action="store_true", help="导出待标定体裁清单（Markdown 表格）")
+    parser.add_argument("--set-genre", action="store_true", help="写回篇目体裁：--id+--genre（单篇）或 --input（批量）")
+    parser.add_argument("--id", type=int, help="单篇标定：chinese_passages.id")
+    parser.add_argument("--genre", help="单篇标定：poem | prose")
+    parser.add_argument("--input", help="批量标定文件：每行 `id<TAB>poem|prose`，空行与 # 注释跳过")
+
+    args = parser.parse_args(argv)
+
+    # 动作互斥：抽取/入库与体裁标定是两条互不相干的路径，混着传必然是误用。
+    actions = [args.extract, args.load, args.all]
+    genre_actions = [args.export_genre, args.set_genre]
+    if sum(actions) + sum(genre_actions) != 1:
+        parser.error("需且只能指定 --extract / --load / --all / --export-genre / --set-genre 之一")
+    # 体裁标定只碰数据库，不需要教材定位参数；抽取/入库缺一不可（旧行为保留）。
+    if any(actions) and (not args.book or not args.term):
+        parser.error("--extract / --load / --all 必须同时给 --book 与 --term")
+    return args
 
 
 #: TOC label 的前导章号：「11 岳阳楼记/范仲淹」→「岳阳楼记/范仲淹」；「13* 湖心亭看雪」同
@@ -451,11 +479,171 @@ def run_load(args, config) -> int:
     return 0
 
 
+# ==================== 体裁标定（--export-genre / --set-genre） ====================
+#
+# `chinese_passages.genre` 决定默写/翻译按哪一档发分（'poem' 诗/词、'prose' 文言文），
+# NULL = 未标定（发分时跳过并留日志）。**不用 LLM 猜体裁**：短字段猜错没有兜底，
+# 且边界篇目（如《陋室铭》）本身有争议——工具只负责读写，人来决定。
+
+#: 合法体裁。只认这两个值，不接收同义词（'shi' / 'wen' / '诗词' 一律拒绝）。
+GENRES: tuple[str, ...] = ("poem", "prose")
+
+#: 待标定清单的文件名（相对 output/dictation/语文/）。
+GENRE_EXPORT_NAME = "genre-todo.md"
+
+
+def validate_genre(value: str) -> str:
+    """校验体裁并去空白；非法值抛 `ValueError`。
+
+    刻意不做「模糊匹配」：`shi`、`古诗`、`poem `（带别的东西）都拒绝——
+    批量文件里一个拼错的词会静默标错体裁，进而按错档发分，宁可让整批失败。
+    """
+    genre = (value or "").strip()
+    if genre not in GENRES:
+        raise ValueError(f"genre 必须是 {' | '.join(GENRES)}（收到 {value!r}）")
+    return genre
+
+
+def parse_genre_updates(text: str) -> list[tuple[int, str]]:
+    """解析批量标定文件内容，返回 `[(passage_id, genre)]`。
+
+    格式：一行一条 `id<TAB>poem|prose`；空行与 `#` 注释跳过。
+    任何一行不合规（列数不对 / id 非正整数 / genre 非法）都抛 `ValueError`——
+    在碰数据库**之前**整份校验完，避免写到一半才发现第 30 行是错的。
+    """
+    updates: list[tuple[int, str]] = []
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        parts = line.split("\t")
+        if len(parts) != 2:
+            raise ValueError(f"第 {lineno} 行格式应为「id<TAB>poem|prose」：{raw!r}")
+        id_text, genre_text = parts[0].strip(), parts[1].strip()
+        if not id_text.isdigit() or int(id_text) <= 0:
+            raise ValueError(f"第 {lineno} 行的 id 必须是正整数（收到 {id_text!r}）")
+        try:
+            genre = validate_genre(genre_text)
+        except ValueError as e:
+            raise ValueError(f"第 {lineno} 行：{e}") from e
+        updates.append((int(id_text), genre))
+    return updates
+
+
+def render_genre_table(rows: list[tuple]) -> str:
+    """把 `(id, work_title, dynasty, genre)` 渲染成 Markdown 表格（空体裁标 `待定`）。"""
+    lines = [
+        "# 待标定体裁清单",
+        "",
+        "`genre` 决定默写/翻译按哪一档发分（`poem` 诗/词、`prose` 文言文），**不猜、不默认**。",
+        "填好后用 `--set-genre --input <文件>` 批量写回，或 `--set-genre --id <n> --genre poem|prose` 单篇写回。",
+        "",
+        "| id | 篇名 | 朝代 | 体裁 |",
+        "|---|---|---|---|",
+    ]
+    for passage_id, work_title, dynasty, genre in rows:
+        lines.append(f"| {passage_id} | {work_title} | {dynasty or ''} | {genre or '待定'} |")
+    if not rows:
+        lines.append("| - | （无 verified 篇目） | | |")
+    return "\n".join(lines) + "\n"
+
+
+def _connect(config: RefineryConfig):
+    """体裁标定专用的数据库连接（不重跑抽取，只读写 `chinese_passages.genre`）。"""
+    return pymysql.connect(host=config.db_host, port=config.db_port, user=config.db_user,
+                           password=config.db_pass, database=config.db_name, charset="utf8mb4")
+
+
+def _genre_out_path(args, config) -> Path:
+    out_root = Path(args.output_dir) if args.output_dir else config.output_dir / "dictation"
+    return out_root / SUBJECT_DIR / GENRE_EXPORT_NAME
+
+
+def run_export_genre(args, config) -> int:
+    """导出待标定清单：`verified = 1` 的篇目按册次/篇序排，空体裁标 `待定`。"""
+    conn = _connect(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, work_title, dynasty, genre FROM chinese_passages "
+                "WHERE verified = 1 ORDER BY semester, sort_order"
+            )
+            rows = list(cur.fetchall())
+    finally:
+        conn.close()
+
+    path = _genre_out_path(args, config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_genre_table(rows), encoding="utf-8")
+    unset = sum(1 for r in rows if not r[3])
+    print(f"[ok] 待标定体裁清单 -> {path}（{len(rows)} 篇，其中未标定 {unset} 篇）", flush=True)
+    return 0
+
+
+def _set_one_genre(conn, passage_id: int, genre: str) -> bool:
+    """写回一篇并打印篇名；该 id 不存在时跳过（返回 False）。"""
+    with conn.cursor() as cur:
+        cur.execute("SELECT work_title FROM chinese_passages WHERE id = %s LIMIT 1", (passage_id,))
+        found = cur.fetchone()
+        if not found:
+            print(f"[WARN] 未找到篇目 id={passage_id}，跳过", flush=True)
+            return False
+        cur.execute("UPDATE chinese_passages SET genre = %s WHERE id = %s", (genre, passage_id))
+    print(f"[ok] 《{found[0]}》 -> {genre}", flush=True)
+    return True
+
+
+def run_set_genre(args, config) -> int:
+    """写回体裁：单篇（`--id` + `--genre`）或批量（`--input`，整份先校验再落库）。"""
+    if args.input:
+        if args.id is not None or args.genre is not None:
+            print("[ERROR] --input 与 --id/--genre 互斥", flush=True)
+            return 2
+        path = Path(args.input)
+        if not path.exists():
+            print(f"[ERROR] 批量文件不存在：{path}", flush=True)
+            return 1
+        try:
+            updates = parse_genre_updates(path.read_text(encoding="utf-8"))
+        except ValueError as e:
+            print(f"[ERROR] {e}", flush=True)
+            return 2
+        if not updates:
+            print("[WARN] 批量文件里没有可写回的行（空行与 # 注释会被跳过）", flush=True)
+            return 1
+    elif args.id is not None or args.genre is not None:
+        if args.id is None or args.genre is None:
+            print("[ERROR] 单篇标定需同时给 --id 与 --genre", flush=True)
+            return 2
+        try:
+            updates = [(args.id, validate_genre(args.genre))]
+        except ValueError as e:
+            print(f"[ERROR] {e}", flush=True)
+            return 2
+    else:
+        print("[ERROR] --set-genre 需给 --id+--genre 或 --input <file>", flush=True)
+        return 2
+
+    conn = _connect(config)
+    updated = 0
+    try:
+        for passage_id, genre in updates:
+            if _set_one_genre(conn, passage_id, genre):
+                updated += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(f"[ok] 体裁写回完成：{updated}/{len(updates)} 篇", flush=True)
+    return 0
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
-    if not (args.extract or args.load or args.all):
-        print("[ERROR] 需指定 --extract / --load / --all 之一", flush=True)
-        return 2
+    if args.export_genre or args.set_genre:
+        config = RefineryConfig.from_env()
+        return run_export_genre(args, config) if args.export_genre else run_set_genre(args, config)
 
     config = RefineryConfig.from_env()
     if args.extract or args.all:
