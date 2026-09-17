@@ -193,8 +193,12 @@ export class VocabularyService {
       if (question) questions.push(question);
     }
 
-    const sessionId = questions.length > 0
-      ? await this.trainingSessionsRepo.create({
+    // 建会话失败**只丢这一轮的积分，不能 500 掉开练**：积分是激励层，绝不能挡住学习路径。
+    // 回 `sessionId: null`，前端照常背词（与「词池为空」同一形状）。
+    let sessionId: number | null = null;
+    if (questions.length > 0) {
+      try {
+        sessionId = await this.trainingSessionsRepo.create({
           student_id: studentId,
           task_code: 'en_vocabulary',
           subject_id: null,
@@ -202,8 +206,13 @@ export class VocabularyService {
           expected_count: questions.length,
           ref_type: 'question',
           ref_id: null,
-        })
-      : null;
+        });
+      } catch (err) {
+        this.logger.warn(
+          `training_sessions.create failed (taskCode=en_vocabulary, studentId=${studentId}, tierKey=${count}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     return { questions, poolSize: pool.length, sessionId };
   }

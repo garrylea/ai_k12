@@ -185,6 +185,16 @@ export class TrainingController {
    * **幂等**：重复调用（前端重试）返回 `already_completed` + `pointsAwarded: 0`，**不报错**。
    * `pointsAwarded` 在 `award` 带回 reason 时一律归 0：`duplicate` 时 `award` 会回首次分值，
    * 那是历史账、本次未入账，报出去前端会弹假 `+N 分`（同 Task 10/11 口径）。
+   *
+   * **发分失败可恢复（顺序有意：先 award 再 completeOwned）**：award 抛错（DB 故障）时
+   * **不把会话置 completed**，直接返回 `reason: 'award_failed'` —— 会话留在 `in_progress`，
+   * 没有「completed 但无流水」的窗口，下一次 complete 走的是同一条首次路径，
+   * 用固定幂等键（`tsess/vsess:<sessionId>`）**补发且只补发一次**。
+   * 这比「先置 completed 再在失败时回滚状态」简单：不用给 `training_sessions` 加 revert 方法，
+   * 也不怕并发请求互相把状态改回去。
+   *
+   * **失败不伪造成 0**：真实 `balance`/`totalEarned` 不是 0，前端的积分快照一旦被覆盖就是错的。
+   * 失败路径一律回 `null`，让客户端能区分「这轮没入账」与「真的 0 分」。
    */
   @Post('sessions/:id/complete')
   async completeSession(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
@@ -192,8 +202,6 @@ export class TrainingController {
     if (!session || session.student_id !== user.sub) {
       throw new NotFoundException({ code: 1002, message: '训练会话不存在' });
     }
-
-    const affected = await this.trainingSessionsRepo.completeOwned(id, user.sub);
 
     let points: AwardResult;
     try {
@@ -207,13 +215,22 @@ export class TrainingController {
         refId: id,
       });
     } catch (err) {
-      // 积分是激励层，发分失败不能把「完成」这个动作变成 500（会话已置 completed，
-      // 前端重试仍会走到 award，幂等键保证不会重复入账）。
+      // 积分是激励层，发分失败不能把「完成」这个动作变成 500（spec §7.2 口径：只降级、不报错）。
+      // 但**必须可区分、可恢复**：会话没被置完成，下一次 complete 会重试 award 补发；
+      // 余额字段回 null 而不是 0，前端不会拿假 0 覆盖本地快照。
       this.logger.warn(
         `points award failed (taskCode=${session.task_code}, sessionId=${id}, studentId=${user.sub}): ${err instanceof Error ? err.message : String(err)}`,
       );
-      return { pointsAwarded: 0, balance: 0, totalEarned: 0, levelUp: null };
+      return {
+        pointsAwarded: 0,
+        balance: null,
+        totalEarned: null,
+        levelUp: null,
+        reason: 'award_failed' as const,
+      };
     }
+
+    const affected = await this.trainingSessionsRepo.completeOwned(id, user.sub);
 
     return {
       pointsAwarded: points.reason ? 0 : points.pointsAwarded,

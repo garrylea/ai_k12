@@ -74,7 +74,7 @@
 |---|---|---|---|---|
 | `mainline_lesson` | 学完一课 | `default` | 10 | 不限 |
 | `math_paper` | 数学卷子一套 | `default` | 50 | 不限 |
-| `math_targeted` | 数学专项 | 题数 | `1`→2 / `3`→8 / `5`→15 / `10`→35 | 不限 |
+| `math_targeted` | 数学专项 | 题数 | `1`→2 / `3`→8 / `5`→15 / `10`→35 | 5 |
 | `error_fix` | 错题订正 | `default` | 3 | 不限 |
 | `cn_dictation` | 古诗文默写 | 体裁 | `poem`→2 / `prose`→5 | 不限 |
 | `cn_interpretation` | 古诗文翻译 | 体裁 | `poem`→3 / `prose`→6 | 不限 |
@@ -82,6 +82,8 @@
 | `en_vocabulary` | 英语背单词 | 词数 | `10`→2 / `15`→4 / `20`→7 | 2 |
 
 **关于数学专项的档位**：用户原话只给了「1 题 2 分、3 题 8 分」两档，本设计补了 `5`→15、`10`→35 两档，以覆盖现有 UI 的常用范围（现在 `TargetedConfigPage.tsx:25` 是 `[3,5,8,10]`）。实施时该常量会被删除、改读 `GET /api/points/me/rules`。
+
+**关于数学专项的每日上限（Task 12 review 补）**：四档共用 `5` 次（与 `en_vocabulary` 三档共用 `2` 次同一口径，按 `task_code` 计数、不分档位）。§6.4 已明确接受「开一个 N 题会话立刻 complete 就等于做完 N 题」，而档位由**学生自选**、幂等键又按 `sessionId`（每次开练都是新 key）——若 `dailyLimit` 不限，把题池缩到 1 题就能用 `10` 档（35 分）反复 complete 无限刷。每日上限是主要（也是唯一）防刷手段，必须给上。注意 `DEFAULT_RULES` 经 `insertIgnoreBatch`（`INSERT IGNORE`）写入，**只对未初始化过规则的新学生生效**，不回溯修正存量学生。
 
 ---
 
@@ -417,7 +419,9 @@ export const LEVELS = [
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/training/sessions/:id/complete` | 201。返回 `{ pointsAwarded, balance, totalEarned, levelUp:{from,to}\|null, reason? }`。`reason` ∈ `'daily_limit'`（`pointsAwarded=0`，**不报错**）\| `'already_completed'` \| `'no_rule'` \| `'tier_inactive'` |
+| POST | `/api/training/sessions/:id/complete` | 201。返回 `{ pointsAwarded, balance, totalEarned, levelUp:{from,to}\|null, reason? }`。`reason` ∈ `'daily_limit'`（`pointsAwarded=0`，**不报错**）\| `'already_completed'` \| `'no_rule'` \| `'tier_inactive'` \| `'award_failed'` |
+
+- **`award_failed`（Task 12 review 补）**：发分引擎抛错（DB 故障）时的降级返回，**仍是 2xx、不报错**（积分不该阻断学习路径）。区别于其它 reason：`balance` / `totalEarned` 回 **`null`** 而不是 0 —— 真实余额不是 0，回 0 会被前端当成合法快照覆盖掉本地积分。这条路径**不把会话置 `completed`**（award 先于 `completeOwned`），会话留在 `in_progress`、没有任何流水行，**下一次 `complete` 会用同一个幂等键 `tsess/vsess:<sessionId>` 补发且只补发一次**。前端见到 `award_failed` 应提示「积分补发中」，并在下次进入该会话/重试时再调一次 `complete`（客户端看到 2xx 不会自动重试）。
 
 - 这两个任务的 `start` 端点返回体加 `sessionId`。
 - `POST /api/training/judge` 加**可选**入参 `sessionId`（只用于累加 `judged_count` 审计，不传也能判题）。

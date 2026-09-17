@@ -287,6 +287,14 @@ describe('VocabularyService.start — 建会话', () => {
       tier_key: '15', expected_count: 1,
     }));
   });
+
+  it('建会话抛错（DB 故障）→ 不 500、词照常出、sessionId=null（积分不能挡学习路径）', async () => {
+    const { service, sessionsRepo } = harness({ random: () => 0.5 });
+    sessionsRepo.create.mockRejectedValue(new Error('db down'));
+    const res = await service.start(startInput(), 9);
+    expect(res.sessionId).toBeNull();
+    expect(res.questions).toHaveLength(2); // 学习路径照常
+  });
 });
 
 // ---------------------------------------------------------------- 开练：熟词僻义

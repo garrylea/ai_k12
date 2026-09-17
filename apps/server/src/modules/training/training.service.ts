@@ -603,8 +603,12 @@ export class TrainingService {
       options: parseOptions(q.options),
     }));
 
-    const sessionId = rows.length > 0
-      ? await this.trainingSessionsRepo.create({
+    // 建会话失败**只丢这一轮的积分，不能 500 掉开练**：积分是激励层，绝不能挡住学习路径。
+    // 回 `sessionId: null`，前端照常出题（与「一题都没抽到」同一形状）。
+    let sessionId: number | null = null;
+    if (rows.length > 0) {
+      try {
+        sessionId = await this.trainingSessionsRepo.create({
           student_id: input.studentId,
           task_code: 'math_targeted',
           subject_id: input.subjectId,
@@ -612,8 +616,13 @@ export class TrainingService {
           expected_count: rows.length,
           ref_type: 'question',
           ref_id: null,
-        })
-      : null;
+        });
+      } catch (err) {
+        this.logger.warn(
+          `training_sessions.create failed (taskCode=math_targeted, studentId=${input.studentId}, tierKey=${input.count}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     return { questions, sessionId };
   }

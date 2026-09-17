@@ -365,6 +365,17 @@ describe('TrainingService.startTargetedPractice — 建会话（乙类整批发�
       expect.objectContaining({ tier_key: '3', expected_count: 3 }),
     );
   });
+
+  it('建会话抛错（DB 故障）→ 不 500、题照常出、sessionId=null（积分不能挡学习路径）', async () => {
+    const rows = [questionRow];
+    const deps = mk({
+      questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue(rows) },
+      trainingSessionsRepo: { create: vi.fn().mockRejectedValue(new Error('db down')) },
+    });
+    const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: null, count: 5 });
+    expect(r.sessionId).toBeNull();
+    expect(r.questions).toHaveLength(1); // 学习路径照常
+  });
 });
 
 describe('TrainingController.startTargetedPractice — 档位白名单（定案 7）', () => {
@@ -557,10 +568,45 @@ describe('TrainingController.completeSession — 完成会话整批发分', () =
     expect((await c2.completeSession(55, user)).levelUp).toEqual({ from: 'pichai', to: 'zhutie' });
   });
 
-  it('award 抛错（DB 故障）→ 请求不 500，按未入账降级返回', async () => {
-    const { c } = mkC({ awardThrows: new Error('db down') });
+  it('award 抛错（DB 故障）→ 请求不 500，余额回 null + reason=award_failed（不能伪造成 0）', async () => {
+    const { c, sessionsRepo } = mkC({ awardThrows: new Error('db down') });
     const res = await c.completeSession(55, user);
-    expect(res).toEqual({ pointsAwarded: 0, balance: 0, totalEarned: 0, levelUp: null });
+    // 0 会被前端当成合法余额覆盖本地快照，必须用 null 表达「这轮没入账」
+    expect(res).toEqual({
+      pointsAwarded: 0, balance: null, totalEarned: null, levelUp: null, reason: 'award_failed',
+    });
+    // 会话**没被置 completed**：否则「completed + 无流水」= 这轮积分永久丢失
+    expect(sessionsRepo.completeOwned).not.toHaveBeenCalled();
+  });
+
+  it('award 失败后下一次 complete 能补发（会话留在 in_progress，不报 already_completed）', async () => {
+    // 用可变状态模拟 training_sessions：completeOwned 只在首次真正生效。
+    // 若实现把 completeOwned 放到了 award 之前，失败那次就会先置 completed → 第二次拿到 0
+    // → 报 already_completed → 本用例失败（这正是要钉住的回归）。
+    let completed = false;
+    const sessionsRepo = {
+      findById: vi.fn().mockResolvedValue(SESSION),
+      completeOwned: vi.fn(async () => {
+        if (completed) return 0;
+        completed = true;
+        return 1;
+      }),
+      incrementJudged: vi.fn().mockResolvedValue(undefined),
+    };
+    const award = vi.fn()
+      .mockRejectedValueOnce(new Error('db down'))
+      .mockResolvedValueOnce({ pointsAwarded: 35, balance: 35, totalEarned: 35, levelUp: null });
+    const c = new TrainingController({} as never, sessionsRepo as never, { award } as never, {} as never);
+
+    const first = await c.completeSession(55, user);
+    expect(first).toMatchObject({ reason: 'award_failed', balance: null, totalEarned: null });
+
+    const second = await c.completeSession(55, user);
+    expect(award).toHaveBeenCalledTimes(2);
+    // 同一个幂等键重试 → 补发一次，且**不能**把这次真实入账报成 already_completed
+    expect(award.mock.calls[1][0].dedupeKey).toBe('tsess:55');
+    expect(second).toEqual({ pointsAwarded: 35, balance: 35, totalEarned: 35, levelUp: null });
+    expect('reason' in second).toBe(false);
   });
 });
 

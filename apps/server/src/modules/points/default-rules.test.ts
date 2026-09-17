@@ -26,11 +26,21 @@ describe('DEFAULT_RULES', () => {
     }
   });
 
-  it('只有 en_vocabulary 的三档限每日 2 次，其余一律不限', () => {
+  it('有每日上限的只有两类任务：math_targeted 四档共用 5 次、en_vocabulary 三档共用 2 次', () => {
     const limited = DEFAULT_RULES.filter((r) => r.dailyLimit !== null);
-    expect(limited).toHaveLength(3);
-    expect(limited.every((r) => r.taskCode === 'en_vocabulary')).toBe(true);
-    expect(limited.every((r) => r.dailyLimit === 2)).toBe(true);
+    expect(limited).toHaveLength(7);
+    expect(limited.filter((r) => r.taskCode === 'math_targeted').every((r) => r.dailyLimit === 5)).toBe(true);
+    expect(limited.filter((r) => r.taskCode === 'math_targeted')).toHaveLength(4);
+    expect(limited.filter((r) => r.taskCode === 'en_vocabulary').every((r) => r.dailyLimit === 2)).toBe(true);
+    expect(limited.filter((r) => r.taskCode === 'en_vocabulary')).toHaveLength(3);
+    // 其余任务一律不限（甲类靠判题函数天然的一次性目标物防刷，不需要日上限）
+    expect(limited.every((r) => r.taskCode === 'math_targeted' || r.taskCode === 'en_vocabulary')).toBe(true);
+  });
+
+  it('math_targeted 四档各有每日上限（档位由学生自选 + 幂等键按会话，无上限可无限刷 10 档 35 分）', () => {
+    const rows = DEFAULT_RULES.filter((r) => r.taskCode === 'math_targeted');
+    expect(rows).toHaveLength(4);
+    expect(rows.every((r) => r.dailyLimit === 5)).toBe(true);
   });
 
   it('math_targeted 四档 1/3/5/10', () => {
@@ -56,10 +66,10 @@ describe('DEFAULT_RULES', () => {
     expect(DEFAULT_RULES.map((r) => [r.taskCode, r.tierKey, r.points, r.dailyLimit])).toEqual([
       ['mainline_lesson', 'default', 10, null],
       ['math_paper', 'default', 50, null],
-      ['math_targeted', '1', 2, null],
-      ['math_targeted', '3', 8, null],
-      ['math_targeted', '5', 15, null],
-      ['math_targeted', '10', 35, null],
+      ['math_targeted', '1', 2, 5],
+      ['math_targeted', '3', 8, 5],
+      ['math_targeted', '5', 15, 5],
+      ['math_targeted', '10', 35, 5],
       ['error_fix', 'default', 3, null],
       ['cn_dictation', 'poem', 2, null],
       ['cn_dictation', 'prose', 5, null],
