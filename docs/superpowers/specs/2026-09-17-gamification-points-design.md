@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS point_ledger (
 
 - `dedupe_key` 唯一键是**幂等的唯一实现**：`INSERT` 撞键 → 说明已发过，回查返回首次结果，**不报错**。
 - `title` 存**快照**：家长改了分值/档位名后，历史流水不能跟着变（否则孩子看到的「+2」和实际不符）。
-- `idx_point_ledger_daily` 服务每日上限计数：`COUNT(*) WHERE student_id=? AND task_code=? AND kind='earn' AND created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY`。
+- `idx_point_ledger_daily` 服务每日上限计数：`COUNT(*) WHERE student_id=? AND task_code=? AND kind='earn' AND created_at >= ? AND created_at < ?`——**两个边界由应用层算好传参，不在 SQL 里用 `CURDATE()`**（见 §4.4）。
 
 #### `student_points` — 快照（读优化，可重建）
 
@@ -262,7 +262,21 @@ CREATE TABLE IF NOT EXISTS training_sessions (
 | `en_vocabulary` | `vsess:<sessionId>` | |
 | 兑换 | `redeem:<redemptionId>` | |
 
-自然日 = **服务器本地时区的 `CURDATE()`**。部署在中国，MySQL 会话时区须为 `+08:00`；实施时在 `connection.ts` 显式设置或确认现状。
+**自然日的算法——照抄仓内既有约定，不要在 SQL 里用 `CURDATE()`。**
+
+`student-word-progress.repo.ts:92` 与 `vocabulary.service.ts:140` 都明确注释过原因：**DB 会话时区与应用时区可能不一致，用 `CURDATE()` 会算错一天**。既有实现是「应用层算出服务器本地时区的当日 00:00，作为参数传给 SQL」：
+
+```ts
+/** 服务器本地时区的当日 00:00。刻意不用 SQL 的 CURDATE()（DB 会话时区可能与应用不一致）。 */
+private startOfToday(): Date {
+  const now = this.now();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+}
+```
+
+本设计沿用：`startOfToday()` 取当天 00:00，`startOfTomorrow()` 取次日 00:00，两个都作为绑定参数传进 SQL。`dedupe_key` 里的 `<YYYY-MM-DD>` 也用同一套本地日期格式化（照抄既有实现，别引第三方库）。
+
+**不要去改 `connection.ts` 的会话时区**——那会改变全应用 `NOW(3)` 的取值，blast radius 远超本功能。
 
 ---
 
@@ -526,5 +540,5 @@ export const LEVELS = [
 | `genre` 未标定的篇目 | 不发分 + 日志留痕，**不猜、不默认** |
 | 家长误把分值调成 0 或超大 | 后端校验 `0 <= points <= 9999` |
 | 兑换不可撤销 | 已知限制明记；`point_redemptions.status` 已为后续撤销留状态位 |
-| 时区不一致导致每日上限跨天错乱 | 实施时确认/显式设置 MySQL 连接时区为 `+08:00` |
+| 时区不一致导致每日上限跨天错乱 | 沿用 `vocabulary.service.ts:140` 的做法：应用层算本地 00:00 传参，**不在 SQL 用 `CURDATE()`**；也不去改 `connection.ts` 的会话时区 |
 | 庆祝动画在 iPad 上卡顿 | Canvas 粒子数上限 120/波、3 秒自动卸载；`prefers-reduced-motion` 降级 |
