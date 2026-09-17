@@ -20,9 +20,9 @@ export class StudentPointsRepository {
   /**
    * 增量更新快照（无行则建行）。调用方与流水插入放同一事务时传 `conn`。
    *
-   * `VALUES()` 形式按本任务契约钉死（`total_earned = total_earned + VALUES(total_earned)`），
-   * 与 `student-word-progress.repo.ts` 用的行别名 `AS new` 写法不同——勿「统一」掉，
-   * 测试与 Task 4 都按该 SQL 形状断言。
+   * 用行别名（`AS new`）而非已弃用的 `VALUES()`：MySQL 8.0.20 起后者会打弃用告警
+   * （同 `student-word-progress.repo.ts:60`）。增量算术因此写成
+   * `student_points.col + new.col`——左侧必须带表名限定，否则被别名 `new` 遮蔽。
    *
    * @param earnedDelta 只加 `total_earned`（兑换传 0）
    * @param balanceDelta 同时加到 `balance`（兑换传负数）
@@ -34,8 +34,8 @@ export class StudentPointsRepository {
     conn?: PoolConnection,
   ): Promise<void> {
     const sql = `INSERT INTO student_points (student_id, total_earned, balance)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE total_earned = total_earned + VALUES(total_earned), balance = balance + VALUES(balance)`;
+       VALUES (?, ?, ?) AS new
+       ON DUPLICATE KEY UPDATE total_earned = student_points.total_earned + new.total_earned, balance = student_points.balance + new.balance`;
     const params = [studentId, earnedDelta, balanceDelta];
     if (conn) {
       await conn.execute(sql, params);
@@ -57,12 +57,16 @@ export class StudentPointsRepository {
     };
   }
 
-  /** 重建脚本用：用流水重算结果**覆盖**快照（不做增量）。 */
+  /**
+   * 重建脚本用：用流水重算结果**覆盖**快照（不做增量）。
+   *
+   * 同样用行别名 `AS new` 而非已弃用的 `VALUES()`（MySQL 8.0.20 起后者打弃用告警）。
+   */
   async overwrite(studentId: number, totalEarned: number, balance: number): Promise<void> {
     await this.pool.execute<ResultSetHeader>(
       `INSERT INTO student_points (student_id, total_earned, balance)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE total_earned = VALUES(total_earned), balance = VALUES(balance)`,
+       VALUES (?, ?, ?) AS new
+       ON DUPLICATE KEY UPDATE total_earned = new.total_earned, balance = new.balance`,
       [studentId, totalEarned, balance],
     );
   }

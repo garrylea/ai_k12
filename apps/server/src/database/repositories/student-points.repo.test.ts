@@ -18,8 +18,12 @@ describe('StudentPointsRepository.upsertDelta', () => {
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('INSERT INTO student_points');
     expect(sql).toContain('(student_id, total_earned, balance)');
-    expect(sql).toContain('ON DUPLICATE KEY UPDATE total_earned = total_earned + VALUES(total_earned)');
-    expect(sql).toContain('balance = balance + VALUES(balance)');
+    expect(sql).toContain('AS new');
+    expect(sql).toContain(
+      'ON DUPLICATE KEY UPDATE total_earned = student_points.total_earned + new.total_earned',
+    );
+    expect(sql).toContain('balance = student_points.balance + new.balance');
+    expect(sql).not.toContain('VALUES(');
     expect(params).toEqual([9, 8, 8]);
   });
 
@@ -66,8 +70,10 @@ describe('StudentPointsRepository.overwrite', () => {
     await repo.overwrite(9, 520, 320);
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('INSERT INTO student_points');
-    expect(sql).toContain('ON DUPLICATE KEY UPDATE total_earned = VALUES(total_earned)');
-    expect(sql).toContain('balance = VALUES(balance)');
+    expect(sql).toContain('AS new');
+    expect(sql).toContain('ON DUPLICATE KEY UPDATE total_earned = new.total_earned');
+    expect(sql).toContain('balance = new.balance');
+    expect(sql).not.toContain('VALUES(');
     expect(sql).not.toContain('total_earned = total_earned +');
     expect(params).toEqual([9, 520, 320]);
   });
