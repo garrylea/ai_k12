@@ -129,7 +129,17 @@ describe('MeaningService.judgeMeaning', () => {
     });
     expect(res.terms[0]).toMatchObject({ correct: null, method: 'undetermined' });
     expect(res.meaning).toMatchObject({ correct: null, method: 'undetermined' });
+    expect(res.emotion).toMatchObject({ correct: null, method: 'undetermined' });
     expect(res.allCorrect).toBe(false);
+  });
+
+  it('整次失败 + 情感空答案 → 短路项保持 unanswered，不被失败兜底覆盖', async () => {
+    const { service } = makeService({ judgeThrows: new Error('boom') });
+    const res = await service.judgeMeaning({
+      passageId: 12, sentenceIndex: 1, terms: [], meaning: '旧事物会被取代', emotion: '',
+    });
+    expect(res.meaning).toMatchObject({ correct: null, method: 'undetermined' });
+    expect(res.emotion).toMatchObject({ correct: false, method: 'unanswered' });
   });
 
   it('模型漏判某项 → 只有漏的那项 undetermined，已判项不清空', async () => {
@@ -151,6 +161,7 @@ describe('MeaningService.judgeMeaning', () => {
       emotion: '豁达乐观、积极进取',
     });
     expect(res.meaning.method).toBe('ai'); // 不是 'exact'
+    expect(res.emotion.method).toBe('ai');
   });
 
   it('篇目不存在 → 404；sentenceIndex 越界 → 400；该句无标准含义 → 400', async () => {

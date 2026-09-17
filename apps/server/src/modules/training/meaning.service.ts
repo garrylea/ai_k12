@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { ChinesePassagesRepository, toSentences, toKeyTerms, toSentenceMeanings } from '../../database/repositories/chinese-passages.repo.js';
+import {
+  ChinesePassagesRepository, toSentences, toKeyTerms, toSentenceMeanings,
+  type PassageSentence, type PassageSentenceMeaning,
+} from '../../database/repositories/chinese-passages.repo.js';
 import { ChineseMeaningJudgeCapability } from '../../ai-core/capabilities/chinese-meaning-judge.capability.js';
 import { stripPinyinAnnotation } from '../../common/utils/normalize-chinese.util.js';
 import type {
@@ -26,6 +29,34 @@ export class MeaningService {
     private readonly passageRepo: ChinesePassagesRepository,
     private readonly meaningJudge: ChineseMeaningJudgeCapability,
   ) {}
+
+  /**
+   * 取该篇的含义数组，**只有与 sentences 等长才可信**。
+   *
+   * `toSentences` 用 filter/push（丢掉 text 非字符串的项），`toSentenceMeanings` 用 map
+   * （保位置），两者长度一旦不等，`meanings[i]` 描述的就是**另一句**——没有异常、没有日志，
+   * 学生会拿别的句子的标准含义被判分。这不是假想：重跑 `interpretation_cli` 会重写
+   * `sentences`（可能切成不同的句数）却不动 `sentence_meanings`，含义就留成了旧切分下的对齐。
+   *
+   * 长度不等时**整个按无含义数据处理**（返回空数组）：开练侧全句 `answerable:false`、
+   * 判题侧走「该句无标准含义」的 400。**不做猜测、不做部分对齐**——宁可少判一句，
+   * 也不能静默串句。
+   */
+  private meaningsOf(
+    passageId: number,
+    sentences: PassageSentence[],
+    raw: unknown,
+  ): Array<PassageSentenceMeaning | null> {
+    const meanings = toSentenceMeanings(raw);
+    if (meanings.length !== sentences.length) {
+      this.logger.warn(
+        `sentence_meanings 与 sentences 长度不一致，按无含义数据处理 `
+        + `(passageId=${passageId}, meanings=${meanings.length}, sentences=${sentences.length})`,
+      );
+      return [];
+    }
+    return meanings;
+  }
 
   /** 配置页篇目清单：只出篇名与册次。 */
   async listMeaningPassages(): Promise<{ passages: MeaningPassageListItem[] }> {
@@ -57,7 +88,7 @@ export class MeaningService {
       // 防御：抽题池已按内容就绪过滤，手工改库仍可能留下空句集——
       // 下发没有句子的篇目会让前端渲染出空白卡片。
       if (sentences.length === 0) continue;
-      const meanings = toSentenceMeanings(r.sentence_meanings);
+      const meanings = this.meaningsOf(r.id, sentences, r.sentence_meanings);
       const terms = toKeyTerms(r.key_terms);
       const items = sentences.map((s, index) => ({
         index, // 真实句下标，判题回传用
@@ -107,7 +138,7 @@ export class MeaningService {
     if (!std) {
       throw new BadRequestException(`sentenceIndex 越界：${input.sentenceIndex}`);
     }
-    const meanings = toSentenceMeanings(passage.sentence_meanings);
+    const meanings = this.meaningsOf(passage.id, sentences, passage.sentence_meanings);
     const stdMeaning = meanings[input.sentenceIndex];
     if (!stdMeaning) {
       throw new BadRequestException(`该句无标准含义：${input.sentenceIndex}`);
