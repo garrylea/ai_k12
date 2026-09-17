@@ -109,7 +109,9 @@ ALTER TABLE controls
 - 与既有 `controls.reward_redemption_enabled`（`schema.sql:851`）配合：开关关了 → 兑换端点直接 400。
 - 该表 `UNIQUE (student_id)`，行由 `students.repo.ts:108` 建默认行时创建；缺行时懒初始化补。
 
-### 4.3 新增 5 张表
+### 4.3 新增 6 张表
+
+> 6 张 = 积分核心三张（`point_rules` / `point_ledger` / `student_points`）＋ 兑换两张（`reward_catalog` / `point_redemptions`）＋ 会话一张（`training_sessions`）。
 
 全部**无外键指向内容表**（与 `chinese_passages` / `english_words` 同规矩：内容表可全量重灌），只挂 `students(id)`。
 

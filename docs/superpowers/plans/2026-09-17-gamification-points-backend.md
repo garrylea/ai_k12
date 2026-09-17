@@ -70,13 +70,13 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 `controls.points_per_yuan` 用同一模式（`SMALLINT NOT NULL DEFAULT 20`）。
 
-**5 张表**（`point_rules` / `point_ledger` / `student_points` / `reward_catalog` / `point_redemptions`）：spec §4.3 的 `CREATE TABLE` 块**逐字复制**。注意三处别漏：
+**6 张表**（`point_rules` / `point_ledger` / `student_points` / `reward_catalog` / `point_redemptions` / `training_sessions`）：spec §4.3 的 `CREATE TABLE` 块**逐字复制**。注意三处别漏：
 
 - `point_ledger.dedupe_key` 的 `UNIQUE KEY uniq_point_ledger_dedupe`
 - `point_ledger` 的 `KEY idx_point_ledger_daily (student_id, task_code, kind, created_at)`——每日上限计数靠它
-- 全部 5 张表**只挂 `students(id)` 外键**，**不要**指向 `questions` / `chinese_passages` / `exam_sessions` 等业务表
+- 全部 6 张表**只挂 `students(id)` 外键**，**不要**指向 `questions` / `chinese_passages` / `exam_sessions` 等业务表
 
-**`schema.sql` 同步**：`chinese_passages` 的 `body TEXT` 行后面加 `genre VARCHAR(10) DEFAULT NULL` 并加注释；`controls` 的 `reward_redemption_enabled` 附近加 `points_per_yuan SMALLINT NOT NULL DEFAULT 20`；5 张表 DDL 追加到文件末尾。
+**`schema.sql` 同步**：`chinese_passages` 的 `body TEXT` 行后面加 `genre VARCHAR(10) DEFAULT NULL` 并加注释；`controls` 的 `reward_redemption_enabled` 附近加 `points_per_yuan SMALLINT NOT NULL DEFAULT 20`；6 张表 DDL 追加到文件末尾。
 
 **验证：**
 
@@ -84,7 +84,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
 mysql -uai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-17_gamification_points.sql
 mysql -uai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-17_gamification_points.sql   # 第二遍必须不报错（幂等）
-mysql -uai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM chinese_passages LIKE 'genre'; SHOW TABLES LIKE 'point_%'; SHOW TABLES LIKE '%training_sessions'; SHOW TABLES LIKE 'reward_catalog';"
+mysql -uai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM chinese_passages LIKE 'genre'; SHOW TABLES LIKE 'point_%'; SHOW TABLES LIKE '%points%'; SHOW TABLES LIKE '%training_sessions%'; SHOW TABLES LIKE 'reward_catalog';"
 ```
 
 期望：第二遍无报错；`genre` 列存在；`point_rules` / `point_ledger` / `student_points` / `point_redemptions` / `reward_catalog` / `training_sessions` 六张表都在。
