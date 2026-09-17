@@ -19,6 +19,8 @@ import DictationConfigPage from '@/pages/student/training/chinese/DictationConfi
 import DictationRunPage from '@/pages/student/training/chinese/DictationRunPage';
 import InterpretationConfigPage from '@/pages/student/training/chinese/InterpretationConfigPage';
 import InterpretationRunPage from '@/pages/student/training/chinese/InterpretationRunPage';
+import MeaningConfigPage from '@/pages/student/training/chinese/MeaningConfigPage';
+import MeaningRunPage from '@/pages/student/training/chinese/MeaningRunPage';
 import VocabularyConfigPage from '@/pages/student/training/english/VocabularyConfigPage';
 import VocabularyRunPage from '@/pages/student/training/english/VocabularyRunPage';
 import ExamListPage from '@/pages/student/training/ExamListPage';
@@ -248,6 +250,24 @@ const router = createBrowserRouter([
     element: (
       <RequireRole role="student">
         <InterpretationRunPage />
+      </RequireRole>
+    ),
+  },
+  // 语文含义配置页（全屏沉浸层；题单经 sessionStorage 交接）
+  {
+    path: '/student/training/chinese/meaning',
+    element: (
+      <RequireRole role="student">
+        <MeaningConfigPage />
+      </RequireRole>
+    ),
+  },
+  // 语文含义答题页（全屏沉浸层；一次一句，结果倒序堆叠，空题单自动踢回配置页）
+  {
+    path: '/student/training/chinese/meaning/run',
+    element: (
+      <RequireRole role="student">
+        <MeaningRunPage />
       </RequireRole>
     ),
   },
