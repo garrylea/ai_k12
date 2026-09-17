@@ -1,14 +1,24 @@
-"""meaning_cli 单测：解析与「按原文定位下标」。
+"""meaning_cli 单测：解析、按原文定位下标、同篇合并与三条防丢守卫。
 
-钉住四件事：
-- 模板解析出 (原文, 含义, 情感) 三元组，按篇名归一定位；
+钉住这些事：
 - 产出数组**与 sentences 等长**，没填的位置是 `None`（不是压缩掉——压缩会让后面整体错位）；
 - 定位**按原文**，不是按行号：模板调序了也跟着原文走；
-- 定位不到的原文进 `skipped`，绝不猜、绝不静默丢。
+- 定位不到的原文进 `skipped`，绝不猜、绝不静默丢；
+- 同篇名多行（九上/九下重复收录）合并时，**兄弟行填好的值要补上基准行的空**
+  （两行状态可能不同步，丢了就会「模板显示空 → --apply 两行一起写成 null」）；
+- `--export` 回填库里已填的含义，让「导出 → 改一句 → 回写」这条修订路径无损；
+- 三条防丢守卫：整篇全空不写库 / 对不上的原文进过目清单且不猜 / 一行都写不成的行不写库；
+- `_UPDATE_SQL` 只碰 `sentence_meanings` 一列，人工标定的三列根本不出现。
+
+全部用假连接，不碰真库。
 """
 
+import json
+
+import src.meaning_cli as cli
 from src.meaning_cli import build_meanings_array, parse_template
 
+TITLE = "酬乐天扬州初逢席上见赠"
 
 TEMPLATE = """# 酬乐天扬州初逢席上见赠
 
@@ -22,6 +32,80 @@ TEMPLATE = """# 酬乐天扬州初逢席上见赠
 含义：比喻新事物必将取代旧事物。
 情感：豁达乐观
 """
+
+
+def _row(row_id, title, texts, meanings=None):
+    """假 DB 行：(id, work_title, sentences JSON, sentence_meanings JSON)。"""
+    return (
+        row_id,
+        title,
+        json.dumps([{"text": t} for t in texts], ensure_ascii=False),
+        json.dumps(meanings, ensure_ascii=False) if meanings is not None else None,
+    )
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+        self.executed = []
+
+    def execute(self, sql, args=None):
+        self.executed.append((sql, args))
+
+    def fetchall(self):
+        return self._rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeConn:
+    """只记 SQL、不连库：够跑 `_fetch_passages` 与那一条 UPDATE。"""
+
+    def __init__(self, rows):
+        self.cur = _FakeCursor(rows)
+        self.committed = 0
+
+    def cursor(self):
+        return self.cur
+
+    def commit(self):
+        self.committed += 1
+
+    def close(self):
+        pass
+
+
+def _args(tmp_path, name="诗词含义.md"):
+    class A:
+        pass
+
+    a = A()
+    a.input = str(tmp_path / name)
+    a.output_dir = str(tmp_path / "out")
+    a.limit = None
+    return a
+
+
+def _config():
+    class C:
+        output_dir = None
+
+    return C()
+
+
+def _updates(conn):
+    return [(s, a) for s, a in conn.cur.executed if s.startswith("UPDATE")]
+
+
+def _review(tmp_path, name="诗词含义") -> str:
+    return (tmp_path / "out" / "语文" / f"{name}-review.md").read_text(encoding="utf-8")
+
+
+# ==================== 模板解析 / 按原文定位（已钉住的四条） ====================
 
 
 def test_parse_template():
@@ -65,3 +149,127 @@ def test_build_meanings_array_对不上的原文进skipped():
     arr, skipped = build_meanings_array(sentences, entries)
     assert arr == [None]
     assert len(skipped) == 2
+
+
+# ==================== 同篇名多行合并（九上/九下重复收录） ====================
+
+
+class TestMergeGroup:
+    def test_兄弟行填好的值补上基准行的空(self):
+        # 基准行「甲。」是空的（上次 --apply 只写成了兄弟行 / 长度不等把基准行降级成空）
+        row0 = _row(1, TITLE, ["甲。", "乙。"],
+                    [None, {"meaning": "乙含义", "emotion": "乙情感"}])
+        row1 = _row(2, TITLE, ["甲。", "乙。"],
+                    [{"meaning": "甲含义", "emotion": "甲情感"},
+                     {"meaning": "乙含义", "emotion": "乙情感"}])
+
+        merged = cli._merge_group([row0, row1])
+
+        assert merged == [("甲。", "甲含义", "甲情感"), ("乙。", "乙含义", "乙情感")]
+
+    def test_按字段补齐_不覆盖基准行已有的值(self):
+        row0 = _row(1, TITLE, ["甲。"], [{"meaning": "基准含义", "emotion": ""}])
+        row1 = _row(2, TITLE, ["甲。"], [{"meaning": "兄弟含义", "emotion": "兄弟情感"}])
+
+        # 基准行有含义 → 保留；情感是空 → 用兄弟行的补上
+        assert cli._merge_group([row0, row1]) == [("甲。", "基准含义", "兄弟情感")]
+
+    def test_基准行篇内重复原文不被合并掉(self):
+        # 诗经那种重章叠句：同一段原文在基准行里出现两次，兄弟行只有一次
+        row0 = _row(1, TITLE, ["甲。", "甲。"], [{"meaning": "一", "emotion": "一"}, None])
+        row1 = _row(2, TITLE, ["甲。"], [{"meaning": "二", "emotion": "二"}])
+
+        merged = cli._merge_group([row0, row1])
+
+        assert len(merged) == 2                       # 兄弟行不额外多出一处
+        assert merged[0] == ("甲。", "一", "一")
+
+    def test_组_by_title_同名两行归一组(self):
+        rows = [_row(1, TITLE, ["甲。"]), _row(2, TITLE, ["甲。"]), _row(3, "另一首", ["乙。"])]
+
+        groups = cli._group_by_title(rows)
+
+        assert [len(g) for g in groups] == [2, 1]
+
+    def test_模板只出一段_且带出兄弟行的值(self):
+        row0 = _row(1, TITLE, ["甲。"], [None])
+        row1 = _row(2, TITLE, ["甲。"], [{"meaning": "甲含义", "emotion": "甲情感"}])
+
+        md = cli.render_template([row0, row1])
+
+        assert md.count(f"# {TITLE}") == 1            # 合并成一段，不重复列
+        assert "含义：甲含义" in md and "情感：甲情感" in md
+
+
+# ==================== --export 回填（修订路径不丢数据） ====================
+
+
+class TestSentencePairsBackfill:
+    def test_库里已填的含义随模板回填(self):
+        row = _row(1, TITLE, ["甲。", "乙。"],
+                   [{"meaning": "甲含义", "emotion": "甲情感"}, None])
+
+        pairs = cli._sentence_pairs(row)
+        assert pairs == [("甲。", "甲含义", "甲情感"), ("乙。", "", "")]
+
+        md = cli.render_template([row])
+        assert md.count("含义：") == 2                # 每句都有含义行
+        assert "含义：甲含义" in md and "情感：甲情感" in md   # 已填的回填
+        assert "含义：\n情感：" in md                  # 没填的仍是空
+
+    def test_长度不等按无含义处理(self):
+        # 与 meaning.service 的口径一致：长度不等 → 整篇按无含义，不回填半截数组
+        row = _row(1, TITLE, ["甲。", "乙。"], [{"meaning": "只有一条", "emotion": "x"}])
+
+        assert cli._sentence_pairs(row) == [("甲。", "", ""), ("乙。", "", "")]
+
+
+# ==================== 三条防丢守卫 ====================
+
+
+class TestAntiWipeGuards:
+    def test_整篇全空不写库(self, tmp_path, monkeypatch):
+        (tmp_path / "诗词含义.md").write_text(
+            "# 岳阳楼记\n\n## 第1句\n> 甲。\n含义：\n情感：\n", encoding="utf-8")
+        conn = _FakeConn([_row(11, "岳阳楼记", ["甲。"])])
+        monkeypatch.setattr(cli, "_connect", lambda config: conn)
+
+        assert cli.run_apply(_args(tmp_path), _config()) == 1
+        assert _updates(conn) == []                   # 一句都没写 → 库里一字不动
+        assert "没填、不入库" in _review(tmp_path)
+
+    def test_对不上的原文进过目清单_跳过_不猜(self, tmp_path, monkeypatch):
+        (tmp_path / "诗词含义.md").write_text(
+            "# 岳阳楼记\n\n## 第1句\n> 另一句。\n含义：含义A\n情感：情感A\n", encoding="utf-8")
+        conn = _FakeConn([_row(11, "岳阳楼记", ["甲。"])])
+        monkeypatch.setattr(cli, "_connect", lambda config: conn)
+
+        assert cli.run_apply(_args(tmp_path), _config()) == 1
+        assert _updates(conn) == []                   # 不猜下标、不硬塞
+        review = _review(tmp_path)
+        assert "另一句。" in review and "定位不到" in review
+
+    def test_一行都写不成的行不写库(self, tmp_path, monkeypatch):
+        (tmp_path / "诗词含义.md").write_text(
+            "# 岳阳楼记\n\n## 第1句\n> 甲。\n含义：含义A\n情感：情感A\n", encoding="utf-8")
+        conn = _FakeConn([
+            _row(11, "岳阳楼记", ["甲。"]),           # 能对上 → 写
+            _row(12, "岳阳楼记", ["丙。"]),           # 兄弟行对不上任何条目 → 不写
+        ])
+        monkeypatch.setattr(cli, "_connect", lambda config: conn)
+
+        assert cli.run_apply(_args(tmp_path), _config()) == 0
+        updates = _updates(conn)
+        assert len(updates) == 1                      # 只写对得上的那行
+        assert updates[0][1][1] == 11
+        assert json.loads(updates[0][1][0])[0]["meaning"] == "含义A"
+        assert "一行都没写成" in _review(tmp_path)
+
+
+# ==================== 只写一列（人工标定不可被重跑刷掉） ====================
+
+
+def test_UPDATE_SQL_不碰人工标定的三列():
+    assert cli._UPDATE_SQL == "UPDATE chinese_passages SET sentence_meanings = %s WHERE id = %s"
+    for col in ("verified", "is_active", "memorize_required"):
+        assert col not in cli._UPDATE_SQL

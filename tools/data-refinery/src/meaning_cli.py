@@ -34,6 +34,7 @@
 
 库里同一首诗常有两行（`chinese_passages` 按册收，实测 34 行只对应 25 首）。
 导出时按篇名归一**合并成一段**（正文相同的兄弟行不重复列），
+合并时**兄弟行已填好的值会补上基准行的空**（两行状态可能不同步，不能丢），
 `--apply` 则按 `work_title` 找到**全部**同名行、**逐行都写**——
 条目按各行的 `sentences` 原文分配，兄弟行独有的原文（两行切句不同）归它自己。
 
@@ -323,9 +324,11 @@ def _merge_group(rows: list[tuple]) -> list[tuple[str, str, str]]:
     """
     base = _sentence_pairs(rows[0])
     remaining: dict[str, int] = {}
-    for text, _m, _e in base:
+    slots: dict[str, deque[int]] = {}
+    for i, (text, _m, _e) in enumerate(base):
         key = _norm(text)
         remaining[key] = remaining.get(key, 0) + 1
+        slots.setdefault(key, deque()).append(i)
 
     merged = list(base)
     for row in rows[1:]:
@@ -333,6 +336,13 @@ def _merge_group(rows: list[tuple]) -> list[tuple[str, str, str]]:
             key = _norm(text)
             if remaining.get(key, 0) > 0:
                 remaining[key] -= 1        # 基准行里已有这一处，不重复列
+                # 但值要**按字段补齐**：两行状态可能不同步（上一次 `--apply` 只写成了
+                # 一行、或长度不等把基准行整行降级成空），基准行这句是空而兄弟行有值时，
+                # 丢掉兄弟行的值会出「模板显示空 → --apply 把两行一起写成 null」的静默毁数据。
+                # 基准行已有的值**不覆盖**（它才是上次人工确认过的版本）。
+                idx = slots[key].popleft()
+                t, m, e = merged[idx]
+                merged[idx] = (t, m or meaning, e or emotion)
             else:
                 merged.append((text, meaning, emotion))
     return merged

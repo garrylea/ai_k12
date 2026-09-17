@@ -2876,6 +2876,11 @@ python src/meaning_cli.py --export --input inputs/meaning/诗词含义.md   # �
 python src/meaning_cli.py --apply  --input inputs/meaning/诗词含义.md   # 幂等入库
 ```
 
+> 实现已超出行内描述（以 spec §4 为准）：`--export` 会**回填库里已填的含义**
+> （否则「导出 → 改一句 → 回写」会把其余句子抹成 `null`）、按原文**合并九上/九下重复收录**
+> 且拒绝覆盖非空模板；`--apply` 对**整篇全空**的篇目不写库、兄弟行状态不同步时按字段补齐。
+> 本 CLI **没有**「整篇清回 NULL」的操作。
+
 模板格式：
 
 ```md
@@ -3000,7 +3005,7 @@ cur.execute("UPDATE chinese_passages SET sentence_meanings = %s WHERE id = %s",
 
 - [ ] **Step 4: 跑测试通过**
 
-Run: `cd tools/data-refinery && python -m pytest tests/test_meaning_cli.py -v` → PASS（4 tests）
+Run: `cd tools/data-refinery && python -m pytest tests/test_meaning_cli.py -v` → PASS（4 tests 起步；后补防丢回归用例后为 15 tests）
 
 - [ ] **Step 5: 全量回归 + 提交**
 
