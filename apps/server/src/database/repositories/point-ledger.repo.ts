@@ -104,6 +104,25 @@ export class PointLedgerRepository {
     return Number(rows[0]?.count ?? 0);
   }
 
+  /**
+   * 今日该学生**获得**的积分之和（`kind='earn'`）——`GET /api/points/me` 的 `todayEarned`。
+   *
+   * 与 `countTodayEarned` 的区别：那个数**条数**（每日上限口径），这个数**分值之和**
+   * （展示口径）。`redeem` 的负流水不进这个和——`todayEarned` 是「今天挣了多少」，
+   * 不是「今天净增多少」。
+   *
+   * 日边界同 `countTodayEarned`：由**应用层**按本地时区算好传参，刻意不在 SQL 用 `CURDATE()`。
+   */
+  async sumTodayEarned(studentId: number, dayStart: Date, dayEnd: Date): Promise<number> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { total: number | string })[]>(
+      `SELECT COALESCE(SUM(points), 0) AS total FROM point_ledger
+       WHERE student_id = ? AND kind = 'earn'
+         AND created_at >= ? AND created_at < ?`,
+      [studentId, dayStart, dayEnd],
+    );
+    return Number(rows[0]?.total ?? 0);
+  }
+
   /** 累计**获得**（`kind='earn'`）——段位依据。重建脚本用。 */
   async sumEarned(studentId: number): Promise<number> {
     const [rows] = await this.pool.execute<(RowDataPacket & { total: number | string })[]>(

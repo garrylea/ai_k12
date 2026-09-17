@@ -18,6 +18,7 @@ import { ConfigModule } from './modules/config/config.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
 import { TrainingModule } from './modules/training/training.module.js';
 import { ExamsModule } from './modules/exams/exams.module.js';
+import { PointsModule } from './modules/points/points.module.js';
 
 @Module({
   imports: [
@@ -37,6 +38,8 @@ import { ExamsModule } from './modules/exams/exams.module.js';
     ParentModule,
     ConfigModule,
     AdminModule,
+    // 闯关积分与段位（2026-09-17）——学生端查询端点；ParentPointsController 见 Task 8
+    PointsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

@@ -3,10 +3,18 @@ import type { Pool } from 'mysql2/promise';
 import { PointRulesRepository } from '../../database/repositories/point-rules.repo.js';
 import type { PointRuleRow } from '../../database/repositories/point-rules.repo.js';
 import { PointLedgerRepository } from '../../database/repositories/point-ledger.repo.js';
+import type { PointLedgerRow } from '../../database/repositories/point-ledger.repo.js';
 import { StudentPointsRepository } from '../../database/repositories/student-points.repo.js';
 import { DEFAULT_RULES, TASK_NAMES } from './default-rules.js';
-import { detectLevelUp } from './levels.js';
+import {
+  detectLevelUp,
+  levelOf,
+  nextLevelOf,
+  pointsToNextLevel as pointsToNextLevelOf,
+  progressPercent as progressPercentOf,
+} from './levels.js';
 import type { LevelInfo } from './levels.js';
+import type { PointLedgerEntry, PointLedgerPage, PointsOverview } from './dto/points.dto.js';
 
 export interface AwardInput {
   studentId: number;
@@ -25,6 +33,18 @@ export interface AwardResult {
   totalEarned: number;
   levelUp: { from: LevelInfo; to: LevelInfo } | null;
   reason?: AwardReason;
+}
+
+/** 仓储行 → 学生端流水视图：只挑展示字段，`student_id` / `dedupe_key` 等内部字段不下发。 */
+function toLedgerEntry(row: PointLedgerRow): PointLedgerEntry {
+  return {
+    id: Number(row.id),
+    kind: row.kind,
+    title: row.title,
+    points: Number(row.points),
+    createdAt: row.created_at,
+    refType: row.ref_type,
+  };
 }
 
 /**
@@ -130,6 +150,50 @@ export class PointsService {
       totalEarned: after.totalEarned,
       levelUp: detectLevelUp(before.totalEarned, after.totalEarned),
     };
+  }
+
+  /**
+   * 学生端概览（`GET /api/points/me`）：余额 / 累计 / 今日获得 / 段位 / 距下一档 / 进度。
+   *
+   * **新学生没有 `student_points` 行也返回全 0 + 劈柴，不抛 404**——`pointsRepo.find`
+   * 对无行返回零值。本方法也**不初始化规则**：这是纯只读端点，不该有写副作用
+   * （规则初始化在 `award()` 与 `PointRulesService.listGrouped()` 里做）。
+   *
+   * 段位/进度一律走 `levels.ts` 的纯函数，**不在这里重算阈值**：阈值是单一真源
+   * （spec §3.1），前端与家长端都从接口拿。
+   */
+  async getOverview(studentId: number): Promise<PointsOverview> {
+    // 日界在一次调用里只读一次时钟，两个边界由同一个 now 派生——各自取钟若跨午夜
+    // 会得到 48 小时窗口（同 award 的每日上限分支）。
+    const now = this.now();
+    const [snapshot, todayEarned] = await Promise.all([
+      this.pointsRepo.find(studentId),
+      this.ledgerRepo.sumTodayEarned(studentId, this.startOfToday(now), this.startOfTomorrow(now)),
+    ]);
+
+    return {
+      balance: snapshot.balance,
+      totalEarned: snapshot.totalEarned,
+      todayEarned,
+      level: levelOf(snapshot.totalEarned),
+      nextLevel: nextLevelOf(snapshot.totalEarned),
+      pointsToNextLevel: pointsToNextLevelOf(snapshot.totalEarned),
+      progressPercent: progressPercentOf(snapshot.totalEarned),
+    };
+  }
+
+  /**
+   * 学生端流水（`GET /api/points/me/ledger`），按 id 倒序（最新在前）。
+   *
+   * `page` / `pageSize` 的**合法性由 controller 校验**（越界 400，不静默钳制）；
+   * 本方法只负责换算 offset。返回的是显式挑字段的视图，不是仓储行直接透传。
+   */
+  async getLedger(studentId: number, page: number, pageSize: number): Promise<PointLedgerPage> {
+    const [rows, total] = await Promise.all([
+      this.ledgerRepo.listByStudent(studentId, pageSize, (page - 1) * pageSize),
+      this.ledgerRepo.countByStudent(studentId),
+    ]);
+    return { items: rows.map(toLedgerEntry), total, page, pageSize };
   }
 
   /** 服务器本地时区的当日 00:00。刻意不用 SQL 的 CURDATE()（DB 会话时区可能与应用不一致）。
