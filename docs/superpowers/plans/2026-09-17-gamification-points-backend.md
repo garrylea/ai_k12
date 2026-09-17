@@ -308,7 +308,11 @@ export interface AwardResult {
 
 **逐步逻辑**（顺序不能变）：
 
-1. 读该生该 `taskCode` 的规则列表（先跑懒初始化 `insertIgnoreBatch`，见 Task 5，这里假定规则已就位）。
+1. **先确保该生规则存在**：直接调 `pointRulesRepo.insertIgnoreBatch(studentId, DEFAULT_RULES)`（`INSERT IGNORE`，已有行是 no-op），再读该生该 `taskCode` 的规则列表。
+
+   > ⚠️ **这一步不能省，也不能推给 Task 5 的 `ensureRules`。** `award()` 是 8 条发分路径的公共入口，而 `ensureRules` 只在「读/写规则」的端点里跑（学生端积分页、家长端配置页）。全新学生若家长没进过配置页、孩子也没点过积分页，`findByStudent` 会返回空数组 → `no_rule` → **静默 0 分**——第一课就白学了。
+   >
+   > 这里直接用 repo + 常量、不注入 `PointRulesService`，是为了避免 service 之间的耦合与潜在环。多一次 `INSERT IGNORE` 走唯一键索引，代价可忽略。
 2. 按 `tierKey ?? 'default'` 找规则。找不到 → 返回 `{ pointsAwarded: 0, reason: 'no_rule', ...当前余额 }`，**不抛错**。
 3. 规则 `is_active === 0` → `reason: 'tier_inactive'`。
 4. **每日上限检查**（仅当 `dailyLimit != null`）：`countTodayEarned(studentId, taskCode, startOfToday(), startOfTomorrow())` ≥ `dailyLimit` → `reason: 'daily_limit'`，`pointsAwarded: 0`。

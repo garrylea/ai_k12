@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool } from 'mysql2/promise';
 import { PointsService } from './points.service.js';
+import { DEFAULT_RULES } from './default-rules.js';
 import type { PointRulesRepository, PointRuleRow } from '../../database/repositories/point-rules.repo.js';
 import type { PointLedgerRepository } from '../../database/repositories/point-ledger.repo.js';
 import type { StudentPointsRepository } from '../../database/repositories/student-points.repo.js';
@@ -29,7 +30,7 @@ function ruleRow(over: Partial<RuleFixture> = {}): PointRuleRow {
 /** 被测服务的全部依赖都是 mock：本用例不连真库。 */
 function harness(startNow = new Date(2026, 8, 17, 10, 0, 0)) {
   let current = startNow;
-  const rulesRepo = { findByStudent: vi.fn() };
+  const rulesRepo = { findByStudent: vi.fn(), insertIgnoreBatch: vi.fn() };
   const ledgerRepo = {
     insert: vi.fn(),
     findByDedupeKey: vi.fn(),
@@ -255,6 +256,56 @@ describe('PointsService.award — 每日上限', () => {
       new Date(2026, 8, 19, 0, 0, 0, 0),
     );
     expect(h.ledgerRepo.insert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PointsService.award — 规则懒初始化（全新学生）', () => {
+  it('首次 findByStudent 返回空 → 先补默认规则再读，发分正常进行', async () => {
+    const h = harness();
+    // 模型化「ensure 前库中无规则行、INSERT IGNORE 之后就位」：读规则的结果取决于 ensure 是否跑过。
+    // 去掉实现里的那一步，本用例会退回 no_rule —— 它就是「全新学生首课静默 0 分」的回归钉子。
+    let primed = false;
+    h.rulesRepo.insertIgnoreBatch.mockImplementation(async () => {
+      primed = true;
+    });
+    h.rulesRepo.findByStudent.mockImplementation(async () => (primed ? [ruleRow()] : []));
+    h.ledgerRepo.countTodayEarned.mockResolvedValue(0);
+    h.pointsRepo.find
+      .mockResolvedValueOnce({ totalEarned: 0, balance: 0 })
+      .mockResolvedValueOnce({ totalEarned: 2, balance: 2 });
+    h.ledgerRepo.insert.mockResolvedValue({ id: 1, duplicate: false });
+
+    const result = await h.service.award(INPUT);
+
+    // 必须用 repo + 常量补齐（不走 PointRulesService），且只补一次
+    expect(h.rulesRepo.insertIgnoreBatch).toHaveBeenCalledTimes(1);
+    expect(h.rulesRepo.insertIgnoreBatch).toHaveBeenCalledWith(1, DEFAULT_RULES);
+    // ensure 必须早于读规则：反了就还是读到空数组 → 静默 0 分
+    expect(h.rulesRepo.insertIgnoreBatch.mock.invocationCallOrder[0]).toBeLessThan(
+      h.rulesRepo.findByStudent.mock.invocationCallOrder[0],
+    );
+    // 发分路径确实走下去了（不是 no_rule）
+    expect(result.reason).toBeUndefined();
+    expect(result).toEqual({
+      pointsAwarded: 2,
+      balance: 2,
+      totalEarned: 2,
+      levelUp: null,
+    });
+    expect(h.ledgerRepo.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it('存量学生：无差别跑一次 INSERT IGNORE（幂等 no-op），发分按读到的自定义分值而非默认值', async () => {
+    const h = harness();
+    stubHappyPath(h);
+    // 家长把 10 词档改成了 5 分；INSERT IGNORE 撞唯一键静默跳过，读到的仍是 5
+    h.rulesRepo.findByStudent.mockResolvedValue([ruleRow({ points: 5 })]);
+
+    const result = await h.service.award(INPUT);
+
+    expect(h.rulesRepo.insertIgnoreBatch).toHaveBeenCalledWith(1, DEFAULT_RULES);
+    expect(result.pointsAwarded).toBe(5);
+    expect(h.ledgerRepo.insert.mock.calls[0][0].points).toBe(5);
   });
 });
 

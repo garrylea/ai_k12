@@ -4,7 +4,7 @@ import { PointRulesRepository } from '../../database/repositories/point-rules.re
 import type { PointRuleRow } from '../../database/repositories/point-rules.repo.js';
 import { PointLedgerRepository } from '../../database/repositories/point-ledger.repo.js';
 import { StudentPointsRepository } from '../../database/repositories/student-points.repo.js';
-import { TASK_NAMES } from './default-rules.js';
+import { DEFAULT_RULES, TASK_NAMES } from './default-rules.js';
 import { detectLevelUp } from './levels.js';
 import type { LevelInfo } from './levels.js';
 
@@ -31,7 +31,7 @@ export interface AwardResult {
  * 发分引擎：全部 8 类任务的**唯一**发分入口。
  *
  * **顺序不能变**（每一步都有理由）：
- * 1. 规则 → 2. 档位 → 3. 停用 → 4. 每日上限 → 5. 发分前累计 → 6. 事务（流水 + 快照）→ 7. 跨档。
+ * 0. 确保规则存在 → 1. 规则 → 2. 档位 → 3. 停用 → 4. 每日上限 → 5. 发分前累计 → 6. 事务（流水 + 快照）→ 7. 跨档。
  * - 每日上限必须早于 INSERT：先写再判会让「到上限的那一条」已经落库。
  * - 发分前累计必须早于事务：`detectLevelUp(old, new)` 要的是事务前的旧值。
  * - 停用早于上限：停用档位连计数都不该查。
@@ -61,12 +61,22 @@ export class PointsService {
 
   /**
    * 发一次分。调用方负责拼 `dedupeKey`（spec §4.4 的幂等键表）。
+   *
+   * **自给自足**：本方法自己保证学生的规则已初始化，调用方**不需要**先跑
+   * `PointRulesService.ensureRules()`（那是给积分页/家长配置页用的）。首次发分的学生
+   * （家长没配过、本人也没点过积分页）在这里补齐默认档位，不会静默 0 分。
    */
   async award(input: AwardInput): Promise<AwardResult> {
     const { studentId, taskCode } = input;
     const tierKey = input.tierKey ?? 'default';
 
-    // 1~2. 规则与档位（懒初始化由 PointRulesService.ensureRules 负责，本方法只读）
+    // 0. 确保规则存在。award() 是 8 条发分路径的**公共入口**，不能假设调用方已跑过
+    //    ensureRules（那一步只在「读/写规则」的端点里）。这里直接用 repo + 常量、
+    //    刻意**不注入 PointRulesService**：避免两个 service 耦合与潜在循环依赖。
+    //    INSERT IGNORE 撞唯一键即跳过，家长已改过的值不会被默认值覆盖，代价可忽略。
+    await this.rulesRepo.insertIgnoreBatch(studentId, DEFAULT_RULES);
+
+    // 1~2. 规则与档位
     const rules = await this.rulesRepo.findByStudent(studentId);
     const rule = rules.find((r) => r.task_code === taskCode && r.tier_key === tierKey) ?? null;
     if (rule === null) return this.skipped(studentId, 'no_rule');
