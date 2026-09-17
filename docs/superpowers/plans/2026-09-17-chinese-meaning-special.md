@@ -807,9 +807,6 @@ export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation',
 
 创建 `apps/server/src/ai-core/capabilities/chinese-meaning-judge.capability.test.ts`，
 照 `interpretation-judge.capability.test.ts` 的结构写三条：
-1. 本地模型成功 → 返回 `{terms, meaning, emotion}`；
-2. 本地抛错 → 走 fallback（断言 fallback 模型被调用）；
-3. JSON 解析失败 → 抛错（不静默返回空）。
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -826,12 +823,14 @@ const REQ = {
   terms: [{ term: '沉舟', gloss: '沉没的船', answer: '沉了的船' }],
 };
 
-function makeClient(impl: (body: any) => Promise<{ content: string; reasoningContent?: string }>) {
-  return { chat: vi.fn().mockImplementation(impl) } as never;
+/** 模型客户端桩：第 n 次调用可给不同返回（用来测 primary 失败 → fallback 顶上）。 */
+function makeClient(impl: (call: number) => Promise<{ content: string; reasoningContent?: string }>) {
+  let n = 0;
+  return { chat: vi.fn().mockImplementation(() => impl(++n)) } as never;
 }
 
 describe('ChineseMeaningJudgeCapability', () => {
-  it('本地模型成功时返回三项判定', async () => {
+  it('模型成功时返回三项判定', async () => {
     const client = makeClient(async () => ({
       content: JSON.stringify({
         terms: [{ term: '沉舟', correct: true, comment: null }],
@@ -846,6 +845,20 @@ describe('ChineseMeaningJudgeCapability', () => {
     expect(res.emotion?.correct).toBe(true);
   });
 
+  it('primary 失败时走 fallback（第二次调用返回成功）', async () => {
+    const ok = JSON.stringify({
+      terms: [], meaning: { correct: false, comment: '偏了' }, emotion: { correct: true, comment: null },
+    });
+    const client = makeClient(async (call) => {
+      if (call === 1) throw new Error('local down');
+      return { content: ok };
+    });
+    const cap = new ChineseMeaningJudgeCapability({ modelClient: client });
+    const res = await cap.generate(REQ);
+    expect(res.meaning?.correct).toBe(false);
+    expect(res.meaning?.comment).toBe('偏了');
+  });
+
   it('解析失败时抛错（不静默返回空）', async () => {
     const client = makeClient(async () => ({ content: '不是 JSON' }));
     const cap = new ChineseMeaningJudgeCapability({ modelClient: client });
@@ -857,7 +870,7 @@ describe('ChineseMeaningJudgeCapability', () => {
 - [ ] **Step 11: 跑测试**
 
 Run: `cd apps/server && npx vitest run src/ai-core/capabilities/chinese-meaning-judge.capability.test.ts`
-Expected: PASS（2 tests）
+Expected: PASS（3 tests）
 
 - [ ] **Step 12: 全量回归 + 提交**
 
@@ -2264,6 +2277,8 @@ import type { StackItem } from './types';
 
 interface Props {
   item: StackItem;
+  /** 是否是栈里最新的一条（由 ResultStack 按 index === 0 传入） */
+  isNewest: boolean;
   onRetry: (sentenceIndex: number) => void;
 }
 
@@ -2356,10 +2371,8 @@ function TermLines({ items }: { items: MeaningTermResultItem[] }) {
   );
 }
 
-/** 结果栈里的单条。最新的一条左侧有 brand 色竖条。 */
-export default function ResultItem({ item, onRetry }: Props) {
-  const isNewest = item.kind === 'pending';   // pending 只可能是刚提交的那条 → 它必然最新
-
+/** 结果栈里的单条。**最新的一条**（数组 index 0）左侧有 brand 色竖条。 */
+export default function ResultItem({ item, isNewest, onRetry }: Props) {
   return (
     <div
       className="rounded-2xl bg-white p-4"
@@ -2420,8 +2433,8 @@ export default function ResultStack({ items, onRetry }: Props) {
   }
   return (
     <div className="flex flex-col gap-3">
-      {items.map((item) => (
-        <ResultItem key={item.key} item={item} onRetry={onRetry} />
+      {items.map((item, i) => (
+        <ResultItem key={item.key} item={item} isNewest={i === 0} onRetry={onRetry} />
       ))}
     </div>
   );
@@ -2742,16 +2755,16 @@ export default function MeaningRunPage() {
     const s = { termRight: 0, termWrong: 0, termUndet: 0,
                 meanRight: 0, meanWrong: 0, meanUndet: 0,
                 emoRight: 0, emoWrong: 0, emoUndet: 0 };
-    const bump = (c: boolean | null, k: 'Right' | 'Wrong' | 'Undet', p: 'term' | 'mean' | 'emo') => {
-      if (c === true) s[`${p}${k}` as keyof typeof s]++;
-      else if (c === false) s[`${p}Wrong` as keyof typeof s]++;
-      else s[`${p}Undet` as keyof typeof s]++;
+    const bump = (c: boolean | null, p: 'term' | 'mean' | 'emo') => {
+      if (c === true) s[`${p}Right`]++;
+      else if (c === false) s[`${p}Wrong`]++;
+      else s[`${p}Undet`]++;
     };
     for (const it of stack) {
       if (it.kind !== 'judged') continue;
-      for (const t of it.result.terms) bump(t.correct, t.correct === true ? 'Right' : t.correct === false ? 'Wrong' : 'Undet', 'term');
-      bump(it.result.meaning.correct, it.result.meaning.correct === true ? 'Right' : it.result.meaning.correct === false ? 'Wrong' : 'Undet', 'mean');
-      bump(it.result.emotion.correct, it.result.emotion.correct === true ? 'Right' : it.result.emotion.correct === false ? 'Wrong' : 'Undet', 'emo');
+      for (const t of it.result.terms) bump(t.correct, 'term');
+      bump(it.result.meaning.correct, 'mean');
+      bump(it.result.emotion.correct, 'emo');
     }
     return s;
   }, [stack]);
