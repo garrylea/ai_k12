@@ -43,6 +43,10 @@ describe('JudgeCoreService.judgeQuestion', () => {
     const r = await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'B', source: 'targeted' });
     expect(r.isCorrect).toBe(false);
     expect(r.method).toBe('exact');
+    // 答错不发分：pointsAwarded=0，无 awardReason，award 根本不被调用（Task 10 契约）
+    expect(r.pointsAwarded).toBe(0);
+    expect(r.awardReason).toBeUndefined();
+    expect(deps.pointsService.award).not.toHaveBeenCalled();
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({ source: 'targeted', question_id: 10, source_ref_id: null }));
     expect(deps.judgment.judge).not.toHaveBeenCalled();
     expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' });
@@ -224,16 +228,20 @@ describe('judgeQuestion error_fix 发分（错题订正）', () => {
     return { svc, points };
   };
 
-  it('cleared = 0（首次就答对）-> 不发分', async () => {
+  it('cleared = 0（首次就答对）-> 不发分，awardReason=not_cleared', async () => {
     const { svc, points } = svcWith(0);
     const out = await svc.judgeQuestion(input('error_practice'));
     expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(0);
+    expect(out.awardReason).toBe('not_cleared');
     expect(points.award).not.toHaveBeenCalled();
   });
 
-  it('cleared > 0 + error_practice -> 发一次，dedupeKey/refType/refId 精确匹配', async () => {
+  it('cleared > 0 + error_practice -> 发一次，响应带 pointsAwarded 且无 awardReason', async () => {
     const { svc, points } = svcWith(1);
-    await svc.judgeQuestion(input('error_practice'));
+    const out = await svc.judgeQuestion(input('error_practice'));
+    expect(out.pointsAwarded).toBe(3);
+    expect(out.awardReason).toBeUndefined();
     expect(points.award).toHaveBeenCalledTimes(1);
     expect(points.award).toHaveBeenCalledWith({
       studentId: 1,
@@ -246,14 +254,27 @@ describe('judgeQuestion error_fix 发分（错题订正）', () => {
     expect(points.todayKey).toHaveBeenCalled();
   });
 
+  it('award 返回 reason=daily_limit -> 响应透传 awardReason=daily_limit，pointsAwarded=0', async () => {
+    const points = {
+      award: vi.fn(async () => ({ pointsAwarded: 0, reason: 'daily_limit' })),
+      todayKey: vi.fn(() => '2026-09-17'),
+    };
+    const { svc } = svcWith(1, points);
+    const out = await svc.judgeQuestion(input('error_practice'));
+    expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(0);
+    expect(out.awardReason).toBe('daily_limit');
+  });
+
   it('cleared > 0 + source = exam（交卷补判）-> 不发分（考试分只由 math_paper 给）', async () => {
     const { svc, points } = svcWith(1);
     const out = await svc.judgeQuestion(input('exam'));
     expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(0);
     expect(points.award).not.toHaveBeenCalled();
   });
 
-  it('award 抛错 -> 判题结果照常返回（不冒泡，不阻断）', async () => {
+  it('award 抛错 -> 判题结果照常返回（不冒泡，不阻断），pointsAwarded=0', async () => {
     const points = {
       award: vi.fn(async () => { throw new Error('points down'); }),
       todayKey: vi.fn(() => '2026-09-17'),
@@ -261,6 +282,8 @@ describe('judgeQuestion error_fix 发分（错题订正）', () => {
     const { svc } = svcWith(1, points);
     const out = await svc.judgeQuestion(input('error_practice'));
     expect(out).toMatchObject({ questionId: 10, isCorrect: true, method: 'exact' });
+    expect(out.pointsAwarded).toBe(0);
+    expect(out.awardReason).toBeUndefined();
     expect(points.award).toHaveBeenCalledTimes(1);
   });
 
@@ -272,6 +295,29 @@ describe('judgeQuestion error_fix 发分（错题订正）', () => {
     const keys = points.award.mock.calls.map((c: any[]) => c[0].dedupeKey);
     expect(keys[0]).toBe('err:1:10:2026-09-17');
     expect(keys[1]).toBe(keys[0]);
+  });
+});
+
+describe('judgeForPractice 不发分（card 中心入口）', () => {
+  const input = { studentId: 7, subjectId: 1, cardId: 3, lessonId: 5, questionN: '0-1', questionText: '题面', studentAnswer: 'A' };
+  const correctQ = { id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' };
+
+  it('答对（清零命中）仍回 pointsAwarded=0、无 awardReason，award 不被调用', async () => {
+    const { svc, pointsService } = makeService({
+      questions: {} as any,
+      mainError: {
+        findUnclearedByStudentQuestion: vi.fn(async () => null),
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        create: vi.fn(async () => 101),
+        clearUnclearedByStudentQuestion: vi.fn(async () => 1),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => 1),
+      },
+    });
+    const out = await svc.judgeForPractice(input, correctQ as any);
+    expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(0);
+    expect(out.awardReason).toBeUndefined();
+    expect(pointsService.award).not.toHaveBeenCalled();
   });
 });
 

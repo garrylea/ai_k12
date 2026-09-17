@@ -3,7 +3,7 @@ import { QuestionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsR
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
-import { PointsService } from '../points/points.service.js';
+import { PointsService, type AwardResult } from '../points/points.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
@@ -73,6 +73,18 @@ export interface JudgeOutput {
   method: 'exact' | 'ai' | 'self_assess' | 'unanswered';
   errorType: 'logic' | 'calculation' | 'format' | 'missing' | null;
   errorBookId: number | undefined;
+  /**
+   * 本次判题实际入账的积分（甲类逐目标发分，spec §7.2）。
+   * 0 = 未发分（答错 / `source='exam'` / 未清零 / 发分失败 / card 中心练习入口不参与发分）。
+   * 前端 `> 0` 弹 `+N 分` 轻反馈。
+   */
+  pointsAwarded: number;
+  /**
+   * 未发分原因（有值时可给差异化文案，无值静默）：
+   * - `not_cleared`：答对但本无未清错题行（`cleared === 0`），没有可订正的错题，故不发分；
+   * - `daily_limit` / `no_rule` / `tier_inactive`：透传 `PointsService.award` 的业务拒发原因。
+   */
+  awardReason?: 'daily_limit' | 'no_rule' | 'tier_inactive' | 'not_cleared';
   /** 主观题 self_assess 模式：前端据此渲染自评 UI。 */
   needsSelfAssessment?: boolean;
   /** 自评展示用（判题时一并带回，省一次往返）。 */
@@ -132,13 +144,16 @@ export class JudgeCoreService {
     let isCorrect: boolean | null;
     let method: JudgeOutput['method'];
     let errorType: 'logic' | 'calculation' | 'format' | 'missing' | null = null;
+    // 甲类逐目标发分（error_fix）：默认 0，仅清零确实命中未清行且非考试来源时改变。
+    let pointsAwarded = 0;
+    let awardReason: JudgeOutput['awardReason'];
 
     // 路由 0（判题体系重构）：空答案守卫（与 judgeForPractice 路由 0 条件一字不差）——
     // 训练抽题虽已过滤空答案（Task 4），但 error_practice 从错题本重抽不过滤：
     // 空答案题落到 AI 判定会产生无依据判错 + 错题 level 提升；主观题空答案则无
     // 参考答案可自评。不计对错、不入错题本、不触发解析生成。
     if (!q.answer || !q.answer.trim()) {
-      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true };
+      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 };
     }
 
     if (EXACT_ONLY_TYPES.has(q.type)) {
@@ -161,6 +176,7 @@ export class JudgeCoreService {
         needsSelfAssessment: true,
         referenceAnswer: q.answer,
         explanation: q.explanation,
+        pointsAwarded: 0,
       };
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof -> AI 判定
@@ -208,14 +224,26 @@ export class JudgeCoreService {
         // 首次就答对（本无错题行）affectedRows=0，不发分；已清零后再做对同样为 0。
         // source='exam' 排除：交卷补判在途题不得额外发订正分（考试分只由 math_paper 一次性给）。
         if (cleared > 0 && input.source !== 'exam') {
-          await this.awardErrorFix(input.studentId, input.questionId);
+          const award = await this.awardErrorFix(input.studentId, input.questionId);
+          // award 失败（null）时保持 0/undefined —— 积分失败绝不改变判题结果。
+          if (award) {
+            pointsAwarded = award.pointsAwarded;
+            // 只透传甲类枚举内的业务拒发原因；duplicate 不在此列（该路径同日重判时
+            // cleared 必为 0，已在下方 not_cleared 分支，不会走到这里）。
+            if (award.reason === 'daily_limit' || award.reason === 'no_rule' || award.reason === 'tier_inactive') {
+              awardReason = award.reason;
+            }
+          }
+        } else if (cleared === 0 && input.source !== 'exam') {
+          // 答对但本无未清错题行 -> 无可订正目标，不发分。spec §7.2 枚举的 not_cleared。
+          awardReason = 'not_cleared';
         }
       } catch (err) {
         this.logger.error(`clearUnclearedByStudentQuestionId failed (student=${input.studentId}, question=${input.questionId}): ${err}`);
       }
     }
 
-    return { questionId: q.id, isCorrect, method, errorType, errorBookId };
+    return { questionId: q.id, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason };
   }
 
   /**
@@ -251,7 +279,7 @@ export class JudgeCoreService {
     // practice_results 由 PracticeService 以 method='unanswered' 落行（保证课程完成
     // 门禁的作答覆盖计数不缺行）。
     if (q && (!q.answer || !q.answer.trim())) {
-      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true };
+      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 };
     }
 
     if (q && EXACT_ONLY_TYPES.has(q.type)) {
@@ -275,6 +303,7 @@ export class JudgeCoreService {
         needsSelfAssessment: true,
         referenceAnswer: q.answer,
         explanation: q.explanation,
+        pointsAwarded: 0,
       };
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof / 未命中 -> AI 判定
@@ -394,7 +423,9 @@ export class JudgeCoreService {
       }
     }
 
-    return { questionId, isCorrect, method, errorType, errorBookId };
+    // card 中心练习入口**不参与逐目标发分**（spec §7.2：error_fix 只挂在题中心 judgeQuestion）：
+    // 显式回 pointsAwarded: 0，保持响应形状与训练入口一致，前端无需分支判空。
+    return { questionId, isCorrect, method, errorType, errorBookId, pointsAwarded: 0 };
   }
 
   /**
@@ -406,10 +437,12 @@ export class JudgeCoreService {
    * （单一真源；spec §4.4 要求所有埋点从它取 key）。
    *
    * 刻意吞异常：积分是激励层，发分失败绝不能挡住判题（镜像 exams 的 awardPaperPoints）。
+   * 返回 `AwardResult`（含 `pointsAwarded` / `reason`）供 judgeQuestion 透传给前端；
+   * 发分失败返回 `null`（调用方保持 pointsAwarded=0、awardReason 不设，判题照常返回）。
    */
-  private async awardErrorFix(studentId: number, questionId: number): Promise<void> {
+  private async awardErrorFix(studentId: number, questionId: number): Promise<AwardResult | null> {
     try {
-      await this.pointsService.award({
+      return await this.pointsService.award({
         studentId,
         taskCode: 'error_fix',
         dedupeKey: `err:${studentId}:${questionId}:${this.pointsService.todayKey()}`,
@@ -418,6 +451,7 @@ export class JudgeCoreService {
       });
     } catch (err) {
       this.logger.warn(`awardErrorFix failed (student=${studentId}, question=${questionId}): ${err}`);
+      return null;
     }
   }
 
