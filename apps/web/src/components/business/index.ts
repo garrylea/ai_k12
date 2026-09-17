@@ -6,3 +6,5 @@ export { PlanetNode } from './PlanetNode';
 export type { PlanetSize, PlanetStatus } from './PlanetNode';
 export { SectionCard } from './SectionCard';
 export { RewardCard } from './RewardCard';
+export { FireworksCanvas } from './FireworksCanvas';
+export { CelebrationOverlay } from './CelebrationOverlay';

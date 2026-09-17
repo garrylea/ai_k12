@@ -10,13 +10,15 @@ import {
   MarkdownImg,
 } from '@/components/markdown';
 import { useThemeStore } from '@/store/themeStore';
-import { fetchLessonCards, getUnclearedErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, fetchStarMap, type LessonCard, type LessonCardsData, type PracticeGroupMeta, type PreviousErrorDetail } from '@/services/api';
+import { fetchLessonCards, getUnclearedErrors, getMyPoints, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, fetchStarMap, type LessonCard, type LessonCardsData, type PracticeGroupMeta, type PreviousErrorDetail } from '@/services/api';
 import { BackButton, LogoutButton, ConfirmDialog } from '@/components/base';
+import { CelebrationOverlay } from '@/components/business';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer } from '@/components/business/DiscussDrawer';
 import { CleanupPhase } from '@/components/business/CleanupPhase';
 import { usePracticeStore } from '@/store/practiceStore';
+import { usePointsStore } from '@/store/pointsStore';
 
 // --- Icons ---
 const ChevronLeftIcon = () => (
@@ -216,7 +218,10 @@ export default function CourseDetailPage() {
   const [showCelebration, setShowCelebration] = useState(false);
   const [nextLessonId, setNextLessonId] = useState<number | null>(null);
   const [isSubjectCompleted, setIsSubjectCompleted] = useState(false);
-  const [countdown, setCountdown] = useState(10);
+  // 升级庆祝：`name` 为 null 表示段位名没取到（降级只显示 code 的图标 + 通用标题）
+  const [celebrationLevel, setCelebrationLevel] = useState<{ code: string; name: string | null } | null>(null);
+  const [celebrationPoints, setCelebrationPoints] = useState(0);
+  const pushPointsToast = usePointsStore((s) => s.push);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStart, setModalStart] = useState(0);
   const [resultOpen, setResultOpen] = useState(false);
@@ -290,7 +295,8 @@ export default function CourseDetailPage() {
     setShowCelebration(false);
     setNextLessonId(null);
     setIsSubjectCompleted(false);
-    setCountdown(10);
+    setCelebrationLevel(null);
+    setCelebrationPoints(0);
   }, [lessonId]);
 
   // 翻页时关闭 modal / 结果列表 / 卡片讨论抽屉
@@ -464,8 +470,10 @@ export default function CourseDetailPage() {
     // 门禁：最后一页若是练习卡，须全部作答才能完成
     if (blockIfPracticeIncomplete()) return;
     const lastCard = data.cards[data.cards.length - 1];
+    let points: Awaited<ReturnType<typeof updateProgress>>['points'];
     try {
       const res = await updateProgress({ subjectId, lessonId, cardSortOrder: lastCard.sortOrder });
+      points = res.points;
       if (res.completed) {
         setIsSubjectCompleted(true);
       } else if (res.nextLessonId) {
@@ -481,24 +489,28 @@ export default function CourseDetailPage() {
     } catch {
       // ignore
     }
+    // 积分反馈：升级走全屏庆祝（不与轻反馈同弹）；仅正分才发轻反馈，
+    // `awarded === 0`（幂等命中 / no_rule）静默——不是「已达上限」。
+    const awarded = points?.awarded ?? 0;
+    if (points?.levelUp) {
+      const to = points.levelUp.to;
+      setCelebrationLevel({ code: to, name: null });
+      // 段位名的唯一真源在后端：升级后再要一次概览，用升级后的 level（失败则只显示图标）
+      getMyPoints()
+        .then((me) => {
+          setCelebrationLevel((current) =>
+            current && current.code === to ? { code: to, name: me.level.name } : current,
+          );
+        })
+        .catch(() => { /* 降级：不显示段位名 */ });
+    } else {
+      // 非升级路径必须显式清掉上一次的升级态，否则重复完成会一直显示旧段位
+      setCelebrationLevel(null);
+      if (awarded > 0) pushPointsToast({ points: awarded, title: '完成本课' });
+    }
+    setCelebrationPoints(awarded > 0 ? awarded : 0);
     setShowCelebration(true);
   };
-
-  useEffect(() => {
-    if (!showCelebration) return;
-    setCountdown(10);
-    const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          handleStartNewLesson();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [showCelebration]);
 
   const handleStartNewLesson = () => {
     setShowCelebration(false);
@@ -1019,81 +1031,26 @@ export default function CourseDetailPage() {
         </main>
       </div>
 
-      {/* 庆祝覆盖层 — 课程完成 */}
-      <AnimatePresence>
-        {showCelebration && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--bg-page)]"
-          >
-            <style>{`
-              @keyframes driftDownSuccess {
-                0% { transform: translateY(-20px) rotate(0deg) scale(0.6); opacity: 0; }
-                15% { opacity: 0.9; }
-                85% { opacity: 0.9; }
-                100% { transform: translateY(600px) rotate(360deg) scale(1.1); opacity: 0; }
-              }
-            `}</style>
-
-            {/* 撒花动效 */}
-            <div className="absolute inset-x-0 top-0 pointer-events-none overflow-hidden z-20 h-full">
-              {Array.from({ length: 20 }).map((_, i) => {
-                const shapes = ['✦', '✧', '＊', '·', '◇'];
-                const shape = shapes[i % shapes.length];
-                const delay = (i * 0.12).toFixed(2);
-                const duration = (1.8 + (i % 3) * 0.4).toFixed(2);
-                const left = ((i * 7) % 95).toFixed(0);
-                const scale = (0.7 + (i % 4) * 0.15).toFixed(2);
-                return (
-                  <div
-                    key={i}
-                    className="pointer-events-none absolute"
-                    style={{
-                      left: `${left}%`,
-                      top: `-10px`,
-                      animation: `driftDownSuccess ${duration}s ease-out ${delay}s infinite normal forwards`,
-                      transform: `scale(${scale})`,
-                      opacity: 0,
-                    }}
-                  >
-                    {shape}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* 成功图标 */}
-            <div className="relative mb-8">
-              <div className="absolute inset-0 bg-green-500/10 rounded-full blur-3xl animate-pulse" />
-              <div className="w-24 h-24 rounded-full bg-[#E2F0D9] border-4 border-green-600 shadow-md flex items-center justify-center text-green-700 relative z-10">
-                <CheckCircleIcon className="w-14 h-14" />
-              </div>
-            </div>
-
-            {/* 恭喜文字 */}
-            <div className="space-y-3 max-w-xl text-center z-10">
-              <h2 className="text-3xl md:text-4xl font-extrabold text-[var(--text-primary)] tracking-tight leading-snug">
-                {isSubjectCompleted ? '恭喜你，本学科全部完成！' : '恭喜你，本节学习完成！'}
-              </h2>
-              <p className="text-[var(--text-secondary)] text-sm font-semibold">
-                {countdown > 0 ? `${countdown} 秒后自动进入下一课` : '正在进入...'}
-              </p>
-            </div>
-
-            {/* 开始新课按钮 */}
-            <div className="pt-8 z-10">
-              <button
-                onClick={handleStartNewLesson}
-                className="flex items-center gap-2.5 bg-[var(--learn-btn-primary)] hover:bg-[var(--learn-btn-primary-hover)] text-white px-10 py-4 rounded-[var(--radius-button)] shadow-md transition-all duration-300 hover:scale-[1.02] font-semibold tracking-wide"
-              >
-                <span>{isSubjectCompleted ? '返回星图' : '开始新课'}</span>
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* 庆祝覆盖层 — 课程完成 / 段位晋升（烟花为 Canvas 粒子，不再是装饰字符） */}
+      <CelebrationOverlay
+        open={showCelebration}
+        variant={celebrationLevel ? 'levelup' : 'task'}
+        title={
+          celebrationLevel
+            ? (celebrationLevel.name ? `晋升 ${celebrationLevel.name}！` : '晋升新段位！')
+            : (isSubjectCompleted ? '恭喜你，本学科全部完成！' : '恭喜你，本节学习完成！')
+        }
+        subtitle={
+          celebrationLevel
+            ? '累计积分达标，段位提升'
+            : (isSubjectCompleted ? '去星图看看你完成的所有关卡' : '继续下一课，保持学习节奏')
+        }
+        pointsAwarded={celebrationPoints}
+        level={celebrationLevel ? { code: celebrationLevel.code, name: celebrationLevel.name ?? '' } : undefined}
+        primaryLabel={isSubjectCompleted ? '返回星图' : '开始新课'}
+        onPrimary={handleStartNewLesson}
+        autoCloseSeconds={10}
+      />
 
       {/* 答题 modal */}
       {modalOpen && (() => {

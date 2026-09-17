@@ -312,8 +312,20 @@ export function bumpErrorLevels(errorBookIds: number[]): Promise<void> {
   });
 }
 
-export function updateProgress(data: { subjectId: number; lessonId: number; cardSortOrder: number }): Promise<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number }> {
-  return fetchApi<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number }>('/progress/update', {
+/**
+ * `POST /api/progress/update` 追加的可选积分反馈（计划一新增，向后兼容：
+ * 老后端不返回该字段时 `points === undefined`）。
+ * 幂等命中 / 无规则时 `awarded === 0`——**不是错误**，静默处理。
+ */
+export interface UpdateProgressPoints {
+  awarded: number;
+  balance: number;
+  /** 段位 code 字符串（不是对象）；非空表示本次升级，庆祝交给全屏 `CelebrationOverlay` */
+  levelUp: { from: string; to: string } | null;
+}
+
+export function updateProgress(data: { subjectId: number; lessonId: number; cardSortOrder: number }): Promise<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number; points?: UpdateProgressPoints }> {
+  return fetchApi<{ advanced: boolean; nextLessonId?: number; completed?: boolean; nextUnlockType?: string; reason?: string; currentLessonId?: number; points?: UpdateProgressPoints }>('/progress/update', {
     method: 'POST',
     body: JSON.stringify(data),
   });
