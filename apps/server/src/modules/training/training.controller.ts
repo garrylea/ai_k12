@@ -1,5 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Logger, NotFoundException, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { TrainingService } from './training.service.js';
+import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
+import { PointsService } from '../points/points.service.js';
+import type { AwardResult } from '../points/points.service.js';
+import { PointRulesService } from '../points/point-rules.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -12,7 +16,14 @@ import type { SelfAssessTrainingDto } from './dto/self-assess.dto.js';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('student')
 export class TrainingController {
-  constructor(private readonly trainingService: TrainingService) {}
+  private readonly logger = new Logger(TrainingController.name);
+
+  constructor(
+    private readonly trainingService: TrainingService,
+    private readonly trainingSessionsRepo: TrainingSessionsRepository,
+    private readonly pointsService: PointsService,
+    private readonly pointRulesService: PointRulesService,
+  ) {}
 
   /** 专项练习允许的题型白名单（null = 不过滤题型）。 */
   private static readonly TARGETED_TYPES = ['choice', 'fill_blank', 'true_false', 'short_answer', 'proof', 'calculation'] as const;
@@ -36,19 +47,36 @@ export class TrainingController {
     return this.trainingService.getErrorBookEntries(user.sub, subjectId, filters);
   }
 
-  /** 训练判题（题中心变体）：source 白名单校验，非训练来源一律 400。 */
+  /** 训练判题（题中心变体）：source 白名单校验，非训练来源一律 400。
+   *  可选 `sessionId`（乙类会话）只用于累加 `judged_count` 审计留痕，不传也能判题，
+   *  且**失败静默**——审计绝不该影响判题（spec §6.4/§7.2）。 */
   @Post('judge')
   async judge(@Body() dto: JudgeTrainingDto, @CurrentUser() user: JwtUser) {
     if (dto.source !== 'targeted' && dto.source !== 'error_practice') {
       throw new BadRequestException('source 仅允许 targeted | error_practice');
     }
-    return this.trainingService.judgeTraining({
+    const result = await this.trainingService.judgeTraining({
       studentId: user.sub,
       questionId: dto.questionId,
       subjectId: dto.subjectId,
       studentAnswer: dto.studentAnswer,
       source: dto.source,
     });
+    // 判题完成后再记审计：放前面一旦抛错就会把判题结果顶掉。
+    await this.recordSessionJudged(dto.sessionId, user.sub);
+    return result;
+  }
+
+  /** 会话判题计数 +1（审计留痕）。非正整数 / 会话不存在 / 别人的 / 已完成的都静默跳过。 */
+  private async recordSessionJudged(sessionId: number | undefined, studentId: number): Promise<void> {
+    if (typeof sessionId !== 'number' || !Number.isInteger(sessionId) || sessionId < 1) return;
+    try {
+      await this.trainingSessionsRepo.incrementJudged(sessionId, studentId);
+    } catch (err) {
+      this.logger.warn(
+        `training_sessions.incrementJudged failed (sessionId=${sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** 主观题学生自评（self_assess 模式）：incorrect 入错题本 / correct 清零；每次自评留痕。
@@ -111,14 +139,22 @@ export class TrainingController {
     return this.trainingService.waitForExplanation(questionId);
   }
 
-  /** 专项练习开练：count 限 1-20 整数，type 限白名单六值（含 null），越界/非法 400。
-   *  studentId 从 JWT 取（用于排除该生已标记不再展示的题）。 */
+  /** 专项练习开练：count 必须是**家长已配的档位**（定案 7「档位即可选项」），再限 1-20 整数兜底；
+   *  type 限白名单六值（含 null），越界/非法 400。返回体带 `sessionId`（乙类整批发分用）。
+   *  studentId 从 JWT 取（用于排除该生已标记不再展示的题）。
+   *
+   *  白名单必须在服务层之前挡：范围校验放行 1-20 的任意整数，`count=13` 能绕过档位设计。
+   *  `listTierKeys` 内部先 `ensureRules`，从未发过分的全新学生拿到默认档位而不是空数组。 */
   @Post('targeted/start')
   async startTargetedPractice(
     @Body() dto: { subjectId: number; kpId: number; type: string | null; count: number },
     @CurrentUser() user: JwtUser,
   ) {
     const { count } = dto;
+    const allowed = await this.pointRulesService.listTierKeys(user.sub, 'math_targeted');
+    if (!allowed.includes(String(count))) {
+      throw new BadRequestException(`题量仅允许 ${allowed.join(' | ')}`);
+    }
     if (!Number.isInteger(count) || count < 1 || count > 20) {
       throw new BadRequestException('count 仅允许 1-20 的整数');
     }
@@ -135,6 +171,62 @@ export class TrainingController {
       type,
       count,
     });
+  }
+
+  // ==================== 训练会话完成发分（乙类整批发分，2026-09-17） ====================
+
+  /**
+   * 训练会话完成发分（`math_targeted` / `en_vocabulary` 专用，spec §7.2）。
+   *
+   * **整批发分**：分值是学生开练时选的档位的**打包价**（「3 题 8 分」不是 3×2），
+   * 所以只在「这一轮结束了」时发一次。**档位取自会话记录、不取前端入参**——
+   * 学生改不了自己开练时后端实际发了什么档，这是乙类唯一的防伪造点（spec §6.4）。
+   *
+   * **幂等**：重复调用（前端重试）返回 `already_completed` + `pointsAwarded: 0`，**不报错**。
+   * `pointsAwarded` 在 `award` 带回 reason 时一律归 0：`duplicate` 时 `award` 会回首次分值，
+   * 那是历史账、本次未入账，报出去前端会弹假 `+N 分`（同 Task 10/11 口径）。
+   */
+  @Post('sessions/:id/complete')
+  async completeSession(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
+    const session = await this.trainingSessionsRepo.findById(id);
+    if (!session || session.student_id !== user.sub) {
+      throw new NotFoundException({ code: 1002, message: '训练会话不存在' });
+    }
+
+    const affected = await this.trainingSessionsRepo.completeOwned(id, user.sub);
+
+    let points: AwardResult;
+    try {
+      points = await this.pointsService.award({
+        studentId: user.sub,
+        taskCode: session.task_code,
+        tierKey: session.tier_key,
+        // 幂等键前缀按任务分（spec §4.4）：背单词 vsess、其余训练会话 tsess。别写死一个。
+        dedupeKey: `${session.task_code === 'en_vocabulary' ? 'vsess' : 'tsess'}:${id}`,
+        refType: 'training_session',
+        refId: id,
+      });
+    } catch (err) {
+      // 积分是激励层，发分失败不能把「完成」这个动作变成 500（会话已置 completed，
+      // 前端重试仍会走到 award，幂等键保证不会重复入账）。
+      this.logger.warn(
+        `points award failed (taskCode=${session.task_code}, sessionId=${id}, studentId=${user.sub}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { pointsAwarded: 0, balance: 0, totalEarned: 0, levelUp: null };
+    }
+
+    return {
+      pointsAwarded: points.reason ? 0 : points.pointsAwarded,
+      balance: points.balance,
+      totalEarned: points.totalEarned,
+      // wire 形状：段位用 code 字符串（同 Task 9），不是 LevelInfo 对象
+      levelUp: points.levelUp ? { from: points.levelUp.from.code, to: points.levelUp.to.code } : null,
+      ...(affected === 0 || points.reason === 'duplicate'
+        ? { reason: 'already_completed' as const }
+        : points.reason
+          ? { reason: points.reason }
+          : {}),
+    };
   }
 
   // ==================== 语文古诗文专项：默写（2026-09-13） ====================

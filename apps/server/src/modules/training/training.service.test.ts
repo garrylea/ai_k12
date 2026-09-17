@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TrainingService } from './training.service';
 import { TrainingController } from './training.controller';
+import { PointRulesService } from '../points/point-rules.service.js';
+import { DEFAULT_RULES } from '../points/default-rules.js';
 
 const mk = (overrides: any = {}) => ({
   mainErrorRepo: {
@@ -34,6 +36,8 @@ const mk = (overrides: any = {}) => ({
   },
   // 甲类发分（Task 11）：默写/解释判题会调 award()。本文件不测发分，给个不发分的桩即可。
   pointsService: { award: vi.fn(), todayKey: vi.fn(() => '2026-09-17') },
+  // 乙类整批发分（Task 12）：专项开练建会话（`training_sessions`）。
+  trainingSessionsRepo: { create: vi.fn().mockResolvedValue(101) },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
@@ -43,7 +47,31 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
     deps.explanationCache, deps.notificationsRepo,
     {} as never, {} as never, {} as never,
     deps.pointsService as never,
+    deps.trainingSessionsRepo as never,
   );
+
+/**
+ * 真实的 `PointRulesService` + 内存 fake 仓储：库里一条规则都没有的**全新学生**，
+ * 第一次 `listTierKeys` 会先 `ensureRules` 补默认档位再查。纯 mock 掉 `listTierKeys`
+ * 只能证明「控制器信了白名单」，证不了「新学生不会被空数组 400 掉」。
+ */
+function freshPointRules() {
+  const STAMP = new Date(2026, 8, 17);
+  const rows = DEFAULT_RULES.map((d, i) => ({
+    id: i + 1, student_id: 9, task_code: d.taskCode, tier_key: d.tierKey,
+    tier_label: d.tierLabel, points: d.points, daily_limit: d.dailyLimit,
+    sort_order: d.sortOrder, is_active: 1, created_at: STAMP, updated_at: STAMP,
+  }));
+  let primed = false;
+  const rulesRepo = {
+    findByStudent: vi.fn(async () => (primed ? rows : [])),
+    insertIgnoreBatch: vi.fn(async () => { primed = true; }),
+    updateOne: vi.fn(),
+  };
+  const points = { startOfToday: vi.fn(), startOfTomorrow: vi.fn() };
+  const service = new PointRulesService({} as never, rulesRepo as never, {} as never, points as never);
+  return { service, rulesRepo };
+}
 
 describe('TrainingService.getErrorBookEntries', () => {
   it('透传筛选参数给 repo', async () => {
@@ -129,7 +157,8 @@ describe('TrainingService.selfAssess', () => {
 });
 
 describe('TrainingController.selfAssess 校验', () => {
-  const mkController = (service: any) => new TrainingController(service);
+  const mkController = (service: any) =>
+    new TrainingController(service, {} as never, {} as never, {} as never);
   const user = { sub: 7, role: 'student' } as any;
 
   it('source 越界 -> 400', async () => {
@@ -300,16 +329,72 @@ describe('TrainingService.startTargetedPractice', () => {
     expect(r.questions[0].options).toBeNull();
   });
 
-  it('抽不到题返回空数组（空集合非错误）', async () => {
+  it('抽不到题返回空数组（空集合非错误）且不建会话（0 题会话能 complete 拿走整档分）', async () => {
     const deps = mk({ questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([]) } });
     const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 999, type: null, count: 5 });
-    expect(r).toEqual({ questions: [] });
+    expect(r).toEqual({ questions: [], sessionId: null });
+    expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
   });
 });
 
-describe('TrainingController.startTargetedPractice 校验', () => {
-  const mkController = (service: any) => new TrainingController(service);
+describe('TrainingService.startTargetedPractice — 建会话（乙类整批发分）', () => {
+  const questionRow = { id: 10, type: 'choice', content: '题面文本', options: null, is_active: 1 } as never;
+
+  it('tier_key = 学生选的档位；expected_count = 后端实际抽到的题数（题池不够时两者不等）', async () => {
+    // 选 10 题档，题池只有 7 题 —— 发分按档位（10）走规则，实际抽到 7 只作审计留痕。
+    const rows = Array.from({ length: 7 }, (_, i) => ({ ...(questionRow as object), id: 100 + i }));
+    const deps = mk({ questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue(rows) } });
+    const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: null, count: 10 });
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith({
+      student_id: 7,
+      task_code: 'math_targeted',
+      subject_id: 1,
+      tier_key: '10',
+      expected_count: 7,
+      ref_type: 'question',
+      ref_id: null,
+    });
+    expect(r.sessionId).toBe(101);
+  });
+
+  it('抽满时 expected_count == 抽到的题数 == 档位', async () => {
+    const rows = Array.from({ length: 3 }, (_, i) => ({ ...(questionRow as object), id: 200 + i }));
+    const deps = mk({ questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue(rows) } });
+    await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: null, count: 3 });
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ tier_key: '3', expected_count: 3 }),
+    );
+  });
+});
+
+describe('TrainingController.startTargetedPractice — 档位白名单（定案 7）', () => {
   const user = { sub: 7, role: 'student' } as any;
+  /** 家长已配的档位（默认档位 1/3/5/10）。 */
+  const TIERS = ['1', '3', '5', '10'];
+  const mkController = (service: any, tiers: string[] = TIERS) =>
+    new TrainingController(
+      service,
+      { create: vi.fn() } as never,
+      {} as never,
+      { listTierKeys: vi.fn().mockResolvedValue(tiers) } as never,
+    );
+
+  it('count 不在已配档位（13）→ 400，且 service / 会话创建都没被碰', async () => {
+    const svc: any = { startTargetedPractice: vi.fn() };
+    const c = mkController(svc);
+    await expect(
+      c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 13 }, user),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(svc.startTargetedPractice).not.toHaveBeenCalled();
+  });
+
+  it('白名单查询用的是 JWT 学生 id + math_targeted 任务码', async () => {
+    const svc: any = { startTargetedPractice: vi.fn().mockResolvedValue({ questions: [], sessionId: 1 }) };
+    const rules: any = { listTierKeys: vi.fn().mockResolvedValue(TIERS) };
+    const c = new TrainingController(svc, { create: vi.fn() } as never, {} as never, rules);
+    await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 3 }, user);
+    expect(rules.listTierKeys).toHaveBeenCalledWith(7, 'math_targeted');
+  });
 
   it('count 越界（0 / 21 / 非整数）-> 400', async () => {
     const svc: any = { startTargetedPractice: vi.fn() };
@@ -331,19 +416,203 @@ describe('TrainingController.startTargetedPractice 校验', () => {
     expect(svc.startTargetedPractice).not.toHaveBeenCalled();
   });
 
-  it('合法 type（含 null）与 count 1-20 透传 service（含 studentId）', async () => {
-    const svc: any = { startTargetedPractice: vi.fn().mockResolvedValue({ questions: [] }) };
+  it('合法 type（含 null）与已配档位透传 service（含 studentId），返回体带回 sessionId', async () => {
+    const svc: any = {
+      startTargetedPractice: vi.fn()
+        .mockResolvedValueOnce({ questions: [], sessionId: 11 })
+        .mockResolvedValueOnce({ questions: [], sessionId: 12 }),
+    };
     const c = mkController(svc);
-    await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 1 }, user);
-    await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: 'proof', count: 20 }, user);
-    expect(svc.startTargetedPractice).toHaveBeenCalledTimes(2);
+    const r1 = await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 1 }, user);
+    const r2 = await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: 'proof', count: 10 }, user);
+    expect(r1).toEqual({ questions: [], sessionId: 11 });
+    expect(r2).toEqual({ questions: [], sessionId: 12 });
     expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(1, { studentId: 7, subjectId: 1, kpId: 3, type: null, count: 1 });
-    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(2, { studentId: 7, subjectId: 1, kpId: 3, type: 'proof', count: 20 });
+    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(2, { studentId: 7, subjectId: 1, kpId: 3, type: 'proof', count: 10 });
+  });
+
+  it('从未发过分的全新学生：先 ensureRules 补默认档位再查，count=3 放行（返回空数组会 400 掉所有请求）', async () => {
+    const rules = freshPointRules();
+    const svc: any = { startTargetedPractice: vi.fn().mockResolvedValue({ questions: [], sessionId: 42 }) };
+    const c = new TrainingController(svc, { create: vi.fn() } as never, {} as never, rules.service as never);
+
+    const r = await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 3 }, { sub: 9, role: 'student' } as any);
+
+    expect(rules.rulesRepo.insertIgnoreBatch).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ questions: [], sessionId: 42 });
+  });
+
+  it('家长停用了某档（is_active=0，listTierKeys 不再返回它）→ 该 count 400', async () => {
+    const svc: any = { startTargetedPractice: vi.fn() };
+    const c = mkController(svc, ['1', '3', '10']); // '5' 被停用
+    await expect(
+      c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 5 }, user),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(svc.startTargetedPractice).not.toHaveBeenCalled();
   });
 });
 
+describe('TrainingController.completeSession — 完成会话整批发分', () => {
+  const user = { sub: 7, role: 'student' } as any;
+  const SESSION = {
+    id: 55, student_id: 7, task_code: 'math_targeted', tier_key: '10',
+    expected_count: 7, status: 'in_progress',
+  } as never;
+
+  const mkC = (over: { session?: any; affected?: number; award?: any; awardThrows?: Error } = {}) => {
+    const sessionsRepo = {
+      // `session: null` 是「查不到」用例，不能用 ?? 兜回默认会话
+      findById: vi.fn().mockResolvedValue('session' in over ? over.session : SESSION),
+      completeOwned: vi.fn().mockResolvedValue(over.affected ?? 1),
+      incrementJudged: vi.fn().mockResolvedValue(undefined),
+    };
+    const points = {
+      award: over.awardThrows
+        ? vi.fn().mockRejectedValue(over.awardThrows)
+        : vi.fn().mockResolvedValue(over.award ?? {
+            pointsAwarded: 35, balance: 35, totalEarned: 35, levelUp: null,
+          }),
+    };
+    const c = new TrainingController({} as never, sessionsRepo as never, points as never, {} as never);
+    return { c, sessionsRepo, points };
+  };
+
+  it('首次完成：award 调一次、档位取自会话记录、dedupe=tsess:<id>、无 reason', async () => {
+    const { c, sessionsRepo, points } = mkC();
+    const res = await c.completeSession(55, user);
+    expect(sessionsRepo.completeOwned).toHaveBeenCalledWith(55, 7);
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award).toHaveBeenCalledWith({
+      studentId: 7,
+      taskCode: 'math_targeted',
+      tierKey: '10',
+      dedupeKey: 'tsess:55',
+      refType: 'training_session',
+      refId: 55,
+    });
+    expect(res).toEqual({ pointsAwarded: 35, balance: 35, totalEarned: 35, levelUp: null });
+    expect('reason' in res).toBe(false);
+  });
+
+  it('背单词会话的 dedupe 前缀是 vsess（按任务分，不能写死一个）', async () => {
+    const { c, points } = mkC({
+      session: { ...(SESSION as object), task_code: 'en_vocabulary', tier_key: '15' },
+    });
+    await c.completeSession(55, user);
+    expect(points.award).toHaveBeenCalledWith(expect.objectContaining({
+      taskCode: 'en_vocabulary', tierKey: '15', dedupeKey: 'vsess:55',
+    }));
+  });
+
+  it('重复完成（affected=0、award 回 duplicate）→ 不报错、reason=already_completed、pointsAwarded 归 0（不是首次值）', async () => {
+    const { c } = mkC({
+      affected: 0,
+      award: { pointsAwarded: 35, balance: 35, totalEarned: 35, levelUp: null, reason: 'duplicate' },
+    });
+    const res = await c.completeSession(55, user);
+    expect((res as { reason?: string }).reason).toBe('already_completed');
+    expect(res.pointsAwarded).toBe(0);
+  });
+
+  it('别人家学生的会话 → 404（1002），不置完成、不发分', async () => {
+    const { c, sessionsRepo, points } = mkC({ session: { ...(SESSION as object), student_id: 8 } });
+    await expect(c.completeSession(55, user)).rejects.toMatchObject({
+      status: 404,
+      response: { code: 1002 },
+    });
+    expect(sessionsRepo.completeOwned).not.toHaveBeenCalled();
+    expect(points.award).not.toHaveBeenCalled();
+  });
+
+  it('会话不存在 → 404（1002）', async () => {
+    const { c } = mkC({ session: null });
+    await expect(c.completeSession(55, user)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('award 回 daily_limit（每日上限用完）→ 不报错、pointsAwarded=0、reason 透传', async () => {
+    const { c } = mkC({
+      award: { pointsAwarded: 0, balance: 35, totalEarned: 35, levelUp: null, reason: 'daily_limit' },
+    });
+    const res = await c.completeSession(55, user);
+    expect(res).toEqual({
+      pointsAwarded: 0, balance: 35, totalEarned: 35, levelUp: null, reason: 'daily_limit',
+    });
+  });
+
+  it('levelUp 用段位 code 字符串（wire 形状，不是 LevelInfo 对象）', async () => {
+    const { c } = mkC({
+      award: {
+        pointsAwarded: 35, balance: 535, totalEarned: 535, levelUp: null,
+      },
+    });
+    const res = await c.completeSession(55, user);
+    expect(res.levelUp).toBeNull();
+
+    const { c: c2 } = mkC({
+      award: {
+        pointsAwarded: 35, balance: 535, totalEarned: 535,
+        levelUp: { from: { code: 'pichai' }, to: { code: 'zhutie' } },
+      },
+    });
+    expect((await c2.completeSession(55, user)).levelUp).toEqual({ from: 'pichai', to: 'zhutie' });
+  });
+
+  it('award 抛错（DB 故障）→ 请求不 500，按未入账降级返回', async () => {
+    const { c } = mkC({ awardThrows: new Error('db down') });
+    const res = await c.completeSession(55, user);
+    expect(res).toEqual({ pointsAwarded: 0, balance: 0, totalEarned: 0, levelUp: null });
+  });
+});
+
+describe('TrainingController.judge — 可选 sessionId 只做审计留痕', () => {
+  const user = { sub: 7, role: 'student' } as any;
+  const DTO = { questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'targeted' } as const;
+
+  const mkC = (over: { incrementJudged?: any; result?: any } = {}) => {
+    const sessionsRepo = {
+      incrementJudged: over.incrementJudged ?? vi.fn().mockResolvedValue(undefined),
+    };
+    const svc = { judgeTraining: vi.fn().mockResolvedValue(over.result ?? { isCorrect: true }) };
+    const c = new TrainingController(svc as never, sessionsRepo as never, {} as never, {} as never);
+    return { c, sessionsRepo, svc };
+  };
+
+  it('带 sessionId → incrementJudged(sessionId, 学生 id)，判题结果照常返回', async () => {
+    const { c, sessionsRepo } = mkC();
+    const res = await c.judge({ ...DTO, sessionId: 55 }, user);
+    expect(sessionsRepo.incrementJudged).toHaveBeenCalledWith(55, 7);
+    expect(res).toEqual({ isCorrect: true });
+  });
+
+  it('不传 sessionId → 不碰会话表', async () => {
+    const { c, sessionsRepo } = mkC();
+    await c.judge({ ...DTO }, user);
+    expect(sessionsRepo.incrementJudged).not.toHaveBeenCalled();
+  });
+
+  it('sessionId 非法（0 / 负数 / 字符串 / 小数）→ 跳过审计，判题照常', async () => {
+    const { c, sessionsRepo } = mkC();
+    for (const sessionId of [0, -1, '55', 1.5, NaN]) {
+      await expect(c.judge({ ...DTO, sessionId } as never, user)).resolves.toEqual({ isCorrect: true });
+    }
+    expect(sessionsRepo.incrementJudged).not.toHaveBeenCalled();
+  });
+
+  it('会话不存在 / 别人的 / 已完成（repo 不抛、0 行受影响）→ 判题照常', async () => {
+    const { c } = mkC();
+    await expect(c.judge({ ...DTO, sessionId: 999999 }, user)).resolves.toEqual({ isCorrect: true });
+  });
+
+  it('审计写库抛错 → 静默，判题照常返回（审计绝不能挡住判题）', async () => {
+    const { c } = mkC({ incrementJudged: vi.fn().mockRejectedValue(new Error('db down')) });
+    await expect(c.judge({ ...DTO, sessionId: 55 }, user)).resolves.toEqual({ isCorrect: true });
+  });
+});
+
+
 describe('TrainingController 解析拉取端点', () => {
-  const mkController = (service: any) => new TrainingController(service);
+  const mkController = (service: any) =>
+    new TrainingController(service, {} as never, {} as never, {} as never);
 
   it('getExplanations：ids 逗号分隔字符串 -> 数字数组（空/坏值过滤后由 service 再兜底）', async () => {
     const svc: any = { getExplanations: vi.fn().mockResolvedValue({ explanations: {} }) };

@@ -7,6 +7,7 @@ import { KnowledgePointsRepository } from '../../database/repositories/knowledge
 import { QuestionHintsRepository } from '../../database/repositories/question-hints.repo.js';
 import { StudentHiddenQuestionsRepository } from '../../database/repositories/student-hidden-questions.repo.js';
 import { AdminNotificationsRepository } from '../../database/repositories/admin-notifications.repo.js';
+import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { PointsService } from '../points/points.service.js';
 import type { AwardResult } from '../points/points.service.js';
@@ -77,6 +78,7 @@ export class TrainingService {
     private readonly dictationFeedback: DictationFeedbackCapability,
     private readonly interpretationJudge: InterpretationJudgeCapability,
     private readonly pointsService: PointsService,
+    private readonly trainingSessionsRepo: TrainingSessionsRepository,
   ) {}
 
   /**
@@ -567,6 +569,14 @@ export class TrainingService {
    * 题单做白名单序列化——只出 questionId/text/type/options，answer/explanation
    * 等字段一律剥离（防答案泄露）；options 是 JSON 字符串，parse 成数组返回。
    * 抽不到题（含该专项题池全部被标记）返回空数组（空集合非错误，前端判空显示提示）。
+   *
+   * **乙类整批发分（2026-09-17）**：抽到题就建一条 `training_sessions`，前端做完调
+   * `POST /api/training/sessions/:id/complete` 整批发分——「3 题 8 分」是打包价，
+   * 逐题发分会退化成线性「每题 2 分」，把溢价设计抵消掉（spec §6.1）。
+   * `tier_key` 用**学生选的档位**（控制器已用白名单校验过），`expected_count` 用
+   * **后端实际抽到的题数**——题池不够时两者可以不等；发分按档位走规则，题数只作审计留痕。
+   *
+   * **一题都没抽到就不建会话**：0 题的会话也能 complete 拿走整档分，是个白送分的口子。
    */
   async startTargetedPractice(input: {
     studentId: number;
@@ -574,7 +584,11 @@ export class TrainingService {
     kpId: number;
     type: string | null;
     count: number;
-  }): Promise<{ questions: Array<{ questionId: number; text: string; type: string; options: unknown[] | null }> }> {
+  }): Promise<{
+    questions: Array<{ questionId: number; text: string; type: string; options: unknown[] | null }>;
+    /** 未抽到题时为 null（没有可完成的会话）。 */
+    sessionId: number | null;
+  }> {
     const rows = await this.questionsRepo.findRandomByKpAndType(
       input.studentId,
       input.subjectId,
@@ -582,14 +596,26 @@ export class TrainingService {
       input.type,
       input.count,
     );
-    return {
-      questions: rows.map((q) => ({
-        questionId: q.id,
-        text: q.content,
-        type: q.type,
-        options: parseOptions(q.options),
-      })),
-    };
+    const questions = rows.map((q) => ({
+      questionId: q.id,
+      text: q.content,
+      type: q.type,
+      options: parseOptions(q.options),
+    }));
+
+    const sessionId = rows.length > 0
+      ? await this.trainingSessionsRepo.create({
+          student_id: input.studentId,
+          task_code: 'math_targeted',
+          subject_id: input.subjectId,
+          tier_key: String(input.count),
+          expected_count: rows.length,
+          ref_type: 'question',
+          ref_id: null,
+        })
+      : null;
+
+    return { questions, sessionId };
   }
 
   /** 标记某题「不再展示」：校验题目存在（避免标记已删题），再 INSERT IGNORE 幂等写入。 */

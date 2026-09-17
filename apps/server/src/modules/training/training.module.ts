@@ -7,7 +7,7 @@ import { VocabularyController } from './vocabulary.controller.js';
 import { VocabularyService } from './vocabulary.service.js';
 import { PracticeModule } from '../practice/practice.module.js';
 import { PointsModule } from '../points/points.module.js';
-import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository, EnglishWordsRepository, StudentWordProgressRepository } from '../../database/repositories/index.js';
+import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository, EnglishWordsRepository, StudentWordProgressRepository, TrainingSessionsRepository } from '../../database/repositories/index.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
@@ -32,12 +32,16 @@ import { ChineseMeaningJudgeCapability } from '../../ai-core/capabilities/chines
  * （零参实例化，避开接口类型可选参数的 DI 坑），仍列进 providers 由 Nest 直接 new。
  *
  * imports PointsModule（2026-09-17）：三个语文专项的判题要调 `PointsService.award` 发分
- * （甲类逐目标发分）。**无循环依赖**：PointsModule → ParentModule → AdminModule/ContentModule，
- * 这条链不回到 TrainingModule（改这里之前请复核）。
+ * （甲类逐目标发分），Task 12 的两个 start 端点还要注入 `PointRulesService.listTierKeys` 做档位
+ * 白名单、`complete` 端点注入 `PointsService` 发整批分。**无循环依赖**：PointsModule → ParentModule
+ * → AdminModule/ContentModule，这条链不回到 TrainingModule（改这里之前请复核）。
+ *
+ * `TrainingSessionsRepository`（Task 12）在本模块 providers 里另起一份实例：`PointsModule`
+ * 只导出 service 不导出 repo，而仓储是**无状态**的（只有一个连接池），两份实例不会分裂任何状态。
  */
 @Module({
   imports: [PracticeModule, PointsModule],
   controllers: [TrainingController, VocabularyController, MeaningController],
-  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability],
+  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository],
 })
 export class TrainingModule {}

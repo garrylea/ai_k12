@@ -9,7 +9,7 @@ function makeController() {
     judgeDictation: vi.fn().mockResolvedValue({ isCorrect: true, feedback: null }),
     generateDictationFeedback: vi.fn().mockResolvedValue({ feedback: null }),
   };
-  return { controller: new TrainingController(service as never), service };
+  return { controller: new TrainingController(service as never, {} as never, {} as never, {} as never), service };
 }
 
 /** JWT 里的学生身份（发分要用，不信 body）。 */

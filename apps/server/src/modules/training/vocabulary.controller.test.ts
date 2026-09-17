@@ -5,15 +5,17 @@ import type { JwtUser } from '../../common/guards/jwt-auth.guard.js';
 
 const STUDENT = { sub: 9, role: 'student' } as JwtUser;
 
-function makeController() {
+function makeController(tiers: string[] = ['10', '15', '20']) {
   const service = {
     getOptions: vi.fn().mockResolvedValue({ pools: [], todayAnswered: 0, counts: {} }),
-    start: vi.fn().mockResolvedValue({ questions: [], poolSize: 0 }),
+    start: vi.fn().mockResolvedValue({ questions: [], poolSize: 0, sessionId: 77 }),
     judge: vi.fn().mockResolvedValue({ verdict: 'correct' }),
     clearWrongMark: vi.fn().mockResolvedValue({ ok: true }),
     getFamily: vi.fn().mockResolvedValue({ root: {}, members: [] }),
   };
-  return { controller: new VocabularyController(service as never), service };
+  // 档位白名单（定案 7）：控制器开练前必须问 PointRulesService 要已配档位。
+  const pointRules = { listTierKeys: vi.fn().mockResolvedValue(tiers) };
+  return { controller: new VocabularyController(service as never, pointRules as never), service, pointRules };
 }
 
 /** 合法的最小开练入参，用例只覆盖自己要测的那一项。 */
@@ -54,6 +56,33 @@ describe('VocabularyController — start 入参校验', () => {
     await controller.start(okStart({ count: 10 }) as never, STUDENT);
     await controller.start(okStart({ count: 20 }) as never, STUDENT);
     expect(service.start).toHaveBeenCalledTimes(2);
+  });
+
+  it('合法档位 15 放行（默认档位 10/15/20 都在白名单里）', async () => {
+    const { controller, service } = makeController();
+    const res = await controller.start(okStart({ count: 15 }) as never, STUDENT);
+    expect(service.start).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ questions: [], poolSize: 0, sessionId: 77 });
+  });
+
+  it('count 不在已配档位（13）→ 400，且不调 service（会话不会建）', async () => {
+    const { controller, service } = makeController();
+    await expect(controller.start(okStart({ count: 13 }) as never, STUDENT))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(service.start).not.toHaveBeenCalled();
+  });
+
+  it('家长停用了某档（白名单里没有它）→ 该 count 400', async () => {
+    const { controller, service } = makeController(['10', '20']);
+    await expect(controller.start(okStart({ count: 15 }) as never, STUDENT))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(service.start).not.toHaveBeenCalled();
+  });
+
+  it('白名单查询用 JWT 学生 id + en_vocabulary 任务码（listTierKeys 内部先 ensureRules，新学生不会拿到空数组）', async () => {
+    const { controller, pointRules } = makeController();
+    await controller.start(okStart({ count: 10 }) as never, STUDENT);
+    expect(pointRules.listTierKeys).toHaveBeenCalledWith(9, 'en_vocabulary');
   });
 
   it('三个枚举走白名单，非法值 → 400', async () => {

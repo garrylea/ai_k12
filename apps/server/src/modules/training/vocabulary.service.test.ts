@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { BadRequestException } from '@nestjs/common';
 import { VocabularyService } from './vocabulary.service.js';
 import type { EnglishWordRow, EnglishWordPoolRow } from '../../database/repositories/english-words.repo.js';
 import type {
@@ -69,6 +70,7 @@ interface Harness {
   service: VocabularyService;
   wordsRepo: Record<string, ReturnType<typeof vi.fn>>;
   progressRepo: Record<string, ReturnType<typeof vi.fn>>;
+  sessionsRepo: Record<string, ReturnType<typeof vi.fn>>;
   judge: { generate: ReturnType<typeof vi.fn> };
   recordResult: ReturnType<typeof vi.fn>;
 }
@@ -111,16 +113,18 @@ const harness = (opts: {
   const judge = {
     generate: vi.fn(async () => ({ verdict: opts.judgeVerdict ?? 'wrong', comment: null })),
   };
+  const sessionsRepo = { create: vi.fn(async () => 77) };
   const service = new VocabularyService(
     wordsRepo as never,
     progressRepo as never,
+    sessionsRepo as never,
     {
       judge: judge as never,
       random: opts.random ?? (() => 0),
       now: opts.now ?? (() => new Date('2026-09-16T10:00:00+08:00')),
     },
   );
-  return { service, wordsRepo, progressRepo, judge, recordResult: progressRepo.recordResult };
+  return { service, wordsRepo, progressRepo, sessionsRepo, judge, recordResult: progressRepo.recordResult };
 };
 
 const startInput = (over: Partial<VocabularyStartInput> = {}): VocabularyStartInput => ({
@@ -170,24 +174,30 @@ describe('VocabularyService.start — 防泄漏', () => {
 // ---------------------------------------------------------------- 开练：抽题
 
 describe('VocabularyService.start — 抽题与顺序', () => {
-  it('题库为空 → 空题目、poolSize=0（不是报错）', async () => {
-    const { service } = harness({ pool: [], rows: [] });
-    expect(await service.start(startInput(), 9)).toEqual({ questions: [], poolSize: 0 });
+  it('题库为空 → 空题目、poolSize=0、不建会话（0 词会话能 complete 拿走整档分）', async () => {
+    const { service, sessionsRepo } = harness({ pool: [], rows: [] });
+    expect(await service.start(startInput(), 9)).toEqual({ questions: [], poolSize: 0, sessionId: null });
+    expect(sessionsRepo.create).not.toHaveBeenCalled();
   });
 
   it('会话长度 == count（一个词一道题，不是每个僻义各一道）', async () => {
     const rows = Array.from({ length: 30 }, (_, i) => word(i + 1, `w${i + 1}`, CARE_MEANINGS));
     const { service } = harness({ rows, random: () => 0.5 });
-    const { questions, poolSize } = await service.start(startInput({ count: 12 }), 9);
-    expect(questions).toHaveLength(12);
+    const { questions, poolSize } = await service.start(startInput({ count: 15 }), 9);
+    expect(questions).toHaveLength(15);
     expect(poolSize).toBe(30);
   });
 
-  it('count 夹到 10–20 区间（越界不报错，也不放行超大请求）', async () => {
+  it('count 越界直接 400（**不夹取**——静默把 13 夹成 15 就是给学生发错档的分）', async () => {
     const rows = Array.from({ length: 40 }, (_, i) => word(i + 1, `w${i + 1}`, CARE_MEANINGS));
     const { service } = harness({ rows, random: () => 0.5 });
-    expect((await service.start(startInput({ count: 3 }), 9)).questions).toHaveLength(10);
-    expect((await service.start(startInput({ count: 999 }), 9)).questions).toHaveLength(20);
+    for (const count of [3, 999, 0, 12.5, '15', undefined, NaN]) {
+      await expect(service.start(startInput({ count } as never), 9))
+        .rejects.toBeInstanceOf(BadRequestException);
+    }
+    // 合法档位照常出题
+    expect((await service.start(startInput({ count: 15 }), 9)).questions).toHaveLength(15);
+    expect((await service.start(startInput({ count: 20 }), 9)).questions).toHaveLength(20);
   });
 
   it('alpha 升序 / alpha_desc 降序（按 word 字典序）', async () => {
@@ -246,6 +256,36 @@ describe('VocabularyService.start — 抽题与顺序', () => {
     const { service } = harness({ rows });
     const { questions } = await service.start(startInput({ direction: 'en2cn' }), 9);
     expect(questions.map((q) => q.prompt)).toEqual(['care']);
+  });
+});
+
+// ---------------------------------------------------------------- 开练：建会话（乙类整批发分）
+
+describe('VocabularyService.start — 建会话', () => {
+  it('tier_key = 学生选的档位；expected_count = 实际出题数（词池不够时两者不等）', async () => {
+    // 选 20 词档，词池只有 2 个词 —— 发分按档位（20）走规则，实际 2 个只作审计留痕。
+    const { service, sessionsRepo } = harness({ random: () => 0.5 });
+    const res = await service.start(startInput({ count: 20 }), 9);
+    expect(res.questions).toHaveLength(2);
+    expect(sessionsRepo.create).toHaveBeenCalledWith({
+      student_id: 9,
+      task_code: 'en_vocabulary',
+      subject_id: null,
+      tier_key: '20',
+      expected_count: 2,
+      ref_type: 'question',
+      ref_id: null,
+    });
+    expect(res.sessionId).toBe(77);
+  });
+
+  it('出不了题的词被跳过时，expected_count 是**实际题数**而不是池子大小', async () => {
+    const rows = [word(1, 'broken', []), word(2, 'care', CARE_MEANINGS)];
+    const { service, sessionsRepo } = harness({ rows });
+    await service.start(startInput({ count: 15 }), 9);
+    expect(sessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      tier_key: '15', expected_count: 1,
+    }));
   });
 });
 

@@ -46,7 +46,7 @@ function makeService(overrides: {
     {} as never, judgeCore as never, {} as never, {} as never, {} as never,
     {} as never, {} as never, {} as never, {} as never,
     dictationRepo as never, dictationFeedback as never, {} as never,
-    points as never,
+    points as never, {} as never,
   );
   return { service, dictationRepo, judgeCore, dictationFeedback, points };
 }

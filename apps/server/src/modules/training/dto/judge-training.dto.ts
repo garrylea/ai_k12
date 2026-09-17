@@ -10,4 +10,7 @@ export interface JudgeTrainingDto {
   subjectId: number;
   studentAnswer: string;
   source: 'targeted' | 'error_practice';
+  /** 可选：本轮训练会话 id（`math_targeted`）。只用于累加 `judged_count` 审计留痕，
+   *  不传也能判题；不存在/非本人/已完成都静默跳过（spec §6.4）。 */
+  sessionId?: number;
 }

@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { VocabularyService, VOCABULARY_MAX_COUNT, VOCABULARY_MIN_COUNT } from './vocabulary.service.js';
+import { PointRulesService } from '../points/point-rules.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -41,7 +42,10 @@ export class VocabularyController {
   private static readonly DIRECTIONS: readonly VocabularyDirection[] = ['en2cn', 'cn2en', 'random', 'ph2en'];
   private static readonly PROMPT_KINDS: readonly VocabularyPromptKind[] = ['en2cn', 'cn2en', 'ph2en'];
 
-  constructor(private readonly vocabularyService: VocabularyService) {}
+  constructor(
+    private readonly vocabularyService: VocabularyService,
+    private readonly pointRulesService: PointRulesService,
+  ) {}
 
   /** 配置页：可选词库范围与规模、今日已背、四个筛选各自的池子大小。 */
   @Get('options')
@@ -50,8 +54,13 @@ export class VocabularyController {
   }
 
   /**
-   * 开练（抽题）。count 限 10-20；三个枚举走白名单；letter 只在 order='letter' 时允许，
+   * 开练（抽题）。count 必须是**家长已配的档位**（定案 7「档位即可选项」），
+   * 再限 10-20 整数兜底；三个枚举走白名单；letter 只在 order='letter' 时允许，
    * 且必须是单个 a-z 字母（仓储还会再校验一次，杜绝把通配符带进 LIKE）。
+   *
+   * 白名单必须在服务层之前挡：服务层的 `normalizeCount` 只做范围兜底，
+   * 而 `count=13` 是**范围内但未配置**的档位——放进去等于学生自己发明了档位和分值。
+   * `listTierKeys` 内部先 `ensureRules`，所以从未发过分的全新学生拿到的是默认档位而不是空数组。
    */
   @Post('start')
   async start(
@@ -69,6 +78,10 @@ export class VocabularyController {
     @CurrentUser() user: JwtUser,
   ) {
     const { count } = dto;
+    const allowed = await this.pointRulesService.listTierKeys(this.studentIdOf(user), 'en_vocabulary');
+    if (!allowed.includes(String(count))) {
+      throw new BadRequestException(`词数仅允许 ${allowed.join(' | ')}`);
+    }
     if (!Number.isInteger(count) || (count as number) < VOCABULARY_MIN_COUNT || (count as number) > VOCABULARY_MAX_COUNT) {
       throw new BadRequestException(`count 仅允许 ${VOCABULARY_MIN_COUNT}-${VOCABULARY_MAX_COUNT} 的整数`);
     }

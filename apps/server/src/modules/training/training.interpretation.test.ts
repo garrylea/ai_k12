@@ -85,7 +85,7 @@ function makeService(overrides: {
     questionHintsRepo as never, {} as never, hiddenRepo as never,
     explanationCache as never, {} as never,
     dictationRepo as never, { generate: vi.fn() } as never, interpretationJudge as never,
-    points as never,
+    points as never, {} as never,
   );
   return { service, dictationRepo, interpretationJudge, mainErrorRepo, hiddenRepo, questionHintsRepo, explanationCache, points };
 }

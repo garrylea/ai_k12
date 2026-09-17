@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { EnglishWordsRepository, toMeanings, toRootAffixes } from '../../database/repositories/english-words.repo.js';
 import type { EnglishWordRow, EnglishWordPoolRow } from '../../database/repositories/english-words.repo.js';
 import { StudentWordProgressRepository } from '../../database/repositories/student-word-progress.repo.js';
+import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
 import { EnglishWordJudgeCapability } from '../../ai-core/capabilities/english-word-judge.capability.js';
 import type { EnglishWordJudgeMode } from '../../ai-core/types.js';
 import {
@@ -98,6 +99,7 @@ export class VocabularyService {
   constructor(
     private readonly wordsRepo: EnglishWordsRepository,
     private readonly progressRepo: StudentWordProgressRepository,
+    private readonly trainingSessionsRepo: TrainingSessionsRepository,
     @Optional() deps?: VocabularyServiceDeps,
   ) {
     this.judgeCapability = deps?.judge ?? new EnglishWordJudgeCapability();
@@ -150,6 +152,12 @@ export class VocabularyService {
    * **不返回** `word` / `phonetic` / `context` / `hasFamily`——词根族树里必然包含单词本身，
    * `word` 与 `hasFamily` 都可能直接把答案递出去。
    * `ph2en` 的音标只出现在 `prompt` 一处（`phonetic` 留 null），免得两处内容打架。
+   *
+   * **乙类整批发分（2026-09-17）**：出题后建一条 `training_sessions`，前端背完整轮调
+   * `POST /api/training/sessions/:id/complete` 整批发分（10/15/20 词是三档打包价，逐词发分会
+   * 退化成线性，spec §6.1）。`tier_key` 用学生选的档位（控制器白名单已校验），
+   * `expected_count` 用实际出题数（词池不够/出不了题的词被跳过时会更少）。
+   * **一题都没出就不建会话**——0 词的会话也能 complete 拿走整档分。
    */
   async start(input: VocabularyStartInput, studentId: number): Promise<VocabularyStartResult> {
     const count = this.normalizeCount(input.count);
@@ -170,7 +178,7 @@ export class VocabularyService {
     });
 
     if (pool.length === 0) {
-      return { questions: [], poolSize: 0 };
+      return { questions: [], poolSize: 0, sessionId: null };
     }
 
     const selected = this.selectPool(pool, order, count);
@@ -185,13 +193,38 @@ export class VocabularyService {
       if (question) questions.push(question);
     }
 
-    return { questions, poolSize: pool.length };
+    const sessionId = questions.length > 0
+      ? await this.trainingSessionsRepo.create({
+          student_id: studentId,
+          task_code: 'en_vocabulary',
+          subject_id: null,
+          tier_key: String(count),
+          expected_count: questions.length,
+          ref_type: 'question',
+          ref_id: null,
+        })
+      : null;
+
+    return { questions, poolSize: pool.length, sessionId };
   }
 
+  /**
+   * 剂量校验，**越界直接拒绝、不夹取**（2026-09-17 改）。
+   *
+   * 原来是 `Math.min(MAX, Math.max(MIN, n))`：把 13 悄悄夹成 15 是**静默改档**——
+   * 而档位直接决定发多少分（档位打包价），静默改档就是给学生发错分。
+   * 「档位即可选项」由控制器的两道校验把关（范围 + `listTierKeys` 白名单），
+   * 这里只是兜底：任何绕过控制器的调用都必须**响**，而不是被悄悄改成合法档位。
+   * 不做 `Number()` 强转（与控制器 `Number.isInteger` 同口径），`'15'` 这类字符串照拒不误。
+   */
   private normalizeCount(raw: unknown): number {
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return VOCABULARY_MIN_COUNT;
-    return Math.min(VOCABULARY_MAX_COUNT, Math.max(VOCABULARY_MIN_COUNT, Math.trunc(n)));
+    if (typeof raw !== 'number' || !Number.isInteger(raw)
+        || raw < VOCABULARY_MIN_COUNT || raw > VOCABULARY_MAX_COUNT) {
+      throw new BadRequestException(
+        `count 仅允许 ${VOCABULARY_MIN_COUNT}-${VOCABULARY_MAX_COUNT} 的整数`,
+      );
+    }
+    return raw;
   }
 
   private normalizeOrder(raw: unknown): VocabularyOrder {

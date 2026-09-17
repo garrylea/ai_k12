@@ -10,7 +10,7 @@ function makeController() {
       passageId: 1, sentenceIndex: 0, allCorrect: true, terms: [], sentence: {}, fullTranslation: null,
     }),
   };
-  return { controller: new TrainingController(service as never), service };
+  return { controller: new TrainingController(service as never, {} as never, {} as never, {} as never), service };
 }
 
 /** JWT 里的学生身份（发分要用，不信 body）。 */
@@ -83,7 +83,7 @@ describe('TrainingController interpretation 端点', () => {
       controller.judgeInterpretation({ passageId: 1, sentenceIndex: 0.5, terms: [], translation: '' }, USER),
     ).rejects.toBeInstanceOf(BadRequestException);
     const { service } = makeController();
-    const c2 = new TrainingController(service as never);
+    const c2 = new TrainingController(service as never, {} as never, {} as never, {} as never);
     await c2.judgeInterpretation({ passageId: 1, sentenceIndex: 0, terms: [], translation: '' }, USER);
     expect(service.judgeInterpretation).toHaveBeenCalled();
   });

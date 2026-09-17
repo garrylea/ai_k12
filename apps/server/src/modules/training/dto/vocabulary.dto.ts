@@ -89,6 +89,8 @@ export interface VocabularyStartResult {
   questions: VocabularyQuestionItem[];
   /** 抽题池命中数。为 0 时 questions 为空，前端提示「当前筛选下没有词」 */
   poolSize: number;
+  /** 本轮训练会话 id（乙类整批发分用）；词池为空时为 null（没有可完成的会话）。 */
+  sessionId: number | null;
 }
 
 // ============ 判题 ============
