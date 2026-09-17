@@ -188,6 +188,8 @@ describe('PointRulesService.listGrouped — 规则分组', () => {
 
     expect(h.points.startOfToday).toHaveBeenCalledTimes(1);
     expect(h.points.startOfTomorrow).toHaveBeenCalledTimes(1);
+    // dayEnd 必须由 dayStart 派生（复用同一个时刻），不能自己再取一次钟——双读数跨午夜会撑成 48h
+    expect(h.points.startOfTomorrow).toHaveBeenCalledWith(DAY_START);
     // 8 个 taskCode 各一次（不是 15 个档位各一次）
     expect(h.ledgerRepo.countTodayEarned).toHaveBeenCalledTimes(8);
     expect(h.ledgerRepo.countTodayEarned).toHaveBeenCalledWith(7, 'math_targeted', DAY_START, DAY_END);
@@ -361,11 +363,11 @@ describe('PointRulesService.updateBatch — 家长批量保存', () => {
     expect(h.conn.commit).toHaveBeenCalledTimes(1);
   });
 
-  it('原样重存（值没变）→ affectedRows 仍是 1，不误报 3005', async () => {
+  it('服务层把 matched=1 当成功（原样重存的 1 不被当成「缺档位」）', async () => {
     const h = harness();
     stubBatch(h);
-    // mysql2 默认带 CLIENT_FOUND_ROWS：UPDATE 的 affectedRows 是**匹配行数**而非改动行数，
-    // 因此「家长原样再存一次」返回 1。这条钉住服务层不能把 1 误读成「缺档位」。
+    // 这里 stub 掉了仓储，所以本条**只**证明「服务层把 1 当成功」，不证明 1 从哪来：
+    // 「读的是 affectedRows 而非 changedRows」钉在 point-rules.repo.test.ts 的 updateOne 用例里。
     h.rulesRepo.updateOne.mockResolvedValue(1);
 
     await expect(h.service.updateBatch(7, [A])).resolves.toBeUndefined();
@@ -384,6 +386,21 @@ describe('PointRulesService.updateBatch — 家长批量保存', () => {
     // 第一条已经写进去了，必须靠回滚撤销——「要么全成、要么全不成」
     expect(h.conn.rollback).toHaveBeenCalledTimes(1);
     expect(h.conn.commit).not.toHaveBeenCalled();
+    expect(h.conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('回滚本身失败时仍抛原始错误（3005 不被连接错误顶掉）', async () => {
+    const h = harness();
+    stubBatch(h);
+    h.rulesRepo.updateOne.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    h.conn.rollback.mockRejectedValue(new Error('connection lost'));
+
+    // 若 rollback 的错误逃出去，抛出的就是 'connection lost'，而不是业务错误 3005
+    await expect(h.service.updateBatch(7, [A, B])).rejects.toMatchObject({
+      response: { code: 3005, message: '档位不存在' },
+    });
+
+    expect(h.conn.rollback).toHaveBeenCalledTimes(1);
     expect(h.conn.release).toHaveBeenCalledTimes(1);
   });
 

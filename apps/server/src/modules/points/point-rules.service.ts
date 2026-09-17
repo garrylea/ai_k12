@@ -94,7 +94,8 @@ export class PointRulesService {
    * 档位共用同一天计数），算出 `completedToday` / `remainingToday`；`dailyLimit == null` 表示不限，
    * `remainingToday` 为 null。未要求计数时两项都是 null（未计算），不假装成 0。
    *
-   * 日边界在一次调用里只取一次：跨 0 点时不能让一半任务算「今天」、一半算「明天」。
+   * 日边界在一次调用里只取一次：`dayEnd` 由 `dayStart` 派生，不会出现「一半任务算今天、
+   * 一半算明天」，也不会因两次读数跨午夜把窗口撑成 48 小时。
    */
   async listGrouped(
     studentId: number,
@@ -104,8 +105,10 @@ export class PointRulesService {
     const rows = await this.rulesRepo.findByStudent(studentId);
 
     const withDailyCounts = opts.withDailyCounts === true;
+    // 一次调用只取一次日边界：dayEnd 由 dayStart 派生（startOfTomorrow 复用同一个时刻，不再读钟）。
+    // 两个边界各自取钟若跨午夜，会得到 48 小时窗口，把两天的发分都算进今日。
     const dayStart = withDailyCounts ? this.points.startOfToday() : null;
-    const dayEnd = withDailyCounts ? this.points.startOfTomorrow() : null;
+    const dayEnd = dayStart === null ? null : this.points.startOfTomorrow(dayStart);
     const counts = new Map<string, number>();
 
     const groups = new Map<string, PointRuleGroup>();
@@ -196,7 +199,8 @@ export class PointRulesService {
       }
       await conn.commit();
     } catch (err) {
-      await conn.rollback();
+      // rollback 失败（连接已断）不能顶掉真正的失败原因；吞掉回滚错误，向上抛原始 err
+      try { await conn.rollback(); } catch { /* 保留原始错误 */ }
       throw err;
     } finally {
       conn.release();

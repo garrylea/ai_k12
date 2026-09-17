@@ -90,11 +90,15 @@ export class PointsService {
     //    日界在 Node 侧算好传参，不用 SQL 的 CURDATE()（DB 会话时区可能与应用不一致）。
     const dailyLimit = rule.daily_limit === null || rule.daily_limit === undefined ? null : Number(rule.daily_limit);
     if (dailyLimit !== null) {
+      // 日边界必须在同一次调用里只取一次时钟：两个边界各自 `now()` 一次，读数若跨过午夜
+      // 就会得到「昨天 00:00 → 后天 00:00」的 48 小时窗口，把两天的发分都算进今天，
+      // 学生在一日两轮的第二轮会被误判到上限。这里取一次 now 同时喂给两个边界。
+      const now = this.now();
       const todayCount = await this.ledgerRepo.countTodayEarned(
         studentId,
         taskCode,
-        this.startOfToday(),
-        this.startOfTomorrow(),
+        this.startOfToday(now),
+        this.startOfTomorrow(now),
       );
       if (todayCount >= dailyLimit) return this.skipped(studentId, 'daily_limit');
     }
@@ -134,7 +138,9 @@ export class PointsService {
     return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   }
 
-  /** 服务器本地时区的次日 00:00（与 `startOfToday` 配对成半开区间 `>= start && < end`）。 */
+  /** 服务器本地时区的次日 00:00（与 `startOfToday` 配对成半开区间 `>= start && < end`）。
+   *  复用调用方传入的 `now`，**不在这里再读一次时钟**——调用方必须把同一个 `now` 同时喂给两个
+   *  边界，否则两次读数跨午夜会撑出 48 小时窗口（见 `award` 每日上限分支）。 */
   startOfTomorrow(now = this.now()): Date {
     const d = this.startOfToday(now);
     d.setDate(d.getDate() + 1);
@@ -191,7 +197,8 @@ export class PointsService {
         await conn.commit();
       }
     } catch (err) {
-      await conn.rollback();
+      // rollback 失败（连接已断）不能顶掉真正的失败原因；吞掉回滚错误，向上抛原始 err
+      try { await conn.rollback(); } catch { /* 保留原始错误 */ }
       throw err;
     } finally {
       conn.release();

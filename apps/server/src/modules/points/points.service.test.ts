@@ -30,6 +30,8 @@ function ruleRow(over: Partial<RuleFixture> = {}): PointRuleRow {
 /** 被测服务的全部依赖都是 mock：本用例不连真库。 */
 function harness(startNow = new Date(2026, 8, 17, 10, 0, 0)) {
   let current = startNow;
+  // 默认时钟读 `current`；setClock 可换成「每次调用返回不同值」的序列钟，用来建模跨午夜读数。
+  let clock: () => Date = () => current;
   const rulesRepo = { findByStudent: vi.fn(), insertIgnoreBatch: vi.fn() };
   const ledgerRepo = {
     insert: vi.fn(),
@@ -49,7 +51,7 @@ function harness(startNow = new Date(2026, 8, 17, 10, 0, 0)) {
     rulesRepo as unknown as PointRulesRepository,
     ledgerRepo as unknown as PointLedgerRepository,
     pointsRepo as unknown as StudentPointsRepository,
-    () => current,
+    () => clock(),
   );
   return {
     service,
@@ -60,6 +62,9 @@ function harness(startNow = new Date(2026, 8, 17, 10, 0, 0)) {
     pool,
     setNow: (d: Date) => {
       current = d;
+    },
+    setClock: (fn: () => Date) => {
+      clock = fn;
     },
   };
 }
@@ -211,6 +216,27 @@ describe('PointsService.award — 每日上限', () => {
       new Date(2026, 8, 17, 0, 0, 0, 0),
       new Date(2026, 8, 18, 0, 0, 0, 0),
     );
+  });
+
+  it('日边界由同一次取钟派生：两次读数跨午夜也不会撑成 48 小时窗口', async () => {
+    const h = harness();
+    // 时钟连读两次会跨过午夜：第 1 次在第 17 天末尾、第 2 次已进入第 18 天。
+    // 若 award 分别裸调 startOfToday()/startOfTomorrow()（各自读一次钟），窗口会变成
+    // 17 日 00:00 → 19 日 00:00（48 小时），把两天的发分都算进今天——学生第二轮被误判上限。
+    const reads = [new Date(2026, 8, 17, 23, 59, 59, 999), new Date(2026, 8, 18, 0, 0, 0, 1)];
+    let i = 0;
+    h.setClock(() => reads[Math.min(i++, reads.length - 1)]);
+    h.rulesRepo.findByStudent.mockResolvedValue([ruleRow({ daily_limit: 2 })]);
+    h.ledgerRepo.countTodayEarned.mockResolvedValue(2);
+    h.pointsRepo.find.mockResolvedValue({ totalEarned: 0, balance: 0 });
+
+    await h.service.award(INPUT);
+
+    const call = h.ledgerRepo.countTodayEarned.mock.calls[0] as unknown as [number, string, Date, Date];
+    const [, , dayStart, dayEnd] = call;
+    expect(dayStart).toEqual(new Date(2026, 8, 17, 0, 0, 0, 0));
+    // 关键断言：窗口必须恰好 24 小时。只单独核对某一边的值抓不到双读数 bug。
+    expect(dayEnd.getTime() - dayStart.getTime()).toBe(24 * 60 * 60 * 1000);
   });
 
   it('dailyLimit 为 null → 完全跳过计数', async () => {
@@ -427,6 +453,18 @@ describe('PointsService.award — 异常', () => {
 
     expect(h.conn.rollback).toHaveBeenCalledTimes(1);
     expect(h.conn.commit).not.toHaveBeenCalled();
+    expect(h.conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('回滚本身失败时仍抛原始错误（连接错误不掩盖真正的失败原因）', async () => {
+    const h = harness();
+    stubHappyPath(h);
+    h.pointsRepo.upsertDelta.mockRejectedValue(new Error('deadlock'));
+    h.conn.rollback.mockRejectedValue(new Error('connection lost'));
+
+    // 若 rollback 的错误逃出去，调用方看到的会是 'connection lost' 而不是 'deadlock'
+    await expect(h.service.award(INPUT)).rejects.toThrow('deadlock');
+    expect(h.conn.rollback).toHaveBeenCalledTimes(1);
     expect(h.conn.release).toHaveBeenCalledTimes(1);
   });
 });

@@ -7,12 +7,12 @@ import type { DefaultRule } from '../../modules/points/default-rules.js';
  * - INSERT/UPDATE -> [ResultSetHeader, fields]
  * - SELECT        -> [rows[], fields]
  */
-const mockPool = (opts: { rows?: any[]; affectedRows?: number; insertId?: number } = {}) => {
-  const { rows = [], affectedRows = 1, insertId = 7 } = opts;
+const mockPool = (opts: { rows?: any[]; affectedRows?: number; changedRows?: number; insertId?: number } = {}) => {
+  const { rows = [], affectedRows = 1, changedRows = affectedRows, insertId = 7 } = opts;
   return {
     execute: vi.fn().mockImplementation((sql: string) => {
       if (/^\s*INSERT/i.test(sql)) return Promise.resolve([{ insertId, affectedRows }, []]);
-      if (/^\s*UPDATE/i.test(sql)) return Promise.resolve([{ affectedRows, changedRows: affectedRows }, []]);
+      if (/^\s*UPDATE/i.test(sql)) return Promise.resolve([{ affectedRows, changedRows }, []]);
       return Promise.resolve([rows, []]);
     }),
     query: vi.fn().mockResolvedValue([rows, []]),
@@ -86,8 +86,11 @@ describe('PointRulesRepository.insertIgnoreBatch', () => {
 });
 
 describe('PointRulesRepository.updateOne', () => {
-  it('生成 SET 子句并返回 affectedRows', async () => {
-    const pool = mockPool({ affectedRows: 1 });
+  it('生成 SET 子句并返回 affectedRows（值没变、changedRows=0 时仍是 1）', async () => {
+    // mysql2 默认 CLIENT_FOUND_ROWS：affectedRows 是**匹配**行数、changedRows 才是改动行数。
+    // 家长原样重存同样的值 → changedRows=0 而 affectedRows=1。若实现改成读 changedRows，
+    // 服务层会把一个真实存在的档位误判成 3005「档位不存在」——这条直接钉住读的是 affectedRows。
+    const pool = mockPool({ affectedRows: 1, changedRows: 0 });
     const repo = new PointRulesRepository(pool as any);
     const affected = await repo.updateOne(10, 'math_targeted', '3', { points: 9, dailyLimit: 5, isActive: true });
     expect(affected).toBe(1);
