@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TrainingController } from './training.controller.js';
 import { TrainingService } from './training.service.js';
+import { MeaningController } from './meaning.controller.js';
+import { MeaningService } from './meaning.service.js';
 import { VocabularyController } from './vocabulary.controller.js';
 import { VocabularyService } from './vocabulary.service.js';
 import { PracticeModule } from '../practice/practice.module.js';
@@ -9,6 +11,7 @@ import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { EnglishWordJudgeCapability } from '../../ai-core/capabilities/english-word-judge.capability.js';
+import { ChineseMeaningJudgeCapability } from '../../ai-core/capabilities/chinese-meaning-judge.capability.js';
 
 /**
  * 错题训练模块（Task 1 骨架 + Task 2 判题 + Task 3 提示缓存 + Task 8 专项练习 + Task 7 解析拉取）。
@@ -22,10 +25,14 @@ import { EnglishWordJudgeCapability } from '../../ai-core/capabilities/english-w
  * 英语背单词（2026-09-16）走**独立的 controller/service**（`/api/training/vocabulary`），
  * 不塞进 TrainingController/TrainingService——那两个已被数学 + 语文撑到数百行，
  * 模块归属不变，只是文件划分更清楚。`EnglishWordJudgeCapability` 同理可直接实例化。
+ *
+ * 语文古诗文「含义」专项（2026-09-17）同样走独立 controller/service（`/api/training/meaning`），
+ * 理由同上；`ChineseMeaningJudgeCapability` 与其它 ai-core capability 一样不写 `@Injectable()`
+ * （零参实例化，避开接口类型可选参数的 DI 坑），仍列进 providers 由 Nest 直接 new。
  */
 @Module({
   imports: [PracticeModule],
-  controllers: [TrainingController, VocabularyController],
-  providers: [TrainingService, VocabularyService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability],
+  controllers: [TrainingController, VocabularyController, MeaningController],
+  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability],
 })
 export class TrainingModule {}
