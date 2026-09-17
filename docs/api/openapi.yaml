@@ -6729,7 +6729,7 @@ components:
       properties:
         passageId: { type: integer, format: int64 }
         workTitle: { type: string }
-        semester: { type: string }
+        semester: { type: string, enum: ['上册', '下册'] }
         sentences:
           type: array
           items:
