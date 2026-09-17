@@ -1529,3 +1529,149 @@ export function submitExamSession(sessionId: number): Promise<ExamSummary> {
 export function getExamResults(sessionId: number): Promise<ExamSummary & { items: ExamResultItem[] }> {
   return fetchApi<ExamSummary & { items: ExamResultItem[] }>(`/exams/sessions/${sessionId}/results`);
 }
+
+// --- Points（学生端积分：概览 / 流水 / 规则档位 / 奖励册 / 训练会话完成发分） ---
+// 字段与后端 modules/points/dto/points.dto.ts 一一对应（wire 形状，不是 service 内部类型）。
+// 契约见 docs/api/openapi.yaml 的 /points/me*；改一边要同步另一边。
+
+/** 段位信息。`code` 有意用 string 而非 LevelCode 联合：后端新增段位时前端不该类型报错，
+ *  图标侧 `LevelIcon` 对未知 code 已做回退。 */
+export interface PointLevel {
+  code: string;
+  name: string;
+  /** 段位序号（0 = 劈柴），可用于比较高低 */
+  index: number;
+  /** 该段位的累计积分门槛 */
+  threshold: number;
+}
+
+/** `GET /api/points/me` —— 概览。新学生无积分行时也会返回全 0 + 劈柴，不是 404。 */
+export interface MyPoints {
+  balance: number;
+  /** 累计获得；段位与进度都按它算（兑换只扣 balance、不影响它） */
+  totalEarned: number;
+  todayEarned: number;
+  level: PointLevel;
+  /** 已满级（王者）时为 null */
+  nextLevel: PointLevel | null;
+  /** 已满级时为 null */
+  pointsToNextLevel: number | null;
+  /** 0-100 整数；满级为 100 */
+  progressPercent: number;
+}
+
+export type PointLedgerKind = 'earn' | 'redeem';
+
+export interface PointLedgerEntry {
+  id: number;
+  kind: PointLedgerKind;
+  /** 展示文案快照（家长后来改分值/档位名，历史流水不变） */
+  title: string;
+  /** earn 正数 / redeem 负数 */
+  points: number;
+  createdAt: string;
+  refType: string | null;
+}
+
+/** `GET /api/points/me/ledger` —— 分页流水（最新在前）。 */
+export interface PointLedgerPage {
+  items: PointLedgerEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PointRuleTier {
+  tierKey: string;
+  /** 按钮文字，如「3 题」「15 词」 */
+  tierLabel: string;
+  points: number;
+  /** null = 不限次数 */
+  dailyLimit: number | null;
+  /** 今日已发分条数；dailyLimit == null（不限）时为 null */
+  completedToday: number | null;
+  /** 今日还剩几次；dailyLimit == null（不限）时为 null。
+   *  注意 === 0 时**仍可开练**，只是不发分——别拦着孩子练（计划 §3 Task 6）。 */
+  remainingToday: number | null;
+}
+
+export interface PointRuleTask {
+  taskCode: string;
+  taskName: string;
+  /** **可能为空数组**（该任务档位被家长全部下架）：调用方不能写 `tiers[0].tierKey` 默认取值。 */
+  tiers: PointRuleTier[];
+}
+
+/** `GET /api/points/me/rules` —— 训练配置页的「档位即可选项」数据源（只含已启用档位）。 */
+export interface MyPointRules {
+  tasks: PointRuleTask[];
+}
+
+export interface StudentRewardItem {
+  id: number;
+  name: string;
+  description: string | null;
+  pointsCost: number;
+  minLevelCode: string | null;
+  /** 余额够不够 */
+  affordable: boolean;
+  /** 段位够不够 */
+  levelOk: boolean;
+  /** `max(0, pointsCost - balance)` */
+  gap: number;
+}
+
+/** `GET /api/points/me/rewards` —— 奖励册（只含已上架；学生只能看，兑换在家长端）。 */
+export interface MyRewards {
+  balance: number;
+  level: PointLevel;
+  items: StudentRewardItem[];
+}
+
+/** 未发分原因。`duplicate`（幂等命中）刻意不在枚举里——一律按 `pointsAwarded: 0` 静默处理。 */
+export type PointsAwardReason =
+  | 'daily_limit'
+  | 'no_rule'
+  | 'tier_inactive'
+  | 'genre_unset';
+
+/** `POST /api/training/sessions/:id/complete` 的响应（数学专项 / 背单词专用）。 */
+export interface CompleteTrainingSessionResult {
+  /** 幂等命中、已达上限、无规则时都是 0——**不是错误** */
+  pointsAwarded: number;
+  /** 发分失败（`reason: 'award_failed'`）时为 **null**：不要拿它覆盖本地积分快照，
+   *  会话留在 `in_progress`，允许重试（服务端会补发）。 */
+  balance: number | null;
+  totalEarned: number | null;
+  /** 段位 code 字符串，不是对象 */
+  levelUp: { from: string; to: string } | null;
+  reason?: PointsAwardReason | 'already_completed' | 'award_failed';
+}
+
+export function getMyPoints(): Promise<MyPoints> {
+  return fetchApi<MyPoints>('/points/me');
+}
+
+export function getMyLedger(page = 1, pageSize = 20): Promise<PointLedgerPage> {
+  const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  return fetchApi<PointLedgerPage>(`/points/me/ledger?${qs.toString()}`);
+}
+
+export function getMyPointRules(): Promise<MyPointRules> {
+  return fetchApi<MyPointRules>('/points/me/rules');
+}
+
+export function getMyRewards(): Promise<MyRewards> {
+  return fetchApi<MyRewards>('/points/me/rewards');
+}
+
+/**
+ * 训练会话完成发分。**幂等**：重复调用（前端重试）返回
+ * `reason: 'already_completed'` + `pointsAwarded: 0`，不报错。
+ * 只有数学专项与背单词走会话；其余四个专项的 `pointsAwarded` 在判题响应里。
+ */
+export function completeTrainingSession(sessionId: number): Promise<CompleteTrainingSessionResult> {
+  return fetchApi<CompleteTrainingSessionResult>(`/training/sessions/${sessionId}/complete`, {
+    method: 'POST',
+  });
+}
