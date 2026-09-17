@@ -101,13 +101,15 @@ interface PointsState {
 ```ts
 interface FireworksCanvasProps {
   active: boolean;      // false 时不渲染 canvas、不跑 RAF
+  intensity?: 'full' | 'soft';  // 默认 'full'；'soft' 用于 task 变体（烟花更淡）
   onDone?: () => void;  // 约 3s 后回调
 }
 ```
 
 - **Canvas 2D + `requestAnimationFrame`**，纯代码生成粒子——**不用图片素材、不用 `✦✧＊·◇` 之类装饰字符**。
-- 规模：每波 ≤120 粒子 × 3 波，总计约 3 秒后自动卸载并 `onDone`。
-- 颜色**读 CSS 变量**（`getComputedStyle(el).getPropertyValue('--brand-500')` 等），这样日夜主题、训练轨硬编码日间主题下都对。
+- 规模：每波 ≤120 粒子 × 3 波，总计约 3 秒后自动卸载并 `onDone`。`'soft'` 档减半粒子数并降 alpha（Task 3 实现：full 90 粒子/波、soft 45 粒子/波 + 0.5 alpha），**两档都不得越过 120 上限**。
+- 按 `devicePixelRatio` 缩放 backing store（`ctx.setTransform`），否则 iPad retina 上粒子发虚——iPad 横屏是本项目主断点。
+- 颜色**读 CSS 变量**（`getComputedStyle(el).getPropertyValue('--brand-500')` 等，记得 `.trim()`），这样日夜主题、训练轨硬编码日间主题下都对。
 - `prefers-reduced-motion: reduce` 或动效关闭 → **不跑动画**，直接 `onDone()`（父组件改为静态光晕）。
 - 必须清理：`cancelAnimationFrame` + 组件卸载时停止，别留后台 RAF。
 
@@ -127,8 +129,9 @@ interface CelebrationOverlayProps {
 }
 ```
 
-- 全屏覆盖层，背景半透明遮罩 + 卡片，**复用于主线现有庆祝与训练轨交卷**。
-- 视觉：`variant === 'levelup'` 时显示 `LevelIcon` 大图标（size 96）+ 段位名 + 烟花；`'task'` 时显示对勾圆 + 烟花（更淡）。
+- 全屏覆盖层，**背景半透明遮罩 + 居中卡片**（不是不透明整面——这个组件还要复用到训练轨交卷），`role="dialog"` + `aria-modal="true"`。
+- 视觉：`variant === 'levelup'` 时显示 `LevelIcon` 大图标（size 96）+ 段位名 + 烟花（`intensity='full'`）；`'task'` 时显示对勾圆 + 烟花（`intensity='soft'`，更淡）。
+- 倒计时行由本组件渲染（给了 `autoCloseSeconds` 就显示「N 秒后自动继续」）；**去哪里的文案由调用方通过 `subtitle` 给**，组件不感知业务。
 - **`aria-modal="true"` + `role="dialog"`**，焦点落在主按钮上。
 - 现在主线那段内联庆祝（`CourseDetailPage.tsx:1022-1096`）里用 `✦✧＊·◇` 做的撒花**一并换成 `FireworksCanvas`**——那是违反「不用装饰元素」硬规则的存量代码，这次顺手修掉。
 
