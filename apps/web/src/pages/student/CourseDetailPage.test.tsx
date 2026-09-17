@@ -86,23 +86,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  // 本机 Node 自带 `localStorage` 全局会盖掉 jsdom 的 Storage（无 getItem），
-  // 页面要读 username/userId，这里给一份内存实现。
-  const memory = new Map<string, string>();
-  vi.stubGlobal('localStorage', {
-    getItem: (key: string) => memory.get(key) ?? null,
-    setItem: (key: string, value: string) => void memory.set(key, value),
-    removeItem: (key: string) => void memory.delete(key),
-    clear: () => memory.clear(),
-  });
-
-  // React Router 导航内部会 `new Request(url, { signal })`，而本环境里
-  // jsdom 的 AbortSignal 与 Node（undici）的 Request 跨 realm 不认，直接抛
-  // `RequestInit: Expected signal ... to be an instance of AbortSignal`。
-  // 用最小 Request 桩绕开这个环境坑，让导航走真路由（否则得把 useNavigate 也 mock 掉）。
-  vi.stubGlobal('Request', class {
-    constructor(public url: string) {}
-  });
+  // localStorage / Request 两处环境坑已统一在 `src/test/setup.ts`（全局 beforeEach）处理。
 
   // jsdom 没有 canvas 实现：stub 掉避免 not-implemented 噪音（烟花本身另有单测）
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
@@ -142,6 +126,8 @@ describe('CourseDetailPage 完成态庆祝', () => {
     expect(await screen.findByRole('dialog')).toHaveAttribute('aria-modal', 'true');
     expect(screen.getByRole('heading', { name: '恭喜你，本节学习完成！' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始新课' })).toBeInTheDocument();
+    // 倒计时文案是通用的，目的地必须由页面 subtitle 交代（「N 秒后自动继续」的所指）
+    expect(screen.getByText(/即将进入下一课/)).toBeInTheDocument();
   });
 
   it('点主按钮「开始新课」→ 带着下一课 id 跳课程详情', async () => {
@@ -198,6 +184,7 @@ describe('CourseDetailPage 完成态庆祝', () => {
     const router = await finishLesson();
 
     expect(await screen.findByRole('heading', { name: '恭喜你，本学科全部完成！' })).toBeInTheDocument();
+    expect(screen.getByText(/即将返回星图/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '返回星图' }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
@@ -241,6 +228,33 @@ describe('CourseDetailPage 完成态庆祝', () => {
     expect(await screen.findByRole('heading', { name: '晋升新段位！' })).toBeInTheDocument();
     expect(screen.getByTestId('celebration-level-icon')).toBeInTheDocument();
     expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
+
+  it('levelUp 与整学科完成同时发生 → 仍交代「本学科全部完成」，主按钮回星图', async () => {
+    updateProgressMock.mockResolvedValue({
+      advanced: true,
+      completed: true,
+      points: { awarded: 20, balance: 520, levelUp: { from: 'pichai', to: 'zhutie' } },
+    });
+    getMyPointsMock.mockResolvedValue({
+      balance: 520,
+      totalEarned: 520,
+      todayEarned: 20,
+      level: { code: 'zhutie', name: '铸铁', index: 1, threshold: 500 },
+      nextLevel: { code: 'qingtong', name: '青铜', index: 2, threshold: 1500 },
+      pointsToNextLevel: 980,
+      progressPercent: 13,
+    });
+
+    const router = await finishLesson();
+
+    // 标题走晋升分支，但学科完成的信息不能被盖掉；目的地仍是星图
+    expect(await screen.findByRole('heading', { name: '晋升 铸铁！' })).toBeInTheDocument();
+    expect(screen.getByText(/本学科全部完成/)).toBeInTheDocument();
+    expect(screen.getByText(/即将返回星图/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回星图' }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
   });
 
   it('后端兜底 practice_incomplete → 不弹庆祝，仍显示门禁提示', async () => {

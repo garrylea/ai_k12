@@ -319,7 +319,8 @@ export function bumpErrorLevels(errorBookIds: number[]): Promise<void> {
  */
 export interface UpdateProgressPoints {
   awarded: number;
-  balance: number;
+  /** `award_failed` 分支后端可能回 `null`（积分入账失败）——前端勿用 null 覆盖本地积分快照（计划 §1.1#3） */
+  balance: number | null;
   /** 段位 code 字符串（不是对象）；非空表示本次升级，庆祝交给全屏 `CelebrationOverlay` */
   levelUp: { from: string; to: string } | null;
 }

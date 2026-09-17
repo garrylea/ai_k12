@@ -13,6 +13,10 @@ import { useThemeStore } from '@/store/themeStore';
 const DURATION_MS = 3000;
 /** 每波粒子数（≤120，留足余量）。 */
 const PARTICLES_PER_WAVE = 90;
+/** `intensity='soft'` 时的每波粒子数（task 变体的「更淡」烟花，§2.4）。 */
+const SOFT_PARTICLES_PER_WAVE = 45;
+/** `intensity='soft'` 时的粒子透明度系数。 */
+const SOFT_ALPHA_SCALE = 0.5;
 /** 三波烟花的起始时刻。 */
 const WAVE_OFFSETS_MS = [0, 1000, 2000];
 /** 取色用的 CSS 变量名（仓内已确认存在）。 */
@@ -40,6 +44,8 @@ interface FireworksCanvasProps {
   active: boolean;
   /** 动画结束（约 3s）后回调 */
   onDone?: () => void;
+  /** 烟花强度：`levelup` 用 full，`task` 用 soft（更淡，§2.4）。默认 full */
+  intensity?: 'full' | 'soft';
 }
 
 /** 系统级降级：`typeof` 双保险，jsdom 与部分老旧 WebView 没有 matchMedia。 */
@@ -58,7 +64,7 @@ function readColors(el: Element): string[] {
   return colors.length > 0 ? colors : [FALLBACK_COLOR];
 }
 
-export function FireworksCanvas({ active, onDone }: FireworksCanvasProps) {
+export function FireworksCanvas({ active, onDone, intensity = 'full' }: FireworksCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const motionEnabled = useThemeStore((s) => s.motionEnabled);
   // 用 ref 持有回调：父组件每次渲染换新闭包时不重启动画
@@ -85,9 +91,15 @@ export function FireworksCanvas({ active, onDone }: FireworksCanvasProps) {
 
     const width = canvas.clientWidth || window.innerWidth || 800;
     const height = canvas.clientHeight || window.innerHeight || 600;
-    canvas.width = width;
-    canvas.height = height;
+    // DPR 缩放：iPad 横屏是主断点，高分屏上不缩放粒子会发虚。
+    // 位图按设备像素、绘制坐标仍用 CSS 像素（setTransform 一次性把比例带进去）。
+    const dpr = typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    const particleCount = intensity === 'soft' ? SOFT_PARTICLES_PER_WAVE : PARTICLES_PER_WAVE;
+    const alphaScale = intensity === 'soft' ? SOFT_ALPHA_SCALE : 1;
     const colors = readColors(canvas);
     const particles: Particle[] = [];
     let start: number | null = null;
@@ -99,8 +111,8 @@ export function FireworksCanvas({ active, onDone }: FireworksCanvasProps) {
     const spawnWave = () => {
       const cx = width * (0.2 + Math.random() * 0.6);
       const cy = height * (0.15 + Math.random() * 0.35);
-      for (let i = 0; i < PARTICLES_PER_WAVE; i += 1) {
-        const angle = (Math.PI * 2 * i) / PARTICLES_PER_WAVE + Math.random() * 0.15;
+      for (let i = 0; i < particleCount; i += 1) {
+        const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.15;
         const speed = 60 + Math.random() * 150;
         particles.push({
           x: cx,
@@ -139,7 +151,7 @@ export function FireworksCanvas({ active, onDone }: FireworksCanvasProps) {
         p.vy += GRAVITY * t;
         p.x += p.vx * t;
         p.y += p.vy * t;
-        ctx.globalAlpha = 1 - p.age / p.life;
+        ctx.globalAlpha = (1 - p.age / p.life) * alphaScale;
         ctx.fillStyle = p.color;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
@@ -161,7 +173,7 @@ export function FireworksCanvas({ active, onDone }: FireworksCanvasProps) {
       finished = true;
       cancelAnimationFrame(rafId);
     };
-  }, [active, motionEnabled]);
+  }, [active, motionEnabled, intensity]);
 
   if (!animate) return null;
 
@@ -169,6 +181,7 @@ export function FireworksCanvas({ active, onDone }: FireworksCanvasProps) {
     <canvas
       ref={canvasRef}
       data-testid="fireworks-canvas"
+      data-intensity={intensity}
       aria-hidden="true"
       className="pointer-events-none absolute inset-0 h-full w-full"
     />

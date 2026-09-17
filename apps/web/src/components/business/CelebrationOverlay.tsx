@@ -122,80 +122,87 @@ export function CelebrationOverlay({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--bg-page)]"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
         >
-          {/* 烟花：关动效时不渲染 canvas，直接落到静态光晕 */}
+          {/* 烟花：canvas `pointer-events-none` 铺满遮罩层，永远不挡主按钮点击 */}
           {animate && !fireworksDone && (
-            <FireworksCanvas active onDone={() => setFireworksDone(true)} />
+            <FireworksCanvas
+              active
+              intensity={variant === 'task' ? 'soft' : 'full'}
+              onDone={() => setFireworksDone(true)}
+            />
           )}
 
-          {/* 主体视觉：levelup = 大段位图标，task = 对勾圆；两者共用静态光晕 */}
-          <div className="relative mb-8 flex items-center justify-center">
-            {showStaticGlow && (
-              <div
-                data-testid="celebration-glow"
-                aria-hidden="true"
-                className="absolute h-56 w-56 rounded-full blur-3xl"
-                style={{ background: 'var(--brand-100)' }}
-              />
-            )}
-            {variant === 'levelup' ? (
-              <div
-                data-testid="celebration-level-icon"
-                className="relative z-10"
-                style={{ color: 'var(--brand-600)' }}
-              >
-                <LevelIcon code={level?.code ?? ''} size={96} />
-              </div>
-            ) : (
-              <div
-                data-testid="celebration-task-icon"
-                className="relative z-10 flex h-24 w-24 items-center justify-center rounded-full border-4"
-                style={{
-                  background: 'var(--brand-100)',
-                  borderColor: 'var(--success)',
-                  color: 'var(--success)',
-                }}
-              >
-                <CheckCircleIcon />
-              </div>
-            )}
-          </div>
+          {/* 卡片：半透明遮罩之上，烟花在卡片四周可见（§2.4「遮罩 + 卡片」） */}
+          <div className="relative z-10 flex w-full max-w-lg flex-col items-center rounded-[var(--radius-card)] bg-[var(--bg-elevated)] px-8 py-10 shadow-[var(--shadow-elevated)]">
+            {/* 主体视觉：levelup = 大段位图标，task = 对勾圆；两者共用静态光晕 */}
+            <div className="relative mb-8 flex items-center justify-center">
+              {showStaticGlow && (
+                <div
+                  data-testid="celebration-glow"
+                  aria-hidden="true"
+                  className="absolute h-56 w-56 rounded-full blur-3xl"
+                  style={{ background: 'var(--brand-100)' }}
+                />
+              )}
+              {variant === 'levelup' ? (
+                <div
+                  data-testid="celebration-level-icon"
+                  className="relative z-10"
+                  style={{ color: 'var(--brand-600)' }}
+                >
+                  <LevelIcon code={level?.code ?? ''} size={96} />
+                </div>
+              ) : (
+                <div
+                  data-testid="celebration-task-icon"
+                  className="relative z-10 flex h-24 w-24 items-center justify-center rounded-full border-4"
+                  style={{
+                    background: 'var(--brand-100)',
+                    borderColor: 'var(--success)',
+                    color: 'var(--success)',
+                  }}
+                >
+                  <CheckCircleIcon />
+                </div>
+              )}
+            </div>
 
-          {/* 文案 */}
-          <div className="z-10 max-w-xl space-y-3 px-6 text-center">
-            <h2 className="text-3xl font-extrabold leading-snug tracking-tight text-[var(--text-primary)] md:text-4xl">
-              {title}
-            </h2>
-            {showLevelName && (
-              <p className="text-lg font-semibold" style={{ color: 'var(--brand-600)' }}>
-                {level?.name}
-              </p>
-            )}
-            {subtitle && (
-              <p className="text-sm font-semibold text-[var(--text-secondary)]">{subtitle}</p>
-            )}
-            {showPoints && (
-              <p className="text-sm font-semibold" style={{ color: 'var(--brand-600)' }}>
-                {`+${pointsAwarded} 分`}
-              </p>
-            )}
-            {!!autoCloseSeconds && (
-              <p className="text-sm font-semibold text-[var(--text-secondary)]">
-                {remaining > 0 ? `${remaining} 秒后自动继续` : '正在继续...'}
-              </p>
-            )}
-          </div>
+            {/* 文案 */}
+            <div className="w-full space-y-3 text-center">
+              <h2 className="text-3xl font-extrabold leading-snug tracking-tight text-[var(--text-primary)] md:text-4xl">
+                {title}
+              </h2>
+              {showLevelName && (
+                <p className="text-lg font-semibold" style={{ color: 'var(--brand-600)' }}>
+                  {level?.name}
+                </p>
+              )}
+              {subtitle && (
+                <p className="text-sm font-semibold text-[var(--text-secondary)]">{subtitle}</p>
+              )}
+              {showPoints && (
+                <p className="text-sm font-semibold" style={{ color: 'var(--brand-600)' }}>
+                  {`+${pointsAwarded} 分`}
+                </p>
+              )}
+              {!!autoCloseSeconds && (
+                <p className="text-sm font-semibold text-[var(--text-secondary)]">
+                  {remaining > 0 ? `${remaining} 秒后自动继续` : '正在继续...'}
+                </p>
+              )}
+            </div>
 
-          {/* 主按钮 */}
-          <div className="z-10 pt-8">
-            <button
-              ref={primaryRef}
-              onClick={onPrimary}
-              className="flex items-center gap-2.5 rounded-[var(--radius-button)] bg-[var(--learn-btn-primary)] px-10 py-4 font-semibold tracking-wide text-white shadow-md transition-all duration-300 hover:scale-[1.02] hover:bg-[var(--learn-btn-primary-hover)]"
-            >
-              <span>{primaryLabel}</span>
-            </button>
+            {/* 主按钮 */}
+            <div className="pt-8">
+              <button
+                ref={primaryRef}
+                onClick={onPrimary}
+                className="flex items-center gap-2.5 rounded-[var(--radius-button)] bg-[var(--learn-btn-primary)] px-10 py-4 font-semibold tracking-wide text-white shadow-md transition-all duration-300 hover:scale-[1.02] hover:bg-[var(--learn-btn-primary-hover)]"
+              >
+                <span>{primaryLabel}</span>
+              </button>
+            </div>
           </div>
         </motion.div>
       )}

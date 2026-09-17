@@ -508,7 +508,7 @@ export default function CourseDetailPage() {
       setCelebrationLevel(null);
       if (awarded > 0) pushPointsToast({ points: awarded, title: '完成本课' });
     }
-    setCelebrationPoints(awarded > 0 ? awarded : 0);
+    setCelebrationPoints(awarded);
     setShowCelebration(true);
   };
 
@@ -1040,11 +1040,15 @@ export default function CourseDetailPage() {
             ? (celebrationLevel.name ? `晋升 ${celebrationLevel.name}！` : '晋升新段位！')
             : (isSubjectCompleted ? '恭喜你，本学科全部完成！' : '恭喜你，本节学习完成！')
         }
-        subtitle={
-          celebrationLevel
-            ? '累计积分达标，段位提升'
-            : (isSubjectCompleted ? '去星图看看你完成的所有关卡' : '继续下一课，保持学习节奏')
-        }
+        subtitle={[
+          // 晋升层标题只说段位，学科完成必须在这里交代，否则整科完成会被升段文案盖掉
+          celebrationLevel ? '累计积分达标，段位提升' : null,
+          celebrationLevel && isSubjectCompleted ? '本学科全部完成' : null,
+          // 倒计时文案是通用「N 秒后自动继续」，目的地由本页 subtitle 给出
+          isSubjectCompleted ? '即将返回星图' : '即将进入下一课',
+        ]
+          .filter(Boolean)
+          .join(' · ')}
         pointsAwarded={celebrationPoints}
         level={celebrationLevel ? { code: celebrationLevel.code, name: celebrationLevel.name ?? '' } : undefined}
         primaryLabel={isSubjectCompleted ? '返回星图' : '开始新课'}

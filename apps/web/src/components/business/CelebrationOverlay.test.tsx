@@ -23,6 +23,19 @@ function stubReducedMotion(reduce: boolean) {
   }));
 }
 
+/** jsdom 没有 canvas 实现：stub 掉 2D context，避免 not-implemented 噪音并让烟花能挂载。 */
+function stubCanvasContext() {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    clearRect: vi.fn(),
+    beginPath: vi.fn(),
+    arc: vi.fn(),
+    fill: vi.fn(),
+    setTransform: vi.fn(),
+    globalAlpha: 1,
+    fillStyle: '',
+  } as unknown as CanvasRenderingContext2D);
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -84,7 +97,10 @@ describe('CelebrationOverlay', () => {
       />,
     );
 
-    expect(screen.getByTestId('celebration-level-icon')).toBeInTheDocument();
+    expect(screen.getByTestId('celebration-level-icon').querySelector('svg')).toHaveAttribute(
+      'width',
+      '96',
+    );
     expect(screen.getByText('铸铁')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument();
   });
@@ -103,7 +119,9 @@ describe('CelebrationOverlay', () => {
     );
 
     expect(screen.getByRole('heading', { name: '晋升新段位！' })).toBeInTheDocument();
-    expect(screen.getByTestId('celebration-level-icon')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('celebration-level-icon').querySelector('svg'),
+    ).toHaveAttribute('width', '96');
   });
 
   it('autoCloseSeconds 到点自动触发 onPrimary（并显示倒计时文案）', () => {
@@ -171,5 +189,36 @@ describe('CelebrationOverlay', () => {
 
     expect(container.querySelector('canvas')).toBeNull();
     expect(screen.getByTestId('celebration-glow')).toBeInTheDocument();
+  });
+
+  it('动效开启时 task 变体挂载烟花 canvas，强度为 soft（比 levelup 更淡）', () => {
+    stubCanvasContext();
+    render(
+      <CelebrationOverlay
+        open
+        variant="task"
+        title="本节学习完成！"
+        primaryLabel="开始新课"
+        onPrimary={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('fireworks-canvas')).toHaveAttribute('data-intensity', 'soft');
+  });
+
+  it('动效开启时 levelup 变体烟花强度为 full', () => {
+    stubCanvasContext();
+    render(
+      <CelebrationOverlay
+        open
+        variant="levelup"
+        title="晋升 铸铁！"
+        level={{ code: 'zhutie', name: '铸铁' }}
+        primaryLabel="继续"
+        onPrimary={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('fireworks-canvas')).toHaveAttribute('data-intensity', 'full');
   });
 });
