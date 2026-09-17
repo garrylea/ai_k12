@@ -323,7 +323,8 @@ CREATE TABLE IF NOT EXISTS chinese_passages (
                                          -- sentenceIndex 指向 sentences 下标（字词属于哪一句）
   sentences JSON DEFAULT NULL,           -- [{"text":"…","translation":"…"}]；不变式 ''.join(text) == body
   -- 含义专项（2026-09-17）：每句 {"meaning","emotion"}，缺数据写 null（不是省略——
-  -- 省略会让后面整体错位）。只给诗词灌，文言文留 NULL——「只做诗词」由数据有无实现，不加体裁列。
+  -- 省略会让后面整体错位）。只给诗词灌，文言文留 NULL——「只做诗词」由数据有无实现；
+  -- 体裁另见上方 genre 列（积分按体裁分档），与本列两回事，勿以本列有无反推体裁。
   sentence_meanings JSON DEFAULT NULL,   -- [{"meaning":"…","emotion":"…"}]，与 sentences 下标对齐
   full_translation TEXT DEFAULT NULL,    -- 整篇译文
   grade_band VARCHAR(20) NOT NULL,       -- 'junior'
