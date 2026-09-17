@@ -3,6 +3,8 @@
 钉住这些事：
 - 产出数组**与 sentences 等长**，没填的位置是 `None`（不是压缩掉——压缩会让后面整体错位）；
 - 定位**按原文**，不是按行号：模板调序了也跟着原文走；
+- 定位的归一形式 = 去空白 + **引号归一**（半角/全角/直角引号折叠）——文档与库
+  的引号形态不一致时同一句也要认得出，否则该句含义会被静默写成 `null`；
 - 定位不到的原文进 `skipped`，绝不猜、绝不静默丢；
 - 同篇名多行（九上/九下重复收录）合并时，**兄弟行填好的值要补上基准行的空**
   （两行状态可能不同步，丢了就会「模板显示空 → --apply 两行一起写成 null」）；
@@ -149,6 +151,39 @@ def test_build_meanings_array_对不上的原文进skipped():
     arr, skipped = build_meanings_array(sentences, entries)
     assert arr == [None]
     assert len(skipped) == 2
+
+
+# ==================== 原文归一：去空白 + 引号归一对齐（Fix 7） ====================
+
+
+def test_norm_去空白并折半角全角引号():
+    assert cli._norm("却道“天凉好个秋”！") == cli._norm('却道"天凉好个秋"！')
+    assert cli._norm("「甲」『乙』‘丙’") == cli._norm("\"甲\"'乙''丙'")
+    assert cli._norm(" 甲\n\t乙 ") == "甲乙"
+    # 引号归一是一换一：长度不变，归一后的下标能映射回原文
+    assert len(cli._norm("“甲”")) == 3
+
+
+def test_引号形态不同也能定位到下标_不静默丢句():
+    """库里是全角引号、用户文档是半角——不归一就会定位不到，该句含义写成 null。"""
+    sentences = [{"text": "而今识尽愁滋味，欲说还休。欲说还休，却道“天凉好个秋”！"}]
+    entries = [('而今识尽愁滋味，欲说还休。欲说还休，却道"天凉好个秋"！', "含义A", "情感A")]
+
+    arr, skipped = build_meanings_array(sentences, entries)
+
+    assert arr == [{"meaning": "含义A", "emotion": "情感A"}]
+    assert skipped == []
+
+
+def test_norm_不把真差异当排版差异():
+    """归一只是折引号、去空白；改了一个字仍然定位不到，照旧进清单。"""
+    sentences = [{"text": "却道“天凉好个秋”！"}]
+    entries = [('却道"天凉好个秋"?', "含义A", "情感A")]
+
+    arr, skipped = build_meanings_array(sentences, entries)
+
+    assert arr == [None]
+    assert len(skipped) == 1
 
 
 # ==================== 同篇名多行合并（九上/九下重复收录） ====================

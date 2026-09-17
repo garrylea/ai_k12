@@ -290,8 +290,12 @@ _UPDATE_SENTENCES_SQL = (
 **硬要求**：`_UPDATE_SENTENCES_SQL` 里**绝不出现** `key_terms` / `verified` / `is_active` / `memorize_required`——加一条断言钉住。
 
 译文：复用 `interpretation_translate.translate_passage`（本地优先、ds-flash 兜底），
-`key_terms=[]` 传入（**只为凑参数，不落库**）。译文失败不阻断：该篇仍写 `sentences`，
-`translation` 留空串并在 `-review.md` 里点名。
+`key_terms=[]` 传入（**只为凑参数，不落库**）。**译文失败 = 整篇不写**（fail-closed，
+与 `interpretation_cli` 一致）：`translation` 是解释专项的标准答案，空串标准答案会让学生
+被误判，所以该篇连 `sentences` 都不写（一写就进抽题池），在
+`<stem>-backfill-review.md` 与 stdout 里点名（篇名 + 原因），退出码 ≠ 0。
+写库 `UPDATE ... WHERE id = %s AND sentences IS NULL`（并发守卫：取数到写库之间
+别的管线可能改过这行），影响行数 ≠ 1 时报「未生效」而不是声称成功。
 
 - [ ] **Step 5: dry-run 核对全 16 首**
 
@@ -328,6 +332,13 @@ Expected: 写 16 行（只 `sentences` + `full_translation`）。
 
 Run: `cd tools/data-refinery && python src/meaning_cli.py --apply --input /Users/lichao/Downloads/诗深层含义.md`
 Expected: 写 31 行（只 `sentence_meanings`）。
+
+> 定位归一已统一为「去空白 + 引号归一」（`meaning_cli._norm`，`meaning_backfill_cli` 复用同一份表）。
+> 只读实测：带引号差异的 4 处里 `丑奴儿·书博山道中壁` 那 1 处已能定位；
+> `十五从军征` **下册行（id=114）仍有 3 句**定位不到——库里那行的引号被切进了句边界
+> （`道逢乡里人：“家中有阿谁？` / `”“遥看是君家…`），属**真差异**（不同版本正文），
+> 不是归一能修的范围。那 3 句在该行会写成 `null`，清单里以「留空的句子」出现；
+> 要补齐得先人工修 id=114 的 `sentences` 或正文，另开一单。
 
 - [ ] **Step 4: 核对「一个字节都没多写」**
 
