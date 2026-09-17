@@ -25,31 +25,55 @@ const CrossIcon = () => (
 
 const DashIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-    strokeLinecap="round" className="w-4 h-4 shrink-0" aria-hidden="true">
+    strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 shrink-0" aria-hidden="true">
     <path d="M6 12h12" />
+  </svg>
+);
+
+/** 重试：逆时针回转箭头（线性 SVG，无 emoji）。 */
+const RetryIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+    strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4" aria-hidden="true">
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
   </svg>
 );
 
 /**
  * 标准答案兜底：`toKeyTerms` 把缺失的 `gloss` 降级成 `''`，直接渲染会剩下
  * 「应为：」这种悬空标签。题库本来就可能没有标准释义，明说比留白好。
+ *
+ * **只用于判错分支**——判对时标准答案只是补充信息，题库没有就不渲染这一行
+ * （见 `StandardLine`）。
  */
 const standardOf = (standard: string) => (standard.trim() !== '' ? standard : '（题库无标准释义）');
 
-/** 单块（含义 / 情感）的结果行：勾=正确 / 叉=错误（附你的 vs 标准）/ 横杠=未判定。 */
+/**
+ * 判对时的标准答案行：灰字，缩进与「你的：」对齐。
+ * 题库没有标准答案时**整行不渲染**——判对已经给了结论，不必再摆一个空标签。
+ */
+const StandardLine = ({ standard }: { standard: string }) =>
+  standard.trim() === '' ? null : (
+    <p className="mt-0.5 pl-[22px] text-sm text-[var(--text-secondary)]">标准：{standard}</p>
+  );
+
+/** 单块（含义 / 情感）的结果行：勾=正确（附灰字标准）/ 叉=错误（附你的 vs 标准）/ 横杠=未判定。 */
 function PartLine({ label, part, mine }: { label: string; part: MeaningPartResult; mine: string }) {
   if (part.correct === true) {
     return (
-      <p className="mt-1 flex items-center gap-1.5 text-sm text-[var(--success)]">
-        <CheckIcon />{label}：正确
-      </p>
+      <div className="mt-1">
+        <p className="flex items-center gap-1.5 text-sm text-[var(--success)]">
+          <CheckIcon />{label}：正确
+        </p>
+        <StandardLine standard={part.standard} />
+      </div>
     );
   }
   if (part.correct === null) {
     return (
       <p className="mt-1 flex items-start gap-1.5 text-sm text-[var(--text-secondary)]">
         <span className="mt-0.5"><DashIcon /></span>
-        <span>{label}：未判定（AI 暂时没判出来，可点「重新判题」）</span>
+        <span>{label}：未判定（AI 暂时没判出来，可点右上角的重试图标）</span>
       </p>
     );
   }
@@ -77,9 +101,12 @@ function TermLines({ items }: { items: MeaningTermResultItem[] }) {
       {items.map((t) => (
         <div key={t.term}>
           {t.correct === true && (
-            <p className="flex items-center gap-1.5 text-sm text-[var(--success)]">
-              <CheckIcon />〔{t.term}〕正确
-            </p>
+            <div>
+              <p className="flex items-center gap-1.5 text-sm text-[var(--success)]">
+                <CheckIcon />〔{t.term}〕正确
+              </p>
+              <StandardLine standard={t.standard} />
+            </div>
           )}
           {t.correct === null && (
             <p className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)]">
@@ -115,11 +142,15 @@ export default function ResultItem({ item, isNewest, onRetry }: Props) {
     >
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-xs text-[var(--text-secondary)]">第 {item.sentenceIndex + 1} 句</span>
+        {/* 图标按钮：视觉无文字，可访问名仍是「重新判题」（读屏与测试都按它找） */}
         <button
+          type="button"
           onClick={() => onRetry(item.sentenceIndex)}
-          className="text-xs text-[var(--brand-500)] underline"
+          aria-label="重新判题"
+          title="重新判题"
+          className="text-[var(--brand-500)] transition-opacity hover:opacity-70"
         >
-          重新判题
+          <RetryIcon />
         </button>
       </div>
       <p className="mt-1 text-sm text-[var(--text-primary)]">{item.text}</p>
@@ -129,7 +160,7 @@ export default function ResultItem({ item, isNewest, onRetry }: Props) {
       )}
 
       {item.kind === 'failed' && (
-        <p className="mt-2 text-sm text-[var(--error)]">判定失败，请点「重新判题」重试</p>
+        <p className="mt-2 text-sm text-[var(--error)]">判定失败，请点右上角的重试图标再试一次</p>
       )}
 
       {item.kind === 'judged' && (

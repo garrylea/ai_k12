@@ -155,7 +155,8 @@ describe('MeaningRunPage', () => {
     expect(stackSentences()).toEqual(['暂凭杯酒长精神', '沉舟侧畔千帆过', '巴山楚水凄凉地']);
 
     // 重试最早那句（栈尾）→ 顺序不变，且它重新变成 pending
-    fireEvent.click(screen.getAllByText('重新判题')[2]);
+    // （重试按钮已改图标，只能按可访问名找）
+    fireEvent.click(screen.getAllByRole('button', { name: '重新判题' })[2]);
     expect(stackSentences()).toEqual(['暂凭杯酒长精神', '沉舟侧畔千帆过', '巴山楚水凄凉地']);
     expect(screen.getAllByText('判定中…')).toHaveLength(3);
   });

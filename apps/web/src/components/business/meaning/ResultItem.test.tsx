@@ -58,4 +58,54 @@ describe('ResultItem', () => {
     render(<ResultItem item={item} isNewest onRetry={vi.fn()} />);
     expect(screen.getByText('〔舟〕应为：（题库无标准释义）')).toBeTruthy();
   });
+
+  it('判对时用灰字给标准答案（含义/情感/字词都渲染）', () => {
+    const item: StackItem = {
+      ...BASE,
+      kind: 'judged',
+      result: {
+        passageId: 12, sentenceIndex: 1, allCorrect: true,
+        terms: [{ term: '舟', correct: true, method: 'ai', standard: '船', comment: null }],
+        meaning: { correct: true, method: 'ai', standard: '含新事物代替旧事物的哲理', comment: null },
+        emotion: { correct: true, method: 'ai', standard: '豁达乐观', comment: null },
+      },
+    };
+    render(<ResultItem item={item} isNewest onRetry={vi.fn()} />);
+
+    // 「标准：」三行都在，且是灰字 token（不是判错的红色）
+    const lines = screen.getAllByText(/^标准：/);
+    expect(lines.map((el) => el.textContent)).toEqual([
+      '标准：船',
+      '标准：含新事物代替旧事物的哲理',
+      '标准：豁达乐观',
+    ]);
+    for (const el of lines) {
+      expect(el.className).toContain('text-[var(--text-secondary)]');
+    }
+    // 判对不该出现「应为：」那套判错文案
+    expect(screen.queryByText(/应为：/)).toBeNull();
+  });
+
+  it('判对但题库没有标准答案 → 不渲染悬空的「标准：」', () => {
+    const item: StackItem = {
+      ...BASE,
+      kind: 'judged',
+      result: {
+        passageId: 12, sentenceIndex: 1, allCorrect: true,
+        terms: [{ term: '舟', correct: true, method: 'ai', standard: '', comment: null }],
+        meaning: { correct: true, method: 'ai', standard: '   ', comment: null },
+        emotion: { correct: true, method: 'ai', standard: '', comment: null },
+      },
+    };
+    render(<ResultItem item={item} isNewest onRetry={vi.fn()} />);
+    expect(screen.queryByText(/^标准：/)).toBeNull();
+  });
+
+  it('重试是图标按钮：无文字，但可访问名仍是「重新判题」', () => {
+    render(<ResultItem item={{ ...BASE, kind: 'failed' }} isNewest onRetry={vi.fn()} />);
+    const btn = screen.getByRole('button', { name: '重新判题' });
+    expect(btn.querySelector('svg')).toBeTruthy();          // 画的是线性 SVG
+    expect(screen.queryByText('重新判题')).toBeNull();       // 不再有文字
+    expect(btn.textContent).toBe('');                       // 按钮内无文本节点
+  });
 });
