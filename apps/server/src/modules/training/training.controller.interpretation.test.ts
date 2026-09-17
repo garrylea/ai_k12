@@ -13,6 +13,9 @@ function makeController() {
   return { controller: new TrainingController(service as never), service };
 }
 
+/** JWT 里的学生身份（发分要用，不信 body）。 */
+const USER = { sub: 7, role: 'student' as const };
+
 describe('TrainingController interpretation 端点', () => {
   it('GET interpretation/passages → 透传 service', async () => {
     const { controller, service } = makeController();
@@ -67,21 +70,21 @@ describe('TrainingController interpretation 端点', () => {
   it('POST interpretation/judge：passageId 非正整数 → 400', async () => {
     const { controller } = makeController();
     await expect(
-      controller.judgeInterpretation({ passageId: 0, sentenceIndex: 0, terms: [], translation: '' }),
+      controller.judgeInterpretation({ passageId: 0, sentenceIndex: 0, terms: [], translation: '' }, USER),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('POST interpretation/judge：sentenceIndex 负数/非整数 → 400（0 是合法首句）', async () => {
     const { controller } = makeController();
     await expect(
-      controller.judgeInterpretation({ passageId: 1, sentenceIndex: -1, terms: [], translation: '' }),
+      controller.judgeInterpretation({ passageId: 1, sentenceIndex: -1, terms: [], translation: '' }, USER),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
-      controller.judgeInterpretation({ passageId: 1, sentenceIndex: 0.5, terms: [], translation: '' }),
+      controller.judgeInterpretation({ passageId: 1, sentenceIndex: 0.5, terms: [], translation: '' }, USER),
     ).rejects.toBeInstanceOf(BadRequestException);
     const { service } = makeController();
     const c2 = new TrainingController(service as never);
-    await c2.judgeInterpretation({ passageId: 1, sentenceIndex: 0, terms: [], translation: '' });
+    await c2.judgeInterpretation({ passageId: 1, sentenceIndex: 0, terms: [], translation: '' }, USER);
     expect(service.judgeInterpretation).toHaveBeenCalled();
   });
 
@@ -89,9 +92,10 @@ describe('TrainingController interpretation 端点', () => {
     const { controller, service } = makeController();
     await controller.judgeInterpretation(
       { passageId: 1, sentenceIndex: 0, terms: 'x' as never, translation: '' },
+      USER,
     );
     expect(service.judgeInterpretation).toHaveBeenCalledWith({
-      passageId: 1, sentenceIndex: 0, terms: [], translation: '',
+      studentId: 7, passageId: 1, sentenceIndex: 0, terms: [], translation: '',
     });
   });
 
@@ -109,8 +113,9 @@ describe('TrainingController interpretation 端点', () => {
         'x',
       ] as never,
       translation: 789 as never,
-    });
+    }, USER);
     expect(service.judgeInterpretation).toHaveBeenCalledWith({
+      studentId: 7,
       passageId: 1,
       sentenceIndex: 0,
       terms: [
@@ -121,19 +126,31 @@ describe('TrainingController interpretation 端点', () => {
     });
   });
 
-  it('POST interpretation/judge：合法入参原样透传（不传 studentId）', async () => {
+  it('POST interpretation/judge：合法入参原样透传（studentId 取自 JWT）', async () => {
     const { controller, service } = makeController();
     await controller.judgeInterpretation({
       passageId: 12,
       sentenceIndex: 3,
       terms: [{ term: '谪守', answer: '被贬官' }],
       translation: '庆历四年春天，滕子京被贬到巴陵郡。',
-    });
+    }, USER);
     expect(service.judgeInterpretation).toHaveBeenCalledWith({
+      studentId: 7,
       passageId: 12,
       sentenceIndex: 3,
       terms: [{ term: '谪守', answer: '被贬官' }],
       translation: '庆历四年春天，滕子京被贬到巴陵郡。',
+    });
+  });
+
+  it('POST interpretation/judge：body 里伪造的 studentId 被忽略（只信 JWT）', async () => {
+    const { controller, service } = makeController();
+    await controller.judgeInterpretation(
+      { passageId: 12, sentenceIndex: 0, terms: [], translation: '', studentId: 999 } as never,
+      { sub: 7, role: 'student' },
+    );
+    expect(service.judgeInterpretation).toHaveBeenCalledWith({
+      studentId: 7, passageId: 12, sentenceIndex: 0, terms: [], translation: '',
     });
   });
 });

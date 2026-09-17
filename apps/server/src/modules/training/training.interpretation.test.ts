@@ -34,6 +34,7 @@ const PASSAGE = {
   verified: 1,
   memorize_required: 1,
   is_active: 1,
+  genre: 'prose',
 };
 
 /** 模型正常返回：1 个字词判错 + 整句判对 */
@@ -49,6 +50,9 @@ function makeService(overrides: {
   byIds?: unknown;
   judged?: unknown;
   judgeThrows?: Error;
+  award?: unknown;
+  awardThrows?: Error;
+  todayKey?: string;
 } = {}) {
   const dictationRepo = {
     findById: vi.fn().mockResolvedValue(overrides.passage === undefined ? PASSAGE : overrides.passage),
@@ -62,6 +66,14 @@ function makeService(overrides: {
       return Promise.resolve(overrides.judged ?? OK_JUDGE);
     }),
   };
+  // 发分依赖（甲类逐目标发分，2026-09-17）。
+  const points = {
+    award: vi.fn().mockImplementation(() => {
+      if (overrides.awardThrows) return Promise.reject(overrides.awardThrows);
+      return Promise.resolve(overrides.award ?? { pointsAwarded: 3, balance: 3, totalEarned: 3, levelUp: null });
+    }),
+    todayKey: vi.fn(() => overrides.todayKey ?? '2026-09-17'),
+  };
   // 这些 repo 在解释专项里**一个都不该被碰**（不写学生状态）
   const mainErrorRepo = { findErrorBookEntries: vi.fn(), bumpLevels: vi.fn() };
   const hiddenRepo = { mark: vi.fn(), unmark: vi.fn(), unmarkAll: vi.fn(), findAllByStudent: vi.fn() };
@@ -73,8 +85,9 @@ function makeService(overrides: {
     questionHintsRepo as never, {} as never, hiddenRepo as never,
     explanationCache as never, {} as never,
     dictationRepo as never, { generate: vi.fn() } as never, interpretationJudge as never,
+    points as never,
   );
-  return { service, dictationRepo, interpretationJudge, mainErrorRepo, hiddenRepo, questionHintsRepo, explanationCache };
+  return { service, dictationRepo, interpretationJudge, mainErrorRepo, hiddenRepo, questionHintsRepo, explanationCache, points };
 }
 
 describe('TrainingService — 解释专项 listInterpretationPassages', () => {
@@ -182,7 +195,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：程序短路', 
   it('全空作答 → 全部 unanswered，**不进 LLM**', async () => {
     const { service, interpretationJudge } = makeService();
     const res = await service.judgeInterpretation({
-      passageId: 12, sentenceIndex: 0, terms: [], translation: '',
+      studentId: 1, passageId: 12, sentenceIndex: 0, terms: [], translation: '',
     });
     expect(interpretationJudge.generate).not.toHaveBeenCalled();
     expect(res.terms).toEqual([
@@ -196,6 +209,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：程序短路', 
   it('归一化全等 → exact，**不进 LLM**（学生整句不打标点也算对）', async () => {
     const { service, interpretationJudge } = makeService();
     const res = await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12,
       sentenceIndex: 0,
       terms: [{ term: '谪守', answer: '因罪贬谪流放,出任外官' }], // 逗号与标准答案不同
@@ -212,7 +226,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：程序短路', 
       passage: { ...PASSAGE, key_terms: [] },
     });
     const res = await service.judgeInterpretation({
-      passageId: 12, sentenceIndex: 0, terms: [{ term: '多传的词', answer: 'x' }], translation: '',
+      studentId: 1, passageId: 12, sentenceIndex: 0, terms: [{ term: '多传的词', answer: 'x' }], translation: '',
     });
     expect(interpretationJudge.generate).not.toHaveBeenCalled();
     expect(res.terms).toEqual([]);
@@ -224,6 +238,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：LLM 补判', ()
   it('待判项打包**一次**调用，字词与整句合成同一请求', async () => {
     const { service, interpretationJudge } = makeService();
     await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 0,
       terms: [{ term: '谪守', answer: '被贬官' }],
       translation: '庆历四年春天，滕子京被派到巴陵当官。',
@@ -239,6 +254,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：LLM 补判', ()
   it('模型判了 → method 变 ai，带上 comment', async () => {
     const { service } = makeService();
     const res = await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 0,
       terms: [{ term: '谪守', answer: '被贬官' }],
       translation: '庆历四年春天，滕子京被派到巴陵当官。',
@@ -261,6 +277,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：LLM 补判', ()
       judged: { terms: [{ term: '谪守', correct: true, comment: null }], sentence: null },
     });
     const res = await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 0,
       terms: [{ term: '谪守', answer: 'a1' }, { term: '越明年', answer: 'a2' }],
       translation: '随便一段译文。',
@@ -275,6 +292,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：LLM 补判', ()
   it('整次调用失败 → 全部待判项 undetermined，**方法不抛错**', async () => {
     const { service } = makeService({ judgeThrows: new Error('local down') });
     const res = await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 0,
       terms: [{ term: '谪守', answer: '被贬官' }],
       translation: '庆历四年春天，滕子京被派到巴陵当官。',
@@ -295,6 +313,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：LLM 补判', ()
       },
     });
     const res = await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 0,
       terms: [{ term: '谪守', answer: '因罪贬谪流放，出任外官' }, { term: '越明年', answer: '乱写' }],
       translation: '',
@@ -306,7 +325,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：LLM 补判', ()
   it('标准答案只在判题响应里下发（request 里给模型，响应里给学生）', async () => {
     const { service } = makeService();
     const res = await service.judgeInterpretation({
-      passageId: 12, sentenceIndex: 0, terms: [], translation: '',
+      studentId: 1, passageId: 12, sentenceIndex: 0, terms: [], translation: '',
     });
     expect(res.terms[0].standard).toBe('因罪贬谪流放，出任外官');
     expect(res.sentence.standard).toBe('庆历四年的春天，滕子京被贬到巴陵郡做太守。');
@@ -317,20 +336,21 @@ describe('TrainingService — 解释专项 judgeInterpretation：边界与副作
   it('篇目不存在 → NotFoundException', async () => {
     const { service } = makeService({ passage: null });
     await expect(service.judgeInterpretation({
-      passageId: 999, sentenceIndex: 0, terms: [], translation: '',
+      studentId: 1, passageId: 999, sentenceIndex: 0, terms: [], translation: '',
     })).rejects.toThrow(/解释篇目不存在/);
   });
 
   it('sentenceIndex 越界 → BadRequestException', async () => {
     const { service } = makeService();
     await expect(service.judgeInterpretation({
-      passageId: 12, sentenceIndex: 2, terms: [], translation: '',
+      studentId: 1, passageId: 12, sentenceIndex: 2, terms: [], translation: '',
     })).rejects.toThrow(/越界/);
   });
 
   it('多传的 term 被忽略，漏传的 term 按空白判 unanswered', async () => {
     const { service, interpretationJudge } = makeService();
     const res = await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 0,
       terms: [
         { term: '谪守', answer: '   ' },      // 漏传 → 空白
@@ -346,11 +366,11 @@ describe('TrainingService — 解释专项 judgeInterpretation：边界与副作
   it('fullTranslation：最后一句才给，中间句为 null', async () => {
     const { service } = makeService();
     const mid = await service.judgeInterpretation({
-      passageId: 12, sentenceIndex: 0, terms: [], translation: '',
+      studentId: 1, passageId: 12, sentenceIndex: 0, terms: [], translation: '',
     });
     expect(mid.fullTranslation).toBeNull();
     const last = await service.judgeInterpretation({
-      passageId: 12, sentenceIndex: 1, terms: [], translation: '',
+      studentId: 1, passageId: 12, sentenceIndex: 1, terms: [], translation: '',
     });
     expect(last.fullTranslation).toBe(PASSAGE.full_translation);
   });
@@ -358,6 +378,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：边界与副作
   it('不写任何学生状态：错题本/隐藏题/提示缓存 repo 一个都不该被调用', async () => {
     const { service, mainErrorRepo, hiddenRepo, questionHintsRepo, explanationCache } = makeService();
     await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 0,
       terms: [{ term: '谪守', answer: '被贬官' }],
       translation: '庆历四年春天，滕子京被派到巴陵当官。',
@@ -373,7 +394,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：边界与副作
   it('allCorrect：字词对 + 整句对 → true；有 undetermined → false', async () => {
     const { service } = makeService({ judged: { terms: [], sentence: null } });
     const res = await service.judgeInterpretation({
-      passageId: 12, sentenceIndex: 1, // 第二句的字词是「越明年」
+      studentId: 1, passageId: 12, sentenceIndex: 1, // 第二句的字词是「越明年」
       terms: [{ term: '越明年', answer: '到了第二年' }],
       translation: '到了第二年，政事顺利，百姓和乐。',
     });
@@ -385,6 +406,7 @@ describe('TrainingService — 解释专项 judgeInterpretation：边界与副作
   it('allCorrect：任一项未判定 → false（不能把「不知道」当成对）', async () => {
     const { service } = makeService({ judged: { terms: [], sentence: null } });
     const res = await service.judgeInterpretation({
+      studentId: 1,
       passageId: 12, sentenceIndex: 1,
       terms: [{ term: '越明年', answer: '第二年吧' }], // 需 LLM 判，而模型没回 → undetermined
       translation: '到了第二年，政事顺利，百姓和乐。',
@@ -392,5 +414,81 @@ describe('TrainingService — 解释专项 judgeInterpretation：边界与副作
     expect(res.terms[0].method).toBe('undetermined');
     expect(res.sentence.method).toBe('exact');
     expect(res.allCorrect).toBe(false);
+  });
+});
+
+describe('TrainingService — 解释专项 judgeInterpretation：甲类发分（cn_interpretation，按体裁取档）', () => {
+  const ANS = { terms: [], translation: '' };
+
+  it('genre=prose → 按 prose 档发一次，幂等键含 todayKey()，响应带 pointsAwarded', async () => {
+    const { service, points } = makeService(); // PASSAGE.genre === 'prose'
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    expect(points.todayKey).toHaveBeenCalled();
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award).toHaveBeenCalledWith({
+      studentId: 7,
+      taskCode: 'cn_interpretation',
+      tierKey: 'prose',
+      dedupeKey: 'interp:7:12:2026-09-17',
+      refType: 'passage',
+      refId: 12,
+    });
+    expect(res.pointsAwarded).toBe(3);
+    expect(res.awardReason).toBeUndefined();
+  });
+
+  it('genre=poem → tierKey=poem', async () => {
+    const { service, points } = makeService({ passage: { ...PASSAGE, genre: 'poem' } });
+    await service.judgeInterpretation({ studentId: 5, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(points.award).toHaveBeenCalledWith(
+      expect.objectContaining({ tierKey: 'poem', dedupeKey: 'interp:5:12:2026-09-17' }),
+    );
+  });
+
+  it('逐句判：第一句判完就发分（同日后续句子靠幂等键不再发）', async () => {
+    // 一篇 = 一次分：判题是逐句的，所以首句判完即发，后几句 award 会回 duplicate
+    const { service, points } = makeService();
+    await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(points.award).toHaveBeenCalledTimes(2);
+    const [first, second] = points.award.mock.calls.map((c) => c[0].dedupeKey);
+    expect(first).toBe(second); // 同一篇同一天 → 同键，第二次必然 duplicate
+  });
+
+  it('genre=null（未标定）→ award 不被调用，awardReason=genre_unset', async () => {
+    const { service, points } = makeService({ passage: { ...PASSAGE, genre: null } });
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    expect(points.award).not.toHaveBeenCalled();
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBe('genre_unset');
+    // 判题本身不受体裁未标定影响
+    expect(res.terms).toEqual([
+      { term: '谪守', correct: false, method: 'unanswered', standard: '因罪贬谪流放，出任外官', comment: null },
+    ]);
+  });
+
+  it('award 抛错 → 判题照常返回（含 fullTranslation），pointsAwarded=0', async () => {
+    const { service } = makeService({ awardThrows: new Error('db down') });
+    const res = await service.judgeInterpretation({
+      studentId: 7, passageId: 12, sentenceIndex: 1, terms: [], translation: '',
+    });
+    expect(res.fullTranslation).toBe(PASSAGE.full_translation);
+    expect(res.allCorrect).toBe(false);
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBeUndefined();
+  });
+
+  it('award 回 daily_limit → pointsAwarded=0 + awardReason 透传', async () => {
+    const { service } = makeService({ award: { pointsAwarded: 0, reason: 'daily_limit' } });
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBe('daily_limit');
+  });
+
+  it('award 回 duplicate（同日重判同一篇）→ 归 0 且静默，不弹假「+N 分」', async () => {
+    const { service } = makeService({ award: { pointsAwarded: 3, reason: 'duplicate' } });
+    const res = await service.judgeInterpretation({ studentId: 7, passageId: 12, sentenceIndex: 0, ...ANS });
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBeUndefined();
   });
 });

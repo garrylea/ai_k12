@@ -21,6 +21,11 @@ export interface ChinesePassageRow extends RowDataPacket {
   verified: number;
   memorize_required: number;
   is_active: number;
+  /**
+   * 体裁（人工标定）：`'poem'` 诗/词 | `'prose'` 文言文 | `null` 未标定。
+   * **只用于积分分档**（默写/解释按体裁取档）；`null` 时不发分、不猜体裁（spec §4.1）。
+   */
+  genre: string | null;
 }
 
 /** 解释专项：一个重点字词。`sentenceIndex` 指向 `sentences` 的下标（「属于哪一句」）。 */
@@ -117,7 +122,7 @@ export interface ChinesePassageUpsertInput {
 const SELECT_COLS = `dp.id, dp.work_title, dp.author, dp.dynasty, dp.body,
   dp.key_terms, dp.sentences, dp.sentence_meanings, dp.full_translation,
   dp.grade_band, dp.grade, dp.semester, dp.sort_order, dp.source_ref, dp.verified,
-  dp.memorize_required, dp.is_active`;
+  dp.memorize_required, dp.is_active, dp.genre`;
 
 /** 解释专项抽题池的两个共同谓词：已校验 + 未停用 + **内容就绪**（切过句才出题）。 */
 const INTERPRETATION_GATE = `dp.verified = 1 AND dp.is_active = 1 AND JSON_LENGTH(dp.sentences) > 0`;

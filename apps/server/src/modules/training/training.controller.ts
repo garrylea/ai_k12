@@ -175,11 +175,14 @@ export class TrainingController {
   @Post('dictation/judge')
   async judgeDictation(
     @Body() dto: { passageId: number; author: string; dynasty: string; body: string },
+    @CurrentUser() user: JwtUser,
   ) {
     if (!Number.isInteger(dto.passageId) || dto.passageId < 1) {
       throw new BadRequestException('passageId 须为正整数');
     }
     return this.trainingService.judgeDictation({
+      // 发分身份只认 JWT（body 无 studentId 字段；伪造值不会被读取，防替别人刷分）
+      studentId: user.sub,
       passageId: dto.passageId,
       author: typeof dto.author === 'string' ? dto.author : '',
       dynasty: typeof dto.dynasty === 'string' ? dto.dynasty : '',
@@ -245,6 +248,7 @@ export class TrainingController {
       terms?: Array<{ term: string; answer: string }>;
       translation?: string;
     },
+    @CurrentUser() user: JwtUser,
   ) {
     if (!Number.isInteger(dto.passageId) || dto.passageId < 1) {
       throw new BadRequestException('passageId 须为正整数');
@@ -260,6 +264,8 @@ export class TrainingController {
       terms.push({ term, answer: typeof answer === 'string' ? answer : '' });
     }
     return this.trainingService.judgeInterpretation({
+      // 发分身份只认 JWT（body 无 studentId 字段）
+      studentId: user.sub,
       passageId: dto.passageId,
       sentenceIndex: dto.sentenceIndex,
       terms,

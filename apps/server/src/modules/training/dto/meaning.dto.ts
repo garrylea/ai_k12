@@ -8,6 +8,8 @@
  *   3. 判题不写任何学生状态（独立子系统，不入错题本）。
  */
 
+import type { PointsAwardReason } from '../../points/dto/points.dto.js';
+
 /**
  * 判定方式。**没有 `exact`** —— 本专项不做字符串归一化全等短路（理解性作答
  * 拿字符串相等去判不成立），全部交给 LLM。
@@ -80,4 +82,13 @@ export interface MeaningJudgeResult {
   terms: MeaningTermJudgeItem[];
   meaning: MeaningPartJudge;
   emotion: MeaningPartJudge;
+  /**
+   * 本次**实际入账**的积分（甲类逐目标发分，`cn_meaning`，**整篇答完发一次**）。
+   * 只有该篇**最后一个可作答句**判完时才可能非 0；其余句恒 0。
+   * 「整篇答完」= 最大的 `i` 使 `meanings[i] != null` —— **不是** `sentences.length - 1`
+   * （末句可能没有标准含义、根本不出题，按末句下标判定会让这些篇目永远拿不到分）。
+   */
+  pointsAwarded: number;
+  /** 未发分原因（无值=静默）；`duplicate` 刻意不在枚举内，见 `PointsAwardReason`。 */
+  awardReason?: PointsAwardReason;
 }

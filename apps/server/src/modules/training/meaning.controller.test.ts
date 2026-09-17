@@ -66,11 +66,14 @@ describe('MeaningController.start', () => {
 });
 
 describe('MeaningController.judge', () => {
+  /** JWT 里的学生身份（handler 第二个参数）；发分要用它，不能信 body。 */
+  const USER = { sub: 7, role: 'student' as const };
+
   it('非法入参 → 400', async () => {
     const { controller } = makeController();
-    await expect(controller.judgeMeaning({ passageId: 0, sentenceIndex: 0, terms: [], meaning: '', emotion: '' }))
+    await expect(controller.judgeMeaning({ passageId: 0, sentenceIndex: 0, terms: [], meaning: '', emotion: '' }, USER))
       .rejects.toThrow(BadRequestException);
-    await expect(controller.judgeMeaning({ passageId: 1, sentenceIndex: -1, terms: [], meaning: '', emotion: '' }))
+    await expect(controller.judgeMeaning({ passageId: 1, sentenceIndex: -1, terms: [], meaning: '', emotion: '' }, USER))
       .rejects.toThrow(BadRequestException);
   });
 
@@ -78,12 +81,12 @@ describe('MeaningController.judge', () => {
     const { controller, service } = makeController();
     // 非可迭代的脏值最容易漏：去掉 Array.isArray 守卫后 for...of 直接 TypeError 变 500
     for (const terms of ['abc', 42, { term: 'x' }, null] as never[]) {
-      await controller.judgeMeaning({ passageId: 7, sentenceIndex: 0, terms, meaning: '', emotion: '' });
+      await controller.judgeMeaning({ passageId: 7, sentenceIndex: 0, terms, meaning: '', emotion: '' }, USER);
     }
     expect(service.judgeMeaning).toHaveBeenCalledTimes(4);
     for (const call of service.judgeMeaning.mock.calls) {
       expect(call[0]).toEqual({
-        passageId: 7, sentenceIndex: 0, terms: [], meaning: '', emotion: '',
+        passageId: 7, sentenceIndex: 0, terms: [], meaning: '', emotion: '', studentId: 7,
       });
     }
   });
@@ -94,11 +97,23 @@ describe('MeaningController.judge', () => {
       passageId: 12, sentenceIndex: 1,
       terms: [{ term: '沉舟', answer: 123 as never }, null as never, { term: 5 as never, answer: 'x' }],
       meaning: 42 as never, emotion: null as never,
-    });
+    }, USER);
     expect(service.judgeMeaning).toHaveBeenCalledWith({
       passageId: 12, sentenceIndex: 1,
       terms: [{ term: '沉舟', answer: '' }],
       meaning: '', emotion: '',
+      studentId: 7,
+    });
+  });
+
+  it('studentId 只来自 JWT —— body 里伪造的 studentId 被忽略，不透传给 service', async () => {
+    const { controller, service } = makeController();
+    await controller.judgeMeaning(
+      { passageId: 12, sentenceIndex: 1, terms: [], meaning: '', emotion: '', studentId: 999 } as never,
+      { sub: 7, role: 'student' },
+    );
+    expect(service.judgeMeaning).toHaveBeenCalledWith({
+      studentId: 7, passageId: 12, sentenceIndex: 1, terms: [], meaning: '', emotion: '',
     });
   });
 });

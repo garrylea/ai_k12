@@ -12,6 +12,9 @@ function makeController() {
   return { controller: new TrainingController(service as never), service };
 }
 
+/** JWT 里的学生身份（发分要用，不信 body）。 */
+const USER = { sub: 7, role: 'student' as const };
+
 describe('TrainingController dictation 端点', () => {
   it('GET dictation/passages → 透传 service', async () => {
     const { controller, service } = makeController();
@@ -67,15 +70,15 @@ describe('TrainingController dictation 端点', () => {
   it('POST dictation/judge：passageId 非正整数 → 400', async () => {
     const { controller } = makeController();
     await expect(
-      controller.judgeDictation({ passageId: 0, author: '', dynasty: '', body: '' }),
+      controller.judgeDictation({ passageId: 0, author: '', dynasty: '', body: '' }, USER),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('POST dictation/judge：缺字段按空串处理并透传（不传 studentId）', async () => {
+  it('POST dictation/judge：缺字段按空串处理并透传（studentId 取自 JWT）', async () => {
     const { controller, service } = makeController();
-    await controller.judgeDictation({ passageId: 1 } as never);
+    await controller.judgeDictation({ passageId: 1 } as never, USER);
     expect(service.judgeDictation).toHaveBeenCalledWith({
-      passageId: 1, author: '', dynasty: '', body: '',
+      studentId: 7, passageId: 1, author: '', dynasty: '', body: '',
     });
   });
 
@@ -83,9 +86,21 @@ describe('TrainingController dictation 端点', () => {
     const { controller, service } = makeController();
     await controller.judgeDictation(
       { passageId: 1, author: 123, dynasty: null, body: {} } as never,
+      USER,
     );
     expect(service.judgeDictation).toHaveBeenCalledWith({
-      passageId: 1, author: '', dynasty: '', body: '',
+      studentId: 7, passageId: 1, author: '', dynasty: '', body: '',
+    });
+  });
+
+  it('POST dictation/judge：body 里伪造的 studentId 被忽略（只信 JWT）', async () => {
+    const { controller, service } = makeController();
+    await controller.judgeDictation(
+      { passageId: 1, author: '李白', dynasty: '唐', body: '床前明月光', studentId: 999 } as never,
+      { sub: 7, role: 'student' },
+    );
+    expect(service.judgeDictation).toHaveBeenCalledWith({
+      studentId: 7, passageId: 1, author: '李白', dynasty: '唐', body: '床前明月光',
     });
   });
 

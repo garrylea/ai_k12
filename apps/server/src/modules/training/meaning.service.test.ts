@@ -33,6 +33,7 @@ const OK_JUDGE = {
 function makeService(overrides: {
   passage?: unknown; list?: unknown; random?: unknown; byIds?: unknown;
   judged?: unknown; judgeThrows?: Error;
+  award?: unknown; awardThrows?: Error; todayKey?: string;
 } = {}) {
   const repo = {
     findById: vi.fn().mockResolvedValue(overrides.passage === undefined ? PASSAGE : overrides.passage),
@@ -46,7 +47,15 @@ function makeService(overrides: {
       return Promise.resolve(overrides.judged ?? OK_JUDGE);
     }),
   };
-  return { service: new MeaningService(repo as never, judge as never), repo, judge };
+  // 发分依赖（甲类逐目标发分，2026-09-17）：整篇最后一个可作答句判完时发一次。
+  const points = {
+    award: vi.fn().mockImplementation(() => {
+      if (overrides.awardThrows) return Promise.reject(overrides.awardThrows);
+      return Promise.resolve(overrides.award ?? { pointsAwarded: 4, balance: 4, totalEarned: 4, levelUp: null });
+    }),
+    todayKey: vi.fn(() => overrides.todayKey ?? '2026-09-17'),
+  };
+  return { service: new MeaningService(repo as never, judge as never, points as never), repo, judge, points };
 }
 
 describe('MeaningService.listMeaningPassages', () => {
@@ -114,7 +123,7 @@ describe('MeaningService.judgeMeaning', () => {
   it('LLM 成功时按项回填，method 为 ai', async () => {
     const { service, judge } = makeService();
     const res = await service.judgeMeaning({
-      passageId: 12, sentenceIndex: 1,
+      studentId: 1, passageId: 12, sentenceIndex: 1,
       terms: [{ term: '沉（chén）舟', answer: '沉了的船' }],
       meaning: '旧事物会被新事物取代', emotion: '乐观',
     });
@@ -138,7 +147,7 @@ describe('MeaningService.judgeMeaning', () => {
   it('空答案不进 LLM，直接 unanswered 判错', async () => {
     const { service, judge } = makeService();
     const res = await service.judgeMeaning({
-      passageId: 12, sentenceIndex: 1, terms: [], meaning: '', emotion: '',
+      studentId: 1, passageId: 12, sentenceIndex: 1, terms: [], meaning: '', emotion: '',
     });
     expect(judge.generate).not.toHaveBeenCalled();
     expect(res.meaning).toMatchObject({ correct: false, method: 'unanswered' });
@@ -148,7 +157,7 @@ describe('MeaningService.judgeMeaning', () => {
   it('只填了含义、情感留空 → 情感 unanswered，含义照判', async () => {
     const { service, judge } = makeService();
     const res = await service.judgeMeaning({
-      passageId: 12, sentenceIndex: 1, terms: [], meaning: '旧事物会被取代', emotion: '',
+      studentId: 1, passageId: 12, sentenceIndex: 1, terms: [], meaning: '旧事物会被取代', emotion: '',
     });
     expect(judge.generate).toHaveBeenCalledTimes(1);
     expect(res.meaning.method).toBe('ai');
@@ -158,7 +167,7 @@ describe('MeaningService.judgeMeaning', () => {
   it('模型整次失败 → 待判项 undetermined、correct 为 null，不抛错', async () => {
     const { service } = makeService({ judgeThrows: new Error('boom') });
     const res = await service.judgeMeaning({
-      passageId: 12, sentenceIndex: 1,
+      studentId: 1, passageId: 12, sentenceIndex: 1,
       terms: [{ term: '沉（chén）舟', answer: '沉了的船' }],
       meaning: '旧事物会被取代', emotion: '乐观',
     });
@@ -171,7 +180,7 @@ describe('MeaningService.judgeMeaning', () => {
   it('整次失败 + 情感空答案 → 短路项保持 unanswered，不被失败兜底覆盖', async () => {
     const { service } = makeService({ judgeThrows: new Error('boom') });
     const res = await service.judgeMeaning({
-      passageId: 12, sentenceIndex: 1, terms: [], meaning: '旧事物会被取代', emotion: '',
+      studentId: 1, passageId: 12, sentenceIndex: 1, terms: [], meaning: '旧事物会被取代', emotion: '',
     });
     expect(res.meaning).toMatchObject({ correct: null, method: 'undetermined' });
     expect(res.emotion).toMatchObject({ correct: false, method: 'unanswered' });
@@ -182,7 +191,7 @@ describe('MeaningService.judgeMeaning', () => {
       judged: { terms: [], meaning: { correct: true, comment: null } }, // emotion 漏了
     });
     const res = await service.judgeMeaning({
-      passageId: 12, sentenceIndex: 1, terms: [], meaning: '旧事物会被取代', emotion: '乐观',
+      studentId: 1, passageId: 12, sentenceIndex: 1, terms: [], meaning: '旧事物会被取代', emotion: '乐观',
     });
     expect(res.meaning).toMatchObject({ correct: true, method: 'ai' });
     expect(res.emotion).toMatchObject({ correct: null, method: 'undetermined' });
@@ -191,7 +200,7 @@ describe('MeaningService.judgeMeaning', () => {
   it('method 枚举不含 exact（钉住「不做程序短路」这个决定）', async () => {
     const { service } = makeService();
     const res = await service.judgeMeaning({
-      passageId: 12, sentenceIndex: 1, terms: [],
+      studentId: 1, passageId: 12, sentenceIndex: 1, terms: [],
       meaning: '比喻新事物必将取代旧事物。', // 与标准答案逐字相同
       emotion: '豁达乐观、积极进取',
     });
@@ -201,15 +210,15 @@ describe('MeaningService.judgeMeaning', () => {
 
   it('篇目不存在 → 404；sentenceIndex 越界 → 400；该句无标准含义 → 400', async () => {
     const { service } = makeService({ passage: null });
-    await expect(service.judgeMeaning({ passageId: 999, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
+    await expect(service.judgeMeaning({ studentId: 1, passageId: 999, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
       .rejects.toThrow(/不存在/);
     const s2 = makeService().service;
-    await expect(s2.judgeMeaning({ passageId: 12, sentenceIndex: 9, terms: [], meaning: 'a', emotion: 'b' }))
+    await expect(s2.judgeMeaning({ studentId: 1, passageId: 12, sentenceIndex: 9, terms: [], meaning: 'a', emotion: 'b' }))
       .rejects.toThrow(/越界/);
     const s3 = makeService({
       passage: { ...PASSAGE, sentence_meanings: [null, null] },
     }).service;
-    await expect(s3.judgeMeaning({ passageId: 12, sentenceIndex: 1, terms: [], meaning: 'a', emotion: 'b' }))
+    await expect(s3.judgeMeaning({ studentId: 1, passageId: 12, sentenceIndex: 1, terms: [], meaning: 'a', emotion: 'b' }))
       .rejects.toThrow(/无标准含义/);
   });
 
@@ -217,10 +226,110 @@ describe('MeaningService.judgeMeaning', () => {
     // 2 句 vs 1 含义：取下标 0 时若不做长度守卫，会拿「另一句」的标准答案去判
     const mismatched = { ...PASSAGE, sentence_meanings: [{ meaning: '写凄凉。', emotion: '辛酸' }] };
     const { service, judge } = makeService({ passage: mismatched });
-    await expect(service.judgeMeaning({ passageId: 12, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
+    await expect(service.judgeMeaning({ studentId: 1, passageId: 12, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
       .rejects.toBeInstanceOf(BadRequestException);
-    await expect(service.judgeMeaning({ passageId: 12, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
+    await expect(service.judgeMeaning({ studentId: 1, passageId: 12, sentenceIndex: 0, terms: [], meaning: 'a', emotion: 'b' }))
       .rejects.toThrow(/无标准含义/);
     expect(judge.generate).not.toHaveBeenCalled();
+  });
+});
+
+describe('MeaningService.judgeMeaning — 甲类发分（cn_meaning，整篇答完发一次）', () => {
+  /** 5 句、**最后一句没有标准含义**：整篇答完应以第 3 句（下标，0-based）为准。 */
+  const FIVE = {
+    ...PASSAGE,
+    key_terms: [],
+    sentences: [
+      { text: '句一。', translation: 't1' },
+      { text: '句二。', translation: 't2' },
+      { text: '句三。', translation: 't3' },
+      { text: '句四。', translation: 't4' },
+      { text: '句五（无标准含义）。', translation: 't5' },
+    ],
+    sentence_meanings: [
+      { meaning: 'm1', emotion: 'e1' },
+      { meaning: 'm2', emotion: 'e2' },
+      { meaning: 'm3', emotion: 'e3' },
+      { meaning: 'm4', emotion: 'e4' },
+      null,
+    ],
+  };
+  const ANS = { terms: [], meaning: '作答', emotion: '作答' };
+
+  it('非最后一句 → 不发分（且 award 根本不被调用）', async () => {
+    const { service, points } = makeService(); // PASSAGE 2 句，都可作答
+    const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 0, ...ANS });
+    expect(points.award).not.toHaveBeenCalled();
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBeUndefined();
+  });
+
+  it('最后一个可作答句 → 发一次，幂等键含 todayKey()，响应带 pointsAwarded', async () => {
+    const { service, points } = makeService();
+    const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(points.todayKey).toHaveBeenCalled();
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award).toHaveBeenCalledWith({
+      studentId: 5,
+      taskCode: 'cn_meaning',
+      tierKey: 'default',
+      dedupeKey: 'meaning:5:12:2026-09-17',
+      refType: 'passage',
+      refId: 12,
+    });
+    expect(res.pointsAwarded).toBe(4);
+    expect(res.awardReason).toBeUndefined();
+  });
+
+  it('末句无可作答内容 → 由**前一个可作答句**（下标 3）触发发分', async () => {
+    // 本任务最容易写错的一处：sentences.length - 1 (=4) 那句没有标准含义，
+    // 若按下标 4 发分，这篇永远拿不到分。
+    const { service, points } = makeService({ passage: FIVE });
+    const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 3, ...ANS });
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupeKey: 'meaning:5:12:2026-09-17', refId: 12 }),
+    );
+    expect(res.pointsAwarded).toBe(4);
+  });
+
+  it('末句不可作答时判它（下标 4）→ 走既有「无标准含义」400 守卫，不发分也不抛积分错', async () => {
+    const { service, points } = makeService({ passage: FIVE });
+    await expect(
+      service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 4, ...ANS }),
+    ).rejects.toThrow(/无标准含义/);
+    expect(points.award).not.toHaveBeenCalled();
+  });
+
+  it('判错/未判定也发分（完成即给，不看对错）', async () => {
+    const { service, points } = makeService({ judged: { terms: [], meaning: null, emotion: null } });
+    const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(res.meaning.method).toBe('undetermined');
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(res.pointsAwarded).toBe(4);
+  });
+
+  it('award 抛错 → 判题结果照常返回（逐项判定完整），pointsAwarded=0', async () => {
+    const { service } = makeService({ awardThrows: new Error('db down') });
+    const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(res.meaning).toMatchObject({ correct: false, method: 'ai' });
+    expect(res.emotion).toMatchObject({ correct: true, method: 'ai' });
+    expect(res.allCorrect).toBe(false);
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBeUndefined();
+  });
+
+  it('award 回 daily_limit → pointsAwarded=0 + awardReason 透传', async () => {
+    const { service } = makeService({ award: { pointsAwarded: 0, reason: 'daily_limit' } });
+    const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBe('daily_limit');
+  });
+
+  it('award 回 duplicate（同日重判同一篇）→ 归 0 且静默，不弹假「+N 分」', async () => {
+    const { service } = makeService({ award: { pointsAwarded: 4, reason: 'duplicate' } });
+    const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 1, ...ANS });
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBeUndefined();
   });
 });

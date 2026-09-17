@@ -32,6 +32,8 @@ const mk = (overrides: any = {}) => ({
     hasUnreadByQuestion: vi.fn().mockResolvedValue(false),
     create: vi.fn().mockResolvedValue(1),
   },
+  // 甲类发分（Task 11）：默写/解释判题会调 award()。本文件不测发分，给个不发分的桩即可。
+  pointsService: { award: vi.fn(), todayKey: vi.fn(() => '2026-09-17') },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
@@ -40,6 +42,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
     deps.questionHintsRepo, deps.hint, deps.hiddenRepo,
     deps.explanationCache, deps.notificationsRepo,
     {} as never, {} as never, {} as never,
+    deps.pointsService as never,
   );
 
 describe('TrainingService.getErrorBookEntries', () => {

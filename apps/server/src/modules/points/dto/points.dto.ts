@@ -34,6 +34,16 @@ export function toPointsAwardDto(result: AwardResult | null | undefined): Points
   };
 }
 
+/**
+ * 甲类埋点（既有判题响应里内联的 `pointsAwarded` / `awardReason`，spec §7.2）的
+ * **未发分原因**枚举。
+ *
+ * `duplicate` **刻意不在枚举内**：幂等命中（同日重判同一目标物）时本次并未入账，
+ * `PointsService.award` 虽会带回首次分值，但那是历史账 —— 一律按「静默、`pointsAwarded=0`」
+ * 处理，避免前端弹假 `+N 分`（与 Task 10 的 `JudgeOutput.awardReason` 同一口径）。
+ */
+export type PointsAwardReason = 'daily_limit' | 'no_rule' | 'tier_inactive' | 'genre_unset';
+
 /** `GET /api/points/me` —— 概览。 */
 export interface PointsOverview {
   balance: number;

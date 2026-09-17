@@ -1,8 +1,9 @@
 import { BadRequestException, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { MeaningService } from './meaning.service.js';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
+import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { MeaningJudgeResult, MeaningPassageItem, MeaningPassageListItem } from './dto/meaning.dto.js';
 
 /**
@@ -51,8 +52,9 @@ export class MeaningController {
   }
 
   /**
-   * 判题：**逐句**判（该句的字词 + 深层含义 + 作者情感），**不写任何学生状态**。
+   * 判题：**逐句**判（该句的字词 + 深层含义 + 作者情感）。
    * 模型漏项/不可用时那些项回 `correct: null` + `method: 'undetermined'`（不报错）。
+   * 该篇**最后一个可作答句**判完时，响应带 `pointsAwarded`（甲类 `cn_meaning`，整篇发一次）。
    */
   @Post('judge')
   async judgeMeaning(
@@ -63,6 +65,7 @@ export class MeaningController {
       meaning?: string;
       emotion?: string;
     },
+    @CurrentUser() user: JwtUser,
   ): Promise<MeaningJudgeResult> {
     if (!Number.isInteger(dto.passageId) || dto.passageId < 1) {
       throw new BadRequestException('passageId 须为正整数');
@@ -78,6 +81,8 @@ export class MeaningController {
       terms.push({ term, answer: typeof answer === 'string' ? answer : '' });
     }
     return this.meaningService.judgeMeaning({
+      // 发分身份只认 JWT（body 无 studentId 字段）
+      studentId: user.sub,
       passageId: dto.passageId,
       sentenceIndex: dto.sentenceIndex,
       terms,

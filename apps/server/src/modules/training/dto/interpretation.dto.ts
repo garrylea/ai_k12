@@ -8,6 +8,8 @@
  *   3. 判题不写任何学生状态（独立子系统，不入错题本）。
  */
 
+import type { PointsAwardReason } from '../../points/dto/points.dto.js';
+
 /** 判定方式。`undetermined` 的 `correct` 为 `null`（模型没判出来，前端显示「未判定」）。 */
 export type InterpretationMethod = 'exact' | 'ai' | 'unanswered' | 'undetermined';
 
@@ -73,4 +75,10 @@ export interface InterpretationJudgeResult {
   sentence: InterpretationSentenceJudgeItem;
   /** **仅当被判的是最后一句时**非 null——整篇译文提前下发等于泄题。 */
   fullTranslation: string | null;
+  /** 本次**实际入账**的积分（甲类逐目标发分，`cn_interpretation`，一篇一天一次；
+   *  判题是逐句的，所以首句判完即发，同日后续句子靠幂等键命中而不再入账）。
+   *  0 = 体裁未标定 / 同日重判 / 达上限 / 停用 / 失败。 */
+  pointsAwarded: number;
+  /** 未发分原因（无值=静默）；`duplicate` 刻意不在枚举内，见 `PointsAwardReason`。 */
+  awardReason?: PointsAwardReason;
 }

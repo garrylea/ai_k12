@@ -8,6 +8,9 @@ import { QuestionHintsRepository } from '../../database/repositories/question-hi
 import { StudentHiddenQuestionsRepository } from '../../database/repositories/student-hidden-questions.repo.js';
 import { AdminNotificationsRepository } from '../../database/repositories/admin-notifications.repo.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
+import { PointsService } from '../points/points.service.js';
+import type { AwardResult } from '../points/points.service.js';
+import type { PointsAwardReason } from '../points/dto/points.dto.js';
 import {
   ChinesePassagesRepository,
   buildDictationPrompt,
@@ -73,7 +76,63 @@ export class TrainingService {
     private readonly dictationRepo: ChinesePassagesRepository,
     private readonly dictationFeedback: DictationFeedbackCapability,
     private readonly interpretationJudge: InterpretationJudgeCapability,
+    private readonly pointsService: PointsService,
   ) {}
+
+  /**
+   * 默写 / 解释共用：按篇目体裁取档发一次分（甲类逐目标发分，spec §6.1/§7.2）。
+   *
+   * 三个口径：
+   *   1. **一篇一天一次** —— 幂等键 `dict|interp:<studentId>:<passageId>:<todayKey>`，
+   *      日期只取 `PointsService.todayKey()`（单一真源，勿在此重写日期格式化）。
+   *   2. **体裁未标定不发分、不猜** —— `genre` 只认 `'poem'` / `'prose'`；`null` 或脏值
+   *      回 `genre_unset`（spec §4.1 的人工标定前提），并留 warning 让未标定篇目可被发现。
+   *   3. **发分失败绝不阻断判题** —— `award()` 抛错只记 warning，按未发分返回。
+   *
+   * 返回值只报**本次真正入账**的分：`duplicate`（同日重判）时 `award` 会带回首次分值，
+   * 那是历史账，一律归 0 且不设 reason，避免前端弹假 `+N 分`（同 Task 10 `awardErrorFixOnClear`）。
+   */
+  private async awardByPassageGenre(input: {
+    studentId: number;
+    taskCode: 'cn_dictation' | 'cn_interpretation';
+    dedupePrefix: 'dict' | 'interp';
+    passageId: number;
+    genre: string | null;
+  }): Promise<{ pointsAwarded: number; awardReason?: PointsAwardReason }> {
+    const { genre } = input;
+    if (genre !== 'poem' && genre !== 'prose') {
+      this.logger.warn(
+        `points award skipped: genre unset (taskCode=${input.taskCode}, `
+        + `passageId=${input.passageId}, genre=${String(genre)})`,
+      );
+      return { pointsAwarded: 0, awardReason: 'genre_unset' };
+    }
+
+    let award: AwardResult;
+    try {
+      award = await this.pointsService.award({
+        studentId: input.studentId,
+        taskCode: input.taskCode,
+        tierKey: genre,
+        dedupeKey: `${input.dedupePrefix}:${input.studentId}:${input.passageId}:${this.pointsService.todayKey()}`,
+        refType: 'passage',
+        refId: input.passageId,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `points award failed (taskCode=${input.taskCode}, studentId=${input.studentId}, `
+        + `passageId=${input.passageId}): ${err}`,
+      );
+      return { pointsAwarded: 0 };
+    }
+
+    // 干净成功才报分；duplicate 带回的是首次分值（历史账），归 0 且静默。
+    if (!award.reason) return { pointsAwarded: award.pointsAwarded };
+    if (award.reason === 'daily_limit' || award.reason === 'no_rule' || award.reason === 'tier_inactive') {
+      return { pointsAwarded: 0, awardReason: award.reason };
+    }
+    return { pointsAwarded: 0 };
+  }
 
   /** 错题练习筛选列表：调 repo 后按 errorBookId 聚合 kpIds，映射 DTO。 */
   async getErrorBookEntries(
@@ -148,7 +207,8 @@ export class TrainingService {
 
   /**
    * 语文默写判题：**纯程序**判对错（JudgeCore.judgeDictation），不等 LLM，
-   * 且**不写任何学生状态**（独立化后不入错题本、不清零）。
+   * 且**不写任何学生状态**（独立化后不入错题本、不清零）——唯一的写入是积分流水
+   * （甲类发分 `cn_dictation`，2026-09-17 起按体裁分档，一篇一天一次）。
    *
    * 2026-09-14 起错因文案与判题解耦：本方法只回判题结果（~25ms），
    * 答错时带 `feedbackPending=true`，由前端另调 generateDictationFeedback 取文案。
@@ -156,6 +216,7 @@ export class TrainingService {
    * 一次错答要等 13–16 秒才看到对错，学生以为卡死。
    */
   async judgeDictation(input: {
+    studentId: number;
     passageId: number;
     author: string;
     dynasty: string;
@@ -172,6 +233,15 @@ export class TrainingService {
       student: { author: input.author, dynasty: input.dynasty, body: input.body },
     });
 
+    // 甲类发分（2026-09-17）：一篇一天一次，完成即给、不看对错。发分失败不影响判题。
+    const award = await this.awardByPassageGenre({
+      studentId: input.studentId,
+      taskCode: 'cn_dictation',
+      dedupePrefix: 'dict',
+      passageId: passage.id,
+      genre: passage.genre,
+    });
+
     // 显式构造返回，不用 spread：judged 带 method 字段，spread 进对象字面量会触发
     // TS 多余属性检查（DictationJudgeResult 未声明 method）。
     return {
@@ -182,6 +252,8 @@ export class TrainingService {
       reference: expected,
       feedback: null,
       feedbackPending: !judged.isCorrect,
+      pointsAwarded: award.pointsAwarded,
+      awardReason: award.awardReason,
     };
   }
 
@@ -285,7 +357,8 @@ export class TrainingService {
 
   /**
    * 解释专项判题：**逐句**判（字词 + 整句翻译），**纯读**、不写任何学生状态
-   * （独立子系统：无错题本、无隐藏题、无提示缓存、无自评）。
+   * （独立子系统：无错题本、无隐藏题、无提示缓存、无自评）——唯一的写入是积分流水
+   * （甲类发分 `cn_interpretation`，2026-09-17 起按体裁分档，一篇一天一次）。
    *
    * 顺序是刻意的：
    *   1. 程序短路掉能确定的项（空答案 → unanswered；归一化全等 → exact），**不进 LLM**；
@@ -294,6 +367,7 @@ export class TrainingService {
    *      ——判题服务不可用不该让学生连「哪些已经对了」都看不到。
    */
   async judgeInterpretation(input: {
+    studentId: number;
     passageId: number;
     sentenceIndex: number;
     terms: Array<{ term: string; answer: string }>;
@@ -381,6 +455,16 @@ export class TrainingService {
 
     const termItems: InterpretationTermJudgeItem[] = slots.map(({ pending: _pending, ...rest }) => rest);
 
+    // 甲类发分（2026-09-17）：一篇一天一次、按体裁分档。判题是**逐句**的，
+    // 所以首句判完即发；同日后续句子会命中幂等键（duplicate → 归 0 静默）。
+    const award = await this.awardByPassageGenre({
+      studentId: input.studentId,
+      taskCode: 'cn_interpretation',
+      dedupePrefix: 'interp',
+      passageId: passage.id,
+      genre: passage.genre,
+    });
+
     return {
       passageId: passage.id,
       sentenceIndex: input.sentenceIndex,
@@ -396,6 +480,8 @@ export class TrainingService {
       fullTranslation: input.sentenceIndex === sentences.length - 1
         ? (passage.full_translation ?? null)
         : null,
+      pointsAwarded: award.pointsAwarded,
+      awardReason: award.awardReason,
     };
   }
 

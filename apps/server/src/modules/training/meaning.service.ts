@@ -4,6 +4,9 @@ import {
   type PassageSentence, type PassageSentenceMeaning,
 } from '../../database/repositories/chinese-passages.repo.js';
 import { ChineseMeaningJudgeCapability } from '../../ai-core/capabilities/chinese-meaning-judge.capability.js';
+import { PointsService } from '../points/points.service.js';
+import type { AwardResult } from '../points/points.service.js';
+import type { PointsAwardReason } from '../points/dto/points.dto.js';
 import { stripPinyinAnnotation } from '../../common/utils/normalize-chinese.util.js';
 import type {
   MeaningPassageListItem, MeaningPassageItem, MeaningJudgeResult,
@@ -28,7 +31,44 @@ export class MeaningService {
   constructor(
     private readonly passageRepo: ChinesePassagesRepository,
     private readonly meaningJudge: ChineseMeaningJudgeCapability,
+    private readonly pointsService: PointsService,
   ) {}
+
+  /**
+   * 整篇答完时发一次 `cn_meaning`（甲类逐目标发分，spec §6.1/§7.2，`default` 档）。
+   *
+   * **一篇一天一次**：幂等键 `meaning:<studentId>:<passageId>:<todayKey>`，日期只取
+   * `PointsService.todayKey()`（单一真源）。判题是逐句的，只有最后一句判完才调用本方法。
+   *
+   * 发分失败/被拒（达上限、家长停用、规则缺失）**绝不阻断判题**：抛错记 warning 后按未发分返回。
+   * 返回值只报**本次真正入账**的分：`duplicate`（同日重判）带回首次分值属历史账，归 0 且静默
+   * （同 Task 10 `awardErrorFixOnClear`）。
+   */
+  private async awardMeaningPassage(
+    studentId: number,
+    passageId: number,
+  ): Promise<{ pointsAwarded: number; awardReason?: PointsAwardReason }> {
+    let award: AwardResult;
+    try {
+      award = await this.pointsService.award({
+        studentId,
+        taskCode: 'cn_meaning',
+        tierKey: 'default',
+        dedupeKey: `meaning:${studentId}:${passageId}:${this.pointsService.todayKey()}`,
+        refType: 'passage',
+        refId: passageId,
+      });
+    } catch (err) {
+      this.logger.warn(`points award failed (taskCode=cn_meaning, studentId=${studentId}, passageId=${passageId}): ${err}`);
+      return { pointsAwarded: 0 };
+    }
+
+    if (!award.reason) return { pointsAwarded: award.pointsAwarded };
+    if (award.reason === 'daily_limit' || award.reason === 'no_rule' || award.reason === 'tier_inactive') {
+      return { pointsAwarded: 0, awardReason: award.reason };
+    }
+    return { pointsAwarded: 0 };
+  }
 
   /**
    * 取该篇的含义数组，**只有与 sentences 等长才可信**。
@@ -116,12 +156,13 @@ export class MeaningService {
 
   /**
    * 判题：**逐句**判（该句的字词 + 深层含义 + 作者情感打包成一次 LLM 调用），
-   * **纯读**、不写任何学生状态。
+   * 学生状态侧唯一的写入是**整篇答完时的积分流水**（甲类 `cn_meaning`）。
    *
    * 与解释专项唯一的流程差别是**没有归一化全等短路**：含义/情感是理解性作答，
    * 学生答得与标准答案逐字相同也必须过 LLM（测试钉住了 `method` 不会是 `exact`）。
    */
   async judgeMeaning(input: {
+    studentId: number;
     passageId: number;
     sentenceIndex: number;
     terms: Array<{ term: string; answer: string }>;
@@ -143,6 +184,16 @@ export class MeaningService {
     if (!stdMeaning) {
       throw new BadRequestException(`该句无标准含义：${input.sentenceIndex}`);
     }
+
+    // ---- 0. 「整篇答完」判定（必须先于判题算好，判完后用它决定是否发分） ----
+    // **不是 `sentences.length - 1`**：末句可能没有标准含义（`answerable:false`，根本不出题），
+    // 按末句下标判定会让这类篇目**永远拿不到分**。整篇答完 = 判的是最后一个**可作答**句。
+    const lastAnswerableIndex = meanings.reduce(
+      (last, m, i) => (m != null ? i : last),
+      -1,
+    );
+    const isLastAnswerableSentence = input.sentenceIndex === lastAnswerableIndex;
+
     const stdTerms = toKeyTerms(passage.key_terms).filter((t) => t.sentenceIndex === input.sentenceIndex);
 
     // 学生答案配对：同名取最后一条，多传的 term 忽略（服务端只认该句「应有」的字词）
@@ -221,6 +272,12 @@ export class MeaningService {
     const meaningOut = stripPending(meaningSlot);
     const emotionOut = stripPending(emotionSlot);
 
+    // 甲类发分（2026-09-17）：只有最后一个可作答句判完才算「整篇答完」，发一次 `default` 档。
+    // 完成即给、不看对错（判错/未判定同样发），发分失败不影响判题。
+    const award = isLastAnswerableSentence
+      ? await this.awardMeaningPassage(input.studentId, passage.id)
+      : null;
+
     return {
       passageId: passage.id,
       sentenceIndex: input.sentenceIndex,
@@ -231,6 +288,8 @@ export class MeaningService {
       terms: termsOut,
       meaning: meaningOut,
       emotion: emotionOut,
+      pointsAwarded: award?.pointsAwarded ?? 0,
+      awardReason: award?.awardReason,
     };
   }
 }

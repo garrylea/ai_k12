@@ -5,7 +5,7 @@ const PASSAGE = {
   id: 1, work_title: '静夜思', author: '李白', dynasty: '唐',
   body: '床前明月光，疑是地上霜。', grade_band: 'junior', grade: '九年级',
   semester: '上册', sort_order: 1, source_ref: 'DEV-FIXTURE', verified: 1,
-  memorize_required: 1, is_active: 1,
+  memorize_required: 1, is_active: 1, genre: 'poem',
 };
 
 const WRONG_JUDGE = {
@@ -14,7 +14,13 @@ const WRONG_JUDGE = {
   bodyDiff: [{ type: 'wrong', expected: '光', actual: '先' }],
 };
 
-function makeService(overrides: { passage?: unknown; judgeResult?: unknown; feedback?: unknown } = {}) {
+/** award 干净成功（无 reason）的默认返回。 */
+const AWARD_OK = { pointsAwarded: 2, balance: 2, totalEarned: 2, levelUp: null };
+
+function makeService(overrides: {
+  passage?: unknown; judgeResult?: unknown; feedback?: unknown;
+  award?: unknown; awardThrows?: Error; todayKey?: string;
+} = {}) {
   const dictationRepo = {
     findById: vi.fn().mockResolvedValue(overrides.passage === undefined ? PASSAGE : overrides.passage),
     findVerifiedForDictation: vi.fn().mockResolvedValue([PASSAGE]),
@@ -28,12 +34,21 @@ function makeService(overrides: { passage?: unknown; judgeResult?: unknown; feed
       return Promise.resolve({ content: overrides.feedback ?? '注意「月光」的「光」' });
     }),
   };
+  // 发分依赖（甲类逐目标发分，2026-09-17）：todayKey 是唯一的日期真源，这里钉成定值。
+  const points = {
+    award: vi.fn().mockImplementation(() => {
+      if (overrides.awardThrows) return Promise.reject(overrides.awardThrows);
+      return Promise.resolve(overrides.award ?? AWARD_OK);
+    }),
+    todayKey: vi.fn(() => overrides.todayKey ?? '2026-09-17'),
+  };
   const service = new TrainingService(
     {} as never, judgeCore as never, {} as never, {} as never, {} as never,
     {} as never, {} as never, {} as never, {} as never,
     dictationRepo as never, dictationFeedback as never, {} as never,
+    points as never,
   );
-  return { service, dictationRepo, judgeCore, dictationFeedback };
+  return { service, dictationRepo, judgeCore, dictationFeedback, points };
 }
 
 describe('renderBodyDiff', () => {
@@ -83,7 +98,7 @@ describe('TrainingService.judgeDictation（判题：纯程序、不等 LLM、不
   it('判错 → 回判题结果 + feedbackPending=true，且**不调用 LLM**', async () => {
     const { service, dictationFeedback } = makeService();
     const res = await service.judgeDictation({
-      passageId: 1, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
+      studentId: 1, passageId: 1, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
     });
     expect(res.isCorrect).toBe(false);
     expect(res.feedback).toBeNull();
@@ -103,7 +118,7 @@ describe('TrainingService.judgeDictation（判题：纯程序、不等 LLM、不
       },
     });
     const res = await service.judgeDictation({
-      passageId: 1, author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。',
+      studentId: 1, passageId: 1, author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。',
     });
     expect(res.isCorrect).toBe(true);
     expect(res.feedback).toBeNull();
@@ -114,7 +129,7 @@ describe('TrainingService.judgeDictation（判题：纯程序、不等 LLM、不
   // 独立化：判定路径只给「纯函数 + 篇目」两样东西，学生身份不再进入判题
   it('只把 expected/student 交给 judgeCore，不透传学生身份/学科/错题本相关字段', async () => {
     const { service, judgeCore } = makeService();
-    await service.judgeDictation({ passageId: 1, author: '李', dynasty: '唐', body: '床' });
+    await service.judgeDictation({ studentId: 1, passageId: 1, author: '李', dynasty: '唐', body: '床' });
     expect(judgeCore.judgeDictation).toHaveBeenCalledWith({
       expected: { author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。' },
       student: { author: '李', dynasty: '唐', body: '床' },
@@ -124,8 +139,89 @@ describe('TrainingService.judgeDictation（判题：纯程序、不等 LLM、不
   it('篇目不存在 → 404', async () => {
     const { service } = makeService({ passage: null });
     await expect(
-      service.judgeDictation({ passageId: 999, author: '', dynasty: '', body: '' }),
+      service.judgeDictation({ studentId: 1, passageId: 999, author: '', dynasty: '', body: '' }),
     ).rejects.toThrow();
+  });
+});
+
+describe('TrainingService.judgeDictation — 甲类发分（cn_dictation，按体裁取档）', () => {
+  const ANS = { author: '', dynasty: '', body: '' };
+
+  it('genre=poem → 按 poem 档发一次，幂等键含 todayKey()，响应带 pointsAwarded', async () => {
+    const { service, points } = makeService(); // PASSAGE.genre === 'poem'
+    const res = await service.judgeDictation({ studentId: 7, passageId: 1, ...ANS });
+    expect(points.todayKey).toHaveBeenCalled();
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(points.award).toHaveBeenCalledWith({
+      studentId: 7,
+      taskCode: 'cn_dictation',
+      tierKey: 'poem',
+      dedupeKey: 'dict:7:1:2026-09-17',
+      refType: 'passage',
+      refId: 1,
+    });
+    expect(res.pointsAwarded).toBe(2);
+    expect(res.awardReason).toBeUndefined();
+  });
+
+  it('genre=prose → tierKey=prose', async () => {
+    const { service, points } = makeService({ passage: { ...PASSAGE, genre: 'prose' } });
+    await service.judgeDictation({ studentId: 3, passageId: 1, ...ANS });
+    expect(points.award).toHaveBeenCalledWith(
+      expect.objectContaining({ tierKey: 'prose', dedupeKey: 'dict:3:1:2026-09-17' }),
+    );
+  });
+
+  it('判错也发分（完成即给，不看对错）—— 默认 WRONG_JUDGE 即判错', async () => {
+    const { service, points } = makeService();
+    const res = await service.judgeDictation({ studentId: 7, passageId: 1, ...ANS });
+    expect(res.isCorrect).toBe(false);
+    expect(points.award).toHaveBeenCalledTimes(1);
+    expect(res.pointsAwarded).toBe(2);
+  });
+
+  it('genre=null（未标定）→ award 不被调用，awardReason=genre_unset', async () => {
+    const { service, points } = makeService({ passage: { ...PASSAGE, genre: null } });
+    const res = await service.judgeDictation({ studentId: 7, passageId: 1, ...ANS });
+    expect(points.award).not.toHaveBeenCalled();
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBe('genre_unset');
+    // 判题本身不受体裁未标定影响
+    expect(res.isCorrect).toBe(false);
+  });
+
+  it('genre 是其它脏值（如 "ci"）→ 同样按未标定处理，不猜体裁', async () => {
+    const { service, points } = makeService({ passage: { ...PASSAGE, genre: 'ci' } });
+    const res = await service.judgeDictation({ studentId: 7, passageId: 1, ...ANS });
+    expect(points.award).not.toHaveBeenCalled();
+    expect(res.awardReason).toBe('genre_unset');
+  });
+
+  it('award 抛错 → 判题结果照常返回，pointsAwarded=0', async () => {
+    const { service } = makeService({ awardThrows: new Error('db down') });
+    const res = await service.judgeDictation({
+      studentId: 7, passageId: 1, author: '李白', dynasty: '唐', body: '床前明月先',
+    });
+    expect(res.isCorrect).toBe(false);
+    expect(res.feedbackPending).toBe(true);
+    expect(res.reference).toEqual({ author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。' });
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBeUndefined();
+  });
+
+  it('award 回 daily_limit → pointsAwarded=0 + awardReason 透传', async () => {
+    const { service } = makeService({ award: { pointsAwarded: 0, reason: 'daily_limit' } });
+    const res = await service.judgeDictation({ studentId: 7, passageId: 1, ...ANS });
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBe('daily_limit');
+  });
+
+  it('award 回 duplicate（同日重判同一篇）→ 归 0 且静默，不弹假「+N 分」', async () => {
+    // PointsService.award 幂等命中时会带回**首次**分值；直接透传就是历史账（Task 10 Finding C1）
+    const { service } = makeService({ award: { pointsAwarded: 2, reason: 'duplicate' } });
+    const res = await service.judgeDictation({ studentId: 7, passageId: 1, ...ANS });
+    expect(res.pointsAwarded).toBe(0);
+    expect(res.awardReason).toBeUndefined();
   });
 });
 

@@ -430,7 +430,9 @@ export const LEVELS = [
 
 前端拿到 `pointsAwarded > 0` 就弹轻反馈；`= 0` 且带 `awardReason` 时静默或显示「今日该任务积分已达上限」。`error_fix` 的 `pointsAwarded` 要透传到 `judge-core` 的各调用方（`training.controller.ts`、`practice` 的判题入口、`exams` 的补判路径——补判路径**不参与发分**，避免考试补判冒出积分）。
 
-**`cn_meaning` 的「整篇答完」判定**：该篇最后一句判完（`sentenceIndex === sentences.length - 1`）时发分。前端不需要额外调用——`judge` 响应里自然带上。
+**`cn_meaning` 的「整篇答完」判定**：该篇**最后一个可作答句**判完时发分。前端不需要额外调用——`judge` 响应里自然带上。
+
+> ⚠️ 「最后一个可作答句」**不是** `sentences.length - 1`：末句可能没有标准含义（`sentence_meanings[i] == null`，`answerable:false`、根本不出题），按下标 `length - 1` 判定会让这类篇目**永远拿不到分**。正确口径是「最大的 `i` 使 `meanings[i] != null`」，实现在 `meaning.service.ts`（`task-11` 落实时修正本条，原写法有误）。
 
 ### 7.3 家长端（`@Roles('parent')`，全部复用 `ParentService.requireOwnedStudent`）
 
