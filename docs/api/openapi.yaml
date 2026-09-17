@@ -47,6 +47,10 @@ tags:
     description: 错题练习与专项训练（辅线学习闭环）
   - name: Exams
     description: 真题试卷考试（选卷/开考/逐题作答/交卷/结果）
+  - name: Points
+    description: 闯关积分：学生端查询（概览/流水/档位/奖励），只读
+  - name: ParentPoints
+    description: 家长端积分：分值规则、兑换、奖励清单、汇率设置
 paths:
   # Auth
   /auth/register:
@@ -477,6 +481,13 @@ paths:
                           currentLessonId:
                             type: integer
                             description: 当前进度中的课程 ID（当 reason=not_current_lesson 时返回，供前端定位下一课）
+                          points:
+                            allOf:
+                              - $ref: '#/components/schemas/PointsAwardDto'
+                            description: >-
+                              学完一课发分结果（mainline_lesson，丙类埋点，2026-09-17）。
+                              仅在 advanced=true（推进到下一课 / 完成学科）时存在；发分故障时
+                              该字段整体缺省（JSON 里无此键，不是 0）。
 
   # Content
   /content/subjects:
@@ -4417,7 +4428,7 @@ paths:
         '404':
           description: 单词不存在 / 该词没有词根族
 
-  /api/training/hidden/mark:
+  /training/hidden/mark:
     post:
       tags: [training]
       summary: 标记某题不再展示（幂等）
@@ -4441,7 +4452,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { description: 题目不存在 }
 
-  /api/training/hidden:
+  /training/hidden:
     get:
       tags: [training]
       summary: 不再展示清单（按标记时间倒序）
@@ -4470,7 +4481,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CommonResponse' }
 
-  /api/training/hidden/{questionId}:
+  /training/hidden/{questionId}:
     delete:
       tags: [training]
       summary: 撤销单条标记
@@ -4742,7 +4753,7 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/ExamSummary'
+                        $ref: '#/components/schemas/ExamSubmitResult'
         '403':
           description: 无权访问该考试会话（非本人）
         '404':
@@ -4801,6 +4812,510 @@ paths:
           description: 无权访问该考试会话（非本人）
         '404':
           description: 考试会话不存在
+
+  # ==================== Points（闯关积分，2026-09-17） ====================
+
+  /points/me:
+    get:
+      tags: [Points]
+      summary: 积分概览（学生端）
+      description: >-
+        学生端积分概览（student JWT，studentId 取自 JWT 不接受入参，防 IDOR）。
+        新学生没有 student_points 行也返回全 0 + 劈柴（不是 404）。
+        totalEarned 是累计获得（段位依据，兑换只扣 balance）；todayEarned 是今日
+        kind='earn' 的 SUM（不含兑换负流水）。已满级（王者）时 nextLevel /
+        pointsToNextLevel 为 null、progressPercent=100。
+      operationId: getMyPoints
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 积分概览
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PointsOverview'
+
+  /points/me/ledger:
+    get:
+      tags: [Points]
+      summary: 我的流水分页（学生端）
+      description: >-
+        按 id 倒序（最新在前）。page 默认 1、pageSize 默认 20 且上限 100；
+        越界/非正整数 400（不静默钳制）。kind earn 正 / redeem 负；title 是展示
+        文案快照（家长改分值/档位名后历史流水不变）。dedupe_key 等内部字段不下发。
+      operationId: getMyPointsLedger
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: 页码（默认 1）
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: 每页条数（默认 20，上限 100）
+      responses:
+        '200':
+          description: 流水分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PointLedgerPage'
+        '400':
+          description: page / pageSize 非法（code=1001）
+
+  /points/me/rules:
+    get:
+      tags: [Points]
+      summary: 各任务档位与分值（档位即可选项数据源）
+      description: >-
+        学生端开练的「档位即可选项」数据源（前端不再硬编码题量）。**只回已启用
+        档位**——下架档恰好也是 start 端点不认的值，选了会被 400；家长端才看得到
+        全部档。dailyLimit == null 表示不限，此时 remainingToday 也为 null；
+        isActive 恒为 true（便于与家长端响应对照调试）。
+      operationId: getMyPointRules
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 按任务分组的规则
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupedPointRules'
+
+  /points/me/rewards:
+    get:
+      tags: [Points]
+      summary: 奖励清单（学生端只读）
+      description: >-
+        只含已上架奖励，逐项标注 affordable（余额够不够）/ levelOk（段位够不够）/
+        gap（还差多少分）。学生只能看，兑换在家长端。
+      operationId: getMyRewards
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 奖励清单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentRewards'
+
+  /parent/students/{studentId}/points:
+    get:
+      tags: [ParentPoints]
+      summary: 孩子积分概览（家长端）
+      description: 复用学生端同款 getOverview（段位/进度单一真源）。归属校验失败 1005/403。
+      operationId: getStudentPoints
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 学生 id
+      responses:
+        '200':
+          description: 积分概览
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PointsOverview'
+        '403':
+          description: 非本人名下学生（code=1005）
+
+  /parent/students/{studentId}/points/rules:
+    get:
+      tags: [ParentPoints]
+      summary: 孩子分值与档位规则（家长端）
+      description: >-
+        按任务分组的**全部**规则（含下架档位——家长要能看到并重新启用）。
+        响应形状同 /points/me/rules，但不滤掉 isActive=false 的档。
+      operationId: getStudentPointRules
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 按任务分组的全部规则
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupedPointRules'
+    put:
+      tags: [ParentPoints]
+      summary: 批量保存分值/上限/启用状态
+      description: >-
+        一个事务，要么全成要么全不成。三个可改字段全必填；points 须 0-9999、
+        dailyLimit 须 null 或 1-99（0 会让该档位永久不发分，拒绝；「不限」只能用
+        null 表达）。某条 (taskCode, tierKey) 查不到 → 3005 并回滚整批。
+      operationId: saveStudentPointRules
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavePointRulesRequest'
+      responses:
+        '200':
+          description: 保存成功（data 为 null）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommonResponse' }
+        '400':
+          description: 入参非法（code=1001）或档位不存在（code=3005）
+
+  /parent/students/{studentId}/points/ledger:
+    get:
+      tags: [ParentPoints]
+      summary: 孩子流水分页（家长端）
+      description: 与学生端同口径（默认 page=1、pageSize=20，上限 100，越界 400，共用 pagination.util.ts）。
+      operationId: getStudentPointsLedger
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: 流水分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PointLedgerPage'
+
+  /parent/students/{studentId}/reward-catalog:
+    get:
+      tags: [ParentPoints]
+      summary: 奖励清单（家长端，含已下架行）
+      description: >-
+        含已下架行——返回软删行是为了让前端整表 PUT 时原样带回 isActive，
+        否则「没带这个字段」会把已下架奖励静默重新上架。
+      operationId: getRewardCatalog
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 奖励清单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RewardCatalogItem'
+    put:
+      tags: [ParentPoints]
+      summary: 整表保存奖励清单
+      description: >-
+        无 id 新增、有 id 整行覆盖、payload 里消失的 id 软删（is_active=0），
+        一个事务；空数组是合法语义（整表清空）。返回保存后的完整清单。
+        isActive 必填（缺省会被服务层当 true，静默重新上架）。
+      operationId: saveRewardCatalog
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveRewardCatalogRequest'
+      responses:
+        '200':
+          description: 保存后的完整清单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RewardCatalogItem'
+        '400':
+          description: 入参非法（code=1001），整批回滚不留半套清单
+
+  /parent/students/{studentId}/points/redeem:
+    post:
+      tags: [ParentPoints]
+      summary: 兑换积分（换钱 / 换奖励）
+      description: >-
+        **201**（Nest @Post 默认）。方向是「积分 → 钱」：家长输入要花掉的积分数，
+        金额由服务端按 cashAmount = round(points / pointsPerYuan, 2) 推导
+        （pointsPerYuan 默认 20，即 20 积分 = 1 元、家长可配）。同事务写兑换单 +
+        负流水 + 条件扣余额；只动 balance、不动 totalEarned（段位只升不降）。
+        拒绝码：3001 余额不足（含事务内条件扣减的权威判定）/ 3002 未达段位门槛 /
+        3003 奖励已下架 / 3004 兑换已关闭；奖励不存在 1002。
+      operationId: redeemPoints
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedeemRequest'
+      responses:
+        '201':
+          description: 兑换成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RedeemResult'
+        '400':
+          description: 余额不足 3001 / 未达段位 3002 / 奖励已下架 3003 / 兑换已关闭 3004
+        '404':
+          description: 奖励不存在（code=1002）
+
+  /parent/students/{studentId}/redemptions:
+    get:
+      tags: [ParentPoints]
+      summary: 兑换记录分页
+      description: page 从 1 起，pageSize 由服务端取默认 20（查询类宽容回落，不抛错）。
+      operationId: listRedemptions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: 兑换记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RedemptionList'
+
+  /parent/redemptions/{id}:
+    patch:
+      tags: [ParentPoints]
+      summary: 修改兑换单状态（pending ⇄ fulfilled）
+      description: >-
+        只改状态/时间，**不动积分**——本期兑换不可撤销。路径里没有 studentId：
+        先按 id 反查该单的 student_id 再做归属校验；不存在 → 404 1002。
+      operationId: patchRedemption
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 兑换单 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchRedemptionRequest'
+      responses:
+        '200':
+          description: 状态已更新（data 为 null）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommonResponse' }
+        '404':
+          description: 兑换单不存在（code=1002）
+
+  /parent/students/{studentId}/points/settings:
+    get:
+      tags: [ParentPoints]
+      summary: 兑换设置（汇率 / 开关）
+      description: 读 controls（缺行先懒初始化补默认行）。与 points/rules 刻意分开：汇率和分值是两个关注点。
+      operationId: getPointsSettings
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 兑换设置
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PointsSettings'
+    put:
+      tags: [ParentPoints]
+      summary: 更新兑换设置（部分更新）
+      description: 至少给一个字段（空 patch 是假成功，400）；pointsPerYuan 须 1-9999 整数。返回更新后的全量。
+      operationId: savePointsSettings
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavePointsSettingsRequest'
+      responses:
+        '200':
+          description: 更新后的设置
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PointsSettings'
+        '400':
+          description: 一个字段都没给（code=1001）
+
+  /training/sessions/{id}/complete:
+    post:
+      tags: [Training]
+      summary: 训练会话完成发分（乙类整批发分）
+      description: >-
+        **201**。只 math_targeted / en_vocabulary 用（档位打包价，整轮结束才发一次）。
+        分值取会话里记录的档位、不取前端入参（乙类唯一的防伪造点）。幂等：重复调用回
+        reason='already_completed' + pointsAwarded=0，不报错。发分失败可恢复：
+        award 抛错（DB 故障）时不把会话置 completed，回 balance/totalEarned=null +
+        reason='award_failed'（真实余额不是 0，回 0 会污染前端快照），会话留在
+        in_progress，下次 complete 用同一幂等键 tsess/vsess:<sessionId> 补发且只补一次。
+      operationId: completeTrainingSession
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 训练会话 id
+      responses:
+        '201':
+          description: 发分结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CompleteSessionResult'
+        '404':
+          description: 训练会话不存在或非本人（code=1002）
 
 components:
   securitySchemes:
@@ -6070,6 +6585,18 @@ components:
           type: integer
           nullable: true
           description: 答错时写入 main_error_books 的 id；答对或 AI 判定失败时不返回
+        pointsAwarded:
+          type: integer
+          description: >-
+            本次**实际入账**的积分（甲类逐目标发分，error_fix，2026-09-17）。
+            0 = 本次没加：答错 / source='exam'（考试补判路径不参与发分）/ 未清掉任何
+            错题（not_cleared）/ 无题库身份（questionId=null）/ 幂等命中（duplicate，
+            本次未入账）/ daily_limit / no_rule / tier_inactive / 发分失败。
+            前端 `> 0` 弹「+N 分」轻反馈。
+        awardReason:
+          allOf:
+            - $ref: '#/components/schemas/PointsAwardReason'
+          description: 未发分原因；无值=静默（duplicate 刻意不在枚举内）
 
     HintRequest:
       type: object
@@ -6479,7 +7006,17 @@ components:
         feedbackPending:
           type: boolean
           description: true=判错且错因待补（前端应另调 dictation/feedback）；答对恒 false
-      required: [passageId, isCorrect, fields, bodyDiff, reference, feedback, feedbackPending]
+        pointsAwarded:
+          type: integer
+          description: >-
+            本次**实际入账**的积分（甲类 cn_dictation，按该篇 genre 取档：诗 2 / 文言文 5）。
+            0 = 本次没加：同日重判（幂等命中）/ 体裁未标定（genre_unset）/ 达上限 /
+            家长停用该档 / 发分失败。前端 `> 0` 弹「+N 分」轻反馈。
+        awardReason:
+          allOf:
+            - $ref: '#/components/schemas/PointsAwardReason'
+          description: 未发分原因；无值=静默（duplicate 刻意不在枚举内）
+      required: [passageId, isCorrect, fields, bodyDiff, reference, feedback, feedbackPending, pointsAwarded]
 
     DictationFeedbackResult:
       type: object
@@ -6638,7 +7175,17 @@ components:
           type: string
           nullable: true
           description: 整篇译文。**仅当被判的是最后一句时非 null**（提前下发等于泄题）
-      required: [passageId, sentenceIndex, allCorrect, terms, sentence, fullTranslation]
+        pointsAwarded:
+          type: integer
+          description: >-
+            本次**实际入账**的积分（甲类 cn_interpretation，按该篇 genre 取档：
+            诗 2 / 文言文 5）。**整篇最后一句判完才可能非 0**；中间句一律 0
+            （含未答完 / 体裁未标定 / 同日重判 / 达上限 / 停用 / 发分失败）。
+        awardReason:
+          allOf:
+            - $ref: '#/components/schemas/PointsAwardReason'
+          description: 未发分原因；无值=静默（duplicate 刻意不在枚举内）
+      required: [passageId, sentenceIndex, allCorrect, terms, sentence, fullTranslation, pointsAwarded]
 
     InterpretationTermResult:
       type: object
@@ -6796,7 +7343,18 @@ components:
           $ref: '#/components/schemas/MeaningPartResult'
         emotion:
           $ref: '#/components/schemas/MeaningPartResult'
-      required: [passageId, sentenceIndex, allCorrect, terms, meaning, emotion]
+        pointsAwarded:
+          type: integer
+          description: >-
+            本次**实际入账**的积分（甲类 cn_meaning，一篇一次）。只有该篇**最后一个
+            可作答句**判完时才可能非 0；其余句恒 0。「整篇答完」= 最大的 i 使
+            meanings[i] != null——**不是** sentences.length - 1（末句可能没有标准含义、
+            根本不出题，按末句下标判定会让这些篇目永远拿不到分）。
+        awardReason:
+          allOf:
+            - $ref: '#/components/schemas/PointsAwardReason'
+          description: 未发分原因；无值=静默（duplicate 刻意不在枚举内）
+      required: [passageId, sentenceIndex, allCorrect, terms, meaning, emotion, pointsAwarded]
 
     MeaningTermResult:
       type: object
@@ -7242,6 +7800,21 @@ components:
           description: 主观题数（is_correct NULL 计数，self_assess 模式不判对错；遗留 ai 模式已判主观行按客观错题计）
       required: [correctCount, totalCount, accuracy, subjectiveCount]
 
+    ExamSubmitResult:
+      description: >-
+        交卷响应（仅在 ExamSummary 之上多一个 `points`）。**仅 submit 响应带 `points`**：
+        finalizeSession 里发分在交卷路径上，`getResults` 只读已交卷的汇总、不补发分，
+        故结果页（ExamResults）内嵌的汇总里该字段缺省（JSON 里无此键，不是 0）。
+        发分故障时同样缺省。
+      allOf:
+        - $ref: '#/components/schemas/ExamSummary'
+        - type: object
+          properties:
+            points:
+              allOf:
+                - $ref: '#/components/schemas/PointsAwardDto'
+              description: 交卷发分结果（math_paper，丙类埋点，2026-09-17）
+
     ExamResultItem:
       type: object
       description: 结果页逐题条目（JOIN questions 带解析）
@@ -7364,3 +7937,432 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Message'
+
+    # ==================== 闯关积分（Points / ParentPoints，2026-09-17） ====================
+
+    PointsLevelInfo:
+      type: object
+      description: 段位信息。阈值常量在 modules/points/levels.ts，不落库、前端不重复定义。
+      properties:
+        code:
+          type: string
+          description: 段位 code（pichai / zhutie / … / wangzhe）
+        name:
+          type: string
+          description: 段位中文名（劈柴 / 铸铁 / … / 王者）
+        index:
+          type: integer
+          description: 段位序号（0 起）
+        threshold:
+          type: integer
+          description: 该段位的累计积分门槛
+
+    PointsAwardReason:
+      type: string
+      enum: [daily_limit, no_rule, tier_inactive, genre_unset, not_cleared]
+      description: >-
+        未发分原因（无值=静默）。duplicate 刻意不在枚举内：幂等命中时本次并未入账，
+        PointsService.award 虽会带回首次分值，但那是历史账——报出去会让前端弹假「+N 分」。
+
+    PointsAwardDto:
+      type: object
+      description: 埋点响应里回带的发分结果（wire 形状；levelUp 是段位 code 而不是对象）。
+      properties:
+        awarded:
+          type: integer
+          description: 本次实际入账分（0 = 没发）
+        balance:
+          type: integer
+          description: 发分后的可用余额
+        levelUp:
+          type: object
+          nullable: true
+          description: 本次是否跨档；未跨档为 null
+          properties:
+            from:
+              type: string
+            to:
+              type: string
+
+    PointsOverview:
+      type: object
+      properties:
+        balance:
+          type: integer
+          description: 可用余额（earn 正 + redeem 负）
+        totalEarned:
+          type: integer
+          description: 累计获得（段位依据；兑换只扣 balance，不影响它）
+        todayEarned:
+          type: integer
+          description: 今日 kind='earn' 的 SUM
+        level:
+          $ref: '#/components/schemas/PointsLevelInfo'
+        nextLevel:
+          allOf:
+            - $ref: '#/components/schemas/PointsLevelInfo'
+          nullable: true
+          description: 已满级（王者）时为 null
+        pointsToNextLevel:
+          type: integer
+          nullable: true
+          description: 距下一档还差多少分；已满级时为 null
+        progressPercent:
+          type: integer
+          description: 当前档内进度 0-100 整数；满级为 100
+
+    PointLedgerEntry:
+      type: object
+      description: 流水一条（只暴露展示字段，dedupe_key / task_code / student_id 不下发）。
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum: [earn, redeem]
+        title:
+          type: string
+          description: 展示文案快照（家长之后改分值/档位名，历史流水不变）
+        points:
+          type: integer
+          description: earn 正数 / redeem 负数
+        createdAt:
+          type: string
+          format: date-time
+        refType:
+          type: string
+          nullable: true
+          description: 来源类型（lesson / exam_session / training_session / passage / question）
+
+    PointLedgerPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PointLedgerEntry'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    PointRuleTierView:
+      type: object
+      properties:
+        tierKey:
+          type: string
+        tierLabel:
+          type: string
+        points:
+          type: integer
+        dailyLimit:
+          type: integer
+          nullable: true
+          description: null = 不限
+        isActive:
+          type: boolean
+        completedToday:
+          type: integer
+          nullable: true
+          description: 今日已发分条数；未计算时为 null
+        remainingToday:
+          type: integer
+          nullable: true
+          description: 今日还剩几次；dailyLimit == null 或未计算时为 null
+
+    PointRuleGroup:
+      type: object
+      properties:
+        taskCode:
+          type: string
+        taskName:
+          type: string
+        tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PointRuleTierView'
+
+    GroupedPointRules:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/PointRuleGroup'
+
+    SavePointRuleItem:
+      type: object
+      required: [taskCode, tierKey, points, dailyLimit, isActive]
+      properties:
+        taskCode:
+          type: string
+          maxLength: 40
+        tierKey:
+          type: string
+          maxLength: 20
+        points:
+          type: integer
+          minimum: 0
+          maximum: 9999
+        dailyLimit:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 99
+          description: null = 不限；0 会让该档位永久不发分，被拒绝
+        isActive:
+          type: boolean
+
+    SavePointRulesRequest:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SavePointRuleItem'
+
+    StudentRewardView:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        pointsCost:
+          type: integer
+        minLevelCode:
+          type: string
+          nullable: true
+        affordable:
+          type: boolean
+          description: 余额是否够
+        levelOk:
+          type: boolean
+          description: 段位是否够（无门槛恒 true）
+        gap:
+          type: integer
+          description: max(0, pointsCost - balance)，还差多少分
+
+    StudentRewards:
+      type: object
+      properties:
+        balance:
+          type: integer
+        level:
+          $ref: '#/components/schemas/PointsLevelInfo'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudentRewardView'
+
+    RewardCatalogItem:
+      type: object
+      description: 奖励清单一行（家长端返回含已下架行，用于整表 PUT 时原样带回 isActive）。
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        pointsCost:
+          type: integer
+        minLevelCode:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        sortOrder:
+          type: integer
+
+    SaveRewardCatalogItem:
+      type: object
+      required: [name, pointsCost, isActive]
+      properties:
+        id:
+          type: integer
+          description: 有 id = 更新（整行覆盖）；无 id = 新增
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+          maxLength: 300
+        pointsCost:
+          type: integer
+          minimum: 1
+          maximum: 999999
+        minLevelCode:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+          description: 必填——缺省会被服务层当 true，静默重新上架已下架奖励
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 9999
+
+    SaveRewardCatalogRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: 空数组是合法语义（整表清空 / 全部软删）
+          items:
+            $ref: '#/components/schemas/SaveRewardCatalogItem'
+
+    RedeemRequest:
+      oneOf:
+        - type: object
+          required: [type, points]
+          properties:
+            type:
+              type: string
+              enum: [cash]
+            points:
+              type: integer
+              minimum: 1
+              maximum: 999999
+              description: 要花掉的积分数（金额由服务端按汇率推导）
+        - type: object
+          required: [type, catalogId]
+          properties:
+            type:
+              type: string
+              enum: [reward]
+            catalogId:
+              type: integer
+              minimum: 1
+
+    RedemptionView:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [cash, reward]
+        pointsSpent:
+          type: integer
+        cashAmount:
+          type: number
+          nullable: true
+          description: type='cash' 时的金额快照（两位小数）
+        rewardCatalogId:
+          type: integer
+          nullable: true
+        rewardName:
+          type: string
+          nullable: true
+          description: 快照（奖励改名/下架不影响历史）
+        status:
+          type: string
+          enum: [pending, fulfilled]
+        note:
+          type: string
+          nullable: true
+        ledgerId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        fulfilledAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RedeemResult:
+      type: object
+      properties:
+        redemption:
+          $ref: '#/components/schemas/RedemptionView'
+        balance:
+          type: integer
+          description: 兑换后的实时余额
+        totalEarned:
+          type: integer
+          description: 必须与兑换前一致（兑换不碰累计获得 → 段位不降）
+        level:
+          $ref: '#/components/schemas/PointsLevelInfo'
+
+    RedemptionList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RedemptionView'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    PatchRedemptionRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, fulfilled]
+          description: 只改状态/时间，不动积分（本期兑换不可撤销）
+
+    PointsSettings:
+      type: object
+      properties:
+        pointsPerYuan:
+          type: integer
+          description: 多少积分换 1 元（默认 20）
+        rewardRedemptionEnabled:
+          type: boolean
+          description: 兑换总开关（false 时兑换端点直接 3004）
+
+    SavePointsSettingsRequest:
+      type: object
+      description: 至少给一个字段（空 patch 400）
+      properties:
+        pointsPerYuan:
+          type: integer
+          minimum: 1
+          maximum: 9999
+        rewardRedemptionEnabled:
+          type: boolean
+
+    CompleteSessionResult:
+      type: object
+      properties:
+        pointsAwarded:
+          type: integer
+          description: 本次实际入账分（0 = 没发）
+        balance:
+          type: integer
+          nullable: true
+          description: 发分失败（award_failed）时为 null——真实余额不是 0，回 0 会污染前端快照
+        totalEarned:
+          type: integer
+          nullable: true
+          description: 同上
+        levelUp:
+          type: object
+          nullable: true
+          properties:
+            from:
+              type: string
+            to:
+              type: string
+        reason:
+          type: string
+          enum: [daily_limit, already_completed, no_rule, tier_inactive, award_failed]

@@ -91,6 +91,13 @@
 | 1008 | 订单已支付或已取消 |
 | 1009 | 支付失败（第三方平台返回错误） |
 | 2001 | 学习无关内容（AI 阻断） |
+| 3001 | 积分余额不足（兑换被拒） |
+| 3002 | 未达该奖励的段位门槛 |
+| 3003 | 奖励已下架 |
+| 3004 | 兑换已关闭（`controls.reward_redemption_enabled = 0`） |
+| 3005 | 档位不存在（家长批量保存分值时某个 `(taskCode, tierKey)` 查不到） |
+
+> **2026-09-17 实现注（积分错误码语义）**：`3001`–`3005` 由 `points` 模块抛出（§4.20 / §4.21）。凡「不满足条件」的拒绝都发生在事务之前，失败时**零写入**（不会留下半张兑换单/半批规则）；入参格式错误仍沿用 `1001`、资源不存在沿用 `1002`。
 
 > **2026-08-14 实现注（auth/parent 端点现行语义，与上表历史规划并存）**：1003 = 未登录/token 失效/用户名或密码错误/账号已停用（auth 与角色守卫）；1004 = 该手机号已注册/用户名已存在；1005 = 无权访问该资源（角色守卫）/无权操作该学生（归属校验）；1008 = 请求过于频繁（登录限流 10 次/分/IP）。
 
@@ -131,6 +138,8 @@
 | Practice | `/api/practice` | 课堂练习答题判对错（practice 卡片） | Practice Service |
 | Training | `/api/training` | 错题练习与专项训练（辅线学习闭环：错题筛选/重做判题/提示/专项抽题） | Training Service |
 | Exams | `/api/exams` | 真题试卷考试（选卷/开考/逐题作答/交卷/结果，过期自动收卷） | Exams Service |
+| Points | `/api/points` | 闯关积分：学生端查询（概览/流水/档位/奖励），只读 | Points Service |
+| ParentPoints | `/api/parent/students/{studentId}/points*` | 家长端积分：分值规则、兑换、奖励清单、汇率设置 | Points Service |
 
 ---
 
@@ -407,6 +416,7 @@
 | GET | `/api/training/questions/{questionId}/explanation-wait` | 单题刷新等待解析（结果页「解析生成中」的刷新入口，前端 120s 倒计时）。DB 已有直返；在途生成等待；无在途且无解析（曾失败）**重新触发**生成再等待（上限 120s）。题目不存在/停用返回 null（不触发生成）；超时/失败返回 null 并写 `admin_notifications`（type=explanation_failed，同题未读去重）通知管理员人工补题解。响应：`{explanation: string\|null}`。 | MVP |
 | GET | `/api/training/knowledge-points?subjectId={subjectId}` | 专项练习知识点平铺列表（`subjectId` 必填 integer；树形组装放前端，按 `parentKpId` 自行组树）。响应：`[{id, name, parentKpId(nullable), gradeBand}]`。 | MVP |
 | POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。**选题基于 JWT user.sub（studentId）排除该生已标记的「不再展示」题**（LEFT JOIN `student_hidden_questions` ... IS NULL，请求体不变）；题池排除后为空时返回 `{ questions: [] }`。 | MVP |
+| POST | `/api/training/sessions/{id}/complete` | 训练会话完成发分（乙类整批发分，只 `math_targeted` / `en_vocabulary` 用，2026-09-17 新增）。**201**。分值取**会话里记录的档位**（不取前端入参——这是乙类唯一的防伪造点），所以整轮结束才发一次。**幂等**：重复调用（前端重试）回 `reason='already_completed'` + `pointsAwarded: 0`，不报错。**发分失败可恢复**：award 抛错（DB 故障）时**不把会话置 completed**，回 `balance: null` / `totalEarned: null` + `reason='award_failed'`（真实余额不是 0，回 0 会污染前端快照），会话留在 `in_progress`，下次 `complete` 用同一幂等键 `tsess/vsess:<sessionId>` 补发且只补发一次。会话不存在/非本人 404（`code=1002`）。响应：`{pointsAwarded, balance, totalEarned, levelUp: {from, to}\|null, reason?}`；`reason` ∈ `daily_limit \| already_completed \| no_rule \| tier_inactive \| award_failed`。 | MVP |
 | GET | `/api/training/dictation/passages` | 语文默写篇目清单（配置页用）。仅返回 `chinese_passages` 中 `verified=1` **且 `memorize_required=1`** 且 `is_active=1` 的篇目（三道闸门：`verified` 是内容已校验、`memorize_required` 是教学上要求背诵、`is_active` 是停用开关），按 `sort_order, id` 排序。**只出篇名 + 册次**——作者/朝代/正文是学生要作答的三个判题字段，一律不下发（防答案泄露）。响应：`{passages: [{passageId, workTitle, semester}]}`。 | MVP |
 | POST | `/api/training/dictation/start` | 语文默写开练。请求体：`{semester, passageIds, count}`；`count` 限 1-20 整数（越界/非整数 400）；`semester` 限 `上册\|下册\|null`（`null`=全部册次，非法 400）；`passageIds` 为正整数数组或 `null`——非空时按指定篇目出题（**忽略 `semester`**，仅保留抽题池内篇目），否则按册次随机抽题。**两条路径都只从抽题池取题**（`verified=1` 且 `memorize_required=1` 且 `is_active=1`，三道闸门）；「全部册次」随机抽时按篇名去重（九上/九下有 9 篇重复收录，跨册取 `MIN(id)`）。**题面由篇名服务端生成**（`请默写《X》`，不落库）。响应：`{questions: [{passageId, prompt, workTitle, semester}]}`——**白名单序列化**，`author`/`dynasty`/正文一律剥离（防答案泄露，与 `targeted/start` 同规矩）。题池为空返回 `{questions: []}`。 | MVP |
 | POST | `/api/training/dictation/judge` | 语文默写判题（**纯程序化判对错，不调用 LLM，不写任何学生状态**）。请求体：`{passageId, author, dynasty, body}`；`passageId` 须正整数（非法 400），篇目不存在 404。判对错口径：三字段各自 `normalizeChineseAnswer`（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后全等，**三项全对才 `isCorrect=true`**（故学生正文带不带标点、全半角、空格不影响判定）；正文不等时由 `diffChineseInOriginalText`（LCS 逐字差异 + 原文标点回投）定位错处，相邻「漏写+多写」合并为一个 `wrong`（写错字）、连续同类项合并成段——**判对错仍忽略标点，但 `bodyDiff` 各段文本回投原文标点**（学生要能读成整句，见 §6.20）。**不入错题本、不清零**（古诗文专项是独立子系统，PRD §6.3 / §7.4 例外；`reference` 判题响应即下发）。**错因与判题解耦**：本端点不等 LLM（实测 ~25ms），答错时回 `feedbackPending=true`，错因由 `POST /training/dictation/feedback` 另取。响应：`{passageId, isCorrect, fields: {author: {match}, dynasty: {match}, body: {match}}, bodyDiff: [{type:'equal'\|'wrong'\|'missing'\|'extra', ...}], reference: {author, dynasty, body}, feedback(恒 null), feedbackPending(bool)}`。 | MVP |
@@ -419,7 +429,7 @@
 | POST | `/api/training/meaning/judge` | 语文含义判题——**逐句**判（2026-09-17 新增）。**返回 201**。请求体：`{passageId, sentenceIndex, terms: [{term, answer}], meaning, emotion}`；`passageId` 须正整数（非法 400）、篇目不存在 404；`sentenceIndex` 须非负整数（非法 400）、越界 400、**该句无标准含义 400**（`answerable:false` 的句子本就不该被提交）；`meaning`/`emotion` 非字符串降级 `''`；`terms` 非数组视作 `[]`，元素 `term` 非字符串丢弃该条、`answer` 非字符串降级 `''`。**流程是两段 + 失败兜底**（照解释专项的三段式但**去掉归一化短路**）：① **空答案短路**（本专项唯一的程序判断）→ `correct:false, method:'unanswered'`；② 剩余待判项**打包一次**喂 `chinese_meaning_judge` 场景（primary=`local`，fallback=`deepseek-flash`，本地端点下发 `chat_template_kwargs:{enable_thinking:false}` 关 thinking）。模型漏项 / 整次调用失败 → 那些项 `correct:null, method:'undetermined'`（**不抛错、已判项不清空**）。**`method` 只有 `ai\|unanswered\|undetermined` 三值，刻意没有 `exact`**——含义与情感是理解性作答，学生答得跟标准答案逐字相同也不能靠字符串相等判「对」，一律过 LLM（有用例钉着，勿「顺手补上」）。**不写任何学生状态**（不入错题本、不清零、无隐藏题/提示缓存/自评）。响应：`{passageId, sentenceIndex, allCorrect, terms: [{term, correct(bool\|null), method, standard, comment}], meaning: {correct, method, standard, comment}, emotion: {correct, method, standard, comment}}`；`standard`（标准含义/标准情感）**只在判题响应里下发**；`terms` 顺序与「该句应有的字词」一致，学生多传的 `term` 忽略、同名取最后一条。 | MVP |
 | POST | `/api/training/hidden/mark` | 标记某题不再展示（幂等：重复标记不报错）。请求体：`{questionId, subjectId}`（均 integer≥1）。**全局排除**——`student_id + question_id` 维度，不分知识点；标记后该题在 `targeted/start` 选题时被 LEFT JOIN ... IS NULL 排除。响应：`{code:0,message:'ok',data:null}`（void op 包装）。 | MVP |
 | GET | `/api/training/hidden?subjectId={subjectId}` | 不再展示清单（按标记时间倒序）。`subjectId` 必填 integer≥1。响应：`[{questionId, questionText(80字截断), type, kpName(nullable,首个 primary kp 名), markedAt}]`。 | MVP |
-| DELETE | `/api/training/hidden/:questionId` | 撤销单条标记（幂等：不存在/未标记不报错）。路径参数 `questionId` integer≥1。响应：`{code:0,message:'ok',data:null}`。 | MVP |
+| DELETE | `/api/training/hidden/{questionId}` | 撤销单条标记（幂等：不存在/未标记不报错）。路径参数 `questionId` integer≥1。响应：`{code:0,message:'ok',data:null}`。 | MVP |
 | DELETE | `/api/training/hidden` | 全部重置（清空该生所有不再展示标记）。无请求体/参数（studentId 取自 JWT）。响应：`{code:0,message:'ok',data:null}`。 | MVP |
 | GET | `/api/training/vocabulary/options` | 英语**背单词**配置页数据（2026-09-16 新增）。`pools` 是三档词库范围及词数：`junior`=「仅初中」（含小学二级词，即义务教育课标 2022 版 1600 词口径）、`senior`=「仅高中」（= 高中课标 3000 词表中不在 1600 词表里的部分）、`all`=两者之和；存储层其实是四层 `primary`/`junior`/`senior_required`/`senior_elective`，页面只暴露这三档。`counts` 是四个筛选项各自可用的词数（`notLearned`=总数-已背过、含从无进度行的词；`myWrong`=该学生错过的词；`commonWrong`=全平台答错过即 `error_count>0` 的词；`extended`=有熟词僻义的词）。`todayAnswered` 按**服务器本地时区**当日 00:00 起算，「见过就算」（答对/答错/不认识/判题失败都计入）。响应：`{pools: [{key, label, count}], todayAnswered, counts: {notLearned, myWrong, commonWrong, extended}}`。 | MVP |
 | POST | `/api/training/vocabulary/start` | 背单词开练（2026-09-16 新增）。请求体：`{levelPool, count, order, letter, direction, onlyNotLearned, onlyMyWrong, onlyCommonWrong, onlyExtendedSense}`；`count` 限 **10-20** 整数（非法 400）；`levelPool` ∈ `junior\|senior\|all`；`order` ∈ `random\|alpha\|alpha_desc\|letter`；`direction` ∈ `en2cn\|cn2en\|ph2en\|random`；**`order=letter` 时必须给单个 a-z 字母的 `letter`，非 letter 模式给了 `letter` 则 400**（静默忽略会让学生以为筛选生效了）。`ph2en` = **看音标写单词**（题面是音标、答案是英文单词）；词没有可用音标时**退化成英→中而不是把这个词丢掉**（静默丢词会让学生以为筛选坏了），`/`、`//` 这类空音标算作没有。服务端把 `direction` 落定成实际方向（`random` 逐题在**本词出得了的方向**里等概率掷，否则会出现「选了随机却总出英→中」）；**勾 `onlyExtendedSense` 时方向强制 `en2cn`**——三档判题口径（含「答成常见义」那一档）建立在「题面给单词 + 语境、学生答中文」之上，中→英下这一档失去意义；**熟词僻义题恒为 `en2cn`**（`ph2en` 只有音标，学生既看不到单词也看不到搭配，而「在搭配里认出那个不常见的意思」正是考点）。**普通模式下也会抽到熟词僻义题**（在该词候选里等概率抽），勾选的作用是「只留」僻义；一个词只出一道题，会话长度 == `count`。**防泄漏**：凡是**答案等于英文单词**的题（`cn2en` 与 `ph2en`）响应里**不含** `word`/`phonetic`/`context`/`hasFamily`——词根族树里必然含单词本身；`ph2en` 的音标只出现在 `prompt` 一处（`phonetic` 为 null）。响应：`{questions: [{wordId, senseIndex, promptKind, prompt, phonetic, context, isExtendedSense, hasFamily}], poolSize}`；题池为空返回 `{questions: [], poolSize: 0}`。 | MVP |
@@ -440,6 +450,45 @@
 | POST | `/api/exams/sessions/{id}/answers` | 单题提交（同步判题）。请求体：`{questionId, answerText}`；题目不在该卷题单 400；已交卷再提交 409（`code=4101`）；超 deadline **先自动收卷再 409**（`code=4102`，未作答按错计一并落库）。判题走 JudgeCore（客观题 exact 即返，AI 判定最长 90s per-scene timeout）；**先落「在途行」再判题**（`answerText` + `is_correct` NULL）——判题在途窗口内倒计时归零触发自动收卷时按「在途补判」而非「未作答」处理，判题失败时在途行已落库（交卷时统一补判）、错误透传前端重试。响应（**白名单，不回传对错——考试防作弊设计**）：`{saved: true}`。 | MVP |
 | POST | `/api/exams/sessions/{id}/submit` | 交卷（**幂等**：已 submitted 直接重算汇总返回）。收卷三分支：未作答 -> 直接判错入错题本（`method='unanswered'`，无答案可判不走判题）；在途（有作答、无判题结果）-> JudgeCore 补判，失败按错计（`method='failed'`）仍入错题本；已判题 -> 跳过。响应：`{correctCount, totalCount, accuracy}`（`accuracy` 为百分比一位小数，如 33.3）。 | MVP |
 | GET | `/api/exams/sessions/{id}/results` | 结果页：仅 `submitted` 会话可查（`in_progress` 409，`code=4103`）。响应：`{correctCount, totalCount, accuracy, subjectiveCount, items: [{questionId, questionNo, text, type, options, answerText(nullable), isCorrect(0\|1\|null), answer(nullable, 参考答案——自评对照展示), needsSelfAssessment(boolean, 主观题待自评), selfAssessment(correct\|incorrect\|null, 该生最近一次自评留痕), analysis(nullable), explanation(nullable)}]}`（items JOIN questions 带解析）。**主观题口径（self_assess 模式）**：主观题 `is_correct=NULL` 不计对错——`correctCount`/`accuracy` 只算客观题（accuracy 分母为客观题数），`subjectiveCount` 单列（结果页展示「客观题 X/Y · 主观题 N 题」）；`selfAssessment` 从 `question_self_assessments` 恢复该生最近一次自评（刷新/重进不丢自评态）。跨模式口径：`subjectiveCount` 按 `is_correct NULL` 推断，遗留 `ai` 模式已判主观行（`is_correct` 非 NULL）计为客观错题。 | MVP |
+
+### 4.20 Points — `/api/points`（学生端积分，只读）
+
+闯关积分的**学生端查询**（2026-09-17 新增）。全部端点 student JWT（`@Roles('student')`，家长/管理员 token 调用返回 403/1005）。四个端点**全部只读**：学生不能给自己发分、也不能兑换（兑换是家长端操作，§4.21）。`studentId` 一律取自 JWT，端点**不接受任何「查哪个学生」的入参**（防 IDOR）。分页 `page` 默认 1、`pageSize` 默认 20 且上限 100，越界/非正整数 **400**（不静默钳制）。
+
+> **段位的单一真源**：段位阈值常量在 `modules/points/levels.ts`，**不落库、前端不重复定义**——学生端与家长端都从这些接口拿。详见 PRD §7.13。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| GET | `/api/points/me` | 积分概览。新学生**没有 `student_points` 行也返回全 0 + 劈柴，不 404**。响应：`{balance, totalEarned, todayEarned, level: {code, name, index, threshold}, nextLevel: {…}\|null, pointsToNextLevel: number\|null, progressPercent}`。`totalEarned` 是累计**获得**（段位依据，兑换只扣 `balance`、不影响它）；`todayEarned` 是今日 `kind='earn'` 的 SUM（不含兑换负流水）。已满级（王者）时 `nextLevel` / `pointsToNextLevel` 为 `null`，`progressPercent` 为 100。 | MVP |
+| GET | `/api/points/me/ledger?page&pageSize` | 流水分页，按 id 倒序（最新在前）。响应：`{items: [{id, kind, title, points, createdAt, refType}], total, page, pageSize}`。`kind` ∈ `earn\|redeem`；`points` earn 正 / redeem 负；`title` 是**展示文案快照**（家长之后改分值/档位名，历史流水不变）；`refType` 是来源类型（`lesson` / `exam_session` / `training_session` / `passage` / `question`）。 | MVP |
+| GET | `/api/points/me/rules` | 各任务的档位与分值——**「档位即可选项」的数据源**（前端因此不再硬编码题量常量，PRD §7.13）。**只回已启用档位**（下架档恰好也是开练端点不认的值，选了会被 400；家长端才看得到全部档）。响应：`{tasks: [{taskCode, taskName, tiers: [{tierKey, tierLabel, points, dailyLimit, completedToday, remainingToday, isActive}]}]}`；`dailyLimit == null` 表示不限，此时 `remainingToday` 也为 `null`；`isActive` 恒为 `true`（便于与家长端响应对照调试）。 | MVP |
+| GET | `/api/points/me/rewards` | 奖励清单（**只含已上架**），逐项标注 `affordable`（余额够不够）/ `levelOk`（段位够不够）/ `gap`（还差多少分）。学生**只能看**，兑换在家长端。响应：`{balance, level, items: [{id, name, description, pointsCost, minLevelCode, affordable, levelOk, gap}]}`。 | MVP |
+
+> **`dedupe_key` 不下发**：`dedupe_key` / `task_code` / `student_id` 等内部字段一律不出现在流水响应里（`PointLedgerEntry` 是显式挑字段的视图，不是仓储行透传）。
+
+### 4.21 ParentPoints — `/api/parent/students/{studentId}/points*`（家长端积分，11 个端点）
+
+家长端分值配置与兑换（2026-09-17 新增）。全部端点 parent JWT（`@Roles('parent')`；与 `ParentController` **同前缀** `api/parent`，Nest 允许同前缀多 controller）。**每个 handler 第一件事**是归属校验 `requireOwnedStudent(parentId, studentId)`——这是唯一防线，不做「先查数据再判归属」（那样会泄漏「这个 id 存在」）。controller 只做「校验 + 转发」：段位、余额、汇率、档位合法性全在学生端同款的三个 service 里，**不在这里重算**。
+
+> ⚠️ 路径里的 `{studentId}` 是**学生 id**（`/api/parent/redemptions/{id}` 那条没有学生 id，见下）。`points/settings` 与 `points/rules` **刻意分开**：汇率和分值是两个关注点（spec §7.3）。`POST` 按 Nest 默认返回 **201**。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| GET | `/api/parent/students/{studentId}/points` | 概览，复用学生端同款 `getOverview`（段位/进度单一真源），响应同 §4.20 第一行。 | MVP |
+| GET | `/api/parent/students/{studentId}/points/rules` | 按任务分组的**全部**规则（含下架档位——家长要能看到并重新启用）。响应同 §4.20 的 `me/rules`，但**不滤掉 `isActive=false` 的档**。 | MVP |
+| PUT | `/api/parent/students/{studentId}/points/rules` | 批量保存分值与上限：`{rules: [{taskCode, tierKey, points, dailyLimit, isActive}]}`，**一个事务**要么全成要么全不成。三个可改字段**全必填**；`points` 须 `0-9999` 整数、`dailyLimit` 须 `null` 或 `1-99`（`0` 会让该档位永久不发分，拒绝；「不限」只能用 `null` 表达）。某条 `(taskCode, tierKey)` 查不到 → `3005` **并回滚整批**。响应 `null`。 | MVP |
+| GET | `/api/parent/students/{studentId}/points/ledger?page&pageSize` | 流水分页，与学生端同口径（默认/上限/越界 400 共用一份 `pagination.util.ts`）。 | MVP |
+| GET | `/api/parent/students/{studentId}/reward-catalog` | 奖励清单，**含已下架行**（返回软删行是为了让前端整表 PUT 时原样带回 `isActive`——否则「没带这个字段」会把已下架奖励静默重新上架）。响应：`[{id, name, description, pointsCost, minLevelCode, isActive, sortOrder}]`。 | MVP |
+| PUT | `/api/parent/students/{studentId}/reward-catalog` | 整表批量保存：无 `id` 新增、有 `id` 整行覆盖、payload 里消失的 id **软删**（`is_active=0`），一个事务；空数组是合法语义（整表清空）。响应：保存后的完整清单 `[{id, name, description, pointsCost, minLevelCode, isActive, sortOrder}]`。 | MVP |
+| POST | `/api/parent/students/{studentId}/points/redeem` | **201**。兑换（换钱 / 换指定奖励）：body `{type:'cash', points}` 或 `{type:'reward', catalogId}`。**方向是「积分 → 钱」**：家长输入要花掉的积分数，金额由服务端按 `cashAmount = round(points / pointsPerYuan, 2)` 推导（`pointsPerYuan` 默认 20，即 20 积分 = 1 元、家长可配）。同事务写兑换单 + 负流水 + 条件扣余额。响应：`{redemption, balance, totalEarned, level}`（`totalEarned` 必须与兑换前一致——段位不降）。拒绝码：`3001` 余额不足（含事务内条件扣减的权威判定）/ `3002` 未达段位门槛 / `3003` 奖励已下架 / `3004` 兑换已关闭；奖励不存在 `1002`。 | MVP |
+| GET | `/api/parent/students/{studentId}/redemptions?page` | 兑换记录分页（`page` 从 1 起，`pageSize` 由服务端取默认 20）。响应：`{items: [{id, type, pointsSpent, cashAmount, rewardCatalogId, rewardName, status, note, ledgerId, createdAt, fulfilledAt}], total, page, pageSize}`。 | MVP |
+| PATCH | `/api/parent/redemptions/{id}` | 只改兑换单状态（`pending` ⇄ `fulfilled`），**不动积分**——本期兑换**不可撤销**。**路径里没有 `studentId`**：先按 `id` 反查出该单的 `student_id` 再做归属校验；不存在 → 404 `1002`。响应 `null`。 | MVP |
+| GET | `/api/parent/students/{studentId}/points/settings` | 兑换设置（读 `controls`，缺行先懒初始化补默认行）。响应：`{pointsPerYuan, rewardRedemptionEnabled}`。 | MVP |
+| PUT | `/api/parent/students/{studentId}/points/settings` | 部分更新兑换设置，**至少给一个字段**（空 patch 是「什么都没改」的假成功，400）。`pointsPerYuan` 须 `1-9999` 整数。返回更新后的全量。 | MVP |
+
+> **错误码**：`3001` 余额不足 / `3002` 未达段位门槛 / `3003` 奖励已下架 / `3004` 兑换已关闭 / `3005` 档位不存在。§2.4 已收录。
+>
+> **已知限制（本期不做）**：兑换**不可撤销**。家长点错只能再兑一次或线下补偿；`point_redemptions.status` 已为将来「撤销」预留状态位，但当前没有任何回补流水的路径。
 
 ---
 
@@ -819,7 +868,7 @@ POST /api/ai/report（AI-Agent AnalyticsCapability 生成报告文本）
 报告内容缓存并写入 learning_reports
   │
   ▼
-家长端 GET /api/parent/students/{id}/reports/{reportId} 展示
+家长端 GET /api/parent/students/{studentId}/reports/{reportId} 展示
 ```
 
 ### 6.9 课堂练习判对错
@@ -1418,6 +1467,83 @@ MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
 
 **内容从哪来**：`sentence_meanings`（每句的含义 + 情感）由**人工填写**——`tools/data-refinery` 的 `meaning_cli.py`（**已实现**，含 15 用例）复用 `answer_importer` 的 `--export` / `--apply` 两步：导出带原文的模板（人工只填「含义」「情感」两个空；**库里已填过的句子连同含义/情感一起回填**，故「导出 → 改一句 → 回写」这条修订路径不会把该篇其余句子抹成 `null`），再**按原文在 `sentences` 里定位下标**幂等写回（不按行号、不做整体长度断言；定位不到的句子写进 `-review.md` 并跳过；只 `UPDATE` `sentence_meanings` 一列，绝不刷掉 `verified`/`is_active`/`memorize_required` 的人工标定）。**整篇一句都没填的篇目拒绝写库**——既避免只剩原文的模板把库里已填含义整列抹掉，也避免 all-`null` 数组混进抽题池（抽题池只查 `sentence_meanings IS NOT NULL`，挡不住全 `null`）。本管线**不调 LLM**。
 
+### 6.24 闯关积分：发分 → 流水 → 快照 → 段位，与积分兑换（2026-09-17）
+
+积分是**平台级**的激励层（不分学科、不分轨道，段位全局唯一），加在既有流程**旁边**而不是里面：**不影响任何门禁**（不清零错题、不替代错题本、不参与主线解锁判定）。只有「完成任务」产生积分，辅线答疑不产生。
+
+```text
+8 类任务的完成事件（粒度分三类，spec §6.1）
+  ├─ 甲类 · 逐目标发分（每完成一个「目标物」发一次，不新增端点）
+  │    cn_dictation / cn_interpretation → 篇目判题端点里发（按该篇 genre 取档：诗 2 / 文言文 5）
+  │    cn_meaning → 该篇**最后一个可作答句**判完时发（整篇答完一次，见下）
+  │    error_fix  → 错题被清零（clearUnclearedByStudentQuestionId 的 affectedRows > 0）时发
+  │    判题响应内联 pointsAwarded / awardReason（§4.18 语文三专项 + practice/training judge）
+  ├─ 乙类 · 整批发分（分值由学生开练时选的**档位**决定，必须整轮发）
+  │    math_targeted / en_vocabulary → POST /api/training/sessions/:id/complete
+  │    分值取**会话记录里的档位**、不取前端入参；start 时把题单规模写进 expected_count
+  └─ 丙类 · 既有完整事件点直接埋
+       mainline_lesson → POST /api/progress/update 推进到下一课/完成时（响应带 points）
+       math_paper      → POST /api/exams/sessions/:id/submit 交卷后（响应带 points）
+  ▼
+PointsService.award —— 8 条路径的**唯一**发分入口，顺序固定（每步都有理由）
+  0 确保规则存在（INSERT IGNORE 补默认档位：INSERT 撞键即跳过，家长改过的值永不回溯）
+  1 查规则 → 2 档位 → 3 停用 → 4 每日上限 → 5 发分前累计 → 6 事务[写流水 + 快照增量] → 7 跨档
+  · 每日上限必须早于 INSERT：先写再判会让「到上限的那一条」已经落库
+  · 发分前累计必须早于事务：detectLevelUp(old, new) 要的是事务前的旧值
+  · 停用早于上限：停用档位连计数都不该查
+  ▼
+point_ledger（**唯一真源**）—— 一条 earn 正流水
+  · 幂等靠 uniq_point_ledger_dedupe：INSERT IGNORE 撞键 = 「已发过」，不报错、不重复加分
+  · 幂等键由**服务端从已知 id 拼**（如 paper:<sessionId> / tsess:<sessionId> / err:<sid>:<qid>:<日期>），
+    绝不接受请求体里的字符串——key 嵌了自增 id，可被枚举/构造
+  · title 存**快照**：家长之后改分值/档位名，历史流水不变
+  │  同事务
+  ▼
+student_points（**读优化快照，可重建**）
+  · total_earned = SUM(points) WHERE kind='earn'（单调递增）
+  · balance      = SUM(points) 全部 kind
+  │  **段位不落库**：由 total_earned 对照 levels.ts 常量实时算（9 档，见 PRD §7.13）
+  │  total_earned 单调递增 → 段位只升不降，没有也不该有降级逻辑
+  ▼
+GET /api/points/me（学生，§4.20） / GET /api/parent/students/:id/points（家长，§4.21）
+```
+
+**每类埋点都 try/catch 吞异常**：积分是激励层，发分失败绝不能阻塞主线推进 / 判题 / 交卷。发分失败时「本次加了 0 分」与「真的 0 分」必须可区分——所以失败路径的 `balance` / `totalEarned` 回 `null`（`award_failed`），**绝不伪造 0**（那会污染前端本地快照）。
+
+**兑换：积分 → 钱 / 奖励（家长端操作，本期不可撤销）**
+
+```text
+POST /api/parent/students/:id/points/redeem
+  0 type 白名单（非法立刻 1001，不碰任何 DB）
+  1 兑换总开关（关了立刻 3004，连快照都不读）
+  2 解析兑换内容：现金验 points（1-999999）；奖励验存在（1002）/ 已上架（3003）
+  3 读快照：段位门槛与余额**共用这一次读**（奖励的 min_level_code 非空时校验段位，未达 3002）
+  4 余额**预检**（3001，advisory 快失败，非权威）
+  5 事务：兑换单（pending）→ 负流水 → **条件扣余额** → 回写 ledger_id
+       · 顺序不能变：先插兑换单拿自增 id，才能拼 dedupe_key='redeem:<id>'
+       · 权威余额闸门是条件 UPDATE（WHERE balance >= ?）：并发两次兑换由 InnoDB 行锁串行化，
+         只有一方 affectedRows=1；为 0 → 3001 回滚。先读后写会把 balance 扣成负数
+  6 事务后重读快照返回
+  ▼
+point_ledger 多一条**负数** kind='redeem' 行（task_code 固定 'redeem'）
+student_points **只减 balance**（earnedDelta 恒为 0）——SQL 里根本不出现 total_earned
+  ⇨ 这就是「段位只升不降」的实现点：任何改动若让它写 total_earned，段位就会被扣低
+```
+
+**快照漂移的修复**：`student_points` 只是快照，与流水不一致时**从流水重算**，不手改行——
+`cd apps/server && npx tsx src/scripts/rebuild-student-points.ts`。它**只读流水、绝不写流水**，
+对每个 `point_ledger` 里出现过的学生算 `SUM(kind='earn')` 与 `SUM(所有)` 后整行覆盖快照。
+
+**为什么每日上限不用 SQL 的 `CURDATE()`**：DB 会话时区与 Node 应用时区可能不一致，`CURDATE()` 会算错一天。两个日界（当日 00:00 / 次日 00:00）由**应用层**按服务器本地时区算好、作为绑定参数传进 SQL（半开区间 `>= start && < end`，跨月跨年无需拼接）。同一口径在 `student-word-progress.repo.ts` / `vocabulary.service.ts` 已有先例。**也不去改 `connection.ts` 的会话时区**——那会改变全应用 `NOW(3)` 的取值。一次调用里 `now()` 只取一次、两个边界由同一个 `now` 派生：各自取钟若跨过午夜会撑出 48 小时窗口，把两天的发分都算进今天。
+
+**`error_fix` 为什么排除考试来源**：`error_fix` 的发放条件是「`clearUnclearedByStudentQuestionId` 的 `affectedRows > 0`」，它只覆盖**做题时清零**的路径。考试交卷的补判路径（`finalizeSession` 补判在途/未作答题目）**不参与发分**——否则「交卷」会顺带冒出大量错题订正分，与 `math_paper` 的交卷分重复，学生什么额外的事都没做。所以补判路径不调 award。
+
+**`cn_meaning` 为什么用「最后一个可作答句」而不是 `sentences.length - 1`**：末句可能没有标准含义（`sentence_meanings[i] == null`、`answerable:false`、根本不出题），按下标 `length - 1` 判定会让这类篇目**永远拿不到分**。正确口径是「最大的 `i` 使 `meanings[i] != null`」，实现在 `meaning.service.ts`。**解释专项**同理：它没有「整篇答完」的概念，但 `fullTranslation` 只在被判的是**最后一句**时下发（提前下发整篇译文等于泄题）。
+
+**`math_targeted` 为什么也要每日上限（默认 5 次）**：四档是**打包价**（「3 题 8 分」不是 3×2），档位由**学生自选**、幂等键按 `sessionId`（每次开练都是新 key）。若不限次，把题池缩到 1 题就能用 `10` 档（35 分）反复 complete 无限刷。每日上限按 `task_code` 计数、四档**共用 5 次**（与 `en_vocabulary` 三档共用 2 次同口径）。每日上限是主要（也是唯一）防刷手段。
+
+**兑换为什么写 `earnedDelta: 0`**：`student_points.total_earned` 是段位唯一依据，语义上不可回退。兑换扣的是「可用余额」`balance`，若同事务里把 `total_earned` 也减掉，段位立刻会降，破坏 spec §3 定案 #2。所以兑换的扣减 SQL **只 `SET balance`**、结构性保证不触碰 `total_earned`（见 `student-points.repo.ts` 的 `deductBalanceIfEnough`）。
+
 ---
 
 ## 7. API 与前端页面对照表
@@ -1447,12 +1573,12 @@ MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
 | P5.2 奖励册 | `/student/rewards` | `GET /api/rewards/.../history` |
 | P5.3 设置 | `/student/settings` | `GET/PATCH /api/users/students/{id}/settings` |
 | P6.1 家长仪表盘 | `/parent/dashboard` | `GET /api/parent/dashboard`, `GET /api/parent/alerts`, WS `/ws/notifications/{id}` |
-| P6.2 学情报告 | `/parent/report` | `GET /api/parent/students/{id}/reports` |
-| P6.3 错题查看 | `/parent/errors` | `GET /api/parent/students/{id}/errors` |
-| P6.4 AI 对话回放 | `/parent/chat-logs` | `GET /api/parent/students/{id}/chat-logs` |
-| P6.5 目标设定 | `/parent/goals` | `GET/POST/PATCH/DELETE /api/parent/students/{id}/goals` |
-| P6.6 行为管控 | `/parent/controls` | `GET/PUT /api/parent/students/{id}/controls` |
-| P6.7 奖励管理 | `/parent/rewards` | `GET /api/parent/students/{id}/rewards`, `POST /api/rewards/{id}/redeem` |
+| P6.2 学情报告 | `/parent/report` | `GET /api/parent/students/{studentId}/reports` |
+| P6.3 错题查看 | `/parent/errors` | `GET /api/parent/students/{studentId}/errors` |
+| P6.4 AI 对话回放 | `/parent/chat-logs` | `GET /api/parent/students/{studentId}/chat-logs` |
+| P6.5 目标设定 | `/parent/goals` | `GET/POST/PATCH/DELETE /api/parent/students/{studentId}/goals` |
+| P6.6 行为管控 | `/parent/controls` | `GET/PUT /api/parent/students/{studentId}/controls` |
+| P6.7 奖励管理 | `/parent/rewards` | `GET /api/parent/students/{studentId}/rewards`, `POST /api/rewards/{id}/redeem` |
 | P6.8 多孩切换 | `/parent/children-switch` | `GET /api/users/students` |
 | P6.9 异常预警 | `/parent/alerts` | `GET /api/parent/alerts`, `PATCH /api/parent/alerts/{id}/read` |
 | P6.10 账号设置 | `/parent/account` | `GET /api/parent/account`, `GET /api/quota/current`, `GET /api/quota/subscription` |
@@ -1615,6 +1741,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v3.7 | 2026-09-17 | **闯关积分与段位体系**（平台级激励层，不影响任何门禁；PRD 新增 §7.13）。新增 Points 分组 §4.20（学生端 4 端点，只读：概览/流水/档位/奖励，`studentId` 取自 JWT 防 IDOR）+ ParentPoints 分组 §4.21（家长端 **11** 个端点：概览、`points/rules` GET+PUT、`points/ledger`、`reward-catalog` GET+PUT、`points/redeem` POST(201)、`redemptions` GET、`redemptions/{id}` PATCH、`points/settings` GET+PUT）；Training 分组 §4.18 增 `POST /api/training/sessions/:id/complete`（乙类整批发分，分值取会话档位、不取前端入参，幂等回 `already_completed`）。新增 §6.24 数据流。错误码 `3001` 余额不足 / `3002` 未达段位 / `3003` 奖励已下架 / `3004` 兑换已关闭 / **`3005` 档位不存在**。甲类埋点（语文三专项 + `error_fix`）在既有判题响应内联 `pointsAwarded` / `awardReason`（枚举 `daily_limit\|no_rule\|tier_inactive\|genre_unset\|not_cleared`，`duplicate` 刻意不在枚举内：幂等命中本次未入账，报出去会弹假 `+N 分`）；丙类（`mainline_lesson` / `math_paper`）在既有响应加 `points`。DB 迁移 `2026-09-17_gamification_points.sql`（6 张表 `point_rules`/`point_ledger`/`student_points`/`reward_catalog`/`point_redemptions`/`training_sessions` + `controls.points_per_yuan` + `chinese_passages.genre`）。快照重建脚本 `rebuild-student-points.ts`（只读流水重算，快照与流水不一致时手工修复）；体裁标定工具 `dictation_cli.py --export-genre / --set-genre`（**不用 LLM 猜体裁**，人工标定）。openapi.yaml 同步（14 路径 + 20 schema + 各判题响应补两字段）。 |
 | v3.6 | 2026-09-17 | 语文古诗文**含义专项**（Training 分组 §4.18 增 3 端点，均为 student JWT、POST 按 Nest 默认返回 **201**）：`GET /api/training/meaning/passages`（抽题池 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0 AND sentence_meanings IS NOT NULL`——比解释专项多「有含义数据」，只出篇名 + 册次）、`POST /api/training/meaning/start`（`count` **1-3**；一次下发整篇所有句子，含 `index`/`text`/`terms[{term,plain}]`/`answerable`，剥离 `meaning`/`emotion`/`translation`/`full_translation`；**`answerable:false` = 无标准含义，只显示在顶部原文条、不出题**）、`POST /api/training/meaning/judge`（**逐句**判该句字词 + 深层含义 + 作者情感，**纯 LLM、无归一化短路**，故 `method` 只有 `ai\|unanswered\|undetermined` 三值、**刻意没有 `exact`**，有用例钉住；漏项/失败逐项 `undetermined`；该句无标准含义 400）。新增 §6.23 数据流。DB 迁移 `2026-09-17_chinese_sentence_meanings.sql`（`chinese_passages` 加 `sentence_meanings` 列）。ai-core 新增 `chinese_meaning_judge` 场景（primary=`local`、fallback=`deepseek-flash`）。内容管线 `meaning_cli.py` **已实现**（15 用例）：`--export` 出带原文的模板并**回填库中已填的含义**（修订路径不会抹掉该篇其余句子），`--apply` 按原文定位下标幂等写回、**整篇全空时拒绝写库**。openapi.yaml 同步（3 端点 + 12 schema）。 |
 | v3.5 | 2026-09-16 | 英语**背单词**子系统（Training 分组 §4.18 增 5 端点，**独立子系统**：不挂 `questions`、不进错题本、不参与主线清零门禁，同语文古诗文专项的独立化论证——作答单位是「词 / 义项」、标准答案是词条自带属性、不接主线无「重做—清零」对象）。① `GET /api/training/vocabulary/options`（三档词库范围 + 今日已背 + 四个筛选的池子大小）；② `POST /api/training/vocabulary/start`（`count` 10-20；`order` 随机/字母序/倒序/指定字母开头；`direction` 英→中/中→英/随机；四个筛选；**`promptKind=cn2en` 的题不下发 `word`/`phonetic`/`context`/`hasFamily`**）；③ `POST /api/training/vocabulary/judge`（**三条路由**：中→英纯程序比对不调 LLM；英→中常见义程序短路 + LLM 二档；英→中熟词僻义程序短路 + LLM **三档**含 `off_target`；`off_target`/`unanswered`/`undetermined` **都不计错**）；④ `POST /api/training/vocabulary/progress/clear`（只清学生自己的 `wrong_count`，不动 `learned`、不动全局 `error_count`）；⑤ `GET /api/training/vocabulary/words/{wordId}/family`（词根族，`root_key` 自关联、**不建新表**）。新增 §6.22 数据流。DB 新增 `english_words`（**无外键**，表即完整边界；`meanings` JSON 承载义项与熟词僻义 `extended`+`context`；`root_key` 自关联表达词根族；`error_count` 为全平台累计错次**只增**）与 `student_word_progress`（本子系统唯一外键 `student_id→students(id)`，`word_id` 故意不设外键以免内容表重灌被入向外键卡死），迁移 `2026-09-16_english_vocabulary.sql`（纯 CREATE TABLE，重跑天然幂等；`schema.sql` 同步收录、两处 DDL 逐字节一致）。ai-core 新增 `english_word_judge` 场景（primary=`local`、fallback=`deepseek-flash`；本地端点靠 `chat_template_kwargs` 关 thinking）；顺带修正管理员 `SCENES` 白名单漂移（漏 `interpretation_judge`/`analysis`/`safety`，并加漂移守卫用例）。前端新增 `VocabularyConfigPage`/`VocabularyRunPage` 与 `WordPromptCard`/`WordFamilyTree`/`AnswerFeedList`/`SpellingDiffView` 组件，训练入口英语由「敬请期待」改为可点。**词库内容（课标官方 PDF：义务教育 2022 版 1600 词 + 高中 2017 版 2020 修订 3000 词）与熟词僻义、词根族数据由后续内容管线导入，本期以 DEV-FIXTURE 假数据打通链路**。openapi.yaml 同步（5 端点 + 12 schema）。 |
 | v3.4 | 2026-09-16 | 语文古诗文**解释（翻译）专项**（Training 分组 §4.18 增 3 端点）：`GET /api/training/interpretation/passages`（抽题池 = `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`，只出篇名 + 册次）、`POST /api/training/interpretation/start`（`count` **1-3**；一次下发整篇所有句子，含 `index`/`text`/`terms` 词名，剥离 `gloss`/`translation`/`full_translation`）、`POST /api/training/interpretation/judge`（**逐句**判：程序短路 → 剩余项一次 LLM 调用 → 漏项/失败逐项 `undetermined`；`method` 四值 `exact\|ai\|unanswered\|undetermined`；`fullTranslation` 仅最后一句下发）。新增 §6.21 数据流。**判题粒度经用户 2026-09-16 裁决由「整篇一次批量」改为「逐句」**（学生答完一句立即知道对错）；**答题形态定为「三行对译」**（原文 → 该句关键字词 → 整句翻译），故 `chinese_passages.key_terms` 每项新增 `sentenceIndex` 指向 `sentences` 下标。解释抽题池与默写**口径有意不同**（不设 `memorize_required`、加「内容就绪」）。DB 迁移 `2026-09-16_chinese_interpretation_columns.sql`（纯 ADD COLUMN）。ai-core 新增 `interpretation_judge` 场景（primary=local、fallback=deepseek-flash，实测整个判题 ~1.3s）。前端新增 `InterpretationConfigPage` / `InterpretationRunPage` 与 `SentenceBlock` / `ItemResultLine` 组件，语文专项页第二张卡由「敬请期待」改为可点。openapi.yaml 同步。 |

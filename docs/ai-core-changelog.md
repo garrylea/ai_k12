@@ -8,6 +8,26 @@
 
 ---
 
+## 2026-09-17 新增（闯关积分与段位体系：6 张表 + 14 条路径 + 快照重建 + 体裁标定）
+
+**做了什么**：`apps/server/src/modules/points/`（`PointsService` 唯一发分入口、`PointRulesService` 家长可配分值、`RedemptionService` 兑换）；迁移 `2026-09-17_gamification_points.sql`（`point_rules`/`point_ledger`/`student_points`/`reward_catalog`/`point_redemptions`/`training_sessions` + `controls.points_per_yuan` + `chinese_passages.genre`）；埋点接全 8 类任务（甲类逐目标：`cn_dictation`/`cn_interpretation`/`cn_meaning`/`error_fix`；乙类整批：`math_targeted`/`en_vocabulary` 走 `POST /api/training/sessions/:id/complete`；丙类既有事件：`mainline_lesson`/`math_paper`）。学生端 4 端点 + 家长端 11 端点 + 会话完成 1 端点；快照重建脚本 `rebuild-student-points.ts`；体裁标定工具 `dictation_cli.py --export-genre / --set-genre`（**不猜体裁**，人工标定）。
+
+**为什么每日上限用应用层算好的日界、不用 SQL 的 `CURDATE()`**：DB 会话时区与应用时区可能不一致，`CURDATE()` 会算错一天（仓内 `student-word-progress.repo.ts` / `vocabulary.service.ts` 早有注释）。两个边界（当日 00:00 / 次日 00:00）在 Node 侧按服务器本地时区算好、作为绑定参数传进 SQL，半开区间 `>= start && < end`。**一次调用只取一次 `now`、两个边界由同一个 `now` 派生**——各自取钟若跨过午夜会撑出 48 小时窗口，把两天的发分都算进今天。也不去改 `connection.ts` 的会话时区（会改变全应用 `NOW(3)`，blast radius 太大）。
+
+**为什么 `error_fix` 排除考试来源**：发放条件是 `clearUnclearedByStudentQuestionId` 的 `affectedRows > 0`，它只覆盖「做题时清零」的路径。考试交卷的补判路径（`finalizeSession` 对在途/未作答题目补判）**不调用 award**——否则交卷会顺带冒出大量错题订正分，与 `math_paper` 的交卷分重复，而学生什么额外的事都没做。
+
+**为什么 `cn_meaning` 用「最后一个可作答句」而不是 `sentences.length - 1`**：末句可能没有标准含义（`sentence_meanings[i] == null`、`answerable:false`、根本不出题），按下标判定会让这类篇目**永远拿不到分**。正确口径是「最大的 `i` 使 `meanings[i] != null`」。
+
+**为什么解释专项「最后一句才发分」**：`cn_interpretation` 的发放点绑定「整篇最后一句判完」，中间句一律 0。否则学生只答第一句就能拿一篇的分；同一原因，`fullTranslation` 也只在最后一句下发（提前给整篇译文等于泄题）。判题本身仍是逐句的（学生答完一句立刻知对错）。
+
+**为什么 `math_targeted` 也要每日上限（默认 5 次）**：四档是**打包价**（「3 题 8 分」不是 3×2），档位由学生自选、幂等键按 `sessionId`（每次开练都是新 key）。不限次时，把题池缩到 1 题就能用 `10` 档（35 分）反复 complete 无限刷。每日上限按 `task_code` 计数、四档共用 5 次（与 `en_vocabulary` 三档共用 2 次同口径），是主要且唯一的防刷手段。
+
+**为什么兑换写 `earnedDelta: 0`**：`student_points.total_earned` 是段位唯一依据、语义上不可回退。兑换扣的是「可用余额」`balance`；若同事务里也减 `total_earned`，段位立刻会降，破坏「段位只升不降」。所以 `deductBalanceIfEnough` 的 SQL **只 `SET balance`、根本不出现 `total_earned`**，这是结构性保证而非约定。权威余额闸门也是它的条件 UPDATE（`WHERE balance >= ?`），并发兑换由 InnoDB 行锁串行化，只有一方 `affectedRows = 1`。
+
+**其它易踩点**：`PointsService`/`RedemptionService` 的函数型参数 `now` 必须 `@Optional()`（带 `@Injectable()` 时 Nest 按 `design:paramtypes` 把函数类型当 token）；`dedupe_key` 只能由服务端从已知 id 拼（key 里嵌自增 id，可被枚举）；`title` 存快照（家长改分值后历史流水不变）；`duplicate` **不在** `awardReason` 枚举内（幂等命中本次未入账，报出去会弹假 `+N 分`）；发分失败一律 try/catch 吞异常且 `balance` 回 `null`、**不伪造 0**。
+
+---
+
 ## 2026-09-17 新增（ai-core 场景 `chinese_meaning_judge`：语文古诗文「含义/情感」判题）
 
 - `ChineseMeaningJudgeCapability` + `prompts/meaning/judge.md`（JSON 输出 + Zod：字词 / 整体含义 / 情感三项，模型漏项不视为解析失败，由调用方标 `undetermined`）。路由 primary=`local`（Qwen3.8-27B）、fallback=`deepseek-flash`，`retry.yaml` 加 `chinese_meaning_judge`。
