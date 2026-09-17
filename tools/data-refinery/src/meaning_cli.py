@@ -11,6 +11,30 @@
     # 2) 填完回写（幂等）
     python src/meaning_cli.py --apply  --input inputs/meaning/诗词含义.md
 
+## `--input` 认两种格式（`--apply` 自动识别）
+
+1. **上面 `--export` 出的模板**（`# 篇名` / `## 第N句` / `> 原文` / `含义：` / `情感：`）；
+2. **用户手写文档**（判据：`### 句子` 且 `#### 深层含义` 同时出现）：
+
+```md
+## 水调歌头(明月几时有)（宋·苏轼）
+
+### 明月几时有？
+#### 关键字词
+几时：什么时候；
+#### 深层含义
+劈头一问，问的是月，实际问的是时间与存在的本源。
+#### 情感
+豪放不羁的浪漫情思，带着微醺的迷惘与好奇。
+```
+
+- 篇名尾部的 `（唐·刘禹锡）` 只在括号内**含间隔号**时剥掉；`水调歌头(明月几时有)`
+  这种没间隔号的括号**原样保留**（剥了就认不出库里的行）。
+- 文首 `#` 大标题与文末附录表格不含 `###` 句子，天然不会成为篇目。
+- ⚠️ **`#### 关键字词` 整段读入即丢、永不进库**：它是 `key_terms` 列的内容，
+  解释专项正在用，导入覆盖会改到线上题面（用户明确要求跳过；`parse_uidoc` 的
+  `_UIDOC_FIELD_MAP` 里没有这个名字，该节正文全部忽略）。
+
 ## 唯一的硬要求：`sentence_meanings` 与 `sentences` **下标对齐**
 
 `meaning.service.ts` 的 `meaningsOf()` 在两者长度不等时**整篇按无含义处理**；
@@ -42,8 +66,10 @@
 
     UPDATE chinese_passages SET sentence_meanings = %s WHERE id = %s
 
-`verified` / `is_active` / `memorize_required` 在语句里**根本不出现**——
-它们是人工标定，管线重跑绝不能刷掉（照 `interpretation_loader.py` 的规矩）。
+`key_terms` / `verified` / `is_active` / `memorize_required` 在语句里**根本不出现**——
+后三个是人工标定，`key_terms` 归解释专项，管线重跑绝不能刷掉
+（照 `interpretation_loader.py` 的规矩）。用户手写文档里的「关键字词」是**只读输入**：
+解析阶段就丢掉，`--apply` 的 SQL 里也没有它的位置。
 
 ## 两个不出声的坑，已经堵掉
 
@@ -76,6 +102,23 @@ _SENTENCE_HEAD_RE = re.compile(r"^##\s+")
 _QUOTE_RE = re.compile(r"^>\s?(.*)$")
 _MEANING_RE = re.compile(r"^含义\s*[:：]\s*(.*)$")
 _EMOTION_RE = re.compile(r"^情感\s*[:：]\s*(.*)$")
+
+#: 用户手写文档的层级：`##` 篇名（文首 `#` 是文档标题，不算篇目）/ `###` 原文 / `####` 字段
+_UIDOC_POEM_RE = re.compile(r"^##\s+(.+?)\s*$")
+_UIDOC_SENT_RE = re.compile(r"^###\s+(.+?)\s*$")
+_UIDOC_FIELD_RE = re.compile(r"^####\s+(关键字词|深层含义|情感)\s*$")
+#: 用户文档里「含义」叫「深层含义」——映射到内部字段名。
+#: `关键字词` **故意不在此表**：`.get()` 返回 None → 该字段正文读入即丢（见 `parse_uidoc`）。
+_UIDOC_FIELD_MAP = {"深层含义": "含义", "情感": "情感"}
+#: 篇名尾部的（唐·刘禹锡）之类：只在**尾部**且括号内含间隔号时剥掉
+_UIDOC_AUTHOR_PAREN_RE = re.compile(r"[（(][^（）()]*[·・][^（）()]*[）)]\s*$")
+#: 自动识别用户文档的判据：`### 句子` **且** `#### 深层含义`，缺一不可
+_UIDOC_SENT_PROBE_RE = re.compile(r"^###\s", re.MULTILINE)
+_UIDOC_FIELD_PROBE_RE = re.compile(r"^####\s+深层含义", re.MULTILINE)
+#: Markdown 水平线（`---` / `***` / `___`）：整行跳过。
+#: 用户文档用 `---` 分篇，**不跳过就会被当成字段正文的续行**，
+#: 粘到上一句「情感」的尾巴上（实测粘出过 `……余韵悠长。---`）。
+_HR_RE = re.compile(r"^\s*([-*_])\1{2,}\s*$")
 
 
 def parse_args(argv=None):
@@ -242,6 +285,102 @@ def parse_template(text: str) -> dict[str, list[tuple[str, str, str]]]:
     return {k: v for k, v in out.items() if v}
 
 
+# ==================== 用户手写文档解析（纯函数） ====================
+
+
+def _uidoc_strip_author(title: str) -> str:
+    """『酬乐天扬州初逢席上见赠（唐·刘禹锡）』→『酬乐天扬州初逢席上见赠』。
+
+    只剥**尾部**且括号内含间隔号（作者·朝代）的；『水调歌头(明月几时有)』这种
+    括号里没有间隔号，必须原样保留，否则对不上库里的篇名。
+    整条标题就是那个括号（剥完为空）时也原样保留，不返回空篇名。
+    """
+    stripped = _UIDOC_AUTHOR_PAREN_RE.sub("", title).strip()
+    return stripped or title
+
+
+def parse_uidoc(text: str) -> dict[str, list[tuple[str, str, str]]]:
+    """解析**用户手写文档** → {篇名归一: [(原文, 含义, 情感), …]}。
+
+    层级：`##` 起篇、`###` 起句、`####` 起字段（`深层含义` 映射到内部的「含义」），
+    字段正文按行累加到下一个 `####`/`###`/`##` 为止。
+
+    **「关键字词」整段跳过、永不进库**：它是 `key_terms` 列的内容，解释专项正在用，
+    导入覆盖会改到线上题面。用户文档里有这一节，所以这里**读入即丢**
+    （`_UIDOC_FIELD_MAP` 里没有它 → `field=None` → 正文全部忽略）。
+
+    文首用 `#` 的说明段（大标题 / 引用行）与文末附录表格都不含 `###` 句子，
+    天然不会成为篇目（篇目只在拿到 `###` 句子后才留下）。
+    """
+    out: dict[str, list[tuple[str, str, str]]] = {}
+    title: str | None = None
+    src: str | None = None
+    field: str | None = None          # 当前字段；None = 不在字段正文里（含「关键字词」）
+    meaning = ""
+    emotion = ""
+
+    def flush() -> None:
+        nonlocal src, field, meaning, emotion
+        if title is not None and src is not None:
+            out[title].append((src, meaning, emotion))
+        src, field, meaning, emotion = None, None, "", ""
+
+    for line in text.splitlines():
+        line = line.rstrip()
+
+        m_poem = _UIDOC_POEM_RE.match(line)
+        if m_poem:
+            flush()
+            key = norm_title(_uidoc_strip_author(m_poem.group(1)))
+            title = key or None
+            if title is not None:
+                out.setdefault(title, [])
+            continue
+
+        m_sent = _UIDOC_SENT_RE.match(line)
+        if m_sent:
+            flush()
+            src = m_sent.group(1).strip()
+            continue
+
+        m_field = _UIDOC_FIELD_RE.match(line)
+        if m_field:
+            field = _UIDOC_FIELD_MAP.get(m_field.group(1))   # 关键字词 → None → 丢
+            continue
+
+        if _HR_RE.match(line):
+            continue                      # `---` 是分篇线，不是字段正文
+
+        if field is None or title is None or src is None or not line.strip():
+            continue
+
+        if field == "含义":
+            meaning += line.strip()
+        else:
+            emotion += line.strip()
+
+    flush()
+    return {k: v for k, v in out.items() if v}
+
+
+def looks_like_uidoc(text: str) -> bool:
+    """→ 这份文本是不是**用户手写文档**（判据：`### 句子` 且 `#### 深层含义`，缺一不可）。
+
+    两条都要：`###` 单独出现可能是有人在模板里手写了小标题，
+    `#### 深层含义` 单独出现可能只是正文里引用了格式说明。
+    """
+    return bool(_UIDOC_SENT_PROBE_RE.search(text) and _UIDOC_FIELD_PROBE_RE.search(text))
+
+
+def parse_input(text: str) -> dict[str, list[tuple[str, str, str]]]:
+    """`--input` 两种格式的统一入口：用户手写文档 / `--export` 出的模板。
+
+    识别不出是手写文档就回退模板解析（而不是静默返回空）——`run_apply`
+    拿不到篇目时会报「没解析出任何篇目」，比猜错格式好定位。
+    """
+    return parse_uidoc(text) if looks_like_uidoc(text) else parse_template(text)
+
+
 # ==================== 按原文定位（纯函数） ====================
 
 
@@ -386,10 +525,17 @@ def run_export(args, config) -> int:
         return 1
 
     path = Path(args.input)
-    if path.exists() and path.read_text(encoding="utf-8").strip():
-        print(f"[ERROR] 模板已存在且非空：{path}"
-              f"——里面可能有你填过的内容。先把它移走（或改名），再重新导出。", flush=True)
-        return 1
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        if existing.strip():
+            if looks_like_uidoc(existing):
+                print(f"[ERROR] --input 指的是一份**手写文档**（含 `### 句子` / `#### 深层含义`）：{path}"
+                      f"——那种格式是喂给 --apply 的；--export 只写「只有原文、两个空」的空白模板，"
+                      f"且**不会覆盖已有文件**。请换一个路径。", flush=True)
+            else:
+                print(f"[ERROR] 模板已存在且非空：{path}"
+                      f"——里面可能有你填过的内容。先把它移走（或改名），再重新导出。", flush=True)
+            return 1
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_template(rows), encoding="utf-8")
@@ -412,9 +558,10 @@ def run_apply(args, config) -> int:
         print(f"[ERROR] 模板不存在：{path}（先跑 --export）", flush=True)
         return 1
 
-    by_title = parse_template(path.read_text(encoding="utf-8"))
+    by_title = parse_input(path.read_text(encoding="utf-8"))
     if not by_title:
-        print(f"[ERROR] 模板里没解析出任何篇目：{path}", flush=True)
+        print(f"[ERROR] 没解析出任何篇目：{path}"
+              f"（认两种格式：--export 出的模板，或含 `### 句子` + `#### 深层含义` 的手写文档）", flush=True)
         return 1
 
     conn = _connect(config)

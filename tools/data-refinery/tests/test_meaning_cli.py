@@ -16,7 +16,7 @@
 import json
 
 import src.meaning_cli as cli
-from src.meaning_cli import build_meanings_array, parse_template
+from src.meaning_cli import build_meanings_array, parse_input, parse_template, parse_uidoc
 
 TITLE = "酬乐天扬州初逢席上见赠"
 
@@ -273,3 +273,110 @@ def test_UPDATE_SQL_不碰人工标定的三列():
     assert cli._UPDATE_SQL == "UPDATE chinese_passages SET sentence_meanings = %s WHERE id = %s"
     for col in ("verified", "is_active", "memorize_required"):
         assert col not in cli._UPDATE_SQL
+
+
+# ==================== 用户手写文档格式（--input 的第二种格式） ====================
+
+UIDOC = """# 古诗深层含义逐句解析（九年级）
+
+> **数据来源**：MySQL 数据库 `ai_k12`
+> **筛选规则**：仅保留**诗歌**
+
+---
+
+## 酬乐天扬州初逢席上见赠（唐·刘禹锡）
+
+### 巴山楚水凄凉地，二十三年弃置身。
+#### 关键字词
+巴山楚水：诗人曾被贬夔州、朗州等地；
+#### 深层含义
+以「凄凉地」与「二十三年」两个时空坐标，把半生贬谪一笔写尽。
+#### 情感
+回顾贬谪生涯的沉痛与辛酸。
+
+### 沉舟侧畔千帆过，病树前头万木春。
+#### 关键字词
+沉舟：沉没的船，喻指自己；
+#### 深层含义
+以「沉舟」「病树」自况，却不作哀音。
+#### 情感
+豁达超脱、不为个人际遇所困的胸襟。
+
+## 附录：被剔除的非诗歌条目
+
+| 篇目 | 作者 |
+| --- | --- |
+| 岳阳楼记 | 范仲淹 |
+"""
+
+
+def test_parse_uidoc_认层级与字段名():
+    got = parse_uidoc(UIDOC)
+    assert list(got) == ["酬乐天扬州初逢席上见赠"]
+    assert got["酬乐天扬州初逢席上见赠"] == [
+        ("巴山楚水凄凉地，二十三年弃置身。",
+         "以「凄凉地」与「二十三年」两个时空坐标，把半生贬谪一笔写尽。",
+         "回顾贬谪生涯的沉痛与辛酸。"),
+        ("沉舟侧畔千帆过，病树前头万木春。",
+         "以「沉舟」「病树」自况，却不作哀音。",
+         "豁达超脱、不为个人际遇所困的胸襟。"),
+    ]
+
+
+def test_parse_uidoc_跳过关键字词与文首说明():
+    got = parse_uidoc(UIDOC)
+    joined = "".join(m + e for _t, m, e in got["酬乐天扬州初逢席上见赠"])
+    assert "巴山楚水：诗人曾被贬" not in joined   # 关键字词整段跳过
+    assert "数据来源" not in joined                 # 文首说明不当成篇目
+    assert "岳阳楼记" not in got                    # 附录表格没 ### 句子，不当篇目
+
+
+def test_parse_uidoc_篇名去掉作者括号():
+    got = parse_uidoc(UIDOC)
+    assert "酬乐天扬州初逢席上见赠" in got
+    assert not any("刘禹锡" in k for k in got)
+
+
+def test_parse_uidoc_篇名括号里没有间隔号时原样保留():
+    # 「水调歌头(明月几时有)（宋·苏轼）」：只剥尾部的作者括号，
+    # 词牌后那个副题括号里没有 `·`，剥掉就对不上库里的篇名了。
+    got = parse_uidoc("## 水调歌头(明月几时有)（宋·苏轼）\n\n### 明月几时有？\n"
+                      "#### 深层含义\n劈头一问。\n#### 情感\n迷惘与好奇。\n")
+    assert list(got) == ["水调歌头(明月几时有)"]
+
+
+def test_parse_uidoc_分篇横线不粘进字段正文():
+    # 真实文档用 `---` 分篇；不跳过它就会粘到上一句「情感」的尾巴上
+    got = parse_uidoc("## 甲（唐·乙）\n\n### 甲句。\n#### 深层含义\n含义甲。\n"
+                      "#### 情感\n情感甲。\n\n---\n\n## 丙\n\n### 丙句。\n"
+                      "#### 深层含义\n含义丙。\n#### 情感\n情感丙。\n")
+    assert got == {"甲": [("甲句。", "含义甲。", "情感甲。")],
+                   "丙": [("丙句。", "含义丙。", "情感丙。")]}
+
+
+def test_parse_input_自动识别两种格式():
+    assert parse_input(UIDOC) == parse_uidoc(UIDOC)          # 手写文档 → uidoc
+    assert parse_input(TEMPLATE) == parse_template(TEMPLATE)  # 自家模板 → template
+
+
+def test_apply_的_UPDATE_语句只动_sentence_meanings():
+    from src.meaning_cli import _UPDATE_SQL
+    for banned in ("key_terms", "verified", "is_active", "memorize_required"):
+        assert banned not in _UPDATE_SQL
+
+
+def test_run_apply_喂手写文档也入库_且不写关键字词(tmp_path, monkeypatch):
+    """Step 4 的接线钉子：`--apply` 读用户手写文档时，走的就是 uidoc 解析。"""
+    (tmp_path / "诗词含义.md").write_text(UIDOC, encoding="utf-8")
+    conn = _FakeConn([_row(11, TITLE, ["巴山楚水凄凉地，二十三年弃置身。",
+                                       "沉舟侧畔千帆过，病树前头万木春。"])])
+    monkeypatch.setattr(cli, "_connect", lambda config: conn)
+
+    assert cli.run_apply(_args(tmp_path), _config()) == 0
+    updates = _updates(conn)
+    assert len(updates) == 1
+    assert updates[0][0] == cli._UPDATE_SQL          # 只 UPDATE sentence_meanings
+    written = json.loads(updates[0][1][0])
+    assert written[0]["meaning"] == "以「凄凉地」与「二十三年」两个时空坐标，把半生贬谪一笔写尽。"
+    assert "关键字词" not in updates[0][1][0]
+    assert "巴山楚水：诗人曾被贬" not in updates[0][1][0]   # key_terms 内容一个字都不写
