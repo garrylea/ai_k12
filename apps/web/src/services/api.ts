@@ -1147,6 +1147,86 @@ export function judgeInterpretation(payload: {
   });
 }
 
+// --- Training · 语文古诗文「含义」专项（2026-09-17） ---
+//
+// 与解释专项的关键差别：`MeaningMethod` **没有 `exact`** —— 本专项不做归一化全等短路，
+// 判题一律交给 LLM。另一个差别是 `sentence.answerable`：没有标准含义的句子只显示、不出题。
+
+export interface MeaningTermItem { term: string; plain: string }
+
+export interface MeaningSentenceItem {
+  index: number;
+  text: string;
+  terms: MeaningTermItem[];
+  /** false = 无标准含义，只在顶部原文条里显示，不进作答队列 */
+  answerable: boolean;
+}
+
+export interface MeaningPassageItem { passageId: number; workTitle: string; semester: string }
+
+export interface MeaningPassageDetail {
+  passageId: number;
+  workTitle: string;
+  semester: string;
+  sentences: MeaningSentenceItem[];
+}
+
+/** 判定方式。**没有 `exact`**（理解性作答不做字符串全等短路）。 */
+export type MeaningMethod = 'ai' | 'unanswered' | 'undetermined';
+
+export interface MeaningPartResult {
+  correct: boolean | null;
+  method: MeaningMethod;
+  standard: string;
+  comment: string | null;
+}
+
+export interface MeaningTermResultItem {
+  term: string;
+  correct: boolean | null;
+  method: MeaningMethod;
+  standard: string;
+  comment: string | null;
+}
+
+export interface MeaningJudgeResult {
+  passageId: number;
+  sentenceIndex: number;
+  allCorrect: boolean;
+  terms: MeaningTermResultItem[];
+  meaning: MeaningPartResult;
+  emotion: MeaningPartResult;
+}
+
+export function fetchMeaningPassages(): Promise<{ passages: MeaningPassageItem[] }> {
+  return fetchApi<{ passages: MeaningPassageItem[] }>('/training/meaning/passages');
+}
+
+export function startMeaning(payload: {
+  semester: string | null;
+  passageIds: number[] | null;
+  count: number;
+}): Promise<{ passages: MeaningPassageDetail[] }> {
+  return fetchApi<{ passages: MeaningPassageDetail[] }>('/training/meaning/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 判**一句**（该句的字词 + 深层含义 + 作者情感）。模型不可用时相关项回 correct=null。 */
+export function judgeMeaning(payload: {
+  passageId: number;
+  sentenceIndex: number;
+  terms: Array<{ term: string; answer: string }>;
+  meaning: string;
+  emotion: string;
+}): Promise<MeaningJudgeResult> {
+  return fetchApi<MeaningJudgeResult>('/training/meaning/judge', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // --- Training · 英语背单词（2026-09-16） ---
 //
 // 独立子系统（不挂 questions、不进错题本、不参与主线清零门禁）。
