@@ -44,6 +44,30 @@ export class StudentPointsRepository {
     await this.pool.execute(sql, params);
   }
 
+  /**
+   * 条件扣减余额：仅当余额足够时才扣，返回 `affectedRows`（0 = 余额不足，未扣任何分）。
+   *
+   * 兑换的余额校验**必须**走这里，不能先读后写——两次并发兑换都会读到同一个够用的余额、
+   * 双双通过检查，再用无条件的 `balance = balance + delta` 把 `balance` 扣成负数
+   * （`student_points.balance` 是有符号 INT、无 CHECK 兜底，`schema.sql` 拦不住）。
+   * 条件 UPDATE 在同一事务内由 InnoDB 行锁串行化：只有一方 `affectedRows = 1`。
+   *
+   * **只 `SET balance`，SQL 里不出现 `total_earned`**（等价于 `earnedDelta` 恒为 0）：
+   * 兑换绝不能动 `total_earned`，否则段位会降（「段位只升不降」见 `redemption.service.ts` 类注释）。
+   */
+  async deductBalanceIfEnough(
+    studentId: number,
+    points: number,
+    conn?: PoolConnection,
+  ): Promise<number> {
+    const sql = `UPDATE student_points SET balance = balance - ? WHERE student_id = ? AND balance >= ?`;
+    const params = [points, studentId, points];
+    const [result] = conn
+      ? await conn.execute<ResultSetHeader>(sql, params)
+      : await this.pool.execute<ResultSetHeader>(sql, params);
+    return result.affectedRows;
+  }
+
   /** 无行（新学生还没发过分）时返回 `{ totalEarned: 0, balance: 0 }`，不抛错、不返回 null。 */
   async find(studentId: number): Promise<StudentPointsSnapshot> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(

@@ -133,9 +133,10 @@ function toRedemptionView(row: PointRedemptionRow): RedemptionView {
  * 积分兑换（换钱 / 换奖励）与奖励清单管理。
  *
  * **核心不变式：兑换绝不碰 `total_earned`，段位只升不降。**
- * 兑换事务里写的是 `kind='redeem'` 的负流水 + `upsertDelta(studentId, 0, -points, conn)`——
- * `earnedDelta` 恒为 0。任何将来改动若把非 0 传进去，`total_earned` 会减少、段位随之下降，
- * 直接破坏 spec §3 定案 #2。`levels.ts` 的 `levelOf` 没有、也不该有降级逻辑。
+ * 兑换事务里写的是 `kind='redeem'` 的负流水 + `deductBalanceIfEnough`——后者的 SQL 只
+ * `SET balance`、根本不出现 `total_earned`（等价于 `earnedDelta` 恒为 0）。任何将来改动若改回
+ * 会写 `total_earned` 的 `upsertDelta`，段位就可能被扣低，直接破坏 spec §3 定案 #2。
+ * `levels.ts` 的 `levelOf` 没有、也不该有降级逻辑。
  *
  * **已知限制：本期兑换不可撤销。** `point_redemptions.status` 只是为将来「撤销」预留的状态位，
  * 当前没有任何回补流水的代码路径，`setRedemptionStatus` 也只写状态/时间。要撤销必须另开设计
@@ -164,13 +165,29 @@ export class RedemptionService {
 
   /**
    * 执行一次兑换。顺序不可调（每步都有理由）：
-   * 1 开关（关了立刻 3004，连快照都不读）→ 2 解析兑换内容并校验（现金验证 points /
-   * 奖励验 is_active、min_level）→ 3 读快照（段位门槛与余额共用一次读）→ 4 余额（3001）→
-   * 5 事务（兑换单 + 负流水 + 快照 + 回写 ledger_id）→ 6 事务后重读快照返回。
+   * 0 type 白名单（非法立刻 1001，不碰任何 DB）→ 1 开关（关了立刻 3004，连快照都不读）→
+   * 2 解析兑换内容并校验（现金验证 points / 奖励验 is_active、min_level）→ 3 读快照
+   * （段位门槛与余额共用一次读）→ 4 余额**预检**（3001，advisory 快失败）→
+   * 5 事务（兑换单 + 负流水 + **条件扣余额** + 回写 ledger_id）→ 6 事务后重读快照返回。
    *
-   * 所有「不满足条件」的拒绝都发生在事务之前 → 失败时**零写入**，不会留下半张兑换单。
+   * **权威的余额闸门是事务内的条件扣减**（`deductBalanceIfEnough` 的 `WHERE balance >= ?`）。
+   * 第 4 步是一次非锁定读，并发两次兑换会双双读到同一笔够用的余额、双双通过；只有条件 UPDATE 的
+   * `affectedRows` 才是最终裁决（为 0 → 3001 回滚）。第 4 步只做快失败，权威判定不在那里。
+   *
+   * 除余额外的所有「不满足条件」的拒绝都发生在事务之前 → 失败时**零写入**，不会留下半张兑换单。
    */
   async redeem(studentId: number, input: RedeemInput): Promise<RedeemResult> {
+    // 0. type 白名单：非法值不能落进下面的 else 被当成 reward 处理——那样 catalogId 为 undefined、
+    //    绑参时 mysql2 直接抛错，会冒成 500。服务层自防，与其它入参校验同口径（1001）；
+    //    Task 8 的 Zod 是外层闸门，不是唯一防线。
+    const rawType = (input as { type?: unknown } | null | undefined)?.type;
+    if (rawType !== 'cash' && rawType !== 'reward') {
+      throw new BadRequestException({
+        code: 1001,
+        message: `type 必须是 cash 或 reward（收到 ${String(rawType)}）`,
+      });
+    }
+
     // 1. 兑换总开关
     await this.controlsRepo.ensure(studentId);
     const controls = await this.controlsRepo.findByStudent(studentId);
@@ -190,7 +207,10 @@ export class RedemptionService {
           ? controls.pointsPerYuan
           : DEFAULT_POINTS_PER_YUAN;
       // 学生声明的是「花多少分」，金额是**被推导**出来的（不是反过来）。保留 2 位小数。
-      cashAmount = Math.round((points / perYuan) * 100) / 100;
+      // 必须用整数运算取整：`Math.round((points / perYuan) * 100) / 100` 会踩浮点误差——
+      // points=201 / perYuan=200 时 201/200*100 = 100.49999999999999 → 1.00，而文档公式
+      // ROUND(points / pointsPerYuan, 2) 应为 1.01，会差一分钱。
+      cashAmount = Math.round((points * 100) / perYuan) / 100;
     } else {
       const row = await this.catalogRepo.findOne(studentId, input.catalogId);
       if (row === null) {
@@ -215,7 +235,9 @@ export class RedemptionService {
       }
     }
 
-    // 4. 余额
+    // 4. 余额**预检**（advisory，非权威）：这是一次非锁定读，只为给常见余额不足一个干净、
+    //    不开事务的 3001。它**不能**用于并发下的正确性——两次兑换会双双读到同一余额、双双通过。
+    //    真正的裁决是事务内 `deductBalanceIfEnough` 的条件 UPDATE（步骤 5）。别依赖这里，也别删。
     if (snapshot.balance < points) {
       throw new BadRequestException({ code: 3001, message: '积分余额不足' });
     }
@@ -402,8 +424,9 @@ export class RedemptionService {
    * ⚠️ 顺序不能变：必须先插兑换单拿自增 id，才能拼 `dedupe_key = 'redeem:<id>'`。
    * `redemption_id` 同时落进流水，便于将来「撤销」按单定位。
    *
-   * `upsertDelta(..., 0, -points, conn)` 的 **earnedDelta 恒为 0**：这是「段位只升不降」的唯一
-   * 实现点，改错一个参数就会让 `total_earned` 减少（见类注释）。
+   * 扣余额走 `deductBalanceIfEnough` 的**条件 UPDATE**（`WHERE balance >= ?`）：并发下
+   * InnoDB 行锁串行化，只有一方 `affectedRows = 1`，另一方为 0 → 抛 3001 回滚。
+   * 它只 `SET balance`、不写 `total_earned`，这就是「段位只升不降」的实现点（见类注释）。
    */
   private async writeRedemption(args: {
     studentId: number;
@@ -453,8 +476,12 @@ export class RedemptionService {
         throw new Error(`兑换单 ${redemptionId} 的流水已存在（dedupe_key 冲突）`);
       }
 
-      // earnedDelta = 0：兑换只扣可用余额，绝不碰 total_earned
-      await this.pointsRepo.upsertDelta(studentId, 0, -points, conn);
+      // 权威余额闸门：条件扣减，余额不足（affectedRows=0）抛 3001 → 回滚。
+      // 只动 balance、绝不碰 total_earned（earnedDelta 恒为 0 的语义由本方法结构性保证）。
+      const deducted = await this.pointsRepo.deductBalanceIfEnough(studentId, points, conn);
+      if (deducted === 0) {
+        throw new BadRequestException({ code: 3001, message: '积分余额不足' });
+      }
 
       const affected = await this.redemptionsRepo.setLedgerId(studentId, redemptionId, ledger.id, conn);
       if (affected === 0) {

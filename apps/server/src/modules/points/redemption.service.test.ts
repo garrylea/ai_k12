@@ -73,7 +73,11 @@ function harness(startNow = new Date(2026, 8, 17, 12, 0, 0)) {
     updateStatus: vi.fn().mockResolvedValue(1),
   };
   const ledgerRepo = { insert: vi.fn().mockResolvedValue({ id: 900, duplicate: false }) };
-  const pointsRepo = { find: vi.fn(), upsertDelta: vi.fn().mockResolvedValue(undefined) };
+  const pointsRepo = {
+    find: vi.fn(),
+    // 条件扣减的默认桩：余额够（affectedRows=1）。并发用例会改回 0。
+    deductBalanceIfEnough: vi.fn().mockResolvedValue(1),
+  };
   const conn = {
     beginTransaction: vi.fn().mockResolvedValue(undefined),
     commit: vi.fn().mockResolvedValue(undefined),
@@ -152,8 +156,8 @@ describe('RedemptionService.redeem — 换钱', () => {
       },
       h.conn,
     );
-    // 关键：earnedDelta 必须是 0，兑换绝不碰 total_earned
-    expect(h.pointsRepo.upsertDelta).toHaveBeenCalledWith(1, 0, -100, h.conn);
+    // 关键：条件扣减只动余额（SQL 里没有 total_earned），兑换绝不碰累计分
+    expect(h.pointsRepo.deductBalanceIfEnough).toHaveBeenCalledWith(1, 100, h.conn);
     expect(h.redemptionsRepo.setLedgerId).toHaveBeenCalledWith(1, 55, 900, h.conn);
     expect(h.conn.commit).toHaveBeenCalledTimes(1);
     expect(h.conn.rollback).not.toHaveBeenCalled();
@@ -181,6 +185,22 @@ describe('RedemptionService.redeem — 换钱', () => {
 
     expect(result.redemption.cashAmount).toBe(3.33);
     expect(h.ledgerRepo.insert.mock.calls[0][0].title).toBe('兑换 · 现金 ¥3.33');
+  });
+
+  it('非默认汇率也按整数运算取整：201 分 / 200 分每元 → 1.01（浮点写法会错成 1.00）', async () => {
+    const h = harness();
+    stubControls(h, { pointsPerYuan: 200 });
+    h.pointsRepo.find
+      .mockResolvedValueOnce({ totalEarned: 501, balance: 1000 })
+      .mockResolvedValueOnce({ totalEarned: 501, balance: 799 });
+
+    const result = await h.service.redeem(1, { type: 'cash', points: 201 });
+
+    // Math.round((201 / 200) * 100) / 100 === 1.00（201/200*100 = 100.49999999999999）
+    // 文档公式 ROUND(201 / 200, 2) === 1.01，必须与之一致
+    expect(result.redemption.cashAmount).toBe(1.01);
+    expect(h.redemptionsRepo.insert.mock.calls[0][0].cash_amount).toBe(1.01);
+    expect(h.ledgerRepo.insert.mock.calls[0][0].title).toBe('兑换 · 现金 ¥1.01');
   });
 
   it('points_per_yuan 缺失/非正数 → 兜底 20', async () => {
@@ -237,7 +257,7 @@ describe('RedemptionService.redeem — 兑换奖励', () => {
       points: -80,
       title: '兑换 · 换个乐高',
     });
-    expect(h.pointsRepo.upsertDelta).toHaveBeenCalledWith(1, 0, -80, h.conn);
+    expect(h.pointsRepo.deductBalanceIfEnough).toHaveBeenCalledWith(1, 80, h.conn);
     expect(result.balance).toBe(20);
     expect(result.totalEarned).toBe(501);
     expect(result.redemption.cashAmount).toBeNull();
@@ -278,7 +298,7 @@ describe('RedemptionService.redeem — 兑换奖励', () => {
       response: { code: 3002 },
     });
 
-    expect(h.pointsRepo.upsertDelta).not.toHaveBeenCalled();
+    expect(h.pointsRepo.deductBalanceIfEnough).not.toHaveBeenCalled();
     expect(h.redemptionsRepo.insert).not.toHaveBeenCalled();
   });
 
@@ -320,7 +340,7 @@ describe('RedemptionService.redeem — 通用校验', () => {
 
     expect(h.redemptionsRepo.insert).not.toHaveBeenCalled();
     expect(h.ledgerRepo.insert).not.toHaveBeenCalled();
-    expect(h.pointsRepo.upsertDelta).not.toHaveBeenCalled();
+    expect(h.pointsRepo.deductBalanceIfEnough).not.toHaveBeenCalled();
     expect(h.pool.getConnection).not.toHaveBeenCalled();
   });
 
@@ -338,12 +358,47 @@ describe('RedemptionService.redeem — 通用校验', () => {
     const h = harness();
     stubControls(h);
     h.pointsRepo.find.mockResolvedValue({ totalEarned: 501, balance: 100 });
-    h.pointsRepo.upsertDelta.mockRejectedValue(new Error('deadlock'));
+    h.pointsRepo.deductBalanceIfEnough.mockRejectedValue(new Error('deadlock'));
 
     await expect(h.service.redeem(1, { type: 'cash', points: 100 })).rejects.toThrow('deadlock');
 
     expect(h.conn.rollback).toHaveBeenCalledTimes(1);
     expect(h.conn.commit).not.toHaveBeenCalled();
+    expect(h.conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('type 非法 → 1001，且早于任何 DB 访问（不开事务、不查开关/快照）', async () => {
+    const h = harness();
+    stubControls(h);
+
+    await expect(
+      h.service.redeem(1, { type: 'bogus' } as never),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+
+    expect(h.controlsRepo.ensure).not.toHaveBeenCalled();
+    expect(h.controlsRepo.findByStudent).not.toHaveBeenCalled();
+    expect(h.pointsRepo.find).not.toHaveBeenCalled();
+    expect(h.catalogRepo.findOne).not.toHaveBeenCalled();
+    expect(h.pool.getConnection).not.toHaveBeenCalled();
+  });
+
+  it('【并发钉子】事务前快照显示余额充足，但条件扣减 affectedRows=0 → 3001 并回滚（权威闸门）', async () => {
+    const h = harness();
+    stubControls(h);
+    // advisory 预检看到余额够（两次并发都读到 100），预检放行
+    h.pointsRepo.find.mockResolvedValue({ totalEarned: 501, balance: 100 });
+    // 但真正扣减时余额已被并发的那一次掏空：条件 UPDATE 没匹配到行
+    h.pointsRepo.deductBalanceIfEnough.mockResolvedValue(0);
+
+    await expect(h.service.redeem(1, { type: 'cash', points: 100 })).rejects.toMatchObject({
+      response: { code: 3001, message: '积分余额不足' },
+    });
+
+    // 权威闸门在事务内、用事务连接执行
+    expect(h.pointsRepo.deductBalanceIfEnough).toHaveBeenCalledWith(1, 100, h.conn);
+    // 半张兑换单/流水必须随事务一起回滚，绝不能 commit
+    expect(h.conn.commit).not.toHaveBeenCalled();
+    expect(h.conn.rollback).toHaveBeenCalledTimes(1);
     expect(h.conn.release).toHaveBeenCalledTimes(1);
   });
 });
@@ -364,9 +419,8 @@ describe('RedemptionService.redeem — 段位只升不降（核心钉子）', ()
     expect(result.totalEarned).toBe(before.totalEarned);
     expect(levelOf(result.totalEarned).code).toBe(levelOf(before.totalEarned).code);
     expect(result.level.code).toBe('zhutie');
-    // 唯一能保证这一点的写法：earnedDelta === 0
-    expect(h.pointsRepo.upsertDelta).toHaveBeenCalledWith(1, 0, -100, h.conn);
-    expect(h.pointsRepo.upsertDelta.mock.calls[0][1]).toBe(0);
+    // 唯一能保证这一点的写法：扣余额走条件 UPDATE，SQL 只 SET balance、不写 total_earned
+    expect(h.pointsRepo.deductBalanceIfEnough).toHaveBeenCalledWith(1, 100, h.conn);
   });
 });
 
@@ -564,7 +618,7 @@ describe('RedemptionService — 兑换记录', () => {
 
     expect(h.redemptionsRepo.updateStatus).toHaveBeenCalledWith(1, 55, 'fulfilled', STAMP);
     expect(h.ledgerRepo.insert).not.toHaveBeenCalled();
-    expect(h.pointsRepo.upsertDelta).not.toHaveBeenCalled();
+    expect(h.pointsRepo.deductBalanceIfEnough).not.toHaveBeenCalled();
     expect(h.pool.getConnection).not.toHaveBeenCalled();
   });
 
