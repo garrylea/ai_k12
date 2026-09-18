@@ -5767,7 +5767,15 @@ export default function ParentErrorsPage() {
             role="tab"
             type="button"
             aria-selected={track === t.key}
-            onClick={() => changeFilter(() => setTrack(t.key))}
+            // 切轨道时**必须清掉来源筛选**：`track=aux`（source = 'auxiliary'）叠加
+            // `source='exam'` 在 SQL 里是永不匹配的组合，后端会安静地返回空列表 +
+            // total 0，家长会读成「孩子没有错题」。这属于筛选器自相矛盾，前端负责不让它发生。
+            onClick={() =>
+              changeFilter(() => {
+                setTrack(t.key);
+                setSource('');
+              })
+            }
             className={clsx(
               'px-4 py-1.5 rounded-full text-sm font-medium border transition-colors',
               track === t.key
