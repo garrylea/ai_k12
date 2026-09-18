@@ -322,11 +322,10 @@ describe('ParentInsightsRepository：错题列表', () => {
       id: 91, question_id: 330, subject_id: 1, source: 'exam', level: 2, is_cleared: 0,
       wrong_answer_text: 'x=3', created_at: new Date('2026-09-16T19:21:00Z'), cleared_at: null,
       question_content: '解方程', question_type: 'calculation', question_difficulty: 3,
-      kp_id: 42, kp_name: '分数加减',
     },
   ];
 
-  it('返回 items + total；默认无附加筛选', async () => {
+  it('返回 items + total；列表行与错题**一比一**（不 JOIN 知识点）', async () => {
     const pool = mockPool([]);
     pool.execute.mockResolvedValueOnce([[{ count: 139 }], []]);
     pool.query.mockResolvedValueOnce([listRows, []]);
@@ -340,15 +339,16 @@ describe('ParentInsightsRepository：错题列表', () => {
         id: 91, questionId: 330, subjectId: 1, source: 'exam', level: 2, isCleared: false,
         wrongAnswerText: 'x=3', createdAt: listRows[0].created_at, clearedAt: null,
         questionContent: '解方程', questionType: 'calculation', questionDifficulty: 3,
-        knowledgePointId: 42, knowledgePointName: '分数加减',
       },
     ]);
     expect(pool.execute.mock.calls[0][0]).toContain('COUNT(*) AS count');
     // 列表走 query（LIMIT ?）
     const listSql = pool.query.mock.calls[0][0] as string;
     expect(listSql).toContain('LEFT JOIN questions');
-    expect(listSql).toContain('LEFT JOIN question_knowledge_points');
     expect(listSql).toContain('ORDER BY meb.created_at DESC, meb.id DESC');
+    // 关键：分页查询**不能**碰知识点关联表，否则一题多 KP 会把行翻倍、分页就错了
+    expect(listSql).not.toContain('question_knowledge_points');
+    expect(listSql).not.toContain('knowledge_points');
   });
 
   it('筛选条件逐条下推（学科 / source / 轨道 / 清零态 / 时间窗）', async () => {
@@ -418,7 +418,6 @@ describe('ParentInsightsRepository：错题列表', () => {
         id: 5, question_id: null, subject_id: 1, source: 'practice', level: 1, is_cleared: 0,
         wrong_answer_text: '只会题面', created_at: new Date('2026-09-10T10:00:00Z'), cleared_at: null,
         question_content: null, question_type: null, question_difficulty: null,
-        kp_id: null, kp_name: null,
       },
     ]);
     pool.execute.mockResolvedValueOnce([[{ count: 1 }], []]);
@@ -427,7 +426,38 @@ describe('ParentInsightsRepository：错题列表', () => {
     const result = await repo.listParentErrors(9, {}, 20, 0);
 
     expect(result.items[0]).toMatchObject({
-      questionId: null, questionContent: null, knowledgePointId: null, wrongAnswerText: '只会题面',
+      questionId: null, questionContent: null, wrongAnswerText: '只会题面',
     });
+  });
+});
+
+describe('ParentInsightsRepository：本页错题的知识点', () => {
+  it('按 questionIds 批量取，一题多 KP 出多行', async () => {
+    const pool = mockPool([
+      { question_id: 330, knowledge_point_id: 42, knowledge_point_name: '分数加减' },
+      { question_id: 330, knowledge_point_id: 43, knowledge_point_name: '整式' },
+      { question_id: 331, knowledge_point_id: 44, knowledge_point_name: '方程' },
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.listErrorKnowledgePoints([330, 331]);
+
+    expect(result).toEqual([
+      { questionId: 330, knowledgePointId: 42, knowledgePointName: '分数加减' },
+      { questionId: 330, knowledgePointId: 43, knowledgePointName: '整式' },
+      { questionId: 331, knowledgePointId: 44, knowledgePointName: '方程' },
+    ]);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('question_knowledge_points');
+    expect(sql).toContain('IN (?,?)');
+    expect(pool.execute.mock.calls[0][1]).toEqual([330, 331]);
+  });
+
+  it('空数组 → 直接返回 []，**不发 SQL**（IN () 是语法错误）', async () => {
+    const pool = mockPool([]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    expect(await repo.listErrorKnowledgePoints([])).toEqual([]);
+    expect(pool.execute).not.toHaveBeenCalled();
   });
 });

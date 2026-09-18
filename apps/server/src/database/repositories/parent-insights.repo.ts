@@ -94,7 +94,11 @@ export interface ParentErrorFilters {
   to?: string;
 }
 
-/** 错题列表行（已 JOIN 题面与知识点；`question_id` 为 NULL 时后几列为 null）。 */
+/**
+ * 错题列表行（已 JOIN 题面；`question_id` 为 NULL 时后三列为 null）。
+ *
+ * **不含知识点**：知识点单独用 `listErrorKnowledgePoints` 批量取（一题多 KP，见方法注释）。
+ */
 export interface ParentErrorRow {
   id: number;
   questionId: number | null;
@@ -108,8 +112,13 @@ export interface ParentErrorRow {
   questionContent: string | null;
   questionType: string | null;
   questionDifficulty: number | null;
-  knowledgePointId: number | null;
-  knowledgePointName: string | null;
+}
+
+/** 「题 × 知识点」扁平行，交给 service 按 questionId 聚成 `question.knowledgePoints[]`。 */
+export interface ErrorKnowledgePointRow {
+  questionId: number;
+  knowledgePointId: number;
+  knowledgePointName: string;
 }
 
 /**
@@ -467,9 +476,13 @@ ${windowed.sql}
    * 家长端错题列表（只读、分页）。
    *
    * 为什么不在 `main-error-books.repo.ts` 上扩展 `findErrorBookEntries`：那个方法正被训练轨
-   * 的错题练习调用，改它会连带改训练轨行为。这里照抄它的 JOIN 与筛选写法自建。
+   * 的错题练习调用，改它会连带改训练轨行为。这里照抄它的筛选写法自建。
    *
    * count 与 list **共用 `buildErrorWhere`**，否则「总数」与「列表」迟早对不上。
+   *
+   * **分页查询刻意不 JOIN 知识点**：实测 41% 的题绑了多个 KP，一 JOIN 就会让行翻倍，而
+   * `LIMIT` 作用在翻倍后的行上——一页的错题数会少于 `pageSize`、同一道错题重复出现、`items`
+   * 与 `total` 对不上。知识点由 `listErrorKnowledgePoints(本页 questionIds)` 另查（见该方法的注释）。
    */
   async listParentErrors(
     studentId: number,
@@ -489,12 +502,9 @@ ${windowed.sql}
       `SELECT meb.id, meb.question_id, meb.subject_id, meb.source, meb.level, meb.is_cleared,
               meb.wrong_answer_text, meb.created_at, meb.cleared_at,
               q.content AS question_content, q.type AS question_type,
-              q.difficulty AS question_difficulty,
-              qkp.knowledge_point_id AS kp_id, kp.name AS kp_name
+              q.difficulty AS question_difficulty
        FROM main_error_books meb
        LEFT JOIN questions q ON q.id = meb.question_id
-       LEFT JOIN question_knowledge_points qkp ON qkp.question_id = meb.question_id
-       LEFT JOIN knowledge_points kp ON kp.id = qkp.knowledge_point_id
        WHERE ${where}
        ORDER BY meb.created_at DESC, meb.id DESC
        LIMIT ? OFFSET ?`,
@@ -516,10 +526,33 @@ ${windowed.sql}
         questionContent: (r.question_content as string | null) ?? null,
         questionType: (r.question_type as string | null) ?? null,
         questionDifficulty: r.question_difficulty === null ? null : Number(r.question_difficulty),
-        knowledgePointId: r.kp_id === null ? null : Number(r.kp_id),
-        knowledgePointName: (r.kp_name as string | null) ?? null,
       })),
     };
+  }
+
+  /**
+   * 本页错题涉及的知识点（一题多 KP 会出多行，由 service 按 questionId 聚成数组）。
+   *
+   * 空数组**直接返回、不发 SQL**：`IN ()` 在 MySQL 里是语法错误。这个守卫必须留在仓储里，
+   * 不能让每个调用方各自记得判空。
+   */
+  async listErrorKnowledgePoints(questionIds: number[]): Promise<ErrorKnowledgePointRow[]> {
+    if (questionIds.length === 0) return [];
+
+    const placeholders = questionIds.map(() => '?').join(',');
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT qkp.question_id, kp.id AS knowledge_point_id, kp.name AS knowledge_point_name
+       FROM question_knowledge_points qkp
+       JOIN knowledge_points kp ON kp.id = qkp.knowledge_point_id
+       WHERE qkp.question_id IN (${placeholders})
+       ORDER BY qkp.question_id ASC, kp.id ASC`,
+      questionIds,
+    );
+    return rows.map((r) => ({
+      questionId: Number(r.question_id),
+      knowledgePointId: Number(r.knowledge_point_id),
+      knowledgePointName: String(r.knowledge_point_name ?? ''),
+    }));
   }
 
   /** 错题列表 count 与 list 的**唯一** WHERE 构造器（改这里就是改两处）。 */
