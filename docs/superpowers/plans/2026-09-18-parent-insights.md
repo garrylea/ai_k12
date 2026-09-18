@@ -1655,8 +1655,8 @@ Expected: FAIL — `Failed to resolve import "./window.util.js"`
 /**
  * 家长端报告的时间窗（spec §4.2 ②）。
  *
- * 口径：`weekly` = 近 7 天（含今天）、`monthly` = 近 30 天。`windowStart` / `windowEnd` 都是
- * **日期**，SQL 上用 `>= start` 与 `< endExclusive` 表达闭区间——半开区间跨月/跨年无需拼接。
+ * 口径：`weekly` = 近 7 天（含今天）、`monthly` = 近 30 天。响应里回显的 `startDay` / `endDay`
+ * 都是**日期**，SQL 上用 `>= start` 与 `< endExclusive` 表达闭区间——半开区间跨月/跨年无需拼接。
  *
  * 一律按**服务器本地时区**的 00:00 算：刻意不在 SQL 里用 `CURDATE()`，因为 DB 会话时区与
  * 应用可能不一致，会算错一天（`point-ledger.repo.ts` 的既有约定）。
@@ -2028,6 +2028,19 @@ import type {
 const ACTIVE_WINDOW_DAYS = 7;
 
 /**
+ * 只认 `{ code: 1002 }` 的 NotFoundException。
+ *
+ * **不要**写成 `err instanceof NotFoundException`：那样会把**任何** 404 都吞掉，将来
+ * `getStarMap` 里新增一个别的 404（比如「教材版本已被删除」）就会被无声跳过，家长端少一张
+ * 卡片且没有任何线索。Nest 把业务码放在 `getResponse()` 上。
+ */
+function isNotFound1002(err: unknown): boolean {
+  if (!(err instanceof NotFoundException)) return false;
+  const body = err.getResponse();
+  return typeof body === 'object' && body !== null && (body as { code?: unknown }).code === 1002;
+}
+
+/**
  * 家长仪表盘（spec §4.2 ①）：**多孩聚合一个端点**，一次给完。
  *
  * 口径注意：
@@ -2117,7 +2130,8 @@ export class DashboardService {
       try {
         starMap = await this.progressService.getStarMap(studentId, subjectId);
       } catch (err) {
-        if (err instanceof NotFoundException) continue;
+        // 只吞 1002（学生不存在 / 该学科暂无教材版本）。非 1002 的异常照常抛，别把真 bug 静默吃掉。
+        if (isNotFound1002(err)) continue;
         throw err;
       }
 
