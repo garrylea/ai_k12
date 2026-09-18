@@ -3,9 +3,12 @@ import { ParentInsightsController } from './parent-insights.controller.js';
 import { DashboardService } from './dashboard.service.js';
 import { ReportService } from './report.service.js';
 import { ErrorsService } from './errors.service.js';
+import { ChatLogsService } from './chat-logs.service.js';
 import { ParentInsightsRepository } from '../../database/repositories/parent-insights.repo.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
+import { AiDialoguesRepository } from '../../database/repositories/ai-dialogues.repo.js';
+import { AiMessagesRepository } from '../../database/repositories/ai-messages.repo.js';
 import { ParentModule } from '../parent/parent.module.js';
 import { ProgressModule } from '../progress/progress.module.js';
 
@@ -28,9 +31,12 @@ import { ProgressModule } from '../progress/progress.module.js';
     DashboardService,
     ReportService,
     ErrorsService,
+    ChatLogsService,
     ParentInsightsRepository,
     StudentsRepository,
     SubjectsRepository,
+    AiDialoguesRepository,
+    AiMessagesRepository,
   ],
 })
 export class ParentInsightsModule {}

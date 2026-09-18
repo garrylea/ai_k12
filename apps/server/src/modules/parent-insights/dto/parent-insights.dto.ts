@@ -163,3 +163,42 @@ export interface ParentErrorPage {
   pageSize: number;
   total: number;
 }
+
+/** 会话列表一行。`blockCount` = 该会话里 `safety_flag = 1` 的消息数（闲聊/偏离学习标记）。 */
+export interface ParentChatLogItem {
+  id: number;
+  track: string;
+  scene: string;
+  title: string | null;
+  subjectId: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  messageCount: number;
+  blockCount: number;
+}
+
+/**
+ * 逐句消息。**不回传 `token_input` / `token_output` / `response_time_ms`**——那三列全仓
+ * 永远写 NULL（`conversations.service.ts` 写死 null），回传只会让家长误以为「没有消耗」。
+ */
+export interface ParentChatLogMessage {
+  id: number;
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  reasoning: string | null;
+  type: string | null;
+  model: string | null;
+  safetyFlag: number;
+  createdAt: Date;
+}
+
+export interface ParentChatLogDetail extends ParentChatLogItem {
+  messages: ParentChatLogMessage[];
+}
+
+export interface ParentChatLogPage {
+  items: ParentChatLogItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}

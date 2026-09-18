@@ -17,7 +17,15 @@ import { DashboardService } from './dashboard.service.js';
 import { ReportService } from './report.service.js';
 import { ErrorsService } from './errors.service.js';
 import type { ErrorsQuery } from './errors.service.js';
-import type { LearningReport, ParentDashboard, ParentErrorPage } from './dto/parent-insights.dto.js';
+import { ChatLogsService } from './chat-logs.service.js';
+import type { ChatLogsQuery } from './chat-logs.service.js';
+import type {
+  LearningReport,
+  ParentChatLogDetail,
+  ParentChatLogPage,
+  ParentDashboard,
+  ParentErrorPage,
+} from './dto/parent-insights.dto.js';
 import type { ReportPeriod } from './window.util.js';
 import { DEFAULT_PAGE, parsePositiveInt } from '../points/pagination.util.js';
 
@@ -44,6 +52,7 @@ export class ParentInsightsController {
     private readonly dashboardService: DashboardService,
     private readonly reportService: ReportService,
     private readonly errorsService: ErrorsService,
+    private readonly chatLogsService: ChatLogsService,
   ) {}
 
   /** P6.1 家长仪表盘：一次返回名下所有孩子的概览（含各自的按学科卡片）。 */
@@ -90,5 +99,40 @@ export class ParentInsightsController {
     if (to) query.to = to;
 
     return this.errorsService.listErrors(studentId, query);
+  }
+
+  /** P6.4 对话回放列表。筛选 = 轨道 + 场景 + 时间 + 标题关键词（无学科，见 service 注释）。 */
+  @Get('students/:studentId/chat-logs')
+  async listChatLogs(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Query('track') track?: string,
+    @Query('scene') scene?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+  ): Promise<ParentChatLogPage> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+
+    const query: ChatLogsQuery = { page: parsePositiveInt(page, 'page', DEFAULT_PAGE) };
+    if (track === 'mainline' || track === 'auxiliary') query.track = track;
+    if (scene) query.scene = scene;
+    if (from) query.from = from;
+    if (to) query.to = to;
+    if (q) query.q = q;
+
+    return this.chatLogsService.listChatLogs(studentId, query);
+  }
+
+  /** P6.4 单条对话详情（逐句回放，含 `reasoning` 与闲聊标记）。 */
+  @Get('students/:studentId/chat-logs/:dialogueId')
+  async getChatLog(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Param('dialogueId', ParseIntPipe) dialogueId: number,
+  ): Promise<ParentChatLogDetail> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    return this.chatLogsService.getChatLog(studentId, dialogueId);
   }
 }
