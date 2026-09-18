@@ -1151,9 +1151,9 @@ export interface ParentErrorRow {
   private buildErrorWhere(
     studentId: number,
     filters: ParentErrorFilters,
-  ): { where: string; params: unknown[] } {
+  ): { where: string; params: (number | string)[] } {
     const conditions = ['meb.student_id = ?'];
-    const params: unknown[] = [studentId];
+    const params: (number | string)[] = [studentId];
 
     if (filters.subjectId !== undefined) {
       conditions.push('meb.subject_id = ?');
@@ -1382,9 +1382,9 @@ export interface ParentChatLogRow {
   private buildChatLogWhere(
     studentId: number,
     filters: ParentChatLogFilters,
-  ): { where: string; params: unknown[] } {
+  ): { where: string; params: (number | string)[] } {
     const conditions = ['d.student_id = ?', 'd.deleted_at IS NULL'];
-    const params: unknown[] = [studentId];
+    const params: (number | string)[] = [studentId];
 
     if (filters.track) {
       conditions.push('d.track = ?');
