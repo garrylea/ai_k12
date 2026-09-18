@@ -8,7 +8,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import ParentPointsPage from './ParentPointsPage';
 import {
   getLevels,
@@ -109,10 +109,37 @@ function renderPage(path = '/parent/rewards') {
   );
 }
 
-function switchStudent(id: number) {
+function switchStudent(id: number | null) {
   act(() => {
     useParentStudentStore.setState({ studentId: id });
   });
+}
+
+/**
+ * 真实路由后退。存在的理由：Tab 按钮上的守卫拦得住「点 Tab」，但拦不住浏览器的
+ * 历史导航——`?tab=` 一变，面板就被卸载，而**脏弹框长在面板内部**，于是弹框与
+ * 面板一起消失。这是「面板卸载即冻结」那个洞的复现入口（不是 mock 计数）。
+ */
+function HistoryBackButton() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" data-testid="history-back" onClick={() => navigate(-1)}>
+      后退
+    </button>
+  );
+}
+
+/** 历史栈：[默认档, ?tab=catalog]，初始停在 catalog —— 后退一步就是一次真实的换 Tab。 */
+function renderWithHistoryBack() {
+  return render(
+    <MemoryRouter
+      initialEntries={['/parent/rewards', '/parent/rewards?tab=catalog']}
+      initialIndex={1}
+    >
+      <HistoryBackButton />
+      <ParentPointsPage />
+    </MemoryRouter>,
+  );
 }
 
 /** 手动控制 resolve 时机，用来制造「上一个孩子的响应迟到」。 */
@@ -418,8 +445,9 @@ describe('ParentPointsPage：未保存草稿保护（Task 6 脏状态注册通�
     await waitFor(() => expect(useParentStudentStore.getState().studentId).toBe(1));
     expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '1');
     expect(within(screen.getByTestId('reward-row-11')).getByLabelText('所需积分')).toHaveValue(300);
-    // 没为「孩子 2」发过清单请求
+    // 没为「孩子 2」发过清单 / 概览请求
     expect(getParentRewardCatalogMock.mock.calls.map((call) => call[0])).toEqual([1]);
+    expect(getParentPointsMock).toHaveBeenLastCalledWith(1);
   });
 
   it('未保存时切孩子 → 确认后换人，且以新 id 重拉清单（草稿丢弃）', async () => {
@@ -433,6 +461,8 @@ describe('ParentPointsPage：未保存草稿保护（Task 6 脏状态注册通�
     await waitFor(() =>
       expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '2'),
     );
+    // 生效值与 store 一致（不是「先换到 2、store 却还停在 1」那种半吊子状态）
+    expect(useParentStudentStore.getState().studentId).toBe(2);
     // 新孩子的面板是新挂载的：草稿没了，回到服务端快照
     const first = await screen.findByTestId('reward-row-11');
     expect(within(first).getByLabelText('所需积分')).toHaveValue(200);
@@ -447,5 +477,99 @@ describe('ParentPointsPage：未保存草稿保护（Task 6 脏状态注册通�
     await waitFor(() => expect(getParentRewardCatalogMock).toHaveBeenLastCalledWith(2));
     expect(screen.queryByText(/有未保存的修改/)).not.toBeInTheDocument();
     expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '2');
+  });
+
+  /**
+   * **冻结回归钉子**。旧实现在确认弹框打开期间把新 id 记在 `pendingStudentId` 里，
+   * 而清除它的只有面板弹框的回调——弹框长在面板内部，一次历史导航把面板（连同弹框）
+   * 卸载后 pending 永远是 2：首个 layout effect 此后每次都在那里 early return，
+   * 页面（概览、Tab、面板）冻结在孩子 1，只有整页刷新能恢复。
+   */
+  it('确认弹框期间面板被卸载（浏览器后退改 ?tab=）→ 挂起被解析，页面跟随 store 不冻结', async () => {
+    renderWithHistoryBack();
+    await makeDraft();
+
+    switchStudent(2);
+    expect(await screen.findByText(/有未保存的修改，确定离开吗/)).toBeInTheDocument();
+    // 还没人回答，页面不许先换人
+    expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '1');
+
+    // 真实后退：?tab 从 catalog 回到默认档 → 面板与它内部的弹框一起被卸载
+    fireEvent.click(screen.getByTestId('history-back'));
+
+    // 关键：挂起必须被解析（提交），页面跟着 store 走，而不是永远停在孩子 1
+    await waitFor(() =>
+      expect(screen.getByTestId('points-panel-rules')).toHaveAttribute('data-student-id', '2'),
+    );
+    expect(useParentStudentStore.getState().studentId).toBe(2);
+    expect(getParentPointsMock).toHaveBeenLastCalledWith(2);
+    // 弹框随面板一起没了，没有留下一个没人能回答的挂起
+    await waitFor(() =>
+      expect(screen.queryByText(/有未保存的修改，确定离开吗/)).not.toBeInTheDocument(),
+    );
+  });
+
+  it('弹框期间 store 又换到第三个孩子 → 确认后直接跟随最新 store，不停在中间值', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await makeDraft();
+
+    switchStudent(2);
+    await screen.findByText(/有未保存的修改，确定离开吗/);
+    // 家长在还没回答弹框时又点了第三个孩子
+    switchStudent(3);
+
+    fireEvent.click(screen.getByRole('button', { name: '确认离开' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '3'),
+    );
+    expect(useParentStudentStore.getState().studentId).toBe(3);
+    // 没有为「孩子 2」多发一次清单请求（挂起记的是「先别跟随」，不是某个目标 id）
+    expect(getParentRewardCatalogMock.mock.calls.map((call) => call[0])).toEqual([1, 3]);
+  });
+
+  /**
+   * §2.5「切孩子前先确认」的**刻意例外**：`storeStudentId === null` 只可能来自
+   * `StudentSwitcher` 把孩子列表回落成空（一个孩子都没有了）。此时没有孩子可换、
+   * 草稿必然作废，「确定离开吗」给不出第二个选项——把 store 回滚成旧 id 还会被
+   * 回落逻辑立刻再置回 null，弹窗会无限循环。
+   */
+  it('store 变 null（没有孩子了）→ 直接进空态，不弹确认', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await makeDraft();
+
+    switchStudent(null);
+
+    expect(screen.getByTestId('points-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('points-panel-catalog')).not.toBeInTheDocument();
+    expect(screen.queryByText(/有未保存的修改/)).not.toBeInTheDocument();
+    expect(useParentStudentStore.getState().studentId).toBeNull();
+  });
+
+  /**
+   * 保存请求在飞时不算脏（Task 6 审查 #5）：那次修改马上落库，再弹「有未保存的修改，
+   * 确定离开吗」是误报——家长刚点过保存，被问「要不要放弃」只会以为保存失败了。
+   */
+  it('保存请求在飞时不算脏：Tab 圆点熄灭、切孩子不弹确认', async () => {
+    const slow = deferred<RewardCatalogView[]>();
+    saveParentRewardCatalogMock.mockReturnValueOnce(slow.promise);
+
+    renderPage('/parent/rewards?tab=catalog');
+    await makeDraft();
+    expect(screen.getByTestId('points-tab-catalog-dirty')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('save-catalog'));
+    await waitFor(() => expect(saveParentRewardCatalogMock).toHaveBeenCalledTimes(1));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('points-tab-catalog-dirty')).not.toBeInTheDocument(),
+    );
+
+    switchStudent(2);
+
+    expect(screen.queryByText(/有未保存的修改/)).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '2'),
+    );
   });
 });

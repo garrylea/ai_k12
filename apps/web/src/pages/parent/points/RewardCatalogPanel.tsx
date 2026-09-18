@@ -34,6 +34,7 @@ import {
  * 用户打「-」「1a」的中间态吞掉），`snapshot` 是服务器清单的序列化结果；两者不等
  * 就是「未保存」。这个布尔值通过 `onRegisterLeaveGuard` 注册给页面，页面据此在
  * Tab 上打点、并在切 Tab / 切孩子前先弹确认（见 `ParentPointsPage`）。
+ * **保存请求在飞时不算脏**：那次修改马上落库，再问「要不要放弃」纯属误报。
  */
 
 export interface RewardCatalogPanelProps {
@@ -53,6 +54,7 @@ export interface RewardCatalogPanelProps {
  * 页面因此拿到的是最新值，也不需要订阅面板内部状态）。
  */
 export interface LeaveGuard {
+  /** 有未保存的改动；**保存请求在飞时为 false**（那次修改马上落库，不算要放弃的东西）。 */
   dirty: boolean;
   /**
    * 请求离场：面板弹「有未保存的修改，确定离开吗？」。
@@ -72,6 +74,11 @@ const SORT_MAX = 9999;
 const NAME_ERROR = `请填 1–${NAME_MAX} 个字符`;
 const DESC_ERROR = `不超过 ${DESC_MAX} 个字符`;
 const COST_ERROR = `请填 ${COST_MIN}–${COST_MAX} 的整数`;
+/**
+ * 家长碰过这一行之前不显示红错（新增即「请填…」两条红字是骂人），改用这句中性提示
+ * 解释「保存为什么是灰的」——只把错误藏起来而让保存无声禁用同样说不通。
+ */
+const UNTOUCHED_HINT = '名称与所需积分填好后才能保存';
 
 /** 服务端 1001 里能对到具体字段时的行内文案（原始 message 仍会显示在表单级提示里）。 */
 const SERVER_FIELD_ERROR: Record<'name' | 'description' | 'pointsCost', string> = {
@@ -118,12 +125,15 @@ function toRow(view: RewardCatalogView, tempKey: string): RowDraft {
  * 所以「上移/下移」只要换数组顺序，排序号自然跟着走。
  */
 function toInput(row: RowDraft, index: number): RewardCatalogItemInput {
+  // name 与 description **同一套规则**：都 trim，全空白等同没填。别只 trim 一边——
+  // 「 abc 」原样发出、而「   」变 null 的不对称会让判脏（serialize 也走这里）
+  // 与服务端归一后的快照悄悄错开。
   const description = row.description.trim();
   return {
     ...(row.id === undefined ? {} : { id: row.id }),
     name: row.name.trim(),
     // 空串必须是 null：空串会被服务端当成「有说明但长度为 0」的脏值
-    description: description === '' ? null : row.description,
+    description: description === '' ? null : description,
     pointsCost: Number(row.pointsCost),
     minLevelCode: row.minLevelCode === '' ? null : row.minLevelCode,
     isActive: row.isActive,
@@ -185,6 +195,8 @@ interface RowProps {
   count: number;
   levels: PointLevel[];
   error?: FieldErrors;
+  /** 该行还没被碰过、却已有校验不通过的地方：用中性提示代替红错。 */
+  hint?: string;
   saving: boolean;
   onPatch: (patch: Partial<RowDraft>) => void;
   onMove: (offset: -1 | 1) => void;
@@ -197,6 +209,7 @@ function RewardRow({
   count,
   levels,
   error,
+  hint,
   saving,
   onPatch,
   onMove,
@@ -347,6 +360,15 @@ function RewardRow({
           </div>
         </div>
       </div>
+
+      {hint && (
+        <p
+          data-testid={`reward-row-hint-${key}`}
+          className="mt-3 text-xs text-[var(--text-tertiary)]"
+        >
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -368,6 +390,13 @@ export default function RewardCatalogPanel({
   } | null>(null);
   /** 新行的本地 key 序号：每次挂载从 1 开始（切孩子/切 Tab 重挂 → 又是一个干净面板）。 */
   const tempSeqRef = useRef(0);
+  /**
+   * 家长碰过哪些行。**新增的空行在被动过之前不报红错**——一点「新增奖励」就被
+   * 「请填 1–100 个字符」+「请填 1–999999 的整数」两条红字骂一顿不是帮忙；
+   * 那一行的中性提示（见 `UNTOUCHED_HINT`）负责解释保存为什么是灰的。
+   * 字段编辑即算碰过；上移/下移/删除不改字段，不标记。
+   */
+  const [touchedKeys, setTouchedKeys] = useState<ReadonlySet<string>>(() => new Set());
 
   /**
    * 按 `studentId` 现算归属，而不是在 effect 里清空：effect 在 commit 之后才跑，
@@ -414,8 +443,17 @@ export default function RewardCatalogPanel({
   }, [rows]);
 
   const hasErrors = Object.keys(clientErrors).length > 0;
-  const dirty = rows !== null && loaded !== null && serialize(rows) !== loaded.snapshot;
-  const canSave = dirty && !hasErrors && !saving;
+  const isDirty = rows !== null && loaded !== null && serialize(rows) !== loaded.snapshot;
+  /**
+   * 对外的「未保存」**排除保存进行中**：请求在飞时这次修改马上就要落库，此刻 Tab 上的
+   * 「未保存」小圆点、切孩子时的「有未保存的修改，确定离开吗」都是误报——家长刚点过
+   * 保存，被问「要不要放弃」只会以为保存失败了。
+   *
+   * 这个降级不会吞掉编辑：保存期间所有输入框/开关/上下移/删除/新增都是 `disabled`，
+   * 飞在空中的那一次提交就是当前全部草稿（响应回来会整表替换本地数组）。
+   */
+  const dirty = isDirty && !saving;
+  const canSave = isDirty && !hasErrors && !saving;
 
   const patchRows = (updater: (prev: RowDraft[]) => RowDraft[]) => {
     // 任何一次编辑都清掉上一次保存失败留下的提示（否则改完还挂着旧错，看着像没生效）
@@ -427,6 +465,8 @@ export default function RewardCatalogPanel({
   };
 
   const patchRow = (key: string, patch: Partial<RowDraft>) => {
+    // 编辑即「碰过」：从这一刻起该行的校验红错才显示
+    setTouchedKeys((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
     patchRows((prev) =>
       prev.map((row) => (keyOf(row) === key ? { ...row, ...patch } : row)),
     );
@@ -544,12 +584,18 @@ export default function RewardCatalogPanel({
   }
 
   const mergedErrors = (key: string): FieldErrors | undefined => {
-    const client = clientErrors[key];
+    // 没碰过的行不显示**客户端**校验（新增即满屏红字）；服务端错误照常显示——
+    // 它只可能来自一次真实提交，那次提交必然已经把整表「碰」过一遍了。
+    const client = touchedKeys.has(key) ? clientErrors[key] : undefined;
     const server = serverErrors[key];
     if (!client && !server) return undefined;
     // 客户端校验更即时，优先显示；服务端的补充在客户端没意见的字段上
     return { ...server, ...client };
   };
+
+  /** 没碰过却有校验不通过的行：用一句中性提示代替红错（别只把保存按钮默默置灰）。 */
+  const rowHint = (key: string): string | undefined =>
+    !touchedKeys.has(key) && clientErrors[key] ? UNTOUCHED_HINT : undefined;
 
   return (
     <div data-student-id={studentId} className="space-y-4">
@@ -605,6 +651,7 @@ export default function RewardCatalogPanel({
                 count={rows.length}
                 levels={loaded.levels}
                 error={mergedErrors(keyOf(row))}
+                hint={rowHint(keyOf(row))}
                 saving={saving}
                 onPatch={(patch) => patchRow(keyOf(row), patch)}
                 onMove={(offset) => moveRow(index, offset)}

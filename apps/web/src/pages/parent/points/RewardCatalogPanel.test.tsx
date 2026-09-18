@@ -346,6 +346,28 @@ describe('RewardCatalogPanel：整表保存', () => {
     expect(items[0].description).toBeNull();
   });
 
+  it('description 两端空白被 trim（与 name 同一套规则，别只 trim 一边）', async () => {
+    renderPanel();
+
+    const first = await screen.findByTestId('reward-row-11');
+    fireEvent.change(within(first).getByLabelText('说明'), {
+      target: { value: ' 和同学一起看 ' },
+    });
+
+    const items = (await saveAndGetItems()) as Array<Record<string, unknown>>;
+    expect(items[0].description).toBe('和同学一起看');
+  });
+
+  it('description 全空白 → 提交 null（不是 "   "）', async () => {
+    renderPanel();
+
+    const first = await screen.findByTestId('reward-row-11');
+    fireEvent.change(within(first).getByLabelText('说明'), { target: { value: '   ' } });
+
+    const items = (await saveAndGetItems()) as Array<Record<string, unknown>>;
+    expect(items[0].description).toBeNull();
+  });
+
   it('下架开关：切到 false 后保存，该行 isActive 进 body', async () => {
     renderPanel();
 
@@ -457,6 +479,40 @@ describe('RewardCatalogPanel：校验与错误', () => {
     expect(screen.getByTestId('save-catalog')).toBeEnabled();
   });
 
+  /**
+   * 新增行的红错回归钉子：一点「新增奖励」就同时画上「请填 1–100 个字符」与
+   * 「请填 1–999999 的整数」，保存还默默变成灰色——这是骂人不是帮忙。
+   */
+  it('新增的空行不报红错，改显示一句中性提示说明保存为什么是灰的', async () => {
+    renderPanel();
+
+    await screen.findByTestId('reward-row-11');
+    fireEvent.click(screen.getByTestId('add-reward'));
+
+    const fresh = screen.getByTestId('reward-row-new-1');
+    expect(within(fresh).queryByText('请填 1–100 个字符')).not.toBeInTheDocument();
+    expect(within(fresh).queryByText('请填 1–999999 的整数')).not.toBeInTheDocument();
+    expect(screen.getByTestId('save-catalog')).toBeDisabled();
+    expect(within(fresh).getByTestId('reward-row-hint-new-1')).toHaveTextContent(
+      '名称与所需积分填好后才能保存',
+    );
+  });
+
+  it('碰过这一行之后才显示校验红错，中性提示随之消失', async () => {
+    renderPanel();
+
+    await screen.findByTestId('reward-row-11');
+    fireEvent.click(screen.getByTestId('add-reward'));
+    const fresh = screen.getByTestId('reward-row-new-1');
+
+    fireEvent.change(within(fresh).getByLabelText('名称'), { target: { value: '去游乐园' } });
+
+    expect(within(fresh).getByText('请填 1–999999 的整数')).toBeInTheDocument();
+    // 已经填好的字段不报错
+    expect(within(fresh).queryByText('请填 1–100 个字符')).not.toBeInTheDocument();
+    expect(within(fresh).queryByTestId('reward-row-hint-new-1')).not.toBeInTheDocument();
+  });
+
   it('后端 1001 → 行内字段提示（不发 toast）', async () => {
     renderPanel();
 
@@ -539,6 +595,36 @@ describe('RewardCatalogPanel：未保存守卫通道', () => {
     act(() => lastGuard()?.confirmLeave(onConfirmed, onCancelled));
     fireEvent.click(await screen.findByRole('button', { name: '确认离开' }));
     expect(onConfirmed).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * 保存请求在飞时不算脏：这次修改马上落库，此刻 Tab 打点、切孩子弹「确定离开吗」
+   * 都是误报。失败（草稿还在）必须回到脏——别把守卫永久关掉。
+   */
+  it('保存请求在飞时 dirty 落回 false；保存失败后草稿还在 → 重新变脏', async () => {
+    const { lastGuard } = renderWithGuard();
+    const first = await screen.findByTestId('reward-row-11');
+    fireEvent.change(within(first).getByLabelText('所需积分'), { target: { value: '300' } });
+    await waitFor(() => expect(lastGuard()?.dirty).toBe(true));
+
+    let rejectSave!: (err: unknown) => void;
+    saveCatalogMock.mockReturnValueOnce(
+      new Promise<RewardCatalogView[]>((_resolve, reject) => {
+        rejectSave = reject;
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId('save-catalog'));
+
+    await waitFor(() => expect(lastGuard()?.dirty).toBe(false));
+
+    await act(async () => {
+      rejectSave(new ApiError(5000, '服务端开小差了'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(lastGuard()?.dirty).toBe(true));
+    expect(within(first).getByLabelText('所需积分')).toHaveValue(300);
   });
 
   it('卸载时注册 null（不留悬空回调）', async () => {

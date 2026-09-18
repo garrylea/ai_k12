@@ -31,6 +31,9 @@ import RedemptionHistoryPanel from './points/RedemptionHistoryPanel';
  *    `leaveGuardRef`（面板 mount 时注册一个 `{dirty, confirmLeave}`、卸载注销）；
  *    `selectTab` 与「store 换孩子」两条路径在真正切换前先问它。**切孩子要多做一步**：
  *    见下面 `activeStudentId` 的注释。
+ *    守卫宿主**可能在家长回答弹窗之前就消失**（浏览器后退改 `?tab=`、面板被卸载）——
+ *    此时挂起必须被解析掉、跟随 store，不能让页面永远冻结在旧孩子上；解析规则见
+ *    第二个 layout effect 的注释。
  *
  * 配色一律 `style.md` §2.3 的 CSS 变量（`ParentLayout` 已给 `data-theme="parent"`，
  * 强制日间、无切换）。段位图标统一 `--brand-500`，不做学生端那套明度阶。
@@ -124,8 +127,14 @@ export default function ParentPointsPage() {
    * 回滚到旧孩子。跨学生提交是事故，**静默丢草稿同样是事故**。
    */
   const [studentId, setActiveStudentId] = useState(storeStudentId);
-  /** store 想切到的新孩子（非 null = 确认弹窗还开着，先不换人）。 */
-  const [pendingStudentId, setPendingStudentId] = useState<number | null>(null);
+  /**
+   * 「跟随 store 换孩子」被挂起（true = 某个脏面板在等家长回答确认弹窗）。
+   *
+   * **目标 id 有意不记在这里**：解除挂起时现读 `storeStudentId`，所以家长在弹窗期间
+   * 又换了孩子（2 → 3）不会被拖去一个过期的目标。store 是「要去看哪个孩子」的唯一
+   * 真源，挂起只表示「先别跟随」，不表示「跟随到某个历史值」。
+   */
+  const [switchPending, setSwitchPending] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = normalizeTab(searchParams.get('tab'));
@@ -189,6 +198,9 @@ export default function ParentPointsPage() {
 
   const selectTab = (key: TabKey) => {
     if (key === activeTab) return;
+    // 挂起中的切孩子还没被回答：此刻再问一次守卫会把它的回调顶掉
+    // （面板只有一个弹窗槽位），家长随后回答的是后一个问题、前一个挂起就再没人解析。
+    if (switchPending) return;
     const guard = leaveGuardRef.current;
     // 脏弹窗由面板自己渲染（它才知道要提示什么），页面只负责「先问再切」
     if (guard?.dirty) {
@@ -206,42 +218,59 @@ export default function ParentPointsPage() {
    * 出现的东西」。layout effect 在绘制前跑完，这一步对用户不可见。
    */
   useLayoutEffect(() => {
-    if (pendingStudentId !== null) return;
+    if (switchPending) return;
     if (storeStudentId === studentId) return;
-    // 没有孩子可看不是「跨学生提交」的危险场景，直接跟随（此时草稿只能丢）
+    /**
+     * `storeStudentId === null` = 顶栏把孩子列表回落成了空（最后一个孩子被删 /
+     * 当前 id 已失效）。**刻意不走守卫，是 §2.5「切孩子前先确认」唯一的例外**：
+     * 此时没有孩子可换，草稿必然作废，「确定离开吗」给不出第二个选项——把 store
+     * 回滚成旧 id 还会被 `StudentSwitcher` 的回落逻辑立刻再置回 null，弹窗无限循环。
+     * 用例：「store 变 null（没有孩子了）→ 直接进空态，不弹确认」。
+     */
     if (storeStudentId === null) {
       setActiveStudentId(null);
       return;
     }
     if (leaveGuardRef.current?.dirty) {
-      setPendingStudentId(storeStudentId);
+      setSwitchPending(true);
       return;
     }
     setActiveStudentId(storeStudentId);
-  }, [storeStudentId, studentId, pendingStudentId]);
+  }, [storeStudentId, studentId, switchPending]);
 
-  /** 挂起中的切孩子：向守卫要一个答复（确认 → 换人；取消 → 把 store 回滚）。 */
+  /**
+   * 挂起中的切孩子：向**当前挂载中**的守卫要一个答复（确认 → 换人；取消 → 回滚 store）。
+   *
+   * `leaveGuardDirty` 必须进依赖，这是「面板卸载即冻结」那个洞的修复本体：守卫宿主
+   * （面板）卸载时会把 ref 清成 null、同时让这个快照翻成 false —— 挂起到此已经没有
+   * 意义（草稿随面板一起没了，再弹确认也问不到人），必须在这里把挂起解析掉、跟随
+   * store；否则首个 layout effect 此后每次都在 `switchPending` 处 early return，
+   * 页面会永远停在旧孩子上（只有整页刷新能救）。
+   * 同理，`storeStudentId` 进依赖保证「弹窗期间 store 又换了人」能追上来。
+   *
+   * 也正因为守卫消失会被立刻解析，**这里不会对已卸载面板的守卫调 `confirmLeave`**：
+   * 能走到下面那行的守卫一定是当前挂载中、且真的脏的那个。
+   */
   useLayoutEffect(() => {
-    if (pendingStudentId === null) return;
-    const nextId = pendingStudentId;
+    if (!switchPending) return;
     const guard = leaveGuardRef.current;
     if (!guard?.dirty) {
-      setActiveStudentId(nextId);
-      setPendingStudentId(null);
+      setSwitchPending(false);
+      setActiveStudentId(storeStudentId);
       return;
     }
     guard.confirmLeave(
       () => {
-        setActiveStudentId(nextId);
-        setPendingStudentId(null);
+        setSwitchPending(false);
+        setActiveStudentId(storeStudentId);
       },
       () => {
-        setPendingStudentId(null);
+        setSwitchPending(false);
         // 页面没真的换人，store 里不能留着新孩子（否则顶栏与页面从此不一致）
         setStoreStudentId(studentId);
       },
     );
-  }, [pendingStudentId, studentId, setStoreStudentId]);
+  }, [switchPending, studentId, storeStudentId, leaveGuardDirty, setStoreStudentId]);
 
   return (
     <div className="space-y-6">
