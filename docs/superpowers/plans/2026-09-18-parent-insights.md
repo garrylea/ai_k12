@@ -5101,7 +5101,7 @@ export default function ParentReportPage() {
               <StatCard label="答题数" value={String(data.stats.answered)} />
               <StatCard label="活跃天数" value={String(data.stats.activeDays)} />
               <StatCard label="自评次数" value={String(data.stats.selfAssessCount)} />
-              <StatCard label="新增错题" value={String(data.stats.errorsAdded)} />
+              <StatCard label="新进错题本" value={String(data.stats.errorsAdded)} />
               <StatCard label="清零错题" value={String(data.stats.errorsCleared)} />
               <StatCard label="考试场次" value={String(data.stats.examCount)} />
             </div>
