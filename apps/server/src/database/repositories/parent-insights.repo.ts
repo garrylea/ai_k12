@@ -18,13 +18,64 @@ import type { Pool, RowDataPacket } from 'mysql2/promise';
 export class ParentInsightsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
-  /** 该学生已开始（存在 progress 行）的学科 id，升序。仪表盘只为这些学科出卡片。 */
+  /**
+   * 该学生已开始学习的学科 id，升序去重。仪表盘只为这些学科出卡片。
+   *
+   * 判定用 `status <> 'not_started'`，**不能**用「存在 progress 行」——行存在 ≠ 已开始：
+   * 家长在「学习配置」里配教材会走 `ProgressRepository.createConfig`
+   * （progress.repo.ts:62-75，写入 status='not_started'、current_lesson_id=NULL），
+   * `applyConfig(reset=true)`（progress.repo.ts:83-92）也会把已有行重置回 not_started。
+   * 若只看行存在，这两个场景会给「只配过教材、根本没开始学」的学科渲染卡片。
+   *
+   * 也不用 `started_at IS NOT NULL`：`ProgressRepository.create`（progress.repo.ts:44-59）
+   * 是学生首次学习时的自动初始化（status='in_progress'、current_lesson_id 已设），
+   * 但它**不写 started_at**（该列为 NULL 默认值），用它会把真正已开始的学科漏掉。
+   * status 是唯一在所有写入路径下都可靠的谓词（create/adoptLesson→in_progress，
+   * createConfig/applyConfig reset→not_started，markCompleted→completed）。
+   */
   async listTrackedSubjectIds(studentId: number): Promise<number[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT DISTINCT subject_id FROM progress WHERE student_id = ? ORDER BY subject_id`,
+      `SELECT DISTINCT subject_id FROM progress
+       WHERE student_id = ? AND status <> 'not_started'
+       ORDER BY subject_id`,
       [studentId],
     );
     return rows.map((r) => Number(r.subject_id));
+  }
+
+  /**
+   * 四路活跃来源的**唯一构造器**。`lastActiveAt`（全时段）与 `activeDays`（窗口内）
+   * 共用它，增删活跃来源只改这一处，避免两个指标口径分叉。
+   *
+   * `windowStart` 省略 = 全时段（不加时间下界）；给出 = 每条支路追加 `<ts> >= ?`。
+   * 参数按支路顺序追加：每支先 studentId，有窗口再追加 windowStart。
+   */
+  private buildActivitySources(
+    studentId: number,
+    windowStart?: Date,
+  ): { sql: string; params: (number | Date)[] } {
+    const params: (number | Date)[] = [];
+    /** 拼一条支路的 WHERE：始终带 studentId；有窗口时追加该支路自己的时间列下界。 */
+    const where = (base: string, tsColumn: string): string => {
+      params.push(studentId);
+      if (windowStart == null) return base;
+      params.push(windowStart);
+      return `${base} AND ${tsColumn} >= ?`;
+    };
+
+    const sql = [
+      `SELECT judged_at AS ts FROM practice_results WHERE ${where('student_id = ?', 'judged_at')}`,
+      `UNION ALL SELECT created_at AS ts FROM point_ledger WHERE ${where('student_id = ?', 'created_at')}`,
+      `UNION ALL SELECT submitted_at AS ts FROM exam_sessions WHERE ${where(
+        'student_id = ? AND submitted_at IS NOT NULL',
+        'submitted_at',
+      )}`,
+      `UNION ALL SELECT m.created_at AS ts FROM ai_messages m
+         JOIN ai_dialogues d ON d.id = m.dialogue_id
+         WHERE ${where('d.student_id = ? AND m.deleted_at IS NULL', 'm.created_at')}`,
+    ].join('\n');
+
+    return { sql, params };
   }
 
   /**
@@ -35,36 +86,26 @@ export class ParentInsightsRepository {
    * `exam_sessions` 会漏掉纯答疑活跃，故补 `ai_messages`。
    *
    * `lastActiveAt` 是**全时段** MAX、`activeDays` 只数 `windowStart` 之后——两者窗口不同，
-   * 必须分两次查，合并成一个 SQL 会算错。
+   * 必须分两次查，合并成一个 SQL 会算错。两次查共用 `buildActivitySources`。
    */
   async getActivitySummary(
     studentId: number,
     windowStart: Date,
   ): Promise<{ lastActiveAt: Date | null; activeDays: number }> {
+    const allTime = this.buildActivitySources(studentId);
     const [maxRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT MAX(ts) AS last_active_at FROM (
-         SELECT judged_at AS ts FROM practice_results WHERE student_id = ?
-         UNION ALL SELECT created_at AS ts FROM point_ledger WHERE student_id = ?
-         UNION ALL SELECT submitted_at AS ts FROM exam_sessions
-                   WHERE student_id = ? AND submitted_at IS NOT NULL
-         UNION ALL SELECT m.created_at AS ts FROM ai_messages m
-                   JOIN ai_dialogues d ON d.id = m.dialogue_id
-                   WHERE d.student_id = ? AND m.deleted_at IS NULL
-       ) t`,
-      [studentId, studentId, studentId, studentId],
+${allTime.sql}
+) t`,
+      allTime.params,
     );
 
+    const windowed = this.buildActivitySources(studentId, windowStart);
     const [dayRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT COUNT(DISTINCT DATE(ts)) AS active_days FROM (
-         SELECT judged_at AS ts FROM practice_results WHERE student_id = ? AND judged_at >= ?
-         UNION ALL SELECT created_at AS ts FROM point_ledger WHERE student_id = ? AND created_at >= ?
-         UNION ALL SELECT submitted_at AS ts FROM exam_sessions
-                   WHERE student_id = ? AND submitted_at IS NOT NULL AND submitted_at >= ?
-         UNION ALL SELECT m.created_at AS ts FROM ai_messages m
-                   JOIN ai_dialogues d ON d.id = m.dialogue_id
-                   WHERE d.student_id = ? AND m.deleted_at IS NULL AND m.created_at >= ?
-       ) t`,
-      [studentId, windowStart, studentId, windowStart, studentId, windowStart, studentId, windowStart],
+${windowed.sql}
+) t`,
+      windowed.params,
     );
 
     const raw = maxRows[0]?.last_active_at;
