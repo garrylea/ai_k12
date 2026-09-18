@@ -8,6 +8,21 @@
 
 ---
 
+## 2026-09-18 新增（学生端积分 UI 完成：段位/流水/奖励册/发分反馈 + 路由表拆分）
+
+**做了什么**：学生端积分 UI 八个任务全部落地——`LevelIcon`（9 段位线性 SVG）、`pointsStore` + `PointsToast`（右下角轻反馈，`z-40`，2.5s，挂在 `App.tsx`）、`FireworksCanvas` + `CelebrationOverlay`（替换主线内联 `✦✧＊·◇` 撒花）、`UserBadge` + `LevelPanel`（三个用户信息入口改用；退出拆成独立按钮）、`ProfilePage` + `RewardsPage`、训练配置页改读 `GET /api/points/me/rules`（删 `COUNT_OPTIONS`）、六个页面的发分反馈（乙类走 `complete`，甲类读判题响应）、路由/导航收尾。共享模块：`training/point-tiers.ts`（档位加载与状态）、`training/points-feedback.ts`（`decidePointsFeedback` 决策表）、`training/session-completion.ts`（会话完成+重试）、`training/run-handoff.ts`（sessionStorage 交接）、`SessionPointsRetryNotice.tsx`。
+
+**为什么路由表拆成三个文件**：`routes/index.tsx` 原先既定义 `Placeholder`/`RoleRedirect` 组件又导出路由数组；测试要挂载真实路由表就会触发 `react-refresh/only-export-components`（`apps/web/eslint.config.js:28` 配了 `allowConstantExport: true`，但仍会为数组字面量报警。实测：最小改动 1 warning、组件与数组同文件 2 warnings、纯配置 0）。拆成 `routeTable.tsx`（唯一真源）+ `Placeholder.tsx` + `RoleRedirect.tsx`，`index.tsx` 只留 `createBrowserRouter` 与 `AppRouter`——**新增/改路由请改 `routes/routeTable.tsx`**。68 条 `path:` 逐条比对过：路径/顺序/包壳/重定向/懒加载与默认导出全部等价。
+
+**已知缺口（本批未做，需裁决）**：
+- 学生端**没有** `GET /api/points/me/redemptions`，所以 `ProfilePage` 的「兑换记录」是从流水里筛 `kind='redeem'` 的行渲染的（只覆盖当前页、无 pending/fulfilled 状态）。计划三的家长端有完整兑换单。
+- `PointsAwardDto`（`progress/update` 与 `exams/submit` 的 `points`）**不带 `reason`**，所以交卷/学完一课的 `awarded === 0` 无法区分「达上限」与「幂等命中」，前端一律静默（`math_paper`/`mainline_lesson` 默认不限次，实际影响小）。
+- 背单词的判题端点不接受 `sessionId`（只有通用 `POST /api/training/judge` 接受）→ `en_vocabulary` 会话的 `judged_count` 审计留痕恒为 0。
+- `components/business/CleanupPhase.tsx` 仍在撒 `✦ ✧ ＊ ·`（与本次修掉的 `CourseDetailPage` 同一「不用装饰元素」硬规则违规，未在本批文件范围内）。
+- `LogoutButton` 的 `username` 药丸变体在三个学生端入口改完后全仓已无调用方（计划要求保留，未删）。
+
+---
+
 ## 2026-09-17 新增（闯关积分与段位体系：6 张表 + 14 条路径 + 快照重建 + 体裁标定）
 
 **做了什么**：`apps/server/src/modules/points/`（`PointsService` 唯一发分入口、`PointRulesService` 家长可配分值、`RedemptionService` 兑换）；迁移 `2026-09-17_gamification_points.sql`（`point_rules`/`point_ledger`/`student_points`/`reward_catalog`/`point_redemptions`/`training_sessions` + `controls.points_per_yuan` + `chinese_passages.genre`）；埋点接全 8 类任务（甲类逐目标：`cn_dictation`/`cn_interpretation`/`cn_meaning`/`error_fix`；乙类整批：`math_targeted`/`en_vocabulary` 走 `POST /api/training/sessions/:id/complete`；丙类既有事件：`mainline_lesson`/`math_paper`）。学生端 4 端点 + 家长端 11 端点 + 会话完成 1 端点；快照重建脚本 `rebuild-student-points.ts`；体裁标定工具 `dictation_cli.py --export-genre / --set-genre`（**不猜体裁**，人工标定）。
