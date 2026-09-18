@@ -172,6 +172,7 @@ export interface ParentChatLogItem {
   title: string | null;
   subjectId: number | null;
   createdAt: Date;
+  /** 最后一条消息时间（无消息则退回创建时间）。 */
   updatedAt: Date;
   messageCount: number;
   blockCount: number;
@@ -192,6 +193,7 @@ export interface ParentChatLogMessage {
   createdAt: Date;
 }
 
+/** 详情继承列表行；`updatedAt` 同口径（最后一条消息时间，无消息则退回创建时间）。 */
 export interface ParentChatLogDetail extends ParentChatLogItem {
   messages: ParentChatLogMessage[];
 }

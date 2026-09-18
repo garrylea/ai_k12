@@ -112,4 +112,30 @@ describe('ChatLogsService：详情', () => {
     });
     expect(d.messagesRepo.findByDialogue).not.toHaveBeenCalled();
   });
+
+  it('详情的 updatedAt 与列表同口径：取最后一条消息时间，而不是 dialogue.updated_at', async () => {
+    const d = mk();
+    // 对话行的 updated_at（若被误用）会明显早于最后一条消息
+    d.dialoguesRepo.findById.mockResolvedValue({
+      ...dialogueRow,
+      updated_at: new Date('2026-09-16T09:00:00Z'),
+    });
+    d.messagesRepo.findByDialogue.mockResolvedValue([
+      messageRow({ id: 201, created_at: new Date('2026-09-16T10:00:30Z') }),
+      messageRow({ id: 202, created_at: new Date('2026-09-16T10:07:00Z') }),
+    ]);
+
+    const result = await mkSvc(d).getChatLog(11, 55);
+
+    expect(result.updatedAt).toEqual(new Date('2026-09-16T10:07:00Z'));
+  });
+
+  it('会话没有任何消息 → updatedAt 退回 dialogue.created_at', async () => {
+    const d = mk();
+    d.messagesRepo.findByDialogue.mockResolvedValue([]);
+
+    const result = await mkSvc(d).getChatLog(11, 55);
+
+    expect(result.updatedAt).toEqual(dialogueRow.created_at);
+  });
 });
