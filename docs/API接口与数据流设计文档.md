@@ -1569,9 +1569,9 @@ student_points **只减 balance**（earnedDelta 恒为 0）——SQL 里根本�
 | P4.1 错题本 | `/student/error-book` | `GET /api/error-book/.../main` |
 | P4.2 错题重做 | `/student/error-book/redo` | `POST /api/error-book/items/{id}/redo` |
 | P4.3 解析与变式 | `/student/error-book/variant` | `GET /api/error-book/items/{id}/variations`, `POST .../variations/{vid}/submit` |
-| P5.1 个人中心 | `/student/profile` | `GET /api/users/students/{id}`, `GET /api/progress/.../overview` |
-| P5.2 奖励册 | `/student/rewards` | `GET /api/rewards/.../history` |
-| P5.3 设置 | `/student/settings` | `GET/PATCH /api/users/students/{id}/settings` |
+| P5.1 个人中心 | `/student/profile` | `GET /api/points/me`、`GET /api/points/me/ledger` |
+| P5.2 奖励册 | `/student/rewards` | `GET /api/points/me/rewards` |
+| ~~P5.3 设置~~ | ~~`/student/settings`~~ | **已废止（2026-09-18 用户裁决）**：学生端不设独立设置页；手动护眼切换在学习沉浸页内，字号由学段（家长配的年级）决定 |
 | P6.1 家长仪表盘 | `/parent/dashboard` | `GET /api/parent/dashboard`, `GET /api/parent/alerts`, WS `/ws/notifications/{id}` |
 | P6.2 学情报告 | `/parent/report` | `GET /api/parent/students/{studentId}/reports` |
 | P6.3 错题查看 | `/parent/errors` | `GET /api/parent/students/{studentId}/errors` |
