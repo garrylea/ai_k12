@@ -165,7 +165,9 @@ apps/server/src/modules/parent-insights/
 }
 ```
 
-- `subjects[]` 只包含**该学生有 `progress` 行**的学科（未开始的学科不出现，避免一排空卡片）。
+- `subjects[]` 只包含**该学生已开始的学科**（未开始的学科不出现，避免一排空卡片）。
+  **判定是 `progress.status <> 'not_started'`，不是「有 progress 行」**——家长在「学习配置」里配教材时就会为该学科建一行 `status='not_started'` 的 `progress`（`progress.repo.ts` 的 `createConfig`，注释即「首次为该学科创建配置行（未开始学习）」），`applyConfig(reset=true)` 也会把行重置回该状态。只看行存在会让仪表盘为「只配过教材」的学科渲染空卡片。
+  另注：**不能改用 `started_at IS NOT NULL`** —— 真正开始学习的那条路径（`progress.repo.ts` 的 `create`）只写 `status='in_progress'`、不写 `started_at`，用它会把刚自动初始化的学科漏掉。
 - `progress.percent` = `completedUnits / totalUnits * 100` 取整；`totalUnits` 为 0 时 `percent = 0`。
 - 进度数据复用 `ProgressService.getStarMap`（`ProgressModule` 已 `exports: [ProgressService]`），**不改它的返回结构**——服务层从它现有的 `StarMapData` 里取：
   - `completedUnits` / `totalUnits` 直接用（顶层字段）

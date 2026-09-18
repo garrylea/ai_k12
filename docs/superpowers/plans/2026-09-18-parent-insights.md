@@ -64,7 +64,7 @@ const mockPool = (rows: any[] = [], insertId = 7) => ({
 });
 
 describe('ParentInsightsRepository：已开始学科', () => {
-  it('按 subject_id 升序返回去重后的学科 id', async () => {
+  it('按 subject_id 升序返回去重后的学科 id（DISTINCT + ORDER BY 都钉住）', async () => {
     const pool = mockPool([{ subject_id: 1 }, { subject_id: 3 }]);
     const repo = new ParentInsightsRepository(pool as any);
 
@@ -73,8 +73,20 @@ describe('ParentInsightsRepository：已开始学科', () => {
     expect(result).toEqual([1, 3]);
     const sql = pool.execute.mock.calls[0][0] as string;
     expect(sql).toContain('FROM progress');
-    expect(sql).toContain('student_id = ?');
+    expect(sql).toContain('DISTINCT');
+    expect(sql).toContain('ORDER BY subject_id');
     expect(pool.execute.mock.calls[0][1]).toEqual([9]);
+  });
+
+  it('只配了教材、还没开始学的学科不算「已开始」（status = not_started 被排除）', async () => {
+    const pool = mockPool([]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.listTrackedSubjectIds(9);
+
+    // 「有 progress 行」≠「已开始」：家长在「学习配置」里配教材就会建 not_started 行
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain("status <> 'not_started'");
   });
 
   it('无 progress 行 → 空数组', async () => {
@@ -156,10 +168,22 @@ import type { Pool, RowDataPacket } from 'mysql2/promise';
 export class ParentInsightsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
-  /** 该学生已开始（存在 progress 行）的学科 id，升序。仪表盘只为这些学科出卡片。 */
+  /**
+   * 该学生**已开始**的学科 id，升序。仪表盘只为这些学科出卡片。
+   *
+   * 判定是 `status <> 'not_started'`，**不是「有 progress 行」**：家长在「学习配置」里配教材
+   * 就会为该学科建一行 `status='not_started'` 的 progress（`progress.repo.ts` 的 `createConfig`），
+   * `applyConfig(reset=true)` 也会重置回该状态。只看行存在会让仪表盘为「只配过教材、没开始学」
+   * 的学科渲染空卡片。
+   *
+   * 也不能用 `started_at IS NOT NULL`：真正开始学习的那条路径（`progress.repo.ts` 的 `create`）
+   * 只写 `status='in_progress'`、不写 `started_at`，用它会把刚自动初始化的学科漏掉。
+   */
   async listTrackedSubjectIds(studentId: number): Promise<number[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT DISTINCT subject_id FROM progress WHERE student_id = ? ORDER BY subject_id`,
+      `SELECT DISTINCT subject_id FROM progress
+       WHERE student_id = ? AND status <> 'not_started'
+       ORDER BY subject_id`,
       [studentId],
     );
     return rows.map((r) => Number(r.subject_id));
