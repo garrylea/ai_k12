@@ -6,6 +6,7 @@ import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
+import { CelebrationOverlay } from '@/components/business';
 import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
@@ -18,6 +19,7 @@ import {
   type TrainingErrorBookEntry,
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
+import { usePointsFeedback } from './points-feedback';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
 const MATH_SUBJECT_ID = 1;
@@ -50,6 +52,10 @@ export default function ErrorPracticeRunPage() {
   // StrictMode 下 effect 会跑两次：ref 守卫保证「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无题单而踢回列表页。
   const bootstrappedRef = useRef(false);
+
+  // 甲类逐目标发分：分就在判题响应里，本页没有会话、**不调**完成接口。
+  // 「什么时候弹什么」全交给共享决策模块（判错 / 未清错题 / 幂等命中都该静默）。
+  const { award, celebrationProps } = usePointsFeedback();
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
@@ -108,14 +114,17 @@ export default function ErrorPracticeRunPage() {
       if (!entry || entry.questionId == null) {
         throw new Error('该题未入库，无法判题');
       }
-      return judgeTraining({
+      // 发分是后端的事，这里只读响应；答对但本无未清错题（not_cleared）等 0 分由决策层静默
+      const res = await judgeTraining({
         questionId: entry.questionId,
         subjectId: MATH_SUBJECT_ID,
         studentAnswer: answer,
         source: 'error_practice',
       });
+      award({ pointsAwarded: res.pointsAwarded, awardReason: res.awardReason, title: '错题订正' });
+      return res;
     },
-    [entryByN],
+    [entryByN, award],
   );
 
   const handleRequestHint = useCallback(
@@ -292,6 +301,8 @@ export default function ErrorPracticeRunPage() {
           message="退出后未作答的题目将不再保留，确定要离开吗？"
           confirmLabel="确认离开"
         />
+        {/* 段位晋升 / 全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
+        <CelebrationOverlay {...celebrationProps} />
       </div>
     </div>
   );

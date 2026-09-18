@@ -6,6 +6,8 @@ import { judgeMeaning, type MeaningPassageDetail } from '@/services/api';
 import { AnswerBlock } from '@/components/business/meaning/AnswerBlock';
 import ResultStack from '@/components/business/meaning/ResultStack';
 import PassageOverviewBar from '@/components/business/meaning/PassageOverviewBar';
+import { CelebrationOverlay } from '@/components/business';
+import { usePointsFeedback } from '../points-feedback';
 import type { MeaningAnswerPayload, StackItem } from '@/components/business/meaning/types';
 
 /**
@@ -27,6 +29,10 @@ export default function MeaningRunPage() {
   const [stack, setStack] = useState<StackItem[]>([]);
   const tokens = useRef<Record<number, number>>({});
   const guardRef = useRef(true);
+
+  // 甲类整篇发分：**只有最后一句判完才可能非 0**，中间句恒 0 且无 reason
+  // → 必须静默（假「已达上限」文案的源头就在这）。决策全在共享模块里。
+  const { award, celebrationProps } = usePointsFeedback();
 
   useEffect(() => {
     const raw = sessionStorage.getItem('training:meaning');
@@ -76,6 +82,7 @@ export default function MeaningRunPage() {
       setStack((prev) => prev.map((it) => (
         it.key === key ? { kind: 'judged', key, sentenceIndex, text, answer, result: res } : it
       )));
+      award({ pointsAwarded: res.pointsAwarded, awardReason: res.awardReason, title: '古诗情感' });
     } catch {
       if (tokens.current[sentenceIndex] !== token) return;
       setStack((prev) => prev.map((it) => (
@@ -208,6 +215,8 @@ export default function MeaningRunPage() {
           <ResultStack items={stack} onRetry={handleRetry} />
         </div>
       </div>
+      {/* 段位晋升 / 全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
+      <CelebrationOverlay {...celebrationProps} />
     </div>
   );
 }

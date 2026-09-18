@@ -139,9 +139,11 @@ export default function ExamRunPage() {
     submittingRef.current = true;
     setSubmitError(null);
     try {
-      await submitExamSession(sid);
+      const summary = await submitExamSession(sid);
       guardRef.current = false;
-      navigate(`/student/training/exam/result/${sid}`, { replace: true });
+      // 交卷发分结果经导航 state 交给结果页：`getExamResults` 是 GET、不补发分，
+      // 不在这里接住就永远拿不到（积分为可选——幂等/早退分支响应里没有这个键）。
+      navigate(`/student/training/exam/result/${sid}`, { replace: true, state: { points: summary.points } });
     } catch (err) {
       submittingRef.current = false;
       setSubmitError(err instanceof Error ? err.message : '交卷失败，请重试');

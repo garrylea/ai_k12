@@ -3,9 +3,16 @@ import { render, screen, cleanup, act, fireEvent } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import MeaningRunPage from '@/pages/student/training/chinese/MeaningRunPage';
 import { judgeMeaning, type MeaningJudgeResult } from '@/services/api';
+import { usePointsStore } from '@/store/pointsStore';
+import { PointsToast } from '@/components/business/PointsToast';
 
 // globals: false —— @testing-library/react 不会自动注册 cleanup，必须自己写
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // store 是模块级单例，用例之间要清空队列，否则上一条的 toast 串到下一条
+  usePointsStore.setState({ queue: [], revision: 0 });
+  sessionStorage.clear();
+});
 
 // 只替换判题接口，其余保持真身（page 树里没有其它地方调 API）
 vi.mock('@/services/api', async (importOriginal) => {
@@ -170,5 +177,67 @@ describe('MeaningRunPage', () => {
     submitCurrent('答第 1 句');
     expect(overview()[0].className).toContain('opacity-50');   // 已答（pending 也算）
     expect(overview()[2].className).not.toContain('opacity-50');  // 下一句还没答
+  });
+});
+
+/**
+ * 接发分反馈（计划 §3 Task 7c）。
+ *
+ * 本页与解释页同为**逐句判题**：只在该篇最后一句判完时发一次分，中间句恒 0 且无 reason
+ * → 必须静默，不能弹「今日该任务积分已达上限」的假文案（计划 §1.1#4）。
+ * 轻反馈组件 `PointsToast` 一并挂上：只断言 store 会漏掉「文案其实没渲染出来」。
+ */
+describe('MeaningRunPage 发分反馈', () => {
+  /** 同 renderPage，但多挂一个 PointsToast（全站唯一渲染队列的地方）。 */
+  const renderPageWithToast = () => {
+    const router = createMemoryRouter(
+      [{ path: '/', element: (
+        <>
+          <MeaningRunPage />
+          <PointsToast />
+        </>
+      ) }],
+      { initialEntries: ['/'] },
+    );
+    return render(<RouterProvider router={router} />);
+  };
+
+  beforeEach(() => {
+    judgeMock.mockReset();
+  });
+
+  it('中间句 0 分无 reason → 静默；末句发分才 push（标题「古诗情感」）', async () => {
+    judgeMock
+      .mockResolvedValueOnce(RESULT(0))
+      .mockResolvedValueOnce({ ...RESULT(2), pointsAwarded: 5 });
+
+    renderPageWithToast();
+
+    await act(async () => { submitCurrent('答第 1 句'); });
+    // 第 1 句是中间句：本次没发分，且没有 reason 可展示 → 一条都不许弹
+    expect(judgeMock).toHaveBeenCalledTimes(1);
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+
+    await act(async () => { submitCurrent('答第 3 句'); });
+
+    expect(judgeMock).toHaveBeenCalledTimes(2);
+    expect(usePointsStore.getState().queue).toHaveLength(1);
+    expect(usePointsStore.getState().queue[0]).toMatchObject({ points: 5, title: '古诗情感' });
+    expect(screen.getByText('+5 分')).toBeTruthy();
+  });
+
+  it('末句 0 分 + daily_limit → 弹「今日该任务积分已达上限」', async () => {
+    judgeMock
+      .mockResolvedValueOnce(RESULT(0))
+      .mockResolvedValueOnce({ ...RESULT(2), pointsAwarded: 0, awardReason: 'daily_limit' });
+
+    renderPageWithToast();
+
+    await act(async () => { submitCurrent('答第 1 句'); });
+    await act(async () => { submitCurrent('答第 3 句'); });
+
+    expect(usePointsStore.getState().queue).toHaveLength(1);
+    expect(usePointsStore.getState().queue[0]).toMatchObject({ points: 0, title: '古诗情感' });
+    expect(screen.getByText('今日该任务积分已达上限')).toBeTruthy();
   });
 });

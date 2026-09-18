@@ -11,6 +11,8 @@ import SentenceBlock, {
   type InterpretationAnswerValue,
   type SentenceState,
 } from '@/components/business/interpretation/SentenceBlock';
+import { CelebrationOverlay } from '@/components/business';
+import { usePointsFeedback } from '../points-feedback';
 
 const EMPTY_ANSWER: InterpretationAnswerValue = { terms: {}, translation: '' };
 
@@ -88,6 +90,10 @@ export default function InterpretationRunPage() {
   // 有作答时退出要确认（放行前须同步置 false 再 navigate，见 RunExitGuard 注释）
   const guardRef = useRef(true);
 
+  // 甲类整篇发分：**只有最后一句判完才可能非 0**，中间句恒 0 且无 reason
+  // → 必须静默（假「已达上限」文案的源头就在这）。决策全在共享模块里。
+  const { award, celebrationProps } = usePointsFeedback();
+
   useEffect(() => {
     const raw = sessionStorage.getItem('training:interpretation');
     if (!raw) {
@@ -130,6 +136,7 @@ export default function InterpretationRunPage() {
       if (tokens.current[idx] !== token) return;    // 过期响应丢弃
       setResults((prev) => ({ ...prev, [idx]: mergeResult(prev[idx], res) }));
       if (res.fullTranslation) setFullTranslation(res.fullTranslation);
+      award({ pointsAwarded: res.pointsAwarded, awardReason: res.awardReason, title: '古诗文翻译' });
     } catch {
       if (tokens.current[idx] !== token) return;
       setFailed((f) => ({ ...f, [idx]: true }));
@@ -289,6 +296,8 @@ export default function InterpretationRunPage() {
           </div>
         )}
       </div>
+      {/* 段位晋升 / 全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
+      <CelebrationOverlay {...celebrationProps} />
     </div>
   );
 }

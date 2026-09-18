@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
+import { CelebrationOverlay } from '@/components/business';
 import {
   getExamResults,
   getExamSession,
@@ -10,6 +11,7 @@ import {
   type ExamResultItem,
   type ExamSummary,
 } from '@/services/api';
+import { usePointsFeedback } from './points-feedback';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
 const MATH_SUBJECT_ID = 1;
@@ -37,6 +39,18 @@ export default function ExamResultPage() {
   const { sessionId } = useParams();
   const sid = Number(sessionId);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  /**
+   * 交卷发分结果由 `ExamRunPage` 经导航 state 交接（结果页自己的 `getExamResults`
+   * 是 GET，**不补发分**）。**可选**：刷新页面 / 重复交卷 / 早退进来的历史项没有这个键，
+   * 此时不弹任何积分反馈、也不报错。
+   */
+  const navPoints = (location.state as { points?: ExamSummary['points'] } | null)?.points;
+
+  const { award, celebrationProps } = usePointsFeedback();
+  // 只庆祝一次：StrictMode 双跑 effect、summary 后续更新都不得重复弹
+  const celebratedRef = useRef(false);
 
   const [summary, setSummary] = useState<ExamSummary | null>(null);
   const [items, setItems] = useState<ExamResultItem[] | null>(null);
@@ -104,6 +118,24 @@ export default function ExamResultPage() {
       cancelled = true;
     };
   }, [sid, navigate]);
+
+  // 交卷是**大任务**：走全屏 task 庆祝（不是轻反馈），分数与积分同屏（计划 §3 Task 7c）。
+  // 副标题要等 summary 到位才拼得出，所以放在这里而不是 load 里；
+  // 「什么时候弹什么」全交给共享决策模块——0 分 / 无 points 一律静默。
+  useEffect(() => {
+    if (celebratedRef.current || !navPoints || !summary) return;
+    celebratedRef.current = true;
+    award({
+      pointsAwarded: navPoints.awarded,
+      levelUp: navPoints.levelUp,
+      title: '数学测验',
+      celebrate: {
+        title: '本套试卷已交卷！',
+        subtitle: `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}% · 积分 +${navPoints.awarded}`,
+        primaryLabel: '查看成绩',
+      },
+    });
+  }, [navPoints, summary, award]);
 
   const resultQuestions = useMemo(
     () => (items ?? []).map((it) => ({ n: String(it.questionNo), text: it.text })),
@@ -262,6 +294,8 @@ export default function ExamResultPage() {
           onClose={() => navigate('/student/training/exam')}
         />
       </div>
+      {/* 段位晋升 / 交卷全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
+      <CelebrationOverlay {...celebrationProps} />
     </div>
   );
 }

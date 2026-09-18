@@ -9,6 +9,8 @@ import {
 } from '@/services/api';
 import DictationAnswerForm, { type DictationAnswerValue } from '@/components/business/dictation/DictationAnswerForm';
 import DictationDiffView from '@/components/business/dictation/DictationDiffView';
+import { CelebrationOverlay } from '@/components/business';
+import { usePointsFeedback } from '../points-feedback';
 
 const EMPTY: DictationAnswerValue = { author: '', dynasty: '', body: '' };
 
@@ -50,6 +52,10 @@ export default function DictationRunPage() {
   // 在途错因请求的令牌：换题后迟到的响应不许写回，否则会把上一题的错因贴到下一题
   const feedbackToken = useRef(0);
 
+  // 甲类整篇发分：分在判题响应里，本页没有会话、**不调**完成接口。
+  // 判错 / 幂等命中 / 体裁档未设（genre_unset）等 0 分情形由共享决策模块静默。
+  const { award, celebrationProps } = usePointsFeedback();
+
   // 读题单（StrictMode 下 effect 会跑两次，读后即删须防第二次读到空）
   useEffect(() => {
     const raw = sessionStorage.getItem('training:dictation');
@@ -86,6 +92,7 @@ export default function DictationRunPage() {
       // 判题回来即出结果——错因还在路上也不等它
       setResult(res);
       if (res.isCorrect) setCorrectCount((n) => n + 1);
+      award({ pointsAwarded: res.pointsAwarded, awardReason: res.awardReason, title: '古诗文默写 · 一篇' });
       if (res.feedbackPending) {
         setFeedbackLoading(true);
         fetchDictationFeedback(payload)
@@ -225,6 +232,8 @@ export default function DictationRunPage() {
           </div>
         )}
       </div>
+      {/* 段位晋升 / 全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
+      <CelebrationOverlay {...celebrationProps} />
     </div>
   );
 }
