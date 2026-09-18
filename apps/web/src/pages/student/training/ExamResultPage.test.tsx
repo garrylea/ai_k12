@@ -22,6 +22,8 @@ import { usePointsStore } from '@/store/pointsStore';
  * 数据来源是 `ExamRunPage` 交卷后经 navigate state 交接过来的 `points` ——
  * 结果页自己的 `getExamResults` 是 GET，**不补发分**，所以：
  *   - 有 `points` → 庆祝；副标题只写**分数**，积分由庆祝层自带的「+N 分」独占（Finding 2）；
+ *   - `points.levelUp` 非空（交卷跨段位阈值）→ 走 levelup 全屏，但**仍带上这条分数副标题**，
+ *     晋升不能把分数藏掉（Finding 1）；
  *   - 导航 state 里没有 `points`（重复交卷 / 已交卷分支 / 从考试列表重新进入）→
  *     不弹任何积分反馈、也不报错；
  *   - `points.awarded === 0`（本次没加）→ 静默（交卷响应的 `points` 没有 reason 字段）。
@@ -178,6 +180,16 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     expect(usePointsStore.getState().queue).toHaveLength(0);
   });
 
+  it('导航 state 只有无关键（不含 points）→ 不庆祝，也不把这条 state 清掉（清除范围收窄到 points）', async () => {
+    const { router } = renderResult({ from: 'somewhere-else' });
+
+    expect(await screen.findByText('客观题答对')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: '本套试卷已交卷！' })).toBeNull();
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+    // 本页只拥有 `points` 这一个 state 契约，别的 state 不该被顺手 wipe 掉
+    expect(router.state.location.state).toEqual({ from: 'somewhere-else' });
+  });
+
   it('points.awarded === 0（本次没加）→ 静默：不庆祝也不弹轻反馈', async () => {
     renderResult({ points: { awarded: 0, balance: 600, levelUp: null } });
 
@@ -186,13 +198,17 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     expect(usePointsStore.getState().queue).toHaveLength(0);
   });
 
-  it('points.levelUp 非空 → 按既定优先级走 levelup 全屏（task 副标题被丢弃，分数仍在页面上）', async () => {
+  it('points.levelUp 非空 → 走 levelup 全屏，但仍带上交卷副标题（分数与积分都要显示），且不弹轻反馈', async () => {
     renderResult({ points: { awarded: 12, balance: 612, levelUp: { from: 'pichai', to: 'zhutie' } } });
 
     expect(await screen.findByRole('dialog', { name: '晋升 铸铁！' })).toBeTruthy();
-    // 已知取舍：levelup 不显示 task 的副标题，但分数仍在页面本体上可见
-    expect(screen.queryByText(/客观题 18\/20/)).toBeNull();
+    // 交卷同时晋升（跨阈值）时，分数不能被晋升庆祝吞掉（Finding 1）
+    const subtitle = screen.getByText(/客观题 18\/20/);
+    expect(subtitle.textContent).toContain('90%');
     expect(screen.getByText('客观题答对')).toBeTruthy();
+    // 积分仍由庆祝层那一行独占，只出现一次
+    expect(screen.getAllByText('+12 分')).toHaveLength(1);
+    // 晋升仍是全屏独占：该分支不 push 轻反馈
     expect(usePointsStore.getState().queue).toHaveLength(0);
   });
 });

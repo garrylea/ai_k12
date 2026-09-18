@@ -99,6 +99,25 @@ describe('InterpretationRunPage 发分反馈', () => {
     expect(screen.getByText('+6 分')).toBeTruthy();
   });
 
+  it('中间句 0 分 + daily_limit → 也弹「今日该任务积分已达上限」（证明中间句确实走了 award）', async () => {
+    // 「中间句静默」有两条实现都能满足上面那条用例：走了 award 被静默、或压根只在末句 award。
+    // daily_limit 是能区分的观察点：真走了 award 才可能在中途弹这条文案。
+    judgeMock
+      .mockResolvedValueOnce(judged(0, { pointsAwarded: 0, awardReason: 'daily_limit' }))
+      .mockResolvedValueOnce(judged(1, { pointsAwarded: 0 }));
+
+    renderPage();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '下一句' }));
+    });
+
+    expect(judgeMock).toHaveBeenCalledTimes(1);
+    expect(usePointsStore.getState().queue).toHaveLength(1);
+    expect(usePointsStore.getState().queue[0]).toMatchObject({ points: 0, title: '古诗文翻译' });
+    expect(screen.getByText('今日该任务积分已达上限')).toBeTruthy();
+  });
+
   it('末句 0 分 + daily_limit → 弹「今日该任务积分已达上限」', async () => {
     judgeMock
       .mockResolvedValueOnce(judged(0, { pointsAwarded: 0 }))

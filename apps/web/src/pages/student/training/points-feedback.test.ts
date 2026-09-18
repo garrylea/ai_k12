@@ -285,7 +285,7 @@ describe('usePointsFeedback', () => {
     expect(result.current.celebrationProps.primaryLabel).toBe('继续');
   });
 
-  it('正分 + celebrate + levelUp → levelup 全屏优先，不用 task 文案，也不 push', async () => {
+  it('正分 + celebrate + levelUp → levelup 全屏优先（标题/按钮归晋升），但保留 celebrate 的副标题，也不 push', async () => {
     getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
     const { result } = renderHook(() => usePointsFeedback());
 
@@ -301,8 +301,25 @@ describe('usePointsFeedback', () => {
     expect(usePointsStore.getState().queue).toHaveLength(0);
     expect(result.current.celebrationProps.variant).toBe('levelup');
     expect(result.current.celebrationProps.title).toBe('晋升 铸铁！');
-    expect(result.current.celebrationProps.subtitle).toBeUndefined();
+    // 交卷同时晋升不能把分数藏掉（计划 §3 Task 7c「分数与积分都要显示」）
+    expect(result.current.celebrationProps.subtitle).toBe('正确 18 / 20');
     expect(result.current.celebrationProps.pointsAwarded).toBe(20);
+  });
+
+  it('正分 + levelUp 但没传 celebrate（会话页 / 甲类页）→ levelup 无副标题', async () => {
+    getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
+    const { result } = renderHook(() => usePointsFeedback());
+
+    await act(async () => {
+      result.current.award({
+        pointsAwarded: 20,
+        levelUp: { from: 'pichai', to: 'zhutie' },
+        title: '数学专项 · 10 题',
+      });
+    });
+
+    expect(result.current.celebrationProps.variant).toBe('levelup');
+    expect(result.current.celebrationProps.subtitle).toBeUndefined();
   });
 
   it('celebrate + 0 分 daily_limit → 只 push 0 分轻反馈，不庆祝', () => {

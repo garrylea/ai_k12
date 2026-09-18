@@ -142,8 +142,11 @@ export default function ExamRunPage() {
       const summary = await submitExamSession(sid);
       guardRef.current = false;
       // 交卷发分结果经导航 state 交给结果页：`getExamResults` 是 GET、不补发分，
-      // 不在这里接住就永远拿不到（积分为可选——幂等/早退分支响应里没有这个键）。
-      navigate(`/student/training/exam/result/${sid}`, { replace: true, state: { points: summary.points } });
+      // 不在这里接住就永远拿不到。积分为可选（幂等/早退分支响应里没有这个键）——
+      // 没有就**整个不带 state**：否则 history entry 上会挂一个 `{ points: undefined }`，
+      // 结果页的 `location.state == null` 哨兵永远为假，白白触发一次 replace 导航。
+      const to = `/student/training/exam/result/${sid}`;
+      navigate(to, summary.points ? { replace: true, state: { points: summary.points } } : { replace: true });
     } catch (err) {
       submittingRef.current = false;
       setSubmitError(err instanceof Error ? err.message : '交卷失败，请重试');

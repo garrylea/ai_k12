@@ -37,6 +37,10 @@ export interface PointsFeedbackInput {
   /**
    * 大任务全屏庆祝（交卷页专用）。**只有 `pointsAwarded > 0` 才会生效**——没发分时传了也静默，
    * 不会凭空空弹庆祝层。`variant` 固定为 `task`（`levelup` 由晋升路径独占），所以入参不带它。
+   *
+   * `subtitle` 在 `levelup` 分支也会被带上：交卷时刚好跨段位阈值是完全可达的，
+   * 晋升不能把交卷的分数一起吞掉（计划 §3 Task 7c「分数与积分都要显示」）。
+   * `title` / `primaryLabel` 仍归晋升路径独占——`levelup` 是更大的消息，只换标题不换信息量。
    */
   celebrate?: {
     /** 庆祝标题，如「本次测验完成！」 */
@@ -157,6 +161,9 @@ export function usePointsFeedback(): PointsFeedback {
       setCelebration({
         variant: 'levelup',
         title: '晋升新段位！',
+        // 晋升与交卷同时发生时（跨阈值交卷），保留调用方的副标题（分数）——
+        // 决策表只换 variant/title，不丢信息（计划 §3 Task 7c）。
+        subtitle: input.celebrate?.subtitle,
         level: { code: to, name: '' },
         pointsAwarded: input.pointsAwarded,
         primaryLabel: '继续',

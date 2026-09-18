@@ -17,7 +17,7 @@ import {
  * 所以「页面读交卷响应里的积分」必须在**交卷那一刻**接住，经 navigate state 带过去。
  * 这里钉住：
  *   - 有 points → 原样交给导航 state；
- *   - 响应没有 points（重复交卷等幂等分支）→ 不编一个假值；
+ *   - 响应没有 points（重复交卷等幂等分支）→ 整个不带导航 state（不是挂一个 `{ points: undefined }`）；
  *   - 进页时已是 submitted（刷新 / 续考）→ 那条分支不带 points。
  *
  * vitest globals:false —— 必须显式 import + 自己写 afterEach(cleanup)。
@@ -89,12 +89,13 @@ describe('ExamRunPage 交卷发分交接', () => {
     expect(router.state.location.state).toEqual({ points });
   });
 
-  it('交卷响应没有 points（幂等 / 重复交卷）→ 不编假值，结果页拿不到就是 undefined', async () => {
+  it('交卷响应没有 points（幂等 / 重复交卷）→ 完全不带导航 state，不留 `{ points: undefined }` 空壳', async () => {
     submitMock.mockResolvedValue({ correctCount: 18, totalCount: 20, accuracy: 90 });
 
     const router = await answerAndSubmit();
 
-    expect((router.state.location.state as { points?: unknown } | null)?.points).toBeUndefined();
+    // 不带 state → 结果页的 `location.state == null` 哨兵为真，不会白触发一次 replace
+    expect(router.state.location.state).toBeNull();
   });
 
   it('进页时已是 submitted（刷新 / 续考）→ 那条分支不带 points', async () => {
@@ -105,7 +106,7 @@ describe('ExamRunPage 交卷发分交接', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/student/training/exam/result/77');
     });
-    expect(router.state.location.state ?? {}).not.toHaveProperty('points');
+    expect(router.state.location.state).toBeNull();
     // 这条分支根本没交卷，不该发第二个交卷请求
     expect(submitMock).not.toHaveBeenCalled();
   });

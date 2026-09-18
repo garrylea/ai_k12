@@ -56,6 +56,14 @@ export default function ExamResultPage() {
     () => (location.state as { points?: ExamSummary['points'] } | null)?.points,
   );
 
+  /**
+   * 这条 history entry 上是否真有「待消费的 points」。只认 `points` 键——
+   * 本页只拥有这一个 state 契约，若未来别的来源往这条 entry 塞了无关 state，
+   * 不该被本页顺手清掉（Finding 3）。
+   */
+  const hasPointsState =
+    location.state != null && Object.prototype.hasOwnProperty.call(location.state, 'points');
+
   const { award, celebrationProps } = usePointsFeedback();
   // 只庆祝一次：StrictMode 双跑 effect、summary 后续更新都不得重复弹
   const celebratedRef = useRef(false);
@@ -130,11 +138,12 @@ export default function ExamResultPage() {
   // 一次性消费：抓到 points 后立刻把导航 state 从 history entry 里剥掉（`state: null`）。
   // 上面已把值抓进本地 state，所以剥掉**不会**影响本次庆祝；剥掉后 F5 / 前进后退
   // 恢复到的 entry 不再带 points → 不再重放（见文件头与上方 examPoints 注释）。
+  // 守卫只认「真有 points 键」的 state，别的 state 不碰（Finding 3）。
   // 注意声明在庆祝 effect 之前：同一次 commit 内先干净地清掉 history，再照常庆祝。
   useEffect(() => {
-    if (location.state == null) return;
+    if (!hasPointsState) return;
     navigate(location.pathname + location.search, { replace: true, state: null });
-  }, [location.state, location.pathname, location.search, navigate]);
+  }, [hasPointsState, location.pathname, location.search, navigate]);
 
   // 交卷是**大任务**：走全屏 task 庆祝（不是轻反馈）。副标题要等 summary 到位才拼得出，
   // 所以放在这里而不是 load 里；「什么时候弹什么」全交给共享决策模块——
