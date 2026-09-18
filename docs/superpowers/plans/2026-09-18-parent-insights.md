@@ -4452,6 +4452,16 @@ git commit -m "feat(web): 抽出分页基座组件"
 - 快捷入口（学情报告 / 错题查看 / 对话回放）：**点击时先 `setStudentId(该孩子)` 再 navigate**，否则报告页会跟随顶栏锚点、跳到别人身上。
 - `rate === null` 显示「暂无数据」，**不是** `0%`。
 
+> ⚠️ **`StudentSwitcher` 会写锚点，这几个页面的测试必须考虑它。**
+> `ParentLayout` 的顶栏挂着 `StudentSwitcher`，它在 `listMyStudents()` 拿到列表后会做「校验 + 回落」（`StudentSwitcher.tsx:119-128`）：
+> - 列表为**空** → 把锚点清成 `null`；
+> - `studentId === null`、或该 id 不在列表里 → **回落成第一个孩子的 id**。
+>
+> 所以用 `createMemoryRouter(routes, ...)` 渲染 `/parent/*` 的页面测试里：
+> - 想验「某个控件**不动**锚点」→ 期望值是**第一个孩子的 id**，不是 `null`；
+> - 想验「**没有选孩子**」的空态 → 必须让 `listMyStudents()` 返回 **`[]`**（同时把 store 的 `studentId` 置 `null`），否则切换器会把锚点补成第一个孩子、页面立刻开始取数，断言「不发请求」必然失败；
+> - 想验「**跟指定孩子取数**」→ `beforeEach` 里 `useParentStudentStore.setState({ studentId: <id> })` 即可（该 id 在 mock 列表里就会被保留）。
+
 - [ ] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/pages/parent/ParentDashboardPage.test.tsx`：
@@ -4577,14 +4587,17 @@ describe('ParentDashboardPage', () => {
     expect(panel).not.toHaveTextContent('0%');
   });
 
-  it('多孩 → 出孩子 Tab；点 Tab 只在本地切换，**不写锚点**', async () => {
+  it('多孩 → 出孩子 Tab；点 Tab 只在本地切换，**不动锚点**', async () => {
     renderAt('/parent/dashboard');
     await screen.findByTestId('dashboard-student-11');
 
     fireEvent.click(screen.getByRole('tab', { name: '小美' }));
 
     await screen.findByTestId('dashboard-student-12');
-    expect(useParentStudentStore.getState().studentId).toBeNull();
+    // 顶栏 StudentSwitcher 挂载时会把锚点落到第一个孩子（11）；
+    // 点 Tab 只切本地展示，**不能**把它改成 12 —— 否则一次点击就改了「当前查看的孩子」，
+    // 报告/错题/回放三页会跟着跳走。
+    expect(useParentStudentStore.getState().studentId).toBe(11);
   });
 
   it('快捷入口先设锚点再导航（否则报告页会跟错孩子）', async () => {
@@ -5118,7 +5131,9 @@ describe('ParentReportPage', () => {
   });
 
   it('没有选孩子 → 空态引导，不发请求', async () => {
+    // 必须让切换器拿到**空列表**：否则它会把锚点回落成第一个孩子，页面就开始取数了
     useParentStudentStore.setState({ studentId: null });
+    listMyStudentsMock.mockResolvedValue([]);
 
     renderAt('/parent/report');
 
@@ -5612,7 +5627,9 @@ describe('ParentErrorsPage', () => {
   });
 
   it('没有选孩子 → 空态，不发请求', async () => {
+    // 必须让切换器拿到**空列表**：否则它会把锚点回落成第一个孩子，页面就开始取数了
     useParentStudentStore.setState({ studentId: null });
+    listMyStudentsMock.mockResolvedValue([]);
 
     renderAt('/parent/errors');
 
@@ -6175,7 +6192,9 @@ describe('ParentChatLogsPage', () => {
   });
 
   it('没有选孩子 → 空态，不发请求', async () => {
+    // 必须让切换器拿到**空列表**：否则它会把锚点回落成第一个孩子，页面就开始取数了
     useParentStudentStore.setState({ studentId: null });
+    listMyStudentsMock.mockResolvedValue([]);
 
     renderAt('/parent/chat-logs');
 
