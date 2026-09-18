@@ -19,7 +19,7 @@ export interface PointsToastItem {
 interface PointsState {
   queue: PointsToastItem[];
   /**
-   * 单调递增的「积分账本版本号」，每次 `push` +1，**永不回退**。
+   * 单调递增的「积分账本版本号」，每次 `push` 或 `bumpRevision` +1，**永不回退**。
    *
    * 为什么不是用 `queue.length`：`dismiss` 会把队列长度减回去，而积分到账是
    * 不可逆的事实——展示层（如 `UserBadge`）订阅它重拉余额，只要发生过发分就必须重拉。
@@ -27,6 +27,14 @@ interface PointsState {
    */
   revision: number;
   push: (item: Omit<PointsToastItem, 'id'>) => void;
+  /**
+   * 只递增账本版本号、不产生轻反馈。
+   *
+   * 为什么需要：**发了分但没弹 toast 的路径**（晋升 / 交卷全屏庆祝）也必须让
+   * `UserBadge` 重拉余额，否则同一屏上会出现「庆祝层 +10 分」与侧栏旧余额两个数。
+   * 静默路径（幂等命中 / 已达上限 / 未发分）**不许调它**——没有入账就没有可刷新的东西。
+   */
+  bumpRevision: () => void;
   dismiss: (id: string) => void;
 }
 
@@ -47,5 +55,6 @@ export const usePointsStore = create<PointsState>((set) => ({
       queue: [...s.queue, { ...item, id: `pt-${++seq}` }],
       revision: s.revision + 1,
     })),
+  bumpRevision: () => set((s) => ({ revision: s.revision + 1 })),
   dismiss: (id) => set((s) => ({ queue: s.queue.filter((t) => t.id !== id) })),
 }));

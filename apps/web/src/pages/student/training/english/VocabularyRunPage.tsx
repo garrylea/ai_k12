@@ -57,7 +57,7 @@ export default function VocabularyRunPage() {
   // 完成发分（乙类会话页唯一入口）：最后一个词提交、finished 变 true 的那一刻调 complete。
   // 注意本页判题是「提交即翻页、判定异步回填」，完成点**不是**最后一次判题返回——
   // 等模型回来再发分会把学生卡在成绩页。sessionId 为 null 时 hook 内部直接跳过。
-  const { complete: completeSession, retry, needsRetry, retrying, celebrationProps } =
+  const { complete: completeSession, retry, needsRetry, unrecoverable, retrying, celebrationProps } =
     useSessionPointsCompletion(sessionId, `英语背单词 · ${questions?.length ?? 0} 词`);
 
   useEffect(() => {
@@ -227,10 +227,14 @@ export default function VocabularyRunPage() {
             <p className="mt-2 text-xs text-[var(--text-secondary)]">
               「未答到考点」是熟词僻义题里答成了常见义——你答的没错，只是没考到那个意思，不计错。
             </p>
-            {/* 发分失败（award_failed / 网络异常）：不弹负反馈，给一个可再点的出口 */}
-            {needsRetry && (
+            {/* 发分失败：可重试的（网络/award_failed）给出口；客户端 4xx 只给诚实说明、不出重试 */}
+            {(needsRetry || unrecoverable) && (
               <div className="mt-4">
-                <SessionPointsRetryNotice retrying={retrying} onRetry={retry} />
+                <SessionPointsRetryNotice
+                  variant={unrecoverable ? 'unrecoverable' : 'retry'}
+                  retrying={retrying}
+                  onRetry={retry}
+                />
               </div>
             )}
             <button

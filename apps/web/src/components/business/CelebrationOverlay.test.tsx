@@ -84,6 +84,26 @@ describe('CelebrationOverlay', () => {
     expect(onPrimary).toHaveBeenCalledTimes(1);
   });
 
+  it('task 对勾圆的底色用 --success（不是夜间几乎透明的 --brand-100）', () => {
+    stubReducedMotion(true);
+    render(
+      <CelebrationOverlay
+        open
+        variant="task"
+        title="本节学习完成！"
+        primaryLabel="继续"
+        onPrimary={() => {}}
+      />,
+    );
+
+    const icon = screen.getByTestId('celebration-task-icon');
+    // 夜间 --brand-100 = rgba(201,213,229,.2)，铺在白色卡片上等于没有底色，
+    // 绿环会变成孤立圆环；改用同语义族的实心 --success + 白勾，两个主题都读得出来。
+    expect(icon.style.background).toBe('var(--success)');
+    expect(icon.style.background).not.toContain('--brand-100');
+    expect(icon.style.color).toBe('var(--text-on-brand)');
+  });
+
   it('variant=levelup 渲染大段位图标与段位名', () => {
     stubReducedMotion(true);
     render(

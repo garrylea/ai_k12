@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import VocabularyRunPage from './VocabularyRunPage';
 import {
+  ApiError,
   completeTrainingSession,
   getMyPoints,
   judgeVocabularyWord,
@@ -127,6 +128,9 @@ describe('VocabularyRunPage 完成发分', () => {
       totalEarned: 600,
       levelUp: null,
     });
+    // 判题**永不返回**：若实现改成「先 await 判题再 complete」，这条会用例超时失败。
+    // 本页的完成点必须是 `finished` 变 true 的那一刻——等模型回来才发分会把学生卡在成绩页。
+    judgeMock.mockReturnValue(new Promise<VocabularyJudgeResult>(() => {}));
 
     await finishOnlyWord();
 
@@ -185,6 +189,29 @@ describe('VocabularyRunPage 完成发分', () => {
     });
     expect(usePointsStore.getState().queue[0]).toMatchObject({ points: 9, title: '英语背单词 · 1 词' });
     expect(screen.queryByText('积分稍后到账，可重试')).toBeNull();
+  });
+
+  it('客户端 4xx（会话不存在 404）→ 诚实说明、不给重试按钮（重试也永远不会成功）', async () => {
+    seed(88);
+    completeMock.mockRejectedValue(new ApiError(1002, '训练会话不存在', undefined, 404));
+
+    await finishOnlyWord();
+
+    await screen.findByText('本次积分未能到账，请联系家长或稍后查看积分明细');
+    expect(screen.queryByText('积分稍后到账，可重试')).toBeNull();
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
+
+  it('网络异常（无 HTTP 响应）→ 仍是「积分稍后到账 + 重试」', async () => {
+    seed(88);
+    completeMock.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await finishOnlyWord();
+
+    await screen.findByText('积分稍后到账，可重试');
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(screen.queryByText('本次积分未能到账，请联系家长或稍后查看积分明细')).toBeNull();
   });
 
   it('reason 为 already_completed（幂等命中，0 分）：静默，不 push 也不弹上限文案', async () => {

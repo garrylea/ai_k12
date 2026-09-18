@@ -158,9 +158,12 @@ export function CelebrationOverlay({
                   data-testid="celebration-task-icon"
                   className="relative z-10 flex h-24 w-24 items-center justify-center rounded-full border-4"
                   style={{
-                    background: 'var(--brand-100)',
+                    // 用实心 `--success` + 白勾（`--text-on-brand`）而不是 `--brand-100` 做底：
+                    // 夜间 `--brand-100` 是 rgba(201,213,229,.2)，铺在白色卡片上几乎透明，
+                    // 绿环就变成「没有底色的孤立圆环」。同语义族的实心绿在两个主题下都读得出来。
+                    background: 'var(--success)',
                     borderColor: 'var(--success)',
-                    color: 'var(--success)',
+                    color: 'var(--text-on-brand)',
                   }}
                 >
                   <CheckCircleIcon />

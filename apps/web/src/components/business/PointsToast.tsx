@@ -91,7 +91,10 @@ function PointsToastCard({ item, animate }: { item: PointsToastItem; animate: bo
           : undefined,
       }}
       className={clsx(
-        'pointer-events-auto flex items-center gap-3',
+        // 有意**不加** `pointer-events-auto`：外层容器是 `pointer-events-none`，
+        // 卡片没有点击行为，却会盖在答题控件上 2.5s——恢复指针事件等于白白吞掉
+        // 这些点击（计划 §1.2#5「积分反馈不能遮挡或抢注意力于答题控件」）。
+        'flex items-center gap-3',
         'min-w-[13rem] max-w-[20rem] px-4 py-3',
         'rounded-[var(--radius-card)] shadow-[var(--shadow-elevated)]',
         // 加分态只用浅品牌底 + 阴影（不加高饱和描边，别抢答题控件的注意力）；

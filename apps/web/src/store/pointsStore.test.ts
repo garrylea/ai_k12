@@ -29,6 +29,13 @@ describe('pointsStore.revision', () => {
     expect(usePointsStore.getState().revision).toBe(2);
   });
 
+  it('bumpRevision 只递增版本号、不入队（发分无 toast 路径用）', () => {
+    usePointsStore.getState().bumpRevision();
+
+    expect(usePointsStore.getState().revision).toBe(1);
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
+
   it('dismiss 不改 revision（不能用 queue.length 代替）', () => {
     usePointsStore.getState().push({ points: 10, title: '本节学习完成' });
     const id = usePointsStore.getState().queue[0].id;

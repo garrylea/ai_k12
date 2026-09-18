@@ -222,6 +222,9 @@ export default function CourseDetailPage() {
   const [celebrationLevel, setCelebrationLevel] = useState<{ code: string; name: string | null } | null>(null);
   const [celebrationPoints, setCelebrationPoints] = useState(0);
   const pushPointsToast = usePointsStore((s) => s.push);
+  /** 晋升走全屏庆祝、不 push 轻反馈，但分已入账——必须显式递增账本版本号，
+   *  否则侧栏 UserBadge 停在旧余额，与庆祝层上的 +N 分同屏打架（见 pointsStore.bumpRevision）。 */
+  const bumpPointsRevision = usePointsStore((s) => s.bumpRevision);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStart, setModalStart] = useState(0);
   const [resultOpen, setResultOpen] = useState(false);
@@ -494,6 +497,8 @@ export default function CourseDetailPage() {
     const awarded = points?.awarded ?? 0;
     if (points?.levelUp) {
       const to = points.levelUp.to;
+      // 晋升只弹全屏庆祝、不发轻反馈；但本课分已入账，必须让徽章重拉余额
+      bumpPointsRevision();
       setCelebrationLevel({ code: to, name: null });
       // 段位名的唯一真源在后端：升级后再要一次概览，用升级后的 level（失败则只显示图标）
       getMyPoints()
@@ -1042,14 +1047,17 @@ export default function CourseDetailPage() {
           // 晋升层标题只说段位，学科完成必须在这里交代，否则整科完成会被升段文案盖掉
           celebrationLevel ? '累计积分达标，段位提升' : null,
           celebrationLevel && isSubjectCompleted ? '本学科全部完成' : null,
-          // 倒计时文案是通用「N 秒后自动继续」，目的地由本页 subtitle 给出
-          isSubjectCompleted ? '即将返回星图' : '即将进入下一课',
+          // 倒计时文案是通用「N 秒后自动继续」，目的地由本页 subtitle 给出。
+          // 条件必须与 handleStartNewLesson 的主按钮分支**逐字对齐**：没有下一课时
+          // 主按钮回星图，这里再说「即将进入下一课」就是谎报目的地。
+          (isSubjectCompleted || !nextLessonId) ? '即将返回星图' : '即将进入下一课',
         ]
           .filter(Boolean)
           .join(' · ')}
         pointsAwarded={celebrationPoints}
         level={celebrationLevel ? { code: celebrationLevel.code, name: celebrationLevel.name ?? '' } : undefined}
-        primaryLabel={isSubjectCompleted ? '返回星图' : '开始新课'}
+        // 主按钮文案同理与跳转分支对齐（无下一课时它是「返回星图」，不是「开始新课」）
+        primaryLabel={(isSubjectCompleted || !nextLessonId) ? '返回星图' : '开始新课'}
         onPrimary={handleStartNewLesson}
         autoCloseSeconds={10}
       />

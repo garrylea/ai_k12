@@ -60,7 +60,7 @@ export default function TargetedRunPage() {
   const [sessionId, setSessionId] = useState<number | null>(null);
 
   // 完成发分（乙类会话页唯一入口）：末题收尾时调 complete；失败可重试
-  const { complete: completeSession, retry, needsRetry, retrying, celebrationProps } =
+  const { complete: completeSession, retry, needsRetry, unrecoverable, retrying, celebrationProps } =
     useSessionPointsCompletion(sessionId, `数学专项 · ${entries?.length ?? 0} 题`);
 
   // StrictMode 下 effect 会跑两次：ref 守卫保证「读 + 删」只执行一次，
@@ -205,12 +205,16 @@ export default function TargetedRunPage() {
             answers={finalResults ?? {}}
             initialExplanations={explanations}
             questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
-            // 发分失败（award_failed / 网络异常）时挂在结果弹窗顶部：不弹负反馈，
-            // 给一个可再点的出口（服务端会话留在 in_progress，重试会补发且只补一次）
+            // 发分失败时挂在结果弹窗顶部：可重试的（网络 / award_failed）给出口；
+            // 客户端 4xx（token 失效 / 会话被删）重试必然失败，只给诚实说明
             headerExtra={
-              needsRetry ? (
+              needsRetry || unrecoverable ? (
                 <div className="px-5 py-3">
-                  <SessionPointsRetryNotice retrying={retrying} onRetry={retry} />
+                  <SessionPointsRetryNotice
+                    variant={unrecoverable ? 'unrecoverable' : 'retry'}
+                    retrying={retrying}
+                    onRetry={retry}
+                  />
                 </div>
               ) : undefined
             }

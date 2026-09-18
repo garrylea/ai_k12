@@ -17,6 +17,7 @@ import {
   type PreviousErrorDetail,
   type JudgeResult,
 } from '@/services/api';
+import { usePointsFeedback } from '@/pages/student/training/points-feedback';
 
 type Phase = 'answering' | 'judging' | 'allClear' | 'hasErrors';
 
@@ -46,6 +47,11 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
   const [finalResults, setFinalResults] = useState<Record<string, RunnerAnswerRecord> | null>(null);
   // 结果页错题解析：末题后批量拉取（key = questionN）；孤儿题（questionId null）无解析不拉
   const [explanations, setExplanations] = useState<Record<string, string | null>>({});
+
+  // 主线清零是 `error_fix` 的第二个入口（spec §6.5）：答对且确实清掉未清错题时后端发分，
+  // 结果就挂在判题响应的 `pointsAwarded` / `awardReason` 上。必须读出来交给共享决策表，
+  // 否则学生清掉错题、账本 +3，而反馈层与侧栏徽章都毫无动静（「发了分却不可见」）。
+  const { award } = usePointsFeedback();
 
   const questions: PracticeQuestion[] = errors.map((e) => ({
     n: e.questionN,
@@ -80,7 +86,7 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
     const error = candidates.find((e) => e.questionText === q.text) ?? candidates[0];
     if (!error) throw new Error('错题记录缺失');
 
-    return judgePractice({
+    const result = await judgePractice({
       cardId: error.cardId,
       // 必须写错题来源卡「真正所属的课」：清零阶段会清到其他课的错题，
       // 若传当前页 lessonId，practice_results.lesson_id 会与卡片所属课不一致，
@@ -91,7 +97,17 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
       questionText: error.questionText,
       studentAnswer,
     });
-  }, [errorsByN, lessonId, subjectId]);
+
+    // 不在这里自己判「该不该弹」：0 分 / 幂等 / 达上限 / not_cleared 的分支全部由
+    // `decidePointsFeedback` 决策表处理（本页只把服务端结果原样递过去）。
+    award({
+      pointsAwarded: result.pointsAwarded,
+      awardReason: result.awardReason,
+      title: '错题订正',
+    });
+
+    return result;
+  }, [errorsByN, lessonId, subjectId, award]);
 
   const handleFinish = useCallback(async (results: Record<string, RunnerAnswerRecord>) => {
     // 判题 Promise 已由 QuestionRunner 等待完毕；judging 态覆盖下方 bumpErrorLevels 窗口

@@ -240,6 +240,54 @@ describe('usePointsFeedback', () => {
     expect(result.current.celebrationProps.open).toBe(false);
   });
 
+  it('正分 + levelUp → 不 push 轻反馈，但 bumpRevision（发分无 toast 路径必须刷新徽章）', async () => {
+    getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
+    const { result } = renderHook(() => usePointsFeedback());
+    const before = usePointsStore.getState().revision;
+
+    await act(async () => {
+      result.current.award({
+        pointsAwarded: 20,
+        levelUp: { from: 'pichai', to: 'zhutie' },
+        title: '数学专项 · 10 题',
+      });
+    });
+
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+    expect(usePointsStore.getState().revision).toBe(before + 1);
+    expect(result.current.celebrationProps.open).toBe(true);
+  });
+
+  it('正分 + celebrate（task 全屏）→ 不 push 轻反馈，但 bumpRevision', () => {
+    const { result } = renderHook(() => usePointsFeedback());
+    const before = usePointsStore.getState().revision;
+
+    act(() => {
+      result.current.award({
+        pointsAwarded: 12,
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      });
+    });
+
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+    expect(usePointsStore.getState().revision).toBe(before + 1);
+    expect(result.current.celebrationProps.open).toBe(true);
+  });
+
+  it('0 分静默（幂等命中）→ 既不入队也不 bumpRevision（没入账就没有可刷新的余额）', () => {
+    const { result } = renderHook(() => usePointsFeedback());
+    const before = usePointsStore.getState().revision;
+
+    act(() => {
+      result.current.award({ pointsAwarded: 0, title: '数学专项 · 5 题' });
+    });
+
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+    expect(usePointsStore.getState().revision).toBe(before);
+    expect(result.current.celebrationProps.open).toBe(false);
+  });
+
   it('正分 + celebrate → 全屏 task 庆祝（标题/副标题/主按钮/积分），不 push 轻反馈', () => {
     const { result } = renderHook(() => usePointsFeedback());
 

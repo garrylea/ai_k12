@@ -126,6 +126,7 @@ export interface PointsFeedback {
 
 export function usePointsFeedback(): PointsFeedback {
   const push = usePointsStore((s) => s.push);
+  const bumpRevision = usePointsStore((s) => s.bumpRevision);
   const [celebration, setCelebration] = useState<PointsCelebration | null>(null);
 
   const closeCelebration = useCallback(() => setCelebration(null), []);
@@ -135,6 +136,7 @@ export function usePointsFeedback(): PointsFeedback {
       const decision = decidePointsFeedback(input);
 
       if (decision.kind === 'toast') {
+        // push 自带 revision +1，展示层据此重拉余额
         push({ points: decision.points, title: input.title });
         return;
       }
@@ -143,6 +145,9 @@ export function usePointsFeedback(): PointsFeedback {
       if (decision.kind === 'task') {
         const celebrate = input.celebrate;
         if (!celebrate) return; // 防御：决策只在 celebrate 存在时才返回 task
+        // 这里同样**确实发了分**（决策只在 pointsAwarded > 0 时返回 task），但没有任何 toast，
+        // 必须显式 bump：否则侧栏 UserBadge 停在旧余额，与庆祝层上的 +N 分自相矛盾。
+        bumpRevision();
         setCelebration({
           variant: 'task',
           title: celebrate.title,
@@ -155,6 +160,9 @@ export function usePointsFeedback(): PointsFeedback {
 
       const levelUp = input.levelUp;
       if (decision.kind !== 'levelup' || !levelUp) return;
+
+      // 晋升是全屏庆祝、不 push 轻反馈，但分已入账 → 同样要 bump（见上）。
+      bumpRevision();
 
       const to = levelUp.to;
       // 段位名的唯一真源在后端（spec §3.1），前端不维护段位表：先出图标，名字晚一拍补上。
@@ -185,7 +193,7 @@ export function usePointsFeedback(): PointsFeedback {
           // 降级：不显示段位名，只显示大图标（标题保持「晋升新段位！」）
         });
     },
-    [push],
+    [push, bumpRevision],
   );
 
   return {

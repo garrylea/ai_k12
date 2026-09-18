@@ -10,10 +10,14 @@ export interface ApiResponse<T> {
 export class ApiError extends Error {
   code: number;
   retryable?: boolean;
-  constructor(code: number, message: string, retryable?: boolean) {
+  /** HTTP 状态码（业务码 `code` 之外的原始信号）。网络层失败（DNS/断网）没有响应，为 undefined。
+   *  调用方用它区分「客户端 4xx，重试也不会好」与「5xx / 网络抖动，可重试」。 */
+  status?: number;
+  constructor(code: number, message: string, retryable?: boolean, status?: number) {
     super(message);
     this.code = code;
     this.retryable = retryable;
+    this.status = status;
     this.name = 'ApiError';
   }
 }
@@ -32,7 +36,7 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const json: ApiResponse<T> = await res.json();
 
   if (json.code !== 0) {
-    throw new ApiError(json.code, json.message, json.retryable);
+    throw new ApiError(json.code, json.message, json.retryable, res.status);
   }
 
   return json.data;
@@ -316,11 +320,14 @@ export function bumpErrorLevels(errorBookIds: number[]): Promise<void> {
  * `POST /api/progress/update` 追加的可选积分反馈（计划一新增，向后兼容：
  * 老后端不返回该字段时 `points === undefined`）。
  * 幂等命中 / 无规则时 `awarded === 0`——**不是错误**，静默处理。
+ *
+ * 由服务端 `toPointsAwardDto` 产出（`progress/update` 与 `exams/submit` 共用）：
+ * 发分失败时它整体返回 `undefined`，JSON 里**没有 `points` 键**，因此这里的 `balance`
+ * 是**非空 number**——`balance: null` 只属于会话完成端点（`CompleteTrainingSessionResult`）。
  */
 export interface UpdateProgressPoints {
   awarded: number;
-  /** `award_failed` 分支后端可能回 `null`（积分入账失败）——前端勿用 null 覆盖本地积分快照（计划 §1.1#3） */
-  balance: number | null;
+  balance: number;
   /** 段位 code 字符串（不是对象）；非空表示本次升级，庆祝交给全屏 `CelebrationOverlay` */
   levelUp: { from: string; to: string } | null;
 }
@@ -352,7 +359,7 @@ export async function uploadFile(file: File, signal?: AbortSignal): Promise<Uplo
     signal,
   });
   const json: ApiResponse<UploadedFileResult> = await res.json();
-  if (json.code !== 0) throw new ApiError(json.code, json.message, json.retryable);
+  if (json.code !== 0) throw new ApiError(json.code, json.message, json.retryable, res.status);
   return json.data;
 }
 
@@ -1734,10 +1741,14 @@ export interface CompleteTrainingSessionResult {
   /** 段位晋升的 from/to code；无晋升为 null */
   levelUp: { from: string; to: string } | null;
   /**
-   * **排除 `not_cleared`**：那是甲类逐目标发分（答对但本无未清错题行）特有的原因，
-   * complete 端点永远不返回它（openapi `CompleteSessionResult.reason` 枚举同此）。
+   * **与 openapi `CompleteSessionResult.reason` 枚举逐字一致**：
+   * `daily_limit` / `no_rule` / `tier_inactive` 是发分引擎的正常未发分原因，
+   * `already_completed` 是幂等命中，`award_failed` 是发分失败（`balance` 为 null、可重试）。
+   *
+   * 这里**不含** `genre_unset`（只由语文默写/解释端点产出）与 `not_cleared`
+   * （只由甲类逐目标发分产出）——complete 端点永远不会返回它们。
    */
-  reason?: Exclude<PointsAwardReason, 'not_cleared'> | 'already_completed' | 'award_failed';
+  reason?: 'daily_limit' | 'no_rule' | 'tier_inactive' | 'already_completed' | 'award_failed';
 }
 
 export function getMyPoints(): Promise<MyPoints> {

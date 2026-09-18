@@ -191,6 +191,26 @@ describe('CourseDetailPage 完成态庆祝', () => {
     expect(screen.getByText('星图页')).toBeInTheDocument();
   });
 
+  it('本课无下一课且学科未完成 → 文案与主按钮都指向星图，不再谎报「即将进入下一课」', async () => {
+    // 后端回了 advanced 但既没 completed 也没 nextLessonId：主按钮会回星图，
+    // 副标题与按钮文案必须跟着走同一个条件（终审修复：原先恒说「即将进入下一课」）。
+    updateProgressMock.mockResolvedValue({
+      advanced: true,
+      points: { awarded: 10, balance: 110, levelUp: null },
+    });
+
+    const router = await finishLesson();
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText(/即将返回星图/)).toBeInTheDocument();
+    expect(screen.queryByText(/即将进入下一课/)).toBeNull();
+    expect(screen.getByRole('button', { name: '返回星图' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '开始新课' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回星图' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
+  });
+
   it('levelUp 非空 → 用后端段位名弹晋升庆祝，且不发轻反馈（避免两处同弹）', async () => {
     updateProgressMock.mockResolvedValue({
       advanced: true,
@@ -213,6 +233,32 @@ describe('CourseDetailPage 完成态庆祝', () => {
     expect(screen.getByTestId('celebration-level-icon')).toBeInTheDocument();
     expect(getMyPointsMock).toHaveBeenCalled();
     expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
+
+  it('levelUp 分支不 push 轻反馈，但递增 revision 让侧栏徽章重拉余额（同屏两个余额不许打架）', async () => {
+    updateProgressMock.mockResolvedValue({
+      advanced: true,
+      nextLessonId: 42,
+      points: { awarded: 20, balance: 520, levelUp: { from: 'pichai', to: 'zhutie' } },
+    });
+    getMyPointsMock.mockResolvedValue({
+      balance: 520,
+      totalEarned: 520,
+      todayEarned: 20,
+      level: { code: 'zhutie', name: '铸铁', index: 1, threshold: 500 },
+      nextLevel: { code: 'qingtong', name: '青铜', index: 2, threshold: 1500 },
+      pointsToNextLevel: 980,
+      progressPercent: 13,
+    });
+
+    const before = usePointsStore.getState().revision;
+    await finishLesson();
+    await screen.findByRole('heading', { name: '晋升 铸铁！' });
+
+    // 没有 toast（晋升只走全屏），但分确实入账 → revision 必须 +1，
+    // 否则 UserBadge 停在旧余额，与庆祝层的 +20 分同屏矛盾。
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+    expect(usePointsStore.getState().revision).toBe(before + 1);
   });
 
   it('含 levelUp 时 getMyPoints 失败 → 降级为「晋升新段位！」且仍显示段位图标', async () => {

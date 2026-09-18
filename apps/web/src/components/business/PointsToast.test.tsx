@@ -105,6 +105,33 @@ describe('PointsToast', () => {
     expect(host).not.toHaveClass('z-[60]');
   });
 
+  it('卡片不吞点击：外层 pointer-events-none，卡片自身没有 pointer-events-auto 也没有点击行为', () => {
+    const { container } = render(<PointsToast />);
+
+    push({ points: 3, title: '默写' });
+
+    const host = container.firstElementChild as HTMLElement;
+    expect(host).toHaveClass('pointer-events-none');
+
+    const card = container.querySelector('[data-testid="points-toast"]') as HTMLElement;
+    expect(card).toBeInTheDocument();
+    // 卡片没有点击行为，却会盖在答题控件上 2.5s——恢复指针事件等于白白抢走点击
+    expect(card.className).not.toContain('pointer-events-auto');
+    expect(card.querySelector('button')).toBeNull();
+    expect(card).not.toHaveAttribute('role');
+  });
+
+  it('开启动效时卡片带 opacity/transform 过渡（有动画，不是硬切换）', () => {
+    const { container } = render(<PointsToast />);
+
+    push({ points: 3, title: '默写' });
+
+    const card = container.querySelector('[data-testid="points-toast"]') as HTMLElement;
+    expect(card.style.transition).not.toBe('');
+    expect(card.style.transition).toContain('opacity 200ms');
+    expect(card.style.transition).toContain('transform 200ms');
+  });
+
   it('关闭动效时不做过渡动画，但仍按时出现与消失', () => {
     useThemeStore.setState({ motionEnabled: false });
     const { container } = render(<PointsToast />);
