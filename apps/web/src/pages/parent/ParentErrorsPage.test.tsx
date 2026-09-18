@@ -135,7 +135,8 @@ describe('ParentErrorsPage', () => {
     renderAt('/parent/errors');
     await screen.findByTestId('error-row-91');
 
-    // 后端把回显页号夹在 1（越界 / 忽略 page 参数），不能把第 1 页内容当成第 2 页渲染
+    // 服务端原样回显请求页码；这里用不一致的回显页号来模拟翻页途中响应错配，
+    // 验证守卫不会渲染旧页内容
     getErrorsMock.mockResolvedValue({ ...PAGE, page: 1 });
     fireEvent.click(screen.getByRole('button', { name: '下一页' }));
 
@@ -161,6 +162,52 @@ describe('ParentErrorsPage', () => {
 
     await waitFor(() =>
       expect(getErrorsMock).toHaveBeenLastCalledWith({ studentId: 11, track: 'aux', page: 1 }),
+    );
+  });
+
+  it('主线 Tab 的来源下拉里**没有**「辅线答疑」（该组合永不匹配，必须选不出来）', async () => {
+    renderAt('/parent/errors');
+    await screen.findByTestId('error-row-91');
+
+    const sourceSelect = screen.getByLabelText('来源');
+    const labels = within(sourceSelect)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(labels).toContain('真题考试');
+    expect(labels).not.toContain('辅线答疑');
+
+    // 切到辅线后反过来：只剩辅线答疑（+ 全部来源）
+    fireEvent.click(screen.getByRole('tab', { name: '辅线' }));
+    await waitFor(() => expect(getErrorsMock).toHaveBeenLastCalledWith({ studentId: 11, track: 'aux', page: 1 }));
+    const auxLabels = within(screen.getByLabelText('来源'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(auxLabels).toContain('辅线答疑');
+    expect(auxLabels).not.toContain('真题考试');
+  });
+
+  it('已翻到第 2 页时切换孩子 → 请求回到第 1 页（否则停在误导性空态且无法自救）', async () => {
+    const GIRL: MyStudentItem = { id: 12, parentId: 3, username: 'xiaohong', name: '小红', age: 12, grade: '初一', schoolLevel: 'junior', isActive: true };
+    listMyStudentsMock.mockResolvedValue([BOY, GIRL]);
+    // 回显页号跟随请求页，模拟正常翻页
+    getErrorsMock.mockImplementation(async (params) =>
+      params.page === 2 ? { ...PAGE, page: 2, items: [PAGE.items[0]] } : PAGE,
+    );
+
+    renderAt('/parent/errors');
+    await screen.findByTestId('error-row-91');
+
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() =>
+      expect(getErrorsMock).toHaveBeenLastCalledWith({ studentId: 11, track: 'main', page: 2 }),
+    );
+
+    // 顶栏切到另一个孩子
+    fireEvent.click(await screen.findByTestId('student-switcher-trigger'));
+    fireEvent.click(await screen.findByTestId('student-option-12'));
+
+    await waitFor(() =>
+      expect(getErrorsMock).toHaveBeenLastCalledWith({ studentId: 12, track: 'main', page: 1 }),
     );
   });
 
