@@ -156,6 +156,14 @@ export default function ParentPointsPage() {
    * 就是最小的耦合通道：页面不掺和两边的表单状态，只负责「保存发生了 → 重读」。
    */
   const [redeemSettingsVersion, setRedeemSettingsVersion] = useState(0);
+  /**
+   * 「兑换记录」的版本号：兑换成功后自增，透传给记录面板触发重拉（Task 8）。
+   *
+   * 面板是按 Tab 条件渲染的（同一时刻只挂载一个），所以切到「兑换记录」本来就会
+   * 重新取数；这条版本号是**显式约定**——「兑换发生了 → 记录该重拉」不再依赖
+   * 「反正会重挂载」这一实现细节，将来面板改为常驻也不会漏刷新。
+   */
+  const [redeemRecordsVersion, setRedeemRecordsVersion] = useState(0);
 
   /**
    * 概览数据**按 studentId 现算**，而不是在 effect 里 `setPoints(null)` 清：
@@ -396,11 +404,17 @@ export default function ParentPointsPage() {
                 <RedeemPanel
                   studentId={studentId}
                   settingsVersion={redeemSettingsVersion}
-                  onPointsChanged={() => setOverviewReload((n) => n + 1)}
+                  onPointsChanged={() => {
+                    // 兑换动了余额（→概览卡）也产生了一条新记录（→兑换记录面板）
+                    setOverviewReload((n) => n + 1);
+                    setRedeemRecordsVersion((n) => n + 1);
+                  }}
                 />
               </div>
             )}
-            {activeTab === 'history' && <RedemptionHistoryPanel studentId={studentId} />}
+            {activeTab === 'history' && (
+              <RedemptionHistoryPanel studentId={studentId} refreshToken={redeemRecordsVersion} />
+            )}
           </div>
         </>
       )}

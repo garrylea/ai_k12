@@ -14,10 +14,16 @@ import {
   getLevels,
   getParentPointRules,
   getParentPoints,
+  getParentPointsSettings,
+  getParentRedemptions,
   getParentRewardCatalog,
+  redeemParentPoints,
   saveParentRewardCatalog,
   type MyPoints,
   type PointLevel,
+  type RedemptionList,
+  type RedemptionView,
+  type RedeemResult,
   type RewardCatalogView,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
@@ -45,16 +51,22 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentPoints: vi.fn(),
     getParentPointRules: vi.fn(),
     getParentRewardCatalog: vi.fn(),
+    getParentPointsSettings: vi.fn(),
+    getParentRedemptions: vi.fn(),
     getLevels: vi.fn(),
     saveParentRewardCatalog: vi.fn(),
+    redeemParentPoints: vi.fn(),
   };
 });
 
 const getParentPointsMock = vi.mocked(getParentPoints);
 const getParentPointRulesMock = vi.mocked(getParentPointRules);
 const getParentRewardCatalogMock = vi.mocked(getParentRewardCatalog);
+const getParentPointsSettingsMock = vi.mocked(getParentPointsSettings);
+const getParentRedemptionsMock = vi.mocked(getParentRedemptions);
 const getLevelsMock = vi.mocked(getLevels);
 const saveParentRewardCatalogMock = vi.mocked(saveParentRewardCatalog);
+const redeemParentPointsMock = vi.mocked(redeemParentPoints);
 
 const POINTS: MyPoints = {
   balance: 120,
@@ -108,6 +120,33 @@ function renderPage(path = '/parent/rewards') {
     </MemoryRouter>,
   );
 }
+
+/** 「兑换」Tab 的兑换设置（关闭开关、汇率默认 20）。 */
+const SETTINGS = { pointsPerYuan: 20, rewardRedemptionEnabled: true };
+
+/** 兑换成功后服务端返回的新记录（status 默认 pending，进兑现队列）。 */
+const NEW_REDEMPTION: RedemptionView = {
+  id: 5,
+  type: 'cash',
+  pointsSpent: 100,
+  cashAmount: 5,
+  rewardCatalogId: null,
+  rewardName: null,
+  status: 'pending',
+  note: null,
+  ledgerId: 9,
+  createdAt: '2026-09-18T10:00:00.000Z',
+  fulfilledAt: null,
+};
+
+const EMPTY_REDEMPTIONS: RedemptionList = { items: [], total: 0, page: 1, pageSize: 20 };
+
+const REDEEM_RESULT: RedeemResult = {
+  redemption: NEW_REDEMPTION,
+  balance: 20,
+  totalEarned: 520,
+  level: POINTS.level,
+};
 
 function switchStudent(id: number | null) {
   act(() => {
@@ -166,6 +205,12 @@ beforeEach(() => {
   getLevelsMock.mockReset();
   getLevelsMock.mockResolvedValue({ levels: LEVELS });
   saveParentRewardCatalogMock.mockReset();
+  getParentPointsSettingsMock.mockReset();
+  getParentPointsSettingsMock.mockResolvedValue(SETTINGS);
+  getParentRedemptionsMock.mockReset();
+  getParentRedemptionsMock.mockResolvedValue(EMPTY_REDEMPTIONS);
+  redeemParentPointsMock.mockReset();
+  redeemParentPointsMock.mockResolvedValue(REDEEM_RESULT);
 });
 
 afterEach(() => {
@@ -369,6 +414,39 @@ describe('ParentPointsPage：孩子上下文', () => {
 
     expect(screen.queryByTestId('points-overview-error')).not.toBeInTheDocument();
     expect(screen.getByTestId('points-overview-skeleton')).toBeInTheDocument();
+  });
+});
+
+describe('ParentPointsPage：兑换成功 → 兑换记录刷新缝', () => {
+  /**
+   * Task 8 的接线验收：兑换成功后切到「兑换记录」必须能看到刚产生的那条。
+   * 页面在 `onPointsChanged` 里同时自增概览重拉与记录版本号，后者透传给记录面板。
+   */
+  it('兑换成功后切到「兑换记录」Tab 能看到刚产生的那条', async () => {
+    renderPage('/parent/rewards?tab=redeem');
+
+    const input = await screen.findByTestId('redeem-points-input');
+    fireEvent.change(input, { target: { value: '100' } });
+    fireEvent.click(screen.getByTestId('redeem-submit'));
+    fireEvent.click(await screen.findByTestId('redeem-confirm'));
+
+    await waitFor(() =>
+      expect(redeemParentPointsMock).toHaveBeenCalledWith(1, { type: 'cash', points: 100 }),
+    );
+
+    // 服务端侧这条已经落库：记录接口开始返回它
+    getParentRedemptionsMock.mockResolvedValue({
+      items: [NEW_REDEMPTION],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: '兑换记录' }));
+
+    expect(await screen.findByTestId('redemption-row-5')).toBeInTheDocument();
+    expect(screen.getByTestId('redemption-content-5')).toHaveTextContent('¥5.00');
+    expect(getParentRedemptionsMock).toHaveBeenLastCalledWith(1, 1);
   });
 });
 
