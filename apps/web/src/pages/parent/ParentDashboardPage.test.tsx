@@ -131,6 +131,16 @@ describe('ParentDashboardPage', () => {
     expect(useParentStudentStore.getState().studentId).toBe(11);
   });
 
+  it('单孩 → 不出孩子 Tab（省掉一个从不变化的控件）', async () => {
+    listMyStudentsMock.mockResolvedValue([BOY]);
+    getDashboardMock.mockResolvedValue({ ...DASHBOARD, students: [DASHBOARD.students[0]] });
+
+    renderAt('/parent/dashboard');
+
+    expect(await screen.findByTestId('dashboard-student-11')).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).toBeNull();
+  });
+
   it('快捷入口先设锚点再导航（否则报告页会跟错孩子）', async () => {
     const { router } = renderAt('/parent/dashboard');
     await screen.findByTestId('dashboard-student-11');
@@ -141,6 +151,9 @@ describe('ParentDashboardPage', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/parent/report'));
     expect(useParentStudentStore.getState().studentId).toBe(12);
+    // 仪表盘的核心特性是「一次请求拿全所有孩子」——切 Tab 只换本地展示，不许重拉。
+    // 这条断言是唯一能钉住「不按孩子逐个请求 / 不因切 Tab 重拉」的东西。
+    expect(getDashboardMock).toHaveBeenCalledTimes(1);
   });
 
   it('名下没有孩子 → 空态 + 去创建账号的入口', async () => {
