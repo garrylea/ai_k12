@@ -315,3 +315,119 @@ describe('ParentInsightsRepository：趋势与考试列表', () => {
     expect(sql).toContain('ORDER BY es.submitted_at DESC');
   });
 });
+
+describe('ParentInsightsRepository：错题列表', () => {
+  const listRows = [
+    {
+      id: 91, question_id: 330, subject_id: 1, source: 'exam', level: 2, is_cleared: 0,
+      wrong_answer_text: 'x=3', created_at: new Date('2026-09-16T19:21:00Z'), cleared_at: null,
+      question_content: '解方程', question_type: 'calculation', question_difficulty: 3,
+      kp_id: 42, kp_name: '分数加减',
+    },
+  ];
+
+  it('返回 items + total；默认无附加筛选', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 139 }], []]);
+    pool.query.mockResolvedValueOnce([listRows, []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.listParentErrors(9, {}, 20, 0);
+
+    expect(result.total).toBe(139);
+    expect(result.items).toEqual([
+      {
+        id: 91, questionId: 330, subjectId: 1, source: 'exam', level: 2, isCleared: false,
+        wrongAnswerText: 'x=3', createdAt: listRows[0].created_at, clearedAt: null,
+        questionContent: '解方程', questionType: 'calculation', questionDifficulty: 3,
+        knowledgePointId: 42, knowledgePointName: '分数加减',
+      },
+    ]);
+    expect(pool.execute.mock.calls[0][0]).toContain('COUNT(*) AS count');
+    // 列表走 query（LIMIT ?）
+    const listSql = pool.query.mock.calls[0][0] as string;
+    expect(listSql).toContain('LEFT JOIN questions');
+    expect(listSql).toContain('LEFT JOIN question_knowledge_points');
+    expect(listSql).toContain('ORDER BY meb.created_at DESC, meb.id DESC');
+  });
+
+  it('筛选条件逐条下推（学科 / source / 轨道 / 清零态 / 时间窗）', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.listParentErrors(
+      9,
+      {
+        subjectId: 1, source: 'exam', cleared: 'uncleared',
+        from: '2026-09-01', to: '2026-09-18',
+      },
+      20,
+      0,
+    );
+
+    const countSql = pool.execute.mock.calls[0][0] as string;
+    expect(countSql).toContain('meb.subject_id = ?');
+    expect(countSql).toContain('meb.source = ?');
+    expect(countSql).toContain('meb.is_cleared = 0');
+    expect(countSql).toContain('meb.created_at >= ?');
+    expect(countSql).toContain('meb.created_at < DATE_ADD(?, INTERVAL 1 DAY)');
+    expect(pool.execute.mock.calls[0][1]).toEqual([
+      9, 1, 'exam', '2026-09-01', '2026-09-18',
+    ]);
+    // count 与 list 用的是同一份 WHERE
+    expect(pool.query.mock.calls[0][0]).toContain('meb.subject_id = ?');
+  });
+
+  it('track=aux → source = auxiliary；track=main → source <> auxiliary（反向排除）', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.listParentErrors(9, { track: 'aux' }, 20, 0);
+    expect(pool.execute.mock.calls[0][0]).toContain("meb.source = 'auxiliary'");
+
+    pool.execute.mockClear();
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    await repo.listParentErrors(9, { track: 'main' }, 20, 0);
+    // 关键：不带具体的 source 值，未来新 source 自动归入主线，不会静默消失
+    expect(pool.execute.mock.calls[0][0]).toContain("meb.source <> 'auxiliary'");
+    expect(pool.execute.mock.calls[0][1]).toEqual([9]);
+  });
+
+  it('cleared=cleared → is_cleared = 1；不传 → 不过滤清零态', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.listParentErrors(9, { cleared: 'cleared' }, 20, 0);
+    expect(pool.execute.mock.calls[0][0]).toContain('meb.is_cleared = 1');
+
+    pool.execute.mockClear();
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    await repo.listParentErrors(9, {}, 20, 0);
+    expect(pool.execute.mock.calls[0][0]).not.toContain('meb.is_cleared');
+  });
+
+  it('question_id 为 NULL 的行不炸（题目相关列全 null）', async () => {
+    const pool = mockPool([
+      {
+        id: 5, question_id: null, subject_id: 1, source: 'practice', level: 1, is_cleared: 0,
+        wrong_answer_text: '只会题面', created_at: new Date('2026-09-10T10:00:00Z'), cleared_at: null,
+        question_content: null, question_type: null, question_difficulty: null,
+        kp_id: null, kp_name: null,
+      },
+    ]);
+    pool.execute.mockResolvedValueOnce([[{ count: 1 }], []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.listParentErrors(9, {}, 20, 0);
+
+    expect(result.items[0]).toMatchObject({
+      questionId: null, questionContent: null, knowledgePointId: null, wrongAnswerText: '只会题面',
+    });
+  });
+});

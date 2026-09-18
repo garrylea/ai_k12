@@ -73,6 +73,46 @@ export interface ExamSummaryRow {
 }
 
 /**
+ * 家长端错题列表的筛选条件。
+ *
+ * `track` 是**反向排除**语义（不是白名单）：
+ * - `aux` → `source = 'auxiliary'`
+ * - `main` → `source <> 'auxiliary'`
+ *
+ * 为什么 main 不用白名单 `IN (...)`：未来「智能组卷」会写入 `homework`/`unit_test`/`midterm`/
+ * `final` 等新 source，白名单会让这些错题从「主线」Tab **静默消失**且不报错。反向排除对新
+ * source 天然免疫。`source` 是「具体来源」筛选（与 `track` 可叠加）。
+ *
+ * `from`/`to` 是 `YYYY-MM-DD`，`to` 用 `DATE_ADD(..., INTERVAL 1 DAY)` 做闭区间。
+ */
+export interface ParentErrorFilters {
+  subjectId?: number;
+  track?: 'main' | 'aux';
+  source?: string;
+  cleared?: 'uncleared' | 'cleared';
+  from?: string;
+  to?: string;
+}
+
+/** 错题列表行（已 JOIN 题面与知识点；`question_id` 为 NULL 时后几列为 null）。 */
+export interface ParentErrorRow {
+  id: number;
+  questionId: number | null;
+  subjectId: number;
+  source: string;
+  level: number;
+  isCleared: boolean;
+  wrongAnswerText: string | null;
+  createdAt: Date;
+  clearedAt: Date | null;
+  questionContent: string | null;
+  questionType: string | null;
+  questionDifficulty: number | null;
+  knowledgePointId: number | null;
+  knowledgePointName: string | null;
+}
+
+/**
  * 家长端只读聚合仓储（spec `2026-09-18-parent-insights-design.md`）。
  *
  * 三条铁律（勿违背）：
@@ -421,5 +461,102 @@ ${windowed.sql}
       correctCount: Number(r.correct_count ?? 0),
       objectiveCount: Number(r.objective_count ?? 0),
     }));
+  }
+
+  /**
+   * 家长端错题列表（只读、分页）。
+   *
+   * 为什么不在 `main-error-books.repo.ts` 上扩展 `findErrorBookEntries`：那个方法正被训练轨
+   * 的错题练习调用，改它会连带改训练轨行为。这里照抄它的 JOIN 与筛选写法自建。
+   *
+   * count 与 list **共用 `buildErrorWhere`**，否则「总数」与「列表」迟早对不上。
+   */
+  async listParentErrors(
+    studentId: number,
+    filters: ParentErrorFilters,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: ParentErrorRow[]; total: number }> {
+    const { where, params } = this.buildErrorWhere(studentId, filters);
+
+    const [countRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS count FROM main_error_books meb WHERE ${where}`,
+      params,
+    );
+
+    // LIMIT ? / OFFSET ? 必须用 pool.query（客户端转义）
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT meb.id, meb.question_id, meb.subject_id, meb.source, meb.level, meb.is_cleared,
+              meb.wrong_answer_text, meb.created_at, meb.cleared_at,
+              q.content AS question_content, q.type AS question_type,
+              q.difficulty AS question_difficulty,
+              qkp.knowledge_point_id AS kp_id, kp.name AS kp_name
+       FROM main_error_books meb
+       LEFT JOIN questions q ON q.id = meb.question_id
+       LEFT JOIN question_knowledge_points qkp ON qkp.question_id = meb.question_id
+       LEFT JOIN knowledge_points kp ON kp.id = qkp.knowledge_point_id
+       WHERE ${where}
+       ORDER BY meb.created_at DESC, meb.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+
+    return {
+      total: Number(countRows[0]?.count ?? 0),
+      items: rows.map((r) => ({
+        id: Number(r.id),
+        questionId: r.question_id === null ? null : Number(r.question_id),
+        subjectId: Number(r.subject_id),
+        source: String(r.source),
+        level: Number(r.level),
+        isCleared: Number(r.is_cleared) === 1,
+        wrongAnswerText: (r.wrong_answer_text as string | null) ?? null,
+        createdAt: new Date(r.created_at as Date),
+        clearedAt: r.cleared_at ? new Date(r.cleared_at as Date) : null,
+        questionContent: (r.question_content as string | null) ?? null,
+        questionType: (r.question_type as string | null) ?? null,
+        questionDifficulty: r.question_difficulty === null ? null : Number(r.question_difficulty),
+        knowledgePointId: r.kp_id === null ? null : Number(r.kp_id),
+        knowledgePointName: (r.kp_name as string | null) ?? null,
+      })),
+    };
+  }
+
+  /** 错题列表 count 与 list 的**唯一** WHERE 构造器（改这里就是改两处）。 */
+  private buildErrorWhere(
+    studentId: number,
+    filters: ParentErrorFilters,
+  ): { where: string; params: (number | string)[] } {
+    const conditions = ['meb.student_id = ?'];
+    const params: (number | string)[] = [studentId];
+
+    if (filters.subjectId !== undefined) {
+      conditions.push('meb.subject_id = ?');
+      params.push(filters.subjectId);
+    }
+    if (filters.track === 'aux') {
+      conditions.push("meb.source = 'auxiliary'");
+    } else if (filters.track === 'main') {
+      // 反向排除：新 source（homework/unit_test/...）自动归入主线，不会静默消失
+      conditions.push("meb.source <> 'auxiliary'");
+    }
+    if (filters.source) {
+      conditions.push('meb.source = ?');
+      params.push(filters.source);
+    }
+    if (filters.cleared === 'uncleared') {
+      conditions.push('meb.is_cleared = 0');
+    } else if (filters.cleared === 'cleared') {
+      conditions.push('meb.is_cleared = 1');
+    }
+    if (filters.from) {
+      conditions.push('meb.created_at >= ?');
+      params.push(filters.from);
+    }
+    if (filters.to) {
+      conditions.push('meb.created_at < DATE_ADD(?, INTERVAL 1 DAY)');
+      params.push(filters.to);
+    }
+    return { where: conditions.join(' AND '), params };
   }
 }
