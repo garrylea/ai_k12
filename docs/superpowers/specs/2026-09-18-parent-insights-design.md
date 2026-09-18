@@ -406,8 +406,9 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 | 场景 | 行为 |
 |---|---|
 | 非 parent 角色 | 403 / 1005（`RolesGuard`，既有） |
-| `studentId` 不属于该家长 / 不存在 | 404 / 1002（`requireOwnedStudent`，既有） |
-| `dialogueId` 不属于该学生 | 404 / 1002（服务层二次校验） |
+| `studentId` 不存在（或已软删） | 404 / 1002（`requireOwnedStudent` 的第一段，既有） |
+| `studentId` 存在但属于**别的家长** | **403 / 1005**（`requireOwnedStudent` 的第二段，既有）。⚠️ **不是 404** —— 别照抄「不泄漏存在性」那句，本仓 `requireOwnedStudent` 对这两种情况给的是**不同**的码 |
+| `dialogueId` 不是该学生的会话 | 404 / 1002（`ChatLogsService` 的二次校验）。这里用 1002 是刻意的：学生归属已由 `requireOwnedStudent` 验过，此处等价于「资源不存在」 |
 | 无数据 | **200 + 空数组 / `rate: null`**，不是 404 |
 | `page` 合法但超出末页 | **200 + 空 `items` + 正确 `total`**（不报 404，前端按空列表处理） |
 | `period` 非法值 | 归一化为 `weekly` |
