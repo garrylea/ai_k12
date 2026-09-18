@@ -6738,7 +6738,9 @@ Expected: 无输出（两份文档里都删干净了）。
    直接返回结构化报告，家长端渲染图表
    ```
    并在节末加一行注：`learning_reports` 表本期**未使用**；AI 生成报告文本（`AnalyticsCapability` + `analysis` 场景）留作后续迭代。
-3. §2.4 错误码表后的「实现注」补一条：家长端学情端点沿用 1002（学生不存在）/ 1005（无权操作该学生）。
+3. §2.4 错误码表后的「实现注」补一条：家长端学情端点沿用 1002（学生不存在）/ 1005（**别的家长的孩子**，不是 404）。
+4. **删掉「页面-接口」映射表里的 `P6.8 多孩切换 → /parent/children-switch` 那一行**（约 `:1593`）：该路由已随 Task 17 删除（顶栏 `StudentSwitcher` 才是真实实现）。
+5. `errors` 端点的 `ErrorItem.source` enum 按**实际的 6 个值**补齐：`practice` / `discuss` / `exam` / `targeted` / `error_practice` / `auxiliary`（原 enum 缺 `exam`/`targeted`/`error_practice`，且多出 `homework`/`unit_test`/`midterm`/`final` 四个当前没有任何写入点的值）。
 
 - [ ] **Step 3: 改 UX 文档**
 
