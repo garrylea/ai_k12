@@ -16,7 +16,10 @@ import { useParentStudentStore } from '@/store/parentStudentStore';
  * 3. 首次进（`studentId === null`）→ 默认选第一个；
  * 4. 拉取失败 → 可重试的轻量错误态，不把顶栏搞崩；
  * 5. **`pathname` 变化 → 重拉**（组件挂在顶栏、不随子路由重挂载，只依赖 `load`
- *    会导致「新建完孩子跳页，顶栏还写着还没有孩子账号」，见下方承重用例）。
+ *    会导致「新建完孩子跳页，顶栏还写着还没有孩子账号」，见下方承重用例）；
+ * 6. **有数据时静默刷新**：`pathname` 变化触发的重拉，若手上已有列表则**不出骨架**，
+ *    旧列表全程可见，拿到结果再替换；静默刷新失败也保留旧列表、不进错误态。
+ *    只有首次加载（以及首次失败后的重试）才出骨架——错误态同理只属于**首次**失败。
  *
  * 另有两条有意为之：
  * - **1 个孩子也照常渲染下拉**（P6.8 多孩切换的可扩展性，布局不抖）；
@@ -199,6 +202,74 @@ describe('StudentSwitcher', () => {
 
     expect(await screen.findByTestId('student-switcher-trigger')).toHaveTextContent('小明');
     expect(screen.queryByTestId('student-switcher-loading')).not.toBeInTheDocument();
+  });
+
+  it('路由变化重拉时不出骨架：旧列表全程可见，拿到新列表再替换', async () => {
+    const user = userEvent.setup();
+    // 首屏正常出一次列表
+    listMyStudentsMock.mockResolvedValueOnce([MING]);
+    // 第二次（导航触发）挂起不 resolve，把「刷新中」这一帧定住
+    let resolveSecond!: (list: MyStudentItem[]) => void;
+    listMyStudentsMock.mockImplementationOnce(
+      () =>
+        new Promise<MyStudentItem[]>((resolve) => {
+          resolveSecond = resolve;
+        }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/parent/students']}>
+        <StudentSwitcher />
+        <NavProbe to="/parent/students/7/config" label="去孩子配置页" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('student-switcher-trigger')).toHaveTextContent('小明');
+
+    await user.click(screen.getByRole('button', { name: '去孩子配置页' }));
+
+    await waitFor(() => expect(listMyStudentsMock).toHaveBeenCalledTimes(2));
+    // 第二次请求在飞：不能出现骨架，旧列表名字仍在屏幕上
+    expect(screen.queryByTestId('student-switcher-loading')).not.toBeInTheDocument();
+    expect(screen.getByTestId('student-switcher-trigger')).toHaveTextContent('小明');
+
+    // 结果回来后静默替换（选中的小明被删/换账号时仍走既有的回落校验）
+    await act(async () => resolveSecond([HONG]));
+    expect(await screen.findByTestId('student-switcher-trigger')).toHaveTextContent('小红');
+    expect(useParentStudentStore.getState().studentId).toBe(2);
+  });
+
+  it('静默刷新失败 → 保留旧列表、不显示错误态；下一次导航仍会再试', async () => {
+    const user = userEvent.setup();
+    listMyStudentsMock.mockResolvedValueOnce([MING]);
+    listMyStudentsMock.mockRejectedValueOnce(new Error('network down'));
+
+    render(
+      <MemoryRouter initialEntries={['/parent/students']}>
+        <StudentSwitcher />
+        <NavProbe to="/parent/students/7/config" label="去孩子配置页" />
+        <NavProbe to="/parent/students/7/rewards" label="去奖励册" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('student-switcher-trigger')).toHaveTextContent('小明');
+
+    await user.click(screen.getByRole('button', { name: '去孩子配置页' }));
+
+    await waitFor(() => expect(listMyStudentsMock).toHaveBeenCalledTimes(2));
+    // 静默刷新失败：不清空、不进错误态、不闪骨架，锚点不动
+    expect(await screen.findByTestId('student-switcher-trigger')).toHaveTextContent('小明');
+    expect(screen.queryByText('孩子信息加载失败')).not.toBeInTheDocument();
+    expect(screen.queryByText('还没有孩子账号')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('student-switcher-loading')).not.toBeInTheDocument();
+    expect(useParentStudentStore.getState().studentId).toBe(1);
+
+    // 下一次导航自动再试（不需要手动重试按钮）
+    listMyStudentsMock.mockResolvedValueOnce([MING, HONG]);
+    await user.click(screen.getByRole('button', { name: '去奖励册' }));
+
+    await waitFor(() => expect(listMyStudentsMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByTestId('student-switcher-trigger')).toHaveTextContent('小明');
   });
 
   it('pathname 变化时重拉列表：新建孩子后跳配置页，顶栏自愈（承重用例）', async () => {

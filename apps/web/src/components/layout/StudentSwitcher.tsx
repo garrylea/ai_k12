@@ -26,7 +26,10 @@ import { useParentStudentStore } from '@/store/parentStudentStore';
  *    N 次请求，为顶栏一个小图标不值。别当成漏了，这是 §2.2 明确的取舍；
  *    要加的话先想办法一次批量拿全（后端没有这种端点）。
  * 3. 拉取失败**只降级这一小块**：给一句说明 + 「重试」，不弹 toast、不把顶栏搞崩。
- *    孩子列表拉不到不该阻断家长用其它页面。
+ *    孩子列表拉不到不该阻断家长用其它页面。注意这只指**首次**失败（手上无列表）；
+ *    已有列表时的静默刷新失败保持旧列表（见 §4）。
+ * 4. **有数据时静默刷新**：`pathname` 变化会重拉（见下方 effect），但只有还没拿到过
+ *    列表时才出骨架；已经有列表时后台替换，避免家长端每次导航顶栏闪一下。
  */
 
 interface StudentSwitcherProps {
@@ -61,13 +64,28 @@ export function StudentSwitcher({ className }: StudentSwitcherProps) {
    */
   const cancelLoadRef = useRef<(() => void) | null>(null);
 
+  /**
+   * 拉列表。「首次」与「静默」不分成两份逻辑，靠**当前状态**区分：
+   *
+   * - 只有还没拿到过列表（首次进入的 `loading`、或上次拉失败的 `error`）才置回
+   *   `loading`，此时该出骨架；
+   * - 已经是 `ready`（手上有列表，哪怕是空列表或上次静默刷新失败后保留的旧列表）
+   *   → `setStatus` 收到同一个值会 bail out，**不闪骨架**，页面继续显示当前列表，
+   *   拿到新结果后再整体替换。
+   *
+   * 失败时同理：`ready` 已经表示「有可用列表」，静默刷新失败不能把它打成错误态、
+   * 更不清空列表；保持旧列表，下一次导航（pathname 变化）会自然再试一次。
+   *
+   * 用函数式 `setStatus` 而不是读闭包里的 `status`，免去把 `status` 塞进 `load`
+   * 依赖（塞了会让 `load` 每次状态变化都换引用，进而反复触发拉取 effect）。
+   */
   const load = useCallback(() => {
     cancelLoadRef.current?.(); // 旧请求作废，避免慢响应盖掉新响应
     let cancelled = false;
     cancelLoadRef.current = () => {
       cancelled = true;
     };
-    setStatus('loading');
+    setStatus((prev) => (prev === 'ready' ? prev : 'loading'));
     listMyStudents()
       .then((list) => {
         if (cancelled) return;
@@ -75,7 +93,8 @@ export function StudentSwitcher({ className }: StudentSwitcherProps) {
         setStatus('ready');
       })
       .catch(() => {
-        if (!cancelled) setStatus('error');
+        // 手上有旧列表就保留（status 维持 ready），只有「首次/重试」失败才进错误态。
+        if (!cancelled) setStatus((prev) => (prev === 'ready' ? prev : 'error'));
       });
   }, []);
 
