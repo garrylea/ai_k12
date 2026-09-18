@@ -4618,8 +4618,10 @@ describe('ParentDashboardPage', () => {
 
     renderAt('/parent/dashboard');
 
-    expect(await screen.findByTestId('dashboard-empty')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /创建学生账号/ })).toBeInTheDocument();
+    const empty = await screen.findByTestId('dashboard-empty');
+    // 必须**限定在空态容器内**查：没有孩子时顶栏 `StudentSwitcher` 也会渲染一个
+    // 「去创建学生账号」链接，不加限定的 getByRole 会同时命中两个而抛错。
+    expect(within(empty).getByRole('link', { name: /创建学生账号/ })).toBeInTheDocument();
   });
 
   it('加载中 → 骨架，不到货不渲染卡片', async () => {
