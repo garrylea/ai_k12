@@ -162,6 +162,37 @@ describe('路由表：积分相关页面', () => {
     expect(screen.getByText(PLACEHOLDER_TEXT)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '知识点选择器 P3.2' })).toBeInTheDocument();
   });
+
+  /**
+   * 硬规则钉子（UX §3.3 + CLAUDE.md）：主轨侧边导航「不含辅轨入口」，
+   * 双轨物理隔离靠路由、**无跨轨链接**。曾经这里有两个违规项：
+   * - 辅线 `/student/auxiliary`（跨轨链接，只能从入口选择页进）
+   * - 主线 `/student/mainline`（只是重定向到星图，与「星图导航」重复）
+   * 这条用例保证它们不会被顺手加回来。
+   */
+  it('主轨侧边导航不含辅轨入口，也没有与星图重复的「主线」项', async () => {
+    setStudentSession();
+    getMyPointsMock.mockResolvedValue(POINTS);
+    getMyLedgerMock.mockResolvedValue(LEDGER);
+
+    renderAt('/student/profile');
+    await screen.findByTestId('profile-level-icon');
+
+    expect(screen.queryByRole('link', { name: '辅线' })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/student/auxiliary"]')).toBeNull();
+    expect(screen.queryByRole('link', { name: '主线' })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/student/mainline"]')).toBeNull();
+
+    // 文档清单里的四项仍在
+    for (const [label, href] of [
+      ['星图导航', '/student/star-map'],
+      ['错题本', '/student/error-book'],
+      ['奖励册', '/student/rewards'],
+      ['个人中心', '/student/profile'],
+    ] as const) {
+      expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
+    }
+  });
 });
 
 describe('路由表：RequireRole 守卫未被放宽', () => {

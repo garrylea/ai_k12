@@ -1,9 +1,22 @@
 import { NavLink } from 'react-router-dom';
 
+/**
+ * 主轨侧边二级导航。
+ *
+ * 组成与顺序依据 `docs/UX-UI设计文档.md` §3.3「学生端导航（主轨/辅轨物理隔离）」：
+ * 主轨侧边 = 星图导航 / 主线错题本 / 奖励册 / 学情报告 / 个人中心，**不含辅轨入口**。
+ *
+ * ⚠️ 两条勿再添加的项（2026-09-18 按用户裁决删除）：
+ * - **辅线**（`/student/auxiliary`）：文档明写「不含辅轨入口」，且 CLAUDE.md 硬规则要求
+ *   双轨「物理隔离靠路由（入口选择页，无跨轨链接）」。在这里放一个辅线入口就是跨轨链接。
+ *   辅线只能从入口选择页（`/student/entry`）进。
+ * - **主线**（`/student/mainline`）：它只是 `Navigate to="/student/star-map"`，与「星图导航」
+ *   指向同一页；UX §3.3 的清单里也没有单独的「主线」项。
+ *
+ * 待补：文档清单里的「学情报告」目前既无导航项也无路由（P2.8 未实现）。
+ */
 const navItems = [
   { to: '/student/star-map', label: '星图导航' },
-  { to: '/student/mainline', label: '主线' },
-  { to: '/student/auxiliary', label: '辅线' },
   { to: '/student/error-book', label: '错题本' },
   { to: '/student/rewards', label: '奖励册' },
   { to: '/student/profile', label: '个人中心' },
