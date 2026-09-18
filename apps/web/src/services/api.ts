@@ -1778,3 +1778,190 @@ export function completeTrainingSession(sessionId: number): Promise<CompleteTrai
     method: 'POST',
   });
 }
+
+// --- Parent: points & rewards（家长端积分配置 / 奖励清单 / 兑换 / 兑换记录 / 兑换设置） ---
+// 字段与后端 modules/points/parent-points.controller.ts 的 wire 形状一一对应；契约见
+// docs/api/openapi.yaml 的 /parent/students/{id}*。类型**复用**上面 Points 分区的定义
+// （学生端与家长端共用同一批 service / DTO），这里只新增家长端独有的形状。
+
+/** 奖励清单一行（家长端视角：**含已下架行**，家长要能重新上架）。
+ *  与学生端 `StudentRewardItem` 不同：那个带 `affordable`/`levelOk`/`gap` 等个人化判定。 */
+export interface RewardCatalogView {
+  id: number;
+  name: string;
+  description: string | null;
+  pointsCost: number;
+  /** 兑换所需最低段位 code；null = 无门槛 */
+  minLevelCode: string | null;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+/** 整表保存奖励清单的一条。无 `id` 新增、有 `id` 整行覆盖、清单里消失的 `id` 软删。
+ *  **`isActive` 必填**：漏回传会把已下架的奖励静默重新上架。 */
+export interface RewardCatalogItemInput {
+  id?: number;
+  name: string;
+  description: string | null;
+  pointsCost: number;
+  minLevelCode: string | null;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export type RedemptionType = 'cash' | 'reward';
+export type RedemptionStatus = 'pending' | 'fulfilled';
+
+export interface RedemptionView {
+  id: number;
+  type: RedemptionType;
+  /** 本次消耗的积分（cash 与 reward 都有） */
+  pointsSpent: number;
+  /** 换钱金额（由服务端按汇率 `pointsPerYuan` 推导）；`type='reward'` 时为 null */
+  cashAmount: number | null;
+  /** `type='reward'` 时的奖励 id；`type='cash'` 时为 null */
+  rewardCatalogId: number | null;
+  /** 兑换时的奖励名快照（奖励后来改名/软删也不变）；`type='cash'` 时为 null */
+  rewardName: string | null;
+  status: RedemptionStatus;
+  note: string | null;
+  ledgerId: number | null;
+  createdAt: string;
+  fulfilledAt: string | null;
+}
+
+export interface RedemptionList {
+  items: RedemptionView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface RedeemResult {
+  redemption: RedemptionView;
+  /** 兑换后的实时余额 */
+  balance: number;
+  /** 累计获得（兑换只扣 balance、不影响它，故段位只升不降） */
+  totalEarned: number;
+  level: PointLevel;
+}
+
+/** `GET|PUT /api/parent/students/:id/points/settings` —— 兑换设置。 */
+export interface PointsSettings {
+  /** 多少积分兑 1 元 */
+  pointsPerYuan: number;
+  /** 关闭后 `POST .../points/redeem` 一律拒（3003） */
+  rewardRedemptionEnabled: boolean;
+}
+
+/** 保存分值规则的一条。三个可改字段**全必填**（后端 Zod 三个都是必填，缺一个 400 1001）。
+ *  `dailyLimit` 只允许 `null`（不限）或 1–99；填 0 会让该档位永久不发分。 */
+export interface PointRuleSaveInput {
+  taskCode: string;
+  tierKey: string;
+  points: number;
+  dailyLimit: number | null;
+  isActive: boolean;
+}
+
+/** `GET /api/points/levels` —— 全量段位表（9 项、升序）。**唯一不需要 `studentId`** 的积分端点，
+ *  家长端用它填奖励的 `minLevelCode` 下拉（段位表单一真源在后端，前端不硬编码）。 */
+export function getLevels(): Promise<{ levels: PointLevel[] }> {
+  return fetchApi<{ levels: PointLevel[] }>('/points/levels');
+}
+
+/** `GET /api/parent/students/:id/points` —— 概览。**形状与学生端 `getMyPoints()` 完全相同**
+ *  （后端 `ParentPointsController.getPoints` 直接复用 `PointsService.getOverview`），
+ *  故复用 `MyPoints` 类型而不另造一份。 */
+export function getParentPoints(studentId: number): Promise<MyPoints> {
+  return fetchApi<MyPoints>(`/parent/students/${studentId}/points`);
+}
+
+/** `GET /api/parent/students/:id/points/rules` —— **含已下架档位**，家长要能看到并重新启用。 */
+export function getParentPointRules(studentId: number): Promise<MyPointRules> {
+  return fetchApi<MyPointRules>(`/parent/students/${studentId}/points/rules`);
+}
+
+/** 批量保存分值规则（一个事务，要么全成要么全不成）。 */
+export function saveParentPointRules(
+  studentId: number,
+  rules: PointRuleSaveInput[],
+): Promise<null> {
+  return fetchApi<null>(`/parent/students/${studentId}/points/rules`, {
+    method: 'PUT',
+    body: JSON.stringify({ rules }),
+  });
+}
+
+/** 流水分页。`pageSize` 省略时**不传该 query**，按后端默认 20（上限 100，越界 400）。 */
+export function getParentPointLedger(
+  studentId: number,
+  page: number,
+  pageSize?: number,
+): Promise<PointLedgerPage> {
+  const qs = new URLSearchParams({ page: String(page) });
+  if (pageSize !== undefined) qs.set('pageSize', String(pageSize));
+  return fetchApi<PointLedgerPage>(`/parent/students/${studentId}/points/ledger?${qs.toString()}`);
+}
+
+/** `GET /api/parent/students/:id/reward-catalog` —— **含已下架行**（整表 PUT 时要原样带回）。 */
+export function getParentRewardCatalog(studentId: number): Promise<RewardCatalogView[]> {
+  return fetchApi<RewardCatalogView[]>(`/parent/students/${studentId}/reward-catalog`);
+}
+
+/** 整表保存奖励清单，返回保存后的完整清单。清单里消失的 `id` 会被**软删**，
+ *  因此必须把当前列表（含已下架的 `isActive: false` 行）原样整表提交。 */
+export function saveParentRewardCatalog(
+  studentId: number,
+  items: RewardCatalogItemInput[],
+): Promise<RewardCatalogView[]> {
+  return fetchApi<RewardCatalogView[]>(`/parent/students/${studentId}/reward-catalog`, {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  });
+}
+
+/** 兑换（Nest `@Post` 默认 **201**）。余额不足 / 段位不够 / 开关关闭 / 已下架等业务拒绝
+ *  由 service 抛 3001-3004 —— **不要**本地判余额后就乐观放行（并发下服务端才准）。 */
+export function redeemParentPoints(
+  studentId: number,
+  body: { type: 'cash'; points: number } | { type: 'reward'; catalogId: number },
+): Promise<RedeemResult> {
+  return fetchApi<RedeemResult>(`/parent/students/${studentId}/points/redeem`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** 兑换记录分页（`pageSize` 由服务端固定 20，故这里只传 `page`）。 */
+export function getParentRedemptions(studentId: number, page: number): Promise<RedemptionList> {
+  const qs = new URLSearchParams({ page: String(page) });
+  return fetchApi<RedemptionList>(`/parent/students/${studentId}/redemptions?${qs.toString()}`);
+}
+
+/** 只改兑换单状态（pending ⇄ fulfilled），**不动积分**。
+ *  ⚠️ 路径里**没有 studentId**：服务端先按 id 反查兑换单拿 `student_id` 再校验归属。 */
+export function setRedemptionStatus(
+  redemptionId: number,
+  status: RedemptionStatus,
+): Promise<null> {
+  return fetchApi<null>(`/parent/redemptions/${redemptionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function getParentPointsSettings(studentId: number): Promise<PointsSettings> {
+  return fetchApi<PointsSettings>(`/parent/students/${studentId}/points/settings`);
+}
+
+/** 部分更新兑换设置（至少给一个字段，空 patch 后端 400）。返回更新后的全量。 */
+export function saveParentPointsSettings(
+  studentId: number,
+  patch: Partial<PointsSettings>,
+): Promise<PointsSettings> {
+  return fetchApi<PointsSettings>(`/parent/students/${studentId}/points/settings`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+}
