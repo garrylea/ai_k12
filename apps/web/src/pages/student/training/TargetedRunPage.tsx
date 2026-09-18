@@ -7,6 +7,7 @@ import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussD
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { Modal } from '@/components/base';
+import { CelebrationOverlay } from '@/components/business';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
   getTrainingExplanations,
@@ -19,6 +20,9 @@ import {
 } from '@/services/api';
 import { toast } from '@/components/base/Toast';
 import { normalizeOptions } from './normalizeOptions';
+import { parseRunHandoff } from './run-handoff';
+import { useSessionPointsCompletion } from './session-completion';
+import { SessionPointsRetryNotice } from './SessionPointsRetryNotice';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
 const MATH_SUBJECT_ID = 1;
@@ -52,6 +56,12 @@ export default function TargetedRunPage() {
   const guardRef = useRef(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
   const [entries, setEntries] = useState<TargetedPracticeQuestion[] | null>(null);
+  // 配置页交接来的会话 id：收尾发分的唯一凭据；null = 会话 INSERT 降级（不发分）
+  const [sessionId, setSessionId] = useState<number | null>(null);
+
+  // 完成发分（乙类会话页唯一入口）：末题收尾时调 complete；失败可重试
+  const { complete: completeSession, retry, needsRetry, retrying, celebrationProps } =
+    useSessionPointsCompletion(sessionId, `数学专项 · ${entries?.length ?? 0} 题`);
 
   // StrictMode 下 effect 会跑两次：ref 守卫保证「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无题单而踢回配置页。
@@ -61,19 +71,12 @@ export default function TargetedRunPage() {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
 
-    let parsed: TargetedPracticeQuestion[] = [];
-    try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const value: unknown = JSON.parse(raw);
-        if (Array.isArray(value)) parsed = value as TargetedPracticeQuestion[];
-      }
-    } catch {
-      // 解析失败视为空题单，回配置页
-    }
+    // 交接体是 { sessionId, questions }；形状不对/解析失败一律视为空题单
+    const handoff = parseRunHandoff<TargetedPracticeQuestion>(sessionStorage.getItem(SESSION_KEY));
     // 读后即删：无论内容是否有效都清掉，避免刷新/回退后带着旧题单重复进入
     sessionStorage.removeItem(SESSION_KEY);
-    setEntries(parsed);
+    setEntries(handoff?.questions ?? []);
+    setSessionId(handoff?.sessionId ?? null);
   }, []);
 
   // 空题单（直接访问 / 解析失败 / 刷新后读不到）回配置页
@@ -118,9 +121,11 @@ export default function TargetedRunPage() {
         subjectId: MATH_SUBJECT_ID,
         studentAnswer: answer,
         source: 'targeted',
+        // 会话留痕（后端累加 judged_count）；sessionId 为 null 时不带这个字段
+        ...(sessionId != null ? { sessionId } : {}),
       });
     },
-    [entryByN],
+    [entryByN, sessionId],
   );
 
   const handleRequestHint = useCallback(
@@ -139,6 +144,10 @@ export default function TargetedRunPage() {
 
   const handleFinish = useCallback(async (results: Record<string, RunnerAnswerRecord>) => {
     setFinalResults(results);
+
+    // 收尾发分：用配置页交接来的 sessionId 调 complete（幂等，内部防重入）。
+    // sessionId 为 null 时 hook 内部直接跳过——不发分、不反馈、不报错。
+    completeSession();
 
     // 末题判题完成后：收集需要解析的 questionId 批量拉取（后端等 in-flight 生成，60s 兜底）。
     // 解析为题级公开数据，题单条目必来自题库（questionId 非空）。
@@ -168,7 +177,7 @@ export default function TargetedRunPage() {
     // 与错题重做的差异点：专项练习答错已由后端 judge 端点自动入错题本，
     // 收尾无需 bump，直接进结果页。
     setPhase('result');
-  }, [entryByN, questions]);
+  }, [entryByN, questions, completeSession]);
 
   const confirmMarkHidden = useCallback(async () => {
     if (markConfirm.questionId == null) return;
@@ -196,6 +205,15 @@ export default function TargetedRunPage() {
             answers={finalResults ?? {}}
             initialExplanations={explanations}
             questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
+            // 发分失败（award_failed / 网络异常）时挂在结果弹窗顶部：不弹负反馈，
+            // 给一个可再点的出口（服务端会话留在 in_progress，重试会补发且只补一次）
+            headerExtra={
+              needsRetry ? (
+                <div className="px-5 py-3">
+                  <SessionPointsRetryNotice retrying={retrying} onRetry={retry} />
+                </div>
+              ) : undefined
+            }
             onWaitExplanation={async (qid) => {
               const res = await waitTrainingExplanation(qid);
               return res.explanation;
@@ -336,6 +354,9 @@ export default function TargetedRunPage() {
             </div>
           </Modal>
         )}
+        {/* 段位晋升 / 全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
+        <CelebrationOverlay {...celebrationProps} />
+
         {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard
           guardRef={guardRef}

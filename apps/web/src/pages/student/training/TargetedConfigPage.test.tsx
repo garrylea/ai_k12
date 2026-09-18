@@ -8,6 +8,7 @@ import {
   startTargetedPractice,
   type MyPointRules,
   type PointRuleTier,
+  type TargetedPracticeQuestion,
   type TrainingKnowledgePoint,
 } from '@/services/api';
 
@@ -18,7 +19,10 @@ import {
  * 白名单来自家长配置的 `(taskCode, tierKey)`；新默认档位是 1/3/5/10。
  * 旧常量里的「8 题」现在会被 400 拒绝，所以档位只能来自 `me/rules`。
  */
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  sessionStorage.clear();
+});
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -54,6 +58,14 @@ const MATH_TIERS: PointRuleTier[] = [
   tier({ tierKey: '2', tierLabel: '2 题', points: 5, dailyLimit: 3, completedToday: 0, remainingToday: null }),
 ];
 
+/** 开练成功返回的题单（happy path 默认值；空题单是另一条分支，用例里单独覆盖）。 */
+const STARTED_QUESTION: TargetedPracticeQuestion = {
+  questionId: 101,
+  text: '1 + 1 = ?',
+  type: 'choice',
+  options: ['A. 1', 'B. 2'],
+};
+
 /** 别的任务排在前面：按 taskCode 挑，而不是拿 tasks[0]。 */
 function rulesOf(tiers: PointRuleTier[]): MyPointRules {
   return {
@@ -70,9 +82,14 @@ function rulesOf(tiers: PointRuleTier[]): MyPointRules {
 
 /** 知识点与档位都在 useEffect 里异步拉取，render 必须包在 act 里等它们落地。 */
 async function renderPage() {
-  const router = createMemoryRouter([{ path: '/', element: <TargetedConfigPage /> }], {
-    initialEntries: ['/'],
-  });
+  const router = createMemoryRouter(
+    [
+      { path: '/', element: <TargetedConfigPage /> },
+      // 开练成功会 navigate 到 run 页；这里要有落点，否则测试环境报「无匹配路由」
+      { path: '/student/training/targeted/run', element: <div /> },
+    ],
+    { initialEntries: ['/'] },
+  );
   let result!: ReturnType<typeof render>;
   await act(async () => {
     result = render(<RouterProvider router={router} />);
@@ -98,7 +115,7 @@ describe('TargetedConfigPage 题量档位', () => {
     startMock.mockReset();
     getKpsMock.mockResolvedValue(KPS);
     getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
-    startMock.mockResolvedValue({ questions: [], sessionId: null });
+    startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: 77 });
   });
 
   it('档位渲染自 me/rules：按 taskCode 取档，每档显示分值，有上限的显示剩余次数', async () => {
@@ -200,5 +217,35 @@ describe('TargetedConfigPage 题量档位', () => {
 
     expect(getRulesMock).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: /^10 题/ })).toBeTruthy();
+  });
+});
+
+describe('TargetedConfigPage sessionId 交接链', () => {
+  beforeEach(() => {
+    getKpsMock.mockReset();
+    getRulesMock.mockReset();
+    startMock.mockReset();
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: 77 });
+  });
+
+  it('开练成功后 sessionStorage 存 { sessionId, questions }（run 页据此发分）', async () => {
+    await renderPage();
+    selectKps();
+    await clickStart();
+
+    const stored: unknown = JSON.parse(sessionStorage.getItem('training:targeted') ?? 'null');
+    expect(stored).toEqual({ sessionId: 77, questions: [STARTED_QUESTION] });
+  });
+
+  it('start 降级返回 sessionId: null 时原样交接（run 页据此不发分）', async () => {
+    startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: null });
+    await renderPage();
+    selectKps();
+    await clickStart();
+
+    const stored: unknown = JSON.parse(sessionStorage.getItem('training:targeted') ?? 'null');
+    expect(stored).toEqual({ sessionId: null, questions: [STARTED_QUESTION] });
   });
 });

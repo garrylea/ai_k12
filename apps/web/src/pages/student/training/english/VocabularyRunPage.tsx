@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/base';
+import { CelebrationOverlay } from '@/components/business';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import WordPromptCard from '@/components/business/vocabulary/WordPromptCard';
 import AnswerFeedList, { type FeedEntry } from '@/components/business/vocabulary/AnswerFeedList';
@@ -12,6 +13,9 @@ import {
   type VocabularyQuestionItem,
   type WordFamilyResult,
 } from '@/services/api';
+import { parseRunHandoff } from '../run-handoff';
+import { useSessionPointsCompletion } from '../session-completion';
+import { SessionPointsRetryNotice } from '../SessionPointsRetryNotice';
 
 /**
  * 背单词答题页。
@@ -34,6 +38,8 @@ export default function VocabularyRunPage() {
   const [feedCollapsed, setFeedCollapsed] = useState(false);
   const [cleared, setCleared] = useState<Record<number, boolean>>({});
   const [finished, setFinished] = useState(false);
+  // 配置页交接来的会话 id：收尾发分的唯一凭据；null = 会话 INSERT 降级（不发分）
+  const [sessionId, setSessionId] = useState<number | null>(null);
 
   // 词根族：只缓存当前展开的那个词，翻页即收起
   const [familyOpen, setFamilyOpen] = useState(false);
@@ -48,27 +54,30 @@ export default function VocabularyRunPage() {
   const lastSubmitAtRef = useRef(0);
   const guardRef = useRef(true);
 
+  // 完成发分（乙类会话页唯一入口）：最后一个词提交、finished 变 true 的那一刻调 complete。
+  // 注意本页判题是「提交即翻页、判定异步回填」，完成点**不是**最后一次判题返回——
+  // 等模型回来再发分会把学生卡在成绩页。sessionId 为 null 时 hook 内部直接跳过。
+  const { complete: completeSession, retry, needsRetry, retrying, celebrationProps } =
+    useSessionPointsCompletion(sessionId, `英语背单词 · ${questions?.length ?? 0} 词`);
+
   useEffect(() => {
-    const raw = sessionStorage.getItem('training:vocabulary');
-    if (!raw) {
+    const handoff = parseRunHandoff<VocabularyQuestionItem>(
+      sessionStorage.getItem('training:vocabulary'),
+    );
+    // 形状不对 / 解析失败 / 空词单一律视为「空题单」踢回配置页
+    if (!handoff || handoff.questions.length === 0) {
       navigate('/student/training/english/vocabulary', { replace: true });
       return;
     }
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        navigate('/student/training/english/vocabulary', { replace: true });
-        return;
-      }
-      const list = parsed as VocabularyQuestionItem[];
-      setQuestions(list);
-      setEntries(
-        list.map((q) => ({ question: q, answer: '', submitted: false })),
-      );
-    } catch {
-      navigate('/student/training/english/vocabulary', { replace: true });
-    }
+    setQuestions(handoff.questions);
+    setSessionId(handoff.sessionId);
+    setEntries(handoff.questions.map((q) => ({ question: q, answer: '', submitted: false })));
   }, [navigate]);
+
+  // finished 变 true 即收尾（内部 startedRef 防重入，StrictMode 双跑也只发一次）
+  useEffect(() => {
+    if (finished) completeSession();
+  }, [finished, completeSession]);
 
   const question = questions?.[idx] ?? null;
 
@@ -218,6 +227,12 @@ export default function VocabularyRunPage() {
             <p className="mt-2 text-xs text-[var(--text-secondary)]">
               「未答到考点」是熟词僻义题里答成了常见义——你答的没错，只是没考到那个意思，不计错。
             </p>
+            {/* 发分失败（award_failed / 网络异常）：不弹负反馈，给一个可再点的出口 */}
+            {needsRetry && (
+              <div className="mt-4">
+                <SessionPointsRetryNotice retrying={retrying} onRetry={retry} />
+              </div>
+            )}
             <button
               onClick={handleFinish}
               className="mt-6 h-12 w-full rounded-2xl text-white font-bold"
@@ -236,6 +251,9 @@ export default function VocabularyRunPage() {
           cleared={cleared}
         />
       </div>
+
+      {/* 段位晋升全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
+      <CelebrationOverlay {...celebrationProps} />
     </div>
   );
 }

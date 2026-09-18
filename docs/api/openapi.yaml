@@ -6774,6 +6774,13 @@ components:
           type: string
           enum: [targeted, error_practice]
           description: 训练来源——targeted=专项练习；error_practice=错题练习（非法值 400）
+        sessionId:
+          type: integer
+          nullable: true
+          description: >-
+            可选：本轮训练会话 id（乙类会话页专用）。只用于累加
+            training_sessions.judged_count 审计留痕，不传也能判题；会话不存在 /
+            非本人 / 已完成都静默跳过，不报错
 
     TrainingSelfAssessRequest:
       type: object

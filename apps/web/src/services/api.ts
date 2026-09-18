@@ -863,6 +863,12 @@ export function judgeTraining(payload: {
   subjectId: number;
   studentAnswer: string;
   source: 'targeted' | 'error_practice';
+  /**
+   * 可选：本轮训练会话 id（乙类会话页收尾要拿它发分）。只用于后端累加
+   * `training_sessions.judged_count` 审计留痕，不传也能判题。背单词的判题端点
+   * **不接受**这个字段，别往 `judgeVocabularyWord` 上加。
+   */
+  sessionId?: number;
 }): Promise<JudgeResult> {
   return fetchApi<JudgeResult>('/training/judge', {
     method: 'POST',

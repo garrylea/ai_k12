@@ -7,6 +7,7 @@ import {
   type TrainingKnowledgePoint,
 } from '@/services/api';
 import { tierStatus, usePointTiers } from './point-tiers';
+import type { TargetedRunHandoff } from './run-handoff';
 
 /** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
 const MATH_SUBJECT_ID = 1;
@@ -216,8 +217,10 @@ export default function TargetedConfigPage() {
         setEmptyHint(true);
         return;
       }
-      // 题单交给 run 页（读后即删），避免 URL 超长
-      sessionStorage.setItem('training:targeted', JSON.stringify(res.questions));
+      // 题单 + 会话 id 交给 run 页（读后即删）：sessionId 是收尾发分的唯一凭据，
+      // 丢掉它 run 页就没法调 completeTrainingSession（可能是 null = 降级不发分）
+      const handoff: TargetedRunHandoff = { sessionId: res.sessionId, questions: res.questions };
+      sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
       navigate('/student/training/targeted/run');
     } catch (err) {
       setStartError(err instanceof Error ? err.message : '开练失败，请重试');

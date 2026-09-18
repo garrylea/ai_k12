@@ -9,6 +9,7 @@ import {
   type MyPointRules,
   type PointRuleTier,
   type VocabularyOptions,
+  type VocabularyQuestionItem,
 } from '@/services/api';
 
 /**
@@ -17,7 +18,10 @@ import {
  * 「背几个」的档位同样来自家长配置的积分规则（`en_vocabulary`），
  * 开练 count 必须落在白名单里，否则 `/training/vocabulary/start` 会 400。
  */
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  sessionStorage.clear();
+});
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -53,6 +57,18 @@ const VOCAB_TIERS: PointRuleTier[] = [
   tier({ tierKey: '12', tierLabel: '12 词', points: 6, dailyLimit: 3, completedToday: 0, remainingToday: null }),
 ];
 
+/** 抽词成功返回的词单（happy path 默认值；空结果另一条分支单独覆盖）。 */
+const STARTED_WORD: VocabularyQuestionItem = {
+  wordId: 7,
+  senseIndex: 0,
+  promptKind: 'cn2en',
+  prompt: '苹果',
+  phonetic: null,
+  context: null,
+  isExtendedSense: false,
+  hasFamily: false,
+};
+
 /** 别的任务排在前面：按 taskCode 挑，而不是拿 tasks[0]。 */
 function rulesOf(tiers: PointRuleTier[]): MyPointRules {
   return {
@@ -65,9 +81,14 @@ function rulesOf(tiers: PointRuleTier[]): MyPointRules {
 
 /** 词库信息与档位都在 useEffect 里异步拉取，render 必须包在 act 里等它们落地。 */
 async function renderPage() {
-  const router = createMemoryRouter([{ path: '/', element: <VocabularyConfigPage /> }], {
-    initialEntries: ['/'],
-  });
+  const router = createMemoryRouter(
+    [
+      { path: '/', element: <VocabularyConfigPage /> },
+      // 开背成功会 navigate 到 run 页；这里要有落点，否则测试环境报「无匹配路由」
+      { path: '/student/training/english/vocabulary/run', element: <div /> },
+    ],
+    { initialEntries: ['/'] },
+  );
   let result!: ReturnType<typeof render>;
   await act(async () => {
     result = render(<RouterProvider router={router} />);
@@ -88,7 +109,7 @@ describe('VocabularyConfigPage 词量档位', () => {
     startMock.mockReset();
     optionsMock.mockResolvedValue(OPTIONS);
     getRulesMock.mockResolvedValue(rulesOf(VOCAB_TIERS));
-    startMock.mockResolvedValue({ questions: [], poolSize: 0, sessionId: null });
+    startMock.mockResolvedValue({ questions: [STARTED_WORD], poolSize: 1, sessionId: 88 });
   });
 
   it('档位渲染自 me/rules：按 taskCode 取档，每档显示分值，有上限的显示剩余次数', async () => {
@@ -179,5 +200,33 @@ describe('VocabularyConfigPage 词量档位', () => {
 
     expect(getRulesMock).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: /^15 词/ })).toBeTruthy();
+  });
+});
+
+describe('VocabularyConfigPage sessionId 交接链', () => {
+  beforeEach(() => {
+    optionsMock.mockReset();
+    getRulesMock.mockReset();
+    startMock.mockReset();
+    optionsMock.mockResolvedValue(OPTIONS);
+    getRulesMock.mockResolvedValue(rulesOf(VOCAB_TIERS));
+    startMock.mockResolvedValue({ questions: [STARTED_WORD], poolSize: 1, sessionId: 88 });
+  });
+
+  it('开背成功后 sessionStorage 存 { sessionId, questions }（run 页据此发分）', async () => {
+    await renderPage();
+    await clickStart();
+
+    const stored: unknown = JSON.parse(sessionStorage.getItem('training:vocabulary') ?? 'null');
+    expect(stored).toEqual({ sessionId: 88, questions: [STARTED_WORD] });
+  });
+
+  it('start 降级返回 sessionId: null 时原样交接（run 页据此不发分）', async () => {
+    startMock.mockResolvedValue({ questions: [STARTED_WORD], poolSize: 1, sessionId: null });
+    await renderPage();
+    await clickStart();
+
+    const stored: unknown = JSON.parse(sessionStorage.getItem('training:vocabulary') ?? 'null');
+    expect(stored).toEqual({ sessionId: null, questions: [STARTED_WORD] });
   });
 });

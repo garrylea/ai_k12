@@ -10,6 +10,7 @@ import {
   type VocabularyOrder,
 } from '@/services/api';
 import { tierStatus, usePointTiers } from '../point-tiers';
+import type { VocabularyRunHandoff } from '../run-handoff';
 
 /** 积分规则里的任务码（英语背单词）。 */
 const EN_VOCAB_TASK_CODE = 'en_vocabulary';
@@ -94,7 +95,9 @@ export default function VocabularyConfigPage() {
         setLoading(false);
         return;
       }
-      sessionStorage.setItem('training:vocabulary', JSON.stringify(res.questions));
+      // 词单 + 会话 id 交给 run 页：sessionId 是收尾发分的唯一凭据（可能是 null = 降级不发分）
+      const handoff: VocabularyRunHandoff = { sessionId: res.sessionId, questions: res.questions };
+      sessionStorage.setItem('training:vocabulary', JSON.stringify(handoff));
       navigate('/student/training/english/vocabulary/run');
     } catch {
       setError('开练失败，请稍后重试');
