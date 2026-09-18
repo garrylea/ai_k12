@@ -152,6 +152,18 @@ describe('DashboardService', () => {
     await expect(mkSvc(d).getDashboard(3)).rejects.toThrow('DB 挂了');
   });
 
+  it('NotFoundException 但 code ≠ 1002 → 照常抛出（只吞 1002，别把别的 404 也吞了）', async () => {
+    const d = mk({
+      progressService: {
+        getStarMap: vi.fn().mockRejectedValue(
+          new NotFoundException({ code: 1002 + 1, message: '教材版本已被删除' }),
+        ),
+      },
+    });
+
+    await expect(mkSvc(d).getDashboard(3)).rejects.toMatchObject({ response: { code: 1003 } });
+  });
+
   it('多个孩子各自出卡片', async () => {
     const d = mk({
       studentsRepo: {

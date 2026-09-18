@@ -15,6 +15,13 @@ import type {
 /** 近 7 天活跃 = 含今天在内的 7 天窗口。 */
 const ACTIVE_WINDOW_DAYS = 7;
 
+/** Nest 的 HttpException 把业务码放在 `getResponse()` 的 `code` 字段上；非 HttpException 一律不算。 */
+function isNotFound1002(err: unknown): boolean {
+  if (!(err instanceof NotFoundException)) return false;
+  const body = err.getResponse();
+  return typeof body === 'object' && body !== null && (body as { code?: unknown }).code === 1002;
+}
+
 /**
  * 家长仪表盘（spec §4.2 ①）：**多孩聚合一个端点**，一次给完。
  *
@@ -105,7 +112,9 @@ export class DashboardService {
       try {
         starMap = await this.progressService.getStarMap(studentId, subjectId);
       } catch (err) {
-        if (err instanceof NotFoundException) continue;
+        // 只吞「学生不存在 / 该学科暂无教材版本」这类 1002——以及它的唯一实际来源
+        // `ProgressService.getStarMap`。非 1002 的异常照常抛，别把真 bug 静默吃掉。
+        if (isNotFound1002(err)) continue;
         throw err;
       }
 
