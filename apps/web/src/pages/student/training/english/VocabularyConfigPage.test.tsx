@@ -88,7 +88,7 @@ describe('VocabularyConfigPage 词量档位', () => {
     startMock.mockReset();
     optionsMock.mockResolvedValue(OPTIONS);
     getRulesMock.mockResolvedValue(rulesOf(VOCAB_TIERS));
-    startMock.mockResolvedValue({ questions: [], poolSize: 0 });
+    startMock.mockResolvedValue({ questions: [], poolSize: 0, sessionId: null });
   });
 
   it('档位渲染自 me/rules：按 taskCode 取档，每档显示分值，有上限的显示剩余次数', async () => {

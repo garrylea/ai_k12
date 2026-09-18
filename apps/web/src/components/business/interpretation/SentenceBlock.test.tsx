@@ -54,6 +54,7 @@ const JUDGED: InterpretationJudgeResult = {
   ],
   sentence: { correct: true, method: 'exact', standard: '庆历四年的春天，滕子京被贬到巴陵郡做太守。', comment: null },
   fullTranslation: null,
+  pointsAwarded: 0,
 };
 
 describe('SentenceBlock — 渲染契约（terms 是 {term, plain} 对象）', () => {

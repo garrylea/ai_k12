@@ -197,8 +197,9 @@ export default function ExamRunPage() {
           next.add(q.n);
           return next;
         });
-        // 后端白名单不回传对错；占位 JudgeResult 仅为满足组件契约（结果页从 getExamResults 拉真数据）
-        return { questionId: 0, isCorrect: true, method: 'exact', analysis: null } as JudgeResult;
+        // 后端白名单不回传对错；占位 JudgeResult 仅为满足组件契约（结果页从 getExamResults 拉真数据，
+        // 发分在交卷响应里，这里恒 0）
+        return { questionId: 0, isCorrect: true, method: 'exact', analysis: null, pointsAwarded: 0 } as JudgeResult;
       });
     },
     [sid, questionIdMap],

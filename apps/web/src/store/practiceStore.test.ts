@@ -21,7 +21,7 @@ beforeEach(() => {
 
 describe('practiceStore', () => {
   it('setSession 重置 answers/hints 并记录 session', () => {
-    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact' });
+    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact', pointsAwarded: 0 });
     usePracticeStore.getState().setSession(42, QUESTIONS);
 
     const s = usePracticeStore.getState();
@@ -33,13 +33,13 @@ describe('practiceStore', () => {
 
   it('record 按复合题号写入 answer 且不影响其它题', () => {
     usePracticeStore.getState().setSession(42, QUESTIONS);
-    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact' });
+    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact', pointsAwarded: 0 });
 
     let s = usePracticeStore.getState();
-    expect(s.answers['0-1']).toMatchObject({ studentAnswer: 'x=2', isCorrect: true, method: 'exact' });
+    expect(s.answers['0-1']).toMatchObject({ studentAnswer: 'x=2', isCorrect: true, method: 'exact', pointsAwarded: 0 });
     expect(s.answers['0-2']).toBeUndefined();
 
-    usePracticeStore.getState().record('0-2', 'x=3', { questionId: 2, isCorrect: false, method: 'ai', errorType: 'calculation' });
+    usePracticeStore.getState().record('0-2', 'x=3', { questionId: 2, isCorrect: false, method: 'ai', errorType: 'calculation', pointsAwarded: 0 });
     s = usePracticeStore.getState();
     expect(s.answers['0-1']).toBeDefined(); // 先答的题不被覆盖
     expect(s.answers['0-2']).toMatchObject({ studentAnswer: 'x=3', isCorrect: false, errorType: 'calculation' });
@@ -47,7 +47,7 @@ describe('practiceStore', () => {
 
   it('record 判定失败时带 failed 标记', () => {
     usePracticeStore.getState().setSession(42, QUESTIONS);
-    usePracticeStore.getState().record('0-1', 'x=2', { questionId: null, isCorrect: false, method: 'ai' }, { failed: true });
+    usePracticeStore.getState().record('0-1', 'x=2', { questionId: null, isCorrect: false, method: 'ai', pointsAwarded: 0 }, { failed: true });
 
     expect(usePracticeStore.getState().answers['0-1'].failed).toBe(true);
   });
@@ -66,7 +66,7 @@ describe('practiceStore', () => {
   it('loadResults 同卡重入时保留在途作答（current 优先）', () => {
     usePracticeStore.getState().setSession(42, QUESTIONS);
     // 用户已作答 0-2（尚未落库），随后 loadResults 返回 DB 只含 0-1
-    usePracticeStore.getState().record('0-2', 'x=3', { questionId: 99, isCorrect: true, method: 'exact' });
+    usePracticeStore.getState().record('0-2', 'x=3', { questionId: 99, isCorrect: true, method: 'exact', pointsAwarded: 0 });
     usePracticeStore.getState().loadResults(42, QUESTIONS, [
       { questionN: '0-1', questionText: 'q1', studentAnswer: 'x=2', isCorrect: false, method: 'ai', errorType: null },
     ]);
@@ -78,7 +78,7 @@ describe('practiceStore', () => {
 
   it('clearAnswers 只清 answers，保留 cardId/questions/hints', () => {
     usePracticeStore.getState().setSession(42, QUESTIONS);
-    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact' });
+    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact', pointsAwarded: 0 });
     usePracticeStore.getState().setHint('0-1', '提示');
 
     usePracticeStore.getState().clearAnswers();
@@ -91,7 +91,7 @@ describe('practiceStore', () => {
 
   it('reset 清空整个 session', () => {
     usePracticeStore.getState().setSession(42, QUESTIONS);
-    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact' });
+    usePracticeStore.getState().record('0-1', 'x=2', { questionId: 1, isCorrect: true, method: 'exact', pointsAwarded: 0 });
     usePracticeStore.getState().reset();
 
     expect(usePracticeStore.getState()).toMatchObject(EMPTY_STATE);

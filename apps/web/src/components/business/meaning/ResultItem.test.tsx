@@ -20,7 +20,7 @@ describe('ResultItem', () => {
       ...BASE,
       kind: 'judged',
       result: {
-        passageId: 12, sentenceIndex: 1, allCorrect: false,
+        passageId: 12, sentenceIndex: 1, allCorrect: false, pointsAwarded: 0,
         terms: [{ term: '舟', correct: false, method: 'ai', standard: '船', comment: '这里是比喻义' }],
         meaning: { correct: false, method: 'ai', standard: '含新事物代替旧事物的哲理', comment: null },
         emotion: { correct: true, method: 'ai', standard: '豁达乐观', comment: null },
@@ -48,7 +48,7 @@ describe('ResultItem', () => {
       ...BASE,
       kind: 'judged',
       result: {
-        passageId: 12, sentenceIndex: 1, allCorrect: false,
+        passageId: 12, sentenceIndex: 1, allCorrect: false, pointsAwarded: 0,
         // toKeyTerms 把缺失的 gloss 降级成 ''，这里模拟题库没有标准释义
         terms: [{ term: '舟', correct: false, method: 'ai', standard: '', comment: null }],
         meaning: { correct: true, method: 'ai', standard: '含哲理', comment: null },
@@ -64,7 +64,7 @@ describe('ResultItem', () => {
       ...BASE,
       kind: 'judged',
       result: {
-        passageId: 12, sentenceIndex: 1, allCorrect: true,
+        passageId: 12, sentenceIndex: 1, allCorrect: true, pointsAwarded: 0,
         terms: [{ term: '舟', correct: true, method: 'ai', standard: '船', comment: null }],
         meaning: { correct: true, method: 'ai', standard: '含新事物代替旧事物的哲理', comment: null },
         emotion: { correct: true, method: 'ai', standard: '豁达乐观', comment: null },
@@ -91,7 +91,7 @@ describe('ResultItem', () => {
       ...BASE,
       kind: 'judged',
       result: {
-        passageId: 12, sentenceIndex: 1, allCorrect: true,
+        passageId: 12, sentenceIndex: 1, allCorrect: true, pointsAwarded: 0,
         terms: [{ term: '舟', correct: true, method: 'ai', standard: '', comment: null }],
         meaning: { correct: true, method: 'ai', standard: '   ', comment: null },
         emotion: { correct: true, method: 'ai', standard: '', comment: null },

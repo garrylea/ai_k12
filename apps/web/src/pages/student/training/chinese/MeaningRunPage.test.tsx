@@ -49,6 +49,7 @@ const RESULT = (sentenceIndex: number): MeaningJudgeResult => ({
   terms: [],
   meaning: { correct: false, method: 'ai', standard: `第${sentenceIndex + 1}句标准含义`, comment: null },
   emotion: { correct: true, method: 'ai', standard: '豁达', comment: null },
+  pointsAwarded: 0,
 });
 
 beforeEach(() => {

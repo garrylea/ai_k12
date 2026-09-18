@@ -611,6 +611,18 @@ export interface JudgeResult {
   explanation?: string | null;
   /** 客观题空答案：不计对错（中性展示） */
   noStandardAnswer?: boolean;
+  /**
+   * 本次**实际入账**的积分（甲类逐目标发分）。`0 = 本次没加`：答错 / `source='exam'` /
+   * 未清掉任何错题（`not_cleared`）/ 无题库身份（`questionId=null`）/ 幂等命中
+   * （`duplicate`，本次未入账）/ 已达上限（`daily_limit`）/ `no_rule` / `tier_inactive` /
+   * 发分失败。**只有 `> 0` 才弹「+N 分」轻反馈。**
+   */
+  pointsAwarded: number;
+  /**
+   * 未发分原因，**缺省 = 静默**。`duplicate`（幂等命中）刻意不在枚举内——本次没入账，
+   * 一律按 0 静默处理，不能弹假 `+N 分`（openapi `PointsAwardReason`）。
+   */
+  awardReason?: PointsAwardReason;
 }
 
 export function judgePractice(payload: {
@@ -946,8 +958,19 @@ export function startTargetedPractice(payload: {
   kpId: number;
   type: string | null;
   count: number;
-}): Promise<{ questions: TargetedPracticeQuestion[] }> {
-  return fetchApi<{ questions: TargetedPracticeQuestion[] }>('/training/targeted/start', {
+}): Promise<{
+  questions: TargetedPracticeQuestion[];
+  /**
+   * 训练会话 id，run 页收尾时拿它调 `completeTrainingSession` 发分（乙类唯一的发分入口）。
+   * **可能是 null**（计划一 Task 12：会话 INSERT 未包住、DB 故障时降级为 null）——此时
+   * 学习照走，只是不发分：run 页跳过 `complete`、不弹任何积分反馈、也不报错。
+   */
+  sessionId: number | null;
+}> {
+  return fetchApi<{
+    questions: TargetedPracticeQuestion[];
+    sessionId: number | null;
+  }>('/training/targeted/start', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -1022,6 +1045,14 @@ export interface DictationJudgeResult {
   feedback: string | null;
   /** true=判错且错因待补（应另调 fetchDictationFeedback）；答对恒 false。 */
   feedbackPending: boolean;
+  /**
+   * 本次实际入账的积分（甲类，整篇按 genre 档发一次）。**`0 = 本次没加`**：判错 /
+   * 幂等命中（`duplicate`，本次未入账）/ `daily_limit` / `no_rule` / `tier_inactive` /
+   * `genre_unset` / 发分失败。只有 `> 0` 才弹「+N 分」轻反馈。
+   */
+  pointsAwarded: number;
+  /** 未发分原因，**缺省 = 静默**；`duplicate` 刻意不在枚举内，一律按 0 静默。 */
+  awardReason?: PointsAwardReason;
 }
 
 export function fetchDictationPassages(): Promise<{ passages: DictationPassageItem[] }> {
@@ -1130,6 +1161,13 @@ export interface InterpretationJudgeResult {
   sentence: InterpretationSentenceResultItem;
   /** **仅当被判的是最后一句时**非 null——整篇译文提前下发等于泄题。 */
   fullTranslation: string | null;
+  /**
+   * 本次实际入账的积分（甲类，整篇最后一句判完才发一次）。**中间句恒为 0 且无 reason
+   * → 必须静默**；`> 0` 才弹「+N 分」。其余 0 分来源同 `DictationJudgeResult`。
+   */
+  pointsAwarded: number;
+  /** 未发分原因，**缺省 = 静默**；`duplicate` 刻意不在枚举内，一律按 0 静默。 */
+  awardReason?: PointsAwardReason;
 }
 
 export function fetchInterpretationPassages(): Promise<{ passages: InterpretationPassageItem[] }> {
@@ -1209,6 +1247,13 @@ export interface MeaningJudgeResult {
   terms: MeaningTermResultItem[];
   meaning: MeaningPartResult;
   emotion: MeaningPartResult;
+  /**
+   * 本次实际入账的积分（甲类，整篇最后一句判完才发一次）。**中间句恒为 0 且无 reason
+   * → 必须静默**；`> 0` 才弹「+N 分」。其余 0 分来源同 `DictationJudgeResult`。
+   */
+  pointsAwarded: number;
+  /** 未发分原因，**缺省 = 静默**；`duplicate` 刻意不在枚举内，一律按 0 静默。 */
+  awardReason?: PointsAwardReason;
 }
 
 export function fetchMeaningPassages(): Promise<{ passages: MeaningPassageItem[] }> {
@@ -1319,6 +1364,12 @@ export interface VocabularyStartResult {
   questions: VocabularyQuestionItem[];
   /** 抽题池命中数。为 0 时 questions 为空（提示「当前筛选下没有词」） */
   poolSize: number;
+  /**
+   * 训练会话 id，run 页收尾时拿它调 `completeTrainingSession` 发分（乙类唯一的发分入口）。
+   * **可能是 null**（计划一 Task 12：会话 INSERT 未包住、DB 故障时降级为 null）——此时
+   * 学习照走，只是不发分：run 页跳过 `complete`、不弹任何积分反馈、也不报错。
+   */
+  sessionId: number | null;
 }
 
 export interface VocabularyStandardMeaning {
@@ -1474,6 +1525,18 @@ export interface ExamSummary {
   accuracy: number;
   /** 主观题题数（self_assess 模式不判对错） */
   subjectiveCount?: number;
+  /**
+   * 交卷发分结果（丙类埋点 math_paper）。
+   *
+   * **可选**：交卷是幂等的——重复交卷 / 早退等分支不发分，`getResults` 也不补发分，
+   * 此时 JSON 里**没有这个键**（不是 `awarded: 0`）。缺省 → 不弹任何积分反馈，也不报错。
+   * `levelUp` 是段位 code 字符串，不是对象。
+   */
+  points?: {
+    awarded: number;
+    balance: number;
+    levelUp: { from: string; to: string } | null;
+  };
 }
 
 export interface ExamResultItem {
@@ -1644,12 +1707,16 @@ export interface MyRewards {
   items: StudentRewardItem[];
 }
 
-/** 未发分原因。`duplicate`（幂等命中）刻意不在枚举里——一律按 `pointsAwarded: 0` 静默处理。 */
+/**
+ * 未发分原因。`duplicate`（幂等命中）刻意不在枚举里——一律按 `pointsAwarded: 0` 静默处理。
+ * `not_cleared` 只见于甲类逐目标发分：答对但本无未清错题行，没有可订正的错题，故不发分。
+ */
 export type PointsAwardReason =
   | 'daily_limit'
   | 'no_rule'
   | 'tier_inactive'
-  | 'genre_unset';
+  | 'genre_unset'
+  | 'not_cleared';
 
 /** `POST /api/training/sessions/:id/complete` 的响应（数学专项 / 背单词专用）。 */
 export interface CompleteTrainingSessionResult {

@@ -15,7 +15,7 @@ const JUDGED = (n: number): StackItem => ({
   text: `第${n}句原文`,
   answer: EMPTY_ANSWER,
   result: {
-    passageId: 12, sentenceIndex: n, allCorrect: true,
+    passageId: 12, sentenceIndex: n, allCorrect: true, pointsAwarded: 0,
     terms: [], meaning: { correct: true, method: 'ai', standard: 'std', comment: null },
     emotion: { correct: true, method: 'ai', standard: 'std', comment: null },
   },

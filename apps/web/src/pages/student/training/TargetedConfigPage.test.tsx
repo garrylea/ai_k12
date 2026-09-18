@@ -98,7 +98,7 @@ describe('TargetedConfigPage 题量档位', () => {
     startMock.mockReset();
     getKpsMock.mockResolvedValue(KPS);
     getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
-    startMock.mockResolvedValue({ questions: [] });
+    startMock.mockResolvedValue({ questions: [], sessionId: null });
   });
 
   it('档位渲染自 me/rules：按 taskCode 取档，每档显示分值，有上限的显示剩余次数', async () => {

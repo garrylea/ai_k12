@@ -44,6 +44,8 @@ export const usePracticeStore = create<PracticeState>((set) => ({
         isCorrect: r.isCorrect,
         method: r.method,
         errorType: r.errorType ?? null,
+        // 从 DB 重放的历史结果：本次没有发分，恒 0（发分只发生在实时判题那次）
+        pointsAwarded: 0,
         studentAnswer: r.studentAnswer,
       };
     }
