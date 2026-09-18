@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { StudentSwitcher } from './StudentSwitcher';
 import { listMyStudents, type MyStudentItem } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
@@ -14,7 +14,9 @@ import { useParentStudentStore } from '@/store/parentStudentStore';
  * 1. 0 个孩子 → 空态 + 去「学生账号」的链接，**不渲染下拉**；
  * 2. 持久化的 id 失效（换账号 / 孩子被删 / 上个家长残留）→ 回落第一个；
  * 3. 首次进（`studentId === null`）→ 默认选第一个；
- * 4. 拉取失败 → 可重试的轻量错误态，不把顶栏搞崩。
+ * 4. 拉取失败 → 可重试的轻量错误态，不把顶栏搞崩；
+ * 5. **`pathname` 变化 → 重拉**（组件挂在顶栏、不随子路由重挂载，只依赖 `load`
+ *    会导致「新建完孩子跳页，顶栏还写着还没有孩子账号」，见下方承重用例）。
  *
  * 另有两条有意为之：
  * - **1 个孩子也照常渲染下拉**（P6.8 多孩切换的可扩展性，布局不抖）；
@@ -50,6 +52,16 @@ function renderSwitcher() {
     <MemoryRouter>
       <StudentSwitcher />
     </MemoryRouter>,
+  );
+}
+
+/** 只负责触发**真路由导航**的按钮：导航后 pathname 变，但组件不重挂载。 */
+function NavProbe({ to, label }: { to: string; label: string }) {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(to)}>
+      {label}
+    </button>
   );
 }
 
@@ -164,7 +176,54 @@ describe('StudentSwitcher', () => {
     expect(link).toHaveAttribute('href', '/parent/students');
     expect(screen.queryByTestId('student-switcher-trigger')).not.toBeInTheDocument();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    // 空态没有「当前」可言，不该读出「当前查看：还没有孩子账号」
+    expect(screen.queryByText('当前查看：')).not.toBeInTheDocument();
     expect(useParentStudentStore.getState().studentId).toBeNull();
+  });
+
+  it('列表返回前渲染骨架，返回后换成下拉（钉住 student-switcher-loading）', async () => {
+    let resolveList!: (list: MyStudentItem[]) => void;
+    listMyStudentsMock.mockImplementation(
+      () =>
+        new Promise<MyStudentItem[]>((resolve) => {
+          resolveList = resolve;
+        }),
+    );
+
+    renderSwitcher();
+
+    expect(screen.getByTestId('student-switcher-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('student-switcher-trigger')).not.toBeInTheDocument();
+
+    await act(async () => resolveList([MING]));
+
+    expect(await screen.findByTestId('student-switcher-trigger')).toHaveTextContent('小明');
+    expect(screen.queryByTestId('student-switcher-loading')).not.toBeInTheDocument();
+  });
+
+  it('pathname 变化时重拉列表：新建孩子后跳配置页，顶栏自愈（承重用例）', async () => {
+    const user = userEvent.setup();
+    // 家长还没有孩子 → 顶栏是空态
+    listMyStudentsMock.mockResolvedValueOnce([]);
+
+    render(
+      <MemoryRouter initialEntries={['/parent/students']}>
+        <StudentSwitcher />
+        <NavProbe to="/parent/students/7/config" label="去孩子配置页" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('还没有孩子账号')).toBeInTheDocument();
+    expect(listMyStudentsMock).toHaveBeenCalledTimes(1);
+
+    // 家长刚在那一页建好孩子（服务端列表变了），随即跳到孩子的配置页。
+    // 组件**没有重挂载**（同一个实例），只有 pathname 变了 —— 仍必须重拉。
+    listMyStudentsMock.mockResolvedValueOnce([MING]);
+    await user.click(screen.getByRole('button', { name: '去孩子配置页' }));
+
+    await waitFor(() => expect(listMyStudentsMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('student-switcher-trigger')).toHaveTextContent('小明');
+    expect(screen.queryByText('还没有孩子账号')).not.toBeInTheDocument();
   });
 
   it('持久化 id 已失效（换账号 / 被删）→ 回落到第一个孩子', async () => {

@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 import { listMyStudents, type MyStudentItem } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
@@ -54,9 +54,19 @@ export function StudentSwitcher({ className }: StudentSwitcherProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * 最近一次请求的取消函数。放在 ref 里而不是只靠 effect 闭包，是为了让**重试
+   * 按钮**也能走同一套取消守卫：按钮回调拿到的是 `load`，而真正需要被取消的是
+   * 「当前在飞的那一次」，只有 ref 知道它是谁。卸载时 effect 清理取消它即可。
+   */
+  const cancelLoadRef = useRef<(() => void) | null>(null);
 
   const load = useCallback(() => {
+    cancelLoadRef.current?.(); // 旧请求作废，避免慢响应盖掉新响应
     let cancelled = false;
+    cancelLoadRef.current = () => {
+      cancelled = true;
+    };
     setStatus('loading');
     listMyStudents()
       .then((list) => {
@@ -67,12 +77,19 @@ export function StudentSwitcher({ className }: StudentSwitcherProps) {
       .catch(() => {
         if (!cancelled) setStatus('error');
       });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
-  useEffect(() => load(), [load]);
+  /**
+   * 本组件挂在 `ParentLayout` 的顶栏上，**不随子路由重挂载**——只依赖 `load`
+   * 的话整个家长会话就只拉一次。具体坏流程：还没有孩子 → 去 `/parent/students`
+   * 新建 → 跳到 `/parent/students/:id/config`，顶栏仍停在「还没有孩子账号」，
+   * 直到整页刷新。把 `pathname` 纳入依赖，每次导航重拉；并发由上面的取消守卫兜住。
+   */
+  const { pathname } = useLocation();
+  useEffect(() => {
+    load();
+    return () => cancelLoadRef.current?.();
+  }, [load, pathname]);
 
   /**
    * 「校验 + 回落」全在此一处。等列表到位后再判断，所以三种情况都走同一段：
@@ -196,15 +213,24 @@ export function StudentSwitcher({ className }: StudentSwitcherProps) {
           onClick={() => setOpen((prev) => !prev)}
           className="flex items-center gap-2 rounded-lg bg-[var(--brand-100)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--bg-subtle)]"
         >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--brand-500)] text-xs font-bold text-white">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--brand-500)] text-xs font-bold text-[var(--text-on-brand)]">
             {initialOf(selected.name)}
           </span>
           <span className="text-sm font-medium text-[var(--text-primary)]">
             {displayName(selected)}
           </span>
-          <span aria-hidden="true" className="text-xs text-[var(--text-tertiary)]">
-            ▼
-          </span>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
         </button>
 
         {open && (
@@ -234,7 +260,7 @@ export function StudentSwitcher({ className }: StudentSwitcherProps) {
                     isSelected && 'bg-[var(--brand-100)]',
                   )}
                 >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--brand-500)] text-xs font-bold text-white">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--brand-500)] text-xs font-bold text-[var(--text-on-brand)]">
                     {initialOf(s.name)}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm text-[var(--text-primary)]">
@@ -265,7 +291,11 @@ export function StudentSwitcher({ className }: StudentSwitcherProps) {
 
   return (
     <div ref={rootRef} className={clsx('flex items-center gap-4', className)}>
-      <span className="text-sm text-[var(--text-secondary)]">当前查看：</span>
+      {/* 「当前查看：」只配下拉：空态/错误态没有「当前」可言，别读出
+          「当前查看：还没有孩子账号」这种句子。 */}
+      {status === 'ready' && students.length > 0 && (
+        <span className="text-sm text-[var(--text-secondary)]">当前查看：</span>
+      )}
       {body}
     </div>
   );

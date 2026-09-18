@@ -26,9 +26,10 @@ export const PARENT_STUDENT_STORAGE_KEY = 'parent-current-student';
  * 惰性解析 localStorage，而不是 `createJSONStorage(() => localStorage)`。
  *
  * 原因：`createJSONStorage` 在 **store 创建那一刻**就调用一次 `getStorage()` 并长期
- * 持有返回对象。测试里 `src/test/setup.ts` 是在 `beforeEach` 才把 localStorage 换成
- * 内存实现的，而 store 模块的导入发生在更早的收集阶段——那一刻拿到的是 jsdom 自带的
- * Storage，之后测试写进内存实现的值永远读不到，持久化用例会「假绿」。
+ * 持有返回对象。而 store 模块的导入发生在测试的收集阶段，早于 `src/test/setup.ts`
+ * 里 `beforeEach` 那次 `vi.stubGlobal('localStorage', …)`——那一刻拿到的是**本机
+ * Node 内置的 `localStorage` 全局**（它盖住了 jsdom 的 `Storage`，`getItem` 甚至
+ * 不是函数），此后测试往内存实现里写的值它永远读不到，持久化用例会「假绿」。
  * 每次读写都重新解析，拿到的就是「当前生效的」localStorage，同时顺手兼容没有
  * localStorage 的环境（不抛错）。
  */
