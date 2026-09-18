@@ -103,6 +103,8 @@
 
 > **2026-08-18 实现注（admin 端点现行语义）**：1009 = 连通性测试失败（`POST /api/admin/routes/validate-connection` 返回，message 含 provider 原始错误，HTTP 502）；上表 1009=支付失败 为 P2 Billing 设计占位（Billing 未实现），两者不冲突。
 
+> **2026-09-18 实现注（家长端学情端点归属校验）**：`/api/parent/students/{studentId}/*`（仪表盘除外的 reports / errors / chat-logs）第一行都过 `requireOwnedStudent`，沿用**两个不同的码**：`studentId` 不存在（或已软删）→ **404 / 1002**；`studentId` 存在但属于**别的家长** → **403 / 1005**（**不是 404**，别照抄「不泄漏存在性」）。`chat-logs/{dialogueId}` 另有二次校验：会话不属于该学生 → **404 / 1002**。非 parent 角色 → 403 / 1005（`RolesGuard`）。
+
 ### 2.5 文件上传约定
 
 - 统一走 `POST /api/files/upload`，返回 `{ fileId, url }`（PDF 上传额外返回 `taskId` 供 SSE 监听提取进度）
@@ -310,12 +312,11 @@
 | PATCH | `/api/parent/students/{studentId}/status` | 停用/启用该学生（`isActive`；停用后登录被拒，数据保留，不提供删除） | MVP |
 | GET | `/api/parent/students/{studentId}/subject-configs` | 按学科教材配置视图：每学科当前配置（`configured`/`started`/`gradeCode`/`term`/`textbookVersionId`/`publisher`/`edition`，未配置学科为按学生年级推导的默认值，不落库）+ 可选项（有数据的年级 → 每年级可用版本含册别，版本按默认规则排序） | MVP |
 | PUT | `/api/parent/students/{studentId}/subject-configs/{subjectId}` | 写入/切换该学科教材配置：`{ gradeCode, term, textbookVersionId? }`；versionId 缺省按默认规则选（同学段 edition 非空优先、id 大者优先）；已开始学习且版本/册别变化时**重置该学科学习状态**并返回 `reset: true`（错题/作业记录保留在库，不再展示/不阻塞门禁） | MVP |
-| GET | `/api/parent/dashboard` | 家长仪表盘：按学科聚合的进度、正确率、薄弱点、异常预警 | MVP |
-| GET | `/api/parent/students/{studentId}/reports` | 学情报告列表（可按学科筛选） | MVP |
-| GET | `/api/parent/students/{studentId}/reports/{reportId}` | 单份报告详情 | MVP |
-| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；可传 `?subject=` 按学科筛选） | MVP |
-| GET | `/api/parent/students/{studentId}/chat-logs` | AI 对话回放列表 | MVP |
-| GET | `/api/parent/students/{studentId}/chat-logs/{dialogueId}` | 单条对话详情 | MVP |
+| GET | `/api/parent/dashboard` | 家长仪表盘：一次返回名下所有孩子的概览（`lastActiveAt` / `activeDays7` / `unreadAlerts`）+ 各自的按学科卡片（进度 / 正确率累计 / 自评 / 错题待清零 / 考试数）；实时聚合，不落库 | MVP |
+| GET | `/api/parent/students/{studentId}/reports` | **实时聚合学情报告（不落库、不调 LLM）**：`?period=weekly\|monthly`（默认 `weekly`，非法值归一化为 `weekly`）。返回 `stats` / `trend` / `subjects` / `weakPoints` / `weakPointsUncoveredCount` / `exams` | MVP |
+| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary) / `track`(main\|aux) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001 | MVP |
+| GET | `/api/parent/students/{studentId}/chat-logs` | AI 对话回放列表（分页壳同 `errors`）。query：`track` / `scene` / `from` / `to` / `q`（**只搜会话标题**）/ `page`。**不提供学科筛选**（`ai_dialogues.subject_id` 约 76% 为 NULL） | MVP |
+| GET | `/api/parent/students/{studentId}/chat-logs/{dialogueId}` | 单条对话详情：逐句回放，含 `reasoning`（AI 思考链，默认折叠）与 `safetyFlag`（闲聊/偏离学习标记）；不回传 `token_*` / `response_time_ms` | MVP |
 | GET | `/api/parent/students/{studentId}/goals` | 学习目标列表 | MVP |
 | POST | `/api/parent/students/{studentId}/goals` | 创建目标 | MVP |
 | PATCH | `/api/parent/students/{studentId}/goals/{goalId}` | 更新目标 | MVP |
@@ -859,27 +860,27 @@ Assessment Service 接收答案
   │      前端 GET /api/assessment/submissions/{sid}/results 获取批改结果
 ```
 
-### 6.8 学情报告生成与展示
+### 6.8 学情报告生成与展示（实时聚合，不落库）
 
 ```text
-触发时机：单元检测/期中/期末完成后，或家长主动刷新
+触发时机：家长打开学情报告页，或切换周报/月报
   │
   ▼
-ParentAdmin Service 聚合数据：
-  │  - GET /api/progress/students/{id}/overview（进度）
-  │  - GET /api/error-book/students/{id}/stats（错题统计）
-  │  - GET /api/knowledge-graph/students/{id}/weak-points（薄弱点）
-  │  - 读取 ai_messages（学习行为）
+GET /api/parent/students/{studentId}/reports?period=weekly|monthly
   │
   ▼
-POST /api/ai/report（AI-Agent AnalyticsCapability 生成报告文本）
+ReportService 实时聚合（不落库、不调 LLM）：
+  │  - ParentInsightsRepository：活跃度 / 正确率 / 自评 / 错题统计 / 趋势 / 考试
+  │  - ProgressService.getStarMap（仅仪表盘用）
+  │  - 窗口口径 = 近 7 天（weekly）/ 近 30 天（monthly）
   │
   ▼
-报告内容缓存并写入 learning_reports
-  │
-  ▼
-家长端 GET /api/parent/students/{studentId}/reports/{reportId} 展示
+直接返回结构化报告，家长端渲染图表
 ```
+
+> **口径注**：正确率合并 `practice_results`（`method IN ('exact','ai')`，排除 `unanswered` / `self_assess`）与 `exam_answers`（`is_correct IS NOT NULL`）两源；`weakPoints` 是**错题数代理**（按未清零错题数排序，`student_knowledge_mastery` 全仓零写入），映射不到知识点的错题由 `weakPointsUncoveredCount` 兜住。无数据返回 200 + 空数组 / `rate: null`，不是 404。
+>
+> **后续迭代**：`learning_reports` 表本期**未使用**；AI 生成报告文本（`POST /api/ai/report` + `AnalyticsCapability` 的 `analysis` 场景，形状见 `ReportContent`）留作后续迭代，届时可复用本批的聚合 service。
 
 ### 6.9 课堂练习判对错
 
@@ -1590,7 +1591,6 @@ student_points **只减 balance**（earnedDelta 恒为 0）——SQL 里根本�
 | P6.5 目标设定 | `/parent/goals` | `GET/POST/PATCH/DELETE /api/parent/students/{studentId}/goals` |
 | P6.6 行为管控 | `/parent/controls` | `GET/PUT /api/parent/students/{studentId}/controls` |
 | P6.7 奖励管理 | `/parent/rewards` | `GET /api/parent/students/{studentId}/points`, `GET/PUT .../points/rules`, `GET .../points/ledger`, `GET/PUT .../reward-catalog`, `POST .../points/redeem`, `GET .../redemptions`, `PATCH /api/parent/redemptions/{id}`, `GET/PUT .../points/settings`, `GET /api/points/levels`（`...` = `/api/parent/students/{studentId}`；见 §4.21 / §4.22） |
-| P6.8 多孩切换 | `/parent/children-switch` | `GET /api/users/students` |
 | P6.9 异常预警 | `/parent/alerts` | `GET /api/parent/alerts`, `PATCH /api/parent/alerts/{id}/read` |
 | P6.10 账号设置 | `/parent/account` | `GET /api/parent/account`, `GET /api/quota/current`, `GET /api/quota/subscription` |
 | **P7.1 订阅中心（P2）** | `/parent/subscription` | `GET /api/quota/plans`, `GET /api/quota/subscription`, `POST /api/billing/orders`, `POST /api/billing/orders/{id}/pay` |
@@ -1752,6 +1752,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.0 | 2026-09-18 | **家长端「看得见」批**（四页 + 6 个只读端点 + 新模块 `apps/server/src/modules/parent-insights/`，与既有 `ParentController` 同前缀 `api/parent`）。契约变更：① `GET /api/parent/dashboard` 返回形状重写——孩子层级 `lastActiveAt`（多表时间并集 MAX，不限窗口）/ `activeDays7`（近 7 天）/ `unreadAlerts`（本期恒 0），并扩出 `subjects[]`（进度 / 正确率累计 / 自评 / 错题待清零 / 考试数）；去掉 `todayStudyMinutes` / `pendingAlerts` 旧占位。② `GET .../reports` 语义改为**实时聚合学情报告（不落 `learning_reports`、不调 LLM）**、加 `?period=weekly\|monthly`，响应改为 `stats`/`trend`/`subjects`/`weakPoints`/`weakPointsUncoveredCount`/`exams`；**删除 `GET .../reports/{reportId}`**（不再是落库报告 ID）、连同原 AI 文本形状 `ReportContent` 不再被本组引用（`POST /ai/report` 本期未实现，留后续迭代）。③ `GET .../errors` 加 `subject`/`source`/`track`/`cleared`/`from`/`to`/`page`，响应改分页壳（`pageSize` 服务端固定 20）；`source` enum 按实际值补 `exam`/`targeted`/`error_practice`、去掉无写入点的 `homework`/`unit_test`/`midterm`/`final`。④ `GET .../chat-logs` 加 `track`/`scene`/`from`/`to`/`q`/`page` + 分页壳；`chat-logs/{dialogueId}` 改返回 `ChatLogDetail`（逐句含 `reasoning` 与 `safetyFlag`，不回传 `token_*`/`response_time_ms`）。错误码口径见 §2.4 新增实现注（1002 不存在 / 1005 别的家长的孩子）。§6.8 数据流整节重写。openapi.yaml 同步（**26 路径**中本组 5 路径重写 / 1 路径删除、新增 20 schema）。 |
 | v3.9 | 2026-09-18 | 补记 §4.22 `GET /api/points/levels`（`@Roles('student','parent')`，静态 9 档、不查库不校验归属；openapi `/points/levels` 已同步）+ 家长端「积分与奖励」页（UX P6.7）接线完成：§7「页面 ↔ 端点」对照表 P6.7 行原写的 `GET .../rewards` + `POST /api/rewards/{id}/redeem` **两条都不是本体系端点**（后者在 openapi 与代码里都不存在），本次更正为 §4.21 / §4.22 的 12 个真实端点。openapi.yaml 同步（顺带补齐存量偏差：`SaveRewardCatalogItem.required` 加 `description`/`minLevelCode`/`sortOrder`，与 controller Zod 必填对齐）。 |
 | v3.8 | 2026-09-18 | 文档补记（**接口无变更**）：`POST /api/training/judge` 请求体补上 `sessionId?`——计划一（v3.7）已让后端接受该可选字段（仅累加 `training_sessions.judged_count` 审计留痕，不传也能判题，会话不存在/非本人/已完成静默跳过），但两份文档一直漏记；学生端会话页（数学专项 / 背单词）本次开始实际携带它，故补齐 §4.18 与 openapi `TrainingJudgeRequest`。**背单词判题端点 `POST /api/training/vocabulary/judge` 不接受该字段**（有意不发分审计）。 | 
 | v3.7 | 2026-09-17 | **闯关积分与段位体系**（平台级激励层，不影响任何门禁；PRD 新增 §7.13）。新增 Points 分组 §4.20（学生端 4 端点，只读：概览/流水/档位/奖励，`studentId` 取自 JWT 防 IDOR）+ ParentPoints 分组 §4.21（家长端 **11** 个端点：概览、`points/rules` GET+PUT、`points/ledger`、`reward-catalog` GET+PUT、`points/redeem` POST(201)、`redemptions` GET、`redemptions/{id}` PATCH、`points/settings` GET+PUT）；Training 分组 §4.18 增 `POST /api/training/sessions/:id/complete`（乙类整批发分，分值取会话档位、不取前端入参，幂等回 `already_completed`）。新增 §6.24 数据流。错误码 `3001` 余额不足 / `3002` 未达段位 / `3003` 奖励已下架 / `3004` 兑换已关闭 / **`3005` 档位不存在**。甲类埋点（语文三专项 + `error_fix`）在既有判题响应内联 `pointsAwarded` / `awardReason`（枚举 `daily_limit\|no_rule\|tier_inactive\|genre_unset\|not_cleared`，`duplicate` 刻意不在枚举内：幂等命中本次未入账，报出去会弹假 `+N 分`）；丙类（`mainline_lesson` / `math_paper`）在既有响应加 `points`。DB 迁移 `2026-09-17_gamification_points.sql`（6 张表 `point_rules`/`point_ledger`/`student_points`/`reward_catalog`/`point_redemptions`/`training_sessions` + `controls.points_per_yuan` + `chinese_passages.genre`）。快照重建脚本 `rebuild-student-points.ts`（只读流水重算，快照与流水不一致时手工修复）；体裁标定工具 `dictation_cli.py --export-genre / --set-genre`（**不用 LLM 猜体裁**，人工标定）。openapi.yaml 同步（**13 路径 + 25 schema** + 各判题响应补两字段）。 |

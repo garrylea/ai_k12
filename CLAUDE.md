@@ -98,6 +98,8 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **`globals: false`**：`@testing-library/react` 不会自动注册 `afterEach(cleanup)`，多用例文件必须自己写 `afterEach(() => cleanup())`，否则上个用例的 DOM 泄漏导致选择器重复命中。
 - **Nest DI 坑（接口类型的可选参数）**：带 `@Injectable()` 的类会发 `design:paramtypes`，**接口类型**的参数在运行时被写成 `Object`，Nest 当成真 token 去容器找、找不到就**启动直接失败**。必须加 `@Optional()`。对照 `ai-core/capabilities/*` 那些类**故意不写 `@Injectable()`**（零参实例化）才一直没踩到——区别在有没有装饰器，不在参数可选不可选。
 - **数据库**：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。schema 在 `tools/db/schema.sql`，迁移在 `tools/db/migrations/YYYY-MM-DD_*.sql`（**无迁移运行器，手工 apply**；必须幂等；新增表/列要同时进 schema.sql）。
+- **派生状态必须带 `studentId` 归属**：家长端切孩子时**不导航、页面不重挂载**（`ParentLayout` 的 `<Outlet />` 无 `key`），所有 `useState` 跨孩子存活。派生值要与 `studentId` 一起存、读取时一并比较（`data && data.studentId === studentId && <本维度检查>`）；只按自己的维度守卫会在切换的第一帧画出上一个孩子的数据。**`useEffect(() => reset(), [studentId])` 救不了**——effect 在 commit 之后才跑，那一帧照样画。
+- **列表页换孩子必须回第 1 页**：否则拿「上一个孩子的第 N 页」请求新孩子，页数不够时响应回显 `page` 仍是 N（自报家门守卫通过），页面停在空态而分页控件只在非空分支渲染，家长无法自救。加 `useEffect(() => setPage(1), [studentId])`。
 
 ## 数据管线（tools/data-refinery）
 
@@ -138,6 +140,11 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 - **抽题**：不走 `ORDER BY RAND() + LIMIT ?`，改「先取候选 id 池 → 服务层洗牌/排序切 N → 按 id 取详情」，四种顺序模式共用一条 SQL。**一个词只出一道题**（会话长度 == count）。**普通模式下也会抽到熟词僻义题**，勾「只出熟词僻义」的作用是「只留」僻义，且此时**方向强制英→中**（三档口径的前提）。
 - **内容管线**：词表来自 smartedu 课本（`crawler_cli.py --site smartedu`）书末附录 `Vocabulary in Each Unit` / `Vocabulary A-Z`；课标官方 PDF 只当**校验白名单**（课标两份词汇表的说明明确写「不标注词性和中文释义」，也不带音标）。**音标本期不做**（实测 macOS Vision 读不了 IPA，见 spec §6.2）。**loader 的 `ON DUPLICATE KEY UPDATE` 必须显式排除 `error_count`**，否则全量重灌抹掉全平台易错统计。抓取**必须串行 + `--crawl-delay 1.5`**（smartedu 会 403）。
 - 场景 `english_word_judge` = primary `local` / fallback `deepseek-flash`。契约见 §4.18/§6.22。设计见 `docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md`。
+
+## 家长端学情（P6.1 仪表盘 / P6.2 报告 / P6.3 错题 / P6.4 对话回放）
+
+- 四页是**只读实时聚合**（`apps/server/src/modules/parent-insights/`）：学情报告**不落 `learning_reports`、不调 LLM**，服务层分次查 + JS 合成后直接返回。**不要往这四个端点里加写入逻辑**。
+- 学习时长 / 知识点掌握度底层无数据，用**活跃度代理**（`activeDays7` / `lastActiveAt`）与**错题数代理**（未清零错题按 KP 聚合）替代；薄弱点必须同时给「未标注知识点的错题数」，否则家长会误读成「只有这些问题」。口径见 `docs/API接口与数据流设计文档.md` §6.8 与 `docs/ai-core-changelog.md` 本批条目。
 
 ## apps/server - ai-core AI Agent Hub
 

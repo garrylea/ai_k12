@@ -8,6 +8,50 @@
 
 ---
 
+## 2026-09-18 新增（家长端「看得见」批：四个页面 + 6 个只读端点 + 新模块 parent-insights）
+
+**做了什么**：家长控制台第一批——P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 AI 对话回放四个页面从 `Placeholder` 变真实页；后端新建 `apps/server/src/modules/parent-insights/`（`DashboardService` / `ReportService` / `ErrorsService` / `ChatLogsService` / `ParentInsightsRepository` + `dto/` + `window.util.ts` / `rate.util.ts`），6 个端点全部**只读**（`GET /api/parent/dashboard`、`.../students/:id/reports`、`/errors`、`/chat-logs`、`/chat-logs/:dialogueId`；另加正确率口径 `getAccuracyBySubject`）。**不产生任何业务写入**，不改学生端行为，不动任何既有门禁；`learning_reports` / `safety_alerts` / `student_knowledge_mastery` 全不碰。文档同步：`openapi.yaml` + API 设计文档（§2.4 实现注 / §4.13 / §6.8 整节重写 / §7 映射表 / §10 v4.0）+ UX §5.6 + PRD §7.7。
+
+**为什么报告是「实时聚合」而不是「AI 生成后落库」**：底层三件事都不存在——`learning_reports` 空表且零代码引用、`AnalyticsCapability` 没接端点、掌握度表（`student_knowledge_mastery` / `knowledge_relations`）全仓零写入。原设计（`/api/ai/report` → 落 `learning_reports` → `/reports/{reportId}` 展示）改成「请求 → 服务层分次查 + JS 合成 → 直接返回」，`{reportId}` 端点降级出 MVP、`LearningReport` 的 AI 文本形状换掉。同一原因，UI 上的「学习时长曲线」「薄弱点雷达图」换成了可得指标：`activeDays7` / `lastActiveAt`（活跃度代理）与「按未清零错题数排序的知识点 Top」。
+
+**为什么正确率必须合并两个源**：`practice_results` 只有 **1** 行，`exam_answers` **564** 行——本库的正确率主源是**考试**。口径写在 `ParentInsightsRepository.getAccuracyBySubject`（唯一实现）：`practice_results` 取 `method IN ('exact','ai')`（排除 `unanswered` / `self_assess`）+ `exam_answers` 取 `is_correct IS NOT NULL`（且 `exam_sessions.status='submitted'`），`rate = correct / answered * 100` 一位小数、`answered = 0` 时 **`rate = null`（不是 0）**；自评（`question_self_assessments`）单独出数、不进 rate。窗口可选：仪表盘走累计（去掉 `judged_at` 条件），报告页走窗口——**同一方法一套 SQL，不写两份**，否则口径必然分叉。
+
+**为什么错题列表要拆两条查询**：`question_knowledge_points` 的 UNIQUE 是「题 × KP」，203 道绑了 KP 的题里 **83 道（41%）绑多个 KP**。分页 SQL 里 JOIN KP 会让行翻倍、把分页和 `total` 算错，所以分页查询刻意不 JOIN，翻页后按本页 `questionId` 集合批量补 KP（`listErrorKnowledgePoints`），服务层拼回。另：`track`（main/aux）由 `source` 现算、不落库，筛选时**下推成 `source` 条件**（`aux` → `= 'auxiliary'`，`main` → `<> 'auxiliary'`），避免全量取出再过滤。
+
+**为什么回放页不提供学科筛选**：`ai_dialogues.subject_id` 有 **61/80 = 76% 为 NULL**（家长配教材时不写、辅线答疑自然无学科）。唯一可靠维度是「轨道 + 场景 + 时间 + 标题关键词」；关键词**只搜 `ai_dialogues.title`**，不搜消息正文。`ChatLogItem.updatedAt` 的语义是**最后一条消息时间**（无消息则退回创建时间）——与共享 `Conversation.updatedAt`（`ai_dialogues.updated_at`）口径不同，为免契约里「同一字段两种含义」，家长端不再复用 `Conversation` schema，另立 `ChatLogItem` / `ChatLogDetail`。逐句消息**不回传** `token_input` / `token_output` / `response_time_ms`（那三列全仓恒 NULL，回传只会误导）。
+
+**实测数据（2026-09-18，dev 库，写进文档供将来判断口径）**：
+
+```
+questions 529      question_knowledge_points 覆盖 203 题（38%）   其中 83 题（41%）绑多个 KP   knowledge_points 79
+main_error_books 139（全部有 question_id；其中 55 条能映射 KP = 40%）
+  source 分布：exam 134 / targeted 5（practice / discuss / auxiliary 当前为 0）
+practice_results 1        exam_sessions 27        exam_answers 564
+ai_dialogues 80（subject_id NULL 61 条 = 76%）
+  track/scene：auxiliary/aux_qna 46、mainline/mainline_card 29、auxiliary/aux_training 5
+ai_messages 198（safety_flag=1 共 22 条）        point_ledger 1        students 5
+```
+
+**已知限制（本期留下）**：
+
+1. **知识点覆盖率只有 40%**（实测 55/139）→ 薄弱点列表会漏 60% 的错题，靠 `weakPointsUncoveredCount` + UI 提示兜住；根治要等题库补绑 KP。
+2. **`activeDays7` 是活跃度代理，不是时长**。孩子挂机不答题 = 不活跃，与「学习时长」语义有偏差（全库无 duration / 心跳 / 学习会话字段）。
+3. **`practice_results` 是 upsert 覆盖式最新态，不是 attempt 历史** → 「进步曲线」实际是「按判题时间分布的当前态」，随时间推移早期数据点会被覆盖而减少。
+4. **`ai_dialogues.subject_id` 76% 为 NULL** → 回放页不提供学科筛选；若将来补写 `subject_id`，可再加。
+5. **`unreadAlerts` 恒 0**（`safety_alerts` 无写入），保留字段等预警闭环后填。
+6. **关键词只搜会话标题**，搜不到消息正文里的关键词。
+7. `weakPoints` 依赖 `question_knowledge_points`，其绑定目前完全靠 DB migration 灌入（`QuestionsRepository.bindKnowledgePoint` 无调用方）。
+8. 列表分页为**页码式**（非游标）、`pageSize` 固定 20，数据量大时深分页会慢；本期家庭级数据量下无影响。
+9. **日期分桶依赖服务器时区**：`DATE(judged_at)` 分桶与时间窗边界都按**服务器本地时区**算（`database/connection.ts` 既没设 `dateStrings` 也没设 `timezone`）。部署到 UTC 容器时，UTC+8 用户 20:00 之后的作答会被分到「前一天」。同类坑：mysql2 把 `DATE(...)` 返回为本地零点的 `Date`，`toISOString()` 会跨时区差一天——仓储侧已改用本地字段拼 `YYYY-MM-DD`。
+10. **「新进错题本」≠「本周答错的题」**：`errorsAdded` 数的是窗口内 `main_error_books.created_at`，而错题重做再次做错只走 `bumpLevels` 更新原行、不新增行。
+11. **薄弱点数不可当覆盖率**：一题可绑多个 KP，`sum(unclearedCount)` 会大于「未清零错题总数」，**不能**用它与 `weakPointsUncoveredCount` 推覆盖率。
+12. **趋势折线的 X 轴只含有记录的天、没有按窗口补零**：相隔 5 天的两次记录在图上会相邻显示。要做得先让 `ChartPoint.value` 允许 `null` 并把 recharts 的 `connectNulls` 关掉（否则会画出「当天 0 分」的假数据）。本期接受这个观感折中。
+13. **柱状图把正确率写进了 X 轴刻度文字**（形如「数学 73.8%」）：学科多于 4~5 个时刻度可能挤。要改就把正确率挪到图表下方的文字行。
+
+**环境漂移发现（不在本批修，建议单独立项）**：`tools/db/schema.sql:1160` 起定义了 **28 条 `CREATE TRIGGER`**（各表 `*_updated_at` 维护），但当前 dev 库 `information_schema.TRIGGERS` 里**只有 1 条**（`trg_aux_error_books_updated_at`）。也就是说 `updated_at` 字段在既有库上大多不会自动更新，且 code 里的 `updated_at` 排序/展示依赖它。这与既有的 `admin_notifications` 缺迁移文件属**同一类问题**：`schema.sql` 与已存在的库不同步，只有全新建库才会拿到全部触发器；仓库**没有迁移运行器**，历史 DDL 变更靠手工 apply，漏了就静默漂移。修复需要：(a) 补齐 27 条触发器的幂等迁移；(b) 排查哪些表的 `updated_at` 已被应用逻辑依赖却从未自动维护。本批不碰。
+
+---
+
 ## 2026-09-18 新增（学生端积分 UI 完成：段位/流水/奖励册/发分反馈 + 路由表拆分）
 
 **做了什么**：学生端积分 UI 八个任务全部落地——`LevelIcon`（9 段位线性 SVG）、`pointsStore` + `PointsToast`（右下角轻反馈，`z-40`，2.5s，挂在 `App.tsx`）、`FireworksCanvas` + `CelebrationOverlay`（替换主线内联 `✦✧＊·◇` 撒花）、`UserBadge` + `LevelPanel`（三个用户信息入口改用；退出拆成独立按钮）、`ProfilePage` + `RewardsPage`、训练配置页改读 `GET /api/points/me/rules`（删 `COUNT_OPTIONS`）、六个页面的发分反馈（乙类走 `complete`，甲类读判题响应）、路由/导航收尾。共享模块：`training/point-tiers.ts`（档位加载与状态）、`training/points-feedback.ts`（`decidePointsFeedback` 决策表）、`training/session-completion.ts`（会话完成+重试）、`training/run-handoff.ts`（sessionStorage 交接）、`SessionPointsRetryNotice.tsx`。

@@ -2287,6 +2287,7 @@ paths:
     get:
       tags: [Parent]
       summary: 家长仪表盘
+      description: 一次返回名下所有孩子的概览（含各自的按学科卡片），前端孩子 Tab 本地切换，不逐孩请求。
       operationId: getDashboard
       responses:
         '200':
@@ -2303,47 +2304,28 @@ paths:
   /parent/students/{studentId}/reports:
     get:
       tags: [Parent]
-      summary: 学情报告列表
-      operationId: listReports
-      parameters:
-        - name: studentId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: 报告列表
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CommonResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/LearningReport'
-  /parent/students/{studentId}/reports/{reportId}:
-    get:
-      tags: [Parent]
-      summary: 单份报告
+      summary: 学情报告（实时聚合，不落库）
+      description: >-
+        服务层实时聚合，不调 LLM、不写 learning_reports。`period` 非法值归一化为 `weekly`（不 400）。
+        无数据时返回 200 + 空数组 / `rate: null`，不是 404。
       operationId: getReport
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
-            type: string
-        - name: reportId
-          in: path
-          required: true
+            type: integer
+        - name: period
+          in: query
+          required: false
           schema:
             type: string
+            enum: [weekly, monthly]
+            default: weekly
+          description: 窗口口径；`weekly` = 近 7 天（含今天），`monthly` = 近 30 天。
       responses:
         '200':
-          description: 报告详情
+          description: 学情报告
           content:
             application/json:
               schema:
@@ -2357,16 +2339,69 @@ paths:
     get:
       tags: [Parent]
       summary: 孩子错题（只读）
+      description: >-
+        `track` 由 `source` 现算（`auxiliary` → `aux`，其余 → `main`），不落库。
+        `pageSize` 服务端固定 20，前端不传；`page` 非法（`abc` / `1.5` / `-1`）→ 400 / 1001，不静默回落。
+        `page` 超出末页 → 200 + 空 `items` + 正确 `total`。
       operationId: listParentErrors
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
+            type: integer
+        - name: subject
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 按学科筛选（subjectId）；不传 = 全部。
+        - name: source
+          in: query
+          required: false
+          schema:
             type: string
+            enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+          description: 按错题来源筛选；不传 = 全部。
+        - name: track
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [main, aux]
+          description: 主线 / 辅线；不传 = 全部。在服务层映射为 `source` 条件后下推 SQL。
+        - name: cleared
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [uncleared, cleared, all]
+            default: all
+          description: 清零状态；`all` 与不传等价。
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: 起始日期（按 `created_at`，`YYYY-MM-DD`）；非法日期忽略该筛选。
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: 结束日期（按 `created_at`，`YYYY-MM-DD`）；非法日期忽略该筛选。
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
       responses:
         '200':
-          description: 错题列表
+          description: 错题分页
           content:
             application/json:
               schema:
@@ -2375,23 +2410,68 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ErrorItem'
+                        $ref: '#/components/schemas/ParentErrorPage'
+        '400':
+          description: page 非法（code=1001）
   /parent/students/{studentId}/chat-logs:
     get:
       tags: [Parent]
       summary: AI 对话回放列表
+      description: >-
+        `q` 只匹配会话标题 `ai_dialogues.title`，不搜消息正文。
+        不提供学科筛选——`ai_dialogues.subject_id` 约 76% 为 NULL。
+        `pageSize` 服务端固定 20；`page` 非法 → 400 / 1001。
       operationId: listChatLogs
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
+            type: integer
+        - name: track
+          in: query
+          required: false
+          schema:
             type: string
+            enum: [mainline, auxiliary]
+          description: 不传 = 全部。
+        - name: scene
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [aux_qna, aux_training, mainline_question, mainline_card]
+          description: 不传 = 全部。
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: 起始日期（按 `updated_at`，`YYYY-MM-DD`）；非法日期忽略该筛选。
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: 结束日期（按 `updated_at`，`YYYY-MM-DD`）；非法日期忽略该筛选。
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 标题关键词（`LIKE %q%`），只搜 `ai_dialogues.title`。
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
       responses:
         '200':
-          description: 对话列表
+          description: 对话分页
           content:
             application/json:
               schema:
@@ -2400,25 +2480,29 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Conversation'
+                        $ref: '#/components/schemas/ChatLogPage'
+        '400':
+          description: page 非法（code=1001）
   /parent/students/{studentId}/chat-logs/{dialogueId}:
     get:
       tags: [Parent]
       summary: 单条对话详情
+      description: >-
+        逐句回放，含 `reasoning`（AI 思考链，前端默认折叠）。不回传
+        `token_input` / `token_output` / `response_time_ms`（那三列全仓恒 NULL）。
+        `dialogueId` 不属于该学生 → 404 / 1002（二次归属校验）。
       operationId: getChatLog
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
-            type: string
+            type: integer
         - name: dialogueId
           in: path
           required: true
           schema:
-            type: string
+            type: integer
       responses:
         '200':
           description: 对话详情
@@ -2430,7 +2514,7 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/ConversationDetail'
+                        $ref: '#/components/schemas/ChatLogDetail'
   /parent/students/{studentId}/goals:
     get:
       tags: [Parent]
@@ -6150,6 +6234,9 @@ components:
 
     ReportContent:
       type: object
+      description: >-
+        AI 生成的报告文本形状，仅服务 `POST /ai/report`（**本期未实现**，留作后续迭代）。
+        家长端学情报告走 `LearningReport`——实时聚合、不落 `learning_reports`、不调 LLM。
       properties:
         summary:
           type: string
@@ -6248,7 +6335,10 @@ components:
           description: 错题所属课时 id（冗余字段，用于快速定位上一节课是否有未清零错题）
         source:
           type: string
-          enum: [homework, unit_test, midterm, final, auxiliary, practice, discuss]
+          enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+          description: >-
+            错题来源。按 `main_error_books.source` 实际写入值列出（原 enum 的
+            homework/unit_test/midterm/final 四个值当前无写入点，已移除）。
 
     RedoRequest:
       type: object
@@ -6501,42 +6591,408 @@ components:
           type: string
           format: date-time
 
+    # ==================== 家长端学情（ParentInsights，2026-09-18） ====================
+    # 四个页面（P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 对话回放）的 6 个只读端点。
+    # 全部实时聚合、不落库：学情报告不写 learning_reports，也不调用 LLM。
+    # 与 DTO `modules/parent-insights/dto/parent-insights.dto.ts` 一一对应。
+
+    RateSummary:
+      type: object
+      description: 答题量与正确率。**累计口径**（仪表盘）或**窗口口径**（报告页）由调用方决定。
+      properties:
+        answered:
+          type: integer
+        correct:
+          type: integer
+        rate:
+          type: number
+          nullable: true
+          description: 正确率（百分比，一位小数）；`answered = 0` 时为 null，**不是 0**。
+
+    SelfAssessSummary:
+      type: object
+      description: 主观题自评结果，**不进 rate**（spec §4.3）。
+      properties:
+        count:
+          type: integer
+        correctCount:
+          type: integer
+
+    ErrorBookSummary:
+      type: object
+      properties:
+        uncleared:
+          type: integer
+        total:
+          type: integer
+
+    DashboardSubjectProgress:
+      type: object
+      description: 取自 `ProgressService.getStarMap` 的现有返回（不新增查询、不改其结构）。
+      properties:
+        completedUnits:
+          type: integer
+        totalUnits:
+          type: integer
+        currentUnitName:
+          type: string
+          nullable: true
+        currentLessonName:
+          type: string
+          nullable: true
+        percent:
+          type: integer
+          description: "`completedUnits / totalUnits * 100` 取整；`totalUnits = 0` 时为 0。"
+
+    DashboardSubject:
+      type: object
+      description: 只包含该学生**已开始**的学科（`progress.status <> 'not_started'`），未开始的不出现。
+      properties:
+        subjectId:
+          type: integer
+        subjectName:
+          type: string
+        progress:
+          $ref: '#/components/schemas/DashboardSubjectProgress'
+        accuracy:
+          $ref: '#/components/schemas/RateSummary'
+        selfAssessed:
+          $ref: '#/components/schemas/SelfAssessSummary'
+        errorBook:
+          $ref: '#/components/schemas/ErrorBookSummary'
+        examCount:
+          type: integer
+
+    DashboardStudent:
+      type: object
+      properties:
+        studentId:
+          type: integer
+        name:
+          type: string
+        grade:
+          type: string
+          nullable: true
+        schoolLevel:
+          type: string
+          nullable: true
+        lastActiveAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 多表时间并集 MAX，**不限时间窗**；无记录为 null。只在孩子层级出现，学科卡片里没有。
+        activeDays7:
+          type: integer
+          description: 近 7 天有记录的天数（带 7 天下界）。与 `lastActiveAt` 窗口不同，分两次查。
+        unreadAlerts:
+          type: integer
+          description: 本期恒 0（`safety_alerts` 无写入），保留占位等预警闭环后填。
+        subjects:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardSubject'
+
     Dashboard:
       type: object
       properties:
         students:
           type: array
           items:
-            type: object
-            properties:
-              studentId:
-                type: string
-              name:
-                type: string
-              todayStudyMinutes:
-                type: integer
-              pendingAlerts:
-                type: integer
-              lastActiveAt:
-                type: string
-                format: date-time
+            $ref: '#/components/schemas/DashboardStudent'
         unreadAlerts:
           type: integer
 
-    LearningReport:
+    TrendPoint:
+      type: object
+      description: 折线的一点。只含有记录的天，**不补零**。
+      properties:
+        date:
+          type: string
+          description: "`YYYY-MM-DD`"
+        answered:
+          type: integer
+        correct:
+          type: integer
+        rate:
+          type: number
+          nullable: true
+          description: "`answered = 0` 时为 null。"
+
+    ReportStats:
       type: object
       properties:
-        id:
+        activeDays:
+          type: integer
+        answered:
+          type: integer
+        correct:
+          type: integer
+        rate:
+          type: number
+          nullable: true
+        selfAssessCount:
+          type: integer
+        errorsAdded:
+          type: integer
+          description: 窗口内 `main_error_books.created_at` 条数（「新进错题本」，不等于「本周答错的题」）。
+        errorsCleared:
+          type: integer
+          description: 窗口内 `main_error_books.cleared_at` 条数（`is_cleared = 1`）。
+        examCount:
+          type: integer
+          description: 窗口内 `exam_sessions.submitted_at` 且 `status='submitted'` 的场次。
+
+    ReportSubjectRow:
+      type: object
+      properties:
+        subjectId:
+          type: integer
+        subjectName:
           type: string
-        studentId:
+        answered:
+          type: integer
+        correct:
+          type: integer
+        rate:
+          type: number
+          nullable: true
+
+    WeakPointItem:
+      type: object
+      description: >-
+        **错题数代理，不是掌握度**：按未清零错题数聚合，`student_knowledge_mastery`
+        全仓零写入。Top 10，累计口径（不限窗口）。
+      properties:
+        knowledgePointId:
+          type: integer
+        name:
           type: string
-        period:
+        unclearedCount:
+          type: integer
+        totalWrongCount:
+          type: integer
+
+    ExamRecord:
+      type: object
+      properties:
+        sessionId:
+          type: integer
+        paperTitle:
           type: string
-        generatedAt:
+        subjectName:
+          type: string
+        submittedAt:
           type: string
           format: date-time
+        correctCount:
+          type: integer
+        objectiveCount:
+          type: integer
+        rate:
+          type: number
+          nullable: true
+
+    LearningReport:
+      type: object
+      description: >-
+        **实时聚合，不落 `learning_reports`、不调 LLM**（spec §3 定案 #2）。取代了原
+        `id/generatedAt/content`（AI 文本 `ReportContent`）形状；`{reportId}` 端点已降级出 MVP。
+      properties:
+        studentId:
+          type: integer
+        period:
+          type: string
+          enum: [weekly, monthly]
+        windowStart:
+          type: string
+          description: 窗口起始日 `YYYY-MM-DD`（含）。
+        windowEnd:
+          type: string
+          description: 窗口结束日 `YYYY-MM-DD`（含）。
+        stats:
+          $ref: '#/components/schemas/ReportStats'
+        trend:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrendPoint'
+        subjects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportSubjectRow'
+        weakPoints:
+          type: array
+          description: Top 10，按 `unclearedCount` 降序、`totalWrongCount` 次之。
+          items:
+            $ref: '#/components/schemas/WeakPointItem'
+        weakPointsUncoveredCount:
+          type: integer
+          description: 仍未清零里**映射不到任何知识点**的错题数（实测约占 60%），UI 必须显式提示。
+        exams:
+          type: array
+          description: 全部考试史（不限窗口），按 `submitted_at` 降序，最多 20 场。
+          items:
+            $ref: '#/components/schemas/ExamRecord'
+
+    ParentErrorQuestion:
+      type: object
+      description: 错题里嵌套的题目信息；`main_error_books.question_id` 为 NULL 时整个 `question` 为 null。
+      properties:
         content:
-          $ref: '#/components/schemas/ReportContent'
+          type: string
+        type:
+          type: string
+        difficulty:
+          type: integer
+          nullable: true
+        knowledgePoints:
+          type: array
+          description: 未绑知识点时是**空数组**，不是 null。
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+
+    ParentErrorItem:
+      type: object
+      description: 家长端错题一行（只读）。`track` 由 `source` 现算、**不落库**。
+      properties:
+        id:
+          type: integer
+        questionId:
+          type: integer
+          nullable: true
+        track:
+          type: string
+          enum: [main, aux]
+          description: "`source === 'auxiliary'` → `aux`，其余 → `main`。"
+        source:
+          type: string
+          enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+        level:
+          type: integer
+          description: 错题级别 1–5。
+        isCleared:
+          type: boolean
+        wrongAnswerText:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        clearedAt:
+          type: string
+          format: date-time
+          nullable: true
+        question:
+          allOf:
+            - $ref: '#/components/schemas/ParentErrorQuestion'
+          nullable: true
+
+    ParentErrorPage:
+      type: object
+      description: 分页壳。`pageSize` 服务端固定 20，前端不传、只回显。
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParentErrorItem'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+
+    ChatLogMessage:
+      type: object
+      description: >-
+        逐句消息。**不回传 `token_input` / `token_output` / `response_time_ms`**——那三列全仓恒 NULL。
+      properties:
+        id:
+          type: integer
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+        reasoning:
+          type: string
+          nullable: true
+          description: AI 思考链，前端默认折叠。
+        type:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        safetyFlag:
+          type: integer
+          description: 1 = 该条被安全标记（闲聊/偏离学习），前端红色标记。
+        createdAt:
+          type: string
+          format: date-time
+
+    ChatLogItem:
+      type: object
+      description: 会话列表一行。
+      properties:
+        id:
+          type: integer
+        track:
+          type: string
+          enum: [mainline, auxiliary]
+        scene:
+          type: string
+          enum: [aux_qna, aux_training, mainline_question, mainline_card]
+        title:
+          type: string
+          nullable: true
+        subjectId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: >-
+            **最后一条消息时间**（该会话内 `deleted_at IS NULL` 的消息的最大 `created_at`）；
+            会话无消息时退回创建时间。与共享 `Conversation.updatedAt`（= `ai_dialogues.updated_at`）
+            口径不同，勿混。
+        messageCount:
+          type: integer
+        blockCount:
+          type: integer
+          description: 该会话里 `safety_flag = 1` 的消息数。
+
+    ChatLogDetail:
+      allOf:
+        - $ref: '#/components/schemas/ChatLogItem'
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChatLogMessage'
+
+    ChatLogPage:
+      type: object
+      description: 分页壳。`pageSize` 服务端固定 20，前端不传、只回显。
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatLogItem'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
 
     ParentAccount:
       type: object
