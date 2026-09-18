@@ -5,7 +5,7 @@ import { usePointsStore } from '@/store/pointsStore';
 import { decidePointsFeedback, usePointsFeedback } from './points-feedback';
 
 /**
- * 积分反馈共享模块（6 个训练页共用一份「什么该弹、什么该静默」的决策）。
+ * 积分反馈共享模块（甲类四页 + 两个会话页 + 交卷页共用一份「什么该弹、什么该静默」的决策）。
  *
  * 这里钉住的是一条最容易写错的规则：`pointsAwarded === 0` **不等于**「已达上限」。
  * Task 2 的 `PointsToast` 对 `points <= 0` 一律渲染「今日该任务积分已达上限」，
@@ -61,6 +61,48 @@ describe('decidePointsFeedback', () => {
     expect(
       decidePointsFeedback({ pointsAwarded: 3, levelUp: null, title: '默写' }),
     ).toEqual({ kind: 'toast', points: 3 });
+  });
+
+  it('正分 + celebrate（交卷大任务）→ task 全屏庆祝，不是轻反馈', () => {
+    expect(
+      decidePointsFeedback({
+        pointsAwarded: 12,
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      }),
+    ).toEqual({ kind: 'task' });
+  });
+
+  it('正分 + celebrate + levelUp → levelup 优先（晋升是更大的消息）', () => {
+    expect(
+      decidePointsFeedback({
+        pointsAwarded: 12,
+        levelUp: { from: 'pichai', to: 'zhutie' },
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      }),
+    ).toEqual({ kind: 'levelup' });
+  });
+
+  it('0 分 + daily_limit + celebrate → 仍只弹 0 分轻反馈，celebrate 不生效', () => {
+    expect(
+      decidePointsFeedback({
+        pointsAwarded: 0,
+        awardReason: 'daily_limit',
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      }),
+    ).toEqual({ kind: 'toast', points: 0 });
+  });
+
+  it('0 分 + 无 reason + celebrate → 静默（幂等交卷不庆祝）', () => {
+    expect(
+      decidePointsFeedback({
+        pointsAwarded: 0,
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      }),
+    ).toEqual({ kind: 'silent' });
   });
 
   it('0 分 + daily_limit → 轻反馈 0 分（渲染「今日该任务积分已达上限」）', () => {
@@ -195,6 +237,103 @@ describe('usePointsFeedback', () => {
       points: 5,
       title: '英语背单词 · 10 词',
     });
+    expect(result.current.celebrationProps.open).toBe(false);
+  });
+
+  it('正分 + celebrate → 全屏 task 庆祝（标题/副标题/主按钮/积分），不 push 轻反馈', () => {
+    const { result } = renderHook(() => usePointsFeedback());
+
+    act(() => {
+      result.current.award({
+        pointsAwarded: 12,
+        celebrate: { title: '本次测验完成！', subtitle: '正确 18 / 20', primaryLabel: '查看结果' },
+        title: '数学测验',
+      });
+    });
+
+    // 计划 §2.2：大任务只有全屏庆祝，不与轻反馈同弹
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+    // task 庆祝不需要段位名，不该多打一次概览请求
+    expect(getMyPointsMock).not.toHaveBeenCalled();
+    expect(result.current.celebrationProps).toMatchObject({
+      open: true,
+      variant: 'task',
+      title: '本次测验完成！',
+      subtitle: '正确 18 / 20',
+      primaryLabel: '查看结果',
+      pointsAwarded: 12,
+    });
+    // task 不显示段位图标
+    expect(result.current.celebrationProps.level).toBeUndefined();
+
+    // onPrimary 直接关闭庆祝层，调用方摊开即可，无需自己接
+    act(() => { result.current.celebrationProps.onPrimary(); });
+    expect(result.current.celebrationProps.open).toBe(false);
+  });
+
+  it('celebrate 不带 primaryLabel → 默认「继续」', () => {
+    const { result } = renderHook(() => usePointsFeedback());
+
+    act(() => {
+      result.current.award({
+        pointsAwarded: 8,
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      });
+    });
+
+    expect(result.current.celebrationProps.primaryLabel).toBe('继续');
+  });
+
+  it('正分 + celebrate + levelUp → levelup 全屏优先，不用 task 文案，也不 push', async () => {
+    getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
+    const { result } = renderHook(() => usePointsFeedback());
+
+    await act(async () => {
+      result.current.award({
+        pointsAwarded: 20,
+        levelUp: { from: 'pichai', to: 'zhutie' },
+        celebrate: { title: '本次测验完成！', subtitle: '正确 18 / 20' },
+        title: '数学测验',
+      });
+    });
+
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+    expect(result.current.celebrationProps.variant).toBe('levelup');
+    expect(result.current.celebrationProps.title).toBe('晋升 铸铁！');
+    expect(result.current.celebrationProps.subtitle).toBeUndefined();
+    expect(result.current.celebrationProps.pointsAwarded).toBe(20);
+  });
+
+  it('celebrate + 0 分 daily_limit → 只 push 0 分轻反馈，不庆祝', () => {
+    const { result } = renderHook(() => usePointsFeedback());
+
+    act(() => {
+      result.current.award({
+        pointsAwarded: 0,
+        awardReason: 'daily_limit',
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      });
+    });
+
+    expect(usePointsStore.getState().queue).toHaveLength(1);
+    expect(usePointsStore.getState().queue[0]).toMatchObject({ points: 0, title: '数学测验' });
+    expect(result.current.celebrationProps.open).toBe(false);
+  });
+
+  it('celebrate + 0 分无 reason（幂等交卷）→ 静默，不 push 也不庆祝', () => {
+    const { result } = renderHook(() => usePointsFeedback());
+
+    act(() => {
+      result.current.award({
+        pointsAwarded: 0,
+        celebrate: { title: '本次测验完成！' },
+        title: '数学测验',
+      });
+    });
+
+    expect(usePointsStore.getState().queue).toHaveLength(0);
     expect(result.current.celebrationProps.open).toBe(false);
   });
 

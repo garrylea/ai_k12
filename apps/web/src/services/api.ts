@@ -1530,7 +1530,6 @@ export interface ExamSummary {
    *
    * **可选**：交卷是幂等的——重复交卷 / 早退等分支不发分，`getResults` 也不补发分，
    * 此时 JSON 里**没有这个键**（不是 `awarded: 0`）。缺省 → 不弹任何积分反馈，也不报错。
-   * `levelUp` 是段位 code 字符串，不是对象。
    */
   points?: {
     awarded: number;
@@ -1726,9 +1725,13 @@ export interface CompleteTrainingSessionResult {
    *  会话留在 `in_progress`，允许重试（服务端会补发）。 */
   balance: number | null;
   totalEarned: number | null;
-  /** 段位 code 字符串，不是对象 */
+  /** 段位晋升的 from/to code；无晋升为 null */
   levelUp: { from: string; to: string } | null;
-  reason?: PointsAwardReason | 'already_completed' | 'award_failed';
+  /**
+   * **排除 `not_cleared`**：那是甲类逐目标发分（答对但本无未清错题行）特有的原因，
+   * complete 端点永远不返回它（openapi `CompleteSessionResult.reason` 枚举同此）。
+   */
+  reason?: Exclude<PointsAwardReason, 'not_cleared'> | 'already_completed' | 'award_failed';
 }
 
 export function getMyPoints(): Promise<MyPoints> {
