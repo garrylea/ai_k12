@@ -3,12 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import {
   getKnowledgePoints,
+  getMyPointRules,
   startTargetedPractice,
+  type PointRuleTier,
   type TrainingKnowledgePoint,
 } from '@/services/api';
 
 /** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
 const MATH_SUBJECT_ID = 1;
+
+/** 积分规则里的任务码（数学专项）。 */
+const MATH_TASK_CODE = 'math_targeted';
 
 /** 题型枚举与后端 questions.type 一致；空串 = 全部（payload type 传 null）。 */
 const TYPE_OPTIONS = [
@@ -21,8 +26,15 @@ const TYPE_OPTIONS = [
   { value: 'calculation', label: '计算' },
 ] as const;
 
-/** 题量档（后端限 1-20，取常用四档）。 */
-const COUNT_OPTIONS = [3, 5, 8, 10] as const;
+/**
+ * 档位副行的次数文案；不限次数时 `text` 为 null。
+ * `capped`（今日已达上限）只置灰，**不禁用**——不发分也让孩子练（计划 §3 Task 6）。
+ */
+function tierStatus(tier: PointRuleTier): { text: string | null; capped: boolean } {
+  if (tier.dailyLimit == null || tier.remainingToday == null) return { text: null, capped: false };
+  if (tier.remainingToday === 0) return { text: '今日已达上限', capped: true };
+  return { text: `剩余 ${tier.remainingToday} 次`, capped: false };
+}
 
 const selectClassName =
   'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
@@ -52,6 +64,52 @@ function KpChip({
       }
     >
       {label}
+    </button>
+  );
+}
+
+/**
+ * 题量档按钮（单选）：主行档位名，副行分值 + 剩余次数。
+ * 档位与分值都来自 `GET /points/me/rules`（家长可改），前端不硬编码。
+ */
+function TierChip({
+  label,
+  points,
+  status,
+  active,
+  capped,
+  onClick,
+}: {
+  label: string;
+  points: number;
+  status: string | null;
+  active: boolean;
+  capped: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        'flex flex-col items-center justify-center min-h-11 px-4 py-1.5 rounded-full border ' +
+        'text-sm font-medium transition-colors ' +
+        (active
+          ? 'border-[var(--brand-500)] bg-[var(--brand-500)] text-[var(--text-on-brand)]'
+          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-secondary)] hover:border-[var(--brand-500)]') +
+        (capped && !active ? ' opacity-60' : '')
+      }
+    >
+      <span>{label}</span>
+      <span
+        className={
+          'text-[10px] font-normal ' +
+          (active ? 'opacity-90' : 'text-[var(--learn-text-tertiary)]')
+        }
+      >
+        +{points} 分{status ? ` · ${status}` : ''}
+      </span>
     </button>
   );
 }
@@ -101,9 +159,11 @@ export default function TargetedConfigPage() {
   const [parentKpId, setParentKpId] = useState<number | null>(null);
   const [childKpId, setChildKpId] = useState<number | null>(null);
 
-  // 题型 / 题量
+  // 题型 / 题量（题量档位来自积分规则，家长可改）
   const [type, setType] = useState('');
-  const [count, setCount] = useState<number>(5);
+  const [tiers, setTiers] = useState<PointRuleTier[] | null>(null);
+  const [tiersError, setTiersError] = useState<string | null>(null);
+  const [tierKey, setTierKey] = useState<string | null>(null);
 
   // 开练状态
   const [starting, setStarting] = useState(false);
@@ -121,9 +181,32 @@ export default function TargetedConfigPage() {
     }
   }, []);
 
+  /**
+   * 题量档位 = 家长配的 `(math_targeted, tierKey)` 白名单。
+   * 开练的 count 必须落在里面，否则后端 400；所以档位没到之前不渲染任何按钮。
+   */
+  const loadTiers = useCallback(async () => {
+    setTiersError(null);
+    try {
+      const data = await getMyPointRules();
+      const list = data.tasks.find((t) => t.taskCode === MATH_TASK_CODE)?.tiers ?? [];
+      setTiers(list);
+      // 默认第一档；空数组**不给默认值**（不能写 tiers[0].tierKey）
+      setTierKey(list.length > 0 ? list[0].tierKey : null);
+    } catch {
+      setTiersError('档位加载失败，请重试');
+      setTiers(null);
+      setTierKey(null);
+    }
+  }, []);
+
   useEffect(() => {
     void loadKps();
   }, [loadKps]);
+
+  useEffect(() => {
+    void loadTiers();
+  }, [loadTiers]);
 
   // 平铺列表 -> 一级 / 当前一级的二级
   const parentKps = useMemo(
@@ -143,10 +226,10 @@ export default function TargetedConfigPage() {
     setEmptyHint(false);
   };
 
-  const canStart = parentKpId != null && childKpId != null && !starting;
+  const canStart = parentKpId != null && childKpId != null && tierKey != null && !starting;
 
   const startPractice = async () => {
-    if (!canStart || childKpId == null) return;
+    if (!canStart || childKpId == null || tierKey == null) return;
     setStarting(true);
     setStartError(null);
     setEmptyHint(false);
@@ -155,7 +238,8 @@ export default function TargetedConfigPage() {
         subjectId: MATH_SUBJECT_ID,
         kpId: childKpId,
         type: type || null,
-        count,
+        // tierKey 对这两个任务是纯数字字符串（家长端不能新增档位），直接当题量
+        count: Number(tierKey),
       });
       if (res.questions.length === 0) {
         // 空集合非错误：提示后留在配置页，学生可换专项/题型再试
@@ -267,19 +351,42 @@ export default function TargetedConfigPage() {
               </label>
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题量</span>
-                <div className="flex flex-wrap gap-2">
-                  {COUNT_OPTIONS.map((c) => (
-                    <KpChip
-                      key={c}
-                      label={`${c} 题`}
-                      active={count === c}
-                      onClick={() => {
-                        setCount(c);
-                        setEmptyHint(false);
-                      }}
-                    />
-                  ))}
-                </div>
+                {tiersError ? (
+                  <div className="flex items-center gap-3">
+                    <p className="text-sm text-[var(--learn-text-secondary)]">{tiersError}</p>
+                    <Button variant="secondary" size="sm" onClick={() => void loadTiers()}>
+                      重试
+                    </Button>
+                  </div>
+                ) : tiers == null ? (
+                  <div className="flex flex-wrap gap-2" data-testid="tier-skeleton">
+                    <Skeleton width={72} height={44} rounded />
+                    <Skeleton width={72} height={44} rounded />
+                    <Skeleton width={72} height={44} rounded />
+                  </div>
+                ) : tiers.length === 0 ? (
+                  <p className="text-sm text-[var(--learn-text-secondary)]">家长已停用该任务</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {tiers.map((tier) => {
+                      const { text, capped } = tierStatus(tier);
+                      return (
+                        <TierChip
+                          key={tier.tierKey}
+                          label={tier.tierLabel}
+                          points={tier.points}
+                          status={text}
+                          active={tierKey === tier.tierKey}
+                          capped={capped}
+                          onClick={() => {
+                            setTierKey(tier.tierKey);
+                            setEmptyHint(false);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </section>
 

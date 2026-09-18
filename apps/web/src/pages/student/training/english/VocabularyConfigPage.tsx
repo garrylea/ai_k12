@@ -1,17 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PageHeader } from '@/components/base';
+import { PageHeader, Skeleton } from '@/components/base';
 import {
   fetchVocabularyOptions,
+  getMyPointRules,
   startVocabulary,
+  type PointRuleTier,
   type VocabularyDirection,
   type VocabularyLevelPool,
   type VocabularyOptions,
   type VocabularyOrder,
 } from '@/services/api';
 
-/** 背几个词：用户口径是「每天 10-20 个」，取三个预设覆盖区间。 */
-const COUNT_OPTIONS = [10, 15, 20];
+/** 积分规则里的任务码（英语背单词）。 */
+const EN_VOCAB_TASK_CODE = 'en_vocabulary';
+
+/**
+ * 档位副行的次数文案；不限次数时 `text` 为 null。
+ * `capped`（今日已达上限）只置灰，**不禁用**——不发分也让孩子练（计划 §3 Task 6）。
+ */
+function tierStatus(tier: PointRuleTier): { text: string | null; capped: boolean } {
+  if (tier.dailyLimit == null || tier.remainingToday == null) return { text: null, capped: false };
+  if (tier.remainingToday === 0) return { text: '今日已达上限', capped: true };
+  return { text: `剩余 ${tier.remainingToday} 次`, capped: false };
+}
 
 const ORDER_OPTIONS: Array<{ label: string; value: VocabularyOrder }> = [
   { label: '随机', value: 'random' },
@@ -45,7 +57,10 @@ export default function VocabularyConfigPage() {
   const navigate = useNavigate();
   const [options, setOptions] = useState<VocabularyOptions | null>(null);
   const [levelPool, setLevelPool] = useState<VocabularyLevelPool>('junior');
-  const [count, setCount] = useState<number>(10);
+  // 背几个：档位来自积分规则（家长可改），不硬编码 10/15/20
+  const [tiers, setTiers] = useState<PointRuleTier[] | null>(null);
+  const [tiersError, setTiersError] = useState<string | null>(null);
+  const [tierKey, setTierKey] = useState<string | null>(null);
   const [order, setOrder] = useState<VocabularyOrder>('random');
   const [letter, setLetter] = useState<string>('a');
   const [direction, setDirection] = useState<VocabularyDirection>('en2cn');
@@ -64,13 +79,38 @@ export default function VocabularyConfigPage() {
     return () => { cancelled = true; };
   }, []);
 
+  /**
+   * 词量档位 = 家长配的 `(en_vocabulary, tierKey)` 白名单（开练 count 必须在里面，否则 400）。
+   * 档位没到之前不渲染任何按钮，也不给默认值。
+   */
+  const loadTiers = useCallback(async () => {
+    setTiersError(null);
+    try {
+      const data = await getMyPointRules();
+      const list = data.tasks.find((t) => t.taskCode === EN_VOCAB_TASK_CODE)?.tiers ?? [];
+      setTiers(list);
+      // 默认第一档；空数组**不给默认值**（不能写 tiers[0].tierKey）
+      setTierKey(list.length > 0 ? list[0].tierKey : null);
+    } catch {
+      setTiersError('档位加载失败，请重试');
+      setTiers(null);
+      setTierKey(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTiers();
+  }, [loadTiers]);
+
   const handleStart = async () => {
+    if (tierKey == null) return;
     setLoading(true);
     setError(null);
     try {
       const res = await startVocabulary({
         levelPool,
-        count,
+        // tierKey 对这个任务是纯数字字符串（家长端不能新增档位），直接当词数
+        count: Number(tierKey),
         order,
         letter: order === 'letter' ? letter : null,
         direction,
@@ -93,6 +133,7 @@ export default function VocabularyConfigPage() {
   };
 
   const poolCount = options?.pools.find((p) => p.key === levelPool)?.count ?? 0;
+  const count = tierKey == null ? null : Number(tierKey);
 
   return (
     <div
@@ -141,23 +182,49 @@ export default function VocabularyConfigPage() {
         {/* 背几个 */}
         <section className="mt-8">
           <h2 className="text-lg font-bold text-[var(--text-primary)]">背几个</h2>
-          <div className="flex flex-wrap gap-3 mt-3">
-            {COUNT_OPTIONS.map((n) => {
-              const active = count === n;
-              return (
-                <button
-                  key={n}
-                  onClick={() => setCount(n)}
-                  className={`w-20 h-11 rounded-xl text-sm font-medium transition-colors ${
-                    active ? 'text-white' : 'bg-white text-[var(--text-secondary)]'
-                  }`}
-                  style={active ? { backgroundColor: 'var(--brand-500)' } : CARD_BORDER}
-                >
-                  {n} 个
-                </button>
-              );
-            })}
-          </div>
+          {tiersError ? (
+            <div className="mt-3 flex items-center gap-3">
+              <p className="text-sm text-[var(--text-secondary)]">{tiersError}</p>
+              <button
+                onClick={() => void loadTiers()}
+                className={`${PILL_BASE} bg-white text-[var(--text-secondary)]`}
+                style={CARD_BORDER}
+              >
+                重试
+              </button>
+            </div>
+          ) : tiers == null ? (
+            <div className="flex flex-wrap gap-3 mt-3" data-testid="tier-skeleton">
+              <Skeleton width={96} height={56} rounded />
+              <Skeleton width={96} height={56} rounded />
+              <Skeleton width={96} height={56} rounded />
+            </div>
+          ) : tiers.length === 0 ? (
+            <p className="mt-3 text-sm text-[var(--text-secondary)]">家长已停用该任务</p>
+          ) : (
+            <div className="flex flex-wrap gap-3 mt-3">
+              {tiers.map((tier) => {
+                const active = tierKey === tier.tierKey;
+                const { text, capped } = tierStatus(tier);
+                return (
+                  <button
+                    key={tier.tierKey}
+                    onClick={() => setTierKey(tier.tierKey)}
+                    aria-pressed={active}
+                    className={`flex flex-col items-center justify-center min-w-20 min-h-14 px-3 rounded-xl text-sm font-medium transition-colors ${
+                      active ? 'text-white' : 'bg-white text-[var(--text-secondary)]'
+                    }${capped && !active ? ' opacity-60' : ''}`}
+                    style={active ? { backgroundColor: 'var(--brand-500)' } : CARD_BORDER}
+                  >
+                    <span>{tier.tierLabel}</span>
+                    <span className={`text-[10px] font-normal ${active ? 'opacity-90' : 'opacity-70'}`}>
+                      +{tier.points} 分{text ? ` · ${text}` : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* 出题顺序 */}
@@ -282,11 +349,11 @@ export default function VocabularyConfigPage() {
 
         <button
           onClick={handleStart}
-          disabled={loading || !options}
+          disabled={loading || !options || count == null}
           className="mt-10 w-full h-14 rounded-2xl text-white text-lg font-bold transition-opacity disabled:opacity-60"
           style={{ backgroundColor: 'var(--brand-500)' }}
         >
-          {loading ? '正在抽词…' : `开始背词（${count} 个 · 池内 ${poolCount} 词）`}
+          {loading ? '正在抽词…' : count == null ? '开始背词' : `开始背词（${count} 个 · 池内 ${poolCount} 词）`}
         </button>
       </div>
     </div>
