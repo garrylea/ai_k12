@@ -274,6 +274,18 @@ describe('ParentInsightsRepository：趋势与考试列表', () => {
     expect(sql).toContain('ORDER BY date ASC');
   });
 
+  it('MySQL 返回 Date 时按**本地**日期拼（toISOString 会在 UTC+8 下切到前一天）', async () => {
+    const pool = mockPool([
+      // mysql2 对 DATE 列返回本地零点的 Date：2026-09-15 本地零点
+      { date: new Date(2026, 8, 15), answered: 10, correct: 7 },
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getAccuracyTrend(9, new Date(2026, 8, 12), new Date(2026, 8, 19));
+
+    expect(result[0].date).toBe('2026-09-15');
+  });
+
   it('考试列表只取已交卷、按交卷时间倒序、带卷名与客观题数', async () => {
     const pool = mockPool([
       {

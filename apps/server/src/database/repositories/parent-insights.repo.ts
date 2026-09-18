@@ -1,6 +1,19 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 
+/**
+ * 本地时区的 `YYYY-MM-DD`。**不要用 `toISOString()`**：那会按 UTC 切，跨时区差一天。
+ *
+ * mysql2 对 `DATE()` 列返回**本地零点**的 Date（connection.ts 未设 `dateStrings`/`timezone`），
+ * 在 UTC+8 下 `toISOString().slice(0,10)` 会把 2026-09-15 折成 '2026-09-14'。
+ */
+function toLocalDayString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /** 按学科的答题量与答对数（已排除空答案与学生自评）。 */
 export interface AccuracyRow {
   subjectId: number;
@@ -374,10 +387,7 @@ ${windowed.sql}
       [studentId, from, to, studentId, from, to],
     );
     return rows.map((r) => ({
-      date:
-        typeof r.date === 'string'
-          ? r.date
-          : new Date(r.date as Date).toISOString().slice(0, 10),
+      date: typeof r.date === 'string' ? r.date : toLocalDayString(new Date(r.date as Date)),
       answered: Number(r.answered ?? 0),
       correct: Number(r.correct ?? 0),
     }));
