@@ -15,8 +15,11 @@ import { CurrentUser } from '../../common/decorators/current-user.js';
 import { ParentService } from '../parent/parent.service.js';
 import { DashboardService } from './dashboard.service.js';
 import { ReportService } from './report.service.js';
-import type { LearningReport, ParentDashboard } from './dto/parent-insights.dto.js';
+import { ErrorsService } from './errors.service.js';
+import type { ErrorsQuery } from './errors.service.js';
+import type { LearningReport, ParentDashboard, ParentErrorPage } from './dto/parent-insights.dto.js';
 import type { ReportPeriod } from './window.util.js';
+import { DEFAULT_PAGE, parsePositiveInt } from '../points/pagination.util.js';
 
 /** `period` 只认这两个值；非法值**回落 `weekly`**（spec §6：查询类参数宽容回落，不 400）。 */
 const PeriodSchema = z.enum(['weekly', 'monthly']);
@@ -40,6 +43,7 @@ export class ParentInsightsController {
     private readonly parentService: ParentService,
     private readonly dashboardService: DashboardService,
     private readonly reportService: ReportService,
+    private readonly errorsService: ErrorsService,
   ) {}
 
   /** P6.1 家长仪表盘：一次返回名下所有孩子的概览（含各自的按学科卡片）。 */
@@ -58,5 +62,33 @@ export class ParentInsightsController {
     await this.parentService.requireOwnedStudent(user.sub, studentId);
     const parsed = PeriodSchema.safeParse(period);
     return this.reportService.getReport(studentId, (parsed.success ? parsed.data : 'weekly') as ReportPeriod);
+  }
+
+  /** P6.3 错题查看（只读）。`pageSize` 服务端固定 20；`page` 非法 → 400/1001。 */
+  @Get('students/:studentId/errors')
+  async listErrors(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Query('subject') subject?: string,
+    @Query('source') source?: string,
+    @Query('track') track?: string,
+    @Query('cleared') cleared?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+  ): Promise<ParentErrorPage> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+
+    const query: ErrorsQuery = {
+      page: parsePositiveInt(page, 'page', DEFAULT_PAGE),
+    };
+    if (subject !== undefined && /^\d+$/.test(subject)) query.subject = Number(subject);
+    if (source) query.source = source;
+    if (track === 'main' || track === 'aux') query.track = track;
+    if (cleared === 'uncleared' || cleared === 'cleared') query.cleared = cleared;
+    if (from) query.from = from;
+    if (to) query.to = to;
+
+    return this.errorsService.listErrors(studentId, query);
   }
 }

@@ -126,3 +126,40 @@ export interface LearningReport {
   /** 全部考试史，最多 20 场（不限窗口）。 */
   exams: ExamRecord[];
 }
+
+/** 错题里嵌套的题目信息；`main_error_books.question_id` 为 NULL 时整个 `question` 为 null。 */
+export interface ParentErrorQuestion {
+  content: string;
+  type: string;
+  difficulty: number | null;
+  /** 未绑知识点时是**空数组**，不是 null（前端不必判两遍）。 */
+  knowledgePoints: Array<{ id: number; name: string }>;
+}
+
+/**
+ * 家长端错题一行（只读）。
+ *
+ * `track` 由 `source` 现算、**不落库**：`source === 'auxiliary'` → `'aux'`，其余 → `'main'`。
+ * 与 `openapi` 原 `ErrorItem` 的差别：`source` enum 按**实际 5 个值**修正（原 enum 只有
+ * `homework/unit_test/midterm/final/auxiliary/practice/discuss`，缺 `exam`/`targeted`/`error_practice`）。
+ */
+export interface ParentErrorItem {
+  id: number;
+  questionId: number | null;
+  track: 'main' | 'aux';
+  source: string;
+  level: number;
+  isCleared: boolean;
+  wrongAnswerText: string | null;
+  createdAt: Date;
+  clearedAt: Date | null;
+  question: ParentErrorQuestion | null;
+}
+
+/** 分页壳（`pageSize` 服务端固定 20，前端不传）。 */
+export interface ParentErrorPage {
+  items: ParentErrorItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
