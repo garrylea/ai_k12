@@ -22,8 +22,12 @@ import { usePointsStore } from '@/store/pointsStore';
  * 数据来源是 `ExamRunPage` 交卷后经 navigate state 交接过来的 `points` ——
  * 结果页自己的 `getExamResults` 是 GET，**不补发分**，所以：
  *   - 有 `points` → 庆祝，副标题里同时有分数与积分；
- *   - 没有 `points`（刷新 / 重复交卷 / 早退）→ 不弹任何积分反馈、也不报错；
- *   - `points.awarded === 0`（本次没加）→ 静默（交卷响应没有 reason 字段）。
+ *   - 导航 state 里没有 `points`（重复交卷 / 已交卷分支 / 从考试列表重新进入）→
+ *     不弹任何积分反馈、也不报错；
+ *   - `points.awarded === 0`（本次没加）→ 静默（交卷响应的 `points` 没有 reason 字段）。
+ *
+ * 注：浏览器原生刷新会恢复 `history.state`，所以刷新结果页**会**再庆祝一次 ——
+ * 这是 navigate state 交接的固有取舍，已在报告里记录（未额外做一次性消费）。
  *
  * vitest globals:false —— 必须显式 import + 自己写 afterEach(cleanup)。
  */
@@ -135,7 +139,7 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     expect(screen.getByRole('button', { name: '查看成绩' })).toBeTruthy();
   });
 
-  it('没有 points（刷新页面 / 重复交卷）→ 不弹任何积分反馈，也不报错', async () => {
+  it('导航 state 里没有 points（重复交卷 / 重新进入结果页）→ 不弹任何积分反馈，也不报错', async () => {
     renderResult(undefined);
 
     // 页面本体照常渲染成绩（AnswerResultList 自身也是 role="dialog"，故按可访问名锁定庆祝层）
