@@ -191,6 +191,27 @@ describe('ParentChatLogsPage', () => {
     );
   });
 
+  it('切孩子后旧会话在新孩子下请求失败，也不能停在失败态（失败标记必须带归属）', async () => {
+    const GIRL = { ...BOY, id: 12, username: 'xiaomei', name: '小美' };
+    listMyStudentsMock.mockResolvedValue([BOY, GIRL]);
+
+    renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+    expect(await screen.findByTestId('chatlog-message-201')).toBeInTheDocument();
+
+    // 切到小美后，activeId 仍是老会话 55 → 会发 (12, 55)，这个组合本就不存在 → 必然失败
+    getDetailMock.mockRejectedValue(new Error('1002'));
+
+    act(() => useParentStudentStore.setState({ studentId: GIRL.id }));
+
+    await waitFor(() => expect(getDetailMock).toHaveBeenCalledWith(GIRL.id, 55));
+    // 不能把「上一个孩子留下的选中会话」的失败，当成新孩子的详情失败态停在右侧
+    await waitFor(() =>
+      expect(screen.queryByText('这条对话暂时无法查看')).not.toBeInTheDocument(),
+    );
+  });
+
   // ↓↓↓ 三条守卫的真实钉子（删掉实现里的守卫它们会红，见 report 反向证据） ↓↓↓
 
   it('翻页后改筛选 → 回到第 1 页（changeFilter）', async () => {

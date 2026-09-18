@@ -111,7 +111,7 @@ function StudentPanel({ student }: { student: ParentDashboardStudent }) {
       {student.subjects.length === 0 ? (
         <Card className="p-10 text-center">
           <p className="text-sm text-[var(--text-secondary)]">
-            这个孩子还没有开始任何学科的学习。
+            这个孩子还没有开始任何主线学科的学习。
           </p>
           <Link
             to={`/parent/students/${student.studentId}/config`}

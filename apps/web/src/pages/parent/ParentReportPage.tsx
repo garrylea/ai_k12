@@ -182,7 +182,12 @@ export default function ParentReportPage() {
           </Card>
 
           <Card className="p-5" data-testid="report-weak-points">
-            <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">薄弱知识点</h2>
+            <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">
+              薄弱知识点
+              <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
+                （累计，不随周/月切换）
+              </span>
+            </h2>
             {data.weakPoints.length === 0 ? (
               <p className="text-sm text-[var(--text-secondary)]">暂无薄弱点数据</p>
             ) : (
@@ -212,7 +217,12 @@ export default function ParentReportPage() {
           </Card>
 
           <Card className="p-5" data-testid="report-exams">
-            <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">考试记录</h2>
+            <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">
+              考试记录
+              <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
+                （累计，不随周/月切换）
+              </span>
+            </h2>
             {data.exams.length === 0 ? (
               <p className="text-sm text-[var(--text-secondary)]">还没有考试记录</p>
             ) : (

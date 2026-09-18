@@ -90,7 +90,13 @@ describe('ChatLogsService：详情', () => {
 
     const result = await mkSvc(d).getChatLog(11, 55);
 
+    // mysql2 返回的行是 snake_case：只钉 camelCase 会被 `{ ...m }` 展开式实现骗过
+    expect(result.messages[0]).not.toHaveProperty('token_input');
+    expect(result.messages[0]).not.toHaveProperty('token_output');
+    expect(result.messages[0]).not.toHaveProperty('response_time_ms');
+    // camelCase 版本一并覆盖（两面都别泄漏）
     expect(result.messages[0]).not.toHaveProperty('tokenInput');
+    expect(result.messages[0]).not.toHaveProperty('tokenOutput');
     expect(result.messages[0]).not.toHaveProperty('responseTimeMs');
   });
 

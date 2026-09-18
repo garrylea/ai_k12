@@ -107,13 +107,30 @@ export default function ParentChatLogsPage() {
    * effect 在 commit 之后才跑，那一帧照样会画出来。
    */
   const [detail, setDetail] = useState<{ studentId: number; value: ParentChatLogDetail } | null>(null);
-  const [detailFailed, setDetailFailed] = useState(false);
+  /**
+   * 失败态**必须连同「哪个孩子的哪条会话」一起存**，与 `ParentReportPage` 的
+   * `failure: { studentId, period }` 同形：在途请求失败时，才不会把责任记到「当前选中」上。
+   *
+   * 但光有归属还不够：切孩子时 `activeId` 仍是上一个孩子的会话，会立刻对新孩子发一次
+   * **注定失败**（1002）的请求，而它的 `(studentId, dialogueId)` 恰好就等于当下的选中态——
+   * 所以必须同时清掉选中态（见下面 `[studentId]` 的 effect），右侧才会回到占位态。
+   */
+  const [detailFailure, setDetailFailure] = useState<{ studentId: number; dialogueId: number } | null>(null);
 
-  // 换孩子必须回第 1 页（与 `ParentErrorsPage` 同因）：否则会拿上一个孩子的第 N 页去请求新孩子，
-  // 若新孩子页数不够，响应回显的 page 仍是 N（守卫会通过）→ 停在「当前筛选下没有对话记录」，
-  // 而**分页控件只在非空分支里渲染**，家长无法自救。
+  /**
+   * 换孩子必须：① 回第 1 页 ② 清掉上一个孩子的选中会话。
+   *
+   * ① 与 `ParentErrorsPage` 同因：否则会拿上一个孩子的第 N 页去请求新孩子，若新孩子页数不够，
+   * 响应回显的 page 仍是 N（守卫会通过）→ 停在「当前筛选下没有对话记录」，而分页控件只在
+   * 非空分支里渲染，家长无法自救。
+   * ② 不清会话会拿「新孩子 × 旧会话」发一次必失败（1002）的详情请求，把右侧钉在
+   * 「这条对话暂时无法查看」。这个 effect 在 commit 之后才跑不影响正确性——`detail` 与
+   * `detailFailure` 都带 studentId 归属，那一帧画不出旧孩子的任何内容。
+   */
   useEffect(() => {
     setPage(1);
+    setActiveId(null);
+    setDetailFailure(null);
   }, [studentId]);
 
   /** 「自报家门」+ 归属：不是当前孩子的、或不是当前选中会话的，都当作还没到货。 */
@@ -123,6 +140,12 @@ export default function ParentChatLogsPage() {
   // 「自报家门」：不归当前孩子、或回显页号对不上 → 当作还没到货
   const pageData =
     list && list.studentId === studentId && list.value.page === page ? list.value : null;
+
+  // 失败标记同样要「自报家门」：不是当前孩子/当前选中会话的失败，不当作本屏的失败态
+  const detailFailed =
+    detailFailure !== null &&
+    detailFailure.studentId === studentId &&
+    detailFailure.dialogueId === activeId;
 
   useEffect(() => {
     if (studentId === null) return;
@@ -153,17 +176,20 @@ export default function ParentChatLogsPage() {
 
   useEffect(() => {
     if (studentId === null || activeId === null) return;
+    // 闭包捕获当次请求的两个维度：失败标记指向的必须是「这一次请求」，而不是渲染时的最新值
+    const requestedStudentId = studentId;
+    const requestedDialogueId = activeId;
     let cancelled = false;
-    setDetailFailed(false);
-    getParentChatLogDetail(studentId, activeId)
+    setDetailFailure(null);
+    getParentChatLogDetail(requestedStudentId, requestedDialogueId)
       .then((res) => {
         if (cancelled) return;
-        setDetail({ studentId, value: res });
+        setDetail({ studentId: requestedStudentId, value: res });
       })
       .catch(() => {
         if (cancelled) return;
         setDetail(null);
-        setDetailFailed(true);
+        setDetailFailure({ studentId: requestedStudentId, dialogueId: requestedDialogueId });
       });
     return () => {
       cancelled = true;
