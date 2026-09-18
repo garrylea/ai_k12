@@ -21,6 +21,27 @@ export interface SubjectCountRow {
   count: number;
 }
 
+/** 按学科的错题本统计（累计）。 */
+export interface ErrorBookSummaryRow {
+  subjectId: number;
+  uncleared: number;
+  total: number;
+}
+
+/**
+ * 薄弱点（**错题数代理**，不是掌握度）。
+ *
+ * 实测只有约 40% 的错题能映射到知识点（`question_knowledge_points` 由 migration 灌入，
+ * 覆盖不完整），所以必须配合 `countUncoveredUnclearedErrors` 一起展示，否则家长会以为
+ * 「只有这些问题」。真掌握度需要写 `student_knowledge_mastery`，不属本批。
+ */
+export interface WeakPointRow {
+  knowledgePointId: number;
+  name: string;
+  unclearedCount: number;
+  totalWrongCount: number;
+}
+
 /**
  * 家长端只读聚合仓储（spec `2026-09-18-parent-insights-design.md`）。
  *
@@ -220,5 +241,95 @@ ${windowed.sql}
       params,
     );
     return rows.map((r) => ({ subjectId: Number(r.subject_id), count: Number(r.count ?? 0) }));
+  }
+
+  /** 错题本「未清零 / 总数」按学科统计（累计，不按时间窗）。 */
+  async getErrorBookSummary(studentId: number): Promise<ErrorBookSummaryRow[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT subject_id,
+              SUM(is_cleared = 0) AS uncleared,
+              COUNT(*) AS total
+       FROM main_error_books
+       WHERE student_id = ?
+       GROUP BY subject_id
+       ORDER BY subject_id`,
+      [studentId],
+    );
+    return rows.map((r) => ({
+      subjectId: Number(r.subject_id),
+      uncleared: Number(r.uncleared ?? 0),
+      total: Number(r.total ?? 0),
+    }));
+  }
+
+  /** 窗口内「新增错题」与「清零错题」条数（报告页 stats）。 */
+  async getErrorDateCounts(
+    studentId: number,
+    from: Date,
+    to: Date,
+  ): Promise<{ added: number; cleared: number }> {
+    const [addedRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS added FROM main_error_books
+       WHERE student_id = ? AND created_at >= ? AND created_at < ?`,
+      [studentId, from, to],
+    );
+    const [clearedRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cleared FROM main_error_books
+       WHERE student_id = ? AND is_cleared = 1 AND cleared_at >= ? AND cleared_at < ?`,
+      [studentId, from, to],
+    );
+    return {
+      added: Number(addedRows[0]?.added ?? 0),
+      cleared: Number(clearedRows[0]?.cleared ?? 0),
+    };
+  }
+
+  /**
+   * 薄弱点 Top N：按「未清零错题数」聚合知识点。
+   *
+   * 统计**全部未清零错题**（不按时间窗）——「现在还剩哪些没清」才是家长关心的。
+   * 只覆盖 `question_id` 非空且已绑 KP 的错题，未覆盖部分由
+   * `countUncoveredUnclearedErrors` 兜住。
+   */
+  async getWeakPoints(studentId: number, limit: number): Promise<WeakPointRow[]> {
+    // LIMIT ? 必须用 pool.query（客户端转义），用 execute 会被 MySQL 拒绝
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT kp.id AS knowledge_point_id,
+              kp.name,
+              SUM(meb.is_cleared = 0) AS uncleared_count,
+              COUNT(*) AS total_wrong_count
+       FROM main_error_books meb
+       JOIN question_knowledge_points qkp ON qkp.question_id = meb.question_id
+       JOIN knowledge_points kp ON kp.id = qkp.knowledge_point_id
+       WHERE meb.student_id = ?
+       GROUP BY kp.id, kp.name
+       ORDER BY uncleared_count DESC, total_wrong_count DESC, kp.id ASC
+       LIMIT ?`,
+      [studentId, limit],
+    );
+    return rows.map((r) => ({
+      knowledgePointId: Number(r.knowledge_point_id),
+      name: String(r.name ?? ''),
+      unclearedCount: Number(r.uncleared_count ?? 0),
+      totalWrongCount: Number(r.total_wrong_count ?? 0),
+    }));
+  }
+
+  /**
+   * 未清零错题里**映射不到任何知识点**的条数（`question_id` 为 NULL，或该题未绑 KP）。
+   *
+   * 与 `getWeakPoints` 是同一口径的补集，UI 必须显式展示这个数（spec §9.1）。
+   */
+  async countUncoveredUnclearedErrors(studentId: number): Promise<number> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS uncovered
+       FROM main_error_books meb
+       WHERE meb.student_id = ? AND meb.is_cleared = 0
+         AND NOT EXISTS (
+           SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id
+         )`,
+      [studentId],
+    );
+    return Number(rows[0]?.uncovered ?? 0);
   }
 }

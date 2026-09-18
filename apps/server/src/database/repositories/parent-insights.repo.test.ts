@@ -188,3 +188,64 @@ describe('ParentInsightsRepository：自评与考试场次', () => {
     expect(sql).toContain('GROUP BY subject_id');
   });
 });
+
+describe('ParentInsightsRepository：错题统计', () => {
+  it('按学科出「未清零 / 总数」两个数（累计，不按时间窗）', async () => {
+    const pool = mockPool([{ subject_id: 1, uncleared: 12, total: 20 }]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getErrorBookSummary(9);
+
+    expect(result).toEqual([{ subjectId: 1, uncleared: 12, total: 20 }]);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('FROM main_error_books');
+    expect(sql).toContain('SUM(is_cleared = 0)');
+  });
+
+  it('新增/清零各按 created_at / cleared_at 落窗', async () => {
+    const pool = mockPool([]);
+    pool.execute
+      .mockResolvedValueOnce([[{ added: 6 }], []])
+      .mockResolvedValueOnce([[{ cleared: 4 }], []]);
+    const from = new Date('2026-09-12T00:00:00Z');
+    const to = new Date('2026-09-19T00:00:00Z');
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getErrorDateCounts(9, from, to);
+
+    expect(result).toEqual({ added: 6, cleared: 4 });
+    expect(pool.execute.mock.calls[0][0]).toContain('created_at >= ?');
+    expect(pool.execute.mock.calls[1][0]).toContain('cleared_at >= ?');
+    expect(pool.execute.mock.calls[1][0]).toContain('is_cleared = 1');
+  });
+
+  it('薄弱点按未清零数降序、按 limit 截断（LIMIT 走 query，不走 execute）', async () => {
+    const pool = mockPool([
+      { knowledge_point_id: 42, name: '分数加减', uncleared_count: 3, total_wrong_count: 5 },
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getWeakPoints(9, 10);
+
+    expect(result).toEqual([
+      { knowledgePointId: 42, name: '分数加减', unclearedCount: 3, totalWrongCount: 5 },
+    ]);
+    const sql = pool.query.mock.calls[0][0] as string;
+    expect(sql).toContain('JOIN question_knowledge_points');
+    expect(sql).toContain('JOIN knowledge_points');
+    expect(sql).toContain('ORDER BY uncleared_count DESC');
+    expect(pool.query.mock.calls[0][1]).toEqual([9, 10]);
+    // LIMIT 场景绝不能用 execute（服务端预处理会报 mysqld_stmt_execute）
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('未标注知识点的未清零错题单独计数', async () => {
+    const pool = mockPool([{ uncovered: 8 }]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    expect(await repo.countUncoveredUnclearedErrors(9)).toBe(8);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('NOT EXISTS');
+    expect(sql).toContain('is_cleared = 0');
+  });
+});
