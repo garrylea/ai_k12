@@ -4840,6 +4840,31 @@ paths:
                       data:
                         $ref: '#/components/schemas/PointsOverview'
 
+  /points/levels:
+    get:
+      tags: [Points]
+      summary: 全量段位表（学生 + 家长）
+      description: >-
+        返回全部 9 个段位，按 threshold 升序、index 从 0 起，供家长端配奖励门槛
+        （minLevelCode 九选一）使用。段位是 modules/points/levels.ts 的静态常量，
+        本端点不查库、不做归属校验、无入参。路径与 /points/me 同前缀，但角色为
+        student + parent（独立 LevelsController；PointsController 是 student-only，
+        家长调会被 403）。GET → 200。
+      operationId: getLevels
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 全量段位表（9 项）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LevelsResponse'
+
   /points/me/ledger:
     get:
       tags: [Points]
@@ -7969,6 +7994,16 @@ components:
         threshold:
           type: integer
           description: 该段位的累计积分门槛
+
+    LevelsResponse:
+      type: object
+      description: 全量段位表（含全部 9 档），家长端配奖励门槛的数据源。
+      properties:
+        levels:
+          type: array
+          description: 按 threshold 升序，index 与数组下标一致。
+          items:
+            $ref: '#/components/schemas/PointsLevelInfo'
 
     PointsAwardReason:
       type: string

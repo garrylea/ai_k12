@@ -138,7 +138,7 @@
 | Practice | `/api/practice` | 课堂练习答题判对错（practice 卡片） | Practice Service |
 | Training | `/api/training` | 错题练习与专项训练（辅线学习闭环：错题筛选/重做判题/提示/专项抽题） | Training Service |
 | Exams | `/api/exams` | 真题试卷考试（选卷/开考/逐题作答/交卷/结果，过期自动收卷） | Exams Service |
-| Points | `/api/points` | 闯关积分：学生端查询（概览/流水/档位/奖励），只读 | Points Service |
+| Points | `/api/points` | 闯关积分：学生端查询（概览/流水/档位/奖励）+ 全量段位表，只读 | Points Service |
 | ParentPoints | `/api/parent/students/{studentId}/points*` | 家长端积分：分值规则、兑换、奖励清单、汇率设置 | Points Service |
 
 ---
@@ -489,6 +489,16 @@
 > **错误码**：`3001` 余额不足 / `3002` 未达段位门槛 / `3003` 奖励已下架 / `3004` 兑换已关闭 / `3005` 档位不存在。§2.4 已收录。
 >
 > **已知限制（本期不做）**：兑换**不可撤销**。家长点错只能再兑一次或线下补偿；`point_redemptions.status` 已为将来「撤销」预留状态位，但当前没有任何回补流水的路径。
+
+### 4.22 PointsLevels — `/api/points/levels`（全量段位表，学生 + 家长）
+
+段位表查询（2026-09-18 新增）。家长端配奖励门槛（`minLevelCode` 九选一）需要完整 9 档清单，而 §4.20 的概览只回 `level` + `nextLevel`、`me/rewards` 的 `minLevelName` 只是**逐项的名字**——都给不出「白银及以上」这种可选项。段位是 `modules/points/levels.ts` 的静态常量（单一真源），本端点**不查库、不做归属校验、无入参**，因此没有业务错误码。
+
+> ⚠️ 路径与 §4.20 **同前缀** `api/points`，但角色是 `@Roles('student','parent')`（学生端将来也可能用），所以**不是** `PointsController`（那个类标了 `@Roles('student')`，家长 token 会被 403/1005），而是独立的 `LevelsController`——与 `ParentPointsController` 同前缀多 controller 是同一既有做法。`GET` → **200**（非 `@Post`）。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| GET | `/api/points/levels` | **200**。全量 9 档，按 `threshold` 升序。响应：`{levels: [{code, name, index, threshold}]}`；`index` 从 0 起、与数组下标一致。前端**不得**自行维护段位表。 | MVP |
 
 ---
 
@@ -1506,6 +1516,7 @@ student_points（**读优化快照，可重建**）
   │  total_earned 单调递增 → 段位只升不降，没有也不该有降级逻辑
   ▼
 GET /api/points/me（学生，§4.20） / GET /api/parent/students/:id/points（家长，§4.21）
+GET /api/points/levels（学生+家长，§4.22）—— 段位表静态常量，家长端配奖励门槛（9 选 1）的唯一数据源
 ```
 
 **每类埋点都 try/catch 吞异常**：积分是激励层，发分失败绝不能阻塞主线推进 / 判题 / 交卷。发分失败时「本次加了 0 分」与「真的 0 分」必须可区分——所以失败路径的 `balance` / `totalEarned` 回 `null`（`award_failed`），**绝不伪造 0**（那会污染前端本地快照）。

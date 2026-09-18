@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PointsController } from './points.controller.js';
 import { ParentPointsController } from './parent-points.controller.js';
+import { LevelsController } from './levels.controller.js';
 import { PointsService } from './points.service.js';
 import { PointRulesService } from './point-rules.service.js';
 import { RedemptionService } from './redemption.service.js';
@@ -29,7 +30,7 @@ import { ParentModule } from '../parent/parent.module.js';
  */
 @Module({
   imports: [ParentModule],
-  controllers: [PointsController, ParentPointsController],
+  controllers: [PointsController, ParentPointsController, LevelsController],
   providers: [
     PointsService,
     PointRulesService,

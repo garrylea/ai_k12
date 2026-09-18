@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   LEVELS,
+  allLevels,
   levelOf,
   nextLevelOf,
   pointsToNextLevel,
@@ -13,6 +14,26 @@ describe('LEVELS', () => {
     expect(LEVELS).toHaveLength(9);
     for (let i = 1; i < LEVELS.length; i++) {
       expect(LEVELS[i].threshold).toBeGreaterThan(LEVELS[i - 1].threshold);
+    }
+  });
+});
+
+describe('allLevels', () => {
+  it('返回全量 9 档（家长端配奖励门槛用），按阈值升序、index 与下标一致', () => {
+    const levels = allLevels();
+
+    expect(levels).toHaveLength(LEVELS.length);
+    for (let i = 0; i < levels.length; i++) {
+      expect(levels[i].index).toBe(i);
+      expect(levels[i].code).toBe(LEVELS[i].code);
+      expect(levels[i].threshold).toBe(LEVELS[i].threshold);
+      if (i > 0) expect(levels[i].threshold).toBeGreaterThan(levels[i - 1].threshold);
+    }
+  });
+
+  it('与 levelOf 同口径：每档 threshold 处正好落在该档', () => {
+    for (const level of allLevels()) {
+      expect(levelOf(level.threshold).code).toBe(level.code);
     }
   });
 });

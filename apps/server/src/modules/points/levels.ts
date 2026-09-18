@@ -19,6 +19,17 @@ function toInfo(i: number): LevelInfo {
 }
 
 /**
+ * 全量段位表（9 档，按 threshold 升序，`index` 与数组下标一致）。
+ *
+ * 单一真源：家长端配奖励门槛（`minLevelCode` 九选一）需要完整清单，前端**不得**
+ * 自己维护一份段位表。复用 `toInfo`，勿在 controller 里重算 `index` / `threshold`。
+ * 返回**新数组**（`LEVELS` 本身不动），调用方想怎么用都可以。
+ */
+export function allLevels(): LevelInfo[] {
+  return LEVELS.map((_, i) => toInfo(i));
+}
+
+/**
  * 取 threshold <= totalEarned 的最大档（从后往前找第一个命中）。
  * totalEarned 单调递增 → 段位只升不降，**不需要也不该有降级逻辑**。
  * 负数按 0 处理（脏数据兜底），返回劈柴。
