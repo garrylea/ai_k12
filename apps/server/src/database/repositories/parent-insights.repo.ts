@@ -122,6 +122,35 @@ export interface ErrorKnowledgePointRow {
 }
 
 /**
+ * 家长端对话回放列表的筛选条件。
+ *
+ * **没有学科筛选**：实测 `ai_dialogues.subject_id` 有 76% 是 NULL
+ * （`ConversationService.createDialogue` 硬编码写 null），按学科筛会大面积漏。
+ * 可靠维度是 `track` + `scene` + 时间 + 标题关键词。
+ */
+export interface ParentChatLogFilters {
+  track?: 'mainline' | 'auxiliary';
+  scene?: string;
+  from?: string;
+  to?: string;
+  /** 只匹配 `ai_dialogues.title`，**不搜消息正文**。 */
+  q?: string;
+}
+
+/** 会话列表行（含消息数与闲聊标记数）。 */
+export interface ParentChatLogRow {
+  id: number;
+  track: string;
+  scene: string;
+  title: string | null;
+  subjectId: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  messageCount: number;
+  blockCount: number;
+}
+
+/**
  * 家长端只读聚合仓储（spec `2026-09-18-parent-insights-design.md`）。
  *
  * 三条铁律（勿违背）：
@@ -553,6 +582,90 @@ ${windowed.sql}
       knowledgePointId: Number(r.knowledge_point_id),
       knowledgePointName: String(r.knowledge_point_name ?? ''),
     }));
+  }
+
+  /**
+   * 家长端会话列表（只读、分页）。`messageCount` / `blockCount` 由 JOIN 聚合带出，
+   * 避免「先查会话再逐条查消息数」的 N+1。
+   *
+   * `blockCount` = 该会话里 `safety_flag = 1` 的消息数（温和阻断落库时就置 1），
+   * 前端据此给「闲聊/偏离学习」打红色标记——本批唯一有真数据的预警信号。
+   */
+  async listParentChatLogs(
+    studentId: number,
+    filters: ParentChatLogFilters,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: ParentChatLogRow[]; total: number }> {
+    const { where, params } = this.buildChatLogWhere(studentId, filters);
+
+    const [countRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS count FROM ai_dialogues d WHERE ${where}`,
+      params,
+    );
+
+    // LIMIT ? / OFFSET ? 必须用 pool.query（客户端转义）
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT d.id, d.track, d.scene, d.title, d.subject_id, d.created_at, d.updated_at,
+              COUNT(m.id) AS message_count,
+              COALESCE(SUM(m.safety_flag = 1), 0) AS block_count
+       FROM ai_dialogues d
+       LEFT JOIN ai_messages m ON m.dialogue_id = d.id AND m.deleted_at IS NULL
+       WHERE ${where}
+       GROUP BY d.id, d.track, d.scene, d.title, d.subject_id, d.created_at, d.updated_at
+       ORDER BY d.updated_at DESC, d.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+
+    return {
+      total: Number(countRows[0]?.count ?? 0),
+      items: rows.map((r) => ({
+        id: Number(r.id),
+        track: String(r.track),
+        scene: String(r.scene),
+        title: (r.title as string | null) ?? null,
+        subjectId: r.subject_id === null ? null : Number(r.subject_id),
+        createdAt: new Date(r.created_at as Date),
+        updatedAt: new Date(r.updated_at as Date),
+        messageCount: Number(r.message_count ?? 0),
+        blockCount: Number(r.block_count ?? 0),
+      })),
+    };
+  }
+
+  /** 会话列表 count 与 list 的**唯一** WHERE 构造器。 */
+  private buildChatLogWhere(
+    studentId: number,
+    filters: ParentChatLogFilters,
+  ): { where: string; params: (number | string)[] } {
+    const conditions = ['d.student_id = ?', 'd.deleted_at IS NULL'];
+    const params: (number | string)[] = [studentId];
+
+    if (filters.track) {
+      conditions.push('d.track = ?');
+      params.push(filters.track);
+    }
+    if (filters.scene) {
+      conditions.push('d.scene = ?');
+      params.push(filters.scene);
+    }
+    if (filters.from) {
+      conditions.push('d.updated_at >= ?');
+      params.push(filters.from);
+    }
+    if (filters.to) {
+      conditions.push('d.updated_at < DATE_ADD(?, INTERVAL 1 DAY)');
+      params.push(filters.to);
+    }
+    if (filters.q) {
+      // LIKE 通配符转义：不转义的话家长搜「50%」会变成「任意字符」而匹配一切。
+      // mysql2 的 `?` 占位只防注入，不处理 LIKE 元字符，必须自己转。
+      const escaped = filters.q.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      conditions.push('d.title LIKE ?');
+      params.push(`%${escaped}%`);
+    }
+    return { where: conditions.join(' AND '), params };
   }
 
   /** 错题列表 count 与 list 的**唯一** WHERE 构造器（改这里就是改两处）。 */

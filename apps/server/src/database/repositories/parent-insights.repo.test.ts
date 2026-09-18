@@ -461,3 +461,68 @@ describe('ParentInsightsRepository：本页错题的知识点', () => {
     expect(pool.execute).not.toHaveBeenCalled();
   });
 });
+
+describe('ParentInsightsRepository：会话列表', () => {
+  const logRows = [
+    {
+      id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值', subject_id: null,
+      created_at: new Date('2026-09-16T10:00:00Z'), updated_at: new Date('2026-09-16T10:05:00Z'),
+      message_count: 8, block_count: 2,
+    },
+  ];
+
+  it('带出 messageCount / blockCount（一条 JOIN 聚合，避免 N+1）', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 80 }], []]);
+    pool.query.mockResolvedValueOnce([logRows, []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.listParentChatLogs(9, {}, 20, 0);
+
+    expect(result.total).toBe(80);
+    expect(result.items[0]).toMatchObject({
+      id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值',
+      subjectId: null, messageCount: 8, blockCount: 2,
+    });
+    const listSql = pool.query.mock.calls[0][0] as string;
+    expect(listSql).toContain('SUM(m.safety_flag = 1)');
+    expect(listSql).toContain('m.deleted_at IS NULL');
+    expect(listSql).toContain('d.deleted_at IS NULL');
+    expect(listSql).toContain('ORDER BY d.updated_at DESC');
+  });
+
+  it('筛选下推：轨道 / 场景 / 时间窗（按 updated_at）/ 标题关键词', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.listParentChatLogs(
+      9,
+      { track: 'auxiliary', scene: 'aux_qna', from: '2026-09-01', to: '2026-09-18', q: '函数' },
+      20,
+      0,
+    );
+
+    const countSql = pool.execute.mock.calls[0][0] as string;
+    expect(countSql).toContain('d.track = ?');
+    expect(countSql).toContain('d.scene = ?');
+    expect(countSql).toContain('d.updated_at >= ?');
+    expect(countSql).toContain('d.updated_at < DATE_ADD(?, INTERVAL 1 DAY)');
+    expect(countSql).toContain('d.title LIKE ?');
+    expect(pool.execute.mock.calls[0][1]).toEqual([
+      9, 'auxiliary', 'aux_qna', '2026-09-01', '2026-09-18', '%函数%',
+    ]);
+  });
+
+  it('关键词里的 % 与 _ 被转义，不当作通配符', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.listParentChatLogs(9, { q: '50%_x' }, 20, 0);
+
+    expect(pool.execute.mock.calls[0][1]).toEqual([9, '%50\\%\\_x%']);
+  });
+});
