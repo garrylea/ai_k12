@@ -1975,3 +1975,244 @@ export function saveParentPointsSettings(
     body: JSON.stringify(patch),
   });
 }
+
+// --- Parent: 学情可见性（仪表盘/报告/错题/对话回放） ---
+// 形状与后端 `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts` 一一对应；
+// `Date` 经 JSON 变成 ISO 字符串。
+
+export interface ParentRateSummary {
+  answered: number;
+  correct: number;
+  /** 未作答时是 null（不是 0）——「暂无数据」与「全错」是两回事。 */
+  rate: number | null;
+}
+
+export interface ParentDashboardSubject {
+  subjectId: number;
+  subjectName: string;
+  progress: {
+    completedUnits: number;
+    totalUnits: number;
+    currentUnitName: string | null;
+    currentLessonName: string | null;
+    percent: number;
+  };
+  accuracy: ParentRateSummary;
+  selfAssessed: { count: number; correctCount: number };
+  errorBook: { uncleared: number; total: number };
+  examCount: number;
+}
+
+export interface ParentDashboardStudent {
+  studentId: number;
+  name: string;
+  grade: string | null;
+  schoolLevel: string | null;
+  lastActiveAt: string | null;
+  /** 近 7 天有记录的天数（「学习时长」的代理指标）。 */
+  activeDays7: number;
+  /** 本期恒 0：`safety_alerts` 尚无写入。 */
+  unreadAlerts: number;
+  subjects: ParentDashboardSubject[];
+}
+
+export interface ParentDashboard {
+  students: ParentDashboardStudent[];
+  unreadAlerts: number;
+}
+
+export function getParentDashboard(): Promise<ParentDashboard> {
+  return fetchApi<ParentDashboard>('/parent/dashboard');
+}
+
+export type ParentReportPeriod = 'weekly' | 'monthly';
+
+export interface ParentTrendPoint {
+  date: string;
+  answered: number;
+  correct: number;
+  rate: number | null;
+}
+
+export interface ParentReportStats {
+  activeDays: number;
+  answered: number;
+  correct: number;
+  rate: number | null;
+  selfAssessCount: number;
+  errorsAdded: number;
+  errorsCleared: number;
+  examCount: number;
+}
+
+export interface ParentReportSubjectRow {
+  subjectId: number;
+  subjectName: string;
+  answered: number;
+  correct: number;
+  rate: number | null;
+}
+
+export interface ParentWeakPoint {
+  knowledgePointId: number;
+  name: string;
+  unclearedCount: number;
+  totalWrongCount: number;
+}
+
+export interface ParentExamRecord {
+  sessionId: number;
+  paperTitle: string;
+  subjectName: string;
+  submittedAt: string;
+  correctCount: number;
+  objectiveCount: number;
+  rate: number | null;
+}
+
+export interface ParentLearningReport {
+  studentId: number;
+  period: ParentReportPeriod;
+  windowStart: string;
+  windowEnd: string;
+  stats: ParentReportStats;
+  trend: ParentTrendPoint[];
+  subjects: ParentReportSubjectRow[];
+  weakPoints: ParentWeakPoint[];
+  /** 未清零错题里映射不到知识点的条数——UI 必须显式提示口径。 */
+  weakPointsUncoveredCount: number;
+  exams: ParentExamRecord[];
+}
+
+export function getParentReport(
+  studentId: number,
+  period: ParentReportPeriod,
+): Promise<ParentLearningReport> {
+  const qs = new URLSearchParams();
+  qs.set('period', period);
+  return fetchApi<ParentLearningReport>(`/parent/students/${studentId}/reports?${qs.toString()}`);
+}
+
+export interface ParentErrorQuestion {
+  content: string;
+  type: string;
+  difficulty: number | null;
+  knowledgePoints: Array<{ id: number; name: string }>;
+}
+
+export interface ParentErrorItem {
+  id: number;
+  questionId: number | null;
+  track: 'main' | 'aux';
+  source: string;
+  level: number;
+  isCleared: boolean;
+  wrongAnswerText: string | null;
+  createdAt: string;
+  clearedAt: string | null;
+  /** `questionId` 为 null 时整个为 null，此时只能展示 `wrongAnswerText`。 */
+  question: ParentErrorQuestion | null;
+}
+
+export interface ParentErrorPage {
+  items: ParentErrorItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface ParentErrorListParams {
+  studentId: number;
+  subject?: number;
+  source?: string;
+  track?: 'main' | 'aux';
+  cleared?: 'uncleared' | 'cleared' | 'all';
+  from?: string;
+  to?: string;
+  /** 从 1 起；不传则后端取 1。`pageSize` 服务端固定 20，前端**不传**。 */
+  page?: number;
+}
+
+export function getParentErrors(params: ParentErrorListParams): Promise<ParentErrorPage> {
+  const qs = new URLSearchParams();
+  if (params.subject !== undefined) qs.set('subject', String(params.subject));
+  if (params.source) qs.set('source', params.source);
+  if (params.track) qs.set('track', params.track);
+  if (params.cleared) qs.set('cleared', params.cleared);
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  if (params.page) qs.set('page', String(params.page));
+  const query = qs.toString();
+  return fetchApi<ParentErrorPage>(
+    `/parent/students/${params.studentId}/errors${query ? `?${query}` : ''}`,
+  );
+}
+
+export interface ParentChatLogItem {
+  id: number;
+  track: string;
+  scene: string;
+  title: string | null;
+  subjectId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  /** 该会话里 `safety_flag = 1` 的消息数（闲聊/偏离学习）→ UI 打红色标记。 */
+  blockCount: number;
+}
+
+export interface ParentChatLogMessage {
+  id: number;
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  reasoning: string | null;
+  type: string | null;
+  model: string | null;
+  safetyFlag: number;
+  createdAt: string;
+}
+
+export interface ParentChatLogDetail extends ParentChatLogItem {
+  messages: ParentChatLogMessage[];
+}
+
+export interface ParentChatLogPage {
+  items: ParentChatLogItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface ParentChatLogListParams {
+  studentId: number;
+  track?: 'mainline' | 'auxiliary';
+  scene?: string;
+  from?: string;
+  to?: string;
+  /** 只搜会话标题（不搜消息正文）。 */
+  q?: string;
+  page?: number;
+}
+
+export function getParentChatLogs(params: ParentChatLogListParams): Promise<ParentChatLogPage> {
+  const qs = new URLSearchParams();
+  if (params.track) qs.set('track', params.track);
+  if (params.scene) qs.set('scene', params.scene);
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  if (params.q) qs.set('q', params.q);
+  if (params.page) qs.set('page', String(params.page));
+  const query = qs.toString();
+  return fetchApi<ParentChatLogPage>(
+    `/parent/students/${params.studentId}/chat-logs${query ? `?${query}` : ''}`,
+  );
+}
+
+export function getParentChatLogDetail(
+  studentId: number,
+  dialogueId: number,
+): Promise<ParentChatLogDetail> {
+  return fetchApi<ParentChatLogDetail>(
+    `/parent/students/${studentId}/chat-logs/${dialogueId}`,
+  );
+}

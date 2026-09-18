@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   getMyPoints,
+  getParentChatLogDetail,
+  getParentChatLogs,
+  getParentDashboard,
+  getParentErrors,
   getParentPointLedger,
+  getParentReport,
   redeemParentPoints,
   saveParentPointRules,
   setRedemptionStatus,
@@ -122,5 +127,64 @@ describe('家长端积分/奖励/兑换 API', () => {
 
     await getParentPointLedger(7, 2, 50);
     expect(requestUrl(f, 1)).toBe('/api/parent/students/7/points/ledger?page=2&pageSize=50');
+  });
+});
+
+/**
+ * 复用本文件既有的 `stubFetch(status, body)`——它包的信封就是 `fetchApi` 解析的
+ * `{code, message, data}`，再定义第二个同名 helper 会直接编译不过。
+ */
+function stubData(data: unknown) {
+  return stubFetch(200, { code: 0, message: 'ok', data });
+}
+
+describe('家长端学情端点：路径与 query', () => {
+  it('getParentDashboard → GET /api/parent/dashboard', async () => {
+    const fetchMock = stubData({ students: [], unreadAlerts: 0 });
+
+    await getParentDashboard();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/parent/dashboard');
+    expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined(); // GET 不写 method
+  });
+
+  it('getParentReport → 路径 + period query', async () => {
+    const fetchMock = stubData({});
+
+    await getParentReport(11, 'monthly');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/parent/students/11/reports?period=monthly');
+  });
+
+  it('getParentErrors → 只拼有值的 query，page 省略时也不出现', async () => {
+    const fetchMock = stubData({ items: [], page: 1, pageSize: 20, total: 0 });
+
+    await getParentErrors({ studentId: 11, track: 'main', cleared: 'uncleared' });
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url.startsWith('/api/parent/students/11/errors?')).toBe(true);
+    expect(url).toContain('track=main');
+    expect(url).toContain('cleared=uncleared');
+    expect(url).not.toContain('page=');
+    expect(url).not.toContain('undefined');
+    expect(url).not.toContain('null');
+  });
+
+  it('getParentChatLogs → q 走 URL 编码（中文与空格不能裸拼）', async () => {
+    const fetchMock = stubData({ items: [], page: 1, pageSize: 20, total: 0 });
+
+    await getParentChatLogs({ studentId: 11, q: '二次 函数', page: 2 });
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('q=%E4%BA%8C%E6%AC%A1+%E5%87%BD%E6%95%B0');
+    expect(url).toContain('page=2');
+  });
+
+  it('getParentChatLogDetail → 两级路径', async () => {
+    const fetchMock = stubData({});
+
+    await getParentChatLogDetail(11, 55);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/parent/students/11/chat-logs/55');
   });
 });
