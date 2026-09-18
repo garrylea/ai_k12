@@ -23,7 +23,7 @@ const getRulesMock = vi.mocked(getMyPointRules);
 function tier(
   over: Pick<PointRuleTier, 'tierKey' | 'tierLabel' | 'points'> & Partial<PointRuleTier>,
 ): PointRuleTier {
-  return { dailyLimit: null, completedToday: null, remainingToday: null, ...over };
+  return { dailyLimit: null, completedToday: null, remainingToday: null, isActive: true, ...over };
 }
 
 /** 别的任务排在前面：确保是按 taskCode 挑，而不是拿 tasks[0]。 */

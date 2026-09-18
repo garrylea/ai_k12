@@ -1681,6 +1681,11 @@ export interface PointRuleTier {
   /** 今日还剩几次；dailyLimit == null（不限）时为 null。
    *  注意 === 0 时**仍可开练**，只是不发分——别拦着孩子练（计划 §3 Task 6）。 */
   remainingToday: number | null;
+  /** 该档是否已启用。
+   *  **学生端 `GET /points/me/rules` 恒为 `true`**（controller 把下架档过滤掉了，
+   *  `points.controller.ts:71`）；**家长端 `.../points/rules` 才可能为 `false`**
+   *  （要显示下架档并支持重新启用，计划 §1.1#1）。 */
+  isActive: boolean;
 }
 
 export interface PointRuleTask {
@@ -1850,7 +1855,7 @@ export interface RedeemResult {
 export interface PointsSettings {
   /** 多少积分兑 1 元 */
   pointsPerYuan: number;
-  /** 关闭后 `POST .../points/redeem` 一律拒（3003） */
+  /** 关闭后 `POST .../points/redeem` 一律拒（3004 兑换已关闭；3003 是「奖励已下架」，见 plan §2.8） */
   rewardRedemptionEnabled: boolean;
 }
 

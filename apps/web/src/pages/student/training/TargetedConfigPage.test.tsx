@@ -46,7 +46,7 @@ const KPS: TrainingKnowledgePoint[] = [
 function tier(
   over: Pick<PointRuleTier, 'tierKey' | 'tierLabel' | 'points'> & Partial<PointRuleTier>,
 ): PointRuleTier {
-  return { dailyLimit: null, completedToday: null, remainingToday: null, ...over };
+  return { dailyLimit: null, completedToday: null, remainingToday: null, isActive: true, ...over };
 }
 
 const MATH_TIERS: PointRuleTier[] = [
