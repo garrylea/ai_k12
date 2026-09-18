@@ -275,24 +275,61 @@ interface UserBadgeProps {
 
 ### Task 7: 训练 run 页接发分反馈
 
+> **⚠️ 实施中发现的前置缺口（2026-09-18 补，实做前必读）**
+>
+> 计划一已让两个 `start` 端点返回 `sessionId`（`training.controller.ts:143`、`vocabulary.controller.ts`），但前端**把它丢了**：
+> - `api.ts` 的 `startTargetedPractice` / `startVocabulary` 返回类型里**没有** `sessionId`（分别是 `{questions}` 与 `{questions, poolSize}`）；
+> - `TargetedConfigPage.tsx:220` 只把 `res.questions` 存进 `sessionStorage`，`sessionId` 从未带到 run 页。
+>
+> 而 `completeTrainingSession(sessionId)` 是乙类唯一的发分入口 → **不补这条交接链，Task 7 做不出来**。所以文件范围必须加上 `api.ts` 与两个配置页。
+>
+> 另外两处**前端类型缺字段**（后端已实现并有测试，见 openapi）：甲类判题响应的 `pointsAwarded` / `awardReason` 没进 `JudgeResult` / `DictationJudgeResult` / `InterpretationJudgeResult` / `MeaningJudgeResult`；`ExamSummary` 没有 `points`；`PointsAwardReason` 少了 `not_cleared`（openapi 枚举是 `daily_limit / no_rule / tier_inactive / genre_unset / not_cleared`）。
+>
+> **`sessionId` 可能是 `null`**（计划一 Task 12：会话 INSERT 未包住、DB 故障降级 `sessionId: null`）→ run 页必须处理：跳过 `complete`、**不弹任何积分反馈**，也不报错（学习流程照走）。
+>
+> 因此本任务拆成三个子任务执行：**7a** 契约补齐 + 共享反馈模块；**7b** 两个会话页（含交接链）；**7c** 甲类四页 + 交卷页。
+
+**7a · 契约补齐 + 共享反馈模块**
+
+- `api.ts`：两个 start 结果加 `sessionId: number | null`；四个判题结果加 `pointsAwarded: number` + `awardReason?: PointsAwardReason`；`ExamSummary` 加 `points?: { awarded; balance; levelUp }`；`PointsAwardReason` 补 `not_cleared`。
+- 新建共享反馈模块（放 `pages/student/training/` 下，与 Task 6 抽出的 `point-tiers.ts` 同层），**6 个页面共用一份**决策逻辑，避免把「什么该弹、什么该静默」抄六遍：
+  - 入参：`{ pointsAwarded, awardReason?, levelUp?, title }`；
+  - `pointsAwarded > 0 && levelUp` → 全屏 `CelebrationOverlay variant="levelup"`（段位名照 Task 3 的做法用 `getMyPoints()` 取，失败降级不带名）；
+  - `pointsAwarded > 0` → `PointsToast`；
+  - `pointsAwarded === 0 && awardReason === 'daily_limit'` → `PointsToast`（文案「今日该任务积分已达上限」）；
+  - **其余一律静默**（`not_cleared` / `no_rule` / `tier_inactive` / `genre_unset` / 无 reason 的幂等命中）——Task 2 的 `PointsToast` 对 `points <= 0` 会渲染「已达上限」，所以**必须在这里按 reason 拦掉**，否则会弹假文案（计划 §1.1#4）。
+  - `awardReason === 'award_failed'` → **不是**反馈模块的活，交回调用方（见 7b）。
+
+**7b · 两个会话页**
+
 **Files**
-- Modify: `apps/web/src/pages/student/training/TargetedRunPage.tsx`（完时调 `completeTrainingSession`）
-- Modify: `apps/web/src/pages/student/training/english/VocabularyRunPage.tsx`（同上）
-- Modify: `apps/web/src/pages/student/training/ExamResultPage.tsx`（交卷响应里的 `points` → **全屏庆祝**）
-- Modify: `apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx`（读判题响应的 `pointsAwarded` → 轻反馈）
-- Modify: `apps/web/src/pages/student/training/chinese/{Dictation,Interpretation,Meaning}RunPage.tsx`（同上）
-- 各页测试
+- Modify: `apps/web/src/services/api.ts`、两个配置页（交接 `sessionId`）
+- Modify: `apps/web/src/pages/student/training/TargetedRunPage.tsx`、`english/VocabularyRunPage.tsx`
+- Modify: 各页测试
 
 **要点**
 - **只有数学专项与背单词走会话**（调 `completeTrainingSession(sessionId)`）；其余四项**不调完成接口**，判题响应里已带 `pointsAwarded`。
+- `sessionStorage` 交接从「只存 questions」改成存 `{ sessionId, questions }`（两个配置页与两个 run 页一起改，不要留两套格式兼容）。
 - `complete` 返回 `balance === null`（`award_failed`）时：**不更新本地积分、不弹负反馈**，提示「积分稍后到账，可重试」，并允许再点一次完成（服务端会补发）。
-- `levelUp` 非空 → 全屏 `CelebrationOverlay variant="levelup"`；否则 `PointsToast`。
-- 交卷（`ExamResultPage`）走全屏庆祝（大任务），分数与积分都要显示。
-- **`pointsAwarded === 0` 且 `awardReason === 'daily_limit'`** → 轻反馈文案「今日该任务积分已达上限」，中性色。
+- `sessionId == null` → 不发分、不反馈、不报错。
+- `levelUp` 非空 → 全屏 `CelebrationOverlay variant="levelup"`；否则 `PointsToast`；`awarded === 0` 且 `reason === 'daily_limit'` → 轻反馈文案「今日该任务积分已达上限」，中性色。
 
-**测试**：每页至少一条——拿到 `pointsAwarded` 时 `pointsStore.push` 被调用且参数正确；`levelUp` 时走全屏而没有轻反馈；`balance === null` 时不污染本地积分且有重试提示。
+**7c · 甲类四页 + 交卷页**
 
-**提交**：`feat(web): 训练各页接发分反馈与升级庆祝`
+**Files**
+- Modify: `apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx`（读判题响应的 `pointsAwarded`）
+- Modify: `apps/web/src/pages/student/training/chinese/{Dictation,Interpretation,Meaning}RunPage.tsx`（同上）
+- Modify: `apps/web/src/pages/student/training/ExamResultPage.tsx`（交卷响应里的 `points` → **全屏庆祝**，分数与积分都要显示）
+- Modify: 各页测试
+
+**要点**
+- 甲类四页只读判题响应里的 `pointsAwarded` / `awardReason`，**不调完成接口**。
+- 交卷（`ExamResultPage`）走全屏庆祝（大任务）。注意 `submitExamSession` 的 `points` 是**可选**字段，且交卷是幂等的（重复交卷可能没有 `points`）→ 没有 `points` 时不要弹任何积分反馈，也不要报错。
+- 逐句判题的页面（解释/含义）只有最后一句才可能非 0，中间句 `pointsAwarded === 0` 且无 reason → 必须静默。
+
+**测试**：每页至少一条——拿到 `pointsAwarded` 时 `pointsStore.push` 被调用且参数正确；`levelUp` 时走全屏而没有轻反馈；`balance === null` 时不污染本地积分且有重试提示；`pointsAwarded === 0` + 无 reason（幂等）时**不 push**。
+
+**提交**（三条）：`feat(web): 积分反馈契约与共享决策模块` / `feat(web): 会话页接发分与重试` / `feat(web): 甲类判题页与交卷页接发分反馈`
 
 ---
 
