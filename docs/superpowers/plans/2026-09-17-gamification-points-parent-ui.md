@@ -246,6 +246,8 @@ interface StudentSwitcherProps { className?: string }
 
 ### 2.8 错误码 → UI 文案与动作（**唯一映射表**，各 Tab 共用）
 
+> ⚠️ **实施中发现的一处注释错误（Task 5 顺手修）**：`api.ts` 里 `rewardRedemptionEnabled` 的注释把「关掉开关」写成拒 **3003**，实际 **3003 = 奖励已下架**、**3004 = 兑换已关闭**（`redemption.service.ts:227` / `:200`）。下表才是权威；照错注释写会把「兑换已关闭」显示成「奖励已下架」。
+
 | HTTP / code | 触发 | 展示 |
 |---|---|---|
 | 400 / `1001` | Zod 入参（points 越界、`dailyLimit:0`、空 patch settings、空 rules、非法 status） | `toast('error', err.message)`；表单类错误同时标红对应字段 |
@@ -352,6 +354,24 @@ export function saveParentPointsSettings(studentId: number, patch: Partial<Point
 - `redeemParentPoints` 的 `type:'cash'` body 是 `{type,points}`、`type:'reward'` 是 `{type,catalogId}`（判别联合不串味）。
 
 **提交**：`feat(web): api 家长端积分/奖励/兑换函数`
+
+---
+
+### Task 3.5: 给 `PointRuleTier` 补 `isActive`（**Task 5 的前置，实施中发现**）
+
+> **为什么必需**：Task 5 必须**显示已下架档位**并提供「重新启用」（§1.1 第 1 条，计划一 Task 7 审查点名过）。但前端的 `PointRuleTier`（计划二 Task 2 定义）**没有声明 `isActive`**——因为学生端 controller 把下架档过滤掉了（`points.controller.ts:71`），只有家长端才回全量。wire 上该字段两端都真实存在（后端 `PointRuleTierView`）。
+>
+> 若不补：Task 5 只有两条坏路——(a) 自己造一个「家长端 tier 类型」→ 一份 wire 形状两个类型，必然漂移；(b) 用 `!tier.isActive` 判断 → 字段是 `undefined` 时**恒为真**，会把**所有档位**当成已下架（这正是 §1.1 第 1 条要防的错）。所以字段必须**必填**（服务器总会下发），学生端测试 fixture 机械补上即可。
+
+**Files**
+- Modify: `apps/web/src/services/api.ts`（`PointRuleTier` 加 `isActive: boolean`，注释写明「学生端 `me/rules` 恒为 `true`；家长端才可能是 `false`」）
+- Modify: 三处 fixture —— `pages/student/training/point-tiers.test.ts`、`TargetedConfigPage.test.tsx`、`english/VocabularyConfigPage.test.tsx`（各补 `isActive: true`）
+
+**要点**：**纯类型 + fixture 补齐**，不改任何运行时逻辑；学生端代码**不读** `isActive`（已核实 grep 无命中），所以行为不变。
+
+**验收**：`npm test` 全绿（fixture 漏补会被 `tsc -b` 挡下）+ `npm run build` + `npm run lint` 无新增。
+
+**提交**：`fix(web): PointRuleTier 补 isActive（家长端要显示下架档位）`
 
 ---
 
