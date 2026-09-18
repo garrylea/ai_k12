@@ -466,3 +466,6 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 6. **关键词只搜会话标题**，搜不到消息正文里的关键词。
 7. `weakPoints` 依赖 `question_knowledge_points`，其绑定目前完全靠 DB migration 灌入（`QuestionsRepository.bindKnowledgePoint` 无调用方）。
 8. 列表分页为**页码式**（非游标）、`pageSize` 固定 20，数据量大时深分页会慢；本期家庭级数据量下无影响。
+9. **日期分桶依赖服务器时区**：`DATE(judged_at)` 的分桶（`trend`）与时间窗边界（`window.util`）都按**服务器本地时区**算——`database/connection.ts` 既没设 `dateStrings` 也没设 `timezone`。部署到 UTC 容器时，UTC+8 用户晚间 20:00 之后的作答会被分到「前一天」。本期**不做**用户级时区处理；投产前必须确认服务器时区 = 用户时区（Asia/Shanghai）。同类坑：mysql2 把 `DATE(...)` 返回为**本地零点**的 `Date`，把它 `toISOString()` 会跨时区差一天——仓储侧已改用本地字段拼 `YYYY-MM-DD`。
+10. **「新进错题本」≠「本周答错的题」**：`errorsAdded` 数的是窗口内 `main_error_books.created_at`，而错题重做再次做错只走 `bumpLevels` 更新原行、不新增行。文案已按此改为「新进错题本」。
+11. **薄弱点数不可当覆盖率**：一个题可绑多个知识点（`question_knowledge_points` 的 UNIQUE 是「题×KP」），所以 `sum(unclearedCount)` 会大于「未清零错题总数」，**不能**用它与 `weakPointsUncoveredCount` 推覆盖率或「已覆盖」数。
