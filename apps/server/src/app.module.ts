@@ -19,6 +19,7 @@ import { AdminModule } from './modules/admin/admin.module.js';
 import { TrainingModule } from './modules/training/training.module.js';
 import { ExamsModule } from './modules/exams/exams.module.js';
 import { PointsModule } from './modules/points/points.module.js';
+import { ParentInsightsModule } from './modules/parent-insights/parent-insights.module.js';
 
 @Module({
   imports: [
@@ -40,6 +41,8 @@ import { PointsModule } from './modules/points/points.module.js';
     AdminModule,
     // 闯关积分与段位（2026-09-17）——学生端查询端点；ParentPointsController 见 Task 8
     PointsModule,
+    // 家长端「看得见」批（2026-09-18）——仪表盘/学情报告/错题查看/AI 对话回放（纯只读）
+    ParentInsightsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
