@@ -238,7 +238,12 @@ interface StudentSwitcherProps { className?: string }
 
 - 列表分页（`page`，`pageSize` 固定 20，服务端返回 `total`）。列：时间 / 类型（换钱 / 换奖励）/ 内容（`cashAmount` → `¥X.XX`；`reward` → `rewardName`）/ 扣除积分（**负数样式**，但用中性色**不**用红色——它不是错误）/ 状态。
 - **兑现队列**（UX P6.7「物质奖励兑现队列」的落地）：
-  - 顶部一个「待兑现 N 条」的筛选 chip（默认显示全部；点一下只看 `pending`）。
+  - 顶部一个「**本页**待兑现 N 条」的筛选 chip（默认显示全部；点一下只看 `pending`）。
+    **N 只统计当前页**：后端 `GET .../redemptions` 只回分页 `items`，既没有 `totalPending`
+    也没有 status 过滤参数，本期**不做后端改造**。因此文案显式限定「本页」，并且
+    `page < totalPages` 时在 chip 旁注「翻页可看到更多」，避免家长把本页数当成全量、
+    清完第 1 页就误判队列已空（第 2 页的待兑现被漏掉）。全局待兑现数需后续后端补
+    `totalPending` 或 status 过滤（列为后续项）。数据未到货（加载/错误）时 chip 不渲染。
   - 每条 `pending` 行有「确认已兑现」按钮 → `PATCH /api/parent/redemptions/:id` `{status:'fulfilled'}` → 成功 `toast` + 重拉当前页。**不动积分**（服务端保证）。
   - `fulfilled` 行显示 `fulfilledAt` + 「已兑现」；提供「改回待兑现」的次要按钮（服务端允许 `pending ⇄ fulfilled`）。
 - 空态：「暂无兑换记录」+ 一个跳「兑换」Tab 的链接。
@@ -471,8 +476,8 @@ export function saveParentPointsSettings(studentId: number, patch: Partial<Point
 **要点**：见 §2.7。
 
 **测试**
-- 渲染记录：`cash` 行显示 `¥X.XX`；`reward` 行显示 `rewardName`；扣分用中性色（断言不出现 `--error`）。
-- 「待兑现 N 条」chip 存在且计数正确；点了之后只显示 `pending`。
+- 渲染记录：`cash` 行显示 `¥X.XX`；`reward` 行显示 `rewardName`；扣分用中性色（**正向断言** `--text-secondary` token，不是只断言「不含 `--error`」）。
+- 「本页待兑现 N 条」chip 存在且计数正确；点了之后只显示 `pending`；`page < totalPages` 时 chip 旁注「翻页可看到更多」，数据未到货时 chip 不渲染。
 - 「确认已兑现」→ `setRedemptionStatus(id, 'fulfilled')` 被调 + 重拉当前页。
 - `fulfilled` 行有「改回待兑现」→ 调 `'pending'`。
 - 空态文案 + 跳「兑换」Tab 的链接。

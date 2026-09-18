@@ -20,11 +20,13 @@ import {
  *    回显的 `page + 1` 推，`total` 只用来判断「还有没有下一页」。渲染一致性用
  *    「数据自报家门」：响应体里的 `page` 与当前页对不上就不渲染（等同还没到货），
  *    翻页时因此自然退回骨架，不会让页码与新页内容错配。
- * 2. **兑现队列**（UX P6.7）：顶部「待兑现 N 条」chip 默认显示全部，点一下只看
+ * 2. **兑现队列**（UX P6.7）：顶部「**本页**待兑现 N 条」chip 默认显示全部，点一下只看
  *    `pending`；`pending` 行「确认已兑现」、`fulfilled` 行「改回待兑现」，都只
  *    `PATCH` 状态、**不动积分**（服务端保证）。成功后重拉当前页。
- *    `N` 是**当前页**的 pending 条数——后端只回分页 items，没有 pending 总数端点；
- *    若要全量计数得新增接口（本期不做），这里如实按本页算。
+ *    `N` 是**当前页**的 pending 条数——后端只回分页 items，既没有 `totalPending`
+ *    也没有 status 过滤（本期不做后端改造）。文案因此**显式限定「本页」**，多页时
+ *    旁注「翻页可看到更多」，不让数字默默低报；全局待兑现数需后续后端补端点。
+ *    `list` 未到货（加载/错误）时 **chip 不渲染**——兜底 0 会瞬时误导成「队列已空」。
  * 3. **扣除积分是负数但用中性色**：它是消费，不是错误——**绝不用 `--error`**
  *    （与个人中心流水行的口径一致）。
  * 4. **与 Task 7 的刷新缝**：页面在兑换成功后自增 `refreshToken` 传进来，本组件据此
@@ -56,6 +58,15 @@ function contentOf(item: RedemptionView): string {
     return `¥${(item.cashAmount ?? 0).toFixed(2)}`;
   }
   return item.rewardName ?? '奖励';
+}
+
+/**
+ * 已兑现行的文案：`fulfilledAt` 为 null / 脏值（解析不出日期）时用「—」补位，
+ * 否则 `已兑现 ${''}` 会渲染成带尾随空格的半个句子。
+ */
+function fulfilledText(item: RedemptionView): string {
+  const at = item.fulfilledAt ? formatDateTime(item.fulfilledAt) : '';
+  return at ? `已兑现 ${at}` : '已兑现 —';
 }
 
 export default function RedemptionHistoryPanel({
@@ -124,20 +135,34 @@ export default function RedemptionHistoryPanel({
     <Card data-testid="redemption-history" data-student-id={studentId} className="p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-bold text-[var(--text-primary)]">兑换记录</h2>
-        <button
-          type="button"
-          data-testid="redemption-pending-chip"
-          aria-pressed={pendingOnly}
-          onClick={() => setPendingOnly((v) => !v)}
-          className={clsx(
-            'rounded-[var(--radius-pill)] border px-3 py-1 text-xs font-medium transition-colors',
-            pendingOnly
-              ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--brand-600)]'
-              : 'border-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)]',
-          )}
-        >
-          {`待兑现 ${pendingCount} 条`}
-        </button>
+        {/* 数据未到货（加载/错误）时不渲染 chip：兜底 0 会让家长以为队列已空 */}
+        {list && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="redemption-pending-chip"
+              aria-pressed={pendingOnly}
+              onClick={() => setPendingOnly((v) => !v)}
+              className={clsx(
+                'rounded-[var(--radius-pill)] border px-3 py-1 text-xs font-medium transition-colors',
+                pendingOnly
+                  ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--brand-600)]'
+                  : 'border-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)]',
+              )}
+            >
+              {`本页待兑现 ${pendingCount} 条`}
+            </button>
+            {/* 只数本页就必须说清楚：还有下一页时点明"翻页可看到更多"，不让数字低报 */}
+            {list.page < totalPages && (
+              <span
+                data-testid="redemption-pending-hint"
+                className="text-xs text-[var(--text-tertiary)]"
+              >
+                翻页可看到更多
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {failed ? (
@@ -209,8 +234,11 @@ export default function RedemptionHistoryPanel({
                   </>
                 ) : (
                   <>
-                    <span className="text-xs text-[var(--text-tertiary)]">
-                      {`已兑现 ${item.fulfilledAt ? formatDateTime(item.fulfilledAt) : ''}`}
+                    <span
+                      data-testid={`redemption-fulfilled-${item.id}`}
+                      className="text-xs text-[var(--text-tertiary)]"
+                    >
+                      {fulfilledText(item)}
                     </span>
                     <Button
                       data-testid={`redemption-revert-${item.id}`}

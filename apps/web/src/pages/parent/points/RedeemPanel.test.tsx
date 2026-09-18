@@ -569,3 +569,33 @@ describe('RedeemPanel：兑换设置耦合（开关关闭 → 表单置灰）', 
     expect(getSettingsMock).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * 首次加载失败 = 致命路径（审查 #1）。本轮为「后台刷新失败不翻错误态」加了
+ * `loadedStudentIdRef.current === studentId` 守卫；若有人把它过度修正成
+ * 「catch 一律置 stale 并 return」，首次加载失败会**永远停在骨架**：既没有错误卡，
+ * 也没有重试按钮（`:183-189` 那条骨架分支永不退出）。下面这条用例就是挡这个方向的钉子，
+ * 断言的是「必须进入错误态」，而不是侧面猜实现。
+ */
+describe('RedeemPanel：首次加载失败必须进错误态（可重试）', () => {
+  it('首次加载 reject → 出现 redeem-error（不是骨架/非致命提示）；点「重试」恢复成表单', async () => {
+    // 首次加载整批 reject（余额/清单/段位表一起挂，模拟网络断）
+    getPointsMock.mockRejectedValueOnce(new Error('first load boom'));
+    getCatalogMock.mockRejectedValueOnce(new Error('first load boom'));
+    getLevelsMock.mockRejectedValueOnce(new Error('first load boom'));
+
+    render(<RedeemPanel studentId={1} />);
+
+    expect(await screen.findByTestId('redeem-error')).toBeInTheDocument();
+    // 不能停在骨架（用户不可操作、看不到任何原因）
+    expect(screen.queryByTestId('redeem-skeleton')).not.toBeInTheDocument();
+    // 也不能被误判成「有可用旧数据」的非致命提示
+    expect(screen.queryByTestId('redeem-stale')).not.toBeInTheDocument();
+
+    // 重试：mock 已恢复默认成功值 → 回到表单
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+
+    await screen.findByTestId('redeem-form');
+    expect(screen.queryByTestId('redeem-error')).not.toBeInTheDocument();
+  });
+});

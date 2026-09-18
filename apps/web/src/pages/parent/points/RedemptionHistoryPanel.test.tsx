@@ -17,7 +17,8 @@ import {
  * 钉住的契约：
  * 1. 内容列按类型分流：`cash` → `¥X.XX`，`reward` → `rewardName`；
  * 2. 扣除积分是**负数但中性色**——它是消费不是错误，绝不用 `--error`；
- * 3. 「待兑现 N 条」筛选 chip（默认显示全部，点一下只看 `pending`）；
+ * 3. 「本页待兑现 N 条」筛选 chip（默认显示全部，点一下只看 `pending`；多页时旁注
+ *    「翻页可看到更多」——N 只数当前页，文案必须显式限定，不让数字默默低报）；
  * 4. `pending` 行「确认已兑现」→ `PATCH {status:'fulfilled'}` + 重拉当前页；
  * 5. `fulfilled` 行显示 `fulfilledAt` 且可「改回待兑现」→ `{status:'pending'}`；
  * 6. 空态文案 + 跳「兑换」Tab 的链接；
@@ -123,10 +124,11 @@ describe('RedemptionHistoryPanel：列表渲染', () => {
     expect(screen.getByTestId('redemption-content-1')).toHaveTextContent('¥5.00');
     expect(screen.getByTestId('redemption-content-2')).toHaveTextContent('周末看电影');
 
-    // 扣分用负数表达，且**不是错误色**
+    // 扣分用负数表达，且**不是错误色**。正向断言中性色 token：
+    // `not.toContain('--error')` 挡不住 `text-red-500` 或内联红，钉不住「消费≠错误」这个意图。
     const spent = screen.getByTestId('redemption-points-1');
     expect(spent).toHaveTextContent('-100 分');
-    expect(spent.className).not.toContain('--error');
+    expect(spent.className).toContain('text-[var(--text-secondary)]');
 
     // 类型标签与时间列
     expect(screen.getByTestId('redemption-row-1')).toHaveTextContent('换钱');
@@ -140,18 +142,36 @@ describe('RedemptionHistoryPanel：列表渲染', () => {
 
     const row = screen.getByTestId('redemption-row-2');
     expect(row).toHaveTextContent('已兑现');
-    expect(row).toHaveTextContent(fmt(REWARD_FULFILLED.fulfilledAt as string));
+    expect(screen.getByTestId('redemption-fulfilled-2')).toHaveTextContent(
+      `已兑现 ${fmt(REWARD_FULFILLED.fulfilledAt as string)}`,
+    );
     expect(screen.getByTestId('redemption-revert-2')).toBeInTheDocument();
+  });
+
+  /**
+   * 脏数据：`fulfilledAt` 为 null（或解析不出日期）时不能渲染成「已兑现 」——
+   * 那是个带尾随空格的半个句子。用 `textContent` 精确断言，普通 `toHaveTextContent`
+   * 会归一化空白，抓不到尾随空格。
+   */
+  it('fulfilledAt 为 null → 显示「已兑现 —」，不留半个空句子', async () => {
+    getRedemptionsMock.mockResolvedValue(
+      page({ items: [{ ...CASH_PENDING, status: 'fulfilled', fulfilledAt: null }] }),
+    );
+
+    renderPanel();
+    await ready();
+
+    expect(screen.getByTestId('redemption-fulfilled-1').textContent).toBe('已兑现 —');
   });
 });
 
 describe('RedemptionHistoryPanel：兑现队列筛选', () => {
-  it('「待兑现 1 条」chip 计数正确；点一下只看 pending', async () => {
+  it('「本页待兑现 1 条」chip 计数正确；点一下只看 pending', async () => {
     renderPanel();
     await ready();
 
     const chip = screen.getByTestId('redemption-pending-chip');
-    expect(chip).toHaveTextContent('待兑现 1 条');
+    expect(chip).toHaveTextContent('本页待兑现 1 条');
     expect(chip).toHaveAttribute('aria-pressed', 'false');
 
     // 默认显示全部
@@ -168,7 +188,7 @@ describe('RedemptionHistoryPanel：兑现队列筛选', () => {
   it('筛选 chip 的计数随数据变化（处理一条后重拉，计数从 1 变 2）', async () => {
     renderPanel();
     await ready();
-    expect(screen.getByTestId('redemption-pending-chip')).toHaveTextContent('待兑现 1 条');
+    expect(screen.getByTestId('redemption-pending-chip')).toHaveTextContent('本页待兑现 1 条');
 
     // 处理掉唯一 pending 后，服务端回显两个人都是 pending（模拟并发下又有新兑换）
     getRedemptionsMock.mockResolvedValue(
@@ -177,8 +197,42 @@ describe('RedemptionHistoryPanel：兑现队列筛选', () => {
     fireEvent.click(screen.getByTestId('redemption-fulfill-1'));
 
     await waitFor(() =>
-      expect(screen.getByTestId('redemption-pending-chip')).toHaveTextContent('待兑现 2 条'),
+      expect(screen.getByTestId('redemption-pending-chip')).toHaveTextContent('本页待兑现 2 条'),
     );
+  });
+
+  /**
+   * 计数只数当前页，所以有下一页时必须旁注「翻页可看到更多」——
+   * 否则第 1 页清完 pending 就以为队列空了，第 2 页的待兑现被漏掉（队列功能恰恰要防这个）。
+   * 单页时本页计数即全部，不该多话。
+   */
+  it('还有下一页 → chip 旁注「翻页可看到更多」；单页时不显示旁注', async () => {
+    getRedemptionsMock.mockResolvedValueOnce(page({ total: 25, page: 1 }));
+
+    renderPanel();
+    await ready();
+
+    expect(screen.getByTestId('redemption-pending-hint')).toHaveTextContent('翻页可看到更多');
+
+    // 翻到最后一页（total 25 / pageSize 20 → 第 2 页）后旁注消失
+    getRedemptionsMock.mockResolvedValueOnce(page({ total: 25, page: 2 }));
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('redemption-pending-hint')).not.toBeInTheDocument(),
+    );
+  });
+
+  /**
+   * 数据未到货时 chip 不渲染：兜底 0 会渲染出「本页待兑现 0 条」并**可点**，
+   * 瞬时误导成「队列已空」。这条用永不 resolve 的请求钉住加载态。
+   */
+  it('加载中（数据未到货）→ chip 不渲染，不出现「待兑现 0 条」', async () => {
+    getRedemptionsMock.mockReturnValueOnce(new Promise<RedemptionList>(() => {}));
+
+    renderPanel();
+
+    expect(screen.queryByTestId('redemption-pending-chip')).not.toBeInTheDocument();
   });
 });
 
