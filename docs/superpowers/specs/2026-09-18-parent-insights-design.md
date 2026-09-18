@@ -470,3 +470,5 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 9. **日期分桶依赖服务器时区**：`DATE(judged_at)` 的分桶（`trend`）与时间窗边界（`window.util`）都按**服务器本地时区**算——`database/connection.ts` 既没设 `dateStrings` 也没设 `timezone`。部署到 UTC 容器时，UTC+8 用户晚间 20:00 之后的作答会被分到「前一天」。本期**不做**用户级时区处理；投产前必须确认服务器时区 = 用户时区（Asia/Shanghai）。同类坑：mysql2 把 `DATE(...)` 返回为**本地零点**的 `Date`，把它 `toISOString()` 会跨时区差一天——仓储侧已改用本地字段拼 `YYYY-MM-DD`。
 10. **「新进错题本」≠「本周答错的题」**：`errorsAdded` 数的是窗口内 `main_error_books.created_at`，而错题重做再次做错只走 `bumpLevels` 更新原行、不新增行。文案已按此改为「新进错题本」。
 11. **薄弱点数不可当覆盖率**：一个题可绑多个知识点（`question_knowledge_points` 的 UNIQUE 是「题×KP」），所以 `sum(unclearedCount)` 会大于「未清零错题总数」，**不能**用它与 `weakPointsUncoveredCount` 推覆盖率或「已覆盖」数。
+12. **趋势折线的 X 轴只含有记录的天，没有按窗口补零**：`trend` 与 `ChartLine` 都是「有几个点画几个点」，所以相隔 5 天的两次记录在图上会**相邻**显示，`MM-DD` 标签之间看不出间隔。spec §4.2 ② 原意是「前端按 `windowStart..windowEnd` 铺 X 轴」，实际未做——要做得先让 `ChartPoint.value` 允许 `null` 并把 recharts 的 `connectNulls` 关掉（否则会画出「当天 0 分」的假数据）。本期接受这个观感折中。
+13. **柱状图的 X 轴标签把正确率写进了刻度文字**（形如「数学 73.8%」）：学科多于 4~5 个时刻度可能挤。本期接受；要改就把正确率挪到图表下方的文字行。
