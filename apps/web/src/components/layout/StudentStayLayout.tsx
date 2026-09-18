@@ -1,5 +1,5 @@
-import { Outlet, Link, NavLink } from 'react-router-dom';
-import { LogoutButton } from '@/components/base';
+import { Outlet, NavLink } from 'react-router-dom';
+import { BackButton, LogoutButton } from '@/components/base';
 
 /**
  * 浅停留页外壳 —— 个人中心（P5.1）与奖励册（P5.2）专用。
@@ -23,8 +23,9 @@ import { LogoutButton } from '@/components/base';
  * （`bg-[var(--bg-card)]` + `border-[var(--bg-subtle)]` + `--radius-pill` 胶囊），
  * 但不复用组件 —— 复用就意味着又要处理主题分支。
  *
- * 去掉了侧栏后，顶栏「返回星图」是学生从这两页回到学习主线的**唯一出口**
- * （`/student/subjects` 那条「切换学科」是两步且语义不同），属必需项。
+ * 去掉了侧栏后，顶栏「返回上一页」（`BackButton` 默认模式）是学生从这两页
+ * 离开的出口：按用户裁决不走「返回星图」定死路径，而是回退一页
+ * （从哪来回哪去，从奖励册/个人中心互相跳转时也符合直觉）。
  */
 const stayItems = [
   { to: '/student/rewards', label: '奖励册' },
@@ -40,12 +41,8 @@ export default function StudentStayLayout() {
     >
       {/* 顶部全局栏：与 StudentLayout 顶栏同一套 token，但无日夜切换 */}
       <header className="h-16 bg-[var(--bg-card)] border-b border-[var(--bg-subtle)] flex items-center justify-between gap-4 px-6 shrink-0">
-        <Link
-          to="/student/star-map"
-          className="text-sm font-medium text-[var(--info)] hover:underline"
-        >
-          返回星图
-        </Link>
+        {/* 统一返回控件：不传 to → 返回上一页（BackButton 默认模式） */}
+        <BackButton />
 
         {/* 两页互跳入口（UX P5.1「入口：奖励册…」），当前页高亮 */}
         <nav className="flex items-center gap-1 bg-[var(--bg-subtle)] rounded-[var(--radius-pill)] p-1">
