@@ -43,10 +43,18 @@ export default function ExamResultPage() {
 
   /**
    * 交卷发分结果由 `ExamRunPage` 经导航 state 交接（结果页自己的 `getExamResults`
-   * 是 GET，**不补发分**）。**可选**：刷新页面 / 重复交卷 / 早退进来的历史项没有这个键，
+   * 是 GET，**不补发分**）。**可选**：重复交卷 / 已交卷分支 / 从考试列表重新进入没有这个键，
    * 此时不弹任何积分反馈、也不报错。
+   *
+   * **只认一次**：react-router 把 state 存在 `history.state.usr` 上，浏览器 F5 会原样恢复 →
+   * 不处理的话刷新结果页会重放一遍烟花（发分在服务端有 `dedupe_key`，不会重复加分，
+   * 但 UI 讲了个假故事）。所以首个渲染先把它**抓进本地 state**（庆祝照常弹），
+   * 紧接着把这条 history entry 的 state 剥掉（见下方 effect）；重挂载时 state 已不在，
+   * 本地 state 也随重挂载清空 → 不会庆祝。用 `useState` 惰性初值，只读一次。
    */
-  const navPoints = (location.state as { points?: ExamSummary['points'] } | null)?.points;
+  const [examPoints] = useState<ExamSummary['points'] | undefined>(
+    () => (location.state as { points?: ExamSummary['points'] } | null)?.points,
+  );
 
   const { award, celebrationProps } = usePointsFeedback();
   // 只庆祝一次：StrictMode 双跑 effect、summary 后续更新都不得重复弹
@@ -119,23 +127,34 @@ export default function ExamResultPage() {
     };
   }, [sid, navigate]);
 
-  // 交卷是**大任务**：走全屏 task 庆祝（不是轻反馈），分数与积分同屏（计划 §3 Task 7c）。
-  // 副标题要等 summary 到位才拼得出，所以放在这里而不是 load 里；
-  // 「什么时候弹什么」全交给共享决策模块——0 分 / 无 points 一律静默。
+  // 一次性消费：抓到 points 后立刻把导航 state 从 history entry 里剥掉（`state: null`）。
+  // 上面已把值抓进本地 state，所以剥掉**不会**影响本次庆祝；剥掉后 F5 / 前进后退
+  // 恢复到的 entry 不再带 points → 不再重放（见文件头与上方 examPoints 注释）。
+  // 注意声明在庆祝 effect 之前：同一次 commit 内先干净地清掉 history，再照常庆祝。
   useEffect(() => {
-    if (celebratedRef.current || !navPoints || !summary) return;
+    if (location.state == null) return;
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [location.state, location.pathname, location.search, navigate]);
+
+  // 交卷是**大任务**：走全屏 task 庆祝（不是轻反馈）。副标题要等 summary 到位才拼得出，
+  // 所以放在这里而不是 load 里；「什么时候弹什么」全交给共享决策模块——
+  // 0 分 / 无 points 一律静默。
+  // 副标题只写**分数**（客观题对几道 / 正确率）；积分那一行由 `CelebrationOverlay`
+  // 自己渲染的 `+N 分` 独占，两处都拼会重复显示（Task 7c 评审 Finding 2）。
+  useEffect(() => {
+    if (celebratedRef.current || !examPoints || !summary) return;
     celebratedRef.current = true;
     award({
-      pointsAwarded: navPoints.awarded,
-      levelUp: navPoints.levelUp,
+      pointsAwarded: examPoints.awarded,
+      levelUp: examPoints.levelUp,
       title: '数学测验',
       celebrate: {
         title: '本套试卷已交卷！',
-        subtitle: `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}% · 积分 +${navPoints.awarded}`,
+        subtitle: `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}%`,
         primaryLabel: '查看成绩',
       },
     });
-  }, [navPoints, summary, award]);
+  }, [examPoints, summary, award]);
 
   const resultQuestions = useMemo(
     () => (items ?? []).map((it) => ({ n: String(it.questionNo), text: it.text })),
