@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import VocabularyConfigPage from './VocabularyConfigPage';
 import {
@@ -49,6 +49,8 @@ const VOCAB_TIERS: PointRuleTier[] = [
   tier({ tierKey: '10', tierLabel: '10 词', points: 5 }),
   tier({ tierKey: '15', tierLabel: '15 词', points: 9, dailyLimit: 2, completedToday: 1, remainingToday: 1 }),
   tier({ tierKey: '20', tierLabel: '20 词', points: 15, dailyLimit: 1, completedToday: 1, remainingToday: 0 }),
+  // 有上限但「今日次数」未计算：remainingToday === null → 不应显示任何状态文案
+  tier({ tierKey: '12', tierLabel: '12 词', points: 6, dailyLimit: 3, completedToday: 0, remainingToday: null }),
 ];
 
 /** 别的任务排在前面：按 taskCode 挑，而不是拿 tasks[0]。 */
@@ -124,6 +126,22 @@ describe('VocabularyConfigPage 词量档位', () => {
     await clickStart();
 
     expect(startMock).toHaveBeenCalledWith(expect.objectContaining({ count: 20 }));
+  });
+
+  it('dailyLimit 有值但 remainingToday 未计算：不显示状态文案，按钮仍可点并用于开练', async () => {
+    await renderPage();
+    const notComputed = screen.getByRole('button', { name: /^12 词/ });
+
+    expect(within(notComputed).getByText('+6 分')).toBeTruthy();
+    expect(within(notComputed).queryByText(/剩余 \d+ 次|今日已达上限/)).toBeNull();
+    expect(notComputed).not.toBeDisabled();
+
+    fireEvent.click(notComputed);
+    expect(notComputed.getAttribute('aria-pressed')).toBe('true');
+
+    await clickStart();
+
+    expect(startMock).toHaveBeenCalledWith(expect.objectContaining({ count: 12 }));
   });
 
   it('空 tiers：显示「家长已停用该任务」，不给默认值、开练禁用', async () => {

@@ -3,11 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import {
   getKnowledgePoints,
-  getMyPointRules,
   startTargetedPractice,
-  type PointRuleTier,
   type TrainingKnowledgePoint,
 } from '@/services/api';
+import { tierStatus, usePointTiers } from './point-tiers';
 
 /** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
 const MATH_SUBJECT_ID = 1;
@@ -25,16 +24,6 @@ const TYPE_OPTIONS = [
   { value: 'proof', label: '证明' },
   { value: 'calculation', label: '计算' },
 ] as const;
-
-/**
- * 档位副行的次数文案；不限次数时 `text` 为 null。
- * `capped`（今日已达上限）只置灰，**不禁用**——不发分也让孩子练（计划 §3 Task 6）。
- */
-function tierStatus(tier: PointRuleTier): { text: string | null; capped: boolean } {
-  if (tier.dailyLimit == null || tier.remainingToday == null) return { text: null, capped: false };
-  if (tier.remainingToday === 0) return { text: '今日已达上限', capped: true };
-  return { text: `剩余 ${tier.remainingToday} 次`, capped: false };
-}
 
 const selectClassName =
   'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
@@ -104,7 +93,7 @@ function TierChip({
       <span>{label}</span>
       <span
         className={
-          'text-[10px] font-normal ' +
+          'text-[0.625rem] font-normal ' +
           (active ? 'opacity-90' : 'text-[var(--learn-text-tertiary)]')
         }
       >
@@ -159,11 +148,15 @@ export default function TargetedConfigPage() {
   const [parentKpId, setParentKpId] = useState<number | null>(null);
   const [childKpId, setChildKpId] = useState<number | null>(null);
 
-  // 题型 / 题量（题量档位来自积分规则，家长可改）
+  // 题型 / 题量（题量档位来自积分规则，家长可改；`tiers == null` = 仍在加载）
   const [type, setType] = useState('');
-  const [tiers, setTiers] = useState<PointRuleTier[] | null>(null);
-  const [tiersError, setTiersError] = useState<string | null>(null);
-  const [tierKey, setTierKey] = useState<string | null>(null);
+  const {
+    tiers,
+    tierKey,
+    setTierKey,
+    error: tiersError,
+    retry: loadTiers,
+  } = usePointTiers(MATH_TASK_CODE);
 
   // 开练状态
   const [starting, setStarting] = useState(false);
@@ -181,32 +174,9 @@ export default function TargetedConfigPage() {
     }
   }, []);
 
-  /**
-   * 题量档位 = 家长配的 `(math_targeted, tierKey)` 白名单。
-   * 开练的 count 必须落在里面，否则后端 400；所以档位没到之前不渲染任何按钮。
-   */
-  const loadTiers = useCallback(async () => {
-    setTiersError(null);
-    try {
-      const data = await getMyPointRules();
-      const list = data.tasks.find((t) => t.taskCode === MATH_TASK_CODE)?.tiers ?? [];
-      setTiers(list);
-      // 默认第一档；空数组**不给默认值**（不能写 tiers[0].tierKey）
-      setTierKey(list.length > 0 ? list[0].tierKey : null);
-    } catch {
-      setTiersError('档位加载失败，请重试');
-      setTiers(null);
-      setTierKey(null);
-    }
-  }, []);
-
   useEffect(() => {
     void loadKps();
   }, [loadKps]);
-
-  useEffect(() => {
-    void loadTiers();
-  }, [loadTiers]);
 
   // 平铺列表 -> 一级 / 当前一级的二级
   const parentKps = useMemo(

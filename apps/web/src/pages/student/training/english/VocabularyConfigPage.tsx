@@ -1,29 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader, Skeleton } from '@/components/base';
 import {
   fetchVocabularyOptions,
-  getMyPointRules,
   startVocabulary,
-  type PointRuleTier,
   type VocabularyDirection,
   type VocabularyLevelPool,
   type VocabularyOptions,
   type VocabularyOrder,
 } from '@/services/api';
+import { tierStatus, usePointTiers } from '../point-tiers';
 
 /** 积分规则里的任务码（英语背单词）。 */
 const EN_VOCAB_TASK_CODE = 'en_vocabulary';
-
-/**
- * 档位副行的次数文案；不限次数时 `text` 为 null。
- * `capped`（今日已达上限）只置灰，**不禁用**——不发分也让孩子练（计划 §3 Task 6）。
- */
-function tierStatus(tier: PointRuleTier): { text: string | null; capped: boolean } {
-  if (tier.dailyLimit == null || tier.remainingToday == null) return { text: null, capped: false };
-  if (tier.remainingToday === 0) return { text: '今日已达上限', capped: true };
-  return { text: `剩余 ${tier.remainingToday} 次`, capped: false };
-}
 
 const ORDER_OPTIONS: Array<{ label: string; value: VocabularyOrder }> = [
   { label: '随机', value: 'random' },
@@ -57,10 +46,14 @@ export default function VocabularyConfigPage() {
   const navigate = useNavigate();
   const [options, setOptions] = useState<VocabularyOptions | null>(null);
   const [levelPool, setLevelPool] = useState<VocabularyLevelPool>('junior');
-  // 背几个：档位来自积分规则（家长可改），不硬编码 10/15/20
-  const [tiers, setTiers] = useState<PointRuleTier[] | null>(null);
-  const [tiersError, setTiersError] = useState<string | null>(null);
-  const [tierKey, setTierKey] = useState<string | null>(null);
+  // 背几个：档位来自积分规则（家长可改），不硬编码 10/15/20；`tiers == null` = 仍在加载
+  const {
+    tiers,
+    tierKey,
+    setTierKey,
+    error: tiersError,
+    retry: loadTiers,
+  } = usePointTiers(EN_VOCAB_TASK_CODE);
   const [order, setOrder] = useState<VocabularyOrder>('random');
   const [letter, setLetter] = useState<string>('a');
   const [direction, setDirection] = useState<VocabularyDirection>('en2cn');
@@ -78,29 +71,6 @@ export default function VocabularyConfigPage() {
       .catch(() => { if (!cancelled) setError('词库信息加载失败，请稍后重试'); });
     return () => { cancelled = true; };
   }, []);
-
-  /**
-   * 词量档位 = 家长配的 `(en_vocabulary, tierKey)` 白名单（开练 count 必须在里面，否则 400）。
-   * 档位没到之前不渲染任何按钮，也不给默认值。
-   */
-  const loadTiers = useCallback(async () => {
-    setTiersError(null);
-    try {
-      const data = await getMyPointRules();
-      const list = data.tasks.find((t) => t.taskCode === EN_VOCAB_TASK_CODE)?.tiers ?? [];
-      setTiers(list);
-      // 默认第一档；空数组**不给默认值**（不能写 tiers[0].tierKey）
-      setTierKey(list.length > 0 ? list[0].tierKey : null);
-    } catch {
-      setTiersError('档位加载失败，请重试');
-      setTiers(null);
-      setTierKey(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadTiers();
-  }, [loadTiers]);
 
   const handleStart = async () => {
     if (tierKey == null) return;
@@ -217,7 +187,7 @@ export default function VocabularyConfigPage() {
                     style={active ? { backgroundColor: 'var(--brand-500)' } : CARD_BORDER}
                   >
                     <span>{tier.tierLabel}</span>
-                    <span className={`text-[10px] font-normal ${active ? 'opacity-90' : 'opacity-70'}`}>
+                    <span className={`text-[0.625rem] font-normal ${active ? 'opacity-90' : 'opacity-70'}`}>
                       +{tier.points} 分{text ? ` · ${text}` : ''}
                     </span>
                   </button>
