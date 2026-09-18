@@ -25,8 +25,44 @@ import {
  * 8. **重新启用**下架档位时，`isActive: true` 必须真的进 body（读服务端原值 = 静默
  *    no-op，家长永远救不回下架档位，§1.1#1）——这是本组件存在的理由，必须被钉住；
  * 9. `points` 边界：`0` 合法、`''` / `'-1'` 非法（不许把空串静默当 0）；
- * 10. 保存 A 卡只重挂 A 卡，B 卡未保存的草稿不能被连带清掉（只接受切 Tab/切孩子丢草稿）。
+ * 10. 保存 A 卡只重挂 A 卡，B 卡未保存的草稿不能被连带清掉（只接受切 Tab/切孩子丢草稿）；
+ * 11. **待重挂的卡是集合不是单槽**：A 的重拉窗口内又保存 B，两张卡都要结算，
+ *     谁都不许永久 `saving=true`（曾用单槽 ref，A 会被 B 覆盖而永远转圈）；
+ * 12. 重拉失败也必须解除 `saving`（不重挂载的那条路径），且保留旧表格、不波及别的卡；
+ * 13. 重拉带来本卡没有 draft 的新档位时，保存要跳过它（不崩、不发假编辑）+ 内部告警。
  */
+
+/** 手动控制时序的 promise（重拉窗口内再保存、重拉成功/失败都由用例说了算）。 */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** 把某档位的 JSON 深拷贝后改字段，避免用例间共享对象被改。 */
+function withTier(
+  base: MyPointRules,
+  taskCode: string,
+  tierKey: string,
+  patch: Partial<MyPointRules['tasks'][number]['tiers'][number]>,
+): MyPointRules {
+  return {
+    tasks: base.tasks.map((task) =>
+      task.taskCode === taskCode
+        ? {
+            ...task,
+            tiers: task.tiers.map((tier) =>
+              tier.tierKey === tierKey ? { ...tier, ...patch } : tier,
+            ),
+          }
+        : task,
+    ),
+  };
+}
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -540,6 +576,269 @@ describe('PointRulesPanel：保存与二次确认', () => {
     const refreshedEnglish = screen.getByTestId('point-rules-card-english_words');
     expect(within(refreshedEnglish).getByTestId('points-input-english_words-5')).toHaveValue(7);
     expect(within(refreshedEnglish).getByTestId('save-task-english_words')).toBeEnabled();
+  });
+});
+
+describe('PointRulesPanel：并发保存与重拉', () => {
+  /**
+   * 时序一：**不重叠**。A 的重拉回来、A 卡结算完，再动 B。
+   * 钉法：让服务端快照的值与用户输入**故意不同**（输入 10 快照 12），
+   * 重挂不清草稿的话输入框仍是 10，断言 12 就同时钉住「重挂」+「draft 被清」。
+   */
+  it('依次保存 A、B（不重叠）→ 两张卡各自按新快照重挂，草稿都清', async () => {
+    renderPanel();
+
+    const math = await screen.findByTestId('point-rules-card-math_targeted');
+    const afterMathSave = withTier(RULES, 'math_targeted', '3', { points: 12 });
+    getRulesMock.mockResolvedValueOnce(afterMathSave);
+
+    fireEvent.change(within(math).getByTestId('points-input-math_targeted-3'), {
+      target: { value: '10' },
+    });
+    fireEvent.click(within(math).getByTestId('save-task-math_targeted'));
+
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('point-rules-card-math_targeted')).getByTestId(
+          'points-input-math_targeted-3',
+        ),
+      ).toHaveValue(12),
+    );
+
+    // A 已结算完，再保存 B（英语 5 词，输入 7 而快照 9）
+    const afterEnglishSave = withTier(afterMathSave, 'english_words', '5', { points: 9 });
+    getRulesMock.mockResolvedValueOnce(afterEnglishSave);
+
+    fireEvent.change(
+      within(screen.getByTestId('point-rules-card-english_words')).getByTestId(
+        'points-input-english_words-5',
+      ),
+      { target: { value: '7' } },
+    );
+    fireEvent.click(
+      within(screen.getByTestId('point-rules-card-english_words')).getByTestId(
+        'save-task-english_words',
+      ),
+    );
+
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('point-rules-card-english_words')).getByTestId(
+          'points-input-english_words-5',
+        ),
+      ).toHaveValue(9),
+    );
+
+    const mathCard = screen.getByTestId('point-rules-card-math_targeted');
+    const englishCard = screen.getByTestId('point-rules-card-english_words');
+    const mathSave = within(mathCard).getByTestId('save-task-math_targeted');
+    const englishSave = within(englishCard).getByTestId('save-task-english_words');
+    // 两张卡都回到服务端快照：draft 清空 → 保存 disabled，且都不在转圈
+    expect(mathSave).toBeDisabled();
+    expect(englishSave).toBeDisabled();
+    expect(mathSave.querySelector('.animate-spin')).toBeNull();
+    expect(englishSave.querySelector('.animate-spin')).toBeNull();
+  });
+
+  /**
+   * 时序二：**重叠**（本轮修的那个 bug）。A 的重拉还在路上就保存 B。
+   * 单槽 ref 下 A 的那次 `.then` 读到的是 'B'，只有 B 被 bump → A 永久 saving=true。
+   * 钉法：两次重拉都挂在 deferred 上，先 resolve 已被取消的 #1、再 resolve #2，
+   * 最后断言**两张卡**都拿到新快照且都不转圈（A 是曾经会挂死的那个）。
+   */
+  it('A 的重拉窗口内又保存 B（重叠）→ 两张卡都结算，谁都不卡在 loading', async () => {
+    renderPanel();
+
+    const math = await screen.findByTestId('point-rules-card-math_targeted');
+    const firstReload = deferred<MyPointRules>();
+    const secondReload = deferred<MyPointRules>();
+    getRulesMock
+      .mockReturnValueOnce(firstReload.promise)
+      .mockReturnValueOnce(secondReload.promise);
+
+    // A 卡上调 8→10 并保存：重拉#1 发起后停在 deferred 上不返回
+    fireEvent.change(within(math).getByTestId('points-input-math_targeted-3'), {
+      target: { value: '10' },
+    });
+    fireEvent.click(within(math).getByTestId('save-task-math_targeted'));
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledTimes(2));
+
+    // A 的重拉还没回来 → 保存 B 卡（2→7），重拉#2 会把重拉#1 取消
+    fireEvent.change(
+      within(screen.getByTestId('point-rules-card-english_words')).getByTestId(
+        'points-input-english_words-5',
+      ),
+      { target: { value: '7' } },
+    );
+    fireEvent.click(
+      within(screen.getByTestId('point-rules-card-english_words')).getByTestId(
+        'save-task-english_words',
+      ),
+    );
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(saveRulesMock).toHaveBeenCalledTimes(2));
+
+    // 两张卡都还在提交中：PUT 已完成但重拉未回 → saving 仍为 true（刻意的防重复提交）
+    const mathSaveBefore = within(screen.getByTestId('point-rules-card-math_targeted')).getByTestId(
+      'save-task-math_targeted',
+    );
+    const englishSaveBefore = within(
+      screen.getByTestId('point-rules-card-english_words'),
+    ).getByTestId('save-task-english_words');
+    expect(mathSaveBefore.querySelector('.animate-spin')).not.toBeNull();
+    expect(englishSaveBefore.querySelector('.animate-spin')).not.toBeNull();
+
+    // 重拉#1 已被取消（结果必须被忽略），重拉#2 才算数；两份快照给同一批新值
+    const snapshot = withTier(
+      withTier(RULES, 'math_targeted', '3', { points: 12 }),
+      'english_words',
+      '5',
+      { points: 9 },
+    );
+    firstReload.resolve(snapshot);
+    secondReload.resolve(snapshot);
+
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('point-rules-card-math_targeted')).getByTestId(
+          'points-input-math_targeted-3',
+        ),
+      ).toHaveValue(12),
+    );
+
+    const mathCard = screen.getByTestId('point-rules-card-math_targeted');
+    const englishCard = screen.getByTestId('point-rules-card-english_words');
+    // 两张卡都重挂到新快照（draft 清空 → 保存 disabled），都不再转圈
+    expect(
+      within(englishCard).getByTestId('points-input-english_words-5'),
+    ).toHaveValue(9);
+    const mathSave = within(mathCard).getByTestId('save-task-math_targeted');
+    const englishSave = within(englishCard).getByTestId('save-task-english_words');
+    expect(mathSave).toBeDisabled();
+    expect(englishSave).toBeDisabled();
+    expect(mathSave.querySelector('.animate-spin')).toBeNull();
+    expect(englishSave.querySelector('.animate-spin')).toBeNull();
+  });
+
+  /**
+   * 时序三：**重拉失败**。拿不到新快照 → 不能靠重挂载复位 saving，必须另有解除路径。
+   * 钉法：重拉挂 deferred、先断言在途时仍转圈（防重复提交没被削弱），再 reject；
+   * 失败后断言 ① 该卡 saving 已解（按钮回到可点、无 spinner）② 表格没被整块换成
+   * 错误态 ③ 其它卡的未保存草稿不受影响。
+   */
+  it('保存后重拉失败 → 该卡 saving 复位（不转圈），表格与其它卡草稿都不受影响', async () => {
+    renderPanel();
+
+    const math = await screen.findByTestId('point-rules-card-math_targeted');
+    const english = screen.getByTestId('point-rules-card-english_words');
+
+    // B 卡有未保存草稿：重拉失败不许把它清掉、也不许把整张表换成错误态
+    fireEvent.change(within(english).getByTestId('points-input-english_words-5'), {
+      target: { value: '7' },
+    });
+
+    const failedReload = deferred<MyPointRules>();
+    getRulesMock.mockReturnValueOnce(failedReload.promise);
+
+    fireEvent.change(within(math).getByTestId('points-input-math_targeted-3'), {
+      target: { value: '10' },
+    });
+    fireEvent.click(within(math).getByTestId('save-task-math_targeted'));
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledTimes(2));
+
+    // 在途：saving 还是 true（这是刻意保留的防重复提交窗口，不是卡死）
+    const savePending = within(screen.getByTestId('point-rules-card-math_targeted')).getByTestId(
+      'save-task-math_targeted',
+    );
+    expect(savePending).toBeDisabled();
+    expect(savePending.querySelector('.animate-spin')).not.toBeNull();
+
+    failedReload.reject(new Error('boom'));
+
+    // 失败 → saving 复位：spinner 消失、草稿仍在所以按钮回到可点（能重试保存）
+    await waitFor(() => {
+      const save = within(screen.getByTestId('point-rules-card-math_targeted')).getByTestId(
+        'save-task-math_targeted',
+      );
+      expect(save.querySelector('.animate-spin')).toBeNull();
+      expect(save).toBeEnabled();
+    });
+    expect(within(screen.getByTestId('point-rules-card-math_targeted')).getByTestId(
+      'points-input-math_targeted-3',
+    )).toHaveValue(10);
+    // 不整块变错误态；给出可感知的失败提示
+    expect(screen.queryByTestId('point-rules-error')).not.toBeInTheDocument();
+    expect(toastMock).toHaveBeenCalledWith('error', '积分规则刷新失败，请稍后重试');
+    // 其它卡不受影响：草稿还在 7
+    expect(
+      within(screen.getByTestId('point-rules-card-english_words')).getByTestId(
+        'points-input-english_words-5',
+      ),
+    ).toHaveValue(7);
+  });
+
+  /**
+   * 缺 draft 的降级路径（第 2 条）：A 卡保存后的重拉给**英语卡**带来一个新档位，
+   * 但英语卡不会重挂载 → 它的 draft 里没有这个新档位（行也不渲染）。
+   * 此时保存英语卡：不许抛 `Cannot read properties of undefined`，跳过该档位并告警。
+   */
+  it('重拉带来本卡没有 draft 的新档位 → 保存时跳过该档位（不崩、不发假编辑）+ 内部告警', async () => {
+    renderPanel();
+
+    const english = await screen.findByTestId('point-rules-card-english_words');
+    // 英语卡先改一笔草稿（不保存），让它在重拉后仍持有 draft、保存按钮可点
+    fireEvent.change(within(english).getByTestId('points-input-english_words-5'), {
+      target: { value: '7' },
+    });
+
+    // A 卡保存后的重拉：给英语卡多带一个 tierKey '20'（本卡既无 draft 也未渲染）
+    const newTier = {
+      tierKey: '20',
+      tierLabel: '20 词',
+      points: 12,
+      dailyLimit: null,
+      isActive: true,
+      completedToday: 0,
+      remainingToday: null,
+    };
+    const withNewTier: MyPointRules = {
+      tasks: RULES.tasks.map((task) =>
+        task.taskCode === 'english_words' ? { ...task, tiers: [...task.tiers, newTier] } : task,
+      ),
+    };
+    getRulesMock.mockResolvedValueOnce(withNewTier);
+
+    const math = screen.getByTestId('point-rules-card-math_targeted');
+    fireEvent.change(within(math).getByTestId('points-input-math_targeted-3'), {
+      target: { value: '10' },
+    });
+    fireEvent.click(within(math).getByTestId('save-task-math_targeted'));
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(saveRulesMock).toHaveBeenCalledTimes(1));
+
+    // 英语卡没重挂载：新档位既没 draft 也不渲染
+    const englishAfter = screen.getByTestId('point-rules-card-english_words');
+    expect(within(englishAfter).queryByTestId('tier-row-english_words-20')).not.toBeInTheDocument();
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    saveRulesMock.mockClear();
+    fireEvent.click(within(englishAfter).getByTestId('save-task-english_words'));
+
+    await waitFor(() => expect(saveRulesMock).toHaveBeenCalledTimes(1));
+    const body = saveRulesMock.mock.calls[0][1];
+    // 有 draft 的档位照常提交（草稿值 7，不是服务端快照 2）
+    expect(body).toContainEqual({
+      taskCode: 'english_words',
+      tierKey: '5',
+      points: 7,
+      dailyLimit: null,
+      isActive: true,
+    });
+    // 缺 draft 的新档位被跳过（不是回退快照值的假编辑）
+    expect(body.some((rule) => rule.tierKey === '20')).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('english_words.20'));
   });
 });
 

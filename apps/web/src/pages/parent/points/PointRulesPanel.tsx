@@ -29,6 +29,10 @@ import {
  * 草稿/快照分离：`draft` 用**字符串**存输入框原值（`Number()` 后回写会把用户打
  * 「1a」「-」的中间态吞掉），脏判定时才做数值比较。每张任务卡一份草稿、一个保存按钮。
  *
+ * 保存后的重拉（父级按 taskCode 记账）：`versions` 决定**重挂哪张卡**（只重挂发起保存的
+ * 那张，别的卡草稿不动），`settles` 决定**何时解除 `saving`**——成功、失败都要解除；
+ * 待重挂的 taskCode 存在**集合**里（同一重拉窗口内可能连存两张卡）。
+ *
  * 接缝：`studentId` 由页面下发；页面切孩子时会重挂载本组件，但本组件自己也把
  * `studentId` 编进「数据归属」与卡片 key——即使页面忘了重挂载，也不会拿上一个
  * 孩子的快照继续编辑（跨学生提交是事故）。
@@ -100,6 +104,13 @@ function progressText(tier: PointRuleTier): string {
   if (tier.completedToday === null) return '今日进度 —';
   if (tier.dailyLimit === null) return `今日已发 ${tier.completedToday} 次（不限）`;
   return `今日已发 ${tier.completedToday} / ${tier.dailyLimit} 次`;
+}
+
+/** 把一组 taskCode 的计数器各 +1（`versions` / `settles` 共用，两者都是按卡存的计数）。 */
+function bumpCounters(prev: Record<string, number>, codes: Set<string>): Record<string, number> {
+  const next = { ...prev };
+  for (const code of codes) next[code] = (next[code] ?? 0) + 1;
+  return next;
 }
 
 const INPUT_CLASS =
@@ -211,17 +222,35 @@ function TierRow({ taskCode, tier, draft, error, saving, onPatch }: TierRowProps
 interface TaskRulesCardProps {
   studentId: number;
   task: PointRuleTask;
+  /**
+   * 「本卡那次重拉已结束」的信号，成功与失败都会变号。只用来复位 `saving`
+   * （见组件内的 effect），与 `versions` 的重挂载职责**刻意分开**。
+   */
+  settleToken: number;
   /** 保存后回报**本卡**的 taskCode：父级只重挂这一张卡（见 `versions`）。 */
   onSaved: (taskCode: string) => void;
 }
 
-function TaskRulesCard({ studentId, task, onSaved }: TaskRulesCardProps) {
+function TaskRulesCard({ studentId, task, settleToken, onSaved }: TaskRulesCardProps) {
   const [draft, setDraft] = useState<CardDraft>(() => initDraft(task));
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState<{
     payload: PointRuleSaveInput[];
     messages: string[];
   } | null>(null);
+
+  /**
+   * 重拉结束（成功/失败）→ 复位 saving。
+   *
+   * **不能只靠「成功路径重挂载」复位它**：重拉失败时拿不到新快照，不能重挂载
+   * （重挂载会按**旧**快照重新 init 草稿，把家长刚填的值改回去），于是 `saving`
+   * 就得靠这条路径解除，否则该卡永久转圈、页面内无法恢复。
+   * 成功路径上本卡通常已因 key 变化重挂载（新实例 saving 本就是 false），
+   * 这里再置一次是无害的空操作；初始挂载时同样是无害的空操作。
+   */
+  useEffect(() => {
+    setSaving(false);
+  }, [settleToken]);
 
   /** 校验结果由草稿派生（不另存一份 state，避免两份真相漂移）。 */
   const errors = useMemo<TierErrors>(() => {
@@ -244,18 +273,40 @@ function TaskRulesCard({ studentId, task, onSaved }: TaskRulesCardProps) {
     setDraft((prev) => ({ ...prev, [tierKey]: { ...prev[tierKey], ...patch } }));
   };
 
-  /** 该任务的**全部**档位，每条带齐三字段（后端 Zod 三个都必填）。 */
-  const buildPayload = (): PointRuleSaveInput[] =>
-    task.tiers.map((tier) => {
+  /**
+   * 该任务**当前能提交的**档位，每条带齐三字段（后端 Zod 三个都必填）。
+   *
+   * **缺 draft 的档位直接跳过**（选择项 A，不猜值、不发这条）：draft 只在卡片挂载时
+   * 按快照 init，而「重拉带来的新档位」只让**发起保存的那张卡**重挂载，所以别的卡
+   * 可能在重拉后拿到一个自己没有 draft 的档位（行也因 `if (!d) return null` 不渲染）。
+   * 两种行为里选跳过：后端 `updateBatch` 只更新传入的行（`point-rules.service.ts`），
+   * 跳过 = 该档位保持服务端原值，正是「没编辑就不动」的语义；回退用快照值补一条则是
+   * 一次**假编辑**（拿可能过期的快照回写一遍），没有收益。跳过的是一条真实存在的档位，
+   * 所以留一条内部告警（`console.warn`）而非静默丢。
+   *
+   * 返回空数组不会出现：`canSave` 要求至少一个档位脏，而脏的档位必有 draft
+   * （`isTierDirty` 对缺 draft 返回 false），后端 `rules` 数组的 `min(1)` 因此不会被撞。
+   */
+  const buildPayload = (): PointRuleSaveInput[] => {
+    const payload: PointRuleSaveInput[] = [];
+    for (const tier of task.tiers) {
       const d = draft[tier.tierKey];
-      return {
+      if (!d) {
+        console.warn(
+          `[PointRulesPanel] 档位 ${task.taskCode}.${tier.tierKey} 没有草稿（重拉带入了未重挂载的新档位），本次保存跳过该档位`,
+        );
+        continue;
+      }
+      payload.push({
         taskCode: task.taskCode,
         tierKey: tier.tierKey,
         points: Number(d.points),
         dailyLimit: d.dailyLimit === '' ? null : Number(d.dailyLimit),
         isActive: d.isActive,
-      };
-    });
+      });
+    }
+    return payload;
+  };
 
   const doSave = async (payload: PointRuleSaveInput[]) => {
     setSaving(true);
@@ -397,8 +448,28 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
    * 保证重挂载读到的就是新快照（提前自增会拿旧数据初始化草稿）。
    */
   const [versions, setVersions] = useState<Record<string, number>>({});
-  /** 本次重拉是为哪张卡发起的；只有它需要重挂载。 */
-  const resetTaskCodeRef = useRef<string | null>(null);
+  /**
+   * 每张卡一份「本卡那次重拉已结束」计数（**成功、失败都自增**）：只用来让卡解除
+   * `saving`，与 `versions` 的重挂载职责刻意分开。
+   *
+   * 两条踩坑：① 不能只用重挂载复位 `saving`——重拉失败时不能重挂载（会把草稿按旧
+   * 快照重置），那条路径上永远转圈；② 也不能用全局一个 tick——那会顺手解开**别的**
+   * 仍在提交中的卡的 `saving`，正好废掉「提交期间禁用按钮」的防重复提交。所以按卡存。
+   */
+  const [settles, setSettles] = useState<Record<string, number>>({});
+  /**
+   * 本次重拉要结算（重挂 + 解 saving）的卡。**必须是集合，不能是单槽**：A 的重拉还在
+   * 路上时又保存了 B，单槽会被 B 覆盖，A 的那次 `.then` 只读到 'B' —— A 从此永远
+   * `saving=true` 且不会重挂载，页面内无解。被取消的那次重拉（`reload` 又变了）
+   * **不清空它**，留给后一次重拉一起消费。
+   */
+  const pendingResetsRef = useRef<Set<string>>(new Set());
+  /**
+   * 已经成功加载过、且属于**哪个**学生的表格。用来区分两种失败：首次加载失败 → 错误态；
+   * 保存后的重拉失败 → **保留**旧表格（不能因为一次刷新失败就让家长正在看的整张表消失），
+   * 只解 saving + 提示重试。切孩子后旧 id 不匹配，仍走错误态。
+   */
+  const loadedStudentIdRef = useRef<number | null>(null);
 
   /**
    * 按 `studentId` 现算归属，而不是在 effect 里清空：effect 在 commit 之后才跑，
@@ -413,18 +484,28 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
       .then((res) => {
         if (cancelled) return;
         setData({ studentId, tasks: res.tasks });
-        const resetTaskCode = resetTaskCodeRef.current;
-        resetTaskCodeRef.current = null;
-        if (resetTaskCode) {
-          setVersions((prev) => ({
-            ...prev,
-            [resetTaskCode]: (prev[resetTaskCode] ?? 0) + 1,
-          }));
+        loadedStudentIdRef.current = studentId;
+        const pending = pendingResetsRef.current;
+        pendingResetsRef.current = new Set();
+        if (pending.size > 0) {
+          // versions 决定「重挂哪张卡」；settles 是成功路径的兜底解除
+          //（正常由重挂载顺带把 saving 归零）。
+          setVersions((prev) => bumpCounters(prev, pending));
+          setSettles((prev) => bumpCounters(prev, pending));
         }
         setFailedStudentId(null);
       })
       .catch(() => {
         if (cancelled) return;
+        const pending = pendingResetsRef.current;
+        pendingResetsRef.current = new Set();
+        // 重拉失败拿不到新快照 → 不重挂载（重挂会按旧快照重置草稿），只解 saving，
+        // 否则发起保存的那张卡会永久转圈。
+        if (pending.size > 0) {
+          setSettles((prev) => bumpCounters(prev, pending));
+          toast('error', '积分规则刷新失败，请稍后重试');
+        }
+        if (loadedStudentIdRef.current === studentId) return;
         setData(null);
         setFailedStudentId(studentId);
       });
@@ -476,8 +557,9 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
           key={`${studentId}-${task.taskCode}-${versions[task.taskCode] ?? 0}`}
           studentId={studentId}
           task={task}
+          settleToken={settles[task.taskCode] ?? 0}
           onSaved={(taskCode) => {
-            resetTaskCodeRef.current = taskCode;
+            pendingResetsRef.current.add(taskCode);
             setReload((n) => n + 1);
           }}
         />
