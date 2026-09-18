@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ParentPointsPage from './ParentPointsPage';
-import { getParentPoints, type MyPoints } from '@/services/api';
+import { getParentPointRules, getParentPoints, type MyPoints } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
 /**
@@ -21,10 +21,11 @@ import { useParentStudentStore } from '@/store/parentStudentStore';
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, getParentPoints: vi.fn() };
+  return { ...actual, getParentPoints: vi.fn(), getParentPointRules: vi.fn() };
 });
 
 const getParentPointsMock = vi.mocked(getParentPoints);
+const getParentPointRulesMock = vi.mocked(getParentPointRules);
 
 const POINTS: MyPoints = {
   balance: 120,
@@ -74,6 +75,11 @@ beforeEach(() => {
   useParentStudentStore.setState({ studentId: 1 });
   getParentPointsMock.mockReset();
   getParentPointsMock.mockResolvedValue(POINTS);
+  // Task 5 起「积分规则」面板是真的组件：它自己会拉 rules。本文件只测页面骨架，
+  // 给它一个空清单即可，否则真实 fetch 失败会让面板渲染出**第二个**「重试」按钮，
+  // 与概览卡的重试撞名。
+  getParentPointRulesMock.mockReset();
+  getParentPointRulesMock.mockResolvedValue({ tasks: [] });
 });
 
 afterEach(() => {
