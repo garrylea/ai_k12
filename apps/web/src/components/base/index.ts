@@ -13,3 +13,5 @@ export { Skeleton } from './Skeleton';
 export { ToastContainer, toast } from './Toast';
 export { LevelIcon } from './LevelIcon';
 export type { LevelCode } from './LevelIcon';
+export { Pagination } from './Pagination';
+export type { PaginationProps } from './Pagination';
