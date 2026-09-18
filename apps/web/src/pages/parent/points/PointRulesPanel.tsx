@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Button, Card, Modal, Skeleton, Tag, toast } from '@/components/base';
 import {
@@ -211,7 +211,8 @@ function TierRow({ taskCode, tier, draft, error, saving, onPatch }: TierRowProps
 interface TaskRulesCardProps {
   studentId: number;
   task: PointRuleTask;
-  onSaved: () => void;
+  /** 保存后回报**本卡**的 taskCode：父级只重挂这一张卡（见 `versions`）。 */
+  onSaved: (taskCode: string) => void;
 }
 
 function TaskRulesCard({ studentId, task, onSaved }: TaskRulesCardProps) {
@@ -265,13 +266,13 @@ function TaskRulesCard({ studentId, task, onSaved }: TaskRulesCardProps) {
       // 重拉：避免拿本地快照继续编辑（别处改了同一批档位时会漂移）。
       // **成功路径故意不解除 saving** —— 重拉回来后卡片会重挂载并重置为不 loading；
       // 在这一帧解除会让按钮瞬间可点，家长双击就能把同一份改动发两遍。
-      onSaved();
+      onSaved(task.taskCode);
     } catch (err: unknown) {
       setConfirming(null);
       // 1001（Zod 校验）与其它错误都回显服务端文案；3005 是唯一需要「重拉 + 重来」的分支。
       if (err instanceof ApiError && err.code === 3005) {
         toast('error', '档位已变化，请确认后重新保存');
-        onSaved();
+        onSaved(task.taskCode);
       } else {
         toast('error', err instanceof Error && err.message ? err.message : '保存失败');
       }
@@ -389,8 +390,15 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
   const [data, setData] = useState<{ studentId: number; tasks: PointRuleTask[] } | null>(null);
   const [failedStudentId, setFailedStudentId] = useState<number | null>(null);
   const [reload, setReload] = useState(0);
-  /** 每次成功拉取 +1：编进卡片 key，重挂载即把草稿重置到新快照。 */
-  const [version, setVersion] = useState(0);
+  /**
+   * 每张卡一份重挂载计数（**不是**全局一个 version）：保存 A 卡后只重挂 A 卡，
+   * B 卡正在编辑但没保存的草稿不被连带清掉。计划接受的取舍只有「切 Tab / 切孩子
+   * 丢草稿」，没有「保存同一 Tab 内另一张卡时丢」。计数在**重拉回来之后**才自增，
+   * 保证重挂载读到的就是新快照（提前自增会拿旧数据初始化草稿）。
+   */
+  const [versions, setVersions] = useState<Record<string, number>>({});
+  /** 本次重拉是为哪张卡发起的；只有它需要重挂载。 */
+  const resetTaskCodeRef = useRef<string | null>(null);
 
   /**
    * 按 `studentId` 现算归属，而不是在 effect 里清空：effect 在 commit 之后才跑，
@@ -405,7 +413,14 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
       .then((res) => {
         if (cancelled) return;
         setData({ studentId, tasks: res.tasks });
-        setVersion((v) => v + 1);
+        const resetTaskCode = resetTaskCodeRef.current;
+        resetTaskCodeRef.current = null;
+        if (resetTaskCode) {
+          setVersions((prev) => ({
+            ...prev,
+            [resetTaskCode]: (prev[resetTaskCode] ?? 0) + 1,
+          }));
+        }
         setFailedStudentId(null);
       })
       .catch(() => {
@@ -422,6 +437,7 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
     return (
       <Card
         data-testid="point-rules-error"
+        data-student-id={studentId}
         className="flex flex-wrap items-center justify-between gap-4 border border-[var(--error)] p-4"
       >
         <span className="text-sm text-[var(--text-secondary)]">积分规则暂时加载失败</span>
@@ -434,7 +450,11 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
 
   if (tasks === null) {
     return (
-      <div data-testid="point-rules-skeleton" className="space-y-4">
+      <div
+        data-testid="point-rules-skeleton"
+        data-student-id={studentId}
+        className="space-y-4"
+      >
         <Skeleton width="100%" height={180} rounded />
         <Skeleton width="100%" height={180} rounded />
       </div>
@@ -443,7 +463,7 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
 
   if (tasks.length === 0) {
     return (
-      <Card data-testid="point-rules-empty" className="p-10 text-center">
+      <Card data-testid="point-rules-empty" data-student-id={studentId} className="p-10 text-center">
         <p className="text-sm text-[var(--text-secondary)]">暂无积分任务配置</p>
       </Card>
     );
@@ -453,10 +473,13 @@ export default function PointRulesPanel({ studentId }: PointRulesPanelProps) {
     <div data-student-id={studentId} className="space-y-6">
       {tasks.map((task) => (
         <TaskRulesCard
-          key={`${studentId}-${task.taskCode}-${version}`}
+          key={`${studentId}-${task.taskCode}-${versions[task.taskCode] ?? 0}`}
           studentId={studentId}
           task={task}
-          onSaved={() => setReload((n) => n + 1)}
+          onSaved={(taskCode) => {
+            resetTaskCodeRef.current = taskCode;
+            setReload((n) => n + 1);
+          }}
         />
       ))}
     </div>

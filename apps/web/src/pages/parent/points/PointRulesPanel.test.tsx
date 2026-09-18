@@ -21,7 +21,11 @@ import {
  * 5. `dailyLimit` 空 = `null`（不限是一等公民），填 `0` 会让该档位永久不发分
  *    → 行内报错 + 保存禁用 + **不发请求**（§1.1#4）；
  * 6. 分值下调要先二次确认，未确认前**不许**发请求；
- * 7. 后端 3005（档位不存在）→ toast + 重拉 rules，避免家长拿着过期快照反复失败。
+ * 7. 后端 3005（档位不存在）→ toast + 重拉 rules，避免家长拿着过期快照反复失败；
+ * 8. **重新启用**下架档位时，`isActive: true` 必须真的进 body（读服务端原值 = 静默
+ *    no-op，家长永远救不回下架档位，§1.1#1）——这是本组件存在的理由，必须被钉住；
+ * 9. `points` 边界：`0` 合法、`''` / `'-1'` 非法（不许把空串静默当 0）；
+ * 10. 保存 A 卡只重挂 A 卡，B 卡未保存的草稿不能被连带清掉（只接受切 Tab/切孩子丢草稿）。
  */
 
 vi.mock('@/services/api', async (importOriginal) => {
@@ -201,6 +205,29 @@ describe('PointRulesPanel：渲染', () => {
     expect(screen.getByTestId('point-rules-skeleton')).toBeInTheDocument();
   });
 
+  it('data-student-id 落在面板的**根元素**上（骨架/错误/空态都在，与其它四个面板同款）', async () => {
+    // 骨架态：根就是骨架 div（此时断言在 mock 兑现前同步做）
+    getRulesMock.mockReturnValue(new Promise<MyPointRules>(() => {}));
+    const skeletonRender = renderPanel(7);
+    expect(skeletonRender.container.firstChild).toHaveAttribute('data-student-id', '7');
+    skeletonRender.unmount();
+
+    // 错误态：根是错误 Card
+    getRulesMock.mockRejectedValueOnce(new Error('boom'));
+    const errorRender = renderPanel(7);
+    const errorBox = await screen.findByTestId('point-rules-error');
+    expect(errorRender.container.firstChild).toBe(errorBox);
+    expect(errorBox).toHaveAttribute('data-student-id', '7');
+    errorRender.unmount();
+
+    // 空态：根是空态 Card
+    getRulesMock.mockResolvedValue({ tasks: [] });
+    const emptyRender = renderPanel(7);
+    const empty = await screen.findByTestId('point-rules-empty');
+    expect(emptyRender.container.firstChild).toBe(empty);
+    expect(empty).toHaveAttribute('data-student-id', '7');
+  });
+
   it('加载失败 → 错误态 + 「重试」重新拉取', async () => {
     getRulesMock.mockRejectedValueOnce(new Error('boom'));
 
@@ -290,6 +317,68 @@ describe('PointRulesPanel：草稿与校验', () => {
     const row = within(math).getByTestId('tier-row-math_targeted-1');
     expect(within(row).getByText('分值请填 0–9999 的整数')).toBeInTheDocument();
     expect(within(math).getByTestId('save-task-math_targeted')).toBeDisabled();
+  });
+
+  it('分值填 0 合法（区间下界就是 0）：无行内报错、可保存、body 里 points 为 0', async () => {
+    renderPanel();
+
+    const math = await screen.findByTestId('point-rules-card-math_targeted');
+    const input = within(math).getByTestId('points-input-math_targeted-1');
+    fireEvent.change(input, { target: { value: '0' } });
+    // 先确认输入框真的持有了 '0'（不是被 number input 归一成空串，那样会假绿）
+    expect(input).toHaveValue(0);
+
+    expect(within(math).queryByText('分值请填 0–9999 的整数')).not.toBeInTheDocument();
+    const save = within(math).getByTestId('save-task-math_targeted');
+    expect(save).toBeEnabled();
+
+    // 3 → 0 属于下调，先过二次确认再校验 body（0 必须原样发出，不能被吞成 null）
+    fireEvent.click(save);
+    fireEvent.click(await screen.findByRole('button', { name: '确认保存' }));
+
+    await waitFor(() => expect(saveRulesMock).toHaveBeenCalledTimes(1));
+    expect(saveRulesMock.mock.calls[0][1]).toContainEqual({
+      taskCode: 'math_targeted',
+      tierKey: '1',
+      points: 0,
+      dailyLimit: null,
+      isActive: true,
+    });
+  });
+
+  it('分值清空非法：行内报错 + 保存 disabled + 不发请求（不许把空串静默当 0 提交）', async () => {
+    renderPanel();
+
+    const math = await screen.findByTestId('point-rules-card-math_targeted');
+    const input = within(math).getByTestId('points-input-math_targeted-1');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input).toHaveValue(null);
+
+    const row = within(math).getByTestId('tier-row-math_targeted-1');
+    expect(within(row).getByText('分值请填 0–9999 的整数')).toBeInTheDocument();
+    const save = within(math).getByTestId('save-task-math_targeted');
+    expect(save).toBeDisabled();
+
+    fireEvent.click(save);
+    expect(saveRulesMock).not.toHaveBeenCalled();
+  });
+
+  it('分值填负数非法：行内报错 + 保存 disabled + 不发请求', async () => {
+    renderPanel();
+
+    const math = await screen.findByTestId('point-rules-card-math_targeted');
+    const input = within(math).getByTestId('points-input-math_targeted-1');
+    fireEvent.change(input, { target: { value: '-1' } });
+    // 负号没被 number input 吞掉，错误确实来自 `/^\d+$/` 守卫
+    expect(input).toHaveValue(-1);
+
+    const row = within(math).getByTestId('tier-row-math_targeted-1');
+    expect(within(row).getByText('分值请填 0–9999 的整数')).toBeInTheDocument();
+    const save = within(math).getByTestId('save-task-math_targeted');
+    expect(save).toBeDisabled();
+
+    fireEvent.click(save);
+    expect(saveRulesMock).not.toHaveBeenCalled();
   });
 });
 
@@ -388,6 +477,69 @@ describe('PointRulesPanel：保存与二次确认', () => {
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith('error', 'dailyLimit 非法'),
     );
+  });
+
+  it('已下架档位切回启用 → 保存 body 里该档位 isActive 为 true（「重新启用」不是 no-op）', async () => {
+    renderPanel();
+
+    const english = await screen.findByTestId('point-rules-card-english_words');
+    // 「10 词」在 fixture 里是 isActive:false（下架）
+    fireEvent.click(within(english).getByTestId('tier-switch-english_words-10'));
+    fireEvent.click(within(english).getByTestId('save-task-english_words'));
+
+    await waitFor(() => expect(saveRulesMock).toHaveBeenCalledTimes(1));
+    const body = saveRulesMock.mock.calls[0][1];
+
+    // 核心断言：草稿的 isActive 必须进 body。若实现改成读服务端原值（tier.isActive），
+    // 这里会拿到 false —— 服务端静默 no-op，家长永远救不回下架档位（计划 §1.1#1）。
+    expect(body).toContainEqual({
+      taskCode: 'english_words',
+      tierKey: '10',
+      points: 5,
+      dailyLimit: 3,
+      isActive: true,
+    });
+    // 同卡另一档位原样带出（整卡三字段齐全）
+    expect(body).toContainEqual({
+      taskCode: 'english_words',
+      tierKey: '5',
+      points: 2,
+      dailyLimit: null,
+      isActive: true,
+    });
+    // 启用不是「停用」，不该弹二次确认
+    expect(screen.queryByRole('button', { name: '确认保存' })).not.toBeInTheDocument();
+  });
+
+  it('保存某张卡后，另一张卡未保存的草稿仍在（重挂载只作用于被保存的那张卡）', async () => {
+    renderPanel();
+
+    const math = await screen.findByTestId('point-rules-card-math_targeted');
+    const english = screen.getByTestId('point-rules-card-english_words');
+
+    // B（英语）卡改一半，不保存
+    fireEvent.change(within(english).getByTestId('points-input-english_words-5'), {
+      target: { value: '7' },
+    });
+
+    // A（数学）卡上调分值并保存
+    fireEvent.change(within(math).getByTestId('points-input-math_targeted-3'), {
+      target: { value: '10' },
+    });
+    fireEvent.click(within(math).getByTestId('save-task-math_targeted'));
+
+    await waitFor(() => expect(saveRulesMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledTimes(2));
+
+    // A 卡重挂载 → 回到服务器快照（8），保存重新 disabled
+    const refreshedMath = screen.getByTestId('point-rules-card-math_targeted');
+    expect(within(refreshedMath).getByTestId('points-input-math_targeted-3')).toHaveValue(8);
+    expect(within(refreshedMath).getByTestId('save-task-math_targeted')).toBeDisabled();
+
+    // B 卡没被重挂载 → 草稿（7）还在，保存仍可点
+    const refreshedEnglish = screen.getByTestId('point-rules-card-english_words');
+    expect(within(refreshedEnglish).getByTestId('points-input-english_words-5')).toHaveValue(7);
+    expect(within(refreshedEnglish).getByTestId('save-task-english_words')).toBeEnabled();
   });
 });
 
