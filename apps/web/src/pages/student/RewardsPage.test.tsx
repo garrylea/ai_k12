@@ -119,6 +119,7 @@ describe('RewardsPage', () => {
 
     const card = screen.getByTestId('reward-card-1');
     expect(card).toHaveAttribute('data-state', 'available');
+    expect(card).toHaveTextContent('所需 100 分');
     expect(screen.getByTestId('reward-status-1')).toHaveTextContent('可兑换');
     expect(card.className).not.toContain('opacity-60');
   });

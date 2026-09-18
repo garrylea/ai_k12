@@ -32,7 +32,7 @@ function RewardCard({ item }: { item: StudentRewardItem }) {
           )}
         </div>
         <span className="shrink-0 text-sm font-semibold tabular-nums text-[var(--text-primary)]">
-          {`${item.pointsCost} 分`}
+          {`所需 ${item.pointsCost} 分`}
         </span>
       </div>
 

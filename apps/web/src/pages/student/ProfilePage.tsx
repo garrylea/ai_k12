@@ -179,7 +179,8 @@ export default function ProfilePage() {
 
             {ledgerFailed ? (
               <p className="mt-4 text-sm text-[var(--text-secondary)]">积分流水暂时加载失败</p>
-            ) : !ledger ? (              <div data-testid="ledger-skeleton" className="mt-4 space-y-3">
+            ) : !ledger ? (
+              <div data-testid="ledger-skeleton" className="mt-4 space-y-3">
                 <Skeleton width="100%" height={44} />
                 <Skeleton width="100%" height={44} />
                 <Skeleton width="100%" height={44} />
