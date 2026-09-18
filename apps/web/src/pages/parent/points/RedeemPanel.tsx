@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Button, Card, Modal, Skeleton, toast } from '@/components/base';
 import {
@@ -76,6 +76,16 @@ export default function RedeemPanel({
 }: RedeemPanelProps) {
   const [data, setData] = useState<LoadedData | null>(null);
   const [dataFailedStudentId, setDataFailedStudentId] = useState<number | null>(null);
+  /**
+   * 「成功过一次、但最近这次后台刷新失败」——**不是**错误态，只配一行非致命提示。
+   *
+   * 只在兑换成功后的重拉失败时会出现：那笔兑换已经扣了积分，若把 `data` 清空、
+   * 翻成「兑换信息暂时加载失败」，家长会以为钱没扣/兑换失败（审查 #1）。
+   * 判断「有没有可用旧数据」用 ref 记住上次成功加载的学生，而不是读 `data`——
+   * 切换孩子时 `data` 还留着上一个孩子的值，那个不算「当前孩子有数据」。
+   */
+  const [dataStale, setDataStale] = useState(false);
+  const loadedStudentIdRef = useRef<number | null>(null);
   const [dataReload, setDataReload] = useState(0);
   const [settingsData, setSettingsData] = useState<LoadedSettings | null>(null);
   const [settingsFailedStudentId, setSettingsFailedStudentId] = useState<number | null>(null);
@@ -104,10 +114,18 @@ export default function RedeemPanel({
           catalog,
           levels: levels.levels,
         });
+        loadedStudentIdRef.current = studentId;
+        setDataStale(false);
         setDataFailedStudentId(null);
       })
       .catch(() => {
         if (cancelled) return;
+        // 当前孩子已经有成功加载过的数据 → 这次只是后台刷新失败，保留旧数据 + 非致命提示。
+        // 首次加载 / 切孩子后的加载失败才进错误态（没有可用数据，必须让家长看到重试）。
+        if (loadedStudentIdRef.current === studentId) {
+          setDataStale(true);
+          return;
+        }
         setData(null);
         setDataFailedStudentId(studentId);
       });
@@ -208,7 +226,10 @@ export default function RedeemPanel({
     ? '兑换已关闭，打开开关后可兑换'
     : closedByServer
       ? '兑换已关闭，可在上方设置中开启'
-      : (serverInline ?? (insufficient ? `可用积分不足，当前 ${balance} 分` : null));
+      : (serverInline ??
+        // `insufficient` 是「换钱输入超额」的本地判据，只属于换钱模式；
+        // 切到换奖励还显示它会答非所问（该模式根本没用那个输入框）——审查 #2
+        (mode === 'cash' && insufficient ? `可用积分不足，当前 ${balance} 分` : null));
 
   const switchMode = (next: Mode) => {
     if (next === mode) return;
@@ -301,6 +322,16 @@ export default function RedeemPanel({
           className="mt-4 rounded-[var(--radius-button)] border border-[var(--error)] px-3 py-2 text-xs text-[var(--error)]"
         >
           {inlineError}
+        </p>
+      )}
+
+      {/*
+        非致命提示（审查 #1）：兑换成功后余额已按响应体更新，只是这次后台重拉失败。
+        数据仍可用（不整块错误态），但汇率/清单可能略旧——说清楚，别吓人。
+      */}
+      {dataStale && (
+        <p data-testid="redeem-stale" className="mt-4 text-xs text-[var(--text-tertiary)]">
+          信息可能不是最新，稍后自动刷新
         </p>
       )}
 
@@ -426,11 +457,16 @@ export default function RedeemPanel({
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 text-xs">
-                        {item.minLevelCode && gate.requiredName && (
+                        {item.minLevelCode && (
                           <span className="text-[var(--text-tertiary)]">
-                            {gate.levelOk
-                              ? `已达「${gate.requiredName}」`
-                              : `需达到「${gate.requiredName}」段位`}
+                            {gate.requiredName
+                              ? gate.levelOk
+                                ? `已达「${gate.requiredName}」`
+                                : `需达到「${gate.requiredName}」段位`
+                              : // 脏 code（段位表里查不到）：项已按后端同口径置为不可兑，
+                                // 但不能让家长只看到灰按钮没有原因。回退文案照服务端学生端
+                                // 用的「更高段位」，不自己编段位名——审查 #3
+                                '需达到更高段位'}
                           </span>
                         )}
                         {!gate.affordable && (

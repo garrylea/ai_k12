@@ -282,6 +282,71 @@ describe('RedeemPanel：换钱', () => {
     // 余额/清单刷新（points + catalog 重拉）
     await waitFor(() => expect(getCatalogMock).toHaveBeenCalledTimes(2));
   });
+
+  /**
+   * 审查小修 #4：确认弹窗的「取消」不能发请求。既有用例只覆盖了「确认前不发请求」，
+   * 取消路径一旦被写成「关弹窗顺手提交」没人挡得住——它会真扣孩子的积分。
+   */
+  it('确认弹窗点「取消」→ 关闭弹窗且不发请求', async () => {
+    render(<RedeemPanel studentId={1} />);
+    await ready();
+
+    fillCashAndSubmit('100');
+    expect(await screen.findByText(/兑换不可撤销/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+
+    await waitFor(() => expect(screen.queryByText(/兑换不可撤销/)).not.toBeInTheDocument());
+    expect(redeemMock).not.toHaveBeenCalled();
+    // 取消只是关弹窗，输入与表单还在
+    expect(screen.getByTestId('redeem-points-input')).toHaveValue(100);
+  });
+
+  /**
+   * 审查小修 #1：兑换成功后的**后台刷新失败**不能把整块面板翻成错误态。
+   * 钱已经扣了，再显示「兑换信息暂时加载失败」会让家长以为兑换没生效。
+   * 此时必须保留上一次成功的数据（含刚更新的余额），只给非致命提示。
+   */
+  it('兑换成功后重拉数据失败 → 保留旧数据 + 非致命提示，不整块错误态', async () => {
+    render(<RedeemPanel studentId={1} />);
+    await ready();
+
+    // 初始加载已成功（ref 记录了学生 1）；下一次数据重拉失败
+    getCatalogMock.mockRejectedValueOnce(new Error('reload boom'));
+
+    fillCashAndSubmit('100');
+    await confirmModal();
+
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith('success', '已为孩子兑换 ¥5.00'));
+
+    // 面板还在（用的是同步更新的余额数据），没有翻成错误卡
+    expect(screen.getByTestId('redeem-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('redeem-error')).not.toBeInTheDocument();
+    // 非致命提示
+    expect(screen.getByTestId('redeem-stale')).toHaveTextContent('信息可能不是最新');
+    // 兑换后余额仍按响应体更新为 900（不是被失败刷新清掉）
+    fireEvent.change(screen.getByTestId('redeem-points-input'), { target: { value: '900' } });
+    expect(screen.getByTestId('redeem-cash-summary')).toHaveTextContent('兑换后余额 0 分');
+  });
+
+  /**
+   * 审查小修 #2：`insufficient` 是「换钱输入超额」的本地判据，只属于换钱模式。
+   * 切到换奖励后还显示「可用积分不足，当前 N 分」是答非所问（该模式根本没用那个输入）。
+   */
+  it('换钱输入超额后切到换奖励：inline 不再显示积分不足；切回换钱再显示', async () => {
+    render(<RedeemPanel studentId={1} />);
+    await ready();
+
+    fireEvent.change(screen.getByTestId('redeem-points-input'), { target: { value: '2000' } });
+    expect(screen.getByTestId('redeem-inline')).toHaveTextContent('可用积分不足，当前 1000 分');
+
+    pickRewardMode();
+    expect(screen.queryByTestId('redeem-inline')).not.toBeInTheDocument();
+
+    // 切回换钱模式：输入原值还在，不足提示应恢复
+    fireEvent.click(screen.getByRole('radio', { name: '换钱' }));
+    expect(screen.getByTestId('redeem-inline')).toHaveTextContent('可用积分不足，当前 1000 分');
+  });
 });
 
 describe('RedeemPanel：换奖励', () => {
@@ -349,6 +414,34 @@ describe('RedeemPanel：换奖励', () => {
     expect(screen.getByTestId('reward-option-11')).toHaveAttribute('aria-checked', 'false');
     // 没有可提交的选中项
     expect(screen.getByTestId('redeem-submit')).toBeDisabled();
+  });
+
+  /**
+   * 审查小修 #3：`minLevelCode` 是脏数据（段位表里没有这个 code）时，该项按后端同口径
+   * 不可兑（`levelOk:false`），但门槛原因行原本**一个字都不渲染**——家长只看到按钮灰着，
+   * 不知道为什么。回退文案照服务端学生端用的「更高段位」，不自己编段位名。
+   */
+  it('脏 minLevelCode（段位表查不到）→ 项 disabled 且回退说明「更高段位」', async () => {
+    getCatalogMock.mockResolvedValue([
+      {
+        id: 21,
+        name: '神秘奖励',
+        description: null,
+        pointsCost: 10,
+        minLevelCode: 'not_a_real_level',
+        isActive: true,
+        sortOrder: 0,
+      },
+    ]);
+
+    render(<RedeemPanel studentId={1} />);
+    await ready();
+    pickRewardMode();
+
+    const option = screen.getByTestId('reward-option-21');
+    expect(option).toBeDisabled();
+    // 不是只灰着：有诚实的回退标签
+    expect(within(option).getByText(/更高段位/)).toBeInTheDocument();
   });
 });
 
