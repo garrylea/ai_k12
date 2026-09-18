@@ -148,6 +148,14 @@ export default function ParentPointsPage() {
   const [failedStudentId, setFailedStudentId] = useState<number | null>(null);
   /** 递增触发重拉。用计数器而不是把请求函数塞进依赖，重试不用再造一个 effect。 */
   const [overviewReload, setOverviewReload] = useState(0);
+  /**
+   * 「兑换设置」保存成功的版本号，透传给同 Tab 下方的兑换表单。
+   *
+   * 两块面板各自独立取数（设置由 `PointsSettingsPanel` 自己读），兑换表单也自己读
+   * settings 拿汇率与开关。上方面板改完开关后，下方面板并不知道 —— 这条数字版本
+   * 就是最小的耦合通道：页面不掺和两边的表单状态，只负责「保存发生了 → 重读」。
+   */
+  const [redeemSettingsVersion, setRedeemSettingsVersion] = useState(0);
 
   /**
    * 概览数据**按 studentId 现算**，而不是在 effect 里 `setPoints(null)` 清：
@@ -381,9 +389,13 @@ export default function ParentPointsPage() {
             )}
             {activeTab === 'redeem' && (
               <div className="space-y-6">
-                <PointsSettingsPanel studentId={studentId} />
+                <PointsSettingsPanel
+                  studentId={studentId}
+                  onSettingsChanged={() => setRedeemSettingsVersion((n) => n + 1)}
+                />
                 <RedeemPanel
                   studentId={studentId}
+                  settingsVersion={redeemSettingsVersion}
                   onPointsChanged={() => setOverviewReload((n) => n + 1)}
                 />
               </div>
