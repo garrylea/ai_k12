@@ -68,6 +68,14 @@ export function UserBadge({ username, initial, subtitle, className }: UserBadgeP
 
   const avatarText = initial ?? (username ? username.charAt(0).toUpperCase() : '学');
 
+  // 余额必须进可访问名：`aria-label` 会**覆盖**元素内容，光在药丸里塞 `sr-only`
+  // 读屏只会念 label 里的「段位与积分」，数字一个读不到。加载中/失败时不给余额子句，
+  // 避免把占位/空值念成「可用积分」。
+  const hasBalance = status === 'ready' && points !== null;
+  const accessibleName = hasBalance
+    ? `${username} · 可用积分 ${points.balance} · 段位与积分`
+    : `${username} · 段位与积分`;
+
   return (
     <div ref={rootRef} className={clsx('relative', className)}>
       <button
@@ -75,7 +83,7 @@ export function UserBadge({ username, initial, subtitle, className }: UserBadgeP
         data-testid="user-badge"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`${username} · 段位与积分`}
+        aria-label={accessibleName}
         onClick={() => setOpen((prev) => !prev)}
         className="flex items-center gap-2 rounded-[var(--radius-pill)] border border-[var(--bg-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 shadow-sm transition-colors hover:bg-[var(--bg-subtle)]"
       >
@@ -111,8 +119,7 @@ export function UserBadge({ username, initial, subtitle, className }: UserBadgeP
               data-testid="user-badge-balance"
               className="shrink-0 text-sm font-semibold tabular-nums text-[var(--brand-600)]"
             >
-              {/* 数字本身没有单位，读屏会念成光秃秃的「120」——补一个视觉隐藏的量词 */}
-              <span className="sr-only">可用积分</span>
+              {/* 量词在 aria-label 里（见上面的 accessibleName），这里只放数字 */}
               {points.balance}
             </span>
           </>

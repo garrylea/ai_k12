@@ -110,6 +110,11 @@ export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
   // 桌面 popover 用 fixed 定位：徽章所在容器多带 overflow-hidden
   //（CourseDetailPage / AuxiliaryLayout 都是），absolute 会被裁掉。
   // 尺寸优先实测（文案/字号一变也不失真），量不到时退回兜底常量。
+  //
+  // ⚠️ 依赖里**必须带 `loading` / `data`**：open 变 true 的那一帧 body 还是兜底
+  // 文案（loading 尚未在 effect 里置 true、data 还是 null），实测到的是 ≈76px 的一行；
+  // body 随后长到 ≈240px 时若不再测，底部宿主（侧栏页脚 + 视口高 overflow-hidden）
+  // 会按一行高翻转，正文连同「查看积分明细 →」整块落到折线以下且滚不到。
   const [pos, setPos] = useState<PanelPosition | null>(null);
   useLayoutEffect(() => {
     if (!open || !isDesktop) {
@@ -145,12 +150,19 @@ export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [open, isDesktop, anchorRef]);
+    // loading / data 刻意入依赖：body 从骨架/兜底长成正文后要在同一 commit 内重测
+  }, [open, isDesktop, anchorRef, loading, data]);
 
-  // aria-modal 要求焦点进入面板：打开后把焦点交给容器（Esc 监听挂在 document 上，仍能关）
+  // aria-modal 要求焦点进入面板：打开后把焦点交给容器（Esc 监听挂在 document 上，仍能关）。
+  // 关闭时把焦点还给打开它的元素——面板一卸载焦点就掉到 <body>，键盘用户会丢位置。
   useEffect(() => {
     if (!open) return;
+    const previous =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panelRef.current?.focus();
+    return () => {
+      previous?.focus();
+    };
   }, [open]);
 
   if (!open) return null;

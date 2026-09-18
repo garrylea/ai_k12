@@ -1,5 +1,6 @@
+import { createRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { LevelPanel } from './LevelPanel';
 import { computePanelPosition } from './level-panel-position';
@@ -148,6 +149,93 @@ describe('LevelPanel', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('关闭后焦点归还给打开面板的触发元素（键盘用户不丢位置）', async () => {
+    getMyPointsMock.mockResolvedValue(BASE);
+
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" data-testid="points-trigger" onClick={() => setOpen(true)}>
+            段位
+          </button>
+          <LevelPanel open={open} onClose={() => setOpen(false)} />
+        </>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/student/star-map']}>
+        <Harness />
+      </MemoryRouter>,
+    );
+
+    const trigger = screen.getByTestId('points-trigger');
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(await screen.findByText('铸铁')).toBeInTheDocument();
+    expect(screen.getByTestId('level-panel')).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    // 面板卸载后焦点不能掉到 <body>
+    expect(screen.queryByTestId('level-panel')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  /**
+   * 首开即「底部宿主」时的重测定位。
+   *
+   * 真机三个宿主都把徽章放在视口高、overflow-hidden、不可滚动的侧栏页脚：
+   * open 变 true 的那一帧 body 还是兜底一行（loading 未置 true、data 为 null），
+   * 若只在 open 时测一次，就会按一行高翻转，正文（≈240px）连同 CTA 落到折线以下。
+   * jsdom 的 rect 恒为 0，这里按元素角色伪造 rect，让「加载后高度」可观测。
+   */
+  it('首开即底部宿主：body 从加载中长成正文后，按「加载后高度」重测定位', async () => {
+    const ANCHOR = { top: 712, bottom: 752, left: 16, right: 250, width: 234, height: 40 };
+    const rect = (o: { top: number; bottom: number; left: number; right: number; width: number; height: number }): DOMRect =>
+      ({ ...o, x: o.left, y: o.top, toJSON: () => ({}) }) as DOMRect;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.dataset.testid === 'anchor') return rect(ANCHOR);
+      if (this.dataset.testid === 'level-panel') {
+        // 正文（有余额节点）240px；骨架/兜底一行 76px
+        const height = this.querySelector('[data-testid="level-panel-balance"]') ? 240 : 76;
+        return rect({ top: 0, bottom: height, left: 0, right: 288, width: 288, height });
+      }
+      return rect({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 });
+    });
+
+    let resolvePoints: (value: MyPoints) => void = () => {};
+    getMyPointsMock.mockReturnValue(
+      new Promise<MyPoints>((resolve) => {
+        resolvePoints = resolve;
+      }),
+    );
+
+    const anchorRef = createRef<HTMLDivElement>();
+    render(
+      <MemoryRouter initialEntries={['/student/star-map']}>
+        <div ref={anchorRef} data-testid="anchor" />
+        <LevelPanel open onClose={vi.fn()} anchorRef={anchorRef} />
+      </MemoryRouter>,
+    );
+
+    const panel = screen.getByTestId('level-panel');
+    // 首帧 body 仍是一行兜底：top = 712 - 76 - 8
+    expect(panel).toHaveStyle({ top: '628px' });
+
+    act(() => resolvePoints(BASE));
+    expect(await screen.findByText('铸铁')).toBeInTheDocument();
+
+    // 正文 240px → top = 712 - 240 - 8；没重测的话会停在 628（一行高的结果）
+    expect(panel).toHaveStyle({ top: '464px' });
+    expect(464 + 240).toBeLessThanOrEqual(ANCHOR.top);
   });
 
   it('窄屏为底部抽屉，点遮罩关闭', async () => {

@@ -81,11 +81,14 @@ describe('UserBadge', () => {
     const icon = await screen.findByTestId('user-badge-level-icon');
     expect(icon.querySelector('svg')).not.toBeNull();
     expect(screen.getByTestId('user-badge-balance')).toHaveTextContent('120');
-    // 数字必须有量词，否则读屏念成光秃秃的「120」
-    expect(screen.getByText('可用积分')).toHaveClass('sr-only');
+    // 数字必须带量词进**可访问名**：aria-label 会覆盖元素内容，
+    // 只加 sr-only 的话读屏还是只念 label，永远听不到余额。
+    expect(screen.getByTestId('user-badge')).toHaveAccessibleName(
+      '小明 · 可用积分 120 · 段位与积分',
+    );
   });
 
-  it('加载完成前显示骨架，不显示「0 分」', () => {
+  it('加载完成前显示骨架，不显示「0 分」，可访问名也不含余额子句', () => {
     getMyPointsMock.mockReturnValue(new Promise<MyPoints>(() => {}));
 
     renderBadge();
@@ -94,6 +97,8 @@ describe('UserBadge', () => {
     expect(screen.getByTestId('user-badge-points-skeleton')).toBeInTheDocument();
     expect(screen.queryByText('0 分')).not.toBeInTheDocument();
     expect(screen.queryByText('0')).not.toBeInTheDocument();
+    // 余额未到时不能念出一个不存在的「可用积分」
+    expect(screen.getByTestId('user-badge')).toHaveAccessibleName('小明 · 段位与积分');
   });
 
   it('加载失败 → 静默降级：只留头像 + 名字，无段位/积分、无错误提示', async () => {
