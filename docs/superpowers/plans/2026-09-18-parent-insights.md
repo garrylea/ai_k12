@@ -6577,6 +6577,8 @@ git commit -m "feat(parent): AI 对话回放页（左列表右详情 + 闲聊红
 4. `GET /parent/students/{studentId}/errors`：加 query `subject` / `source` / `track`（enum main,aux）/ `cleared`（enum uncleared,cleared,all）/ `from` / `to` / `page`；响应改为分页壳 `{items, page, pageSize, total}`。`ErrorItem.source` 的 enum 按**实际值**改成 `[practice, discuss, exam, targeted, error_practice, auxiliary]`。
 5. `GET /parent/students/{studentId}/chat-logs`：加 query `track` / `scene` / `from` / `to` / `q` / `page`；响应改为分页壳；新增 `ChatLogItem` schema（含 `messageCount` / `blockCount`）。
 6. 新增 `ChatLogDetail` schema（`ChatLogItem` + `messages[]`，每条含 `id/role/content/reasoning/type/model/safetyFlag/createdAt`）。
+   - **注意 `updatedAt` 的语义**：新 `ChatLogItem.updatedAt` 的 description 必须写清是「**最后一条消息时间**（无消息则退回创建时间）」。现在 `openapi.yaml:2399` 的家长端会话列表挂在**共享的 `Conversation` schema** 上，而那个 schema 的 `updatedAt`（约 `:6343`）与学生端端点同源、指的是 `ai_dialogues.updated_at`——不改就会在契约里留下「同一字段两种含义」的歧义。
+   - 分页壳沿用 `{items, page, pageSize, total}`，与 errors 一致。
 
 校验：
 ```bash
