@@ -3355,6 +3355,11 @@ export class ChatLogsService {
     }
 
     const messages = await this.messagesRepo.findByDialogue(dialogueId);
+    // 与列表同口径：`updatedAt` 是「最后一条消息时间」，不是 `dialogue.updated_at`
+    // （后者实质冻结在创建时刻——追加消息只 INSERT 消息表）。`findByDialogue` 按 id 升序
+    // 返回且已过滤软删，故最后一条即最新一条；没有消息时退回创建时间。
+    const lastMessageAt =
+      messages.length > 0 ? messages[messages.length - 1].created_at : dialogue.created_at;
     const listItem = {
       id: dialogue.id,
       track: dialogue.track,
@@ -3362,7 +3367,7 @@ export class ChatLogsService {
       title: dialogue.title,
       subjectId: dialogue.subject_id,
       createdAt: dialogue.created_at,
-      updatedAt: dialogue.updated_at,
+      updatedAt: lastMessageAt,
       messageCount: messages.length,
       blockCount: messages.filter((m) => m.safety_flag === 1).length,
     };
