@@ -35,6 +35,7 @@ import AdminLayout from '@/components/layout/AdminLayout';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
 import ParentMessagesPage from '@/pages/parent/ParentMessagesPage';
 import StudentSubjectConfigPage from '@/pages/parent/StudentSubjectConfigPage';
+import ParentPointsPage from '@/pages/parent/ParentPointsPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -324,7 +325,7 @@ export const routes: RouteObject[] = [
       { path: 'chat-logs', element: <Placeholder title="AI 对话全透明回放 P6.4" /> },
       { path: 'goals', element: <Placeholder title="目标设定 P6.5" /> },
       { path: 'controls', element: <Placeholder title="行为管控 P6.6" /> },
-      { path: 'rewards', element: <Placeholder title="奖励管理与兑现 P6.7" /> },
+      { path: 'rewards', element: <ParentPointsPage /> },
       { path: 'children-switch', element: <Placeholder title="多孩切换 P6.8" /> },
       { path: 'alerts', element: <Placeholder title="异常预警中心 P6.9" /> },
       { path: 'account', element: <Placeholder title="账号设置 P6.10" /> },
