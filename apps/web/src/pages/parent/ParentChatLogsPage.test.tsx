@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
 import {
@@ -169,6 +169,26 @@ describe('ParentChatLogsPage', () => {
 
     expect(await screen.findByTestId('chatlogs-no-student')).toBeInTheDocument();
     expect(getLogsMock).not.toHaveBeenCalled();
+  });
+
+  it('切换孩子时，上一个孩子的对话内容不能留在右侧（详情必须按 studentId 归属）', async () => {
+    const GIRL = { ...BOY, id: 12, username: 'xiaomei', name: '小美' };
+    listMyStudentsMock.mockResolvedValue([BOY, GIRL]);
+
+    renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+    expect(await screen.findByTestId('chatlog-message-201')).toBeInTheDocument();
+
+    // 切到小美，并让「详情」请求悬着不 resolve —— 此时旧内容**不能**还挂在屏上。
+    // 本页不会因换孩子而重挂载（ParentLayout 的 <Outlet/> 没有 key），
+    // 所以只按 activeId 守卫会让上一个孩子的整段对话在新孩子的名字下继续显示。
+    getDetailMock.mockImplementation(() => new Promise(() => {}));
+    act(() => useParentStudentStore.setState({ studentId: GIRL.id }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('chatlog-message-201')).not.toBeInTheDocument(),
+    );
   });
 
   // ↓↓↓ 三条守卫的真实钉子（删掉实现里的守卫它们会红，见 report 反向证据） ↓↓↓

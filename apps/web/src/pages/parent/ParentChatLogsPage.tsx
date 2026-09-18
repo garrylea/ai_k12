@@ -95,8 +95,30 @@ export default function ParentChatLogsPage() {
   const [failure, setFailure] = useState(false);
   const [reload, setReload] = useState(0);
   const [activeId, setActiveId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<ParentChatLogDetail | null>(null);
+  /**
+   * 详情**必须连同 studentId 一起存**，光按 `activeId` 守卫不够。
+   *
+   * 顶栏 `StudentSwitcher` 切孩子时不导航，而 `ParentLayout` 的 `<Outlet />` **没有 key**，
+   * 所以本页**不会重挂载**——`activeId` 与 `detail` 都会跨孩子活下来。若只判
+   * `detail.id === activeId`，切孩子的第一帧就会把**上一个孩子的对话内容整屏画出来**
+   * （含可展开的 AI 思路），而顶栏已经显示新孩子的名字。等详情请求回来才纠正，
+   * 慢网下这个窗口有好几秒。
+   * 注意**加一个 `useEffect(() => setActiveId(null), [studentId])` 是不够的**：
+   * effect 在 commit 之后才跑，那一帧照样会画出来。
+   */
+  const [detail, setDetail] = useState<{ studentId: number; value: ParentChatLogDetail } | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
+
+  // 换孩子必须回第 1 页（与 `ParentErrorsPage` 同因）：否则会拿上一个孩子的第 N 页去请求新孩子，
+  // 若新孩子页数不够，响应回显的 page 仍是 N（守卫会通过）→ 停在「当前筛选下没有对话记录」，
+  // 而**分页控件只在非空分支里渲染**，家长无法自救。
+  useEffect(() => {
+    setPage(1);
+  }, [studentId]);
+
+  /** 「自报家门」+ 归属：不是当前孩子的、或不是当前选中会话的，都当作还没到货。 */
+  const detailData =
+    detail && detail.studentId === studentId && detail.value.id === activeId ? detail.value : null;
 
   // 「自报家门」：不归当前孩子、或回显页号对不上 → 当作还没到货
   const pageData =
@@ -136,7 +158,7 @@ export default function ParentChatLogsPage() {
     getParentChatLogDetail(studentId, activeId)
       .then((res) => {
         if (cancelled) return;
-        setDetail(res);
+        setDetail({ studentId, value: res });
       })
       .catch(() => {
         if (cancelled) return;
@@ -329,7 +351,7 @@ export default function ParentChatLogsPage() {
               <p className="py-16 text-center text-sm text-[var(--text-secondary)]">
                 这条对话暂时无法查看
               </p>
-            ) : detail === null || detail.id !== activeId ? (
+            ) : detailData === null ? (
               <div className="space-y-3">
                 <Skeleton width="100%" height={64} />
                 <Skeleton width="100%" height={64} />
@@ -338,13 +360,13 @@ export default function ParentChatLogsPage() {
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base font-bold text-[var(--text-primary)]">
-                    {detail.title || '未命名会话'}
+                    {detailData.title || '未命名会话'}
                   </h2>
                   <span className="text-xs text-[var(--text-tertiary)]">
-                    {`${detail.messageCount} 句 · ${formatDateTime(detail.createdAt)}`}
+                    {`${detailData.messageCount} 句 · ${formatDateTime(detailData.createdAt)}`}
                   </span>
                 </div>
-                {detail.messages.map((m) => (
+                {detailData.messages.map((m) => (
                   <MessageRow key={m.id} message={m} />
                 ))}
               </div>
