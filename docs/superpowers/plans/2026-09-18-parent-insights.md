@@ -3921,6 +3921,11 @@ export default function ChartBar({
 }
 ```
 
+> ⚠️ **上面两个组件里的取色写法是错的，已在实施中修正——别照抄那两行 `useMemo`。**
+> 原写法 `useMemo(() => readChartColor(token, wrapRef.current), [colorToken])` 在**首次渲染时 `wrapRef.current` 是 `null`**（React 要到 commit 阶段才填 ref），所以它**永远返回兜底值**——「从最近的 `[data-theme]` 容器读真实色值」这个本任务的核心行为从未执行过。而且因为兜底值刻意等于家长主题真值，这个 bug **完全不可见**（首屏颜色看起来一模一样）。
+> 正确写法是**挂载后读取**：`useState` 存色值 + `useLayoutEffect(..., [colorToken])` 里 `setState`。layout effect 在浏览器 paint 之前同步 flush，所以不会先闪一帧兜底色。
+> 落盘实现见 `apps/web/src/components/business/parent/ChartLine.tsx` 与 `ChartBar.tsx`；对应的**回归钉子**是每个组件各一条「容器上给 `--brand-500: #123456`，断言 series 的 `data-stroke`/`data-fill` 等于 `#123456`」——只断言 `!== '#8884d8'` 是**无效断言**（读容器与用兜底都会通过，因为兜底本身就是 `#2563EB`）。
+
 - [ ] **Step 9: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/`
