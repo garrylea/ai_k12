@@ -753,6 +753,18 @@ describe('ParentInsightsRepository：趋势与考试列表', () => {
     expect(sql).toContain('ORDER BY date ASC');
   });
 
+  it('MySQL 返回 Date 时按**本地**日期拼（toISOString 会在 UTC+8 下切到前一天）', async () => {
+    const pool = mockPool([
+      // mysql2 对 DATE 列返回本地零点的 Date：2026-09-15 本地零点
+      { date: new Date(2026, 8, 15), answered: 10, correct: 7 },
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getAccuracyTrend(9, new Date(2026, 8, 12), new Date(2026, 8, 19));
+
+    expect(result[0].date).toBe('2026-09-15');
+  });
+
   it('考试列表只取已交卷、按交卷时间倒序、带卷名与客观题数', async () => {
     const pool = mockPool([
       {
@@ -839,10 +851,10 @@ export interface ExamSummaryRow {
       [studentId, from, to, studentId, from, to],
     );
     return rows.map((r) => ({
-      date:
-        typeof r.date === 'string'
-          ? r.date
-          : new Date(r.date as Date).toISOString().slice(0, 10),
+      // `DATE(x)` 经 mysql2 回来的是**本地零点**的 Date。UTC+8 下 `toISOString()` 会把它切成
+      // 前一天（2026-09-15 本地零点 = 2026-09-14T16:00Z），整条折线的 X 轴会集体前移一天。
+      // 必须按本地字段拼 —— 与 `modules/parent-insights/window.util.ts` 的 `toDayString` 同口径。
+      date: typeof r.date === 'string' ? r.date : toLocalDayString(new Date(r.date as Date)),
       answered: Number(r.answered ?? 0),
       correct: Number(r.correct ?? 0),
     }));
@@ -878,6 +890,24 @@ export interface ExamSummaryRow {
     }));
   }
 ```
+
+> **`date` 的映射是本任务最容易踩的坑**：`DATE(judged_at)` 经 mysql2（`connection.ts` 未设 `dateStrings`/`timezone`）
+> 回来是**本地零点**的 `Date` 对象。若用 `toISOString().slice(0,10)`，UTC+8 下会得到**前一天**，
+> 整条折线 X 轴集体前移一天。必须在仓储文件里加一个模块级 helper 按本地字段拼：
+
+```ts
+/** 本地时区的 `YYYY-MM-DD`。**不要用 `toISOString()`**：那会按 UTC 切，跨时区差一天。 */
+function toLocalDayString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+```
+
+> 为什么不复用 `modules/parent-insights/window.util.ts` 的 `toDayString`：那是**模块层**的工具，
+> 从 `database/repositories/` 反向 import 模块层是分层倒挂。两处各自保留一份 4 行实现是有意的，
+> **不要**为了 DRY 把它们抽成跨层共享。
 
 - [ ] **Step 4: 跑测试确认通过**
 
