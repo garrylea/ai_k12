@@ -267,6 +267,8 @@ interface StudentSwitcherProps { className?: string }
 
 - `ApiError` 的 `code` 从 `err.code` 取（`fetchApi` 已解 `{code,message}`）。**不要**用 `err.message.includes(...)` 判错。
 
+> **实现注（终审裁决，2026-09-18）**：上表 404/`1002`、403/`1005` 两行的「**+ 切回第一个 / 回落第一个**」本次**未实现**——页面只出各自的空态（`points-student-missing` / `points-student-forbidden`，与通用错误条分开的 testid），**家长需手动在顶部 `StudentSwitcher` 切换孩子**。原因与后继做法见 §6 遗留 5。
+
 ### 2.9 `services/api.ts` 家长端新增函数（`// --- Parent: points & rewards ---` 分区）
 
 ```ts
@@ -546,3 +548,4 @@ cd ../web && npm run dev
 2. `RewardCard.tsx` 仍是**死组件**（`apps/web/src/components/business/RewardCard.tsx`，仅被 UX §3.2.6 引用）。计划二 Task 5 的奖励册自建卡片、本计划的清单用表格，两处都不用它。→ 建议终审裁决「删掉」或「改造后复用」，本计划不动。
 3. `ParentLayout` 的假 Banner（`hasAlert = true`）是「异常预警」的占位，与积分无关，本次不碰。
 4. 计划一的 `dailyLimit` 默认值改动**不回溯存量学生**（`insertIgnoreBatch` 不覆盖已有行）。家长若此前已初始化过规则，`math_targeted` 仍是 `dailyLimit: null`（无上限）。→ 上线前用家长页手工设一次，或单独跑迁移；**不做**自动回溯。
+5. **学生类 `1002`/`1005` 不自动回落到第一个孩子**（终审裁决的已知取舍，2026-09-18）。页面已按 §2.8 给两个独立空态，但**不替家长换人**。可达场景：顶栏列表加载后孩子在别处被删/被转走，家长在同一 pathname 下切 Tab（`commitTab` 只改 `?tab=`、**不改 pathname**，而 `StudentSwitcher` 的重拉 effect 依赖 `[load, pathname]`）→ 概览与各面板持续报错。**当前行为**：家长手工在顶部切换孩子即可恢复；不切换就一直停在空态。**要做自动回落**得先给 `StudentSwitcher` 开一条重拉通道（它才持有孩子列表），由它发现「当前 id 已不在列表」后 `setStudentId(第一个)`——属另一处改动，本计划不做。

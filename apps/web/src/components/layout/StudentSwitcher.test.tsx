@@ -91,6 +91,8 @@ describe('StudentSwitcher', () => {
     expect(trigger).toHaveTextContent('小明');
     expect(trigger).toHaveTextContent('（三年级）');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    // 有孩子才有「当前查看：」这个前缀标签（空态/错误态刻意不渲染它，见下方用例）
+    expect(screen.getByText('当前查看：')).toBeInTheDocument();
     // 没有年级时不编一个出来
     expect(trigger).not.toHaveTextContent('（null）');
   });

@@ -1898,7 +1898,12 @@ export function saveParentPointRules(
   });
 }
 
-/** 流水分页。`pageSize` 省略时**不传该 query**，按后端默认 20（上限 100，越界 400）。 */
+/** 流水分页。`pageSize` 省略时**不传该 query**，按后端默认 20（上限 100，越界 400）。
+ *
+ *  ⚠️ **当前无消费方**（终审 2026-09-18 裁决：保留）。家长端本期没有「积分流水」Tab
+ *  ——学生端的流水在个人中心。这条留着是给后续**家长端流水页**预留（端点 §4.21 已
+ *  在服务端实现并有集成用例），`api.test.ts` 的 query 拼接用例同步保留；若要删，
+ *  请连用例一起删，别只删函数。 */
 export function getParentPointLedger(
   studentId: number,
   page: number,

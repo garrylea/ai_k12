@@ -9,8 +9,10 @@ import {
   within,
 } from '@testing-library/react';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { flushSync } from 'react-dom';
 import ParentPointsPage from './ParentPointsPage';
 import {
+  ApiError,
   getLevels,
   getParentPointRules,
   getParentPoints,
@@ -318,6 +320,47 @@ describe('ParentPointsPage：概览卡', () => {
     expect(getParentPointsMock).toHaveBeenCalledTimes(2);
     expect(getParentPointsMock).toHaveBeenLastCalledWith(1);
   });
+
+  /**
+   * §2.8 学生类错误码分流。孩子在别处被删/被转走后，本页手里的 id 已经失效——
+   * 「重试」永远不会成功，所以 `1002`/`1005` 给**空态**（与「加载失败」不同的
+   * testid/文案，也没有重试按钮），只有其它错误（网络/500）才是「加载失败」。
+   */
+  it('概览 404/1002 → 「该孩子账号不存在」空态，不是通用错误条、也没有重试', async () => {
+    getParentPointsMock.mockRejectedValueOnce(new ApiError(1002, '学生不存在'));
+
+    renderPage();
+
+    expect(await screen.findByTestId('points-student-missing')).toBeInTheDocument();
+    expect(screen.getByText('该孩子账号不存在，请在顶部切换其它孩子')).toBeInTheDocument();
+    expect(screen.queryByTestId('points-overview-error')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('points-overview-skeleton')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+  });
+
+  it('概览 403/1005 → 「无权查看该孩子」空态，不是通用错误条', async () => {
+    getParentPointsMock.mockRejectedValueOnce(new ApiError(1005, '无权查看该学生'));
+
+    renderPage();
+
+    expect(await screen.findByTestId('points-student-forbidden')).toBeInTheDocument();
+    expect(screen.getByText('无权查看该孩子')).toBeInTheDocument();
+    expect(screen.queryByTestId('points-overview-error')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('points-student-missing')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+  });
+
+  it('概览其它业务错误（如 5000）→ 仍走通用错误条 + 重试，不误判成学生类空态', async () => {
+    getParentPointsMock.mockRejectedValueOnce(new ApiError(5000, '服务端开小差了'));
+
+    renderPage();
+
+    expect(await screen.findByTestId('points-overview-error')).toBeInTheDocument();
+    expect(screen.getByText('积分信息暂时加载失败')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(screen.queryByTestId('points-student-missing')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('points-student-forbidden')).not.toBeInTheDocument();
+  });
 });
 
 describe('ParentPointsPage：孩子上下文', () => {
@@ -349,15 +392,31 @@ describe('ParentPointsPage：孩子上下文', () => {
     expect(getParentPointsMock).toHaveBeenCalledTimes(2);
   });
 
-  it('切换孩子时立即退回骨架，不拿上一个孩子的分数顶替', async () => {
+  /**
+   * **防「闪过上一个孩子分数」的唯一钉子**。
+   *
+   * 断言必须落在**同一次 commit 内**才有区分力：`act()` 会把被动 effect flush 掉，
+   * 于是「在 `useEffect` 里 `setPoints(null)` 清空（慢一帧）」的实现也能过——那正是
+   * 本页明确拒绝的写法（切换孩子的第一帧会显示上一个孩子的段位/分数）。
+   * 所以这里用 `flushSync` 强制同步 commit（它跑 layout effect、**不**跑被动 effect），
+   * 再同步断言：渲染期派生的实现这一帧就是骨架；effect 清空的实现这一帧还是「铸铁」。
+   * 反向验证见 `.superpowers/sdd/final-fix-report-parent.md` 第 3 条。
+   */
+  it('切换孩子时同一帧就退回骨架，不拿上一个孩子的分数顶替（钉住渲染期派生）', async () => {
     renderPage();
 
     expect(await screen.findByText('铸铁')).toBeInTheDocument();
+    expect(screen.getByText('120 分')).toBeInTheDocument();
 
     getParentPointsMock.mockReturnValue(new Promise<MyPoints>(() => {}));
-    switchStudent(2);
+
+    flushSync(() => {
+      useParentStudentStore.setState({ studentId: 2 });
+    });
 
     expect(screen.queryByText('铸铁')).not.toBeInTheDocument();
+    expect(screen.queryByText('120 分')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('points-overview')).not.toBeInTheDocument();
     expect(screen.getByTestId('points-overview-skeleton')).toBeInTheDocument();
   });
 
@@ -419,10 +478,15 @@ describe('ParentPointsPage：孩子上下文', () => {
 
 describe('ParentPointsPage：兑换成功 → 兑换记录刷新缝', () => {
   /**
-   * Task 8 的接线验收：兑换成功后切到「兑换记录」必须能看到刚产生的那条。
-   * 页面在 `onPointsChanged` 里同时自增概览重拉与记录版本号，后者透传给记录面板。
+   * **这条用例只证明「兑换成功后切到兑换记录 Tab 能取到新数据」。**
+   *
+   * 它**不**证明 `refreshToken` 接线：面板是按 Tab 条件渲染的，切到 history 必然
+   * 重新挂载、必然重拉一次，所以即使页面不传 `refreshToken`，这里照样是绿的。
+   * `refreshToken` 这条 prop 的钉子只有一条，在
+   * `RedemptionHistoryPanel.test.tsx:314`（`refreshToken` 变化 → 重拉当前页）——
+   * 别把本用例当成它的覆盖证据（终审 #3 的整改结论：改名 + 注明而不是留名义覆盖）。
    */
-  it('兑换成功后切到「兑换记录」Tab 能看到刚产生的那条', async () => {
+  it('兑换成功后切到「兑换记录」Tab 能取到刚产生的那条（重挂载取数路径）', async () => {
     renderPage('/parent/rewards?tab=redeem');
 
     const input = await screen.findByTestId('redeem-points-input');

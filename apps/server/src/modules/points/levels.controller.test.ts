@@ -95,8 +95,10 @@ describe('LevelsController.getLevels', () => {
     }
   });
 
-  it('不做任何 DB 访问（无构造依赖、纯静态常量）', () => {
-    // 构造器零参即可实例化：若误注入仓储/服务，这里会直接抛「需传参」
-    expect(() => new LevelsController()).not.toThrow();
+  it('不做任何 DB 访问：构造器零参（`length` 才是真断言）', () => {
+    // `new LevelsController()` 在 TS 里漏传参也编译得过（JS 不校验实参），
+    // 所以 `not.toThrow()` 近乎空断言。`length` = 构造器声明的形参个数：
+    // 一旦误注入仓储/服务，它立刻变正，这条才会真的红。
+    expect(LevelsController.length).toBe(0);
   });
 });

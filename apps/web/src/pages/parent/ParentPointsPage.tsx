@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Link, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Button, Card, LevelIcon, Progress, Skeleton } from '@/components/base';
-import { getParentPoints, type MyPoints } from '@/services/api';
+import { getParentPoints, ApiError, type MyPoints } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import PointRulesPanel from './points/PointRulesPanel';
 import RewardCatalogPanel, { type LeaveGuard } from './points/RewardCatalogPanel';
@@ -19,7 +19,9 @@ import RedemptionHistoryPanel from './points/RedemptionHistoryPanel';
  *    —— 分享出去的链接带了脏参数也不该白屏或报错。
  * 2. **概览卡常驻**在 Tab 之上：加载给骨架、失败给内联错误条 + 重试、
  *    就绪才渲染段位与分数。**绝不先渲染「劈柴 0 分」再跳成真实值**——
- *    那会让人以为积分归零（spec 明写）。
+ *    那会让人以为积分归零（spec 明写）。失败还按 §2.8 分学生类：`1002`
+ *    给「账号不存在」、`1005` 给「无权查看」两个**空态**（重试无意义，故不给重试），
+ *    其余才走通用错误条 + 重试。空态与加载失败用不同 testid，别混。
  * 3. **孩子上下文**：`studentId === null` 时渲染空态（不是骨架、也不崩），
  *    引导去 `/parent/students` 开通账号；否则所有请求都按这个 id 走。
  * 4. **切孩子丢弃一切**：概览立刻退回骨架（不拿上一个孩子的分数顶替），
@@ -145,7 +147,18 @@ export default function ParentPointsPage() {
   const [leaveGuardDirty, setLeaveGuardDirty] = useState(false);
 
   const [overview, setOverview] = useState<{ studentId: number; points: MyPoints } | null>(null);
-  const [failedStudentId, setFailedStudentId] = useState<number | null>(null);
+  /**
+   * 概览请求失败：记下**是哪个孩子**失败、以及业务错误码（非 `ApiError` 记 null）。
+   *
+   * 两件事必须一起记：`studentId` 用于「切换孩子后不把失败态带过去」（旧孩子的失败
+   * 不该让新孩子显示错误条），`code` 用于 §2.8 唯一映射表的学生类分流——`1002`
+   * 该孩子账号已不存在、`1005` 无权查看，两者都**不是**「系统坏了」，给通用错误条
+   * 会让家长重试到天荒地老。其它（网络/500）才走通用错误条 + 重试。
+   */
+  const [overviewFailure, setOverviewFailure] = useState<{
+    studentId: number;
+    code: number | null;
+  } | null>(null);
   /** 递增触发重拉。用计数器而不是把请求函数塞进依赖，重试不用再造一个 effect。 */
   const [overviewReload, setOverviewReload] = useState(0);
   /**
@@ -172,7 +185,9 @@ export default function ParentPointsPage() {
    * 一致性判断：数据不归当前孩子，就等同于没有数据。
    */
   const points = overview && overview.studentId === studentId ? overview.points : null;
-  const overviewFailed = studentId !== null && failedStudentId === studentId;
+  /** 当前孩子的失败信息（旧孩子的失败由这里滤掉，不带到新孩子）。 */
+  const failure =
+    overviewFailure && overviewFailure.studentId === studentId ? overviewFailure : null;
 
   useEffect(() => {
     if (studentId === null) return;
@@ -181,12 +196,15 @@ export default function ParentPointsPage() {
       .then((res) => {
         if (cancelled) return;
         setOverview({ studentId, points: res });
-        setFailedStudentId(null);
+        setOverviewFailure(null);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setOverview(null);
-        setFailedStudentId(studentId);
+        setOverviewFailure({
+          studentId,
+          code: err instanceof ApiError ? err.code : null,
+        });
       });
     return () => {
       cancelled = true;
@@ -314,7 +332,23 @@ export default function ParentPointsPage() {
         </Card>
       ) : (
         <>
-          {overviewFailed ? (
+          {failure?.code === 1002 ? (
+            /*
+              §2.8 学生类 1002：孩子在别处被删/被转走，本页手里还是旧 id。
+              **不是「加载失败」**——重试一万次也还是 404，所以没有重试按钮，
+              只引导家长在顶部换一个孩子（自动回落见计划 §6 遗留 5）。
+            */
+            <Card data-testid="points-student-missing" className="p-10 text-center">
+              <p className="text-sm text-[var(--text-secondary)]">
+                该孩子账号不存在，请在顶部切换其它孩子
+              </p>
+            </Card>
+          ) : failure?.code === 1005 ? (
+            /* §2.8 学生类 1005：非本人学生（如孩子被转到别的家长名下）。同 1002，不给重试。 */
+            <Card data-testid="points-student-forbidden" className="p-10 text-center">
+              <p className="text-sm text-[var(--text-secondary)]">无权查看该孩子</p>
+            </Card>
+          ) : failure ? (
             <Card
               data-testid="points-overview-error"
               className="flex flex-wrap items-center justify-between gap-4 border border-[var(--error)] p-4"

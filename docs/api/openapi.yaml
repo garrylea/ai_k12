@@ -8239,7 +8239,7 @@ components:
 
     SaveRewardCatalogItem:
       type: object
-      required: [name, pointsCost, isActive]
+      required: [name, description, pointsCost, minLevelCode, isActive, sortOrder]
       properties:
         id:
           type: integer
