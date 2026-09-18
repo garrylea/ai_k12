@@ -98,8 +98,8 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **`globals: false`**：`@testing-library/react` 不会自动注册 `afterEach(cleanup)`，多用例文件必须自己写 `afterEach(() => cleanup())`，否则上个用例的 DOM 泄漏导致选择器重复命中。
 - **Nest DI 坑（接口类型的可选参数）**：带 `@Injectable()` 的类会发 `design:paramtypes`，**接口类型**的参数在运行时被写成 `Object`，Nest 当成真 token 去容器找、找不到就**启动直接失败**。必须加 `@Optional()`。对照 `ai-core/capabilities/*` 那些类**故意不写 `@Injectable()`**（零参实例化）才一直没踩到——区别在有没有装饰器，不在参数可选不可选。
 - **数据库**：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。schema 在 `tools/db/schema.sql`，迁移在 `tools/db/migrations/YYYY-MM-DD_*.sql`（**无迁移运行器，手工 apply**；必须幂等；新增表/列要同时进 schema.sql）。
-- **派生状态必须带 `studentId` 归属**：家长端切孩子时**不导航、页面不重挂载**（`ParentLayout` 的 `<Outlet />` 无 `key`），所有 `useState` 跨孩子存活。派生值要与 `studentId` 一起存、读取时一并比较（`data && data.studentId === studentId && <本维度检查>`）；只按自己的维度守卫会在切换的第一帧画出上一个孩子的数据。**`useEffect(() => reset(), [studentId])` 救不了**——effect 在 commit 之后才跑，那一帧照样画。
-- **列表页换孩子必须回第 1 页**：否则拿「上一个孩子的第 N 页」请求新孩子，页数不够时响应回显 `page` 仍是 N（自报家门守卫通过），页面停在空态而分页控件只在非空分支渲染，家长无法自救。加 `useEffect(() => setPage(1), [studentId])`。
+- **派生状态必须带 `studentId` 归属**：家长端切孩子不重挂载、`useState` 跨孩子存活，只按自身维度守卫会在切换首帧画出上个孩子的数据（`useEffect(reset)` 救不了——它在 commit 之后才跑）；派生值必须与 `studentId` 一起存、读取时一并比较。
+- **列表页换孩子必须回第 1 页**：否则带「上个孩子的第 N 页」请求新孩子，页数不够时停在空态且分页控件只在非空分支渲染（家长无法自救）；加 `useEffect(() => setPage(1), [studentId])`。
 
 ## 数据管线（tools/data-refinery）
 

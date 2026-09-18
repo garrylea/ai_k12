@@ -8,9 +8,9 @@
 
 ---
 
-## 2026-09-18 新增（家长端「看得见」批：四个页面 + 6 个只读端点 + 新模块 parent-insights）
+## 2026-09-18 新增（家长端「看得见」批：四个页面 + 5 个只读端点 + 新模块 parent-insights）
 
-**做了什么**：家长控制台第一批——P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 AI 对话回放四个页面从 `Placeholder` 变真实页；后端新建 `apps/server/src/modules/parent-insights/`（`DashboardService` / `ReportService` / `ErrorsService` / `ChatLogsService` / `ParentInsightsRepository` + `dto/` + `window.util.ts` / `rate.util.ts`），6 个端点全部**只读**（`GET /api/parent/dashboard`、`.../students/:id/reports`、`/errors`、`/chat-logs`、`/chat-logs/:dialogueId`；另加正确率口径 `getAccuracyBySubject`）。**不产生任何业务写入**，不改学生端行为，不动任何既有门禁；`learning_reports` / `safety_alerts` / `student_knowledge_mastery` 全不碰。文档同步：`openapi.yaml` + API 设计文档（§2.4 实现注 / §4.13 / §6.8 整节重写 / §7 映射表 / §10 v4.0）+ UX §5.6 + PRD §7.7。
+**做了什么**：家长控制台第一批——P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 AI 对话回放四个页面从 `Placeholder` 变真实页；后端新建 `apps/server/src/modules/parent-insights/`（`DashboardService` / `ReportService` / `ErrorsService` / `ChatLogsService` / `ParentInsightsRepository` + `dto/` + `window.util.ts` / `rate.util.ts`），5 个端点全部**只读**（`GET /api/parent/dashboard`、`.../students/:id/reports`、`/errors`、`/chat-logs`、`/chat-logs/:dialogueId`；另加正确率口径 `getAccuracyBySubject`）。**不产生任何业务写入**，不改学生端行为，不动任何既有门禁；`learning_reports` / `safety_alerts` / `student_knowledge_mastery` 全不碰。文档同步：`openapi.yaml` + API 设计文档（§2.4 实现注 / §4.13 / §6.8 整节重写 / §7 映射表 / §10 v4.0）+ UX §5.6 + PRD §7.7。
 
 **为什么报告是「实时聚合」而不是「AI 生成后落库」**：底层三件事都不存在——`learning_reports` 空表且零代码引用、`AnalyticsCapability` 没接端点、掌握度表（`student_knowledge_mastery` / `knowledge_relations`）全仓零写入。原设计（`/api/ai/report` → 落 `learning_reports` → `/reports/{reportId}` 展示）改成「请求 → 服务层分次查 + JS 合成 → 直接返回」，`{reportId}` 端点降级出 MVP、`LearningReport` 的 AI 文本形状换掉。同一原因，UI 上的「学习时长曲线」「薄弱点雷达图」换成了可得指标：`activeDays7` / `lastActiveAt`（活跃度代理）与「按未清零错题数排序的知识点 Top」。
 
@@ -49,6 +49,14 @@ ai_messages 198（safety_flag=1 共 22 条）        point_ledger 1        stude
 13. **柱状图把正确率写进了 X 轴刻度文字**（形如「数学 73.8%」）：学科多于 4~5 个时刻度可能挤。要改就把正确率挪到图表下方的文字行。
 
 **环境漂移发现（不在本批修，建议单独立项）**：`tools/db/schema.sql:1160` 起定义了 **28 条 `CREATE TRIGGER`**（各表 `*_updated_at` 维护），但当前 dev 库 `information_schema.TRIGGERS` 里**只有 1 条**（`trg_aux_error_books_updated_at`）。也就是说 `updated_at` 字段在既有库上大多不会自动更新，且 code 里的 `updated_at` 排序/展示依赖它。这与既有的 `admin_notifications` 缺迁移文件属**同一类问题**：`schema.sql` 与已存在的库不同步，只有全新建库才会拿到全部触发器；仓库**没有迁移运行器**，历史 DDL 变更靠手工 apply，漏了就静默漂移。修复需要：(a) 补齐 27 条触发器的幂等迁移；(b) 排查哪些表的 `updated_at` 已被应用逻辑依赖却从未自动维护。本批不碰。
+
+**两条工程约定的踩坑细节（从 CLAUDE.md 压缩迁出，见「工程约定」）**：① 派生状态必须带 `studentId` 归属——顶栏切孩子不导航、`ParentLayout` 的 `<Outlet />` 无 `key`，报告页曾闪现上一个孩子的旧报告、回放页曾整屏显示上一个孩子的对话内容（只按自身维度守卫；`useEffect(reset)` 在 commit 后才跑，救不了首帧）。② 列表页换孩子必须回第 1 页——错题页/回放页曾带「上个孩子的页码」请求新孩子，页数不够时响应回显 `page` 仍是通过的，页面停在空态而分页控件只在非空分支渲染，家长无法自救。
+
+**已知文档债（未修，建议单独立项）**：
+
+1. `GET/PUT /api/parent/students/{studentId}/subject-configs` 在 API 文档 §4.13 标 MVP，但 `openapi.yaml` 里没有（2026-09-01 教材配置批的存量漏收）。补它要新造 2 条 path 并从 `parent.service.ts` 反推 config 形状。
+2. `openapi.yaml` 里 `HintRequest` 被定义了两次（约 `:6142` 与 `:7088`）；YAML 解析会静默取后者（前一处定义等于失效）。
+3. 根 `CLAUDE.md` 已 20.3KB+（超 ~15KB 的维护目标），本批之前即如此；本批只压缩了自己新增的两条，未做全文件清理。
 
 ---
 

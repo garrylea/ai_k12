@@ -6328,7 +6328,7 @@ components:
         sourceRefId:
           type: integer
           nullable: true
-          description: 来源记录 ID（homework/assessment 的 submission_id；practice/discuss 时为 cards.id）
+          description: 来源记录 ID（`source` 为评估类来源时为对应 submission_id；practice/discuss 时为 cards.id）
         lessonId:
           type: integer
           nullable: true
