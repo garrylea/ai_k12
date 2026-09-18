@@ -359,7 +359,8 @@ export function saveParentPointsSettings(studentId: number, patch: Partial<Point
 
 **Files**
 - Create: `apps/web/src/pages/parent/ParentPointsPage.tsx`、`.test.tsx`
-- Modify: `apps/web/src/routes/index.tsx:339`（`/parent/rewards` 的 `Placeholder` 换成真页面）
+- Modify: `apps/web/src/routes/routeTable.tsx:327`（`/parent/rewards` 的 `Placeholder` 换成真页面）
+  ⚠️ 路由此前在 `routes/index.tsx` 里，2026-09-18 学生端 Task 8 已拆成 `routeTable.tsx`（唯一真源）+ `Placeholder.tsx` + `RoleRedirect.tsx`；**改路由一律改 `routeTable.tsx`**。
 
 **要点**：见 §2.3。四个 Tab 先渲染各自占位子组件（Task 5–7 填内容），但**骨架、深链、概览卡、切孩子重拉**这次就要做全。
 
@@ -466,7 +467,7 @@ export function saveParentPointsSettings(studentId: number, patch: Partial<Point
 **Files**
 - Modify: `apps/web/src/pages/parent/ParentStudentsPage.tsx:216-228`（每个孩子卡的动作区加「积分与奖励」按钮 → 先 `setStudentId(s.id)` 再 `navigate('/parent/rewards')`）
 - Modify: `apps/web/src/components/layout/ParentNav.tsx:13`（确认「奖励管理」标签与顺序；**不改路径**）
-- Modify: `apps/web/src/routes/index.tsx:339`（确认 `Placeholder` 已被 Task 4 替换）
+- Modify: `apps/web/src/routes/routeTable.tsx:327`（确认 `Placeholder` 已被 Task 4 替换）
 
 **测试**
 - 路由渲染测试：`/parent/rewards` 渲染 `ParentPointsPage` 而不是 `Placeholder`（断言 `Placeholder` 的「原型占位」文案**不**出现）。
