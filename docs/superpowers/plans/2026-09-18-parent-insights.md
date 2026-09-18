@@ -241,7 +241,7 @@ export class ParentInsightsRepository {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
-Expected: PASS（4 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -476,7 +476,7 @@ export interface SubjectCountRow {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
-Expected: PASS（10 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -699,7 +699,7 @@ export interface WeakPointRow {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
-Expected: PASS（14 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -912,7 +912,7 @@ function toLocalDayString(d: Date): string {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
-Expected: PASS（16 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -933,8 +933,16 @@ git commit -m "feat(parent-insights): 按天趋势与考试记录聚合"
 - Consumes: Task 1–4 的 `ParentInsightsRepository`
 - Produces:
   - `interface ParentErrorFilters { subjectId?: number; track?: 'main' | 'aux'; source?: string; cleared?: 'uncleared' | 'cleared'; from?: string; to?: string }`
-  - `interface ParentErrorRow { id: number; questionId: number | null; subjectId: number; source: string; level: number; isCleared: boolean; wrongAnswerText: string | null; createdAt: Date; clearedAt: Date | null; questionContent: string | null; questionType: string | null; questionDifficulty: number | null; knowledgePointId: number | null; knowledgePointName: string | null }`
+  - `interface ParentErrorRow { id: number; questionId: number | null; subjectId: number; source: string; level: number; isCleared: boolean; wrongAnswerText: string | null; createdAt: Date; clearedAt: Date | null; questionContent: string | null; questionType: string | null; questionDifficulty: number | null }`
+  - `interface ErrorKnowledgePointRow { questionId: number; knowledgePointId: number; knowledgePointName: string }`
   - `listParentErrors(studentId: number, filters: ParentErrorFilters, limit: number, offset: number): Promise<{ items: ParentErrorRow[]; total: number }>`
+  - `listErrorKnowledgePoints(questionIds: number[]): Promise<ErrorKnowledgePointRow[]>`
+
+> ⚠️ **不要在分页查询里 JOIN `question_knowledge_points`。** 实测 dev 库：203 道绑了知识点的题里 **83 道（41%）绑了多个 KP**，139 条错题里 **26 条（19%）** 会因此产出多行。`LIMIT ? OFFSET ?` 作用在**翻倍后的行**上，后果是：一页返回的错题数少于 `pageSize`、同一道错题重复出现、`items.length` 与 `total` 对不上（`total` 走的是不带 join 的 `COUNT(*)`）。这是真实数据上会发生的问题，不是理论边角。
+>
+> 所以：**分页查询只出「一行一道错题」**（保留 `LEFT JOIN questions` 拿题面，去掉两个 KP join），知识点由 `listErrorKnowledgePoints(本页 questionIds)` **另一条查询批量取回**，由 service 组装成 `question.knowledgePoints[]`。
+>
+> **为什么不在 SQL 里聚合 KP**（`GROUP_CONCAT` / `JSON_ARRAYAGG`）：要么得到需要二次解析的字符串（分隔符还得防内容里出现），要么要处理 LEFT JOIN 无匹配时 `[{"id":null}]` 的脏形状。两条查询更直白，且本页数据量很小（≤20 条）。
 
 > **`track` 用「反向排除」而不是「白名单」**：`aux` → `source = 'auxiliary'`；`main` → `source <> 'auxiliary'`。
 > 白名单（`IN ('practice','discuss','exam','targeted','error_practice')`）看似更严格，但未来「智能组卷」
@@ -953,11 +961,10 @@ describe('ParentInsightsRepository：错题列表', () => {
       id: 91, question_id: 330, subject_id: 1, source: 'exam', level: 2, is_cleared: 0,
       wrong_answer_text: 'x=3', created_at: new Date('2026-09-16T19:21:00Z'), cleared_at: null,
       question_content: '解方程', question_type: 'calculation', question_difficulty: 3,
-      kp_id: 42, kp_name: '分数加减',
     },
   ];
 
-  it('返回 items + total；默认无附加筛选', async () => {
+  it('返回 items + total；列表行与错题**一比一**（不 JOIN 知识点）', async () => {
     const pool = mockPool([]);
     pool.execute.mockResolvedValueOnce([[{ count: 139 }], []]);
     pool.query.mockResolvedValueOnce([listRows, []]);
@@ -971,15 +978,15 @@ describe('ParentInsightsRepository：错题列表', () => {
         id: 91, questionId: 330, subjectId: 1, source: 'exam', level: 2, isCleared: false,
         wrongAnswerText: 'x=3', createdAt: listRows[0].created_at, clearedAt: null,
         questionContent: '解方程', questionType: 'calculation', questionDifficulty: 3,
-        knowledgePointId: 42, knowledgePointName: '分数加减',
       },
     ]);
     expect(pool.execute.mock.calls[0][0]).toContain('COUNT(*) AS count');
-    // 列表走 query（LIMIT ?）
     const listSql = pool.query.mock.calls[0][0] as string;
     expect(listSql).toContain('LEFT JOIN questions');
-    expect(listSql).toContain('LEFT JOIN question_knowledge_points');
     expect(listSql).toContain('ORDER BY meb.created_at DESC, meb.id DESC');
+    // 关键：分页查询**不能**碰知识点关联表，否则一题多 KP 会把行翻倍、分页就错了
+    expect(listSql).not.toContain('question_knowledge_points');
+    expect(listSql).not.toContain('knowledge_points');
   });
 
   it('筛选条件逐条下推（学科 / source / 轨道 / 清零态 / 时间窗）', async () => {
@@ -1049,7 +1056,6 @@ describe('ParentInsightsRepository：错题列表', () => {
         id: 5, question_id: null, subject_id: 1, source: 'practice', level: 1, is_cleared: 0,
         wrong_answer_text: '只会题面', created_at: new Date('2026-09-10T10:00:00Z'), cleared_at: null,
         question_content: null, question_type: null, question_difficulty: null,
-        kp_id: null, kp_name: null,
       },
     ]);
     pool.execute.mockResolvedValueOnce([[{ count: 1 }], []]);
@@ -1058,8 +1064,39 @@ describe('ParentInsightsRepository：错题列表', () => {
     const result = await repo.listParentErrors(9, {}, 20, 0);
 
     expect(result.items[0]).toMatchObject({
-      questionId: null, questionContent: null, knowledgePointId: null, wrongAnswerText: '只会题面',
+      questionId: null, questionContent: null, wrongAnswerText: '只会题面',
     });
+  });
+});
+
+describe('ParentInsightsRepository：本页错题的知识点', () => {
+  it('按 questionIds 批量取，一题多 KP 出多行', async () => {
+    const pool = mockPool([
+      { question_id: 330, knowledge_point_id: 42, knowledge_point_name: '分数加减' },
+      { question_id: 330, knowledge_point_id: 43, knowledge_point_name: '整式' },
+      { question_id: 331, knowledge_point_id: 44, knowledge_point_name: '方程' },
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.listErrorKnowledgePoints([330, 331]);
+
+    expect(result).toEqual([
+      { questionId: 330, knowledgePointId: 42, knowledgePointName: '分数加减' },
+      { questionId: 330, knowledgePointId: 43, knowledgePointName: '整式' },
+      { questionId: 331, knowledgePointId: 44, knowledgePointName: '方程' },
+    ]);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('question_knowledge_points');
+    expect(sql).toContain('IN (?,?)');
+    expect(pool.execute.mock.calls[0][1]).toEqual([330, 331]);
+  });
+
+  it('空数组 → 直接返回 []，**不发 SQL**（IN () 是语法错误）', async () => {
+    const pool = mockPool([]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    expect(await repo.listErrorKnowledgePoints([])).toEqual([]);
+    expect(pool.execute).not.toHaveBeenCalled();
   });
 });
 ```
@@ -1096,7 +1133,11 @@ export interface ParentErrorFilters {
   to?: string;
 }
 
-/** 错题列表行（已 JOIN 题面与知识点；`question_id` 为 NULL 时后几列为 null）。 */
+/**
+ * 错题列表行（已 JOIN 题面；`question_id` 为 NULL 时后三列为 null）。
+ *
+ * **不含知识点**：知识点单独用 `listErrorKnowledgePoints` 批量取（一题多 KP，见方法注释）。
+ */
 export interface ParentErrorRow {
   id: number;
   questionId: number | null;
@@ -1110,8 +1151,13 @@ export interface ParentErrorRow {
   questionContent: string | null;
   questionType: string | null;
   questionDifficulty: number | null;
-  knowledgePointId: number | null;
-  knowledgePointName: string | null;
+}
+
+/** 「题 × 知识点」扁平行，交给 service 按 questionId 聚成 `question.knowledgePoints[]`。 */
+export interface ErrorKnowledgePointRow {
+  questionId: number;
+  knowledgePointId: number;
+  knowledgePointName: string;
 }
 ```
 
@@ -1122,9 +1168,13 @@ export interface ParentErrorRow {
    * 家长端错题列表（只读、分页）。
    *
    * 为什么不在 `main-error-books.repo.ts` 上扩展 `findErrorBookEntries`：那个方法正被训练轨
-   * 的错题练习调用，改它会连带改训练轨行为。这里照抄它的 JOIN 与筛选写法自建。
+   * 的错题练习调用，改它会连带改训练轨行为。这里照抄它的筛选写法自建。
    *
    * count 与 list **共用 `buildErrorWhere`**，否则「总数」与「列表」迟早对不上。
+   *
+   * **分页查询刻意不 JOIN 知识点**：实测 41% 的题绑了多个 KP，一 JOIN 就会让行翻倍，而
+   * `LIMIT` 作用在翻倍后的行上——一页的错题数会少于 `pageSize`、同一道错题重复出现、`items`
+   * 与 `total` 对不上。知识点由 `listErrorKnowledgePoints(本页 questionIds)` 另查（见该方法的注释）。
    */
   async listParentErrors(
     studentId: number,
@@ -1144,12 +1194,9 @@ export interface ParentErrorRow {
       `SELECT meb.id, meb.question_id, meb.subject_id, meb.source, meb.level, meb.is_cleared,
               meb.wrong_answer_text, meb.created_at, meb.cleared_at,
               q.content AS question_content, q.type AS question_type,
-              q.difficulty AS question_difficulty,
-              qkp.knowledge_point_id AS kp_id, kp.name AS kp_name
+              q.difficulty AS question_difficulty
        FROM main_error_books meb
        LEFT JOIN questions q ON q.id = meb.question_id
-       LEFT JOIN question_knowledge_points qkp ON qkp.question_id = meb.question_id
-       LEFT JOIN knowledge_points kp ON kp.id = qkp.knowledge_point_id
        WHERE ${where}
        ORDER BY meb.created_at DESC, meb.id DESC
        LIMIT ? OFFSET ?`,
@@ -1171,10 +1218,33 @@ export interface ParentErrorRow {
         questionContent: (r.question_content as string | null) ?? null,
         questionType: (r.question_type as string | null) ?? null,
         questionDifficulty: r.question_difficulty === null ? null : Number(r.question_difficulty),
-        knowledgePointId: r.kp_id === null ? null : Number(r.kp_id),
-        knowledgePointName: (r.kp_name as string | null) ?? null,
       })),
     };
+  }
+
+  /**
+   * 本页错题涉及的知识点（一题多 KP 会出多行，由 service 按 questionId 聚成数组）。
+   *
+   * 空数组**直接返回、不发 SQL**：`IN ()` 在 MySQL 里是语法错误。这个守卫必须留在仓储里，
+   * 不能让每个调用方各自记得判空。
+   */
+  async listErrorKnowledgePoints(questionIds: number[]): Promise<ErrorKnowledgePointRow[]> {
+    if (questionIds.length === 0) return [];
+
+    const placeholders = questionIds.map(() => '?').join(',');
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT qkp.question_id, kp.id AS knowledge_point_id, kp.name AS knowledge_point_name
+       FROM question_knowledge_points qkp
+       JOIN knowledge_points kp ON kp.id = qkp.knowledge_point_id
+       WHERE qkp.question_id IN (${placeholders})
+       ORDER BY qkp.question_id ASC, kp.id ASC`,
+      questionIds,
+    );
+    return rows.map((r) => ({
+      questionId: Number(r.question_id),
+      knowledgePointId: Number(r.knowledge_point_id),
+      knowledgePointName: String(r.knowledge_point_name ?? ''),
+    }));
   }
 
   /** 错题列表 count 与 list 的**唯一** WHERE 构造器（改这里就是改两处）。 */
@@ -1219,7 +1289,7 @@ export interface ParentErrorRow {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
-Expected: PASS（20 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -1446,7 +1516,7 @@ export interface ParentChatLogRow {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
-Expected: PASS（23 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -1610,7 +1680,7 @@ export function resolveWindow(period: ReportPeriod): ReportWindow {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts`
-Expected: PASS（4 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 写并实现 rate.util（含测试）**
 
@@ -1654,7 +1724,7 @@ export function toRate(answered: number, correct: number): number | null {
 ```
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/rate.util.test.ts`
-Expected: PASS（3 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 写 dashboard.service 的失败测试**
 
@@ -2058,7 +2128,7 @@ export class DashboardService {
 - [ ] **Step 10: 跑 dashboard 测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/dashboard.service.test.ts`
-Expected: PASS（8 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 11: 写 controller**
 
@@ -2545,7 +2615,7 @@ export class ReportService {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/report.service.test.ts`
-Expected: PASS（6 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 加端点**
 
@@ -2642,13 +2712,15 @@ git commit -m "feat(parent-insights): 学情报告端点（实时聚合，周/�
 - Test: `apps/server/src/modules/parent-insights/errors.service.test.ts`
 
 **Interfaces:**
-- Consumes: Task 5 的 `listParentErrors(studentId, filters, limit, offset)` + `ParentErrorFilters`、`modules/points/pagination.util.ts` 的 `DEFAULT_PAGE` / `parsePositiveInt`
+- Consumes: Task 5 的 `listParentErrors(studentId, filters, limit, offset)` + `listErrorKnowledgePoints(questionIds)` + `ParentErrorFilters`、`modules/points/pagination.util.ts` 的 `DEFAULT_PAGE` / `parsePositiveInt`
 - Produces:
   - DTO: `ParentErrorQuestion`、`ParentErrorItem`、`ParentErrorPage`
   - `const PAGE_SIZE = 20`（服务端固定，前端不传）
   - `class ErrorsService { listErrors(studentId: number, query: ErrorsQuery): Promise<ParentErrorPage> }`
   - `interface ErrorsQuery { subject?: number; source?: string; track?: 'main' | 'aux'; cleared?: 'uncleared' | 'cleared' | 'all'; from?: string; to?: string; page: number }`
   - 端点 `GET /api/parent/students/:studentId/errors`
+
+> **service 要负责把「本页错题」与「本页知识点」拼起来**：仓储的分页查询**刻意不 JOIN 知识点**（一题多 KP 会让行翻倍、把分页算错，见 Task 5 的说明），知识点由 `listErrorKnowledgePoints(本页去重后的 questionIds)` 另查一次，再按 questionId 聚成 `question.knowledgePoints[]`。本页没有错题、或本页的错题全都没有 `question_id` 时，**跳过这次查询**。
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -2662,23 +2734,30 @@ const row = (over: Record<string, any> = {}) => ({
   id: 91, questionId: 330, subjectId: 1, source: 'exam', level: 2, isCleared: false,
   wrongAnswerText: 'x=3', createdAt: new Date('2026-09-16T19:21:00Z'), clearedAt: null,
   questionContent: '解方程', questionType: 'calculation', questionDifficulty: 3,
-  knowledgePointId: 42, knowledgePointName: '分数加减',
   ...over,
 });
 
 const mkRepo = () => ({
   listParentErrors: vi.fn().mockResolvedValue({ items: [row()], total: 139 }),
+  listErrorKnowledgePoints: vi.fn().mockResolvedValue([
+    { questionId: 330, knowledgePointId: 42, knowledgePointName: '分数加减' },
+  ]),
 });
 
 const mkSvc = (d = mkRepo()) => new ErrorsService(d as any);
 
 describe('ErrorsService', () => {
-  it('track 映射：auxiliary → aux，其余 → main；题目装配成嵌套对象', async () => {
+  it('track 映射：auxiliary → aux，其余 → main；知识点按 questionId 聚成数组', async () => {
     const repo = mkRepo();
     repo.listParentErrors.mockResolvedValue({
-      items: [row(), row({ id: 92, source: 'auxiliary' })],
+      items: [row(), row({ id: 92, questionId: 331, source: 'auxiliary' })],
       total: 2,
     });
+    // 330 绑两个 KP、331 未绑 —— 一次批量查询同时覆盖两种情况
+    repo.listErrorKnowledgePoints.mockResolvedValue([
+      { questionId: 330, knowledgePointId: 42, knowledgePointName: '分数加减' },
+      { questionId: 330, knowledgePointId: 43, knowledgePointName: '整式' },
+    ]);
 
     const result = await mkSvc(repo).listErrors(11, { page: 1 });
 
@@ -2686,8 +2765,16 @@ describe('ErrorsService', () => {
     expect(result.items[1]).toMatchObject({ track: 'aux', source: 'auxiliary' });
     expect(result.items[0].question).toEqual({
       content: '解方程', type: 'calculation', difficulty: 3,
-      knowledgePoints: [{ id: 42, name: '分数加减' }],
+      knowledgePoints: [
+        { id: 42, name: '分数加减' },
+        { id: 43, name: '整式' },
+      ],
     });
+    // 未绑 KP 的那道题是空数组，不是 null
+    expect(result.items[1].question?.knowledgePoints).toEqual([]);
+    // 只查一次，入参是本页**去重后**的 questionId
+    expect(repo.listErrorKnowledgePoints).toHaveBeenCalledTimes(1);
+    expect(repo.listErrorKnowledgePoints).toHaveBeenCalledWith([330, 331]);
   });
 
   it('pageSize 固定 20，offset 由 page 推', async () => {
@@ -2709,10 +2796,10 @@ describe('ErrorsService', () => {
     expect(repo.listParentErrors).toHaveBeenLastCalledWith(11, { cleared: 'uncleared' }, 20, 0);
   });
 
-  it('question_id 为 NULL → question 整体为 null（只留 wrongAnswerText）', async () => {
+  it('question_id 为 NULL → question 整体为 null；且不拿空列表去查知识点', async () => {
     const repo = mkRepo();
     repo.listParentErrors.mockResolvedValue({
-      items: [row({ questionId: null, questionContent: null, questionType: null, questionDifficulty: null, knowledgePointId: null, knowledgePointName: null })],
+      items: [row({ questionId: null, questionContent: null, questionType: null, questionDifficulty: null })],
       total: 1,
     });
 
@@ -2720,18 +2807,17 @@ describe('ErrorsService', () => {
 
     expect(result.items[0].question).toBeNull();
     expect(result.items[0].wrongAnswerText).toBe('x=3');
+    // 本页没有可查的 questionId → 跳过批量查询（仓储对空数组也会早返回，少一次调用更省）
+    expect(repo.listErrorKnowledgePoints).not.toHaveBeenCalled();
   });
 
-  it('未绑知识点 → knowledgePoints 为空数组（不是 null）', async () => {
+  it('本页没有错题 → 不查知识点（避免无谓查询）', async () => {
     const repo = mkRepo();
-    repo.listParentErrors.mockResolvedValue({
-      items: [row({ knowledgePointId: null, knowledgePointName: null })],
-      total: 1,
-    });
+    repo.listParentErrors.mockResolvedValue({ items: [], total: 0 });
 
-    const result = await mkSvc(repo).listErrors(11, { page: 1 });
+    await mkSvc(repo).listErrors(11, { page: 1 });
 
-    expect(result.items[0].question?.knowledgePoints).toEqual([]);
+    expect(repo.listErrorKnowledgePoints).not.toHaveBeenCalled();
   });
 
   it('无数据 → items 空数组 + total 0（不是 404）', async () => {
@@ -2846,6 +2932,21 @@ export class ErrorsService {
       offset,
     );
 
+    // 知识点单独批量取：分页查询刻意不 JOIN KP（一题多 KP 会让行翻倍、把分页算错）。
+    // 先去重（同一道题可能在同一页出现多次…不会，但去重能避免 IN 列表白长）；
+    // 本页没有可查的 questionId 时跳过 —— 仓储对空数组也早返回，少一次调用更省。
+    const questionIds = [
+      ...new Set(items.map((r) => r.questionId).filter((id): id is number => id !== null)),
+    ];
+    const kpRows =
+      questionIds.length > 0 ? await this.repo.listErrorKnowledgePoints(questionIds) : [];
+    const kpByQuestion = new Map<number, Array<{ id: number; name: string }>>();
+    for (const kp of kpRows) {
+      const list = kpByQuestion.get(kp.questionId) ?? [];
+      list.push({ id: kp.knowledgePointId, name: kp.knowledgePointName });
+      kpByQuestion.set(kp.questionId, list);
+    }
+
     return {
       items: items.map((r) => ({
         id: r.id,
@@ -2865,9 +2966,7 @@ export class ErrorsService {
                 type: r.questionType ?? '',
                 difficulty: r.questionDifficulty,
                 knowledgePoints:
-                  r.knowledgePointId === null
-                    ? []
-                    : [{ id: r.knowledgePointId, name: r.knowledgePointName ?? '' }],
+                  r.questionId === null ? [] : (kpByQuestion.get(r.questionId) ?? []),
               },
       })),
       page: query.page,
@@ -2881,7 +2980,7 @@ export class ErrorsService {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/errors.service.test.ts`
-Expected: PASS（6 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 加端点**
 
@@ -3235,7 +3334,7 @@ export class ChatLogsService {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/chat-logs.service.test.ts`
-Expected: PASS（7 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 加端点**
 
@@ -3423,7 +3522,7 @@ export function readChartColor(token: string, container: Element | null): string
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/chart-theme.test.ts`
-Expected: PASS（3 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 > 已实测确认：jsdom **支持**用 `getComputedStyle(el).getPropertyValue('--x')` 读**内联**声明的自定义属性
 > （探针：`<div data-theme="parent" style="--brand-500: #2563EB">` → 返回 `#2563EB`）。
@@ -3759,7 +3858,7 @@ export default function ChartBar({
 - [ ] **Step 9: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/`
-Expected: PASS（9 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 10: 提交**
 
@@ -4254,7 +4353,7 @@ export type { PaginationProps } from './Pagination';
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/base/Pagination.test.tsx`
-Expected: PASS（4 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -4727,7 +4826,7 @@ export default function ParentDashboardPage() {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentDashboardPage.test.tsx`
-Expected: PASS（7 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 全量前端测试 + 构建**
 
@@ -5235,7 +5334,7 @@ export default function ParentReportPage() {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentReportPage.test.tsx`
-Expected: PASS（9 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 提交**
 
@@ -5801,7 +5900,7 @@ export default function ParentErrorsPage() {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentErrorsPage.test.tsx`
-Expected: PASS（8 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 提交**
 
@@ -6401,7 +6500,7 @@ export default function ParentChatLogsPage() {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentChatLogsPage.test.tsx`
-Expected: PASS（8 个用例）
+Expected: PASS（本任务新增的用例全绿）
 
 - [ ] **Step 6: 全量前端测试 + lint + 构建**
 
