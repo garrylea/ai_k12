@@ -257,6 +257,28 @@ describe('CourseDetailPage 完成态庆祝', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
   });
 
+  it('侧栏用户区渲染为段位入口 UserBadge（保留「专注学习中...」副标题，退出仍在右侧）', async () => {
+    localStorage.setItem('username', '小明');
+    getMyPointsMock.mockResolvedValue({
+      balance: 120,
+      totalEarned: 520,
+      todayEarned: 10,
+      level: { code: 'zhutie', name: '铸铁', index: 1, threshold: 500 },
+      nextLevel: { code: 'qingtong', name: '青铜', index: 2, threshold: 1500 },
+      pointsToNextLevel: 980,
+      progressPercent: 13,
+    });
+
+    renderCourseDetail();
+
+    expect(await screen.findByTestId('user-badge')).toBeInTheDocument();
+    expect(screen.getByText('小明')).toBeInTheDocument();
+    expect(screen.getByText('专注学习中...')).toBeInTheDocument();
+    expect(await screen.findByTestId('user-badge-level-icon')).toBeInTheDocument();
+    // 退出仍是独立的图标按钮，不再挂在用户名药丸上
+    expect(screen.getByLabelText('退出登录')).toBeInTheDocument();
+  });
+
   it('后端兜底 practice_incomplete → 不弹庆祝，仍显示门禁提示', async () => {
     updateProgressMock.mockResolvedValue({ advanced: false, reason: 'practice_incomplete' });
 

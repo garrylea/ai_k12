@@ -3,6 +3,7 @@ import ConversationList from '@/components/business/ConversationList';
 import AuxChatPanel from '@/components/business/AuxChatPanel';
 import AuxInputBar from '@/components/business/AuxInputBar';
 import { BackButton, LogoutButton } from '@/components/base';
+import { UserBadge } from '@/components/business';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import { useChatStore } from '@/store/chatStore';
 import { useAuxChat } from '@/hooks/useAuxChat';
@@ -18,21 +19,6 @@ const PlusIcon = () => (
     className="w-4 h-4"
   >
     <path d="M12 5v14M5 12h14" />
-  </svg>
-);
-
-const UserIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="w-5 h-5"
-  >
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-    <circle cx="12" cy="7" r="4" />
   </svg>
 );
 
@@ -70,12 +56,9 @@ export default function AuxiliaryHomePage() {
         <ConversationList />
       </div>
 
-      {/* 底部：用户状态 + 退出 */}
+      {/* 底部：用户状态（段位入口）+ 退出 */}
       <div className="p-4 border-t border-[#E5E5E5] flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <UserIcon />
-          <span className="text-sm text-[#1D1D1F] truncate">{username}</span>
-        </div>
+        <UserBadge username={username} />
         <LogoutButton onLogout={() => { reset(); setCurrentDialogueId(null); }} />
       </div>
     </>

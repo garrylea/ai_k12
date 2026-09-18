@@ -12,7 +12,7 @@ import {
 import { useThemeStore } from '@/store/themeStore';
 import { fetchLessonCards, getUnclearedErrors, getMyPoints, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, fetchStarMap, type LessonCard, type LessonCardsData, type PracticeGroupMeta, type PreviousErrorDetail } from '@/services/api';
 import { BackButton, LogoutButton, ConfirmDialog } from '@/components/base';
-import { CelebrationOverlay } from '@/components/business';
+import { CelebrationOverlay, UserBadge } from '@/components/business';
 import { AnswerModal, type PracticeQuestion } from '@/components/business/AnswerModal';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer } from '@/components/business/DiscussDrawer';
@@ -658,15 +658,12 @@ export default function CourseDetailPage() {
 
           <div className="p-4">
             <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[var(--learn-btn-primary)] flex items-center justify-center text-white font-bold text-lg">
-                  {username ? username[0].toUpperCase() : '学'}
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-[var(--sidebar-text-primary)]">{username || '学生'}</div>
-                  <div className="text-xs text-[var(--sidebar-text-muted)]">专注学习中...</div>
-                </div>
-              </div>
+              {/* 用户区：段位入口（点击开积分面板，不再退出）+ 右侧独立退出按钮 */}
+              <UserBadge
+                username={username || '学生'}
+                subtitle="专注学习中..."
+                className="min-w-0"
+              />
               <LogoutButton />
             </div>
           </div>

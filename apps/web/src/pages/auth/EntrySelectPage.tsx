@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { LogoutButton } from '@/components/base';
+import { UserBadge } from '@/components/business';
 
 const BookIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   <svg
@@ -73,7 +74,10 @@ export default function EntrySelectPage() {
           </h1>
         </div>
 
-        <LogoutButton username={username} />
+        <div className="flex items-center gap-2">
+          <UserBadge username={username} />
+          <LogoutButton />
+        </div>
       </header>
 
       {/* 2. 中部：三入口大卡（三卡视觉一致，靠文字「学习/答疑/训练」区分） */}
