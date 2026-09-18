@@ -42,6 +42,23 @@ export interface WeakPointRow {
   totalWrongCount: number;
 }
 
+/** 按天的答题量与答对数（报告页折线）。只含有记录的天。 */
+export interface TrendRow {
+  date: string;
+  answered: number;
+  correct: number;
+}
+
+/** 已交卷考试的摘要行（报告页考试记录）。客观题数 = 已判对错的题数。 */
+export interface ExamSummaryRow {
+  sessionId: number;
+  paperTitle: string;
+  subjectId: number;
+  submittedAt: Date;
+  correctCount: number;
+  objectiveCount: number;
+}
+
 /**
  * 家长端只读聚合仓储（spec `2026-09-18-parent-insights-design.md`）。
  *
@@ -331,5 +348,68 @@ ${windowed.sql}
       [studentId],
     );
     return Number(rows[0]?.uncovered ?? 0);
+  }
+
+  /**
+   * 按天趋势（口径与 `getAccuracyBySubject` 完全一致，只是 GROUP BY 换成日期）。
+   * 只返回有记录的天；窗口内没做过的天不补零——前端按窗口铺 X 轴。
+   */
+  async getAccuracyTrend(studentId: number, from: Date, to: Date): Promise<TrendRow[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT date, SUM(total) AS answered, SUM(correct) AS correct FROM (
+         SELECT DATE(judged_at) AS date, SUM(is_correct = 1) AS correct, COUNT(*) AS total
+         FROM practice_results
+         WHERE student_id = ? AND method IN ('exact','ai')
+           AND judged_at >= ? AND judged_at < ?
+         GROUP BY DATE(judged_at)
+         UNION ALL
+         SELECT DATE(ea.judged_at) AS date, SUM(ea.is_correct = 1) AS correct, COUNT(*) AS total
+         FROM exam_sessions es JOIN exam_answers ea ON ea.session_id = es.id
+         WHERE es.student_id = ? AND es.status = 'submitted' AND ea.is_correct IS NOT NULL
+           AND ea.judged_at >= ? AND ea.judged_at < ?
+         GROUP BY DATE(ea.judged_at)
+       ) t
+       GROUP BY date
+       ORDER BY date ASC`,
+      [studentId, from, to, studentId, from, to],
+    );
+    return rows.map((r) => ({
+      date:
+        typeof r.date === 'string'
+          ? r.date
+          : new Date(r.date as Date).toISOString().slice(0, 10),
+      answered: Number(r.answered ?? 0),
+      correct: Number(r.correct ?? 0),
+    }));
+  }
+
+  /**
+   * 已交卷考试列表（不限时间窗，让家长看到全部考试史）。
+   * `objectiveCount` = 已判对错的题数（`exam_answers.is_correct IS NOT NULL`），
+   * 与 `ExamsService.summarize` 口径一致——主观题不参与正确率。
+   */
+  async listSubmittedExams(studentId: number, limit: number): Promise<ExamSummaryRow[]> {
+    // LIMIT ? 必须用 pool.query（客户端转义）
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT es.id AS session_id, ep.title AS paper_title, es.subject_id, es.submitted_at,
+              SUM(ea.is_correct = 1) AS correct_count,
+              SUM(ea.is_correct IS NOT NULL) AS objective_count
+       FROM exam_sessions es
+       JOIN exam_papers ep ON ep.id = es.paper_id
+       LEFT JOIN exam_answers ea ON ea.session_id = es.id
+       WHERE es.student_id = ? AND es.status = 'submitted'
+       GROUP BY es.id, ep.title, es.subject_id, es.submitted_at
+       ORDER BY es.submitted_at DESC, es.id DESC
+       LIMIT ?`,
+      [studentId, limit],
+    );
+    return rows.map((r) => ({
+      sessionId: Number(r.session_id),
+      paperTitle: String(r.paper_title ?? ''),
+      subjectId: Number(r.subject_id),
+      submittedAt: new Date(r.submitted_at as Date),
+      correctCount: Number(r.correct_count ?? 0),
+      objectiveCount: Number(r.objective_count ?? 0),
+    }));
   }
 }

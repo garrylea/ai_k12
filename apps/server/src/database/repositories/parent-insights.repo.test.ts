@@ -249,3 +249,57 @@ describe('ParentInsightsRepository：错题统计', () => {
     expect(sql).toContain('is_cleared = 0');
   });
 });
+
+describe('ParentInsightsRepository：趋势与考试列表', () => {
+  it('趋势按日聚合，只含有记录的天（不补零，由前端铺 X 轴）', async () => {
+    const pool = mockPool([
+      { date: '2026-09-15', answered: 10, correct: 7 },
+      { date: '2026-09-17', answered: 4, correct: 4 },
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+    const from = new Date('2026-09-12T00:00:00Z');
+    const to = new Date('2026-09-19T00:00:00Z');
+
+    const result = await repo.getAccuracyTrend(9, from, to);
+
+    expect(result).toEqual([
+      { date: '2026-09-15', answered: 10, correct: 7 },
+      { date: '2026-09-17', answered: 4, correct: 4 },
+    ]);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('DATE(judged_at)');
+    // 与 getAccuracyBySubject 同口径（两源合并、排除未答/自评/未判）
+    expect(sql).toContain("method IN ('exact','ai')");
+    expect(sql).toContain('ea.is_correct IS NOT NULL');
+    expect(sql).toContain('ORDER BY date ASC');
+  });
+
+  it('考试列表只取已交卷、按交卷时间倒序、带卷名与客观题数', async () => {
+    const pool = mockPool([
+      {
+        session_id: 7,
+        paper_title: '2025 学年七年级上期中',
+        subject_id: 1,
+        submitted_at: new Date('2026-09-16T19:20:00Z'),
+        correct_count: 18,
+        objective_count: 22,
+      },
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.listSubmittedExams(9, 20);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      sessionId: 7,
+      paperTitle: '2025 学年七年级上期中',
+      subjectId: 1,
+      correctCount: 18,
+      objectiveCount: 22,
+    });
+    const sql = pool.query.mock.calls[0][0] as string;
+    expect(sql).toContain('JOIN exam_papers');
+    expect(sql).toContain("status = 'submitted'");
+    expect(sql).toContain('ORDER BY es.submitted_at DESC');
+  });
+});
