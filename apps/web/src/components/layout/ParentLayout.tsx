@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useThemeStore } from '@/store/themeStore';
 import { ParentNav } from './ParentNav';
+import { StudentSwitcher } from './StudentSwitcher';
 import { Banner } from '@/components/base';
 import { getUnreadMessageCount } from '@/services/api';
 
@@ -52,14 +53,8 @@ export default function ParentLayout() {
 
           {/* 顶部栏 */}
           <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0">
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-[var(--text-secondary)]">当前查看：</span>
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100">
-                <div className="w-7 h-7 rounded-full bg-[var(--brand-500)] flex items-center justify-center text-white text-xs font-bold">明</div>
-                <span className="text-sm font-medium text-[var(--text-primary)]">小明（三年级）</span>
-                <span className="text-xs text-[var(--text-tertiary)]">▼</span>
-              </div>
-            </div>
+            {/* 「当前查看哪个孩子」的锚点：列表拉取与回落逻辑都在组件里，本层不再拉第二次 */}
+            <StudentSwitcher />
             <div className="flex items-center gap-3">
               <span className="text-sm text-[var(--text-tertiary)]">家长端 · 监管空间</span>
               <button
