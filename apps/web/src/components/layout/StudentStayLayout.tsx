@@ -1,0 +1,78 @@
+import { Outlet, Link, NavLink } from 'react-router-dom';
+import { LogoutButton } from '@/components/base';
+
+/**
+ * 浅停留页外壳 —— 个人中心（P5.1）与奖励册（P5.2）专用。
+ *
+ * **为什么单独有这个外壳（别再把它合回 `StudentLayout`）**
+ *
+ * `docs/UX-UI设计文档.md` §1.5（第 58/59 行）按主题行为把学生页分成两类：
+ * - 第 58 行「启用日夜切换」：课程详情、AI 讨论、课后作业、单元检测、成绩报告、
+ *   辅轨答疑、错题本等学习沉浸页 —— 包 `.student-theme-container`，跟随 18:00–06:00
+ *   自动切夜、并允许手动切换。这些页仍由 `StudentLayout` 承载。
+ * - 第 59 行「禁用夜间切换」：登录、注册、学科选择、入口选择页、章节星链图、
+ *   **个人中心、奖励册**、设置 —— **直接写死 `data-theme="student-day"`**，
+ *   不使用 `.student-theme-container`。
+ *
+ * 个人中心/奖励册此前与 P2.4–P2.8 占位页共用一个 `StudentLayout`：那个外壳会读
+ * `themeStore.mode` 自动切夜、顶栏还挂「日间/夜间」手动胶囊，**直接违反第 59 行**。
+ * 它们是「浅停留页」（看一眼积分/奖励就走，不是沉浸学习），也不该出现主轨侧栏
+ * 那套导航。所以拆出本外壳：写死日间、不带 `themeStore`、不带任何日夜切换 UI。
+ *
+ * 与 `StudentLayout` 的关系：顶栏沿用**同一套 CSS 变量 token 与视觉风格**
+ * （`bg-[var(--bg-card)]` + `border-[var(--bg-subtle)]` + `--radius-pill` 胶囊），
+ * 但不复用组件 —— 复用就意味着又要处理主题分支。
+ *
+ * 去掉了侧栏后，顶栏「返回星图」是学生从这两页回到学习主线的**唯一出口**
+ * （`/student/subjects` 那条「切换学科」是两步且语义不同），属必需项。
+ */
+const stayItems = [
+  { to: '/student/rewards', label: '奖励册' },
+  { to: '/student/profile', label: '个人中心' },
+];
+
+export default function StudentStayLayout() {
+  return (
+    <div
+      data-theme="student-day"
+      data-school="junior"
+      className="flex h-screen flex-col overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]"
+    >
+      {/* 顶部全局栏：与 StudentLayout 顶栏同一套 token，但无日夜切换 */}
+      <header className="h-16 bg-[var(--bg-card)] border-b border-[var(--bg-subtle)] flex items-center justify-between gap-4 px-6 shrink-0">
+        <Link
+          to="/student/star-map"
+          className="text-sm font-medium text-[var(--info)] hover:underline"
+        >
+          返回星图
+        </Link>
+
+        {/* 两页互跳入口（UX P5.1「入口：奖励册…」），当前页高亮 */}
+        <nav className="flex items-center gap-1 bg-[var(--bg-subtle)] rounded-[var(--radius-pill)] p-1">
+          {stayItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `px-3 py-1 text-xs rounded-[var(--radius-pill)] transition-all ${
+                  isActive
+                    ? 'bg-[var(--brand-500)] text-white'
+                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                }`
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <LogoutButton />
+      </header>
+
+      {/* 页面内容：沿用 StudentLayout 的 main 样式 */}
+      <main className="flex-1 overflow-y-auto bg-[var(--bg-base)]">
+        <Outlet />
+      </main>
+    </div>
+  );
+}

@@ -29,6 +29,7 @@ import ExamListPage from '@/pages/student/training/ExamListPage';
 import ExamRunPage from '@/pages/student/training/ExamRunPage';
 import ExamResultPage from '@/pages/student/training/ExamResultPage';
 import StudentLayout from '@/components/layout/StudentLayout';
+import StudentStayLayout from '@/components/layout/StudentStayLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
@@ -329,6 +330,7 @@ export const routes: RouteObject[] = [
       { path: 'account', element: <Placeholder title="账号设置 P6.10" /> },
     ],
   },
+  // 主轨侧栏外壳：留给 P2.4–P2.8 等学习/占位页（第 58 行「启用日夜切换」一类）
   {
     path: '/student',
     element: (
@@ -350,9 +352,28 @@ export const routes: RouteObject[] = [
       { path: 'error-book/variant', element: <Placeholder title="变式练习 P4.3" /> },
 
       { path: 'mainline', element: <Navigate to="/student/star-map" replace /> },
-      { path: 'profile', element: <ProfilePage /> },
-      { path: 'rewards', element: <RewardsPage /> },
-      { path: 'settings', element: <Placeholder title="学习设置 P5.3" /> },
+      // 学习设置 P5.3 已按用户裁决从学生端移除（不再有 /student/settings）。
     ],
+  },
+  // 浅停留页外壳（第 59 行「禁用夜间切换」）：个人中心/奖励册写死日间、无侧栏、无日夜切换。
+  // 独立成顶层路由（而非继续挂在上面 `/student` 的 children），避免两条同 path 的
+  // `/student` 路由同时声明造成匹配歧义。
+  {
+    path: '/student/profile',
+    element: (
+      <RequireRole role="student">
+        <StudentStayLayout />
+      </RequireRole>
+    ),
+    children: [{ index: true, element: <ProfilePage /> }],
+  },
+  {
+    path: '/student/rewards',
+    element: (
+      <RequireRole role="student">
+        <StudentStayLayout />
+      </RequireRole>
+    ),
+    children: [{ index: true, element: <RewardsPage /> }],
   },
 ];

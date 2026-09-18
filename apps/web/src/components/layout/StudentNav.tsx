@@ -14,6 +14,13 @@ import { NavLink } from 'react-router-dom';
  *   指向同一页；UX §3.3 的清单里也没有单独的「主线」项。
  *
  * 待补：文档清单里的「学情报告」目前既无导航项也无路由（P2.8 未实现）。
+ *
+ * ⚠️ 2026-09-18 起，「奖励册/个人中心」已改用浅停留页外壳（`StudentStayLayout`，
+ * 无侧栏），所以这两项**当前只会在还挂在 `StudentLayout` 下的 P2.4–P2.8 占位页上
+ * 渲染**。保留它们（文档清单要求），但别为了「点得到」把侧栏塞回浅停留页。
+ *
+ * 底部原有一行硬编码「三年级 · 数学」假数据，已删 —— 真实年级/学科由
+ * `StudentLayout` 顶栏从 `learnContextStore` 显示。
  */
 const navItems = [
   { to: '/student/star-map', label: '星图导航' },
@@ -54,13 +61,6 @@ export function StudentNav() {
           </NavLink>
         ))}
       </nav>
-
-      {/* 底部 */}
-      <div className="px-4 py-4 border-t border-[var(--bg-subtle)]">
-        <div className="hidden lg:flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
-          <span>三年级 · 数学</span>
-        </div>
-      </div>
     </aside>
   );
 }

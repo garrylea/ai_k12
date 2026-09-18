@@ -115,6 +115,41 @@ beforeEach(() => {
   getMyRewardsMock.mockReset();
 });
 
+/**
+ * 浅停留页外壳（UX §1.5 第 59 行）的承重断言。
+ *
+ * 个人中心 / 奖励册属「禁用夜间切换」一类：直接写死 `data-theme="student-day"`、
+ * **不使用** `.student-theme-container`（第 58 行那一类才用）。它们此前挂在
+ * `StudentLayout` 下，因而跟随 `themeStore.mode` 自动切夜、顶栏还挂了「日间/夜间」
+ * 胶囊 —— 与第 59 行冲突。这里把新口径钉死：写死日间、无侧栏、无日夜切换控件。
+ */
+function expectStayPageShell() {
+  // 写死日间：容器上必须有 data-theme="student-day"
+  expect(document.querySelector('[data-theme="student-day"]')).not.toBeNull();
+  // 且**不是**学习沉浸页：不得出现 .student-theme-container
+  expect(document.querySelector('.student-theme-container')).toBeNull();
+  // 无主轨侧栏（aside），因此侧栏的「星图导航/错题本」链接也不该在
+  expect(document.querySelector('aside')).toBeNull();
+  expect(screen.queryByRole('link', { name: '星图导航' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: '错题本' })).not.toBeInTheDocument();
+  // 核心钉子：页面上不存在日/夜切换控件
+  expect(screen.queryByRole('button', { name: '日间' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '夜间' })).not.toBeInTheDocument();
+  // 去掉侧栏后，顶栏「返回星图」是回学习主线的唯一出口
+  expect(screen.getByRole('link', { name: '返回星图' })).toHaveAttribute(
+    'href',
+    '/student/star-map',
+  );
+  // 两页互跳入口
+  expect(screen.getByRole('link', { name: '奖励册' })).toHaveAttribute('href', '/student/rewards');
+  expect(screen.getByRole('link', { name: '个人中心' })).toHaveAttribute(
+    'href',
+    '/student/profile',
+  );
+  // 退出登录（此前这两页根本没有）
+  expect(screen.getByRole('button', { name: '退出登录' })).toBeInTheDocument();
+}
+
 describe('路由表：积分相关页面', () => {
   it('/student/profile 渲染 ProfilePage，而非 Placeholder', async () => {
     setStudentSession();
@@ -129,17 +164,8 @@ describe('路由表：积分相关页面', () => {
     expect(screen.getByText('还差 680 分')).toBeInTheDocument();
 
     expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
-    // 挂在 StudentLayout 下（跟随主题、有侧栏导航），不是全屏页
-    expect(document.querySelector('.student-theme-container')).not.toBeNull();
-    // 侧栏两项都在且指向正确路径（导航与路由是两条独立的线，得各钉各的）
-    expect(screen.getByRole('link', { name: '奖励册' })).toHaveAttribute(
-      'href',
-      '/student/rewards',
-    );
-    expect(screen.getByRole('link', { name: '个人中心' })).toHaveAttribute(
-      'href',
-      '/student/profile',
-    );
+    // 换用浅停留页外壳：写死日间、无侧栏、无日夜切换（第 59 行）
+    expectStayPageShell();
   });
 
   it('/student/rewards 渲染 RewardsPage（含「找家长兑换」），而非 Placeholder', async () => {
@@ -153,7 +179,7 @@ describe('路由表：积分相关页面', () => {
     expect(screen.getByTestId('reward-card-1')).toBeInTheDocument();
 
     expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
-    expect(document.querySelector('.student-theme-container')).not.toBeNull();
+    expectStayPageShell();
   });
 
   it('其余占位路由仍渲染 Placeholder（证明 Placeholder 未被误删/误改）', () => {
@@ -164,20 +190,37 @@ describe('路由表：积分相关页面', () => {
   });
 
   /**
+   * 学习设置（P5.3）已按用户裁决从学生端移除：路由与页面都不该存在。
+   * 本仓路由表没有 404 兜底路由，未匹配路径由 React Router 默认错误分支接管；
+   * 这里**只断言不渲染学习设置页**，不为好测而新增兜底路由。
+   */
+  it('/student/settings 已不存在，不再渲染学习设置页', () => {
+    setStudentSession();
+
+    renderAt('/student/settings');
+
+    expect(screen.queryByRole('heading', { name: '学习设置 P5.3' })).not.toBeInTheDocument();
+    expect(screen.queryByText('学习设置 P5.3')).not.toBeInTheDocument();
+    expect(screen.queryByText('学习设置')).not.toBeInTheDocument();
+  });
+
+  /**
    * 硬规则钉子（UX §3.3 + CLAUDE.md）：主轨侧边导航「不含辅轨入口」，
    * 双轨物理隔离靠路由、**无跨轨链接**。曾经这里有两个违规项：
    * - 辅线 `/student/auxiliary`（跨轨链接，只能从入口选择页进）
    * - 主线 `/student/mainline`（只是重定向到星图，与「星图导航」重复）
    * 这条用例保证它们不会被顺手加回来。
+   *
+   * 挂载点是仍在 `StudentLayout`（带侧栏）下的 P2.4 占位页 ——
+   * 2026-09-18 改：个人中心/奖励册已改用浅停留页外壳、不再有侧栏，
+   * 原先拿它们当宿主会让这条守卫测到空的侧栏上。
    */
-  it('主轨侧边导航不含辅轨入口，也没有与星图重复的「主线」项', async () => {
+  it('主轨侧边导航不含辅轨入口，也没有与星图重复的「主线」项', () => {
     setStudentSession();
-    getMyPointsMock.mockResolvedValue(POINTS);
-    getMyLedgerMock.mockResolvedValue(LEDGER);
 
-    renderAt('/student/profile');
-    await screen.findByTestId('profile-level-icon');
+    renderAt('/student/homework');
 
+    expect(document.querySelector('[data-theme="student-day"]')).not.toBeNull();
     expect(screen.queryByRole('link', { name: '辅线' })).not.toBeInTheDocument();
     expect(document.querySelector('a[href="/student/auxiliary"]')).toBeNull();
     expect(screen.queryByRole('link', { name: '主线' })).not.toBeInTheDocument();

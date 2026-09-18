@@ -10,8 +10,9 @@ import {
 } from '@/services/api';
 
 /**
- * 个人中心（计划 §3 Task 5 / spec §8.1）——`StudentLayout` 子路由，**跟随日夜主题**，
- * 所以颜色一律走 CSS 变量，不写死 `data-theme`、不按主题分支。
+ * 个人中心（计划 §3 Task 5 / spec §8.1）——挂在浅停留页外壳 `StudentStayLayout` 下，
+ * **写死日间、禁用夜间切换**（UX §1.5 第 59 行，2026-09-18 由 `StudentLayout` 迁出）。
+ * 颜色仍一律走 CSS 变量、不按主题分支。
  *
  * 三块：段位大卡 → 积分概览 → 积分流水（分页）+ 兑换记录。
  *
