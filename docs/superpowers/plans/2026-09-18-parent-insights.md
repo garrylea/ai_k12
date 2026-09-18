@@ -4348,7 +4348,7 @@ describe('Pagination', () => {
     expect(onChange).toHaveBeenCalledWith(1);
   });
 
-  it('只有一页时仍然渲染（不显示翻页按钮，禁用两侧）', () => {
+  it('只有一页时仍然渲染，两侧按钮都禁用', () => {
     render(<Pagination page={1} totalPages={1} onChange={() => {}} />);
 
     expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
