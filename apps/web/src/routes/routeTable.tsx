@@ -36,6 +36,7 @@ import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
 import ParentMessagesPage from '@/pages/parent/ParentMessagesPage';
 import StudentSubjectConfigPage from '@/pages/parent/StudentSubjectConfigPage';
 import ParentPointsPage from '@/pages/parent/ParentPointsPage';
+import ParentDashboardPage from '@/pages/parent/ParentDashboardPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -319,7 +320,7 @@ export const routes: RouteObject[] = [
       { path: 'messages', element: <ParentMessagesPage /> },
       { path: 'students', element: <ParentStudentsPage /> },
       { path: 'students/:id/config', element: <StudentSubjectConfigPage /> },
-      { path: 'dashboard', element: <Placeholder title="家长仪表盘 P6.1" /> },
+      { path: 'dashboard', element: <ParentDashboardPage /> },
       { path: 'report', element: <Placeholder title="学情报告 P6.2" /> },
       { path: 'errors', element: <Placeholder title="错题查看 P6.3" /> },
       { path: 'chat-logs', element: <Placeholder title="AI 对话全透明回放 P6.4" /> },
