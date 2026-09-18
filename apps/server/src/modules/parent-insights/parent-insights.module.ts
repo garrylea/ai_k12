@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ParentInsightsController } from './parent-insights.controller.js';
 import { DashboardService } from './dashboard.service.js';
+import { ReportService } from './report.service.js';
 import { ParentInsightsRepository } from '../../database/repositories/parent-insights.repo.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
@@ -24,6 +25,7 @@ import { ProgressModule } from '../progress/progress.module.js';
   controllers: [ParentInsightsController],
   providers: [
     DashboardService,
+    ReportService,
     ParentInsightsRepository,
     StudentsRepository,
     SubjectsRepository,
