@@ -18,7 +18,7 @@
 | GET | `/api/points/me` | `{ balance, totalEarned, todayEarned, level:{code,name,index,threshold}, nextLevel:{code,name,threshold}\|null, pointsToNextLevel:number\|null, progressPercent:number }` |
 | GET | `/api/points/me/ledger?page&pageSize` | `{ items:[{id,kind,title,points,createdAt,refType}], total, page, pageSize }` |
 | GET | `/api/points/me/rules` | `{ tasks:[{taskCode,taskName,tiers:[{tierKey,tierLabel,points,dailyLimit,completedToday,remainingToday}]}] }` |
-| GET | `/api/points/me/rewards` | `{ balance, level, items:[{id,name,description,pointsCost,minLevelCode,affordable,levelOk,gap}] }` |
+| GET | `/api/points/me/rewards` | `{ balance, level, items:[{id,name,description,pointsCost,minLevelCode,minLevelName,affordable,levelOk,gap}] }` |
 | POST | `/api/training/sessions/:id/complete` | `{ pointsAwarded, balance\|null, totalEarned\|null, levelUp:{from,to}\|null, reason? }` |
 | POST | `/api/progress/update` | 追加可选 `points?: { awarded, balance, levelUp:{from,to}\|null }` |
 | POST | `/api/exams/sessions/:id/submit` | 追加可选 `points?: {...同上}` |

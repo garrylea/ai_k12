@@ -407,11 +407,12 @@ export const LEVELS = [
 | GET | `/api/points/me` | `{ balance, totalEarned, todayEarned, level:{code,name,index,threshold}, nextLevel:{code,name,threshold}\|null, pointsToNextLevel:number, progressPercent:number }` |
 | GET | `/api/points/me/ledger?page&pageSize` | `{ items:[{id,kind,title,points,createdAt,refType}], total, page, pageSize }` |
 | GET | `/api/points/me/rules` | `{ tasks:[{taskCode,taskName,tiers:[{tierKey,tierLabel,points,dailyLimit,completedToday,remainingToday}]}] }` |
-| GET | `/api/points/me/rewards` | `{ balance, level, items:[{id,name,description,pointsCost,minLevelCode,affordable,levelOk,gap}] }` |
+| GET | `/api/points/me/rewards` | `{ balance, level, items:[{id,name,description,pointsCost,minLevelCode,minLevelName,affordable,levelOk,gap}] }` |
 
 - `pointsToNextLevel`：已满级（王者）时为 `null`。
 - `remainingToday`：`dailyLimit == null` 时为 `null`。
 - `me/rules` 是**档位即可选项**的实现基础——各训练配置页靠它渲染可选档位，学生端**不再硬编码** `COUNT_OPTIONS`。
+- `minLevelName`（**2026-09-18 补，任务五实施时新增**）：`minLevelCode` 对应的段位名，无门槛或脏 code 时为 `null`。加它是为了让奖励册能写出「段位不够（需达到 XX）」而**不必在前端维护段位表**（§3.1：段位表单一真源在 `levels.ts`）。脏 code 一律 `null`，前端回退成「更高段位」——**不编造名字**。它与计划三要加的 `GET /api/points/levels` 不重复：那个是给家长端「9 选 1」下拉用的全量表，这个是学生端逐项的名称。
 
 ### 7.2 训练发分
 

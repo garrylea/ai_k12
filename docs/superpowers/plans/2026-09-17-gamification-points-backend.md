@@ -460,7 +460,7 @@ export class PointsModule {}
 | GET | `me` | `getOverview(studentId)` | `{ balance, totalEarned, todayEarned, level, nextLevel, pointsToNextLevel, progressPercent }` |
 | GET | `me/ledger?page&pageSize` | `getLedger(studentId, page, pageSize)` | `{ items:[{id,kind,title,points,createdAt,refType}], total, page, pageSize }` |
 | GET | `me/rules` | `listGrouped(studentId, { withDailyCounts: true })` | `{ tasks:[{taskCode, taskName, tiers:[{tierKey,tierLabel,points,dailyLimit,completedToday,remainingToday,isActive}]}] }` |
-| GET | `me/rewards` | `listForStudent(studentId)` | `{ balance, level, items:[{id,name,description,pointsCost,minLevelCode,affordable,levelOk,gap}] }` |
+| GET | `me/rewards` | `listForStudent(studentId)` | `{ balance, level, items:[{id,name,description,pointsCost,minLevelCode,minLevelName,affordable,levelOk,gap}] }` |
 
 - `todayEarned` = 当天 `kind='earn'` 的 `SUM(points)`（用 `startOfToday`/`startOfTomorrow` 传参）。
 - `page` 默认 1、`pageSize` 默认 20、**`pageSize` 上限 100**（越界 400）。
