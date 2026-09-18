@@ -3940,7 +3940,7 @@ git commit -m "feat(parent): 引入 recharts 并封装折线/柱状图（CSS 变
 
 ---
 
-### Task 12: 前端 — api.ts 六个方法 + 类型
+### Task 12: 前端 — api.ts 五个方法 + 类型
 
 **Files:**
 - Modify: `apps/web/src/services/api.ts`
