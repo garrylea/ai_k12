@@ -5615,6 +5615,27 @@ describe('ParentErrorsPage', () => {
     );
   });
 
+  it('主线 Tab 的来源下拉里**没有**「辅线答疑」（该组合永不匹配，必须选不出来）', async () => {
+    renderAt('/parent/errors');
+    await screen.findByTestId('error-row-91');
+
+    const sourceSelect = screen.getByLabelText('来源');
+    const labels = within(sourceSelect)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(labels).toContain('真题考试');
+    expect(labels).not.toContain('辅线答疑');
+
+    // 切到辅线后反过来：只剩辅线答疑（+ 全部来源）
+    fireEvent.click(screen.getByRole('tab', { name: '辅线' }));
+    await waitFor(() => expect(getErrorsMock).toHaveBeenLastCalledWith({ studentId: 11, track: 'aux', page: 1 }));
+    const auxLabels = within(screen.getByLabelText('来源'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(auxLabels).toContain('辅线答疑');
+    expect(auxLabels).not.toContain('真题考试');
+  });
+
   it('学科筛选：下拉来自 /content/subjects，选中后 subject 透传', async () => {
     renderAt('/parent/errors');
     await screen.findByTestId('error-row-91');
@@ -5686,18 +5707,47 @@ const TRACK_TABS: Array<{ key: TrackFilter; label: string }> = [
   { key: 'aux', label: '辅线' },
 ];
 
-/** `main_error_books.source` 的**实际** 5 个值（openapi 的 enum 不全，别照抄）。 */
-const SOURCE_OPTIONS = [
-  { value: '', label: '全部来源' },
-  { value: 'practice', label: '课堂练习' },
-  { value: 'discuss', label: '讨论' },
-  { value: 'exam', label: '真题考试' },
-  { value: 'targeted', label: '专项练习' },
-  { value: 'error_practice', label: '错题练习' },
-  { value: 'auxiliary', label: '辅线答疑' },
-];
+/**
+ * 「来源」下拉的可选项 —— **按轨道分组**，不是一张扁平表。
+ *
+ * 为什么必须分轨道：后端 `main` 的语义就是 `source <> 'auxiliary'`（反向排除），
+ * 与 `source = 'auxiliary'` 互斥。若「主线」Tab 下也能选到「辅线答疑」，请求会变成
+ * `track=main&source=auxiliary` → 两个条件 AND 起来**永不匹配** → 后端安静地返回
+ * 空列表 + `total: 0`，家长会读成「孩子没有错题」。**这个矛盾组合必须在 UI 上就无法选中**，
+ * 而不是靠切轨道时清来源去补救（那只防了一个方向）。
+ *
+ * 值取自服务端实际写入点（`main_error_books.source` 是自由 `VARCHAR(20)`，DB 层无 enum，
+ * 所以前端这份清单就是唯一的枚举处）：`practice` / `discuss` / `exam` / `targeted` /
+ * `error_practice` / `auxiliary`。
+ */
+const SOURCES_BY_TRACK: Record<TrackFilter, Array<{ value: string; label: string }>> = {
+  all: [
+    { value: '', label: '全部来源' },
+    { value: 'practice', label: '课堂练习' },
+    { value: 'discuss', label: '讨论' },
+    { value: 'exam', label: '真题考试' },
+    { value: 'targeted', label: '专项练习' },
+    { value: 'error_practice', label: '错题练习' },
+    { value: 'auxiliary', label: '辅线答疑' },
+  ],
+  main: [
+    { value: '', label: '全部来源' },
+    { value: 'practice', label: '课堂练习' },
+    { value: 'discuss', label: '讨论' },
+    { value: 'exam', label: '真题考试' },
+    { value: 'targeted', label: '专项练习' },
+    { value: 'error_practice', label: '错题练习' },
+    // 刻意没有 auxiliary：主线 Tab 下它永远匹配不到东西
+  ],
+  aux: [
+    { value: '', label: '全部来源' },
+    { value: 'auxiliary', label: '辅线答疑' },
+  ],
+};
 
-const SOURCE_LABEL = new Map(SOURCE_OPTIONS.map((o) => [o.value, o.label]));
+const SOURCE_LABEL = new Map(
+  SOURCES_BY_TRACK.all.map((o) => [o.value, o.label]),
+);
 
 function formatDay(iso: string | null): string {
   if (!iso) return '—';
@@ -5803,6 +5853,13 @@ export default function ParentErrorsPage() {
       cancelled = true;
     };
   }, []);
+
+  // 换孩子必须回第 1 页：否则会拿「上一個孩子的第 2 页」去请求新孩子，
+  // 若新孩子错题不足 20 条，响应 `items: []` 但回显 page 仍是 2（守卫会通过），
+  // 页面就停在「当前筛选下没有错题」，而**分页控件只在非空分支里渲染**——家长无法自救。
+  useEffect(() => {
+    setPage(1);
+  }, [studentId]);
 
   useEffect(() => {
     if (studentId === null) return;
@@ -5915,7 +5972,7 @@ export default function ParentErrorsPage() {
             onChange={(e) => changeFilter(() => setSource(e.target.value))}
             className="rounded-[var(--radius-input)] border border-[var(--bg-subtle)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
           >
-            {SOURCE_OPTIONS.map((o) => (
+            {SOURCES_BY_TRACK[track].map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
