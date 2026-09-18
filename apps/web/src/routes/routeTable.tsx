@@ -38,6 +38,7 @@ import StudentSubjectConfigPage from '@/pages/parent/StudentSubjectConfigPage';
 import ParentPointsPage from '@/pages/parent/ParentPointsPage';
 import ParentDashboardPage from '@/pages/parent/ParentDashboardPage';
 import ParentReportPage from '@/pages/parent/ParentReportPage';
+import ParentErrorsPage from '@/pages/parent/ParentErrorsPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -323,7 +324,7 @@ export const routes: RouteObject[] = [
       { path: 'students/:id/config', element: <StudentSubjectConfigPage /> },
       { path: 'dashboard', element: <ParentDashboardPage /> },
       { path: 'report', element: <ParentReportPage /> },
-      { path: 'errors', element: <Placeholder title="错题查看 P6.3" /> },
+      { path: 'errors', element: <ParentErrorsPage /> },
       { path: 'chat-logs', element: <Placeholder title="AI 对话全透明回放 P6.4" /> },
       { path: 'goals', element: <Placeholder title="目标设定 P6.5" /> },
       { path: 'controls', element: <Placeholder title="行为管控 P6.6" /> },
