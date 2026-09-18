@@ -2254,14 +2254,23 @@ import { ParentInsightsModule } from './modules/parent-insights/parent-insights.
 
 - [ ] **Step 13: 真启动一次（DI 缺依赖只在启动时暴露，tsc 抓不到）**
 
-Run:
+> ⚠️ **不要用 `pkill -f 'node dist/main.js'`**：开发机上很可能有别人（或控制侧）已经跑着的后端，
+> 一句 pkill 会把它一起杀掉。用**独立端口 + 按 PID 精确收尾**：
+
 ```bash
-cd apps/server && npm run build && (node dist/main.js &) && sleep 6 && curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/parent/dashboard
+cd apps/server && npm run build
+# 用 3399 而不是默认端口，避免撞上已在跑的服务
+PORT=3399 node dist/main.js > /tmp/pi-smoke.log 2>&1 &
+SMOKE_PID=$!
+sleep 6
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3399/api/parent/dashboard
+kill "$SMOKE_PID"
+grep -E "dependencies initialized|Mapped \{/api/parent/dashboard|successfully started" /tmp/pi-smoke.log
 ```
-Expected: 构建无错；日志出现 `Nest application successfully started`。`curl` 返回 `401`
-（无 token，被守卫拦下）——**返回 401 就说明模块装配与 DI 都对**。
-若日志报 `Nest can't resolve dependencies of DashboardService (...)`，就是 `providers` 少列了仓储。
-验证完记得 `pkill -f 'node dist/main.js'`。
+Expected: 构建无错；日志出现 `ParentInsightsModule dependencies initialized`、`Mapped {/api/parent/dashboard, GET}`、
+`Nest application successfully started`；`curl` 返回 `401`（无 token，被守卫拦下）——**返回 401 就说明模块装配与 DI 都对**。
+若日志报 `Nest can't resolve dependencies of DashboardService (...)`，就是 `providers` 少列了仓储。若报 `EADDRINUSE`，
+说明 3399 也被占用，**换一个端口重试**，不要 kill 占用者。
 
 - [ ] **Step 14: 跑全量后端测试**
 
@@ -3433,8 +3442,16 @@ import type { ParentChatLogDetail, ParentChatLogPage } from './dto/parent-insigh
 
 - [ ] **Step 7: 跑全量后端测试 + 真启动 + 构建**
 
-Run: `cd apps/server && npm test && npm run build && (node dist/main.js &) && sleep 6 && curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/parent/students/1/chat-logs && pkill -f 'node dist/main.js'`
+```bash
+cd apps/server && npm run build
+PORT=3399 node dist/main.js > /tmp/pi-smoke.log 2>&1 &
+SMOKE_PID=$!
+sleep 6
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3399/api/parent/students/1/chat-logs
+kill "$SMOKE_PID"
+```
 Expected: 测试全绿、构建无错、`curl` 返回 `401`（无 token 被守卫拦下，说明 DI 装配正常）。
+**不要用 `pkill`** —— 会连带杀掉开发机上别人在跑的后端（只按 `$SMOKE_PID` 收尾）。端口占用就换一个，别 kill 占用者。
 
 - [ ] **Step 8: 提交**
 
@@ -6655,7 +6672,7 @@ git commit -m "docs(parent): 同步学情四页契约（openapi/API/UX/PRD/chang
 
 ## 附：全批完成后的人工验收清单
 
-跑完自动化测试后，按这份清单在浏览器里过一遍（`cd apps/server && npm run build && node dist/main.js`，另开 `cd apps/web && npm run dev`）：
+跑完自动化测试后，按这份清单在浏览器里过一遍（`cd apps/server && npm run build && PORT=3399 node dist/main.js`，另开 `cd apps/web && npm run dev`；**用 3399 而不是默认端口，别 kill 已在跑的后端**）：
 
 1. 家长登录 → `/parent/dashboard`：能看到名下所有孩子；多孩时 Tab 可切；学科卡片数字与「学生账号 → 学习配置」里的配置一致。
 2. 点某孩子的「学情报告」→ 报告页顶栏锚点是那个孩子（**不是**第一个）；切周报/月报数字会变。
