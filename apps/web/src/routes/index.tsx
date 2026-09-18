@@ -8,6 +8,8 @@ import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
 import ConversationManagePage from '@/pages/student/ConversationManagePage';
 import TrainingSubjectPage from '@/pages/student/TrainingSubjectPage';
+import ProfilePage from '@/pages/student/ProfilePage';
+import RewardsPage from '@/pages/student/RewardsPage';
 import TrainingHomePage from '@/pages/student/training/TrainingHomePage';
 import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage';
@@ -363,8 +365,8 @@ const router = createBrowserRouter([
       { path: 'error-book/variant', element: <Placeholder title="变式练习 P4.3" /> },
 
       { path: 'mainline', element: <Navigate to="/student/star-map" replace /> },
-      { path: 'profile', element: <Placeholder title="个人中心 P5.1" /> },
-      { path: 'rewards', element: <Placeholder title="奖励册 P5.2" /> },
+      { path: 'profile', element: <ProfilePage /> },
+      { path: 'rewards', element: <RewardsPage /> },
       { path: 'settings', element: <Placeholder title="学习设置 P5.3" /> },
     ],
   },

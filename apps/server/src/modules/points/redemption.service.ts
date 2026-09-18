@@ -66,6 +66,12 @@ export interface StudentRewardView {
   description: string | null;
   pointsCost: number;
   minLevelCode: string | null;
+  /**
+   * `minLevelCode` 对应的段位名（无门槛、或脏 code 查不到时为 null）。
+   * 段位常量单一真源在 `levels.ts`，所以名字由服务端给——学生端文案
+   * 「段位不够（需达到 XX）」不维护前端段位表。
+   */
+  minLevelName: string | null;
   affordable: boolean;
   levelOk: boolean;
   /** `max(0, pointsCost - balance)`，差多少分才够。 */
@@ -319,6 +325,8 @@ export class RedemptionService {
           description: row.description,
           pointsCost,
           minLevelCode,
+          // 脏 code（-1）没有可展示的名字，前端回退成「更高段位」
+          minLevelName: required >= 0 ? LEVELS[required].name : null,
           affordable: snapshot.balance >= pointsCost,
           // 无门槛恒 true；未知 code（-1）恒 false
           levelOk: !hasGate || (required >= 0 && level.index >= required),

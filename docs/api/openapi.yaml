@@ -8146,6 +8146,12 @@ components:
         minLevelCode:
           type: string
           nullable: true
+        minLevelName:
+          type: string
+          nullable: true
+          description: >-
+            minLevelCode 对应的段位名（无段位门槛或脏 code 时为 null）。段位表单一真源在
+            服务端 levels.ts —— 学生端「段位不够（需达到 XX）」直接用这个名字，不维护前端段位表。
         affordable:
           type: boolean
           description: 余额是否够

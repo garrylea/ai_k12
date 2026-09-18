@@ -447,6 +447,7 @@ describe('RedemptionService.listForStudent — 学生端只读', () => {
         description: null,
         pointsCost: 30,
         minLevelCode: null,
+        minLevelName: null,
         affordable: true,
         levelOk: true,
         gap: 0,
@@ -457,6 +458,7 @@ describe('RedemptionService.listForStudent — 学生端只读', () => {
         description: null,
         pointsCost: 150,
         minLevelCode: null,
+        minLevelName: null,
         affordable: false,
         levelOk: true,
         gap: 50,
@@ -467,6 +469,7 @@ describe('RedemptionService.listForStudent — 学生端只读', () => {
         description: null,
         pointsCost: 10,
         minLevelCode: 'wangzhe',
+        minLevelName: '王者',
         affordable: true,
         levelOk: false,
         gap: 0,
@@ -482,6 +485,8 @@ describe('RedemptionService.listForStudent — 学生端只读', () => {
     const view = await h.service.listForStudent(1);
 
     expect(view.items[0].levelOk).toBe(false);
+    // 脏 code 没有可展示的段位名——前端据此回退成「更高段位」，不能编一个名字出来
+    expect(view.items[0].minLevelName).toBeNull();
   });
 });
 

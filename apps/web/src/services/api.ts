@@ -1626,6 +1626,9 @@ export interface StudentRewardItem {
   description: string | null;
   pointsCost: number;
   minLevelCode: string | null;
+  /** `minLevelCode` 对应的段位名；无段位门槛或脏 code 时为 null。
+   *  段位表单一真源在后端，前端不维护段位表（spec §3.1）。 */
+  minLevelName: string | null;
   /** 余额够不够 */
   affordable: boolean;
   /** 段位够不够 */
