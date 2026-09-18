@@ -1,6 +1,26 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 
+/** 按学科的答题量与答对数（已排除空答案与学生自评）。 */
+export interface AccuracyRow {
+  subjectId: number;
+  answered: number;
+  correct: number;
+}
+
+/** 按学科的学生自评统计（主观题，**不进正确率**，单独出数）。 */
+export interface SelfAssessRow {
+  subjectId: number;
+  count: number;
+  correctCount: number;
+}
+
+/** 按学科的计数行（考试场次等）。 */
+export interface SubjectCountRow {
+  subjectId: number;
+  count: number;
+}
+
 /**
  * 家长端只读聚合仓储（spec `2026-09-18-parent-insights-design.md`）。
  *
@@ -113,5 +133,92 @@ ${windowed.sql}
       lastActiveAt: raw ? new Date(raw as string | Date) : null,
       activeDays: Number(dayRows[0]?.active_days ?? 0),
     };
+  }
+
+  /**
+   * 正确率（spec §4.3，**本批唯一实现，勿分散**）：`practice_results` + `exam_answers` 两源合并。
+   *
+   * 口径（最容易被「统一」掉的地方，测试钉死）：
+   * - `practice_results` 排除 `method IN ('unanswered','self_assess')`——空答案守卫与学生自评
+   *   都会落行，朴素 `AVG(is_correct)` 会把「没答」算成错。
+   * - `exam_answers` 排除 `is_correct IS NULL`（主观题 self_assess 模式落 NULL = 不判对错）。
+   *
+   * 窗口可选：`from`/`to` 都不传 = 累计（仪表盘）；都传 = 窗口（报告页）。**一套 SQL 按参数
+   * 拼条件**，不写两份，否则口径必然分叉。`to` 是半开区间上界（service 传「末日 + 1 天」）。
+   */
+  async getAccuracyBySubject(studentId: number, from?: Date, to?: Date): Promise<AccuracyRow[]> {
+    const windowed = from !== undefined && to !== undefined;
+    const practiceWindow = windowed ? ' AND judged_at >= ? AND judged_at < ?' : '';
+    const examWindow = windowed ? ' AND ea.judged_at >= ? AND ea.judged_at < ?' : '';
+    const params: (number | Date)[] = windowed
+      ? [studentId, from, to, studentId, from, to]
+      : [studentId, studentId];
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT subject_id, SUM(total) AS answered, SUM(correct) AS correct FROM (
+         SELECT subject_id, SUM(is_correct = 1) AS correct, COUNT(*) AS total
+         FROM practice_results
+         WHERE student_id = ? AND method IN ('exact','ai')${practiceWindow}
+         GROUP BY subject_id
+         UNION ALL
+         SELECT es.subject_id, SUM(ea.is_correct = 1) AS correct, COUNT(*) AS total
+         FROM exam_sessions es JOIN exam_answers ea ON ea.session_id = es.id
+         WHERE es.student_id = ? AND es.status = 'submitted' AND ea.is_correct IS NOT NULL${examWindow}
+         GROUP BY es.subject_id
+       ) t
+       GROUP BY subject_id
+       ORDER BY subject_id`,
+      params,
+    );
+    return rows.map((r) => ({
+      subjectId: Number(r.subject_id),
+      answered: Number(r.answered ?? 0),
+      correct: Number(r.correct ?? 0),
+    }));
+  }
+
+  /** 学生自评（主观题）按学科统计。`assessment = 'correct'` 才计入 correctCount。 */
+  async getSelfAssessBySubject(
+    studentId: number,
+    from?: Date,
+    to?: Date,
+  ): Promise<SelfAssessRow[]> {
+    const windowed = from !== undefined && to !== undefined;
+    const window = windowed ? ' AND qsa.created_at >= ? AND qsa.created_at < ?' : '';
+    const params: (number | Date)[] = windowed ? [studentId, from, to] : [studentId];
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT q.subject_id,
+              COUNT(*) AS count,
+              SUM(qsa.assessment = 'correct') AS correct_count
+       FROM question_self_assessments qsa
+       JOIN questions q ON q.id = qsa.question_id
+       WHERE qsa.student_id = ?${window}
+       GROUP BY q.subject_id
+       ORDER BY q.subject_id`,
+      params,
+    );
+    return rows.map((r) => ({
+      subjectId: Number(r.subject_id),
+      count: Number(r.count ?? 0),
+      correctCount: Number(r.correct_count ?? 0),
+    }));
+  }
+
+  /** 已交卷的考试场次按学科计数。窗口按 `submitted_at`。 */
+  async getExamCounts(studentId: number, from?: Date, to?: Date): Promise<SubjectCountRow[]> {
+    const windowed = from !== undefined && to !== undefined;
+    const window = windowed ? ' AND submitted_at >= ? AND submitted_at < ?' : '';
+    const params: (number | Date)[] = windowed ? [studentId, from, to] : [studentId];
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT subject_id, COUNT(*) AS count
+       FROM exam_sessions
+       WHERE student_id = ? AND status = 'submitted'${window}
+       GROUP BY subject_id
+       ORDER BY subject_id`,
+      params,
+    );
+    return rows.map((r) => ({ subjectId: Number(r.subject_id), count: Number(r.count ?? 0) }));
   }
 }

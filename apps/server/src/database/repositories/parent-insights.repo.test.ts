@@ -111,3 +111,80 @@ describe('ParentInsightsRepository：活跃度', () => {
     expect(result.activeDays).toBe(0);
   });
 });
+
+describe('ParentInsightsRepository：正确率（口径钉子）', () => {
+  it('合并 practice_results 与 exam_answers；排除 unanswered/self_assess 与 is_correct IS NULL', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([
+      [
+        { subject_id: 1, answered: 42, correct: 31 },
+        { subject_id: 2, answered: 10, correct: 4 },
+      ],
+      [],
+    ]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getAccuracyBySubject(9);
+
+    expect(result).toEqual([
+      { subjectId: 1, answered: 42, correct: 31 },
+      { subjectId: 2, answered: 10, correct: 4 },
+    ]);
+
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain("method IN ('exact','ai')");
+    expect(sql).toContain("es.status = 'submitted'");
+    expect(sql).toContain('ea.is_correct IS NOT NULL');
+    // 不传窗口 → 无时间条件，参数只有两个 studentId
+    expect(pool.execute.mock.calls[0][1]).toEqual([9, 9]);
+  });
+
+  it('传窗口 → 两个源各自带 judged_at 半开区间', async () => {
+    const pool = mockPool([]);
+    const from = new Date('2026-09-12T00:00:00Z');
+    const to = new Date('2026-09-19T00:00:00Z');
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.getAccuracyBySubject(9, from, to);
+
+    const sql = pool.execute.mock.calls[0][0] as string;
+    // 两个源各出现一次窗口条件（practice 的 judged_at、exam 的 ea.judged_at）
+    expect(sql.match(/judged_at >= \?/g)).toHaveLength(2);
+    expect(sql).toContain('ea.judged_at < ?');
+    expect(pool.execute.mock.calls[0][1]).toEqual([9, from, to, 9, from, to]);
+  });
+
+  it('answered 为 0 时原样返回（rate 的 null 判定在 util）', async () => {
+    const pool = mockPool([{ subject_id: 1, answered: 0, correct: 0 }]);
+    const repo = new ParentInsightsRepository(pool as any);
+    expect(await repo.getAccuracyBySubject(9)).toEqual([
+      { subjectId: 1, answered: 0, correct: 0 },
+    ]);
+  });
+});
+
+describe('ParentInsightsRepository：自评与考试场次', () => {
+  it('自评全部计入 count、只有 correct 计入 correctCount', async () => {
+    const pool = mockPool([{ subject_id: 1, count: 5, correct_count: 3 }]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getSelfAssessBySubject(9);
+
+    expect(result).toEqual([{ subjectId: 1, count: 5, correctCount: 3 }]);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('FROM question_self_assessments');
+    expect(sql).toContain("assessment = 'correct'");
+  });
+
+  it('考试场次按学科计数，只算已交卷', async () => {
+    const pool = mockPool([{ subject_id: 1, count: 4 }]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    const result = await repo.getExamCounts(9);
+
+    expect(result).toEqual([{ subjectId: 1, count: 4 }]);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain("status = 'submitted'");
+    expect(sql).toContain('GROUP BY subject_id');
+  });
+});
