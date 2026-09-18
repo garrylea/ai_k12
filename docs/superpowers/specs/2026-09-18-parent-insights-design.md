@@ -99,17 +99,16 @@ ai_messages 198（safety_flag=1 共 22 条）        point_ledger 1        stude
 
 ```
 apps/server/src/modules/parent-insights/
-  parent-insights.module.ts        imports:[ParentModule]（取 requireOwnedStudent）
+  parent-insights.module.ts        imports:[ParentModule（requireOwnedStudent）, ProgressModule（getStarMap，
+                                   已 exports: [ProgressService]）, ContentModule]
                                    providers（照构造函数逐个列出，不漏则 Nest 启动报「can't resolve dependencies」）：
                                      ParentInsightsController
                                      DashboardService / ReportService / ErrorsService / ChatLogsService
                                      ParentInsightsRepository
-                                     + 各 service 注入的全部既有仓储（StudentsRepository、
-                                       ProgressRepository、TextbookVersionsRepository、SemestersRepository、
-                                       UnitsRepository、LessonsRepository、SubjectsRepository、
-                                       PracticeResultsRepository、ExamSessionsRepository、
+                                     + 各 service 注入的全部**本模块自用**既有仓储（StudentsRepository、
+                                       SubjectsRepository、PracticeResultsRepository、ExamSessionsRepository、
                                        MainErrorBooksRepository、AiDialoguesRepository、AiMessagesRepository、
-                                       PointLedgerRepository、KnowledgePointsRepository）
+                                       QuestionSelfAssessmentsRepository 等）
   parent-insights.controller.ts    @Controller('api/parent') + @Roles('parent')
   dashboard.service.ts
   report.service.ts
@@ -157,8 +156,7 @@ apps/server/src/modules/parent-insights/
           "accuracy": { "answered": 42, "correct": 31, "rate": 73.8 },
           "selfAssessed": { "count": 5, "correctCount": 3 },
           "errorBook": { "uncleared": 12, "total": 20 },
-          "examCount": 4,
-          "lastActiveAt": "2026-09-18T20:11:00.000Z"
+          "examCount": 4
         }
       ]
     }
@@ -169,8 +167,15 @@ apps/server/src/modules/parent-insights/
 
 - `subjects[]` 只包含**该学生有 `progress` 行**的学科（未开始的学科不出现，避免一排空卡片）。
 - `progress.percent` = `completedUnits / totalUnits * 100` 取整；`totalUnits` 为 0 时 `percent = 0`。
-- 进度数据复用 `ProgressService.getStarMap` 的口径（含默认版本规则、学期选择）。为多孩批量取用时，`DashboardService` 对每个孩子每个学科各调一次；孩子数与学科数都很小（实测 5 名学生），不做批量 SQL。
+- 进度数据复用 `ProgressService.getStarMap`（`ProgressModule` 已 `exports: [ProgressService]`），**不改它的返回结构**——服务层从它现有的 `StarMapData` 里取：
+  - `completedUnits` / `totalUnits` 直接用（顶层字段）
+  - `currentUnitName` = `chapters.find(c => c.status === 'current')?.title`
+  - `currentLessonName` = 同一个 chapter 里 `sections.find(s => s.status === 'current')?.title`
+  - `percent` = `totalUnits > 0 ? Math.round(completedUnits / totalUnits * 100) : 0`（**不是** `StarMapData` 里的 `progress`，那个是「本章已完成的节占比」，语义不同，别拿错）
+  - 注意 `ChapterData.id` / `SectionData.id` 是 **string**（`String(unit.id)`），本批对外字段里不暴露它们
+- **性能提示**：`getStarMap` 内部对每个 unit 调一次 `contentService.getLessons()`（N+1）。实测 5 名学生 × 每人 1–2 个学科 × 每学科 8 个单元 ≈ 几十次查询，家庭级规模可接受；**不做批量优化**（要改 `ProgressService` 的签名，越界）。
 - `accuracy` / `selfAssessed` / `errorBook` / `examCount` 均为**累计值，不限时间窗**（与报告页的窗口口径区分开）。
+- `lastActiveAt` **只在孩子层级出现，学科卡片里没有**：按学科算「最近活跃」要再对四张表各查一次并加学科条件（成本 ×学科数），而家长真正关心的是「这个孩子最近在不在学」+「这门课学到哪了」——后者由 `progress` 已经表达。
 - `lastActiveAt` = **不限时间窗**的 MAX；`activeDays7` = **近 7 天**内有记录的天数。两者窗口不同，必须分两次查，不能共用一个带时间条件的 SQL：
 
 ```sql
@@ -251,6 +256,8 @@ SELECT COUNT(DISTINCT DATE(ts)) AS active_days FROM (
 | `page` | ≥1 | 1 |
 
 > **`pageSize` 由服务端固定为 20，前端不传**（沿用家长端既有约定，见 `RedemptionHistoryPanel.tsx:19-22`）。响应里回显 `pageSize`，前端用 `page` 对不上就不渲染（防页码与新内容错配）。
+>
+> `page` **复用 `modules/points/pagination.util.ts` 的 `parsePositiveInt`**：非法（`abc` / `1.5` / `-1` / 空）一律 **400 / 1001**，**不静默回落**——与 `points` 的流水分页同一口径。
 
 ```jsonc
 {
@@ -384,7 +391,8 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 ### 5.3 图表（recharts）
 
 - 新增依赖 `recharts`（`apps/web/package.json`）。
-- **必须覆盖的默认样式**：坐标轴线/刻度颜色、`tooltip` 容器、字体族、折线/柱状配色 —— 全部取自 `style.md` §2 的 CSS 变量，**不使用 recharts 默认色板**。
+- **必须覆盖的默认样式**：坐标轴线/刻度颜色、`tooltip` 容器、字体族、折线/柱状配色 —— 全部取自 CSS 变量（家长主题值见 `apps/web/src/styles/global.css` 的 `[data-theme='parent']` 段），**不使用 recharts 默认色板**。
+- **取色坑**：CSS 变量不能直接当数值传给图表库，必须在挂载后经 `getComputedStyle` 读；而**家长页的变量定义在 `[data-theme="parent"]` 容器上、不在 `:root`**——从 `document.documentElement` 读到的是学生端日间值（brand = `#ff6b35` 橙色），会画错色。必须从 `document.querySelector('[data-theme="parent"]')`（或元素的 `closest('[data-theme]')`）读。
 - **禁止装饰元素**：不加渐变填充、不加雷达图的网格装饰、不用饼图。只做折线（trend）+ 柱状（subjects）+ 数字卡。
 - 响应式：容器 `ResponsiveContainer`，主断点 1024px / 1280px（照 `style.md` §7）。
 - 组件要包一层薄封装：新建 `components/business/parent/`（与既有的 `answer/` `dictation/` `interpretation/` `meaning/` `vocabulary/` 同约定）放 `ChartLine.tsx` / `ChartBar.tsx`，让页面不直接依赖 recharts API —— 也便于补渲染测试。
@@ -399,8 +407,9 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 | `studentId` 不属于该家长 / 不存在 | 404 / 1002（`requireOwnedStudent`，既有） |
 | `dialogueId` 不属于该学生 | 404 / 1002（服务层二次校验） |
 | 无数据 | **200 + 空数组 / `rate: null`**，不是 404 |
+| `page` 合法但超出末页 | **200 + 空 `items` + 正确 `total`**（不报 404，前端按空列表处理） |
 | `period` 非法值 | 归一化为 `weekly` |
-| `page` 越界 / 非法 | 归一化 `page = max(1, floor(page))`；非数字→1。`page` 超出末页时返回**空 `items` + 正确 `total`**（不报 404，前端按空列表处理） |
+| `page` 非法（`abc` / `1.5` / `-1` / 空串以外空格） | **400 / 1001**，复用 `parsePositiveInt`（`modules/points/pagination.util.ts`），**不静默回落** |
 | `from` / `to` 非法日期 | 忽略该筛选（不报错），并在响应中不体现 |
 | 学生已停用（`is_active=0`） | **仍可查**（家长看历史数据是正当需求） |
 
@@ -427,7 +436,7 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 
 1. `dashboard.service`：多孩 × 多学科编排；无 `progress` 行的学科不出卡片；`percent` 边界（`totalUnits = 0`）。
 2. `report.service`：`period` 归一化；`trend` 不补零；`weakPoints` Top 10 排序与 `uncoveredCount` 计算；`rate = null`（`answered = 0`）。
-3. `errors.service`：`track` 映射（`auxiliary → aux`，其余 → `main`）；`track` 筛选下推到 `source` 条件；`page` 越界（负数、0、超末页、非数字）归一化；`question_id IS NULL` 的行不炸。
+3. `errors.service`：`track` 映射（`auxiliary → aux`，其余 → `main`）；`track` 筛选下推到 `source` 条件；`page` 非法 → 400/1001、`page` 超末页 → 空 `items` + 正确 `total`；`question_id IS NULL` 的行不炸。
 4. `chat-logs.service`：`messageCount` / `blockCount` 聚合正确；`q` 只匹配 title；`dialogueId` 跨学生 → 1002。
 5. `parent-insights.repo`：正确率合并口径（排除 `unanswered`/`self_assess`；`exam_answers` 排除 `is_correct IS NULL`）—— 这是本批最容易被「统一」掉的口径，用测试钉死。
 6. 归属校验：四个域各一条「别人的孩子 → 404/1002」。
