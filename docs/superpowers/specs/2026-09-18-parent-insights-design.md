@@ -472,3 +472,4 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 11. **薄弱点数不可当覆盖率**：一个题可绑多个知识点（`question_knowledge_points` 的 UNIQUE 是「题×KP」），所以 `sum(unclearedCount)` 会大于「未清零错题总数」，**不能**用它与 `weakPointsUncoveredCount` 推覆盖率或「已覆盖」数。
 12. **趋势折线的 X 轴只含有记录的天，没有按窗口补零**：`trend` 与 `ChartLine` 都是「有几个点画几个点」，所以相隔 5 天的两次记录在图上会**相邻**显示，`MM-DD` 标签之间看不出间隔。spec §4.2 ② 原意是「前端按 `windowStart..windowEnd` 铺 X 轴」，实际未做——要做得先让 `ChartPoint.value` 允许 `null` 并把 recharts 的 `connectNulls` 关掉（否则会画出「当天 0 分」的假数据）。本期接受这个观感折中。
 13. **柱状图的 X 轴标签把正确率写进了刻度文字**（形如「数学 73.8%」）：学科多于 4~5 个时刻度可能挤。本期接受；要改就把正确率挪到图表下方的文字行。
+14. **`attachments` 不回传 → 拍照解题的图片在家长回放里不可见**：`ParentChatLogMessage` 是白名单映射，刻意不返回消息的 `attachments`（拍照解题留下的图片 JSON）。这与 PRD §7.7「全透明回放…全面掌握孩子的思考路径」存在张力；本期按**明确不做**处理（要做需前端一并处理图片 URL 与过期），需产品裁决是否后续补。

@@ -47,6 +47,7 @@ ai_messages 198（safety_flag=1 共 22 条）        point_ledger 1        stude
 11. **薄弱点数不可当覆盖率**：一题可绑多个 KP，`sum(unclearedCount)` 会大于「未清零错题总数」，**不能**用它与 `weakPointsUncoveredCount` 推覆盖率。
 12. **趋势折线的 X 轴只含有记录的天、没有按窗口补零**：相隔 5 天的两次记录在图上会相邻显示。要做得先让 `ChartPoint.value` 允许 `null` 并把 recharts 的 `connectNulls` 关掉（否则会画出「当天 0 分」的假数据）。本期接受这个观感折中。
 13. **柱状图把正确率写进了 X 轴刻度文字**（形如「数学 73.8%」）：学科多于 4~5 个时刻度可能挤。要改就把正确率挪到图表下方的文字行。
+14. **`attachments` 不回传 → 拍照解题的图片在家长回放里不可见**：`ParentChatLogMessage` 是白名单映射，不返回消息的 `attachments`（拍照解题留下的图片 JSON），与 PRD §7.7「全透明回放」存在张力。本期按**明确不做**处理（要做需前端一并处理图片 URL 与过期）；**需产品裁决是否后续补**。
 
 **环境漂移发现（不在本批修，建议单独立项）**：`tools/db/schema.sql:1160` 起定义了 **28 条 `CREATE TRIGGER`**（各表 `*_updated_at` 维护），但当前 dev 库 `information_schema.TRIGGERS` 里**只有 1 条**（`trg_aux_error_books_updated_at`）。也就是说 `updated_at` 字段在既有库上大多不会自动更新，且 code 里的 `updated_at` 排序/展示依赖它。这与既有的 `admin_notifications` 缺迁移文件属**同一类问题**：`schema.sql` 与已存在的库不同步，只有全新建库才会拿到全部触发器；仓库**没有迁移运行器**，历史 DDL 变更靠手工 apply，漏了就静默漂移。修复需要：(a) 补齐 27 条触发器的幂等迁移；(b) 排查哪些表的 `updated_at` 已被应用逻辑依赖却从未自动维护。本批不碰。
 

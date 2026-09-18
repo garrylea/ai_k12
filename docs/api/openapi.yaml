@@ -6592,7 +6592,7 @@ components:
           format: date-time
 
     # ==================== 家长端学情（ParentInsights，2026-09-18） ====================
-    # 四个页面（P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 对话回放）的 6 个只读端点。
+    # 四个页面（P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 对话回放）的 5 个只读端点。
     # 全部实时聚合、不落库：学情报告不写 learning_reports，也不调用 LLM。
     # 与 DTO `modules/parent-insights/dto/parent-insights.dto.ts` 一一对应。
 

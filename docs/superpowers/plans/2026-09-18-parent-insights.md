@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把家长端的仪表盘、学情报告、错题查看、AI 对话回放四页从 `Placeholder` 落地为真实页，后端新增 6 个只读端点。
+**Goal:** 把家长端的仪表盘、学情报告、错题查看、AI 对话回放四页从 `Placeholder` 落地为真实页，后端新增 5 个只读端点。
 
-**Architecture:** 后端新建 `apps/server/src/modules/parent-insights/`（与 `modules/points/` 同范式）：1 个 controller 挂 6 个端点、4 个领域 service、1 个聚合仓储。归属校验一律复用 `ParentService.requireOwnedStudent`，进度复用 `ProgressService.getStarMap`。前端新增 4 个页面 + 6 个 api 方法 + recharts 图表薄封装。
+**Architecture:** 后端新建 `apps/server/src/modules/parent-insights/`（与 `modules/points/` 同范式）：1 个 controller 挂 5 个端点、4 个领域 service、1 个聚合仓储。归属校验一律复用 `ParentService.requireOwnedStudent`，进度复用 `ProgressService.getStarMap`。前端新增 4 个页面 + 5 个 api 方法 + recharts 图表薄封装。
 
 **Tech Stack:** Nest 10 + TS ESM（import 路径带 `.js`）+ Vitest + mysql2/promise；React 18 + Vite + Tailwind + Zustand + Vitest + @testing-library/react + recharts（新增）。
 
