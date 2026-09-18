@@ -8,6 +8,7 @@ import {
   setStudentStatus,
   type MyStudentItem,
 } from '@/services/api';
+import { useParentStudentStore } from '@/store/parentStudentStore';
 
 const GRADES = [
   '小学一年级', '小学二年级', '小学三年级', '小学四年级', '小学五年级', '小学六年级',
@@ -18,6 +19,7 @@ const emptyForm = { name: '', username: '', password: '', age: '', grade: '' };
 
 export default function ParentStudentsPage() {
   const navigate = useNavigate();
+  const setStudentId = useParentStudentStore((s) => s.setStudentId);
   const [students, setStudents] = useState<MyStudentItem[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -225,6 +227,22 @@ export default function ParentStudentsPage() {
                   学习配置
                 </Button>
               </div>
+              {/*
+                积分页（`/parent/rewards`）按 `parentStudentStore` 的 `studentId` 取数，
+                所以**必须先设锚点再导航**：反过来的话页面会先按上一个孩子渲染一帧，
+                切换守卫/重拉都救不回那一眼错的数据（跨学生显示是事故）。
+                zustand 的 `set` 是同步的，两行之间不会被打断。
+              */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setStudentId(s.id);
+                  navigate('/parent/rewards');
+                }}
+              >
+                积分与奖励
+              </Button>
             </div>
           </div>
         ))}

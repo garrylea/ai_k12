@@ -6,10 +6,16 @@ import {
   getMyLedger,
   getMyPoints,
   getMyRewards,
+  getParentPointRules,
+  getParentPoints,
+  getUnreadMessageCount,
+  listMyStudents,
   type MyPoints,
   type MyRewards,
+  type MyStudentItem,
   type PointLedgerPage,
 } from '@/services/api';
+import { useParentStudentStore } from '@/store/parentStudentStore';
 
 /**
  * 路由级回归（计划 §3 Task 8）。
@@ -35,12 +41,21 @@ vi.mock('@/services/api', async (importOriginal) => {
     getMyPoints: vi.fn(),
     getMyLedger: vi.fn(),
     getMyRewards: vi.fn(),
+    // 家长端：`ParentLayout` 的顶栏（学生切换器 + 未读数）与 `/parent/rewards` 概览
+    getParentPoints: vi.fn(),
+    getParentPointRules: vi.fn(),
+    listMyStudents: vi.fn(),
+    getUnreadMessageCount: vi.fn(),
   };
 });
 
 const getMyPointsMock = vi.mocked(getMyPoints);
 const getMyLedgerMock = vi.mocked(getMyLedger);
 const getMyRewardsMock = vi.mocked(getMyRewards);
+const getParentPointsMock = vi.mocked(getParentPoints);
+const getParentPointRulesMock = vi.mocked(getParentPointRules);
+const listMyStudentsMock = vi.mocked(listMyStudents);
+const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
 
 const PLACEHOLDER_TEXT = '原型占位：此页面正在设计中...';
 
@@ -88,6 +103,18 @@ const REWARDS: MyRewards = {
   ],
 };
 
+/** 家长端的顶栏孩子列表：至少一个孩子，页面的概览/面板才有 `studentId` 可取。 */
+const PARENT_STUDENT: MyStudentItem = {
+  id: 7,
+  parentId: 1,
+  username: 'xiaoming',
+  name: '小明',
+  age: 9,
+  grade: '三年级',
+  schoolLevel: 'primary',
+  isActive: true,
+};
+
 /** 造一个 exp 在未来的假 JWT：`isSessionValid()` 解 payload 校 exp，不是只看字符串存在。 */
 function validToken(): string {
   const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
@@ -99,6 +126,11 @@ function setStudentSession() {
   localStorage.setItem('userRole', 'student');
 }
 
+function setParentSession() {
+  localStorage.setItem('token', validToken());
+  localStorage.setItem('userRole', 'parent');
+}
+
 function renderAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   return render(<RouterProvider router={router} />);
@@ -107,12 +139,23 @@ function renderAt(path: string) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  // 家长锚点是模块级单例，用例之间会串（下一个用例可能读到上个用例的孩子 id）
+  useParentStudentStore.setState({ studentId: null });
 });
 
 beforeEach(() => {
   getMyPointsMock.mockReset();
   getMyLedgerMock.mockReset();
   getMyRewardsMock.mockReset();
+  getParentPointsMock.mockReset();
+  getParentPointsMock.mockResolvedValue(POINTS);
+  getParentPointRulesMock.mockReset();
+  getParentPointRulesMock.mockResolvedValue({ tasks: [] });
+  listMyStudentsMock.mockReset();
+  listMyStudentsMock.mockResolvedValue([PARENT_STUDENT]);
+  getUnreadMessageCountMock.mockReset();
+  getUnreadMessageCountMock.mockResolvedValue(0);
+  useParentStudentStore.setState({ studentId: null });
 });
 
 /**
@@ -235,6 +278,58 @@ describe('路由表：积分相关页面', () => {
     ] as const) {
       expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
     }
+  });
+});
+
+/**
+ * 计划三 Task 9：`/parent/rewards` 必须挂真页面。
+ *
+ * Task 4 已把 `routeTable.tsx` 里 `rewards` 那一行的 `Placeholder` 换成 `ParentPointsPage`。
+ * 页面自己有组件测试，但那个测试挂的是**页面本身**、绕过了路由表——「路由确实指到这个
+ * 页面」只有这里能证明（一个手误改回 `Placeholder` 或改错 path，组件测试全绿也发现不了）。
+ */
+describe('路由表：家长端「积分与奖励」', () => {
+  it('/parent/rewards 渲染 ParentPointsPage（概览 + 四个 Tab），而非 Placeholder', async () => {
+    setParentSession();
+
+    renderAt('/parent/rewards');
+
+    expect(await screen.findByRole('heading', { name: '积分与奖励' })).toBeInTheDocument();
+    // 概览卡的数据来自 ParentPointsPage 自己的 getParentPoints；占位页不可能有
+    expect(await screen.findByTestId('points-overview')).toBeInTheDocument();
+    for (const label of ['积分规则', '奖励清单', '兑换', '兑换记录']) {
+      expect(screen.getByRole('tab', { name: label })).toBeInTheDocument();
+    }
+    expect(screen.getByRole('tab', { name: '积分规则' })).toHaveAttribute('aria-selected', 'true');
+    // 顶栏孩子切换器把 store 锚点落到唯一那个孩子上，页面按这个 id 取数
+    expect(getParentPointsMock).toHaveBeenCalledWith(PARENT_STUDENT.id);
+
+    // 占位页文案不许出现——这是「没被改回 Placeholder」的钉子
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    // 家长端仍是家长主题（商务白蓝，无日夜切换）
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+
+  it('侧边导航「奖励管理」仍指向 /parent/rewards（路径不许改）', async () => {
+    setParentSession();
+
+    renderAt('/parent/rewards');
+
+    // 只认 UX §家长端侧边清单里的「奖励管理」；路径是深链/书签的对外契约
+    expect(await screen.findByRole('link', { name: '奖励管理' })).toHaveAttribute(
+      'href',
+      '/parent/rewards',
+    );
+  });
+
+  it('无 token 访问 /parent/rewards → 回登录页，不发积分请求', async () => {
+    localStorage.clear();
+
+    renderAt('/parent/rewards');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '积分与奖励' })).not.toBeInTheDocument();
+    expect(getParentPointsMock).not.toHaveBeenCalled();
   });
 });
 
