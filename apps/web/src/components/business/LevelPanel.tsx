@@ -2,6 +2,13 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import { useNavigate } from 'react-router-dom';
 import { LevelIcon, Progress, Skeleton } from '@/components/base';
 import { getMyPoints, type MyPoints } from '@/services/api';
+import {
+  GUTTER,
+  PANEL_FALLBACK_SIZE,
+  clamp,
+  computePanelPosition,
+  type PanelPosition,
+} from './level-panel-position';
 
 /**
  * 段位 / 积分面板——用户点 `UserBadge` 要看的东西（计划 §2.5）。
@@ -102,25 +109,49 @@ export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
 
   // 桌面 popover 用 fixed 定位：徽章所在容器多带 overflow-hidden
   //（CourseDetailPage / AuxiliaryLayout 都是），absolute 会被裁掉。
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  // 尺寸优先实测（文案/字号一变也不失真），量不到时退回兜底常量。
+  const [pos, setPos] = useState<PanelPosition | null>(null);
   useLayoutEffect(() => {
-    if (!open || !isDesktop) return;
-    const compute = () => {
-      const el = anchorRef?.current;
-      if (!el) {
-        setPos({ top: 96, right: 16 });
+    if (!open || !isDesktop) {
+      setPos(null);
+      return;
+    }
+    const measure = () => {
+      const panelRect = panelRef.current?.getBoundingClientRect();
+      const size = {
+        width: Math.round(panelRect?.width ?? 0) || PANEL_FALLBACK_SIZE.width,
+        height: Math.round(panelRect?.height ?? 0) || PANEL_FALLBACK_SIZE.height,
+      };
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const anchorRect = anchorRef?.current?.getBoundingClientRect();
+      // 锚点缺失或拿到全 0 矩形（jsdom 无布局引擎）→ 退到右上角固定位，不崩
+      const hasAnchor =
+        !!anchorRect &&
+        !(
+          anchorRect.width === 0 &&
+          anchorRect.height === 0 &&
+          anchorRect.top === 0 &&
+          anchorRect.bottom === 0
+        );
+      if (!hasAnchor || !anchorRect) {
+        setPos({
+          top: clamp(96, GUTTER, viewport.height - size.height - GUTTER),
+          left: clamp(viewport.width - size.width - 16, GUTTER, viewport.width - size.width - GUTTER),
+        });
         return;
       }
-      const rect = el.getBoundingClientRect();
-      setPos({
-        top: rect.bottom + 8,
-        right: Math.max(8, window.innerWidth - rect.right),
-      });
+      setPos(computePanelPosition(anchorRect, size, viewport));
     };
-    compute();
-    window.addEventListener('resize', compute);
-    return () => window.removeEventListener('resize', compute);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
   }, [open, isDesktop, anchorRef]);
+
+  // aria-modal 要求焦点进入面板：打开后把焦点交给容器（Esc 监听挂在 document 上，仍能关）
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.focus();
+  }, [open]);
 
   if (!open) return null;
 
@@ -204,8 +235,9 @@ export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
           role="dialog"
           aria-modal="true"
           aria-label="积分与段位"
+          tabIndex={-1}
           data-testid="level-panel"
-          className="relative w-full rounded-t-[var(--radius-card)] bg-[var(--bg-elevated)] px-5 pb-6 pt-5 shadow-[var(--shadow-elevated)]"
+          className="relative w-full rounded-t-[var(--radius-card)] bg-[var(--bg-elevated)] px-5 pb-6 pt-5 shadow-[var(--shadow-elevated)] outline-none"
         >
           <div className="space-y-4">{body}</div>
         </div>
@@ -218,9 +250,10 @@ export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
       ref={panelRef}
       role="dialog"
       aria-label="积分与段位"
+      tabIndex={-1}
       data-testid="level-panel"
-      className="fixed z-50 w-72 rounded-[var(--radius-card)] border border-[var(--bg-subtle)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-elevated)]"
-      style={{ top: pos?.top ?? 96, right: pos?.right ?? 16 }}
+      className="fixed z-50 w-72 rounded-[var(--radius-card)] border border-[var(--bg-subtle)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-elevated)] outline-none"
+      style={{ top: pos?.top ?? 96, left: pos?.left ?? 16 }}
     >
       <div className="space-y-4">{body}</div>
     </div>

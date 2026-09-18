@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { LevelIcon, Skeleton } from '@/components/base';
 import { getMyPoints, type MyPoints } from '@/services/api';
+import { usePointsStore } from '@/store/pointsStore';
 import { LevelPanel } from './LevelPanel';
 
 /**
@@ -30,7 +31,15 @@ export function UserBadge({ username, initial, subtitle, className }: UserBadgeP
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
+  /**
+   * 每次 `push` 递增的积分账本版本号。学完一课拿到 +10 分后，`CourseDetailPage`
+   * 不会重挂载，徽章必须靠它重拉一次余额，否则侧栏药丸会一直停在旧数字上。
+   */
+  const revision = usePointsStore((s) => s.revision);
+  /** 首个 revision 值（store 初值 0）由 mount effect 负责，避免重复请求。 */
+  const seenRevision = useRef(revision);
+
+  const loadPoints = useCallback(() => {
     let cancelled = false;
     getMyPoints()
       .then((res) => {
@@ -39,12 +48,23 @@ export function UserBadge({ username, initial, subtitle, className }: UserBadgeP
         setStatus('ready');
       })
       .catch(() => {
-        if (!cancelled) setStatus('failed');
+        // 静默降级；但已经有数据时不要把它降级掉——重拉失败就继续显示旧值
+        if (!cancelled) setStatus((prev) => (prev === 'ready' ? prev : 'failed'));
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // mount 时拉一次
+  useEffect(() => loadPoints(), [loadPoints]);
+
+  // 之后每次发分（revision 递增）再拉一次；跳过首个值，不与 mount 那次重复
+  useEffect(() => {
+    if (revision === seenRevision.current) return;
+    seenRevision.current = revision;
+    return loadPoints();
+  }, [revision, loadPoints]);
 
   const avatarText = initial ?? (username ? username.charAt(0).toUpperCase() : '学');
 
@@ -91,6 +111,8 @@ export function UserBadge({ username, initial, subtitle, className }: UserBadgeP
               data-testid="user-badge-balance"
               className="shrink-0 text-sm font-semibold tabular-nums text-[var(--brand-600)]"
             >
+              {/* 数字本身没有单位，读屏会念成光秃秃的「120」——补一个视觉隐藏的量词 */}
+              <span className="sr-only">可用积分</span>
               {points.balance}
             </span>
           </>

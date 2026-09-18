@@ -18,6 +18,14 @@ export interface PointsToastItem {
 
 interface PointsState {
   queue: PointsToastItem[];
+  /**
+   * 单调递增的「积分账本版本号」，每次 `push` +1，**永不回退**。
+   *
+   * 为什么不是用 `queue.length`：`dismiss` 会把队列长度减回去，而积分到账是
+   * 不可逆的事实——展示层（如 `UserBadge`）订阅它重拉余额，只要发生过发分就必须重拉。
+   * 也不能靠 toast 文案里的数字，因为那会改动 `PointsToastItem` 契约。
+   */
+  revision: number;
   push: (item: Omit<PointsToastItem, 'id'>) => void;
   dismiss: (id: string) => void;
 }
@@ -33,6 +41,11 @@ let seq = 0;
  */
 export const usePointsStore = create<PointsState>((set) => ({
   queue: [],
-  push: (item) => set((s) => ({ queue: [...s.queue, { ...item, id: `pt-${++seq}` }] })),
+  revision: 0,
+  push: (item) =>
+    set((s) => ({
+      queue: [...s.queue, { ...item, id: `pt-${++seq}` }],
+      revision: s.revision + 1,
+    })),
   dismiss: (id) => set((s) => ({ queue: s.queue.filter((t) => t.id !== id) })),
 }));

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { UserBadge } from './UserBadge';
 import { getMyPoints, type MyPoints } from '@/services/api';
+import { usePointsStore } from '@/store/pointsStore';
 
 /**
  * 用户信息入口 → 段位入口。
@@ -59,11 +60,14 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  // store 是模块级单例：revision 不归零会串到下个用例，让「只拉一次」断言失败
+  usePointsStore.setState({ queue: [], revision: 0 });
 });
 
 beforeEach(() => {
   stubMatchMedia();
   getMyPointsMock.mockReset();
+  usePointsStore.setState({ queue: [], revision: 0 });
 });
 
 describe('UserBadge', () => {
@@ -73,8 +77,12 @@ describe('UserBadge', () => {
     renderBadge();
 
     expect(screen.getByText('小明')).toBeInTheDocument();
-    expect(await screen.findByTestId('user-badge-level-icon')).toBeInTheDocument();
+    // 断言真正的 svg：外层 testid 的 span 恒在，光断言它等于没断言
+    const icon = await screen.findByTestId('user-badge-level-icon');
+    expect(icon.querySelector('svg')).not.toBeNull();
     expect(screen.getByTestId('user-badge-balance')).toHaveTextContent('120');
+    // 数字必须有量词，否则读屏念成光秃秃的「120」
+    expect(screen.getByText('可用积分')).toHaveClass('sr-only');
   });
 
   it('加载完成前显示骨架，不显示「0 分」', () => {
@@ -103,6 +111,9 @@ describe('UserBadge', () => {
   });
 
   it('点击徽章打开 LevelPanel（再次点击关闭）', async () => {
+    // 桌面（≥1024px）：窄屏抽屉有全屏遮罩，真实浏览器里徽章点不到，
+    // 「开→再点关」这条路径只在桌面可达。
+    stubMatchMedia(true);
     getMyPointsMock.mockResolvedValue(BASE);
 
     renderBadge();
@@ -141,5 +152,43 @@ describe('UserBadge', () => {
     renderBadge({ subtitle: '专注学习中...' });
 
     expect(screen.getByText('专注学习中...')).toBeInTheDocument();
+  });
+
+  it('收到积分发分（revision 递增）后重拉余额并更新徽章', async () => {
+    getMyPointsMock
+      .mockResolvedValueOnce(BASE)
+      .mockResolvedValueOnce({ ...BASE, balance: 130, totalEarned: 530 });
+
+    renderBadge();
+
+    expect(await screen.findByTestId('user-badge-balance')).toHaveTextContent('120');
+    // mount 那次只请求一次：订阅 revision 不能把首个值也当成变化
+    expect(getMyPointsMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      usePointsStore.getState().push({ points: 10, title: '本节学习完成' });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('user-badge-balance')).toHaveTextContent('130'),
+    );
+    expect(getMyPointsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('重拉失败时保留旧余额，不把徽章降级成「无积分」', async () => {
+    getMyPointsMock
+      .mockResolvedValueOnce(BASE)
+      .mockRejectedValueOnce(new Error('network down'));
+
+    renderBadge();
+    expect(await screen.findByTestId('user-badge-balance')).toHaveTextContent('120');
+
+    act(() => {
+      usePointsStore.getState().push({ points: 10, title: '本节学习完成' });
+    });
+
+    await waitFor(() => expect(getMyPointsMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('user-badge-balance')).toHaveTextContent('120');
+    expect(screen.getByTestId('user-badge-level-icon')).toBeInTheDocument();
   });
 });

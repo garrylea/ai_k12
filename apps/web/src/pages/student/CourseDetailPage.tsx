@@ -661,6 +661,7 @@ export default function CourseDetailPage() {
               {/* 用户区：段位入口（点击开积分面板，不再退出）+ 右侧独立退出按钮 */}
               <UserBadge
                 username={username || '学生'}
+                initial={username ? username[0].toUpperCase() : '学'}
                 subtitle="专注学习中..."
                 className="min-w-0"
               />
