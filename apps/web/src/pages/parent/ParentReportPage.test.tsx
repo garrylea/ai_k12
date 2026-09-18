@@ -110,7 +110,7 @@ describe('ParentReportPage', () => {
     renderAt('/parent/report');
 
     expect(await screen.findByTestId('report-stats')).toHaveTextContent('73.8%');
-    expect(screen.getByTestId('report-stats')).toHaveTextContent('3');
+    expect(screen.getByTestId('report-stats')).toHaveTextContent('活跃天数3');
     expect(getReportMock).toHaveBeenCalledWith(11, 'weekly');
   });
 
@@ -121,6 +121,20 @@ describe('ParentReportPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '月报' }));
 
     await waitFor(() => expect(getReportMock).toHaveBeenLastCalledWith(11, 'monthly'));
+  });
+
+  it('切档时请求未回来 → 出骨架，不残留上一档的内容（防「闪现旧数据」）', async () => {
+    renderAt('/parent/report');
+    // 先让周报正常到货
+    expect(await screen.findByTestId('report-stats')).toHaveTextContent('73.8%');
+
+    // 月报这次**悬着不 resolve**
+    getReportMock.mockImplementation(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: '月报' }));
+
+    // 请求在飞：必须是骨架，且周报的数字不能再挂在屏上
+    expect(await screen.findByTestId('report-skeleton')).toBeInTheDocument();
+    expect(screen.queryByTestId('report-stats')).not.toBeInTheDocument();
   });
 
   it('趋势折线喂的是 rate，标签是日期', async () => {
@@ -184,6 +198,8 @@ describe('ParentReportPage', () => {
     expect(await screen.findByTestId('report-stats')).toHaveTextContent('暂无数据');
     expect(screen.getByTestId('chart-line')).toHaveAttribute('data-count', '0');
     expect(screen.getByTestId('report-exams')).toHaveTextContent('还没有考试记录');
+    // 未标注数为 0 时不能渲染「另有 0 道…」提示
+    expect(screen.queryByTestId('report-uncovered-hint')).not.toBeInTheDocument();
   });
 
   it('没有选孩子 → 空态引导，不发请求', async () => {
@@ -205,5 +221,23 @@ describe('ParentReportPage', () => {
 
     expect(await screen.findByTestId('report-student-missing')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+  });
+
+  it('月报失败后切回周报 → 立刻不再挂错误卡（失败状态也按 studentId+period 区分）', async () => {
+    const { ApiError } = await import('@/services/api');
+
+    renderAt('/parent/report');
+    expect(await screen.findByTestId('report-stats')).toHaveTextContent('73.8%');
+
+    getReportMock.mockImplementation((_studentId, p) =>
+      p === 'monthly' ? Promise.reject(new ApiError(500, '服务异常')) : Promise.resolve(REPORT),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '月报' }));
+    expect(await screen.findByTestId('report-error')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '周报' }));
+    // 同步断言：切回来的那一帧不能再显示月报的错误卡
+    expect(screen.queryByTestId('report-error')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('report-stats')).toHaveTextContent('73.8%');
   });
 });

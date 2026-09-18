@@ -45,16 +45,18 @@ export default function ParentReportPage() {
   const studentId = useParentStudentStore((s) => s.studentId);
   const [period, setPeriod] = useState<ParentReportPeriod>('weekly');
   const [report, setReport] = useState<{ studentId: number; period: ParentReportPeriod; value: ParentLearningReport } | null>(null);
-  const [failure, setFailure] = useState<{ studentId: number; code: number | null } | null>(null);
+  const [failure, setFailure] = useState<{ studentId: number; period: ParentReportPeriod; code: number | null } | null>(null);
   const [reload, setReload] = useState(0);
 
   /**
    * 数据按 `studentId + period` 现算，而不是在 effect 里 setReport(null)：
    * effect 在 commit 之后才跑，清空会慢一帧——那一帧页面上是**上一个孩子/上一档**的报告。
+   * `failure` 同理带 `period`，否则月报失败后切回周报会先闪一帧错误卡。
    */
   const data =
     report && report.studentId === studentId && report.period === period ? report.value : null;
-  const err = failure && failure.studentId === studentId ? failure : null;
+  const err =
+    failure && failure.studentId === studentId && failure.period === period ? failure : null;
 
   useEffect(() => {
     if (studentId === null) return;
@@ -68,7 +70,7 @@ export default function ParentReportPage() {
       .catch((error: unknown) => {
         if (cancelled) return;
         setReport(null);
-        setFailure({ studentId, code: error instanceof ApiError ? error.code : null });
+        setFailure({ studentId, period, code: error instanceof ApiError ? error.code : null });
       });
     return () => {
       cancelled = true;
