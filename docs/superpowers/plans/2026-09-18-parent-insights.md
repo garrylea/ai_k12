@@ -3369,7 +3369,12 @@ export function readChartColor(token: string, container: Element | null): string
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/chart-theme.test.ts`
-Expected: PASS（3 个用例）。若 jsdom 不解析内联自定义属性导致第 1 个用例失败，把该用例改成断言「返回值等于 `CHART_FALLBACK` 或内联值」——**不要**为了让测试通过而删掉「从容器读」这个行为；该行为由 Step 6 的组件测试在真实 DOM 结构下再覆盖一次。
+Expected: PASS（3 个用例）
+
+> 已实测确认：jsdom **支持**用 `getComputedStyle(el).getPropertyValue('--x')` 读**内联**声明的自定义属性
+> （探针：`<div data-theme="parent" style="--brand-500: #2563EB">` → 返回 `#2563EB`）。
+> 所以第 1 个用例照写即可，**不要**为了让它通过而把断言放宽成「等于内联值或兜底值」——
+> 那种「两个都可能」的断言等于什么都没验证。
 
 - [ ] **Step 6: 写图表封装的失败测试**
 
