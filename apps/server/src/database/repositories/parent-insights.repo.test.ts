@@ -466,7 +466,7 @@ describe('ParentInsightsRepository：会话列表', () => {
   const logRows = [
     {
       id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值', subject_id: null,
-      created_at: new Date('2026-09-16T10:00:00Z'), updated_at: new Date('2026-09-16T10:05:00Z'),
+      created_at: new Date('2026-09-16T10:00:00Z'), last_active_at: new Date('2026-09-16T10:05:00Z'),
       message_count: 8, block_count: 2,
     },
   ];
@@ -484,14 +484,23 @@ describe('ParentInsightsRepository：会话列表', () => {
       id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值',
       subjectId: null, messageCount: 8, blockCount: 2,
     });
+    // `updatedAt` 取的是「最后一条消息时间」（SQL 里的 last_active_at），不是 d.updated_at
+    expect(result.items[0].updatedAt).toEqual(new Date('2026-09-16T10:05:00Z'));
+
     const listSql = pool.query.mock.calls[0][0] as string;
     expect(listSql).toContain('SUM(m.safety_flag = 1)');
+    // 消息侧条件必须在 ON 里：写到 WHERE 会把 LEFT JOIN 变成 INNER JOIN，零消息会话会整条消失
+    expect(listSql).toContain('LEFT JOIN ai_messages m');
     expect(listSql).toContain('m.deleted_at IS NULL');
     expect(listSql).toContain('d.deleted_at IS NULL');
-    expect(listSql).toContain('ORDER BY d.updated_at DESC');
+    // 排序按「最后一条消息时间」——用 d.updated_at 会把横跨整个学期的主线卡片会话排错
+    expect(listSql).toContain('COALESCE(MAX(m.created_at), d.created_at) AS last_active_at');
+    expect(listSql).toContain('ORDER BY last_active_at DESC');
+    // 会话行可能在几十毫秒内同时创建，没有 id 兜底 OFFSET 分页会漏行/重复行
+    expect(listSql).toContain('d.id DESC');
   });
 
-  it('筛选下推：轨道 / 场景 / 时间窗（按 updated_at）/ 标题关键词', async () => {
+  it('筛选下推：轨道 / 场景 / 时间窗（按最后一条消息时间）/ 标题关键词', async () => {
     const pool = mockPool([]);
     pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
     pool.query.mockResolvedValueOnce([[], []]);
@@ -507,8 +516,10 @@ describe('ParentInsightsRepository：会话列表', () => {
     const countSql = pool.execute.mock.calls[0][0] as string;
     expect(countSql).toContain('d.track = ?');
     expect(countSql).toContain('d.scene = ?');
-    expect(countSql).toContain('d.updated_at >= ?');
-    expect(countSql).toContain('d.updated_at < DATE_ADD(?, INTERVAL 1 DAY)');
+    // 时间窗走相关子查询（count 查询不带 JOIN，写聚合会报错；且 count/list 必须共用同一份 WHERE）
+    expect(countSql).toContain('(SELECT MAX(m2.created_at) FROM ai_messages m2');
+    expect(countSql).toContain('>= ?');
+    expect(countSql).toContain('< DATE_ADD(?, INTERVAL 1 DAY)');
     expect(countSql).toContain('d.title LIKE ?');
     expect(pool.execute.mock.calls[0][1]).toEqual([
       9, 'auxiliary', 'aux_qna', '2026-09-01', '2026-09-18', '%函数%',

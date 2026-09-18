@@ -137,7 +137,7 @@ export interface ParentChatLogFilters {
   q?: string;
 }
 
-/** 会话列表行（含消息数与闲聊标记数）。 */
+/** 会话列表行（含消息数与闲聊标记数）。`updatedAt` = 最后一条消息时间（见方法注释）。 */
 export interface ParentChatLogRow {
   id: number;
   track: string;
@@ -145,6 +145,7 @@ export interface ParentChatLogRow {
   title: string | null;
   subjectId: number | null;
   createdAt: Date;
+  /** **最后一条消息时间**（无消息则退回 `createdAt`），不是 `ai_dialogues.updated_at`。 */
   updatedAt: Date;
   messageCount: number;
   blockCount: number;
@@ -590,6 +591,17 @@ ${windowed.sql}
    *
    * `blockCount` = 该会话里 `safety_flag = 1` 的消息数（温和阻断落库时就置 1），
    * 前端据此给「闲聊/偏离学习」打红色标记——本批唯一有真数据的预警信号。
+   *
+   * **`updatedAt` 是「最后一条消息时间」，不是 `ai_dialogues.updated_at`。**
+   * 为什么不能直接用那一列：追加消息只 `INSERT INTO ai_messages`，**不 UPDATE 对话行**，
+   * 所以 `ai_dialogues.updated_at` 实质冻结在创建时刻（schema 里那个
+   * `trg_ai_dialogues_updated_at` 只在 UPDATE 对话行时触发，帮不上忙；而且当前 dev 库里
+   * 它压根没装上——见 changelog）。主线卡片讨论是 find-or-create（一个会话横跨整个学期），
+   * 用创建时间排序会把**最近在聊**的会话沉到列表底部。
+   *
+   * 因此统一用 `COALESCE(MAX(m.created_at), d.created_at)`：有消息取最后一条消息时间，
+   * 没消息退回创建时间。排序与时间窗（`buildChatLogWhere` 里的相关子查询）都用它，
+   * 保证「列表看到的顺序」与「筛选用的时间」是同一个东西。
    */
   async listParentChatLogs(
     studentId: number,
@@ -606,14 +618,15 @@ ${windowed.sql}
 
     // LIMIT ? / OFFSET ? 必须用 pool.query（客户端转义）
     const [rows] = await this.pool.query<RowDataPacket[]>(
-      `SELECT d.id, d.track, d.scene, d.title, d.subject_id, d.created_at, d.updated_at,
+      `SELECT d.id, d.track, d.scene, d.title, d.subject_id, d.created_at,
+              COALESCE(MAX(m.created_at), d.created_at) AS last_active_at,
               COUNT(m.id) AS message_count,
               COALESCE(SUM(m.safety_flag = 1), 0) AS block_count
        FROM ai_dialogues d
        LEFT JOIN ai_messages m ON m.dialogue_id = d.id AND m.deleted_at IS NULL
        WHERE ${where}
-       GROUP BY d.id, d.track, d.scene, d.title, d.subject_id, d.created_at, d.updated_at
-       ORDER BY d.updated_at DESC, d.id DESC
+       GROUP BY d.id, d.track, d.scene, d.title, d.subject_id, d.created_at
+       ORDER BY last_active_at DESC, d.id DESC
        LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
@@ -627,7 +640,7 @@ ${windowed.sql}
         title: (r.title as string | null) ?? null,
         subjectId: r.subject_id === null ? null : Number(r.subject_id),
         createdAt: new Date(r.created_at as Date),
-        updatedAt: new Date(r.updated_at as Date),
+        updatedAt: new Date(r.last_active_at as Date),
         messageCount: Number(r.message_count ?? 0),
         blockCount: Number(r.block_count ?? 0),
       })),
@@ -650,12 +663,18 @@ ${windowed.sql}
       conditions.push('d.scene = ?');
       params.push(filters.scene);
     }
+    // 时间窗按「最后一条消息时间」算，与 ORDER BY 同一表达式。
+    // 这里必须用**相关子查询**而不是 MAX(m.created_at)：count 查询是**不带 JOIN** 的
+    // `SELECT COUNT(*) FROM ai_dialogues d`，写聚合函数会直接报错；而 count 与 list 必须
+    // 共用同一份 WHERE（否则 total 与列表会各算各的）。
+    const lastActive =
+      'COALESCE((SELECT MAX(m2.created_at) FROM ai_messages m2 WHERE m2.dialogue_id = d.id AND m2.deleted_at IS NULL), d.created_at)';
     if (filters.from) {
-      conditions.push('d.updated_at >= ?');
+      conditions.push(`${lastActive} >= ?`);
       params.push(filters.from);
     }
     if (filters.to) {
-      conditions.push('d.updated_at < DATE_ADD(?, INTERVAL 1 DAY)');
+      conditions.push(`${lastActive} < DATE_ADD(?, INTERVAL 1 DAY)`);
       params.push(filters.to);
     }
     if (filters.q) {
