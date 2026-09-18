@@ -1321,35 +1321,44 @@ git commit -m "feat(parent-insights): 家长端错题列表（筛选 + 分页，
 
 ```ts
 describe('ParentInsightsRepository：会话列表', () => {
-  const logRows = [
-    {
-      id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值', subject_id: null,
-      created_at: new Date('2026-09-16T10:00:00Z'), updated_at: new Date('2026-09-16T10:05:00Z'),
-      message_count: 8, block_count: 2,
-    },
-  ];
+const logRows = [
+  {
+    id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值', subject_id: null,
+    created_at: new Date('2026-09-16T10:00:00Z'), last_active_at: new Date('2026-09-16T10:05:00Z'),
+    message_count: 8, block_count: 2,
+  },
+];
 
-  it('带出 messageCount / blockCount（一条 JOIN 聚合，避免 N+1）', async () => {
-    const pool = mockPool([]);
-    pool.execute.mockResolvedValueOnce([[{ count: 80 }], []]);
-    pool.query.mockResolvedValueOnce([logRows, []]);
-    const repo = new ParentInsightsRepository(pool as any);
+it('带出 messageCount / blockCount（一条 JOIN 聚合，避免 N+1）', async () => {
+  const pool = mockPool([]);
+  pool.execute.mockResolvedValueOnce([[{ count: 80 }], []]);
+  pool.query.mockResolvedValueOnce([logRows, []]);
+  const repo = new ParentInsightsRepository(pool as any);
 
-    const result = await repo.listParentChatLogs(9, {}, 20, 0);
+  const result = await repo.listParentChatLogs(9, {}, 20, 0);
 
-    expect(result.total).toBe(80);
-    expect(result.items[0]).toMatchObject({
-      id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值',
-      subjectId: null, messageCount: 8, blockCount: 2,
-    });
-    const listSql = pool.query.mock.calls[0][0] as string;
-    expect(listSql).toContain('SUM(m.safety_flag = 1)');
-    expect(listSql).toContain('m.deleted_at IS NULL');
-    expect(listSql).toContain('d.deleted_at IS NULL');
-    expect(listSql).toContain('ORDER BY d.updated_at DESC');
+  expect(result.total).toBe(80);
+  expect(result.items[0]).toMatchObject({
+    id: 55, track: 'auxiliary', scene: 'aux_qna', title: '二次函数求最值',
+    subjectId: null, messageCount: 8, blockCount: 2,
   });
+  // `updatedAt` 取的是「最后一条消息时间」（SQL 里的 last_active_at），不是 d.updated_at
+  expect(result.items[0].updatedAt).toEqual(new Date('2026-09-16T10:05:00Z'));
 
-  it('筛选下推：轨道 / 场景 / 时间窗（按 updated_at）/ 标题关键词', async () => {
+  const listSql = pool.query.mock.calls[0][0] as string;
+  expect(listSql).toContain('SUM(m.safety_flag = 1)');
+  // 消息侧条件必须在 ON 里：写到 WHERE 会把 LEFT JOIN 变成 INNER JOIN，零消息会话会整条消失
+  expect(listSql).toContain('LEFT JOIN ai_messages m');
+  expect(listSql).toContain('m.deleted_at IS NULL');
+  expect(listSql).toContain('d.deleted_at IS NULL');
+  // 排序按「最后一条消息时间」——用 d.updated_at 会把横跨整个学期的主线卡片会话排错
+  expect(listSql).toContain('COALESCE(MAX(m.created_at), d.created_at) AS last_active_at');
+  expect(listSql).toContain('ORDER BY last_active_at DESC');
+  // 会话行可能在几十毫秒内同时创建，没有 id 兜底 OFFSET 分页会漏行/重复行
+  expect(listSql).toContain('d.id DESC');
+});
+
+it('筛选下推：轨道 / 场景 / 时间窗（按最后一条消息时间）/ 标题关键词', async () => {
     const pool = mockPool([]);
     pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
     pool.query.mockResolvedValueOnce([[], []]);
@@ -1365,8 +1374,10 @@ describe('ParentInsightsRepository：会话列表', () => {
     const countSql = pool.execute.mock.calls[0][0] as string;
     expect(countSql).toContain('d.track = ?');
     expect(countSql).toContain('d.scene = ?');
-    expect(countSql).toContain('d.updated_at >= ?');
-    expect(countSql).toContain('d.updated_at < DATE_ADD(?, INTERVAL 1 DAY)');
+    // 时间窗走相关子查询（count 查询不带 JOIN，写聚合会报错；且 count/list 必须共用同一份 WHERE）
+    expect(countSql).toContain('(SELECT MAX(m2.created_at) FROM ai_messages m2');
+    expect(countSql).toContain('>= ?');
+    expect(countSql).toContain('< DATE_ADD(?, INTERVAL 1 DAY)');
     expect(countSql).toContain('d.title LIKE ?');
     expect(pool.execute.mock.calls[0][1]).toEqual([
       9, 'auxiliary', 'aux_qna', '2026-09-01', '2026-09-18', '%函数%',
@@ -1412,7 +1423,7 @@ export interface ParentChatLogFilters {
   q?: string;
 }
 
-/** 会话列表行（含消息数与闲聊标记数）。 */
+/** 会话列表行（含消息数与闲聊标记数）。`updatedAt` = 最后一条消息时间（见方法注释）。 */
 export interface ParentChatLogRow {
   id: number;
   track: string;
@@ -1420,6 +1431,7 @@ export interface ParentChatLogRow {
   title: string | null;
   subjectId: number | null;
   createdAt: Date;
+  /** **最后一条消息时间**（无消息则退回 `createdAt`），不是 `ai_dialogues.updated_at`。 */
   updatedAt: Date;
   messageCount: number;
   blockCount: number;
@@ -1435,6 +1447,17 @@ export interface ParentChatLogRow {
    *
    * `blockCount` = 该会话里 `safety_flag = 1` 的消息数（温和阻断落库时就置 1），
    * 前端据此给「闲聊/偏离学习」打红色标记——本批唯一有真数据的预警信号。
+   *
+   * **`updatedAt` 是「最后一条消息时间」，不是 `ai_dialogues.updated_at`。**
+   * 为什么不能直接用那一列：追加消息只 `INSERT INTO ai_messages`，**不 UPDATE 对话行**，
+   * 所以 `ai_dialogues.updated_at` 实质冻结在创建时刻（schema 里那个
+   * `trg_ai_dialogues_updated_at` 只在 UPDATE 对话行时触发，帮不上忙；而且当前 dev 库里
+   * 它压根没装上——见 changelog）。主线卡片讨论是 find-or-create（一个会话横跨整个学期），
+   * 用创建时间排序会把**最近在聊**的会话沉到列表底部。
+   *
+   * 因此统一用 `COALESCE(MAX(m.created_at), d.created_at)`：有消息取最后一条消息时间，
+   * 没消息退回创建时间。排序与时间窗（`buildChatLogWhere` 里的相关子查询）都用它，
+   * 保证「列表看到的顺序」与「筛选用的时间」是同一个东西。
    */
   async listParentChatLogs(
     studentId: number,
@@ -1450,14 +1473,15 @@ export interface ParentChatLogRow {
     );
 
     const [rows] = await this.pool.query<RowDataPacket[]>(
-      `SELECT d.id, d.track, d.scene, d.title, d.subject_id, d.created_at, d.updated_at,
+      `SELECT d.id, d.track, d.scene, d.title, d.subject_id, d.created_at,
+              COALESCE(MAX(m.created_at), d.created_at) AS last_active_at,
               COUNT(m.id) AS message_count,
               COALESCE(SUM(m.safety_flag = 1), 0) AS block_count
        FROM ai_dialogues d
        LEFT JOIN ai_messages m ON m.dialogue_id = d.id AND m.deleted_at IS NULL
        WHERE ${where}
-       GROUP BY d.id, d.track, d.scene, d.title, d.subject_id, d.created_at, d.updated_at
-       ORDER BY d.updated_at DESC, d.id DESC
+       GROUP BY d.id, d.track, d.scene, d.title, d.subject_id, d.created_at
+       ORDER BY last_active_at DESC, d.id DESC
        LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
@@ -1471,7 +1495,7 @@ export interface ParentChatLogRow {
         title: (r.title as string | null) ?? null,
         subjectId: r.subject_id === null ? null : Number(r.subject_id),
         createdAt: new Date(r.created_at as Date),
-        updatedAt: new Date(r.updated_at as Date),
+        updatedAt: new Date(r.last_active_at as Date),
         messageCount: Number(r.message_count ?? 0),
         blockCount: Number(r.block_count ?? 0),
       })),
@@ -1494,12 +1518,18 @@ export interface ParentChatLogRow {
       conditions.push('d.scene = ?');
       params.push(filters.scene);
     }
+    // 时间窗按「最后一条消息时间」算，与 ORDER BY 同一表达式。
+    // 这里必须用**相关子查询**而不是 MAX(m.created_at)：count 查询是**不带 JOIN** 的
+    // `SELECT COUNT(*) FROM ai_dialogues d`，写聚合函数会直接报错；而 count 与 list 必须
+    // 共用同一份 WHERE（否则 total 与列表会各算各的）。
+    const lastActive =
+      'COALESCE((SELECT MAX(m2.created_at) FROM ai_messages m2 WHERE m2.dialogue_id = d.id AND m2.deleted_at IS NULL), d.created_at)';
     if (filters.from) {
-      conditions.push('d.updated_at >= ?');
+      conditions.push(`${lastActive} >= ?`);
       params.push(filters.from);
     }
     if (filters.to) {
-      conditions.push('d.updated_at < DATE_ADD(?, INTERVAL 1 DAY)');
+      conditions.push(`${lastActive} < DATE_ADD(?, INTERVAL 1 DAY)`);
       params.push(filters.to);
     }
     if (filters.q) {
