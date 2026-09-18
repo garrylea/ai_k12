@@ -1,12 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ParentPointsPage from './ParentPointsPage';
-import { getParentPointRules, getParentPoints, type MyPoints } from '@/services/api';
+import {
+  getLevels,
+  getParentPointRules,
+  getParentPoints,
+  getParentRewardCatalog,
+  saveParentRewardCatalog,
+  type MyPoints,
+  type PointLevel,
+  type RewardCatalogView,
+} from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
 /**
- * 家长端积分页骨架（计划三 §2.3 / §3 Task 4）。
+ * 家长端积分页骨架（计划三 §2.3 / §3 Task 4）+ 未保存草稿保护（Task 6）。
  *
  * 契约要点：
  * 1. Tab 走 `?tab=` 深链，四档 `rules`（默认）/`catalog`/`redeem`/`history`；
@@ -16,16 +33,28 @@ import { useParentStudentStore } from '@/store/parentStudentStore';
  * 3. 概览失败给内联错误条 + 「重试」，**不整页白屏**（Tab 仍在）；
  * 4. `studentId === null` → 页面空态（不是骨架、也不崩），引导去 `/parent/students`；
  * 5. 切孩子 → 全部数据重拉（`getParentPoints` 以新 id 再调），且**不拿上一个孩子的
- *    分数顶替**（立即退回骨架）；面板按 `studentId` 重挂载 = 丢弃草稿的机制。
+ *    分数顶替**（立即退回骨架）；面板按 `studentId` 重挂载 = 丢弃草稿的机制；
+ * 6. **面板脏 → 切 Tab / 切孩子先弹确认**（Task 6）：取消要留在原地且草稿还在
+ *    （面板是按 Tab 条件渲染的，只有页面能拦住这次卸载）。
  */
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, getParentPoints: vi.fn(), getParentPointRules: vi.fn() };
+  return {
+    ...actual,
+    getParentPoints: vi.fn(),
+    getParentPointRules: vi.fn(),
+    getParentRewardCatalog: vi.fn(),
+    getLevels: vi.fn(),
+    saveParentRewardCatalog: vi.fn(),
+  };
 });
 
 const getParentPointsMock = vi.mocked(getParentPoints);
 const getParentPointRulesMock = vi.mocked(getParentPointRules);
+const getParentRewardCatalogMock = vi.mocked(getParentRewardCatalog);
+const getLevelsMock = vi.mocked(getLevels);
+const saveParentRewardCatalogMock = vi.mocked(saveParentRewardCatalog);
 
 const POINTS: MyPoints = {
   balance: 120,
@@ -46,6 +75,31 @@ const MAXED: MyPoints = {
   pointsToNextLevel: null,
   progressPercent: 100,
 };
+
+/** 「奖励清单」Tab 现在是真的面板：它自己会拉清单与段位表，本文件给最小可用数据。 */
+const CATALOG: RewardCatalogView[] = [
+  {
+    id: 11,
+    name: '周末看电影',
+    description: '和同学一起',
+    pointsCost: 200,
+    minLevelCode: null,
+    isActive: true,
+    sortOrder: 0,
+  },
+];
+
+const LEVELS: PointLevel[] = [
+  { code: 'pichai', name: '劈柴', index: 0, threshold: 0 },
+  { code: 'zhutie', name: '铸铁', index: 1, threshold: 500 },
+  { code: 'qingtong', name: '青铜', index: 2, threshold: 1200 },
+  { code: 'baiyin', name: '白银', index: 3, threshold: 2000 },
+  { code: 'huangjin', name: '黄金', index: 4, threshold: 3000 },
+  { code: 'bojin', name: '铂金', index: 5, threshold: 5000 },
+  { code: 'zuanshi', name: '钻石', index: 6, threshold: 8000 },
+  { code: 'xingyao', name: '星耀', index: 7, threshold: 12000 },
+  { code: 'wangzhe', name: '王者', index: 8, threshold: 20000 },
+];
 
 function renderPage(path = '/parent/rewards') {
   return render(
@@ -80,6 +134,11 @@ beforeEach(() => {
   // 与概览卡的重试撞名。
   getParentPointRulesMock.mockReset();
   getParentPointRulesMock.mockResolvedValue({ tasks: [] });
+  getParentRewardCatalogMock.mockReset();
+  getParentRewardCatalogMock.mockResolvedValue(CATALOG);
+  getLevelsMock.mockReset();
+  getLevelsMock.mockResolvedValue({ levels: LEVELS });
+  saveParentRewardCatalogMock.mockReset();
 });
 
 afterEach(() => {
@@ -283,5 +342,110 @@ describe('ParentPointsPage：孩子上下文', () => {
 
     expect(screen.queryByTestId('points-overview-error')).not.toBeInTheDocument();
     expect(screen.getByTestId('points-overview-skeleton')).toBeInTheDocument();
+  });
+});
+
+describe('ParentPointsPage：未保存草稿保护（Task 6 脏状态注册通道）', () => {
+  /** 在「奖励清单」Tab 里改一笔，制造未保存草稿。 */
+  async function makeDraft() {
+    const first = await screen.findByTestId('reward-row-11');
+    fireEvent.change(within(first).getByLabelText('所需积分'), { target: { value: '300' } });
+    return first;
+  }
+
+  it('面板脏时 Tab 标题打「未保存」小圆点', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await screen.findByTestId('reward-row-11');
+
+    expect(screen.queryByTestId('points-tab-catalog-dirty')).not.toBeInTheDocument();
+
+    await makeDraft();
+
+    expect(screen.getByTestId('points-tab-catalog-dirty')).toBeInTheDocument();
+  });
+
+  it('面板不脏时切 Tab 不弹窗（日常操作不能被骚扰）', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await screen.findByTestId('reward-row-11');
+
+    fireEvent.click(screen.getByRole('tab', { name: '积分规则' }));
+
+    expect(screen.getByTestId('points-panel-rules')).toBeInTheDocument();
+    expect(screen.queryByText(/有未保存的修改/)).not.toBeInTheDocument();
+  });
+
+  it('未保存就切 Tab → 先弹确认；取消 → 留在原 Tab 且草稿还在', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await makeDraft();
+
+    fireEvent.click(screen.getByRole('tab', { name: '积分规则' }));
+
+    expect(await screen.findByText(/有未保存的修改，确定离开吗/)).toBeInTheDocument();
+    // 还没真的切走：面板仍是奖励清单
+    expect(screen.getByTestId('points-panel-catalog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+
+    expect(screen.getByTestId('points-panel-catalog')).toBeInTheDocument();
+    expect(screen.queryByTestId('points-panel-rules')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '奖励清单' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(screen.getByTestId('reward-row-11')).getByLabelText('所需积分')).toHaveValue(300);
+  });
+
+  it('未保存就切 Tab → 确认离开后真的切走', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await makeDraft();
+
+    fireEvent.click(screen.getByRole('tab', { name: '积分规则' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认离开' }));
+
+    expect(await screen.findByTestId('points-panel-rules')).toBeInTheDocument();
+    expect(screen.queryByTestId('points-panel-catalog')).not.toBeInTheDocument();
+  });
+
+  it('未保存时切孩子 → 先弹确认；取消 → 回到原孩子且草稿还在', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await makeDraft();
+
+    switchStudent(2);
+
+    expect(await screen.findByText(/有未保存的修改，确定离开吗/)).toBeInTheDocument();
+    // 弹窗没被回答前不许换人：面板仍是孩子 1 的
+    expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '1');
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+
+    await waitFor(() => expect(useParentStudentStore.getState().studentId).toBe(1));
+    expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '1');
+    expect(within(screen.getByTestId('reward-row-11')).getByLabelText('所需积分')).toHaveValue(300);
+    // 没为「孩子 2」发过清单请求
+    expect(getParentRewardCatalogMock.mock.calls.map((call) => call[0])).toEqual([1]);
+  });
+
+  it('未保存时切孩子 → 确认后换人，且以新 id 重拉清单（草稿丢弃）', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await makeDraft();
+
+    switchStudent(2);
+    fireEvent.click(await screen.findByRole('button', { name: '确认离开' }));
+
+    await waitFor(() => expect(getParentRewardCatalogMock).toHaveBeenLastCalledWith(2));
+    await waitFor(() =>
+      expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '2'),
+    );
+    // 新孩子的面板是新挂载的：草稿没了，回到服务端快照
+    const first = await screen.findByTestId('reward-row-11');
+    expect(within(first).getByLabelText('所需积分')).toHaveValue(200);
+  });
+
+  it('面板干净时切孩子直接换人（不弹窗）', async () => {
+    renderPage('/parent/rewards?tab=catalog');
+    await screen.findByTestId('reward-row-11');
+
+    switchStudent(2);
+
+    await waitFor(() => expect(getParentRewardCatalogMock).toHaveBeenLastCalledWith(2));
+    expect(screen.queryByText(/有未保存的修改/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('points-panel-catalog')).toHaveAttribute('data-student-id', '2');
   });
 });
