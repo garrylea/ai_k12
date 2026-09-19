@@ -29,7 +29,7 @@ export class AdminModelsService {
     });
   }
 
-  async create(dto: { modelKey: string; name: string; providerType: string; modelId: string; baseUrl: string; apiKey: string; contextWindow?: number; maxOutputTokens?: number }) {
+  async create(dto: { modelKey: string; name: string; providerType: string; modelId: string; baseUrl: string; apiKey: string; contextWindow?: number; maxOutputTokens?: number; inputPricePer1k?: number; outputPricePer1k?: number }) {
     if (!(PROVIDER_TYPES as readonly string[]).includes(dto.providerType)) {
       throw new ConflictException({ code: 1001, message: '供应商类型不合法' });
     }
@@ -40,11 +40,15 @@ export class AdminModelsService {
       modelKey: dto.modelKey, name: dto.name, providerType: dto.providerType, modelId: dto.modelId,
       baseUrl: dto.baseUrl, apiKey: dto.apiKey,
       contextWindow: dto.contextWindow ?? 131072, maxOutputTokens: dto.maxOutputTokens ?? 16384,
+      // 单价缺省写 0（= 免费），不是 undefined：llm_models 两列 NOT NULL DEFAULT 0，
+      // 传 undefined 会让 INSERT 显式写 NULL 而报错。
+      inputPricePer1k: dto.inputPricePer1k ?? 0,
+      outputPricePer1k: dto.outputPricePer1k ?? 0,
     });
     await this.registry.reload();
   }
 
-  async update(modelKey: string, dto: Partial<{ name: string; providerType: string; modelId: string; baseUrl: string; apiKey: string; contextWindow: number; maxOutputTokens: number }>) {
+  async update(modelKey: string, dto: Partial<{ name: string; providerType: string; modelId: string; baseUrl: string; apiKey: string; contextWindow: number; maxOutputTokens: number; inputPricePer1k: number; outputPricePer1k: number }>) {
     if (!(await this.llmModelsRepo.findByKey(modelKey))) {
       throw new NotFoundException({ code: 1002, message: '模型不存在' });
     }

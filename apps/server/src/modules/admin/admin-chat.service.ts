@@ -81,7 +81,9 @@ export class AdminChatService {
       baseUrl: m.baseUrl,
       contextWindow: m.contextWindow,
       maxOutputTokens: m.maxOutputTokens,
-      costPer1K: { input: 0, output: 0 },
+      // 单价从 DB 行取。旧代码写死 {0,0}，导致管理员自己对话的成本永远算不出来，
+      // 进 llm_call_logs 后同样失真。
+      costPer1K: { input: m.inputPricePer1k, output: m.outputPricePer1k },
       supportsStreaming: true,
       apiKey: m.apiKey,
     };
