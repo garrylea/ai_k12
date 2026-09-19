@@ -2,7 +2,17 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { Button, Card, Progress, Skeleton, Tag } from '@/components/base';
-import { ApiError, getParentDashboard, type ParentDashboard, type ParentDashboardStudent } from '@/services/api';
+import {
+  ApiError,
+  getParentDashboard,
+  getParentStudyTime,
+  getParentTodayUsage,
+  type ParentDashboard,
+  type ParentDashboardStudent,
+  type ParentStudyTime,
+  type ParentTodayUsage,
+} from '@/services/api';
+import { formatDuration } from '@/utils/duration';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
 /** `rate` 为 null（一道题都没做过）时必须显示「暂无数据」——显示 0% 会被读成「全错了」。 */
@@ -65,10 +75,84 @@ function SubjectCard({ subject }: { subject: ParentDashboardStudent['subjects'][
   );
 }
 
+/**
+ * 学习时长区块（会话口径）。
+ *
+ * ⚠️ 它与同页的「近 7 天活跃 N 天」是**两套口径**（spec §10）：
+ * 旧活跃 = 四路时间戳代理（答题/积分/考试/对话），新时长 = 显式会话。
+ * 孩子挂机不答题时旧口径不活跃、新口径有时长；两者数字不同是**正常的**。
+ * 因此这里**并列展示 + 文案区分**，绝不替换或合并。
+ */
+function StudyTimePanel({
+  studentId,
+  study,
+  usage,
+}: {
+  studentId: number;
+  study: ParentStudyTime | null;
+  usage: ParentTodayUsage | null;
+}) {
+  return (
+    <div className="mb-4 grid gap-4 md:grid-cols-2">
+      <Card className="p-5" data-testid={`dashboard-study-time-${studentId}`}>
+        <h3 className="text-base font-bold text-[var(--text-primary)]">学习时长（近 7 天）</h3>
+        <p className="mt-2 text-2xl font-black text-[var(--text-primary)]">
+          {study ? formatDuration(study.totalSeconds) : '暂无数据'}
+        </p>
+        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+          会话口径：只统计进入学习页且有操作的时间，与「近 7 天活跃天数」不是同一口径。
+        </p>
+      </Card>
+
+      <Card className="p-5" data-testid={`dashboard-today-usage-${studentId}`}>
+        <h3 className="text-base font-bold text-[var(--text-primary)]">今日已用</h3>
+        <p className="mt-2 text-2xl font-black text-[var(--text-primary)]">
+          {usage ? formatDuration(usage.activeSeconds) : '暂无数据'}
+        </p>
+        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+          {usage
+            ? usage.limitMinutes === null
+              ? '家长未设置每日上限'
+              : `每日上限 ${usage.limitMinutes} 分钟${usage.exceeded ? ' · 已达上限' : ''}`
+            : ' '}
+        </p>
+      </Card>
+    </div>
+  );
+}
+
 /** 单个孩子的概览面板（Tab 切换时整块换掉）。 */
 function StudentPanel({ student }: { student: ParentDashboardStudent }) {
   const setStudentId = useParentStudentStore((s) => s.setStudentId);
   const navigate = useNavigate();
+
+  const [study, setStudy] = useState<{ studentId: number; value: ParentStudyTime } | null>(null);
+  const [usage, setUsage] = useState<{ studentId: number; value: ParentTodayUsage } | null>(null);
+
+  /**
+   * 派生数据带 `studentId` 归属：切 Tab 不重挂载本组件，只在 `useEffect` 里清空
+   * 会让上一帧画出**上一个孩子**的时长（effect 在 commit 之后才跑）。
+   * 按当前 `studentId` 比对后派生即可，不需要也不应该 setState(null)。
+   */
+  const studyValue = study && study.studentId === student.studentId ? study.value : null;
+  const usageValue = usage && usage.studentId === student.studentId ? usage.value : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const id = student.studentId;
+    void Promise.all([getParentStudyTime(id), getParentTodayUsage(id)])
+      .then(([studyRes, usageRes]) => {
+        if (cancelled) return;
+        setStudy({ studentId: id, value: studyRes });
+        setUsage({ studentId: id, value: usageRes });
+      })
+      .catch(() => {
+        // 时长是**增值信息**：取不到不影响既有概览显示，静默降级为「暂无数据」
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [student.studentId]);
 
   /**
    * 快捷入口必须先 `setStudentId` 再跳：报告/错题/回放三页跟随顶栏锚点，
@@ -107,6 +191,8 @@ function StudentPanel({ student }: { student: ParentDashboardStudent }) {
           </Button>
         </div>
       </Card>
+
+      <StudyTimePanel studentId={student.studentId} study={studyValue} usage={usageValue} />
 
       {student.subjects.length === 0 ? (
         <Card className="p-10 text-center">

@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
-import { getParentDashboard, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentDashboard } from '@/services/api';
+import {
+  getParentDashboard,
+  getParentStudyTime,
+  getParentTodayUsage,
+  getUnreadMessageCount,
+  listMyStudents,
+  type MyStudentItem,
+  type ParentDashboard,
+} from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
 
@@ -13,12 +21,16 @@ vi.mock('@/services/api', async (importOriginal) => {
     listMyStudents: vi.fn(),
     getUnreadMessageCount: vi.fn(),
     getParentDashboard: vi.fn(),
+    getParentStudyTime: vi.fn(),
+    getParentTodayUsage: vi.fn(),
   };
 });
 
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMock = vi.mocked(getUnreadMessageCount);
 const getDashboardMock = vi.mocked(getParentDashboard);
+const getStudyTimeMock = vi.mocked(getParentStudyTime);
+const getTodayUsageMock = vi.mocked(getParentTodayUsage);
 
 const BOY: MyStudentItem = { id: 11, parentId: 3, username: 'xiaoming', name: '小明', age: 13, grade: '初一', schoolLevel: 'junior', isActive: true };
 const GIRL: MyStudentItem = { ...BOY, id: 12, username: 'xiaomei', name: '小美' };
@@ -83,6 +95,23 @@ beforeEach(() => {
   getUnreadMock.mockResolvedValue(0);
   getDashboardMock.mockReset();
   getDashboardMock.mockResolvedValue(DASHBOARD);
+  getStudyTimeMock.mockReset();
+  getStudyTimeMock.mockResolvedValue({
+    totalSeconds: 5400,
+    activeDays: 2,
+    byDay: [{ date: '2026-09-19', seconds: 5400 }],
+    byModule: [{ module: 'en_vocabulary', seconds: 5400 }],
+    bySubject: [],
+    source: 'sessions',
+  });
+  getTodayUsageMock.mockReset();
+  getTodayUsageMock.mockResolvedValue({
+    date: '2026-09-19',
+    activeSeconds: 1800,
+    limitMinutes: 30,
+    exceeded: true,
+    byModule: [{ module: 'en_vocabulary', seconds: 1800 }],
+  });
 });
 
 afterEach(() => {
@@ -186,5 +215,36 @@ describe('ParentDashboardPage', () => {
     fireEvent.click(within(errBox).getByRole('button', { name: '重试' }));
 
     expect(await screen.findByTestId('dashboard-student-11')).toBeInTheDocument();
+  });
+
+  it('学习时长与活跃天数**并列**展示，文案区分口径（不许替换）', async () => {
+    renderAt('/parent/dashboard');
+    await waitFor(() => expect(screen.getByTestId('dashboard-study-time-11')).toBeTruthy());
+
+    // 新卡：会话口径
+    expect(screen.getByTestId('dashboard-study-time-11').textContent).toContain('1 小时 30 分');
+    expect(screen.getByTestId('dashboard-study-time-11').textContent).toContain('会话口径');
+    // 旧口径仍在，未被替换。用带数值的整串匹配：新卡文案里也含「近 7 天活跃天数」，
+    // 只匹配 /近 7 天活跃/ 会同时命中两处；带上「3 天」才能唯一锚定旧口径那行。
+    expect(screen.getByText(/近 7 天活跃 3 天/)).toBeTruthy();
+  });
+
+  it('今日已用：达到上限时提示', async () => {
+    renderAt('/parent/dashboard');
+    await waitFor(() => expect(screen.getByTestId('dashboard-today-usage-11')).toBeTruthy());
+
+    const text = screen.getByTestId('dashboard-today-usage-11').textContent ?? '';
+    expect(text).toContain('30 分钟'); // 每日上限 30 分钟
+    expect(text).toContain('已达上限');
+  });
+
+  it('时长取数失败时静默降级为「暂无数据」，不影响概览', async () => {
+    getStudyTimeMock.mockRejectedValue(new Error('boom'));
+    getTodayUsageMock.mockRejectedValue(new Error('boom'));
+    renderAt('/parent/dashboard');
+    await waitFor(() => expect(screen.getByTestId('dashboard-study-time-11')).toBeTruthy());
+    expect(screen.getByTestId('dashboard-study-time-11').textContent).toContain('暂无数据');
+    // 概览主体仍在
+    expect(screen.getByTestId('dashboard-student-11')).toBeTruthy();
   });
 });
