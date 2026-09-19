@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
-import { getParentReport, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentLearningReport } from '@/services/api';
+import { getParentReport, getParentStudyTime, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentLearningReport } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
 
@@ -39,12 +39,14 @@ vi.mock('@/services/api', async (importOriginal) => {
     listMyStudents: vi.fn(),
     getUnreadMessageCount: vi.fn(),
     getParentReport: vi.fn(),
+    getParentStudyTime: vi.fn(),
   };
 });
 
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMock = vi.mocked(getUnreadMessageCount);
 const getReportMock = vi.mocked(getParentReport);
+const getStudyTimeMock = vi.mocked(getParentStudyTime);
 
 const BOY: MyStudentItem = { id: 11, parentId: 3, username: 'xiaoming', name: '小明', age: 13, grade: '初一', schoolLevel: 'junior', isActive: true };
 
@@ -96,6 +98,18 @@ beforeEach(() => {
   getUnreadMock.mockResolvedValue(0);
   getReportMock.mockReset();
   getReportMock.mockResolvedValue(REPORT);
+  getStudyTimeMock.mockReset();
+  getStudyTimeMock.mockResolvedValue({
+    totalSeconds: 5400,
+    activeDays: 2,
+    byDay: [
+      { date: '2026-09-15', seconds: 3600 },
+      { date: '2026-09-16', seconds: 1800 },
+    ],
+    byModule: [{ module: 'mainline', seconds: 5400 }],
+    bySubject: [{ subjectId: 1, seconds: 5400 }],
+    source: 'sessions',
+  });
 });
 
 afterEach(() => {
@@ -239,5 +253,29 @@ describe('ParentReportPage', () => {
     // 同步断言：切回来的那一帧不能再显示月报的错误卡
     expect(screen.queryByTestId('report-error')).not.toBeInTheDocument();
     expect(await screen.findByTestId('report-stats')).toHaveTextContent('73.8%');
+  });
+
+  it('学习时长与活跃天数并列；每日柱状图按窗口日期喂给 ChartBar', async () => {
+    renderAt('/parent/report');
+    await waitFor(() => expect(screen.getByTestId('report-study-time')).toBeTruthy());
+
+    // 旧口径仍在一张独立卡里
+    expect(screen.getByText('活跃天数')).toBeTruthy();
+    // 新口径：数字卡 + 每日柱状
+    expect(screen.getByText('学习时长（会话）')).toBeTruthy();
+    expect(screen.getByText('1 小时 30 分')).toBeTruthy();
+
+    // 报告页有两个 ChartBar，必须限定到学习时长卡内取
+    const bars = within(screen.getByTestId('report-study-time')).getByTestId('chart-bar');
+    expect(bars.getAttribute('data-count')).toBe('2');
+    expect(bars.textContent).toContain('09-15:60'); // 3600s → 60 分钟
+  });
+
+  it('时长取数失败 → 该卡显示「暂无学习时长数据」，报告主体不受影响', async () => {
+    getStudyTimeMock.mockRejectedValue(new Error('boom'));
+    renderAt('/parent/report');
+    await waitFor(() => expect(screen.getByTestId('report-study-time')).toBeTruthy());
+    expect(screen.getByTestId('report-study-time').textContent).toContain('暂无学习时长数据');
+    expect(screen.getByTestId('report-stats')).toBeTruthy();
   });
 });
