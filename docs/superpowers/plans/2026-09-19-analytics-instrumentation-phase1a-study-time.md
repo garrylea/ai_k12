@@ -2993,13 +2993,20 @@ describe('tracker 会话生命周期', () => {
     expect(body.sessionUid).toMatch(/[0-9a-f-]{8,}/i);
   });
 
-  it('30s 心跳只发 state，**不重复带设备字段**', async () => {
+  it('30s 定时器真的补发了心跳，且心跳只带 state、不重复带设备字段', async () => {
     tracker.onRouteChange(STUDY);
+    await vi.advanceTimersByTimeAsync(0);
+    // ⚠️ 必须先取基线：`ROUTE_ENTER` 在 t=0 就发过一次 visible 心跳，
+    // 只看 `toHaveBeenCalledWith` 会被它白送——删掉整个 heartbeatTimer 也照样绿。
+    const before = transport.heartbeat.mock.calls.length;
+    const uid = transport.start.mock.calls[0][0].sessionUid;
+
     await vi.advanceTimersByTimeAsync(30_000);
 
-    expect(transport.heartbeat).toHaveBeenCalledWith(expect.any(String), 'visible');
-    const args = transport.heartbeat.mock.calls[0];
-    expect(args).toHaveLength(2); // (uid, state) —— 没有第三个「设备」参数
+    expect(transport.heartbeat.mock.calls.length).toBe(before + 1);
+    const beat = transport.heartbeat.mock.calls[before];
+    expect(beat).toEqual([uid, 'visible']);
+    expect(beat).toHaveLength(2); // (uid, state) —— 没有第三个「设备」参数
   });
 
   it('同一学习场景重复调用不重开会话（query 变化不该算新会话）', async () => {
@@ -3084,7 +3091,11 @@ describe('tracker 会话生命周期', () => {
   it('传输失败不冒泡（埋点绝不打断学习）', async () => {
     transport.start.mockRejectedValue(new Error('offline'));
     expect(() => tracker.onRouteChange(STUDY)).not.toThrow();
-    await expect(vi.advanceTimersByTimeAsync(0)).resolves.toBeUndefined();
+    // ⚠️ 不要写 `.resolves.toBeUndefined()`——`advanceTimersByTimeAsync` 解析出的是
+    // vitest 工具对象（`Promise<VitestUtils>`），那个断言恒真、什么都没测。
+    // 真正要验的是：reject 之后流程照常（`start` 仍只被调用一次、没有把异常抛出去）。
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.start).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -3328,9 +3339,13 @@ function applyEffect(input: { visibility?: boolean; pageHide?: boolean }): void 
 }
 
 /**
- * 执行一次状态机迁移——**全部副作用的唯一出口**：`start` / `end` / `heartbeat`
- * 都由这里按 `effects` 执行。调用点（路由变化、可见性、pagehide、空闲）只负责把事件喂进来，
- * 自己不做任何网络或状态操作。这样「谁负责开会话/结束会话」永远只有一个答案。
+ * 执行一次状态机迁移——**迁移驱动的副作用出口**：`start` / `end` / `effects.heartbeat`
+ * 都由这里按 `effects` 执行。调用点（路由变化、可见性、pagehide、空闲）只负责把事件喂进来。
+ *
+ * ⚠️ 「唯一出口」有**两个具名例外**（别再往里加第三个）：
+ * ① `armTimers` 的 30s 周期心跳**直接**调 `sendHeartbeat`——周期 tick 不改变状态、
+ *    只是重申当前状态，状态机的事件集里没有也不该有「tick」这个事件；
+ * ② `setEnabled(false)` 直接调 `endSession('closed')`——`closed` 不是状态机事件，属拆解路径。
  */
 function runTransition(event: SessionEvent): void {
   const next = transition(state, event);
@@ -3428,7 +3443,7 @@ export function collectDeviceInfo(): {
 cd apps/web && npx vitest run src/analytics/tracker.test.ts
 ```
 
-Expected: PASS（**16 条**——10 条生命周期 + 3 条设备分档 + 1 条「hidden 状态下切场景仍必须先 end 再 start」的顺序钉子 + 2 条不变）。若 `screenClass` 断言失败，检查 jsdom 的 `window.innerWidth`（默认 1024×768 → `ipad_landscape`）。
+Expected: PASS（**15 条**——12 条生命周期 + 3 条设备分档）。⚠️ 周期心跳那两条用例必须**断言「新增的第 N 条」**（先取 `mock.calls.length` 再推进定时器），不能只写 `toHaveBeenCalledWith(...)`：`ROUTE_ENTER` 在 t=0 就发过一次 `visible` 心跳，弱断言会被它白送——删掉整个 `heartbeatTimer` 也照样绿。若 `screenClass` 断言失败，检查 jsdom 的 `window.innerWidth`（默认 1024×768 → `ipad_landscape`）。
 
 - [ ] **Step 5: Commit**
 
