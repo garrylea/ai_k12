@@ -65,6 +65,26 @@ export class ControlsRepository {
   }
 
   /**
+   * 读每日学习时长上限（分钟）。**无行 / 列为 NULL → 返回 null**（= 未设限）。
+   *
+   * 不复用 `findByStudent`：那个方法刻意只 select 兑换两列，把整张表带进服务层是
+   * 它注释里明确拒绝的过度设计。这里同样只取**一个列**，不做通用 controls 仓储。
+   *
+   * 语义提醒：这个值只是**上限**。它是「行为管控」的一半，另一半「今日已用」
+   * 来自 `study_sessions`（Phase 1A 才补上）——在本批之前这个上限是摆设。
+   */
+  async findDailyTimeLimit(studentId: number): Promise<number | null> {
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & { daily_time_limit_minutes: number | null })[]
+    >(
+      `SELECT daily_time_limit_minutes FROM controls WHERE student_id = ? LIMIT 1`,
+      [studentId],
+    );
+    const value = rows[0]?.daily_time_limit_minutes;
+    return value === null || value === undefined ? null : Number(value);
+  }
+
+  /**
    * 部分更新控制项（家长端 `PUT /api/parent/students/:id/points/settings`）。
    *
    * 只拼**白名单列**（`points_per_yuan` / `reward_redemption_enabled`），列名不来自入参，

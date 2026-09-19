@@ -52,3 +52,21 @@ describe('ControlsRepository.findByStudent', () => {
     });
   });
 });
+
+describe('ControlsRepository.findDailyTimeLimit', () => {
+  it('有值 → 数字', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[{ daily_time_limit_minutes: 60 }], []]) };
+    const repo = new ControlsRepository(pool as any);
+    expect(await repo.findDailyTimeLimit(9)).toBe(60);
+  });
+
+  it('无行 / NULL → null（未设限，不是 0）', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
+    const repo = new ControlsRepository(pool as any);
+    expect(await repo.findDailyTimeLimit(9)).toBeNull();
+
+    const nullPool = { execute: vi.fn().mockResolvedValue([[{ daily_time_limit_minutes: null }], []]) };
+    const repo2 = new ControlsRepository(nullPool as any);
+    expect(await repo2.findDailyTimeLimit(9)).toBeNull();
+  });
+});

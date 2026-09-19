@@ -204,3 +204,29 @@ export interface ParentChatLogPage {
   pageSize: number;
   total: number;
 }
+
+/**
+ * 学习时长（spec §8.2）。`source: 'sessions'` 是**口径标记**：家长端同时存在
+ * 「活跃天数」（四路时间戳代理）与「学习时长」（显式会话）两套口径，UI 必须能区分，
+ * 见 spec §10 的第 1 条硬约束。
+ */
+export interface StudyTimeSummary {
+  totalSeconds: number;
+  /** 会话口径的「有学习的天数」，与旧 `activeDays7` **刻意不同**。 */
+  activeDays: number;
+  byDay: Array<{ date: string; seconds: number }>;
+  byModule: Array<{ module: string; seconds: number }>;
+  /** 只含 `subject_id IS NOT NULL` 的会话；没选学科的会话不进这张表。 */
+  bySubject: Array<{ subjectId: number; seconds: number }>;
+  source: 'sessions';
+}
+
+/** 今日已用时长（spec §8.2）。`limitMinutes: null` = 家长未设限。 */
+export interface TodayUsageSummary {
+  date: string;
+  activeSeconds: number;
+  limitMinutes: number | null;
+  /** `>=` 判定：用满上限即算超出（管控语义是「该停了」）。 */
+  exceeded: boolean;
+  byModule: Array<{ module: string; seconds: number }>;
+}

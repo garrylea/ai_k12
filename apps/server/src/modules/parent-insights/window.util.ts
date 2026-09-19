@@ -32,7 +32,7 @@ export function startOfDaysAgo(days: number): Date {
 }
 
 /** `YYYY-MM-DD`（本地时区；**不用** `toISOString()`——那会按 UTC 切，跨时区差一天）。 */
-function toDayString(d: Date): string {
+export function toDayString(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -49,5 +49,45 @@ export function resolveWindow(period: ReportPeriod): ReportWindow {
     endExclusive,
     startDay: toDayString(start),
     endDay: toDayString(endInclusive),
+  };
+}
+
+/** 把 `YYYY-MM-DD` 解析为**本地时区**当天 00:00；形状不合法或日期不存在（如 2026-02-30）→ null。 */
+function parseDayString(raw: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return null;
+  // 挡掉 2026-02-30 这类「Date 会静默滚到 3 月」的输入
+  if (d.getFullYear() !== Number(m[1]) || d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3])) {
+    return null;
+  }
+  return d;
+}
+
+const DEFAULT_RANGE_DAYS = 7;
+
+/**
+ * 显式日期区间 → 报告窗口。用于 `study-time` 的 `from`/`to`（spec §8.2）。
+ *
+ * 宽容回落：查询类参数非法**不 400**（与 `PeriodSchema` 对 `period` 的处理一致）——
+ * 一个拼错的日期不应该让家长看到错误页。缺省 = 近 7 天。
+ * `from > to` 时自动交换：宁可给出「反着的窗口」也不要给空窗口。
+ */
+export function resolveRange(from?: string, to?: string): ReportWindow {
+  const parsedTo = to ? parseDayString(to) : null;
+  const endInclusive = parsedTo ?? startOfDaysAgo(0);
+  let start = (from ? parseDayString(from) : null) ?? new Date(endInclusive.getTime() - (DEFAULT_RANGE_DAYS - 1) * DAY_MS);
+  let end = endInclusive;
+  if (start.getTime() > end.getTime()) {
+    const swap = start;
+    start = end;
+    end = swap;
+  }
+  return {
+    start,
+    endExclusive: new Date(end.getTime() + DAY_MS),
+    startDay: toDayString(start),
+    endDay: toDayString(end),
   };
 }

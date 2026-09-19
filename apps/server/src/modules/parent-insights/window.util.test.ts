@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { startOfDaysAgo, resolveWindow } from './window.util.js';
+import { startOfDaysAgo, resolveWindow, resolveRange } from './window.util.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -48,5 +48,42 @@ describe('window.util', () => {
 
     expect(w.startDay).toBe('2026-08-20');
     expect(w.endDay).toBe('2026-09-18');
+  });
+});
+
+describe('resolveRange', () => {
+  it('两个都不传 → 近 7 天（含今天），endExclusive 是明天的 00:00', () => {
+    const w = resolveRange();
+    const today = new Date();
+    expect(w.endDay).toBe(
+      `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+    );
+    expect(Math.round((w.endExclusive.getTime() - w.start.getTime()) / 86_400_000)).toBe(7);
+  });
+
+  it('显式 from/to → 闭区间：to 那天整天都在窗口内', () => {
+    const w = resolveRange('2026-09-13', '2026-09-19');
+    expect(w.startDay).toBe('2026-09-13');
+    expect(w.endDay).toBe('2026-09-19');
+    expect(Math.round((w.endExclusive.getTime() - w.start.getTime()) / 86_400_000)).toBe(7);
+    expect(w.endExclusive.getTime() - w.start.getTime()).toBe(7 * 86_400_000);
+  });
+
+  it('只给 to → 以 to 收尾的 7 天窗口', () => {
+    const w = resolveRange(undefined, '2026-09-19');
+    expect(w.startDay).toBe('2026-09-13');
+    expect(w.endDay).toBe('2026-09-19');
+  });
+
+  it('非法日期串 → 回落默认（查询参数宽容，不 400）', () => {
+    const w = resolveRange('2026-9-3', 'garbage');
+    expect(w.startDay).not.toBe('2026-9-3');
+    expect(w.endDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('from > to → 交换，不返回空窗口', () => {
+    const w = resolveRange('2026-09-19', '2026-09-13');
+    expect(w.startDay).toBe('2026-09-13');
+    expect(w.endDay).toBe('2026-09-19');
   });
 });
