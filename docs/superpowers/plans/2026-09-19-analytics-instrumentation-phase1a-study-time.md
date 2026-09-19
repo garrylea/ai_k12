@@ -491,7 +491,7 @@ describe('StudySessionsRepository.heartbeat', () => {
   it('增量封顶 45s，且用 GREATEST 防负数（时钟回拨）', async () => {
     const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 120 }] });
     const repo = new StudySessionsRepository(pool as any);
-    const seconds = await repo.heartbeat('uid-1', 9, 'visible');
+    const seconds = await repo.heartbeat('uid-1', 9, 'hidden');
 
     expect(seconds).toBe(120);
     const [updateSql, updateParams] = pool.execute.mock.calls[0];
@@ -500,6 +500,13 @@ describe('StudySessionsRepository.heartbeat', () => {
     expect(updateSql).toContain("IF(client_state = 'visible'");
     expect(updateSql).toContain('heartbeat_count = heartbeat_count + 1');
     expect(updateSql).toContain("WHERE session_uid = ? AND student_id = ? AND status = 'active'");
+    // 顺序是 load-bearing：MySQL 的 SET 从左到右求值，后出现的表达式会看到**已赋值**的新值。
+    // 若把 `client_state = ?` 挪到 IF 之前，IF 就会读到本次上报的新状态（hidden 心跳不再补计
+    // 最后一段 visible、visible 心跳反而把 hidden 期间也计上），静默算错时长。
+    const ifIndex = updateSql.indexOf("IF(client_state = 'visible'");
+    const assignIndex = updateSql.indexOf('client_state = ?');
+    expect(ifIndex).toBeGreaterThanOrEqual(0);
+    expect(assignIndex).toBeGreaterThan(ifIndex);
     expect(updateParams).toEqual(['hidden', 'uid-1', 9]);
   });
 
@@ -670,9 +677,14 @@ export class StudySessionsRepository {
   /**
    * 心跳：按「上次心跳」到现在累加秒数，**只在上一状态为 visible 时计**（hidden 暂停计时）。
    *
-   * `SET` 里所有表达式都用**更新前**的列值，所以 `client_state = ?` 写新状态
-   * 与 `IF(client_state = 'visible', ...)` 读旧状态互不干扰——这是本算法的关键，
-   * 不要拆成两条 SQL（会有竞态窗口）。
+   * ⚠️ **本语句的列顺序是 load-bearing 的**。MySQL 对单表 `SET` 列表**从左到右**求值，
+   * 后出现的表达式若引用前面已赋值的列，读到的是**新值**——并不是「所有表达式都用更新前的值」。
+   * 因此 `IF(client_state = 'visible', ...)`（读**旧**状态）**必须排在 `client_state = ?`
+   * （写**新**状态）之前**。顺序反了照样能编译运行，但 IF 会读到本次上报的新状态：
+   * hidden 心跳不再补计最后一段 visible、visible 心跳反而把 hidden 期间也计上，**静默算错时长**。
+   * 单测里有一条 index 顺序钉子（`assignIndex > ifIndex`）守着这一点。
+   *
+   * 也不要拆成两条 SQL（会有竞态窗口）。
    *
    * 返回累计秒数；`null` = 会话不存在 / 非本人 / 非 active（调用方**静默 200**，不报错——
    * 心跳是尽力而为，报错只会污染前端日志）。
@@ -688,8 +700,8 @@ export class StudySessionsRepository {
              + IF(client_state = 'visible',
                   GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)),
                   0),
-           client_state      = ?,
-           heartbeat_count   = heartbeat_count + 1,
+           client_state = ?,
+           heartbeat_count = heartbeat_count + 1,
            last_heartbeat_at = NOW(3)
        WHERE session_uid = ? AND student_id = ? AND status = 'active'`,
       [state, sessionUid, studentId],
@@ -720,9 +732,9 @@ export class StudySessionsRepository {
              + IF(client_state = 'visible',
                   GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)),
                   0),
-           status            = 'ended',
-           end_reason        = ?,
-           ended_at          = NOW(3),
+           status = 'ended',
+           end_reason = ?,
+           ended_at = NOW(3),
            last_heartbeat_at = NOW(3)
        WHERE session_uid = ? AND student_id = ? AND status = 'active'`,
       [reason, sessionUid, studentId],
