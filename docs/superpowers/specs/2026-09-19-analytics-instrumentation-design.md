@@ -161,6 +161,14 @@ CREATE TABLE IF NOT EXISTS study_sessions (
 
 > 原设计里的 `client_platform`（`web|electron|ipad` 自报）被上面 5 列取代——它是这三列的子集，留着会语义重叠。
 
+**⚠️ 必须做的交叉校正（否则 iPad 全部会被算成 Mac）**：iPadOS 13+ 的 Safari UA 字符串写的是 `Macintosh`（苹果的「desktop-class browsing」策略），所以**只看 UA 会把 iPad 误判为 Mac**——而 iPad 正是这个产品的主断点目标设备，误判会让这个报表直接失去意义。校正规则：
+
+```
+若 platform_class == 'mac' 且 input_type == 'touch'  →  platform_class = 'ipad'
+```
+
+服务端在写入 `study_sessions` 时应用这条规则（`input_type` 是前端上报的，二者在同一个请求里，可当场校正）。单测必须覆盖：`Macintosh` UA + `input_type='touch'` → `ipad`；`Macintosh` UA + `input_type='mouse'` → `mac`。
+
 **心跳累计算法（唯一实现，写在 `StudySessionsService`）**
 
 ```sql
