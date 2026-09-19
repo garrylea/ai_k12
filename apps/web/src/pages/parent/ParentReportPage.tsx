@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { Button, Card, Skeleton } from '@/components/base';
 import ChartLine from '@/components/business/parent/ChartLine';
 import ChartBar from '@/components/business/parent/ChartBar';
+import MasteryPanel from '@/components/business/parent/MasteryPanel';
 import {
   ApiError,
   getParentReport,
@@ -281,6 +282,11 @@ export default function ParentReportPage() {
               </p>
             )}
           </Card>
+
+          {/* 真掌握度（Phase 1B）：紧挨「薄弱知识点」放，方便家长对照两套口径；
+              与它是**并存不替换**关系——那张是错题数代理，这张是 student_knowledge_mastery，
+              两张卡标题不同、不得合并（spec §10 硬约束） */}
+          <MasteryPanel studentId={studentId} />
 
           <Card className="p-5" data-testid="report-exams">
             <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">

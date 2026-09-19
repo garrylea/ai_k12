@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
-import { getParentReport, getParentStudyTime, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentLearningReport, type ParentStudyTime } from '@/services/api';
+import { getParentReport, getParentStudyTime, getParentMastery, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentLearningReport, type ParentMastery, type ParentStudyTime } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
 
@@ -40,6 +40,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getUnreadMessageCount: vi.fn(),
     getParentReport: vi.fn(),
     getParentStudyTime: vi.fn(),
+    // 真掌握度卡（埋点 Phase 1B）自己取数
+    getParentMastery: vi.fn(),
   };
 });
 
@@ -47,8 +49,22 @@ const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMock = vi.mocked(getUnreadMessageCount);
 const getReportMock = vi.mocked(getParentReport);
 const getStudyTimeMock = vi.mocked(getParentStudyTime);
+const getMasteryMock = vi.mocked(getParentMastery);
 
 const BOY: MyStudentItem = { id: 11, parentId: 3, username: 'xiaoming', name: '小明', age: 13, grade: '初一', schoolLevel: 'junior', isActive: true };
+
+/** 真掌握度卡的默认数据（埋点 Phase 1B）：覆盖率三项按实测基线 203/530。 */
+const MASTERY: ParentMastery = {
+  items: [
+    {
+      knowledgePointId: 42, name: '分数加减', masteryScore: 0.5, level: 2,
+      correctCount: 3, errorCount: 3, lastSeenAt: '2026-09-16T10:00:00.000Z',
+    },
+  ],
+  coveredQuestions: 203,
+  totalQuestions: 530,
+  uncovered: 327,
+};
 
 const REPORT: ParentLearningReport = {
   studentId: 11,
@@ -110,6 +126,8 @@ beforeEach(() => {
     bySubject: [{ subjectId: 1, seconds: 5400 }],
     source: 'sessions',
   });
+  getMasteryMock.mockReset();
+  getMasteryMock.mockResolvedValue(MASTERY);
 });
 
 afterEach(() => {
@@ -318,5 +336,26 @@ describe('ParentReportPage', () => {
     expect(screen.getByTestId('report-stats')).toHaveTextContent('73.8%');
     expect(screen.getByTestId('report-weak-points')).toHaveTextContent('分数加减');
     expect(screen.getByTestId('report-exams')).toHaveTextContent('2025 学年七年级上期中');
+  });
+
+  /**
+   * spec §10 硬约束：**真掌握度与薄弱知识点并存不替换**。
+   * 两张卡、两个标题、两套口径（前者是 `student_knowledge_mastery`，后者是错题数代理）。
+   * 这条用例的价值在于：谁要是「顺手统一」成一张卡，或者把旧卡删了，这里立刻红。
+   */
+  it('真掌握度与薄弱知识点**两张卡并存**，标题不同且各用自己的数据', async () => {
+    renderAt('/parent/report');
+
+    const weak = await screen.findByTestId('report-weak-points');
+    const mastery = await screen.findByTestId('report-mastery');
+
+    expect(weak).toHaveTextContent('薄弱知识点');
+    expect(mastery).toHaveTextContent('真掌握度');
+    // 各自的数据来源不同：薄弱点来自报告接口的 weakPoints，掌握度来自 /mastery
+    expect(weak).toHaveTextContent('分数加减');
+    expect(mastery).toHaveTextContent('掌握度 50%');
+    expect(getMasteryMock).toHaveBeenCalledWith(11, 10);
+    // 旧卡的「未标注知识点」提示一个字都没动
+    expect(screen.getByTestId('report-uncovered-hint')).toBeInTheDocument();
   });
 });
