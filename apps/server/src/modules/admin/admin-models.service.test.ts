@@ -12,7 +12,7 @@ const mk = (o: any = {}) => ({
 });
 const svc = (d: any) => new AdminModelsService(d.llmModelsRepo, d.llmRoutesRepo, d.registry);
 
-const dbModel = (key: string) => ({ modelKey: key, name: key, providerType: 'kimi', modelId: key, baseUrl: 'https://x', apiKey: 'sk-secret123', contextWindow: 8, maxOutputTokens: 8, isEnabled: true, inputPricePer1k: 0, outputPricePer1k: 0 });
+const dbModel = (key: string) => ({ modelKey: key, name: key, providerType: 'kimi', modelId: key, baseUrl: 'https://x', apiKey: 'sk-secret123', contextWindow: 8, maxOutputTokens: 8, isEnabled: true });
 
 describe('AdminModelsService', () => {
   it('列表 apiKey 打码且不含明文', async () => {
@@ -65,32 +65,6 @@ describe('AdminModelsService', () => {
   it('更新/停用不存在的模型 -> 1002', async () => {
     await expect(svc(mk()).update('ghost', { name: 'x' })).rejects.toMatchObject({ response: { code: 1002 } });
     await expect(svc(mk()).setEnabled('ghost', false)).rejects.toMatchObject({ response: { code: 1002 } });
-  });
-
-  it('create 透传单价给 repo', async () => {
-    const d = mk();
-    await svc(d).create({
-      modelKey: 'm9', name: 'M9', providerType: 'kimi', modelId: 'm9',
-      baseUrl: 'https://x', apiKey: 'sk-1', inputPricePer1k: 0.007, outputPricePer1k: 0.028,
-    });
-    expect(d.llmModelsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
-      inputPricePer1k: 0.007, outputPricePer1k: 0.028,
-    }));
-  });
-
-  it('create 不给单价 -> 记 0（不是 undefined）', async () => {
-    const d = mk();
-    await svc(d).create({ modelKey: 'm8', name: 'M8', providerType: 'kimi', modelId: 'm8', baseUrl: 'https://x', apiKey: 'sk-1' });
-    expect(d.llmModelsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
-      inputPricePer1k: 0, outputPricePer1k: 0,
-    }));
-  });
-
-  it('update 透传单价并触发 registry.reload', async () => {
-    const d = mk({ llmModelsRepo: { ...mk().llmModelsRepo, findByKey: vi.fn().mockResolvedValue(dbModel('m1')) } });
-    await svc(d).update('m1', { inputPricePer1k: 0.02 });
-    expect(d.llmModelsRepo.update).toHaveBeenCalledWith('m1', { inputPricePer1k: 0.02 });
-    expect(d.registry.reload).toHaveBeenCalled();
   });
 });
 

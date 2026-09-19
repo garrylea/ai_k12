@@ -944,10 +944,6 @@ CREATE TABLE IF NOT EXISTS llm_models (
   api_key VARCHAR(500) NOT NULL,
   context_window INT NOT NULL DEFAULT 131072,
   max_output_tokens INT NOT NULL DEFAULT 16384,
-  -- 每 1K token 单价，单位与 ai-core/model-routes.yaml 的 costPer1K 一致。
-  -- 这两个列是**价格的唯一真源**：model-config-registry 从这里读进 costPer1K。
-  input_price_per_1k  DECIMAL(10,6) NOT NULL DEFAULT 0 COMMENT '每 1K 输入 token 价，单位与 model-routes.yaml 的 costPer1K.input 一致',
-  output_price_per_1k DECIMAL(10,6) NOT NULL DEFAULT 0 COMMENT '每 1K 输出 token 价，单位与 costPer1K.output 一致',
   is_enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -1164,8 +1160,8 @@ CREATE TABLE IF NOT EXISTS training_sessions (
 -- ---- llm_call_logs：每次 LLM 调用（含重试尝试、失败、超时、fallback）一行 ----
 -- student_id 用 ON DELETE SET NULL（**有意**偏离仓库 CASCADE 约定）：账本是审计数据，
 -- 学生被删后聚合量应保留、仅匿名化；列可空故 FK 合法。
--- cost / input_tokens / output_tokens 允许 NULL —— **NULL = 算不出，绝不是 0**；
--- 0 只代表「真免费」（本地模型）。与家长端 answered=0 → rate=null 同一纪律。
+-- input_tokens / output_tokens 允许 NULL —— **NULL = 拿不到，绝不是 0**；
+-- 0 会让「用量缺失」在报表上隐身，NULL 才能被单列出来。与家长端 answered=0 → rate=null 同一纪律。
 CREATE TABLE IF NOT EXISTS llm_call_logs (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   request_id          VARCHAR(64)   DEFAULT NULL COMMENT '关联 api_request_logs.request_id',
@@ -1186,9 +1182,6 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   input_tokens        INT           DEFAULT NULL,
   output_tokens       INT           DEFAULT NULL,
   usage_source        VARCHAR(12)   NOT NULL DEFAULT 'unavailable' COMMENT 'provider|estimated|unavailable',
-  input_price_per_1k  DECIMAL(10,6) DEFAULT NULL COMMENT '价格快照，防改价后历史成本漂移',
-  output_price_per_1k DECIMAL(10,6) DEFAULT NULL,
-  cost                DECIMAL(12,6) DEFAULT NULL COMMENT 'NULL = 算不出，绝不写 0',
   latency_ms          INT           NOT NULL,
   created_at          DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_lcl_scene_time    (scene, created_at),

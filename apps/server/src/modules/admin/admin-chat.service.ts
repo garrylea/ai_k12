@@ -81,9 +81,9 @@ export class AdminChatService {
       baseUrl: m.baseUrl,
       contextWindow: m.contextWindow,
       maxOutputTokens: m.maxOutputTokens,
-      // 单价从 DB 行取。旧代码写死 {0,0}，导致管理员自己对话的成本永远算不出来，
-      // 进 llm_call_logs 后同样失真。
-      costPer1K: { input: m.inputPricePer1k, output: m.outputPricePer1k },
+      // 成本不在本期范围（只记 token）。此字段是既有 ModelConfig 的必填项，保留占位；
+      // 本批曾试图让它变真（读模型价格列），随后按用户裁决取消——故恢复为 {0,0}。
+      costPer1K: { input: 0, output: 0 },
       supportsStreaming: true,
       apiKey: m.apiKey,
     };

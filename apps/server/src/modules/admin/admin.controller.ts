@@ -21,9 +21,6 @@ const ModelSchema = z.object({
   apiKey: z.string().min(1).max(400),
   contextWindow: z.number().int().positive().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
-  // 每 1K token 单价；0 合法（本地模型免费），因此用 nonnegative 而非 positive
-  inputPricePer1k: z.number().nonnegative().max(1000).optional(),
-  outputPricePer1k: z.number().nonnegative().max(1000).optional(),
 });
 // 更新时 apiKey 可传空串=不修改（service 层据此剔除该字段）
 const ModelUpdateSchema = ModelSchema.partial().omit({ modelKey: true }).extend({ apiKey: z.string().max(400) });
