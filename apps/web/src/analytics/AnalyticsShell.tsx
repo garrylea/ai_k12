@@ -16,19 +16,29 @@ import * as tracker from './tracker';
  * 往里加组件会破坏「纯配置」的约束。
  *
  * 副作用分两段 effect，顺序不能颠倒：
- * 1. 先配好 enabled / transport / subjectId 提供者；
- * 2. 再按路由变化驱动会话（若反了，首个路由变化会因为 `enabled=false` 被丢掉）。
+ * 1. 先配好 subjectId 提供者；
+ * 2. 再按路由变化补角色闸门并驱动会话（若反了，首个路由变化会因为 `enabled=false` 被丢掉）。
  */
 export default function AnalyticsShell() {
   const location = useLocation();
 
   useEffect(() => {
     tracker.setSubjectIdProvider(() => useLearnContextStore.getState().subjectId);
-    tracker.setEnabled(localStorage.getItem('userRole') === 'student');
+    // 卸载收尾：把在跑的会话收掉。已知 dev-only 假象 —— `<StrictMode>`（仅开发构建）
+    // 会双跑 effect，这次清理会顺手抹掉去重键，于是每次进场出现一轮 start/end/start；
+    // 生产构建不双跑，**有意不在这里绕**。
     return () => tracker.setEnabled(false);
   }, []);
 
   useEffect(() => {
+    // 角色闸门放在**路由 effect** 里，而不是挂载 effect —— 这是有意的，别改回去：
+    // 本壳是路由根元素，一次页面加载只挂载一次；而登录是**客户端导航**
+    // （LoginPage 写入 userRole 后直接 navigate，页面不刷新）。
+    // 若只在挂载时读一次 userRole，「从登录页进来」的学生在整个浏览器会话里
+    // enabled 恒为 false，`onRouteChange` 第一行就 return —— 学习时长**完全不计**，
+    // 而这正是本批要产出的指标。放在这里，登录后的第一次路由变化就把闸门补上。
+    // 反向同理：退出登录（同样不刷新）后立刻置回 false，并收掉在跑的会话。
+    tracker.setEnabled(localStorage.getItem('userRole') === 'student');
     tracker.onRouteChange(mapScene(location.pathname));
   }, [location.pathname]);
 
