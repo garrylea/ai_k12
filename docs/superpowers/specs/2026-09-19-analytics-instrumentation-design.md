@@ -481,6 +481,7 @@ apps/server/src/scripts/seed-llm-prices.ts
 ### 6.6 usage 修复（Phase 0 必做，否则成本永远算不出）
 
 - `aggregateStream()` 不再硬编码 `{0,0,0}`：优先取 provider 流末个 chunk 的 usage——OpenAI 兼容端点请求体加 `stream_options: {include_usage: true}`（仅对该 provider 支持时下发）；拿不到则 `estimateTokens()` 兜底（CJK 按字、拉丁 char/4，**口径写在一处并加测试**）→ `usage_source = 'estimated'`；两者都无 → `usage_source = 'unavailable'`，tokens/cost 写 **NULL**。
+- **输入与输出是独立的两个量，各用自己的数据源**：输入估自 `request.messages`（经 `contentToText` 兼容多模态），输出估自响应正文（含 reasoning）。**不要**把输入当输出的附属品、也不要因为「请求体已随流发送」就放弃输入估算——长 prompt 下输入往往是大头，漏掉会让成本严重低估。
 - **绝不把「未知」写成 0**（与家长端 `answered = 0 → rate = null` 同一纪律）。`local` 模型价格真为 0 → cost 可写 0，但 `usage_source` 必须是 `provider`。
 - 价格真源统一到 DB：`model-config-registry.ts:70` 改读 `llm_models` 的两个价格列；`scripts/seed-llm-prices.ts` 从 `model-routes.yaml` **幂等**回填；`admin-chat.service.ts:84` 的硬编码 0 一并消除。
 

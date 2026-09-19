@@ -238,10 +238,11 @@ Expected: `llm_call_logs` 含 `usage_source` / `input_price_per_1k` / `output_pr
 - [ ] **Step 5: 断言 schema.sql 与库一致（防「schema 漂移」老毛病）**
 
 ```bash
-mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW CREATE TABLE llm_call_logs\G" | grep -c "input_price_per_1k"
+# 两张表都要看：单看 llm_call_logs 只有 1 处，合计才是 2 处
+mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW CREATE TABLE llm_call_logs\G SHOW CREATE TABLE llm_models\G" | grep -c "input_price_per_1k"
 grep -c "input_price_per_1k" tools/db/schema.sql
 ```
-Expected: 两条命令都输出 `2`（表定义里出现过 2 次：`llm_call_logs` 与 `llm_models`）。
+Expected: 两条命令都输出 `2`（`llm_call_logs` 的列定义 1 处 + `llm_models` 的列定义 1 处）。
 若数字不等，说明 schema.sql 漏改，回去补——**「schema.sql 与既有库不同步」是本仓记录在案的事故类型**。
 
 - [ ] **Step 6: Commit**
@@ -1015,21 +1016,91 @@ export interface StreamChunk {
 
 **6e.** `gemini-client.ts:70-84` 的 usage 对象补 `source: 'provider' as const`（数值语义不变）。
 
-- [ ] **Step 7: 修流式聚合（本任务核心）**
+- [ ] **Step 7: 先写估算档的失败测试**
 
-替换 `apps/server/src/ai-core/infra/model-client/index.ts:82-102` 的 `aggregateStream`，并在类外（文件靠上、`ModelClient` 定义之前）加辅助函数：
+输入与输出是**两个独立的量**，各有自己的数据源——输入估自 `request.messages`，输出估自响应正文。不要用「一个 estimated 就一起含糊过去」的写法。
+
+在 `apps/server/src/ai-core/infra/model-client/model-client.test.ts` 追加：
+
+```ts
+describe('流式拿不到 usage 时的估算（输入/输出各自的数据源）', () => {
+  it('输入估自请求 messages，输出估自响应正文', async () => {
+    const providers = new Map([
+      ['kimi', {
+        chat: vi.fn(),
+        streamChat: async function* () {
+          yield { content: '你好世界' };      // 输出 4 token
+        },
+      }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    const res = await mc.chat({
+      model: {
+        provider: 'kimi', modelId: 'kimi-latest', baseUrl: 'https://x', contextWindow: 8,
+        maxOutputTokens: 8, supportsStreaming: true, costPer1K: { input: 0.01, output: 0.02 },
+      } as any,
+      messages: [{ role: 'user', content: 'abcdefgh' }],   // 输入 2 token
+      stream: true,
+    });
+    expect(res.usage.source).toBe('estimated');
+    expect(res.usage.inputTokens).toBe(2);    // 来自请求
+    expect(res.usage.outputTokens).toBe(4);   // 来自响应
+    // cost 按两段分别计价：2/1000*0.01 + 4/1000*0.02 = 0.00002 + 0.00008
+    expect(res.usage.cost).toBeCloseTo(0.0001, 8);
+  });
+
+  it('请求与响应都为空 -> unavailable，token/cost 全 NULL（不写 0）', async () => {
+    const providers = new Map([
+      ['kimi', { chat: vi.fn(), streamChat: async function* () { /* 什么都不 yield */ } }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    const res = await mc.chat({
+      model: {
+        provider: 'kimi', modelId: 'kimi-latest', baseUrl: 'https://x', contextWindow: 8,
+        maxOutputTokens: 8, supportsStreaming: true, costPer1K: { input: 0.01, output: 0.02 },
+      } as any,
+      messages: [],
+      stream: true,
+    });
+    expect(res.usage.source).toBe('unavailable');
+    expect(res.usage.inputTokens).toBeNull();
+    expect(res.usage.outputTokens).toBeNull();
+    expect(res.usage.cost).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 8: 跑测试确认失败**
+
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/model-client/model-client.test.ts
+```
+Expected: FAIL —— `res.usage.source` 是 `undefined`（旧代码返回 `{inputTokens:0,outputTokens:0,cost:0}`，没有 source），`inputTokens` 是 0 而非 2。
+
+- [ ] **Step 9: 实现流式聚合（本任务核心）**
+
+替换 `apps/server/src/ai-core/infra/model-client/index.ts:82-102` 的 `aggregateStream`，并在类外（文件靠上、`ModelClient` 定义之前）加两个辅助函数：
 
 ```ts
 /**
+ * 估算**请求侧**的输入 token。输入与输出相互独立，各用自己的数据源：
+ * 输入 = request.messages 的文本，输出 = 响应正文（见 buildStreamUsage）。
+ * 用 contentToText 兼容多模态消息（ContentPart[] 只取 text 部分）。
+ */
+function estimateInputTokens(messages: ChatMessage[]): number {
+  return messages.reduce((sum, m) => sum + estimateTokens(contentToText(m.content)), 0);
+}
+
+/**
  * 流式 usage 的三级降级：
- *   1) 端点回了 usage       -> provider，按真值算钱
- *   2) 拿不到 -> 用正文估算 -> estimated，按估算算钱（标出来，上层可区分）
- *   3) 连正文都空（异常/空响应）-> unavailable，token/cost 写 NULL（**不写 0**）
- * 注意：输入侧无从估算（请求体已随流发送，这里只有响应），故第 2 档把输入按 0 计
- * 并把来源标成 estimated —— 上层据此知道这个成本是**下界**。
+ *   1) 端点回了 usage -> provider，按真值算钱
+ *   2) 拿不到 -> 输入/输出**分别估算** -> estimated（两段都来自估算，故共用一个来源标签；
+ *      端点要么两段都给、要么都不给，不存在只估一段的情况）
+ *   3) 请求与响应都为空 -> unavailable，token/cost 写 NULL（**不写 0**）
  */
 function buildStreamUsage(
   providerUsage: { inputTokens: number; outputTokens: number } | null,
+  estimatedInputTokens: number,
   content: string,
   reasoningContent: string,
   costPer1K: { input: number; output: number },
@@ -1043,14 +1114,15 @@ function buildStreamUsage(
       source: 'provider',
     };
   }
+  const inputTokens = estimatedInputTokens;
   const outputTokens = estimateTokens(content) + estimateTokens(reasoningContent);
-  if (outputTokens === 0) {
+  if (inputTokens === 0 && outputTokens === 0) {
     return { inputTokens: null, outputTokens: null, cost: null, source: 'unavailable' };
   }
   return {
-    inputTokens: 0,
+    inputTokens,
     outputTokens,
-    cost: (outputTokens / 1000) * costPer1K.output,
+    cost: (inputTokens / 1000) * costPer1K.input + (outputTokens / 1000) * costPer1K.output,
     source: 'estimated',
   };
 }
@@ -1079,27 +1151,33 @@ function buildStreamUsage(
       content,
       reasoningContent: reasoningContent || undefined,
       finishReason,
-      usage: buildStreamUsage(providerUsage, content, reasoningContent, request.model.costPer1K),
+      usage: buildStreamUsage(
+        providerUsage,
+        estimateInputTokens(request.messages),
+        content,
+        reasoningContent,
+        request.model.costPer1K,
+      ),
       latencyMs: Date.now() - startTime,
     };
   }
 ```
 
-同文件顶部 import 追加 `estimateTokens`。
+同文件顶部 import 追加：`estimateTokens`（来自 `../usage-estimate.js`），并把 `ChatMessage`、`contentToText` 加进 `../../types.js` 的 import（`contentToText` 是**值**不是类型，不能放 `import type` 里）。
 
-- [ ] **Step 8: 跑测试 + 类型检查 + 全量回归**
+- [ ] **Step 10: 跑测试确认通过 + 类型检查 + 全量回归**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/ && npx tsc --noEmit && npm test 2>&1 | tail -6
 ```
-Expected: 全绿；tsc 无错误。
+Expected: 全绿（含 Step 7 新加的两条）；tsc 无错误。
 **注意**：能力测试里大量固定装置写了 `usage: { inputTokens: 10, outputTokens: 5, cost: 0 }`（如 `grading.capability.test.ts:52`）——`source` 是可选的，**这些文件不需要改**。若 tsc 报 usage 相关错误，说明我把某字段写成了必填，回去检查。
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/usage-estimate.ts apps/server/src/ai-core/infra/usage-estimate.test.ts apps/server/src/ai-core/types.ts apps/server/src/ai-core/infra/model-client/
-git commit -m "fix(ai-core): 流式 usage 三级降级（provider/estimated/unavailable），token 不再恒为 0"
+git commit -m "fix(ai-core): 流式 usage 三级降级——输入/输出分别估算，token 不再恒为 0"
 ```
 
 ---
@@ -1397,14 +1475,16 @@ describe('TelemetryBuffer', () => {
     buf.stop();
   });
 
-  it('超过 maxEntries 丢最旧并计数 dropped', () => {
-    const { buf } = mk();
-    buf.push({ n: 1 });
-    buf.push({ n: 2 });   // 触发异步 flush
-    buf.push({ n: 3 });
-    buf.push({ n: 4 });   // 缓冲再次到达 3 上限
-    expect(buf.dropped).toBeGreaterThanOrEqual(0);
-    expect(buf.size).toBeLessThanOrEqual(3);
+  it('超过 maxEntries 丢最旧并计数 dropped，保留最新', async () => {
+    // 用 flushAt:100 让 flush 不介入，才能确定性地观察丢弃行为
+    const flush = vi.fn().mockResolvedValue(undefined);
+    const buf = new TelemetryBuffer<{ n: number }>(flush, { name: 't', maxEntries: 3, flushIntervalMs: 1000, flushAt: 100 });
+    for (let n = 1; n <= 5; n += 1) buf.push({ n });
+    expect(buf.size).toBe(3);
+    expect(buf.dropped).toBe(2);
+    expect(flush).not.toHaveBeenCalled();   // flushAt=100 未到，不该触发
+    await buf.flushNow();
+    expect(flush).toHaveBeenCalledWith([{ n: 3 }, { n: 4 }, { n: 5 }]);  // 丢的是最旧的 1、2
   });
 
   it('flush 失败整批丢弃、不抛、不重试', async () => {
