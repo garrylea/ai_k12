@@ -809,7 +809,7 @@ git commit -m "feat(analytics): StudySessionsRepository（心跳封顶增量 + �
 **Interfaces:**
 - Consumes: `StudySessionsRepository`（Task 3）、`parseUserAgent`（Task 2）、`SubjectsRepository`
 - Produces:
-  - 常量 `HEARTBEAT_MAX_INCREMENT_SECONDS = 45`、`STALE_SESSION_MINUTES = 5`
+  - 封闭字典常量 `STUDY_MODULES` / `STUDY_SCENES` / `END_REASONS`（**不导出**数字阈值常量——45s 封顶与 5min 收尾是 SQL 字面量，见实现处注释）
   - `type StudyModule` / `type StudyScene`（spec §5.1 的封闭枚举，供 controller 复用）
   - `interface StartSessionInput { studentId; sessionUid; module; scene; subjectId?; refType?; refId?; screenClass?; inputType?; appShell?; userAgent?: string | null }`
   - `class StudySessionsService`
@@ -1017,13 +1017,14 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { StudySessionsRepository } from '../../database/repositories/study-sessions.repo.js';
 import type { StudySessionRow } from '../../database/repositories/study-sessions.repo.js';
 import { parseUserAgent } from '../../common/utils/user-agent.util.js';
-import type { PlatformClass, BrowserClass } from '../../common/utils/user-agent.util.js';
+import type { PlatformClass } from '../../common/utils/user-agent.util.js';
 
-/** 心跳参数（spec §4.2「服务端常量，一处可调」）。前端心跳间隔同为 30s。 */
-export const HEARTBEAT_INTERVAL_SECONDS = 30;
-export const HEARTBEAT_MAX_INCREMENT_SECONDS = 45;
-export const IDLE_TIMEOUT_SECONDS = 120;
-export const STALE_SESSION_MINUTES = 5;
+/**
+ * 三个时长阈值（45s 单次封顶 / 5min 惰性收尾 / 前端 30s 心跳间隔）在此**不导出为常量**：
+ * 它们只作为 SQL 字面量出现（见 `study-sessions.repo.ts` 的两处 `LEAST(..., 45)` 与
+ * `INTERVAL 5 MINUTE`），导出会变成没人引用的死代码。要改封顶值，得同时改那两处 SQL
+ * 和守着顺序的 index 钉子测试——不是改一个常量。
+ */
 
 /** `module` / `scene` 是封闭字典（spec §5.1）——**唯一真源在后端**，前端 `sceneMap.ts` 只能取这里的值。 */
 export const STUDY_MODULES = [
@@ -1212,8 +1213,6 @@ export function correctIpad(
   if (platformClass === 'mac' && inputType === 'touch') return 'ipad';
   return platformClass;
 }
-
-export type { BrowserClass };
 ```
 
 > **DI 说明**：第二个构造参数是**接口** `SubjectsRepoLike`——按仓库的 DI 坑，**必须**显式 `@Inject(token)`，否则 Nest 会把 `design:paramtypes` 写成 `Object` 并启动失败。本计划用 `'SUBJECTS_REPO_FOR_ANALYTICS'` 作为 token，并在 `AnalyticsModule` 里 `{ provide: 'SUBJECTS_REPO_FOR_ANALYTICS', useExisting: SubjectsRepository }`（见 Task 5）。
