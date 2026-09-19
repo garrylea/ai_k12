@@ -1556,6 +1556,23 @@ student_points **只减 balance**（earnedDelta 恒为 0）——SQL 里根本�
 
 **兑换为什么写 `earnedDelta: 0`**：`student_points.total_earned` 是段位唯一依据，语义上不可回退。兑换扣的是「可用余额」`balance`，若同事务里把 `total_earned` 也减掉，段位立刻会降，破坏 spec §3 定案 #2。所以兑换的扣减 SQL **只 `SET balance`**、结构性保证不触碰 `total_earned`（见 `student-points.repo.ts` 的 `deductBalanceIfEnough`）。
 
+### 6.26 LLM 调用 → 账本 → token 计量（2026-09-20）
+
+任何 capability 最终都经 `ModelClient.chat()`（`ai-core/infra/model-client/index.ts`）。在那里：
+
+1. **归因**：`ModelRouter.route()` 给 primary/fallback 条目打 `scene`/`subject`/`modelKey`/`isFallbackEntry`；
+   HTTP 路径的 `student_id`/`request_id` 由 `AsyncLocalStorage`（`ai-core/infra/request-context.ts`）带出，
+   后台路径（判错解析、会话标题）由调用方显式传 `ChatRequest.meta`。
+2. **usage**：流式默认拿不到，故请求体下发 `stream_options.include_usage`（本地 llama.cpp 例外，它不认）；
+   仍拿不到则**输入/输出分别估算**（输入估自 `request.messages`、输出估自响应正文）并把 `usage_source`
+   标为 `estimated`；两者都无则 `unavailable` 且两个 token 列写 **NULL**（**绝不写 0** —— 0 会让
+   「用量缺失」在报表上隐身）。
+3. **落库**：每次逻辑调用 + 每次重试尝试各一行，`attempt` 递增；失败/超时也记（`success=0`、`error_type`）。
+   写入走 `TelemetryBuffer`（2s 或 200 条 flush，满 5000 丢最旧，失败整批丢弃不重试）。
+4. **本期只记 token，不记价格与成本**（用户 2026-09-19 裁决）：账本只有 `input_tokens` / `output_tokens` /
+   `usage_source`，**没有** `cost` 与价格快照列；`llm_models` 也不加价格列。以后按 token 计价，
+   钱由 token 换算，平台不必自己算。
+
 ---
 
 ## 7. API 与前端页面对照表

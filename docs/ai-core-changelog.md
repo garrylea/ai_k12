@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-09-20 埋点 Phase 0：模型调用账本 + API 请求日志
+
+- 新增 `llm_call_logs`（每次 LLM 调用一行，记**输入/输出 token**、usage_source、重试尝试/失败/fallback）
+  与 `api_request_logs`（每请求一行，归一化 route / 状态码 / 业务码 / 耗时 / is_sse）
+- **修正「生产 token 恒为 0」**：`ModelClient.chat()` 默认流式，而 `aggregateStream()` 把 usage
+  硬编码 `{0,0,0}`；现改为三级降级 —— 端点 usage > **输入/输出分别估算** > NULL
+  （**绝不把未知写成 0**）。流式请求体下发 `stream_options.include_usage`，本地 llama.cpp 除外
+- **本期只记 token，不记价格/成本**（用户裁决）：以后按 token 计价。早期版本误加的
+  `cost` 与价格快照列（`llm_call_logs` 3 列 + `llm_models` 2 列）已由 `2026-09-20` 迁移
+  用带守卫的 DROP 收敛掉——`cost` 留着会恒为 0，而 0 表示「真免费」，会误导后续查成本的人
+- `student_id` 是**硬要求**：HTTP 走 ALS，后台路径（判错解析/标题生成）必须显式传 `ChatRequest.meta`
+- 埋点两条纪律：分析日志走 `TelemetryBuffer`（失败整批丢弃、不重试、不抛）；埋点异常绝不让请求 500
+- 已知待办（属 Phase 2）：归属覆盖率、`/api/admin/analytics/*` 查询端与页面
+
+---
+
 ## 2026-09-19 新增（统一 `updated_at` 维护方式：触发器 → 列级 `ON UPDATE`）
 
 **起因**：排查「dev 库 28 条 `*_updated_at` 触发器只装了 1 条」这件事。盘点后发现比原先记的更糟：
