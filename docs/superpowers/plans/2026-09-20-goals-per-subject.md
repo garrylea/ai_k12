@@ -6,7 +6,7 @@
 
 **为什么会有这批**：1B 按 spec 实现了「四个全局 metric」（学习时长 / 背单词 / 古诗文篇目 / 清零错题），但 PRD 第 200 行写的是「**按学科**设定每日/每周学习目标」、UX §P6.5 写的是「**按学科**设定：每日学习时长目标、**每周完课目标**」。用户 2026-09-20 走查时提出这个不一致，并裁决**按 PRD 补齐**。
 
-**Architecture:** 三条改动线。① 目标模型从「全局 metric」改为「(学科, 指标)」二元组：`goals` 加**生成列** `scope_subject_id`（`COALESCE(subject_id, 0)`）把唯一键改到 `(student_id, scope_subject_id, metric)` —— 因为 MySQL 的唯一索引**把 NULL 视为互不相等**，直接用 `(student_id, subject_id, metric)` 会让「全局目标」失去唯一性、`ON DUPLICATE KEY` 静默失效（本批已实测）。② 新建 `lesson_completions`（每课完成事件）供「每周完课」用；③ 会话心跳支持**补写** `subject_id`，让「按学科学习时长」有数据。
+**Architecture:** 三条改动线。① 目标模型从「全局 metric」改为「(学科, 指标)」二元组：`goals` 加**生成列** `scope_subject_id`（条件式，`VIRTUAL`）把唯一键改到 `(student_id, scope_subject_id, metric)` —— 因为 MySQL 的唯一索引**把 NULL 视为互不相等**，直接用 `(student_id, subject_id, metric)` 会让「全局目标」失去唯一性、`ON DUPLICATE KEY` 静默失效（本批已实测）。② 新建 `lesson_completions`（每课完成事件）供「每周完课」用；③ 会话心跳支持**补写** `subject_id`，让「按学科学习时长」有数据。
 
 **Tech Stack:** NestJS + TypeScript ESM + mysql2 + Zod + Vitest；React + Zustand + Tailwind（CSS 变量 token）。
 
@@ -61,11 +61,15 @@
 所以加一列**生成列**把 NULL 折成 0，再把唯一键建在它上面：
 
 ```sql
-scope_subject_id BIGINT AS (COALESCE(subject_id, 0)) STORED
+scope_subject_id BIGINT AS (IF(metric IS NULL, NULL, COALESCE(subject_id, 0))) VIRTUAL
 UNIQUE KEY uniq_goals_student_scope_metric (student_id, scope_subject_id, metric)
 ```
 
-好处：① 唯一性对 NULL 也成立，upsert 永远正确；② 迁移**不必删除任何历史行**（`subject_id` 为 NULL 的停用行继续留着，被 `is_active=1` 过滤）；③ 将来若真要「全局目标」（`subject_id = NULL`），语义天然成立。
+**为什么是「条件式」而不是简单的 `COALESCE(subject_id, 0)`（2026-09-20 执行期实测补充）**：1B 的去重步骤把重复行的 `metric` 清成了 `NULL`（`is_active=0`）。若 scope 对它们也算出 0，则同一个学生的多行 `metric IS NULL` 会在新唯一键上**互相冲突 → `ADD UNIQUE KEY` 直接失败**（`ERROR 1062`）。让 `metric IS NULL` 时 scope 也为 `NULL`，就回到 MySQL「NULL 互不相等」的语义——历史停用行继续共存，而真实目标（`metric NOT NULL`）的唯一性照常成立。已在真库用临时表验证：两行 `metric IS NULL` 可共存，而两行 `(7,1,'daily_words')` 会被拦。
+
+好处：① 唯一性对真实目标成立，upsert 永远正确；② 迁移**不必删除任何历史行**；③ 将来若真要「全局目标」（`subject_id = NULL` 但有 metric），语义天然成立。
+
+**必须是 `VIRTUAL` 而不是 `STORED`（2026-09-20 执行期实测）**：在 `goals` 上加 STORED 生成列报 `ERROR 1215 Cannot add foreign key constraint` —— STORED 要重建整表，而该表有 `fk_goals_student_id` / `fk_goals_subject_id`，重建时外键校验失败；VIRTUAL 不动行数据，加列与加索引都成功。**教训：别用临时表验证这类事**——临时表没有外键，我第一轮就是这么误判为可行的。
 
 代价：**本仓首次使用生成列**（`grep GENERATED|STORED *.sql` 零命中）—— 必须在 DB 设计文档里记一笔，并说明为什么不用哨兵值 0（哨兵值会撞 `fk_goals_subject_id` 外键）。
 
@@ -154,14 +158,18 @@ UNIQUE KEY uniq_goals_student_scope_metric (student_id, scope_subject_id, metric
 -- 2026-09-20 P6.5 目标设定补齐：goals 改「按学科」+ 新建 lesson_completions
 --
 -- 做什么：
---   1) goals 加生成列 scope_subject_id = COALESCE(subject_id, 0)（STORED），
+--   1) goals 加生成列 scope_subject_id = IF(metric IS NULL, NULL, COALESCE(subject_id, 0))（STORED），
 --      唯一键从 (student_id, metric) 改到 (student_id, scope_subject_id, metric)
 --   2) 新建 lesson_completions（每课完成事件），供「每周完课目标」用
 --
 -- 为什么：
 --   * MySQL 的唯一索引把 NULL 视为互不相等 —— 直接用 (student_id, subject_id, metric)
 --     会让 subject_id IS NULL 的行失去唯一性，ON DUPLICATE KEY 静默不命中、重复插行。
---     生成列把 NULL 折成 0，唯一性对 NULL 也成立（2026-09-20 实测确认）。
+--     生成列把 NULL 折成 0，唯一性对真实目标成立（2026-09-20 实测确认）。
+--   * 为什么是**条件式**（metric IS NULL 时 scope 也为 NULL）：1B 去重把重复行的 metric
+--     清成了 NULL，若这些行的 scope 都算成 0，(student_id, 0, NULL) 会互相冲突，
+--     ADD UNIQUE KEY 直接失败（ERROR 1062）。保持 NULL 就回到「NULL 互不相等」，
+--     历史停用行继续共存、加键不失败。
 --   * metric 变成「按学科」后，(student_id, metric) 这个旧键不再成立（同一 metric
 --     在不同学科各有一行）。旧键必须先删，否则同一 metric 只能存一个学科。
 --   * 不删任何历史行：subject_id 为 NULL 的历史行（1B 去重时停用的）留着，读侧靠
@@ -180,7 +188,7 @@ SET @col_scope := (
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goals' AND COLUMN_NAME = 'scope_subject_id'
 );
 SET @ddl := IF(@col_scope = 0,
-  'ALTER TABLE goals ADD COLUMN scope_subject_id BIGINT AS (COALESCE(subject_id, 0)) STORED COMMENT ''生成列：NULL 折 0，仅供唯一键用（MySQL 唯一索引把 NULL 视为互不相等）''',
+  'ALTER TABLE goals ADD COLUMN scope_subject_id BIGINT AS (IF(metric IS NULL, NULL, COALESCE(subject_id, 0))) VIRTUAL COMMENT ''生成列（条件式）：metric 非空时把 subject_id 的 NULL 折 0，供唯一键用；metric 为空的历史停用行保持 NULL，不参与唯一性''',
   'DO 0');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
@@ -284,7 +292,7 @@ CREATE TABLE IF NOT EXISTS goals (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   student_id BIGINT NOT NULL,
   subject_id BIGINT DEFAULT NULL COMMENT '按学科目标；为 NULL 的历史行是迁移前停用行，读侧被 is_active=1 过滤',
-  scope_subject_id BIGINT AS (COALESCE(subject_id, 0)) STORED COMMENT '生成列：NULL 折 0，仅供唯一键用（MySQL 唯一索引把 NULL 视为互不相等）',
+  scope_subject_id BIGINT AS (IF(metric IS NULL, NULL, COALESCE(subject_id, 0))) VIRTUAL COMMENT '生成列（条件式）：metric 非空时把 subject_id 的 NULL 折 0，供唯一键用；metric 为空的历史停用行保持 NULL，不参与唯一性',
   metric VARCHAR(40) DEFAULT NULL COMMENT 'daily_study_minutes|weekly_lessons|daily_words|weekly_passages|weekly_clear_errors',
   title VARCHAR(200) NOT NULL,
   period VARCHAR(10) NOT NULL,
@@ -322,7 +330,7 @@ diff <(sed -n '/^CREATE TABLE IF NOT EXISTS lesson_completions/,/^) ENGINE=InnoD
      <(sed -n '/^CREATE TABLE IF NOT EXISTS lesson_completions/,/^) ENGINE=InnoDB/p' tools/db/schema.sql) \
   && echo "lesson_completions: IDENTICAL"
 diff <(sed -n '/^CREATE TABLE IF NOT EXISTS goals/,/^) ENGINE=InnoDB/p' tools/db/schema.sql | grep -E 'scope_subject_id|uniq_goals_student_scope_metric') \
-     <(echo "  scope_subject_id BIGINT AS (COALESCE(subject_id, 0)) STORED COMMENT '生成列：NULL 折 0，仅供唯一键用（MySQL 唯一索引把 NULL 视为互不相等）',
+     <(echo "  scope_subject_id BIGINT AS (IF(metric IS NULL, NULL, COALESCE(subject_id, 0))) VIRTUAL COMMENT '生成列（条件式）：metric 非空时把 subject_id 的 NULL 折 0，供唯一键用；metric 为空的历史停用行保持 NULL，不参与唯一性',
   UNIQUE KEY uniq_goals_student_scope_metric (student_id, scope_subject_id, metric),") \
   && echo "goals: 生成列与新键都在 schema.sql 里"
 ```
