@@ -242,3 +242,47 @@ export interface TodayUsageSummary {
   exceeded: boolean;
   byModule: Array<{ module: string; seconds: number }>;
 }
+
+/**
+ * 一个专项模块的窗口内聚合（spec §8.2 `/specials`）。
+ * `rate` 为 `null` 表示「本期没有可判对错的作答」，**不是 0**。
+ */
+export interface SpecialModuleSummary {
+  /** 作答单位数：默写=篇、解释/含义=句、背单词=题（日志一行 = 一个单位）。 */
+  units: number;
+  correct: number;
+  rate: number | null;
+  byDay: Array<{ date: string; count: number }>;
+}
+
+/** 四个模块的聚合。只有 `vocabulary` 多一个 `newWords`。 */
+export interface SpecialsSummary {
+  dictation: SpecialModuleSummary;
+  interpretation: SpecialModuleSummary;
+  meaning: SpecialModuleSummary;
+  vocabulary: SpecialModuleSummary & { newWords: number };
+}
+
+/** `/mastery` 的一行。`lastSeenAt` 为 null = 从未见过（不要编成 0）。 */
+export interface MasteryItem {
+  knowledgePointId: number;
+  name: string;
+  /** 0..1 的比值（后端已算好，前端不要再除）。 */
+  masteryScore: number;
+  level: number;
+  correctCount: number;
+  errorCount: number;
+  lastSeenAt: Date | null;
+}
+
+/**
+ * `/mastery` 响应。三个覆盖率计数**必须都回**：题库只有 38% 的题绑了 KP，
+ * 不给出「未覆盖」计数会让家长以为薄弱点只有列出的这些（spec §4.8 规则①）。
+ */
+export interface MasterySummary {
+  items: MasteryItem[];
+  coveredQuestions: number;
+  totalQuestions: number;
+  /** = totalQuestions - coveredQuestions，后端算好，前端不要自己减。 */
+  uncovered: number;
+}

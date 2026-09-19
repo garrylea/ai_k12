@@ -1864,14 +1864,13 @@ export class SpecialsService {
 
   async getSpecials(studentId: number, from?: string, to?: string): Promise<SpecialsSummary> {
     // 窗口由应用层算（不用 CURDATE()）；resolveRange 的语义与 1A 的 study-time 完全一致
-    const range = resolveRange(from, to);
-    const fromDate = range.from;
-    const toExclusive = range.toExclusive;
+    // ⚠️ 2026-09-22 执行期订正：字段名是 start / endExclusive（原 snippet 写的 range.from 不存在，tsc 会直接报错）
+    const window = resolveRange(from, to);
 
     const [agg, byDay, newWords] = await Promise.all([
-      this.logsRepo.aggregateByModule(studentId, fromDate, toExclusive),
-      this.logsRepo.countByDayByModule(studentId, fromDate, toExclusive),
-      this.logsRepo.countDistinctCorrectWords(studentId, fromDate, toExclusive),
+      this.logsRepo.aggregateByModule(studentId, window.start, window.endExclusive),
+      this.logsRepo.countByDayByModule(studentId, window.start, window.endExclusive),
+      this.logsRepo.countDistinctCorrectWords(studentId, window.start, window.endExclusive),
     ]);
 
     const build = (module: SpecialPracticeModule): SpecialModuleSummary => {
