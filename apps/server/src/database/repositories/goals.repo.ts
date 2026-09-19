@@ -53,6 +53,12 @@ export class GoalsRepository {
    *
    * ⚠️ 必须 `INSERT IGNORE`：唯一键是 `(student_id, metric)`，若用 `ON DUPLICATE KEY UPDATE`，
    * 家长已改过的目标会被默认值**覆盖回去**。IGNORE 遇到已存在就跳过，正是懒初始化要的语义。
+   *
+   * ⚠️ **占位符顺序必须与列清单逐位对应**（`student_id, subject_id, metric, title, period, target_value`）：
+   * 2026-09-22 端到端冒烟实测栽过——参数写成 `[studentId, metric, period, title, target]` 时
+   * `title` 与 `period` 会对调，库里落下 `title='daily' / period='每日学习时长'`。
+   * 单测（断言 params 字面量）与接口响应都看不出来：响应里的 title/period 由 `GoalsService`
+   * 从常量回填，把库里的脏值盖住了。**改这里必须用真库验证**（或按列名配对断言）。
    */
   async ensureDefaults(
     studentId: number,
@@ -63,7 +69,7 @@ export class GoalsRepository {
         `INSERT IGNORE INTO goals
            (student_id, subject_id, metric, title, period, target_value, reminder_enabled, is_active)
          VALUES (?, NULL, ?, ?, ?, ?, 0, 1)`,
-        [studentId, d.metric, d.period, d.title, d.target],
+        [studentId, d.metric, d.title, d.period, d.target],
       );
     }
   }
@@ -73,6 +79,7 @@ export class GoalsRepository {
    *
    * 用 `ON DUPLICATE KEY UPDATE`（与 `ensureDefaults` 相反，这里**就是**要覆盖），
    * 并把 `is_active` 置回 1——家长重新启用一个曾被停用的目标时不该另插一行。
+   * 占位符顺序同上：`title` 在 `period` 之前（列清单顺序，别按语义直觉排）。
    */
   async upsertTarget(
     studentId: number,
@@ -90,7 +97,7 @@ export class GoalsRepository {
          period       = new.period,
          title        = new.title,
          is_active    = 1`,
-      [studentId, metric, period, title, target],
+      [studentId, metric, title, period, target],
     );
   }
 }

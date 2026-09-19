@@ -103,4 +103,28 @@ describe('SpecialPracticeLogsRepository', () => {
 
     expect(await repo.countDistinctCorrectWords(11, new Date(), new Date())).toBe(0);
   });
+
+  it('countDistinctPassages：三个语文专项合并去重，排除 ref_id 为 NULL', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ passages: '6' }], []]);
+    const repo = new SpecialPracticeLogsRepository(pool as any);
+
+    expect(await repo.countDistinctPassages(11, new Date('2026-09-13'), new Date('2026-09-20'))).toBe(6);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('COUNT(DISTINCT ref_id)');
+    for (const m of ['chinese_dictation', 'chinese_interpretation', 'chinese_meaning']) {
+      expect(sql).toContain(`'${m}'`);
+    }
+    // 英语不在篇目口径里
+    expect(sql).not.toContain('en_vocabulary');
+    expect(sql).toContain('ref_id IS NOT NULL');
+  });
+
+  it('countDistinctPassages：无数据返回 0（不是 null）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ passages: null }], []]);
+    const repo = new SpecialPracticeLogsRepository(pool as any);
+
+    expect(await repo.countDistinctPassages(11, new Date(), new Date())).toBe(0);
+  });
 });

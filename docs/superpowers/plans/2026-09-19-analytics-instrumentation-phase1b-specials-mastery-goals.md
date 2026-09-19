@@ -1577,8 +1577,7 @@ describe('GoalsRepository', () => {
     expect(pool.execute.mock.calls[0][1]).toEqual([11, 'weekly_passages', 'weekly', '每周古诗文篇目', 8]);
   });
 
-  it('findActiveByStudent：只取 is_active=1，返回 camelCase 且 Number() 化', async () => {
-    const pool = mockPool();
+  it('findActiveByStudent：只取 is_active=1，返回 camelCase 且 Number() 化', async () => {    const pool = mockPool();
     pool.execute.mockResolvedValueOnce([
       [{ id: 7, metric: 'daily_words', period: 'daily', target_value: '20', title: '每日背单词' }],
       [],
@@ -1595,6 +1594,11 @@ describe('GoalsRepository', () => {
   });
 });
 ```
+
+> ⚠️ **2026-09-22 执行期订正（必读）**：上面两条 `expect(params).toEqual([...])` 是**位置断言**，它能通过只说明「代码与它自己一致」，**拦不住列错位**——实测就栽在这里：`ensureDefaults`/`upsertTarget` 的参数写成 `[studentId, metric, period, title, target]`，而列清单是 `(student_id, subject_id, metric, title, period, target_value, …)`，于是 `title` 与 `period` 落库时对调（库里成 `title='daily' / period='每日学习时长'`），位置断言照样全绿，最后靠端到端冒烟才抓到。
+> 实现时**改为按列名配对断言**：从 SQL 解析列清单、与 VALUES 的 token 逐位配对成对象，再 `toEqual({ student_id, subject_id, metric, title, period, target_value, reminder_enabled, is_active })`。已交付版本见 `goals.repo.test.ts` 的 `zipInsert()`（带注释说明为什么不能用位置断言），并已验证「把参数顺序改回错的 → 该用例立刻红」。
+>
+> 💡 教训（值得记进 CLAUDE.md 的工程约定）：**「只断言自己传给仓储的 payload」的单测证明不了落库语义**。凡是「参数顺序 ↔ 列清单」这类映射，要么按列名配对断言，要么用真库跑一次（事务 + ROLLBACK）。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -1664,6 +1668,11 @@ export class GoalsRepository {
    *
    * ⚠️ 必须 `INSERT IGNORE`：唯一键是 `(student_id, metric)`，若用 `ON DUPLICATE KEY UPDATE`，
    * 家长已改过的目标会被默认值**覆盖回去**。IGNORE 遇到已存在就跳过，正是懒初始化要的语义。
+   *
+   * ⚠️ **占位符顺序必须与列清单逐位对应**（`student_id, subject_id, metric, title, period, target_value`）：
+   * 2026-09-22 端到端冒烟实测栽过——写成 `[studentId, metric, period, title, target]` 时
+   * `title` 与 `period` 会对调，库里落下 `title='daily' / period='每日学习时长'`。
+   * **单测断言 params 字面量也拦不住**（那只能证明代码与它自己一致），必须按列名配对断言。
    */
   async ensureDefaults(
     studentId: number,
@@ -1674,7 +1683,7 @@ export class GoalsRepository {
         `INSERT IGNORE INTO goals
            (student_id, subject_id, metric, title, period, target_value, reminder_enabled, is_active)
          VALUES (?, NULL, ?, ?, ?, ?, 0, 1)`,
-        [studentId, d.metric, d.period, d.title, d.target],
+        [studentId, d.metric, d.title, d.period, d.target],
       );
     }
   }
@@ -2465,8 +2474,9 @@ describe('GoalsService.getAttainment', () => {
     ]);
     await mkSvc(d).getAttainment(11);
 
-    const [dailyFrom, dailyTo] = d.analyticsRepo.getStudyTimeTotal.mock.calls[0] as [number, Date, Date];
-    const [weekFrom, weekTo] = d.logsRepo.countDistinctPassages.mock.calls[0] as [number, Date, Date];
+    // ⚠️ 2026-09-22 执行期订正：mock 入参是 (studentId, from, toExclusive)，首个元素要跳过
+    const [, dailyFrom, dailyTo] = d.analyticsRepo.getStudyTimeTotal.mock.calls[0] as [number, Date, Date];
+    const [, weekFrom, weekTo] = d.logsRepo.countDistinctPassages.mock.calls[0] as [number, Date, Date];
     const DAY = 24 * 3_600_000;
     expect(dailyTo.getTime() - dailyFrom.getTime()).toBe(DAY);
     expect(weekTo.getTime() - weekFrom.getTime()).toBe(7 * DAY);
@@ -2634,7 +2644,9 @@ const UpsertGoalSchema = z.object({ target: z.number().int().min(1).max(9999) })
 ```
 
 > 需要把 `BadRequestException` 加进 `@nestjs/common` 的具名导入。
-> ⚠️ **与既有 `/goals/{goalId}` 的路径重叠**：新 `PUT .../goals/{metric}` 与旧 `PATCH/DELETE .../goals/{goalId}` 匹配同一批 URL，但 **HTTP 方法不同**，Nest 路由不冲突。旧 CRUD 本期只标废弃、**不删**（Task 12），故两者会共存一段时间。
+> ⚠️ **旧 goals CRUD 从未实现过（2026-09-22 执行期实测）**：API 设计文档与 `openapi.yaml` 里记着 `GET/POST /goals`、`PATCH/DELETE /goals/{goalId}` 四条，但**全仓没有对应 handler**（启动日志里 `/api/parent/students/:studentId/goals` 只出现新加的两条）。所以：
+> - 不存在「路径撞车」问题——那边只有文档、没有路由；
+> - Task 12 的「标废弃」要按**「文档里记了但从未实现，且无 `metric` 维度」**来写，不要写成「保留仅供存量调用方兼容」（没有调用方，那是假话）。
 
 - [ ] **Step 7: 模块接线**
 
@@ -2762,7 +2774,11 @@ kill $(cat /tmp/boot_1b.pid) && rm -f /tmp/boot_1b.pid /tmp/boot_1b.log
 Expected: `Nest application successfully started` + 三条新路由被 mapped。
 ⚠️ **按 PID 收尾**，**别** `pkill -f 'node dist/main.js'`（会杀掉用户本机在跑的服务）。
 
-> 本机 dev 库**没有任何 students 行**（2026-09-22 实测 `SELECT COUNT(*) FROM students` = 0），所以**做不了**「登录 → 调端点 → 查库」的端到端冒烟。写入链的语义已在 Task 5/6 用真库 SQL（事务 + ROLLBACK）逐条验过；Task 8 的剩余风险只是「路由有没有挂上 / DI 有没有解析」，由上面的启动冒烟覆盖。**不要**为了冒烟往 dev 库塞假学生。
+> **本机 dev 库可以做端到端冒烟**（2026-09-22 执行期订正）：`students` 有 5 行（`student1`/`garry`/`streamtest3`/`garry1`/`lc1`），`main_error_books` 141 行、`goals` 0 行。
+> ① 先用 `mysql -t` 看真实列名——**`students` 没有 `phone` 列**（是 `username`），查错列会报 `ERROR 1054`；别把这个错误连同 `2>/dev/null` 一起吞掉当成「表是空的」（2026-09-22 就是这么误判过）。
+> ② 拿 token 不必知道密码：用 `node -e` 以 `.env` 的 `JWT_SECRET` 自签一个本地 dev token（payload 形状见 `JwtUser`：家长 `{sub, role:'parent'}`；学生还要 `familyId`/`parentId`）。
+> ③ 冒烟会**真的写库**（懒初始化 4 行 `goals`、PUT 改目标值、判题会写 `special_practice_logs` 并可能发积分）。**判题那条链最好不要端到端跑**（会给学生发分、动 `point_ledger`），家长端点那条链副作用只有 `goals`，跑完按需清理。
+> ④ 收尾：`kill <自己起的 PID>`，**别** `pkill -f 'node dist/main.js'`（用户本机可能在跑自己的服务——2026-09-22 实测当时就有一个已跑 1 小时的实例）。
 
 - [ ] **Step 10: 提交**
 
@@ -3266,7 +3282,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 **(b) 旧 goals CRUD 标废弃**（§4.13 里那 4 行之后插一个引用块——这是本文档既有的废弃写法，照 §7 的 P5.3 那条来）：
 
 ```markdown
-> **已废弃（2026-09-22 用户裁决）**：以下 4 个 `goals` CRUD（`GET/POST/PATCH/DELETE /students/{studentId}/goals`）**没有 `metric` 维度**，被上方的 `/goals/attainment` 与 `PUT /goals/{metric}` 取代。保留仅为兼容存量调用方，**新代码勿引用**。
+> **已废弃（2026-09-22 用户裁决）**：以下 4 个 `goals` CRUD（`GET/POST/PATCH/DELETE /students/{studentId}/goals`）**从未实现**（文档先于代码写下、代码里没有对应 handler，2026-09-22 实测），且**没有 `metric` 维度**，无法表达「每日学习时长 / 每日背单词 / 每周篇目 / 每周清零」四类目标。已被上方的 `/goals/attainment` 与 `PUT /goals/{metric}` 取代——那两条是**第一次真正落地**的目标读写端点。新代码勿引用旧路径。
 ```
 
 **(c) 新增 §4.24**：插在 §4.23 之后、`## 5. WebSocket 设计` 之前的 `---` 处（**§4.24 是下一个空号**）。内容写「家长端学情聚合（Phase 1B）」的端点总览 + 一张 `方法 | 路径 | 入参 | 校验与逻辑 | 返回` 的宽表（把上面 4 行浓缩）+ 一段 blockquote 讲**隐私分层**（本批 3 个读端点**不含任何 `tier='ops'` 派生字段**，「建议」类文案若要有必须由后端生成中性结论、**不暴露任何次数**）。
@@ -3295,7 +3311,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 **(f) §10 变更日志**：表头下第一行插 `v4.3`，行格式与 v4.2/v4.1 一致（**行尾有一个空格再跟 `| `**）：
 
 ```markdown
-| v4.3 | 2026-09-22 | **埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成**。契约变更：新增 `GET /api/parent/students/{studentId}/specials`、`/mastery`、`/goals/attainment` 与 `PUT /api/parent/students/{studentId}/goals/{metric}`（§4.13 四行 + §4.24 总览，`openapi.yaml` 同步）；旧 `goals` CRUD（无 `metric`）**标废弃保留**。数据面：`special_practice_logs` 新表（DB 文档 §3.17）、`goals` 加 `metric` 列与唯一键 `(student_id, metric)`（迁移 `2026-09-22_special_practice_logs_and_goals.sql`）。两条口径裁决（2026-09-22 用户确认）：① `weekly_passages` 的达成值 = 三个语文专项**去重篇目数**（不要用行数——解释/含义是一句一行，会把「8 句」当「8 篇」）；② 默认目标 60 分钟/20 词/8 篇/10 道。四处新增口径：专项日志一行 = 一个作答单位、`rate` 分母为 0 时恒 `null`、掌握度**与 `weakPoints` 并存不替换**、埋点写入**永不阻断判题**。顺带修 spec §4.8 的 UPSERT 算式 bug（`ON DUPLICATE KEY UPDATE` 的 SET 从左到右读到的已是更新后的列，原式把本次增量算了两遍：1 对 1 错实测 0.333，应为 0.500） | 
+| v4.3 | 2026-09-22 | **埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成**。契约变更：新增 `GET /api/parent/students/{studentId}/specials`、`/mastery`、`/goals/attainment` 与 `PUT /api/parent/students/{studentId}/goals/{metric}`（§4.13 四行 + §4.24 总览，`openapi.yaml` 同步）；旧 `goals` CRUD 四条**从未实现**（文档先于代码写下、无 handler）且无 `metric` 维度，**标废弃**。数据面：`special_practice_logs` 新表（DB 文档 §3.17）、`goals` 加 `metric` 列与唯一键 `(student_id, metric)`（迁移 `2026-09-22_special_practice_logs_and_goals.sql`）。两条口径裁决（2026-09-22 用户确认）：① `weekly_passages` 的达成值 = 三个语文专项**去重篇目数**（不要用行数——解释/含义是一句一行，会把「8 句」当「8 篇」）；② 默认目标 60 分钟/20 词/8 篇/10 道。四处新增口径：专项日志一行 = 一个作答单位、`rate` 分母为 0 时恒 `null`、掌握度**与 `weakPoints` 并存不替换**、埋点写入**永不阻断判题**。顺带修 spec §4.8 的 UPSERT 算式 bug（`ON DUPLICATE KEY UPDATE` 的 SET 从左到右读到的已是更新后的列，原式把本次增量算了两遍：1 对 1 错实测 0.333，应为 0.500） | 
 ```
 
 - [ ] **Step 2: `docs/api/openapi.yaml`**
@@ -3304,9 +3320,9 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 
 必须写进 description 的：`specials` 的「`rate` 缺省 null = 本期无可判作答，不是 0」与「四个键保证都在」；`mastery` 的「`limit` 缺省 10 上限 50，越界 400」与「覆盖率三项必须展示」；`goals/attainment` 的懒初始化与四路达成值分派；`PUT` 的白名单 400 与只收 `target`。
 
-**(b)** 旧 goals 的 4 个 operation（`get`/`post`/`patch`/`delete`）各加一行 `deprecated: true`（放在 `summary` 之后、`operationId` 之前），并在 `description` 开头写 `**已废弃**：旧目标 CRUD 无 metric 维度，被 /goals/attainment 与 PUT /goals/{metric} 取代。` —— 本文件此前**从未用过** `deprecated`，这是第一处。
+**(b)** 旧 goals 的 4 个 operation（`get`/`post`/`patch`/`delete`）各加一行 `deprecated: true`（放在 `summary` 之后、`operationId` 之前），并在 `description` 开头写 `**已废弃**：这 4 条从未实现（文档先于代码），且无 metric 维度；被 /goals/attainment 与 PUT /goals/{metric} 取代。` —— 本文件此前**从未用过** `deprecated`，这是第一处。
 
-> ⚠️ 新的 `PUT /parent/students/{studentId}/goals/{metric}` 与旧的 `/parent/students/{studentId}/goals/{goalId}` 是**两个模板路径匹配同一批 URL**：OpenAPI 视为两个 path key，方法不同（PUT vs PATCH/DELETE）故不冲突，但易混淆。在 §4.24 与 openapi 的 PUT description 里各写一句说明两者共存的原因。
+> ⚠️ 别再担心「新旧路径撞车」：那 4 条只有文档、没有 handler（Task 8 执行期实测），新的 `PUT .../goals/{metric}` 是全仓第一个 goals 写路由。
 
 **(c)** `components.schemas` 末尾（`EndSessionRequest` 之后）追加 3 个 schema：`SpecialModuleSummary`、`SpecialsSummary`、`ParentMasterySummary`、`GoalAttainmentItem`、`GoalAttainmentSummary`（PascalCase、feature-prefixed；`rate` 用 `nullable: true` + `type: number`，与 `TodayUsageSummary.limitMinutes` 同款——**不要**用 `type: [number,'null']`，本文件既有风格是 `nullable`）。
 

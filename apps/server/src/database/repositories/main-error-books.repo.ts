@@ -128,6 +128,27 @@ export class MainErrorBooksRepository {
   }
 
   /**
+   * 窗口内**清零**的错题数，即目标 `weekly_clear_errors` 的达成值（埋点 Phase 1B）。
+   *
+   * 口径：按 `cleared_at` 落在窗口内数（`is_cleared = 1 AND cleared_at IS NOT NULL`）。
+   * 同一道题清了又被做错会**再新建一行**（`create`），所以这里数的是「清零动作次数」而不是
+   * 「去重题数」——这正是家长要的「这周订正掉几道」。`cleared_at` 为 NULL 的历史行不计
+   * （老数据 `is_cleared=1` 但没时间戳，无法判断属于哪一周，宁少不猜）。
+   *
+   * 窗口边界由**应用层**算好传参（半开区间），不用 `CURDATE()`——DB 会话时区与 Node 可能不一致。
+   */
+  async countClearedBetween(studentId: number, from: Date, toExclusive: Date): Promise<number> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { n: number | string | null })[]>(
+      `SELECT COUNT(*) AS n
+       FROM main_error_books
+       WHERE student_id = ? AND is_cleared = 1 AND cleared_at IS NOT NULL
+         AND cleared_at >= ? AND cleared_at < ?`,
+      [studentId, from, toExclusive],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /**
    * 答对清零（card+题面变体）：把该学生此题所有「未清」错题记录一次性 is_cleared=1
    * （兼容历史重复记录）。匹配条件镜像 findUnclearedByStudentQuestion
    * （question_id 或 题面+cardId），不限 source。

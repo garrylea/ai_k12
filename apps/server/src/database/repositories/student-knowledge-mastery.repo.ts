@@ -63,7 +63,7 @@ export class StudentKnowledgeMasteryRepository {
     );
   }
 
-  /** 最弱的 N 个知识点（家长端 `/mastery`）；`limit` 由 service 夹在 1..50。 */
+  /** 最弱的 N 个知识点（家长端 `/mastery`）；`limit` 由 controller 校验为 1..50（越界 400，不钳制）。 */
   async listWeakest(studentId: number, limit: number): Promise<WeakMasteryRow[]> {
     // LIMIT ? 必须用 pool.query（客户端转义），execute 会被 MySQL 拒绝——既有约定
     const [rows] = await this.pool.query<

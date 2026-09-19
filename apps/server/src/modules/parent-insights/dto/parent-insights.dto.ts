@@ -1,3 +1,5 @@
+import type { GoalMetric, GoalPeriod } from '../../../database/repositories/goals.repo.js';
+
 /**
  * 家长端「看得见」批的响应形状（spec `2026-09-18-parent-insights-design.md` §4.2）。
  *
@@ -285,4 +287,24 @@ export interface MasterySummary {
   totalQuestions: number;
   /** = totalQuestions - coveredQuestions，后端算好，前端不要自己减。 */
   uncovered: number;
+}
+
+/**
+ * 目标达成的一行（spec §8.2 `/goals/attainment`）。
+ *
+ * `rate` = `toRate(target, achieved)`，**分母是 target**（与其它 rate 口径同一条纪律：
+ * 分母为 0 → `null`，不是 0）。**允许 > 100** = 超额完成，前端不要截断。
+ */
+export interface GoalAttainmentItem {
+  metric: GoalMetric;
+  period: GoalPeriod;
+  title: string;
+  target: number;
+  achieved: number;
+  rate: number | null;
+}
+
+/** 四个目标维度的达成情况（懒初始化后必然齐 4 条）。 */
+export interface GoalAttainmentSummary {
+  items: GoalAttainmentItem[];
 }

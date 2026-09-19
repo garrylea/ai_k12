@@ -159,4 +159,28 @@ export class SpecialPracticeLogsRepository {
     );
     return Number(rows[0]?.words ?? 0);
   }
+
+  /**
+   * 窗口内**答过的去重篇目数**，即目标 `weekly_passages` 的达成值（2026-09-22 用户裁决）。
+   *
+   * 为什么必须去重而不是 COUNT(*)：本表**一行 = 一个作答单位**——默写一篇一行，
+   * 解释/含义却是**一句一行**。直接数行数会把「8 句」当成「8 篇」汇报给家长。
+   * 三个语文专项合并统计：孩子只要在任一个专项里碰过这篇，就算「本周学过这篇」。
+   */
+  async countDistinctPassages(
+    studentId: number,
+    from: Date,
+    toExclusive: Date,
+  ): Promise<number> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { passages: number | string | null })[]>(
+      `SELECT COUNT(DISTINCT ref_id) AS passages
+       FROM special_practice_logs
+       WHERE student_id = ?
+         AND module IN ('chinese_dictation', 'chinese_interpretation', 'chinese_meaning')
+         AND ref_id IS NOT NULL
+         AND created_at >= ? AND created_at < ?`,
+      [studentId, from, toExclusive],
+    );
+    return Number(rows[0]?.passages ?? 0);
+  }
 }
