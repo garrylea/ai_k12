@@ -69,3 +69,5 @@ export type {
 } from './special-practice-logs.repo.js';
 export { StudentKnowledgeMasteryRepository } from './student-knowledge-mastery.repo.js';
 export type { WeakMasteryRow } from './student-knowledge-mastery.repo.js';
+export { GoalsRepository } from './goals.repo.js';
+export type { GoalMetric, GoalPeriod, GoalRow } from './goals.repo.js';
