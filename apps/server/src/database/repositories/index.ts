@@ -54,3 +54,6 @@ export { PointRedemptionsRepository } from './point-redemptions.repo.js';
 export type { PointRedemptionRow, PointRedemptionInsertInput } from './point-redemptions.repo.js';
 export { TrainingSessionsRepository } from './training-sessions.repo.js';
 export type { TrainingSessionRow, CreateTrainingSessionInput } from './training-sessions.repo.js';
+export { LlmCallLogsRepository } from './llm-call-logs.repo.js';
+export { ApiRequestLogsRepository } from './api-request-logs.repo.js';
+export type { ApiRequestLogEntry } from './api-request-logs.repo.js';

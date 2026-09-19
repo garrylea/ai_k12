@@ -81,6 +81,8 @@ export class AdminChatService {
       baseUrl: m.baseUrl,
       contextWindow: m.contextWindow,
       maxOutputTokens: m.maxOutputTokens,
+      // 成本不在本期范围（只记 token）。此字段是既有 ModelConfig 的必填项，保留占位；
+      // 本批曾试图让它变真（读模型价格列），随后按用户裁决取消——故恢复为 {0,0}。
       costPer1K: { input: 0, output: 0 },
       supportsStreaming: true,
       apiKey: m.apiKey,

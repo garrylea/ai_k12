@@ -61,4 +61,17 @@ describe('ModelRouter', () => {
     const result = router.route({ scene: 'grading', subject: 'math', hasImage: true });
     expect(result.primary.modelId).toBe('deepseek-flash');
   });
+
+  it('route() 给 primary/fallback 打 scene/subject/modelKey；fallback 额外带 isFallbackEntry', () => {
+    const result = new ModelRouter().route({ scene: 'judgment', subject: 'math' });
+    expect(result.primary.scene).toBe('judgment');
+    expect(result.primary.subject).toBe('math');
+    expect(result.primary.modelKey).toBeTruthy();
+    expect(result.primary.isFallbackEntry).toBeUndefined();
+    if (result.fallback) {
+      expect(result.fallback.isFallbackEntry).toBe(true);
+      expect(result.fallback.modelKey).toBeTruthy();
+      expect(result.fallback.scene).toBe('judgment');
+    }
+  });
 });

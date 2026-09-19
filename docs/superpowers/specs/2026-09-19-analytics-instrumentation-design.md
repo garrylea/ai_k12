@@ -13,7 +13,7 @@
 | 消费方 | 要什么 | 粒度需求 |
 |---|---|---|
 | **家长**（P6.1–P6.5） | 每个孩子的、可解释的学情：**总学习时长 / 各科学了多久** / 哪科弱 / 错在哪 / **今日累计学习时长**（= 今天真正在学的时间，用来和「每日上限」「每日目标」比较，见下） | 结果类 + 时长 |
-| **运营/公司管理者**（管理台） | 跨学生的聚合 + 漏斗 + 留存 + 模块效果 + 内容与接口质量 + 模型费用 + **设备分布**（大多数学生用什么设备学习） | 过程类行为流 |
+| **运营/公司管理者**（管理台） | 跨学生的聚合 + 漏斗 + 留存 + 模块效果 + 内容与接口质量 + 模型 token 消耗 + **设备分布**（大多数学生用什么设备学习） | 过程类行为流 |
 | **家长协同**（P6.5 目标 / P6.6 管控） | 「今日已用时长」这种实时用量，用于与上限/目标比较 | 实时聚合 |
 
 > **「今日累计学习时长」的口径**：只累计**页面在前台且有操作**的时间（切后台、挂机 > 2 分钟不计）。它存在的理由是补齐 P6.6 行为管控缺失的另一半——`controls.daily_time_limit_minutes` 只是**上限**，库里现在没有「已用」，所以那个上限目前是摆设；P6.5 的「每日学习 30 分钟」目标同理需要它算达成率。
@@ -59,15 +59,11 @@ model-client/index.ts:64   useStream = request.stream !== false && provider !== 
 model-client/index.ts:99   usage: { inputTokens: 0, outputTokens: 0, cost: 0 }              ← 硬编码 0
 ```
 
-所以**不只 Kimi**——生产环境所有 LLM 调用的 token 都是 0，`cost` 更是永远 0。加上：
+所以**不只 Kimi**——生产环境所有 LLM 调用的 **token 都是 0**（`cost` 也永远是 0，但成本不在本期范围，见下）。
 
-```
-model-config-registry.ts:70        costPer1K: { input: 0, output: 0 }   ← DB 路径把单价写死
-modules/admin/admin-chat.service.ts:84  costPer1K: { input: 0, output: 0 }
-schema.sql:937-951                 llm_models 表**没有价格列**（真价只在 model-routes.yaml）
-```
+> **口径（用户 2026-09-19 裁决，勿再引入价格/成本）**：本期**只记 token 数**——输入多少、输出多少。因为**以后按 token 计价**，钱由 token 换算，平台不必自己算。故本设计**不记价格、不记成本、不做定价维护**：`llm_call_logs` 只有 `input_tokens` / `output_tokens` / `usage_source`，没有 `cost` 与价格快照列；`llm_models` 也不加价格列。ai-core 里既有的 `ModelConfig.costPer1K` / `calculateCost` 是**本批之前就存在**的引擎管线、无人消费，本期不动它们（要拆是另一次重构，不在埋点范围）。
 
-即「次数 / token / 钱」三样现在**全都算不出来**。这就是 §12 把「钱」放在 Phase 0 的原因。
+即「调用次数 / 输入 token / 输出 token」三样现在**全都拿不到**。这就是 §12 把 usage 修复放在 Phase 0 的原因。
 
 ---
 
@@ -82,10 +78,10 @@ schema.sql:937-951                 llm_models 表**没有价格列**（真价只
    ├─[JudgeCoreService 出口]──→ student_knowledge_mastery (C) + behavior_events(判题/清零)
    ├─[专项判题出口]───────────→ special_practice_logs     (C：语文三专项逐句 / 英语逐词)
    ├─[PointsService.award]────→ behavior_events(points_awarded / exam_submitted)
-   └─[ModelClient.chat]───────→ llm_call_logs            (E：每次调用 + tokens + cost + fallback)
+   └─[ModelClient.chat]───────→ llm_call_logs            (E：每次调用 + 输入/输出 token + fallback)
 
 家长端 → parent-analytics.repo.ts（**硬编码 tier='parent'**）→ 时长/趋势/专项/掌握度/今日用量/目标
-运营端 → /api/admin/analytics/* → overview·funnel·retention·modules·cohort-compare·quality·llm-cost·events·requests
+运营端 → /api/admin/analytics/* → overview·funnel·retention·modules·cohort-compare·quality·llm-tokens·events·requests
 ```
 
 **两条写入纪律（贯穿全设计）**：
@@ -278,7 +274,7 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
 
 > 这里用 `ON DELETE SET NULL`（**唯一**偏离仓库 CASCADE 约定，且是**有意**的）：审计日志在删除学生后应保留聚合量、仅匿名化；列可空故 FK 合法。`llm_call_logs` 同理。
 
-### 4.6 `llm_call_logs` + `llm_models` 价格列
+### 4.6 `llm_call_logs`
 
 ```sql
 CREATE TABLE IF NOT EXISTS llm_call_logs (
@@ -286,7 +282,9 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   request_id          VARCHAR(64)   DEFAULT NULL COMMENT '关联 api_request_logs.request_id',
   student_id          BIGINT        DEFAULT NULL COMMENT '**有归属时必填**（不是可选优化）；仅探活/系统任务等无归属调用为 NULL，见 §6.5',
   dialogue_id         BIGINT        DEFAULT NULL COMMENT '无外键：对话可删，账本不可',
-  scene               VARCHAR(30)   NOT NULL,
+  -- 可空：探活与管理员对话构造的模型配置没有路由归因（§6.5 第 5 条），
+  -- 且账本是批量 INSERT——一个 NULL 不能毒掉整批。
+  scene               VARCHAR(30)   DEFAULT NULL,
   subject             VARCHAR(20)   DEFAULT NULL,
   capability          VARCHAR(30)   DEFAULT NULL,
   model_key           VARCHAR(50)   DEFAULT NULL COMMENT '路由条目 key（聚合按它，不按 model_id）',
@@ -301,9 +299,6 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   input_tokens        INT           DEFAULT NULL,
   output_tokens       INT           DEFAULT NULL,
   usage_source        VARCHAR(12)   NOT NULL DEFAULT 'unavailable' COMMENT 'provider|estimated|unavailable',
-  input_price_per_1k  DECIMAL(10,6) DEFAULT NULL COMMENT '价格快照，防改价后历史成本漂移',
-  output_price_per_1k DECIMAL(10,6) DEFAULT NULL,
-  cost                DECIMAL(12,6) DEFAULT NULL COMMENT '**NULL = 算不出，绝不写 0**',
   latency_ms          INT           NOT NULL,
   created_at          DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_lcl_scene_time    (scene, created_at),
@@ -313,12 +308,6 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   KEY idx_lcl_time          (created_at),
   CONSTRAINT fk_lcl_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-ALTER TABLE llm_models
-  ADD COLUMN input_price_per_1k  DECIMAL(10,6) NOT NULL DEFAULT 0
-    COMMENT '每 1K 输入 token 价，单位与 model-routes.yaml 的 costPer1K.input 一致',
-  ADD COLUMN output_price_per_1k DECIMAL(10,6) NOT NULL DEFAULT 0
-    COMMENT '每 1K 输出 token 价，单位与 costPer1K.output 一致';
 ```
 
 ### 4.7 `goals`（复活，加 `metric` 列）
@@ -357,9 +346,11 @@ ON DUPLICATE KEY UPDATE
 
 | 文件 | 内容 |
 |---|---|
-| `tools/db/migrations/2026-09-20_analytics_ledger.sql` | `llm_call_logs` + `api_request_logs` 建表；`llm_models` 加两价格列（带守卫） |
+| `tools/db/migrations/2026-09-20_analytics_ledger.sql` | `llm_call_logs` + `api_request_logs` 建表；**并清掉早期误加的价格/成本列**（见下） |
 | `tools/db/migrations/2026-09-21_study_sessions_events.sql` | `study_sessions` + `behavior_events` + `special_practice_logs` 建表；`goals` 加 `metric` |
-| `tools/db/schema.sql` | 上述全部**同步**写入（新建表放对应域段落；`llm_models` 与 `goals` 直接改列定义） |
+| `tools/db/schema.sql` | 上述全部**同步**写入（新建表放对应域段落；`goals` 直接改列定义） |
+
+**关于「清掉早期误加的价格/成本列」**：本设计的早期版本给 `llm_call_logs` 加过 `input_price_per_1k` / `output_price_per_1k` / `cost`，给 `llm_models` 加过两价格列，已在 dev 库上执行。价格口径取消后这些列没有任何写入方，**留着比删掉更危险**——`cost` 会恒为 0，而 0 在本设计里表示「真免费」，将来任何人查成本都会看到「全部 0 元」并可能信以为真。故 `2026-09-20` 这个迁移改为「建表（**不含**这些列）+ 查 `information_schema` 确认列存在后再用 `PREPARE` 动态执行 `DROP COLUMN` 把已建出的这些列收敛掉」（MySQL 8/9 **没有** `DROP COLUMN IF EXISTS`，只能靠这个守卫），同一个文件重复执行即收敛，不需要额外迁移。`llm_call_logs` 目前**零行**、`llm_models` 的价格列从未被灌值（seed 脚本已取消），故删除无损。
 
 ---
 
@@ -426,7 +417,7 @@ apps/server/src/modules/analytics/
   telemetry-buffer.ts              # 纯缓冲实现（可单测）
   request-context.ts               # AsyncLocalStorage<RequestContext>
   mastery.service.ts
-  dashboard/{overview,funnel,retention,quality,cost}.service.ts
+  dashboard/{overview,funnel,retention,quality,tokens}.service.ts
 apps/server/src/database/repositories/
   study-sessions.repo.ts, behavior-events.repo.ts, api-request-logs.repo.ts,
   llm-call-logs.repo.ts, special-practice-logs.repo.ts,
@@ -435,10 +426,11 @@ apps/server/src/database/repositories/
 apps/server/src/common/interceptors/analytics.interceptor.ts
 apps/server/src/common/middleware/request-context.middleware.ts
 apps/server/src/ai-core/infra/llm-call-log.ts   # LlmCallSink 单例（仿 model-config-registry 的全局单例法）
-apps/server/src/scripts/seed-llm-prices.ts
 ```
 
-**修改**：`app.module.ts`、`main.ts`（`enableShutdownHooks()` 以在退出时 flush buffer）、`ai-core/infra/model-client/index.ts`、`model-router.ts`、`model-config-registry.ts`、`ai-core/types.ts`、`database/repositories/llm-models.repo.ts`、`modules/admin/{admin-models.service.ts, admin.controller.ts, admin-chat.service.ts}`、`modules/practice/judge-core.service.ts`、`modules/training/{training.service.ts, meaning.service.ts, vocabulary.service.ts}`、`modules/points/points.service.ts`、`modules/exams/exams.service.ts`、`modules/parent-insights/{parent-insights.controller.ts, dto/parent-insights.dto.ts}`。
+**修改**：`app.module.ts`、`main.ts`（`enableShutdownHooks()` 以在退出时 flush buffer）、`ai-core/infra/model-client/index.ts`、`model-router.ts`、`ai-core/types.ts`、`modules/practice/judge-core.service.ts`、`modules/training/{training.service.ts, meaning.service.ts, vocabulary.service.ts}`、`modules/points/points.service.ts`、`modules/exams/exams.service.ts`、`modules/parent-insights/{parent-insights.controller.ts, dto/parent-insights.dto.ts}`。
+
+> 价格口径取消后，`llm-models.repo.ts`、`model-config-registry.ts`、`modules/admin/{admin-models.service.ts, admin.controller.ts, admin-chat.service.ts}` 与 `apps/web/src/pages/admin/AdminModelsPage.tsx` **都不再需要改动**（早期误加的价格代码须回退到原状）。
 
 ### 6.2 API 自动埋点（`AnalyticsInterceptor`）
 
@@ -447,6 +439,7 @@ apps/server/src/scripts/seed-llm-prices.ts
 - route 归一化：优先 `req.baseUrl + req.route?.path`（Express 路由模板，如 `/api/practice/:cardId/results`）；拿不到时对 `req.path` 做数字/UUID 段替换。
 - `biz_code`：从响应体 `data?.code` 取；异常路径读 `exception.getResponse()`。
 - **跳过名单**：`/api/admin/analytics/*`（自指噪音）、`/assets/*`、`/uploads/*`、`/api/track/events`（避免自指放大）。
+- **覆盖边界**：被 `JwtAuthGuard`/`RolesGuard` 拒掉的 401/403 与 404 **不在**本表内（守卫在拦截器之前执行、未匹配路径进不了处理器），失败率口径不含鉴权失败。
 - **绝不 `await` DB**：只 `telemetry.record(...)` 入内存 buffer。
 
 ### 6.3 `TelemetryBuffer`（纯类，可单测）
@@ -478,11 +471,12 @@ apps/server/src/scripts/seed-llm-prices.ts
    - **唯一允许 NULL 的情形**：`admin-chat`（管理员对话，无学生）、`routes/validate-connection` 探活、系统定时任务。
 5. 后台复制 `ModelConfig` 的地方（探活、admin chat）不带这些字段 → `scene` 允许 NULL（已知限制，非缺陷）。
 
-### 6.6 usage 修复（Phase 0 必做，否则成本永远算不出）
+### 6.6 usage 修复（Phase 0 必做，否则 token 永远拿不到）
 
-- `aggregateStream()` 不再硬编码 `{0,0,0}`：优先取 provider 流末个 chunk 的 usage——OpenAI 兼容端点请求体加 `stream_options: {include_usage: true}`（仅对该 provider 支持时下发）；拿不到则 `estimateTokens()` 兜底（CJK 按字、拉丁 char/4，**口径写在一处并加测试**）→ `usage_source = 'estimated'`；两者都无 → `usage_source = 'unavailable'`，tokens/cost 写 **NULL**。
-- **绝不把「未知」写成 0**（与家长端 `answered = 0 → rate = null` 同一纪律）。`local` 模型价格真为 0 → cost 可写 0，但 `usage_source` 必须是 `provider`。
-- 价格真源统一到 DB：`model-config-registry.ts:70` 改读 `llm_models` 的两个价格列；`scripts/seed-llm-prices.ts` 从 `model-routes.yaml` **幂等**回填；`admin-chat.service.ts:84` 的硬编码 0 一并消除。
+- `aggregateStream()` 不再硬编码 `{0,0,0}`：优先取 provider 流末个 chunk 的 usage——OpenAI 兼容端点请求体加 `stream_options: {include_usage: true}`（仅对该 provider 支持时下发）；拿不到则 `estimateTokens()` 兜底（CJK 按字、拉丁 char/4，**口径写在一处并加测试**）→ `usage_source = 'estimated'`；两者都无 → `usage_source = 'unavailable'`，两个 token 列写 **NULL**。
+- **输入与输出是独立的两个量，各用自己的数据源**：输入估自 `request.messages`（经 `contentToText` 兼容多模态），输出估自响应正文（含 reasoning）。**不要**把输入当输出的附属品、也不要因为「请求体已随流发送」就放弃输入估算——长 prompt 下输入往往是大头，漏掉会让用量被严重低估。
+- **绝不把「未知」写成 0**（与家长端 `answered = 0 → rate = null` 同一纪律）：拿不到就写 NULL，好让「用量缺失」在报表上可见。
+- **不记价格、不记成本**（用户 2026-09-19 裁决）：`ChatResponse.usage` 上既有的 `cost` 字段是本批之前就存在的引擎字段、无人消费，本期**不动它也不往账本写**；账本只落 `input_tokens` / `output_tokens` / `usage_source`。
 
 ---
 
@@ -605,7 +599,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | GET | `/modules` | `from,to` | 各模块使用/时长/正确率横向对比 |
 | GET | `/cohort-compare` | `metric,outcome,from,to` | 分组对比；响应**必须带** `disclaimer: 'correlation-not-causation'` |
 | GET | `/quality` | `from,to` | API 失败率/错误码分布、LLM 超时率/fallback 率、内容质量四指标 |
-| GET | `/llm-cost` | `from,to,groupBy=scene\|model\|day\|student` | 成本/token 汇总与时序；`groupBy=student` 即「**哪个学生最费 LLM / 调用最多**」排行（用户明确要求的优化依据，见 §6.5）。`cost` 为 NULL 的计数单列为 `unpricedCalls`（**不许当 0 求和**）；同时返回 `attributed` / `unattributed` 调用数（归属覆盖率） |
+| GET | `/llm-tokens` | `from,to,groupBy=scene\|model\|day\|student` | **输入/输出 token 汇总与时序**（本期唯一口径，不涉价格与成本）。`groupBy=student` 即「**哪个学生 token 消耗最多 / 调用最频繁**」排行（用户明确要求的优化依据，见 §6.5）。同时返回 `attributed` / `unattributed` 调用数（归属覆盖率），以及 `usage_source='unavailable'` 的调用数——即「用量缺失」的调用，**不许当 0 求和** |
 | GET | `/llm-calls` | `from,to,scene,model,success,page` | 逐条调用排查（分页 20） |
 | GET | `/events` | `event,module,from,to,page` | 行为事件流排查（**仅 ops tier**） |
 | GET | `/requests` | `path,status,minLatency,from,to,page` | 慢接口 / 错误码排查 |
@@ -617,13 +611,13 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 | 端点 | 变化 |
 |---|---|
-| `GET /api/admin/models` | 每项新增 `inputPricePer1k` / `outputPricePer1k`（`admin-models.service.ts:24-30` 需带出新列） |
-| `PATCH /api/admin/models/:modelKey` | `ModelSchema` / `ModelUpdateSchema` 增加两个 `z.number().nonnegative()` 字段 |
-| `GET /api/admin/dashboard` | 可选加 `todayActiveStudents` / `todayLlmCost` |
+| `GET /api/admin/dashboard` | 可选加 `todayActiveStudents` / `todayLlmTokens` |
 | `GET /api/parent/dashboard` | **v1 不动**（避免破坏 `ParentDashboard` 契约；今日时长走独立 `/today-usage`） |
 | `GET /api/parent/students/:id/reports` | **v1 不动**（保留 `weakPoints` 的代理语义） |
 
-**文档落点**：`docs/API接口与数据流设计文档.md`（主稿）新增 §4.23 StudySessions+Track、§4.24 AdminAnalytics，§4.13 Parent 下补 5 个端点；§6 新增两条数据流 —— **§6.25 会话心跳 → 学习时长聚合**、**§6.26 LLM 调用 → 账本 → 成本**。`docs/api/openapi.yaml` 逐字段同步（本批端点即 MVP，一并进）。
+> **本期不动 `GET/PATCH /api/admin/models`**：价格口径取消后，模型接口保持原状（不新增任何价格字段），早期误加的两个价格字段随代码回退一并撤掉。
+
+**文档落点**：`docs/API接口与数据流设计文档.md`（主稿）新增 §4.23 StudySessions+Track、§4.24 AdminAnalytics，§4.13 Parent 下补 5 个端点；§6 新增两条数据流 —— **§6.25 会话心跳 → 学习时长聚合**、**§6.26 LLM 调用 → 账本 → token 计量**。`docs/api/openapi.yaml` 逐字段同步（本批端点即 MVP，一并进）。
 
 ---
 
@@ -638,11 +632,11 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | `/admin/analytics/retention` | `AnalyticsRetentionPage` | D1/D7/D30 留存（按首次活跃分组） |
 | `/admin/analytics/modules` | `AnalyticsModulesPage` | 模块使用/时长/正确率对比 + 分组对比（标注「相关非因果」） |
 | `/admin/analytics/quality` | `AnalyticsQualityPage` | 接口失败率、错误码分布、LLM 超时/fallback、内容质量四指标 |
-| `/admin/analytics/llm-cost` | `AnalyticsLlmCostPage` | 按场景/模型/天/学生的 token 与成本 + `unpricedCalls`；**「最费 LLM 的学生」排行**（用于定位异常用量与做系统优化） |
+| `/admin/analytics/llm-tokens` | `AnalyticsLlmTokensPage` | **按场景/模型/天/学生的输入与输出 token 汇总**（本期唯一口径，不涉价格成本）；**「token 消耗最多的学生」排行**（用于定位异常用量与做系统优化）；并显示「用量缺失」（`usage_source='unavailable'`）的调用数 |
 | `/admin/analytics/devices` | `AnalyticsDevicesPage` | **大多数学生用什么设备学习**；各设备上的学习时长与正确率对比；多设备学生占比与设备切换（验证「iPad 横屏主断点」假设、决定要不要做移动端） |
 | `/admin/analytics/events` | `AnalyticsEventsPage` | 原始事件 + 慢/错接口排查（v1 可推迟并入 quality） |
 
-计费配置留在已有 `/admin/models`（`AdminModelsPage.tsx` 表单加两个价格输入）。图表复用既有的 `chart-theme.ts` + `ChartLine` / `ChartBar`（recharts，取色从最近的 `[data-theme]` 容器读）。
+`/admin/models` 保持不变（**不加价格输入**；早期误加的价格字段随代码回退撤掉）。图表复用既有的 `chart-theme.ts` + `ChartLine` / `ChartBar`（recharts，取色从最近的 `[data-theme]` 容器读）。
 
 ---
 
@@ -683,17 +677,17 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 ## 12. 分阶段实施
 
-### Phase 0 — 地基与「钱」（成本报告的前置，必须先做）
+### Phase 0 — 地基与 token 计量（**必须先做**）
 
-1. 迁移 `2026-09-20_analytics_ledger.sql` + `schema.sql` 同步。
-2. `llm-models.repo.ts` 映射价格；`model-config-registry.ts:70` 读真价；`scripts/seed-llm-prices.ts` 从 YAML 幂等回填。
-3. `admin-models.service.ts` + `admin.controller.ts` + `AdminModelsPage.tsx` 支持编辑价格。
-4. **修 `aggregateStream` 的 usage** + `stream_options.include_usage`（不修则成本面板全空）。
-5. `ai-core/infra/llm-call-log.ts`（sink 单例）+ `ModelClient` 埋点 + `RoutedModel` 归因 + `request-context` ALS。
-6. `AnalyticsInterceptor` + `TelemetryBuffer` → `api_request_logs`。
-7. 修 `admin-chat.service.ts:84` 的硬编码 0。
+1. 迁移 `2026-09-20_analytics_ledger.sql`（建两表 + 清掉早期误加的价格/成本列）+ `schema.sql` 同步。
+2. **回退早期误加的价格代码**：`llm-models.repo.ts`、`admin-models.service.ts`、`admin.controller.ts`、`admin-chat.service.ts` 恢复到本批之前的状态（详见 §4.9 说明）。
+3. **修 `aggregateStream` 的 usage** + `stream_options.include_usage` + 输入/输出分别估算（不修则 token 永远是 0，整个账本没有意义）。
+4. `ai-core/infra/llm-call-log.ts`（sink 单例）+ `ModelClient` 埋点 + `RoutedModel` 归因 + `request-context` ALS。
+5. `AnalyticsInterceptor` + `TelemetryBuffer` → `api_request_logs`。
 
-**解锁**：`/admin/analytics/llm-cost`、`/admin/analytics/quality`（API 失败率 / LLM 兜底率）。
+**解锁**：`/admin/analytics/llm-tokens`（输入/输出 token 与「谁用得最多」）、`/admin/analytics/quality`（API 失败率 / LLM 兜底率）。
+
+> 早期版本的 Phase 0 还含「价格真源进 DB + seed 回填 + 后台编辑价格」三步，**已随价格口径取消而删除**（见 §2.3 的口径说明与 §14 风险表）。
 
 ### Phase 1 — 家长「看得见」的赢（A + C，**不依赖 Phase 0，可并行**）
 
@@ -726,7 +720,8 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 - `variation_questions` / `knowledge_relations` / `safety_alerts` / `learning_reports` / `error_redo_logs` 的复活。
 - `devices.last_active_at` / `progress.last_active_at` 接线。
 - **A/B 实验框架**、归因模型、ML 预测。
-- 家长端暴露任何 ops 信号或逐学生 LLM 成本。
+- 家长端暴露任何 ops 信号或逐学生 LLM token 消耗。
+- **价格 / 成本 / 定价维护**（`llm_call_logs` 的 `cost` 与价格快照列、`llm_models` 的价格列、后台价格编辑、`seed-llm-prices`），以及 ai-core 既有 `costPer1K`/`calculateCost` 管线的清理——本期只记 token（§2.3 口径）。
 - `daily_study_stats`（Phase 3）。
 - `sendBeacon` 专用端点（Phase 2 可选）。
 - 新增 LLM scene（埋点顺手加 scene 会牵动 8 处，本批不碰）。
@@ -737,9 +732,9 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 | # | 风险 | 说明与对策 |
 |---|---|---|
-| 1 | **生产 token 恒为 0** | `model-client/index.ts:64/99`：默认流式 + usage 硬编码 0。**Phase 0 第 4 步是成本功能的前置**，不修则账本与面板全 0 |
-| 2 | **价格三处漂移** | YAML 真价 / DB 0（`model-config-registry.ts:70`）/ `admin-chat.service.ts:84` 硬编码 0 → 必须让 DB 成唯一真源 + seed 回填，否则新旧部署行为不一致 |
-| 3 | **`cost` 的 0 vs NULL** | 本地模型真价 0 可写 0；无用量/无价必须写 **NULL**。UI 单列 `unpricedCalls`，**不能把 NULL 当 0 求和** |
+| 1 | **生产 token 恒为 0** | `model-client/index.ts:64/99`：默认流式 + usage 硬编码 0。**Phase 0 第 3 步是整个账本的前置**，不修则 token 永远拿不到、账本毫无意义 |
+| 2 | **输入与输出必须分别估算** | 输入估自 `request.messages`、输出估自响应正文，各自独立（§6.6）。把输入当输出的附属品、或因「请求体已随流发送」就放弃输入估算，都会让长 prompt 场景严重低估用量——而长 prompt 恰恰是输入占大头的地方 |
+| 3 | **「未知」写成 0 会让用量缺口隐身** | 拿不到 usage 时必须写 **NULL**（不是 0），好让报表能把「用量缺失」的调用单列出来。本案有两次独立评审提出「0 vs NULL 不可区分」的同类问题（`cost` 与未定价模型），最终以「取消价格口径」消解；token 侧同理，凡拿不到就 NULL |
 | 4 | **流式 usage 可能拿不到** | Kimi 可能既不支持 `include_usage` 也不回 usage → 只能估算，`usage_source='estimated'` 必须可见；估算口径写一处并加测试 |
 | 5 | **`model_key` vs `model_id` 混用** | `kimi` 的 key 是 `kimi`、modelId 是 `kimi-latest`；DeepSeek 只认 `deepseek-flash`/`deepseek-v4-pro`。聚合**按 key**，别按 model_id 关联 `llm_models` |
 | 6 | **ALS 传播边界 → 已收紧为硬要求** | 后台生成类（explanation / title）**必须显式传 `meta.studentId`**，不许以「ALS 可能丢上下文」为由留 NULL；`student_id` 缺失率（归属覆盖率）要能在 `/analytics/quality` 上看到 |
@@ -749,6 +744,8 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | 10 | **无迁移运行器** | 迁移必须幂等、手工 apply、`mysql --force` 禁用；新表/新列**必须同时**进 `schema.sql` |
 | 11 | **心跳必须封顶** | 不封顶时「关标签 2 小时」会被算成 2 小时；封顶 45s + 乐观锁条件 `status='active'` |
 | 12 | **埋点不得影响主链路** | 分析类日志走 buffer 且失败静默；业务数据直写但 catch；**任何埋点异常都不许让请求 500** |
+| 13 | **早期误加的价格/成本列必须清掉，不能留着** | 早期版本给 `llm_call_logs` 加过 `cost` 与两个价格快照列、给 `llm_models` 加过两个价格列（**已在 dev 库执行**）。价格口径取消后这些列没有任何写入方：`cost` 会恒为 0，而 0 在本设计里表示「真免费」，将来查成本的人会看到「全部 0 元」并可能信以为真。**一个不存在的字段，比一个永远为 0 的字段安全得多** → 由 `2026-09-20` 迁移用带守卫的 `DROP COLUMN IF EXISTS` 收敛（`llm_call_logs` 零行、价格列从未灌值，删除无损） |
+| 14 | **回退不要留下半拉子** | 回退价格代码时注意：`admin-chat.service.ts` 的 `toModelConfig()` 里 `costPer1K` 是既有 `ModelConfig` 的**必填字段**，只能恢复成原来的 `{ input: 0, output: 0 }` 并注明「成本不在本期范围」，不能整行删掉（会编译不过） |
 
 ---
 
@@ -777,7 +774,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | # | 问题 | 当前取用的默认 |
 |---|---|---|
 | 1 | 心跳参数（30s / 封顶 45s / idle 120s / 5min 惰性收尾）是否符合对「学习时长」的产品预期？ | 按此默认，放服务端常量一处可调 |
-| 2 | `api_request_logs` 是否保留 `raw_path` / `client_ts_ms`（可识别信息）？ | 保留，30 天清理；若要最小化可只留归一化 route |
+| 2 | `api_request_logs` 是否保留 `raw_path`，`behavior_events` 是否保留 `client_ts_ms`（可识别信息）？ | 都保留；`raw_path` 随 `api_request_logs` 30 天清理，`client_ts_ms` 随 `behavior_events` 180 天清理；若要最小化可只留归一化 route |
 | 3 | ops 分析端点是否进 openapi？ | **进**（本批实现即 MVP） |
 | 4 | `study_sessions` 180 天后折 rollup 还是直接删？ | 折 rollup（Phase 3 建）；若不需跨年趋势，直接删更省 |
 | 5 | `goals.metric` 的取值集合是否就是这四种（`daily_study_minutes` / `daily_words` / `weekly_passages` / `weekly_clear_errors`）？ | 按此默认 |

@@ -67,19 +67,26 @@ export class GeminiClient implements ProviderAdapter {
 
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    const inputTokens = data.usageMetadata?.promptTokenCount ?? 0;
-    const outputTokens = data.usageMetadata?.candidatesTokenCount ?? 0;
+    // 没有 usageMetadata 时**不能**编造 0 并标 source:'provider'——「没拿到」
+    // 必须与「测到 0」可区分，否则报表上看不出缺口。缺块 -> unavailable/NULL。
+    const usageMeta = data.usageMetadata;
+    const hasUsage = usageMeta && typeof usageMeta.promptTokenCount === 'number' && typeof usageMeta.candidatesTokenCount === 'number';
+    const inputTokens = hasUsage ? usageMeta.promptTokenCount : null;
+    const outputTokens = hasUsage ? usageMeta.candidatesTokenCount : null;
 
     return {
       id: data.responseId ?? 'gemini',
       model: request.model.modelId,
       content: text,
       finishReason: this.mapFinishReason(data.candidates?.[0]?.finishReason),
-      usage: {
-        inputTokens,
-        outputTokens,
-        cost: this.calculateCost(inputTokens, outputTokens, request.model.costPer1K),
-      },
+      usage: hasUsage
+        ? {
+            inputTokens: inputTokens as number,
+            outputTokens: outputTokens as number,
+            cost: this.calculateCost(inputTokens as number, outputTokens as number, request.model.costPer1K),
+            source: 'provider' as const,
+          }
+        : { inputTokens: null, outputTokens: null, cost: null, source: 'unavailable' as const },
       latencyMs: 0,
     };
   }

@@ -52,8 +52,10 @@ export class ModelRouter {
     const reason = `scene=${request.scene} subject=${request.subject} difficulty=${request.difficulty ?? 'any'}`;
 
     return {
-      primary: this.models[rule.primary],
-      fallback: rule.fallback ? this.models[rule.fallback] : undefined,
+      primary: { ...this.models[rule.primary], scene: request.scene, subject: request.subject, modelKey: rule.primary },
+      fallback: rule.fallback
+        ? { ...this.models[rule.fallback], scene: request.scene, subject: request.subject, modelKey: rule.fallback, isFallbackEntry: true }
+        : undefined,
       reason,
     };
   }
