@@ -147,7 +147,7 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 ## 家长端学情（P6.1 仪表盘 / P6.2 报告 / P6.3 错题 / P6.4 对话回放）
 
 - 四页是**只读实时聚合**（`apps/server/src/modules/parent-insights/`）：学情报告**不落 `learning_reports`、不调 LLM**，服务层分次查 + JS 合成后直接返回。**不要往这四个端点里加写入逻辑**。
-- 学习时长 / 知识点掌握度底层无数据，用**活跃度代理**（`activeDays7` / `lastActiveAt`）与**错题数代理**（未清零错题按 KP 聚合）替代；薄弱点必须同时给「未标注知识点的错题数」，否则家长会误读成「只有这些问题」。口径见 `docs/API接口与数据流设计文档.md` §6.8 与 `docs/ai-core-changelog.md` 本批条目。
+- **学习时长与掌握度都已不是代理**：时长走会话口径（`study_sessions`，Phase 1A）；掌握度自 Phase 1B 起由判题出口回写 `student_knowledge_mastery`（**与「错题数代理」`weakPoints` 并存不替换**，两卡标题不同、不得合并）；专项学情/目标达成是只读实时聚合（`special_practice_logs` / `goals.metric`）。**仅**活跃度（`activeDays7`）仍是时间戳代理。薄弱点必须给「未标注知识点的错题数」、掌握度必须给覆盖率三项，否则家长误读成「只有这些问题」。口径见 API 文档 §6.8/§6.27。**埋点写入永不阻断判题**（失败只 warn；掌握度回写走 `void` 不 `await`）——注意 **ODKU 的 SET 从左到右求值、读到的是已更新的列**（累计列须在计数列之后写且不得再 `+ new.x`），仓储占位符顺序必须与列清单逐位对应（`goals` 的 `title` 在 `period` 前），**这类错位置断言式单测拦不住**（详见 changelog 本批条目）。
 
 ## apps/server - ai-core AI Agent Hub
 

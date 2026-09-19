@@ -2590,10 +2590,186 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/TodayUsageSummary'
+  /parent/students/{studentId}/specials:
+    get:
+      tags: [Parent]
+      summary: 专项学情（四模块）
+      description: >-
+        埋点 Phase 1B。四个专项模块（语文默写 / 语文解释 / 语文含义 / 英语背单词）在窗口内的聚合，
+        **四个键保证都在**（没数据给 0 / rate:null / byDay:[]），前端不必判空。
+        `rate` 为 null 表示「本期没有可判对错的作答」，**不是 0**；口径与其它家长端点一致
+        （answered = is_correct IS NOT NULL）。`units` = 作答单位数（默写=篇、解释/含义=句、背单词=题），
+        所以四个模块的 units 相加没有业务含义，UI 必须分行显示各自的单位。
+        `from`/`to` 形如 `YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400；
+        `from > to` 自动交换。窗口由应用层算好传参，不用 `CURDATE()`。归属校验先于取数。
+      operationId: getParentSpecials
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 起始日 `YYYY-MM-DD`（含）；缺省 = 近 7 天。
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 结束日 `YYYY-MM-DD`（含）；缺省 = 今天。
+      responses:
+        '200':
+          description: 四模块专项聚合
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParentSpecialsSummary'
+  /parent/students/{studentId}/mastery:
+    get:
+      tags: [Parent]
+      summary: 真掌握度（最弱知识点 + 覆盖率）
+      description: >-
+        埋点 Phase 1B。按 `mastery_score ASC, error_count DESC` 取最弱 N 个知识点。
+        **覆盖率三项（coveredQuestions / totalQuestions / uncovered）必须一起展示**：
+        题库只有约 38% 的题绑了知识点，不给出「未覆盖」计数会让家长以为孩子的问题只有列出的这几个。
+        `masteryScore` 是 0..1 的比值（后端已算好，前端不要再除）。
+        **与薄弱知识点（错题数代理）是两套口径、并存不替换**（spec §10）。
+        `limit` 缺省 10、上限 50；**越界或非法一律 400**，不静默钳制。归属校验先于取数。
+      operationId: getParentMastery
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+          description: 取最弱的 N 项；缺省 10，上限 50，越界 400。
+      responses:
+        '200':
+          description: 掌握度与覆盖率
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParentMasterySummary'
+  /parent/students/{studentId}/goals/attainment:
+    get:
+      tags: [Parent]
+      summary: 目标达成（四个维度）
+      description: >-
+        埋点 Phase 1B。读 `goals WHERE is_active=1`；**无目标时懒初始化四个默认目标**
+        （每日学习 60 分钟 / 每日背单词 20 词 / 每周古诗文 8 篇 / 每周清零错题 10 道），
+        用 `INSERT IGNORE` 只补缺失、**不覆盖**家长已改过的值。
+        达成值按 metric 分派：daily_study_minutes ← study_sessions（秒→分钟向下取整）；
+        daily_words ← special_practice_logs 的 en_vocabulary 单位数；
+        weekly_passages ← 三个语文专项**去重篇目数**（不是行数——解释/含义一句一行）；
+        weekly_clear_errors ← main_error_books 窗口内清零数。
+        `rate` = achieved/target（**分母是 target**），target 为 0 或无法计算时 null；
+        **允许 > 100 = 超额完成**，前端不要截断。
+        窗口：daily = 今天、weekly = 近 7 天（含今天），应用层算好传参（不用 CURDATE()）。
+        返回顺序固定为四个维度的声明顺序。归属校验先于取数。
+      operationId: getParentGoalAttainment
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 四个目标维度的达成情况
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParentGoalAttainmentSummary'
+  /parent/students/{studentId}/goals/{metric}:
+    put:
+      tags: [Parent]
+      summary: 改目标值（按 metric upsert）
+      description: >-
+        埋点 Phase 1B，家长端本模块**唯一的写端点**。
+        `metric` 必须在白名单内（daily_study_minutes / daily_words / weekly_passages /
+        weekly_clear_errors），否则 400；body **只收 target**（1–9999），period/title 由服务端按
+        metric 派生，家长无从自定义。按唯一键 `(student_id, metric)` upsert，并把 `is_active` 置回 1
+        （复活曾被停用的目标）。响应是**该 metric 的最新达成情况**——调用方拿它原地替换该行即可，
+        不必再发一次 GET（省一次往返，也避免写后读不一致的窗口）。
+        注意：本路径与文档里那 4 条**从未实现**的旧 goals CRUD（`/goals`、`/goals/{goalId}`，见下方
+        `deprecated: true`）没有冲突——那边只有文档、没有路由；即便将来补实现，方法也不同（PUT vs PATCH/DELETE）。
+        归属校验先于写入（403/1005、404/1002）。
+      operationId: putParentGoalTarget
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: metric
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [daily_study_minutes, daily_words, weekly_passages, weekly_clear_errors]
+          description: 目标维度；不在白名单内 → 400。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target:
+                  type: integer
+                  minimum: 1
+                  maximum: 9999
+                  description: 目标值；**只收这一个字段**，period/title 由服务端派生。
+      responses:
+        '200':
+          description: 该 metric 的最新达成情况
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParentGoalAttainmentItem'
   /parent/students/{studentId}/goals:
     get:
       tags: [Parent]
       summary: 学习目标列表
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-22 用户裁决）**：本条与下方 POST/PATCH/DELETE 四个旧 goals CRUD
+        **从未实现**（文档先于代码写下，代码里没有对应 handler），且**没有 metric 维度**，
+        无法表达「每日学习时长 / 每日背单词 / 每周篇目 / 每周清零」四类目标。
+        已被 `/goals/attainment` 与 `PUT /goals/{metric}` 取代。新代码勿引用。
       operationId: listGoals
       parameters:
         - name: studentId
@@ -2618,6 +2794,8 @@ paths:
     post:
       tags: [Parent]
       summary: 创建目标
+      deprecated: true
+      description: "**已废弃（2026-09-22 用户裁决）**：从未实现且无 metric 维度；创建目标改由 `PUT /goals/{metric}`（服务端幂等 upsert，首次即创建）。"
       operationId: createGoal
       parameters:
         - name: studentId
@@ -2647,6 +2825,8 @@ paths:
     patch:
       tags: [Parent]
       summary: 更新目标
+      deprecated: true
+      description: "**已废弃（2026-09-22 用户裁决）**：从未实现且无 metric 维度；改目标值改由 `PUT /goals/{metric}`。"
       operationId: updateGoal
       parameters:
         - name: studentId
@@ -2675,6 +2855,8 @@ paths:
     delete:
       tags: [Parent]
       summary: 删除目标
+      deprecated: true
+      description: "**已废弃（2026-09-22 用户裁决）**：从未实现；本期不做「删除目标」，停用走 `goals.is_active`，`PUT /goals/{metric}` 会把它置回 1。"
       operationId: deleteGoal
       parameters:
         - name: studentId
@@ -9217,3 +9399,140 @@ components:
         reason:
           type: string
           enum: [route_change, pagehide, idle_timeout, closed, hidden_timeout]
+
+    # ---- 埋点 Phase 1B：家长端专项学情 / 真掌握度 / 目标达成 ----
+
+    SpecialModuleSummary:
+      type: object
+      description: >-
+        一个专项模块的窗口内聚合。`units` = 作答单位数（默写=篇、解释/含义=句、背单词=题），
+        所以四个模块的 units 相加没有业务含义。
+      required: [units, correct, rate, byDay]
+      properties:
+        units:
+          type: integer
+          description: 作答单位数（一行 = 一个作答单位）。
+        correct:
+          type: integer
+          description: 其中判对的数量。
+        rate:
+          type: number
+          nullable: true
+          description: >-
+            正确率（一位小数）。**null = 本期没有可判对错的作答**（不是 0）——
+            前端显示「暂无数据」，不要显示 0%。
+        byDay:
+          type: array
+          description: 按本地日期分组的作答单位数（喂柱状图）。
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                description: "`YYYY-MM-DD`"
+              count:
+                type: integer
+
+    ParentSpecialsSummary:
+      type: object
+      description: >-
+        四个专项模块的聚合（spec §8.2）。**四个键保证都在**，没数据的模块给 0 / rate:null / byDay:[]，
+        前端不必做「模块缺失」兜底。只有 vocabulary 多一个 newWords。
+      required: [dictation, interpretation, meaning, vocabulary]
+      properties:
+        dictation:
+          $ref: '#/components/schemas/SpecialModuleSummary'
+        interpretation:
+          $ref: '#/components/schemas/SpecialModuleSummary'
+        meaning:
+          $ref: '#/components/schemas/SpecialModuleSummary'
+        vocabulary:
+          allOf:
+            - $ref: '#/components/schemas/SpecialModuleSummary'
+            - type: object
+              required: [newWords]
+              properties:
+                newWords:
+                  type: integer
+                  description: 窗口内**答对过的去重词数**（不是「本期第一次学会的词数」——那需要跨窗口历史）。
+
+    ParentMasterySummary:
+      type: object
+      description: >-
+        真掌握度（spec §8.2）。**覆盖率三项必须一起展示**：题库只有约 38% 的题绑了知识点，
+        不给出「未覆盖」计数会让家长以为孩子的问题只有列出的这几个。
+        **与薄弱知识点（错题数代理）是两套口径、并存不替换**（spec §10）。
+      required: [items, coveredQuestions, totalQuestions, uncovered]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [knowledgePointId, name, masteryScore, level, correctCount, errorCount]
+            properties:
+              knowledgePointId:
+                type: integer
+              name:
+                type: string
+              masteryScore:
+                type: number
+                description: "0..1 的比值（后端已算好，前端不要再除 100）"
+              level:
+                type: integer
+                description: 段位，0–5（= FLOOR(5 * masteryScore)）。
+              correctCount:
+                type: integer
+              errorCount:
+                type: integer
+              lastSeenAt:
+                type: string
+                nullable: true
+                description: null = 从未见过（不要编成 0）。
+        coveredQuestions:
+          type: integer
+          description: 题库中**绑了知识点**的题数（实测 203）。
+        totalQuestions:
+          type: integer
+          description: 题库总题数（实测 530）。
+        uncovered:
+          type: integer
+          description: "= totalQuestions - coveredQuestions（后端算好，前端不要自己减）"
+
+    ParentGoalAttainmentItem:
+      type: object
+      description: >-
+        目标达成的一行。`rate` = achieved/target（**分母是 target**），target 为 0 时 null；
+        **允许 > 100 = 超额完成**，前端不要截断。
+      required: [metric, period, title, target, achieved, rate]
+      properties:
+        metric:
+          type: string
+          enum: [daily_study_minutes, daily_words, weekly_passages, weekly_clear_errors]
+        period:
+          type: string
+          enum: [daily, weekly]
+          description: 由 metric 派生（daily_study_minutes/daily_words → daily；另两个 → weekly）。
+        title:
+          type: string
+          description: 由 metric 派生的固定标题（家长不能自定义）。
+        target:
+          type: integer
+        achieved:
+          type: integer
+          description: >-
+            窗口内达成的数量。口径按 metric 分派：分钟（向下取整）/ 背过的词数 /
+            去重篇目数 / 清零错题数。
+        rate:
+          type: number
+          nullable: true
+          description: "达成率（一位小数）；target 为 0 → null。> 100 表示超额。"
+
+    ParentGoalAttainmentSummary:
+      type: object
+      description: 四个目标维度的达成情况（懒初始化后必然齐 4 条，顺序固定为维度声明顺序）。
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParentGoalAttainmentItem'
