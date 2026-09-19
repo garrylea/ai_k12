@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
 import {
@@ -10,6 +10,8 @@ import {
   listMyStudents,
   type MyStudentItem,
   type ParentDashboard,
+  type ParentStudyTime,
+  type ParentTodayUsage,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
@@ -73,9 +75,31 @@ const DASHBOARD: ParentDashboard = {
   ],
 };
 
+function studyTime(totalSeconds: number): ParentStudyTime {
+  return {
+    totalSeconds,
+    activeDays: 2,
+    byDay: [{ date: '2026-09-19', seconds: totalSeconds }],
+    byModule: [{ module: 'en_vocabulary', seconds: totalSeconds }],
+    bySubject: [],
+    source: 'sessions',
+  };
+}
+
 function validToken(): string {
   const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
   return `header.${payload}.signature`;
+}
+
+/**
+ * 排空微任务队列：让挂在同一条 promise 链上的 then/catch 全部跑完。
+ * `act` 同时保证由此触发的 React 更新已提交，便于随后做同步 DOM 断言。
+ */
+async function flushMicrotasks(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 function renderAt(path: string) {
@@ -96,21 +120,18 @@ beforeEach(() => {
   getDashboardMock.mockReset();
   getDashboardMock.mockResolvedValue(DASHBOARD);
   getStudyTimeMock.mockReset();
-  getStudyTimeMock.mockResolvedValue({
-    totalSeconds: 5400,
-    activeDays: 2,
-    byDay: [{ date: '2026-09-19', seconds: 5400 }],
-    byModule: [{ module: 'en_vocabulary', seconds: 5400 }],
-    bySubject: [],
-    source: 'sessions',
-  });
+  getStudyTimeMock.mockResolvedValue(studyTime(5400));
   getTodayUsageMock.mockReset();
+  // activeSeconds 与 limitMinutes 刻意取不同的数字：1860 → 「31 分钟」，limit 30 → 「每日上限 30 分钟」。
+  // 若两者相同（如 1800/30），断言 `toContain('30 分钟')` 会被「每日上限 30 分钟」单独满足，
+  // 时长值即使渲染错也照样通过——那条断言等于没写。
   getTodayUsageMock.mockResolvedValue({
     date: '2026-09-19',
-    activeSeconds: 1800,
+    activeSeconds: 1860,
     limitMinutes: 30,
+    // 1860s >= 30 * 60s，语义上就是「已达上限」。
     exceeded: true,
-    byModule: [{ module: 'en_vocabulary', seconds: 1800 }],
+    byModule: [{ module: 'en_vocabulary', seconds: 1860 }],
   });
 });
 
@@ -229,22 +250,73 @@ describe('ParentDashboardPage', () => {
     expect(screen.getByText(/近 7 天活跃 3 天/)).toBeTruthy();
   });
 
-  it('今日已用：达到上限时提示', async () => {
+  it('今日已用：时长值与上限值分别断言（数字不同，时长值无可替代）', async () => {
     renderAt('/parent/dashboard');
     await waitFor(() => expect(screen.getByTestId('dashboard-today-usage-11')).toBeTruthy());
 
     const text = screen.getByTestId('dashboard-today-usage-11').textContent ?? '';
-    expect(text).toContain('30 分钟'); // 每日上限 30 分钟
+    // activeSeconds=1860 → 「31 分钟」。该子串只可能来自**时长值**，上限文案里是 30。
+    expect(text).toContain('31 分钟');
+    // 上限文案独立断言，避免被时长值顺带命中。
+    expect(text).toContain('每日上限 30 分钟');
     expect(text).toContain('已达上限');
   });
 
-  it('时长取数失败时静默降级为「暂无数据」，不影响概览', async () => {
-    getStudyTimeMock.mockRejectedValue(new Error('boom'));
-    getTodayUsageMock.mockRejectedValue(new Error('boom'));
+  it('时长取数失败时静默降级为「暂无数据」，不影响概览（拒绝 settle 后才断言）', async () => {
+    // 组件在「请求进行中」与「请求已失败」两种状态下渲染的是同一段「暂无数据」，
+    // 单看 DOM 无法区分。这里用**可控的 rejected promise** 驱动，显式等拒绝被消化后再断言，
+    // 保证断言不可能在请求仍 in-flight 时（假性）通过。
+    let rejectStudy!: (reason?: unknown) => void;
+    let rejectUsage!: (reason?: unknown) => void;
+    const studyPromise = new Promise<ParentStudyTime>((_, reject) => {
+      rejectStudy = reject;
+    });
+    const usagePromise = new Promise<ParentTodayUsage>((_, reject) => {
+      rejectUsage = reject;
+    });
+    getStudyTimeMock.mockReturnValue(studyPromise);
+    getTodayUsageMock.mockReturnValue(usagePromise);
+
     renderAt('/parent/dashboard');
-    await waitFor(() => expect(screen.getByTestId('dashboard-study-time-11')).toBeTruthy());
-    expect(screen.getByTestId('dashboard-study-time-11').textContent).toContain('暂无数据');
+    await screen.findByTestId('dashboard-student-11');
+
+    // 此时请求尚未 reject（仍 in-flight），「暂无数据」也只是未设值的结果。
+    rejectStudy(new Error('study boom'));
+    rejectUsage(new Error('usage boom'));
+    await flushMicrotasks();
+
+    const card = screen.getByTestId('dashboard-study-time-11');
+    expect(card.textContent).toContain('暂无数据');
     // 概览主体仍在
     expect(screen.getByTestId('dashboard-student-11')).toBeTruthy();
+  });
+
+  it('切孩子：时长按 studentId 归属派生，绝不带出上一个孩子的时长', async () => {
+    // 两个孩子时长刻意不同且格式化后不同：5400 → 「1 小时 30 分」；600 → 「10 分钟」。
+    // 小美的请求挂在一个**我们不主动 resolve 的 deferred** 上，制造出「已切到小美、数据未到」
+    // 的那一帧——这正是派生若忽略 studentId 会把小明时长画到小美卡上的时刻。
+    let resolveGirlStudy!: (value: ParentStudyTime) => void;
+    const girlStudy = new Promise<ParentStudyTime>((resolve) => {
+      resolveGirlStudy = resolve;
+    });
+    getStudyTimeMock.mockImplementation((id: number) =>
+      id === 11 ? Promise.resolve(studyTime(5400)) : girlStudy,
+    );
+
+    renderAt('/parent/dashboard');
+    await waitFor(() =>
+      expect(screen.getByTestId('dashboard-study-time-11').textContent).toContain('1 小时 30 分'),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: '小美' }));
+
+    // 小美数据未到：绝不能出现小明（上一个孩子）的时长。
+    expect(screen.getByTestId('dashboard-study-time-12').textContent).not.toContain('1 小时 30 分');
+
+    resolveGirlStudy(studyTime(600));
+    await waitFor(() =>
+      expect(screen.getByTestId('dashboard-study-time-12').textContent).toContain('10 分钟'),
+    );
+    expect(screen.getByTestId('dashboard-study-time-12').textContent).not.toContain('1 小时 30 分');
   });
 });
