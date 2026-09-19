@@ -5,7 +5,9 @@
  *   - push 是同步 O(1)，只入数组；到 flushAt 条或定时到点才异步落库
  *   - 超过 maxEntries 丢**最旧**的并累加 dropped（宁可丢样本，不可把内存吃光）
  *   - flush 失败：整批丢弃 + 计数，不做重试 —— 埋点故障绝不能放大成 DB 压力
- *   - stop() 在 OnModuleDestroy 调用，兜一次最后的 flush（仍可能丢 <1 个间隔的数据）
+ *   - stop() **只停定时器、不落库**；退出流程必须再显式 `await flushNow()` 兜最后一批
+ *   - flush 进行中若又触发 flush，会被 `flushing` 守卫挡掉且**不会补排一次**：剩余行要等
+ *     下一次 push 或下一个定时器。故 `start()` **必须**被调用，否则一波突发之后可能长期停滞
  */
 export interface TelemetryBufferOptions {
   /** 仅用于日志标识 */
@@ -55,6 +57,11 @@ export class TelemetryBuffer<T> {
     this.timer.unref?.();
   }
 
+  /**
+   * 只停定时器，**不落库**。停止后请在退出流程里显式 `await flushNow()` 兜最后一批
+   * （见 TelemetryService.onModuleDestroy）——`stop()` 故意不做这件事：它是同步的，
+   * 而落库是异步的，藏一个「看起来同步、其实吞掉一个 Promise」的收尾更容易漏掉。
+   */
   stop(): void {
     if (this.timer) {
       clearInterval(this.timer);
