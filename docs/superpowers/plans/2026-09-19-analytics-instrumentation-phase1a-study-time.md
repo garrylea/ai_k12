@@ -3113,6 +3113,7 @@ import type {
   InputType,
   SceneInfo,
   ScreenClass,
+  SessionEvent,
   SessionState,
 } from './types';
 
@@ -3155,6 +3156,8 @@ let subjectIdProvider: () => number | null = () => null;
 
 let state: SessionState = 'idle';
 let currentKey: string | null = null;
+/** 当前场景的完整信息。开会话必须同时知道 module/scene，而 `currentKey` 只是个去重键。 */
+let currentInfo: SceneInfo | null = null;
 let sessionUid: string | null = null;
 let lastInputAt = 0;
 let lastInputRecordedAt = 0;
@@ -3168,7 +3171,7 @@ export function setEnabled(value: boolean): void {
   enabled = value;
   if (!value) {
     // 退出登录 / 角色变化：把在跑的会话收掉，别让它挂到惰性收尾（会白记 5 分钟）
-    if (sessionUid) endCurrent('closed');
+    if (sessionUid) endSession('closed');
     else resetLocalState();
   }
 }
@@ -3199,16 +3202,20 @@ export function __resetForTests(): void {
  *
  * 去重：同一 `module/scene` 重复调用是 no-op（React 严格模式会双跑 effect，
  * 翻页/改 query 也不该被算成新会话）。
+ *
+ * 开会话**只经状态机**（`runTransition('ROUTE_ENTER')` → `effects.start`），
+ * 这里不直接建会话——否则「谁负责开会话」就有两个答案，迟早重复开会话。
  */
 export function onRouteChange(info: SceneInfo): void {
   if (!enabled) return;
 
   const key = sceneKey(info);
   if (key !== null && key === currentKey && sessionUid) return;
-  if (sessionUid) endCurrent('route_change');
+  if (sessionUid) runTransition('ROUTE_LEAVE');
 
   currentKey = key;
-  if (info.isStudyScene && info.module && info.scene) startCurrent(info);
+  currentInfo = info;
+  if (key !== null) runTransition('ROUTE_ENTER');
 }
 
 /** 用户活动（节流）。用于空闲检测与「hidden → active」的恢复。 */
@@ -3235,9 +3242,15 @@ export function onPageHide(): void {
 
 // ---------------------------------------------------------------- 内部
 
-function startCurrent(info: SceneInfo): void {
+/**
+ * 真正建会话（生成 uid、采设备信息、发首次 `start`）。
+ * **只由 `runTransition` 在 `effects.start` 为真时调用**——这是全模块唯一的开会话点。
+ */
+function beginSession(): void {
+  const info = currentInfo;
+  if (!info?.module || !info.scene) return;
+
   sessionUid = newSessionUid();
-  state = 'active';
   lastInputAt = Date.now();
   lastInputRecordedAt = lastInputAt;
 
@@ -3246,8 +3259,8 @@ function startCurrent(info: SceneInfo): void {
   void transport
     .start({
       sessionUid,
-      module: info.module as string,
-      scene: info.scene as string,
+      module: info.module,
+      scene: info.scene,
       ...(subjectId !== null ? { subjectId } : {}),
       ...device,
     })
@@ -3258,12 +3271,13 @@ function startCurrent(info: SceneInfo): void {
   armTimers();
 }
 
-function endCurrent(reason: EndReason): void {
+/** 收尾当前会话（若有）。所有「结束」都走这里，避免多处各写一遍。 */
+function endSession(reason: EndReason): void {
   const uid = sessionUid;
   resetLocalState();
   if (!uid) return;
   void transport.end(uid, reason).catch(() => {
-    /* 同上 */
+    /* 静默 */
   });
 }
 
@@ -3294,24 +3308,16 @@ function applyEffect(input: { visibility?: boolean; pageHide?: boolean }): void 
 }
 
 /**
- * 执行一次状态机迁移。**只处理 `end` 与 `heartbeat`** —— `ROUTE_ENTER` 不走这里：
- * 起会话需要完整的 `SceneInfo`（module/scene），那只有 `onRouteChange` 手上才有，
- * 由它直接调 `startCurrent`。两处都写 start 逻辑会重复开会话。
+ * 执行一次状态机迁移——**全部副作用的唯一出口**：`start` / `end` / `heartbeat`
+ * 都由这里按 `effects` 执行。调用点（路由变化、可见性、pagehide、空闲）只负责把事件喂进来，
+ * 自己不做任何网络或状态操作。这样「谁负责开会话/结束会话」永远只有一个答案。
  */
 function runTransition(event: SessionEvent): void {
   const next = transition(state, event);
   state = next.state;
 
-  if (next.effects.end) {
-    const uid = sessionUid;
-    resetLocalState();
-    if (uid) {
-      void transport.end(uid, next.effects.end).catch(() => {
-        /* 静默 */
-      });
-    }
-    return;
-  }
+  if (next.effects.start) beginSession();
+  if (next.effects.end) return endSession(next.effects.end);
   if (next.effects.heartbeat) sendHeartbeat(next.effects.heartbeat);
 }
 
@@ -3337,6 +3343,7 @@ function resetLocalState(): void {
   disarmTimers();
   state = 'idle';
   currentKey = null;
+  currentInfo = null;
   sessionUid = null;
   lastInputAt = 0;
   lastInputRecordedAt = 0;
@@ -3386,7 +3393,14 @@ export function collectDeviceInfo(): {
 }
 ```
 
-> **实现注意**：上面 `runTransition` 刻意**不处理 `effects.start`**——`ROUTE_ENTER` 由 `onRouteChange → startCurrent` 直接执行（那里才有 `SceneInfo`）。`transition` 的 `idle/ended + ROUTE_ENTER` 分支因此只在测试里被覆盖，生产路径不经过它。若你觉得这里别扭，可以改成 tracker 持有完整 `SceneInfo` 再让 `runTransition` 统一处理 start——但那样 `startCurrent` 需要读 `currentInfo`，两种写法等价，**不要**两处都写 start 逻辑（会重复开会话）。
+> **设计要点**：**所有副作用都从 `runTransition` 出**——`effects.start` / `effects.end` / `effects.heartbeat` 三个都由它执行，`onRouteChange`、`applyEffect`、空闲定时器只负责把事件喂进状态机，自己不做网络调用、也不改 `state`。
+>
+> 这样「谁负责开会话」只有一个答案：`runTransition` → `beginSession()`。开会话需要完整的 `SceneInfo`（module/scene），所以 tracker 用一个 `currentInfo` 模块变量持有当前场景；`onRouteChange` 在调 `ROUTE_ENTER` **之前**把它设好（顺序不能反）。
+>
+> 反面教材（本计划初稿的写法，已废弃）：让 `onRouteChange` 直接调 `startCurrent()`、把 `state = 'active'` 写死、并让 `runTransition` 声明「不处理 effects.start」。那会让 `effects.start` 成为**永远不会被读的死代码**，且 `state` 有第二个写入点（绕过状态机）——两个都会在后续维护里变成 bug 源。
+>
+> `ROUTE_ENTER` 带 `heartbeat: 'visible'`（开完会话立刻补一次心跳）不是为了凑数：`start` 那条 INSERT 用的是库默认 `client_state='visible'`，若标签页是**在后台被打开/恢复**的，这一次心跳至少会把后端的 `client_state` 拉正、`heartbeat_count` 从 0 起算。
+> ⚠️ **已知边界（本批不修，记入终审）**：`AnalyticsShell` 只在收到 `visibilitychange` **事件**时上报可见性，**不读挂载时的初始 `document.visibilityState`**。所以「页面在后台标签里被打开」的场景下，开头最多 ≤120s（直到空闲定时器把它判成 hidden）会被算进时长。要修的话是在 shell 挂载时把初始可见性同步给 tracker；影响有限（仅后台加载场景、且上界 120s），故未纳入本批。
 
 - [ ] **Step 4: 跑测试确认通过**
 
