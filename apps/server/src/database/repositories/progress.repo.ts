@@ -41,6 +41,21 @@ export class ProgressRepository {
     return rows.length > 0 ? this.mapRow(rows[0]) : null;
   }
 
+  /**
+   * 该生**在学学科**的 id 列表（P6.5：按学科目标的「在学」判据）。
+   *
+   * `progress` 一行 = 一 (student, subject)，家长配教材即产生 —— 所以「有 progress 行」
+   * 就是「这个孩子在这门学科上有学习配置」。**按 subject_id 升序**返回（稳定顺序，
+   * 页面分组与目标排序都依赖它，别改成依赖插入顺序）。
+   */
+  async findSubjectIdsByStudent(studentId: number): Promise<number[]> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { subject_id: number })[]>(
+      'SELECT DISTINCT subject_id FROM progress WHERE student_id = ? ORDER BY subject_id',
+      [studentId],
+    );
+    return rows.map((r) => Number(r.subject_id));
+  }
+
   async create(data: {
     studentId: number;
     subjectId: number;
