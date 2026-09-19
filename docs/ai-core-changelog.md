@@ -8,6 +8,17 @@
 
 ---
 
+## 2026-09-19 家长端 AI 对话回放补齐孩子的图片
+
+- **契约**：`GET /api/parent/students/:id/chat-logs/{dialogueId}` 的消息对象新增 `images: string[]`（API 设计文档 §4.13 v4.2、`openapi.yaml` 的 `ChatLogMessage` 已同步）。
+- **数据源与解析**：`ai_messages.attachments` 是 `text` 列，装 JSON 串 `[{type,url}]`（实测 url 形如 `/uploads/auxiliary/xxx.jpg`）。服务端在 `chat-logs.service.ts` 里解析，**只留 `type == 'image'`**——`attachments` 里还有 `type: 'file'`（PDF 提取任务），家长端本期不展示，解析后就不会漏出去。**不回传原始 `attachments` 串**：家长端不该复制学生端 `useAuxChat` 那份 `JSON.parse` + 过滤逻辑（两处迟早漂移）。
+- **两条口径**：① 无附件时是**空数组而非 null**（与 `knowledgePoints` 同规矩，前端不必判两遍）；② **坏 JSON / 非数组 / 缺 url 一律当「没有附件」且不抛**——一条消息的脏数据不该让整个回放页 500。
+- **为什么不复用 `resolveAsset`**：它给 `/assets/` 相对路径补前缀，而 `/uploads/...` 已是绝对路径（Vite `server.proxy` 与 `preview.proxy` 都把 `/uploads` 转给后端）。加了前缀反而 404。
+- **顺带抽共享组件**：学生端的图片大图预览原先私有在 `AuxChatPanel.tsx` 里（含 `CloseIcon`），现抽成 `components/base/ImageLightbox.tsx` 并导出，两端共用。抽的原因不是好看——这类组件有成对的监听清理（Esc 监听、`body.style.overflow` 锁/复位），抄第二份最怕漏一处；抽完后它第一次有了独立测试（5 条，含「卸载后 Esc 失效」「卸载后滚动复位」）。`AuxChatPanel.tsx` 本身此前**零测试**，本次补了 2 条（图片渲染 + 点开大图；顺带钉住「AI 走 markdown、孩子的话原样」）。
+- **为什么之前是缺口**：数据一直在库里、学生端一直能看（`useAuxChat` 解析 `attachments` → `AuxChatPanel` 渲染 `<img>`），是家长端那 8 字段白名单漏了它 → PRD §7.7「全透明回放」缺一块。
+
+---
+
 ## 2026-09-19 家长端错题轨道改 主线/训练 + 两页富文本渲染修正
 
 - **`GET /api/parent/students/:id/errors` 的 `track` 由 `main|aux` 改为 `main|training`**（契约变更，API 设计文档 §4.13 与 `openapi.yaml` 已同步）。分档表 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：`main` = `practice|discuss|exam`；`training` = `targeted|error_practice|auxiliary`。

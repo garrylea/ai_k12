@@ -54,15 +54,18 @@ const DETAIL: ParentChatLogDetail = {
     {
       id: 201, role: 'user', content: '怎么求最值', reasoning: null,
       type: null, model: null, safetyFlag: 0, createdAt: '2026-09-16T10:00:30.000Z',
+      images: [],
     },
     {
       id: 202, role: 'assistant', content: '先判断开口方向', reasoning: '开口向上取最小值',
       type: 'socratic', model: 'qwen3.8-max', safetyFlag: 0, createdAt: '2026-09-16T10:01:00.000Z',
+      images: [],
     },
     {
       id: 203, role: 'assistant', content: '我是你的学习助手，这个话题课后聊',
       reasoning: null, type: 'block', model: 'qwen3.8-max', safetyFlag: 1,
       createdAt: '2026-09-16T10:02:00.000Z',
+      images: [],
     },
   ],
 };
@@ -126,6 +129,51 @@ describe('ParentChatLogsPage', () => {
     expect(screen.queryByTestId('chatlog-reasoning-202')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /看 AI 思路/ }));
     expect(screen.getByTestId('chatlog-reasoning-202')).toHaveTextContent('开口向上取最小值');
+  });
+
+  it('孩子发的图片渲染为 <img>（/uploads 绝对路径，不加 /assets 前缀）', async () => {
+    getDetailMock.mockResolvedValue({
+      ...DETAIL,
+      messages: [{ ...DETAIL.messages[0], images: ['/uploads/auxiliary/a.jpg'] }],
+    });
+
+    renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+
+    const box = await screen.findByTestId('chatlog-images-201');
+    const img = box.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img).toHaveAttribute('src', '/uploads/auxiliary/a.jpg');
+  });
+
+  it('点图片开大图，Esc 关闭', async () => {
+    getDetailMock.mockResolvedValue({
+      ...DETAIL,
+      messages: [{ ...DETAIL.messages[0], images: ['/uploads/auxiliary/a.jpg'] }],
+    });
+
+    renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+
+    const img = (await screen.findByTestId('chatlog-images-201')).querySelector('img')!;
+    fireEvent.click(img);
+
+    const lightbox = await screen.findByTestId('image-lightbox');
+    expect(lightbox.querySelector('img')).toHaveAttribute('src', '/uploads/auxiliary/a.jpg');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('image-lightbox')).not.toBeInTheDocument());
+  });
+
+  it('没有图片的消息不渲染图片区', async () => {
+    renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+
+    await screen.findByTestId('chatlog-message-201');
+    expect(screen.queryByTestId('chatlog-images-201')).not.toBeInTheDocument();
   });
 
   it('AI 回复走共享渲染：$..$ 出 KaTeX、原生 HTML 表格成为真表格、无 katex-error', async () => {
@@ -348,6 +396,7 @@ describe('ParentChatLogsPage', () => {
         {
           id: 301, role: 'user', content: '第二条会话的消息', reasoning: null,
           type: null, model: null, safetyFlag: 0, createdAt: '2026-09-15T10:00:10.000Z',
+          images: [],
         },
       ],
     });

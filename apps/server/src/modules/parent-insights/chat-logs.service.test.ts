@@ -145,3 +145,57 @@ describe('ChatLogsService：详情', () => {
     expect(result.updatedAt).toEqual(dialogueRow.created_at);
   });
 });
+
+describe('ChatLogsService：消息里的图片（attachments → images）', () => {
+  it('无附件 → images 是空数组（不是 null，前端不必判两遍）', async () => {
+    const d = mk();
+
+    const result = await mkSvc(d).getChatLog(11, 55);
+
+    expect(result.messages[0].images).toEqual([]);
+  });
+
+  it('解析出 image 的 url；file 类型（PDF 提取任务）被过滤掉', async () => {
+    const d = mk();
+    d.messagesRepo.findByDialogue.mockResolvedValue([
+      messageRow({
+        attachments: JSON.stringify([
+          { type: 'image', url: '/uploads/auxiliary/a.jpg' },
+          { type: 'file', url: '/uploads/auxiliary/b.pdf' },
+          { type: 'image', url: '/uploads/auxiliary/c.png' },
+        ]),
+      }),
+    ]);
+
+    const result = await mkSvc(d).getChatLog(11, 55);
+
+    expect(result.messages[0].images).toEqual([
+      '/uploads/auxiliary/a.jpg',
+      '/uploads/auxiliary/c.png',
+    ]);
+  });
+
+  it('坏 JSON / 非数组 / 缺 url → 全当没有附件，且不抛（一条脏消息不该让回放页 500）', async () => {
+    const d = mk();
+    d.messagesRepo.findByDialogue.mockResolvedValue([
+      messageRow({ id: 201, attachments: '{不是 JSON' }),
+      messageRow({ id: 202, attachments: '{"type":"image"}' }), // 对象而非数组
+      messageRow({ id: 203, attachments: JSON.stringify([{ type: 'image' }, { type: 'image', url: '' }, 'x', null]) }),
+    ]);
+
+    const result = await mkSvc(d).getChatLog(11, 55);
+
+    expect(result.messages.map((m) => m.images)).toEqual([[], [], []]);
+  });
+
+  it('不回传原始 attachments 串（家长端不该自己 parse JSON）', async () => {
+    const d = mk();
+    d.messagesRepo.findByDialogue.mockResolvedValue([
+      messageRow({ attachments: JSON.stringify([{ type: 'image', url: '/uploads/auxiliary/a.jpg' }]) }),
+    ]);
+
+    const result = await mkSvc(d).getChatLog(11, 55);
+
+    expect(result.messages[0]).not.toHaveProperty('attachments');
+  });
+});

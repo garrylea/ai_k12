@@ -2223,6 +2223,12 @@ export interface ParentChatLogMessage {
   model: string | null;
   safetyFlag: number;
   createdAt: string;
+  /**
+   * 孩子随消息发的图片 URL（形如 `/uploads/auxiliary/xxx.jpg`，由 Vite proxy 转给后端）。
+   * 服务端已从 `attachments` 的 JSON 串里解析好，**无附件时是空数组**（不是 null）。
+   * 注意不要对它用 `resolveAsset`——那是给 `/assets/` 相对路径补前缀的，`/uploads/` 已是绝对路径。
+   */
+  images: string[];
 }
 
 export interface ParentChatLogDetail extends ParentChatLogItem {

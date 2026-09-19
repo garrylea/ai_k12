@@ -15,3 +15,5 @@ export { LevelIcon } from './LevelIcon';
 export type { LevelCode } from './LevelIcon';
 export { Pagination } from './Pagination';
 export type { PaginationProps } from './Pagination';
+export { ImageLightbox } from './ImageLightbox';
+export type { ImageLightboxProps } from './ImageLightbox';

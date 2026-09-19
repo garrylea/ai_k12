@@ -195,6 +195,14 @@ export interface ParentChatLogMessage {
   model: string | null;
   safetyFlag: number;
   createdAt: Date;
+  /**
+   * 孩子随消息发的图片 URL（`/uploads/...`）。服务端从 `ai_messages.attachments` 的
+   * JSON 串里解析、**只留 `type === 'image'`**；无附件时是**空数组**（不是 null）。
+   *
+   * 为什么要有这个字段：学生端能看（`useAuxChat` 解析 `attachments` → `AuxChatPanel`
+   * 渲染 `<img>`），而家长端原先的字段白名单漏了它 → PRD §7.7「全透明回放」缺一块。
+   */
+  images: string[];
 }
 
 /** 详情继承列表行；`updatedAt` 同口径（最后一条消息时间，无消息则退回创建时间）。 */

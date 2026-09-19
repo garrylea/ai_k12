@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import ReactMarkdown from 'react-markdown';
-import { Button, Card, Pagination, Skeleton, Tag } from '@/components/base';
+import { Button, Card, ImageLightbox, Pagination, Skeleton, Tag } from '@/components/base';
 import {
   markdownRemarkPlugins,
   markdownRemarkPluginsWithBreaks,
@@ -37,7 +37,14 @@ function formatDateTime(iso: string): string {
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function MessageRow({ message }: { message: ParentChatLogDetail['messages'][number] }) {
+function MessageRow({
+  message,
+  onPreview,
+}: {
+  message: ParentChatLogDetail['messages'][number];
+  /** 点图片开大图；由页面持有 lightbox 状态，保证同时只有一个预览层。 */
+  onPreview: (src: string) => void;
+}) {
   const [showReasoning, setShowReasoning] = useState(false);
   const isBlocked = message.safetyFlag === 1;
   const isUser = message.role === 'user';
@@ -64,6 +71,28 @@ function MessageRow({ message }: { message: ParentChatLogDetail['messages'][numb
           {formatDateTime(message.createdAt)}
         </span>
       </div>
+
+      {/*
+        孩子随消息发的图片（服务端已从 attachments 解析成 images[]）。位置与学生端
+        `AuxChatPanel` 一致：图片在正文之上。`/uploads/...` 已是绝对路径，**不要**
+        用 resolveAsset（那是给 /assets/ 相对路径补前缀的）。
+      */}
+      {message.images.length > 0 && (
+        <div
+          data-testid={`chatlog-images-${message.id}`}
+          className="mb-2 flex flex-wrap gap-1"
+        >
+          {message.images.map((src, i) => (
+            <img
+              key={`${src}-${i}`}
+              src={src}
+              alt="孩子发送的图片"
+              onClick={() => onPreview(src)}
+              className="max-w-[220px] max-h-[220px] rounded-md object-cover cursor-zoom-in hover:opacity-90 transition"
+            />
+          ))}
+        </div>
+      )}
 
       {/*
         孩子自己输入的文本**原样展示**，不走 markdown —— 学生端（`AuxChatPanel`）也是如此。
@@ -149,6 +178,8 @@ export default function ParentChatLogsPage() {
    * 所以必须同时清掉选中态（见下面 `[studentId]` 的 effect），右侧才会回到占位态。
    */
   const [detailFailure, setDetailFailure] = useState<{ studentId: number; dialogueId: number } | null>(null);
+  /** 大图预览的当前图片；null = 没开。放在页面级，保证同时只有一个预览层。 */
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   /**
    * 换孩子必须：① 回第 1 页 ② 清掉上一个孩子的选中会话。
@@ -426,12 +457,16 @@ export default function ParentChatLogsPage() {
                   </span>
                 </div>
                 {detailData.messages.map((m) => (
-                  <MessageRow key={m.id} message={m} />
+                  <MessageRow key={m.id} message={m} onPreview={setPreviewSrc} />
                 ))}
               </div>
             )}
           </Card>
         </div>
+      )}
+
+      {previewSrc && (
+        <ImageLightbox src={previewSrc} onClose={() => setPreviewSrc(null)} />
       )}
     </div>
   );

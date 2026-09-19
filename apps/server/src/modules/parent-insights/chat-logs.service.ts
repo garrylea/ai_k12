@@ -11,6 +11,33 @@ import type {
 /** 服务端固定页大小：前端不传 `pageSize`。 */
 export const PAGE_SIZE = 20;
 
+/**
+ * `ai_messages.attachments` 是 JSON 字符串（`[{type,url}]`），这里只取 `type === 'image'` 的 url。
+ *
+ * 为什么在**服务端**解析而不是把原始串下发给前端：
+ * ① 家长端不该复制学生端 `useAuxChat` 里那份 `JSON.parse` + 过滤逻辑（两处迟早漂移）；
+ * ② 契约给数组，无附件时是**空数组而不是 null**（与 `knowledgePoints` 同规矩，前端不必判两遍）；
+ * ③ `attachments` 里还有 `type: 'file'`（PDF 提取任务），家长端本期不展示，解析后不会漏出去。
+ *
+ * 坏 JSON / 非数组一律当「没有附件」——一条消息的脏数据不该让整个回放页 500。
+ */
+function parseImageUrls(attachments: string | null): string[] {
+  if (!attachments) return [];
+  try {
+    const parsed: unknown = JSON.parse(attachments);
+    if (!Array.isArray(parsed)) return [];
+    const urls: string[] = [];
+    for (const item of parsed) {
+      if (typeof item !== 'object' || item === null) continue;
+      const { type, url } = item as { type?: unknown; url?: unknown };
+      if (type === 'image' && typeof url === 'string' && url.length > 0) urls.push(url);
+    }
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
 export interface ChatLogsQuery {
   track?: 'mainline' | 'auxiliary';
   scene?: string;
@@ -94,6 +121,7 @@ export class ChatLogsService {
         model: m.model,
         safetyFlag: m.safety_flag,
         createdAt: m.created_at,
+        images: parseImageUrls(m.attachments),
       })),
     };
   }

@@ -7138,6 +7138,15 @@ components:
         createdAt:
           type: string
           format: date-time
+        images:
+          type: array
+          items:
+            type: string
+          description: >-
+            孩子随消息发的图片 URL（形如 `/uploads/auxiliary/xxx.jpg`）。
+            服务端从 `ai_messages.attachments` 的 JSON 串解析、只留 `type == 'image'`；
+            无附件时是**空数组**（不是 null）。`file` 类型（PDF 提取任务）本期不下发。
+            前端**不要**对它用 `resolveAsset`——`/uploads/` 已是绝对路径。
 
     ChatLogItem:
       type: object
