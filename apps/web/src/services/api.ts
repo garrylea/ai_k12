@@ -2093,6 +2093,47 @@ export function getParentReport(
   return fetchApi<ParentLearningReport>(`/parent/students/${studentId}/reports?${qs.toString()}`);
 }
 
+// --- Parent: 学习时长（会话口径，埋点 Phase 1A） ---
+// ⚠️ 与 `ParentDashboardStudent.activeDays7`（四路时间戳代理）是**两套口径**，
+// 必须并列展示、文案区分，不得相互替换（spec §10 第 1 条）。
+
+export interface ParentStudyTime {
+  totalSeconds: number;
+  /** 会话口径的「有学习的天数」，与 `activeDays7` 刻意不同。 */
+  activeDays: number;
+  byDay: Array<{ date: string; seconds: number }>;
+  byModule: Array<{ module: string; seconds: number }>;
+  bySubject: Array<{ subjectId: number; seconds: number }>;
+  /** 口径标记：永远是 'sessions'，用于 UI 上明确这是会话时长。 */
+  source: 'sessions';
+}
+
+export interface ParentTodayUsage {
+  date: string;
+  activeSeconds: number;
+  /** `null` = 家长未设限（不是「上限 0 分钟」）。 */
+  limitMinutes: number | null;
+  /** `>=` 判定：用满上限即算超出。 */
+  exceeded: boolean;
+  byModule: Array<{ module: string; seconds: number }>;
+}
+
+export function getParentStudyTime(
+  studentId: number,
+  from?: string,
+  to?: string,
+): Promise<ParentStudyTime> {
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return fetchApi<ParentStudyTime>(`/parent/students/${studentId}/study-time${suffix}`);
+}
+
+export function getParentTodayUsage(studentId: number): Promise<ParentTodayUsage> {
+  return fetchApi<ParentTodayUsage>(`/parent/students/${studentId}/today-usage`);
+}
+
 export interface ParentErrorQuestion {
   content: string;
   type: string;
@@ -2214,5 +2255,57 @@ export function getParentChatLogDetail(
 ): Promise<ParentChatLogDetail> {
   return fetchApi<ParentChatLogDetail>(
     `/parent/students/${studentId}/chat-logs/${dialogueId}`,
+  );
+}
+
+// --- 学习会话采集（student 角色，埋点 Phase 1A） ---
+
+export type StudySessionClientState = 'visible' | 'hidden';
+export type StudySessionEndReason =
+  | 'route_change'
+  | 'pagehide'
+  | 'idle_timeout'
+  | 'closed'
+  | 'hidden_timeout';
+
+export interface StartStudySessionBody {
+  sessionUid: string;
+  module: string;
+  scene: string;
+  subjectId?: number;
+  refType?: string;
+  refId?: number;
+  screenClass?: string;
+  inputType?: string;
+  appShell?: string;
+}
+
+/** `@Post` 默认 201；`fetchApi` 只判 `code === 0`，无需特殊处理。 */
+export function startStudySession(
+  body: StartStudySessionBody,
+): Promise<{ sessionUid: string; startedAt: string }> {
+  return fetchApi<{ sessionUid: string; startedAt: string }>('/study-sessions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function heartbeatStudySession(
+  uid: string,
+  state: StudySessionClientState,
+): Promise<{ activeSeconds: number | null }> {
+  return fetchApi<{ activeSeconds: number | null }>(
+    `/study-sessions/${encodeURIComponent(uid)}/heartbeat`,
+    { method: 'PATCH', body: JSON.stringify({ state }) },
+  );
+}
+
+export function endStudySession(
+  uid: string,
+  reason: StudySessionEndReason,
+): Promise<{ activeSeconds: number | null; endedAt: string | null }> {
+  return fetchApi<{ activeSeconds: number | null; endedAt: string | null }>(
+    `/study-sessions/${encodeURIComponent(uid)}/end`,
+    { method: 'PATCH', body: JSON.stringify({ reason }) },
   );
 }
