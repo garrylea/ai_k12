@@ -67,3 +67,5 @@ export type {
   SpecialPracticeModule,
   SpecialPracticeVerdict,
 } from './special-practice-logs.repo.js';
+export { StudentKnowledgeMasteryRepository } from './student-knowledge-mastery.repo.js';
+export type { WeakMasteryRow } from './student-knowledge-mastery.repo.js';

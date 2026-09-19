@@ -24,11 +24,13 @@ const mk = (overrides: any = {}) => ({
   selfAssessRepo: { create: vi.fn().mockResolvedValue(1) },
   // Task 10 新增第 7 参：错题订正发分（error_fix）
   pointsService: { award: vi.fn().mockResolvedValue({ pointsAwarded: 3 }), todayKey: vi.fn(() => '2026-09-17') },
+  // 埋点 Phase 1B 新增第 8 参：掌握度回写（fire-and-forget）
+  masteryService: { recordFromJudge: vi.fn().mockResolvedValue(undefined) },
   ...overrides,
 });
 
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any);
+  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any, deps.masteryService as any);
 
 describe('JudgeCoreService.judgeQuestion', () => {
   it('choice 命中 -> exact 比对，答错入错题本（source 透传）', async () => {
@@ -102,7 +104,7 @@ describe('JudgeCoreService.judgeQuestion', () => {
 });
 
 /** 构造带 mock 依赖的 JudgeCoreService（capabilities 不会被 self_assess 路径触达，占位即可）。 */
-function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess' | 'points', any>> = {}) {
+function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess' | 'points' | 'mastery', any>> = {}) {
   const questions = overrides.questions ?? {
     findById: vi.fn(async () => null),
   };
@@ -113,6 +115,7 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
   };
   const selfAssess = overrides.selfAssess ?? { create: vi.fn(async () => 1) };
   const pointsService = overrides.points ?? { award: vi.fn(async () => ({ pointsAwarded: 3 })), todayKey: vi.fn(() => '2026-09-17') };
+  const masteryService = overrides.mastery ?? { recordFromJudge: vi.fn(async () => undefined) };
   const svc = new JudgeCoreService(
     questions as unknown as QuestionsRepository,
     mainError as unknown as MainErrorBooksRepository,
@@ -121,8 +124,9 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
     {} as any, // ExplanationCacheService（self_assess 路径不触达）
     selfAssess as unknown as QuestionSelfAssessmentsRepository,
     pointsService as any, // PointsService（Task 10 错题订正发分）
+    masteryService as any, // MasteryService（埋点 Phase 1B 掌握度回写）
   );
-  return { svc, questions, mainError, selfAssess, pointsService };
+  return { svc, questions, mainError, selfAssess, pointsService, masteryService };
 }
 
 const q = (type: string, answer = 'B', explanation: string | null = '解析文本') => ({
@@ -446,5 +450,62 @@ describe('recordSelfAssessment', () => {
     });
     await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'correct', source: 'exam', sourceRefId: 55 });
     expect(pointsService.award).not.toHaveBeenCalled();
+  });
+});
+
+describe('JudgeCoreService.judgeQuestion — 掌握度回写接线（埋点 Phase 1B）', () => {
+  it('客观题判完会把对错交给 MasteryService（fire-and-forget，不拖慢判题）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' }),
+        findByContentHash: vi.fn(), findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'A', source: 'targeted' });
+    // fire-and-forget：必须让出一次微任务再断言
+    await Promise.resolve();
+
+    expect(deps.masteryService.recordFromJudge).toHaveBeenCalledWith({
+      studentId: 1, questionId: 10, isCorrect: true,
+    });
+  });
+
+  it('没标准答案的题（isCorrect=null）也照样交给 service —— 挡在 service 里，不在调用点分叉', async () => {
+    const deps = mk({
+      questionsRepo: {
+        // 路由 0：题目本身没有标准答案 → isCorrect=null 的**早退**路径
+        findById: vi.fn().mockResolvedValue({ id: 10, type: 'choice', answer: '', options: null }),
+        findByContentHash: vi.fn(), findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'A', source: 'targeted' });
+    await Promise.resolve();
+
+    // 调用点**不做** isCorrect === null 的判断：规则②统一在 MasteryService 里守，避免两处漂移
+    expect(deps.masteryService.recordFromJudge).toHaveBeenCalledWith({
+      studentId: 1, questionId: 10, isCorrect: null,
+    });
+  });
+
+  it('主观题 self_assess 早退路径同样经过出口收尾（isCorrect=null）', async () => {
+    delete process.env.JUDGE_SUBJECTIVE_MODE;
+    const deps = mk({
+      questionsRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 10, type: 'short_answer', answer: '过程…结果 x=3', options: null, explanation: '解析' }),
+        findByContentHash: vi.fn(), findOrCreate: vi.fn(), deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'x=3', source: 'targeted' });
+    await Promise.resolve();
+
+    expect(deps.masteryService.recordFromJudge).toHaveBeenCalledWith({
+      studentId: 1, questionId: 10, isCorrect: null,
+    });
   });
 });

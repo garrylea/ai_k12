@@ -3,6 +3,7 @@ import { QuestionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsR
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
+import { MasteryService } from './mastery.service.js';
 import { PointsService, type AwardResult } from '../points/points.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
@@ -137,7 +138,28 @@ export class JudgeCoreService {
     private readonly explanationCache: ExplanationCacheService,
     private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
     private readonly pointsService: PointsService,
+    private readonly masteryService: MasteryService,
   ) {}
+
+  /**
+   * 题中心判题的**统一出口收尾**：把本次对错交给掌握度回写（spec §4.8）。
+   *
+   * 为什么放在出口、而不是「算出 isCorrect 之后」：
+   *   空答案（路由 0）与主观题 self_assess 两条路径都是**早退**且 isCorrect=null，
+   *   规则②「isCorrect 为 null 不写」统一由 `MasteryService` 内部守——
+   *   调用点**不做**这个判断，否则同一条规则会有两份实现、早晚漂移。
+   *
+   * 为什么 `void` 而不是 `await`：判题是主链路，掌握度是派生数据，
+   * 一次取 KP + N 次 UPSERT 的往返不该拖长学生等待（失败只 warn，见 MasteryService 规则④）。
+   */
+  private finishJudge(studentId: number, out: JudgeOutput): JudgeOutput {
+    void this.masteryService.recordFromJudge({
+      studentId,
+      questionId: out.questionId,
+      isCorrect: out.isCorrect,
+    });
+    return out;
+  }
 
   /** 题中心判题（训练模块专用入口）。q 恒非空，无「未命中 AI+结构化」分支。 */
   async judgeQuestion(input: JudgeCoreQuestionInput): Promise<JudgeOutput> {
@@ -158,7 +180,7 @@ export class JudgeCoreService {
     // 空答案题落到 AI 判定会产生无依据判错 + 错题 level 提升；主观题空答案则无
     // 参考答案可自评。不计对错、不入错题本、不触发解析生成。
     if (!q.answer || !q.answer.trim()) {
-      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 };
+      return this.finishJudge(input.studentId, { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 });
     }
 
     if (EXACT_ONLY_TYPES.has(q.type)) {
@@ -172,7 +194,7 @@ export class JudgeCoreService {
     } else if (SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess') {
       // 路由 1c（判题体系重构 2026-09-09）：主观题 self_assess 模式 -> 不判对错。
       // 参考答案/解析随判题返回（前端当场展开自评）；错题本与清零由自评端点处理。
-      return {
+      return this.finishJudge(input.studentId, {
         questionId: q.id,
         isCorrect: null,
         method: 'self_assess',
@@ -182,7 +204,7 @@ export class JudgeCoreService {
         referenceAnswer: q.answer,
         explanation: q.explanation,
         pointsAwarded: 0,
-      };
+      });
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof -> AI 判定
       const questionType = q.type === 'proof' ? 'proof' : 'calculation';
@@ -237,7 +259,7 @@ export class JudgeCoreService {
       }
     }
 
-    return { questionId: q.id, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason };
+    return this.finishJudge(input.studentId, { questionId: q.id, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason });
   }
 
   /**

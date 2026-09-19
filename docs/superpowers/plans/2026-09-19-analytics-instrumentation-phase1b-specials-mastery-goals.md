@@ -1196,12 +1196,15 @@ export class StudentKnowledgeMasteryRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
   /**
-   * 判题后 UPSERT 一条（spec §4.8 的 SQL，逐字对齐）。
+   * 判题后 UPSERT 一条（spec §4.8）。
    *
    * 用 `AS new` 别名而不是 `VALUES()`（后者在 MySQL 8.0.20+ 已废弃）。
-   * 首次插入时 score/level 由**本次**的对错给出（答对 1.0/5、答错 0.0/0）；
-   * 命中已有行时 SQL 会用**累计后**的计数重算它们（故传入的这两个值只在首插生效）。
-   * 分母 `NULLIF(..., 0)` 防除零（首插时分子分母都非零，防御的是极端历史数据）。
+   * 首次插入时 score/level 由**本次**的对错给出（答对 1.0/5、答错 0.0/0）。
+   *
+   * ⚠️ **2026-09-22 执行期实测订正**（原 snippet 有 bug，已同步改 spec §4.8）：
+   *   MySQL 的 ODKU SET 子句**从左到右求值，后面的表达式读到的是前面刚写入的值**。
+   *   故（a）计数列必须写在 score/level 之前；（b）score/level 里**绝不能再写 `+ new.correct_count`**，
+   *   否则本次增量算两遍——实测 1 对 + 1 错本应 0.500，旧式得 **0.333**，且会被后续判题持续放大。
    */
   async upsertOnJudge(studentId: number, knowledgePointId: number, isCorrect: boolean): Promise<void> {
     const correctDelta = isCorrect ? 1 : 0;
@@ -1215,12 +1218,10 @@ export class StudentKnowledgeMasteryRepository {
        ON DUPLICATE KEY UPDATE
          correct_count = student_knowledge_mastery.correct_count + new.correct_count,
          error_count   = student_knowledge_mastery.error_count   + new.error_count,
-         mastery_score = (student_knowledge_mastery.correct_count + new.correct_count)
-                       / NULLIF(student_knowledge_mastery.correct_count + new.correct_count
-                              + student_knowledge_mastery.error_count + new.error_count, 0),
-         level         = FLOOR(5 * ((student_knowledge_mastery.correct_count + new.correct_count)
-                       / NULLIF(student_knowledge_mastery.correct_count + new.correct_count
-                              + student_knowledge_mastery.error_count + new.error_count, 0))),
+         mastery_score = student_knowledge_mastery.correct_count
+                       / NULLIF(student_knowledge_mastery.correct_count + student_knowledge_mastery.error_count, 0),
+         level         = FLOOR(5 * (student_knowledge_mastery.correct_count
+                       / NULLIF(student_knowledge_mastery.correct_count + student_knowledge_mastery.error_count, 0))),
          last_seen_at  = NOW(3)`,
       [studentId, knowledgePointId, correctDelta, errorDelta, score, level],
     );
@@ -1434,6 +1435,9 @@ export class MasteryService {
 ```
 
 > ⚠️ **必须 `await`** 吗？不必——它是「派生数据、失败只 warn」，可以 `void`。但 `judgeQuestion` 是 `async`，直接 `await` 会让判题多两次 DB 往返（取 KP + UPSERT）。**选 `void`**（fire-and-forget），并加注释说明为什么：主链路延迟不该被埋点拖长。测试要相应改成「等一个微任务」再断言（见 Step 8）。
+>
+> **2026-09-22 执行期调整（已实现，勿改回）**：`judgeQuestion` 里**不只有一个**返回点——路由 0（题目无标准答案）与路由 1c（主观题 self_assess）都是 **isCorrect=null 的早退**。若只在最后那个统一 `return` 前插一行，这两条路径就绕过了掌握度回写，Step 8 的第 2 条用例也永远不可能绿。
+> 实现改为抽一个私有出口方法 `finishJudge(studentId, out)`（`void` 回写 + 原样返回 `out`），三个返回点一律 `return this.finishJudge(input.studentId, {...})`。好处：调用点仍然**不做** `isCorrect === null` 判断（规则②只留在 `MasteryService` 里，杜绝两处漂移），且服务只被调一次。
 
 **(b)** `practice.module.ts`：`providers` 加 `StudentKnowledgeMasteryRepository` 与 `MasteryService`；`exports` 加 `MasteryService`（供将来别的模块复用，与 `ExplanationCacheService` 同款做法）。**注意**：`StudentKnowledgeMasteryRepository` 只在本模块 provide 一次（重复 provide 会得到两份实例）。
 
@@ -1468,6 +1472,12 @@ export class MasteryService {
     });
   });
 ```
+
+> ⚠️ **2026-09-22 执行期订正**：上面第 2 条用例的夹具必须让 `isCorrect` **真的是 null**。
+> 路由 0 的守卫看的是**题目**有没有标准答案（`!q.answer`），不是学生答案空不空——
+> 拿一个 `answer: 'A'` 的 choice 题配 `studentAnswer: ''` 只会得到 `isCorrect: false`（判错），用例会假绿/假红。
+> 实现时应把 `questionsRepo.findById` 返回成 `{ id: 10, type: 'choice', answer: '' }`（题目无标准答案 → 路由 0 → null）；
+> 另建议再补一条主观题 `self_assess` 路径（`type: 'short_answer'`）的同构断言，两条早退路径都钉住。
 
 > 若该文件既有的用例用 `mkService` 而非 `mkSvc`，按实际名字来。
 
