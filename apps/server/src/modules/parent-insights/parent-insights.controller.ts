@@ -19,6 +19,8 @@ import { ErrorsService } from './errors.service.js';
 import type { ErrorsQuery } from './errors.service.js';
 import { ChatLogsService } from './chat-logs.service.js';
 import type { ChatLogsQuery } from './chat-logs.service.js';
+import { StudyTimeService } from './study-time.service.js';
+import type { StudyTimeSummary, TodayUsageSummary } from './dto/parent-insights.dto.js';
 import type {
   LearningReport,
   ParentChatLogDetail,
@@ -53,6 +55,7 @@ export class ParentInsightsController {
     private readonly reportService: ReportService,
     private readonly errorsService: ErrorsService,
     private readonly chatLogsService: ChatLogsService,
+    private readonly studyTimeService: StudyTimeService,
   ) {}
 
   /** P6.1 家长仪表盘：一次返回名下所有孩子的概览（含各自的按学科卡片）。 */
@@ -134,5 +137,33 @@ export class ParentInsightsController {
   ): Promise<ParentChatLogDetail> {
     await this.parentService.requireOwnedStudent(user.sub, studentId);
     return this.chatLogsService.getChatLog(studentId, dialogueId);
+  }
+
+  /**
+   * 学习时长（spec §8.2）。`from`/`to` 形如 `YYYY-MM-DD`，缺省近 7 天；
+   * 非法值**宽容回落**默认窗口，不 400（与 `period` 的处理一致）。
+   *
+   * ⚠️ 这个端点的数字与 `dashboard` 里的 `activeDays7` 是**两套口径**（spec §10）。
+   * 不要为了「看起来一致」把任何一个改掉。
+   */
+  @Get('students/:studentId/study-time')
+  async getStudyTime(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ): Promise<StudyTimeSummary> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    return this.studyTimeService.getStudyTime(studentId, from, to);
+  }
+
+  /** 今日已用时长（spec §8.2）——用于和 `controls.daily_time_limit_minutes` 比较。 */
+  @Get('students/:studentId/today-usage')
+  async getTodayUsage(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+  ): Promise<TodayUsageSummary> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    return this.studyTimeService.getTodayUsage(studentId);
   }
 }
