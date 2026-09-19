@@ -52,7 +52,7 @@
 
 | 文件 | 改动 |
 |---|---|
-| `tools/db/schema.sql` | 新增 §15 两张表；`llm_models` 加两个价格列 |
+| `tools/db/schema.sql` | 新增 §14 两张表；`llm_models` 加两个价格列 |
 | `apps/server/src/database/repositories/llm-models.repo.ts` | `LlmModelRow`/`LlmModel` 加价格；`create`/`update`/`mapRow` 带上 |
 | `apps/server/src/database/repositories/index.ts` | 导出两个新 repo 与类型 |
 | `apps/server/src/ai-core/infra/model-config-registry.ts` | `costPer1K` 从 DB 价格列来（不再写死 `{0,0}`） |
@@ -78,7 +78,7 @@
 
 **Files:**
 - Create: `tools/db/migrations/2026-09-20_analytics_ledger.sql`
-- Modify: `tools/db/schema.sql`（`llm_models` 定义 + 末尾新增 §15）
+- Modify: `tools/db/schema.sql`（`llm_models` 定义 + 末尾新增 §14）
 
 **Interfaces:**
 - Consumes: 无
@@ -209,11 +209,11 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
   is_enabled TINYINT(1) NOT NULL DEFAULT 1,
 ```
 
-**2b.** 在 `training_sessions` 之后、`-- 14.（已移除）updated_at 自动触发器` 之前（约 `schema.sql:1154`）插入新段落——内容就是把 Step 1 里的两个 `CREATE TABLE` 原样粘贴，前面加段落头：
+**2b.** 在 `training_sessions` 之后、`-- 15.（已移除）updated_at 自动触发器` 之前（约 `schema.sql:1154`）插入新段落——内容就是把 Step 1 里的两个 `CREATE TABLE` 原样粘贴，前面加段落头：
 
 ```sql
 -- ============================================================
--- 15. 埋点与账本（2026-09-20，埋点 Phase 0）
+-- 14. 埋点与账本（2026-09-20，埋点 Phase 0）
 -- ============================================================
 -- 见 tools/db/migrations/2026-09-20_analytics_ledger.sql 的头部注释（口径与幂等说明）。
 ```
