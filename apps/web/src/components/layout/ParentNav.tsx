@@ -1,17 +1,138 @@
+import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LogoutButton } from '@/components/base';
 
-const navItems = [
-  { to: '/parent/messages', label: '消息' },
-  { to: '/parent/students', label: '学生账号' },
-  { to: '/parent/dashboard', label: '仪表盘' },
-  { to: '/parent/report', label: '学情报告' },
-  { to: '/parent/errors', label: '错题查看' },
-  { to: '/parent/chat-logs', label: 'AI 对话回放' },
-  { to: '/parent/goals', label: '目标设定' },
-  { to: '/parent/controls', label: '行为管控' },
-  { to: '/parent/rewards', label: '奖励管理' },
-  { to: '/parent/account', label: '账号设置' },
+/**
+ * 线性 SVG 图标的统一外壳（`style.md` §2：图标仅限功能图标、必须是线性 SVG、禁用 emoji）。
+ *
+ * ⚠️ 这些图标**不是装饰**，是窄屏下的唯一可辨识信息：侧栏在 `<lg` 时收成 64px 图标栏，
+ * 标签是 `hidden lg:inline`。**在补图标之前，这一栏在窄屏下是 10 行空白**——家长根本看不出
+ * 哪行是哪个入口（2026-09-20 用户实际走查时因此找不到「目标设定」）。
+ * 所以删改导航项时必须同时给它一个图标，别再出现「只有文字、没有图标」的项。
+ */
+function Icon({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="w-5 h-5 shrink-0"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
+  {
+    to: '/parent/messages',
+    label: '消息',
+    icon: <Icon><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z" /></Icon>,
+  },
+  {
+    to: '/parent/students',
+    label: '学生账号',
+    icon: (
+      <Icon>
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3 20a6 6 0 0 1 12 0" />
+        <path d="M17 11a3 3 0 1 0-2.5-4.7" />
+        <path d="M21 20a5 5 0 0 0-4-4.9" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/dashboard',
+    label: '仪表盘',
+    icon: (
+      <Icon>
+        <rect x="3" y="3" width="7" height="9" rx="1" />
+        <rect x="14" y="3" width="7" height="5" rx="1" />
+        <rect x="14" y="12" width="7" height="9" rx="1" />
+        <rect x="3" y="16" width="7" height="5" rx="1" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/report',
+    label: '学情报告',
+    icon: (
+      <Icon>
+        <line x1="6" y1="20" x2="6" y2="12" />
+        <line x1="12" y1="20" x2="12" y2="5" />
+        <line x1="18" y1="20" x2="18" y2="9" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/errors',
+    label: '错题查看',
+    icon: (
+      <Icon>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9 9l6 6M15 9l-6 6" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/chat-logs',
+    label: 'AI 对话回放',
+    icon: (
+      <Icon>
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v5h5" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/goals',
+    label: '目标设定',
+    icon: (
+      <Icon>
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="5" />
+        <circle cx="12" cy="12" r="1" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/controls',
+    label: '行为管控',
+    icon: (
+      <Icon>
+        <line x1="4" y1="7" x2="20" y2="7" />
+        <circle cx="9" cy="7" r="2" />
+        <line x1="4" y1="17" x2="20" y2="17" />
+        <circle cx="15" cy="17" r="2" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/rewards',
+    label: '奖励管理',
+    icon: (
+      <Icon>
+        <rect x="3" y="8" width="18" height="4" rx="1" />
+        <path d="M5 12v8h14v-8" />
+        <path d="M12 8v12" />
+      </Icon>
+    ),
+  },
+  {
+    to: '/parent/account',
+    label: '账号设置',
+    icon: (
+      <Icon>
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="10" r="3" />
+        <path d="M6.5 19a6 6 0 0 1 11 0" />
+      </Icon>
+    ),
+  },
 ];
 
 export function ParentNav() {
@@ -33,6 +154,9 @@ export function ParentNav() {
           <NavLink
             key={item.to}
             to={item.to}
+            // 窄屏（<lg）标签被 CSS 隐藏，靠 title 悬停提示 + aria-label 让入口仍可辨识
+            title={item.label}
+            aria-label={item.label}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm
               ${
@@ -42,6 +166,7 @@ export function ParentNav() {
               }`
             }
           >
+            {item.icon}
             <span className="hidden lg:inline">{item.label}</span>
           </NavLink>
         ))}
