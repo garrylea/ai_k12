@@ -139,14 +139,18 @@ export interface ParentErrorQuestion {
 /**
  * 家长端错题一行（只读）。
  *
- * `track` 由 `source` 现算、**不落库**：`source === 'auxiliary'` → `'aux'`，其余 → `'main'`。
- * 与 `openapi` 原 `ErrorItem` 的差别：`source` enum 按**实际 5 个值**修正（原 enum 只有
+ * `track` 由 `source` 现算、**不落库**，分档表在 `parent-insights.repo.ts` 的
+ * `TRACK_SOURCES`（唯一真源）：
+ *   - `main` = `practice | discuss | exam`（主线：课堂练习 / 讨论 / 考试）
+ *   - `training` = `targeted | error_practice | auxiliary`（训练轨错题 + 辅线答疑里问过的题）
+ *
+ * 与 `openapi` 原 `ErrorItem` 的差别：`source` enum 按**实际 6 个值**修正（原 enum 只有
  * `homework/unit_test/midterm/final/auxiliary/practice/discuss`，缺 `exam`/`targeted`/`error_practice`）。
  */
 export interface ParentErrorItem {
   id: number;
   questionId: number | null;
-  track: 'main' | 'aux';
+  track: 'main' | 'training';
   source: string;
   level: number;
   isCleared: boolean;
@@ -203,4 +207,30 @@ export interface ParentChatLogPage {
   page: number;
   pageSize: number;
   total: number;
+}
+
+/**
+ * 学习时长（spec §8.2）。`source: 'sessions'` 是**口径标记**：家长端同时存在
+ * 「活跃天数」（四路时间戳代理）与「学习时长」（显式会话）两套口径，UI 必须能区分，
+ * 见 spec §10 的第 1 条硬约束。
+ */
+export interface StudyTimeSummary {
+  totalSeconds: number;
+  /** 会话口径的「有学习的天数」，与旧 `activeDays7` **刻意不同**。 */
+  activeDays: number;
+  byDay: Array<{ date: string; seconds: number }>;
+  byModule: Array<{ module: string; seconds: number }>;
+  /** 只含 `subject_id IS NOT NULL` 的会话；没选学科的会话不进这张表。 */
+  bySubject: Array<{ subjectId: number; seconds: number }>;
+  source: 'sessions';
+}
+
+/** 今日已用时长（spec §8.2）。`limitMinutes: null` = 家长未设限。 */
+export interface TodayUsageSummary {
+  date: string;
+  activeSeconds: number;
+  limitMinutes: number | null;
+  /** `>=` 判定：用满上限即算超出（管控语义是「该停了」）。 */
+  exceeded: boolean;
+  byModule: Array<{ module: string; seconds: number }>;
 }

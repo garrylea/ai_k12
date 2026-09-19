@@ -7,9 +7,12 @@ import ChartBar from '@/components/business/parent/ChartBar';
 import {
   ApiError,
   getParentReport,
+  getParentStudyTime,
   type ParentLearningReport,
   type ParentReportPeriod,
+  type ParentStudyTime,
 } from '@/services/api';
+import { formatDuration } from '@/utils/duration';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
 const PERIODS: Array<{ key: ParentReportPeriod; label: string }> = [
@@ -76,6 +79,40 @@ export default function ParentReportPage() {
       cancelled = true;
     };
   }, [studentId, period, reload]);
+
+  const [study, setStudy] = useState<{ studentId: number; period: ParentReportPeriod; value: ParentStudyTime } | null>(null);
+  /**
+   * 与报告同一条纪律：值按 `studentId + period` 现算，不在 effect 里清空。
+   * 学习时长是**增值信息**——取不到就整块走 `studyValue === null` 的空态，不影响报告主体。
+   */
+  const studyValue =
+    study && study.studentId === studentId && study.period === period ? study.value : null;
+  /**
+   * byDay 与 totalSeconds 走同一个「有效会话」谓词，故 **byDay 为空 ⟹ totalSeconds 为 0**。
+   * ⚠️ 反向**不成立**（别据此把守卫「简化」成 `totalSeconds === 0`）：`active_seconds = 0`
+   * 的会话——打开页面、任何心跳增量累计前就离开——会给出非空的 byDay 而 totalSeconds 仍为 0。
+   * 那时改判 0 会在「有学习的天数 1 天」旁边印出「暂无数据」，比现在这个 bug 更糟。
+   * 用数组长度判空而不是 `totalSeconds === 0`：它同时决定柱状图是否为空，避免卡内两处口径打架。
+   * 无会话时不能说「不足 1 分钟」——那读起来像「学了点」，真相是「什么都没学」。
+   */
+  const hasStudy = studyValue !== null && studyValue.byDay.length > 0;
+
+  useEffect(() => {
+    // 窗口要等报告回来才知道（服务端算的，前端不重复实现窗口逻辑）
+    if (studentId === null || !data) return;
+    let cancelled = false;
+    void getParentStudyTime(studentId, data.windowStart, data.windowEnd)
+      .then((res) => {
+        if (cancelled) return;
+        setStudy({ studentId, period, value: res });
+      })
+      .catch(() => {
+        // 增值信息：取不到就整块不渲染（下方 studyValue === null 分支），不打断报告
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, period, data]);
 
   if (studentId === null) {
     return (
@@ -152,6 +189,10 @@ export default function ParentReportPage() {
               <StatCard label="正确率" value={formatRate(data.stats.rate)} />
               <StatCard label="答题数" value={String(data.stats.answered)} />
               <StatCard label="活跃天数" value={String(data.stats.activeDays)} />
+              <StatCard
+                label="学习时长（会话）"
+                value={hasStudy ? formatDuration(studyValue.totalSeconds) : '暂无数据'}
+              />
               <StatCard label="自评次数" value={String(data.stats.selfAssessCount)} />
               <StatCard label="新进错题本" value={String(data.stats.errorsAdded)} />
               <StatCard label="清零错题" value={String(data.stats.errorsCleared)} />
@@ -179,6 +220,31 @@ export default function ParentReportPage() {
               }))}
               emptyText="本期还没有答题记录"
             />
+          </Card>
+
+          <Card className="p-5" data-testid="report-study-time">
+            <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">
+              每日学习时长
+              <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
+                （分钟；会话口径，只统计进入学习页且有操作的时间）
+              </span>
+            </h2>
+            {!hasStudy ? (
+              <p className="text-sm text-[var(--text-secondary)]">暂无学习时长数据</p>
+            ) : (
+              <>
+                <p className="mb-3 text-sm text-[var(--text-secondary)]">
+                  {`本期合计 ${formatDuration(studyValue.totalSeconds)}，会话口径下有学习的天数 ${studyValue.activeDays} 天`}
+                </p>
+                <ChartBar
+                  points={studyValue.byDay.map((d) => ({
+                    label: shortDay(d.date),
+                    value: Math.round(d.seconds / 60),
+                  }))}
+                  emptyText="本期还没有学习会话"
+                />
+              </>
+            )}
           </Card>
 
           <Card className="p-5" data-testid="report-weak-points">

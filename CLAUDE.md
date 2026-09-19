@@ -26,10 +26,10 @@ docs/                 — PRD, API 设计, UX/UI, DB 设计, 数据管线文档
 npm run dev        # Vite dev server at http://localhost:5173
 npm run build      # tsc -b + vite build
 npm run lint       # ESLint for .ts/.tsx
-npm test           # vitest（107 tests）
+npm test           # vitest（676 tests / 72 files）
 
 # apps/server/
-npm test           # vitest（748 tests / 67 files）
+npm test           # vitest（1263 tests / 103 files）
 npm run build      # tsc + scripts/copy-assets.mjs（把 ai-core 的 yaml 与 prompts 复制进 dist）
 npx tsx src/ai-core/__tests__/safety-classification.ts   # 确定性安全回归，无需 API Key
 
@@ -101,6 +101,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **派生状态必须带 `studentId` 归属**：家长端切孩子不重挂载、`useState` 跨孩子存活，只按自身维度守卫会在切换首帧画出上个孩子的数据（`useEffect(reset)` 救不了——它在 commit 之后才跑）；派生值必须与 `studentId` 一起存、读取时一并比较。
 - **列表页换孩子必须回第 1 页**：否则带「上个孩子的第 N 页」请求新孩子，页数不够时停在空态且分页控件只在非空分支渲染（家长无法自救）；加 `useEffect(() => setPage(1), [studentId])`。
 - **埋点不得影响请求**：analytics 日志走内存 buffer——满时丢最旧、失败批次直接丢弃不重试、**永不抛**；ledger / request-log 写入**绝不在请求路径上 await**。
+- **埋点（学习会话）的两条纪律**：`active_seconds` **只由服务端**按 `last_heartbeat_at` 差值累加、**单次封顶 45s**、且只在上一状态为 visible 时计（客户端上报的秒数一律不采信；不封顶时「关标签 2 小时」会被算成 2 小时）。埋点写入**永不阻断主链路**：三个采集端点的失败由**前端传输层吞掉**（`analytics/tracker.ts` 全 `.catch(() => {})`，故端点允许 DB 失败直接 500），而**嵌在业务流里**的埋点写入（如家长 GET 里的 `closeStale`）必须 catch、失败只 warn。家长端「学习时长（会话）」与既有「近 7 天活跃天数」是**两套口径、并存不替换**（spec §10），UI 必须并列展示并区分文案。
 - **`input_tokens` / `output_tokens` 可为 NULL，NULL = 量不到**：量不到就写 NULL，**绝不写 0**——否则报表无法区分「缺口」与「真实读数」（本期只记 token，不记价格/成本）。
 
 ## 数据管线（tools/data-refinery）

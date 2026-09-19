@@ -128,6 +128,64 @@ describe('ParentChatLogsPage', () => {
     expect(screen.getByTestId('chatlog-reasoning-202')).toHaveTextContent('开口向上取最小值');
   });
 
+  it('AI 回复走共享渲染：$..$ 出 KaTeX、原生 HTML 表格成为真表格、无 katex-error', async () => {
+    getDetailMock.mockResolvedValue({
+      ...DETAIL,
+      messages: [
+        {
+          ...DETAIL.messages[1],
+          // 表格独占一行（前后空行）→ 块级 HTML，避免 <table> 嵌进 <p> 的非法嵌套
+          content: '抛物线 $y=x^2$ 的顶点\n\n<table><tr><th>a</th><td>1</td></tr></table>',
+          reasoning: null,
+        },
+      ],
+    });
+
+    const { container } = renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+
+    const row = await screen.findByTestId('chatlog-message-202');
+    expect(container.innerHTML).toContain('class="katex"');
+    expect(container.innerHTML).not.toContain('katex-error');
+    expect(row.querySelector('table')).not.toBeNull();
+    expect(row).not.toHaveTextContent('<table>');
+  });
+
+  it('孩子的话原样显示（不走 markdown）——与学生端辅线答疑一致，`2*3*4` 不被吃成斜体', async () => {
+    getDetailMock.mockResolvedValue({
+      ...DETAIL,
+      messages: [{ ...DETAIL.messages[0], content: '2*3*4 等于多少', reasoning: null }],
+    });
+
+    renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+
+    const row = await screen.findByTestId('chatlog-message-201');
+    expect(row).toHaveTextContent('2*3*4 等于多少');
+    // 若孩子的话被当 markdown 渲染，`*3*` 会变成 <em>
+    expect(row.querySelector('em')).toBeNull();
+  });
+
+  it('AI 思路走 markdown（公式渲染，且保留换行）', async () => {
+    getDetailMock.mockResolvedValue({
+      ...DETAIL,
+      messages: [{ ...DETAIL.messages[1], content: '见下', reasoning: '两边同时除 $2$' }],
+    });
+
+    const { container } = renderAt('/parent/chat-logs');
+    await screen.findByTestId('chatlog-item-55');
+    fireEvent.click(screen.getByTestId('chatlog-item-55'));
+    await screen.findByTestId('chatlog-message-202');
+
+    fireEvent.click(screen.getByRole('button', { name: /看 AI 思路/ }));
+    const reasoning = screen.getByTestId('chatlog-reasoning-202');
+    expect(reasoning.innerHTML).toContain('class="katex"');
+    expect(reasoning).toHaveTextContent('两边同时除');
+    expect(container.innerHTML).not.toContain('katex-error');
+  });
+
   it('轨道筛选透传（选辅线答疑）', async () => {
     renderAt('/parent/chat-logs');
     await screen.findByTestId('chatlog-item-55');

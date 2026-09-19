@@ -8,6 +8,32 @@
 
 ---
 
+## 2026-09-19 家长端错题轨道改 主线/训练 + 两页富文本渲染修正
+
+- **`GET /api/parent/students/:id/errors` 的 `track` 由 `main|aux` 改为 `main|training`**（契约变更，API 设计文档 §4.13 与 `openapi.yaml` 已同步）。分档表 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：`main` = `practice|discuss|exam`；`training` = `targeted|error_practice|auxiliary`。
+- **为什么改**：旧 `main` 用反向排除（`source <> 'auxiliary'`），孩子**在辅线答疑里问过**的题（`source='auxiliary'`）自成一条「辅线」轨。但这些题会进训练轨「错题练习」池（`findErrorBookEntries` 不过滤 source），孩子能在那里做对清零——它的归处是**训练**，不该单列一轨。UI Tab 现为 全部 / 主线 / 训练。
+- **分档改成白名单 + 分区测试**：反向排除只能表达「非 A 即 B」，两档各是一组来源时会把来源归错档。改为白名单的代价是「未登记的 source 两档都搜不到（只剩全部可见）」；由 `TRACK_SOURCES` 的分区测试兜底——它枚举 `ALL_ERROR_SOURCES` 断言每个来源恰好归某一档，**新增来源不入册即红**，比静默归错档安全。
+- **不清零/不参与的边界没变**：`auxiliary` 题**能**被清零（`clearUnclearedByStudentQuestionId` 明确「不限 source」），所以它计入「未清零错题数」与「薄弱知识点」是**正确的**——曾经误判为「泄漏」，实为该设计自洽的前提。唯一真正的缺口是家长端多出来的那条「辅线」轨。
+- **两处富文本渲染修正**（家长端未走共享配置，`markdown.tsx` 文件头要求的「所有 ReactMarkdown 使用点都从这里取」）：
+  - AI 对话回放：AI 回复与「AI 思路」改走 `@/components/markdown`（KaTeX + 原生 HTML 表格 + 图片 + `preprocessMarkdown` 修残缺 HTML）。**孩子的发言仍原样显示**——学生端 `AuxChatPanel` 也是原样，渲染 markdown 会让孩子输入的 `2*3*4` 被吃成斜体，且家长会看到孩子没看到过的排版。
+  - 错题查看：题面改走共享配置。
+- **「学生作答」行删除（字段名历史误导）**：`main_error_books.wrong_answer_text` 装的**不是**学生作答，而是「题库未命中时保存的题面原文」（`judge-core.service.ts`：`questionId === null ? input.questionText : null`），`questionId` 非空时恒为 null——本地 140 条全部如此，旧版页面因此**每行都显示「学生作答：（空）」**，会被家长读成"孩子什么都没写"。现改为：有 `question.content` 用它，否则把 `wrongAnswerText` 当**题面**兜底显示。库里从未存过学生作答文本，需要真正的作答展示得另立数据源。
+
+---
+
+## 2026-09-21 埋点 Phase 1A：学习时长端到端
+
+- 新增 `study_sessions`（迁移 `2026-09-21_study_sessions.sql` + `schema.sql`；列 / 索引 / 三条口径见数据库设计文档 §3.16）与三个采集端点 `POST /api/study-sessions`、`PATCH /api/study-sessions/:uid/heartbeat`、`PATCH /api/study-sessions/:uid/end`（API 设计文档 §4.23、数据流 §6.25、契约 `openapi.yaml`）。家长端新增 `GET /api/parent/students/:id/study-time`、`/today-usage`（§4.13）。
+- **`active_seconds` 只由服务端累计，单次封顶 45s**：心跳时按 `last_heartbeat_at → NOW(3)` 差值增量，且只在**上一状态为 visible** 时计（hidden 暂停）。**理由（会被反复问，记死）**：不封顶时，用户关掉标签页 2 小时后若有一次迟到心跳，差值会把整段 2 小时算成学习时长；封顶后最坏只多算 45s（心跳间隔 30s + 15s 抖动余量）。客户端上报的秒数**一律不采信**。`GREATEST(0, ...)` 兜住时钟回拨。
+- **`closeStale` 惰性收尾**：用户直接关标签 / 断网时不会有 `end` 请求，会话会永远停在 `active`、「今日已用」永远不更新。家长端读前（传 `studentId`）把「`active` 且心跳超 5 分钟」收为 `ended`，`ended_at = last_heartbeat_at`（**不是 `NOW`**——最后 5 分钟实际状态未知，不能白送时长）。`studentId` 可选的**全库收尾形态是预留入口**：当前**无调用方**、夜间定时任务**未实现**（仓库里没有 `@nestjs/schedule` / `@Cron` 等调度器），参数留着给后续阶段用。家长端调用处**吞异常**（失败只 warn），收尾失败绝不该把家长页打成 500。
+- **§10 并存不替换（硬约束）**：家长端新的「学习时长（会话）」与既有「近 7 天活跃天数」（`practice_results ∪ point_ledger ∪ exam_sessions ∪ ai_messages` 的四路时间戳代理）是**两套口径、并存不替换**，数字会明显不同。UI 必须**并列展示 + 区分文案**，响应里用 `source: 'sessions'` 标口径。**不要为了「看起来一致」把任何一个改掉**。
+- **前端 `analytics/` 本批只做会话生命周期**（start / heartbeat / end + 设备分档 + 状态机）；`behavior_events` 表与 `POST /api/track/events` **有意留到 Phase 2**（表尚不存在，提前开端点只会得到 500）。家长端 / 管理端 `setEnabled(false)`，本批不启动会话追踪。
+- **`subject_id` 的来源改了（与 spec §7.3 原写法有偏差，已修正）**：spec 原写「`subject_id` 从 `useLearnContextStore` 取」，但该 store 原先只有 `subjectName` 等展示字段、**并不携带数字 id**。本批把 store 扩展为带数字 `subjectId`，并注明**不能从路由 state 取**——路由 state 只有在「从星图进入」时才带并当次写入 store，直接刷新 / 深链根本走不到那次写入。埋点经 `tracker.setSubjectIdProvider()` 读 store，不让 tracker 直接依赖 store。
+- **iPad 校正**：iPadOS 13+ 的 Safari UA 写 `Macintosh`，只看 UA 必然把 iPad 判成 Mac（而 iPad 横屏是主断点）。服务端按「`platform_class == 'mac'` 且 `input_type == 'touch'` → `ipad`」校正。设备列只到**类别**，不存唯一标识、不存原始 UA；`platform_class` / `browser` 服务端解析、`screen_class` / `input_type` / `app_shell` 前端上报，**非法值落 NULL 不报错**。
+- **埋点写入的例外**：三个采集端点**允许 DB 失败直接 500**（前端传输层 `.catch(() => {})` 吞掉，静默隐藏故障会让生产问题只能从日志排障）；而**嵌在别的业务流里**的埋点写入（如家长 GET 里的 `closeStale`）必须 catch、失败只 warn。
+
+---
+
 ## 2026-09-20 埋点 Phase 0：模型调用账本 + API 请求日志
 
 - 新增 `llm_call_logs`（每次 LLM 调用一行，记**输入/输出 token**、usage_source、重试尝试/失败/fallback）

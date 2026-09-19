@@ -85,9 +85,58 @@ export interface ExamSummaryRow {
  *
  * `from`/`to` 是 `YYYY-MM-DD`，`to` 用 `DATE_ADD(..., INTERVAL 1 DAY)` 做闭区间。
  */
+/**
+ * 错题的两档轨道（家长端「错题查看」的 Tab）。
+ *
+ * 2026-09-19 由 `main | aux` 改为 `main | training`：孩子**在辅线答疑里问过**的题会进
+ * 训练轨的「错题练习」池（`findErrorBookEntries` 不过滤 source），孩子能在那儿做对清零，
+ * 所以它在家长端的归属是**训练**，而不是自成一条「辅线」轨。
+ */
+export type ParentErrorTrack = 'main' | 'training';
+
+/**
+ * 已知的全部错题来源（`main_error_books.source`，DB 层是自由 `VARCHAR(20)`、无 enum，
+ * 这里是**唯一**的枚举处）。写入点：判题 `practice` / `discuss` / `exam` / `targeted` /
+ * `error_practice`，辅线答疑入库 `auxiliary`（`ai.service.ts`）。
+ */
+export const ALL_ERROR_SOURCES = [
+  'practice',
+  'discuss',
+  'exam',
+  'targeted',
+  'error_practice',
+  'auxiliary',
+] as const;
+
+/**
+ * `source` → 轨道档位的**唯一真源**（`buildErrorWhere` 的 IN 列表由它生成）。
+ *
+ * 为什么改成白名单而不再用反向排除（旧 `main` 曾写作 `source <> 'auxiliary'`）：
+ * 反向排除只能表达「非 A 即 B」；现在两档各自是一组来源，硬凑成反向排除会把来源
+ * 归错档。代价是**未登记的 source 两档都不进**——由分区测试兜底：它枚举
+ * `ALL_ERROR_SOURCES` 断言每个来源恰好属于一档且并集无遗漏，新增来源不入册即红。
+ * 「测试红了逼你登记」比「静默归错档」好。
+ */
+export const TRACK_SOURCES: Record<ParentErrorTrack, readonly string[]> = {
+  // 主线：课堂练习 / 卡片讨论 / 考试（PRD §6.1，错题进主线错题本）
+  main: ['practice', 'discuss', 'exam'],
+  // 训练：训练轨自身产生的错题 + 辅线答疑里孩子问过的题（都进训练轨错题练习池）
+  training: ['targeted', 'error_practice', 'auxiliary'],
+};
+
+/**
+ * 由 `source` 现算轨道，供响应字段用——与 `TRACK_SOURCES` **同源**，不另写一份映射。
+ *
+ * 未登记的 source 兜底归「主线」（沿旧响应的「其余 → main」语义）。正常运行期走不到
+ * 这条分支：`TRACK_SOURCES` 的分区测试要求每个已知来源都已登记。
+ */
+export function trackOfSource(source: string): ParentErrorTrack {
+  return TRACK_SOURCES.training.includes(source) ? 'training' : 'main';
+}
+
 export interface ParentErrorFilters {
   subjectId?: number;
-  track?: 'main' | 'aux';
+  track?: ParentErrorTrack;
   source?: string;
   cleared?: 'uncleared' | 'cleared';
   from?: string;
@@ -699,11 +748,11 @@ ${windowed.sql}
       conditions.push('meb.subject_id = ?');
       params.push(filters.subjectId);
     }
-    if (filters.track === 'aux') {
-      conditions.push("meb.source = 'auxiliary'");
-    } else if (filters.track === 'main') {
-      // 反向排除：新 source（homework/unit_test/...）自动归入主线，不会静默消失
-      conditions.push("meb.source <> 'auxiliary'");
+    if (filters.track) {
+      // IN 列表由 TRACK_SOURCES 生成（不写字面量）：改分档只改那一处。
+      const sources = TRACK_SOURCES[filters.track];
+      conditions.push(`meb.source IN (${sources.map(() => '?').join(', ')})`);
+      params.push(...sources);
     }
     if (filters.source) {
       conditions.push('meb.source = ?');

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ParentInsightsRepository } from './parent-insights.repo.js';
+import {
+  ALL_ERROR_SOURCES,
+  ParentInsightsRepository,
+  TRACK_SOURCES,
+} from './parent-insights.repo.js';
 
 /**
  * mockPool 模拟 mysql2 的 pool 双返回形状：[rows, fields]。
@@ -380,21 +384,35 @@ describe('ParentInsightsRepository：错题列表', () => {
     expect(pool.query.mock.calls[0][0]).toContain('meb.subject_id = ?');
   });
 
-  it('track=aux → source = auxiliary；track=main → source <> auxiliary（反向排除）', async () => {
+  it('track 白名单由 TRACK_SOURCES 生成：main 不含 auxiliary，training 不含 exam', async () => {
     const pool = mockPool([]);
     pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
     pool.query.mockResolvedValueOnce([[], []]);
     const repo = new ParentInsightsRepository(pool as any);
 
-    await repo.listParentErrors(9, { track: 'aux' }, 20, 0);
-    expect(pool.execute.mock.calls[0][0]).toContain("meb.source = 'auxiliary'");
+    await repo.listParentErrors(9, { track: 'main' }, 20, 0);
+    const mainSql = pool.execute.mock.calls[0][0] as string;
+    expect(mainSql).toContain('meb.source IN (?, ?, ?)');
+    // 参数里的 source 列表必须与常量同源，不能是手抄的字面量
+    expect(pool.execute.mock.calls[0][1]).toEqual([9, ...TRACK_SOURCES.main]);
+    // 孩子问过的题（auxiliary）属训练档，不能出现在主线档
+    expect(pool.execute.mock.calls[0][1]).not.toContain('auxiliary');
 
     pool.execute.mockClear();
     pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
-    await repo.listParentErrors(9, { track: 'main' }, 20, 0);
-    // 关键：不带具体的 source 值，未来新 source 自动归入主线，不会静默消失
-    expect(pool.execute.mock.calls[0][0]).toContain("meb.source <> 'auxiliary'");
-    expect(pool.execute.mock.calls[0][1]).toEqual([9]);
+    await repo.listParentErrors(9, { track: 'training' }, 20, 0);
+    expect(pool.execute.mock.calls[0][1]).toEqual([9, ...TRACK_SOURCES.training]);
+    expect(pool.execute.mock.calls[0][1]).toContain('auxiliary');
+    // 考试错题属主线档
+    expect(pool.execute.mock.calls[0][1]).not.toContain('exam');
+  });
+
+  it('source 分区不重不漏：每个已知 source 恰好归某一档', () => {
+    // 这条是 TRACK_SOURCES 的兜底：新增 source 只加进 main_error_books 却忘了登记档位，
+    // 会让它在家长端两个档里都搜不到（只剩「全部」能看到）——这条必须红。
+    const partitioned = [...TRACK_SOURCES.main, ...TRACK_SOURCES.training];
+    expect([...partitioned].sort()).toEqual([...ALL_ERROR_SOURCES].sort());
+    expect(new Set(partitioned).size).toBe(partitioned.length); // 无重复（一源一档）
   });
 
   it('cleared=cleared → is_cleared = 1；不传 → 不过滤清零态', async () => {

@@ -314,9 +314,11 @@
 | PUT | `/api/parent/students/{studentId}/subject-configs/{subjectId}` | 写入/切换该学科教材配置：`{ gradeCode, term, textbookVersionId? }`；versionId 缺省按默认规则选（同学段 edition 非空优先、id 大者优先）；已开始学习且版本/册别变化时**重置该学科学习状态**并返回 `reset: true`（错题/作业记录保留在库，不再展示/不阻塞门禁） | MVP |
 | GET | `/api/parent/dashboard` | 家长仪表盘：一次返回名下所有孩子的概览（`lastActiveAt` / `activeDays7` / `unreadAlerts`）+ 各自的按学科卡片（进度 / 正确率累计 / 自评 / 错题待清零 / 考试数）；实时聚合，不落库 | MVP |
 | GET | `/api/parent/students/{studentId}/reports` | **实时聚合学情报告（不落库、不调 LLM）**：`?period=weekly\|monthly`（默认 `weekly`，非法值归一化为 `weekly`）。返回 `stats` / `trend` / `subjects` / `weakPoints` / `weakPointsUncoveredCount` / `exams` | MVP |
-| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary) / `track`(main\|aux) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001 | MVP |
+| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary) / `track`(main\|training) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001。**轨道分档**（`source` → 档位，唯一真源 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary`。孩子**在辅线答疑里问过**的题（`auxiliary`）归 `training`——它进训练轨「错题练习」池、可被做对清零，故不再单列「辅线」档 | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs` | AI 对话回放列表（分页壳同 `errors`）。query：`track` / `scene` / `from` / `to` / `q`（**只搜会话标题**）/ `page`。**不提供学科筛选**（`ai_dialogues.subject_id` 约 76% 为 NULL） | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs/{dialogueId}` | 单条对话详情：逐句回放，含 `reasoning`（AI 思考链，默认折叠）与 `safetyFlag`（闲聊/偏离学习标记）；不回传 `token_*` / `response_time_ms` | MVP |
+| GET | `/api/parent/students/{studentId}/study-time` | **学习时长（会话口径）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400；`from > to` 自动交换）。响应 `{totalSeconds, activeDays, byDay:[{date,seconds}], byModule:[{module,seconds}], bySubject:[{subjectId,seconds}], source:'sessions'}`。**口径标注**：这是**显式会话**口径，与 `dashboard.activeDays7` 的**四路时间戳代理并存、不替换**（spec §10，详见 §6.25）——UI 必须并列展示 + 区分文案（如「学习时长（会话）」vs「活跃天数」），**不得悄悄换掉** | MVP |
+| GET | `/api/parent/students/{studentId}/today-usage` | **今日已用时长**（用于与 `controls.daily_time_limit_minutes` 比较）。响应 `{date, activeSeconds, limitMinutes\|null, exceeded, byModule:[{module,seconds}]}`。`limitMinutes` 取自 `controls.daily_time_limit_minutes`，**为 NULL = 家长未设限 → `exceeded=false`**（不是「超了」，也不是「用了 0 分钟」）；`exceeded` 用 `>=`（用满即算超出，管控语义是「该停了」）。「今日」由**应用层**算好本地日传入，不用 `CURDATE()`。读前会惰性收尾该学生的孤儿会话（失败只 warn、不 500） | MVP |
 | GET | `/api/parent/students/{studentId}/goals` | 学习目标列表 | MVP |
 | POST | `/api/parent/students/{studentId}/goals` | 创建目标 | MVP |
 | PATCH | `/api/parent/students/{studentId}/goals/{goalId}` | 更新目标 | MVP |
@@ -500,6 +502,22 @@
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
 | GET | `/api/points/levels` | **200**。全量 9 档，按 `threshold` 升序。响应：`{levels: [{code, name, index, threshold}]}`；`index` 从 0 起、与数组下标一致。前端**不得**自行维护段位表。 | MVP |
+
+### 4.23 StudySessions — `/api/study-sessions`（学习会话采集，student）
+
+学习时长的**采集端**（2026-09-21 埋点 Phase 1A）。全部端点 student JWT（`@Roles('student')`）；`studentId` 一律取自 JWT，端点**不接受任何「查哪个学生」的入参**。`session_uid` 由前端生成、是**幂等键**。`POST` 按 Nest 默认返回 **201**（本仓无 `@HttpCode` 覆盖，见 CLAUDE.md 同步规则 §5）。
+
+> **`POST /api/track/events` 不在本批**：`behavior_events` 表属 Phase 2（spec §12）。在表不存在的情况下提前开端点只会得到一个 500，故本批只做**会话生命周期**（start / heartbeat / end）。
+
+| 方法 | 路径 | 入参 | 校验与逻辑 | 返回 |
+|---|---|---|---|---|
+| POST | `/api/study-sessions` | `{sessionUid, module, scene, subjectId?, refType?, refId?, screenClass?, inputType?, appShell?}` | `sessionUid` 必填且必须是 **UUID 形状**（`8-4-4-4-12` 十六进制）→ 否则 1001。`module` / `scene` 必须在**封闭字典**内（后端 `STUDY_MODULES` / `STUDY_SCENES` 是唯一真源，前端 `sceneMap.ts` 只能取这里的值）→ 否则 1001。`subjectId` 若给，需是**在售学科**（本期**有意不校验**「学生是否有权学该学科」）→ 否则 1001。设备三项 `screenClass` / `inputType` / `appShell` **不做枚举校验**：命中白名单取原值，否则**落 NULL 且不报错**（设备信息是尽力而为）。`platformClass` / `browser` 由服务端从请求头 `User-Agent` 解析后落库，**不接受客户端上报**（伪造 UA 是弱信号，但至少比自报强）。**幂等**：同 `sessionUid` 重复 POST **返回既有会话**（不新建、不报错）；但该 uid 已被**别的学生**占用 → 1001「会话标识冲突」（静默返回别人的 `startedAt` 会让前端以为自己的会话在跑，后续心跳全会落空） | `{sessionUid, startedAt}` **201** |
+| PATCH | `/api/study-sessions/{uid}/heartbeat` | `{state:'visible'\|'hidden'}` | `state` 必填枚举 → 否则 1001。会话不存在 / 非本人 / 非 `active` → **静默 200 返回 `{activeSeconds: null}`**（不报错：心跳是尽力而为，报错只会污染前端日志）。服务端按 `last_heartbeat_at → NOW(3)` 差值累加 `active_seconds`，**只在上一状态为 visible 时计**（hidden 暂停计时），**单次封顶 45s**（理由见 §6.25） | `{activeSeconds: number\|null}` |
+| PATCH | `/api/study-sessions/{uid}/end` | `{reason}` | `reason` 必填枚举：`route_change` / `pagehide` / `idle_timeout` / `closed` / `hidden_timeout` → 否则 1001。先补计最后一段（**同心跳的封顶规则**，但不改 `client_state`），再落 `status='ended'` / `end_reason` / `ended_at=NOW(3)`。会话不存在 / 已结束 → **幂等返回现有值**（不报错、不重复计） | `{activeSeconds, endedAt}` |
+
+> **乐观锁**：心跳 / 结束两条 UPDATE 都带 `status = 'active'` 条件——会话一旦 `ended`，迟到的请求只影响 0 行，不会把已结算的秒数再动一遍。
+>
+> **埋点写入的例外**：这三个采集端点是**唯一**允许 DB 失败直接 500 的埋点路径（前端传输层会吞掉，见 §6.25）；而**嵌在别的业务流里**的埋点写入（如家长端 GET 里的 `closeStale`）必须 catch、失败只 warn、绝不 500。静默隐藏故障会让生产问题只能从日志排障。
 
 ---
 
@@ -1556,6 +1574,66 @@ student_points **只减 balance**（earnedDelta 恒为 0）——SQL 里根本�
 
 **兑换为什么写 `earnedDelta: 0`**：`student_points.total_earned` 是段位唯一依据，语义上不可回退。兑换扣的是「可用余额」`balance`，若同事务里把 `total_earned` 也减掉，段位立刻会降，破坏 spec §3 定案 #2。所以兑换的扣减 SQL **只 `SET balance`**、结构性保证不触碰 `total_earned`（见 `student-points.repo.ts` 的 `deductBalanceIfEnough`）。
 
+### 6.25 会话心跳 → 学习时长聚合（埋点 Phase 1A，2026-09-21）
+
+学习时长的端到端链路（采集在 §4.23、读侧在 §4.13）。**设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.2 / §7.4 / §8 / §10。**
+
+```text
+前端 AnalyticsShell（useLocation 副作用驱动，唯一开会话入口）
+  · tracker.onRouteChange(sceneInfo) 经状态机 runTransition('ROUTE_ENTER') → beginSession()
+  · 只在「学习页」开会话（sceneKey !== null）；配置页 / 入口页只管看、不算时长
+  · subjectId 从 useLearnContextStore 取（不是路由 state——深链 / 直接刷新走不到那次写入）
+  · 设备三项（screen_class / input_type / app_shell）只在 start 时采一次，中途转屏不改
+  ▼
+POST /api/study-sessions（@Post 默认 201；幂等键 = 前端生成的 UUID）
+  · 服务端解析 UA → platform_class / browser；非法设备值落 NULL、不报错
+  · iPad 校正：platform_class=='mac' 且 input_type=='touch' → 'ipad'
+    （iPadOS 13+ 的 Safari UA 写 Macintosh，只看 UA 必然把 iPad 判成 Mac，而 iPad 横屏是主断点）
+  ▼
+PATCH /api/study-sessions/:uid/heartbeat  {state:'visible'|'hidden'}    每 30s
+  · 服务端按 last_heartbeat_at → NOW(3) 差值累加 active_seconds
+  · 只在「上一状态为 visible」时计（hidden 暂停计时）
+  · 单次增量 LEAST(..., 45)；GREATEST(0, ...) 兜住客户端 / DB 时钟回拨
+  · ⚠️ UPDATE 的 SET 列表列顺序是 load-bearing 的：IF(client_state='visible', ...) 必须排在
+    client_state=? 之前——MySQL 单表 SET 从左到右求值，后出现的表达式引用前面已赋值的列时读到的是
+    **新值**；顺序反了语句照样编译运行，但会静默算错时长（有顺序钉子用例守着，别调换）
+  · 未命中（不存在 / 非本人 / 非 active）→ 静默 200 {activeSeconds: null}
+  ▼
+PATCH /api/study-sessions/:uid/end  {reason}    路由离开 / pagehide / 挂机
+  · 先补计最后一段（同心跳的封顶规则，但不改 client_state），再落 status='ended'
+  · ended_at = NOW(3)（**不是** last_heartbeat_at）：用户按「离开」时已过一段时间，秒数已按差值补进来
+  · 幂等：已 ended 时 UPDATE 影响 0 行 → 回读现有值返回，不重复计
+  ▼
+study_sessions（学习时长唯一真源，迁移 2026-09-21_study_sessions.sql）
+  │  孤儿会话：用户直接关标签 / 断网 → 没有 end 请求，会话会永远停在 active
+  ▼
+closeStale（惰性收尾；家长端读前传 studentId = 顺带修正那个人。**预留**全库收尾入口
+  ——不传 studentId 的调用形态当前**无调用方**、夜间定时任务**未实现**，参数留着给后续阶段用）
+  · status='active' 且 last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE
+    → status='ended', end_reason='closed'
+  · ended_at = last_heartbeat_at（**不是 NOW**）：最后 5 分钟的实际状态未知，不能白送时长
+  · 家长端调用处**吞异常**（closeStaleQuietly 失败只 warn）——收尾失败绝不该把家长页打成 500
+  ▼
+家长端读侧 parent-analytics.repo.ts（只读、唯一入口）
+  · 有效会话谓词 EFFECTIVE_SESSION（五处聚合共用：total / byDay / byModule / bySubject / activeDays，唯一口径）：
+      status IN ('ended','abandoned')
+        OR (status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE)
+    ——已变成孤儿但还没被 closeStale 收尾的 active 会话也要算进来，
+      否则「今日已用」会永远不更新（散点 SQL 漏掉这个分支会让各卡片互相打架）
+  · 窗口由**应用层**算好传参（from 含 / toExclusive 不含），**不用 CURDATE()**
+    （DB 会话时区与 Node 可能不一致，会算错一天——沿用 point_ledger 的既有约定）
+  ▼
+GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
+```
+
+**为什么单次封顶 45s**：心跳间隔 30s，45s 给一次网络抖动留余量。**不封顶**时，用户关掉标签页 2 小时后若再有一次迟到心跳（或紧接着的惰性收尾 / end），差值会把整段 2 小时算成学习时长；封顶后最坏只多算 45s。客户端上报的秒数**一律不采信**——`active_seconds` 只由服务端按 `last_heartbeat_at` 差值累加。
+
+**与前端口径的关系（spec §10 硬约束，一行都不能改）**：家长端的「学习时长（会话）」是**新增口径**，不是对既有「近 7 天活跃天数」的修正——两者**并存、不替换**。旧「活跃」是 `practice_results ∪ point_ledger ∪ exam_sessions ∪ ai_messages` 的**四路时间戳代理**，新「时长」只来自**显式会话**，两者数字会明显不同（孩子挂机不答题：旧口径不活跃、但页面开着则新口径有；反之只看一页不操作可能两边都不算）。UI 必须**并列展示 + 区分文案**（如「学习时长（会话）」vs「活跃天数」），**不得合并、不得相互替换**——否则家长会看到数字莫名下降。响应里的 `source: 'sessions'` 就是口径标记。
+
+**前端传输层刻意吞错**：`apps/web/src/analytics/tracker.ts` 的 `start` / `heartbeat` / `end` 全部 `.catch(() => {})`——埋点失败**绝不打断学习**。所以服务端的三个采集端点允许 DB 失败直接 500（前端无感，且静默隐藏故障会让生产问题只能从日志排障）；而嵌在别的业务流里的埋点写入必须 catch（失败只 warn，见 §4.23 注）。
+
+**本批范围**：前端 `analytics/` 只做**会话生命周期**（start / heartbeat / end + 设备分档 + 状态机）。`behavior_events` 与 `POST /api/track/events` **有意留到 Phase 2**（表尚不存在，提前开端点只会得到 500）；家长端 / 管理端**不启动会话追踪**（`tracker.setEnabled` 按角色关闭）。
+
 ### 6.26 LLM 调用 → 账本 → token 计量（2026-09-20）
 
 任何 capability 最终都经 `ModelClient.chat()`（`ai-core/infra/model-client/index.ts`）。在那里：
@@ -1769,6 +1847,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.1 | 2026-09-19 | **家长端错题轨道改 主线/训练 + 两页富文本渲染修正**。契约变更：`GET /api/parent/students/:id/errors` 的 `track` 由 `main\|aux` 改为 `main\|training`（§4.13 与 `openapi.yaml` 的路径参数、`ParentErrorItem.track` 已同步）。分档表 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary`——孩子**在辅线答疑里问过**的题（`auxiliary`）进训练轨「错题练习」池、可被做对清零，故归训练、不再单列「辅线」档；筛选由反向排除改为 `source IN (...)` 白名单（未登记 source 不入任何档，由分区测试兜底：新增来源不入册即红）。`ParentErrorItem.wrongAnswerText` 补注：字段名历史误导，它装的是「题库未命中时保存的题面原文」而**非**学生作答（`questionId` 非空时恒为 null），家长端页面据此不再渲染「学生作答」行。前端两处富文本改走共享渲染配置（AI 对话回放的 AI 回复与思路、错题页题面）。**未涉及**：`/error-book/students/{studentId}/main` 的旧 `ErrorItem` schema 仍写 `track: [main, aux]`（遗留端点，属存量偏差，另行处理）。 | 
 | v4.0 | 2026-09-18 | **家长端「看得见」批**（四页 + 5 个只读端点 + 新模块 `apps/server/src/modules/parent-insights/`，与既有 `ParentController` 同前缀 `api/parent`）。契约变更：① `GET /api/parent/dashboard` 返回形状重写——孩子层级 `lastActiveAt`（多表时间并集 MAX，不限窗口）/ `activeDays7`（近 7 天）/ `unreadAlerts`（本期恒 0），并扩出 `subjects[]`（进度 / 正确率累计 / 自评 / 错题待清零 / 考试数）；去掉 `todayStudyMinutes` / `pendingAlerts` 旧占位。② `GET .../reports` 语义改为**实时聚合学情报告（不落 `learning_reports`、不调 LLM）**、加 `?period=weekly\|monthly`，响应改为 `stats`/`trend`/`subjects`/`weakPoints`/`weakPointsUncoveredCount`/`exams`；**删除 `GET .../reports/{reportId}`**（不再是落库报告 ID）、连同原 AI 文本形状 `ReportContent` 不再被本组引用（`POST /ai/report` 本期未实现，留后续迭代）。③ `GET .../errors` 加 `subject`/`source`/`track`/`cleared`/`from`/`to`/`page`，响应改分页壳（`pageSize` 服务端固定 20）；`source` enum 按实际值补 `exam`/`targeted`/`error_practice`、去掉无写入点的 `homework`/`unit_test`/`midterm`/`final`。④ `GET .../chat-logs` 加 `track`/`scene`/`from`/`to`/`q`/`page` + 分页壳；`chat-logs/{dialogueId}` 改返回 `ChatLogDetail`（逐句含 `reasoning` 与 `safetyFlag`，不回传 `token_*`/`response_time_ms`）。错误码口径见 §2.4 新增实现注（1002 不存在 / 1005 别的家长的孩子）。§6.8 数据流整节重写。openapi.yaml 同步（**26 路径**中本组 5 路径重写 / 1 路径删除、新增 20 schema）。 |
 | v3.9 | 2026-09-18 | 补记 §4.22 `GET /api/points/levels`（`@Roles('student','parent')`，静态 9 档、不查库不校验归属；openapi `/points/levels` 已同步）+ 家长端「积分与奖励」页（UX P6.7）接线完成：§7「页面 ↔ 端点」对照表 P6.7 行原写的 `GET .../rewards` + `POST /api/rewards/{id}/redeem` **两条都不是本体系端点**（后者在 openapi 与代码里都不存在），本次更正为 §4.21 / §4.22 的 12 个真实端点。openapi.yaml 同步（顺带补齐存量偏差：`SaveRewardCatalogItem.required` 加 `description`/`minLevelCode`/`sortOrder`，与 controller Zod 必填对齐）。 |
 | v3.8 | 2026-09-18 | 文档补记（**接口无变更**）：`POST /api/training/judge` 请求体补上 `sessionId?`——计划一（v3.7）已让后端接受该可选字段（仅累加 `training_sessions.judged_count` 审计留痕，不传也能判题，会话不存在/非本人/已完成静默跳过），但两份文档一直漏记；学生端会话页（数学专项 / 背单词）本次开始实际携带它，故补齐 §4.18 与 openapi `TrainingJudgeRequest`。**背单词判题端点 `POST /api/training/vocabulary/judge` 不接受该字段**（有意不发分审计）。 | 

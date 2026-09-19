@@ -128,6 +128,7 @@ export default function StarMapPage() {
       const result = await fetchStarMap(studentId, subjectId);
       setData(result);
       useLearnContextStore.getState().setContext({
+        subjectId,
         subjectName: result.subjectName,
         gradeName: result.gradeName,
         publisher: result.publisher || null,

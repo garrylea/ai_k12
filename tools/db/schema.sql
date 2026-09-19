@@ -1229,4 +1229,45 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
 -- 列级写法随 CREATE/ALTER TABLE 走，不存在「忘了装」。
 -- **不要再往这里加 *_updated_at 触发器**；新表直接在列上写 ON UPDATE。
 
+-- ============================================================
+-- 16. 学习会话（2026-09-21，埋点 Phase 1A）
+-- ============================================================
+-- 见 tools/db/migrations/2026-09-21_study_sessions.sql 的头部注释（口径与幂等说明）。
+
+-- ---- study_sessions：一段「进入学习页 → 离开 / 挂机结束」的会话 ----
+-- active_seconds 只由服务端按心跳差值累计（单次封顶 45s），客户端上报的秒数一律不采信。
+-- 设备列只到「类别」，不存唯一标识；platform_class/browser 由服务端解析 UA，
+-- screen_class/input_type/app_shell 由前端上报。iPadOS 的 Macintosh UA 由服务端校正为 ipad。
+CREATE TABLE IF NOT EXISTS study_sessions (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id        BIGINT       NOT NULL,
+  session_uid       CHAR(36)     NOT NULL COMMENT '前端生成的幂等键',
+  module            VARCHAR(32)  NOT NULL COMMENT '低基数枚举，见 spec §5.1',
+  scene             VARCHAR(40)  NOT NULL COMMENT '路由级细分，比 module 细',
+  subject_id        BIGINT       DEFAULT NULL,
+  ref_type          VARCHAR(24)  DEFAULT NULL COMMENT 'lesson|card|paper|passage|word|dialogue',
+  ref_id            BIGINT       DEFAULT NULL,
+  status            VARCHAR(12)  NOT NULL DEFAULT 'active' COMMENT 'active|ended|abandoned',
+  client_state      VARCHAR(10)  NOT NULL DEFAULT 'visible' COMMENT 'visible|hidden（上次心跳时的可见性）',
+  active_seconds    INT          NOT NULL DEFAULT 0 COMMENT '服务端累计；客户端上报的秒数一律不采信',
+  heartbeat_count   INT          NOT NULL DEFAULT 0,
+  started_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  last_heartbeat_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  ended_at          DATETIME(3)  DEFAULT NULL,
+  end_reason        VARCHAR(20)  DEFAULT NULL COMMENT 'route_change|pagehide|idle_timeout|closed|hidden_timeout',
+  platform_class    VARCHAR(20)  DEFAULT NULL COMMENT 'ipad|iphone|android_tablet|android_phone|mac|windows|linux|other（服务端解析 UA）',
+  browser           VARCHAR(20)  DEFAULT NULL COMMENT 'chrome|safari|edge|firefox|electron|other（服务端解析 UA）',
+  screen_class      VARCHAR(20)  DEFAULT NULL COMMENT 'ipad_landscape|desktop|tablet_portrait|mobile（前端上报）',
+  input_type        VARCHAR(10)  DEFAULT NULL COMMENT 'touch|mouse|hybrid（前端上报）',
+  app_shell         VARCHAR(10)  DEFAULT NULL COMMENT 'web|electron（前端上报）',
+  created_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_ss_uid (session_uid),
+  KEY idx_ss_student_time   (student_id, started_at),
+  KEY idx_ss_student_module (student_id, module, started_at),
+  KEY idx_ss_open           (status, last_heartbeat_at),
+  KEY idx_ss_platform_time  (platform_class, started_at),
+  CONSTRAINT fk_ss_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

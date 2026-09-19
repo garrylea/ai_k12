@@ -8,7 +8,14 @@ import { TelemetryService } from '../../modules/analytics/telemetry.service.js';
 
 /** 不做埋点的路径：自指噪音 + 静态资源 */
 const SKIP_PREFIXES = ['/assets/', '/uploads/'];
-const SKIP_PATTERNS = [/^\/api\/admin\/analytics(\/|$)/, /^\/api\/track(\/|$)/];
+const SKIP_PATTERNS = [
+  /^\/api\/admin\/analytics(\/|$)/,
+  /^\/api\/track(\/|$)/,
+  // 心跳 30s 一次 × 全班在学的学生，会让 api_request_logs 被单端点淹没；
+  // 它的时长语义已落 study_sessions，请求日志里没有额外信息（spec §6.2 的「自指噪音」同理）。
+  // 开始/结束**不跳过**——低频且携带业务事件。
+  /^\/api\/study-sessions\/[^/]+\/heartbeat$/,
+];
 
 export function shouldSkipRoute(path: string): boolean {
   if (SKIP_PREFIXES.some((p) => path.startsWith(p))) return true;
