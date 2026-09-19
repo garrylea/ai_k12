@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ModelClient } from './index';
+import { setLlmCallSink } from '../llm-call-log';
 
 const okResponse = { content: 'ok', finishReason: 'stop' as const, usage: { promptTokens: 1, completionTokens: 1 } };
 
@@ -105,5 +106,123 @@ describe('流式拿不到 usage 时的估算（输入/输出各自的数据源�
     expect(res.usage.inputTokens).toBeNull();
     expect(res.usage.outputTokens).toBeNull();
     expect(res.usage.cost).toBeNull();
+  });
+});
+
+describe('ModelClient 写 llm_call_logs', () => {
+  afterEach(() => setLlmCallSink(null));
+
+  const baseModel = (extra: Record<string, unknown> = {}) => ({
+    provider: 'kimi', modelId: 'kimi-latest', baseUrl: 'https://x', contextWindow: 8,
+    maxOutputTokens: 8, supportsStreaming: true, costPer1K: { input: 0.012, output: 0.012 }, ...extra,
+  });
+
+  it('成功调用记一条：带 scene/attempt/cost，usage 来自响应', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', {
+        chat: vi.fn().mockResolvedValue({
+          id: 'r1', model: 'kimi-latest', content: 'ok', finishReason: 'stop',
+          usage: { inputTokens: 100, outputTokens: 20, cost: 0.0012, source: 'provider' }, latencyMs: 5,
+        }),
+        streamChat: async function* () {},
+      }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await mc.chat({
+      model: baseModel({ scene: 'judgment', subject: 'math', modelKey: 'kimi' }) as any,
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: false,
+      meta: { studentId: 9, capability: 'judgment' },
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      studentId: 9, scene: 'judgment', subject: 'math', modelKey: 'kimi', provider: 'kimi',
+      attempt: 1, requestKind: 'chat', isFallback: false, success: true,
+      inputTokens: 100, outputTokens: 20, usageSource: 'provider',
+    });
+  });
+
+  it('失败也记一条：success=false，cost 为 null', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const boom = Object.assign(new Error('nope'), { name: 'ServerError', statusCode: 500 });
+    const providers = new Map([
+      ['kimi', { chat: vi.fn().mockRejectedValue(boom), streamChat: async function* () {} }],
+    ]);
+    const mc = new ModelClient({ providers, retryOptions: { maxRetries: 0, baseDelayMs: 1, maxBackoffMs: 1 } } as any);
+    await expect(mc.chat({
+      model: baseModel() as any,
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: false,
+    })).rejects.toThrow();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ success: false, inputTokens: null, outputTokens: null, usageSource: 'unavailable' });
+  });
+
+  it('没注册 sink 时调用照常成功（埋点缺席不能影响业务）', async () => {
+    setLlmCallSink(null);
+    const providers = new Map([
+      ['kimi', { chat: vi.fn().mockResolvedValue({ content: 'ok', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, model: 'm', id: 'i', latencyMs: 1 }), streamChat: async function* () {} }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    const res = await mc.chat({ model: baseModel() as any, messages: [{ role: 'user', content: 'hi' }], stream: false });
+    expect(res.content).toBe('ok');
+  });
+
+  // ★ 这一条钉住 8d：真流式路径（tutoring / admin-chat 直接调 streamChat）也必须落账本。
+  // 少了它，AI 讨论/答疑在账本里会完全缺席，而那是 token 消耗最大的场景。
+  it('streamChat 消费完毕后落一条账本（requestKind=stream，attempt=1），且 chunk 原样透传', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', {
+        chat: vi.fn(),
+        streamChat: async function* () {
+          yield { content: 'abcdefgh' };           // 输出 2 token
+          yield { content: '', reasoningContent: '你好世界' }; // 输出再 +4
+        },
+      }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    const seen: string[] = [];
+    for await (const c of mc.streamChat({
+      model: baseModel({ scene: 'tutoring', subject: 'math', modelKey: 'kimi' }) as any,
+      messages: [{ role: 'user', content: '你好' }],  // 输入 2 token
+      meta: { studentId: 7, capability: 'tutoring' },
+    } as any)) {
+      // 收集**全部** chunk（含 content 为空、只带 reasoning 的那个），
+      // 否则「原样透传」的断言会被过滤条件掩盖成假绿。
+      seen.push(c.content);
+    }
+    // chunk 必须原样透传（SSE 行为不能变）
+    expect(seen).toEqual(['abcdefgh', '']);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      studentId: 7, scene: 'tutoring', subject: 'math', modelKey: 'kimi',
+      attempt: 1, requestKind: 'stream', success: true, usageSource: 'estimated',
+      inputTokens: 2, outputTokens: 6,
+    });
+  });
+
+  it('streamChat 中途失败也落一条（success=false），且异常原样抛出', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', {
+        chat: vi.fn(),
+        streamChat: async function* () {
+          yield { content: '部分内容' };
+          throw Object.assign(new Error('boom'), { name: 'ServerError' });
+        },
+      }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await expect((async () => {
+      for await (const _ of mc.streamChat({ model: baseModel() as any, messages: [{ role: 'user', content: 'hi' }] } as any)) { /* drain */ }
+    })()).rejects.toThrow('boom');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ requestKind: 'stream', success: false, inputTokens: null, outputTokens: null, errorType: 'ServerError' });
   });
 });

@@ -38,8 +38,19 @@ export interface ModelConfig {
   supportsStreaming: boolean;
 }
 
-/** 路由结果模型带 apiKey（registry 快照/新 YAML 路径不再剥离；供 ModelClient 直接取用） */
-export type RoutedModel = ModelConfig & { apiKey?: string };
+/**
+ * 路由结果模型带 apiKey（registry 快照/新 YAML 路径不再剥离；供 ModelClient 直接取用），
+ * 并带上**归因信息**——ModelClient 靠它把每次调用记进 llm_call_logs：
+ * scene/subject/modelKey 由 ModelRouter 打标；isFallbackEntry 只有 fallback 条目为 true。
+ */
+export type RoutedModel = ModelConfig & {
+  apiKey?: string;
+  scene?: Scene;
+  subject?: Subject;
+  /** 路由条目 key（≠ modelId）。账本聚合按它，不按 modelId。 */
+  modelKey?: string;
+  isFallbackEntry?: boolean;
+};
 
 export interface RouteResult {
   primary: RoutedModel;
@@ -139,6 +150,18 @@ export interface ChatRequest {
    *  `LLAMA_CPP_NO_THINKING_BODY`（见 infra/model-client/local-client.ts）。 */
   extraBody?: Record<string, unknown>;
   signal?: AbortSignal;  // caller-controlled abort (e.g. client disconnect) combined with timeout
+  /**
+   * 归因信息（可选）。HTTP 路径不用传——走 AsyncLocalStorage 自动带出；
+   * **后台路径必须显式传**（判错解析 ExplanationCacheService、会话标题生成等），
+   * 否则账本里这条调用的 student_id 为 NULL，会污染「哪个学生最费 LLM」的统计。
+   */
+  meta?: {
+    studentId?: number | null;
+    scene?: Scene;
+    subject?: Subject;
+    dialogueId?: number | null;
+    capability?: string;
+  };
 }
 
 /** usage 的来源：provider=端点回了真值；estimated=估算兜底；unavailable=完全拿不到 */

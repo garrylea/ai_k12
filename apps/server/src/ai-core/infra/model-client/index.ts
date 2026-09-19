@@ -1,8 +1,10 @@
-import type { ChatRequest, ChatResponse, ChatMessage, StreamChunk, RetryOptions } from '../../types.js';
-import { contentToText } from '../../types.js';
+import type { ChatRequest, ChatResponse, ChatMessage, StreamChunk, RetryOptions, RoutedModel } from '../../types.js';
+import { contentToText, LLMClientError } from '../../types.js';
 import { timeoutConfig, getApiKeyByProvider } from '../../config.js';
 import type { ProviderAdapter } from './types.js';
 import { callWithRetry } from './errors.js';
+import { emitLlmCall } from '../llm-call-log.js';
+import { getRequestContext } from '../request-context.js';
 import { KimiClient } from './kimi-client.js';
 import { LocalClient } from './local-client.js';
 import { estimateTokens } from '../usage-estimate.js';
@@ -109,16 +111,67 @@ export class ModelClient {
     const provider = this.getProvider(request.model.provider, request.model.apiKey);
     const startTime = Date.now();
     const useStream = request.stream !== false && request.model.provider !== 'gemini';
+    // callWithRetry 会**重复调用同一个闭包**，所以闭包内自增即为 attempt（1-based）；
+    // 每次尝试（含失败与最终放弃的那次）都要落一行账本。
+    let attempt = 0;
 
     const run = async (): Promise<ChatResponse> => {
-      if (useStream) {
-        return this.aggregateStream(provider, request, startTime);
+      attempt += 1;
+      const attemptStart = Date.now();
+      try {
+        const response = useStream
+          ? await this.aggregateStream(provider, request, startTime)
+          : { ...(await provider.chat(request)), latencyMs: Date.now() - startTime };
+        this.recordCall(request, attempt, useStream, response.usage, Date.now() - attemptStart, null);
+        return response;
+      } catch (err) {
+        this.recordCall(request, attempt, useStream, null, Date.now() - attemptStart, err);
+        throw err;
       }
-      const response = await provider.chat(request);
-      return { ...response, latencyMs: Date.now() - startTime };
     };
 
     return callWithRetry(run, this.retryOptions);
+  }
+
+  /**
+   * 写一条账本。**永不抛**（emitLlmCall 内部吞异常），也永不 await。
+   * 归因优先级：request.meta（后台路径显式传）> model 上的 router 打标 > ALS 上下文。
+   *
+   * 入参收的是 `usage` 而不是整个 `ChatResponse`——因为真流式那条路径（见 streamChat）
+   * 没有 ChatResponse 可传，只有边透传边累积出来的一份 usage。
+   */
+  private recordCall(
+    request: ChatRequest,
+    attempt: number,
+    useStream: boolean,
+    usage: ChatResponse['usage'] | null,
+    latencyMs: number,
+    err: unknown,
+  ): void {
+    const model = request.model as RoutedModel;
+    const ctx = getRequestContext();
+    const llmErr = err instanceof LLMClientError ? err : null;
+    emitLlmCall({
+      requestId: ctx?.requestId ?? null,
+      studentId: request.meta?.studentId ?? ctx?.studentId ?? null,
+      dialogueId: request.meta?.dialogueId ?? null,
+      scene: request.meta?.scene ?? model.scene ?? null,
+      subject: request.meta?.subject ?? model.subject ?? null,
+      capability: request.meta?.capability ?? null,
+      modelKey: model.modelKey ?? null,
+      modelId: request.model.modelId ?? null,
+      provider: request.model.provider,
+      attempt,
+      requestKind: useStream ? 'stream' : 'chat',
+      isFallback: model.isFallbackEntry === true,
+      success: usage !== null,
+      errorType: llmErr ? llmErr.name : err ? ((err as Error).name || 'Error') : null,
+      httpStatus: llmErr ? llmErr.statusCode : null,
+      inputTokens: usage?.inputTokens ?? null,
+      outputTokens: usage?.outputTokens ?? null,
+      usageSource: usage?.source ?? 'unavailable',
+      latencyMs,
+    });
   }
 
   /**
@@ -163,9 +216,55 @@ export class ModelClient {
    * True streaming (AsyncIterable) for HTTP-layer SSE forwarding. NOT wrapped
    * in callWithRetry - mid-stream retry would duplicate generated tokens, so it
    * is the caller's (HTTP layer's) responsibility to handle stream errors.
+   *
+   * 这条路径**不经 `chat()`**（tutoring 与 admin-chat 直接调它做 SSE 转发），
+   * 所以账本必须在这里也记一笔。做法是原样透传每个 chunk（**不改变任何 SSE 行为**），
+   * 同时在边上累积 content/reasoning，结束时按同一套 `buildStreamUsage` 估算后落一行。
+   *
+   * 三点必须注意：
+   *   1. 本路径**不走 callWithRetry**（中途重试会重复吐 token），故 `attempt` 恒为 1。
+   *   2. 客户端中途断开时，生成器会被 `.return()`，`finally` 仍会执行 —— 这是对的：
+   *      token 已经烧掉了，必须记账（失败原因记 AbortError）。
+   *   3. `provider.streamChat` 是 async generator，`this` 在嵌套函数里不自动绑定，
+   *      故先 `const self = this`。
    */
   streamChat(request: ChatRequest): AsyncIterable<StreamChunk> {
     const provider = this.getProvider(request.model.provider, request.model.apiKey);
-    return provider.streamChat(request);
+    const self = this;
+    return (async function* (): AsyncIterable<StreamChunk> {
+      const started = Date.now();
+      let content = '';
+      let reasoningContent = '';
+      let providerUsage: { inputTokens: number; outputTokens: number } | null = null;
+      let failed: unknown = null;
+      try {
+        for await (const chunk of provider.streamChat(request)) {
+          if (chunk.content) content += chunk.content;
+          if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
+          if (chunk.usage) providerUsage = chunk.usage;
+          yield chunk; // 原样透传，SSE 行为零变化
+        }
+      } catch (err) {
+        failed = err;
+        throw err;
+      } finally {
+        self.recordCall(
+          request,
+          1,
+          true,
+          failed === null
+            ? buildStreamUsage(
+                providerUsage,
+                estimateInputTokens(request.messages),
+                content,
+                reasoningContent,
+                request.model.costPer1K,
+              )
+            : null,
+          Date.now() - started,
+          failed,
+        );
+      }
+    })();
   }
 }
