@@ -778,7 +778,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | # | 问题 | 当前取用的默认 |
 |---|---|---|
 | 1 | 心跳参数（30s / 封顶 45s / idle 120s / 5min 惰性收尾）是否符合对「学习时长」的产品预期？ | 按此默认，放服务端常量一处可调 |
-| 2 | `api_request_logs` 是否保留 `raw_path` / `client_ts_ms`（可识别信息）？ | 保留，30 天清理；若要最小化可只留归一化 route |
+| 2 | `api_request_logs` 是否保留 `raw_path`，`behavior_events` 是否保留 `client_ts_ms`（可识别信息）？ | 都保留；`raw_path` 随 `api_request_logs` 30 天清理，`client_ts_ms` 随 `behavior_events` 180 天清理；若要最小化可只留归一化 route |
 | 3 | ops 分析端点是否进 openapi？ | **进**（本批实现即 MVP） |
 | 4 | `study_sessions` 180 天后折 rollup 还是直接删？ | 折 rollup（Phase 3 建）；若不需跨年趋势，直接删更省 |
 | 5 | `goals.metric` 的取值集合是否就是这四种（`daily_study_minutes` / `daily_words` / `weekly_passages` / `weekly_clear_errors`）？ | 按此默认 |

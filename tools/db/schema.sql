@@ -946,8 +946,8 @@ CREATE TABLE IF NOT EXISTS llm_models (
   max_output_tokens INT NOT NULL DEFAULT 16384,
   -- 每 1K token 单价，单位与 ai-core/model-routes.yaml 的 costPer1K 一致。
   -- 这两个列是**价格的唯一真源**：model-config-registry 从这里读进 costPer1K。
-  input_price_per_1k  DECIMAL(10,6) NOT NULL DEFAULT 0,
-  output_price_per_1k DECIMAL(10,6) NOT NULL DEFAULT 0,
+  input_price_per_1k  DECIMAL(10,6) NOT NULL DEFAULT 0 COMMENT '每 1K 输入 token 价，单位与 model-routes.yaml 的 costPer1K.input 一致',
+  output_price_per_1k DECIMAL(10,6) NOT NULL DEFAULT 0 COMMENT '每 1K 输出 token 价，单位与 costPer1K.output 一致',
   is_enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -1157,7 +1157,7 @@ CREATE TABLE IF NOT EXISTS training_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
--- 15. 埋点与账本（2026-09-20，埋点 Phase 0）
+-- 14. 埋点与账本（2026-09-20，埋点 Phase 0）
 -- ============================================================
 -- 见 tools/db/migrations/2026-09-20_analytics_ledger.sql 的头部注释（口径与幂等说明）。
 
@@ -1224,7 +1224,7 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
--- 14.（已移除）updated_at 自动触发器
+-- 15.（已移除）updated_at 自动触发器
 -- ============================================================
 -- 这里原有的 28 条 trg_*_updated_at 触发器已全部删除，改用**列级**
 -- `ON UPDATE CURRENT_TIMESTAMP(3)`（见各表 updated_at 列定义）。
