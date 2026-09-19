@@ -40,6 +40,7 @@ import ParentDashboardPage from '@/pages/parent/ParentDashboardPage';
 import ParentReportPage from '@/pages/parent/ParentReportPage';
 import ParentErrorsPage from '@/pages/parent/ParentErrorsPage';
 import ParentChatLogsPage from '@/pages/parent/ParentChatLogsPage';
+import ParentGoalsPage from '@/pages/parent/ParentGoalsPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -327,7 +328,7 @@ export const routes: RouteObject[] = [
       { path: 'report', element: <ParentReportPage /> },
       { path: 'errors', element: <ParentErrorsPage /> },
       { path: 'chat-logs', element: <ParentChatLogsPage /> },
-      { path: 'goals', element: <Placeholder title="目标设定 P6.5" /> },
+      { path: 'goals', element: <ParentGoalsPage /> },
       { path: 'controls', element: <Placeholder title="行为管控 P6.6" /> },
       { path: 'rewards', element: <ParentPointsPage /> },
       { path: 'alerts', element: <Placeholder title="异常预警中心 P6.9" /> },
