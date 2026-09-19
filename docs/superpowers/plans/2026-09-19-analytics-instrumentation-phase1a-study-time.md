@@ -2311,7 +2311,7 @@ git commit -m "feat(parent): study-time / today-usage 两个端点 + 模块接�
 Create `apps/web/src/store/learnContextStore.test.ts`：
 
 ```ts
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useLearnContextStore } from './learnContextStore';
 
 beforeEach(() => {
@@ -2331,19 +2331,32 @@ describe('learnContextStore', () => {
     expect(s.subjectName).toBe('数学');
   });
 
-  it('未选学科时是 null（不是 0）——0 会被服务端当成非法学科', () => {
-    expect(useLearnContextStore.getState().subjectId).toBeNull();
+  it('未选学科时初始值是 null（不是 0）——0 会被服务端当成非法学科', async () => {
+    // 必须拿一个**全新的模块实例**来观察初始值：beforeEach 的 setState 会把这个字段
+    // 直接写进去（Zustand 合并未声明的键），在同一个实例上断言只会断言到 beforeEach 自己。
+    // 同理**不能**改用「把 subjectId 从 beforeEach 里删掉」来省事——本文件第一条用例会把
+    // subjectId 写成 7，模块级单例下就变成靠用例顺序决定成败。
+    // 初始值若被改成 0（服务端会当成非法学科），这条必须红。
+    vi.resetModules();
+    const fresh = await import('./learnContextStore');
+    expect(fresh.useLearnContextStore.getState().subjectId).toBeNull();
   });
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: 跑 RED —— 注意真正的 RED 在 `tsc`，不在 vitest**
 
 ```bash
 cd apps/web && npx vitest run src/store/learnContextStore.test.ts
 ```
 
-Expected: FAIL —— `subjectId` 不存在（类型 + 断言）。
+Expected: **两条都 PASS**（不是 FAIL）。这不是测试写错——Zustand 的 `set` 会合并任意键、esbuild 又把类型擦掉，所以旧的 `setContext` 在运行时**本来就会**把 `subjectId` 存进去。类型层才是真正缺的那一半：
+
+```bash
+cd apps/web && npx tsc -b
+```
+
+Expected: FAIL —— `Property 'subjectId' does not exist on type 'LearnContextState'`（约 4 处：store 接口、`setContext` 参数、初始化对象、`StarMapPage` 调用点）。**这才是本任务的 RED**，也是唯一的守卫：`npm test`（vitest）不做类型检查，只有 `npm run build` 里的 `tsc -b` 会。
 
 - [ ] **Step 3: 实现 store 改动**
 
@@ -2357,7 +2370,9 @@ import { create } from 'zustand';
  *
  * `subjectId` 是**数字**学科 id：顶栏只显示名字就够，但埋点上报 `study_sessions.subject_id`
  * 需要数字（后端要校验它属于在售学科，并按它做「各科学了多久」的聚合）。
- * 它不在路由 state 里取——路由 state 只有在「从星图进入」时才带，直接刷新/深链会丢。
+ * 为什么读它而不读**路由 state**：这个值在**星图加载那一次**写进来，之后每个下游页面都能直接读到，
+ * 不必把路由 state 一路透传下去（深链直接进下游页时路由 state 根本没有）。store 是内存态，
+ * 硬刷新同样会丢——但它丢的是**同一个来源**，而路由 state 是在导航链上逐跳丢失。
  */
 interface LearnContextState {
   subjectId: number | null;
