@@ -272,6 +272,7 @@ Create `apps/server/src/database/repositories/llm-models.repo.test.ts`：
 ```ts
 import { describe, it, expect, vi } from 'vitest';
 import { LlmModelsRepository } from './llm-models.repo';
+import { encryptApiKey } from '../../common/utils/api-key-crypto.js';
 
 /** 模拟 mysql2 pool 的双返回形状：SELECT -> [rows, fields] */
 const mockPool = (rows: any[] = []) => ({
@@ -284,7 +285,10 @@ const mockPool = (rows: any[] = []) => ({
 
 const dbRow = () => ({
   id: 1, model_key: 'kimi', name: 'Kimi', provider_type: 'kimi', model_id: 'kimi-latest',
-  base_url: 'https://x', api_key: 'plain-key-does-not-decrypt', context_window: 131072,
+  base_url: 'https://x',
+  // 必须是**真实密文**：mapRow 会调 decryptApiKey，写个明文串会在断言之前就抛
+  // 「Invalid authentication tag length」。本用例不关心 apiKey，只要它能解密即可。
+  api_key: encryptApiKey('sk-test'), context_window: 131072,
   max_output_tokens: 16384, is_enabled: 1,
   input_price_per_1k: '0.012000', output_price_per_1k: '0.028000',
 });
