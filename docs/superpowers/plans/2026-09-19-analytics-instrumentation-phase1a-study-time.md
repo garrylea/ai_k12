@@ -4207,7 +4207,7 @@ Expected: 两份都出现 3 个采集端点 + 2 个家长端点，路径字符�
 
 1. `docs/K12智学系统-数据库设计文档.md`：新增 `study_sessions` 表设计（照 schema.sql 的列 + 索引 + 三条口径注释：服务端累计秒数、设备只到类别、iPad 校正）。
 2. `docs/ai-core-changelog.md`：顶部追加一条 `2026-09-XX 埋点 Phase 1A：学习时长端到端`，记录：新增表与端点、`§10 并存不替换` 的硬约束、`active_seconds` 封顶 45s 的理由（不封顶会把「关标签 2 小时」算成 2 小时）、`closeStale` 惰性收尾、`subject_id` 改从 `learnContextStore` 取（spec §7.3 原写法的偏差已修正）、`behavior_events` 留 Phase 2。
-3. 根 `CLAUDE.md`：「工程约定」节补一条——
+3. 根 `CLAUDE.md`：顺手订正两处**已过期的测试计数**（本批之前就漂了，Task 8 实测暴露）：`## Development Commands` 里 `apps/web/` 段写 `vitest（107 tests）`、`apps/server/` 段写 `vitest（748 tests / 67 files）`——以 Task 18 实测的数字为准改（Task 8 时后端是 1263 tests / 103 files）。然后「工程约定」节补一条——
 
 ```markdown
 - **埋点（学习会话）的两条纪律**：`active_seconds` **只由服务端**按 `last_heartbeat_at` 差值累加、**单次封顶 45s**（客户端上报的秒数一律不采信；不封顶时「关标签 2 小时」会被算成 2 小时）；埋点写入**永不阻断主链路**（`study_sessions` 直写但必须 catch，失败只 warn）。家长端「学习时长（会话）」与既有「近 7 天活跃天数」是**两套口径、并存不替换**（spec §10），UI 必须并列展示并区分文案。
