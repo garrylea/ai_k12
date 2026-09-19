@@ -77,6 +77,13 @@ describe('StudySessionsRepository.heartbeat', () => {
     expect(updateSql).toContain("IF(client_state = 'visible'");
     expect(updateSql).toContain('heartbeat_count = heartbeat_count + 1');
     expect(updateSql).toContain("WHERE session_uid = ? AND student_id = ? AND status = 'active'");
+    // 顺序是 load-bearing：MySQL 的 SET 从左到右求值，后出现的表达式会看到**已赋值**的新值。
+    // 若把 `client_state = ?` 挪到 IF 之前，IF 就会读到本次上报的新状态（hidden 心跳不再补计
+    // 最后一段 visible、visible 心跳反而把 hidden 期间也计上），静默算错时长。
+    const ifIndex = updateSql.indexOf("IF(client_state = 'visible'");
+    const assignIndex = updateSql.indexOf('client_state = ?');
+    expect(ifIndex).toBeGreaterThanOrEqual(0);
+    expect(assignIndex).toBeGreaterThan(ifIndex);
     expect(updateParams).toEqual(['hidden', 'uid-1', 9]);
   });
 
