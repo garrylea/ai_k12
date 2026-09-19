@@ -1489,6 +1489,563 @@ git add apps/server/src/database/repositories/student-knowledge-mastery.repo.ts 
 git commit -m "feat(analytics): 掌握度回写 —— MasteryService 挂判题出口 + 仓储与覆盖率读"
 ```
 
+---
+
+### Task 6: `GoalsRepository`（懒初始化 + 按 metric upsert）
+
+**Files:**
+- Create: `apps/server/src/database/repositories/goals.repo.ts`
+- Test: `apps/server/src/database/repositories/goals.repo.test.ts`
+- Modify: `apps/server/src/database/repositories/index.ts`（barrel）
+
+**Interfaces:**
+- Produces（Task 8 依赖）：
+  - `type GoalMetric = 'daily_study_minutes' | 'daily_words' | 'weekly_passages' | 'weekly_clear_errors'`
+  - `type GoalPeriod = 'daily' | 'weekly'`
+  - `interface GoalRow { id: number; metric: GoalMetric | null; period: string; targetValue: number; title: string }`
+  - `class GoalsRepository`：
+    - `findActiveByStudent(studentId: number): Promise<GoalRow[]>`
+    - `ensureDefaults(studentId: number, defaults: ReadonlyArray<{ metric: GoalMetric; period: GoalPeriod; title: string; target: number }>): Promise<void>`
+    - `upsertTarget(studentId: number, metric: GoalMetric, period: GoalPeriod, title: string, target: number): Promise<void>`
+
+**两个关键设计（别改）**
+- **懒初始化必须用 `INSERT IGNORE`**，不能用 `ON DUPLICATE KEY UPDATE`：后者会把家长**已经设过**的目标值覆盖回默认值（唯一键是 `(student_id, metric)`，冲突时会走 UPDATE）。`INSERT IGNORE` 遇到已存在就跳过——正是「只补缺失的默认目标」的语义。
+- **显式保存（PUT）才用 `ON DUPLICATE KEY UPDATE`**，并把 `is_active` 置回 1（家长重新启用一个曾被停用的目标）。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `apps/server/src/database/repositories/goals.repo.test.ts`：
+
+```ts
+import { describe, it, expect, vi } from 'vitest';
+import { GoalsRepository } from './goals.repo.js';
+
+const mockPool = () => ({
+  execute: vi.fn().mockResolvedValue([[], []]),
+  query: vi.fn().mockResolvedValue([[], []]),
+});
+
+describe('GoalsRepository', () => {
+  it('ensureDefaults：必须用 INSERT IGNORE（否则会覆盖家长已设的值）', async () => {
+    const pool = mockPool();
+    const repo = new GoalsRepository(pool as any);
+
+    await repo.ensureDefaults(11, [
+      { metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 60 },
+      { metric: 'daily_words', period: 'daily', title: '每日背单词', target: 20 },
+    ]);
+
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('INSERT IGNORE INTO goals');
+    expect(sql).not.toContain('ON DUPLICATE KEY UPDATE');
+    expect(pool.execute.mock.calls[0][1]).toEqual([11, 'daily_study_minutes', 'daily', '每日学习时长', 60]);
+  });
+
+  it('ensureDefaults：空数组不发任何 SQL', async () => {
+    const pool = mockPool();
+    const repo = new GoalsRepository(pool as any);
+
+    await repo.ensureDefaults(11, []);
+
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('upsertTarget：ON DUPLICATE KEY UPDATE 更新目标值并把 is_active 置回 1', async () => {
+    const pool = mockPool();
+    const repo = new GoalsRepository(pool as any);
+
+    await repo.upsertTarget(11, 'weekly_passages', 'weekly', '每周古诗文篇目', 8);
+
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('INSERT INTO goals');
+    expect(sql).toContain('ON DUPLICATE KEY UPDATE');
+    expect(sql).toContain('target_value = new.target_value');
+    expect(sql).toContain('is_active     = 1');
+    expect(pool.execute.mock.calls[0][1]).toEqual([11, 'weekly_passages', 'weekly', '每周古诗文篇目', 8]);
+  });
+
+  it('findActiveByStudent：只取 is_active=1，返回 camelCase 且 Number() 化', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([
+      [{ id: 7, metric: 'daily_words', period: 'daily', target_value: '20', title: '每日背单词' }],
+      [],
+    ]);
+    const repo = new GoalsRepository(pool as any);
+
+    const rows = await repo.findActiveByStudent(11);
+
+    expect(rows).toEqual([
+      { id: 7, metric: 'daily_words', period: 'daily', targetValue: 20, title: '每日背单词' },
+    ]);
+    expect(pool.execute.mock.calls[0][0]).toContain('is_active = 1');
+    expect(pool.execute.mock.calls[0][1]).toEqual([11]);
+  });
+});
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+```bash
+cd apps/server && npx vitest run src/database/repositories/goals.repo.test.ts
+```
+
+Expected: FAIL —— 模块不存在。
+
+- [ ] **Step 3: 写实现**
+
+创建 `apps/server/src/database/repositories/goals.repo.ts`：
+
+```ts
+import { Injectable, Inject } from '@nestjs/common';
+import type { Pool, RowDataPacket } from 'mysql2/promise';
+
+/** 四个目标维度（与 `goals.metric` 的列注释逐字一致）。 */
+export type GoalMetric =
+  | 'daily_study_minutes'
+  | 'daily_words'
+  | 'weekly_passages'
+  | 'weekly_clear_errors';
+
+export type GoalPeriod = 'daily' | 'weekly';
+
+export interface GoalRow {
+  id: number;
+  metric: GoalMetric | null;
+  period: string;
+  targetValue: number;
+  title: string;
+}
+
+/**
+ * `goals` 的读写（埋点 Phase 1B，复活这张死表）。
+ *
+ * 唯一键 `(student_id, metric)`（Task 1 加的）让「按 metric upsert」成立。
+ * `metric` 为 NULL 的历史行按 `daily_study_minutes` 解释（迁移里已回填）。
+ */
+@Injectable()
+export class GoalsRepository {
+  constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
+
+  /** 该学生所有**启用中**的目标。 */
+  async findActiveByStudent(studentId: number): Promise<GoalRow[]> {
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & { id: number; metric: GoalMetric | null; period: string; target_value: number | string | null; title: string })[]
+    >(
+      `SELECT id, metric, period, target_value, title
+       FROM goals
+       WHERE student_id = ? AND is_active = 1
+       ORDER BY id`,
+      [studentId],
+    );
+    return rows.map((r) => ({
+      id: Number(r.id),
+      metric: r.metric,
+      period: r.period,
+      targetValue: Number(r.target_value ?? 0),
+      title: r.title,
+    }));
+  }
+
+  /**
+   * **只补缺失的**默认目标。
+   *
+   * ⚠️ 必须 `INSERT IGNORE`：唯一键是 `(student_id, metric)`，若用 `ON DUPLICATE KEY UPDATE`，
+   * 家长已改过的目标会被默认值**覆盖回去**。IGNORE 遇到已存在就跳过，正是懒初始化要的语义。
+   */
+  async ensureDefaults(
+    studentId: number,
+    defaults: ReadonlyArray<{ metric: GoalMetric; period: GoalPeriod; title: string; target: number }>,
+  ): Promise<void> {
+    for (const d of defaults) {
+      await this.pool.execute(
+        `INSERT IGNORE INTO goals
+           (student_id, subject_id, metric, title, period, target_value, reminder_enabled, is_active)
+         VALUES (?, NULL, ?, ?, ?, ?, 0, 1)`,
+        [studentId, d.metric, d.period, d.title, d.target],
+      );
+    }
+  }
+
+  /**
+   * 家长显式保存某个 metric 的目标值（PUT 路径）。
+   *
+   * 用 `ON DUPLICATE KEY UPDATE`（与 `ensureDefaults` 相反，这里**就是**要覆盖），
+   * 并把 `is_active` 置回 1——家长重新启用一个曾被停用的目标时不该另插一行。
+   */
+  async upsertTarget(
+    studentId: number,
+    metric: GoalMetric,
+    period: GoalPeriod,
+    title: string,
+    target: number,
+  ): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO goals
+         (student_id, subject_id, metric, title, period, target_value, reminder_enabled, is_active)
+       VALUES (?, NULL, ?, ?, ?, ?, 0, 1) AS new
+       ON DUPLICATE KEY UPDATE
+         target_value = new.target_value,
+         period       = new.period,
+         title        = new.title,
+         is_active    = 1`,
+      [studentId, metric, period, title, target],
+    );
+  }
+}
+```
+
+- [ ] **Step 4: barrel + 跑测试**
+
+`repositories/index.ts` 追加（与 Task 2 同款）：
+
+```ts
+export { GoalsRepository } from './goals.repo.js';
+export type { GoalMetric, GoalPeriod, GoalRow } from './goals.repo.js';
+```
+
+```bash
+cd apps/server && npx vitest run src/database/repositories/goals.repo.test.ts && npx tsc --noEmit
+```
+
+Expected: `4 passed`，`tsc` 无输出。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add apps/server/src/database/repositories/goals.repo.ts \
+        apps/server/src/database/repositories/goals.repo.test.ts \
+        apps/server/src/database/repositories/index.ts
+git commit -m "feat(analytics): GoalsRepository —— 懒初始化用 INSERT IGNORE、显式保存用 upsert"
+```
+
+---
+
+### Task 7: 两个家长聚合 service —— `SpecialsService` + `ParentMasteryService`
+
+**Files:**
+- Create: `apps/server/src/modules/parent-insights/specials.service.ts`
+- Test: `apps/server/src/modules/parent-insights/specials.service.test.ts`
+- Create: `apps/server/src/modules/parent-insights/parent-mastery.service.ts`
+- Test: `apps/server/src/modules/parent-insights/parent-mastery.service.test.ts`
+- Modify: `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts`（加两组响应类型）
+
+**Interfaces:**
+- Consumes: `SpecialPracticeLogsRepository`（Task 2）、`StudentKnowledgeMasteryRepository`（Task 5）、`rate.util.ts` 的 `toRate`、`window.util.ts` 的 `resolveRange`（1A 已导出）
+- Produces（Task 8 依赖）：
+  - `class SpecialsService`：`getSpecials(studentId: number, from?: string, to?: string): Promise<SpecialsSummary>`
+  - `class ParentMasteryService`：`getMastery(studentId: number, limit: number): Promise<MasterySummary>`
+  - DTO：`SpecialsSummary`、`SpecialModuleSummary`、`MasterySummary`、`MasteryItem`
+
+> ⚠️ **命名**：家长端这个类叫 `ParentMasteryService`（文件 `parent-mastery.service.ts`），因为 practice 模块已经有一个 `MasteryService`（Task 5，判题侧回写）。两者职责完全不同，**不要合并、不要同名**。
+
+**`rate` 口径**（两个 service 都涉及）：`toRate(answered, correct)` —— **注意签名是 `(answered, correct)`**，别把参数顺序写反；`answered = 0` 返回 `null`，**不是 0**。
+
+- [ ] **Step 1: 写 `SpecialsService` 的失败测试**
+
+创建 `apps/server/src/modules/parent-insights/specials.service.test.ts`：
+
+```ts
+import { describe, it, expect, vi } from 'vitest';
+import { SpecialsService } from './specials.service.js';
+
+const mkRepo = () => ({
+  aggregateByModule: vi.fn().mockResolvedValue([]),
+  countByDayByModule: vi.fn().mockResolvedValue([]),
+  countDistinctCorrectWords: vi.fn().mockResolvedValue(0),
+});
+const mkSvc = (repo = mkRepo()) => new SpecialsService(repo as any);
+
+describe('SpecialsService', () => {
+  it('四个模块一定都在：没数据的模块给 units=0 / correct=0 / rate=null / byDay=[]', async () => {
+    const out = await mkSvc().getSpecials(11);
+
+    expect(Object.keys(out)).toEqual(['dictation', 'interpretation', 'meaning', 'vocabulary']);
+    expect(out.dictation).toEqual({ units: 0, correct: 0, rate: null, byDay: [] });
+    // rate 必须是 null 而不是 0（spec §10 第 2 条）
+    expect(out.vocabulary).toEqual({ units: 0, correct: 0, rate: null, byDay: [], newWords: 0 });
+  });
+
+  it('rate 用 toRate(answered, correct)；answered 排除没有明确对错的行', async () => {
+    const repo = mkRepo();
+    repo.aggregateByModule.mockResolvedValue([
+      // 5 个单位，只有 4 个有明确对错，其中 3 个对 → 3/4 = 75%
+      { module: 'chinese_dictation', units: 5, answered: 4, correct: 3 },
+    ]);
+
+    const out = await mkSvc(repo).getSpecials(11);
+
+    expect(out.dictation).toMatchObject({ units: 5, correct: 3, rate: 75 });
+  });
+
+  it('byDay 按模块切分并映射成 {date, count}', async () => {
+    const repo = mkRepo();
+    repo.countByDayByModule.mockResolvedValue([
+      { module: 'chinese_meaning', day: '2026-09-15', count: 3 },
+      { module: 'en_vocabulary', day: '2026-09-16', count: 2 },
+    ]);
+
+    const out = await mkSvc(repo).getSpecials(11);
+
+    expect(out.meaning.byDay).toEqual([{ date: '2026-09-15', count: 3 }]);
+    expect(out.vocabulary.byDay).toEqual([{ date: '2026-09-16', count: 2 }]);
+  });
+
+  it('vocabulary 多一个 newWords，且只由 countDistinctCorrectWords 提供', async () => {
+    const repo = mkRepo();
+    repo.countDistinctCorrectWords.mockResolvedValue(12);
+
+    const out = await mkSvc(repo).getSpecials(11);
+
+    expect(out.vocabulary.newWords).toBe(12);
+    // 其余三个模块没有这个字段
+    expect(out.dictation).not.toHaveProperty('newWords');
+  });
+
+  it('窗口由 resolveRange 算好传参，仓储收到的是 Date 半开区间', async () => {
+    const repo = mkRepo();
+
+    await mkSvc(repo).getSpecials(11, '2026-09-13', '2026-09-19');
+
+    const [, from, toExclusive] = repo.aggregateByModule.mock.calls[0];
+    expect(from).toBeInstanceOf(Date);
+    expect(toExclusive).toBeInstanceOf(Date);
+    // 两端闭区间 → 排他上界是 09-20 的 00:00
+    expect((toExclusive as Date).getTime() - (from as Date).getTime()).toBe(7 * 24 * 3_600_000);
+  });
+});
+```
+
+- [ ] **Step 2: 写 `SpecialsService` 实现**
+
+创建 `apps/server/src/modules/parent-insights/specials.service.ts`：
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
+import type { SpecialPracticeModule } from '../../database/repositories/special-practice-logs.repo.js';
+import { resolveRange } from './window.util.js';
+import { toRate } from './rate.util.js';
+import type { SpecialModuleSummary, SpecialsSummary } from './dto/parent-insights.dto.js';
+
+/** 响应键（短名）→ 表里的 module（长名）。响应形状按 spec §8.2，用短名。 */
+const MODULE_BY_KEY: Record<keyof SpecialsSummary, SpecialPracticeModule> = {
+  dictation: 'chinese_dictation',
+  interpretation: 'chinese_interpretation',
+  meaning: 'chinese_meaning',
+  vocabulary: 'en_vocabulary',
+};
+
+/**
+ * 家长端专项学情（spec §8.2 `/specials`）：**只读聚合** `special_practice_logs`。
+ *
+ * 三条口径：
+ *   1. **四个模块一定都在响应里**——没有数据的模块给 `units=0 / rate=null / byDay=[]`，
+ *      让前端不必判空（与「未绑知识点时是空数组」同规矩）。
+ *   2. `rate = toRate(answered, correct)`，`answered` 由仓储用 `is_correct IS NOT NULL` 统计
+ *      （排除「没有明确对错」的行）。**`answered=0` → `null`，不是 0**。
+ *   3. 只有 vocabulary 多一个 `newWords`（窗口内答对过的去重词数），其余三个模块没有这个键。
+ */
+@Injectable()
+export class SpecialsService {
+  constructor(private readonly logsRepo: SpecialPracticeLogsRepository) {}
+
+  async getSpecials(studentId: number, from?: string, to?: string): Promise<SpecialsSummary> {
+    // 窗口由应用层算（不用 CURDATE()）；resolveRange 的语义与 1A 的 study-time 完全一致
+    const range = resolveRange(from, to);
+    const fromDate = range.from;
+    const toExclusive = range.toExclusive;
+
+    const [agg, byDay, newWords] = await Promise.all([
+      this.logsRepo.aggregateByModule(studentId, fromDate, toExclusive),
+      this.logsRepo.countByDayByModule(studentId, fromDate, toExclusive),
+      this.logsRepo.countDistinctCorrectWords(studentId, fromDate, toExclusive),
+    ]);
+
+    const build = (module: SpecialPracticeModule): SpecialModuleSummary => {
+      const row = agg.find((a) => a.module === module);
+      return {
+        units: row?.units ?? 0,
+        correct: row?.correct ?? 0,
+        rate: toRate(row?.answered ?? 0, row?.correct ?? 0),
+        byDay: byDay.filter((d) => d.module === module).map((d) => ({ date: d.day, count: d.count })),
+      };
+    };
+
+    return {
+      dictation: build(MODULE_BY_KEY.dictation),
+      interpretation: build(MODULE_BY_KEY.interpretation),
+      meaning: build(MODULE_BY_KEY.meaning),
+      vocabulary: { ...build(MODULE_BY_KEY.vocabulary), newWords },
+    };
+  }
+}
+```
+
+> `resolveRange` 返回的字段名以 `window.util.ts` 实际为准（1A 的实现里是 `from` / `toExclusive`）；若字段名不同，用实际的那两个。**先读该文件**。
+
+- [ ] **Step 3: 写 `ParentMasteryService` 的失败测试**
+
+创建 `apps/server/src/modules/parent-insights/parent-mastery.service.test.ts`：
+
+```ts
+import { describe, it, expect, vi } from 'vitest';
+import { ParentMasteryService } from './parent-mastery.service.js';
+
+const mkRepo = () => ({
+  listWeakest: vi.fn().mockResolvedValue([]),
+  countQuestionCoverage: vi.fn().mockResolvedValue({ coveredQuestions: 203, totalQuestions: 530 }),
+});
+const mkSvc = (repo = mkRepo()) => new ParentMasteryService(repo as any);
+
+describe('ParentMasteryService', () => {
+  it('返回 items + 三个覆盖率计数；uncovered = total - covered', async () => {
+    const repo = mkRepo();
+    repo.listWeakest.mockResolvedValue([
+      { knowledgePointId: 42, name: '分数加减', masteryScore: 0.5, level: 2,
+        correctCount: 3, errorCount: 3, lastSeenAt: new Date('2026-09-16T10:00:00Z') },
+    ]);
+
+    const out = await mkSvc(repo).getMastery(11, 10);
+
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0]).toMatchObject({ knowledgePointId: 42, name: '分数加减', masteryScore: 0.5, level: 2 });
+    expect(out).toMatchObject({ coveredQuestions: 203, totalQuestions: 530, uncovered: 327 });
+    expect(repo.listWeakest).toHaveBeenCalledWith(11, 10);
+  });
+
+  it('无掌握度数据 → items 空，但覆盖率计数照给（否则家长不知道是「没数据」还是「没覆盖」）', async () => {
+    const out = await mkSvc().getMastery(11, 10);
+
+    expect(out.items).toEqual([]);
+    expect(out.uncovered).toBe(327);
+  });
+
+  it('lastSeenAt 为 null 时原样传 null（不编成 0）', async () => {
+    const repo = mkRepo();
+    repo.listWeakest.mockResolvedValue([
+      { knowledgePointId: 42, name: 'x', masteryScore: 0, level: 0, correctCount: 0, errorCount: 0, lastSeenAt: null },
+    ]);
+
+    const out = await mkSvc(repo).getMastery(11, 10);
+
+    expect(out.items[0].lastSeenAt).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 4: 写 `ParentMasteryService` 实现**
+
+创建 `apps/server/src/modules/parent-insights/parent-mastery.service.ts`：
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { StudentKnowledgeMasteryRepository } from '../../database/repositories/student-knowledge-mastery.repo.js';
+import type { MasterySummary } from './dto/parent-insights.dto.js';
+
+/**
+ * 家长端真掌握度（spec §8.2 `/mastery`）：**只读** `student_knowledge_mastery` + `knowledge_points`。
+ *
+ * 与既有的 `weakPoints`（**错题数代理**）是两套口径：spec §10 明确要求两张卡**并存、标题区分、不得合并**，
+ * 所以本 service 不碰 `parent-insights.repo.ts` 的 weakPoints 查询。
+ *
+ * `coveredQuestions` / `totalQuestions` / `uncovered` **必须回**：题库的 KP 覆盖率只有 38%，
+ * 不展示会让家长把「只有这几个薄弱点」当成事实（spec §4.8 规则①）。
+ *
+ * 调用方（controller）负责把 `limit` 校验为 1..50 的整数。
+ */
+@Injectable()
+export class ParentMasteryService {
+  constructor(private readonly masteryRepo: StudentKnowledgeMasteryRepository) {}
+
+  async getMastery(studentId: number, limit: number): Promise<MasterySummary> {
+    const [items, coverage] = await Promise.all([
+      this.masteryRepo.listWeakest(studentId, limit),
+      this.masteryRepo.countQuestionCoverage(),
+    ]);
+
+    return {
+      items,
+      coveredQuestions: coverage.coveredQuestions,
+      totalQuestions: coverage.totalQuestions,
+      uncovered: Math.max(0, coverage.totalQuestions - coverage.coveredQuestions),
+    };
+  }
+}
+```
+
+- [ ] **Step 5: 加 DTO（两处，Task 8 的 controller 要用）**
+
+在 `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts` **末尾**追加：
+
+```ts
+/**
+ * 一个专项模块的窗口内聚合（spec §8.2 `/specials`）。
+ * `rate` 为 `null` 表示「本期没有可判对错的作答」，**不是 0**。
+ */
+export interface SpecialModuleSummary {
+  /** 作答单位数：默写=篇、解释/含义=句、背单词=题（日志一行 = 一个单位）。 */
+  units: number;
+  correct: number;
+  rate: number | null;
+  byDay: Array<{ date: string; count: number }>;
+}
+
+/** 四个模块的聚合。只有 `vocabulary` 多一个 `newWords`。 */
+export interface SpecialsSummary {
+  dictation: SpecialModuleSummary;
+  interpretation: SpecialModuleSummary;
+  meaning: SpecialModuleSummary;
+  vocabulary: SpecialModuleSummary & { newWords: number };
+}
+
+/** `/mastery` 的一行。`lastSeenAt` 为 null = 从未见过（不要编成 0）。 */
+export interface MasteryItem {
+  knowledgePointId: number;
+  name: string;
+  /** 0..1 的比值（后端已算好，前端不要再除）。 */
+  masteryScore: number;
+  level: number;
+  correctCount: number;
+  errorCount: number;
+  lastSeenAt: Date | null;
+}
+
+/**
+ * `/mastery` 响应。三个覆盖率计数**必须都回**：题库只有 38% 的题绑了 KP，
+ * 不给出「未覆盖」计数会让家长以为薄弱点只有列出的这些（spec §4.8 规则①）。
+ */
+export interface MasterySummary {
+  items: MasteryItem[];
+  coveredQuestions: number;
+  totalQuestions: number;
+  /** = totalQuestions - coveredQuestions，后端算好，前端不要自己减。 */
+  uncovered: number;
+}
+```
+
+- [ ] **Step 6: 跑两个 service 的测试 + 类型检查**
+
+```bash
+cd apps/server && npx vitest run src/modules/parent-insights/specials.service.test.ts src/modules/parent-insights/parent-mastery.service.test.ts && npx tsc --noEmit
+```
+
+Expected: `SpecialsService` 5 条 + `ParentMasteryService` 3 条全绿；`tsc` 无输出。
+
+> 若 `tsc` 报 `resolveRange` 的返回字段名不对，去读 `window.util.ts` 用它的真实字段名——**不要**为迁就本 plan 去改 `window.util.ts`（1A 已交付并有测试）。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add apps/server/src/modules/parent-insights/specials.service.ts \
+        apps/server/src/modules/parent-insights/specials.service.test.ts \
+        apps/server/src/modules/parent-insights/parent-mastery.service.ts \
+        apps/server/src/modules/parent-insights/parent-mastery.service.test.ts \
+        apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts
+git commit -m "feat(parent): 专项与掌握度两个聚合 service（四模块补齐 + 覆盖率计数）"
+```
+
+
 
 
 
