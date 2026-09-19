@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useLearnContextStore } from './learnContextStore';
 
 beforeEach(() => {
@@ -18,7 +18,12 @@ describe('learnContextStore', () => {
     expect(s.subjectName).toBe('数学');
   });
 
-  it('未选学科时是 null（不是 0）——0 会被服务端当成非法学科', () => {
-    expect(useLearnContextStore.getState().subjectId).toBeNull();
+  it('未选学科时初始值是 null（不是 0）——0 会被服务端当成非法学科', async () => {
+    // 必须拿一个**全新的模块实例**来观察初始值：beforeEach 的 setState 会把这个字段
+    // 直接写进去（Zustand 合并未声明的键），在同一个实例上断言只会断言到 beforeEach 自己。
+    // 初始值若被改成 0（服务端会当成非法学科），这条必须红。
+    vi.resetModules();
+    const fresh = await import('./learnContextStore');
+    expect(fresh.useLearnContextStore.getState().subjectId).toBeNull();
   });
 });
