@@ -88,7 +88,10 @@ export default function ParentReportPage() {
   const studyValue =
     study && study.studentId === studentId && study.period === period ? study.value : null;
   /**
-   * byDay 与 totalSeconds 走同一个「有效会话」谓词，故 byDay 为空 ⟺ totalSeconds 为 0。
+   * byDay 与 totalSeconds 走同一个「有效会话」谓词，故 **byDay 为空 ⟹ totalSeconds 为 0**。
+   * ⚠️ 反向**不成立**（别据此把守卫「简化」成 `totalSeconds === 0`）：`active_seconds = 0`
+   * 的会话——打开页面、任何心跳增量累计前就离开——会给出非空的 byDay 而 totalSeconds 仍为 0。
+   * 那时改判 0 会在「有学习的天数 1 天」旁边印出「暂无数据」，比现在这个 bug 更糟。
    * 用数组长度判空而不是 `totalSeconds === 0`：它同时决定柱状图是否为空，避免卡内两处口径打架。
    * 无会话时不能说「不足 1 分钟」——那读起来像「学了点」，真相是「什么都没学」。
    */

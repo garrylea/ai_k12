@@ -291,6 +291,49 @@ describe('ParentDashboardPage', () => {
     expect(screen.getByTestId('dashboard-student-11')).toBeTruthy();
   });
 
+  it('窗口内零会话 → 两张卡都显示「暂无数据」，绝不出现「不足 1 分钟」', async () => {
+    // 端点**总会**返回对象（totalSeconds / activeSeconds 是普通数字，契约里没有「无数据」信号），
+    // 所以「没有会话」只能靠数组判空。用 deferred + act 保证这份零会话响应已落到 state，
+    // 否则断言会落在「请求还没回来」的 null 空态上——那条路和修复前长得一样，测不出回归。
+    let resolveStudy!: (v: ParentStudyTime) => void;
+    let resolveUsage!: (v: ParentTodayUsage) => void;
+    getStudyTimeMock.mockImplementation(
+      () =>
+        new Promise<ParentStudyTime>((res) => {
+          resolveStudy = res;
+        }),
+    );
+    getTodayUsageMock.mockImplementation(
+      () =>
+        new Promise<ParentTodayUsage>((res) => {
+          resolveUsage = res;
+        }),
+    );
+
+    renderAt('/parent/dashboard');
+    await screen.findByTestId('dashboard-student-11');
+    await waitFor(() => expect(getStudyTimeMock).toHaveBeenCalled());
+
+    await act(async () => {
+      resolveStudy({
+        totalSeconds: 0, activeDays: 0, byDay: [], byModule: [], bySubject: [], source: 'sessions',
+      });
+      resolveUsage({
+        date: '2026-09-19', activeSeconds: 0, limitMinutes: null, exceeded: false, byModule: [],
+      });
+    });
+
+    const studyCard = screen.getByTestId('dashboard-study-time-11');
+    const usageCard = screen.getByTestId('dashboard-today-usage-11');
+    expect(studyCard).toHaveTextContent('暂无数据');
+    expect(usageCard).toHaveTextContent('暂无数据');
+    // 零会话格式化成「不足 1 分钟」会把「什么都没学」读成「学了点」。
+    expect(studyCard).not.toHaveTextContent('不足 1 分钟');
+    expect(usageCard).not.toHaveTextContent('不足 1 分钟');
+    // 概览主体照常渲染
+    expect(screen.getByTestId('dashboard-student-11')).toBeTruthy();
+  });
+
   it('切孩子：时长按 studentId 归属派生，绝不带出上一个孩子的时长', async () => {
     // 两个孩子时长刻意不同且格式化后不同：5400 → 「1 小时 30 分」；600 → 「10 分钟」。
     // 小美的请求挂在一个**我们不主动 resolve 的 deferred** 上，制造出「已切到小美、数据未到」

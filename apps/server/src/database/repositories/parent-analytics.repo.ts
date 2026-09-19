@@ -35,9 +35,9 @@ export class ParentAnalyticsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
   /**
-   * 会话有效性的**唯一口径**，四处聚合共用。
+   * 会话有效性的**唯一口径**，五处聚合共用（total / byDay / byModule / bySubject / activeDays）。
    *
-   * 抽成常量而不是四处复制：漏掉孤儿会话分支的散点 SQL 会让不同卡片上的
+   * 抽成常量而不是五处复制：漏掉孤儿会话分支的散点 SQL 会让不同卡片上的
    * 「学习时长」互相打架，而家长会认为其中一个是 bug。
    */
   private static readonly EFFECTIVE_SESSION = `(status IN ('ended','abandoned')

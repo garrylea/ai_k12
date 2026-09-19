@@ -41,7 +41,10 @@ export function clearUserAgentCache(): void {
 }
 
 function detectPlatform(ua: string): PlatformClass {
-  // iPad 要排在最前：它的 UA 同时含 `Macintosh` 与 `Mobile` 之外的特征，顺序错会落到 mac。
+  // 顺序敏感：这些模式互相重叠，靠「先命中先返回」区分。
+  // · `/iPad/` 必须排在 `/Macintosh|Mac OS X/` 之前——iPadOS 13+ 的 Safari UA 带 `Macintosh`。
+  // · `/iPhone|iPod/` 同样必须排在 `/Macintosh|Mac OS X/` 之前——iPhone UA 含 `like Mac OS X`。
+  // 任何一条落到 mac 那条之后，iPhone / iPad 都会被误判成 mac。
   if (/iPad/i.test(ua)) return 'ipad';
   if (/iPhone|iPod/i.test(ua)) return 'iphone';
   if (/Android/i.test(ua)) return /Mobile/i.test(ua) ? 'android_phone' : 'android_tablet';

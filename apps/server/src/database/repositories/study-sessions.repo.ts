@@ -182,7 +182,8 @@ export class StudySessionsRepository {
    * 「今日已用时长」会一直不更新。收尾时 `ended_at = last_heartbeat_at`
    * （不是 NOW），因为最后 5 分钟的实际状态未知，不能白送时长。
    *
-   * `studentId` 可选：家长查单人时传（顺带修正那个人），夜间任务不传（全库兜底）。
+   * `studentId` 可选：家长查单人时传（顺带修正那个人）。不传的**全库收尾形态是预留入口**
+   * ——当前**无调用方**、夜间定时任务**未实现**（仓库内没有任何调度器），参数留给后续阶段用。
    */
   async closeStale(studentId?: number): Promise<number> {
     const where = studentId === undefined ? '' : ' AND student_id = ?';

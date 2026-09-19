@@ -174,7 +174,10 @@ export class StudySessionsService {
     return { activeSeconds: row.active_seconds, endedAt: row.ended_at };
   }
 
-  /** 惰性收尾（家长端查询前 / 夜间兜底）。见 repo 的同名方法。 */
+  /**
+   * 惰性收尾（家长端查询前；不传 studentId 的全库形态是**预留入口**，当前无调用方、
+   * 夜间定时任务未实现）。见 repo 的同名方法。
+   */
   async closeStale(studentId?: number): Promise<number> {
     return this.repo.closeStale(studentId);
   }

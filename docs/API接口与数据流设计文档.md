@@ -1607,14 +1607,15 @@ PATCH /api/study-sessions/:uid/end  {reason}    路由离开 / pagehide / 挂机
 study_sessions（学习时长唯一真源，迁移 2026-09-21_study_sessions.sql）
   │  孤儿会话：用户直接关标签 / 断网 → 没有 end 请求，会话会永远停在 active
   ▼
-closeStale（惰性收尾；家长端读前传 studentId，夜间任务不传 = 全库兜底）
+closeStale（惰性收尾；家长端读前传 studentId = 顺带修正那个人。**预留**全库收尾入口
+  ——不传 studentId 的调用形态当前**无调用方**、夜间定时任务**未实现**，参数留着给后续阶段用）
   · status='active' 且 last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE
     → status='ended', end_reason='closed'
   · ended_at = last_heartbeat_at（**不是 NOW**）：最后 5 分钟的实际状态未知，不能白送时长
   · 家长端调用处**吞异常**（closeStaleQuietly 失败只 warn）——收尾失败绝不该把家长页打成 500
   ▼
 家长端读侧 parent-analytics.repo.ts（只读、唯一入口）
-  · 有效会话谓词 EFFECTIVE_SESSION（四处聚合共用，唯一口径）：
+  · 有效会话谓词 EFFECTIVE_SESSION（五处聚合共用：total / byDay / byModule / bySubject / activeDays，唯一口径）：
       status IN ('ended','abandoned')
         OR (status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE)
     ——已变成孤儿但还没被 closeStale 收尾的 active 会话也要算进来，

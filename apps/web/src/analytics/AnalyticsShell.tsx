@@ -15,9 +15,10 @@ import * as tracker from './tracker';
  * `routeTable.tsx` **不改**：它的测试用 `createMemoryRouter(routes)` 直接挂真实表，
  * 往里加组件会破坏「纯配置」的约束。
  *
- * 副作用分两段 effect，顺序不能颠倒：
+ * 副作用共三段 effect。其中**前两段有顺序依赖，不能颠倒**：
  * 1. 先配好 subjectId 提供者；
  * 2. 再按路由变化补角色闸门并驱动会话（若反了，首个路由变化会因为 `enabled=false` 被丢掉）。
+ * 第三段挂 visibility / pagehide / 输入事件监听，与前两段无顺序关系。
  */
 export default function AnalyticsShell() {
   const location = useLocation();

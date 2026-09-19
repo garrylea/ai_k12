@@ -1,6 +1,6 @@
 import type { SceneInfo, StudyModule, StudyScene } from './types';
 
-/** 一条映射规则：正则命中即返回（**按顺序**匹配，具体路径必须在通配之前）。 */
+/** 一条映射规则：按顺序匹配，命中即返回。 */
 interface Rule {
   pattern: RegExp;
   module: StudyModule | null;
@@ -15,8 +15,9 @@ interface Rule {
  * 因此这里改规则不需要同步后端——但 `module` / `scene` 的**取值**必须落在后端白名单内
  * （`study-sessions.service.ts` 的 `STUDY_MODULES` / `STUDY_SCENES`），否则会话会被 1001 拒掉。
  *
- * 顺序敏感：`/student/training/chinese/dictation/run` 必须排在
- * `/student/training/...` 的通配之前——所以这里**不用**通配，只列具体路径。
+ * 无通配规则：下面 16 条规则两两不相交（都是具体路径前缀），所以顺序**当前不影响结果**，
+ * 循环只是「命中即返回」。这里刻意不写 `/student/training/...` 这类通配——一旦引入，
+ * 上面那些具体路径就必须排在它前面，否则会被通配先吃掉（`mapScene` 返回首个命中）。
  */
 const RULES: Rule[] = [
   // ---- 学习场景（开会话）----

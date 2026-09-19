@@ -82,6 +82,12 @@ function SubjectCard({ subject }: { subject: ParentDashboardStudent['subjects'][
  * 旧活跃 = 四路时间戳代理（答题/积分/考试/对话），新时长 = 显式会话。
  * 孩子挂机不答题时旧口径不活跃、新口径有时长；两者数字不同是**正常的**。
  * 因此这里**并列展示 + 文案区分**，绝不替换或合并。
+ *
+ * 「暂无数据」看**数组**而不是数字：两个端点**总会**返回对象（`totalSeconds` /
+ * `activeSeconds` 只是普通数字，契约里没有「无数据」信号），所以「无会话」只能靠
+ * 空数组判。数组与数字走同一个「有效会话」谓词，故**空数组 ⟹ 数字为 0**（单向，
+ * 反之不然——`active_seconds = 0` 的会话会让数组非空而数字仍为 0）。
+ * 不能改判 `totalSeconds === 0`，详见 `ParentReportPage` 同处注释。
  */
 function StudyTimePanel({
   studentId,
@@ -97,7 +103,7 @@ function StudyTimePanel({
       <Card className="p-5" data-testid={`dashboard-study-time-${studentId}`}>
         <h3 className="text-base font-bold text-[var(--text-primary)]">学习时长（近 7 天）</h3>
         <p className="mt-2 text-2xl font-black text-[var(--text-primary)]">
-          {study ? formatDuration(study.totalSeconds) : '暂无数据'}
+          {study && study.byDay.length > 0 ? formatDuration(study.totalSeconds) : '暂无数据'}
         </p>
         <p className="mt-1 text-xs text-[var(--text-tertiary)]">
           会话口径：只统计进入学习页且有操作的时间，与「近 7 天活跃天数」不是同一口径。
@@ -107,7 +113,7 @@ function StudyTimePanel({
       <Card className="p-5" data-testid={`dashboard-today-usage-${studentId}`}>
         <h3 className="text-base font-bold text-[var(--text-primary)]">今日已用</h3>
         <p className="mt-2 text-2xl font-black text-[var(--text-primary)]">
-          {usage ? formatDuration(usage.activeSeconds) : '暂无数据'}
+          {usage && usage.byModule.length > 0 ? formatDuration(usage.activeSeconds) : '暂无数据'}
         </p>
         <p className="mt-1 text-xs text-[var(--text-tertiary)]">
           {usage
