@@ -2104,7 +2104,7 @@ Expected: PASS
 - [ ] **Step 9: Commit**
 
 ```bash
-git add apps/server/src/modules/parent-insights/window.util.ts apps/server/src/modules/parent-insights/window.util.test.ts apps/server/src/database/repositories/controls.repo.ts apps/server/src/database/repositories/controls.repo.test.ts apps/server/src/modules/parent-insights/study-time.service.ts apps/server/src/modules/parent-insights/study-time.service.test.ts
+git add apps/server/src/modules/parent-insights/window.util.ts apps/server/src/modules/parent-insights/window.util.test.ts apps/server/src/database/repositories/controls.repo.ts apps/server/src/database/repositories/controls.repo.test.ts apps/server/src/modules/parent-insights/study-time.service.ts apps/server/src/modules/parent-insights/study-time.service.test.ts apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts
 git commit -m "feat(parent): StudyTimeService + resolveRange + controls 每日上限读取"
 ```
 
