@@ -51,6 +51,8 @@ tags:
     description: 闯关积分：学生端查询（概览/流水/档位/奖励），只读
   - name: ParentPoints
     description: 家长端积分：分值规则、兑换、奖励清单、汇率设置
+  - name: StudySessions
+    description: 学习会话采集（学习时长，student）
 paths:
   # Auth
   /auth/register:
@@ -1375,7 +1377,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HintRequest'
+              $ref: '#/components/schemas/AiHintRequest'
       responses:
         '200':
           description: 提示
@@ -2515,6 +2517,75 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/ChatLogDetail'
+  /parent/students/{studentId}/study-time:
+    get:
+      tags: [Parent]
+      summary: 学习时长（会话口径）
+      description: >-
+        **口径标注**：会话口径，与 `dashboard.activeDays7` 的四路时间戳代理**并存、不替换**
+        （spec §10）。UI 必须并列展示 + 区分文案，不得合并或互相替换。
+        `from` / `to` 形如 `YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400
+        （与 `period` 的处理一致）；`from > to` 自动交换。窗口由应用层算好传参，不用 `CURDATE()`。
+        只聚合**有效会话**（已结束 / 已惰性收尾的孤儿会话）。归属校验先于取数。
+      operationId: getStudyTime
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 起始日 `YYYY-MM-DD`（含）；缺省 = 近 7 天。
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 结束日 `YYYY-MM-DD`（含）；缺省 = 今天。
+      responses:
+        '200':
+          description: 学习时长汇总
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudyTimeSummary'
+  /parent/students/{studentId}/today-usage:
+    get:
+      tags: [Parent]
+      summary: 今日已用时长（与每日上限比较）
+      description: >-
+        `limitMinutes` 取自 `controls.daily_time_limit_minutes`，**为 NULL = 家长未设限**
+        → `exceeded = false`（不是「超了」，也不是「用了 0 分钟」）。`exceeded` 用 `>=`：
+        用满上限即算超出（管控语义是「该停了」）。「今日」由应用层算好本地日传入。
+        读前惰性收尾该学生的孤儿会话（失败只 warn、不 500）。归属校验先于取数。
+      operationId: getTodayUsage
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 今日用量汇总
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TodayUsageSummary'
   /parent/students/{studentId}/goals:
     get:
       tags: [Parent]
@@ -2778,6 +2849,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommonResponse'
+
+  # StudySessions（学习会话采集，全部 @Roles('student')）
+  /study-sessions:
+    post:
+      tags: [StudySessions]
+      summary: 开始学习会话（幂等，201）
+      description: >-
+        **201**（Nest `@Post` 默认，本仓无 `@HttpCode` 覆盖）。`sessionUid` 由前端生成、
+        是幂等键：同 uid 重复 POST 返回**既有**会话（不新建、不报错）；但该 uid 已被别的学生
+        占用 → 400 / 1001（静默返回别人 startedAt 会让前端以为会话在跑，后续心跳全会落空）。
+        `module` / `scene` 必须在**封闭字典**内；设备三项 `screenClass` / `inputType` /
+        `appShell` 命中白名单取原值、否则**落 NULL 不报错**（设备信息是尽力而为）；
+        `platformClass` / `browser` 由服务端解析 `User-Agent`，**不接受客户端上报**。
+      operationId: startStudySession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartStudySessionRequest'
+      responses:
+        '201':
+          description: 会话已创建（或幂等复用既有会话）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          sessionUid:
+                            type: string
+                          startedAt:
+                            type: string
+                            format: date-time
+        '400':
+          description: 参数不合法（code=1001）：sessionUid 非 UUID / 未知 module / 未知 scene / 未知学科 / 会话标识冲突
+  /study-sessions/{uid}/heartbeat:
+    patch:
+      tags: [StudySessions]
+      summary: 会话心跳（PATCH 默认 200）
+      description: >-
+        服务端按 `last_heartbeat_at → NOW(3)` 差值累加，只在**上一状态为 visible** 时计
+        （hidden 暂停计时），**单次封顶 45s**（不封顶时「关标签 2 小时」会被算成 2 小时）。
+        会话不存在 / 非本人 / 非 `active` → **静默 200 + `activeSeconds: null`**
+        （不报错：心跳是尽力而为，报错只会污染前端日志）。
+      operationId: heartbeatStudySession
+      parameters:
+        - name: uid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 前端生成的 `sessionUid`（UUID）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: 累计时长；未命中时 data.activeSeconds 为 null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          activeSeconds:
+                            type: integer
+                            nullable: true
+                            description: 当前累计秒数；null = 会话不存在 / 非本人 / 非 active（静默）
+        '400':
+          description: state 不是 visible / hidden（code=1001）
+  /study-sessions/{uid}/end:
+    patch:
+      tags: [StudySessions]
+      summary: 结束学习会话（幂等）
+      description: >-
+        先补计最后一段（同心跳的封顶规则，但不改 `client_state`），再落 `status='ended'` /
+        `end_reason` / `ended_at=NOW(3)`。已结束 / 不存在 → **幂等返回现有值**
+        （不报错、不重复计）。
+      operationId: endStudySession
+      parameters:
+        - name: uid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 前端生成的 `sessionUid`（UUID）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EndSessionRequest'
+      responses:
+        '200':
+          description: 最终累计时长与结束时间
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          activeSeconds:
+                            type: integer
+                            nullable: true
+                          endedAt:
+                            type: string
+                            format: date-time
+                            nullable: true
+        '400':
+          description: reason 不在枚举内（code=1001）
 
   # Admin（管理员中枢，全部 @Roles('admin')）
   /admin/models:
@@ -6139,7 +6336,7 @@ components:
         fallback:
           type: boolean
 
-    HintRequest:
+    AiHintRequest:
       type: object
       properties:
         studentId:
@@ -8876,3 +9073,131 @@ components:
         reason:
           type: string
           enum: [daily_limit, already_completed, no_rule, tier_inactive, award_failed]
+
+    # ---- 埋点 Phase 1A：学习会话（2026-09-21）----
+
+    StudyTimeSummary:
+      type: object
+      description: >-
+        学习时长（**会话口径**，spec §8.2/§10）。`source: 'sessions'` 是口径标记：
+        与 `dashboard.activeDays7` 的四路时间戳代理**并存、不替换**。
+      properties:
+        totalSeconds:
+          type: integer
+        activeDays:
+          type: integer
+          description: 会话口径的「有学习的天数」，与旧 `activeDays7` **刻意不同**（不是同一回事）。
+        byDay:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                description: "`YYYY-MM-DD`"
+              seconds:
+                type: integer
+        byModule:
+          type: array
+          description: 按 `module` 聚合，按秒数降序。
+          items:
+            type: object
+            properties:
+              module:
+                type: string
+              seconds:
+                type: integer
+        bySubject:
+          type: array
+          description: 只含 `subject_id IS NOT NULL` 的会话；没选学科的会话不进这张表。
+          items:
+            type: object
+            properties:
+              subjectId:
+                type: integer
+              seconds:
+                type: integer
+        source:
+          type: string
+          enum: [sessions]
+
+    TodayUsageSummary:
+      type: object
+      description: 今日已用时长（spec §8.2），用于与 `controls.daily_time_limit_minutes` 比较。
+      properties:
+        date:
+          type: string
+          description: "`YYYY-MM-DD`（应用层算好的本地日）"
+        activeSeconds:
+          type: integer
+        limitMinutes:
+          type: integer
+          nullable: true
+          description: >-
+            取自 `controls.daily_time_limit_minutes`。**null = 家长未设限**（不是 0，
+            也不是「用了 0 分钟」），此时 `exceeded = false`。
+        exceeded:
+          type: boolean
+          description: "`activeSeconds >= limitMinutes * 60`；`limitMinutes` 为 null 时恒 false。"
+        byModule:
+          type: array
+          items:
+            type: object
+            properties:
+              module:
+                type: string
+              seconds:
+                type: integer
+
+    StartStudySessionRequest:
+      type: object
+      required: [sessionUid, module, scene]
+      properties:
+        sessionUid:
+          type: string
+          description: 前端生成的 UUID（幂等键）；形状不合法 → 400 / 1001。
+        module:
+          type: string
+          description: 后端封闭字典（`STUDY_MODULES`）；前端 `sceneMap.ts` 只能取这里的值。
+          enum: [mainline, aux_qna, training_targeted, training_error_practice, exam, chinese_dictation, chinese_interpretation, chinese_meaning, en_vocabulary]
+        scene:
+          type: string
+          description: 后端封闭字典（`STUDY_SCENES`），比 module 细。
+          enum: [course_detail, star_map, aux_chat, targeted_run, error_run, exam_run, dictation_run, interpretation_run, meaning_run, vocabulary_run, profile, rewards]
+        subjectId:
+          type: integer
+          description: 可选；若给需是**在售学科**，否则 400 / 1001。
+        refType:
+          type: string
+          description: "`lesson` | `card` | `paper` | `passage` | `word` | `dialogue`（最长 24）"
+        refId:
+          type: integer
+        screenClass:
+          type: string
+          enum: [ipad_landscape, desktop, tablet_portrait, mobile]
+          description: 前端上报；**非法值落 NULL 不报错**（设备信息是尽力而为）。
+        inputType:
+          type: string
+          enum: [touch, mouse, hybrid]
+          description: 前端上报；非法值落 NULL。`mac + touch` 会被服务端校正为 `ipad`。
+        appShell:
+          type: string
+          enum: [web, electron]
+          description: 前端上报；非法值落 NULL。
+
+    HeartbeatRequest:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [visible, hidden]
+          description: visible = 继续计时；hidden = 暂停计时（服务端只在上一状态为 visible 时累加）。
+
+    EndSessionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          enum: [route_change, pagehide, idle_timeout, closed, hidden_timeout]

@@ -8,6 +8,19 @@
 
 ---
 
+## 2026-09-21 埋点 Phase 1A：学习时长端到端
+
+- 新增 `study_sessions`（迁移 `2026-09-21_study_sessions.sql` + `schema.sql`；列 / 索引 / 三条口径见数据库设计文档 §3.16）与三个采集端点 `POST /api/study-sessions`、`PATCH /api/study-sessions/:uid/heartbeat`、`PATCH /api/study-sessions/:uid/end`（API 设计文档 §4.23、数据流 §6.25、契约 `openapi.yaml`）。家长端新增 `GET /api/parent/students/:id/study-time`、`/today-usage`（§4.13）。
+- **`active_seconds` 只由服务端累计，单次封顶 45s**：心跳时按 `last_heartbeat_at → NOW(3)` 差值增量，且只在**上一状态为 visible** 时计（hidden 暂停）。**理由（会被反复问，记死）**：不封顶时，用户关掉标签页 2 小时后若有一次迟到心跳，差值会把整段 2 小时算成学习时长；封顶后最坏只多算 45s（心跳间隔 30s + 15s 抖动余量）。客户端上报的秒数**一律不采信**。`GREATEST(0, ...)` 兜住时钟回拨。
+- **`closeStale` 惰性收尾**：用户直接关标签 / 断网时不会有 `end` 请求，会话会永远停在 `active`、「今日已用」永远不更新。家长端读前（传 `studentId`）与夜间兜底（不传 = 全库）把「`active` 且心跳超 5 分钟」收为 `ended`，`ended_at = last_heartbeat_at`（**不是 `NOW`**——最后 5 分钟实际状态未知，不能白送时长）。家长端调用处**吞异常**（失败只 warn），收尾失败绝不该把家长页打成 500。
+- **§10 并存不替换（硬约束）**：家长端新的「学习时长（会话）」与既有「近 7 天活跃天数」（`practice_results ∪ point_ledger ∪ exam_sessions ∪ ai_messages` 的四路时间戳代理）是**两套口径、并存不替换**，数字会明显不同。UI 必须**并列展示 + 区分文案**，响应里用 `source: 'sessions'` 标口径。**不要为了「看起来一致」把任何一个改掉**。
+- **前端 `analytics/` 本批只做会话生命周期**（start / heartbeat / end + 设备分档 + 状态机）；`behavior_events` 表与 `POST /api/track/events` **有意留到 Phase 2**（表尚不存在，提前开端点只会得到 500）。家长端 / 管理端 `setEnabled(false)`，本批不启动会话追踪。
+- **`subject_id` 的来源改了（与 spec §7.3 原写法有偏差，已修正）**：spec 原写「`subject_id` 从 `useLearnContextStore` 取」，但该 store 原先只有 `subjectName` 等展示字段、**并不携带数字 id**。本批把 store 扩展为带数字 `subjectId`，并注明**不能从路由 state 取**——路由 state 只有在「从星图进入」时才带并当次写入 store，直接刷新 / 深链根本走不到那次写入。埋点经 `tracker.setSubjectIdProvider()` 读 store，不让 tracker 直接依赖 store。
+- **iPad 校正**：iPadOS 13+ 的 Safari UA 写 `Macintosh`，只看 UA 必然把 iPad 判成 Mac（而 iPad 横屏是主断点）。服务端按「`platform_class == 'mac'` 且 `input_type == 'touch'` → `ipad`」校正。设备列只到**类别**，不存唯一标识、不存原始 UA；`platform_class` / `browser` 服务端解析、`screen_class` / `input_type` / `app_shell` 前端上报，**非法值落 NULL 不报错**。
+- **埋点写入的例外**：三个采集端点**允许 DB 失败直接 500**（前端传输层 `.catch(() => {})` 吞掉，静默隐藏故障会让生产问题只能从日志排障）；而**嵌在别的业务流里**的埋点写入（如家长 GET 里的 `closeStale`）必须 catch、失败只 warn。
+
+---
+
 ## 2026-09-20 埋点 Phase 0：模型调用账本 + API 请求日志
 
 - 新增 `llm_call_logs`（每次 LLM 调用一行，记**输入/输出 token**、usage_source、重试尝试/失败/fallback）
