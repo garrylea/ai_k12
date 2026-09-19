@@ -59,3 +59,5 @@ export { ApiRequestLogsRepository } from './api-request-logs.repo.js';
 export type { ApiRequestLogEntry } from './api-request-logs.repo.js';
 export { StudySessionsRepository } from './study-sessions.repo.js';
 export type { StudySessionRow, StudySessionInsertInput } from './study-sessions.repo.js';
+export { ParentAnalyticsRepository } from './parent-analytics.repo.js';
+export type { DaySeconds, ModuleSeconds, SubjectSeconds } from './parent-analytics.repo.js';
