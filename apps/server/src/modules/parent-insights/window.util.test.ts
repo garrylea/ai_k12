@@ -77,8 +77,18 @@ describe('resolveRange', () => {
 
   it('非法日期串 → 回落默认（查询参数宽容，不 400）', () => {
     const w = resolveRange('2026-9-3', 'garbage');
-    expect(w.startDay).not.toBe('2026-9-3');
+    expect(w.startDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(w.endDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('不存在的日历日被拒并回落——不是被 Date 静默滚到下个月', () => {
+    // 裸 `new Date(2026, 1, 30)` 会静默变成 2026-03-02，让窗口悄悄错位
+    expect(resolveRange('2026-02-30', '2026-02-30').endDay).not.toBe('2026-03-02');
+    expect(resolveRange('2026-04-31', '2026-04-31').endDay).not.toBe('2026-05-01');
+    // 月份越界同理（裸 Date 会滚到 2027-01）
+    expect(resolveRange('2026-13-01', '2026-13-01').endDay).not.toBe('2027-01-01');
+    // 回落后仍是合法形状的默认窗口
+    expect(resolveRange('2026-02-30', '2026-02-30').endDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('from > to → 交换，不返回空窗口', () => {
