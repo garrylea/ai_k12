@@ -63,6 +63,31 @@ describe('流式拿不到 usage 时的估算（输入/输出各自的数据源�
     expect(res.usage.cost).toBeCloseTo(0.0001, 8);
   });
 
+  it('思考（reasoningContent）也计入输出 token —— 钉子用例', async () => {
+    const providers = new Map([
+      ['kimi', {
+        chat: vi.fn(),
+        streamChat: async function* () {
+          yield { content: 'x' };                          // 输出 1 token（ceil(1/4)）
+          yield { content: '', reasoningContent: '你好世界' }; // 输出 4 token（4 CJK）
+        },
+      }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    const res = await mc.chat({
+      model: {
+        provider: 'kimi', modelId: 'kimi-latest', baseUrl: 'https://x', contextWindow: 8,
+        maxOutputTokens: 8, supportsStreaming: true, costPer1K: { input: 0.01, output: 0.02 },
+      } as any,
+      messages: [{ role: 'user', content: 'abcdefgh' }],   // 输入 2 token
+      stream: true,
+    });
+    expect(res.usage.source).toBe('estimated');
+    expect(res.usage.inputTokens).toBe(2);
+    expect(res.usage.outputTokens).toBe(5);   // 1（'x'）+ 4（'你好世界'）
+    expect(typeof res.usage.cost).toBe('number');
+  });
+
   it('请求与响应都为空 -> unavailable，token/cost 全 NULL（不写 0）', async () => {
     const providers = new Map([
       ['kimi', { chat: vi.fn(), streamChat: async function* () { /* 什么都不 yield */ } }],

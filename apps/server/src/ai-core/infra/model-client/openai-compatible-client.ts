@@ -209,12 +209,15 @@ export class OpenAICompatibleClient implements ProviderAdapter {
             if (parsed.choices?.[0]?.finish_reason) {
               yield { content: '', finishReason: parsed.choices[0].finish_reason };
             }
-            if (parsed.usage) {
+            // 只在两个字段都是真实数字时才产出 usage；缺字段就整个跳过，
+            // 让 aggregateStream 落到 estimated 档。**不要**用 ?? 0 —— 那会把
+            // 「没拿到」写成「测到 0」还标 source:'provider'，报表上再也看不出缺口。
+            if (parsed.usage && typeof parsed.usage.prompt_tokens === 'number' && typeof parsed.usage.completion_tokens === 'number') {
               yield {
                 content: '',
                 usage: {
-                  inputTokens: parsed.usage.prompt_tokens ?? 0,
-                  outputTokens: parsed.usage.completion_tokens ?? 0,
+                  inputTokens: parsed.usage.prompt_tokens,
+                  outputTokens: parsed.usage.completion_tokens,
                 },
               };
             }
