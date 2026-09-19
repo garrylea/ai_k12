@@ -13,7 +13,12 @@ import type {
   SessionState,
 } from './types';
 
-/** 与后端 `study-sessions.service.ts` 的常量对齐（心跳间隔 30s、空闲阈值 120s）。 */
+/**
+ * 心跳间隔 30s：对齐后端设计所预期的前端心跳间隔 —— 后端**不导出**这个常量
+ * （见 `study-sessions.service.ts` 顶部注释），别去那边找。
+ * 空闲阈值 120s 是**纯前端**的选择：后端只把「自己的」封顶写成 SQL 字面量
+ * （单次增量 45s、5 分钟惰性收尾，见 `study-sessions.repo.ts` 的 `LEAST(..., 45)` 与 `INTERVAL 5 MINUTE`）。
+ */
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const IDLE_TIMEOUT_MS = 120_000;
 /** 空闲检测的轮询间隔：120s 阈值不必每秒查，5s 粒度足够，且省电。 */
@@ -66,7 +71,9 @@ let idleTimer: ReturnType<typeof setInterval> | null = null;
 export function setEnabled(value: boolean): void {
   enabled = value;
   if (!value) {
-    // 退出登录 / 角色变化：把在跑的会话收掉，别让它挂到惰性收尾（会白记 5 分钟）
+    // 退出登录 / 角色变化：把在跑的会话收掉，别让它挂到惰性收尾（会白记 5 分钟）。
+    // 注意：这里的 endSession('closed') **绕过了 `runTransition`**——`closed` 是拆机流程，
+    // 不是状态机事件（事件集里没有它），这是 `runTransition` 独占副作用的具名例外之一。
     if (sessionUid) endSession('closed');
     else resetLocalState();
   }
@@ -204,9 +211,14 @@ function applyEffect(input: { visibility?: boolean; pageHide?: boolean }): void 
 }
 
 /**
- * 执行一次状态机迁移——**全部副作用的唯一出口**：`start` / `end` / `heartbeat`
- * 都由这里按 `effects` 执行。调用点（路由变化、可见性、pagehide、空闲）只负责把事件喂进来，
+ * 执行一次状态机迁移，并落**迁移驱动的**副作用：状态变更（`start` / `end`）与
+ * `effects.heartbeat` 都由这里执行。调用点（路由变化、可见性、pagehide、空闲）只负责把事件喂进来，
  * 自己不做任何网络或状态操作。这样「谁负责开会话/结束会话」永远只有一个答案。
+ *
+ * **两个具名例外**（都是有意为之，别据此再往里加第三个）：
+ * ① 周期心跳——`armTimers` 的 30s 定时器直接调 `sendHeartbeat`（tick 不带状态变化，事件集里
+ *    没有「tick」这种事件，理由见 `armTimers` 上方注释）；
+ * ② `setEnabled(false)` → `endSession('closed')`——`closed` 是拆机流程而非状态机事件。
  */
 function runTransition(event: SessionEvent): void {
   const next = transition(state, event);
@@ -217,6 +229,13 @@ function runTransition(event: SessionEvent): void {
   if (next.effects.heartbeat) sendHeartbeat(next.effects.heartbeat);
 }
 
+/**
+ * 周期心跳：**有意独立于状态机的第二个触发器**，与 `effects.heartbeat` 那种「迁移驱动」的心跳
+ * 不是同一条路径。tick 本身不携带状态变化——它只是把**当前**状态再报一次，没有新事件可喂给
+ * 状态机，所以不需要（也无法）用 machine event 表达。只在 `active` / `hidden` 时发
+ * （`idle` / `ended` 不该再有心跳）。代价是「状态名 → 上报值」的映射在此重复了一份
+ * （与 `sessionMachine` 的 `effects.heartbeat` 同义）——这是不动已冻结事件集的取舍。
+ */
 function armTimers(): void {
   disarmTimers();
   heartbeatTimer = setInterval(() => {

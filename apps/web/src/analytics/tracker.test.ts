@@ -47,12 +47,18 @@ describe('tracker 会话生命周期', () => {
     expect(body.sessionUid).toMatch(/[0-9a-f-]{8,}/i);
   });
 
-  it('30s 心跳只发 state，**不重复带设备字段**', async () => {
+  it('30s 定时器到点 → **新增**一条 visible 心跳，且只带 (uid, state)', async () => {
     tracker.onRouteChange(STUDY);
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(0);
+    // t=0 的 ROUTE_ENTER 也会发一条 visible 心跳；先记下它，避免用例被它「白送」通过。
+    const before = transport.heartbeat.mock.calls.length;
+    const uid = transport.start.mock.calls[0][0].sessionUid;
 
-    expect(transport.heartbeat).toHaveBeenCalledWith(expect.any(String), 'visible');
-    const args = transport.heartbeat.mock.calls[0];
+    await vi.advanceTimersByTimeAsync(30_000); // 跨过一个心跳周期
+
+    expect(transport.heartbeat.mock.calls.length).toBe(before + 1);
+    const args = transport.heartbeat.mock.calls[before];
+    expect(args).toEqual([uid, 'visible']);
     expect(args).toHaveLength(2); // (uid, state) —— 没有第三个「设备」参数
   });
 
@@ -104,12 +110,17 @@ describe('tracker 会话生命周期', () => {
     expect(transport.end).not.toHaveBeenCalled();
   });
 
-  it('hidden 后用户有输入 → 发 visible 心跳恢复计时', async () => {
+  it('hidden 后用户有输入 → **新增**一条 visible 心跳恢复计时', async () => {
     tracker.onRouteChange(STUDY);
-    await vi.advanceTimersByTimeAsync(125_000);
+    await vi.advanceTimersByTimeAsync(125_000); // 空闲 → hidden（期间周期心跳也会发，故不能用 lastCalled 判定）
+    const before = transport.heartbeat.mock.calls.length;
+    const uid = transport.start.mock.calls[0][0].sessionUid;
+
     tracker.notifyInput();
     await vi.advanceTimersByTimeAsync(0);
-    expect(transport.heartbeat).toHaveBeenLastCalledWith(expect.any(String), 'visible');
+
+    expect(transport.heartbeat.mock.calls.length).toBe(before + 1);
+    expect(transport.heartbeat.mock.calls[before]).toEqual([uid, 'visible']);
   });
 
   it('页面隐藏 → hidden 心跳；恢复可见 → visible 心跳', async () => {
