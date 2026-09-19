@@ -472,4 +472,11 @@ SELECT subject_id, SUM(correct) AS correct, SUM(total) AS answered FROM (
 11. **薄弱点数不可当覆盖率**：一个题可绑多个知识点（`question_knowledge_points` 的 UNIQUE 是「题×KP」），所以 `sum(unclearedCount)` 会大于「未清零错题总数」，**不能**用它与 `weakPointsUncoveredCount` 推覆盖率或「已覆盖」数。
 12. **趋势折线的 X 轴只含有记录的天，没有按窗口补零**：`trend` 与 `ChartLine` 都是「有几个点画几个点」，所以相隔 5 天的两次记录在图上会**相邻**显示，`MM-DD` 标签之间看不出间隔。spec §4.2 ② 原意是「前端按 `windowStart..windowEnd` 铺 X 轴」，实际未做——要做得先让 `ChartPoint.value` 允许 `null` 并把 recharts 的 `connectNulls` 关掉（否则会画出「当天 0 分」的假数据）。本期接受这个观感折中。
 13. **柱状图的 X 轴标签把正确率写进了刻度文字**（形如「数学 73.8%」）：学科多于 4~5 个时刻度可能挤。本期接受；要改就把正确率挪到图表下方的文字行。
-14. **`attachments` 不回传 → 拍照解题的图片在家长回放里不可见**：`ParentChatLogMessage` 是白名单映射，刻意不返回消息的 `attachments`（拍照解题留下的图片 JSON）。这与 PRD §7.7「全透明回放…全面掌握孩子的思考路径」存在张力；本期按**明确不做**处理（要做需前端一并处理图片 URL 与过期），需产品裁决是否后续补。
+14. **`attachments` 没回传 → 拍照解题的图片在家长回放里看不到**（**是家长端独有的缺失，不是产品决定**）。
+  - 事实链：照片确实落库（`ai_messages.attachments`，写入侧 `services/conversation/index.ts` 存的是 `{type,url}[]` 的 JSON）；**学生端能看** —— `ConversationsService.getMessages` 返回仓储原始行（带 `attachments`），`hooks/useAuxChat.ts` 把它解析成 `images: string[]`，`AuxChatPanel` 用 `<img>` 渲染；**家长端看不到** —— `ParentChatLogMessage` 是我写的**白名单映射**，8 个字段里没有 `attachments`。
+  - 因此这与 PRD §7.7「全透明回放…全面掌握孩子的思考路径」是**真实缺口**，而且**修法就是照学生端抄**：后端白名单加 `attachments`（+ DTO/openapi 同步），前端回放页把 `{type,url}[]` 解析成图片、用 `resolveAsset` 拼 URL 并处理破图。
+  - 本期**未做**（不在本批 18 个任务内），列为后续项。
+15. **专项类学情没有学科卡片**（用户 2026-09-19 提出的后续项）：仪表盘的学科卡片只收 `progress` 行存在的学科，而**语文古诗文三专项、英语背单词、辅线答疑都不写 `progress`**。所以只在专项里学的孩子（例如「只背单词」）在仪表盘上**没有对应学科卡**，看不到「背了多少天 / 共背多少词 / 易错词是哪些 / 每天背几个」。
+  - 需求方向（用户原话）：这类专项也应出学科卡，展示该专项自己的指标。
+  - **数据可用性需先确认**：英语有 `student_word_progress`（`learned` / `wrong_count` / `last_seen_at`，唯一键 `student_id + word_id`）→「共背多少词」「易错词 Top」可查；但 `last_seen_at` 是**覆盖式最新值**，「每天背了几个」**不能**直接由它得出，需另找按天的数据源（`point_ledger` 的 `en_vocabulary` 流水只有发分次数，不含词数；可能需新增按天的进度埋点）。语文三专项**没有学生进度表**，只能从 `point_ledger`（`ref_type='passage'`）间接推「做过哪些篇目」。
+  - 结论：这是一个**独立的前置调研 + 新一批**，不要在本批补。
