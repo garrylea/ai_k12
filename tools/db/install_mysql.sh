@@ -7,7 +7,8 @@
 #   2. 若未安装或版本过低，则调用系统包管理器自动安装/升级。
 #   3. 启动 MySQL 服务。
 #   4. 创建业务数据库与用户。
-#   5. 执行 schema.sql 初始化表结构、索引与触发器，并写入基础种子数据（subjects，见 schema.sql 末尾 INSERT IGNORE）。
+#   5. 执行 schema.sql 初始化表结构、索引与种子数据（subjects，见 schema.sql 末尾 INSERT IGNORE）。
+#      updated_at 由**列级** ON UPDATE CURRENT_TIMESTAMP(3) 维护，不再建触发器（2026-09-19 统一）。
 #
 # 设计文档约定：
 #   - 数据库：MySQL 9.7.1 LTS（文档版本 v1.2）

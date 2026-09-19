@@ -8,6 +8,27 @@
 
 ---
 
+## 2026-09-19 新增（统一 `updated_at` 维护方式：触发器 → 列级 `ON UPDATE`）
+
+**起因**：排查「dev 库 28 条 `*_updated_at` 触发器只装了 1 条」这件事。盘点后发现比原先记的更糟：
+
+- `schema.sql` 里 **28 张表**的 `updated_at` **列定义没有** `ON UPDATE CURRENT_TIMESTAMP`，靠 §14 的 `BEFORE UPDATE` 触发器维护；另有 **2 张表**（`admins` / `student_hidden_questions`）**两种机制都没有**（连触发器都没定义，新装库也是冻结的）。
+- dev 库里那唯一装上的触发器 `trg_aux_error_books_updated_at` 长在**已废弃**的 `aux_error_books` 上（`ai.module.ts` 明确「no longer used」，且该表已不在 `schema.sql` 中）→ **27 张在用的表 `updated_at` 在行被 UPDATE 时根本不刷新**。
+- 实测证据：`UPDATE parents` 前该行 `updated_at = 2026-07-28 11:57:16.998`（插入时刻）。
+
+**做了什么**（按用户裁决「统一用列级写法」）：
+
+1. `tools/db/schema.sql`：30 张表的 `updated_at` 改成 `DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)`；**删掉 §14 整节 28 条触发器**，原处只留一段说明（含「不要再加 `*_updated_at` 触发器」）。全文件现在 0 条 `CREATE TRIGGER`，40 处列级 `ON UPDATE`。
+2. 新增迁移 `tools/db/migrations/2026-09-19_updated_at_on_update.sql`（幂等）：30 条 `ALTER TABLE ... MODIFY COLUMN` + 28 条 `DROP TRIGGER IF EXISTS` + 顺带清掉废弃表上那条残留触发器。
+3. 文档同步：数据库设计文档 §1.2 由「updated_at 自动触发器」改写为「列级 ON UPDATE，不用触发器」（并注明原文档里 `DELIMITER //` 那版写法与 `schema.sql` 实际实现并不一致）；`install_mysql.sh` 顶部注释；根 `CLAUDE.md` 数据库约定加一句「`updated_at` 一律列级 `ON UPDATE`，不要建触发器」。
+4. **已应用到 dev 库**并验证：触发器数 0；`information_schema` 里 40 个 `updated_at` 列带 `on update`（剩下 1 个是废弃的 `aux_error_books`）。事务内实测：`UPDATE` 后 `updated_at` 由 `2026-07-28` 跳到 `2026-09-19`，`ROLLBACK` 后回到原值、数据零变化。
+
+**为什么选列级而不是补触发器**：触发器是**独立对象**，`schema.sql` 与既有库不同步时会**静默缺失**（本仓没有迁移运行器，历史 DDL 靠手工 apply）——这正是本次事故的成因；列级写法随 `CREATE`/`ALTER TABLE` 走，不存在「忘了装」。这也是本仓反复出现的同一类漂移（另见 `admin_notifications` 缺迁移文件、`subject-configs` 在 openapi 缺失）。
+
+**影响评估（当时无现网 bug，但是潜在坑）**：全仓只有 3 处碰 `updated_at`——① `admin-chat.repo.ts` 的会话列表排序（其写入路径 `addMessage` **自己显式 SET**，所以是对的）；② `extract_tasks` 的「启动时扫残留 processing 任务」（`markStaleProcessingAsFailed` 的 WHERE 依赖它，但只在 `onModuleInit` 跑一次，启动时残留任务本来就是孤儿，仅在**多实例**部署下才会误伤）；③ 家长端回放**刻意没用** `ai_dialogues.updated_at`（改用最后一条消息时间，见 2026-09-18 条目）。所以本次是消除潜在坑，不是救火。
+
+---
+
 ## 2026-09-18 新增（家长端「看得见」批：四个页面 + 5 个只读端点 + 新模块 parent-insights）
 
 **做了什么**：家长控制台第一批——P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 AI 对话回放四个页面从 `Placeholder` 变真实页；后端新建 `apps/server/src/modules/parent-insights/`（`DashboardService` / `ReportService` / `ErrorsService` / `ChatLogsService` / `ParentInsightsRepository` + `dto/` + `window.util.ts` / `rate.util.ts`），5 个端点全部**只读**（`GET /api/parent/dashboard`、`.../students/:id/reports`、`/errors`、`/chat-logs`、`/chat-logs/:dialogueId`；另加正确率口径 `getAccuracyBySubject`）。**不产生任何业务写入**，不改学生端行为，不动任何既有门禁；`learning_reports` / `safety_alerts` / `student_knowledge_mastery` 全不碰。文档同步：`openapi.yaml` + API 设计文档（§2.4 实现注 / §4.13 / §6.8 整节重写 / §7 映射表 / §10 v4.0）+ UX §5.6 + PRD §7.7。
@@ -50,7 +71,7 @@ ai_messages 198（safety_flag=1 共 22 条）        point_ledger 1        stude
 14. **`attachments` 没回传 → 拍照解题的图片在家长回放里看不到**（**家长端独有的缺失，不是产品决定，别当成有意的取舍**）。照片确实落库（`ai_messages.attachments` 存 `{type,url}[]` 的 JSON）；**学生端能看**（`ConversationsService.getMessages` 返回原始行带 `attachments`，`hooks/useAuxChat.ts` 解析成 `images[]`，`AuxChatPanel` 渲染 `<img>`）；`ParentChatLogMessage` 是我写的 8 字段白名单，漏了它。与 PRD §7.7「全透明回放」是真实缺口；**修法照学生端抄**（后端加字段 + DTO/openapi，前端回放页解析 `{type,url}[]` + `resolveAsset` + 破图处理）。本期未做，列为后续项。
 15. **专项类学情没有学科卡片**（用户 2026-09-19 提出的后续项）：仪表盘学科卡只收 `progress` 行存在的学科，而**语文古诗文三专项、英语背单词、辅线答疑都不写 `progress`**，所以「只背单词」的孩子在仪表盘上没有对应学科卡，看不到「背了多少天 / 共背多少词 / 易错词是哪些 / 每天背几个」。数据可用性需先确认：英语有 `student_word_progress`（`learned`/`wrong_count`）→「共背多少词」「易错词 Top」可查，但 `last_seen_at` 是**覆盖式最新值**，「每天几个词」不能直接得出（`point_ledger` 的 `en_vocabulary` 流水只有发分次数、不含词数；可能需新增按天埋点）；语文三专项**没有学生进度表**，只能从 `point_ledger`（`ref_type='passage'`）间接推。**属独立前置调研 + 新一批**，不要在本批补。
 
-**环境漂移发现（不在本批修，建议单独立项）**：`tools/db/schema.sql:1160` 起定义了 **28 条 `CREATE TRIGGER`**（各表 `*_updated_at` 维护），但当前 dev 库 `information_schema.TRIGGERS` 里**只有 1 条**（`trg_aux_error_books_updated_at`）。也就是说 `updated_at` 字段在既有库上大多不会自动更新，且 code 里的 `updated_at` 排序/展示依赖它。这与既有的 `admin_notifications` 缺迁移文件属**同一类问题**：`schema.sql` 与已存在的库不同步，只有全新建库才会拿到全部触发器；仓库**没有迁移运行器**，历史 DDL 变更靠手工 apply，漏了就静默漂移。修复需要：(a) 补齐 27 条触发器的幂等迁移；(b) 排查哪些表的 `updated_at` 已被应用逻辑依赖却从未自动维护。本批不碰。
+**环境漂移发现（**已于 2026-09-19 修复，见顶部该日条目**）**：`tools/db/schema.sql:1160` 起定义了 **28 条 `CREATE TRIGGER`**（各表 `*_updated_at` 维护），但当前 dev 库 `information_schema.TRIGGERS` 里**只有 1 条**（`trg_aux_error_books_updated_at`）。也就是说 `updated_at` 字段在既有库上大多不会自动更新，且 code 里的 `updated_at` 排序/展示依赖它。这与既有的 `admin_notifications` 缺迁移文件属**同一类问题**：`schema.sql` 与已存在的库不同步，只有全新建库才会拿到全部触发器；仓库**没有迁移运行器**，历史 DDL 变更靠手工 apply，漏了就静默漂移。~~本批不碰。~~ → 2026-09-19 已按「统一改用列级 `ON UPDATE`」处理（含迁移与 dev 库应用）。
 
 **两条工程约定的踩坑细节（从 CLAUDE.md 压缩迁出，见「工程约定」）**：① 派生状态必须带 `studentId` 归属——顶栏切孩子不导航、`ParentLayout` 的 `<Outlet />` 无 `key`，报告页曾闪现上一个孩子的旧报告、回放页曾整屏显示上一个孩子的对话内容（只按自身维度守卫；`useEffect(reset)` 在 commit 后才跑，救不了首帧）。② 列表页换孩子必须回第 1 页——错题页/回放页曾带「上个孩子的页码」请求新孩子，页数不够时响应回显 `page` 仍是通过的，页面停在空态而分页控件只在非空分支渲染，家长无法自救。
 

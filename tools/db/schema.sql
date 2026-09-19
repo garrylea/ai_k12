@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS parents (
   avatar_url VARCHAR(500) DEFAULT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) DEFAULT NULL,
   UNIQUE KEY uniq_parents_phone (phone, deleted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS students (
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   avatar_url VARCHAR(500) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) DEFAULT NULL,
   UNIQUE KEY uniq_students_username (username, deleted_at),
   KEY idx_students_parent_id (parent_id),
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS admins (
   name VARCHAR(50) DEFAULT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) DEFAULT NULL,
   UNIQUE KEY uniq_admins_username (username, deleted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS student_settings (
   motion_enabled TINYINT(1) NOT NULL DEFAULT 1,
   sound_enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_student_settings_student_id (student_id),
   CONSTRAINT fk_student_settings_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS subjects (
   sort_order SMALLINT NOT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_subjects_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS textbook_versions (
   edition VARCHAR(50) NOT NULL DEFAULT '' COMMENT '版次标记：书名前导括号内容（如「根据2022年版课程标准修订」），空=旧版（2012 课标）',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_textbook_versions_code (code),
   UNIQUE KEY uniq_textbook_versions_edition (subject_id, publisher, grade_band, edition),
   KEY idx_textbook_versions_subject_grade (subject_id, grade_band),
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS semesters (
   term VARCHAR(10) NOT NULL,
   sort_order SMALLINT NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_semesters_version_grade_term (textbook_version_id, grade, term),
   CONSTRAINT fk_semesters_textbook_version_id FOREIGN KEY (textbook_version_id) REFERENCES textbook_versions (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS units (
   sort_order SMALLINT NOT NULL DEFAULT 0,
   is_midterm_boundary TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_units_semester_sort (semester_id, sort_order),
   CONSTRAINT fk_units_semester_id FOREIGN KEY (semester_id) REFERENCES semesters (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS lessons (
   sort_order SMALLINT NOT NULL DEFAULT 0,
   is_unit_last TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_lessons_unit_sort (unit_id, sort_order),
   CONSTRAINT fk_lessons_unit_id FOREIGN KEY (unit_id) REFERENCES units (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS knowledge_points (
   difficulty SMALLINT DEFAULT NULL,
   description TEXT DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_kp_subject_grade (subject_id, grade_band),
   KEY idx_kp_parent (parent_kp_id),
   CONSTRAINT fk_knowledge_points_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS cards (
   knowledge_point_ids TEXT DEFAULT NULL,
   textbook_page VARCHAR(20) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_cards_lesson_sort (lesson_id, sort_order),
   KEY idx_cards_kp_ids (lesson_id, sort_order),
   KEY idx_cards_lesson_type_sort (lesson_id, card_type, sort_order),
@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS questions (
   answer_verified TINYINT(1) NOT NULL DEFAULT 0,    -- 人工/AI 核验导入标记（answer_importer 置 1）
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_q_subject_type_diff (subject_id, type, difficulty),
   KEY idx_q_grade (grade_band),
   KEY idx_q_group (group_id, group_order),
@@ -482,7 +482,7 @@ CREATE TABLE IF NOT EXISTS student_knowledge_mastery (
   level SMALLINT NOT NULL DEFAULT 0,
   last_seen_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_skm_student_kp (student_id, knowledge_point_id),
   KEY idx_skm_student_mastery (student_id, mastery_score),
   KEY idx_skm_student_level (student_id, level),
@@ -509,7 +509,7 @@ CREATE TABLE IF NOT EXISTS progress (
   started_at DATETIME(3) DEFAULT NULL,
   last_active_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_progress_student_subject (student_id, subject_id),
   KEY idx_progress_student (student_id),
   CONSTRAINT fk_progress_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
@@ -532,7 +532,7 @@ CREATE TABLE IF NOT EXISTS homeworks (
   question_ids TEXT NOT NULL,
   total_score SMALLINT NOT NULL DEFAULT 100,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_homeworks_lesson (lesson_id),
   CONSTRAINT fk_homeworks_lesson_id FOREIGN KEY (lesson_id) REFERENCES lessons (id) ON DELETE CASCADE,
   CONSTRAINT fk_homeworks_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT
@@ -550,7 +550,7 @@ CREATE TABLE IF NOT EXISTS homework_submissions (
   submitted_at DATETIME(3) DEFAULT NULL,
   graded_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_hw_sub_student_status (student_id, status),
   KEY idx_hw_sub_homework_student (homework_id, student_id),
   CONSTRAINT fk_hw_sub_homework_id FOREIGN KEY (homework_id) REFERENCES homeworks (id) ON DELETE RESTRICT,
@@ -569,7 +569,7 @@ CREATE TABLE IF NOT EXISTS assessments (
   total_score SMALLINT NOT NULL DEFAULT 100,
   difficulty_distribution TEXT DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_assessments_subject_type (subject_id, type),
   CONSTRAINT fk_assessments_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
   CONSTRAINT fk_assessments_scope_semester_id FOREIGN KEY (scope_semester_id) REFERENCES semesters (id) ON DELETE SET NULL
@@ -588,7 +588,7 @@ CREATE TABLE IF NOT EXISTS assessment_submissions (
   graded_at DATETIME(3) DEFAULT NULL,
   auto_saved_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_as_sub_student_status (student_id, status),
   KEY idx_as_sub_assessment_student (assessment_id, student_id),
   CONSTRAINT fk_as_sub_assessment_id FOREIGN KEY (assessment_id) REFERENCES assessments (id) ON DELETE RESTRICT,
@@ -610,7 +610,7 @@ CREATE TABLE IF NOT EXISTS answers (
   feedback TEXT DEFAULT NULL,
   graded_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_answers_sub_q (submission_type, submission_id, question_id),
   KEY idx_answers_submission (submission_type, submission_id),
   CONSTRAINT fk_answers_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
@@ -642,7 +642,7 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   dialogue_id BIGINT DEFAULT NULL,
   cleared_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_me_student_subject (student_id, subject_id),
   KEY idx_me_student_cleared (student_id, is_cleared),
   KEY idx_me_student_level (student_id, is_cleared, level),
@@ -666,7 +666,7 @@ CREATE TABLE IF NOT EXISTS student_hidden_questions (
   subject_id BIGINT NOT NULL,
   question_id BIGINT NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_shq_student_question (student_id, question_id),
   KEY idx_shq_student (student_id),
   KEY idx_shq_student_subject (student_id, subject_id),
@@ -694,7 +694,7 @@ CREATE TABLE IF NOT EXISTS practice_results (
   error_type VARCHAR(20) DEFAULT NULL,     -- logic|calculation|format|missing|null
   judged_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_pr_student_card_qn (student_id, card_id, question_n),
   KEY idx_pr_student_card (student_id, card_id),
   KEY idx_pr_student_lesson (student_id, lesson_id),
@@ -768,7 +768,7 @@ CREATE TABLE IF NOT EXISTS ai_dialogues (
   pending_questions TEXT DEFAULT NULL,             -- P1 多题时的全部转录 JSON
   consecutive_fail_count SMALLINT NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) DEFAULT NULL,
   KEY idx_dlg_student_track (student_id, track),
   KEY idx_dlg_student_card (student_id, track, card_id),
@@ -849,7 +849,7 @@ CREATE TABLE IF NOT EXISTS goals (
   reminder_enabled TINYINT(1) NOT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_goals_student (student_id, is_active),
   CONSTRAINT fk_goals_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_goals_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE SET NULL
@@ -868,7 +868,7 @@ CREATE TABLE IF NOT EXISTS controls (
   alert_level VARCHAR(10) NOT NULL DEFAULT 'standard',
   break_reminder_minutes SMALLINT DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_controls_student (student_id),
   CONSTRAINT fk_controls_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -891,7 +891,7 @@ CREATE TABLE IF NOT EXISTS rewards (
   redeemed_at DATETIME(3) DEFAULT NULL,
   fulfilled_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) DEFAULT NULL,
   KEY idx_rewards_student_status (student_id, status),
   KEY idx_rewards_parent_pending (student_id, status),
@@ -924,7 +924,7 @@ CREATE TABLE IF NOT EXISTS extract_tasks (
   result TEXT DEFAULT NULL,
   error_message TEXT DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_et_status (status),
   CONSTRAINT fk_et_file_id FOREIGN KEY (file_id) REFERENCES uploaded_files (id) ON DELETE RESTRICT,
   CONSTRAINT fk_et_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE SET NULL
@@ -946,7 +946,7 @@ CREATE TABLE IF NOT EXISTS llm_models (
   max_output_tokens INT NOT NULL DEFAULT 16384,
   is_enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_llm_models_key (model_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -957,7 +957,7 @@ CREATE TABLE IF NOT EXISTS llm_routes (
   primary_model_key VARCHAR(50) NOT NULL,
   fallback_model_key VARCHAR(50) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_llm_routes (scene, subject),
   CONSTRAINT fk_llm_routes_primary FOREIGN KEY (primary_model_key) REFERENCES llm_models (model_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -988,7 +988,7 @@ CREATE TABLE IF NOT EXISTS admin_dialogues (
   model_key VARCHAR(50) NOT NULL,
   title VARCHAR(200) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_admin_dialogues_admin (admin_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -1153,175 +1153,14 @@ CREATE TABLE IF NOT EXISTS training_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
--- 14. updated_at 自动触发器
+-- 14.（已移除）updated_at 自动触发器
 -- ============================================================
-
-DROP TRIGGER IF EXISTS trg_parents_updated_at;
-CREATE TRIGGER trg_parents_updated_at
-BEFORE UPDATE ON parents
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_students_updated_at;
-CREATE TRIGGER trg_students_updated_at
-BEFORE UPDATE ON students
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_student_settings_updated_at;
-CREATE TRIGGER trg_student_settings_updated_at
-BEFORE UPDATE ON student_settings
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_subjects_updated_at;
-CREATE TRIGGER trg_subjects_updated_at
-BEFORE UPDATE ON subjects
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_textbook_versions_updated_at;
-CREATE TRIGGER trg_textbook_versions_updated_at
-BEFORE UPDATE ON textbook_versions
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_semesters_updated_at;
-CREATE TRIGGER trg_semesters_updated_at
-BEFORE UPDATE ON semesters
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_units_updated_at;
-CREATE TRIGGER trg_units_updated_at
-BEFORE UPDATE ON units
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_lessons_updated_at;
-CREATE TRIGGER trg_lessons_updated_at
-BEFORE UPDATE ON lessons
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_cards_updated_at;
-CREATE TRIGGER trg_cards_updated_at
-BEFORE UPDATE ON cards
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_knowledge_points_updated_at;
-CREATE TRIGGER trg_knowledge_points_updated_at
-BEFORE UPDATE ON knowledge_points
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_questions_updated_at;
-CREATE TRIGGER trg_questions_updated_at
-BEFORE UPDATE ON questions
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_student_knowledge_mastery_updated_at;
-CREATE TRIGGER trg_student_knowledge_mastery_updated_at
-BEFORE UPDATE ON student_knowledge_mastery
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_progress_updated_at;
-CREATE TRIGGER trg_progress_updated_at
-BEFORE UPDATE ON progress
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_homeworks_updated_at;
-CREATE TRIGGER trg_homeworks_updated_at
-BEFORE UPDATE ON homeworks
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_homework_submissions_updated_at;
-CREATE TRIGGER trg_homework_submissions_updated_at
-BEFORE UPDATE ON homework_submissions
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_assessments_updated_at;
-CREATE TRIGGER trg_assessments_updated_at
-BEFORE UPDATE ON assessments
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_assessment_submissions_updated_at;
-CREATE TRIGGER trg_assessment_submissions_updated_at
-BEFORE UPDATE ON assessment_submissions
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_answers_updated_at;
-CREATE TRIGGER trg_answers_updated_at
-BEFORE UPDATE ON answers
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_main_error_books_updated_at;
-CREATE TRIGGER trg_main_error_books_updated_at
-BEFORE UPDATE ON main_error_books
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_practice_results_updated_at;
-CREATE TRIGGER trg_practice_results_updated_at
-BEFORE UPDATE ON practice_results
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_ai_dialogues_updated_at;
-CREATE TRIGGER trg_ai_dialogues_updated_at
-BEFORE UPDATE ON ai_dialogues
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_goals_updated_at;
-CREATE TRIGGER trg_goals_updated_at
-BEFORE UPDATE ON goals
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_controls_updated_at;
-CREATE TRIGGER trg_controls_updated_at
-BEFORE UPDATE ON controls
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_rewards_updated_at;
-CREATE TRIGGER trg_rewards_updated_at
-BEFORE UPDATE ON rewards
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_extract_tasks_updated_at;
-CREATE TRIGGER trg_extract_tasks_updated_at
-BEFORE UPDATE ON extract_tasks
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_llm_models_updated_at;
-CREATE TRIGGER trg_llm_models_updated_at
-BEFORE UPDATE ON llm_models
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_llm_routes_updated_at;
-CREATE TRIGGER trg_llm_routes_updated_at
-BEFORE UPDATE ON llm_routes
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
-
-DROP TRIGGER IF EXISTS trg_admin_dialogues_updated_at;
-CREATE TRIGGER trg_admin_dialogues_updated_at
-BEFORE UPDATE ON admin_dialogues
-FOR EACH ROW
-SET NEW.updated_at = CURRENT_TIMESTAMP(3);
+-- 这里原有的 28 条 trg_*_updated_at 触发器已全部删除，改用**列级**
+-- `ON UPDATE CURRENT_TIMESTAMP(3)`（见各表 updated_at 列定义）。
+-- 原因：触发器是**独立对象**，schema.sql 与既有库不同步时会静默缺失
+-- （2026-09-19 实测：dev 库 28 条只装了 1 条，且那条长在已废弃的 aux_error_books 上，
+--  导致 27 张在用的表 updated_at 在行被 UPDATE 时根本不刷新）。
+-- 列级写法随 CREATE/ALTER TABLE 走，不存在「忘了装」。
+-- **不要再往这里加 *_updated_at 触发器**；新表直接在列上写 ON UPDATE。
 
 SET FOREIGN_KEY_CHECKS = 1;

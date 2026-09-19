@@ -1,0 +1,87 @@
+-- 2026-09-19 统一 updated_at 的维护方式：改成**列级** ON UPDATE，废弃 *_updated_at 触发器
+--
+-- 背景：schema.sql 历史上对 28 张表用 `BEFORE UPDATE ... SET NEW.updated_at = CURRENT_TIMESTAMP(3)`
+-- 触发器维护 updated_at；另有 2 张表（admins / student_hidden_questions）**两种机制都没有**。
+-- 触发器是**独立对象**：schema.sql 与既有库不同步时会静默缺失——2026-09-19 实测 dev 库
+-- information_schema.TRIGGERS 里只有 1 条（还长在已废弃的 aux_error_books 上），
+-- 于是 27 张在用的表 updated_at 在行被 UPDATE 时**根本不刷新**（不报错、很难发现）。
+--
+-- 本迁移把 30 张表统一改成列级写法，并删掉那 28 条触发器。
+-- 列级写法随 CREATE/ALTER TABLE 走，不存在「忘了装」。
+--
+-- 幂等：`MODIFY COLUMN` 可重复执行；`DROP TRIGGER IF EXISTS` 亦然。
+-- 若某张表在本库不存在，对应语句会报错——本迁移假设库结构与 schema.sql 一致。
+
+-- ------------------------------------------------------------
+-- 1) 列级 ON UPDATE（30 张表）
+-- ------------------------------------------------------------
+
+ALTER TABLE admin_dialogues MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE admins MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE ai_dialogues MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE answers MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE assessment_submissions MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE assessments MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE cards MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE controls MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE extract_tasks MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE goals MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE homework_submissions MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE homeworks MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE knowledge_points MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE lessons MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE llm_models MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE llm_routes MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE main_error_books MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE parents MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE practice_results MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE progress MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE questions MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE rewards MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE semesters MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE student_hidden_questions MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE student_knowledge_mastery MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE student_settings MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE students MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE subjects MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE textbook_versions MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+ALTER TABLE units MODIFY COLUMN updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3);
+
+-- ------------------------------------------------------------
+-- 2) 删除历史触发器（28 条；不存在则跳过）
+--    注意：触发器名不带库前缀，请在目标库内执行本文件。
+-- ------------------------------------------------------------
+
+DROP TRIGGER IF EXISTS trg_admin_dialogues_updated_at;
+DROP TRIGGER IF EXISTS trg_ai_dialogues_updated_at;
+DROP TRIGGER IF EXISTS trg_answers_updated_at;
+DROP TRIGGER IF EXISTS trg_assessment_submissions_updated_at;
+DROP TRIGGER IF EXISTS trg_assessments_updated_at;
+DROP TRIGGER IF EXISTS trg_cards_updated_at;
+DROP TRIGGER IF EXISTS trg_controls_updated_at;
+DROP TRIGGER IF EXISTS trg_extract_tasks_updated_at;
+DROP TRIGGER IF EXISTS trg_goals_updated_at;
+DROP TRIGGER IF EXISTS trg_homework_submissions_updated_at;
+DROP TRIGGER IF EXISTS trg_homeworks_updated_at;
+DROP TRIGGER IF EXISTS trg_knowledge_points_updated_at;
+DROP TRIGGER IF EXISTS trg_lessons_updated_at;
+DROP TRIGGER IF EXISTS trg_llm_models_updated_at;
+DROP TRIGGER IF EXISTS trg_llm_routes_updated_at;
+DROP TRIGGER IF EXISTS trg_main_error_books_updated_at;
+DROP TRIGGER IF EXISTS trg_parents_updated_at;
+DROP TRIGGER IF EXISTS trg_practice_results_updated_at;
+DROP TRIGGER IF EXISTS trg_progress_updated_at;
+DROP TRIGGER IF EXISTS trg_questions_updated_at;
+DROP TRIGGER IF EXISTS trg_rewards_updated_at;
+DROP TRIGGER IF EXISTS trg_semesters_updated_at;
+DROP TRIGGER IF EXISTS trg_student_knowledge_mastery_updated_at;
+DROP TRIGGER IF EXISTS trg_student_settings_updated_at;
+DROP TRIGGER IF EXISTS trg_students_updated_at;
+DROP TRIGGER IF EXISTS trg_subjects_updated_at;
+DROP TRIGGER IF EXISTS trg_textbook_versions_updated_at;
+DROP TRIGGER IF EXISTS trg_units_updated_at;
+
+-- 3) 顺带清掉一张**已废弃表**上的残留触发器
+--    aux_error_books 已不在 schema.sql 中（服务端 ai.module.ts 明确「no longer used」），
+--    但 dev 库里它的触发器还在——留着会让人误以为「触发器机制仍在生效」。
+DROP TRIGGER IF EXISTS trg_aux_error_books_updated_at;
