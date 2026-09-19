@@ -1,3 +1,5 @@
+import type { ClientState, EndReason } from '@/analytics/types';
+
 const API_BASE = '/api';
 
 export interface ApiResponse<T> {
@@ -2103,6 +2105,8 @@ export interface ParentStudyTime {
   activeDays: number;
   byDay: Array<{ date: string; seconds: number }>;
   byModule: Array<{ module: string; seconds: number }>;
+  /** 只含 `subject_id IS NOT NULL` 的会话——**选学科之前**开始的会话不在这个列表里，
+   *  UI 标注「按学科」时要说明这一点（与 `totalSeconds` 对不上是正常的）。 */
   bySubject: Array<{ subjectId: number; seconds: number }>;
   /** 口径标记：永远是 'sessions'，用于 UI 上明确这是会话时长。 */
   source: 'sessions';
@@ -2260,14 +2264,6 @@ export function getParentChatLogDetail(
 
 // --- 学习会话采集（student 角色，埋点 Phase 1A） ---
 
-export type StudySessionClientState = 'visible' | 'hidden';
-export type StudySessionEndReason =
-  | 'route_change'
-  | 'pagehide'
-  | 'idle_timeout'
-  | 'closed'
-  | 'hidden_timeout';
-
 export interface StartStudySessionBody {
   sessionUid: string;
   module: string;
@@ -2292,7 +2288,7 @@ export function startStudySession(
 
 export function heartbeatStudySession(
   uid: string,
-  state: StudySessionClientState,
+  state: ClientState,
 ): Promise<{ activeSeconds: number | null }> {
   return fetchApi<{ activeSeconds: number | null }>(
     `/study-sessions/${encodeURIComponent(uid)}/heartbeat`,
@@ -2302,7 +2298,7 @@ export function heartbeatStudySession(
 
 export function endStudySession(
   uid: string,
-  reason: StudySessionEndReason,
+  reason: EndReason,
 ): Promise<{ activeSeconds: number | null; endedAt: string | null }> {
   return fetchApi<{ activeSeconds: number | null; endedAt: string | null }>(
     `/study-sessions/${encodeURIComponent(uid)}/end`,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
+  endStudySession,
   getMyPoints,
   getParentChatLogDetail,
   getParentChatLogs,
@@ -8,9 +9,12 @@ import {
   getParentErrors,
   getParentPointLedger,
   getParentReport,
+  getParentStudyTime,
+  heartbeatStudySession,
   redeemParentPoints,
   saveParentPointRules,
   setRedemptionStatus,
+  startStudySession,
 } from './api';
 
 /**
@@ -186,5 +190,70 @@ describe('家长端学情端点：路径与 query', () => {
     await getParentChatLogDetail(11, 55);
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/parent/students/11/chat-logs/55');
+  });
+});
+
+describe('学习会话与学习时长端点：路径、编码与 body', () => {
+  it('getParentStudyTime：不给 from/to 时路径以 id 收尾，不拖尾 ?', async () => {
+    const fetchMock = stubData({});
+
+    await getParentStudyTime(11);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/parent/students/11/study-time');
+    expect(fetchMock.mock.calls[0][0]).not.toContain('?');
+  });
+
+  it('getParentStudyTime：给了 from/to 就带上两个 query', async () => {
+    const fetchMock = stubData({});
+
+    await getParentStudyTime(11, '2026-09-13', '2026-09-19');
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url.startsWith('/api/parent/students/11/study-time?')).toBe(true);
+    expect(url).toContain('from=2026-09-13');
+    expect(url).toContain('to=2026-09-19');
+  });
+
+  it('heartbeatStudySession → PATCH .../heartbeat，body 恰好 {state}', async () => {
+    const fetchMock = stubData({ activeSeconds: 12 });
+
+    await heartbeatStudySession('uid-1', 'hidden');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/study-sessions/uid-1/heartbeat');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(requestBody(fetchMock)).toEqual({ state: 'hidden' });
+  });
+
+  it('endStudySession → PATCH .../end，body 恰好 {reason}', async () => {
+    const fetchMock = stubData({ activeSeconds: 30, endedAt: null });
+
+    await endStudySession('uid-1', 'pagehide');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/study-sessions/uid-1/end');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(requestBody(fetchMock)).toEqual({ reason: 'pagehide' });
+  });
+
+  it('startStudySession → POST /api/study-sessions，body 原样发出', async () => {
+    const fetchMock = stubData({ sessionUid: 'uid-1', startedAt: '2026-09-19T00:00:00.000Z' });
+
+    await startStudySession({ sessionUid: 'uid-1', module: 'mainline', scene: 'course_detail' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/study-sessions');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(requestBody(fetchMock)).toEqual({
+      sessionUid: 'uid-1',
+      module: 'mainline',
+      scene: 'course_detail',
+    });
+  });
+
+  it('sessionUid 里的保留字符会被 URL 编码（a/b?c 不能裸拼进路径）', async () => {
+    const fetchMock = stubData({ activeSeconds: null });
+
+    await endStudySession('a/b?c', 'pagehide');
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toBe('/api/study-sessions/a%2Fb%3Fc/end');
   });
 });

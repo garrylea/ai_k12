@@ -49,6 +49,15 @@ export type SessionEvent =
   | 'IDLE_TIMEOUT'
   | 'PAGEHIDE';
 
+/**
+ * `end()` 的结束原因 / `heartbeat()` 的前端可见性——**成员镜像后端的权威枚举**
+ * （`apps/server/src/modules/analytics/study-sessions.service.ts` 的 `END_REASONS` 等）。
+ *
+ * 后端对这两个字段**硬校验**：认不出的值直接回 1001，且会话被**静默丢弃**
+ * （不报错、家长端时长永远少一段）。所以这里是**唯一声明**，
+ * `services/api.ts` 从这里导入（别再在 wire 层复制一份）——改后端枚举时，
+ * 只需改这一处，且必须与后端同时改。
+ */
 export type EndReason = 'route_change' | 'pagehide' | 'idle_timeout' | 'closed' | 'hidden_timeout';
 
 export type ClientState = 'visible' | 'hidden';
