@@ -12,9 +12,11 @@
 
 | 消费方 | 要什么 | 粒度需求 |
 |---|---|---|
-| **家长**（P6.1–P6.5） | 一个孩子的、可解释的学情：学了多久 / 哪科弱 / 错在哪 / 今日用了多少 | 结果类 + 时长 |
-| **运营/公司管理者**（管理台） | 跨学生的聚合 + 漏斗 + 留存 + 模块效果 + 内容与接口质量 + 模型费用 | 过程类行为流 |
+| **家长**（P6.1–P6.5） | 每个孩子的、可解释的学情：**总学习时长 / 各科学了多久** / 哪科弱 / 错在哪 / **今日累计学习时长**（= 今天真正在学的时间，用来和「每日上限」「每日目标」比较，见下） | 结果类 + 时长 |
+| **运营/公司管理者**（管理台） | 跨学生的聚合 + 漏斗 + 留存 + 模块效果 + 内容与接口质量 + 模型费用 + **设备分布**（大多数学生用什么设备学习） | 过程类行为流 |
 | **家长协同**（P6.5 目标 / P6.6 管控） | 「今日已用时长」这种实时用量，用于与上限/目标比较 | 实时聚合 |
+
+> **「今日累计学习时长」的口径**：只累计**页面在前台且有操作**的时间（切后台、挂机 > 2 分钟不计）。它存在的理由是补齐 P6.6 行为管控缺失的另一半——`controls.daily_time_limit_minutes` 只是**上限**，库里现在没有「已用」，所以那个上限目前是摆设；P6.5 的「每日学习 30 分钟」目标同理需要它算达成率。
 
 **边界**：
 
@@ -23,6 +25,7 @@
 - **隐私分层是硬约束**：一部分行为信号（看答案/提示依赖、连续失败、放弃点、「我不会」自评）**只进运营端**，永不进家长端（§5.4）。
 - **不做 A/B 实验框架、不做归因模型、不做 ML 预测**。效果归因止步于「描述指标 + 分组对比」，并明确标注相关非因果。
 - **不改 `homeworks` / `assessments` 的接线**——那是整块产品面（智能组卷），不是埋点。
+- **设备统计只到「类别」，不建设备指纹**：不存任何能唯一定位一台设备的标识（也不存原始 UA 字符串），粒度只到 `platform_class` / `browser` / `screen_class` / `input_type` / `app_shell`（§4.2、§8.3）。设备维度属 **ops-only**，不进家长端。
 
 ---
 
@@ -35,6 +38,8 @@
 | 无任何时长/心跳/事件/点击/指标表 | grep `heartbeat\|event\|click\|metric\|telemetry\|study_time\|page_view` 全库零命中；`schema.sql` 58 表无一张可充当事件存储 |
 | `progress.last_active_at` 只在首次领课时写一次，且仓储不读 | `schema.sql:510` |
 | `devices.last_active_at` 存在但**无仓储、从未写入** | `schema.sql:78` |
+| `devices` 表**不能**当设备画像复用：它是登录 token 记录（`token_hash` / `expires_at`，`device_name` 只是备注），且从未写入 | `schema.sql:72-83` |
+| 前后端**都没有** UA 解析依赖（`ua-parser` / `bowser` / `platform` 全无） | `apps/server/package.json`、`apps/web/package.json` |
 | `ai_messages` 的 `model` / `token_input` / `token_output` / `response_time_ms` 四列**生产恒写 NULL** | `conversations.service.ts:91,176,198`、`services/conversation/index.ts:143`；DTO 亦如此注明（`parent-insights.dto.ts:182`） |
 | `training_sessions` 是唯一「有 started_at/completed_at」的会话表，仅覆盖 `math_targeted` / `en_vocabulary`，且**全仓未计算过时长** | `schema.sql:1136`、`training-sessions.repo.ts:44,72,87` |
 | prom-client 指标**未接线**（只定义、无自增调用者、无 `/metrics` 路由） | `ai-core/infra/metrics.ts:13-19,64`；CLAUDE.md 的「metrics 未接入 capability」 |
@@ -129,16 +134,32 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   last_heartbeat_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   ended_at          DATETIME(3)  DEFAULT NULL,
   end_reason        VARCHAR(20)  DEFAULT NULL COMMENT 'route_change|pagehide|idle_timeout|closed|hidden_timeout',
-  client_platform   VARCHAR(16)  DEFAULT NULL COMMENT 'web|electron|ipad（自报，仅参考）',
+  -- 设备画像：只到「类别」，不存任何唯一标识（见 §1 边界）
+  platform_class    VARCHAR(20)  DEFAULT NULL COMMENT 'ipad|iphone|android_tablet|android_phone|mac|windows|linux|other（服务端解析 UA）',
+  browser           VARCHAR(20)  DEFAULT NULL COMMENT 'chrome|safari|edge|firefox|electron|other（服务端解析 UA）',
+  screen_class      VARCHAR(20)  DEFAULT NULL COMMENT 'ipad_landscape|desktop|tablet_portrait|mobile（前端上报）',
+  input_type        VARCHAR(10)  DEFAULT NULL COMMENT 'touch|mouse|hybrid（前端上报）',
+  app_shell         VARCHAR(10)  DEFAULT NULL COMMENT 'web|electron（前端上报）',
   created_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at        DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_ss_uid (session_uid),
   KEY idx_ss_student_time   (student_id, started_at),
   KEY idx_ss_student_module (student_id, module, started_at),
   KEY idx_ss_open           (status, last_heartbeat_at),
+  KEY idx_ss_platform_time  (platform_class, started_at),
   CONSTRAINT fk_ss_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
+
+**设备画像的来源与分工**（粗分类，**不引依赖**——前后端都没有 UA 解析库，而我们只需要约 8 类、不要版本号）：
+
+| 字段 | 来源 | 说明 |
+|---|---|---|
+| `platform_class` / `browser` | **服务端**解析 `User-Agent` 请求头 | 页面 JS 改不了（仍是弱信号，UA 本身可伪造）。自研粗正则 + **按 UA 字符串 memoize**，避免每请求重复解析 |
+| `screen_class` / `input_type` | **前端**上报 | 服务端拿不到：屏幕档按视口宽度 + 宽高比分档（对齐 `UX-UI设计文档` 的 iPad 横屏主断点）；`input_type` 用 `matchMedia('(pointer: coarse)')` |
+| `app_shell` | **前端**上报 | `web` / `electron`（Electron 有 UA 标记，双保险） |
+
+> 原设计里的 `client_platform`（`web|electron|ipad` 自报）被上面 5 列取代——它是这三列的子集，留着会语义重叠。
 
 **心跳累计算法（唯一实现，写在 `StudySessionsService`）**
 
@@ -485,6 +506,8 @@ const router = createBrowserRouter([{ element: <AnalyticsShell />, children: rou
 
 **配置页不算学习会话**——避免把「挑题 10 分钟」算成学习时长。`subject_id` 从 `useLearnContextStore` 取，不额外发请求。
 
+**设备信息在 `startStudySession` 时一并上报**（一次性，不随心跳重复发）：`screen_class`（按视口宽度 + 宽高比分档，对齐 `UX-UI设计文档` 的 iPad 横屏主断点）、`input_type`（`matchMedia('(pointer: coarse)')` → `touch` / `mouse` / `hybrid`）、`app_shell`（`web` / `electron`）。这三项**只在会话开始时取一次**，会话中途转屏不改（一次会话代表一段连续学习，用哪块屏不重要）。`platform_class` / `browser` **不由前端上报**，由服务端从 `User-Agent` 解析，避免客户端伪造。
+
 ### 7.4 会话状态机
 
 ```
@@ -528,7 +551,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 | method | path | 入参 | 校验与逻辑 | 返回 |
 |---|---|---|---|---|
-| POST | `/api/study-sessions` | `{sessionUid, module, scene, subjectId?, refType?, refId?}` | `sessionUid` 必填 UUID；`module`/`scene` 白名单校验；`subjectId` 若给需属于该学生可选学科 → 否则 1001；`sessionUid` 重复 → **幂等返回已存在会话**（不报错，不新建） | `{sessionUid, startedAt}` 201 |
+| POST | `/api/study-sessions` | `{sessionUid, module, scene, subjectId?, refType?, refId?, screenClass?, inputType?, appShell?}` | `sessionUid` 必填 UUID；`module`/`scene` 白名单校验；`subjectId` 若给需属于该学生可选学科 → 否则 1001；`screenClass`/`inputType`/`appShell` 白名单校验（非法 → 存 NULL，不报错——设备信息是尽力而为）；`sessionUid` 重复 → **幂等返回已存在会话**（不报错，不新建）。`platform_class`/`browser` 由服务端从 `User-Agent` 解析后落库，**不接受客户端上报** | `{sessionUid, startedAt}` 201 |
 | PATCH | `/api/study-sessions/:uid/heartbeat` | `{state:'visible'\|'hidden'}` | `state` 必填枚举 → 否则 1001；会话不存在 / 非本人 / 非 `active` → **静默 200 返回 `{activeSeconds: null}`**（不报错：心跳是尽力而为，报错会污染前端日志） | `{activeSeconds: number\|null}` |
 | PATCH | `/api/study-sessions/:uid/end` | `{reason}` | `reason` 枚举校验；会话不存在 / 已结束 → 幂等返回现有值 | `{activeSeconds, endedAt}` |
 | POST | `/api/track/events` | `{events:[{event, module?, scene?, subjectId?, refType?, refId?, sessionUid?, props?, clientTsMs?}]}` | 批量 ≤ 50 条，超出 → 1001；逐条校验：`event` 必须在 `EVENT_TIER` 字典内、且**必须属于 client 白名单**（防伪造 `answer_submitted` 等服务端权威事件）；`module`/`scene` 白名单；`props` 序列化后 ≤ 2KB | `{accepted, rejected}` 201（`rejected` 计数，不整体失败） |
@@ -561,6 +584,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | GET | `/llm-calls` | `from,to,scene,model,success,page` | 逐条调用排查（分页 20） |
 | GET | `/events` | `event,module,from,to,page` | 行为事件流排查（**仅 ops tier**） |
 | GET | `/requests` | `path,status,minLatency,from,to,page` | 慢接口 / 错误码排查 |
+| GET | `/devices` | `from,to,groupBy=platform\|screen\|input\|shell\|browser` | **大多数学生用什么设备学习**。按所选维度分组，指标 = `COUNT(DISTINCT student_id)`（**按人头，不按会话**——一个学生一天开 10 次会话只能算 1 人）+ `totalSeconds` + `accuracy` + `sessions`。除 `groupBy` 维度外并列返回其他维度的交叉表（如各设备上的时长与正确率），用于回答「手机上是不是学得更短/更差」 |
 
 `/quality` 字段：`apiFailureRate`、`errorCodeDistribution`、`llmTimeoutRate`、`llmFallbackRate`、`questionsWithoutStandardAnswer`、`kpCoverage:{covered,total,rate}`、`globalWordErrorRate:{wrong,total,rate}`（源 `english_words.error_count`）、`passageSkipRate`（抽中但未提交的篇目 / 抽中的篇目）。
 
@@ -590,6 +614,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | `/admin/analytics/modules` | `AnalyticsModulesPage` | 模块使用/时长/正确率对比 + 分组对比（标注「相关非因果」） |
 | `/admin/analytics/quality` | `AnalyticsQualityPage` | 接口失败率、错误码分布、LLM 超时/fallback、内容质量四指标 |
 | `/admin/analytics/llm-cost` | `AnalyticsLlmCostPage` | 按场景/模型/天/学生的 token 与成本 + `unpricedCalls` |
+| `/admin/analytics/devices` | `AnalyticsDevicesPage` | **大多数学生用什么设备学习**；各设备上的学习时长与正确率对比（验证「iPad 横屏主断点」假设、决定要不要做移动端） |
 | `/admin/analytics/events` | `AnalyticsEventsPage` | 原始事件 + 慢/错接口排查（v1 可推迟并入 quality） |
 
 计费配置留在已有 `/admin/models`（`AdminModelsPage.tsx` 表单加两个价格输入）。图表复用既有的 `chart-theme.ts` + `ChartLine` / `ChartBar`（recharts，取色从最近的 `[data-theme]` 容器读）。
@@ -647,7 +672,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 ### Phase 1 — 家长「看得见」的赢（A + C，**不依赖 Phase 0，可并行**）
 
-1. `study_sessions` 建表（迁移 `2026-09-21_study_sessions_events.sql`）+ `StudySessionsService` + 采集端点。
+1. `study_sessions` 建表（迁移 `2026-09-21_study_sessions_events.sql`，**含 5 个设备画像列**）+ `StudySessionsService` + 采集端点 + 服务端 UA 粗分类工具。
 2. 前端 `analytics/` 全套 + `routes/index.tsx` 包壳。
 3. `special_practice_logs` 建表 + 三个专项判题点写入。
 4. `student-knowledge-mastery.repo.ts`（新建）+ `MasteryService` + `JudgeCoreService` 挂载。
@@ -660,7 +685,9 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 1. `behavior_events` 建表 + `EventsService`（字典/tier）+ 服务端事件挂载（判题、清零、发分、考试、专项）。
 2. 前端显式事件（提示 / 看答案 / 翻卡 / 发消息 / 闲置）。
-3. ops 聚合 service + 10 个端点 + admin 分析页 + `AdminNav`。
+3. ops 聚合 service + 11 个端点（含 `/devices`）+ admin 分析页（含 `AnalyticsDevicesPage`）+ `AdminNav`。
+
+> **设备列在 Phase 1 就建好并开始采集**（随 `study_sessions` 一起），但设备**报表**属运营面，放 Phase 2 —— 这样到 Phase 2 时已经有真实数据可看，不用等采满。
 
 ### Phase 3 — 规模与治理（非必须）
 
@@ -704,9 +731,9 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 **必测用例**：
 
-- 纯函数 / reducer：`sceneMap`（表驱动，覆盖每条正则）、`sessionMachine`（表驱动，覆盖 §7.4 全部迁移）。
-- 前端：`tracker`（`setTransport` 注入假传输 + `vi.useFakeTimers()` 推进心跳与 flush）、`AnalyticsShell`（`createMemoryRouter` + `Object.defineProperty(document,'visibilityState')` + `dispatchEvent(new Event('pagehide'))`，断言收到 start/heartbeat/end 与批量 events）。
-- 后端：`TelemetryBuffer`（满丢最旧 / flush 失败不抛 / 计数）、`MasteryService`（空答案不写 / 无 KP 不写 / 对错累加 / repo 抛错不冒泡）、`StudySessionsService`（心跳封顶 / 非本人不写 / 幂等 start）、usage 估算、`parent-analytics.repo` 的**隐私守卫测试**。
+- 纯函数 / reducer：`sceneMap`（表驱动，覆盖每条正则）、`sessionMachine`（表驱动，覆盖 §7.4 全部迁移）、**UA 粗分类器**（表驱动：iPad / iPhone / Android 平板与手机 / Mac / Windows / Linux / Electron / 未知，并断言**同一 UA 只解析一次**的 memoize 生效）。
+- 前端：`tracker`（`setTransport` 注入假传输 + `vi.useFakeTimers()` 推进心跳与 flush）、`AnalyticsShell`（`createMemoryRouter` + `Object.defineProperty(document,'visibilityState')` + `dispatchEvent(new Event('pagehide'))`，断言收到 start/heartbeat/end 与批量 events）、**设备上报只在 start 发生一次**（心跳不重复带设备字段）。
+- 后端：`TelemetryBuffer`（满丢最旧 / flush 失败不抛 / 计数）、`MasteryService`（空答案不写 / 无 KP 不写 / 对错累加 / repo 抛错不冒泡）、`StudySessionsService`（心跳封顶 / 非本人不写 / 幂等 start / 设备字段白名单非法存 NULL）、usage 估算、**`/analytics/devices` 按 `COUNT(DISTINCT student_id)` 聚合**（构造一个学生多会话的用例，断言不会被算重）、`parent-analytics.repo` 的**隐私守卫测试**。
 - 每个新页面/组件补至少一条渲染测试（CLAUDE.md 硬规则，React #31 的教训）。
 - `globals: false`：多用例文件必须自己 `afterEach(() => cleanup())`，并复位模块级 Zustand 单例。
 
