@@ -226,6 +226,28 @@ describe('ModelClient 写 llm_call_logs', () => {
     expect(entries[0].studentId).toBeNull(); // 关键：不能变成 9
   });
 
+  // request_id 是 api_request_logs 的 join 键，而那张表的 student_id 是真实学生。
+  // 显式「不归属」若仍带上下文里的 request_id，将来 join 会把它重新算到那个学生头上。
+  it('显式 studentId: null 时连带清空 requestId，避免 join 重新归属', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', { chat: vi.fn().mockResolvedValue({ content: 'ok', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, model: 'm', id: 'i', latencyMs: 1 }), streamChat: async function* () {} }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await runWithRequestContext({ requestId: 'r-ambient', studentId: 9, role: 'student' }, async () => {
+      await mc.chat({
+        model: baseModel() as any,
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: false,
+        meta: { studentId: null, capability: 'explanation' }, // 题目级缓存：不属任何学生
+      });
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].studentId).toBeNull();
+    expect(entries[0].requestId).toBeNull(); // 关键：不能变成 'r-ambient'
+  });
+
   it('meta 不给 studentId 时仍走 ALS 归属', async () => {
     const entries: any[] = [];
     setLlmCallSink((e) => entries.push(e));
@@ -233,10 +255,11 @@ describe('ModelClient 写 llm_call_logs', () => {
       ['kimi', { chat: vi.fn().mockResolvedValue({ content: 'ok', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, model: 'm', id: 'i', latencyMs: 1 }), streamChat: async function* () {} }],
     ]);
     const mc = new ModelClient({ providers } as any);
-    await runWithRequestContext({ requestId: 'r', studentId: 9, role: 'student' }, async () => {
+    await runWithRequestContext({ requestId: 'r-ambient', studentId: 9, role: 'student' }, async () => {
       await mc.chat({ model: baseModel() as any, messages: [{ role: 'user', content: 'hi' }], stream: false });
     });
     expect(entries[0].studentId).toBe(9);
+    expect(entries[0].requestId).toBe('r-ambient'); // 抑制只限显式 null 那条路径
   });
 
   it('streamChat 中途失败也落一条（success=false），且异常原样抛出', async () => {

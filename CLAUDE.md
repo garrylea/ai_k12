@@ -100,6 +100,8 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **数据库**：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。schema 在 `tools/db/schema.sql`，迁移在 `tools/db/migrations/YYYY-MM-DD_*.sql`（**无迁移运行器，手工 apply**；必须幂等；新增表/列要同时进 schema.sql）。`updated_at` 一律用**列级** `ON UPDATE CURRENT_TIMESTAMP(3)`，**不要建 `*_updated_at` 触发器**（触发器是独立对象、会随 schema 漂移静默缺失，2026-09-19 已统一）。
 - **派生状态必须带 `studentId` 归属**：家长端切孩子不重挂载、`useState` 跨孩子存活，只按自身维度守卫会在切换首帧画出上个孩子的数据（`useEffect(reset)` 救不了——它在 commit 之后才跑）；派生值必须与 `studentId` 一起存、读取时一并比较。
 - **列表页换孩子必须回第 1 页**：否则带「上个孩子的第 N 页」请求新孩子，页数不够时停在空态且分页控件只在非空分支渲染（家长无法自救）；加 `useEffect(() => setPage(1), [studentId])`。
+- **埋点不得影响请求**：analytics 日志走内存 buffer——满时丢最旧、失败批次直接丢弃不重试、**永不抛**；ledger / request-log 写入**绝不在请求路径上 await**。
+- **`input_tokens` / `output_tokens` 可为 NULL，NULL = 量不到**：量不到就写 NULL，**绝不写 0**——否则报表无法区分「缺口」与「真实读数」（本期只记 token，不记价格/成本）。
 
 ## 数据管线（tools/data-refinery）
 

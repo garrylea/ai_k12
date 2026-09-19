@@ -350,7 +350,7 @@ ON DUPLICATE KEY UPDATE
 | `tools/db/migrations/2026-09-21_study_sessions_events.sql` | `study_sessions` + `behavior_events` + `special_practice_logs` 建表；`goals` 加 `metric` |
 | `tools/db/schema.sql` | 上述全部**同步**写入（新建表放对应域段落；`goals` 直接改列定义） |
 
-**关于「清掉早期误加的价格/成本列」**：本设计的早期版本给 `llm_call_logs` 加过 `input_price_per_1k` / `output_price_per_1k` / `cost`，给 `llm_models` 加过两价格列，已在 dev 库上执行。价格口径取消后这些列没有任何写入方，**留着比删掉更危险**——`cost` 会恒为 0，而 0 在本设计里表示「真免费」，将来任何人查成本都会看到「全部 0 元」并可能信以为真。故 `2026-09-20` 这个迁移改为「建表（**不含**这些列）+ 用 `information_schema` 守卫的 `DROP COLUMN IF EXISTS` 把已建出的这些列收敛掉」，同一个文件重复执行即收敛，不需要额外迁移。`llm_call_logs` 目前**零行**、`llm_models` 的价格列从未被灌值（seed 脚本已取消），故删除无损。
+**关于「清掉早期误加的价格/成本列」**：本设计的早期版本给 `llm_call_logs` 加过 `input_price_per_1k` / `output_price_per_1k` / `cost`，给 `llm_models` 加过两价格列，已在 dev 库上执行。价格口径取消后这些列没有任何写入方，**留着比删掉更危险**——`cost` 会恒为 0，而 0 在本设计里表示「真免费」，将来任何人查成本都会看到「全部 0 元」并可能信以为真。故 `2026-09-20` 这个迁移改为「建表（**不含**这些列）+ 查 `information_schema` 确认列存在后再用 `PREPARE` 动态执行 `DROP COLUMN` 把已建出的这些列收敛掉」（MySQL 8/9 **没有** `DROP COLUMN IF EXISTS`，只能靠这个守卫），同一个文件重复执行即收敛，不需要额外迁移。`llm_call_logs` 目前**零行**、`llm_models` 的价格列从未被灌值（seed 脚本已取消），故删除无损。
 
 ---
 

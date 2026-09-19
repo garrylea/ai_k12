@@ -29,7 +29,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `tools/db/migrations/2026-09-20_analytics_ledger.sql` | 建 `llm_call_logs` + `api_request_logs`；`llm_models` 加两个价格列（带守卫） |
+| `tools/db/migrations/2026-09-20_analytics_ledger.sql` | 建 `llm_call_logs` + `api_request_logs`；~~`llm_models` 加两个价格列（带守卫）~~ **改为清掉早期误加的价格列**（Task 5R） |
 | `apps/server/src/database/repositories/llm-call-logs.repo.ts` | `llm_call_logs` 的批量插入（列序常量是唯一真源） |
 | `apps/server/src/database/repositories/api-request-logs.repo.ts` | `api_request_logs` 的批量插入 + `ApiRequestLogEntry` 类型 |
 | `apps/server/src/modules/analytics/telemetry-buffer.ts` | 通用环形缓冲（纯类，无 DB 依赖，可单测） |
@@ -46,14 +46,14 @@
 
 | 文件 | 职责 |
 |---|---|
-| `apps/web/src/pages/admin/AdminModelsPage.test.tsx` | 价格列的渲染测试 |
+| ~~`apps/web/src/pages/admin/AdminModelsPage.test.tsx`~~ | **不建**（价格口径取消，Task 5 已取消；文件从未创建） |
 
 **修改**
 
 | 文件 | 改动 |
 |---|---|
-| `tools/db/schema.sql` | 新增 §14 两张表；`llm_models` 加两个价格列 |
-| `apps/server/src/database/repositories/llm-models.repo.ts` | `LlmModelRow`/`LlmModel` 加价格；`create`/`update`/`mapRow` 带上 |
+| `tools/db/schema.sql` | 新增 §14 两张表；~~`llm_models` 加两个价格列~~ **删掉误加的价格列**（Task 5R） |
+| `apps/server/src/database/repositories/llm-models.repo.ts` | ~~`LlmModelRow`/`LlmModel` 加价格；`create`/`update`/`mapRow` 带上~~ **已由 Task 5R 回退**（价格口径取消） |
 | `apps/server/src/database/repositories/index.ts` | 导出两个新 repo 与类型 |
 | `apps/server/src/ai-core/infra/model-config-registry.ts` | ~~`costPer1K` 从 DB 价格列来~~ **不动**（价格口径取消） |
 | `apps/server/src/ai-core/types.ts` | `RoutedModel` 加归因字段；`ChatRequest` 加 `meta`；`ChatResponse.usage` 支持 NULL + `source`；`StreamChunk` 加 `usage` |
@@ -62,13 +62,13 @@
 | `apps/server/src/ai-core/infra/model-client/openai-compatible-client.ts` | 流式请求体加 `stream_options.include_usage`；usage 缺失时不再写 0；流式透出 usage |
 | `apps/server/src/ai-core/infra/model-client/local-client.ts` | 删掉 `stream_options`（llama.cpp 不认） |
 | `apps/server/src/ai-core/infra/model-client/gemini-client.ts` | usage 补 `source: 'provider'` |
-| `apps/server/src/modules/admin/admin-models.service.ts` | create/update 接受价格字段 |
-| `apps/server/src/modules/admin/admin.controller.ts` | `ModelSchema` 加价格校验 |
+| `apps/server/src/modules/admin/admin-models.service.ts` | ~~create/update 接受价格字段~~ **已由 Task 5R 回退**（价格口径取消） |
+| `apps/server/src/modules/admin/admin.controller.ts` | ~~`ModelSchema` 加价格校验~~ **已由 Task 5R 回退**（价格口径取消） |
 | `apps/server/src/modules/admin/admin-chat.service.ts` | ~~消除硬编码 `costPer1K: {0,0}`~~ **回退为原状**（价格口径取消；该字段是既有必填项不能删） |
 | `apps/server/src/app.module.ts` | 注册 `RequestContextMiddleware` + `APP_INTERCEPTOR(useExisting AnalyticsInterceptor)` + `AnalyticsModule` |
 | `apps/server/src/main.ts` | `enableShutdownHooks()` |
-| `apps/web/src/services/api.ts` | `AdminModelItem` 加价格；create/update 参数加价格 |
-| `apps/web/src/pages/admin/AdminModelsPage.tsx` | 表单加两个价格输入（**编辑态可改**） |
+| `apps/web/src/services/api.ts` | ~~`AdminModelItem` 加价格；create/update 参数加价格~~ **不实施**（价格口径取消，Task 5 已取消） |
+| `apps/web/src/pages/admin/AdminModelsPage.tsx` | ~~表单加两个价格输入（**编辑态可改**）~~ **不实施**（价格口径取消，Task 5 已取消） |
 
 **任务依赖**：Task 1 →（2、3、4、5、6、7 可并行）→ Task 8（依赖 2、3、6、7）→ Task 9（依赖 7、8）→ Task 10。Task 5 依赖 Task 4。
 

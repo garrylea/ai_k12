@@ -155,8 +155,12 @@ export class ModelClient {
     // （如题目级缓存，不属任何学生），不能被 ALS 兜底覆盖。
     const metaHasStudentId = request.meta !== undefined && 'studentId' in request.meta;
     const studentId = metaHasStudentId ? (request.meta!.studentId ?? null) : (ctx?.studentId ?? null);
+    // 显式声明「不归属」时，连带把 request_id 也置空：request_id 是 api_request_logs 的
+    // join 键，而那张表的 student_id 是**真实学生**。若这里仍带上当时恰好占着上下文的
+    // request_id，将来 join 会把这次调用重新算到那个学生头上——正是「显式不归属」要避免的事。
+    const requestId = metaHasStudentId && studentId === null ? null : (ctx?.requestId ?? null);
     emitLlmCall({
-      requestId: ctx?.requestId ?? null,
+      requestId,
       studentId,
       dialogueId: request.meta?.dialogueId ?? null,
       scene: request.meta?.scene ?? model.scene ?? null,
