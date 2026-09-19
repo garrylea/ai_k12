@@ -2342,7 +2342,11 @@ paths:
       tags: [Parent]
       summary: 孩子错题（只读）
       description: >-
-        `track` 由 `source` 现算（`auxiliary` → `aux`，其余 → `main`），不落库。
+        `track` 由 `source` 现算、不落库，分档表是服务端
+        `apps/server/src/database/repositories/parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：
+        `main` = `practice | discuss | exam`；`training` = `targeted | error_practice | auxiliary`。
+        孩子**在辅线答疑里问过**的题（`source = 'auxiliary'`）归 `training`——它进训练轨
+        「错题练习」池、孩子能在那里做对清零，所以不单列「辅线」档。
         `pageSize` 服务端固定 20，前端不传；`page` 非法（`abc` / `1.5` / `-1`）→ 400 / 1001，不静默回落。
         `page` 超出末页 → 200 + 空 `items` + 正确 `total`。
       operationId: listParentErrors
@@ -2370,8 +2374,8 @@ paths:
           required: false
           schema:
             type: string
-            enum: [main, aux]
-          description: 主线 / 辅线；不传 = 全部。在服务层映射为 `source` 条件后下推 SQL。
+            enum: [main, training]
+          description: 主线 / 训练；不传 = 全部。在仓储层展开为 `source IN (...)` 白名单后下推 SQL（两档的 source 列表见 `TRACK_SOURCES`）。
         - name: cleared
           in: query
           required: false
@@ -7054,7 +7058,7 @@ components:
 
     ParentErrorItem:
       type: object
-      description: 家长端错题一行（只读）。`track` 由 `source` 现算、**不落库**。
+      description: 家长端错题一行（只读）。`track` 由 `source` 现算、**不落库**（分档见 `TRACK_SOURCES`）。
       properties:
         id:
           type: integer
@@ -7063,8 +7067,8 @@ components:
           nullable: true
         track:
           type: string
-          enum: [main, aux]
-          description: "`source === 'auxiliary'` → `aux`，其余 → `main`。"
+          enum: [main, training]
+          description: "`training` = `targeted | error_practice | auxiliary`，其余 → `main`。"
         source:
           type: string
           enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
@@ -7076,6 +7080,9 @@ components:
         wrongAnswerText:
           type: string
           nullable: true
+          description: >-
+            ⚠️ 字段名历史误导：它装的**不是**学生作答，而是「题库未命中时保存的题面原文」
+            （`questionId` 非空时恒为 null，题面取 `question.content`）。库里从未存过学生作答文本。
         createdAt:
           type: string
           format: date-time

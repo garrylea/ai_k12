@@ -139,14 +139,18 @@ export interface ParentErrorQuestion {
 /**
  * 家长端错题一行（只读）。
  *
- * `track` 由 `source` 现算、**不落库**：`source === 'auxiliary'` → `'aux'`，其余 → `'main'`。
- * 与 `openapi` 原 `ErrorItem` 的差别：`source` enum 按**实际 5 个值**修正（原 enum 只有
+ * `track` 由 `source` 现算、**不落库**，分档表在 `parent-insights.repo.ts` 的
+ * `TRACK_SOURCES`（唯一真源）：
+ *   - `main` = `practice | discuss | exam`（主线：课堂练习 / 讨论 / 考试）
+ *   - `training` = `targeted | error_practice | auxiliary`（训练轨错题 + 辅线答疑里问过的题）
+ *
+ * 与 `openapi` 原 `ErrorItem` 的差别：`source` enum 按**实际 6 个值**修正（原 enum 只有
  * `homework/unit_test/midterm/final/auxiliary/practice/discuss`，缺 `exam`/`targeted`/`error_practice`）。
  */
 export interface ParentErrorItem {
   id: number;
   questionId: number | null;
-  track: 'main' | 'aux';
+  track: 'main' | 'training';
   source: string;
   level: number;
   isCleared: boolean;

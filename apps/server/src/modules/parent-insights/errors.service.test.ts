@@ -18,7 +18,7 @@ const mkRepo = () => ({
 const mkSvc = (d = mkRepo()) => new ErrorsService(d as any);
 
 describe('ErrorsService', () => {
-  it('track 映射：auxiliary → aux，其余 → main；知识点按 questionId 聚成数组', async () => {
+  it('track 映射：auxiliary → training，exam → main；知识点按 questionId 聚成数组', async () => {
     const repo = mkRepo();
     repo.listParentErrors.mockResolvedValue({
       items: [row(), row({ id: 92, questionId: 331, source: 'auxiliary' })],
@@ -33,7 +33,8 @@ describe('ErrorsService', () => {
     const result = await mkSvc(repo).listErrors(11, { page: 1 });
 
     expect(result.items[0]).toMatchObject({ track: 'main', source: 'exam' });
-    expect(result.items[1]).toMatchObject({ track: 'aux', source: 'auxiliary' });
+    // 孩子问过的题在家长端归「训练」——它进的是训练轨的错题练习池
+    expect(result.items[1]).toMatchObject({ track: 'training', source: 'auxiliary' });
     expect(result.items[0].question).toEqual({
       content: '解方程', type: 'calculation', difficulty: 3,
       knowledgePoints: [

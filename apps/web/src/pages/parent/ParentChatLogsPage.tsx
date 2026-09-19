@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
+import ReactMarkdown from 'react-markdown';
 import { Button, Card, Pagination, Skeleton, Tag } from '@/components/base';
+import {
+  markdownRemarkPlugins,
+  markdownRemarkPluginsWithBreaks,
+  markdownRehypePlugins,
+  markdownComponents,
+  preprocessMarkdown,
+} from '@/components/markdown';
 import {
   getParentChatLogDetail,
   getParentChatLogs,
@@ -57,7 +65,25 @@ function MessageRow({ message }: { message: ParentChatLogDetail['messages'][numb
         </span>
       </div>
 
-      <p className="whitespace-pre-wrap text-[var(--text-primary)]">{message.content}</p>
+      {/*
+        孩子自己输入的文本**原样展示**，不走 markdown —— 学生端（`AuxChatPanel`）也是如此。
+        若这里渲染 markdown，家长会看到孩子没看到过的排版，且孩子输入的 `2*3*4`、`#` 之类
+        会被 markdown 当语法吃掉。AI 侧的富文本渲染见下面。
+      */}
+      {isUser ? (
+        <p className="whitespace-pre-wrap text-[var(--text-primary)]">{message.content}</p>
+      ) : (
+        // AI 回复走共享渲染配置（KaTeX + 原生 HTML 表格 + 图片），与学生端一致
+        <div className="text-[var(--text-primary)] leading-[1.7]">
+          <ReactMarkdown
+            remarkPlugins={markdownRemarkPlugins}
+            rehypePlugins={markdownRehypePlugins}
+            components={markdownComponents}
+          >
+            {preprocessMarkdown(message.content)}
+          </ReactMarkdown>
+        </div>
+      )}
 
       {message.reasoning && (
         <>
@@ -69,12 +95,19 @@ function MessageRow({ message }: { message: ParentChatLogDetail['messages'][numb
             {showReasoning ? '收起 AI 思路' : '看 AI 思路'}
           </button>
           {showReasoning && (
-            <p
+            // 思路是模型原文（软换行有意义、且常带公式），用带换行保留的插件集渲染
+            <div
               data-testid={`chatlog-reasoning-${message.id}`}
-              className="mt-2 whitespace-pre-wrap text-xs text-[var(--text-secondary)]"
+              className="mt-2 text-xs text-[var(--text-secondary)] leading-[1.7]"
             >
-              {message.reasoning}
-            </p>
+              <ReactMarkdown
+                remarkPlugins={markdownRemarkPluginsWithBreaks}
+                rehypePlugins={markdownRehypePlugins}
+                components={markdownComponents}
+              >
+                {preprocessMarkdown(message.reasoning)}
+              </ReactMarkdown>
+            </div>
           )}
         </>
       )}

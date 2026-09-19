@@ -8,6 +8,19 @@
 
 ---
 
+## 2026-09-19 家长端错题轨道改 主线/训练 + 两页富文本渲染修正
+
+- **`GET /api/parent/students/:id/errors` 的 `track` 由 `main|aux` 改为 `main|training`**（契约变更，API 设计文档 §4.13 与 `openapi.yaml` 已同步）。分档表 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：`main` = `practice|discuss|exam`；`training` = `targeted|error_practice|auxiliary`。
+- **为什么改**：旧 `main` 用反向排除（`source <> 'auxiliary'`），孩子**在辅线答疑里问过**的题（`source='auxiliary'`）自成一条「辅线」轨。但这些题会进训练轨「错题练习」池（`findErrorBookEntries` 不过滤 source），孩子能在那里做对清零——它的归处是**训练**，不该单列一轨。UI Tab 现为 全部 / 主线 / 训练。
+- **分档改成白名单 + 分区测试**：反向排除只能表达「非 A 即 B」，两档各是一组来源时会把来源归错档。改为白名单的代价是「未登记的 source 两档都搜不到（只剩全部可见）」；由 `TRACK_SOURCES` 的分区测试兜底——它枚举 `ALL_ERROR_SOURCES` 断言每个来源恰好归某一档，**新增来源不入册即红**，比静默归错档安全。
+- **不清零/不参与的边界没变**：`auxiliary` 题**能**被清零（`clearUnclearedByStudentQuestionId` 明确「不限 source」），所以它计入「未清零错题数」与「薄弱知识点」是**正确的**——曾经误判为「泄漏」，实为该设计自洽的前提。唯一真正的缺口是家长端多出来的那条「辅线」轨。
+- **两处富文本渲染修正**（家长端未走共享配置，`markdown.tsx` 文件头要求的「所有 ReactMarkdown 使用点都从这里取」）：
+  - AI 对话回放：AI 回复与「AI 思路」改走 `@/components/markdown`（KaTeX + 原生 HTML 表格 + 图片 + `preprocessMarkdown` 修残缺 HTML）。**孩子的发言仍原样显示**——学生端 `AuxChatPanel` 也是原样，渲染 markdown 会让孩子输入的 `2*3*4` 被吃成斜体，且家长会看到孩子没看到过的排版。
+  - 错题查看：题面改走共享配置。
+- **「学生作答」行删除（字段名历史误导）**：`main_error_books.wrong_answer_text` 装的**不是**学生作答，而是「题库未命中时保存的题面原文」（`judge-core.service.ts`：`questionId === null ? input.questionText : null`），`questionId` 非空时恒为 null——本地 140 条全部如此，旧版页面因此**每行都显示「学生作答：（空）」**，会被家长读成"孩子什么都没写"。现改为：有 `question.content` 用它，否则把 `wrongAnswerText` 当**题面**兜底显示。库里从未存过学生作答文本，需要真正的作答展示得另立数据源。
+
+---
+
 ## 2026-09-21 埋点 Phase 1A：学习时长端到端
 
 - 新增 `study_sessions`（迁移 `2026-09-21_study_sessions.sql` + `schema.sql`；列 / 索引 / 三条口径见数据库设计文档 §3.16）与三个采集端点 `POST /api/study-sessions`、`PATCH /api/study-sessions/:uid/heartbeat`、`PATCH /api/study-sessions/:uid/end`（API 设计文档 §4.23、数据流 §6.25、契约 `openapi.yaml`）。家长端新增 `GET /api/parent/students/:id/study-time`、`/today-usage`（§4.13）。

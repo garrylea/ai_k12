@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
+import ReactMarkdown from 'react-markdown';
 import { Button, Card, Pagination, Skeleton, Tag } from '@/components/base';
+import {
+  markdownRemarkPlugins,
+  markdownRehypePlugins,
+  markdownComponents,
+  preprocessMarkdown,
+} from '@/components/markdown';
 import {
   ApiError,
   fetchSubjects,
@@ -12,26 +19,31 @@ import {
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
-type TrackFilter = 'all' | 'main' | 'aux';
+type TrackFilter = 'all' | 'main' | 'training';
 
 const TRACK_TABS: Array<{ key: TrackFilter; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'main', label: '主线' },
-  { key: 'aux', label: '辅线' },
+  { key: 'training', label: '训练' },
 ];
 
 /**
  * 「来源」下拉的可选项 —— **按轨道分组**，不是一张扁平表。
  *
- * 为什么必须分轨道：后端 `main` 的语义就是 `source <> 'auxiliary'`（反向排除），
- * 与 `source = 'auxiliary'` 互斥。若「主线」Tab 下也能选到「辅线答疑」，请求会变成
+ * 为什么必须分轨道：`track` 是**互斥的白名单**（服务端 `parent-insights.repo.ts` 的
+ * `TRACK_SOURCES` 是唯一真源）。若「主线」Tab 下也能选到「辅线答疑」，请求会变成
  * `track=main&source=auxiliary` → 两个条件 AND 起来**永不匹配** → 后端安静地返回
  * 空列表 + `total: 0`，家长会读成「孩子没有错题」。**这个矛盾组合必须在 UI 上就无法选中**，
  * 而不是靠切轨道时清来源去补救（那只防了一个方向）。
  *
+ * 分档（与后端 `TRACK_SOURCES` 一致，改动必须两边同步）：
+ *   - 主线 = `practice | discuss | exam`
+ *   - 训练 = `targeted | error_practice | auxiliary`
+ *
+ * `auxiliary`（孩子**在辅线答疑里问过**、并非做错的题）归**训练**：它会进训练轨的
+ * 「错题练习」池、孩子能在那里做对清零，所以家长端按训练档呈现，不再单列一条「辅线」轨。
  * 值取自服务端实际写入点（`main_error_books.source` 是自由 `VARCHAR(20)`，DB 层无 enum，
- * 所以前端这份清单就是唯一的枚举处）：`practice` / `discuss` / `exam` / `targeted` /
- * `error_practice` / `auxiliary`。
+ * 所以前端这份清单就是唯一的枚举处）。
  */
 const SOURCES_BY_TRACK: Record<TrackFilter, Array<{ value: string; label: string }>> = {
   all: [
@@ -48,17 +60,18 @@ const SOURCES_BY_TRACK: Record<TrackFilter, Array<{ value: string; label: string
     { value: 'practice', label: '课堂练习' },
     { value: 'discuss', label: '讨论' },
     { value: 'exam', label: '真题考试' },
+    // 刻意没有 targeted / error_practice / auxiliary：它们在主线档永远匹配不到东西
+  ],
+  training: [
+    { value: '', label: '全部来源' },
     { value: 'targeted', label: '专项练习' },
     { value: 'error_practice', label: '错题练习' },
-    // 刻意没有 auxiliary：主线 Tab 下它永远匹配不到东西
-  ],
-  aux: [
-    { value: '', label: '全部来源' },
     { value: 'auxiliary', label: '辅线答疑' },
+    // 同样刻意没有 practice / discuss / exam
   ],
 };
 
-// 行内来源标签要认识**全部** 6 个值 —— 「全部」Tab 下会出现辅线行（含 auxiliary）
+// 行内来源标签要认识**全部** 6 个值 —— 「全部」Tab 下会出现所有来源的行
 const SOURCE_LABEL = new Map(
   SOURCES_BY_TRACK.all.map((o) => [o.value, o.label]),
 );
@@ -71,12 +84,20 @@ function formatDay(iso: string | null): string {
 
 function ErrorRow({ item }: { item: ParentErrorItem }) {
   const [open, setOpen] = useState(false);
+  /**
+   * 题面二选一：题库命中 → `questions.content`；未命中 → 入库时兜底存的题面。
+   *
+   * `wrongAnswerText` 这个列名是**历史误导**：它装的不是学生作答，而是「题库未命中时
+   * 存下来的题面原文」（见 `judge-core.service.ts` 的 `questionId === null ? input.questionText : null`）。
+   * 库里也从未存过学生的作答文本，所以本页**不展示**「学生作答」——那会指向一个不存在的字段。
+   */
+  const stem = item.question?.content ?? item.wrongAnswerText;
 
   return (
     <div data-testid={`error-row-${item.id}`} className="py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <Tag variant={item.track === 'aux' ? 'auxiliary' : 'mainline'}>
-          {item.track === 'aux' ? '辅线' : '主线'}
+        <Tag variant={item.track === 'training' ? 'training' : 'mainline'}>
+          {item.track === 'training' ? '训练' : '主线'}
         </Tag>
         <Tag>{SOURCE_LABEL.get(item.source) ?? item.source}</Tag>
         <span className="text-xs text-[var(--text-tertiary)]">{`难度级别 L${item.level}`}</span>
@@ -98,31 +119,41 @@ function ErrorRow({ item }: { item: ParentErrorItem }) {
           data-testid={`error-detail-${item.id}`}
           className="mt-3 rounded-[var(--radius-card)] bg-[var(--bg-subtle)] p-4 text-sm"
         >
-          {item.question ? (
-            <>
-              <p className="whitespace-pre-wrap text-[var(--text-primary)]">
-                {item.question.content}
-              </p>
-              <p className="mt-2 text-xs text-[var(--text-secondary)]">
-                {`题型：${item.question.type || '未标注'} · 难度：${
-                  item.question.difficulty ?? '未标注'
-                }`}
-              </p>
-              {item.question.knowledgePoints.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {item.question.knowledgePoints.map((kp) => (
-                    <Tag key={kp.id} variant="knowledge">{kp.name}</Tag>
-                  ))}
-                </div>
-              )}
-            </>
+          {stem ? (
+            // 题面走共享渲染配置（KaTeX + 原生 HTML 表格 + 图片），与学生端一致
+            <div className="text-[var(--text-primary)] leading-[1.7]">
+              <ReactMarkdown
+                remarkPlugins={markdownRemarkPlugins}
+                rehypePlugins={markdownRehypePlugins}
+                components={markdownComponents}
+              >
+                {preprocessMarkdown(stem)}
+              </ReactMarkdown>
+            </div>
           ) : (
-            <p className="text-[var(--text-secondary)]">题目未入库（仅保存了作答内容）</p>
+            <p className="text-[var(--text-secondary)]">题目未入库，且未保存题面</p>
           )}
 
-          <p className="mt-3 text-[var(--text-secondary)]">
-            {`学生作答：${item.wrongAnswerText || '（空）'}`}
-          </p>
+          {item.question && (
+            <p className="mt-2 text-xs text-[var(--text-secondary)]">
+              {`题型：${item.question.type || '未标注'} · 难度：${
+                item.question.difficulty ?? '未标注'
+              }`}
+            </p>
+          )}
+          {item.question && item.question.knowledgePoints.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {item.question.knowledgePoints.map((kp) => (
+                <Tag key={kp.id} variant="knowledge">{kp.name}</Tag>
+              ))}
+            </div>
+          )}
+          {!item.question && stem && (
+            <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+              题目未入库（以上为入库时保存的题面原文）
+            </p>
+          )}
+
           {item.clearedAt && (
             <p className="mt-1 text-xs text-[var(--text-tertiary)]">
               {`清零时间：${formatDay(item.clearedAt)}`}

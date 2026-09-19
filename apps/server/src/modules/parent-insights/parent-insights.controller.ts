@@ -96,7 +96,7 @@ export class ParentInsightsController {
     };
     if (subject !== undefined && /^\d+$/.test(subject)) query.subject = Number(subject);
     if (source) query.source = source;
-    if (track === 'main' || track === 'aux') query.track = track;
+    if (track === 'main' || track === 'training') query.track = track;
     if (cleared === 'uncleared' || cleared === 'cleared') query.cleared = cleared;
     if (from) query.from = from;
     if (to) query.to = to;

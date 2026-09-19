@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { ParentInsightsRepository } from '../../database/repositories/parent-insights.repo.js';
+import {
+  ParentInsightsRepository,
+  trackOfSource,
+} from '../../database/repositories/parent-insights.repo.js';
 import type { ParentErrorFilters } from '../../database/repositories/parent-insights.repo.js';
 import type { ParentErrorPage } from './dto/parent-insights.dto.js';
 
@@ -9,7 +12,7 @@ export const PAGE_SIZE = 20;
 export interface ErrorsQuery {
   subject?: number;
   source?: string;
-  track?: 'main' | 'aux';
+  track?: 'main' | 'training';
   cleared?: 'uncleared' | 'cleared' | 'all';
   from?: string;
   to?: string;
@@ -19,8 +22,8 @@ export interface ErrorsQuery {
 /**
  * 家长端错题查看（spec §4.2 ③）：**只读**，复用主线错题本 `main_error_books`。
  *
- * `track` 只在**响应里现算**、不落库，也**不参与筛选**——筛选走仓储的 `track` 反向排除
- * （`main` → `source <> 'auxiliary'`），由仓储负责 SQL 语义。
+ * `track` 在响应与筛选两处**现算**、不落库；两处的 source 分档都取自仓储的
+ * `TRACK_SOURCES`（唯一真源），本文件不再持有第二份映射。
  */
 @Injectable()
 export class ErrorsService {
@@ -65,7 +68,7 @@ export class ErrorsService {
       items: items.map((r) => ({
         id: r.id,
         questionId: r.questionId,
-        track: r.source === 'auxiliary' ? 'aux' : 'main',
+        track: trackOfSource(r.source),
         source: r.source,
         level: r.level,
         isCleared: r.isCleared,

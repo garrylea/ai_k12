@@ -2148,10 +2148,18 @@ export interface ParentErrorQuestion {
 export interface ParentErrorItem {
   id: number;
   questionId: number | null;
-  track: 'main' | 'aux';
+  /**
+   * 轨道档位，由后端按 `source` 现算（分档表见 `apps/server` 的 `TRACK_SOURCES`）：
+   * `main` = 课堂练习/讨论/考试；`training` = 训练轨错题 + 辅线答疑里问过的题。
+   */
+  track: 'main' | 'training';
   source: string;
   level: number;
   isCleared: boolean;
+  /**
+   * ⚠️ 列名历史误导：它装的**不是**学生作答，而是「题库未命中时保存的题面原文」
+   * （`questionId` 非空时该字段为 null，题面取 `question.content`）。
+   */
   wrongAnswerText: string | null;
   createdAt: string;
   clearedAt: string | null;
@@ -2170,7 +2178,7 @@ export interface ParentErrorListParams {
   studentId: number;
   subject?: number;
   source?: string;
-  track?: 'main' | 'aux';
+  track?: 'main' | 'training';
   cleared?: 'uncleared' | 'cleared' | 'all';
   from?: string;
   to?: string;
