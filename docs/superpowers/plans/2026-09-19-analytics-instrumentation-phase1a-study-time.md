@@ -2434,6 +2434,7 @@ git commit -m "feat(web): learnContextStore 记住 subjectId（埋点上报用�
 - Create: `apps/web/src/analytics/types.ts`
 - Create: `apps/web/src/analytics/sceneMap.ts`
 - Test: `apps/web/src/analytics/sceneMap.test.ts`
+- Test: `apps/web/src/analytics/types.test.ts`（`newSessionUid` 的 UUID 形状 + 缺 `crypto.randomUUID` 的回退路径 + `sceneKey`；**必须用与后端 `UUID_RE` 同形的手写正则**——前端不许 import 服务端代码，靠注释指明镜像来源）
 
 **Interfaces:**
 - Produces:
@@ -2446,11 +2447,16 @@ Create `apps/web/src/analytics/types.ts`：
 
 ```ts
 /**
- * 埋点会话的封闭字典（与后端 `study-sessions.service.ts` 的白名单**逐字一致**）。
+ * 埋点会话的字典（后端 `study-sessions.service.ts` 白名单的**超集**：本文件多出 4 个值）。
  *
- * 服务端是权威：字典不匹配的 module/scene 会被 1001 拒掉。这里保留 `admin` / `parent`
- * 是因为 spec §5.1 的 module 枚举含它们（用于 `page_view` 之类事件的归属），
- * 但**只有 `isStudyScene` 为真的路由才会开会话**——家长端/管理端永不启动会话。
+ * 服务端是权威：字典**不匹配**的 module/scene 会被 1001 拒掉，而且是**静默**的——
+ * 会话根本不会创建，家长端时长永远是空。所以多出来的 4 个值必须小心：
+ *
+ * - 多出的 `admin` / `parent`（module）与 `parent_dashboard` / `admin_dashboard`（scene）
+ *   后端**不认**——它们只在 `isStudyScene: false` 的路由上产出，用于 `page_view` 之类
+ *   **非会话事件**的归属（spec §5.1）。
+ * - ⚠️ 因此**开会话的闸门只能看 `isStudyScene` / `sceneKey(info) !== null`，
+ *   绝不能写成 `module != null`**——后者会把 `admin` / `parent` 送进 `start()`，直接 1001。
  */
 export type StudyModule =
   | 'mainline'
@@ -2506,12 +2512,35 @@ export interface SceneInfo {
   isStudyScene: boolean;
 }
 
-/** 会话标识：`crypto.randomUUID()`，浏览器不支持时退化为时间戳 + 随机数。 */
+/**
+ * 会话标识（`study_sessions.session_uid`）。
+ *
+ * 必须是**合法 UUID 形状**：后端 `UUID_RE` 只认 `8-4-4-4-12` 十六进制，不合法就直接 1001，
+ * 而那意味着**会话静默全丢**（没有任何提示，家长端时长永远是空）。
+ *
+ * 为什么不能只用 `crypto.randomUUID()`：它**只在安全上下文**存在。`http://localhost` 算安全，
+ * 但本产品的主断点是 **iPad 横屏**，开发时通常用 `http://192.168.x.x:5173` 这类局域网地址打开——
+ * 那不是安全上下文，`randomUUID` 是 undefined。所以回退分支**不是**防御性代码，是会被真实走到的。
+ *
+ * `crypto.getRandomValues` 不受安全上下文限制，用它拼 v4 形状；只有连它都没有时才退到 Math.random。
+ */
 export function newSessionUid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  // 按 RFC 4122 打上 v4 的版本位与变体位——形状对了后端才收
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 ```
 
