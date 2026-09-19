@@ -2138,6 +2138,123 @@ export function getParentTodayUsage(studentId: number): Promise<ParentTodayUsage
   return fetchApi<ParentTodayUsage>(`/parent/students/${studentId}/today-usage`);
 }
 
+// --- Parent: 专项学情 / 真掌握度 / 目标达成（埋点 Phase 1B） ---
+
+/** 目标维度（与后端 `goals.metric` 的列注释逐字一致）。 */
+export type ParentGoalMetric =
+  | 'daily_study_minutes'
+  | 'daily_words'
+  | 'weekly_passages'
+  | 'weekly_clear_errors';
+
+/**
+ * 一个专项模块的窗口内聚合。
+ * ⚠️ `rate` 为 `null` = **本期没有可判对错的作答**，不是 0——显示「暂无数据」，不要显示 0%。
+ */
+export interface ParentSpecialModule {
+  /** 作答单位数：默写=篇、解释/含义=句、背单词=题。 */
+  units: number;
+  correct: number;
+  rate: number | null;
+  byDay: Array<{ date: string; count: number }>;
+}
+
+/**
+ * 四个专项模块。后端**保证四个键都在**（没数据给 0 / `rate: null` / `byDay: []`），
+ * 所以前端不必做「模块缺失」兜底；只有 `vocabulary` 多一个 `newWords`。
+ */
+export interface ParentSpecials {
+  dictation: ParentSpecialModule;
+  interpretation: ParentSpecialModule;
+  meaning: ParentSpecialModule;
+  vocabulary: ParentSpecialModule & { newWords: number };
+}
+
+/**
+ * 真掌握度（`student_knowledge_mastery`）的一行。
+ * `masteryScore` 是 **0..1 的比值**（后端已算好，前端不要再除 100）。
+ * `lastSeenAt` 为 null = 从未见过。
+ */
+export interface ParentMasteryItem {
+  knowledgePointId: number;
+  name: string;
+  masteryScore: number;
+  level: number;
+  correctCount: number;
+  errorCount: number;
+  lastSeenAt: string | null;
+}
+
+/**
+ * `/mastery` 响应。三个覆盖率计数必须一起展示：题库只有 **38%** 的题绑了知识点，
+ * 只列最弱几项会让家长以为「孩子的问题只有这几个」。
+ */
+export interface ParentMastery {
+  items: ParentMasteryItem[];
+  coveredQuestions: number;
+  totalQuestions: number;
+  /** = totalQuestions - coveredQuestions（后端算好，前端不要自己减）。 */
+  uncovered: number;
+}
+
+/** 目标达成的一行。`rate` 允许 > 100（超额完成），前端**不要截断**。 */
+export interface ParentGoalAttainmentItem {
+  metric: ParentGoalMetric;
+  period: 'daily' | 'weekly';
+  title: string;
+  target: number;
+  achieved: number;
+  rate: number | null;
+}
+
+export interface ParentGoalAttainment {
+  items: ParentGoalAttainmentItem[];
+}
+
+/**
+ * 专项学情。`from`/`to` 形如 `YYYY-MM-DD`，缺省近 7 天；
+ * 非法值后端**宽容回落**默认窗口、不报错（与 `getParentStudyTime` 一致）。
+ */
+export function getParentSpecials(
+  studentId: number,
+  from?: string,
+  to?: string,
+): Promise<ParentSpecials> {
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return fetchApi<ParentSpecials>(`/parent/students/${studentId}/specials${suffix}`);
+}
+
+/** 真掌握度。`limit` 缺省 10、上限 50（越界后端 400，前端不要传超）。 */
+export function getParentMastery(studentId: number, limit?: number): Promise<ParentMastery> {
+  const qs = new URLSearchParams();
+  if (limit !== undefined) qs.set('limit', String(limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return fetchApi<ParentMastery>(`/parent/students/${studentId}/mastery${suffix}`);
+}
+
+/** 目标达成（首次调用后端会懒初始化四个默认目标）。 */
+export function getParentGoalAttainment(studentId: number): Promise<ParentGoalAttainment> {
+  return fetchApi<ParentGoalAttainment>(`/parent/students/${studentId}/goals/attainment`);
+}
+
+/**
+ * 改某个目标的值。响应是**该 metric 的最新达成情况**——调用方应拿它原地替换该行，
+ * 不要再发一次 GET（省一次往返，也避免写后读不一致的窗口）。
+ */
+export function putParentGoalTarget(
+  studentId: number,
+  metric: ParentGoalMetric,
+  target: number,
+): Promise<ParentGoalAttainmentItem> {
+  return fetchApi<ParentGoalAttainmentItem>(
+    `/parent/students/${studentId}/goals/${metric}`,
+    { method: 'PUT', body: JSON.stringify({ target }) },
+  );
+}
+
 export interface ParentErrorQuestion {
   content: string;
   type: string;
