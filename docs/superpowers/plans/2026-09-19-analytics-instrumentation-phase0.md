@@ -2121,16 +2121,19 @@ describe('ModelClient 写 llm_call_logs', () => {
       }],
     ]);
     const mc = new ModelClient({ providers } as any);
-    const seen: string[] = [];
+    // 收**整个 chunk 序列**，不要只收 content —— 只收 content 会把第二个
+    // 「content: '' 只带 reasoning」的 chunk 过滤掉，那样这个断言永远不可能成立
+    // （Task 8 实现时踩过：原计划这里写的是 `if (c.content) seen.push(c.content)`，自相矛盾）。
+    const seen: StreamChunk[] = [];
     for await (const c of mc.streamChat({
       model: baseModel({ scene: 'tutoring', subject: 'math', modelKey: 'kimi' }) as any,
       messages: [{ role: 'user', content: '你好' }],  // 输入 2 token
       meta: { studentId: 7, capability: 'tutoring' },
     } as any)) {
-      if (c.content) seen.push(c.content);
+      seen.push(c);
     }
-    // chunk 必须原样透传（SSE 行为不能变）
-    expect(seen).toEqual(['abcdefgh', '']);
+    // chunk 必须**逐字段原样**透传（SSE 行为不能变）：内容、顺序、空 content 的 reasoning chunk 都要在
+    expect(seen).toEqual([{ content: 'abcdefgh' }, { content: '', reasoningContent: '你好世界' }]);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       studentId: 7, scene: 'tutoring', subject: 'math', modelKey: 'kimi',
@@ -2173,6 +2176,124 @@ Expected: 全绿；tsc 无错误。
 ```bash
 git add apps/server/src/ai-core/infra/request-context.ts apps/server/src/ai-core/infra/request-context.test.ts apps/server/src/ai-core/types.ts apps/server/src/ai-core/infra/model-router.ts apps/server/src/ai-core/infra/model-router.test.ts apps/server/src/ai-core/infra/model-client/
 git commit -m "feat(ai-core): ModelClient 记 llm_call_logs（含重试尝试/失败），router 打归因标，ALS 传学生上下文"
+```
+
+---
+
+### Task 8R: 归属语义收紧——「显式不归属」要能表达，且解释缓存不得被误归属
+
+> 来源：Task 8 评审核实（Minor #4 + ⚠️ #2）。这不是洁癖，它直接影响用户的核心指标「哪个学生 token 用得最多」。
+
+**Files:**
+- Modify: `apps/server/src/ai-core/infra/model-client/index.ts`（`recordCall` 里 studentId 的解析）
+- Modify: `apps/server/src/ai-core/capabilities/explanation.capability.ts`（chat 调用补 `meta`）
+- Test: `apps/server/src/ai-core/infra/model-client/model-client.test.ts`（追加两条）
+
+**Interfaces:**
+- Consumes: Task 8 的 `recordCall` 与 `ChatRequest.meta`
+- Produces: 语义——`meta` 里**显式**给了 `studentId: null` 表示「明确不归属」，**不得**被 ALS 兜底覆盖；`meta` 未给该键时仍走 ALS
+
+**背景（为什么必须修）**：
+1. `ExplanationCacheService` 的 LLM 调用来自一个**进程内队列**：`enqueue()` → `void this.drain()`，而 `drain()` 还会从 `inFlight.finally(...)` **再次进入**。也就是说，排到后面的任务是在「某个 promise 完成时」的上下文里跑的——ALS 里可能是**另一个学生的请求上下文**。
+2. 而解释缓存本身是**题目级**的：`generate()` 里写的就是 `studentId: ''`，生成一次、全生命周期复用、**所有学生共享**。把它归给当时恰好占着上下文的那个学生，是**错的**。
+3. 后果直接打在指标上：既有漏记（NULL）也有**错记**（记到别的学生头上），而后者更难发现。
+4. 现有优先级链 `request.meta?.studentId ?? ctx?.studentId ?? null` **无法表达「显式不归属」**——`null ?? x` 会穿透到 `x`（Task 8 评审的 Minor #4 正是这条）。所以必须先让语义可表达。
+
+- [ ] **Step 1: 写两条失败测试**
+
+在 `model-client.test.ts` 的 `describe('ModelClient 写 llm_call_logs', ...)` 内追加（顶部补 `runWithRequestContext` 的 import）：
+
+```ts
+  it('meta 显式给 studentId: null 表示「明确不归属」，压住 ALS 兜底', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', { chat: vi.fn().mockResolvedValue({ content: 'ok', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, model: 'm', id: 'i', latencyMs: 1 }), streamChat: async function* () {} }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await runWithRequestContext({ requestId: 'r', studentId: 9, role: 'student' }, async () => {
+      await mc.chat({
+        model: baseModel() as any,
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: false,
+        meta: { studentId: null, capability: 'explanation' }, // 题目级缓存：不属任何学生
+      });
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].studentId).toBeNull(); // 关键：不能变成 9
+  });
+
+  it('meta 不给 studentId 时仍走 ALS 归属', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', { chat: vi.fn().mockResolvedValue({ content: 'ok', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, model: 'm', id: 'i', latencyMs: 1 }), streamChat: async function* () {} }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await runWithRequestContext({ requestId: 'r', studentId: 9, role: 'student' }, async () => {
+      await mc.chat({ model: baseModel() as any, messages: [{ role: 'user', content: 'hi' }], stream: false });
+    });
+    expect(entries[0].studentId).toBe(9);
+  });
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/model-client/model-client.test.ts
+```
+Expected: 第一条 FAIL（`studentId` 是 `9`，因为 `null ?? 9` 穿透了）；第二条应已通过。
+
+- [ ] **Step 3: 修 `recordCall` 的解析**
+
+在 `model-client/index.ts` 的 `recordCall` 内，把 studentId 的表达式抽成局部变量（放在 `const llmErr = ...` 之后）：
+
+```ts
+    // 区分「没传 meta.studentId」与「显式传了 null」：后者表示**明确不归属**
+    // （如题目级缓存，不属任何学生），不能被 ALS 兜底覆盖。
+    const metaHasStudentId = request.meta !== undefined && 'studentId' in request.meta;
+    const studentId = metaHasStudentId ? (request.meta!.studentId ?? null) : (ctx?.studentId ?? null);
+```
+并把 `emitLlmCall({ ... })` 里的这一行：
+```ts
+      studentId: request.meta?.studentId ?? ctx?.studentId ?? null,
+```
+换成：
+```ts
+      studentId,
+```
+
+- [ ] **Step 4: 给解释缓存显式标注「不归属」**
+
+修改 `apps/server/src/ai-core/capabilities/explanation.capability.ts` 的 `modelClient.chat({...})` 调用（约 `:63`），补一个 `meta`：
+
+```ts
+    const chatResponse = await this.modelClient.chat({
+      model: routeResult.primary,
+      messages: promptResult.messages,
+      timeout: timeoutConfig.timeout.explanation ?? timeoutConfig.timeout.default,
+      // 题目级缓存：生成一次、全生命周期复用、所有学生共享，**不属任何学生**。
+      // 显式传 null 压掉 ALS 兜底——该调用来自进程内队列，drain 时可能继承到
+      // 别的学生的请求上下文，那样会把这次调用错记到那个学生头上。
+      // （scene 由 router 打标为 'explanation'，不必在这里重复。）
+      meta: { studentId: null, capability: 'explanation' },
+    });
+```
+
+**为什么 title 生成不在此列**：会话标题是**会话级**的，会话属于某个学生，ALS 归属正确——不要顺手也给它传 null。
+
+- [ ] **Step 5: 跑测试 + 类型检查 + 全量回归**
+
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/ && npx tsc --noEmit && npm test 2>&1 | tail -6
+```
+Expected: 全绿（新增 2 条）；tsc **0 错**。
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/server/src/ai-core/infra/model-client/ apps/server/src/ai-core/capabilities/explanation.capability.ts
+git commit -m "fix(ai-core): 归属语义收紧——meta 显式 null = 明确不归属；解释缓存显式去归属"
 ```
 
 ---
