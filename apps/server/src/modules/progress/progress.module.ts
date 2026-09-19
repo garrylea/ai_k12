@@ -4,6 +4,7 @@ import { ProgressService } from './progress.service.js';
 import { ContentModule } from '../content/content.module.js';
 import { PracticeModule } from '../practice/practice.module.js';
 import { PointsModule } from '../points/points.module.js';
+import { LessonCompletionsRepository } from '../../database/repositories/lesson-completions.repo.js';
 import { ProgressRepository } from '../../database/repositories/progress.repo.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { LessonsRepository } from '../../database/repositories/lessons.repo.js';
@@ -14,7 +15,8 @@ import { SemestersRepository } from '../../database/repositories/semesters.repo.
   // PointsModule：学完一课发分（Task 9，mainline_lesson）注入其导出的 PointsService
   imports: [ContentModule, PracticeModule, PointsModule],
   controllers: [ProgressController],
-  providers: [ProgressService, ProgressRepository, StudentsRepository, LessonsRepository, UnitsRepository, SemestersRepository],
+  // LessonCompletionsRepository（P6.5）：ProgressService 在「学完一课」时写一行完课事件
+  providers: [ProgressService, ProgressRepository, StudentsRepository, LessonsRepository, UnitsRepository, SemestersRepository, LessonCompletionsRepository],
   exports: [ProgressService],
 })
 export class ProgressModule {}

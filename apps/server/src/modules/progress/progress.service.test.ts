@@ -59,7 +59,7 @@ function makeService(opts: {
     },
   };
   const practiceService = opts.practiceService ?? {};
-  return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any, practiceService as any, {} as any);
+  return new ProgressService(progressRepo as any, studentsRepo as any, lessonsRepo, unitsRepo, semestersRepo, contentService as any, practiceService as any, {} as any, { recordCompletion: vi.fn().mockResolvedValue(1) } as any);
 }
 
 describe('ProgressService.getStarMap — semester/version selection', () => {
@@ -140,6 +140,7 @@ function makeUpdateService(opts: {
   withPracticeService?: boolean;
   lesson?: { id: number; unitId: number } | null;
   pointsService?: any;
+  lessonCompletionsRepo?: any;
 }) {
   const progressRepo = {
     findByStudentAndSubject: async () => opts.progress,
@@ -161,6 +162,10 @@ function makeUpdateService(opts: {
     : {};
   // 缺省发分 mock：返回 null（未发分）——老用例的响应形状保持不变（points 走 undefined）
   const pointsService = opts.pointsService ?? { award: vi.fn().mockResolvedValue(null) };
+  // 完课事件（P6.5）：ProgressService 第 9 参。**必须传**——漏传会是 undefined，
+  // 而写入点包在 try/catch 里，会静默变成「没写」（老用例照样绿，新功能实际没生效）。
+  const lessonCompletionsRepo =
+    opts.lessonCompletionsRepo ?? { recordCompletion: vi.fn().mockResolvedValue(1) };
   const svc = new ProgressService(
     progressRepo as any,
     {} as any,
@@ -170,8 +175,9 @@ function makeUpdateService(opts: {
     contentService as any,
     practiceService as any,
     pointsService as any,
+    lessonCompletionsRepo as any,
   );
-  return { svc, progressRepo, contentService, practiceService, pointsService };
+  return { svc, progressRepo, contentService, practiceService, pointsService, lessonCompletionsRepo };
 }
 
 describe('ProgressService.updateProgress — practice gate', () => {
@@ -393,5 +399,78 @@ describe('ProgressService.updateProgress — 学完一课发分（mainline_lesso
     expect(res.points).toBeUndefined();
     expect(progressRepo.advanceLesson).toHaveBeenCalledWith(1, 99, null);
     expect(pointsService.award).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- updateProgress 完课事件（P6.5「每周完课目标」的数据源） ---
+
+describe('ProgressService.updateProgress — 完课事件写入', () => {
+  const cards = [
+    { id: 1, sortOrder: 1, cardType: 'reading' },
+    { id: 2, sortOrder: 2, cardType: 'reading' },
+  ];
+
+  it('学完一课（还有下一课）→ 记一行完课事件，学科取 progress.subjectId', async () => {
+    const { svc, lessonCompletionsRepo } = makeUpdateService({
+      progress: { id: 1, subjectId: 2, currentLessonId: 1112, currentCardSort: 1 },
+      cards,
+      nextLesson: { id: 1113, unitId: 310 },
+      lesson: { id: 1112, unitId: 310 },
+    });
+
+    await svc.updateProgress(7, 2, 1112, 2);
+
+    expect(lessonCompletionsRepo.recordCompletion).toHaveBeenCalledWith({
+      studentId: 7,
+      subjectId: 2,
+      lessonId: 1112,
+    });
+  });
+
+  it('整科最后一课（无下一课）→ 同样记一行（markCompleted 也算完课）', async () => {
+    const { svc, lessonCompletionsRepo } = makeUpdateService({
+      progress: { id: 1, subjectId: 1, currentLessonId: 1112, currentCardSort: 1 },
+      cards,
+      nextLesson: null,
+      lesson: { id: 1112, unitId: 310 },
+    });
+
+    const res = await svc.updateProgress(7, 1, 1112, 2);
+
+    expect(res).toMatchObject({ advanced: true, completed: true });
+    expect(lessonCompletionsRepo.recordCompletion).toHaveBeenCalledWith({
+      studentId: 7, subjectId: 1, lessonId: 1112,
+    });
+  });
+
+  it('完课事件写失败**不阻断**学完一课（best-effort，只 warn）', async () => {
+    const { svc } = makeUpdateService({
+      progress: { id: 1, subjectId: 1, currentLessonId: 1112, currentCardSort: 1 },
+      cards,
+      nextLesson: { id: 1113, unitId: 310 },
+      lesson: { id: 1112, unitId: 310 },
+      lessonCompletionsRepo: { recordCompletion: vi.fn().mockRejectedValue(new Error('db down')) },
+    });
+
+    const res = await svc.updateProgress(7, 1, 1112, 2);
+
+    expect(res).toMatchObject({ advanced: true });
+  });
+
+  it('练习未全部作答被门禁拦下 → **不记**完课事件（没真学完）', async () => {
+    const { svc, lessonCompletionsRepo } = makeUpdateService({
+      progress: { id: 1, subjectId: 1, currentLessonId: 9, currentCardSort: 0 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'practice' },
+      ],
+      practiceComplete: false,
+      withPracticeService: true,
+    });
+
+    const res = await svc.updateProgress(2, 1, 9, 2);
+
+    expect(res).toEqual({ advanced: false, reason: 'practice_incomplete' });
+    expect(lessonCompletionsRepo.recordCompletion).not.toHaveBeenCalled();
   });
 });

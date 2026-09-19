@@ -71,3 +71,4 @@ export { StudentKnowledgeMasteryRepository } from './student-knowledge-mastery.r
 export type { WeakMasteryRow } from './student-knowledge-mastery.repo.js';
 export { GoalsRepository } from './goals.repo.js';
 export type { GoalMetric, GoalPeriod, GoalRow } from './goals.repo.js';
+export { LessonCompletionsRepository } from './lesson-completions.repo.js';
