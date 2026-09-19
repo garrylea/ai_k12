@@ -238,8 +238,9 @@ Expected: `llm_call_logs` 含 `usage_source` / `input_price_per_1k` / `output_pr
 - [ ] **Step 5: 断言 schema.sql 与库一致（防「schema 漂移」老毛病）**
 
 ```bash
-# 两张表都要看：单看 llm_call_logs 只有 1 处，合计才是 2 处
-mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW CREATE TABLE llm_call_logs\G SHOW CREATE TABLE llm_models\G" | grep -c "input_price_per_1k"
+# 两张表都要看：单看 llm_call_logs 只有 1 处，合计才是 2 处。
+# 用 --vertical（不要用 \G：本机 mysql 9.5 客户端在 -e 下不认 \G）
+mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "SHOW CREATE TABLE llm_call_logs; SHOW CREATE TABLE llm_models;" | grep -c "input_price_per_1k"
 grep -c "input_price_per_1k" tools/db/schema.sql
 ```
 Expected: 两条命令都输出 `2`（`llm_call_logs` 的列定义 1 处 + `llm_models` 的列定义 1 处）。
