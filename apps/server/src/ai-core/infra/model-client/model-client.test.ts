@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ModelClient } from './index';
 import { setLlmCallSink } from '../llm-call-log';
+import { runWithRequestContext } from '../request-context';
 
 const okResponse = { content: 'ok', finishReason: 'stop' as const, usage: { promptTokens: 1, completionTokens: 1 } };
 
@@ -204,6 +205,38 @@ describe('ModelClient 写 llm_call_logs', () => {
       attempt: 1, requestKind: 'stream', success: true, usageSource: 'estimated',
       inputTokens: 2, outputTokens: 6,
     });
+  });
+
+  it('meta 显式给 studentId: null 表示「明确不归属」，压住 ALS 兜底', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', { chat: vi.fn().mockResolvedValue({ content: 'ok', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, model: 'm', id: 'i', latencyMs: 1 }), streamChat: async function* () {} }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await runWithRequestContext({ requestId: 'r', studentId: 9, role: 'student' }, async () => {
+      await mc.chat({
+        model: baseModel() as any,
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: false,
+        meta: { studentId: null, capability: 'explanation' }, // 题目级缓存：不属任何学生
+      });
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].studentId).toBeNull(); // 关键：不能变成 9
+  });
+
+  it('meta 不给 studentId 时仍走 ALS 归属', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', { chat: vi.fn().mockResolvedValue({ content: 'ok', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, model: 'm', id: 'i', latencyMs: 1 }), streamChat: async function* () {} }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await runWithRequestContext({ requestId: 'r', studentId: 9, role: 'student' }, async () => {
+      await mc.chat({ model: baseModel() as any, messages: [{ role: 'user', content: 'hi' }], stream: false });
+    });
+    expect(entries[0].studentId).toBe(9);
   });
 
   it('streamChat 中途失败也落一条（success=false），且异常原样抛出', async () => {

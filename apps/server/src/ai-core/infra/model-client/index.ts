@@ -151,9 +151,13 @@ export class ModelClient {
     const model = request.model as RoutedModel;
     const ctx = getRequestContext();
     const llmErr = err instanceof LLMClientError ? err : null;
+    // 区分「没传 meta.studentId」与「显式传了 null」：后者表示**明确不归属**
+    // （如题目级缓存，不属任何学生），不能被 ALS 兜底覆盖。
+    const metaHasStudentId = request.meta !== undefined && 'studentId' in request.meta;
+    const studentId = metaHasStudentId ? (request.meta!.studentId ?? null) : (ctx?.studentId ?? null);
     emitLlmCall({
       requestId: ctx?.requestId ?? null,
-      studentId: request.meta?.studentId ?? ctx?.studentId ?? null,
+      studentId,
       dialogueId: request.meta?.dialogueId ?? null,
       scene: request.meta?.scene ?? model.scene ?? null,
       subject: request.meta?.subject ?? model.subject ?? null,

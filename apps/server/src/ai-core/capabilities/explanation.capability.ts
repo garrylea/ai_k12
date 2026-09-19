@@ -64,6 +64,11 @@ export class ExplanationCapability {
       model: routeResult.primary,
       messages: promptResult.messages,
       timeout: timeoutConfig.timeout.explanation ?? timeoutConfig.timeout.default,
+      // 题目级缓存：生成一次、全生命周期复用、所有学生共享，**不属任何学生**。
+      // 显式传 null 压掉 ALS 兜底——该调用来自进程内队列，drain 时可能继承到
+      // 别的学生的请求上下文，那样会把这次调用错记到那个学生头上。
+      // （scene 由 router 打标为 'explanation'，不必在这里重复。）
+      meta: { studentId: null, capability: 'explanation' },
     });
 
     const parsed = this.responseParser.parse({
