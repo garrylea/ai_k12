@@ -292,11 +292,16 @@ export interface MasterySummary {
 /**
  * 目标达成的一行（spec §8.2 `/goals/attainment`）。
  *
+ * 2026-09-20 起**按学科**（P6.5）：目标是 `(学科, 指标)` 二元组，**`metric` 不再全局唯一**
+ * —— 同一个 metric 会在多个学科各占一行。前端渲染的 key 必须用 `subjectId:metric`。
+ *
  * `rate` = `toRate(target, achieved)`，**分母是 target**（与其它 rate 口径同一条纪律：
  * 分母为 0 → `null`，不是 0）。**允许 > 100** = 超额完成，前端不要截断。
  */
 export interface GoalAttainmentItem {
   metric: GoalMetric;
+  subjectId: number;
+  subjectName: string;
   period: GoalPeriod;
   title: string;
   target: number;
