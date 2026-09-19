@@ -439,6 +439,7 @@ apps/server/src/ai-core/infra/llm-call-log.ts   # LlmCallSink 单例（仿 model
 - route 归一化：优先 `req.baseUrl + req.route?.path`（Express 路由模板，如 `/api/practice/:cardId/results`）；拿不到时对 `req.path` 做数字/UUID 段替换。
 - `biz_code`：从响应体 `data?.code` 取；异常路径读 `exception.getResponse()`。
 - **跳过名单**：`/api/admin/analytics/*`（自指噪音）、`/assets/*`、`/uploads/*`、`/api/track/events`（避免自指放大）。
+- **覆盖边界**：被 `JwtAuthGuard`/`RolesGuard` 拒掉的 401/403 与 404 **不在**本表内（守卫在拦截器之前执行、未匹配路径进不了处理器），失败率口径不含鉴权失败。
 - **绝不 `await` DB**：只 `telemetry.record(...)` 入内存 buffer。
 
 ### 6.3 `TelemetryBuffer`（纯类，可单测）

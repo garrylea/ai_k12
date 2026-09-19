@@ -30,6 +30,14 @@ export function normalizeRoute(input: { baseUrl: string; routePath?: string; pat
     .replace(/\/\d+/g, '/:id');
 }
 
+/**
+ * 覆盖边界（**已知缺口，勿当作 bug 反复报**）：Nest 的守卫在拦截器**之前**执行，
+ * 未匹配的路径也进不了处理器，所以被 JwtAuthGuard/RolesGuard 拒掉的 401/403、
+ * 以及 404 都**不会**落进 api_request_logs。即本表覆盖的是「走到了处理器的请求」。
+ * 影响：失败率里不含鉴权失败（会在 Phase 2 的报表口径里注明）。
+ * 若将来需要全覆盖，改成在 AuthMiddleware 之后注册一个中间件、用 res.on('finish') 记账
+ * （中间件不会拒请求，因此不会漏）。
+ */
 @Injectable()
 export class AnalyticsInterceptor implements NestInterceptor {
   constructor(private telemetry: TelemetryService) {}
@@ -60,7 +68,10 @@ export class AnalyticsInterceptor implements NestInterceptor {
         bizCode,
         errorCode,
         latencyMs: Date.now() - started,
-        isSse: String(req.headers['accept'] ?? '').includes('text/event-stream'),
+        // 从**响应**头判定 SSE，而不是请求头：前端的流式调用只发 Content-Type/Authorization，
+        // 浏览器补的是 Accept: */*，请求头判定永远不成立。流式处理器会自己 setHeader
+        // 'Content-Type: text/event-stream'，tap 触发时它已经写好。
+        isSse: String(http.getResponse().getHeader('content-type') ?? '').includes('text/event-stream'),
       };
       this.telemetry.apiRequests.push(entry);
     };
