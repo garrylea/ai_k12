@@ -248,7 +248,9 @@ SELECT CONCAT('goals_uniq=', COUNT(*)) FROM information_schema.STATISTICS
 "
 ```
 
-Expected: `columns=14`、`fk=1`、`datetim3=1`、`triggers=0`、`goals_metric=1`、`goals_uniq=2`（唯一键两列各一行，故是 2）。
+Expected: `columns=13`、`fk=1`、`datetim3=1`、`triggers=0`、`goals_metric=1`、`goals_uniq=2`（唯一键两列各一行，故是 2）。
+
+> 2026-09-22 执行订正：原写 `columns=14` 是数错——Step 1 的 DDL 就是 13 列（`id`/`student_id`/`module`/`subject_id`/`ref_type`/`ref_id`/`ref_key`/`sentence_index`/`verdict`/`is_correct`/`error_counted`/`session_uid`/`created_at`），实测库中亦为 13。**以 DDL 为准，不是补一列。**
 
 - [ ] **Step 4: 幂等复跑**
 
