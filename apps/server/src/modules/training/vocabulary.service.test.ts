@@ -71,6 +71,7 @@ interface Harness {
   wordsRepo: Record<string, ReturnType<typeof vi.fn>>;
   progressRepo: Record<string, ReturnType<typeof vi.fn>>;
   sessionsRepo: Record<string, ReturnType<typeof vi.fn>>;
+  specialLogsRepo: { insert: ReturnType<typeof vi.fn> };
   judge: { generate: ReturnType<typeof vi.fn> };
   recordResult: ReturnType<typeof vi.fn>;
 }
@@ -114,17 +115,23 @@ const harness = (opts: {
     generate: vi.fn(async () => ({ verdict: opts.judgeVerdict ?? 'wrong', comment: null })),
   };
   const sessionsRepo = { create: vi.fn(async () => 77) };
+  // 专项日志（Phase 1B）：判题后写一行 special_practice_logs。
+  const specialLogsRepo = { insert: vi.fn(async () => 1) };
   const service = new VocabularyService(
     wordsRepo as never,
     progressRepo as never,
     sessionsRepo as never,
+    specialLogsRepo as never,
     {
       judge: judge as never,
       random: opts.random ?? (() => 0),
       now: opts.now ?? (() => new Date('2026-09-16T10:00:00+08:00')),
     },
   );
-  return { service, wordsRepo, progressRepo, sessionsRepo, judge, recordResult: progressRepo.recordResult };
+  return {
+    service, wordsRepo, progressRepo, sessionsRepo, judge, specialLogsRepo,
+    recordResult: progressRepo.recordResult,
+  };
 };
 
 const startInput = (over: Partial<VocabularyStartInput> = {}): VocabularyStartInput => ({
@@ -645,6 +652,60 @@ describe('VocabularyService.judge — 记账规则', () => {
     h.progressRepo.findByStudentAndWord.mockResolvedValueOnce({ learned: 1, wrong_count: 3 });
     const res = await h.service.judge(judgeInput({ senseIndex: 0, answer: '地址' }), 9);
     expect(res.progress).toEqual({ learned: true, wrongCount: 3 });
+  });
+});
+
+// ---------------------------------------------------------------- 专项日志（Phase 1B）
+
+describe('VocabularyService.judge — 专项日志（Phase 1B）', () => {
+  it('判错 → verdict 入库为 incorrect（原始枚举是 wrong），errorCounted 取 progressDelta', async () => {
+    const h = harness();
+    await h.service.judge(judgeInput({ promptKind: 'cn2en', answer: 'adress' }), 7);
+
+    expect(h.specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 7,
+      module: 'en_vocabulary',
+      refType: 'word',
+      refId: 1,
+      refKey: 'address',
+      sentenceIndex: null,
+      verdict: 'incorrect', // ← 原始是 'wrong'
+      isCorrect: false,
+      errorCounted: true,   // ← 来自 progressDelta('wrong').wrongDelta
+      sessionUid: null,
+    }));
+  });
+
+  it('答对 → verdict=correct、isCorrect=true、errorCounted=false', async () => {
+    const h = harness();
+    await h.service.judge(judgeInput({ promptKind: 'cn2en', answer: 'address' }), 7);
+
+    expect(h.specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: 'correct', isCorrect: true, errorCounted: false,
+    }));
+  });
+
+  it('off_target（答成常见义）与 unanswered 都不计错、isCorrect=null', async () => {
+    const offTarget = harness({ judgeVerdict: 'off_target' });
+    await offTarget.service.judge(judgeInput({ senseIndex: 2, answer: '住的地方' }), 7);
+    expect(offTarget.specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: 'off_target', isCorrect: null, errorCounted: false,
+    }));
+
+    const blank = harness();
+    await blank.service.judge(judgeInput({ answer: '   ' }), 7);
+    expect(blank.specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: 'unanswered', isCorrect: null, errorCounted: false,
+    }));
+  });
+
+  it('日志写入失败不阻断判题', async () => {
+    const h = harness();
+    h.specialLogsRepo.insert.mockRejectedValueOnce(new Error('db down'));
+
+    const res = await h.service.judge(judgeInput({ promptKind: 'cn2en', answer: 'address' }), 7);
+    expect(res).toHaveProperty('verdict');
+    expect(res.verdict).toBe('correct');
   });
 });
 

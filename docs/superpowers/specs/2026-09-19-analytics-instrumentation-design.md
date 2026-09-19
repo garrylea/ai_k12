@@ -324,6 +324,12 @@ ALTER TABLE goals
 
 UPSERT（MySQL 8.0.20+ 的 `AS new` 别名写法，`VALUES()` 已废弃）：
 
+> ⚠️ **2026-09-22 执行期订正（务必按下面的版本写，不要照抄旧式）**
+> `ON DUPLICATE KEY UPDATE` 的 SET 子句**从左到右求值，且后面的表达式读到的是前面刚写入的值**（不是本行更新前的旧值）。
+> 因此：**① 计数列必须写在 score/level 之前；② score/level 里绝不能再写 `+ new.correct_count`**，否则本次增量被算两遍。
+> 实测（1 对 + 1 错，正确应为 `1/2 = 0.500`）：旧式会得到 `1/3 = 0.333`，并且这个错值会被后续每次判题继续放大
+> ——掌握度是长期累计列，错了不会自愈，家长端「真掌握度」卡会一直读错。
+
 ```sql
 INSERT INTO student_knowledge_mastery
   (student_id, knowledge_point_id, correct_count, error_count, mastery_score, level, last_seen_at)
@@ -331,12 +337,10 @@ VALUES (?, ?, ?, ?, ?, ?, NOW(3)) AS new
 ON DUPLICATE KEY UPDATE
   correct_count = student_knowledge_mastery.correct_count + new.correct_count,
   error_count   = student_knowledge_mastery.error_count   + new.error_count,
-  mastery_score = (student_knowledge_mastery.correct_count + new.correct_count)
-                / NULLIF(student_knowledge_mastery.correct_count + new.correct_count
-                       + student_knowledge_mastery.error_count + new.error_count, 0),
-  level         = FLOOR(5 * ((student_knowledge_mastery.correct_count + new.correct_count)
-                / NULLIF(student_knowledge_mastery.correct_count + new.correct_count
-                       + student_knowledge_mastery.error_count + new.error_count, 0))),
+  mastery_score = student_knowledge_mastery.correct_count
+                / NULLIF(student_knowledge_mastery.correct_count + student_knowledge_mastery.error_count, 0),
+  level         = FLOOR(5 * (student_knowledge_mastery.correct_count
+                / NULLIF(student_knowledge_mastery.correct_count + student_knowledge_mastery.error_count, 0))),
   last_seen_at  = NOW(3);
 ```
 

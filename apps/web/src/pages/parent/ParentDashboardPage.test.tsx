@@ -4,12 +4,14 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
 import {
   getParentDashboard,
+  getParentSpecials,
   getParentStudyTime,
   getParentTodayUsage,
   getUnreadMessageCount,
   listMyStudents,
   type MyStudentItem,
   type ParentDashboard,
+  type ParentSpecials,
   type ParentStudyTime,
   type ParentTodayUsage,
 } from '@/services/api';
@@ -25,6 +27,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentDashboard: vi.fn(),
     getParentStudyTime: vi.fn(),
     getParentTodayUsage: vi.fn(),
+    // 专项学情卡（埋点 Phase 1B）自己取数；不 mock 会打到真 fetch（jsdom 里静默降级）
+    getParentSpecials: vi.fn(),
   };
 });
 
@@ -33,9 +37,18 @@ const getUnreadMock = vi.mocked(getUnreadMessageCount);
 const getDashboardMock = vi.mocked(getParentDashboard);
 const getStudyTimeMock = vi.mocked(getParentStudyTime);
 const getTodayUsageMock = vi.mocked(getParentTodayUsage);
+const getSpecialsMock = vi.mocked(getParentSpecials);
 
 const BOY: MyStudentItem = { id: 11, parentId: 3, username: 'xiaoming', name: '小明', age: 13, grade: '初一', schoolLevel: 'junior', isActive: true };
 const GIRL: MyStudentItem = { ...BOY, id: 12, username: 'xiaomei', name: '小美' };
+
+/** 专项学情卡的默认数据（埋点 Phase 1B）。四个模块后端保证都在。 */
+const SPECIALS: ParentSpecials = {
+  dictation: { units: 3, correct: 2, rate: 66.7, byDay: [] },
+  interpretation: { units: 5, correct: 4, rate: 80, byDay: [] },
+  meaning: { units: 0, correct: 0, rate: null, byDay: [] },
+  vocabulary: { units: 10, correct: 8, rate: 80, byDay: [], newWords: 7 },
+};
 
 const DASHBOARD: ParentDashboard = {
   unreadAlerts: 0,
@@ -133,6 +146,8 @@ beforeEach(() => {
     exceeded: true,
     byModule: [{ module: 'en_vocabulary', seconds: 1860 }],
   });
+  getSpecialsMock.mockReset();
+  getSpecialsMock.mockResolvedValue(SPECIALS);
 });
 
 afterEach(() => {
@@ -164,8 +179,14 @@ describe('ParentDashboardPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: '小美' }));
 
     const panel = await screen.findByTestId('dashboard-student-12');
-    expect(panel).toHaveTextContent('暂无数据');
-    expect(panel).not.toHaveTextContent('0%');
+    /**
+     * 断言必须**限定在学科卡内**，不能对整个面板做 `not.toHaveTextContent('0%')`：
+     * 面板里还有别的含百分比的卡（专项学情的 80% 就含子串「0%」），
+     * 整面板断言会把「别的卡显示 80%」误判成「正确率显示成了 0%」。
+     */
+    const subjectCard = within(panel).getByTestId('dashboard-subject-1');
+    expect(subjectCard).toHaveTextContent('暂无数据');
+    expect(subjectCard).not.toHaveTextContent('0%');
   });
 
   it('多孩 → 出孩子 Tab；点 Tab 只在本地切换，**不动锚点**', async () => {

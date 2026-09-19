@@ -6,6 +6,7 @@ import {
   getMyLedger,
   getMyPoints,
   getMyRewards,
+  getParentGoalAttainment,
   getParentPointRules,
   getParentPoints,
   getUnreadMessageCount,
@@ -46,6 +47,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentPointRules: vi.fn(),
     listMyStudents: vi.fn(),
     getUnreadMessageCount: vi.fn(),
+    // `/parent/goals`（埋点 Phase 1B 从 Placeholder 换成真页）：页面自己拉四项目标
+    getParentGoalAttainment: vi.fn(),
   };
 });
 
@@ -56,6 +59,7 @@ const getParentPointsMock = vi.mocked(getParentPoints);
 const getParentPointRulesMock = vi.mocked(getParentPointRules);
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
+const getParentGoalAttainmentMock = vi.mocked(getParentGoalAttainment);
 
 const PLACEHOLDER_TEXT = '原型占位：此页面正在设计中...';
 
@@ -155,6 +159,15 @@ beforeEach(() => {
   listMyStudentsMock.mockResolvedValue([PARENT_STUDENT]);
   getUnreadMessageCountMock.mockReset();
   getUnreadMessageCountMock.mockResolvedValue(0);
+  getParentGoalAttainmentMock.mockReset();
+  getParentGoalAttainmentMock.mockResolvedValue({
+    items: [
+      { metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 60, achieved: 30, rate: 50 },
+      { metric: 'daily_words', period: 'daily', title: '每日背单词', target: 20, achieved: 10, rate: 50 },
+      { metric: 'weekly_passages', period: 'weekly', title: '每周古诗文篇目', target: 8, achieved: 2, rate: 25 },
+      { metric: 'weekly_clear_errors', period: 'weekly', title: '每周清零错题', target: 10, achieved: 1, rate: 10 },
+    ],
+  });
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -330,6 +343,44 @@ describe('路由表：家长端「积分与奖励」', () => {
     expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '积分与奖励' })).not.toBeInTheDocument();
     expect(getParentPointsMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 埋点 Phase 1B：`/parent/goals` 从 `Placeholder` 换成 `ParentGoalsPage`。
+ *
+ * 与 `/parent/rewards` 同一条理由：页面自己有组件测试，但那个测试挂的是**页面本身**、
+ * 绕过了路由表——「路由确实指到这个页面」只有这里能证明。
+ */
+describe('路由表：家长端「目标设定」', () => {
+  it('/parent/goals 渲染 ParentGoalsPage（四个目标可改），而非 Placeholder', async () => {
+    setParentSession();
+
+    renderAt('/parent/goals');
+
+    expect(await screen.findByRole('heading', { name: '目标设定' })).toBeInTheDocument();
+    expect(await screen.findByTestId('goals-card')).toBeInTheDocument();
+    for (const metric of ['daily_study_minutes', 'daily_words', 'weekly_passages', 'weekly_clear_errors']) {
+      expect(screen.getByTestId(`goal-row-${metric}`)).toBeInTheDocument();
+    }
+    // 顶栏孩子切换器把锚点落到唯一那个孩子上，页面按这个 id 取数
+    expect(getParentGoalAttainmentMock).toHaveBeenCalledWith(PARENT_STUDENT.id);
+
+    // 占位页文案不许出现——这是「没被改回 Placeholder」的钉子
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    // 家长端仍是家长主题（商务白蓝，无日夜切换）
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+
+  it('侧边导航「目标设定」仍指向 /parent/goals（路径不许改）', async () => {
+    setParentSession();
+
+    renderAt('/parent/goals');
+
+    expect(await screen.findByRole('link', { name: '目标设定' })).toHaveAttribute(
+      'href',
+      '/parent/goals',
+    );
   });
 });
 

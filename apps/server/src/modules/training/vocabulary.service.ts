@@ -3,6 +3,9 @@ import { EnglishWordsRepository, toMeanings, toRootAffixes } from '../../databas
 import type { EnglishWordRow, EnglishWordPoolRow } from '../../database/repositories/english-words.repo.js';
 import { StudentWordProgressRepository } from '../../database/repositories/student-word-progress.repo.js';
 import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
+import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
+import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
+import { isCorrectOf } from '../../common/utils/special-practice.util.js';
 import { EnglishWordJudgeCapability } from '../../ai-core/capabilities/english-word-judge.capability.js';
 import type { EnglishWordJudgeMode } from '../../ai-core/types.js';
 import {
@@ -100,6 +103,7 @@ export class VocabularyService {
     private readonly wordsRepo: EnglishWordsRepository,
     private readonly progressRepo: StudentWordProgressRepository,
     private readonly trainingSessionsRepo: TrainingSessionsRepository,
+    private readonly specialLogsRepo: SpecialPracticeLogsRepository,
     @Optional() deps?: VocabularyServiceDeps,
   ) {
     this.judgeCapability = deps?.judge ?? new EnglishWordJudgeCapability();
@@ -443,6 +447,36 @@ export class VocabularyService {
     // 极端情况下只差一个计数不值得引入分布式事务的复杂度。
     if (delta.wrongDelta === 1) {
       await this.wordsRepo.incrementErrorCount(row.id);
+    }
+
+    // 专项日志（Phase 1B）：英语的作答单位是「词的一个义项」，一行记一道题。
+    //
+    // ⚠️ 义项下标（senseIndex）**本期不入库**：spec §4.4 的 DDL 没有这一列，且
+    // `sentence_index` 的列注释写明「默写/背词为 NULL」。所以想知道「哪个义项容易错」
+    // 目前做不到——那需要加列或改 spec，属 spec 变更，**先与用户确认再做**，别偷偷塞进
+    // sentence_index（会污染「逐句」这个语义）或 ref_key（它语义是词面快照）。
+    //
+    // 入库映射：英语原始枚举叫 'wrong'，而本表的 verdict 是跨专项统一字典（没有 'wrong'），
+    // 故映射成 'incorrect'。errorCounted 用**原始** verdict 走 progressDelta，不另写一套。
+    const logVerdict: SpecialPracticeVerdict =
+      outcome.verdict === 'wrong' ? 'incorrect' : outcome.verdict;
+    try {
+      await this.specialLogsRepo.insert({
+        studentId,
+        module: 'en_vocabulary',
+        refType: 'word',
+        refId: row.id,
+        refKey: row.word,
+        sentenceIndex: null,
+        verdict: logVerdict,
+        isCorrect: isCorrectOf(logVerdict),
+        errorCounted: delta.wrongDelta === 1,
+        // sessionUid 本期恒 null：1B 不做「学习会话 ↔ 专项作答」串联，留列给后续。
+        sessionUid: null,
+      });
+    } catch (err) {
+      // 埋点绝不阻断判题：失败只 warn
+      this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);
     }
 
     const progress = await this.progressRepo.findByStudentAndWord(studentId, row.id);

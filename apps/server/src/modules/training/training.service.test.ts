@@ -38,6 +38,8 @@ const mk = (overrides: any = {}) => ({
   pointsService: { award: vi.fn(), todayKey: vi.fn(() => '2026-09-17') },
   // 乙类整批发分（Task 12）：专项开练建会话（`training_sessions`）。
   trainingSessionsRepo: { create: vi.fn().mockResolvedValue(101) },
+  // 专项日志（Phase 1B）：语文三专项判题各写一行 `special_practice_logs`。
+  specialLogsRepo: { insert: vi.fn().mockResolvedValue(1) },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
@@ -48,6 +50,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
     {} as never, {} as never, {} as never,
     deps.pointsService as never,
     deps.trainingSessionsRepo as never,
+    deps.specialLogsRepo as never,
   );
 
 /**

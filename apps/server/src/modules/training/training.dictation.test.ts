@@ -42,13 +42,16 @@ function makeService(overrides: {
     }),
     todayKey: vi.fn(() => overrides.todayKey ?? '2026-09-17'),
   };
+  // 专项日志（Phase 1B）：默写判题会写一行 special_practice_logs。
+  const specialLogsRepo = { insert: vi.fn().mockResolvedValue(1) };
   const service = new TrainingService(
     {} as never, judgeCore as never, {} as never, {} as never, {} as never,
     {} as never, {} as never, {} as never, {} as never,
     dictationRepo as never, dictationFeedback as never, {} as never,
     points as never, {} as never,
+    specialLogsRepo as never,
   );
-  return { service, dictationRepo, judgeCore, dictationFeedback, points };
+  return { service, dictationRepo, judgeCore, dictationFeedback, points, specialLogsRepo };
 }
 
 describe('renderBodyDiff', () => {
@@ -259,5 +262,39 @@ describe('TrainingService.generateDictationFeedback（错因：可选、失败�
     await expect(
       service.generateDictationFeedback({ passageId: 999, author: '', dynasty: '', body: '' }),
     ).rejects.toThrow();
+  });
+});
+
+describe('TrainingService.judgeDictation — 专项日志（Phase 1B）', () => {
+  it('默写判题会写一行专项日志；日志写入失败**不阻断**判题', async () => {
+    const { service, specialLogsRepo } = makeService();
+    specialLogsRepo.insert.mockRejectedValueOnce(new Error('db down'));
+
+    const res = await service.judgeDictation({
+      studentId: 7, passageId: 1, author: '李白', dynasty: '唐', body: '床前明月先，疑是地上霜。',
+    });
+
+    // 判题结果照常返回（这是本条用例的重点）
+    expect(res).toHaveProperty('isCorrect');
+    expect(res.isCorrect).toBe(false);
+    expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 7, module: 'chinese_dictation', refType: 'passage', refId: 1,
+      refKey: '静夜思', sentenceIndex: null,
+      verdict: 'incorrect', isCorrect: false, errorCounted: true,
+    }));
+  });
+
+  it('判对 → verdict=correct / isCorrect=true / 不计错', async () => {
+    const { service, specialLogsRepo } = makeService({
+      judgeResult: { ...WRONG_JUDGE, isCorrect: true, bodyDiff: [] },
+    });
+
+    await service.judgeDictation({
+      studentId: 7, passageId: 1, author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。',
+    });
+
+    expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: 'correct', isCorrect: true, errorCounted: false,
+    }));
   });
 });

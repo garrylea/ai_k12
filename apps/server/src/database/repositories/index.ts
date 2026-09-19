@@ -61,3 +61,13 @@ export { StudySessionsRepository } from './study-sessions.repo.js';
 export type { StudySessionRow, StudySessionInsertInput } from './study-sessions.repo.js';
 export { ParentAnalyticsRepository } from './parent-analytics.repo.js';
 export type { DaySeconds, ModuleSeconds, SubjectSeconds } from './parent-analytics.repo.js';
+export { SpecialPracticeLogsRepository } from './special-practice-logs.repo.js';
+export type {
+  SpecialPracticeLogInsert,
+  SpecialPracticeModule,
+  SpecialPracticeVerdict,
+} from './special-practice-logs.repo.js';
+export { StudentKnowledgeMasteryRepository } from './student-knowledge-mastery.repo.js';
+export type { WeakMasteryRow } from './student-knowledge-mastery.repo.js';
+export { GoalsRepository } from './goals.repo.js';
+export type { GoalMetric, GoalPeriod, GoalRow } from './goals.repo.js';

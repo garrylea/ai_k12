@@ -843,6 +843,7 @@ CREATE TABLE IF NOT EXISTS goals (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   student_id BIGINT NOT NULL,
   subject_id BIGINT DEFAULT NULL,
+  metric VARCHAR(40) DEFAULT NULL COMMENT 'daily_study_minutes|daily_words|weekly_passages|weekly_clear_errors',
   title VARCHAR(200) NOT NULL,
   period VARCHAR(10) NOT NULL,
   target_value SMALLINT NOT NULL,
@@ -851,6 +852,7 @@ CREATE TABLE IF NOT EXISTS goals (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_goals_student (student_id, is_active),
+  UNIQUE KEY uniq_goals_student_metric (student_id, metric),
   CONSTRAINT fk_goals_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_goals_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1268,6 +1270,33 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   KEY idx_ss_open           (status, last_heartbeat_at),
   KEY idx_ss_platform_time  (platform_class, started_at),
   CONSTRAINT fk_ss_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 17. 专项练习日志（2026-09-22，埋点 Phase 1B）
+-- ============================================================
+-- 语文三专项 + 英语背单词的判题流水。独立子系统：只挂 student_id 一个外键，
+-- ref_id 故意不设外键（内容表全量重灌会被入向外键卡死）。
+-- 迁移：tools/db/migrations/2026-09-22_special_practice_logs_and_goals.sql
+
+CREATE TABLE IF NOT EXISTS special_practice_logs (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id     BIGINT       NOT NULL,
+  module         VARCHAR(32)  NOT NULL COMMENT 'chinese_dictation|chinese_interpretation|chinese_meaning|en_vocabulary',
+  subject_id     BIGINT       DEFAULT NULL,
+  ref_type       VARCHAR(24)  NOT NULL COMMENT 'passage|word',
+  ref_id         BIGINT       DEFAULT NULL COMMENT 'passage_id / word_id；**故意不设外键**（同 student_word_progress.word_id）',
+  ref_key        VARCHAR(128) DEFAULT NULL COMMENT '篇目标题 / 词面快照，便于排查与无 id 场景',
+  sentence_index SMALLINT     DEFAULT NULL COMMENT '解释/含义专项逐句；默写/背词为 NULL',
+  verdict        VARCHAR(20)  NOT NULL COMMENT 'correct|incorrect|off_target|unanswered|undetermined',
+  is_correct     TINYINT(1)   DEFAULT NULL COMMENT 'correct=1 / incorrect=0 / 其它 NULL（沿用「空答案不计对错」）',
+  error_counted  TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '必须复用 normalize-english.util 的 progressDelta 判决',
+  session_uid    CHAR(36)     DEFAULT NULL,
+  created_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_spl_student_module_time (student_id, module, created_at),
+  KEY idx_spl_student_ref         (student_id, module, ref_id),
+  KEY idx_spl_time                (created_at),
+  CONSTRAINT fk_spl_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

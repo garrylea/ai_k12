@@ -91,6 +91,15 @@ export class QuestionsRepository {
     );
   }
 
+  /** 该题绑定的知识点 id（掌握度回写用；无绑定返回空数组，不是 null）。 */
+  async findKnowledgePointIdsByQuestion(questionId: number): Promise<number[]> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { knowledge_point_id: number })[]>(
+      `SELECT knowledge_point_id FROM question_knowledge_points WHERE question_id = ?`,
+      [questionId],
+    );
+    return rows.map((r) => Number(r.knowledge_point_id));
+  }
+
   /**
    * 专项练习随机抽题（训练模块 Task 8）：按学科 + 知识点（JOIN qkp）随机取 count 题。
    * type 传 null 时不过滤题型；空答案题一律排除（判题体系重构 2026-09-09）：客观题判不了对，

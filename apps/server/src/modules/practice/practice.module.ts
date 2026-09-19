@@ -2,12 +2,13 @@ import { Module } from '@nestjs/common';
 import { PracticeController } from './practice.controller.js';
 import { PracticeService } from './practice.service.js';
 import { JudgeCoreService } from './judge-core.service.js';
-import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository, ProgressRepository, QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
+import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, PracticeResultsRepository, ProgressRepository, QuestionSelfAssessmentsRepository, StudentKnowledgeMasteryRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { ExplanationCapability } from '../../ai-core/capabilities/explanation.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
+import { MasteryService } from './mastery.service.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
 import { ContentModule } from '../content/content.module.js';
 import { PointsModule } from '../points/points.module.js';
@@ -42,7 +43,11 @@ import { PointsModule } from '../points/points.module.js';
     HintCapability,
     ExplanationCacheService,
     ExplanationCapability,
+    // 掌握度回写（埋点 Phase 1B）：JudgeCoreService 判题出口调用（fire-and-forget）。
+    // StudentKnowledgeMasteryRepository **只在本模块 provide 一次**（重复 provide 会得到两份实例）。
+    StudentKnowledgeMasteryRepository,
+    MasteryService,
   ],
-  exports: [PracticeService, JudgeCoreService, ExplanationCacheService],
+  exports: [PracticeService, JudgeCoreService, ExplanationCacheService, MasteryService],
 })
 export class PracticeModule {}

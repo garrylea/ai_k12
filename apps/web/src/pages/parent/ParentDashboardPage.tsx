@@ -13,6 +13,7 @@ import {
   type ParentTodayUsage,
 } from '@/services/api';
 import { formatDuration } from '@/utils/duration';
+import SpecialsPanel from '@/components/business/parent/SpecialsPanel';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
 /** `rate` 为 null（一道题都没做过）时必须显示「暂无数据」——显示 0% 会被读成「全错了」。 */
@@ -199,6 +200,11 @@ function StudentPanel({ student }: { student: ParentDashboardStudent }) {
       </Card>
 
       <StudyTimePanel studentId={student.studentId} study={studyValue} usage={usageValue} />
+
+      {/* 专项学情（Phase 1B）：与上面的「学习时长」**并列不替代**——那是会话时长，这是专项作答量 */}
+      <div className="mb-4">
+        <SpecialsPanel studentId={student.studentId} />
+      </div>
 
       {student.subjects.length === 0 ? (
         <Card className="p-10 text-center">

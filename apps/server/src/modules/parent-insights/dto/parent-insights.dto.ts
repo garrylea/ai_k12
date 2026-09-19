@@ -1,3 +1,5 @@
+import type { GoalMetric, GoalPeriod } from '../../../database/repositories/goals.repo.js';
+
 /**
  * 家长端「看得见」批的响应形状（spec `2026-09-18-parent-insights-design.md` §4.2）。
  *
@@ -241,4 +243,68 @@ export interface TodayUsageSummary {
   /** `>=` 判定：用满上限即算超出（管控语义是「该停了」）。 */
   exceeded: boolean;
   byModule: Array<{ module: string; seconds: number }>;
+}
+
+/**
+ * 一个专项模块的窗口内聚合（spec §8.2 `/specials`）。
+ * `rate` 为 `null` 表示「本期没有可判对错的作答」，**不是 0**。
+ */
+export interface SpecialModuleSummary {
+  /** 作答单位数：默写=篇、解释/含义=句、背单词=题（日志一行 = 一个单位）。 */
+  units: number;
+  correct: number;
+  rate: number | null;
+  byDay: Array<{ date: string; count: number }>;
+}
+
+/** 四个模块的聚合。只有 `vocabulary` 多一个 `newWords`。 */
+export interface SpecialsSummary {
+  dictation: SpecialModuleSummary;
+  interpretation: SpecialModuleSummary;
+  meaning: SpecialModuleSummary;
+  vocabulary: SpecialModuleSummary & { newWords: number };
+}
+
+/** `/mastery` 的一行。`lastSeenAt` 为 null = 从未见过（不要编成 0）。 */
+export interface MasteryItem {
+  knowledgePointId: number;
+  name: string;
+  /** 0..1 的比值（后端已算好，前端不要再除）。 */
+  masteryScore: number;
+  level: number;
+  correctCount: number;
+  errorCount: number;
+  lastSeenAt: Date | null;
+}
+
+/**
+ * `/mastery` 响应。三个覆盖率计数**必须都回**：题库只有 38% 的题绑了 KP，
+ * 不给出「未覆盖」计数会让家长以为薄弱点只有列出的这些（spec §4.8 规则①）。
+ */
+export interface MasterySummary {
+  items: MasteryItem[];
+  coveredQuestions: number;
+  totalQuestions: number;
+  /** = totalQuestions - coveredQuestions，后端算好，前端不要自己减。 */
+  uncovered: number;
+}
+
+/**
+ * 目标达成的一行（spec §8.2 `/goals/attainment`）。
+ *
+ * `rate` = `toRate(target, achieved)`，**分母是 target**（与其它 rate 口径同一条纪律：
+ * 分母为 0 → `null`，不是 0）。**允许 > 100** = 超额完成，前端不要截断。
+ */
+export interface GoalAttainmentItem {
+  metric: GoalMetric;
+  period: GoalPeriod;
+  title: string;
+  target: number;
+  achieved: number;
+  rate: number | null;
+}
+
+/** 四个目标维度的达成情况（懒初始化后必然齐 4 条）。 */
+export interface GoalAttainmentSummary {
+  items: GoalAttainmentItem[];
 }

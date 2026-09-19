@@ -13,8 +13,15 @@ import { ParentModule } from '../parent/parent.module.js';
 import { ProgressModule } from '../progress/progress.module.js';
 import { AnalyticsModule } from '../analytics/analytics.module.js';
 import { StudyTimeService } from './study-time.service.js';
+import { SpecialsService } from './specials.service.js';
+import { ParentMasteryService } from './parent-mastery.service.js';
+import { GoalsService } from './goals.service.js';
 import { ParentAnalyticsRepository } from '../../database/repositories/parent-analytics.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
+import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
+import { StudentKnowledgeMasteryRepository } from '../../database/repositories/student-knowledge-mastery.repo.js';
+import { GoalsRepository } from '../../database/repositories/goals.repo.js';
+import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 
 /**
  * 家长端「看得见」批（spec `2026-09-18-parent-insights-design.md`）。
@@ -40,6 +47,9 @@ import { ControlsRepository } from '../../database/repositories/controls.repo.js
     ErrorsService,
     ChatLogsService,
     StudyTimeService,
+    SpecialsService,
+    ParentMasteryService,
+    GoalsService,
     ParentInsightsRepository,
     StudentsRepository,
     SubjectsRepository,
@@ -47,6 +57,11 @@ import { ControlsRepository } from '../../database/repositories/controls.repo.js
     AiMessagesRepository,
     ParentAnalyticsRepository,
     ControlsRepository,
+    // 埋点 Phase 1B：三个新仓储 + MainErrorBooksRepository（目标达成要用清零数）只在本模块 provide
+    SpecialPracticeLogsRepository,
+    StudentKnowledgeMasteryRepository,
+    GoalsRepository,
+    MainErrorBooksRepository,
   ],
 })
 export class ParentInsightsModule {}

@@ -74,11 +74,14 @@ function makeService(overrides: {
     }),
     todayKey: vi.fn(() => overrides.todayKey ?? '2026-09-17'),
   };
-  // 这些 repo 在解释专项里**一个都不该被碰**（不写学生状态）
+  // 这些 repo 在解释专项里**一个都不该被碰**（不写学生状态）。
+  // ⚠️ `specialLogsRepo` 不在此列：它是 Phase 1B 的判题流水日志（只追加、不读回），
+  // 判题时**必须**被写一次（见本文件末尾的专项日志用例）。
   const mainErrorRepo = { findErrorBookEntries: vi.fn(), bumpLevels: vi.fn() };
   const hiddenRepo = { mark: vi.fn(), unmark: vi.fn(), unmarkAll: vi.fn(), findAllByStudent: vi.fn() };
   const questionHintsRepo = { findByQuestionId: vi.fn(), upsert: vi.fn() };
   const explanationCache = { ensureExplanation: vi.fn() };
+  const specialLogsRepo = { insert: vi.fn().mockResolvedValue(1) };
 
   const service = new TrainingService(
     mainErrorRepo as never, {} as never, {} as never, {} as never,
@@ -86,8 +89,9 @@ function makeService(overrides: {
     explanationCache as never, {} as never,
     dictationRepo as never, { generate: vi.fn() } as never, interpretationJudge as never,
     points as never, {} as never,
+    specialLogsRepo as never,
   );
-  return { service, dictationRepo, interpretationJudge, mainErrorRepo, hiddenRepo, questionHintsRepo, explanationCache, points };
+  return { service, dictationRepo, interpretationJudge, mainErrorRepo, hiddenRepo, questionHintsRepo, explanationCache, points, specialLogsRepo };
 }
 
 describe('TrainingService — 解释专项 listInterpretationPassages', () => {
@@ -495,5 +499,44 @@ describe('TrainingService — 解释专项 judgeInterpretation：甲类发分（
     expect(points.award).toHaveBeenCalledTimes(1);
     expect(res.pointsAwarded).toBe(0);
     expect(res.awardReason).toBeUndefined();
+  });
+});
+
+describe('TrainingService — 解释专项 judgeInterpretation：专项日志（Phase 1B）', () => {
+  it('逐句作答 → 一行记一句，句级 verdict 由「字词项 + 翻译项」塌缩', async () => {
+    const { service, specialLogsRepo } = makeService(); // OK_JUDGE：『谪守』判错、整句判对
+    await service.judgeInterpretation({
+      studentId: 7, passageId: 12, sentenceIndex: 0,
+      terms: [{ term: '谪守', answer: '贬官' }], translation: '庆历四年的春天。',
+    });
+
+    // 字词项 LLM 判错（method=ai）→ 整句 incorrect，即使整句翻译判对
+    expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 7, module: 'chinese_interpretation', refType: 'passage', refId: 12,
+      refKey: '岳阳楼记', sentenceIndex: 0,
+      verdict: 'incorrect', isCorrect: false, errorCounted: true,
+    }));
+  });
+
+  it('什么都没写 → 整句 unanswered（isCorrect=null、**不计错**）', async () => {
+    const { service, specialLogsRepo } = makeService();
+    await service.judgeInterpretation({
+      studentId: 7, passageId: 12, sentenceIndex: 0, terms: [], translation: '',
+    });
+
+    expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      sentenceIndex: 0, verdict: 'unanswered', isCorrect: null, errorCounted: false,
+    }));
+  });
+
+  it('日志写入失败不阻断判题', async () => {
+    const { service, specialLogsRepo } = makeService();
+    specialLogsRepo.insert.mockRejectedValueOnce(new Error('db down'));
+
+    const res = await service.judgeInterpretation({
+      studentId: 7, passageId: 12, sentenceIndex: 0,
+      terms: [{ term: '谪守', answer: '贬官' }], translation: '庆历四年的春天。',
+    });
+    expect(res).toHaveProperty('allCorrect');
   });
 });

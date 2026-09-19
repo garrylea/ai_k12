@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-09-22 埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成
+
+- **数据面**：新增 `special_practice_logs`（迁移 `2026-09-22_special_practice_logs_and_goals.sql` + `schema.sql`；列/索引/三条口径见数据库设计文档 §3.17）——语文三专项 + 英语背单词的判题流水，**一行 = 一个作答单位**（默写一篇、解释/含义一句、背单词一题）；只挂 `student_id` 一个外键，`ref_id` **故意不设外键**（内容表全量重灌会被入向外键卡死，同 `student_word_progress.word_id` 的教训）。`goals` 复活（§3.8）：加 `metric` 列 + 唯一键 `(student_id, metric)`（按 metric upsert 的前提）。
+- **四个写入点**：`training.service.judgeDictation` / `judgeInterpretation`、`meaning.service.judgeMeaning`、`vocabulary.service.judge`。语文的句级 verdict 由纯函数 `collapseUnitVerdict` 塌缩（优先级：确定错 → 没能判定 → 没作答 → 全对；**不能只看 `correct`**——`unanswered` 的项也是 `false`）；英语复用 `progressDelta` 并把内部枚举 `wrong` 映射成统一字典的 `incorrect`。**写入永不阻断判题**（`try/catch` 只 warn）。
+- **掌握度回写**：`MasteryService.recordFromJudge` 挂在 `JudgeCoreService` 的**出口收尾** `finishJudge`（`void`，不 `await`）。放在出口而非「算出 isCorrect 之后」是因为 `judgeQuestion` 有**三个返回点**（路由 0 空标准答案、路由 1c 主观题 self_assess 两条是 `isCorrect=null` 的早退），只挂最后一个会漏掉两条。四条规则（spec §4.8）：只在该题绑了 KP 时写、`isCorrect===null` 不写、`questionId==null` 跳过、失败只 warn。
+- **家长端 4 端点**：`GET /specials`、`GET /mastery`、`GET /goals/attainment`、`PUT /goals/{metric}`（API 设计文档 §4.13 / §4.24、数据流 §6.27、契约 `openapi.yaml`）。`limit` 越界 **400 不钳制**；`/goals/attainment` 无目标时**懒初始化四个默认目标**（`INSERT IGNORE` 只补缺失）。旧 `goals` CRUD 四条（`GET/POST /goals`、`PATCH/DELETE /goals/{goalId}`）**从未实现过**（文档先于代码），标废弃。
+- **两条口径裁决（2026-09-22 用户确认）**：① `weekly_passages` 的达成值 = 三个语文专项**去重篇目数**（`COUNT(DISTINCT ref_id)`）——**不能用行数**，解释/含义一句一行，会把「8 句」当「8 篇」；② 默认目标 60 分钟 / 20 词 / 8 篇 / 10 道。
+- **前端**：`/parent/goals` 从占位变真页（读四目标 + 逐行改目标，行级保存态、失败保留用户输入）；仪表盘加「专项学情」卡；报告页加「真掌握度」卡——**与「薄弱知识点」（错题数代理）并存不替换**，两卡标题不同、各用自己的数据源（spec §10）。
+- **顺带修掉两个真 bug（都是「单测绿但数据错」）**：① spec §4.8 的 UPSERT 算式——`ON DUPLICATE KEY UPDATE` 的 SET **从左到右求值、读到的已是更新后的列**，原式把本次增量算了两遍（1 对 1 错实测 `mastery_score = 0.333`，应为 `0.500`），而掌握度是长期累计列、错了不会自愈；② `GoalsRepository` 的占位符顺序没按列清单排（列是 `…metric, title, period, target_value…`，参数写成 `[studentId, metric, period, title, target]`），`title` 与 `period` 对调落库。两个都是**端到端冒烟（独立端口 + 真 dev 库）**抓到的，位置断言式单测拦不住——`goals.repo.test.ts` 已改为**按列名配对断言**（`zipInsert`），并验证「把顺序改回错的 → 该用例立刻红」。
+- **教训（值得复用的两条）**：① 「只断言自己传给仓储的 payload」的测试证明不了落库语义，凡「参数顺序 ↔ 列清单」的映射要么按列名配对断言、要么用真库（事务 + ROLLBACK）跑一次；② 查库下结论前先看列名对不对——`students` 没有 `phone` 列（是 `username`），把 `ERROR 1054` 连同 `2>/dev/null` 一起吞掉会得出「库里没有学生」的假结论（本期真犯过）。
+- 计划见 `docs/superpowers/plans/2026-09-19-analytics-instrumentation-phase1b-specials-mastery-goals.md`（Task 1–12）；设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.4/§4.7/§4.8/§8.2/§10。
+
+---
+
 ## 2026-09-19 家长端 AI 对话回放补齐孩子的图片
 
 - **契约**：`GET /api/parent/students/:id/chat-logs/{dialogueId}` 的消息对象新增 `images: string[]`（API 设计文档 §4.13 v4.2、`openapi.yaml` 的 `ChatLogMessage` 已同步）。

@@ -21,6 +21,9 @@ import {
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
+import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
+import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
+import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
 import {
   evaluateDictation,
   normalizeChineseAnswer,
@@ -79,6 +82,7 @@ export class TrainingService {
     private readonly interpretationJudge: InterpretationJudgeCapability,
     private readonly pointsService: PointsService,
     private readonly trainingSessionsRepo: TrainingSessionsRepository,
+    private readonly specialLogsRepo: SpecialPracticeLogsRepository,
   ) {}
 
   /**
@@ -243,6 +247,30 @@ export class TrainingService {
       passageId: passage.id,
       genre: passage.genre,
     });
+
+    // 专项日志（Phase 1B）：默写的作答单位是「一篇」，一行记一篇。
+    // errorCounted 口径：只有 incorrect 计错，unanswered/undetermined 不计——精神与英语的
+    // progressDelta 一致（只算「确定错」），但实现必须是本文件这套：语文没有 off_target，
+    // 也不该去 import 只吃英语五档枚举的 progressDelta。
+    const dictationVerdict: SpecialPracticeVerdict = judged.isCorrect ? 'correct' : 'incorrect';
+    try {
+      await this.specialLogsRepo.insert({
+        studentId: input.studentId,
+        module: 'chinese_dictation',
+        refType: 'passage',
+        refId: passage.id,
+        refKey: passage.work_title ?? null,
+        sentenceIndex: null,
+        verdict: dictationVerdict,
+        isCorrect: isCorrectOf(dictationVerdict),
+        errorCounted: dictationVerdict === 'incorrect',
+        // sessionUid 本期恒 null：1B 不做「学习会话 ↔ 专项作答」串联，留列给后续。
+        sessionUid: null,
+      });
+    } catch (err) {
+      // 埋点绝不阻断判题：失败只 warn
+      this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);
+    }
 
     // 显式构造返回，不用 spread：judged 带 method 字段，spread 进对象字面量会触发
     // TS 多余属性检查（DictationJudgeResult 未声明 method）。
@@ -471,6 +499,26 @@ export class TrainingService {
           genre: passage.genre,
         })
       : null;
+
+    // 专项日志（Phase 1B）：解释专项逐句作答，一行记一句；
+    // 句级 verdict 由「字词项 + 翻译项」塌缩而来（不能只看 correct——unanswered 的项也是 false）。
+    const interpretationVerdict = collapseUnitVerdict([...termItems, sentSlot]);
+    try {
+      await this.specialLogsRepo.insert({
+        studentId: input.studentId,
+        module: 'chinese_interpretation',
+        refType: 'passage',
+        refId: passage.id,
+        refKey: passage.work_title ?? null,
+        sentenceIndex: input.sentenceIndex,
+        verdict: interpretationVerdict,
+        isCorrect: isCorrectOf(interpretationVerdict),
+        errorCounted: interpretationVerdict === 'incorrect',
+        sessionUid: null,
+      });
+    } catch (err) {
+      this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);
+    }
 
     return {
       passageId: passage.id,
