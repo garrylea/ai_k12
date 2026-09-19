@@ -36,6 +36,13 @@ describe('shouldSkipRoute', () => {
     expect(shouldSkipRoute('/api/track/events')).toBe(true);
     expect(shouldSkipRoute('/api/practice/12/judge')).toBe(false);
   });
+
+  it('跳过心跳：30s 一次的高频自指噪音，且已落 study_sessions', () => {
+    expect(shouldSkipRoute('/api/study-sessions/3f2504e0-4f89-11d3-9a0c-0305e82c3301/heartbeat')).toBe(true);
+    // 开始/结束是低频且有业务意义的写入，仍要计入请求日志
+    expect(shouldSkipRoute('/api/study-sessions')).toBe(false);
+    expect(shouldSkipRoute('/api/study-sessions/3f2504e0-4f89-11d3-9a0c-0305e82c3301/end')).toBe(false);
+  });
 });
 
 describe('AnalyticsInterceptor', () => {
