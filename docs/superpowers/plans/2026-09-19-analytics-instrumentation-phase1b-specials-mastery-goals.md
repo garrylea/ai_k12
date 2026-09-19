@@ -2056,6 +2056,1331 @@ git add apps/server/src/modules/parent-insights/specials.service.ts \
 git commit -m "feat(parent): 专项与掌握度两个聚合 service（四模块补齐 + 覆盖率计数）"
 ```
 
+---
+
+### Task 8: 暴露读/写链 —— 两个仓储新查询 + `GoalsService` + 4 个端点 + 模块接线
+
+**Files:**
+- Modify: `apps/server/src/database/repositories/special-practice-logs.repo.ts`（加 `countDistinctPassages`）
+- Modify: `apps/server/src/database/repositories/special-practice-logs.repo.test.ts`
+- Modify: `apps/server/src/database/repositories/main-error-books.repo.ts`（加 `countClearedBetween`）
+- Modify: `apps/server/src/database/repositories/student-knowledge-mastery.repo.ts`（订正一处**失实注释**，见 Step 1）
+- Create: `apps/server/src/modules/parent-insights/goals.service.ts`
+- Test: `apps/server/src/modules/parent-insights/goals.service.test.ts`
+- Modify: `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts`（加目标达成两组类型）
+- Modify: `apps/server/src/modules/parent-insights/parent-insights.controller.ts`（3 `@Get` + 1 `@Put`）
+- Modify: `apps/server/src/modules/parent-insights/parent-insights.controller.test.ts`（`makeController` 加 3 个位置参数 + 4 条端点用例）
+- Modify: `apps/server/src/modules/parent-insights/parent-insights.module.ts`（providers）
+
+**Interfaces:**
+- Consumes: `SpecialPracticeLogsRepository`（Task 2）、`StudentKnowledgeMasteryRepository`（Task 5）、`GoalsRepository`（Task 6）、既有的 `ParentAnalyticsRepository.getStudyTimeTotal(studentId, from, toExclusive): Promise<number>`（秒）、既有的 `MainErrorBooksRepository`
+- Produces:
+  - `SpecialPracticeLogsRepository.countDistinctPassages(studentId, from, toExclusive): Promise<number>`
+  - `MainErrorBooksRepository.countClearedBetween(studentId, from, toExclusive): Promise<number>`
+  - `class GoalsService`：`getAttainment(studentId): Promise<GoalAttainmentSummary>`、`upsertTarget(studentId, metric: GoalMetric, target: number): Promise<GoalAttainmentItem>`
+  - DTO：`GoalAttainmentItem`、`GoalAttainmentSummary`
+
+---
+
+#### 两处已裁决的口径（2026-09-22 用户确认，勿自行改回）
+
+**① `weekly_passages` 的达成值 = 三个语文专项在窗口内的去重篇目数**
+
+spec §8.2 只写了「← `special_practice_logs`」，但该表里**一行 = 一个作答单位**：默写一篇一行、解释/含义是一句一行。若直接把行数当「篇目数」，家长看到的「8」可能是「8 句」，语义崩坏。故口径定为：
+
+```sql
+COUNT(DISTINCT ref_id) WHERE module IN ('chinese_dictation','chinese_interpretation','chinese_meaning')
+```
+
+即「本周学过（任一语文专项作答过）的不同篇目数」。`ref_id IS NOT NULL` 必须显式排除（`ref_id` 可空，是排查用的兜底列）。
+
+**② 四个默认目标：60 分钟 / 20 词 / 8 篇 / 10 道**
+
+| metric | period | title | 默认 target |
+|---|---|---|---|
+| `daily_study_minutes` | `daily` | 每日学习时长 | 60 |
+| `daily_words` | `daily` | 每日背单词 | 20 |
+| `weekly_passages` | `weekly` | 每周古诗文篇目 | 8 |
+| `weekly_clear_errors` | `weekly` | 每周清零错题 | 10 |
+
+默认值只写在 `GoalsService` 的 `GOAL_DEFAULTS` 常量里（仿 `points/default-rules.ts` 的 `DEFAULT_RULES`），**不进 DB、不写迁移**；家长改过之后 `INSERT IGNORE` 不会再覆盖（Task 6 已保证）。
+
+**③ 窗口口径沿用 1A（不另立一套）**：`daily` = 今天 00:00 → 明天 00:00；`weekly` = **近 7 天（含今天）00:00 → 明天 00:00**。一律用 `window.util.ts` 的 `startOfDaysAgo()`，**不用 `CURDATE()`**（DB 会话时区与 Node 可能不一致）。这与 1A 的 `resolveWindow('weekly')` 是同一个口径，家长端「周」只有一种含义。
+
+**④ `rate` 复用 `toRate`（分母是 target）**：`rate = toRate(target, achieved)`。`target = 0` → `null`（与 `answered=0 → null` 同一条纪律）。**允许 > 100**（超额完成），前端据此显示「已超额」，**不截断**。
+
+---
+
+- [ ] **Step 1: 两个仓储新查询 + 一处失实注释订正**
+
+**(a)** `special-practice-logs.repo.ts` 追加（紧邻 `countDistinctCorrectWords` 之后，写法与它同款）：
+
+```ts
+  /**
+   * 窗口内**答过的去重篇目数**，即目标 `weekly_passages` 的达成值（2026-09-22 用户裁决）。
+   *
+   * 为什么必须去重而不是 COUNT(*)：本表**一行 = 一个作答单位**——默写一篇一行，
+   * 解释/含义却是**一句一行**。直接数行数会把「8 句」当成「8 篇」汇报给家长。
+   * 三个语文专项合并统计：孩子只要在任一个专项里碰过这篇，就算「本周学过这篇」。
+   */
+  async countDistinctPassages(
+    studentId: number,
+    from: Date,
+    toExclusive: Date,
+  ): Promise<number> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { passages: number | string | null })[]>(
+      `SELECT COUNT(DISTINCT ref_id) AS passages
+       FROM special_practice_logs
+       WHERE student_id = ?
+         AND module IN ('chinese_dictation', 'chinese_interpretation', 'chinese_meaning')
+         AND ref_id IS NOT NULL
+         AND created_at >= ? AND created_at < ?`,
+      [studentId, from, toExclusive],
+    );
+    return Number(rows[0]?.passages ?? 0);
+  }
+```
+
+**(b)** `main-error-books.repo.ts` 追加（紧邻 `markCleared` 之后）：
+
+```ts
+  /**
+   * 窗口内**清零**的错题数，即目标 `weekly_clear_errors` 的达成值。
+   *
+   * 口径：按 `cleared_at` 落在窗口内数（`is_cleared = 1 AND cleared_at IS NOT NULL`）。
+   * 同一道题清了又被做错会**再新建一行**（`create`），所以这里数的是「清零动作次数」而不是
+   * 「去重题数」——这正是家长要的「这周订正掉几道」。`cleared_at` 为 NULL 的历史行不计
+   * （老数据 `is_cleared=1` 但没时间戳，无法判断属于哪一周，宁少不猜）。
+   */
+  async countClearedBetween(studentId: number, from: Date, toExclusive: Date): Promise<number> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { n: number | string | null })[]>(
+      `SELECT COUNT(*) AS n
+       FROM main_error_books
+       WHERE student_id = ? AND is_cleared = 1 AND cleared_at IS NOT NULL
+         AND cleared_at >= ? AND cleared_at < ?`,
+      [studentId, from, toExclusive],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+```
+
+> 该文件已 import `RowDataPacket`（`findByStudent` 等处已用）；若没有就补进 `import type { … } from 'mysql2/promise'`。
+
+**(c) 订正失实注释（别跳过）**：`student-knowledge-mastery.repo.ts` 的 `listWeakest` 注释现在写「`limit` 由 service 夹在 1..50」——**没有任何地方夹**，Task 8 起由 controller 用 `parsePositiveInt(limit, 'limit', 10, 50)` **校验并 400**（本仓全局纪律：越界一律 400，不静默钳制）。把该行改成：
+
+```ts
+  /** 最弱的 N 个知识点（家长端 `/mastery`）；`limit` 由 controller 校验为 1..50（越界 400，不钳制）。 */
+```
+
+- [ ] **Step 2: 加仓储测试（两条）**
+
+`special-practice-logs.repo.test.ts` 追加：
+
+```ts
+  it('countDistinctPassages：三个语文专项合并去重，排除 ref_id 为 NULL', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ passages: '6' }], []]);
+    const repo = new SpecialPracticeLogsRepository(pool as any);
+
+    expect(await repo.countDistinctPassages(11, new Date('2026-09-13'), new Date('2026-09-20'))).toBe(6);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('COUNT(DISTINCT ref_id)');
+    for (const m of ['chinese_dictation', 'chinese_interpretation', 'chinese_meaning']) {
+      expect(sql).toContain(`'${m}'`);
+    }
+    // 英语不在篇目口径里
+    expect(sql).not.toContain('en_vocabulary');
+    expect(sql).toContain('ref_id IS NOT NULL');
+    // 无数据返回 0（不是 null）
+    const empty = mockPool();
+    empty.execute.mockResolvedValueOnce([[{ passages: null }], []]);
+    expect(await new SpecialPracticeLogsRepository(empty as any)
+      .countDistinctPassages(11, new Date(), new Date())).toBe(0);
+  });
+```
+
+`main-error-books.repo.test.ts`（该文件不存在，**新建**，mock 形状照抄 `point-ledger.repo.test.ts` 的 `mockPool`）：
+
+```ts
+import { describe, it, expect, vi } from 'vitest';
+import { MainErrorBooksRepository } from './main-error-books.repo.js';
+
+const mockPool = () => ({
+  execute: vi.fn().mockResolvedValue([[], []]),
+  query: vi.fn().mockResolvedValue([[], []]),
+});
+
+describe('MainErrorBooksRepository.countClearedBetween', () => {
+  it('只数窗口内 cleared_at 非空的已清零行', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: '4' }], []]);
+    const repo = new MainErrorBooksRepository(pool as any);
+
+    expect(await repo.countClearedBetween(11, new Date('2026-09-13'), new Date('2026-09-20'))).toBe(4);
+    const sql = pool.execute.mock.calls[0][0] as string;
+    expect(sql).toContain('is_cleared = 1');
+    expect(sql).toContain('cleared_at IS NOT NULL');
+    expect(sql).toContain('cleared_at >= ? AND cleared_at < ?');
+    expect(pool.execute.mock.calls[0][1]).toEqual([11, new Date('2026-09-13'), new Date('2026-09-20')]);
+  });
+
+  it('无数据 → 0', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: null }], []]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    expect(await repo.countClearedBetween(11, new Date(), new Date())).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 3: 加 DTO（两组类型）**
+
+`dto/parent-insights.dto.ts` 末尾追加：
+
+```ts
+/**
+ * 目标达成的一行（spec §8.2 `/goals/attainment`）。
+ *
+ * `rate` = `toRate(target, achieved)`，**分母是 target**（与其它 rate 口径同一条纪律：
+ * 分母为 0 → `null`，不是 0）。**允许 > 100** = 超额完成，前端不要截断。
+ */
+export interface GoalAttainmentItem {
+  metric: GoalMetric;
+  period: GoalPeriod;
+  title: string;
+  target: number;
+  achieved: number;
+  rate: number | null;
+}
+
+/** 四个目标维度的达成情况（懒初始化后必然齐 4 条）。 */
+export interface GoalAttainmentSummary {
+  items: GoalAttainmentItem[];
+}
+```
+
+> 需在文件顶部 `import type { GoalMetric, GoalPeriod } from '../../../database/repositories/goals.repo.js';`（DTO 文件目前没有任何 import，这是第一处——加在文件最上方）。
+
+- [ ] **Step 4: 写 `GoalsService`（含两个窗口常量）**
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { GoalsRepository } from '../../database/repositories/goals.repo.js';
+import type { GoalMetric, GoalPeriod } from '../../database/repositories/goals.repo.js';
+import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
+import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
+import { ParentAnalyticsRepository } from '../../database/repositories/parent-analytics.repo.js';
+import { startOfDaysAgo, toDayString } from './window.util.js';
+import { toRate } from './rate.util.js';
+import type { GoalAttainmentItem, GoalAttainmentSummary } from './dto/parent-insights.dto.js';
+
+/** 默认目标（2026-09-22 用户裁决：60 分钟 / 20 词 / 8 篇 / 10 道）。只补缺失的，不覆盖家长改过的值。 */
+export const GOAL_DEFAULTS: ReadonlyArray<{
+  metric: GoalMetric; period: GoalPeriod; title: string; target: number;
+}> = [
+  { metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 60 },
+  { metric: 'daily_words', period: 'daily', title: '每日背单词', target: 20 },
+  { metric: 'weekly_passages', period: 'weekly', title: '每周古诗文篇目', target: 8 },
+  { metric: 'weekly_clear_errors', period: 'weekly', title: '每周清零错题', target: 10 },
+];
+
+/** `period` 由 `metric` 派生（`goals.period` 是列，要落库，但不接受家长自定义）。 */
+const PERIOD_BY_METRIC: Record<GoalMetric, GoalPeriod> = {
+  daily_study_minutes: 'daily',
+  daily_words: 'daily',
+  weekly_passages: 'weekly',
+  weekly_clear_errors: 'weekly',
+};
+
+/** 标题也由 metric 派生：库里没有「自定义标题」的入口，统一用常量，避免同名目标两种写法。 */
+const TITLE_BY_METRIC: Record<GoalMetric, string> = Object.fromEntries(
+  GOAL_DEFAULTS.map((d) => [d.metric, d.title]),
+) as Record<GoalMetric, string>;
+
+/**
+ * 家长端目标达成（spec §8.2 `/goals/attainment` + Phase 1B 新增的 `PUT /goals/{metric}`）。
+ *
+ * 四件事，逐条对应口径：
+ *   1. **懒初始化**：`getAttainment` 先 `ensureDefaults`（只补缺失）——全新学生第一次打开
+ *      `/parent/goals` 就有四条目标，不必家长先手动创建。
+ *   2. **达成值按 metric 分派**（spec §8.2）：`daily_study_minutes` ← `study_sessions`（秒→分钟，
+ *      **向下取整**，宁少报不虚报达成）；`daily_words` ← `special_practice_logs` 的
+ *      `en_vocabulary` 单位数；`weekly_passages` ← 三个语文专项去重篇目数（见本批裁决①）；
+ *      `weekly_clear_errors` ← `main_error_books` 窗口内清零数。
+ *   3. **窗口用 `startOfDaysAgo()`**：daily = 今天 00:00 → 明天 00:00；weekly = 近 7 天含今天。
+ *      绝不 `CURDATE()`（DB 会话时区与 Node 可能不一致，会算错一天）。
+ *   4. **达成值不缓存**：四个查询每次实时算——目标页是低频只读页，不值得引入缓存失效问题。
+ */
+@Injectable()
+export class GoalsService {
+  constructor(
+    private readonly goalsRepo: GoalsRepository,
+    private readonly logsRepo: SpecialPracticeLogsRepository,
+    private readonly mainErrorRepo: MainErrorBooksRepository,
+    private readonly analyticsRepo: ParentAnalyticsRepository,
+  ) {}
+
+  async getAttainment(studentId: number): Promise<GoalAttainmentSummary> {
+    await this.goalsRepo.ensureDefaults(studentId, GOAL_DEFAULTS);
+    const rows = await this.goalsRepo.findActiveByStudent(studentId);
+
+    const items = await Promise.all(
+      rows
+        // 脏数据防御：`metric` 为 NULL 的历史行（迁移已回填，但手工改库仍可能留下）不入响应——
+        // 前端按 metric 渲染，收到 null 会渲染出一个没有名字的目标。
+        .filter((r): r is typeof r & { metric: GoalMetric } => r.metric !== null)
+        .map(async (r): Promise<GoalAttainmentItem> => {
+          const achieved = await this.achievedOf(studentId, r.metric);
+          return {
+            metric: r.metric,
+            period: PERIOD_BY_METRIC[r.metric],
+            title: r.title,
+            target: r.targetValue,
+            achieved,
+            rate: toRate(r.targetValue, achieved),
+          };
+        }),
+    );
+    // 稳定排序：按 GOAL_DEFAULTS 的顺序（家长看到的顺序应与页面固定顺序一致，不随 id 漂移）
+    const order = new Map(GOAL_DEFAULTS.map((d, i) => [d.metric, i]));
+    items.sort((a, b) => (order.get(a.metric) ?? 99) - (order.get(b.metric) ?? 99));
+    return { items };
+  }
+
+  async upsertTarget(studentId: number, metric: GoalMetric, target: number): Promise<GoalAttainmentItem> {
+    const period = PERIOD_BY_METRIC[metric];
+    await this.goalsRepo.upsertTarget(studentId, metric, period, TITLE_BY_METRIC[metric], target);
+    const achieved = await this.achievedOf(studentId, metric);
+    return {
+      metric,
+      period,
+      title: TITLE_BY_METRIC[metric],
+      target,
+      achieved,
+      rate: toRate(target, achieved),
+    };
+  }
+
+  /** 窗口：`daily` = 今天 → 明天；`weekly` = 近 7 天（含今天）→ 明天。 */
+  private windowOf(period: GoalPeriod): { start: Date; endExclusive: Date } {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const start = startOfDaysAgo(period === 'daily' ? 0 : 6);
+    const today = startOfDaysAgo(0);
+    return { start, endExclusive: new Date(today.getTime() + DAY_MS) };
+  }
+
+  private async achievedOf(studentId: number, metric: GoalMetric): Promise<number> {
+    const period = PERIOD_BY_METRIC[metric];
+    const { start, endExclusive } = this.windowOf(period);
+    switch (metric) {
+      case 'daily_study_minutes': {
+        const seconds = await this.analyticsRepo.getStudyTimeTotal(studentId, start, endExclusive);
+        return Math.floor(seconds / 60); // 向下取整：59 秒不算 1 分钟，不虚报达成
+      }
+      case 'daily_words': {
+        const rows = await this.logsRepo.aggregateByModule(studentId, start, endExclusive);
+        return rows.find((r) => r.module === 'en_vocabulary')?.units ?? 0;
+      }
+      case 'weekly_passages':
+        return this.logsRepo.countDistinctPassages(studentId, start, endExclusive);
+      case 'weekly_clear_errors':
+        return this.mainErrorRepo.countClearedBetween(studentId, start, endExclusive);
+    }
+  }
+}
+```
+
+- [ ] **Step 5: 写 `GoalsService` 测试（表驱动 + 边界）**
+
+创建 `apps/server/src/modules/parent-insights/goals.service.test.ts`：
+
+```ts
+import { describe, it, expect, vi } from 'vitest';
+import { GoalsService, GOAL_DEFAULTS } from './goals.service.js';
+
+const mk = () => ({
+  goalsRepo: {
+    ensureDefaults: vi.fn().mockResolvedValue(undefined),
+    findActiveByStudent: vi.fn().mockResolvedValue([]),
+    upsertTarget: vi.fn().mockResolvedValue(undefined),
+  },
+  logsRepo: {
+    aggregateByModule: vi.fn().mockResolvedValue([]),
+    countDistinctPassages: vi.fn().mockResolvedValue(0),
+  },
+  mainErrorRepo: { countClearedBetween: vi.fn().mockResolvedValue(0) },
+  analyticsRepo: { getStudyTimeTotal: vi.fn().mockResolvedValue(0) },
+});
+const mkSvc = (d = mk()) =>
+  new GoalsService(d.goalsRepo as any, d.logsRepo as any, d.mainErrorRepo as any, d.analyticsRepo as any);
+
+const goalRow = (metric: string, target: number, title = 'T') =>
+  ({ id: 1, metric, period: 'daily', targetValue: target, title });
+
+describe('GoalsService.getAttainment', () => {
+  it('先懒初始化（只补缺失），再读启用中的目标', async () => {
+    const d = mk();
+    await mkSvc(d).getAttainment(11);
+    expect(d.goalsRepo.ensureDefaults).toHaveBeenCalledWith(11, GOAL_DEFAULTS);
+    expect(d.goalsRepo.findActiveByStudent).toHaveBeenCalledWith(11);
+  });
+
+  it('四个 metric 的达成值各走自己的数据源', async () => {
+    const d = mk();
+    d.goalsRepo.findActiveByStudent.mockResolvedValue([
+      goalRow('daily_study_minutes', 60), goalRow('daily_words', 20),
+      goalRow('weekly_passages', 8), goalRow('weekly_clear_errors', 10),
+    ]);
+    d.analyticsRepo.getStudyTimeTotal.mockResolvedValue(3599); // 59 分 59 秒 → 向下取整 59
+    d.logsRepo.aggregateByModule.mockResolvedValue([
+      { module: 'en_vocabulary', units: 7, answered: 7, correct: 5 },
+    ]);
+    d.logsRepo.countDistinctPassages.mockResolvedValue(3);
+    d.mainErrorRepo.countClearedBetween.mockResolvedValue(4);
+
+    const out = await mkSvc(d).getAttainment(11);
+
+    expect(Object.fromEntries(out.items.map((i) => [i.metric, i.achieved]))).toEqual({
+      daily_study_minutes: 59, daily_words: 7, weekly_passages: 3, weekly_clear_errors: 4,
+    });
+  });
+
+  it('rate 复用 toRate（分母 = target）：达标 100、超额可 >100、target=0 → null', async () => {
+    const d = mk();
+    d.goalsRepo.findActiveByStudent.mockResolvedValue([
+      goalRow('daily_words', 10), goalRow('weekly_clear_errors', 0),
+    ]);
+    d.logsRepo.aggregateByModule.mockResolvedValue([{ module: 'en_vocabulary', units: 15, answered: 0, correct: 0 }]);
+
+    const out = await mkSvc(d).getAttainment(11);
+
+    expect(out.items.find((i) => i.metric === 'daily_words')?.rate).toBe(150);
+    expect(out.items.find((i) => i.metric === 'weekly_clear_errors')?.rate).toBeNull();
+  });
+
+  it('daily 用今天窗口、weekly 用近 7 天窗口（半开区间，绝不用 CURDATE）', async () => {
+    const d = mk();
+    d.goalsRepo.findActiveByStudent.mockResolvedValue([
+      goalRow('daily_study_minutes', 60), goalRow('weekly_passages', 8),
+    ]);
+    await mkSvc(d).getAttainment(11);
+
+    const [dailyFrom, dailyTo] = d.analyticsRepo.getStudyTimeTotal.mock.calls[0] as [number, Date, Date];
+    const [weekFrom, weekTo] = d.logsRepo.countDistinctPassages.mock.calls[0] as [number, Date, Date];
+    const DAY = 24 * 3_600_000;
+    expect(dailyTo.getTime() - dailyFrom.getTime()).toBe(DAY);
+    expect(weekTo.getTime() - weekFrom.getTime()).toBe(7 * DAY);
+    expect(dailyFrom.getHours()).toBe(0);   // 本地 00:00
+    expect(weekFrom.getHours()).toBe(0);
+  });
+
+  it('metric 为 NULL 的历史脏行不进响应（前端按 metric 渲染）', async () => {
+    const d = mk();
+    d.goalsRepo.findActiveByStudent.mockResolvedValue([goalRow('daily_words', 20), { ...goalRow('x', 1), metric: null }]);
+    const out = await mkSvc(d).getAttainment(11);
+    expect(out.items.map((i) => i.metric)).toEqual(['daily_words']);
+  });
+
+  it('返回顺序固定按 GOAL_DEFAULTS，不随 id 漂移', async () => {
+    const d = mk();
+    d.goalsRepo.findActiveByStudent.mockResolvedValue([
+      goalRow('weekly_clear_errors', 10), goalRow('daily_words', 20), goalRow('daily_study_minutes', 60),
+    ]);
+    const out = await mkSvc(d).getAttainment(11);
+    expect(out.items.map((i) => i.metric)).toEqual([
+      'daily_study_minutes', 'daily_words', 'weekly_clear_errors',
+    ]);
+  });
+});
+
+describe('GoalsService.upsertTarget', () => {
+  it('period/title 由 metric 派生（不接受家长自定义），并回填达成值', async () => {
+    const d = mk();
+    d.logsRepo.aggregateByModule.mockResolvedValue([{ module: 'en_vocabulary', units: 12, answered: 0, correct: 0 }]);
+
+    const out = await mkSvc(d).upsertTarget(11, 'daily_words', 24);
+
+    expect(d.goalsRepo.upsertTarget).toHaveBeenCalledWith(11, 'daily_words', 'daily', '每日背单词', 24);
+    expect(out).toMatchObject({ metric: 'daily_words', period: 'daily', target: 24, achieved: 12, rate: 50 });
+  });
+
+  it('weekly 维度 → period=weekly', async () => {
+    const d = mk();
+    await mkSvc(d).upsertTarget(11, 'weekly_passages', 6);
+    expect(d.goalsRepo.upsertTarget).toHaveBeenCalledWith(11, 'weekly_passages', 'weekly', '每周古诗文篇目', 6);
+  });
+});
+```
+
+- [ ] **Step 6: 控制器加 4 个端点**
+
+`parent-insights.controller.ts` 四处改动：
+
+**(a)** 顶部 import 追加：
+
+```ts
+import { Body, Put } from '@nestjs/common';        // 并入既有的 '@nestjs/common' 具名导入
+import { GoalsService } from './goals.service.js';
+import { SpecialsService } from './specials.service.js';
+import { ParentMasteryService } from './parent-mastery.service.js';
+import { GOAL_METRICS } from './goals.service.js';  // 若把白名单放在 service 里（见下）
+import type {
+  GoalAttainmentItem,
+  GoalAttainmentSummary,
+  MasterySummary,
+  SpecialsSummary,
+} from './dto/parent-insights.dto.js';
+import type { GoalMetric } from '../../database/repositories/goals.repo.js';
+```
+
+**(b)** 类文档那句「全部端点**只读**」必须改掉（本批新增了唯一的写端点）：
+
+```ts
+ * `GET` 端点全部只读；**唯一的写端点是 `PUT students/:studentId/goals/:metric`**（家长改目标值）——
+ * 它同样先做归属校验，且只允许改 `target`，`metric`/`period`/`title` 由服务端派生。
+```
+
+**(c)** 白名单常量（放在 `PeriodSchema` 旁边）：
+
+```ts
+/** 目标维度白名单（与 `goals.metric` 的列注释、`GoalMetric` 类型逐字一致）。 */
+const GOAL_METRICS: readonly GoalMetric[] =
+  ['daily_study_minutes', 'daily_words', 'weekly_passages', 'weekly_clear_errors'];
+
+/**
+ * `PUT .../goals/:metric` 的 body。**只收 `target`**：`metric` 在路径里、`period`/`title`
+ * 由服务端按 metric 派生，家长无从自定义。上限 9999 与 `points` 的规则值同一档，
+ * 顺带挡住 `SMALLINT` 溢出；**下限 1**：目标 0 没有意义（达成率永远是 null）。
+ */
+const UpsertGoalSchema = z.object({ target: z.number().int().min(1).max(9999) });
+```
+
+**(d)** 构造函数加 3 个参数（**加在末尾**，顺序即测试里的位置参数）：
+
+```ts
+    private readonly studyTimeService: StudyTimeService,
+    private readonly specialsService: SpecialsService,
+    private readonly parentMasteryService: ParentMasteryService,
+    private readonly goalsService: GoalsService,
+  ) {}
+```
+
+**(e)** 四个 handler（追加在 `getTodayUsage` 之后）：
+
+```ts
+  @Get('students/:studentId/specials')
+  async getSpecials(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ): Promise<SpecialsSummary> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    return this.specialsService.getSpecials(studentId, from, to);
+  }
+
+  /**
+   * `limit` 走 `parsePositiveInt`：**越界 400，不静默钳制**（本仓全局纪律）。
+   * 缺省 10，上限 50（spec §8.2）。
+   */
+  @Get('students/:studentId/mastery')
+  async getMastery(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Query('limit') limit?: string,
+  ): Promise<MasterySummary> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    return this.parentMasteryService.getMastery(studentId, parsePositiveInt(limit, 'limit', 10, 50));
+  }
+
+  @Get('students/:studentId/goals/attainment')
+  async getGoalAttainment(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+  ): Promise<GoalAttainmentSummary> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    return this.goalsService.getAttainment(studentId);
+  }
+
+  /**
+   * 家长改目标值（本批唯一的写端点）。响应回**该 metric 的最新达成情况**，
+   * 前端拿它原地替换行数据，不必再发一次 GET（省一次往返，也避免写后读不一致的窗口）。
+   *
+   * 错误码：`metric` 不在白名单 → 400/1001；body 校验失败 → 400/1001；
+   * 不是自己孩子 → 403/1005；孩子不存在 → 404/1002（都由 requireOwnedStudent 抛）。
+   */
+  @Put('students/:studentId/goals/:metric')
+  async putGoalTarget(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Param('metric') metric: string,
+    @Body() body: unknown,
+  ): Promise<GoalAttainmentItem> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    if (!GOAL_METRICS.includes(metric as GoalMetric)) {
+      throw new BadRequestException({
+        code: 1001,
+        message: `metric 仅允许 ${GOAL_METRICS.join(' | ')}（收到 ${metric}）`,
+      });
+    }
+    const parsed = UpsertGoalSchema.safeParse(body);
+    if (!parsed.success) {
+      const detail = parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`).join('; ');
+      throw new BadRequestException({ code: 1001, message: `入参校验失败：${detail}` });
+    }
+    return this.goalsService.upsertTarget(studentId, metric as GoalMetric, parsed.data.target);
+  }
+```
+
+> 需要把 `BadRequestException` 加进 `@nestjs/common` 的具名导入。
+> ⚠️ **与既有 `/goals/{goalId}` 的路径重叠**：新 `PUT .../goals/{metric}` 与旧 `PATCH/DELETE .../goals/{goalId}` 匹配同一批 URL，但 **HTTP 方法不同**，Nest 路由不冲突。旧 CRUD 本期只标废弃、**不删**（Task 12），故两者会共存一段时间。
+
+- [ ] **Step 7: 模块接线**
+
+`parent-insights.module.ts`：providers 追加 6 项（**服务在前、仓储在后**，与现有顺序风格一致）：
+
+```ts
+    StudyTimeService,
+    SpecialsService,
+    ParentMasteryService,
+    GoalsService,
+    ...
+    ParentAnalyticsRepository,
+    ControlsRepository,
+    // 埋点 Phase 1B：三个新仓储只在本模块 provide（仓储无状态，其它模块要用各自 provide）
+    SpecialPracticeLogsRepository,
+    StudentKnowledgeMasteryRepository,
+    GoalsRepository,
+    MainErrorBooksRepository,
+```
+
+> `MainErrorBooksRepository` 目前**不在**本模块 providers 里（Task 8 是第一个需要它的家长端点），`ParentAnalyticsRepository` 已在。漏加任何一项 → Nest **启动直接失败**（"can't resolve dependencies"），Step 9 的启动冒烟会立刻抓到。
+
+- [ ] **Step 8: 控制器测试（改 `makeController` + 4 条用例）**
+
+**(a)** `makeController` 必须补 3 个位置参数（放在 `studyTime` 之后），否则所有既有用例都会因构造参数错位而炸：
+
+```ts
+function makeController(requireOwnedStudent: ReturnType<typeof vi.fn>) {
+  const parentService = { requireOwnedStudent } as unknown as ParentService;
+  const studyTime = { /* …既有… */ } as unknown as StudyTimeService;
+  const specials = { getSpecials: vi.fn().mockResolvedValue({}) } as unknown as SpecialsService;
+  const mastery = { getMastery: vi.fn().mockResolvedValue({}) } as unknown as ParentMasteryService;
+  const goals = {
+    getAttainment: vi.fn().mockResolvedValue({ items: [] }),
+    upsertTarget: vi.fn().mockResolvedValue({}),
+  } as unknown as GoalsService;
+  const controller = new ParentInsightsController(
+    parentService, {} as never, {} as never, {} as never, {} as never, studyTime,
+    specials, mastery, goals,
+  );
+  return { controller, studyTime, specials, mastery, goals };
+}
+```
+
+**(b)** 新增用例（都遵循「先归属校验、再取数」的既有断言风格）：
+
+```ts
+describe('ParentInsightsController 专项 / 掌握度 / 目标端点', () => {
+  it('specials：归属校验先于取数，from/to 原样透传', async () => {
+    const order: string[] = [];
+    const requireOwned = vi.fn(async () => { order.push('ownership'); });
+    const { controller, specials } = makeController(requireOwned);
+    (specials.getSpecials as any).mockImplementation(async () => { order.push('query'); return {}; });
+
+    await controller.getSpecials(USER, 11, '2026-09-13', '2026-09-19');
+
+    expect(order).toEqual(['ownership', 'query']);
+    expect(specials.getSpecials).toHaveBeenCalledWith(11, '2026-09-13', '2026-09-19');
+  });
+
+  it('mastery：limit 缺省 10；越界 400 且**不取数**', async () => {
+    const requireOwned = vi.fn(async () => {});
+    const { controller, mastery } = makeController(requireOwned);
+
+    await controller.getMastery(USER, 11, undefined);
+    expect(mastery.getMastery).toHaveBeenCalledWith(11, 10);
+
+    await expect(controller.getMastery(USER, 11, '51')).rejects.toMatchObject({ status: 400 });
+    await expect(controller.getMastery(USER, 11, 'abc')).rejects.toMatchObject({ status: 400 });
+    expect(mastery.getMastery).toHaveBeenCalledTimes(1); // 只有缺省那次真取数
+  });
+
+  it('goals/attainment：归属校验后取达成', async () => {
+    const requireOwned = vi.fn(async () => {});
+    const { controller, goals } = makeController(requireOwned);
+    await controller.getGoalAttainment(USER, 11);
+    expect(requireOwned).toHaveBeenCalledWith(3, 11);
+    expect(goals.getAttainment).toHaveBeenCalledWith(11);
+  });
+
+  it('PUT goals/:metric：白名单外 400、body 非法 400，都不写库', async () => {
+    const { controller, goals } = makeController(vi.fn(async () => {}));
+
+    await expect(controller.putGoalTarget(USER, 11, 'daily_x', { target: 30 }))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 0 }))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 20.5 }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(goals.upsertTarget).not.toHaveBeenCalled();
+  });
+
+  it('PUT goals/:metric：合法入参 → 调 service 并回该行达成情况', async () => {
+    const { controller, goals } = makeController(vi.fn(async () => {}));
+    await controller.putGoalTarget(USER, 11, 'daily_words', { target: 30 });
+    expect(goals.upsertTarget).toHaveBeenCalledWith(11, 'daily_words', 30);
+  });
+
+  it('归属校验失败时不写库（403 不许泄漏存在性）', async () => {
+    const { controller, goals } = makeController(vi.fn().mockRejectedValue(new Error('1005')));
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 30 })).rejects.toThrow();
+    expect(goals.upsertTarget).not.toHaveBeenCalled();
+  });
+});
+```
+
+- [ ] **Step 9: 定向测试 + 全量 + 类型检查 + 启动冒烟**
+
+```bash
+cd apps/server && npx vitest run src/modules/parent-insights src/database/repositories && npx tsc --noEmit
+cd apps/server && npm test 2>&1 | tail -5
+```
+
+Expected: 全绿；`tsc` 无输出。
+
+**启动冒烟（必须做，抓 DI）**——本批新增了 3 个 service + 4 个仓储进 providers，类型检查抓不到漏配：
+
+```bash
+cd apps/server && npm run build
+cd apps/server && PORT=3117 node dist/main.js > /tmp/boot_1b.log 2>&1 & echo $! > /tmp/boot_1b.pid
+sleep 6 && grep -E "successfully started|Mapped \{/api/parent/students/:studentId/(specials|mastery|goals/attainment)" /tmp/boot_1b.log
+kill $(cat /tmp/boot_1b.pid) && rm -f /tmp/boot_1b.pid /tmp/boot_1b.log
+```
+
+Expected: `Nest application successfully started` + 三条新路由被 mapped。
+⚠️ **按 PID 收尾**，**别** `pkill -f 'node dist/main.js'`（会杀掉用户本机在跑的服务）。
+
+> 本机 dev 库**没有任何 students 行**（2026-09-22 实测 `SELECT COUNT(*) FROM students` = 0），所以**做不了**「登录 → 调端点 → 查库」的端到端冒烟。写入链的语义已在 Task 5/6 用真库 SQL（事务 + ROLLBACK）逐条验过；Task 8 的剩余风险只是「路由有没有挂上 / DI 有没有解析」，由上面的启动冒烟覆盖。**不要**为了冒烟往 dev 库塞假学生。
+
+- [ ] **Step 10: 提交**
+
+```bash
+git add apps/server/src/database/repositories/special-practice-logs.repo.ts \
+        apps/server/src/database/repositories/special-practice-logs.repo.test.ts \
+        apps/server/src/database/repositories/main-error-books.repo.ts \
+        apps/server/src/database/repositories/main-error-books.repo.test.ts \
+        apps/server/src/database/repositories/student-knowledge-mastery.repo.ts \
+        apps/server/src/modules/parent-insights/
+git commit -m "feat(parent): 暴露专项/掌握度/目标达成 4 个端点（GoalsService + 两个仓储新查询）"
+```
+
+---
+
+### Task 9: 前端 API 层 —— 6 个类型 + 4 个方法
+
+**Files:**
+- Modify: `apps/web/src/services/api.ts`（家长端学情段之后）
+
+**Interfaces:**
+- Produces（Task 10/11 依赖，**逐字照抄名字**）：
+  - `type ParentGoalMetric = 'daily_study_minutes' | 'daily_words' | 'weekly_passages' | 'weekly_clear_errors'`
+  - `interface ParentSpecialModule { units; correct; rate: number | null; byDay: Array<{date;count}> }`
+  - `interface ParentSpecials { dictation; interpretation; meaning; vocabulary: ParentSpecialModule & { newWords: number } }`
+  - `interface ParentMasteryItem`、`interface ParentMastery`
+  - `interface ParentGoalAttainmentItem`、`interface ParentGoalAttainment`
+  - `getParentSpecials(studentId, from?, to?)`、`getParentMastery(studentId, limit?)`、`getParentGoalAttainment(studentId)`、`putParentGoalTarget(studentId, metric, target)`
+
+**口径（都要进注释）**
+- `rate` 一律可能是 `null`（分母为 0），前端**不得**把它当 0 显示成「0%」。
+- 目标的 `rate` **允许 > 100**（超额），前端不要 `Math.min(100, …)`。
+- 四个模块**后端保证都在**，前端不需要判空兜底；但 `byDay` 可能是空数组。
+
+- [ ] **Step 1: 追加类型与方法**
+
+在 `api.ts` 的家长端学情段（`getParentTodayUsage` 之后）追加，风格照抄既有的 `ParentStudyTime` / `getParentStudyTime`（`URLSearchParams` 只在有值时 set、`fetchApi<T>`、不手工包 `{code,message,data}`）：
+
+```ts
+// --- Parent: 专项学情 / 真掌握度 / 目标达成（埋点 Phase 1B） ---
+
+/** 目标维度（与后端 `goals.metric` 的列注释逐字一致）。 */
+export type ParentGoalMetric =
+  | 'daily_study_minutes'
+  | 'daily_words'
+  | 'weekly_passages'
+  | 'weekly_clear_errors';
+
+/**
+ * 一个专项模块的窗口内聚合。
+ * ⚠️ `rate` 为 `null` = **本期没有可判对错的作答**，不是 0——显示「暂无数据」，不要显示 0%。
+ */
+export interface ParentSpecialModule {
+  /** 作答单位数：默写=篇、解释/含义=句、背单词=题。 */
+  units: number;
+  correct: number;
+  rate: number | null;
+  byDay: Array<{ date: string; count: number }>;
+}
+
+/**
+ * 四个专项模块。后端**保证四个键都在**（没数据给 0 / rate null / byDay 空），
+ * 所以前端不必做「模块缺失」兜底；只有 `vocabulary` 多一个 `newWords`。
+ */
+export interface ParentSpecials {
+  dictation: ParentSpecialModule;
+  interpretation: ParentSpecialModule;
+  meaning: ParentSpecialModule;
+  vocabulary: ParentSpecialModule & { newWords: number };
+}
+
+/**
+ * 真掌握度（`student_knowledge_mastery`）的一行。
+ * `masteryScore` 是 **0..1 的比值**（后端已算好，前端不要再除 100）。
+ * `lastSeenAt` 为 null = 从未见过。
+ */
+export interface ParentMasteryItem {
+  knowledgePointId: number;
+  name: string;
+  masteryScore: number;
+  level: number;
+  correctCount: number;
+  errorCount: number;
+  lastSeenAt: string | null;
+}
+
+/**
+ * `/mastery` 响应。三个覆盖率计数必须一起展示：题库只有 **38%** 的题绑了知识点，
+ * 只列最弱几项会让家长以为「孩子的问题只有这几个」。
+ */
+export interface ParentMastery {
+  items: ParentMasteryItem[];
+  coveredQuestions: number;
+  totalQuestions: number;
+  /** = totalQuestions - coveredQuestions（后端算好，前端不要自己减）。 */
+  uncovered: number;
+}
+
+/** 目标达成的一行。`rate` 允许 > 100（超额完成），前端**不要截断**。 */
+export interface ParentGoalAttainmentItem {
+  metric: ParentGoalMetric;
+  period: 'daily' | 'weekly';
+  title: string;
+  target: number;
+  achieved: number;
+  rate: number | null;
+}
+
+export interface ParentGoalAttainment {
+  items: ParentGoalAttainmentItem[];
+}
+
+/**
+ * 专项学情。`from`/`to` 形如 `YYYY-MM-DD`，缺省近 7 天；
+ * 非法值后端**宽容回落**默认窗口、不报错（与 `getParentStudyTime` 一致）。
+ */
+export function getParentSpecials(
+  studentId: number,
+  from?: string,
+  to?: string,
+): Promise<ParentSpecials> {
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return fetchApi<ParentSpecials>(`/parent/students/${studentId}/specials${suffix}`);
+}
+
+/** 真掌握度。`limit` 缺省 10、上限 50（越界后端 400，前端不要传超）。 */
+export function getParentMastery(studentId: number, limit?: number): Promise<ParentMastery> {
+  const qs = new URLSearchParams();
+  if (limit !== undefined) qs.set('limit', String(limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return fetchApi<ParentMastery>(`/parent/students/${studentId}/mastery${suffix}`);
+}
+
+/** 目标达成（首次调用后端会懒初始化四个默认目标）。 */
+export function getParentGoalAttainment(studentId: number): Promise<ParentGoalAttainment> {
+  return fetchApi<ParentGoalAttainment>(`/parent/students/${studentId}/goals/attainment`);
+}
+
+/**
+ * 改某个目标的值。响应是**该 metric 的最新达成情况**——调用方应拿它原地替换该行，
+ * 不要再发一次 GET（省一次往返，也避免写后读不一致的窗口）。
+ */
+export function putParentGoalTarget(
+  studentId: number,
+  metric: ParentGoalMetric,
+  target: number,
+): Promise<ParentGoalAttainmentItem> {
+  return fetchApi<ParentGoalAttainmentItem>(
+    `/parent/students/${studentId}/goals/${metric}`,
+    { method: 'PUT', body: JSON.stringify({ target }) },
+  );
+}
+```
+
+- [ ] **Step 2: 验证**
+
+```bash
+cd apps/web && npx tsc -b && npm run lint
+```
+
+Expected: 均无输出/无错。本步骤**不加测试**（纯类型 + 薄封装，行为由 Task 10/11 的页面测试覆盖）。
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add apps/web/src/services/api.ts
+git commit -m "feat(parent): api 层加专项/掌握度/目标达成 4 个方法（埋点 Phase 1B）"
+```
+
+---
+
+### Task 10: `/parent/goals` 真页（读 + 改目标）
+
+**Files:**
+- Create: `apps/web/src/pages/parent/ParentGoalsPage.tsx`
+- Test: `apps/web/src/pages/parent/ParentGoalsPage.test.tsx`
+- Modify: `apps/web/src/routes/routeTable.tsx`（`/parent/goals` 的 `<Placeholder>` → `<ParentGoalsPage />`；顶部加 import）
+- Modify: `apps/web/src/routes/routeTable.test.tsx`（加一条「渲染 ParentGoalsPage，不是 Placeholder」的钉子）
+
+**口径与约束**
+- 家长端**全程日间**：页面**不加** `data-theme`、不用 `.student-theme-container`（由 `ParentLayout` 统一写 `data-theme="parent"`）。
+- **不用 emoji、不用图标库**；要图标就内联线性 `<svg>`（照抄 `ParentLayout` 的写法）。本页无图标需求。
+- **派生数据必须带 `studentId` 归属**（切孩子不重挂载 + `useEffect` 在 commit 之后跑 = 会闪上一个孩子的数据）。照抄 `ParentReportPage` 的 `{ studentId, value }` 写法，**不要**在 effect 里 `setData(null)`。
+- 行的顺序由后端固定（`GOAL_DEFAULTS` 顺序），前端**原样渲染**、不重排、不按 metric 自定义顺序。
+
+**状态机（逐态都要有断言）**
+
+| 状态 | 触发 | 渲染 |
+|---|---|---|
+| `no-student` | `studentId === null` | 「请先选择孩子」卡 + 链接 `/parent/students`，`data-testid="goals-no-student"` |
+| `student-missing` | `err.code === 1002` | 「学生不存在或已删除」卡，`data-testid="goals-student-missing"` |
+| `student-forbidden` | `err.code === 1005` | 「无权查看该学生」卡，`data-testid="goals-student-forbidden"` |
+| `loading` | 已选孩子且 `data === null` 且无错 | `<Skeleton>` 堆叠，`data-testid="goals-skeleton"` |
+| `error` | 其它错误 | 错误卡（`border-[var(--error)]`）+ 「重试」按钮（bump `reload`），`data-testid="goals-error"` |
+| `ready` | `data.items` 非空 | 四行目标，每行：标题、`period` 文案（每日/每周）、输入框（type=number）、「保存」按钮、达成进度（`achieved / target` + 百分比或「暂无数据」） |
+| `empty` | `data.items.length === 0` | 「暂无目标」文案（正常不该出现——后端保证四条） |
+| 行级 `saving` | 该行点保存 | 该行按钮 disabled + 文案「保存中…」；**其它行不受影响**（行级状态用 `savingMetric` 单值） |
+| 行级 `saved` | 保存成功 | 用响应 item 原地替换该行（`target`/`achieved`/`rate` 一起更新），无 toast 也可（页面自带反馈：数字变了） |
+| 行级 `save-failed` | 保存失败 | 该行下方红字错误（`data-testid={`goal-error-${metric}`}`），**保留家长输入不回滚**，按钮恢复可点 |
+
+- [ ] **Step 1: 写实现**
+
+```tsx
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Card, Skeleton } from '@/components/base';
+import { ApiError } from '@/services/api';
+import {
+  getParentGoalAttainment,
+  putParentGoalTarget,
+  type ParentGoalAttainment,
+  type ParentGoalAttainmentItem,
+  type ParentGoalMetric,
+} from '@/services/api';
+import { useParentStudentStore } from '@/store/parentStudentStore';
+
+const PERIOD_LABEL: Record<ParentGoalAttainmentItem['period'], string> = {
+  daily: '每日',
+  weekly: '每周',
+};
+
+/** 达成率文案：null（未设定/分母为 0）显示「暂无数据」，>100 明确写「已超额」。 */
+function rateText(item: ParentGoalAttainmentItem): string {
+  if (item.rate === null) return '暂无数据';
+  const pct = `${item.rate}%`;
+  return item.rate > 100 ? `${pct}（已超额）` : pct;
+}
+
+export default function ParentGoalsPage() {
+  const studentId = useParentStudentStore((s) => s.studentId);
+  const [data, setData] = useState<{ studentId: number; value: ParentGoalAttainment } | null>(null);
+  const [failure, setFailure] = useState<{ studentId: number; code: number | null } | null>(null);
+  const [reload, setReload] = useState(0);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [savingMetric, setSavingMetric] = useState<ParentGoalMetric | null>(null);
+  const [saveError, setSaveError] = useState<{ metric: ParentGoalMetric; message: string } | null>(null);
+
+  /** 派生值带 studentId 归属：切孩子不重挂载，只按当前孩子比对（effect 在 commit 之后跑，清空会闪）。 */
+  const value = data && data.studentId === studentId ? data.value : null;
+  const err = failure && failure.studentId === studentId ? failure : null;
+
+  useEffect(() => {
+    if (studentId === null) return;
+    let cancelled = false;
+    getParentGoalAttainment(studentId)
+      .then((res) => {
+        if (cancelled) return;
+        setData({ studentId, value: res });
+        setFailure(null);
+        // 换孩子/重载时清掉上一份草稿与行级错误，否则会把上个孩子的输入带过来
+        setDraft({});
+        setSaveError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setData(null);
+        setFailure({ studentId, code: error instanceof ApiError ? error.code : null });
+      });
+    return () => { cancelled = true; };
+  }, [studentId, reload]);
+
+  const save = async (item: ParentGoalAttainmentItem) => {
+    if (studentId === null) return;
+    const raw = draft[item.metric] ?? String(item.target);
+    const target = Number(raw);
+    if (!Number.isInteger(target) || target < 1 || target > 9999) {
+      setSaveError({ metric: item.metric, message: '目标值需为 1–9999 的整数' });
+      return;
+    }
+    setSavingMetric(item.metric);
+    setSaveError(null);
+    try {
+      const updated = await putParentGoalTarget(studentId, item.metric, target);
+      // 原地替换该行：用后端回的最新达成情况，避免再发一次 GET
+      setData((prev) =>
+        prev && prev.studentId === studentId
+          ? { studentId, value: { items: prev.value.items.map((it) => (it.metric === updated.metric ? updated : it)) } }
+          : prev,
+      );
+      setDraft((prev) => { const next = { ...prev }; delete next[item.metric]; return next; });
+    } catch (error: unknown) {
+      setSaveError({ metric: item.metric, message: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setSavingMetric(null);
+    }
+  };
+  // …渲染见 Step 2 的状态分支
+}
+```
+
+> `Card` / `Skeleton` 从 `@/components/base` 具名导入（与 `ParentReportPage` 同款）。`Input` 若基座组件的 props 不便，直接写 `<input type="number" className="…">` 也可以——**不要**为了复用而改基座组件。
+
+- [ ] **Step 2: 渲染分支（骨架）**
+
+```tsx
+  if (studentId === null) { /* goals-no-student 卡 + <Link to="/parent/students"> */ }
+  if (err?.code === 1002) { /* goals-student-missing */ }
+  if (err?.code === 1005) { /* goals-student-forbidden */ }
+  if (err) { /* goals-error 卡 + 重试按钮 onClick={() => setReload((n) => n + 1)} */ }
+  if (value === null) { /* goals-skeleton：3 个 Skeleton */ }
+  // ready / empty：
+  // <Card className="p-5" data-testid="goals-card">
+  //   每行 <div data-testid={`goal-row-${item.metric}`}>
+  //     标题 + period 文案 + `${item.achieved} / ${item.target}` + rateText(item)
+  //     <input type="number" value={draft[item.metric] ?? String(item.target)}
+  //            onChange={e => setDraft(p => ({...p, [item.metric]: e.target.value}))}
+  //            aria-label={`${item.title}目标值`} />
+  //     <button disabled={savingMetric === item.metric} onClick={() => save(item)}>
+  //       {savingMetric === item.metric ? '保存中…' : '保存'}
+  //     </button>
+  //     {saveError?.metric === item.metric && <p data-testid={`goal-error-${item.metric}`} className="text-[var(--error)]">{saveError.message}</p>}
+```
+
+- [ ] **Step 3: 写测试（8 条，逐态一条）**
+
+新建 `ParentGoalsPage.test.tsx`，照抄 `ParentReportPage.test.tsx` 的骨架：`vi.mock('@/services/api', importOriginal)` 只 mock 本页用到的四个方法、`createMemoryRouter(routes)` + `validToken()`、`beforeEach` 里 `useParentStudentStore.setState({ studentId: 11 })`、`afterEach` 里 `cleanup()` + 复位两个 store。
+
+必须覆盖：
+1. 四行都渲染（`goal-row-daily_study_minutes` 等四个 testid 都在）；标题用后端给的 `title`。
+2. `rate === null` → 文案「暂无数据」，**不出现「0%」**。
+3. `rate === 150` → 文案含「已超额」。
+4. 改值 + 点保存 → 调 `putParentGoalTarget(11, 'daily_words', 30)`，且该行数字按**响应**更新（mock 返回 `achieved: 12, rate: 40`，断言页面显示 `12 / 30`）。
+5. 保存失败（mock reject `new ApiError(1001, '入参校验失败')`）→ 该行出现红字、**输入框仍是用户输入的值**（不回滚）、按钮恢复可点。
+6. 非法输入（输入 `0` 或 `abc`）→ 不发请求、直接显示校验文案。
+7. `studentId === null` → `goals-no-student`；`err.code === 1005` → `goals-student-forbidden`。
+8. 切孩子不闪旧数据（Pin 反闪）：先 `studentId=11` 渲染出 A 的目标，再 `act(() => useParentStudentStore.setState({ studentId: 12 }))` 且让 12 的请求挂起 → 断言**看不到** A 的数字（`goals-skeleton` 出现或内容为空）。
+
+- [ ] **Step 4: 路由替换 + 路由钉子**
+
+```tsx
+// routeTable.tsx 顶部
+import ParentGoalsPage from '@/pages/parent/ParentGoalsPage';
+// 家长路由表内
+{ path: 'goals', element: <ParentGoalsPage /> },
+```
+
+`routeTable.test.tsx` 的 Parent 路由块追加：
+
+```tsx
+  it('/parent/goals 渲染真页而不是占位', () => {
+    const { router } = renderAt('/parent/goals');
+    const el = router.state.matches.at(-1)?.route.element as React.ReactElement;
+    expect((el.type as { name?: string })?.name ?? String(el.type)).toContain('ParentGoalsPage');
+  });
+```
+
+> 该文件既有 Parent 路由用例的写法是什么样，就照那个写法来（先读再改，别照抄本段的 cast 写法）。
+
+- [ ] **Step 5: 跑测试 + 类型检查 + lint**
+
+```bash
+cd apps/web && npx vitest run src/pages/parent/ParentGoalsPage.test.tsx src/routes/routeTable.test.tsx && npx tsc -b && npm run lint
+```
+
+Expected: 全绿；`tsc`/lint 无输出。
+⚠️ 既有红：`routeTable.test.tsx` 里「主轨侧边导航不含辅轨入口」那条断言 `[data-theme="student-day"]`，`StudentLayout` 按挂钟 18:00–06:00 切夜间 → **夜间跑必红**，与本任务无关（清单文档 §3.3 第 6 项）。**不要**顺手去改它。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add apps/web/src/pages/parent/ParentGoalsPage.tsx \
+        apps/web/src/pages/parent/ParentGoalsPage.test.tsx \
+        apps/web/src/routes/routeTable.tsx apps/web/src/routes/routeTable.test.tsx
+git commit -m "feat(parent): /parent/goals 从占位变真页（读四目标 + 逐行改目标）"
+```
+
+---
+
+### Task 11: 仪表盘「专项学情」卡 + 报告页「真掌握度」卡
+
+**Files:**
+- Create: `apps/web/src/components/business/parent/SpecialsPanel.tsx`
+- Test: `apps/web/src/components/business/parent/SpecialsPanel.test.tsx`
+- Create: `apps/web/src/components/business/parent/MasteryPanel.tsx`
+- Test: `apps/web/src/components/business/parent/MasteryPanel.test.tsx`
+- Modify: `apps/web/src/pages/parent/ParentDashboardPage.tsx`（`StudentPanel` 里 `<StudyTimePanel>` 之后加 `<SpecialsPanel studentId={…} />`）
+- Modify: `apps/web/src/pages/parent/ParentReportPage.tsx`（`report-weak-points` 卡**旁边**加 `<MasteryPanel … />`）
+- Modify: `apps/web/src/pages/parent/ParentReportPage.test.tsx`（加「两卡并存」断言）
+
+**§10 并存不替换（本任务最容易做错的地方）**
+- 报告页上「薄弱知识点」（**错题数代理**，`weakPoints`）与「真掌握度」（`student_knowledge_mastery`）**两张卡并存、标题不同、不得合并**，也**不得**用新卡替换旧卡。旧卡的 `data-testid="report-weak-points"` 与它内部的「未标注知识点的错题数」提示**一个字都不许动**。
+- 仪表盘「专项学情」与既有「学习时长」卡也是并列关系（前者是专项作答量，后者是会话时长），**不相互替代**。
+
+**组件契约（两个都走「自己的数据自己取」）**
+
+`SpecialsPanel`：
+- props：`{ studentId: number }`（**只收 id，不收父组件已取的数据**——每个孩子一份，父组件不重复取数）
+- 内部 state：`{ studentId, value } | null` + `failure`（同 `StudentPanel` 的 `study/usage` 写法），请求 `getParentSpecials(studentId)`
+- 派生值按 `value && value.studentId === studentId` 比对（**反闪**）
+- 渲染：`<Card className="p-5" data-testid={`dashboard-special-${studentId}`}>`，标题「专项学情」；四个模块各一行：模块名（语文默写 / 语文解释 / 语文含义 / 英语背单词）+ `units` 单位数 + `rate === null ? '暂无数据' : `${rate}%``；英语那行额外显示 `newWords`（文案「答对 N 词」）
+- 图：把该学生的 `byDay` **合并四个模块**后喂 `ChartBar`（`points = [{label: date, value: 总数}]`，按日期升序）。**若无 byDay 数据** → 不渲染图（`ChartBar` 自带「暂无数据」空态，直接喂空数组即可）
+- 取数失败：**静默降级**为「暂无数据」（与 `StudyTimePanel` 同款——专项是增值信息，不该让整页报错）
+
+`MasteryPanel`：
+- props：`{ studentId: number; mastery: ParentMastery | null; error?: number | null }`——**报告页已经把数据取回来了吗？没有**：报告页的 `getParentReport` 不含 mastery，所以本组件**自己取**：props 只收 `{ studentId }`，内部 `getParentMastery(studentId, 10)`，`{ studentId, value }` 反闪写法同上。
+- 渲染：`<Card className="p-5" data-testid="report-mastery">`，标题「真掌握度」+ 副标题「（按知识点掌握度，累计）」；两段内容：
+  1. **覆盖率说明（必显）**：`共 ${totalQuestions} 道题中 ${coveredQuestions} 道标注了知识点，另有 ${uncovered} 道未标注、未计入下面的统计。`（`data-testid="mastery-coverage"`）
+     —— 不显示这句，家长会把「列出的几个弱项」当成全部问题（spec §4.8 规则①）。
+  2. 最弱 10 项列表：每行 `name` + `correctCount`/`errorCount` 文案 + 掌握度（`Math.round(masteryScore * 100)` 显示百分比，**注意后端给的是 0..1 比值**）+ 段位 `level`（0–5）
+- 空态：`items.length === 0` → 「暂无掌握度数据」（**但覆盖率句仍要显示**——否则家长分不清「没数据」与「没覆盖」）
+- 取数失败：卡内错误文案 + 「重试」（`data-testid="mastery-error"`）；**不得**影响同页其它卡（尤其 `report-weak-points`）
+
+- [ ] **Step 1: 写两个组件（含反闪写法）+ 各自的渲染测试**
+
+测试重点（组件级，直接 `<SpecialsPanel studentId={11} />` 渲染，**不走路由表**）：
+
+`SpecialsPanel.test.tsx`：
+1. 四模块名都在；`units` / `rate` 正确显示。
+2. `rate === null` → 「暂无数据」，**不出现 0%**。
+3. `vocabulary.newWords` 显示为「答对 N 词」，另三个模块**不出现**这个词。
+4. 取数失败 → 出现「暂无数据」，**不抛错、不渲错误卡**。
+5. 反闪：`studentId` 从 11 改到 12（12 的请求挂起）→ 看不到 11 的 `units`。
+
+`MasteryPanel.test.tsx`：
+1. `mastery-coverage` 文案含 530 / 203 / 327（用 mock 的 `coveredQuestions: 203, totalQuestions: 530, uncovered: 327`）。
+2. `masteryScore: 0.5` 显示「50%」（**不是 0.5% 也不是 0%**）。
+3. `items` 为空 → 「暂无掌握度数据」**且覆盖率句仍在**。
+4. 取数失败 → `mastery-error` 出现且有「重试」。
+5. 反闪：同 `SpecialsPanel` 第 5 条。
+
+`afterEach(() => cleanup())` 必须写（`globals: false`，不自动 cleanup）。
+
+- [ ] **Step 2: 接到两个页面**
+
+**(a)** `ParentDashboardPage.tsx` 的 `StudentPanel` 内，`<StudyTimePanel … />` 之后：
+
+```tsx
+        <SpecialsPanel studentId={student.studentId} />
+```
+
+**(b)** `ParentReportPage.tsx` 的 `report-weak-points` 卡**之后**（同级、不嵌套）：
+
+```tsx
+          {/* 真掌握度：与上面的「薄弱知识点」（错题数代理）**并存不替换**，标题必须不同（spec §10） */}
+          <MasteryPanel studentId={studentId} />
+```
+
+**(c)** `ParentReportPage.test.tsx` 追加一条「两卡并存」钉子：
+
+```tsx
+  it('真掌握度与薄弱知识点两张卡并存、标题不同（不合并、不替换）', async () => {
+    renderAt('/parent/report');
+    expect(await screen.findByTestId('report-weak-points')).toBeTruthy();
+    expect(await screen.findByTestId('report-mastery')).toBeTruthy();
+    // 旧卡内容一个字没动
+    expect(screen.getByTestId('report-weak-points').textContent).toContain('薄弱知识点');
+    expect(screen.getByTestId('report-mastery').textContent).toContain('真掌握度');
+  });
+```
+
+> 该文件已 mock 整个 `@/services/api`；`MasteryPanel` 会调 `getParentMastery`，**必须在 mock 里补上这个方法**（否则是 `undefined` → 组件抛错）。这是本任务最容易漏的一步。
+
+- [ ] **Step 3: 跑测试 + 类型检查 + lint + 构建**
+
+```bash
+cd apps/web && npx vitest run src/components/business/parent src/pages/parent && npx tsc -b && npm run lint && npm run build
+```
+
+Expected: 全绿；`tsc`/lint 无输出；`vite build` 成功。
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add apps/web/src/components/business/parent/SpecialsPanel.tsx \
+        apps/web/src/components/business/parent/SpecialsPanel.test.tsx \
+        apps/web/src/components/business/parent/MasteryPanel.tsx \
+        apps/web/src/components/business/parent/MasteryPanel.test.tsx \
+        apps/web/src/pages/parent/ParentDashboardPage.tsx \
+        apps/web/src/pages/parent/ParentReportPage.tsx \
+        apps/web/src/pages/parent/ParentReportPage.test.tsx
+git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与薄弱知识点并存）"
+```
+
+---
+
+### Task 12: 文档同步（两份 API 文档必须同时改）
+
+**Files:**
+- Modify: `docs/API接口与数据流设计文档.md`（§4.13 加 4 行 + 旧 goals CRUD 标废弃；新增 §4.24；新增 §6.27；§7 的 P6.5 行；§10 加 v4.3）
+- Modify: `docs/api/openapi.yaml`（4 条新路径 + 3 个新 schema + 旧 goals 4 个 operation 标 `deprecated: true`）
+- Modify: `docs/K12智学系统-数据库设计文档.md`（新增 §3.17 `special_practice_logs`；§3.8 `goals` 加 `metric` 行；§4 枚举值汇总；§8 加 v2.5）
+- Modify: `docs/ai-core-changelog.md`（追加 Phase 1B 条目）
+- Modify: `CLAUDE.md`（家长端学情节订正一处**已失实**的描述）
+
+**⚠️ 本任务是「同一事实写五处」，逐处核对，别只改两份 API 文档。**
+
+- [ ] **Step 1: `docs/API接口与数据流设计文档.md`**
+
+**(a) §4.13 表格**（4 列：`方法 | 路径 | 说明 | 阶段`）追加 4 行，写法照抄 §4.13 既有的 `study-time` 行（单行、把校验与返回形状都写在「说明」列里）：
+
+```markdown
+| GET | `/api/parent/students/{studentId}/specials` | **专项学情（埋点 Phase 1B）**。query `from`/`to`（`YYYY-MM-DD`，缺省近 7 天；非法**宽容回落**、不 400）。响应四模块 `{dictation,interpretation,meaning,vocabulary}`，每模块 `{units,correct,rate\|null,byDay:[{date,count}]}`，`vocabulary` 多 `newWords`。**四个键后端保证都在**（没数据给 0 / `rate:null` / `byDay:[]`）；`rate` 沿用 `answered=0 → null`（**不许写 0**）。口径见 §6.27 | MVP |
+| GET | `/api/parent/students/{studentId}/mastery` | **真掌握度（埋点 Phase 1B）**。query `limit`（缺省 10、上限 50；**越界 400/1001，不静默钳制**）。按 `mastery_score ASC` 取最弱 N 个知识点，响应 `{items:[{knowledgePointId,name,masteryScore(0..1),level,correctCount,errorCount,lastSeenAt}],coveredQuestions,totalQuestions,uncovered}`。**覆盖率三项必须展示**——题库仅 38% 的题绑了知识点，不展示会让家长误以为「问题只有这几个」。**与 §6.8 的 `weakPoints`（错题数代理）是两套口径、并存不替换** | MVP |
+| GET | `/api/parent/students/{studentId}/goals/attainment` | **目标达成（埋点 Phase 1B）**。无 query。读 `goals WHERE is_active=1`；**无目标时懒初始化四个默认目标**（60 分钟/20 词/8 篇/10 道，只补缺失、不覆盖家长已改的值）。达成值按 `metric` 分派（`daily_study_minutes` ← `study_sessions` 秒→分钟向下取整；`daily_words` ← `special_practice_logs` 的 `en_vocabulary` 单位数；`weekly_passages` ← 三个语文专项**去重篇目数**；`weekly_clear_errors` ← `main_error_books` 窗口内清零数）。响应 `{items:[{metric,period,title,target,achieved,rate\|null}]}`，`rate = toRate(target, achieved)`（**分母是 target**，为 0 → null；**允许 > 100 = 超额**）。窗口：daily=今天、weekly=近 7 天，应用层算好传参（不用 `CURDATE()`） | MVP |
+| PUT | `/api/parent/students/{studentId}/goals/{metric}` | **改目标值（本批唯一写端点）**。路径 `metric ∈ daily_study_minutes\|daily_words\|weekly_passages\|weekly_clear_errors`（**白名单外 400/1001**）；body `{target: int 1..9999}`（**只收 target**，`period`/`title` 由服务端按 `metric` 派生）。按 `(student_id, metric)` upsert 并把 `is_active` 置回 1（复活被停用的目标）。响应 = **该 metric 的最新达成情况**（形状同 attainment 的一行），调用方原地替换即可、不必再 GET。归属校验同其它家长端点（403/1005、404/1002） | MVP |
+```
+
+**(b) 旧 goals CRUD 标废弃**（§4.13 里那 4 行之后插一个引用块——这是本文档既有的废弃写法，照 §7 的 P5.3 那条来）：
+
+```markdown
+> **已废弃（2026-09-22 用户裁决）**：以下 4 个 `goals` CRUD（`GET/POST/PATCH/DELETE /students/{studentId}/goals`）**没有 `metric` 维度**，被上方的 `/goals/attainment` 与 `PUT /goals/{metric}` 取代。保留仅为兼容存量调用方，**新代码勿引用**。
+```
+
+**(c) 新增 §4.24**：插在 §4.23 之后、`## 5. WebSocket 设计` 之前的 `---` 处（**§4.24 是下一个空号**）。内容写「家长端学情聚合（Phase 1B）」的端点总览 + 一张 `方法 | 路径 | 入参 | 校验与逻辑 | 返回` 的宽表（把上面 4 行浓缩）+ 一段 blockquote 讲**隐私分层**（本批 3 个读端点**不含任何 `tier='ops'` 派生字段**，「建议」类文案若要有必须由后端生成中性结论、**不暴露任何次数**）。
+
+**(d) 新增 §6.27**：追加在 §6 末尾（**§6.27 是下一个空号**，§6.26 是 LLM 账本）。照抄 §6.25 的骨架（一句「设计见 spec」→ ` ```text ` 流程图 → 加粗小标题段落）：
+
+```text
+判题出口（4 个写入点 + 1 个回写）
+  · training.service.judgeDictation     ┐
+  · training.service.judgeInterpretation├─► special_practice_logs（一行 = 一个作答单位）
+  · meaning.service.judgeMeaning        │      · 语文：句级 verdict 由 collapseUnitVerdict 塌缩
+  · vocabulary.service.judge            ┘      · 英语：wrong→incorrect，error_counted 取 progressDelta
+  · practice.JudgeCoreService.finishJudge ─► student_knowledge_mastery（UPSERT 累计 + 现算 score/level）
+
+读侧（家长端，全部只读实时聚合）
+  GET /specials  ─► aggregateByModule / countByDayByModule / countDistinctCorrectWords
+  GET /mastery   ─► listWeakest + countQuestionCoverage
+  GET /goals/attainment ─► goals（+ 懒初始化）→ 四路达成值
+  PUT /goals/{metric}   ─► upsertTarget → 回该 metric 最新达成
+```
+
+必须写进 §6.27 的**四条口径**（会被反复问）：① 一行 = 一个作答单位（默写一篇/解释含义一句/背词一题），故 `units = COUNT(*)`；② `answered = SUM(is_correct IS NOT NULL)` 排除「没有明确对错」的行、`rate` 用 `toRate(answered, correct)`；③ **掌握度与 `weakPoints` 两套口径并存不替换**；④ 埋点写入**绝不阻断判题**（`try/catch` 只 warn；掌握度回写走 `void`，不 await）。
+
+**(e) §7 的 P6.5 行**（`| P6.5 目标设定 | /parent/goals | GET/POST/PATCH/DELETE … |`）改成真页 + 新端点，旧 CRUD 标废弃（§7 的废弃写法见同表 P5.3 那条：`~~删除线~~` + `**已废止（日期 用户裁决）**`）。
+
+**(f) §10 变更日志**：表头下第一行插 `v4.3`，行格式与 v4.2/v4.1 一致（**行尾有一个空格再跟 `| `**）：
+
+```markdown
+| v4.3 | 2026-09-22 | **埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成**。契约变更：新增 `GET /api/parent/students/{studentId}/specials`、`/mastery`、`/goals/attainment` 与 `PUT /api/parent/students/{studentId}/goals/{metric}`（§4.13 四行 + §4.24 总览，`openapi.yaml` 同步）；旧 `goals` CRUD（无 `metric`）**标废弃保留**。数据面：`special_practice_logs` 新表（DB 文档 §3.17）、`goals` 加 `metric` 列与唯一键 `(student_id, metric)`（迁移 `2026-09-22_special_practice_logs_and_goals.sql`）。两条口径裁决（2026-09-22 用户确认）：① `weekly_passages` 的达成值 = 三个语文专项**去重篇目数**（不要用行数——解释/含义是一句一行，会把「8 句」当「8 篇」）；② 默认目标 60 分钟/20 词/8 篇/10 道。四处新增口径：专项日志一行 = 一个作答单位、`rate` 分母为 0 时恒 `null`、掌握度**与 `weakPoints` 并存不替换**、埋点写入**永不阻断判题**。顺带修 spec §4.8 的 UPSERT 算式 bug（`ON DUPLICATE KEY UPDATE` 的 SET 从左到右读到的已是更新后的列，原式把本次增量算了两遍：1 对 1 错实测 0.333，应为 0.500） | 
+```
+
+- [ ] **Step 2: `docs/api/openapi.yaml`**
+
+**(a)** 在 `/parent/students/{studentId}/study-time` 与 `/parent/students/{studentId}/today-usage` 之后、旧的 `/parent/students/{studentId}/goals:` **之前**，插 4 个 path item。逐条照抄 `study-time` 的写法：`tags: [Parent]`、`operationId` 驼峰、响应 `allOf: [CommonResponse, {type: object, properties: {data: <Schema>}}]`、成功码 `'200'`、**`studentId` 的 schema 用 `type: integer`**（新端点一律 integer；旧 goals 那几条写的是 `string`，属历史不一致，**不要跟着抄**）。
+
+必须写进 description 的：`specials` 的「`rate` 缺省 null = 本期无可判作答，不是 0」与「四个键保证都在」；`mastery` 的「`limit` 缺省 10 上限 50，越界 400」与「覆盖率三项必须展示」；`goals/attainment` 的懒初始化与四路达成值分派；`PUT` 的白名单 400 与只收 `target`。
+
+**(b)** 旧 goals 的 4 个 operation（`get`/`post`/`patch`/`delete`）各加一行 `deprecated: true`（放在 `summary` 之后、`operationId` 之前），并在 `description` 开头写 `**已废弃**：旧目标 CRUD 无 metric 维度，被 /goals/attainment 与 PUT /goals/{metric} 取代。` —— 本文件此前**从未用过** `deprecated`，这是第一处。
+
+> ⚠️ 新的 `PUT /parent/students/{studentId}/goals/{metric}` 与旧的 `/parent/students/{studentId}/goals/{goalId}` 是**两个模板路径匹配同一批 URL**：OpenAPI 视为两个 path key，方法不同（PUT vs PATCH/DELETE）故不冲突，但易混淆。在 §4.24 与 openapi 的 PUT description 里各写一句说明两者共存的原因。
+
+**(c)** `components.schemas` 末尾（`EndSessionRequest` 之后）追加 3 个 schema：`SpecialModuleSummary`、`SpecialsSummary`、`ParentMasterySummary`、`GoalAttainmentItem`、`GoalAttainmentSummary`（PascalCase、feature-prefixed；`rate` 用 `nullable: true` + `type: number`，与 `TodayUsageSummary.limitMinutes` 同款——**不要**用 `type: [number,'null']`，本文件既有风格是 `nullable`）。
+
+- [ ] **Step 3: `docs/K12智学系统-数据库设计文档.md`**
+
+**(a)** 新增 `### 3.17 专项练习日志（Phase 1B，2026-09-22）`：插在 §3.16 之后、`## 4. 枚举值汇总` 之前。照 §3.16 的骨架写（`>` blockquote 三行：实施状态 / 背景 / 设计指针 → `#### special_practice_logs（…）` → 5 列表格 `列名|类型|可空|默认值|说明` → `PK/FK/Index/口径` 项目符号）。**必须写清**：只挂 `student_id` 一个外键（`ref_id` 故意不设，理由同 `student_word_progress.word_id`）、`verdict` 是跨专项统一字典（**没有 `wrong`**，英语入库前映射成 `incorrect`）、`error_counted` 必须复用 `progressDelta`。
+
+**(b)** §3.8 的 `goals` 表：在 `target_value` 行之后插 `metric` 行；并在项目符号里补唯一键 `uniq_goals_student_metric (student_id, metric)`（这是「按 metric upsert」的前提）。
+
+**(c)** §4 枚举值汇总：在 `goal.period` 附近补 `goal.metric`；在 `study_session.*` 附近补 `special_practice_logs.module` / `.verdict`。
+
+**(d)** §8 变更日志：表头下插 `v2.5` 行。
+
+- [ ] **Step 4: `docs/ai-core-changelog.md`**
+
+在引言 `---` 之后、现有最新条目之上，追加：
+
+```markdown
+## 2026-09-22 埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成
+
+- 新表 `special_practice_logs`（迁移 `2026-09-22_special_practice_logs_and_goals.sql` + `schema.sql`；DB 文档 §3.17）与 `goals.metric` 列（唯一键 `(student_id, metric)`）。四个写入点：语文默写/解释/含义 + 英语背单词的判题出口（`units` 一行 = 一个作答单位）。写侧**永不阻断判题**。
+- 掌握度回写：`MasteryService` 挂在 `JudgeCoreService` 的**出口收尾** `finishJudge`（`void`，不 await），四条规则见 spec §4.8。⚠️ 顺手修掉 spec §4.8 的 UPSERT 算式 bug：`ON DUPLICATE KEY UPDATE` 的 SET **从左到右求值、读到的已是更新后的列**，原式把本次增量算了两遍（1 对 1 错实测 0.333，应为 0.500，且错值会被后续判题持续放大）。已改为「计数在前、score/level 只引用更新后的列」。
+- 家长端 4 端点：`GET /specials`、`GET /mastery`、`GET /goals/attainment`、`PUT /goals/{metric}`（API 设计文档 §4.13/§4.24、数据流 §6.27、契约 `openapi.yaml`）；旧 `goals` CRUD 标废弃保留。
+- 两条口径裁决（用户确认）：`weekly_passages` 用三个语文专项**去重篇目数**（不是行数——解释/含义一句一行）；默认目标 60 分钟/20 词/8 篇/10 道。
+- 前端：`/parent/goals` 从占位变真页；仪表盘加「专项学情」卡；报告页加「真掌握度」卡（**与「薄弱知识点」并存不替换**，spec §10）。
+```
+
+- [ ] **Step 5: `CLAUDE.md` 订正失实描述**
+
+「家长端学情」节那条现在写「知识点掌握度底层无数据，用错题数代理替代」——**Phase 1B 起前半句已不成立**。改成（**只加半句、不新增段落**，本文件已 22.9KB、超 ~15KB 维护目标）：
+
+```markdown
+- 学习时长走会话口径（`study_sessions`，1A）；知识点掌握度自 Phase 1B 起由 `student_knowledge_mastery` 实时回写（**与「错题数代理」的 `weakPoints` 并存不替换**，两卡标题必须不同）；专项学情/目标达成为只读实时聚合。薄弱点必须同时给「未标注知识点的错题数」，否则家长会误读成「只有这些问题」。口径见 `docs/API接口与数据流设计文档.md` §6.27 与 `docs/ai-core-changelog.md` 本批条目。
+```
+
+- [ ] **Step 6: 两份 API 文档的端点清单核对（本仓硬规则）**
+
+文档类改动**没有自动化测试**，只能靠这道人工核验；逐条比对两份文档的路径列表：
+
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12
+echo "--- openapi 新增 4 条 ---"
+grep -nE "^\s+/parent/students/\{studentId\}/(specials|mastery|goals/attainment):" docs/api/openapi.yaml
+grep -nE "^\s+/parent/students/\{studentId\}/goals/\{metric\}:" docs/api/openapi.yaml
+echo "--- API 文档新增 4 条 ---"
+grep -nE "students/\{studentId\}/(specials|mastery|goals/attainment|goals/\{metric\})" docs/API接口与数据流设计文档.md
+echo "--- 旧 goals CRUD 是否两边都标了废弃 ---"
+grep -n "deprecated: true" docs/api/openapi.yaml | head
+grep -n "已废弃" docs/API接口与数据流设计文档.md | head
+```
+
+Expected: 两边都能找到对应路径；openapi 里 `deprecated: true` **恰好 4 处**（旧 goals 的 4 个 operation）；API 文档里有一处「已废弃」引用块。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml \
+        docs/K12智学系统-数据库设计文档.md docs/ai-core-changelog.md CLAUDE.md
+git commit -m "docs: 同步埋点 Phase 1B（§4.13/§4.24/§6.27、openapi、DB 设计、changelog、CLAUDE.md）"
+```
+
+---
+
+## 完工判据（1B 整体）
+
+1. `apps/server`：`npm test` 全绿 + `npx tsc --noEmit` 无输出 + `npm run build` 成功 + `node dist/main.js` 启动冒烟里三条新路由被 mapped。
+2. `apps/web`：`npm test` 全绿（除清单文档 §3.3 第 6 项那条既有夜间红）+ `npx tsc -b` + `npm run lint` + `npm run build`。
+3. DB：迁移可幂等复跑；`schema.sql` 与迁移建表语句 `diff` 一致；`goals.metric` 唯一键存在。
+4. 文档：Task 12 Step 6 的两份文档路径核对通过。
+5. **人工走查（无法自动化，留给用户）**：家长端登录 → 仪表盘看到专项卡 → 报告页两张卡并存 → `/parent/goals` 改一个目标并刷新确认已保存。
+
+
+
+
 
 
 
