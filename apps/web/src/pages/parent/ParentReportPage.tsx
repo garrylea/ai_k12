@@ -87,6 +87,12 @@ export default function ParentReportPage() {
    */
   const studyValue =
     study && study.studentId === studentId && study.period === period ? study.value : null;
+  /**
+   * byDay 与 totalSeconds 走同一个「有效会话」谓词，故 byDay 为空 ⟺ totalSeconds 为 0。
+   * 用数组长度判空而不是 `totalSeconds === 0`：它同时决定柱状图是否为空，避免卡内两处口径打架。
+   * 无会话时不能说「不足 1 分钟」——那读起来像「学了点」，真相是「什么都没学」。
+   */
+  const hasStudy = studyValue !== null && studyValue.byDay.length > 0;
 
   useEffect(() => {
     // 窗口要等报告回来才知道（服务端算的，前端不重复实现窗口逻辑）
@@ -182,7 +188,7 @@ export default function ParentReportPage() {
               <StatCard label="活跃天数" value={String(data.stats.activeDays)} />
               <StatCard
                 label="学习时长（会话）"
-                value={studyValue ? formatDuration(studyValue.totalSeconds) : '暂无数据'}
+                value={hasStudy ? formatDuration(studyValue.totalSeconds) : '暂无数据'}
               />
               <StatCard label="自评次数" value={String(data.stats.selfAssessCount)} />
               <StatCard label="新进错题本" value={String(data.stats.errorsAdded)} />
@@ -217,10 +223,10 @@ export default function ParentReportPage() {
             <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">
               每日学习时长
               <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
-                （会话口径，只统计进入学习页且有操作的时间）
+                （分钟；会话口径，只统计进入学习页且有操作的时间）
               </span>
             </h2>
-            {studyValue === null ? (
+            {!hasStudy ? (
               <p className="text-sm text-[var(--text-secondary)]">暂无学习时长数据</p>
             ) : (
               <>

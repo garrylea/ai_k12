@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
-import { getParentReport, getParentStudyTime, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentLearningReport } from '@/services/api';
+import { getParentReport, getParentStudyTime, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentLearningReport, type ParentStudyTime } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
 
@@ -126,6 +126,14 @@ describe('ParentReportPage', () => {
     expect(await screen.findByTestId('report-stats')).toHaveTextContent('73.8%');
     expect(screen.getByTestId('report-stats')).toHaveTextContent('活跃天数3');
     expect(getReportMock).toHaveBeenCalledWith(11, 'weekly');
+    // 学习时长必须用**报告里服务端算出的窗口**去取：前端不自己推窗口（钉住数据来源）
+    await waitFor(() =>
+      expect(getStudyTimeMock).toHaveBeenCalledWith(
+        REPORT.studentId,
+        REPORT.windowStart,
+        REPORT.windowEnd,
+      ),
+    );
   });
 
   it('切月报 → 用 monthly 重新拉取', async () => {
@@ -277,5 +285,38 @@ describe('ParentReportPage', () => {
     await waitFor(() => expect(screen.getByTestId('report-study-time')).toBeTruthy());
     expect(screen.getByTestId('report-study-time').textContent).toContain('暂无学习时长数据');
     expect(screen.getByTestId('report-stats')).toBeTruthy();
+  });
+
+  it('窗口内没有会话 → 只出「暂无学习时长数据」，绝不出现「不足 1 分钟」', async () => {
+    // 端点**总会**返回对象（totalSeconds 是普通数字，契约里没有「无数据」信号），
+    // 所以「没有会话」只能靠 byDay 判空。用 deferred + act 保证这份响应已落到 state，
+    // 否则断言会落在「请求还没回来」的 null 空态上——那条路和修复前的行为长得一样，测不出回归。
+    let resolveStudy!: (v: ParentStudyTime) => void;
+    getStudyTimeMock.mockImplementation(
+      () =>
+        new Promise<ParentStudyTime>((res) => {
+          resolveStudy = res;
+        }),
+    );
+
+    renderAt('/parent/report');
+    await screen.findByTestId('report-stats');
+    await waitFor(() => expect(getStudyTimeMock).toHaveBeenCalled());
+
+    await act(async () => {
+      resolveStudy({
+        totalSeconds: 0, activeDays: 0, byDay: [], byModule: [], bySubject: [], source: 'sessions',
+      });
+    });
+
+    const card = screen.getByTestId('report-study-time');
+    expect(card).toHaveTextContent('暂无学习时长数据');
+    expect(card).not.toHaveTextContent('不足 1 分钟');
+    // 数字卡那格也不能把 0 格式化成「不足 1 分钟」——那是「学了点」的读法，真相是「什么都没学」
+    expect(screen.queryByText('不足 1 分钟')).not.toBeInTheDocument();
+    // 报告主体照常渲染
+    expect(screen.getByTestId('report-stats')).toHaveTextContent('73.8%');
+    expect(screen.getByTestId('report-weak-points')).toHaveTextContent('分数加减');
+    expect(screen.getByTestId('report-exams')).toHaveTextContent('2025 学年七年级上期中');
   });
 });
