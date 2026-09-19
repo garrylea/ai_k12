@@ -14,7 +14,7 @@
 
 - **DB 约定**：所有时间列 `DATETIME(3)`；`updated_at` 用**列级** `ON UPDATE CURRENT_TIMESTAMP(3)`，**绝不加触发器**；引擎/字符集 `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`。
 - **迁移**：无迁移运行器，**手工 apply**；必须**幂等**（建表用 `CREATE TABLE IF NOT EXISTS`，加列用 `information_schema` + `PREPARE` 守卫）；新表/新列**必须同时写进 `tools/db/schema.sql`**。
-- **`cost` 的 NULL 语义**：算不出成本写 **NULL**，**绝不写 0**（0 只代表「真免费」，如本地模型）。tokens 同理：拿不到写 NULL，不写 0。
+- **本期只记 token，不记价格/成本**（用户 2026-09-19 裁决）：账本只有 `input_tokens` / `output_tokens` / `usage_source` 三个量。**拿不到 token 就写 NULL，绝不写 0** —— 0 会让「用量缺失」在报表上隐身，而 NULL 能被单列出来。同理，**不要新增任何价格列或成本计算**。
 - **埋点不得影响主链路**：分析类日志只进内存缓冲，flush 失败**整批丢弃、不重试、不抛**；`llm_call_logs` / `api_request_logs` 的写入永不 `await` 在请求路径上。
 - **Nest DI 坑**：`@Injectable()` 的类若构造参数是**接口类型**（非 class），运行时 `design:paramtypes` 会序列化成 `Object`，Nest 找不到 token 会**启动直接失败**。必须显式 `@Inject(TOKEN)` 或 `@Optional()`。仓库先例：`admin-models.service.ts:21` 的 `@Inject(ModelConfigRegistry)`。
 - **模型 ID 勿改**：`kimi-latest`、`qwen3.8-max`、`gemini-3.1-pro`、`deepseek-flash`。配置里 kimi 的**路由 key 是 `kimi`**、modelId 是 `kimi-latest`——聚合一律按 **model_key**，不要按 model_id 关联 `llm_models`。
@@ -40,7 +40,7 @@
 | `apps/server/src/ai-core/infra/usage-estimate.ts` | token 估算兜底（CJK 按字、拉丁 char/4） |
 | `apps/server/src/common/middleware/request-context.middleware.ts` | 每请求 `runWithRequestContext(...)` |
 | `apps/server/src/common/interceptors/analytics.interceptor.ts` | 记录 `api_request_logs`（含 SSE 时长、错误码、跳过名单） |
-| `apps/server/src/scripts/seed-llm-prices.ts` | 从 `model-routes.yaml` 幂等回填两个价格列 |
+| ~~`apps/server/src/scripts/seed-llm-prices.ts`~~ | **不建**（价格口径取消，Task 3 已取消） |
 
 **新建（前端）**
 
@@ -55,7 +55,7 @@
 | `tools/db/schema.sql` | 新增 §14 两张表；`llm_models` 加两个价格列 |
 | `apps/server/src/database/repositories/llm-models.repo.ts` | `LlmModelRow`/`LlmModel` 加价格；`create`/`update`/`mapRow` 带上 |
 | `apps/server/src/database/repositories/index.ts` | 导出两个新 repo 与类型 |
-| `apps/server/src/ai-core/infra/model-config-registry.ts` | `costPer1K` 从 DB 价格列来（不再写死 `{0,0}`） |
+| `apps/server/src/ai-core/infra/model-config-registry.ts` | ~~`costPer1K` 从 DB 价格列来~~ **不动**（价格口径取消） |
 | `apps/server/src/ai-core/types.ts` | `RoutedModel` 加归因字段；`ChatRequest` 加 `meta`；`ChatResponse.usage` 支持 NULL + `source`；`StreamChunk` 加 `usage` |
 | `apps/server/src/ai-core/infra/model-router.ts` | `route()` 给 primary/fallback 打 `scene`/`subject`/`modelKey`/`isFallbackEntry` |
 | `apps/server/src/ai-core/infra/model-client/index.ts` | usage 采集修复 + 每次尝试发 `emitLlmCall` |
@@ -64,7 +64,7 @@
 | `apps/server/src/ai-core/infra/model-client/gemini-client.ts` | usage 补 `source: 'provider'` |
 | `apps/server/src/modules/admin/admin-models.service.ts` | create/update 接受价格字段 |
 | `apps/server/src/modules/admin/admin.controller.ts` | `ModelSchema` 加价格校验 |
-| `apps/server/src/modules/admin/admin-chat.service.ts` | 消除硬编码 `costPer1K: {0,0}` |
+| `apps/server/src/modules/admin/admin-chat.service.ts` | ~~消除硬编码 `costPer1K: {0,0}`~~ **回退为原状**（价格口径取消；该字段是既有必填项不能删） |
 | `apps/server/src/app.module.ts` | 注册 `RequestContextMiddleware` + `APP_INTERCEPTOR(useExisting AnalyticsInterceptor)` + `AnalyticsModule` |
 | `apps/server/src/main.ts` | `enableShutdownHooks()` |
 | `apps/web/src/services/api.ts` | `AdminModelItem` 加价格；create/update 参数加价格 |
@@ -72,13 +72,14 @@
 
 **任务依赖**：Task 1 →（2、3、4、5、6、7 可并行）→ Task 8（依赖 2、3、6、7）→ Task 9（依赖 7、8）→ Task 10。Task 5 依赖 Task 4。
 
-**实际执行顺序（2026-09-19 执行时确定，两处调整）**：`1 → 2 → 4 → 6 → 7 → 8 → 9 → 3 → 5 → 10`
-- **2 之后立刻插 4**：Task 2 把 `LlmModel` 的两个价格字段设为必填，会让 `admin-models.service.ts:39`（唯一调用方，属 Task 4 的文件）`tsc` 报错。Task 4 只依赖 Task 2，故紧接着跑，把「类型红窗口」压在一个任务内关闭（评审亦建议此处置）。
-- **6/7/8/9 提到 3/5 之前**：用户裁决本期核心指标是 **token 数（输入/输出分开）**，价格精度不是重点。把「token 采集 → 账本 → 归因 → 请求日志」这条主线先打通，价格相关的 3/5 放最后。
+**实际执行顺序（2026-09-19 执行时确定）**：`1 → 2 → 4 → 5R → 6 → 7 → 8 → 9 → 10`（**Task 3 与 Task 5 已取消**）
+- **2 之后立刻插 4**：Task 2 把 `LlmModel` 的两个价格字段设为必填，会让 `admin-models.service.ts:39`（唯一调用方，属 Task 4 的文件）`tsc` 报错。Task 4 只依赖 Task 2，故紧接着跑，把「类型红窗口」压在一个任务内关闭。
+- **4 之后接 5R**：用户随后裁决**本期只记 token、不记价格/成本**，于是 Task 3/5 取消、Task 5R 负责「迁移收敛 5 个价格/成本列 + 回退 Task 2/4 的价格代码」。必须先做 5R，后面的 Task 7/8 才不会照着带价格列的旧 DDL 写。
+- **6/7/8/9 在 5R 之后**：这条是 token 主线（采集 → 账本 → 归因 → 请求日志），即本批的核心价值。
 
 ---
 
-### Task 1: 迁移与 schema——两张账本表 + `llm_models` 价格列
+### Task 1: 迁移与 schema——两张账本表（**无**价格/成本列）
 
 **Files:**
 - Create: `tools/db/migrations/2026-09-20_analytics_ledger.sql`
@@ -86,62 +87,31 @@
 
 **Interfaces:**
 - Consumes: 无
-- Produces: 表 `llm_call_logs`、`api_request_logs`；列 `llm_models.input_price_per_1k`、`llm_models.output_price_per_1k`（后续所有任务依赖这些确切列名）
+- Produces: 表 `llm_call_logs`、`api_request_logs`（**不含**任何价格/成本列）；效果——早期误加在 `llm_models` 与 `llm_call_logs` 上的 5 个价格/成本列被清除。后续任务依赖的确切列名是 `input_tokens` / `output_tokens` / `usage_source`。
 
 - [ ] **Step 1: 写迁移文件**
 
 Create `tools/db/migrations/2026-09-20_analytics_ledger.sql`：
 
 ```sql
--- 2026-09-20 埋点 Phase 0：模型调用账本 + API 请求日志 + 模型单价列。
+-- 2026-09-20 埋点 Phase 0：模型调用账本 + API 请求日志。
 --
 -- 背景（见 docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md §2.3）：
 --   * `ai_messages` 的 model/token_input/token_output/response_time_ms 四列**生产恒写 NULL**；
---   * `ModelClient.chat()` 默认走流式，`aggregateStream()` 把 usage 硬编码成 {0,0,0}；
---   * `model-config-registry.ts:70` 把 costPer1K 写死 {input:0,output:0}；`llm_models` 根本没有价格列。
---   即「次数 / token / 钱」三样全算不出。本迁移只补**存储**；采集修复在代码侧。
+--   * `ModelClient.chat()` 默认走流式，`aggregateStream()` 把 usage 硬编码成 {0,0,0}。
+--   即「调用次数 / 输入 token / 输出 token」现在全都拿不到。本迁移只补**存储**；采集修复在代码侧。
 --
--- 幂等：建表用 CREATE TABLE IF NOT EXISTS；ADD COLUMN 先查 information_schema 再 PREPARE
--- （沿用 2026-09-16_chinese_interpretation_columns.sql 的固定套路）。本文件**没有任何
--- DELETE/DROP**——2026-09-15 那次迁移因级联删题静默清空 50 行的教训见
--- docs/superpowers/plans/2026-09-15-chinese-passages-standalone.md Task 9。
-
--- ---- llm_models 单价列 ----
-SET @has_col := (
-  SELECT COUNT(*) FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE()
-    AND TABLE_NAME = 'llm_models'
-    AND COLUMN_NAME = 'input_price_per_1k'
-);
-SET @ddl := IF(
-  @has_col = 0,
-  'ALTER TABLE llm_models ADD COLUMN input_price_per_1k DECIMAL(10,6) NOT NULL DEFAULT 0 COMMENT ''每 1K 输入 token 价，单位与 model-routes.yaml 的 costPer1K.input 一致'' AFTER max_output_tokens',
-  'SELECT 1'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @has_col := (
-  SELECT COUNT(*) FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE()
-    AND TABLE_NAME = 'llm_models'
-    AND COLUMN_NAME = 'output_price_per_1k'
-);
-SET @ddl := IF(
-  @has_col = 0,
-  'ALTER TABLE llm_models ADD COLUMN output_price_per_1k DECIMAL(10,6) NOT NULL DEFAULT 0 COMMENT ''每 1K 输出 token 价，单位与 costPer1K.output 一致'' AFTER input_price_per_1k',
-  'SELECT 1'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- **口径（用户 2026-09-19 裁决，勿再引入价格/成本）**：本期**只记 token 数**——输入多少、输出多少。
+-- 以后按 token 计价，钱由 token 换算，平台不必自己算。故建表**不带** `cost` 与价格快照列。
+--
+-- 幂等：建表用 CREATE TABLE IF NOT EXISTS；列存在性检查一律先查 information_schema 再 PREPARE
+-- （沿用 2026-09-16_chinese_interpretation_columns.sql 的固定套路）。
 
 -- ---- llm_call_logs：每次 LLM 调用（含重试尝试、失败、超时、fallback）一行 ----
 -- student_id 用 ON DELETE SET NULL（**有意**偏离仓库 CASCADE 约定）：账本是审计数据，
 -- 学生被删后聚合量应保留、仅匿名化；列可空故 FK 合法。
--- cost / input_tokens / output_tokens 允许 NULL —— **NULL = 算不出，绝不是 0**；
--- 0 只代表「真免费」（本地模型）。与家长端 answered=0 → rate=null 同一纪律。
+-- input_tokens / output_tokens 允许 NULL —— **NULL = 拿不到，绝不是 0**；
+-- 0 会让「用量缺失」在报表上隐身，NULL 才能被单列出来。与家长端 answered=0 → rate=null 同一纪律。
 CREATE TABLE IF NOT EXISTS llm_call_logs (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   request_id          VARCHAR(64)   DEFAULT NULL COMMENT '关联 api_request_logs.request_id',
@@ -162,9 +132,6 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   input_tokens        INT           DEFAULT NULL,
   output_tokens       INT           DEFAULT NULL,
   usage_source        VARCHAR(12)   NOT NULL DEFAULT 'unavailable' COMMENT 'provider|estimated|unavailable',
-  input_price_per_1k  DECIMAL(10,6) DEFAULT NULL COMMENT '价格快照，防改价后历史成本漂移',
-  output_price_per_1k DECIMAL(10,6) DEFAULT NULL,
-  cost                DECIMAL(12,6) DEFAULT NULL COMMENT 'NULL = 算不出，绝不写 0',
   latency_ms          INT           NOT NULL,
   created_at          DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_lcl_scene_time    (scene, created_at),
@@ -198,20 +165,54 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
   KEY idx_arl_time         (created_at),
   CONSTRAINT fk_arl_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 收敛：删掉早期误加的价格/成本列（不存在则跳过）
+-- ============================================================
+-- 背景：本设计的早期版本给 llm_call_logs 加过 cost + 两个价格快照列、给 llm_models 加过两个价格列，
+-- 并已在 dev 库执行。价格口径取消后这些列没有任何写入方，留着会让 `cost` 恒为 0 ——
+-- 而 0 在本设计里表示「真免费」，将来查成本的人会看到「全部 0 元」并可能信以为真。
+-- llm_call_logs 目前零行、llm_models 的价格列从未被灌值，故删除无损。
+--
+-- 必须放在两张 CREATE 之后（表存在才能删列）；MySQL 8/9 **没有** DROP COLUMN IF EXISTS，
+-- 所以每列各写一段 information_schema + PREPARE 守卫（与加列同一套路，方向相反）。
+-- 注意删的是**本次自己刚加的空列**，与 2026-09-15 那次「未经守卫的级联删」事故性质不同：
+-- 这里既限定表与列名，又有存在性守卫，不存在则跳过。
+
+-- llm_call_logs.cost
+SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_call_logs' AND COLUMN_NAME = 'cost');
+SET @ddl := IF(@has_col = 1, 'ALTER TABLE llm_call_logs DROP COLUMN cost', 'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- llm_call_logs.input_price_per_1k
+SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_call_logs' AND COLUMN_NAME = 'input_price_per_1k');
+SET @ddl := IF(@has_col = 1, 'ALTER TABLE llm_call_logs DROP COLUMN input_price_per_1k', 'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- llm_call_logs.output_price_per_1k
+SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_call_logs' AND COLUMN_NAME = 'output_price_per_1k');
+SET @ddl := IF(@has_col = 1, 'ALTER TABLE llm_call_logs DROP COLUMN output_price_per_1k', 'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- llm_models.input_price_per_1k
+SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_models' AND COLUMN_NAME = 'input_price_per_1k');
+SET @ddl := IF(@has_col = 1, 'ALTER TABLE llm_models DROP COLUMN input_price_per_1k', 'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- llm_models.output_price_per_1k
+SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_models' AND COLUMN_NAME = 'output_price_per_1k');
+SET @ddl := IF(@has_col = 1, 'ALTER TABLE llm_models DROP COLUMN output_price_per_1k', 'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 ```
 
 - [ ] **Step 2: 同步 `tools/db/schema.sql`（两处）**
 
-**2a.** 在 `llm_models` 定义（`schema.sql:937-951`）的 `max_output_tokens` 之后插入两列：
-
-```sql
-  max_output_tokens INT NOT NULL DEFAULT 16384,
-  -- 每 1K token 单价，单位与 ai-core/model-routes.yaml 的 costPer1K 一致。
-  -- 这两个列是**价格的唯一真源**：model-config-registry 从这里读进 costPer1K。
-  input_price_per_1k  DECIMAL(10,6) NOT NULL DEFAULT 0,
-  output_price_per_1k DECIMAL(10,6) NOT NULL DEFAULT 0,
-  is_enabled TINYINT(1) NOT NULL DEFAULT 1,
-```
+**2a. `llm_models` 不加任何列。** 价格口径已取消（用户 2026-09-19 裁决：只记 token，不记价格/成本），所以 `llm_models` 保持原状。早期版本曾在此加过 `input_price_per_1k` / `output_price_per_1k` 两列并已应用到 dev 库——那两列的清除由 **Task 5R** 负责。
 
 **2b.** 在 `training_sessions` 之后、`-- 15.（已移除）updated_at 自动触发器` 之前（约 `schema.sql:1154`）插入新段落——内容就是把 Step 1 里的两个 `CREATE TABLE` 原样粘贴，前面加段落头：
 
@@ -230,36 +231,40 @@ mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_analytics_ledge
 # 再跑一次证明幂等（必须同样成功、且不报 Duplicate column）
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_analytics_ledger.sql
 ```
-Expected: 两次都无错误输出（第二次因为走 `SELECT 1` 分支而静默成功）。
+Expected: 两次都无错误输出。
 
 - [ ] **Step 4: 断言结构与列名**
 
 ```bash
-mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM llm_call_logs; SHOW COLUMNS FROM api_request_logs; SHOW COLUMNS FROM llm_models LIKE '%price%';"
+mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM llm_call_logs; SHOW COLUMNS FROM api_request_logs;"
 ```
-Expected: `llm_call_logs` 含 `usage_source` / `input_price_per_1k` / `output_price_per_1k` / `cost` 且 `cost` 的 `Null=YES`；`api_request_logs` 含 `route` / `raw_path` / `is_sse`；`llm_models` 两行价格列 `Null=NO`、默认 `0.000000`。
+Expected: `llm_call_logs` 含 `input_tokens` / `output_tokens` / `usage_source`，且这两个 token 列的 `Null=YES`；**不含** `cost` / `input_price_per_1k` / `output_price_per_1k`。`api_request_logs` 含 `route` / `raw_path` / `is_sse`。
 
-- [ ] **Step 5: 断言 schema.sql 与库一致（防「schema 漂移」老毛病）**
+- [ ] **Step 5: 断言价格/成本列已彻底消失（库 + schema.sql 双向）**
 
 ```bash
-# 两张表都要看：单看 llm_call_logs 只有 1 处，合计才是 2 处。
-# 用 --vertical（不要用 \G：本机 mysql 9.5 客户端在 -e 下不认 \G）
-mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "SHOW CREATE TABLE llm_call_logs; SHOW CREATE TABLE llm_models;" | grep -c "input_price_per_1k"
-grep -c "input_price_per_1k" tools/db/schema.sql
+mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "
+SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND COLUMN_NAME IN ('input_price_per_1k','output_price_per_1k','cost');"
+# Expected: Empty set（0 行）
+grep -c "price_per_1k" tools/db/schema.sql || echo "0（grep 无匹配）"
+# Expected: 0
 ```
-Expected: 两条命令都输出 `2`（`llm_call_logs` 的列定义 1 处 + `llm_models` 的列定义 1 处）。
-若数字不等，说明 schema.sql 漏改，回去补——**「schema.sql 与既有库不同步」是本仓记录在案的事故类型**。
+**为什么这条检查重要**：`cost` 若留着会恒为 0，而 0 表示「真免费」——将来查成本的人会看到「全部 0 元」并可能信以为真。**一个不存在的字段，比一个永远为 0 的字段安全得多**。
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-20_analytics_ledger.sql tools/db/schema.sql
-git commit -m "feat(db): llm_call_logs + api_request_logs 建表，llm_models 加单价列（埋点 Phase 0）"
+git commit -m "feat(db): llm_call_logs + api_request_logs 建表（埋点 Phase 0，只记 token）"
 ```
 
 ---
 
-### Task 2: `LlmModelsRepository` 支持价格字段
+### Task 2: `LlmModelsRepository` 支持价格字段 ⚠️ **已实施，随后由 Task 5R 回退**
+
+> **状态**：本任务已完成（commit `be27a33`）并通过评审，但价格口径随后被用户取消（2026-09-19：只记 token，不记价格/成本）。其产出由 **Task 5R** 回退。下方正文保留为历史记录。
 
 **Files:**
 - Modify: `apps/server/src/database/repositories/llm-models.repo.ts`
@@ -416,7 +421,9 @@ git commit -m "feat(repo): LlmModelsRepository 支持输入/输出单价（DECIM
 
 ---
 
-### Task 3: registry 读真价 + 价格回填脚本
+### Task 3: 【**已取消**】registry 读真价 + 价格回填脚本
+
+> **状态：取消，不要执行。** 用户 2026-09-19 裁决本期只记 token、不记价格/成本，故「让 registry 读真价」与「YAML→DB 价格回填脚本」都不再做。下方正文保留为历史记录。
 
 **Files:**
 - Modify: `apps/server/src/ai-core/infra/model-config-registry.ts:70`
@@ -538,7 +545,9 @@ git commit -m "feat(ai-core): costPer1K 改读 DB 单价列，附 YAML→DB 幂�
 
 ---
 
-### Task 4: 管理端后端——价格的增改接口 + 消除 admin-chat 硬编码
+### Task 4: 管理端后端——价格的增改接口 + 消除 admin-chat 硬编码 ⚠️ **已实施，随后由 Task 5R 回退**
+
+> **状态**：本任务已完成（commit `4cde324`）并通过评审（它当时还负责关掉 Task 2 留下的类型红窗口），但价格口径随后被用户取消。其产出由 **Task 5R** 回退——注意回退时 `admin-chat.service.ts` 的 `costPer1K` 字段**不能删**（是既有 `ModelConfig` 的必填项），只能恢复成原来的 `{ input: 0, output: 0 }`。下方正文保留为历史记录。
 
 **Files:**
 - Modify: `apps/server/src/modules/admin/admin-models.service.ts`
@@ -679,7 +688,95 @@ git commit -m "feat(admin): 模型单价增改接口 + 消除 admin-chat 的 cos
 
 ---
 
-### Task 5: 管理端前端——价格输入
+### Task 5: 【**已取消**】管理端前端——价格输入
+
+> **状态：取消，不要执行。** 与 Task 3 同理。下方正文保留为历史记录。
+
+---
+
+### Task 5R: 清掉价格/成本（迁移收敛 + 代码回退）
+
+**Files:**
+- Modify: `tools/db/migrations/2026-09-20_analytics_ledger.sql`（加 5 段带守卫的 `DROP COLUMN`，见 Task 1 Step 1）
+- Modify: `tools/db/schema.sql`（删掉 `llm_models` 的两列价格定义；`llm_call_logs` 段不得含 cost/价格列）
+- Revert: `apps/server/src/database/repositories/llm-models.repo.ts` → 回到 `3c641dd` 之前的状态
+- Delete: `apps/server/src/database/repositories/llm-models.repo.test.ts`（Task 2 新增的纯价格测试）
+- Revert: `apps/server/src/modules/admin/admin-models.service.ts`（含 `admin-models.service.test.ts` 的 `dbModel` 固定装置与 3 条新用例）
+- Revert: `apps/server/src/modules/admin/admin.controller.ts`（`ModelSchema` 去掉两个价格字段）
+- Revert: `apps/server/src/modules/admin/admin-chat.service.ts`（`toModelConfig` 的 `costPer1K` 恢复为 `{ input: 0, output: 0 }` 并加注释）
+
+**Interfaces:**
+- Consumes: Task 1 的迁移文件与 `schema.sql`；Task 2/4 的产出
+- Produces: 库与 `schema.sql` 中**不存在**任何价格/成本列；`LlmModel` 恢复为无价格字段；`tsc --noEmit` 仍为 **0 错**
+
+- [ ] **Step 1: 改迁移文件——加上 5 段带守卫的 DROP COLUMN**
+
+按 Task 1 Step 1 里「收敛：删掉早期误加的价格/成本列」那一段的**原文**补进 `tools/db/migrations/2026-09-20_analytics_ledger.sql` 的**末尾**（必须在两个 `CREATE TABLE` 之后）。同时确认该文件的 `llm_call_logs` 建表语句里**没有** `cost` / `input_price_per_1k` / `output_price_per_1k` 三行。
+
+- [ ] **Step 2: 应用迁移并验证收敛**
+
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12
+mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_analytics_ledger.sql
+# 再跑一次证明幂等（第一次已删掉的列，第二次应走 'SELECT 1' 分支）
+mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_analytics_ledger.sql
+```
+Expected: 两次都无错误。
+
+- [ ] **Step 3: 断言 5 列在库里已消失（Task 1 Step 5 的两条检查）**
+
+```bash
+mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "
+SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND COLUMN_NAME IN ('input_price_per_1k','output_price_per_1k','cost');"
+# Expected: Empty set（0 行）
+mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) AS llm_models_rows FROM llm_models;"
+# Expected: 5（既有模型行一个没少——只删列，绝不删行）
+```
+**第二条断言是必须的**：本批有过一次「未经守卫的删操作静默清空数据」的历史事故，所以任何 DDL 之后都要证明行数没变。
+
+- [ ] **Step 4: 回退代码**
+
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12
+# llm-models.repo.ts / admin-models.service.ts / admin.controller.ts / admin-chat.service.ts
+# 四个文件的「价格相关改动」回退到本批之前的状态
+git diff 3c641dd -- apps/server/src/database/repositories/llm-models.repo.ts
+```
+按上面的 diff 逐处回退。要点：
+1. `LlmModelRow` / `LlmModel` 删掉两个价格字段，`create` / `update` / `mapRow` 全部还原（`mapRow` 里的 `Number(...)` 也删）。
+2. `llm-models.repo.test.ts` **整个文件删除**（它只测价格映射，回退后无对象可测）。
+3. `admin-models.service.ts` 的 `create` / `update` 去掉两个价格参数；`admin-models.service.test.ts` 删掉 3 条价格用例、`dbModel()` 固定装置去掉两个字段。
+4. `admin.controller.ts` 的 `ModelSchema` 去掉两个价格字段（`ModelUpdateSchema` 是派生的，自动跟着变）。
+5. `admin-chat.service.ts` 的 `toModelConfig`：把 `costPer1K: { input: m.inputPricePer1k, output: m.outputPricePer1k }` 恢复为：
+```ts
+      // 成本不在本期范围（只记 token）。此字段是既有 ModelConfig 的必填项，保留占位；
+      // 无人消费它——旧代码就是 {0,0}，本批曾试图让它变真，随后按用户裁决取消。
+      costPer1K: { input: 0, output: 0 },
+```
+**不要**整行删掉 `costPer1K`——会让 `tsc` 报错。
+
+- [ ] **Step 5: 同步 `schema.sql`**
+
+删掉 `llm_models` 定义里的两列价格（`schema.sql` 约 947-950），并确认 §14 埋点段里的两个 `CREATE TABLE` 与迁移文件**逐字一致**（都不含 cost/价格列）。
+
+- [ ] **Step 6: 跑检查**
+
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx tsc --noEmit && npm test 2>&1 | tail -6
+grep -c "price_per_1k" ../../tools/db/schema.sql || echo "0（grep 无匹配）"
+```
+Expected: `tsc` **0 错**；测试全绿（数量比 Task 4 后少掉被删的价格用例，属预期）；`schema.sql` 里 `price_per_1k` 出现 **0** 次。
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A tools/db apps/server/src
+git commit -m "refactor: 清掉价格/成本（口径取消）——迁移收敛 5 列 + 回退价格代码"
+```
+
+---
 
 **Files:**
 - Modify: `apps/web/src/services/api.ts:731-741`
@@ -1244,10 +1341,6 @@ export interface LlmCallLogEntry {
   inputTokens: number | null;
   outputTokens: number | null;
   usageSource: UsageSource;
-  inputPricePer1k: number | null;
-  outputPricePer1k: number | null;
-  /** NULL = 算不出，绝不写 0 */
-  cost: number | null;
   latencyMs: number;
 }
 
@@ -1289,8 +1382,7 @@ const entry = () => ({
   capability: 'judgment', modelKey: 'local', modelId: 'Qwen3.8-27B', provider: 'local',
   attempt: 1, requestKind: 'chat' as const, isFallback: false, success: true,
   errorType: null, httpStatus: null, inputTokens: 120, outputTokens: 8,
-  usageSource: 'provider' as const, inputPricePer1k: 0, outputPricePer1k: 0,
-  cost: 0, latencyMs: 1180,
+  usageSource: 'provider' as const, latencyMs: 1180,
 });
 
 describe('LlmCallLogsRepository.insertMany', () => {
@@ -1301,7 +1393,7 @@ describe('LlmCallLogsRepository.insertMany', () => {
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).toContain('INSERT INTO llm_call_logs');
     expect(sql).toContain('student_id');
-    expect(params).toHaveLength(44); // 2 行 × 22 列（列数见实现 COLUMNS）
+    expect(params).toHaveLength(38); // 2 行 × 19 列（列数见实现 COLUMNS）
     expect(params[0]).toBe('r1');
   });
 
@@ -1311,15 +1403,15 @@ describe('LlmCallLogsRepository.insertMany', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
-  it('cost 为 null 时原样写 null（不洗成 0）', async () => {
+  it('token 为 null 时原样写 null（不洗成 0）', async () => {
     const pool = mockPool();
     await new LlmCallLogsRepository(pool as any).insertMany([
-      { ...entry(), cost: null, usageSource: 'unavailable', inputTokens: null, outputTokens: null },
+      { ...entry(), usageSource: 'unavailable', inputTokens: null, outputTokens: null },
     ]);
     const [, params] = pool.query.mock.calls[0];
-    // cost 在 COLUMNS 里的下标（0-based）——以实现为准
-    const costIdx = 20;
-    expect(params[costIdx]).toBeNull();
+    // COLUMNS 里的下标：input_tokens=15、output_tokens=16（0-based，见实现 COLUMNS）
+    expect(params[15]).toBeNull();
+    expect(params[16]).toBeNull();
     expect(params[params.length - 1]).toBe(1180); // latency_ms 是最后一列
   });
 
@@ -1369,7 +1461,7 @@ const COLUMNS = [
   'request_id', 'student_id', 'dialogue_id', 'scene', 'subject', 'capability',
   'model_key', 'model_id', 'provider', 'attempt', 'request_kind', 'is_fallback',
   'success', 'error_type', 'http_status', 'input_tokens', 'output_tokens',
-  'usage_source', 'input_price_per_1k', 'output_price_per_1k', 'cost', 'latency_ms',
+  'usage_source', 'latency_ms',
 ] as const;
 
 @Injectable()
@@ -1387,7 +1479,7 @@ export class LlmCallLogsRepository {
       e.requestId, e.studentId, e.dialogueId, e.scene, e.subject, e.capability,
       e.modelKey, e.modelId, e.provider, e.attempt, e.requestKind, e.isFallback ? 1 : 0,
       e.success ? 1 : 0, e.errorType, e.httpStatus, e.inputTokens, e.outputTokens,
-      e.usageSource, e.inputPricePer1k, e.outputPricePer1k, e.cost, e.latencyMs,
+      e.usageSource, e.latencyMs,
     ]);
     await this.pool.query(
       `INSERT INTO llm_call_logs (${COLUMNS.join(', ')}) VALUES ${placeholders}`,
@@ -1448,7 +1540,7 @@ export class ApiRequestLogsRepository {
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/database/repositories/analytics-logs.repo.test.ts
 ```
-Expected: PASS。列下标由 `COLUMNS` 常量决定，当前顺序下为：`is_fallback`=11、`success`=12、`cost`=20，共 22 列（2 行 → 44 个参数）。**若日后调整 `COLUMNS` 顺序，这些下标断言与 `toHaveLength(44)` 必须一起改。**
+Expected: PASS。列下标由 `COLUMNS` 常量决定，当前顺序（**19 列**）下为：`input_tokens`=15、`output_tokens`=16、`is_fallback`=11、`success`=12，共 19 列（2 行 → 38 个参数）。**若日后调整 `COLUMNS` 顺序，这些下标断言与 `toHaveLength(38)` 必须一起改。**
 
 - [ ] **Step 6: 写 buffer 的失败测试**
 
@@ -1874,9 +1966,6 @@ import { getRequestContext } from '../request-context.js';
       inputTokens: usage?.inputTokens ?? null,
       outputTokens: usage?.outputTokens ?? null,
       usageSource: usage?.source ?? 'unavailable',
-      inputPricePer1k: request.model.costPer1K?.input ?? null,
-      outputPricePer1k: request.model.costPer1K?.output ?? null,
-      cost: usage?.cost ?? null,
       latencyMs,
     });
   }
@@ -1922,7 +2011,7 @@ describe('ModelClient 写 llm_call_logs', () => {
     expect(entries[0]).toMatchObject({
       studentId: 9, scene: 'judgment', subject: 'math', modelKey: 'kimi', provider: 'kimi',
       attempt: 1, requestKind: 'chat', isFallback: false, success: true,
-      inputTokens: 100, outputTokens: 20, usageSource: 'provider', cost: 0.0012,
+      inputTokens: 100, outputTokens: 20, usageSource: 'provider',
     });
   });
 
@@ -1940,7 +2029,7 @@ describe('ModelClient 写 llm_call_logs', () => {
       stream: false,
     })).rejects.toThrow();
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ success: false, cost: null, usageSource: 'unavailable' });
+    expect(entries[0]).toMatchObject({ success: false, inputTokens: null, outputTokens: null, usageSource: 'unavailable' });
   });
 
   it('没注册 sink 时调用照常成功（埋点缺席不能影响业务）', async () => {
@@ -2019,7 +2108,7 @@ describe('moduleFromRoute', () => {
 
 describe('shouldSkipRoute', () => {
   it('跳过自指与静态资源', () => {
-    expect(shouldSkipRoute('/api/admin/analytics/llm-cost')).toBe(true);
+    expect(shouldSkipRoute('/api/admin/analytics/llm-tokens')).toBe(true);
     expect(shouldSkipRoute('/assets/textbooks/a.jpg')).toBe(true);
     expect(shouldSkipRoute('/uploads/x.png')).toBe(true);
     expect(shouldSkipRoute('/api/track/events')).toBe(true);
@@ -2333,25 +2422,28 @@ curl -s -X POST http://localhost:3099/api/auth/login -H 'Content-Type: applicati
 
 ```bash
 kill "$(cat /tmp/k12_smoke.pid)"; rm -f /tmp/k12_smoke.pid
-mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT scene, model_key, provider, attempt, success, usage_source, input_tokens, output_tokens, cost, latency_ms, student_id FROM llm_call_logs ORDER BY id DESC LIMIT 5; SELECT route, method, status_code, latency_ms, is_sse FROM api_request_logs ORDER BY id DESC LIMIT 5;"
+mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT scene, model_key, provider, attempt, success, usage_source, input_tokens, output_tokens, latency_ms, student_id FROM llm_call_logs ORDER BY id DESC LIMIT 5; SELECT route, method, status_code, latency_ms, is_sse FROM api_request_logs ORDER BY id DESC LIMIT 5;"
 ```
 
 **验收标准（三条，缺一不可）**：
 1. `api_request_logs` 有刚触发的请求行，`route` 是**归一化模板**（含 `:id` / `:uuid` 之类占位符），不是带真实 id 的路径。
-2. `llm_call_logs` 有对应行，`usage_source` 是 `provider` 或 `estimated`（**不是 `unavailable`**），且 `output_tokens > 0`。
-3. 非本地模型 `cost > 0`；本地模型 `cost = 0` 且 `usage_source = 'provider'`（真免费，不是算不出）。
+2. `llm_call_logs` 有对应行，`usage_source` 是 `provider` 或 `estimated`（**不是 `unavailable`**），且 **`input_tokens > 0` 与 `output_tokens > 0` 都成立**——这是本批的核心价值：**输入与输出都要有数，不能只有一个**（早期错误设计只估输出、把输入记 0）。
+3. `student_id` **非空**（HTTP 路径经 ALS 归因成功）。若该次调用来自管理员探活或后台任务，允许为空，但**必须能说清是这三种无归属情形之一**。
 
-排查指引：第 2 条得到 `unavailable` → 检查是否真的下发了 `stream_options`（`local` provider 有意删除，属预期）；第 3 条非本地模型 `cost = 0` → 检查 Task 3 Step 6 的回填是否执行过。
+排查指引：
+- 第 2 条得到 `unavailable` → 检查是否真的下发了 `stream_options`（`local` provider 有意删除该字段，属预期，会落到估算档）。
+- 第 2 条 `input_tokens = 0` → 说明输入估算没接上（`estimateInputTokens(request.messages)` 未生效），回去查 Task 6 的 `aggregateStream`。
+- 第 3 条为空且来源是学生端接口 → 查 `RequestContextMiddleware` 是否排在 `AuthMiddleware` 之后（Task 9 Step 6）。
 
 - [ ] **Step 2: 同步 API 文档（主稿）**
 
 `docs/API接口与数据流设计文档.md`：
 
-1. §4.17 Admin 的 `POST /api/admin/models` 与 `PATCH /api/admin/models/:modelKey` 请求体各加两字段：`inputPricePer1k?: number`（每 1K 输入 token 单价，≥0，0 表示免费）、`outputPricePer1k?: number`；`GET /api/admin/models` 响应体加同名字段。
+1. **§4.17 Admin 不需要改**（价格口径已取消，模型接口保持原状）。
 2. §6 末尾新增：
 
 ```markdown
-### 6.26 LLM 调用 → 账本 → 成本（2026-09-20）
+### 6.26 LLM 调用 → 账本 → token 计量（2026-09-20）
 
 任何 capability 最终都经 `ModelClient.chat()`（`ai-core/infra/model-client/index.ts`）。在那里：
 
@@ -2359,24 +2451,23 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT scene, model_key, provider, attempt, 
    HTTP 路径的 `student_id`/`request_id` 由 `AsyncLocalStorage`（`ai-core/infra/request-context.ts`）带出，
    后台路径（判错解析、会话标题）由调用方显式传 `ChatRequest.meta`。
 2. **usage**：流式默认拿不到，故请求体下发 `stream_options.include_usage`（本地 llama.cpp 例外，它不认）；
-   仍拿不到则按 `estimateTokens()` 估算并把 `usage_source` 标为 `estimated`；两者都无则 `unavailable`
-   且 tokens/cost 写 **NULL**（**绝不写 0** —— 0 只代表真免费）。
+   仍拿不到则**输入/输出分别估算**（输入估自 `request.messages`、输出估自响应正文）并把 `usage_source`
+   标为 `estimated`；两者都无则 `unavailable` 且两个 token 列写 **NULL**（**绝不写 0** —— 0 会让
+   「用量缺失」在报表上隐身）。
 3. **落库**：每次逻辑调用 + 每次重试尝试各一行，`attempt` 递增；失败/超时也记（`success=0`、`error_type`）。
    写入走 `TelemetryBuffer`（2s 或 200 条 flush，满 5000 丢最旧，失败整批丢弃不重试）。
-4. **成本**：单价唯一真源是 `llm_models` 的 `input_price_per_1k`/`output_price_per_1k`（后台可改），
-   `model-config-registry` 读进 `costPer1K`；账本存**价格快照**，改价不会让历史成本漂移。
+4. **本期只记 token，不记价格与成本**（用户 2026-09-19 裁决）：账本只有 `input_tokens` / `output_tokens` /
+   `usage_source`，**没有** `cost` 与价格快照列；`llm_models` 也不加价格列。以后按 token 计价，
+   钱由 token 换算，平台不必自己算。
 ```
 
 - [ ] **Step 3: 同步 openapi.yaml**
 
-```bash
-cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "modelKey" docs/api/openapi.yaml | head
-```
-找到 `/api/admin/models` 的请求/响应 schema，加 `inputPricePer1k` / `outputPricePer1k`（`type: number`、`format: double`、`minimum: 0`）。**只加字段，不新增端点**（openapi 只收 MVP 端点）。
+**本步不需要改 `/api/admin/models`**（价格字段已取消）。本批 Phase 0 不新增任何端点，故 openapi 的改动只有：若 Phase 0 期间新增了 `/api/track/*` 或 `/api/study-sessions/*`（属 Phase 1，本计划不含），则另说。**Phase 0 对 openapi 无改动**——确认这一点后跳过本步。
 
 - [ ] **Step 4: 同步数据库设计文档**
 
-`docs/K12智学系统-数据库设计文档.md`：按该文档既有表清单格式追加 `llm_call_logs`、`api_request_logs`，以及 `llm_models` 的两个新列；口径直接引用 spec §4.6。
+`docs/K12智学系统-数据库设计文档.md`：按该文档既有表清单格式追加 `llm_call_logs`、`api_request_logs` 两张表。**两表都不含任何价格/成本列**；口径直接引用 spec §4.6。
 
 - [ ] **Step 5: 追加 changelog**
 
@@ -2385,16 +2476,17 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "modelKey" docs/api/op
 ```markdown
 ## 2026-09-20 埋点 Phase 0：模型调用账本 + API 请求日志
 
-- 新增 `llm_call_logs`（每次 LLM 调用一行，含重试尝试/失败/fallback，带 token/cost/价格快照）
+- 新增 `llm_call_logs`（每次 LLM 调用一行，记**输入/输出 token**、usage_source、重试尝试/失败/fallback）
   与 `api_request_logs`（每请求一行，归一化 route / 状态码 / 业务码 / 耗时 / is_sse）
-- `llm_models` 新增 `input_price_per_1k` / `output_price_per_1k`：**单价唯一真源进 DB**，
-  后台可改；`model-config-registry` 改读它（此前 DB 路径写死 `{0,0}`）
 - **修正「生产 token 恒为 0」**：`ModelClient.chat()` 默认流式，而 `aggregateStream()` 把 usage
-  硬编码 `{0,0,0}`；现改为三级降级 —— 端点 usage > `estimateTokens()` 估算 > NULL
+  硬编码 `{0,0,0}`；现改为三级降级 —— 端点 usage > **输入/输出分别估算** > NULL
   （**绝不把未知写成 0**）。流式请求体下发 `stream_options.include_usage`，本地 llama.cpp 除外
+- **本期只记 token，不记价格/成本**（用户裁决）：以后按 token 计价。早期版本误加的
+  `cost` 与价格快照列（`llm_call_logs` 3 列 + `llm_models` 2 列）已由 `2026-09-20` 迁移
+  用带守卫的 DROP 收敛掉——`cost` 留着会恒为 0，而 0 表示「真免费」，会误导后续查成本的人
 - `student_id` 是**硬要求**：HTTP 走 ALS，后台路径（判错解析/标题生成）必须显式传 `ChatRequest.meta`
 - 埋点两条纪律：分析日志走 `TelemetryBuffer`（失败整批丢弃、不重试、不抛）；埋点异常绝不让请求 500
-- 已知待办（属 Phase 2）：`llmAttributionCoverage` 归属覆盖率、`/api/admin/analytics/*` 查询端与页面
+- 已知待办（属 Phase 2）：归属覆盖率、`/api/admin/analytics/*` 查询端与页面
 ```
 
 - [ ] **Step 6: 全量回归 + 最终提交**
@@ -2408,7 +2500,7 @@ Expected: 后端全绿（1166 + 本批新增）；前端全绿（573 + 1）。
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
 git add docs/
-git commit -m "docs: 同步埋点 Phase 0（价格字段 / 账本数据流 §6.26 / DB 设计 / changelog）"
+git commit -m "docs: 同步埋点 Phase 0（账本数据流 §6.26 / DB 设计 / changelog）"
 ```
 
 ---
@@ -2419,19 +2511,22 @@ git commit -m "docs: 同步埋点 Phase 0（价格字段 / 账本数据流 §6.2
 
 | spec 章节 | 覆盖它的任务 |
 |---|---|
-| §4.6 `llm_call_logs` DDL + `llm_models` 价格列 | Task 1、2 |
+| §4.6 `llm_call_logs` DDL（只记 token，无价格/成本列） | Task 1、**5R** |
 | §4.5 `api_request_logs` DDL | Task 1、7、9 |
+| §4.9 迁移落点 + 「清掉早期误加的价格/成本列」 | Task 1、**5R** |
 | §6.2 API 自动埋点（拦截器、跳过名单、route 归一化、biz_code） | Task 9 |
 | §6.3 `TelemetryBuffer`（环形丢弃 / 失败静默 / `pool.query` 多行） | Task 7 |
 | §6.5 账本写入点（ModelClient，含重试尝试）+ 归因传播 | Task 8 |
 | §6.5 第 4 条「student_id 硬要求 + 后台显式 `meta`」 | Task 8（`meta` 类型 + `recordCall` 优先级链） |
-| §6.6 usage 修复（`include_usage`、估算兜底、NULL 不写 0、价格真源进 DB） | Task 3、6 |
-| §8.4 现有端点形状变化（`GET/POST/PATCH /api/admin/models`） | Task 4、5、10 |
-| §12 Phase 0 第 1–7 项 | Task 1（1）、3（2）、4（3、7）、6（4）、8（5）、9（6） |
-| §14 陷阱（token 恒 0 / 价格漂移 / NULL vs 0 / 流式 usage / `model_key`≠`model_id` / DI 坑 / 无迁移运行器） | Task 6（1、4）、3（2）、6（3）、8（5）、4（9）、1（10） |
+| §6.6 usage 修复（`include_usage`、**输入/输出分别估算**、NULL 不写 0、不记价格成本） | Task 6 |
+| §8.4 端点形状（**本期不动 admin models**） | 无改动（原 Task 4/5 已取消/回退 → Task 5R） |
+| §12 Phase 0 第 1–5 项 | Task 1（1）、**5R**（2）、6（3）、8（4）、9（5） |
+| §14 陷阱（token 恒 0 / 输入输出分开 / NULL vs 0 / 误加的价格列必须清掉 / 回退别留半拉子 / 流式 usage / `model_key`≠`model_id` / DI 坑 / 无迁移运行器） | Task 6（1、2、3）、1+5R（13、14）、7（4）、8（5）、9（9）、1（10） |
 | §15 测试义务 | 各任务的测试步骤 |
 
-**本计划有意不覆盖**（属 Phase 1/2，另有计划）：`study_sessions`、`behavior_events`、`special_practice_logs`、`student_knowledge_mastery`、`goals.metric`、家长端 5 个端点、设备画像列与 UA 分类器、`/api/admin/analytics/*` 查询端与页面、`llmAttributionCoverage` 指标。
+**本计划有意不覆盖**（属 Phase 1/2，另有计划）：`study_sessions`、`behavior_events`、`special_practice_logs`、`student_knowledge_mastery`、`goals.metric`、家长端 5 个端点、设备画像列与 UA 分类器、`/api/admin/analytics/*` 查询端与页面、归属覆盖率指标。
+
+**取消的任务**：Task 3（registry 读真价 + 价格回填脚本）、Task 5（管理端前端价格输入）——用户 2026-09-19 裁决本期只记 token。
 
 ### 2. Placeholder scan
 
@@ -2440,22 +2535,23 @@ git commit -m "docs: 同步埋点 Phase 0（价格字段 / 账本数据流 §6.2
 计划阶段无法凭读代码确定的两个事实，**已实测消解**而不是留成占位符：
 
 - `estimateTokens` 的 5 个期望值 → 用 node 跑过实际实现确认（见 Task 6 Step 4）。
-- `admin-chat.service.ts:84` 的取数来源 → 读代码确认它在 `toModelConfig(m: LlmModel)` 内、`m` 来自 `modelsRepo.listEnabled()`，故改法唯一（Task 4 Step 5 已写成确定代码，不再给二选一）。
+- `admin-chat.service.ts:84` 的取数来源 → 读代码确认它在 `toModelConfig(m: LlmModel)` 内、`m` 来自 `modelsRepo.listEnabled()`（回退时 `costPer1K` 只能恢复成 `{0,0}`，不能整行删）。
 
-另核实：`LlmModelsRepository.create` 全仓**只有一个调用方**（`admin-models.service.ts:39`，本计划 Task 4 会改），没有其它地方凭空构造 `LlmModel`——所以 Task 2 把两个价格字段设成**必填**不会打坏别的调用点。
+另核实：`LlmModelsRepository.create` 全仓**只有一个调用方**（`admin-models.service.ts:39`）。**价格口径取消后这条核实仍然有用**：Task 5R 回退 Task 2 的必填字段时，只需回退这唯一一个调用方，不会有别处漏改。
 
 ### 3. Type consistency（跨任务名称核对）
 
 | 名称 | 定义处 | 使用处 | 一致 |
 |---|---|---|---|
-| `inputPricePer1k` / `outputPricePer1k`（驼峰） | Task 2 `LlmModel` | Task 3 registry、Task 4 service/controller、Task 5 api.ts | ✅ |
-| `input_price_per_1k` / `output_price_per_1k`（下划线） | Task 1 DDL | Task 2 repo SQL、Task 7 账本快照列 | ✅ |
-| `UsageSource` | Task 6 `types.ts` | Task 7 `LlmCallLogEntry.usageSource`、Task 8 `recordCall` | ✅ |
-| `LlmCallLogEntry` | Task 7 `llm-call-log.ts` | Task 7 repo、Task 8 `emitLlmCall`、Task 9 `TelemetryService` | ✅ |
-| `ApiRequestLogEntry` | Task 7 `api-request-logs.repo.ts` | Task 9 拦截器 | ✅ |
+| `UsageSource`（`'provider' \| 'estimated' \| 'unavailable'`） | Task 6 `types.ts` | Task 7 `LlmCallLogEntry.usageSource`、Task 8 `recordCall`、Task 10 验收 | ✅ |
+| `estimateTokens(text): number` | Task 6 `usage-estimate.ts` | Task 6 `aggregateStream` 的输入/输出两处估算 | ✅ |
+| `LlmCallLogEntry`（**19 个字段，无价格/成本**） | Task 7 `llm-call-log.ts` | Task 7 repo `COLUMNS`（19 列）、Task 8 `emitLlmCall`、Task 9 `TelemetryService` | ✅ |
+| `LlmCallLogsRepository.insertMany` 的列序 | Task 7 `COLUMNS` | Task 7 测试下标（`input_tokens`=15 / `output_tokens`=16 / `is_fallback`=11 / `success`=12，共 19 列 → 2 行 38 参数） | ✅ |
+| `ApiRequestLogEntry`（12 个字段） | Task 7 `api-request-logs.repo.ts` | Task 9 拦截器 | ✅ |
 | `TelemetryBuffer.push/flushNow/start/stop/size/dropped/failed` | Task 7 | Task 9 `TelemetryService` | ✅ |
 | `RequestContext` / `runWithRequestContext` / `getRequestContext` | Task 8 | Task 9 中间件、Task 8 `recordCall` | ✅ |
 | `RoutedModel.{scene,subject,modelKey,isFallbackEntry}` | Task 8 `types.ts` | Task 8 `model-router.route()`、`recordCall` | ✅ |
+| `ChatRequest.meta` | Task 8 `types.ts` | Task 8 `recordCall` 归因优先级链 | ✅ |
 | `AnalyticsInterceptor` | Task 9 | Task 9 `app.module.ts`（`useExisting`）+ `AnalyticsModule.exports` | ✅ |
 | `normalizeRoute` / `moduleFromRoute` / `shouldSkipRoute` | Task 9 | Task 9 测试 + 拦截器自身 | ✅ |
-| `seed-llm-prices.ts` 用的 `repo.findByKey` / `repo.update` | Task 2 | Task 3 脚本 | ✅ |
+| ~~`inputPricePer1k` / `outputPricePer1k`~~ | **Task 5R 已删除** | 无（价格口径取消） | — |
