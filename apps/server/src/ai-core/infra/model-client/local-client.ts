@@ -28,6 +28,9 @@ export class LocalClient extends OpenAICompatibleClient {
   protected buildRequestBody(request: ChatRequest, stream: boolean): Record<string, unknown> {
     const body = super.buildRequestBody(request, stream);
     delete body.enable_thinking;
+    // llama.cpp 不认 OpenAI 的 stream_options（可能直接 400），本地端点也不计费，
+    // 删掉后走估算兜底即可。
+    delete body.stream_options;
     return body;
   }
 }

@@ -141,13 +141,25 @@ export interface ChatRequest {
   signal?: AbortSignal;  // caller-controlled abort (e.g. client disconnect) combined with timeout
 }
 
+/** usage 的来源：provider=端点回了真值；estimated=估算兜底；unavailable=完全拿不到 */
+export type UsageSource = 'provider' | 'estimated' | 'unavailable';
+
 export interface ChatResponse {
   id: string;
   model: string;
   content: string;
   reasoningContent?: string;          // thinking 内容(reasoner 模型的 reasoning_content 聚合)
   finishReason: 'stop' | 'length' | 'content_filter' | 'error';
-  usage: { inputTokens: number; outputTokens: number; cost: number };
+  /**
+   * token 与成本。**NULL = 算不出，绝不是 0**（0 只代表真免费，如本地模型）——
+   * 与家长端 answered=0 → rate=null 同一纪律。source 缺省视为 'unavailable'。
+   */
+  usage: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cost: number | null;
+    source?: UsageSource;
+  };
   latencyMs: number;
 }
 
@@ -155,6 +167,8 @@ export interface StreamChunk {
   content: string;
   reasoningContent?: string;          // 增量 thinking delta(reasoning_content)
   finishReason?: 'stop' | 'length' | 'content_filter' | 'error';
+  /** 仅在端点回传 usage 时出现（openai 兼容端点开了 include_usage 会放最后一个 chunk） */
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 // Streaming event yielded by capability streaming methods (e.g. tutorStream)

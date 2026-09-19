@@ -1,14 +1,61 @@
-import type { ChatRequest, ChatResponse, StreamChunk, RetryOptions } from '../../types.js';
+import type { ChatRequest, ChatResponse, ChatMessage, StreamChunk, RetryOptions } from '../../types.js';
+import { contentToText } from '../../types.js';
 import { timeoutConfig, getApiKeyByProvider } from '../../config.js';
 import type { ProviderAdapter } from './types.js';
 import { callWithRetry } from './errors.js';
 import { KimiClient } from './kimi-client.js';
 import { LocalClient } from './local-client.js';
+import { estimateTokens } from '../usage-estimate.js';
 
 export { LLAMA_CPP_NO_THINKING_BODY } from './local-client.js';
 import { QwenClient } from './qwen-client.js';
 import { DeepSeekClient } from './deepseek-client.js';
 import { GeminiClient } from './gemini-client.js';
+
+/**
+ * 估算**请求侧**的输入 token。输入与输出相互独立，各用自己的数据源：
+ * 输入 = request.messages 的文本，输出 = 响应正文（见 buildStreamUsage）。
+ * 用 contentToText 兼容多模态消息（ContentPart[] 只取 text 部分）。
+ */
+function estimateInputTokens(messages: ChatMessage[]): number {
+  return messages.reduce((sum, m) => sum + estimateTokens(contentToText(m.content)), 0);
+}
+
+/**
+ * 流式 usage 的三级降级：
+ *   1) 端点回了 usage -> provider，按真值算钱
+ *   2) 拿不到 -> 输入/输出**分别估算** -> estimated（两段都来自估算，故共用一个来源标签；
+ *      端点要么两段都给、要么都不给，不存在只估一段的情况）
+ *   3) 请求与响应都为空 -> unavailable，token/cost 写 NULL（**不写 0**）
+ */
+function buildStreamUsage(
+  providerUsage: { inputTokens: number; outputTokens: number } | null,
+  estimatedInputTokens: number,
+  content: string,
+  reasoningContent: string,
+  costPer1K: { input: number; output: number },
+): ChatResponse['usage'] {
+  if (providerUsage) {
+    const { inputTokens, outputTokens } = providerUsage;
+    return {
+      inputTokens,
+      outputTokens,
+      cost: (inputTokens / 1000) * costPer1K.input + (outputTokens / 1000) * costPer1K.output,
+      source: 'provider',
+    };
+  }
+  const inputTokens = estimatedInputTokens;
+  const outputTokens = estimateTokens(content) + estimateTokens(reasoningContent);
+  if (inputTokens === 0 && outputTokens === 0) {
+    return { inputTokens: null, outputTokens: null, cost: null, source: 'unavailable' };
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    cost: (inputTokens / 1000) * costPer1K.input + (outputTokens / 1000) * costPer1K.output,
+    source: 'estimated',
+  };
+}
 
 export class ModelClient {
   private providers = new Map<string, ProviderAdapter>();
@@ -76,18 +123,23 @@ export class ModelClient {
 
   /**
    * Aggregate a provider's streamChat into a single ChatResponse. Collects
-   * content + reasoningContent (thinking). usage is best-effort: 0 when the
-   * provider's stream omits usage (e.g. Kimi - see ../kimi-chat.js note).
+   * content + reasoningContent (thinking). usage: provider-reported when the
+   * endpoint returns it (stream_options.include_usage), otherwise estimated
+   * from the request (input) and the response body (output); NULL when neither
+   * is measurable.
    */
   private async aggregateStream(provider: ProviderAdapter, request: ChatRequest, startTime: number): Promise<ChatResponse> {
     let content = '';
     let reasoningContent = '';
     let finishReason: ChatResponse['finishReason'] = 'stop';
+    // 端点在最后一个 chunk 里回传的 usage（需 stream_options.include_usage）
+    let providerUsage: { inputTokens: number; outputTokens: number } | null = null;
 
     for await (const chunk of provider.streamChat(request)) {
       if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
       if (chunk.content) content += chunk.content;
       if (chunk.finishReason) finishReason = chunk.finishReason;
+      if (chunk.usage) providerUsage = chunk.usage;
     }
 
     return {
@@ -96,7 +148,13 @@ export class ModelClient {
       content,
       reasoningContent: reasoningContent || undefined,
       finishReason,
-      usage: { inputTokens: 0, outputTokens: 0, cost: 0 },
+      usage: buildStreamUsage(
+        providerUsage,
+        estimateInputTokens(request.messages),
+        content,
+        reasoningContent,
+        request.model.costPer1K,
+      ),
       latencyMs: Date.now() - startTime,
     };
   }

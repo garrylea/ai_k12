@@ -22,6 +22,9 @@ export class OpenAICompatibleClient implements ProviderAdapter {
     // 逐字段复刻改动前的两个请求体：非流式带 stop、流式带 stream。
     if (stream) {
       body.stream = true;
+      // 让端点把 usage 放进最后一个 chunk（OpenAI 扩展）。没有它，流式路径
+      // 永远拿不到 token —— 生产 100% 走流式，成本就永远算不出。
+      body.stream_options = { include_usage: true };
     } else {
       body.stop = request.stopSequences;
     }
@@ -85,11 +88,14 @@ export class OpenAICompatibleClient implements ProviderAdapter {
         ? choice.message.reasoning_content.replace(/\\n/g, '\n')
         : undefined,
       finishReason: choice.finish_reason,
-      usage: {
-        inputTokens: data.usage?.prompt_tokens ?? 0,
-        outputTokens: data.usage?.completion_tokens ?? 0,
-        cost: this.calculateCost(data.usage?.prompt_tokens ?? 0, data.usage?.completion_tokens ?? 0, request.model.costPer1K),
-      },
+      usage: data.usage
+        ? {
+            inputTokens: data.usage.prompt_tokens ?? null,
+            outputTokens: data.usage.completion_tokens ?? null,
+            cost: this.calculateCost(data.usage.prompt_tokens ?? 0, data.usage.completion_tokens ?? 0, request.model.costPer1K),
+            source: 'provider' as const,
+          }
+        : { inputTokens: null, outputTokens: null, cost: null, source: 'unavailable' as const },
       latencyMs: 0,
     };
   }
@@ -202,6 +208,15 @@ export class OpenAICompatibleClient implements ProviderAdapter {
             }
             if (parsed.choices?.[0]?.finish_reason) {
               yield { content: '', finishReason: parsed.choices[0].finish_reason };
+            }
+            if (parsed.usage) {
+              yield {
+                content: '',
+                usage: {
+                  inputTokens: parsed.usage.prompt_tokens ?? 0,
+                  outputTokens: parsed.usage.completion_tokens ?? 0,
+                },
+              };
             }
           } catch {
             // skip malformed SSE chunks

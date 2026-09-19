@@ -79,6 +79,7 @@ export class GeminiClient implements ProviderAdapter {
         inputTokens,
         outputTokens,
         cost: this.calculateCost(inputTokens, outputTokens, request.model.costPer1K),
+        source: 'provider' as const,
       },
       latencyMs: 0,
     };
