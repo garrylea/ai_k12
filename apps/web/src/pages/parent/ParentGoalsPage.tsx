@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Card, Skeleton } from '@/components/base';
+import { Button, Card, Input, Skeleton } from '@/components/base';
 import {
   ApiError,
   getParentGoalAttainment,
@@ -15,6 +15,28 @@ const PERIOD_LABEL: Record<ParentGoalAttainmentItem['period'], string> = {
   daily: '每日',
   weekly: '每周',
 };
+
+/**
+ * 每个指标的单位。
+ * ⚠️ 别统一写「个」：分钟/课/道/篇/词 各不相同，统一了家长就看不出「2」是什么。
+ */
+const UNIT_BY_METRIC: Record<ParentGoalMetric, string> = {
+  daily_study_minutes: '分钟',
+  weekly_lessons: '课',
+  weekly_clear_errors: '道',
+  weekly_passages: '篇',
+  daily_words: '词',
+};
+
+/**
+ * 一行的**唯一键**：`学科:指标`。
+ *
+ * ⚠️ 2026-09-20（P6.5）起所有目标都按学科，**同一个 metric 会在多个学科各有一行**
+ * —— 只用 `metric` 当 key / 草稿键 / 保存态键会互相串（React 复用同一节点、草稿覆盖）。
+ */
+function rowKey(item: ParentGoalAttainmentItem): string {
+  return `${item.subjectId}:${item.metric}`;
+}
 
 /**
  * 达成率文案。
@@ -35,15 +57,15 @@ function parseTarget(raw: string): number | null {
 }
 
 /**
- * 目标设定（PRD P6.5）。从占位页变真页：读四个维度目标 + 逐行改目标值。
+ * 目标设定（PRD P6.5）。2026-09-20 起**按学科**：页面按学科分组，每组下是适用指标。
  *
  * 家长端全程日间：页面**不加** `data-theme`、不用 `.student-theme-container`（`ParentLayout` 统一写）。
  *
- * 两条实现纪律：
+ * 三条实现纪律：
  *   1. **派生数据带 `studentId` 归属**：切孩子不重挂载本页，只在 effect 里 `setData(null)` 会慢一帧、
  *      把上一个孩子的数字画出来（effect 在 commit 之后才跑）。故存 `{ studentId, value }`、读取时比对。
- *   2. **行级保存态**：`savingMetric` 是单值（同一时刻只可能点一个按钮），失败时**保留家长输入不回滚**
- *      ——把用户刚打的数字擦掉是最招人烦的交互。
+ *   2. **行级状态一律用 `rowKey`（学科:指标）**，不能用 metric —— 同 metric 会跨学科重复。
+ *   3. **失败保留家长输入不回滚** —— 把用户刚打的数字擦掉是最招人烦的交互。
  */
 export default function ParentGoalsPage() {
   const studentId = useParentStudentStore((s) => s.studentId);
@@ -51,8 +73,8 @@ export default function ParentGoalsPage() {
   const [failure, setFailure] = useState<{ studentId: number; code: number | null } | null>(null);
   const [reload, setReload] = useState(0);
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [savingMetric, setSavingMetric] = useState<ParentGoalMetric | null>(null);
-  const [saveError, setSaveError] = useState<{ metric: ParentGoalMetric; message: string } | null>(null);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<{ key: string; message: string } | null>(null);
 
   const value = data && data.studentId === studentId ? data.value : null;
   const err = failure && failure.studentId === studentId ? failure : null;
@@ -81,38 +103,41 @@ export default function ParentGoalsPage() {
 
   const save = async (item: ParentGoalAttainmentItem) => {
     if (studentId === null) return;
-    const target = parseTarget(draft[item.metric] ?? String(item.target));
+    const key = rowKey(item);
+    const target = parseTarget(draft[key] ?? String(item.target));
     if (target === null) {
-      setSaveError({ metric: item.metric, message: '目标值需为 1–9999 的整数' });
+      setSaveError({ key, message: '目标值需为 1–9999 的整数' });
       return;
     }
-    setSavingMetric(item.metric);
+    setSavingKey(key);
     setSaveError(null);
     try {
-      const updated = await putParentGoalTarget(studentId, item.metric, target);
+      const updated = await putParentGoalTarget(studentId, item.metric, target, item.subjectId);
       // 原地替换该行：用后端回的最新达成情况，避免再发一次 GET
       setData((prev) =>
         prev && prev.studentId === studentId
           ? {
               studentId,
               value: {
-                items: prev.value.items.map((it) => (it.metric === updated.metric ? updated : it)),
+                items: prev.value.items.map((it) =>
+                  rowKey(it) === rowKey(updated) ? updated : it,
+                ),
               },
             }
           : prev,
       );
       setDraft((prev) => {
         const next = { ...prev };
-        delete next[item.metric];
+        delete next[key];
         return next;
       });
     } catch (error: unknown) {
       setSaveError({
-        metric: item.metric,
+        key,
         message: error instanceof Error ? error.message : '保存失败',
       });
     } finally {
-      setSavingMetric(null);
+      setSavingKey(null);
     }
   };
 
@@ -130,12 +155,21 @@ export default function ParentGoalsPage() {
     );
   }
 
+  /** 按学科分组（组顺序沿用后端给的顺序，前端不重排）。 */
+  const groups: Array<{ subjectId: number; subjectName: string; items: ParentGoalAttainmentItem[] }> =
+    [];
+  for (const item of value?.items ?? []) {
+    const last = groups[groups.length - 1];
+    if (last && last.subjectId === item.subjectId) last.items.push(item);
+    else groups.push({ subjectId: item.subjectId, subjectName: item.subjectName, items: [item] });
+  }
+
   return (
     <div>
       <header className="mb-5">
         <h1 className="text-2xl font-black text-[var(--text-primary)]">目标设定</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          给孩子设定每日/每周目标，达成情况按学习数据实时统计。
+          按学科给孩子设定每日/每周目标，达成情况按学习数据实时统计。
         </p>
       </header>
 
@@ -164,64 +198,88 @@ export default function ParentGoalsPage() {
           <Skeleton width="100%" height={92} rounded />
           <Skeleton width="100%" height={92} rounded />
         </div>
-      ) : (
-        <Card className="p-5" data-testid="goals-card">
-          {value.items.length === 0 ? (
-            <p className="text-sm text-[var(--text-secondary)]">暂无目标</p>
-          ) : (
-            <ul className="space-y-4">
-              {value.items.map((item) => (
-                <li
-                  key={item.metric}
-                  data-testid={`goal-row-${item.metric}`}
-                  className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--bg-subtle)] pb-4 last:border-b-0 last:pb-0"
-                >
-                  <div className="min-w-[10rem]">
-                    <div className="text-sm font-bold text-[var(--text-primary)]">
-                      {item.title}
-                      <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
-                        {PERIOD_LABEL[item.period]}
-                      </span>
-                    </div>
-                    <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                      {`已达成 ${item.achieved} / ${item.target}`}
-                      <span className="ml-2 text-[var(--text-tertiary)]">{rateText(item)}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={1}
-                      max={9999}
-                      aria-label={`${item.title}目标值`}
-                      value={draft[item.metric] ?? String(item.target)}
-                      onChange={(e) =>
-                        setDraft((prev) => ({ ...prev, [item.metric]: e.target.value }))
-                      }
-                      className="w-24 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] bg-[var(--bg-card)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
-                    />
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      disabled={savingMetric === item.metric}
-                      onClick={() => void save(item)}
-                    >
-                      {savingMetric === item.metric ? '保存中…' : '保存'}
-                    </Button>
-                  </div>
-                  {saveError?.metric === item.metric && (
-                    <p
-                      data-testid={`goal-error-${item.metric}`}
-                      className="w-full text-xs text-[var(--error)]"
-                    >
-                      {saveError.message}
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+      ) : groups.length === 0 ? (
+        // 真实空态：孩子在 `progress` 里一门学科都没有（家长还没配教材），后端**不编造**默认目标
+        <Card data-testid="goals-empty" className="p-10 text-center">
+          <p className="text-sm text-[var(--text-secondary)]">
+            这个孩子还没有在学学科，所以还没有可设的目标。
+          </p>
+          <Link
+            to={`/parent/students/${studentId}/config`}
+            className="mt-3 inline-block text-sm font-medium text-[var(--brand-600)] hover:underline"
+          >
+            去配置教材
+          </Link>
         </Card>
+      ) : (
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <Card
+              key={group.subjectId}
+              className="p-5"
+              data-testid={`goals-subject-${group.subjectId}`}
+            >
+              <h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">
+                {group.subjectName}
+              </h2>
+              <ul className="space-y-4">
+                {group.items.map((item) => {
+                  const key = rowKey(item);
+                  return (
+                    <li
+                      key={key}
+                      data-testid={`goal-row-${key}`}
+                      className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--bg-subtle)] pb-4 last:border-b-0 last:pb-0"
+                    >
+                      <div className="min-w-[10rem]">
+                        <div className="text-sm font-bold text-[var(--text-primary)]">
+                          {item.title}
+                          <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
+                            {PERIOD_LABEL[item.period]}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                          {`已达成 ${item.achieved} / ${item.target} ${UNIT_BY_METRIC[item.metric]}`}
+                          <span className="ml-2 text-[var(--text-tertiary)]">{rateText(item)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <div className="w-28">
+                          <Input
+                            type="number"
+                            min={1}
+                            max={9999}
+                            aria-label={`${item.title}（${group.subjectName}）目标值`}
+                            value={draft[key] ?? String(item.target)}
+                            onChange={(e) =>
+                              setDraft((prev) => ({ ...prev, [key]: e.target.value }))
+                            }
+                          />
+                        </div>
+                        <Button
+                          variant="primary"
+                          size="md"
+                          disabled={savingKey === key}
+                          onClick={() => void save(item)}
+                        >
+                          {savingKey === key ? '保存中…' : '保存'}
+                        </Button>
+                      </div>
+                      {saveError?.key === key && (
+                        <p
+                          data-testid={`goal-error-${key}`}
+                          className="w-full text-xs text-[var(--error)]"
+                        >
+                          {saveError.message}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          ))}
+        </div>
       )}
     </div>
   );
