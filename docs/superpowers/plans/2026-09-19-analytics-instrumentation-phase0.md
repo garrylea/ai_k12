@@ -1723,20 +1723,20 @@ git commit -m "feat(analytics): 账本/请求日志仓储 + TelemetryBuffer（�
 
 ---
 
-### Task 8: 账本接线——ALS 上下文 + router 打标 + `ModelClient` 记账
+### Task 8: 账本接线——ALS 上下文 + router 打标 + `ModelClient` 记账（**两条路径都要埋**）
 
 **Files:**
 - Create: `apps/server/src/ai-core/infra/request-context.ts`
 - Create: `apps/server/src/ai-core/infra/request-context.test.ts`
 - Modify: `apps/server/src/ai-core/types.ts`（`RoutedModel` + `ChatRequest.meta`）
 - Modify: `apps/server/src/ai-core/infra/model-router.ts:54-58`
-- Modify: `apps/server/src/ai-core/infra/model-client/index.ts:61-75`
+- **Modify: `apps/server/src/ai-core/infra/model-client/index.ts` 的 `chat()`（`:61-75`）与 `streamChat()`（`:109-112`）两处**
 - Test: `apps/server/src/ai-core/infra/model-router.test.ts`（追加）
 - Test: `apps/server/src/ai-core/infra/model-client/model-client.test.ts`（追加）
 
 **Interfaces:**
-- Consumes: Task 6 的 `usage.source`；Task 7 的 `emitLlmCall` / `LlmCallLogEntry`
-- Produces: `RequestContext` / `runWithRequestContext` / `getRequestContext`（Task 9 用）；`RoutedModel` 带 `scene`/`subject`/`modelKey`/`isFallbackEntry`；`ChatRequest.meta`；效果——每次 `ModelClient.chat()` 尝试都调一次 `emitLlmCall`
+- Consumes: Task 6 的 `usage.source` / `buildStreamUsage` / `estimateInputTokens`；Task 7 的 `emitLlmCall` / `LlmCallLogEntry`
+- Produces: `RequestContext` / `runWithRequestContext` / `getRequestContext`（Task 9 用）；`RoutedModel` 带 `scene`/`subject`/`modelKey`/`isFallbackEntry`；`ChatRequest.meta`；效果——**两个写入点**：`chat()` 每次尝试一行（`attempt` 递增），`streamChat()` 每次调用一行（`requestKind='stream'`，`attempt` 恒 1）。**两个都不能漏**：只埋 `chat()` 会让 AI 讨论/答疑（很可能是 token 消耗最大的场景）在账本里完全缺席，直接违背用户「哪个学生 token 用得最多」的目标。
 
 - [ ] **Step 1: 写 ALS 的失败测试**
 
@@ -1920,7 +1920,7 @@ import { getRequestContext } from '../request-context.js';
         const response = useStream
           ? await this.aggregateStream(provider, request, startTime)
           : { ...(await provider.chat(request)), latencyMs: Date.now() - startTime };
-        this.recordCall(request, attempt, useStream, response, Date.now() - attemptStart, null);
+        this.recordCall(request, attempt, useStream, response.usage, Date.now() - attemptStart, null);
         return response;
       } catch (err) {
         this.recordCall(request, attempt, useStream, null, Date.now() - attemptStart, err);
@@ -1934,19 +1934,21 @@ import { getRequestContext } from '../request-context.js';
   /**
    * 写一条账本。**永不抛**（emitLlmCall 内部吞异常），也永不 await。
    * 归因优先级：request.meta（后台路径显式传）> model 上的 router 打标 > ALS 上下文。
+   *
+   * 入参收的是 `usage` 而不是整个 `ChatResponse`——因为真流式那条路径（见 8d）
+   * 没有 ChatResponse 可传，只有边透传边累积出来的一份 usage。
    */
   private recordCall(
     request: ChatRequest,
     attempt: number,
     useStream: boolean,
-    response: ChatResponse | null,
+    usage: ChatResponse['usage'] | null,
     latencyMs: number,
     err: unknown,
   ): void {
     const model = request.model as RoutedModel;
     const ctx = getRequestContext();
     const llmErr = err instanceof LLMClientError ? err : null;
-    const usage = response?.usage;
     emitLlmCall({
       requestId: ctx?.requestId ?? null,
       studentId: request.meta?.studentId ?? ctx?.studentId ?? null,
@@ -1960,7 +1962,7 @@ import { getRequestContext } from '../request-context.js';
       attempt,
       requestKind: useStream ? 'stream' : 'chat',
       isFallback: model.isFallbackEntry === true,
-      success: response !== null,
+      success: usage !== null,
       errorType: llmErr ? llmErr.name : err ? ((err as Error).name || 'Error') : null,
       httpStatus: llmErr ? llmErr.statusCode : null,
       inputTokens: usage?.inputTokens ?? null,
@@ -1972,6 +1974,68 @@ import { getRequestContext } from '../request-context.js';
 ```
 
 同文件补 `RoutedModel` 到类型 import：`import type { ChatRequest, ChatResponse, StreamChunk, RetryOptions, RoutedModel } from '../../types.js';`
+
+**8d. 同时给 `streamChat()` 埋账本——**这条**必须**做，否则本批的核心目标会缺一大块**。
+
+为什么：`chat()` 不是唯一出口。`tutoring.capability.ts:142`（AI 讨论 / 答疑的 SSE 转发）与 `admin-chat.service.ts:56` 是**直接调 `modelClient.streamChat(...)`** 的，完全绕过 `chat()`。只埋 `chat()` 的话，**AI 讨论/答疑——很可能是 token 消耗最大的场景——在账本里一行都没有**，而用户要的正是「哪个学生 token 用得最多」（见 spec §6.5 第 4 条的硬要求）。
+
+替换现有实现（`model-client/index.ts:109-112`）：
+
+```ts
+  /**
+   * 真流式：**这条路径不经 `chat()`**（tutoring 与 admin-chat 直接调它做 SSE 转发），
+   * 所以账本必须在这里也记一笔。做法是原样透传每个 chunk（**不改变任何 SSE 行为**），
+   * 同时在边上累积 content/reasoning，结束时按同一套 `buildStreamUsage` 估算后落一行。
+   *
+   * 三点必须注意：
+   *   1. 本路径**不走 callWithRetry**（中途重试会重复吐 token），故 `attempt` 恒为 1。
+   *   2. 客户端中途断开时，生成器会被 `.return()`，`finally` 仍会执行 —— 这是对的：
+   *      token 已经烧掉了，必须记账（失败原因记 AbortError）。
+   *   3. `provider.streamChat` 是 async generator，`this` 在嵌套函数里不自动绑定，
+   *      故先 `const self = this`。
+   */
+  streamChat(request: ChatRequest): AsyncIterable<StreamChunk> {
+    const provider = this.getProvider(request.model.provider, request.model.apiKey);
+    const self = this;
+    return (async function* (): AsyncIterable<StreamChunk> {
+      const started = Date.now();
+      let content = '';
+      let reasoningContent = '';
+      let providerUsage: { inputTokens: number; outputTokens: number } | null = null;
+      let failed: unknown = null;
+      try {
+        for await (const chunk of provider.streamChat(request)) {
+          if (chunk.content) content += chunk.content;
+          if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
+          if (chunk.usage) providerUsage = chunk.usage;
+          yield chunk; // 原样透传，SSE 行为零变化
+        }
+      } catch (err) {
+        failed = err;
+        throw err;
+      } finally {
+        self.recordCall(
+          request,
+          1,
+          true,
+          failed === null
+            ? buildStreamUsage(
+                providerUsage,
+                estimateInputTokens(request.messages),
+                content,
+                reasoningContent,
+                request.model.costPer1K,
+              )
+            : null,
+          Date.now() - started,
+          failed,
+        );
+      }
+    })();
+  }
+```
+
+同时把 Task 8 开头 Files/Interfaces 里的「账本写入点」补成**两处**：`chat()`（每次尝试一行）与 `streamChat()`（每次调用一行）。
 
 - [ ] **Step 9: 写 ModelClient 记账的失败测试**
 
@@ -2040,6 +2104,59 @@ describe('ModelClient 写 llm_call_logs', () => {
     const mc = new ModelClient({ providers } as any);
     const res = await mc.chat({ model: baseModel() as any, messages: [{ role: 'user', content: 'hi' }], stream: false });
     expect(res.content).toBe('ok');
+  });
+
+  // ★ 这一条钉住 8d：真流式路径（tutoring / admin-chat 直接调 streamChat）也必须落账本。
+  // 少了它，AI 讨论/答疑在账本里会完全缺席，而那是 token 消耗最大的场景。
+  it('streamChat 消费完毕后落一条账本（requestKind=stream，attempt=1），且 chunk 原样透传', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', {
+        chat: vi.fn(),
+        streamChat: async function* () {
+          yield { content: 'abcdefgh' };           // 输出 2 token
+          yield { content: '', reasoningContent: '你好世界' }; // 输出再 +4
+        },
+      }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    const seen: string[] = [];
+    for await (const c of mc.streamChat({
+      model: baseModel({ scene: 'tutoring', subject: 'math', modelKey: 'kimi' }) as any,
+      messages: [{ role: 'user', content: '你好' }],  // 输入 2 token
+      meta: { studentId: 7, capability: 'tutoring' },
+    } as any)) {
+      if (c.content) seen.push(c.content);
+    }
+    // chunk 必须原样透传（SSE 行为不能变）
+    expect(seen).toEqual(['abcdefgh', '']);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      studentId: 7, scene: 'tutoring', subject: 'math', modelKey: 'kimi',
+      attempt: 1, requestKind: 'stream', success: true, usageSource: 'estimated',
+      inputTokens: 2, outputTokens: 6,
+    });
+  });
+
+  it('streamChat 中途失败也落一条（success=false），且异常原样抛出', async () => {
+    const entries: any[] = [];
+    setLlmCallSink((e) => entries.push(e));
+    const providers = new Map([
+      ['kimi', {
+        chat: vi.fn(),
+        streamChat: async function* () {
+          yield { content: '部分内容' };
+          throw Object.assign(new Error('boom'), { name: 'ServerError' });
+        },
+      }],
+    ]);
+    const mc = new ModelClient({ providers } as any);
+    await expect((async () => {
+      for await (const _ of mc.streamChat({ model: baseModel() as any, messages: [{ role: 'user', content: 'hi' }] } as any)) { /* drain */ }
+    })()).rejects.toThrow('boom');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ requestKind: 'stream', success: false, inputTokens: null, outputTokens: null, errorType: 'ServerError' });
   });
 });
 ```
@@ -2516,7 +2633,7 @@ git commit -m "docs: 同步埋点 Phase 0（账本数据流 §6.26 / DB 设计 /
 | §4.9 迁移落点 + 「清掉早期误加的价格/成本列」 | Task 1、**5R** |
 | §6.2 API 自动埋点（拦截器、跳过名单、route 归一化、biz_code） | Task 9 |
 | §6.3 `TelemetryBuffer`（环形丢弃 / 失败静默 / `pool.query` 多行） | Task 7 |
-| §6.5 账本写入点（ModelClient，含重试尝试）+ 归因传播 | Task 8 |
+| §6.5 账本写入点（**`chat()` 与 `streamChat()` 两条路径**，含重试尝试）+ 归因传播 | Task 8（8b/8d + Step 9 的两条 streamChat 用例） |
 | §6.5 第 4 条「student_id 硬要求 + 后台显式 `meta`」 | Task 8（`meta` 类型 + `recordCall` 优先级链） |
 | §6.6 usage 修复（`include_usage`、**输入/输出分别估算**、NULL 不写 0、不记价格成本） | Task 6 |
 | §8.4 端点形状（**本期不动 admin models**） | 无改动（原 Task 4/5 已取消/回退 → Task 5R） |
