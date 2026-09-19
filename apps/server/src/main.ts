@@ -16,6 +16,9 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // 让 OnModuleDestroy 生效，退出时把埋点 buffer 里剩余的行 flush 掉
+  app.enableShutdownHooks();
+
   // 物化图片静态服务：/assets/* → tools/data-refinery/output/assets/*
   // 前端 ASSET_BASE 默认 /assets/，图片 url（如 textbooks/math/xxx/1/xx.jpg）挂在 /assets 下。
   const assetsDir = path.resolve(import.meta.dirname, '../../../tools/data-refinery/output/assets');
