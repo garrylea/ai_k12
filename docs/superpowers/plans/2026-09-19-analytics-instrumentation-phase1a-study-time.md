@@ -68,7 +68,8 @@ spec §7.1/§7.5 把 `beacon.ts`、事件批量队列、`/api/track/events` 写�
 | `tools/db/schema.sql` | 末尾新增 §16 段落（`study_sessions`） |
 | `apps/server/src/database/repositories/index.ts` | 导出两个新 repo |
 | `apps/server/src/database/repositories/controls.repo.ts` | 加 `findDailyTimeLimit(studentId)`（只读一个列，不动既有两法） |
-| `apps/server/src/modules/analytics/analytics.module.ts` | 加 `AnalyticsController` + `StudySessionsService` + 两个 repo + `SubjectsRepository` |
+| `apps/server/src/modules/analytics/analytics.module.ts` | 加 `AnalyticsController` + `StudySessionsService` + 两个 repo + `SubjectsRepository`（**保留 `TelemetryService`**——见 Task 5 Step 6 的注释） |
+| `apps/server/src/database/repositories/study-sessions.repo.ts` | 只改类注释第 54 行那**一句**：把「调用方必须包 try/catch、绝不 500」收窄为「只约束嵌在别的业务流里的埋点写入（如家长 GET 的 `closeStale`）；三个采集端点是例外，允许 500」（该句写于 2026-09-19 收窄裁决之前，已过期） |
 | `apps/server/src/common/interceptors/analytics.interceptor.ts` | 跳过名单加「心跳」（高频自指噪音） |
 | `apps/server/src/common/interceptors/analytics.interceptor.test.ts` | 补心跳跳过断言 |
 | `apps/server/src/modules/parent-insights/parent-insights.module.ts` | 加 `StudyTimeService` + `ParentAnalyticsRepository` + `ControlsRepository` |
@@ -1411,6 +1412,10 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
   providers: [
     LlmCallLogsRepository,
     ApiRequestLogsRepository,
+    // TelemetryService **必须留在这里**：本模块的构造函数（下面的 setLlmCallSink）与
+    // AnalyticsInterceptor 都注入它，而本模块没有 imports、也不是 @Global。
+    // 漏掉它 = 模块初始化直接失败（Phase 0 的原始 providers 里本来就有它，别删）。
+    TelemetryService,
     StudySessionsRepository,
     SubjectsRepository,
     StudySessionsService,
@@ -1425,6 +1430,12 @@ export class AnalyticsModule {
   }
 }
 ```
+
+- [ ] **Step 6b: 订正 `study-sessions.repo.ts` 的过期注释（只改一句）**
+
+`apps/server/src/database/repositories/study-sessions.repo.ts:54` 的「两条纪律」第 2 条写的是「所有写入……调用方（service）必须包 try/catch，失败只 warn、绝不 500」。这句写在 2026-09-19 的**收窄裁决之前**，现在是错的：生效义务只落在**嵌在别的业务流里的埋点写入**（如家长 GET 里的 `closeStale`），而本任务的三个采集端点**是例外**——允许 DB 失败直接 500。
+
+把**这一句**改成收窄后的说法（保持中文、`**加粗**` 承重点、一句话讲清，别顺手改这个文件的其它行）。
 
 - [ ] **Step 7: 构建 + 全量后端测试**
 
@@ -1449,7 +1460,7 @@ Expected: `401`（未登录被 `JwtAuthGuard` 拒——**不是** 500，说明�
 - [ ] **Step 9: Commit**
 
 ```bash
-git add apps/server/src/modules/analytics/analytics.controller.ts apps/server/src/modules/analytics/analytics.module.ts apps/server/src/common/interceptors/analytics.interceptor.ts apps/server/src/common/interceptors/analytics.interceptor.test.ts
+git add apps/server/src/modules/analytics/analytics.controller.ts apps/server/src/modules/analytics/analytics.module.ts apps/server/src/common/interceptors/analytics.interceptor.ts apps/server/src/common/interceptors/analytics.interceptor.test.ts apps/server/src/database/repositories/study-sessions.repo.ts
 git commit -m "feat(analytics): /api/study-sessions 采集端点 + 模块接线 + 心跳不进请求日志"
 ```
 
