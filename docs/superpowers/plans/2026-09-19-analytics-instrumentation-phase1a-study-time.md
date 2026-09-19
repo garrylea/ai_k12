@@ -3718,14 +3718,13 @@ export function getParentTodayUsage(studentId: number): Promise<ParentTodayUsage
 
 ```ts
 // --- 学习会话采集（student 角色，埋点 Phase 1A） ---
-
-export type StudySessionClientState = 'visible' | 'hidden';
-export type StudySessionEndReason =
-  | 'route_change'
-  | 'pagehide'
-  | 'idle_timeout'
-  | 'closed'
-  | 'hidden_timeout';
+//
+// ⚠️ 枚举**不在这里声明**：`ClientState` / `EndReason` 的**唯一真源**是
+// `apps/web/src/analytics/types.ts`（该文件本就是「后端封闭字典的前端镜像」）。
+// 早先版本在本文件重复声明了 `StudySessionClientState` / `StudySessionEndReason`，
+// 造成同一份后端枚举有两个前端声明——后端改一个、漏改另一个时**类型检查抓不到**，
+// 运行期静默 1001、会话全丢。已合并。改本文件时不要再把它们加回来。
+import type { ClientState, EndReason } from '@/analytics/types';
 
 export interface StartStudySessionBody {
   sessionUid: string;
@@ -3751,7 +3750,7 @@ export function startStudySession(
 
 export function heartbeatStudySession(
   uid: string,
-  state: StudySessionClientState,
+  state: ClientState,
 ): Promise<{ activeSeconds: number | null }> {
   return fetchApi<{ activeSeconds: number | null }>(
     `/study-sessions/${encodeURIComponent(uid)}/heartbeat`,
@@ -3761,7 +3760,7 @@ export function heartbeatStudySession(
 
 export function endStudySession(
   uid: string,
-  reason: StudySessionEndReason,
+  reason: EndReason,
 ): Promise<{ activeSeconds: number | null; endedAt: string | null }> {
   return fetchApi<{ activeSeconds: number | null; endedAt: string | null }>(
     `/study-sessions/${encodeURIComponent(uid)}/end`,
