@@ -55,7 +55,12 @@ function makeService(overrides: {
     }),
     todayKey: vi.fn(() => overrides.todayKey ?? '2026-09-17'),
   };
-  return { service: new MeaningService(repo as never, judge as never, points as never), repo, judge, points };
+  // 专项日志（Phase 1B）：含义判题会写一行 special_practice_logs。
+  const specialLogsRepo = { insert: vi.fn().mockResolvedValue(1) };
+  return {
+    service: new MeaningService(repo as never, judge as never, points as never, specialLogsRepo as never),
+    repo, judge, points, specialLogsRepo,
+  };
 }
 
 describe('MeaningService.listMeaningPassages', () => {
@@ -331,5 +336,66 @@ describe('MeaningService.judgeMeaning — 甲类发分（cn_meaning，整篇答�
     const res = await service.judgeMeaning({ studentId: 5, passageId: 12, sentenceIndex: 1, ...ANS });
     expect(res.pointsAwarded).toBe(0);
     expect(res.awardReason).toBeUndefined();
+  });
+});
+
+describe('MeaningService.judgeMeaning — 专项日志（Phase 1B）', () => {
+  it('逐句作答 → 一行记一句；含义判错即整句 incorrect', async () => {
+    const { service, specialLogsRepo } = makeService(); // OK_JUDGE：字词/情感判对、含义判错
+    await service.judgeMeaning({
+      studentId: 5, passageId: 12, sentenceIndex: 1,
+      terms: [{ term: '沉（chén）舟', answer: '沉了的船' }],
+      meaning: '写景', emotion: '乐观',
+    });
+
+    expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 5, module: 'chinese_meaning', refType: 'passage', refId: 12,
+      refKey: '酬乐天扬州初逢席上见赠', sentenceIndex: 1,
+      verdict: 'incorrect', isCorrect: false, errorCounted: true,
+    }));
+  });
+
+  it('三项全判对 → correct / isCorrect=true / 不计错', async () => {
+    const { service, specialLogsRepo } = makeService({
+      judged: {
+        terms: [{ term: '沉（chén）舟', correct: true, comment: null }],
+        meaning: { correct: true, comment: null },
+        emotion: { correct: true, comment: null },
+      },
+    });
+    await service.judgeMeaning({
+      studentId: 5, passageId: 12, sentenceIndex: 1,
+      terms: [{ term: '沉（chén）舟', answer: '沉了的船' }],
+      meaning: '新事物取代旧事物', emotion: '乐观进取',
+    });
+
+    expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: 'correct', isCorrect: true, errorCounted: false,
+    }));
+  });
+
+  it('三处都空 → unanswered（isCorrect=null、**不计错**），且不调 LLM', async () => {
+    const { service, specialLogsRepo, judge } = makeService();
+    await service.judgeMeaning({
+      studentId: 5, passageId: 12, sentenceIndex: 1,
+      terms: [{ term: '沉（chén）舟', answer: '' }], meaning: '', emotion: '',
+    });
+
+    expect(judge.generate).not.toHaveBeenCalled();
+    expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
+      sentenceIndex: 1, verdict: 'unanswered', isCorrect: null, errorCounted: false,
+    }));
+  });
+
+  it('日志写入失败不阻断判题', async () => {
+    const { service, specialLogsRepo } = makeService();
+    specialLogsRepo.insert.mockRejectedValueOnce(new Error('db down'));
+
+    const res = await service.judgeMeaning({
+      studentId: 5, passageId: 12, sentenceIndex: 1,
+      terms: [{ term: '沉（chén）舟', answer: '沉了的船' }],
+      meaning: '写景', emotion: '乐观',
+    });
+    expect(res).toHaveProperty('allCorrect');
   });
 });

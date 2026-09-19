@@ -8,6 +8,8 @@ import { PointsService } from '../points/points.service.js';
 import type { AwardResult } from '../points/points.service.js';
 import type { PointsAwardReason } from '../points/dto/points.dto.js';
 import { stripPinyinAnnotation } from '../../common/utils/normalize-chinese.util.js';
+import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
+import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type {
   MeaningPassageListItem, MeaningPassageItem, MeaningJudgeResult,
   MeaningTermJudgeItem, MeaningPartJudge,
@@ -17,8 +19,9 @@ import type {
  * 语文古诗文「含义」专项服务（2026-09-17）。
  *
  * 独立子系统：不挂 `questions`、不进错题本、不参与主线清零门禁、
- * 不用「不再展示」/提示缓存/自评 —— 所以本服务**只注入篇目 repo 与判题能力**，
- * 不注入任何学生状态 repo。
+ * 不用「不再展示」/提示缓存/自评 —— 所以本服务**不注入任何学生状态 repo**。
+ * （`SpecialPracticeLogsRepository` 是 Phase 1B 的判题流水日志，只追加、不读回、
+ *   不参与判题，不属于「学生状态」。）
  *
  * 与解释专项最关键的差别：**没有程序短路**。含义与情感是理解性作答，
  * 拿字符串归一化全等去判不成立，一律交给 LLM。唯一保留的程序判断是
@@ -32,6 +35,7 @@ export class MeaningService {
     private readonly passageRepo: ChinesePassagesRepository,
     private readonly meaningJudge: ChineseMeaningJudgeCapability,
     private readonly pointsService: PointsService,
+    private readonly specialLogsRepo: SpecialPracticeLogsRepository,
   ) {}
 
   /**
@@ -277,6 +281,28 @@ export class MeaningService {
     const award = isLastAnswerableSentence
       ? await this.awardMeaningPassage(input.studentId, passage.id)
       : null;
+
+    // 专项日志（Phase 1B）：含义专项逐句作答，一行记一句；
+    // 句级 verdict 由「字词项 + 含义项 + 情感项」塌缩而来（不能只看 correct——
+    // unanswered 的项也是 false；且没作答 / 没能判定 / 判错三者的优先级由 util 定死）。
+    const meaningVerdict = collapseUnitVerdict([...termsOut, meaningOut, emotionOut]);
+    try {
+      await this.specialLogsRepo.insert({
+        studentId: input.studentId,
+        module: 'chinese_meaning',
+        refType: 'passage',
+        refId: passage.id,
+        refKey: passage.work_title ?? null,
+        sentenceIndex: input.sentenceIndex,
+        verdict: meaningVerdict,
+        isCorrect: isCorrectOf(meaningVerdict),
+        errorCounted: meaningVerdict === 'incorrect',
+        sessionUid: null,
+      });
+    } catch (err) {
+      // 埋点绝不阻断判题：失败只 warn
+      this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);
+    }
 
     return {
       passageId: passage.id,
