@@ -2832,7 +2832,9 @@ export interface SessionTransition {
   effects: SessionEffects;
 }
 
-const NO_EFFECTS: SessionEffects = { start: false, end: null, heartbeat: null };
+// 空操作迁移共用的哨兵。**冻结**：它是被多处按引用返回的同一对象，
+// 将来若有调用方就地改写它，后续所有空操作迁移都会静默带上脏副作用。
+const NO_EFFECTS: SessionEffects = Object.freeze({ start: false, end: null, heartbeat: null });
 
 /**
  * 纯 reducer（spec §7.4 的状态机）。**不碰 DOM、不碰网络、不读时钟**——
@@ -2901,7 +2903,9 @@ export function transition(prev: SessionState, event: SessionEvent): SessionTran
 cd apps/web && npx vitest run src/analytics/sessionMachine.test.ts
 ```
 
-Expected: PASS（24 条）
+Expected: PASS（**22 条**——9 个整形状 `it` + 12 个 `it.each` 幂等/忽略格 + 1 个 `active + VISIBLE` 空操作）。
+
+⚠️ 覆盖面说明：4 状态 × 6 事件 = **24 格**，本表显式断言 **22 格**，缺的两格是 `active + ROUTE_ENTER` 与 `hidden + ROUTE_ENTER`（都落在 `default` 分支 → 状态不变、无副作用）。缺它们是因为**这两格在生产里不可达**：`onRouteChange` 对同一场景会先去重、对不同场景一定先发 `ROUTE_LEAVE`（把状态推回 `idle`）再发 `ROUTE_ENTER`，而 `hidden` 蕴含 `sessionUid != null`（`resetLocalState` 同时清 uid 与状态）。留着未断言，是为了不把「不可达行为」写成契约；Task 12 有一条**顺序钉子**（hidden → 切场景 → 必须先 end 再 start）守着这个前提。
 
 - [ ] **Step 5: Commit**
 
@@ -3012,6 +3016,22 @@ describe('tracker 会话生命周期', () => {
 
     expect(transport.end).toHaveBeenCalledWith(expect.any(String), 'route_change');
     expect(transport.start).toHaveBeenCalledTimes(2);
+  });
+
+  it('hidden 状态下切学习场景：仍必须先 end 再 start', async () => {
+    // 顺序钉子：状态机的 `hidden + ROUTE_ENTER` 是**死格**（状态不变、不 start）。
+    // 若 onRouteChange 不先发 ROUTE_LEAVE，切场景时会静默**开不出新会话**，
+    // 而且因为各入口都以 sessionUid 为闸门，之后整个 SPA 生命周期都不会再有会话。
+    tracker.onRouteChange(STUDY);
+    await vi.advanceTimersByTimeAsync(125_000); // 空闲 → hidden
+    const firstUid = transport.start.mock.calls[0][0].sessionUid;
+
+    tracker.onRouteChange({ module: 'en_vocabulary', scene: 'vocabulary_run', isStudyScene: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(transport.end).toHaveBeenCalledWith(firstUid, 'route_change');
+    expect(transport.start).toHaveBeenCalledTimes(2);
+    expect(transport.start.mock.calls[1][0].module).toBe('en_vocabulary');
   });
 
   it('离开到非学习场景 → end(route_change)，不再 start', async () => {
@@ -3408,7 +3428,7 @@ export function collectDeviceInfo(): {
 cd apps/web && npx vitest run src/analytics/tracker.test.ts
 ```
 
-Expected: PASS（15 条）。若 `screenClass` 断言失败，检查 jsdom 的 `window.innerWidth`（默认 1024×768 → `ipad_landscape`）。
+Expected: PASS（**16 条**——10 条生命周期 + 3 条设备分档 + 1 条「hidden 状态下切场景仍必须先 end 再 start」的顺序钉子 + 2 条不变）。若 `screenClass` 断言失败，检查 jsdom 的 `window.innerWidth`（默认 1024×768 → `ipad_landscape`）。
 
 - [ ] **Step 5: Commit**
 
