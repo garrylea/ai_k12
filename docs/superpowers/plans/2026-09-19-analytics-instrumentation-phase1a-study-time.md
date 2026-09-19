@@ -74,7 +74,7 @@ spec §7.1/§7.5 把 `beacon.ts`、事件批量队列、`/api/track/events` 写�
 | `apps/server/src/common/interceptors/analytics.interceptor.test.ts` | 补心跳跳过断言 |
 | `apps/server/src/modules/parent-insights/parent-insights.module.ts` | 加 `StudyTimeService` + `ParentAnalyticsRepository` + `ControlsRepository` |
 | `apps/server/src/modules/parent-insights/parent-insights.controller.ts` | 加 2 个端点 |
-| `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts` | 加 4 个响应类型 |
+| `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts` | 加 `StudyTimeSummary` / `TodayUsageSummary`（**Task 7 Step 0**，因为 service 是产出方；Task 8 只消费） |
 | `apps/server/src/modules/parent-insights/window.util.ts` | 导出 `toDayString` + 新增 `resolveRange(from?, to?)` |
 | `apps/web/src/routes/index.tsx` | 包 pathless `AnalyticsShell` |
 | `apps/web/src/store/learnContextStore.ts` | 加 `subjectId` |
@@ -1746,13 +1746,19 @@ git commit -m "feat(analytics): ParentAnalyticsRepository（学习时长聚合 +
 - Test: `apps/server/src/database/repositories/controls.repo.test.ts`（若已存在则追加）
 - Create: `apps/server/src/modules/parent-insights/study-time.service.ts`
 - Test: `apps/server/src/modules/parent-insights/study-time.service.test.ts`
+- Modify: `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts`（追加 `StudyTimeSummary` / `TodayUsageSummary`——**由本任务加**，因为 `StudyTimeService` 是它们的产出方；Task 8 只消费）
 
 **Interfaces:**
 - Consumes: `ParentAnalyticsRepository`（Task 6）、`ControlsRepository`、`StudySessionsService`（Task 4）
 - Produces:
   - `resolveRange(from?: string, to?: string): ReportWindow`（`from`/`to` 为 `YYYY-MM-DD`；缺省近 7 天；非法回落默认；`from > to` 自动交换）
   - `ControlsRepository.findDailyTimeLimit(studentId: number): Promise<number | null>`
+  - DTO 类型 `StudyTimeSummary` / `TodayUsageSummary`（Task 8 的 controller 与前端 `api.ts` 都按这两个形状对齐）
   - `class StudyTimeService`：`getStudyTime(studentId, from?, to?)` 与 `getTodayUsage(studentId)`
+
+- [ ] **Step 0: 先把两个 DTO 类型加到 `dto/parent-insights.dto.ts` 末尾**
+
+`StudyTimeService` 的返回类型就是这两个接口，所以**本任务必须先加它们**，否则 `tsc` 会红（Task 8 只消费、不再新增）。照 plan 的 Task 8 Step 1 里那两段 `export interface StudyTimeSummary` / `export interface TodayUsageSummary` 逐字粘贴到文件末尾。
 
 - [ ] **Step 1: 写 `resolveRange` 的失败测试**
 
@@ -2107,20 +2113,22 @@ git commit -m "feat(parent): StudyTimeService + resolveRange + controls 每日�
 ### Task 8: 家长端两个新端点 + DTO + 模块接线
 
 **Files:**
-- Modify: `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts`（追加 4 个类型）
+- Modify: `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts`（**只读确认**：`StudyTimeSummary` / `TodayUsageSummary` 已由 Task 7 Step 0 添加；本任务若要给 controller 加查询参数类型再加，别重复定义）
 - Modify: `apps/server/src/modules/parent-insights/parent-insights.controller.ts`
 - Modify: `apps/server/src/modules/parent-insights/parent-insights.module.ts`
 - Test: `apps/server/src/modules/parent-insights/parent-insights.controller.test.ts`（若不存在则新建，验证归属校验先于取数）
 
 **Interfaces:**
-- Consumes: `StudyTimeService`（Task 7）
+- Consumes: `StudyTimeService`（Task 7）、`StudyTimeSummary` / `TodayUsageSummary`（Task 7 Step 0 已加到 DTO）
 - Produces:
   - `GET /api/parent/students/:studentId/study-time?from=&to=` → `StudyTimeSummary`
   - `GET /api/parent/students/:studentId/today-usage` → `TodayUsageSummary`
 
-- [ ] **Step 1: 加 DTO 类型**
+- [ ] **Step 1: 确认 DTO 类型已就位（**不要重复定义**）**
 
-在 `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts` 末尾追加：
+`StudyTimeSummary` / `TodayUsageSummary` 已在 Task 7 Step 0 加进 `dto/parent-insights.dto.ts` 末尾。这里只需 `grep` 确认两个 `export interface` 都在，然后直接进 Step 2。若你出于任何原因发现它们缺失，说明 Task 7 没做全——**先回报，不要在这里补抄一份**（两处定义会让 `tsc` 报 duplicate identifier，而且这两个形状是 `StudyTimeService` 的契约，必须只有一处真源）。
+
+为便于核对，Task 7 Step 0 粘进去的应当是下面这两段（**仅供比对，勿再粘贴一次**）：
 
 ```ts
 /**
