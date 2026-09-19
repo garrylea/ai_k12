@@ -282,7 +282,9 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   request_id          VARCHAR(64)   DEFAULT NULL COMMENT '关联 api_request_logs.request_id',
   student_id          BIGINT        DEFAULT NULL COMMENT '**有归属时必填**（不是可选优化）；仅探活/系统任务等无归属调用为 NULL，见 §6.5',
   dialogue_id         BIGINT        DEFAULT NULL COMMENT '无外键：对话可删，账本不可',
-  scene               VARCHAR(30)   NOT NULL,
+  -- 可空：探活与管理员对话构造的模型配置没有路由归因（§6.5 第 5 条），
+  -- 且账本是批量 INSERT——一个 NULL 不能毒掉整批。
+  scene               VARCHAR(30)   DEFAULT NULL,
   subject             VARCHAR(20)   DEFAULT NULL,
   capability          VARCHAR(30)   DEFAULT NULL,
   model_key           VARCHAR(50)   DEFAULT NULL COMMENT '路由条目 key（聚合按它，不按 model_id）',

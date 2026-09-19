@@ -113,3 +113,16 @@ SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_models' AND COLUMN_NAME = 'output_price_per_1k');
 SET @ddl := IF(@has_col = 1, 'ALTER TABLE llm_models DROP COLUMN output_price_per_1k', 'SELECT 1');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ============================================================
+-- 收敛：llm_call_logs.scene 改为可空（已是 NULL 则跳过）
+-- ============================================================
+-- llm_call_logs.scene 改为可空：探活与管理员对话构造的模型配置没有路由归因，scene 是真的未知；
+-- 而账本是**多行批量 INSERT**——一个 NULL 会让整条语句失败、进而让整批（含正常的学习 token 记录）
+-- 被 buffer 丢弃且不重试（TelemetryBuffer 有意如此：埋点故障绝不放大）。故列必须可空。
+-- 不用 'unknown' 占位：那是编造的 scene 值，聚合时可能与真实 scene 撞名。
+SET @is_not_null := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_call_logs'
+    AND COLUMN_NAME = 'scene' AND IS_NULLABLE = 'NO');
+SET @ddl := IF(@is_not_null = 1, 'ALTER TABLE llm_call_logs MODIFY COLUMN scene VARCHAR(30) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
