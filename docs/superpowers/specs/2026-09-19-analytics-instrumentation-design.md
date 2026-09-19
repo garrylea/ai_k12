@@ -169,6 +169,16 @@ CREATE TABLE IF NOT EXISTS study_sessions (
 
 服务端在写入 `study_sessions` 时应用这条规则（`input_type` 是前端上报的，二者在同一个请求里，可当场校正）。单测必须覆盖：`Macintosh` UA + `input_type='touch'` → `ipad`；`Macintosh` UA + `input_type='mouse'` → `mac`。
 
+**会话与设备的对应关系（决定了能做哪些设备分析）**：
+
+- **一个会话 = 一台设备**。会话生命周期是「进入学习页 → 离开 / 挂机结束」，`session_uid` 由前端在内存中生成，**重新登录必然产生新会话**。
+- 因此「先在 PC 上学，出门换 Pad 重新登录继续学」是**两段会话、两行 `study_sessions`**，各自带自己的设备画像。这是正常且预期内的数据形态，不是重复计数。
+- **由此可做的分析**（虽然不认「同一台物理设备」，但按**类别**足够）：
+  - 「大多数学生用什么设备学习」= 按 `platform_class` 分组做 `COUNT(DISTINCT student_id)`（**按人头，不按会话**——一个学生一天开 10 次会话只能算 1 人）。
+  - **多设备学生**：`COUNT(DISTINCT platform_class) GROUP BY student_id` → 「有多少学生用过不止一类设备」。
+  - **设备切换**：相邻两段会话的 `platform_class` 不同 → 切换次数；配合 `byDay` 还能看出「平时 PC、周末 Pad」这类模式。
+- **做不到**（需设备指纹，已明确排除）：「同一个学生是不是在用**同一台** Mac」「人均持有几台设备」。
+
 **心跳累计算法（唯一实现，写在 `StudySessionsService`）**
 
 ```sql
@@ -274,7 +284,7 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
 CREATE TABLE IF NOT EXISTS llm_call_logs (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   request_id          VARCHAR(64)   DEFAULT NULL COMMENT '关联 api_request_logs.request_id',
-  student_id          BIGINT        DEFAULT NULL,
+  student_id          BIGINT        DEFAULT NULL COMMENT '**有归属时必填**（不是可选优化）；仅探活/系统任务等无归属调用为 NULL，见 §6.5',
   dialogue_id         BIGINT        DEFAULT NULL COMMENT '无外键：对话可删，账本不可',
   scene               VARCHAR(30)   NOT NULL,
   subject             VARCHAR(20)   DEFAULT NULL,
@@ -455,10 +465,17 @@ apps/server/src/scripts/seed-llm-prices.ts
 
 **归因传播（零改 14 个 capability）**：
 
-1. `ai-core/types.ts`：`RoutedModel = ModelConfig & { apiKey?: string; scene?: Scene; subject?: Subject; isFallbackEntry?: boolean }`。
+1. `ai-core/types.ts` 两处类型改动：① `RoutedModel = ModelConfig & { apiKey?: string; scene?: Scene; subject?: Subject; isFallbackEntry?: boolean }`；② `ChatRequest` 增加 `meta?: { studentId?: number; scene?: Scene; subject?: Subject; dialogueId?: number; capability?: string }`（供后台路径显式归因，见第 4 条）。
 2. `model-router.ts:39 route()` 给 `primary` 打 `scene`/`subject`，给 `fallback` 额外打 `isFallbackEntry: true`。
 3. capability 原样把 `routeResult.primary | fallback` 放进 `ChatRequest.model` → `ModelClient` 直接读。
-4. `student_id` / `request_id` 走 `AsyncLocalStorage`（`request-context.ts`）：`RequestContextMiddleware` 在入口 `als.run({requestId, studentId, role}, next)`；`ChatRequest.meta?: {studentId?, scene?, subject?, dialogueId?, capability?}` 供**非 HTTP 路径**（explanation 后台生成、title 生成）显式覆盖。
+4. `student_id` / `request_id` 走 `AsyncLocalStorage`（`request-context.ts`）：`RequestContextMiddleware` 在入口 `als.run({requestId, studentId, role}, next)`。
+
+   **`student_id` 不是「有则更好」而是硬要求** —— 它是「哪个学生最费 LLM / 用最多」这个分析的全部依据（用户明确要求，用于后续系统优化）。因此：
+
+   - **HTTP 路径**：ALS 自动带出，无需改 capability。
+   - **后台路径**（`ExplanationCacheService` fire-and-forget、title 生成等）：**必须显式传** `ChatRequest.meta: {studentId, scene, subject, dialogueId?, capability}`。取值来源现成——explanation 从被判题目的 `student_id` 取、title 从对话的 `student_id` 取。**不允许**以「ALS 可能丢上下文」为由留下 NULL。
+   - **可观测**：把 `student_id IS NULL` 的占比作为指标（`llm_call_logs` 的**归属覆盖率**）暴露在 `/analytics/quality` 上。目标是「只有探活/系统任务这类真正无归属的调用落在 NULL」。有覆盖率的仪表盘，缺口不会被静默藏住。
+   - **唯一允许 NULL 的情形**：`admin-chat`（管理员对话，无学生）、`routes/validate-connection` 探活、系统定时任务。
 5. 后台复制 `ModelConfig` 的地方（探活、admin chat）不带这些字段 → `scene` 允许 NULL（已知限制，非缺陷）。
 
 ### 6.6 usage 修复（Phase 0 必做，否则成本永远算不出）
@@ -588,13 +605,13 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | GET | `/modules` | `from,to` | 各模块使用/时长/正确率横向对比 |
 | GET | `/cohort-compare` | `metric,outcome,from,to` | 分组对比；响应**必须带** `disclaimer: 'correlation-not-causation'` |
 | GET | `/quality` | `from,to` | API 失败率/错误码分布、LLM 超时率/fallback 率、内容质量四指标 |
-| GET | `/llm-cost` | `from,to,groupBy=scene\|model\|day\|student` | 成本/token 汇总与时序；`cost` 为 NULL 的计数单列为 `unpricedCalls`（**不许当 0 求和**） |
+| GET | `/llm-cost` | `from,to,groupBy=scene\|model\|day\|student` | 成本/token 汇总与时序；`groupBy=student` 即「**哪个学生最费 LLM / 调用最多**」排行（用户明确要求的优化依据，见 §6.5）。`cost` 为 NULL 的计数单列为 `unpricedCalls`（**不许当 0 求和**）；同时返回 `attributed` / `unattributed` 调用数（归属覆盖率） |
 | GET | `/llm-calls` | `from,to,scene,model,success,page` | 逐条调用排查（分页 20） |
 | GET | `/events` | `event,module,from,to,page` | 行为事件流排查（**仅 ops tier**） |
 | GET | `/requests` | `path,status,minLatency,from,to,page` | 慢接口 / 错误码排查 |
-| GET | `/devices` | `from,to,groupBy=platform\|screen\|input\|shell\|browser` | **大多数学生用什么设备学习**。按所选维度分组，指标 = `COUNT(DISTINCT student_id)`（**按人头，不按会话**——一个学生一天开 10 次会话只能算 1 人）+ `totalSeconds` + `accuracy` + `sessions`。除 `groupBy` 维度外并列返回其他维度的交叉表（如各设备上的时长与正确率），用于回答「手机上是不是学得更短/更差」 |
+| GET | `/devices` | `from,to` | **大多数学生用什么设备学习**。返回三块：① **设备分布**按 `platform_class`（并列 `screen_class` / `input_type` / `app_shell` / `browser` 交叉表），指标 = `COUNT(DISTINCT student_id)`（**按人头，不按会话**——一个学生一天开 10 次会话只能算 1 人）+ `totalSeconds` + `accuracy` + `sessions`，用于回答「手机上是不是学得更短/更差」；② **多设备学生**：每学生 `COUNT(DISTINCT platform_class)` 的分档人数与占比；③ **设备切换**：相邻两段会话平台不同的次数与人次（见 §4.2「会话与设备的对应关系」） |
 
-`/quality` 字段：`apiFailureRate`、`errorCodeDistribution`、`llmTimeoutRate`、`llmFallbackRate`、`questionsWithoutStandardAnswer`、`kpCoverage:{covered,total,rate}`、`globalWordErrorRate:{wrong,total,rate}`（源 `english_words.error_count`）、`passageSkipRate`（抽中但未提交的篇目 / 抽中的篇目）。
+`/quality` 字段：`apiFailureRate`、`errorCodeDistribution`、`llmTimeoutRate`、`llmFallbackRate`、**`llmAttributionCoverage`（`llm_call_logs` 中 `student_id` 非空的占比，见 §6.5）**、`questionsWithoutStandardAnswer`、`kpCoverage:{covered,total,rate}`、`globalWordErrorRate:{wrong,total,rate}`（源 `english_words.error_count`）、`passageSkipRate`（抽中但未提交的篇目 / 抽中的篇目）。
 
 ### 8.4 现有端点形状变化（**触发 openapi + API 文档同步**）
 
@@ -621,8 +638,8 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | `/admin/analytics/retention` | `AnalyticsRetentionPage` | D1/D7/D30 留存（按首次活跃分组） |
 | `/admin/analytics/modules` | `AnalyticsModulesPage` | 模块使用/时长/正确率对比 + 分组对比（标注「相关非因果」） |
 | `/admin/analytics/quality` | `AnalyticsQualityPage` | 接口失败率、错误码分布、LLM 超时/fallback、内容质量四指标 |
-| `/admin/analytics/llm-cost` | `AnalyticsLlmCostPage` | 按场景/模型/天/学生的 token 与成本 + `unpricedCalls` |
-| `/admin/analytics/devices` | `AnalyticsDevicesPage` | **大多数学生用什么设备学习**；各设备上的学习时长与正确率对比（验证「iPad 横屏主断点」假设、决定要不要做移动端） |
+| `/admin/analytics/llm-cost` | `AnalyticsLlmCostPage` | 按场景/模型/天/学生的 token 与成本 + `unpricedCalls`；**「最费 LLM 的学生」排行**（用于定位异常用量与做系统优化） |
+| `/admin/analytics/devices` | `AnalyticsDevicesPage` | **大多数学生用什么设备学习**；各设备上的学习时长与正确率对比；多设备学生占比与设备切换（验证「iPad 横屏主断点」假设、决定要不要做移动端） |
 | `/admin/analytics/events` | `AnalyticsEventsPage` | 原始事件 + 慢/错接口排查（v1 可推迟并入 quality） |
 
 计费配置留在已有 `/admin/models`（`AdminModelsPage.tsx` 表单加两个价格输入）。图表复用既有的 `chart-theme.ts` + `ChartLine` / `ChartBar`（recharts，取色从最近的 `[data-theme]` 容器读）。
@@ -725,7 +742,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | 3 | **`cost` 的 0 vs NULL** | 本地模型真价 0 可写 0；无用量/无价必须写 **NULL**。UI 单列 `unpricedCalls`，**不能把 NULL 当 0 求和** |
 | 4 | **流式 usage 可能拿不到** | Kimi 可能既不支持 `include_usage` 也不回 usage → 只能估算，`usage_source='estimated'` 必须可见；估算口径写一处并加测试 |
 | 5 | **`model_key` vs `model_id` 混用** | `kimi` 的 key 是 `kimi`、modelId 是 `kimi-latest`；DeepSeek 只认 `deepseek-flash`/`deepseek-v4-pro`。聚合**按 key**，别按 model_id 关联 `llm_models` |
-| 6 | **ALS 传播边界** | `ExplanationCacheService` fire-and-forget 时 `student_id` 可能为 NULL —— 可接受（账本仍记 scene/cost），但 UI 要说明「部分后台调用无学生归属」 |
+| 6 | **ALS 传播边界 → 已收紧为硬要求** | 后台生成类（explanation / title）**必须显式传 `meta.studentId`**，不许以「ALS 可能丢上下文」为由留 NULL；`student_id` 缺失率（归属覆盖率）要能在 `/analytics/quality` 上看到 |
 | 7 | **复活死表的副作用** | `student_knowledge_mastery` 有 CASCADE 到 KP（删 KP 连带删掌握度）；写入是 UPSERT **非全量重算**，未来若加重算脚本必须复用同一公式常量 |
 | 8 | **`goals` 语义变化** | 原表只有 `period`/`target_value`，加 `metric` 后需回填历史行，否则 NULL 语义要靠约定兜底 |
 | 9 | **Nest DI 坑** | `@Injectable()` + **接口类型**的可选构造参数 → 必须 `@Optional()` 或显式 `@Inject(token)`，否则**启动直接失败** |
@@ -741,7 +758,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 - 纯函数 / reducer：`sceneMap`（表驱动，覆盖每条正则）、`sessionMachine`（表驱动，覆盖 §7.4 全部迁移）、**UA 粗分类器**（表驱动：iPad / iPhone / Android 平板与手机 / Mac / Windows / Linux / Electron / 未知，并断言**同一 UA 只解析一次**的 memoize 生效）。
 - 前端：`tracker`（`setTransport` 注入假传输 + `vi.useFakeTimers()` 推进心跳与 flush）、`AnalyticsShell`（`createMemoryRouter` + `Object.defineProperty(document,'visibilityState')` + `dispatchEvent(new Event('pagehide'))`，断言收到 start/heartbeat/end 与批量 events）、**设备上报只在 start 发生一次**（心跳不重复带设备字段）。
-- 后端：`TelemetryBuffer`（满丢最旧 / flush 失败不抛 / 计数）、`MasteryService`（空答案不写 / 无 KP 不写 / 对错累加 / repo 抛错不冒泡）、`StudySessionsService`（心跳封顶 / 非本人不写 / 幂等 start / 设备字段白名单非法存 NULL）、usage 估算、**`/analytics/devices` 按 `COUNT(DISTINCT student_id)` 聚合**（构造一个学生多会话的用例，断言不会被算重）、`parent-analytics.repo` 的**隐私守卫测试**。
+- 后端：`TelemetryBuffer`（满丢最旧 / flush 失败不抛 / 计数）、`MasteryService`（空答案不写 / 无 KP 不写 / 对错累加 / repo 抛错不冒泡）、`StudySessionsService`（心跳封顶 / 非本人不写 / 幂等 start / 设备字段白名单非法存 NULL / **Mac+touch → ipad 校正**）、usage 估算、**`llm_call_logs` 的 `student_id` 归属**（HTTP 路径自动带上；explanation / title 后台调用因显式传 `meta.studentId` 也带上；只有探活/管理员对话/系统任务为 NULL——用一条用例钉住「不许出现无归属的学习类调用」）、**`/analytics/devices` 按 `COUNT(DISTINCT student_id)` 聚合**（构造一个学生多会话的用例，断言不会被算重）、`parent-analytics.repo` 的**隐私守卫测试**。
 - 每个新页面/组件补至少一条渲染测试（CLAUDE.md 硬规则，React #31 的教训）。
 - `globals: false`：多用例文件必须自己 `afterEach(() => cleanup())`，并复位模块级 Zustand 单例。
 
@@ -755,12 +772,13 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 
 ## 16. 开放问题（待确认，不影响开工）
 
+> **已拍板（评审时确认，原 Open Q1）**：`llm_call_logs` **一定**带 `student_id` —— 用户要求「能统计出哪个学生用的 LLM 最多，据此做系统优化」。落地要求见 §6.5 第 4 条（HTTP 走 ALS、后台必须显式传 `meta.studentId`、NULL 只允许探活/管理员/系统任务，并暴露归属覆盖率）。仅 ops 可见。
+
 | # | 问题 | 当前取用的默认 |
 |---|---|---|
-| 1 | `llm_call_logs` 是否带 `student_id`？ | **带**（可空 + `ON DELETE SET NULL` + 仅 ops 可见）。理由：逐学生成本排查与分组对比都需要；它不在任何家长端点可达路径上 |
-| 2 | 心跳参数（30s / 封顶 45s / idle 120s / 5min 惰性收尾）是否符合对「学习时长」的产品预期？ | 按此默认，放服务端常量一处可调 |
-| 3 | `api_request_logs` 是否保留 `raw_path` / `client_ts_ms`（可识别信息）？ | 保留，30 天清理；若要最小化可只留归一化 route |
-| 4 | ops 分析端点是否进 openapi？ | **进**（本批实现即 MVP） |
-| 5 | `study_sessions` 180 天后折 rollup 还是直接删？ | 折 rollup（Phase 3 建）；若不需跨年趋势，直接删更省 |
-| 6 | `goals.metric` 的取值集合是否就是这四种（`daily_study_minutes` / `daily_words` / `weekly_passages` / `weekly_clear_errors`）？ | 按此默认 |
-| 7 | 数据量假设（< 10k 学生 / DAU < 2k）是否成立？ | 按此设计；若量级更高，Phase 3 的 rollup 与分区需提前 |
+| 1 | 心跳参数（30s / 封顶 45s / idle 120s / 5min 惰性收尾）是否符合对「学习时长」的产品预期？ | 按此默认，放服务端常量一处可调 |
+| 2 | `api_request_logs` 是否保留 `raw_path` / `client_ts_ms`（可识别信息）？ | 保留，30 天清理；若要最小化可只留归一化 route |
+| 3 | ops 分析端点是否进 openapi？ | **进**（本批实现即 MVP） |
+| 4 | `study_sessions` 180 天后折 rollup 还是直接删？ | 折 rollup（Phase 3 建）；若不需跨年趋势，直接删更省 |
+| 5 | `goals.metric` 的取值集合是否就是这四种（`daily_study_minutes` / `daily_words` / `weekly_passages` / `weekly_clear_errors`）？ | 按此默认 |
+| 6 | 数据量假设（< 10k 学生 / DAU < 2k）是否成立？ | 按此设计；若量级更高，Phase 3 的 rollup 与分区需提前 |
