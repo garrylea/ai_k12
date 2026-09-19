@@ -2420,10 +2420,13 @@ export function startStudySession(
 export function heartbeatStudySession(
   uid: string,
   state: ClientState,
+  subjectId?: number | null,
 ): Promise<{ activeSeconds: number | null }> {
+  // subjectId 只在拿到时带：会话开头可能还没有学科（星图未加载完），后端会用它**补写**
+  // 会话的 subject_id（只补不覆盖）——否则这段时长永远归不了科（P6.5）。
   return fetchApi<{ activeSeconds: number | null }>(
     `/study-sessions/${encodeURIComponent(uid)}/heartbeat`,
-    { method: 'PATCH', body: JSON.stringify({ state }) },
+    { method: 'PATCH', body: JSON.stringify({ state, ...(subjectId ? { subjectId } : {}) }) },
   );
 }
 

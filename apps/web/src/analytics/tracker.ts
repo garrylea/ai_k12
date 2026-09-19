@@ -40,14 +40,14 @@ export interface StudySessionStartBody {
 
 export interface StudySessionTransport {
   start(body: StudySessionStartBody): Promise<unknown>;
-  heartbeat(uid: string, state: ClientState): Promise<unknown>;
+  heartbeat(uid: string, state: ClientState, subjectId?: number | null): Promise<unknown>;
   end(uid: string, reason: EndReason): Promise<unknown>;
 }
 
 /** 默认传输走 `api.ts`（带 Authorization 的 `fetch`）。测试用 `setTransport` 注入假实现。 */
 const defaultTransport: StudySessionTransport = {
   start: (body) => startStudySession(body),
-  heartbeat: (uid, state) => heartbeatStudySession(uid, state),
+  heartbeat: (uid, state, subjectId) => heartbeatStudySession(uid, state, subjectId),
   end: (uid, reason) => endStudySession(uid, reason),
 };
 
@@ -187,7 +187,8 @@ function endSession(reason: EndReason): void {
 function sendHeartbeat(next: ClientState): void {
   const uid = sessionUid;
   if (!uid) return;
-  void transport.heartbeat(uid, next).catch(() => {
+  // 带上当时可得的学科：会话开头可能还没有（星图未加载完），后端只补不覆盖（P6.5）
+  void transport.heartbeat(uid, next, subjectIdProvider()).catch(() => {
     /* 同上 */
   });
 }

@@ -29,7 +29,12 @@ const StartSchema = z.object({
   appShell: z.string().max(10).optional(),
 });
 
-const HeartbeatSchema = z.object({ state: z.enum(['visible', 'hidden']) });
+// subjectId 可选：前端在「星图加载完、拿到学科」后随心跳补写（P6.5）。
+// 允许缺失；给了但非法（0/负数/非整数）时 **宽容回落为「没带」**，不 400（心跳尽力而为）。
+const HeartbeatSchema = z.object({
+  state: z.enum(['visible', 'hidden']),
+  subjectId: z.number().int().positive().optional(),
+});
 const EndSchema = z.object({ reason: z.enum(END_REASONS) });
 
 function parseOrThrow<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -65,7 +70,12 @@ export class AnalyticsController {
     @Body() body: unknown,
   ) {
     const dto = parseOrThrow(HeartbeatSchema, body);
-    return this.studySessions.heartbeat({ studentId: user.sub, sessionUid: uid, state: dto.state });
+    return this.studySessions.heartbeat({
+      studentId: user.sub,
+      sessionUid: uid,
+      state: dto.state,
+      subjectId: dto.subjectId,
+    });
   }
 
   /** 结束会话（幂等）。 */

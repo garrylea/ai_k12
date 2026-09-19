@@ -68,7 +68,7 @@ describe('StudySessionsRepository.heartbeat', () => {
   it('增量封顶 45s，且用 GREATEST 防负数（时钟回拨）', async () => {
     const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 120 }] });
     const repo = new StudySessionsRepository(pool as any);
-    const seconds = await repo.heartbeat('uid-1', 9, 'hidden');
+    const seconds = await repo.heartbeat('uid-1', 9, 'hidden', 2);
 
     expect(seconds).toBe(120);
     const [updateSql, updateParams] = pool.execute.mock.calls[0];
@@ -84,13 +84,27 @@ describe('StudySessionsRepository.heartbeat', () => {
     const assignIndex = updateSql.indexOf('client_state = ?');
     expect(ifIndex).toBeGreaterThanOrEqual(0);
     expect(assignIndex).toBeGreaterThan(ifIndex);
-    expect(updateParams).toEqual(['hidden', 'uid-1', 9]);
+    // subject_id 只补不覆盖（P6.5）：必须是 COALESCE(subject_id, ?)，
+    // 写成 `subject_id = ?` 会把会话中途换的学科覆盖掉已完成时段的归属。
+    expect(updateSql).toContain('subject_id = COALESCE(subject_id, ?)');
+    expect(updateSql).not.toMatch(/subject_id\s*=\s*\?/);
+    expect(updateParams).toEqual(['hidden', 2, 'uid-1', 9]);
+  });
+
+  it('不传学科（null）也是合法调用：等价「这次没带」，不影响已有 subject_id', async () => {
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
+    const repo = new StudySessionsRepository(pool as any);
+
+    await repo.heartbeat('uid-1', 9, 'visible', null);
+
+    const [, updateParams] = pool.execute.mock.calls[0];
+    expect(updateParams).toEqual(['visible', null, 'uid-1', 9]);
   });
 
   it('没命中活跃会话（affectedRows=0）→ null，不报错', async () => {
     const pool = mockPool({ affectedRows: 0 });
     const repo = new StudySessionsRepository(pool as any);
-    expect(await repo.heartbeat('uid-x', 9, 'visible')).toBeNull();
+    expect(await repo.heartbeat('uid-x', 9, 'visible', null)).toBeNull();
   });
 });
 
