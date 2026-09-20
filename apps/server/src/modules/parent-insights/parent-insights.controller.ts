@@ -48,7 +48,12 @@ import type {
 } from './dto/parent-insights.dto.js';
 import type { GoalMetric } from '../../database/repositories/goals.repo.js';
 import type { ReportPeriod } from './window.util.js';
-import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, parsePositiveInt } from '../points/pagination.util.js';
+import {
+  DEFAULT_PAGE,
+  DEFAULT_PAGE_SIZE,
+  parseOptionalPositiveInt,
+  parsePositiveInt,
+} from '../points/pagination.util.js';
 
 /** `period` 只认这两个值；非法值**回落 `weekly`**（spec §6：查询类参数宽容回落，不 400）。 */
 const PeriodSchema = z.enum(['weekly', 'monthly']);
@@ -372,10 +377,14 @@ export class ParentInsightsController {
       page: parsePositiveInt(page, 'page', DEFAULT_PAGE),
       pageSize: parsePositiveInt(pageSize, 'pageSize', DEFAULT_PAGE_SIZE, ALERTS_MAX_PAGE_SIZE),
     };
-    // 空串等同「没传」；非空才解析并校验归属（def 用不到，占位而已）
-    if (studentId !== undefined && studentId !== '') {
-      query.studentId = parsePositiveInt(studentId, 'studentId', DEFAULT_PAGE);
-      await this.parentService.requireOwnedStudent(user.sub, query.studentId);
+    // `studentId` 可选：空串等同「没传」（spec §4.3）。用 `parseOptionalPositiveInt` 而不是
+    // `parsePositiveInt(..., 默认值)` —— 后者必须给个 number 默认值，而任何 number 都可能是
+    // 合法学生 id（`1` 尤其），空串会静默变成「按 1 号孩子筛选」。返回 `undefined` 的语义是
+    // 「不过滤」，与「按某个孩子过滤」在类型上就分得开。
+    const ownedStudentId = parseOptionalPositiveInt(studentId, 'studentId');
+    if (ownedStudentId !== undefined) {
+      query.studentId = ownedStudentId;
+      await this.parentService.requireOwnedStudent(user.sub, ownedStudentId);
     }
     // 只认 `'1'` 为真（spec §4.3）
     if (unreadOnly === '1') query.unreadOnly = true;

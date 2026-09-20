@@ -281,6 +281,30 @@ describe('ParentInsightsController alerts 端点（spec §4.3/§4.4）', () => {
     });
   });
 
+  it('GET：studentId 空串 → 等同「没传」（不校验归属、不带筛选），不得静默变成 studentId=1', async () => {
+    const requireOwned = vi.fn().mockResolvedValue(undefined);
+    const { controller, alerts } = makeController(requireOwned);
+
+    await controller.listAlerts(USER, '', undefined, undefined, undefined);
+
+    // 这条钉子防的是「借一个合法 id 当占位默认值」：`1` 是合法学生 id，
+    // 若解析写成 parsePositiveInt(studentId, 'studentId', 1)，空串会变成「看 1 号孩子」
+    expect(requireOwned).not.toHaveBeenCalled();
+    expect(alerts.list).toHaveBeenCalledWith(3, { page: 1, pageSize: 20 });
+  });
+
+  it('GET：studentId 非数字 → 400（不取数、不校验归属）', async () => {
+    const requireOwned = vi.fn().mockResolvedValue(undefined);
+    const { controller, alerts } = makeController(requireOwned);
+
+    await expect(
+      controller.listAlerts(USER, 'abc', undefined, undefined, undefined),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(requireOwned).not.toHaveBeenCalled();
+    expect(alerts.list).not.toHaveBeenCalled();
+  });
+
   it('GET：unreadOnly 只有 "1" 算真（"0"/缺省都不加筛选）', async () => {
     const { controller, alerts } = makeController(vi.fn().mockResolvedValue(undefined));
 

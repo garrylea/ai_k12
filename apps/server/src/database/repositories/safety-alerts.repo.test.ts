@@ -1,8 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SafetyAlertsRepository } from './safety-alerts.repo.js';
 
+/**
+ * mockPool 模拟 mysql2 的 pool 双返回形状：[rows, fields]。
+ *
+ * `execute` 与 `query` **都要 stub**：`listByParent` 的列表查询带 `LIMIT ?`，必须走
+ * `query`（客户端转义），COUNT 与其余单行查询走 `execute`。少 stub 一个，调用点会以
+ * `pool.<method> is not a function` 直接爆出来——这正是 2026-09-20 那次修复的连带影响
+ * （改池方法后旧 mock 只 stub 了 execute）。
+ */
 const mockPool = () => ({
   execute: vi.fn().mockResolvedValue([[], []]),
+  query: vi.fn().mockResolvedValue([[], []]),
 });
 
 /**
@@ -130,7 +139,7 @@ describe('SafetyAlertsRepository.listByParent', () => {
   it('筛选按列名配对，分页参数排在筛选参数之后（不做位置硬编码）', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([[{ n: '3' }], []]);
-    pool.execute.mockResolvedValueOnce([
+    pool.query.mockResolvedValueOnce([
       [{ id: 1, parent_id: 5, student_id: 7, student_name: '小明' }],
       [],
     ]);
@@ -139,7 +148,7 @@ describe('SafetyAlertsRepository.listByParent', () => {
     const out = await repo.listByParent(5, { studentId: 7, unreadOnly: true }, 20, 40);
 
     const [countSql, countParams] = pool.execute.mock.calls[0];
-    const [listSql, listParams] = pool.execute.mock.calls[1];
+    const [listSql, listParams] = pool.query.mock.calls[0];
 
     expect(zipWhere(countSql as string, countParams as unknown[])).toEqual({
       'sa.parent_id': 5,
@@ -158,12 +167,14 @@ describe('SafetyAlertsRepository.listByParent', () => {
   it('total 来自独立 COUNT 查询（不受 LIMIT 影响），不是 items.length', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([[{ n: '42' }], []]);
-    pool.execute.mockResolvedValueOnce([[{ id: 1 }], []]);
+    pool.query.mockResolvedValueOnce([[{ id: 1 }], []]);
     const repo = new SafetyAlertsRepository(pool as any);
 
     const out = await repo.listByParent(5, {}, 1, 0);
 
-    expect(pool.execute).toHaveBeenCalledTimes(2);
+    // COUNT 走 execute、列表走 query，各一次（列表带 LIMIT ? 不能走预处理语句）
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+    expect(pool.query).toHaveBeenCalledTimes(1);
     const [countSql, countParams] = pool.execute.mock.calls[0];
     expect(countSql).toMatch(/^SELECT COUNT\(\*\) AS n FROM safety_alerts sa WHERE/);
     expect(countSql).not.toContain('LIMIT');
@@ -175,12 +186,13 @@ describe('SafetyAlertsRepository.listByParent', () => {
   it('孩子名来自 LEFT JOIN students，排序稳定（created_at DESC, id DESC）', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([[{ n: 0 }], []]);
-    pool.execute.mockResolvedValueOnce([[], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
     const repo = new SafetyAlertsRepository(pool as any);
 
     await repo.listByParent(5, {}, 10, 0);
 
-    const [listSql] = pool.execute.mock.calls[1];
+    // 列表走 query（LIMIT ?）
+    const [listSql] = pool.query.mock.calls[0];
     expect(listSql).toContain('SELECT sa.*, s.name AS student_name');
     expect(listSql).toContain('LEFT JOIN students s ON s.id = sa.student_id');
     expect(listSql).toContain('ORDER BY sa.created_at DESC, sa.id DESC');
@@ -190,7 +202,7 @@ describe('SafetyAlertsRepository.listByParent', () => {
   it('不传筛选时不加谓词、不占参数位', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([[{ n: 0 }], []]);
-    pool.execute.mockResolvedValueOnce([[], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
     const repo = new SafetyAlertsRepository(pool as any);
 
     await repo.listByParent(5, {}, 10, 0);
@@ -204,12 +216,39 @@ describe('SafetyAlertsRepository.listByParent', () => {
   it('unreadOnly=false 与缺省等价（不加 is_read 谓词）', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([[{ n: 0 }], []]);
-    pool.execute.mockResolvedValueOnce([[], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
     const repo = new SafetyAlertsRepository(pool as any);
 
     await repo.listByParent(5, { unreadOnly: false }, 10, 0);
 
     const [countSql] = pool.execute.mock.calls[0];
     expect(countSql).not.toContain('is_read');
+  });
+
+  /**
+   * 形态护栏：`LIMIT ?` 必须走 `pool.query`（客户端转义）。
+   *
+   * 为什么单靠「断言 SQL 字符串」的仓储测试拦不住这类错误：`mockPool` 从不真正执行 SQL，
+   * 所以「SQL 长得对、参数顺序也对」与「MySQL 愿意执行它」是两件**结构上不可互相推导**的事。
+   * 2026-09-20 实测：`listByParent` 的列表查询用 `pool.execute` 时，真库对
+   * `GET /api/parent/alerts` **每调必 500**（`ER_WRONG_ARGUMENTS Incorrect arguments to
+   * mysqld_stmt_execute`），而当时全部仓储用例绿。本用例是那条真库现象的**离线替身**：
+   * 钉住「带 LIMIT ? 的语句只准走 query」。同款钉子见 `parent-insights.repo.test.ts:349`、
+   * `point-ledger.repo.test.ts:151-157`。
+   */
+  it('形态护栏：列表 SQL 含 LIMIT ? → 走 query，且 execute 一条含 LIMIT ? 的 SQL 都没收到', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: 0 }], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    await repo.listByParent(5, {}, 20, 0);
+
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    expect(pool.query.mock.calls[0][0]).toContain('LIMIT ? OFFSET ?');
+    // 反向断言：execute 收到的任何 SQL 都不得含 LIMIT ?（改回 execute 时这一条与上一条同时红）
+    for (const [sql] of pool.execute.mock.calls) {
+      expect(String(sql)).not.toMatch(/LIMIT\s*\?/);
+    }
   });
 });
