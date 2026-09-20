@@ -608,6 +608,7 @@ git commit -m "feat(controls): 仓储支持预警灵敏度两个阈值列"
 **Files:**
 - Modify: `apps/web/src/analytics/types.ts`、`sessionMachine.ts`、`tracker.ts`
 - Modify: `apps/web/src/analytics/sessionMachine.test.ts`、`tracker.test.ts`
+- Modify: **`apps/web/src/services/api.ts`**（`heartbeatStudySession` 加第 4 个参数 `reason` —— 漏了它 `reason` 到不了 wire、功能静默失效，2026-09-20 实施时补上）
 - Modify: `apps/server/src/modules/analytics/analytics.controller.ts`、`study-sessions.service.ts`、`analytics.module.ts`
 - Modify: `apps/server/src/database/repositories/study-sessions.repo.ts` + `.test.ts`
 - Modify: `apps/server/src/modules/analytics/study-sessions.service.test.ts`
@@ -616,6 +617,7 @@ git commit -m "feat(controls): 仓储支持预警灵敏度两个阈值列"
 - `HiddenReason = 'away' | 'idle'`（前端 `analytics/types.ts` 新增，**唯一声明**，`services/api.ts` 从这导入）
 - `SessionEffects.heartbeat: { state: ClientState; reason: HiddenReason | null } | null`（`reason` 仅 `state==='hidden'` 时有意义）
 - `StudySessionsRepository.heartbeat(sessionUid, studentId, state, subjectId, reason: HiddenReason | null)`
+- `StudySessionsRepository.end(...)` **返回值同样追加** `hiddenSince` / `hiddenReason`（`end` 路径也要判阈值，brief 原文只写了 heartbeat 的变更，2026-09-20 实施时补上）
 - `StudySessionsService.heartbeat(input: { studentId; sessionUid; state; subjectId?; reason? })`
 
 **⚠️ 本任务最高风险点：SET 列顺序**
@@ -625,10 +627,10 @@ git commit -m "feat(controls): 仓储支持预警灵敏度两个阈值列"
 ```
 SET hidden_away_seconds = hidden_away_seconds
       + IF(client_state = 'hidden' AND hidden_reason = 'away',
-           GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+           GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
     hidden_idle_seconds = hidden_idle_seconds
       + IF(client_state = 'hidden' AND hidden_reason = 'idle',
-           GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+           GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
     active_seconds = active_seconds
       + IF(client_state = 'visible',
            GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
@@ -640,12 +642,18 @@ SET hidden_away_seconds = hidden_away_seconds
     last_heartbeat_at = NOW(3)
 ```
 
-**为什么两个累计列必须排在 `client_state` / `hidden_reason` / `hidden_since` 之前**：它们要读**本次上报前**的 `client_state`、`hidden_reason`、`hidden_since`。一旦排到后面，读到的就是本次刚写的新值 → 静默算错（既有 `active_seconds` 的坑同源）。
+**⚠️ 差值的基点必须是 `last_heartbeat_at`，不是 `hidden_since`**（2026-09-20 实施时踩到）：三个累计列都是「**距上次心跳**的增量、单次封顶 45s」，与既有 `active_seconds` 完全同源。若改用 `hidden_since` 作基点，挂机段内每 30 秒的心跳都会按「距本段起点」重算并加满 45s → **系统性偏大 ~1.6×**（实测 45 → 90 → 135）。`hidden_since` 的用途是**另一个**：给服务层判「这一段连续挂机多久了」用（阈值判定），**不参与秒数累加**。
 
-**参数数组（必须逐位对应）**：`[state, reason, state, subjectId, sessionUid, studentId]`
-（`state` 出现两次：一次给 `hidden_reason` 前面的 `client_state = ?`… 不——见下）
+**为什么两个累计列必须排在 `client_state` / `hidden_reason` 之前**：它们要读**本次上报前**的 `client_state` 与 `hidden_reason`。一旦排到后面，读到的就是本次刚写的新值 → 静默算错（既有 `active_seconds` 的坑同源）。`hidden_since` 的赋值本身不参与任何 IF 求值，但**保持它排在累计列之后**，让「哪条表达式读旧值」一眼可辨。
 
-> ⚠️ 实施时**先写 SQL 再数占位符**：上面的 SET 里有 4 个 `?`（`client_state`、`hidden_reason`、`hidden_since` 的 `IF`、`subject_id`），加 WHERE 2 个 = 6 个。**写完后用 `zipInsert` 式按位置断言逐位核对**，不要凭记忆。`hidden_reason = ?` 在 visible 时传 `null`。
+**参数数组（逐位对应，共 6 个）**：`[state, reason, state, subjectId, sessionUid, studentId]`
+- `client_state = ?` ← `state`
+- `hidden_reason = ?` ← `reason`（**visible 时传 `null`**，即 `state === 'hidden' ? reason : null`）
+- `hidden_since = IF(? = 'hidden', ...)` ← `state`（同一个值第二次出现）
+- `subject_id = COALESCE(subject_id, ?)` ← `subjectId`
+- WHERE 的 `session_uid = ?` / `student_id = ?` ← 后两个
+
+> ⚠️ 实施时**先写 SQL 再数占位符**：SET 里 4 个 `?` + WHERE 2 个 = 6 个，与上面 6 个参数**逐位**核对。**不要凭记忆**（`state` 出现两次，最容易漏）。
 
 - [ ] **Step 1: 前端类型与状态机**
 
@@ -1232,24 +1240,32 @@ START TRANSACTION;
 -- ① 预警去重：同学生同 type 第二条不写（走 existsRecent 的 SQL 语义）
 SELECT CONCAT('dedupe_probe=', COUNT(*)) AS r FROM safety_alerts
   WHERE student_id = 1 AND type = 'away' AND created_at >= NOW(3) - INTERVAL 30 MINUTE;
--- ② 走神两列互不串：away 段只累加 hidden_away_seconds
+-- ② 走神两列互不串 + 差值基点是 last_heartbeat_at（不是 hidden_since）
+--    造一个「last_heartbeat_at 是 30 秒前、但 hidden_since 是 10 分钟前」的行：
+--    正确公式（基点 last_heartbeat_at）→ away 只加 30；错误公式（基点 hidden_since）→ 加满 45。
 INSERT INTO study_sessions (student_id, session_uid, module, scene, status, client_state,
-                            hidden_since, hidden_reason, hidden_away_seconds, hidden_idle_seconds)
+                            hidden_since, hidden_reason, last_heartbeat_at,
+                            hidden_away_seconds, hidden_idle_seconds)
 VALUES (1, '00000000-0000-4000-8000-0000000000aa', 'mainline', 'course_detail', 'active',
-        'hidden', NOW(3) - INTERVAL 10 MINUTE, 'away', 0, 0);
+        'hidden', NOW(3) - INTERVAL 10 MINUTE, 'away', NOW(3) - INTERVAL 30 SECOND, 0, 0);
 UPDATE study_sessions
   SET hidden_away_seconds = hidden_away_seconds
         + IF(client_state = 'hidden' AND hidden_reason = 'away',
-             GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+             GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
       hidden_idle_seconds = hidden_idle_seconds
         + IF(client_state = 'hidden' AND hidden_reason = 'idle',
-             GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+             GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
+      active_seconds = active_seconds
+        + IF(client_state = 'visible',
+             GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
       client_state = 'hidden',
       hidden_reason = 'away',
       hidden_since = IF('hidden' = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)
   WHERE session_uid = '00000000-0000-4000-8000-0000000000aa';
-SELECT CONCAT('away_only: away=', hidden_away_seconds, ' idle=', hidden_idle_seconds) AS r
+SELECT CONCAT('away_only: away=', hidden_away_seconds, ' idle=', hidden_idle_seconds,
+              ' active=', active_seconds) AS r
   FROM study_sessions WHERE session_uid = '00000000-0000-4000-8000-0000000000aa';
+-- 期望 away=30（若得到 45，说明差值基点被写成了 hidden_since，是 bug）、idle=0、active=0
 -- ③ controls 两列默认值与写入
 INSERT INTO controls (student_id) VALUES (999001) ON DUPLICATE KEY UPDATE student_id = student_id;
 SELECT CONCAT('defaults: away=', alert_away_minutes, ' idle=', alert_idle_minutes) AS r
@@ -1260,7 +1276,7 @@ ROLLBACK;
 " 2>/dev/null
 ```
 
-Expected: `away_only: away=45 idle=0`（**只累加 away**，且封顶 45s）、`defaults: away=5 idle=15`。
+Expected: `away_only: away=30 idle=0 active=0`（**只累加 away**、差值基点是 `last_heartbeat_at` 的 30 秒；若得 `away=45` 说明基点写成了 `hidden_since`，是 bug）、`defaults: away=5 idle=15`。
 
 - [ ] **Step 2: 端到端冒烟（真 dev 库，独立端口）**
 
