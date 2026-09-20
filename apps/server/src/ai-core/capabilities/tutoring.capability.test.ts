@@ -239,6 +239,36 @@ describe('TutoringCapability', () => {
     expect(result.message.content).toBe('换个话题吧～');
   });
 
+  // --- F5 回归（fix wave 2）：剥离正则必须与检测的 CRLF 口径对称 ------------------------
+  // 检测用 `trimEnd()`（`\r` 属空白 → 能认 CRLF 末行），旧剥离正则只认 `\n`，于是模型若用
+  // CRLF 换行会「判了闲聊却剥不掉」→ 标记残留进学生可见内容与历史（违反 spec §3.2）。
+  it('⑤e CRLF 内容的末行标记 → 判闲聊**且**剥净（剥离正则的 CRLF 容忍度承重）', async () => {
+    const sink = mkSink();
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('换个话题吧～\r\n<!--topic:off-->\r\n'),
+      safetyAlerts: sink,
+    });
+    const result = await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    // 检测（本就容忍 CRLF）：判闲聊、写一条 off_topic 预警
+    expect(sink.record).toHaveBeenCalledTimes(1);
+    expect(sink.record.mock.calls[0][0].type).toBe('off_topic');
+    // 剥离（本次修的）：不得残留 —— 只判不剥就是 spec §3.2 被违反
+    expect(result.message.content).not.toContain('topic:off');
+    expect(result.message.content).toBe('换个话题吧～');
+  });
+
+  it('⑤f CRLF 中段的独占行标记 → 不判闲聊但同样剥净，且不破坏行尾风格', async () => {
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('第一段\r\n<!--topic:off-->\r\n第二段'),
+    });
+    const result = await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    expect(result.message.content).not.toContain('topic:off');
+    // 只删标记那一行：相邻两行不合并、CRLF 不被打成 LF
+    expect(result.message.content).toBe('第一段\r\n第二段');
+  });
+
   it('⑤ 模型自报闲聊 → 助手消息 safety_flag = 1（不回写家长端计数会归零）', async () => {
     const capability = new TutoringCapability(convService, {
       modelClient: mkModel('换个话题吧～\n<!--topic:off-->'),

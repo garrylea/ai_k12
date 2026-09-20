@@ -84,10 +84,15 @@ const PARENT_MESSAGE: Record<SafetyAlertSignalType, string> = {
  */
 const OFF_TOPIC_MARKER_LINE = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/;
 /**
- * 全局剥离：只删**独占一行**的标记，连同其**前导**换行；后随换行由 `(?=\n|$)` 保留，
+ * 全局剥离：只删**独占一行**的标记，连同其**前导**换行；后随换行由 `(?=\r?\n|$)` 保留，
  * 以维持正文行结构（`第一段\n<!--M-->\n第二段` → `第一段\n第二段`）。
+ *
+ * ⚠️ `\r?` **不是可删的多余代码**：检测走 `trimEnd()`（`\r` 属空白，故能识别 CRLF 的末行），
+ * 剥离若只认 `\n` 就会与检测**口径不对称** —— 模型若用 CRLF 换行，末行标记会「判了闲聊却
+ * 剥不掉」，标记残留进学生可见内容与持久化历史，违反 spec §3.2 的核心要求。
+ * 加 `\r?` 后 CRLF 与 LF 同口径（且保留原有行尾风格，不把 CRLF 改成 LF）。
  */
-const OFF_TOPIC_MARKER_STRIP = /(?:^|\n)[ \t]*<!--\s*topic:off\s*-->[ \t]*(?=\n|$)/g;
+const OFF_TOPIC_MARKER_STRIP = /(?:^|\r?\n)[ \t]*<!--\s*topic:off\s*-->[ \t]*(?=\r?\n|$)/g;
 
 /** 标记是否落在「最后一个非空行」且独占该行（spec §3.2）。 */
 function isOffTopicMarkerOnLastLine(content: string): boolean {
