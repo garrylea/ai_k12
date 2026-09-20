@@ -557,7 +557,7 @@ UX §P6.6 全文只有三行：
 
 | 不变量 | 说明 |
 |---|---|
-| **预警写入永不阻断主链路** | 辅导链路与心跳链路的判定+写入**整段 try/catch，失败只 `logger.warn`**。心跳路径尤其重要：绝不能影响 `active_seconds` 累加与心跳响应 |
+| **预警写入永不阻断主链路** | 辅导链路与心跳链路的判定+写入**整段 try/catch，失败只 `logger.warn`**。心跳路径尤其重要：绝不能影响 `active_seconds` 累加与心跳响应——所以**判定与写入一律 `void` 调用、不得 `await`**：判定里含 `findAlertThresholds` 的一次 DB 往返，学生处于 hidden 时**每次心跳**（30s）都会走到它，`await` 会把这次往返静默叠加到心跳响应上（前端 fire-and-forget、用户无感、日志看不出）。`void` 的安全前提是该方法**永不 reject**（整段含 `await` 的拒绝都在 try 里），有专门的 unhandled-rejection 用例钉住 |
 | **`active_seconds` 语义不变** | 本批新增的列不参与既有的学习时长统计口径（`parent-analytics.repo.ts:43-44` 的 `EFFECTIVE_SESSION` 不动） |
 | **SET 列顺序不变** | 既有 `active_seconds` 那段的顺序不得打乱（§3.3） |
 | **预警读取失败 → 空态** | 家长端不因预警接口失败而白屏 |
@@ -644,6 +644,7 @@ UX §P6.6 全文只有三行：
 | **`countConsecutiveOffTopic` 与 `safety.yaml` 的 `off_topic.escalateThreshold`/`criticalThreshold` 保留但不再被调用** | 与上一条同源。按「先留着」的既有原则保留（含其单测），文档注明「预留未用」 |
 | **`ai_messages.safety_flag` 的语义有变（双来源）** | 从「被硬阻断的轮次」变为「被模型判为闲聊 **或** 被阻断的轮次」（后者现在只剩情绪/敏感）。家长端「对话回放」的标签与计数因此会变（**更准确**，文案已从「闲聊」改为「偏离学习」），历史数据的口径不一致 |
 | **走神预警在挂机**进行中**就会报** | 不等挂机段结束——因为「切走后不再回来」正是家长最需要知道的场景。副作用：学生仍在挂机时预警已产生，若其后回来并继续学习，该条预警依然存在 |
+| **无 `end` 的会话（浏览器崩溃 / 被强杀 / 断电）不判走神阈值** | 阈值判定只在两处发生：**心跳**与 **`end`**（§3.3「判定时机两处」）。若浏览器**崩溃 / 被系统强杀 / 断电**（不发 `pagehide`），不再有任何心跳 → 会话只能被 `closeStale` 惰性收尾（家长拉学情时触发，`end_reason='closed'`，`ended_at=last_heartbeat_at`）→ **没有任何路径做阈值判定** → 走神预警**永不产生**。正常关标签 / 页面内导航会发 `pagehide`（由 `end` 覆盖），所以风险集中在崩溃/强杀这一类。要补需让 `closeStale` 也做判定（本批**不做**：`closeStale` 的调用方在家长 GET 的路径上，判定要读阈值 + 写预警，属另一处要评估的写入点） |
 | **历史挂机数据无法回填** | 4 个新列在迁移前不存在，旧会话的「切走/无操作」细分永久缺失（与 Phase 1A 的 `subject_id` 回填同类问题） |
 
 ---
@@ -672,3 +673,4 @@ UX §P6.6 全文只有三行：
 | 2026-09-20 | 用户审核后补「走神判定口径」（§3.3 新增段 + §9 两条）：显式区分**前端写死的 120 秒空闲阈值**与**家长可调的 `alert_idle_minutes`**（两者相加才是家长感知的报警延迟，默认档约 17 分钟），并列出「哪些交互算有操作 / 哪些不算」（打字、删除、点按钮、滚动、触屏均算；`mousemove`/`focus`/`blur`/`resize` 不算） |
 | 2026-09-20 | **Task 0 验证门已执行并通过（3/3）→ 采用方案 A**。改动：`tutoring/math/auxiliary.md` 与 `mainline.md` 加入 `<!--topic:off-->` 标记指令；新增手工 eval 脚本 `src/ai-core/__tests__/off-topic-marker.ts`。实测三条（数学题 / 语文理解题 / 闲聊）标记行为均符合预期、辅导质量无退化；同时确认现有 `parseContent` 不剥离该标记 → 剥离改造必需。结果见 §3.2，命令见 §7.3 |
 | 2026-09-20 | 计划评审期补两处裁决：① **`safety_flag` 双来源**（闲聊标记 ∪ anomaly 阻断）都计入，家长端文案从「闲聊」改「偏离学习」（§3.2 / §9 / §8）；② **端点归属**——`controls`/`alerts` 进 `parent-insights.controller.ts`，`account`/`password` 进 `parent.controller.ts` + `ParentService`（§4 开头）。实施计划见 `docs/superpowers/plans/2026-09-20-parent-controls-and-alerts.md` |
+| 2026-09-20 | **Task 4 评审修复**：§9 补一条已知限制——「无 `end` 的会话（浏览器崩溃 / 被强杀 / 断电）不判走神阈值」（评审 M-3；`closeStale` 收尾路径不做判定，本批不改代码） |

@@ -700,11 +700,13 @@ export type HiddenReason = 'away' | 'idle';
 
 - `analytics.controller.ts` 的 `HeartbeatSchema`（:34-37）加 `reason: z.enum(['away', 'idle']).optional()`（**可选**是为兼容旧客户端；spec §3.3）。
 - `study-sessions.service.ts` 的 `heartbeat` 入参加 `reason?: string`；非法/缺失归一为 `null`（同 `subjectId` 的处理，不 500）。
+- **⚠️ `reason` 必须在 service 侧再归一一次**：`state === 'hidden' ? pick(HIDDEN_REASONS, input.reason) : null`。`repo.heartbeat` 是薄 SQL 层、不做归一，手搓 `{"state":"visible","reason":"away"}`（Zod 合法）会落成 `client_state='visible'` + `hidden_reason='away'` 的坏组合，违反 `study_sessions.hidden_reason` 的列不变量（spec §3.3「回到 visible 时置 NULL」）。**2026-09-20 实施时漏了这层归一，评审 M-2 指出后补上。**
 - `study-sessions.service.ts` 在心跳与结束两条路径上做**阈值判定**（spec §3.3「判定时机两处，缺一不可」）：
   - 条件：`client_state==='hidden'` 且 `TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)) >= 对应阈值`
   - 阈值来自 `ControlsRepository.findAlertThresholds(studentId)`
   - 命中 → `void this.safetyAlerts.record({ studentId, dialogueId: null, type: reason, level: 'info', message: this.safetyAlerts.messageFor(reason, minutes), context: this.safetyAlerts.awayContext(reason, minutes) })`
   - **`end` 路径也要判**：覆盖「学生最小化后直接关掉页面」（`pagehide` 触发 end，之后不再有心跳）。
+  - **⚠️ 判定方法（`maybeRecordHiddenAlert`）的调用点一律 `void`、不得 `await`**（2026-09-20 实施时写成 `await`，评审 I-1 指出）。理由见上面 Global Constraints 的「预警写入永不阻断主链路」：它内部 `await findAlertThresholds`（一次 DB 往返），学生 hidden 时每 30 秒的心跳都会多等这一次往返；前端 fire-and-forget，用户无感、日志看不出。`void` 安全的前提是该方法**永不 reject**（整段 try/catch 含 `await` 的拒绝）——**先确认这一点再改**，并在 docstring 里写明「调用方一律 `void`、不得 `await`」防止后人「顺手 await 一下好测试」改回去。测试侧对应改用 `await vi.waitFor(() => expect(safety.record).toHaveBeenCalledWith(...))`，**不要**只删 `await` 留同步断言（会在写入前跑，恒假/不稳定）。
 - `analytics.module.ts`：import `SafetyAlertsModule`；providers 加 `ControlsRepository`；`StudySessionsService` 构造函数注入 `SafetyAlertsService` 与 `ControlsRepository`。
 
 - [ ] **Step 5: 服务端仓储**
@@ -722,7 +724,13 @@ export type HiddenReason = 'away' | 'idle';
 - [ ] **Step 6: 服务端测试**
 
 - `study-sessions.repo.test.ts`：**顺序钉子用例必须同步**（params 位置变了 → 会红，这是好事）；新增：`away` 只累加 `hidden_away_seconds`、`idle` 只累加 `hidden_idle_seconds`、`hidden_since` 建立与回到 visible 清空、`hidden_reason` 维护。
-- `study-sessions.service.test.ts`：新增：阈值命中写预警（`type='away'`/`'idle'`、`level='info'`）；未命中不写；`findAlertThresholds` 的分钟数真的生效（改小阈值 → 更早报）；`end` 路径也判；预警写入抛错时**心跳仍正常返回**（不阻断）。
+  - **⚠️ 映射必须按列名配对断言，不许只断言参数数组字面量**（Global Constraints 的「仓储测试」条 + 2026-09-22 的 `goals` 事故）。本语句是最容易错的一类：`state` 出现两次、占位符还藏在 `IF(...)` / `COALESCE(...)` **内部**。做法：写一个 `zipSet(sql, params)`——**按顶层逗号切分 SET 赋值子句（算括号深度，别在 `IF(...)` 内部的逗号上切）→ 取子句首部列名 → 把子句内的 `?` 依序归到该列名下**——断言 `{ client_state: 'hidden', hidden_reason: 'away', hidden_since: 'hidden', subject_id: 2 }`，再用 `restAfterSet` 断言 WHERE 的两项 `['uid-1', 9]`。⚠️ **不能照抄 `controls.repo.test.ts` 的 `zipSet`**（它用 `(\w+)\s*=\s*\?` 只认「列 = ?」，会漏掉 `IF(...)`/`COALESCE(...)` 里的两列，而它们恰恰是最容易写反的一对）。`end` 同理：`zipSet` = `{ end_reason }`、`restAfterSet` = `['uid-1', 9]`。
+  - **⚠️ 「`IF` ↔ 列」要就近断言**：把 `hidden_away_seconds` 的赋值子句单独取出，断言其内含 `hidden_reason = 'away'`；`hidden_idle_seconds` 的子句内含 `'idle'`。只断言整条 SQL 里同时出现 `'away'` 与 `'idle'` 拦不住两条 `IF` 对调（对调后两个字符串都还在，只是挂错列 → 两口径互换）。
+  - **⚠️ 别留「断言自己传进去的实参」的恒真断言**（如 `expect(params[1]).toBe('idle')`、`expect(params[2]).toBe('hidden')`）——把 SQL 里对应那段删掉仍全绿。改成语义断言（按列名配对 / 就近断言子句内容）。
+  - **⚠️ 用变异验证断言非空转**：把「`hidden_since` 与 `subject_id` 子句对调」「两条累计列的 `IF` 守卫对调」各做一次，确认新断言**必红**再还原。2026-09-20 首次实施时这两类对调能让全部旧断言**全绿**（评审 I-2 逐条推演，修复时实跑确认）。
+- `study-sessions.service.test.ts`：新增：阈值命中写预警（`type='away'`/`'idle'`、`level='info'`）；未命中不写；`findAlertThresholds` 的分钟数真的生效（改小阈值 → 更早报）；`end` 路径也判；`state='visible'` + `reason='away'` → 落库 `hidden_reason` 为 `null`（M-2 的归一）。
+  - 因为判定是 `void` 出去的：命中写入的断言用 `await vi.waitFor(...)`；「未达阈值不写」要先 `await flushAsync()`（让出一个宏任务）**再断言「没写」**，否则是恒真。
+  - **「预警写入失败不阻断心跳」这条用例必须保持有意义**：`void` 之后「心跳仍返回 200」由构造保证、不再是被测行为。断言重心移到真正还在被测的三件事：① 心跳响应本身正常；② 失败被 `logger.warn` 吞掉；③ **`void` 出去的那个 promise 没有逃逸成 unhandled rejection**（`void` 引入的新风险，用 run 级 `process.on('unhandledRejection')` 探针钉住——这是唯一能观测到它的方式）。再加一条「判定被挂住时心跳仍立刻返回、放行后才写预警」的用例，直接钉「心跳路径不 `await` 判定」这条硬约束。
 
 - [ ] **Step 7: 跑测试 + 类型检查（两端）**
 
