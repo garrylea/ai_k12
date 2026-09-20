@@ -2430,6 +2430,25 @@ export function getParentAlerts(params: ParentAlertListParams = {}): Promise<Par
   return fetchApi<ParentAlertPage>(`/parent/alerts${query ? `?${query}` : ''}`);
 }
 
+/** 轮询用的未读预警（spec §3.3：banner 只需要展示字段）。 */
+export interface ParentUnreadAlertItem {
+  id: number;
+  type: string;
+  level: string;
+  message: string;
+  studentName: string | null;
+  createdAt: string;
+}
+
+export interface ParentUnreadAlerts {
+  items: ParentUnreadAlertItem[];
+  total: number;
+}
+
+export function getParentUnreadAlerts(): Promise<ParentUnreadAlerts> {
+  return fetchApi<ParentUnreadAlerts>('/parent/alerts/unread');
+}
+
 /** 标记单条预警已读（幂等）。后端返回 `null`。 */
 export function markParentAlertRead(alertId: number): Promise<null> {
   return fetchApi<null>(`/parent/alerts/${alertId}/read`, { method: 'PATCH' });
