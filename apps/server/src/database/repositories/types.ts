@@ -79,7 +79,7 @@ export interface SafetyAlertRow extends RowDataPacket {
   student_id: number;
   dialogue_id: number | null;
   message_id: number | null;
-  type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
+  type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive' | 'away' | 'idle';
   level: 'info' | 'warning' | 'critical';
   message: string;
   context: string | null;
