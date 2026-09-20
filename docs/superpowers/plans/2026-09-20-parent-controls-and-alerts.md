@@ -109,7 +109,7 @@
 | `apps/server/src/ai-core/infra/safety-guard.ts` | **删** off_topic 硬阻断与辅线豁免（保留 anomaly 分支与 `countConsecutiveOffTopic`） |
 | `apps/server/src/ai-core/capabilities/tutoring.capability.ts` | `parseContent` 剥离标记并返回 `offTopic`；`recordSafetySignals`；两条入口传 `safetyFlag` |
 | `apps/server/src/ai-core/types.ts` | `SaveMessageEntry` 加可选 `safetyFlag` |
-| `apps/server/src/services/conversation/index.ts` | `:144` 改 `msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)` |
+| `apps/server/src/services/conversation/index.ts` | `:144` 改 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))`（**外层 `Number(...)` 必需**，理由见 Step 3） |
 | `apps/server/src/modules/conversations/conversations.service.ts` | `:199` 同上 |
 | `apps/server/src/modules/ai/ai.module.ts` | import `SafetyAlertsModule`；factory 注入 `SafetyAlertsService` 传给 `TutoringCapability` |
 | `apps/server/src/modules/parent-insights/parent-insights.controller.ts` | 加 controls / alerts 四端点 |
@@ -809,7 +809,7 @@ export interface SafetyAlertSink {
   record(input: {
     studentId: number;
     dialogueId: number | null;
-    type: 'off_topic' | 'emotional' | 'sensitive';
+    type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
     level: 'info' | 'warning' | 'critical';
     message: string;
     context: string | null;
@@ -822,13 +822,35 @@ export interface TutoringCapabilityDeps {
 }
 ```
 
+> **⚠️ union 必须含 `'abusive'`**（Task 5 实现时踩过）：`SafetyGuard.detectAnomalyType` 的返回类型是
+> `AnomalyType = 'emotional' | 'sensitive' | 'abusive'`，anomaly 分支把 `alertPayload.type` **原样透传**
+> 到 sink，不收窄就过不了 `tsc`。`SafetyAlertsService.messageFor('abusive')` 已覆盖（→ 敏感文案），与
+> `pickGentleBlockMessage` 的 abusive→sensitive 约定同源。**运行时不可达** —— `detectAnomalyType`
+> 只可能返回 `'emotional'`/`'sensitive'`，从不返回 `abusive`。
+> 同理 `SafetyAlert.level` 的类型是更宽的 `AlertLevel`（含 `'none'`），而 sink 只收 `'info' | 'warning' | 'critical'`；
+> 调用点用 `alert.level === 'critical' ? 'critical' : 'warning'` 收窄。**收窄是安全的**：anomaly 分支的
+> `alertLevel` 与 `alertPayload.level` 是**同一个三目表达式**（`safety-guard.ts:90` 与 `:95`），取值恒为
+> `'warning' | 'critical'`，收窄对这两个值恒等（只有 `SafetyAlert.level` 更宽才需要收窄）。
+
 构造函数存 `this.safetyAlerts = deps?.safetyAlerts`。
 
 **(b)** `parseContent` 剥离标记：
 
 ```ts
-/** 模型自报的闲聊标记（spec §3.2）：独占最后一行、HTML 注释形式（学生端渲染不可见）。 */
-const OFF_TOPIC_MARKER = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/m;
+/**
+ * 模型自报的闲聊标记（spec §3.2）：HTML 注释形式（学生端渲染不可见）。
+ * - **检测**只认「最后一个非空行、且该行只有标记」（不带 `m`/`g`，逐行全等判断）。
+ * - **剥离**删掉所有**独占一行**的标记（不管在第几行）；夹在句子中间的不匹配、保持原样。
+ */
+const OFF_TOPIC_MARKER_LINE = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/;
+/** 全局剥离：连同标记行的**前导**换行一起删；后随换行由 `(?=\n|$)` 保留以维持行结构。 */
+const OFF_TOPIC_MARKER_STRIP = /(?:^|\n)[ \t]*<!--\s*topic:off\s*-->[ \t]*(?=\n|$)/g;
+
+/** 标记是否落在「最后一个非空行」且独占该行（spec §3.2）。 */
+function isOffTopicMarkerOnLastLine(content: string): boolean {
+  const trimmed = content.trimEnd();
+  return OFF_TOPIC_MARKER_LINE.test(trimmed.slice(trimmed.lastIndexOf('\n') + 1));
+}
 
   private parseContent(rawContent: string): {
     content: string;
@@ -838,9 +860,14 @@ const OFF_TOPIC_MARKER = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/m;
     const parsed = this.responseParser.parse({ rawContent, mode: 'text' });
     let content = parsed.rawText ?? rawContent;
 
-    // 先剥标记（它比 JSON 块更靠后，且闲聊轮次不会有 JSON 块）
-    const offTopic = OFF_TOPIC_MARKER.test(content);
-    if (offTopic) content = content.replace(OFF_TOPIC_MARKER, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+    // 先剥标记（它比 JSON 块更靠后，且闲聊轮次不会有 JSON 块）。
+    // 检测：只认「最后一个非空行独占」（spec §3.2）—— 位置不合法（中段/内联）不判闲聊。
+    // 剥离：凡是**独占一行**的标记都删掉（不管在第几行），标记永不进学生可见内容与历史。
+    const offTopic = isOffTopicMarkerOnLastLine(content);
+    const stripped = content.replace(OFF_TOPIC_MARKER_STRIP, '');
+    if (stripped !== content) {
+      content = stripped.replace(/\n{3,}/g, '\n\n').trim();
+    }
 
     let structuredQuestion: StructuredQuestionOutput | undefined;
     const jsonBlock = this.responseParser.extractJsonBlock(content);
@@ -865,7 +892,7 @@ const OFF_TOPIC_MARKER = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/m;
   private recordSafetySignals(input: {
     studentId: string;
     dialogueId: string;
-    type: 'off_topic' | 'emotional' | 'sensitive';
+    type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
     level: 'info' | 'warning' | 'critical';
     studentMessage: string;
   }): void {
@@ -896,15 +923,28 @@ const OFF_TOPIC_MARKER = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/m;
 
 - `tutor()`：`const { content, structuredQuestion, offTopic } = this.parseContent(...)`；`saveMessages` 的 assistant 条目加 `safetyFlag: offTopic`；随后 `if (offTopic) this.recordSafetySignals({ ... })`。
 - `tutorStream()`：同（`:197` 之后），并在 `yield { type:'done', ... }` 之前调。
-- `prepare()`：在 anomaly 的 `shouldBlock` 分支里、`saveMessages` **之后**调 `recordSafetySignals`（`type` 取 `safetyResult.anomalyType`，`level` 取 `safetyResult.alertLevel`）。**这是 `alertPayload` 第一次被消费**（spec §2.2）。
+- `prepare()`：在 anomaly 的 `shouldBlock` 分支里、`saveMessages` **之后**调 `recordSafetySignals`。**取 `type`/`level` 时消费 `safetyResult.alertPayload`**（`alertPayload.type` / `alertPayload.level`）—— **这是 `alertPayload` 第一次被真正消费**（spec §2.2；brief 也硬要求「真的把它用起来，而不是另起一套」）。
+  > 原 plan 这一句自相矛盾：既说「`type` 取 `safetyResult.anomalyType`、`level` 取 `safetyResult.alertLevel`」，又说「`alertPayload` 第一次被消费」。**两者逐值等价** —— `alertPayload.type === anomalyType`、`alertPayload.level === alertLevel`（同一三目表达式，`safety-guard.ts:83-99`），所以**行为中性**；但只有取 `alertPayload` 才满足 spec §2.2 的「消费」意图。实现选择消费 `alertPayload`，并由变异证明（把 `alertPayload.type` 改成与派生值不同的值 → 用例 RED）。
 
 - [ ] **Step 3: `safety_flag` 回写 + 家长端文案口径（用户 2026-09-20 裁决）**
 
 **取值规则（两处写同一表达式，保持一致）**：
 
 ```
-safety_flag = msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)
+safety_flag = Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))
 ```
+
+> **⚠️ 外层 `Number(...)` 必需，别当多余代码删掉**（Task 5 实现时踩过）：
+> `safetyFlag` 是 `boolean`，`??` 会**原样返回它**（`true` 而非 `1`），而 `safety_alerts` /
+> `ai_messages.safety_flag` 的列类型是 INT。**`tsc` 不报这个错** —— `AiMessageRow extends
+> RowDataPacket` 带 `[column: string]: any` 索引签名（`types.ts:26`），而 `createMany` 的入参是
+> `Omit<AiMessageRow, …>`；`Omit` 用 `keyof`（被索引签名撑成 `string | number`）把具名属性
+> **全部抹成 `any`**，于是类型检查不再约束 `safety_flag`。评审已用最小探针复现：带索引签名无错、
+> 去掉索引签名立刻 `TS2322: Type 'boolean' is not assignable to type 'number'`。
+> 不加 `Number(...)` 的后果：单测断言 `= 1` 直接红，且真库里靠 mysql2 转义把 `true` 写进 INT 列。
+> （两处**不是逐字相同**而是**语义等价**：`services/conversation/index.ts` 有 `msg` 对象，
+> `modules/conversations/conversations.service.ts` 是位置参数、没有 `msg`——plan :925 也知道这点，
+> 别把这种不一致当 bug。）
 
 **⚠️ 删掉 off_topic 硬阻断后，`safety_flag = 1` 有 两个来源**（不是 spec §9 措辞里说的单一来源）：
 
@@ -939,9 +979,10 @@ safety_flag = msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)
 
 - [ ] **Step 5: 测试改写 + 新增**
 
-- `safety-guard.test.ts`：**删** off_topic 相关的 `shouldBlock` 断言；保留 anomaly 断言；新增「主线 off_topic 也不再阻断」（替代原来的「辅线豁免」用例）。
+- `safety-guard.test.ts`：该文件**原本就没有** `check()`/`shouldBlock` 断言（plan 原写「删」是错的，无可删 —— GAP-1）→ 改为**新增**三条 `check()` 用例：① 主线 off_topic 不再阻断；② **辅线 off_topic 同样走统一的 off_topic 分支**（⚠️ 断言必须能区分两个分支：`classification === 'off_topic'` **且** `isLearningRelated === false`；**不能只断言 `shouldBlock === false`** —— 被删的旧辅线豁免段返回体也是 `shouldBlock: false`，只断言它则把豁免段注入回去仍全绿，是**假钉**，钉不住 spec §3.1 的「删掉辅线豁免段」）；③ anomaly 仍阻断 + `alertPayload`。
 - `__tests__/safety-classification.ts`：off_topic 用例（:47-56）改为断言「不再判 shouldBlock」（注释说明原因）。
 - `tutoring.capability.test.ts`：新增 ① 标记被识别并从 `content` 剥离；② 标记**不进历史**（`saveMessages` 收到的 assistant content 不含标记）；③ 无标记时不写预警；④ **两条入口（`tutor` / `tutorStream`）都覆盖**；⑤ `safetyFlag` 正确回写（`offTopic` → `true`）；⑥ anomaly 轮次也写预警且 `level='critical'`（sensitive）；⑦ 文案表与 `SafetyAlertsService.messageFor` 逐字一致。
+  另补（F4/F5 位置与剥离边界的钉子）：④c 标记独占**最后一个非空行** → 判闲聊 + 内容不含标记；④d 标记独占一行但在**正文中段** → **不**判闲聊（本次收紧的钉子）；④e 标记**夹在句子中间** → **不**判闲聊；⑤c 模型写了两遍标记 → 两处都不残留（全局替换承重）；⑤d 标记在第一行 → content 不以换行开头。
 - `services/conversation` 与 `modules/conversations` 的既有测试：新增「`safetyFlag` 显式传入时优先于 `type==='block'` 推导；未传时行为不变」。**再补一条**：`safetyFlag=true`（闲聊，`type='socratic'`）与 `type='block'`（anomaly）**都**落成 `safety_flag = 1`（两类口径）。
 - `ParentChatLogsPage.test.tsx`：`:127` 的断言改 `'偏离学习'`；新增「计数文案是『偏离学习 N』、不含『闲聊』」（钉住本次文案口径变更）。
 
@@ -949,9 +990,20 @@ safety_flag = msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)
 
 ```bash
 cd apps/server && npx vitest run src/ai-core src/services/conversation src/modules/conversations && npx tsc --noEmit
-npx tsx src/ai-core/__tests__/off-topic-marker.ts   # 期望仍 3/3
+npx tsx src/ai-core/__tests__/off-topic-marker.ts   # 期望 3/3（观测点已前移，见下方说明）
 cd ../web && npx vitest run src/pages/parent/ParentChatLogsPage.test.tsx && npx tsc -b
 ```
+
+> **⚠️ 不能「原样重跑」这条门 —— 观测点必须前移**（Task 5 实现时踩过）：旧门的唯一观测点是
+> `result.message.content` 里有没有标记，而 **Task 5 Step 2 的 `parseContent` 正是要把标记从这里剥掉**
+> —— 二者互斥，原样重跑**必然 2/3**，而且脚本会打印**误导性的**「方案 A 不通过，需切方案 B（并行 LLM 分类器）」。
+> 所以 `off-topic-marker.ts` 已改为从**标记的唯一下游消费者**观测：注入一个**假 sink**，断言
+> sample③ 真的写出一条 `off_topic` 预警（sample①② 不写），并**新增**「标记不残留于学生端内容」断言
+> （旧门没有这条）。这是**更强**的验证（信号真的产生 + 内容真的干净），不是放宽。
+> 另：脚本的 `studentId` 从 `'test_student'` 改为 `'1'` —— `recordSafetySignals` 对非有限数**静默 return**
+> （`Number('test_student') = NaN`），不改则门永远收不到信号。生产路径不会踩这个坑（JWT `sub` 是数字）。
+> ⚠️ 该文件**不在本 Task 的 Files 清单里**，但在 `git add apps/server/src/ai-core` 的路径范围内；
+> 不改它则本 Step 永久 2/3 且输出误导结论。
 
 - [ ] **Step 7: 提交**
 

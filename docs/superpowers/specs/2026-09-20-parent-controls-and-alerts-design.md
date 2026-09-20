@@ -218,6 +218,13 @@ UX §P6.6 全文只有三行：
 
 **服务端处理**：在 `parseContent`（`tutoring.capability.ts:389-402`）中检测并剥离，返回 `offTopic: boolean`；两个入口据此写 `safety_alerts(type='off_topic')`（落点见 §3.1 的表）。
 
+**检测规则（精确口径，2026-09-20 Task 5 收紧后）**：`offTopic = true` **当且仅当**「标记独占**最后一个非空行**」—— 取 `content.trimEnd()` 的最后一行做全等匹配（该行除标记外只允许前后空白）。因此：
+- 标记独占一行但**在正文中段**（其后还有正文）→ **不**判闲聊；
+- 标记**夹在句子中间**（非独占一行，如 `……<!--topic:off-->……`）→ **不**判闲聊。
+> 旧实现的正则带 `m` 但不锚定末尾，任何独占一行的标记都会判闲聊 —— 比本节要求**宽**，属静默偏离，已收紧。**位置之外的宽松点**：剥离是**另一条规则**（见下），它不看位置，因此正文中段独占一行的标记仍会被**剥离**（但**不**判闲聊）。
+
+**剥离规则**：凡是**独占一行**的标记一律删掉（**不管它在第几行**），保证「标记永不进学生可见内容与历史」（§3.2 的核心要求）。夹在句子中间的（非独占一行）不匹配、保持原样。实现用**全局**替换（`replace` 带 `g`）并去掉首尾多余换行 —— 模型若写了两遍标记，两处都要清掉（只去第一处会让第二处残留进学生可见内容）。
+
 **⚠️ 必须同时回写 `ai_messages.safety_flag`（否则会打坏既有功能）**：现在 `safety_flag` 的唯一来源是「助手回复的 `type === 'block'`」（`services/conversation/index.ts:144`、`modules/conversations/conversations.service.ts:199`）。闲聊不再硬阻断 ⇒ 不再有 `block` 消息 ⇒ **`safety_flag` 将永远是 0，家长端「对话回放」页的「闲聊/偏离学习」标签与「闲聊 N」计数会全部归零**（`parent-insights.repo.ts:673` 的 `block_count`、`ParentChatLogsPage.tsx:66,410`）。
 
 因此：给 `saveMessages` 的消息对象加**可选** `safetyFlag?: boolean`，取值规则改为 `msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)`；两条入口保存 assistant 消息时传 `safetyFlag: offTopic`。
@@ -646,6 +653,8 @@ UX §P6.6 全文只有三行：
 | **走神预警在挂机**进行中**就会报** | 不等挂机段结束——因为「切走后不再回来」正是家长最需要知道的场景。副作用：学生仍在挂机时预警已产生，若其后回来并继续学习，该条预警依然存在 |
 | **无 `end` 的会话（浏览器崩溃 / 被强杀 / 断电）不判走神阈值** | 阈值判定只在两处发生：**心跳**与 **`end`**（§3.3「判定时机两处」）。若浏览器**崩溃 / 被系统强杀 / 断电**（不发 `pagehide`），不再有任何心跳 → 会话只能被 `closeStale` 惰性收尾（家长拉学情时触发，`end_reason='closed'`，`ended_at=last_heartbeat_at`）→ **没有任何路径做阈值判定** → 走神预警**永不产生**。正常关标签 / 页面内导航会发 `pagehide`（由 `end` 覆盖），所以风险集中在崩溃/强杀这一类。要补需让 `closeStale` 也做判定（本批**不做**：`closeStale` 的调用方在家长 GET 的路径上，判定要读阈值 + 写预警，属另一处要评估的写入点） |
 | **历史挂机数据无法回填** | 4 个新列在迁移前不存在，旧会话的「切走/无操作」细分永久缺失（与 Phase 1A 的 `subject_id` 回填同类问题） |
+| **标记若未落在「最后一个非空行」→ 该轮不判闲聊、不产生预警** | §3.2 的检测规则要求标记独占最后一行；若模型把标记写在正文中段或夹在句子里，该轮**不**判闲聊（剥离仍会处理独占一行的标记）。Task 0 实测模型稳定写在末行；**本批的验证门（`off-topic-marker.ts` 真模型 3/3）会兜住这一点** —— 若模型不再把标记写在末行，sample③ 的 `signalRecorded` 会变 false → 门 FAIL。这是**有意收紧**（对齐 §3.2 与提示词），残余风险由此门覆盖 |
+| **`SafetyAlertSink` 的 union 含 `'abusive'` 但运行时不可达** | `SafetyGuard.detectAnomalyType` 的声明返回类型是 `AnomalyType`（含 `abusive`），anomaly 分支把 `alertPayload.type` 原样透传，不收窄过不了 `tsc`；`SafetyAlertsService.messageFor('abusive')` 已覆盖（→ 敏感文案）。但检测器只可能返回 `'emotional'`/`'sensitive'`，**从不返回 `abusive`**，故该分支在运行时不可达。同理 `level` 在调用点收窄为 `'critical' | 'warning'`（anomaly 的 level 恒为这两者之一） |
 
 ---
 
@@ -672,5 +681,6 @@ UX §P6.6 全文只有三行：
 | 2026-09-20 | 自查修正三处内部矛盾：① 闲聊的 `level` 原写「沿用连续 3/5 次升级」，但升级依赖被删的关键词计数 → 改为恒 `warning` 并把「无频繁语义」列入 §9；② 补上「必须同时回写 `ai_messages.safety_flag`」——否则家长端对话回放的闲聊标签与计数会归零（§3.2 / §7.1 / §8 / §9）；③ 补明两条入口（`tutor` / `tutorStream`）共用 `prepare()` 的写入落点（§3.1） |
 | 2026-09-20 | 用户审核后补「走神判定口径」（§3.3 新增段 + §9 两条）：显式区分**前端写死的 120 秒空闲阈值**与**家长可调的 `alert_idle_minutes`**（两者相加才是家长感知的报警延迟，默认档约 17 分钟），并列出「哪些交互算有操作 / 哪些不算」（打字、删除、点按钮、滚动、触屏均算；`mousemove`/`focus`/`blur`/`resize` 不算） |
 | 2026-09-20 | **Task 0 验证门已执行并通过（3/3）→ 采用方案 A**。改动：`tutoring/math/auxiliary.md` 与 `mainline.md` 加入 `<!--topic:off-->` 标记指令；新增手工 eval 脚本 `src/ai-core/__tests__/off-topic-marker.ts`。实测三条（数学题 / 语文理解题 / 闲聊）标记行为均符合预期、辅导质量无退化；同时确认现有 `parseContent` 不剥离该标记 → 剥离改造必需。结果见 §3.2，命令见 §7.3 |
+| 2026-09-20 | **Task 5 评审收尾（Fix 1）**：§3.2 补**精确**的检测/剥离规则（检测只认「最后一个非空行独占」；剥离对所有独占一行的标记做**全局**替换并去首尾换行）；§9 补两条已知限制（①标记未落末行 → 该轮不判闲聊、由验证门兜住；②sink union 含 `abusive` 但运行时不可达）。plan 同步回写 3 处实现偏离（`Number(...)` 必需、验证门观测点前移、union 扩 `abusive`）与 3 个已知错误代码块，并订正 Step 5 的假钉断言（辅线用例须断言 `classification`/`isLearningRelated`） |
 | 2026-09-20 | 计划评审期补两处裁决：① **`safety_flag` 双来源**（闲聊标记 ∪ anomaly 阻断）都计入，家长端文案从「闲聊」改「偏离学习」（§3.2 / §9 / §8）；② **端点归属**——`controls`/`alerts` 进 `parent-insights.controller.ts`，`account`/`password` 进 `parent.controller.ts` + `ParentService`（§4 开头）。实施计划见 `docs/superpowers/plans/2026-09-20-parent-controls-and-alerts.md` |
 | 2026-09-20 | **Task 4 评审修复**：§9 补一条已知限制——「无 `end` 的会话（浏览器崩溃 / 被强杀 / 断电）不判走神阈值」（评审 M-3；`closeStale` 收尾路径不做判定，本批不改代码） |
