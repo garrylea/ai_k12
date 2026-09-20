@@ -1,6 +1,8 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { StudySessionsRepository } from '../../database/repositories/study-sessions.repo.js';
 import type { StudySessionRow } from '../../database/repositories/study-sessions.repo.js';
+import { ControlsRepository } from '../../database/repositories/controls.repo.js';
+import { SafetyAlertsService } from '../safety/safety-alerts.service.js';
 import { parseUserAgent } from '../../common/utils/user-agent.util.js';
 import type { PlatformClass } from '../../common/utils/user-agent.util.js';
 
@@ -56,6 +58,13 @@ const APP_SHELLS = ['web', 'electron'] as const;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * 走神原因白名单（spec §3.3）。与前端 `analytics/types.ts` 的 `HiddenReason` **同源**，
+ * 也是 `HeartbeatSchema` 的 `reason` 枚举。
+ */
+type HiddenReason = 'away' | 'idle';
+const HIDDEN_REASONS: readonly HiddenReason[] = ['away', 'idle'];
+
 export interface StartSessionInput {
   studentId: number;
   sessionUid: string;
@@ -78,9 +87,13 @@ function pick<T extends string>(allowed: readonly T[], value: string | null | un
 
 @Injectable()
 export class StudySessionsService {
+  private readonly logger = new Logger(StudySessionsService.name);
+
   constructor(
     @Inject(StudySessionsRepository) private readonly repo: StudySessionsRepository,
     @Inject('SUBJECTS_REPO_FOR_ANALYTICS') private readonly subjectsRepo: SubjectsRepoLike,
+    @Inject(SafetyAlertsService) private readonly safetyAlerts: SafetyAlertsService,
+    @Inject(ControlsRepository) private readonly controlsRepo: ControlsRepository,
   ) {}
 
   /**
@@ -150,6 +163,7 @@ export class StudySessionsService {
     sessionUid: string;
     state: string;
     subjectId?: number;
+    reason?: string;
   }): Promise<{ activeSeconds: number | null }> {
     if (input.state !== 'visible' && input.state !== 'hidden') {
       throw new BadRequestException({ code: 1001, message: "state 必须是 visible 或 hidden" });
@@ -160,8 +174,21 @@ export class StudySessionsService {
       Number.isInteger(input.subjectId) && (input.subjectId as number) > 0
         ? (input.subjectId as number)
         : null;
-    const seconds = await this.repo.heartbeat(input.sessionUid, input.studentId, input.state, subjectId);
-    return { activeSeconds: seconds };
+    // reason 同 subjectId 的口径：非法/缺失一律归一为 null（=「没带原因」，旧客户端即如此），
+    // 不 400 —— 走神原因丢了只是这一段归不了 away/idle 两口径，不该把整条心跳打掉。
+    const reason = pick(HIDDEN_REASONS, input.reason);
+
+    const result = await this.repo.heartbeat(
+      input.sessionUid,
+      input.studentId,
+      input.state,
+      subjectId,
+      reason,
+    );
+    if (result) {
+      await this.maybeRecordHiddenAlert(input.studentId, result.hiddenReason, result.hiddenSince);
+    }
+    return { activeSeconds: result?.activeSeconds ?? null };
   }
 
   /** 结束。未命中（已结束/不存在）→ 回读现有值，幂等（spec §8.1）。 */
@@ -174,11 +201,60 @@ export class StudySessionsService {
       throw new BadRequestException({ code: 1001, message: `未知 end reason：${input.reason}` });
     }
     const done = await this.repo.end(input.sessionUid, input.studentId, input.reason);
-    if (done) return { activeSeconds: done.activeSeconds, endedAt: done.endedAt };
+    if (done) {
+      // 结束路径也判一次阈值（spec §3.3「判定时机两处，缺一不可」）：覆盖「学生最小化后
+      // 直接关掉页面」——pagehide 触发 end 之后不再有任何心跳，只靠心跳路径这条永远报不出来。
+      await this.maybeRecordHiddenAlert(input.studentId, done.hiddenReason, done.hiddenSince);
+      return { activeSeconds: done.activeSeconds, endedAt: done.endedAt };
+    }
 
     const row = await this.repo.findByUid(input.sessionUid);
     if (!row || row.student_id !== input.studentId) return { activeSeconds: null, endedAt: null };
     return { activeSeconds: row.active_seconds, endedAt: row.ended_at };
+  }
+
+  /**
+   * 走神阈值判定 + 写预警（spec §3.3）。**心跳与结束两条路径共用**。
+   *
+   * 判定口径：**当前这一段连续挂机**（`hidden_since`）已持续 ≥ 家长设定的分钟数。
+   * ⚠️ 注意 `hidden_since` 是客户端 120s 空闲判定（`tracker.ts` 的 `IDLE_TIMEOUT_MS`，
+   * **写死、不接家长配置**）之后才建立的，所以家长感知的「多久没操作」= 120s + 该阈值
+   * （默认档约 17 分钟）。别把 `alert_idle_minutes` 当成「无操作 N 分钟」。
+   *
+   * 为什么在**阈值处**就报、不等挂机段结束：学生切走后再不回来正是家长最需要知道的场景；
+   * 只在「回到前台」判定的话，这个场景永远报不出来（spec §9 已记录该副作用）。
+   *
+   * **整段 try/catch、失败只 warn**：判定与写入绝不阻断主链路——心跳响应与 `active_seconds`
+   * 的累加不能因为这里失败而受影响（`record()` 自身也永不抛，见 `SafetyAlertsService`）。
+   * 30 分钟去重窗口在 `SafetyAlertsService` 里，所以挂机期间每次心跳重复命中也只写一条。
+   */
+  private async maybeRecordHiddenAlert(
+    studentId: number,
+    hiddenReason: string | null,
+    hiddenSince: Date | null,
+  ): Promise<void> {
+    try {
+      if (hiddenReason !== 'away' && hiddenReason !== 'idle') return;
+      if (!hiddenSince) return;
+
+      const elapsedSeconds = Math.floor((Date.now() - hiddenSince.getTime()) / 1000);
+      const thresholds = await this.controlsRepo.findAlertThresholds(studentId);
+      const thresholdMinutes =
+        hiddenReason === 'away' ? thresholds.awayMinutes : thresholds.idleMinutes;
+      if (elapsedSeconds < thresholdMinutes * 60) return;
+
+      const minutes = Math.floor(elapsedSeconds / 60);
+      void this.safetyAlerts.record({
+        studentId,
+        dialogueId: null,
+        type: hiddenReason,
+        level: 'info',
+        message: this.safetyAlerts.messageFor(hiddenReason, minutes),
+        context: this.safetyAlerts.awayContext(hiddenReason, minutes),
+      });
+    } catch (err) {
+      this.logger.warn(`走神预警判定失败（已忽略，不影响心跳）：${String(err)}`);
+    }
   }
 
   /**

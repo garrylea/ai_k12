@@ -6,6 +6,7 @@ import type {
   AppShell,
   ClientState,
   EndReason,
+  HiddenReason,
   InputType,
   SceneInfo,
   ScreenClass,
@@ -40,14 +41,19 @@ export interface StudySessionStartBody {
 
 export interface StudySessionTransport {
   start(body: StudySessionStartBody): Promise<unknown>;
-  heartbeat(uid: string, state: ClientState, subjectId?: number | null): Promise<unknown>;
+  heartbeat(
+    uid: string,
+    state: ClientState,
+    subjectId?: number | null,
+    reason?: HiddenReason | null,
+  ): Promise<unknown>;
   end(uid: string, reason: EndReason): Promise<unknown>;
 }
 
 /** 默认传输走 `api.ts`（带 Authorization 的 `fetch`）。测试用 `setTransport` 注入假实现。 */
 const defaultTransport: StudySessionTransport = {
   start: (body) => startStudySession(body),
-  heartbeat: (uid, state, subjectId) => heartbeatStudySession(uid, state, subjectId),
+  heartbeat: (uid, state, subjectId, reason) => heartbeatStudySession(uid, state, subjectId, reason),
   end: (uid, reason) => endStudySession(uid, reason),
 };
 
@@ -60,6 +66,15 @@ let currentKey: string | null = null;
 /** 当前场景的完整信息。开会话必须同时知道 module/scene，而 `currentKey` 只是个去重键。 */
 let currentInfo: SceneInfo | null = null;
 let sessionUid: string | null = null;
+/**
+ * 当前挂机段的原因（`hidden` 时才有值）。
+ *
+ * 为什么需要：30s 的**周期心跳**没有新事件可喂状态机（tick 不是状态机事件），
+ * 它只能把当前状态再报一次——但「当前为什么挂着」推不出来（`state === 'hidden'`
+ * 既可能是 `idle` 也可能是 `away`）。所以在 `runTransition` 执行 `effects.heartbeat`
+ * 时同步记下它，tick 直接复用；**别在 tick 里重新推断**。
+ */
+let currentHiddenReason: HiddenReason | null = null;
 let lastInputAt = 0;
 let lastInputRecordedAt = 0;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -184,11 +199,12 @@ function endSession(reason: EndReason): void {
   });
 }
 
-function sendHeartbeat(next: ClientState): void {
+function sendHeartbeat(next: { state: ClientState; reason: HiddenReason | null }): void {
   const uid = sessionUid;
   if (!uid) return;
-  // 带上当时可得的学科：会话开头可能还没有（星图未加载完），后端只补不覆盖（P6.5）
-  void transport.heartbeat(uid, next, subjectIdProvider()).catch(() => {
+  // 带上当时可得的学科：会话开头可能还没有（星图未加载完），后端只补不覆盖（P6.5）。
+  // `reason` 只在 hidden 时有意义（服务端据此分 away/idle 两口径累计，spec §3.3）。
+  void transport.heartbeat(uid, next.state, subjectIdProvider(), next.reason).catch(() => {
     /* 同上 */
   });
 }
@@ -227,7 +243,11 @@ function runTransition(event: SessionEvent): void {
 
   if (next.effects.start) beginSession();
   if (next.effects.end) return endSession(next.effects.end);
-  if (next.effects.heartbeat) sendHeartbeat(next.effects.heartbeat);
+  if (next.effects.heartbeat) {
+    // 同步记下「本段挂机的原因」供周期心跳复用（见 `currentHiddenReason` 的注释）。
+    currentHiddenReason = next.effects.heartbeat.reason;
+    sendHeartbeat(next.effects.heartbeat);
+  }
 }
 
 /**
@@ -236,11 +256,15 @@ function runTransition(event: SessionEvent): void {
  * 状态机，所以不需要（也无法）用 machine event 表达。只在 `active` / `hidden` 时发
  * （`idle` / `ended` 不该再有心跳）。代价是「状态名 → 上报值」的映射在此重复了一份
  * （与 `sessionMachine` 的 `effects.heartbeat` 同义）——这是不动已冻结事件集的取舍。
+ *
+ * 挂机段的原因（`reason`）**复用 `currentHiddenReason`**，不在 tick 里重新推断：
+ * `hidden` 状态本身分不出「前台发呆」与「页面被切走」。
  */
 function armTimers(): void {
   disarmTimers();
   heartbeatTimer = setInterval(() => {
-    if (state === 'active' || state === 'hidden') sendHeartbeat(state === 'active' ? 'visible' : 'hidden');
+    if (state === 'active') sendHeartbeat({ state: 'visible', reason: null });
+    else if (state === 'hidden') sendHeartbeat({ state: 'hidden', reason: currentHiddenReason });
   }, HEARTBEAT_INTERVAL_MS);
 
   idleTimer = setInterval(() => {
@@ -263,6 +287,7 @@ function resetLocalState(): void {
   sessionUid = null;
   lastInputAt = 0;
   lastInputRecordedAt = 0;
+  currentHiddenReason = null;
 }
 
 // ---------------------------------------------------------------- 设备分档

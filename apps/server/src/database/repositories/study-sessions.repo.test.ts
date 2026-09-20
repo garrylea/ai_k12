@@ -68,43 +68,151 @@ describe('StudySessionsRepository.heartbeat', () => {
   it('增量封顶 45s，且用 GREATEST 防负数（时钟回拨）', async () => {
     const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 120 }] });
     const repo = new StudySessionsRepository(pool as any);
-    const seconds = await repo.heartbeat('uid-1', 9, 'hidden', 2);
+    const out = await repo.heartbeat('uid-1', 9, 'hidden', 2, 'away');
 
-    expect(seconds).toBe(120);
+    expect(out?.activeSeconds).toBe(120);
     const [updateSql, updateParams] = pool.execute.mock.calls[0];
     expect(updateSql).toContain('LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)');
     expect(updateSql).toContain('GREATEST(0,');
     expect(updateSql).toContain("IF(client_state = 'visible'");
     expect(updateSql).toContain('heartbeat_count = heartbeat_count + 1');
     expect(updateSql).toContain("WHERE session_uid = ? AND student_id = ? AND status = 'active'");
-    // 顺序是 load-bearing：MySQL 的 SET 从左到右求值，后出现的表达式会看到**已赋值**的新值。
-    // 若把 `client_state = ?` 挪到 IF 之前，IF 就会读到本次上报的新状态（hidden 心跳不再补计
-    // 最后一段 visible、visible 心跳反而把 hidden 期间也计上），静默算错时长。
-    const ifIndex = updateSql.indexOf("IF(client_state = 'visible'");
-    const assignIndex = updateSql.indexOf('client_state = ?');
-    expect(ifIndex).toBeGreaterThanOrEqual(0);
-    expect(assignIndex).toBeGreaterThan(ifIndex);
     // subject_id 只补不覆盖（P6.5）：必须是 COALESCE(subject_id, ?)，
     // 写成 `subject_id = ?` 会把会话中途换的学科覆盖掉已完成时段的归属。
     expect(updateSql).toContain('subject_id = COALESCE(subject_id, ?)');
     expect(updateSql).not.toMatch(/subject_id\s*=\s*\?/);
-    expect(updateParams).toEqual(['hidden', 2, 'uid-1', 9]);
+    // 参数逐位对应：state / reason / state（hidden_since 的 IF）/ subjectId / uid / studentId。
+    expect(updateParams).toEqual(['hidden', 'away', 'hidden', 2, 'uid-1', 9]);
+    expect(updateParams).toHaveLength(6);
+  });
+
+  it('SET 列顺序是 load-bearing：三个累计列 + hidden_since 的 IF 都必须排在赋值之前', async () => {
+    // MySQL 的 SET 从左到右求值，后出现的表达式会看到**已赋值**的新值。
+    // 三个累计列要读**本次上报前**的 client_state / hidden_reason / hidden_since；
+    // 一旦把 `client_state = ?` 挪到前面，语句照样能跑，但口径全错、静默算错时长。
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 120 }] });
+    const repo = new StudySessionsRepository(pool as any);
+    await repo.heartbeat('uid-1', 9, 'visible', null, null);
+
+    const [sql] = pool.execute.mock.calls[0];
+    const awayIdx = sql.indexOf('hidden_away_seconds = hidden_away_seconds');
+    const idleIdx = sql.indexOf('hidden_idle_seconds = hidden_idle_seconds');
+    const activeIdx = sql.indexOf('active_seconds = active_seconds');
+    const assignStateIdx = sql.indexOf('client_state = ?');
+    const assignReasonIdx = sql.indexOf('hidden_reason = ?');
+    const assignSinceIdx = sql.indexOf('hidden_since = IF(?');
+    const assignSubjectIdx = sql.indexOf('subject_id = COALESCE(subject_id, ?)');
+
+    for (const [name, idx] of [
+      ['hidden_away_seconds', awayIdx],
+      ['hidden_idle_seconds', idleIdx],
+      ['active_seconds', activeIdx],
+      ['client_state = ?', assignStateIdx],
+      ['hidden_reason = ?', assignReasonIdx],
+      ['hidden_since = IF(?', assignSinceIdx],
+      ['subject_id = COALESCE', assignSubjectIdx],
+    ] as const) {
+      expect(idx, `${name} 没找到`).toBeGreaterThanOrEqual(0);
+    }
+
+    // 三个累计列都在三个赋值之前（它们读的是旧值）
+    expect(awayIdx).toBeLessThan(assignStateIdx);
+    expect(awayIdx).toBeLessThan(assignReasonIdx);
+    expect(awayIdx).toBeLessThan(assignSinceIdx);
+    expect(idleIdx).toBeLessThan(assignStateIdx);
+    expect(idleIdx).toBeLessThan(assignReasonIdx);
+    expect(idleIdx).toBeLessThan(assignSinceIdx);
+    expect(activeIdx).toBeLessThan(assignStateIdx);
+    expect(activeIdx).toBeLessThan(assignReasonIdx);
+    expect(activeIdx).toBeLessThan(assignSinceIdx);
+    // hidden_since 的 IF 读旧 hidden_since → 必须排在两个挂机累计列之后
+    expect(assignSinceIdx).toBeGreaterThan(awayIdx);
+    expect(assignSinceIdx).toBeGreaterThan(idleIdx);
+    // 既有顺序：subject_id 仍在 client_state 之后（别挪到累计列之前，会看不清哪条读旧值）
+    expect(assignSubjectIdx).toBeGreaterThan(assignStateIdx);
+  });
+
+  it('away 段只累加 hidden_away_seconds（按 hidden_reason 分流，两条 IF 各自守卫）', async () => {
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
+    const repo = new StudySessionsRepository(pool as any);
+    await repo.heartbeat('uid-1', 9, 'hidden', null, 'away');
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain("IF(client_state = 'hidden' AND hidden_reason = 'away'");
+    expect(sql).toContain("IF(client_state = 'hidden' AND hidden_reason = 'idle'");
+    // 两条挂机累计都按 hidden_since 差值、同样封顶 45s
+    expect(sql.match(/LEAST\(TIMESTAMPDIFF\(SECOND, hidden_since, NOW\(3\)\), 45\)/g)).toHaveLength(2);
+    expect(params[1]).toBe('away');
+  });
+
+  it('idle 段只累加 hidden_idle_seconds', async () => {
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
+    const repo = new StudySessionsRepository(pool as any);
+    await repo.heartbeat('uid-1', 9, 'hidden', null, 'idle');
+
+    const [, params] = pool.execute.mock.calls[0];
+    expect(params[1]).toBe('idle');
+  });
+
+  it('hidden_since 建立（hidden 时 COALESCE 保住本段起点）与回到 visible 清空', async () => {
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
+    const repo = new StudySessionsRepository(pool as any);
+    await repo.heartbeat('uid-1', 9, 'hidden', null, 'away');
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    // hidden → 建立（已建立则不动：COALESCE 保住本段起点，供 service 判「这一段连续多久」）
+    expect(sql).toContain("hidden_since = IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)");
+    // 第三个占位符就是 state（`client_state = ?` 之外还要再出现一次）
+    expect(params[2]).toBe('hidden');
+
+    // 回到 visible → 同一个表达式落到 NULL 分支，清空本段
+    // （每次 heartbeat 是「UPDATE + 回读 SELECT」两条，故第二次的 UPDATE 在 calls[2]）
+    await repo.heartbeat('uid-1', 9, 'visible', null, null);
+    const [sql2, params2] = pool.execute.mock.calls[2];
+    expect(sql2).toContain("hidden_since = IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)");
+    expect(params2[2]).toBe('visible');
+  });
+
+  it('hidden_reason 维护：hidden 时写本次原因，visible 时写 null', async () => {
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
+    const repo = new StudySessionsRepository(pool as any);
+
+    await repo.heartbeat('uid-1', 9, 'hidden', null, 'idle');
+    expect(pool.execute.mock.calls[0][1][1]).toBe('idle');
+
+    await repo.heartbeat('uid-1', 9, 'visible', null, null);
+    expect(pool.execute.mock.calls[2][1][1]).toBeNull();
   });
 
   it('不传学科（null）也是合法调用：等价「这次没带」，不影响已有 subject_id', async () => {
     const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
     const repo = new StudySessionsRepository(pool as any);
 
-    await repo.heartbeat('uid-1', 9, 'visible', null);
+    await repo.heartbeat('uid-1', 9, 'visible', null, null);
 
     const [, updateParams] = pool.execute.mock.calls[0];
-    expect(updateParams).toEqual(['visible', null, 'uid-1', 9]);
+    expect(updateParams).toEqual(['visible', null, 'visible', null, 'uid-1', 9]);
+  });
+
+  it('返回本段挂机信息（hidden_since / hidden_reason）供 service 判阈值', async () => {
+    const since = new Date('2026-09-20T10:00:00.000Z');
+    const pool = mockPool({
+      affectedRows: 1,
+      rows: [{ active_seconds: 300, hidden_since: since, hidden_reason: 'away' }],
+    });
+    const repo = new StudySessionsRepository(pool as any);
+
+    const out = await repo.heartbeat('uid-1', 9, 'hidden', null, 'away');
+
+    expect(out).toEqual({ activeSeconds: 300, hiddenSince: since, hiddenReason: 'away' });
+    const [selectSql] = pool.execute.mock.calls[1];
+    expect(selectSql).toContain('SELECT active_seconds, hidden_since, hidden_reason');
   });
 
   it('没命中活跃会话（affectedRows=0）→ null，不报错', async () => {
     const pool = mockPool({ affectedRows: 0 });
     const repo = new StudySessionsRepository(pool as any);
-    expect(await repo.heartbeat('uid-x', 9, 'visible', null)).toBeNull();
+    expect(await repo.heartbeat('uid-x', 9, 'visible', null, null)).toBeNull();
   });
 });
 
@@ -119,6 +227,38 @@ describe('StudySessionsRepository.end', () => {
     expect(sql).toContain('end_reason = ?');
     expect(sql).toContain('ended_at = NOW(3)');
     expect(out?.activeSeconds).toBe(300);
+  });
+
+  it('结束前也补计最后一段挂机秒数（pagehide 后不再有心跳），且不写挂机三列', async () => {
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 300, ended_at: new Date('2026-09-19T10:00:00Z') }] });
+    const repo = new StudySessionsRepository(pool as any);
+    await repo.end('uid-1', 9, 'pagehide');
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain("IF(client_state = 'hidden' AND hidden_reason = 'away'");
+    expect(sql).toContain("IF(client_state = 'hidden' AND hidden_reason = 'idle'");
+    // 三条累计列必须排在 `last_heartbeat_at = NOW(3)` 之前（active_seconds 读旧 last_heartbeat_at）
+    expect(sql.indexOf('active_seconds = active_seconds')).toBeLessThan(
+      sql.indexOf('last_heartbeat_at = NOW(3)'),
+    );
+    // end 不改 client_state / hidden_since / hidden_reason（本段信息要留给 service 判定）
+    expect(sql).not.toContain('client_state = ?');
+    expect(sql).not.toContain('hidden_since =');
+    expect(sql).not.toContain('hidden_reason = ?');
+    expect(params).toEqual(['pagehide', 'uid-1', 9]);
+  });
+
+  it('返回本段挂机信息供 service 在结束路径判阈值', async () => {
+    const since = new Date('2026-09-20T10:00:00.000Z');
+    const pool = mockPool({
+      affectedRows: 1,
+      rows: [{ active_seconds: 300, ended_at: new Date('2026-09-19T10:00:00Z'), hidden_since: since, hidden_reason: 'idle' }],
+    });
+    const repo = new StudySessionsRepository(pool as any);
+    const out = await repo.end('uid-1', 9, 'pagehide');
+
+    expect(out?.hiddenSince).toEqual(since);
+    expect(out?.hiddenReason).toBe('idle');
   });
 
   it('没命中（已结束/不存在）→ null', async () => {

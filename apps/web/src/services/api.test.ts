@@ -224,6 +224,22 @@ describe('学习会话与学习时长端点：路径、编码与 body', () => {
     expect(requestBody(fetchMock)).toEqual({ state: 'hidden' });
   });
 
+  it('heartbeatStudySession 带 subjectId + reason → 两者都进 body（走神两口径的唯一 wire 入口）', async () => {
+    const fetchMock = stubData({ activeSeconds: 12 });
+
+    await heartbeatStudySession('uid-1', 'hidden', 7, 'away');
+
+    expect(requestBody(fetchMock)).toEqual({ state: 'hidden', subjectId: 7, reason: 'away' });
+  });
+
+  it('heartbeatStudySession 的 reason=null → body 里不出现 reason（后端按可选处理）', async () => {
+    const fetchMock = stubData({ activeSeconds: 12 });
+
+    await heartbeatStudySession('uid-1', 'visible', 7, null);
+
+    expect(requestBody(fetchMock)).toEqual({ state: 'visible', subjectId: 7 });
+  });
+
   it('endStudySession → PATCH .../end，body 恰好 {reason}', async () => {
     const fetchMock = stubData({ activeSeconds: 30, endedAt: null });
 

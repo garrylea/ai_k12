@@ -1,12 +1,12 @@
-import type { ClientState, EndReason, SessionEvent, SessionState } from './types';
+import type { ClientState, EndReason, HiddenReason, SessionEvent, SessionState } from './types';
 
 export interface SessionEffects {
   /** 要新开一段会话（`sessionUid` 由 tracker 生成）。 */
   start: boolean;
   /** 要结束当前会话（`null` = 不结束）。 */
   end: EndReason | null;
-  /** 要发一次心跳（`null` = 不发）。 */
-  heartbeat: ClientState | null;
+  /** 要发一次心跳（`null` = 不发）。`reason` 仅在 `state === 'hidden'` 时有意义。 */
+  heartbeat: { state: ClientState; reason: HiddenReason | null } | null;
 }
 
 export interface SessionTransition {
@@ -35,20 +35,33 @@ const NO_EFFECTS: SessionEffects = Object.freeze({ start: false, end: null, hear
  *
  * `hidden` 期间**不结束会话**：用户切出去看一眼消息就回来，不该被算成两次学习；
  * 但也不计时（服务端只在 `client_state = 'visible'` 时累加秒数）。
+ *
+ * `effects.heartbeat.reason` 区分两种挂机：`IDLE_TIMEOUT`（前台发呆）→ `idle`、
+ * `HIDDEN`（页面被切走）→ `away`；回到 `visible` 一律 `null`。服务端据此把两类
+ * 挂机时长**分开累计**（spec §3.3）。
  */
 export function transition(prev: SessionState, event: SessionEvent): SessionTransition {
   switch (prev) {
     case 'idle':
       return event === 'ROUTE_ENTER'
-        ? { state: 'active', effects: { start: true, end: null, heartbeat: 'visible' } }
+        ? {
+            state: 'active',
+            effects: { start: true, end: null, heartbeat: { state: 'visible', reason: null } },
+          }
         : { state: 'idle', effects: NO_EFFECTS };
 
     case 'active':
       switch (event) {
         case 'IDLE_TIMEOUT':
-          return { state: 'hidden', effects: { start: false, end: null, heartbeat: 'hidden' } };
+          return {
+            state: 'hidden',
+            effects: { start: false, end: null, heartbeat: { state: 'hidden', reason: 'idle' } },
+          };
         case 'HIDDEN':
-          return { state: 'hidden', effects: { start: false, end: null, heartbeat: 'hidden' } };
+          return {
+            state: 'hidden',
+            effects: { start: false, end: null, heartbeat: { state: 'hidden', reason: 'away' } },
+          };
         case 'ROUTE_LEAVE':
           return { state: 'ended', effects: { start: false, end: 'route_change', heartbeat: null } };
         case 'PAGEHIDE':
@@ -61,7 +74,10 @@ export function transition(prev: SessionState, event: SessionEvent): SessionTran
     case 'hidden':
       switch (event) {
         case 'VISIBLE':
-          return { state: 'active', effects: { start: false, end: null, heartbeat: 'visible' } };
+          return {
+            state: 'active',
+            effects: { start: false, end: null, heartbeat: { state: 'visible', reason: null } },
+          };
         case 'ROUTE_LEAVE':
           return { state: 'ended', effects: { start: false, end: 'route_change', heartbeat: null } };
         case 'PAGEHIDE':
@@ -72,7 +88,10 @@ export function transition(prev: SessionState, event: SessionEvent): SessionTran
 
     case 'ended':
       return event === 'ROUTE_ENTER'
-        ? { state: 'active', effects: { start: true, end: null, heartbeat: 'visible' } }
+        ? {
+            state: 'active',
+            effects: { start: true, end: null, heartbeat: { state: 'visible', reason: null } },
+          }
         : { state: 'ended', effects: NO_EFFECTS };
   }
 }

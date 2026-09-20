@@ -31,9 +31,12 @@ const StartSchema = z.object({
 
 // subjectId 可选：前端在「星图加载完、拿到学科」后随心跳补写（P6.5）。
 // 允许缺失；给了但非法（0/负数/非整数）时 **宽容回落为「没带」**，不 400（心跳尽力而为）。
+// reason 可选：**旧客户端不带**（spec §3.3），只在 state='hidden' 时有意义；
+// 取值与前端 `analytics/types.ts` 的 `HiddenReason` 同源，服务层还会再归一一次。
 const HeartbeatSchema = z.object({
   state: z.enum(['visible', 'hidden']),
   subjectId: z.number().int().positive().optional(),
+  reason: z.enum(['away', 'idle']).optional(),
 });
 const EndSchema = z.object({ reason: z.enum(END_REASONS) });
 
@@ -75,6 +78,7 @@ export class AnalyticsController {
       sessionUid: uid,
       state: dto.state,
       subjectId: dto.subjectId,
+      reason: dto.reason,
     });
   }
 

@@ -59,9 +59,10 @@ describe('tracker 会话生命周期', () => {
     expect(transport.heartbeat.mock.calls.length).toBe(before + 1);
     const args = transport.heartbeat.mock.calls[before];
     // 第三个参数是 subjectId（P6.5 补写用；beforeEach 里 provider 给的是 7），
-    // **不是**设备信息——设备信息只在 start 时一次性带上。
-    expect(args).toEqual([uid, 'visible', 7]);
-    expect(args).toHaveLength(3);
+    // 第四个是挂机原因（visible 时恒为 null，spec §3.3）——**都不是**设备信息，
+    // 设备信息只在 start 时一次性带上。
+    expect(args).toEqual([uid, 'visible', 7, null]);
+    expect(args).toHaveLength(4);
   });
 
   it('拿不到学科时心跳仍发，第三个参数是 null（后端按「这次没带」处理）', async () => {
@@ -70,7 +71,7 @@ describe('tracker 会话生命周期', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     const uid = transport.start.mock.calls[0][0].sessionUid;
-    expect(transport.heartbeat.mock.calls[0]).toEqual([uid, 'visible', null]);
+    expect(transport.heartbeat.mock.calls[0]).toEqual([uid, 'visible', null, null]);
   });
 
   it('同一学习场景重复调用不重开会话（query 变化不该算新会话）', async () => {
@@ -113,15 +114,15 @@ describe('tracker 会话生命周期', () => {
     expect(transport.start).toHaveBeenCalledTimes(1);
   });
 
-  it('120s 无输入 → 发 hidden 心跳（暂停计时但不断会话）', async () => {
+  it('120s 无输入 → 发 hidden 心跳，且 reason=idle（暂停计时但不断会话）', async () => {
     tracker.onRouteChange(STUDY);
     await vi.advanceTimersByTimeAsync(120_000 + 5_000);
 
-    expect(transport.heartbeat).toHaveBeenCalledWith(expect.any(String), 'hidden', expect.anything());
+    expect(transport.heartbeat).toHaveBeenLastCalledWith(expect.any(String), 'hidden', 7, 'idle');
     expect(transport.end).not.toHaveBeenCalled();
   });
 
-  it('hidden 后用户有输入 → **新增**一条 visible 心跳恢复计时', async () => {
+  it('hidden 后用户有输入 → **新增**一条 visible 心跳恢复计时（reason=null）', async () => {
     tracker.onRouteChange(STUDY);
     await vi.advanceTimersByTimeAsync(125_000); // 空闲 → hidden（期间周期心跳也会发，故不能用 lastCalled 判定）
     const before = transport.heartbeat.mock.calls.length;
@@ -131,15 +132,39 @@ describe('tracker 会话生命周期', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(transport.heartbeat.mock.calls.length).toBe(before + 1);
-    expect(transport.heartbeat.mock.calls[before]).toEqual([uid, 'visible', 7]);
+    expect(transport.heartbeat.mock.calls[before]).toEqual([uid, 'visible', 7, null]);
   });
 
-  it('页面隐藏 → hidden 心跳；恢复可见 → visible 心跳', async () => {
+  it('页面隐藏 → hidden 心跳（reason=away）；恢复可见 → visible 心跳（reason=null）', async () => {
     tracker.onRouteChange(STUDY);
     tracker.setVisibility(false);
-    expect(transport.heartbeat).toHaveBeenLastCalledWith(expect.any(String), 'hidden', expect.anything());
+    expect(transport.heartbeat).toHaveBeenLastCalledWith(expect.any(String), 'hidden', 7, 'away');
     tracker.setVisibility(true);
-    expect(transport.heartbeat).toHaveBeenLastCalledWith(expect.any(String), 'visible', expect.anything());
+    expect(transport.heartbeat).toHaveBeenLastCalledWith(expect.any(String), 'visible', 7, null);
+  });
+
+  it('周期心跳复用本段挂机的原因：先 idle 变 hidden，之后切走不换标签，tick 仍报 idle', async () => {
+    // spec §9 已知副作用：hidden 状态下 `HIDDEN` 是空操作，所以「先 idle 后切走」该段仍记为 idle。
+    // 这条同时钉住 `currentHiddenReason` 的复用——tick 没有新事件可喂状态机，只能沿用本段原因。
+    tracker.onRouteChange(STUDY);
+    await vi.advanceTimersByTimeAsync(125_000); // 空闲 → hidden(idle)
+    const uid = transport.start.mock.calls[0][0].sessionUid;
+
+    tracker.setVisibility(false); // 已 hidden → 空操作，不发心跳、不换原因
+    expect(transport.heartbeat).toHaveBeenLastCalledWith(expect.any(String), 'hidden', 7, 'idle');
+
+    await vi.advanceTimersByTimeAsync(30_000); // 跨过一个心跳周期
+    expect(transport.heartbeat).toHaveBeenLastCalledWith(uid, 'hidden', 7, 'idle');
+  });
+
+  it('周期心跳在 away 段报 away', async () => {
+    tracker.onRouteChange(STUDY);
+    tracker.setVisibility(false);
+    const uid = transport.start.mock.calls[0][0].sessionUid;
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(transport.heartbeat).toHaveBeenLastCalledWith(uid, 'hidden', 7, 'away');
   });
 
   it('pagehide → end(pagehide)', async () => {

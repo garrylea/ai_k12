@@ -4,31 +4,31 @@ import { transition } from './sessionMachine';
 const NO_FX = { start: false, end: null, heartbeat: null };
 
 describe('sessionMachine.transition', () => {
-  it('idle + ROUTE_ENTER → active，起会话并立刻发一次 visible 心跳', () => {
+  it('idle + ROUTE_ENTER → active，起会话并立刻发一次 visible 心跳（reason=null）', () => {
     expect(transition('idle', 'ROUTE_ENTER')).toEqual({
       state: 'active',
-      effects: { start: true, end: null, heartbeat: 'visible' },
+      effects: { start: true, end: null, heartbeat: { state: 'visible', reason: null } },
     });
   });
 
-  it('active + IDLE_TIMEOUT → hidden，发 hidden 心跳（暂停计时但不断会话）', () => {
+  it('active + IDLE_TIMEOUT → hidden，发 hidden 心跳且 reason=idle（暂停计时但不断会话）', () => {
     expect(transition('active', 'IDLE_TIMEOUT')).toEqual({
       state: 'hidden',
-      effects: { start: false, end: null, heartbeat: 'hidden' },
+      effects: { start: false, end: null, heartbeat: { state: 'hidden', reason: 'idle' } },
     });
   });
 
-  it('hidden + VISIBLE → active，恢复计时', () => {
+  it('hidden + VISIBLE → active，恢复计时（reason=null）', () => {
     expect(transition('hidden', 'VISIBLE')).toEqual({
       state: 'active',
-      effects: { start: false, end: null, heartbeat: 'visible' },
+      effects: { start: false, end: null, heartbeat: { state: 'visible', reason: null } },
     });
   });
 
-  it('active + HIDDEN → hidden（visibilitychange 切后台）', () => {
+  it('active + HIDDEN → hidden，发 hidden 心跳且 reason=away（visibilitychange 切后台）', () => {
     expect(transition('active', 'HIDDEN')).toEqual({
       state: 'hidden',
-      effects: { start: false, end: null, heartbeat: 'hidden' },
+      effects: { start: false, end: null, heartbeat: { state: 'hidden', reason: 'away' } },
     });
   });
 
@@ -57,7 +57,7 @@ describe('sessionMachine.transition', () => {
   it('ended + ROUTE_ENTER → active：连续走两个学习场景不必回 idle', () => {
     expect(transition('ended', 'ROUTE_ENTER')).toEqual({
       state: 'active',
-      effects: { start: true, end: null, heartbeat: 'visible' },
+      effects: { start: true, end: null, heartbeat: { state: 'visible', reason: null } },
     });
   });
 

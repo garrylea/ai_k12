@@ -1,4 +1,4 @@
-import type { ClientState, EndReason } from '@/analytics/types';
+import type { ClientState, EndReason, HiddenReason } from '@/analytics/types';
 
 const API_BASE = '/api';
 
@@ -2429,12 +2429,22 @@ export function heartbeatStudySession(
   uid: string,
   state: ClientState,
   subjectId?: number | null,
+  reason?: HiddenReason | null,
 ): Promise<{ activeSeconds: number | null }> {
   // subjectId 只在拿到时带：会话开头可能还没有学科（星图未加载完），后端会用它**补写**
   // 会话的 subject_id（只补不覆盖）——否则这段时长永远归不了科（P6.5）。
+  // reason 只在 state='hidden' 时有意义（服务端据此分 away/idle 两口径累计，spec §3.3）；
+  // 后端是**可选**字段（兼容旧客户端），所以只在有值时带上。
   return fetchApi<{ activeSeconds: number | null }>(
     `/study-sessions/${encodeURIComponent(uid)}/heartbeat`,
-    { method: 'PATCH', body: JSON.stringify({ state, ...(subjectId ? { subjectId } : {}) }) },
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        state,
+        ...(subjectId ? { subjectId } : {}),
+        ...(reason ? { reason } : {}),
+      }),
+    },
   );
 }
 

@@ -13,6 +13,14 @@ export interface StudySessionRow extends RowDataPacket {
   status: 'active' | 'ended' | 'abandoned';
   client_state: 'visible' | 'hidden';
   active_seconds: number;
+  /** 会话内累计「页面不可见」秒数（不参与 `active_seconds` 口径）。 */
+  hidden_away_seconds: number;
+  /** 会话内累计「前台无操作」秒数（不参与 `active_seconds` 口径）。 */
+  hidden_idle_seconds: number;
+  /** 当前连续挂机段起点；回到 visible 时置 NULL。 */
+  hidden_since: Date | null;
+  /** 当前挂机段原因 `away` / `idle`；回到 visible 时置 NULL。 */
+  hidden_reason: string | null;
   heartbeat_count: number;
   started_at: Date;
   last_heartbeat_at: Date;
@@ -99,14 +107,23 @@ export class StudySessionsRepository {
   }
 
   /**
-   * 心跳：按「上次心跳」到现在累加秒数，**只在上一状态为 visible 时计**（hidden 暂停计时）。
+   * 心跳：按「上次心跳」到现在累加秒数，**只在上一状态为 visible 时计**（hidden 暂停计时）；
+   * 同时按 `hidden_reason` 把挂机秒数分 `away` / `idle` 两口径累计（spec §3.3）。
    *
    * ⚠️ **本语句的列顺序是 load-bearing 的**：MySQL 对单表 `SET` 列表**从左到右**求值，
    * 后出现的表达式若引用前面已赋值的列，读到的是**新值**——并不是「所有表达式都用更新前的值」。
-   * 所以 `IF(client_state = 'visible', ...)` **必须排在 `client_state = ?` 之前**：它要读的是
-   * **本次上报前**的状态（上一段是否 visible）。一旦把 `client_state = ?` 挪到前面，语句照样能
-   * 编译运行，但 `IF` 会读到本次上报的新状态——hidden 心跳不再补计最后一段 visible、
-   * visible 心跳反而把 hidden 期间也计上，**静默算错时长**（有顺序钉子用例守着，别调换）。
+   * 因此**三个累计列 + `hidden_since` 的 `IF`** 必须排在 `client_state = ?` / `hidden_reason = ?` /
+   * `hidden_since = ...` 之前：它们要读的是**本次上报前**的状态与挂机段（上一段是否 visible、
+   * 上一段是 away 还是 idle、上一段从何时开始）。一旦排到后面，语句照样能编译运行，
+   * 但读到的是本次刚写的新值 → hidden 心跳不再补计最后一段 visible、visible 心跳反而把 hidden
+   * 期间也计上、挂机秒数按错误口径累加，**静默算错**（有顺序钉子用例守着，别调换）。
+   *
+   * 三条挂机/时长口径：
+   * - `hidden_away_seconds` / `hidden_idle_seconds`：按**本段起点** `hidden_since` 的差值增量，
+   *   单次封顶 45s（与 `active_seconds` 同规则，防「关标签 2 小时」一次算成 2 小时）。
+   * - `hidden_since`：`IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)` —— 进入 hidden 时
+   *   建立（**已建立则不动**，`COALESCE` 保住本段起点），回到 visible 时清空。
+   * - `hidden_reason`：本次上报的原因（visible 时传 `null`）。这是「本段原因」，供 service 判定阈值。
    *
    * 另外**不要拆成两条 SQL**（会有竞态窗口）。
    *
@@ -114,43 +131,74 @@ export class StudySessionsRepository {
    * 会话开头可能还没有学科（星图没加载完，前端上下文里拿不到 subjectId），心跳时补上；
    * **已经带了就不动**（同一个会话中途换学科，不该改写前面那段的归属）。
    * 前端不传/传非法值时调用方传 `null`，等价于「没带」。
-   * 它放在 `client_state` 之后、`heartbeat_count` 之前：与上面那条 `IF` 无交互，
+   * 它放在挂机三列之后、`heartbeat_count` 之前：与上面那条 `IF` 无交互，
    * 但**别挪到 `IF` 之前**——那条顺序是时长口径的钉子（`subject_id` 赋值本身不参与 IF 求值，
    * 挪动它虽不改变语义，但会让「哪条表达式读旧值」更难一眼看清）。
    *
-   * 返回累计秒数；`null` = 会话不存在 / 非本人 / 非 active（调用方**静默 200**，不报错——
-   * 心跳是尽力而为，报错只会污染前端日志）。
+   * **参数数组逐位对应**：`[state, reason, state, subjectId, sessionUid, studentId]`
+   * （`state` 出现两次：`client_state = ?` 与 `hidden_since` 的 `IF(? = 'hidden', ...)`；
+   * 共 6 个占位符 = SET 4 + WHERE 2）。
+   *
+   * 返回累计秒数 + 本段挂机信息（供 service 判阈值）；`null` = 会话不存在 / 非本人 / 非 active
+   * （调用方**静默 200**，不报错——心跳是尽力而为，报错只会污染前端日志）。
    */
   async heartbeat(
     sessionUid: string,
     studentId: number,
     state: 'visible' | 'hidden',
     subjectId: number | null,
-  ): Promise<number | null> {
+    reason: 'away' | 'idle' | null,
+  ): Promise<{ activeSeconds: number; hiddenSince: Date | null; hiddenReason: string | null } | null> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE study_sessions
-       SET active_seconds = active_seconds
+       SET hidden_away_seconds = hidden_away_seconds
+             + IF(client_state = 'hidden' AND hidden_reason = 'away',
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+           hidden_idle_seconds = hidden_idle_seconds
+             + IF(client_state = 'hidden' AND hidden_reason = 'idle',
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+           active_seconds = active_seconds
              + IF(client_state = 'visible',
-                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)),
-                  0),
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
            client_state = ?,
+           hidden_reason = ?,
+           hidden_since = IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL),
            subject_id = COALESCE(subject_id, ?),
            heartbeat_count = heartbeat_count + 1,
            last_heartbeat_at = NOW(3)
        WHERE session_uid = ? AND student_id = ? AND status = 'active'`,
-      [state, subjectId, sessionUid, studentId],
+      [state, reason, state, subjectId, sessionUid, studentId],
     );
     if (result.affectedRows === 0) return null;
 
-    const [rows] = await this.pool.execute<(RowDataPacket & { active_seconds: number })[]>(
-      `SELECT active_seconds FROM study_sessions WHERE session_uid = ? LIMIT 1`,
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & {
+        active_seconds: number;
+        hidden_since: Date | null;
+        hidden_reason: string | null;
+      })[]
+    >(
+      `SELECT active_seconds, hidden_since, hidden_reason FROM study_sessions WHERE session_uid = ? LIMIT 1`,
       [sessionUid],
     );
-    return Number(rows[0]?.active_seconds ?? 0);
+    const row = rows[0];
+    return {
+      activeSeconds: Number(row?.active_seconds ?? 0),
+      hiddenSince: row?.hidden_since ?? null,
+      hiddenReason: row?.hidden_reason ?? null,
+    };
   }
 
   /**
-   * 结束会话：先补计最后一段（同心跳的封顶规则，但**不改** `client_state`），再落状态。
+   * 结束会话：先补计最后一段（同心跳的封顶规则与**同一 SET 顺序规则**，但**不改** `client_state`
+   * 与挂机三列），再落状态。
+   *
+   * 为什么也要累加挂机秒数：`pagehide` 触发的结束之后不会再有心跳，最后这一段挂机不补就会整段丢失
+   * （spec §3.3 的「判定时机两处」同源）。`end` 不写 `client_state` / `hidden_since` / `hidden_reason`，
+   * 所以它们的旧值在 `SET` 求值时天然可见；但三条累计列仍必须排在 `last_heartbeat_at = NOW(3)`
+   * **之前**（`active_seconds` 的 `IF` 要读旧 `last_heartbeat_at`）。
+   *
+   * 返回值带上本段挂机信息，供 service 在结束路径上做阈值判定（覆盖「最小化后直接关页面」）。
    *
    * `ended_at = NOW(3)` 而不是 `last_heartbeat_at`：用户按「离开」时已经过了一段时间，
    * 秒数已按 `last_heartbeat_at → NOW(3)` 补进来，结束时刻就该是现在。
@@ -159,13 +207,23 @@ export class StudySessionsRepository {
     sessionUid: string,
     studentId: number,
     reason: string,
-  ): Promise<{ activeSeconds: number; endedAt: Date } | null> {
+  ): Promise<{
+    activeSeconds: number;
+    endedAt: Date;
+    hiddenSince: Date | null;
+    hiddenReason: string | null;
+  } | null> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE study_sessions
-       SET active_seconds = active_seconds
+       SET hidden_away_seconds = hidden_away_seconds
+             + IF(client_state = 'hidden' AND hidden_reason = 'away',
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+           hidden_idle_seconds = hidden_idle_seconds
+             + IF(client_state = 'hidden' AND hidden_reason = 'idle',
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+           active_seconds = active_seconds
              + IF(client_state = 'visible',
-                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)),
-                  0),
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
            status = 'ended',
            end_reason = ?,
            ended_at = NOW(3),
@@ -176,13 +234,25 @@ export class StudySessionsRepository {
     if (result.affectedRows === 0) return null;
 
     const [rows] = await this.pool.execute<
-      (RowDataPacket & { active_seconds: number; ended_at: Date })[]
+      (RowDataPacket & {
+        active_seconds: number;
+        ended_at: Date;
+        hidden_since: Date | null;
+        hidden_reason: string | null;
+      })[]
     >(
-      `SELECT active_seconds, ended_at FROM study_sessions WHERE session_uid = ? LIMIT 1`,
+      `SELECT active_seconds, ended_at, hidden_since, hidden_reason FROM study_sessions WHERE session_uid = ? LIMIT 1`,
       [sessionUid],
     );
     const row = rows[0];
-    return row ? { activeSeconds: Number(row.active_seconds), endedAt: row.ended_at } : null;
+    return row
+      ? {
+          activeSeconds: Number(row.active_seconds),
+          endedAt: row.ended_at,
+          hiddenSince: row.hidden_since ?? null,
+          hiddenReason: row.hidden_reason ?? null,
+        }
+      : null;
   }
 
   /**

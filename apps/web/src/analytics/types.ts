@@ -62,6 +62,13 @@ export type EndReason = 'route_change' | 'pagehide' | 'idle_timeout' | 'closed' 
 
 export type ClientState = 'visible' | 'hidden';
 
+/**
+ * 挂机原因（spec §3.3）。**唯一声明**：服务端 `HeartbeatSchema` 的 `reason` 枚举、
+ * 前端 tracker 上报都从这里取——改这里必须同时改后端。
+ * `away` = 页面被切走（visibilitychange）；`idle` = 前台无操作（120s 无输入）。
+ */
+export type HiddenReason = 'away' | 'idle';
+
 export type ScreenClass = 'ipad_landscape' | 'desktop' | 'tablet_portrait' | 'mobile';
 export type InputType = 'touch' | 'mouse' | 'hybrid';
 export type AppShell = 'web' | 'electron';

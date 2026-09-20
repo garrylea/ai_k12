@@ -3,6 +3,8 @@ import { LlmCallLogsRepository } from '../../database/repositories/llm-call-logs
 import { ApiRequestLogsRepository } from '../../database/repositories/api-request-logs.repo.js';
 import { StudySessionsRepository } from '../../database/repositories/study-sessions.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
+import { ControlsRepository } from '../../database/repositories/controls.repo.js';
+import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
 import { TelemetryService } from './telemetry.service.js';
 import { StudySessionsService } from './study-sessions.service.js';
 import { AnalyticsController } from './analytics.controller.js';
@@ -21,8 +23,13 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
  * `SUBJECTS_REPO_FOR_ANALYTICS` 这个 token：`StudySessionsService` 的第二个构造参数是
  * **接口** `SubjectsRepoLike`，按仓库的 DI 坑必须显式 `@Inject(token)`，否则 Nest 会把
  * `design:paramtypes` 写成 `Object` 并启动失败。用 `useExisting` 复用同一个 SubjectsRepository。
+ *
+ * 走神预警（2026-09-20，P6.9）：`SafetyAlertsService` 由 `SafetyAlertsModule` **导出后复用**
+ * （绝不在本模块重复 provide，否则会分裂实例与去重语义）；`ControlsRepository` 是本地 provider
+ * （家长可调的预警灵敏度两个阈值，心跳路径按学生读）。
  */
 @Module({
+  imports: [SafetyAlertsModule],
   controllers: [AnalyticsController],
   providers: [
     LlmCallLogsRepository,
@@ -32,6 +39,7 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
     TelemetryService,
     StudySessionsRepository,
     SubjectsRepository,
+    ControlsRepository,
     StudySessionsService,
     AnalyticsInterceptor,
     { provide: 'SUBJECTS_REPO_FOR_ANALYTICS', useExisting: SubjectsRepository },
