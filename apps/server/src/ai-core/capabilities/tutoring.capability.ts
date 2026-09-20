@@ -75,8 +75,25 @@ const PARENT_MESSAGE: Record<SafetyAlertSignalType, string> = {
   abusive: '检测到敏感内容输入，建议尽快关注',
 };
 
-/** 模型自报的闲聊标记（spec §3.2）：独占最后一行、HTML 注释形式（学生端渲染不可见）。 */
-const OFF_TOPIC_MARKER = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/m;
+/**
+ * 模型自报的闲聊标记（spec §3.2）：HTML 注释形式（学生端渲染不可见）。
+ * - **检测**只认「最后一个非空行、且该行只有标记」（`OFF_TOPIC_MARKER_LINE`，不带
+ *   `m`/`g`，逐行做全等判断）—— 中段独占一行、或夹在句子中间的标记都**不**判闲聊。
+ * - **剥离**则删掉所有**独占一行**的标记（不管它在第几行），保证标记永不进学生可见
+ *   内容与历史。夹在句子中间的（非独占一行）不匹配、保持原样。
+ */
+const OFF_TOPIC_MARKER_LINE = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/;
+/**
+ * 全局剥离：只删**独占一行**的标记，连同其**前导**换行；后随换行由 `(?=\n|$)` 保留，
+ * 以维持正文行结构（`第一段\n<!--M-->\n第二段` → `第一段\n第二段`）。
+ */
+const OFF_TOPIC_MARKER_STRIP = /(?:^|\n)[ \t]*<!--\s*topic:off\s*-->[ \t]*(?=\n|$)/g;
+
+/** 标记是否落在「最后一个非空行」且独占该行（spec §3.2）。 */
+function isOffTopicMarkerOnLastLine(content: string): boolean {
+  const trimmed = content.trimEnd();
+  return OFF_TOPIC_MARKER_LINE.test(trimmed.slice(trimmed.lastIndexOf('\n') + 1));
+}
 
 // Result of the shared pre-model prepare() step. shortCircuit = fallback/block
 // (persistence already done, ready to return/yield). stream = ready to call the
@@ -477,9 +494,14 @@ export class TutoringCapability {
     const parsed = this.responseParser.parse({ rawContent, mode: 'text' });
     let content = parsed.rawText ?? rawContent;
 
-    // 先剥标记（它比 JSON 块更靠后，且闲聊轮次不会有 JSON 块）
-    const offTopic = OFF_TOPIC_MARKER.test(content);
-    if (offTopic) content = content.replace(OFF_TOPIC_MARKER, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+    // 先剥标记（它比 JSON 块更靠后，且闲聊轮次不会有 JSON 块）。
+    // 检测：只认「最后一个非空行独占」（spec §3.2）—— 位置不合法（中段/内联）不判闲聊。
+    // 剥离：凡是**独占一行**的标记都删掉（不管在第几行），标记永不进学生可见内容与历史。
+    const offTopic = isOffTopicMarkerOnLastLine(content);
+    const stripped = content.replace(OFF_TOPIC_MARKER_STRIP, '');
+    if (stripped !== content) {
+      content = stripped.replace(/\n{3,}/g, '\n\n').trim();
+    }
 
     let structuredQuestion: StructuredQuestionOutput | undefined;
     const jsonBlock = this.responseParser.extractJsonBlock(content);

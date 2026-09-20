@@ -176,6 +176,69 @@ describe('TutoringCapability', () => {
     expect(sink.record.mock.calls[0][0].type).toBe('off_topic');
   });
 
+  // --- F4：标记**位置**的钉子（spec §3.2 要求「最后一个非空行、独占一行」）-------------
+  // 旧实现的正则带 `m` 但不锚定末尾，任何独占一行的标记都判闲聊；这三条把位置钉住。
+  it('④c 标记独占**最后一个非空行** → 判闲聊，且内容不含标记', async () => {
+    const sink = mkSink();
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('换个话题吧～\n<!--topic:off-->'),
+      safetyAlerts: sink,
+    });
+    const result = await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    expect(sink.record).toHaveBeenCalledTimes(1);
+    expect(sink.record.mock.calls[0][0].type).toBe('off_topic');
+    expect(result.message.content).not.toContain('<!--topic:off-->');
+    expect(result.message.content).toBe('换个话题吧～');
+  });
+
+  it('④d 标记独占一行但**在正文中段** → 不判闲聊（本次收紧的钉子）', async () => {
+    const sink = mkSink();
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('第一段\n<!--topic:off-->\n第二段'),
+      safetyAlerts: sink,
+    });
+    await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    // 位置不合法（其后还有正文）→ 不判闲聊、不写预警。
+    // 只断言**检测**结果；剥离是另一回事（独占一行的标记一律剥离，见 ⑤c）。
+    expect(sink.record).not.toHaveBeenCalled();
+  });
+
+  it('④e 标记**夹在句子中间**（非独占一行）→ 不判闲聊（行首行尾锚点承重）', async () => {
+    const sink = mkSink();
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('要不要聊点别的呢<!--topic:off-->？'),
+      safetyAlerts: sink,
+    });
+    await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    // 非独占一行 → 不判闲聊。内联标记不保证被剥离，故这里不断言 content。
+    expect(sink.record).not.toHaveBeenCalled();
+  });
+
+  // --- F5：剥离的边界（全局替换 + 去首尾）---------------------------------------------
+  it('⑤c 模型写了两遍标记 → 两处都不残留（全局替换承重）', async () => {
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('换个话题吧～\n<!--topic:off-->\n<!--topic:off-->'),
+    });
+    const result = await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    expect(result.message.content).not.toContain('<!--topic:off-->');
+    expect(result.message.content).toBe('换个话题吧～');
+  });
+
+  it('⑤d 标记在第一行 → content 不以换行开头（trim 首尾）', async () => {
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('<!--topic:off-->\n换个话题吧～'),
+    });
+    const result = await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    expect(result.message.content).not.toContain('<!--topic:off-->');
+    expect(result.message.content.startsWith('\n')).toBe(false);
+    expect(result.message.content).toBe('换个话题吧～');
+  });
+
   it('⑤ 模型自报闲聊 → 助手消息 safety_flag = 1（不回写家长端计数会归零）', async () => {
     const capability = new TutoringCapability(convService, {
       modelClient: mkModel('换个话题吧～\n<!--topic:off-->'),
