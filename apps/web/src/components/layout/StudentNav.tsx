@@ -1,4 +1,6 @@
+import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { NavIcon } from '@/components/base';
 
 /**
  * 主轨侧边二级导航。
@@ -22,11 +24,48 @@ import { NavLink } from 'react-router-dom';
  * 底部原有一行硬编码「三年级 · 数学」假数据，已删 —— 真实年级/学科由
  * `StudentLayout` 顶栏从 `learnContextStore` 显示。
  */
-const navItems = [
-  { to: '/student/star-map', label: '星图导航' },
-  { to: '/student/error-book', label: '错题本' },
-  { to: '/student/rewards', label: '奖励册' },
-  { to: '/student/profile', label: '个人中心' },
+const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
+  {
+    to: '/student/star-map',
+    label: '星图导航',
+    icon: (
+      <NavIcon>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M15.5 8.5l-2 5-5 2 2-5z" />
+      </NavIcon>
+    ),
+  },
+  {
+    to: '/student/error-book',
+    label: '错题本',
+    icon: (
+      <NavIcon>
+        <path d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z" />
+        <path d="M9.5 9l4 4M13.5 9l-4 4" />
+      </NavIcon>
+    ),
+  },
+  {
+    to: '/student/rewards',
+    label: '奖励册',
+    icon: (
+      <NavIcon>
+        <circle cx="12" cy="9" r="5" />
+        <path d="M8.5 13.5L7 21l5-3 5 3-1.5-7.5" />
+      </NavIcon>
+    ),
+  },
+  {
+    to: '/student/profile',
+    label: '个人中心',
+    icon: (
+      <NavIcon>
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="10" r="3" />
+        <path d="M6.5 19a6 6 0 0 1 11 0" />
+      </NavIcon>
+    ),
+  },
 ];
 
 export function StudentNav() {
@@ -48,6 +87,9 @@ export function StudentNav() {
           <NavLink
             key={item.to}
             to={item.to}
+            // 窄屏（<lg）标签被 CSS 隐藏，靠 title 悬停提示 + aria-label 让入口仍可辨识
+            title={item.label}
+            aria-label={item.label}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-button)] transition-all text-sm
               ${
@@ -57,6 +99,7 @@ export function StudentNav() {
               }`
             }
           >
+            {item.icon}
             <span className="hidden lg:inline">{item.label}</span>
           </NavLink>
         ))}

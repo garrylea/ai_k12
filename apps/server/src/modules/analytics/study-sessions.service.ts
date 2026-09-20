@@ -149,11 +149,18 @@ export class StudySessionsService {
     studentId: number;
     sessionUid: string;
     state: string;
+    subjectId?: number;
   }): Promise<{ activeSeconds: number | null }> {
     if (input.state !== 'visible' && input.state !== 'hidden') {
       throw new BadRequestException({ code: 1001, message: "state 必须是 visible 或 hidden" });
     }
-    const seconds = await this.repo.heartbeat(input.sessionUid, input.studentId, input.state);
+    // subjectId 是**尽力而为**的补写线索（P6.5）：非法/缺失一律按 null 处理（=「这次没带」），
+    // 不 400 —— 心跳报错只会污染前端日志，还会让时长白丢。
+    const subjectId =
+      Number.isInteger(input.subjectId) && (input.subjectId as number) > 0
+        ? (input.subjectId as number)
+        : null;
+    const seconds = await this.repo.heartbeat(input.sessionUid, input.studentId, input.state, subjectId);
     return { activeSeconds: seconds };
   }
 

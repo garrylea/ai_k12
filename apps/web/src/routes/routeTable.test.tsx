@@ -160,12 +160,13 @@ beforeEach(() => {
   getUnreadMessageCountMock.mockReset();
   getUnreadMessageCountMock.mockResolvedValue(0);
   getParentGoalAttainmentMock.mockReset();
+  // P6.5：目标按学科（(学科, 指标) 二元组），响应必须带 subjectId/subjectName
   getParentGoalAttainmentMock.mockResolvedValue({
     items: [
-      { metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 60, achieved: 30, rate: 50 },
-      { metric: 'daily_words', period: 'daily', title: '每日背单词', target: 20, achieved: 10, rate: 50 },
-      { metric: 'weekly_passages', period: 'weekly', title: '每周古诗文篇目', target: 8, achieved: 2, rate: 25 },
-      { metric: 'weekly_clear_errors', period: 'weekly', title: '每周清零错题', target: 10, achieved: 1, rate: 10 },
+      { metric: 'daily_study_minutes', subjectId: 1, subjectName: '数学', period: 'daily', title: '每日学习时长', target: 30, achieved: 15, rate: 50 },
+      { metric: 'weekly_lessons', subjectId: 1, subjectName: '数学', period: 'weekly', title: '每周完课', target: 2, achieved: 1, rate: 50 },
+      { metric: 'weekly_passages', subjectId: 2, subjectName: '语文', period: 'weekly', title: '每周古诗文篇目', target: 8, achieved: 2, rate: 25 },
+      { metric: 'daily_words', subjectId: 3, subjectName: '英语', period: 'daily', title: '每日背单词', target: 20, achieved: 10, rate: 50 },
     ],
   });
   useParentStudentStore.setState({ studentId: null });
@@ -353,15 +354,18 @@ describe('路由表：家长端「积分与奖励」', () => {
  * 绕过了路由表——「路由确实指到这个页面」只有这里能证明。
  */
 describe('路由表：家长端「目标设定」', () => {
-  it('/parent/goals 渲染 ParentGoalsPage（四个目标可改），而非 Placeholder', async () => {
+  it('/parent/goals 渲染 ParentGoalsPage（按学科分组的可改目标），而非 Placeholder', async () => {
     setParentSession();
 
     renderAt('/parent/goals');
 
     expect(await screen.findByRole('heading', { name: '目标设定' })).toBeInTheDocument();
-    expect(await screen.findByTestId('goals-card')).toBeInTheDocument();
-    for (const metric of ['daily_study_minutes', 'daily_words', 'weekly_passages', 'weekly_clear_errors']) {
-      expect(screen.getByTestId(`goal-row-${metric}`)).toBeInTheDocument();
+    // P6.5：目标按学科分组（每个学科一张卡），行 key 是 学科:指标
+    for (const subjectId of [1, 2, 3]) {
+      expect(await screen.findByTestId(`goals-subject-${subjectId}`)).toBeInTheDocument();
+    }
+    for (const key of ['1:daily_study_minutes', '1:weekly_lessons', '2:weekly_passages', '3:daily_words']) {
+      expect(screen.getByTestId(`goal-row-${key}`)).toBeInTheDocument();
     }
     // 顶栏孩子切换器把锚点落到唯一那个孩子上，页面按这个 id 取数
     expect(getParentGoalAttainmentMock).toHaveBeenCalledWith(PARENT_STUDENT.id);

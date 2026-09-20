@@ -18,6 +18,9 @@ function makeController(requireOwnedStudent: ReturnType<typeof vi.fn>) {
   const goals = {
     getAttainment: vi.fn().mockResolvedValue({ items: [] }),
     upsertTarget: vi.fn().mockResolvedValue({}),
+    // P6.5：controller 用这两个做「指标×学科」与「在学学科」校验，默认放行
+    isMetricAllowedForSubject: vi.fn().mockResolvedValue(true),
+    isLearningSubject: vi.fn().mockResolvedValue(true),
   } as unknown as GoalsService;
   const controller = new ParentInsightsController(
     parentService,
@@ -106,29 +109,65 @@ describe('ParentInsightsController 专项 / 掌握度 / 目标端点（埋点 Ph
   it('PUT goals/:metric：白名单外 400、body 非法 400，都不写库', async () => {
     const { controller, goals } = makeController(vi.fn().mockImplementation(async () => {}));
 
-    await expect(controller.putGoalTarget(USER, 11, 'daily_x', { target: 30 }))
+    await expect(controller.putGoalTarget(USER, 11, 'daily_x', { target: 30, subjectId: 1 }))
       .rejects.toMatchObject({ status: 400 });
-    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 0 }))
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 0, subjectId: 3 }))
       .rejects.toMatchObject({ status: 400 });
-    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 20.5 }))
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 20.5, subjectId: 3 }))
       .rejects.toMatchObject({ status: 400 });
-    await expect(controller.putGoalTarget(USER, 11, 'daily_words', {}))
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 30 }))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 30, subjectId: 0 }))
       .rejects.toMatchObject({ status: 400 });
     expect(goals.upsertTarget).not.toHaveBeenCalled();
   });
 
-  it('PUT goals/:metric：合法入参 → 调 service（period/title 由服务端派生）', async () => {
+  it('PUT goals/:metric：指标与学科不匹配 → 400 且不写库（如「每日背单词」只适用英语）', async () => {
+    const { controller, goals } = makeController(vi.fn().mockImplementation(async () => {}));
+    (goals.isMetricAllowedForSubject as any).mockResolvedValue(false); // 英语专属指标配到了数学
+
+    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 30, subjectId: 1 }))
+      .rejects.toMatchObject({ status: 400 });
+
+    expect(goals.isMetricAllowedForSubject).toHaveBeenCalledWith(1, 'daily_words');
+    // 第一步就被拦下：连「在学学科」都不必查，更不能写库
+    expect(goals.isLearningSubject).not.toHaveBeenCalled();
+    expect(goals.upsertTarget).not.toHaveBeenCalled();
+  });
+
+  it('PUT goals/:metric：不是该生的在学学科 → 400 且不写库', async () => {
+    const { controller, goals } = makeController(vi.fn().mockImplementation(async () => {}));
+    (goals.isLearningSubject as any).mockResolvedValue(false);
+
+    await expect(controller.putGoalTarget(USER, 11, 'weekly_lessons', { target: 2, subjectId: 4 }))
+      .rejects.toMatchObject({ status: 400 });
+
+    expect(goals.isLearningSubject).toHaveBeenCalledWith(11, 4);
+    expect(goals.upsertTarget).not.toHaveBeenCalled();
+  });
+
+  it('PUT goals/:metric：合法入参 → 调 service，subjectId 一并传入', async () => {
     const { controller, goals } = makeController(vi.fn().mockImplementation(async () => {}));
 
-    await controller.putGoalTarget(USER, 11, 'daily_words', { target: 30 });
+    await controller.putGoalTarget(USER, 11, 'daily_words', { target: 30, subjectId: 3 });
 
-    expect(goals.upsertTarget).toHaveBeenCalledWith(11, 'daily_words', 30);
+    expect(goals.upsertTarget).toHaveBeenCalledWith(11, 3, 'daily_words', 30);
+  });
+
+  it('PUT goals/:metric：`weekly_lessons` 是合法指标（新增指标别漏进白名单）', async () => {
+    const { controller, goals } = makeController(vi.fn().mockImplementation(async () => {}));
+
+    await controller.putGoalTarget(USER, 11, 'weekly_lessons', { target: 2, subjectId: 1 });
+
+    expect(goals.upsertTarget).toHaveBeenCalledWith(11, 1, 'weekly_lessons', 2);
   });
 
   it('归属校验失败时不写库（403 不许泄漏存在性）', async () => {
     const { controller, goals } = makeController(vi.fn().mockRejectedValue(new Error('1005')));
 
-    await expect(controller.putGoalTarget(USER, 11, 'daily_words', { target: 30 })).rejects.toThrow();
+    await expect(
+      controller.putGoalTarget(USER, 11, 'daily_words', { target: 30, subjectId: 3 }),
+    ).rejects.toThrow();
     expect(goals.upsertTarget).not.toHaveBeenCalled();
   });
 });

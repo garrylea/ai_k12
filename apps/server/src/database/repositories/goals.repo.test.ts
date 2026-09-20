@@ -45,8 +45,8 @@ describe('GoalsRepository', () => {
     const repo = new GoalsRepository(pool as any);
 
     await repo.ensureDefaults(11, [
-      { metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 60 },
-      { metric: 'daily_words', period: 'daily', title: '每日背单词', target: 20 },
+      { subjectId: 1, metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 30 },
+      { subjectId: 1, metric: 'weekly_lessons', period: 'weekly', title: '每周完课', target: 2 },
     ]);
 
     expect(pool.execute).toHaveBeenCalledTimes(2);
@@ -55,25 +55,48 @@ describe('GoalsRepository', () => {
     expect(sql).not.toContain('ON DUPLICATE KEY UPDATE');
   });
 
-  it('ensureDefaults：title 与 period 各就各位（按列名配对断言，别退回位置断言）', async () => {
+  it('ensureDefaults：subject/title/period 各就各位（按列名配对断言，别退回位置断言）', async () => {
     const pool = mockPool();
     const repo = new GoalsRepository(pool as any);
 
     await repo.ensureDefaults(11, [
-      { metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 60 },
+      { subjectId: 1, metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 30 },
     ]);
 
     const [sql, params] = pool.execute.mock.calls[0];
     expect(zipInsert(sql as string, params as unknown[])).toEqual({
       student_id: 11,
-      subject_id: null,
+      subject_id: 1,
       metric: 'daily_study_minutes',
       title: '每日学习时长',
       period: 'daily',
-      target_value: 60,
+      target_value: 30,
       reminder_enabled: 0,
       is_active: 1,
     });
+  });
+
+  it('ensureDefaults：**同一个 metric 可以在不同学科各建一行**（按学科后 metric 不再唯一）', async () => {
+    const pool = mockPool();
+    const repo = new GoalsRepository(pool as any);
+
+    await repo.ensureDefaults(11, [
+      { subjectId: 1, metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 30 },
+      { subjectId: 2, metric: 'daily_study_minutes', period: 'daily', title: '每日学习时长', target: 30 },
+    ]);
+
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+    const first = zipInsert(
+      pool.execute.mock.calls[0][0] as string,
+      pool.execute.mock.calls[0][1] as unknown[],
+    );
+    const second = zipInsert(
+      pool.execute.mock.calls[1][0] as string,
+      pool.execute.mock.calls[1][1] as unknown[],
+    );
+    expect(first.subject_id).toBe(1);
+    expect(second.subject_id).toBe(2);
+    expect(first.metric).toBe(second.metric);
   });
 
   it('ensureDefaults：空数组不发任何 SQL', async () => {
@@ -89,25 +112,29 @@ describe('GoalsRepository', () => {
     const pool = mockPool();
     const repo = new GoalsRepository(pool as any);
 
-    await repo.upsertTarget(11, 'weekly_passages', 'weekly', '每周古诗文篇目', 8);
+    await repo.upsertTarget(11, 2, 'weekly_passages', 'weekly', '每周古诗文篇目', 8);
 
     const sql = pool.execute.mock.calls[0][0] as string;
     expect(sql).toContain('INSERT INTO goals');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
     expect(sql).toContain('target_value = new.target_value');
     expect(sql).toContain('is_active    = 1');
+    // 提醒本期不做（2026-09-20 用户裁决）：写入一律把 reminder_enabled 固定成 0，
+    // 且不得出现 `reminder_enabled = ` 这种「把它当可改字段」的写法。
+    expect(sql).toContain('0, 1)');
+    expect(sql).not.toContain('reminder_enabled = ');
   });
 
-  it('upsertTarget：title/period 不串列（与 ensureDefaults 同一个坑）', async () => {
+  it('upsertTarget：subject/title/period 不串列（与 ensureDefaults 同一个坑）', async () => {
     const pool = mockPool();
     const repo = new GoalsRepository(pool as any);
 
-    await repo.upsertTarget(11, 'weekly_passages', 'weekly', '每周古诗文篇目', 8);
+    await repo.upsertTarget(11, 2, 'weekly_passages', 'weekly', '每周古诗文篇目', 8);
 
     const [sql, params] = pool.execute.mock.calls[0];
     expect(zipInsert(sql as string, params as unknown[])).toEqual({
       student_id: 11,
-      subject_id: null,
+      subject_id: 2,
       metric: 'weekly_passages',
       title: '每周古诗文篇目',
       period: 'weekly',
@@ -117,10 +144,10 @@ describe('GoalsRepository', () => {
     });
   });
 
-  it('findActiveByStudent：只取 is_active=1，返回 camelCase 且 Number() 化', async () => {
+  it('findActiveByStudent：只取 is_active=1，返回 camelCase（含 subjectId）且 Number() 化', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([
-      [{ id: 7, metric: 'daily_words', period: 'daily', target_value: '20', title: '每日背单词' }],
+      [{ id: 7, subject_id: 3, metric: 'daily_words', period: 'daily', target_value: '20', title: '每日背单词' }],
       [],
     ]);
     const repo = new GoalsRepository(pool as any);
@@ -128,9 +155,24 @@ describe('GoalsRepository', () => {
     const rows = await repo.findActiveByStudent(11);
 
     expect(rows).toEqual([
-      { id: 7, metric: 'daily_words', period: 'daily', targetValue: 20, title: '每日背单词' },
+      { id: 7, subjectId: 3, metric: 'daily_words', period: 'daily', targetValue: 20, title: '每日背单词' },
     ]);
-    expect(pool.execute.mock.calls[0][0]).toContain('is_active = 1');
-    expect(pool.execute.mock.calls[0][1]).toEqual([11]);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('is_active = 1');
+    expect(sql).toContain('ORDER BY subject_id, id');
+    expect(params).toEqual([11]);
+  });
+
+  it('findActiveByStudent：subject_id 为 NULL 的历史行原样返回 null（由调用方跳过）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([
+      [{ id: 9, subject_id: null, metric: 'daily_words', period: 'daily', target_value: 20, title: '每日背单词' }],
+      [],
+    ]);
+    const repo = new GoalsRepository(pool as any);
+
+    const rows = await repo.findActiveByStudent(11);
+
+    expect(rows[0].subjectId).toBeNull();
   });
 });

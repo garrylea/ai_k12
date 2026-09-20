@@ -22,6 +22,8 @@ import { SpecialPracticeLogsRepository } from '../../database/repositories/speci
 import { StudentKnowledgeMasteryRepository } from '../../database/repositories/student-knowledge-mastery.repo.js';
 import { GoalsRepository } from '../../database/repositories/goals.repo.js';
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
+import { LessonCompletionsRepository } from '../../database/repositories/lesson-completions.repo.js';
+import { ProgressRepository } from '../../database/repositories/progress.repo.js';
 
 /**
  * 家长端「看得见」批（spec `2026-09-18-parent-insights-design.md`）。
@@ -62,6 +64,9 @@ import { MainErrorBooksRepository } from '../../database/repositories/main-error
     StudentKnowledgeMasteryRepository,
     GoalsRepository,
     MainErrorBooksRepository,
+    // P6.5 按学科目标新增：完课事件（每周完课达成值）+ 在学学科清单
+    LessonCompletionsRepository,
+    ProgressRepository,
   ],
 })
 export class ParentInsightsModule {}

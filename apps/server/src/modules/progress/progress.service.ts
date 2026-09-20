@@ -10,6 +10,7 @@ import { PointsService } from '../points/points.service.js';
 import type { AwardResult } from '../points/points.service.js';
 import { toPointsAwardDto } from '../points/dto/points.dto.js';
 import { gradeCodeFromLabel } from '../../common/utils/grade.js';
+import { LessonCompletionsRepository } from '../../database/repositories/lesson-completions.repo.js';
 
 export interface SectionData {
   id: string;
@@ -52,6 +53,7 @@ export class ProgressService {
     private contentService: ContentService,
     private practiceService: PracticeService,
     private pointsService: PointsService,
+    private lessonCompletionsRepo: LessonCompletionsRepository,
   ) {}
 
   async getStarMap(studentId: number, subjectId: number): Promise<StarMapData> {
@@ -290,11 +292,13 @@ export class ProgressService {
       if (nextLesson) {
         const nextUnitId = nextLesson.unitId !== progress.currentUnitId ? nextLesson.unitId : null;
         await this.progressRepo.advanceLesson(progress.id, nextLesson.id, nextUnitId);
+        await this.recordLessonCompletion(studentId, progress.subjectId, lessonId);
         const points = toPointsAwardDto(await this.awardLessonPoints(studentId, lessonId));
         return { advanced: true, nextLessonId: nextLesson.id, points };
       }
       // No more lessons: mark subject completed
       await this.progressRepo.markCompleted(progress.id);
+      await this.recordLessonCompletion(studentId, progress.subjectId, lessonId);
       const points = toPointsAwardDto(await this.awardLessonPoints(studentId, lessonId));
       return { advanced: true, completed: true, points };
     }
@@ -302,6 +306,27 @@ export class ProgressService {
     const nextUnlockType = currentCard.cardType === 'practice' ? 'practice' : 'lesson';
     await this.progressRepo.updateCardSort(progress.id, cardSortOrder, nextUnlockType);
     return { advanced: false, nextUnlockType };
+  }
+
+  /**
+   * 完课事件（P6.5）：无论「还有下一课」还是「整科完成」，这一课都算完成。
+   *
+   * **best-effort**：写失败只 warn ——「学完一课」是主动作，不能被辅助记录拖垮
+   * （与 `awardLessonPoints` 同一条纪律）。仓储侧用 `INSERT IGNORE`，同课重复完成静默跳过。
+   *
+   * `subjectId` 取 `progress.subjectId`（该行的游标就属于这门学科），**不要**用请求里
+   * 传来的「当前选中学科」——两者可能不是同一个。
+   */
+  private async recordLessonCompletion(
+    studentId: number,
+    subjectId: number,
+    lessonId: number,
+  ): Promise<void> {
+    try {
+      await this.lessonCompletionsRepo.recordCompletion({ studentId, subjectId, lessonId });
+    } catch (err) {
+      this.logger.warn(`recordLessonCompletion failed (student=${studentId}, lesson=${lessonId}): ${err}`);
+    }
   }
 
   /** 学完一课发分。刻意吞掉异常：积分是激励层，发分失败绝不能挡住主线推进。

@@ -2143,6 +2143,7 @@ export function getParentTodayUsage(studentId: number): Promise<ParentTodayUsage
 /** 目标维度（与后端 `goals.metric` 的列注释逐字一致）。 */
 export type ParentGoalMetric =
   | 'daily_study_minutes'
+  | 'weekly_lessons'
   | 'daily_words'
   | 'weekly_passages'
   | 'weekly_clear_errors';
@@ -2200,6 +2201,10 @@ export interface ParentMastery {
 /** 目标达成的一行。`rate` 允许 > 100（超额完成），前端**不要截断**。 */
 export interface ParentGoalAttainmentItem {
   metric: ParentGoalMetric;
+  /** 学科（P6.5 起所有目标都按学科）。**渲染 key 必须用 `${subjectId}:${metric}`** ——
+   *  同一个 metric 会在多个学科各有一行，只用 metric 当 key 会撞。 */
+  subjectId: number;
+  subjectName: string;
   period: 'daily' | 'weekly';
   title: string;
   target: number;
@@ -2248,10 +2253,13 @@ export function putParentGoalTarget(
   studentId: number,
   metric: ParentGoalMetric,
   target: number,
+  subjectId: number,
 ): Promise<ParentGoalAttainmentItem> {
+  // subjectId 走 body（不是路径）：所有目标都按学科，但再加一条同深度模板路径没必要，
+  // 也容易和 `goals/:metric` 的匹配产生歧义。
   return fetchApi<ParentGoalAttainmentItem>(
     `/parent/students/${studentId}/goals/${metric}`,
-    { method: 'PUT', body: JSON.stringify({ target }) },
+    { method: 'PUT', body: JSON.stringify({ target, subjectId }) },
   );
 }
 
@@ -2420,10 +2428,13 @@ export function startStudySession(
 export function heartbeatStudySession(
   uid: string,
   state: ClientState,
+  subjectId?: number | null,
 ): Promise<{ activeSeconds: number | null }> {
+  // subjectId 只在拿到时带：会话开头可能还没有学科（星图未加载完），后端会用它**补写**
+  // 会话的 subject_id（只补不覆盖）——否则这段时长永远归不了科（P6.5）。
   return fetchApi<{ activeSeconds: number | null }>(
     `/study-sessions/${encodeURIComponent(uid)}/heartbeat`,
-    { method: 'PATCH', body: JSON.stringify({ state }) },
+    { method: 'PATCH', body: JSON.stringify({ state, ...(subjectId ? { subjectId } : {}) }) },
   );
 }
 

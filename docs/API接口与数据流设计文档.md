@@ -321,8 +321,8 @@
 | GET | `/api/parent/students/{studentId}/today-usage` | **今日已用时长**（用于与 `controls.daily_time_limit_minutes` 比较）。响应 `{date, activeSeconds, limitMinutes\|null, exceeded, byModule:[{module,seconds}]}`。`limitMinutes` 取自 `controls.daily_time_limit_minutes`，**为 NULL = 家长未设限 → `exceeded=false`**（不是「超了」，也不是「用了 0 分钟」）；`exceeded` 用 `>=`（用满即算超出，管控语义是「该停了」）。「今日」由**应用层**算好本地日传入，不用 `CURDATE()`。读前会惰性收尾该学生的孤儿会话（失败只 warn、不 500） | MVP |
 | GET | `/api/parent/students/{studentId}/specials` | **专项学情（埋点 Phase 1B）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；非法**宽容回落**、不 400）。响应四模块 `{dictation,interpretation,meaning,vocabulary}`，每模块 `{units,correct,rate\|null,byDay:[{date,count}]}`，`vocabulary` 多一个 `newWords`。**四个键后端保证都在**（没数据给 `0` / `rate:null` / `byDay:[]`），前端不必判空；`rate` 沿用 `answered=0 → null`（**不许写 0**）。`units` = 作答单位数（默写=篇、解释/含义=句、背单词=题）。口径见 §6.27 | MVP |
 | GET | `/api/parent/students/{studentId}/mastery` | **真掌握度（埋点 Phase 1B）**。query `limit`（缺省 10、上限 50；**越界/非法 400/1001，不静默钳制**）。按 `mastery_score ASC, error_count DESC` 取最弱 N 个知识点，响应 `{items:[{knowledgePointId,name,masteryScore(0..1),level,correctCount,errorCount,lastSeenAt\|null}],coveredQuestions,totalQuestions,uncovered}`。**覆盖率三项必须展示**——题库仅 203/530 ≈ 38% 的题绑了知识点，不展示会让家长以为「孩子的问题只有这几个」。**与 §6.8 的 `weakPoints`（错题数代理）是两套口径、并存不替换**（spec §10） | MVP |
-| GET | `/api/parent/students/{studentId}/goals/attainment` | **目标达成（埋点 Phase 1B）**。无 query。读 `goals WHERE is_active=1`；**无目标时懒初始化四个默认目标**（每日学习 60 分钟 / 每日背单词 20 词 / 每周古诗文 8 篇 / 每周清零错题 10 道；`INSERT IGNORE` 只补缺失、**不覆盖**家长已改过的值）。达成值按 `metric` 分派：`daily_study_minutes` ← `study_sessions`（秒→分钟**向下取整**）；`daily_words` ← `special_practice_logs` 的 `en_vocabulary` 单位数；`weekly_passages` ← 三个语文专项**去重篇目数**；`weekly_clear_errors` ← `main_error_books` 窗口内清零数。响应 `{items:[{metric,period,title,target,achieved,rate\|null}]}`，`rate = toRate(target, achieved)`（**分母是 target**，为 0 → null；**允许 > 100 = 超额**，前端不截断）。窗口：daily = 今天、weekly = 近 7 天（含今天），由**应用层**算好传参（不用 `CURDATE()`）。返回顺序固定为四个维度的声明顺序 | MVP |
-| PUT | `/api/parent/students/{studentId}/goals/{metric}` | **改目标值（埋点 Phase 1B，本模块唯一的写端点）**。路径 `metric ∈ daily_study_minutes \| daily_words \| weekly_passages \| weekly_clear_errors`（**白名单外 400/1001**）；body `{ target: int }`，**只收 `target`**（1–9999，越界 400/1001），`period`/`title` 由服务端按 `metric` 派生，家长无从自定义。按唯一键 `(student_id, metric)` upsert 并把 `is_active` 置回 1（复活曾被停用的目标）。响应 = **该 metric 的最新达成情况**（形状同 attainment 的一行），调用方原地替换即可、**不必再 GET**（省一次往返，也避免写后读不一致的窗口）。归属校验同其它家长端点（403/1005、404/1002） | MVP |
+| GET | `/api/parent/students/{studentId}/goals/attainment` | **目标达成（埋点 Phase 1B；2026-09-20 P6.5 起按学科）**。无 query。读 `goals WHERE is_active=1`；**无目标时懒初始化**（`INSERT IGNORE` 只补缺失、**不覆盖**家长已改的值）。**所有目标都是 `(学科, 指标)` 二元组**：在学学科 = `progress` 行的学科 ∪ 固定兜底 {语文,英语} ∩ MVP 白名单 {数学,语文,英语}，按 `subjects.sort_order` 排序；**没有在学学科 → `items: []`**（去配置教材），**绝不编造默认目标**。默认规模 = 数学 3 + 语文 4 + 英语 4 = 11 行；默认值 30 分钟/学科·天、2 课/周、5 道/周、8 篇/周（仅语文）、20 词/天（仅英语）。达成值按 `metric` 分派：`daily_study_minutes` ← `study_sessions` **按学科**（秒→分钟**向下取整**）；`weekly_lessons` ← `lesson_completions` **按学科**（**历史完课补不回来**，从 2026-09-20 起算）；`weekly_clear_errors` ← `main_error_books` **按学科**；`daily_words` / `weekly_passages` ← `special_practice_logs`（该表 `subject_id` 恒 NULL，按 `module` 筛；这两个指标只挂在英语/语文学科上）。响应 `{items:[{metric,subjectId,subjectName,period,title,target,achieved,rate\|null}]}`，`rate = toRate(target, achieved)`（**分母是 target**，为 0 → null；**允许 > 100 = 超额**，前端不截断）。窗口：daily = 今天、weekly = 近 7 天（含今天），由**应用层**算好传参（不用 `CURDATE()`）。返回顺序固定为「学科 sort_order → 指标模板顺序」 | MVP |
+| PUT | `/api/parent/students/{studentId}/goals/{metric}` | **改目标值（本模块唯一的写端点）**。路径 `metric ∈ daily_study_minutes \| weekly_lessons \| daily_words \| weekly_passages \| weekly_clear_errors`（**白名单外 400/1001**，白名单**从后端 `GOAL_TEMPLATES` 派生**、不手抄）；body **`{ target: int, subjectId: int }`** —— `subjectId` **必填**（所有目标按学科，路径参数不够定位资源；走 body 以避免再加同深度模板路径），`period`/`title` 由服务端按 `metric` 派生，家长无从自定义。**校验链路 6 步**：归属校验 → `metric` 白名单 → body Zod（`target` 1–9999、`subjectId` 正整数）→ **指标×学科匹配**（如 `daily_words` 只适用英语）→ **该学科是该生的在学学科** → upsert。按唯一键 `(student_id, scope_subject_id, metric)` upsert 并把 `is_active` 置回 1（复活曾被停用的目标）。`reminder_enabled` 恒 0（**提醒本期不做**）。响应 = **该 `(学科, 指标)` 的最新达成情况**（形状同 attainment 的一行），调用方原地替换即可、**不必再 GET**。归属校验同其它家长端点（403/1005、404/1002） | MVP |
 | ~~GET~~ | ~~`/api/parent/students/{studentId}/goals`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：旧目标 CRUD **从未实现**（文档先于代码写下，代码里没有对应 handler）；且**没有 `metric` 维度**，表达不了四类目标。已被上方的 `/goals/attainment` 取代 | ~~MVP~~ |
 | ~~POST~~ | ~~`/api/parent/students/{studentId}/goals`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现、无 `metric`；创建目标改由 `PUT /goals/{metric}`（服务端幂等 upsert，首次即创建） | ~~MVP~~ |
 | ~~PATCH~~ | ~~`/api/parent/students/{studentId}/goals/{goalId}`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现；改目标值改由 `PUT /goals/{metric}` | ~~MVP~~ |
@@ -533,8 +533,8 @@
 |---|---|---|---|---|
 | GET | `/api/parent/students/{studentId}/specials` | `from?` `to?` | `from`/`to` 交给 `resolveRange` **宽容回落**（形状非法 / `2026-02-30` 这类不存在的日期 → 近 7 天；`from > to` 自动交换）；**绝不 400**。「窗口」由应用层算好传参，**不用 `CURDATE()`**（DB 会话时区与 Node 可能不一致，会算错一天）。四个模块**后端保证都在**，不因缺数据而少键 | `{dictation, interpretation, meaning, vocabulary}` |
 | GET | `/api/parent/students/{studentId}/mastery` | `limit?` | `parsePositiveInt(limit, 'limit', 10, 50)`：非法 / 越界 **400/1001**，**不静默钳制**（本仓全局纪律：静默改档会让家长以为「就这些」）。`limit` 由 controller 校验，service/repo 不再夹 | `{items, coveredQuestions, totalQuestions, uncovered}` |
-| GET | `/api/parent/students/{studentId}/goals/attainment` | — | 先 `ensureDefaults`（`INSERT IGNORE`，**只补缺失**，绝不覆盖家长已改的值），再读 `is_active=1` 的行；`metric` 为 NULL 的历史脏行**不入响应**。四个达成值并行实时算（不缓存——低频只读页不值得引入失效问题） | `{items:[{metric,period,title,target,achieved,rate}]}` |
-| PUT | `/api/parent/students/{studentId}/goals/{metric}` | `{target}` | 顺序：归属校验 → `metric` 白名单 → body 校验 → upsert。**只认 `target`**；`period`/`title` 服务端按 `metric` 派生 | 该 metric 的最新达成情况 |
+| GET | `/api/parent/students/{studentId}/goals/attainment` | — | 先 `ensureDefaults`（`INSERT IGNORE`，**只补缺失**，绝不覆盖家长已改的值），再读 `is_active=1` 的行；`metric` 或 `subject_id` 为 NULL 的历史停用行、以及不在「在学学科」里的行**都不入响应**。五个达成值并行实时算（不缓存——低频只读页不值得引入失效问题） | `{items:[{metric,subjectId,subjectName,period,title,target,achieved,rate}]}` |
+| PUT | `/api/parent/students/{studentId}/goals/{metric}` | `{target, subjectId}` | 顺序：归属校验 → `metric` 白名单 → body 校验 → **指标×学科匹配** → **在学学科** → upsert。`subjectId` 必填；`period`/`title` 服务端按 `metric` 派生 | 该 `(学科, 指标)` 的最新达成情况 |
 
 **四条口径（勿「统一」掉）**
 
@@ -1687,9 +1687,9 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 ---
 
-### 6.27 判题出口 → 专项流水 / 掌握度 → 家长端聚合（埋点 Phase 1B，2026-09-22）
+### 6.27 判题出口 → 专项流水 / 掌握度 / 完课 → 家长端聚合（埋点 Phase 1B + P6.5，2026-09-22）
 
-专项学情与真掌握度的端到端链路（读侧在 §4.13 / §4.24，写入嵌在既有判题出口）。**设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.4 / §4.7 / §4.8 / §8.2 / §10。**
+专项学情、真掌握度、**按学科目标**的端到端链路（读侧在 §4.13 / §4.24，写入嵌在既有判题出口与学习进度推进）。**设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.4 / §4.7 / §4.8 / §8.2 / §10。**
 
 ```text
 判题出口（四个专项写入点 + 一个掌握度回写）
@@ -1699,12 +1699,15 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
   · vocabulary.service.judge             ┘     · 英语：wrong→incorrect，error_counted 取 progressDelta
   · JudgeCoreService.finishJudge（出口收尾）─► student_knowledge_mastery
                                                 （UPSERT 累加计数 + 用累计值现算 score/level）
+  · ProgressService.updateProgress（学完一课）─► lesson_completions（INSERT IGNORE，一课一次）
+  · PATCH /api/study-sessions/:uid/heartbeat  ─► study_sessions.subject_id
+                                                （COALESCE 只补不覆盖：会话开头没带学科时补上）
 
 读侧（家长端，全部只读实时聚合）
   GET /api/parent/students/:id/specials        ─► aggregateByModule / countByDayByModule / countDistinctCorrectWords
   GET /api/parent/students/:id/mastery         ─► listWeakest + countQuestionCoverage
-  GET /api/parent/students/:id/goals/attainment─► goals（无则懒初始化）→ 四路达成值
-  PUT /api/parent/students/:id/goals/:metric   ─► upsertTarget → 回该 metric 最新达成
+  GET /api/parent/students/:id/goals/attainment─► goals（无则懒初始化）→ 按学科分派的五路达成值
+  PUT /api/parent/students/:id/goals/:metric   ─► upsertTarget(学科, 指标) → 回该行最新达成
 ```
 
 **四条口径（会被反复问，记死）**
@@ -1712,12 +1715,15 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 1. **一行 = 一个作答单位**：默写一篇、解释/含义一句、背单词一题。故 `units = COUNT(*)`，四个模块的 `units` 相加没有业务含义。
 2. **`answered = SUM(is_correct IS NOT NULL)`**：排除 `unanswered` / `undetermined`（「没有明确对错」）的行；`rate` 一律用 `rate.util.ts` 的 `toRate(answered, correct)`（**唯一实现**），分母为 0 → `null` 而不是 0。
 3. **掌握度与 `weakPoints` 并存不替换**：前者读 `student_knowledge_mastery`（真掌握度，判题时回写），后者是错题数代理（§6.8）。报告页两张卡、两个标题，不得合并；`/mastery` 必须回覆盖率三项（题库仅约 38% 的题绑了知识点）。
-4. **埋点写入永不阻断判题**：四个专项写入点与掌握度回写都在 `try/catch` 里，**失败只 warn**；掌握度回写走 `void`（不 `await`）——判题是主链路，派生数据不该拖长学生等待。
+4. **埋点写入永不阻断主链路**：四个专项写入点、掌握度回写、**完课事件**都在 `try/catch` 里，**失败只 warn**；掌握度回写走 `void`（不 `await`）——判题/推进是主链路，派生数据不该拖长学生等待。
+5. **目标 = `(学科, 指标)`二元组（P6.5，2026-09-20）**：不存在全局目标。同一個 metric 会在多个学科各有一行，所以「metric」不再是唯一键、前端渲染 key 必须用 `subjectId:metric`。在学学科 = `progress` 行的学科 ∪ 兜底 {语文,英语} ∩ MVP 白名单；没有在学学科就**不建默认目标**。
+6. **`weekly_lessons` 的数据源是 `lesson_completions`，且历史补不回来**：`progress` 表只有游标（覆盖式更新、无历史），回答不了「本周完成了几课」；本表从 2026-09-20 起记。同理 `study_sessions.subject_id` **心跳补写**只对之后的会话生效，旧会话（NULL）不追溯。
 
 **两条容易踩的实现坑（2026-09-22 实测）**
 
 - **`ON DUPLICATE KEY UPDATE` 的 SET 从左到右求值，后面的表达式读到的是前面刚写入的值**（不是本行旧值）。`student_knowledge_mastery` 的 `mastery_score` 因此必须写成「计数列先更新、score/level 只引用更新后的列」；若在 score 里再写一次 `+ new.correct_count`，本次增量会被算两遍（1 对 1 错实测 `0.333`，应为 `0.500`），而掌握度是长期累计列，**错了不会自愈**。
 - **仓储的占位符顺序必须与列清单逐位对应**：`goals` 的列是 `(student_id, subject_id, metric, title, period, target_value, …)`，参数按语义直觉排成 `[studentId, metric, period, title, target]` 会让 `title` 与 `period` 对调落库。**只断言「自己传了什么 payload」的单测拦不住这类错**——要么按列名配对断言，要么用真库（事务 + ROLLBACK）跑一次。
+- **`goals` 的唯一键靠 VIRTUAL 生成列，不能改 STORED（2026-09-20 实测）**：MySQL 的唯一索引把 NULL 视为互不相等，所以 `(student_id, subject_id, metric)` 在 `subject_id IS NULL` 时**允许重复行**、`ON DUPLICATE KEY` 静默失效。修法是生成列 `scope_subject_id = IF(metric IS NULL, NULL, COALESCE(subject_id, 0))`（VIRTUAL）＋唯一键 `(student_id, scope_subject_id, metric)`。**必须是 VIRTUAL**：STORED 要重建整表，而 `goals` 上有两个外键 → `ERROR 1215 Cannot add foreign key constraint`。⚠️ **别用临时表验证这类事**——临时表没有外键，STORED 在临时表上能建成功（本项目真踩过）。
 
 ---
 
@@ -1915,6 +1921,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.4 | 2026-09-20 | **P6.5 目标设定补齐：按学科 + 每周完课 + 采集修正**。契约变更：`GET /goals/attainment` 的 `items[]` 新增 **`subjectId` / `subjectName`**（目标改为 `(学科, 指标)` 二元组，同 metric 不再全局唯一，排序固定为「学科 sort_order → 指标模板顺序」）；`PUT /goals/:metric` 的 body 由 `{target}` 改为 **`{target, subjectId}`**（`subjectId` 必填，校验链路 6 步，新增「指标×学科匹配」与「在学学科」两道）。`metric` 枚举新增 **`weekly_lessons`**（每周完课）。数据面：新建 `lesson_completions`（每课完成事件；**历史完课补不回来**，从 2026-09-20 起算），`goals` 唯一键改为 `(student_id, scope_subject_id, metric)`（生成列 `scope_subject_id`，**必须 VIRTUAL**——STORED 会被外键挡住）。采集修正：会话心跳可带 `subjectId` 并**只补不覆盖**地写回 `study_sessions.subject_id`（此前该列近乎全 NULL，按学科的学习时长恒为 0；旧会话不追溯）。口径裁决（2026-09-20 用户确认）：**提醒本期不做**（PRD/UX 已加批注，`reminder_enabled` 恒 0；短信单独立项）、每周完课用新建事件表而非积分账本代理、按学科学习时长靠心跳补写。默认目标：数学 3 + 语文 4 + 英语 4 = 11 行（30 分钟/学科·天、2 课/周、5 道/周、8 篇/周、20 词/天）。**没有在学学科时不建默认目标**。 |
 | v4.3 | 2026-09-22 | **埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成**。契约变更：新增 `GET /api/parent/students/{studentId}/specials`、`/mastery`、`/goals/attainment` 与 `PUT /api/parent/students/{studentId}/goals/{metric}`（§4.13 四行 + §4.24 总览，`openapi.yaml` 同步）；旧 `goals` CRUD 四条**从未实现**（文档先于代码写下、无 handler）且无 `metric` 维度，**标废弃**（§4.13 删除线 + §7 P6.5）。数据面：`special_practice_logs` 新表（DB 设计文档 §3.17）、`goals` 加 `metric` 列与唯一键 `(student_id, metric)`（迁移 `2026-09-22_special_practice_logs_and_goals.sql`）。两条口径裁决（2026-09-22 用户确认）：① `weekly_passages` 的达成值 = 三个语文专项**去重篇目数**（不能用行数——解释/含义一句一行，会把「8 句」当「8 篇」）；② 默认目标 60 分钟 / 20 词 / 8 篇 / 10 道。四处新增口径：`units` 一行 = 一个作答单位、`rate` 分母为 0 恒 `null`、掌握度**与 `weakPoints` 并存不替换**、埋点写入**永不阻断判题**（§6.27）。顺带修 spec §4.8 的 UPSERT 算式 bug：`ON DUPLICATE KEY UPDATE` 的 SET 从左到右读到的已是更新后的列，原式把本次增量算了两遍（1 对 1 错实测 0.333，应为 0.500） | 
 | v4.2 | 2026-09-19 | **家长端 AI 对话回放补齐孩子的图片**。契约变更：`GET /api/parent/students/:id/chat-logs/{dialogueId}` 的消息对象新增 **`images: string[]`**（`openapi.yaml` 的 `ChatLogMessage` 同步）。服务端从 `ai_messages.attachments` 的 JSON 串解析、**只留 `type == 'image'`**（`file` 类型本期下发），无附件时是**空数组而非 null**；不回传原始 `attachments` 串（家长端不该自己 parse JSON）。动机：数据在库里、学生端能看（`useAuxChat` 解析 → `AuxChatPanel` 渲染 `<img>`），而家长端原先的字段白名单漏了它 → PRD §7.7「全透明回放」缺一块。顺带把学生端的图片大图预览抽成共享 `components/base/ImageLightbox`（原先私有在 `AuxChatPanel` 里），两端共用一份（避免 Esc 监听与 `body.overflow` 复位抄漏）。 | 
 | v4.1 | 2026-09-19 | **家长端错题轨道改 主线/训练 + 两页富文本渲染修正**。契约变更：`GET /api/parent/students/:id/errors` 的 `track` 由 `main\|aux` 改为 `main\|training`（§4.13 与 `openapi.yaml` 的路径参数、`ParentErrorItem.track` 已同步）。分档表 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary`——孩子**在辅线答疑里问过**的题（`auxiliary`）进训练轨「错题练习」池、可被做对清零，故归训练、不再单列「辅线」档；筛选由反向排除改为 `source IN (...)` 白名单（未登记 source 不入任何档，由分区测试兜底：新增来源不入册即红）。`ParentErrorItem.wrongAnswerText` 补注：字段名历史误导，它装的是「题库未命中时保存的题面原文」而**非**学生作答（`questionId` 非空时恒为 null），家长端页面据此不再渲染「学生作答」行。前端两处富文本改走共享渲染配置（AI 对话回放的 AI 回复与思路、错题页题面）。**未涉及**：`/error-book/students/{studentId}/main` 的旧 `ErrorItem` schema 仍写 `track: [main, aux]`（遗留端点，属存量偏差，另行处理）。 | 

@@ -90,9 +90,13 @@ describe('AnalyticsShell', () => {
     await waitFor(() => expect(transport.start).toHaveBeenCalled());
 
     document.dispatchEvent(new Event('visibilitychange'));
-    await waitFor(() =>
-      expect(transport.heartbeat).toHaveBeenCalledWith(expect.any(String), 'hidden'),
-    );
+    // 只断言前两个参数：第三个是 subjectId（P6.5 补写用），本用例没有学习上下文 →
+    // 它是 null。**别用 `expect.anything()`**——它不匹配 null/undefined。
+    await waitFor(() => {
+      const last = transport.heartbeat.mock.calls.at(-1);
+      expect(last?.[0]).toEqual(expect.any(String));
+      expect(last?.[1]).toBe('hidden');
+    });
   });
 
   /**

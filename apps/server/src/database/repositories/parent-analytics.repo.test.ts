@@ -26,6 +26,21 @@ describe('ParentAnalyticsRepository 学习时长', () => {
     expect(params).toEqual([9, FROM, TO]);
   });
 
+  it('getStudyTimeBySubjectOne：收窄到一个学科、返回标量，过滤条件与 bySubject 一致', async () => {
+    const pool = mockPool([{ seconds: '1500' }]);
+    const repo = new ParentAnalyticsRepository(pool as any);
+
+    expect(await repo.getStudyTimeBySubjectOne(9, 2, FROM, TO)).toBe(1500);
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('subject_id = ?');
+    // 与 getStudyTimeBySubject 同一套「有效会话」口径（否则两个口径会打架）
+    expect(sql).toContain("status IN ('ended','abandoned')");
+    expect(sql).toContain("status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE");
+    expect(sql).not.toContain('CURDATE()');
+    expect(params).toEqual([9, 2, FROM, TO]);
+  });
+
   it('getStudyTimeByDay：按 DATE(started_at) 分组，日期由 SQL 出', async () => {
     const rows = [
       { day: '2026-09-13', seconds: 600 },

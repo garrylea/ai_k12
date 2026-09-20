@@ -98,6 +98,33 @@ export class ParentAnalyticsRepository {
     return rows.map((r) => ({ subjectId: Number(r.subjectId), seconds: Number(r.seconds ?? 0) }));
   }
 
+  /**
+   * **单学科**窗口内的学习秒数（P6.5：按学科的「每日学习时长」目标达成值）。
+   *
+   * 与 `getStudyTimeBySubject` 同一套过滤（同样只算 `EFFECTIVE_SESSION`），只是收窄到
+   * 一个学科并返回标量 —— 目标达成要一个数，不必把整张表取回来再挑。
+   *
+   * ⚠️ 只有**带了 `subject_id` 的会话**才计入（`subject_id = ?` 天然排除了 NULL）。
+   * 2026-09-20 之前开的会话绝大多数是 NULL（采集时机问题），已由「心跳补写」修掉，
+   * 但**历史会话不追溯** —— 所以这个数字在旧数据上会偏低，页面文案要说清。
+   */
+  async getStudyTimeBySubjectOne(
+    studentId: number,
+    subjectId: number,
+    from: Date,
+    toExclusive: Date,
+  ): Promise<number> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { seconds: number | string | null })[]>(
+      `SELECT COALESCE(SUM(active_seconds), 0) AS seconds
+       FROM study_sessions
+       WHERE student_id = ? AND subject_id = ?
+         AND started_at >= ? AND started_at < ?
+         AND ${ParentAnalyticsRepository.EFFECTIVE_SESSION}`,
+      [studentId, subjectId, from, toExclusive],
+    );
+    return Number(rows[0]?.seconds ?? 0);
+  }
+
   /** 会话口径的「有学习的天数」。与旧「近 7 天活跃」（四路时间戳代理）**刻意不同**，见 spec §10。 */
   async getActiveDays(studentId: number, from: Date, toExclusive: Date): Promise<number> {
     const [rows] = await this.pool.execute<(RowDataPacket & { active_days: number | string | null })[]>(

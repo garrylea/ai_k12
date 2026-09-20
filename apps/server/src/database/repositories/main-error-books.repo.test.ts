@@ -87,7 +87,6 @@ describe('MainErrorBooksRepository', () => {
     const repo = new MainErrorBooksRepository(pool as any);
     await repo.findByStudent(10, 2, true);
     const [sql, params] = pool.execute.mock.calls[0];
-    expect(sql).toContain('subject_id = ?');
     expect(sql).not.toContain('is_cleared = 0'); // includeCleared 跳过
     expect(params).toEqual([10, 2]);
   });
@@ -224,19 +223,20 @@ describe('MainErrorBooksRepository.countClearedBetween（埋点 Phase 1B）', ()
     const pool = mockPool([{ n: '4' }]);
     const repo = new MainErrorBooksRepository(pool as any);
 
-    expect(await repo.countClearedBetween(11, new Date('2026-09-13'), new Date('2026-09-20'))).toBe(4);
+    expect(await repo.countClearedBetween(11, 1, new Date('2026-09-13'), new Date('2026-09-20'))).toBe(4);
     const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('subject_id = ?');
     expect(sql).toContain('is_cleared = 1');
     expect(sql).toContain('cleared_at IS NOT NULL');
     expect(sql).toContain('cleared_at >= ? AND cleared_at < ?');
     expect(sql).not.toContain('CURDATE()');
-    expect(params).toEqual([11, new Date('2026-09-13'), new Date('2026-09-20')]);
+    expect(params).toEqual([11, 1, new Date('2026-09-13'), new Date('2026-09-20')]);
   });
 
   it('无数据 → 0（不是 null）', async () => {
     const pool = mockPool([{ n: null }]);
     const repo = new MainErrorBooksRepository(pool as any);
 
-    expect(await repo.countClearedBetween(11, new Date(), new Date())).toBe(0);
+    expect(await repo.countClearedBetween(11, 1, new Date(), new Date())).toBe(0);
   });
 });

@@ -8,6 +8,21 @@
 
 ---
 
+## 2026-09-20 P6.5 目标设定补齐：按学科 + 每周完课 + 采集修正
+
+- **起因（一次我的疏漏）**：用户实际走查后问「这个目标该从哪儿设置呢，我在家长管理系统中没有看到设置目标的位置」。排查发现两层问题：① 目标页的数字输入框首版写成**原生 `<input>`**（1px 浅灰边框、无聚焦态），在白卡上看起来像静态文字 —— 用户因此没意识到「哪里能改」；② 更根本的是：1B 按 spec 实现了**四个全局目标**（学习时长/背单词/古诗文篇目/清零错题），而 **PRD 第 200 行与 UX §P6.5 要求的是「按学科设定每日/每周学习目标」**（UX 还明确要「每周完课目标」）。我按 spec 实现时**没有把这条冲突标出来**，属疏漏 —— 本仓硬规则是「PRD 覆盖任何设计决策，有冲突必须先与用户确认」。
+- **用户三条裁决（2026-09-20）**：① **提醒本期不做**（本仓零调度基础设施：无 cron / `@nestjs/schedule`；且**无任何短信/推送通道**，做到期提醒需新建调度 + 幂等去重，属独立一批；`goals.reminder_enabled` 恒 0）；② **「每周完课」新建 `lesson_completions` 表**，不用积分账本代理（账本发分走 try/catch 吞异常会漏记、且无学科字段）；③ **按学科学习时长靠心跳补写 `subject_id`**。
+- **模型改为 `(学科, 指标)` 二元组**：不存在全局目标；在学学科 = `progress` 行的学科 ∪ 固定兜底 {语文,英语} ∩ MVP 白名单 {数学,语文,英语}，按 `subjects.sort_order`；**没有在学学科就不建默认目标**（`items: []` + 页面引导去配置教材），绝不编造。默认规模 数学 3 + 语文 4 + 英语 4 = **11 行**（30 分钟/学科·天、2 课/周、5 道/周、8 篇/周、20 词/天）；语文才有古诗文、英语才有背单词。
+- **契约变更**：`GET /goals/attainment` 的 items 新增 `subjectId`/`subjectName`（排序固定「学科 sort_order → 指标模板顺序」）；`PUT /goals/:metric` 的 body 由 `{target}` 改为 `{target, subjectId}`（必填），校验链路 6 步 —— 归属 → metric 白名单 → body → **指标×学科匹配** → **在学学科** → upsert，每步 400 且文案指名原因。`metric` 枚举加 `weekly_lessons`。白名单**从后端 `GOAL_TEMPLATES` 派生**，不手抄（手抄必然在某次加指标时漏掉）。
+- **数据面**：`goals` 唯一键改 `(student_id, scope_subject_id, metric)`，`scope_subject_id` 是**条件式生成列** `IF(metric IS NULL, NULL, COALESCE(subject_id, 0))`；新增 `lesson_completions`（每课完成事件，`lesson_id` 不设外键、`uniq(student_id, lesson_id)` 让 `INSERT IGNORE` 幂等）。详见数据库设计文档 §3.8/§3.18、迁移 `2026-09-20_goals_per_subject_and_lesson_completions.sql`。
+- **两个必须记住的实现坑（都是实测）**：
+  1. **生成列必须 `VIRTUAL`、不能 `STORED`**：`goals` 上有两个外键，STORED 要重建整表 → `ERROR 1215 Cannot add foreign key constraint`。而我**第一轮用临时表验证「STORED 可行」是假阳性** —— 临时表没有外键。教训：外键相关的 DDL 只能在真表上验。
+  2. **`expect.anything()` 不匹配 `null`**：心跳第三个参数（`subjectId`）在无学科时是 `null`，用它断言会假红。
+  3. **新增构造参数最容易静默失效**：`ProgressService` 加第 9 参后老测试 harness 没传，写入点被 `try/catch` 吞掉、**老用例照样全绿**。凡新增可选依赖，必须同时补所有构造点。
+- **前端**：目标页按学科分组；**行 key / 草稿 / 保存态一律改成 `subjectId:metric`**（按学科后同 metric 跨学科重复，用 metric 当 key 会互相串）；数字输入换基座 `Input`（修掉上面那个走查缺陷，并加类名断言钉住）；行内带单位（分钟/课/道/篇/词）；无在学学科时引导去配置教材。
+- **计划**：`docs/superpowers/plans/2026-09-20-goals-per-subject.md`（Task 1–10）。实施期偏离一处并已记录：Task 6+7 合并成一个提交（否则中间提交 tsc 红）。
+- **走查第二个缺陷（同一轮发现并修掉）**：用户点「保存」反馈「啥也没有响应」。查 `api_request_logs` 后确认 —— **四个 PUT 全部 200 成功**，但库里 `updated_at`/`target_value` 全未变：因为保存的是**与当前相同的值**，行内容零变化、`ON DUPLICATE KEY UPDATE` 也是无操作（连 `updated_at` 都不动）。根因是我在计划里写了「成功不给 toast，靠数字变化当反馈」——**当值没变时这个假设就崩了**，家长会以为按钮坏了（实测 8 秒内连点 4 次）。修法：保存成功 `toast('success', '已保存：<标题> <值> <单位>')`，**回显服务端返回的值**（万一输入没被采纳，这句话会直接把差异摆出来）；失败也补一条全局 error 提示（行内小字在窄屏下容易忽略）。新增 2 条用例钉住。教训：**「不需要反馈」是个危险假设**——凡是用户主动触发的写操作，必须有可感知的成功信号。
+
 ## 2026-09-22 埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成
 
 - **数据面**：新增 `special_practice_logs`（迁移 `2026-09-22_special_practice_logs_and_goals.sql` + `schema.sql`；列/索引/三条口径见数据库设计文档 §3.17）——语文三专项 + 英语背单词的判题流水，**一行 = 一个作答单位**（默写一篇、解释/含义一句、背单词一题）；只挂 `student_id` 一个外键，`ref_id` **故意不设外键**（内容表全量重灌会被入向外键卡死，同 `student_word_progress.word_id` 的教训）。`goals` 复活（§3.8）：加 `metric` 列 + 唯一键 `(student_id, metric)`（按 metric upsert 的前提）。

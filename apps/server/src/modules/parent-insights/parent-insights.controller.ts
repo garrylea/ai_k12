@@ -25,7 +25,7 @@ import type { ChatLogsQuery } from './chat-logs.service.js';
 import { StudyTimeService } from './study-time.service.js';
 import { SpecialsService } from './specials.service.js';
 import { ParentMasteryService } from './parent-mastery.service.js';
-import { GoalsService } from './goals.service.js';
+import { GoalsService, GOAL_TEMPLATES } from './goals.service.js';
 import type { StudyTimeSummary, TodayUsageSummary } from './dto/parent-insights.dto.js';
 import type {
   GoalAttainmentItem,
@@ -45,16 +45,25 @@ import { DEFAULT_PAGE, parsePositiveInt } from '../points/pagination.util.js';
 /** `period` 只认这两个值；非法值**回落 `weekly`**（spec §6：查询类参数宽容回落，不 400）。 */
 const PeriodSchema = z.enum(['weekly', 'monthly']);
 
-/** 目标维度白名单（与 `goals.metric` 的列注释、`GoalMetric` 类型逐字一致）。 */
-const GOAL_METRICS: readonly GoalMetric[] =
-  ['daily_study_minutes', 'daily_words', 'weekly_passages', 'weekly_clear_errors'];
+/**
+ * 目标维度白名单 —— **从 `GOAL_TEMPLATES` 派生**，不手抄。
+ * 手抄必然在某次加指标时漏掉（1B 就出现过「枚举加了、白名单没加」的隐患），模板是唯一真源。
+ */
+const GOAL_METRICS: readonly GoalMetric[] = GOAL_TEMPLATES.map((t) => t.metric);
 
 /**
- * `PUT .../goals/:metric` 的 body。**只收 `target`**：`metric` 在路径里、`period`/`title`
- * 由服务端按 metric 派生，家长无从自定义。上限 9999 与 points 规则值同一档，顺带挡住
- * `SMALLINT` 溢出；**下限 1**：目标 0 没有意义（达成率永远是 null）。
+ * `PUT .../goals/:metric` 的 body。
+ *
+ * 2026-09-20（P6.5）起 `subjectId` **必填**：所有目标都按学科（不存在全局目标），
+ * 所以一条路径参数不够定位资源 —— 用 body 带学科，避免再加一条同深度模板路径。
+ * `period`/`title` 由服务端按 metric 派生，家长无从自定义。
+ * 上限 9999 与 points 规则值同一档，顺带挡住 `SMALLINT` 溢出；**下限 1**：目标 0 没有意义
+ * （达成率永远是 null）。
  */
-const UpsertGoalSchema = z.object({ target: z.number().int().min(1).max(9999) });
+const UpsertGoalSchema = z.object({
+  target: z.number().int().min(1).max(9999),
+  subjectId: z.number().int().positive(),
+});
 
 /**
  * 家长端「看得见」批（spec `2026-09-18-parent-insights-design.md`）。
@@ -267,6 +276,22 @@ export class ParentInsightsController {
         .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`).join('; ');
       throw new BadRequestException({ code: 1001, message: `入参校验失败：${detail}` });
     }
-    return this.goalsService.upsertTarget(studentId, metric as GoalMetric, parsed.data.target);
+    const { subjectId, target } = parsed.data;
+
+    // 「指标 × 学科」必须匹配（如 daily_words 只适用英语）。规则真源在 GoalsService 里，别在这儿复制。
+    if (!(await this.goalsService.isMetricAllowedForSubject(subjectId, metric as GoalMetric))) {
+      throw new BadRequestException({
+        code: 1001,
+        message: `${metric} 不适用于该学科（学科 ${subjectId}）`,
+      });
+    }
+    // 只能给「在学学科」设目标：否则会给一门孩子根本没在学的课写目标，家长在页面上也看不到它。
+    if (!(await this.goalsService.isLearningSubject(studentId, subjectId))) {
+      throw new BadRequestException({
+        code: 1001,
+        message: `学科 ${subjectId} 不是这个孩子的在学学科（先去「学生账号 → 配置教材」）`,
+      });
+    }
+    return this.goalsService.upsertTarget(studentId, subjectId, metric as GoalMetric, target);
   }
 }

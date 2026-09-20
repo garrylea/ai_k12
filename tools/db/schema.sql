@@ -842,8 +842,9 @@ CREATE TABLE IF NOT EXISTS learning_reports (
 CREATE TABLE IF NOT EXISTS goals (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   student_id BIGINT NOT NULL,
-  subject_id BIGINT DEFAULT NULL,
-  metric VARCHAR(40) DEFAULT NULL COMMENT 'daily_study_minutes|daily_words|weekly_passages|weekly_clear_errors',
+  subject_id BIGINT DEFAULT NULL COMMENT '按学科目标；为 NULL 的历史行是迁移前停用行，读侧被 is_active=1 过滤',
+  scope_subject_id BIGINT AS (IF(metric IS NULL, NULL, COALESCE(subject_id, 0))) VIRTUAL COMMENT '生成列（条件式，必须 VIRTUAL 不能 STORED——STORED 会重建表并被外键挡住）：metric 非空时把 subject_id 的 NULL 折 0 供唯一键用；metric 为空的历史停用行保持 NULL，不参与唯一性',
+  metric VARCHAR(40) DEFAULT NULL COMMENT 'daily_study_minutes|weekly_lessons|daily_words|weekly_passages|weekly_clear_errors',
   title VARCHAR(200) NOT NULL,
   period VARCHAR(10) NOT NULL,
   target_value SMALLINT NOT NULL,
@@ -852,7 +853,7 @@ CREATE TABLE IF NOT EXISTS goals (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_goals_student (student_id, is_active),
-  UNIQUE KEY uniq_goals_student_metric (student_id, metric),
+  UNIQUE KEY uniq_goals_student_scope_metric (student_id, scope_subject_id, metric),
   CONSTRAINT fk_goals_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_goals_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1297,6 +1298,26 @@ CREATE TABLE IF NOT EXISTS special_practice_logs (
   KEY idx_spl_student_ref         (student_id, module, ref_id),
   KEY idx_spl_time                (created_at),
   CONSTRAINT fk_spl_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 18. 课时完成事件（2026-09-20，P6.5 目标设定补齐）
+-- ============================================================
+-- 「每周完课目标」的唯一数据源。此前 progress 表只有游标（current_lesson_id，覆盖式更新、
+-- 无历史），回答不了「本周完成了几课」。**历史完课补不回来**，达成值从本表上线起算。
+-- lesson_id 故意不设外键（lessons 是内容表、会全量重灌）。
+-- 迁移：tools/db/migrations/2026-09-20_goals_per_subject_and_lesson_completions.sql
+
+CREATE TABLE IF NOT EXISTS lesson_completions (
+  id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id   BIGINT      NOT NULL,
+  subject_id   BIGINT      NOT NULL COMMENT '取自 progress.subject_id（该列 NOT NULL）',
+  lesson_id    BIGINT      NOT NULL COMMENT 'lessons.id；**故意不设外键**（内容表会全量重灌）',
+  completed_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  -- 一课只记一次：完成不可逆，重复上报/重放都靠它幂等（写入用 INSERT IGNORE）
+  UNIQUE KEY uniq_lc_student_lesson (student_id, lesson_id),
+  KEY idx_lc_student_subject_time (student_id, subject_id, completed_at),
+  CONSTRAINT fk_lc_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

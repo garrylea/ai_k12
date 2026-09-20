@@ -128,7 +128,8 @@ export class MainErrorBooksRepository {
   }
 
   /**
-   * 窗口内**清零**的错题数，即目标 `weekly_clear_errors` 的达成值（埋点 Phase 1B）。
+   * 窗口内**某学科**清零的错题数，即目标 `weekly_clear_errors` 的达成值（埋点 Phase 1B；
+   * 2026-09-20 P6.5 起带 subjectId，因为所有目标都改成了按学科）。
    *
    * 口径：按 `cleared_at` 落在窗口内数（`is_cleared = 1 AND cleared_at IS NOT NULL`）。
    * 同一道题清了又被做错会**再新建一行**（`create`），所以这里数的是「清零动作次数」而不是
@@ -137,13 +138,19 @@ export class MainErrorBooksRepository {
    *
    * 窗口边界由**应用层**算好传参（半开区间），不用 `CURDATE()`——DB 会话时区与 Node 可能不一致。
    */
-  async countClearedBetween(studentId: number, from: Date, toExclusive: Date): Promise<number> {
+  async countClearedBetween(
+    studentId: number,
+    subjectId: number,
+    from: Date,
+    toExclusive: Date,
+  ): Promise<number> {
+    // subject_id 是 NOT NULL 列，所以「每周清零错题」天然可按学科统计（P6.5 起按学科）。
     const [rows] = await this.pool.execute<(RowDataPacket & { n: number | string | null })[]>(
       `SELECT COUNT(*) AS n
        FROM main_error_books
-       WHERE student_id = ? AND is_cleared = 1 AND cleared_at IS NOT NULL
+       WHERE student_id = ? AND subject_id = ? AND is_cleared = 1 AND cleared_at IS NOT NULL
          AND cleared_at >= ? AND cleared_at < ?`,
-      [studentId, from, toExclusive],
+      [studentId, subjectId, from, toExclusive],
     );
     return Number(rows[0]?.n ?? 0);
   }

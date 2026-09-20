@@ -2677,17 +2677,18 @@ paths:
       tags: [Parent]
       summary: 目标达成（四个维度）
       description: >-
-        埋点 Phase 1B。读 `goals WHERE is_active=1`；**无目标时懒初始化四个默认目标**
-        （每日学习 60 分钟 / 每日背单词 20 词 / 每周古诗文 8 篇 / 每周清零错题 10 道），
-        用 `INSERT IGNORE` 只补缺失、**不覆盖**家长已改过的值。
-        达成值按 metric 分派：daily_study_minutes ← study_sessions（秒→分钟向下取整）；
-        daily_words ← special_practice_logs 的 en_vocabulary 单位数；
-        weekly_passages ← 三个语文专项**去重篇目数**（不是行数——解释/含义一句一行）；
-        weekly_clear_errors ← main_error_books 窗口内清零数。
-        `rate` = achieved/target（**分母是 target**），target 为 0 或无法计算时 null；
-        **允许 > 100 = 超额完成**，前端不要截断。
-        窗口：daily = 今天、weekly = 近 7 天（含今天），应用层算好传参（不用 CURDATE()）。
-        返回顺序固定为四个维度的声明顺序。归属校验先于取数。
+        埋点 Phase 1B；**2026-09-20 P6.5 起按学科**。目标是 `(学科, 指标)` **二元组**，
+        **不存在全局目标** —— 同一个 metric 会在多个学科各有一行（前端渲染 key 用 subjectId:metric）。
+        在学学科 = progress 行的学科 ∪ 固定兜底 {语文,英语} ∩ MVP 白名单 {数学,语文,英语}，按
+        subjects.sort_order 排序；**没有在学学科 → items: []**（去配置教材），**绝不编造默认目标**。
+        无目标时懒初始化（INSERT IGNORE 只补缺失、不覆盖家长已改的值）：数学 3 + 语文 4 + 英语 4 = 11 行。
+        达成值按 metric 分派：daily_study_minutes ← study_sessions **按学科**（秒→分钟向下取整）；
+        weekly_lessons ← lesson_completions **按学科**（历史完课补不回来，从 2026-09-20 起算）；
+        weekly_clear_errors ← main_error_books **按学科**；daily_words / weekly_passages ←
+        special_practice_logs（该表 subject_id 恒 NULL，按 module 筛；这两个指标只挂英语/语文）。
+        rate = achieved/target（**分母是 target**），为 0 → null；**允许 > 100 = 超额**，前端不截断。
+        窗口由应用层算好传参（daily = 今天、weekly = 近 7 天，不用 CURDATE()）。
+        返回顺序固定为「学科 sort_order → 指标模板顺序」。归属校验先于取数。
       operationId: getParentGoalAttainment
       parameters:
         - name: studentId
@@ -2712,15 +2713,14 @@ paths:
       tags: [Parent]
       summary: 改目标值（按 metric upsert）
       description: >-
-        埋点 Phase 1B，家长端本模块**唯一的写端点**。
-        `metric` 必须在白名单内（daily_study_minutes / daily_words / weekly_passages /
-        weekly_clear_errors），否则 400；body **只收 target**（1–9999），period/title 由服务端按
-        metric 派生，家长无从自定义。按唯一键 `(student_id, metric)` upsert，并把 `is_active` 置回 1
-        （复活曾被停用的目标）。响应是**该 metric 的最新达成情况**——调用方拿它原地替换该行即可，
-        不必再发一次 GET（省一次往返，也避免写后读不一致的窗口）。
-        注意：本路径与文档里那 4 条**从未实现**的旧 goals CRUD（`/goals`、`/goals/{goalId}`，见下方
-        `deprecated: true`）没有冲突——那边只有文档、没有路由；即便将来补实现，方法也不同（PUT vs PATCH/DELETE）。
-        归属校验先于写入（403/1005、404/1002）。
+        家长端本模块**唯一的写端点**。**2026-09-20 P6.5 起所有目标都按学科**，故 `subjectId` **必填**
+        （走 body 而不是路径：路径参数不够定位资源，再加同深度模板路径只会和 goals/:metric 产生歧义）。
+        校验链路 6 步，每步 400 且文案指名原因：归属校验 → metric 白名单 → body Zod
+        （target 1–9999 整数、subjectId 正整数）→ **指标×学科匹配**（如 daily_words 只适用英语）
+        → **该学科是该生的在学学科** → upsert。period/title 由服务端按 metric 派生，家长无从自定义。
+        按唯一键 (student_id, scope_subject_id, metric) upsert，并把 is_active 置回 1（复活曾被停用的目标）。
+        reminder_enabled 恒 0（**提醒本期不做**，见 PRD/UX 批注）。
+        响应是**该 (学科, 指标) 的最新达成情况** —— 调用方原地替换该行即可，不必再发 GET。
       operationId: putParentGoalTarget
       parameters:
         - name: studentId
@@ -2733,21 +2733,27 @@ paths:
           required: true
           schema:
             type: string
-            enum: [daily_study_minutes, daily_words, weekly_passages, weekly_clear_errors]
-          description: 目标维度；不在白名单内 → 400。
+            enum: [daily_study_minutes, weekly_lessons, daily_words, weekly_passages, weekly_clear_errors]
+          description: 目标维度；不在白名单内 → 400（白名单从后端 GOAL_TEMPLATES 派生）。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [target]
+              required: [target, subjectId]
               properties:
                 target:
                   type: integer
                   minimum: 1
                   maximum: 9999
-                  description: 目标值；**只收这一个字段**，period/title 由服务端派生。
+                  description: 目标值；period/title 由服务端派生。
+                subjectId:
+                  type: integer
+                  minimum: 1
+                  description: >-
+                    学科 id（**必填**）。必须同时满足：该 metric 适用于该学科、且该学科是该生的
+                    在学学科（progress 有行或有兜底），否则 400。
       responses:
         '200':
           description: 该 metric 的最新达成情况
@@ -9501,13 +9507,21 @@ components:
     ParentGoalAttainmentItem:
       type: object
       description: >-
-        目标达成的一行。`rate` = achieved/target（**分母是 target**），target 为 0 时 null；
+        目标达成的一行，**按学科**（2026-09-20 P6.5）：目标是 (学科, 指标) 二元组，
+        `metric` 不再全局唯一 —— 前端渲染 key 必须用 `subjectId:metric`。
+        `rate` = achieved/target（**分母是 target**），target 为 0 时 null；
         **允许 > 100 = 超额完成**，前端不要截断。
-      required: [metric, period, title, target, achieved, rate]
+      required: [metric, subjectId, subjectName, period, title, target, achieved, rate]
       properties:
         metric:
           type: string
-          enum: [daily_study_minutes, daily_words, weekly_passages, weekly_clear_errors]
+          enum: [daily_study_minutes, weekly_lessons, daily_words, weekly_passages, weekly_clear_errors]
+        subjectId:
+          type: integer
+          description: 学科 id。
+        subjectName:
+          type: string
+          description: 学科名（展示用，前端不自行映射）。
         period:
           type: string
           enum: [daily, weekly]
