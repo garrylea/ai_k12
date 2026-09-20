@@ -63,13 +63,15 @@
 
 - 归属：`parent-insights` 模块（`AlertsService` + controller），鉴权同既有 `GET /parent/alerts`（parent 角色，不传 `studentId` = 全部孩子）。
 - 行为：① 取该家长名下全部学生（`studentsRepo.findByParentId`），逐个 `closeStale`（**嵌在业务流里的写入：整段 catch、失败只 warn、绝不阻断响应**）；② 查未读预警。
-- 响应：`{ items: [{ id, type, message, studentName, createdAt }] , total }`；`items` 截最新 5 条，`total` 为未读总数（banner 文案用）。
+- 响应：`{ items: [{ id, type, level, message, studentName, createdAt }] , total }`；`items` 截最新 5 条，`total` 为未读总数（banner 文案用）。`level` 供前端区分 Banner 配色（warning/critical → danger 红、info 走神 → warning 橙）。
 - 复用既有 list 仓储的 `unreadOnly` 过滤，不新写查询逻辑。
 - **API 文档同步铁律**：`docs/API接口与数据流设计文档.md` §4 端点清单 + §6.28 口径，与 `docs/api/openapi.yaml` 必须同批更新（含 idle 字面语义变更、补判行为、已知边界）。
 
 ### 3.4 前端：`ParentLayout` 挂 `AlertBanner` + 30s 轮询
 
-新组件 `apps/web/src/components/business/AlertBanner.tsx`（或 `layout/` 下，随就近惯例），挂在 `ParentLayout` 顶部，**所有家长页生效**（含行为管控页）：
+> **实施时发现（2026-09-20，写计划阶段）**：`ParentLayout` 已有一个预警 banner —— 仅在路由切换时刷新、只看**当前选中孩子**、且 `info` 级（走神）被上一批裁决排除（「info 只进列表页」）。本批**用新 `AlertBanner` 替换它**（不是叠两个 banner）：旧裁决被本批用户裁决 2/4 显式推翻（走神必须醒目提示）；旧的「warning/critical → danger 红色」配色习惯保留（按最新一条的 `level` 映射）。旧的「按当前孩子过滤」被「家长名下全部孩子」取代（走神预警不应依赖当前选中了谁）。
+
+新组件 `apps/web/src/components/business/AlertBanner.tsx`，挂在 `ParentLayout` 顶部，**所有家长页生效**（含行为管控页）：
 
 - 轮询：`POLL_INTERVAL_MS = 30_000`（组件内具名常量），挂载即查一次；浏览器后台 tab 节流降到约 1 次/分钟，回前台自动补上，**不做手动暂停逻辑**。
 - 展示：有未读 → 顶部 Banner（复用 base `Banner` 组件、parent 主题、无 emoji）：「有 N 条新预警，最新：{最新一条 message}」。
