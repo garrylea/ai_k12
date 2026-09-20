@@ -219,4 +219,22 @@ describe('AlertsService.unread（轮询端点 + 补判）', () => {
       warn.mockRestore();
     }
   });
+
+  it('家长名下无孩子 → 不补判、listByParent 仍返回空', async () => {
+    const alertsRepo = {
+      listByParent: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    } as unknown as SafetyAlertsRepository;
+    const sessions = { closeStale: vi.fn().mockResolvedValue(1) } as unknown as StudySessionsService;
+    const studentsRepo = {
+      findByParentId: vi.fn().mockResolvedValue([]),
+    } as unknown as StudentsRepository;
+    const service = new AlertsService(alertsRepo, sessions, studentsRepo);
+
+    const result = await service.unread(4);
+
+    expect(studentsRepo.findByParentId).toHaveBeenCalledWith(4);
+    expect(sessions.closeStale).not.toHaveBeenCalled();
+    expect(alertsRepo.listByParent).toHaveBeenCalledWith(4, { unreadOnly: true }, 5, 0);
+    expect(result).toEqual({ items: [], total: 0 });
+  });
 });
