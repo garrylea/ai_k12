@@ -16,7 +16,7 @@ afterEach(() => {
  * 防止以后新增项时又只写文字标签。
  */
 describe('ParentNav', () => {
-  it('10 个入口每个都有线性 SVG 图标与可访问名字（窄屏收成图标栏时仍可辨识）', () => {
+  it('11 个入口每个都有线性 SVG 图标与可访问名字（窄屏收成图标栏时仍可辨识）', () => {
     render(
       <MemoryRouter>
         <ParentNav />
@@ -30,6 +30,7 @@ describe('ParentNav', () => {
       ['/parent/report', '学情报告'],
       ['/parent/errors', '错题查看'],
       ['/parent/chat-logs', 'AI 对话回放'],
+      ['/parent/alerts', '异常预警'],
       ['/parent/goals', '目标设定'],
       ['/parent/controls', '行为管控'],
       ['/parent/rewards', '奖励管理'],

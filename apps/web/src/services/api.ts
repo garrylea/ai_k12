@@ -2326,6 +2326,59 @@ export function getParentErrors(params: ParentErrorListParams): Promise<ParentEr
   );
 }
 
+/** 一条家长端异常预警（`safety_alerts` 的展示投影，见 spec §4.3）。 */
+export interface ParentAlertItem {
+  id: number;
+  studentId: number;
+  /** join `students` 得到；两个 FK 都是 `ON DELETE CASCADE`，理论上取不到，前端兜底显示「未知学生」。 */
+  studentName: string | null;
+  /**
+   * 必须与后端 6 值一致（含 `abusive`）。后端 DTO 用的是 `SafetyAlertRow['type']`，
+   * 若这里收窄成 5 值，遇到 `abusive` 行会缺分支而 **tsc 不报**（见 Task 6 报告 §9 硬要求）。
+   */
+  type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive' | 'away' | 'idle';
+  level: 'info' | 'warning' | 'critical';
+  message: string;
+  context: string | null;
+  /** 闲聊类预警带对话 id（可跳回放）；其余为 null。 */
+  dialogueId: number | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface ParentAlertPage {
+  items: ParentAlertItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface ParentAlertListParams {
+  /** 不传 = **全部孩子**（spec §3.7）。传了就由后端校验归属。 */
+  studentId?: number;
+  /** 只看未读。后端只认 `'1'`。 */
+  unreadOnly?: boolean;
+  /** 从 1 起；不传则后端取 1。 */
+  page?: number;
+  /** 1..50；不传则后端取 20。 */
+  pageSize?: number;
+}
+
+export function getParentAlerts(params: ParentAlertListParams = {}): Promise<ParentAlertPage> {
+  const qs = new URLSearchParams();
+  if (params.studentId !== undefined) qs.set('studentId', String(params.studentId));
+  if (params.unreadOnly) qs.set('unreadOnly', '1');
+  if (params.page) qs.set('page', String(params.page));
+  if (params.pageSize) qs.set('pageSize', String(params.pageSize));
+  const query = qs.toString();
+  return fetchApi<ParentAlertPage>(`/parent/alerts${query ? `?${query}` : ''}`);
+}
+
+/** 标记单条预警已读（幂等）。后端返回 `null`。 */
+export function markParentAlertRead(alertId: number): Promise<null> {
+  return fetchApi<null>(`/parent/alerts/${alertId}/read`, { method: 'PATCH' });
+}
+
 export interface ParentChatLogItem {
   id: number;
   track: string;

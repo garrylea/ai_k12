@@ -64,6 +64,17 @@ const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
     ),
   },
   {
+    to: '/parent/alerts',
+    label: '异常预警',
+    icon: (
+      <NavIcon>
+        <path d="M12 3.5 2.5 20h19L12 3.5z" />
+        <line x1="12" y1="10" x2="12" y2="14.5" />
+        <circle cx="12" cy="17.5" r="0.75" />
+      </NavIcon>
+    ),
+  },
+  {
     to: '/parent/goals',
     label: '目标设定',
     icon: (

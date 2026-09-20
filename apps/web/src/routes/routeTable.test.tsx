@@ -7,6 +7,7 @@ import {
   getMyLedger,
   getMyPoints,
   getMyRewards,
+  getParentAlerts,
   getParentGoalAttainment,
   getParentPointRules,
   getParentPoints,
@@ -50,6 +51,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getUnreadMessageCount: vi.fn(),
     // `/parent/goals`（埋点 Phase 1B 从 Placeholder 换成真页）：页面自己拉四项目标
     getParentGoalAttainment: vi.fn(),
+    // `/parent/alerts`（P6.9 从 Placeholder 换成真页）：列表页 + 顶栏 Banner 都会拉它
+    getParentAlerts: vi.fn(),
   };
 });
 
@@ -61,6 +64,7 @@ const getParentPointRulesMock = vi.mocked(getParentPointRules);
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
 const getParentGoalAttainmentMock = vi.mocked(getParentGoalAttainment);
+const getParentAlertsMock = vi.mocked(getParentAlerts);
 
 const PLACEHOLDER_TEXT = '原型占位：此页面正在设计中...';
 
@@ -172,6 +176,9 @@ beforeEach(() => {
       { metric: 'daily_words', subjectId: 3, subjectName: '英语', period: 'daily', title: '每日背单词', target: 20, achieved: 10, rate: 50 },
     ],
   });
+  getParentAlertsMock.mockReset();
+  // 顶栏 Banner 与列表页共用此端点：默认「无预警」→ Banner 不渲染
+  getParentAlertsMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 1 });
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -398,6 +405,38 @@ describe('路由表：家长端「目标设定」', () => {
     expect(await screen.findByRole('link', { name: '目标设定' })).toHaveAttribute(
       'href',
       '/parent/goals',
+    );
+  });
+});
+
+/**
+ * P6.9：`/parent/alerts` 从 `Placeholder` 换成 `ParentAlertsPage`。
+ *
+ * 与 `/parent/rewards`、`/parent/goals` 同一条理由：页面组件测试挂的是页面本身、
+ * 绕过路由表——「路由确实指到这个页面」只有这里能证明。
+ */
+describe('路由表：家长端「异常预警中心」', () => {
+  it('/parent/alerts 渲染 ParentAlertsPage，而非 Placeholder', async () => {
+    setParentSession();
+
+    renderAt('/parent/alerts');
+
+    expect(await screen.findByRole('heading', { name: '异常预警中心' })).toBeInTheDocument();
+    // 列表页默认「全部孩子」口径
+    expect(await screen.findByLabelText('孩子')).toBeInTheDocument();
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    // 家长端仍是家长主题（商务白蓝，无日夜切换）
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+
+  it('侧边导航「异常预警」指向 /parent/alerts（Banner 点掉后仍可达）', async () => {
+    setParentSession();
+
+    renderAt('/parent/alerts');
+
+    expect(await screen.findByRole('link', { name: '异常预警' })).toHaveAttribute(
+      'href',
+      '/parent/alerts',
     );
   });
 });
