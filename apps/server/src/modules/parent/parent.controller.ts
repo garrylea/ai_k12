@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards, Request } from '@nestjs/common';
+import { Body, ConflictException, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards, Request } from '@nestjs/common';
 import type { Request as ExpressRequest } from 'express';
 import { z } from 'zod';
 import { ParentService } from './parent.service.js';
@@ -18,6 +18,18 @@ const CreateStudentSchema = z.object({
 
 const ResetPasswordSchema = z.object({ newPassword: z.string().min(6).max(32) });
 const StatusSchema = z.object({ isActive: z.boolean() });
+
+/**
+ * 家长改自己密码的 body（spec §4.6）。
+ *
+ * 越界走 `safeParse` 后抛 `409`/`1001`（spec 的校验链口径），**不是** Zod 默认的 400、
+ * 更不是裸 `ZodError`（那会被全局过滤器兜成 500/5000）。服务层还有一道同样的长度校验
+ * 作为最后防线（`ParentService.changePassword`，直连服务的调用方绕过 schema 也拦得住）。
+ */
+const ChangePasswordSchema = z.object({
+  oldPassword: z.string().min(1).max(100),
+  newPassword: z.string().min(6).max(32),
+});
 
 const SubjectConfigSchema = z.object({
   gradeCode: z.string().min(1).max(20),
@@ -103,6 +115,27 @@ export class ParentController {
   async read(@Request() req: ExpressRequest, @Param('id', ParseIntPipe) id: number) {
     const user = (req as ExpressRequest & { user?: JwtUser }).user!;
     await this.messagesService.markRead(user.sub, id);
+    return null;
+  }
+
+  /** 家长自己的账号信息（spec §4.5）——账号级、非按学生，故落在本 controller。 */
+  @Get('account')
+  async account(@Request() req: ExpressRequest) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    return this.parentService.getAccount(user.sub);
+  }
+
+  /** 家长改自己的密码（spec §4.6）。改后**不失效旧 token**（本仓无 token 版本机制）。 */
+  @Patch('password')
+  async changePassword(@Request() req: ExpressRequest, @Body() body: unknown) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    const parsed = ChangePasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      const detail = parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`).join('; ');
+      throw new ConflictException({ code: 1001, message: `入参校验失败：${detail}` });
+    }
+    await this.parentService.changePassword(user.sub, parsed.data.oldPassword, parsed.data.newPassword);
     return null;
   }
 }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ParentController } from './parent.controller.js';
 import { ParentService } from './parent.service.js';
+import { ParentsRepository } from '../../database/repositories/parents.repo.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { ProgressRepository } from '../../database/repositories/progress.repo.js';
 import { TextbookVersionsRepository } from '../../database/repositories/textbook-versions.repo.js';
@@ -13,6 +14,8 @@ import { ContentModule } from '../content/content.module.js';
   controllers: [ParentController],
   providers: [
     ParentService,
+    // 账号级端点（GET account / PATCH password）用：读自己那一行 + 改密
+    ParentsRepository,
     StudentsRepository,
     ProgressRepository,
     TextbookVersionsRepository,

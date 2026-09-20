@@ -1,5 +1,12 @@
-import { Injectable, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { ParentsRepository } from '../../database/repositories/parents.repo.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { ProgressRepository } from '../../database/repositories/progress.repo.js';
 import { TextbookVersionsRepository } from '../../database/repositories/textbook-versions.repo.js';
@@ -43,6 +50,7 @@ export class ParentService {
     private versionsRepo: TextbookVersionsRepository,
     private semestersRepo: SemestersRepository,
     private contentService: ContentService,
+    private parentsRepo: ParentsRepository,
   ) {}
 
   async createStudent(
@@ -189,6 +197,47 @@ export class ParentService {
       });
     }
     return { subjectId, textbookVersionId: version.id, semesterId: semester.id, reset };
+  }
+
+  /**
+   * 家长自己的账号信息（spec §4.5）。
+   *
+   * **只回 `id`/`name`/`phone`**：订阅 / 额度 / 订单那些表在本仓根本不存在，
+   * 多回字段等于承诺了后端没有的能力（openapi 的 `ParentAccount` 同步收敛）。
+   * 家长行理论上必然存在（JWT 里就有 id），兜底 404/1002 只为异常态。
+   */
+  async getAccount(parentId: number): Promise<{ id: number; name: string | null; phone: string }> {
+    const parent = await this.parentsRepo.findById(parentId);
+    if (!parent) {
+      throw new NotFoundException({ code: 1002, message: '家长账号不存在' });
+    }
+    return { id: parent.id, name: parent.name, phone: parent.phone };
+  }
+
+  /**
+   * 家长改**自己**的密码（spec §4.6），照 `AdminDashboardService.changePassword`：
+   * 长度 6..32（409/1001）→ 取 hash → 旧密码比对失败（401/1003）→ 新旧相同（409/1001）
+   * → `bcrypt.hash(newPassword, 10)` 落库。
+   *
+   * **不做会话失效**（本仓没有 token 版本机制，与 admin 端一致）：改密后**旧 token 在
+   * 7 天有效期内仍然可用**。要立刻踢下线得先引入 token 版本/黑名单，那是另一件事。
+   */
+  async changePassword(parentId: number, oldPassword: string, newPassword: string): Promise<void> {
+    if (newPassword.length < 6 || newPassword.length > 32) {
+      throw new ConflictException({ code: 1001, message: '新密码长度需为 6-32 位' });
+    }
+    const parent = await this.parentsRepo.findById(parentId);
+    if (!parent) {
+      throw new NotFoundException({ code: 1002, message: '家长账号不存在' });
+    }
+    const ok = await bcrypt.compare(oldPassword, parent.passwordHash);
+    if (!ok) {
+      throw new UnauthorizedException({ code: 1003, message: '旧密码错误' });
+    }
+    if (oldPassword === newPassword) {
+      throw new ConflictException({ code: 1001, message: '新密码不能与旧密码相同' });
+    }
+    await this.parentsRepo.updatePassword(parentId, await bcrypt.hash(newPassword, 10));
   }
 
   /** 归属校验：先查存在（1002），再比对 parent_id（1005，不泄漏存在性）。

@@ -45,6 +45,14 @@ export class ParentsRepository {
     return rows.length > 0 ? this.mapRow(rows[0]) : null;
   }
 
+  /** 家长改自己的密码（`PATCH /api/parent/password`）。照 `admins.repo.ts` 同款。 */
+  async updatePassword(id: number, passwordHash: string): Promise<void> {
+    await this.pool.execute(
+      'UPDATE parents SET password_hash = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+      [passwordHash, id],
+    );
+  }
+
   async setActive(id: number, isActive: boolean): Promise<void> {
     await this.pool.execute(
       'UPDATE parents SET is_active = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',

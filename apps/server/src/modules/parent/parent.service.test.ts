@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
+import * as bcrypt from 'bcrypt';
 import { ParentService } from './parent.service';
 
 const mk = (overrides: Record<string, any> = {}) => ({
+  parentsRepo: {
+    findById: vi.fn().mockResolvedValue(null),
+    updatePassword: vi.fn().mockResolvedValue(undefined),
+  },
   studentsRepo: {
     findById: vi.fn().mockResolvedValue(null),
     findByUsername: vi.fn().mockResolvedValue(null),
@@ -32,7 +37,7 @@ const mk = (overrides: Record<string, any> = {}) => ({
 });
 
 const mkSvc = (d: ReturnType<typeof mk>) =>
-  new ParentService(d.studentsRepo as any, d.progressRepo as any, d.versionsRepo as any, d.semestersRepo as any, d.contentService as any);
+  new ParentService(d.studentsRepo as any, d.progressRepo as any, d.versionsRepo as any, d.semestersRepo as any, d.contentService as any, d.parentsRepo as any);
 
 const own = { id: 5, parentId: 3, username: 'xiaoming', passwordHash: 'h', name: '小明', age: 13, grade: '初二', schoolLevel: 'junior', isActive: true };
 
@@ -258,5 +263,113 @@ describe('ParentService 教材配置', () => {
     const res = await mkSvc(d).updateSubjectConfig(3, 5, 1, { gradeCode: 'grade_9', term: 'first', textbookVersionId: 10 });
     expect(res.reset).toBe(false);
     expect(d.progressRepo.applyConfig).toHaveBeenCalledWith(1, { textbookVersionId: 10, semesterId: 88, reset: false });
+  });
+});
+
+describe('ParentService 账号信息（spec §4.5）', () => {
+  const parentRow = {
+    id: 7, phone: '13800000000', passwordHash: '$2b$10$secret', name: '张三', isActive: true,
+  };
+
+  it('getAccount：只回 id/name/phone（不泄漏 passwordHash / isActive）', async () => {
+    const d = mk({
+      parentsRepo: { findById: vi.fn().mockResolvedValue(parentRow), updatePassword: vi.fn() },
+    });
+
+    const out = await mkSvc(d).getAccount(7);
+
+    // 键集合精确相等：这是防「顺手多返回」的钉子
+    expect(Object.keys(out).sort()).toEqual(['id', 'name', 'phone']);
+    expect(out).toEqual({ id: 7, name: '张三', phone: '13800000000' });
+    expect(d.parentsRepo.findById).toHaveBeenCalledWith(7);
+  });
+
+  it('getAccount：家长行不存在 → 404/1002', async () => {
+    const d = mk(); // 默认 findById → null
+
+    await expect(mkSvc(d).getAccount(7)).rejects.toMatchObject({
+      status: 404,
+      response: { code: 1002 },
+    });
+  });
+
+  it('getAccount：name 为 null 时原样返回（不编成空串）', async () => {
+    const d = mk({
+      parentsRepo: { findById: vi.fn().mockResolvedValue({ ...parentRow, name: null }), updatePassword: vi.fn() },
+    });
+
+    await expect(mkSvc(d).getAccount(7)).resolves.toEqual({
+      id: 7, name: null, phone: '13800000000',
+    });
+  });
+});
+
+describe('ParentService 改密（spec §4.6）', () => {
+  const hash = (pw: string) => bcrypt.hash(pw, 4);
+  const mkWithHash = (passwordHash: string) => mk({
+    parentsRepo: { findById: vi.fn().mockResolvedValue({
+      id: 7, phone: '13800000000', passwordHash, name: '张三', isActive: true,
+    }), updatePassword: vi.fn() },
+  });
+
+  it('新密码长度越界（<6 / >32）→ 409/1001 且**不写库**', async () => {
+    const d = mkWithHash(await hash('oldpass'));
+
+    await expect(mkSvc(d).changePassword(7, 'oldpass', '12345')).rejects.toMatchObject({
+      status: 409,
+      response: { code: 1001 },
+    });
+    await expect(mkSvc(d).changePassword(7, 'oldpass', 'x'.repeat(33))).rejects.toMatchObject({
+      status: 409,
+      response: { code: 1001 },
+    });
+
+    expect(d.parentsRepo.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('家长行不存在 → 404/1002 且不写库', async () => {
+    const d = mk(); // 默认 findById → null
+
+    await expect(mkSvc(d).changePassword(7, 'oldpass', 'newpass123')).rejects.toMatchObject({
+      status: 404,
+      response: { code: 1002 },
+    });
+
+    expect(d.parentsRepo.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('旧密码错 → 401/1003 且**不写库**（与登录失败同码）', async () => {
+    const d = mkWithHash(await hash('right-old'));
+
+    await expect(mkSvc(d).changePassword(7, 'wrong-old', 'newpass123')).rejects.toMatchObject({
+      status: 401,
+      response: { code: 1003 },
+    });
+
+    expect(d.parentsRepo.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('新旧相同 → 409/1001 且不写库', async () => {
+    const d = mkWithHash(await hash('samepass'));
+
+    await expect(mkSvc(d).changePassword(7, 'samepass', 'samepass')).rejects.toMatchObject({
+      status: 409,
+      response: { code: 1001 },
+    });
+
+    expect(d.parentsRepo.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('成功 → updatePassword 收到的是 **bcrypt hash**（不是明文）', async () => {
+    const d = mkWithHash(await hash('oldpass'));
+
+    await mkSvc(d).changePassword(7, 'oldpass', 'newpass123');
+
+    expect(d.parentsRepo.updatePassword).toHaveBeenCalledTimes(1);
+    const [id, received] = d.parentsRepo.updatePassword.mock.calls[0];
+    expect(id).toBe(7);
+    // 明文落库是最危险的退化：既断言不等于明文，也断言 hash 能验回新密码
+    expect(received).not.toBe('newpass123');
+    expect(await bcrypt.compare('newpass123', received)).toBe(true);
   });
 });
