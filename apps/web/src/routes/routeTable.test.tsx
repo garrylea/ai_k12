@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from './routeTable';
+import { useThemeStore } from '@/store/themeStore';
 import {
   getMyLedger,
   getMyPoints,
@@ -143,6 +144,8 @@ function renderAt(path: string) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  // 主题是模块级单例：StudentLayout 挂载时会按挂钟把它切成 day/night，不复位会串到下一个用例
+  useThemeStore.setState({ mode: 'student-day' });
   // 家长锚点是模块级单例，用例之间会串（下一个用例可能读到上个用例的孩子 id）
   useParentStudentStore.setState({ studentId: null });
 });
@@ -277,7 +280,18 @@ describe('路由表：积分相关页面', () => {
 
     renderAt('/student/homework');
 
-    expect(document.querySelector('[data-theme="student-day"]')).not.toBeNull();
+    /**
+     * ⚠️ 这里**不要断言 `data-theme="student-day"`**（原写法）：`StudentLayout` 挂载时会
+     * `autoToggleNightMode()` 按挂钟切主题，于是本文件在 18:00–06:00 跑必红 —— 那是**依赖运行时刻**
+     * 的假红（2026-09-19 记入 `docs/家长端学情批-完成情况与待办清单.md` §3.3 第 6 项，
+     * 2026-09-20 按该文档的建议①修掉）。
+     * 本用例真正要表达的是「宿主外壳是学生端主题容器」（下面的四项导航断言才有意义），
+     * 所以只断言「学生端主题之一」，不锁日间。**别用 TZ 绕**——那只是把时间依赖藏起来。
+     */
+    expect(document.querySelector('[data-theme]')).toHaveAttribute(
+      'data-theme',
+      expect.stringMatching(/^student-(day|night)$/),
+    );
     expect(screen.queryByRole('link', { name: '辅线' })).not.toBeInTheDocument();
     expect(document.querySelector('a[href="/student/auxiliary"]')).toBeNull();
     expect(screen.queryByRole('link', { name: '主线' })).not.toBeInTheDocument();
