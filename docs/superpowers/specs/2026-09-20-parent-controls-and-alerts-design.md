@@ -225,7 +225,7 @@ UX §P6.6 全文只有三行：
 
 **剥离规则**：凡是**独占一行**的标记一律删掉（**不管它在第几行**），保证「标记永不进学生可见内容与历史」（§3.2 的核心要求）。夹在句子中间的（非独占一行）不匹配、保持原样。实现用**全局**替换（`replace` 带 `g`）并去掉首尾多余换行 —— 模型若写了两遍标记，两处都要清掉（只去第一处会让第二处残留进学生可见内容）。换行**同时容忍 LF 与 CRLF**（`\r?\n`）：检测走 `trimEnd()`（`\r` 属空白，故能认 CRLF 的末行），剥离必须与之**口径对称**，否则模型若用 CRLF 换行会「判了闲聊却剥不掉」、标记泄漏进学生可见内容与持久化历史（Task 5 fix wave 2 修的回归）。删标记时**保留原有行尾风格**（不把 CRLF 打成 LF），也不合并相邻两行。
 
-**⚠️ 必须同时回写 `ai_messages.safety_flag`（否则会打坏既有功能）**：现在 `safety_flag` 的唯一来源是「助手回复的 `type === 'block'`」（`services/conversation/index.ts:144`、`modules/conversations/conversations.service.ts:199`）。闲聊不再硬阻断 ⇒ 不再有 `block` 消息 ⇒ **`safety_flag` 将永远是 0，家长端「对话回放」页的「闲聊/偏离学习」标签与「闲聊 N」计数会全部归零**（`parent-insights.repo.ts:673` 的 `block_count`、`ParentChatLogsPage.tsx:66,410`）。
+**⚠️ 必须同时回写 `ai_messages.safety_flag`（否则会打坏既有功能）**：**改动前** `safety_flag` 的唯一来源是「助手回复的 `type === 'block'`」（`services/conversation/index.ts:152`、`modules/conversations/conversations.service.ts:207`）。闲聊不再硬阻断 ⇒ 不再有 `block` 消息 ⇒ **`safety_flag` 将永远是 0，家长端「对话回放」页的「闲聊/偏离学习」标签与「闲聊 N」计数会全部归零**（`parent-insights.repo.ts:673` 的 `block_count`、`ParentChatLogsPage.tsx:66,410`）。
 
 因此：给 `saveMessages` 的消息对象加**可选** `safetyFlag?: boolean`，取值规则改为 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))`；两条入口保存 assistant 消息时传 `safetyFlag: offTopic`。
 

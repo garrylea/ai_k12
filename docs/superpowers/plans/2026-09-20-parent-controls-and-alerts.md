@@ -758,8 +758,8 @@ git commit -m "feat(analytics): 走神分 away/idle 两口径累计 + 阈值处�
 - Modify: `apps/server/src/ai-core/infra/safety-guard.ts`
 - Modify: `apps/server/src/ai-core/capabilities/tutoring.capability.ts` + `.test.ts`
 - Modify: `apps/server/src/ai-core/types.ts`（`SaveMessageEntry` 加 `safetyFlag?`）
-- Modify: `apps/server/src/services/conversation/index.ts:144`
-- Modify: `apps/server/src/modules/conversations/conversations.service.ts:199`
+- Modify: `apps/server/src/services/conversation/index.ts:152`
+- Modify: `apps/server/src/modules/conversations/conversations.service.ts:207`
 - Modify: `apps/server/src/modules/ai/ai.module.ts`
 - Modify: `apps/server/src/ai-core/infra/safety-guard.test.ts`、`apps/server/src/ai-core/__tests__/safety-classification.ts`
 - Modify: `apps/web/src/pages/parent/ParentChatLogsPage.tsx` + `.test.tsx`、`apps/web/src/services/api.ts`（`:2338` 注释）—— 见 Step 3 的文案口径
@@ -982,7 +982,7 @@ safety_flag = Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))
 | `ParentChatLogsPage.test.tsx:127` | 断言 `'闲聊/偏离学习'` | 断言 `'偏离学习'`（**测试同步，不是放宽断言**） |
 
 **另**：`ai-core/types.ts` 的 `SaveMessageEntry`（:610-623）加 `safetyFlag?: boolean;`（注释说明语义变更：从「被硬阻断的轮次」→「被模型判为闲聊 **或** 被阻断的轮次」）。
-`services/conversation/index.ts:144` 与 `modules/conversations/conversations.service.ts:199` 都改成上面那个表达式。
+`services/conversation/index.ts:152` 与 `modules/conversations/conversations.service.ts:207` 都改成上面那个表达式。
 
 - [ ] **Step 4: 模块接线**
 
