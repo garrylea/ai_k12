@@ -406,9 +406,17 @@ describe('StudySessionsRepository.closeStale', () => {
   it('按学生收尾：end_reason=closed、ended_at=最后一次心跳', async () => {
     const pool = mockPool({ affectedRows: 3 });
     const repo = new StudySessionsRepository(pool as any);
-    expect(await repo.closeStale(9)).toBe(3);
+    const result = await repo.closeStale(9);
+    expect(result.closedCount).toBe(3);
+    expect(result.hidden).toEqual([]);
 
-    const [sql, params] = pool.execute.mock.calls[0];
+    // SELECT 在前（取挂机信息）、UPDATE 在后（收尾）
+    const [selectSql, selectParams] = pool.execute.mock.calls[0];
+    expect(selectSql).toMatch(/^SELECT/i);
+    expect(selectSql).toContain('hidden_since');
+    expect(selectParams).toEqual([9]);
+
+    const [sql, params] = pool.execute.mock.calls[1];
     expect(sql).toContain("status = 'ended', end_reason = 'closed', ended_at = last_heartbeat_at");
     expect(sql).toContain("WHERE status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE");
     expect(sql).toContain('AND student_id = ?');
@@ -419,8 +427,28 @@ describe('StudySessionsRepository.closeStale', () => {
     const pool = mockPool({ affectedRows: 0 });
     const repo = new StudySessionsRepository(pool as any);
     await repo.closeStale();
-    const [sql, params] = pool.execute.mock.calls[0];
-    expect(sql).not.toContain('student_id = ?');
-    expect(params).toEqual([]);
+    const [updateSql] = pool.execute.mock.calls[1];
+    const [, updateParams] = pool.execute.mock.calls[1];
+    expect(updateSql).not.toContain('student_id = ?');
+    expect(updateParams).toEqual([]);
+  });
+
+  it('返回被关会话里 hidden 段的信息（供 service 补判），visible / 无挂机的不返回', async () => {
+    const since = new Date('2026-09-20T18:03:19.869Z');
+    const pool = mockPool({
+      affectedRows: 3,
+      rows: [
+        { student_id: 7, client_state: 'hidden', hidden_reason: 'away', hidden_since: since },
+        { student_id: 7, client_state: 'visible', hidden_reason: null, hidden_since: null },
+        { student_id: 8, client_state: 'hidden', hidden_reason: 'idle', hidden_since: since },
+      ],
+    });
+    const repo = new StudySessionsRepository(pool as any);
+    const result = await repo.closeStale(7);
+    expect(result.closedCount).toBe(3);
+    expect(result.hidden).toEqual([
+      { studentId: 7, hiddenReason: 'away', hiddenSince: since },
+      { studentId: 8, hiddenReason: 'idle', hiddenSince: since },
+    ]);
   });
 });

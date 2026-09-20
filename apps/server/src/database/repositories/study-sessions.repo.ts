@@ -50,6 +50,18 @@ export interface StudySessionInsertInput {
   appShell: string | null;
 }
 
+/** `closeStale` 返回的被关会话挂机段信息（供 service 补判阈值）。 */
+export interface ClosedHiddenSession {
+  studentId: number;
+  hiddenReason: string;
+  hiddenSince: Date;
+}
+
+export interface CloseStaleResult {
+  closedCount: number;
+  hidden: ClosedHiddenSession[];
+}
+
 const INSERT_COLUMNS =
   '(student_id, session_uid, module, scene, subject_id, ref_type, ref_id, platform_class, browser, screen_class, input_type, app_shell)';
 
@@ -280,16 +292,41 @@ export class StudySessionsRepository {
    *
    * `studentId` 可选：家长查单人时传（顺带修正那个人）。不传的**全库收尾形态是预留入口**
    * ——当前**无调用方**、夜间定时任务**未实现**（仓库内没有任何调度器），参数留给后续阶段用。
+   *
+   * 2026-09-20「及时可见」批：先 SELECT 命中行、再 UPDATE，返回**被关会话里 hidden 段的
+   * 信息**（student_id / hidden_reason / hidden_since），供 `StudySessionsService.closeStale`
+   * 补判走神阈值（spec §3.1：心跳全断的后台冻结 tab 只有这里能得到判定机会）。
+   * SELECT 与 UPDATE 之间的并发窗口无害：另一并发收尾抢先关掉时，本侧 UPDATE 命中 0 行、
+   * 多判的一次被 `SafetyAlertsService` 的 30 分钟去重窗口兜住。
    */
-  async closeStale(studentId?: number): Promise<number> {
+  async closeStale(studentId?: number): Promise<CloseStaleResult> {
     const where = studentId === undefined ? '' : ' AND student_id = ?';
     const params = studentId === undefined ? [] : [studentId];
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & {
+        student_id: number;
+        client_state: string;
+        hidden_reason: string | null;
+        hidden_since: Date | null;
+      })[]
+    >(
+      `SELECT student_id, client_state, hidden_reason, hidden_since FROM study_sessions
+       WHERE status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE${where}`,
+      params,
+    );
+    const hidden: ClosedHiddenSession[] = rows
+      .filter((r) => r.client_state === 'hidden' && r.hidden_reason !== null && r.hidden_since !== null)
+      .map((r) => ({
+        studentId: r.student_id,
+        hiddenReason: r.hidden_reason as string,
+        hiddenSince: r.hidden_since as Date,
+      }));
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE study_sessions
        SET status = 'ended', end_reason = 'closed', ended_at = last_heartbeat_at
        WHERE status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE${where}`,
       params,
     );
-    return result.affectedRows;
+    return { closedCount: result.affectedRows, hidden };
   }
 }

@@ -25,7 +25,7 @@ function makeRepo(overrides: Partial<StudySessionsRepository> = {}) {
       hiddenSince: null,
       hiddenReason: null,
     }),
-    closeStale: vi.fn().mockResolvedValue(0),
+    closeStale: vi.fn().mockResolvedValue({ closedCount: 0, hidden: [] }),
     ...overrides,
   } as unknown as StudySessionsRepository;
 }

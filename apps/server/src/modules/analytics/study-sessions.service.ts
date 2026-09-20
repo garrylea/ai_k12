@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { StudySessionsRepository } from '../../database/repositories/study-sessions.repo.js';
-import type { StudySessionRow } from '../../database/repositories/study-sessions.repo.js';
+import type { CloseStaleResult, StudySessionRow } from '../../database/repositories/study-sessions.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
 import { SafetyAlertsService } from '../safety/safety-alerts.service.js';
 import { parseUserAgent } from '../../common/utils/user-agent.util.js';
@@ -283,8 +283,11 @@ export class StudySessionsService {
   /**
    * 惰性收尾（家长端查询前；不传 studentId 的全库形态是**预留入口**，当前无调用方、
    * 夜间定时任务未实现）。见 repo 的同名方法。
+   *
+   * 2026-09-20「及时可见」批：透传 repo 的新返回形状 `{ closedCount, hidden }`
+   * （被关会话里 hidden 段的信息）；`hidden` 的消费在本服务属 Task 3，此处先原样带回。
    */
-  async closeStale(studentId?: number): Promise<number> {
+  async closeStale(studentId?: number): Promise<CloseStaleResult> {
     return this.repo.closeStale(studentId);
   }
 }
