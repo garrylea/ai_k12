@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SafetyAlertsService } from './safety-alerts.service.js';
-import type { RecordSafetyAlertInput } from './safety-alerts.service.js';
+import type { RecordSafetyAlertInput, SafetyAlertType } from './safety-alerts.service.js';
 
 const DEDUPE_WINDOW_MS = 30 * 60 * 1000;
 
@@ -166,6 +166,21 @@ describe('SafetyAlertsService.messageFor —— 面向家长文案的唯一真�
     const svc = mkSvc();
     expect(svc.messageFor('away')).toBe('孩子离开了学习页面 0 分钟');
     expect(svc.messageFor('idle')).toBe('孩子在学习页面 0 分钟无操作');
+  });
+
+  it('abusive（第 6 个类型）复用敏感文案，不是 undefined', () => {
+    const svc = mkSvc();
+    expect(svc.messageFor('abusive')).toBe('检测到敏感内容输入，建议尽快关注');
+  });
+
+  it('全部六个类型都返回非空 string（钉住不会有任何一个落到 undefined）', () => {
+    const svc = mkSvc();
+    const all: SafetyAlertType[] = ['off_topic', 'emotional', 'sensitive', 'abusive', 'away', 'idle'];
+    for (const type of all) {
+      const msg = svc.messageFor(type);
+      expect(typeof msg, `${type} 应为 string`).toBe('string');
+      expect(msg.length, `${type} 文案不应为空`).toBeGreaterThan(0);
+    }
   });
 });
 

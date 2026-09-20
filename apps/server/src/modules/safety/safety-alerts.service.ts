@@ -2,8 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SafetyAlertsRepository } from '../../database/repositories/safety-alerts.repo.js';
 
-/** 预警类型（与 `SafetyAlertRow['type']` 同源，这里窄化成「本批会写的四种 + abusive 兜底」）。 */
-export type SafetyAlertType = 'off_topic' | 'emotional' | 'sensitive' | 'away' | 'idle';
+/**
+ * 预警类型。**与 `SafetyAlertRow['type']` 同源**（`database/repositories/types.ts`），
+ * `abusive` 一并保留 —— 虽然 `SafetyGuard.detectAnomalyType` 目前不可达它，但它是
+ * `SafetyAlertRow` 的合法取值；漏掉会让 `messageFor` 落到 `undefined`（安全功能里
+ * 静默返回 undefined 不可接受，2026-09-20 Task 2 评审指出）。
+ */
+export type SafetyAlertType = 'off_topic' | 'emotional' | 'sensitive' | 'abusive' | 'away' | 'idle';
 
 export interface RecordSafetyAlertInput {
   studentId: number;
@@ -68,12 +73,14 @@ export class SafetyAlertsService {
     }
   }
 
-  /** 面向家长的文案（spec §3.4 表，**唯一真源**，调用方别自己拼）。 */
+  /** 面向家长的文案（spec §3.4 表，**唯一真源**，调用方别自己拼）。六个类型全覆盖，无 `default`。 */
   messageFor(type: SafetyAlertType, minutes?: number): string {
     switch (type) {
       case 'off_topic': return '检测到孩子在学习中发起了与学习无关的闲聊';
       case 'emotional': return '检测到孩子出现情绪发泄类输入';
       case 'sensitive': return '检测到敏感内容输入，建议尽快关注';
+      // `abusive` 无独立文案，与 `SafetyGuard.pickGentleBlockMessage` 的既有约定一致（→ 复用敏感文案）
+      case 'abusive': return '检测到敏感内容输入，建议尽快关注';
       case 'away': return `孩子离开了学习页面 ${minutes ?? 0} 分钟`;
       case 'idle': return `孩子在学习页面 ${minutes ?? 0} 分钟无操作`;
     }
