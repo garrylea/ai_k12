@@ -2885,14 +2885,18 @@ paths:
   /parent/students/{studentId}/controls:
     get:
       tags: [Parent]
-      summary: 行为管控配置
+      summary: 行为管控配置（P6.6 预警灵敏度）
+      description: >-
+        返回**两个预警灵敏度阈值**（默认 5 / 15）。读前 `ensure` 建默认行，故两字段恒非空。
+        ⚠️ 兑换汇率/开关**不在本端点**（归 `points/settings`）；每日时长/禁用时段/辅线开关/拍照开关
+        按用户 2026-09-20 裁决**本批不做**。归属校验：404/1002、403/1005。
       operationId: getControls
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
-            type: string
+            type: integer
       responses:
         '200':
           description: 管控配置
@@ -2907,27 +2911,35 @@ paths:
                         $ref: '#/components/schemas/Controls'
     put:
       tags: [Parent]
-      summary: 更新行为管控
+      summary: 更新行为管控（预警灵敏度）
+      description: >-
+        两字段**均可选**、`1..180` 整数。校验链：归属 → **至少一个字段**（都缺 409/1001）
+        → 范围越界（409/1001）。**只发改动过的字段**（未提供即不动）；响应是**回读库里的完整对象**。
       operationId: updateControls
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
-            type: string
+            type: integer
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Controls'
+              $ref: '#/components/schemas/ControlsUpdateRequest'
       responses:
         '200':
-          description: 更新成功
+          description: 更新成功（返回回读后的完整对象）
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CommonResponse'
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Controls'
   /parent/students/{studentId}/rewards:
     get:
       tags: [Parent]
@@ -2956,11 +2968,41 @@ paths:
   /parent/alerts:
     get:
       tags: [Parent]
-      summary: 异常预警
+      summary: 异常预警列表（P6.9）
+      description: >-
+        `studentId` 不传 = **全部孩子**（列表带 `studentName`）；传了就校验归属（404/1002、403/1005）。
+        `unreadOnly` 只认 `'1'`。空结果 `items: []` / `total: 0`（**不是错误**）。
       operationId: listAlerts
+      parameters:
+        - name: studentId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: unreadOnly
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ['1']
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
       responses:
         '200':
-          description: 预警列表
+          description: 预警列表（分页壳）
           content:
             application/json:
               schema:
@@ -2969,20 +3011,19 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Alert'
+                        $ref: '#/components/schemas/ParentAlertPage'
   /parent/alerts/{alertId}/read:
     patch:
       tags: [Parent]
-      summary: 标记预警已读
+      summary: 标记预警已读（幂等）
+      description: '校验链：`alertId` 正整数（409/1001）→ 存在（404/1002）→ 属于本家长（403/1005）。返回 `null`。'
       operationId: markAlertRead
       parameters:
         - name: alertId
           in: path
           required: true
           schema:
-            type: string
+            type: integer
       responses:
         '200':
           description: 标记成功
@@ -2993,7 +3034,10 @@ paths:
   /parent/account:
     get:
       tags: [Parent]
-      summary: 家长账号摘要
+      summary: 家长账号信息（P6.10，只读）
+      description: >-
+        ⚠️ **不返回**订阅/额度/订单（那些表不存在，属 P7.1）。`name` 可为 `null`（注册不强制）。
+        家长行不存在（理论上不可能）→ 404/1002。
       operationId: getParentAccount
       responses:
         '200':
@@ -3007,6 +3051,27 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/ParentAccount'
+  /parent/password:
+    patch:
+      tags: [Parent]
+      summary: 家长改自己的密码（P6.10）
+      description: >-
+        校验链：Zod（越界 409/1001）→ 旧密码比对失败（**401/1003**，与登录失败同码）
+        → 新旧相同（409/1001）。返回 `null`。**不失效旧 token**（无 token 版本机制，7 天内仍可用）。
+      operationId: changeParentPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
 
   /parent/messages:
     get:
@@ -6990,45 +7055,102 @@ components:
 
     Controls:
       type: object
+      description: >-
+        行为管控 P6.6 —— **预警灵敏度**（2026-09-20 实现，以代码为准）。
+        ⚠️ 只含两个阈值：兑换汇率/开关归 `points/settings`（同一字段两个归属会打架）；
+        每日最大使用时长 / 禁用时段 / 辅线访问开关 / 拍照解题开关按用户 2026-09-20 裁决
+        **本批不做**，`controls` 表里那几列（`daily_time_limit_minutes` / `disabled_hours` /
+        `alert_level` / `auxiliary_enabled` / `photo_search_enabled`）**保留待用**。
       properties:
-        dailyTimeLimit:
+        alertAwayMinutes:
           type: integer
-        disabledHours:
-          type: array
-          items:
-            type: object
-            properties:
-              start:
-                type: string
-              end:
-                type: string
-        rewardRedemptionEnabled:
-          type: boolean
-        auxiliaryEnabled:
-          type: boolean
-        photoSearchEnabled:
-          type: boolean
+          minimum: 1
+          maximum: 180
+          description: 孩子切走页面连续多少分钟算「离开」（默认 5）。
+        alertIdleMinutes:
+          type: integer
+          minimum: 1
+          maximum: 180
+          description: >-
+            孩子前台无操作连续多少分钟算「走神」（默认 15）。⚠️ 前端写死的 120 秒空闲判定阈值
+            **不含在内**，两者相加才是家长感知的报警延迟（默认档约 17 分钟）。
+
+    ControlsUpdateRequest:
+      type: object
+      description: 两字段**均可选**，但**至少给一个**（都缺 → 409/1001）。未提供的字段不动。
+      properties:
+        alertAwayMinutes:
+          type: integer
+          minimum: 1
+          maximum: 180
+        alertIdleMinutes:
+          type: integer
+          minimum: 1
+          maximum: 180
 
     Alert:
       type: object
+      description: >-
+        一条家长端异常预警（`safety_alerts` 的展示投影，P6.9，2026-09-20 实现）。
+        ⚠️ **「建议家长行动」不入库**，由前端按 `type` 静态映射（为一段展示文案改表不划算）。
       properties:
         id:
-          type: string
+          type: integer
         studentId:
+          type: integer
+        studentName:
           type: string
+          nullable: true
+          description: join `students` 得到；两个 FK 都是 `ON DELETE CASCADE`，理论上取不到，前端兜底「未知学生」。
         type:
           type: string
-          enum: [chat_off_topic, anomaly, quota_warning, goal_reminder]
+          description: 以代码为准（`database/repositories/types.ts` 的 `SafetyAlertRow['type']`）。`abusive` 保留（`pickGentleBlockMessage` 仍映射它）。
+          enum: [off_topic, emotional, sensitive, abusive, away, idle]
         level:
           type: string
           enum: [info, warning, critical]
         message:
           type: string
+        context:
+          type: string
+          nullable: true
+        dialogueId:
+          type: integer
+          nullable: true
+          description: 闲聊类预警带对话 id（可跳回放）；其余为 null。
         isRead:
           type: boolean
         createdAt:
           type: string
           format: date-time
+
+    ParentAlertPage:
+      type: object
+      description: 预警列表分页壳（同 `ParentErrorPage`，但 `pageSize` 由前端传、默认 20、上限 50）。
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+
+    ChangePasswordRequest:
+      type: object
+      required: [oldPassword, newPassword]
+      properties:
+        oldPassword:
+          type: string
+          minLength: 1
+          maxLength: 100
+        newPassword:
+          type: string
+          minLength: 6
+          maxLength: 32
 
     # ==================== 家长端学情（ParentInsights，2026-09-18） ====================
     # 四个页面（P6.1 仪表盘 / P6.2 学情报告 / P6.3 错题查看 / P6.4 对话回放）的 5 个只读端点。
@@ -7372,7 +7494,10 @@ components:
           nullable: true
         safetyFlag:
           type: integer
-          description: 1 = 该条被安全标记（闲聊/偏离学习），前端红色标记。
+          description: >-
+            1 = 该条被安全标记（**偏离学习**）。⚠️ 2026-09-20 起是**双来源**：
+            被模型判为闲聊（`<!--topic:off-->` 标记）**或** 被阻断（现在只剩情绪/敏感）；
+            此前只有「被硬阻断的轮次」一种来源。家长端文案已从「闲聊」改成「偏离学习」。
         createdAt:
           type: string
           format: date-time
@@ -7418,7 +7543,8 @@ components:
           type: integer
         blockCount:
           type: integer
-          description: 该会话里 `safety_flag = 1` 的消息数。
+          description: >-
+            该会话里 `safety_flag = 1` 的消息数 = **被判闲聊 或 被阻断** 的轮次（双来源，见 `ChatLogMessage.safetyFlag`）。
 
     ChatLogDetail:
       allOf:
@@ -7447,21 +7573,19 @@ components:
 
     ParentAccount:
       type: object
+      description: >-
+        家长账号信息（P6.10，2026-09-20 实现，**只读**）。
+        ⚠️ 原 schema 里的 `parent` / `subscription` / `quota` 是**文档漂移**：`AIQuota` 类型不存在、
+        订阅与额度也没有表（属 P7.1）→ 已收敛为下列三字段。
       properties:
-        parent:
-          $ref: '#/components/schemas/Parent'
-        subscription:
-          type: object
-          properties:
-            planName:
-              type: string
-            status:
-              type: string
-            expiresAt:
-              type: string
-              format: date-time
-        quota:
-          $ref: '#/components/schemas/AIQuota'
+        id:
+          type: integer
+        name:
+          type: string
+          nullable: true
+          description: 家长姓名，注册时不强制 → 可为 null（前端显示「未设置」）。
+        phone:
+          type: string
 
     Quota:
       type: object

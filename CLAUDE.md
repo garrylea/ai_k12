@@ -149,6 +149,13 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 - 四页是**只读实时聚合**（`apps/server/src/modules/parent-insights/`）：学情报告**不落 `learning_reports`、不调 LLM**，服务层分次查 + JS 合成后直接返回。**不要往这四个端点里加写入逻辑**。
 - **学习时长与掌握度都已不是代理**：时长走会话口径（`study_sessions`，Phase 1A）；掌握度自 Phase 1B 起由判题出口回写 `student_knowledge_mastery`（**与「错题数代理」`weakPoints` 并存不替换**，两卡标题不同、不得合并）；专项学情/目标达成为只读实时聚合（`special_practice_logs` / `lesson_completions` / `goals`）。**目标自 P6.5 起是 `(学科, 指标)` 二元组、没有全局目标**：在学学科 = `progress` 行 ∪ 兜底 {语文,英语} ∩ MVP 白名单，**没有在学学科就不建默认目标**；`goals` 的唯一键靠**条件式 VIRTUAL 生成列** `scope_subject_id`（`IF(metric IS NULL, NULL, COALESCE(subject_id, 0))`）——**不能改 STORED**（要重建整表，被两个外键挡住报 1215），也**别用临时表验证**（临时表没外键，会得出假阳性）。**仅**活跃度（`activeDays7`）仍是时间戳代理。薄弱点必须给「未标注知识点的错题数」、掌握度必须给覆盖率三项，否则家长误读成「只有这些问题」。口径见 API 文档 §6.8/§6.27。**埋点写入永不阻断主链路**（失败只 warn；掌握度回写走 `void` 不 `await`）——注意 **ODKU 的 SET 从左到右求值、读到的是已更新的列**（累计列须在计数列之后写且不得再 `+ new.x`），仓储占位符顺序必须与列清单逐位对应（`goals` 的 `title` 在 `period` 前），**这类错位置断言式单测拦不住**（详见 changelog 本批条目）。
 
+## 家长端「管得住」批（P6.6 行为管控 / P6.9 异常预警 / P6.10 账号设置，2026-09-20）
+
+- **闲聊判定 = 模型自报标记 `<!--topic:off-->`（独占回复最后一个非空行），无标记 = 不报警**（宁漏勿误报）。原关键词正则实测 **6/12 条正常语文/英语题误判**，其 `off_topic` 硬阻断已删除（情绪/敏感的阻断保留）。服务端在 `parseContent` 剥离标记（**检测只认末行、剥离对独占一行的标记全局替换**，容忍 CRLF），标记永不进学生可见内容与历史。
+- **⚠️ `ai_messages.safety_flag` 是双来源**（模型自报闲聊 ∪ `type='block'`，后者现在只剩情绪/敏感），取值必须 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))` —— **外层 `Number(...)` 必需**（`??` 会把 `boolean` 原样返回，列是 INT；`tsc` 因 `RowDataPacket` 索引签名 + `Omit` 抹平**不报错**）。家长端文案是「偏离学习 N」。
+- **走神两个「分钟数」不是一回事**：客户端 `IDLE_TIMEOUT_MS=120_000` **写死**，家长的 `controls.alert_idle_minutes` 只从 `hidden_since` 起算 → 两者相加才是家长感知的延迟。`study_sessions` 的 `hidden_*` 四列**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**（累计列须排在 `client_state`/`hidden_reason` 之前）。阈值判定只在**心跳**与 **`end`** 两处（无 `end` 的崩溃会话不判）。
+- **P6.6 只做「预警灵敏度 + 奖励兑换只读」**：每日时长 / 禁用时段 / 辅线开关 / 拍照开关按用户裁决**不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）。`controls` 端点**只含两个阈值**，兑换字段归 `points/settings`（同一字段不做两个归属）。口径见 API 文档 §6.28。
+
 ## apps/server - ai-core AI Agent Hub
 
 两层架构：`infra/`（ModelRouter、PromptBuilder、ModelClient + Kimi/Qwen/DeepSeek/Gemini/local 适配器、ResponseParser、SafetyGuard、FallbackHandler、Logger、Metrics）+ `capabilities/`（Tutoring/Grading/Explanation/Variation/Analytics/Judgment 及若干专项能力）+ `prompts/`（Mustache 模板）+ `*.yaml`（model-routes / retry / safety / fallback）。技术栈：Node + TS ESM、Vitest、Zod、Mustache、prom-client、dotenv。
