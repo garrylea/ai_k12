@@ -483,7 +483,12 @@ describe('ParentPointsController 端点透传', () => {
   it('GET/PUT students/:id/points/settings 读写 controls（ensure 先行）', async () => {
     const { controller, controls } = makeController();
 
-    await expect(controller.getSettings(PARENT, 7)).resolves.toEqual(SETTINGS);
+    // 响应只含兑换两字段：`findByStudent` 回的是四字段快照（SETTINGS），而 `toEqual` 精确相等，
+    // 因此这条断言顺带钉住 `alertAwayMinutes` / `alertIdleMinutes` 不被积分端点泄漏出去。
+    await expect(controller.getSettings(PARENT, 7)).resolves.toEqual({
+      pointsPerYuan: SETTINGS.pointsPerYuan,
+      rewardRedemptionEnabled: SETTINGS.rewardRedemptionEnabled,
+    });
     expect(controls.ensure).toHaveBeenCalledWith(7);
     expect(controls.findByStudent).toHaveBeenCalledWith(7);
 

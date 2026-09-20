@@ -98,6 +98,27 @@ const SettingsSchema = z
   });
 
 /**
+ * `GET|PUT .../points/settings` 的响应：**只含兑换设置这两个字段**（对应 openapi 的
+ * `PointsSettings`）。
+ *
+ * **不能直接把 `ControlsSnapshot` 整个返回**：仓储快照还带 `alertAwayMinutes` /
+ * `alertIdleMinutes`，那是预警灵敏度的字段、归 `.../controls`（spec 要求「同一字段单一
+ * 归属」）。整个透传会让积分端点泄漏别家字段，并与 API 文档声明的 schema 不符。
+ */
+interface PointsSettingsResponse {
+  pointsPerYuan: number;
+  rewardRedemptionEnabled: boolean;
+}
+
+/** 把 controls 快照**投影**成本端点自己的两个字段（见 `PointsSettingsResponse`）。 */
+function toPointsSettings(snapshot: ControlsSnapshot): PointsSettingsResponse {
+  return {
+    pointsPerYuan: snapshot.pointsPerYuan,
+    rewardRedemptionEnabled: snapshot.rewardRedemptionEnabled,
+  };
+}
+
+/**
  * Zod 校验 + 把 `ZodError` 转成 400。
  *
  * 直接用 `Schema.parse()` 抛出的 `ZodError` 不是 `HttpException`，会被全局
@@ -240,28 +261,30 @@ export class ParentPointsController {
     return null;
   }
 
-  /** 兑换设置：读 `controls`（缺行先 `ensure` 补默认行，与兑换端点的懒初始化同口径）。 */
+  /** 兑换设置：读 `controls`（缺行先 `ensure` 补默认行，与兑换端点的懒初始化同口径）。
+   *  只投影出兑换两字段（`PointsSettingsResponse`），**不把快照整个返回**。 */
   @Get('students/:id/points/settings')
   async getSettings(
     @CurrentUser() user: JwtUser,
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<ControlsSnapshot> {
+  ): Promise<PointsSettingsResponse> {
     await this.parentService.requireOwnedStudent(user.sub, id);
     await this.controlsRepo.ensure(id);
-    return this.controlsRepo.findByStudent(id);
+    return toPointsSettings(await this.controlsRepo.findByStudent(id));
   }
 
-  /** 兑换设置：部分更新，至少给一个字段（空 patch 是假成功，Zod 层 400）。返回更新后的全量。 */
+  /** 兑换设置：部分更新，至少给一个字段（空 patch 是假成功，Zod 层 400）。返回更新后的全量
+   *  （同样只投影兑换两字段）。 */
   @Put('students/:id/points/settings')
   async saveSettings(
     @CurrentUser() user: JwtUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: unknown,
-  ): Promise<ControlsSnapshot> {
+  ): Promise<PointsSettingsResponse> {
     await this.parentService.requireOwnedStudent(user.sub, id);
     const patch = parseInput(SettingsSchema, body);
     await this.controlsRepo.ensure(id);
     await this.controlsRepo.update(id, patch);
-    return this.controlsRepo.findByStudent(id);
+    return toPointsSettings(await this.controlsRepo.findByStudent(id));
   }
 }
