@@ -1,4 +1,5 @@
 import type { GoalMetric, GoalPeriod } from '../../../database/repositories/goals.repo.js';
+import type { SafetyAlertRow } from '../../../database/repositories/types.js';
 
 /**
  * 家长端「看得见」批的响应形状（spec `2026-09-18-parent-insights-design.md` §4.2）。
@@ -48,14 +49,52 @@ export interface DashboardStudent {
   schoolLevel: string | null;
   lastActiveAt: Date | null;
   activeDays7: number;
-  /** 本期恒 0：`safety_alerts` 无写入，等预警闭环后填（spec §3 定案 #9）。 */
+  /** 该孩子未读预警数（`safety_alerts.is_read = 0` 真查；2026-09-20 起不再是占位 0）。 */
   unreadAlerts: number;
   subjects: DashboardSubject[];
 }
 
 export interface ParentDashboard {
   students: DashboardStudent[];
+  /** 该家长**全部孩子**的未读预警合计（同一张 `safety_alerts` 表，不重复计算）。 */
   unreadAlerts: number;
+}
+
+/**
+ * 预警灵敏度（spec §4.1/§4.2）。**只含这两个阈值**：奖励兑换状态归
+ * `GET .../points/settings`，同一字段不许两个归属（spec §4.1 明文）。
+ */
+export interface ParentControls {
+  alertAwayMinutes: number;
+  alertIdleMinutes: number;
+}
+
+/**
+ * 预警中心一行（spec §4.3）。
+ *
+ * `type` 直接用 `SafetyAlertRow['type']`（含 `abusive`）：DB 枚举里有它、
+ * `SafetyAlertsService.messageFor` 也覆盖了它，此处收窄成 5 个值就是撒谎。
+ * `studentName` 可为 null（两个 FK 都是 CASCADE，孤儿行理论不可能，前端按「未知学生」兜底）。
+ */
+export interface ParentAlertItem {
+  id: number;
+  studentId: number;
+  studentName: string | null;
+  type: SafetyAlertRow['type'];
+  level: 'info' | 'warning' | 'critical';
+  message: string;
+  context: string | null;
+  dialogueId: number | null;
+  isRead: boolean;
+  createdAt: Date;
+}
+
+/** 预警中心分页壳（`page`/`pageSize` 由请求回显，便于前端翻页）。 */
+export interface ParentAlertPage {
+  items: ParentAlertItem[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /** 报告页折线的一点（只含有记录的天）。 */

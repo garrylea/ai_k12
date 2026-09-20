@@ -46,6 +46,7 @@ const mk = (overrides: Record<string, any> = {}) => ({
   subjectsRepo: { findAll: vi.fn().mockResolvedValue([{ id: 1, name: '数学' }]) },
   progressService: { getStarMap: vi.fn().mockResolvedValue(STAR_MAP) },
   repo: mkRepo(),
+  alertsRepo: { countUnread: vi.fn().mockResolvedValue(0) },
   ...overrides,
 });
 
@@ -55,6 +56,7 @@ const mkSvc = (d: ReturnType<typeof mk>) =>
     d.subjectsRepo as any,
     d.progressService as any,
     d.repo as any,
+    d.alertsRepo as any,
   );
 
 describe('DashboardService', () => {
@@ -176,10 +178,36 @@ describe('DashboardService', () => {
     expect(result.students.map((s: any) => s.studentId)).toEqual([11, 12]);
   });
 
-  it('unreadAlerts 恒为 0（safety_alerts 无写入，字段先占位）', async () => {
+  it('unreadAlerts 真查：顶层数全部孩子、学生级数这个孩子（两值不同防串位）', async () => {
     const d = mk();
+    // 顶层 7、学生 11 是 3：值刻意不同——写死常量、或把两个口径接反，都会红
+    d.alertsRepo.countUnread.mockImplementation(
+      async (_parentId: number, studentId?: number) => (studentId === undefined ? 7 : 3),
+    );
+
     const result = await mkSvc(d).getDashboard(3);
-    expect(result.unreadAlerts).toBe(0);
-    expect(result.students[0].unreadAlerts).toBe(0);
+
+    // 真的查了库（不是把常量改个数字）：顶层带家长、学生级再带孩子
+    expect(d.alertsRepo.countUnread).toHaveBeenCalledWith(3);
+    expect(d.alertsRepo.countUnread).toHaveBeenCalledWith(3, 11);
+    expect(result.unreadAlerts).toBe(7);
+    expect(result.students[0].unreadAlerts).toBe(3);
+  });
+
+  it('多个孩子时未读计数按孩子分别查（不是把顶层值复制给每个孩子）', async () => {
+    const d = mk({
+      studentsRepo: {
+        findByParentId: vi.fn().mockResolvedValue([BOY, { ...BOY, id: 12, name: '小美' }]),
+      },
+    });
+    d.alertsRepo.countUnread.mockImplementation(
+      async (_parentId: number, studentId?: number) =>
+        studentId === undefined ? 5 : studentId === 11 ? 2 : 3,
+    );
+
+    const result = await mkSvc(d).getDashboard(3);
+
+    expect(result.students.map((s: any) => s.unreadAlerts)).toEqual([2, 3]);
+    expect(result.unreadAlerts).toBe(5);
   });
 });

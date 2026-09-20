@@ -87,6 +87,45 @@ describe('SafetyAlertsRepository.findById', () => {
   });
 });
 
+describe('SafetyAlertsRepository.countUnread', () => {
+  it('顶层：只按 parent_id + is_read = 0 计数（不带 student_id、不取行）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: '7' }], []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    expect(await repo.countUnread(3)).toBe(7);
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toMatch(/^SELECT COUNT\(\*\) AS n FROM safety_alerts WHERE/);
+    expect(zipWhere(sql as string, params as unknown[])).toEqual({ parent_id: 3 });
+    expect(sql).toContain('is_read = 0');
+    expect(sql).not.toContain('student_id = ?');
+    expect(sql).not.toContain('LIMIT');
+  });
+
+  it('学生级：parent_id 与 student_id 按列名各就各位（写反会数错孩子）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: 3 }], []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    expect(await repo.countUnread(3, 11)).toBe(3);
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(zipWhere(sql as string, params as unknown[])).toEqual({ parent_id: 3, student_id: 11 });
+    expect(restAfterWhere(sql as string, params as unknown[])).toEqual([]);
+  });
+
+  it('COUNT 回来是字符串也转成 number；空结果 → 0', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: '2' }], []]);
+    expect(await new SafetyAlertsRepository(pool as any).countUnread(3)).toBe(2);
+
+    const empty = mockPool();
+    empty.execute.mockResolvedValueOnce([[], []]);
+    expect(await new SafetyAlertsRepository(empty as any).countUnread(3)).toBe(0);
+  });
+});
+
 describe('SafetyAlertsRepository.listByParent', () => {
   it('筛选按列名配对，分页参数排在筛选参数之后（不做位置硬编码）', async () => {
     const pool = mockPool();

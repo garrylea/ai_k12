@@ -5,6 +5,8 @@ import type { StudyTimeService } from './study-time.service.js';
 import type { SpecialsService } from './specials.service.js';
 import type { ParentMasteryService } from './parent-mastery.service.js';
 import type { GoalsService } from './goals.service.js';
+import type { ControlsService } from './controls.service.js';
+import type { AlertsService } from './alerts.service.js';
 
 function makeController(requireOwnedStudent: ReturnType<typeof vi.fn>) {
   const parentService = { requireOwnedStudent } as unknown as ParentService;
@@ -22,6 +24,15 @@ function makeController(requireOwnedStudent: ReturnType<typeof vi.fn>) {
     isMetricAllowedForSubject: vi.fn().mockResolvedValue(true),
     isLearningSubject: vi.fn().mockResolvedValue(true),
   } as unknown as GoalsService;
+  // 本批新增的第 10/11 参：行为管控 / 预警中心
+  const controls = {
+    get: vi.fn().mockResolvedValue({ alertAwayMinutes: 5, alertIdleMinutes: 15 }),
+    update: vi.fn().mockResolvedValue({ alertAwayMinutes: 5, alertIdleMinutes: 15 }),
+  } as unknown as ControlsService;
+  const alerts = {
+    list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
+    markRead: vi.fn().mockResolvedValue(undefined),
+  } as unknown as AlertsService;
   const controller = new ParentInsightsController(
     parentService,
     {} as never, // dashboardService
@@ -32,8 +43,10 @@ function makeController(requireOwnedStudent: ReturnType<typeof vi.fn>) {
     specials,
     mastery,
     goals,
+    controls,
+    alerts,
   );
-  return { controller, studyTime, specials, mastery, goals };
+  return { controller, studyTime, specials, mastery, goals, controls, alerts };
 }
 
 const USER = { sub: 3, role: 'parent' as const };
@@ -169,5 +182,139 @@ describe('ParentInsightsController 专项 / 掌握度 / 目标端点（埋点 Ph
       controller.putGoalTarget(USER, 11, 'daily_words', { target: 30, subjectId: 3 }),
     ).rejects.toThrow();
     expect(goals.upsertTarget).not.toHaveBeenCalled();
+  });
+});
+
+describe('ParentInsightsController controls 端点（spec §4.1/§4.2）', () => {
+  it('GET：归属校验先于取数', async () => {
+    const order: string[] = [];
+    const requireOwned = vi.fn().mockImplementation(async () => {
+      order.push('ownership');
+    });
+    const { controller, controls } = makeController(requireOwned);
+    (controls.get as any).mockImplementation(async () => {
+      order.push('query');
+      return { alertAwayMinutes: 5, alertIdleMinutes: 15 };
+    });
+
+    await controller.getControls(USER, 11);
+
+    expect(order).toEqual(['ownership', 'query']);
+    expect(requireOwned).toHaveBeenCalledWith(3, 11);
+    expect(controls.get).toHaveBeenCalledWith(11);
+  });
+
+  it('PUT：越界 0 / 181 → 409（schema 层就拦下，不是 400）且不写库', async () => {
+    const { controller, controls } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await expect(controller.putControls(USER, 11, { alertAwayMinutes: 0 })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 1001 },
+    });
+    await expect(controller.putControls(USER, 11, { alertIdleMinutes: 181 })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 1001 },
+    });
+
+    expect(controls.update).not.toHaveBeenCalled();
+  });
+
+  it('PUT：body 不是对象 / 字段类型错 → 409 且不写库（不落到 500）', async () => {
+    const { controller, controls } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await expect(controller.putControls(USER, 11, null)).rejects.toMatchObject({ status: 409 });
+    await expect(
+      controller.putControls(USER, 11, { alertAwayMinutes: '5' }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    expect(controls.update).not.toHaveBeenCalled();
+  });
+
+  it('PUT：合法 → 归属校验后把 patch 透传给 service', async () => {
+    const { controller, controls } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await controller.putControls(USER, 11, { alertAwayMinutes: 2, alertIdleMinutes: 30 });
+
+    expect(controls.update).toHaveBeenCalledWith(11, { alertAwayMinutes: 2, alertIdleMinutes: 30 });
+  });
+
+  it('PUT：归属失败 → 不写库（403 不许泄漏存在性）', async () => {
+    const { controller, controls } = makeController(vi.fn().mockRejectedValue(new Error('1005')));
+
+    await expect(controller.putControls(USER, 11, { alertAwayMinutes: 2 })).rejects.toThrow();
+
+    expect(controls.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('ParentInsightsController alerts 端点（spec §4.3/§4.4）', () => {
+  it('GET：studentId 缺省 → 不校验归属；分页取默认值 page=1/pageSize=20', async () => {
+    const requireOwned = vi.fn().mockResolvedValue(undefined);
+    const { controller, alerts } = makeController(requireOwned);
+
+    await controller.listAlerts(USER, undefined, undefined, undefined, undefined);
+
+    expect(requireOwned).not.toHaveBeenCalled();
+    expect(alerts.list).toHaveBeenCalledWith(3, { page: 1, pageSize: 20 });
+  });
+
+  it('GET：studentId 给了先校验归属；unreadOnly=1 视为真；pageSize 上界 50', async () => {
+    const order: string[] = [];
+    const requireOwned = vi.fn().mockImplementation(async () => {
+      order.push('ownership');
+    });
+    const { controller, alerts } = makeController(requireOwned);
+    (alerts.list as any).mockImplementation(async () => {
+      order.push('query');
+      return { items: [], total: 0, page: 2, pageSize: 50 };
+    });
+
+    await controller.listAlerts(USER, '11', '1', '2', '50');
+
+    expect(order).toEqual(['ownership', 'query']);
+    expect(requireOwned).toHaveBeenCalledWith(3, 11);
+    expect(alerts.list).toHaveBeenCalledWith(3, {
+      studentId: 11,
+      unreadOnly: true,
+      page: 2,
+      pageSize: 50,
+    });
+  });
+
+  it('GET：unreadOnly 只有 "1" 算真（"0"/缺省都不加筛选）', async () => {
+    const { controller, alerts } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await controller.listAlerts(USER, undefined, '0', undefined, undefined);
+
+    expect(alerts.list).toHaveBeenCalledWith(3, { page: 1, pageSize: 20 });
+  });
+
+  it('GET：分页非法（page=0 / pageSize=51）→ 400 且不取数', async () => {
+    const { controller, alerts } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await expect(controller.listAlerts(USER, undefined, undefined, '0', undefined)).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(controller.listAlerts(USER, undefined, undefined, undefined, '51')).rejects.toMatchObject({
+      status: 400,
+    });
+
+    expect(alerts.list).not.toHaveBeenCalled();
+  });
+
+  it('GET：studentId 非本家长 → 403 且不取数', async () => {
+    const { controller, alerts } = makeController(vi.fn().mockRejectedValue(new Error('1005')));
+
+    await expect(controller.listAlerts(USER, '11', undefined, undefined, undefined)).rejects.toThrow();
+
+    expect(alerts.list).not.toHaveBeenCalled();
+  });
+
+  it('PATCH read：alertId 原样下传（正整数校验在 service，故 409 而非 400）', async () => {
+    const { controller, alerts } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await expect(controller.markAlertRead(USER, '12')).resolves.toBeNull();
+
+    expect(alerts.markRead).toHaveBeenCalledWith(3, '12');
   });
 });

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 import { ParentInsightsRepository } from '../../database/repositories/parent-insights.repo.js';
+import { SafetyAlertsRepository } from '../../database/repositories/safety-alerts.repo.js';
 import { ProgressService } from '../progress/progress.service.js';
 import type { StarMapData } from '../progress/progress.service.js';
 import { startOfDaysAgo } from './window.util.js';
@@ -40,10 +41,12 @@ export class DashboardService {
     private readonly subjectsRepo: SubjectsRepository,
     private readonly progressService: ProgressService,
     private readonly repo: ParentInsightsRepository,
+    private readonly alertsRepo: SafetyAlertsRepository,
   ) {}
 
   async getDashboard(parentId: number): Promise<ParentDashboard> {
     const students = await this.studentsRepo.findByParentId(parentId);
+    const unreadAlertsTotal = await this.alertsRepo.countUnread(parentId);
     const weekStart = startOfDaysAgo(ACTIVE_WINDOW_DAYS - 1);
     const subjectNames = new Map((await this.subjectsRepo.findAll()).map((s) => [s.id, s.name]));
 
@@ -82,12 +85,13 @@ export class DashboardService {
         schoolLevel: student.schoolLevel,
         lastActiveAt: activity.lastActiveAt,
         activeDays7: activity.activeDays,
-        unreadAlerts: 0,
+        // 真查（`is_read = 0` 计数）：孩子卡片只数这个孩子，顶层数全部孩子
+        unreadAlerts: await this.alertsRepo.countUnread(parentId, student.id),
         subjects,
       });
     }
 
-    return { students: result, unreadAlerts: 0 };
+    return { students: result, unreadAlerts: unreadAlertsTotal };
   }
 
   /**

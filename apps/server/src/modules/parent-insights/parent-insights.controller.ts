@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Put,
   Query,
   UseGuards,
@@ -26,21 +28,27 @@ import { StudyTimeService } from './study-time.service.js';
 import { SpecialsService } from './specials.service.js';
 import { ParentMasteryService } from './parent-mastery.service.js';
 import { GoalsService, GOAL_TEMPLATES } from './goals.service.js';
+import { ControlsService } from './controls.service.js';
+import type { ControlsUpdatePatch } from './controls.service.js';
+import { AlertsService } from './alerts.service.js';
+import type { AlertsListQuery } from './alerts.service.js';
 import type { StudyTimeSummary, TodayUsageSummary } from './dto/parent-insights.dto.js';
 import type {
   GoalAttainmentItem,
   GoalAttainmentSummary,
   LearningReport,
   MasterySummary,
+  ParentAlertPage,
   ParentChatLogDetail,
   ParentChatLogPage,
+  ParentControls,
   ParentDashboard,
   ParentErrorPage,
   SpecialsSummary,
 } from './dto/parent-insights.dto.js';
 import type { GoalMetric } from '../../database/repositories/goals.repo.js';
 import type { ReportPeriod } from './window.util.js';
-import { DEFAULT_PAGE, parsePositiveInt } from '../points/pagination.util.js';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, parsePositiveInt } from '../points/pagination.util.js';
 
 /** `period` 只认这两个值；非法值**回落 `weekly`**（spec §6：查询类参数宽容回落，不 400）。 */
 const PeriodSchema = z.enum(['weekly', 'monthly']);
@@ -66,15 +74,33 @@ const UpsertGoalSchema = z.object({
 });
 
 /**
+ * `PUT .../controls` 的 body（spec §4.2）：两个字段**均可选**、`1..180` 整数。
+ *
+ * 越界在这里就 `409`/`1001`（**不是** Zod 默认的 400）——spec §4.2 的校验链把范围越界
+ * 与「没有要更新的字段」并列成 409。`ControlsService` 里还有一道同样的范围校验，
+ * 那是服务层的最后防线（controller 直连服务的调用方绕过 schema 时仍能拦住）。
+ */
+const ControlsPatchSchema = z.object({
+  alertAwayMinutes: z.number().int().min(1).max(180).optional(),
+  alertIdleMinutes: z.number().int().min(1).max(180).optional(),
+});
+
+/** `GET alerts` 的 `pageSize` 上界（spec §4.3：1..50，与其它分页端点不同的档）。 */
+const ALERTS_MAX_PAGE_SIZE = 50;
+
+/**
  * 家长端「看得见」批（spec `2026-09-18-parent-insights-design.md`）。
  *
  * 与 `ParentController` 同前缀 `api/parent`（Nest 允许多个 controller 共前缀，
- * `ParentPointsController` 已是先例）。`GET` 端点全部只读；**唯一的写端点是
- * `PUT students/:studentId/goals/:metric`**（家长改目标值）——它同样先做归属校验，
- * 且只允许改 `target`，`metric`/`period`/`title` 由服务端派生。
+ * `ParentPointsController` 已是先例）。写端点有：`PUT students/:studentId/goals/:metric`
+ * （家长改目标值，只允许改 `target`，`metric`/`period`/`title` 由服务端派生）、
+ * `PUT students/:studentId/controls`（预警灵敏度）与 `PATCH alerts/:alertId/read`。
+ * 新增路径**不得与 `ParentController` 撞车**（同前缀，撞了会静默覆盖）。
  *
- * 归属校验：除 `dashboard`（按 `parentId` 查自己名下全部孩子）外，每个 handler 第一行必须
- * `await this.parentService.requireOwnedStudent(user.sub, studentId)`（Task 9/10 的端点）。
+ * 归属校验：按学生的端点第一行 `await this.parentService.requireOwnedStudent(user.sub, studentId)`。
+ * 三个例外：`dashboard` 按 `parentId` 查自己名下全部孩子；`GET alerts` 只在**传了
+ * `studentId`** 时校验（不传 = 看全部孩子）；`PATCH alerts/:alertId/read` 没有 `studentId`，
+ * 它的归属校验（`alert.parent_id === parentId`）只能放在 `AlertsService` 里——要先 `findById`。
  *
  * 不手工包 `{code, message, data}`——全局 `ResponseInterceptor` 统一包。
  */
@@ -92,6 +118,8 @@ export class ParentInsightsController {
     private readonly specialsService: SpecialsService,
     private readonly parentMasteryService: ParentMasteryService,
     private readonly goalsService: GoalsService,
+    private readonly controlsService: ControlsService,
+    private readonly alertsService: AlertsService,
   ) {}
 
   /** P6.1 家长仪表盘：一次返回名下所有孩子的概览（含各自的按学科卡片）。 */
@@ -293,5 +321,78 @@ export class ParentInsightsController {
       });
     }
     return this.goalsService.upsertTarget(studentId, subjectId, metric as GoalMetric, target);
+  }
+
+  /**
+   * 行为管控 —— 读预警灵敏度（spec §4.1）。响应**只有两个阈值**，兑换状态不在这里
+   * （前端另调 `GET .../points/settings`，避免同一字段两个归属）。
+   */
+  @Get('students/:studentId/controls')
+  async getControls(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+  ): Promise<ParentControls> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    return this.controlsService.get(studentId);
+  }
+
+  /**
+   * 行为管控 —— 改预警灵敏度（spec §4.2）。至少一个字段、范围 1..180，越界 409/1001；
+   * 合法则回读并返回完整对象。
+   */
+  @Put('students/:studentId/controls')
+  async putControls(
+    @CurrentUser() user: JwtUser,
+    @Param('studentId', ParseIntPipe) studentId: number,
+    @Body() body: unknown,
+  ): Promise<ParentControls> {
+    await this.parentService.requireOwnedStudent(user.sub, studentId);
+    const parsed = ControlsPatchSchema.safeParse(body);
+    if (!parsed.success) {
+      const detail = parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`).join('; ');
+      throw new ConflictException({ code: 1001, message: `入参校验失败：${detail}` });
+    }
+    return this.controlsService.update(studentId, parsed.data as ControlsUpdatePatch);
+  }
+
+  /**
+   * 预警中心列表（spec §4.3）。`studentId` 缺省 = 全部孩子；给了就先校验归属。
+   * 空结果是正常态（`items: []` / `total: 0`），不是错误。
+   */
+  @Get('alerts')
+  async listAlerts(
+    @CurrentUser() user: JwtUser,
+    @Query('studentId') studentId?: string,
+    @Query('unreadOnly') unreadOnly?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<ParentAlertPage> {
+    const query: AlertsListQuery = {
+      page: parsePositiveInt(page, 'page', DEFAULT_PAGE),
+      pageSize: parsePositiveInt(pageSize, 'pageSize', DEFAULT_PAGE_SIZE, ALERTS_MAX_PAGE_SIZE),
+    };
+    // 空串等同「没传」；非空才解析并校验归属（def 用不到，占位而已）
+    if (studentId !== undefined && studentId !== '') {
+      query.studentId = parsePositiveInt(studentId, 'studentId', DEFAULT_PAGE);
+      await this.parentService.requireOwnedStudent(user.sub, query.studentId);
+    }
+    // 只认 `'1'` 为真（spec §4.3）
+    if (unreadOnly === '1') query.unreadOnly = true;
+    return this.alertsService.list(user.sub, query);
+  }
+
+  /**
+   * 标记预警已读（spec §4.4）。`alertId` **不走 `ParseIntPipe`**：spec 要求非正整数
+   * 也回 409/1001，而 pipe 会先抛 400。正整数/存在/归属三段校验都在 `AlertsService`。
+   * 幂等：重复标记不报错。
+   */
+  @Patch('alerts/:alertId/read')
+  async markAlertRead(
+    @CurrentUser() user: JwtUser,
+    @Param('alertId') alertId: string,
+  ): Promise<null> {
+    await this.alertsService.markRead(user.sub, alertId);
+    return null;
   }
 }

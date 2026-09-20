@@ -16,6 +16,9 @@ import { StudyTimeService } from './study-time.service.js';
 import { SpecialsService } from './specials.service.js';
 import { ParentMasteryService } from './parent-mastery.service.js';
 import { GoalsService } from './goals.service.js';
+import { ControlsService } from './controls.service.js';
+import { AlertsService } from './alerts.service.js';
+import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
 import { ParentAnalyticsRepository } from '../../database/repositories/parent-analytics.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
@@ -36,15 +39,20 @@ import { ProgressRepository } from '../../database/repositories/progress.repo.js
  * - `imports: [AnalyticsModule]` —— `StudyTimeService` 注入 `StudySessionsService`
  *   （`AnalyticsModule` 已 `exports: [StudySessionsService]`）；只把它列进 `providers` 而漏了
  *   `imports`，Nest 会在**启动**时直接报无法解析依赖。
+ * - `imports: [SafetyAlertsModule]` —— 预警列表 / 标记已读 / 仪表盘未读计数都要用
+ *   `SafetyAlertsRepository`，它由 `SafetyAlertsModule` **导出**。**不要**再在
+ *   `providers` 里写一遍：那会分裂实例（去重语义与 Task 2/4 的写入口不再共享）。
  * - `providers` 必须**逐个列出 service 构造函数里注入的全部仓储**，少一个 Nest 启动就抛
  *   「can't resolve dependencies」。`@Inject('DATABASE_POOL')` 来自 `@Global()` 的
  *   `DatabaseModule`，不需要在这里 import。
  */
 @Module({
-  imports: [ParentModule, ProgressModule, AnalyticsModule],
+  imports: [ParentModule, ProgressModule, AnalyticsModule, SafetyAlertsModule],
   controllers: [ParentInsightsController],
   providers: [
     DashboardService,
+    ControlsService,
+    AlertsService,
     ReportService,
     ErrorsService,
     ChatLogsService,

@@ -55,6 +55,27 @@ export class SafetyAlertsRepository {
   }
 
   /**
+   * 未读预警计数（`is_read = 0`）。`studentId` 省略 = 该家长**全部孩子**。
+   *
+   * 仪表盘 `unreadAlerts` 真查用（spec §4.2 ①）：顶层卡片传家长、孩子卡片传
+   * `(parentId, studentId)`。独立 `COUNT(*)` 而不是复用 `listByParent`——后者会
+   * 顺手把整页行取回来，仪表盘只要一个数字。
+   */
+  async countUnread(parentId: number, studentId?: number): Promise<number> {
+    const where: string[] = ['parent_id = ?', 'is_read = 0'];
+    const params: number[] = [parentId];
+    if (studentId !== undefined) {
+      where.push('student_id = ?');
+      params.push(studentId);
+    }
+    const [rows] = await this.pool.execute<(RowDataPacket & { n: number | string })[]>(
+      `SELECT COUNT(*) AS n FROM safety_alerts WHERE ${where.join(' AND ')}`,
+      params,
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /**
    * 家长端列表（join students 取孩子名）。
    * 排序固定 `created_at DESC, id DESC`（同一毫秒的稳定次序）；半开区间不涉及。
    * 孤儿行理论上不可能（两个 FK 都是 ON DELETE CASCADE），但 `studentName` 仍按可空处理。
