@@ -1267,9 +1267,14 @@ SELECT CONCAT('away_only: away=', hidden_away_seconds, ' idle=', hidden_idle_sec
   FROM study_sessions WHERE session_uid = '00000000-0000-4000-8000-0000000000aa';
 -- 期望 away=30（若得到 45，说明差值基点被写成了 hidden_since，是 bug）、idle=0、active=0
 -- ③ controls 两列默认值与写入
-INSERT INTO controls (student_id) VALUES (999001) ON DUPLICATE KEY UPDATE student_id = student_id;
+--    ⚠️ controls.student_id 有 FK → students(id)（fk_controls_student_id）：用「不存在的假 id」会
+--    ERROR 1452 中断整个脚本，**连 ROLLBACK 都跑不到**（2026-09-20 实施时踩到）。
+--    故取一个**真实且尚无 controls 行**的学生：
+SET @sid = (SELECT s.id FROM students s LEFT JOIN controls c ON c.student_id = s.id
+            WHERE c.student_id IS NULL ORDER BY s.id LIMIT 1);
+INSERT INTO controls (student_id) VALUES (@sid) ON DUPLICATE KEY UPDATE student_id = student_id;
 SELECT CONCAT('defaults: away=', alert_away_minutes, ' idle=', alert_idle_minutes) AS r
-  FROM controls WHERE student_id = 999001;
+  FROM controls WHERE student_id = @sid;
 -- ④ 标记已读幂等
 SELECT CONCAT('markread_probe=', COUNT(*)) AS r FROM safety_alerts WHERE id = -1;
 ROLLBACK;
