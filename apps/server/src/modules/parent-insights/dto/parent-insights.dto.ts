@@ -97,6 +97,22 @@ export interface ParentAlertPage {
   pageSize: number;
 }
 
+/** 轮询用的未读预警条目（spec §3.3：banner 只需要展示字段，不带 context/dialogueId）。 */
+export interface ParentUnreadAlertItem {
+  id: number;
+  type: string;
+  level: string;
+  message: string;
+  studentName: string | null;
+  createdAt: Date;
+}
+
+/** `GET /parent/alerts/unread` 响应：items 截最新 5 条，total 是未读总数。 */
+export interface ParentUnreadAlerts {
+  items: ParentUnreadAlertItem[];
+  total: number;
+}
+
 /** 报告页折线的一点（只含有记录的天）。 */
 export interface TrendPoint {
   date: string;

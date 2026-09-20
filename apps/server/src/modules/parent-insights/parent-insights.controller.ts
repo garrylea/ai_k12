@@ -44,6 +44,7 @@ import type {
   ParentControls,
   ParentDashboard,
   ParentErrorPage,
+  ParentUnreadAlerts,
   SpecialsSummary,
 } from './dto/parent-insights.dto.js';
 import type { GoalMetric } from '../../database/repositories/goals.repo.js';
@@ -359,6 +360,16 @@ export class ParentInsightsController {
       throw new ConflictException({ code: 1001, message: `入参校验失败：${detail}` });
     }
     return this.controlsService.update(studentId, parsed.data as ControlsUpdatePatch);
+  }
+
+  /**
+   * 未读预警轮询（spec §3.3，家长端 Banner 30s 一次）。家长维度、不看单个孩子，
+   * 因此**不做** `requireOwnedStudent`；service 内部先对名下全部孩子跑 `closeStale`
+   * 补判（失败只 warn）。空结果是正常态。
+   */
+  @Get('alerts/unread')
+  async listUnreadAlerts(@CurrentUser() user: JwtUser): Promise<ParentUnreadAlerts> {
+    return this.alertsService.unread(user.sub);
   }
 
   /**

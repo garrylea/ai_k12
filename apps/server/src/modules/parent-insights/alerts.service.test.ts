@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { AlertsService } from './alerts.service.js';
+import type { StudentsRepository } from '../../database/repositories/students.repo.js';
+import type { StudySessionsService } from '../analytics/study-sessions.service.js';
+import type { SafetyAlertsRepository } from '../../database/repositories/safety-alerts.repo.js';
 
 const mkRow = (over: Record<string, unknown> = {}) => ({
   id: 12,
@@ -24,7 +28,12 @@ const mkRepo = () => ({
   markRead: vi.fn().mockResolvedValue(undefined),
 });
 
-const mkSvc = (repo: ReturnType<typeof mkRepo>) => new AlertsService(repo as never);
+const mkSvc = (repo: ReturnType<typeof mkRepo>) =>
+  new AlertsService(
+    repo as never,
+    { closeStale: vi.fn().mockResolvedValue(0) } as never,
+    { findByParentId: vi.fn().mockResolvedValue([]) } as never,
+  );
 
 describe('AlertsService.list（spec §4.3）', () => {
   it('行 → DTO：列名转驼峰、is_read 转 boolean、student_name 可空；不泄漏 message_id/read_at/parent_id', async () => {
@@ -150,5 +159,64 @@ describe('AlertsService.markRead（spec §4.4）', () => {
     await expect(mkSvc(repo).markRead(3, 12)).resolves.toBeUndefined();
 
     expect(repo.markRead).toHaveBeenCalledWith(12);
+  });
+});
+
+describe('AlertsService.unread（轮询端点 + 补判）', () => {
+  function makeUnreadDeps() {
+    const alertsRepo = {
+      listByParent: vi.fn().mockResolvedValue({
+        items: [
+          {
+            id: 26, student_id: 7, student_name: '小刚', type: 'idle', level: 'info',
+            message: '孩子在学习页面 5 分钟无操作', context: '无操作 5 分钟',
+            dialogue_id: null, is_read: 0, created_at: new Date('2026-09-20T19:26:27Z'),
+          },
+        ],
+        total: 1,
+      }),
+    } as unknown as SafetyAlertsRepository;
+    const sessions = { closeStale: vi.fn().mockResolvedValue(1) } as unknown as StudySessionsService;
+    const studentsRepo = {
+      findByParentId: vi.fn().mockResolvedValue([{ id: 7 }, { id: 8 }]),
+    } as unknown as StudentsRepository;
+    return { alertsRepo, sessions, studentsRepo };
+  }
+
+  it('先补判（名下每个孩子各一次 closeStale）再查未读；items 只带展示字段', async () => {
+    const { alertsRepo, sessions, studentsRepo } = makeUnreadDeps();
+    const service = new AlertsService(alertsRepo, sessions, studentsRepo);
+
+    const result = await service.unread(4);
+
+    expect(sessions.closeStale).toHaveBeenCalledTimes(2);
+    expect(sessions.closeStale).toHaveBeenCalledWith(7);
+    expect(sessions.closeStale).toHaveBeenCalledWith(8);
+    expect(alertsRepo.listByParent).toHaveBeenCalledWith(4, { unreadOnly: true }, 5, 0);
+    expect(result).toEqual({
+      items: [
+        {
+          id: 26, type: 'idle', level: 'info',
+          message: '孩子在学习页面 5 分钟无操作',
+          studentName: '小刚', createdAt: new Date('2026-09-20T19:26:27Z'),
+        },
+      ],
+      total: 1,
+    });
+  });
+
+  it('补判失败只 warn、不 500，仍返回未读列表', async () => {
+    const { alertsRepo, studentsRepo } = makeUnreadDeps();
+    const sessions = { closeStale: vi.fn().mockRejectedValue(new Error('db down')) } as unknown as StudySessionsService;
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const service = new AlertsService(alertsRepo, sessions, studentsRepo);
+
+    try {
+      const result = await service.unread(4);
+      expect(result.total).toBe(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('补判失败'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

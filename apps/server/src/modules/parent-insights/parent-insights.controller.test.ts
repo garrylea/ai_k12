@@ -32,6 +32,7 @@ function makeController(requireOwnedStudent: ReturnType<typeof vi.fn>) {
   const alerts = {
     list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
     markRead: vi.fn().mockResolvedValue(undefined),
+    unread: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   } as unknown as AlertsService;
   const controller = new ParentInsightsController(
     parentService,
@@ -357,5 +358,17 @@ describe('ParentInsightsController alerts 端点（spec §4.3/§4.4）', () => {
     await expect(controller.markAlertRead(USER, '12')).resolves.toBeNull();
 
     expect(alerts.markRead).toHaveBeenCalledWith(3, '12');
+  });
+});
+
+describe('ParentInsightsController 未读轮询端点', () => {
+  it('GET alerts/unread：不做学生归属校验（家长维度），直接透传 user.sub', async () => {
+    const requireOwned = vi.fn();
+    const { controller, alerts } = makeController(requireOwned);
+
+    await controller.listUnreadAlerts(USER);
+
+    expect(requireOwned).not.toHaveBeenCalled();
+    expect(alerts.unread).toHaveBeenCalledWith(3);
   });
 });
