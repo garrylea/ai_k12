@@ -2,6 +2,11 @@ import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { SafetyAlertRow } from './types.js';
 
+/** 列表行：预警本体 + join 出来的孩子名（取不到就是「未知学生」，不做非空断言）。 */
+export interface SafetyAlertRowWithStudentName extends SafetyAlertRow {
+  student_name: string | null;
+}
+
 @Injectable()
 export class SafetyAlertsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
@@ -29,5 +34,54 @@ export class SafetyAlertsRepository {
       `UPDATE safety_alerts SET is_read = 1, read_at = NOW(3) WHERE id = ?`,
       [id],
     );
+  }
+
+  /** 去重窗口：同一学生 + 同一 type 在 `since` 之后是否已写过一条（spec §3.5，30 分钟）。 */
+  async existsRecent(studentId: number, type: string, since: Date): Promise<boolean> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { n: number | string })[]>(
+      `SELECT COUNT(*) AS n FROM safety_alerts
+       WHERE student_id = ? AND type = ? AND created_at >= ?`,
+      [studentId, type, since],
+    );
+    return Number(rows[0]?.n ?? 0) > 0;
+  }
+
+  async findById(id: number): Promise<SafetyAlertRow | null> {
+    const [rows] = await this.pool.execute<SafetyAlertRow[]>(
+      `SELECT * FROM safety_alerts WHERE id = ? LIMIT 1`,
+      [id],
+    );
+    return rows[0] ?? null;
+  }
+
+  /**
+   * 家长端列表（join students 取孩子名）。
+   * 排序固定 `created_at DESC, id DESC`（同一毫秒的稳定次序）；半开区间不涉及。
+   * 孤儿行理论上不可能（两个 FK 都是 ON DELETE CASCADE），但 `studentName` 仍按可空处理。
+   */
+  async listByParent(
+    parentId: number,
+    filters: { studentId?: number; unreadOnly?: boolean },
+    limit: number,
+    offset: number,
+  ): Promise<{ items: SafetyAlertRowWithStudentName[]; total: number }> {
+    const where: string[] = ['sa.parent_id = ?'];
+    const params: Array<number> = [parentId];
+    if (filters.studentId !== undefined) { where.push('sa.student_id = ?'); params.push(filters.studentId); }
+    if (filters.unreadOnly) where.push('sa.is_read = 0');
+    const clause = where.join(' AND ');
+
+    const [countRows] = await this.pool.execute<(RowDataPacket & { n: number | string })[]>(
+      `SELECT COUNT(*) AS n FROM safety_alerts sa WHERE ${clause}`, params,
+    );
+    const [rows] = await this.pool.execute<SafetyAlertRowWithStudentName[]>(
+      `SELECT sa.*, s.name AS student_name
+       FROM safety_alerts sa LEFT JOIN students s ON s.id = sa.student_id
+       WHERE ${clause}
+       ORDER BY sa.created_at DESC, sa.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+    return { items: rows, total: Number(countRows[0]?.n ?? 0) };
   }
 }
