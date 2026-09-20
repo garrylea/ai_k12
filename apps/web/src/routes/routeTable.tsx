@@ -47,6 +47,7 @@ import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
 import AdminMessagesPage from '@/pages/admin/AdminMessagesPage';
 import AdminChatPage from '@/pages/admin/AdminChatPage';
+import AdminAlertsPage from '@/pages/admin/AdminAlertsPage';
 import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
 import RequireRole from './RequireRole';
 import RoleRedirect from './RoleRedirect';
@@ -84,6 +85,7 @@ export const routes: RouteObject[] = [
       { path: 'accounts', element: <AdminAccountsPage /> },
       { path: 'messages', element: <AdminMessagesPage /> },
       { path: 'chat', element: <AdminChatPage /> },
+      { path: 'alerts', element: <AdminAlertsPage /> },
       { path: 'security', element: <AdminSecurityPage /> },
     ],
   },

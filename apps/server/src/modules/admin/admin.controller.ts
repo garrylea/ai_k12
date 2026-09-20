@@ -7,6 +7,7 @@ import { AdminMessagesService } from './admin-messages.service.js';
 import { AdminNotificationsService } from './admin-notifications.service.js';
 import { AdminChatService } from './admin-chat.service.js';
 import { AdminDashboardService } from './admin-dashboard.service.js';
+import { AdminAlertsService } from './admin-alerts.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -51,9 +52,21 @@ export class AdminController {
     private notificationsService: AdminNotificationsService,
     private chatService: AdminChatService,
     private dashboardService: AdminDashboardService,
+    private alertsService: AdminAlertsService,
   ) {}
 
   @Get('dashboard') dashboard() { return this.dashboardService.get(); }
+
+  /**
+   * 预警数据（同一资源两个方法）：`GET` 看有多少条过期、`DELETE` 清掉。
+   * 无入参、阈值固定 30 天（`AdminAlertsService` 的常量），故无校验、无错误分支
+   * —— 唯一失败面是 DB 异常，走全局过滤器。
+   *
+   * 用 `@Delete`（→ 200）而不是 `@Post`（→ 201）：201 对「清理」语义不对。
+   */
+  @Get('alerts/expired') expiredAlerts() { return this.alertsService.preview(); }
+
+  @Delete('alerts/expired') purgeExpiredAlerts() { return this.alertsService.purge(); }
 
   @Patch('password')
   async changePassword(@CurrentUser() user: JwtUser, @Body() b: unknown) {

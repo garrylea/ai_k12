@@ -814,6 +814,8 @@ CREATE TABLE IF NOT EXISTS safety_alerts (
   read_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_sa_parent_unread (parent_id, is_read),
+  KEY idx_sa_parent_created (parent_id, created_at),
+  KEY idx_sa_created_at (created_at),
   KEY idx_sa_student (student_id),
   CONSTRAINT fk_sa_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_sa_parent_id FOREIGN KEY (parent_id) REFERENCES parents (id) ON DELETE CASCADE,

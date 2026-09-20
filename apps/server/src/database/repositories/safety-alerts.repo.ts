@@ -46,6 +46,43 @@ export class SafetyAlertsRepository {
     return Number(rows[0]?.n ?? 0) > 0;
   }
 
+  /**
+   * 保留期清理的**预览**：`created_at < cutoff` 的总条数，以及其中未读的条数。
+   *
+   * 只由管理员手动触发（本批不加 scheduler，spec §9）。`cutoff` 由调用方算好传入，
+   * 仓储里不写 `NOW()` / `CURDATE()`（与 `existsRecent` 同口径，便于离线断言）。
+   *
+   * ⚠️ 两个类型坑：0 行时 `SUM(...)` 回来是 **`NULL`**（不是 0）；`COUNT(*)` 回来是
+   * **字符串**。`RowDataPacket` 有 index signature，`tsc` 两个都不会拦，必须显式 `Number`。
+   */
+  async countOlderThan(cutoff: Date): Promise<{ total: number; unread: number }> {
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & { n: number | string; unread: number | string | null })[]
+    >(
+      `SELECT COUNT(*) AS n, SUM(is_read = 0) AS unread FROM safety_alerts WHERE created_at < ?`,
+      [cutoff],
+    );
+    return {
+      total: Number(rows[0]?.n ?? 0),
+      unread: Number(rows[0]?.unread ?? 0),
+    };
+  }
+
+  /**
+   * 保留期清理：**物理删除** `created_at < cutoff` 的行（**含未读**，用户 2026-09-20 裁决：
+   * 「清理一个月前」的字面意思；未读的也永久堆积等于没解决问题）。返回删除行数。
+   *
+   * 无 `LIMIT`，走 `execute`（预处理语句）即可；`affectedRows` 照
+   * `student-hidden-questions.repo.ts:28-34` 的既有模式。
+   */
+  async deleteOlderThan(cutoff: Date): Promise<number> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `DELETE FROM safety_alerts WHERE created_at < ?`,
+      [cutoff],
+    );
+    return result.affectedRows;
+  }
+
   async findById(id: number): Promise<SafetyAlertRow | null> {
     const [rows] = await this.pool.execute<SafetyAlertRow[]>(
       `SELECT * FROM safety_alerts WHERE id = ? LIMIT 1`,

@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from './routeTable';
 import { useThemeStore } from '@/store/themeStore';
 import {
+  getExpiredAlertStats,
   getMyLedger,
   getMyPoints,
   getMyRewards,
@@ -13,6 +14,7 @@ import {
   getParentPoints,
   getUnreadMessageCount,
   listMyStudents,
+  type AdminAlertRetentionPreview,
   type MyPoints,
   type MyRewards,
   type MyStudentItem,
@@ -53,6 +55,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentGoalAttainment: vi.fn(),
     // `/parent/alerts`（P6.9 从 Placeholder 换成真页）：列表页 + 顶栏 Banner 都会拉它
     getParentAlerts: vi.fn(),
+    // `/admin/alerts`（管理员端「预警数据」新页）：挂载即拉过期预警统计
+    getExpiredAlertStats: vi.fn(),
   };
 });
 
@@ -65,6 +69,7 @@ const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
 const getParentGoalAttainmentMock = vi.mocked(getParentGoalAttainment);
 const getParentAlertsMock = vi.mocked(getParentAlerts);
+const getExpiredAlertStatsMock = vi.mocked(getExpiredAlertStats);
 
 const PLACEHOLDER_TEXT = '原型占位：此页面正在设计中...';
 
@@ -140,6 +145,11 @@ function setParentSession() {
   localStorage.setItem('userRole', 'parent');
 }
 
+function setAdminSession() {
+  localStorage.setItem('token', validToken());
+  localStorage.setItem('userRole', 'admin');
+}
+
 function renderAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   return render(<RouterProvider router={router} />);
@@ -179,6 +189,13 @@ beforeEach(() => {
   getParentAlertsMock.mockReset();
   // 顶栏 Banner 与列表页共用此端点：默认「无预警」→ Banner 不渲染
   getParentAlertsMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 1 });
+  getExpiredAlertStatsMock.mockReset();
+  getExpiredAlertStatsMock.mockResolvedValue({
+    retentionDays: 30,
+    cutoff: '2026-08-21T02:00:00.000Z',
+    total: 12,
+    unread: 3,
+  } satisfies AdminAlertRetentionPreview);
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -438,6 +455,52 @@ describe('路由表：家长端「异常预警中心」', () => {
       'href',
       '/parent/alerts',
     );
+  });
+});
+
+/**
+ * 管理员端「预警数据」（2026-09-20 批）：`/admin/alerts` 是新页，从零加进路由表。
+ *
+ * 页面自己有组件测试，但那个测试挂的是**页面本身**、绕过了路由表——
+ * 「路由确实指到这个页面」只有这里能证明（同 `/parent/rewards`、`/parent/goals`、`/parent/alerts`）。
+ */
+describe('路由表：管理员端「预警数据」', () => {
+  it('/admin/alerts 渲染 AdminAlertsPage（统计卡 + 清理按钮），而非 Placeholder', async () => {
+    setAdminSession();
+
+    renderAt('/admin/alerts');
+
+    expect(await screen.findByRole('heading', { name: '预警数据' })).toBeInTheDocument();
+    // 统计卡的数据来自页面自己的 getExpiredAlertStats；占位页不可能有
+    expect(await screen.findByTestId('alerts-stats')).toBeInTheDocument();
+    expect(screen.getByTestId('alerts-purge-btn')).toBeInTheDocument();
+    expect(getExpiredAlertStatsMock).toHaveBeenCalled();
+
+    // 占位页文案不许出现——这是「没被改回 Placeholder」的钉子
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    // 管理台仍是家长主题（商务白蓝，无日夜切换）
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+
+  it('侧边导航「预警数据」指向 /admin/alerts（路径是深链/书签的对外契约）', async () => {
+    setAdminSession();
+
+    renderAt('/admin/alerts');
+
+    expect(await screen.findByRole('link', { name: '预警数据' })).toHaveAttribute(
+      'href',
+      '/admin/alerts',
+    );
+  });
+
+  it('无 token 访问 /admin/alerts → 回登录页，不发统计请求', async () => {
+    localStorage.clear();
+
+    renderAt('/admin/alerts');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '预警数据' })).not.toBeInTheDocument();
+    expect(getExpiredAlertStatsMock).not.toHaveBeenCalled();
   });
 });
 

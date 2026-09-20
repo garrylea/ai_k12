@@ -74,6 +74,86 @@ describe('SafetyAlertsRepository.existsRecent', () => {
   });
 });
 
+describe('SafetyAlertsRepository.countOlderThan', () => {
+  it('SQL 用 created_at < ?，参数就是传入的 Date（保留期常量不落在仓储里）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: '5', unread: '2' }], []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    const cutoff = new Date('2026-08-21T10:00:00Z');
+    expect(await repo.countOlderThan(cutoff)).toEqual({ total: 5, unread: 2 });
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('FROM safety_alerts WHERE created_at < ?');
+    expect(sql).toContain('SUM(is_read = 0) AS unread');
+    // 与 existsRecent 同口径：cutoff 由调用方给，仓储里写 NOW()/CURDATE() 会让保留期不可测
+    expect(sql).not.toMatch(/NOW\s*\(|CURDATE\s*\(/i);
+    expect(params).toEqual([cutoff]);
+  });
+
+  it('0 行时 SUM(...) 回来是 NULL → unread 兜底 0；COUNT 字符串也转 number', async () => {
+    const pool = mockPool();
+    // 真实 MySQL 空集形状：COUNT 是 '0'、SUM 是 null
+    pool.execute.mockResolvedValueOnce([[{ n: '0', unread: null }], []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    expect(await repo.countOlderThan(new Date())).toEqual({ total: 0, unread: 0 });
+  });
+
+  it('空结果集（无行）→ 全 0，不抛', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[], []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    expect(await repo.countOlderThan(new Date())).toEqual({ total: 0, unread: 0 });
+  });
+
+  it('未读比总数大也不可能（两个数字各自独立转换，不做减法推导）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ n: '7', unread: '7' }], []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    expect(await repo.countOlderThan(new Date())).toEqual({ total: 7, unread: 7 });
+  });
+});
+
+describe('SafetyAlertsRepository.deleteOlderThan', () => {
+  it('SQL 用 created_at < ?（不是 >，写反就删错一半），返回 affectedRows', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 3 }, []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    const cutoff = new Date('2026-08-21T10:00:00Z');
+    expect(await repo.deleteOlderThan(cutoff)).toBe(3);
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('DELETE FROM safety_alerts WHERE created_at < ?');
+    expect(sql).not.toContain('created_at > ?');
+    expect(sql).not.toMatch(/NOW\s*\(|CURDATE\s*\(/i);
+    expect(params).toEqual([cutoff]);
+  });
+
+  it('没有命中行 → 返回 0（不是 undefined）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    expect(await repo.deleteOlderThan(new Date())).toBe(0);
+  });
+
+  it('无 LIMIT（不带 LIMIT ? 才敢走 execute 预处理语句）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]);
+    const repo = new SafetyAlertsRepository(pool as any);
+
+    await repo.deleteOlderThan(new Date());
+
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).not.toMatch(/LIMIT\s*\?/);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+});
+
 describe('SafetyAlertsRepository.findById', () => {
   it('命中 → 返回该行', async () => {
     const pool = mockPool();

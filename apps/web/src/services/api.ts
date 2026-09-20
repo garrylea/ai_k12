@@ -831,6 +831,29 @@ export function changeAdminPassword(oldPassword: string, newPassword: string): P
   return fetchApi('/admin/password', { method: 'PATCH', body: JSON.stringify({ oldPassword, newPassword }) });
 }
 
+// --- Admin: 预警数据（保留期清理） ---
+export interface AdminAlertRetentionPreview {
+  /** 固定 30（后端常量，接口不带参数）。 */
+  retentionDays: number;
+  /** `created_at < cutoff` 的预警会被清理；ISO 字符串。 */
+  cutoff: string;
+  total: number;
+  unread: number;
+}
+export interface AdminAlertPurgeResult {
+  retentionDays: number;
+  cutoff: string;
+  deleted: number;
+}
+/** 预览：有多少条 30 天前的预警（含未读）。 */
+export function getExpiredAlertStats(): Promise<AdminAlertRetentionPreview> {
+  return fetchApi('/admin/alerts/expired');
+}
+/** 执行清理：物理删除 30 天前的预警（含未读）。 */
+export function purgeExpiredAlerts(): Promise<AdminAlertPurgeResult> {
+  return fetchApi('/admin/alerts/expired', { method: 'DELETE' });
+}
+
 // --- Parent: messages ---
 export interface ParentMessageItem { id: number; type: string; title: string; content: string; isRead: boolean; isBroadcast: boolean; createdAt: string; }
 export function listMyMessages(): Promise<ParentMessageItem[]> { return fetchApi('/parent/messages'); }

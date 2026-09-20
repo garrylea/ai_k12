@@ -7,6 +7,7 @@ const navItems = [
   { to: '/admin/accounts', label: '账号管理' },
   { to: '/admin/messages', label: '消息推送' },
   { to: '/admin/chat', label: 'AI 助手' },
+  { to: '/admin/alerts', label: '预警数据' },
   { to: '/admin/security', label: '账号安全' },
 ];
 

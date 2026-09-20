@@ -648,6 +648,7 @@ UX §P6.6 全文只有三行：
 | **`hidden_reason` 在极少数情况会贴错标签** | 若先因 `idle` 变 hidden、随后标签页又被切走，客户端不再发新心跳（状态机在 `hidden` 下对 `HIDDEN` 是空操作），该段仍记为 `idle` |
 | **改密码不失效旧 token** | 本仓无 token 版本机制，旧 token 在 7 天有效期内仍可用（与管理员改密码的既有行为一致） |
 | **预警不是实时推送** | 无调度器 / 无 WebSocket，家长在**打开或切换页面时**才拉到新预警 |
+| **预警无自动保留期** | `safety_alerts` **不会自己清理**——无 scheduler、无 `@nestjs/schedule`（全仓零命中），表随时间**无上限增长**（30 分钟去重窗口下每孩子每天上限约 240 条，约 87k 行/年/孩子）。补的手段是**管理员手动清理**：`GET /api/admin/alerts/expired` 预览 + `DELETE /api/admin/alerts/expired` 物理删除 **30 天前**的行（**含未读**，不可恢复），阈值固定 30 天常量、接口不带参数（杜绝「填 0 就删库」）。管理员端页面「预警数据」（`/admin/alerts`）。**明确不做**：自动保留期 / 清理前导出备份 / 审计日志 / 按类型或按孩子筛选清理 / 数量上限保护。配套索引：`idx_sa_parent_created (parent_id, created_at)`（家长端列表 + Banner 免 filesort）与 `idx_sa_created_at (created_at)`（清理走区间扫描而非全表扫），迁移 `2026-09-20_safety_alerts_retention_indexes.sql` |
 | **`alert_level` / `auxiliary_enabled` / `photo_search_enabled` 仍未被读取** | 按裁决保留（用户要求「先留着，等以后可能还有用」），DB 设计文档注明「预留未用」 |
 | **闲聊预警没有「频繁」语义** | PRD 206 的措辞是「**频繁**发起与学习无关的闲聊」，但本批去掉了关键词计数（`countConsecutiveOffTopic` 依赖被删的 `off_topic` 判定），无法可靠判断「频繁」。实现为**每次发生即报**，靠 30 分钟去重兜住频率。若以后要真正的「频繁」语义，需给 `safety_alerts` 加出现次数或按窗口计数 |
 | **`countConsecutiveOffTopic` 与 `safety.yaml` 的 `off_topic.escalateThreshold`/`criticalThreshold` 保留但不再被调用** | 与上一条同源。按「先留着」的既有原则保留（含其单测），文档注明「预留未用」 |

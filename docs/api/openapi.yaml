@@ -3573,6 +3573,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommonResponse'
 
+  # 预警数据：保留期清理（阈值固定 30 天，无入参）
+  /admin/alerts/expired:
+    get:
+      tags: [Admin]
+      summary: 预览 30 天前的预警（含未读数，不删除）
+      operationId: getExpiredAlerts
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminExpiredAlertPreview'
+    delete:
+      tags: [Admin]
+      summary: 清理 30 天前的预警（物理删除，含未读；不可恢复）
+      operationId: purgeExpiredAlerts
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminExpiredAlertPurgeResult'
+
   # Quota
   /quota/current:
     get:
@@ -6081,6 +6106,31 @@ components:
         content: { type: string }
         parentId: { type: integer, description: 缺省=全员广播 }
       required: [type, title, content]
+
+    # 预警数据保留期（阈值固定 30 天常量，接口不带参数）
+    AdminExpiredAlertPreview:
+      allOf:
+        - $ref: '#/components/schemas/CommonResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                retentionDays: { type: integer, description: 固定 30 }
+                cutoff: { type: string, format: date-time, description: created_at 早于此值的预警会被清理 }
+                total: { type: integer }
+                unread: { type: integer, description: 其中未读条数（也会被清理） }
+    AdminExpiredAlertPurgeResult:
+      allOf:
+        - $ref: '#/components/schemas/CommonResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                retentionDays: { type: integer, description: 固定 30 }
+                cutoff: { type: string, format: date-time }
+                deleted: { type: integer, description: 本次实际删除条数 }
 
     Parent:
       allOf:
