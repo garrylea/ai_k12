@@ -29,7 +29,7 @@ convert(MinerU) → image_scan → card_splitter → card_labeler(LLM)
 | 项 | 值 | 来源 |
 |---|---|---|
 | iPad 横屏宽度（最紧断点） | 1024px | iPad 横屏基准 |
-| 侧边导航 StudentNav | 224px | `w-56` = 14rem × 16 |
+| 课程页左侧任务栏 | 224px | `--learn-sidebar-width-ipad` = 14rem × 16（`global.css`；**非**全局导航，全局 `StudentNav` 已于 2026-09-20 删除） |
 | 内容区宽度 | 800px | 1024 − 224 |
 | 卡片内边距 | 64px | `px-8` |
 | 文字区宽度 | **736px = 46rem** | 800 − 64 |

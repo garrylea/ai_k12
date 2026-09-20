@@ -8,6 +8,23 @@
 
 ---
 
+## 2026-09-20 清理两条死线：错题本 P4.1–P4.3 页面（从未实现）与 `/api/error-book` 服务（2026-08-07 已删）
+
+**起因**：用户问「错题本是不是文档需要更新」。排查确认——**错题本的三条机制全部已实现**（① 主线错题清零门禁；② 辅线答疑题目进训练轨错题练习；③ 专项错题在专项错题练习中）；**文档里那条死线指的是从未实现的 P4.1–P4.3 三页**，以及 **2026-08-07 就已整体删除的后端 `error-book` 模块**（两份权威文档仍把它当 MVP 端点描述）。
+
+- **用户裁决（8 项）**：① 不做「主线智能组卷」（逻辑未想清楚，现状够用）；② P4.1–P4.3 三页**标废弃**（照 P5.3「学习设置」先例：保留原文 + 修订注记）；③ `StudentNav` 与 `StudentLayout` **一起删**（无任何入口可达）；④ `/student/error-book` 旧书签**不补重定向**（同 `/student/settings` 先例）；⑤ 9 个幽灵端点标废弃（照 goals CRUD 先例）；⑥ 三份架构文档**逐行改干净**（不走「只在顶部加注记」的捷径）；⑦ 前端死代码同批删；⑧ 与并发的另一 AI 工具**按区域错开**（不等）。
+- **前端删除（不可达外壳 + 死代码）**：`components/layout/StudentLayout.tsx`、`StudentNav.tsx(+test)`、`components/business/ErrorBookCard.tsx`、`types/index.ts` 的 `TrackType`/`Question`/`ErrorBookItem`；`routeTable.tsx` 删掉 `/student` 父路由及其下 **9 条占位路由**，改为 `/student` 与 `/student/mainline` → `/student/star-map` 的 `Navigate` 重定向。
+- **关键判断：`StudentNav` 是「无入口可达」的**。它只在自身那 9 个占位页上渲染，**任何在应用内的链接都到不了那些页** —— 所以学生从未见过它，不存在「显眼断链」（我一度说成断链，用户追问后更正）。据此选**删除**而非重定向；`/student` 是唯一例外（登录后可能被手敲），故补重定向。
+- **测试连带面**：`routeTable.test.tsx` 的「双轨物理隔离」钉子原宿主（`/student/mainline` 占位页）随路由删除消失 → 迁移到 `/student/profile`（`StudentStayLayout`，仍在）；另补两条重定向用例 `it.each([['/student'],['/student/mainline']])`。全仓前端 **793 tests / 82 files 全绿**，`tsc -b` / `lint`（0 error）/ `build` 均通过。
+- **openapi.yaml**：9 个 `/error-book/*` operation 各加 `deprecated: true` + 说明。**保留** `tags: ErrorBook`、被保留 path 引用的 5 个 schema、`/training/error-book`（真实端点）。验证：YAML 可解析、218 个 `$ref` 无悬空。
+- **API 文档**：§3 总表、§4.10 整节、§6.1/§6.4 数据流、§7 页面↔端点表、§9.4 示例均标废弃；**§6.1/§6.4 改指真实端点**（`/api/practice/uncleared-errors`、`/api/training/judge`、`/api/training/bump-error-levels`）；P2.4–P2.9 行标「页面未实现」；新增 changelog **v4.6**。
+- **UX 文档**：§1.4 页面清单删 P4.x、§1.5 日夜切换清单删「错题本 P4.x」、§3.3 删过时的侧边导航清单（并注明「学生端没有主轨侧边导航」）、§5.0 三行标废弃、§5.4 整节标废弃 + `>` 注记（原文保留）；§3.2.4 的 `ErrorBookCard` 组件描述加「已从前端删除」。
+- **三份架构文档逐行改干净**：统一口径 = **错题本机制仍在**（`main_error_books`/`error_logs`/`variation_questions` 三表 + `MainErrorBooksRepository` 都在），但**无独立 ErrorBook Service/模块**；写入由 `practice`/`training`/`exams` 经 `MainErrorBooksRepository` 完成，家长端只读聚合在 `parent-insights`。验证 `grep -rn "ErrorBook Service\|ErrorBookModule\|error-book/" docs/K12智学系统-*.md` → **0 命中**。
+- **`CLAUDE.md`**：主题作用域清单删「错题本 P4.x」；删掉 `StudentLayout = 学习页外壳（…）` 整条，`StudentStayLayout` 约束保留（「不要把个人中心/奖励册合回任何共享 Layout」）。
+- **顺带发现（未在本批处理）**：`docs/K12智学系统-架构设计文档.md` §2.1 架构图**第二行**（家长/用户/奖励服务）原本就 ASCII 错位（`│ 账号 │` 等缺右侧边框）；本批只把删框那一行补齐到 79 列。另：架构图组件树里的 `LevelPlanet.tsx` 实际不存在（真实为 `LevelPanel.tsx`/`PlanetNode.tsx`），亦为旧漂移。
+
+---
+
 ## 2026-09-20 家长端「管得住」批：行为管控 P6.6 / 异常预警中心 P6.9 / 账号设置 P6.10
 
 **设计**：`docs/superpowers/specs/2026-09-20-parent-controls-and-alerts-design.md`（§1.1 有 10 条用户裁决原文）；**计划**：`docs/superpowers/plans/2026-09-20-parent-controls-and-alerts.md`（Task 0–10）。

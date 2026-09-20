@@ -89,7 +89,6 @@ apps/server/src/
 │   ├── progress/                    # 学习进度 + 星图聚合
 │   ├── ai/                          # AI 能力封装（待建）
 │   ├── assessment/                  # 测评考试（待建）
-│   ├── error-book/                  # 主线错题本（全系统唯一，待建）
 │   ├── conversations/               # 对话管理（待建）
 │   ├── knowledge-graph/             # 知识点图谱（待建）
 │   ├── rewards/                     # 奖励（待建）
@@ -122,14 +121,13 @@ app.module
   ├── ContentModule           (→ DatabaseModule)
   ├── ProgressModule          (→ DatabaseModule, ContentModule)
   ├── KnowledgeGraphModule    (→ DatabaseModule)
-  ├── ErrorBookModule         (→ DatabaseModule, ContentModule)
   ├── ConversationsModule     (→ DatabaseModule)
-  ├── AssessmentModule        (→ DatabaseModule, ErrorBookModule, ContentModule)
-  ├── AIModule                (→ ai-core/capabilities, ProgressModule, ErrorBookModule)
+  ├── AssessmentModule        (→ DatabaseModule, ContentModule)
+  ├── AIModule                (→ ai-core/capabilities, ProgressModule)
   ├── RefineryModule          (→ FilesModule)
   ├── FilesModule             (→ DatabaseModule)
   ├── RewardsModule           (→ DatabaseModule, ProgressModule)
-  ├── ParentModule            (→ DatabaseModule, ProgressModule, ErrorBookModule)
+  ├── ParentModule            (→ DatabaseModule, ProgressModule)
   └── QuotaModule             (→ DatabaseModule)
 ```
 
@@ -269,7 +267,7 @@ export class UnitsRepository {
 
 ### 7.2 待实现
 
-其余 12 个模块（Users、AI、Assessment、ErrorBook、Conversations、KnowledgeGraph、Rewards、Parent、Refinery、Files、Quota、WebSocket）按 MVP 优先级后续迭代。
+其余 11 个模块（Users、AI、Assessment、Conversations、KnowledgeGraph、Rewards、Parent、Refinery、Files、Quota、WebSocket）按 MVP 优先级后续迭代。
 
 ---
 

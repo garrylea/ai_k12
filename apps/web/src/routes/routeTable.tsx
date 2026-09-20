@@ -28,7 +28,6 @@ import VocabularyRunPage from '@/pages/student/training/english/VocabularyRunPag
 import ExamListPage from '@/pages/student/training/ExamListPage';
 import ExamRunPage from '@/pages/student/training/ExamRunPage';
 import ExamResultPage from '@/pages/student/training/ExamResultPage';
-import StudentLayout from '@/components/layout/StudentLayout';
 import StudentStayLayout from '@/components/layout/StudentStayLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
@@ -127,7 +126,7 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  // 辅线答疑轨（全屏沉浸层，独立于 StudentLayout，物理隔离）
+  // 辅线答疑轨（全屏沉浸层，独立于任何 Layout，物理隔离）
   {
     path: '/student/auxiliary',
     element: (
@@ -144,7 +143,7 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  // 训练轨（全屏沉浸层，独立于 StudentLayout，物理隔离；三轨入口之一）
+  // 训练轨（全屏沉浸层，独立于任何 Layout，物理隔离；三轨入口之一）
   {
     path: '/student/training',
     element: (
@@ -162,7 +161,7 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  // 错题练习列表页（全屏沉浸层，独立于 StudentLayout，与 /student/training 同层）
+  // 错题练习列表页（全屏沉浸层，独立于任何 Layout，与 /student/training 同层）
   {
     path: '/student/training/errors',
     element: (
@@ -180,7 +179,7 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  // 专项练习配置页（全屏沉浸层，独立于 StudentLayout，与 errors 同层）
+  // 专项练习配置页（全屏沉浸层，独立于任何 Layout，与 errors 同层）
   {
     path: '/student/training/targeted',
     element: (
@@ -207,7 +206,7 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  // 语文专项页（全屏沉浸层，独立于 StudentLayout；仅「古诗文默写」开放）
+  // 语文专项页（全屏沉浸层，独立于任何 Layout；仅「古诗文默写」开放）
   {
     path: '/student/training/chinese/special',
     element: (
@@ -288,7 +287,7 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  // 考试试卷列表页（全屏沉浸层，独立于 StudentLayout，与 errors/targeted 同层）
+  // 考试试卷列表页（全屏沉浸层，独立于任何 Layout，与 errors/targeted 同层）
   {
     path: '/student/training/exam',
     element: (      <RequireRole role="student">
@@ -340,34 +339,28 @@ export const routes: RouteObject[] = [
       { path: 'account', element: <ParentAccountPage /> },
     ],
   },
-  // 主轨侧栏外壳：留给 P2.4–P2.8 等学习/占位页（第 58 行「启用日夜切换」一类）
+  // 学生端主轨落地：`StudentLayout` 外壳与 P2.4–P2.9 / P4.x 占位页已于 2026-09-20 删除
+  // （P4.x 错题本页面已废弃，错题能力由训练轨 `/student/training/errors` 承担）。
+  // 保留这两条顶层重定向，否则老地址 `/student`、`/student/mainline` 会落到路由默认错误页
+  // （本仓无 404 兜底路由）。包 `RequireRole` 以维持未登录 → 登录页的行为。
   {
     path: '/student',
     element: (
       <RequireRole role="student">
-        <StudentLayout />
+        <Navigate to="/student/star-map" replace />
       </RequireRole>
     ),
-    children: [
-      { path: '', element: <Navigate to="/student/star-map" replace /> },
-      { path: 'homework', element: <Placeholder title="课后作业 P2.4" /> },
-      { path: 'homework-result', element: <Placeholder title="作业解析 P2.5" /> },
-      { path: 'unit-test', element: <Placeholder title="单元检测 P2.6" /> },
-      { path: 'exam', element: <Placeholder title="期中/期末 P2.7" /> },
-      { path: 'scores', element: <Placeholder title="成绩报告 P2.8" /> },
-      { path: 'reward-unlock', element: <Placeholder title="闯关奖励 P2.9" /> },
-
-      { path: 'error-book', element: <Placeholder title="错题本 P4.1" /> },
-      { path: 'error-book/redo', element: <Placeholder title="错题重做 P4.2" /> },
-      { path: 'error-book/variant', element: <Placeholder title="变式练习 P4.3" /> },
-
-      { path: 'mainline', element: <Navigate to="/student/star-map" replace /> },
-      // 学习设置 P5.3 已按用户裁决从学生端移除（不再有 /student/settings）。
-    ],
+  },
+  {
+    path: '/student/mainline',
+    element: (
+      <RequireRole role="student">
+        <Navigate to="/student/star-map" replace />
+      </RequireRole>
+    ),
   },
   // 浅停留页外壳（第 59 行「禁用夜间切换」）：个人中心/奖励册写死日间、无侧栏、无日夜切换。
-  // 独立成顶层路由（而非继续挂在上面 `/student` 的 children），避免两条同 path 的
-  // `/student` 路由同时声明造成匹配歧义。
+  // 独立成顶层路由（第 58 行「启用日夜切换」那一类学习沉浸页不再挂 `/student` 外壳）。
   {
     path: '/student/profile',
     element: (

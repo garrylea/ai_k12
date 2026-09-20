@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from './routeTable';
 import { useThemeStore } from '@/store/themeStore';
@@ -181,7 +181,8 @@ function renderAt(path: string) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  // 主题是模块级单例：StudentLayout 挂载时会按挂钟把它切成 day/night，不复位会串到下一个用例
+  // 主题是模块级单例：挂载的学习沉浸页（如 CourseDetailPage）会按挂钟把它切成 day/night，
+  // 不复位会串到下一个用例
   useThemeStore.setState({ mode: 'student-day' });
   // 家长锚点是模块级单例，用例之间会串（下一个用例可能读到上个用例的孩子 id）
   useParentStudentStore.setState({ studentId: null });
@@ -236,9 +237,10 @@ beforeEach(() => {
  * 浅停留页外壳（UX §1.5 第 59 行）的承重断言。
  *
  * 个人中心 / 奖励册属「禁用夜间切换」一类：直接写死 `data-theme="student-day"`、
- * **不使用** `.student-theme-container`（第 58 行那一类才用）。它们此前挂在
- * `StudentLayout` 下，因而跟随 `themeStore.mode` 自动切夜、顶栏还挂了「日间/夜间」
- * 胶囊 —— 与第 59 行冲突。这里把新口径钉死：写死日间、无侧栏、无日夜切换控件。
+ * **不使用** `.student-theme-container`（第 58 行那一类才用）。它们此前挂在主轨侧栏外壳
+ * `StudentLayout` 下（该外壳与 `StudentNav` 已于 2026-09-20 删除），因而曾跟随
+ * `themeStore.mode` 自动切夜、顶栏还挂了「日间/夜间」胶囊 —— 与第 59 行冲突。
+ * 这里把口径钉死：写死日间、无侧栏、无日夜切换控件。
  */
 function expectStayPageShell() {
   // 写死日间：容器上必须有 data-theme="student-day"
@@ -322,48 +324,45 @@ describe('路由表：积分相关页面', () => {
   });
 
   /**
-   * 硬规则钉子（UX §3.3 + CLAUDE.md）：主轨侧边导航「不含辅轨入口」，
-   * 双轨物理隔离靠路由、**无跨轨链接**。曾经这里有两个违规项：
+   * 硬规则钉子（UX §3.3 + CLAUDE.md）：双轨物理隔离靠路由、**无跨轨链接**。
+   * 曾经有两个违规项会被加回来：
    * - 辅线 `/student/auxiliary`（跨轨链接，只能从入口选择页进）
    * - 主线 `/student/mainline`（只是重定向到星图，与「星图导航」重复）
-   * 这条用例保证它们不会被顺手加回来。
    *
-   * 挂载点是仍在 `StudentLayout`（带侧栏）下的 P2.4 占位页 ——
-   * 2026-09-18 改：个人中心/奖励册已改用浅停留页外壳、不再有侧栏，
-   * 原先拿它们当宿主会让这条守卫测到空的侧栏上。
+   * **2026-09-20 迁移**：原宿主 `/student/homework` 与主轨侧栏（`StudentLayout`/`StudentNav`）
+   * 已一并删除，原用例的挂载点不复存在。钉子改挂在真页面 `/student/profile` 上 ——
+   * 该页有真链接（奖励册/个人中心互跳），「不存在跨轨链接」的断言才有区分力。
    */
-  it('主轨侧边导航不含辅轨入口，也没有与星图重复的「主线」项', () => {
+  it('主轨学生页不含跨轨链接（双轨物理隔离硬规则）', async () => {
     setStudentSession();
+    getMyPointsMock.mockResolvedValue(POINTS);
+    getMyLedgerMock.mockResolvedValue(LEDGER);
 
-    renderAt('/student/homework');
+    renderAt('/student/profile');
+    await screen.findByRole('heading', { name: '个人中心' });
 
-    /**
-     * ⚠️ 这里**不要断言 `data-theme="student-day"`**（原写法）：`StudentLayout` 挂载时会
-     * `autoToggleNightMode()` 按挂钟切主题，于是本文件在 18:00–06:00 跑必红 —— 那是**依赖运行时刻**
-     * 的假红（2026-09-19 记入 `docs/家长端学情批-完成情况与待办清单.md` §3.3 第 6 项，
-     * 2026-09-20 按该文档的建议①修掉）。
-     * 本用例真正要表达的是「宿主外壳是学生端主题容器」（下面的四项导航断言才有意义），
-     * 所以只断言「学生端主题之一」，不锁日间。**别用 TZ 绕**——那只是把时间依赖藏起来。
-     */
-    expect(document.querySelector('[data-theme]')).toHaveAttribute(
-      'data-theme',
-      expect.stringMatching(/^student-(day|night)$/),
-    );
     expect(screen.queryByRole('link', { name: '辅线' })).not.toBeInTheDocument();
     expect(document.querySelector('a[href="/student/auxiliary"]')).toBeNull();
     expect(screen.queryByRole('link', { name: '主线' })).not.toBeInTheDocument();
     expect(document.querySelector('a[href="/student/mainline"]')).toBeNull();
-
-    // 文档清单里的四项仍在
-    for (const [label, href] of [
-      ['星图导航', '/student/star-map'],
-      ['错题本', '/student/error-book'],
-      ['奖励册', '/student/rewards'],
-      ['个人中心', '/student/profile'],
-    ] as const) {
-      expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
-    }
   });
+
+  /**
+   * `StudentLayout` 删除后 `/student` 与 `/student/mainline` 不再有子路由，
+   * 改由两条顶层 `Navigate` 承接。本仓无 404 兜底路由，若这两条被顺手删掉，
+   * 老地址会落到 React Router 默认错误页 —— 这里钉住它们。
+   */
+  it.each([['/student'], ['/student/mainline']])(
+    '%s 重定向到 /student/star-map',
+    async (entry) => {
+      setStudentSession();
+
+      const router = createMemoryRouter(routes, { initialEntries: [entry] });
+      render(<RouterProvider router={router} />);
+
+      await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
+    },
+  );
 });
 
 /**

@@ -33,7 +33,7 @@ const typeLabelMap: Record<string, string> = {
   calculation: '计算',
 };
 
-/** level 圆点配色与 ErrorBookCard 一致（L1-L5 绿→深红）。 */
+/** level 圆点配色：L1–L5 绿 → 深红。 */
 const levelColor = ['#4A9B6E', '#D89844', '#C44A3F', '#A03020', '#7B1F1F'];
 
 const EmptyStateIcon = () => (

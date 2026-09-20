@@ -9,8 +9,8 @@ import * as tracker from './tracker';
  *
  * **不是** `App.tsx`：那个组件在 `RouterProvider` **之外**，拿不到 `useLocation`。
  * 正确落点是在 `createBrowserRouter` 的根上包一层 **pathless wrapper route**——
- * 这样它同时覆盖布局页（`StudentLayout` 下的）与全屏沉浸页（训练/考试/课程详情都不在
- * `StudentLayout` 下），也覆盖 `RequireRole` 之下的一切。
+ * 这样它同时覆盖带外壳的页面（如个人中心/奖励册）与全屏沉浸页（训练/考试/课程详情
+ * 都不在任何 Layout 下），也覆盖 `RequireRole` 之下的一切。
  *
  * `routeTable.tsx` **不改**：它的测试用 `createMemoryRouter(routes)` 直接挂真实表，
  * 往里加组件会破坏「纯配置」的约束。

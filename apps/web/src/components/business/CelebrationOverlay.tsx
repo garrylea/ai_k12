@@ -8,7 +8,7 @@ import { useThemeStore } from '@/store/themeStore';
  * 全屏庆祝层（主线课程完成 / 段位晋升共用）。
  *
  * 颜色一律走 CSS 变量：训练轨页面硬编码 `data-theme="student-day"`，
- * `StudentLayout` 页面跟随主题，两处都必须正确（计划 §1.2 第 3 条）。
+ * 跟随主题的沉浸页（如课程详情）两处都必须正确（计划 §1.2 第 3 条）。
  * `z-50` 有意高于轻反馈 `PointsToast` 的 `z-40`——轻反馈不该盖住全屏庆祝。
  */
 

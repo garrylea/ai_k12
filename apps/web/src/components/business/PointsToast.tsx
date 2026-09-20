@@ -130,8 +130,8 @@ function PointsToastCard({ item, animate }: { item: PointsToastItem; animate: bo
 /**
  * 积分轻反馈（右下角，多条纵向排队）。
  *
- * 挂在 `App.tsx` 而不是 `StudentLayout`：训练轨的答题页（专项 / 背单词 / 语文 / 考试）
- * 都是全屏页、不在 `StudentLayout` 下，挂在那里永远看不到发分反馈。
+ * 挂在 `App.tsx` 根上而不是任何 Layout 内：训练轨的答题页（专项 / 背单词 / 语文 / 考试）
+ * 都是全屏页、不在任何 Layout 下，挂进外壳里永远看不到发分反馈。
  *
  * `z-40` 有意低于答题弹窗的 `z-50`：绝不能盖住「提示 / 讨论 / 提交」，
  * 也不能抢苏格拉底按钮的注意力（`docs/superpowers/plans/2026-09-17-gamification-points-student-ui.md` §1.2）。

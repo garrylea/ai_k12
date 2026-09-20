@@ -70,8 +70,8 @@ src/
 ├── types/                    # 业务类型
 ├── components/
 │   ├── base/                 # Button/Input/Tag/Card/Modal/Toast/Banner/Progress/Skeleton
-│   ├── business/             # TextbookCard/AIDialogue/QuestionCard/ErrorBookCard/PlanetNode/SectionCard/RewardCard
-│   └── layout/               # StudentLayout/ParentLayout/StudentNav/ParentNav
+│   ├── business/             # TextbookCard/AIDialogue/QuestionCard/PlanetNode/SectionCard/RewardCard
+│   └── layout/               # StudentStayLayout/ParentLayout/ParentNav/AdminLayout/AdminNav
 └── pages/                    # auth / student / parent 三大子模块
 ```
 

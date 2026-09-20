@@ -124,14 +124,14 @@
 |---|---|---|---|
 | Auth | `/api/auth` | 登录、注册、登出 | Auth Service |
 | Users | `/api/users` | 家长/学生账号、子账号管理 | Auth Service |
-| Progress | `/api/progress` | 按学科记录的学生学习进度与解锁状态 | ErrorBook + Progress |
+| Progress | `/api/progress` | 按学科记录的学生学习进度与解锁状态 | Progress Service |
 | Content | `/api/content` | 学科、版本、单元、课、卡片、知识点、题库 | Content Service |
 | Knowledge Graph | `/api/knowledge-graph` | 知识点关系、薄弱点、学情 overlay | KnowledgeGraphService |
 | Assessment | `/api/assessment` | 作业、单元测、期中期末、成绩报告 | Assessment Service |
 | AI | `/api/ai` | 苏格拉底辅导、判题、组卷、解析、变式、报告 | AI-Agent 中枢 |
 | Refinery | `/api/refinery` | 图片/PDF 题目识别与提取 | Data Refinery |
 | Files | `/api/files` | 文件上传、签名 URL | 基础设施 |
-| ErrorBook | `/api/error-book` | 主线错题本（全系统唯一，PRD §7.4）、重做、清零、薄弱点统计 | ErrorBook Service |
+| ~~ErrorBook~~ | ~~`/api/error-book`~~ | **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，本族 9 个端点**从未在现行代码中存在**（文档先于代码写下）。错题**机制**仍在（PRD §7.4，`main_error_books` 表 + `MainErrorBooksRepository`），写入由 practice / training / exams 三个模块承担，读侧为家长端只读聚合；学生端错题练习走 Training `GET /api/training/error-book`。新代码勿引用 | ~~ErrorBook Service~~ |
 | Conversations | `/api/conversations` | 会话创建、消息读写、上下文加载 | ConversationService |
 | Rewards | `/api/rewards` | 奖励发放、领取、兑现记录 | Reward Service |
 | Parent | `/api/parent` | 报告、对话回放、目标、管控、预警 | ParentAdmin Service |
@@ -263,19 +263,27 @@
 | GET | `/api/files/{fileId}` | 文件元数据 | MVP |
 | GET | `/api/files/{fileId}/signed-url` | 获取临时签名访问 URL | P1 |
 
-### 4.10 ErrorBook — `/api/error-book`
+### 4.10 ErrorBook — `/api/error-book`（**已废弃，2026-09-20 用户裁决**）
+
+> **本族 9 个端点从未实现**：后端 `error-book` 模块已于 2026-08-07 整体删除
+> （见 `plans/2026-08-07-auxiliary-multi-question-disambiguation.md:44`），全仓无
+> `@Controller` 使用该前缀，前端也无任何代码调用它。**错题本机制本身仍在**（PRD §7.4：
+> `main_error_books` 表 + `MainErrorBooksRepository`），只是没有独立服务与这一族端点 ——
+> 写入由 practice / training / exams 承担，学生端错题练习走
+> `GET /api/training/error-book`（§4.18），家长端读侧见 §4.13 的 `/errors`。
+> 下表保留原文仅供溯源，`openapi.yaml` 对应路径已标 `deprecated: true`。
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| GET | `/api/error-book/students/{studentId}/main` | 主线错题本列表（默认当前学科，可传 `?subject=` 筛选） | MVP |
-| GET | `/api/error-book/items/{errorItemId}` | 错题详情 | MVP |
-| POST | `/api/error-book/items/{errorItemId}/redo` | 提交错题重做答案 | MVP |
-| POST | `/api/error-book/items/{errorItemId}/clear` | 标记错题已清零 | MVP |
-| GET | `/api/error-book/items/{errorItemId}/explanation` | 获取 AI 解析 | MVP |
-| GET | `/api/error-book/items/{errorItemId}/variations` | 获取变式题列表 | MVP |
-| POST | `/api/error-book/items/{errorItemId}/variations/{variationId}/submit` | 提交变式题答案 | MVP |
-| GET | `/api/error-book/students/{studentId}/stats` | 错题统计与薄弱点（默认当前学科，可传 `?subject=` 筛选） | MVP |
-| GET | `/api/error-book/students/{studentId}/clear-status` | 当前待清零状态（默认当前学科，可传 `?subject=` 筛选；用于解锁判断） | MVP |
+| ~~GET~~ | ~~`/api/error-book/students/{studentId}/main`~~ | ~~主线错题本列表（默认当前学科，可传 `?subject=` 筛选）~~ | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/error-book/items/{errorItemId}`~~ | ~~错题详情~~ | ~~MVP~~ |
+| ~~POST~~ | ~~`/api/error-book/items/{errorItemId}/redo`~~ | ~~提交错题重做答案~~ | ~~MVP~~ |
+| ~~POST~~ | ~~`/api/error-book/items/{errorItemId}/clear`~~ | ~~标记错题已清零~~ | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/error-book/items/{errorItemId}/explanation`~~ | ~~获取 AI 解析~~ | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/error-book/items/{errorItemId}/variations`~~ | ~~获取变式题列表~~ | ~~MVP~~ |
+| ~~POST~~ | ~~`/api/error-book/items/{errorItemId}/variations/{variationId}/submit`~~ | ~~提交变式题答案~~ | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/error-book/students/{studentId}/stats`~~ | ~~错题统计与薄弱点（默认当前学科，可传 `?subject=` 筛选）~~ | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/error-book/students/{studentId}/clear-status`~~ | ~~当前待清零状态（默认当前学科，可传 `?subject=` 筛选；用于解锁判断）~~ | ~~MVP~~ |
 
 ### 4.11 Conversations — `/api/conversations`
 
@@ -614,9 +622,10 @@
 GET /api/progress/students/{id}/overview
   │  ├─ 若上一课/单元有未清零错题
   │  ▼
-  │  跳转 P4.1 主线错题本
-  │  POST /api/error-book/items/{id}/redo 或 /clear
-  │  GET /api/error-book/students/{id}/clear-status（确认清零）
+  │  跳转训练轨错题练习 /student/training/errors
+  │  GET /api/training/error-book?subjectId=&from=&to=&type=&kpId=（未清零错题）
+  │  POST /api/training/judge（逐题重做；答对即清零 is_cleared=1）
+  │  GET /api/practice/uncleared-errors（门禁查询：确认本课之前的错题是否已清）
   │  ▼
   │  错题清零完成 → Reward Service 发放上一课/单元奖励
   │  GET /api/rewards/students/{id}/available
@@ -676,7 +685,7 @@ GET /api/assessment/submissions/{sid}/results
   │  └─ 主观题：内部调用 AI-Agent GradingCapability，结果一并返回
   │
   ▼
-错题写入主线错题本（系统内部调用 ErrorBook Service）
+错题写入主线错题本（practice 模块经 `MainErrorBooksRepository` 内部写入；无独立 ErrorBook 服务）
   │
   ▼
 本课学习完成，等待下次进入新课时触发错题清零检查与奖励发放（见流程开头）
@@ -781,13 +790,13 @@ SafetyGuard 判断：
 ### 6.4 错题升级与变式生成
 
 ```text
-学生在错题本重做 → POST /api/error-book/items/{id}/redo
+学生在训练轨错题练习重做 → POST /api/training/judge
   │
   ▼
 再次做错
   │
   ▼
-ErrorBook Service 提升错题级别（L1→L2→...→L5）
+POST /api/training/bump-error-levels（提升错题级别 L1→L2→...→L5）
   │
   ▼
 POST /api/ai/variation
@@ -807,9 +816,8 @@ Validator 逻辑自洽校验
   │      ▼
   │      变式题存入 variation_questions
   │      ▼
-  │      GET /api/error-book/items/{id}/variations 下发学生
-  │      ▼
-  │      POST /api/error-book/items/{id}/variations/{vid}/submit（学生作答）
+  │      （变式下发端点为原 §4.10 `/api/error-book/.../variations`，
+  │        已于 2026-09-20 标废弃：变式生成本期未实现，见 §10 v4.6）
 ```
 
 ### 6.5 奖励领取与兑现
@@ -1759,19 +1767,19 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 | P2.1 星图导航 | `/student/star-map` | `GET /api/progress/students/{id}/star-map?subjectId=`（星图主数据）；`GET /api/progress/.../overview`（跨学科总览，可选） |
 | P2.2 课程详情 | `/student/course-detail` | `GET /api/content/lessons/{lessonId}/cards`（卡片列表）；`GET /api/practice/uncleared-errors?subjectId=&lessonId=`（错题清零门禁，只看当前课之前的未清题；本课刚产生的错题不触发）；`POST /api/practice/bump-error-levels`（清零后仍错递增 level）；`POST /api/progress/update`（翻页上报进度）；卡片级讨论抽屉调 `POST /api/practice/discuss-card`；practice 卡「让 AI 讲一讲」抽屉调 `POST /api/practice/discuss` |
 | P2.3 AI 讨论 | 已合并为抽屉 | 题目级讨论在 AnswerModal 内（`POST /api/practice/discuss`）；卡片级讨论在 CourseDetailPage 内（`POST /api/practice/discuss-card`）。均走 `POST /api/ai/tutor/stream` 流式。 |
-| P2.4 课后作业 | `/student/homework` | `GET /api/assessment/homework/{id}`, `POST .../answers`, `POST .../hint` |
-| P2.5 作业解析 | `/student/homework-result` | `GET /api/assessment/submissions/{id}/results` |
-| P2.6 单元检测 | `/student/unit-test` | `GET /api/assessment/exams/{id}`, `POST .../submissions`, `POST .../save/submit` |
-| P2.7 期中期末 | `/student/exam` | 同单元检测，scope 不同 |
-| P2.8 成绩报告 | `/student/scores` | `GET /api/assessment/submissions/{id}/results`, `GET /api/knowledge-graph/.../weak-points` |
-| P2.9 闯关奖励 | `/student/reward-unlock` | `GET /api/rewards/.../available`, `POST /api/rewards/.../claim/{id}` |
+| P2.4 课后作业 | ~~`/student/homework`~~ | **页面未实现**（占位路由已于 2026-09-20 删除）。规划端点：`GET /api/assessment/homework/{id}`, `POST .../answers`, `POST .../hint` |
+| P2.5 作业解析 | ~~`/student/homework-result`~~ | **页面未实现**（同上）。规划端点：`GET /api/assessment/submissions/{id}/results` |
+| P2.6 单元检测 | ~~`/student/unit-test`~~ | **页面未实现**（同上）。规划端点：`GET /api/assessment/exams/{id}`, `POST .../submissions`, `POST .../save/submit` |
+| P2.7 期中期末 | ~~`/student/exam`~~ | **页面未实现**（同上）。规划端点：同单元检测，scope 不同 |
+| P2.8 成绩报告 | ~~`/student/scores`~~ | **页面未实现**（同上）。规划端点：`GET /api/assessment/submissions/{id}/results`, `GET /api/knowledge-graph/.../weak-points` |
+| P2.9 闯关奖励 | ~~`/student/reward-unlock`~~ | **页面未实现**（同上）。规划端点：`GET /api/rewards/.../available`, `POST /api/rewards/.../claim/{id}` |
 | P3.1 辅线首页 | `/student/auxiliary` | `GET /api/conversations?track=aux` |
 | P3.2 知识点选择 | `/student/auxiliary/selector` | `GET /api/content/knowledge-points` |
 | P3.3 拍照/输入答疑 | `/student/auxiliary/ask` | `POST /api/files/upload`, `POST /api/refinery/extract` |
 | P3.4 辅线对话 | `/student/auxiliary/chat` | `POST /api/ai/tutor` (mode=auxiliary), WS `/ws/ai/{id}` |
-| P4.1 错题本 | `/student/error-book` | `GET /api/error-book/.../main` |
-| P4.2 错题重做 | `/student/error-book/redo` | `POST /api/error-book/items/{id}/redo` |
-| P4.3 解析与变式 | `/student/error-book/variant` | `GET /api/error-book/items/{id}/variations`, `POST .../variations/{vid}/submit` |
+| ~~P4.1 错题本~~ | ~~`/student/error-book`~~ | **已废弃（2026-09-20 用户裁决）**：独立错题本页面从未实现，占位路由与主轨侧栏入口已删除；错题能力由训练轨错题练习 `/student/training/errors` 承担（`GET /api/training/error-book`） |
+| ~~P4.2 错题重做~~ | ~~`/student/error-book/redo`~~ | **已废弃（同上）**：重做在训练轨错题练习页内完成（`POST /api/training/judge`，答对即清零） |
+| ~~P4.3 解析与变式~~ | ~~`/student/error-book/variant`~~ | **已废弃（同上）**：变式生成本期未实现（`variation_questions` 表 0 引用）；AI 解析走 `POST /api/training/questions/explanations` |
 | P5.1 个人中心 | `/student/profile` | `GET /api/points/me`、`GET /api/points/me/ledger` |
 | P5.2 奖励册 | `/student/rewards` | `GET /api/points/me/rewards` |
 | ~~P5.3 设置~~ | ~~`/student/settings`~~ | **已废止（2026-09-18 用户裁决）**：学生端不设独立设置页；手动护眼切换在学习沉浸页内，字号由学段（家长配的年级）决定 |
@@ -1912,7 +1920,11 @@ POST /api/assessment/submissions/{submissionId}/answers
 }
 ```
 
-### 9.4 错题重做
+### 9.4 错题重做（**已废弃，2026-09-20 用户裁决**）
+
+> 本节示例的端点为已废弃的 `/api/error-book/*` 族（从未实现，见 §4.10）。**现行重做路径**
+> 是训练轨错题练习：`GET /api/training/error-book` 取未清零错题 → `POST /api/training/judge`
+> 逐题重做（答对即清零）。示例原文保留仅供溯源。
 
 **请求**：
 ```json
@@ -1943,6 +1955,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.6 | 2026-09-20 | **清理「错题本 P4.x 页面」+「已删除的 `/api/error-book` 服务」两条死线（文档与代码对齐）**。**接口契约无新增**，只有废弃标注：§4.10 ErrorBook 整节 9 个端点标 `~~删除线~~` + 废弃注记（**从未实现**——后端 `error-book` 模块已于 2026-08-07 整体删除，全仓无该前缀的 `@Controller`，前端也无任何代码调用；错题**机制**仍在 PRD §7.4，写入由 practice / training / exams 经 `MainErrorBooksRepository` 承担，学生端错题练习走 `GET /api/training/error-book`）。`openapi.yaml` 同步：9 个 `/error-book/*` 路径的 operation 各加 `deprecated: true` + 说明（**路径与 schema 全部保留**，避免 `$ref` 悬空）。同时订正：§3 分组总表 ErrorBook 行与 Progress 行的归属列（去掉不存在的 `ErrorBook Service`）、§6.1/§6.4 数据流改指真实端点（`GET /api/practice/uncleared-errors`、`POST /api/training/judge`、`POST /api/training/bump-error-levels`）、§7 页面↔端点表 P4.1–P4.3 三行标废弃 + **P2.4–P2.9 六行标「页面未实现、无此路由」**（占位路由已删）。**前端同批删除**：`StudentLayout` + `StudentNav`（主轨侧栏外壳，只承载不可达占位页）、9 条占位路由（`/student/homework`、`/homework-result`、`/unit-test`、`/exam`、`/scores`、`/reward-unlock`、`/student/error-book`×3）、死组件 `ErrorBookCard` 与死类型 `ErrorBookItem`/`TrackType`；`/student` 与 `/student/mainline` 保留为顶层 `Navigate` → `/student/star-map`（否则老地址落默认错误页，本仓无 404 兜底）。「双轨物理隔离」硬规则的测试钉子由原 `/student/homework` 宿主迁移到 `/student/profile`。**后端代码零改动**。UX §5.4 的 P4.1–P4.3 三节同批标废弃。 |
 | v4.5 | 2026-09-20 | **管理员手动清理 30 天前的预警 + `safety_alerts` 补两个索引**（同属 `feat/parent-controls-and-alerts` 分支，不改判题/预警判定口径）。契约变更：§4.17 Admin 分组新增两条**同资源**端点——`GET /api/admin/alerts/expired`（预览：`{retentionDays: 30, cutoff, total, unread}`，只读不删）与 `DELETE /api/admin/alerts/expired`（清理：`{retentionDays: 30, cutoff, deleted}`，物理删除 `created_at < cutoff` 的行，**含未读**）。`openapi.yaml` 同步（1 路径 / 2 operation / 2 schema，都记 `'200'`）。**阈值固定 30 天、接口不带参数**（杜绝「填 0 就删库」）、**用 `DELETE` 而非 `POST`**（`@Post` 默认 201，对「清理」语义不对）。数据面：`safety_alerts` 补 `idx_sa_parent_created (parent_id, created_at)`（家长端**全量**列表免 filesort；⚠️ 带 `AND is_read=0` 的「只看未读」变体**实测仍 filesort**，顶栏 Banner 走的正是这条，要一并免掉需 `(parent_id, is_read, created_at)`，属另一批）与 `idx_sa_created_at (created_at)`（保留期清理由全表扫变区间扫描），迁移 `2026-09-20_safety_alerts_retention_indexes.sql`（`information_schema.STATISTICS` 幂等守卫，条件 `> 0`——多列索引在 STATISTICS 里有多行）。**明确不做**：不加自动保留期、不引 `@nestjs/schedule`、不做清理前导出/审计日志/按类型筛选/数量上限保护。spec §9 补记「预警无自动保留期」。 | 
 | v4.4 | 2026-09-20 | **P6.5 目标设定补齐：按学科 + 每周完课 + 采集修正**。契约变更：`GET /goals/attainment` 的 `items[]` 新增 **`subjectId` / `subjectName`**（目标改为 `(学科, 指标)` 二元组，同 metric 不再全局唯一，排序固定为「学科 sort_order → 指标模板顺序」）；`PUT /goals/:metric` 的 body 由 `{target}` 改为 **`{target, subjectId}`**（`subjectId` 必填，校验链路 6 步，新增「指标×学科匹配」与「在学学科」两道）。`metric` 枚举新增 **`weekly_lessons`**（每周完课）。数据面：新建 `lesson_completions`（每课完成事件；**历史完课补不回来**，从 2026-09-20 起算），`goals` 唯一键改为 `(student_id, scope_subject_id, metric)`（生成列 `scope_subject_id`，**必须 VIRTUAL**——STORED 会被外键挡住）。采集修正：会话心跳可带 `subjectId` 并**只补不覆盖**地写回 `study_sessions.subject_id`（此前该列近乎全 NULL，按学科的学习时长恒为 0；旧会话不追溯）。口径裁决（2026-09-20 用户确认）：**提醒本期不做**（PRD/UX 已加批注，`reminder_enabled` 恒 0；短信单独立项）、每周完课用新建事件表而非积分账本代理、按学科学习时长靠心跳补写。默认目标：数学 3 + 语文 4 + 英语 4 = 11 行（30 分钟/学科·天、2 课/周、5 道/周、8 篇/周、20 词/天）。**没有在学学科时不建默认目标**。 |
 | v4.3 | 2026-09-22 | **埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成**。契约变更：新增 `GET /api/parent/students/{studentId}/specials`、`/mastery`、`/goals/attainment` 与 `PUT /api/parent/students/{studentId}/goals/{metric}`（§4.13 四行 + §4.24 总览，`openapi.yaml` 同步）；旧 `goals` CRUD 四条**从未实现**（文档先于代码写下、无 handler）且无 `metric` 维度，**标废弃**（§4.13 删除线 + §7 P6.5）。数据面：`special_practice_logs` 新表（DB 设计文档 §3.17）、`goals` 加 `metric` 列与唯一键 `(student_id, metric)`（迁移 `2026-09-22_special_practice_logs_and_goals.sql`）。两条口径裁决（2026-09-22 用户确认）：① `weekly_passages` 的达成值 = 三个语文专项**去重篇目数**（不能用行数——解释/含义一句一行，会把「8 句」当「8 篇」）；② 默认目标 60 分钟 / 20 词 / 8 篇 / 10 道。四处新增口径：`units` 一行 = 一个作答单位、`rate` 分母为 0 恒 `null`、掌握度**与 `weakPoints` 并存不替换**、埋点写入**永不阻断判题**（§6.27）。顺带修 spec §4.8 的 UPSERT 算式 bug：`ON DUPLICATE KEY UPDATE` 的 SET 从左到右读到的已是更新后的列，原式把本次增量算了两遍（1 对 1 错实测 0.333，应为 0.500） | 

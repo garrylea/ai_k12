@@ -1633,6 +1633,11 @@ paths:
     get:
       tags: [ErrorBook]
       summary: 主线错题本
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: listMainErrors
       parameters:
         - name: studentId
@@ -1658,6 +1663,11 @@ paths:
     get:
       tags: [ErrorBook]
       summary: 错题详情
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: getErrorItem
       parameters:
         - name: errorItemId
@@ -1681,6 +1691,11 @@ paths:
     post:
       tags: [ErrorBook]
       summary: 错题重做
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: redoErrorItem
       parameters:
         - name: errorItemId
@@ -1710,6 +1725,11 @@ paths:
     post:
       tags: [ErrorBook]
       summary: 标记清零
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: clearErrorItem
       parameters:
         - name: errorItemId
@@ -1728,6 +1748,11 @@ paths:
     get:
       tags: [ErrorBook]
       summary: 获取解析
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: getExplanation
       parameters:
         - name: errorItemId
@@ -1751,6 +1776,11 @@ paths:
     get:
       tags: [ErrorBook]
       summary: 变式题列表
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: listVariations
       parameters:
         - name: errorItemId
@@ -1776,6 +1806,11 @@ paths:
     post:
       tags: [ErrorBook]
       summary: 提交变式题答案
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: submitVariation
       parameters:
         - name: errorItemId
@@ -1810,6 +1845,11 @@ paths:
     get:
       tags: [ErrorBook]
       summary: 错题统计
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: getErrorStats
       parameters:
         - name: studentId
@@ -1833,6 +1873,11 @@ paths:
     get:
       tags: [ErrorBook]
       summary: 清零状态
+      deprecated: true
+      description: >-
+        **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，
+        本端点从未在现行代码中存在（文档先于代码写下）。错题能力现由 Training
+        `GET /api/training/error-book`（训练轨错题练习）与家长端只读聚合承担。新代码勿引用。
       operationId: getClearStatus
       parameters:
         - name: studentId

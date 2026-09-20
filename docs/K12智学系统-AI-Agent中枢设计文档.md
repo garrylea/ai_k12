@@ -19,7 +19,7 @@
 - 基础设施层（infra）6 个组件的详细设计：ModelRouter、PromptBuilder、ModelClient、SafetyGuard、ResponseParser、FallbackHandler
 - 能力层（capabilities）5 个能力的详细设计：TutoringCapability、GradingCapability、ExplanationCapability、VariationCapability、AnalyticsCapability
 - 多学科并行的完整 Prompt 模板体系（数学 / 语文 / 英语，共 18+ 个模板）
-- 与业务服务（ConversationService、Assessment、ErrorBook、ParentAdmin）的交互协议
+- 与业务服务（ConversationService、Assessment、Practice/Training、ParentAdmin）的交互协议
 - 模型路由策略、成本配额控制、可观测性与质量监控
 - 完整的 TypeScript 接口 DTO 定义和 YAML 配置项清单
 
@@ -51,7 +51,7 @@ PRD（产品需求文档）
   ├── §7.5 自动判题 ───────────► 本文档 §4.2 GradingCapability
   ├── §7.9 异常兜底 ───────────► 本文档 §3.4 SafetyGuard + §3.6 FallbackHandler
   ├── §7.10 变式题生成 ────────► 本文档 §4.4 VariationCapability
-  └── §7.4 错题本 ────────────► 本文档 §6.3 与 ErrorBook Service 的协作
+  └── §7.4 错题本 ────────────► 本文档 §6.3 与错题写入方（practice/training/exams）的协作
 
 架构文档 §4.2.1（AI-Agent 中枢高层定义）
   │
@@ -76,7 +76,7 @@ AI-Agent 中枢是 K12 智学系统后端内部的**通用智能能力层模块*
 
 **三个核心原则**：
 
-1. **不直接接收用户请求**：AI-Agent 中枢只输出智能结果，所有用户请求由业务服务（Content/Assessment/ErrorBook 等）接入
+1. **不直接接收用户请求**：AI-Agent 中枢只输出智能结果，所有用户请求由业务服务（Content/Assessment 等）接入
 2. **不持有业务数据**：对话流水归 ConversationService（架构文档 §4.2.10），AI-Agent 中枢自身无状态
 3. **不绑定展示型服务**：ParentAdmin 等展示层只读 AI-Agent 产出的结论，Agent 中枢不感知展示逻辑
 
@@ -195,7 +195,6 @@ apps/server/
 │   ├── services/                      # 业务服务
 │   │   ├── content/
 │   │   ├── assessment/
-│   │   ├── error-book/
 │   │   ├── conversation/
 │   │   ├── parent-admin/
 │   │   ├── auth/
@@ -1400,7 +1399,7 @@ class GradingCapability {
 
 #### 4.3.1 职责
 
-为错题本中的错题生成详细解析，对学生反复做错的知识点进行重新讲解，或生成与具体学生作答无关、可入库复用的标准题解。被 ErrorBook Service / ExplanationCacheService 调用。
+为错题本中的错题生成详细解析，对学生反复做错的知识点进行重新讲解，或生成与具体学生作答无关、可入库复用的标准题解。被 `ExplanationCacheService` 调用（错题由 practice / training / exams 经 `MainErrorBooksRepository` 写入，**无独立 ErrorBook 服务**）。
 
 #### 4.3.2 三种模式
 
@@ -2298,15 +2297,15 @@ Assessment Service                      AI-Agent 中枢
      │  存储评分结果 + 返回前端                 │
 ```
 
-**错题交接**：Assessment Service 判断答题错误后，将错题信息写入 ErrorBook Service，如需解析内容，由 ErrorBook Service 调用 `ExplanationCapability`。
+**错题交接**：Assessment Service 判断答题错误后，经 `MainErrorBooksRepository` 将错题写入 `main_error_books`（**无独立 ErrorBook 服务**）；如需解析内容，由 `ExplanationCacheService` 调用 `ExplanationCapability` 后台生成。
 
 ---
 
-### 6.3 与 ErrorBook Service 的协作
+### 6.3 与错题写入方（practice / training / exams）的协作
 
 **调用场景**：
 
-| 场景 | ErrorBook → AI-Agent | 说明 |
+| 场景 | 错题写入方 → AI-Agent | 说明 |
 |------|---------------------|------|
 | 错题解析 | `ExplanationCapability.explain()` | 首次查看错题解析 |
 | 错题重讲 | `ExplanationCapability.explain()` | 升级后重新讲解 |
@@ -2314,7 +2313,7 @@ Assessment Service                      AI-Agent 中枢
 | 辅线主动录入 | `TutoringCapability.tutor()` | 拍照上传后 AI 引导 |
 
 ```text
-ErrorBook Service                       AI-Agent 中枢
+Practice/Training                       AI-Agent 中枢
      │                                       │
      │  错题升级 → generate(request) ───────► VariationCapability
      │                                       │

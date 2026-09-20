@@ -5,7 +5,7 @@ import { getMyRewards, type MyRewards, type StudentRewardItem } from '@/services
 
 /**
  * 奖励册（计划 §3 Task 5 / spec §8.1）——挂在浅停留页外壳 `StudentStayLayout` 下，
- * **写死日间、禁用夜间切换**（UX §1.5 第 59 行，2026-09-18 由 `StudentLayout` 迁出）。
+ * **写死日间、禁用夜间切换**（UX §1.5 第 59 行）。
  * 颜色一律走 CSS 变量。
  *
  * 口径：

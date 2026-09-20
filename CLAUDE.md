@@ -67,8 +67,8 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 ### 主题与学段
 
 - 三套主题经 CSS 变量 + 容器上的 `data-theme` 实现，token 真源在 `apps/web/style.md` §2。`student-day`（默认）/ `student-night` / `parent`。
-- **主题作用域按 `UX-UI设计文档.md` §1.5 分两类**：①**学习沉浸页**（课程详情 P2.2、AI 讨论 P2.3、课后作业/作业解析 P2.4–2.5、单元检测/期中期末/成绩报告 P2.6–2.8、辅轨答疑 P3.1、错题本 P4.x）→ 包 `.student-theme-container`、按 18:00–06:00 自动切、并允许在**沉浸页内**手动切（如 `CourseDetailPage` 右下角的「护眼」按钮）；②**非学习阶段学生页**（登录、注册、学科选择、入口选择页、章节星链图 P2.1、个人中心 P5.1、奖励册 P5.2）→ **写死 `data-theme="student-day"`、不使用 `.student-theme-container`、无手动切换**。家长端/管理端全程日间。
-- **页面外壳与归属（勿混）**：`StudentLayout` = 学习页外壳（跟随主题；当前承载 P2.4–P2.8 等占位页，将来实现时仍需自动切夜）；`StudentStayLayout` = **浅停留页外壳**（**个人中心/奖励册专用**：写死日间、不带侧栏、无日夜切换，顶栏「返回星图」是这两页回学习主线的唯一出口 + `LogoutButton`）——**不要把个人中心/奖励册合回 `StudentLayout`**；训练轨页面全屏、硬编码 `data-theme="student-day"`、不在任何 Layout 下。
+- **主题作用域按 `UX-UI设计文档.md` §1.5 分两类**：①**学习沉浸页**（课程详情 P2.2、AI 讨论 P2.3、课后作业/作业解析 P2.4–2.5、单元检测/期中期末/成绩报告 P2.6–2.8、辅轨答疑 P3.1）→ 包 `.student-theme-container`、按 18:00–06:00 自动切、并允许在**沉浸页内**手动切（如 `CourseDetailPage` 右下角的「护眼」按钮）；②**非学习阶段学生页**（登录、注册、学科选择、入口选择页、章节星链图 P2.1、个人中心 P5.1、奖励册 P5.2）→ **写死 `data-theme="student-day"`、不使用 `.student-theme-container`、无手动切换**。家长端/管理端全程日间。
+- **页面外壳与归属（勿混）**：`StudentStayLayout` = **浅停留页外壳**（**个人中心/奖励册专用**：写死日间、不带侧栏、无日夜切换，顶栏「返回星图」是这两页回学习主线的唯一出口 + `LogoutButton`）——**不要把个人中心/奖励册合回任何共享 Layout**；训练轨页面全屏、硬编码 `data-theme="student-day"`、不在任何 Layout 下。
 - **学生端没有独立设置页**（UX P5.3「学习设置」已废止，2026-09-18）：护眼/日夜=自动 + 沉浸页内手动；字号由学段决定（`data-school` 的字号来自家长在「学习配置」里选的年级）；行距是排版规范（`style.md` §9 定死 1.6–1.8）；音效 PRD 未定义。`themeStore.motionEnabled` 存在但**无 UI 入口**，本期不做。
 - **训练轨内的页面一律单一浅色主题**（硬编码 `data-theme="student-day"`，不跟随主题、无切换按钮）。
 - `data-school`（`primary`/`junior`/`senior`）**只调字号**，颜色与圆角三学段一致。
