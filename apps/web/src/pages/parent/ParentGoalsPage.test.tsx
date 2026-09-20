@@ -13,8 +13,16 @@ import {
   type ParentGoalAttainmentItem,
   type ParentGoalMetric,
 } from '@/services/api';
+import { toast } from '@/components/base';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
+
+vi.mock('@/components/base', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/base')>();
+  // 只替换 toast：其它基座原语（Input/Card/Button）必须是真的——本文件有一条用例要断言
+  // 输入框用的是基座 Input 的类名。
+  return { ...actual, toast: vi.fn() };
+});
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -31,6 +39,7 @@ const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMock = vi.mocked(getUnreadMessageCount);
 const getGoalsMock = vi.mocked(getParentGoalAttainment);
 const putGoalMock = vi.mocked(putParentGoalTarget);
+const toastMock = vi.mocked(toast);
 
 const BOY: MyStudentItem = { id: 11, parentId: 3, username: 'xiaoming', name: '小明', age: 13, grade: '初一', schoolLevel: 'junior', isActive: true };
 const GIRL: MyStudentItem = { id: 12, parentId: 3, username: 'xiaohong', name: '小红', age: 10, grade: '四年级', schoolLevel: 'primary', isActive: true };
@@ -89,6 +98,7 @@ beforeEach(() => {
   getGoalsMock.mockReset();
   getGoalsMock.mockResolvedValue(ATTAINMENT);
   putGoalMock.mockReset();
+  toastMock.mockReset();
 });
 
 afterEach(() => {
@@ -218,6 +228,32 @@ describe('ParentGoalsPage 保存交互', () => {
     const after = await row('1:weekly_lessons');
     expect(after.getByLabelText('每周完课（数学）目标值')).toHaveValue(5);
     expect(after.getByRole('button', { name: '保存' })).not.toBeDisabled();
+  });
+
+  it('保存成功 → 弹「已保存」并**回显服务端保存后的值**（值没变时也要有反馈，2026-09-20 走查踩坑）', async () => {
+    putGoalMock.mockResolvedValue(
+      goal(ENGLISH, 'daily_words', '每日背单词', 'daily', 25, 10, 40),
+    );
+    renderAt('/parent/goals');
+
+    const r = await row('3:daily_words');
+    fireEvent.change(r.getByLabelText('每日背单词（英语）目标值'), { target: { value: '25' } });
+    fireEvent.click(r.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith('success', '已保存：每日背单词 25 词'));
+  });
+
+  it('保存失败 → 除了行内报错，还给一条全局 error 提示（行内小字在窄屏下容易被忽略）', async () => {
+    putGoalMock.mockRejectedValue(new ApiError(1001, 'daily_words 不适用于该学科'));
+    renderAt('/parent/goals');
+
+    const r = await row('3:daily_words');
+    fireEvent.click(r.getByRole('button', { name: '保存' }));
+
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith('error', '保存失败：daily_words 不适用于该学科'),
+    );
+    expect(await screen.findByTestId('goal-error-3:daily_words')).toBeInTheDocument();
   });
 
   it('数字输入用基座 Input（border-2 + 聚焦变蓝）—— 1B 走查时它像静态文字，这条钉住修复', async () => {

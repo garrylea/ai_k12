@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Card, Input, Skeleton } from '@/components/base';
+import { Button, Card, Input, Skeleton, toast } from '@/components/base';
 import {
   ApiError,
   getParentGoalAttainment,
@@ -113,6 +113,14 @@ export default function ParentGoalsPage() {
     setSaveError(null);
     try {
       const updated = await putParentGoalTarget(studentId, item.metric, target, item.subjectId);
+      /**
+       * **成功必须有反馈（2026-09-20 走查踩坑，别再删）**：保存「与当前相同的值」时行内容零变化
+       * （库里 ODKU 也是无操作，`updated_at` 都不会动），如果只靠「数字变了」当反馈，
+       * 家长会以为按钮坏了而反复点击 —— 实际发生了 4 连点。
+       * 提示里**回显服务端保存后的值**：万一输入没被采纳（那样发出去的就是旧值），
+       * 这句话会直接把差异摆在眼前。
+       */
+      toast('success', `已保存：${updated.title} ${updated.target} ${UNIT_BY_METRIC[updated.metric]}`);
       // 原地替换该行：用后端回的最新达成情况，避免再发一次 GET
       setData((prev) =>
         prev && prev.studentId === studentId
@@ -132,10 +140,10 @@ export default function ParentGoalsPage() {
         return next;
       });
     } catch (error: unknown) {
-      setSaveError({
-        key,
-        message: error instanceof Error ? error.message : '保存失败',
-      });
+      const message = error instanceof Error ? error.message : '保存失败';
+      // 失败同样给全局提示：行内那行小字在窄屏下容易被忽略（走查时「什么都没发生」的观感就是这么来的）
+      toast('error', `保存失败：${message}`);
+      setSaveError({ key, message });
     } finally {
       setSavingKey(null);
     }
