@@ -52,6 +52,18 @@ export const END_REASONS = [
 ] as const;
 export type EndReason = (typeof END_REASONS)[number];
 
+/**
+ * 前端空闲检测窗口（秒），与 `apps/web/src/analytics/tracker.ts` 的
+ * `IDLE_TIMEOUT_MS = 120_000` **同源镜像**——改一处必须同步另一处。
+ *
+ * 为什么需要：`hidden_since` 是客户端 120s 无操作判定之后才建立的，若直接拿
+ * `now - hidden_since` 与家长阈值比较，家长感知的「无操作时长」= 120s + 阈值。
+ * 2026-09-20 裁决改字面语义（spec §3.2）：idle 判定把窗口补回去；
+ * away 的 `hidden_since` 就是离开时刻，无需补偿。
+ * 已知边界：阈值 ≤ 2 分钟时 idle 实际生效值约为 2 分钟（检测窗口即下限）。
+ */
+export const CLIENT_IDLE_DETECTION_SECONDS = 120;
+
 const SCREEN_CLASSES = ['ipad_landscape', 'desktop', 'tablet_portrait', 'mobile'] as const;
 const INPUT_TYPES = ['touch', 'mouse', 'hybrid'] as const;
 const APP_SHELLS = ['web', 'electron'] as const;
@@ -230,9 +242,11 @@ export class StudySessionsService {
    * 走神阈值判定 + 写预警（spec §3.3）。**心跳与结束两条路径共用**。
    *
    * 判定口径：**当前这一段连续挂机**（`hidden_since`）已持续 ≥ 家长设定的分钟数。
-   * ⚠️ 注意 `hidden_since` 是客户端 120s 空闲判定（`tracker.ts` 的 `IDLE_TIMEOUT_MS`，
-   * **写死、不接家长配置**）之后才建立的，所以家长感知的「多久没操作」= 120s + 该阈值
-   * （默认档约 17 分钟）。别把 `alert_idle_minutes` 当成「无操作 N 分钟」。
+   * idle 是**字面语义**（spec §3.2，2026-09-20 裁决）：`hidden_since` 是客户端 120s 空闲
+   * 检测窗口之后才建立的，判定时把窗口补回去（`CLIENT_IDLE_DETECTION_SECONDS`）——
+   * 所以 `alert_idle_minutes` 就是家长理解的「无操作 N 分钟」，不再叠加 120s。
+   * away 的 `hidden_since` 即离开时刻，不补偿。已知边界：阈值 ≤ 2 分钟时 idle 实际
+   * 生效值约为 2 分钟（120s 检测窗口即下限，无法在客户端更快判定）。
    *
    * 为什么在**阈值处**就报、不等挂机段结束：学生切走后再不回来正是家长最需要知道的场景；
    * 只在「回到前台」判定的话，这个场景永远报不出来（spec §9 已记录该副作用）。
@@ -260,7 +274,11 @@ export class StudySessionsService {
       if (hiddenReason !== 'away' && hiddenReason !== 'idle') return;
       if (!hiddenSince) return;
 
-      const elapsedSeconds = Math.floor((Date.now() - hiddenSince.getTime()) / 1000);
+      const rawElapsedSeconds = Math.floor((Date.now() - hiddenSince.getTime()) / 1000);
+      // idle 的家长口径是「从最后一次操作起算」（spec §3.2）：hidden_since 建立时距最后一次
+      // 操作已过了 120s 检测窗口，补回去才是家长理解的「无操作 N 分钟」。
+      const elapsedSeconds =
+        hiddenReason === 'idle' ? rawElapsedSeconds + CLIENT_IDLE_DETECTION_SECONDS : rawElapsedSeconds;
       const thresholds = await this.controlsRepo.findAlertThresholds(studentId);
       const thresholdMinutes =
         hiddenReason === 'away' ? thresholds.awayMinutes : thresholds.idleMinutes;

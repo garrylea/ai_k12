@@ -281,6 +281,44 @@ describe('StudySessionsService.heartbeat', () => {
     );
   });
 
+  it('idle 字面语义：hidden_since 3分50秒前 + 120s 检测窗口 = 5分50秒 ≥ 阈值 5 → 报，文案分钟数按有效值', async () => {
+    // spec §3.2：家长口径的「无操作 N 分钟」从最后一次操作起算。hidden_since 建立时
+    // 距最后一次操作已过了 120s 前端检测窗口，必须补回去（2026-09-20 裁决，去 7 分钟口径）。
+    const since = new Date(Date.now() - (3 * 60_000 + 50_000));
+    const repo = makeRepo({
+      heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 100, hiddenSince: since, hiddenReason: 'idle' }),
+    });
+    const safety = makeSafety();
+    const controls = makeControls({
+      findAlertThresholds: vi.fn().mockResolvedValue({ awayMinutes: 2, idleMinutes: 5 }),
+    });
+    const service = makeService(repo, makeSubjects(), safety, controls);
+
+    await service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'idle' });
+
+    await vi.waitFor(() => expect(safety.record).toHaveBeenCalledTimes(1));
+    // 有效经过 = 230s + 120s = 350s → 分钟数 5（不是 3）
+    expect(safety.record).toHaveBeenCalledWith(expect.objectContaining({ type: 'idle', message: 'msg:idle:5' }));
+  });
+
+  it('idle 字面语义：有效值未达阈值 → 不报（2 分钟前挂机 + 120s = 4 分钟 < 5）', async () => {
+    const since = new Date(Date.now() - 2 * 60_000);
+    const repo = makeRepo({
+      heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 100, hiddenSince: since, hiddenReason: 'idle' }),
+    });
+    const safety = makeSafety();
+    const controls = makeControls({
+      findAlertThresholds: vi.fn().mockResolvedValue({ awayMinutes: 2, idleMinutes: 5 }),
+    });
+    const service = makeService(repo, makeSubjects(), safety, controls);
+
+    await service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'idle' });
+
+    await flushAsync();
+    expect(controls.findAlertThresholds).toHaveBeenCalledWith(9);
+    expect(safety.record).not.toHaveBeenCalled();
+  });
+
   it('未达阈值 → 不写预警（away 4 分钟 < 默认 5 分钟）', async () => {
     const since = new Date(Date.now() - 4 * 60_000);
     const repo = makeRepo({
