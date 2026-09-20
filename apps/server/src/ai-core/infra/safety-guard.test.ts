@@ -102,7 +102,7 @@ describe('SafetyGuard', () => {
     expect(result.alertPayload).toBeUndefined();
   });
 
-  it('辅线 off_topic 同样不再阻断（豁免段删除后两条轨都不拦）', async () => {
+  it('辅线 off_topic 不再阻断，且走的是统一的 off_topic 分支（钉住辅线豁免段已删除）', async () => {
     const result = await guard.check({
       studentId: '1',
       message: '今天天气真好，想出去玩',
@@ -110,6 +110,13 @@ describe('SafetyGuard', () => {
       track: 'auxiliary',
     });
 
+    // ⚠️ 只断言 shouldBlock === false 是**假钉**：被删除的旧辅线豁免段返回体也是
+    // shouldBlock: false，只是 classification: 'learning' / isLearningRelated: true
+    // （见 1021892 的 safety-guard.ts）。恢复旧豁免段时用例仍会绿 → 钉不住 spec §3.1
+    // 「删掉辅线豁免段」这条硬要求。因此这里必须断言能区分两个分支的字段：
+    // 豁免段下分别是 'learning' / true，必红。
+    expect(result.classification).toBe('off_topic');
+    expect(result.isLearningRelated).toBe(false);
     expect(result.shouldBlock).toBe(false);
   });
 
