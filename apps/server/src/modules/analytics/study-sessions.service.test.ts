@@ -431,6 +431,24 @@ describe('StudySessionsService.heartbeat', () => {
       warn.mockRestore();
     }
   });
+
+  it('state=visible 却带了 reason → 归一为 null 再落库（hidden_reason 列不变量）', async () => {
+    // `study_sessions.hidden_reason` 的语义是「当前连续挂机段的原因；回到 visible 时置 NULL」。
+    // 手搓 `{"state":"visible","reason":"away"}`（Zod 合法）若不归一，会落成
+    // `client_state='visible'` + `hidden_reason='away'` 的坏组合。归一在 service 侧做，
+    // repo 是薄 SQL 层、不做归一。
+    const repo = makeRepo();
+    const service = makeService(repo);
+
+    await service.heartbeat({
+      studentId: 9,
+      sessionUid: baseInput().sessionUid,
+      state: 'visible',
+      reason: 'away',
+    });
+
+    expect((repo.heartbeat as any).mock.calls[0]).toEqual([baseInput().sessionUid, 9, 'visible', null, null]);
+  });
 });
 
 describe('StudySessionsService.end', () => {

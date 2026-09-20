@@ -176,7 +176,12 @@ export class StudySessionsService {
         : null;
     // reason 同 subjectId 的口径：非法/缺失一律归一为 null（=「没带原因」，旧客户端即如此），
     // 不 400 —— 走神原因丢了只是这一段归不了 away/idle 两口径，不该把整条心跳打掉。
-    const reason = pick(HIDDEN_REASONS, input.reason);
+    //
+    // ⚠️ **`state !== 'hidden'` 时恒为 `null`**（`study_sessions.hidden_reason` 的列不变量：
+    // 「回到 visible 时置 NULL」，spec §3.3）。`repo.heartbeat` 是薄 SQL 层、不做归一，所以
+    // 手搓 `{"state":"visible","reason":"away"}`（Zod 合法）能落成 `client_state='visible'` +
+    // `hidden_reason='away'` 的坏组合——归一必须在这里做。
+    const reason = input.state === 'hidden' ? pick(HIDDEN_REASONS, input.reason) : null;
 
     const result = await this.repo.heartbeat(
       input.sessionUid,

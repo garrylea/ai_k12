@@ -127,7 +127,12 @@ export class StudySessionsRepository {
    *   给服务层判「这一段连续挂机多久了」（阈值判定），**不参与秒数累加**。
    * - `hidden_since`：`IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)` —— 进入 hidden 时
    *   建立（**已建立则不动**，`COALESCE` 保住本段起点），回到 visible 时清空。
-   * - `hidden_reason`：本次上报的原因（visible 时传 `null`）。这是「本段原因」，供 service 判定阈值。
+   * - `hidden_reason`：本次上报的原因（`away` / `idle`）。这是「本段原因」，供 service 判定阈值。
+   *   ⚠️ **契约（由 service 保证、本层不做归一）：`state !== 'hidden'` 时 `reason` 恒为 `null`。**
+   *   `study_sessions.hidden_reason` 的语义是「当前连续挂机段的原因；回到 visible 时置 NULL」
+   *   （spec §3.3），所以 visible 上报必须落 NULL。手搓 `{"state":"visible","reason":"away"}`
+   *   （Zod 合法）若不归一就会落成 `client_state='visible'` + `hidden_reason='away'` 的坏组合
+   *   ——归一的唯一落点是 `StudySessionsService.heartbeat`（本仓 repo 保持薄 SQL 层）。
    *
    * 另外**不要拆成两条 SQL**（会有竞态窗口）。
    *
