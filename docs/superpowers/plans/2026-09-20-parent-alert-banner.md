@@ -1062,7 +1062,7 @@ git commit -m "feat(web): ParentLayout 挂 AlertBanner 替换旧 banner（全孩
 | GET | `/parent/alerts/unread` | 家长 | 未读预警轮询（Banner 用；自带 closeStale 补判） | `{ items: [{ id, type, level, message, studentName, createdAt }], total }`，items 截最新 5 条 | MVP |
 ```
 
-§6.28 追加（保留原内容，加小节「2026-09-20 及时可见批变更」）：
+§6.28 **先修订旧口径**（评审补充，2026-09-20）：第 4 条里「家长的 `alert_idle_minutes` 只从 `hidden_since` 起算——两者**相加**才是家长感知的报警延迟（默认档 15 分钟 ⇒ 约 17 分钟）」这句必须改写为新口径（`alert_idle_minutes` 即字面语义，服务端补 120s 检测窗口；阈值 ≤ 2 分钟时生效值约 2 分钟），否则与追加的新小节自相矛盾。然后再追加小节：
 
 ```markdown
 ### 走神预警「及时可见」批变更（2026-09-20）
@@ -1118,6 +1118,8 @@ git commit -m "feat(web): ParentLayout 挂 AlertBanner 替换旧 banner（全孩
 ```
 
 （`tags`/`security` 写法对齐该文件既有 `/parent/alerts` 定义；若文件里 bearerAuth 引用名不同，照既有写法。）
+
+**评审补充（2026-09-20）**：`Controls` schema 的 `alertIdleMinutes` 字段 description 里也留着旧口径（「两者相加才是家长感知的报警延迟」），必须同批改写为新口径（字面语义 + 阈值 ≤ 2 分钟生效值约 2 分钟的边界），与本节 §6.28 的修订一致。
 
 - [ ] **Step 3: CLAUDE.md**
 
