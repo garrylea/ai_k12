@@ -1049,6 +1049,11 @@ git commit -m "feat(ai-core): 闲聊改模型自报标记（不硬拦）+ safety
 - Modify: `apps/server/src/database/repositories/parents.repo.ts`（加 `updatePassword`）
 - Modify: `apps/server/src/modules/parent/parent.controller.ts` / `parent.service.ts` / `parent.module.ts`
 
+> **清单订正（Fix 1，评审 §3-5）**：上面的原始清单漏了三个**实际必须改**的文件，而 Step 4（本文件 :1077-1079）又明文要求「加一个新仓储方法（如 `countUnread`）」：
+> - `apps/server/src/database/repositories/safety-alerts.repo.ts` + `.test.ts` —— `countUnread(parentId, studentId?)` 的落点。Fix 1 另在此文件把 `listByParent` 的列表查询从 `pool.execute` 改成 `pool.query`（`LIMIT ?` 走预处理语句会被 MySQL 拒，端点对真库每调必 500）。
+> - `apps/server/src/modules/parent/parent.service.test.ts` —— 必测 #5/#6（`getAccount` / `changePassword`）的落点；`mkSvc` 是位置参数，加第 6 个依赖时必须同步改这里。
+> - `apps/server/src/database/repositories/limit-placeholder.guard.test.ts` —— Fix 1 新增的全仓形态护栏（扫 `*.repo.ts`，断言含 `LIMIT ?` 的内联 SQL 不走 `execute`）。
+
 **Interfaces:**
 - 四个端点契约见 **spec §4.1–§4.4**（校验链、错误码、返回形状**逐条照做**，不在这里重复）
 - `GET /api/parent/account`、`PATCH /api/parent/password` 见 **spec §4.5–§4.6**
@@ -1061,22 +1066,30 @@ git commit -m "feat(ai-core): 闲聊改模型自报标记（不硬拦）+ safety
 
 - [ ] **Step 1: `ControlsService`（spec §4.1/§4.2）**
 
-校验链照 spec 逐条实现：归属（404/1002、403/1005）→ 至少一个字段（409/1001）→ 范围 1..180（409/1001）。`PUT` 逻辑 `ensure` → `update` → **回读** `findByStudent` → 返回完整对象。响应形状**只含两个阈值**（`{ alertAwayMinutes, alertIdleMinutes }`）。
+校验链照 spec 逐条实现：至少一个字段（409/1001）→ 范围 1..180（409/1001）。`PUT` 逻辑 `ensure` → `update` → **回读** `findByStudent` → 返回完整对象。响应形状**只含两个阈值**（`{ alertAwayMinutes, alertIdleMinutes }`）。
+
+> **归属分层（Fix 1 订正 —— 本计划原文 Step 1/2 与 Step 3 自相矛盾，评审 §3-5）**
+> **按学生的归属校验（404/1002 / 403/1005）在 controller，不在 service。** 与 `parent-points.controller.ts` 的钉子用例（「每个端点的第一件事都是 `requireOwnedStudent`」）同源，也与 `parent-insights.controller.ts` 既有 10 个 handler 一致。
+> 原文把这段写在 Step 1/2 的 service 校验链里、Step 3 又写「controller 每个 handler 都先 `requireOwnedStudent`」——同一道校验两处归属，照 Step 1/2 实现会**重复查库**、错误码来源也会分叉。所以 `ControlsService` 只管「至少一个字段 + 范围 + `ensure`/`update`/回读」。
+> **例外（预警归属）：`PATCH alerts/:alertId/read` 的 `alert.parent_id === parentId` 只能留在 service** —— 该端点没有 `studentId`，必须先 `findById` 拿到 `parent_id` 才判得了，controller 无从下手（见 Step 2）。
 
 - [ ] **Step 2: `AlertsService`（spec §4.3/§4.4）**
 
-- `list(parentId, { studentId?, unreadOnly?, page, pageSize })`：`studentId` 给了就先 `requireOwnedStudent`；调 `alertsRepo.listByParent`；映射 DTO（`studentName` 取不到 → 前端显示「未知学生」，后端不做非空断言）。
-- `markRead(parentId, alertId)`：`alertId` 正整数（409/1001）→ `findById` 不存在（404/1002）→ `parent_id !== parentId`（403/1005）→ `markRead`（幂等）。
+- `list(parentId, { studentId?, unreadOnly?, page, pageSize })`：调 `alertsRepo.listByParent`；映射 DTO（`studentName` 取不到 → 前端显示「未知学生」，后端不做非空断言）。**不在 service 里做归属校验**（`studentId` 的归属由 controller 先做，见 Step 1 的分层说明）。
+- `markRead(parentId, alertId)`：`alertId` 正整数（409/1001）→ `findById` 不存在（404/1002）→ `parent_id !== parentId`（403/1005）→ `markRead`（幂等）。**预警归属只能留在这里**（理由见 Step 1 的例外说明）。
 
 - [ ] **Step 3: controller + module + DTO**
 
-- `parent-insights.controller.ts` 加 4 个 handler（`@Get('students/:studentId/controls')`、`@Put('students/:studentId/controls')`、`@Get('alerts')`、`@Patch('alerts/:alertId/read')`），每个都先 `requireOwnedStudent`。
+- `parent-insights.controller.ts` 加 4 个 handler（`@Get('students/:studentId/controls')`、`@Put('students/:studentId/controls')`、`@Get('alerts')`、`@Patch('alerts/:alertId/read')`）。**按学生的归属校验在 controller**：前三个（凡带 `studentId` 的）第一件事就是 `requireOwnedStudent`；`PATCH alerts/:alertId/read` 不带 `studentId`，其预警归属在 `AlertsService`（见 Step 2）。
+- `GET alerts` 的 `studentId` 是**可选** query 参数：用 `parseOptionalPositiveInt`（`../points/pagination.util.js`，未传/空串 → `undefined` = 不筛选），**不要**写成 `parsePositiveInt(studentId, 'studentId', 1)` —— `1` 恰好是合法学生 id，空串会静默变成「按 1 号孩子筛选」并去校验归属（Fix 1 修的 Minor 3-3）。
 - `parent-insights.module.ts`：import `SafetyAlertsModule`；providers 加 `ControlsService` / `AlertsService`（`SafetyAlertsRepository` 由 `SafetyAlertsModule` 导出）。
 - `dto/parent-insights.dto.ts` 加 `ParentControls` / `ParentAlertItem` / `ParentAlertPage`，并把 `DashboardStudent.unreadAlerts` 的注释「本期恒 0」改掉。
 
 - [ ] **Step 4: `unreadAlerts` 改真查**
 
 `dashboard.service.ts:85,90` 改为真查（未读 = `is_read = 0` 的 `safety_alerts` 数）：顶层 = 该家长全部孩子未读；学生级 = 该孩子未读。用一个新仓储方法（`countUnread(parentId, studentId?)`）或复用 `listByParent` 的 count。**改 `dashboard.service.test.ts:179-184`** 那条「恒为 0」的用例为真查后的行为。
+
+> ⚠️ **不要为了拿 count 而调 `listByParent`**：它带 `LIMIT ? OFFSET ?`，真库上只有走 `pool.query` 才执行得动（`pool.execute` 会报 `Incorrect arguments to mysqld_stmt_execute`；本仓铁律见 `parent-insights.repo.ts:210-211`）。这也是本计划推荐独立 `countUnread` 的原因之一 —— 仪表盘只要一个数字，不该顺手取一整页行。
 
 - [ ] **Step 5: account / password**
 
