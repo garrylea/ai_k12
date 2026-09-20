@@ -49,7 +49,12 @@ const VALID_CATALOG_ITEM = {
   sortOrder: 0,
 };
 
-const SETTINGS: ControlsSnapshot = { pointsPerYuan: 20, rewardRedemptionEnabled: true };
+const SETTINGS: ControlsSnapshot = {
+  pointsPerYuan: 20,
+  rewardRedemptionEnabled: true,
+  alertAwayMinutes: 5,
+  alertIdleMinutes: 15,
+};
 
 type MockFn = ReturnType<typeof vi.fn>;
 
