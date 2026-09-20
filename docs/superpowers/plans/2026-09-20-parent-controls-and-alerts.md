@@ -1148,7 +1148,9 @@ git commit -m "feat(parent): 行为管控/预警中心/账号设置端点 + dash
 ```ts
 export interface ParentAlertItem {
   id: number; studentId: number; studentName: string | null;
-  type: 'off_topic' | 'emotional' | 'sensitive' | 'away' | 'idle';
+  // 必须与后端 6 值一致（含 `abusive`）：后端 DTO 用的是 `SafetyAlertRow['type']`，
+  // 若前端收窄成 5 值，遇到 `abusive` 行会缺分支而 tsc 不报（见 Task 6 报告 §9 硬要求）。
+  type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive' | 'away' | 'idle';
   level: 'info' | 'warning' | 'critical';
   message: string; context: string | null; dialogueId: number | null;
   isRead: boolean; createdAt: string;
