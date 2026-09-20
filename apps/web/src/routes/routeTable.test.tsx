@@ -8,17 +8,24 @@ import {
   getMyLedger,
   getMyPoints,
   getMyRewards,
+  getParentAccount,
   getParentAlerts,
+  getParentControls,
   getParentGoalAttainment,
   getParentPointRules,
   getParentPoints,
+  getParentPointsSettings,
   getUnreadMessageCount,
   listMyStudents,
+  putParentControls,
   type AdminAlertRetentionPreview,
   type MyPoints,
   type MyRewards,
   type MyStudentItem,
+  type ParentAccount,
+  type ParentControls,
   type PointLedgerPage,
+  type PointsSettings,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
@@ -55,6 +62,11 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentGoalAttainment: vi.fn(),
     // `/parent/alerts`（P6.9 从 Placeholder 换成真页）：列表页 + 顶栏 Banner 都会拉它
     getParentAlerts: vi.fn(),
+    // `/parent/controls` 与 `/parent/account`（P6.6/P6.10 从 Placeholder 换成真页）
+    getParentControls: vi.fn(),
+    putParentControls: vi.fn(),
+    getParentPointsSettings: vi.fn(),
+    getParentAccount: vi.fn(),
     // `/admin/alerts`（管理员端「预警数据」新页）：挂载即拉过期预警统计
     getExpiredAlertStats: vi.fn(),
   };
@@ -70,6 +82,17 @@ const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
 const getParentGoalAttainmentMock = vi.mocked(getParentGoalAttainment);
 const getParentAlertsMock = vi.mocked(getParentAlerts);
 const getExpiredAlertStatsMock = vi.mocked(getExpiredAlertStats);
+const getParentControlsMock = vi.mocked(getParentControls);
+const putParentControlsMock = vi.mocked(putParentControls);
+const getParentPointsSettingsMock = vi.mocked(getParentPointsSettings);
+const getParentAccountMock = vi.mocked(getParentAccount);
+
+/** P6.6：与后端默认档一致（切走 5 / 无操作 15），恰好等于「标准」预设。 */
+const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15 };
+/** P6.6 兑换卡片的只读数据源（另一条端点，故意不与 controls 同源）。 */
+const POINTS_SETTINGS: PointsSettings = { pointsPerYuan: 20, rewardRedemptionEnabled: true };
+/** P6.10：账号信息（只读）。 */
+const ACCOUNT: ParentAccount = { id: 1, name: '张三', phone: '13800000000' };
 
 const PLACEHOLDER_TEXT = '原型占位：此页面正在设计中...';
 
@@ -196,6 +219,16 @@ beforeEach(() => {
     total: 12,
     unread: 3,
   } satisfies AdminAlertRetentionPreview);
+  getParentControlsMock.mockReset();
+  getParentControlsMock.mockResolvedValue(CONTROLS);
+  putParentControlsMock.mockReset();
+  putParentControlsMock.mockImplementation((_studentId, patch) =>
+    Promise.resolve({ ...CONTROLS, ...patch }),
+  );
+  getParentPointsSettingsMock.mockReset();
+  getParentPointsSettingsMock.mockResolvedValue(POINTS_SETTINGS);
+  getParentAccountMock.mockReset();
+  getParentAccountMock.mockResolvedValue(ACCOUNT);
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -454,6 +487,69 @@ describe('路由表：家长端「异常预警中心」', () => {
     expect(await screen.findByRole('link', { name: '异常预警' })).toHaveAttribute(
       'href',
       '/parent/alerts',
+    );
+  });
+});
+
+/**
+ * P6.6 / P6.10：`/parent/controls` 与 `/parent/account` 从 `Placeholder` 换成真页。
+ *
+ * 与 `/parent/rewards`、`/parent/goals`、`/parent/alerts` 同一条理由：页面组件测试挂的是
+ * 页面本身、绕过路由表——「路由确实指到这个页面」只有这里能证明。
+ */
+describe('路由表：家长端「行为管控」与「账号设置」', () => {
+  it('/parent/controls 渲染 ParentControlsPage（灵敏度表单 + 兑换只读），而非 Placeholder', async () => {
+    setParentSession();
+    // 本页依赖顶栏选中的孩子（null 时是空态），给一个孩子才验得到真内容
+    useParentStudentStore.setState({ studentId: PARENT_STUDENT.id });
+
+    renderAt('/parent/controls');
+
+    expect(await screen.findByRole('heading', { name: '行为管控' })).toBeInTheDocument();
+    // 真页的钉子：接口被调用 + 输入框渲染出服务端值（占位页不可能有）
+    expect(getParentControlsMock).toHaveBeenCalledWith(PARENT_STUDENT.id);
+    expect(await screen.findByTestId('controls-away-input')).toHaveValue(5);
+    expect(screen.getByTestId('controls-rewards-status')).toBeInTheDocument();
+
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    // 家长端仍是家长主题（商务白蓝，无日夜切换）
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+
+  it('侧边导航「行为管控」指向 /parent/controls', async () => {
+    setParentSession();
+
+    renderAt('/parent/controls');
+
+    expect(await screen.findByRole('link', { name: '行为管控' })).toHaveAttribute(
+      'href',
+      '/parent/controls',
+    );
+  });
+
+  it('/parent/account 渲染 ParentAccountPage（账号信息 + 改密码），而非 Placeholder', async () => {
+    setParentSession();
+
+    renderAt('/parent/account');
+
+    expect(await screen.findByRole('heading', { name: '账号设置' })).toBeInTheDocument();
+    // 真页的钉子：账号信息来自接口
+    expect(getParentAccountMock).toHaveBeenCalled();
+    expect(await screen.findByTestId('account-name')).toHaveTextContent('张三');
+    expect(screen.getByTestId('old-password-input')).toBeInTheDocument();
+
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+
+  it('侧边导航「账号设置」指向 /parent/account', async () => {
+    setParentSession();
+
+    renderAt('/parent/account');
+
+    expect(await screen.findByRole('link', { name: '账号设置' })).toHaveAttribute(
+      'href',
+      '/parent/account',
     );
   });
 });

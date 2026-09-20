@@ -2349,6 +2349,39 @@ export function getParentErrors(params: ParentErrorListParams): Promise<ParentEr
   );
 }
 
+// --- Parent: 行为管控 P6.6（spec §4.1/§4.2） ---
+
+/**
+ * 行为管控 —— **只含两个预警灵敏度阈值**。
+ *
+ * ⚠️ 奖励兑换开关**故意不在这里**：它归 `GET|PUT .../points/settings`（同一字段两个归属
+ * 会打架，见 spec §4.1）。页面要展示兑换状态时另调 `getParentPointsSettings`。
+ */
+export interface ParentControls {
+  /** 孩子切走页面连续多少分钟算「离开」（1..180，默认 5）。 */
+  alertAwayMinutes: number;
+  /** 孩子前台无操作连续多少分钟算「走神」（1..180，默认 15）。 */
+  alertIdleMinutes: number;
+}
+
+export function getParentControls(studentId: number): Promise<ParentControls> {
+  return fetchApi<ParentControls>(`/parent/students/${studentId}/controls`);
+}
+
+/**
+ * 部分更新预警灵敏度。**至少给一个字段**（空 patch 后端 409/1001），
+ * 且**只发改动过的字段**（后端语义是「未提供即不动」）。返回服务端回读的全量。
+ */
+export function putParentControls(
+  studentId: number,
+  patch: Partial<ParentControls>,
+): Promise<ParentControls> {
+  return fetchApi<ParentControls>(`/parent/students/${studentId}/controls`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+}
+
 /** 一条家长端异常预警（`safety_alerts` 的展示投影，见 spec §4.3）。 */
 export interface ParentAlertItem {
   id: number;
@@ -2400,6 +2433,39 @@ export function getParentAlerts(params: ParentAlertListParams = {}): Promise<Par
 /** 标记单条预警已读（幂等）。后端返回 `null`。 */
 export function markParentAlertRead(alertId: number): Promise<null> {
   return fetchApi<null>(`/parent/alerts/${alertId}/read`, { method: 'PATCH' });
+}
+
+// --- Parent: 账号设置 P6.10（spec §4.5/§4.6） ---
+
+/**
+ * 家长自己的账号信息（**只读**）。
+ *
+ * ⚠️ 后端**不返回**订阅/额度/订单（那些表不存在，spec §2.7 的文档漂移已订正）——
+ * 别照旧 openapi 的 `subscription`/`AIQuota` 补字段。
+ */
+export interface ParentAccount {
+  id: number;
+  /** 家长姓名，可空（注册时不强制）。 */
+  name: string | null;
+  phone: string;
+}
+
+export function getParentAccount(): Promise<ParentAccount> {
+  return fetchApi<ParentAccount>('/parent/account');
+}
+
+/**
+ * 家长改**自己**的密码。后端返回 `null`。
+ *
+ * 失败口径：旧密码错 → `401`/`1003`（页面据此给旧密码框标错）；新密码长度或
+ * 与旧密码相同 → `409`/`1001`。**改后不失效旧 token**（本仓无 token 版本机制，
+ * 旧 token 在 7 天有效期内仍可用）。
+ */
+export function changeParentPassword(oldPassword: string, newPassword: string): Promise<null> {
+  return fetchApi<null>('/parent/password', {
+    method: 'PATCH',
+    body: JSON.stringify({ oldPassword, newPassword }),
+  });
 }
 
 export interface ParentChatLogItem {

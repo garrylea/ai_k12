@@ -42,6 +42,8 @@ import ParentErrorsPage from '@/pages/parent/ParentErrorsPage';
 import ParentChatLogsPage from '@/pages/parent/ParentChatLogsPage';
 import ParentGoalsPage from '@/pages/parent/ParentGoalsPage';
 import ParentAlertsPage from '@/pages/parent/ParentAlertsPage';
+import ParentControlsPage from '@/pages/parent/ParentControlsPage';
+import ParentAccountPage from '@/pages/parent/ParentAccountPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -332,10 +334,10 @@ export const routes: RouteObject[] = [
       { path: 'errors', element: <ParentErrorsPage /> },
       { path: 'chat-logs', element: <ParentChatLogsPage /> },
       { path: 'goals', element: <ParentGoalsPage /> },
-      { path: 'controls', element: <Placeholder title="行为管控 P6.6" /> },
+      { path: 'controls', element: <ParentControlsPage /> },
       { path: 'rewards', element: <ParentPointsPage /> },
       { path: 'alerts', element: <ParentAlertsPage /> },
-      { path: 'account', element: <Placeholder title="账号设置 P6.10" /> },
+      { path: 'account', element: <ParentAccountPage /> },
     ],
   },
   // 主轨侧栏外壳：留给 P2.4–P2.8 等学习/占位页（第 58 行「启用日夜切换」一类）
