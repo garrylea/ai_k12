@@ -1,7 +1,7 @@
 # 家长端「管得住」批（行为管控 P6.6 / 异常预警中心 P6.9 / 账号设置 P6.10）· 设计
 
 日期：2026-09-20
-状态：**待实施**
+状态：**待实施**（Task 0 标记验证门已通过 3/3 → 方案 A，2026-09-20；见 §3.2）
 相关：`docs/K12智学系统-产品需求文档.md` §7.7（第 203 / 206 / 223 行）、`docs/UX-UI设计文档.md` §P6.6 / §P6.9 / §P6.10、`docs/API接口与数据流设计文档.md` §4.13 / §7、`docs/api/openapi.yaml`、`apps/server/src/modules/parent-insights/`、`apps/server/src/ai-core/`、`apps/web/src/pages/parent/`
 上游：`docs/superpowers/specs/2026-09-18-parent-insights-design.md`（§1.1 把本批列为「管得住」批）、`docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md`（心跳与 `study_sessions` 的来源）
 
@@ -220,7 +220,9 @@ UX §P6.6 全文只有三行：
 
 **⚠️ 必须同时回写 `ai_messages.safety_flag`（否则会打坏既有功能）**：现在 `safety_flag` 的唯一来源是「助手回复的 `type === 'block'`」（`services/conversation/index.ts:144`、`modules/conversations/conversations.service.ts:199`）。闲聊不再硬阻断 ⇒ 不再有 `block` 消息 ⇒ **`safety_flag` 将永远是 0，家长端「对话回放」页的「闲聊/偏离学习」标签与「闲聊 N」计数会全部归零**（`parent-insights.repo.ts:673` 的 `block_count`、`ParentChatLogsPage.tsx:66,410`）。
 
-因此：给 `saveMessages` 的消息对象加**可选** `safetyFlag?: boolean`，取值规则改为 `msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)`；两条入口保存 assistant 消息时传 `safetyFlag: offTopic`。这样「对话回放」的口径从「被阻断的轮次」变成「被判闲聊的轮次」——**更准确**，但**语义有变**，必须写进 §8 的文档同步与 §9 的限制。
+因此：给 `saveMessages` 的消息对象加**可选** `safetyFlag?: boolean`，取值规则改为 `msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)`；两条入口保存 assistant 消息时传 `safetyFlag: offTopic`。
+
+**⚠️ 删掉硬阻断后 `safety_flag = 1` 变成「双来源」（用户 2026-09-20 裁决）**：① 模型自报标记（闲聊）；② `type === 'block'`（**现在只剩 anomaly**：情绪/敏感）。两类**都计入**——它们都属于「偏离学习」。因此家长端文案**从「闲聊」改成「偏离学习」**（`ParentChatLogsPage.tsx:66` 的标签、`:410` 的 `闲聊 N` 计数，以及 `services/api.ts:2338` 的注释），否则情绪/敏感轮次会被误标成闲聊。这样「对话回放」的口径从「被阻断的轮次」变成「被判闲聊**或**被阻断的轮次」——**更准确**，但**语义有变**，必须写进 §8 的文档同步与 §9 的限制。
 
 **响应里的 `safety` 字段本批不动**：`tutor()` 返回的 `safety: { isLearningRelated, alertLevel }` 在学生端**只有类型声明、从不被读取**（`apps/web/src/services/api.ts:468` 是全仓唯一出现处），所以闲聊不再阻断不会带来学生端连带影响，本批**不新增任何学生端提示**（不让学生知道自己被标记）。
 
@@ -236,11 +238,46 @@ UX §P6.6 全文只有三行：
 3. 判定：**3/3 符合预期** → 采用方案 A；**否则** → 切**方案 B**。
 4. 同时核对辅导质量无退化（回复仍自然、无多余元信息、不解释该标记）。
 
+**✅ 验证结果（2026-09-20，已通过 → 采用方案 A）**
+
+用新增的手工 eval 脚本 `npx tsx src/ai-core/__tests__/off-topic-marker.ts`（仿 `tutoring-quality.ts`：内存 fake 仓储 + 真模型，辅线 track、`subject=math`）跑 3 条真实样本，**3/3 符合预期**：
+
+| 样本 | 学生消息 | 期望 | 实测 | 结果 |
+|---|---|---|---|---|
+| ① 数学题 | 3x + 5 = 14，x 等于多少？ | 无标记 | 无标记 | ✅ |
+| ② 语文理解题 | 这首诗表达了什么情感？ | 无标记 | 无标记 | ✅ |
+| ③ 闲聊 | 你喜欢什么游戏？ | 有标记 | 有标记，且**独占最后一行**（`trim() === '<!--topic:off-->'`） | ✅ |
+
+走的是 `tutoring/math/auxiliary.md`（辅线只有 math 一套模板、全学科共用），路由 `qwen3.8-max`。
+
+**质量核对**：三条回复均自然、无多余元信息、未解释该标记；样本③是「我更喜欢和你一起玩学习里的『闯关游戏』呀…」——温和引导，符合 §1.1 裁决 4（不硬拦）。**无退化。**
+
+**⚠️ 实测同时确认**：现有 `parseContent` **不剥离**该标记（标记原样留在 `content` 里）→ §3.1/§3.2 的剥离改造是**必需**的；即便漏剥，因标记是 HTML 注释、学生端 markdown 管道含 `rehype-raw`，仍不可见（§3.2 的选型理由）。
+
 **方案 B（仅当验证门不通过时启用）**：新建 LLM 场景做**并行**分类调用——复用已写好的 `prompts/safety/classifier.md`，启用 `safety.yaml` 里已声明的 `classifier.model`，与辅导调用**并行发出**（不增加学生等待时间）。注意：**新增 LLM 场景需同步改 8 处**（见 `CLAUDE.md`）。
 
 ### 3.3 走神采集改造
 
 **目标**：把「页面被切走」与「前台无操作」分开记，并知道**当前这一挂机段连续了多久**。
+
+**⚠️ 先读这段：两个「分钟数」不是一回事（最易误解，实施与验收都按这个口径）**
+
+| 数 | 值 | 谁定 | 作用 |
+|---|---|---|---|
+| 前端空闲判定阈值 | **120 秒，写死**（`tracker.ts:23` 的 `IDLE_TIMEOUT_MS`） | 代码常量；**本批不接入家长配置** | 决定客户端状态机**多久**从 `active` 翻成 `hidden` |
+| `controls.alert_idle_minutes` | 默认 15，家长可调 1..180 | 家长 | 决定翻成 `hidden` **之后**连续挂机多久写一条 `idle` 预警 |
+
+两者**相加**才是家长感知的「孩子多久没操作会收到预警」：默认档 15 分钟 ⇒ 距最后一次操作约 **17 分钟**报警。验收「改阈值真的生效」（§7.4 第 5 条）必须按这个口径算，别把 15 分钟当成「无操作 15 分钟」。
+
+**「有操作 / 无操作」的判定口径**：客户端在 **`window`** 上挂监听（`AnalyticsShell.tsx:46-66`），事件冒泡即可命中，**无需**监听具体输入元素。
+
+| 算「有操作」（刷新 `lastInputAt`，把 120 秒计时推后） | 不算（§2.3 的既有缺口，本批不补） |
+|---|---|
+| `keydown` —— 打字、退格/删除、改字、Enter/Space 激活聚焦按钮 | `mousemove`（只移动鼠标、不点任何东西） |
+| `pointerdown` —— 鼠标 / 触摸 / 触控笔按下，**覆盖一切按钮点击** | `focus` / `blur`（窗口失焦、重新聚焦） |
+| `scroll` / `touchstart` | `resize`（缩放窗口） |
+
+即**按键、在文本框输入/删除/修改、点任意 button、滚动、触屏点按**都算「有操作」，120 秒内有过任意一次就保持 `active`。节流 5 秒（`tracker.ts:27`）无害——最多让 `lastInputAt` 落后真实活动 5 秒，远小于 120 秒阈值。
 
 | 层 | 改动 |
 |---|---|
@@ -328,6 +365,8 @@ UX §P6.6 全文只有三行：
 ---
 
 ## 4. 端点契约
+
+**归属（2026-09-20 裁决，spec 原文未指定）**：`controls`（§4.1/§4.2）与 `alerts`（§4.3/§4.4）放 **`parent-insights.controller.ts`** —— 它已是 `@Controller('api/parent')` + `@Roles('parent')`，且已有 `students/:studentId/...` 模式与 `parentService.requireOwnedStudent`；`account`（§4.5）与 `password`（§4.6）放 **`parent.controller.ts` + `ParentService`**（账号级、非按学生）。两个 controller 都是 `api/parent`，**新增路径不得与既有路径撞车**（既有清单见各自的 controller）。
 
 ### 4.1 `GET /api/parent/students/{studentId}/controls`
 
@@ -560,6 +599,7 @@ UX §P6.6 全文只有三行：
 - 后端 `npm test`（server 目录）
 - 前端 `npm test`（web 目录）+ **`TZ=UTC` 再跑一遍**（防挂钟依赖，沿用 `d31ffa2` 的做法）
 - `tsc` / `lint` / `build` 两端
+- **Task 0 标记验证**（需 API Key，非 CI）：`npx tsx src/ai-core/__tests__/off-topic-marker.ts`（结果见 §3.2）
 
 ### 7.4 手工走查清单（交付时一并给出）
 
@@ -594,14 +634,15 @@ UX §P6.6 全文只有三行：
 | **「家长来了迅速切回来」测不到** | 系统不记录切换次数与每次操作的时间点，这种快进快出在数据上与正常学习无法区分。**已在设计阶段向用户说明是天花板** |
 | **「小窗口摆在旁边」测不到** | `document.hidden` 为 false（浏览器仍可见），且无 `resize` 监听、`screen_class` 只在会话开始时采一次。若学生不碰学习页，会被 `idle` 兜住 |
 | **「前台发呆」与「认真阅读/思考」无法区分** | 120 秒无输入即判 `idle`，阅读长文或思考难题很容易超过。缓解手段：默认阈值取保守值（15 分钟）、家长可调、只记 `info` 不弹 Banner。**这是设计上的取舍，不是缺陷** |
-| **`idle` 段的计时起点晚 2 分钟** | 客户端在**最后一次输入后 120 秒**才判定 hidden，`hidden_since` 从那时起算。所以「无操作 15 分钟」实际是「距最后一次操作约 17 分钟」 |
+| **`idle` 段的计时起点晚 2 分钟（两个「分钟数」不是一回事）** | 客户端空闲阈值 `IDLE_TIMEOUT_MS = 120_000`（`tracker.ts:23`）是**写死的**，本批**不接入家长配置**；家长的 `alert_idle_minutes` 只从 `hidden_since` 起算。所以默认档「无操作 15 分钟」实际是「距最后一次操作约 17 分钟」。验收时按 §3.3 的口径，别拿 15 分钟当「无操作 15 分钟」 |
+| **只移动鼠标、窗口失焦/聚焦、缩放窗口不算「有操作」** | 未监听 `mousemove` / `focus` / `blur` / `resize`（§2.3 缺口）。学生只看不动键鼠时会被 120 秒空闲判定兜住（判 `idle`，`info` 级）。本批**不新增这些监听**——`mousemove` 高频、且会放大「人在但没学」的误判面 |
 | **`hidden_reason` 在极少数情况会贴错标签** | 若先因 `idle` 变 hidden、随后标签页又被切走，客户端不再发新心跳（状态机在 `hidden` 下对 `HIDDEN` 是空操作），该段仍记为 `idle` |
 | **改密码不失效旧 token** | 本仓无 token 版本机制，旧 token 在 7 天有效期内仍可用（与管理员改密码的既有行为一致） |
 | **预警不是实时推送** | 无调度器 / 无 WebSocket，家长在**打开或切换页面时**才拉到新预警 |
 | **`alert_level` / `auxiliary_enabled` / `photo_search_enabled` 仍未被读取** | 按裁决保留（用户要求「先留着，等以后可能还有用」），DB 设计文档注明「预留未用」 |
 | **闲聊预警没有「频繁」语义** | PRD 206 的措辞是「**频繁**发起与学习无关的闲聊」，但本批去掉了关键词计数（`countConsecutiveOffTopic` 依赖被删的 `off_topic` 判定），无法可靠判断「频繁」。实现为**每次发生即报**，靠 30 分钟去重兜住频率。若以后要真正的「频繁」语义，需给 `safety_alerts` 加出现次数或按窗口计数 |
 | **`countConsecutiveOffTopic` 与 `safety.yaml` 的 `off_topic.escalateThreshold`/`criticalThreshold` 保留但不再被调用** | 与上一条同源。按「先留着」的既有原则保留（含其单测），文档注明「预留未用」 |
-| **`ai_messages.safety_flag` 的语义有变** | 从「被硬阻断的轮次」变为「被模型判为闲聊的轮次」。家长端「对话回放」的标签与计数因此会变（**更准确**），历史数据的口径不一致 |
+| **`ai_messages.safety_flag` 的语义有变（双来源）** | 从「被硬阻断的轮次」变为「被模型判为闲聊 **或** 被阻断的轮次」（后者现在只剩情绪/敏感）。家长端「对话回放」的标签与计数因此会变（**更准确**，文案已从「闲聊」改为「偏离学习」），历史数据的口径不一致 |
 | **走神预警在挂机**进行中**就会报** | 不等挂机段结束——因为「切走后不再回来」正是家长最需要知道的场景。副作用：学生仍在挂机时预警已产生，若其后回来并继续学习，该条预警依然存在 |
 | **历史挂机数据无法回填** | 4 个新列在迁移前不存在，旧会话的「切走/无操作」细分永久缺失（与 Phase 1A 的 `subject_id` 回填同类问题） |
 
@@ -628,3 +669,6 @@ UX §P6.6 全文只有三行：
 |---|---|
 | 2026-09-20 | 初稿。含 §1.1 的 10 条用户裁决、§1.2 与 UX §P6.6 的偏差说明、§2 的实测调研结论（含闲聊分类器 6/12 误判的实测数据） |
 | 2026-09-20 | 自查修正三处内部矛盾：① 闲聊的 `level` 原写「沿用连续 3/5 次升级」，但升级依赖被删的关键词计数 → 改为恒 `warning` 并把「无频繁语义」列入 §9；② 补上「必须同时回写 `ai_messages.safety_flag`」——否则家长端对话回放的闲聊标签与计数会归零（§3.2 / §7.1 / §8 / §9）；③ 补明两条入口（`tutor` / `tutorStream`）共用 `prepare()` 的写入落点（§3.1） |
+| 2026-09-20 | 用户审核后补「走神判定口径」（§3.3 新增段 + §9 两条）：显式区分**前端写死的 120 秒空闲阈值**与**家长可调的 `alert_idle_minutes`**（两者相加才是家长感知的报警延迟，默认档约 17 分钟），并列出「哪些交互算有操作 / 哪些不算」（打字、删除、点按钮、滚动、触屏均算；`mousemove`/`focus`/`blur`/`resize` 不算） |
+| 2026-09-20 | **Task 0 验证门已执行并通过（3/3）→ 采用方案 A**。改动：`tutoring/math/auxiliary.md` 与 `mainline.md` 加入 `<!--topic:off-->` 标记指令；新增手工 eval 脚本 `src/ai-core/__tests__/off-topic-marker.ts`。实测三条（数学题 / 语文理解题 / 闲聊）标记行为均符合预期、辅导质量无退化；同时确认现有 `parseContent` 不剥离该标记 → 剥离改造必需。结果见 §3.2，命令见 §7.3 |
+| 2026-09-20 | 计划评审期补两处裁决：① **`safety_flag` 双来源**（闲聊标记 ∪ anomaly 阻断）都计入，家长端文案从「闲聊」改「偏离学习」（§3.2 / §9 / §8）；② **端点归属**——`controls`/`alerts` 进 `parent-insights.controller.ts`，`account`/`password` 进 `parent.controller.ts` + `ParentService`（§4 开头）。实施计划见 `docs/superpowers/plans/2026-09-20-parent-controls-and-alerts.md` |
