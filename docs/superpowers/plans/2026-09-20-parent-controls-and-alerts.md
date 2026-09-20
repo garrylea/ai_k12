@@ -801,6 +801,15 @@ anomaly 分支（:108-125）**不动**（继续阻断 + `alertPayload`）。
 
 ```ts
 /**
+ * 预警类型（写入 `safety_alerts.type`）。比 spec §3.1 的三类多一个 `abusive`：
+ * `SafetyGuard.detectAnomalyType` 的返回类型是 `AnomalyType`（含 `abusive`），
+ * anomaly 分支把 `alertPayload.type` 原样透传到这里，不收窄就无法通过 `tsc`；
+ * `SafetyAlertsService.messageFor('abusive')` 也已覆盖（→ 敏感文案），与
+ * `pickGentleBlockMessage` 的 abusive→sensitive 约定同源。运行时不可达（检测器不发它）。
+ */
+export type SafetyAlertSignalType = 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
+
+/**
  * 预警写入的抽象（spec §3.1）。实现在 `modules/safety/SafetyAlertsService`，
  * 由 `ai.module.ts` 的 factory 注入 —— ai-core 不依赖 Nest/DB。
  * **约定：`record` 同步返回且永不抛**（实现方负责吞错）。
@@ -809,7 +818,7 @@ export interface SafetyAlertSink {
   record(input: {
     studentId: number;
     dialogueId: number | null;
-    type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
+    type: SafetyAlertSignalType;
     level: 'info' | 'warning' | 'critical';
     message: string;
     context: string | null;
@@ -821,6 +830,10 @@ export interface TutoringCapabilityDeps {
   safetyAlerts?: SafetyAlertSink;
 }
 ```
+
+> **⚠️ union 抽成 `SafetyAlertSignalType` 别名（勿写回内联字面量）**：该 union 在 `SafetyAlertSink.record`、
+> `recordSafetySignals`、`PARENT_MESSAGE` 三处出现，抽别名才能保证键集一致（`PARENT_MESSAGE` 是
+> `Record<SafetyAlertSignalType, string>`，漏一个键 `tsc` 就报）。理由见下条。
 
 > **⚠️ union 必须含 `'abusive'`**（Task 5 实现时踩过）：`SafetyGuard.detectAnomalyType` 的返回类型是
 > `AnomalyType = 'emotional' | 'sensitive' | 'abusive'`，anomaly 分支把 `alertPayload.type` **原样透传**
@@ -843,8 +856,15 @@ export interface TutoringCapabilityDeps {
  * - **剥离**删掉所有**独占一行**的标记（不管在第几行）；夹在句子中间的不匹配、保持原样。
  */
 const OFF_TOPIC_MARKER_LINE = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/;
-/** 全局剥离：连同标记行的**前导**换行一起删；后随换行由 `(?=\n|$)` 保留以维持行结构。 */
-const OFF_TOPIC_MARKER_STRIP = /(?:^|\n)[ \t]*<!--\s*topic:off\s*-->[ \t]*(?=\n|$)/g;
+/**
+ * 全局剥离：只删**独占一行**的标记，连同其**前导**换行；后随换行由 `(?=\r?\n|$)` 保留，
+ * 以维持正文行结构（`第一段\n<!--M-->\n第二段` → `第一段\n第二段`）。
+ *
+ * ⚠️ `\r?` **不是可删的多余代码**：检测走 `trimEnd()`（`\r` 属空白，故能识别 CRLF 的末行），
+ * 剥离若只认 `\n` 就会与检测**口径不对称** —— 模型若用 CRLF 换行，末行标记会「判了闲聊却
+ * 剥不掉」，标记残留进学生可见内容与持久化历史，违反 spec §3.2 的核心要求。
+ */
+const OFF_TOPIC_MARKER_STRIP = /(?:^|\r?\n)[ \t]*<!--\s*topic:off\s*-->[ \t]*(?=\r?\n|$)/g;
 
 /** 标记是否落在「最后一个非空行」且独占该行（spec §3.2）。 */
 function isOffTopicMarkerOnLastLine(content: string): boolean {
@@ -887,12 +907,12 @@ function isOffTopicMarkerOnLastLine(content: string): boolean {
 ```ts
   /**
    * 写一条预警。**整段 try/catch + 同步调用**（spec §6 不变量：预警写入永不阻断主链路）。
-   * 两条入口（`tutor` / `tutorStream`）共用，别各写一份。
+   * `tutor` / `tutorStream` / `prepare` 三处共用这**唯一**入口，别各写一份。
    */
   private recordSafetySignals(input: {
     studentId: string;
     dialogueId: string;
-    type: 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
+    type: SafetyAlertSignalType;
     level: 'info' | 'warning' | 'critical';
     studentMessage: string;
   }): void {
@@ -919,7 +939,7 @@ function isOffTopicMarkerOnLastLine(content: string): boolean {
 
 其中 `PARENT_MESSAGE` 是与 `SafetyAlertsService.messageFor` **逐字一致**的常量表（spec §3.4）。⚠️ **两份文案会漂移** → 加一条测试断言两边一致（在 `tutoring.capability.test.ts` 里对 `off_topic`/`emotional`/`sensitive` 三条逐字比对 `SafetyAlertsService.messageFor`）。
 
-**(d)** 两个调用点：
+**(d)** 三个调用点（同一入口，别各写一份）：
 
 - `tutor()`：`const { content, structuredQuestion, offTopic } = this.parseContent(...)`；`saveMessages` 的 assistant 条目加 `safetyFlag: offTopic`；随后 `if (offTopic) this.recordSafetySignals({ ... })`。
 - `tutorStream()`：同（`:197` 之后），并在 `yield { type:'done', ... }` 之前调。
@@ -943,8 +963,8 @@ safety_flag = Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))
 > 去掉索引签名立刻 `TS2322: Type 'boolean' is not assignable to type 'number'`。
 > 不加 `Number(...)` 的后果：单测断言 `= 1` 直接红，且真库里靠 mysql2 转义把 `true` 写进 INT 列。
 > （两处**不是逐字相同**而是**语义等价**：`services/conversation/index.ts` 有 `msg` 对象，
-> `modules/conversations/conversations.service.ts` 是位置参数、没有 `msg`——plan :925 也知道这点，
-> 别把这种不一致当 bug。）
+> `modules/conversations/conversations.service.ts` 是位置参数、没有 `msg`——Step 2(d) 的 `prepare()` 条目
+> 也处理过同类「两处语义等价、但非逐字相同」的判断，别把这种不一致当 bug。）
 
 **⚠️ 删掉 off_topic 硬阻断后，`safety_flag = 1` 有 两个来源**（不是 spec §9 措辞里说的单一来源）：
 

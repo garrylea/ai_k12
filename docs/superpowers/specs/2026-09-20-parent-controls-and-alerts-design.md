@@ -223,11 +223,13 @@ UX §P6.6 全文只有三行：
 - 标记**夹在句子中间**（非独占一行，如 `……<!--topic:off-->……`）→ **不**判闲聊。
 > 旧实现的正则带 `m` 但不锚定末尾，任何独占一行的标记都会判闲聊 —— 比本节要求**宽**，属静默偏离，已收紧。**位置之外的宽松点**：剥离是**另一条规则**（见下），它不看位置，因此正文中段独占一行的标记仍会被**剥离**（但**不**判闲聊）。
 
-**剥离规则**：凡是**独占一行**的标记一律删掉（**不管它在第几行**），保证「标记永不进学生可见内容与历史」（§3.2 的核心要求）。夹在句子中间的（非独占一行）不匹配、保持原样。实现用**全局**替换（`replace` 带 `g`）并去掉首尾多余换行 —— 模型若写了两遍标记，两处都要清掉（只去第一处会让第二处残留进学生可见内容）。
+**剥离规则**：凡是**独占一行**的标记一律删掉（**不管它在第几行**），保证「标记永不进学生可见内容与历史」（§3.2 的核心要求）。夹在句子中间的（非独占一行）不匹配、保持原样。实现用**全局**替换（`replace` 带 `g`）并去掉首尾多余换行 —— 模型若写了两遍标记，两处都要清掉（只去第一处会让第二处残留进学生可见内容）。换行**同时容忍 LF 与 CRLF**（`\r?\n`）：检测走 `trimEnd()`（`\r` 属空白，故能认 CRLF 的末行），剥离必须与之**口径对称**，否则模型若用 CRLF 换行会「判了闲聊却剥不掉」、标记泄漏进学生可见内容与持久化历史（Task 5 fix wave 2 修的回归）。删标记时**保留原有行尾风格**（不把 CRLF 打成 LF），也不合并相邻两行。
 
 **⚠️ 必须同时回写 `ai_messages.safety_flag`（否则会打坏既有功能）**：现在 `safety_flag` 的唯一来源是「助手回复的 `type === 'block'`」（`services/conversation/index.ts:144`、`modules/conversations/conversations.service.ts:199`）。闲聊不再硬阻断 ⇒ 不再有 `block` 消息 ⇒ **`safety_flag` 将永远是 0，家长端「对话回放」页的「闲聊/偏离学习」标签与「闲聊 N」计数会全部归零**（`parent-insights.repo.ts:673` 的 `block_count`、`ParentChatLogsPage.tsx:66,410`）。
 
-因此：给 `saveMessages` 的消息对象加**可选** `safetyFlag?: boolean`，取值规则改为 `msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)`；两条入口保存 assistant 消息时传 `safetyFlag: offTopic`。
+因此：给 `saveMessages` 的消息对象加**可选** `safetyFlag?: boolean`，取值规则改为 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))`；两条入口保存 assistant 消息时传 `safetyFlag: offTopic`。
+
+> **⚠️ 外层 `Number(...)` 必需，别当多余代码删掉**（Task 5 实现时踩过）：`safetyFlag` 是 `boolean`，`??` 会**原样返回它**（`true` 而非 `1`），而 `ai_messages.safety_flag` / `safety_alerts` 的列类型是 INT。**`tsc` 不报这个错** —— `AiMessageRow extends RowDataPacket` 带 `[column: string]: any` 索引签名（`types.ts:26`），而 `createMany` 的入参是 `Omit<AiMessageRow, …>`；`Omit` 用 `keyof`（被索引签名撑成 `string | number`）把具名属性**全部抹成 `any`**，于是类型检查不再约束 `safety_flag`。不加 `Number(...)` 的后果：单测断言 `= 1` 直接红，且真库里靠 mysql2 转义把 `true` 写进 INT 列。**本 spec 这一处是设计真源，plan Step 3 与两处实现（`services/conversation/index.ts`、`modules/conversations/conversations.service.ts`）都必须与之逐处一致**（Task 5 fix wave 2 发现本行曾被漏改、留下未包 `Number` 的版本）。
 
 **⚠️ 删掉硬阻断后 `safety_flag = 1` 变成「双来源」（用户 2026-09-20 裁决）**：① 模型自报标记（闲聊）；② `type === 'block'`（**现在只剩 anomaly**：情绪/敏感）。两类**都计入**——它们都属于「偏离学习」。因此家长端文案**从「闲聊」改成「偏离学习」**（`ParentChatLogsPage.tsx:66` 的标签、`:410` 的 `闲聊 N` 计数，以及 `services/api.ts:2338` 的注释），否则情绪/敏感轮次会被误标成闲聊。这样「对话回放」的口径从「被阻断的轮次」变成「被判闲聊**或**被阻断的轮次」——**更准确**，但**语义有变**，必须写进 §8 的文档同步与 §9 的限制。
 
@@ -684,3 +686,4 @@ UX §P6.6 全文只有三行：
 | 2026-09-20 | **Task 5 评审收尾（Fix 1）**：§3.2 补**精确**的检测/剥离规则（检测只认「最后一个非空行独占」；剥离对所有独占一行的标记做**全局**替换并去首尾换行）；§9 补两条已知限制（①标记未落末行 → 该轮不判闲聊、由验证门兜住；②sink union 含 `abusive` 但运行时不可达）。plan 同步回写 3 处实现偏离（`Number(...)` 必需、验证门观测点前移、union 扩 `abusive`）与 3 个已知错误代码块，并订正 Step 5 的假钉断言（辅线用例须断言 `classification`/`isLearningRelated`） |
 | 2026-09-20 | 计划评审期补两处裁决：① **`safety_flag` 双来源**（闲聊标记 ∪ anomaly 阻断）都计入，家长端文案从「闲聊」改「偏离学习」（§3.2 / §9 / §8）；② **端点归属**——`controls`/`alerts` 进 `parent-insights.controller.ts`，`account`/`password` 进 `parent.controller.ts` + `ParentService`（§4 开头）。实施计划见 `docs/superpowers/plans/2026-09-20-parent-controls-and-alerts.md` |
 | 2026-09-20 | **Task 4 评审修复**：§9 补一条已知限制——「无 `end` 的会话（浏览器崩溃 / 被强杀 / 断电）不判走神阈值」（评审 M-3；`closeStale` 收尾路径不做判定，本批不改代码） |
+| 2026-09-20 | **Task 5 评审收尾（Fix 2）**：① §3.2 剥离规则补「换行同时容忍 LF 与 CRLF」——检测走 `trimEnd()` 能认 CRLF 末行，剥离正则若只认 `\n` 就会「判了闲聊却剥不掉」（Fix 1 引入的回归，已修）；② §3.2 的 `safety_flag` 取值规则补外层 `Number(...)`（Fix 1 漏改本行，留下会写 boolean 的版本）并附为什么必需 |
