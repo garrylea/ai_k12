@@ -62,7 +62,7 @@
 ### 3.3 服务端：新端点 `GET /parent/alerts/unread`
 
 - 归属：`parent-insights` 模块（`AlertsService` + controller），鉴权同既有 `GET /parent/alerts`（parent 角色，不传 `studentId` = 全部孩子）。
-- 行为：① 取该家长名下全部学生（`studentsRepo.findByParentId`），逐个 `closeStale`（**嵌在业务流里的写入：整段 catch、失败只 warn、绝不阻断响应**）；② 查未读预警。
+- 行为：① 取该家长名下全部学生（`studentsRepo.findByParentId`），逐个 `closeStale`（**嵌在业务流里的写入：整段 catch、失败只 warn、绝不阻断响应**）；② 查未读预警。**可见性口径（评审修订，2026-09-20）**：补判出的预警写入在 `maybeRecordHiddenAlert` 内部仍是 `void`（不破坏该方法的调用纪律），与②的 SELECT 存在竞态——通常**下一次轮询**（30s 内）才出现在响应里，而非本次。
 - 响应：`{ items: [{ id, type, level, message, studentName, createdAt }] , total }`；`items` 截最新 5 条，`total` 为未读总数（banner 文案用）。`level` 供前端区分 Banner 配色（warning/critical → danger 红、info 走神 → warning 橙）。
 - 复用既有 list 仓储的 `unreadOnly` 过滤，不新写查询逻辑。
 - **API 文档同步铁律**：`docs/API接口与数据流设计文档.md` §4 端点清单 + §6.28 口径，与 `docs/api/openapi.yaml` 必须同批更新（含 idle 字面语义变更、补判行为、已知边界）。
@@ -84,7 +84,7 @@
 | 场景 | banner 出现时间 |
 |---|---|
 | 学生心跳活着、阈值到达 | 最坏 ~60s（心跳 0–30s + 轮询 0–30s） |
-| 学生 tab 冻结/关闭（心跳全断） | 家长端开着：最坏 ~30s（一个轮询周期触发补判）；家长不在线：下次登录首次轮询即弹 |
+| 学生 tab 冻结/关闭（心跳全断） | 家长端开着：最坏 ~60s（首个轮询触发补判、下一轮取到）；家长不在线：下次登录后 ~30s 内弹 |
 | idle 5 分钟 | 第 5 分钟（不再 +2） |
 | away 2 分钟 | 第 2 分钟（心跳活着时 2:00–2:30，原行为不变） |
 

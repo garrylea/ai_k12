@@ -297,8 +297,10 @@ export class StudySessionsRepository {
    * 2026-09-20「及时可见」批：先 SELECT 命中行、再 UPDATE，返回**被关会话里 hidden 段的
    * 信息**（student_id / hidden_reason / hidden_since），供 `StudySessionsService.closeStale`
    * 补判走神阈值（spec §3.1：心跳全断的后台冻结 tab 只有这里能得到判定机会）。
-   * SELECT 与 UPDATE 之间的并发窗口无害：另一并发收尾抢先关掉时，本侧 UPDATE 命中 0 行、
-   * 多判的一次被 `SafetyAlertsService` 的 30 分钟去重窗口兜住。
+   * SELECT 与 UPDATE 之间的并发窗口：另一并发收尾抢先关掉时，本侧 UPDATE 命中 0 行，串行的
+   * 重复判定被 `SafetyAlertsService` 的 30 分钟去重窗口兜住；但去重本身是 check-then-insert
+   * （非原子），**并发**双收尾存在毫秒级 TOCTOU 窗口，可能产生重复的 info 级预警（无害，
+   * banner 聚合展示、items 截前 5 条）。
    */
   async closeStale(studentId?: number): Promise<CloseStaleResult> {
     const where = studentId === undefined ? '' : ' AND student_id = ?';

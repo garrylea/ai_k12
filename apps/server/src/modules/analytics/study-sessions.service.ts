@@ -274,6 +274,8 @@ export class StudySessionsService {
       if (hiddenReason !== 'away' && hiddenReason !== 'idle') return;
       if (!hiddenSince) return;
 
+      // ⚠️ 时钟源：hidden_since 由 DB 的 NOW(3) 写入，这里用应用时钟——同机部署两者一致；
+      // 跨机时钟偏差会等量偏移 elapsed（偏小晚报、偏大早报）。
       const rawElapsedSeconds = Math.floor((Date.now() - hiddenSince.getTime()) / 1000);
       // idle 的家长口径是「从最后一次操作起算」（spec §3.2）：hidden_since 建立时距最后一次
       // 操作已过了 120s 检测窗口，补回去才是家长理解的「无操作 N 分钟」。
@@ -305,8 +307,11 @@ export class StudySessionsService {
    * 2026-09-20「及时可见」批（spec §3.1）：收尾出的 hidden 段逐条补判走神阈值——
    * 这是「心跳全断的会话」（后台 tab 被浏览器冻结 / 关闭时 end fetch 被取消）**唯一**的
    * 判定机会。`await` 而不是 `void`：本方法跑在家长查询路径（30s 轮询 / 学情 GET），不是
-   * 学生心跳热路径；且轮询端点希望「本次收尾出的预警」直接出现在本次响应里。
+   * 学生心跳热路径。`await` 的实际收益只是「判定链（阈值查询）在返回前完成」；预警写入本身在
+   * `maybeRecordHiddenAlert` 内部仍是 `void`（不破坏该方法的调用纪律），所以补判出的
+   * 预警**通常出现在下一次轮询**（30s 内）而非本次响应——与 spec §3.5 的验收口径一致。
    * `maybeRecordHiddenAlert` 整段 try/catch 永不 reject，`await` 不引入新失败面。
+   * hidden 段数受「学生的并发 stale 会话数」约束（个位数），逐条判定的 DB 往返可控。
    */
   async closeStale(studentId?: number): Promise<number> {
     const { closedCount, hidden } = await this.repo.closeStale(studentId);
