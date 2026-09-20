@@ -88,7 +88,7 @@ describe('StudySessionsRepository.heartbeat', () => {
 
   it('SET 列顺序是 load-bearing：三个累计列 + hidden_since 的 IF 都必须排在赋值之前', async () => {
     // MySQL 的 SET 从左到右求值，后出现的表达式会看到**已赋值**的新值。
-    // 三个累计列要读**本次上报前**的 client_state / hidden_reason / hidden_since；
+    // 三个累计列要读**本次上报前**的 client_state / hidden_reason / last_heartbeat_at；
     // 一旦把 `client_state = ?` 挪到前面，语句照样能跑，但口径全错、静默算错时长。
     const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 120 }] });
     const repo = new StudySessionsRepository(pool as any);
@@ -125,7 +125,8 @@ describe('StudySessionsRepository.heartbeat', () => {
     expect(activeIdx).toBeLessThan(assignStateIdx);
     expect(activeIdx).toBeLessThan(assignReasonIdx);
     expect(activeIdx).toBeLessThan(assignSinceIdx);
-    // hidden_since 的 IF 读旧 hidden_since → 必须排在两个挂机累计列之后
+    // hidden_since 的 IF 读自己的旧值（COALESCE 保住本段起点）→ 按约定仍排在两个挂机累计列之后，
+    // 让「哪条表达式读旧值」一眼可辨（累计列已不再读 hidden_since，此顺序本身不改变口径）
     expect(assignSinceIdx).toBeGreaterThan(awayIdx);
     expect(assignSinceIdx).toBeGreaterThan(idleIdx);
     // 既有顺序：subject_id 仍在 client_state 之后（别挪到累计列之前，会看不清哪条读旧值）
@@ -140,8 +141,10 @@ describe('StudySessionsRepository.heartbeat', () => {
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain("IF(client_state = 'hidden' AND hidden_reason = 'away'");
     expect(sql).toContain("IF(client_state = 'hidden' AND hidden_reason = 'idle'");
-    // 两条挂机累计都按 hidden_since 差值、同样封顶 45s
-    expect(sql.match(/LEAST\(TIMESTAMPDIFF\(SECOND, hidden_since, NOW\(3\)\), 45\)/g)).toHaveLength(2);
+    // 三条累计（away / idle / active）全部以「上次心跳」为基点，单次封顶 45s
+    expect(sql.match(/LEAST\(TIMESTAMPDIFF\(SECOND, last_heartbeat_at, NOW\(3\)\), 45\)/g)).toHaveLength(3);
+    // hidden_since 只用于维护本段起点，绝不参与秒数累加
+    expect(sql).not.toContain('TIMESTAMPDIFF(SECOND, hidden_since');
     expect(params[1]).toBe('away');
   });
 
@@ -265,6 +268,30 @@ describe('StudySessionsRepository.end', () => {
     const pool = mockPool({ affectedRows: 0, rows: [] });
     const repo = new StudySessionsRepository(pool as any);
     expect(await repo.end('uid-x', 9, 'route_change')).toBeNull();
+  });
+});
+
+describe('StudySessionsRepository 挂机累计差值基点', () => {
+  it('挂机累计的差值基点是 last_heartbeat_at，不是 hidden_since（改回会系统性偏大 1.6×）', async () => {
+    // 心跳间隔 30s、单次封顶 45s：若以「本段起点」hidden_since 为基点，挂机段内每次心跳都会
+    // 按「距起点」重算并加满 45s（45 → 90 → 135），累计系统性偏大 ~1.6×。三条累计列必须与
+    // active_seconds 同源，一律以「上次心跳」last_heartbeat_at 为基点。
+    const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
+    const repo = new StudySessionsRepository(pool as any);
+
+    // heartbeat：away / idle / active 三条累计的基点都是 last_heartbeat_at
+    await repo.heartbeat('uid-1', 9, 'hidden', null, 'away');
+    const [heartbeatSql] = pool.execute.mock.calls[0];
+    expect(heartbeatSql).not.toContain('TIMESTAMPDIFF(SECOND, hidden_since');
+    expect(
+      heartbeatSql.match(/LEAST\(TIMESTAMPDIFF\(SECOND, last_heartbeat_at, NOW\(3\)\), 45\)/g),
+    ).toHaveLength(3);
+
+    // end：同样三条累计，基点也是 last_heartbeat_at（heartbeat 是 UPDATE+SELECT 两条，故 end 的 UPDATE 在 calls[2]）
+    await repo.end('uid-1', 9, 'pagehide');
+    const [endSql] = pool.execute.mock.calls[2];
+    expect(endSql).not.toContain('TIMESTAMPDIFF(SECOND, hidden_since');
+    expect(endSql.match(/LEAST\(TIMESTAMPDIFF\(SECOND, last_heartbeat_at, NOW\(3\)\), 45\)/g)).toHaveLength(3);
   });
 });
 

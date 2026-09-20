@@ -113,14 +113,18 @@ export class StudySessionsRepository {
    * ⚠️ **本语句的列顺序是 load-bearing 的**：MySQL 对单表 `SET` 列表**从左到右**求值，
    * 后出现的表达式若引用前面已赋值的列，读到的是**新值**——并不是「所有表达式都用更新前的值」。
    * 因此**三个累计列 + `hidden_since` 的 `IF`** 必须排在 `client_state = ?` / `hidden_reason = ?` /
-   * `hidden_since = ...` 之前：它们要读的是**本次上报前**的状态与挂机段（上一段是否 visible、
-   * 上一段是 away 还是 idle、上一段从何时开始）。一旦排到后面，语句照样能编译运行，
+   * `hidden_since = ...` 之前：累计列要读的是**本次上报前**的状态（上一段是否 visible、
+   * 上一段是 away 还是 idle）与上次心跳时刻。一旦排到后面，语句照样能编译运行，
    * 但读到的是本次刚写的新值 → hidden 心跳不再补计最后一段 visible、visible 心跳反而把 hidden
    * 期间也计上、挂机秒数按错误口径累加，**静默算错**（有顺序钉子用例守着，别调换）。
    *
    * 三条挂机/时长口径：
-   * - `hidden_away_seconds` / `hidden_idle_seconds`：按**本段起点** `hidden_since` 的差值增量，
-   *   单次封顶 45s（与 `active_seconds` 同规则，防「关标签 2 小时」一次算成 2 小时）。
+   * - `hidden_away_seconds` / `hidden_idle_seconds`：与 `active_seconds` **完全同源**——按
+   *   **上次心跳** `last_heartbeat_at` 的差值增量，单次封顶 45s（防「关标签 2 小时」一次算成 2 小时）。
+   *   ⚠️ **基点必须是 `last_heartbeat_at`，不是 `hidden_since`**（2026-09-20 实施时踩到）：
+   *   心跳间隔 30s，若按本段起点算，挂机段内每次心跳都会按「距起点」重算并加满 45s →
+   *   累计系统性偏大 ~1.6×（实测 45 → 90 → 135）。`hidden_since` 是**另一个**用途：
+   *   给服务层判「这一段连续挂机多久了」（阈值判定），**不参与秒数累加**。
    * - `hidden_since`：`IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)` —— 进入 hidden 时
    *   建立（**已建立则不动**，`COALESCE` 保住本段起点），回到 visible 时清空。
    * - `hidden_reason`：本次上报的原因（visible 时传 `null`）。这是「本段原因」，供 service 判定阈值。
@@ -153,10 +157,10 @@ export class StudySessionsRepository {
       `UPDATE study_sessions
        SET hidden_away_seconds = hidden_away_seconds
              + IF(client_state = 'hidden' AND hidden_reason = 'away',
-                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
            hidden_idle_seconds = hidden_idle_seconds
              + IF(client_state = 'hidden' AND hidden_reason = 'idle',
-                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
            active_seconds = active_seconds
              + IF(client_state = 'visible',
                   GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
@@ -190,8 +194,8 @@ export class StudySessionsRepository {
   }
 
   /**
-   * 结束会话：先补计最后一段（同心跳的封顶规则与**同一 SET 顺序规则**，但**不改** `client_state`
-   * 与挂机三列），再落状态。
+   * 结束会话：先补计最后一段（同心跳的封顶规则与差值基点 `last_heartbeat_at`、**同一 SET 顺序规则**，
+   * 但**不改** `client_state` 与挂机三列），再落状态。
    *
    * 为什么也要累加挂机秒数：`pagehide` 触发的结束之后不会再有心跳，最后这一段挂机不补就会整段丢失
    * （spec §3.3 的「判定时机两处」同源）。`end` 不写 `client_state` / `hidden_since` / `hidden_reason`，
@@ -217,10 +221,10 @@ export class StudySessionsRepository {
       `UPDATE study_sessions
        SET hidden_away_seconds = hidden_away_seconds
              + IF(client_state = 'hidden' AND hidden_reason = 'away',
-                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
            hidden_idle_seconds = hidden_idle_seconds
              + IF(client_state = 'hidden' AND hidden_reason = 'idle',
-                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)), 45)), 0),
+                  GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
            active_seconds = active_seconds
              + IF(client_state = 'visible',
                   GREATEST(0, LEAST(TIMESTAMPDIFF(SECOND, last_heartbeat_at, NOW(3)), 45)), 0),
