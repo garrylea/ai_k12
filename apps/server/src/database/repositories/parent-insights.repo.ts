@@ -638,8 +638,11 @@ ${windowed.sql}
    * 家长端会话列表（只读、分页）。`messageCount` / `blockCount` 由 JOIN 聚合带出，
    * 避免「先查会话再逐条查消息数」的 N+1。
    *
-   * `blockCount` = 该会话里 `safety_flag = 1` 的消息数（温和阻断落库时就置 1），
-   * 前端据此给「闲聊/偏离学习」打红色标记——本批唯一有真数据的预警信号。
+   * `blockCount` = 该会话里 `safety_flag = 1` 的消息数（「偏离学习」）→ 前端据此打红色标记。
+   * `safety_flag = 1` 有**两个来源**（Task 5 起，2026-09-20 裁决）：① 模型自报闲聊标记
+   * （`tutor`/`tutorStream` 保存助手消息时写 `safetyFlag: offTopic`）；② 助手消息
+   * `type === 'block'`（删掉闲聊硬阻断后**只剩 anomaly**：情绪 / 敏感被阻断）。
+   * 两类都算「偏离学习」，故前端文案是「偏离学习」而非「闲聊」（那会把情绪/敏感误标成闲聊）。
    *
    * **`updatedAt` 是「最后一条消息时间」，不是 `ai_dialogues.updated_at`。**
    * 为什么不能直接用那一列：追加消息只 `INSERT INTO ai_messages`，**不 UPDATE 对话行**，
