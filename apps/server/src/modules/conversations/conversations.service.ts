@@ -183,6 +183,12 @@ export class ConversationsService {
     studentId: number,
     content: string,
     type: AiMessageRow['type'] = 'socratic',
+    /**
+     * 是否记为「偏离学习」（写 `safety_flag = 1`）。与 `ConversationService.saveMessages`
+     * 的同名可选字段同口径（spec §3.2）：显式传入时优先，未传时回落到 `type === 'block'`
+     * 推导 —— 删掉 off_topic 硬阻断后，`type === 'block'` 只剩 anomaly（情绪 / 敏感）。
+     */
+    safetyFlag?: boolean,
   ) {
     await this.get(dialogueId, studentId);
     await this.messagesRepo.create({
@@ -196,7 +202,9 @@ export class ConversationsService {
       token_input: null,
       token_output: null,
       response_time_ms: null,
-      safety_flag: type === 'block' ? 1 : 0,
+      // 与 `ConversationService.saveMessages` 同一表达式（`Number(...)` 是必需的：
+      // `safetyFlag` 是 boolean，`??` 会原样返回它，而列是 INT）。
+      safety_flag: Number(safetyFlag ?? (type === 'block' ? 1 : 0)),
     });
   }
 }

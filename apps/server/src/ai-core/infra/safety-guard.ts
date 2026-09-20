@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
-import type { SafetyCheckRequest, SafetyCheckResult, Message, Classification, AnomalyType, AlertLevel } from '../types.js';
+import type { SafetyCheckRequest, SafetyCheckResult, Message, Classification, AnomalyType } from '../types.js';
 import { contentToText } from '../types.js';
 import { safetyConfig } from '../config.js';
 
@@ -56,21 +56,6 @@ export class SafetyGuard {
   async check(request: SafetyCheckRequest): Promise<SafetyCheckResult> {
     const classification = this.classifyByKeywords(request.message);
 
-    // Auxiliary (free-exploration) track supports all K12 subjects. Its keyword
-    // classifier is math-centric, so non-math subjects (语文/物理/英语…) and
-    // image captions would be false-positive off_topic. Delegate subject
-    // relevance to the model (the prompt's 学科范围 rule redirects genuinely
-    // non-K12 content); here we only block anomaly/abuse (handled below).
-    // hasImage is subsumed (images only arrive in auxiliary).
-    if (classification.classification === 'off_topic' && request.track === 'auxiliary') {
-      return {
-        isLearningRelated: true,
-        classification: 'learning',
-        alertLevel: 'none',
-        shouldBlock: false,
-      };
-    }
-
     if (classification.classification === 'learning') {
       return {
         isLearningRelated: true,
@@ -80,28 +65,18 @@ export class SafetyGuard {
       };
     }
 
+    // 2026-09-20：闲聊**不再硬阻断**（spec §3.1）。关键词分类器对语文/英语理解题误判率
+    // 过高（实测 6/12，spec §2.1），拿它当门禁会把正常学习提问拒掉。改由模型自报标记
+    // （spec §3.2）判定并写入预警 —— 这里只如实报告「与学习无关」，不拦、不报警。
+    // 辅线豁免段随之删除：既然两条轨都不拦，就没有「豁免」这回事了。
+    // 注：`countConsecutiveOffTopic` 与 `safetyConfig.safety.off_topic.*` 保留但不再被
+    // 本方法调用（spec §9「预留未用」），删掉会与 spec §9 冲突。
     if (classification.classification === 'off_topic') {
-      const consecutiveCount = this.countConsecutiveOffTopic(request.dialogueHistory);
-      let alertLevel: AlertLevel = 'info';
-      if (consecutiveCount >= safetyConfig.safety.off_topic.criticalThreshold) {
-        alertLevel = 'critical';
-      } else if (consecutiveCount >= safetyConfig.safety.off_topic.escalateThreshold) {
-        alertLevel = 'warning';
-      }
-
       return {
         isLearningRelated: false,
         classification: 'off_topic',
-        alertLevel,
-        shouldBlock: true,
-        blockResponse: this.pickGentleBlockMessage('off_topic'),
-        alertPayload: alertLevel !== 'info' ? {
-          studentId: request.studentId,
-          level: alertLevel,
-          type: 'off_topic',
-          message: request.message,
-          timestamp: new Date(),
-        } : undefined,
+        alertLevel: 'none',
+        shouldBlock: false,
       };
     }
 

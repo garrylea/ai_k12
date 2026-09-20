@@ -118,13 +118,27 @@ describe('ParentChatLogsPage', () => {
     expect(screen.queryByTestId('chatlog-block-badge-56')).not.toBeInTheDocument();
   });
 
-  it('点会话 → 拉详情并逐句渲染；block 消息红色标记 + reasoning 折叠', async () => {
+  it('计数文案是「偏离学习 N」，不含「闲聊」（2026-09-20 口径变更）', async () => {
+    // `safety_flag = 1` 现在有两个来源（模型自报闲聊 / anomaly 阻断），两类都属
+    // 「偏离学习」；旧文案「闲聊 N」会把情绪 / 敏感轮次误标成闲聊。
+    renderAt('/parent/chat-logs');
+
+    const badge = await screen.findByTestId('chatlog-block-badge-55');
+    expect(badge).toHaveTextContent('偏离学习 2');
+    expect(badge).not.toHaveTextContent('闲聊');
+  });
+
+  it('点会话 → 拉详情并逐句渲染；偏离学习消息红色标记 + reasoning 折叠', async () => {
     renderAt('/parent/chat-logs');
     await screen.findByTestId('chatlog-item-55');
 
     fireEvent.click(screen.getByTestId('chatlog-item-55'));
 
-    expect(await screen.findByTestId('chatlog-message-203')).toHaveTextContent('闲聊/偏离学习');
+    // 2026-09-20 口径变更：`safety_flag = 1` 的两个来源（模型自报闲聊 / anomaly 阻断）
+    // 都属「偏离学习」，标签不再是「闲聊/偏离学习」。
+    const row = await screen.findByTestId('chatlog-message-203');
+    expect(row).toHaveTextContent('偏离学习');
+    expect(row).not.toHaveTextContent('闲聊');
     // reasoning 默认折叠
     expect(screen.queryByTestId('chatlog-reasoning-202')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /看 AI 思路/ }));

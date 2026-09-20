@@ -55,7 +55,10 @@ function MessageRow({
       className={clsx(
         'rounded-[var(--radius-card)] p-3 text-sm',
         isUser ? 'bg-[var(--brand-100)]' : 'bg-[var(--bg-subtle)]',
-        // 闲聊/偏离学习：红色边框 + 红字标签（本批唯一有真数据的预警信号）
+        // 偏离学习：红色边框 + 红字标签（本批唯一有真数据的预警信号）。
+        // `safety_flag = 1` 有两个来源（2026-09-20 裁决）：模型自报闲聊、或助手消息
+        // `type === 'block'`（现在只剩 anomaly：情绪 / 敏感被阻断）。两类都算「偏离学习」，
+        // 故文案不用「闲聊」（那会把情绪/敏感轮次误标成闲聊）。
         isBlocked && 'border border-[var(--error)]',
       )}
     >
@@ -63,7 +66,7 @@ function MessageRow({
         <span className="text-xs font-semibold text-[var(--text-secondary)]">
           {isUser ? '孩子' : 'AI'}
         </span>
-        {isBlocked && <Tag variant="hard">闲聊/偏离学习</Tag>}
+        {isBlocked && <Tag variant="hard">偏离学习</Tag>}
         {message.type && !isBlocked && (
           <span className="text-xs text-[var(--text-tertiary)]">{message.type}</span>
         )}
@@ -407,7 +410,7 @@ export default function ParentChatLogsPage() {
                             data-testid={`chatlog-block-badge-${item.id}`}
                             className="rounded-full bg-[var(--error)] px-2 py-0.5 text-[10px] font-bold text-white"
                           >
-                            {`闲聊 ${item.blockCount}`}
+                            {`偏离学习 ${item.blockCount}`}
                           </span>
                         )}
                       </div>

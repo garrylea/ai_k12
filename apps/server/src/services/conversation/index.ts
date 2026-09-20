@@ -141,7 +141,15 @@ export class ConversationService {
       token_input: null,
       token_output: null,
       response_time_ms: null,
-      safety_flag: msg.type === 'block' ? 1 : 0,
+      // `safety_flag = 1` 的两个来源（spec §3.2，用户 2026-09-20 裁决）：
+      //   ① 模型自报闲聊 → 调用方显式传 `safetyFlag: true`；
+      //   ② `type === 'block'`（现在只剩 anomaly：情绪 / 敏感被阻断）。
+      // 未传时回落 ②，保持既有调用方行为不变。
+      // ⚠️ 必须 `Number(...)` 包一层：`safetyFlag` 是 boolean，`??` 会**原样返回**它
+      // （`true` 而非 1），而列类型是 INT（`AiMessageRow.safety_flag: number`）。
+      // mysql2 的 `RowDataPacket` 带 `[column: string]: any` 索引签名，会**吞掉**这个
+      // 类型错，`tsc` 不会报——只能靠这里显式收敛（2026-09-20 实测）。
+      safety_flag: Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0)),
     }));
     await this.messagesRepo.createMany(rows);
   }

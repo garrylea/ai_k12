@@ -32,9 +32,51 @@ const StructuredQuestionOutputSchema = z.object({
   quality: z.enum(['good', 'poor']),
 });
 
+/**
+ * 预警类型（写入 `safety_alerts.type`）。比 spec §3.1 的三类多一个 `abusive`：
+ * `SafetyGuard.detectAnomalyType` 的返回类型是 `AnomalyType`（含 `abusive`），
+ * anomaly 分支把 `alertPayload.type` 原样透传到这里，不收窄就无法通过 `tsc`；
+ * `SafetyAlertsService.messageFor('abusive')` 也已覆盖（→ 敏感文案），与
+ * `pickGentleBlockMessage` 的 abusive→sensitive 约定同源。运行时不可达（检测器不发它）。
+ */
+export type SafetyAlertSignalType = 'off_topic' | 'emotional' | 'sensitive' | 'abusive';
+
+/**
+ * 预警写入的抽象（spec §3.1）。实现在 `modules/safety/SafetyAlertsService`，
+ * 由 `ai.module.ts` 的 factory 注入 —— ai-core 不依赖 Nest/DB。
+ * **约定：`record` 同步返回且永不抛**（实现方负责吞错）。
+ */
+export interface SafetyAlertSink {
+  record(input: {
+    studentId: number;
+    dialogueId: number | null;
+    type: SafetyAlertSignalType;
+    level: 'info' | 'warning' | 'critical';
+    message: string;
+    context: string | null;
+  }): void;
+}
+
 export interface TutoringCapabilityDeps {
   modelClient?: ModelClient;
+  safetyAlerts?: SafetyAlertSink;
 }
+
+/**
+ * 面向家长的文案表（spec §3.4）。⚠️ 与 `modules/safety/safety-alerts.service.ts` 的
+ * `SafetyAlertsService.messageFor` **逐字一致** —— 两份文案在两个文件里，将来一定会漂，
+ * 所以 `tutoring.capability.test.ts` 有一条「真实调用 `messageFor` 逐字比对」的钉子。
+ */
+const PARENT_MESSAGE: Record<SafetyAlertSignalType, string> = {
+  off_topic: '检测到孩子在学习中发起了与学习无关的闲聊',
+  emotional: '检测到孩子出现情绪发泄类输入',
+  sensitive: '检测到敏感内容输入，建议尽快关注',
+  // abusive 与 messageFor 同源：复用敏感文案
+  abusive: '检测到敏感内容输入，建议尽快关注',
+};
+
+/** 模型自报的闲聊标记（spec §3.2）：独占最后一行、HTML 注释形式（学生端渲染不可见）。 */
+const OFF_TOPIC_MARKER = /^[ \t]*<!--\s*topic:off\s*-->[ \t]*$/m;
 
 // Result of the shared pre-model prepare() step. shortCircuit = fallback/block
 // (persistence already done, ready to return/yield). stream = ready to call the
@@ -57,6 +99,8 @@ export class TutoringCapability {
   private responseParser: ResponseParser;
   private fallbackHandler: FallbackHandler;
   private conversationService: ConversationService;
+  /** 预警 sink；未接线（脚本/测试）时为 undefined，`recordSafetySignals` 静默跳过。 */
+  private safetyAlerts?: SafetyAlertSink;
 
   constructor(conversationService: ConversationService, deps?: TutoringCapabilityDeps) {
     this.modelRouter = new ModelRouter(getModelConfigRegistry());
@@ -70,6 +114,7 @@ export class TutoringCapability {
       modelRouter: this.modelRouter,
     });
     this.conversationService = conversationService;
+    this.safetyAlerts = deps?.safetyAlerts;
   }
 
   async tutor(request: TutoringRequest): Promise<TutoringResponse> {
@@ -87,17 +132,27 @@ export class TutoringCapability {
       timeout: timeoutConfig.timeout.tutoring ?? timeoutConfig.timeout.default,
     });
 
-    // Step 7: Parse + strip structured-question JSON block.
-    const { content, structuredQuestion } = this.parseContent(chatResponse.content);
+    // Step 7: Parse + strip structured-question JSON block + 闲聊标记。
+    const { content, structuredQuestion, offTopic } = this.parseContent(chatResponse.content);
 
     // Step 8: Persist. Step 9: update fail count.
     await this.conversationService.saveMessages({
       dialogueId,
       messages: [
         { role: 'user', content: request.message, attachments: prepared.userAttachments },
-        { role: 'assistant', content, reasoning: chatResponse.reasoningContent, type: 'socratic', model: prepared.routeResult.primary.modelId },
+        { role: 'assistant', content, reasoning: chatResponse.reasoningContent, type: 'socratic', model: prepared.routeResult.primary.modelId, safetyFlag: offTopic },
       ],
     });
+    // 模型自报闲聊 → 写预警（不阻断）。与 `tutorStream` 共用同一入口。
+    if (offTopic) {
+      this.recordSafetySignals({
+        studentId: request.studentId,
+        dialogueId,
+        type: 'off_topic',
+        level: 'warning',
+        studentMessage: request.message,
+      });
+    }
     const isAnswerWrong = this.detectWrongAnswer(content);
     await this.conversationService.updateFailCount({ dialogueId, increment: isAnswerWrong });
 
@@ -193,8 +248,8 @@ export class TutoringCapability {
       return;
     }
 
-    // Step 7: strip structured-question JSON block from displayed content.
-    const { content: finalContent, structuredQuestion } = this.parseContent(content);
+    // Step 7: strip structured-question JSON block + 闲聊标记 from displayed content.
+    const { content: finalContent, structuredQuestion, offTopic } = this.parseContent(content);
     if (finalContent !== content) {
       // Replace the streamed (raw) content with the cleaned version.
       yield { type: 'content', delta: finalContent, replace: true };
@@ -202,13 +257,24 @@ export class TutoringCapability {
 
     // Step 8-9: persist + fail count. On retry, the user message is already
     // stored, so persist the assistant reply only.
-    const finalAssistant = { role: 'assistant' as const, content: finalContent, reasoning, type: 'socratic' as const, model: prepared.routeResult.primary.modelId };
+    const finalAssistant = { role: 'assistant' as const, content: finalContent, reasoning, type: 'socratic' as const, model: prepared.routeResult.primary.modelId, safetyFlag: offTopic };
     await this.conversationService.saveMessages({
       dialogueId,
       messages: userMessage ? [userMessage, finalAssistant] : [finalAssistant],
     });
     const isAnswerWrong = this.detectWrongAnswer(finalContent);
     await this.conversationService.updateFailCount({ dialogueId, increment: isAnswerWrong });
+
+    // 模型自报闲聊 → 写预警（不阻断）。放在 `done` 之前，与 `tutor` 共用同一入口。
+    if (offTopic) {
+      this.recordSafetySignals({
+        studentId: request.studentId,
+        dialogueId,
+        type: 'off_topic',
+        level: 'warning',
+        studentMessage: request.message,
+      });
+    }
 
     yield { type: 'done', fallback: false, structuredQuestion };
   }
@@ -329,6 +395,22 @@ export class TutoringCapability {
           { role: 'assistant', content: blockResponse, type: 'block' },
         ],
       });
+      // 硬阻断后只剩 anomaly（情绪 / 敏感 / 辱骂）会走到这里 —— `alertPayload` 是
+      // safety-guard 专门构造的预警数据，本批是它**第一次**被真正消费（spec §2.2）。
+      // 写预警在 `saveMessages` 之后、且不阻断返回（整段在 recordSafetySignals 里吞错）。
+      if (safetyResult.alertPayload) {
+        const alert = safetyResult.alertPayload;
+        this.recordSafetySignals({
+          studentId: alert.studentId,
+          dialogueId,
+          type: alert.type,
+          // anomaly 分支的 level 恒为 'warning' | 'critical'（safety-guard.ts），
+          // 但 `SafetyAlert.level` 的类型是更宽的 `AlertLevel`（含 'none'）——
+          // 显式收窄到 sink 接受的集合（'none' 不是 safety_alerts.level 的合法值）。
+          level: alert.level === 'critical' ? 'critical' : 'warning',
+          studentMessage: alert.message,
+        });
+      }
       return {
         kind: 'shortCircuit',
         content: blockResponse,
@@ -384,11 +466,21 @@ export class TutoringCapability {
     return { kind: 'stream', promptResult, routeResult, context, userAttachments };
   }
 
-  // Step 7 helper: parse + strip the structured-question JSON block from the
-  // model reply so history doesn't contain raw JSON.
-  private parseContent(rawContent: string): { content: string; structuredQuestion?: StructuredQuestionOutput } {
+  // Step 7 helper: parse + strip the structured-question JSON block and the
+  // model's self-reported off-topic marker from the reply, so neither the
+  // displayed content nor the persisted history contains them.
+  private parseContent(rawContent: string): {
+    content: string;
+    structuredQuestion?: StructuredQuestionOutput;
+    offTopic: boolean;
+  } {
     const parsed = this.responseParser.parse({ rawContent, mode: 'text' });
     let content = parsed.rawText ?? rawContent;
+
+    // 先剥标记（它比 JSON 块更靠后，且闲聊轮次不会有 JSON 块）
+    const offTopic = OFF_TOPIC_MARKER.test(content);
+    if (offTopic) content = content.replace(OFF_TOPIC_MARKER, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+
     let structuredQuestion: StructuredQuestionOutput | undefined;
     const jsonBlock = this.responseParser.extractJsonBlock(content);
     if (jsonBlock) {
@@ -398,7 +490,38 @@ export class TutoringCapability {
         content = this.responseParser.stripJsonBlock(content);
       }
     }
-    return { content, structuredQuestion };
+    return { content, structuredQuestion, offTopic };
+  }
+
+  /**
+   * 写一条预警。**整段 try/catch + 同步调用**（spec §6 不变量：预警写入永不阻断主链路）。
+   * `tutor` / `tutorStream` / `prepare` 三处共用这**唯一**入口，别各写一份。
+   */
+  private recordSafetySignals(input: {
+    studentId: string;
+    dialogueId: string;
+    type: SafetyAlertSignalType;
+    level: 'info' | 'warning' | 'critical';
+    studentMessage: string;
+  }): void {
+    const sink = this.safetyAlerts;
+    if (!sink) return;                       // 未接线（测试/脚本）→ 静默跳过
+    try {
+      const studentId = Number(input.studentId);
+      if (!Number.isFinite(studentId)) return;
+      const dialogueId = Number(input.dialogueId);
+      sink.record({
+        studentId,
+        dialogueId: Number.isFinite(dialogueId) ? dialogueId : null,
+        type: input.type,
+        level: input.level,
+        message: PARENT_MESSAGE[input.type],
+        context: input.studentMessage.slice(0, 200),
+      });
+    } catch (err) {
+      // sink 本身永不抛；这里是双保险
+      console.warn('[tutoring] 预警写入失败（已忽略）:', err instanceof Error ? err.message : err);
+    }
   }
 
   /**

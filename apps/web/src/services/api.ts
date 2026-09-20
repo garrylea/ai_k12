@@ -2335,7 +2335,11 @@ export interface ParentChatLogItem {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
-  /** 该会话里 `safety_flag = 1` 的消息数（闲聊/偏离学习）→ UI 打红色标记。 */
+  /**
+   * 该会话里 `safety_flag = 1` 的消息数（「偏离学习」）→ UI 打红色标记。
+   * 两个来源（2026-09-20 裁决）：模型自报闲聊、或助手消息 `type === 'block'`
+   * （现在只剩 anomaly：情绪 / 敏感被阻断）。故文案是「偏离学习」而非「闲聊」。
+   */
   blockCount: number;
 }
 

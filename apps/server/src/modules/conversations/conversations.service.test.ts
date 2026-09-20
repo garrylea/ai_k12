@@ -131,4 +131,21 @@ describe('ConversationsService (scene 分型 + 训练讲一讲按题锚定)', ()
     expect(training).toHaveLength(1);
     expect(training[0].scene).toBe('aux_training');
   });
+
+  // --- safety_flag（spec §3.2，2026-09-20 双来源口径）--------------------------
+  // `FakeMessagesRepo.rows` 是**列名键控**的对象，`row.safety_flag` 天然「列↔值配对」；
+  // 每条断言用 content 锚定到具体那一行，不靠数组位置。
+  it('appendAssistantMessage：显式 safetyFlag 优先于 type==="block" 推导，未传时行为不变', async () => {
+    const d = await svc.create(1, { track: 'mainline' });
+    await svc.appendAssistantMessage(d!.id, 1, '闲聊轮', 'socratic', true);   // 模型自报闲聊 → 1
+    await svc.appendAssistantMessage(d!.id, 1, '敏感轮', 'block');            // 未传 → 推导 1
+    await svc.appendAssistantMessage(d!.id, 1, '显式放行', 'block', false);   // 显式优先 → 0
+    await svc.appendAssistantMessage(d!.id, 1, '普通轮', 'socratic');         // 未传 → 0
+
+    const byContent = (text: string) => messages.rows.find((r) => r.content === text)!.safety_flag;
+    expect(byContent('闲聊轮')).toBe(1);
+    expect(byContent('敏感轮')).toBe(1);
+    expect(byContent('显式放行')).toBe(0);
+    expect(byContent('普通轮')).toBe(0);
+  });
 });

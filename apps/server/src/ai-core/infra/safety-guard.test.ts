@@ -81,4 +81,51 @@ describe('SafetyGuard', () => {
     const result = guard.classifyByKeywords('我好烦不想学了');
     expect(result.classification).toBe('anomaly');
   });
+
+  // --- 2026-09-20（spec §3.1）：闲聊不再硬阻断 ---------------------------------
+  // 关键词分类器仍把这类消息判为 off_topic（上面 classifyByKeywords 的断言保留），
+  // 但 check() **不再据此拦截** —— 改由模型自报标记判定 + 写预警。
+  it('主线 off_topic 不再阻断（shouldBlock=false，且不带 blockResponse/alertPayload）', async () => {
+    const result = await guard.check({
+      studentId: '1',
+      message: '今天天气真好，想出去玩',
+      dialogueHistory: [],
+      track: 'mainline',
+    });
+
+    expect(result.classification).toBe('off_topic');
+    expect(result.isLearningRelated).toBe(false);
+    expect(result.shouldBlock).toBe(false);
+    expect(result.blockResponse).toBeUndefined();
+    // off_topic 的 alertPayload 随旧分支一并删除（spec §2.2）—— 闲聊的预警改由
+    // 模型自报标记在 tutoring 侧写（type='off_topic'），不从这里出。
+    expect(result.alertPayload).toBeUndefined();
+  });
+
+  it('辅线 off_topic 同样不再阻断（豁免段删除后两条轨都不拦）', async () => {
+    const result = await guard.check({
+      studentId: '1',
+      message: '今天天气真好，想出去玩',
+      dialogueHistory: [],
+      track: 'auxiliary',
+    });
+
+    expect(result.shouldBlock).toBe(false);
+  });
+
+  it('anomaly 仍阻断且带 alertPayload（情绪/敏感行为不变）', async () => {
+    const result = await guard.check({
+      studentId: '1',
+      message: '我好烦不想学了',
+      dialogueHistory: [],
+      track: 'mainline',
+    });
+
+    expect(result.classification).toBe('anomaly');
+    expect(result.anomalyType).toBe('emotional');
+    expect(result.shouldBlock).toBe(true);
+    expect(result.blockResponse).toBeTruthy();
+    expect(result.alertPayload?.type).toBe('emotional');
+    expect(result.alertPayload?.level).toBe('warning');
+  });
 });

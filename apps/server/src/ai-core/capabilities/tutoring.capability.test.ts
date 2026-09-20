@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TutoringCapability } from './tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
+import { SafetyAlertsService } from '../../modules/safety/safety-alerts.service.js';
 import { ModelClient } from '../infra/model-client/index.js';
 import { contentToText } from '../types.js';
-import type { ChatResponse } from '../types.js';
+import type { ChatResponse, StreamEvent } from '../types.js';
 
 class FakeDialoguesRepo {
   rows: any[] = [];
@@ -42,10 +43,34 @@ class FakeStudentsRepo {
 describe('TutoringCapability', () => {
   let convService: ConversationService;
   let dialogueId: number;
+  /**
+   * 暴露消息仓储以断言**落库的行对象**。`FakeMessagesRepo.rows` 是**列名键控**的对象
+   * （不是位置数组），所以 `row.safety_flag` 这种断言天然是「列↔值配对」，
+   * 不存在 params 位置错位的风险（见 goals.repo.test.ts 的 zipInsert 注释）。
+   */
+  let messages: FakeMessagesRepo;
+
+  /** `SafetyAlertSink` 的测试替身：记录 tutoring 侧**实际写进 sink** 的入参。 */
+  const mkSink = () => ({ record: vi.fn() });
+
+  /** 非流式模型替身：返回固定 content。 */
+  const mkModel = (content: string) => ({
+    chat: async (): Promise<ChatResponse> => ({
+      id: 'resp_test', model: 'qwen3.8-max', content,
+      finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
+    }),
+  }) as unknown as ModelClient;
+
+  const req = (message: string, mode: 'mainline' | 'auxiliary' = 'mainline') => ({
+    studentId: '1',
+    mode,
+    message,
+    dialogueId: String(dialogueId),
+  });
 
   beforeEach(async () => {
     const dialogues = new FakeDialoguesRepo();
-    const messages = new FakeMessagesRepo();
+    messages = new FakeMessagesRepo();
     const students = new FakeStudentsRepo();
     convService = new ConversationService(dialogues as any, messages as any, students as any, { findContentById: async () => null } as any);
     dialogueId = await convService.createDialogue({
@@ -58,22 +83,152 @@ describe('TutoringCapability', () => {
     });
   });
 
-  it('blocks off-topic messages via safety guard and persists the user message', async () => {
-    const capability = new TutoringCapability(convService);
-    const result = await capability.tutor({
-      studentId: 'student_1',
-      mode: 'mainline',
-      message: '今天天气真好我们去玩吧',
-      dialogueId: String(dialogueId),
-    });
+  it('off_topic 不再被硬阻断：走模型（socratic）且仍持久化学生消息', async () => {
+    // 2026-09-20（spec §3.1）：关键词分类器对语文/英语理解题误判率过高（实测 6/12），
+    // 拿它当门禁会拒掉正常提问。闲聊改由模型自报标记判定 —— 这条消息（无标记）必须
+    // 走 socratic，**不再**出现 type='block'。
+    const capability = new TutoringCapability(convService, { modelClient: mkModel('我们聊点别的吧～') });
+    const result = await capability.tutor(req('今天天气真好我们去玩吧'));
 
-    expect(result.safety.isLearningRelated).toBe(false);
-    expect(result.message.type).toBe('block');
-    // The user's off-topic message must be persisted so consecutive-off-topic
-    // escalation can fire across repeated blocks.
+    expect(result.message.type).toBe('socratic');
+    // 学生消息仍要落库（后续轮次的对话上下文依赖它）
     const persisted = await convService.loadContext(String(dialogueId), 3000);
     expect(persisted!.messages.some(m => m.role === 'user' && contentToText(m.content).includes('今天天气真好'))).toBe(true);
     expect(persisted!.messages.some(m => m.role === 'assistant')).toBe(true);
+  });
+
+  it('① 识别模型自报的闲聊标记并从 content 剥离', async () => {
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('换个话题吧，我们聊聊游戏～\n<!--topic:off-->'),
+    });
+    const result = await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    expect(result.message.content).toBe('换个话题吧，我们聊聊游戏～');
+    expect(result.message.content).not.toContain('<!--topic:off-->');
+    expect(result.message.type).toBe('socratic');
+  });
+
+  it('② 标记不进入历史（saveMessages 收到的 assistant content 不含标记）', async () => {
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('换个话题吧～\n<!--topic:off-->'),
+    });
+    await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    const assistantRow = messages.rows.find((r) => r.role === 'assistant');
+    expect(assistantRow).toBeDefined();
+    expect(assistantRow.content).toBe('换个话题吧～');
+    expect(assistantRow.content).not.toContain('<!--topic:off-->');
+  });
+
+  it('③ 模型没自报标记时不写预警（「没有标记 = 不报警」兜底原则）', async () => {
+    const sink = mkSink();
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('你观察一下等式两边，有什么发现？'),
+      safetyAlerts: sink,
+    });
+    await capability.tutor(req('老师，一元一次方程怎么解？'));
+
+    expect(sink.record).not.toHaveBeenCalled();
+  });
+
+  it('④a tutor：自报闲聊 → 写一条 off_topic/warning 预警', async () => {
+    const sink = mkSink();
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('换个话题吧～\n<!--topic:off-->'),
+      safetyAlerts: sink,
+    });
+    await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    expect(sink.record).toHaveBeenCalledTimes(1);
+    const input = sink.record.mock.calls[0][0];
+    expect(input.type).toBe('off_topic');
+    expect(input.level).toBe('warning');
+    expect(input.studentId).toBe(1);
+    expect(input.dialogueId).toBe(dialogueId);
+    expect(input.context).toBe('你喜欢什么游戏？');
+  });
+
+  it('④b tutorStream：同一入口覆盖 —— 剥离标记 + 写预警 + 回写 safetyFlag', async () => {
+    const sink = mkSink();
+    const modelClient = {
+      streamChat: async function* () {
+        yield { content: '换个话题吧～\n<!--topic:off-->' };
+      },
+    } as unknown as ModelClient;
+    const capability = new TutoringCapability(convService, { modelClient, safetyAlerts: sink });
+
+    const events: StreamEvent[] = [];
+    for await (const ev of capability.tutorStream(req('你喜欢什么游戏？', 'auxiliary'))) {
+      events.push(ev);
+    }
+
+    // 剥离后必须发一条整体替换事件，学生端不会看到标记
+    const replaceEvent = events.find((e) => e.type === 'content' && 'replace' in e && e.replace);
+    expect(replaceEvent).toBeDefined();
+    expect((replaceEvent as { delta: string }).delta).toBe('换个话题吧～');
+    // done 事件仍要发出（预警写在 done 之前，不吞掉它）
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+
+    const assistantRow = messages.rows.find((r) => r.role === 'assistant');
+    expect(assistantRow.content).toBe('换个话题吧～');
+    expect(assistantRow.safety_flag).toBe(1);
+    expect(sink.record).toHaveBeenCalledTimes(1);
+    expect(sink.record.mock.calls[0][0].type).toBe('off_topic');
+  });
+
+  it('⑤ 模型自报闲聊 → 助手消息 safety_flag = 1（不回写家长端计数会归零）', async () => {
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('换个话题吧～\n<!--topic:off-->'),
+    });
+    await capability.tutor(req('你喜欢什么游戏？', 'auxiliary'));
+
+    const assistantRow = messages.rows.find((r) => r.role === 'assistant');
+    expect(assistantRow.safety_flag).toBe(1);
+  });
+
+  it('⑥ anomaly（敏感）轮次仍阻断，且消费 alertPayload 写 level=critical 的预警', async () => {
+    const sink = mkSink();
+    // '这是敏感话题' → classifyByKeywords=anomaly，detectAnomalyType='sensitive' → critical
+    const capability = new TutoringCapability(convService, {
+      modelClient: mkModel('（不该被调用）'),
+      safetyAlerts: sink,
+    });
+    const result = await capability.tutor(req('这是敏感话题'));
+
+    // 阻断行为未变（anomaly 分支不动）
+    expect(result.message.type).toBe('block');
+    expect(result.safety.alertLevel).toBe('critical');
+    // alertPayload 第一次被消费：type/level/context 都来自它
+    expect(sink.record).toHaveBeenCalledTimes(1);
+    const input = sink.record.mock.calls[0][0];
+    expect(input.type).toBe('sensitive');
+    expect(input.level).toBe('critical');
+    expect(input.context).toBe('这是敏感话题');
+  });
+
+  it('⑦ 预警文案表与 SafetyAlertsService.messageFor 逐字一致（跨文件漂移钉子）', async () => {
+    // 真实调用 messageFor（不是把两边的常量都 import 进来比对 —— 那是 a === a，恒真无区分力）
+    const alertsSvc = new SafetyAlertsService({} as any, {} as any);
+
+    const cases: { message: string; mode: 'mainline' | 'auxiliary'; modelContent?: string }[] = [
+      { message: '你喜欢什么游戏？', mode: 'auxiliary', modelContent: '换个话题吧～\n<!--topic:off-->' },
+      { message: '我好烦不想学了', mode: 'mainline' },
+      { message: '这是敏感话题', mode: 'mainline' },
+    ];
+
+    for (const c of cases) {
+      const sink = mkSink();
+      const capability = new TutoringCapability(convService, {
+        modelClient: mkModel(c.modelContent ?? '（不该被调用）'),
+        safetyAlerts: sink,
+      });
+      await capability.tutor(req(c.message, c.mode));
+
+      expect(sink.record).toHaveBeenCalledTimes(1);
+      const written = sink.record.mock.calls[0][0];
+      // 断言的是 tutoring 侧**实际写进 sink 的 message** 与 messageFor 的返回值一致
+      expect(written.message).toBe(alertsSvc.messageFor(written.type));
+    }
   });
 
   it('routes learning messages through socratic flow with mocked model', async () => {

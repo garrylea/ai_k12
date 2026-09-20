@@ -3,6 +3,16 @@
 // 验证模型是否按提示词在「闲聊」轮次输出 `<!--topic:off-->`、在「学习相关」轮次不输出。
 // 走辅线（track=auxiliary）+ 真实模型调用（需 .env 的 QWEN_API_KEY / DEEPSEEK_API_KEY）。
 // Run: npx tsx src/ai-core/__tests__/off-topic-marker.ts
+//
+// ⚠️ 2026-09-20（Task 5）**观测点变更**：`parseContent` 现在会剥离该标记（标记不该进
+// 学生端内容、也不该进历史），所以「标记是否存在」**不能再从 `result.message.content`
+// 观察** —— 旧断言在 Task 5 之后恒为 false（原样重跑会误报 2/3「方案 A 不通过」，
+// 实测原始输出见 `.superpowers/sdd/task-5-report.md`）。
+// 现在从**标记的下游产物**观察：注入一个假 sink，看 tutoring 侧是否真的写了一条
+// `off_topic` 预警（这正是标记在生产里唯一的消费方式）；同时仍断言学生端内容**不含**标记。
+//
+// 另注：`recordSafetySignals` 只接受**数字** studentId（生产是 JWT 的 user.sub），
+// 所以这里传 '1'；传 'test_student' 会因 `Number()` 为 NaN 而被静默跳过。
 
 import { TutoringCapability } from '../capabilities/tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
@@ -72,18 +82,12 @@ class FakeStudentsRepo {
   }
 }
 
-/** 标记是否出现在「最后一行且独占该行」。 */
-function markerPlacement(content: string): { present: boolean; onLastLineAlone: boolean; lineIndex: number } {
-  const lines = content.split('\n');
-  const idx = lines.findIndex((l) => l.includes(MARKER));
-  if (idx === -1) return { present: false, onLastLineAlone: false, lineIndex: -1 };
-  const lastNonEmpty = [...lines].reverse().findIndex((l) => l.trim() !== '');
-  const lastNonEmptyIdx = lastNonEmpty === -1 ? -1 : lines.length - 1 - lastNonEmpty;
-  return {
-    present: true,
-    onLastLineAlone: idx === lastNonEmptyIdx && lines[idx].trim() === MARKER,
-    lineIndex: idx,
-  };
+/** 假 sink：记录 tutoring 侧实际写进来的预警（`off_topic` 是标记的唯一消费方式）。 */
+class FakeSafetyAlerts {
+  calls: { type: string; level: string; message: string; context: string | null }[] = [];
+  record(input: { type: string; level: string; message: string; context: string | null }): void {
+    this.calls.push(input);
+  }
 }
 
 async function run(): Promise<void> {
@@ -109,7 +113,8 @@ async function run(): Promise<void> {
       currentQuestion: { content: '解方程 2x+3=7', answer: 'x=2' },
     });
 
-    const capability = new TutoringCapability(convService);
+    const safety = new FakeSafetyAlerts();
+    const capability = new TutoringCapability(convService, { safetyAlerts: safety as any });
 
     console.log('='.repeat(72));
     console.log(`[${sample.id}] ${sample.label}`);
@@ -117,22 +122,25 @@ async function run(): Promise<void> {
 
     try {
       const result = await capability.tutor({
-        studentId: 'test_student',
+        studentId: '1',
         mode: 'auxiliary',
         message: sample.studentMessage,
         dialogueId: String(dialogueId),
       });
 
       const content = result.message.content ?? '';
-      const placement = markerPlacement(content);
-      const ok = placement.present === sample.expectMarker;
+      const offTopicSignals = safety.calls.filter((c) => c.type === 'off_topic');
+      const signalRecorded = offTopicSignals.length > 0;
+      const markerLeaked = content.includes(MARKER);
+      const ok = signalRecorded === sample.expectMarker && !markerLeaked;
 
-      console.log(`--- 模型原始回复（${content.length} 字）---`);
+      console.log(`--- 模型回复（已剥离标记，${content.length} 字）---`);
       console.log(content);
       console.log('--- 检测 ---');
-      console.log(`标记存在：${placement.present}（期望 ${sample.expectMarker}）`);
-      if (placement.present) {
-        console.log(`标记所在行号：${placement.lineIndex}；独占最后一行：${placement.onLastLineAlone}`);
+      console.log(`模型自报闲聊（sink 收到 off_topic 预警）：${signalRecorded}（期望 ${sample.expectMarker}）`);
+      console.log(`标记残留于学生端内容：${markerLeaked}（期望 false）`);
+      if (signalRecorded) {
+        console.log(`预警 level：${offTopicSignals[0].level}；context：${offTopicSignals[0].context}`);
       }
       console.log(`结果：${ok ? 'PASS' : 'FAIL'}`);
       if (ok) passed++;

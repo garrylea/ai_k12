@@ -616,6 +616,18 @@ export interface SaveMessageEntry {
   tokenInput?: number;
   tokenOutput?: number;
   latencyMs?: number;
+  /**
+   * 是否把该条消息记为「偏离学习」（写 `ai_messages.safety_flag = 1`）。
+   *
+   * 语义变更（2026-09-20）：过去 `safety_flag` 的唯一来源是「助手回复的
+   * `type === 'block'`」（即被硬阻断的轮次）。删掉 off_topic 硬阻断后，闲聊
+   * 不再产生 `block` 消息，改由**模型自报标记**（`tutoring.capability` 的
+   * `offTopic`）显式传入 —— 否则家长端「对话回放」的偏离学习标签与计数会**全部归零**。
+   * 现在 `safety_flag = 1` 有两个来源：① 被判闲聊（本字段）；② `type === 'block'`
+   * （现在只剩 anomaly：情绪 / 敏感）。
+   * 未传时回落到 `type === 'block'` 推导（向后兼容）。
+   */
+  safetyFlag?: boolean;
   // Durable attachment URLs (e.g. /uploads/xxx.jpg) to persist alongside the
   // message so history can re-render images. Base64 data URLs are NOT stored
   // here (too large) - only the server URL.

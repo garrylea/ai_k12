@@ -55,18 +55,41 @@ const SAMPLES: SafetySample[] = [
   { id: 's_026', message: '你去过北京吗？', expectedClassification: 'off_topic' },
 ];
 
-function runSafetyTests(): void {
+async function runSafetyTests(): Promise<void> {
   const guard = new SafetyGuard();
   let correct = 0;
 
   for (const sample of SAMPLES) {
     const result = guard.classifyByKeywords(sample.message);
-    const isCorrect = result.classification === sample.expectedClassification;
-    if (isCorrect) {
+    const classificationOk = result.classification === sample.expectedClassification;
+
+    // 2026-09-20（spec §3.1）：闲聊**不再硬阻断**。off_topic 样本额外断言
+    // `check()` 不判 shouldBlock —— 关键词分类器仍把它判为 off_topic（上面那条断言保留，
+    // 它是分类器本身的回归钉子），但**不再据此拦截**：旧行为拿这个门禁会拒掉正常提问
+    // （语文/英语理解题误判率实测 6/12，spec §2.1）。
+    let shouldBlockOk = true;
+    if (sample.expectedClassification === 'off_topic') {
+      const checked = await guard.check({
+        studentId: '1',
+        message: sample.message,
+        dialogueHistory: [],
+        track: 'mainline',
+      });
+      shouldBlockOk = checked.shouldBlock === false;
+    }
+
+    if (classificationOk && shouldBlockOk) {
       correct++;
-    } else {
+      continue;
+    }
+    if (!classificationOk) {
       console.log(
         `[MISMATCH] ${sample.id}: "${sample.message}" -> got "${result.classification}", expected "${sample.expectedClassification}"`,
+      );
+    }
+    if (!shouldBlockOk) {
+      console.log(
+        `[MISMATCH] ${sample.id}: "${sample.message}" -> check() 仍判 shouldBlock=true（闲聊已不硬阻断）`,
       );
     }
   }
@@ -75,4 +98,4 @@ function runSafetyTests(): void {
   console.log(`\nSafety Classification Accuracy: ${correct}/${SAMPLES.length} (${accuracy}%)`);
 }
 
-runSafetyTests();
+void runSafetyTests();
