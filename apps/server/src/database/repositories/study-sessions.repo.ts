@@ -59,6 +59,7 @@ export interface ClosedHiddenSession {
 
 export interface CloseStaleResult {
   closedCount: number;
+  /** 可含本次 UPDATE 未命中的行（SELECT→UPDATE 并发窗口），消费方按「SELECT 时点曾挂机」理解。 */
   hidden: ClosedHiddenSession[];
 }
 

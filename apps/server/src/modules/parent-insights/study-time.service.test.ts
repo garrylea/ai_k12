@@ -18,7 +18,8 @@ function makeRepo(overrides: Partial<Record<string, unknown>> = {}) {
 const makeControls = (limit: number | null) =>
   ({ findDailyTimeLimit: vi.fn().mockResolvedValue(limit) } as unknown as ControlsRepository);
 
-const makeSessions = () => ({ closeStale: vi.fn().mockResolvedValue(0) } as unknown as StudySessionsService);
+const makeSessions = () =>
+  ({ closeStale: vi.fn().mockResolvedValue({ closedCount: 0, hidden: [] }) } as unknown as StudySessionsService);
 
 describe('StudyTimeService.getStudyTime', () => {
   it('组装窗口、总量、按天/模块/学科，并回显 source=sessions', async () => {

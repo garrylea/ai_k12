@@ -427,6 +427,8 @@ describe('StudySessionsRepository.closeStale', () => {
     const pool = mockPool({ affectedRows: 0 });
     const repo = new StudySessionsRepository(pool as any);
     await repo.closeStale();
+    const [selectSql] = pool.execute.mock.calls[0];
+    expect(selectSql).not.toContain('student_id = ?');
     const [updateSql] = pool.execute.mock.calls[1];
     const [, updateParams] = pool.execute.mock.calls[1];
     expect(updateSql).not.toContain('student_id = ?');

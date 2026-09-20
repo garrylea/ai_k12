@@ -319,6 +319,22 @@ describe('StudySessionsService.heartbeat', () => {
     expect(safety.record).not.toHaveBeenCalled();
   });
 
+  it('idle 等值边界：有效经过恰好 == 阈值（3 分钟 + 120s = 300s == 5 分钟）→ 也报', async () => {
+    const since = new Date(Date.now() - 3 * 60_000);
+    const repo = makeRepo({
+      heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 100, hiddenSince: since, hiddenReason: 'idle' }),
+    });
+    const safety = makeSafety();
+    const controls = makeControls({
+      findAlertThresholds: vi.fn().mockResolvedValue({ awayMinutes: 2, idleMinutes: 5 }),
+    });
+    const service = makeService(repo, makeSubjects(), safety, controls);
+
+    await service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'idle' });
+
+    await vi.waitFor(() => expect(safety.record).toHaveBeenCalledTimes(1));
+  });
+
   it('未达阈值 → 不写预警（away 4 分钟 < 默认 5 分钟）', async () => {
     const since = new Date(Date.now() - 4 * 60_000);
     const repo = makeRepo({
@@ -563,5 +579,61 @@ describe('StudySessionsService.end', () => {
     await expect(
       service.end({ studentId: 9, sessionUid: baseInput().sessionUid, reason: 'rage_quit' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('StudySessionsService.closeStale（补判）', () => {
+  it('收尾出的 hidden 会话超阈值 → 补写预警（后台 tab 冻结 / end 丢失场景）', async () => {
+    const since = new Date(Date.now() - 30 * 60_000); // 30 分钟前开始挂机
+    const repo = makeRepo({
+      closeStale: vi.fn().mockResolvedValue({
+        closedCount: 1,
+        hidden: [{ studentId: 9, hiddenReason: 'away', hiddenSince: since }],
+      }),
+    });
+    const safety = makeSafety();
+    const service = makeService(repo, makeSubjects(), safety, makeControls());
+
+    const closed = await service.closeStale(9);
+
+    expect(closed).toBe(1);
+    expect(safety.record).toHaveBeenCalledWith({
+      studentId: 9,
+      dialogueId: null,
+      type: 'away',
+      level: 'info',
+      message: 'msg:away:30',
+      context: 'ctx:away:30',
+    });
+  });
+
+  it('收尾出的 hidden 会话走 idle 补偿口径', async () => {
+    const since = new Date(Date.now() - (3 * 60_000 + 50_000));
+    const repo = makeRepo({
+      closeStale: vi.fn().mockResolvedValue({
+        closedCount: 1,
+        hidden: [{ studentId: 9, hiddenReason: 'idle', hiddenSince: since }],
+      }),
+    });
+    const safety = makeSafety();
+    const controls = makeControls({
+      findAlertThresholds: vi.fn().mockResolvedValue({ awayMinutes: 2, idleMinutes: 5 }),
+    });
+    const service = makeService(repo, makeSubjects(), safety, controls);
+
+    await service.closeStale(9);
+
+    expect(safety.record).toHaveBeenCalledWith(expect.objectContaining({ type: 'idle', message: 'msg:idle:5' }));
+  });
+
+  it('无 hidden 段 → 不查阈值、不写预警；返回值仍是收尾条数', async () => {
+    const repo = makeRepo({
+      closeStale: vi.fn().mockResolvedValue({ closedCount: 2, hidden: [] }),
+    });
+    const controls = makeControls();
+    const service = makeService(repo, makeSubjects(), makeSafety(), controls);
+
+    await expect(service.closeStale(9)).resolves.toBe(2);
+    expect(controls.findAlertThresholds).not.toHaveBeenCalled();
   });
 });
