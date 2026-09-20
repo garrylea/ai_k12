@@ -305,6 +305,23 @@ describe('ParentInsightsController alerts 端点（spec §4.3/§4.4）', () => {
     expect(alerts.list).not.toHaveBeenCalled();
   });
 
+  // `parseOptionalPositiveInt` 的数值边界：`undefined`/`''` 两条已在上方覆盖，
+  // 这里补「给了但非法」的各形态（含超长数字串 → offset 会溢出直送 SQL 的 LIMIT）。
+  it.each(['0', '-1', '1.5', '12abc', ' 1', '99999999999999999999'])(
+    'GET：studentId = %j 非法 → 400（不取数、不校验归属）',
+    async (raw) => {
+      const requireOwned = vi.fn().mockResolvedValue(undefined);
+      const { controller, alerts } = makeController(requireOwned);
+
+      await expect(
+        controller.listAlerts(USER, raw, undefined, undefined, undefined),
+      ).rejects.toMatchObject({ status: 400 });
+
+      expect(requireOwned).not.toHaveBeenCalled();
+      expect(alerts.list).not.toHaveBeenCalled();
+    },
+  );
+
   it('GET：unreadOnly 只有 "1" 算真（"0"/缺省都不加筛选）', async () => {
     const { controller, alerts } = makeController(vi.fn().mockResolvedValue(undefined));
 
