@@ -154,6 +154,19 @@ describe('ParentLayout', () => {
     expect(screen.queryByRole('button', { name: '立即查看' })).not.toBeInTheDocument();
     // 顶栏其余部分不受影响
     expect(screen.getByText('家长端 · 监管空间')).toBeInTheDocument();
+    /**
+     * 「不占位」这一半必须显式钉住（2026-09-20 评审 Important-3）。
+     *
+     * 为什么：上面两条断言（无 CTA、顶栏在）**拦不住「预留一个空槽」**—— 把 Banner 包进
+     * 一个恒定渲染的 `<div className="h-16">` 后，失败态会凭空多出 64px、把整页内容顶下去，
+     * 而原断言**照样全绿**（评审实测 8/8 通过）。
+     *
+     * 钉法：取顶栏 `<header>` 的父容器（`flex-1 flex flex-col` 那一列），无 Banner 时它
+     * 应当**恰好只有两个元素子节点** —— `<header>` 与 `<main>`。多出任何一个（哪怕是个空 div）
+     * 就是为 Banner 预留了位置。
+     */
+    const column = screen.getByText('家长端 · 监管空间').closest('header')!.parentElement!;
+    expect(column.children).toHaveLength(2);
   });
 
   it('Banner：没有孩子（studentId 为 null）→ 不请求、不渲染', async () => {

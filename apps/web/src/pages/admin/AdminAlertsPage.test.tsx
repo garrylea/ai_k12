@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import AdminAlertsPage from './AdminAlertsPage';
 import {
   ApiError,
@@ -165,5 +165,34 @@ describe('AdminAlertsPage 清理确认流程', () => {
       expect(toastMock).toHaveBeenCalledWith('error', '数据库异常');
     });
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  /**
+   * 防连点（2026-09-20 评审 Important-1）。
+   *
+   * 为什么这条必须存在：`ConfirmDialog` 的确认按钮**没有 `disabled`**，本页自己那个按钮
+   * 在对话框打开时被遮罩挡住点不到，而 `setConfirmOpen(false)` 在 `await` 之后才跑 ——
+   * 于是整个请求期间确认按钮都可点。只用 state 当闸门时，快速连点会在 state 落地前
+   * 就发出多个 DELETE（评审实测 3 次 → 3 个请求）。清理不可恢复，故用 ref 同步兜住。
+   *
+   * 请求故意**不 resolve**：只有这样才能让三次点击都落在「在途」窗口内，
+   * 否则第一次的 `finally` 会提前把闸门放开、用例失去区分力。
+   */
+  it('连点确认 → 只发一个 DELETE（在途期间丢弃后续点击）', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('alerts-purge-btn'));
+    const dialog = await screen.findByRole('dialog');
+    const confirm = within(dialog).getByRole('button', { name: '确认' });
+
+    purgeMock.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(purgeMock).toHaveBeenCalledTimes(1));
+    // 再等一拍，确认没有「迟到的」第二、三个请求
+    await new Promise((r) => setTimeout(r, 20));
+    expect(purgeMock).toHaveBeenCalledTimes(1);
   });
 });

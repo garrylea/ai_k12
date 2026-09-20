@@ -188,7 +188,15 @@ export default function ParentAlertsPage() {
       .then(() => {
         setData((prev) => {
           if (!prev) return prev;
-          const items = unreadOnly
+          /**
+           * 判定用 `prev.unreadOnly`（**该份数据的请求口径**）而不是闭包里的 `unreadOnly`。
+           *
+           * 两者在「点了标记已读、PATCH 还没回来时家长切了只看未读」这段窗口里会不一致：
+           * 闭包值停留在发起时的旧筛选，而 `prev` 已是新筛选取回的数据 —— 拿旧口径去过滤
+           * 新数据会把一条已读行留在「只看未读」列表里（2026-09-20 评审 Minor-1）。
+           * `data` 里存了 `unreadOnly`，就用它自己那份，天然免疫。
+           */
+          const items = prev.unreadOnly
             ? prev.value.items.filter((it) => it.id !== id)
             : prev.value.items.map((it) => (it.id === id ? { ...it, isRead: true } : it));
           const removed = prev.value.items.length - items.length;
@@ -199,6 +207,24 @@ export default function ParentAlertsPage() {
         toast('error', error instanceof ApiError ? error.message : '标记失败，请重试');
       });
   };
+
+  /**
+   * 本页被清空 → 回上一页。
+   *
+   * 为什么必须有：标记已读会把行从「只看未读」列表里摘掉，若摘掉的是**本页最后一条**
+   * （如第 2 页只剩 1 条），`items` 变空 → 渲染落到「当前筛选下没有预警」空态，而
+   * `Pagination` 只在非空分支渲染（`page` 也没变，不触发重拉）→ 家长看到的是**假的空态**
+   * （第 1 页其实还有 20 条未读）且**无路可退**，只剩「清除筛选」这一条会连筛选一起丢的出路。
+   * 这是 CLAUDE.md 记过的同类陷阱（分页控件只在非空分支渲染）。
+   *
+   * 放在 effect 里按**当前派生值**判定，而不是在 `setData` 的 updater 里顺手 `setPage`
+   * （updater 必须是纯函数）；这样也顺带覆盖「服务端返回空页」等同形情况。
+   * 回退会改 `page` → 依赖 `page` 的拉取 effect 重新请求；若第 1 页也空则 `page > 1` 不成立、
+   * 停在空态（此时空态是真的），不会无限回退。
+   */
+  useEffect(() => {
+    if (list && list.items.length === 0 && page > 1) setPage((p) => p - 1);
+  }, [list, page]);
 
   const hasFilter = filterStudentId !== null || unreadOnly;
   const clearFilters = () => {

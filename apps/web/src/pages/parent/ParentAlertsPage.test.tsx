@@ -236,6 +236,112 @@ describe('ParentAlertsPage 交互（spec §5.2）', () => {
     ).toBeInTheDocument();
   });
 
+  /**
+   * 「共 N 条」必须跟着就地更新一起减（2026-09-20 评审 Important-2）。
+   *
+   * 为什么单独钉：原先只断言「行被摘掉」，把 `total: prev.value.total - removed` 改成
+   * `total: prev.value.total`（即完全不减）后**全套 13 条用例照样全绿** ——
+   * 头部计数会一直显示清理前的数字，家长以为还有那么多条没读。
+   */
+  it('标记已读（只看未读）→ 「共 N 条」同步递减', async () => {
+    getAlertsMock.mockImplementation(() =>
+      echoPage({ items: [alertItem({ id: 1 }), alertItem({ id: 2 })], total: 5 }),
+    );
+
+    renderPage();
+    await screen.findByTestId('alert-row-1');
+    fireEvent.click(screen.getByRole('button', { name: '只看未读' }));
+    await waitFor(() => expect(getAlertsMock).toHaveBeenLastCalledWith({ unreadOnly: true, page: 1 }));
+
+    expect(await screen.findByText('共 5 条')).toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByTestId('alert-row-1')).getByRole('button', { name: '标记已读' }),
+    );
+
+    // 摘掉一行 → 总数从 5 减到 4（不是只摘行、计数不动）
+    expect(await screen.findByText('共 4 条')).toBeInTheDocument();
+  });
+
+  /**
+   * 「只看未读」下摘掉**本页最后一条** → 必须回上一页，不能停在假空态（2026-09-20 评审 Important-1）。
+   *
+   * 为什么这是真 bug：`Pagination` 只在非空分支渲染，且 `page` 没变就不会重拉。于是
+   * 家长在第 2 页摘掉唯一那条后，看到的是「当前筛选下没有预警」——**而第 1 页还有 20 条未读**，
+   * 且没有任何翻页控件能回去，只剩「清除筛选」（会把筛选一起丢掉）。CLAUDE.md 记过同类陷阱。
+   */
+  it('「只看未读」下标记本页最后一条 → 回上一页重拉，不停在假空态', async () => {
+    getAlertsMock.mockImplementation((params) =>
+      params?.page === 2
+        ? echoPage({ page: 2, total: 21, items: [alertItem({ id: 21 })] })
+        : echoPage({ page: params?.page ?? 1, total: 21 }),
+    );
+
+    renderPage();
+    await screen.findByTestId('alert-row-1');
+    fireEvent.click(screen.getByRole('button', { name: '只看未读' }));
+    await waitFor(() =>
+      expect(getAlertsMock).toHaveBeenLastCalledWith({ unreadOnly: true, page: 1 }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() =>
+      expect(getAlertsMock).toHaveBeenLastCalledWith({ unreadOnly: true, page: 2 }),
+    );
+    const row = await screen.findByTestId('alert-row-21');
+
+    fireEvent.click(within(row).getByRole('button', { name: '标记已读' }));
+
+    // 自动回第 1 页并重拉（而不是停在「当前筛选下没有预警」）
+    await waitFor(() =>
+      expect(getAlertsMock).toHaveBeenLastCalledWith({ unreadOnly: true, page: 1 }),
+    );
+    expect(screen.queryByText('当前筛选下没有预警')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('alert-row-1')).toBeInTheDocument();
+  });
+
+  /**
+   * PATCH 在途时切筛选 → 判定必须用**数据自身的口径**，不是发起时的闭包值（2026-09-20 评审 Minor-1）。
+   *
+   * 竞态：点「标记已读」时 `unreadOnly=false`，PATCH 还没回来家长就切了「只看未读」。
+   * 此时 `prev` 已是未读口径的数据，若仍按闭包里的旧口径走「标记成 isRead:true」分支，
+   * 一条**服务端已判为已读**的行会留在「只看未读」列表里 —— 筛选语义被破坏。
+   */
+  it('标记已读在途时切「只看未读」→ 该行被摘掉，不得留在未读列表里', async () => {
+    getAlertsMock.mockImplementation((params) =>
+      params?.unreadOnly
+        ? echoPage({ items: [alertItem({ id: 1 })], total: 1 })
+        : echoPage({
+            items: [alertItem({ id: 1 }), alertItem({ id: 2, isRead: true })],
+            total: 2,
+          }),
+    );
+    let releaseMark!: () => void;
+    markReadMock.mockReturnValue(
+      // `markParentAlertRead` 的返回类型是 `Promise<null>`，这里必须同型（tsc 会拦）
+      new Promise<null>((resolve) => {
+        releaseMark = () => resolve(null);
+      }),
+    );
+
+    renderPage();
+    const row = await screen.findByTestId('alert-row-1');
+    fireEvent.click(within(row).getByRole('button', { name: '标记已读' }));
+    await waitFor(() => expect(markReadMock).toHaveBeenCalledWith(1));
+
+    // PATCH 仍在途：切「只看未读」，服务端只回未读那条
+    fireEvent.click(screen.getByRole('button', { name: '只看未读' }));
+    await waitFor(() =>
+      expect(getAlertsMock).toHaveBeenLastCalledWith({ unreadOnly: true, page: 1 }),
+    );
+    expect(await screen.findByTestId('alert-row-1')).toBeInTheDocument();
+
+    // 放行 PATCH：此时必须按「未读口径」把它摘掉
+    releaseMark();
+
+    await waitFor(() => expect(screen.queryByTestId('alert-row-1')).not.toBeInTheDocument());
+  });
+
   it('换孩子 → 回第 1 页并带上孩子筛选重拉', async () => {
     getAlertsMock.mockImplementation((params) => echoPage({ page: params?.page, total: 25 }));
 

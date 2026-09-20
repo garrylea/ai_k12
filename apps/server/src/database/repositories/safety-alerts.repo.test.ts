@@ -86,6 +86,17 @@ describe('SafetyAlertsRepository.countOlderThan', () => {
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('FROM safety_alerts WHERE created_at < ?');
     expect(sql).toContain('SUM(is_read = 0) AS unread');
+    /**
+     * ⚠️ 必须显式钉住 `AS n` 这个**别名**（2026-09-20 评审 Important-2）。
+     *
+     * 为什么不能省：`mockPool` 无论 SQL 文本是什么都回固定的 `{n, unread}`，于是
+     * 「SQL 里的别名」与「代码读的键 `rows[0]?.n`」在结构上**互不推导** —— 把
+     * `COUNT(*) AS n` 改成 `COUNT(*) AS total_rows` 而读取处不动，真库上 `Number(undefined ?? 0)`
+     * 恒为 0，而**全套用例照样绿**。后果是管理员页永远显示「0 条」并把按钮禁用，
+     * 保留期清理**从 UI 上彻底不可达**，而那个不可恢复的 DELETE 端点还活着。
+     * 同款盲区也存在于既有的 `existsRecent`（本仓模式问题），但这条守的是破坏性功能。
+     */
+    expect(sql).toContain('COUNT(*) AS n');
     // 与 existsRecent 同口径：cutoff 由调用方给，仓储里写 NOW()/CURDATE() 会让保留期不可测
     expect(sql).not.toMatch(/NOW\s*\(|CURDATE\s*\(/i);
     expect(params).toEqual([cutoff]);

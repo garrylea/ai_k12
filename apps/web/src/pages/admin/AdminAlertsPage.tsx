@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getExpiredAlertStats,
   purgeExpiredAlerts,
@@ -18,9 +18,19 @@ import { ConfirmDialog, Skeleton, toast } from '@/components/base';
 export default function AdminAlertsPage() {
   const [stats, setStats] = useState<AdminAlertRetentionPreview | null>(null);
   const [error, setError] = useState('');
-  /** 确认框开合。清理中置 `purging` 防连点（清理不可恢复）。 */
+  /** 确认框开合。`purging` 只用于按钮的禁用态（视觉），**不是**防连点的闸门。 */
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [purging, setPurging] = useState(false);
+  /**
+   * 防连点的真闸门，必须是 ref 而不是 state。
+   *
+   * 为什么 state 不够：`ConfirmDialog` 的确认按钮**没有 `disabled`**（本仓不为此改共享组件），
+   * 而本页自己那个按钮在对话框打开时被 `fixed inset-0 z-50` 遮罩挡住、根本点不到；
+   * 且 `setConfirmOpen(false)` 在 `await` 之后才执行，整个请求期间确认按钮都可点。
+   * `setPurging(true)` 要等下一次渲染才生效，快速连点能在它落地前就发出第二个请求
+   * （2026-09-20 评审实测：连点 3 次 → 3 个 DELETE）。清理不可恢复，这里用同步 ref 兜住。
+   */
+  const purgingRef = useRef(false);
 
   const load = useCallback(() => {
     getExpiredAlertStats()
@@ -41,6 +51,9 @@ export default function AdminAlertsPage() {
   }, [load]);
 
   const handlePurge = async () => {
+    // 在途请求未回来前，第二次点击直接丢弃（见 `purgingRef` 的注释）
+    if (purgingRef.current) return;
+    purgingRef.current = true;
     setPurging(true);
     try {
       const res = await purgeExpiredAlerts();
@@ -50,6 +63,7 @@ export default function AdminAlertsPage() {
     } catch (err) {
       toast('error', err instanceof Error ? err.message : '清理失败');
     } finally {
+      purgingRef.current = false;
       setPurging(false);
     }
   };
