@@ -699,7 +699,7 @@ export type HiddenReason = 'away' | 'idle';
 - [ ] **Step 4: 服务端协议与透传**
 
 - `analytics.controller.ts` 的 `HeartbeatSchema`（:34-37）加 `reason: z.enum(['away', 'idle']).optional()`（**可选**是为兼容旧客户端；spec §3.3）。
-- `study-sessions.service.ts` 的 `heartbeat` 入参加 `reason?: string`；非法/缺失归一为 `null`（同 `subjectId` 的处理，不 500）。
+- `study-sessions.service.ts` 的 `heartbeat` 入参加 `reason?: string`；**缺失**归一为 `null`（同 `subjectId` 的处理）。⚠️ **非法值到不了 service**：HTTP 路径上 `HeartbeatSchema.reason` 是 `z.enum(['away','idle']).optional()`，非法值在 controller 层就 400/1001（service 的宽容只服务非 HTTP 调用方）。
 - **⚠️ `reason` 必须在 service 侧再归一一次**：`state === 'hidden' ? pick(HIDDEN_REASONS, input.reason) : null`。`repo.heartbeat` 是薄 SQL 层、不做归一，手搓 `{"state":"visible","reason":"away"}`（Zod 合法）会落成 `client_state='visible'` + `hidden_reason='away'` 的坏组合，违反 `study_sessions.hidden_reason` 的列不变量（spec §3.3「回到 visible 时置 NULL」）。**2026-09-20 实施时漏了这层归一，评审 M-2 指出后补上。**
 - `study-sessions.service.ts` 在心跳与结束两条路径上做**阈值判定**（spec §3.3「判定时机两处，缺一不可」）：
   - 条件：`client_state==='hidden'` 且 `TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)) >= 对应阈值`

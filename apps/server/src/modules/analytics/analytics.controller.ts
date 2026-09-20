@@ -30,7 +30,8 @@ const StartSchema = z.object({
 });
 
 // subjectId 可选：前端在「星图加载完、拿到学科」后随心跳补写（P6.5）。
-// 允许缺失；给了但非法（0/负数/非整数）时 **宽容回落为「没带」**，不 400（心跳尽力而为）。
+// **缺失** → service 按「没带」处理（不报错）；给了但非法（0/负数/非整数）会被下面的
+// `z.number().int().positive()` 拦成 400/1001 —— service 里的宽容分支只服务非 HTTP 调用方。
 // reason 可选：**旧客户端不带**（spec §3.3），只在 state='hidden' 时有意义；
 // 取值与前端 `analytics/types.ts` 的 `HiddenReason` 同源，服务层还会再归一一次。
 const HeartbeatSchema = z.object({

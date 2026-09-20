@@ -139,7 +139,9 @@ export class StudySessionsRepository {
    * **`subject_id` 只补不覆盖（2026-09-20，P6.5）**：`subject_id = COALESCE(subject_id, ?)` ——
    * 会话开头可能还没有学科（星图没加载完，前端上下文里拿不到 subjectId），心跳时补上；
    * **已经带了就不动**（同一个会话中途换学科，不该改写前面那段的归属）。
-   * 前端不传/传非法值时调用方传 `null`，等价于「没带」。
+   * 前端不传时调用方传 `null`，等价于「没带」。（**非法值到不了这里**：HTTP 路径上
+   * `HeartbeatSchema.subjectId` 是 `z.number().int().positive()`，0/负数/小数在 controller
+   * 层就 400/1001；service 里那段宽容只服务非 HTTP 调用方。）
    * 它放在挂机三列之后、`heartbeat_count` 之前：与上面那条 `IF` 无交互，
    * 但**别挪到 `IF` 之前**——那条顺序是时长口径的钉子（`subject_id` 赋值本身不参与 IF 求值，
    * 挪动它虽不改变语义，但会让「哪条表达式读旧值」更难一眼看清）。

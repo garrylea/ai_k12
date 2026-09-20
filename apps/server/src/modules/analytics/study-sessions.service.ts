@@ -168,14 +168,19 @@ export class StudySessionsService {
     if (input.state !== 'visible' && input.state !== 'hidden') {
       throw new BadRequestException({ code: 1001, message: "state 必须是 visible 或 hidden" });
     }
-    // subjectId 是**尽力而为**的补写线索（P6.5）：非法/缺失一律按 null 处理（=「这次没带」），
-    // 不 400 —— 心跳报错只会污染前端日志，还会让时长白丢。
+    // subjectId 是**尽力而为**的补写线索（P6.5）：**缺失** → 按 null 处理（=「这次没带」）。
+    // ⚠️ **非法值不会走到这里**：HeartbeatSchema.subjectId 是 `z.number().int().positive()`，
+    // `0`/负数/小数在 controller 层就被拦成 400/1001。下面这段宽容只是给**非 HTTP 调用方**的
+    // 第二道防线，不代表线上「非法也不 400」。
     const subjectId =
       Number.isInteger(input.subjectId) && (input.subjectId as number) > 0
         ? (input.subjectId as number)
         : null;
-    // reason 同 subjectId 的口径：非法/缺失一律归一为 null（=「没带原因」，旧客户端即如此），
-    // 不 400 —— 走神原因丢了只是这一段归不了 away/idle 两口径，不该把整条心跳打掉。
+    // reason 同 subjectId 的口径：**缺失**（旧客户端不带）→ 归一为 null（=「没带原因」）。
+    // ⚠️ **非法值不会走到这里**：HTTP 路径上 HeartbeatSchema.reason 是
+    // `z.enum(['away','idle']).optional()`，`reason:'zzz'` 在 controller 层就被拦成 400/1001
+    // （analytics.controller.ts:39、:46）。下面 pick 的宽容只是给**非 HTTP 调用方**（直接调
+    // service 的测试/内部代码）的第二道防线，不代表线上「非法也不 400」。
     //
     // ⚠️ **`state !== 'hidden'` 时恒为 `null`**（`study_sessions.hidden_reason` 的列不变量：
     // 「回到 visible 时置 NULL」，spec §3.3）。`repo.heartbeat` 是薄 SQL 层、不做归一，所以
