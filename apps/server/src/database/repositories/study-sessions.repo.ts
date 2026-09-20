@@ -143,6 +143,11 @@ export class StudySessionsRepository {
    * （`state` 出现两次：`client_state = ?` 与 `hidden_since` 的 `IF(? = 'hidden', ...)`；
    * 共 6 个占位符 = SET 4 + WHERE 2）。
    *
+   * ⚠️ 上面这条映射**由 `study-sessions.repo.test.ts` 的 `zipSet` 按列名配对断言**（不是断言
+   * 参数数组字面量）——字面量只证明「代码与自己一致」，而 `hidden_since` 与 `subject_id` 两个
+   * 子句对调、或两条累计列的 `IF` 守卫对调，字面量断言全绿但生产静默算错（预警永不触发 /
+   * away 与 idle 口径互换）。改 SQL 时别只跑「参数数组」那条用例。
+   *
    * 返回累计秒数 + 本段挂机信息（供 service 判阈值）；`null` = 会话不存在 / 非本人 / 非 active
    * （调用方**静默 200**，不报错——心跳是尽力而为，报错只会污染前端日志）。
    */

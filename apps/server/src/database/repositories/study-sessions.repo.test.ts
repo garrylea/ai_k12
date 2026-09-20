@@ -30,6 +30,84 @@ const insertInput = () => ({
   appShell: 'web',
 });
 
+/**
+ * 把 `SET` 子句按**顶层逗号**切成 `[列名, 赋值子句原文]`（按 SQL 文本顺序）。
+ *
+ * **括号深度必须算**：本语句的赋值子句里嵌着 `IF(a, b, c)` 与 `GREATEST(0, LEAST(...))`，
+ * 它们内部的逗号不是子句分隔符——在它们上面切分会把一条赋值撕成几段，列名配对全乱。
+ */
+function setAssignments(sql: string): Array<[string, string]> {
+  const setClause = /SET\s+(.+?)\s+WHERE\b/is.exec(sql)?.[1] ?? '';
+  const clauses: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of setClause) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      clauses.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  clauses.push(current);
+  return clauses.map((raw) => {
+    const clause = raw.trim();
+    const col = /^([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(clause)?.[1] ?? '';
+    return [col, clause] as [string, string];
+  });
+}
+
+/**
+ * 取某一列的赋值子句原文（用于「`IF` 与列就近配对」这类断言）。
+ *
+ * 只断言整条 SQL 里同时出现 `'away'` 与 `'idle'`（`toContain`）拦不住「两条 IF 对调」——
+ * 对调后两个字符串都还在，只是挂错了列。必须**就近**看某一列自己的子句。
+ */
+function setAssignment(sql: string, column: string): string {
+  const found = setAssignments(sql).find(([col]) => col === column);
+  expect(found, `SET 里没有 ${column} 的赋值子句`).toBeDefined();
+  return found![1];
+}
+
+/**
+ * 把 `SET` 的每个赋值子句与其 `?` 按**列名**配对，返回 `{ 列名: 参数 }`。
+ *
+ * **为什么不直接断言 `params` 数组字面量**：那只证明「实现自己构造的数组等于一个字面量」，
+ * 即「代码与它自己一致」。列与值张冠李戴时（例如把 `hidden_since = IF(? = 'hidden', ...)`
+ * 与 `subject_id = COALESCE(subject_id, ?)` 两个子句**对调位置**、参数数组不动）字面量断言
+ * 照样全绿，而生产后果是 `'hidden'` 被写进 `subject_id`、`hidden_since` 每次心跳都被置 NULL
+ * → 走神预警永不触发（静默失效）。plan 的 Global Constraints 明文禁止这种写法
+ * （2026-09-22 的 `goals` 错位事故即同类，见 `goals.repo.test.ts:9-17`）。
+ *
+ * ⚠️ **不能照抄 `controls.repo.test.ts:29-35` 的 `zipSet`**：那份用 `(\w+)\s*=\s*\?` 只认
+ * 「列 = ?」这一种形态，而本语句的占位符会出现在 `IF(...)` **内部**
+ * （`hidden_since = IF(? = 'hidden', ...)`）和 `COALESCE(...)` 内部
+ * （`subject_id = COALESCE(subject_id, ?)`）——照抄会把这两列**整列漏掉**，而它们恰恰是
+ * 最容易写反的一对。所以这里改成「先按顶层逗号切分赋值子句 → 取子句首部的列名 →
+ * 把该子句内的 `?` 依序都归到该列名下」。
+ *
+ * 只收录**含 `?` 的**列（三条累计列没有占位符，不出现）；某列含多个 `?` 时其值为参数数组。
+ */
+function zipSet(sql: string, params: unknown[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  let i = 0;
+  for (const [col, clause] of setAssignments(sql)) {
+    const holes = clause.match(/\?/g)?.length ?? 0;
+    if (holes === 0) continue;
+    out[col] = holes === 1 ? params[i] : params.slice(i, i + holes);
+    i += holes;
+  }
+  return out;
+}
+
+/** `SET` 子句吃掉之后剩下的参数（本语句就是 WHERE 的 `sessionUid` / `studentId` 两项）。 */
+function restAfterSet(sql: string, params: unknown[]): unknown[] {
+  const setClause = /SET\s+(.+?)\s+WHERE\b/is.exec(sql)?.[1] ?? '';
+  return params.slice((setClause.match(/\?/g) ?? []).length);
+}
+
 describe('StudySessionsRepository.insert', () => {
   it('INSERT IGNORE 落一行，列序与参数一一对应', async () => {
     const pool = mockPool({ affectedRows: 1 });
@@ -81,9 +159,18 @@ describe('StudySessionsRepository.heartbeat', () => {
     // 写成 `subject_id = ?` 会把会话中途换的学科覆盖掉已完成时段的归属。
     expect(updateSql).toContain('subject_id = COALESCE(subject_id, ?)');
     expect(updateSql).not.toMatch(/subject_id\s*=\s*\?/);
-    // 参数逐位对应：state / reason / state（hidden_since 的 IF）/ subjectId / uid / studentId。
-    expect(updateParams).toEqual(['hidden', 'away', 'hidden', 2, 'uid-1', 9]);
-    expect(updateParams).toHaveLength(6);
+    // 映射按**列名**配对断言（不是「实现自己构造的数组等于字面量」）。`state` 在 SQL 里出现
+    // 两次（`client_state = ?` 与 `hidden_since` 的 `IF(? = 'hidden', ...)`），是最容易静默
+    // 错位的一处：`hidden_since` 必须拿到 `state`、`subject_id` 必须拿到 `subjectId`。
+    expect(zipSet(updateSql, updateParams)).toEqual({
+      client_state: 'hidden',
+      hidden_reason: 'away',
+      hidden_since: 'hidden',
+      subject_id: 2,
+    });
+    // SET 里 4 个 `?` 之外的参数就是 WHERE 的两项，顺序也不能错
+    expect(restAfterSet(updateSql, updateParams)).toEqual(['uid-1', 9]);
+    expect(updateParams).toHaveLength(6); // SET 4 个 ? + WHERE 2 个
   });
 
   it('SET 列顺序是 load-bearing：三个累计列 + hidden_since 的 IF 都必须排在赋值之前', async () => {
@@ -145,16 +232,25 @@ describe('StudySessionsRepository.heartbeat', () => {
     expect(sql.match(/LEAST\(TIMESTAMPDIFF\(SECOND, last_heartbeat_at, NOW\(3\)\), 45\)/g)).toHaveLength(3);
     // hidden_since 只用于维护本段起点，绝不参与秒数累加
     expect(sql).not.toContain('TIMESTAMPDIFF(SECOND, hidden_since');
-    expect(params[1]).toBe('away');
+    // 就近断言：away 这条 IF 必须挂在 hidden_away_seconds 自己的赋值子句里
+    expect(setAssignment(sql, 'hidden_away_seconds')).toContain("hidden_reason = 'away'");
+    // 映射（原来这里只断言 `params[1] === 'away'`，而 `'away'` 就是本用例自己传进去的实参
+    // → 把 SQL 里 `hidden_reason = ?` 整段删掉仍全绿；按列名配对才钉得住）
+    expect(zipSet(sql, params).hidden_reason).toBe('away');
   });
 
-  it('idle 段只累加 hidden_idle_seconds', async () => {
+  it('idle 上报：两条挂机累计列的 IF 守卫各自就近配对（防 away/idle 两口径对调）', async () => {
     const pool = mockPool({ affectedRows: 1, rows: [{ active_seconds: 60 }] });
     const repo = new StudySessionsRepository(pool as any);
     await repo.heartbeat('uid-1', 9, 'hidden', null, 'idle');
 
-    const [, params] = pool.execute.mock.calls[0];
-    expect(params[1]).toBe('idle');
+    const [sql, params] = pool.execute.mock.calls[0];
+    // 只断言「SQL 里同时出现 'away' 与 'idle'」拦不住对调——对调后两个字符串都还在，
+    // 只是挂错了列 → away/idle 口径互换、预警类型与分钟数张冠李戴。必须就近看每条子句。
+    expect(setAssignment(sql, 'hidden_away_seconds')).toContain("hidden_reason = 'away'");
+    expect(setAssignment(sql, 'hidden_idle_seconds')).toContain("hidden_reason = 'idle'");
+    expect(setAssignment(sql, 'active_seconds')).toContain("client_state = 'visible'");
+    expect(zipSet(sql, params).hidden_reason).toBe('idle');
   });
 
   it('hidden_since 建立（hidden 时 COALESCE 保住本段起点）与回到 visible 清空', async () => {
@@ -165,15 +261,16 @@ describe('StudySessionsRepository.heartbeat', () => {
     const [sql, params] = pool.execute.mock.calls[0];
     // hidden → 建立（已建立则不动：COALESCE 保住本段起点，供 service 判「这一段连续多久」）
     expect(sql).toContain("hidden_since = IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)");
-    // 第三个占位符就是 state（`client_state = ?` 之外还要再出现一次）
-    expect(params[2]).toBe('hidden');
+    // `IF(...)` **内部**的那个占位符必须绑定 `state`（这是「子句 ↔ 参数」最容易错位的一处：
+    // 与 `subject_id` 的子句对调后，`hidden_since` 会拿到 subjectId → 每次心跳都被置 NULL）
+    expect(zipSet(sql, params).hidden_since).toBe('hidden');
 
     // 回到 visible → 同一个表达式落到 NULL 分支，清空本段
     // （每次 heartbeat 是「UPDATE + 回读 SELECT」两条，故第二次的 UPDATE 在 calls[2]）
     await repo.heartbeat('uid-1', 9, 'visible', null, null);
     const [sql2, params2] = pool.execute.mock.calls[2];
     expect(sql2).toContain("hidden_since = IF(? = 'hidden', COALESCE(hidden_since, NOW(3)), NULL)");
-    expect(params2[2]).toBe('visible');
+    expect(zipSet(sql2, params2).hidden_since).toBe('visible');
   });
 
   it('hidden_reason 维护：hidden 时写本次原因，visible 时写 null', async () => {
@@ -181,10 +278,14 @@ describe('StudySessionsRepository.heartbeat', () => {
     const repo = new StudySessionsRepository(pool as any);
 
     await repo.heartbeat('uid-1', 9, 'hidden', null, 'idle');
-    expect(pool.execute.mock.calls[0][1][1]).toBe('idle');
+    // 按列名配对（原来断言 `calls[0][1][1] === 'idle'` 是「断言自己传进去的实参」，
+    // 把 SQL 里的 `hidden_reason = ?` 删掉仍全绿）
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(zipSet(sql, params).hidden_reason).toBe('idle');
 
     await repo.heartbeat('uid-1', 9, 'visible', null, null);
-    expect(pool.execute.mock.calls[2][1][1]).toBeNull();
+    const [sql2, params2] = pool.execute.mock.calls[2];
+    expect(zipSet(sql2, params2).hidden_reason).toBeNull();
   });
 
   it('不传学科（null）也是合法调用：等价「这次没带」，不影响已有 subject_id', async () => {
@@ -193,8 +294,10 @@ describe('StudySessionsRepository.heartbeat', () => {
 
     await repo.heartbeat('uid-1', 9, 'visible', null, null);
 
-    const [, updateParams] = pool.execute.mock.calls[0];
-    expect(updateParams).toEqual(['visible', null, 'visible', null, 'uid-1', 9]);
+    const [updateSql, updateParams] = pool.execute.mock.calls[0];
+    // 第 4 个占位符（`subject_id = COALESCE(subject_id, ?)`）必须绑定 null
+    expect(zipSet(updateSql, updateParams).subject_id).toBeNull();
+    expect(restAfterSet(updateSql, updateParams)).toEqual(['uid-1', 9]);
   });
 
   it('返回本段挂机信息（hidden_since / hidden_reason）供 service 判阈值', async () => {
@@ -248,7 +351,11 @@ describe('StudySessionsRepository.end', () => {
     expect(sql).not.toContain('client_state = ?');
     expect(sql).not.toContain('hidden_since =');
     expect(sql).not.toContain('hidden_reason = ?');
-    expect(params).toEqual(['pagehide', 'uid-1', 9]);
+    // 映射按列名配对（`end` 的 SET 里只有 `end_reason` 带占位符），且两条 IF 就近配对
+    expect(zipSet(sql, params)).toEqual({ end_reason: 'pagehide' });
+    expect(restAfterSet(sql, params)).toEqual(['uid-1', 9]);
+    expect(setAssignment(sql, 'hidden_away_seconds')).toContain("hidden_reason = 'away'");
+    expect(setAssignment(sql, 'hidden_idle_seconds')).toContain("hidden_reason = 'idle'");
   });
 
   it('返回本段挂机信息供 service 在结束路径判阈值', async () => {
