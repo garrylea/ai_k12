@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { StudySessionsService } from './study-sessions.service.js';
 import type { StudySessionsRepository, StudySessionRow } from '../../database/repositories/study-sessions.repo.js';
 import type { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
@@ -68,6 +68,38 @@ const baseInput = () => ({
   scene: 'targeted_run',
   userAgent: MAC_CHROME_UA,
 });
+
+/**
+ * 让出一个宏任务：微任务队列先排空，`void` 出去的判定链（最多一次 `await`）此刻已跑完。
+ *
+ * 用于**否定断言**（「没写预警」）：判定是 `void` 出去的，紧跟心跳的同步断言会在判定
+ * 跑完之前执行 → 恒真。但也不能只等 `vi.waitFor(findAlertThresholds 被调用)`——那只
+ * 证明「查询发出去了」，不保证它的续体（真正决定写不写的那段）已经跑过。
+ */
+const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * 在 `fn` 执行期间捕获**逃逸的 unhandled rejection**（返回捕获到的原因列表）。
+ *
+ * 为什么需要：心跳/结束改成 `void this.maybeRecordHiddenAlert(...)` 之后，「失败不会让
+ * 请求 500」由构造保证、不再是被测行为；`void` 引入的**新**风险是「该 promise 若 reject
+ * 则无人接管」。这条风险只能从 run 级观测到，不能在调用点断言。
+ *
+ * `unhandledRejection` 在微任务队列排空后的同一轮事件循环里派发，所以 `setTimeout(0)`
+ * 足以确保已派发（本机 Node 实测：一次 `setTimeout(0)` 后即捕获到，见报告）。
+ */
+async function withUnhandledRejectionSpy(fn: () => Promise<void>): Promise<unknown[]> {
+  const rejections: unknown[] = [];
+  const onUnhandled = (reason: unknown) => rejections.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    await fn();
+    await flushAsync();
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+  return rejections;
+}
 
 describe('StudySessionsService.start', () => {
   let repo: StudySessionsRepository;
@@ -220,8 +252,10 @@ describe('StudySessionsService.heartbeat', () => {
       service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' }),
     ).resolves.toEqual({ activeSeconds: 300 });
 
+    // 判定是 `void` 出去的（心跳路径不得 await 它）→ 必须**异步等待**写入发生。
+    // 同步 `toHaveBeenCalled()` 会跑在写入之前，变成不稳定/恒假。
+    await vi.waitFor(() => expect(safety.record).toHaveBeenCalledTimes(1));
     expect(controls.findAlertThresholds).toHaveBeenCalledWith(9);
-    expect(safety.record).toHaveBeenCalledTimes(1);
     expect(safety.record).toHaveBeenCalledWith({
       studentId: 9,
       dialogueId: null,
@@ -242,7 +276,9 @@ describe('StudySessionsService.heartbeat', () => {
 
     await service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'idle' });
 
-    expect(safety.record).toHaveBeenCalledWith(expect.objectContaining({ type: 'idle', level: 'info' }));
+    await vi.waitFor(() =>
+      expect(safety.record).toHaveBeenCalledWith(expect.objectContaining({ type: 'idle', level: 'info' })),
+    );
   });
 
   it('未达阈值 → 不写预警（away 4 分钟 < 默认 5 分钟）', async () => {
@@ -251,10 +287,15 @@ describe('StudySessionsService.heartbeat', () => {
       heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 240, hiddenSince: since, hiddenReason: 'away' }),
     });
     const safety = makeSafety();
-    const service = makeService(repo, makeSubjects(), safety, makeControls());
+    const controls = makeControls();
+    const service = makeService(repo, makeSubjects(), safety, controls);
 
     await service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' });
 
+    // 先让判定链跑完（`void` 出去的那段），否则「没写」可能只是「还没轮到」→ 恒真。
+    // 再断言查询真的发生过：证明判定跑到了比较那一步，而不是整条路径被跳过。
+    await flushAsync();
+    expect(controls.findAlertThresholds).toHaveBeenCalledWith(9);
     expect(safety.record).not.toHaveBeenCalled();
   });
 
@@ -265,8 +306,11 @@ describe('StudySessionsService.heartbeat', () => {
     });
     const input = { studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' };
 
+    const strictControls = makeControls();
     const strictSafety = makeSafety();
-    await makeService(repo, makeSubjects(), strictSafety, makeControls()).heartbeat(input);
+    await makeService(repo, makeSubjects(), strictSafety, strictControls).heartbeat(input);
+    await flushAsync();
+    expect(strictControls.findAlertThresholds).toHaveBeenCalledWith(9); // 判定确实跑了
     expect(strictSafety.record).not.toHaveBeenCalled(); // 默认 5 分钟
 
     const looseSafety = makeSafety();
@@ -274,7 +318,41 @@ describe('StudySessionsService.heartbeat', () => {
       findAlertThresholds: vi.fn().mockResolvedValue({ awayMinutes: 2, idleMinutes: 15 }),
     });
     await makeService(repo, makeSubjects(), looseSafety, looseControls).heartbeat(input);
-    expect(looseSafety.record).toHaveBeenCalledTimes(1); // 家长改成 2 分钟 → 3 分钟就报
+    // 家长改成 2 分钟 → 3 分钟就报（`void` 出去，故异步等待）
+    await vi.waitFor(() => expect(looseSafety.record).toHaveBeenCalledTimes(1));
+  });
+
+  it('心跳响应不等待阈值判定（`void`）：判定被挂住时心跳仍立刻返回，放行后才写预警', async () => {
+    // 这条直接钉「心跳路径绝不拖长响应」这条硬约束：让 `findAlertThresholds` 返回一个
+    // **永不自动 settle** 的 promise（模拟 DB 慢查询）。若实现改回 `await`，下面那次
+    // `await service.heartbeat(...)` 会一直挂着 → 用例超时必红。
+    const since = new Date(Date.now() - 6 * 60_000);
+    const repo = makeRepo({
+      heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 300, hiddenSince: since, hiddenReason: 'away' }),
+    });
+    let release!: (t: { awayMinutes: number; idleMinutes: number }) => void;
+    const controls = makeControls({
+      findAlertThresholds: vi.fn(
+        () =>
+          new Promise<{ awayMinutes: number; idleMinutes: number }>((resolve) => {
+            release = resolve;
+          }),
+      ),
+    });
+    const safety = makeSafety();
+    const service = makeService(repo, makeSubjects(), safety, controls);
+
+    await expect(
+      service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' }),
+    ).resolves.toEqual({ activeSeconds: 300 });
+
+    // 心跳已返回时判定还挂在那里 → 证明它确实没被 await
+    await flushAsync();
+    expect(safety.record).not.toHaveBeenCalled();
+
+    // 放行后 fire-and-forget 的那段仍然会完成写入（`void` 不是「丢掉不写」）
+    release({ awayMinutes: 5, idleMinutes: 15 });
+    await vi.waitFor(() => expect(safety.record).toHaveBeenCalledTimes(1));
   });
 
   it('visible 心跳（hidden_reason 为 null）→ 不查阈值、不写预警', async () => {
@@ -285,11 +363,15 @@ describe('StudySessionsService.heartbeat', () => {
 
     await service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'visible' });
 
+    await flushAsync();
+    // 这里的否定断言是确定性的：`hiddenReason !== 'away' && !== 'idle'` 的早退发生在
+    // `maybeRecordHiddenAlert` 的第一个 `await` **之前**（async 函数体同步执行到首个 await），
+    // 所以查询一次都不会发出——与 `void` 无关，也与调度时序无关。
     expect(controls.findAlertThresholds).not.toHaveBeenCalled();
     expect(safety.record).not.toHaveBeenCalled();
   });
 
-  it('预警写入抛错 → 心跳仍正常返回（永不阻断主链路）', async () => {
+  it('预警写入抛错 → 不 reject、被 warn 吞掉、心跳仍正常返回（`void` 不产生 unhandled rejection）', async () => {
     const since = new Date(Date.now() - 6 * 60_000);
     const repo = makeRepo({
       heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 300, hiddenSince: since, hiddenReason: 'away' }),
@@ -299,14 +381,31 @@ describe('StudySessionsService.heartbeat', () => {
         throw new Error('boom');
       }),
     });
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const service = makeService(repo, makeSubjects(), safety, makeControls());
 
-    await expect(
-      service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' }),
-    ).resolves.toEqual({ activeSeconds: 300 });
+    try {
+      // `void` 之后「心跳仍返回 200」由构造保证、不再是被测行为；这条用例改测三件真正
+      // 还在被测的事：① 心跳响应本身正常；② 失败被 logger.warn 吞掉（catch 真的走到了）；
+      // ③ `void` 出去的那个 promise 没有逃逸成 unhandled rejection（`void` 的新风险）。
+      const rejections = await withUnhandledRejectionSpy(async () => {
+        await expect(
+          service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' }),
+        ).resolves.toEqual({ activeSeconds: 300 });
+
+        await vi.waitFor(() =>
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining('走神预警判定失败')),
+        );
+      });
+
+      expect(safety.record).toHaveBeenCalledTimes(1); // 真的走到了写入并抛出
+      expect(rejections).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it('阈值查询抛错 → 心跳仍正常返回（失败只 warn，不 500）', async () => {
+  it('阈值查询抛错 → 不 reject、被 warn 吞掉、心跳仍正常返回（失败只 warn，不 500）', async () => {
     const since = new Date(Date.now() - 6 * 60_000);
     const repo = makeRepo({
       heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 300, hiddenSince: since, hiddenReason: 'away' }),
@@ -314,11 +413,23 @@ describe('StudySessionsService.heartbeat', () => {
     const controls = makeControls({
       findAlertThresholds: vi.fn().mockRejectedValue(new Error('db down')),
     });
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const service = makeService(repo, makeSubjects(), makeSafety(), controls);
 
-    await expect(
-      service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' }),
-    ).resolves.toEqual({ activeSeconds: 300 });
+    try {
+      const rejections = await withUnhandledRejectionSpy(async () => {
+        await expect(
+          service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'away' }),
+        ).resolves.toEqual({ activeSeconds: 300 });
+
+        await vi.waitFor(() =>
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining('走神预警判定失败')),
+        );
+      });
+      expect(rejections).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -348,6 +459,8 @@ describe('StudySessionsService.end', () => {
     const out = await service.end({ studentId: 9, sessionUid: baseInput().sessionUid, reason: 'pagehide' });
 
     expect(out.activeSeconds).toBe(90);
+    // 结束路径的判定同样是 `void` 出去的 → 异步等待
+    await vi.waitFor(() => expect(safety.record).toHaveBeenCalledTimes(1));
     expect(controls.findAlertThresholds).toHaveBeenCalledWith(9);
     expect(safety.record).toHaveBeenCalledWith(
       expect.objectContaining({ studentId: 9, type: 'away', level: 'info', message: 'msg:away:8' }),
@@ -365,10 +478,13 @@ describe('StudySessionsService.end', () => {
       }),
     });
     const safety = makeSafety();
-    const service = makeService(repo, makeSubjects(), safety, makeControls());
+    const controls = makeControls();
+    const service = makeService(repo, makeSubjects(), safety, controls);
 
     await service.end({ studentId: 9, sessionUid: baseInput().sessionUid, reason: 'route_change' });
 
+    await flushAsync();
+    expect(controls.findAlertThresholds).toHaveBeenCalledWith(9); // 判定确实跑了，不是路径被跳过
     expect(safety.record).not.toHaveBeenCalled();
   });
 

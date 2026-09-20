@@ -186,7 +186,8 @@ export class StudySessionsService {
       reason,
     );
     if (result) {
-      await this.maybeRecordHiddenAlert(input.studentId, result.hiddenReason, result.hiddenSince);
+      // `void` 不 `await`：见 maybeRecordHiddenAlert 的 docstring（心跳热路径硬约束）。
+      void this.maybeRecordHiddenAlert(input.studentId, result.hiddenReason, result.hiddenSince);
     }
     return { activeSeconds: result?.activeSeconds ?? null };
   }
@@ -204,7 +205,9 @@ export class StudySessionsService {
     if (done) {
       // 结束路径也判一次阈值（spec §3.3「判定时机两处，缺一不可」）：覆盖「学生最小化后
       // 直接关掉页面」——pagehide 触发 end 之后不再有任何心跳，只靠心跳路径这条永远报不出来。
-      await this.maybeRecordHiddenAlert(input.studentId, done.hiddenReason, done.hiddenSince);
+      // `void` 不 `await`（与心跳路径同一纪律，见 maybeRecordHiddenAlert 的 docstring）：
+      // 结束响应同样不该等这次判定里的 DB 往返。
+      void this.maybeRecordHiddenAlert(input.studentId, done.hiddenReason, done.hiddenSince);
       return { activeSeconds: done.activeSeconds, endedAt: done.endedAt };
     }
 
@@ -227,6 +230,16 @@ export class StudySessionsService {
    * **整段 try/catch、失败只 warn**：判定与写入绝不阻断主链路——心跳响应与 `active_seconds`
    * 的累加不能因为这里失败而受影响（`record()` 自身也永不抛，见 `SafetyAlertsService`）。
    * 30 分钟去重窗口在 `SafetyAlertsService` 里，所以挂机期间每次心跳重复命中也只写一条。
+   *
+   * ⚠️ **调用方一律 `void`、不得 `await`**（2026-09-20 Task 4 评审 I-1 的裁决，plan 的
+   * Global Constraint 原文：「心跳路径**绝不**拖长 `active_seconds` 的累加与心跳响应」）。
+   * 原因：本方法在 `findAlertThresholds` 上会 `await` **一次 DB 往返**，而学生处于 hidden 时
+   * **每 30 秒的每一次心跳**都会走到这里；`await` 会把这次往返直接叠加到心跳响应上。前端是
+   * `.catch(()=>{})` 的 fire-and-forget，用户无感、日志里也看不出——正是「静默拖长」。
+   *
+   * `void` 安全的前提是**本方法永不 reject**：整段（含 `await` 的拒绝）都在下面的 try 里，
+   * 所以 `void` 不会产生 unhandled rejection。**别为了「好断言」改回 `await`**——服务层测试
+   * 用 `vi.waitFor` 等异步写入，不依赖 `await` 在这里。
    */
   private async maybeRecordHiddenAlert(
     studentId: number,
