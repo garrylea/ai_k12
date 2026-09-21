@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-09-21 CLAUDE.md 瘦身（26.8KB → 22.0KB，-18%）
+
+**背景**：根 `CLAUDE.md` 长期只增不减，26.8KB 已明显超出「~15KB」的体量目标，模型上下文被稀释。
+
+**做法**：新加一条「体量纪律」blockquote 定调——**只放仍生效的硬约束**（读代码 / config / 权威文档得不到的「为什么」与「勿动」），带日期的日志 / 事故经过 / 实测数字一律进本文件，端点 / 字段 / SQL 谓词等已写在 API 文档 / schema 里的内容**不在此重复**。据此：
+
+- **合并**：家长端两节（学情批 + 管得住批）合一；「埋点写入永不阻断主链路」在「工程约定」与「家长端」各写一遍 → 保留「工程约定」的详版，家长端改为一句回指。
+- **改指向不重复**：各专项的端点 / 抽题池谓词 / 判题枚举 / 设计 spec 路径 → 指向 API 文档 §4.18 与 §5.20–§5.23；extract/publish/db_loader 的已稳定细则 → 指向本文件；已删模块的「已知限制」清单（metrics 未接入、ConversationService 内存存储、gemini 流式未实现等）→ 指向本文件。
+- **场景路由**：原来的逐场景枚举（judgment/grading/…）改为「运行时真源是 DB 的 `llm_routes`，`model-routes.yaml` 只服务新装 / DB 空时」+「新增场景要改 8 处」清单（枚举本身可从 `model-routes.yaml` / `llm_routes` 读回，且已 seed 的库改 YAML 无效——枚举留在 CLAUDE.md 反而误导）。
+- **保留**：所有「勿动」陷阱（Nest DI 可选参数、ODKU SET 求值顺序、VIRTUAL 生成列不能改 STORED、英语防泄漏两条、CASCADE 摘外键、React #31 渲染钉子、空闲超时无墙钟上限、本地 llama.cpp 关 thinking 只能走 `extraBody` 等）。
+- **顺带修悬空引用**：两处「见 changelog」在本文件查无实据 —— React #31 的事故经过实际写在 `SentenceBlock.test.tsx` 头部注释、CASCADE 级联清空篇目的根因写在 `plans/2026-09-15-chinese-passages-standalone.md` Task 9，改指真实位置；`§6.20–§6.23` 经上一批重编号后已不存在，删去。
+
+**未做**：Monorepo 结构 / Development Commands / 代码组织三节虽可从文件系统与 `package.json` 推出，但作定位用途保留。
+
 ## 2026-09-21 清除全仓 WebSocket 设计 + API 文档章节重编号 + `subject-configs` 补进 openapi
 
 **背景（用户裁决）**：本仓**零 WS 实现**且**确定不需要**——流式一律 SSE（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`），家长端预警靠 30s 轮询。文档里那套 WS 通道设计（`/ws/ai/{dialogueId}`、`/ws/notifications/{studentId}`、心跳/重连/订阅模型/消息格式/降级策略）是**从未落地的规划稿**，故**直接删除**（不是标废弃——废弃标注留给「实现过又下线」的东西，见 UX P5.3 / `/api/error-book` 先例）。
