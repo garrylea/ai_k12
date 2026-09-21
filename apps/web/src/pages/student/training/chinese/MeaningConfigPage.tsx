@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PageHeader } from '@/components/base';
+import { PageHeader, PlusMinusIcon } from '@/components/base';
 import {
   fetchMeaningPassages,
   startMeaning,
@@ -150,9 +150,7 @@ export default function MeaningConfigPage() {
             aria-expanded={listOpen}
           >
             指定篇目（不选则随机抽）
-            <span className="text-sm font-normal text-[var(--text-secondary)]">
-              {listOpen ? '收起' : '展开'}
-            </span>
+            <PlusMinusIcon open={listOpen} className="text-[var(--brand-500)]" />
           </button>
 
           {listOpen && (

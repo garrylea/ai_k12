@@ -14,6 +14,7 @@ export { NavIcon } from './NavIcon';
 export { ToastContainer, toast } from './Toast';
 export { LevelIcon } from './LevelIcon';
 export type { LevelCode } from './LevelIcon';
+export { PlusMinusIcon } from './PlusMinusIcon';
 export { Pagination } from './Pagination';
 export type { PaginationProps } from './Pagination';
 export { ImageLightbox } from './ImageLightbox';
