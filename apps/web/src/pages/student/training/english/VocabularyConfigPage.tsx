@@ -105,7 +105,6 @@ export default function VocabularyConfigPage() {
     }
   };
 
-  const poolCount = options?.pools.find((p) => p.key === levelPool)?.count ?? 0;
   const count = tierKey == null ? null : Number(tierKey);
 
   return (
@@ -313,9 +312,6 @@ export default function VocabularyConfigPage() {
               </label>
             ))}
           </div>
-          <p className="mt-3 text-xs text-[var(--text-secondary)]">
-            多个筛选同时勾选时取交集；「易错词」按全平台答错次数统计，「我错过的词」只算你自己的。
-          </p>
         </section>
 
         {error && <p className="mt-6 text-sm text-[var(--error)]">{error}</p>}
@@ -326,7 +322,7 @@ export default function VocabularyConfigPage() {
           className="mt-10 w-full h-14 rounded-2xl text-white text-lg font-bold transition-opacity disabled:opacity-60"
           style={{ backgroundColor: 'var(--brand-500)' }}
         >
-          {loading ? '正在抽词…' : count == null ? '开始背词' : `开始背词（${count} 个 · 池内 ${poolCount} 词）`}
+          {loading ? '正在抽词…' : count == null ? '开始背词' : `开始背词（${count} ）`}
         </button>
       </div>
     </div>

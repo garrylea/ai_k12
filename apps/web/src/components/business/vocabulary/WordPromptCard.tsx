@@ -2,13 +2,6 @@ import { useEffect, useRef } from 'react';
 import type { VocabularyPromptKind, VocabularyQuestionItem, WordFamilyResult } from '@/services/api';
 import WordFamilyTree from './WordFamilyTree';
 
-/** 作答提示。三种题面各一句，别用嵌套三元——加第四种方向时会漏改一处。 */
-const ANSWER_HINT: Record<VocabularyPromptKind, string> = {
-  en2cn: '写出它的中文意思',
-  cn2en: '写出对应的英文单词',
-  ph2en: '根据音标写出英文单词',
-};
-
 const ANSWER_PLACEHOLDER: Record<VocabularyPromptKind, string> = {
   en2cn: '中文意思',
   cn2en: '英文单词',
@@ -113,10 +106,6 @@ export default function WordPromptCard({
         </p>
       )}
 
-      <p className="mt-3 text-sm text-[var(--text-secondary)]">
-        {ANSWER_HINT[question.promptKind]}
-      </p>
-
       <input
         ref={inputRef}
         value={value}
@@ -137,7 +126,7 @@ export default function WordPromptCard({
           className="h-12 flex-1 rounded-xl text-white font-bold transition-opacity"
           style={{ backgroundColor: 'var(--brand-500)' }}
         >
-          提交并下一个
+          下一个
         </button>
         <button
           onClick={onSkip}
