@@ -136,4 +136,61 @@ export class QuestionsRepository {
     const [rows] = await this.pool.query<RowDataPacket[]>(sql, params);
     return rows as QuestionRow[];
   }
+
+  /** 补偿套题抽题（2026-09-21）：同考点 + 同题型 + 难度档（数组）随机取题。
+   *  谓词与 findRandomByKpAndType 同源（「不再展示」排除、空答案排除、is_active）；
+   *  难度由调用方按放宽阶梯（先同档，再 ±1 档）分次传入；
+   *  excludeQuestionIds 排除原错题与套题已有题。kp 匹配不限 role（与专项抽题一致，次级标注也算考过该点）。 */
+  async findRandomByKpTypeDifficulty(
+    studentId: number,
+    subjectId: number,
+    kpId: number,
+    type: string,
+    difficulties: number[],
+    count: number,
+    excludeQuestionIds: number[],
+  ): Promise<QuestionRow[]> {
+    const diffFilter = difficulties.map(() => '?').join(',');
+    const exclusion = excludeQuestionIds.length > 0
+      ? ` AND q.id NOT IN (${excludeQuestionIds.map(() => '?').join(',')})`
+      : '';
+    const sql = `SELECT q.* FROM questions q
+      JOIN question_knowledge_points qkp ON qkp.question_id = q.id
+      LEFT JOIN student_hidden_questions shq
+        ON shq.question_id = q.id AND shq.student_id = ?
+      WHERE q.subject_id = ? AND qkp.knowledge_point_id = ? AND q.is_active = 1
+        AND q.type = ? AND q.difficulty IN (${diffFilter})
+        AND q.answer <> ''
+        AND shq.id IS NULL${exclusion}
+      ORDER BY RAND() LIMIT ?`;
+    // pool.query（非 execute）：LIMIT 占位符会被 MySQL prepared statement 拒绝
+    //（见 findRandomByKpAndType 注释，联调实测过的问题）。
+    const [rows] = await this.pool.query<RowDataPacket[]>(sql, [
+      studentId, subjectId, kpId, type, ...difficulties, ...excludeQuestionIds, count,
+    ]);
+    return rows as QuestionRow[];
+  }
+
+  /** 批量按主键取在用题（补偿套题生成：由错题 id 反查题型/难度/题干）。 */
+  async findByIds(ids: number[]): Promise<QuestionRow[]> {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(',');
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM questions WHERE is_active = 1 AND id IN (${placeholders})`,
+      ids,
+    );
+    return rows as QuestionRow[];
+  }
+
+  /** question_id -> primary 知识点 id（补偿套题按 primary 考点分组；无 primary 的题由调用方跳过）。 */
+  async findPrimaryKpIds(questionIds: number[]): Promise<Map<number, number>> {
+    if (questionIds.length === 0) return new Map();
+    const placeholders = questionIds.map(() => '?').join(',');
+    const [rows] = await this.pool.query<(RowDataPacket & { question_id: number; knowledge_point_id: number })[]>(
+      `SELECT question_id, knowledge_point_id FROM question_knowledge_points
+       WHERE role = 'primary' AND question_id IN (${placeholders})`,
+      questionIds,
+    );
+    return new Map(rows.map((r) => [Number(r.question_id), Number(r.knowledge_point_id)]));
+  }
 }
