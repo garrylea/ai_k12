@@ -345,12 +345,12 @@ class DbLoader:
 
     # --- full-reload 业务数据守卫 ---
     # 会挡住 full-reload DELETE 的业务表（FK ON DELETE RESTRICT，或经 CASCADE 链传导）：
-    # - questions 的 RESTRICT 引用：answers / aux_error_books / main_error_books / variation_questions / exam_answers
+    # - questions 的 RESTRICT 引用：answers / aux_error_books / main_error_books / variation_questions / exam_answers / remediation_set_items
     #   （practice_questions 的 question_id 是 SET NULL、question_knowledge_points 是 CASCADE，不挡）
     # - textbook_versions 级联链（semesters->units->lessons->cards）的阻挡：
     #   progress.textbook_version_id RESTRICT；homeworks.lesson_id CASCADE 会连带删 homeworks，
     #   再被 homework_submissions.homework_id RESTRICT 挡住。
-    QUESTIONS_BLOCKERS = ["answers", "aux_error_books", "main_error_books", "variation_questions", "exam_answers"]
+    QUESTIONS_BLOCKERS = ["answers", "aux_error_books", "main_error_books", "variation_questions", "exam_answers", "remediation_set_items"]
     # 人工/AI 核验内容（answer_importer 写入）的守卫计数键（非真实表名，purge 不按其删表）
     VERIFIED_QUESTIONS_KEY = "questions(answer_verified=1)"
     # practice_results.card_id 是 ON DELETE CASCADE——不挡 DELETE 但会**静默连带删除**
@@ -394,7 +394,8 @@ class DbLoader:
             # exam_sessions 先清：exam_answers.session_id 是 ON DELETE CASCADE 会连带清答案
             # （后续 blockers 里 DELETE FROM exam_answers 为幂等空操作）；
             # exam_sessions 本身不挡 questions DELETE，但答案清空后会话成孤儿，一并清
-            for t in ["exam_sessions", "error_redo_logs"] + self.QUESTIONS_BLOCKERS:
+            # remediation_sets CASCADE 会连带清 groups/items，故只需在 questions 清理前删套题头
+            for t in ["exam_sessions", "error_redo_logs", "remediation_sets"] + self.QUESTIONS_BLOCKERS:
                 if self._table_exists(t):
                     deleted[t] = self._delete(f"DELETE FROM {t}")
         if reset_cards:

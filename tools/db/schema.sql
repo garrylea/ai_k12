@@ -1159,6 +1159,49 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   CONSTRAINT fk_training_sessions_student FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ===== 错题补偿套题（相似题专项，2026-09-21）=====
+-- 折回自 migrations/2026-09-21_remediation_sets.sql（install_mysql.sh 只执行 schema.sql，迁移需同步折回）。
+-- 设计：docs/superpowers/specs/2026-09-21-remediation-set-design.md
+
+CREATE TABLE IF NOT EXISTS remediation_sets (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id BIGINT      NOT NULL,
+  subject_id BIGINT      NOT NULL COMMENT '首期恒数学（MATH_SUBJECT_ID=1）',
+  status     VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active（全对后整行删除）',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  KEY idx_rsets_student (student_id, status),
+  CONSTRAINT fk_rsets_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS remediation_groups (
+  id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+  set_id             BIGINT      NOT NULL,
+  kp_id              BIGINT      NOT NULL COMMENT '触发原错题的 primary 知识点',
+  type               VARCHAR(20) NOT NULL,
+  difficulty         SMALLINT    NOT NULL,
+  origin_question_id BIGINT      NOT NULL COMMENT '触发本组的原错题（审计）',
+  ai_pending_count   SMALLINT    NOT NULL DEFAULT 0 COMMENT 'AI 补题缺口；补完/失败清零，>0 且无 in-flight = 进程重启悬挂',
+  created_at         DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_rgroups_triple (set_id, kp_id, type, difficulty),
+  CONSTRAINT fk_rgroups_set_id FOREIGN KEY (set_id) REFERENCES remediation_sets (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS remediation_set_items (
+  id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  group_id         BIGINT      NOT NULL,
+  question_id      BIGINT      NOT NULL,
+  is_correct       TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '套题自清零标记：答对置 1',
+  points_awarded   TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '首答发分防重（dedupe_key rem:<id> 兜底）',
+  attempts         SMALLINT    NOT NULL DEFAULT 0,
+  last_answered_at DATETIME(3) DEFAULT NULL,
+  created_at       DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_ritems_group_question (group_id, question_id),
+  KEY idx_ritems_group (group_id, is_correct),
+  CONSTRAINT fk_ritems_group_id FOREIGN KEY (group_id) REFERENCES remediation_groups (id) ON DELETE CASCADE,
+  CONSTRAINT fk_ritems_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================
 -- 14. 埋点与账本（2026-09-20，埋点 Phase 0）
 -- ============================================================
