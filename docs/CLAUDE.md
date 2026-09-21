@@ -9,7 +9,7 @@
 | [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md) | **唯一权威需求基准**（PRD） | 所有需求、功能、流程、规则的设计输入 |
 | [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md) | 技术架构、子系统划分、数据模型、部署视图 | 后端开发、数据库设计、服务拆分决策 |
 | [K12智学系统-后端Web服务设计文档.md](./K12智学系统-后端Web服务设计文档.md) | NestJS HTTP 层架构：模块划分、Repository 模式、JWT 认证、统一响应、ai-core 集成 | `apps/server/` HTTP 接入层实现（Controller/Service/Repository/Middleware） |
-| [API接口与数据流设计文档.md](./API接口与数据流设计文档.md) | REST / WebSocket API 契约、端点清单、数据流时序 | 前后端接口联调、`services/` 层实现 |
+| [API接口与数据流设计文档.md](./API接口与数据流设计文档.md) | REST API 契约、端点清单、数据流时序 | 前后端接口联调、`services/` 层实现 |
 | [UX-UI设计文档.md](./UX-UI设计文档.md) | 页面规范、响应式规则、组件层级、交互细节 | 前端页面开发、组件库建设、视觉还原 |
 | [K12智学系统-AI辅导流程详细设计.md](./K12智学系统-AI辅导流程详细设计.md) | 苏格拉底辅导状态机、AI 话术策略、兜底规则 | AI 对话引擎、辅导交互流程实现 |
 | [K12智学系统-AI-Agent中枢设计文档.md](./K12智学系统-AI-Agent中枢设计文档.md) | AI-Agent 中枢 infra + capabilities 详细设计、Prompt 模板体系、模型路由策略 | AI 推理能力开发、Prompt 维护、模型配置 |

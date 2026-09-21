@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v2.8
+> 版本：v4.8
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -17,7 +17,6 @@
 ### 1.2 范围
 
 - 所有 REST API 端点（MVP 必做 + P1/P2 标记）
-- WebSocket 通道定义
 - 核心业务流程的端点级时序
 - 前端页面与 API 的映射关系
 
@@ -54,7 +53,6 @@
 ### 2.2 认证
 
 - REST：请求头携带 `Authorization: Bearer <JWT>`
-- WebSocket：连接时通过 query param `?token=<JWT>` 传递
 - JWT Payload 至少包含：`userId`、`role`（`parent` / `student`）、`familyId`
 - 学生子账号 JWT 额外包含：`parentId`
 
@@ -325,23 +323,23 @@
 | GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary) / `track`(main\|training) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001。**轨道分档**（`source` → 档位，唯一真源 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary`。孩子**在辅线答疑里问过**的题（`auxiliary`）归 `training`——它进训练轨「错题练习」池、可被做对清零，故不再单列「辅线」档 | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs` | AI 对话回放列表（分页壳同 `errors`）。query：`track` / `scene` / `from` / `to` / `q`（**只搜会话标题**）/ `page`。**不提供学科筛选**（`ai_dialogues.subject_id` 约 76% 为 NULL） | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs/{dialogueId}` | 单条对话详情：逐句回放，含 `reasoning`（AI 思考链，默认折叠）、`safetyFlag`（闲聊/偏离学习标记）与 `images[]`（孩子随消息发的图片 URL，服务端从 `attachments` 解析、只留 `type=='image'`，无附件时空数组）；不回传 `token_*` / `response_time_ms` | MVP |
-| GET | `/api/parent/students/{studentId}/study-time` | **学习时长（会话口径）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400；`from > to` 自动交换）。响应 `{totalSeconds, activeDays, byDay:[{date,seconds}], byModule:[{module,seconds}], bySubject:[{subjectId,seconds}], source:'sessions'}`。**口径标注**：这是**显式会话**口径，与 `dashboard.activeDays7` 的**四路时间戳代理并存、不替换**（spec §10，详见 §6.25）——UI 必须并列展示 + 区分文案（如「学习时长（会话）」vs「活跃天数」），**不得悄悄换掉** | MVP |
+| GET | `/api/parent/students/{studentId}/study-time` | **学习时长（会话口径）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400；`from > to` 自动交换）。响应 `{totalSeconds, activeDays, byDay:[{date,seconds}], byModule:[{module,seconds}], bySubject:[{subjectId,seconds}], source:'sessions'}`。**口径标注**：这是**显式会话**口径，与 `dashboard.activeDays7` 的**四路时间戳代理并存、不替换**（spec §10，详见 §5.25）——UI 必须并列展示 + 区分文案（如「学习时长（会话）」vs「活跃天数」），**不得悄悄换掉** | MVP |
 | GET | `/api/parent/students/{studentId}/today-usage` | **今日已用时长**（用于与 `controls.daily_time_limit_minutes` 比较）。响应 `{date, activeSeconds, limitMinutes\|null, exceeded, byModule:[{module,seconds}]}`。`limitMinutes` 取自 `controls.daily_time_limit_minutes`，**为 NULL = 家长未设限 → `exceeded=false`**（不是「超了」，也不是「用了 0 分钟」）；`exceeded` 用 `>=`（用满即算超出，管控语义是「该停了」）。「今日」由**应用层**算好本地日传入，不用 `CURDATE()`。读前会惰性收尾该学生的孤儿会话（失败只 warn、不 500） | MVP |
-| GET | `/api/parent/students/{studentId}/specials` | **专项学情（埋点 Phase 1B）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；非法**宽容回落**、不 400）。响应四模块 `{dictation,interpretation,meaning,vocabulary}`，每模块 `{units,correct,rate\|null,byDay:[{date,count}]}`，`vocabulary` 多一个 `newWords`。**四个键后端保证都在**（没数据给 `0` / `rate:null` / `byDay:[]`），前端不必判空；`rate` 沿用 `answered=0 → null`（**不许写 0**）。`units` = 作答单位数（默写=篇、解释/含义=句、背单词=题）。口径见 §6.27 | MVP |
-| GET | `/api/parent/students/{studentId}/mastery` | **真掌握度（埋点 Phase 1B）**。query `limit`（缺省 10、上限 50；**越界/非法 400/1001，不静默钳制**）。按 `mastery_score ASC, error_count DESC` 取最弱 N 个知识点，响应 `{items:[{knowledgePointId,name,masteryScore(0..1),level,correctCount,errorCount,lastSeenAt\|null}],coveredQuestions,totalQuestions,uncovered}`。**覆盖率三项必须展示**——题库仅 203/530 ≈ 38% 的题绑了知识点，不展示会让家长以为「孩子的问题只有这几个」。**与 §6.8 的 `weakPoints`（错题数代理）是两套口径、并存不替换**（spec §10） | MVP |
+| GET | `/api/parent/students/{studentId}/specials` | **专项学情（埋点 Phase 1B）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；非法**宽容回落**、不 400）。响应四模块 `{dictation,interpretation,meaning,vocabulary}`，每模块 `{units,correct,rate\|null,byDay:[{date,count}]}`，`vocabulary` 多一个 `newWords`。**四个键后端保证都在**（没数据给 `0` / `rate:null` / `byDay:[]`），前端不必判空；`rate` 沿用 `answered=0 → null`（**不许写 0**）。`units` = 作答单位数（默写=篇、解释/含义=句、背单词=题）。口径见 §5.27 | MVP |
+| GET | `/api/parent/students/{studentId}/mastery` | **真掌握度（埋点 Phase 1B）**。query `limit`（缺省 10、上限 50；**越界/非法 400/1001，不静默钳制**）。按 `mastery_score ASC, error_count DESC` 取最弱 N 个知识点，响应 `{items:[{knowledgePointId,name,masteryScore(0..1),level,correctCount,errorCount,lastSeenAt\|null}],coveredQuestions,totalQuestions,uncovered}`。**覆盖率三项必须展示**——题库仅 203/530 ≈ 38% 的题绑了知识点，不展示会让家长以为「孩子的问题只有这几个」。**与 §5.8 的 `weakPoints`（错题数代理）是两套口径、并存不替换**（spec §10） | MVP |
 | GET | `/api/parent/students/{studentId}/goals/attainment` | **目标达成（埋点 Phase 1B；2026-09-20 P6.5 起按学科）**。无 query。读 `goals WHERE is_active=1`；**无目标时懒初始化**（`INSERT IGNORE` 只补缺失、**不覆盖**家长已改的值）。**所有目标都是 `(学科, 指标)` 二元组**：在学学科 = `progress` 行的学科 ∪ 固定兜底 {语文,英语} ∩ MVP 白名单 {数学,语文,英语}，按 `subjects.sort_order` 排序；**没有在学学科 → `items: []`**（去配置教材），**绝不编造默认目标**。默认规模 = 数学 3 + 语文 4 + 英语 4 = 11 行；默认值 30 分钟/学科·天、2 课/周、5 道/周、8 篇/周（仅语文）、20 词/天（仅英语）。达成值按 `metric` 分派：`daily_study_minutes` ← `study_sessions` **按学科**（秒→分钟**向下取整**）；`weekly_lessons` ← `lesson_completions` **按学科**（**历史完课补不回来**，从 2026-09-20 起算）；`weekly_clear_errors` ← `main_error_books` **按学科**；`daily_words` / `weekly_passages` ← `special_practice_logs`（该表 `subject_id` 恒 NULL，按 `module` 筛；这两个指标只挂在英语/语文学科上）。响应 `{items:[{metric,subjectId,subjectName,period,title,target,achieved,rate\|null}]}`，`rate = toRate(target, achieved)`（**分母是 target**，为 0 → null；**允许 > 100 = 超额**，前端不截断）。窗口：daily = 今天、weekly = 近 7 天（含今天），由**应用层**算好传参（不用 `CURDATE()`）。返回顺序固定为「学科 sort_order → 指标模板顺序」 | MVP |
 | PUT | `/api/parent/students/{studentId}/goals/{metric}` | **改目标值（本模块唯一的写端点）**。路径 `metric ∈ daily_study_minutes \| weekly_lessons \| daily_words \| weekly_passages \| weekly_clear_errors`（**白名单外 400/1001**，白名单**从后端 `GOAL_TEMPLATES` 派生**、不手抄）；body **`{ target: int, subjectId: int }`** —— `subjectId` **必填**（所有目标按学科，路径参数不够定位资源；走 body 以避免再加同深度模板路径），`period`/`title` 由服务端按 `metric` 派生，家长无从自定义。**校验链路 6 步**：归属校验 → `metric` 白名单 → body Zod（`target` 1–9999、`subjectId` 正整数）→ **指标×学科匹配**（如 `daily_words` 只适用英语）→ **该学科是该生的在学学科** → upsert。按唯一键 `(student_id, scope_subject_id, metric)` upsert 并把 `is_active` 置回 1（复活曾被停用的目标）。`reminder_enabled` 恒 0（**提醒本期不做**）。响应 = **该 `(学科, 指标)` 的最新达成情况**（形状同 attainment 的一行），调用方原地替换即可、**不必再 GET**。归属校验同其它家长端点（403/1005、404/1002） | MVP |
 | ~~GET~~ | ~~`/api/parent/students/{studentId}/goals`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：旧目标 CRUD **从未实现**（文档先于代码写下，代码里没有对应 handler）；且**没有 `metric` 维度**，表达不了四类目标。已被上方的 `/goals/attainment` 取代 | ~~MVP~~ |
 | ~~POST~~ | ~~`/api/parent/students/{studentId}/goals`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现、无 `metric`；创建目标改由 `PUT /goals/{metric}`（服务端幂等 upsert，首次即创建） | ~~MVP~~ |
 | ~~PATCH~~ | ~~`/api/parent/students/{studentId}/goals/{goalId}`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现；改目标值改由 `PUT /goals/{metric}` | ~~MVP~~ |
 | ~~DELETE~~ | ~~`/api/parent/students/{studentId}/goals/{goalId}`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现；本期不做「删除目标」，停用走 `goals.is_active`（家长可重新启用，`PUT` 会置回 1） | ~~MVP~~ |
-| GET | `/api/parent/students/{studentId}/controls` | **行为管控 P6.6 —— 预警灵敏度（2026-09-20 实现）**。响应**只有两个字段** `{alertAwayMinutes, alertIdleMinutes}`（默认 5 / 15，范围 1..180）。⚠️ **兑换汇率/开关不在本端点**（归 `GET\|PUT .../points/settings`，同一字段两个归属会打架）。读前 `ensure` 建默认行，故两字段恒非空。归属校验：学生不存在 404/1002、不属于本家长 403/1005。⚠️ **本批不做、页面上也不出现**（用户 2026-09-20 裁决，**勿照 UX §P6.6 原文加回**）：每日最大使用时长、禁用时段、辅线访问开关、拍照解题开关 —— `controls` 的 `daily_time_limit_minutes`/`disabled_hours`/`alert_level`/`auxiliary_enabled`/`photo_search_enabled` **保留待用**。见 §6.28 | MVP |
-| PUT | `/api/parent/students/{studentId}/controls` | **改预警灵敏度**。body 两字段**均可选**、均为 `1..180` 整数。校验链：归属校验 → **至少一个字段**（两个都缺 → 409/1001）→ 范围越界（409/1001）。**只发改动过的字段**（未提供即不动）；返回**回读库里的完整对象**（不是回声入参）。见 §6.28 | MVP |
+| GET | `/api/parent/students/{studentId}/controls` | **行为管控 P6.6 —— 预警灵敏度（2026-09-20 实现）**。响应**只有两个字段** `{alertAwayMinutes, alertIdleMinutes}`（默认 5 / 15，范围 1..180）。⚠️ **兑换汇率/开关不在本端点**（归 `GET\|PUT .../points/settings`，同一字段两个归属会打架）。读前 `ensure` 建默认行，故两字段恒非空。归属校验：学生不存在 404/1002、不属于本家长 403/1005。⚠️ **本批不做、页面上也不出现**（用户 2026-09-20 裁决，**勿照 UX §P6.6 原文加回**）：每日最大使用时长、禁用时段、辅线访问开关、拍照解题开关 —— `controls` 的 `daily_time_limit_minutes`/`disabled_hours`/`alert_level`/`auxiliary_enabled`/`photo_search_enabled` **保留待用**。见 §5.28 | MVP |
+| PUT | `/api/parent/students/{studentId}/controls` | **改预警灵敏度**。body 两字段**均可选**、均为 `1..180` 整数。校验链：归属校验 → **至少一个字段**（两个都缺 → 409/1001）→ 范围越界（409/1001）。**只发改动过的字段**（未提供即不动）；返回**回读库里的完整对象**（不是回声入参）。见 §5.28 | MVP |
 | GET | `/api/parent/students/{studentId}/rewards` | 奖励管理视图 | MVP |
-| GET | `/api/parent/alerts` | **异常预警列表 P6.9（2026-09-20 实现）**。query：`studentId?`（给了就校验归属；**不传 = 全部孩子**，列表带 `studentName`）/ `unreadOnly?`（只认 `'1'`）/ `page?`（≥1，默认 1）/ `pageSize?`（1..50，默认 20）。分页壳同 `errors`。`type ∈ off_topic\|emotional\|sensitive\|abusive\|away\|idle`、`level ∈ info\|warning\|critical`；**「建议家长行动」不入库**，由前端按 `type` 静态映射（spec §3.4）。空结果 `items: []` / `total: 0`（**不是错误**）。见 §6.28 | MVP |
+| GET | `/api/parent/alerts` | **异常预警列表 P6.9（2026-09-20 实现）**。query：`studentId?`（给了就校验归属；**不传 = 全部孩子**，列表带 `studentName`）/ `unreadOnly?`（只认 `'1'`）/ `page?`（≥1，默认 1）/ `pageSize?`（1..50，默认 20）。分页壳同 `errors`。`type ∈ off_topic\|emotional\|sensitive\|abusive\|away\|idle`、`level ∈ info\|warning\|critical`；**「建议家长行动」不入库**，由前端按 `type` 静态映射（spec §3.4）。空结果 `items: []` / `total: 0`（**不是错误**）。见 §5.28 | MVP |
 | PATCH | `/api/parent/alerts/{alertId}/read` | **标记预警已读**（幂等，重复标记不报错）。校验链：`alertId` 正整数（否则 409/1001）→ 预警存在（404/1002）→ 属于本家长（403/1005）。返回 `null` | MVP |
-| GET | `/api/parent/alerts/unread` | **未读预警轮询（家长端 Banner，2026-09-20 实现）**。无 query：**不分页、不看单个孩子、只返回 Banner 展示字段**——这是它与 `GET /parent/alerts` 的三点区别。服务端先对名下**全部孩子**跑 `closeStale`（补判走神阈值；失败只 `warn`、**绝不把轮询打成 500**），再查未读。响应 `{items:[{id,type,level,message,studentName,createdAt}], total}`：`items` 截**最新 5 条**、`total` 是未读总数（Banner 文案用）。⚠️ 补判的写入在 `maybeRecordHiddenAlert` 内部仍是 `void`（与随后的 SELECT 存在竞态）→ 补判出的预警通常**下一次轮询**（30s 内）才出现在响应里，不是本次。见 §6.28 | MVP |
-| GET | `/api/parent/account` | **家长账号信息 P6.10（2026-09-20 实现，只读）**：`{id, name\|null, phone}`。⚠️ **不返回**订阅/额度/订单（那些表不存在，见 §8）。`name` 可为 `null`（注册不强制），前端显示「未设置」 | MVP |
+| GET | `/api/parent/alerts/unread` | **未读预警轮询（家长端 Banner，2026-09-20 实现）**。无 query：**不分页、不看单个孩子、只返回 Banner 展示字段**——这是它与 `GET /parent/alerts` 的三点区别。服务端先对名下**全部孩子**跑 `closeStale`（补判走神阈值；失败只 `warn`、**绝不把轮询打成 500**），再查未读。响应 `{items:[{id,type,level,message,studentName,createdAt}], total}`：`items` 截**最新 5 条**、`total` 是未读总数（Banner 文案用）。⚠️ 补判的写入在 `maybeRecordHiddenAlert` 内部仍是 `void`（与随后的 SELECT 存在竞态）→ 补判出的预警通常**下一次轮询**（30s 内）才出现在响应里，不是本次。见 §5.28 | MVP |
+| GET | `/api/parent/account` | **家长账号信息 P6.10（2026-09-20 实现，只读）**：`{id, name\|null, phone}`。⚠️ **不返回**订阅/额度/订单（那些表不存在，见 §7）。`name` 可为 `null`（注册不强制），前端显示「未设置」 | MVP |
 | PATCH | `/api/parent/password` | **家长改自己的密码 P6.10（2026-09-20 实现）**。body `{oldPassword, newPassword}`（旧 1..100、新 6..32）。校验链：Zod（越界 409/1001）→ 旧密码比对（失败 **401/1003**，与登录失败同码）→ 新旧相同（409/1001）。返回 `null`。**不失效旧 token**（本仓无 token 版本机制，旧 token 在 7 天有效期内仍可用，与管理员改密一致） | MVP |
 | ~~PATCH~~ | ~~`/api/parent/account`~~ | **本批不做（2026-09-20 用户裁决）**：PRD 无「家长改手机号/姓名」的要求。原文阶段 P1 保留作历史，**别按它实现** | ~~P1~~ |
 | GET | `/api/parent/messages` | 我的消息（定向 + 全员广播合并，倒序；广播已读回传） | MVP |
@@ -438,7 +436,7 @@
 | POST | `/api/training/sessions/{id}/complete` | 训练会话完成发分（乙类整批发分，只 `math_targeted` / `en_vocabulary` 用，2026-09-17 新增）。**201**。分值取**会话里记录的档位**（不取前端入参——这是乙类唯一的防伪造点），所以整轮结束才发一次。**幂等**：重复调用（前端重试）回 `reason='already_completed'` + `pointsAwarded: 0`，不报错。**发分失败可恢复**：award 抛错（DB 故障）时**不把会话置 completed**，回 `balance: null` / `totalEarned: null` + `reason='award_failed'`（真实余额不是 0，回 0 会污染前端快照），会话留在 `in_progress`，下次 `complete` 用同一幂等键 `tsess/vsess:<sessionId>` 补发且只补发一次。会话不存在/非本人 404（`code=1002`）。响应：`{pointsAwarded, balance, totalEarned, levelUp: {from, to}\|null, reason?}`；`reason` ∈ `daily_limit \| already_completed \| no_rule \| tier_inactive \| award_failed`。 | MVP |
 | GET | `/api/training/dictation/passages` | 语文默写篇目清单（配置页用）。仅返回 `chinese_passages` 中 `verified=1` **且 `memorize_required=1`** 且 `is_active=1` 的篇目（三道闸门：`verified` 是内容已校验、`memorize_required` 是教学上要求背诵、`is_active` 是停用开关），按 `sort_order, id` 排序。**只出篇名 + 册次**——作者/朝代/正文是学生要作答的三个判题字段，一律不下发（防答案泄露）。响应：`{passages: [{passageId, workTitle, semester}]}`。 | MVP |
 | POST | `/api/training/dictation/start` | 语文默写开练。请求体：`{semester, passageIds, count}`；`count` 限 1-20 整数（越界/非整数 400）；`semester` 限 `上册\|下册\|null`（`null`=全部册次，非法 400）；`passageIds` 为正整数数组或 `null`——非空时按指定篇目出题（**忽略 `semester`**，仅保留抽题池内篇目），否则按册次随机抽题。**两条路径都只从抽题池取题**（`verified=1` 且 `memorize_required=1` 且 `is_active=1`，三道闸门）；「全部册次」随机抽时按篇名去重（九上/九下有 9 篇重复收录，跨册取 `MIN(id)`）。**题面由篇名服务端生成**（`请默写《X》`，不落库）。响应：`{questions: [{passageId, prompt, workTitle, semester}]}`——**白名单序列化**，`author`/`dynasty`/正文一律剥离（防答案泄露，与 `targeted/start` 同规矩）。题池为空返回 `{questions: []}`。 | MVP |
-| POST | `/api/training/dictation/judge` | 语文默写判题（**纯程序化判对错，不调用 LLM，不写任何学生状态**）。请求体：`{passageId, author, dynasty, body}`；`passageId` 须正整数（非法 400），篇目不存在 404。判对错口径：三字段各自 `normalizeChineseAnswer`（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后全等，**三项全对才 `isCorrect=true`**（故学生正文带不带标点、全半角、空格不影响判定）；正文不等时由 `diffChineseInOriginalText`（LCS 逐字差异 + 原文标点回投）定位错处，相邻「漏写+多写」合并为一个 `wrong`（写错字）、连续同类项合并成段——**判对错仍忽略标点，但 `bodyDiff` 各段文本回投原文标点**（学生要能读成整句，见 §6.20）。**不入错题本、不清零**（古诗文专项是独立子系统，PRD §6.3 / §7.4 例外；`reference` 判题响应即下发）。**错因与判题解耦**：本端点不等 LLM（实测 ~25ms），答错时回 `feedbackPending=true`，错因由 `POST /training/dictation/feedback` 另取。响应：`{passageId, isCorrect, fields: {author: {match}, dynasty: {match}, body: {match}}, bodyDiff: [{type:'equal'\|'wrong'\|'missing'\|'extra', ...}], reference: {author, dynasty, body}, feedback(恒 null), feedbackPending(bool), pointsAwarded: number, awardReason?(enum: daily_limit\|no_rule\|tier_inactive\|genre_unset\|not_cleared)}`。**积分字段（2026-09-17）**：`pointsAwarded` 是本次调用**实际入账**的积分（甲类 `cn_dictation`，完成即给、不看对错），`0` = 本次未加分——篇目未标定体裁（`genre_unset`）/ 档位未启用 / 已达每日上限 / 无规则 / 幂等命中 / 发分失败；`awardReason` 是未发分原因，**幂等命中（`duplicate`）刻意静默**——回 `pointsAwarded: 0` 但不带原因（`duplicate` 会带回历史分值，报出去会让前端弹假 `+N 分`）。 | MVP |
+| POST | `/api/training/dictation/judge` | 语文默写判题（**纯程序化判对错，不调用 LLM，不写任何学生状态**）。请求体：`{passageId, author, dynasty, body}`；`passageId` 须正整数（非法 400），篇目不存在 404。判对错口径：三字段各自 `normalizeChineseAnswer`（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后全等，**三项全对才 `isCorrect=true`**（故学生正文带不带标点、全半角、空格不影响判定）；正文不等时由 `diffChineseInOriginalText`（LCS 逐字差异 + 原文标点回投）定位错处，相邻「漏写+多写」合并为一个 `wrong`（写错字）、连续同类项合并成段——**判对错仍忽略标点，但 `bodyDiff` 各段文本回投原文标点**（学生要能读成整句，见 §5.20）。**不入错题本、不清零**（古诗文专项是独立子系统，PRD §6.3 / §7.4 例外；`reference` 判题响应即下发）。**错因与判题解耦**：本端点不等 LLM（实测 ~25ms），答错时回 `feedbackPending=true`，错因由 `POST /training/dictation/feedback` 另取。响应：`{passageId, isCorrect, fields: {author: {match}, dynasty: {match}, body: {match}}, bodyDiff: [{type:'equal'\|'wrong'\|'missing'\|'extra', ...}], reference: {author, dynasty, body}, feedback(恒 null), feedbackPending(bool), pointsAwarded: number, awardReason?(enum: daily_limit\|no_rule\|tier_inactive\|genre_unset\|not_cleared)}`。**积分字段（2026-09-17）**：`pointsAwarded` 是本次调用**实际入账**的积分（甲类 `cn_dictation`，完成即给、不看对错），`0` = 本次未加分——篇目未标定体裁（`genre_unset`）/ 档位未启用 / 已达每日上限 / 无规则 / 幂等命中 / 发分失败；`awardReason` 是未发分原因，**幂等命中（`duplicate`）刻意静默**——回 `pointsAwarded: 0` 但不带原因（`duplicate` 会带回历史分值，报出去会让前端弹假 `+N 分`）。 | MVP |
 | POST | `/api/training/dictation/feedback` | 语文默写错因文案（LLM 可选，**与判题解耦**，2026-09-14 新增）。请求体同 `judge`：`{passageId, author, dynasty, body}`；`passageId` 须正整数（非法 400），篇目不存在 404。服务端按入参用纯函数 `evaluateDictation` 重算三字段匹配与差异（**只读篇目、只算差异，不写任何学生状态**），再喂 `dictation_feedback` 场景（primary=`local` 本地 llama.cpp，fallback=`deepseek-flash`）。本地端点靠 `chat_template_kwargs:{enable_thinking:false}` 关 thinking（**`thinking:false` 对 llama.cpp 无效**，它不认 DashScope 的 `enable_thinking`），实测错因耗时 13–16s → 2s 量级。模型不可达/超时/两个模型都失败一律 **HTTP 200 + `feedback=null`**（不报错），前端显示兜底文案。响应：`{feedback: string\|null}`。 | MVP |
 | GET | `/api/training/interpretation/passages` | 语文古诗文**解释（翻译）**专项篇目清单（配置页「指定篇目」用，2026-09-16 新增）。抽题池 = `chinese_passages` 中 `verified=1 AND is_active=1 AND JSON_LENGTH(sentences) > 0`——**不设 `memorize_required`**（「要背诵」不是「要理解翻译」的必要条件），但多一道**「内容就绪」**闸门（没切过句的篇目点进去没题目）。按 `sort_order, id` 排序。**只出篇名 + 册次**——标准释义/标准译文是判题答案，一律不下发。响应：`{passages: [{passageId, workTitle, semester}]}`。 | MVP |
 | POST | `/api/training/interpretation/start` | 语文解释开练（2026-09-16 新增）。请求体：`{semester, passageIds, count}`；`count` 限 **1-3** 整数（每篇逐句判，3 篇已是长会话；越界/非整数 400）；`semester` 限 `上册\|下册\|null`（非法 400）；`passageIds` 为正整数数组或 `null`——非空时按指定篇目出题（**忽略 `semester`**，仅保留抽题池内篇目），否则按册次随机抽题。**「全部册次」随机抽时按篇名去重**（九上/九下有 9 篇重复收录，跨册取 `MIN(id)`）。**一次下发整篇所有句子**——前端才能把整篇铺出来、让学生看见上下文（三行对译不换页）。响应：`{passages: [{passageId, workTitle, semester, sentences: [{index, text, terms: [词名]}]}]}`——**白名单序列化**，`gloss`（释义）/`translation`（译文）/`full_translation` 与 `author`/`dynasty`/`body` 一律剥离（防答案泄露）；`terms` 只出**词名**，是该句需要学生作答的关键字词。题池为空返回 `{passages: []}`。 | MVP |
@@ -528,12 +526,12 @@
 | 方法 | 路径 | 入参 | 校验与逻辑 | 返回 |
 |---|---|---|---|---|
 | POST | `/api/study-sessions` | `{sessionUid, module, scene, subjectId?, refType?, refId?, screenClass?, inputType?, appShell?}` | `sessionUid` 必填且必须是 **UUID 形状**（`8-4-4-4-12` 十六进制）→ 否则 1001。`module` / `scene` 必须在**封闭字典**内（后端 `STUDY_MODULES` / `STUDY_SCENES` 是唯一真源，前端 `sceneMap.ts` 只能取这里的值）→ 否则 1001。`subjectId` 若给，需是**在售学科**（本期**有意不校验**「学生是否有权学该学科」）→ 否则 1001。设备三项 `screenClass` / `inputType` / `appShell` **不做枚举校验**：命中白名单取原值，否则**落 NULL 且不报错**（设备信息是尽力而为）。`platformClass` / `browser` 由服务端从请求头 `User-Agent` 解析后落库，**不接受客户端上报**（伪造 UA 是弱信号，但至少比自报强）。**幂等**：同 `sessionUid` 重复 POST **返回既有会话**（不新建、不报错）；但该 uid 已被**别的学生**占用 → 1001「会话标识冲突」（静默返回别人的 `startedAt` 会让前端以为自己的会话在跑，后续心跳全会落空） | `{sessionUid, startedAt}` **201** |
-| PATCH | `/api/study-sessions/{uid}/heartbeat` | `{state:'visible'\|'hidden'}` | `state` 必填枚举 → 否则 1001。会话不存在 / 非本人 / 非 `active` → **静默 200 返回 `{activeSeconds: null}`**（不报错：心跳是尽力而为，报错只会污染前端日志）。服务端按 `last_heartbeat_at → NOW(3)` 差值累加 `active_seconds`，**只在上一状态为 visible 时计**（hidden 暂停计时），**单次封顶 45s**（理由见 §6.25） | `{activeSeconds: number\|null}` |
+| PATCH | `/api/study-sessions/{uid}/heartbeat` | `{state:'visible'\|'hidden'}` | `state` 必填枚举 → 否则 1001。会话不存在 / 非本人 / 非 `active` → **静默 200 返回 `{activeSeconds: null}`**（不报错：心跳是尽力而为，报错只会污染前端日志）。服务端按 `last_heartbeat_at → NOW(3)` 差值累加 `active_seconds`，**只在上一状态为 visible 时计**（hidden 暂停计时），**单次封顶 45s**（理由见 §5.25） | `{activeSeconds: number\|null}` |
 | PATCH | `/api/study-sessions/{uid}/end` | `{reason}` | `reason` 必填枚举：`route_change` / `pagehide` / `idle_timeout` / `closed` / `hidden_timeout` → 否则 1001。先补计最后一段（**同心跳的封顶规则**，但不改 `client_state`），再落 `status='ended'` / `end_reason` / `ended_at=NOW(3)`。会话不存在 / 已结束 → **幂等返回现有值**（不报错、不重复计） | `{activeSeconds, endedAt}` |
 
 > **乐观锁**：心跳 / 结束两条 UPDATE 都带 `status = 'active'` 条件——会话一旦 `ended`，迟到的请求只影响 0 行，不会把已结算的秒数再动一遍。
 >
-> **埋点写入的例外**：这三个采集端点是**唯一**允许 DB 失败直接 500 的埋点路径（前端传输层会吞掉，见 §6.25）；而**嵌在别的业务流里**的埋点写入（如家长端 GET 里的 `closeStale`）必须 catch、失败只 warn、绝不 500。静默隐藏故障会让生产问题只能从日志排障。
+> **埋点写入的例外**：这三个采集端点是**唯一**允许 DB 失败直接 500 的埋点路径（前端传输层会吞掉，见 §5.25）；而**嵌在别的业务流里**的埋点写入（如家长端 GET 里的 `closeStale`）必须 catch、失败只 warn、绝不 500。静默隐藏故障会让生产问题只能从日志排障。
 
 ---
 
@@ -552,7 +550,7 @@
 
 1. **`units` = 一个作答单位，不是一道题**：默写一篇一行、解释/含义**一句一行**、背单词一题一行。所以四个模块的 `units` 相加**没有业务含义**，单位词也各不相同（篇/句/句/题），UI 必须分行显示各自的单位。
 2. **`rate` 分母为 0 时恒为 `null`，不是 0**：三处都用 `rate.util.ts` 的 `toRate`（唯一实现）。`specials` 的分母是「本期有明确对错的作答数」，`goals` 的分母是 `target`。**`goals.rate` 允许 > 100**（超额完成），前端不截断。
-3. **掌握度与「薄弱知识点」是两套口径，并存不替换**（spec §10 硬约束）：`/mastery` 读 `student_knowledge_mastery`（**真掌握度**）；§6.8 的 `weakPoints` 是**错题数代理**（未清零错题按知识点聚合）。报告页**两张卡并存、标题不同、不得合并**。`/mastery` **必须**同时回 `coveredQuestions`/`totalQuestions`/`uncovered` —— 题库只有约 38% 的题绑了知识点。
+3. **掌握度与「薄弱知识点」是两套口径，并存不替换**（spec §10 硬约束）：`/mastery` 读 `student_knowledge_mastery`（**真掌握度**）；§5.8 的 `weakPoints` 是**错题数代理**（未清零错题按知识点聚合）。报告页**两张卡并存、标题不同、不得合并**。`/mastery` **必须**同时回 `coveredQuestions`/`totalQuestions`/`uncovered` —— 题库只有约 38% 的题绑了知识点。
 4. **`weekly_passages` 是「去重篇目数」**：`COUNT(DISTINCT ref_id)` 跨三个语文专项（`chinese_dictation`/`chinese_interpretation`/`chinese_meaning`）。**不能用行数**——解释/含义是一句一行，数行数会把「8 句」当成「8 篇」汇报给家长（2026-09-22 用户裁决）。
 
 **隐私分层（三道锁之一）**
@@ -563,58 +561,15 @@
 
 **旧 `goals` CRUD（§4.13 的四条删除线行）**：`GET/POST /goals`、`PATCH/DELETE /goals/{goalId}` **从未实现**（文档先于代码），且无 `metric` 维度，2026-09-22 起标废弃。本节的 `PUT /goals/{metric}` 与它们**没有路径冲突**（那边没有路由）；即便将来补实现，两边的 HTTP 方法也不同（PUT vs PATCH/DELETE）。
 
-**数据流**见 §6.27；设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.4/§4.7/§4.8/§8.2/§10。
+**数据流**见 §5.27；设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.4/§4.7/§4.8/§8.2/§10。
 
 ---
 
-## 5. WebSocket 设计
-
-### 5.1 通道定义
-
-| 通道 | 路径 | 用途 |
-|---|---|---|
-| AI 辅导流 | `wss://host/ws/ai/{dialogueId}` | AI 辅导的 token 级流式响应 |
-| 家长通知 | `wss://host/ws/notifications/{studentId}` | 异常预警、额度预警、目标提醒 |
-
-### 5.2 连接管理
-
-- **鉴权**：连接建立时携带 JWT（query param `?token=xxx`），服务端校验后绑定 `studentId` / `parentId`
-- **心跳**：客户端 30s 发送一次 `ping`，服务端 60s 无响应断开
-- **断线重连**：客户端指数退避（1s → 2s → 4s → ... 最大 30s），重连成功后携带 `lastMessageId` 请求补发离线期间消息
-- **订阅模型**：家长通知通道支持按预警类型订阅/取消订阅
-- **跨节点续接**：`dialogueId` 绑定到 ConversationService 持久化数据，节点切换后通过 `dialogueId` 无缝恢复上下文
-
-### 5.3 消息格式（AI 通道示例）
-
-```json
-{
-  "type": "token" | "full" | "error" | "safety_alert" | "heartbeat",
-  "payload": {
-    "content": "...",
-    "messageId": "msg_xxx",
-    "model": "kimi",
-    "safety": { "isLearningRelated": true, "alertLevel": "none" }
-  }
-}
-```
-
-- `type=token`：逐字/token 推送（首字延迟 ≤1s）
-- `type=full`：兜底或降级时的完整消息包
-- `type=safety_alert`：触发安全预警时同步推送
-- `type=heartbeat`：服务端心跳回应
-
-### 5.4 降级策略
-
-- WebSocket 不可用时，前端自动降级为 SSE（`GET /api/ai/tutor?stream=sse`）
-- SSE 亦不可用时，降级为轮询（不推荐，仅作最后保底）
-
----
-
-## 6. 核心数据流详细设计
+## 5. 核心数据流详细设计
 
 以下时序描述将架构 §5 的高层流程细化到端点级别。
 
-### 6.1 主线一课学习完整闭环
+### 5.1 主线一课学习完整闭环
 
 ```text
 学生登录
@@ -657,7 +612,7 @@ GET /api/content/versions/{v}/units/{u}/lessons/{l}/cards
   ├─ [可选] 点击「讨论」
   │   ▼
   │   POST /api/conversations（创建主线会话，范围限定 cardId）
-  │   WS /ws/ai/{dialogueId}（或 POST /api/ai/tutor）
+  │   POST /api/ai/tutor/stream（流式）
   │   POST /api/conversations/{id}/messages（用户消息写入）
   │   AI 流式响应 → 前端展示
   │   ▼
@@ -692,7 +647,7 @@ GET /api/assessment/submissions/{sid}/results
 本课学习完成，等待下次进入新课时触发错题清零检查与奖励发放（见流程开头）
 ```
 
-### 6.2 辅线自由探索与拍照录入
+### 5.2 辅线自由探索与拍照录入
 
 ```text
 学生进入 P3.1 辅线首页
@@ -700,8 +655,7 @@ GET /api/assessment/submissions/{sid}/results
   ├─ 直接问 AI
   │  ▼
   │  POST /api/conversations（track=auxiliary）
-  │  WS /ws/ai/{dialogueId}（开放范围，不限卡片）
-  │  或 POST /api/ai/tutor（mode=auxiliary）
+  │  POST /api/ai/tutor/stream（开放范围，不限卡片；mode=auxiliary）
   │
   ├─ 拍照解题 / 输入答疑
   │  ▼
@@ -727,7 +681,7 @@ GET /api/assessment/submissions/{sid}/results
 若辅线做题做错 → 写入主线错题本（source 不参与门禁计数，不影响主线）
 ```
 
-### 6.2.1 PDF 上传→提取→SSE 通知时序
+### 5.2.1 PDF 上传→提取→SSE 通知时序
 
 ```text
 前端 POST /api/files/upload (PDF)
@@ -750,10 +704,10 @@ GET /api/assessment/submissions/{sid}/results
 文件内容拼入 LLM user message，PDF 图片路由到多模态模型
 ```
 
-### 6.3 AI 辅导请求处理流
+### 5.3 AI 辅导请求处理流
 
 ```text
-前端 WS 连接 /ws/ai/{dialogueId}（或 POST /api/ai/tutor）
+前端 POST /api/ai/tutor/stream（或 POST /api/ai/tutor）
   │
   ▼
 API Gateway 鉴权（JWT 校验）
@@ -766,8 +720,7 @@ SafetyGuard 判断：
   │  ├─ 非学习 / 异常输入
   │  │  ▼
   │  │  温和阻断话术返回前端
-  │  │  SafetyGuard 写入 safety_alerts（家长端实时推送）
-  │  │  WS /ws/notifications/{studentId} 推送预警
+  │  │  SafetyGuard 写入 safety_alerts（家长端 30s 轮询可见，见 §5.28）
   │  │
   │  └─ 学习相关内容
   │      ▼
@@ -788,7 +741,7 @@ SafetyGuard 判断：
   │      连续失败 3 次 → FallbackHandler 输出完整解析 + 知识点总结
 ```
 
-### 6.4 错题升级与变式生成
+### 5.4 错题升级与变式生成
 
 ```text
 学生在训练轨错题练习重做 → POST /api/training/judge
@@ -818,10 +771,10 @@ Validator 逻辑自洽校验
   │      变式题存入 variation_questions
   │      ▼
   │      （变式下发端点为原 §4.10 `/api/error-book/.../variations`，
-  │        已于 2026-09-20 标废弃：变式生成本期未实现，见 §10 v4.6）
+  │        已于 2026-09-20 标废弃：变式生成本期未实现，见 §9 v4.6）
 ```
 
-### 6.5 奖励领取与兑现
+### 5.5 奖励领取与兑现
 
 ```text
 学生端：P2.9 闯关奖励页
@@ -844,7 +797,7 @@ POST /api/rewards/students/{id}/claim/{rewardId}
   │      线下履约后 → POST /api/rewards/{recordId}/fulfill
 ```
 
-### 6.6 订阅购买与续费
+### 5.6 订阅购买与续费
 
 ```text
 家长端：P6.10 账号设置 / P7.1 订阅中心（P2 新增）
@@ -886,7 +839,7 @@ GET /api/quota/subscription（确认生效）
 GET /api/quota/subscription（检测到即将到期）
   │
   ▼
-推送续费提醒（WebSocket / 站内信）
+推送续费提醒（站内信）
   │
   ▼
 家长端点击续费
@@ -896,7 +849,7 @@ POST /api/billing/subscription/renew
 后续同购买流程：创建订单 → 支付 → 回调 → 生效
 ```
 
-### 6.7 手写/主观题提交与 AI 按步骤给分流
+### 5.7 手写/主观题提交与 AI 按步骤给分流
 
 ```text
 学生在作业/考试中遇到主观题/手写题
@@ -924,7 +877,7 @@ Assessment Service 接收答案
   │      前端 GET /api/assessment/submissions/{sid}/results 获取批改结果
 ```
 
-### 6.8 学情报告生成与展示（实时聚合，不落库）
+### 5.8 学情报告生成与展示（实时聚合，不落库）
 
 ```text
 触发时机：家长打开学情报告页，或切换周报/月报
@@ -946,7 +899,7 @@ ReportService 实时聚合（不落库、不调 LLM）：
 >
 > **后续迭代**：`learning_reports` 表本期**未使用**；AI 生成报告文本（`POST /api/ai/report` + `AnalyticsCapability` 的 `analysis` 场景，形状见 `ReportContent`）留作后续迭代，届时可复用本批的聚合 service。该端点的阶段标记（§4.14 仍记 MVP）将另行调整。
 
-### 6.9 课堂练习判对错
+### 5.9 课堂练习判对错
 
 ```text
 学生在主线课程浏览到 practice 卡片（card_type='practice'）
@@ -1004,7 +957,7 @@ Practice Service 计算 contentHash -> questionsRepo.findByContentHash
   │  └─ isCorrect=false -> 前端展示解析，错题进入主线错题本（下次进入新课触发清零检查）
 ```
 
-### 6.10 课堂练习提示（AI 生成 + Card 级缓存）
+### 5.10 课堂练习提示（AI 生成 + Card 级缓存）
 
 ```text
 学生在 practice 卡片答题前点「提示」
@@ -1040,7 +993,7 @@ Practice Service.getHint -> cardsRepo.findHintsById(cardId)
 
 ---
 
-### 6.11 课堂练习「让 AI 讲一讲」（苏格拉底讨论）
+### 5.11 课堂练习「让 AI 讲一讲」（苏格拉底讨论）
 
 ```text
 学生在 practice 卡片答题前点「让 AI 讲一讲」
@@ -1082,7 +1035,7 @@ POST /api/ai/tutor/stream（mode=mainline, dialogueId, message）-> SSE 流式
 > 错题本记录无论后续答对答错都保留（清除门禁尚未实现，`markCleared` 暂无调用方）。
 > 抽屉仅手动关闭（开/关/放大），不自动收起--多轮对话需稳定展示。
 
-### 6.12 卡片级「思辨答疑」（苏格拉底讨论）
+### 5.12 卡片级「思辨答疑」（苏格拉底讨论）
 
 ```text
 学生在非 practice 知识卡片上点「思辨答疑」
@@ -1123,7 +1076,7 @@ POST /api/ai/tutor/stream（mode=mainline, dialogueId, message）-> SSE 流式
 
 ---
 
-### 6.13 错题清零门禁（进每节课前清空错题本所有未清题）
+### 5.13 错题清零门禁（进每节课前清空错题本所有未清题）
 
 ```text
 CourseDetailPage 加载（fetchData，带 subjectId）
@@ -1155,7 +1108,7 @@ CleanupPhase 逐题作答 -> 复用 POST /api/practice/judge 判题
   全部判完 -> 仍错的调 POST /api/practice/bump-error-levels 递增 level -> 庆祝/对错表 -> 开始学习
 ```
 
-### 6.14 课堂练习结果持久化与 reset
+### 5.14 课堂练习结果持久化与 reset
 
 ```text
 进 practice 卡 / 刷新 / 跨设备登录
@@ -1178,7 +1131,7 @@ PracticeService.getResults -> PracticeResultsRepository.findByStudentCard
   └─ reset 只删 practice_results，不碰 main_error_books（与错题本解耦）
 ```
 
-### 6.15 错题练习（训练模块）
+### 5.15 错题练习（训练模块）
 
 ```text
 训练入口（TrainingSubjectPage）-> 错题练习
@@ -1206,7 +1159,7 @@ ErrorPracticeRunPage 逐题作答 -> POST /api/training/judge（source='error_pr
   全部判完 -> 仍错的调 POST /api/training/bump-error-levels 递增 level
 ```
 
-### 6.16 专项练习（训练模块）
+### 5.16 专项练习（训练模块）
 
 ```text
 训练入口（TrainingSubjectPage）-> 专项练习
@@ -1234,7 +1187,7 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
   （专项练习无 bump-error-levels：新错题首轮作答，无「重做仍错」语义）
 ```
 
-#### 6.16.1 专项训练选题排除已标记题
+#### 5.16.1 专项训练选题排除已标记题
 
 ```text
 学生开专项练习 -> POST /api/training/targeted/start（JWT studentId 透传）
@@ -1246,7 +1199,7 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
 
 **约束**：仅 `targeted/start` 选题路径受影响；**主线练习/错题重做/考试不动**（不复用此排除逻辑）。标记维度是 `student_id + question_id` 全局排除，不分知识点——同题挂多 KP 时，标记一次即对所有 KP 的专项抽题都排除。
 
-### 6.17 真题考试（考试模块）
+### 5.17 真题考试（考试模块）
 
 ```text
 考试入口（试卷列表页）-> GET /api/exams/papers?subjectId={subjectId}
@@ -1293,7 +1246,7 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
 
 ---
 
-### 6.18 会话场景分型（scene）与训练「讲一讲」按题续接（2026-09-07）
+### 5.18 会话场景分型（scene）与训练「讲一讲」按题续接（2026-09-07）
 
 > 各系统（辅线答疑 / 课堂练习讲一讲 / 卡片思辨答疑 / 训练讲一讲）共用 `ai_dialogues` + `ai_messages`
 > 同一套后端链路，但**按 `scene` 分型隔离历史列表**；对话不再混在辅线答疑列表里。
@@ -1336,7 +1289,7 @@ ConversationsService.create（scene=aux_training + questionId）
   锚定的归 `mainline_question`，其余归 `mainline_card`。详见
   `tools/db/migrations/2026-09-07_add_ai_dialogues_scene.sql`。
 
-### 6.19 主观题自评（self_assess 模式，2026-09-09）
+### 5.19 主观题自评（self_assess 模式，2026-09-09）
 
 `JUDGE_SUBJECTIVE_MODE=self_assess`（默认）下，short_answer/proof/calculation 等主观题不判对错，学生对照参考答案自评。时序：
 
@@ -1348,7 +1301,7 @@ ConversationsService.create（scene=aux_training + questionId）
 
 `ai` 模式（`JUDGE_SUBJECTIVE_MODE=ai`）保留原 JudgmentCapability AI 判定路径可切回；遗留 `ai` 模式已判的主观行（`is_correct` 非 NULL）在结果页计为客观错题。
 
-### 6.20 语文古诗文默写（训练模块，2026-09-13）
+### 5.20 语文古诗文默写（训练模块，2026-09-13）
 
 ```text
 训练入口（TrainingSubjectPage）-> 语文 -> 语文专项页（ChineseSpecialPage，两卡：古诗文默写可点 / 古诗文解释灰化）
@@ -1406,7 +1359,7 @@ DictationRunPage 逐篇三字段作答（作者/朝代/正文）-> POST /api/tra
 
 **2026-09-14 解耦动因**：解耦前错因 LLM 调用挂在 `judge` 的关键路径上，而本地 `Qwen3.8-27B` 是**思考模型**（先出 `reasoning_content` 再出正文），一次错答要等 13–16 秒才看到对错，且前端全程只有一个变灰的「正在判题…」按钮——学生以为卡死。现在判题 25ms 出结果、错因异步补取、等待期间有转圈动画；同时错因调用关掉 thinking（2s 量级）。
 
-### 6.21 语文古诗文解释（翻译）：三行对译 + 逐句判题（2026-09-16）
+### 5.21 语文古诗文解释（翻译）：三行对译 + 逐句判题（2026-09-16）
 
 ```
 InterpretationConfigPage 加载 -> GET /api/training/interpretation/passages
@@ -1447,7 +1400,7 @@ InterpretationRunPage 逐句作答（三行对译）：
 
 **内容从哪来**：`start` 一次给全「原文 + 该句有哪些关键字词」；**标准释义与标准译文只在该句判题返回时逐句下发**——这是本设计与默写最大的口径差别，防的是「还没答就看见答案」。字词由用户整理后交 `tools/data-refinery/src/interpretation_cli.py` 入库（`key_terms` 每项带 `sentenceIndex` 指出该词属于哪一句）；译文为**混合模式**——输入给了就用输入的，没给由管线调本地 LLM 生成。
 
-### 6.22 英语背单词（训练模块，2026-09-16）
+### 5.22 英语背单词（训练模块，2026-09-16）
 
 ```text
 VocabularyConfigPage 加载 -> GET /api/training/vocabulary/options
@@ -1497,7 +1450,7 @@ VocabularyRunPage：题面 -> 作答 -> **提交即翻下一个词，不等判�
 
 **内容从哪来**：词库为课标官方 PDF 附录词汇表（义务教育 2022 版 1600 词 + 高中 2017 版 2020 修订 3000 词），熟词僻义与词根族由「我出草稿 + 程序硬校验 + 人工审」产出，走 data-refinery 旁路管线（见 `docs/data-refinery-使用手册.md`）；**本期以 DEV-FIXTURE 假数据打通链路，真实词库待内容管线导入**（`npx tsx src/scripts/seed-vocabulary-fixture.ts`）。
 
-### 6.23 语文古诗含义（深层含义 + 作者情感，2026-09-17）
+### 5.23 语文古诗含义（深层含义 + 作者情感，2026-09-17）
 
 ```text
 MeaningConfigPage 加载 -> GET /api/training/meaning/passages
@@ -1542,7 +1495,7 @@ MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
 
 **内容从哪来**：`sentence_meanings`（每句的含义 + 情感）由**人工填写**——`tools/data-refinery` 的 `meaning_cli.py`（**已实现**，含 15 用例）复用 `answer_importer` 的 `--export` / `--apply` 两步：导出带原文的模板（人工只填「含义」「情感」两个空；**库里已填过的句子连同含义/情感一起回填**，故「导出 → 改一句 → 回写」这条修订路径不会把该篇其余句子抹成 `null`），再**按原文在 `sentences` 里定位下标**幂等写回（不按行号、不做整体长度断言；定位不到的句子写进 `-review.md` 并跳过；只 `UPDATE` `sentence_meanings` 一列，绝不刷掉 `verified`/`is_active`/`memorize_required` 的人工标定）。**整篇一句都没填的篇目拒绝写库**——既避免只剩原文的模板把库里已填含义整列抹掉，也避免 all-`null` 数组混进抽题池（抽题池只查 `sentence_meanings IS NOT NULL`，挡不住全 `null`）。本管线**不调 LLM**。
 
-### 6.24 闯关积分：发分 → 流水 → 快照 → 段位，与积分兑换（2026-09-17）
+### 5.24 闯关积分：发分 → 流水 → 快照 → 段位，与积分兑换（2026-09-17）
 
 积分是**平台级**的激励层（不分学科、不分轨道，段位全局唯一），加在既有流程**旁边**而不是里面：**不影响任何门禁**（不清零错题、不替代错题本、不参与主线解锁判定）。只有「完成任务」产生积分，辅线答疑不产生。
 
@@ -1620,7 +1573,7 @@ student_points **只减 balance**（earnedDelta 恒为 0）——SQL 里根本�
 
 **兑换为什么写 `earnedDelta: 0`**：`student_points.total_earned` 是段位唯一依据，语义上不可回退。兑换扣的是「可用余额」`balance`，若同事务里把 `total_earned` 也减掉，段位立刻会降，破坏 spec §3 定案 #2。所以兑换的扣减 SQL **只 `SET balance`**、结构性保证不触碰 `total_earned`（见 `student-points.repo.ts` 的 `deductBalanceIfEnough`）。
 
-### 6.25 会话心跳 → 学习时长聚合（埋点 Phase 1A，2026-09-21）
+### 5.25 会话心跳 → 学习时长聚合（埋点 Phase 1A，2026-09-21）
 
 学习时长的端到端链路（采集在 §4.23、读侧在 §4.13）。**设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.2 / §7.4 / §8 / §10。**
 
@@ -1680,7 +1633,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 **本批范围**：前端 `analytics/` 只做**会话生命周期**（start / heartbeat / end + 设备分档 + 状态机）。`behavior_events` 与 `POST /api/track/events` **有意留到 Phase 2**（表尚不存在，提前开端点只会得到 500）；家长端 / 管理端**不启动会话追踪**（`tracker.setEnabled` 按角色关闭）。
 
-### 6.26 LLM 调用 → 账本 → token 计量（2026-09-20）
+### 5.26 LLM 调用 → 账本 → token 计量（2026-09-20）
 
 任何 capability 最终都经 `ModelClient.chat()`（`ai-core/infra/model-client/index.ts`）。在那里：
 
@@ -1699,7 +1652,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 ---
 
-### 6.27 判题出口 → 专项流水 / 掌握度 / 完课 → 家长端聚合（埋点 Phase 1B + P6.5，2026-09-22）
+### 5.27 判题出口 → 专项流水 / 掌握度 / 完课 → 家长端聚合（埋点 Phase 1B + P6.5，2026-09-22）
 
 专项学情、真掌握度、**按学科目标**的端到端链路（读侧在 §4.13 / §4.24，写入嵌在既有判题出口与学习进度推进）。**设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.4 / §4.7 / §4.8 / §8.2 / §10。**
 
@@ -1726,7 +1679,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 1. **一行 = 一个作答单位**：默写一篇、解释/含义一句、背单词一题。故 `units = COUNT(*)`，四个模块的 `units` 相加没有业务含义。
 2. **`answered = SUM(is_correct IS NOT NULL)`**：排除 `unanswered` / `undetermined`（「没有明确对错」）的行；`rate` 一律用 `rate.util.ts` 的 `toRate(answered, correct)`（**唯一实现**），分母为 0 → `null` 而不是 0。
-3. **掌握度与 `weakPoints` 并存不替换**：前者读 `student_knowledge_mastery`（真掌握度，判题时回写），后者是错题数代理（§6.8）。报告页两张卡、两个标题，不得合并；`/mastery` 必须回覆盖率三项（题库仅约 38% 的题绑了知识点）。
+3. **掌握度与 `weakPoints` 并存不替换**：前者读 `student_knowledge_mastery`（真掌握度，判题时回写），后者是错题数代理（§5.8）。报告页两张卡、两个标题，不得合并；`/mastery` 必须回覆盖率三项（题库仅约 38% 的题绑了知识点）。
 4. **埋点写入永不阻断主链路**：四个专项写入点、掌握度回写、**完课事件**都在 `try/catch` 里，**失败只 warn**；掌握度回写走 `void`（不 `await`）——判题/推进是主链路，派生数据不该拖长学生等待。
 5. **目标 = `(学科, 指标)`二元组（P6.5，2026-09-20）**：不存在全局目标。同一個 metric 会在多个学科各有一行，所以「metric」不再是唯一键、前端渲染 key 必须用 `subjectId:metric`。在学学科 = `progress` 行的学科 ∪ 兜底 {语文,英语} ∩ MVP 白名单；没有在学学科就**不建默认目标**。
 6. **`weekly_lessons` 的数据源是 `lesson_completions`，且历史补不回来**：`progress` 表只有游标（覆盖式更新、无历史），回答不了「本周完成了几课」；本表从 2026-09-20 起记。同理 `study_sessions.subject_id` **心跳补写**只对之后的会话生效，旧会话（NULL）不追溯。
@@ -1737,7 +1690,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 - **仓储的占位符顺序必须与列清单逐位对应**：`goals` 的列是 `(student_id, subject_id, metric, title, period, target_value, …)`，参数按语义直觉排成 `[studentId, metric, period, title, target]` 会让 `title` 与 `period` 对调落库。**只断言「自己传了什么 payload」的单测拦不住这类错**——要么按列名配对断言，要么用真库（事务 + ROLLBACK）跑一次。
 - **`goals` 的唯一键靠 VIRTUAL 生成列，不能改 STORED（2026-09-20 实测）**：MySQL 的唯一索引把 NULL 视为互不相等，所以 `(student_id, subject_id, metric)` 在 `subject_id IS NULL` 时**允许重复行**、`ON DUPLICATE KEY` 静默失效。修法是生成列 `scope_subject_id = IF(metric IS NULL, NULL, COALESCE(subject_id, 0))`（VIRTUAL）＋唯一键 `(student_id, scope_subject_id, metric)`。**必须是 VIRTUAL**：STORED 要重建整表，而 `goals` 上有两个外键 → `ERROR 1215 Cannot add foreign key constraint`。⚠️ **别用临时表验证这类事**——临时表没有外键，STORED 在临时表上能建成功（本项目真踩过）。
 
-### 6.28 学习信号 → `safety_alerts` → 家长端预警中心（P6.6 / P6.9 / P6.10，2026-09-20）
+### 5.28 学习信号 → `safety_alerts` → 家长端预警中心（P6.6 / P6.9 / P6.10，2026-09-20）
 
 ```
 ① 闲聊（off_topic）      辅导回复末行自报 `<!--topic:off-->`  ─┐
@@ -1771,7 +1724,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 ---
 
-## 7. API 与前端页面对照表
+## 6. API 与前端页面对照表
 
 | 前端页面 | 路由 | 主要调用 API |
 |---|---|---|
@@ -1790,21 +1743,21 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 | P3.1 辅线首页 | `/student/auxiliary` | `GET /api/conversations?track=aux` |
 | P3.2 知识点选择 | `/student/auxiliary/selector` | `GET /api/content/knowledge-points` |
 | P3.3 拍照/输入答疑 | `/student/auxiliary/ask` | `POST /api/files/upload`, `POST /api/refinery/extract` |
-| P3.4 辅线对话 | `/student/auxiliary/chat` | `POST /api/ai/tutor` (mode=auxiliary), WS `/ws/ai/{id}` |
+| P3.4 辅线对话 | `/student/auxiliary/chat` | `POST /api/ai/tutor/stream` (mode=auxiliary) |
 | ~~P4.1 错题本~~ | ~~`/student/error-book`~~ | **已废弃（2026-09-20 用户裁决）**：独立错题本页面从未实现，占位路由与主轨侧栏入口已删除；错题能力由训练轨错题练习 `/student/training/errors` 承担（`GET /api/training/error-book`） |
 | ~~P4.2 错题重做~~ | ~~`/student/error-book/redo`~~ | **已废弃（同上）**：重做在训练轨错题练习页内完成（`POST /api/training/judge`，答对即清零） |
 | ~~P4.3 解析与变式~~ | ~~`/student/error-book/variant`~~ | **已废弃（同上）**：变式生成本期未实现（`variation_questions` 表 0 引用）；AI 解析走 `POST /api/training/questions/explanations` |
 | P5.1 个人中心 | `/student/profile` | `GET /api/points/me`、`GET /api/points/me/ledger` |
 | P5.2 奖励册 | `/student/rewards` | `GET /api/points/me/rewards` |
 | ~~P5.3 设置~~ | ~~`/student/settings`~~ | **已废止（2026-09-18 用户裁决）**：学生端不设独立设置页；手动护眼切换在学习沉浸页内，字号由学段（家长配的年级）决定 |
-| P6.1 家长仪表盘 | `/parent/dashboard` | `GET /api/parent/dashboard`, `GET /api/parent/alerts`, WS `/ws/notifications/{id}` |
+| P6.1 家长仪表盘 | `/parent/dashboard` | `GET /api/parent/dashboard`, `GET /api/parent/alerts` |
 | P6.2 学情报告 | `/parent/report` | `GET /api/parent/students/{studentId}/reports` |
 | P6.3 错题查看 | `/parent/errors` | `GET /api/parent/students/{studentId}/errors` |
 | P6.4 AI 对话回放 | `/parent/chat-logs` | `GET /api/parent/students/{studentId}/chat-logs` |
 | P6.5 目标设定 | `/parent/goals` | `GET /api/parent/students/{studentId}/goals/attainment` + `PUT .../goals/{metric}`（§4.24）。~~旧 `GET/POST/PATCH/DELETE .../goals`~~ **已废弃（2026-09-22 用户裁决）**：那四条**从未实现**且无 `metric` 维度 |
-| P6.6 行为管控 | `/parent/controls` | `GET/PUT /api/parent/students/{studentId}/controls`（预警灵敏度）+ `GET /api/parent/students/{studentId}/points/settings`（**只读**展示兑换状态，开关本身在奖励管理页改）。见 §6.28 |
+| P6.6 行为管控 | `/parent/controls` | `GET/PUT /api/parent/students/{studentId}/controls`（预警灵敏度）+ `GET /api/parent/students/{studentId}/points/settings`（**只读**展示兑换状态，开关本身在奖励管理页改）。见 §5.28 |
 | P6.7 奖励管理 | `/parent/rewards` | `GET /api/parent/students/{studentId}/points`, `GET/PUT .../points/rules`, `GET .../points/ledger`, `GET/PUT .../reward-catalog`, `POST .../points/redeem`, `GET .../redemptions`, `PATCH /api/parent/redemptions/{id}`, `GET/PUT .../points/settings`, `GET /api/points/levels`（`...` = `/api/parent/students/{studentId}`；见 §4.21 / §4.22） |
-| P6.9 异常预警 | `/parent/alerts` | `GET /api/parent/alerts`, `PATCH /api/parent/alerts/{alertId}/read`；**顶栏 Banner（所有家长页）走 `GET /api/parent/alerts/unread`**（30s 轮询、全部孩子、含 info 级；点击即已读并跳本页 —— 2026-09-20「及时可见」批替换了旧的 `GET /api/parent/alerts?studentId=&unreadOnly=1&pageSize=1`）。**侧栏「异常预警」入口为 UX 清单外的偏差**（不加则 Banner 点掉后页面不可达，已回写 UX 文档）。见 §6.28 |
+| P6.9 异常预警 | `/parent/alerts` | `GET /api/parent/alerts`, `PATCH /api/parent/alerts/{alertId}/read`；**顶栏 Banner（所有家长页）走 `GET /api/parent/alerts/unread`**（30s 轮询、全部孩子、含 info 级；点击即已读并跳本页 —— 2026-09-20「及时可见」批替换了旧的 `GET /api/parent/alerts?studentId=&unreadOnly=1&pageSize=1`）。**侧栏「异常预警」入口为 UX 清单外的偏差**（不加则 Banner 点掉后页面不可达，已回写 UX 文档）。见 §5.28 |
 | P6.10 账号设置 | `/parent/account` | `GET /api/parent/account`, `PATCH /api/parent/password`。⚠️ 原文写的 `GET /api/quota/current`、`GET /api/quota/subscription` **不存在**（订阅/额度无表，属 P7.1 范围），本批**不放占位卡** |
 | **P7.1 订阅中心（P2）** | `/parent/subscription` | `GET /api/quota/plans`, `GET /api/quota/subscription`, `POST /api/billing/orders`, `POST /api/billing/orders/{id}/pay` |
 | **P7.2 订单管理（P2）** | `/parent/orders` | `GET /api/billing/orders`, `GET /api/billing/orders/{id}`, `POST /api/billing/orders/{id}/cancel` |
@@ -1812,9 +1765,9 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 ---
 
-## 8. MVP 范围与延期项
+## 7. MVP 范围与延期项
 
-### 8.1 MVP 必做（首发数学学科）
+### 7.1 MVP 必做（首发数学学科）
 
 - 账号体系：注册、登录、家长/学生身份、子账号创建（强制年龄/年级）
 - 内容查询：学科、版本、单元、课、卡片、知识点
@@ -1825,7 +1778,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 - 文件上传与实时识别（拍照解题）
 - AI 额度查询与预警
 
-### 8.2 P1 阶段
+### 7.2 P1 阶段
 
 - 期中/期末考试完整闭环
 - 错题变式 AI 生成 + 逻辑校验
@@ -1834,7 +1787,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 - 签名 URL 访问控制
 - 学习路径推荐
 
-### 8.3 P2 阶段
+### 7.3 P2 阶段
 
 - **订阅购买与支付集成**：
   - 套餐列表展示（月卡/年卡、价格、折扣）
@@ -1852,11 +1805,11 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 ---
 
-## 9. 关键 DTO 示例
+## 8. 关键 DTO 示例
 
 本节提供少量核心接口的请求/响应结构示例，供前后端开发参考。完整 Schema 参见 `openapi.yaml`。
 
-### 9.1 登录
+### 8.1 登录
 
 **请求**：
 ```json
@@ -1883,7 +1836,7 @@ POST /api/auth/login
 }
 ```
 
-### 9.2 AI 辅导
+### 8.2 AI 辅导
 
 **请求**：
 ```json
@@ -1921,7 +1874,7 @@ POST /api/ai/tutor
 }
 ```
 
-### 9.3 提交作业答案
+### 8.3 提交作业答案
 
 **请求**：
 ```json
@@ -1934,7 +1887,7 @@ POST /api/assessment/submissions/{submissionId}/answers
 }
 ```
 
-### 9.4 错题重做（**已废弃，2026-09-20 用户裁决**）
+### 8.4 错题重做（**已废弃，2026-09-20 用户裁决**）
 
 > 本节示例的端点为已废弃的 `/api/error-book/*` 族（从未实现，见 §4.10）。**现行重做路径**
 > 是训练轨错题练习：`GET /api/training/error-book` 取未清零错题 → `POST /api/training/judge`
@@ -1965,10 +1918,12 @@ POST /api/error-book/items/{errorItemId}/redo
 
 ---
 
-## 10. 变更日志
+## 9. 变更日志
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.8 | 2026-09-21 | **清除全仓 WebSocket 设计（全仓零实现，且用户裁决不需要）**。本仓流式一律走 SSE（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`），家长端预警靠 30s 轮询，无任何 WS 依赖。删除：**§5「WebSocket 设计」整节**（通道定义 / 连接管理 / 消息格式 / 降级策略）、§1.2 范围里的「WebSocket 通道定义」、§2.2 认证里的 WS query-param 鉴权行、§5.1/§5.2/§5.3 时序图里的 `WS /ws/ai/{id}`（改指 `POST /api/ai/tutor/stream`）、§5.3 的 `WS /ws/notifications/{id} 推送预警`（改为「写入 `safety_alerts` → 家长端 30s 轮询可见」）、§5.6 的「WebSocket / 站内信」（改「站内信」）、§6 对照表 P3.4 与 P6.1 两行。**章节自本次起重新编号**：旧 §6→§5、§7→§6、§8→§7、§9→§8、§10→§9，正文内 17 处 `§6.x` / `§8` / `§10` 引用同步改。**下表 v4.6 及更早的历史条目沿用当时的旧编号、不回改**，读旧条目时按上述映射换算。顺带说明：§1.3「与上游文档的关系」表与 `apps/web/CLAUDE.md` 的「§5 数据流时序」本就按「无 WS」的编号写，此前一直是漂移状态，本次重编号后自动对齐（未额外改动）。同步：架构文档 §7.3 整节删除 + §2.1 / §4.2.6 / §6 / §9.1 / §11 五处改指 SSE / 站内信 / 轮询；`K12智学系统-后端Web服务设计文档.md` 模块清单去掉不存在的 WebSocket 模块；`openapi.yaml` 描述去「与 WebSocket」；`docs/CLAUDE.md` 契约描述同步。**接口契约零变更**（无端点增删改）。 |
+| v4.7 | 2026-09-21 | **`subject-configs` 补入 `openapi.yaml`（存量漏收，接口本身零变更）**。§4.13 的 `GET /api/parent/students/{studentId}/subject-configs` 与 `PUT .../subject-configs/{subjectId}` 自 v2.1（2026-09-01 教材配置批）起即为 MVP、已实现且前端在用（`/parent/students/:id/config` 页 + 学生卡片「学习配置」入口 + `StudentSwitcher`），却一直没收进 openapi。本次补 2 条 path + 7 个 schema（`SubjectConfigOption` / `SubjectConfigState` / `SubjectConfigsResponse` / `SubjectConfigUpdateRequest` / `SubjectConfigUpdateResult` / `SubjectConfigVersionOption` / `SubjectConfigGradeOption`），形状取自 `parent.service.ts` 实际返回：读侧 `{studentId, studentName, subjects[], options}`；写侧 body `{gradeCode, term, textbookVersionId?}`（`textbookVersionId` 缺省按「同学段 `edition` 非空优先、`id` 大者优先」选），回 `{subjectId, textbookVersionId, semesterId, reset}`（该学科已开始学习且版本/册别变化时 `reset: true`）。 |
 | v4.6 | 2026-09-20 | **清理「错题本 P4.x 页面」+「已删除的 `/api/error-book` 服务」两条死线（文档与代码对齐）**。**接口契约无新增**，只有废弃标注：§4.10 ErrorBook 整节 9 个端点标 `~~删除线~~` + 废弃注记（**从未实现**——后端 `error-book` 模块已于 2026-08-07 整体删除，全仓无该前缀的 `@Controller`，前端也无任何代码调用；错题**机制**仍在 PRD §7.4，写入由 practice / training / exams 经 `MainErrorBooksRepository` 承担，学生端错题练习走 `GET /api/training/error-book`）。`openapi.yaml` 同步：9 个 `/error-book/*` 路径的 operation 各加 `deprecated: true` + 说明（**路径与 schema 全部保留**，避免 `$ref` 悬空）。同时订正：§3 分组总表 ErrorBook 行与 Progress 行的归属列（去掉不存在的 `ErrorBook Service`）、§6.1/§6.4 数据流改指真实端点（`GET /api/practice/uncleared-errors`、`POST /api/training/judge`、`POST /api/training/bump-error-levels`）、§7 页面↔端点表 P4.1–P4.3 三行标废弃 + **P2.4–P2.9 六行标「页面未实现、无此路由」**（占位路由已删）。**前端同批删除**：`StudentLayout` + `StudentNav`（主轨侧栏外壳，只承载不可达占位页）、9 条占位路由（`/student/homework`、`/homework-result`、`/unit-test`、`/exam`、`/scores`、`/reward-unlock`、`/student/error-book`×3）、死组件 `ErrorBookCard` 与死类型 `ErrorBookItem`/`TrackType`；`/student` 与 `/student/mainline` 保留为顶层 `Navigate` → `/student/star-map`（否则老地址落默认错误页，本仓无 404 兜底）。「双轨物理隔离」硬规则的测试钉子由原 `/student/homework` 宿主迁移到 `/student/profile`。**后端代码零改动**。UX §5.4 的 P4.1–P4.3 三节同批标废弃。 |
 | v4.5 | 2026-09-20 | **管理员手动清理 30 天前的预警 + `safety_alerts` 补两个索引**（同属 `feat/parent-controls-and-alerts` 分支，不改判题/预警判定口径）。契约变更：§4.17 Admin 分组新增两条**同资源**端点——`GET /api/admin/alerts/expired`（预览：`{retentionDays: 30, cutoff, total, unread}`，只读不删）与 `DELETE /api/admin/alerts/expired`（清理：`{retentionDays: 30, cutoff, deleted}`，物理删除 `created_at < cutoff` 的行，**含未读**）。`openapi.yaml` 同步（1 路径 / 2 operation / 2 schema，都记 `'200'`）。**阈值固定 30 天、接口不带参数**（杜绝「填 0 就删库」）、**用 `DELETE` 而非 `POST`**（`@Post` 默认 201，对「清理」语义不对）。数据面：`safety_alerts` 补 `idx_sa_parent_created (parent_id, created_at)`（家长端**全量**列表免 filesort；⚠️ 带 `AND is_read=0` 的「只看未读」变体**实测仍 filesort**，顶栏 Banner 走的正是这条，要一并免掉需 `(parent_id, is_read, created_at)`，属另一批）与 `idx_sa_created_at (created_at)`（保留期清理由全表扫变区间扫描），迁移 `2026-09-20_safety_alerts_retention_indexes.sql`（`information_schema.STATISTICS` 幂等守卫，条件 `> 0`——多列索引在 STATISTICS 里有多行）。**明确不做**：不加自动保留期、不引 `@nestjs/schedule`、不做清理前导出/审计日志/按类型筛选/数量上限保护。spec §9 补记「预警无自动保留期」。 | 
 | v4.4 | 2026-09-20 | **P6.5 目标设定补齐：按学科 + 每周完课 + 采集修正**。契约变更：`GET /goals/attainment` 的 `items[]` 新增 **`subjectId` / `subjectName`**（目标改为 `(学科, 指标)` 二元组，同 metric 不再全局唯一，排序固定为「学科 sort_order → 指标模板顺序」）；`PUT /goals/:metric` 的 body 由 `{target}` 改为 **`{target, subjectId}`**（`subjectId` 必填，校验链路 6 步，新增「指标×学科匹配」与「在学学科」两道）。`metric` 枚举新增 **`weekly_lessons`**（每周完课）。数据面：新建 `lesson_completions`（每课完成事件；**历史完课补不回来**，从 2026-09-20 起算），`goals` 唯一键改为 `(student_id, scope_subject_id, metric)`（生成列 `scope_subject_id`，**必须 VIRTUAL**——STORED 会被外键挡住）。采集修正：会话心跳可带 `subjectId` 并**只补不覆盖**地写回 `study_sessions.subject_id`（此前该列近乎全 NULL，按学科的学习时长恒为 0；旧会话不追溯）。口径裁决（2026-09-20 用户确认）：**提醒本期不做**（PRD/UX 已加批注，`reminder_enabled` 恒 0；短信单独立项）、每周完课用新建事件表而非积分账本代理、按学科学习时长靠心跳补写。默认目标：数学 3 + 语文 4 + 英语 4 = 11 行（30 分钟/学科·天、2 课/周、5 道/周、8 篇/周、20 词/天）。**没有在学学科时不建默认目标**。 |

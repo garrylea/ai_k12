@@ -3,7 +3,7 @@
 > 版本：v0.1（阶段 A）
 > 对应文档：
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（整体架构、子系统划分）
-> - [API接口与数据流设计文档.md](./API接口与数据流设计文档.md)（REST/WebSocket 契约）
+> - [API接口与数据流设计文档.md](./API接口与数据流设计文档.md)（REST 契约）
 > - [K12智学系统-数据库设计文档.md](./K12智学系统-数据库设计文档.md)（schema 定义）
 > - [K12智学系统-AI-Agent中枢设计文档.md](./K12智学系统-AI-Agent中枢设计文档.md)（ai-core 层）
 > - [api/openapi.yaml](./api/openapi.yaml)（OpenAPI 规范）
@@ -267,7 +267,7 @@ export class UnitsRepository {
 
 ### 7.2 待实现
 
-其余 11 个模块（Users、AI、Assessment、Conversations、KnowledgeGraph、Rewards、Parent、Refinery、Files、Quota、WebSocket）按 MVP 优先级后续迭代。
+其余 10 个模块（Users、AI、Assessment、Conversations、KnowledgeGraph、Rewards、Parent、Refinery、Files、Quota）按 MVP 优先级后续迭代。
 
 ---
 

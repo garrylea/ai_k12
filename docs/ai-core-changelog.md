@@ -8,6 +8,30 @@
 
 ---
 
+## 2026-09-21 清除全仓 WebSocket 设计 + API 文档章节重编号 + `subject-configs` 补进 openapi
+
+**背景（用户裁决）**：本仓**零 WS 实现**且**确定不需要**——流式一律 SSE（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`），家长端预警靠 30s 轮询。文档里那套 WS 通道设计（`/ws/ai/{dialogueId}`、`/ws/notifications/{studentId}`、心跳/重连/订阅模型/消息格式/降级策略）是**从未落地的规划稿**，故**直接删除**（不是标废弃——废弃标注留给「实现过又下线」的东西，见 UX P5.3 / `/api/error-book` 先例）。
+
+**API 文档（`docs/API接口与数据流设计文档.md`）**
+- **§5「WebSocket 设计」整节删除**；连带清掉 §1.2 范围的「WebSocket 通道定义」、§2.2 认证的 WS query-param 鉴权行、§5.1/§5.2/§5.3 时序图里的 `WS /ws/ai/{id}`（改指 `POST /api/ai/tutor/stream`）、§5.3 的 `WS /ws/notifications/{id} 推送预警`（改为「写入 `safety_alerts` → 家长端 30s 轮询可见」）、§5.6 的「WebSocket / 站内信」（改「站内信」）、§6 对照表 P3.4 与 P6.1 两行。
+- **章节重新编号**（用户裁决「重编号」）：旧 §6→§5、§7→§6、§8→§7、§9→§8、§10→§9；正文内 17 处 `§6.x` / `§8` / `§10` 自引用同步改。**本文档 §9 变更日志里 v4.6 及更早的历史条目沿用当时的旧编号、不回改**（读旧条目按上述映射换算）；其他活文档里**向外**指向 API 文档的引用则全部改成新编号，保持可跳转。
+- 顺带说明：§1.3「与上游文档的关系」表与 `apps/web/CLAUDE.md` 的「§5 数据流时序」**本就按「无 WS」的编号写**（WS 节是后插的、编号从未对齐），本次重编号后自动对齐——这两处此前一直是漂移状态。
+- 头部版本号 `v2.8`（远落后于变更日志的 v4.6）一并订正为 v4.8。
+
+**其他活文档**
+- `K12智学系统-架构设计文档.md`：**§7.3「WebSocket 设计」整节删除**（它是 §7 的最后一小节，删除无需重编号）；§2.1 系统全景的 `HTTPS / WebSocket` 改 `HTTPS`；§4.2.6 异常预警触达改「站内信/短信」（顺带补回该行缺失的反引号 `` `safety_alerts` ``）；§4.2.12 计费流程删掉「WebSocket 推送『订阅生效』通知」一步；§9.1 两处 `SSE/WS`、`SSE 或 WebSocket` 改 SSE；§11 对照清单「异常行为全局预警」改「`safety_alerts` + 家长端顶栏 Banner（30s 轮询）」。
+- `K12智学系统-后端Web服务设计文档.md`：文档头「REST/WebSocket 契约」改「REST 契约」；§7.2 待实现模块清单去掉不存在的 `WebSocket` 模块（11 → 10）。
+- `docs/api/openapi.yaml`：`info.description` 去「与 WebSocket」。
+- `docs/CLAUDE.md` / `apps/web/CLAUDE.md`：API 文档的职责描述去「/ WebSocket」。
+- `CLAUDE.md`（根）：新增硬规则「**不用 WebSocket**」（附 SSE 三端点与 30s 轮询口径），防后续再漂移；API 文档同步规则里的「数据流（§6）」改「（§5）」。
+- 交叉引用同步（旧 §6.x → §5.x）：`CLAUDE.md`（§5.8/§5.27/§5.28、§5.22）、`UX-UI设计文档.md`（§5.28 ×2）、`K12智学系统-数据库设计文档.md`（§5.25/§5.26/§5.27 ×2/§5.28 ×3，含其变更日志三条）、`家长端学情批-完成情况与待办清单.md`（§5.28 ×2）。
+
+**`subject-configs` 补进 openapi（存量漏收，接口零变更）**：`GET /api/parent/students/{studentId}/subject-configs` 与 `PUT .../subject-configs/{subjectId}` 自 v2.1（2026-09-01 教材配置批）起就是 MVP、已实现且前端在用（`/parent/students/:id/config` 页 + 学生卡片「学习配置」入口 + `StudentSwitcher`），却一直没收进 `openapi.yaml`。本次补 **2 条 path + 7 个 schema**（`SubjectConfigOption` / `SubjectConfigState` / `SubjectConfigsResponse` / `SubjectConfigUpdateRequest` / `SubjectConfigUpdateResult` / `SubjectConfigVersionOption` / `SubjectConfigGradeOption`），形状取自 `parent.service.ts` 实际返回：读侧 `{studentId, studentName, subjects[], options}`；写侧 body `{gradeCode, term, textbookVersionId?}`，回 `{subjectId, textbookVersionId, semesterId, reset}`（该学科已开始学习且版本/册别变化时 `reset: true`）。API 文档 §4.13 与 §9 变更日志（v4.7）同步。
+
+**归档不回改**：`docs/superpowers/**` 的历史 spec/plan（如 `2026-08-02-auxiliary-track-design.md` 的「与 API 文档 §5.4 保持一致」、`2026-07-28-backend-web-service-implementation.md` 的「2 个 WebSocket 通道」）按惯例保留原文——它们记录的是当时的方案，不代表现状。
+
+**验证**：`docs/api/openapi.yaml` 通过 YAML 解析（185 paths）；全仓 grep 复核活文档已无 WS 实现描述（仅剩「不做/无实时推送」这类事实陈述）；`.md` 无语法破坏；**无代码改动**（后端/前端零改动，故未跑测试）。
+
 ## 2026-09-20 家长端走神预警「及时可见」批：Banner 30s 轮询 + `closeStale` 补判 + idle 字面语义
 
 **设计**：`docs/superpowers/specs/2026-09-20-parent-alert-banner-timeliness-design.md`（§2 有 4 条用户裁决原文）；**计划**：`docs/superpowers/plans/2026-09-20-parent-alert-banner.md`（Task 1–7）。

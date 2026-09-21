@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: K12 智学系统 API
-  description: K12 智学系统 REST API 与 WebSocket 规范
+  description: K12 智学系统 REST API 规范
   version: 1.0.0
 servers:
   - url: http://localhost:3000/api
@@ -2330,6 +2330,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommonResponse'
+  /parent/students/{studentId}/subject-configs:
+    get:
+      tags: [Parent]
+      summary: 按学科教材配置视图（每学科当前配置 + 可选项）
+      description: >-
+        每学科返回当前配置（`configured=false` 时是按学生年级**推导的默认值、不落库**）+ 可选项
+        （只含**有教材数据**的年级；无数据学科不出现）。`options[].grades[].versions[]` 按默认规则
+        排序（同学段 `edition` 非空优先、`id` 大者优先）。归属校验：学生不存在 404/1002、不属于本家长 403/1005。
+      operationId: getSubjectConfigs
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 各学科配置 + 可选项
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubjectConfigsResponse'
+  /parent/students/{studentId}/subject-configs/{subjectId}:
+    put:
+      tags: [Parent]
+      summary: 写入/切换某学科教材配置
+      description: >-
+        `textbookVersionId` 缺省时按默认规则选（同学段 `edition` 非空优先、`id` 大者优先）。
+        **已开始学习且版本或册别变化时重置该学科学习状态**并返回 `reset: true`（错题/作业记录保留在库，
+        不再展示、不阻塞清零门禁）。错误码：归属 404/1002、403/1005；版本不属于该学科 409/1001；
+        该版本不含此年级/册别 409/1001；该学科无任何版本 404/1002。
+      operationId: updateSubjectConfig
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: subjectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubjectConfigUpdateRequest'
+      responses:
+        '200':
+          description: 写入结果（`reset` 表示该学科学习状态是否被重置）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubjectConfigUpdateResult'
   /parent/dashboard:
     get:
       tags: [Parent]
@@ -6132,6 +6198,134 @@ components:
         isActive:
           type: boolean
       required: [isActive]
+
+    SubjectConfigVersionOption:
+      type: object
+      description: 某年级下可选的教材版本（`options[].grades[].versions[]`）。
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        publisher:
+          type: string
+          nullable: true
+        edition:
+          type: string
+        gradeBand:
+          type: string
+          description: 学段（`primary` / `junior` / `senior`）。
+        terms:
+          type: array
+          description: 该版本在该年级下实际存在的册别。
+          items:
+            type: string
+            enum: [first, second]
+
+    SubjectConfigGradeOption:
+      type: object
+      properties:
+        code:
+          type: string
+          description: 年级码（如 `grade7`）。
+        label:
+          type: string
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectConfigVersionOption'
+
+    SubjectConfigOption:
+      type: object
+      description: 某学科的可选项（只含**有教材数据**的年级；无数据学科整体不出现）。
+      properties:
+        subjectId:
+          type: integer
+        subjectName:
+          type: string
+        grades:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectConfigGradeOption'
+
+    SubjectConfigState:
+      type: object
+      description: >-
+        某学科的当前配置。`configured=false` = 库中无 `progress` 行，此时 `gradeCode`/`term`/
+        `textbookVersionId`/`publisher` 是**按学生年级推导的默认值、不落库**（`options` 里没有对应
+        年级时可能为 `null`）。`started=true` = 已开始学习（`progress.status <> 'not_started'`
+        或已有 `currentLessonId`）—— 只有 `started` 且版本/册别变化才会 `reset`。
+      properties:
+        subjectId:
+          type: integer
+        subjectName:
+          type: string
+        configured:
+          type: boolean
+        started:
+          type: boolean
+        gradeCode:
+          type: string
+          nullable: true
+        term:
+          type: string
+          nullable: true
+          enum: [first, second]
+        textbookVersionId:
+          type: integer
+          nullable: true
+        publisher:
+          type: string
+          nullable: true
+        edition:
+          type: string
+
+    SubjectConfigsResponse:
+      type: object
+      properties:
+        studentId:
+          type: integer
+        studentName:
+          type: string
+          nullable: true
+        subjects:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectConfigState'
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectConfigOption'
+
+    SubjectConfigUpdateRequest:
+      type: object
+      required: [gradeCode, term]
+      properties:
+        gradeCode:
+          type: string
+          minLength: 1
+          maxLength: 20
+        term:
+          type: string
+          enum: [first, second]
+        textbookVersionId:
+          type: integer
+          description: 缺省按默认规则选（同学段 `edition` 非空优先、`id` 大者优先）。
+
+    SubjectConfigUpdateResult:
+      type: object
+      properties:
+        subjectId:
+          type: integer
+        textbookVersionId:
+          type: integer
+        semesterId:
+          type: integer
+        reset:
+          type: boolean
+          description: >-
+            该学科学习状态是否被重置。仅当**已开始学习**且版本或册别发生变化时为 `true`
+            （错题/作业记录保留在库，不再展示、不阻塞清零门禁）。
 
     StudentAccountListResponse:
       allOf:

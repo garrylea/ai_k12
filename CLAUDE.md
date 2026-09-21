@@ -86,7 +86,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 `docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml` 必须始终一致：
 
 1. **任何一方变更时，另一方必须同步更新**（路径、方法、参数、响应结构）。
-2. **以 API 设计文档为主稿**：端点清单（§4）与数据流（§6）定义业务语义；openapi.yaml 是其机器可读实现。
+2. **以 API 设计文档为主稿**：端点清单（§4）与数据流（§5）定义业务语义；openapi.yaml 是其机器可读实现。
 3. **阶段标记**：openapi.yaml 只收 MVP 端点；P1/P2 在 API 文档里标阶段，进入开发时再补入。
 4. **检查清单**：每次 API 变更后核对两文档的端点路径列表，确认无遗漏。
 5. 注意 **Nest 的 `@Post` 默认返回 201 而非 200**（本仓无端点用 `@HttpCode` 覆盖）——新端点按实际记 `'201'`，以 `2xx` 判断成功。
@@ -103,6 +103,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **埋点不得影响请求**：analytics 日志走内存 buffer——满时丢最旧、失败批次直接丢弃不重试、**永不抛**；ledger / request-log 写入**绝不在请求路径上 await**。
 - **埋点（学习会话）的两条纪律**：`active_seconds` **只由服务端**按 `last_heartbeat_at` 差值累加、**单次封顶 45s**、且只在上一状态为 visible 时计（客户端上报的秒数一律不采信；不封顶时「关标签 2 小时」会被算成 2 小时）。埋点写入**永不阻断主链路**：三个采集端点的失败由**前端传输层吞掉**（`analytics/tracker.ts` 全 `.catch(() => {})`，故端点允许 DB 失败直接 500），而**嵌在业务流里**的埋点写入（如家长 GET 里的 `closeStale`）必须 catch、失败只 warn。家长端「学习时长（会话）」与既有「近 7 天活跃天数」是**两套口径、并存不替换**（spec §10），UI 必须并列展示并区分文案。
 - **`input_tokens` / `output_tokens` 可为 NULL，NULL = 量不到**：量不到就写 NULL，**绝不写 0**——否则报表无法区分「缺口」与「真实读数」（本期只记 token，不记价格/成本）。
+- **不用 WebSocket**：全仓无 WS 实现、也不再引入（2026-09-21 用户裁决）。AI 流式一律走 **SSE**（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`）；家长端预警靠 **30s 轮询**（`GET /api/parent/alerts/unread`）。新文档/契约/openapi 里不要再出现 WS 通道设计（API 文档原 §5「WebSocket 设计」已整节删除，其后章节重编号为 §5 数据流 … §9 变更日志）。
 
 ## 数据管线（tools/data-refinery）
 
@@ -142,19 +143,19 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 - **两条防泄漏铁律**：① `promptKind='cn2en'` 的题**后端不下发** `word`/`phonetic`/`context`/`hasFamily`；② **`+` 号只在 `promptKind==='en2cn' && hasFamily` 时渲染**——词根族树里必然含单词本身，中→英题点开等于直接看答案（有专门的渲染钉子用例）。
 - **抽题**：不走 `ORDER BY RAND() + LIMIT ?`，改「先取候选 id 池 → 服务层洗牌/排序切 N → 按 id 取详情」，四种顺序模式共用一条 SQL。**一个词只出一道题**（会话长度 == count）。**普通模式下也会抽到熟词僻义题**，勾「只出熟词僻义」的作用是「只留」僻义，且此时**方向强制英→中**（三档口径的前提）。
 - **内容管线**：词表来自 smartedu 课本（`crawler_cli.py --site smartedu`）书末附录 `Vocabulary in Each Unit` / `Vocabulary A-Z`；课标官方 PDF 只当**校验白名单**（课标两份词汇表的说明明确写「不标注词性和中文释义」，也不带音标）。**音标本期不做**（实测 macOS Vision 读不了 IPA，见 spec §6.2）。**loader 的 `ON DUPLICATE KEY UPDATE` 必须显式排除 `error_count`**，否则全量重灌抹掉全平台易错统计。抓取**必须串行 + `--crawl-delay 1.5`**（smartedu 会 403）。
-- 场景 `english_word_judge` = primary `local` / fallback `deepseek-flash`。契约见 §4.18/§6.22。设计见 `docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md`。
+- 场景 `english_word_judge` = primary `local` / fallback `deepseek-flash`。契约见 §4.18/§5.22。设计见 `docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md`。
 
 ## 家长端学情（P6.1 仪表盘 / P6.2 报告 / P6.3 错题 / P6.4 对话回放）
 
 - 四页是**只读实时聚合**（`apps/server/src/modules/parent-insights/`）：学情报告**不落 `learning_reports`、不调 LLM**，服务层分次查 + JS 合成后直接返回。**不要往这四个端点里加写入逻辑**。
-- **学习时长与掌握度都已不是代理**：时长走会话口径（`study_sessions`，Phase 1A）；掌握度自 Phase 1B 起由判题出口回写 `student_knowledge_mastery`（**与「错题数代理」`weakPoints` 并存不替换**，两卡标题不同、不得合并）；专项学情/目标达成为只读实时聚合（`special_practice_logs` / `lesson_completions` / `goals`）。**目标自 P6.5 起是 `(学科, 指标)` 二元组、没有全局目标**：在学学科 = `progress` 行 ∪ 兜底 {语文,英语} ∩ MVP 白名单，**没有在学学科就不建默认目标**；`goals` 的唯一键靠**条件式 VIRTUAL 生成列** `scope_subject_id`（`IF(metric IS NULL, NULL, COALESCE(subject_id, 0))`）——**不能改 STORED**（要重建整表，被两个外键挡住报 1215），也**别用临时表验证**（临时表没外键，会得出假阳性）。**仅**活跃度（`activeDays7`）仍是时间戳代理。薄弱点必须给「未标注知识点的错题数」、掌握度必须给覆盖率三项，否则家长误读成「只有这些问题」。口径见 API 文档 §6.8/§6.27。**埋点写入永不阻断主链路**（失败只 warn；掌握度回写走 `void` 不 `await`）——注意 **ODKU 的 SET 从左到右求值、读到的是已更新的列**（累计列须在计数列之后写且不得再 `+ new.x`），仓储占位符顺序必须与列清单逐位对应（`goals` 的 `title` 在 `period` 前），**这类错位置断言式单测拦不住**（详见 changelog 本批条目）。
+- **学习时长与掌握度都已不是代理**：时长走会话口径（`study_sessions`，Phase 1A）；掌握度自 Phase 1B 起由判题出口回写 `student_knowledge_mastery`（**与「错题数代理」`weakPoints` 并存不替换**，两卡标题不同、不得合并）；专项学情/目标达成为只读实时聚合（`special_practice_logs` / `lesson_completions` / `goals`）。**目标自 P6.5 起是 `(学科, 指标)` 二元组、没有全局目标**：在学学科 = `progress` 行 ∪ 兜底 {语文,英语} ∩ MVP 白名单，**没有在学学科就不建默认目标**；`goals` 的唯一键靠**条件式 VIRTUAL 生成列** `scope_subject_id`（`IF(metric IS NULL, NULL, COALESCE(subject_id, 0))`）——**不能改 STORED**（要重建整表，被两个外键挡住报 1215），也**别用临时表验证**（临时表没外键，会得出假阳性）。**仅**活跃度（`activeDays7`）仍是时间戳代理。薄弱点必须给「未标注知识点的错题数」、掌握度必须给覆盖率三项，否则家长误读成「只有这些问题」。口径见 API 文档 §5.8/§5.27。**埋点写入永不阻断主链路**（失败只 warn；掌握度回写走 `void` 不 `await`）——注意 **ODKU 的 SET 从左到右求值、读到的是已更新的列**（累计列须在计数列之后写且不得再 `+ new.x`），仓储占位符顺序必须与列清单逐位对应（`goals` 的 `title` 在 `period` 前），**这类错位置断言式单测拦不住**（详见 changelog 本批条目）。
 
 ## 家长端「管得住」批（P6.6 行为管控 / P6.9 异常预警 / P6.10 账号设置，2026-09-20）
 
 - **闲聊判定 = 模型自报标记 `<!--topic:off-->`（独占回复最后一个非空行），无标记 = 不报警**（宁漏勿误报）。原关键词正则实测 **6/12 条正常语文/英语题误判**，其 `off_topic` 硬阻断已删除（情绪/敏感的阻断保留）。服务端在 `parseContent` 剥离标记（**检测只认末行、剥离对独占一行的标记全局替换**，容忍 CRLF），标记永不进学生可见内容与历史。
 - **⚠️ `ai_messages.safety_flag` 是双来源**（模型自报闲聊 ∪ `type='block'`，后者现在只剩情绪/敏感），取值必须 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))` —— **外层 `Number(...)` 必需**（`??` 会把 `boolean` 原样返回，列是 INT；`tsc` 因 `RowDataPacket` 索引签名 + `Omit` 抹平**不报错**）。家长端文案是「偏离学习 N」。
-- **走神预警「及时可见」批（2026-09-20）**：① idle 阈值已是**字面语义**（从最后一次操作起算；服务端 `CLIENT_IDLE_DETECTION_SECONDS = 120` 镜像前端 `IDLE_TIMEOUT_MS`，**改一处必须同步另一处**；阈值 ≤ 2 分钟时生效值约 2 分钟，检测窗口即下限）；② 心跳全断的会话（后台 tab 冻结 / `end` 丢失）由 **`closeStale` 补判**兜底 —— 判定时机现在是**心跳、`end`、`closeStale` 三处**（崩溃/断电仍不判）；③ 家长端 Banner = `AlertBanner`（`ParentLayout` 顶部、30s 轮询 `GET /parent/alerts/unread`、**点击即已读**、覆盖**全部孩子、含 info 级** —— 上一批「info 只进列表页」的 banner 裁决已被本批推翻，预警**列表页**行为不变）。`study_sessions` 的 `hidden_*` 四列仍**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**的铁律不变。口径见 API 文档 §6.28。
-- **P6.6 只做「预警灵敏度 + 奖励兑换只读」**：每日时长 / 禁用时段 / 辅线开关 / 拍照开关按用户裁决**不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）。`controls` 端点**只含两个阈值**，兑换字段归 `points/settings`（同一字段不做两个归属）。口径见 API 文档 §6.28。
+- **走神预警「及时可见」批（2026-09-20）**：① idle 阈值已是**字面语义**（从最后一次操作起算；服务端 `CLIENT_IDLE_DETECTION_SECONDS = 120` 镜像前端 `IDLE_TIMEOUT_MS`，**改一处必须同步另一处**；阈值 ≤ 2 分钟时生效值约 2 分钟，检测窗口即下限）；② 心跳全断的会话（后台 tab 冻结 / `end` 丢失）由 **`closeStale` 补判**兜底 —— 判定时机现在是**心跳、`end`、`closeStale` 三处**（崩溃/断电仍不判）；③ 家长端 Banner = `AlertBanner`（`ParentLayout` 顶部、30s 轮询 `GET /parent/alerts/unread`、**点击即已读**、覆盖**全部孩子、含 info 级** —— 上一批「info 只进列表页」的 banner 裁决已被本批推翻，预警**列表页**行为不变）。`study_sessions` 的 `hidden_*` 四列仍**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**的铁律不变。口径见 API 文档 §5.28。
+- **P6.6 只做「预警灵敏度 + 奖励兑换只读」**：每日时长 / 禁用时段 / 辅线开关 / 拍照开关按用户裁决**不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）。`controls` 端点**只含两个阈值**，兑换字段归 `points/settings`（同一字段不做两个归属）。口径见 API 文档 §5.28。
 
 ## apps/server - ai-core AI Agent Hub
 
