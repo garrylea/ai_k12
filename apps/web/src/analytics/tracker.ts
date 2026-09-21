@@ -19,6 +19,7 @@ import type {
  * （见 `study-sessions.service.ts` 顶部注释），别去那边找。
  * 空闲阈值 120s 是**纯前端**的选择：后端只把「自己的」封顶写成 SQL 字面量
  * （单次增量 45s、5 分钟惰性收尾，见 `study-sessions.repo.ts` 的 `LEAST(..., 45)` 与 `INTERVAL 5 MINUTE`）。
+ * 后端 `StudySessionsService.CLIENT_IDLE_DETECTION_SECONDS` 镜像此值；改一处必须同步另一处。
  */
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const IDLE_TIMEOUT_MS = 120_000;

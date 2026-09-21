@@ -4,10 +4,10 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import ParentLayout from './ParentLayout';
 import {
   getUnreadMessageCount,
-  getParentAlerts,
+  getParentUnreadAlerts,
+  markParentAlertRead,
   listMyStudents,
   type MyStudentItem,
-  type ParentAlertItem,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
@@ -24,13 +24,15 @@ vi.mock('@/services/api', async (importOriginal) => {
     ...actual,
     listMyStudents: vi.fn(),
     getUnreadMessageCount: vi.fn(),
-    getParentAlerts: vi.fn(),
+    getParentUnreadAlerts: vi.fn(),
+    markParentAlertRead: vi.fn().mockResolvedValue(null),
   };
 });
 
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
-const getParentAlertsMock = vi.mocked(getParentAlerts);
+const getParentUnreadAlertsMock = vi.mocked(getParentUnreadAlerts);
+const markParentAlertReadMock = vi.mocked(markParentAlertRead);
 
 const STUDENT: MyStudentItem = {
   id: 1,
@@ -43,27 +45,7 @@ const STUDENT: MyStudentItem = {
   isActive: true,
 };
 
-const MESSAGE = '检测到孩子在学习中发起了与学习无关的闲聊';
-
-function alertItem(over: Partial<ParentAlertItem> = {}): ParentAlertItem {
-  return {
-    id: 1,
-    studentId: 1,
-    studentName: '小刚',
-    type: 'off_topic',
-    level: 'warning',
-    message: MESSAGE,
-    context: '你喜欢什么游戏？',
-    dialogueId: 88,
-    isRead: false,
-    createdAt: '2026-09-20T10:00:00.000Z',
-    ...over,
-  };
-}
-
-function page(items: ParentAlertItem[]) {
-  return { items, total: items.length, page: 1, pageSize: 1 };
-}
+const MESSAGE = '孩子在学习页面 5 分钟无操作';
 
 function renderLayout() {
   const router = createMemoryRouter(
@@ -86,7 +68,8 @@ beforeEach(() => {
   localStorage.clear();
   listMyStudentsMock.mockReset().mockResolvedValue([STUDENT]);
   getUnreadMessageCountMock.mockReset().mockResolvedValue(0);
-  getParentAlertsMock.mockReset().mockResolvedValue(page([]));
+  getParentUnreadAlertsMock.mockReset().mockResolvedValue({ items: [], total: 0 });
+  markParentAlertReadMock.mockReset().mockResolvedValue(null);
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -111,100 +94,43 @@ describe('ParentLayout', () => {
     expect(container.querySelector('[data-theme="parent"]')).not.toBeNull();
   });
 
-  it('Banner：当前孩子有未读 warning 预警 → 渲染（标题=message）', async () => {
-    getParentAlertsMock.mockResolvedValue(page([alertItem({ level: 'warning' })]));
-
-    renderLayout();
-
-    expect(await screen.findByText(MESSAGE)).toBeInTheDocument();
-    expect(screen.getByText('点击查看详情，建议适时介入')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '立即查看' })).toBeInTheDocument();
-    // 请求口径：只看未读 + 只取 1 条（spec §5.1）
-    expect(getParentAlertsMock).toHaveBeenCalledWith({
-      studentId: 1,
-      unreadOnly: true,
-      pageSize: 1,
+  it('Banner：有未读预警 → AlertBanner 渲染（不依赖当前选中孩子）', async () => {
+    useParentStudentStore.setState({ studentId: null });
+    getParentUnreadAlertsMock.mockResolvedValue({
+      items: [
+        { id: 1, type: 'idle', level: 'info', message: MESSAGE, studentName: '小刚', createdAt: '2026-09-20T10:00:00.000Z' },
+      ],
+      total: 1,
     });
-  });
-
-  it('Banner：critical 也渲染', async () => {
-    getParentAlertsMock.mockResolvedValue(page([alertItem({ level: 'critical' })]));
-
     renderLayout();
-
     expect(await screen.findByText(MESSAGE)).toBeInTheDocument();
   });
 
-  it('Banner：只有 info 或空 → 不渲染（info 只进列表页）', async () => {
-    getParentAlertsMock.mockResolvedValue(page([alertItem({ level: 'info' })]));
-
+  it('Banner：无未读 → 不渲染', async () => {
     renderLayout();
-
-    await waitFor(() => expect(getParentAlertsMock).toHaveBeenCalled());
-    expect(screen.queryByText(MESSAGE)).not.toBeInTheDocument();
+    await waitFor(() => expect(getParentUnreadAlertsMock).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: '立即查看' })).not.toBeInTheDocument();
+  });
+
+  it('Banner：点「立即查看」→ 跳 /parent/alerts 且标已读', async () => {
+    getParentUnreadAlertsMock
+      .mockResolvedValueOnce({
+        items: [
+          { id: 1, type: 'idle', level: 'info', message: MESSAGE, studentName: '小刚', createdAt: '2026-09-20T10:00:00.000Z' },
+        ],
+        total: 1,
+      })
+      .mockResolvedValue({ items: [], total: 0 });
+    renderLayout();
+    fireEvent.click(await screen.findByRole('button', { name: '立即查看' }));
+    expect(await screen.findByText('预警中心页')).toBeInTheDocument();
+    await waitFor(() => expect(markParentAlertReadMock).toHaveBeenCalledWith(1));
   });
 
   it('Banner：请求失败 → 静默不渲染（不占位、不抖动）', async () => {
-    getParentAlertsMock.mockRejectedValue(new Error('boom'));
-
+    getParentUnreadAlertsMock.mockRejectedValue(new Error('net'));
     renderLayout();
-
-    await waitFor(() => expect(getParentAlertsMock).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: '立即查看' })).not.toBeInTheDocument();
-    // 顶栏其余部分不受影响
-    expect(screen.getByText('家长端 · 监管空间')).toBeInTheDocument();
-    /**
-     * 「不占位」这一半必须显式钉住（2026-09-20 评审 Important-3）。
-     *
-     * 为什么：上面两条断言（无 CTA、顶栏在）**拦不住「预留一个空槽」**—— 把 Banner 包进
-     * 一个恒定渲染的 `<div className="h-16">` 后，失败态会凭空多出 64px、把整页内容顶下去，
-     * 而原断言**照样全绿**（评审实测 8/8 通过）。
-     *
-     * 钉法：取顶栏 `<header>` 的父容器（`flex-1 flex flex-col` 那一列），无 Banner 时它
-     * 应当**恰好只有两个元素子节点** —— `<header>` 与 `<main>`。多出任何一个（哪怕是个空 div）
-     * 就是为 Banner 预留了位置。
-     */
-    const column = screen.getByText('家长端 · 监管空间').closest('header')!.parentElement!;
-    expect(column.children).toHaveLength(2);
-  });
-
-  it('Banner：没有孩子（studentId 为 null）→ 不请求、不渲染', async () => {
-    // 列表为空 → StudentSwitcher 不回落出 studentId，锚点保持 null
-    listMyStudentsMock.mockResolvedValue([]);
-
-    renderLayout();
-
-    expect(await screen.findByText('还没有孩子账号')).toBeInTheDocument();
-    expect(getParentAlertsMock).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: '立即查看' })).not.toBeInTheDocument();
-  });
-
-  it('Banner：点「立即查看」→ 跳 /parent/alerts', async () => {
-    getParentAlertsMock.mockResolvedValue(page([alertItem()]));
-
-    renderLayout();
-
-    fireEvent.click(await screen.findByRole('button', { name: '立即查看' }));
-
-    expect(await screen.findByText('预警中心页')).toBeInTheDocument();
-  });
-
-  it('Banner：切孩子后、新请求未回来前，不得继续显示上一个孩子的预警（派生状态带 studentId）', async () => {
-    // 两个孩子，才切得动（只有一个孩子时 StudentSwitcher 会回落回它）
-    const SECOND: MyStudentItem = { ...STUDENT, id: 2, username: 'student2', name: '小红' };
-    listMyStudentsMock.mockResolvedValue([STUDENT, SECOND]);
-    getParentAlertsMock.mockResolvedValueOnce(page([alertItem({ message: '一号孩子的预警' })]));
-
-    renderLayout();
-    expect(await screen.findByText('一号孩子的预警')).toBeInTheDocument();
-
-    // 切到 2 号孩子：新请求**挂起不返回**（模拟慢网络）
-    getParentAlertsMock.mockImplementation(() => new Promise(() => {}));
-    useParentStudentStore.setState({ studentId: 2 });
-
-    // 若不按 studentId 归属过滤，此刻会拿「一号孩子的预警」渲染给二号孩子看
-    await waitFor(() => expect(screen.queryByText('一号孩子的预警')).not.toBeInTheDocument());
+    await waitFor(() => expect(getParentUnreadAlertsMock).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: '立即查看' })).not.toBeInTheDocument();
   });
 });
