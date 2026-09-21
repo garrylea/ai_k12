@@ -340,6 +340,7 @@
 | GET | `/api/parent/students/{studentId}/rewards` | 奖励管理视图 | MVP |
 | GET | `/api/parent/alerts` | **异常预警列表 P6.9（2026-09-20 实现）**。query：`studentId?`（给了就校验归属；**不传 = 全部孩子**，列表带 `studentName`）/ `unreadOnly?`（只认 `'1'`）/ `page?`（≥1，默认 1）/ `pageSize?`（1..50，默认 20）。分页壳同 `errors`。`type ∈ off_topic\|emotional\|sensitive\|abusive\|away\|idle`、`level ∈ info\|warning\|critical`；**「建议家长行动」不入库**，由前端按 `type` 静态映射（spec §3.4）。空结果 `items: []` / `total: 0`（**不是错误**）。见 §6.28 | MVP |
 | PATCH | `/api/parent/alerts/{alertId}/read` | **标记预警已读**（幂等，重复标记不报错）。校验链：`alertId` 正整数（否则 409/1001）→ 预警存在（404/1002）→ 属于本家长（403/1005）。返回 `null` | MVP |
+| GET | `/api/parent/alerts/unread` | **未读预警轮询（家长端 Banner，2026-09-20 实现）**。无 query：**不分页、不看单个孩子、只返回 Banner 展示字段**——这是它与 `GET /parent/alerts` 的三点区别。服务端先对名下**全部孩子**跑 `closeStale`（补判走神阈值；失败只 `warn`、**绝不把轮询打成 500**），再查未读。响应 `{items:[{id,type,level,message,studentName,createdAt}], total}`：`items` 截**最新 5 条**、`total` 是未读总数（Banner 文案用）。⚠️ 补判的写入在 `maybeRecordHiddenAlert` 内部仍是 `void`（与随后的 SELECT 存在竞态）→ 补判出的预警通常**下一次轮询**（30s 内）才出现在响应里，不是本次。见 §6.28 | MVP |
 | GET | `/api/parent/account` | **家长账号信息 P6.10（2026-09-20 实现，只读）**：`{id, name\|null, phone}`。⚠️ **不返回**订阅/额度/订单（那些表不存在，见 §8）。`name` 可为 `null`（注册不强制），前端显示「未设置」 | MVP |
 | PATCH | `/api/parent/password` | **家长改自己的密码 P6.10（2026-09-20 实现）**。body `{oldPassword, newPassword}`（旧 1..100、新 6..32）。校验链：Zod（越界 409/1001）→ 旧密码比对（失败 **401/1003**，与登录失败同码）→ 新旧相同（409/1001）。返回 `null`。**不失效旧 token**（本仓无 token 版本机制，旧 token 在 7 天有效期内仍可用，与管理员改密一致） | MVP |
 | ~~PATCH~~ | ~~`/api/parent/account`~~ | **本批不做（2026-09-20 用户裁决）**：PRD 无「家长改手机号/姓名」的要求。原文阶段 P1 保留作历史，**别按它实现** | ~~P1~~ |
@@ -1740,20 +1741,33 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 ```
 ① 闲聊（off_topic）      辅导回复末行自报 `<!--topic:off-->`  ─┐
-② 情绪/敏感（emotional/sensitive）  既有 8 条正则（零改动）    ├─→ safety_alerts ─→ GET /parent/alerts
-③ 走神（away / idle）    心跳/结束时按家长设的阈值判定        ─┘        │
-                                                                       └─→ ParentLayout 红色 Banner（仅 warning/critical）
+② 情绪/敏感（emotional/sensitive）  既有 8 条正则（零改动）    ├─→ safety_alerts
+③ 走神（away / idle）    心跳/结束/closeStale 收尾时按家长设的阈值判定 ─┘
 家长设阈值：GET/PUT .../controls（alert_away_minutes / alert_idle_minutes）
+
+消费面（两个，读同一张表）：
+  · GET /parent/alerts         预警中心（分页 / 筛选 / 标记已读）
+  · ParentLayout `AlertBanner`  30s 轮询 GET /parent/alerts/unread（全部孩子、含 info）
 ```
 
 1. **闲聊判定改成「模型自报标记」**：提示词要求模型在**判定与 K12 学习无关**时，于回复**最后一个非空行**输出 `<!--topic:off-->`（HTML 注释，学生端 markdown 管道含 `rehype-raw` → **对学生不可见**，不像结构化 JSON 块那样会在流式过程中闪现）。服务端在 `parseContent` 检测并**全局剥离**该标记（独占一行的都删，容忍 LF/CRLF），标记**永不进学生可见内容与持久化历史**。**兜底原则：没有标记 = 不报警** → 模型的失败模式是**漏报而非误报**（家长收到假警报比漏报更伤信任）。
 2. **`off_topic` 的硬阻断被删除**：原关键词分类器是**纯正则**（约 40 个以数学为中心的词），实测 12 句里 **6 条正常语文/英语学习问题被判「闲聊」**（「这首诗表达了什么情感」「翻译一下这句文言文」…）→ 主线真被拒答（辅线此前靠「全放行」豁免绕开）。本批改为**模型温和引导、服务端只记录 + 报警**，顺带修掉该既有 bug。**情绪/敏感的阻断行为保持不变**。
 3. **⚠️ `ai_messages.safety_flag` 语义有变（双来源）**：改动前唯一来源是「助手回复 `type='block'`」（即被硬阻断的轮次）；删掉 off_topic 阻断后若不同步回写，该列会**永远是 0**、家长端「对话回放」的标签与计数全部归零。现取值 = **被判闲聊 ∪ 被阻断（现在只剩情绪/敏感）**，两类都算「偏离学习」→ 家长端文案同步从「闲聊 N」改成「**偏离学习 N**」（口径更准，但语义有变，历史数据口径不一致）。取值必须 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))` —— **外层 `Number(...)` 必需**（`??` 会把 `boolean` 原样返回，而列是 INT；`tsc` 因 `RowDataPacket` 索引签名 + `Omit` 抹平**不报错**）。
-4. **走神信号两类分记**：客户端状态机把 `IDLE_TIMEOUT` 产出 `reason='idle'`、`HIDDEN` 产出 `reason='away'`，心跳带上该 `reason`；服务端按 `hidden_reason` 分别累加到 `hidden_away_seconds` / `hidden_idle_seconds`，并维护 `hidden_since`（当前连续挂机段起点，回 visible 清空）。**⚠️ 两个「分钟数」不是一回事**：客户端空闲判定阈值 `IDLE_TIMEOUT_MS = 120_000` 是**写死**的，家长的 `alert_idle_minutes` 只从 `hidden_since` 起算 —— 两者**相加**才是家长感知的报警延迟（默认档 15 分钟 ⇒ 距最后一次操作约 **17 分钟**）。**判定时机两处缺一不可**：心跳时（学生切走后不回来，正是家长最需要知道的场景）+ `end` 时（覆盖「最小化后直接关页面」）。
-5. **防轰炸与分级**：同一 `student_id` + 同一 `type` **30 分钟内只写一条**（心跳每 30s 一次，不去重会刷屏）；走神恒 `info`（走神 ≠ 问题，**不弹 Banner**）、闲聊 `warning`、情绪/敏感沿用既有规则（`warning`/`critical`）。**Banner 只弹 `warning`/`critical`**，且只认**当前选中孩子**；`studentId` 为 null 时不显示。
+4. **走神信号两类分记**：客户端状态机把 `IDLE_TIMEOUT` 产出 `reason='idle'`、`HIDDEN` 产出 `reason='away'`，心跳带上该 `reason`；服务端按 `hidden_reason` 分别累加到 `hidden_away_seconds` / `hidden_idle_seconds`，并维护 `hidden_since`（当前连续挂机段起点，回 visible 清空）。**⚠️ idle 阈值已是字面语义（2026-09-20「及时可见」批改）**：`alert_idle_minutes` 从**最后一次操作**起算 —— 服务端把前端写死的检测窗口补回去（`CLIENT_IDLE_DETECTION_SECONDS = 120`，与 `tracker.ts` 的 `IDLE_TIMEOUT_MS = 120_000` **同源镜像、改一处必须同步另一处**），于是家长设 5 分钟就**第 5 分钟报**、文案也写 5 分钟（改前是「两者相加」、设 5 实际约 7 分钟）。**已知边界**：阈值 ≤ 2 分钟时 idle 实际生效值约为 2 分钟（检测窗口即下限，页面允许最小 1 分钟，**不加 UI 限制**）。`away` 分支不变（`hidden_since` 即离开时刻，本来就是字面语义）。**判定时机三处缺一不可**：心跳时（学生切走后不回来，正是家长最需要知道的场景）+ `end` 时（覆盖「最小化后直接关页面」）+ **`closeStale` 惰性收尾时**（补判「后台 tab 被浏览器冻结 / 关闭时 `end` fetch 丢失 → 心跳全断」的漏报盲区）。
+5. **防轰炸与分级**：同一 `student_id` + 同一 `type` **30 分钟内只写一条**（心跳每 30s 一次，不去重会刷屏）；**级别**：走神恒 `info`（走神 ≠ 问题）、闲聊 `warning`、情绪/敏感沿用既有规则（`warning`/`critical`）。**⚠️ Banner 的可见性口径已被 2026-09-20「及时可见」批推翻**：`ParentLayout` 顶部改挂 `AlertBanner`，覆盖家长名下**全部孩子、全部级别（含 info 级走神）**，配色按**最新一条**的 `level` 映射（`warning`/`critical` → 红，其余 → 橙）；**不再按「当前选中孩子」过滤**（走神预警不应取决于家长当时选中了谁）。预警**列表页**行为不变。
 6. **写入永不阻断主链路**：辅导链路与心跳链路的判定 + 写入**整段 try/catch、失败只 `logger.warn`**，且一律 **`void` 调用、不 `await`**（心跳路径尤其重要：判定含一次 DB 往返，`await` 会把它静默叠加到心跳响应上）。
 7. **保留期**：`safety_alerts` **不自动清理**（全仓无 scheduler），由管理员**手动**清理 30 天前的行（`GET/DELETE /api/admin/alerts/expired`，含未读、不可恢复，阈值固定 30 天常量）。
-8. **已知天花板**（设计取舍，不是缺陷）：① 「家长来了迅速切回来」「小窗口摆在旁边」技术上测不到；② 「前台发呆」与「认真阅读/思考」无法区分（120 秒无输入即判 idle，靠默认保守阈值 15 分钟 + 家长可调 + 只记 `info` 缓解）；③ 只移动鼠标、窗口失焦/聚焦、缩放窗口**不算**「有操作」；④ **浏览器崩溃/被强杀/断电**的会话（无 `pagehide`）不做阈值判定 → 走神预警永不产生；⑤ 预警**不是实时推送**（无 WebSocket/短信），家长在打开或切换页面时才拉到。
+8. **已知天花板**（设计取舍，不是缺陷）：① 「家长来了迅速切回来」「小窗口摆在旁边」技术上测不到；② 「前台发呆」与「认真阅读/思考」无法区分（120 秒无输入即判 idle，靠默认保守阈值 15 分钟 + 家长可调 + 只记 `info` 缓解）；③ 只移动鼠标、窗口失焦/聚焦、缩放窗口**不算**「有操作」；④ **浏览器崩溃/被强杀/断电**的会话（无 `pagehide`）不做阈值判定 → 走神预警永不产生；⑤ 预警**不是实时推送**（无 WebSocket/短信）：家长端靠 `AlertBanner` **每 30s 轮询** `GET /parent/alerts/unread`，端到端最坏 ~60s（学生心跳 0–30s + 轮询 0–30s）；家长不在线时下次打开后 ~30s 内弹。
+
+### 走神预警「及时可见」批变更（2026-09-20）
+
+**起因（实测复盘）**：用户实测「学生进语文专项训练 → 同浏览器开新 tab → 另一浏览器登家长号等 1 小时」，家长侧毫无感知。查库还原（`student_id=7`，阈值 2/5 分钟）：18:03:19 会话 13 变 `away` 后**再无任何心跳、无 `end`**；18:15:28 与 19:26:27 两条 idle 预警其实**已落库**（`safety_alerts` id 25/26）—— 但既没有推送面，`away` 那条又因心跳全断而**永不判定**。
+
+1. **idle 口径改字面语义**：`alert_idle_minutes` 现在从**最后一次操作**起算（服务端对 `hidden_since` 补回 120s 前端检测窗口，`CLIENT_IDLE_DETECTION_SECONDS`）。**已知边界**：阈值 ≤ 2 分钟时 idle 实际生效值约为 2 分钟（检测窗口即下限）。`away` 不变（离开时刻起算）。
+2. **`closeStale` 补判**：惰性收尾时对被关会话里 `client_state='hidden'` 的段补判阈值 —— 覆盖「学生端后台 tab 被浏览器冻结 / 关闭时 `end` fetch 丢失 → 心跳全断」的漏报盲区。**判定时机因此从两处变三处**（心跳 / `end` / `closeStale`）。
+3. **新端点 `GET /parent/alerts/unread`**：家长端 Banner 每 30s 轮询；服务端先对名下**全部孩子**跑 `closeStale`（补判，失败只 `warn`）再返回未读（`unreadOnly`，最新 5 条 + 总数）。⚠️ 补判的写入在 `maybeRecordHiddenAlert` 内部仍是 `void`（不破坏该方法的调用纪律），与随后的 SELECT 存在竞态 → 补判出的预警**通常下一次轮询才可见**。
+4. **Banner 替换**：`ParentLayout` 顶部由旧 banner（仅路由切换刷新、只看当前选中孩子、排除 info）换成 `AlertBanner`（30s 轮询 + 路由切换即刷、**全部孩子、含 info**；**点击即已读** → 并发 `PATCH /parent/alerts/{alertId}/read` + 跳 `/parent/alerts`）。**上一批「info 只进列表页」的裁决被本批显式推翻**；预警**列表页**行为不变。
+5. **明确不做**（spec §2）：WebSocket/SSE 推送基础设施、系统级推送（APNs/FCM）、Banner 的「不看不消失」关闭钮、多孩分孩子 banner（聚合展示即可，详情在预警页看）。
 
 ---
 
@@ -1790,7 +1804,7 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 | P6.5 目标设定 | `/parent/goals` | `GET /api/parent/students/{studentId}/goals/attainment` + `PUT .../goals/{metric}`（§4.24）。~~旧 `GET/POST/PATCH/DELETE .../goals`~~ **已废弃（2026-09-22 用户裁决）**：那四条**从未实现**且无 `metric` 维度 |
 | P6.6 行为管控 | `/parent/controls` | `GET/PUT /api/parent/students/{studentId}/controls`（预警灵敏度）+ `GET /api/parent/students/{studentId}/points/settings`（**只读**展示兑换状态，开关本身在奖励管理页改）。见 §6.28 |
 | P6.7 奖励管理 | `/parent/rewards` | `GET /api/parent/students/{studentId}/points`, `GET/PUT .../points/rules`, `GET .../points/ledger`, `GET/PUT .../reward-catalog`, `POST .../points/redeem`, `GET .../redemptions`, `PATCH /api/parent/redemptions/{id}`, `GET/PUT .../points/settings`, `GET /api/points/levels`（`...` = `/api/parent/students/{studentId}`；见 §4.21 / §4.22） |
-| P6.9 异常预警 | `/parent/alerts` | `GET /api/parent/alerts`, `PATCH /api/parent/alerts/{id}/read`；顶栏 Banner 走 `GET /api/parent/alerts?studentId=&unreadOnly=1&pageSize=1`。**侧栏「异常预警」入口为 UX 清单外的偏差**（不加则 Banner 点掉后页面不可达，已回写 UX 文档）。见 §6.28 |
+| P6.9 异常预警 | `/parent/alerts` | `GET /api/parent/alerts`, `PATCH /api/parent/alerts/{alertId}/read`；**顶栏 Banner（所有家长页）走 `GET /api/parent/alerts/unread`**（30s 轮询、全部孩子、含 info 级；点击即已读并跳本页 —— 2026-09-20「及时可见」批替换了旧的 `GET /api/parent/alerts?studentId=&unreadOnly=1&pageSize=1`）。**侧栏「异常预警」入口为 UX 清单外的偏差**（不加则 Banner 点掉后页面不可达，已回写 UX 文档）。见 §6.28 |
 | P6.10 账号设置 | `/parent/account` | `GET /api/parent/account`, `PATCH /api/parent/password`。⚠️ 原文写的 `GET /api/quota/current`、`GET /api/quota/subscription` **不存在**（订阅/额度无表，属 P7.1 范围），本批**不放占位卡** |
 | **P7.1 订阅中心（P2）** | `/parent/subscription` | `GET /api/quota/plans`, `GET /api/quota/subscription`, `POST /api/billing/orders`, `POST /api/billing/orders/{id}/pay` |
 | **P7.2 订单管理（P2）** | `/parent/orders` | `GET /api/billing/orders`, `GET /api/billing/orders/{id}`, `POST /api/billing/orders/{id}/cancel` |

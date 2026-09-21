@@ -1,7 +1,7 @@
 # 家长端走神预警「及时可见」批 · 设计
 
 日期：2026-09-20
-状态：**待实施**
+状态：**已实施（2026-09-20/21，Task 1–7 全部完成，见计划与 changelog）**
 相关：`docs/superpowers/specs/2026-09-20-parent-controls-and-alerts-design.md`（走神预警的来源批）、`docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md`（心跳与 `study_sessions`）、`docs/API接口与数据流设计文档.md` §6.28、`docs/api/openapi.yaml`
 代码锚点：`apps/server/src/modules/analytics/study-sessions.service.ts`、`apps/server/src/database/repositories/study-sessions.repo.ts`、`apps/server/src/modules/parent-insights/`、`apps/web/src/analytics/tracker.ts`、`apps/web/src/components/layout/ParentLayout.tsx`
 

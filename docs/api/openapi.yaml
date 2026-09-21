@@ -3057,6 +3057,29 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/ParentAlertPage'
+  /parent/alerts/unread:
+    get:
+      tags: [Parent]
+      summary: 未读预警轮询（家长端 Banner，「及时可见」批 2026-09-20）
+      description: >-
+        家长端 Banner 每 30s 轮询一次。服务端先对名下**全部孩子**执行 `closeStale`
+        （补判走神阈值；失败只 warn，不影响响应），再返回未读预警（最新 5 条 + 总数）。
+        与 `GET /parent/alerts` 的区别：不分页、不看单个孩子、只返回 banner 展示字段。
+        ⚠️ 补判的写入在 `maybeRecordHiddenAlert` 内部仍是 `void`，与随后的 SELECT 存在竞态
+        → 补判出的预警通常**下一次轮询**（30s 内）才可见，不是本次。
+      operationId: listUnreadAlerts
+      responses:
+        '200':
+          description: '未读预警（空结果是正常态：`items: []` / `total: 0`）'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParentUnreadAlerts'
   /parent/alerts/{alertId}/read:
     patch:
       tags: [Parent]
@@ -7117,8 +7140,10 @@ components:
           minimum: 1
           maximum: 180
           description: >-
-            孩子前台无操作连续多少分钟算「走神」（默认 15）。⚠️ 前端写死的 120 秒空闲判定阈值
-            **不含在内**，两者相加才是家长感知的报警延迟（默认档约 17 分钟）。
+            孩子前台无操作连续多少分钟算「走神」（默认 15）。**字面语义**（2026-09-20「及时可见」批改：
+            服务端把前端写死的 120 秒检测窗口补回 `hidden_since`，故家长设 5 分钟就在第 5 分钟报，
+            文案也写 5 分钟；改前是「两者相加」、设 5 实际约 7 分钟）。⚠️ **已知边界**：阈值 ≤ 2 分钟时
+            实际生效值约为 2 分钟（检测窗口即下限，页面允许最小 1 分钟，不加 UI 限制）。
 
     ControlsUpdateRequest:
       type: object
@@ -7183,6 +7208,43 @@ components:
           type: integer
         total:
           type: integer
+
+    ParentUnreadAlerts:
+      type: object
+      description: >-
+        未读预警轮询壳（`GET /parent/alerts/unread`，「及时可见」批 2026-09-20）。
+        与 `ParentAlertPage` 的区别：不分页（无 `page`/`pageSize`），`items` 固定截**最新 5 条**，
+        item 只带 Banner 展示字段（不含 `studentId`/`context`/`dialogueId`/`isRead`）。
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [id, type, level, message, studentName, createdAt]
+            properties:
+              id:
+                type: integer
+              type:
+                type: string
+                description: 以代码为准（`SafetyAlertRow['type']`），同 `Alert.type`。
+                enum: [off_topic, emotional, sensitive, abusive, away, idle]
+              level:
+                type: string
+                enum: [info, warning, critical]
+                description: 供 Banner 配色：`warning`/`critical` → 红，`info`（走神）→ 橙。
+              message:
+                type: string
+              studentName:
+                type: string
+                nullable: true
+              createdAt:
+                type: string
+                format: date-time
+        total:
+          type: integer
+          description: 未读总数（Banner 文案「有 N 条新预警」用）。
 
     ChangePasswordRequest:
       type: object

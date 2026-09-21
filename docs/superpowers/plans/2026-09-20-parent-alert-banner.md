@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **执行状态（2026-09-21 收尾）**：**Task 1–7 全部完成**。Task 1–6 及审查后修复 = 提交 `b860eae`…`4dd9f07`；Task 7 = 文档同步 + 全量回归 + 端到端（见 `docs/ai-core-changelog.md` 同名条目）。验证结果：后端 `npm test` **1525/1525（120 文件）**、前端 `npm test` **798/798（83 文件）**、`apps/web` `npm run build` 成功、真浏览器端到端**由用户本人走查确认**。⚠️ **下文复选框未逐个勾选**（Task 1–6 由前一段上下文实施，未回填勾选）—— 本批的进度以 `git log` 与 changelog 为准。
+
 **Goal:** 让家长端在走神预警产生后 ~60s 内通过顶部 Banner 看到（30s 轮询 + 点击即已读），修掉「学生后台 tab 冻结导致 away 永远漏报」的盲区（`closeStale` 补判），并把「无操作 N 分钟」改为字面语义（去掉 +2 分钟检测窗口）。
 
 **Architecture:** 三层改动：① `study_sessions` 仓储/服务的 `closeStale` 返回被关会话的挂机信息并由服务补判阈值；② `maybeRecordHiddenAlert` 对 `idle` 加 120s 检测窗口补偿；③ 新 `GET /parent/alerts/unread` 轮询端点（自带补判）+ 前端 `AlertBanner` 替换 `ParentLayout` 既有 banner。

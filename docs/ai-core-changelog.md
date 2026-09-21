@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-09-20 家长端走神预警「及时可见」批：Banner 30s 轮询 + `closeStale` 补判 + idle 字面语义
+
+**设计**：`docs/superpowers/specs/2026-09-20-parent-alert-banner-timeliness-design.md`（§2 有 4 条用户裁决原文）；**计划**：`docs/superpowers/plans/2026-09-20-parent-alert-banner.md`（Task 1–7）。
+
+- **起因（用户实测复盘）**：用户实测「学生进语文专项训练 → 同浏览器开新 tab → 另一浏览器登家长号等 1 小时」，家长侧毫无感知。查库还原（`student_id=7`，阈值 2/5 分钟）：18:03:19 会话 13 变 `away` 后**再无任何心跳、无 `end`**；18:15:28 / 19:26:27 两条 idle 预警其实**已落库**（`safety_alerts` id 25/26）—— 但既没有推送面，`away` 那条又因心跳全断而**永不判定**。三个问题：无推送感知 / `away` 漏报盲区 / idle 口径与文案不符（设 5 分钟实际约 7 分钟）。
+- **四条用户裁决**：① 用 **30s 轮询 + 全局 Banner**，不建 WebSocket/SSE（预警数据源本身就是 30s 粒度，端到端只差 30s，却避免引入全仓第一条长连接）；② Banner **点击即已读**（点击 → 跳 `/parent/alerts` + 标已读 + 消失），**无 X 关闭钮**；③ 「无操作 N 分钟」改**字面语义**；④ 「离开页面 N 分钟」保持字面语义但**必须修掉盲区**。**明确不做**：WS/SSE、系统级推送（APNs/FCM）、Banner 关闭钮、多孩分孩子 banner。
+- **① idle 改字面语义**：`maybeRecordHiddenAlert` 的 `reason='idle'` 分支改为 `有效经过秒数 = (now - hidden_since) + CLIENT_IDLE_DETECTION_SECONDS`（新具名常量 `= 120`，注释钉住与前端 `tracker.ts` 的 `IDLE_TIMEOUT_MS = 120_000` **同源镜像、改一处必须同步另一处**）。阈值比较与预警文案都用有效值 → 设 5 分钟就第 5 分钟报、文案写 5 分钟。`away` 分支不动。**已知边界**：阈值 ≤ 2 分钟时 idle 实际生效值约 2 分钟（检测窗口即下限），写进 API 文档，**不加 UI 限制**。`hidden_idle_seconds` / `hidden_away_seconds` 的**秒数累计口径不动**（与预警判定是两套口径）。
+- **② `closeStale` 补判（修 away 盲区）**：`repo.closeStale` 从裸 `UPDATE` 改为「先 SELECT 命中行（取 `client_state='hidden'` 的 `student_id`/`hidden_reason`/`hidden_since`）→ UPDATE → 返回被关会话的挂机信息」，`StudySessionsService.closeStale` 再逐条复用既有的 `maybeRecordHiddenAlert`（保持 private，不外提）。**判定时机从两处变三处**（心跳 / `end` / `closeStale`）—— 覆盖「后台 tab 被浏览器冻结 / 关闭时 `end` fetch 丢失 → 心跳全断」这个「学生切走后一直不回来」的最关键场景。不重复刷屏：`closeStale` 只关一次 + 30 分钟去重窗口照旧。**崩溃 / 断电**（最后心跳仍是 `visible`）仍不判。
+- **③ 新端点 `GET /parent/alerts/unread`**：家长端 Banner 每 30s 轮询；服务端先对名下**全部孩子**跑 `closeStale`（**嵌在业务流里的写入：整段 catch、失败只 warn、绝不把轮询打成 500**）再查未读（复用 list 仓储的 `unreadOnly`，不新写查询）。响应 `{items:[{id,type,level,message,studentName,createdAt}], total}`，`items` 截最新 5 条、`total` 供 Banner 文案。⚠️ **可见性口径（评审修订）**：补判的写入在 `maybeRecordHiddenAlert` 内部仍是 `void`（不破坏该方法的调用纪律），与随后的 SELECT 存在竞态 → 补判出的预警**通常下一次轮询（30s 内）才可见**，不是本次。
+- **④ Banner 替换（不是叠两个）**：`ParentLayout` 旧的「仅路由切换刷新 + 只看当前选中孩子 + 排除 info」banner 换成 `AlertBanner`（30s 轮询 + 路由切换即刷、**全部孩子、含 info 级**、配色按**最新一条**的 `level` 映射 warning/critical→红、其余→橙、点击即已读并跳预警中心）。**上一批「info 只进列表页」的 banner 裁决被本批用户裁决显式推翻**（走神必须醒目提示，且不应取决于家长当时选中了谁）；预警**列表页**行为不变。
+- **验证**：后端 `npm test` **1525/1525（120 文件）**、前端 `npm test` **798/798（83 文件）**、`apps/web` `npm run build` 成功。`AlertBanner` 的渲染钉子覆盖「有未读显示 / 点击标已读 + 跳转 / 无未读不渲染 / 竞态抑制 + 请求去重」。
+- **端到端（真浏览器，用户本人走查确认）**：学生端进学习页 → 切走 tab，**08:27:58 按 2 分钟阈值落 `away` 预警**（`safety_alerts` id 28；对应 `study_sessions` id 16 挂机 212s）；08:29:08 落 `idle` 预警（id 29）；**点击 Banner 后 id 28 变已读**。链路通。
+- **文档同步（Task 7）**：API 文档 §4.13 加端点行、§6.28 修订旧口径（第 4 条「两个分钟数相加」/ 第 5 条「Banner 只弹 warning·critical 且只认当前孩子」/ 已知天花板第 5 条 / 数据流图）+ 新增「走神预警『及时可见』批变更（2026-09-20）」小节、§7 的 P6.9 行改指新端点；`openapi.yaml` 加 `/parent/alerts/unread`（+ `ParentUnreadAlerts` schema）+ 改写 `Controls.alertIdleMinutes` 描述；`CLAUDE.md` 的走神条目整条替换；本文。
+
+---
+
 ## 2026-09-20 清理两条死线：错题本 P4.1–P4.3 页面（从未实现）与 `/api/error-book` 服务（2026-08-07 已删）
 
 **起因**：用户问「错题本是不是文档需要更新」。排查确认——**错题本的三条机制全部已实现**（① 主线错题清零门禁；② 辅线答疑题目进训练轨错题练习；③ 专项错题在专项错题练习中）；**文档里那条死线指的是从未实现的 P4.1–P4.3 三页**，以及 **2026-08-07 就已整体删除的后端 `error-book` 模块**（两份权威文档仍把它当 MVP 端点描述）。

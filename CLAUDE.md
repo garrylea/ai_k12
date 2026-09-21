@@ -153,7 +153,7 @@ convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_lo
 
 - **闲聊判定 = 模型自报标记 `<!--topic:off-->`（独占回复最后一个非空行），无标记 = 不报警**（宁漏勿误报）。原关键词正则实测 **6/12 条正常语文/英语题误判**，其 `off_topic` 硬阻断已删除（情绪/敏感的阻断保留）。服务端在 `parseContent` 剥离标记（**检测只认末行、剥离对独占一行的标记全局替换**，容忍 CRLF），标记永不进学生可见内容与历史。
 - **⚠️ `ai_messages.safety_flag` 是双来源**（模型自报闲聊 ∪ `type='block'`，后者现在只剩情绪/敏感），取值必须 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))` —— **外层 `Number(...)` 必需**（`??` 会把 `boolean` 原样返回，列是 INT；`tsc` 因 `RowDataPacket` 索引签名 + `Omit` 抹平**不报错**）。家长端文案是「偏离学习 N」。
-- **走神两个「分钟数」不是一回事**：客户端 `IDLE_TIMEOUT_MS=120_000` **写死**，家长的 `controls.alert_idle_minutes` 只从 `hidden_since` 起算 → 两者相加才是家长感知的延迟。`study_sessions` 的 `hidden_*` 四列**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**（累计列须排在 `client_state`/`hidden_reason` 之前）。阈值判定只在**心跳**与 **`end`** 两处（无 `end` 的崩溃会话不判）。
+- **走神预警「及时可见」批（2026-09-20）**：① idle 阈值已是**字面语义**（从最后一次操作起算；服务端 `CLIENT_IDLE_DETECTION_SECONDS = 120` 镜像前端 `IDLE_TIMEOUT_MS`，**改一处必须同步另一处**；阈值 ≤ 2 分钟时生效值约 2 分钟，检测窗口即下限）；② 心跳全断的会话（后台 tab 冻结 / `end` 丢失）由 **`closeStale` 补判**兜底 —— 判定时机现在是**心跳、`end`、`closeStale` 三处**（崩溃/断电仍不判）；③ 家长端 Banner = `AlertBanner`（`ParentLayout` 顶部、30s 轮询 `GET /parent/alerts/unread`、**点击即已读**、覆盖**全部孩子、含 info 级** —— 上一批「info 只进列表页」的 banner 裁决已被本批推翻，预警**列表页**行为不变）。`study_sessions` 的 `hidden_*` 四列仍**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**的铁律不变。口径见 API 文档 §6.28。
 - **P6.6 只做「预警灵敏度 + 奖励兑换只读」**：每日时长 / 禁用时段 / 辅线开关 / 拍照开关按用户裁决**不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）。`controls` 端点**只含两个阈值**，兑换字段归 `points/settings`（同一字段不做两个归属）。口径见 API 文档 §6.28。
 
 ## apps/server - ai-core AI Agent Hub
