@@ -94,10 +94,11 @@ describe('WordPromptCard — 看音标写单词（ph2en）', () => {
   const ph2en = (over: Partial<VocabularyQuestionItem> = {}) =>
     question({ promptKind: 'ph2en', prompt: '/ˈkʌntri/', phonetic: null, hasFamily: false, ...over });
 
-  it('音标作为题面渲染，提示与占位符都是「写英文单词」', () => {
+  it('音标作为题面渲染，占位符是「英文单词」', () => {
+    // 题面旁不再有「根据音标写出英文单词」这类提示句（2026-09-21 精简冗余文案），
+    // 作答方向由占位符承担；本用例只钉「题面渲染什么 + 占位符是什么」。
     renderCard({ question: ph2en() });
     expect(screen.getByTestId('prompt-text')).toHaveTextContent('/ˈkʌntri/');
-    expect(screen.getByText('根据音标写出英文单词')).toBeInTheDocument();
     expect(screen.getByTestId('answer-input')).toHaveAttribute('placeholder', '英文单词');
   });
 
@@ -121,17 +122,17 @@ describe('WordPromptCard — 看音标写单词（ph2en）', () => {
 });
 
 describe('WordPromptCard — 题面与作答', () => {
-  it('英→中：显示单词、音标与「写中文意思」提示', () => {
+  it('英→中：显示单词与音标，占位符是「中文意思」', () => {
     renderCard();
     expect(screen.getByTestId('prompt-text')).toHaveTextContent('care');
     expect(screen.getByText('/keə(r)/')).toBeInTheDocument();
-    expect(screen.getByText('写出它的中文意思')).toBeInTheDocument();
+    expect(screen.getByTestId('answer-input')).toHaveAttribute('placeholder', '中文意思');
   });
 
-  it('中→英：显示中文释义与「写英文单词」提示', () => {
+  it('中→英：显示中文释义，占位符是「英文单词」', () => {
     renderCard({ question: question({ promptKind: 'cn2en', prompt: '照顾；小心', phonetic: null }) });
     expect(screen.getByTestId('prompt-text')).toHaveTextContent('照顾；小心');
-    expect(screen.getByText('写出对应的英文单词')).toBeInTheDocument();
+    expect(screen.getByTestId('answer-input')).toHaveAttribute('placeholder', '英文单词');
   });
 
   it('熟词僻义题显示徽标与语境搭配', () => {
