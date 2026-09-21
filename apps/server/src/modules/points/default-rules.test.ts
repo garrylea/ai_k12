@@ -5,8 +5,8 @@ const tiersOf = (taskCode: string) =>
   DEFAULT_RULES.filter((r) => r.taskCode === taskCode).map((r) => r.tierKey);
 
 describe('DEFAULT_RULES', () => {
-  it('共 15 行', () => {
-    expect(DEFAULT_RULES).toHaveLength(15);
+  it('共 18 行', () => {
+    expect(DEFAULT_RULES).toHaveLength(18);
   });
 
   it('(taskCode, tierKey) 组合唯一（point_rules 的唯一键，重复会 INSERT IGNORE 静默丢行）', () => {
@@ -51,6 +51,19 @@ describe('DEFAULT_RULES', () => {
     expect(tiersOf('en_vocabulary')).toEqual(['10', '15', '20']);
   });
 
+  it('remediation_question 按题型三档：选择 3 / 填空 4 / 大题 6，不限每日上限', () => {
+    const tiers = DEFAULT_RULES.filter((r) => r.taskCode === 'remediation_question');
+    expect(tiers.map((t) => [t.tierKey, t.points, t.dailyLimit])).toEqual([
+      ['choice', 3, null],
+      ['fill_blank', 4, null],
+      ['major', 6, null],
+    ]);
+  });
+
+  it('TASK_NAMES 含相似题专项', () => {
+    expect(TASK_NAMES.remediation_question).toBe('相似题专项');
+  });
+
   it('两个语文专项各按体裁分 poem / prose 两档', () => {
     expect(tiersOf('cn_dictation')).toEqual(['poem', 'prose']);
     expect(tiersOf('cn_interpretation')).toEqual(['poem', 'prose']);
@@ -71,6 +84,9 @@ describe('DEFAULT_RULES', () => {
       ['math_targeted', '5', 15, 5],
       ['math_targeted', '10', 35, 5],
       ['error_fix', 'default', 3, null],
+      ['remediation_question', 'choice', 3, null],
+      ['remediation_question', 'fill_blank', 4, null],
+      ['remediation_question', 'major', 6, null],
       ['cn_dictation', 'poem', 2, null],
       ['cn_dictation', 'prose', 5, null],
       ['cn_interpretation', 'poem', 3, null],

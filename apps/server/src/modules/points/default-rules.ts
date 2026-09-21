@@ -17,6 +17,7 @@ export const TASK_NAMES: Record<string, string> = {
   cn_interpretation: '古诗文翻译',
   cn_meaning: '古诗情感',
   en_vocabulary: '英语背单词',
+  remediation_question: '相似题专项',
 };
 
 /**
@@ -40,6 +41,9 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 32 },
   { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '10',      tierLabel: '10 题',  points: 35, dailyLimit: 5,    sortOrder: 33 },
   { taskCode: 'error_fix',         taskName: '错题订正',     tierKey: 'default', tierLabel: '一题',   points: 3,  dailyLimit: null, sortOrder: 40 },
+  { taskCode: 'remediation_question', taskName: '相似题专项', tierKey: 'choice',     tierLabel: '选择题', points: 3, dailyLimit: null, sortOrder: 35 },
+  { taskCode: 'remediation_question', taskName: '相似题专项', tierKey: 'fill_blank', tierLabel: '填空题', points: 4, dailyLimit: null, sortOrder: 36 },
+  { taskCode: 'remediation_question', taskName: '相似题专项', tierKey: 'major',      tierLabel: '大题',   points: 6, dailyLimit: null, sortOrder: 37 },
   { taskCode: 'cn_dictation',      taskName: '古诗文默写',   tierKey: 'poem',    tierLabel: '古诗',   points: 2,  dailyLimit: null, sortOrder: 50 },
   { taskCode: 'cn_dictation',      taskName: '古诗文默写',   tierKey: 'prose',   tierLabel: '古文',   points: 5,  dailyLimit: null, sortOrder: 51 },
   { taskCode: 'cn_interpretation', taskName: '古诗文翻译',   tierKey: 'poem',    tierLabel: '古诗',   points: 3,  dailyLimit: null, sortOrder: 60 },
