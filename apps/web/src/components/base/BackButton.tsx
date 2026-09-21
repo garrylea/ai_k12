@@ -41,7 +41,12 @@ const ArrowLeftIcon = () => (
  *    例：`<BackButton to="/student/entry" />`、`<BackButton to="/student/star-map" state={{ subjectId }} />`。
  * 2. **返回上一页** —— 不传 `to`。`onClick` 走 `navigate(-1)`，回退一格路由历史；
  *    此时 `state` 无意义、被忽略。默认可访问名为「返回上一页」。
- *    例：`<BackButton />`（个人中心 / 奖励册这类「浅停留页」顶栏）。
+ *    例：`<BackButton />`。
+ *
+ *    ⚠️ **2026-09-21 起个人中心/奖励册不再用这个模式**：它们的顶栏「返回」要回到
+ *    「进入本页之前的那一页」，而两页互跳会把兄弟页压进历史栈，`navigate(-1)` 会退回
+ *    兄弟页（用户实测反馈）。那两页改用显式来源页协议（`@/utils/stayReturn`，传 `to`）。
+ *    本模式作为通用能力保留（仍有用例），但**别再拿它做「回到从哪来」**——需要确定性落点就传 `to`。
  *
  * **不做「没有上一页时兜底跳某处」**：直接 `navigate(-1)`。
  * 判断「是否存在站内历史」在 `createMemoryRouter`（测试）下不可测、

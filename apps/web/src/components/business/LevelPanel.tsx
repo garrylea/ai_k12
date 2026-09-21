@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { LevelIcon, Progress, Skeleton } from '@/components/base';
 import { getMyPoints, type MyPoints } from '@/services/api';
+import { buildStayReturnState } from '@/utils/stayReturn';
 import {
   GUTTER,
   PANEL_FALLBACK_SIZE,
@@ -54,6 +55,7 @@ function useIsDesktop(): boolean {
 
 export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const isDesktop = useIsDesktop();
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -224,7 +226,10 @@ export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
         type="button"
         onClick={() => {
           onClose();
-          navigate('/student/profile');
+          // 个人中心顶栏的「返回」要回得来：把当前页（含它自己的 state）记成来源页
+          navigate('/student/profile', {
+            state: buildStayReturnState(location.pathname, location.state),
+          });
         }}
         className="w-full rounded-[var(--radius-button)] border border-[var(--bg-subtle)] px-3 py-2 text-sm font-medium text-[var(--brand-600)] transition-colors hover:bg-[var(--bg-subtle)]"
       >

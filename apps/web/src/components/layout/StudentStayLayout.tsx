@@ -1,5 +1,6 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { BackButton, LogoutButton } from '@/components/base';
+import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
  * 浅停留页外壳 —— 个人中心（P5.1）与奖励册（P5.2）专用。
@@ -24,9 +25,10 @@ import { BackButton, LogoutButton } from '@/components/base';
  * `border-[var(--bg-subtle)]` + `--radius-pill` 胶囊），但不复用任何布局组件 ——
  * 复用就意味着又要处理主题分支。
  *
- * 顶栏「返回上一页」（`BackButton` 默认模式）是学生从这两页离开的出口：按用户裁决
- * 不走「返回星图」定死路径，而是回退一页（从哪来回哪去，从奖励册/个人中心互相跳转时
- * 也符合直觉）。
+ * 顶栏「返回」是学生从这两页离开的出口，落点是**进入本页之前的那一页**（来源页协议，
+ * 见 `@/utils/stayReturn`）——**不是**回退浏览器历史：两页互跳会把兄弟页压进历史栈，
+ * 学生从星图进来、切过奖励册再切回来按「返回」就会退回奖励册而不是星图（2026-09-21 用户实测反馈）。
+ * 两页互跳时来源原样带过去，来源缺失时兜底回星图。
  */
 const stayItems = [
   { to: '/student/rewards', label: '奖励册' },
@@ -34,6 +36,12 @@ const stayItems = [
 ];
 
 export default function StudentStayLayout() {
+  const location = useLocation();
+  // 来源页 + 来源页自己的 location.state（课程详情缺 state 会被自己的「缺少课程信息」挡住）
+  const back = resolveStayReturn(location.state);
+  // 两页互跳时把来源原样带过去，否则切一次 tab 来源就丢了
+  const carriedReturnState = buildStayReturnState(back.to, back.state);
+
   return (
     <div
       data-theme="student-day"
@@ -42,8 +50,8 @@ export default function StudentStayLayout() {
     >
       {/* 顶部全局栏：学生端统一 token，但无日夜切换 */}
       <header className="h-16 bg-[var(--bg-card)] border-b border-[var(--bg-subtle)] flex items-center justify-between gap-4 px-6 shrink-0">
-        {/* 统一返回控件：不传 to → 返回上一页（BackButton 默认模式） */}
-        <BackButton />
+        {/* 统一返回控件：跳到进入本页之前的那一页（来源页协议），没有来源则回星图 */}
+        <BackButton to={back.to} state={back.state} />
 
         {/* 两页互跳入口（UX P5.1「入口：奖励册…」），当前页高亮 */}
         <nav className="flex items-center gap-1 bg-[var(--bg-subtle)] rounded-[var(--radius-pill)] p-1">
@@ -51,6 +59,7 @@ export default function StudentStayLayout() {
             <NavLink
               key={item.to}
               to={item.to}
+              state={carriedReturnState}
               className={({ isActive }) =>
                 `px-3 py-1 text-xs rounded-[var(--radius-pill)] transition-all ${
                   isActive

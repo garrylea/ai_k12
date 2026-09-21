@@ -254,11 +254,13 @@ function expectStayPageShell() {
   // 核心钉子：页面上不存在日/夜切换控件
   expect(screen.queryByRole('button', { name: '日间' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '夜间' })).not.toBeInTheDocument();
-  // 去掉侧栏后，顶栏「返回上一页」是离开这两页的出口。
+  // 去掉侧栏后，顶栏「返回」是离开这两页的出口。
   // 2026-09-18 改：原先是页内手写的 <Link to="/student/star-map">返回星图</Link>，
-  // 按用户裁决改为统一 BackButton 的默认模式（返回上一页）——渲染成 <button> 而非 <a>，
-  // 也没有固定 href；它真的会回退一格历史由 BackButton.test.tsx 用真路由断言钉住。
-  expect(screen.getByRole('button', { name: '返回上一页' })).toBeInTheDocument();
+  // 按用户裁决改为统一 BackButton。
+  // 2026-09-21 再改：落点从「回退浏览器历史」改成**来源页协议**（两页互跳会把兄弟页压进
+  // 历史栈，`navigate(-1)` 会退回兄弟页 —— 用户实测反馈），故可访问名从「返回上一页」
+  // 变回「返回」，真实落点由 StudentStayLayout.test.tsx 用真路由断言钉住。
+  expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument();
   // 两页互跳入口
   expect(screen.getByRole('link', { name: '奖励册' })).toHaveAttribute('href', '/student/rewards');
   expect(screen.getByRole('link', { name: '个人中心' })).toHaveAttribute(

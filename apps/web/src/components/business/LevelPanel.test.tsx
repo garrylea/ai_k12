@@ -1,7 +1,7 @@
 import { createRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { LevelPanel } from './LevelPanel';
 import { computePanelPosition } from './level-panel-position';
 import { getMyPoints, type MyPoints } from '@/services/api';
@@ -48,12 +48,31 @@ function stubMatchMedia(desktop: boolean) {
   }));
 }
 
-function renderPanel(onClose: () => void = vi.fn()) {
+/**
+ * `/student/profile` 的探针：个人中心顶栏的「返回」要靠这里收到的导航 state
+ * 才知道该回哪一页（来源页协议，见 `@/utils/stayReturn`）。
+ */
+function ProfileProbe() {
+  const location = useLocation();
+  const state = location.state as { from?: string; fromState?: unknown } | null;
+  return (
+    <div>
+      个人中心页
+      <span data-testid="profile-from">{state?.from ?? ''}</span>
+      <span data-testid="profile-from-state">{JSON.stringify(state?.fromState ?? null)}</span>
+    </div>
+  );
+}
+
+function renderPanel(
+  onClose: () => void = vi.fn(),
+  entry: string | { pathname: string; state?: unknown } = '/student/star-map',
+) {
   render(
-    <MemoryRouter initialEntries={['/student/star-map']}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/student/star-map" element={<LevelPanel open onClose={onClose} />} />
-        <Route path="/student/profile" element={<div>个人中心页</div>} />
+        <Route path="/student/profile" element={<ProfileProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -126,6 +145,16 @@ describe('LevelPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: '查看积分明细 →' }));
 
     expect(await screen.findByText('个人中心页')).toBeInTheDocument();
+  });
+
+  it('跳转时把来源页与它自己的 state 一起传过去（个人中心顶栏「返回」靠它回得来）', async () => {
+    getMyPointsMock.mockResolvedValue(BASE);
+
+    renderPanel(vi.fn(), { pathname: '/student/star-map', state: { subjectId: 7 } });
+    fireEvent.click(await screen.findByRole('button', { name: '查看积分明细 →' }));
+
+    expect(await screen.findByTestId('profile-from')).toHaveTextContent('/student/star-map');
+    expect(screen.getByTestId('profile-from-state')).toHaveTextContent('{"subjectId":7}');
   });
 
   it('Esc 关闭', async () => {
