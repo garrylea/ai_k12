@@ -701,7 +701,7 @@ export type HiddenReason = 'away' | 'idle';
 - `analytics.controller.ts` 的 `HeartbeatSchema`（:34-37）加 `reason: z.enum(['away', 'idle']).optional()`（**可选**是为兼容旧客户端；spec §3.3）。
 - `study-sessions.service.ts` 的 `heartbeat` 入参加 `reason?: string`；**缺失**归一为 `null`（同 `subjectId` 的处理）。⚠️ **非法值到不了 service**：HTTP 路径上 `HeartbeatSchema.reason` 是 `z.enum(['away','idle']).optional()`，非法值在 controller 层就 400/1001（service 的宽容只服务非 HTTP 调用方）。
 - **⚠️ `reason` 必须在 service 侧再归一一次**：`state === 'hidden' ? pick(HIDDEN_REASONS, input.reason) : null`。`repo.heartbeat` 是薄 SQL 层、不做归一，手搓 `{"state":"visible","reason":"away"}`（Zod 合法）会落成 `client_state='visible'` + `hidden_reason='away'` 的坏组合，违反 `study_sessions.hidden_reason` 的列不变量（spec §3.3「回到 visible 时置 NULL」）。**2026-09-20 实施时漏了这层归一，评审 M-2 指出后补上。**
-- `study-sessions.service.ts` 在心跳与结束两条路径上做**阈值判定**（spec §3.3「判定时机两处，缺一不可」）：
+- `study-sessions.service.ts` 在心跳与结束两条路径上做**阈值判定**（spec §3.3「判定时机两处，缺一不可」）。（⚠️ **后续修订**：2026-09-20「及时可见」批增为**三处** —— 新增 `closeStale` 惰性收尾时补判，修「后台 tab 冻结 / `end` 丢失 → 心跳全断」的盲区；见 `plans/2026-09-20-parent-alert-banner.md`）
   - 条件：`client_state==='hidden'` 且 `TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)) >= 对应阈值`
   - 阈值来自 `ControlsRepository.findAlertThresholds(studentId)`
   - 命中 → `void this.safetyAlerts.record({ studentId, dialogueId: null, type: reason, level: 'info', message: this.safetyAlerts.messageFor(reason, minutes), context: this.safetyAlerts.awayContext(reason, minutes) })`
@@ -1165,6 +1165,8 @@ export function markParentAlertRead(alertId: number): Promise<null>
 
 - [ ] **Step 2: 真 Banner（spec §5.1 状态机）**
 
+> ⚠️ **本步产物已被 2026-09-20「及时可见」批整体替换**（`plans/2026-09-20-parent-alert-banner.md` Task 6）：改为独立组件 `AlertBanner` + 新端点 `GET /parent/alerts/unread`（30s 轮询、全部孩子、含 `info`）。下面保留原始设计作对照。
+
 `ParentLayout.tsx`：删 `const hasAlert = true;` 与假文案。改为：
 
 ```
@@ -1412,10 +1414,10 @@ cd apps/web && npm test 2>&1 | tail -3 && npx tsc -b && npm run lint && npm run 
 1. 辅线发一条语文理解题 → **不被拒答**（修复验证，§7.4-1）
 2. 辅线发一条闲聊 → 模型温和引导，且家长端预警中心出现 `off_topic` 预警
 3. 家长端任意页顶部出现红色 Banner → 点 CTA 进预警中心 → 标记已读 → 返回后 Banner 消失
-4. 学生端切走 ≥ 5 分钟（可先改小阈值）→ 出现 `away` 预警，且**不弹 Banner**（`info` 级）
-5. 改「切走等待时长」为 2 分钟 → 再切走 2 分钟即报警（**阈值真的生效**；注意口径是「最后一次操作后 120 秒 + 阈值」，见 spec §3.3）
+4. 学生端切走 ≥ 5 分钟（可先改小阈值）→ 出现 `away` 预警，~~且**不弹 Banner**（`info` 级）~~ → **「及时可见」批起 `info` 级也进 Banner（橙色）**，应看到 Banner
+5. 改「切走等待时长」为 2 分钟 → 再切走 2 分钟即报警（**阈值真的生效**；⚠️ 口径已由「最后一次操作后 120 秒 + 阈值」改为**字面语义**，见 spec §3.3 的 2026-09-21 修订行）
 6. 改密码：旧密码错 → 报错；旧密码对 → 成功且新密码可登录
-7. 多孩：切换孩子 → Banner 与列表按所选孩子变化，列表页回到第 1 页
+7. 多孩：切换孩子 → ~~Banner 与列表按所选孩子变化~~ → **「及时可见」批起 Banner 覆盖全部孩子**（不随切换变化），列表按所选孩子筛选、且回第 1 页
 8. 家长端「行为管控」页数字输入框一眼看得出能改；改完刷新仍在
 
 ---
@@ -1435,12 +1437,13 @@ cd apps/web && npm test 2>&1 | tail -3 && npx tsc -b && npm run lint && npm run 
 
 - **走神在挂机进行中就会报**：不等挂机段结束（「切走后不再回来」正是家长最需要知道的场景）；副作用是学生回来后该条预警仍在。
 - **「家长来了迅速切回来」「小窗口摆在旁边」测不到**（spec §9 已在设计阶段向用户说明是天花板）。
-- **`idle` 段的计时起点晚 2 分钟**：客户端在最后一次输入后 120 秒才判 hidden，且该 120 秒**写死不接家长配置** → 家长设 15 分钟实际约 17 分钟报警。
+- ~~**`idle` 段的计时起点晚 2 分钟**：客户端在最后一次输入后 120 秒才判 hidden，且该 120 秒**写死不接家长配置** → 家长设 15 分钟实际约 17 分钟报警。~~ → **2026-09-20「及时可见」批已修**：服务端把该 120 秒补回 `hidden_since`，`alert_idle_minutes` 现为**字面语义**（设 15 分钟即第 15 分钟报）；阈值 ≤ 2 分钟时生效值约 2 分钟（检测窗口即下限）。
 - **`hidden_reason` 在极少数情况会贴错标签**：先因 idle 变 hidden、随后标签页又被切走，该段仍记为 `idle`。
 - **历史挂机数据无法回填**：4 个新列在迁移前不存在。
 - **闲聊预警没有「频繁」语义**：实现为每次发生即报，靠 30 分钟去重兜住频率。
 - **`ai_messages.safety_flag` 语义有变（双来源）**：从「被硬阻断的轮次」变为「被模型判为闲聊 **或** 被阻断的轮次」（后者现在只剩情绪/敏感）。家长端计数口径随之变化（**更准确**），文案已改成「偏离学习 N」；**历史数据的口径与新的不一致**。
 - **改密码不失效旧 token**：本仓无 token 版本机制，旧 token 7 天内仍有效（与管理员改密码一致）。
-- **预警不是实时推送**：无调度器 / WebSocket，家长打开或切换页面时才拉到新预警。
+- **预警不是实时推送**：无调度器 / WebSocket。~~家长打开或切换页面时才拉到新预警~~ → **2026-09-20「及时可见」批起**家长端 `AlertBanner` **每 30s 轮询** `GET /parent/alerts/unread`（端到端最坏 ~60s）。
+- ~~**无 `end` 的会话不判走神阈值**~~ → **2026-09-20「及时可见」批已部分修复**：判定增为**三处**（心跳 / `end` / `closeStale` 补判），覆盖「后台 tab 冻结 / `end` fetch 丢失」；**崩溃 / 强杀 / 断电仍不判**（最后心跳是 `visible`）。
 - **`alert_level` / `auxiliary_enabled` / `photo_search_enabled` 仍未被读取**：按裁决 10 保留，DB 文档注明「预留未用」。
 - **`countConsecutiveOffTopic` 与 `safety.yaml` 的 `off_topic.escalateThreshold` / `criticalThreshold` 保留但不再被调用**（含其单测）。

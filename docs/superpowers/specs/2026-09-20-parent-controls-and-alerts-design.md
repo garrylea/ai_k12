@@ -269,14 +269,14 @@ UX §P6.6 全文只有三行：
 
 **目标**：把「页面被切走」与「前台无操作」分开记，并知道**当前这一挂机段连续了多久**。
 
-**⚠️ 先读这段：两个「分钟数」不是一回事（最易误解，实施与验收都按这个口径）**
+**⚠️ 先读这段：两个「分钟数」的关系（口径已于 2026-09-20「及时可见」批修订，下面是改后口径）**
 
 | 数 | 值 | 谁定 | 作用 |
 |---|---|---|---|
-| 前端空闲判定阈值 | **120 秒，写死**（`tracker.ts:23` 的 `IDLE_TIMEOUT_MS`） | 代码常量；**本批不接入家长配置** | 决定客户端状态机**多久**从 `active` 翻成 `hidden` |
-| `controls.alert_idle_minutes` | 默认 15，家长可调 1..180 | 家长 | 决定翻成 `hidden` **之后**连续挂机多久写一条 `idle` 预警 |
+| 前端空闲判定阈值 | **120 秒，写死**（`tracker.ts:23` 的 `IDLE_TIMEOUT_MS`） | 代码常量；**仍不接入家长配置** | 决定客户端状态机**多久**从 `active` 翻成 `hidden` |
+| `controls.alert_idle_minutes` | 默认 15，家长可调 1..180 | 家长 | 决定「距**最后一次操作**」多久写一条 `idle` 预警 |
 
-两者**相加**才是家长感知的「孩子多久没操作会收到预警」：默认档 15 分钟 ⇒ 距最后一次操作约 **17 分钟**报警。验收「改阈值真的生效」（§7.4 第 5 条）必须按这个口径算，别把 15 分钟当成「无操作 15 分钟」。
+改前两者**相加**才是家长感知的延迟（默认档 15 分钟 ⇒ 距最后一次操作约 **17 分钟**报警）；「及时可见」批把服务端判定改成 `(now - hidden_since) + CLIENT_IDLE_DETECTION_SECONDS`（服务端常量 `= 120`，镜像前端 `IDLE_TIMEOUT_MS`），即 **字面语义** —— 家长设 15 分钟就在第 15 分钟报。**已知边界**：阈值 ≤ 2 分钟时生效值约 2 分钟（检测窗口即下限，页面允许最小 1 分钟）。验收「改阈值真的生效」（§7.4 第 5 条）按**字面语义**算。见 `docs/superpowers/specs/2026-09-20-parent-alert-banner-timeliness-design.md`。
 
 **「有操作 / 无操作」的判定口径**：客户端在 **`window`** 上挂监听（`AnalyticsShell.tsx:46-66`），事件冒泡即可命中，**无需**监听具体输入元素。
 
@@ -306,10 +306,11 @@ UX §P6.6 全文只有三行：
 
 **⚠️ SET 列顺序是承重的**（`study-sessions.repo.ts:104-119` 注释已说明，且有测试钉住）：MySQL 单表 `SET` 从左到右求值，读的是**已更新后**的值。所以两个累计列必须排在 `client_state = ?` 与 `hidden_reason = ?` **之前**（它们要读旧值）。本批新增的行必须插在正确位置，不得打乱既有 `active_seconds` 那段的顺序。
 
-**判定时机（两处，缺一不可）**：
+**判定时机（本批两处，缺一不可；2026-09-20「及时可见」批增为三处）**：
 
 1. **心跳时**：若 `client_state='hidden'` 且 `TIMESTAMPDIFF(SECOND, hidden_since, NOW(3)) >= 对应阈值` → 写预警。
 2. **结束时**（`end` 路径）：同样检查一次 —— 覆盖「学生最小化后直接关掉页面」（此时 `pagehide` 触发 end，之后不会再有心跳）。
+3. **`closeStale` 惰性收尾时**（**「及时可见」批新增**）：对被关会话里 `client_state='hidden'` 的段补判 —— 覆盖「后台 tab 被浏览器冻结 / 关闭时 `end` fetch 丢失 → 心跳全断」（⚠️ 崩溃 / 强杀 / 断电的最后心跳是 `visible`，仍不判）。
 
 **为什么在阈值处就报、而不是等挂机段结束**：学生切走后再不回来，正是家长最需要知道的场景；若只在「回到前台」时判定，这个场景永远报不出来。
 
@@ -340,16 +341,16 @@ UX §P6.6 全文只有三行：
 | 规则 | 值 | 理由 |
 |---|---|---|
 | 去重窗口 | 同一 `student_id` + 同一 `type`，**30 分钟**内只写一条 | 心跳每 30 秒一次，不去重会刷屏 |
-| 走神 `level` | `info` | 走神 ≠ 问题，不该天天弹红条 |
+| 走神 `level` | `info` | 走神 ≠ 问题（⚠️ 「及时可见」批起 `info` **也会进 Banner**，只是配色为橙而非红；`level` 仍恒 `info`） |
 | 闲聊 `level` | `warning`（**每次发生即报**） | 见 §9：已去掉关键词计数，无法判断 PRD 所说的「**频繁**发起」 |
 | 情绪/敏感 `level` | `warning` / `critical` | 沿用 `SafetyGuard` 的既有硬编码规则（`sensitive`/`abusive` → `critical`，`emotional` → `warning`） |
-| **Banner 只弹 `warning` / `critical`** | — | `info` 只进列表页 |
+| ~~**Banner 只弹 `warning` / `critical`**~~ | ~~`info` 只进列表页~~ | **已被 2026-09-20「及时可见」批推翻**：`AlertBanner` 覆盖**全部孩子、全部级别（含 `info`）**；配色按最新一条的 `level`（`warning`/`critical` → 红、`info` → 橙） |
 
 ### 3.6 家长端
 
 | 位置 | 设计 |
 |---|---|
-| **Banner**（`ParentLayout.tsx`） | 删除 `:32` 的 `const hasAlert = true` 与假文案；改为拉「**当前选中孩子**的最新一条未读 `warning`/`critical` 预警」；无则**完全不渲染**；CTA 跳 `/parent/alerts`。**`studentId` 为 null 时不显示** |
+| **Banner**（`ParentLayout.tsx`） | 删除 `:32` 的 `const hasAlert = true` 与假文案；改为拉「**当前选中孩子**的最新一条未读 `warning`/`critical` 预警」；无则**完全不渲染**；CTA 跳 `/parent/alerts`。**`studentId` 为 null 时不显示**。⚠️ **2026-09-20「及时可见」批已替换**：改为独立组件 `AlertBanner`（30s 轮询 `GET /parent/alerts/unread`、**全部孩子**、**含 `info` 级**、点击即已读并跳预警中心） |
 | **预警中心页** `/parent/alerts` | 列表含触发时间、**孩子名**、类型、级别、上下文片段、建议行动；支持「只看未读」筛选；逐条标记已读；闲聊类（有 `dialogue_id`）可跳该对话回放；空态齐备 |
 | **侧栏** | 加「异常预警」入口（`ParentNav.tsx` + 复用 `NavIcon`）。UX 侧栏清单未列，但不加则 Banner 点掉后页面不可达 → **偏差，写进文档** |
 | **P6.6 页** `/parent/controls` | 预警灵敏度：两个分钟数输入（1..180）+ 宽松/标准/严格预设按钮（**纯前端一键填值，无服务端预设状态**）；奖励兑换只读状态 + 跳转奖励管理页。保存沿用 `PointsSettingsPanel` 的「只提交改动字段」模式 + toast |
@@ -369,7 +370,7 @@ UX §P6.6 全文只有三行：
 
 - **派生状态必须带 `studentId` 归属**：`data` 存 `{ studentId, value }`，读取时一并比较。
 - **列表页换孩子必须回第 1 页**：`useEffect(() => setPage(1), [studentId])`。
-- Banner 只认**当前选中孩子**；预警中心列表默认显示**全部孩子**（带孩子名），并支持按孩子筛选。
+- Banner ~~只认**当前选中孩子**~~ → **覆盖家长名下全部孩子**（2026-09-20「及时可见」批修订：走神预警不应取决于家长当时选中了谁）；预警中心列表默认显示**全部孩子**（带孩子名），并支持按孩子筛选。
 
 ---
 
@@ -482,6 +483,10 @@ UX §P6.6 全文只有三行：
 
 ### 5.1 Banner（`ParentLayout`）
 
+> ⚠️ **本节已被 2026-09-20「及时可见」批整体替换**（见 `specs/2026-09-20-parent-alert-banner-timeliness-design.md` §3.4）：
+> 改为独立组件 `AlertBanner`，**不再读 `useParentStudentStore.studentId`**、不再按 level 过滤、不再只在路由变化时刷新。
+> 下面是本批的原始设计，保留作对照。
+
 ```
 读 useParentStudentStore.studentId
 ├─ studentId == null        → 不渲染（不请求）
@@ -494,8 +499,10 @@ UX §P6.6 全文只有三行：
       └─ 其他（空 / 只有 info）→ 不渲染
 ```
 
+**改后（「及时可见」批，以代码为准）**：`GET /parent/alerts/unread`（30s 轮询 + 路由切换即刷）→ 未读数为 0 时不渲染；否则渲染 Banner（标题=`有 N 条新预警，最新：{message}`，配色按最新一条的 `level`：`warning`/`critical` → 红、`info` → 橙）→ 点击即已读（并发 `PATCH`）+ `navigate('/parent/alerts')`。
+
 - CTA `onClick` → `navigate('/parent/alerts')`（补上现有按钮缺失的 handler）
-- 刷新时机：与未读数一致——`location.pathname` 变化时重拉（`ParentLayout.tsx:28-30` 的既有模式）
+- 刷新时机：~~与未读数一致——`location.pathname` 变化时重拉~~ → 改后为 **30s 轮询 + `location.pathname` 变化时即刷**
 
 ### 5.2 预警中心页（`/parent/alerts`）
 
@@ -615,10 +622,10 @@ UX §P6.6 全文只有三行：
 1. 辅线发一条语文理解题 → **不被拒答**（修复验证）
 2. 辅线发一条闲聊 → 模型温和引导，且家长端预警中心出现 `off_topic` 预警
 3. 家长端任意页顶部出现红色 Banner → 点 CTA 进预警中心 → 标记已读 → 返回后 Banner 消失
-4. 学生端切走 ≥ 5 分钟（改小阈值便于验证）→ 出现 `away` 预警，且**不弹 Banner**（`info` 级）
+4. 学生端切走 ≥ 5 分钟（改小阈值便于验证）→ 出现 `away` 预警，~~且**不弹 Banner**（`info` 级）~~ → **「及时可见」批起 `info` 级也进 Banner（橙色）**，故应看到 Banner
 5. 改「切走等待时长」为 2 分钟 → 再切走 2 分钟即报警（阈值真的生效）
 6. 改密码：旧密码错 → 报错；旧密码对 → 成功且新密码可登录
-7. 多孩：切换孩子 → Banner 与列表按所选孩子变化，列表页回到第 1 页
+7. 多孩：切换孩子 → ~~Banner 与列表按所选孩子变化~~ → **「及时可见」批起 Banner 覆盖全部孩子**（不随切换变化），预警中心列表按所选孩子筛选、且回第 1 页
 
 ---
 
@@ -642,19 +649,19 @@ UX §P6.6 全文只有三行：
 |---|---|
 | **「家长来了迅速切回来」测不到** | 系统不记录切换次数与每次操作的时间点，这种快进快出在数据上与正常学习无法区分。**已在设计阶段向用户说明是天花板** |
 | **「小窗口摆在旁边」测不到** | `document.hidden` 为 false（浏览器仍可见），且无 `resize` 监听、`screen_class` 只在会话开始时采一次。若学生不碰学习页，会被 `idle` 兜住 |
-| **「前台发呆」与「认真阅读/思考」无法区分** | 120 秒无输入即判 `idle`，阅读长文或思考难题很容易超过。缓解手段：默认阈值取保守值（15 分钟）、家长可调、只记 `info` 不弹 Banner。**这是设计上的取舍，不是缺陷** |
-| **`idle` 段的计时起点晚 2 分钟（两个「分钟数」不是一回事）** | 客户端空闲阈值 `IDLE_TIMEOUT_MS = 120_000`（`tracker.ts:23`）是**写死的**，本批**不接入家长配置**；家长的 `alert_idle_minutes` 只从 `hidden_since` 起算。所以默认档「无操作 15 分钟」实际是「距最后一次操作约 17 分钟」。验收时按 §3.3 的口径，别拿 15 分钟当「无操作 15 分钟」 |
+| **「前台发呆」与「认真阅读/思考」无法区分** | 120 秒无输入即判 `idle`，阅读长文或思考难题很容易超过。缓解手段：默认阈值取保守值（15 分钟）、家长可调、只记 `info`（~~不弹 Banner~~ —— 「及时可见」批起 `info` **也进 Banner**，靠橙色而非红色区分严重度）。**这是设计上的取舍，不是缺陷** |
+| ~~**`idle` 段的计时起点晚 2 分钟（两个「分钟数」不是一回事）**~~ **（2026-09-20「及时可见」批已修）** | 客户端空闲阈值 `IDLE_TIMEOUT_MS = 120_000`（`tracker.ts:23`）仍**写死**、**仍不接入家长配置**；但服务端判定时会把该 120 秒补回 `hidden_since`（`CLIENT_IDLE_DETECTION_SECONDS`）→ `alert_idle_minutes` 现为**字面语义**：设 15 分钟就在第 15 分钟报（改前是「两者相加」、实际约 17 分钟）。**已知边界**：阈值 ≤ 2 分钟时生效值约 2 分钟（检测窗口即下限） |
 | **只移动鼠标、窗口失焦/聚焦、缩放窗口不算「有操作」** | 未监听 `mousemove` / `focus` / `blur` / `resize`（§2.3 缺口）。学生只看不动键鼠时会被 120 秒空闲判定兜住（判 `idle`，`info` 级）。本批**不新增这些监听**——`mousemove` 高频、且会放大「人在但没学」的误判面 |
 | **`hidden_reason` 在极少数情况会贴错标签** | 若先因 `idle` 变 hidden、随后标签页又被切走，客户端不再发新心跳（状态机在 `hidden` 下对 `HIDDEN` 是空操作），该段仍记为 `idle` |
 | **改密码不失效旧 token** | 本仓无 token 版本机制，旧 token 在 7 天有效期内仍可用（与管理员改密码的既有行为一致） |
-| **预警不是实时推送** | 无调度器 / 无 WebSocket，家长在**打开或切换页面时**才拉到新预警 |
-| **预警无自动保留期** | `safety_alerts` **不会自己清理**——无 scheduler、无 `@nestjs/schedule`（全仓零命中），表随时间**无上限增长**（30 分钟去重窗口下每孩子每天上限约 240 条，约 87k 行/年/孩子）。补的手段是**管理员手动清理**：`GET /api/admin/alerts/expired` 预览 + `DELETE /api/admin/alerts/expired` 物理删除 **30 天前**的行（**含未读**，不可恢复），阈值固定 30 天常量、接口不带参数（杜绝「填 0 就删库」）。管理员端页面「预警数据」（`/admin/alerts`）。**明确不做**：自动保留期 / 清理前导出备份 / 审计日志 / 按类型或按孩子筛选清理 / 数量上限保护。配套索引：`idx_sa_parent_created (parent_id, created_at)`（家长端**全量**列表免 filesort）与 `idx_sa_created_at (created_at)`（清理走区间扫描而非全表扫），迁移 `2026-09-20_safety_alerts_retention_indexes.sql`。⚠️ **「只看未读」变体（`AND is_read = 0`）实测仍 filesort** —— 优化器选了更选择性的既有 `idx_sa_parent_unread`，而**顶栏 Banner 走的正是这条**（`ParentLayout.tsx` 传 `unreadOnly: true, pageSize: 1`）；要一并免掉需 `(parent_id, is_read, created_at)`，属另一批决策，本批未做 |
+| **预警不是实时推送** | 无调度器 / 无 WebSocket。~~家长在**打开或切换页面时**才拉到新预警~~ → **2026-09-20「及时可见」批起**家长端 `AlertBanner` **每 30s 轮询** `GET /parent/alerts/unread`（端到端最坏 ~60s） |
+| **预警无自动保留期** | `safety_alerts` **不会自己清理**——无 scheduler、无 `@nestjs/schedule`（全仓零命中），表随时间**无上限增长**（30 分钟去重窗口下每孩子每天上限约 240 条，约 87k 行/年/孩子）。补的手段是**管理员手动清理**：`GET /api/admin/alerts/expired` 预览 + `DELETE /api/admin/alerts/expired` 物理删除 **30 天前**的行（**含未读**，不可恢复），阈值固定 30 天常量、接口不带参数（杜绝「填 0 就删库」）。管理员端页面「预警数据」（`/admin/alerts`）。**明确不做**：自动保留期 / 清理前导出备份 / 审计日志 / 按类型或按孩子筛选清理 / 数量上限保护。配套索引：`idx_sa_parent_created (parent_id, created_at)`（家长端**全量**列表免 filesort）与 `idx_sa_created_at (created_at)`（清理走区间扫描而非全表扫），迁移 `2026-09-20_safety_alerts_retention_indexes.sql`。⚠️ **「只看未读」变体（`AND is_read = 0`）实测仍 filesort** —— 优化器选了更选择性的既有 `idx_sa_parent_unread`，而**顶栏 Banner 走的正是这条**（2026-09-20「及时可见」批起改走 `GET /parent/alerts/unread`，其仓储调用仍是 `listByParent(parentId, { unreadOnly: true }, 5, 0)`）；要一并免掉需 `(parent_id, is_read, created_at)`，属另一批决策，本批未做 |
 | **`alert_level` / `auxiliary_enabled` / `photo_search_enabled` 仍未被读取** | 按裁决保留（用户要求「先留着，等以后可能还有用」），DB 设计文档注明「预留未用」 |
 | **闲聊预警没有「频繁」语义** | PRD 206 的措辞是「**频繁**发起与学习无关的闲聊」，但本批去掉了关键词计数（`countConsecutiveOffTopic` 依赖被删的 `off_topic` 判定），无法可靠判断「频繁」。实现为**每次发生即报**，靠 30 分钟去重兜住频率。若以后要真正的「频繁」语义，需给 `safety_alerts` 加出现次数或按窗口计数 |
 | **`countConsecutiveOffTopic` 与 `safety.yaml` 的 `off_topic.escalateThreshold`/`criticalThreshold` 保留但不再被调用** | 与上一条同源。按「先留着」的既有原则保留（含其单测），文档注明「预留未用」 |
 | **`ai_messages.safety_flag` 的语义有变（双来源）** | 从「被硬阻断的轮次」变为「被模型判为闲聊 **或** 被阻断的轮次」（后者现在只剩情绪/敏感）。家长端「对话回放」的标签与计数因此会变（**更准确**，文案已从「闲聊」改为「偏离学习」），历史数据的口径不一致 |
 | **走神预警在挂机**进行中**就会报** | 不等挂机段结束——因为「切走后不再回来」正是家长最需要知道的场景。副作用：学生仍在挂机时预警已产生，若其后回来并继续学习，该条预警依然存在 |
-| **无 `end` 的会话（浏览器崩溃 / 被强杀 / 断电）不判走神阈值** | 阈值判定只在两处发生：**心跳**与 **`end`**（§3.3「判定时机两处」）。若浏览器**崩溃 / 被系统强杀 / 断电**（不发 `pagehide`），不再有任何心跳 → 会话只能被 `closeStale` 惰性收尾（家长拉学情时触发，`end_reason='closed'`，`ended_at=last_heartbeat_at`）→ **没有任何路径做阈值判定** → 走神预警**永不产生**。正常关标签 / 页面内导航会发 `pagehide`（由 `end` 覆盖），所以风险集中在崩溃/强杀这一类。要补需让 `closeStale` 也做判定（本批**不做**：`closeStale` 的调用方在家长 GET 的路径上，判定要读阈值 + 写预警，属另一处要评估的写入点） |
+| **无 `end` 的会话（后台 tab 冻结 / 浏览器崩溃 / 被强杀 / 断电）不判走神阈值** | **2026-09-20「及时可见」批已部分修复**：阈值判定从两处（**心跳** / **`end`**）增为**三处**，新增 **`closeStale` 惰性收尾时补判**（对被关会话里 `client_state='hidden'` 的段判定）—— 覆盖「学生端**后台 tab 被浏览器冻结 / 关闭时 `end` fetch 丢失** → 心跳全断」这个「切走后一直不回来」的主场景（该批的起因就是它）。⚠️ **仍未覆盖**：浏览器**崩溃 / 被系统强杀 / 断电**（不发 `pagehide`，最后心跳仍是 `visible`）→ 会话被 `closeStale` 收尾（`end_reason='closed'`、`ended_at=last_heartbeat_at`）时**不做**判定 → 走神预警**永不产生**。要覆盖需让 `closeStale` 对 `visible` 段也判定（会白送时长/误判风险，属另一批） |
 | **历史挂机数据无法回填** | 4 个新列在迁移前不存在，旧会话的「切走/无操作」细分永久缺失（与 Phase 1A 的 `subject_id` 回填同类问题） |
 | **标记若未落在「最后一个非空行」→ 该轮不判闲聊、不产生预警** | §3.2 的检测规则要求标记独占最后一行；若模型把标记写在正文中段或夹在句子里，该轮**不**判闲聊（剥离仍会处理独占一行的标记）。Task 0 实测模型稳定写在末行；**本批的验证门（`off-topic-marker.ts` 真模型 3/3）会兜住这一点** —— 若模型不再把标记写在末行，sample③ 的 `signalRecorded` 会变 false → 门 FAIL。这是**有意收紧**（对齐 §3.2 与提示词），残余风险由此门覆盖 |
 | **`SafetyAlertSink` 的 union 含 `'abusive'` 但运行时不可达** | `SafetyGuard.detectAnomalyType` 的声明返回类型是 `AnomalyType`（含 `abusive`），anomaly 分支把 `alertPayload.type` 原样透传，不收窄过不了 `tsc`；`SafetyAlertsService.messageFor('abusive')` 已覆盖（→ 敏感文案）。但检测器只可能返回 `'emotional'`/`'sensitive'`，**从不返回 `abusive`**，故该分支在运行时不可达。同理 `level` 在调用点收窄为 `'critical' | 'warning'`（anomaly 的 level 恒为这两者之一） |
@@ -668,7 +675,7 @@ UX §P6.6 全文只有三行：
 | 模型忘记写标记 → 漏报 | 兜底「无标记 = 不报警」；**Task 0 阻塞验证门**；不通过则切方案 B（并行小模型分类） |
 | 提示词改动影响辅导质量 | Task 0 一并核对回复自然度；标记用 HTML 注释（不可见），不让学生看到元信息 |
 | 心跳路径新增逻辑影响学习计时 | 判定与写入整段 try/catch、失败只 warn；**不改既有 `active_seconds` 的 SET 顺序**；补 SET 顺序回归测试 |
-| 走神误报 | 默认阈值保守（无操作 15 分钟）+ 家长可调 + 只记 `info` 不弹 Banner（§9） |
+| 走神误报 | 默认阈值保守（无操作 15 分钟）+ 家长可调 + 只记 `info`（~~不弹 Banner~~ —— 「及时可见」批起 `info` 也进 Banner，但为橙色、非红色）（§9） |
 | 删 off_topic 兜底是**破坏性变更** | 同步改 2 个测试文件；改前确认无其他消费方依赖 `shouldBlock` |
 | `openapi.yaml` 三处 schema 漂移 | §8 统一订正，`Alert.type` 以**代码**为准 |
 | 保留的 TODO 含过时表述会误导后来人 | 只订正事实部分（「仓储未建」是错的），TODO 的意图与位置原样保留 |
@@ -682,6 +689,7 @@ UX §P6.6 全文只有三行：
 |---|---|
 | 2026-09-20 | 初稿。含 §1.1 的 10 条用户裁决、§1.2 与 UX §P6.6 的偏差说明、§2 的实测调研结论（含闲聊分类器 6/12 误判的实测数据） |
 | 2026-09-20 | 自查修正三处内部矛盾：① 闲聊的 `level` 原写「沿用连续 3/5 次升级」，但升级依赖被删的关键词计数 → 改为恒 `warning` 并把「无频繁语义」列入 §9；② 补上「必须同时回写 `ai_messages.safety_flag`」——否则家长端对话回放的闲聊标签与计数会归零（§3.2 / §7.1 / §8 / §9）；③ 补明两条入口（`tutor` / `tutorStream`）共用 `prepare()` 的写入落点（§3.1） |
+| 2026-09-21 | **被「及时可见」批修订**（`specs/2026-09-20-parent-alert-banner-timeliness-design.md`）：① idle 口径改**字面语义**（§3.3 / §9）；② 判定时机两处 → **三处**（新增 `closeStale` 补判，§9）；③ Banner 由 `ParentLayout` 内联逻辑换成 `AlertBanner`（**全部孩子、含 `info` 级**、30s 轮询 `GET /parent/alerts/unread`、点击即已读）（§3.5 / §3.6 / §3.7 / §9 / §10）。本文件相关段落已就地标注改后口径 |
 | 2026-09-20 | 用户审核后补「走神判定口径」（§3.3 新增段 + §9 两条）：显式区分**前端写死的 120 秒空闲阈值**与**家长可调的 `alert_idle_minutes`**（两者相加才是家长感知的报警延迟，默认档约 17 分钟），并列出「哪些交互算有操作 / 哪些不算」（打字、删除、点按钮、滚动、触屏均算；`mousemove`/`focus`/`blur`/`resize` 不算） |
 | 2026-09-20 | **Task 0 验证门已执行并通过（3/3）→ 采用方案 A**。改动：`tutoring/math/auxiliary.md` 与 `mainline.md` 加入 `<!--topic:off-->` 标记指令；新增手工 eval 脚本 `src/ai-core/__tests__/off-topic-marker.ts`。实测三条（数学题 / 语文理解题 / 闲聊）标记行为均符合预期、辅导质量无退化；同时确认现有 `parseContent` 不剥离该标记 → 剥离改造必需。结果见 §3.2，命令见 §7.3 |
 | 2026-09-20 | **Task 5 评审收尾（Fix 1）**：§3.2 补**精确**的检测/剥离规则（检测只认「最后一个非空行独占」；剥离对所有独占一行的标记做**全局**替换并去首尾换行）；§9 补两条已知限制（①标记未落末行 → 该轮不判闲聊、由验证门兜住；②sink union 含 `abusive` 但运行时不可达）。plan 同步回写 3 处实现偏离（`Number(...)` 必需、验证门观测点前移、union 扩 `abusive`）与 3 个已知错误代码块，并订正 Step 5 的假钉断言（辅线用例须断言 `classification`/`isLearningRelated`） |

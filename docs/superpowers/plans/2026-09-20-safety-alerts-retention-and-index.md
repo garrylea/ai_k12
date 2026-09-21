@@ -232,6 +232,7 @@ cd apps/web && npx tsc -b && npm run lint && npm run build
 ## 关联未决项（**不在本批范围**，新 session 请勿顺手改）
 
 1. **Banner 遮蔽**：`ParentLayout` 用 `pageSize=1` 且不按 level 过滤，一条**更新的 `info`** 会占掉 `items[0]`，导致未读的 `warning` 永远不显示（已用 id 20 复现后删除）。属 spec §5.1 口径问题。
+   - **2026-09-20「及时可见」批更新**：Banner 已换成 `AlertBanner`（走 `GET /parent/alerts/unread`，**不再按 level 过滤**），故「未读 `warning` 完全不显示」这个失败模式**已消除**；但 `items[0]`（最新一条）仍决定 Banner 的**文案与配色**，所以「更新的 `info` 走神把更早的 `critical` 挤成橙色文案」这一层**仍在**（`total` 计数与点击后进预警中心不受影响）。
 2. **「查看对话」跳转**：`ParentAlertsPage` 的 `dialogueId` 链接落到对话回放**列表页**，因为不存在 `/parent/chat-logs/:dialogueId` 路由。属 spec §3.6 与 §5.2 不一致。
 3. **Task 7 独立复核**：因 subagent 派发 429（配额 2026-09-21 09:40:52 UTC+8 恢复）而欠一次独立评审。
 4. **Task 8/9/10**：家长端行为管控页 `/parent/controls` + 账号设置页 `/parent/account`；openapi 4 条旧形状条目订正 + 补 `/parent/password`；端到端走查。
