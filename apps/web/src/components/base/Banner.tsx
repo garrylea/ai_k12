@@ -17,11 +17,14 @@ const typeStyles = {
 
 export function Banner({ type = 'warning', title, description, action, onClose }: BannerProps) {
   return (
-    <div className={clsx(
-      'w-full px-6 py-3 flex items-center gap-4',
-      'border-b-2 sticky top-0 z-40',
-      typeStyles[type],
-    )}>
+    <div
+      role="alert"
+      className={clsx(
+        'w-full px-6 py-3 flex items-center gap-4',
+        'border-b-2 sticky top-0 z-40',
+        typeStyles[type],
+      )}
+    >
       <div className="flex-1">
         <div className="font-semibold">{title}</div>
         {description && <div className="text-sm opacity-90 mt-0.5">{description}</div>}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Banner } from '@/components/base';
 import { getParentUnreadAlerts, markParentAlertRead, type ParentUnreadAlerts } from '@/services/api';
@@ -22,10 +22,16 @@ export default function AlertBanner() {
   const navigate = useNavigate();
   const location = useLocation();
   const [unread, setUnread] = useState<ParentUnreadAlerts | null>(null);
+  const skipNextLoadRef = useRef(false);
+  const requestIdRef = useRef(0);
 
   const load = useCallback(() => {
+    const id = ++requestIdRef.current;
     getParentUnreadAlerts()
-      .then(setUnread)
+      .then((data) => {
+        if (id !== requestIdRef.current) return;
+        setUnread(data);
+      })
       .catch(() => {
         /* 轮询失败静默：保持上次值，不打扰 */
       });
@@ -33,6 +39,10 @@ export default function AlertBanner() {
 
   // 挂载即查 + 路由切换即刷（读预警返回后立刻反映「已读完」）
   useEffect(() => {
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
+      return;
+    }
     load();
   }, [load, location.pathname]);
 
@@ -50,6 +60,7 @@ export default function AlertBanner() {
   const handleClick = () => {
     // 点击即已读：乐观清掉 + 跳转；标已读失败静默（下次轮询会再出现，可接受）
     setUnread(null);
+    skipNextLoadRef.current = true;
     void Promise.allSettled(unread.items.map((alert) => markParentAlertRead(alert.id)));
     navigate('/parent/alerts');
   };

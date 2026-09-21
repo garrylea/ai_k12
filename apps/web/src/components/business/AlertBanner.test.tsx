@@ -143,6 +143,18 @@ describe('AlertBanner', () => {
     await waitFor(() => expect(screen.getByText('预警中心页')).toBeInTheDocument());
   });
 
+  it('点击后路由切换刷新被抑制，banner 不会在预警页重新出现', async () => {
+    getParentUnreadAlertsMock
+      .mockResolvedValueOnce(unread())   // 初始加载有 1 条
+      .mockResolvedValueOnce(unread());  // 点击后的路由刷新若触发，仍返回同一条
+    renderBanner();
+    fireEvent.click(await screen.findByRole('button', { name: '立即查看' }));
+
+    await waitFor(() => expect(screen.getByText('预警中心页')).toBeInTheDocument());
+    // 路由切换后的刷新被跳过，所以同一条预警不会再次渲染为 banner
+    expect(screen.queryByRole('button', { name: '立即查看' })).not.toBeInTheDocument();
+  });
+
   it('标已读请求失败 → 静默（仍跳转，下次轮询可能再出现）', async () => {
     markParentAlertReadMock.mockRejectedValue(new Error('net'));
     getParentUnreadAlertsMock.mockResolvedValueOnce(unread()).mockResolvedValue({ items: [], total: 0 });
