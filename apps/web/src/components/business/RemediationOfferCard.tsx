@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Banner } from '@/components/base';
+import { Banner, Button } from '@/components/base';
 import { toast } from '@/components/base/Toast';
 import { generateRemediationSet } from '@/services/api';
 
@@ -42,26 +42,28 @@ export function RemediationOfferCard({ source, sessionId, wrongCount, wrongQuest
   return (
     <Banner
       type="info"
-      title={`本场错了 ${wrongCount} 道题，生成相似题专项练习？`}
+      title={`本次错了 ${wrongCount} 道题，生成相似题专项练习？`}
       description="按考点每组配 3 题，逐题作答，答对清零、全对清套"
       action={
         <div className="flex shrink-0 items-center gap-2">
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             disabled={state === 'generating'}
             onClick={() => setState('done')}
-            className="rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-[13px] font-medium text-blue-900 hover:bg-blue-50 disabled:opacity-60"
           >
             跳过
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="primary"
+            size="sm"
             disabled={state === 'generating'}
             onClick={handleGenerate}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
           >
             {state === 'generating' ? '生成中…' : '生成练习'}
-          </button>
+          </Button>
         </div>
       }
     />

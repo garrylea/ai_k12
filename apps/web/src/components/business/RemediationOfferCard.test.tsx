@@ -35,14 +35,15 @@ beforeEach(() => {
 describe('RemediationOfferCard', () => {
   it('错题数 > 0 时渲染询问卡', () => {
     render(<RemediationOfferCard source="exam" sessionId={7} wrongCount={3} />);
-    expect(screen.getByText(/本场错了 3 道题/)).toBeInTheDocument();
+    expect(screen.getByText(/本次错了 3 道题/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /生成练习/ })).toBeInTheDocument();
   });
 
   it('点击“跳过”隐藏卡片', () => {
     render(<RemediationOfferCard source="exam" sessionId={7} wrongCount={3} />);
     fireEvent.click(screen.getByRole('button', { name: /跳过/ }));
-    expect(screen.queryByText(/本场错了/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/本次错了/)).not.toBeInTheDocument();
+    expect(generateRemediationSet).not.toHaveBeenCalled();
   });
 
   it('targeted 来源携带 wrongQuestionIds 调用生成', async () => {
@@ -58,7 +59,7 @@ describe('RemediationOfferCard', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /生成练习/ }));
     await vi.waitFor(() =>
-      expect(toast).toHaveBeenCalledWith('success', expect.stringContaining('已生成')),
+      expect(toast).toHaveBeenCalledWith('success', expect.stringContaining('2 组 6 题')),
     );
     expect(generateRemediationSet).toHaveBeenCalledWith({
       source: 'targeted',
