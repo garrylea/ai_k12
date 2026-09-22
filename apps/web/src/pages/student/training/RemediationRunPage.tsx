@@ -117,11 +117,18 @@ export default function RemediationRunPage() {
 
   const handleSubmit = useCallback(
     async (q: RunnerQuestion, answer: string) => {
-      const res = await submitRemediationAnswer({ questionId: Number(q.n), studentAnswer: answer });
-      handlePoints(res);
-      if (res.setCompleted) handleCompleted();
-      // RemediationAnswerResult 是 RunnerJudgeOutcome 的结构超集，直接返回合法
-      return res;
+      try {
+        const res = await submitRemediationAnswer({ questionId: Number(q.n), studentAnswer: answer });
+        handlePoints(res);
+        if (res.setCompleted) handleCompleted();
+        // RemediationAnswerResult 是 RunnerJudgeOutcome 的结构超集，直接返回合法
+        return res;
+      } catch (err) {
+        // 本页没有结果面能展示「提交失败」：runner 会把 rejection 吞成 failed 记录后静默切下一题，
+        // 学生将完全无感。先弹一条可见反馈，再原样抛回，让 runner 照常记录 failed 并推进。
+        toast('error', '答案提交失败，请检查网络后重试');
+        throw err;
+      }
     },
     [handlePoints, handleCompleted],
   );
@@ -145,15 +152,27 @@ export default function RemediationRunPage() {
   // onFinish 传入的本地 results 快照这里用不上：重拉服务端状态更权威，
   // 还能覆盖「题目被下线批量标对」这类服务端行为
   const handleFinish = useCallback(async () => {
-    const res = await getRemediationQuestions();
-    if (res.questions.length === 0) {
-      handleCompleted();
-    } else {
-      // 还有本轮答错的题：换轮次重挂 runner 再战
-      setData(res);
-      setRound((r) => r + 1);
+    // 已由 setCompleted 触发完成并 navigate 离开：runner 在末题提交后仍会再触发一次 onFinish，
+    // 此时重拉纯属多余（套题已清，重拉结果必然是空），更要紧的是这次请求若失败会把
+    // 已完成的学生拖进下面那条失败路径。completedRef 是同步 ref，卸载拦不住、但能拦住这次多余请求。
+    if (completedRef.current) return;
+    try {
+      const res = await getRemediationQuestions();
+      if (res.questions.length === 0) {
+        handleCompleted();
+      } else {
+        // 还有本轮答错的题：换轮次重挂 runner 再战
+        setData(res);
+        setRound((r) => r + 1);
+      }
+    } catch {
+      // 重拉失败：题目与作答进度都在服务端，回训练首页重新进入即可续做。
+      // 留在原地只会看到 runner 判题态那只 spinner（无 X、无重试），学生无从自救。
+      toast('error', '网络不太稳定，请回训练首页重新进入相似题专项');
+      guardRef.current = false;
+      navigate('/student/training/home', { replace: true });
     }
-  }, [handleCompleted]);
+  }, [handleCompleted, navigate]);
 
   if (!loaded || !data) return null;
 
