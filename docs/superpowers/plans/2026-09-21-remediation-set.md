@@ -1660,6 +1660,8 @@ export function RemediationOfferCard({ source, sessionId, wrongCount, wrongQuest
 
 （若 `@/components/base` 不导出 `Banner`，改为 `import { Banner } from '@/components/base/Banner'`；PageHeader 从 `@/components/base` 导入，说明该 barrel 存在。）
 
+> ⚠️ **按钮配色（勿照抄上面的 `bg-blue-600`）**：按钮一律用 `base/Button` 的 `primary` / `secondary` 变体（brand 橘红 token），计划片段里的 `bg-blue-600` / `border-blue-300 text-blue-900` 是笔误，**勿照抄**（`style.md` §2 主 CTA = Brand-500 `#ff6b35`；Tailwind 原生蓝是家长端主题色，学生端不得使用）。本卡实际实现：`<Button variant="primary" size="sm">生成练习</Button>` + `<Button variant="secondary" size="sm">跳过</Button>`。
+
 - [ ] **Step 4: 跑测试确认通过**
 
 ```bash
@@ -1731,6 +1733,8 @@ import { getTrainingErrorBook, getRemediationOverview } from '@/services/api';
           </div>
         )}
 ```
+
+> ⚠️ **按钮配色（勿照抄上面的 `bg-blue-600`）**：按钮一律用 `base/Button` 的 `primary` / `secondary` 变体（brand 橘红 token），计划片段里的 `bg-blue-600` 是笔误，**勿照抄**（`style.md` §2 主 CTA = Brand-500 `#ff6b35`）。此处「开始练习」应为 `<Button variant="primary" size="sm" onClick={…}>开始练习</Button>`。
 
 - [ ] **Step 2: 写测试**
 
