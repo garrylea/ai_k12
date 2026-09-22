@@ -33,9 +33,18 @@ function rowFrom(d: DefaultRule, over: Partial<RuleFixture> = {}): PointRuleRow 
   return { ...base, ...over } as PointRuleRow;
 }
 
-/** 全量默认 15 条，id 按序递增。 */
+/**
+ * 全量默认 18 条，id 按序递增。
+ *
+ * 必须按 `sortOrder` 排：`listGrouped` 的分组顺序取自行的首次出现序（见服务注释），
+ * 而真实 repo 的 `findByStudent` 是 `ORDER BY sort_order, id`。`DEFAULT_RULES` 的**数组序**
+ * 已不等于 sortOrder 序（`remediation_question` 的 35–37 排在数组里 `error_fix`(40) 之后），
+ * 不排就会喂出生产上不存在的分组顺序。
+ */
 function defaultRows(): PointRuleRow[] {
-  return DEFAULT_RULES.map((d, i) => rowFrom(d, { id: i + 1 }));
+  return [...DEFAULT_RULES]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((d, i) => rowFrom(d, { id: i + 1 }));
 }
 
 const key = (taskCode: string, tierKey: string) => `${taskCode}/${tierKey}`;
@@ -79,7 +88,7 @@ function primeOnInsert(h: ReturnType<typeof harness>, rows: PointRuleRow[]) {
 }
 
 describe('PointRulesService.ensureRules — 懒初始化（幂等补齐）', () => {
-  it('库里只有前 3 条默认档位 → 只补缺的 12 条，且补的正是缺的那些 key', async () => {
+  it('库里只有前 3 条默认档位 → 只补缺的 15 条，且补的正是缺的那些 key', async () => {
     const h = harness();
     const present = defaultRows().slice(0, 3);
     h.rulesRepo.findByStudent.mockResolvedValue(present);
@@ -89,13 +98,13 @@ describe('PointRulesService.ensureRules — 懒初始化（幂等补齐）', () 
     expect(h.rulesRepo.insertIgnoreBatch).toHaveBeenCalledTimes(1);
     const [studentId, missing] = h.rulesRepo.insertIgnoreBatch.mock.calls[0];
     expect(studentId).toBe(7);
-    expect(missing).toHaveLength(12);
+    expect(missing).toHaveLength(15);
     expect((missing as DefaultRule[]).map((r) => key(r.taskCode, r.tierKey))).toEqual(
       DEFAULT_RULES.slice(3).map((r) => key(r.taskCode, r.tierKey)),
     );
   });
 
-  it('库里已全量 15 条 → 直接跳过，不调 insertIgnoreBatch（幂等 no-op）', async () => {
+  it('库里已全量 18 条 → 直接跳过，不调 insertIgnoreBatch（幂等 no-op）', async () => {
     const h = harness();
     h.rulesRepo.findByStudent.mockResolvedValue(defaultRows());
 
@@ -113,7 +122,7 @@ describe('PointRulesService.ensureRules — 懒初始化（幂等补齐）', () 
 
     await h.service.ensureRules(7);
 
-    // 15 个 key 齐全 → 一条都不补，家长的值原样保留（懒初始化有意不回溯默认值）
+    // 18 个 key 齐全 → 一条都不补，家长的值原样保留（懒初始化有意不回溯默认值）
     expect(h.rulesRepo.insertIgnoreBatch).not.toHaveBeenCalled();
   });
 
@@ -145,6 +154,7 @@ describe('PointRulesService.listGrouped — 规则分组', () => {
       'mainline_lesson',
       'math_paper',
       'math_targeted',
+      'remediation_question',
       'error_fix',
       'cn_dictation',
       'cn_interpretation',
@@ -164,14 +174,14 @@ describe('PointRulesService.listGrouped — 规则分组', () => {
     ]);
   });
 
-  it('规则先补齐再读：全新学生也能拿到 8 个任务的全量档位', async () => {
+  it('规则先补齐再读：全新学生也能拿到 9 个任务的全量档位', async () => {
     const h = harness();
     primeOnInsert(h, defaultRows());
 
     const { tasks } = await h.service.listGrouped(7);
 
-    expect(tasks).toHaveLength(8);
-    expect(tasks.flatMap((t) => t.tiers)).toHaveLength(15);
+    expect(tasks).toHaveLength(9);
+    expect(tasks.flatMap((t) => t.tiers)).toHaveLength(18);
     // ensureRules 内部先读一次找缺失、再补；补完必须早于**第二次**读（取全量规则）。
     // 反了就是空表 —— 「全新学生开练 400」的回归钉子。
     expect(h.rulesRepo.findByStudent).toHaveBeenCalledTimes(2);
@@ -190,8 +200,8 @@ describe('PointRulesService.listGrouped — 规则分组', () => {
     expect(h.points.startOfTomorrow).toHaveBeenCalledTimes(1);
     // dayEnd 必须由 dayStart 派生（复用同一个时刻），不能自己再取一次钟——双读数跨午夜会撑成 48h
     expect(h.points.startOfTomorrow).toHaveBeenCalledWith(DAY_START);
-    // 8 个 taskCode 各一次（不是 15 个档位各一次）
-    expect(h.ledgerRepo.countTodayEarned).toHaveBeenCalledTimes(8);
+    // 9 个 taskCode 各一次（不是 18 个档位各一次）
+    expect(h.ledgerRepo.countTodayEarned).toHaveBeenCalledTimes(9);
     expect(h.ledgerRepo.countTodayEarned).toHaveBeenCalledWith(7, 'math_targeted', DAY_START, DAY_END);
     expect(h.ledgerRepo.countTodayEarned).toHaveBeenCalledWith(7, 'en_vocabulary', DAY_START, DAY_END);
   });
