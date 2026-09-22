@@ -16,6 +16,7 @@ import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage'
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
 import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
+import RemediationRunPage from '@/pages/student/training/RemediationRunPage';
 import ChineseSpecialPage from '@/pages/student/training/chinese/ChineseSpecialPage';
 import DictationConfigPage from '@/pages/student/training/chinese/DictationConfigPage';
 import DictationRunPage from '@/pages/student/training/chinese/DictationRunPage';
@@ -203,6 +204,15 @@ export const routes: RouteObject[] = [
     element: (
       <RequireRole role="student">
         <HiddenQuestionsPage />
+      </RequireRole>
+    ),
+  },
+  // 错题补偿套题（相似题专项练习，2026-09-21）：全屏沉浸层，题单由服务端持有（非 sessionStorage）
+  {
+    path: '/student/training/remediation/run',
+    element: (
+      <RequireRole role="student">
+        <RemediationRunPage />
       </RequireRole>
     ),
   },

@@ -15,6 +15,7 @@ import {
   getParentPointRules,
   getParentPoints,
   getParentPointsSettings,
+  getRemediationQuestions,
   getUnreadMessageCount,
   listMyStudents,
   putParentControls,
@@ -69,6 +70,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentAccount: vi.fn(),
     // `/admin/alerts`（管理员端「预警数据」新页）：挂载即拉过期预警统计
     getExpiredAlertStats: vi.fn(),
+    // `/student/training/remediation/run`（补偿套题作答页新页）：挂载即拉套题题单
+    getRemediationQuestions: vi.fn(),
   };
 });
 
@@ -86,6 +89,7 @@ const getParentControlsMock = vi.mocked(getParentControls);
 const putParentControlsMock = vi.mocked(putParentControls);
 const getParentPointsSettingsMock = vi.mocked(getParentPointsSettings);
 const getParentAccountMock = vi.mocked(getParentAccount);
+const getRemediationQuestionsMock = vi.mocked(getRemediationQuestions);
 
 /** P6.6：与后端默认档一致（切走 5 / 无操作 15），恰好等于「标准」预设。 */
 const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15 };
@@ -230,6 +234,7 @@ beforeEach(() => {
   getParentPointsSettingsMock.mockResolvedValue(POINTS_SETTINGS);
   getParentAccountMock.mockReset();
   getParentAccountMock.mockResolvedValue(ACCOUNT);
+  getRemediationQuestionsMock.mockReset();
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -598,6 +603,41 @@ describe('路由表：管理员端「预警数据」', () => {
     expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '预警数据' })).not.toBeInTheDocument();
     expect(getExpiredAlertStatsMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 补偿套题作答页（2026-09-21 批）：`/student/training/remediation/run` 是新页，从零加进路由表。
+ *
+ * 页面自己有组件测试，但那个测试挂的是**页面本身**、绕过了路由表——
+ * 「路由确实指到这个页面」只有这里能证明（同 /parent/rewards、/parent/alerts）。
+ * 同时这是 Task 11 提示条 CTA 的落点：路由缺失时点「开始练习」会落到无匹配路由。
+ */
+describe('路由表：补偿套题作答页', () => {
+  it('/student/training/remediation/run 渲染 RemediationRunPage（题目来自接口），而非无匹配路由', async () => {
+    setStudentSession();
+    getRemediationQuestionsMock.mockResolvedValue({
+      questions: [{ questionId: 11, text: '补偿套题题干钉子', type: 'fill_blank', options: null }],
+      itemCount: 1,
+      correctCount: 0,
+    });
+
+    renderAt('/student/training/remediation/run');
+
+    // 真页面内容：题面来自 getRemediationQuestions（无匹配路由 / 占位页都不可能渲染出它）
+    expect(await screen.findByText('补偿套题题干钉子')).toBeInTheDocument();
+    expect(getRemediationQuestionsMock).toHaveBeenCalled();
+    // 学习沉浸层（UX §1.5 第 58 行那一类）
+    expect(document.querySelector('.student-theme-container')).not.toBeNull();
+  });
+
+  it('无 token 访问 /student/training/remediation/run → 回登录页，不拉题', async () => {
+    localStorage.clear();
+
+    renderAt('/student/training/remediation/run');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(getRemediationQuestionsMock).not.toHaveBeenCalled();
   });
 });
 
