@@ -145,6 +145,10 @@ export default function ErrorPracticeRunPage() {
     async (results: Record<string, RunnerAnswerRecord>) => {
       setFinalResults(results);
 
+      // 末题已答完 = 会话结束：立刻解除导航守卫，否则结果页「确认」的 navigate 会被
+      // RunExitGuard 拦成「确认离开/继续答题」。守卫只保护「没答完就想走」。
+      guardRef.current = false;
+
       // 仍错的题：递增错题级别（答对的由后端 judge 端点清零，failed 不算答错不 bump）
       const stillWrongIds = (entries ?? [])
         .filter((e) => {

@@ -69,11 +69,16 @@ function seed(sessionId: number | null) {
   sessionStorage.setItem(KEY, JSON.stringify({ sessionId, questions: [QUESTION] }));
 }
 
-/** RunExitGuard 用 useBlocker —— 必须是 data router（createMemoryRouter）。 */
+/** RunExitGuard 用 useBlocker —— 必须是 data router（createMemoryRouter）。
+ *  第二条路由是结果页「确认」离开后的落点，用来断言导航真的发生了。 */
 function renderPage() {
-  const router = createMemoryRouter([{ path: '/', element: <TargetedRunPage /> }], {
-    initialEntries: ['/'],
-  });
+  const router = createMemoryRouter(
+    [
+      { path: '/', element: <TargetedRunPage /> },
+      { path: '/student/training/targeted', element: <div>已回到配置页</div> },
+    ],
+    { initialEntries: ['/'] },
+  );
   return render(<RouterProvider router={router} />);
 }
 
@@ -292,5 +297,33 @@ describe('TargetedRunPage 完成发分', () => {
     // 全对 → headerExtra 必须真正为 undefined（连空槽位 div 都不能留），
     // 否则 AnswerResultList 仍会画 border-b + 16px 空带（AnswerResultList.tsx:157-158）
     expect(screen.queryByTestId('remediation-offer-slot')).toBeNull();
+  });
+
+  /**
+   * 会话结束后的守卫回归钉子（2026-09-22 用户报障）：
+   * 答完最后一题后点结果页「确认」= 正常结束、回配置页，**不得**再弹
+   * 「确认离开 / 继续答题」—— 那是「还没答完就想走」的确认，题都答完了就不该出现。
+   * 曾因 handleFinish 没把 guardRef.current 置 false，末题答完（1/3/5 题一样）点确认必弹。
+   */
+  it('答完最后一题后点结果页「确认」：直接离开，不弹退出守卫', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({
+      pointsAwarded: 12,
+      balance: 612,
+      totalEarned: 612,
+      levelUp: null,
+    });
+
+    await answerOnlyQuestion();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    });
+
+    // 会话已结束：守卫必须放行，RunExitGuard 的两个按钮都不该出现
+    expect(screen.queryByRole('button', { name: '确认离开' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '继续答题' })).toBeNull();
+    // 且确实导航离开了答题页
+    expect(await screen.findByText('已回到配置页')).toBeTruthy();
   });
 });

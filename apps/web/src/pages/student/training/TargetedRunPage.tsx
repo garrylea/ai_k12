@@ -169,6 +169,10 @@ export default function TargetedRunPage() {
   const handleFinish = useCallback(async (results: Record<string, RunnerAnswerRecord>) => {
     setFinalResults(results);
 
+    // 末题已答完 = 会话结束：立刻解除导航守卫，否则结果页「确认」的 navigate 会被
+    // RunExitGuard 拦成「确认离开/继续答题」（1/3/5 题都一样）。守卫只保护「没答完就想走」。
+    guardRef.current = false;
+
     // 收尾发分：用配置页交接来的 sessionId 调 complete（幂等，内部防重入）。
     // sessionId 为 null 时 hook 内部直接跳过——不发分、不反馈、不报错。
     completeSession();

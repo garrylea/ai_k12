@@ -63,15 +63,19 @@ function judged(overrides: Partial<JudgeResult> = {}): JudgeResult {
   return { questionId: 101, isCorrect: true, method: 'exact', pointsAwarded: 0, ...overrides };
 }
 
-/** RunExitGuard 用 useBlocker —— 必须是 data router（createMemoryRouter）。 */
+/** RunExitGuard 用 useBlocker —— 必须是 data router（createMemoryRouter）。
+ *  第二条路由是结果页「确认」离开后的落点，用来断言导航真的发生了。 */
 function renderPage() {
   const router = createMemoryRouter(
-    [{ path: '/', element: (
-      <>
-        <ErrorPracticeRunPage />
-        <PointsToast />
-      </>
-    ) }],
+    [
+      { path: '/', element: (
+        <>
+          <ErrorPracticeRunPage />
+          <PointsToast />
+        </>
+      ) },
+      { path: '/student/training/errors', element: <div>已回到错题列表</div> },
+    ],
     { initialEntries: ['/'] },
   );
   return render(<RouterProvider router={router} />);
@@ -127,5 +131,25 @@ describe('ErrorPracticeRunPage 发分反馈', () => {
     expect(usePointsStore.getState().queue).toHaveLength(1);
     expect(usePointsStore.getState().queue[0]).toMatchObject({ points: 0, title: '错题订正' });
     expect(screen.getByText('今日该任务积分已达上限')).toBeTruthy();
+  });
+
+  /**
+   * 会话结束后的守卫回归钉子（2026-09-22，与专项练习同批报障）：
+   * 答完最后一题后点结果页「确认」= 正常结束、回错题列表，不得再弹
+   * 「确认离开 / 继续答题」—— 守卫只保护「没答完就想走」。
+   */
+  it('答完最后一题后点结果页「确认」：直接离开，不弹退出守卫', async () => {
+    judgeMock.mockResolvedValue(judged({ pointsAwarded: 8 }));
+
+    await answerOnlyQuestion();
+    await screen.findByText('答题结果');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    });
+
+    expect(screen.queryByRole('button', { name: '确认离开' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '继续答题' })).toBeNull();
+    expect(await screen.findByText('已回到错题列表')).toBeTruthy();
   });
 });
