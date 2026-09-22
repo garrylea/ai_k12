@@ -8562,7 +8562,7 @@ components:
           description: 判题对错；主观题待自评/未判时为 null
         method:
           type: string
-          description: 判题方法（exact / ai / self_assess / unanswered / undetermined 等）
+          description: 判题方法（exact / ai / self_assess / unanswered）
         errorType:
           type: string
           nullable: true
