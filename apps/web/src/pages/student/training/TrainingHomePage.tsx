@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PageHeader } from '@/components/base';
-import { getTrainingErrorBook } from '@/services/api';
+import { Banner, Button, PageHeader } from '@/components/base';
+import { getRemediationOverview, getTrainingErrorBook, type RemediationOverview } from '@/services/api';
 
 /** id 对应 subjects 表 seed（1=数学），与训练轨各页一致。 */
 const MATH_SUBJECT_ID = 1;
@@ -67,6 +67,23 @@ export default function TrainingHomePage() {
   const navigate = useNavigate();
   // null = 载入中/失败（显示「--」），不阻塞三卡导航
   const [unclearedCount, setUnclearedCount] = useState<number | null>(null);
+  // 相似题专项练习：null = 载入中/失败（不显示提示条）
+  const [remediation, setRemediation] = useState<RemediationOverview | null>(null);
+  const [remediationDismissed, setRemediationDismissed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRemediationOverview()
+      .then((overview) => {
+        if (!cancelled) setRemediation(overview);
+      })
+      .catch(() => {
+        // 失败静默，不阻塞三卡页
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +106,11 @@ export default function TrainingHomePage() {
         ? '暂无未清零错题'
         : `未清零 ${unclearedCount} 题`;
 
+  // 待完成题数 = 总题数 - 已答对。差值 0 时不显示提示条：套题全对正常会被删除，
+  // 但数据管线按卷 purge 可能留下 0 题的 active 套题，此处兜底避免「待完成 0 题」的荒谬文案。
+  const remediationPending = remediation ? remediation.itemCount - remediation.correctCount : 0;
+  const showRemediation = remediation?.active === true && !remediationDismissed && remediationPending > 0;
+
   return (
     <div
       data-theme="student-day"
@@ -103,6 +125,28 @@ export default function TrainingHomePage() {
           title="数学 · 训练"
           titleClassName="text-4xl font-extrabold"
         />
+
+        {/* 待完成相似题专项练习（可关闭；用 warning 橘底，info 的蓝是家长端 brand 色） */}
+        {showRemediation && remediation && (
+          <div className="mt-6">
+            <Banner
+              type="warning"
+              title={`相似题专项练习待完成：${remediationPending} 题 / ${remediation.groupCount} 组`}
+              description="考试与专项的错题已按考点配好相似题，逐题作答，答对清零"
+              onClose={() => setRemediationDismissed(true)}
+              action={
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => navigate('/student/training/remediation/run')}
+                >
+                  开始练习
+                </Button>
+              }
+            />
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
           {/* 专项练习 */}
