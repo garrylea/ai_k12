@@ -1208,8 +1208,9 @@ class DbLoader:
                     out["purged"]["error_redo_logs"] = (
                         out["purged"].get("error_redo_logs", 0) + n)
             # exam_answers 先于 answers（若两者都引用）；其余按表删引用行
+            # remediation_set_items 对 questions 是 RESTRICT，必须在删 questions 前清
             for t in ("exam_answers", "answers", "variation_questions",
-                      "aux_error_books", "main_error_books"):
+                      "aux_error_books", "main_error_books", "remediation_set_items"):
                 if t in blocking and self._table_exists(t):
                     out["purged"][t] = self._delete(
                         f"DELETE FROM {t} WHERE {inq}", qids)
@@ -1282,8 +1283,9 @@ class DbLoader:
                         (ebt, *sorted(error_book_ids)))
                     out["purged"]["error_redo_logs"] = (
                         out["purged"].get("error_redo_logs", 0) + n)
+            # remediation_set_items 对 questions 是 RESTRICT，必须在删 questions 前清
             for t in ("exam_answers", "answers", "variation_questions",
-                      "aux_error_books", "main_error_books"):
+                      "aux_error_books", "main_error_books", "remediation_set_items"):
                 if t in blocking and self._table_exists(t):
                     out["purged"][t] = self._delete(
                         f"DELETE FROM {t} WHERE question_id IN ({ph})", qids)
