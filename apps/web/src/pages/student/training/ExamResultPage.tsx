@@ -217,6 +217,13 @@ export default function ExamResultPage() {
   // 前端若算进去，卡片会承诺一个后端不会兑现的数字。
   const remediationWrongCount = (items ?? []).filter((it) => it.isCorrect === 0).length;
 
+  // 镜像 RemediationOfferCard 自身的守卫（RemediationOfferCard.tsx:17 的
+  // `wrongCount === 0 || sessionId == null || state === 'done'`，宿主只能知道前两项）。
+  // 宿主必须自己知道卡片会不会渲染：本页槽位挂在**始终渲染**的 headerExtra 块里，
+  // 若无条件渲染槽位，全对试卷的分数卡下方会多出一条 16px 空白条。
+  // 卡片内部 state === 'done'（点「生成练习」/「跳过」后自隐）宿主观察不到，故槽位另加 empty:hidden 兜底。
+  const remediationOfferVisible = remediationWrongCount > 0 && sid != null;
+
   // 自评提交后更新本地态（消除 needsSelfAssess / 记录 selfAssessment），未自评横幅随之消失
   const handleSelfAssess = async (n: string, assessment: 'correct' | 'incorrect') => {
     const qid = questionIdByN.get(n);
@@ -322,10 +329,13 @@ export default function ExamResultPage() {
                     </>
                   )}
                 </div>
-                {/* 错题补偿套题询问卡：wrongCount 为 0 或会话 id 缺失时卡片自身返回 null */}
-                <div className="px-5 pb-4">
-                  <RemediationOfferCard source="exam" sessionId={sid} wrongCount={remediationWrongCount} />
-                </div>
+                {/* 错题补偿套题询问卡槽位：remediationOfferVisible 为假时连槽位都不渲染，
+                    否则始终渲染的 headerExtra 块里会多出一条空白条 */}
+                {remediationOfferVisible && (
+                  <div className="px-5 pb-4 empty:hidden" data-testid="remediation-offer-slot">
+                    <RemediationOfferCard source="exam" sessionId={sid} wrongCount={remediationWrongCount} />
+                  </div>
+                )}
               </div>
             )
           }

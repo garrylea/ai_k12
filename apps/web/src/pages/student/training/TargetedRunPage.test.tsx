@@ -271,6 +271,8 @@ describe('TargetedRunPage 完成发分', () => {
     await answerOnlyQuestion();
 
     expect(await screen.findByText(/本次错了 1 道题/)).toBeInTheDocument();
+    // 槽位本身必须在（证明 testid 真的存在，不只是「找不到」恒真）
+    expect(screen.getByTestId('remediation-offer-slot')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '生成练习' }));
     await waitFor(() =>
       expect(generateMock).toHaveBeenCalledWith({
@@ -287,5 +289,8 @@ describe('TargetedRunPage 完成发分', () => {
     await answerOnlyQuestion();
 
     expect(screen.queryByText(/本次错了/)).toBeNull();
+    // 全对 → headerExtra 必须真正为 undefined（连空槽位 div 都不能留），
+    // 否则 AnswerResultList 仍会画 border-b + 16px 空带（AnswerResultList.tsx:157-158）
+    expect(screen.queryByTestId('remediation-offer-slot')).toBeNull();
   });
 });

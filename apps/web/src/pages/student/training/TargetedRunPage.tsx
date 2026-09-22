@@ -126,6 +126,14 @@ export default function TargetedRunPage() {
       .map((q) => Number(q.n));
   }, [finalResults, questions]);
 
+  // 镜像 RemediationOfferCard 自身的守卫（RemediationOfferCard.tsx:17 的
+  // `wrongCount === 0 || sessionId == null || state === 'done'`，宿主只能知道前两项）。
+  // 宿主必须自己知道卡片到底会不会渲染，因为 AnswerResultList 对**任何 truthy 的 headerExtra**
+  // 都画一条 border-b（AnswerResultList.tsx:157-158）——若无条件渲染包裹槽位，全对轮次
+  // 会凭空多出一条分隔线与 16px 空带（空 div 仍让外层 space-y-3 非空、headerExtra 仍 truthy）。
+  // 卡片内部 state === 'done'（点「生成练习」/「跳过」后自隐）宿主观察不到，故槽位另加 empty:hidden 兜底。
+  const remediationOfferVisible = remediationWrongIds.length > 0 && sessionId != null;
+
   const handleSubmit = useCallback(
     async (q: RunnerQuestion, answer: string) => {
       const entry = entryByN.get(q.n);
@@ -224,26 +232,33 @@ export default function TargetedRunPage() {
             // 发分失败时挂在结果弹窗顶部：可重试的（网络 / award_failed）给出口；
             // 客户端 4xx（token 失效 / 会话被删）重试必然失败，只给诚实说明
             headerExtra={
-              <div className="space-y-3">
-                {needsRetry || unrecoverable ? (
-                  <div className="px-5 py-3">
-                    <SessionPointsRetryNotice
-                      variant={unrecoverable ? 'unrecoverable' : 'retry'}
-                      retrying={retrying}
-                      onRetry={retry}
-                    />
-                  </div>
-                ) : undefined}
-                {/* 错题补偿套题询问卡：wrongCount 为 0 / sessionId 缺失时卡片自身返回 null */}
-                <div className="px-5 pb-4">
-                  <RemediationOfferCard
-                    source="targeted"
-                    sessionId={sessionId}
-                    wrongCount={remediationWrongIds.length}
-                    wrongQuestionIds={remediationWrongIds}
-                  />
+              // 只有真有内容可展示时才给 headerExtra —— 否则返回 undefined，
+              // 让 AnswerResultList 不画那条 border-b（全对且发分正常是常见路径）
+              needsRetry || unrecoverable || remediationOfferVisible ? (
+                <div className="space-y-3">
+                  {needsRetry || unrecoverable ? (
+                    <div className="px-5 py-3">
+                      <SessionPointsRetryNotice
+                        variant={unrecoverable ? 'unrecoverable' : 'retry'}
+                        retrying={retrying}
+                        onRetry={retry}
+                      />
+                    </div>
+                  ) : undefined}
+                  {/* 错题补偿套题询问卡槽位：remediationOfferVisible 为假时连槽位都不渲染，
+                      否则外层 space-y-3 仍非空、headerExtra 仍 truthy → 多出分隔线 */}
+                  {remediationOfferVisible && (
+                    <div className="px-5 pb-4 empty:hidden" data-testid="remediation-offer-slot">
+                      <RemediationOfferCard
+                        source="targeted"
+                        sessionId={sessionId}
+                        wrongCount={remediationWrongIds.length}
+                        wrongQuestionIds={remediationWrongIds}
+                      />
+                    </div>
+                  )}
                 </div>
-              </div>
+              ) : undefined
             }
             onWaitExplanation={async (qid) => {
               const res = await waitTrainingExplanation(qid);

@@ -223,6 +223,8 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     renderResult();
 
     expect(await screen.findByText(/本次错了 2 道题/)).toBeInTheDocument();
+    // 槽位本身必须在（证明 testid 真的存在，不只是「找不到」恒真）
+    expect(screen.getByTestId('remediation-offer-slot')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '生成练习' })).toBeInTheDocument();
   });
 
@@ -237,5 +239,7 @@ describe('ExamResultPage 交卷发分庆祝', () => {
 
     await screen.findByText('答题结果'); // 等页面加载完（AnswerResultList 既有标题）
     expect(screen.queryByText(/本次错了/)).toBeNull();
+    // 无客观错题 → 槽位必须整块不渲染（不是渲染空 div），否则分数卡下方会多出 16px 空白条
+    expect(screen.queryByTestId('remediation-offer-slot')).toBeNull();
   });
 });
