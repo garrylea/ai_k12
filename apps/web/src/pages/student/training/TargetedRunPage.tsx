@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from '@/components/business/answer/types';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
+import { RemediationOfferCard } from '@/components/business/RemediationOfferCard';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
@@ -110,6 +111,21 @@ export default function TargetedRunPage() {
     [entries],
   );
 
+  // 补偿套题用：本轮真正答错（且判题成功）的题号。
+  // - isCorrect !== true 覆盖「客观题答错」与「主观题自评做错」；
+  // - !r.failed 排除判题请求失败的题（没判过 ≠ 答错，后端也不会为它建组）。
+  // 后端不信任这些题号（逐个回查错题本，只认 source==='targeted' 的未清错题），
+  // 但前端要尽量对齐，否则卡片上的 N 会虚高。
+  const remediationWrongIds = useMemo(() => {
+    if (!finalResults) return [];
+    return questions
+      .filter((q) => {
+        const r = finalResults[q.n];
+        return r && r.isCorrect !== true && !r.failed;
+      })
+      .map((q) => Number(q.n));
+  }, [finalResults, questions]);
+
   const handleSubmit = useCallback(
     async (q: RunnerQuestion, answer: string) => {
       const entry = entryByN.get(q.n);
@@ -208,15 +224,26 @@ export default function TargetedRunPage() {
             // 发分失败时挂在结果弹窗顶部：可重试的（网络 / award_failed）给出口；
             // 客户端 4xx（token 失效 / 会话被删）重试必然失败，只给诚实说明
             headerExtra={
-              needsRetry || unrecoverable ? (
-                <div className="px-5 py-3">
-                  <SessionPointsRetryNotice
-                    variant={unrecoverable ? 'unrecoverable' : 'retry'}
-                    retrying={retrying}
-                    onRetry={retry}
+              <div className="space-y-3">
+                {needsRetry || unrecoverable ? (
+                  <div className="px-5 py-3">
+                    <SessionPointsRetryNotice
+                      variant={unrecoverable ? 'unrecoverable' : 'retry'}
+                      retrying={retrying}
+                      onRetry={retry}
+                    />
+                  </div>
+                ) : undefined}
+                {/* 错题补偿套题询问卡：wrongCount 为 0 / sessionId 缺失时卡片自身返回 null */}
+                <div className="px-5 pb-4">
+                  <RemediationOfferCard
+                    source="targeted"
+                    sessionId={sessionId}
+                    wrongCount={remediationWrongIds.length}
+                    wrongQuestionIds={remediationWrongIds}
                   />
                 </div>
-              ) : undefined
+              </div>
             }
             onWaitExplanation={async (qid) => {
               const res = await waitTrainingExplanation(qid);

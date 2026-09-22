@@ -211,4 +211,31 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     // 晋升仍是全屏独占：该分支不 push 轻反馈
     expect(usePointsStore.getState().queue).toHaveLength(0);
   });
+
+  /**
+   * 错题补偿套题询问卡（2026-09-21 批）：结果页有客观错题时才出现。
+   * 一正一反两条：只断言「出现」证明不了 wrongCount 是从 items 算的——还得证明没错题时不出现。
+   */
+  it('有客观错题 → 渲染补偿套题询问卡，且错题数与 items 一致', async () => {
+    const wrong = (n: number): ExamResultItem => ({ ...ITEM, questionId: 200 + n, questionNo: n, isCorrect: 0 });
+    resultsMock.mockResolvedValue({ ...SUMMARY, items: [ITEM, wrong(2), wrong(3)] });
+
+    renderResult();
+
+    expect(await screen.findByText(/本次错了 2 道题/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '生成练习' })).toBeInTheDocument();
+  });
+
+  it('无客观错题（含只有主观题待自评）→ 不渲染询问卡', async () => {
+    // ITEM.isCorrect = 1；再加一道 isCorrect: null 的主观题（自评口径的「错」不该算进来）
+    resultsMock.mockResolvedValue({
+      ...SUMMARY,
+      items: [ITEM, { ...ITEM, questionId: 202, questionNo: 2, type: 'short_answer', isCorrect: null }],
+    });
+
+    renderResult();
+
+    await screen.findByText('答题结果'); // 等页面加载完（AnswerResultList 既有标题）
+    expect(screen.queryByText(/本次错了/)).toBeNull();
+  });
 });

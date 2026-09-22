@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import TargetedRunPage from './TargetedRunPage';
 import {
   completeTrainingSession,
+  generateRemediationSet,
   getMyPoints,
   getTrainingExplanations,
   judgeTraining,
@@ -38,6 +39,7 @@ vi.mock('@/services/api', async (importOriginal) => {
     getTrainingExplanations: vi.fn(),
     completeTrainingSession: vi.fn(),
     getMyPoints: vi.fn(),
+    generateRemediationSet: vi.fn(),
   };
 });
 
@@ -45,6 +47,7 @@ const judgeMock = vi.mocked(judgeTraining);
 const completeMock = vi.mocked(completeTrainingSession);
 const explanationsMock = vi.mocked(getTrainingExplanations);
 const getMyPointsMock = vi.mocked(getMyPoints);
+const generateMock = vi.mocked(generateRemediationSet);
 
 const KEY = 'training:targeted';
 
@@ -109,6 +112,7 @@ describe('TargetedRunPage 完成发分', () => {
     completeMock.mockReset();
     explanationsMock.mockReset();
     getMyPointsMock.mockReset();
+    generateMock.mockReset();
     judgeMock.mockResolvedValue(JUDGED);
     explanationsMock.mockResolvedValue({ explanations: {} });
     getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
@@ -250,5 +254,38 @@ describe('TargetedRunPage 完成发分', () => {
 
     expect(judgeMock).toHaveBeenCalledTimes(1);
     expect(judgeMock.mock.calls[0][0]).not.toHaveProperty('sessionId');
+  });
+
+  /**
+   * 错题补偿套题询问卡（2026-09-21 批）：专项结果页有答错题时才出现。
+   * 这条同时钉住两件事：wrongCount 来自本轮真实结果、点击生成把 source/sessionId/wrongQuestionIds 原样送后端。
+   */
+  it('有答错题 → 渲染询问卡；点「生成练习」带上本轮错题号', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+    judgeMock.mockResolvedValue({ ...JUDGED, isCorrect: false });
+    generateMock.mockResolvedValue({
+      setId: 5, groupsCreated: 1, itemsCreated: 3, skippedNoKp: 0, aiPendingCount: 0,
+    });
+
+    await answerOnlyQuestion();
+
+    expect(await screen.findByText(/本次错了 1 道题/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '生成练习' }));
+    await waitFor(() =>
+      expect(generateMock).toHaveBeenCalledWith({
+        source: 'targeted', sessionId: 77, wrongQuestionIds: [101],
+      }),
+    );
+  });
+
+  it('全对 → 不渲染询问卡', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 12, balance: 612, totalEarned: 612, levelUp: null });
+    // judgeMock 默认 isCorrect: true
+
+    await answerOnlyQuestion();
+
+    expect(screen.queryByText(/本次错了/)).toBeNull();
   });
 });

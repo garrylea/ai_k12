@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { CelebrationOverlay } from '@/components/business';
+import { RemediationOfferCard } from '@/components/business/RemediationOfferCard';
 import {
   getExamResults,
   getExamSession,
@@ -211,6 +212,11 @@ export default function ExamResultPage() {
     return map;
   }, [items]);
 
+  // 与后端 examWrongIds 同口径：只数 is_correct === 0。
+  // 自评为「做错」的主观题（isCorrect === null）不算——后端不为它建相似题组，
+  // 前端若算进去，卡片会承诺一个后端不会兑现的数字。
+  const remediationWrongCount = (items ?? []).filter((it) => it.isCorrect === 0).length;
+
   // 自评提交后更新本地态（消除 needsSelfAssess / 记录 selfAssessment），未自评横幅随之消失
   const handleSelfAssess = async (n: string, assessment: 'correct' | 'incorrect') => {
     const qid = questionIdByN.get(n);
@@ -315,6 +321,10 @@ export default function ExamResultPage() {
                       </div>
                     </>
                   )}
+                </div>
+                {/* 错题补偿套题询问卡：wrongCount 为 0 或会话 id 缺失时卡片自身返回 null */}
+                <div className="px-5 pb-4">
+                  <RemediationOfferCard source="exam" sessionId={sid} wrongCount={remediationWrongCount} />
                 </div>
               </div>
             )
