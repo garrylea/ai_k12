@@ -4,14 +4,25 @@
 //    整段 text.includes('$') 短路而退化成字面文本）；
 // 2) 数学符号触发（+ - * / = 等）；
 // 3) 不误伤的边界（Markdown 结构行 / 英文单词 / TeX 特殊字符 / 行内代码 / 未配对 $）。
+// 另覆盖滚动跟随：scrollSync 通道（输入区写入比例 → 预览区按自身高度比例定位 scrollTop）。
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
-import { autoWrapMath } from './LatexPreview';
+import { LatexPreview, autoWrapMath } from './LatexPreview';
+import type { PreviewScrollSync } from './preview-scroll-sync';
 import { markdownRemarkPluginsWithBreaks, markdownRehypePlugins, markdownComponents } from '@/components/markdown';
 
 afterEach(() => cleanup());
+
+/** jsdom 无布局：用实例属性覆写滚动几何，返回可断言的 scrollTop 视图 */
+function mockScrollGeometry(el: HTMLElement, geo: { scrollTop: number; scrollHeight: number; clientHeight: number }) {
+  let top = geo.scrollTop;
+  Object.defineProperty(el, 'scrollTop', { get: () => top, set: (v: number) => { top = v; }, configurable: true });
+  Object.defineProperty(el, 'scrollHeight', { get: () => geo.scrollHeight, configurable: true });
+  Object.defineProperty(el, 'clientHeight', { get: () => geo.clientHeight, configurable: true });
+  return { get scrollTop() { return top; } };
+}
 
 /** 走与 LatexPreview 完全相同的渲染管线，拿到 HTML 断言（含 KaTeX 报错检测）。 */
 const renderPreview = (s: string) =>
@@ -193,5 +204,48 @@ describe('autoWrapMath 渲染结果', () => {
     expect(table).toContain('<table');
     expect(table).toContain('<td');
     expect(katexCount(table)).toBe(0);
+  });
+});
+
+describe('LatexPreview 滚动跟随（scrollSync 通道）', () => {
+  it('挂载后注册 apply：按预览自身滚动高度比例定位 scrollTop', () => {
+    const sync: { current: PreviewScrollSync } = { current: { ratio: 0.5 } };
+    render(<LatexPreview value="x^2" scrollSync={sync} />);
+    expect(sync.current.apply).toBeTypeOf('function');
+
+    const el = screen.getByTestId('latex-preview-scroll');
+    const geo = mockScrollGeometry(el, { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 });
+
+    sync.current.apply!();
+    expect(geo.scrollTop).toBe(300); // 0.5 × (1000 - 400)
+  });
+
+  it('预览不可滚动时 apply 不动 scrollTop（max<=0 无跟随语义）', () => {
+    const sync: { current: PreviewScrollSync } = { current: { ratio: 0.5 } };
+    render(<LatexPreview value="x^2" scrollSync={sync} />);
+    const el = screen.getByTestId('latex-preview-scroll');
+    const geo = mockScrollGeometry(el, { scrollTop: 40, scrollHeight: 400, clientHeight: 400 });
+
+    sync.current.apply!();
+    expect(geo.scrollTop).toBe(40);
+  });
+
+  it('内容防抖重渲染后按最新比例重定位（渲染高度变了要重放）', async () => {
+    const sync: { current: PreviewScrollSync } = { current: { ratio: 0.25 } };
+    const view = render(<LatexPreview value="a" scrollSync={sync} />);
+    const el = screen.getByTestId('latex-preview-scroll');
+    const geo = mockScrollGeometry(el, { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 });
+
+    sync.current.ratio = 0.75;
+    view.rerender(<LatexPreview value="b+c" scrollSync={sync} />);
+    await waitFor(() => expect(geo.scrollTop).toBe(450)); // 0.75 × 600，防抖后重放
+  });
+
+  it('卸载时注销 apply（tab 切到草稿后输入区滚动不得打到旧节点）', () => {
+    const sync: { current: PreviewScrollSync } = { current: { ratio: 0 } };
+    const view = render(<LatexPreview value="x^2" scrollSync={sync} />);
+    expect(sync.current.apply).toBeTypeOf('function');
+    view.unmount();
+    expect(sync.current.apply).toBeUndefined();
   });
 });

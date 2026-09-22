@@ -2,7 +2,7 @@
 // 复现测试：切题（上一题回退）后，之前已作答的答案应被回填，不丢失。
 // 场景对应 bug 报告：专项训练/考试/错题练习时回到上一题看到作答空白。
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useMemo, useState } from 'react';
 
@@ -154,6 +154,28 @@ describe('QuestionRunner 回看上一题保留作答（bug 复现）', () => {
     // 回退到第 1 题：B 仍选中
     await user.click(screen.getByRole('button', { name: '上一题' }));
     expect(optionRadio('选项B')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  // ── 左输入区 → 右预览区的比例滚动跟随（2026-09-22 bug：两侧独立滚动完全脱节）──
+  // jsdom 无布局：用实例属性覆写滚动几何（左 250/500 = 0.5 → 右 0.5 × 600 = 300）
+  it('文本作答：输入区滚动后预览区按比例跟随', async () => {
+    await renderRunner({ textAnswer: true });
+
+    const ta = screen.getByPlaceholderText(/在此用 LaTeX 作答/) as HTMLTextAreaElement;
+    const preview = screen.getByTestId('latex-preview-scroll');
+    const mock = (el: HTMLElement, geo: { scrollTop: number; scrollHeight: number; clientHeight: number }) => {
+      let top = geo.scrollTop;
+      Object.defineProperty(el, 'scrollTop', { get: () => top, set: (v: number) => { top = v; }, configurable: true });
+      Object.defineProperty(el, 'scrollHeight', { get: () => geo.scrollHeight, configurable: true });
+      Object.defineProperty(el, 'clientHeight', { get: () => geo.clientHeight, configurable: true });
+      return { get scrollTop() { return top; } };
+    };
+    mock(ta, { scrollTop: 250, scrollHeight: 800, clientHeight: 300 });
+    const pgeo = mock(preview, { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 });
+
+    fireEvent.scroll(ta);
+
+    expect(pgeo.scrollTop).toBe(300);
   });
 });
 

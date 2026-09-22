@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   markdownRemarkPluginsWithBreaks,
   markdownRehypePlugins,
   markdownComponents,
 } from '@/components/markdown';
+import type { PreviewScrollSync } from './preview-scroll-sync';
 
 /** CJK 字符（含全角标点 / 全角符号）——必须留在数学模式外，KaTeX 无法渲染中文 */
 const CJK_CHAR = /[一-鿿　-〿＀-￯]/;
@@ -98,17 +99,46 @@ export function autoWrapMath(text: string): string {
   );
 }
 
-export function LatexPreview({ value }: { value: string }) {
+export function LatexPreview({ value, scrollSync }: { value: string; scrollSync?: { current: PreviewScrollSync } }) {
   const [debounced, setDebounced] = useState(value);
+  const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), 150);
     return () => clearTimeout(t);
   }, [value]);
 
+  // 按输入区滚动比例定位预览容器（比例映射，见 PreviewScrollSync 注释）
+  const applyRatio = useCallback(() => {
+    const sync = scrollSync?.current;
+    const el = containerRef.current;
+    if (!sync || !el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max > 0) el.scrollTop = sync.ratio * max;
+  }, [scrollSync]);
+
+  // 注册重放函数（输入区每次滚动调用）；卸载注销，防止打到已卸载节点
+  useEffect(() => {
+    if (!scrollSync) return;
+    const sync = scrollSync.current; // 捕获局部：cleanup 里读 ref.current 会触发 exhaustive-deps
+    sync.apply = applyRatio;
+    return () => {
+      if (sync.apply === applyRatio) sync.apply = undefined;
+    };
+  }, [scrollSync, applyRatio]);
+
+  // 内容（防抖）变化后重放：渲染高度变了，按最新比例重新定位
+  useEffect(() => {
+    scrollSync?.current.apply?.();
+  }, [debounced, scrollSync]);
+
   const wrapped = autoWrapMath(debounced);
 
   return (
-    <div className="h-full overflow-auto p-4 text-[var(--text-primary)]">
+    <div
+      ref={containerRef}
+      data-testid="latex-preview-scroll"
+      className="h-full overflow-auto p-4 text-[var(--text-primary)]"
+    >
       {wrapped.trim() ? (
         // learn-prose：项目自有的 Markdown 排版类（global.css §Learn Prose，标题/列表/引用/图片）。
         // 不要写 `prose`——项目没装 @tailwindcss/typography，那个类是死的，会让标题看起来跟正文一样。

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LatexPreview } from './LatexPreview';
+import type { PreviewScrollSync } from './preview-scroll-sync';
 import { DraftWhiteboard } from './DraftWhiteboard';
 
 type Tab = 'preview' | 'draft';
@@ -9,13 +10,15 @@ interface Props {
   questionId: string;
   /** 仅数学学科启用草稿白板（PRD §7.12） */
   enabled: boolean;
+  /** 左输入区 → 右预览区的滚动跟随通道（透传给 LatexPreview） */
+  scrollSync?: { current: PreviewScrollSync };
 }
 
-export function PreviewDraftPanel({ answer, questionId, enabled }: Props) {
+export function PreviewDraftPanel({ answer, questionId, enabled, scrollSync }: Props) {
   const [tab, setTab] = useState<Tab>('preview');
 
   if (!enabled) {
-    return <LatexPreview value={answer} />;
+    return <LatexPreview value={answer} scrollSync={scrollSync} />;
   }
 
   const tabBtn = (t: Tab, label: string) => (
@@ -39,7 +42,7 @@ export function PreviewDraftPanel({ answer, questionId, enabled }: Props) {
         {tabBtn('draft', '草稿')}
       </div>
       <div className="flex-1 min-h-0">
-        {tab === 'preview' ? <LatexPreview value={answer} /> : <DraftWhiteboard questionId={questionId} />}
+        {tab === 'preview' ? <LatexPreview value={answer} scrollSync={scrollSync} /> : <DraftWhiteboard questionId={questionId} />}
       </div>
     </div>
   );

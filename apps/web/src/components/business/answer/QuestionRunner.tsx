@@ -16,6 +16,7 @@ import {
 } from '@/components/markdown';
 import { LatexEditor } from '../LatexEditor';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
+import type { PreviewScrollSync } from '../preview-scroll-sync';
 import { clearDraft } from '../draft-store';
 import { ChoiceOptionList } from './ChoiceOptionList';
 import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion, RunnerSelfAssessContext } from './types';
@@ -124,6 +125,9 @@ export function QuestionRunner({
 }: QuestionRunnerProps) {
   const [idx, setIdx] = useState(startIndex ?? 0);
   const [answer, setAnswer] = useState('');
+  // 左输入区 → 右预览区的滚动跟随通道（ref 而非 state：滚动 60fps 不触发本组件重渲染，
+  // 否则题干 ReactMarkdown 每帧重解析；机制见 PreviewScrollSync 注释）
+  const previewScrollSync = useRef<PreviewScrollSync>({ ratio: 0 });
   // answering：作答中；judging：末题已交，等待后台判题全部完成；self_assess：主观题自评视图
   const [phase, setPhase] = useState<'answering' | 'judging' | 'self_assess'>('answering');
   const [hintState, setHintState] = useState<{ show: boolean; loading: boolean; error: boolean }>({
@@ -500,7 +504,7 @@ export function QuestionRunner({
               {/* min-w-0：训练轨草稿面板并排占位后答题列会窄到 ~440px，两个 50% 分栏默认
                   min-width:auto 会被内容撑破、把面板顶出可视区 */}
               <div className="w-1/2 min-w-0 border-r border-[var(--bg-subtle)] flex flex-col">
-                <LatexEditor value={answer} onChange={updateAnswer} />
+                <LatexEditor value={answer} onChange={updateAnswer} scrollSync={previewScrollSync} />
               </div>
               {/* 右半区：预览 / 草稿 tab。主线保留数学草稿（PRD §7.12）；训练轨答题页传 draftDisabled
                   关闭——页面级 DraftPanel 取代内嵌草稿，其余上下文（AnswerModal 弹窗 / CleanupPhase
@@ -510,6 +514,7 @@ export function QuestionRunner({
                   answer={answer}
                   questionId={`${draftKeyPrefix}-${q.n}`}
                   enabled={!draftDisabled && subjectId === MATH_SUBJECT_ID}
+                  scrollSync={previewScrollSync}
                 />
               </div>
             </>
