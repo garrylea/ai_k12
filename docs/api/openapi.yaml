@@ -5195,6 +5195,160 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CommonResponse' }
 
+  # 错题补偿套题（相似题专项练习，2026-09-21）
+  /training/remediation/generate:
+    post:
+      tags: [Training]
+      summary: 生成相似题套题（学生同意后）
+      description: >-
+        学生同意后生成错题补偿套题（student JWT）。请求体 {source, sessionId,
+        wrongQuestionIds?}：source 枚举 exam|targeted（非法 400）；sessionId 须正整数
+        （非法 400）；source='targeted' 时 wrongQuestionIds 必带、最多 50 个、元素须为
+        正整数（否则 400）。exam 来源由后端从考试会话推导错题（会话不存在/非本人 404，
+        尚未交卷 400）；targeted 来源前端提交题号不可信——逐个回查错题本，只认
+        source='targeted' 的未清错题。同步建组 + 题库抽题，AI 补题 fire-and-forget
+        （不 await）；无错题 / 错题全下线 / 全无 primary 考点 → 不建套题、全 0 返回
+        （setId: 0）；已有 active 套题则追加合并。Nest @Post 默认返回 201。
+      operationId: generateRemediationSet
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemediationGenerateRequest'
+      responses:
+        '201':
+          description: 套题概要（无错题时不建套题，setId=0 且各计数为 0）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RemediationGenerateResult'
+        '400':
+          description: 参数非法（source/sessionId/wrongQuestionIds）或考试尚未交卷
+        '404':
+          description: 考试会话 / 专项练习会话不存在或非本人
+
+  /training/remediation/me:
+    get:
+      tags: [Training]
+      summary: 当前 active 套题概要
+      description: >-
+        当前 active 相似题套题概要（student JWT，三卡页提示条用）。无套题时返回
+        {active:false, setId:null, groupCount:0, itemCount:0, correctCount:0}。
+        顺带对 ai_pending_count > 0 的组做惰性重试（覆盖进程重启悬挂的 AI 补题；
+        fire-and-forget、不 await）。
+      operationId: getRemediationOverview
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 套题概要
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RemediationOverview'
+
+  /training/remediation/questions:
+    get:
+      tags: [Training]
+      summary: 拉取未答对题目（作答页）
+      description: >-
+        作答页拉取未答对题目（student JWT，白名单序列化 {questionId, text, type,
+        options}）。options 为 JSON 字符串 parse 后的数组，可为 null（题无选项/坏
+        JSON）。题目被下线（is_active=0）时直接标对（防套题死锁）；全对时后端
+        deleteSet 并返回 {questions: [], itemCount: N, correctCount: N}。
+      operationId: getRemediationQuestions
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 未答对题单（可能为空数组）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RemediationQuestionsResult'
+
+  /training/remediation/answers:
+    post:
+      tags: [Training]
+      summary: 逐题提交作答
+      description: >-
+        逐题提交作答（student JWT）。请求体 {questionId, studentAnswer}；questionId 须
+        正整数、studentAnswer 须 string（否则 400）。判题复用 JudgeCoreService
+        （source='remediation'，不入错题本、不清零原错题、不参与主线清零门禁）；首次
+        作答即发分（task_code='remediation_question'，幂等键 dedupe_key='rem:<item.id>'，
+        ref_type='question'、ref_id=questions.id），答对置 is_correct=1，全部答对时
+        物理删除套题。Nest @Post 默认返回 201。
+      operationId: submitRemediationAnswer
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemediationAnswerRequest'
+      responses:
+        '201':
+          description: 判题与发分结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RemediationAnswerResult'
+        '400':
+          description: 参数非法 / 无进行中套题 / 该题不在当前套题中 / 该题已答对
+
+  /training/remediation/self-assess:
+    post:
+      tags: [Training]
+      summary: 套题内主观题自评
+      description: >-
+        套题内主观题自评（student JWT）。请求体 {questionId, assessment}；assessment
+        枚举 correct|incorrect（非法 400）。刻意不经 judgeCore.recordSelfAssessment：
+        直接 requireItem + applyOutcome，故套题内自评同样不入错题本 / 不清零 / 不发
+        error_fix（method='self_assess'，errorType/referenceAnswer/explanation 为 null）。
+        响应结构与 /answers 完全一致。Nest @Post 默认返回 201。
+      operationId: selfAssessRemediation
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemediationSelfAssessRequest'
+      responses:
+        '201':
+          description: 自评与发分结果（结构与 /answers 一致）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RemediationAnswerResult'
+        '400':
+          description: 参数非法 / 无进行中套题 / 该题不在当前套题中 / 该题已答对
+
   # Exams
   /exams/papers:
     get:
@@ -8246,6 +8400,196 @@ components:
           items: {}
           nullable: true
           description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
+
+    RemediationGenerateRequest:
+      type: object
+      required: [source, sessionId]
+      properties:
+        source:
+          type: string
+          enum: [exam, targeted]
+          description: 来源——exam=真题考试交卷结果页；targeted=数学专项完成页（非法 400）
+        sessionId:
+          type: integer
+          description: >-
+            来源会话 id（exam=考试会话，targeted=专项练习会话）；须正整数（非法 400），
+            不存在 / 非本人 404
+        wrongQuestionIds:
+          type: array
+          maxItems: 50
+          description: >-
+            仅 source='targeted' 必带；前端提交的错题号（最多 50 个、须正整数，否则 400）。
+            后端不信任：逐个回查错题本，只认 source='targeted' 的未清错题
+          items:
+            type: integer
+            minimum: 1
+
+    RemediationGenerateResult:
+      type: object
+      description: >-
+        套题概要。无错题 / 错题全下线 / 全无 primary 考点时不建套题，setId=0 且各计数为 0。
+      properties:
+        setId:
+          type: integer
+          description: active 套题 id；0 = 本次未建套题（无可生成的错题）
+        groupsCreated:
+          type: integer
+          description: 本次新建的组数（撞三元组唯一键而跳过的组不计）
+        itemsCreated:
+          type: integer
+          description: 本次入套的题数（题库抽题 + 已有 AI 题）
+        skippedNoKp:
+          type: integer
+          description: 因错题无 primary 考点而整组跳过的组数
+        aiPendingCount:
+          type: integer
+          description: 交 AI 异步补题的缺口总数
+      required: [setId, groupsCreated, itemsCreated, skippedNoKp, aiPendingCount]
+
+    RemediationOverview:
+      type: object
+      description: active 套题概要（无套题时 active=false、setId=null、各计数为 0）。
+      properties:
+        active:
+          type: boolean
+        setId:
+          type: integer
+          nullable: true
+          description: active 套题 id；无套题时为 null
+        groupCount:
+          type: integer
+        itemCount:
+          type: integer
+        correctCount:
+          type: integer
+      required: [active, setId, groupCount, itemCount, correctCount]
+
+    RemediationQuestionsResult:
+      type: object
+      description: >-
+        未答对题单（全对时后端已清套，返回 questions: []、correctCount == itemCount）。
+      properties:
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemediationQuestion'
+        itemCount:
+          type: integer
+          description: 套题总题数
+        correctCount:
+          type: integer
+          description: 已答对题数
+      required: [questions, itemCount, correctCount]
+
+    RemediationQuestion:
+      type: object
+      description: 作答页题目（白名单序列化，answer/explanation 等一律剥离）。
+      properties:
+        questionId:
+          type: integer
+        text:
+          type: string
+          description: 题面原文
+        type:
+          type: string
+          description: 题型（choice/fill_blank/true_false/short_answer/proof）
+        options:
+          type: array
+          nullable: true
+          description: 选项数组（DB JSON 字符串 parse 后）；题无选项/坏 JSON 时为 null
+          items: {}
+      required: [questionId, text, type, options]
+
+    RemediationAnswerRequest:
+      type: object
+      required: [questionId, studentAnswer]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（须正整数，否则 400）
+        studentAnswer:
+          type: string
+          description: 学生提交的答案文本（须 string，否则 400）
+
+    RemediationSelfAssessRequest:
+      type: object
+      required: [questionId, assessment]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（须正整数，否则 400）
+        assessment:
+          type: string
+          enum: [correct, incorrect]
+          description: 学生自评对错（非法 400）
+
+    RemediationPointsAward:
+      type: object
+      description: >-
+        发分结果（原样回带 AwardResult；字段名 pointsAwarded，与埋点响应的
+        PointsAwardDto——{awarded, levelUp: code 串}——不是同一形状）。
+      properties:
+        pointsAwarded:
+          type: integer
+          description: 本次实际入账分（0 = 本次未入账，含幂等命中）
+        balance:
+          type: integer
+          description: 发分后的可用余额
+        totalEarned:
+          type: integer
+          description: 累计获得（段位依据）
+        levelUp:
+          type: object
+          nullable: true
+          description: 本次是否跨档；未跨档为 null
+          properties:
+            from:
+              $ref: '#/components/schemas/PointsLevelInfo'
+            to:
+              $ref: '#/components/schemas/PointsLevelInfo'
+        reason:
+          type: string
+          enum: [daily_limit, no_rule, tier_inactive, duplicate]
+          description: 未发分原因（无值=静默）；duplicate=幂等命中，本次未入账
+
+    RemediationAnswerResult:
+      type: object
+      description: 逐题作答 / 自评结果（/answers 与 /self-assess 同构）。
+      properties:
+        isCorrect:
+          type: boolean
+          nullable: true
+          description: 判题对错；主观题待自评/未判时为 null
+        method:
+          type: string
+          description: 判题方法（exact / ai / self_assess / unanswered / undetermined 等）
+        errorType:
+          type: string
+          nullable: true
+          description: 错因枚举（logic/calculation/format/missing）；无错因为 null
+        needsSelfAssessment:
+          type: boolean
+          description: 是否待学生自评（主观题）
+        referenceAnswer:
+          type: string
+          nullable: true
+          description: 参考答案（主观题自评对照用）；无则 null
+        explanation:
+          type: string
+          nullable: true
+          description: 解析；无则 null
+        points:
+          allOf:
+            - $ref: '#/components/schemas/RemediationPointsAward'
+          nullable: true
+          description: 本次发分结果；未发分/无需发分时为 null
+        setCompleted:
+          type: boolean
+          description: 本次作答是否使套题全部答对（true 时后端已整行删除套题）
+        remainingCount:
+          type: integer
+          description: 套题内仍未答对的题数（setCompleted 时为 0）
+      required: [isCorrect, method, errorType, needsSelfAssessment, referenceAnswer, explanation, points, setCompleted, remainingCount]
 
     DictationPassageListResult:
       type: object

@@ -59,8 +59,8 @@
 | 表 | 关键列 | 说明 |
 |---|---|---|
 | `remediation_sets` | student_id, subject_id, status('active'), created_at, updated_at | 每学生每学科至多一条 active |
-| `remediation_groups` | set_id, kp_id, type, difficulty, ai_pending_count, UNIQUE(set_id, kp_id, type, difficulty) | 三元组去重靠唯一键；`ai_pending_count` 记 AI 补题缺口 |
-| `remediation_set_items` | group_id, question_id, origin_question_id, is_correct, points_awarded, attempts, last_answered_at | `origin_question_id` 留审计；答对即 `is_correct=1`；`points_awarded` 防重复发分 |
+| `remediation_groups` | set_id, kp_id, type, difficulty, origin_question_id, ai_pending_count, UNIQUE(set_id, kp_id, type, difficulty) | 三元组去重靠唯一键；**`origin_question_id` 是组级审计字段**（组即 `(kp_id, type, difficulty)` 三元组，一个组由一个原错题触发）；`ai_pending_count` 记 AI 补题缺口 |
+| `remediation_set_items` | group_id, question_id, is_correct, points_awarded, attempts, last_answered_at | 答对即 `is_correct=1`；`points_awarded` 防重复发分。**原错题的审计字段不在本表**（在 `remediation_groups` 上，见上行） |
 
 约束与口径：
 
@@ -109,7 +109,7 @@
 
 - **题型映射**：`choice` + `true_false` → `choice` 档；`fill_blank` → `fill_blank` 档；其余（`calculation` / `proof` / `short_answer`）→ `major` 档。
 - **发分时机**：每题**首次作答**即发，**不看对错**（对齐平台「完成即给分」哲学与用户「鼓励多做」的诉求）；`dedupe_key` 幂等保证**每题（set item）全程只发一次**——有意偏离「跨天可再得」默认，理由：套题内同一题反复作答是清零流程的一部分，不是新任务，且防刷分。
-- `ref_type='question'`，`ref_id` = `remediation_set_items.id`。
+- `ref_type='question'`，`ref_id` = **`questions.id`**（= `remediation_set_items.question_id`）。真正的幂等键是 `dedupe_key='rem:<item.id>'`，`ref_id` 仅供审计、**无消费方**。
 - 家长可改分值 / 上限 / 停用档位（既有 point_rules 能力，零额外开发）；默认规则只对新学生生效（既有行为）。学生端 `GET /api/points/me/rules` 自动带出新任务。
 - 套题**整体完成**不另发整套奖励（避免双重计分）。
 
