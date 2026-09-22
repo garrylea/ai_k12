@@ -31,7 +31,14 @@ function toDifficulty(value: number): Difficulty {
  *  且入库时 options 已剥掉 isCorrect、判题必然退化为「label === answer」比对 ——
  *  故 answer 必须以正确选项的 label 入库。否则 AI 若把 answer 写成选项文本（如 "2"），
  *  学生提交 label（如 "B"）会**恒判错**。
- *  调用前必须已过 variationRejectionReason 的「恰有 1 个 isCorrect」校验。 */
+ *  调用前必须已过 variationRejectionReason 的「恰有 1 个 isCorrect」校验。
+ *
+ *  ⚠️ 已知限制：`true_false` **未**做同类归一（本函数只处理 choice，variationRejectionReason
+ *  的校验也仅对 choice 生效）。前端 true_false 走默认选项 `对`/`错`
+ *  （见 apps/web/src/components/business/answer/QuestionRunner.tsx 的 `q.type === 'true_false'`
+ *  分支），若 AI 把 answer 写成「正确」/「T」之类，学生提交 `对`/`错` 同样会恒判错。
+ *  当前**不可达**：套题组类型只能来自原错题题型，而数学题库（subject_id=1）无 true_false 题。
+ *  若将来题库引入判断题，**必须**同样把 answer 归一到 `对`/`错` 并强制 `options=null`。 */
 function toStoredAnswer(v: VariationQuestion, type: string): string {
   if (type !== 'choice') return v.answer;
   const correct = (v.options ?? []).find((o) => o.isCorrect === true);
@@ -101,7 +108,7 @@ export class RemediationGeneratorService {
       if (shortfall > 0) {
         await this.remediationRepo.updateGroupAiPending(groupId, shortfall);
         result.aiPendingCount += shortfall;
-        this.fillWithAi(groupId, [...existingItems]);
+        void this.fillWithAi(groupId, [...existingItems]);
       }
     }
     return result;
@@ -131,9 +138,12 @@ export class RemediationGeneratorService {
     }
   }
 
-  /** AI 补题入口（fire-and-forget）：调用方绝不 await（LLM 无墙钟上限，spec §5.1）。 */
-  fillWithAi(groupId: number, excludeQuestionIds: number[]): void {
-    if (this.inFlight.has(groupId)) return;
+  /** AI 补题入口（fire-and-forget）：调用方绝不 await（LLM 无墙钟上限，spec §5.1）。
+   *  **有意返回该 promise**（而非 `void`）：调用点一律写 `void this.fillWithAi(...)` 保留
+   *  fire-and-forget 语义，同时让「有人误加 await」被 I4 的回归钉子捕捉到
+   *  —— 若返回 `void`，`await undefined` 是空操作，钉子拦不住字面违规。 */
+  fillWithAi(groupId: number, excludeQuestionIds: number[]): Promise<void> {
+    if (this.inFlight.has(groupId)) return Promise.resolve();
     const promise = this.runAiFill(groupId, excludeQuestionIds)
       .catch((err) => {
         this.logger.warn(`remediation AI fill failed (group=${groupId}): ${err instanceof Error ? err.message : String(err)}`);
@@ -142,6 +152,7 @@ export class RemediationGeneratorService {
         this.inFlight.delete(groupId);
       });
     this.inFlight.set(groupId, promise);
+    return promise;
   }
 
   /** 惰性重试：active 套题里 ai_pending > 0 且无 in-flight 的组 = 进程重启悬挂（spec §5.1）。 */
@@ -151,7 +162,7 @@ export class RemediationGeneratorService {
       .then((groups) => {
         for (const g of groups) {
           if (g.ai_pending_count > 0 && !this.inFlight.has(g.id)) {
-            this.fillWithAi(g.id, []);
+            void this.fillWithAi(g.id, []);
           }
         }
       })

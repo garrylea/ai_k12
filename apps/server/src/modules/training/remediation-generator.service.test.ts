@@ -1,7 +1,7 @@
 /**
  * RemediationGeneratorService（补偿套题生成器，Task 6）单元测试。
  *
- * 三条铁律被用例钉住：
+ * 四条铁律被用例钉住：
  *
  * 1. `buildGroups` 只做同步工作（三元组成组 + 题库抽题 + 记缺口），LLM 补题一律
  *    fire-and-forget（spec §5.1：LLM 调用无墙钟上限，不得挂在关键路径上）。因此
@@ -9,10 +9,12 @@
  * 2. AI 生成题入 `questions` 前必须剥掉 `options[].isCorrect`（spec §5.3 关键铁律）——
  *    否则选项里藏答案，判题前就泄漏。
  * 3. `buildGroups` 绝不 await 补题（含 `generate` 永不 resolve 时仍必须立即 resolve 的钉子）。
+ *    `fillWithAi` 返回 promise（调用点写 `void`），故 `await this.fillWithAi(...)` 这类字面违规
+ *    也会让 buildGroups 挂住 → 钉子能捕捉（若返回 `void`，`await undefined` 是空操作、拦不住）。
  * 4. choice 题入库 `answer` 必须归一为正确选项的 **label**：前端提交 label、判题 `compareAnswer`
  *    只按 label 命中选项，若沿用 AI 写成的选项文本则学生提交 label 会**恒判错**（回归钉子）。
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Logger } from '@nestjs/common';
 import { RemediationGeneratorService } from './remediation-generator.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
@@ -20,8 +22,23 @@ import type { QuestionRow } from '../../database/repositories/types.js';
 import type { RemediationGroupRow } from '../../database/repositories/remediation.repo.js';
 import type { VariationQuestion } from '../../ai-core/types.js';
 
-// 有 spied Logger.prototype.warn 的用例：用例间必须还原，避免泄漏影响他例。
-afterEach(() => vi.restoreAllMocks());
+// 静音 Nest Logger：runAiFill 收尾记「缺口 X → 实补 Y」（log）、校验拒绝与撞键各留 warn，
+// 否则每个用例都往测试输出打 `[Nest] LOG/WARN ...` 噪声。`log` 是本次新增、`warn` 是既有噪声，
+// 一并静音使本文件输出干净；需要断言日志的用例直接用这里的 `warnSpy`（不再自建 spy，避免叠加）。
+// 注意：Nest 的 `Logger.prototype.log/warn` 被 `@WrapBuffer` 装饰过，仅靠 `vi.restoreAllMocks()`
+// 还原会在下次调用时丢 `this`（实测 `this.context` undefined）——必须先对 spy 显式 `mockRestore()`。
+let logSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+beforeEach(() => {
+  logSpy = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+  warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  logSpy.mockRestore();
+  warnSpy.mockRestore();
+  vi.restoreAllMocks(); // 兜底：清掉用例内可能自建的 spy
+});
 
 const STUDENT_ID = 7;
 const SET_ID = 1;
@@ -339,7 +356,6 @@ describe('RemediationGeneratorService.fillWithAi', () => {
 
   it('校验不过的 AI 题不入库不入套，缺口清零并留日志', async () => {
     const { service, questionsRepo, remediationRepo, variation } = harness();
-    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
     variation.generate.mockResolvedValue({
       variations: [
         makeVariation({ content: '   ' }), // 题干为空
@@ -441,7 +457,6 @@ describe('RemediationGeneratorService.fillWithAi', () => {
     const row = questionsRepo.findOrCreate.mock.calls[0][0] as any;
     // 回归钉子：学生提交 label 'B'，入库 answer 必须是 'B' 而非 '2'，否则 compareAnswer 恒判错
     expect(row.answer).toBe('B');
-    expect(row.answer).not.toBe('2');
     // 选项仍只存 label/text（防泄漏）
     expect(JSON.parse(row.options)).toEqual([
       { label: 'A', text: '1' },
