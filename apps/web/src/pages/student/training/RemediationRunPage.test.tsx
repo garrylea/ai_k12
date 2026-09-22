@@ -81,11 +81,15 @@ describe('RemediationRunPage', () => {
    */
   it('末题答对：完成处理幂等、收尾不再重拉，只弹一次「已清零」', async () => {
     const user = userEvent.setup();
-    getRemediationQuestions.mockResolvedValueOnce({
-      questions: [{ questionId: 11, text: '唯一一题', type: 'fill_blank', options: null }],
-      itemCount: 1,
-      correctCount: 0,
-    });
+    getRemediationQuestions
+      .mockResolvedValueOnce({
+        questions: [{ questionId: 11, text: '唯一一题', type: 'fill_blank', options: null }],
+        itemCount: 1,
+        correctCount: 0,
+      })
+      // 兜底（修复后收尾这次重拉不会发出，见下）：仍给第二个返回值 resolve 空，
+      // 这样万一「早退」被去掉，第二条断言能干净地变红，而不是被 rejection 掩成失败路径
+      .mockResolvedValue({ questions: [], itemCount: 1, correctCount: 1 });
     submitRemediationAnswer.mockResolvedValue({
       isCorrect: true,
       method: 'exact',
