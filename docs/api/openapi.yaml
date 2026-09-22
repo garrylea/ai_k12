@@ -5208,7 +5208,9 @@ paths:
         尚未交卷 400）；targeted 来源前端提交题号不可信——逐个回查错题本，只认
         source='targeted' 的未清错题。同步建组 + 题库抽题，AI 补题 fire-and-forget
         （不 await）；无错题 / 错题全下线 / 全无 primary 考点 → 不建套题、全 0 返回
-        （setId: 0）；已有 active 套题则追加合并。Nest @Post 默认返回 201。
+        （setId: 0，仅限本次新建时——若已有 active 套题则是追加合并，返回既有 setId）；
+        已有 active 套题则追加合并。并发安全：remediation_sets 有唯一键 uniq_rsets_active，
+        两处同时生成时后到者复用赢家的套题。Nest @Post 默认返回 201。
       operationId: generateRemediationSet
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -8427,7 +8429,9 @@ components:
     RemediationGenerateResult:
       type: object
       description: >-
-        套题概要。无错题 / 错题全下线 / 全无 primary 考点时不建套题，setId=0 且各计数为 0。
+        套题概要。无错题 / 错题全下线 / 全无 primary 考点时**本次新建**的套题不保留，
+        setId=0 且各计数为 0；若调用时已有 active 套题（含并发下后到者复用赢家），
+        则返回既有 setId，此时 groupsCreated=0 只表示「三元组都已存在」。
       properties:
         setId:
           type: integer

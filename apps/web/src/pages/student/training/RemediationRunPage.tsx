@@ -9,6 +9,7 @@ import { Modal, PageHeader } from '@/components/base';
 import { toast } from '@/components/base/Toast';
 import { usePointsStore } from '@/store/pointsStore';
 import {
+  ApiError,
   getRemediationQuestions,
   getTrainingHint,
   selfAssessRemediation,
@@ -126,7 +127,11 @@ export default function RemediationRunPage() {
       } catch (err) {
         // 本页没有结果面能展示「提交失败」：runner 会把 rejection 吞成 failed 记录后静默切下一题，
         // 学生将完全无感。先弹一条可见反馈，再原样抛回，让 runner 照常记录 failed 并推进。
-        toast('error', '答案提交失败，请检查网络后重试');
+        // 4xx 是**业务性拒绝**（该题已答对 / 不在当前套题 / 已无进行中套题，如另一标签页刚清套），
+        // 服务端 message 本身就是给学生看的、可照做；说成「检查网络」会把人引到错方向。
+        const isClientReject =
+          err instanceof ApiError && err.status !== undefined && err.status >= 400 && err.status < 500;
+        toast('error', isClientReject ? err.message : '答案提交失败，请检查网络后重试');
         throw err;
       }
     },

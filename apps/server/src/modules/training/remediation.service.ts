@@ -8,6 +8,7 @@ import { MainErrorBooksRepository } from '../../database/repositories/main-error
 import { ExamSessionsRepository } from '../../database/repositories/exam-sessions.repo.js';
 import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
 import { RemediationGeneratorService } from './remediation-generator.service.js';
+import { parseOptions } from '../../common/utils/parse-options.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 import type { RemediationItemRow, RemediationSetRow } from '../../database/repositories/remediation.repo.js';
 
@@ -123,12 +124,13 @@ export class RemediationService {
       return { setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 };
     }
 
-    let setId = (await this.remediationRepo.findActiveByStudent(studentId, MATH_SUBJECT_ID))?.id ?? null;
-    // 进来时没有 active 套题 = 本次新建 —— 只有这种情况才允许回收空套题（见下）
-    const createdNow = setId === null;
-    if (setId === null) {
-      setId = await this.remediationRepo.createSet(studentId, MATH_SUBJECT_ID);
-    }
+    // 取/建 active 套题一步完成（DB 唯一键 uniq_rsets_active 兜底并发，见 repo 方法注释）。
+    // `createdNow` = 「这套是我建的」——只有这种情况才允许回收空套题（见下）。
+    // 并发下后到者会拿到别人建的套题（created=false），此时绝不能回收。
+    const { id: setId, created: createdNow } = await this.remediationRepo.findOrCreateActiveSet(
+      studentId,
+      MATH_SUBJECT_ID,
+    );
     const summary = await this.generator.buildGroups(studentId, setId, wrongs);
 
     // 错题都在、但全无 primary 考点 → 一组未建（spec §4 的**常规分支**）：套题是 0 组 0 题的空壳，
@@ -220,7 +222,8 @@ export class RemediationService {
         questionId: q.id,
         text: q.content,
         type: q.type,
-        options: q.options ? (JSON.parse(q.options) as Array<{ label: string; text: string }>) : null,
+        // parseOptions 而非裸 JSON.parse：坏 JSON/非数组一律 null（否则作答页整页 500）
+        options: parseOptions(q.options) as Array<{ label: string; text: string }> | null,
       };
     });
 

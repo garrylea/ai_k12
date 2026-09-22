@@ -34,14 +34,55 @@ describe('RemediationRepository.findActiveByStudent', () => {
   });
 });
 
-describe('RemediationRepository.createSet', () => {
-  it('返回 insertId，参数 (studentId, subjectId)', async () => {
+describe('RemediationRepository.findOrCreateActiveSet', () => {
+  it('已有 active 套题 → 返回既有 id 且 created=false，不 INSERT', async () => {
+    const row = { id: 3, student_id: 7, subject_id: 1, status: 'active' };
+    const pool = mockPool([row]);
+    const repo = new RemediationRepository(pool as any);
+
+    expect(await repo.findOrCreateActiveSet(7, 1)).toEqual({ id: 3, created: false });
+    expect(pool.execute).toHaveBeenCalledTimes(1); // 只有那一次 SELECT
+  });
+
+  it('没有 active 套题 → INSERT 并返回 created=true', async () => {
     const pool = mockPool([], 1, 42);
     const repo = new RemediationRepository(pool as any);
-    expect(await repo.createSet(7, 1)).toBe(42);
-    const [sql, params] = pool.execute.mock.calls[0];
+
+    expect(await repo.findOrCreateActiveSet(7, 1)).toEqual({ id: 42, created: true });
+    const [sql, params] = pool.execute.mock.calls[1];
     expect(sql).toContain('INSERT INTO remediation_sets (student_id, subject_id)');
     expect(params).toEqual([7, 1]);
+  });
+
+  it('并发：INSERT 撞 uniq_rsets_active（ER_DUP_ENTRY）→ 回查赢家的套题，created=false', async () => {
+    const winner = { id: 9, student_id: 7, subject_id: 1, status: 'active' };
+    let call = 0;
+    const pool = {
+      execute: vi.fn().mockImplementation((sql: string) => {
+        const upper = sql.trim().toUpperCase();
+        if (upper.startsWith('SELECT')) {
+          call++;
+          // 第一次 SELECT 落空（并发对手还没提交），撞键后回查命中赢家
+          return Promise.resolve([call === 1 ? [] : [winner], []]) as any;
+        }
+        return Promise.reject(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' })) as any;
+      }),
+    };
+    const repo = new RemediationRepository(pool as any);
+
+    expect(await repo.findOrCreateActiveSet(7, 1)).toEqual({ id: 9, created: false });
+  });
+
+  it('非撞键错误（如连接断开）原样抛出，不被吞掉', async () => {
+    const pool = {
+      execute: vi.fn().mockImplementation((sql: string) => {
+        if (sql.trim().toUpperCase().startsWith('SELECT')) return Promise.resolve([[], []]) as any;
+        return Promise.reject(Object.assign(new Error('boom'), { code: 'ECONNRESET' })) as any;
+      }),
+    };
+    const repo = new RemediationRepository(pool as any);
+
+    await expect(repo.findOrCreateActiveSet(7, 1)).rejects.toThrow('boom');
   });
 });
 

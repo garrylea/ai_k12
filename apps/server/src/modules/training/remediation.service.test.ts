@@ -106,7 +106,8 @@ function harness() {
   const remediationRepo = {
     // 修正简报样板：返回真实套题行（否则 requireItem 必抛，submitAnswer 用例全红）
     findActiveByStudent: vi.fn().mockResolvedValue(makeSet()),
-    createSet: vi.fn().mockResolvedValue(SET_ID),
+    // 默认「已有 active 套题」：created=false（本次不是我们建的 → 不许回收空套题）
+    findOrCreateActiveSet: vi.fn().mockResolvedValue({ id: SET_ID, created: false }),
     findGroupsBySet: vi.fn().mockResolvedValue([]),
     findItemsBySet: vi.fn().mockResolvedValue([]),
     findItemBySetQuestion: vi.fn().mockResolvedValue(makeItem()),
@@ -162,7 +163,7 @@ describe('generate · exam 来源', () => {
 
     await expect(service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 }))
       .rejects.toThrow('考试会话不存在');
-    expect(remediationRepo.createSet).not.toHaveBeenCalled();
+    expect(remediationRepo.findOrCreateActiveSet).not.toHaveBeenCalled();
   });
 
   it('会话不存在 → NotFound', async () => {
@@ -195,7 +196,9 @@ describe('generate · exam 来源', () => {
     const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
 
     expect(questionsRepo.findByIds).toHaveBeenCalledWith([11, 14]);
-    expect(remediationRepo.createSet).not.toHaveBeenCalled(); // 追加合并：复用既有套题
+    // 复用既有套题：repo 返回 created=false，故不得回收（断言见下方 deleteSet）
+    expect(remediationRepo.findOrCreateActiveSet).toHaveBeenCalledWith(STUDENT_ID, 1);
+    expect(remediationRepo.deleteSet).not.toHaveBeenCalled();
     expect(generator.buildGroups).toHaveBeenCalledWith(STUDENT_ID, SET_ID, wrongs);
     expect(res).toEqual({ setId: SET_ID, groupsCreated: 2, itemsCreated: 6, skippedNoKp: 0, aiPendingCount: 1 });
   });
@@ -208,24 +211,23 @@ describe('generate · exam 来源', () => {
     const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
 
     expect(res).toEqual({ setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
-    expect(remediationRepo.createSet).not.toHaveBeenCalled();
+    expect(remediationRepo.findOrCreateActiveSet).not.toHaveBeenCalled();
     expect(questionsRepo.findByIds).not.toHaveBeenCalled();
     expect(generator.buildGroups).not.toHaveBeenCalled();
   });
 
-  it('没有 active 套题时新建（createSet），返回新 setId', async () => {
+  it('没有 active 套题时新建（findOrCreateActiveSet），返回新 setId', async () => {
     const { service, examSessionsRepo, questionsRepo, remediationRepo, generator } = harness();
     examSessionsRepo.findById.mockResolvedValue({ student_id: STUDENT_ID, status: 'submitted' });
     examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 11, is_correct: 0 }]);
     questionsRepo.findByIds.mockResolvedValue([makeQuestion({ id: 11 })]);
-    remediationRepo.findActiveByStudent.mockResolvedValue(null);
-    remediationRepo.createSet.mockResolvedValue(555);
-    // 新建了组 → 不触发空套题回收（groupsCreated === 0 才回收，见下面三条守卫用例）
+    remediationRepo.findOrCreateActiveSet.mockResolvedValue({ id: 555, created: true });
+    // 新建了组 → 不触发空套题回收（groupsCreated === 0 才回收，见下面四条守卫用例）
     generator.buildGroups.mockResolvedValue({ groupsCreated: 1, itemsCreated: 3, skippedNoKp: 0, aiPendingCount: 0 });
 
     const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
 
-    expect(remediationRepo.createSet).toHaveBeenCalledWith(STUDENT_ID, 1);
+    expect(remediationRepo.findOrCreateActiveSet).toHaveBeenCalledWith(STUDENT_ID, 1);
     expect(generator.buildGroups).toHaveBeenCalledWith(STUDENT_ID, 555, expect.any(Array));
     expect(remediationRepo.deleteSet).not.toHaveBeenCalled();
     expect(res.setId).toBe(555);
@@ -242,8 +244,7 @@ describe('generate · exam 来源', () => {
     const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
 
     expect(questionsRepo.findByIds).toHaveBeenCalledWith([11]);
-    expect(remediationRepo.findActiveByStudent).not.toHaveBeenCalled(); // 守卫在查题之后、建套题之前
-    expect(remediationRepo.createSet).not.toHaveBeenCalled();
+    expect(remediationRepo.findOrCreateActiveSet).not.toHaveBeenCalled(); // 守卫在查题之后、建套题之前
     expect(generator.buildGroups).not.toHaveBeenCalled();
     expect(res).toEqual({ setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
   });
@@ -253,14 +254,13 @@ describe('generate · exam 来源', () => {
     examSessionsRepo.findById.mockResolvedValue({ student_id: STUDENT_ID, status: 'submitted' });
     examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 11, is_correct: 0 }]);
     questionsRepo.findByIds.mockResolvedValue([makeQuestion({ id: 11 })]);
-    remediationRepo.findActiveByStudent.mockResolvedValue(null); // 进来时无 active → 本次新建
-    remediationRepo.createSet.mockResolvedValue(555);
+    remediationRepo.findOrCreateActiveSet.mockResolvedValue({ id: 555, created: true }); // 本次新建
     // spec §4 常规分支：错题无 primary 考点标注 → 一组未建
     generator.buildGroups.mockResolvedValue({ groupsCreated: 0, itemsCreated: 0, skippedNoKp: 1, aiPendingCount: 0 });
 
     const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
 
-    expect(remediationRepo.createSet).toHaveBeenCalledWith(STUDENT_ID, 1);
+    expect(remediationRepo.findOrCreateActiveSet).toHaveBeenCalledWith(STUDENT_ID, 1);
     expect(remediationRepo.deleteSet).toHaveBeenCalledWith(555); // 回收刚建的空壳
     expect(res).toEqual({ setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
   });
@@ -270,14 +270,30 @@ describe('generate · exam 来源', () => {
     examSessionsRepo.findById.mockResolvedValue({ student_id: STUDENT_ID, status: 'submitted' });
     examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 11, is_correct: 0 }]);
     questionsRepo.findByIds.mockResolvedValue([makeQuestion({ id: 11 })]);
-    // findActiveByStudent 走 harness 默认（makeSet() → SET_ID）→ 追加合并场景
+    // findOrCreateActiveSet 走 harness 默认（{id: SET_ID, created: false}）→ 追加合并场景
     generator.buildGroups.mockResolvedValue({ groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
 
     const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
 
-    expect(remediationRepo.createSet).not.toHaveBeenCalled();
     expect(remediationRepo.deleteSet).not.toHaveBeenCalled(); // 已有套题里有题，删了就是事故
     expect(res.setId).toBe(SET_ID);
+  });
+
+  it('并发撞唯一键（created=false，别人抢先建）→ 即使 groupsCreated=0 也绝不回收', async () => {
+    // 回归钉子：两个标签页同时点「生成练习」。我们进来时以为要新建，但 INSERT 撞
+    // uniq_rsets_active → repo 返回赢家的套题（created=false）。此时若按「本次新建」回收空套题，
+    // 就会把并发请求刚建好的组级联删掉（T7-M1 同类数据丢失），且赢家仍返回 setId 给前端 → 学生点进去报错。
+    const { service, examSessionsRepo, questionsRepo, remediationRepo, generator } = harness();
+    examSessionsRepo.findById.mockResolvedValue({ student_id: STUDENT_ID, status: 'submitted' });
+    examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 11, is_correct: 0 }]);
+    questionsRepo.findByIds.mockResolvedValue([makeQuestion({ id: 11 })]);
+    remediationRepo.findOrCreateActiveSet.mockResolvedValue({ id: 777, created: false }); // 赢家的套题
+    generator.buildGroups.mockResolvedValue({ groupsCreated: 0, itemsCreated: 0, skippedNoKp: 1, aiPendingCount: 0 });
+
+    const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
+
+    expect(remediationRepo.deleteSet).not.toHaveBeenCalled(); // 删了就是删掉并发请求刚建的组
+    expect(res.setId).toBe(777);
   });
 });
 
@@ -335,7 +351,7 @@ describe('generate · targeted 来源', () => {
     const res = await service.generate(STUDENT_ID, { source: 'targeted', sessionId: 8, wrongQuestionIds: [11, 12] });
 
     expect(res).toEqual({ setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
-    expect(remediationRepo.createSet).not.toHaveBeenCalled();
+    expect(remediationRepo.findOrCreateActiveSet).not.toHaveBeenCalled();
     expect(generator.buildGroups).not.toHaveBeenCalled();
   });
 });
@@ -403,6 +419,31 @@ describe('listQuestions', () => {
       correctCount: 1,
     });
     expect(questionsRepo.findByIds).toHaveBeenCalledWith([11]); // 只查未答对的
+  });
+
+  it('options 是坏 JSON → 降级为 null（不抛，否则作答页整页 500）', async () => {
+    const { service, remediationRepo, questionsRepo } = harness();
+    remediationRepo.findItemsBySet.mockResolvedValue([makeItem({ id: 901, question_id: 11, is_correct: 0 })]);
+    questionsRepo.findByIds.mockResolvedValue([
+      makeQuestion({ id: 11, content: '1+1=?', type: 'choice', options: '{"label":"A"' }), // 截断的 JSON
+    ]);
+
+    await expect(service.listQuestions(STUDENT_ID)).resolves.toEqual({
+      questions: [{ questionId: 11, text: '1+1=?', type: 'choice', options: null }],
+      itemCount: 1,
+      correctCount: 0,
+    });
+  });
+
+  it('options 是合法 JSON 但不是数组 → 同样降级为 null', async () => {
+    const { service, remediationRepo, questionsRepo } = harness();
+    remediationRepo.findItemsBySet.mockResolvedValue([makeItem({ id: 901, question_id: 11, is_correct: 0 })]);
+    questionsRepo.findByIds.mockResolvedValue([
+      makeQuestion({ id: 11, content: '1+1=?', type: 'choice', options: '{"label":"A"}' }),
+    ]);
+
+    const res = await service.listQuestions(STUDENT_ID);
+    expect(res.questions[0].options).toBeNull();
   });
 
   it('全部已答对 → deleteSet 兜底清套，返回空', async () => {

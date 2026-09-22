@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import RemediationRunPage from './RemediationRunPage';
+import { ApiError } from '@/services/api';
 
 /**
  * 相似题专项（错题补偿套题）作答页。
@@ -159,5 +160,108 @@ describe('RemediationRunPage', () => {
       '网络不太稳定，请回训练首页重新进入相似题专项',
     );
     expect(screen.queryByText('判题中，请稍候…')).toBeNull();
+  });
+
+  /**
+   * 本轮没全对：重拉 → 换轮次重挂 runner，只渲染仍未答对的题。
+   *
+   * 这是除「全对离场」外**最主要的正常路径**（答错一题就要再战一轮），此前没有用例覆盖。
+   * 它钉三件事：① `handleFinish` 的 else 分支确实执行 setData + round+1；
+   * ② 换轮次真的重挂并渲染新题单（`key={round}` 生效）；③ 头部计数在轮次边界刷新
+   * （同轮内不刷新是已知的 F2 小问题，此处顺带把「边界会刷新」钉住）。
+   */
+  it('本轮答错 → 重拉后换轮次重挂，只渲染仍未答对的题', async () => {
+    const user = userEvent.setup();
+    getRemediationQuestions
+      .mockResolvedValueOnce({
+        questions: [
+          { questionId: 11, text: '第一题', type: 'fill_blank', options: null },
+          { questionId: 12, text: '第二题', type: 'fill_blank', options: null },
+        ],
+        itemCount: 2,
+        correctCount: 0,
+      })
+      // onFinish 的重拉：第 1 题答错留在套题里，第 2 题已答对
+      .mockResolvedValueOnce({
+        questions: [{ questionId: 11, text: '第一题（重出）', type: 'fill_blank', options: null }],
+        itemCount: 2,
+        correctCount: 1,
+      });
+    submitRemediationAnswer.mockResolvedValue({
+      isCorrect: false,
+      method: 'exact',
+      errorType: null,
+      needsSelfAssessment: false,
+      referenceAnswer: null,
+      explanation: null,
+      points: null,
+      setCompleted: false,
+      remainingCount: 1,
+    });
+
+    renderPage();
+    await screen.findByText('第一题');
+    expect(screen.getByRole('heading', { name: /已答对 0\/2/ })).toBeInTheDocument();
+
+    // 第 1 题 → 自动进第 2 题；第 2 题提交后触发 onFinish
+    await user.type(screen.getByRole('textbox'), 'x');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    await screen.findByText('第二题');
+    await user.type(screen.getByRole('textbox'), 'y');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    // 换轮次后只剩未答对的第 1 题；头部计数取到重拉后的 1/2
+    expect(await screen.findByText('第一题（重出）')).toBeInTheDocument();
+    expect(screen.queryByText('第二题')).toBeNull();
+    expect(screen.getByRole('heading', { name: /已答对 1\/2/ })).toBeInTheDocument();
+    expect(getRemediationQuestions).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * 提交失败的两条文案分支（此前 catch 无覆盖 —— T12-M2）。
+   *
+   * 4xx 是业务性拒绝（该题已答对 / 不在套题 / 已无进行中套题，如另一标签页刚清套），
+   * 服务端 message 本身就是可照做的指引；网络失败没有 status，才该说「检查网络」。
+   * 引错方向比不说更糟，故两条都要钉住。
+   */
+  it('提交被 4xx 拒绝：弹服务端原话，不说「检查网络」', async () => {
+    const user = userEvent.setup();
+    getRemediationQuestions.mockResolvedValue({
+      questions: [{ questionId: 11, text: '唯一一题', type: 'fill_blank', options: null }],
+      itemCount: 1,
+      correctCount: 0,
+    });
+    submitRemediationAnswer.mockRejectedValue(
+      new ApiError(1001, '该题已答对，无需重复作答', false, 400),
+    );
+
+    renderPage();
+    await screen.findByText('唯一一题');
+    await user.type(screen.getByRole('textbox'), '2');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith('error', '该题已答对，无需重复作答'),
+    );
+    expect(toastMock).not.toHaveBeenCalledWith('error', '答案提交失败，请检查网络后重试');
+  });
+
+  it('提交网络失败（无 status）：仍提示「检查网络后重试」', async () => {
+    const user = userEvent.setup();
+    getRemediationQuestions.mockResolvedValue({
+      questions: [{ questionId: 11, text: '唯一一题', type: 'fill_blank', options: null }],
+      itemCount: 1,
+      correctCount: 0,
+    });
+    submitRemediationAnswer.mockRejectedValue(new Error('network down'));
+
+    renderPage();
+    await screen.findByText('唯一一题');
+    await user.type(screen.getByRole('textbox'), '2');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith('error', '答案提交失败，请检查网络后重试'),
+    );
   });
 });

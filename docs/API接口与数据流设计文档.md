@@ -453,7 +453,7 @@
 | POST | `/api/training/vocabulary/judge` | 背单词判题（2026-09-16 新增）。请求体：`{wordId, senseIndex, promptKind, answer}`；`wordId` 须正整数（非法 400）、不存在 404；`senseIndex` 须非负整数（非法 400）；`promptKind` ∈ `en2cn\|cn2en\|ph2en`；`answer` 非字符串降级空串（防 number 混进去变 500）。**三条路由**：① **答案是英文单词的两条**（中→英 `cn2en`、看音标写单词 `ph2en`）——纯程序比对（归一化后相等，或命中人工整理的拼写变体组，或正确答案含连字符/空格时忽略其差异），**不调 LLM**，答错时给 `spellingDiff` 逐字符差异；② **英→中·常见义**——先把该词全部常见义的 gloss 按 `；,、/` 拆成原子做归一化比对（命中即 `exact`、不调模型），未命中才调 `english_word_judge` 场景（primary=`local`、fallback=`deepseek-flash`，本地端点下发 `chat_template_kwargs:{enable_thinking:false}` 关 thinking），二档 `correct\|wrong`；③ **英→中·熟词僻义**——同上但只认目标僻义义项，且调模型时**必须带上锁定僻义的语境搭配**（「在搭配里认那个僻义」正是考点），模型判**三档** `correct\|off_target\|wrong`；`common` 模式下模型若输出 `off_target` 会收敛成 `wrong`。`senseIndex` 越界（内容重灌后下标漂移）时按「全义项都接受」判——宁放过不错杀。判题失败 → `verdict='undetermined'`，**不抛错**。**记账**：`correct` 置 `learned`、`wrong` 同时给学生 `wrong_count` 与全局 `error_count` 各加一；**`off_target` / `unanswered`（空作答）/ `undetermined` 三者都不计错**（「不会」不等于「易错」，判题失败更不该让学生背锅）。响应：`{wordId, senseIndex, verdict, method, standard: {word, phonetic, meanings, target}, spellingDiff, comment, familyAvailable, progress: {learned, wrongCount}}`；`verdict` 五值 `correct\|off_target\|wrong\|unanswered\|undetermined`，`method` 二值 `exact\|ai`。 | MVP |
 | POST | `/api/training/vocabulary/progress/clear` | 「移除易错标记」（2026-09-16 新增）。请求体：`{wordId}`（整数 ≥1，非法 400）。只把 `student_word_progress.wrong_count` 清零——**不动 `learned`**（背过就是背过），也**不动 `english_words.error_count`**（那是全平台的统计，不该被单个学生抹掉）。该学生没有这条进度行时是正常的空操作。响应：`{ok: true}`。 | MVP |
 | GET | `/api/training/vocabulary/words/{wordId}/family` | 词根族（2026-09-16 新增，点「+」号懒加载）。族的定义是「`root_key` 指向同一个中心词」，**不建新表**——`WHERE root_key = ?` 一句取全族，中心词自己也带 `root_key`=自己的 `word`（该不变式由内容管线的 check 保证）。返回 `root`（中心词）+ `members`（中心词排最前，其余按课标原序），每个成员带相对中心词的**词缀注记**（如 `-less 无…的 → 形容词`）与第一顺位中文释义，供前端渲染缩进树。**本端点不按题面类型设限**（成绩单复盘时也要能看），但**前端必须只在英→中题上渲染「+」号入口**——族树里必然包含单词本身，中→英题点开等于直接看答案。路径参数 `wordId`（ParseIntPipe）；单词不存在 404，该词没有族（族内不足 2 行）亦 404。响应：`{root: {word, phonetic, gloss}, members: [{word, phonetic, gloss, pos, affixes: [{type, code, gloss, posHint}], isHead, level}]}`。 | MVP |
-| POST | `/api/training/remediation/generate` | **错题补偿套题（相似题专项练习，2026-09-21）**：学生同意后生成套题。请求体：`{source, sessionId, wrongQuestionIds?}`；`source` 枚举 `exam\|targeted`（非法 400）；`sessionId` 须正整数（非法 400）；`source='targeted'` 时 `wrongQuestionIds` 必带、最多 50 个、元素须为正整数（否则 400）。`exam` 来源由后端从考试会话推导错题（会话不存在/非本人 404，尚未交卷 400）；`targeted` 来源前端提交题号**不可信**——逐个回查错题本，只认 `source='targeted'` 的未清错题。**同步建组 + 题库抽题，AI 补题 fire-and-forget（不 await）**；无错题 / 错题全下线 / 全无 primary 考点 → **不建套题、全 0 返回**（`setId: 0`）；已有 active 套题则**追加合并**。**201**。响应：`{setId, groupsCreated, itemsCreated, skippedNoKp, aiPendingCount}`。 | MVP |
+| POST | `/api/training/remediation/generate` | **错题补偿套题（相似题专项练习，2026-09-21）**：学生同意后生成套题。请求体：`{source, sessionId, wrongQuestionIds?}`；`source` 枚举 `exam\|targeted`（非法 400）；`sessionId` 须正整数（非法 400）；`source='targeted'` 时 `wrongQuestionIds` 必带、最多 50 个、元素须为正整数（否则 400）。`exam` 来源由后端从考试会话推导错题（会话不存在/非本人 404，尚未交卷 400）；`targeted` 来源前端提交题号**不可信**——逐个回查错题本，只认 `source='targeted'` 的未清错题。**同步建组 + 题库抽题，AI 补题 fire-and-forget（不 await）**。**本次新建**的套题在「无错题 / 错题全下线 / 全无 primary 考点」时不保留、全 0 返回（`setId: 0`）；若调用时已有 active 套题则**追加合并**（返回既有 `setId`，此时 `groupsCreated: 0` 只表示三元组都已存在）。并发安全：`remediation_sets` 有唯一键 `uniq_rsets_active`，两处同时生成时后到者复用赢家的套题（不重复建套、不重复发分）。**201**。响应：`{setId, groupsCreated, itemsCreated, skippedNoKp, aiPendingCount}`。 | MVP |
 | GET | `/api/training/remediation/me` | 当前 active 套题概要（三卡页提示条用）。无套题时返回 `{active:false, setId:null, groupCount:0, itemCount:0, correctCount:0}`。顺带对 `ai_pending_count > 0` 的组做**惰性重试**（覆盖进程重启悬挂的 AI 补题；fire-and-forget、不 await）。**200**。响应：`{active, setId(nullable), groupCount, itemCount, correctCount}`。 | MVP |
 | GET | `/api/training/remediation/questions` | 作答页拉取未答对题目（含渲染数据，白名单序列化）：`{questionId, text, type, options}`，`options` 为 JSON 字符串 parse 后的数组，**可为 `null`**（题无选项/坏 JSON）。题目被下线（`is_active=0`）时直接标对（防套题死锁）；**全对时后端 `deleteSet`** 并返回 `{questions: [], itemCount: N, correctCount: N}`。**200**。响应：`{questions: [...], itemCount, correctCount}`。 | MVP |
 | POST | `/api/training/remediation/answers` | 逐题提交作答。请求体：`{questionId, studentAnswer}`；`questionId` 须正整数、`studentAnswer` 须 string（否则 400）。判题复用 `JudgeCoreService`（`source='remediation'`，**不入错题本、不清零原错题、不参与主线清零门禁**）；**首次作答即发分**（`task_code='remediation_question'`、幂等键 `dedupe_key='rem:<item.id>'`、`ref_type='question'`、`ref_id=questions.id`），答对置 `is_correct=1`，**全部答对时清套题**（物理删除）。400：无进行中套题 / 该题不在当前套题中 / 该题已答对无需重复作答 / 参数非法。**201**。响应：`{isCorrect(nullable), method, errorType(nullable), needsSelfAssessment, referenceAnswer(nullable), explanation(nullable), points(nullable 对象), setCompleted, remainingCount}`。 | MVP |
@@ -1505,12 +1505,15 @@ MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
 积分是**平台级**的激励层（不分学科、不分轨道，段位全局唯一），加在既有流程**旁边**而不是里面：**不影响任何门禁**（不清零错题、不替代错题本、不参与主线解锁判定）。只有「完成任务」产生积分，辅线答疑不产生。
 
 ```text
-8 类任务的完成事件（粒度分三类，spec §6.1）
+9 类任务的完成事件（粒度分三类，spec §6.1）
   ├─ 甲类 · 逐目标发分（每完成一个「目标物」发一次，不新增端点）
   │    cn_dictation / cn_interpretation → 篇目判题端点里发（按该篇 genre 取档：诗 2 / 文言文 5）
   │    cn_meaning → 该篇**最后一个可作答句**判完时发（整篇答完一次，见下）
   │    error_fix  → 错题被清零（clearUnclearedByStudentQuestionId 的 affectedRows > 0）时发
-  │    判题响应内联 pointsAwarded / awardReason（§4.18 语文三专项 + practice/training judge）
+  │    remediation_question（2026-09-21）→ POST /api/training/remediation/answers 与 /self-assess 内联发，
+  │      **首答即发、不看对错**（每 item 一次；dedupe_key='rem:<item.id>' 不带日期，故每题全程只发一次）
+  │    判题响应内联 pointsAwarded / awardReason（§4.18 语文三专项 + practice/training judge）；
+  │    相似题专项内联的是 points 对象（§4.18 remediation/answers）
   ├─ 乙类 · 整批发分（分值由学生开练时选的**档位**决定，必须整轮发）
   │    math_targeted / en_vocabulary → POST /api/training/sessions/:id/complete
   │    分值取**会话记录里的档位**、不取前端入参；start 时把题单规模写进 expected_count
@@ -1518,7 +1521,7 @@ MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
        mainline_lesson → POST /api/progress/update 推进到下一课/完成时（响应带 points）
        math_paper      → POST /api/exams/sessions/:id/submit 交卷后（响应带 points）
   ▼
-PointsService.award —— 8 条路径的**唯一**发分入口，顺序固定（每步都有理由）
+PointsService.award —— 9 条路径的**唯一**发分入口，顺序固定（每步都有理由）
   0 确保规则存在（INSERT IGNORE 补默认档位：INSERT 撞键即跳过，家长改过的值永不回溯）
   1 查规则 → 2 档位 → 3 停用 → 4 每日上限 → 5 发分前累计 → 6 事务[写流水 + 快照增量] → 7 跨档
   · 每日上限必须早于 INSERT：先写再判会让「到上限的那一条」已经落库

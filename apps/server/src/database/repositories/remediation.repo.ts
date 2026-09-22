@@ -45,12 +45,36 @@ export class RemediationRepository {
     return (rows[0] as RemediationSetRow) ?? null;
   }
 
-  async createSet(studentId: number, subjectId: number): Promise<number> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO remediation_sets (student_id, subject_id) VALUES (?, ?)`,
-      [studentId, subjectId],
-    );
-    return result.insertId;
+  /**
+   * 取本人在该学科的 active 套题；没有就新建。返回 `created` 供调用方判断「这套是不是我建的」。
+   *
+   * **并发安全**：唯一键 `uniq_rsets_active`（条件式生成列 `active_student_id`，见
+   * `tools/db/migrations/2026-09-22_remediation_sets_active_unique.sql`）保证同一学生同一学科
+   * **至多一条 active**。两个标签页同时点「生成练习」时，后到者撞 `ER_DUP_ENTRY` → 按「已有套题」
+   * 处理（同 `createGroupOrSkip` 的先例），返回既有 id 且 `created=false`。
+   *
+   * ⚠️ 调用方**不得**在 `created=false` 时回收「空套题」——那可能是并发请求刚建好、组还没落库的套题，
+   * 删掉会把对方刚建的组级联清空（T7-M1 同类数据丢失）。
+   */
+  async findOrCreateActiveSet(
+    studentId: number,
+    subjectId: number,
+  ): Promise<{ id: number; created: boolean }> {
+    const existing = await this.findActiveByStudent(studentId, subjectId);
+    if (existing) return { id: existing.id, created: false };
+    try {
+      const [result] = await this.pool.execute<ResultSetHeader>(
+        `INSERT INTO remediation_sets (student_id, subject_id) VALUES (?, ?)`,
+        [studentId, subjectId],
+      );
+      return { id: result.insertId, created: true };
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'ER_DUP_ENTRY') {
+        const winner = await this.findActiveByStudent(studentId, subjectId);
+        if (winner) return { id: winner.id, created: false };
+      }
+      throw err;
+    }
   }
 
   async findGroupById(groupId: number): Promise<RemediationGroupRow | null> {

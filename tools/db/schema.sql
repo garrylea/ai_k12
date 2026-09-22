@@ -1160,7 +1160,8 @@ CREATE TABLE IF NOT EXISTS training_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===== 错题补偿套题（相似题专项，2026-09-21）=====
--- 折回自 migrations/2026-09-21_remediation_sets.sql（install_mysql.sh 只执行 schema.sql，迁移需同步折回）。
+-- 折回自 migrations/2026-09-21_remediation_sets.sql + 2026-09-22_remediation_sets_active_unique.sql
+-- （install_mysql.sh 只执行 schema.sql，迁移需同步折回）。
 -- 设计：docs/superpowers/specs/2026-09-21-remediation-set-design.md
 
 CREATE TABLE IF NOT EXISTS remediation_sets (
@@ -1168,8 +1169,12 @@ CREATE TABLE IF NOT EXISTS remediation_sets (
   student_id BIGINT      NOT NULL,
   subject_id BIGINT      NOT NULL COMMENT '首期恒数学（MATH_SUBJECT_ID=1）',
   status     VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active（全对后整行删除）',
+  -- 条件式生成列（必须 VIRTUAL 不能 STORED——STORED 会重建表并被 fk_rsets_student_id 挡住报 1215）：
+  -- 仅 active 时等于 student_id，供唯一键实现「每学生每学科至多一条 active」；非 active 保持 NULL 不参与唯一性
+  active_student_id BIGINT AS (IF(status = 'active', student_id, NULL)) VIRTUAL COMMENT '生成列（条件式），见 2026-09-22 迁移',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_rsets_active (active_student_id, subject_id),
   KEY idx_rsets_student (student_id, status),
   CONSTRAINT fk_rsets_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
