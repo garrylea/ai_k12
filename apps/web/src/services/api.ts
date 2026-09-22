@@ -1052,6 +1052,94 @@ export function unmarkAllTrainingHidden(): Promise<void> {
   return fetchApi<void>('/training/hidden', { method: 'DELETE' });
 }
 
+// --- Training: remediation set（错题补偿套题 / 相似题专项，2026-09-21） ---
+
+export interface RemediationGenerateResult {
+  setId: number;
+  groupsCreated: number;
+  itemsCreated: number;
+  skippedNoKp: number;
+  aiPendingCount: number;
+}
+
+export function generateRemediationSet(payload: {
+  source: 'exam' | 'targeted';
+  sessionId: number;
+  wrongQuestionIds?: number[];
+}): Promise<RemediationGenerateResult> {
+  return fetchApi<RemediationGenerateResult>('/training/remediation/generate', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface RemediationOverview {
+  active: boolean;
+  setId: number | null;
+  groupCount: number;
+  itemCount: number;
+  correctCount: number;
+}
+
+export function getRemediationOverview(): Promise<RemediationOverview> {
+  return fetchApi<RemediationOverview>('/training/remediation/me');
+}
+
+export interface RemediationQuestion {
+  questionId: number;
+  text: string;
+  type: string;
+  options: Array<{ label: string; text: string }> | null;
+}
+
+export interface RemediationQuestionsResult {
+  questions: RemediationQuestion[];
+  itemCount: number;
+  correctCount: number;
+}
+
+export function getRemediationQuestions(): Promise<RemediationQuestionsResult> {
+  return fetchApi<RemediationQuestionsResult>('/training/remediation/questions');
+}
+
+export interface RemediationAnswerResult {
+  isCorrect: boolean | null;
+  method: string;
+  errorType: string | null;
+  needsSelfAssessment: boolean;
+  referenceAnswer: string | null;
+  explanation: string | null;
+  points: {
+    pointsAwarded: number;
+    balance: number;
+    totalEarned: number;
+    levelUp: { from: { code: string; name: string }; to: { code: string; name: string } } | null;
+    reason?: string;
+  } | null;
+  setCompleted: boolean;
+  remainingCount: number;
+}
+
+export function submitRemediationAnswer(payload: {
+  questionId: number;
+  studentAnswer: string;
+}): Promise<RemediationAnswerResult> {
+  return fetchApi<RemediationAnswerResult>('/training/remediation/answers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function selfAssessRemediation(payload: {
+  questionId: number;
+  assessment: 'correct' | 'incorrect';
+}): Promise<RemediationAnswerResult> {
+  return fetchApi<RemediationAnswerResult>('/training/remediation/self-assess', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // --- Training · 语文古诗文默写（2026-09-13） ---
 
 export interface DictationPassageItem {
