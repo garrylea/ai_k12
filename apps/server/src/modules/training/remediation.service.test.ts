@@ -3,10 +3,12 @@
  *
  * 本文件钉住的铁律：
  *
- * 1. **发分顺序**（用户裁决，偏离简报原码）：`award` 成功之后才置 `points_awarded=1`，
- *    且两步都在 try 内、失败只 warn。若反过来（先置标记再发分），award 一旦抖动，
- *    标记已置 1 → 学生这道题**永久拿不到分**；DB 失败还会让 `submitAnswer` 在判题之后抛错。
- *    见「发分顺序」与「award 抛错」两条用例。
+ * 1. **发分顺序**（用户裁决，偏离简报原码）：整个发分块排在 `markItemCorrect` **之前**，且
+ *    `award` 成功之后才置 `points_awarded=1`，两步都在 try 内、失败只 warn。反序（先清零再发分）
+ *    在**答对的题**上留了永久丢分路径：award 一抖，item 已是 `is_correct=1` 且 `points_awarded=0`，
+ *    `requireItem` 以「该题已答对」把后续作答全挡掉，套题全对后 item 行还被物理删除 → 该题的分
+ *    **永远拿不到**。发分前置后 award 失败 → 未清零 → 该题重出 → 发分被重试（dedupeKey 幂等）。
+ *    见「发分顺序」「答对 + award 抛错」「award 抛错」三条用例。
  * 2. **`selfAssess` 不经 `judgeCore`**（Task 4 复核遗留裁决的可执行证据）：套题内主观题自评
  *    走 `requireItem` + `applyOutcome`，**不调** `judgeCore.judgeQuestion`/`recordSelfAssessment`，
  *    故不会入错题本、不清零原错题、不发 `error_fix`。见 `selfAssess` 描述块。
@@ -16,6 +18,13 @@
  *    → 标记已答对防死锁。
  * 5. **`generate` 防伪造**：targeted 来源逐个用 `findUnclearedByStudentQuestionId` 校验、
  *    只认 `source === 'targeted'`。
+ * 6. **`generate` 不建空套题**：① 守卫在 `findByIds` **之后**（原始 id 非空 ≠ 有题可建，错题可能
+ *    全被下线）；② 错题都在但全无 primary 考点（`groupsCreated === 0`，spec §4 常规分支）时，
+ *    **仅当本次新建**才回收刚建的空套题 —— 追加合并场景下 `groupsCreated === 0` 可能只是三元组
+ *    都已存在（套题里有题），绝不能删。见 `generate` 的三条守卫用例。
+ * 7. **`duplicate` 归 0**：`PointsService.award` 幂等命中时回的是**首次**分值，直接透传会让前端
+ *    弹一个账本没动过的假 `+N 分` —— 有 `reason` 一律 `pointsAwarded = 0`（同 judge-core /
+ *    training 口径）。
  *
  * harness 说明（**对简报样板的修正**）：简报把 `remediationRepo.findActiveByStudent` mock 成
  * 恒 `null`，但 `requireItem()` 第一步就查它、为 null 直接抛「当前没有进行中的相似题专项练习」
@@ -211,12 +220,64 @@ describe('generate · exam 来源', () => {
     questionsRepo.findByIds.mockResolvedValue([makeQuestion({ id: 11 })]);
     remediationRepo.findActiveByStudent.mockResolvedValue(null);
     remediationRepo.createSet.mockResolvedValue(555);
+    // 新建了组 → 不触发空套题回收（groupsCreated === 0 才回收，见下面三条守卫用例）
+    generator.buildGroups.mockResolvedValue({ groupsCreated: 1, itemsCreated: 3, skippedNoKp: 0, aiPendingCount: 0 });
 
     const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
 
     expect(remediationRepo.createSet).toHaveBeenCalledWith(STUDENT_ID, 1);
     expect(generator.buildGroups).toHaveBeenCalledWith(STUDENT_ID, 555, expect.any(Array));
+    expect(remediationRepo.deleteSet).not.toHaveBeenCalled();
     expect(res.setId).toBe(555);
+  });
+
+  // --- 空套题守卫（Important 1）：守卫对象是「查得到的在用错题」，不是原始 id 列表 ---
+
+  it('错题全被下线（findByIds 返回空）→ 不建套题、不查 active 套题、全 0 概要', async () => {
+    const { service, examSessionsRepo, questionsRepo, remediationRepo, generator } = harness();
+    examSessionsRepo.findById.mockResolvedValue({ student_id: STUDENT_ID, status: 'submitted' });
+    examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 11, is_correct: 0 }]);
+    questionsRepo.findByIds.mockResolvedValue([]); // 11 已下线：repo 只回 is_active=1
+
+    const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
+
+    expect(questionsRepo.findByIds).toHaveBeenCalledWith([11]);
+    expect(remediationRepo.findActiveByStudent).not.toHaveBeenCalled(); // 守卫在查题之后、建套题之前
+    expect(remediationRepo.createSet).not.toHaveBeenCalled();
+    expect(generator.buildGroups).not.toHaveBeenCalled();
+    expect(res).toEqual({ setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
+  });
+
+  it('错题都在但全无 primary 考点（groupsCreated=0）→ 回收本次新建的空套题、全 0 概要', async () => {
+    const { service, examSessionsRepo, questionsRepo, remediationRepo, generator } = harness();
+    examSessionsRepo.findById.mockResolvedValue({ student_id: STUDENT_ID, status: 'submitted' });
+    examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 11, is_correct: 0 }]);
+    questionsRepo.findByIds.mockResolvedValue([makeQuestion({ id: 11 })]);
+    remediationRepo.findActiveByStudent.mockResolvedValue(null); // 进来时无 active → 本次新建
+    remediationRepo.createSet.mockResolvedValue(555);
+    // spec §4 常规分支：错题无 primary 考点标注 → 一组未建
+    generator.buildGroups.mockResolvedValue({ groupsCreated: 0, itemsCreated: 0, skippedNoKp: 1, aiPendingCount: 0 });
+
+    const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
+
+    expect(remediationRepo.createSet).toHaveBeenCalledWith(STUDENT_ID, 1);
+    expect(remediationRepo.deleteSet).toHaveBeenCalledWith(555); // 回收刚建的空壳
+    expect(res).toEqual({ setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
+  });
+
+  it('进来时已有 active 套题且 groupsCreated=0（三元组都已存在）→ 绝不回收（套题里有题）', async () => {
+    const { service, examSessionsRepo, questionsRepo, remediationRepo, generator } = harness();
+    examSessionsRepo.findById.mockResolvedValue({ student_id: STUDENT_ID, status: 'submitted' });
+    examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 11, is_correct: 0 }]);
+    questionsRepo.findByIds.mockResolvedValue([makeQuestion({ id: 11 })]);
+    // findActiveByStudent 走 harness 默认（makeSet() → SET_ID）→ 追加合并场景
+    generator.buildGroups.mockResolvedValue({ groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 });
+
+    const res = await service.generate(STUDENT_ID, { source: 'exam', sessionId: 7 });
+
+    expect(remediationRepo.createSet).not.toHaveBeenCalled();
+    expect(remediationRepo.deleteSet).not.toHaveBeenCalled(); // 已有套题里有题，删了就是事故
+    expect(res.setId).toBe(SET_ID);
   });
 });
 
@@ -398,6 +459,9 @@ describe('submitAnswer', () => {
     expect(remediationRepo.recordAttempt).toHaveBeenCalledWith(ITEM_ID);
     expect(remediationRepo.markItemCorrect).toHaveBeenCalledWith(ITEM_ID);
     expect(remediationRepo.deleteSet).toHaveBeenCalledWith(SET_ID);
+    // 发分先于清零：award 必须排在 markItemCorrect 之前（反序 = 答对的题 award 一抖就永久丢分）
+    expect(pointsService.award.mock.invocationCallOrder[0])
+      .toBeLessThan(remediationRepo.markItemCorrect.mock.invocationCallOrder[0]);
     expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
       studentId: STUDENT_ID,
       taskCode: 'remediation_question',
@@ -455,6 +519,37 @@ describe('submitAnswer', () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('remediation award failed'));
   });
 
+  it('答对 + award 抛错 → 不置 is_correct（该题下次重出、发分可重试，无永久丢分）', async () => {
+    const { service, remediationRepo, judgeCore, pointsService } = harness();
+    judgeCore.judgeQuestion.mockResolvedValue({ isCorrect: true, method: 'exact' });
+    pointsService.award.mockRejectedValue(new Error('db down'));
+    // 未清零 → DB 里该题仍 is_correct=0，剩余计数自然把它算进去（预期行为）
+    remediationRepo.findItemsBySet.mockResolvedValue([makeItem({ id: ITEM_ID, is_correct: 0 })]);
+
+    const res = await service.submitAnswer(STUDENT_ID, { questionId: QUESTION_ID, studentAnswer: 'B' });
+
+    // 「可重试」钉子：清零排在发分之后 → award 失败时绝不置 is_correct，否则 requireItem 会以
+    // 「该题已答对」永久挡住重试（套题全对后 item 行还会被删，分就再也拿不到）。
+    expect(remediationRepo.markItemCorrect).not.toHaveBeenCalled();
+    expect(remediationRepo.markPointsAwarded).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ isCorrect: true, setCompleted: false, remainingCount: 1 });
+    expect(res.points).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('remediation award failed'));
+  });
+
+  it('award 返回 reason=duplicate（幂等命中）→ pointsAwarded 归 0，不报假分', async () => {
+    const { service, remediationRepo, judgeCore, pointsService } = harness();
+    judgeCore.judgeQuestion.mockResolvedValue({ isCorrect: false, method: 'ai' });
+    // PointsService.award 幂等命中时回的是**首次**分值（3）而不是 0，直接透传就是假 `+3 分`
+    pointsService.award.mockResolvedValue({ pointsAwarded: 3, balance: 100, totalEarned: 200, levelUp: null, reason: 'duplicate' });
+
+    const res = await service.submitAnswer(STUDENT_ID, { questionId: QUESTION_ID, studentAnswer: 'A' });
+
+    expect(res.points?.pointsAwarded).toBe(0); // 本次未入账 → 静默
+    expect(res.points?.balance).toBe(100); // 余额快照照常带回
+    expect(remediationRepo.markPointsAwarded).toHaveBeenCalledWith(ITEM_ID); // 标记照置（防反复查库）
+  });
+
   it('markPointsAwarded 抛错 → 只 warn、不阻断判题（points 仍随响应返回）', async () => {
     const { service, remediationRepo, judgeCore } = harness();
     judgeCore.judgeQuestion.mockResolvedValue({ isCorrect: false, method: 'ai' });
@@ -506,6 +601,37 @@ describe('submitAnswer', () => {
     await service.submitAnswer(STUDENT_ID, { questionId: QUESTION_ID, studentAnswer: 'x' });
 
     expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({ tierKey }));
+  });
+
+  // --- 主观题 self_assess 路由的真实流（Important 1 复核后的补测，Minor 4b） ---
+
+  it('主观题 self_assess 路由（isCorrect===null, needsSelfAssessment）→ 不清零、仍首答发分；随后 selfAssess 不重复发分', async () => {
+    const { service, remediationRepo, judgeCore, pointsService } = harness();
+    remediationRepo.findItemsBySet.mockResolvedValue([makeItem({ id: ITEM_ID, is_correct: 0 })]);
+    judgeCore.judgeQuestion.mockResolvedValue({ isCorrect: null, method: 'self_assess', needsSelfAssessment: true });
+
+    const first = await service.submitAnswer(STUDENT_ID, { questionId: QUESTION_ID, studentAnswer: 'x' });
+
+    expect(remediationRepo.markItemCorrect).not.toHaveBeenCalled(); // null 不是「答对」，不置对错
+    expect(remediationRepo.deleteSet).not.toHaveBeenCalled();
+    expect(pointsService.award).toHaveBeenCalledTimes(1); // 首答发分（不看对错）
+    expect(first).toMatchObject({
+      isCorrect: null, method: 'self_assess', needsSelfAssessment: true,
+      setCompleted: false, remainingCount: 1,
+    });
+
+    // 学生随后自评：item 已 points_awarded=1 → 不重复发分（只做自清零）
+    pointsService.award.mockClear();
+    remediationRepo.markPointsAwarded.mockClear();
+    remediationRepo.findItemBySetQuestion.mockResolvedValue(makeItem({ id: ITEM_ID, is_correct: 0, points_awarded: 1 }));
+    remediationRepo.findItemsBySet.mockResolvedValue([makeItem({ id: ITEM_ID, is_correct: 1 })]);
+
+    const second = await service.selfAssess(STUDENT_ID, { questionId: QUESTION_ID, assessment: 'correct' });
+
+    expect(pointsService.award).not.toHaveBeenCalled(); // 自评不重复发分（submit 已发过）
+    expect(remediationRepo.markPointsAwarded).not.toHaveBeenCalled();
+    expect(remediationRepo.markItemCorrect).toHaveBeenCalledWith(ITEM_ID);
+    expect(second).toMatchObject({ isCorrect: true, method: 'self_assess', setCompleted: true, remainingCount: 0 });
   });
 
   it('没有进行中的套题 → BadRequest', async () => {

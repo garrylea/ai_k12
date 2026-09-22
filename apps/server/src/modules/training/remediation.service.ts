@@ -116,13 +116,29 @@ export class RemediationService {
       return { setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 };
     }
 
-    // findByIds 只回 is_active=1 的题：已下线错题不进套题（否则套题内永远答不了 → 死锁）
+    // findByIds 只回 is_active=1 的题：已下线错题不进套题（否则套题内永远答不了 → 死锁）。
+    // **守卫必须放在这次查询之后**：原始 id 非空 ≠ 有题可建（错题可能全被下线）。
     const wrongs = await this.questionsRepo.findByIds(wrongIds);
+    if (wrongs.length === 0) {
+      return { setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 };
+    }
+
     let setId = (await this.remediationRepo.findActiveByStudent(studentId, MATH_SUBJECT_ID))?.id ?? null;
+    // 进来时没有 active 套题 = 本次新建 —— 只有这种情况才允许回收空套题（见下）
+    const createdNow = setId === null;
     if (setId === null) {
       setId = await this.remediationRepo.createSet(studentId, MATH_SUBJECT_ID);
     }
     const summary = await this.generator.buildGroups(studentId, setId, wrongs);
+
+    // 错题都在、但全无 primary 考点 → 一组未建（spec §4 的**常规分支**）：套题是 0 组 0 题的空壳，
+    // getOverview 会读到它 → 三卡页显示「待完成相似题专项练习：0 题 / 0 组」。回收它。
+    // ⚠️ 只在**本次新建**时回收：进来时已有 active 套题（追加合并）时 groupsCreated === 0 可能只是
+    // 三元组都已存在 —— 那套题里有题，绝不能删。
+    if (createdNow && summary.groupsCreated === 0) {
+      await this.remediationRepo.deleteSet(setId);
+      return { setId: 0, groupsCreated: 0, itemsCreated: 0, skippedNoKp: 0, aiPendingCount: 0 };
+    }
     return { setId, ...summary };
   }
 
@@ -253,13 +269,18 @@ export class RemediationService {
   }
 
   /**
-   * 作答出口：记尝试 → 置对错 → 首答发分 → 全对清套 → 算剩余。
+   * 作答出口：记尝试 → 首答发分 → 置对错 → 全对清套 → 算剩余。
    *
-   * **发分顺序（用户裁决）**：`award` 成功之后才置 `points_awarded=1`，两步都在 try 内。
-   * 反过来（先置标记再发分）时，award 一旦抖动标记已置 1 → 该题**永久拿不到分**；
-   * 且 DB 失败会让 `submitAnswer` 在判题之后抛错（积分写入不得阻断主链路）。
-   * 这里 award 失败则跳过置标记，下次作答仍会尝试，由 `dedupeKey` 幂等兜底
-   *（`PointsService` 命中重复时返回 `reason: 'duplicate'`，不会重复入账）。
+   * **发分必须在清零之前（用户裁决）**：`award` 成功之后才置 `points_awarded=1`，两步都在 try 内；
+   * 且整个发分块排在 `markItemCorrect` **之前**。反序（先清零再发分）在**答对的题**上留了永久丢分
+   * 路径：award 一抖，item 已是 `is_correct=1` 且 `points_awarded=0`，`requireItem` 会以「该题已答对，
+   * 无需重复作答」把后续作答全部挡掉，套题全对后 item 行还会被物理删除 → 这一题的分**永远拿不到**。
+   * 现在发分块失败时**跳过 `markItemCorrect`**（`is_correct` 保持 0）→ 该题下次仍会重出 →
+   * 发分被重试（对答对/答错都成立），由 `dedupeKey = rem:<item.id>` 幂等兜底
+   *（`PointsService` 命中重复时返回 `reason: 'duplicate'`，不会重复入账）。自愈，无永久丢分。
+   *
+   * award 失败导致本题未清零时，`remainingCount` 会自然把它算进去（它数的是 `is_correct === 0`），
+   * 这是预期行为，不要额外「修正」。
    */
   private async applyOutcome(
     ctx: { set: RemediationSetRow; item: RemediationItemRow },
@@ -274,15 +295,16 @@ export class RemediationService {
   ): Promise<RemediationAnswerResult> {
     const { set, item } = ctx;
     await this.remediationRepo.recordAttempt(item.id);
-    if (isCorrect === true) await this.remediationRepo.markItemCorrect(item.id);
 
-    // 首答即发分（不看对错，每题一次；spec §7）——积分失败绝不影响判题结果
+    // 首答即发分（不看对错，每题一次；spec §7）——积分失败绝不影响判题结果。
+    // **整块排在 markItemCorrect 之前**，理由见方法头注释（答对的题反序会永久丢分）。
     let points: AwardResult | null = null;
+    let pointsBlockFailed = false;
     if (item.points_awarded === 0) {
       const q = await this.questionsRepo.findById(item.question_id);
       if (q) {
         try {
-          points = await this.pointsService.award({
+          const awarded = await this.pointsService.award({
             studentId: set.student_id,
             taskCode: 'remediation_question',
             tierKey: RemediationService.tierKeyOf(q.type),
@@ -290,14 +312,23 @@ export class RemediationService {
             refType: 'question',
             refId: item.question_id,
           });
+          // 只认**本次真正入账**的分：`duplicate` 幂等命中时 award 会回首次分值，那是历史账、
+          // 本次未入账 —— 一律归 0，避免前端弹假 `+N 分`（同 judge-core / training 口径）。
+          points = awarded.reason ? { ...awarded, pointsAwarded: 0 } : awarded;
           // 发分成功后才置标记；若这一步失败，下次仍会尝试 award，
           // 由 dedupeKey 幂等兜底（PointsService 返回 duplicate、不会重复入账）。
           await this.remediationRepo.markPointsAwarded(item.id);
         } catch (err) {
+          pointsBlockFailed = true;
           this.logger.warn(`remediation award failed (item=${item.id}): ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
+
+    // 发分块没走完（award 或置标记抛错）→ **不清零**：否则答对的题会落在
+    // `is_correct=1` + `points_awarded=0` 的死角（`requireItem` 以「该题已答对」挡住重试，
+    // 套题全对后 item 行还会被删）→ 该题的分永久拿不到。保持 0 让该题下次重出、整块重来。
+    if (isCorrect === true && !pointsBlockFailed) await this.remediationRepo.markItemCorrect(item.id);
 
     let setCompleted = false;
     if (isCorrect === true) {
