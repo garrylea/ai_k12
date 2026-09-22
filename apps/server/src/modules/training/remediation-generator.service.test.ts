@@ -1,20 +1,25 @@
 /**
  * RemediationGeneratorService（补偿套题生成器，Task 6）单元测试。
  *
- * 两条铁律被用例钉住：
+ * 三条铁律被用例钉住：
  *
  * 1. `buildGroups` 只做同步工作（三元组成组 + 题库抽题 + 记缺口），LLM 补题一律
  *    fire-and-forget（spec §5.1：LLM 调用无墙钟上限，不得挂在关键路径上）。因此
  *    **断言后台任务必须用 `vi.waitFor` 确定性等待**，不能靠微任务运气。
  * 2. AI 生成题入 `questions` 前必须剥掉 `options[].isCorrect`（spec §5.3 关键铁律）——
  *    否则选项里藏答案，判题前就泄漏。
+ * 3. `buildGroups` 绝不 await 补题（含 `generate` 永不 resolve 时仍必须立即 resolve 的钉子）。
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { RemediationGeneratorService } from './remediation-generator.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 import type { RemediationGroupRow } from '../../database/repositories/remediation.repo.js';
 import type { VariationQuestion } from '../../ai-core/types.js';
+
+// 有 spied Logger.prototype.warn 的用例：用例间必须还原，避免泄漏影响他例。
+afterEach(() => vi.restoreAllMocks());
 
 const STUDENT_ID = 7;
 const SET_ID = 1;
@@ -198,6 +203,63 @@ describe('RemediationGeneratorService.buildGroups', () => {
     expect(questionsRepo.findRandomByKpTypeDifficulty).not.toHaveBeenCalled();
   });
 
+  it('并发下建组撞 uniq_rgroups_triple（ER_DUP_ENTRY）= 已有组：跳过、不抛、不重复抽题/计数', async () => {
+    const { service, questionsRepo, remediationRepo } = harness();
+    questionsRepo.findPrimaryKpIds.mockResolvedValue(new Map([[1, KP_ID]]));
+    // findGroupByTriple 双双落空（并发窗口），后到者 INSERT 撞键
+    remediationRepo.createGroup.mockRejectedValue(
+      Object.assign(new Error("Duplicate entry '1-10-choice-1' for key 'uniq_rgroups_triple'"), {
+        code: 'ER_DUP_ENTRY',
+      }),
+    );
+
+    const res = await service.buildGroups(STUDENT_ID, SET_ID, [makeQuestion({ id: 1 })]);
+
+    expect(res.groupsCreated).toBe(0);
+    expect(res.itemsCreated).toBe(0);
+    expect(res.aiPendingCount).toBe(0);
+    expect(questionsRepo.findRandomByKpTypeDifficulty).not.toHaveBeenCalled();
+    expect(remediationRepo.insertItems).not.toHaveBeenCalled();
+    expect(remediationRepo.updateGroupAiPending).not.toHaveBeenCalled();
+  });
+
+  it('建组遇到非唯一键错误照常抛出（兜底只认 ER_DUP_ENTRY，不吞真故障）', async () => {
+    const { service, questionsRepo, remediationRepo } = harness();
+    questionsRepo.findPrimaryKpIds.mockResolvedValue(new Map([[1, KP_ID]]));
+    remediationRepo.createGroup.mockRejectedValue(
+      Object.assign(new Error('Deadlock found'), { code: 'ER_LOCK_DEADLOCK' }),
+    );
+
+    await expect(service.buildGroups(STUDENT_ID, SET_ID, [makeQuestion({ id: 1 })])).rejects.toThrow(
+      'Deadlock found',
+    );
+  });
+
+  it('铁律：buildGroups 绝不 await LLM 补题（generate 悬挂时 buildGroups 已 resolve 且未触发调用）', async () => {
+    const { service, questionsRepo, remediationRepo, variation } = harness();
+    questionsRepo.findPrimaryKpIds.mockResolvedValue(new Map([[1, KP_ID]]));
+    // 题库抽不到题 -> 缺口 3 -> 触发 fillWithAi；generate 返回永不 resolve 的 promise
+    let release!: (v: unknown) => void;
+    const hanging = new Promise((resolve) => {
+      release = resolve;
+    });
+    variation.generate.mockReturnValue(hanging);
+
+    const res = await service.buildGroups(STUDENT_ID, SET_ID, [makeQuestion({ id: 1 })]);
+
+    // 若 buildGroups await 了补题，永不 resolve 的 generate 会让上面这行永不返回（用例超时）
+    expect(res.aiPendingCount).toBe(3);
+    // 关键断言：buildGroups 已 resolve 的这一刻，LLM 调用尚未发生
+    expect(variation.generate).not.toHaveBeenCalled();
+
+    // 释放悬挂 promise 收尾，不留未决任务
+    release({ variations: [], generatedBy: 'mock-model' });
+    await vi.waitFor(() => expect(variation.generate).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(remediationRepo.updateGroupAiPending).toHaveBeenCalledWith(GROUP_ID, 0),
+    );
+  });
+
   it('放宽阶梯：同档不足时按 ±1 档再抽一轮，且排除原错题与套题已有题', async () => {
     const { service, questionsRepo, remediationRepo } = harness();
     questionsRepo.findPrimaryKpIds.mockResolvedValue(new Map([[1, KP_ID]]));
@@ -275,6 +337,7 @@ describe('RemediationGeneratorService.fillWithAi', () => {
 
   it('校验不过的 AI 题不入库不入套，缺口清零并留日志', async () => {
     const { service, questionsRepo, remediationRepo, variation } = harness();
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
     variation.generate.mockResolvedValue({
       variations: [
         makeVariation({ content: '   ' }), // 题干为空
@@ -291,6 +354,86 @@ describe('RemediationGeneratorService.fillWithAi', () => {
 
     expect(questionsRepo.findOrCreate).not.toHaveBeenCalled();
     expect(remediationRepo.insertItems).not.toHaveBeenCalled();
+
+    // 每题一条可定位的拒绝日志（含 groupId / variationType / 具体原因）
+    const rejected = warnSpy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('rejected'));
+    expect(rejected).toHaveLength(3);
+    expect(rejected[0]).toContain(`group=${GROUP_ID}`);
+    expect(rejected[0]).toContain('variationType=换数');
+    expect(rejected[0]).toContain('题干为空');
+    expect(rejected[1]).toContain('无可解答案');
+    expect(rejected[2]).toContain('choice 选项不足 2 个');
+  });
+
+  it('选择题校验：正确选项数 ≠ 1 或 answer 与正确选项不一致时拒绝入库', async () => {
+    const { service, questionsRepo, remediationRepo, variation } = harness();
+    variation.generate.mockResolvedValue({
+      variations: [
+        // 两个正确选项
+        makeVariation({
+          options: [
+            { label: 'A', text: '甲', isCorrect: true },
+            { label: 'B', text: '乙', isCorrect: true },
+          ],
+          answer: 'A',
+        }),
+        // 没有正确选项
+        makeVariation({
+          options: [
+            { label: 'A', text: '甲', isCorrect: false },
+            { label: 'B', text: '乙', isCorrect: false },
+          ],
+          answer: 'A',
+        }),
+        // answer 指向错误选项 B（正确项是 A）
+        makeVariation({ answer: 'B' }),
+      ],
+      generatedBy: 'mock-model',
+    });
+
+    service.fillWithAi(GROUP_ID, []);
+    await vi.waitFor(() =>
+      expect(remediationRepo.updateGroupAiPending).toHaveBeenCalledWith(GROUP_ID, 0),
+    );
+
+    expect(questionsRepo.findOrCreate).not.toHaveBeenCalled();
+    expect(remediationRepo.insertItems).not.toHaveBeenCalled();
+  });
+
+  it('选择题校验：answer 与正确选项的 text 一致也算通过（compareAnswer 同口径）', async () => {
+    const { service, questionsRepo, remediationRepo, variation } = harness();
+    variation.generate.mockResolvedValue({
+      variations: [makeVariation({ answer: '选项甲' })], // 正确项 label='A' text='选项甲'
+      generatedBy: 'mock-model',
+    });
+
+    service.fillWithAi(GROUP_ID, []);
+    await vi.waitFor(() => expect(questionsRepo.findOrCreate).toHaveBeenCalledTimes(1));
+
+    const row = questionsRepo.findOrCreate.mock.calls[0][0] as any;
+    expect(row.answer).toBe('选项甲');
+    await vi.waitFor(() =>
+      expect(remediationRepo.updateGroupAiPending).toHaveBeenCalledWith(GROUP_ID, 0),
+    );
+  });
+
+  it('撞 hash 复用已有题（未在套题内）时不再 bind 考点（避免同题多挂 primary）', async () => {
+    const { service, questionsRepo, remediationRepo, variation } = harness();
+    variation.generate.mockResolvedValue({
+      variations: [makeVariation()],
+      generatedBy: 'mock-model',
+    });
+    questionsRepo.findOrCreate.mockResolvedValue({ id: 900, created: false });
+
+    service.fillWithAi(GROUP_ID, []);
+    await vi.waitFor(() =>
+      expect(remediationRepo.insertItems).toHaveBeenCalledWith(GROUP_ID, [900]),
+    );
+
+    expect(questionsRepo.bindKnowledgePoint).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(remediationRepo.updateGroupAiPending).toHaveBeenCalledWith(GROUP_ID, 0),
+    );
   });
 
   it('原题或考点已下线：不调 LLM，直接清缺口', async () => {

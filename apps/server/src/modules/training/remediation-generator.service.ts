@@ -3,6 +3,7 @@ import { QuestionsRepository } from '../../database/repositories/questions.repo.
 import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
 import { RemediationRepository } from '../../database/repositories/remediation.repo.js';
 import { VariationCapability } from '../../ai-core/capabilities/variation.capability.js';
+import { compareAnswer } from '../practice/judge-core.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 import type { Difficulty, VariationQuestion } from '../../ai-core/types.js';
@@ -60,7 +61,8 @@ export class RemediationGeneratorService {
       }
       seenTriples.add(tripleKey);
 
-      const groupId = await this.remediationRepo.createGroup(setId, kpId, q.type, q.difficulty, q.id);
+      const groupId = await this.createGroupOrSkip(setId, kpId, q);
+      if (groupId === null) continue; // 撞唯一键 = 该三元组已有组（spec §2 决策 5）
       result.groupsCreated++;
 
       // 放宽阶梯：先同档，再 ±1 档（spec §5.2）
@@ -91,6 +93,30 @@ export class RemediationGeneratorService {
       }
     }
     return result;
+  }
+
+  /**
+   * 建组，撞唯一键 `uniq_rgroups_triple` 时按「已有组」处理（返回 null = 跳过该三元组）。
+   *
+   * 并发（双开 tab / 交卷与专项完成同时触发）下 findGroupByTriple 可能双双落空、双双 INSERT，
+   * 后到者撞键。spec §2 决策 5：INSERT 撞键 = 该三元组已有组，跳过（不重复抽题、不重复计数）。
+   */
+  private async createGroupOrSkip(
+    setId: number,
+    kpId: number,
+    q: QuestionRow,
+  ): Promise<number | null> {
+    try {
+      return await this.remediationRepo.createGroup(setId, kpId, q.type, q.difficulty, q.id);
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'ER_DUP_ENTRY') {
+        this.logger.warn(
+          `remediation group already exists (set=${setId}, kp=${kpId}, type=${q.type}, difficulty=${q.difficulty}): skip`,
+        );
+        return null;
+      }
+      throw err;
+    }
   }
 
   /** AI 补题入口（fire-and-forget）：调用方绝不 await（LLM 无墙钟上限，spec §5.1）。 */
@@ -132,6 +158,9 @@ export class RemediationGeneratorService {
       return;
     }
 
+    const shortfall = group.ai_pending_count;
+    let filled = 0;
+    let rejected = 0;
     try {
       const res = await this.variation.generate({
         originalQuestion: {
@@ -149,8 +178,16 @@ export class RemediationGeneratorService {
       const existing = new Set([...excludeQuestionIds, ...setItems.map((i) => i.question_id)]);
 
       for (const v of res.variations) {
-        if (!this.isValidVariation(v, group.type)) continue; // 轻校验（spec §5.3）
-        const { id } = await this.questionsRepo.findOrCreate({
+        const reason = this.variationRejectionReason(v, group.type);
+        if (reason) {
+          rejected++;
+          // 校验不通过：不入库、不入套题（spec §5.3），留日志便于事后定位被丢弃的题
+          this.logger.warn(
+            `remediation variation rejected (group=${group.id}, kp=${group.kp_id}, type=${group.type}, variationType=${v.variationType}): ${reason}`,
+          );
+          continue;
+        }
+        const { id, created } = await this.questionsRepo.findOrCreate({
           subject_id: MATH_SUBJECT_ID,
           type: group.type,
           difficulty: group.difficulty,
@@ -164,20 +201,45 @@ export class RemediationGeneratorService {
         });
         if (existing.has(id)) continue;
         await this.remediationRepo.insertItems(group.id, [id]);
-        await this.questionsRepo.bindKnowledgePoint(id, group.kp_id, 'primary');
+        // 撞 hash 复用已有题时不再挂 primary：同题可挂多个 primary 会让 findPrimaryKpIds
+        // 的取值随行序漂移（分组不确定）。只有新入库的题才需要补挂考点。
+        if (created) await this.questionsRepo.bindKnowledgePoint(id, group.kp_id, 'primary');
         existing.add(id);
+        filled++;
       }
     } finally {
+      // 缺口清零处留一条「缺口 X → 实补 Y」日志（spec §5.3）
+      this.logger.log(
+        `remediation AI fill (group=${groupId}): 缺口 ${shortfall} → 实补 ${filled}（校验拒绝 ${rejected}）`,
+      );
       // 无论成败都清缺口（spec §5.3）：失败则维持题库抽到的题；悬挂重试只管进程重启场景
       await this.remediationRepo.updateGroupAiPending(groupId, 0);
     }
   }
 
-  private isValidVariation(v: VariationQuestion, type: string): boolean {
-    if (!v.content.trim() || !v.answer.trim()) return false;
+  /** 轻校验（spec §5.3）：返回拒绝原因，null = 通过。 */
+  private variationRejectionReason(v: VariationQuestion, type: string): string | null {
+    if (!v.content.trim()) return '题干为空';
+    if (!v.answer.trim()) return '无可解答案';
     if (type === 'choice') {
-      return Array.isArray(v.options) && v.options.length >= 2;
+      if (!Array.isArray(v.options) || v.options.length < 2) {
+        return `choice 选项不足 2 个（实际 ${v.options?.length ?? 0}）`;
+      }
+      // 有且仅有一个正确选项：多个/零个都会让判题（choice 走程序比对）行为不确定
+      const correct = v.options.filter((o) => o.isCorrect === true);
+      if (correct.length !== 1) {
+        return `choice 正确选项应恰有 1 个（实际 ${correct.length}）`;
+      }
+      // 答案与正确选项一致：与 judge-core.compareAnswer 同口径（归一化后比对）——
+      // 命中正确选项的 label，或命中其 text（题库 choice 题答案常直接写选项文本）。
+      const optsJson = JSON.stringify(v.options);
+      if (
+        !compareAnswer(v.answer, correct[0].label, optsJson) &&
+        !compareAnswer(v.answer, correct[0].text, optsJson)
+      ) {
+        return `choice 答案与正确选项不一致（answer=${v.answer}，正确项 ${correct[0].label}）`;
+      }
     }
-    return true;
+    return null;
   }
 }
