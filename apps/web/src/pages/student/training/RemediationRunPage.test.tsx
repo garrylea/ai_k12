@@ -73,11 +73,11 @@ describe('RemediationRunPage', () => {
    * 末题答对：完成处理幂等，且收尾不再多发一次拉题。
    *
    * 末题答对时「submit 返回 setCompleted」先触发完成并 navigate 离开；runner 之后仍会再触发
-   * 一次 onFinish，`handleFinish` 靠 completedRef 早退把它拦下 —— 所以收尾那次重拉根本不会发出。
-   * 两条断言各钉一个机制（分别对应源码里两处 completedRef 用法）：
-   *  - 「只弹一次 success」= `handleCompleted` 内的幂等守卫（去掉它完成处理会跑两次 → 2 条 toast）；
-   *  - 「getRemediationQuestions 只调 1 次」= `handleFinish` 顶部的 completedRef 早退
-   *    （去掉它，onFinish 会真的再拉一次 → 变 2 次；那条多出来的请求若失败还会把学生拖进判题死态）。
+   * 一次 onFinish。修复后 `handleFinish` 靠顶部的 completedRef 早退把这次多余重拉整个拦下。
+   * 两条断言各钉一个机制：
+   *  - 「getRemediationQuestions 只调 1 次」钉 `handleFinish` 顶部的早退：单独去掉它即变红（1 → 2 次）。
+   *  - 「只弹一次 success」是用户可见不变量，钉 `handleCompleted` 的幂等守卫。因早退已先挡住第二条
+   *    完成路径，单独去掉该守卫不会变红，只有两处守卫同时去掉才会变 2 条 toast（已实测）。
    */
   it('末题答对：完成处理幂等、收尾不再重拉，只弹一次「已清零」', async () => {
     const user = userEvent.setup();
@@ -111,7 +111,7 @@ describe('RemediationRunPage', () => {
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith('success', '套题全部答对，已清零'),
     );
-    // 幂等钉子：去掉 handleCompleted 的 completedRef 守卫会变 2
+    // 幂等不变量：两处 completedRef 守卫都在时只会有这一条 success
     expect(toastMock.mock.calls.filter(([t]) => t === 'success')).toHaveLength(1);
     // 早退钉子：去掉 handleFinish 顶部的 completedRef 早退，收尾那次重拉会真的发出 → 变 2
     expect(getRemediationQuestions).toHaveBeenCalledTimes(1);
