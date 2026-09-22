@@ -86,6 +86,7 @@
 
 - 复用 ai-core `variation` 场景（基于原错题换数 / 换场景 / 调条件），无需新增场景路由。
 - 轻校验（照 `variation_questions.validator_passed` 先例）：题干完整、题型合法、有可解答案；数学题过逻辑自洽校验（§7.10 风控要求）——**本期未实现，延后到后续批次**：需要新增「题目逻辑自洽性」校验能力（题目内部条件与结论是否自洽的判定），范围超出本期；服务端亦无 `validator_passed` 写入方。
+- **答案归一仅覆盖 `choice`；`true_false` 同类归一延后（当前不可达）**：`choice` 已把入库 `answer` 归一为正确选项的 **label**（前端提交 label、判题只认 label，见实现 `toStoredAnswer`），但 `true_false` **未**归一——前端判断题走默认选项 `对`/`错`（`QuestionRunner.tsx` 的 `q.type === 'true_false'` 分支），若 AI 把 answer 写成「正确」/「T」之类，学生提交 `对`/`错` 会**恒判错**（与 choice 修复前的隐患同类）。**本期不实现**，理由：套题组类型只能来自原错题题型，而数学题库（`subject_id=1`）当前**无任何 `true_false` 题**，`true_false` 组**不可达**。**若将来题库引入判断题，必须同样把 answer 归一到 `对`/`错` 并强制 `options=null`**（对齐前端默认选项）。
 - 入库 `questions`：`source='remediation'`、`answer_verified=0`、`content_hash` 去重（复用辅轨规则，撞 hash 复用已有题 ID）。**不复用 `variation_questions` 表**（它挂 `original_error_item_id`，语义是「错题再错变式」，来源不同）。
 - 校验不通过的 AI 题不入库、不入套题；该组维持题库抽到的题（可少于 3 题），`ai_pending_count` 清零并留日志。
 
