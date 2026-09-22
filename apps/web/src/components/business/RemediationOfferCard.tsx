@@ -41,7 +41,8 @@ export function RemediationOfferCard({ source, sessionId, wrongCount, wrongQuest
 
   return (
     <Banner
-      type="info"
+      // 用 warning（橘底）而非 info（蓝底）：info 的蓝是家长端 brand 色，学生端统一 brand 橘红
+      type="warning"
       title={`本次错了 ${wrongCount} 道题，生成相似题专项练习？`}
       description="按考点每组配 3 题，逐题作答，答对清零、全对清套"
       action={
