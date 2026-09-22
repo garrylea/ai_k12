@@ -26,6 +26,18 @@ function toDifficulty(value: number): Difficulty {
   return 2;
 }
 
+/** choice 题入库答案归一：前端提交的是选项 label（ChoiceOptionList 提交 opt.label），
+ *  而 judge-core.compareAnswer 只按 **label** 命中选项（`opts.find(o => normalizeAnswer(o.label) === a)`），
+ *  且入库时 options 已剥掉 isCorrect、判题必然退化为「label === answer」比对 ——
+ *  故 answer 必须以正确选项的 label 入库。否则 AI 若把 answer 写成选项文本（如 "2"），
+ *  学生提交 label（如 "B"）会**恒判错**。
+ *  调用前必须已过 variationRejectionReason 的「恰有 1 个 isCorrect」校验。 */
+function toStoredAnswer(v: VariationQuestion, type: string): string {
+  if (type !== 'choice') return v.answer;
+  const correct = (v.options ?? []).find((o) => o.isCorrect === true);
+  return correct?.label ?? v.answer;
+}
+
 @Injectable()
 export class RemediationGeneratorService {
   private readonly logger = new Logger(RemediationGeneratorService.name);
@@ -194,7 +206,8 @@ export class RemediationGeneratorService {
           content: v.content,
           // 选项只存 label/text，**绝不存 isCorrect**（防答案泄漏；spec 关键铁律）
           options: v.options ? JSON.stringify(v.options.map(({ label, text }) => ({ label, text }))) : null,
-          answer: v.answer,
+          // choice 答案以正确选项 label 归一（见 toStoredAnswer）；非 choice 原样透传
+          answer: toStoredAnswer(v, group.type),
           explanation: v.explanation,
           source: 'remediation',
           content_hash: computeContentHash(v.content),

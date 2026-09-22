@@ -9,6 +9,8 @@
  * 2. AI 生成题入 `questions` 前必须剥掉 `options[].isCorrect`（spec §5.3 关键铁律）——
  *    否则选项里藏答案，判题前就泄漏。
  * 3. `buildGroups` 绝不 await 补题（含 `generate` 永不 resolve 时仍必须立即 resolve 的钉子）。
+ * 4. choice 题入库 `answer` 必须归一为正确选项的 **label**：前端提交 label、判题 `compareAnswer`
+ *    只按 label 命中选项，若沿用 AI 写成的选项文本则学生提交 label 会**恒判错**（回归钉子）。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Logger } from '@nestjs/common';
@@ -400,7 +402,7 @@ describe('RemediationGeneratorService.fillWithAi', () => {
     expect(remediationRepo.insertItems).not.toHaveBeenCalled();
   });
 
-  it('选择题校验：answer 与正确选项的 text 一致也算通过（compareAnswer 同口径）', async () => {
+  it('选择题校验：answer 与正确选项的 text 一致也算通过（compareAnswer 同口径），但入库归一为 label', async () => {
     const { service, questionsRepo, remediationRepo, variation } = harness();
     variation.generate.mockResolvedValue({
       variations: [makeVariation({ answer: '选项甲' })], // 正确项 label='A' text='选项甲'
@@ -411,7 +413,40 @@ describe('RemediationGeneratorService.fillWithAi', () => {
     await vi.waitFor(() => expect(questionsRepo.findOrCreate).toHaveBeenCalledTimes(1));
 
     const row = questionsRepo.findOrCreate.mock.calls[0][0] as any;
-    expect(row.answer).toBe('选项甲');
+    // 校验用 text 命中通过，但入库 answer 必须归一为 label（判题只认 label）
+    expect(row.answer).toBe('A');
+    await vi.waitFor(() =>
+      expect(remediationRepo.updateGroupAiPending).toHaveBeenCalledWith(GROUP_ID, 0),
+    );
+  });
+
+  it('选择题 answer 写成选项文本时归一为正确选项 label（防「学生提交 label 恒判错」）', async () => {
+    const { service, questionsRepo, remediationRepo, variation } = harness();
+    variation.generate.mockResolvedValue({
+      variations: [
+        makeVariation({
+          options: [
+            { label: 'A', text: '1', isCorrect: false },
+            { label: 'B', text: '2', isCorrect: true },
+          ],
+          answer: '2', // AI 把答案写成正确选项的 text，而非 label
+        }),
+      ],
+      generatedBy: 'mock-model',
+    });
+
+    service.fillWithAi(GROUP_ID, []);
+    await vi.waitFor(() => expect(questionsRepo.findOrCreate).toHaveBeenCalledTimes(1));
+
+    const row = questionsRepo.findOrCreate.mock.calls[0][0] as any;
+    // 回归钉子：学生提交 label 'B'，入库 answer 必须是 'B' 而非 '2'，否则 compareAnswer 恒判错
+    expect(row.answer).toBe('B');
+    expect(row.answer).not.toBe('2');
+    // 选项仍只存 label/text（防泄漏）
+    expect(JSON.parse(row.options)).toEqual([
+      { label: 'A', text: '1' },
+      { label: 'B', text: '2' },
+    ]);
     await vi.waitFor(() =>
       expect(remediationRepo.updateGroupAiPending).toHaveBeenCalledWith(GROUP_ID, 0),
     );
