@@ -105,7 +105,7 @@ export interface JudgeCoreQuestionInput {
   subjectId: number;
   questionId: number;        // 题中心：必传（训练题必来自题库）
   studentAnswer: string;
-  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'practice'
+  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'practice' | 'remediation'
   sourceRefId?: number | null; // 考试传 session_id；practice 沿用现结构不经过此变体
 }
 
@@ -231,6 +231,18 @@ export class JudgeCoreService {
     }
 
     let errorBookId: number | undefined;
+
+    // 补偿套题（2026-09-21，spec §6/§8）：套题自清零——不入错题本、不清零原错题、不发 error_fix
+    //（原错题已按 §7.4 入本，套题内做错不重复记账）。答错仍触发解析缓存（fire-and-forget，
+    // 无害）供套题作答反馈复用；掌握度回写保留（finishJudge，派生数据与判题来源无关）。
+    if (input.source === 'remediation') {
+      if (!isCorrect) {
+        this.explanationCache.ensureExplanation(q);
+      }
+      return this.finishJudge(input.studentId, {
+        questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0,
+      });
+    }
 
     if (!isCorrect) {
       // 答错 -> 触发解析缓存生成（fire-and-forget；q 必非空，explanation 已有/长答案直写，见 ExplanationCacheService）

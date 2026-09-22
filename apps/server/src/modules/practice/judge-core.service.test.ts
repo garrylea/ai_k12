@@ -453,6 +453,74 @@ describe('recordSelfAssessment', () => {
   });
 });
 
+describe('JudgeCoreService.judgeQuestion — remediation 来源（补偿套题自清零，spec §6/§8）', () => {
+  // 题型 choice + 无 isCorrect 标记 -> 走 exact 字符串比对，不依赖 AI 判定：
+  // answer='B'，答 'A' 判错、答 'B' 判对。
+  const remediationQ = {
+    id: 11, subject_id: 1, type: 'choice', difficulty: 1,
+    content: '1+1=?', options: JSON.stringify([{ label: 'A', text: '1' }, { label: 'B', text: '2' }]),
+    answer: 'B', explanation: null, source: null, content_hash: null, is_active: 1, created_at: new Date(),
+  };
+  /** cleared=1：若早退分支失效、误走清零路径，award 会被真的调到 —— 让「不发 error_fix」断言有区分力。 */
+  const mkRemediationDeps = () => mk({
+    questionsRepo: {
+      findById: vi.fn().mockResolvedValue(remediationQ),
+      findByContentHash: vi.fn(), findOrCreate: vi.fn(), deleteById: vi.fn(),
+    },
+    mainErrorRepo: {
+      create: vi.fn().mockResolvedValue(42),
+      findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
+      clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
+    },
+  });
+  const judge = (svc: JudgeCoreService, studentAnswer: string) =>
+    svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 11, studentAnswer, source: 'remediation' });
+
+  it('判错：不入错题本（create/findUncleared 都不调），仍触发解析缓存', async () => {
+    const deps = mkRemediationDeps();
+    const svc = mkSvc(deps);
+    const r = await judge(svc, 'A');
+    expect(r.isCorrect).toBe(false);
+    expect(r.errorBookId).toBeUndefined();
+    expect(r.pointsAwarded).toBe(0);
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.mainErrorRepo.findUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+    // 解析缓存保留（fire-and-forget，供套题作答反馈复用；无害）
+    expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith(remediationQ);
+  });
+
+  it('判对：不清零原错题、不发 error_fix 分', async () => {
+    const deps = mkRemediationDeps();
+    const svc = mkSvc(deps);
+    const r = await judge(svc, 'B');
+    expect(r.isCorrect).toBe(true);
+    expect(r.errorBookId).toBeUndefined();
+    expect(r.pointsAwarded).toBe(0);
+    expect(r.awardReason).toBeUndefined();
+    expect(deps.mainErrorRepo.clearUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+    expect(deps.pointsService.award).not.toHaveBeenCalled();
+    expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
+  });
+
+  it('掌握度回写保留（出口收尾与判题来源无关）', async () => {
+    const deps = mkRemediationDeps();
+    const svc = mkSvc(deps);
+    await judge(svc, 'A');
+    await Promise.resolve();
+    expect(deps.masteryService.recordFromJudge).toHaveBeenCalledWith({
+      studentId: 1, questionId: 11, isCorrect: false,
+    });
+  });
+
+  it('非 remediation 来源（targeted）行为不变：判错仍入错题本', async () => {
+    // 防回归钉子：早退分支只认 'remediation'，不得波及既有来源。
+    const deps = mkRemediationDeps();
+    const svc = mkSvc(deps);
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 11, studentAnswer: 'A', source: 'targeted' });
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({ source: 'targeted', question_id: 11 }));
+  });
+});
+
 describe('JudgeCoreService.judgeQuestion — 掌握度回写接线（埋点 Phase 1B）', () => {
   it('客观题判完会把对错交给 MasteryService（fire-and-forget，不拖慢判题）', async () => {
     const deps = mk({
