@@ -584,6 +584,8 @@ git commit -m "feat(repo): 错题补偿套题三表仓储（RemediationRepositor
 - Create: `apps/server/src/modules/training/remediation-generator.service.ts`
 - Create: `apps/server/src/modules/training/remediation-generator.service.test.ts`
 
+> **延后项（本期未实现）**：spec §5.3 的「数学题过逻辑自洽校验（§7.10 风控要求）」本期未实现，延后到后续批次 —— 需新增「题目逻辑自洽性」校验能力，范围超出本期；服务端亦无 `validator_passed` 写入方。
+
 - [ ] **Step 1: 写测试（失败）**
 
 `apps/server/src/modules/training/remediation-generator.service.test.ts`，mock questionsRepo/knowledgePointsRepo/remediationRepo/variation，构造 service 新实例：

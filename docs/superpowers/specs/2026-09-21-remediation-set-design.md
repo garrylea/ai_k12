@@ -85,7 +85,7 @@
 ### 5.3 AI 生成与入库
 
 - 复用 ai-core `variation` 场景（基于原错题换数 / 换场景 / 调条件），无需新增场景路由。
-- 轻校验（照 `variation_questions.validator_passed` 先例）：题干完整、题型合法、有可解答案；数学题过逻辑自洽校验（§7.10 风控要求）。
+- 轻校验（照 `variation_questions.validator_passed` 先例）：题干完整、题型合法、有可解答案；数学题过逻辑自洽校验（§7.10 风控要求）——**本期未实现，延后到后续批次**：需要新增「题目逻辑自洽性」校验能力（题目内部条件与结论是否自洽的判定），范围超出本期；服务端亦无 `validator_passed` 写入方。
 - 入库 `questions`：`source='remediation'`、`answer_verified=0`、`content_hash` 去重（复用辅轨规则，撞 hash 复用已有题 ID）。**不复用 `variation_questions` 表**（它挂 `original_error_item_id`，语义是「错题再错变式」，来源不同）。
 - 校验不通过的 AI 题不入库、不入套题；该组维持题库抽到的题（可少于 3 题），`ai_pending_count` 清零并留日志。
 
