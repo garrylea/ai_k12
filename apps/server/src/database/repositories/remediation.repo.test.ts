@@ -84,6 +84,19 @@ describe('RemediationRepository.findOrCreateActiveSet', () => {
 
     await expect(repo.findOrCreateActiveSet(7, 1)).rejects.toThrow('boom');
   });
+
+  it('撞键后回查落空（赢家在这一瞬被清套）→ 原样抛出，不返回 undefined 型 id', async () => {
+    const pool = {
+      execute: vi.fn().mockImplementation((sql: string) =>
+        sql.trim().toUpperCase().startsWith('SELECT')
+          ? (Promise.resolve([[], []]) as any) // 两次 SELECT 都落空
+          : (Promise.reject(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' })) as any),
+      ),
+    };
+    const repo = new RemediationRepository(pool as any);
+
+    await expect(repo.findOrCreateActiveSet(7, 1)).rejects.toThrow('dup');
+  });
 });
 
 describe('RemediationRepository.insertItems', () => {

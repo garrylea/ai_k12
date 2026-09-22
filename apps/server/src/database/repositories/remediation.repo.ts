@@ -54,7 +54,9 @@ export class RemediationRepository {
    * 处理（同 `createGroupOrSkip` 的先例），返回既有 id 且 `created=false`。
    *
    * ⚠️ 调用方**不得**在 `created=false` 时回收「空套题」——那可能是并发请求刚建好、组还没落库的套题，
-   * 删掉会把对方刚建的组级联清空（T7-M1 同类数据丢失）。
+   * 删掉会把对方刚建的组级联清空。注意这是与 T7-M1 **同类**的数据丢失，但**不是** T7-M1 本身：
+   * T7-M1 说的是 `createdNow === true` 的一方在 `groupsCreated === 0` 时回收，可能删掉并发方刚建好的组；
+   * 本唯一键**不覆盖**那条路径，T7-M1 仍然敞开。
    */
   async findOrCreateActiveSet(
     studentId: number,

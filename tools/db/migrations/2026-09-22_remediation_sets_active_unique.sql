@@ -20,6 +20,9 @@
 --     ⚠️ 别用临时表验证这类事：临时表没有外键，STORED 在临时表上能过，会得出假阳性。
 --
 -- 幂等：加列/加索引都带 information_schema 守卫，重复执行无副作用。
+--       ⚠️ 例外：若表里**已有**同一 (student_id, subject_id) 的多条 active 行（本迁移之前并发插入的脏数据），
+--       第 2 步 ADD UNIQUE KEY 会以 ERROR 1062 中止（响亮失败，不是静默）。此时需先人工清理重复 active 行
+--       （保留 id 最小的那条，其余 DELETE）再重跑；第 1 步的加列已提交，重跑会从第 2 步续上，不会更脏。
 -- 回滚：ALTER TABLE remediation_sets DROP KEY uniq_rsets_active, DROP COLUMN active_student_id;
 
 -- ── 1. 加条件式生成列（MySQL 8/9 无 ADD COLUMN IF NOT EXISTS，只能守卫）──
