@@ -13,6 +13,12 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { EnglishWordJudgeCapability } from '../../ai-core/capabilities/english-word-judge.capability.js';
 import { ChineseMeaningJudgeCapability } from '../../ai-core/capabilities/chinese-meaning-judge.capability.js';
+import { VariationCapability } from '../../ai-core/capabilities/variation.capability.js';
+import { RemediationController } from './remediation.controller.js';
+import { RemediationService } from './remediation.service.js';
+import { RemediationGeneratorService } from './remediation-generator.service.js';
+import { RemediationRepository } from '../../database/repositories/remediation.repo.js';
+import { ExamSessionsRepository } from '../../database/repositories/exam-sessions.repo.js';
 
 /**
  * 错题训练模块（Task 1 骨架 + Task 2 判题 + Task 3 提示缓存 + Task 8 专项练习 + Task 7 解析拉取）。
@@ -38,10 +44,16 @@ import { ChineseMeaningJudgeCapability } from '../../ai-core/capabilities/chines
  *
  * `TrainingSessionsRepository`（Task 12）在本模块 providers 里另起一份实例：`PointsModule`
  * 只导出 service 不导出 repo，而仓储是**无状态**的（只有一个连接池），两份实例不会分裂任何状态。
+ *
+ * 错题补偿套题（2026-09-21）仍走独立 controller/service（`/api/training/remediation`）：
+ * `RemediationService` 的 `JudgeCoreService`/`PointsService` 由 imports 提供（**勿重复 provide**），
+ * 其余依赖（含 `RemediationRepository`、`ExamSessionsRepository`）在本模块 provide；
+ * `RemediationGeneratorService` 的 `VariationCapability` 与其它 ai-core capability 一样不写
+ * `@Injectable()`、构造参数可选，列进 providers 由 Nest 直接零参 new。
  */
 @Module({
   imports: [PracticeModule, PointsModule],
-  controllers: [TrainingController, VocabularyController, MeaningController],
-  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository, SpecialPracticeLogsRepository],
+  controllers: [TrainingController, VocabularyController, MeaningController, RemediationController],
+  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository, SpecialPracticeLogsRepository, RemediationService, RemediationGeneratorService, RemediationRepository, ExamSessionsRepository, VariationCapability],
 })
 export class TrainingModule {}
