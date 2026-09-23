@@ -2531,12 +2531,19 @@ export default function WeakPointGraphPage() {
   // null = 还没拉到档位（加载中）或没有可用档位（家长停用）——两种都由界面表达，见 PracticeAction。
   const practiceCount = tiers == null ? null : pickPracticeCount(tiers);
 
-  /** 「开始补这个」的界面状态：四种都靠控件本身表达，不用文案解释。 */
+  /**
+   * 「开始补这个」的界面状态：四种都靠控件本身表达，不用文案解释。
+   *
+   * **必须先判 `tierError` 再判 `tiers == null`**：`usePointTiers` 在拉取失败时会把
+   * `tiers` 一并清成 `null`（`point-tiers.ts` 的 catch 分支），所以「失败」与「加载中」
+   * 在 `tiers` 上同形。若先判 `tiers == null`，`failed` 会成为永远走不到的死分支，
+   * 失败态又退回成一个转圈的假加载 —— 正是本项要修的「状态塌成一种」。
+   */
   const practiceState: PracticeActionState =
-    tiers == null
-      ? 'loading'
-      : tierError != null
-        ? 'failed'
+    tierError != null
+      ? 'failed'
+      : tiers == null
+        ? 'loading'
         : practiceCount == null
           ? 'unavailable'
           : 'ready';
@@ -3068,14 +3075,32 @@ const getWeakPointsMock = vi.mocked(getWeakPoints);
 const getMyPointRulesMock = vi.mocked(getMyPointRules);
 ```
 
-在 `beforeEach` 里补 reset + 默认返回（档位给一个可用档，避免页面停在「重试」态）：
+在 `beforeEach` 里补 reset + 默认返回（档位给一个可用档，避免页面停在「重试」态）。
+
+⚠️ **字段必须给全**：本文件用的是 `vi.mocked(getMyPointRules)`（**带真实类型**，与 `WeakPointGraphPage.test.tsx` 的 `vi.hoisted(() => vi.fn())` 不同），`PointRuleTier` 要求 `tierKey / tierLabel / points / dailyLimit / completedToday / remainingToday / isActive` 齐全，缺字段 `npx tsc -b` 会报 TS2740：
 
 ```tsx
   getKnowledgeGraphMasteryMock.mockReset();
   getWeakPointsMock.mockReset();
   getMyPointRulesMock.mockReset();
   getMyPointRulesMock.mockResolvedValue({
-    tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [{ tierKey: '3' }] }],
+    tasks: [
+      {
+        taskCode: 'math_targeted',
+        taskName: '数学专项',
+        tiers: [
+          {
+            tierKey: '3',
+            tierLabel: '3 题',
+            points: 8,
+            dailyLimit: null,
+            completedToday: null,
+            remainingToday: null,
+            isActive: true,
+          },
+        ],
+      },
+    ],
   });
 ```
 
