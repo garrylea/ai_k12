@@ -2296,7 +2296,7 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
 
     // 失败不是「灰着不动」：给可操作的重试控件，而不是一行说明文字
     expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
-    const retry = screen.getByRole('button', { name: '重试' });
+    const retry = screen.getByRole('button', { name: '重试档位' });
 
     getMyPointRules.mockResolvedValue({
       tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [{ tierKey: '3' }] }],
@@ -2331,6 +2331,19 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
     const cta = await screen.findByRole('button', { name: '开始补这个' });
     expect(cta).toBeDisabled();
     expect(cta.querySelector('.animate-spin')).not.toBeNull();
+  });
+
+  it('推荐条与详情栏同时给出重试时，名字可区分（详情栏带知识点名）', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockRejectedValue(new Error('boom'));
+
+    await renderSettled();
+    fireEvent.click(screen.getByRole('button', { name: /数与式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '有理数' }));
+
+    expect(screen.getByRole('button', { name: '重试档位' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重试档位：有理数' })).toBeInTheDocument();
   });
 });
 
@@ -2390,7 +2403,21 @@ describe('WeakPointGraphPage 页脚与错误态', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '重试图谱' })).toBeInTheDocument();
+  });
+
+  it('图谱与档位同时失败：两个重试控件各有可区分的可访问名（不撞同名）', async () => {
+    getKnowledgeGraphMastery.mockRejectedValue(new Error('boom'));
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockRejectedValue(new Error('boom'));
+
+    renderPage();
+
+    // 推荐条（重试档位）与主体错误块（重试图谱）会同时出现——名字必须不同，
+    // 否则屏幕阅读器听到一串无法区分的「重试」，getByRole 也会撞 multiple elements。
+    expect(await screen.findByRole('button', { name: '重试图谱' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '重试档位' })).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: '重试' })).toHaveLength(0);
   });
 
   it('全灰树不显示「暂无数据」（不是错误态）', async () => {
@@ -2630,6 +2657,7 @@ export default function WeakPointGraphPage() {
                   <PracticeAction
                     state={practiceState}
                     starting={starting}
+                    retryLabel="重试档位"
                     onStart={() => void startPractice(rec.recommendation!.knowledgePointId)}
                     onRetry={retryTiers}
                   />
@@ -2668,7 +2696,7 @@ export default function WeakPointGraphPage() {
         {masteryError ? (
           <div className="mt-12 flex flex-col items-center gap-4">
             <p className="text-[var(--text-secondary)]">图谱加载失败</p>
-            <Button variant="primary" onClick={() => void loadMastery()}>
+            <Button variant="primary" aria-label="重试图谱" onClick={() => void loadMastery()}>
               重试
             </Button>
           </div>
@@ -2847,7 +2875,13 @@ function KpDetail({
         <Button variant="secondary" size="sm" onClick={onViewErrors}>
           看这个知识点的错题
         </Button>
-        <PracticeAction state={practiceState} starting={starting} onStart={onStart} onRetry={onRetry} />
+        <PracticeAction
+          state={practiceState}
+          starting={starting}
+          retryLabel={`重试档位：${node.name}`}
+          onStart={onStart}
+          onRetry={onRetry}
+        />
       </div>
     </div>
   );
@@ -2862,22 +2896,29 @@ type PracticeActionState = 'loading' | 'failed' | 'unavailable' | 'ready';
  * - `failed`：档位加载失败 → 换成**「重试」按钮**（可操作控件，不是说明文字）
  * - `unavailable`：家长停用了全部档位 → **不渲染**（不提供点不动的死按钮，只留「看错题」）
  * - `ready`：正常可点
+ *
+ * `retryLabel` 是「重试」按钮的**可访问名**，必须由调用方按所在区域给具体值：
+ * 页面上可能同时存在多个重试控件（图谱整页重试、推荐条重试、详情栏重试），
+ * 一律叫「重试」会让屏幕阅读器听到一串无法区分的同名按钮，测试也会撞
+ * 「Found multiple elements」。
  */
 function PracticeAction({
   state,
   starting,
+  retryLabel,
   onStart,
   onRetry,
 }: {
   state: PracticeActionState;
   starting: boolean;
+  retryLabel: string;
   onStart: () => void;
   onRetry: () => void;
 }) {
   if (state === 'unavailable') return null;
   if (state === 'failed') {
     return (
-      <Button variant="secondary" size="sm" onClick={onRetry}>
+      <Button variant="secondary" size="sm" aria-label={retryLabel} onClick={onRetry}>
         重试
       </Button>
     );
@@ -2899,7 +2940,7 @@ function PracticeAction({
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/WeakPointGraphPage.test.tsx`
-Expected: PASS（22 用例全绿：折叠树 3 + 详情栏 4 + 推荐条 6 + **档位状态 3** + confidence 三态 2 + 页脚与错误态 4）
+Expected: PASS（24 用例全绿：折叠树 3 + 详情栏 4 + 推荐条 6 + **档位状态 4** + confidence 三态 2 + 页脚与错误态 5）
 
 - [ ] **Step 5: 提交**
 
