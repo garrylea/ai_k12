@@ -1694,6 +1694,16 @@ describe('heatForLevel', () => {
     // 2.6 → 3（四舍五入到最近档）
     expect(heatForLevel(2.6).background).toBe(heatForLevel(3).background);
   });
+
+  it('NaN 兜底到 level 0，不产出 undefined 颜色（畸形载荷防线）', () => {
+    expect(heatForLevel(NaN).background).toBe(heatForLevel(0).background);
+    expect(heatForLevel(NaN).background).not.toContain('undefined');
+  });
+
+  it('±Infinity 仍走夹取（守卫只拦 NaN，不反转无穷的语义）', () => {
+    expect(heatForLevel(Infinity).background).toBe(heatForLevel(5).background);
+    expect(heatForLevel(-Infinity).background).toBe(heatForLevel(0).background);
+  });
 });
 
 describe('heatForNode', () => {
@@ -1833,7 +1843,11 @@ export const NEUTRAL_HEAT: HeatStyle = {
 
 /** 由 level 取热力样式；level 越界或非整数一律夹/四舍五入到 0–5。 */
 export function heatForLevel(level: number): HeatStyle {
-  const clamped = Math.min(5, Math.max(0, Math.round(level)));
+  // NaN 单独兜底：`Math.round(NaN)` → NaN 会一路穿透到 `HEAT_ALPHA[NaN]` === undefined，
+  // 产出 `rgba(255, 107, 53, undefined)` 这种非法颜色（畸形载荷防线）。
+  // **只拦 NaN，不用 `Number.isFinite`**——±Infinity 走下面的夹取本就正确
+  // （+∞→5、-∞→0），换成 isFinite 会把它反转成 0，语义反而错。
+  const clamped = Number.isNaN(level) ? 0 : Math.min(5, Math.max(0, Math.round(level)));
   const alpha = HEAT_ALPHA[clamped];
   return {
     background: `rgba(${BRAND_RGB}, ${alpha})`,
@@ -2106,7 +2120,10 @@ describe('WeakPointGraphPage 详情栏', () => {
     fireEvent.click(screen.getByRole('button', { name: '有理数' }));
 
     expect(screen.getByText('对 4 错 6')).toBeInTheDocument();
-    expect(screen.getByText(/样本 10 题/)).toBeInTheDocument();
+    // 必须用**精确串**而非正则：`/样本 10 题/` 会同时命中推荐条的
+    // 「掌握度 40% · 样本 10 题 · 可抽 7 题」与详情栏的「样本 10 题」→ getByText 因多命中而抛错。
+    // 精确串只命中详情栏（推荐条那个节点的 textContent 还含前后文）。
+    expect(screen.getByText('样本 10 题')).toBeInTheDocument();
   });
 
   it('样本不足的 KP：详情栏注明「暂不判定强弱」', async () => {
@@ -2407,7 +2424,10 @@ export default function WeakPointGraphPage() {
     };
   }, []);
 
-  const nodes = mastery?.nodes ?? [];
+  // 必须 useMemo：`mastery?.nodes ?? []` 每次渲染都是**新数组身份**，会让下面三个
+  // 记忆化钩子（parents / childrenOf / nodeById）每帧重算、等于白写，且触发 3 条
+  // react-hooks/exhaustive-deps 警告（训练目录原本 lint 干净）。
+  const nodes = useMemo(() => mastery?.nodes ?? [], [mastery]);
 
   const parents = useMemo(() => nodes.filter((n) => n.parentId == null), [nodes]);
   const childrenOf = useCallback(
@@ -2735,7 +2755,7 @@ function KpDetail({
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/WeakPointGraphPage.test.tsx`
-Expected: PASS（16 用例全绿）
+Expected: PASS（19 用例全绿：折叠树 3 + 详情栏 4 + 推荐条 6 + confidence 三态 2 + 页脚与错误态 4）
 
 - [ ] **Step 5: 提交**
 
