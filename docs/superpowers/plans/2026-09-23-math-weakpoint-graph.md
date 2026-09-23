@@ -935,7 +935,8 @@ describe('KnowledgeGraphService.getWeakPoints', () => {
         listBySubject: vi.fn().mockResolvedValue([
           // 同分（0.5），error_count 大者在前
           { knowledgePointId: 11, masteryScore: 0.5, level: 2, correctCount: 5, errorCount: 5, lastSeenAt: seen },
-          { knowledgePointId: 21, masteryScore: 0.5, level: 2, correctCount: 2, errorCount: 2, lastSeenAt: seen },
+          // ⚠️ 样本量必须 ≥ MIN_SAMPLE_SIZE（3+3=6），否则会被闸门 2 排除、这个用例就测不到排序了
+          { knowledgePointId: 21, masteryScore: 0.5, level: 2, correctCount: 3, errorCount: 3, lastSeenAt: seen },
           // 分最低，排第一
           { knowledgePointId: 12, masteryScore: 0.2, level: 1, correctCount: 1, errorCount: 4, lastSeenAt: seen },
         ]),
