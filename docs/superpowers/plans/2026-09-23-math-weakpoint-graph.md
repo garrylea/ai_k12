@@ -4,7 +4,7 @@
 
 **Goal:** 学生端训练轨新增「薄弱点图谱」全屏页——以掌握度给两级知识点树着色，并给出一条「最该补」的推荐，一键开练。
 
-**Architecture:** 后端新建只读模块 `knowledge-graph`（两个 GET 端点），复用既有三个仓储 + 新增 4 个只读查询；推荐算法三道闸门（有行 / 样本 ≥5 / 有题可抽）+ 稳定排序，`MIN_SAMPLE_SIZE` 是唯一阈值真源。前端新增独立全屏页，一级折叠树 + 右栏详情（窄屏降级底部抽屉），热力梯度与档位选择各抽成单一实现模块，避免页面内重算。
+**Architecture:** 后端新建只读模块 `knowledge-graph`（两个 GET 端点），复用既有三个仓储 + 新增 4 个只读查询；推荐算法四道闸门（有行 / 样本 ≥5 / 有题可抽 / 尚未掌握）+ 稳定排序，`MIN_SAMPLE_SIZE` 与 `WEAK_LEVEL_MAX` 是唯一阈值真源。前端新增独立全屏页，一级折叠树 + 右栏详情（窄屏降级底部抽屉），热力梯度与档位选择各抽成单一实现模块，避免页面内重算。
 
 **Tech Stack:** NestJS + MySQL2（apps/server）、React 18 + Vite + Tailwind + Vitest/RTL（apps/web）、React Router 6。
 
@@ -67,7 +67,7 @@
 | `student-knowledge-mastery.repo.test.ts`（**已存在 88 行，追加**） | 两方法形状 + SQL 谓词钉子 |
 | `main-error-books.repo.test.ts`（**已存在 242 行，追加**） | `countUncoveredUncleared` 谓词钉子 |
 | `sql-fragments.test.ts`（新） | 共享片段文本钉子（两处共用的唯一真源） |
-| `knowledge-graph.service.test.ts`（新） | 三道闸门 / 排序 / 空候选 / confidence 三态 |
+| `knowledge-graph.service.test.ts`（新） | 四道闸门 / 排序 / 空候选 / confidence 三态 |
 | `knowledge-graph.controller.test.ts`（新） | 403/1005、400/1001、透传 |
 | `weak-point-heat.test.ts`（新） | 梯度夹取 / 三态 / 汇总 |
 | `point-tiers.test.ts`（改） | `pickPracticeCount` 三种边界 + `MATH_TASK_CODE` 真源钉子 |
@@ -715,10 +715,16 @@ Expected: FAIL —— `Cannot find module './knowledge-graph.service.js'`
 export const MIN_SAMPLE_SIZE = 5;
 
 /**
- * 「待补」的展示阈值：`level <= 2`（即掌握度 < 60%）记为待补。
+ * 「薄弱」阈值：`level <= 2`（即掌握度 < 60%）才算「待补 / 该补」。
  *
- * **纯展示口径**，只用于一级行的「N 个待补」汇总，**不参与推荐算法**
- * （推荐只看 `mastery_score` 排序 + 三道闸门）。spec 未定义此阈值，本计划定稿为 2。
+ * **两个用途刻意共用同一口径**（不拆成两个常量）：① 一级行汇总「N 个待补」；
+ * ② 推荐的第 4 道闸门（`level > WEAK_LEVEL_MAX` 直接不算候选）。
+ * 拆开会出现自相矛盾——一级行显示「0 个待补」，推荐条却把同一个点推成「最该补」。
+ *
+ * ⚠️ 前端 `apps/web/src/pages/student/training/weak-point-heat.ts` 有同名常量，
+ * **改这里必须同步那里**（跨包无法共享，与 `CLIENT_IDLE_DETECTION_SECONDS` 同一处理方式）。
+ *
+ * spec 未定义此阈值，2026-09-23 定稿为 2。
  */
 export const WEAK_LEVEL_MAX = 2;
 
@@ -771,6 +777,7 @@ import { StudentKnowledgeMasteryRepository } from '../../database/repositories/s
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 import {
   MIN_SAMPLE_SIZE,
+  WEAK_LEVEL_MAX,
   type KnowledgeGraphMastery,
   type KnowledgeGraphNode,
   type MasteryConfidence,
@@ -779,11 +786,11 @@ import {
 /**
  * 转出阈值常量，供**本模块的测试**引用。
  *
- * 定义仍然只有一处（DTO 的 `MIN_SAMPLE_SIZE`），这里只是把「服务判定样本够不够」
- * 这件事的阈值暴露在服务自己的 API 面上 —— 测试因此可以从被测对象侧取值，
- * 而不必跨层去 import DTO。（Task 3 的 `getWeakPoints` 也用它。）
+ * 定义仍然只有一处（DTO 的 `MIN_SAMPLE_SIZE` / `WEAK_LEVEL_MAX`），这里只是把
+ * 「样本够不够 / 算不算薄弱」这两件事的阈值暴露在服务自己的 API 面上 —— 测试因此可以
+ * 从被测对象侧取值，而不必跨层去 import DTO。（Task 3 的 `getWeakPoints` 也用它俩。）
  */
-export { MIN_SAMPLE_SIZE };
+export { MIN_SAMPLE_SIZE, WEAK_LEVEL_MAX };
 
 /**
  * 数学薄弱点图谱（只读）：把知识点全树与该生掌握度 overlay 组装成可直渲的形状。
@@ -918,7 +925,7 @@ describe('KnowledgeGraphService.getWeakPoints', () => {
   ];
   const available = new Map([[11, 7], [12, 3], [13, 0]]);
 
-  it('三道闸门：样本不足（14）与无题可抽（13）都被排除', async () => {
+  it('闸门 2/3：样本不足（14）与无题可抽（13）都被排除', async () => {
     const { svc } = mk({
       kpRepo: {
         findBySubject: vi.fn().mockResolvedValue([
@@ -937,6 +944,75 @@ describe('KnowledgeGraphService.getWeakPoints', () => {
 
     expect(result.candidates.map((c) => c.knowledgePointId)).toEqual([11, 12]);
     expect(result.reason).toBe('ok');
+  });
+
+  it('闸门 4：已掌握（level > 2）不算候选——哪怕样本足够、有题可抽', async () => {
+    const { svc } = mk({
+      kpRepo: {
+        findBySubject: vi.fn().mockResolvedValue([
+          { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
+          { id: 11, name: '有理数', parentKpId: 1, gradeBand: 'junior' },
+          { id: 45, name: '多边形及其内角和', parentKpId: 1, gradeBand: 'junior' },
+        ]),
+        countAvailableQuestionsByKp: vi.fn().mockResolvedValue(new Map([[11, 7], [45, 4]])),
+      },
+      masteryRepo: {
+        listBySubject: vi.fn().mockResolvedValue([
+          // 满分 + 样本 7 + 有 4 题可抽：前三道闸门全过，但已掌握，不该被推
+          { knowledgePointId: 45, masteryScore: 1, level: 5, correctCount: 7, errorCount: 0, lastSeenAt: seen },
+          { knowledgePointId: 11, masteryScore: 0.5, level: 2, correctCount: 5, errorCount: 5, lastSeenAt: seen },
+        ]),
+      },
+    });
+
+    const result = await svc.getWeakPoints(9, 1, 10);
+
+    expect(result.candidates.map((c) => c.knowledgePointId)).toEqual([11]);
+  });
+
+  it('闸门 4 边界：level 正好 2 仍算候选，level 3 不算（与一级行「N 个待补」同口径）', async () => {
+    const atLevel = (level: number) =>
+      mk({
+        kpRepo: {
+          findBySubject: vi.fn().mockResolvedValue([
+            { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
+            { id: 11, name: '有理数', parentKpId: 1, gradeBand: 'junior' },
+          ]),
+          countAvailableQuestionsByKp: vi.fn().mockResolvedValue(new Map([[11, 5]])),
+        },
+        masteryRepo: {
+          listBySubject: vi.fn().mockResolvedValue([
+            { knowledgePointId: 11, masteryScore: level / 5, level, correctCount: 5, errorCount: 5, lastSeenAt: seen },
+          ]),
+        },
+      });
+
+    expect((await atLevel(2).svc.getWeakPoints(9, 1, 10)).candidates).toHaveLength(1);
+    expect((await atLevel(3).svc.getWeakPoints(9, 1, 10)).candidates).toHaveLength(0);
+  });
+
+  it('真机冒烟回归（lc1）：唯一过闸的候选已掌握 → 转引导态，不推「最该补：你 100% 掌握的点」', async () => {
+    const { svc } = mk({
+      kpRepo: {
+        findBySubject: vi.fn().mockResolvedValue([
+          { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
+          { id: 44, name: '四边形', parentKpId: null, gradeBand: 'junior' },
+          { id: 45, name: '多边形及其内角和', parentKpId: 44, gradeBand: 'junior' },
+        ]),
+        countAvailableQuestionsByKp: vi.fn().mockResolvedValue(new Map([[45, 4]])),
+      },
+      masteryRepo: {
+        listBySubject: vi.fn().mockResolvedValue([
+          { knowledgePointId: 45, masteryScore: 1, level: 5, correctCount: 7, errorCount: 0, lastSeenAt: seen },
+        ]),
+      },
+    });
+
+    const result = await svc.getWeakPoints(7, 1, 1);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.recommendation).toBeNull();
+    expect(result.reason).toBe('no_qualified_candidate');
   });
 
   it('排序：mastery_score 升序 → error_count 降序 → kp_id 升序', async () => {
@@ -1066,7 +1142,7 @@ Expected: FAIL —— `svc.getWeakPoints is not a function`
 在 `apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts` 末尾追加：
 
 ```ts
-/** 够格的薄弱点候选（三道闸门全过才有资格进来）。 */
+/** 够格的薄弱点候选（四道闸门全过才有资格进来）。 */
 export interface WeakPointCandidate {
   knowledgePointId: number;
   name: string;
@@ -1097,12 +1173,18 @@ export interface WeakPointRecommendation {
 
 ```ts
   /**
-   * 薄弱点推荐（spec §5.4）：三道闸门筛候选 + 稳定排序，取前 `limit` 个。
+   * 薄弱点推荐（spec §5.4）：四道闸门筛候选 + 稳定排序，取前 `limit` 个。
    *
-   * **候选资格（三条同时满足）**：
+   * **候选资格（四条同时满足）**：
    * 1. 有该生的掌握度行（做过至少一题且题带 KP 标注）
    * 2. `sampleSize >= MIN_SAMPLE_SIZE` —— 滤掉「做 1 题答对 = 满分」的小样本噪声
    * 3. `availableQuestionCount > 0` —— 否则推了也练不了
+   * 4. `level <= WEAK_LEVEL_MAX`（掌握度 < 60%）—— **已掌握的不算「该补」**
+   *
+   * 第 4 条是 2026-09-23 真机冒烟后补的：只有前三道时，一个「零星几条数据」的账号
+   * （lc1：3 行掌握度里 2 行样本不足，只剩 1 行满分过闸）会被推「最该补：你 100% 掌握的点」，
+   * 学生直接不信这个功能。**与一级行「N 个待补」共用同一口径**，故不会出现
+   * 「一级行说 0 个待补、推荐条却推它」的矛盾。
    *
    * **排序**：`mastery_score ASC, error_count DESC, knowledge_point_id ASC`。
    * 前两项与 `StudentKnowledgeMasteryRepository.listWeakest` 既有排序一致；
@@ -1128,6 +1210,8 @@ export interface WeakPointRecommendation {
       .filter((row) => {
         const sampleSize = row.correctCount + row.errorCount;
         if (sampleSize < MIN_SAMPLE_SIZE) return false;
+        // 闸门 4：已掌握（level > 2，即掌握度 >= 60%）不算「该补」
+        if (row.level > WEAK_LEVEL_MAX) return false;
         return (availableMap.get(row.knowledgePointId) ?? 0) > 0;
       })
       .map((row) => {
@@ -1168,6 +1252,7 @@ export interface WeakPointRecommendation {
 ```ts
 import {
   MIN_SAMPLE_SIZE,
+  WEAK_LEVEL_MAX,
   type KnowledgeGraphMastery,
   type KnowledgeGraphNode,
   type MasteryConfidence,
@@ -1179,7 +1264,7 @@ import {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/knowledge-graph/knowledge-graph.service.test.ts`
-Expected: PASS（13 用例全绿）
+Expected: PASS（16 用例全绿）
 
 - [ ] **Step 6: 提交**
 
@@ -1187,7 +1272,7 @@ Expected: PASS（13 用例全绿）
 git add apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts \
         apps/server/src/modules/knowledge-graph/knowledge-graph.service.ts \
         apps/server/src/modules/knowledge-graph/knowledge-graph.service.test.ts
-git commit -m "feat(server): 薄弱点推荐——三道闸门 + 稳定排序，无候选返回 null 不报错"
+git commit -m "feat(server): 薄弱点推荐——四道闸门 + 稳定排序，无候选返回 null 不报错"
 ```
 
 ---
@@ -1774,6 +1859,17 @@ describe('summarizeParent', () => {
     expect(result.pendingCount).toBe(1);
   });
 
+  it('有结论但都不弱（level 全 > 2）→ weakestLevel 非 null 而 pendingCount 0（一级行据此显示「已掌握」）', () => {
+    const result = summarizeParent([
+      { confidence: 'ok', level: 5 },
+      { confidence: 'ok', level: 4 },
+    ]);
+
+    // 关键区别：weakestLevel 非 null（≠「未开始」），但 pendingCount 为 0（≠「N 个待补」）
+    expect(result.weakestLevel).toBe(4);
+    expect(result.pendingCount).toBe(0);
+  });
+
   it('无任何 ok 子项 → weakestLevel null、pendingCount 0（一级行显示「未开始」）', () => {
     const result = summarizeParent([
       { confidence: 'none', level: null },
@@ -1908,14 +2004,25 @@ export function isDashedBorder(confidence: MasteryConfidence): boolean {
   return confidence === 'insufficient';
 }
 
-/** 「待补」的 level 上界：`level <= 2`（掌握度 < 60%）。纯展示口径，不参与推荐算法。 */
+/**
+ * 「薄弱」阈值：`level <= 2`（掌握度 < 60%）才算「待补 / 该补」。
+ *
+ * ⚠️ 与后端 `apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts` 的
+ * `WEAK_LEVEL_MAX` **是同一个口径、改一处必须同步另一处**（跨包无法共享）：后端拿它做推荐的
+ * 第 4 道闸门，前端拿它算一级行的「N 个待补」。两边若不一致，就会出现
+ * 「一级行说 0 个待补、推荐条却推它」的自相矛盾。
+ */
 const WEAK_LEVEL_MAX = 2;
 
 /**
  * 一级行的汇总：只统计**有结论**（`ok`）的子项。
  *
  * - `weakestLevel` = 子项里最弱的 level（汇总色块用）；无 `ok` 子项 → null（一级行显示「未开始」）
- * - `pendingCount` = `ok` 子项里 `level <= WEAK_LEVEL_MAX` 的个数（「N 个待补」）
+ * - `pendingCount` = `ok` 子项里 `level <= WEAK_LEVEL_MAX` 的个数
+ *
+ * 调用方据此渲染**三态**：`weakestLevel == null` →「未开始」；
+ * `pendingCount === 0` →「已掌握」（全是 `level > 2`，没有待补的）；
+ * 否则 →「N 个待补」。少了中间那态就会渲染出「0 个待补」这种噪音。
  *
  * `insufficient` 与 `none` **都不计入**任何一边：前者没结论、后者没做过，
  * 混进来会让「待补」数字失去意义（spec §6.4：不假装有数据）。
@@ -2151,6 +2258,27 @@ describe('WeakPointGraphPage 折叠树', () => {
     await renderSettled();
 
     expect(screen.getByText('1 个待补')).toBeInTheDocument();
+  });
+
+  it('一级行「有结论但都不弱」显示「已掌握」，不是「0 个待补」', async () => {
+    // 真机冒烟回归（lc1 的「四边形」）：下面只有 1 个满分点，pendingCount 会算成 0
+    getKnowledgeGraphMastery.mockResolvedValue(
+      mastery({
+        nodes: [
+          { id: 1, name: '数与式', parentId: null, masteryScore: null, level: null, correctCount: null, errorCount: null, lastSeenAt: null, sampleSize: 0, confidence: 'none', availableQuestionCount: 0 },
+          { id: 44, name: '四边形', parentId: null, masteryScore: null, level: null, correctCount: null, errorCount: null, lastSeenAt: null, sampleSize: 0, confidence: 'none', availableQuestionCount: 1 },
+          { id: 45, name: '多边形及其内角和', parentId: 44, masteryScore: 1, level: 5, correctCount: 7, errorCount: 0, lastSeenAt: '2026-09-23T07:24:17.716Z', sampleSize: 7, confidence: 'ok', availableQuestionCount: 4 },
+        ],
+      }),
+    );
+    getWeakPoints.mockResolvedValue({ subjectId: 1, candidates: [], recommendation: null, reason: 'no_qualified_candidate' });
+
+    await renderSettled();
+
+    expect(screen.getByText('已掌握')).toBeInTheDocument();
+    expect(screen.queryByText('0 个待补')).toBeNull();
+    // 「已掌握」≠「未开始」：同页仍应有别的行显示「未开始」
+    expect(screen.getByText('未开始')).toBeInTheDocument();
   });
 });
 
@@ -2748,7 +2876,17 @@ export default function WeakPointGraphPage() {
                       />
                       <span className="flex-1 font-semibold text-[var(--text-primary)]">{parent.name}</span>
                       <span className="text-sm text-[var(--text-secondary)]">
-                        {summary.weakestLevel == null ? '未开始' : `${summary.pendingCount} 个待补`}
+                        {/*
+                          一级行三态：未开始 / N 个待补 / 已掌握。
+                          中间那态**必须判 pendingCount**：`weakestLevel != null` 只说明「有 ok 子项」，
+                          不代表有弱的——全是 level > 2 时会算出 pendingCount = 0，直接渲染就是
+                          「0 个待补」这种无意义噪音（真机冒烟：lc1 的「四边形」下面只有 1 个满分点）。
+                        */}
+                        {summary.weakestLevel == null
+                          ? '未开始'
+                          : summary.pendingCount === 0
+                            ? '已掌握'
+                            : `${summary.pendingCount} 个待补`}
                       </span>
                     </button>
 
@@ -2949,7 +3087,7 @@ function PracticeAction({
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/WeakPointGraphPage.test.tsx`
-Expected: PASS（24 用例全绿：折叠树 3 + 详情栏 4 + 推荐条 6 + **档位状态 4** + confidence 三态 2 + 页脚与错误态 5）
+Expected: PASS（25 用例全绿：折叠树 4 + 详情栏 4 + 推荐条 6 + **档位状态 4** + confidence 三态 2 + 页脚与错误态 5）
 
 - [ ] **Step 5: 提交**
 
@@ -3648,10 +3786,12 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 - **布局**：顶部 `PageHeader`（回训练首页、标题「薄弱点图谱 · 数学」）；下方推荐条；主体 `lg` 起两栏——左为**一级折叠树（默认全收起）**、右为详情栏（**窄屏降级为底部抽屉**，同一 DOM 节点切 class）；底部页脚给覆盖口径。
 - **推荐条三态**：有候选 →「最该补：X」+ 掌握度/样本/可抽题数 + **[开始补这个]**（**只此一个动作**，勿再加第二个按钮）；无候选 → 引导文案 +「去专项练习」/「去考试」；**拉取失败 → 整条不渲染**（图谱仍可用，一栏坏掉不拖垮另一栏）。
 - **两个动作（都在详情栏，推荐条不放）**：「开始补这个」按「≥3 的最小可用档」开练并跳作答页；「看这个知识点的错题」跳 `/student/training/errors?kpId=<id>`（该页据此预填筛选并**首屏即按它查询**）。推荐条只留「开始补这个」——两个并列按钮会让学生分不清「一键补漏」的主路径。
+- **一级行状态标签三态**：**未开始**（该一级下无任何 `ok` 子项）/ **N 个待补**（`ok` 子项里 `level <= 2` 的有 N 个）/ **已掌握**（有 `ok` 子项但一个都不弱）。**第三态必须有**——少了它，全是 `level > 2` 的一级行会渲染成「0 个待补」这种无意义噪音（2026-09-23 真机冒烟发现）。
 - **树与详情**：点一级展开/收起二级；点二级 chip 在详情栏出对错数、样本可信度、最近作答与两个动作。
 
 #### 约束
-- **热力梯度**（`weak-point-heat.ts` 唯一实现）：色相固定 brand 橘红 `#ff6b35` 只调不透明度，**不得引入第二套配色**；一级汇总的「待补」阈值 `level <= 2` 是**纯展示口径**、不参与推荐算法。
+- **热力梯度**（`weak-point-heat.ts` 唯一实现）：色相固定 brand 橘红 `#ff6b35` 只调不透明度，**不得引入第二套配色**。
+- **`WEAK_LEVEL_MAX = 2`（`level <= 2` ⟺ 掌握度 < 60%）是两个用途共用的口径**：① 一级行的「N 个待补」；② **推荐的第 4 道闸门**（已掌握的不算「该补」，见 API 文档 §4.5 / spec §5.4）。后端在 `knowledge-graph.dto.ts`、前端在 `weak-point-heat.ts` 各有一份**镜像常量**，**改一处必须同步另一处**——不一致就会出现「一级行说 0 个待补、推荐条却推它」的自相矛盾。
 - **`masteryScore: null` = 从未作答**，**不是 0**（0 是「很弱」，语义相反）——渲染为「未开始」灰显，**绝不显示 0%**。
 - **`confidence` 三态**由后端算好下发（`none`/`insufficient`/`ok`），前端**不重算阈值**；`insufficient` 额外用虚线边与「有结论但浅」区分。
 - **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：数学约 457 道 active 题里只有约 45% 带 KP 标注，不说明会让学生误读成「只有这些问题」。
@@ -3682,7 +3822,7 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 
 在「家长端」小节之后新增一小节（只写仍生效的「勿动」，日期日志进 changelog）：
 
-⚠️ **原文勘误（Task 10 评审标为 Minor，用户裁决「按体量纪律删重」）**：原稿有三处违反 CLAUDE.md 体量纪律——① 重复了主稿 §4.5 已写的**三道闸门 + 排序**；② 重复了 `subjectId=1`；③ 写了**实测数字**「数学 457 道 active 题里只有约 45% 带 KP 标注」（体量纪律明写实测数字进 changelog，且该数字会随题库增长失效）。以下为删重后的版本：
+⚠️ **原文勘误（Task 10 评审标为 Minor，用户裁决「按体量纪律删重」）**：原稿有三处违反 CLAUDE.md 体量纪律——① 重复了主稿 §4.5 已写的**闸门 + 排序**；② 重复了 `subjectId=1`；③ 写了**实测数字**「数学 457 道 active 题里只有约 45% 带 KP 标注」（体量纪律明写实测数字进 changelog，且该数字会随题库增长失效）。以下为删重后的版本：
 
 ```markdown
 ## 数学薄弱点图谱（2026-09-23）
@@ -3691,7 +3831,8 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 - **`masteryScore: null` = 从未作答**，**不是 0**（0 是「很弱」，语义相反）。前端渲染为「未开始」灰显，**绝不显示 0%**。
 - **`confidence` 由后端算好下发**（`none`/`insufficient`/`ok`），`MIN_SAMPLE_SIZE = 5` 是**唯一真源**，前端不重算阈值。
 - **无候选不是错误**：端点仍 200 + `recommendation: null`，前端据此转引导态——**不要改成 404/4xx**。
-- **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**；一级汇总的「待补」阈值 `level <= 2` 是**纯展示口径**、不参与推荐算法。
+- **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**。
+- **`WEAK_LEVEL_MAX = 2` 是「待补」与「推荐闸门 4」共用的口径**（后端 DTO 与前端 `weak-point-heat.ts` 各一份镜像常量，**改一处必须同步另一处**）。
 - **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`）。**档位状态一律走 `usePointTiers`**（与专项配置页同一实现）：加载中转圈、失败给重试控件、家长停用则不渲染开练按钮——**不加说明文案**，也不硬发请求（否则被 `targeted/start` 400 拒绝）。
 - **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：不说明会让学生以为「只有这些问题」。
 ```
@@ -3781,7 +3922,7 @@ Expected: 工作区干净；本批提交按序在列（数量随计划修正提�
 | §3 裁决 2/5（训练轨入口、第 4 张卡、独立全屏页） | Task 7 + Task 8 |
 | §3 裁决 3（树状热力图） | Task 7（折叠树）+ Task 6（热力梯度） |
 | §3 裁决 4（掌握度为主 + 样本兜底 + 未标注说明） | Task 2 `confidence` + Task 7 页脚 |
-| §3 裁决 6/7（一条推荐 + 三道闸门） | Task 3 |
+| §3 裁决 6/7（一条推荐 + 闸门） | Task 3（**闸门于 2026-09-23 真机冒烟后由 3 道增为 4 道**，见 §10.1） |
 | §3 裁决 8（一级折叠） | Task 7 |
 | §3 裁决 9/14（右栏详情 / 窄屏抽屉） | Task 7 `aside` 的 class 切换 |
 | §3 裁决 10（新建模块 + relations 降级 P1） | Task 4 + Task 10 |
@@ -3806,7 +3947,7 @@ Expected: 工作区干净；本批提交按序在列（数量随计划修正提�
 | §9 文档同步清单 6 项 | Task 10 |
 | §10 裁决补记（题量 / kpId 可达 / role 不区分） | Task 6（题量）+ Task 9（kpId）+ 无 role 过滤（Task 1/2 一致） |
 
-**覆盖缺口：无。** 其中两处对 spec 的**有意细化**已在计划内标注：① `uncoveredUnclearedErrors` / `coverage` 收窄为**学科口径**（spec 只写「照抄」，但本页是数学专用页）；② `WEAK_LEVEL_MAX = 2`（spec 未定义的「待补」阈值，已标为纯展示口径）。
+**覆盖缺口：无。** 其中两处对 spec 的**有意细化**已在计划内标注：① `uncoveredUnclearedErrors` / `coverage` 收窄为**学科口径**（spec 只写「照抄」，但本页是数学专用页）；② `WEAK_LEVEL_MAX = 2`（spec 未定义的「薄弱」阈值，**2026-09-23 真机冒烟后由纯展示口径升为「展示 + 推荐闸门 4」共用口径**，见 §10.1）。
 
 **2. 占位符扫描**：无 TBD / TODO / 「类似 Task N」/「加上适当的错误处理」。每个代码步骤都是完整可粘贴代码。
 

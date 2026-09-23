@@ -66,14 +66,25 @@ export function isDashedBorder(confidence: MasteryConfidence): boolean {
   return confidence === 'insufficient';
 }
 
-/** 「待补」的 level 上界：`level <= 2`（掌握度 < 60%）。纯展示口径，不参与推荐算法。 */
+/**
+ * 「薄弱」阈值：`level <= 2`（掌握度 < 60%）才算「待补 / 该补」。
+ *
+ * ⚠️ 与后端 `apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts` 的
+ * `WEAK_LEVEL_MAX` **是同一个口径、改一处必须同步另一处**（跨包无法共享）：后端拿它做推荐的
+ * 第 4 道闸门，前端拿它算一级行的「N 个待补」。两边若不一致，就会出现
+ * 「一级行说 0 个待补、推荐条却推它」的自相矛盾。
+ */
 const WEAK_LEVEL_MAX = 2;
 
 /**
  * 一级行的汇总：只统计**有结论**（`ok`）的子项。
  *
  * - `weakestLevel` = 子项里最弱的 level（汇总色块用）；无 `ok` 子项 → null（一级行显示「未开始」）
- * - `pendingCount` = `ok` 子项里 `level <= WEAK_LEVEL_MAX` 的个数（「N 个待补」）
+ * - `pendingCount` = `ok` 子项里 `level <= WEAK_LEVEL_MAX` 的个数
+ *
+ * 调用方据此渲染**三态**：`weakestLevel == null` →「未开始」；
+ * `pendingCount === 0` →「已掌握」（全是 `level > 2`，没有待补的）；
+ * 否则 →「N 个待补」。少了中间那态就会渲染出「0 个待补」这种噪音。
  *
  * `insufficient` 与 `none` **都不计入**任何一边：前者没结论、后者没做过，
  * 混进来会让「待补」数字失去意义（spec §6.4：不假装有数据）。

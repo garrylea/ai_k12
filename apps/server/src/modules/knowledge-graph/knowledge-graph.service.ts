@@ -4,6 +4,7 @@ import { StudentKnowledgeMasteryRepository } from '../../database/repositories/s
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 import {
   MIN_SAMPLE_SIZE,
+  WEAK_LEVEL_MAX,
   type KnowledgeGraphMastery,
   type KnowledgeGraphNode,
   type MasteryConfidence,
@@ -13,9 +14,9 @@ import {
 
 /**
  * 阈值只在 DTO 里定义（唯一真源），这里**透传**一次——测试从本模块导入它，
- * 且后续 Task 3 的 `getWeakPoints` 也复用同一个常量，不另立一份。
+ * `getWeakPoints` 的四道闸门也复用同一组常量，不另立一份。
  */
-export { MIN_SAMPLE_SIZE };
+export { MIN_SAMPLE_SIZE, WEAK_LEVEL_MAX };
 
 /**
  * 数学薄弱点图谱（只读）：把知识点全树与该生掌握度 overlay 组装成可直渲的形状。
@@ -94,12 +95,18 @@ export class KnowledgeGraphService {
   }
 
   /**
-   * 薄弱点推荐（spec §5.4）：三道闸门筛候选 + 稳定排序，取前 `limit` 个。
+   * 薄弱点推荐（spec §5.4）：四道闸门筛候选 + 稳定排序，取前 `limit` 个。
    *
-   * **候选资格（三条同时满足）**：
+   * **候选资格（四条同时满足）**：
    * 1. 有该生的掌握度行（做过至少一题且题带 KP 标注）
    * 2. `sampleSize >= MIN_SAMPLE_SIZE` —— 滤掉「做 1 题答对 = 满分」的小样本噪声
    * 3. `availableQuestionCount > 0` —— 否则推了也练不了
+   * 4. `level <= WEAK_LEVEL_MAX`（掌握度 < 60%）—— **已掌握的不算「该补」**
+   *
+   * 第 4 条是 2026-09-23 真机冒烟后补的：只有前三道时，一个「零星几条数据」的账号
+   * （lc1：3 行掌握度里 2 行样本不足，只剩 1 行满分过闸）会被推「最该补：你 100% 掌握的点」，
+   * 学生直接不信这个功能。**与一级行「N 个待补」共用同一口径**，故不会出现
+   * 「一级行说 0 个待补、推荐条却推它」的矛盾。
    *
    * **排序**：`mastery_score ASC, error_count DESC, knowledge_point_id ASC`。
    * 前两项与 `StudentKnowledgeMasteryRepository.listWeakest` 既有排序一致；
@@ -125,6 +132,8 @@ export class KnowledgeGraphService {
       .filter((row) => {
         const sampleSize = row.correctCount + row.errorCount;
         if (sampleSize < MIN_SAMPLE_SIZE) return false;
+        // 闸门 4：已掌握（level > 2，即掌握度 >= 60%）不算「该补」
+        if (row.level > WEAK_LEVEL_MAX) return false;
         return (availableMap.get(row.knowledgePointId) ?? 0) > 0;
       })
       .map((row) => {

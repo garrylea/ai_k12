@@ -283,8 +283,18 @@ export default function WeakPointGraphPage() {
                         aria-hidden="true"
                       />
                       <span className="flex-1 font-semibold text-[var(--text-primary)]">{parent.name}</span>
+                      {/*
+                        一级行三态：未开始 / N 个待补 / 已掌握。
+                        中间那态**必须判 pendingCount**：`weakestLevel != null` 只说明「有 ok 子项」，
+                        不代表有弱的——全是 level > 2 时会算出 pendingCount = 0，直接渲染就是
+                        「0 个待补」这种无意义噪音（真机冒烟：lc1 的「四边形」下面只有 1 个满分点）。
+                      */}
                       <span className="text-sm text-[var(--text-secondary)]">
-                        {summary.weakestLevel == null ? '未开始' : `${summary.pendingCount} 个待补`}
+                        {summary.weakestLevel == null
+                          ? '未开始'
+                          : summary.pendingCount === 0
+                            ? '已掌握'
+                            : `${summary.pendingCount} 个待补`}
                       </span>
                     </button>
 

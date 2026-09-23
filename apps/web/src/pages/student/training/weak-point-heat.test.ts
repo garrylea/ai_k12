@@ -84,6 +84,17 @@ describe('summarizeParent', () => {
     expect(result.pendingCount).toBe(1);
   });
 
+  it('有结论但都不弱（level 全 > 2）→ weakestLevel 非 null 而 pendingCount 0（一级行据此显示「已掌握」）', () => {
+    const result = summarizeParent([
+      { confidence: 'ok', level: 5 },
+      { confidence: 'ok', level: 4 },
+    ]);
+
+    // 关键区别：weakestLevel 非 null（≠「未开始」），但 pendingCount 为 0（≠「N 个待补」）
+    expect(result.weakestLevel).toBe(4);
+    expect(result.pendingCount).toBe(0);
+  });
+
   it('无任何 ok 子项 → weakestLevel null、pendingCount 0（一级行显示「未开始」）', () => {
     const result = summarizeParent([
       { confidence: 'none', level: null },

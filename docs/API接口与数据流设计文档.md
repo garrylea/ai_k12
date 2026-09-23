@@ -221,7 +221,8 @@
 
 **`weak-points` 返回**：`{ subjectId, candidates[], recommendation, reason }`。
 
-- 候选资格（三条同时满足）：① 有该生掌握度行 ② `sampleSize >= 5` ③ `availableQuestionCount > 0`。
+- 候选资格（**四条**同时满足）：① 有该生掌握度行 ② `sampleSize >= 5` ③ `availableQuestionCount > 0` ④ **`level <= 2`（掌握度 < 60%，即尚未掌握）**。
+  - ④ 是 2026-09-23 真机冒烟后补的：只有前三道时，「零星几条数据」的学生会被推「最该补：你 100% 掌握的知识点」（样本不足的行被 ② 滤掉，只剩满分那行过闸）。阈值 `WEAK_LEVEL_MAX = 2` **与图谱页一级行「N 个待补」共用**，避免「一级行说 0 个待补、推荐条却推它」。
 - 排序：`mastery_score ASC, error_count DESC, knowledge_point_id ASC`。
 - `recommendation = candidates[0] ?? null`；**无候选仍返回 200**（`reason='no_qualified_candidate'`），前端据此转引导态——**不是错误**。
 

@@ -142,7 +142,7 @@ describe('KnowledgeGraphService.getWeakPoints', () => {
   ];
   const available = new Map([[11, 7], [12, 3], [13, 0]]);
 
-  it('三道闸门：样本不足（14）与无题可抽（13）都被排除', async () => {
+  it('闸门 2/3：样本不足（14）与无题可抽（13）都被排除', async () => {
     const { svc } = mk({
       kpRepo: {
         findBySubject: vi.fn().mockResolvedValue([
@@ -161,6 +161,75 @@ describe('KnowledgeGraphService.getWeakPoints', () => {
 
     expect(result.candidates.map((c) => c.knowledgePointId)).toEqual([11, 12]);
     expect(result.reason).toBe('ok');
+  });
+
+  it('闸门 4：已掌握（level > 2）不算候选——哪怕样本足够、有题可抽', async () => {
+    const { svc } = mk({
+      kpRepo: {
+        findBySubject: vi.fn().mockResolvedValue([
+          { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
+          { id: 11, name: '有理数', parentKpId: 1, gradeBand: 'junior' },
+          { id: 45, name: '多边形及其内角和', parentKpId: 1, gradeBand: 'junior' },
+        ]),
+        countAvailableQuestionsByKp: vi.fn().mockResolvedValue(new Map([[11, 7], [45, 4]])),
+      },
+      masteryRepo: {
+        listBySubject: vi.fn().mockResolvedValue([
+          // 满分 + 样本 7 + 有 4 题可抽：前三道闸门全过，但已掌握，不该被推
+          { knowledgePointId: 45, masteryScore: 1, level: 5, correctCount: 7, errorCount: 0, lastSeenAt: seen },
+          { knowledgePointId: 11, masteryScore: 0.5, level: 2, correctCount: 5, errorCount: 5, lastSeenAt: seen },
+        ]),
+      },
+    });
+
+    const result = await svc.getWeakPoints(9, 1, 10);
+
+    expect(result.candidates.map((c) => c.knowledgePointId)).toEqual([11]);
+  });
+
+  it('闸门 4 边界：level 正好 2 仍算候选，level 3 不算（与一级行「N 个待补」同口径）', async () => {
+    const atLevel = (level: number) =>
+      mk({
+        kpRepo: {
+          findBySubject: vi.fn().mockResolvedValue([
+            { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
+            { id: 11, name: '有理数', parentKpId: 1, gradeBand: 'junior' },
+          ]),
+          countAvailableQuestionsByKp: vi.fn().mockResolvedValue(new Map([[11, 5]])),
+        },
+        masteryRepo: {
+          listBySubject: vi.fn().mockResolvedValue([
+            { knowledgePointId: 11, masteryScore: level / 5, level, correctCount: 5, errorCount: 5, lastSeenAt: seen },
+          ]),
+        },
+      });
+
+    expect((await atLevel(2).svc.getWeakPoints(9, 1, 10)).candidates).toHaveLength(1);
+    expect((await atLevel(3).svc.getWeakPoints(9, 1, 10)).candidates).toHaveLength(0);
+  });
+
+  it('真机冒烟回归（lc1）：唯一过闸的候选已掌握 → 转引导态，不推「最该补：你 100% 掌握的点」', async () => {
+    const { svc } = mk({
+      kpRepo: {
+        findBySubject: vi.fn().mockResolvedValue([
+          { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
+          { id: 44, name: '四边形', parentKpId: null, gradeBand: 'junior' },
+          { id: 45, name: '多边形及其内角和', parentKpId: 44, gradeBand: 'junior' },
+        ]),
+        countAvailableQuestionsByKp: vi.fn().mockResolvedValue(new Map([[45, 4]])),
+      },
+      masteryRepo: {
+        listBySubject: vi.fn().mockResolvedValue([
+          { knowledgePointId: 45, masteryScore: 1, level: 5, correctCount: 7, errorCount: 0, lastSeenAt: seen },
+        ]),
+      },
+    });
+
+    const result = await svc.getWeakPoints(7, 1, 1);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.recommendation).toBeNull();
+    expect(result.reason).toBe('no_qualified_candidate');
   });
 
   it('排序：mastery_score 升序 → error_count 降序 → kp_id 升序', async () => {

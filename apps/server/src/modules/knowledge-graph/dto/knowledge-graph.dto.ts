@@ -14,10 +14,16 @@
 export const MIN_SAMPLE_SIZE = 5;
 
 /**
- * 「待补」的展示阈值：`level <= 2`（即掌握度 < 60%）记为待补。
+ * 「薄弱」阈值：`level <= 2`（即掌握度 < 60%）才算「待补 / 该补」。
  *
- * **纯展示口径**，只用于一级行的「N 个待补」汇总，**不参与推荐算法**
- * （推荐只看 `mastery_score` 排序 + 三道闸门）。spec 未定义此阈值，本计划定稿为 2。
+ * **两个用途刻意共用同一口径**（不拆成两个常量）：① 一级行汇总「N 个待补」；
+ * ② 推荐的第 4 道闸门（`level > WEAK_LEVEL_MAX` 直接不算候选）。
+ * 拆开会出现自相矛盾——一级行显示「0 个待补」，推荐条却把同一个点推成「最该补」。
+ *
+ * ⚠️ 前端 `apps/web/src/pages/student/training/weak-point-heat.ts` 有同名常量，
+ * **改这里必须同步那里**（跨包无法共享，与 `CLIENT_IDLE_DETECTION_SECONDS` 同一处理方式）。
+ *
+ * spec 未定义此阈值，2026-09-23 定稿为 2。
  */
 export const WEAK_LEVEL_MAX = 2;
 

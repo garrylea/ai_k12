@@ -117,6 +117,27 @@ describe('WeakPointGraphPage 折叠树', () => {
 
     expect(screen.getByText('1 个待补')).toBeInTheDocument();
   });
+
+  it('一级行「有结论但都不弱」显示「已掌握」，不是「0 个待补」', async () => {
+    // 真机冒烟回归（lc1 的「四边形」）：下面只有 1 个满分点，pendingCount 会算成 0
+    getKnowledgeGraphMastery.mockResolvedValue(
+      mastery({
+        nodes: [
+          { id: 1, name: '数与式', parentId: null, masteryScore: null, level: null, correctCount: null, errorCount: null, lastSeenAt: null, sampleSize: 0, confidence: 'none', availableQuestionCount: 0 },
+          { id: 44, name: '四边形', parentId: null, masteryScore: null, level: null, correctCount: null, errorCount: null, lastSeenAt: null, sampleSize: 0, confidence: 'none', availableQuestionCount: 1 },
+          { id: 45, name: '多边形及其内角和', parentId: 44, masteryScore: 1, level: 5, correctCount: 7, errorCount: 0, lastSeenAt: '2026-09-23T07:24:17.716Z', sampleSize: 7, confidence: 'ok', availableQuestionCount: 4 },
+        ],
+      }),
+    );
+    getWeakPoints.mockResolvedValue({ subjectId: 1, candidates: [], recommendation: null, reason: 'no_qualified_candidate' });
+
+    await renderSettled();
+
+    expect(screen.getByText('已掌握')).toBeInTheDocument();
+    expect(screen.queryByText('0 个待补')).toBeNull();
+    // 「已掌握」≠「未开始」：同页仍应有别的行显示「未开始」
+    expect(screen.getByText('未开始')).toBeInTheDocument();
+  });
 });
 
 describe('WeakPointGraphPage 详情栏', () => {

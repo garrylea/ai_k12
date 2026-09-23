@@ -133,8 +133,9 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **`masteryScore: null` = 从未作答**，**不是 0**（0 是「很弱」，语义相反）。前端渲染为「未开始」灰显，**绝不显示 0%**。
 - **`confidence` 由后端算好下发**（`none`/`insufficient`/`ok`），`MIN_SAMPLE_SIZE = 5` 是**唯一真源**，前端不重算阈值。
 - **无候选不是错误**：端点仍 200 + `recommendation: null`，前端据此转引导态——**不要改成 404/4xx**。
-- **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**；一级汇总的「待补」阈值 `level <= 2` 是**纯展示口径**、不参与推荐算法。
-- **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`），档位为空时置灰按钮、不硬发请求（否则被 `targeted/start` 400 拒绝）。
+- **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**。
+- **`WEAK_LEVEL_MAX = 2`（`level <= 2` ⟺ 掌握度 < 60%）是「展示 + 推荐」共用口径，勿拆成两个阈值**：一级行的「N 个待补」与推荐的**第 4 道闸门**（已掌握的不算「该补」）同源。后端 `knowledge-graph.dto.ts` 与前端 `weak-point-heat.ts` 各一份**镜像常量，改一处必须同步另一处**——不一致就会出现「一级行说 0 个待补、推荐条却推它」的自相矛盾。一级行因此是**三态**（未开始 / N 个待补 / **已掌握**），**勿渲染成「0 个待补」**。
+- **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`）；档位取不到时由**界面**表达（加载转圈 / 重试控件 / 干脆不渲染），**不硬发请求**（否则被 `targeted/start` 400 拒绝）。
 - **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：不说明会让学生以为「只有这些问题」。
 
 ## apps/server - ai-core AI Agent Hub
