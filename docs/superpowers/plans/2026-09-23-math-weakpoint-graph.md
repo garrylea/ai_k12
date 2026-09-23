@@ -22,6 +22,7 @@
 - **只读端点**：本期两个端点无任何写入；查询失败按 Nest 默认 500 抛出（不加吞异常——这不是埋点路径）。
 - **不新增表 / 列 / 迁移**（`tools/db/migrations/` 本期不动）。
 - **测试与文档同步铁律**：测试断言与 config / types / 设计文档冲突时**测试错**，改测试。
+- **状态由界面表达，不加说明文案**：某个状态（加载中 / 失败 / 不可用）要让学生看懂时，用**控件本身**表达——loading 转圈、可操作的**重试按钮**、干脆不渲染死控件；**不要**加一行解释文字。界面表达不了，说明状态被合并/丢失了（先查是不是该复用既有 hook，如 `usePointTiers`）。
 - **`globals: false`**：前端多用例测试文件必须自己 `afterEach(() => cleanup())`。
 - **组件改动必须补渲染测试**（类型检查抓不到运行时数据形状问题）。
 - 前端命令在 `apps/web/` 执行；后端命令在 `apps/server/` 执行。
@@ -50,7 +51,8 @@
 | 文件 | 职责 |
 |---|---|
 | `apps/web/src/services/api.ts`（改） | 4 个类型 + 2 个函数 |
-| `apps/web/src/pages/student/training/point-tiers.ts`（改） | 加 `MIN_PRACTICE_COUNT` + `pickPracticeCount()` |
+| `apps/web/src/pages/student/training/point-tiers.ts`（改） | 加 `MATH_TASK_CODE`（两页共用的任务代号真源）+ `MIN_PRACTICE_COUNT` + `pickPracticeCount()` |
+| `apps/web/src/pages/student/training/TargetedConfigPage.tsx`（改） | 私有 `MATH_TASK_CODE` 改为从 `point-tiers` import（行为零变化） |
 | `apps/web/src/pages/student/training/weak-point-heat.ts`（新） | 热力梯度 / 中性态 / 一级汇总——**唯一实现** |
 | `apps/web/src/pages/student/training/WeakPointGraphPage.tsx`（新） | 页面 |
 | `apps/web/src/routes/routeTable.tsx`（改） | 注册 `/student/training/weak-points` |
@@ -68,9 +70,10 @@
 | `knowledge-graph.service.test.ts`（新） | 三道闸门 / 排序 / 空候选 / confidence 三态 |
 | `knowledge-graph.controller.test.ts`（新） | 403/1005、400/1001、透传 |
 | `weak-point-heat.test.ts`（新） | 梯度夹取 / 三态 / 汇总 |
-| `point-tiers.test.ts`（改） | `pickPracticeCount` 三种边界 |
-| `WeakPointGraphPage.test.tsx`（新） | 折叠 / 详情 / 推荐两态 / 三态渲染 / 页脚 |
+| `point-tiers.test.ts`（改） | `pickPracticeCount` 三种边界 + `MATH_TASK_CODE` 真源钉子 |
+| `WeakPointGraphPage.test.tsx`（新） | 折叠 / 详情 / 推荐两态 / 档位四态 / 三态渲染 / 页脚 |
 | `TrainingHomePage.test.tsx`（改） | 第 4 张卡存在且可点 |
+| `routeTable.test.tsx`（改） | 「路由确实指到 `WeakPointGraphPage`」的唯一证明 |
 | `ErrorPracticePage.test.tsx`（改） | `?kpId=` 预填 |
 
 ---
@@ -210,7 +213,7 @@ describe('StudentKnowledgeMasteryRepository.countQuestionCoverageBySubject', () 
 });
 ```
 
-创建 `apps/server/src/database/repositories/main-error-books.repo.test.ts` —— **该文件已存在**，不要覆盖。把下面这个 `describe` **追加到文件末尾**（它复用文件顶部已有的 `mockPool` 与 `MainErrorBooksRepository` import，无需新增 import）：
+创建 `apps/server/src/database/repositories/main-error-books.repo.test.ts` —— **该文件已存在**，不要覆盖。把下面这个 `describe` **追加到文件末尾**（它复用文件顶部已有的 `mockPool` 与 `MainErrorBooksRepository` import；另需**新增一行 import**：`import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments';`）：
 
 ```ts
 describe('MainErrorBooksRepository.countUncoveredUncleared', () => {
@@ -234,6 +237,9 @@ describe('MainErrorBooksRepository.countUncoveredUncleared', () => {
     expect(sql).toContain('meb.is_cleared = 0');
     expect(sql).toContain('NOT EXISTS');
     expect(sql).toContain('qkp.question_id = meb.question_id');
+    // 共享片段必须**真的被插值进来**：只钉子串的话，将来有人把 `NOT EXISTS` 重新内联回
+    // 查询里，两边测试仍全绿、共享就白抽了（漂移静默复活）。这一行把「共用同一常量」钉死。
+    expect(sql).toContain(UNCOVERED_ERROR_PREDICATE);
     expect(params).toEqual([9, 1]);
   });
 
@@ -489,7 +495,19 @@ import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 ```
 
-**⚠️ 不要改这个方法的签名、不要改它的 `subject_id` 缺失（那是家长端跨学科口径）、不要动该文件里的任何其它方法。** 既有的 `parent-insights.repo.test.ts` 有两个用例钉着这个方法（`toContain('NOT EXISTS')`、`toContain('is_cleared = 0')`），改完必须仍然通过。
+**⚠️ 不要改这个方法的签名、不要改它的 `subject_id` 缺失（那是家长端跨学科口径）、不要动该文件里的任何其它方法。** 既有的 `parent-insights.repo.test.ts` 有用例钉着这个方法（`toContain('NOT EXISTS')`、`toContain('is_cleared = 0')`），改完必须仍然通过。
+
+- [ ] **Step 7b: 给家长端那条 SQL 钉子也加上「共用常量」断言**
+
+改 `apps/server/src/database/repositories/parent-insights.repo.test.ts` 的「未标注知识点的未清零错题单独计数」用例（约 246-254 行）——在现有两条 `toContain` 之后**加一行**，并在该文件顶部 import 区加 `import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments';`：
+
+```ts
+    // 与 MainErrorBooksRepository.countUncoveredUncleared 共用同一片段——这一行把「共用」本身钉死，
+    // 否则将来把 NOT EXISTS 重新内联回查询，两边测试仍绿、漂移静默复活。
+    expect(sql).toContain(UNCOVERED_ERROR_PREDICATE);
+```
+
+**为什么两处都要加**：`UNCOVERED_ERROR_PREDICATE` 的唯一价值就是「两处共用」，而 mockPool 不看 SQL 文本 —— 只钉子串的话，重新内联不会被任何测试发现。
 
 - [ ] **Step 8: 跑测试确认通过**
 
@@ -507,7 +525,8 @@ git add apps/server/src/database/sql-fragments.ts \
         apps/server/src/database/repositories/parent-insights.repo.ts \
         apps/server/src/database/repositories/knowledge-points.repo.test.ts \
         apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts \
-        apps/server/src/database/repositories/main-error-books.repo.test.ts
+        apps/server/src/database/repositories/main-error-books.repo.test.ts \
+        apps/server/src/database/repositories/parent-insights.repo.test.ts
 git commit -m "feat(server): 图谱读侧仓储——可抽题数/按学科掌握度/学科覆盖率/未标注错题数（未标注谓词抽共享片段）"
 ```
 
@@ -1489,8 +1508,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getKnowledgeGraphMastery, getWeakPoints } from './api';
 
 /**
- * 只钉 URL 拼装：路径段 + 查询串必须与后端 `@Controller('api/knowledge-graph')` 逐字对上，
- * 拼错（少 `/api`、把 subjectId 写成 path 段）在本仓是静默 404，只有这个用例能拦住。
+ * 只钉 URL 拼装：断言**全串**（含 `API_BASE` 的 `/api` 前缀），与后端
+ * `@Controller('api/knowledge-graph')` 逐字对上。
+ *
+ * 拼错（少 `/api`、把 subjectId 写成 path 段）在本仓是静默 404，只有这个用例能拦住 ——
+ * 所以必须钉全串。用 `toContain('/knowledge-graph/...')` 会**漏掉 `/api` 前缀回归**：
+ * 那个子串恰好不含 `/api`，`API_BASE` 改成 `/api/v2` 时测试仍全绿而线上 404。
  */
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -1510,7 +1533,7 @@ describe('getKnowledgeGraphMastery', () => {
 
     await getKnowledgeGraphMastery(7, 1);
 
-    expect(fetchMock.mock.calls[0][0]).toContain('/knowledge-graph/students/7/mastery?subjectId=1');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/knowledge-graph/students/7/mastery?subjectId=1');
   });
 });
 
@@ -1520,7 +1543,9 @@ describe('getWeakPoints', () => {
 
     await getWeakPoints(7, 1);
 
-    expect(fetchMock.mock.calls[0][0]).toContain('/knowledge-graph/students/7/weak-points?subjectId=1&limit=1');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/knowledge-graph/students/7/weak-points?subjectId=1&limit=1',
+    );
   });
 
   it('显式 limit 透传', async () => {
@@ -1528,7 +1553,9 @@ describe('getWeakPoints', () => {
 
     await getWeakPoints(7, 1, 5);
 
-    expect(fetchMock.mock.calls[0][0]).toContain('limit=5');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/knowledge-graph/students/7/weak-points?subjectId=1&limit=5',
+    );
   });
 });
 ```
@@ -1763,7 +1790,7 @@ describe('summarizeParent', () => {
 });
 ```
 
-在 `apps/web/src/pages/student/training/point-tiers.test.ts` 末尾追加（文件顶部 import 需补 `pickPracticeCount`、`MIN_PRACTICE_COUNT`）：
+在 `apps/web/src/pages/student/training/point-tiers.test.ts` 末尾追加（文件顶部 import 需补 `pickPracticeCount`、`MIN_PRACTICE_COUNT`、`MATH_TASK_CODE`）：
 
 ```ts
 describe('pickPracticeCount', () => {
@@ -1784,7 +1811,7 @@ describe('pickPracticeCount', () => {
     expect(pickPracticeCount([t('10'), t('5'), t('3')])).toBe(3);
   });
 
-  it('空数组 → null（调用方据此置灰按钮，不硬发请求）', () => {
+  it('空数组 → null（调用方据此不渲染开练按钮，不硬发请求）', () => {
     expect(pickPracticeCount([])).toBeNull();
   });
 
@@ -1795,6 +1822,10 @@ describe('pickPracticeCount', () => {
 
   it('MIN_PRACTICE_COUNT 是 3（spec §10 裁决：1 题偏少）', () => {
     expect(MIN_PRACTICE_COUNT).toBe(3);
+  });
+
+  it('MATH_TASK_CODE 是 math_targeted（两页共用的真源，改名必须显式改这里）', () => {
+    expect(MATH_TASK_CODE).toBe('math_targeted');
   });
 });
 ```
@@ -1908,6 +1939,15 @@ export function summarizeParent(
 
 ```ts
 /**
+ * 数学专项练习的任务代号（`GET /points/me/rules` 返回的 `taskCode`）。
+ *
+ * **单一真源**：专项配置页与薄弱点图谱页都从这里 import。以前两页各写一份字面量，
+ * 哪天后端/别处改了这个代号而只改一处 → 图谱页查不到档位 → 「开始补这个」不渲染，
+ * 学生只看到一个莫名其妙的缺失动作（专项配置页那侧则照旧能用）。
+ */
+export const MATH_TASK_CODE = 'math_targeted';
+
+/**
  * 专项练习的最小题量（spec §10 裁决：1 题偏少，改取「≥3 的最小可用档」）。
  */
 export const MIN_PRACTICE_COUNT = 3;
@@ -1918,7 +1958,7 @@ export const MIN_PRACTICE_COUNT = 3;
  * 规则（spec §6.3）：
  * 1. 取 **≥ `MIN_PRACTICE_COUNT` 的最小档**（默认档位 `1/3/5/10` 下即 3）
  * 2. 若可用档**全部 < 3**（家长只留了 1 题档）→ 退化为其中**最大**的一档，**不报错**
- * 3. 一个可用档都没有（空数组 / 全非数字）→ `null`，调用方据此**置灰按钮**，
+ * 3. 一个可用档都没有（空数组 / 全非数字）→ `null`，调用方据此**不渲染开练按钮**，
  *    不硬发请求（否则会被 `targeted/start` 以 400 拒绝）
  *
  * `tierKey` 对 `math_targeted` 是纯数字字符串（家长端不能新增档位），可直接 `Number()`。
@@ -1935,9 +1975,19 @@ export function pickPracticeCount(tiers: Array<{ tierKey: string }>): number | n
 }
 ```
 
+- [ ] **Step 4b: 让专项配置页改用同一常量**
+
+改 `apps/web/src/pages/student/training/TargetedConfigPage.tsx`：删掉文件里的私有 `const MATH_TASK_CODE = 'math_targeted';`（约第 16 行），改成从 `./point-tiers` import：
+
+```ts
+import { MATH_TASK_CODE, tierStatus, usePointTiers } from './point-tiers';
+```
+
+**行为零变化**（值一样），目的是让两页共用一份真源。既有 `TargetedConfigPage.test.tsx` 全部用例必须仍通过。
+
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `cd apps/web && npx vitest run src/pages/student/training/weak-point-heat.test.ts src/pages/student/training/point-tiers.test.ts`
+Run: `cd apps/web && npx vitest run src/pages/student/training/weak-point-heat.test.ts src/pages/student/training/point-tiers.test.ts src/pages/student/training/TargetedConfigPage.test.tsx`
 Expected: PASS（两文件全绿）
 
 - [ ] **Step 6: 提交**
@@ -1946,7 +1996,8 @@ Expected: PASS（两文件全绿）
 git add apps/web/src/pages/student/training/weak-point-heat.ts \
         apps/web/src/pages/student/training/weak-point-heat.test.ts \
         apps/web/src/pages/student/training/point-tiers.ts \
-        apps/web/src/pages/student/training/point-tiers.test.ts
+        apps/web/src/pages/student/training/point-tiers.test.ts \
+        apps/web/src/pages/student/training/TargetedConfigPage.tsx
 git commit -m "feat(web): 热力梯度与开练题量抽取（单一实现 + 边界测试）"
 ```
 
@@ -1959,7 +2010,7 @@ git commit -m "feat(web): 热力梯度与开练题量抽取（单一实现 + 边
 - Test: `apps/web/src/pages/student/training/WeakPointGraphPage.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 5 的 API 函数与类型；Task 6 的 `heatForNode` / `isDashedBorder` / `summarizeParent` / `pickPracticeCount`；既有 `getMyPointRules` / `startTargetedPractice` / `parseRunHandoff` / `TargetedRunHandoff`
+- Consumes: Task 5 的 API 函数与类型；Task 6 的 `heatForNode` / `isDashedBorder` / `summarizeParent` / `pickPracticeCount` / **`MATH_TASK_CODE` / `usePointTiers`**（档位一律走它，不要自己调 `getMyPointRules`）；既有 `startTargetedPractice` / `parseRunHandoff` / `TargetedRunHandoff`
 - Produces: `export default function WeakPointGraphPage(): JSX.Element`；写 `sessionStorage['training:targeted']` 后跳 `/student/training/targeted/run`
 
 **页面结构（spec §6.2 逐条落地）**
@@ -1990,7 +2041,8 @@ import type { KnowledgeGraphMastery, WeakPointRecommendation } from '@/services/
  * 薄弱点图谱页（spec §6）。
  *
  * 钉住：折叠树默认收起、展开出二级、点 chip 出详情、推荐条两态（有候选 / 引导）、
- * 推荐拉取失败时**只降级推荐条**（图谱仍渲染）、confidence 三态渲染各异、页脚口径。
+ * 推荐拉取失败时**只降级推荐条**（图谱仍渲染）、**档位四态**（加载中转圈 / 失败给重试控件 /
+ * 家长停用不渲染死按钮 / 正常可点）、confidence 三态渲染各异、页脚口径。
  *
  * vitest globals:false —— 必须显式 import + 自己写 afterEach(cleanup)。
  */
@@ -2234,6 +2286,54 @@ describe('WeakPointGraphPage 推荐条', () => {
   });
 });
 
+describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案）', () => {
+  it('档位加载失败：主 CTA 换成「重试」控件，点它能重新拉到档位', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockRejectedValueOnce(new Error('boom'));
+
+    await renderSettled();
+
+    // 失败不是「灰着不动」：给可操作的重试控件，而不是一行说明文字
+    expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
+    const retry = screen.getByRole('button', { name: '重试' });
+
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [{ tierKey: '3' }] }],
+    });
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始补这个' })).toBeEnabled());
+  });
+
+  it('家长停用全部档位：不渲染点不动的死按钮，只留「看这个知识点的错题」', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [] }],
+    });
+
+    await renderSettled();
+
+    expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
+    // 能用的动作仍在，学生不至于无路可走
+    expect(screen.getByRole('button', { name: '看这个知识点的错题' })).toBeInTheDocument();
+  });
+
+  it('档位加载中：CTA 转圈（loading），不是静默置灰', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockReturnValue(new Promise(() => {})); // 永不 resolve → 停在加载态
+
+    renderPage();
+
+    // 渲染出来（区别于 unavailable 的「不渲染」）+ disabled + 有 spinner
+    const cta = await screen.findByRole('button', { name: '开始补这个' });
+    expect(cta).toBeDisabled();
+    expect(cta.querySelector('.animate-spin')).not.toBeNull();
+  });
+});
+
 describe('WeakPointGraphPage confidence 三态渲染', () => {
   it('ok 用 brand 橘红实底；insufficient / none 用中性灰', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
@@ -2328,14 +2428,13 @@ import clsx from 'clsx';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import {
   getKnowledgeGraphMastery,
-  getMyPointRules,
   getWeakPoints,
   startTargetedPractice,
   type KnowledgeGraphMastery,
   type KnowledgeGraphNode,
   type WeakPointRecommendation,
 } from '@/services/api';
-import { pickPracticeCount } from './point-tiers';
+import { MATH_TASK_CODE, pickPracticeCount, usePointTiers } from './point-tiers';
 import { heatForNode, isDashedBorder, summarizeParent } from './weak-point-heat';
 import type { TargetedRunHandoff } from './run-handoff';
 
@@ -2378,8 +2477,14 @@ export default function WeakPointGraphPage() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [selectedKpId, setSelectedKpId] = useState<number | null>(null);
 
-  // 档位：决定「开始补这个」的题量（≥3 的最小可用档）
-  const [tiers, setTiers] = useState<Array<{ tierKey: string }> | null>(null);
+  // 档位：决定「开始补这个」的题量（≥3 的最小可用档）。
+  //
+  // **必须复用 `usePointTiers`，不要自己再手搓一次 `getMyPointRules()`**：它把状态分成
+  // `null`=加载中 / `error`=失败 / `[]`=家长停用，并给了 `retry()`，与专项配置页是同一份实现。
+  // 手搓会把三种状态塌成「空数组」一种 —— 失败时主 CTA 就成了一个**永远点不动、也没人
+  // 解释为什么**的死按钮。spec §6.3 要求「档位取不到 → 不硬发请求」，而这件事要由**界面**
+  // 说清楚（loading 转圈 / 重试控件 / 干脆不渲染），不是加一行文案。
+  const { tiers, error: tierError, retry: retryTiers } = usePointTiers(MATH_TASK_CODE);
   const [starting, setStarting] = useState(false);
   const [startNotice, setStartNotice] = useState<string | null>(null);
 
@@ -2409,21 +2514,6 @@ export default function WeakPointGraphPage() {
     void loadRec();
   }, [loadMastery, loadRec]);
 
-  useEffect(() => {
-    let cancelled = false;
-    getMyPointRules()
-      .then((data) => {
-        if (cancelled) return;
-        setTiers(data.tasks.find((t) => t.taskCode === 'math_targeted')?.tiers ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setTiers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // 必须 useMemo：`mastery?.nodes ?? []` 每次渲染都是**新数组身份**，会让下面三个
   // 记忆化钩子（parents / childrenOf / nodeById）每帧重算、等于白写，且触发 3 条
   // react-hooks/exhaustive-deps 警告（训练目录原本 lint 干净）。
@@ -2438,7 +2528,18 @@ export default function WeakPointGraphPage() {
 
   const selected = selectedKpId != null ? nodeById.get(selectedKpId) ?? null : null;
 
+  // null = 还没拉到档位（加载中）或没有可用档位（家长停用）——两种都由界面表达，见 PracticeAction。
   const practiceCount = tiers == null ? null : pickPracticeCount(tiers);
+
+  /** 「开始补这个」的界面状态：四种都靠控件本身表达，不用文案解释。 */
+  const practiceState: PracticeActionState =
+    tiers == null
+      ? 'loading'
+      : tierError != null
+        ? 'failed'
+        : practiceCount == null
+          ? 'unavailable'
+          : 'ready';
 
   const toggleParent = (id: number) => {
     setExpanded((prev) => {
@@ -2519,14 +2620,12 @@ export default function WeakPointGraphPage() {
                   >
                     看这个知识点的错题
                   </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={practiceCount == null || starting}
-                    onClick={() => void startPractice(rec.recommendation!.knowledgePointId)}
-                  >
-                    开始补这个
-                  </Button>
+                  <PracticeAction
+                    state={practiceState}
+                    starting={starting}
+                    onStart={() => void startPractice(rec.recommendation!.knowledgePointId)}
+                    onRetry={retryTiers}
+                  />
                 </div>
               </Card>
             ) : (
@@ -2650,9 +2749,10 @@ export default function WeakPointGraphPage() {
               ) : (
                 <KpDetail
                   node={selected}
-                  practiceCount={practiceCount}
+                  practiceState={practiceState}
                   starting={starting}
                   onStart={() => void startPractice(selected.id)}
+                  onRetry={retryTiers}
                   onViewErrors={() => goErrors(selected.id)}
                 />
               )}
@@ -2684,15 +2784,17 @@ export default function WeakPointGraphPage() {
 /** 详情栏内容：掌握度条 / 对错数 / 最近作答 / 可信度说明 + 两个动作。 */
 function KpDetail({
   node,
-  practiceCount,
+  practiceState,
   starting,
   onStart,
+  onRetry,
   onViewErrors,
 }: {
   node: KnowledgeGraphNode;
-  practiceCount: number | null;
+  practiceState: PracticeActionState;
   starting: boolean;
   onStart: () => void;
+  onRetry: () => void;
   onViewErrors: () => void;
 }) {
   return (
@@ -2738,16 +2840,51 @@ function KpDetail({
         <Button variant="secondary" size="sm" onClick={onViewErrors}>
           看这个知识点的错题
         </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={practiceCount == null || starting}
-          onClick={onStart}
-        >
-          开始补这个
-        </Button>
+        <PracticeAction state={practiceState} starting={starting} onStart={onStart} onRetry={onRetry} />
       </div>
     </div>
+  );
+}
+
+/** 「开始补这个」的界面状态。 */
+type PracticeActionState = 'loading' | 'failed' | 'unavailable' | 'ready';
+
+/**
+ * 「开始补这个」的四种界面状态——**不用文案解释，靠控件本身表达**：
+ * - `loading`：档位加载中 → 按钮 loading（转圈），学生看得出在跑，不是坏了
+ * - `failed`：档位加载失败 → 换成**「重试」按钮**（可操作控件，不是说明文字）
+ * - `unavailable`：家长停用了全部档位 → **不渲染**（不提供点不动的死按钮，只留「看错题」）
+ * - `ready`：正常可点
+ */
+function PracticeAction({
+  state,
+  starting,
+  onStart,
+  onRetry,
+}: {
+  state: PracticeActionState;
+  starting: boolean;
+  onStart: () => void;
+  onRetry: () => void;
+}) {
+  if (state === 'unavailable') return null;
+  if (state === 'failed') {
+    return (
+      <Button variant="secondary" size="sm" onClick={onRetry}>
+        重试
+      </Button>
+    );
+  }
+  return (
+    <Button
+      variant="primary"
+      size="sm"
+      loading={state === 'loading'}
+      disabled={state !== 'ready' || starting}
+      onClick={onStart}
+    >
+      开始补这个
+    </Button>
   );
 }
 ```
@@ -2755,7 +2892,7 @@ function KpDetail({
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/WeakPointGraphPage.test.tsx`
-Expected: PASS（19 用例全绿：折叠树 3 + 详情栏 4 + 推荐条 6 + confidence 三态 2 + 页脚与错误态 4）
+Expected: PASS（22 用例全绿：折叠树 3 + 详情栏 4 + 推荐条 6 + **档位状态 3** + confidence 三态 2 + 页脚与错误态 4）
 
 - [ ] **Step 5: 提交**
 
@@ -2773,6 +2910,7 @@ git commit -m "feat(web): 薄弱点图谱页——折叠树 + 右栏详情（窄
 - Modify: `apps/web/src/routes/routeTable.tsx`
 - Modify: `apps/web/src/pages/student/training/TrainingHomePage.tsx`
 - Test: `apps/web/src/pages/student/training/TrainingHomePage.test.tsx`（追加）
+- Test: `apps/web/src/routes/routeTable.test.tsx`（追加；「路由确实指到页面」的唯一证明）
 
 **Interfaces:**
 - Consumes: Task 7 的 `WeakPointGraphPage`
@@ -2909,18 +3047,96 @@ import WeakPointGraphPage from '@/pages/student/training/WeakPointGraphPage';
   },
 ```
 
+- [ ] **Step 4b: 补 routeTable 级集成钉子（`apps/web/src/routes/routeTable.test.tsx`）**
+
+**为什么必须补**：Task 7 的页面测试挂的是**页面本身**、Step 1 的卡片测试给这条路径挂了**桩** —— 两处都绕过了真路由表，所以「路由确实指到 `WeakPointGraphPage`」**没有任何测试证明**：`path` 写错一个字符，卡片照样 `navigate`，落到 React Router 的无匹配路由，而**所有测试依旧全绿**。本仓对此有先例与自述理由（同文件的 `describe('路由表：补偿套题作答页')`：*「页面自己有组件测试，但那个测试挂的是页面本身、绕过了路由表——『路由确实指到这个页面』只有这里能证明」*）。
+
+先在该文件的 `vi.mock('@/services/api', ...)` 返回对象里补两个（页面挂载即拉这两个只读端点，档位也走它）：
+
+```tsx
+    // `/student/training/weak-points`（薄弱点图谱页新页）：挂载即拉掌握度 + 推荐，并拉档位
+    getKnowledgeGraphMastery: vi.fn(),
+    getWeakPoints: vi.fn(),
+    getMyPointRules: vi.fn(),
+```
+
+在顶部 `@/services/api` 的 import 清单里补 `getKnowledgeGraphMastery`、`getWeakPoints`、`getMyPointRules`，并加：
+
+```tsx
+const getKnowledgeGraphMasteryMock = vi.mocked(getKnowledgeGraphMastery);
+const getWeakPointsMock = vi.mocked(getWeakPoints);
+const getMyPointRulesMock = vi.mocked(getMyPointRules);
+```
+
+在 `beforeEach` 里补 reset + 默认返回（档位给一个可用档，避免页面停在「重试」态）：
+
+```tsx
+  getKnowledgeGraphMasteryMock.mockReset();
+  getWeakPointsMock.mockReset();
+  getMyPointRulesMock.mockReset();
+  getMyPointRulesMock.mockResolvedValue({
+    tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [{ tierKey: '3' }] }],
+  });
+```
+
+再在文件末尾追加：
+
+```tsx
+/**
+ * 薄弱点图谱页（2026-09-23 批）：`/student/training/weak-points` 是新页，从零加进路由表。
+ *
+ * 页面自己有组件测试，但那个测试挂的是**页面本身**、绕过了路由表；
+ * TrainingHomePage 的卡片测试又给这条路径挂了**桩** —— 两处都证明不了「路由确实指到这个页面」。
+ * 路径写错一个字符，卡片仍会 navigate、落到无匹配路由，而所有测试依旧全绿。只有这里能证明。
+ */
+describe('路由表：薄弱点图谱页', () => {
+  it('/student/training/weak-points 渲染 WeakPointGraphPage（数据来自接口），而非无匹配路由', async () => {
+    setStudentSession();
+    getKnowledgeGraphMasteryMock.mockResolvedValue({
+      subjectId: 1,
+      nodes: [
+        { id: 1, name: '数与式', parentId: null, masteryScore: null, level: null, correctCount: null, errorCount: null, lastSeenAt: null, sampleSize: 0, confidence: 'none', availableQuestionCount: 0 },
+      ],
+      coverage: { coveredQuestions: 0, totalQuestions: 0, uncoveredUnclearedErrors: 0 },
+    });
+    getWeakPointsMock.mockResolvedValue({
+      subjectId: 1,
+      candidates: [],
+      recommendation: null,
+      reason: 'no_qualified_candidate',
+    });
+
+    renderAt('/student/training/weak-points');
+
+    // 真页面内容：一级知识点来自 getKnowledgeGraphMastery（无匹配路由 / 占位页都渲染不出它）
+    expect(await screen.findByText('数与式')).toBeInTheDocument();
+    expect(getKnowledgeGraphMasteryMock).toHaveBeenCalled();
+  });
+
+  it('无 token 访问 /student/training/weak-points → 回登录页，不拉数据', async () => {
+    localStorage.clear();
+
+    renderAt('/student/training/weak-points');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(getKnowledgeGraphMasteryMock).not.toHaveBeenCalled();
+  });
+});
+```
+
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `cd apps/web && npx vitest run src/pages/student/training/TrainingHomePage.test.tsx`
-Expected: PASS（原 6 用例 + 新 2 用例全绿）
+Run: `cd apps/web && npx vitest run src/pages/student/training/TrainingHomePage.test.tsx src/routes/routeTable.test.tsx`
+Expected: PASS（TrainingHomePage 原 6 用例 + 新 2 用例；routeTable 原有用例 + 新 2 用例，全绿）
 
 - [ ] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/routes/routeTable.tsx \
+        apps/web/src/routes/routeTable.test.tsx \
         apps/web/src/pages/student/training/TrainingHomePage.tsx \
         apps/web/src/pages/student/training/TrainingHomePage.test.tsx
-git commit -m "feat(web): 训练页四卡 + 薄弱点图谱路由注册"
+git commit -m "feat(web): 训练页四卡 + 薄弱点图谱路由注册（含 routeTable 级映射钉子）"
 ```
 
 ---
@@ -3387,7 +3603,7 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 - **`confidence` 由后端算好下发**（`none`/`insufficient`/`ok`），`MIN_SAMPLE_SIZE = 5` 是**唯一真源**，前端不重算阈值。
 - **无候选不是错误**：端点仍 200 + `recommendation: null`，前端据此转引导态——**不要改成 404/4xx**。
 - **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**；一级汇总的「待补」阈值 `level <= 2` 是**纯展示口径**、不参与推荐算法。
-- **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`），档位为空时置灰按钮、不硬发请求（否则被 `targeted/start` 400 拒绝）。
+- **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`）。**档位状态一律走 `usePointTiers`**（与专项配置页同一实现）：加载中转圈、失败给重试控件、家长停用则不渲染开练按钮——**不加说明文案**，也不硬发请求（否则被 `targeted/start` 400 拒绝）。
 - **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：不说明会让学生以为「只有这些问题」。
 ```
 
@@ -3462,7 +3678,7 @@ Expected: 全部 PASS；`tsc -b` 无输出；`lint` 0 error
 - [ ] **Step 5: 确认无遗留分支 / 未提交改动**
 
 Run: `git status --short && git log --oneline -12`
-Expected: 工作区干净；本批 9 个提交按序在列
+Expected: 工作区干净；本批提交按序在列（数量随计划修正提交累计而变，不必对数字）
 
 ---
 
@@ -3492,6 +3708,7 @@ Expected: 工作区干净；本批 9 个提交按序在列
 | §6.1 路由与入口（无深链参数） | Task 8 |
 | §6.2 状态机 + 着色表 | Task 7 |
 | §6.3 三个交互（开练 / 看错题 / 边界） | Task 7 + Task 9 |
+| §6.3 边界「档位取不到 → 不硬发请求」 | Task 6（复用 `usePointTiers`，状态不塌）+ Task 7 `PracticeAction`（**界面表达**：转圈 / 重试控件 / 不渲染） |
 | §6.4 空态与引导 | Task 7 |
 | §6.5 窄屏降级 | Task 7 |
 | §6.6 样式硬约束 | Task 7（`data-theme` / 线性 SVG / token 派生色） |
