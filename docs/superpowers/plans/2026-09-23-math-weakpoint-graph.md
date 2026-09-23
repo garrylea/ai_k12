@@ -1757,7 +1757,10 @@ describe('summarizeParent', () => {
 
 ```ts
 describe('pickPracticeCount', () => {
-  const t = (tierKey: string) => ({ tierKey } as any);
+  // 不加 `as any`：`tseslint.configs.recommended` 的 no-explicit-any 是 error 级、
+  // 且配置里没有测试文件豁免，加了会让 Task 11 的 `npm run lint` 门禁失败。
+  // `{ tierKey: string }` 本就满足 `Array<{ tierKey: string }>`，断言是多余的。
+  const t = (tierKey: string) => ({ tierKey });
 
   it('取 ≥3 的最小档（默认档位 1/3/5/10 → 3）', () => {
     expect(pickPracticeCount([t('1'), t('3'), t('5'), t('10')])).toBe(3);
