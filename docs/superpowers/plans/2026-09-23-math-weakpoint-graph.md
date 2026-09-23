@@ -2017,12 +2017,13 @@ git commit -m "feat(web): 热力梯度与开练题量抽取（单一实现 + 边
 
 ```
 [PageHeader: 返回训练 / 薄弱点图谱 · 数学]
-[推荐条]  有候选 → 「最该补：X」+ 掌握度/样本/可抽题数 + [开始补这个] [看这个知识点的错题]
+[推荐条]  有候选 → 「最该补：X」+ 掌握度/样本/可抽题数 + [开始补这个]（**只此一个动作**，勿再加第二个）
           无候选 → 引导文案 + [去专项练习] [去考试]
           拉取失败 → 整条不渲染（图谱仍可用）
 [主体 lg: 两栏]
   左：一级折叠树（默认全收起）
   右：详情栏（未选中 → 提示；选中 → 详情 + 两个动作）；< lg 时为底部抽屉
+     ↑ 两个动作（「开始补这个」「看这个知识点的错题」）**只在详情栏**，推荐条不放第二个
 [页脚] 覆盖 x/y 道题 · 另有 N 道未标注知识点的题，不计入上图 · [去错题页看]
 ```
 
@@ -2203,7 +2204,7 @@ describe('WeakPointGraphPage 详情栏', () => {
 });
 
 describe('WeakPointGraphPage 推荐条', () => {
-  it('有候选：显示「最该补：X」+ 样本 + 可抽题数 + 两个动作', async () => {
+  it('有候选：显示「最该补：X」+ 样本 + 可抽题数 + 只有一个动作', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockResolvedValue(recommendation());
 
@@ -2211,7 +2212,9 @@ describe('WeakPointGraphPage 推荐条', () => {
 
     expect(screen.getByText(/最该补：有理数/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始补这个' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '看这个知识点的错题' })).toBeInTheDocument();
+    // 推荐条**只有一个动作**（spec §6.2 / mockup assembled.html）：另一个动作只在**详情栏**，
+    // 未选中 KP 时不该出现——否则推荐条会变成两个并列按钮、主路径不清。
+    expect(screen.queryByRole('button', { name: '看这个知识点的错题' })).toBeNull();
   });
 
   it('无候选：转引导态，显示引导文案 + [去专项练习] / [去考试]', async () => {
@@ -2271,11 +2274,14 @@ describe('WeakPointGraphPage 推荐条', () => {
     expect(router.state.location.pathname).toBe('/student/training/weak-points');
   });
 
-  it('「看这个知识点的错题」带 kpId 跳错题页', async () => {
+  it('详情栏「看这个知识点的错题」带 kpId 跳错题页', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockResolvedValue(recommendation());
 
     const { router } = await renderSettled();
+    // 该动作只在**详情栏**（推荐条没有）——先展开并选中 KP 才会出现
+    fireEvent.click(screen.getByRole('button', { name: /数与式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '有理数' }));
     fireEvent.click(screen.getByRole('button', { name: '看这个知识点的错题' }));
 
     await waitFor(() =>
@@ -2306,7 +2312,7 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
     await waitFor(() => expect(screen.getByRole('button', { name: '开始补这个' })).toBeEnabled());
   });
 
-  it('家长停用全部档位：不渲染点不动的死按钮，只留「看这个知识点的错题」', async () => {
+  it('家长停用全部档位：推荐条不渲染点不动的死按钮，也不退化成「重试」', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockResolvedValue(recommendation());
     getMyPointRules.mockResolvedValue({
@@ -2315,8 +2321,15 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
 
     await renderSettled();
 
+    // 推荐条仍在（学生仍看到「最该补」），但没有点不动的「开始补这个」
+    expect(screen.getByText(/最该补：有理数/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
-    // 能用的动作仍在，学生不至于无路可走
+    // 停用 ≠ 失败：不给「重试」（重试也变不出档位）
+    expect(screen.queryByRole('button', { name: '重试档位' })).toBeNull();
+
+    // 学生不至于无路可走：详情栏的「看这个知识点的错题」照常可用
+    fireEvent.click(screen.getByRole('button', { name: /数与式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '有理数' }));
     expect(screen.getByRole('button', { name: '看这个知识点的错题' })).toBeInTheDocument();
   });
 
@@ -2646,22 +2659,18 @@ export default function WeakPointGraphPage() {
                     · 可抽 {rec.recommendation.availableQuestionCount} 题
                   </div>
                 </div>
-                <div className="flex gap-3">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => goErrors(rec.recommendation!.knowledgePointId)}
-                  >
-                    看这个知识点的错题
-                  </Button>
-                  <PracticeAction
-                    state={practiceState}
-                    starting={starting}
-                    retryLabel="重试档位"
-                    onStart={() => void startPractice(rec.recommendation!.knowledgePointId)}
-                    onRetry={retryTiers}
-                  />
-                </div>
+                {/*
+                  推荐条**只有一个动作**「开始补这个」（spec §6.2 与 mockup assembled.html 一致）。
+                  这里刻意**不放**「看这个知识点的错题」——两个动作属于**详情栏**（spec §6.3）；
+                  推荐条塞两个并列按钮会让学生分不清「一键补漏」的主路径是哪条。
+                */}
+                <PracticeAction
+                  state={practiceState}
+                  starting={starting}
+                  retryLabel="重试档位"
+                  onStart={() => void startPractice(rec.recommendation!.knowledgePointId)}
+                  onRetry={retryTiers}
+                />
               </Card>
             ) : (
               <Card className="flex flex-wrap items-center gap-4 border border-[var(--learn-card-border)] bg-[var(--learn-card-bg)]">
@@ -2992,6 +3001,20 @@ describe('TrainingHomePage 薄弱点图谱入口（第 4 张卡）', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/weak-points'));
   });
+
+  it('四卡排成 2×2（两行两列），不是一排四个', async () => {
+    getRemediationOverview.mockResolvedValue({ active: false, setId: 0, groupCount: 0, itemCount: 0, correctCount: 0 });
+
+    const { container } = await renderSettled();
+
+    // 头脑风暴定稿的形状（entry-placement.html 的「A · 第 4 张卡」：专项/考试在上、
+    // 错题/薄弱点图谱在下）。曾一度实现成 `lg:grid-cols-4` 一排四个——本用例钉住不许回退。
+    const grid = container.querySelector<HTMLElement>('.grid');
+    expect(grid).not.toBeNull();
+    expect(grid?.className).toContain('sm:grid-cols-2');
+    expect(grid?.className).not.toContain('lg:grid-cols-4');
+    expect(grid?.querySelectorAll('button')).toHaveLength(4);
+  });
 });
 ```
 
@@ -3025,16 +3048,16 @@ const GraphIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
 );
 ```
 
-把容器宽度改宽（4 卡不压扁）：
+容器宽度 `max-w-4xl`（**不要改 `max-w-5xl`**）：4 卡排 **2×2** 时这个宽度正好，卡片不被压扁。
 
 ```tsx
-      <div className="w-full max-w-5xl px-4 sm:px-8">
+      <div className="w-full max-w-4xl px-4 sm:px-8">
 ```
 
-把网格断点改为两列 → 四列：
+网格保持 **2×2（两行两列）**，**不要改成 `lg:grid-cols-4` 一排四个**——这是头脑风暴定稿的形状（`.superpowers/brainstorm/<批次>/content/entry-placement.html` 的「A · 第 4 张卡」：专项/考试在上、错题/薄弱点图谱在下），也是本页从三卡改四卡时用户确认过的样子；一排四个会把卡片压扁。
 
 ```tsx
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-12">
 ```
 
 在错题练习那张卡之后（`</button>` 与 `</div>` 之间）加第 4 张卡：
@@ -3193,7 +3216,7 @@ describe('路由表：薄弱点图谱页', () => {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/TrainingHomePage.test.tsx src/routes/routeTable.test.tsx`
-Expected: PASS（TrainingHomePage 原 6 用例 + 新 2 用例；routeTable 原有用例 + 新 2 用例，全绿）
+Expected: PASS（TrainingHomePage 原 6 用例 + 新 3 用例；routeTable 原有用例 + 新 2 用例，全绿）
 
 - [ ] **Step 6: 提交**
 
@@ -3623,8 +3646,8 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 #### 页面 `/student/training/weak-points`
 - **入口**：训练首页第 4 张卡（四卡：专项练习 / 真题考试 / 错题练习 / 薄弱点图谱）。
 - **布局**：顶部 `PageHeader`（回训练首页、标题「薄弱点图谱 · 数学」）；下方推荐条；主体 `lg` 起两栏——左为**一级折叠树（默认全收起）**、右为详情栏（**窄屏降级为底部抽屉**，同一 DOM 节点切 class）；底部页脚给覆盖口径。
-- **推荐条三态**：有候选 →「最该补：X」+ 掌握度/样本/可抽题数 + 两个动作；无候选 → 引导文案 +「去专项练习」/「去考试」；**拉取失败 → 整条不渲染**（图谱仍可用，一栏坏掉不拖垮另一栏）。
-- **两个动作**：「开始补这个」按「≥3 的最小可用档」开练并跳作答页；「看这个知识点的错题」跳 `/student/training/errors?kpId=<id>`（该页据此预填筛选并**首屏即按它查询**）。
+- **推荐条三态**：有候选 →「最该补：X」+ 掌握度/样本/可抽题数 + **[开始补这个]**（**只此一个动作**，勿再加第二个按钮）；无候选 → 引导文案 +「去专项练习」/「去考试」；**拉取失败 → 整条不渲染**（图谱仍可用，一栏坏掉不拖垮另一栏）。
+- **两个动作（都在详情栏，推荐条不放）**：「开始补这个」按「≥3 的最小可用档」开练并跳作答页；「看这个知识点的错题」跳 `/student/training/errors?kpId=<id>`（该页据此预填筛选并**首屏即按它查询**）。推荐条只留「开始补这个」——两个并列按钮会让学生分不清「一键补漏」的主路径。
 - **树与详情**：点一级展开/收起二级；点二级 chip 在详情栏出对错数、样本可信度、最近作答与两个动作。
 
 #### 约束
@@ -3737,8 +3760,8 @@ Expected: 全部 PASS；`tsc -b` 无输出；`lint` 0 error
 1. 训练页应看到 **4 张卡**（新增「薄弱点图谱」），4 卡不被压扁
 2. 点进图谱页：因库里掌握度只有 3 行，**大概率是全灰树 + 引导态推荐条**——这是**正确表现**，不是 bug
 3. 展开任一有二级的一级行，点一个二级 chip → 右栏出详情
-4. 若该生有够格候选，点「开始补这个」→ 应跳到专项作答页且题量 = 3
-5. 点「看这个知识点的错题」→ 错题页应预填该知识点且列表已按它过滤
+4. 若该生有够格候选，点推荐条的「开始补这个」→ 应跳到专项作答页且题量 = 3（推荐条上**只有这一个按钮**）
+5. 在**详情栏**点「看这个知识点的错题」→ 错题页应预填该知识点且列表已按它过滤
 6. 页脚应显示「知识点覆盖 205 / 457 道题」与（若有）「另有 N 道未标注知识点的题」
 
 - [ ] **Step 5: 确认无遗留分支 / 未提交改动**

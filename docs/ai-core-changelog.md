@@ -26,6 +26,13 @@
 - 实测勘误：brainstorming 调研摘要曾断言「training 判题不回写掌握度」——**错**，
   `training.service.ts:173-174` 经 `judgeCore.judgeQuestion` → `finishJudge` → `recordFromJudge`，
   **无 source 分支**，四个来源（practice/training/exams/remediation）都回写。
+- **实现后对照 mockup 复查，修掉两处偏离**（用户对照最初稿子发现）：① 训练首页四卡一度写成
+  `lg:grid-cols-4` 一排四个，稿子 `entry-placement.html` 是 **2×2**（专项/考试在上、错题/薄弱点在下）→
+  改回 `sm:grid-cols-2`（容器 `max-w-4xl`）+ 钉子用例；② 图谱推荐条一度同时放「开始补这个」与
+  「看这个知识点的错题」**两个**按钮，spec §6.2 / `assembled.html` 只有**一个**（两个动作属**详情栏**，
+  spec §6.3）→ 推荐条只留「开始补这个」。**根因是计划正文写偏**：`plans/2026-09-23-math-weakpoint-graph.md`
+  的页面结构图与代码块先把这两处写成「两个动作 / 四连排」，实现照抄了计划——**spec 本身没错**，
+  已同步计划与 `UX-UI设计文档.md` §5.8。
 
 ## 2026-09-22 错题补偿套题（相似题专项练习）——补记本批 changelog 条目
 
