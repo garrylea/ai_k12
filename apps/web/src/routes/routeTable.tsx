@@ -15,6 +15,7 @@ import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage';
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
+import WeakPointGraphPage from '@/pages/student/training/WeakPointGraphPage';
 import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
 import RemediationRunPage from '@/pages/student/training/RemediationRunPage';
 import ChineseSpecialPage from '@/pages/student/training/chinese/ChineseSpecialPage';
@@ -212,6 +213,15 @@ export const routes: RouteObject[] = [
     element: (
       <RequireRole role="student">
         <RemediationRunPage />
+      </RequireRole>
+    ),
+  },
+  // 薄弱点图谱（2026-09-23）：全屏沉浸层，训练轨第 4 张卡；两个只读端点
+  {
+    path: '/student/training/weak-points',
+    element: (
+      <RequireRole role="student">
+        <WeakPointGraphPage />
       </RequireRole>
     ),
   },

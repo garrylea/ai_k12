@@ -47,6 +47,7 @@ function renderPage() {
     [
       { path: '/student/training/home', element: <TrainingHomePage /> },
       { path: '/student/training/remediation/run', element: <div>作答页桩</div> },
+      { path: '/student/training/weak-points', element: <div>薄弱点图谱页桩</div> },
     ],
     { initialEntries: ['/student/training/home'] },
   );
@@ -123,5 +124,24 @@ describe('TrainingHomePage 相似题专项练习提示条', () => {
     expect(screen.getByText('专项练习')).toBeInTheDocument();
     expect(screen.getByText('真题考试')).toBeInTheDocument();
     expect(screen.getByText('错题练习')).toBeInTheDocument();
+  });
+});
+
+describe('TrainingHomePage 薄弱点图谱入口（第 4 张卡）', () => {
+  it('渲染第 4 张卡「薄弱点图谱」', async () => {
+    getRemediationOverview.mockResolvedValue({ active: false, setId: 0, groupCount: 0, itemCount: 0, correctCount: 0 });
+
+    await renderSettled();
+
+    expect(screen.getByText('薄弱点图谱')).toBeInTheDocument();
+  });
+
+  it('点第 4 张卡跳 /student/training/weak-points', async () => {
+    getRemediationOverview.mockResolvedValue({ active: false, setId: 0, groupCount: 0, itemCount: 0, correctCount: 0 });
+
+    const { router } = await renderSettled();
+    fireEvent.click(screen.getByRole('button', { name: '进入薄弱点图谱' }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/weak-points'));
   });
 });

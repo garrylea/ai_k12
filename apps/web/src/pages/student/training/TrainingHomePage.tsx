@@ -57,8 +57,27 @@ const RedoIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   </svg>
 );
 
+/** 薄弱点图谱：节点连线。 */
+const GraphIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <circle cx="12" cy="5" r="2.5" />
+    <circle cx="5" cy="18" r="2.5" />
+    <circle cx="19" cy="18" r="2.5" />
+    <path d="M10.8 7.2 6.2 15.8" />
+    <path d="M13.2 7.2 17.8 15.8" />
+  </svg>
+);
+
 /**
- * 训练三卡选择页（PRD §6.3 三类训练并列）：选完学科后的落地页，
+ * 训练四卡选择页（PRD §6.3 三类训练 + 薄弱点图谱）：选完学科后的落地页，
  * 专项/考试/错题三个并列入口，卡片语言复刻入口选择页（style.md §2.7）。
  * 错题卡是唯一「有状态」的入口——实时拉未清零错题数（失败/载入中显示「--」，
  * 不阻塞；0 显示「暂无未清零错题」，仍可点入看空列表）。
@@ -117,7 +136,7 @@ export default function TrainingHomePage() {
       className="min-h-screen flex flex-col items-center justify-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
-      <div className="w-full max-w-4xl px-4 sm:px-8">
+      <div className="w-full max-w-5xl px-4 sm:px-8">
         {/* 返回选学科页 + 标题（上下结构，StarMapPage header 同款模式） */}
         <PageHeader
           to="/student/training"
@@ -148,7 +167,7 @@ export default function TrainingHomePage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-12">
           {/* 专项练习 */}
           <button
             onClick={() => navigate('/student/training/targeted')}
@@ -240,6 +259,36 @@ export default function TrainingHomePage() {
             {/* 功能性文案（非装饰副标题）：未清零错题数 */}
             <span className="text-sm text-[var(--text-secondary)]">
               {errorCountText}
+            </span>
+          </button>
+
+          {/* 薄弱点图谱（第 4 张卡，2026-09-23）：纯导航，无状态徽标 */}
+          <button
+            onClick={() => navigate('/student/training/weak-points')}
+            className="h-64 rounded-3xl bg-white p-8 flex flex-col items-center justify-center gap-4 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
+            style={{
+              border: '1px solid rgba(226, 232, 240, 0.8)',
+              boxShadow: 'var(--shadow-card)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = 'var(--shadow-card)';
+            }}
+            aria-label="进入薄弱点图谱"
+          >
+            <div
+              className="w-20 h-20 rounded-2xl flex items-center justify-center text-white shadow-sm"
+              style={{
+                background: 'linear-gradient(to top right, #FF6B35, #FFB25A)',
+              }}
+              aria-hidden="true"
+            >
+              <GraphIcon />
+            </div>
+            <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
+              薄弱点图谱
             </span>
           </button>
         </div>
