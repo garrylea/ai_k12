@@ -20,6 +20,7 @@ import { TrainingModule } from './modules/training/training.module.js';
 import { ExamsModule } from './modules/exams/exams.module.js';
 import { PointsModule } from './modules/points/points.module.js';
 import { ParentInsightsModule } from './modules/parent-insights/parent-insights.module.js';
+import { KnowledgeGraphModule } from './modules/knowledge-graph/knowledge-graph.module.js';
 import { AnalyticsModule } from './modules/analytics/analytics.module.js';
 import { AnalyticsInterceptor } from './common/interceptors/analytics.interceptor.js';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware.js';
@@ -48,6 +49,8 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
     ParentInsightsModule,
     // 埋点 Phase 0（2026-09-19）——持有两个 TelemetryBuffer + 注册 ai-core 的 LLM 账本 sink
     AnalyticsModule,
+    // 数学薄弱点图谱（2026-09-23）——学生端训练轨第 4 张卡；两个只读端点
+    KnowledgeGraphModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
