@@ -37,6 +37,8 @@
 | `apps/server/src/database/repositories/knowledge-points.repo.ts`（改） | 加 `countAvailableQuestionsByKp()`：一次分组查询取「该生可抽题数」 |
 | `apps/server/src/database/repositories/student-knowledge-mastery.repo.ts`（改） | 加 `listBySubject()`、`countQuestionCoverageBySubject()` |
 | `apps/server/src/database/repositories/main-error-books.repo.ts`（改） | 加 `countUncoveredUncleared()` |
+| `apps/server/src/database/sql-fragments.ts`（新） | 跨模块共享的 SQL 片段常量（目前只有「未标注知识点的错题」谓词） |
+| `apps/server/src/database/repositories/parent-insights.repo.ts`（改） | `countUncoveredUnclearedErrors` 改用同一共享常量（消除漂移） |
 | `apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts`（新） | 端点出参类型 + `MIN_SAMPLE_SIZE` + `WEAK_LEVEL_MAX` |
 | `apps/server/src/modules/knowledge-graph/knowledge-graph.service.ts`（新） | 组装树 + overlay；推荐算法 |
 | `apps/server/src/modules/knowledge-graph/knowledge-graph.controller.ts`（新） | 两个 GET 路由 + 入参/归属校验 |
@@ -62,6 +64,7 @@
 | `knowledge-points.repo.test.ts`（**已存在 25 行，追加**） | SQL 谓词钉子 |
 | `student-knowledge-mastery.repo.test.ts`（**已存在 88 行，追加**） | 两方法形状 + SQL 谓词钉子 |
 | `main-error-books.repo.test.ts`（**已存在 242 行，追加**） | `countUncoveredUncleared` 谓词钉子 |
+| `sql-fragments.test.ts`（新） | 共享片段文本钉子（两处共用的唯一真源） |
 | `knowledge-graph.service.test.ts`（新） | 三道闸门 / 排序 / 空候选 / confidence 三态 |
 | `knowledge-graph.controller.test.ts`（新） | 403/1005、400/1001、透传 |
 | `weak-point-heat.test.ts`（新） | 梯度夹取 / 三态 / 汇总 |
@@ -78,9 +81,12 @@
 - Modify: `apps/server/src/database/repositories/knowledge-points.repo.ts`
 - Modify: `apps/server/src/database/repositories/student-knowledge-mastery.repo.ts`
 - Modify: `apps/server/src/database/repositories/main-error-books.repo.ts`
+- Modify: `apps/server/src/database/repositories/parent-insights.repo.ts`（**只改 `countUncoveredUnclearedErrors` 一处，用共享常量**）
+- Create: `apps/server/src/database/sql-fragments.ts`
 - Test: `apps/server/src/database/repositories/knowledge-points.repo.test.ts`（**已存在，追加一个 describe**）
 - Test: `apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts`（**已存在，追加两个 describe**）
 - Test: `apps/server/src/database/repositories/main-error-books.repo.test.ts`（**已存在，追加一个 describe**）
+- Test: `apps/server/src/database/sql-fragments.test.ts`（**新建**）
 
 **Interfaces:**
 - Produces:
@@ -88,10 +94,15 @@
   - `StudentKnowledgeMasteryRepository.listBySubject(studentId: number, subjectId: number): Promise<Array<{ knowledgePointId: number; masteryScore: number; level: number; correctCount: number; errorCount: number; lastSeenAt: Date | null }>>`
   - `StudentKnowledgeMasteryRepository.countQuestionCoverageBySubject(subjectId: number): Promise<{ coveredQuestions: number; totalQuestions: number }>`
   - `MainErrorBooksRepository.countUncoveredUncleared(studentId: number, subjectId: number): Promise<number>`
+  - `apps/server/src/database/sql-fragments.ts` 导出 `UNCOVERED_ERROR_PREDICATE: string`
 
 **为什么这些谓词必须逐字对齐：** 本仓既有盲区是 `mockPool` 不看 SQL 文本——别名 / 谓词改错也全绿（见 `docs/ai-core-changelog.md` 2026-09-20 的 I2 教训）。故每个方法都要用 `expect(sql).toContain(...)` 把谓词钉住。
 
 **注意 `subjectId` 作用域：** spec §5.1 说「口径照抄」家长端 `countUncoveredUnclearedErrors`，但那个查询**不带学科**。本页是数学专用页，`coverage` 与「未标注错题数」都必须是**数学口径**，否则页脚会把语文/英语的错题算进数学页。这是对 spec 的**有意细化**，已在 spec §9 文档同步清单外补记于本计划。
+
+**为什么抽共享片段（2026-09-23 用户裁决，替代原「两处各写一份」）：** 两个查询的 `NOT EXISTS (...)` 子句**逐字相同**，只有外层 `subject_id` 谓词不同。原先「各写一份」的写法在 Task 1 审查中被 reviewer 标为 Important（plan-mandated 近重复），残留风险是**改一处忘另一处会静默漂移**，而两边的测试各自只钉住自己那份、钉不住对方。用户裁决：把**子句**抽成中立常量、两处共用；`subject_id` 的差异仍留在各自查询里（这是**语义差异**，不是重复）。常量放 `src/database/sql-fragments.ts`（纯字符串、无依赖），两个仓储 import 它 —— 只共享字符串，不造成模块耦合，也没有 import `ParentInsightsRepository`。
+
+**⚠️ 两处查询都用 `meb` 作为 `main_error_books` 的别名**（`parent-insights.repo.ts:484`、`main-error-books.repo.ts:168`），所以片段可以逐字共用。若将来给某一边换别名，必须同步改片段或改用参数化别名。
 
 - [ ] **Step 1: 写失败的仓储测试**
 
@@ -235,10 +246,41 @@ describe('MainErrorBooksRepository.countUncoveredUncleared', () => {
 });
 ```
 
+创建 `apps/server/src/database/sql-fragments.test.ts`（**新文件**）：
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { UNCOVERED_ERROR_PREDICATE } from './sql-fragments';
+
+/**
+ * 共享片段是**两处查询的唯一真源**（`MainErrorBooksRepository.countUncoveredUncleared`
+ * 与 `ParentInsightsRepository.countUncoveredUnclearedErrors` 都拼它）。
+ * 这个用例把片段文本钉死：片段被改宽/改窄（比如漏掉 `qkp.question_id = meb.question_id`
+ * 变成恒真子查询）时，两处会**同时**静默错掉，只有这里能拦住。
+ */
+describe('sql-fragments.UNCOVERED_ERROR_PREDICATE', () => {
+  it('谓词文本与两处仓储的期望逐字一致', () => {
+    expect(UNCOVERED_ERROR_PREDICATE).toBe(
+      'NOT EXISTS (SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id)',
+    );
+  });
+
+  it('不含外层过滤条件（student_id / is_cleared / subject_id 归各自查询管）', () => {
+    expect(UNCOVERED_ERROR_PREDICATE).not.toContain('student_id');
+    expect(UNCOVERED_ERROR_PREDICATE).not.toContain('is_cleared');
+    expect(UNCOVERED_ERROR_PREDICATE).not.toContain('subject_id');
+  });
+
+  it('别名固定为 meb（两处查询都用 meb 指 main_error_books，换别名必须同步改片段）', () => {
+    expect(UNCOVERED_ERROR_PREDICATE).toContain('meb.question_id');
+  });
+});
+```
+
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd apps/server && npx vitest run src/database/repositories/knowledge-points.repo.test.ts src/database/repositories/student-knowledge-mastery.repo.test.ts src/database/repositories/main-error-books.repo.test.ts`
-Expected: FAIL —— `repo.countAvailableQuestionsByKp is not a function`（三个新方法都不存在）
+Run: `cd apps/server && npx vitest run src/database/repositories/knowledge-points.repo.test.ts src/database/repositories/student-knowledge-mastery.repo.test.ts src/database/repositories/main-error-books.repo.test.ts src/database/sql-fragments.test.ts`
+Expected: FAIL —— `repo.countAvailableQuestionsByKp is not a function`（三个新方法都不存在）与 `Cannot find module './sql-fragments'`
 
 - [ ] **Step 3: 实现 `KnowledgePointsRepository.countAvailableQuestionsByKp`**
 
@@ -350,7 +392,42 @@ Expected: FAIL —— `repo.countAvailableQuestionsByKp is not a function`（三
   }
 ```
 
-- [ ] **Step 5: 实现 `MainErrorBooksRepository.countUncoveredUncleared`**
+- [ ] **Step 5: 新建共享片段 `sql-fragments.ts`**
+
+创建 `apps/server/src/database/sql-fragments.ts`：
+
+```ts
+/**
+ * 跨仓储共享的 SQL 片段常量。
+ *
+ * **为什么要有这个文件**：`MainErrorBooksRepository.countUncoveredUncleared`（学生端图谱页）
+ * 与 `ParentInsightsRepository.countUncoveredUnclearedErrors`（家长端报告）的
+ * `NOT EXISTS (...)` 子句**逐字相同**，只有外层过滤条件不同。原先两边各写一份，
+ * 残留风险是改一处忘另一处会**静默漂移**，而两边的测试各自只钉住自己那份。
+ * 抽成常量后，两边拼的是同一段文本，漂移在结构上不可能发生。
+ *
+ * **只共享字符串**：这里不 import 任何仓储 / service，所以不造成模块耦合
+ * （与「不要把 `ParentInsightsRepository` 跨模块复用」并不冲突 —— 那说的是不要共享**实例**）。
+ *
+ * ⚠️ 片段里的 `meb` 是 `main_error_books` 的别名，两处查询都这么写
+ * （`parent-insights.repo.ts:484`、`main-error-books.repo.ts:168`）。
+ * 谁换别名，谁必须同步改这里。
+ */
+
+/**
+ * 「这条错题映射不到任何知识点」的判定子句。
+ *
+ * 语义：`main_error_books` 的某行（别名 `meb`）在 `question_knowledge_points` 里
+ * 找不到任何关联行 —— 即该题的 KP 标注缺失，进不了知识点图谱。
+ *
+ * **不含** `student_id` / `is_cleared` / `subject_id`：那些是外层查询的过滤条件，
+ * 两处口径不同（家长端跨学科、学生端仅数学），故意留在各自查询里。
+ */
+export const UNCOVERED_ERROR_PREDICATE =
+  'NOT EXISTS (SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id)';
+```
+
+- [ ] **Step 6: 实现 `MainErrorBooksRepository.countUncoveredUncleared`**
 
 在 `apps/server/src/database/repositories/main-error-books.repo.ts` 的 `countClearedBetween` 之后追加（类内）：
 
@@ -358,39 +435,80 @@ Expected: FAIL —— `repo.countAvailableQuestionsByKp is not a function`（三
   /**
    * 未清零错题里**映射不到任何知识点**的条数（数学口径，图谱页页脚用）。
    *
-   * 与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors` 是**同一谓词**，
-   * 但那条不带 subject —— 家长端跨学科汇总，本页只讲数学，故这里按 `subject_id` 收窄。
-   * 两处**故意各写一份**：`parent-insights` 的仓储不导出、跨模块复用会绑死两个模块的演进。
+   * 与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors` 共用
+   * `UNCOVERED_ERROR_PREDICATE`（见 `sql-fragments.ts`），只有外层过滤不同：
+   * 家长端跨学科汇总，本页只讲数学，故这里按 `subject_id` 收窄。
    */
   async countUncoveredUncleared(studentId: number, subjectId: number): Promise<number> {
     const [rows] = await this.pool.execute<(RowDataPacket & { uncovered: number | string | null })[]>(
       `SELECT COUNT(*) AS uncovered
        FROM main_error_books meb
        WHERE meb.student_id = ? AND meb.subject_id = ? AND meb.is_cleared = 0
-         AND NOT EXISTS (
-           SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id
-         )`,
+         AND ${UNCOVERED_ERROR_PREDICATE}`,
       [studentId, subjectId],
     );
     return Number(rows[0]?.uncovered ?? 0);
   }
 ```
 
-- [ ] **Step 6: 跑测试确认通过**
+同时在文件顶部 import 区加：
 
-Run: `cd apps/server && npx vitest run src/database/repositories/knowledge-points.repo.test.ts src/database/repositories/student-knowledge-mastery.repo.test.ts src/database/repositories/main-error-books.repo.test.ts`
-Expected: PASS（3 文件全绿）
+```ts
+import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
+```
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 7: 让家长端也用同一片段**
+
+改 `apps/server/src/database/repositories/parent-insights.repo.ts` 的 `countUncoveredUnclearedErrors`（约 481-492 行）——**只动这一处**，把内联的 `NOT EXISTS (...)` 换成常量：
+
+```ts
+  /**
+   * 未清零错题里**映射不到任何知识点**的条数（`question_id` 为 NULL，或该题未绑 KP）。
+   *
+   * 与 `getWeakPoints` 是同一口径的补集，UI 必须显式展示这个数（spec §9.1）。
+   *
+   * 谓词子句与 `MainErrorBooksRepository.countUncoveredUncleared` **共用**
+   * `UNCOVERED_ERROR_PREDICATE`（见 `sql-fragments.ts`）；本查询**不带学科**
+   * （家长端跨学科汇总），学生端图谱那份按 `subject_id` 收窄。
+   */
+  async countUncoveredUnclearedErrors(studentId: number): Promise<number> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS uncovered
+       FROM main_error_books meb
+       WHERE meb.student_id = ? AND meb.is_cleared = 0
+         AND ${UNCOVERED_ERROR_PREDICATE}`,
+      [studentId],
+    );
+    return Number(rows[0]?.uncovered ?? 0);
+  }
+```
+
+并在 `parent-insights.repo.ts` 顶部 import 区加：
+
+```ts
+import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
+```
+
+**⚠️ 不要改这个方法的签名、不要改它的 `subject_id` 缺失（那是家长端跨学科口径）、不要动该文件里的任何其它方法。** 既有的 `parent-insights.repo.test.ts` 有两个用例钉着这个方法（`toContain('NOT EXISTS')`、`toContain('is_cleared = 0')`），改完必须仍然通过。
+
+- [ ] **Step 8: 跑测试确认通过**
+
+Run: `cd apps/server && npx vitest run src/database/repositories/knowledge-points.repo.test.ts src/database/repositories/student-knowledge-mastery.repo.test.ts src/database/repositories/main-error-books.repo.test.ts src/database/sql-fragments.test.ts src/database/repositories/parent-insights.repo.test.ts src/modules/parent-insights/report.service.test.ts`
+Expected: PASS（6 文件全绿；后两个是既有家长端用例，验证这次重构没打破它们）
+
+- [ ] **Step 9: 提交**
 
 ```bash
-git add apps/server/src/database/repositories/knowledge-points.repo.ts \
+git add apps/server/src/database/sql-fragments.ts \
+        apps/server/src/database/sql-fragments.test.ts \
+        apps/server/src/database/repositories/knowledge-points.repo.ts \
         apps/server/src/database/repositories/student-knowledge-mastery.repo.ts \
         apps/server/src/database/repositories/main-error-books.repo.ts \
+        apps/server/src/database/repositories/parent-insights.repo.ts \
         apps/server/src/database/repositories/knowledge-points.repo.test.ts \
         apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts \
         apps/server/src/database/repositories/main-error-books.repo.test.ts
-git commit -m "feat(server): 图谱读侧仓储——可抽题数/按学科掌握度/学科覆盖率/未标注错题数"
+git commit -m "feat(server): 图谱读侧仓储——可抽题数/按学科掌握度/学科覆盖率/未标注错题数（未标注谓词抽共享片段）"
 ```
 
 ---
@@ -3202,7 +3320,10 @@ Expected 输出 4 行（`relations` / `mastery` / `weak-points` / `learning-path
 - 新增只读模块 `apps/server/src/modules/knowledge-graph/`，落地 API 文档 §4.5 的两个 MVP 端点；
   `relations` 端点**降级 P1**（`knowledge_relations` 表零数据，等于要先做一轮数据工程）。
 - 新增 4 个只读仓储查询：可抽题数（按 KP 分组）、按学科掌握度行、按学科题库覆盖率、未标注知识点的未清零错题数。
-  后两个**故意与家长端各写一份**（家长端不带学科，本页是数学口径），不复用 `parent-insights` 的仓储。
+  最后一条的「未标注」判定子句与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors`
+  **共用 `apps/server/src/database/sql-fragments.ts` 的 `UNCOVERED_ERROR_PREDICATE`**
+  （原计划是两边各写一份，Task 1 审查标为 plan-mandated 近重复 → 用户裁决抽共享片段消漂移）；
+  外层过滤仍各自保留（家长端跨学科、本页仅数学），两处**不共享仓储实例**。
 - 前端新增 `/student/training/weak-points`（训练轨第 4 张卡）+ `weak-point-heat.ts`（热力梯度唯一实现）
   + `point-tiers.ts` 的 `pickPracticeCount`；`ErrorPracticePage` 补 `?kpId=` 预填
   （spec §6.3 原写「已支持」，实测只到 API 层，页面不读 URL）。
