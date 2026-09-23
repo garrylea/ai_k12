@@ -8,6 +8,23 @@
 
 ---
 
+## 2026-09-22 错题补偿套题（相似题专项练习）——补记本批 changelog 条目
+
+> 本条目为 2026-09-23 补写：该批落地时只同步了 API/PRD/DB/UX/openapi 五处文档（提交 `2836a82`），漏了本文件的条目，今按仓库体量纪律补上。同批顺带清掉前端两条遗留死路由（见文末）。
+
+**设计**：`docs/superpowers/specs/2026-09-21-remediation-set-design.md`（含 9 项用户裁决）；**计划**：`docs/superpowers/plans/2026-09-21-remediation-set.md`（Task 1–15）。**PRD 锚点**：§6.3 训练轨、§7.6 末条「测评后推荐薄弱点专项练习」、§7.13 积分体系。
+
+- **功能**：数学考试/专项练习出分后，询问卡征得学生同意（跳过则什么都不发生，原错题照常入错题本），按（考点+题型+难度）**三元组去重**成组、每组 3 题（题库优先、难度 ±1 放宽、AI 生成兜底），挂训练轨三卡页顶部提示条；逐题作答**答对清题、全对清套**（整套记录删除，题库题不动）；**不入错题本、不参与主线清零门禁**；积分按题型 选择 3 / 填空 4 / 大题 6，每题首答即发、不看对错（新任务 `remediation_question`）。
+- **数据面**：新三表 `remediation_sets` / `remediation_groups` / `remediation_set_items`（迁移 `2026-09-21_remediation_sets.sql`，折回 schema.sql；`uniq_rgroups_triple (set_id, kp_id, type, difficulty)` 是三元组追加合并去重键；`origin_question_id` 在 groups 上作组级审计）。⚠️ **终审补的唯一键**：`remediation_sets` 加条件式 **VIRTUAL** 生成列 `active_student_id` + `uniq_rsets_active`——修复「两个标签页同时点生成 → check-then-insert 各建一条 active 套题 → 学生清掉新套后旧套复活、同一批错题经不同 item id 重复发分」（`dedupe_key 'rem:<item.id>'` 跨套失效）。VIRTUAL 不能改 STORED（外键挡 1215，同 goals 先例）。
+- **后端**：`RemediationRepository` + `RemediationGeneratorService`（建组/抽题/AI 补题）+ `RemediationService`（编排）；judge-core 新增 `remediation` 来源跳过错题本副作用；5 端点见 API 文档 **v4.9**（`generate` / `me` / `questions` / `answers` / `self-assess`，三个 POST 记 201）。**AI 补题复用 ai-core `variation` 场景**（无新场景），fire-and-forget + in-flight 去重 + `ai_pending_count` 悬挂时读取端惰性重试；AI 题入库 `questions`（`source='remediation'`、`content_hash` 去重、**`options` 剥 `isCorrect` 防泄漏**、choice 答案归一到正确选项 label 防恒判错）。
+- **前端**：`services/api.ts` 接口函数、`RemediationOfferCard` 询问卡（考试结果页 + 专项完成页挂载）、三卡页顶部提示条、`RemediationRunPage` 套题作答页（复用 `QuestionRunner` 与训练轨作答流）。询问卡**只显示错题总数 N**、不显示「M 题可生成」（M 要调 generate 后才知道，生成前无从预判；实得组数/题数由生成后 toast 告知）。
+- **落地后四轮收尾修复**（用户实测/复核轮）：① 并发生成重复建套/重复发分（上条唯一键）+ 提交失败按 `ApiError.status` 区分 4xx 业务拒绝与网络失败 + `listQuestions` 改共享 `parseOptions`（坏 JSON 降级 null 不再整页 500）；② 询问卡槽位不再无条件渲染（全对时多出空带与分隔线）+ 收尾重拉失败不卡死在判题中；③ 配色改 brand token / `Button` 原语（学生端不引入 bg-blue-600，Banner 橘底）；④ 数学专项/错题重练答完末题不再误弹退出守卫、答题组件左输入右预览滚动跟随钉底。
+- **延后项（本批明确不做）**：① 数学题**逻辑自洽校验**（spec §5.3 / §7.10 风控）——需新增「题目逻辑自洽性」校验能力 + `validator_passed` 写入方，范围超出本期；② `true_false` 答案归一——数学题库当前无判断题、该组型不可达，**将来引入判断题必须把 answer 归一到 `对`/`错` 并强制 `options=null`**（对齐前端默认选项，否则恒判错）。
+- **验证**（2026-09-23 全量复跑）：服务端 `npm test` **1617/1617 全绿**；前端 `npm test` **842/842 全绿**、`tsc -b` 退出 0。
+- **同批清理**：删除前端两条遗留死路由 `/student/auxiliary/selector`（P3.2）与 `/student/auxiliary/ask`（P3.3）——两者的功能都实现在辅轨答疑应用 P3.1 内部（UX 文档 P3 节的「实现状态」注记已标 P3.1–P3.4 完成），全仓无链接指向；`Placeholder` 组件随之删除，**本仓已无占位页**（`routeTable.test.tsx` 原「占位路由仍渲染 Placeholder」金丝雀用例改为「P3.2/P3.3 已不存在」钉子，与 `/student/settings` 先例同口径）；`apps/web/CLAUDE.md` 目录树同步。API 文档头部版本号 v4.8 → v4.9（上批漏更）。
+
+---
+
 ## 2026-09-21 个人中心/奖励册顶栏「返回」改为回来源页（用户实测反馈，推翻 2026-09-18 的「返回上一页」裁决）
 
 **问题（用户实测）**：从星图点段位面板「查看积分明细 →」进个人中心、再点「奖励册」切回「个人中心」后按「返回」，退回去的是**奖励册**而不是进来的那一页。根因：顶栏用的是 `BackButton` 默认模式（`navigate(-1)` 回退浏览器历史），而这两页共用外壳 `StudentStayLayout`、页内可互跳，**互跳会把兄弟页压进历史栈 —— 历史栈 ≠「从哪来」**。

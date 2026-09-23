@@ -53,12 +53,11 @@ import AdminAlertsPage from '@/pages/admin/AdminAlertsPage';
 import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
 import RequireRole from './RequireRole';
 import RoleRedirect from './RoleRedirect';
-import { Placeholder } from './Placeholder';
 
 /**
  * 真实路由表（纯配置，**不定义组件**：本文件只导出 `routes`，路由级测试用
  * `createMemoryRouter(routes)` 直接挂载它，钉住「某个路径确实指向某个页面」。
- * 浏览器 router 单例在 `index.tsx`；`Placeholder` / `RoleRedirect` 各自单独成文件。
+ * 浏览器 router 单例在 `index.tsx`；`RoleRedirect` 单独成文件。
  */
 export const routes: RouteObject[] = [
   {
@@ -323,8 +322,6 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  { path: '/student/auxiliary/selector', element: <Placeholder title="知识点选择器 P3.2" /> },
-  { path: '/student/auxiliary/ask', element: <Placeholder title="拍照/输入答疑 P3.3" /> },
   { path: '/student/auxiliary/chat', element: <Navigate to="/student/auxiliary" replace /> },
   {
     path: '/parent',

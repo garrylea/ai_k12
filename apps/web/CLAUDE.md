@@ -62,7 +62,6 @@ src/
 ├── App.tsx, main.tsx, vite-env.d.ts
 ├── routes/index.tsx          # 路由启动（createBrowserRouter）
 ├── routes/routeTable.tsx     # 路由表（唯一真源；新增/改路由改这里）
-├── routes/Placeholder.tsx    # 未实现页面的占位组件
 ├── routes/RoleRedirect.tsx   # 根路径按角色分流
 ├── store/themeStore.ts       # 主题/夜间模式 store
 ├── styles/global.css         # CSS Variables 三套主题落地

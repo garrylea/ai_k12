@@ -308,11 +308,23 @@ describe('路由表：积分相关页面', () => {
     expectStayPageShell();
   });
 
-  it('其余占位路由仍渲染 Placeholder（证明 Placeholder 未被误删/误改）', () => {
+  /**
+   * 辅线最后两条占位路由（知识点选择器 P3.2 / 拍照答疑 P3.3）已删除（2026-09-23）：
+   * 两者的功能都实现在辅轨答疑应用 P3.1 内部（UX §370 已标 P3.1–P3.4 完成），
+   * 全仓无任何链接指向这两条路径，属遗留死路由。随路由一并删掉了 `Placeholder`
+   * 组件——本仓已无占位页。与 `/student/settings` 同口径：路由表没有 404 兜底，
+   * 未匹配路径由 React Router 默认错误分支接管，这里只断言不渲染占位内容。
+   */
+  it('辅线占位路由（P3.2/P3.3）已不存在，不渲染占位内容', () => {
     renderAt('/student/auxiliary/selector');
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '知识点选择器 P3.2' })).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByText(PLACEHOLDER_TEXT)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '知识点选择器 P3.2' })).toBeInTheDocument();
+  it('辅线拍照答疑占位路由（P3.3）已不存在，不渲染占位内容', () => {
+    renderAt('/student/auxiliary/ask');
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '拍照/输入答疑 P3.3' })).not.toBeInTheDocument();
   });
 
   /**
