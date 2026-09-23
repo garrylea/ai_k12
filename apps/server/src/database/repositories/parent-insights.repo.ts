@@ -1,5 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
+import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 
 /**
  * 本地时区的 `YYYY-MM-DD`。**不要用 `toISOString()`**：那会按 UTC 切，跨时区差一天。
@@ -477,15 +478,17 @@ ${windowed.sql}
    * 未清零错题里**映射不到任何知识点**的条数（`question_id` 为 NULL，或该题未绑 KP）。
    *
    * 与 `getWeakPoints` 是同一口径的补集，UI 必须显式展示这个数（spec §9.1）。
+   *
+   * 谓词子句与 `MainErrorBooksRepository.countUncoveredUncleared` **共用**
+   * `UNCOVERED_ERROR_PREDICATE`（见 `sql-fragments.ts`）；本查询**不带学科**
+   * （家长端跨学科汇总），学生端图谱那份按 `subject_id` 收窄。
    */
   async countUncoveredUnclearedErrors(studentId: number): Promise<number> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS uncovered
        FROM main_error_books meb
        WHERE meb.student_id = ? AND meb.is_cleared = 0
-         AND NOT EXISTS (
-           SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id
-         )`,
+         AND ${UNCOVERED_ERROR_PREDICATE}`,
       [studentId],
     );
     return Number(rows[0]?.uncovered ?? 0);

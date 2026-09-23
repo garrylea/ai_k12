@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { MainErrorBookRow } from './types.js';
+import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 
 @Injectable()
 export class MainErrorBooksRepository {
@@ -158,18 +159,16 @@ export class MainErrorBooksRepository {
   /**
    * 未清零错题里**映射不到任何知识点**的条数（数学口径，图谱页页脚用）。
    *
-   * 与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors` 是**同一谓词**，
-   * 但那条不带 subject —— 家长端跨学科汇总，本页只讲数学，故这里按 `subject_id` 收窄。
-   * 两处**故意各写一份**：`parent-insights` 的仓储不导出、跨模块复用会绑死两个模块的演进。
+   * 与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors` 共用
+   * `UNCOVERED_ERROR_PREDICATE`（见 `sql-fragments.ts`），只有外层过滤不同：
+   * 家长端跨学科汇总，本页只讲数学，故这里按 `subject_id` 收窄。
    */
   async countUncoveredUncleared(studentId: number, subjectId: number): Promise<number> {
     const [rows] = await this.pool.execute<(RowDataPacket & { uncovered: number | string | null })[]>(
       `SELECT COUNT(*) AS uncovered
        FROM main_error_books meb
        WHERE meb.student_id = ? AND meb.subject_id = ? AND meb.is_cleared = 0
-         AND NOT EXISTS (
-           SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id
-         )`,
+         AND ${UNCOVERED_ERROR_PREDICATE}`,
       [studentId, subjectId],
     );
     return Number(rows[0]?.uncovered ?? 0);
