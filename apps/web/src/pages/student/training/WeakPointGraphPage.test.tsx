@@ -167,7 +167,7 @@ describe('WeakPointGraphPage 详情栏', () => {
 });
 
 describe('WeakPointGraphPage 推荐条', () => {
-  it('有候选：显示「最该补：X」+ 样本 + 可抽题数 + 两个动作', async () => {
+  it('有候选：显示「最该补：X」+ 样本 + 可抽题数 + 只有一个动作', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockResolvedValue(recommendation());
 
@@ -175,7 +175,9 @@ describe('WeakPointGraphPage 推荐条', () => {
 
     expect(screen.getByText(/最该补：有理数/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始补这个' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '看这个知识点的错题' })).toBeInTheDocument();
+    // 推荐条**只有一个动作**（spec §6.2 / mockup assembled.html）：另一个动作只在**详情栏**，
+    // 未选中 KP 时不该出现——否则推荐条会变成两个并列按钮、主路径不清。
+    expect(screen.queryByRole('button', { name: '看这个知识点的错题' })).toBeNull();
   });
 
   it('无候选：转引导态，显示引导文案 + [去专项练习] / [去考试]', async () => {
@@ -235,11 +237,14 @@ describe('WeakPointGraphPage 推荐条', () => {
     expect(router.state.location.pathname).toBe('/student/training/weak-points');
   });
 
-  it('「看这个知识点的错题」带 kpId 跳错题页', async () => {
+  it('详情栏「看这个知识点的错题」带 kpId 跳错题页', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockResolvedValue(recommendation());
 
     const { router } = await renderSettled();
+    // 该动作只在**详情栏**（推荐条没有）——先展开并选中 KP 才会出现
+    fireEvent.click(screen.getByRole('button', { name: /数与式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '有理数' }));
     fireEvent.click(screen.getByRole('button', { name: '看这个知识点的错题' }));
 
     await waitFor(() =>
@@ -270,7 +275,7 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
     await waitFor(() => expect(screen.getByRole('button', { name: '开始补这个' })).toBeEnabled());
   });
 
-  it('家长停用全部档位：不渲染点不动的死按钮，只留「看这个知识点的错题」', async () => {
+  it('家长停用全部档位：推荐条不渲染点不动的死按钮，也不退化成「重试」', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockResolvedValue(recommendation());
     getMyPointRules.mockResolvedValue({
@@ -279,8 +284,15 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
 
     await renderSettled();
 
+    // 推荐条仍在（学生仍看到「最该补」），但没有点不动的「开始补这个」
+    expect(screen.getByText(/最该补：有理数/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
-    // 能用的动作仍在，学生不至于无路可走
+    // 停用 ≠ 失败：不给「重试」（重试也变不出档位）
+    expect(screen.queryByRole('button', { name: '重试档位' })).toBeNull();
+
+    // 学生不至于无路可走：详情栏的「看这个知识点的错题」照常可用
+    fireEvent.click(screen.getByRole('button', { name: /数与式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '有理数' }));
     expect(screen.getByRole('button', { name: '看这个知识点的错题' })).toBeInTheDocument();
   });
 

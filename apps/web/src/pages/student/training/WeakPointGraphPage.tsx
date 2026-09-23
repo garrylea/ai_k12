@@ -195,22 +195,18 @@ export default function WeakPointGraphPage() {
                     · 可抽 {rec.recommendation.availableQuestionCount} 题
                   </div>
                 </div>
-                <div className="flex gap-3">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => goErrors(rec.recommendation!.knowledgePointId)}
-                  >
-                    看这个知识点的错题
-                  </Button>
-                  <PracticeAction
-                    state={practiceState}
-                    starting={starting}
-                    retryLabel="重试档位"
-                    onStart={() => void startPractice(rec.recommendation!.knowledgePointId)}
-                    onRetry={retryTiers}
-                  />
-                </div>
+                {/*
+                  推荐条**只有一个动作**「开始补这个」（spec §6.2 与 mockup assembled.html 一致）。
+                  这里刻意**不放**「看这个知识点的错题」——两个动作属于**详情栏**（spec §6.3）；
+                  推荐条塞两个并列按钮会让学生分不清「一键补漏」的主路径是哪条。
+                */}
+                <PracticeAction
+                  state={practiceState}
+                  starting={starting}
+                  retryLabel="重试档位"
+                  onStart={() => void startPractice(rec.recommendation!.knowledgePointId)}
+                  onRetry={retryTiers}
+                />
               </Card>
             ) : (
               <Card className="flex flex-wrap items-center gap-4 border border-[var(--learn-card-border)] bg-[var(--learn-card-bg)]">

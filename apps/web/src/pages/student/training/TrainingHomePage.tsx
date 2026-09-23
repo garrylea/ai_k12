@@ -136,7 +136,7 @@ export default function TrainingHomePage() {
       className="min-h-screen flex flex-col items-center justify-center p-4"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
-      <div className="w-full max-w-5xl px-4 sm:px-8">
+      <div className="w-full max-w-4xl px-4 sm:px-8">
         {/* 返回选学科页 + 标题（上下结构，StarMapPage header 同款模式） */}
         <PageHeader
           to="/student/training"
@@ -167,7 +167,13 @@ export default function TrainingHomePage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-12">
+        {/*
+          四卡排成 2×2（两行两列），**不要改成 `lg:grid-cols-4` 一排四个**：
+          这是头脑风暴定稿的形状（`.superpowers/brainstorm/<批次>/content/entry-placement.html`
+          里的「A · 第 4 张卡」选项——专项/考试在上、错题/薄弱点图谱在下），
+          也是本页从三卡改四卡时用户确认过的样子。改成一排四个会让卡片被压扁。
+        */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-12">
           {/* 专项练习 */}
           <button
             onClick={() => navigate('/student/training/targeted')}

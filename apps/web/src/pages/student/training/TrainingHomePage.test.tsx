@@ -144,4 +144,18 @@ describe('TrainingHomePage 薄弱点图谱入口（第 4 张卡）', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/weak-points'));
   });
+
+  it('四卡排成 2×2（两行两列），不是一排四个', async () => {
+    getRemediationOverview.mockResolvedValue({ active: false, setId: 0, groupCount: 0, itemCount: 0, correctCount: 0 });
+
+    const { container } = await renderSettled();
+
+    // 头脑风暴定稿的形状（entry-placement.html 的「A · 第 4 张卡」：专项/考试在上、
+    // 错题/薄弱点图谱在下）。曾一度实现成 `lg:grid-cols-4` 一排四个——本用例钉住不许回退。
+    const grid = container.querySelector<HTMLElement>('.grid');
+    expect(grid).not.toBeNull();
+    expect(grid?.className).toContain('sm:grid-cols-2');
+    expect(grid?.className).not.toContain('lg:grid-cols-4');
+    expect(grid?.querySelectorAll('button')).toHaveLength(4);
+  });
 });
