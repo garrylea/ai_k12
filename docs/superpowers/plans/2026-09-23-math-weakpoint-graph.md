@@ -758,6 +758,15 @@ import {
 } from './dto/knowledge-graph.dto.js';
 
 /**
+ * 转出阈值常量，供**本模块的测试**引用。
+ *
+ * 定义仍然只有一处（DTO 的 `MIN_SAMPLE_SIZE`），这里只是把「服务判定样本够不够」
+ * 这件事的阈值暴露在服务自己的 API 面上 —— 测试因此可以从被测对象侧取值，
+ * 而不必跨层去 import DTO。（Task 3 的 `getWeakPoints` 也用它。）
+ */
+export { MIN_SAMPLE_SIZE };
+
+/**
  * 数学薄弱点图谱（只读）：把知识点全树与该生掌握度 overlay 组装成可直渲的形状。
  *
  * **本服务零写入**：掌握度由判题出口（`MasteryService.recordFromJudge`）回写，
