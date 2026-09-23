@@ -2710,3 +2710,79 @@ export function endStudySession(
     { method: 'PATCH', body: JSON.stringify({ reason }) },
   );
 }
+
+// --- 数学薄弱点图谱（GET /api/knowledge-graph/*；spec 2026-09-23-math-weakpoint-graph-design） ---
+
+/** 与后端 `knowledge-graph.dto.ts` 同形；改一处必须同步另一处。 */
+export type MasteryConfidence = 'none' | 'insufficient' | 'ok';
+
+export interface KnowledgeGraphNode {
+  id: number;
+  name: string;
+  /** null = 一级知识点 */
+  parentId: number | null;
+  /** null = 从未作答（**不是 0**——0 是「很弱」） */
+  masteryScore: number | null;
+  level: number | null;
+  correctCount: number | null;
+  errorCount: number | null;
+  /** ISO 字符串；未作答为 null */
+  lastSeenAt: string | null;
+  /** correct + error；未作答 = 0 */
+  sampleSize: number;
+  /** **由后端算好**，前端不重算阈值（阈值唯一真源在服务端 `MIN_SAMPLE_SIZE`） */
+  confidence: MasteryConfidence;
+  availableQuestionCount: number;
+}
+
+export interface KnowledgeGraphMastery {
+  subjectId: number;
+  nodes: KnowledgeGraphNode[];
+  coverage: {
+    coveredQuestions: number;
+    totalQuestions: number;
+    uncoveredUnclearedErrors: number;
+  };
+}
+
+export interface WeakPointCandidate {
+  knowledgePointId: number;
+  name: string;
+  parentId: number | null;
+  masteryScore: number;
+  level: number;
+  correctCount: number;
+  errorCount: number;
+  sampleSize: number;
+  availableQuestionCount: number;
+  lastSeenAt: string | null;
+}
+
+export interface WeakPointRecommendation {
+  subjectId: number;
+  candidates: WeakPointCandidate[];
+  /** 无候选时为 null（**不是错误**，端点仍 200） */
+  recommendation: WeakPointCandidate | null;
+  reason: 'ok' | 'no_qualified_candidate';
+}
+
+export function getKnowledgeGraphMastery(
+  studentId: number,
+  subjectId: number,
+): Promise<KnowledgeGraphMastery> {
+  const qs = new URLSearchParams({ subjectId: String(subjectId) });
+  return fetchApi<KnowledgeGraphMastery>(
+    `/knowledge-graph/students/${studentId}/mastery?${qs.toString()}`,
+  );
+}
+
+export function getWeakPoints(
+  studentId: number,
+  subjectId: number,
+  limit = 1,
+): Promise<WeakPointRecommendation> {
+  const qs = new URLSearchParams({ subjectId: String(subjectId), limit: String(limit) });
+  return fetchApi<WeakPointRecommendation>(
+    `/knowledge-graph/students/${studentId}/weak-points?${qs.toString()}`,
+  );
+}
