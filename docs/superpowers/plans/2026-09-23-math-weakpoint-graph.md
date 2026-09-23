@@ -59,9 +59,9 @@
 
 | 文件 | 覆盖 |
 |---|---|
-| `knowledge-points.repo.test.ts`（新） | SQL 谓词钉子 |
-| `student-knowledge-mastery.repo.test.ts`（新） | 两方法形状 + SQL 谓词钉子 |
-| `main-error-books.repo.test.ts`（**已存在，追加**） | `countUncoveredUncleared` 谓词钉子 |
+| `knowledge-points.repo.test.ts`（**已存在 25 行，追加**） | SQL 谓词钉子 |
+| `student-knowledge-mastery.repo.test.ts`（**已存在 88 行，追加**） | 两方法形状 + SQL 谓词钉子 |
+| `main-error-books.repo.test.ts`（**已存在 242 行，追加**） | `countUncoveredUncleared` 谓词钉子 |
 | `knowledge-graph.service.test.ts`（新） | 三道闸门 / 排序 / 空候选 / confidence 三态 |
 | `knowledge-graph.controller.test.ts`（新） | 403/1005、400/1001、透传 |
 | `weak-point-heat.test.ts`（新） | 梯度夹取 / 三态 / 汇总 |
@@ -78,8 +78,8 @@
 - Modify: `apps/server/src/database/repositories/knowledge-points.repo.ts`
 - Modify: `apps/server/src/database/repositories/student-knowledge-mastery.repo.ts`
 - Modify: `apps/server/src/database/repositories/main-error-books.repo.ts`
-- Test: `apps/server/src/database/repositories/knowledge-points.repo.test.ts`（新建）
-- Test: `apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts`（新建）
+- Test: `apps/server/src/database/repositories/knowledge-points.repo.test.ts`（**已存在，追加一个 describe**）
+- Test: `apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts`（**已存在，追加两个 describe**）
 - Test: `apps/server/src/database/repositories/main-error-books.repo.test.ts`（**已存在，追加一个 describe**）
 
 **Interfaces:**
@@ -95,18 +95,9 @@
 
 - [ ] **Step 1: 写失败的仓储测试**
 
-创建 `apps/server/src/database/repositories/knowledge-points.repo.test.ts`：
+`apps/server/src/database/repositories/knowledge-points.repo.test.ts` —— **该文件已存在（25 行）**，不要覆盖。它顶部已有 `mockPool(rows)`（只有 `execute`，够本用例用）与 `KnowledgePointsRepository` 的 import。把下面这个 `describe` **追加到文件末尾**，**不新增任何 import**：
 
 ```ts
-import { describe, it, expect, vi } from 'vitest';
-import { KnowledgePointsRepository } from './knowledge-points.repo.js';
-
-/** mockPool 模拟 mysql2 的 pool 双返回形状：[rows, fields]。 */
-const mockPool = (rows: any[] = []) => ({
-  execute: vi.fn().mockResolvedValue([rows, []]),
-  query: vi.fn().mockResolvedValue([rows, []]),
-});
-
 describe('KnowledgePointsRepository.countAvailableQuestionsByKp', () => {
   it('一次分组查询返回 kp_id -> 可抽题数 的 Map', async () => {
     const pool = mockPool([
@@ -131,7 +122,7 @@ describe('KnowledgePointsRepository.countAvailableQuestionsByKp', () => {
 
     await repo.countAvailableQuestionsByKp(9, 1);
 
-    const sql = pool.execute.mock.calls[0][0] as string;
+    const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('JOIN question_knowledge_points qkp ON qkp.question_id = q.id');
     expect(sql).toContain('LEFT JOIN student_hidden_questions shq');
     expect(sql).toContain('q.subject_id = ?');
@@ -140,18 +131,19 @@ describe('KnowledgePointsRepository.countAvailableQuestionsByKp', () => {
     expect(sql).toContain('shq.id IS NULL');
     expect(sql).toContain('GROUP BY qkp.knowledge_point_id');
     // 参数顺序：LEFT JOIN 的 studentId 在前，WHERE 的 subjectId 在后
-    expect(pool.execute.mock.calls[0][1]).toEqual([9, 1]);
+    expect(params).toEqual([9, 1]);
   });
 });
 ```
 
-创建 `apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts`：
+`apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts` —— **该文件已存在（88 行）**，不要覆盖。⚠️ **它的 `mockPool` 是无参的**（`const mockPool = () => ({ execute: vi.fn().mockResolvedValue([[], []]) })`），**不能喂行数据**，也**不要改它**（会动到既有 4 个用例）。在追加块里另起一个可传行的工厂。把下面内容**追加到文件末尾**（顶部已有 `describe/it/expect/vi` 与 `StudentKnowledgeMasteryRepository` 的 import，无需新增）：
 
 ```ts
-import { describe, it, expect, vi } from 'vitest';
-import { StudentKnowledgeMasteryRepository } from './student-knowledge-mastery.repo.js';
-
-const mockPool = (rows: any[] = []) => ({
+/**
+ * 追加块专用：既有 `mockPool()` 不接受行数据（它只回空结果），
+ * 这里另起一个可传行的工厂，**不改动既有用例**。
+ */
+const mockPoolWithRows = (rows: any[]) => ({
   execute: vi.fn().mockResolvedValue([rows, []]),
   query: vi.fn().mockResolvedValue([rows, []]),
 });
@@ -159,7 +151,7 @@ const mockPool = (rows: any[] = []) => ({
 describe('StudentKnowledgeMasteryRepository.listBySubject', () => {
   it('按学科取该生全部掌握度行，数值字段 Number 归一、lastSeenAt 保留 Date', async () => {
     const seen = new Date('2026-09-20T10:00:00Z');
-    const pool = mockPool([
+    const pool = mockPoolWithRows([
       {
         knowledge_point_id: 11, mastery_score: '0.4000', level: '2',
         correct_count: '4', error_count: '6', last_seen_at: seen,
@@ -175,34 +167,34 @@ describe('StudentKnowledgeMasteryRepository.listBySubject', () => {
   });
 
   it('SQL 按 student_id + 学科过滤，不设 LIMIT（服务层要全量）', async () => {
-    const pool = mockPool([]);
+    const pool = mockPoolWithRows([]);
     const repo = new StudentKnowledgeMasteryRepository(pool as any);
 
     await repo.listBySubject(9, 1);
 
-    const sql = pool.execute.mock.calls[0][0] as string;
+    const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('FROM student_knowledge_mastery skm');
     expect(sql).toContain('JOIN knowledge_points kp ON kp.id = skm.knowledge_point_id');
     expect(sql).toContain('skm.student_id = ?');
     expect(sql).toContain('kp.subject_id = ?');
     expect(sql).not.toContain('LIMIT');
-    expect(pool.execute.mock.calls[0][1]).toEqual([9, 1]);
+    expect(params).toEqual([9, 1]);
   });
 });
 
 describe('StudentKnowledgeMasteryRepository.countQuestionCoverageBySubject', () => {
   it('覆盖数与总数都按学科 + is_active 统计', async () => {
-    const pool = mockPool([{ total: '457', covered: '205' }]);
+    const pool = mockPoolWithRows([{ total: '457', covered: '205' }]);
     const repo = new StudentKnowledgeMasteryRepository(pool as any);
 
     const result = await repo.countQuestionCoverageBySubject(1);
 
     expect(result).toEqual({ coveredQuestions: 205, totalQuestions: 457 });
-    const sql = pool.execute.mock.calls[0][0] as string;
+    const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('FROM questions');
     expect(sql).toContain('is_active = 1');
     expect(sql).toContain('COUNT(DISTINCT q.id)');
-    expect(pool.execute.mock.calls[0][1]).toEqual([1, 1]);
+    expect(params).toEqual([1, 1]);
   });
 });
 ```
