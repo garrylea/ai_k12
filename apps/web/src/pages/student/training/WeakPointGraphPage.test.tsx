@@ -250,6 +250,54 @@ describe('WeakPointGraphPage 推荐条', () => {
   });
 });
 
+describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案）', () => {
+  it('档位加载失败：主 CTA 换成「重试」控件，点它能重新拉到档位', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockRejectedValueOnce(new Error('boom'));
+
+    await renderSettled();
+
+    // 失败不是「灰着不动」：给可操作的重试控件，而不是一行说明文字
+    expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
+    const retry = screen.getByRole('button', { name: '重试' });
+
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [{ tierKey: '3' }] }],
+    });
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始补这个' })).toBeEnabled());
+  });
+
+  it('家长停用全部档位：不渲染点不动的死按钮，只留「看这个知识点的错题」', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [] }],
+    });
+
+    await renderSettled();
+
+    expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
+    // 能用的动作仍在，学生不至于无路可走
+    expect(screen.getByRole('button', { name: '看这个知识点的错题' })).toBeInTheDocument();
+  });
+
+  it('档位加载中：CTA 转圈（loading），不是静默置灰', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockReturnValue(new Promise(() => {})); // 永不 resolve → 停在加载态
+
+    renderPage();
+
+    // 渲染出来（区别于 unavailable 的「不渲染」）+ disabled + 有 spinner
+    const cta = await screen.findByRole('button', { name: '开始补这个' });
+    expect(cta).toBeDisabled();
+    expect(cta.querySelector('.animate-spin')).not.toBeNull();
+  });
+});
+
 describe('WeakPointGraphPage confidence 三态渲染', () => {
   it('ok 用 brand 橘红实底；insufficient / none 用中性灰', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());

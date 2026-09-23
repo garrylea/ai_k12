@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { getMyPointRules, type MyPointRules, type PointRuleTier } from '@/services/api';
 import {
+  MATH_TASK_CODE,
   MIN_PRACTICE_COUNT,
   TIER_LOAD_ERROR,
   pickPracticeCount,
@@ -170,7 +171,7 @@ describe('pickPracticeCount', () => {
     expect(pickPracticeCount([t('10'), t('5'), t('3')])).toBe(3);
   });
 
-  it('空数组 → null（调用方据此置灰按钮，不硬发请求）', () => {
+  it('空数组 → null（调用方据此不渲染开练按钮，不硬发请求）', () => {
     expect(pickPracticeCount([])).toBeNull();
   });
 
@@ -181,5 +182,9 @@ describe('pickPracticeCount', () => {
 
   it('MIN_PRACTICE_COUNT 是 3（spec §10 裁决：1 题偏少）', () => {
     expect(MIN_PRACTICE_COUNT).toBe(3);
+  });
+
+  it('MATH_TASK_CODE 是 math_targeted（两页共用的真源，改名必须显式改这里）', () => {
+    expect(MATH_TASK_CODE).toBe('math_targeted');
   });
 });

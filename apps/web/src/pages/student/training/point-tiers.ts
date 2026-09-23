@@ -70,6 +70,15 @@ export function usePointTiers(taskCode: string): PointTiersState {
 }
 
 /**
+ * 数学专项练习的任务代号（`GET /points/me/rules` 返回的 `taskCode`）。
+ *
+ * **单一真源**：专项配置页与薄弱点图谱页都从这里 import。以前两页各写一份字面量，
+ * 哪天后端/别处改了这个代号而只改一处 → 图谱页查不到档位 → 「开始补这个」不渲染，
+ * 学生只看到一个莫名其妙的缺失动作（专项配置页那侧则照旧能用）。
+ */
+export const MATH_TASK_CODE = 'math_targeted';
+
+/**
  * 专项练习的最小题量（spec §10 裁决：1 题偏少，改取「≥3 的最小可用档」）。
  */
 export const MIN_PRACTICE_COUNT = 3;
@@ -80,7 +89,7 @@ export const MIN_PRACTICE_COUNT = 3;
  * 规则（spec §6.3）：
  * 1. 取 **≥ `MIN_PRACTICE_COUNT` 的最小档**（默认档位 `1/3/5/10` 下即 3）
  * 2. 若可用档**全部 < 3**（家长只留了 1 题档）→ 退化为其中**最大**的一档，**不报错**
- * 3. 一个可用档都没有（空数组 / 全非数字）→ `null`，调用方据此**置灰按钮**，
+ * 3. 一个可用档都没有（空数组 / 全非数字）→ `null`，调用方据此**不渲染开练按钮**，
  *    不硬发请求（否则会被 `targeted/start` 以 400 拒绝）
  *
  * `tierKey` 对 `math_targeted` 是纯数字字符串（家长端不能新增档位），可直接 `Number()`。

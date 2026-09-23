@@ -5,7 +5,9 @@ import { routes } from './routeTable';
 import { useThemeStore } from '@/store/themeStore';
 import {
   getExpiredAlertStats,
+  getKnowledgeGraphMastery,
   getMyLedger,
+  getMyPointRules,
   getMyPoints,
   getMyRewards,
   getParentAccount,
@@ -17,6 +19,7 @@ import {
   getParentPointsSettings,
   getRemediationQuestions,
   getUnreadMessageCount,
+  getWeakPoints,
   listMyStudents,
   putParentControls,
   type AdminAlertRetentionPreview,
@@ -72,6 +75,10 @@ vi.mock('@/services/api', async (importOriginal) => {
     getExpiredAlertStats: vi.fn(),
     // `/student/training/remediation/run`（补偿套题作答页新页）：挂载即拉套题题单
     getRemediationQuestions: vi.fn(),
+    // `/student/training/weak-points`（薄弱点图谱页新页）：挂载即拉掌握度 + 推荐，并拉档位
+    getKnowledgeGraphMastery: vi.fn(),
+    getWeakPoints: vi.fn(),
+    getMyPointRules: vi.fn(),
   };
 });
 
@@ -90,6 +97,9 @@ const putParentControlsMock = vi.mocked(putParentControls);
 const getParentPointsSettingsMock = vi.mocked(getParentPointsSettings);
 const getParentAccountMock = vi.mocked(getParentAccount);
 const getRemediationQuestionsMock = vi.mocked(getRemediationQuestions);
+const getKnowledgeGraphMasteryMock = vi.mocked(getKnowledgeGraphMastery);
+const getWeakPointsMock = vi.mocked(getWeakPoints);
+const getMyPointRulesMock = vi.mocked(getMyPointRules);
 
 /** P6.6：与后端默认档一致（切走 5 / 无操作 15），恰好等于「标准」预设。 */
 const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15 };
@@ -235,6 +245,30 @@ beforeEach(() => {
   getParentAccountMock.mockReset();
   getParentAccountMock.mockResolvedValue(ACCOUNT);
   getRemediationQuestionsMock.mockReset();
+  getKnowledgeGraphMasteryMock.mockReset();
+  getWeakPointsMock.mockReset();
+  getMyPointRulesMock.mockReset();
+  getMyPointRulesMock.mockResolvedValue({
+    tasks: [
+      {
+        taskCode: 'math_targeted',
+        taskName: '数学专项',
+        // 档位给一个可用档，避免页面停在「重试」态。字段必须给全：这里是
+        // `vi.mocked(getMyPointRules)`（有真实类型），少字段 `tsc -b` 会红。
+        tiers: [
+          {
+            tierKey: '3',
+            tierLabel: '3 题',
+            points: 8,
+            dailyLimit: null,
+            completedToday: null,
+            remainingToday: null,
+            isActive: true,
+          },
+        ],
+      },
+    ],
+  });
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -673,5 +707,46 @@ describe('路由表：RequireRole 守卫未被放宽', () => {
     expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '个人中心' })).not.toBeInTheDocument();
     expect(getMyPointsMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 薄弱点图谱页（2026-09-23 批）：`/student/training/weak-points` 是新页，从零加进路由表。
+ *
+ * 页面自己有组件测试，但那个测试挂的是**页面本身**、绕过了路由表；
+ * TrainingHomePage 的卡片测试又给这条路径挂了**桩** —— 两处都证明不了「路由确实指到这个页面」。
+ * 路径写错一个字符，卡片仍会 navigate、落到无匹配路由，而所有测试依旧全绿。只有这里能证明。
+ */
+describe('路由表：薄弱点图谱页', () => {
+  it('/student/training/weak-points 渲染 WeakPointGraphPage（数据来自接口），而非无匹配路由', async () => {
+    setStudentSession();
+    getKnowledgeGraphMasteryMock.mockResolvedValue({
+      subjectId: 1,
+      nodes: [
+        { id: 1, name: '数与式', parentId: null, masteryScore: null, level: null, correctCount: null, errorCount: null, lastSeenAt: null, sampleSize: 0, confidence: 'none', availableQuestionCount: 0 },
+      ],
+      coverage: { coveredQuestions: 0, totalQuestions: 0, uncoveredUnclearedErrors: 0 },
+    });
+    getWeakPointsMock.mockResolvedValue({
+      subjectId: 1,
+      candidates: [],
+      recommendation: null,
+      reason: 'no_qualified_candidate',
+    });
+
+    renderAt('/student/training/weak-points');
+
+    // 真页面内容：一级知识点来自 getKnowledgeGraphMastery（无匹配路由 / 占位页都渲染不出它）
+    expect(await screen.findByText('数与式')).toBeInTheDocument();
+    expect(getKnowledgeGraphMasteryMock).toHaveBeenCalled();
+  });
+
+  it('无 token 访问 /student/training/weak-points → 回登录页，不拉数据', async () => {
+    localStorage.clear();
+
+    renderAt('/student/training/weak-points');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(getKnowledgeGraphMasteryMock).not.toHaveBeenCalled();
   });
 });

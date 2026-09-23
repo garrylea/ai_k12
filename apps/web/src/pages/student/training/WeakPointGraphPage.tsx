@@ -4,14 +4,13 @@ import clsx from 'clsx';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import {
   getKnowledgeGraphMastery,
-  getMyPointRules,
   getWeakPoints,
   startTargetedPractice,
   type KnowledgeGraphMastery,
   type KnowledgeGraphNode,
   type WeakPointRecommendation,
 } from '@/services/api';
-import { pickPracticeCount } from './point-tiers';
+import { MATH_TASK_CODE, pickPracticeCount, usePointTiers } from './point-tiers';
 import { heatForNode, isDashedBorder, summarizeParent } from './weak-point-heat';
 import type { TargetedRunHandoff } from './run-handoff';
 
@@ -54,8 +53,14 @@ export default function WeakPointGraphPage() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [selectedKpId, setSelectedKpId] = useState<number | null>(null);
 
-  // 档位：决定「开始补这个」的题量（≥3 的最小可用档）
-  const [tiers, setTiers] = useState<Array<{ tierKey: string }> | null>(null);
+  // 档位：决定「开始补这个」的题量（≥3 的最小可用档）。
+  //
+  // **必须复用 `usePointTiers`，不要自己再手搓一次 `getMyPointRules()`**：它把状态分成
+  // `null`=加载中 / `error`=失败 / `[]`=家长停用，并给了 `retry()`，与专项配置页是同一份实现。
+  // 手搓会把三种状态塌成「空数组」一种 —— 失败时主 CTA 就成了一个**永远点不动、也没人
+  // 解释为什么**的死按钮。spec §6.3 要求「档位取不到 → 不硬发请求」，而这件事要由**界面**
+  // 说清楚（loading 转圈 / 重试控件 / 干脆不渲染），不是加一行文案。
+  const { tiers, error: tierError, retry: retryTiers } = usePointTiers(MATH_TASK_CODE);
   const [starting, setStarting] = useState(false);
   const [startNotice, setStartNotice] = useState<string | null>(null);
 
@@ -85,21 +90,6 @@ export default function WeakPointGraphPage() {
     void loadRec();
   }, [loadMastery, loadRec]);
 
-  useEffect(() => {
-    let cancelled = false;
-    getMyPointRules()
-      .then((data) => {
-        if (cancelled) return;
-        setTiers(data.tasks.find((t) => t.taskCode === 'math_targeted')?.tiers ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setTiers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // 必须 useMemo：`mastery?.nodes ?? []` 每次渲染都是**新数组身份**，会让下面三个
   // 记忆化钩子（parents / childrenOf / nodeById）每帧重算、等于白写，且触发 3 条
   // react-hooks/exhaustive-deps 警告（训练目录原本 lint 干净）。
@@ -114,7 +104,25 @@ export default function WeakPointGraphPage() {
 
   const selected = selectedKpId != null ? nodeById.get(selectedKpId) ?? null : null;
 
+  // null = 还没拉到档位（加载中）或没有可用档位（家长停用）——两种都由界面表达，见 PracticeAction。
   const practiceCount = tiers == null ? null : pickPracticeCount(tiers);
+
+  /**
+   * 「开始补这个」的界面状态：四种都靠控件本身表达，不用文案解释。
+   *
+   * **必须先判 `tierError` 再判 `tiers == null`**：`usePointTiers` 在拉取失败时会把
+   * `tiers` 一并清成 `null`（`point-tiers.ts` 的 catch 分支），所以「失败」与「加载中」
+   * 在 `tiers` 上同形。若先判 `tiers == null`，`failed` 会变成永远走不到的死分支，
+   * 失败态又退回成一个转圈的假加载——正是本项要修的「状态塌成一种」。
+   */
+  const practiceState: PracticeActionState =
+    tierError != null
+      ? 'failed'
+      : tiers == null
+        ? 'loading'
+        : practiceCount == null
+          ? 'unavailable'
+          : 'ready';
 
   const toggleParent = (id: number) => {
     setExpanded((prev) => {
@@ -195,14 +203,12 @@ export default function WeakPointGraphPage() {
                   >
                     看这个知识点的错题
                   </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={practiceCount == null || starting}
-                    onClick={() => void startPractice(rec.recommendation!.knowledgePointId)}
-                  >
-                    开始补这个
-                  </Button>
+                  <PracticeAction
+                    state={practiceState}
+                    starting={starting}
+                    onStart={() => void startPractice(rec.recommendation!.knowledgePointId)}
+                    onRetry={retryTiers}
+                  />
                 </div>
               </Card>
             ) : (
@@ -326,9 +332,10 @@ export default function WeakPointGraphPage() {
               ) : (
                 <KpDetail
                   node={selected}
-                  practiceCount={practiceCount}
+                  practiceState={practiceState}
                   starting={starting}
                   onStart={() => void startPractice(selected.id)}
+                  onRetry={retryTiers}
                   onViewErrors={() => goErrors(selected.id)}
                 />
               )}
@@ -360,15 +367,17 @@ export default function WeakPointGraphPage() {
 /** 详情栏内容：掌握度条 / 对错数 / 最近作答 / 可信度说明 + 两个动作。 */
 function KpDetail({
   node,
-  practiceCount,
+  practiceState,
   starting,
   onStart,
+  onRetry,
   onViewErrors,
 }: {
   node: KnowledgeGraphNode;
-  practiceCount: number | null;
+  practiceState: PracticeActionState;
   starting: boolean;
   onStart: () => void;
+  onRetry: () => void;
   onViewErrors: () => void;
 }) {
   return (
@@ -414,15 +423,50 @@ function KpDetail({
         <Button variant="secondary" size="sm" onClick={onViewErrors}>
           看这个知识点的错题
         </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={practiceCount == null || starting}
-          onClick={onStart}
-        >
-          开始补这个
-        </Button>
+        <PracticeAction state={practiceState} starting={starting} onStart={onStart} onRetry={onRetry} />
       </div>
     </div>
+  );
+}
+
+/** 「开始补这个」的界面状态。 */
+type PracticeActionState = 'loading' | 'failed' | 'unavailable' | 'ready';
+
+/**
+ * 「开始补这个」的四种界面状态——**不用文案解释，靠控件本身表达**：
+ * - `loading`：档位加载中 → 按钮 loading（转圈），学生看得出在跑，不是坏了
+ * - `failed`：档位加载失败 → 换成**「重试」按钮**（可操作控件，不是说明文字）
+ * - `unavailable`：家长停用了全部档位 → **不渲染**（不提供点不动的死按钮，只留「看错题」）
+ * - `ready`：正常可点
+ */
+function PracticeAction({
+  state,
+  starting,
+  onStart,
+  onRetry,
+}: {
+  state: PracticeActionState;
+  starting: boolean;
+  onStart: () => void;
+  onRetry: () => void;
+}) {
+  if (state === 'unavailable') return null;
+  if (state === 'failed') {
+    return (
+      <Button variant="secondary" size="sm" onClick={onRetry}>
+        重试
+      </Button>
+    );
+  }
+  return (
+    <Button
+      variant="primary"
+      size="sm"
+      loading={state === 'loading'}
+      disabled={state !== 'ready' || starting}
+      onClick={onStart}
+    >
+      开始补这个
+    </Button>
   );
 }

@@ -6,14 +6,11 @@ import {
   startTargetedPractice,
   type TrainingKnowledgePoint,
 } from '@/services/api';
-import { tierStatus, usePointTiers } from './point-tiers';
+import { MATH_TASK_CODE, tierStatus, usePointTiers } from './point-tiers';
 import type { TargetedRunHandoff } from './run-handoff';
 
 /** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
 const MATH_SUBJECT_ID = 1;
-
-/** 积分规则里的任务码（数学专项）。 */
-const MATH_TASK_CODE = 'math_targeted';
 
 /** 题型枚举与后端 questions.type 一致；空串 = 全部（payload type 传 null）。 */
 const TYPE_OPTIONS = [
