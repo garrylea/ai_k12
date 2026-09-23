@@ -38,6 +38,7 @@ out/
 .playwright-cli/
 apps/server/uploads/
 .superpowers/
+.codebuddy/
 tools/runtime/
 
 
