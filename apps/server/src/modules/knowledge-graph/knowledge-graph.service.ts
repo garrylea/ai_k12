@@ -7,6 +7,8 @@ import {
   type KnowledgeGraphMastery,
   type KnowledgeGraphNode,
   type MasteryConfidence,
+  type WeakPointCandidate,
+  type WeakPointRecommendation,
 } from './dto/knowledge-graph.dto.js';
 
 /**
@@ -88,6 +90,72 @@ export class KnowledgeGraphService {
         totalQuestions: coverage.totalQuestions,
         uncoveredUnclearedErrors,
       },
+    };
+  }
+
+  /**
+   * 薄弱点推荐（spec §5.4）：三道闸门筛候选 + 稳定排序，取前 `limit` 个。
+   *
+   * **候选资格（三条同时满足）**：
+   * 1. 有该生的掌握度行（做过至少一题且题带 KP 标注）
+   * 2. `sampleSize >= MIN_SAMPLE_SIZE` —— 滤掉「做 1 题答对 = 满分」的小样本噪声
+   * 3. `availableQuestionCount > 0` —— 否则推了也练不了
+   *
+   * **排序**：`mastery_score ASC, error_count DESC, knowledge_point_id ASC`。
+   * 前两项与 `StudentKnowledgeMasteryRepository.listWeakest` 既有排序一致；
+   * 第三项补稳定性，避免并列时每次请求结果抖动。
+   *
+   * **无候选不是错误**：返回 200 + `recommendation: null`，
+   * 让前端转「先做一次练习/考试生成诊断」的引导态（spec §5.3/§6.4）。
+   */
+  async getWeakPoints(
+    studentId: number,
+    subjectId: number,
+    limit: number,
+  ): Promise<WeakPointRecommendation> {
+    const [kps, masteryRows, availableMap] = await Promise.all([
+      this.kpRepo.findBySubject(subjectId),
+      this.masteryRepo.listBySubject(studentId, subjectId),
+      this.kpRepo.countAvailableQuestionsByKp(studentId, subjectId),
+    ]);
+
+    const kpById = new Map(kps.map((kp) => [kp.id, kp]));
+
+    const candidates: WeakPointCandidate[] = masteryRows
+      .filter((row) => {
+        const sampleSize = row.correctCount + row.errorCount;
+        if (sampleSize < MIN_SAMPLE_SIZE) return false;
+        return (availableMap.get(row.knowledgePointId) ?? 0) > 0;
+      })
+      .map((row) => {
+        const kp = kpById.get(row.knowledgePointId);
+        return {
+          knowledgePointId: row.knowledgePointId,
+          // 掌握度行理论上必挂在 KP 上（JOIN 保证），`?? ''` 只防御脏数据
+          name: kp?.name ?? '',
+          parentId: kp?.parentKpId ?? null,
+          masteryScore: row.masteryScore,
+          level: row.level,
+          correctCount: row.correctCount,
+          errorCount: row.errorCount,
+          sampleSize: row.correctCount + row.errorCount,
+          availableQuestionCount: availableMap.get(row.knowledgePointId) ?? 0,
+          lastSeenAt: row.lastSeenAt ? row.lastSeenAt.toISOString() : null,
+        };
+      })
+      .sort(
+        (a, b) =>
+          a.masteryScore - b.masteryScore ||
+          b.errorCount - a.errorCount ||
+          a.knowledgePointId - b.knowledgePointId,
+      )
+      .slice(0, limit);
+
+    return {
+      subjectId,
+      candidates,
+      recommendation: candidates[0] ?? null,
+      reason: candidates.length > 0 ? 'ok' : 'no_qualified_candidate',
     };
   }
 

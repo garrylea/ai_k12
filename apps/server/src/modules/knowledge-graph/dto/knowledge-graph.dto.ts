@@ -57,3 +57,27 @@ export interface KnowledgeGraphMastery {
     uncoveredUnclearedErrors: number;
   };
 }
+
+/** 够格的薄弱点候选（三道闸门全过才有资格进来）。 */
+export interface WeakPointCandidate {
+  knowledgePointId: number;
+  name: string;
+  parentId: number | null;
+  masteryScore: number;
+  level: number;
+  correctCount: number;
+  errorCount: number;
+  sampleSize: number;
+  availableQuestionCount: number;
+  lastSeenAt: string | null;
+}
+
+/** `GET /api/knowledge-graph/students/{studentId}/weak-points` 的 data。 */
+export interface WeakPointRecommendation {
+  subjectId: number;
+  candidates: WeakPointCandidate[];
+  /** = `candidates[0] ?? null` */
+  recommendation: WeakPointCandidate | null;
+  /** 无候选**不是错误**：端点仍返回 200，前端据此转引导态 */
+  reason: 'ok' | 'no_qualified_candidate';
+}
