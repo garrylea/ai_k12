@@ -32,7 +32,11 @@ export const NEUTRAL_HEAT: HeatStyle = {
 
 /** 由 level 取热力样式；level 越界或非整数一律夹/四舍五入到 0–5。 */
 export function heatForLevel(level: number): HeatStyle {
-  const clamped = Math.min(5, Math.max(0, Math.round(level)));
+  // NaN 单独兜底：`Math.round(NaN)` → NaN 会一路穿透到 `HEAT_ALPHA[NaN]` === undefined，
+  // 产出 `rgba(255, 107, 53, undefined)` 这种非法颜色（畸形载荷防线）。
+  // **只拦 NaN，不用 `Number.isFinite`**——±Infinity 走下面的夹取本就正确
+  // （+∞→5、-∞→0），换成 isFinite 会把它反转成 0，语义反而错。
+  const clamped = Number.isNaN(level) ? 0 : Math.min(5, Math.max(0, Math.round(level)));
   const alpha = HEAT_ALPHA[clamped];
   return {
     background: `rgba(${BRAND_RGB}, ${alpha})`,

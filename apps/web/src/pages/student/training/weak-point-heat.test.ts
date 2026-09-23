@@ -31,6 +31,16 @@ describe('heatForLevel', () => {
     // 2.6 → 3（四舍五入到最近档）
     expect(heatForLevel(2.6).background).toBe(heatForLevel(3).background);
   });
+
+  it('NaN 兜底到 level 0，不产出 undefined 颜色（畸形载荷防线）', () => {
+    expect(heatForLevel(NaN).background).toBe(heatForLevel(0).background);
+    expect(heatForLevel(NaN).background).not.toContain('undefined');
+  });
+
+  it('±Infinity 仍走夹取（守卫只拦 NaN，不反转无穷的语义）', () => {
+    expect(heatForLevel(Infinity).background).toBe(heatForLevel(5).background);
+    expect(heatForLevel(-Infinity).background).toBe(heatForLevel(0).background);
+  });
 });
 
 describe('heatForNode', () => {

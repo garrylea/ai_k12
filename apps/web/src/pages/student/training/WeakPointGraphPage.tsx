@@ -100,7 +100,10 @@ export default function WeakPointGraphPage() {
     };
   }, []);
 
-  const nodes = mastery?.nodes ?? [];
+  // 必须 useMemo：`mastery?.nodes ?? []` 每次渲染都是**新数组身份**，会让下面三个
+  // 记忆化钩子（parents / childrenOf / nodeById）每帧重算、等于白写，且触发 3 条
+  // react-hooks/exhaustive-deps 警告（训练目录原本 lint 干净）。
+  const nodes = useMemo(() => mastery?.nodes ?? [], [mastery]);
 
   const parents = useMemo(() => nodes.filter((n) => n.parentId == null), [nodes]);
   const childrenOf = useCallback(
