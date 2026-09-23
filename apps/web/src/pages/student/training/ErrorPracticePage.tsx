@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import {
   markdownRemarkPlugins,
@@ -72,11 +72,13 @@ function formatDate(iso: string): string {
 export default function ErrorPracticePage() {
   const navigate = useNavigate();
 
-  // 筛选条件
+  // 筛选条件。kpId 支持从 URL 预填（薄弱点图谱「看这个知识点的错题」跳进来时带 ?kpId=）——
+  // 用 useState 惰性初始化，mount 时的 load() 就会带上它，不需要额外的同步 effect。
+  const [searchParams] = useSearchParams();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [type, setType] = useState('');
-  const [kpId, setKpId] = useState('');
+  const [kpId, setKpId] = useState(() => searchParams.get('kpId') ?? '');
   // 专项下拉：二级 KP 平铺（label 为「一级名 / 二级名」）
   const [kpOptions, setKpOptions] = useState<Array<{ value: string; label: string }>>([]);
 
