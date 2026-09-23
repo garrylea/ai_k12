@@ -240,3 +240,35 @@ describe('MainErrorBooksRepository.countClearedBetween（埋点 Phase 1B）', ()
     expect(await repo.countClearedBetween(11, 1, new Date(), new Date())).toBe(0);
   });
 });
+
+describe('MainErrorBooksRepository.countUncoveredUncleared', () => {
+  it('返回未清零且映射不到任何知识点的错题数（数学口径）', async () => {
+    const pool = mockPool([{ uncovered: '8' }]);
+    const repo = new MainErrorBooksRepository(pool as any);
+
+    expect(await repo.countUncoveredUncleared(9, 1)).toBe(8);
+  });
+
+  it('SQL 谓词：subject_id + is_cleared = 0 + NOT EXISTS(qkp)', async () => {
+    const pool = mockPool([{ uncovered: 0 }]);
+    const repo = new MainErrorBooksRepository(pool as any);
+
+    await repo.countUncoveredUncleared(9, 1);
+
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('FROM main_error_books meb');
+    expect(sql).toContain('meb.student_id = ?');
+    expect(sql).toContain('meb.subject_id = ?');
+    expect(sql).toContain('meb.is_cleared = 0');
+    expect(sql).toContain('NOT EXISTS');
+    expect(sql).toContain('qkp.question_id = meb.question_id');
+    expect(params).toEqual([9, 1]);
+  });
+
+  it('无数据 → 0（不是 null）', async () => {
+    const pool = mockPool([{ uncovered: null }]);
+    const repo = new MainErrorBooksRepository(pool as any);
+
+    expect(await repo.countUncoveredUncleared(9, 1)).toBe(0);
+  });
+});

@@ -37,4 +37,34 @@ export class KnowledgePointsRepository {
     );
     return (rows[0] as KnowledgePointRow) ?? null;
   }
+
+  /**
+   * 该生在某学科下、每个知识点**可抽题数**（一次分组查询，别 79 次单查）。
+   *
+   * 谓词与 `QuestionsRepository.findRandomByKpAndType` **逐字同源**：
+   * `is_active = 1` + `answer <> ''` + 排除该生 `student_hidden_questions`。
+   * 不同步就会出现「推荐说有题、开练抽不到」的落差。
+   *
+   * 返回 `Map<kpId, 数量>`；没有可抽题的 KP **不出现**在 Map 里（调用方 `?? 0`）。
+   */
+  async countAvailableQuestionsByKp(
+    studentId: number,
+    subjectId: number,
+  ): Promise<Map<number, number>> {
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & { kp_id: number; n: number | string | null })[]
+    >(
+      `SELECT qkp.knowledge_point_id AS kp_id, COUNT(DISTINCT q.id) AS n
+       FROM questions q
+       JOIN question_knowledge_points qkp ON qkp.question_id = q.id
+       LEFT JOIN student_hidden_questions shq
+         ON shq.question_id = q.id AND shq.student_id = ?
+       WHERE q.subject_id = ? AND q.is_active = 1
+         AND q.answer <> ''
+         AND shq.id IS NULL
+       GROUP BY qkp.knowledge_point_id`,
+      [studentId, subjectId],
+    );
+    return new Map(rows.map((r) => [Number(r.kp_id), Number(r.n ?? 0)]));
+  }
 }

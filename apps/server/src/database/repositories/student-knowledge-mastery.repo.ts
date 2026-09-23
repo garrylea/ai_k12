@@ -109,4 +109,72 @@ export class StudentKnowledgeMasteryRepository {
       totalQuestions: Number(rows[0]?.total ?? 0),
     };
   }
+
+  /**
+   * 该生在某学科下的**全部**掌握度行（图谱 overlay 用）。
+   *
+   * 与 `listWeakest` 的区别：那个只给最弱 N 个、且不按学科过滤，图谱要全量 + 按学科。
+   * **不设 LIMIT**：79 个 KP 规模下无需分页。
+   */
+  async listBySubject(
+    studentId: number,
+    subjectId: number,
+  ): Promise<
+    Array<{
+      knowledgePointId: number;
+      masteryScore: number;
+      level: number;
+      correctCount: number;
+      errorCount: number;
+      lastSeenAt: Date | null;
+    }>
+  > {
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & {
+        knowledge_point_id: number; mastery_score: number | string | null; level: number | string | null;
+        correct_count: number | string | null; error_count: number | string | null;
+        last_seen_at: Date | null;
+      })[]
+    >(
+      `SELECT skm.knowledge_point_id, skm.mastery_score, skm.level,
+              skm.correct_count, skm.error_count, skm.last_seen_at
+       FROM student_knowledge_mastery skm
+       JOIN knowledge_points kp ON kp.id = skm.knowledge_point_id
+       WHERE skm.student_id = ? AND kp.subject_id = ?
+       ORDER BY skm.knowledge_point_id`,
+      [studentId, subjectId],
+    );
+    return rows.map((r) => ({
+      knowledgePointId: Number(r.knowledge_point_id),
+      masteryScore: Number(r.mastery_score ?? 0),
+      level: Number(r.level ?? 0),
+      correctCount: Number(r.correct_count ?? 0),
+      errorCount: Number(r.error_count ?? 0),
+      lastSeenAt: r.last_seen_at,
+    }));
+  }
+
+  /**
+   * 题库 KP 覆盖率的**学科口径**（图谱页页脚必须展示，否则学生会以为「只有这些问题」）。
+   *
+   * 与 `countQuestionCoverage()`（全库口径、家长端用）并存不替换：那个不带 subject 过滤，
+   * 本页只讲数学，混进语文/英语的数会让页脚数字对不上图谱。
+   */
+  async countQuestionCoverageBySubject(
+    subjectId: number,
+  ): Promise<{ coveredQuestions: number; totalQuestions: number }> {
+    const [rows] = await this.pool.execute<
+      (RowDataPacket & { total: number | string | null; covered: number | string | null })[]
+    >(
+      `SELECT (SELECT COUNT(*) FROM questions WHERE subject_id = ? AND is_active = 1) AS total,
+              (SELECT COUNT(DISTINCT q.id) FROM questions q
+                 JOIN question_knowledge_points qkp ON qkp.question_id = q.id
+                WHERE q.subject_id = ? AND q.is_active = 1) AS covered`,
+      [subjectId, subjectId],
+    );
+    return {
+      coveredQuestions: Number(rows[0]?.covered ?? 0),
+      totalQuestions: Number(rows[0]?.total ?? 0),
+    };
+  }
 }
