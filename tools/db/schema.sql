@@ -863,7 +863,7 @@ CREATE TABLE IF NOT EXISTS goals (
 CREATE TABLE IF NOT EXISTS controls (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   student_id BIGINT NOT NULL,
-  daily_time_limit_minutes SMALLINT DEFAULT NULL,
+  session_lock_minutes SMALLINT DEFAULT NULL COMMENT '单次学习锁定分钟数（1..480）：学生登录起该时间内禁止登出；NULL = 未设锁',
   disabled_hours TEXT DEFAULT NULL,
   reward_redemption_enabled TINYINT(1) NOT NULL DEFAULT 1,   -- 兑换总开关：关了兑换端点直接 400
   -- 兑换汇率：多少积分换 1 元（家长可配）。与上面开关配合使用。
@@ -878,6 +878,43 @@ CREATE TABLE IF NOT EXISTS controls (
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_controls_student (student_id),
   CONSTRAINT fk_controls_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 学习管控（PC App 单次学习锁定，2026-09-23）
+-- 一次学生登录 → 退出的记录，同时是锁定窗口的载体。
+-- active_student_id 条件式 VIRTUAL 生成列 + 唯一键：DB 级保证「每学生至多一个进行中的学习会话」，
+-- 不靠 check-then-insert。**必须 VIRTUAL**（STORED 要重建整表，会被外键以 ERROR 1215 挡住）。
+CREATE TABLE IF NOT EXISTS learning_sessions (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id            BIGINT      NOT NULL,
+  app_shell             VARCHAR(10) NOT NULL DEFAULT 'electron' COMMENT '复用埋点既有枚举 web|electron；本期只有 electron 写入',
+  started_at            DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  last_seen_at          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '由学生端轮询刷新（轮询兼心跳）；判「在线」的唯一依据',
+  ended_at              DATETIME(3) DEFAULT NULL COMMENT 'NULL = 进行中。不设 end_kind：本设计不区分异常退出，结束只有一种语义',
+  lock_minutes          SMALLINT    DEFAULT NULL COMMENT '开始时的快照；家长事后改设置不影响本次',
+  lock_expires_at       DATETIME(3) DEFAULT NULL,
+  unlocked_at           DATETIME(3) DEFAULT NULL,
+  unlocked_by_parent_id BIGINT      DEFAULT NULL,
+  active_student_id     BIGINT AS (IF(ended_at IS NULL, student_id, NULL)) VIRTUAL COMMENT '生成列（条件式）：仅进行中时等于 student_id，供唯一键实现「每学生至多一个进行中的学习会话」；已结束保持 NULL 不参与唯一性',
+  created_at            DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at            DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  KEY idx_lsessions_student_started (student_id, started_at),
+  UNIQUE KEY uniq_lsessions_active (active_student_id),
+  CONSTRAINT fk_lsessions_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 家长 → 学生端的命令队列（本期只有 unlock）。
+-- command 用 VARCHAR + 服务端白名单，不用 ENUM：单取值的 ENUM 就是死枚举，将来加命令要改 schema。
+CREATE TABLE IF NOT EXISTS device_commands (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id          BIGINT      NOT NULL,
+  command             VARCHAR(20) NOT NULL COMMENT '服务端白名单，本期 [''unlock'']',
+  status              VARCHAR(10) NOT NULL DEFAULT 'pending' COMMENT 'pending | consumed | expired',
+  issued_by_parent_id BIGINT      NOT NULL,
+  created_at          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  consumed_at         DATETIME(3) DEFAULT NULL,
+  KEY idx_dcommands_pending (student_id, status, created_at),
+  CONSTRAINT fk_dcommands_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
