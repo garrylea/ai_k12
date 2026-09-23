@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v4.9
+> 版本：v4.10
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -203,12 +203,27 @@
 
 ### 4.5 Knowledge Graph — `/api/knowledge-graph`
 
+**仅数学**（`subjectId=1`；语文/英语无知识点体系）。全部为**只读**端点，`studentId` 必须等于 JWT 的 `sub`（不符 403 / code 1005），`subjectId` 非 1 一律 400 / code 1001。
+
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| GET | `/api/knowledge-graph/knowledge-points/{id}/relations` | 知识点前置/包含关系 | MVP |
-| GET | `/api/knowledge-graph/students/{studentId}/mastery` | 学生知识点掌握度 overlay | MVP |
-| GET | `/api/knowledge-graph/students/{studentId}/weak-points` | 薄弱点 TOP N 与推荐 | MVP |
+| GET | `/api/knowledge-graph/knowledge-points/{id}/relations` | 知识点前置/包含关系（`knowledge_relations` 表零数据，**降级 P1**） | P1 |
+| GET | `/api/knowledge-graph/students/{studentId}/mastery` | 学生知识点掌握度 overlay：全树 + 掌握度，`?subjectId=1` | MVP |
+| GET | `/api/knowledge-graph/students/{studentId}/weak-points` | 薄弱点候选 + 一条推荐，`?subjectId=1&limit=1`（limit 1–10） | MVP |
 | GET | `/api/knowledge-graph/students/{studentId}/learning-path` | 基于薄弱点的建议复习路径 | P1 |
+
+**`mastery` 返回**：`{ subjectId, nodes[], coverage }`。`nodes[]` 每项含 `id / name / parentId / masteryScore / level / correctCount / errorCount / lastSeenAt / sampleSize / confidence / availableQuestionCount`。
+
+- `masteryScore` 为 **`null` 表示从未作答**（**不是 0**——0 是「很弱」，语义相反）。
+- `confidence` 由后端算好下发（`none` 从未作答 / `insufficient` 样本 < 5 / `ok` 可下结论），**前端不重算阈值**（`MIN_SAMPLE_SIZE = 5` 是唯一真源）。
+- `availableQuestionCount` 谓词与专项抽题同源：`is_active=1 AND answer <> '' AND` 排除该生「不再展示」。
+- `coverage` = `{ coveredQuestions, totalQuestions, uncoveredUnclearedErrors }`，**均为数学口径**。
+
+**`weak-points` 返回**：`{ subjectId, candidates[], recommendation, reason }`。
+
+- 候选资格（三条同时满足）：① 有该生掌握度行 ② `sampleSize >= 5` ③ `availableQuestionCount > 0`。
+- 排序：`mastery_score ASC, error_count DESC, knowledge_point_id ASC`。
+- `recommendation = candidates[0] ?? null`；**无候选仍返回 200**（`reason='no_qualified_candidate'`），前端据此转引导态——**不是错误**。
 
 ### 4.6 Assessment — `/api/assessment`
 

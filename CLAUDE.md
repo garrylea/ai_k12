@@ -127,6 +127,16 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **走神预警**：① idle 阈值是**字面语义**（从最后一次操作起算）；`CLIENT_IDLE_DETECTION_SECONDS = 120` 镜像前端 `IDLE_TIMEOUT_MS`，**改一处必须同步另一处**。② 判定时机是**心跳、`end`、`closeStale` 三处**（`closeStale` 补判覆盖「后台 tab 冻结 / `end` 丢失 → 心跳全断」的盲区；崩溃/断电仍不判）。③ 家长端 Banner = `AlertBanner`（`ParentLayout` 顶部、30s 轮询 `GET /parent/alerts/unread`、**点击即已读**、**全部孩子含 info 级**）。`study_sessions.hidden_*` 四列**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**。
 - **P6.6 只做「预警灵敏度 + 奖励兑换只读」**：每日时长 / 禁用时段 / 辅线开关 / 拍照开关**不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）；`controls` 端点**只含两个阈值**，兑换字段归 `points/settings`（同一字段不做两个归属）。口径见 API 文档 §5.28。
 
+## 数学薄弱点图谱（2026-09-23）
+
+- **仅数学**：`/api/knowledge-graph/*` 只接受 `subjectId=1`（语文/英语无知识点体系）；两个端点只读、不写库、不发分。
+- **`masteryScore: null` = 从未作答**，**不是 0**（0 是「很弱」，语义相反）。前端渲染为「未开始」灰显，**绝不显示 0%**。
+- **`confidence` 由后端算好下发**（`none`/`insufficient`/`ok`），`MIN_SAMPLE_SIZE = 5` 是**唯一真源**，前端不重算阈值。
+- **推荐三道闸门**（有行 / 样本 ≥5 / 有题可抽）+ 排序 `mastery_score ASC, error_count DESC, kp_id ASC`；**无候选返回 200 + `recommendation: null`**（不是错误），前端转引导态。
+- **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**；一级汇总的「待补」阈值 `level <= 2` 是**纯展示口径**、不参与推荐算法。
+- **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`），档位为空时置灰按钮、不硬发请求（否则被 `targeted/start` 400 拒绝）。
+- **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：数学 457 道 active 题里只有约 45% 带 KP 标注，不说明会让学生以为「只有这些问题」。
+
 ## apps/server - ai-core AI Agent Hub
 
 `infra/`（ModelRouter、PromptBuilder、ModelClient + 各厂商适配器、ResponseParser、SafetyGuard、FallbackHandler、Logger、Metrics）+ `capabilities/`（Tutoring/Grading/Explanation/Variation/Analytics/Judgment 及专项能力）+ `prompts/`（Mustache）+ `*.yaml`（model-routes / retry / safety / fallback）。Node + TS ESM、Vitest、Zod、Mustache、prom-client、dotenv。

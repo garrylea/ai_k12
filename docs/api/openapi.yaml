@@ -897,17 +897,24 @@ paths:
   /knowledge-graph/students/{studentId}/mastery:
     get:
       tags: [KnowledgeGraph]
-      summary: 掌握度 overlay
+      summary: 学生知识点掌握度 overlay（仅数学）
       operationId: getMastery
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
-            type: string
+            type: integer
+        - name: subjectId
+          in: query
+          required: true
+          description: 本期仅支持 1（数学）；其它值 400
+          schema:
+            type: integer
+            enum: [1]
       responses:
         '200':
-          description: 掌握度数据
+          description: 全树 + 掌握度 overlay
           content:
             application/json:
               schema:
@@ -916,23 +923,39 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/KnowledgeMastery'
+                        $ref: '#/components/schemas/KnowledgeGraphMastery'
+        '403':
+          description: studentId 非本人（code 1005）
   /knowledge-graph/students/{studentId}/weak-points:
     get:
       tags: [KnowledgeGraph]
-      summary: 薄弱点
+      summary: 薄弱点候选 + 一条推荐（仅数学）
       operationId: getWeakPoints
       parameters:
         - name: studentId
           in: path
           required: true
           schema:
-            type: string
+            type: integer
+        - name: subjectId
+          in: query
+          required: true
+          description: 本期仅支持 1（数学）；其它值 400
+          schema:
+            type: integer
+            enum: [1]
+        - name: limit
+          in: query
+          required: false
+          description: 默认 1，范围 1-10
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 1
       responses:
         '200':
-          description: 薄弱点列表
+          description: 候选与推荐；无候选时 recommendation 为 null（仍 200）
           content:
             application/json:
               schema:
@@ -941,9 +964,9 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/WeakPoint'
+                        $ref: '#/components/schemas/WeakPointRecommendation'
+        '403':
+          description: studentId 非本人（code 1005）
 
   # Assessment
   /assessment/students/{studentId}/homework:
@@ -6809,30 +6832,105 @@ components:
         weight:
           type: number
 
-    KnowledgeMastery:
+    KnowledgeGraphNode:
       type: object
       properties:
-        knowledgePointId:
-          type: string
-        masteryScore:
-          type: number
-        errorCount:
+        id:
           type: integer
-        level:
-          type: string
-          enum: [L1, L2, L3, L4, L5]
-
-    WeakPoint:
-      type: object
-      properties:
-        knowledgePointId:
-          type: string
         name:
           type: string
-        errorRate:
+        parentId:
+          type: integer
+          nullable: true
+          description: null = 一级知识点
+        masteryScore:
           type: number
-        recommendation:
+          nullable: true
+          description: null = 从未作答（不是 0）
+        level:
+          type: integer
+          nullable: true
+        correctCount:
+          type: integer
+          nullable: true
+        errorCount:
+          type: integer
+          nullable: true
+        lastSeenAt:
           type: string
+          format: date-time
+          nullable: true
+        sampleSize:
+          type: integer
+          description: correct + error；未作答 = 0
+        confidence:
+          type: string
+          enum: [none, insufficient, ok]
+        availableQuestionCount:
+          type: integer
+
+    KnowledgeGraphMastery:
+      type: object
+      properties:
+        subjectId:
+          type: integer
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeGraphNode'
+        coverage:
+          type: object
+          properties:
+            coveredQuestions:
+              type: integer
+            totalQuestions:
+              type: integer
+            uncoveredUnclearedErrors:
+              type: integer
+
+    WeakPointCandidate:
+      type: object
+      properties:
+        knowledgePointId:
+          type: integer
+        name:
+          type: string
+        parentId:
+          type: integer
+          nullable: true
+        masteryScore:
+          type: number
+        level:
+          type: integer
+        correctCount:
+          type: integer
+        errorCount:
+          type: integer
+        sampleSize:
+          type: integer
+        availableQuestionCount:
+          type: integer
+        lastSeenAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    WeakPointRecommendation:
+      type: object
+      properties:
+        subjectId:
+          type: integer
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/WeakPointCandidate'
+        recommendation:
+          allOf:
+            - $ref: '#/components/schemas/WeakPointCandidate'
+          nullable: true
+        reason:
+          type: string
+          enum: [ok, no_qualified_candidate]
 
     Question:
       type: object

@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-09-23 数学薄弱点图谱与推荐（学生端训练轨）
+
+- 新增只读模块 `apps/server/src/modules/knowledge-graph/`，落地 API 文档 §4.5 的两个 MVP 端点；
+  `relations` 端点**降级 P1**（`knowledge_relations` 表零数据，等于要先做一轮数据工程）。
+- 新增 4 个只读仓储查询：可抽题数（按 KP 分组）、按学科掌握度行、按学科题库覆盖率、未标注知识点的未清零错题数。
+  最后一条的「未标注」判定子句与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors`
+  **共用 `apps/server/src/database/sql-fragments.ts` 的 `UNCOVERED_ERROR_PREDICATE`**
+  （原计划是两边各写一份，Task 1 审查标为 plan-mandated 近重复 → 用户裁决抽共享片段消漂移）；
+  外层过滤仍各自保留（家长端跨学科、本页仅数学），两处**不共享仓储实例**。
+- 前端新增 `/student/training/weak-points`（训练轨第 4 张卡）+ `weak-point-heat.ts`（热力梯度唯一实现）
+  + `point-tiers.ts` 的 `pickPracticeCount`；`ErrorPracticePage` 补 `?kpId=` 预填
+  （spec §6.3 原写「已支持」，实测只到 API 层，页面不读 URL）。
+- 实测勘误：brainstorming 调研摘要曾断言「training 判题不回写掌握度」——**错**，
+  `training.service.ts:173-174` 经 `judgeCore.judgeQuestion` → `finishJudge` → `recordFromJudge`，
+  **无 source 分支**，四个来源（practice/training/exams/remediation）都回写。
+
 ## 2026-09-22 错题补偿套题（相似题专项练习）——补记本批 changelog 条目
 
 > 本条目为 2026-09-23 补写：该批落地时只同步了 API/PRD/DB/UX/openapi 五处文档（提交 `2836a82`），漏了本文件的条目，今按仓库体量纪律补上。同批顺带清掉前端两条遗留死路由（见文末）。
