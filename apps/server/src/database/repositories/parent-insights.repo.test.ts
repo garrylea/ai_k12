@@ -4,6 +4,7 @@ import {
   ParentInsightsRepository,
   TRACK_SOURCES,
 } from './parent-insights.repo.js';
+import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments';
 
 /**
  * mockPool 模拟 mysql2 的 pool 双返回形状：[rows, fields]。
@@ -251,6 +252,9 @@ describe('ParentInsightsRepository：错题统计', () => {
     const sql = pool.execute.mock.calls[0][0] as string;
     expect(sql).toContain('NOT EXISTS');
     expect(sql).toContain('is_cleared = 0');
+    // 与 MainErrorBooksRepository.countUncoveredUncleared 共用同一片段——这一行把「共用」本身钉死，
+    // 否则将来把 NOT EXISTS 重新内联回查询，两边测试仍绿、漂移静默复活。
+    expect(sql).toContain(UNCOVERED_ERROR_PREDICATE);
   });
 });
 

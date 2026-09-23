@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { MainErrorBooksRepository } from './main-error-books.repo';
+import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments';
 
 /**
  * mockPool 模拟 mysql2 的 pool.execute 双返回形状：
@@ -262,6 +263,9 @@ describe('MainErrorBooksRepository.countUncoveredUncleared', () => {
     expect(sql).toContain('meb.is_cleared = 0');
     expect(sql).toContain('NOT EXISTS');
     expect(sql).toContain('qkp.question_id = meb.question_id');
+    // 共享片段必须**真的被插值进来**：只钉子串的话，将来有人把 `NOT EXISTS` 重新内联回
+    // 查询里，两边测试仍全绿、共享就白抽了（漂移静默复活）。这一行把「共用同一常量」钉死。
+    expect(sql).toContain(UNCOVERED_ERROR_PREDICATE);
     expect(params).toEqual([9, 1]);
   });
 
