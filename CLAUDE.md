@@ -129,13 +129,13 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 
 ## 数学薄弱点图谱（2026-09-23）
 
-- **仅数学**：`/api/knowledge-graph/*` 只接受 `subjectId=1`（语文/英语无知识点体系）；两个端点只读、不写库、不发分。
+- **仅数学、两个端点只读**：不写库、不发分（发分仍归 `POST /api/training/targeted/start`）。端点与阶段见 API 文档 §4.5。
 - **`masteryScore: null` = 从未作答**，**不是 0**（0 是「很弱」，语义相反）。前端渲染为「未开始」灰显，**绝不显示 0%**。
 - **`confidence` 由后端算好下发**（`none`/`insufficient`/`ok`），`MIN_SAMPLE_SIZE = 5` 是**唯一真源**，前端不重算阈值。
-- **推荐三道闸门**（有行 / 样本 ≥5 / 有题可抽）+ 排序 `mastery_score ASC, error_count DESC, kp_id ASC`；**无候选返回 200 + `recommendation: null`**（不是错误），前端转引导态。
+- **无候选不是错误**：端点仍 200 + `recommendation: null`，前端据此转引导态——**不要改成 404/4xx**。
 - **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**；一级汇总的「待补」阈值 `level <= 2` 是**纯展示口径**、不参与推荐算法。
 - **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`），档位为空时置灰按钮、不硬发请求（否则被 `targeted/start` 400 拒绝）。
-- **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：数学 457 道 active 题里只有约 45% 带 KP 标注，不说明会让学生以为「只有这些问题」。
+- **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：不说明会让学生以为「只有这些问题」。
 
 ## apps/server - ai-core AI Agent Hub
 

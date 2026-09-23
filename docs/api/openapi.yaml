@@ -869,31 +869,6 @@ paths:
                         $ref: '#/components/schemas/Question'
 
   # Knowledge Graph
-  /knowledge-graph/knowledge-points/{id}/relations:
-    get:
-      tags: [KnowledgeGraph]
-      summary: 知识点关系
-      operationId: getKnowledgeRelations
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: 关系列表
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CommonResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/KnowledgeRelation'
   /knowledge-graph/students/{studentId}/mastery:
     get:
       tags: [KnowledgeGraph]
@@ -924,6 +899,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/KnowledgeGraphMastery'
+        '400':
+          description: subjectId 非 1（code 1001）
         '403':
           description: studentId 非本人（code 1005）
   /knowledge-graph/students/{studentId}/weak-points:
@@ -965,6 +942,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/WeakPointRecommendation'
+        '400':
+          description: subjectId 非 1（code 1001）
         '403':
           description: studentId 非本人（code 1005）
 
@@ -6818,19 +6797,6 @@ components:
           type: string
         description:
           type: string
-
-    KnowledgeRelation:
-      type: object
-      properties:
-        srcId:
-          type: string
-        dstId:
-          type: string
-        relationType:
-          type: string
-          enum: [prerequisite, contains]
-        weight:
-          type: number
 
     KnowledgeGraphNode:
       type: object

@@ -11,7 +11,10 @@
 ## 2026-09-23 数学薄弱点图谱与推荐（学生端训练轨）
 
 - 新增只读模块 `apps/server/src/modules/knowledge-graph/`，落地 API 文档 §4.5 的两个 MVP 端点；
-  `relations` 端点**降级 P1**（`knowledge_relations` 表零数据，等于要先做一轮数据工程）。
+  `relations` 端点**降级 P1**（`knowledge_relations` 表零数据，等于要先做一轮数据工程），
+  并已按 CLAUDE.md 规则 3（openapi 只收 MVP）**从 `docs/api/openapi.yaml` 移除其路径与 `KnowledgeRelation` schema**。
+- 实测数字（原写在 CLAUDE.md，按体量纪律移到此）：数学约 **457** 道 active 题里只有约 **45%** 带 KP 标注，
+  故图谱页脚必须给覆盖口径，否则学生会误读成「只有这些问题」。该数字随题库增长会变，勿写回 CLAUDE.md。
 - 新增 4 个只读仓储查询：可抽题数（按 KP 分组）、按学科掌握度行、按学科题库覆盖率、未标注知识点的未清零错题数。
   最后一条的「未标注」判定子句与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors`
   **共用 `apps/server/src/database/sql-fragments.ts` 的 `UNCOVERED_ERROR_PREDICATE`**
