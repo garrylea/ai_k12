@@ -3289,17 +3289,43 @@ git commit -m "feat(web): 错题页支持 ?kpId= 预填（图谱「看这个知�
           enum: [ok, no_qualified_candidate]
 ```
 
+- [ ] **Step 3b: 从 openapi 移除 P1 的 `relations`（用户裁决，CLAUDE.md 规则 3）**
+
+⚠️ **原文勘误（Task 10 评审标为 Important，用户裁决「按 CLAUDE.md 规则移除」）**：Step 3 原写「`relations` 端点降级 P1 但 schema 先留着」，**与 CLAUDE.md 规则 3「openapi.yaml 只收 MVP 端点；P1/P2 在 API 文档里标阶段」冲突**。证据：同一张 §4.5 表里 P1 的 `learning-path` 被正确排除在 openapi 之外，而 P1 的 `relations` 却在 —— openapi 自己对「P1 该不该收」自相矛盾（且这处不一致是本次提交新造的：改前两边都是 MVP）。
+
+**做法**：
+1. 删掉 `docs/api/openapi.yaml` 里 `/knowledge-graph/knowledge-points/{id}/relations` 的**整个路径块**。
+2. 删掉 components 里的 **`KnowledgeRelation`** schema —— 先 `grep -n "KnowledgeRelation" docs/api/openapi.yaml` 确认除该 schema 定义与其 `$ref` 外**无其它引用**，有引用就停下报告。
+3. `docs/API接口与数据流设计文档.md` §4.5 的 `relations` 行**保持 P1 不动**（主稿是阶段真源）。
+
+- [ ] **Step 3c: 给两个端点补 `'400'` 响应（用户裁决）**
+
+⚠️ 评审 Minor（用户裁决「补上」）：主稿 §4.5 明写「`subjectId` 非 1 一律 400 / code 1001」，但 openapi 两个端点都**没有 `'400'` 响应**，而 CLAUDE.md 规则 1 把「响应结构」列为必须同步的字段（实现确实返回 400，已由 `knowledge-graph.controller.test.ts` 钉住）。
+
+给 `mastery` 与 `weak-points` 两条各补一条，紧挨既有的 `'403'`：
+
+```yaml
+        '400':
+          description: subjectId 非 1（code 1001）
+```
+
 - [ ] **Step 4: 校验 openapi 可解析 + 端点清单对齐**
 
-Run:
-```bash
-cd /Users/lichao/Downloads/claude/imooc/ai_k12 && \
-node -e "const y=require('js-yaml');const fs=require('fs');const d=y.load(fs.readFileSync('docs/api/openapi.yaml','utf8'));console.log(Object.keys(d.paths).filter(p=>p.includes('knowledge-graph')).join('\n'))" 2>/dev/null || \
-python3 -c "import yaml,sys;d=yaml.safe_load(open('docs/api/openapi.yaml'));print('\n'.join(p for p in d['paths'] if 'knowledge-graph' in p))"
-```
-Expected 输出 4 行（`relations` / `mastery` / `weak-points` / `learning-path`——若 `learning-path` 原本不在 openapi 里则 3 行），且无 YAML 解析异常。
+⚠️ **原文勘误（我预检核实，两处）**：① 原命令 `cd /Users/lichao/Downloads/claude/imooc/ai_k12` 指向**父仓库**，读到的会是未改动的 `openapi.yaml`（假通过）——必须在工作树内执行；② 原命令用 `require('js-yaml')`，但本仓**无根 `package.json`**，js-yaml 无法解析。`python3` 的 PyYAML 可用（已实测 6.0.2）。
 
-再人工核对：API 文档 §4.5 表格的 4 条路径与 openapi 的 `paths` 键**逐条对上**（CLAUDE.md 检查清单第 4 条）。
+Run（在工作树根执行）:
+```bash
+cd /Users/lichao/Downloads/claude/imooc/ai_k12/.codebuddy/worktrees/math-weakpoint-graph && python3 -c "
+import yaml
+d = yaml.safe_load(open('docs/api/openapi.yaml'))
+kg = [p for p in d['paths'] if 'knowledge-graph' in p]
+print(len(kg))
+print('\n'.join(kg))
+"
+```
+Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/mastery` 与 `/knowledge-graph/students/{studentId}/weak-points`（Step 3b 移除 `relations` 后由 3 变 2），且无 YAML 解析异常。
+
+再人工核对（CLAUDE.md 检查清单第 4 条）：API 文档 §4.5 表格的 **4** 条路径里，**2 条 MVP** 必须与 openapi 的 `paths` 键**逐字对上**（除 `/api` 前缀）；**2 条 P1**（`relations` / `learning-path`）**按规则 3 只存在于主稿**——这个不对称是**预期且正确**的。
 
 - [ ] **Step 5: 改 UX 文档**
 
@@ -3351,16 +3377,18 @@ Expected 输出 4 行（`relations` / `mastery` / `weak-points` / `learning-path
 
 在「家长端」小节之后新增一小节（只写仍生效的「勿动」，日期日志进 changelog）：
 
+⚠️ **原文勘误（Task 10 评审标为 Minor，用户裁决「按体量纪律删重」）**：原稿有三处违反 CLAUDE.md 体量纪律——① 重复了主稿 §4.5 已写的**三道闸门 + 排序**；② 重复了 `subjectId=1`；③ 写了**实测数字**「数学 457 道 active 题里只有约 45% 带 KP 标注」（体量纪律明写实测数字进 changelog，且该数字会随题库增长失效）。以下为删重后的版本：
+
 ```markdown
 ## 数学薄弱点图谱（2026-09-23）
 
-- **仅数学**：`/api/knowledge-graph/*` 只接受 `subjectId=1`（语文/英语无知识点体系）；两个端点只读、不写库、不发分。
+- **仅数学、两个端点只读**：不写库、不发分（发分仍归 `POST /api/training/targeted/start`）。端点与阶段见 API 文档 §4.5。
 - **`masteryScore: null` = 从未作答**，**不是 0**（0 是「很弱」，语义相反）。前端渲染为「未开始」灰显，**绝不显示 0%**。
 - **`confidence` 由后端算好下发**（`none`/`insufficient`/`ok`），`MIN_SAMPLE_SIZE = 5` 是**唯一真源**，前端不重算阈值。
-- **推荐三道闸门**（有行 / 样本 ≥5 / 有题可抽）+ 排序 `mastery_score ASC, error_count DESC, kp_id ASC`；**无候选返回 200 + `recommendation: null`**（不是错误），前端转引导态。
+- **无候选不是错误**：端点仍 200 + `recommendation: null`，前端据此转引导态——**不要改成 404/4xx**。
 - **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**；一级汇总的「待补」阈值 `level <= 2` 是**纯展示口径**、不参与推荐算法。
 - **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`），档位为空时置灰按钮、不硬发请求（否则被 `targeted/start` 400 拒绝）。
-- **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：数学 457 道 active 题里只有约 45% 带 KP 标注，不说明会让学生以为「只有这些问题」。
+- **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：不说明会让学生以为「只有这些问题」。
 ```
 
 - [ ] **Step 8: 补 changelog**
@@ -3371,7 +3399,10 @@ Expected 输出 4 行（`relations` / `mastery` / `weak-points` / `learning-path
 ## 2026-09-23 数学薄弱点图谱与推荐（学生端训练轨）
 
 - 新增只读模块 `apps/server/src/modules/knowledge-graph/`，落地 API 文档 §4.5 的两个 MVP 端点；
-  `relations` 端点**降级 P1**（`knowledge_relations` 表零数据，等于要先做一轮数据工程）。
+  `relations` 端点**降级 P1**（`knowledge_relations` 表零数据，等于要先做一轮数据工程），
+  并已按 CLAUDE.md 规则 3（openapi 只收 MVP）**从 `docs/api/openapi.yaml` 移除其路径与 `KnowledgeRelation` schema**。
+- 实测数字（原写在 CLAUDE.md，按体量纪律移到此）：数学约 **457** 道 active 题里只有约 **45%** 带 KP 标注，
+  故图谱页脚必须给覆盖口径，否则学生会误读成「只有这些问题」。该数字随题库增长会变，勿写回 CLAUDE.md。
 - 新增 4 个只读仓储查询：可抽题数（按 KP 分组）、按学科掌握度行、按学科题库覆盖率、未标注知识点的未清零错题数。
   最后一条的「未标注」判定子句与家长端 `ParentInsightsRepository.countUncoveredUnclearedErrors`
   **共用 `apps/server/src/database/sql-fragments.ts` 的 `UNCOVERED_ERROR_PREDICATE`**
