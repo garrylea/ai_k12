@@ -68,3 +68,30 @@ export function usePointTiers(taskCode: string): PointTiersState {
 
   return { tiers, tierKey, setTierKey, error, retry: load };
 }
+
+/**
+ * 专项练习的最小题量（spec §10 裁决：1 题偏少，改取「≥3 的最小可用档」）。
+ */
+export const MIN_PRACTICE_COUNT = 3;
+
+/**
+ * 从可用档位里挑一个开练题量（薄弱点图谱「开始补这个」用）。
+ *
+ * 规则（spec §6.3）：
+ * 1. 取 **≥ `MIN_PRACTICE_COUNT` 的最小档**（默认档位 `1/3/5/10` 下即 3）
+ * 2. 若可用档**全部 < 3**（家长只留了 1 题档）→ 退化为其中**最大**的一档，**不报错**
+ * 3. 一个可用档都没有（空数组 / 全非数字）→ `null`，调用方据此**置灰按钮**，
+ *    不硬发请求（否则会被 `targeted/start` 以 400 拒绝）
+ *
+ * `tierKey` 对 `math_targeted` 是纯数字字符串（家长端不能新增档位），可直接 `Number()`。
+ */
+export function pickPracticeCount(tiers: Array<{ tierKey: string }>): number | null {
+  const counts = tiers
+    .map((t) => Number(t.tierKey))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (counts.length === 0) return null;
+
+  const usable = counts.filter((n) => n >= MIN_PRACTICE_COUNT);
+  if (usable.length > 0) return Math.min(...usable);
+  return Math.max(...counts);
+}

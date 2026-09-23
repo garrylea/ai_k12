@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { getMyPointRules, type MyPointRules, type PointRuleTier } from '@/services/api';
-import { TIER_LOAD_ERROR, tierStatus, usePointTiers } from './point-tiers';
+import {
+  MIN_PRACTICE_COUNT,
+  TIER_LOAD_ERROR,
+  pickPracticeCount,
+  tierStatus,
+  usePointTiers,
+} from './point-tiers';
 
 /**
  * 档位共享模块（数学专项 / 背单词两个配置页共用）。
@@ -146,5 +152,34 @@ describe('usePointTiers', () => {
     expect(result.current.error).toBeNull();
     expect(result.current.tiers).toHaveLength(1);
     expect(result.current.tierKey).toBe('10');
+  });
+});
+
+describe('pickPracticeCount', () => {
+  const t = (tierKey: string) => ({ tierKey });
+
+  it('取 ≥3 的最小档（默认档位 1/3/5/10 → 3）', () => {
+    expect(pickPracticeCount([t('1'), t('3'), t('5'), t('10')])).toBe(3);
+  });
+
+  it('全部 < 3（家长只留 1 题档）→ 退化为最大档，不报错', () => {
+    expect(pickPracticeCount([t('1')])).toBe(1);
+  });
+
+  it('档位顺序打乱也取最小值', () => {
+    expect(pickPracticeCount([t('10'), t('5'), t('3')])).toBe(3);
+  });
+
+  it('空数组 → null（调用方据此置灰按钮，不硬发请求）', () => {
+    expect(pickPracticeCount([])).toBeNull();
+  });
+
+  it('非数字 / 非正档位被忽略', () => {
+    expect(pickPracticeCount([t('abc'), t('0'), t('5')])).toBe(5);
+    expect(pickPracticeCount([t('abc')])).toBeNull();
+  });
+
+  it('MIN_PRACTICE_COUNT 是 3（spec §10 裁决：1 题偏少）', () => {
+    expect(MIN_PRACTICE_COUNT).toBe(3);
   });
 });
