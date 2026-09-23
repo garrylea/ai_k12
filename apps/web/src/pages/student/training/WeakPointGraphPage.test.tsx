@@ -260,7 +260,7 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
 
     // 失败不是「灰着不动」：给可操作的重试控件，而不是一行说明文字
     expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
-    const retry = screen.getByRole('button', { name: '重试' });
+    const retry = screen.getByRole('button', { name: '重试档位' });
 
     getMyPointRules.mockResolvedValue({
       tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: [{ tierKey: '3' }] }],
@@ -295,6 +295,19 @@ describe('WeakPointGraphPage 档位状态（靠界面表达，不加说明文案
     const cta = await screen.findByRole('button', { name: '开始补这个' });
     expect(cta).toBeDisabled();
     expect(cta.querySelector('.animate-spin')).not.toBeNull();
+  });
+
+  it('推荐条与详情栏同时给出重试时，名字可区分（详情栏带知识点名）', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockRejectedValue(new Error('boom'));
+
+    await renderSettled();
+    fireEvent.click(screen.getByRole('button', { name: /数与式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '有理数' }));
+
+    expect(screen.getByRole('button', { name: '重试档位' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重试档位：有理数' })).toBeInTheDocument();
   });
 });
 
@@ -354,7 +367,21 @@ describe('WeakPointGraphPage 页脚与错误态', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '重试图谱' })).toBeInTheDocument();
+  });
+
+  it('图谱与档位同时失败：两个重试控件各有可区分的可访问名（不撞同名）', async () => {
+    getKnowledgeGraphMastery.mockRejectedValue(new Error('boom'));
+    getWeakPoints.mockResolvedValue(recommendation());
+    getMyPointRules.mockRejectedValue(new Error('boom'));
+
+    renderPage();
+
+    // 推荐条（重试档位）与主体错误块（重试图谱）会同时出现——名字必须不同，
+    // 否则屏幕阅读器听到一串无法区分的「重试」，getByRole 也会撞 multiple elements。
+    expect(await screen.findByRole('button', { name: '重试图谱' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '重试档位' })).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: '重试' })).toHaveLength(0);
   });
 
   it('全灰树不显示「暂无数据」（不是错误态）', async () => {
