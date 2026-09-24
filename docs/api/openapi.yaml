@@ -53,6 +53,8 @@ tags:
     description: 家长端积分：分值规则、兑换、奖励清单、汇率设置
   - name: StudySessions
     description: 学习会话采集（学习时长，student）
+  - name: DeviceControl
+    description: PC App 学习管控（单次学习锁定 + 家长解除命令）
 paths:
   # Auth
   /auth/register:
@@ -2998,11 +3000,13 @@ paths:
   /parent/students/{studentId}/controls:
     get:
       tags: [Parent]
-      summary: 行为管控配置（P6.6 预警灵敏度）
+      summary: 行为管控配置（预警灵敏度 + 单次学习锁定）
       description: >-
-        返回**两个预警灵敏度阈值**（默认 5 / 15）。读前 `ensure` 建默认行，故两字段恒非空。
-        ⚠️ 兑换汇率/开关**不在本端点**（归 `points/settings`）；每日时长/禁用时段/辅线开关/拍照开关
-        按用户 2026-09-20 裁决**本批不做**。归属校验：404/1002、403/1005。
+        返回两个预警灵敏度阈值（默认 5 / 15）与**单次学习锁定分钟数** `sessionLockMinutes`
+        （1..480；**`null` = 未设锁**，不是 0）。读前 `ensure` 建默认行，故三个字段恒有值。
+        ⚠️ 兑换汇率/开关**不在本端点**（归 `points/settings`）；每日最大使用时长/禁用时段/
+        辅线开关/拍照开关按用户 2026-09-20 裁决**仍不做**。
+        归属校验：404/1002、403/1005。
       operationId: getControls
       parameters:
         - name: studentId
@@ -3024,10 +3028,13 @@ paths:
                         $ref: '#/components/schemas/Controls'
     put:
       tags: [Parent]
-      summary: 更新行为管控（预警灵敏度）
+      summary: 更新行为管控（预警灵敏度 + 单次学习锁定）
       description: >-
-        两字段**均可选**、`1..180` 整数。校验链：归属 → **至少一个字段**（都缺 409/1001）
-        → 范围越界（409/1001）。**只发改动过的字段**（未提供即不动）；响应是**回读库里的完整对象**。
+        三个字段**均可选**：`alertAwayMinutes` / `alertIdleMinutes`（`1..180` 整数）、
+        `sessionLockMinutes`（`1..480` 整数或 `null` = 解除锁定）。校验链：归属 →
+        **至少一个字段**（全缺 409/1001）→ 范围越界（409/1001；`null` 跳过范围校验）。
+        **只发改动过的字段**（未提供即不动；**`null` 是「清空」不是「不动」**）；
+        响应是**回读库里的完整对象**。
       operationId: updateControls
       parameters:
         - name: studentId
@@ -3053,6 +3060,99 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/Controls'
+
+  /parent/students/{studentId}/device-commands:
+    post:
+      tags: [DeviceControl]
+      summary: 下发解除命令（PC App 学习管控）
+      description: >-
+        body `{command}`，本期只认 `'unlock'`（白名单外 **400/1001**）。
+        ⚠️ **没有进行中的学习会话 → 409/1001 且不写任何命令** —— 这是主防线：否则一条命令会
+        悬在那里，解锁掉**将来某次**锁定（轮询里的 10 分钟惰性过期只是兜底）。
+        归属校验：404/1002、403/1005。按 Nest 默认返回 **201**。
+      operationId: issueDeviceCommand
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueCommandRequest'
+      responses:
+        '201':
+          description: 命令已入队（pending）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssuedCommandView'
+        '400':
+          description: command 不在白名单（code=1001）
+        '409':
+          description: 当前没有进行中的学习会话（code=1001）
+
+  /parent/students/{studentId}/learning-sessions:
+    get:
+      tags: [DeviceControl]
+      summary: 进出时间列表（PC App 学习管控）
+      description: >-
+        query `days?`（缺省 7、`1..90`）、`limit?`（缺省 50、`1..100`）—— **越界 400/1001，不静默钳制**。
+        `items` 按 `startedAt` 倒序；`total` 是**同窗口总数**（不受 `limit` 影响）。
+        **`online` 由后端算好下发**（阈值 45 秒、与客户端 10 秒轮询成对；**已结束的会话永远 false**），
+        前端不重算。空结果 `items: []` / `total: 0` 是**正常态，不 404**。
+      operationId: listParentLearningSessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+          description: 回看天数；越界 → 400/1001（不钳制）
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: 最多返回条数；越界 → 400/1001（不钳制）
+      responses:
+        '200':
+          description: 进出时间（分页壳）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParentSessionPage'
+        '400':
+          description: days / limit 越界（code=1001）
+
   /parent/students/{studentId}/rewards:
     get:
       tags: [Parent]
@@ -3368,6 +3468,95 @@ paths:
                             nullable: true
         '400':
           description: reason 不在枚举内（code=1001）
+
+  # DeviceControl —— PC App 学习管控（学生端 3 条，2026-09-23）
+  /student/learning-sessions:
+    post:
+      tags: [DeviceControl]
+      summary: 取或建本次学习会话（幂等，**显式 200**）
+      description: >-
+        PC App 学生登录时调用，返回（必要时新建）本次学习会话，并带上锁定窗口。
+        **先查进行中会话**：命中就刷新 `last_seen_at` 并原样返回既有行 —— 绝不在客户端重启时
+        重算 `lockExpiresAt`（那等于「重启即重置时钟」）。「一个学生只有一个进行中会话」由 DB 层
+        条件式 VIRTUAL 生成列 + 唯一键保证（撞键回读既有行）。
+        ⚠️ 本端点是全仓**唯一**显式覆盖 `@HttpCode(200)` 的 POST：默认的 201 会误导调用方
+        「每次都在创建」。
+      operationId: openOrGetLearningSession
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 本次会话（新建或既有）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentSessionView'
+        '401':
+          description: 未登录或 token 无效（code=1003）
+
+  /student/learning-sessions/{id}/end:
+    patch:
+      tags: [DeviceControl]
+      summary: 结束本次学习会话（正常登出，幂等）
+      description: >-
+        `:id` 不属于自己 → **404/1002**（刻意不用 403：403 等于告诉调用方「该 id 存在、只是不是你的」）。
+        已结束的会话再调 → 幂等，回原 `endedAt` 且**不重写**（`ended_at` 是家长端「退出时间」的数据源）。
+        进行中 → 落 `ended_at=NOW(3)` 后**回读**取真值（不用 `NOW()` 猜）。
+      operationId: endLearningSession
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 结束时刻
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/EndSessionView'
+        '404':
+          description: 会话不存在或不属于该学生（code=1002）
+
+  /student/device-commands:
+    get:
+      tags: [DeviceControl]
+      summary: 命令轮询（**兼心跳**）
+      description: >-
+        客户端每 10 秒调用一次。**同一个事务**做 5 件事：① 超 10 分钟的 `pending` 命令置 `expired`；
+        ② 刷新进行中会话的 `last_seen_at`（**判「在线」的唯一依据**）；③ 取 `pending` 命令；
+        ④ 认领为 `consumed`（`WHERE status='pending'` 保证幂等）；⑤ 遇 `unlock` 落
+        `unlocked_at` / `unlocked_by_parent_id`。④⑤ 必须同生共死，否则家长端会显示
+        「已下发但没生效」而学生端已解锁。
+        **空结果是正常态**（`{commands: [], lock: null}`），绝不 404。
+      operationId: pollDeviceCommands
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 本次轮询结果（命令 + 当前锁定状态供对账）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PollView'
 
   # Admin（管理员中枢，全部 @Roles('admin')）
   /admin/models:
@@ -7538,11 +7727,13 @@ components:
     Controls:
       type: object
       description: >-
-        行为管控 P6.6 —— **预警灵敏度**（2026-09-20 实现，以代码为准）。
-        ⚠️ 只含两个阈值：兑换汇率/开关归 `points/settings`（同一字段两个归属会打架）；
-        每日最大使用时长 / 禁用时段 / 辅线访问开关 / 拍照解题开关按用户 2026-09-20 裁决
-        **本批不做**，`controls` 表里那几列（`daily_time_limit_minutes` / `disabled_hours` /
-        `alert_level` / `auxiliary_enabled` / `photo_search_enabled`）**保留待用**。
+        行为管控 —— **预警灵敏度 + 单次学习锁定**（预警灵敏度 2026-09-20 实现；
+        单次学习锁定 2026-09-23 实现，以代码为准）。
+        ⚠️ 兑换汇率/开关归 `points/settings`（同一字段两个归属会打架）；每日最大使用时长 /
+        禁用时段 / 辅线访问开关 / 拍照解题开关按用户 2026-09-20 裁决**仍不做**，`controls` 表里
+        那几列（`disabled_hours` / `alert_level` / `auxiliary_enabled` / `photo_search_enabled`）
+        **保留待用**（`daily_time_limit_minutes` 已于 2026-09-23 改名 `session_lock_minutes`
+        并启用为「单次登录起算的禁登出窗口」）。
       properties:
         alertAwayMinutes:
           type: integer
@@ -7558,10 +7749,23 @@ components:
             服务端把前端写死的 120 秒检测窗口补回 `hidden_since`，故家长设 5 分钟就在第 5 分钟报，
             文案也写 5 分钟；改前是「两者相加」、设 5 实际约 7 分钟）。⚠️ **已知边界**：阈值 ≤ 2 分钟时
             实际生效值约为 2 分钟（检测窗口即下限，页面允许最小 1 分钟，不加 UI 限制）。
+        sessionLockMinutes:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 480
+          description: >-
+            **单次学习锁定分钟数**（1..480，即最长 8 小时）：学生在 PC App 登录起该时间内**禁止登出**，
+            到点自动解除，家长也可用 `device-commands` 的 `unlock` 提前解除。
+            **`null` = 未设锁**（学生可自由登出）—— **不是 0**，0 不是合法锁定时长（下限 1），
+            拿 0 兜底会让「没设」与「设成 0」混淆。⚠️ 上限取 480 是有意的严格性：设 480 + 拔网线
+            最长 8 小时无法登出（拔网线不解锁，否则等于白送逃逸通道），家长端文案必须说清。
 
     ControlsUpdateRequest:
       type: object
-      description: 两字段**均可选**，但**至少给一个**（都缺 → 409/1001）。未提供的字段不动。
+      description: >-
+        三个字段**均可选**，但**至少给一个**（全缺 → 409/1001）。未提供的字段不动。
+        ⚠️ `sessionLockMinutes: null` 是**「清空锁定」**（合法值），不是「不动」——「不动」用缺字段表示。
       properties:
         alertAwayMinutes:
           type: integer
@@ -7571,6 +7775,149 @@ components:
           type: integer
           minimum: 1
           maximum: 180
+        sessionLockMinutes:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 480
+          description: "`null` = 解除锁定（合法值）；范围校验只在非 null 时做。"
+
+    StudentSessionView:
+      type: object
+      description: "`POST /student/learning-sessions` 的响应（PC App 学习管控）。"
+      properties:
+        id:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        lockMinutes:
+          type: integer
+          nullable: true
+          description: 开始时的快照（家长事后改设置不影响本次）；`null` = 本次未设锁。
+        lockExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        unlockedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 家长提前解除的时刻；`null` = 未被解除过。
+
+    EndSessionView:
+      type: object
+      description: "`PATCH /student/learning-sessions/{id}/end` 的响应。"
+      properties:
+        id:
+          type: integer
+        endedAt:
+          type: string
+          format: date-time
+          description: 结束时刻。**幂等**：已结束的会话再调返回**原**时刻、不重写。
+
+    PollView:
+      type: object
+      description: >-
+        `GET /student/device-commands` 的响应（轮询兼心跳）。**空结果是正常态**，绝不 404。
+      properties:
+        commands:
+          type: array
+          description: 本次认领到的命令（已置 `consumed`，不会重复返回）。
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              command:
+                type: string
+                description: "本期只有 `unlock`。"
+        lock:
+          nullable: true
+          description: >-
+            当前进行中会话的锁定状态，供客户端**对账**——本地 `lockExpiresAt` 与服务端不一致时
+            以服务端为准（例如家长已在别处解除）。无进行中会话 → `null`。
+          type: object
+          properties:
+            sessionId:
+              type: integer
+            lockExpiresAt:
+              type: string
+              format: date-time
+              nullable: true
+            unlockedAt:
+              type: string
+              format: date-time
+              nullable: true
+
+    IssueCommandRequest:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          enum: [unlock]
+          description: 本期唯一命令。白名单外 → 400/1001。
+
+    IssuedCommandView:
+      type: object
+      description: "`POST /parent/students/{studentId}/device-commands` 的响应。"
+      properties:
+        id:
+          type: integer
+        command:
+          type: string
+        status:
+          type: string
+          enum: [pending]
+        learningSessionId:
+          type: integer
+          description: 该命令指向的进行中会话 —— 家长端据此知道「解除了哪一次」。
+        createdAt:
+          type: string
+          format: date-time
+
+    ParentSessionItem:
+      type: object
+      description: 家长端「进出时间」的一行。
+      properties:
+        id:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: "`null` = 仍在进行中。"
+        online:
+          type: boolean
+          description: >-
+            由后端算好下发（阈值 `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 秒，
+            与客户端 10 秒轮询成对），**前端不重算**。已结束的会话永远 `false`。
+        lockMinutes:
+          type: integer
+          nullable: true
+        lockExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        unlockedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ParentSessionPage:
+      type: object
+      description: 进出时间列表的分页壳。`total` 是**同窗口总数**，不受 `limit` 影响。
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParentSessionItem'
+        total:
+          type: integer
 
     Alert:
       type: object
@@ -10214,22 +10561,16 @@ components:
 
     TodayUsageSummary:
       type: object
-      description: 今日已用时长（spec §8.2），用于与 `controls.daily_time_limit_minutes` 比较。
+      description: >-
+        今日已用时长（spec §8.2，2026-09-23 收缩）。**不含上下限对比**：`controls.daily_time_limit_minutes`
+        已改名 `session_lock_minutes` 并改成「单次登录起算的禁登出窗口」，「每日累计上限」概念已废除，
+        限制改由「单次学习锁定」承担。想看今天用了多久看 `activeSeconds`。
       properties:
         date:
           type: string
           description: "`YYYY-MM-DD`（应用层算好的本地日）"
         activeSeconds:
           type: integer
-        limitMinutes:
-          type: integer
-          nullable: true
-          description: >-
-            取自 `controls.daily_time_limit_minutes`。**null = 家长未设限**（不是 0，
-            也不是「用了 0 分钟」），此时 `exceeded = false`。
-        exceeded:
-          type: boolean
-          description: "`activeSeconds >= limitMinutes * 60`；`limitMinutes` 为 null 时恒 false。"
         byModule:
           type: array
           items:

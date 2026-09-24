@@ -140,6 +140,7 @@
 | Exams | `/api/exams` | 真题试卷考试（选卷/开考/逐题作答/交卷/结果，过期自动收卷） | Exams Service |
 | Points | `/api/points` | 闯关积分：学生端查询（概览/流水/档位/奖励）+ 全量段位表，只读 | Points Service |
 | ParentPoints | `/api/parent/students/{studentId}/points*` | 家长端积分：分值规则、兑换、奖励清单、汇率设置 | Points Service |
+| DeviceControl | `/api/student/learning-sessions`、`/api/student/device-commands`、`/api/parent/students/{studentId}/*` | PC App 学习管控：单次学习锁定（学生端取或建 / 结束 / 轮询兼心跳）与家长解除命令 | DeviceControl Service |
 
 ---
 
@@ -340,7 +341,7 @@
 | GET | `/api/parent/students/{studentId}/chat-logs` | AI 对话回放列表（分页壳同 `errors`）。query：`track` / `scene` / `from` / `to` / `q`（**只搜会话标题**）/ `page`。**不提供学科筛选**（`ai_dialogues.subject_id` 约 76% 为 NULL） | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs/{dialogueId}` | 单条对话详情：逐句回放，含 `reasoning`（AI 思考链，默认折叠）、`safetyFlag`（闲聊/偏离学习标记）与 `images[]`（孩子随消息发的图片 URL，服务端从 `attachments` 解析、只留 `type=='image'`，无附件时空数组）；不回传 `token_*` / `response_time_ms` | MVP |
 | GET | `/api/parent/students/{studentId}/study-time` | **学习时长（会话口径）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400；`from > to` 自动交换）。响应 `{totalSeconds, activeDays, byDay:[{date,seconds}], byModule:[{module,seconds}], bySubject:[{subjectId,seconds}], source:'sessions'}`。**口径标注**：这是**显式会话**口径，与 `dashboard.activeDays7` 的**四路时间戳代理并存、不替换**（spec §10，详见 §5.25）——UI 必须并列展示 + 区分文案（如「学习时长（会话）」vs「活跃天数」），**不得悄悄换掉** | MVP |
-| GET | `/api/parent/students/{studentId}/today-usage` | **今日已用时长**（用于与 `controls.daily_time_limit_minutes` 比较）。响应 `{date, activeSeconds, limitMinutes\|null, exceeded, byModule:[{module,seconds}]}`。`limitMinutes` 取自 `controls.daily_time_limit_minutes`，**为 NULL = 家长未设限 → `exceeded=false`**（不是「超了」，也不是「用了 0 分钟」）；`exceeded` 用 `>=`（用满即算超出，管控语义是「该停了」）。「今日」由**应用层**算好本地日传入，不用 `CURDATE()`。读前会惰性收尾该学生的孤儿会话（失败只 warn、不 500） | MVP |
+| GET | `/api/parent/students/{studentId}/today-usage` | **今日已用时长（纯统计，2026-09-23 收缩）**。响应 `{date, activeSeconds, byModule:[{module,seconds}]}` —— **不再有 `limitMinutes` / `exceeded`**：`controls.daily_time_limit_minutes` 已改名 `session_lock_minutes` 并改成「单次登录起算的禁登出窗口」（§4.25），「每日累计上限」这个概念不存在，留着那两个字段就是撒谎（家长会以为还有每日上限）。想看今天用了多久看 `activeSeconds`；想限制用「单次学习锁定」。「今日」由**应用层**算好本地日传入，不用 `CURDATE()`。读前会惰性收尾该学生的孤儿会话（失败只 warn、不 500） | MVP |
 | GET | `/api/parent/students/{studentId}/specials` | **专项学情（埋点 Phase 1B）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；非法**宽容回落**、不 400）。响应四模块 `{dictation,interpretation,meaning,vocabulary}`，每模块 `{units,correct,rate\|null,byDay:[{date,count}]}`，`vocabulary` 多一个 `newWords`。**四个键后端保证都在**（没数据给 `0` / `rate:null` / `byDay:[]`），前端不必判空；`rate` 沿用 `answered=0 → null`（**不许写 0**）。`units` = 作答单位数（默写=篇、解释/含义=句、背单词=题）。口径见 §5.27 | MVP |
 | GET | `/api/parent/students/{studentId}/mastery` | **真掌握度（埋点 Phase 1B）**。query `limit`（缺省 10、上限 50；**越界/非法 400/1001，不静默钳制**）。按 `mastery_score ASC, error_count DESC` 取最弱 N 个知识点，响应 `{items:[{knowledgePointId,name,masteryScore(0..1),level,correctCount,errorCount,lastSeenAt\|null}],coveredQuestions,totalQuestions,uncovered}`。**覆盖率三项必须展示**——题库仅 203/530 ≈ 38% 的题绑了知识点，不展示会让家长以为「孩子的问题只有这几个」。**与 §5.8 的 `weakPoints`（错题数代理）是两套口径、并存不替换**（spec §10） | MVP |
 | GET | `/api/parent/students/{studentId}/goals/attainment` | **目标达成（埋点 Phase 1B；2026-09-20 P6.5 起按学科）**。无 query。读 `goals WHERE is_active=1`；**无目标时懒初始化**（`INSERT IGNORE` 只补缺失、**不覆盖**家长已改的值）。**所有目标都是 `(学科, 指标)` 二元组**：在学学科 = `progress` 行的学科 ∪ 固定兜底 {语文,英语} ∩ MVP 白名单 {数学,语文,英语}，按 `subjects.sort_order` 排序；**没有在学学科 → `items: []`**（去配置教材），**绝不编造默认目标**。默认规模 = 数学 3 + 语文 4 + 英语 4 = 11 行；默认值 30 分钟/学科·天、2 课/周、5 道/周、8 篇/周（仅语文）、20 词/天（仅英语）。达成值按 `metric` 分派：`daily_study_minutes` ← `study_sessions` **按学科**（秒→分钟**向下取整**）；`weekly_lessons` ← `lesson_completions` **按学科**（**历史完课补不回来**，从 2026-09-20 起算）；`weekly_clear_errors` ← `main_error_books` **按学科**；`daily_words` / `weekly_passages` ← `special_practice_logs`（该表 `subject_id` 恒 NULL，按 `module` 筛；这两个指标只挂在英语/语文学科上）。响应 `{items:[{metric,subjectId,subjectName,period,title,target,achieved,rate\|null}]}`，`rate = toRate(target, achieved)`（**分母是 target**，为 0 → null；**允许 > 100 = 超额**，前端不截断）。窗口：daily = 今天、weekly = 近 7 天（含今天），由**应用层**算好传参（不用 `CURDATE()`）。返回顺序固定为「学科 sort_order → 指标模板顺序」 | MVP |
@@ -349,8 +350,10 @@
 | ~~POST~~ | ~~`/api/parent/students/{studentId}/goals`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现、无 `metric`；创建目标改由 `PUT /goals/{metric}`（服务端幂等 upsert，首次即创建） | ~~MVP~~ |
 | ~~PATCH~~ | ~~`/api/parent/students/{studentId}/goals/{goalId}`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现；改目标值改由 `PUT /goals/{metric}` | ~~MVP~~ |
 | ~~DELETE~~ | ~~`/api/parent/students/{studentId}/goals/{goalId}`~~ | **已废弃（2026-09-22 用户裁决，详见 §4.24）**：同上，从未实现；本期不做「删除目标」，停用走 `goals.is_active`（家长可重新启用，`PUT` 会置回 1） | ~~MVP~~ |
-| GET | `/api/parent/students/{studentId}/controls` | **行为管控 P6.6 —— 预警灵敏度（2026-09-20 实现）**。响应**只有两个字段** `{alertAwayMinutes, alertIdleMinutes}`（默认 5 / 15，范围 1..180）。⚠️ **兑换汇率/开关不在本端点**（归 `GET\|PUT .../points/settings`，同一字段两个归属会打架）。读前 `ensure` 建默认行，故两字段恒非空。归属校验：学生不存在 404/1002、不属于本家长 403/1005。⚠️ **本批不做、页面上也不出现**（用户 2026-09-20 裁决，**勿照 UX §P6.6 原文加回**）：每日最大使用时长、禁用时段、辅线访问开关、拍照解题开关 —— `controls` 的 `daily_time_limit_minutes`/`disabled_hours`/`alert_level`/`auxiliary_enabled`/`photo_search_enabled` **保留待用**。见 §5.28 | MVP |
-| PUT | `/api/parent/students/{studentId}/controls` | **改预警灵敏度**。body 两字段**均可选**、均为 `1..180` 整数。校验链：归属校验 → **至少一个字段**（两个都缺 → 409/1001）→ 范围越界（409/1001）。**只发改动过的字段**（未提供即不动）；返回**回读库里的完整对象**（不是回声入参）。见 §5.28 | MVP |
+| GET | `/api/parent/students/{studentId}/controls` | **行为管控 —— 预警灵敏度 + 单次学习锁定**。响应 `{alertAwayMinutes, alertIdleMinutes, sessionLockMinutes}`：两个阈值默认 5 / 15（范围 1..180）；`sessionLockMinutes` 是**单次学习锁定分钟数**（1..480），**`null` = 未设锁**（学生可自由登出）—— **不是 0**，0 不是合法锁定时长（下限 1），拿 0 兜底会让「没设」与「设成 0」混淆。⚠️ **兑换汇率/开关不在本端点**（归 `GET\|PUT .../points/settings`，同一字段两个归属会打架）。读前 `ensure` 建默认行，故三个字段恒有值。归属校验：学生不存在 404/1002、不属于本家长 403/1005。⚠️ **仍不做、页面上也不出现**（用户 2026-09-20 裁决，**勿照 UX §P6.6 原文加回**）：每日最大使用时长、禁用时段、辅线访问开关、拍照解题开关 —— `controls` 的 `disabled_hours`/`alert_level`/`auxiliary_enabled`/`photo_search_enabled` **保留待用**（`daily_time_limit_minutes` 已于 2026-09-23 改名 `session_lock_minutes` 并启用，语义是「单次登录起算」）。见 §4.25、§5.28 | MVP |
+| PUT | `/api/parent/students/{studentId}/controls` | **改预警灵敏度 / 单次学习锁定**。body 三个字段**均可选**：`alertAwayMinutes` / `alertIdleMinutes`（均 `1..180` 整数）、`sessionLockMinutes`（`1..480` 整数**或 `null` = 解除锁定**）。校验链：归属校验 → **至少一个字段**（全缺 → 409/1001）→ 范围越界（409/1001；`sessionLockMinutes` 为 `null` 时跳过范围校验）。**只发改动过的字段**（未提供即不动；**`null` 是「清空」不是「不动」**）；返回**回读库里的完整对象**（不是回声入参）。范围校验**两处都有**（controller 的 Zod 是第一道、service 是最后一道）。见 §4.25、§5.28 | MVP |
+| POST | `/api/parent/students/{studentId}/device-commands` | **下发解除命令（PC App 学习管控，2026-09-23 实现）**。body `{command}`，`command` 本期只认 `'unlock'`（白名单外 **400/1001**）。⚠️ **没有进行中的学习会话 → 409/1001 且不写任何命令** —— 这是主防线：否则一条命令会悬在那里，解锁掉**将来某次**锁定（`pollAndConsume` 的 10 分钟惰性过期只是兜底）。响应 `{id, command, status:'pending', learningSessionId, createdAt}`（`learningSessionId` 让家长端知道「解除了哪一次」）。按 Nest 默认返回 **201**。归属校验：学生不存在 404/1002、不属于本家长 403/1005。见 §4.25 | MVP |
+| GET | `/api/parent/students/{studentId}/learning-sessions` | **进出时间列表（PC App 学习管控，2026-09-23 实现）**。query `days?`（缺省 7、`1..90`）、`limit?`（缺省 50、`1..100`）—— **越界 400/1001，不静默钳制**。响应 `{items:[{id, startedAt, endedAt\|null, online, lockMinutes\|null, lockExpiresAt\|null, unlockedAt\|null}], total}`；`items` 按 `startedAt` 倒序、`total` 是**同窗口总数**（不受 `limit` 影响）。**`online` 由后端算好下发**（阈值 `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 秒、与客户端 10 秒轮询成对；**已结束的会话永远 `false`**），前端不重算。空结果 `items: []` / `total: 0` 是**正常态，不 404**。见 §4.25 | MVP |
 | GET | `/api/parent/students/{studentId}/rewards` | 奖励管理视图 | MVP |
 | GET | `/api/parent/alerts` | **异常预警列表 P6.9（2026-09-20 实现）**。query：`studentId?`（给了就校验归属；**不传 = 全部孩子**，列表带 `studentName`）/ `unreadOnly?`（只认 `'1'`）/ `page?`（≥1，默认 1）/ `pageSize?`（1..50，默认 20）。分页壳同 `errors`。`type ∈ off_topic\|emotional\|sensitive\|abusive\|away\|idle`、`level ∈ info\|warning\|critical`；**「建议家长行动」不入库**，由前端按 `type` 静态映射（spec §3.4）。空结果 `items: []` / `total: 0`（**不是错误**）。见 §5.28 | MVP |
 | PATCH | `/api/parent/alerts/{alertId}/read` | **标记预警已读**（幂等，重复标记不报错）。校验链：`alertId` 正整数（否则 409/1001）→ 预警存在（404/1002）→ 属于本家长（403/1005）。返回 `null` | MVP |
@@ -583,6 +586,30 @@
 **旧 `goals` CRUD（§4.13 的四条删除线行）**：`GET/POST /goals`、`PATCH/DELETE /goals/{goalId}` **从未实现**（文档先于代码），且无 `metric` 维度，2026-09-22 起标废弃。本节的 `PUT /goals/{metric}` 与它们**没有路径冲突**（那边没有路由）；即便将来补实现，两边的 HTTP 方法也不同（PUT vs PATCH/DELETE）。
 
 **数据流**见 §5.27；设计见 `docs/superpowers/specs/2026-09-19-analytics-instrumentation-design.md` §4.4/§4.7/§4.8/§8.2/§10。
+
+---
+
+### 4.25 StudyLockdown — PC App 学习管控（2026-09-23）
+
+PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → 退出**记一条 `learning_sessions`，家长可设「上课时长」（如 60 分钟），该窗口内学生**不能登出**，只有家长能提前解除，**到期自动解除**。设计见 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`。5 个端点：学生端 3（`apps/server/src/modules/device-control/` 的 `DeviceControlController` + `DeviceCommandsController`）、家长端 2（`DeviceControlParentController`，与 §4.13 共用 `api/parent` 前缀、路径不撞车）。
+
+> **为什么不复用埋点表**：`study_sessions`（§4.23）是**学习页粒度**（进一个场景一行），而锁定是**登录粒度**；且埋点采集的失败必须被吞掉（§5.25），而管控状态丢了会让门禁失灵。故另起 `learning_sessions`，**不参与**学习时长口径。
+
+| 方法 | 路径 | 入参 | 校验与逻辑 | 返回 |
+|---|---|---|---|---|
+| POST | `/api/student/learning-sessions` | —（`studentId` 取自 JWT） | **取或建**本次学习会话，幂等。**先查进行中会话**：命中就刷新 `last_seen_at` 并**原样返回**——绝不在客户端重启时重算到期时间（那等于「重启即重置时钟」，学生重启即可无限续时）。未命中才读 `controls.session_lock_minutes` 快照进 `lock_minutes` / `lock_expires_at`。「一个学生同时只有一个进行中会话」由 **DB 层**唯一键 `uniq_lsessions_active`（条件式 VIRTUAL 生成列 `active_student_id`）保证，不靠 check-then-insert；撞键时回读既有行返回。⚠️ **Nest 默认 201 会误导「每次都在创建」，故本端点显式覆盖为 `200`（全仓唯一一处 `@HttpCode`）** | `{id, startedAt, lockMinutes\|null, lockExpiresAt\|null, unlockedAt\|null}` **200** |
+| PATCH | `/api/student/learning-sessions/{id}/end` | — | **正常登出**。`:id` 不属于自己 → **404/1002**（刻意不用 403：403 等于告诉调用方「该 id 存在、只是不是你的」= 存在性泄露）。已结束的会话再调 → **幂等**，回原 `endedAt`、**不重写**（`ended_at` 是家长端「退出时间」的数据源）。进行中 → 落 `ended_at=NOW(3)` 后**回读**取真值（不用 `NOW()` 猜） | `{id, endedAt}` |
+| GET | `/api/student/device-commands` | — | **轮询兼心跳**（客户端每 10 秒一次）。**同一个事务**做 5 件事：① 超 `COMMAND_TTL_MINUTES = 10` 分钟的 `pending` 命令置 `expired`；② 刷新进行中会话的 `last_seen_at`（**判「在线」的唯一依据**）；③ 取 `pending` 命令；④ 认领为 `consumed`（`WHERE status='pending'` 保证幂等）；⑤ 遇 `unlock` 落 `unlocked_at` / `unlocked_by_parent_id`。**④⑤ 必须同生共死**，否则家长端会显示「已下发但没生效」而学生端已解锁。**空结果是正常态，绝不 404** | `{commands:[{id, command}], lock:{sessionId, lockExpiresAt\|null, unlockedAt\|null}\|null}` |
+| POST | `/api/parent/students/{studentId}/device-commands` | `{command:'unlock'}` | 见 §4.13 该行（**无进行中会话 409/1001** 是主防线） | 见 §4.13 |
+| GET | `/api/parent/students/{studentId}/learning-sessions` | `days?` `limit?` | 见 §4.13 该行（`online` 由后端算好下发） | 见 §4.13 |
+
+**三条口径（勿「统一」掉）**
+
+1. **锁定时长是「单次登录起算的墙钟窗口」，不是每日累计**：范围 `1..480` 分钟（上限 8 小时）；`NULL` = 未设锁。**到点自动解除**；家长也可随时用 `unlock` 提前解除。旧列名 `daily_time_limit_minutes` 与「每日上限」语义已于同批改动废除（§4.13 的 `today-usage` 同步收缩）。
+2. **`online` 的 45 秒阈值只在这一处**（`learning-session-log.service.ts` 的 `LEARNING_SESSION_ONLINE_WINDOW_SECONDS`，与计划 2 的客户端 `LEARNING_SESSION_POLL_MS = 10_000` **成对、改一处必须同步另一处**，沿用 `CLIENT_IDLE_DETECTION_SECONDS` ↔ `IDLE_TIMEOUT_MS` 的镜像纪律）。后端算好下发，**前端不重算**。
+3. **两条「做不到」是有意的非目标，别当缺陷修**：Electron 拦不住 `Alt+Tab` / `Ctrl+Alt+Del` / 强制退出（全屏 ≠ 不能切走）；**拔网线不解锁**（否则等于白送逃逸通道）。
+
+**迁移与数据面**：迁移 `tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql`（改名列 + 两张新表，幂等）。`learning_sessions.active_student_id` 是**条件式 VIRTUAL 生成列** —— **必须 VIRTUAL 不能 STORED**（STORED 要重建整表，会被外键以 ERROR 1215 挡住）；同理 **`listByStudent` 的 `LIMIT ?` 必须走 `pool.query`**（MySQL 拒绝预处理语句的 `LIMIT ?`，见 `limit-placeholder.guard.test.ts`）。
 
 ---
 
@@ -1772,6 +1799,49 @@ GET /api/parent/students/:id/study-time（§4.13）/ today-usage（§4.13）
 
 ---
 
+### 5.30 PC App 单次学习锁定：登录取或建 → 轮询兼心跳 → 家长解除（2026-09-23）
+
+学生**登录**（Electron 壳、真全屏 kiosk）→ **锁定窗口内不能登出** → 家长可提前解除 / 到点自动解除。端点见 §4.25，设计见 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`。
+
+```text
+学生登录（Electron 壳；家长/管理员才是普通窗口）
+  │
+  ▼
+POST /api/student/learning-sessions          ← 取或建（幂等，显式 200）
+  │  先 findOpen：命中 → touch(last_seen_at) 后原样返回既有行
+  │       └─ 关键：绝不重算 lock_expires_at（否则重启即重置时钟）
+  │  未命中 → 读 controls.session_lock_minutes 快照 → insertOpen
+  │       └─ lock_expires_at = DATE_ADD(NOW(3), INTERVAL ? MINUTE)（DB 侧时钟）
+  │       └─ 撞 uniq_lsessions_active(1062) → 回读既有行返回（DB 级保证单会话）
+  ▼
+客户端每 10 秒 GET /api/student/device-commands        ← 轮询兼心跳
+  │  ┌── 单事务 ────────────────────────────────────────────┐
+  │  │ ① pending 超 10 分钟 → expired（惰性兜底）            │
+  │  │ ② 刷新 last_seen_at（判「在线」的唯一依据）           │
+  │  │ ③ 取 pending 命令 ④ 认领为 consumed                   │
+  │  │ ⑤ 遇 unlock → 落 unlocked_at / unlocked_by_parent_id  │
+  │  └──────────────────────────────────────────────────────┘
+  │  返回 {commands, lock}；lock 供客户端**对账**（服务端是唯一真源）
+  ▼
+家长端（Web，30s 轮询预警之外另走这两个端点）
+  · GET  /api/parent/students/{id}/learning-sessions  进出时间（online 由后端算好）
+  · POST /api/parent/students/{id}/device-commands    {command:'unlock'}
+        └─ ⚠️ 没有进行中会话 → 409/1001，不写任何命令（主防线）
+  ▼
+学生端下一次轮询拿到 unlock → 本地解锁（并落库 unlocked_at）
+
+登出：PATCH /api/student/learning-sessions/{id}/end（幂等；非本人 → 404/1002）
+到点：lock_expires_at 过期即自动解除（客户端本地判定 + 服务端 lock 对账）
+```
+
+1. **「一个学生同时只有一个进行中会话」由 DB 强制**，不靠 check-then-insert：`learning_sessions.active_student_id` 是**条件式 VIRTUAL 生成列**（`IF(ended_at IS NULL, student_id, NULL)`）+ 唯一键 `uniq_lsessions_active`。客户端重启后再调取或建会撞唯一键 → 仓储回读既有行返回**同一个** `lock_expires_at`（`insertOpen` 捕获 1062）。**必须 VIRTUAL 不能 STORED**（STORED 要重建整表、被外键以 ERROR 1215 挡住）；**验证生成列必须用真表**（临时表没外键，会得假阳性）。
+2. **锁定时长是快照**：`lock_minutes` 在会话开始时写入，家长事后改设置**不影响本次**（避免「家长改一下就把孩子当前锁延长/缩短」这类不可预期行为）。
+3. **家长命令的时效性靠两道**：主防线是下发时「没有进行中会话就 409」；`pollAndConsume` 里超 10 分钟的 `pending` 置 `expired` 只是兜底（防止极端时序下一条陈旧 `unlock` 去解锁**将来某次**锁定）。
+4. **轮询兼心跳，且只有它写 `last_seen_at`**：家长端「进出时间」的 `online` 完全由它推导（45 秒窗口 = 容忍 4 次丢包）。**不新增独立心跳端点**——多一条路径就多一处能写出不一致的 `last_seen_at`。
+5. **埋点写入永不阻断主链路不适用于本模块**：这是**管控状态**而非埋点统计 —— 事务里 ④⑤ 同生共死，失败即回滚并向上抛（不做 catch-and-warn）。
+
+---
+
 ## 6. API 与前端页面对照表
 
 | 前端页面 | 路由 | 主要调用 API |
@@ -1970,6 +2040,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.10 | 2026-09-24 | **PC App 学习管控（单次学习锁定）**。新增 §4.25 与 §5.30，5 个端点：学生端 3 —— `POST /api/student/learning-sessions`（**取或建，显式 `@HttpCode(200)`，是全仓唯一一处覆盖**：幂等端点用默认 201 会误导「每次都在创建」）、`PATCH /api/student/learning-sessions/{id}/end`（幂等；非本人 → **404/1002 而非 403**，403 属于存在性泄露）、`GET /api/student/device-commands`（**轮询兼心跳**，客户端 10 秒一次；单事务做「惰性过期 + 刷 `last_seen_at` + 取 pending + 认领 consumed + `unlock` 落 `unlocked_at`」，后两步必须同生共死）；家长端 2 —— `POST /api/parent/students/{studentId}/device-commands`（body `{command:'unlock'}`，**没有进行中会话 → 409/1001 且不写命令**，这是防止「一条命令解锁将来某次锁定」的主防线；返回 **201**）、`GET /api/parent/students/{studentId}/learning-sessions`（进出时间，`days` 1..90 缺省 7、`limit` 1..100 缺省 50，**越界 400/1001 不钳制**；`online` **由后端算好下发**，阈值 45 秒与客户端 10 秒轮询成对）。**契约变更**：`controls` 的 GET/PUT 补 `sessionLockMinutes`（`1..480` 或 `null` = 解除；**`null` 是「清空」不是「不动」**）；`GET .../today-usage` **删 `limitMinutes` 与 `exceeded`**（「每日累计上限」概念废除，纯统计）。**列改名**：`controls.daily_time_limit_minutes` → `session_lock_minutes`，语义从「每日累计上限」改为「单次登录起算的禁登出窗口」（改名前该列实测恒为 NULL，零数据丢失）。数据面：新增 `learning_sessions`（条件式 VIRTUAL 生成列 `active_student_id` + 唯一键，**DB 级**保证「每学生至多一个进行中会话」→ 客户端重启不重置时钟）、`device_commands`；迁移 `tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql`。`openapi.yaml` 同步收录 5 端点 + 7 个 schema + `DeviceControl` tag。 |
 | v4.9 | 2026-09-22 | **错题补偿套题（相似题专项练习）**。契约变更：Training 分组 §4.18 新增 5 个补偿套题端点（student JWT；三个 POST 按 Nest 默认返回 **201**，两个 GET 200）——`generate`（学生同意后**同步**建组 + 题库抽题、AI 补题后台跑；`source` 枚举 `exam\|targeted`，`targeted` 必带 `wrongQuestionIds`（≤50）；考试未交卷 400、会话不存在/非本人 404；无错题全 0 返回 `setId:0`）、`me`（active 套题概要 + AI 补题惰性重试）、`questions`（未答对题含渲染数据，**`options` 可为 null**；全对时后端 `deleteSet`）、`answers`（逐题提交，判题 `source='remediation'` **不入错题本/不清零原错题/不参与主线门禁**，首答发分 `remediation_question`、幂等键 `rem:<item.id>`，全对清套）、`self-assess`（套题内主观题自评，**刻意不经 `judgeCore`**，不入错题本/不清零/不发 `error_fix`）。错误码口径：**「无进行中套题 / 题不在套题中 / 该题已答对」一律 400**（`BadRequestException`），**不是 404**。新增 §5.29 数据流。数据面：新增 `remediation_sets` / `remediation_groups` / `remediation_set_items` 三表（DB 设计文档 §3.19；`origin_question_id` 在 **groups** 上、`items.question_id` 是 `ON DELETE RESTRICT`）。积分：新增任务 `remediation_question`（PRD §7.13，档位=题型：选择→3 / 填空→4 / 大题→6，不限每日上限）。`openapi.yaml` 同步收录 5 端点。 |
 | v4.8 | 2026-09-21 | **清除全仓 WebSocket 设计（全仓零实现，且用户裁决不需要）**。本仓流式一律走 SSE（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`），家长端预警靠 30s 轮询，无任何 WS 依赖。删除：**§5「WebSocket 设计」整节**（通道定义 / 连接管理 / 消息格式 / 降级策略）、§1.2 范围里的「WebSocket 通道定义」、§2.2 认证里的 WS query-param 鉴权行、§5.1/§5.2/§5.3 时序图里的 `WS /ws/ai/{id}`（改指 `POST /api/ai/tutor/stream`）、§5.3 的 `WS /ws/notifications/{id} 推送预警`（改为「写入 `safety_alerts` → 家长端 30s 轮询可见」）、§5.6 的「WebSocket / 站内信」（改「站内信」）、§6 对照表 P3.4 与 P6.1 两行。**章节自本次起重新编号**：旧 §6→§5、§7→§6、§8→§7、§9→§8、§10→§9，正文内 17 处 `§6.x` / `§8` / `§10` 引用同步改。**下表 v4.6 及更早的历史条目沿用当时的旧编号、不回改**，读旧条目时按上述映射换算。顺带说明：§1.3「与上游文档的关系」表与 `apps/web/CLAUDE.md` 的「§5 数据流时序」本就按「无 WS」的编号写，此前一直是漂移状态，本次重编号后自动对齐（未额外改动）。同步：架构文档 §7.3 整节删除 + §2.1 / §4.2.6 / §6 / §9.1 / §11 五处改指 SSE / 站内信 / 轮询；`K12智学系统-后端Web服务设计文档.md` 模块清单去掉不存在的 WebSocket 模块；`openapi.yaml` 描述去「与 WebSocket」；`docs/CLAUDE.md` 契约描述同步。**接口契约零变更**（无端点增删改）。 |
 | v4.7 | 2026-09-21 | **`subject-configs` 补入 `openapi.yaml`（存量漏收，接口本身零变更）**。§4.13 的 `GET /api/parent/students/{studentId}/subject-configs` 与 `PUT .../subject-configs/{subjectId}` 自 v2.1（2026-09-01 教材配置批）起即为 MVP、已实现且前端在用（`/parent/students/:id/config` 页 + 学生卡片「学习配置」入口 + `StudentSwitcher`），却一直没收进 openapi。本次补 2 条 path + 7 个 schema（`SubjectConfigOption` / `SubjectConfigState` / `SubjectConfigsResponse` / `SubjectConfigUpdateRequest` / `SubjectConfigUpdateResult` / `SubjectConfigVersionOption` / `SubjectConfigGradeOption`），形状取自 `parent.service.ts` 实际返回：读侧 `{studentId, studentName, subjects[], options}`；写侧 body `{gradeCode, term, textbookVersionId?}`（`textbookVersionId` 缺省按「同学段 `edition` 非空优先、`id` 大者优先」选），回 `{subjectId, textbookVersionId, semesterId, reset}`（该学科已开始学习且版本/册别变化时 `reset: true`）。 |
