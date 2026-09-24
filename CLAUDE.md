@@ -2,7 +2,10 @@
 
 This file provides guidance to Claude Code and CodeBuddy Code when working with this repository. 根目录 `AGENTS.md` 是本文件的软链（CodeBuddy 及其他读 AGENTS.md 的 agent 工具经它加载同一内容）。
 
-> **体量纪律**：只放**仍生效的硬约束** —— 读代码 / config / 权威设计文档得不到的「**为什么**」与「**勿动**」。带日期的日志、事故经过、实测数字一律进 `docs/ai-core-changelog.md`；端点、字段、SQL 谓词等已写在 API 文档 / schema 里的内容**不在此重复**。
+> **体量纪律**：本文件只放**跨主题**的仍生效硬约束 —— 读代码 / config / 权威设计文档得不到的「**为什么**」与「**勿动**」。三类内容**不在此**：
+> ① 带日期的日志、事故经过、实测数字 → `docs/ai-core-changelog.md`；
+> ② **按主题的「勿动」细节**（ai-core / 家长端 / 专项子系统 / PC App / 数学薄弱点 / 数据管线）→ **`docs/constraints/<主题>.md`**（2026-09-24 迁出，索引见下「权威文档索引」）；**动对应子系统前必读那份**。
+> ③ 端点、字段、SQL 谓词等已写在 API 文档 / schema 里的内容 → 指过去，不重复。
 
 ## Project Overview
 
@@ -44,6 +47,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 | `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml` | API 契约，两份**互为对照、必须同步**（规则见下）。**各专项的端点、抽题池谓词、判题口径**见 §4.18 / §5.20–§5.23；积分 / 埋点 / 家长端聚合见 §5.24–§5.28 |
 | `docs/ai-core-changelog.md` | 历史工作日志。**本文件迁出的带日期细节都在这里**，它同时记录各次事故与踩坑 |
 | `docs/data-refinery-管线总结与后续.md` / `使用手册.md` | 数据管线的约定与操作 |
+| `docs/constraints/*.md` | **按主题的硬约束与踩坑（动手前必读对应那份，本文迁出的「勿动」细节）**：`ai-core.md`（模型路由 / 流式超时 / 判题分层 / 构建拷贝）、`家长端.md`、`专项子系统.md`（语文·英语）、`pc-app-学习管控.md`、`数学薄弱点图谱.md`、`数据管线.md` |
 | `docs/superpowers/specs/` 与 `docs/superpowers/plans/` | 各子系统的设计 spec 与任务级实施计划 |
 
 ## 基本原则（硬规则，勿违背）
@@ -96,76 +100,3 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **`input_tokens` / `output_tokens` 可为 NULL，NULL = 量不到**：量不到就写 NULL，**绝不写 0**（否则报表分不清「缺口」与「真实读数」；本期只记 token，不记价格/成本）。
 - **不用 WebSocket**（2026-09-21 用户裁决）：全仓无 WS 实现、也不再引入。AI 流式一律走 **SSE**（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`）；家长端预警靠 **30s 轮询**（`GET /api/parent/alerts/unread`）。
 
-## 数据管线（tools/data-refinery）
-
-`convert_cli (MinerU) -> extract_cli (LLM) -> publish_cli (物化图片) -> db_loader_cli (MySQL)`；`refinery_cli.py` 串联 publish + db_loader，DB 由 `tools/db/install_mysql.sh` 初始化。题目内容回写工具 `answer_importer`（JSONL/Markdown → questions 的 answer/approach/explanation/type，`--export` 出模板 / `--apply` 幂等写入）。
-
-**改动前必读三条**（细节见 `docs/data-refinery-管线总结与后续.md` §3）：① LLM 配置用 `.env` 的 `LLM_BASE_URL`/`LLM_AUTH_TOKEN`（refinery 专属），**不要用 `ANTHROPIC_*`**（会被 shell 里 Claude Code 覆盖）；② `db_loader` 的 full-reload 有**业务数据守卫**（库里有 answers/error_books 等外键数据时默认报错退出），需显式 `--purge-business-data`（按 FK 安全序清空）或改用 `--load-cards` 增量；③ 重抽目标页用 `unmark_extracted` 而非 `--force`（`--force` 绕过 skip 分支会断 lesson_id 的跨页继承回填）。
-
-其余 extract/publish/db_loader 细则（全角括号归一、页眉页脚剥离与书尾识别、二维码过滤、版次 edition 维度、页码锚定 lesson_anchor 等）属已稳定行为，见 `docs/ai-core-changelog.md`。
-
-## 独立子系统（语文古诗文 / 英语背单词）
-
-两条子系统**自己的表、自己的端点、自己的页面**。**共同原则（勿违背）**：作答单位不是「题」（语文是**篇目**、英语是**词/义项**），标准答案是内容自带属性，判题方式专项专属 —— 因此**不挂 `questions`、不进错题本、不参与主线清零门禁、不用「不再展示」/提示缓存/自评**；表都**无外键**（或只挂学生表），表即完整边界。
-
-**边界勿泛化到学科**：语文/英语的**试题类**（试卷/真题/考试）属正常题库业务，作答单位是「题」、错题要进错题本参与门禁，**仍走 `questions` + 错题本 + 考试/组卷既有体系，复用、不另起一套**。划界依据是**形态**（「篇目/词」还是「题」），**不是学科**。
-
-各专项的端点、抽题池谓词、判题枚举见 API 文档 §4.18 与 §5.20–§5.23。**以下是「勿动」清单**：
-
-- **三处「有意不统一」，勿合并**：① 三个专项的抽题池**逐层加闸门**（默写「必背」→ 解释「内容就绪」→ 含义再加 `sentence_meanings`）；② 英语**判题三条路由 + 计错口径**（只有 `wrong` 计错，`off_target`/`unanswered`/`undetermined` **都不计**）；③ 解释逐句判（`judge` 带 `sentenceIndex`）与含义 `method` **不含 `exact`**（理解性作答一律过 LLM、无归一化全等短路）。
-- **英语防泄漏铁律**：`promptKind='cn2en'` 的题**后端不下发** `word`/`phonetic`/`context`/`hasFamily`；**`+` 号只在 `promptKind==='en2cn' && hasFamily` 时渲染**（词根族树必然含单词本身，中→英题点开等于直接看答案；有渲染钉子用例）。
-- **数据面硬约束**：`english_words` **无外键**、`error_count` 只增，**loader 的 `ON DUPLICATE KEY UPDATE` 必须显式排除 `error_count`**（否则全量重灌抹掉全平台易错统计）；`student_word_progress.word_id` **故意不设外键**（否则内容表全量重灌会被入向外键卡死）；抓取**必须串行 + `--crawl-delay 1.5`**（smartedu 会 403）；**音标本期不做**。记账唯一实现在 `normalize-english.util.ts` 的 `progressDelta`；场景 `english_word_judge` = primary `local` / fallback `deepseek-flash`，设计见 `docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md`。
-- **语文内容走旁路**（`dictation_cli`/`interpretation_cli`）：**不接**四阶段主线、不产 `cards`、不写 `questions`；字词由**用户手工整理**。**改 `tools/db/migrations/2026-09-15_chinese_passages.sql` 前记住**：删 `questions` 行前必须先摘掉 `dictation_passages` 的 CASCADE 外键（首跑曾因级联静默清空篇目、从备份恢复，根因见 `docs/superpowers/plans/2026-09-15-chinese-passages-standalone.md` Task 9）。设计见 `docs/superpowers/plans/2026-09-16-chinese-interpretation-special.md`。
-
-## 家长端（学情 P6.1–P6.4 / 行为管控与预警 P6.6·P6.9·P6.10）
-
-- **学情四页是只读实时聚合**（`modules/parent-insights/`）：**不落 `learning_reports`、不调 LLM**，服务层分次查 + JS 合成后直接返回；**不要往这四个端点里加写入逻辑**。
-- **时长与掌握度都已不是代理**：时长走会话口径（`study_sessions`）；掌握度由判题出口回写 `student_knowledge_mastery`（**与「错题数代理」`weakPoints` 并存不替换**，两卡标题不同、不得合并）。**仅**活跃度（`activeDays7`）仍是时间戳代理。薄弱点必须给「未标注知识点的错题数」、掌握度必须给覆盖率三项，否则家长误读成「只有这些问题」。
-- **目标自 P6.5 起是 `(学科, 指标)` 二元组、没有全局目标**：在学学科 = `progress` 行 ∪ 兜底 {语文,英语} ∩ MVP 白名单，**没有在学学科就不建默认目标**；`goals` 唯一键靠**条件式 VIRTUAL 生成列** `scope_subject_id` —— **不能改 STORED**（重建整表会被两个外键挡住报 1215），也**别用临时表验证**（临时表没外键，会得出假阳性）。
-- **掌握度回写走 `void` 不 `await`**（埋点写入永不阻断主链路，见「工程约定」）；**`ON DUPLICATE KEY UPDATE` 的 SET 从左到右求值、读到的是已更新的列**（累计列须在计数列之后写、不得再 `+ new.x`），仓储占位符顺序必须与列清单逐位对应（`goals` 的 `title` 在 `period` 前）。
-- **闲聊判定 = 模型自报标记 `<!--topic:off-->`（独占回复最后一个非空行），无标记 = 不报警**（宁漏勿误报）—— 关键词正则已被否掉（实测 6/12 条正常题误判），其 `off_topic` 硬阻断已删除（情绪/敏感的阻断保留）。服务端在 `parseContent` 剥离（**只认末行、对独占一行的标记全局替换**，容忍 CRLF），标记永不进学生可见内容与历史。
-- **⚠️ `ai_messages.safety_flag` 是双来源**（模型自报闲聊 ∪ `type='block'`，后者现在只剩情绪/敏感）：取值必须 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))` —— **外层 `Number(...)` 必需**（`??` 会把 `boolean` 原样返回，列是 INT；`tsc` 因 `RowDataPacket` 索引签名 + `Omit` 抹平**不报错**）。家长端文案是「偏离学习 N」。
-- **走神预警**：① idle 阈值是**字面语义**（从最后一次操作起算）；`CLIENT_IDLE_DETECTION_SECONDS = 120` 镜像前端 `IDLE_TIMEOUT_MS`，**改一处必须同步另一处**。② 判定时机是**心跳、`end`、`closeStale` 三处**（`closeStale` 补判覆盖「后台 tab 冻结 / `end` 丢失 → 心跳全断」的盲区；崩溃/断电仍不判）。③ 家长端 Banner = `AlertBanner`（`ParentLayout` 顶部、30s 轮询 `GET /parent/alerts/unread`、**点击即已读**、**全部孩子含 info 级**）。`study_sessions.hidden_*` 四列**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**。
-- **P6.6 + PC App 学习管控**：`controls` 端点含**三个**字段 —— 两个预警阈值 + `session_lock_minutes`（单次学习锁定）。⚠️ 兑换字段仍归 `points/settings`（**同一字段不做两个归属**）。**禁用时段 / 辅线开关 / 拍照开关仍不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）；「每日累计使用时长」概念已于 2026-09-23 **废除**，被「单次学习锁定」取代（见「PC App 学习管控」节）。口径见 API 文档 §4.13/§4.25/§5.28。
-
-## PC App 学习管控（2026-09-23）
-
-`apps/desktop`（Electron 壳，**dev 模式**；本期不出安装包）+ 「单次学习锁定」。设计见 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`；契约见 API 文档 §4.25/§5.30。
-
-- **布局：PC App 与 Web 完全相同，不做三栏**（推翻 UX/架构的 P1「三栏」承诺）。角色驱动：学生 → kiosk、`parent`/`admin` → 普通窗口；角色闸门放**路由 effect**（登录/登出是客户端导航、不刷新页面）。
-- **⚠️ kiosk 由「角色」决定，与家长有没有设时长无关** —— 推给壳的是 `setStudentMode(role === 'student')`；`session_lock_minutes` **只决定能不能登出 + 要不要显示 pill**。**这两件事勿合并成一个布尔**（合并过一次：家长没设时长 → 学生登录后完全不被全屏、可随便切应用，用户实测报回）。`UNLOCKED`（学生但无锁/已到期/已解除）**仍是 kiosk 全屏**，只是允许登出。改 `preload.js` 接口名**必须重启壳**（preload 只在窗口创建时加载）。
-- **禁退三处缺一即逃逸口**：① `LogoutButton` 自判（**`aria-disabled` 而非原生 `disabled`** —— 原生禁用不触发 click、toast 弹不出来；**不许改 `aria-label`**，4 个测试靠它断言）；② 壳拦 `close`/`before-quit`/`minimize`；③ 壳拦外链与跨源导航。
-- **`learning_sessions` 的「一个学生同时只有一个进行中」由 DB 条件式 VIRTUAL 生成列 + 唯一键保证**（「重启不重置时钟」的基础）：**必须 VIRTUAL 不能 STORED**（STORED 重建整表被外键 1215 挡住）；**验证生成列必须用真表**，临时表得假阳性。
-- **`LEARNING_SESSION_POLL_MS = 10_000` ↔ `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 是镜像**，改一处必须同步另一处；`online` **后端算好下发**，前端不重算。
-- **拔网线不解锁**（有意的严格性）：失败**绝不清锁**，本地截止时间是唯一判据。`session_lock_minutes` 是**单次登录起算的墙钟窗口**（1..480，**默认 30**；`NULL` = 家长**显式解除设置**），**不是**已废除的每日累计；它是**开始时快照**，家长事后改设置不影响本次。
-- **家长下发命令的主防线 = 「没有进行中会话就 409/1001、不写命令」**；惰性过期只是兜底。命令认领与 `unlocked_at` 落库**必须同一事务**。
-- **做不到的别当缺陷修**：拦不住 `Alt+Tab`/`Cmd+Tab`/`Ctrl+Alt+Del`/强制退出；**不区分异常退出**；真·无法切屏靠 OS 级单应用模式（运维）。**非目标**：安装包/自动更新/签名、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
-
-## 数学薄弱点图谱（2026-09-23）
-
-- **仅数学、两个端点只读**：不写库、不发分（发分仍归 `POST /api/training/targeted/start`）。端点与阶段见 API 文档 §4.5。
-- **`masteryScore: null` = 从未作答**，**不是 0**（0 是「很弱」，语义相反）。前端渲染为「未开始」灰显，**绝不显示 0%**。
-- **`confidence` 由后端算好下发**（`none`/`insufficient`/`ok`），`MIN_SAMPLE_SIZE = 5` 是**唯一真源**，前端不重算阈值。
-- **无候选不是错误**：端点仍 200 + `recommendation: null`，前端据此转引导态——**不要改成 404/4xx**。
-- **热力梯度唯一实现在 `weak-point-heat.ts`**：色相固定 brand 橘红只调不透明度，**不得引入第二套配色**。
-- **`WEAK_LEVEL_MAX = 2`（`level <= 2` ⟺ 掌握度 < 60%）是「展示 + 推荐」共用口径，勿拆成两个阈值**：一级行的「N 个待补」与推荐的**第 4 道闸门**（已掌握的不算「该补」）同源。后端 `knowledge-graph.dto.ts` 与前端 `weak-point-heat.ts` 各一份**镜像常量，改一处必须同步另一处**——不一致就会出现「一级行说 0 个待补、推荐条却推它」的自相矛盾。一级行因此是**三态**（未开始 / N 个待补 / **已掌握**），**勿渲染成「0 个待补」**。
-- **开练题量取「≥3 的最小可用档」**（`point-tiers.ts` 的 `pickPracticeCount`）；档位取不到时由**界面**表达（加载转圈 / 重试控件 / 干脆不渲染），**不硬发请求**（否则被 `targeted/start` 400 拒绝）。
-- **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：不说明会让学生以为「只有这些问题」。
-
-## apps/server - ai-core AI Agent Hub
-
-`infra/`（ModelRouter、PromptBuilder、ModelClient + 各厂商适配器、ResponseParser、SafetyGuard、FallbackHandler、Logger、Metrics）+ `capabilities/`（Tutoring/Grading/Explanation/Variation/Analytics/Judgment 及专项能力）+ `prompts/`（Mustache）+ `*.yaml`（model-routes / retry / safety / fallback）。Node + TS ESM、Vitest、Zod、Mustache、prom-client、dotenv。
-
-**改代码前必读**：
-
-- **模型 ID（勿改）**：`kimi-latest`、`qwen3.8-max`、`gemini-3.1-pro`、`deepseek-flash`、`Qwen3.8-27B`（本地 llama.cpp，`local` provider）。配置里 kimi 的 key 是 `kimi` 但 modelId 是 `kimi-latest`。**DeepSeek 端点只认 `deepseek-flash` 与 `deepseek-v4-pro`**（传其它名字直接 400）；`deepseek-v4-flash` 仅作旧别名存活，**勿再新增引用**。
-- **API Key 用 `.env` 的 `KIMI_API_KEY`/`QWEN_API_KEY`/`GEMINI_API_KEY`/`DEEPSEEK_API_KEY` 及对应 `*_BASE_URL`**（ai-core 专属）。**不要用 `ANTHROPIC_*`**（会被 shell 里 Claude Code 覆盖）。
-- **场景路由（勿随意切换）**：运行时真源是 DB 的 `llm_routes`（`model-routes.yaml` 只服务新装 / DB 空时）；已 seed 的库用 `npx tsx src/scripts/set-*-route.ts` 幂等补路由。**新增场景要改 8 处**：`types.ts` 两个 union、`model-routes.yaml`、`retry.yaml`、`prompts/` 模板、`prompt-builder.ts` 的 `resolveTemplatePath` 分支、capability 类、seed 脚本、**`admin-models.service.ts` 的 `SCENES` 白名单**（漏了后台下拉选不到；有漂移守卫用例钉着）。
-- **给本地 llama.cpp 关 thinking 只能用 `extraBody`**：`ChatRequest.thinking=false` 是 **DashScope 系**的开关，**对本地端点完全无效**（`LocalClient` 会删掉该字段）；必须走 `ChatRequest.extraBody: LLAMA_CPP_NO_THINKING_BODY`（从 `infra/model-client/index.js` 导出）。`/no_think` 软开关**实测无效**（数据见 changelog）。⚠️ `JudgmentCapability` 既有的 `thinking:false` 对 local 是**空操作**，2026-09-14 有意未改（会改变数学判题行为）。
-- **流式用空闲超时，不是墙钟硬超时**：阈值取 `retry.yaml` 的 `streaming.firstTokenTimeoutMs`（3s）/ `interTokenTimeoutMs`（10s），有数据就重置，reasoner 思考 >45s 不会被砍。空闲抛 `TimeoutError`（408）→ 前端 1009；外部 `request.signal` 走 `AbortError`。**副作用**：`request.timeout` 只在 `streaming.*` 缺失时兜底且每收一字节重新 arm，「持续吐思考 token」的调用**没有墙钟上限** —— **凡把 LLM 调用放请求关键路径都要意识到。**
-- **`PromptBuilder`**：`customVariables` 已展平进 Mustache 视图（可传对象/数组）；**已关闭 HTML 转义**（数学符号 `=<>` 必须原样保留）；`{{> partial}}` 加载 `system/*.md` 并剥 frontmatter；模板用 `## System Prompt` / `## User Message` 分段。
-- **判题与解析分离**：判题（`judgment`）只判对错，prompt **勿加回 analysis 输出**；判错解析由 `ExplanationCacheService` 后台生成入 `questions.explanation` 一次性复用。⚠️ 该服务**必须由 `PracticeModule` 导出后注入同一实例**，**勿在其它模块重复 provide**（会分裂 in-flight 队列）。
-- **判题体系分层**：`choice`/`true_false` 程序比对；`fill_blank`/`calculation` 归一化比对 + AI 等价判断；`short_answer`/`proof` 由 `JUDGE_SUBJECTIVE_MODE` 控制（默认 `self_assess`：不判对错、学生自评）。空答案不计对错。设计见 `docs/superpowers/specs/2026-09-09-judging-rework-design.md`。
-- **`npm run build` 经 `scripts/copy-assets.mjs` 把 `ai-core/*.yaml` 与 `prompts/` 复制进 `dist/ai-core`**，使 `node dist/main.js` 与 `tsx src/...` 读到同一份配置。
-
-**已知限制与历史实现细节**（metrics 未接入 capability、ConversationService 内存存储无上限、gemini 流式未实现、多模态图片直送、辅线「详细解析」走题库、会话标题路由等）已迁至 `docs/ai-core-changelog.md`。
