@@ -45,6 +45,10 @@ P6.10 账号设置（账号信息 + 改密码 + 退出）
 | 9 | **拍照解题开关：撤掉** | 辅线一直可用，拍照也一直可用 |
 | 10 | `ai.service.ts:153` 的 TODO **保留不删**；`controls` 的 `alert_level` / `auxiliary_enabled` / `photo_search_enabled` 三列**保留、不标废弃** | 用户原话：「这个不要删呀，先留着，等以后可能还有用」 |
 
+> **2026-09-23 更新**：上表第 7 条**已被 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md` 推翻并落地**
+> —— 即当年记的「需要时单独立项」那次立项。注意语义已从「每日累计上限」改为「单次登录起算的锁定窗口」，
+> 列也从 `daily_time_limit_minutes` 改名 `session_lock_minutes`。**「禁用时段」仍未做**。
+
 ### 1.2 与 UX §P6.6 的偏差（必须写进文档）
 
 UX §P6.6 全文只有三行：
@@ -54,6 +58,8 @@ UX §P6.6 全文只有三行：
 - 禁用时段（多段时间窗）
 - 开关：奖励兑换、辅线访问、拍照解题
 ```
+> **2026-09-23 更新**：「每日最大使用时长」**已改名并改语义**为「单次学习锁定」（列 `daily_time_limit_minutes` → `session_lock_minutes`），
+> 见 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`。**禁用时段仍未做**。
 
 按上表裁决 7/8/9，**四项不做**（每日时长、禁用时段、辅线开关、拍照开关），奖励兑换已有独立归属（奖励管理页）。因此本批 P6.6 页的实际内容为：
 
@@ -69,6 +75,7 @@ UX §P6.6 全文只有三行：
 | 项 | 归属 |
 |---|---|
 | 每日最大使用时长 / 禁用时段的学生端强制 | 用户裁决暂不做；需要时单独立项 |
+| ↑ **2026-09-23 更新** | 「需要时单独立项」**已发生**：`docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md` 落地了**单次学习锁定**（PC App kiosk，期间禁止登出、到期自动解除、家长可远程解除），本条**已被它推翻**。注意语义是「单次登录起算的锁定窗口」，**不是**每日累计上限。**「禁用时段」仍未做** |
 | 辅线访问 / 拍照解题门禁 | 用户裁决不做；`ai.service.ts:153` TODO 与 `controls` 相关列保留待用 |
 | 订阅 / 订单 / 优惠券 / 额度（P7.1–P7.3） | 独立 spec（连表都没有）；本批**不放假卡** |
 | 家长改手机号 / 改姓名 | PRD 无要求，本批不做 |
@@ -153,10 +160,10 @@ UX §P6.6 全文只有三行：
 
 ### 2.5 `controls` 表与仓储现状
 
-- 列（`tools/db/schema.sql:861-877`）：`student_id`、`daily_time_limit_minutes`、`disabled_hours`、`reward_redemption_enabled`(默认1)、`points_per_yuan`(默认20)、`auxiliary_enabled`(默认1)、`photo_search_enabled`(默认1)、`alert_level`(默认 `'standard'`)、`break_reminder_minutes`、时间戳；唯一键 `uniq_controls_student`；FK → `students`。
-- `controls.repo.ts`：`ensure` / `findByStudent`（只 SELECT 两列）/ `findDailyTimeLimit` / `update`（**白名单只有 `pointsPerYuan`、`rewardRedemptionEnabled`**）。
+- 列（`tools/db/schema.sql:861-877`）：`student_id`、`daily_time_limit_minutes`（**该列已于 2026-09-23 改名 `session_lock_minutes` 并启用**，见 §1.1 更新）、`disabled_hours`、`reward_redemption_enabled`(默认1)、`points_per_yuan`(默认20)、`auxiliary_enabled`(默认1)、`photo_search_enabled`(默认1)、`alert_level`(默认 `'standard'`)、`break_reminder_minutes`、时间戳；唯一键 `uniq_controls_student`；FK → `students`。
+- `controls.repo.ts`：`ensure` / `findByStudent`（只 SELECT 两列）/ `findDailyTimeLimit`（**2026-09-23 已改名 `findSessionLockMinutes`，语义改为单次锁定**）/ `update`（**白名单只有 `pointsPerYuan`、`rewardRedemptionEnabled`**）。
 - **唯一写入方**是 `parent-points.controller.ts:255` `PUT students/:id/points/settings`。
-- `daily_time_limit_minutes` 无写入方（`controls.repo.ts:74-76` 注释已说明恒 NULL）；`disabled_hours` / `alert_level` / `break_reminder_minutes` / `photo_search_enabled` **零代码读**；`auxiliary_enabled` 只出现在 `ai.service.ts:153` 的**过时 TODO**（注释说仓储未建，实际早已建好）。
+- `daily_time_limit_minutes`（**已于 2026-09-23 改名并改为单次锁定语义**）当时无写入方（`controls.repo.ts:74-76` 注释已说明恒 NULL）；`disabled_hours` / `alert_level` / `break_reminder_minutes` / `photo_search_enabled` **零代码读**；`auxiliary_enabled` 只出现在 `ai.service.ts:153` 的**过时 TODO**（注释说仓储未建，实际早已建好）。
 - **「开关真生效」的现成范例**：`points/redemption.service.ts:198-202` —— `ensure` → `findByStudent` → 关闭时 `BadRequestException({ code: 3004 })`。
 
 ### 2.6 家长账号现状

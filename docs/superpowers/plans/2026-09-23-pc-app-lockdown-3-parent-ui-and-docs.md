@@ -908,7 +908,27 @@ git commit -m "fix(parent-ui): 端到端联调第 N 条 — <现象>"
 
 - [ ] **Step 7: 复核（用 grep 而不是眼睛）**
 
-Run:
+> **实施时修正（2026-09-24）**：下面这条命令**范围太宽**，会把两类**不该改的**也算成失败：
+> ① 历史归档（`docs/superpowers/plans/2026-09-19-*`、`2026-09-20-*`、`docs/ai-core-changelog.md`
+> 的旧条目、`apps/server/dist/**` 构建产物）—— 本仓规矩是**历史条目保留原文、不回改**
+> （同 API 文档「v4.6 及更早沿用当时编号」的处理）；
+> ② **就地标注过**的引用（写成「已改名 / 已废除 / 已推翻 / 不做三栏」或紧邻一行有「2026-09-23 更新」）。
+> 所以复核应**限定在活文档**并放行这些标注形态，用下面这条：
+>
+> ```bash
+> cd /Users/lichao/Downloads/claude/imooc/ai_k12 && \
+> grep -rn "daily_time_limit_minutes\|每日最大使用时长\|PC App 三栏\|三栏布局" \
+>   docs/K12智学系统-*.md docs/UX-UI设计文档.md docs/api/openapi.yaml \
+>   docs/家长端学情批-完成情况与待办清单.md apps/web/style.md \
+>   | grep -v "已改名\|已废除\|已于.*废除\|已推翻\|改名并改语义\|改名而来\|改语义\|不做三栏\|已收缩\|原「\|当时无写入方\|该列已于"
+> ```
+>
+> Expected: 无输出。**实测结果（2026-09-24）**：无输出 ✓；`grep -c session_lock_minutes docs/K12智学系统-数据库设计文档.md` = **5** ✓。
+> 附带发现并修掉的两处**真漏改**（初稿清单里没有）：`docs/UX-UI设计文档.md` 的 P6.6 页面规格
+> （「每日最大使用时长（小时滑块）」）与 `docs/api/openapi.yaml` 的 **today-usage 路径级 description**
+> （初稿只改了 `TodayUsageSummary` schema，路径描述仍在讲已被删掉的 `limitMinutes`/`exceeded`）。
+
+Run（原命令，仅供参考）:
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && echo "--- 应为 0（三栏承诺已清）---" && grep -rn "PC App 三栏\|三栏布局" docs/ apps/web/style.md | grep -v "不做三栏" | grep -v "不另做三栏" ; echo "--- 应为 0（每日上限已清）---" && grep -rn "daily_time_limit_minutes\|每日最大使用时长" docs/ apps/ | grep -v "已改名\|已废除\|已被.*推翻\|改名并改语义" ; echo "--- 应 >0（新字段已写）---" && grep -rc "session_lock_minutes" docs/K12智学系统-数据库设计文档.md
 ```

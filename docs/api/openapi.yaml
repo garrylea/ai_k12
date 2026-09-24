@@ -2680,12 +2680,14 @@ paths:
   /parent/students/{studentId}/today-usage:
     get:
       tags: [Parent]
-      summary: 今日已用时长（与每日上限比较）
+      summary: 今日已用时长（纯统计）
       description: >-
-        `limitMinutes` 取自 `controls.daily_time_limit_minutes`，**为 NULL = 家长未设限**
-        → `exceeded = false`（不是「超了」，也不是「用了 0 分钟」）。`exceeded` 用 `>=`：
-        用满上限即算超出（管控语义是「该停了」）。「今日」由应用层算好本地日传入。
-        读前惰性收尾该学生的孤儿会话（失败只 warn、不 500）。归属校验先于取数。
+        **2026-09-23 收缩**：响应只有 `date` / `activeSeconds` / `byModule`，**不再返回**
+        `limitMinutes` 与 `exceeded` —— 「每日累计上限」概念已废除（`controls.daily_time_limit_minutes`
+        已改名 `session_lock_minutes` 并改成「单次登录起算的禁登出窗口」，见 `/controls`）。
+        限制孩子用多久改由「单次学习锁定」承担；本端点只回答「今天用了多久」。
+        「今日」由应用层算好本地日传入。读前惰性收尾该学生的孤儿会话（失败只 warn、不 500）。
+        归属校验先于取数。
       operationId: getTodayUsage
       parameters:
         - name: studentId
@@ -3004,8 +3006,9 @@ paths:
       description: >-
         返回两个预警灵敏度阈值（默认 5 / 15）与**单次学习锁定分钟数** `sessionLockMinutes`
         （1..480；**`null` = 未设锁**，不是 0）。读前 `ensure` 建默认行，故三个字段恒有值。
-        ⚠️ 兑换汇率/开关**不在本端点**（归 `points/settings`）；每日最大使用时长/禁用时段/
-        辅线开关/拍照开关按用户 2026-09-20 裁决**仍不做**。
+        ⚠️ 兑换汇率/开关**不在本端点**（归 `points/settings`）；「每日最大使用时长」概念已于
+        2026-09-23 废除（改由本端点的 `sessionLockMinutes` 承担），禁用时段/辅线开关/拍照开关
+        按用户 2026-09-20 裁决**仍未做**。
         归属校验：404/1002、403/1005。
       operationId: getControls
       parameters:
