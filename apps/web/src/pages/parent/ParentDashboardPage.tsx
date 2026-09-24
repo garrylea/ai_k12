@@ -116,12 +116,11 @@ function StudyTimePanel({
         <p className="mt-2 text-2xl font-black text-[var(--text-primary)]">
           {usage && usage.byModule.length > 0 ? formatDuration(usage.activeSeconds) : '暂无数据'}
         </p>
+        {/* ⚠️ 这里**不再有**「每日上限」：该概念 2026-09-23 已废除（后端 today-usage 已删
+            limitMinutes/exceeded）。限制孩子用多久改由「单次学习锁定」承担，见 /parent/controls。
+            别再照旧版 UI 稿把上限文案加回来。 */}
         <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-          {usage
-            ? usage.limitMinutes === null
-              ? '家长未设置每日上限'
-              : `每日上限 ${usage.limitMinutes} 分钟${usage.exceeded ? ' · 已达上限' : ''}`
-            : ' '}
+          会话口径，只统计进入学习页且有操作的时间。
         </p>
       </Card>
     </div>

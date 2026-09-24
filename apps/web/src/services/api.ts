@@ -2226,10 +2226,6 @@ export interface ParentStudyTime {
 export interface ParentTodayUsage {
   date: string;
   activeSeconds: number;
-  /** `null` = 家长未设限（不是「上限 0 分钟」）。 */
-  limitMinutes: number | null;
-  /** `>=` 判定：用满上限即算超出。 */
-  exceeded: boolean;
   byModule: Array<{ module: string; seconds: number }>;
 }
 

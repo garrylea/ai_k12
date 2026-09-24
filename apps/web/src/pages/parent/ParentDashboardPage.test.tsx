@@ -135,15 +135,11 @@ beforeEach(() => {
   getStudyTimeMock.mockReset();
   getStudyTimeMock.mockResolvedValue(studyTime(5400));
   getTodayUsageMock.mockReset();
-  // activeSeconds 与 limitMinutes 刻意取不同的数字：1860 → 「31 分钟」，limit 30 → 「每日上限 30 分钟」。
-  // 若两者相同（如 1800/30），断言 `toContain('30 分钟')` 会被「每日上限 30 分钟」单独满足，
-  // 时长值即使渲染错也照样通过——那条断言等于没写。
+  // 1860s → 「31 分钟」。用这个**非整点**的数字是为了让断言只可能来自时长值本身
+  // （整点数字容易与其它文案撞车，断言会变成「等于没写」）。
   getTodayUsageMock.mockResolvedValue({
     date: '2026-09-19',
     activeSeconds: 1860,
-    limitMinutes: 30,
-    // 1860s >= 30 * 60s，语义上就是「已达上限」。
-    exceeded: true,
     byModule: [{ module: 'en_vocabulary', seconds: 1860 }],
   });
   getSpecialsMock.mockReset();
@@ -271,16 +267,17 @@ describe('ParentDashboardPage', () => {
     expect(screen.getByText(/近 7 天活跃 3 天/)).toBeTruthy();
   });
 
-  it('今日已用：时长值与上限值分别断言（数字不同，时长值无可替代）', async () => {
+  it('今日已用：只展示时长，**不再有「每日上限」**（该概念 2026-09-23 已废除）', async () => {
     renderAt('/parent/dashboard');
     await waitFor(() => expect(screen.getByTestId('dashboard-today-usage-11')).toBeTruthy());
 
     const text = screen.getByTestId('dashboard-today-usage-11').textContent ?? '';
-    // activeSeconds=1860 → 「31 分钟」。该子串只可能来自**时长值**，上限文案里是 30。
+    // activeSeconds=1860 → 「31 分钟」
     expect(text).toContain('31 分钟');
-    // 上限文案独立断言，避免被时长值顺带命中。
-    expect(text).toContain('每日上限 30 分钟');
-    expect(text).toContain('已达上限');
+    // 回归钉子：后端 today-usage 已删 limitMinutes/exceeded，前端若照旧稿渲染上限文案，
+    // 运行时字段是 undefined，会画出「每日上限 undefined 分钟」。
+    expect(text).not.toContain('每日上限');
+    expect(text).not.toContain('undefined');
   });
 
   it('时长取数失败时静默降级为「暂无数据」，不影响概览（拒绝 settle 后才断言）', async () => {
@@ -340,7 +337,7 @@ describe('ParentDashboardPage', () => {
         totalSeconds: 0, activeDays: 0, byDay: [], byModule: [], bySubject: [], source: 'sessions',
       });
       resolveUsage({
-        date: '2026-09-19', activeSeconds: 0, limitMinutes: null, exceeded: false, byModule: [],
+        date: '2026-09-19', activeSeconds: 0, byModule: [],
       });
     });
 
