@@ -1175,10 +1175,11 @@ vi.mock('@/components/base/Toast', async (importOriginal) => {
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, endStudentLearningSession: vi.fn().mockResolvedValue({ id: 7, endedAt: '' }) };
+  return { ...actual, endStudentLearningSession: vi.fn() };
 });
 
 const toastMock = vi.mocked(toast);
+const endMock = vi.mocked(endStudentLearningSession);
 const LATER = new Date(Date.now() + 60 * 60_000).toISOString();
 
 function renderButton() {
@@ -1204,6 +1205,11 @@ beforeEach(() => {
   localStorage.setItem('userRole', 'student');
   localStorage.setItem('userId', '9');
   toastMock.mockReset();
+  // 每次重新武装：`afterEach` 的 restoreAllMocks 会抹掉模块 mock 的实现，
+  // 而 `vi.mock` 工厂只跑一次（模块被缓存），不重设就会让 `endStudentLearningSession`
+  // 返回 undefined → `releaseOnLogout` 里的 `.catch` 抛错 → 登出被自己的收尾逻辑打断。
+  endMock.mockReset();
+  endMock.mockResolvedValue({ id: 7, endedAt: '2026-09-23T02:00:00.000Z' });
 });
 
 afterEach(() => {
@@ -1269,8 +1275,10 @@ describe('LogoutButton：锁定中', () => {
   });
 
   it('**别的孩子**被锁不影响当前登录者（同设备换人）', () => {
-    localStorage.setItem('userId', '42');
+    // 顺序要紧：`seedSession` 会把 `userId` 写成 `studentId`，所以必须先落「学生 9 的会话」，
+    // 再把当前登录者改成学生 42。反过来写会被覆盖回 9，这条用例就退化成「本人被锁」。
     seedSession(9, { lockExpiresAt: LATER, unlockedAt: null });
+    localStorage.setItem('userId', '42');
     renderButton();
     fireEvent.click(screen.getByLabelText('退出登录'));
     expect(screen.getByText('登录页')).toBeInTheDocument();
