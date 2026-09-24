@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ParentAnalyticsRepository } from '../../database/repositories/parent-analytics.repo.js';
-import { ControlsRepository } from '../../database/repositories/controls.repo.js';
 import { StudySessionsService } from '../analytics/study-sessions.service.js';
 import { resolveRange, startOfDaysAgo, toDayString } from './window.util.js';
 import type { StudyTimeSummary, TodayUsageSummary } from './dto/parent-insights.dto.js';
@@ -11,7 +10,6 @@ export class StudyTimeService {
 
   constructor(
     @Inject(ParentAnalyticsRepository) private readonly repo: ParentAnalyticsRepository,
-    @Inject(ControlsRepository) private readonly controls: ControlsRepository,
     @Inject(StudySessionsService) private readonly sessions: StudySessionsService,
   ) {}
 
@@ -46,29 +44,24 @@ export class StudyTimeService {
   }
 
   /**
-   * 今日已用时长（spec §8.2）——补齐 `controls.daily_time_limit_minutes` 的另一半。
+   * 今日已用时长（spec §8.2，2026-09-23 收缩）。
    *
-   * `limitMinutes: null` = 家长未设限 → `exceeded: false`（**不是**「超了」，
-   * 也不是「用了 0 分钟」）。`exceeded` 用 `>=`：管控语义是「用满了就该停」。
+   * **不再返回 `limitMinutes` / `exceeded`**：`controls.daily_time_limit_minutes` 已在
+   * 2026-09-23 改名 `session_lock_minutes` 并改成「单次登录起算的禁登出窗口」，
+   * 「每日累计上限」这个概念不存在了。留着这两个字段就是撒谎——家长会以为还有每日上限。
+   * 想看孩子今天用了多久，看 `activeSeconds`；想限制，用「单次学习锁定」。
    */
   async getTodayUsage(studentId: number): Promise<TodayUsageSummary> {
     const today = toDayString(startOfDaysAgo(0));
     const window = resolveRange(today, today);
     await this.closeStaleQuietly(studentId);
 
-    const [activeSeconds, limitMinutes, byModule] = await Promise.all([
+    const [activeSeconds, byModule] = await Promise.all([
       this.repo.getStudyTimeTotal(studentId, window.start, window.endExclusive),
-      this.controls.findDailyTimeLimit(studentId),
       this.repo.getStudyTimeByModule(studentId, window.start, window.endExclusive),
     ]);
 
-    return {
-      date: today,
-      activeSeconds,
-      limitMinutes,
-      exceeded: limitMinutes !== null && activeSeconds >= limitMinutes * 60,
-      byModule,
-    };
+    return { date: today, activeSeconds, byModule };
   }
 
   /**

@@ -80,7 +80,8 @@ const UpsertGoalSchema = z.object({
 });
 
 /**
- * `PUT .../controls` 的 body（spec §4.2）：两个字段**均可选**、`1..180` 整数。
+ * `PUT .../controls` 的 body（spec §4.2/§5.6）：三个字段**均可选**；两个预警阈值 `1..180`、
+ * 单次学习锁定 `1..480`（或 `null` = 解除），都是整数。
  *
  * 越界在这里就 `409`/`1001`（**不是** Zod 默认的 400）——spec §4.2 的校验链把范围越界
  * 与「没有要更新的字段」并列成 409。`ControlsService` 里还有一道同样的范围校验，
@@ -89,6 +90,9 @@ const UpsertGoalSchema = z.object({
 const ControlsPatchSchema = z.object({
   alertAwayMinutes: z.number().int().min(1).max(180).optional(),
   alertIdleMinutes: z.number().int().min(1).max(180).optional(),
+  // null 必须显式允许（解除设置），故用 .nullable() 而不是 .nullish()——
+  // nullish 会让 undefined 也通过，虽然语义上等价，但显式写更清楚。
+  sessionLockMinutes: z.number().int().min(1).max(480).nullable().optional(),
 });
 
 /** `GET alerts` 的 `pageSize` 上界（spec §4.3：1..50，与其它分页端点不同的档）。 */
@@ -227,7 +231,7 @@ export class ParentInsightsController {
     return this.studyTimeService.getStudyTime(studentId, from, to);
   }
 
-  /** 今日已用时长（spec §8.2）——用于和 `controls.daily_time_limit_minutes` 比较。 */
+  /** 今日已用时长（spec §8.2）——**纯统计**：不再与任何「每日上限」比较（该概念 2026-09-23 已废除）。 */
   @Get('students/:studentId/today-usage')
   async getTodayUsage(
     @CurrentUser() user: JwtUser,

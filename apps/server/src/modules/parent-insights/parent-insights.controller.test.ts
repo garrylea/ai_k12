@@ -26,8 +26,8 @@ function makeController(requireOwnedStudent: ReturnType<typeof vi.fn>) {
   } as unknown as GoalsService;
   // 本批新增的第 10/11 参：行为管控 / 预警中心
   const controls = {
-    get: vi.fn().mockResolvedValue({ alertAwayMinutes: 5, alertIdleMinutes: 15 }),
-    update: vi.fn().mockResolvedValue({ alertAwayMinutes: 5, alertIdleMinutes: 15 }),
+    get: vi.fn().mockResolvedValue({ alertAwayMinutes: 5, alertIdleMinutes: 15, sessionLockMinutes: null }),
+    update: vi.fn().mockResolvedValue({ alertAwayMinutes: 5, alertIdleMinutes: 15, sessionLockMinutes: null }),
   } as unknown as ControlsService;
   const alerts = {
     list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
@@ -195,7 +195,7 @@ describe('ParentInsightsController controls 端点（spec §4.1/§4.2）', () =>
     const { controller, controls } = makeController(requireOwned);
     (controls.get as any).mockImplementation(async () => {
       order.push('query');
-      return { alertAwayMinutes: 5, alertIdleMinutes: 15 };
+      return { alertAwayMinutes: 5, alertIdleMinutes: 15, sessionLockMinutes: null };
     });
 
     await controller.getControls(USER, 11);
@@ -237,6 +237,30 @@ describe('ParentInsightsController controls 端点（spec §4.1/§4.2）', () =>
     await controller.putControls(USER, 11, { alertAwayMinutes: 2, alertIdleMinutes: 30 });
 
     expect(controls.update).toHaveBeenCalledWith(11, { alertAwayMinutes: 2, alertIdleMinutes: 30 });
+  });
+
+  it('PUT：sessionLockMinutes 的 1..480 与 null（解除）都合法，并透传给 service', async () => {
+    const { controller, controls } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await controller.putControls(USER, 11, { sessionLockMinutes: 60 });
+    expect(controls.update).toHaveBeenCalledWith(11, { sessionLockMinutes: 60 });
+
+    // null = 解除设置，必须能穿过 schema（若误用 .optional() 不带 .nullable()，这里会 409）
+    await controller.putControls(USER, 11, { sessionLockMinutes: null });
+    expect(controls.update).toHaveBeenCalledWith(11, { sessionLockMinutes: null });
+  });
+
+  it('PUT：sessionLockMinutes 0 / 481 → 409/1001 且不写库（锁定时长有独立上下限，不与阈值共用 1..180）', async () => {
+    const { controller, controls } = makeController(vi.fn().mockResolvedValue(undefined));
+
+    await expect(
+      controller.putControls(USER, 11, { sessionLockMinutes: 0 }),
+    ).rejects.toMatchObject({ status: 409, response: { code: 1001 } });
+    await expect(
+      controller.putControls(USER, 11, { sessionLockMinutes: 481 }),
+    ).rejects.toMatchObject({ status: 409, response: { code: 1001 } });
+
+    expect(controls.update).not.toHaveBeenCalled();
   });
 
   it('PUT：归属失败 → 不写库（403 不许泄漏存在性）', async () => {

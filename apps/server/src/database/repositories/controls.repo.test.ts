@@ -68,6 +68,7 @@ describe('ControlsRepository.findByStudent', () => {
           reward_redemption_enabled: 0,
           alert_away_minutes: 3,
           alert_idle_minutes: 20,
+          session_lock_minutes: 60,
         },
       ],
     });
@@ -80,6 +81,7 @@ describe('ControlsRepository.findByStudent', () => {
       rewardRedemptionEnabled: false,
       alertAwayMinutes: 3,
       alertIdleMinutes: 20,
+      sessionLockMinutes: 60,
     });
     const [sql, params] = pool.execute.mock.calls[0];
     expect(selectList(sql)).toEqual([
@@ -87,13 +89,14 @@ describe('ControlsRepository.findByStudent', () => {
       'reward_redemption_enabled',
       'alert_away_minutes',
       'alert_idle_minutes',
+      'session_lock_minutes',
     ]);
     expect(sql).toContain('FROM controls');
     expect(sql).toContain('WHERE student_id = ? LIMIT 1');
     expect(params).toEqual([9]);
   });
 
-  it('无行 / 列为 NULL 时返回默认值（20 分/元、开启、切走 5、无操作 15），不抛错、不返回 null', async () => {
+  it('无行 / 列为 NULL 时返回默认值（20 分/元、开启、切走 5、无操作 15）；锁定时长唯独给 null 不给 0', async () => {
     const repo = new ControlsRepository(mockPool({ rows: [] }) as any);
 
     await expect(repo.findByStudent(9)).resolves.toEqual({
@@ -101,6 +104,7 @@ describe('ControlsRepository.findByStudent', () => {
       rewardRedemptionEnabled: true,
       alertAwayMinutes: 5,
       alertIdleMinutes: 15,
+      sessionLockMinutes: null,
     });
 
     const nullRow = mockPool({
@@ -110,6 +114,7 @@ describe('ControlsRepository.findByStudent', () => {
           reward_redemption_enabled: null,
           alert_away_minutes: null,
           alert_idle_minutes: null,
+          session_lock_minutes: null,
         },
       ],
     });
@@ -119,6 +124,7 @@ describe('ControlsRepository.findByStudent', () => {
       rewardRedemptionEnabled: true,
       alertAwayMinutes: 5,
       alertIdleMinutes: 15,
+      sessionLockMinutes: null,
     });
   });
 });
@@ -164,6 +170,31 @@ describe('ControlsRepository.update', () => {
     expect(await repo.update(9, {})).toBe(0);
     expect(pool.execute).not.toHaveBeenCalled();
   });
+
+  it('sessionLockMinutes 写进 SET；`null` 是「清空锁」的合法值，必须真的传下去（不是被 undefined 短路跳过）', async () => {
+    const setPool = writePool(1);
+    const repo = new ControlsRepository(setPool as any);
+
+    expect(await repo.update(9, { sessionLockMinutes: 60 })).toBe(1);
+    {
+      const [sql, params] = setPool.execute.mock.calls[0];
+      expect(zipSet(sql as string, params as unknown[])).toEqual({ session_lock_minutes: 60 });
+      expect(restAfterSet(sql as string, params as unknown[])).toEqual([9]);
+    }
+
+    const clearPool = writePool(1);
+    const repo2 = new ControlsRepository(clearPool as any);
+
+    expect(await repo2.update(9, { sessionLockMinutes: null })).toBe(1);
+    {
+      const [sql, params] = clearPool.execute.mock.calls[0];
+      // 关键：null 必须出现在 SET 子句并带着 null 参数发出去。
+      // 若实现用 `if (patch.sessionLockMinutes)` 判空，这里会退化成空 patch → 不发 SQL、返回 0，
+      // 家长点「解除锁定」会静默失败。
+      expect(zipSet(sql as string, params as unknown[])).toEqual({ session_lock_minutes: null });
+      expect(restAfterSet(sql as string, params as unknown[])).toEqual([9]);
+    }
+  });
 });
 
 describe('ControlsRepository.findAlertThresholds', () => {
@@ -205,27 +236,27 @@ describe('ControlsRepository.findAlertThresholds', () => {
   });
 });
 
-describe('ControlsRepository.findDailyTimeLimit', () => {
+describe('ControlsRepository.findSessionLockMinutes', () => {
   it('有值 → 数字', async () => {
-    const pool = { execute: vi.fn().mockResolvedValue([[{ daily_time_limit_minutes: 60 }], []]) };
+    const pool = { execute: vi.fn().mockResolvedValue([[{ session_lock_minutes: 60 }], []]) };
     const repo = new ControlsRepository(pool as any);
-    expect(await repo.findDailyTimeLimit(9)).toBe(60);
+    expect(await repo.findSessionLockMinutes(9)).toBe(60);
   });
 
-  it('无行 / NULL → null（未设限，不是 0）', async () => {
+  it('无行 / NULL → null（未设锁，不是 0）', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
     const repo = new ControlsRepository(pool as any);
-    expect(await repo.findDailyTimeLimit(9)).toBeNull();
+    expect(await repo.findSessionLockMinutes(9)).toBeNull();
 
-    const nullPool = { execute: vi.fn().mockResolvedValue([[{ daily_time_limit_minutes: null }], []]) };
+    const nullPool = { execute: vi.fn().mockResolvedValue([[{ session_lock_minutes: null }], []]) };
     const repo2 = new ControlsRepository(nullPool as any);
-    expect(await repo2.findDailyTimeLimit(9)).toBeNull();
+    expect(await repo2.findSessionLockMinutes(9)).toBeNull();
   });
 
   it('只发一条 SELECT —— 读路径不建行（不 ensure）', async () => {
-    const pool = { execute: vi.fn().mockResolvedValue([[{ daily_time_limit_minutes: 60 }], []]) };
+    const pool = { execute: vi.fn().mockResolvedValue([[{ session_lock_minutes: 60 }], []]) };
     const repo = new ControlsRepository(pool as any);
-    await repo.findDailyTimeLimit(9);
+    await repo.findSessionLockMinutes(9);
 
     expect(pool.execute).toHaveBeenCalledTimes(1);
     expect(pool.execute.mock.calls[0][0]).toMatch(/^\s*SELECT .*FROM controls/i);

@@ -102,8 +102,9 @@ const SettingsSchema = z
  * `PointsSettings`）。
  *
  * **不能直接把 `ControlsSnapshot` 整个返回**：仓储快照还带 `alertAwayMinutes` /
- * `alertIdleMinutes`，那是预警灵敏度的字段、归 `.../controls`（spec 要求「同一字段单一
- * 归属」）。整个透传会让积分端点泄漏别家字段，并与 API 文档声明的 schema 不符。
+ * `alertIdleMinutes`（预警灵敏度，归 `.../controls`）与 `sessionLockMinutes`（单次学习锁定，
+ * 归 `.../controls`），spec 要求「同一字段单一归属」。整个透传会让积分端点泄漏别家字段，
+ * 并与 API 文档声明的 schema 不符。
  */
 interface PointsSettingsResponse {
   pointsPerYuan: number;

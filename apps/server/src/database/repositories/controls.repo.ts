@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
-/** 家长控制项的只读快照（兑换 + 预警灵敏度）。按需逐列取，避免把整张 controls 表带进服务层。 */
+/** 家长控制项的只读快照（兑换 + 预警灵敏度 + 单次学习锁定）。按需逐列取，避免把整张 controls 表带进服务层。 */
 export interface ControlsSnapshot {
   /** 多少积分换 1 元。DB 默认 20，家长可配。 */
   pointsPerYuan: number;
@@ -11,6 +11,8 @@ export interface ControlsSnapshot {
   alertAwayMinutes: number;
   /** 前台无操作多少分钟写 `idle` 预警。DB 默认 15，家长可调 1..180。 */
   alertIdleMinutes: number;
+  /** 单次学习锁定分钟数（1..480）。`null` = 家长未设锁 → 学生可自由登出。 */
+  sessionLockMinutes: number | null;
 }
 
 /** 家长可改的控制项（缺省 = 不动该列）。范围校验在 API 层（Zod），这里只做白名单拼 SQL。 */
@@ -19,11 +21,13 @@ export interface ControlsPatch {
   rewardRedemptionEnabled?: boolean;
   alertAwayMinutes?: number;
   alertIdleMinutes?: number;
+  /** `null` 是合法值（= 解除设置），不是「不动」；「不动」用 `undefined`。 */
+  sessionLockMinutes?: number | null;
 }
 
 /**
- * 家长控制项（`controls`）。用到两组共四列：兑换（`points_per_yuan` / `reward_redemption_enabled`）
- * 与预警灵敏度（`alert_away_minutes` / `alert_idle_minutes`）。
+ * 家长控制项（`controls`）。用到三组共五列：兑换（`points_per_yuan` / `reward_redemption_enabled`）、
+ * 预警灵敏度（`alert_away_minutes` / `alert_idle_minutes`）与单次学习锁定（`session_lock_minutes`）。
  *
  * 全仓此前没有任何 `controls` 代码（`ai.service.ts:153` 还留着 TODO），本 repo 是第一个使用者，
  * 因此**只实现当前有调用方的读法**，不做「通用 controls 仓储」的过度设计；其余列等有需求再加。
@@ -52,7 +56,8 @@ export class ControlsRepository {
 
   /**
    * 读家长控制项快照。**无行 / 列为 NULL 时返回默认值**（20 分/元、开启、切走 5 分、无操作 15 分），
-   * 不返回 null、不抛错：
+   * 不返回 null、不抛错。**唯一例外是 `sessionLockMinutes`：缺失 → `null`**（见该方法内的注释——
+   * 锁定「没设」与「设成 0」必须区分，而 0 不是合法值）：
    *
    * - 调用方（兑换服务 / 管控端点）已先 `ensure()`，正常不会走到兜底分支；
    * - 但迁移未 apply 的库、或 ensure 与读之间行被删，返回默认值比 500 更合理；
@@ -67,9 +72,10 @@ export class ControlsRepository {
         reward_redemption_enabled: number;
         alert_away_minutes: number;
         alert_idle_minutes: number;
+        session_lock_minutes: number | null;
       })[]
     >(
-      `SELECT points_per_yuan, reward_redemption_enabled, alert_away_minutes, alert_idle_minutes
+      `SELECT points_per_yuan, reward_redemption_enabled, alert_away_minutes, alert_idle_minutes, session_lock_minutes
        FROM controls WHERE student_id = ? LIMIT 1`,
       [studentId],
     );
@@ -79,6 +85,12 @@ export class ControlsRepository {
       rewardRedemptionEnabled: Number(row?.reward_redemption_enabled ?? 1) === 1,
       alertAwayMinutes: Number(row?.alert_away_minutes ?? 5),
       alertIdleMinutes: Number(row?.alert_idle_minutes ?? 15),
+      // 缺失/无行 → null（= 未设锁），**不是** 0：0 不是合法锁定时长（下限 1），
+      // 拿 0 兜底会让「没设」和「设成 0」混淆，而后者根本不允许存在。
+      sessionLockMinutes:
+        row?.session_lock_minutes === null || row?.session_lock_minutes === undefined
+          ? null
+          : Number(row.session_lock_minutes),
     };
   }
 
@@ -86,7 +98,7 @@ export class ControlsRepository {
    * 读预警灵敏度的两个阈值（分钟）：切走多久写 `away`、无操作多久写 `idle`。
    *
    * **单独一条轻量 SELECT、只取两列**，不复用 `findByStudent`：本方法跑在心跳路径上
-   * （每 30 秒一次），把兑换汇率/开关一起读出来纯属浪费。和 `findDailyTimeLimit` 同一个形态。
+   * （每 30 秒一次），把兑换汇率/开关一起读出来纯属浪费。和 `findSessionLockMinutes` 同一个形态。
    *
    * **无行 / 列为 NULL → 返回默认档（5 / 15），不返回 null**：`controls` 行由建学生时或
    * `ensure()` 保证存在，仓储不该让心跳调用方处理「没有配置」这种态（两列本就是
@@ -109,38 +121,39 @@ export class ControlsRepository {
   }
 
   /**
-   * 读每日学习时长上限（分钟）。**无行 / 列为 NULL → 返回 null**（= 未设限）。
+   * 读单次学习锁定分钟数。**无行 / 列为 NULL → 返回 null**（= 未设锁，学生可自由登出）。
    *
-   * 不复用 `findByStudent`：那个方法刻意只 select 兑换两列，把整张表带进服务层是
-   * 它注释里明确拒绝的过度设计。这里同样只取**一个列**，不做通用 controls 仓储。
+   * 不复用 `findByStudent`：那个方法的本职是兑换 + 预警四列，而本方法跑在**学生登录**
+   * 这条路径上（`POST /api/student/learning-sessions`），只取一个列。和 `findAlertThresholds`
+   * 同一个形态。
    *
-   * 语义提醒：这个值只是**上限**。它是「行为管控」的一半，另一半「今日已用」
-   * 来自 `study_sessions`（Phase 1A 才补上）。**读侧已接好、写侧尚未实现**：
-   * `controls.daily_time_limit_minutes` 全仓**没有任何写入方**（`update()` 只白名单
-   * 两个积分列，家长端管控页仍是占位），因此目前它**恒为 NULL**、`limitMinutes` 恒为 null。
+   * 语义：这是个**单次登录起算的墙钟窗口**（1..480 分钟），不是每日累计。到点自动解除，
+   * 家长也可随时用 `device_commands` 的 `unlock` 提前解除。列名由 2026-09-23 迁移从
+   * `daily_time_limit_minutes` 改来——旧名字和旧语义已在同一批改动中废除。
    */
-  async findDailyTimeLimit(studentId: number): Promise<number | null> {
+  async findSessionLockMinutes(studentId: number): Promise<number | null> {
     const [rows] = await this.pool.execute<
-      (RowDataPacket & { daily_time_limit_minutes: number | null })[]
+      (RowDataPacket & { session_lock_minutes: number | null })[]
     >(
-      `SELECT daily_time_limit_minutes FROM controls WHERE student_id = ? LIMIT 1`,
+      `SELECT session_lock_minutes FROM controls WHERE student_id = ? LIMIT 1`,
       [studentId],
     );
-    const value = rows[0]?.daily_time_limit_minutes;
+    const value = rows[0]?.session_lock_minutes;
     return value === null || value === undefined ? null : Number(value);
   }
 
   /**
-   * 部分更新控制项（兑换设置 `PUT .../points/settings`、预警灵敏度 `PUT .../controls`）。
+   * 部分更新控制项（兑换设置 `PUT .../points/settings`、预警灵敏度与锁定时长 `PUT .../controls`）。
    *
    * 只拼**白名单列**（`points_per_yuan` / `reward_redemption_enabled` / `alert_away_minutes` /
-   * `alert_idle_minutes`），列名不来自入参，因此不存在 SQL 注入面。空 patch 是 no-op
-   * （调用方是用例的 400/409 闸门）。返回是否真的命中该生那一行——调用方必须先 `ensure()`，
-   * 否则 UPDATE 会静默影响 0 行。
+   * `alert_idle_minutes` / `session_lock_minutes`），列名不来自入参，因此不存在 SQL 注入面。
+   * 空 patch 是 no-op（调用方是用例的 400/409 闸门）。返回是否真的命中该生那一行——调用方
+   * 必须先 `ensure()`，否则 UPDATE 会静默影响 0 行。
    */
   async update(studentId: number, patch: ControlsPatch): Promise<number> {
     const sets: string[] = [];
-    const params: Array<number | string> = [];
+    // 允许 null（= 清空锁定时长），所以参数类型从 Array<number|string> 放宽。
+    const params: Array<number | string | null> = [];
     if (patch.pointsPerYuan !== undefined) {
       sets.push('points_per_yuan = ?');
       params.push(patch.pointsPerYuan);
@@ -156,6 +169,10 @@ export class ControlsRepository {
     if (patch.alertIdleMinutes !== undefined) {
       sets.push('alert_idle_minutes = ?');
       params.push(patch.alertIdleMinutes);
+    }
+    if (patch.sessionLockMinutes !== undefined) {
+      sets.push('session_lock_minutes = ?');
+      params.push(patch.sessionLockMinutes);
     }
     if (sets.length === 0) return 0;
 

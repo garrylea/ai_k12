@@ -61,12 +61,14 @@ export interface ParentDashboard {
 }
 
 /**
- * 预警灵敏度（spec §4.1/§4.2）。**只含这两个阈值**：奖励兑换状态归
- * `GET .../points/settings`，同一字段不许两个归属（spec §4.1 明文）。
+ * 行为管控（spec §4.1/§4.2/§5.6）。
+ * **不含兑换状态**：奖励兑换归 `GET .../points/settings`，同一字段不许两个归属。
  */
 export interface ParentControls {
   alertAwayMinutes: number;
   alertIdleMinutes: number;
+  /** 单次学习锁定分钟数（1..480）；`null` = 未设锁（学生可自由登出）。 */
+  sessionLockMinutes: number | null;
 }
 
 /**
@@ -290,13 +292,13 @@ export interface StudyTimeSummary {
   source: 'sessions';
 }
 
-/** 今日已用时长（spec §8.2）。`limitMinutes: null` = 家长未设限。 */
+/**
+ * 今日已用时长（spec §8.2，2026-09-23 收缩）。
+ * **不含上下限对比**：「每日累计上限」概念已废除，限制改由「单次学习锁定」承担（spec §5.6）。
+ */
 export interface TodayUsageSummary {
   date: string;
   activeSeconds: number;
-  limitMinutes: number | null;
-  /** `>=` 判定：用满上限即算超出（管控语义是「该停了」）。 */
-  exceeded: boolean;
   byModule: Array<{ module: string; seconds: number }>;
 }
 
