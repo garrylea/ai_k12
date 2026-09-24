@@ -2786,3 +2786,46 @@ export function getWeakPoints(
     `/knowledge-graph/students/${studentId}/weak-points?${qs.toString()}`,
   );
 }
+
+// --- 学生端：学习会话与设备命令（spec §5.1–§5.3，PC App 学习管控）---
+
+/**
+ * `POST /api/student/learning-sessions` —— 取或建本次学习会话。
+ *
+ * **幂等**：服务端已有进行中的会话就原样返回（含**原来那个** `lockExpiresAt`），
+ * 所以客户端重启后再调也不会重置锁定时钟。成功码是 **200**（本仓唯一覆盖 `@Post` 默认 201 的端点）。
+ */
+export interface StudentLearningSession {
+  id: number;
+  startedAt: string;
+  /** 开始时的快照；`null` = 本次未设锁。 */
+  lockMinutes: number | null;
+  lockExpiresAt: string | null;
+  unlockedAt: string | null;
+}
+
+export function openStudentLearningSession(): Promise<StudentLearningSession> {
+  return fetchApi<StudentLearningSession>('/student/learning-sessions', { method: 'POST' });
+}
+
+/** `PATCH /api/student/learning-sessions/:id/end` —— 正常登出。幂等。 */
+export function endStudentLearningSession(id: number): Promise<{ id: number; endedAt: string }> {
+  return fetchApi<{ id: number; endedAt: string }>(`/student/learning-sessions/${id}/end`, {
+    method: 'PATCH',
+  });
+}
+
+/**
+ * `GET /api/student/device-commands` —— 轮询（兼心跳，服务端据此刷 `last_seen_at`）。
+ *
+ * `lock` 是服务端对当前会话锁定态的权威描述，客户端拿它**对账**（家长在别处解除时，
+ * 本地的 `lockExpiresAt` 会被这里带回的 `unlockedAt` 覆盖）。无进行中会话 → `lock: null`。
+ */
+export interface DeviceCommandPoll {
+  commands: Array<{ id: number; command: string }>;
+  lock: { sessionId: number; lockExpiresAt: string | null; unlockedAt: string | null } | null;
+}
+
+export function pollStudentDeviceCommands(): Promise<DeviceCommandPoll> {
+  return fetchApi<DeviceCommandPoll>('/student/device-commands');
+}
