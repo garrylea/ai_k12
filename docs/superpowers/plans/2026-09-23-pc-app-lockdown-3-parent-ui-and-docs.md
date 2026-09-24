@@ -53,6 +53,33 @@
 
 - [ ] **Step 1: 扩展 API 层**
 
+> **实施时修正（2026-09-24，五处 —— 本任务初稿内部自相矛盾，按下面已修正的版本执行）**
+>
+> 1. **`LOCK_MINUTES_ERROR` 必须与测试断言的字符串完全一致**。初稿常量写
+>    `请填 1–480 的整数，或留空表示不设锁`，但 Step 2 的测试用
+>    `getByText('请填 1–480 的整数')`（字符串匹配是**全等**）→ 必红。取**短版**
+>    （与同页 `MINUTES_ERROR` 的 `请填 1–180 的整数` 同款），「留空表示不设锁」这句提示
+>    已在该块的说明文字里，不必挤进报错文案。
+> 2. **`canUnlock` 的初稿推导写不出测试要的语义**。初稿 `canUnlock = sessionsKnown && !unlocking`
+>    只区分「已知/未知」，但两条测试要求**相反**的行为：查到「没有进行中会话」→ **禁用**；
+>    查**失败** → **保持可点**（交给服务端判 409）。两者都表现为「没有 openId」，必须用
+>    **三态**（`null` = 未知）才能分开。改为下面的 `sessions` 单状态对象 + `knownNoSession`。
+> 3. **Step 2 第一条测试要自己覆盖 `beforeEach` 的默认值**。`beforeEach` 里
+>    `getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: 60 })` 是「已设锁」，
+>    而第一条测试断言的是「未设锁」（输入框空 + 文案「未设锁」）→ 必红。该条须自己
+>    `getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: null })`。
+> 4. **`ParentControls` 加了必填字段，所有字面量都要补**。初稿只提了文件顶部的 `CONTROLS`；
+>    实际还有两处会 `tsc` 报 TS2741：本文件「保存成功回显服务端值」里的
+>    `putControlsMock.mockResolvedValueOnce({ alertAwayMinutes: 20, alertIdleMinutes: 40 })`
+>    （补 `sessionLockMinutes: null`）与 **`apps/web/src/routes/routeTable.test.tsx` 的 `CONTROLS`**
+>    （该文件不在初稿的文件清单里）。
+> 5. **第三块那张 Card 必须放进 `loaded !== null` 分支内**（初稿把它放在三元分支之外）：
+>    放在外面 `loaded` 可能为 `null`（`tsc` TS18047），且卡片会在「还没加载完」时就渲染出输入框，
+>    使测试的 `findByTestId('lock-minutes-input')` **立刻命中**、断言跑在数据到达之前（时序不稳）。
+>    做法：把 `controls-form` 与 `controls-lock` 两张卡一起放进同一个 `<>…</>` Fragment。
+>    另：初稿 JSX 文案里的 `**不能退出登录**` 是 Markdown 强调语法，写在 JSX 里会**原样显示星号**
+>    给家长看，已改为纯文本。
+
 `apps/web/src/services/api.ts`：把 `ParentControls` 接口改为
 
 ```ts
@@ -64,7 +91,8 @@ export interface ParentControls {
   alertIdleMinutes: number;
   /**
    * 单次学习锁定分钟数（1..480）。`null` = 未设锁。
-   * 语义是**学生登录起算的墙钟窗口**，不是每日累计（旧 `daily_time_limit_minutes` 已于 2026-09-23 改名废除此语义）。
+   * 语义是**学生登录起算的墙钟窗口**，不是每日累计（旧 `daily_time_limit_minutes`
+   * 已于 2026-09-23 改名废除此语义）。
    */
   sessionLockMinutes: number | null;
 }
@@ -170,6 +198,8 @@ const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15, se
 ```tsx
 describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
   it('渲染接口值；未设锁时输入框为空、显示「当前：未设锁」', async () => {
+    // 必须自己覆盖 beforeEach 的「已设锁 60」默认值 —— 本条要测的就是未设锁的渲染
+    getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: null });
     renderPage();
     expect(await screen.findByTestId('lock-minutes-input')).toHaveValue(null);
     expect(screen.getByTestId('lock-status')).toHaveTextContent('未设锁');
@@ -269,6 +299,12 @@ describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
 });
 ```
 
+> **两处必须一起改**（否则 `tsc` TS2741，因为 `ParentControls` 多了一个必填字段）：
+> ① 本文件「保存成功 → toast 回显服务端值」里的
+> `putControlsMock.mockResolvedValueOnce({ alertAwayMinutes: 20, alertIdleMinutes: 40 })`
+> 要补 `sessionLockMinutes: null`；② `apps/web/src/routes/routeTable.test.tsx` 里的
+> `const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15 }` 同样要补。
+
 - [ ] **Step 3: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentControlsPage.test.tsx`
@@ -307,7 +343,8 @@ Expected: FAIL —— `lock-minutes-input` / `unlock-button` 找不到。
 /** 「单次学习锁定」范围（spec §5.6）。null = 未设锁。 */
 const LOCK_MINUTES_MIN = 1;
 const LOCK_MINUTES_MAX = 480;
-const LOCK_MINUTES_ERROR = `请填 ${LOCK_MINUTES_MIN}–${LOCK_MINUTES_MAX} 的整数，或留空表示不设锁`;
+// 与同页 MINUTES_ERROR 同款短版：字符串匹配是全等，多写一句就会让断言 `getByText('请填 1–480 的整数')` 失败
+const LOCK_MINUTES_ERROR = `请填 ${LOCK_MINUTES_MIN}–${LOCK_MINUTES_MAX} 的整数`;
 
 /**
  * 解析锁定输入框原值。
@@ -381,11 +418,29 @@ interface LoadedControls {
   const dirty = awayChanged || idleChanged || lockChanged;
   const canSave = dirty && !awayError && !idleError && !lockError && !saving;
 
-  const sessionsKnown = activeSessionStudentId === studentId;
-  const canUnlock = sessionsKnown && !unlocking;
-  const unlockHint =
-    sessionsKnown && activeSessionId === null ? '当前没有进行中的学习，无需解除' : null;
+  /**
+   * 三态：`null` = 未知（还没查 / 查失败）、`{openId: null}` = 查到了但没有进行中会话。
+   * 两者都表现为「没有 openId」，但**裁决相反** —— 查失败要**保持可点**（交给服务端判 409，
+   * 别把家长卡在灰按钮上），查到没有才该禁用。用布尔压成一态就写不出这两条测试要的行为。
+   */
+  const sessionsKnown = sessions?.studentId === studentId;
+  const knownNoSession = sessionsKnown && sessions!.openId === null;
+  const canUnlock = !unlocking && !knownNoSession;
+  const unlockHint = knownNoSession ? '当前没有进行中的学习，无需解除' : null;
 ```
+
+对应的 state 声明改为（初稿是 `activeSessionId` + `activeSessionStudentId` 两个 state，压掉了「未知」这一态）：
+
+```tsx
+  const [sessions, setSessions] = useState<{ studentId: number; openId: number | null } | null>(
+    null,
+  );
+  const [unlocking, setUnlocking] = useState(false);
+  const [sessionsReload, setSessionsReload] = useState(0);
+```
+
+拉取 effect 的 `.then` / `.catch` 相应改为 `setSessions({ studentId, openId: open ? open.id : null })`
+与 `setSessions(null)`（**失败写 `null` 保住「未知」语义**，不要写成 `{studentId, openId: null}`）。
 
 `doSave` 里补：
 
@@ -426,57 +481,66 @@ interface LoadedControls {
   };
 ```
 
-7. JSX：在 `controls-form` 那张 Card 之后、`controls-rewards` Card 之前插入第三块：
+7. JSX：在 `controls-form` 那张 Card 之后**（同一 `loaded !== null` 分支内）**插入第三块。
+   把两张卡一起包进 `<>…</>`（Fragment）—— 第三块要用 `loaded` 的两个字段，且必须等数据到达才渲染
+   （否则 `findByTestId('lock-minutes-input')` 会在加载中就命中，断言跑在数据之前）：
 
 ```tsx
-      <Card data-testid="controls-lock" className="mt-4 p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-base font-bold text-[var(--text-primary)]">单次学习锁定</h2>
-            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-              孩子登录学习端后，下面这段时间内**不能退出登录**，到点自动解除；也可以随时手动解除。
-              留空表示不设锁。
-            </p>
-          </div>
-          <span data-testid="lock-status" className="text-sm text-[var(--text-secondary)]">
-            {loaded.snapshot.sessionLockMinutes === null
-              ? '当前：未设锁'
-              : `当前：${loaded.snapshot.sessionLockMinutes} 分钟`}
-          </span>
-        </div>
+        </Card>
 
-        <div className="mt-5 flex flex-wrap items-end gap-4">
-          <Input
-            label="锁定时长（分钟，1–480）"
-            data-testid="lock-minutes-input"
-            type="number"
-            min={LOCK_MINUTES_MIN}
-            max={LOCK_MINUTES_MAX}
-            step={1}
-            inputMode="numeric"
-            value={loaded.lock}
-            disabled={saving}
-            error={lockError ? LOCK_MINUTES_ERROR : undefined}
-            onChange={(e) => patch((prev) => ({ ...prev, lock: e.target.value }))}
-          />
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={unlocking}
-            disabled={!canUnlock}
-            data-testid="unlock-button"
-            onClick={() => void doUnlock()}
-          >
-            解除锁定
-          </Button>
-        </div>
+          <Card data-testid="controls-lock" className="mt-4 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-bold text-[var(--text-primary)]">单次学习锁定</h2>
+                {/* ⚠️ 这里不要写 Markdown 的 `**强调**`：JSX 会原样渲染成星号 */}
+                <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                  孩子登录学习端后，下面这段时间内不能退出登录，到点自动解除；也可以随时手动解除。
+                  留空表示不设锁。
+                </p>
+              </div>
+              <span data-testid="lock-status" className="text-sm text-[var(--text-secondary)]">
+                {loaded.snapshot.sessionLockMinutes === null
+                  ? '当前：未设锁'
+                  : `当前：${loaded.snapshot.sessionLockMinutes} 分钟`}
+              </span>
+            </div>
 
-        {unlockHint && (
-          <p data-testid="unlock-hint" className="mt-2 text-xs text-[var(--text-secondary)]">
-            {unlockHint}
-          </p>
-        )}
-      </Card>
+            <div className="mt-5 flex flex-wrap items-end gap-4">
+              <Input
+                label={`锁定时长（分钟，${LOCK_MINUTES_MIN}–${LOCK_MINUTES_MAX}）`}
+                data-testid="lock-minutes-input"
+                type="number"
+                min={LOCK_MINUTES_MIN}
+                max={LOCK_MINUTES_MAX}
+                step={1}
+                inputMode="numeric"
+                value={loaded.lock}
+                disabled={saving}
+                error={lockError ? LOCK_MINUTES_ERROR : undefined}
+                onChange={(e) => patch((prev) => ({ ...prev, lock: e.target.value }))}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={unlocking}
+                disabled={!canUnlock}
+                data-testid="unlock-button"
+                onClick={() => void doUnlock()}
+              >
+                解除锁定
+              </Button>
+            </div>
+
+            {unlockHint && (
+              <p data-testid="unlock-hint" className="mt-2 text-xs text-[var(--text-secondary)]">
+                {unlockHint}
+              </p>
+            )}
+          </Card>
+        </>
+      )}
+
+      {/* controls-rewards 卡在原处不动 */}
 ```
 
 > 该页的「保存」按钮是所有字段共用的（`save-controls`），所以改锁定值也是点同一个按钮——**不要**给第三块单独加一个保存按钮，否则会出现两个「保存」让家长猜哪个生效。

@@ -6,9 +6,12 @@ import { toast } from '@/components/base';
 import {
   ApiError,
   getParentControls,
+  getParentLearningSessions,
   getParentPointsSettings,
+  issueParentDeviceCommand,
   putParentControls,
   type ParentControls,
+  type ParentSessionItem,
   type PointsSettings,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
@@ -26,8 +29,23 @@ import { useParentStudentStore } from '@/store/parentStudentStore';
  * 7. **派生状态带 `studentId` 归属**：切孩子时旧值不许画到新孩子头上（顶栏切孩子不重挂载本页）。
  */
 
-const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15 };
+const CONTROLS: ParentControls = {
+  alertAwayMinutes: 5,
+  alertIdleMinutes: 15,
+  sessionLockMinutes: null,
+};
 const POINTS: PointsSettings = { pointsPerYuan: 20, rewardRedemptionEnabled: true };
+
+/** 进行中的一次学习会话（用来决定「解除锁定」按钮可否点）。 */
+const SESSION_RUNNING: ParentSessionItem = {
+  id: 7,
+  startedAt: '2026-09-23T01:00:00.000Z',
+  endedAt: null,
+  online: true,
+  lockMinutes: 60,
+  lockExpiresAt: '2026-09-23T02:00:00.000Z',
+  unlockedAt: null,
+};
 
 vi.mock('@/components/base', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/base')>();
@@ -42,12 +60,16 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentControls: vi.fn(),
     putParentControls: vi.fn(),
     getParentPointsSettings: vi.fn(),
+    getParentLearningSessions: vi.fn(),
+    issueParentDeviceCommand: vi.fn(),
   };
 });
 
 const getControlsMock = vi.mocked(getParentControls);
 const putControlsMock = vi.mocked(putParentControls);
 const getPointsSettingsMock = vi.mocked(getParentPointsSettings);
+const getSessionsMock = vi.mocked(getParentLearningSessions);
+const issueCommandMock = vi.mocked(issueParentDeviceCommand);
 const toastMock = vi.mocked(toast);
 
 function renderPage() {
@@ -62,13 +84,24 @@ beforeEach(() => {
   localStorage.clear();
   useParentStudentStore.setState({ studentId: 1 });
   getControlsMock.mockReset();
-  getControlsMock.mockResolvedValue(CONTROLS);
+  // 默认**设了锁**（60 分钟），单测「未设锁」的那条自己覆盖成 null
+  getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: 60 });
   putControlsMock.mockReset();
   putControlsMock.mockImplementation((_studentId, patch) =>
     Promise.resolve({ ...CONTROLS, ...patch }),
   );
   getPointsSettingsMock.mockReset();
   getPointsSettingsMock.mockResolvedValue(POINTS);
+  getSessionsMock.mockReset();
+  getSessionsMock.mockResolvedValue({ items: [SESSION_RUNNING], total: 1 });
+  issueCommandMock.mockReset();
+  issueCommandMock.mockResolvedValue({
+    id: 3,
+    command: 'unlock',
+    status: 'pending',
+    learningSessionId: 7,
+    createdAt: '2026-09-23T01:10:00.000Z',
+  });
   toastMock.mockReset();
 });
 
@@ -211,7 +244,11 @@ describe('ParentControlsPage：校验与保存', () => {
       target: { value: '10' },
     });
     // 服务端回读的值与提交的不同（模拟归一/并发改动）：本地必须用响应体，不自己拼
-    putControlsMock.mockResolvedValueOnce({ alertAwayMinutes: 20, alertIdleMinutes: 40 });
+    putControlsMock.mockResolvedValueOnce({
+      alertAwayMinutes: 20,
+      alertIdleMinutes: 40,
+      sessionLockMinutes: null,
+    });
 
     fireEvent.click(screen.getByTestId('save-controls'));
 
@@ -294,5 +331,110 @@ describe('ParentControlsPage：多孩归属', () => {
     expect(screen.getByTestId('controls-skeleton')).toBeInTheDocument();
     expect(screen.queryByTestId('controls-away-input')).not.toBeInTheDocument();
     expect(getControlsMock).toHaveBeenCalledWith(2);
+  });
+});
+
+describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
+  it('渲染接口值；未设锁时输入框为空、显示「当前：未设锁」', async () => {
+    // 覆盖 beforeEach 的「已设锁 60」默认值 —— 本条要测的就是未设锁的渲染
+    getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: null });
+    renderPage();
+
+    expect(await screen.findByTestId('lock-minutes-input')).toHaveValue(null);
+    expect(screen.getByTestId('lock-status')).toHaveTextContent('未设锁');
+  });
+
+  it('已设锁时回显分钟数', async () => {
+    getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: 90 });
+    renderPage();
+
+    expect(await screen.findByTestId('lock-minutes-input')).toHaveValue(90);
+    expect(screen.getByTestId('lock-status')).toHaveTextContent('90 分钟');
+  });
+
+  it('越界（481）→ 行内报错 + 保存禁用 + **不发请求**', async () => {
+    renderPage();
+    const input = await screen.findByTestId('lock-minutes-input');
+    fireEvent.change(input, { target: { value: '481' } });
+
+    expect(screen.getByText('请填 1–480 的整数')).toBeInTheDocument();
+    expect(screen.getByTestId('save-controls')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('save-controls'));
+    expect(putControlsMock).not.toHaveBeenCalled();
+  });
+
+  it('清空输入框 = 解除设置，保存时发 **null**（不是省略该字段）', async () => {
+    renderPage();
+    const input = await screen.findByTestId('lock-minutes-input');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('save-controls'));
+
+    await waitFor(() =>
+      expect(putControlsMock).toHaveBeenCalledWith(1, { sessionLockMinutes: null }),
+    );
+  });
+
+  it('**只发改动过的字段**：改锁定时长不会把预警阈值一起带上', async () => {
+    renderPage();
+    const input = await screen.findByTestId('lock-minutes-input');
+    fireEvent.change(input, { target: { value: '120' } });
+    fireEvent.click(screen.getByTestId('save-controls'));
+
+    await waitFor(() => expect(putControlsMock).toHaveBeenCalledWith(1, { sessionLockMinutes: 120 }));
+  });
+
+  it('保存成功回显服务端值', async () => {
+    putControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: 120 });
+    renderPage();
+    const input = await screen.findByTestId('lock-minutes-input');
+    fireEvent.change(input, { target: { value: '120' } });
+    fireEvent.click(screen.getByTestId('save-controls'));
+
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenCalledWith('success', expect.stringContaining('120')),
+    );
+  });
+
+  it('有进行中的会话 → 解除按钮可点，点击后下发 unlock', async () => {
+    renderPage();
+    const button = await screen.findByTestId('unlock-button');
+    expect(button).not.toBeDisabled();
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(issueCommandMock).toHaveBeenCalledWith(1, 'unlock'));
+  });
+
+  it('**没有**进行中的会话 → 解除按钮禁用并说明原因（不硬发请求）', async () => {
+    getSessionsMock.mockResolvedValue({ items: [], total: 0 });
+    renderPage();
+
+    const button = await screen.findByTestId('unlock-button');
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(screen.getByTestId('unlock-hint')).toHaveTextContent('当前没有进行中的学习');
+    fireEvent.click(button);
+    expect(issueCommandMock).not.toHaveBeenCalled();
+  });
+
+  it('会话列表加载失败 → 解除按钮**保持可点**（交给服务端判 409），不把家长卡死', async () => {
+    getSessionsMock.mockRejectedValue(new ApiError(500, 'boom'));
+    renderPage();
+    expect(await screen.findByTestId('unlock-button')).not.toBeDisabled();
+  });
+
+  it('切孩子时锁定值不许串台（派生状态带 studentId 归属）', async () => {
+    getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: 90 });
+    const { rerender } = renderPage();
+    expect(await screen.findByTestId('lock-minutes-input')).toHaveValue(90);
+
+    getControlsMock.mockResolvedValue({ ...CONTROLS, sessionLockMinutes: 30 });
+    act(() => useParentStudentStore.setState({ studentId: 2 }));
+    rerender(
+      <MemoryRouter>
+        <ParentControlsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('lock-minutes-input')).toHaveValue(30));
   });
 });

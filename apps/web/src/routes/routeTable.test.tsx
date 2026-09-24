@@ -102,7 +102,11 @@ const getWeakPointsMock = vi.mocked(getWeakPoints);
 const getMyPointRulesMock = vi.mocked(getMyPointRules);
 
 /** P6.6：与后端默认档一致（切走 5 / 无操作 15），恰好等于「标准」预设。 */
-const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15 };
+const CONTROLS: ParentControls = {
+  alertAwayMinutes: 5,
+  alertIdleMinutes: 15,
+  sessionLockMinutes: null,
+};
 /** P6.6 兑换卡片的只读数据源（另一条端点，故意不与 controls 同源）。 */
 const POINTS_SETTINGS: PointsSettings = { pointsPerYuan: 20, rewardRedemptionEnabled: true };
 /** P6.10：账号信息（只读）。 */

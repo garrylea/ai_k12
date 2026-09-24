@@ -2450,6 +2450,12 @@ export interface ParentControls {
   alertAwayMinutes: number;
   /** 孩子前台无操作连续多少分钟算「走神」（1..180，默认 15）。 */
   alertIdleMinutes: number;
+  /**
+   * 单次学习锁定分钟数（1..480）。`null` = 未设锁。
+   * 语义是**学生登录起算的墙钟窗口**，不是每日累计（旧 `daily_time_limit_minutes`
+   * 已于 2026-09-23 改名废除此语义）。
+   */
+  sessionLockMinutes: number | null;
 }
 
 export function getParentControls(studentId: number): Promise<ParentControls> {
@@ -2467,6 +2473,52 @@ export function putParentControls(
   return fetchApi<ParentControls>(`/parent/students/${studentId}/controls`, {
     method: 'PUT',
     body: JSON.stringify(patch),
+  });
+}
+
+// --- Parent: PC App 学习管控（spec §5.4/§5.5）---
+
+/** 家长端「进出时间」的一行。`online` 由后端算好下发，**前端不重算阈值**。 */
+export interface ParentSessionItem {
+  id: number;
+  startedAt: string;
+  /** `null` = 仍在进行中。 */
+  endedAt: string | null;
+  online: boolean;
+  lockMinutes: number | null;
+  lockExpiresAt: string | null;
+  unlockedAt: string | null;
+}
+
+export interface ParentSessionPage {
+  items: ParentSessionItem[];
+  total: number;
+}
+
+/** 孩子每次进入/退出 PC App 的记录（近 `days` 天，倒序）。 */
+export function getParentLearningSessions(
+  studentId: number,
+  days = 7,
+  limit = 50,
+): Promise<ParentSessionPage> {
+  return fetchApi<ParentSessionPage>(
+    `/parent/students/${studentId}/learning-sessions?days=${days}&limit=${limit}`,
+  );
+}
+
+/**
+ * 下发设备命令。本期只有 `'unlock'`。
+ *
+ * 服务端在**没有进行中会话时返回 409/1001**，所以调用方要么先确认有进行中的会话
+ * （`getParentLearningSessions` 的 `items[0].endedAt === null`），要么把 409 的 message 展示出来。
+ */
+export function issueParentDeviceCommand(
+  studentId: number,
+  command: 'unlock',
+): Promise<{ id: number; command: string; status: 'pending'; learningSessionId: number; createdAt: string }> {
+  return fetchApi(`/parent/students/${studentId}/device-commands`, {
+    method: 'POST',
+    body: JSON.stringify({ command }),
   });
 }
 
