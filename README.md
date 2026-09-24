@@ -21,7 +21,7 @@ The goal is to move away from "blanket teaching" towards "precision learning" by
 
 ## Project Structure
 - `apps/web`: React-based web application.
-- `apps/desktop`: Electron-based desktop application.
+- `apps/desktop`: Electron shell for PC App (dev mode; loads the **same UI as Web**). 见 [PC App 学习管控设计](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
 - `apps/server`: Node.js backend API (NestJS + ai-core AI Agent Hub).
 - `tools/crawler`: Python-based data crawling and processing service.
 - `packages/`: Shared configurations and types.
@@ -48,6 +48,21 @@ bash tools/services.sh log server  # 跟踪 server 日志（log web 同理）
 ```
 
 PID/日志与 deploy.sh 共用 `tools/deploy/runtime/`；由 deploy.sh 启动的服务也可用本脚本停止/重启。
+
+### PC App (`apps/desktop`，Electron 壳)
+
+本地开发需要**三个进程**（壳加载的是 Web 的页面，不另起一套 UI）：
+
+```bash
+cd apps/server && npm run build && node dist/main.js   # 1) 后端 :3001（必须用 dist：npx tsx 的 DI 是坏的）
+cd apps/web    && npm run dev                          # 2) 前端 :5173
+cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm install 会下载 Electron 二进制，约 100MB+，较慢）
+# 壳默认加载 http://localhost:5173；换地址用 K12_WEB_URL=… npm start
+```
+
+> 学生登录即进真全屏 kiosk（锁定期间关不掉窗口）；家长/管理员登录是普通窗口。
+> ⚠️ Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
+> 真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）。见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
 
 ### Web 端 (`apps/web`)
 
@@ -119,4 +134,4 @@ cd apps/web && npm run dev                     # http://localhost:5173
 2. Design Hierarchical Knowledge Data Model
 3. Build Node.js Knowledge API
 4. Build React Knowledge Navigation & Display UI
-5. Electron Desktop Integration
+5. Electron Desktop Integration → **已落地（dev 模式，2026-09-23）**：`apps/desktop` 壳 + kiosk 单次学习锁定，见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)（安装包/签名/自动更新仍非目标）

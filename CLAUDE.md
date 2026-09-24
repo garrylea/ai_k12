@@ -79,7 +79,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 2. **以 API 设计文档为主稿**：端点清单（§4）与数据流（§5）定义业务语义；openapi.yaml 是其机器可读实现。
 3. **阶段标记**：openapi.yaml 只收 MVP 端点；P1/P2 在 API 文档里标阶段，进入开发时再补入。
 4. **检查清单**：每次 API 变更后核对两文档的端点路径列表，确认无遗漏。
-5. 注意 **Nest 的 `@Post` 默认返回 201 而非 200**（本仓无端点用 `@HttpCode` 覆盖）——新端点按实际记 `'201'`，以 `2xx` 判断成功。
+5. 注意 **Nest 的 `@Post` 默认返回 201 而非 200**：新端点按实际记 `'201'`，以 `2xx` 判断成功。本仓**唯一**的 `@HttpCode` 覆盖是 `POST /api/student/learning-sessions`（幂等「取或建」，显式 **200**，见「PC App 学习管控」节）。
 
 ## 工程约定（血泪教训，勿重蹈）
 
@@ -125,7 +125,19 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **闲聊判定 = 模型自报标记 `<!--topic:off-->`（独占回复最后一个非空行），无标记 = 不报警**（宁漏勿误报）—— 关键词正则已被否掉（实测 6/12 条正常题误判），其 `off_topic` 硬阻断已删除（情绪/敏感的阻断保留）。服务端在 `parseContent` 剥离（**只认末行、对独占一行的标记全局替换**，容忍 CRLF），标记永不进学生可见内容与历史。
 - **⚠️ `ai_messages.safety_flag` 是双来源**（模型自报闲聊 ∪ `type='block'`，后者现在只剩情绪/敏感）：取值必须 `Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))` —— **外层 `Number(...)` 必需**（`??` 会把 `boolean` 原样返回，列是 INT；`tsc` 因 `RowDataPacket` 索引签名 + `Omit` 抹平**不报错**）。家长端文案是「偏离学习 N」。
 - **走神预警**：① idle 阈值是**字面语义**（从最后一次操作起算）；`CLIENT_IDLE_DETECTION_SECONDS = 120` 镜像前端 `IDLE_TIMEOUT_MS`，**改一处必须同步另一处**。② 判定时机是**心跳、`end`、`closeStale` 三处**（`closeStale` 补判覆盖「后台 tab 冻结 / `end` 丢失 → 心跳全断」的盲区；崩溃/断电仍不判）。③ 家长端 Banner = `AlertBanner`（`ParentLayout` 顶部、30s 轮询 `GET /parent/alerts/unread`、**点击即已读**、**全部孩子含 info 级**）。`study_sessions.hidden_*` 四列**不参与**学习时长口径；**`UPDATE ... SET` 列顺序承重**。
-- **P6.6 只做「预警灵敏度 + 奖励兑换只读」**：每日时长 / 禁用时段 / 辅线开关 / 拍照开关**不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）；`controls` 端点**只含两个阈值**，兑换字段归 `points/settings`（同一字段不做两个归属）。口径见 API 文档 §5.28。
+- **P6.6 + PC App 学习管控**：`controls` 端点含**三个**字段 —— 两个预警阈值 + `session_lock_minutes`（单次学习锁定）。⚠️ 兑换字段仍归 `points/settings`（**同一字段不做两个归属**）。**禁用时段 / 辅线开关 / 拍照开关仍不做、页面上也不出现**（`controls` 表那几列保留待用，`alert_level` 已不被读取）；「每日累计使用时长」概念已于 2026-09-23 **废除**，被「单次学习锁定」取代（见「PC App 学习管控」节）。口径见 API 文档 §4.13/§4.25/§5.28。
+
+## PC App 学习管控（2026-09-23）
+
+`apps/desktop`（Electron 壳，**dev 模式**；本期不出安装包）+ 「单次学习锁定」。设计见 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`；契约见 API 文档 §4.25/§5.30。
+
+- **布局：PC App 与 Web 完全相同，不做三栏**（推翻 UX/架构的 P1「三栏」承诺）。角色驱动：学生 → kiosk、`parent`/`admin` → 普通窗口；角色闸门放**路由 effect**（登录/登出是客户端导航、不刷新页面）。
+- **禁退三处缺一即逃逸口**：① `LogoutButton` 自判（**`aria-disabled` 而非原生 `disabled`** —— 原生禁用不触发 click、toast 弹不出来；**不许改 `aria-label`**，4 个测试靠它断言）；② 壳拦 `close`/`before-quit`/`minimize`；③ 壳拦外链与跨源导航。
+- **`learning_sessions` 的「一个学生同时只有一个进行中」由 DB 条件式 VIRTUAL 生成列 + 唯一键保证**（「重启不重置时钟」的基础）：**必须 VIRTUAL 不能 STORED**（STORED 重建整表被外键 1215 挡住）；**验证生成列必须用真表**，临时表得假阳性。
+- **`LEARNING_SESSION_POLL_MS = 10_000` ↔ `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 是镜像**，改一处必须同步另一处；`online` **后端算好下发**，前端不重算。
+- **拔网线不解锁**（有意的严格性）：失败**绝不清锁**，本地截止时间是唯一判据。`session_lock_minutes` 是**单次登录起算的墙钟窗口**（1..480，`NULL` = 未设锁），**不是**已废除的每日累计；它是**开始时快照**，家长事后改设置不影响本次。
+- **家长下发命令的主防线 = 「没有进行中会话就 409/1001、不写命令」**；惰性过期只是兜底。命令认领与 `unlocked_at` 落库**必须同一事务**。
+- **做不到的别当缺陷修**：拦不住 `Alt+Tab`/`Cmd+Tab`/`Ctrl+Alt+Del`/强制退出；**不区分异常退出**；真·无法切屏靠 OS 级单应用模式（运维）。**非目标**：安装包/自动更新/签名、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
 
 ## 数学薄弱点图谱（2026-09-23）
 

@@ -8,7 +8,48 @@
 
 ---
 
-## 2026-09-24 PC App 学习管控（后端数据层与管控读写）— Task 1–5
+## 2026-09-24 PC App 学习管控（计划 2 / 3：学生端锁定 + Electron 壳 + 家长端 UI + 文档）
+
+计划 2 `…-2-client-lock-and-shell.md`、计划 3 `…-3-parent-ui-and-docs.md` 的代码与文档部分。
+**⚠️ 人工冒烟（计划 2 Task 8 的 14 条 + 计划 3 Task 3）尚未执行**，需 GUI，留待用户本机。
+
+- 产出：`apps/web/src/kiosk/`（`learningLock.ts` 纯逻辑 / `desktopBridge.ts` 桥 / `LearningSessionShell.tsx` 状态机 / `LockedPill.tsx`）+
+  `apps/desktop/`（`main.js` / `preload.js`，**electron 44.4.5**）+ `LogoutButton` 锁定中拒绝登出 +
+  `/parent/controls` 第三块「单次学习锁定」+ 仪表盘「学习时段」卡 + 7 份设计文档与 API 文档同步。
+- **已做的启动预检（非交互部分）**：`npx electron .` 起得来、页面从 :5173 正常加载（vite HMR 连上）、
+  **无 preload 加载失败、无运行时报错**；4 个 kiosk 模块在 vite dev 下均编译通过。
+- **踩坑（按价值排序）**：
+  1. **`npm install electron` 不会下二进制**（postinstall 未跑），首次 `npx electron --version` 才现场下载
+     —— 实测耗 **21 分钟**。别误判成卡死；国内网络慢可 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`。
+  2. **后端收缩响应字段时漏改前端消费者 → 用户可见的假数据**。计划 1 删掉 `today-usage` 的
+     `limitMinutes`/`exceeded` 后，web 的类型仍声明它们、仪表盘照旧渲染，运行时字段是 `undefined`、
+     `undefined === null` 为 false → 页面显示「**每日上限 undefined 分钟**」。**TypeScript 抓不到，因为类型本身也错了**
+     —— 收缩响应字段时，`grep` 一遍前端对旧字段的引用。
+  3. **状态推送只允许有一个出口**。`LearningSessionShell` 初稿在「角色闸门」里直接 `setDesktopLocked(false)`，
+     同时另一个 effect 也推当前值 → 挂载瞬间发两次（家长路径 `[false,false]`、新生登录 `[false,true]`），
+     即**先退出 kiosk 再进回去**。改为「判定完成（`resolved`）后由**唯一**出口推」。
+  4. **`vi.restoreAllMocks()` 会抹掉 `vi.mock` 工厂里设的 `mockResolvedValue`**（工厂只跑一次、模块被缓存）
+     → 「成功登出要发 API」的用例里 `endStudentLearningSession` 返回 `undefined`，`.catch` 抛错、登出被自己的收尾打断。
+     解法：在 `beforeEach` 重新武装 mock（Task 3 的测试一直是这么写的）。
+  5. **三态语义别用布尔压**：`canUnlock` 初稿 `sessionsKnown && !unlocking` 写不出测试要的两条**相反**行为
+     ——「查到没有进行中会话」→ 禁用、「查失败」→ 保持可点（交给服务端判 409）。两者都表现为「没有 openId」，
+     必须用 `null`（未知）表达第三态。
+  6. **JSX 里的 Markdown 语法会原样显示**：计划给的文案写成 `**不能退出登录**`，落到 JSX 就是给家长看星号。
+  7. **测试要按真实机制驱动**：仪表盘切孩子是**页面本地 `activeId`**（Tab 按钮）驱动的，`useParentStudentStore.setState`
+     切不动它 —— 初稿照 store 写、断言永远失败。
+  8. **新增必填字段会打断所有字面量**：`ParentControls` 加 `sessionLockMinutes` 后，除计划点名的那处外，
+     `parent-points.controller.test.ts` 与 `routes/routeTable.test.tsx` 也会 `tsc` TS2741（计划都没提）。
+- **复核手段**：`docs/` 里「三栏承诺」与「每日上限」的清理**用 grep 复核而非眼睛** —— 顺带发现
+  `openapi.yaml` 的 `today-usage` **路径级 description** 仍在讲已删掉的 `limitMinutes`/`exceeded`
+  （计划 1 Task 10 只改了 schema、漏了这段）。注意 grep 要**限定活文档**：历史 plans/specs、changelog 旧条目、
+  `apps/server/dist/**` 属「保留原文不回改」，全量 grep 会把它们误报成漏改。
+- **遗留**：① 人工冒烟未跑（两个计划的 GUI 验收项）；② **`CLAUDE.md` 现 26.2KB，超出其 ~15KB 体量纪律**
+  （属既有超支，非本批引入；本次新增的「PC App 学习管控」节已压到 2.1KB）。若要瘦身，需单独一批
+  按节搬迁（最大三节：ai-core 4.2KB / 家长端 3.6KB / 工程约定 3.4KB）。
+
+---
+
+## 2026-09-24 PC App 学习管控（后端数据层与管控读写）— 计划 1 Task 1–5
 
 实施计划 `docs/superpowers/plans/2026-09-23-pc-app-lockdown-1-backend.md`（spec `…-study-lockdown-design.md`）的 Task 1–5。
 迁移 `tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql` 已 apply 到本机 `ai_k12`。
