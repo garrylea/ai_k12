@@ -8,6 +8,25 @@
 
 ---
 
+## 2026-09-24 PC App 学习管控（用户实测报回的第一个真 bug：**未设锁时学生完全不被全屏**）
+
+**现象**（用户原话）：「登录之后屏幕没有将整个屏幕占领呀，这样学生可以随便切到其它应用呀」。
+
+**根因（两条独立证据坐实）**：① 库里的会话行 `lock_minutes/lock_expires_at` 均为 **NULL**；
+② spec 自相矛盾 —— §6.1（`:290`）把 `setLocked(false)` 定义为 `setKiosk(false)`，而 §6.2 状态表与 §3 裁决 2
+说的是「**角色驱动** kiosk：`UNLOCKED`（学生 + 无锁）**也是 kiosk 全屏**」。我照 §6.1 字面把
+「kiosk」和「锁定窗口是否生效」**绑成了一个布尔** ⇒ 家长没设时长（或到期/被解除）时整个退出全屏。
+
+**修法**（先改 spec 再改代码）：拆成两个独立信号 —— `setStudentMode(role==='student' && inShell)` 驱动 kiosk（含 closable/拦关闭/失焦抢回），
+`locked` 只驱动「禁止登出」与 pill。IPC 正名为 `kiosk:set-student-mode`，桥 `setLocked` → `setStudentMode`
+（名字不该撒谎）。spec §6.1/§6.2 已改写并注明「两件事勿再合并」，plan 2 的 Global Constraints 与代码块同步。
+
+**顺带**：`preload.js` **只在窗口创建时加载** —— 改它的接口名**必须重启壳**（热更新救不了）；渲染层的桥调用加了
+`?.` 防护，避免老壳 + 新渲染层把整个组件打崩。测试补了回归钉子：**未设锁时仍须 `setStudentMode(true)`**，
+并把「到期/被解除后仍留在 kiosk」也钉住（原来那两条断言正好把 bug 当成期望值写死了）。
+
+---
+
 ## 2026-09-24 PC App 学习管控（计划 2 / 3：学生端锁定 + Electron 壳 + 家长端 UI + 文档）
 
 计划 2 `…-2-client-lock-and-shell.md`、计划 3 `…-3-parent-ui-and-docs.md` 的代码与文档部分。

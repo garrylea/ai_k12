@@ -15,8 +15,15 @@ const path = require('node:path');
  * 属运维配置，不是代码（spec §8 局限 1）。
  */
 
-/** 锁定态由渲染层上报。false = 家长/管理员在用，或学生未被锁定 → 窗口应像普通应用一样可用。 */
-let locked = false;
+/**
+ * **学生模式**由渲染层上报：true = 当前登录者是学生且在壳里 → 进 kiosk。
+ *
+ * ⚠️ 它**不是**「锁定窗口生效」的意思（2026-09-24 修正）：kiosk 只由**角色**决定，
+ * 家长设的时长只决定「能不能登出」（渲染层 `LogoutButton` 自判）。初稿把两者合成一个布尔，
+ * 后果是「家长没设时长 → 学生登录后完全不被全屏、可随便切到其它应用」。
+ * `false` = 家长/管理员在用，或学生已登出 → 窗口应像普通应用一样可用。
+ */
+let studentMode = false;
 let win = null;
 
 /**
@@ -59,18 +66,18 @@ function createWindow() {
     if (!isSameOrigin(url)) event.preventDefault();
   });
 
-  // 锁定期间关不掉 / 最小化不了。家长/管理员登录时 locked=false，窗口完全正常。
+  // 学生模式下关不掉 / 最小化不了（kiosk 就该是这样）。家长/管理员登录时 studentMode=false，窗口完全正常。
   win.on('close', (event) => {
-    if (locked) event.preventDefault();
+    if (studentMode) event.preventDefault();
   });
   win.on('minimize', (event) => {
-    if (locked) event.preventDefault();
+    if (studentMode) event.preventDefault();
   });
 
   // 失焦抢回：**尽力而为**。刻意**不加** setAlwaysOnTop——那会盖住 UAC / 系统安全对话框，
   // 风险大于收益。macOS 上后台抢占受 OS 限制，抢不回来是已知限制（spec §8 局限 1）。
   win.on('blur', () => {
-    if (locked && win && !win.isDestroyed()) win.focus();
+    if (studentMode && win && !win.isDestroyed()) win.focus();
   });
 
   win.on('closed', () => {
@@ -80,7 +87,7 @@ function createWindow() {
 
 // 拦 before-quit：否则 Cmd+Q / Alt+F4 能绕过上面那个 close 拦截。
 app.on('before-quit', (event) => {
-  if (locked) event.preventDefault();
+  if (studentMode) event.preventDefault();
 });
 
 app.whenReady().then(() => {
@@ -94,12 +101,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// 渲染层 → 主进程：锁定开关。`setKiosk` 是真全屏 + 锁定（比 fullscreen 更彻底）。
-ipcMain.on('kiosk:set-locked', (_event, next) => {
-  locked = Boolean(next);
+// 渲染层 → 主进程：学生模式开关。`setKiosk` 是真全屏 + 锁定（比 fullscreen 更彻底）。
+ipcMain.on('kiosk:set-student-mode', (_event, on) => {
+  studentMode = Boolean(on);
   if (!win || win.isDestroyed()) return;
-  win.setKiosk(locked);
-  win.setClosable(!locked);
+  win.setKiosk(studentMode);
+  win.setClosable(!studentMode);
   // setMinimizable 在 macOS 上是 no-op；Windows/Linux 上有效。不是错误，别加平台分支。
-  win.setMinimizable(!locked);
+  win.setMinimizable(!studentMode);
 });

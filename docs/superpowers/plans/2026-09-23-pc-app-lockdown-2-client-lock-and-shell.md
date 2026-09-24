@@ -17,6 +17,11 @@
 - **不改 `LogoutButton` 的 `aria-label`/`title` 默认值**：4 个现有测试用 `getByLabelText('退出登录')` / `getByRole('button', { name: '退出登录' })` 断言存在，改了会连带打破它们。
 - **不要给 `LogoutButton` 加原生 `disabled`**：原生禁用按钮**不触发 click**，解释用的 toast 就永远弹不出来。用 `aria-disabled` + 在 handler 里拒绝。
 - **`LEARNING_SESSION_POLL_MS = 10_000` 与服务端 `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 成对**，改一处必须同步另一处（镜像纪律）。
+- **⚠️ kiosk 由「角色」决定，与「是否设了时长」无关**（2026-09-24 修正）：学生 + 在壳里 → `setDesktopStudentMode(true)`（真全屏）；
+  家长/管理员 → `false`。家长设的 `session_lock_minutes` **只决定「能不能登出」**（`LogoutButton` 自判）与**要不要显示 pill**。
+  **这两件事必须分开，勿再合并成一个布尔** —— 初稿用「锁定窗口是否生效」同时驱动 kiosk，后果是
+  **家长没设时长时学生登录后完全不被全屏、可随便切到其它应用**（用户实测报回）。spec §3 裁决 2 与 §6.2 的
+  `UNLOCKED → kiosk 全屏` 都要求 kiosk 跟着角色走。**改了 `preload.js` 的接口名必须重启壳**（preload 只在窗口创建时加载）。
 - **拔网线不解锁**：本地持久化的截止时间是唯一判据，轮询失败**不得**清锁。
 - **`services/api.ts` 是唯一 API 层**，不新开 fetch 封装。
 
@@ -419,9 +424,9 @@ git commit -m "feat(kiosk): 锁定判定的纯逻辑 + 常量（含跨学生隔�
 **Interfaces:**
 - Consumes: `readPersistedSession` / `clearPersistedSession` / `LEARNING_SESSION_STORAGE_KEY`（Task 2）、`endStudentLearningSession`（Task 1）
 - Produces:
-  - `export interface K12DesktopBridge { setLocked: (locked: boolean) => void; isDesktop: true }`
+  - `export interface K12DesktopBridge { setStudentMode: (locked: boolean) => void; isDesktop: true }`
   - `export function isDesktopShell(): boolean`
-  - `export function setDesktopLocked(locked: boolean): void`
+  - `export function setDesktopStudentMode(locked: boolean): void`
   - `export function releaseOnLogout(): void`
 
 - [ ] **Step 1: 写失败的测试**
@@ -445,7 +450,7 @@ function installBridge() {
   const calls: boolean[] = [];
   (window as unknown as { k12Desktop?: unknown }).k12Desktop = {
     isDesktop: true,
-    setLocked: (locked: boolean) => calls.push(locked),
+    setStudentMode: (locked: boolean) => calls.push(locked),
   };
   return calls;
 }
@@ -462,23 +467,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('isDesktopShell / setDesktopLocked', () => {
+describe('isDesktopShell / setDesktopStudentMode', () => {
   it('没有桥（浏览器）→ isDesktopShell() 为 false', async () => {
     const { isDesktopShell } = await import('./desktopBridge');
     expect(isDesktopShell()).toBe(false);
   });
 
-  it('setDesktopLocked 把布尔值原样送到桥', async () => {
+  it('setDesktopStudentMode 把布尔值原样送到桥', async () => {
     const calls = installBridge();
-    const { setDesktopLocked } = await import('./desktopBridge');
-    setDesktopLocked(true);
-    setDesktopLocked(false);
+    const { setDesktopStudentMode } = await import('./desktopBridge');
+    setDesktopStudentMode(true);
+    setDesktopStudentMode(false);
     expect(calls).toEqual([true, false]);
   });
 
-  it('没有桥时 setDesktopLocked **不抛错**（浏览器里也是正常路径）', async () => {
-    const { setDesktopLocked } = await import('./desktopBridge');
-    expect(() => setDesktopLocked(true)).not.toThrow();
+  it('没有桥时 setDesktopStudentMode **不抛错**（浏览器里也是正常路径）', async () => {
+    const { setDesktopStudentMode } = await import('./desktopBridge');
+    expect(() => setDesktopStudentMode(true)).not.toThrow();
   });
 });
 
@@ -538,7 +543,7 @@ import { clearPersistedSession, readPersistedSession } from './learningLock';
 /** preload 经 `contextBridge` 暴露的接口（见 `apps/desktop/preload.js`）。 */
 export interface K12DesktopBridge {
   /** 驱动主进程进/出 kiosk。渲染层是唯一发起方。 */
-  setLocked: (locked: boolean) => void;
+  setStudentMode: (locked: boolean) => void;
   isDesktop: true;
 }
 
@@ -560,8 +565,8 @@ export function isDesktopShell(): boolean {
 }
 
 /** 把锁定态同步给主进程。没有桥时是**静默 no-op**（浏览器里也是正常路径，不是异常）。 */
-export function setDesktopLocked(locked: boolean): void {
-  window.k12Desktop?.setLocked(locked);
+export function setDesktopStudentMode(locked: boolean): void {
+  window.k12Desktop?.setStudentMode(locked);
 }
 
 /**
@@ -584,7 +589,7 @@ export function releaseOnLogout(): void {
     });
   }
   clearPersistedSession();
-  setDesktopLocked(false);
+  setDesktopStudentMode(false);
 }
 ```
 
@@ -736,7 +741,7 @@ function installBridge() {
   lockCalls = [];
   (window as unknown as { k12Desktop?: unknown }).k12Desktop = {
     isDesktop: true,
-    setLocked: (locked: boolean) => lockCalls.push(locked),
+    setStudentMode: (locked: boolean) => lockCalls.push(locked),
   };
 }
 
@@ -931,7 +936,7 @@ Expected: FAIL —— 组件不存在。
 
 > **实施时修正（2026-09-24，两处）**：
 > 1. **推送锁定态只留一个出口，并加 `resolved` 门**。初稿在 effect ① 里对「非学生角色」直接
->    `setDesktopLocked(false)`，同时 effect ② 也推当前 `locked` —— 于是挂载瞬间会发**两次**
+>    `setDesktopStudentMode(false)`，同时 effect ② 也推当前 `locked` —— 于是挂载瞬间会发**两次**
 >    （`[false, false]`），新生登录路径更是 `[false, true]`：先退出 kiosk 再进回去。
 >    这与本计划 Step 1 的测试（用精确数组断言 `[true]` / `[false]`）**自相矛盾**，
 >    且「先解锁再锁回」在真机上可能让 kiosk 闪一下普通窗口。改为：effect ① 只做判定并置
@@ -954,7 +959,7 @@ import {
   remainingMs,
   writePersistedSession,
 } from './learningLock';
-import { isDesktopShell, setDesktopLocked } from './desktopBridge';
+import { isDesktopShell, setDesktopStudentMode } from './desktopBridge';
 import { LockedPill } from './LockedPill';
 
 interface LockState {
@@ -1038,11 +1043,16 @@ export default function LearningSessionShell() {
 
   const locked = lock !== null && computeLocked(lock, nowMs);
 
-  // ② 锁定态 → Electron 主进程（**唯一出口**）。`resolved` 之前不推，避免先解锁再锁回去。
+  // ② **学生模式** → Electron 主进程（**唯一出口**）。`resolved` 之前不推，避免先退出再进 kiosk。
+  //
+  // ⚠️ 推的是「当前登录者是不是学生」，**不是** `locked`（2026-09-24 修正）：
+  // kiosk 由**角色**决定（spec §3 裁决 2、§6.2 的 `UNLOCKED` 也是 kiosk 全屏）；
+  // 家长设的时长只影响「能不能登出」（LogoutButton 自判）与 pill。两者合并过一次，
+  // 后果是「家长没设时长 → 学生登录后完全不被全屏、可随便切应用」——用户实测报回来的就是这个。
   useEffect(() => {
     if (!isDesktopShell() || !resolved) return;
-    setDesktopLocked(locked);
-  }, [locked, resolved]);
+    setDesktopStudentMode(isStudent);
+  }, [isStudent, resolved]);
 
   // ③ 轮询（兼心跳）。依赖**会话 id**（而非整个 lock）：换会话才换轮询，
   // 否则每次轮询 setLock 都会重建 interval。取出 `lockId` 是为了让依赖数组显式且无 warning。
@@ -1351,7 +1361,7 @@ export function LogoutButton({
   ...rest
 }: LogoutButtonProps) {
   const navigate = useNavigate();
-  const [locked, setLocked] = useState(() => isCurrentStudentLocked());
+  const [locked, setStudentMode] = useState(() => isCurrentStudentLocked());
 
   /**
    * 锁定态会随时间变化（到点自动解除），所以每秒对一次表——**只在锁定时起定时器**，
@@ -1360,14 +1370,14 @@ export function LogoutButton({
    */
   useEffect(() => {
     if (!locked) return;
-    const timer = window.setInterval(() => setLocked(isCurrentStudentLocked()), 1000);
+    const timer = window.setInterval(() => setStudentMode(isCurrentStudentLocked()), 1000);
     return () => window.clearInterval(timer);
   }, [locked]);
 
   const handleLogout = () => {
     // 再判一次，不只是信 state：距上次 tick 最多差 1 秒，而这里才是**真正的闸门**。
     if (isCurrentStudentLocked()) {
-      setLocked(true);
+      setStudentMode(true);
       toast('info', LOCKED_HINT);
       return;
     }
@@ -1465,7 +1475,7 @@ git commit -m "feat(logout): 锁定中拒绝登出（aria-disabled + toast 解�
 - Create: `apps/desktop/.gitignore`
 
 **Interfaces:**
-- Consumes: `window.k12Desktop.setLocked(boolean)` 契约（Task 3 的 `K12DesktopBridge`）
+- Consumes: `window.k12Desktop.setStudentMode(boolean)` 契约（Task 3 的 `K12DesktopBridge`）
 - Produces: 可 `npm start` 运行的 dev 壳
 
 - [ ] **Step 1: 建 `package.json` 并装 Electron**
@@ -1500,14 +1510,14 @@ const { contextBridge, ipcRenderer } = require('electron');
  * 渲染层与主进程之间**唯一**的通道（spec §6.1）。
  *
  * 只暴露两个东西，且都是单向/只读的：
- *   - `setLocked`：渲染层 → 主进程，驱动 kiosk 开关。渲染层是唯一发起方。
+ *   - `setStudentMode`：渲染层 → 主进程，驱动 kiosk 开关。渲染层是唯一发起方。
  *   - `isDesktop`：能力探测，渲染层据此决定是否启用整套锁定（浏览器里没有这个对象）。
  *
  * **不要**在这里加 `require`/`fs`/`ipcRenderer.invoke` 之类的口子：渲染层加载的是
  * 远端页面（云端时是公网），暴露 Node 能力等于把整台机器交出去。
  */
 contextBridge.exposeInMainWorld('k12Desktop', {
-  setLocked: (locked) => ipcRenderer.send('kiosk:set-locked', Boolean(locked)),
+  setStudentMode: (locked) => ipcRenderer.send('kiosk:set-student-mode', Boolean(locked)),
   isDesktop: true,
 });
 ```
@@ -1612,7 +1622,7 @@ app.on('window-all-closed', () => {
 });
 
 // 渲染层 → 主进程：锁定开关。`setKiosk` 是真全屏 + 锁定（比 fullscreen 更彻底）。
-ipcMain.on('kiosk:set-locked', (_event, next) => {
+ipcMain.on('kiosk:set-student-mode', (_event, next) => {
   locked = Boolean(next);
   if (!win || win.isDestroyed()) return;
   win.setKiosk(locked);

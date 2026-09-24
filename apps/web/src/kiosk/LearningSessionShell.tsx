@@ -11,7 +11,7 @@ import {
   remainingMs,
   writePersistedSession,
 } from './learningLock';
-import { isDesktopShell, setDesktopLocked } from './desktopBridge';
+import { isDesktopShell, setDesktopStudentMode } from './desktopBridge';
 import { LockedPill } from './LockedPill';
 
 interface LockState {
@@ -50,22 +50,26 @@ export default function LearningSessionShell() {
   /**
    * 「角色 + 会话是否已判定」。
    *
-   * **为什么需要它**：把锁定态推给主进程只允许有**一个出口**（下面的 effect ②）。若在判定
-   * 完成前就推当前值，挂载瞬间会对主进程发一次 `setLocked(false)`（那时 `lock` 还是 null），
-   * 紧接着会话建好又发 `setLocked(true)` —— 窗口会先退出 kiosk 再进回去，既是多余 IPC，
+   * **为什么需要它**：把学生模式推给主进程只允许有**一个出口**（下面的 effect ②）。若在判定
+   * 完成前就推当前值，挂载瞬间会对主进程发一次 `setStudentMode(false)`（那时还不知道角色），
+   * 紧接着判定完又发 `setStudentMode(true)` —— 窗口会先退出 kiosk 再进回去，既是多余 IPC，
    * 也可能让 kiosk 闪一下普通窗口。判定完成前**不猜**，等有结论再推一次。
    */
   const [resolved, setResolved] = useState(false);
+  /** 当前登录者是不是学生（判定完成后才为 true）。**kiosk 只由它决定**，与锁定窗口无关。 */
+  const [isStudent, setIsStudent] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // ① 角色闸门 + 建立会话。**只做判定，不直接推锁定态**（推的动作留给 effect ②）。
+  // ① 角色闸门 + 建立会话。**只做判定，不直接推学生模式**（推的动作留给 effect ②）。
   useEffect(() => {
     if (!isDesktopShell()) return;
     if (localStorage.getItem('userRole') !== 'student') {
       // 家长/管理员登入（或学生已登出）：壳必须回到普通窗口，否则家长也用不了这台机器。
+      setIsStudent(false);
       setResolved(true);
       return;
     }
+    setIsStudent(true);
     if (readPersistedSession() !== null) {
       setResolved(true); // 已有本地会话 → 交给轮询对账，不重复建
       return;
@@ -89,7 +93,8 @@ export default function LearningSessionShell() {
         setResolved(true);
       })
       .catch(() => {
-        // 建会话失败**不阻断学习**：退化为「未锁」。管控失效好过学生进不去。
+        // 建会话失败**不阻断学习**：退化为「未锁」，但**仍然是学生模式**（该全屏还是要全屏）。
+        // 管控失效好过学生进不去 / 好过学生能随便切应用。
         if (!cancelled) setResolved(true);
       });
     return () => {
@@ -99,11 +104,17 @@ export default function LearningSessionShell() {
 
   const locked = lock !== null && computeLocked(lock, nowMs);
 
-  // ② 锁定态 → Electron 主进程（**唯一出口**）。`resolved` 之前不推，避免先解锁再锁回去。
+  /**
+   * ② 学生模式 → Electron 主进程（**唯一出口**）。`resolved` 之前不推，避免先退出再进 kiosk。
+   *
+   * ⚠️ **推的是 `resolved && isStudent`，不是 `locked`**：kiosk 由**角色**决定（spec §3 裁决 2、
+   * §6.2 的 `UNLOCKED` 也是 kiosk 全屏）；家长设的时长只影响「能不能登出」与 pill。
+   * 两者合并过一次 → 家长没设时长时学生完全不被全屏、可随便切应用（2026-09-24 修）。
+   */
   useEffect(() => {
     if (!isDesktopShell() || !resolved) return;
-    setDesktopLocked(locked);
-  }, [locked, resolved]);
+    setDesktopStudentMode(isStudent);
+  }, [isStudent, resolved]);
 
   // ③ 轮询（兼心跳）。依赖**会话 id**（而非整个 lock）：换会话才换轮询，
   // 否则每次轮询 setLock 都会重建 interval。取出 `lockId` 是为了让依赖数组显式且无 warning。

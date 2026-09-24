@@ -14,7 +14,7 @@ function installBridge() {
   const calls: boolean[] = [];
   (window as unknown as { k12Desktop?: unknown }).k12Desktop = {
     isDesktop: true,
-    setLocked: (locked: boolean) => calls.push(locked),
+    setStudentMode: (on: boolean) => calls.push(on),
   };
   return calls;
 }
@@ -31,23 +31,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('isDesktopShell / setDesktopLocked', () => {
+describe('isDesktopShell / setDesktopStudentMode', () => {
   it('没有桥（浏览器）→ isDesktopShell() 为 false', async () => {
     const { isDesktopShell } = await import('./desktopBridge');
     expect(isDesktopShell()).toBe(false);
   });
 
-  it('setDesktopLocked 把布尔值原样送到桥', async () => {
+  it('setDesktopStudentMode 把布尔值原样送到桥', async () => {
     const calls = installBridge();
-    const { setDesktopLocked } = await import('./desktopBridge');
-    setDesktopLocked(true);
-    setDesktopLocked(false);
+    const { setDesktopStudentMode } = await import('./desktopBridge');
+    setDesktopStudentMode(true);
+    setDesktopStudentMode(false);
     expect(calls).toEqual([true, false]);
   });
 
-  it('没有桥时 setDesktopLocked **不抛错**（浏览器里也是正常路径）', async () => {
-    const { setDesktopLocked } = await import('./desktopBridge');
-    expect(() => setDesktopLocked(true)).not.toThrow();
+  it('没有桥时 setDesktopStudentMode **不抛错**（浏览器里也是正常路径）', async () => {
+    const { setDesktopStudentMode } = await import('./desktopBridge');
+    expect(() => setDesktopStudentMode(true)).not.toThrow();
   });
 });
 

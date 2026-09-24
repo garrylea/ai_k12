@@ -26,7 +26,7 @@ function installBridge() {
   lockCalls = [];
   (window as unknown as { k12Desktop?: unknown }).k12Desktop = {
     isDesktop: true,
-    setLocked: (locked: boolean) => lockCalls.push(locked),
+    setStudentMode: (on: boolean) => lockCalls.push(on),
   };
 }
 
@@ -68,7 +68,7 @@ afterEach(() => {
 });
 
 describe('LearningSessionShell：建立会话', () => {
-  it('学生 + 壳 → 调取或建，并把锁定态推给壳', async () => {
+  it('学生 + 壳 → 调取或建，并推**学生模式**给壳（进 kiosk）', async () => {
     renderShell();
     await act(async () => { await Promise.resolve(); });
 
@@ -78,7 +78,7 @@ describe('LearningSessionShell：建立会话', () => {
     expect(screen.getByText('学习页')).toBeInTheDocument();
   });
 
-  it('**非壳（浏览器）→ 完全不建会话、不锁**', async () => {
+  it('**非壳（浏览器）→ 完全不建会话、不推**', async () => {
     delete (window as unknown as { k12Desktop?: unknown }).k12Desktop;
     renderShell();
     await act(async () => { await Promise.resolve(); });
@@ -87,7 +87,7 @@ describe('LearningSessionShell：建立会话', () => {
     expect(lockCalls).toEqual([]);
   });
 
-  it('非学生角色（家长登录）→ 不建会话，且把壳解锁', async () => {
+  it('非学生角色（家长登录）→ 不建会话，且推 false（回普通窗口）', async () => {
     localStorage.setItem('userRole', 'parent');
     renderShell();
     await act(async () => { await Promise.resolve(); });
@@ -105,15 +105,15 @@ describe('LearningSessionShell：建立会话', () => {
     expect(lockCalls).toEqual([true]);
   });
 
-  it('建会话失败 → 保持未锁（不把学生挡在门外）', async () => {
+  it('建会话失败 → 不阻断学习，且**仍然进学生模式**（该全屏还是要全屏）', async () => {
     openMock.mockRejectedValue(new Error('boom'));
     renderShell();
     await act(async () => { await Promise.resolve(); });
 
-    expect(lockCalls).toEqual([false]);
+    expect(lockCalls).toEqual([true]);
   });
 
-  it('未设锁（lockExpiresAt=null）→ 建会话但**不锁**', async () => {
+  it('**未设锁（lockExpiresAt=null）→ 仍然是 kiosk 全屏**（回归钉子：kiosk 由角色决定，不由锁定窗口决定）', async () => {
     openMock.mockResolvedValue({
       id: 7,
       startedAt: '2026-09-23T01:00:00.000Z',
@@ -125,12 +125,14 @@ describe('LearningSessionShell：建立会话', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(readPersistedSession(9)).toMatchObject({ lockExpiresAt: null });
-    expect(lockCalls).toEqual([false]);
+    // 家长没设时长 ≠ 学生可以随便切应用：仍要进 kiosk（只是允许登出、不显示 pill）
+    expect(lockCalls).toEqual([true]);
+    expect(screen.queryByTestId('locked-pill')).not.toBeInTheDocument();
   });
 });
 
 describe('LearningSessionShell：轮询与解锁', () => {
-  it('轮询取到 unlock 命令 → 解锁并落 unlockedAt', async () => {
+  it('轮询取到 unlock 命令 → 解锁并落 unlockedAt（学生模式不变，仍 kiosk）', async () => {
     vi.useFakeTimers();
     pollMock.mockResolvedValue({
       commands: [{ id: 3, command: 'unlock' }],
@@ -141,7 +143,8 @@ describe('LearningSessionShell：轮询与解锁', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(pollMock).toHaveBeenCalled();
-    expect(lockCalls[lockCalls.length - 1]).toBe(false);
+    // 「解除锁定」只解除**禁止登出**，不退出 kiosk
+    expect(lockCalls[lockCalls.length - 1]).toBe(true);
     expect(readPersistedSession(9)?.unlockedAt).not.toBeNull();
   });
 
@@ -156,7 +159,7 @@ describe('LearningSessionShell：轮询与解锁', () => {
     expect(readPersistedSession(9)?.lockExpiresAt).toBe(LATER);
   });
 
-  it('到点自动解除（不必家长操作）', async () => {
+  it('到点自动解除（不必家长操作），但**仍留在 kiosk**', async () => {
     vi.useFakeTimers();
     const soon = new Date(Date.now() + 2_000).toISOString();
     openMock.mockResolvedValue({
@@ -172,7 +175,9 @@ describe('LearningSessionShell：轮询与解锁', () => {
 
     await act(async () => { vi.advanceTimersByTime(3_000); });
 
-    expect(lockCalls[lockCalls.length - 1]).toBe(false);
+    // 到期只解除「禁止登出」与 pill；kiosk 由角色决定，不该跟着退出
+    expect(lockCalls[lockCalls.length - 1]).toBe(true);
+    expect(screen.queryByTestId('locked-pill')).not.toBeInTheDocument();
   });
 
   it('锁定中渲染剩余时间 pill；解锁后消失', async () => {

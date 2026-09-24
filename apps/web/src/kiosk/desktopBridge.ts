@@ -3,8 +3,8 @@ import { clearPersistedSession, readPersistedSession } from './learningLock';
 
 /** preload 经 `contextBridge` 暴露的接口（见 `apps/desktop/preload.js`）。 */
 export interface K12DesktopBridge {
-  /** 驱动主进程进/出 kiosk。渲染层是唯一发起方。 */
-  setLocked: (locked: boolean) => void;
+  /** 驱动主进程进/出 kiosk。渲染层是唯一发起方。**语义是「学生模式」，与锁定窗口无关**。 */
+  setStudentMode: (on: boolean) => void;
   isDesktop: true;
 }
 
@@ -25,9 +25,18 @@ export function isDesktopShell(): boolean {
   return typeof window !== 'undefined' && Boolean(window.k12Desktop);
 }
 
-/** 把锁定态同步给主进程。没有桥时是**静默 no-op**（浏览器里也是正常路径，不是异常）。 */
-export function setDesktopLocked(locked: boolean): void {
-  window.k12Desktop?.setLocked(locked);
+/**
+ * 把**学生模式**同步给主进程（进/出 kiosk）。没有桥时是**静默 no-op**（浏览器里也是正常路径，不是异常）。
+ *
+ * ⚠️ **传的是「当前登录者是不是学生」，不是「锁定窗口是否生效」**（2026-09-24 修正）：
+ * 家长设的时长只决定**能不能登出**（`LogoutButton` 自判，见 spec §6.3）与要不要显示 pill。
+ * 两者合并过一次，后果是「家长没设时长 → 学生登录后完全不被全屏、可随便切应用」。
+ */
+export function setDesktopStudentMode(on: boolean): void {
+  // `?.` 是有意的：preload 只在**窗口创建时**加载，dev 期改了 `preload.js` 后老壳的桥还是旧接口。
+  // 这种情况下静默跳过好过抛 TypeError 把整个壳组件打崩（真机发布不存在这种不一致）。
+  // ⚠️ 改了 preload 的接口名**必须重启壳**（`npm start`），热更新救不了。
+  window.k12Desktop?.setStudentMode?.(on);
 }
 
 /**
@@ -50,5 +59,6 @@ export function releaseOnLogout(): void {
     });
   }
   clearPersistedSession();
-  setDesktopLocked(false);
+  // 学生已登出 → 退出 kiosk（用「学生模式」而非「是否仍锁定」：登出后必须让家长/管理员能用这台机器）
+  setDesktopStudentMode(false);
 }

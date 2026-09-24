@@ -287,8 +287,9 @@ CREATE TABLE IF NOT EXISTS device_commands (
   - 本期默认指向本地 vite dev（`:5173` **已在服务端 CORS 白名单内**，故本期零 CORS 改动）
   - `K12_WEB_URL` 即**云端接缝**（裁决 13）；云端接入所需的 CORS/HTTPS/持久化存储列为非目标（§2.8）
 - **窗口**：`contextIsolation: true` / `nodeIntegration: false` / `sandbox: true` + preload
-- **`k12Desktop.setLocked(true)` 时**：`win.setKiosk(true)`、`setClosable(false)`、`setMinimizable(false)`、`win.on('close', e => locked && e.preventDefault())`、`app.on('before-quit', e => locked && e.preventDefault())`
-- **`setLocked(false)`**：反向恢复（`setKiosk(false)`、恢复 closable/minimizable）
+- **`k12Desktop.setStudentMode(true)` 时**：`win.setKiosk(true)`、`setClosable(false)`、`setMinimizable(false)`、`win.on('close', e => studentMode && e.preventDefault())`、`app.on('before-quit', e => studentMode && e.preventDefault())`
+- **`setStudentMode(false)`**：反向恢复（`setKiosk(false)`、恢复 closable/minimizable）
+  - ⚠️ **这个名字与语义是 2026-09-24 修正的**：初稿把这个信号叫 `setLocked`，读起来像「锁定窗口生效时才 kiosk」——照字面实现会让**未设锁的学生完全不被全屏**（学生登录后仍能随便切应用），与 §3 裁决 2「**角色驱动** kiosk」和 §6.2 的 `UNLOCKED → kiosk 全屏` 直接冲突。**kiosk 只由「是不是学生角色 + 在不在壳里」决定**；家长设的时长只决定**能不能登出**（§6.3 的 `LogoutButton` 自判）与**要不要显示 pill**（§6.4）。两件事必须分开，**勿再合并成一个布尔**。
 - **封堵导航逃逸**：`webContents.setWindowOpenHandler(() => ({ action: 'deny' }))`；`will-navigate` 只放行同源 URL
   - 必须做：AI 回复的 markdown 会渲染 `target="_blank"` 外链（`AdminChatPage.tsx:136`、`AuxChatPanel.tsx:171`），不拦就是"大模型吐个链接 → 学生点进浏览器"
 - **失焦抢回**：`win.on('blur', () => { if (locked) win.focus() })`
@@ -304,9 +305,12 @@ CREATE TABLE IF NOT EXISTS device_commands (
 
 | 状态 | 进入条件 | 壳行为 | 登出 |
 |---|---|---|---|
-| `IDLE` | 非学生 或 非 Electron 环境 | 普通窗口 | 允许 |
-| `UNLOCKED` | 学生 + 无 `lockExpiresAt`（含已到期 / 已被家长解除） | kiosk 全屏 | 允许 |
-| `LOCKED` | 学生 + `lockExpiresAt > now` | kiosk 全屏 | **禁止** |
+| `IDLE` | 非学生 或 非 Electron 环境 | 普通窗口（`setStudentMode(false)`） | 允许 |
+| `UNLOCKED` | 学生 + 无 `lockExpiresAt`（含已到期 / 已被家长解除） | kiosk 全屏（`setStudentMode(true)`） | 允许 |
+| `LOCKED` | 学生 + `lockExpiresAt > now` | kiosk 全屏（`setStudentMode(true)`） | **禁止** |
+
+> **注意 `UNLOCKED` 与 `LOCKED` 的壳行为完全相同**（都是 kiosk 全屏）—— 两者只差「登出允许与否」+ 是否显示 pill。
+> 推给壳的信号是 **`setStudentMode(role === 'student' && inShell)`**，**不是**「锁定窗口是否生效」（2026-09-24 修正，见 §6.1）。
 
 - **转移**：
   - `onEnable` → `POST 5.1` 拿到 `lockExpiresAt` → `LOCKED` 或 `UNLOCKED`
