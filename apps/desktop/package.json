@@ -1,0 +1,13 @@
+{
+  "name": "k12-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "K12 智学 PC App（Electron 壳，dev 模式；本期不出安装包）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.4.5"
+  }
+}
