@@ -21,6 +21,14 @@ export interface InsertOpenInput {
   lockMinutes: number | null;
 }
 
+/** 命令在 pending 里最长存活多久（分钟）。超时即 `expired`，见 `pollAndConsume`。 */
+export const COMMAND_TTL_MINUTES = 10;
+
+export interface PollResult {
+  commands: Array<{ id: number; command: string }>;
+  openSession: LearningSessionRow | null;
+}
+
 const SELECT_COLUMNS =
   'id, student_id, app_shell, started_at, last_seen_at, ended_at, lock_minutes, lock_expires_at, unlocked_at, unlocked_by_parent_id';
 
@@ -134,5 +142,87 @@ export class LearningSessionsRepository {
        WHERE student_id = ? AND ended_at IS NULL`,
       [studentId],
     );
+  }
+
+  /**
+   * 学生端一次轮询的全部副作用（spec §5.3），**同一个事务**：
+   *   1. 惰性过期：把超时的 pending 命令置 expired；
+   *   2. 心跳：刷新进行中会话的 last_seen_at（轮询兼心跳，判「在线」的唯一依据）；
+   *   3. 取 pending 命令；
+   *   4. 认领（consumed）：`WHERE status='pending'` 让认领幂等；
+   *   5. `unlock` → 把进行中会话的 unlocked_at / unlocked_by_parent_id 落库。
+   *
+   * 为什么要事务：4 与 5 必须同生共死——认领了命令却没落 unlocked_at，家长端会显示
+   * 「已下发但没生效」，而学生端已经解锁了。
+   *
+   * 为什么惰性过期而不是定时任务：一条陈旧 unlock 会解锁**将来某次**锁定。过期只是兜底，
+   * 主防线是服务端「没有进行中会话就 409，不许下发」（spec §5.4）。
+   */
+  async pollAndConsume(studentId: number): Promise<PollResult> {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      await conn.execute(
+        `UPDATE device_commands SET status = 'expired'
+         WHERE student_id = ? AND status = 'pending'
+           AND created_at < DATE_SUB(NOW(3), INTERVAL ${COMMAND_TTL_MINUTES} MINUTE)`,
+        [studentId],
+      );
+
+      await conn.execute(
+        `UPDATE learning_sessions SET last_seen_at = NOW(3)
+         WHERE student_id = ? AND ended_at IS NULL`,
+        [studentId],
+      );
+
+      const [pending] = await conn.execute<
+        (RowDataPacket & { id: number; command: string; issued_by_parent_id: number })[]
+      >(
+        `SELECT id, command, issued_by_parent_id FROM device_commands
+         WHERE student_id = ? AND status = 'pending' ORDER BY id`,
+        [studentId],
+      );
+
+      if (pending.length > 0) {
+        const placeholders = pending.map(() => '?').join(', ');
+        await conn.execute(
+          `UPDATE device_commands SET status = 'consumed', consumed_at = NOW(3)
+           WHERE id IN (${placeholders}) AND status = 'pending'`,
+          pending.map((row) => row.id),
+        );
+
+        const unlock = pending.find((row) => row.command === 'unlock');
+        if (unlock) {
+          await conn.execute(
+            `UPDATE learning_sessions SET unlocked_at = NOW(3), unlocked_by_parent_id = ?
+             WHERE student_id = ? AND ended_at IS NULL`,
+            [unlock.issued_by_parent_id, studentId],
+          );
+        }
+      }
+
+      const [sessions] = await conn.execute<LearningSessionRow[]>(
+        `SELECT ${SELECT_COLUMNS} FROM learning_sessions
+         WHERE student_id = ? AND ended_at IS NULL LIMIT 1`,
+        [studentId],
+      );
+
+      await conn.commit();
+      return {
+        commands: pending.map((row) => ({ id: row.id, command: row.command })),
+        openSession: sessions[0] ?? null,
+      };
+    } catch (err) {
+      // 回滚失败（连接已断）不能顶掉真正的失败原因；吞掉回滚错误，向上抛原始 err
+      try {
+        await conn.rollback();
+      } catch {
+        /* 保留原始错误 */
+      }
+      throw err;
+    } finally {
+      conn.release();
+    }
   }
 }

@@ -9,6 +9,7 @@ const mkSessionsRepo = () => ({
   touch: vi.fn().mockResolvedValue(undefined),
   endById: vi.fn().mockResolvedValue(undefined),
   findByIdForStudent: vi.fn().mockResolvedValue(null),
+  pollAndConsume: vi.fn().mockResolvedValue({ commands: [], openSession: null }),
 });
 
 const mkControlsRepo = (lockMinutes: number | null) =>
@@ -115,5 +116,42 @@ describe('LearningSessionsService.end（spec §5.2）', () => {
 
     expect(sessions.endById).toHaveBeenCalledWith(7, 9);
     expect(out).toEqual({ id: 7, endedAt: '2026-09-23T01:45:00.000Z' });
+  });
+});
+
+describe('LearningSessionsService.poll（spec §5.3）', () => {
+  it('无进行中会话 → commands 空、lock 为 null（正常态，不是 404）', async () => {
+    const sessions = mkSessionsRepo();
+    (sessions.pollAndConsume as any).mockResolvedValue({ commands: [], openSession: null });
+
+    const out = await mkSvc(sessions, mkControlsRepo(null)).poll(9);
+
+    expect(out).toEqual({ commands: [], lock: null });
+  });
+
+  it('带回 lock 供客户端对账（服务端是唯一真源）', async () => {
+    const sessions = mkSessionsRepo();
+    (sessions.pollAndConsume as any).mockResolvedValue({ commands: [], openSession: ROW() });
+
+    const out = await mkSvc(sessions, mkControlsRepo(null)).poll(9);
+
+    expect(out.lock).toEqual({
+      sessionId: 7,
+      lockExpiresAt: '2026-09-23T02:00:00.000Z',
+      unlockedAt: null,
+    });
+  });
+
+  it('透传认领到的命令', async () => {
+    const sessions = mkSessionsRepo();
+    (sessions.pollAndConsume as any).mockResolvedValue({
+      commands: [{ id: 3, command: 'unlock' }],
+      openSession: ROW({ unlocked_at: new Date('2026-09-23T01:20:00.000Z') }),
+    });
+
+    const out = await mkSvc(sessions, mkControlsRepo(null)).poll(9);
+
+    expect(out.commands).toEqual([{ id: 3, command: 'unlock' }]);
+    expect(out.lock?.unlockedAt).toBe('2026-09-23T01:20:00.000Z');
   });
 });

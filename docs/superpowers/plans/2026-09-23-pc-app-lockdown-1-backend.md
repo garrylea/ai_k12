@@ -1520,7 +1520,10 @@ export interface PollResult {
   }
 ```
 
-> `COMMAND_TTL_MINUTES` 直接插进 SQL 字符串（不占位符）：它是**本文件内的字面常量整数**，不是入参，没有注入面；而 `INTERVAL ? MINUTE` 在部分 mysql2 版本的服务端预处理下会报语法错。
+> `COMMAND_TTL_MINUTES` 直接插进 SQL 字符串（不占位符）：它是**本文件内的字面常量整数**，不是入参，没有注入面。
+> （初稿的理由写的是「`INTERVAL ? MINUTE` 在部分 mysql2 版本下会报语法错」——2026-09-24 实测**本机不成立**，
+> `INTERVAL ?` 的预处理是正常的，见 Task 5 `insertOpen` 的修正说明。这里保留字面量插值只是因为它更简单，
+> 不是因为有语法障碍。）
 
 - [ ] **Step 4: 实现 service 的 `poll`**
 

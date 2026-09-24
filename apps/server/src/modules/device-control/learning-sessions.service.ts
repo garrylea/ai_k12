@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { LearningSessionsRepository } from '../../database/repositories/learning-sessions.repo.js';
 import type { LearningSessionRow } from '../../database/repositories/learning-sessions.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
-import type { EndSessionView, StudentSessionView } from './dto/device-control.dto.js';
+import type { EndSessionView, PollView, StudentSessionView } from './dto/device-control.dto.js';
 
 /** 本期只有 Electron 壳会写；埋点既有枚举是 web|electron，这里复用。 */
 export const LEARNING_SESSION_APP_SHELL = 'electron';
@@ -77,5 +77,28 @@ export class LearningSessionsService {
       throw new NotFoundException({ code: 1002, message: '学习会话不存在' });
     }
     return { id: after.id, endedAt: after.ended_at.toISOString() };
+  }
+
+  /**
+   * 学生端轮询（spec §5.3）。客户端每 10 秒一次，**兼作心跳**。
+   *
+   * 空结果是正常态：`{ commands: [], lock: null }`，绝不 404。
+   */
+  async poll(studentId: number): Promise<PollView> {
+    const { commands, openSession } = await this.sessions.pollAndConsume(studentId);
+    return {
+      commands,
+      lock: openSession
+        ? {
+            sessionId: openSession.id,
+            lockExpiresAt:
+              openSession.lock_expires_at === null
+                ? null
+                : openSession.lock_expires_at.toISOString(),
+            unlockedAt:
+              openSession.unlocked_at === null ? null : openSession.unlocked_at.toISOString(),
+          }
+        : null,
+    };
   }
 }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DeviceControlController } from './device-control.controller.js';
+import { DeviceCommandsController } from './device-commands.controller.js';
 import { LearningSessionsService } from './learning-sessions.service.js';
 import { LearningSessionsRepository } from '../../database/repositories/learning-sessions.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
@@ -15,7 +16,7 @@ import { ControlsRepository } from '../../database/repositories/controls.repo.js
  * （只握 pool），多一个实例无害；`AnalyticsModule` 也是这么做的，属既有先例。
  */
 @Module({
-  controllers: [DeviceControlController],
+  controllers: [DeviceControlController, DeviceCommandsController],
   providers: [LearningSessionsService, LearningSessionsRepository, ControlsRepository],
 })
 export class DeviceControlModule {}

@@ -18,3 +18,13 @@ export interface EndSessionView {
   id: number;
   endedAt: string;
 }
+
+/** `GET /api/student/device-commands` 的响应（spec §5.3）。 */
+export interface PollView {
+  commands: Array<{ id: number; command: string }>;
+  /**
+   * 当前进行中会话的锁定状态，供客户端**对账**——本地 `lockExpiresAt` 与服务端不一致时
+   * 以服务端为准（例如家长已在别处解除）。无进行中会话 → `null`。
+   */
+  lock: { sessionId: number; lockExpiresAt: string | null; unlockedAt: string | null } | null;
+}
