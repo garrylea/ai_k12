@@ -430,7 +430,7 @@ git commit -m "feat(kiosk): 锁定判定的纯逻辑 + 常量（含跨学生隔�
 
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearPersistedSession, readPersistedSession, writePersistedSession } from './learningLock';
+import { readPersistedSession, writePersistedSession } from './learningLock';
 import { endStudentLearningSession } from '@/services/api';
 
 vi.mock('@/services/api', async (importOriginal) => {
