@@ -80,3 +80,40 @@ describe('LearningSessionsService.openOrGet（spec §5.1）', () => {
     expect(out.lockExpiresAt).toBeNull();
   });
 });
+
+describe('LearningSessionsService.end（spec §5.2）', () => {
+  it('不属于该生的 id → 404/1002（不复用 403，避免泄露「该 id 存在」）', async () => {
+    const sessions = mkSessionsRepo();
+    (sessions.findByIdForStudent as any).mockResolvedValue(null);
+
+    await expect(mkSvc(sessions, mkControlsRepo(null)).end(9, 123)).rejects.toMatchObject({
+      status: 404,
+      response: { code: 1002 },
+    });
+    expect(sessions.endById).not.toHaveBeenCalled();
+  });
+
+  it('已结束的会话再调 → 幂等，回原 endedAt，不重复写库', async () => {
+    const sessions = mkSessionsRepo();
+    (sessions.findByIdForStudent as any).mockResolvedValue(
+      ROW({ ended_at: new Date('2026-09-23T01:30:00.000Z') }),
+    );
+
+    const out = await mkSvc(sessions, mkControlsRepo(null)).end(9, 7);
+
+    expect(out.endedAt).toBe('2026-09-23T01:30:00.000Z');
+    expect(sessions.endById).not.toHaveBeenCalled();
+  });
+
+  it('进行中 → 结束并回新时刻', async () => {
+    const sessions = mkSessionsRepo();
+    (sessions.findByIdForStudent as any)
+      .mockResolvedValueOnce(ROW())
+      .mockResolvedValueOnce(ROW({ ended_at: new Date('2026-09-23T01:45:00.000Z') }));
+
+    const out = await mkSvc(sessions, mkControlsRepo(null)).end(9, 7);
+
+    expect(sessions.endById).toHaveBeenCalledWith(7, 9);
+    expect(out).toEqual({ id: 7, endedAt: '2026-09-23T01:45:00.000Z' });
+  });
+});

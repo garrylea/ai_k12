@@ -12,3 +12,9 @@ export interface StudentSessionView {
   lockExpiresAt: string | null;
   unlockedAt: string | null;
 }
+
+/** `PATCH /api/student/learning-sessions/:id/end` 的响应（spec §5.2）。 */
+export interface EndSessionView {
+  id: number;
+  endedAt: string;
+}

@@ -1,8 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { LearningSessionsRepository } from '../../database/repositories/learning-sessions.repo.js';
 import type { LearningSessionRow } from '../../database/repositories/learning-sessions.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
-import type { StudentSessionView } from './dto/device-control.dto.js';
+import type { EndSessionView, StudentSessionView } from './dto/device-control.dto.js';
 
 /** 本期只有 Electron 壳会写；埋点既有枚举是 web|electron，这里复用。 */
 export const LEARNING_SESSION_APP_SHELL = 'electron';
@@ -52,5 +52,30 @@ export class LearningSessionsService {
       lockMinutes,
     });
     return toSessionView(created);
+  }
+
+  /**
+   * 正常登出：结束本次学习会话（spec §5.2）。幂等。
+   *
+   * 归属不符一律 **404/1002**（不是 403）：403 会告诉调用方「这个 id 是存在的、只是不是你的」，
+   * 属于存在性泄露。404 对两种情况一视同仁。
+   */
+  async end(studentId: number, id: number): Promise<EndSessionView> {
+    const row = await this.sessions.findByIdForStudent(id, studentId);
+    if (!row) {
+      throw new NotFoundException({ code: 1002, message: '学习会话不存在' });
+    }
+    if (row.ended_at !== null) {
+      // 幂等：已结束就回原时刻，不覆盖（ended_at 是家长端「退出时间」的数据源，不许被重写）。
+      return { id: row.id, endedAt: row.ended_at.toISOString() };
+    }
+
+    await this.sessions.endById(id, studentId);
+    // 回读而不是用 NOW() 猜：真值只有库里有。
+    const after = await this.sessions.findByIdForStudent(id, studentId);
+    if (!after || after.ended_at === null) {
+      throw new NotFoundException({ code: 1002, message: '学习会话不存在' });
+    }
+    return { id: after.id, endedAt: after.ended_at.toISOString() };
   }
 }

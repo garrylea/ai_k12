@@ -100,6 +100,24 @@ export class LearningSessionsRepository {
     return rows[0] ?? null;
   }
 
+  /** 按 id + 归属学生读一行。**不是自己的 → null**，由服务层翻成 404/1002。 */
+  async findByIdForStudent(id: number, studentId: number): Promise<LearningSessionRow | null> {
+    const [rows] = await this.pool.execute<LearningSessionRow[]>(
+      `SELECT ${SELECT_COLUMNS} FROM learning_sessions WHERE id = ? AND student_id = ? LIMIT 1`,
+      [id, studentId],
+    );
+    return rows[0] ?? null;
+  }
+
+  /** 结束指定 id 的会话（带 studentId 双重约束，防止越权结束别人的）。 */
+  async endById(id: number, studentId: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE learning_sessions SET ended_at = NOW(3)
+       WHERE id = ? AND student_id = ? AND ended_at IS NULL`,
+      [id, studentId],
+    );
+  }
+
   /** 刷新「最后一次见到客户端」。轮询端点每 10 秒调一次，兼作心跳。 */
   async touch(studentId: number): Promise<void> {
     await this.pool.execute(

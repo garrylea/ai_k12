@@ -1,10 +1,10 @@
-import { Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Controller, HttpCode, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import { LearningSessionsService } from './learning-sessions.service.js';
-import type { StudentSessionView } from './dto/device-control.dto.js';
+import type { EndSessionView, StudentSessionView } from './dto/device-control.dto.js';
 
 /**
  * 学生端学习会话（spec §5.1/§5.2）。
@@ -25,5 +25,14 @@ export class DeviceControlController {
   @HttpCode(200)
   async openOrGet(@CurrentUser() user: JwtUser): Promise<StudentSessionView> {
     return this.sessions.openOrGet(user.sub);
+  }
+
+  /** 正常登出。幂等；`:id` 不属于自己 → 404/1002。 */
+  @Patch(':id/end')
+  async end(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<EndSessionView> {
+    return this.sessions.end(user.sub, id);
   }
 }
