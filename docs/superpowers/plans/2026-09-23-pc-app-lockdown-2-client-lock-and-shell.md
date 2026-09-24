@@ -929,6 +929,17 @@ Expected: FAIL —— 组件不存在。
 
 - [ ] **Step 3: 实现 `LearningSessionShell.tsx`**
 
+> **实施时修正（2026-09-24，两处）**：
+> 1. **推送锁定态只留一个出口，并加 `resolved` 门**。初稿在 effect ① 里对「非学生角色」直接
+>    `setDesktopLocked(false)`，同时 effect ② 也推当前 `locked` —— 于是挂载瞬间会发**两次**
+>    （`[false, false]`），新生登录路径更是 `[false, true]`：先退出 kiosk 再进回去。
+>    这与本计划 Step 1 的测试（用精确数组断言 `[true]` / `[false]`）**自相矛盾**，
+>    且「先解锁再锁回」在真机上可能让 kiosk 闪一下普通窗口。改为：effect ① 只做判定并置
+>    `resolved`，effect ② 是**唯一**推送点、且在 `resolved` 之前不推（判定完成前不猜）。
+> 2. **effect ③ 的依赖从 `[lock?.id]` 改为 `[lockId]`**（`const lockId = lock?.id ?? null`）：
+>    语义完全等价（换会话才换轮询，否则每次轮询 `setLock` 都会重建 interval），
+>    只是让 `react-hooks/exhaustive-deps` 不再报警告——它是**刻意收窄**的依赖，不是漏写。
+
 ```tsx
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
@@ -979,17 +990,25 @@ function initialLockState(): LockState | null {
 export default function LearningSessionShell() {
   const location = useLocation();
   const [lock, setLock] = useState<LockState | null>(initialLockState);
+  /**
+   * 「角色 + 会话是否已判定」。判定完成前**不推**锁定态（见下面 effect ②），
+   * 否则挂载瞬间会先推 `false` 再推 `true`，窗口闪一次普通态。
+   */
+  const [resolved, setResolved] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // ① 角色闸门 + 建立会话
+  // ① 角色闸门 + 建立会话。**只做判定，不直接推锁定态**（推的动作留给 effect ②）。
   useEffect(() => {
     if (!isDesktopShell()) return;
     if (localStorage.getItem('userRole') !== 'student') {
       // 家长/管理员登入（或学生已登出）：壳必须回到普通窗口，否则家长也用不了这台机器。
-      setDesktopLocked(false);
+      setResolved(true);
       return;
     }
-    if (readPersistedSession() !== null) return; // 已有本地会话 → 交给轮询对账，不重复建
+    if (readPersistedSession() !== null) {
+      setResolved(true); // 已有本地会话 → 交给轮询对账，不重复建
+      return;
+    }
 
     let cancelled = false;
     openStudentLearningSession()
@@ -1006,9 +1025,11 @@ export default function LearningSessionShell() {
           lockExpiresAt: session.lockExpiresAt,
           unlockedAt: session.unlockedAt,
         });
+        setResolved(true);
       })
       .catch(() => {
         // 建会话失败**不阻断学习**：退化为「未锁」。管控失效好过学生进不去。
+        if (!cancelled) setResolved(true);
       });
     return () => {
       cancelled = true;
@@ -1017,15 +1038,17 @@ export default function LearningSessionShell() {
 
   const locked = lock !== null && computeLocked(lock, nowMs);
 
-  // ② 锁定态 → Electron 主进程
+  // ② 锁定态 → Electron 主进程（**唯一出口**）。`resolved` 之前不推，避免先解锁再锁回去。
   useEffect(() => {
-    if (!isDesktopShell()) return;
+    if (!isDesktopShell() || !resolved) return;
     setDesktopLocked(locked);
-  }, [locked]);
+  }, [locked, resolved]);
 
-  // ③ 轮询（兼心跳）。依赖 lock.id：换会话就换轮询。
+  // ③ 轮询（兼心跳）。依赖**会话 id**（而非整个 lock）：换会话才换轮询，
+  // 否则每次轮询 setLock 都会重建 interval。取出 `lockId` 是为了让依赖数组显式且无 warning。
+  const lockId = lock?.id ?? null;
   useEffect(() => {
-    if (!isDesktopShell() || lock === null) return;
+    if (!isDesktopShell() || lockId === null) return;
     const poll = () => {
       pollStudentDeviceCommands()
         .then((res) => {
@@ -1053,7 +1076,7 @@ export default function LearningSessionShell() {
     poll();
     const timer = window.setInterval(poll, LEARNING_SESSION_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [lock?.id]);
+  }, [lockId]);
 
   // ④ 锁定时每秒对表（驱动 pill 与到点解除）；不锁就不起定时器。
   useEffect(() => {
