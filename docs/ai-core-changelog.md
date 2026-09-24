@@ -8,6 +8,35 @@
 
 ---
 
+## 2026-09-24 PC App 学习管控（后端数据层与管控读写）— Task 1–5
+
+实施计划 `docs/superpowers/plans/2026-09-23-pc-app-lockdown-1-backend.md`（spec `…-study-lockdown-design.md`）的 Task 1–5。
+迁移 `tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql` 已 apply 到本机 `ai_k12`。
+
+- **`controls.daily_time_limit_minutes` → `session_lock_minutes`**（语义从「每日累计上限」改为「单次登录起算的禁登出窗口」）；
+  改名前实测该列 **2 行全为 NULL**（读侧已接、写侧从未实现），故改名零数据丢失。
+- `today-usage` 收缩：`getTodayUsage` 去掉 `limitMinutes` / `exceeded` 与 `ControlsRepository` 依赖
+  （「每日累计上限」概念废除，限制改由「单次学习锁定」承担）。`ParentControls` 增加 `sessionLockMinutes`（1..480 或 `null`）。
+- 新增 `learning_sessions`（条件式 VIRTUAL 生成列 `active_student_id` + 唯一键，DB 级保证「每学生至多一个进行中会话」）
+  与 `device_commands`；`POST /api/student/learning-sessions` **显式 `@HttpCode(200)`**（幂等取或建，默认 201 会误导）。
+- **事故与根因（`insertOpen`）**：初稿在「未设锁」时把 `lock_expires_at` 拼成 SQL 字面量 `NULL` →
+  语句只有 **3 个 `?`** 却传 **2 个参数** → mysql2 走服务端预处理（参数按位置绑定）报
+  `Incorrect arguments to COM_STMT_EXECUTE`（**HTTP 500**）。⚠️「未设锁」是绝大多数学生的默认态，这条路径一坏取或建端点即不可用。
+  四种写法逐一实测（事务内 insert + rollback，未留数据）：字面 `NULL` **FAIL**；`null` 走参数 **OK**；
+  `DATE_ADD(NOW(3), INTERVAL ? MINUTE)` **OK**（本机 MySQL 的 `INTERVAL ?` 预处理无语法问题，实测算出「距现在 59 分」）；
+  JS 侧算 `Date` **OK**。修法：**占位符恒为 4 个、与参数逐位对应**，`null` 当参数传。已补 `learning-sessions.repo.test.ts`
+  钉「占位符数 == 参数数」。
+- **vitest 下无法用内存方式验 DI（踩坑）**：`emitDecoratorMetadata` 在 tsconfig 里是 true，但 vitest 走 esbuild，
+  **不产出** `design:paramtypes`（实测 `undefined`）。而 Nest 对**缺元数据的构造参数不报错、直接传 0 个实参**，
+  于是 `NestFactory.create(AppModule)` **静默成功**（不抛 "can't resolve dependencies"），
+  形如 `constructor(private readonly svc: SomeService)`（无 `@Inject()`）的控制器字段却是 `undefined`；
+  只有显式 `@Inject(Token)` 的参数真的注入。⇒ 这种「内存 DI 冒烟」是**假绿**，只有 `node dist/main.js` 才验得准。
+- 启动验证（`node dist/main.js`，:3001）：`Mapped {/api/student/learning-sessions, POST}` 已挂载、无依赖解析错误；
+  端到端实测两条路径 —— 未设锁 → `200 {lockMinutes:null, lockExpiresAt:null}`；设锁 60 → 新会话 `lockExpiresAt` = +1h（DB 侧 `remain 59`）；
+  连续两次调用返回**同一个 id 与同一 `startedAt`**（「重启不重置时钟」成立），库内仅 1 行进行中会话。
+
+---
+
 ## 2026-09-23 数学薄弱点图谱与推荐（学生端训练轨）
 
 - 新增只读模块 `apps/server/src/modules/knowledge-graph/`，落地 API 文档 §4.5 的两个 MVP 端点；

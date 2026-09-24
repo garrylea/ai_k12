@@ -21,6 +21,7 @@ import { ExamsModule } from './modules/exams/exams.module.js';
 import { PointsModule } from './modules/points/points.module.js';
 import { ParentInsightsModule } from './modules/parent-insights/parent-insights.module.js';
 import { KnowledgeGraphModule } from './modules/knowledge-graph/knowledge-graph.module.js';
+import { DeviceControlModule } from './modules/device-control/device-control.module.js';
 import { AnalyticsModule } from './modules/analytics/analytics.module.js';
 import { AnalyticsInterceptor } from './common/interceptors/analytics.interceptor.js';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware.js';
@@ -51,6 +52,8 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
     AnalyticsModule,
     // 数学薄弱点图谱（2026-09-23）——学生端训练轨第 4 张卡；两个只读端点
     KnowledgeGraphModule,
+    // PC App 学习管控（2026-09-23）—— 学习会话 + 家长解除命令（学生端 3 + 家长端 2 端点）
+    DeviceControlModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

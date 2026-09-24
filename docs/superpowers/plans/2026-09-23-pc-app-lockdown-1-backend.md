@@ -904,15 +904,25 @@ export class LearningSessionsRepository {
    * 返回既有行而不是抛错，是「重启不重置时钟」的关键：客户端重启后再调取或建，
    * 会拿到**原来那个** `lock_expires_at`，而不是一个新的一小时。
    *
-   * `lock_expires_at` 用 SQL 侧 `NOW(3)` 算，避免应用与 DB 时钟不一致。
-   * ⚠️ 若本机 mysql2 对 `INTERVAL ?` 的服务端预处理报语法错，改为在 JS 侧算
-   * `new Date(Date.now() + lockMinutes * 60_000)` 传 Date——两种都可，别改成字符串拼接。
+   * `lock_expires_at` 非 null 时用 SQL 侧 `NOW(3)` 算，避免应用与 DB 时钟不一致。
+   *
+   * ⚠️ **占位符个数必须恒为 4、与参数数组逐位对应**（2026-09-24 修正）。初稿在未设锁时把
+   * 该列拼成字面量 `NULL`，语句只剩 3 个 `?` 却传 2 个参数 → mysql2 的服务端预处理
+   * （参数按位置绑定）直接报 `Incorrect arguments to COM_STMT_EXECUTE`。**「未设锁」是绝大多数
+   * 学生的默认态**，这条路径一坏整个取或建端点就不可用。四种写法逐一实测后确认：
+   * `null` 当参数传（配 `?`）与 `DATE_ADD(NOW(3), INTERVAL ? MINUTE)`（配锁定时长参数）**都可用**，
+   * 本机 MySQL 的 `INTERVAL ?` 预处理没有语法问题——所以保留 DB 侧算时钟，只需把 null 走参数。
    */
   async insertOpen(input: InsertOpenInput): Promise<LearningSessionRow> {
+    // 未设锁 → 该列就是 NULL；设了锁 → 由 DB 侧时钟算，避免应用与 DB 时钟不一致。
     const expiresFragment =
-      input.lockMinutes === null ? 'NULL' : 'DATE_ADD(NOW(3), INTERVAL ? MINUTE)';
-    const params: Array<number | string | null> = [input.studentId, input.appShell];
-    if (input.lockMinutes !== null) params.push(input.lockMinutes);
+      input.lockMinutes === null ? '?' : 'DATE_ADD(NOW(3), INTERVAL ? MINUTE)';
+    const params: Array<number | string | null> = [
+      input.studentId,
+      input.appShell,
+      input.lockMinutes,
+      input.lockMinutes,
+    ];
 
     try {
       const [result] = await this.pool.execute<ResultSetHeader>(
