@@ -637,16 +637,56 @@ describe('仪表盘：学习时段卡（spec §6.5）', () => {
     expect(screen.getByTestId('learning-timeline-retry')).toBeInTheDocument();
   });
 
-  it('切孩子 → 重新取该孩子的记录', async () => {
-    getSessionsMock.mockResolvedValue(SESSIONS);
-    renderPage();
+  it('切孩子 → 重新取该孩子的记录（走 Tab 切换，不是改 store）', async () => {
+    renderAt('/parent/dashboard');
     await screen.findByTestId('learning-timeline');
+    expect(getSessionsMock).toHaveBeenCalledWith(11, 7, 10);
 
-    useParentStudentStore.setState({ studentId: 2 });
-    await waitFor(() => expect(getSessionsMock).toHaveBeenCalledWith(2, 7, 10));
+    // ⚠️ 仪表盘切孩子是**页面本地 activeId**（Tab 按钮）驱动的，改 store 不会切 Tab
+    fireEvent.click(screen.getByRole('tab', { name: '小美' }));
+
+    await waitFor(() => expect(getSessionsMock).toHaveBeenCalledWith(12, 7, 10));
+  });
+
+  it('切孩子时，在途的旧记录不许画到新孩子头上（派生带 studentId 归属）', async () => {
+    renderAt('/parent/dashboard');
+    await screen.findByTestId('learning-timeline');
+    expect(screen.getByTestId('session-7')).toBeInTheDocument();
+
+    // 小美的请求挂在一个**不主动 resolve 的 deferred** 上，制造「已切到小美、数据未到」那一帧
+    let resolveGirl!: (value: ParentSessionPage) => void;
+    const girl = new Promise<ParentSessionPage>((resolve) => {
+      resolveGirl = resolve;
+    });
+    getSessionsMock.mockImplementation((id) =>
+      id === 12 ? girl : Promise.resolve(SESSIONS),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: '小美' }));
+
+    await waitFor(() => expect(getSessionsMock).toHaveBeenCalledWith(12, 7, 10));
+    expect(screen.queryByTestId('session-7')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-6')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveGirl({ items: [], total: 0 });
+    });
+    expect(await screen.findByTestId('learning-timeline-empty')).toBeInTheDocument();
   });
 });
 ```
+
+> **实施时修正（2026-09-24，三处）**
+> 1. **「切孩子」那条测试初稿用 `useParentStudentStore.setState({ studentId: 2 })`，切不动。**
+>    仪表盘切孩子是**页面本地 `activeId`**（Tab 按钮）驱动的，store 只做跨页锚点。
+>    照初稿写会断言 `(2, 7, 10)` 而实际始终 `(11, 7, 10)` → 必红。改为
+>    `fireEvent.click(screen.getByRole('tab', { name: '小美' }))` 并断言 `(12, 7, 10)`。
+> 2. 上一条之外**补了一条归属钉子**（初稿没有）：切孩子的在途帧里，上一个孩子的记录
+>    不许画到新孩子头上——这正是本仓 Global Constraints 里点名的失效模式。
+> 3. 卡片 class 用 `mb-4 p-5`（与同页 `dashboard-study-time` 那组卡一致），骨架高度 72；
+>    初稿写的 `p-6` / 96 与同页风格不符。
+> 4. 本任务测试代码里的 `renderPage()` 应写成本文件既有的 **`renderAt('/parent/dashboard')`**
+>    （`ParentDashboardPage.test.tsx` 里没有 `renderPage` 这个 helper，那是 Task 1 那个文件的）。
 
 - [ ] **Step 2: 跑测试确认失败**
 

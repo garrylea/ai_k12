@@ -5,10 +5,12 @@ import { Button, Card, Progress, Skeleton, Tag } from '@/components/base';
 import {
   ApiError,
   getParentDashboard,
+  getParentLearningSessions,
   getParentStudyTime,
   getParentTodayUsage,
   type ParentDashboard,
   type ParentDashboardStudent,
+  type ParentSessionPage,
   type ParentStudyTime,
   type ParentTodayUsage,
 } from '@/services/api';
@@ -127,6 +129,110 @@ function StudyTimePanel({
   );
 }
 
+/** 时刻格式化：只给家长看「几月几日 几点几分」，不显示秒与时区噪音。 */
+function formatClock(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * 学习时段（spec §6.5）。
+ *
+ * 与同页「学习时长」卡的本质区别：**这条是列表、不是聚合**——家长要看的是「几点进去、
+ * 几点出来」。数据源是 `learning_sessions`（**登录粒度**），不是 `study_sessions`
+ * （学习页粒度，且只有聚合值可用），两者不是一回事，别合并。
+ *
+ * `online` 由后端算好下发（阈值真源在后端，前端**不重算**）：本页这个卡不额外起定时器，
+ * 只在拉取时取一次快照。
+ */
+function LearningTimelineCard({ studentId }: { studentId: number }) {
+  const [state, setState] = useState<{ studentId: number; page: ParentSessionPage } | null>(null);
+  const [failedStudentId, setFailedStudentId] = useState<number | null>(null);
+  const [reload, setReload] = useState(0);
+
+  // 派生带 studentId 归属：切 Tab 不重挂载本组件，只 setState(null) 会慢一帧画出上个孩子的记录
+  const page = state && state.studentId === studentId ? state.page : null;
+  const failed = failedStudentId === studentId;
+
+  useEffect(() => {
+    let cancelled = false;
+    getParentLearningSessions(studentId, 7, 10)
+      .then((res) => {
+        if (cancelled) return;
+        setState({ studentId, page: res });
+        setFailedStudentId(null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setState(null);
+        setFailedStudentId(studentId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, reload]);
+
+  return (
+    <Card className="mb-4 p-5" data-testid="learning-timeline">
+      <h3 className="text-base font-bold text-[var(--text-primary)]">学习时段（近 7 天）</h3>
+      <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+        孩子每次进入和退出学习端的时间。这里只记 PC App 上的学习。
+      </p>
+
+      {failed ? (
+        <div
+          data-testid="learning-timeline-error"
+          className="mt-4 flex flex-wrap items-center justify-between gap-4"
+        >
+          <span className="text-sm text-[var(--text-secondary)]">学习时段暂时加载失败</span>
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="learning-timeline-retry"
+            onClick={() => setReload((n) => n + 1)}
+          >
+            重试
+          </Button>
+        </div>
+      ) : page === null ? (
+        <div className="mt-4">
+          <Skeleton width="100%" height={72} rounded />
+        </div>
+      ) : page.items.length === 0 ? (
+        <p data-testid="learning-timeline-empty" className="mt-4 text-sm text-[var(--text-secondary)]">
+          近 7 天还没有学习记录
+        </p>
+      ) : (
+        <ul className="mt-4 divide-y divide-[var(--bg-subtle)]">
+          {page.items.map((item) => (
+            <li
+              key={item.id}
+              data-testid={`session-${item.id}`}
+              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2"
+            >
+              <span className="text-sm text-[var(--text-primary)]">
+                {formatClock(item.startedAt)}
+              </span>
+              <span className="text-sm text-[var(--text-secondary)]">
+                {item.endedAt === null ? '进行中' : `→ ${formatClock(item.endedAt)}`}
+              </span>
+              <span
+                className={clsx(
+                  'text-xs',
+                  item.online ? 'font-medium text-[var(--brand-600)]' : 'text-[var(--text-secondary)]',
+                )}
+              >
+                {item.endedAt === null ? (item.online ? '在线' : '已断开') : '已退出'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 /** 单个孩子的概览面板（Tab 切换时整块换掉）。 */
 function StudentPanel({ student }: { student: ParentDashboardStudent }) {
   const setStudentId = useParentStudentStore((s) => s.setStudentId);
@@ -199,6 +305,10 @@ function StudentPanel({ student }: { student: ParentDashboardStudent }) {
       </Card>
 
       <StudyTimePanel studentId={student.studentId} study={studyValue} usage={usageValue} />
+
+      {/* 学习时段（PC App 学习管控）：是**列表**不是聚合，与上面「学习时长」并列不替代。
+          放在时长卡之后：它是补充信息（几点进去/几点出来），不是主指标。 */}
+      <LearningTimelineCard studentId={student.studentId} />
 
       {/* 专项学情（Phase 1B）：与上面的「学习时长」**并列不替代**——那是会话时长，这是专项作答量 */}
       <div className="mb-4">

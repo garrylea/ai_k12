@@ -3,7 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
 import {
+  ApiError,
   getParentDashboard,
+  getParentLearningSessions,
   getParentSpecials,
   getParentStudyTime,
   getParentTodayUsage,
@@ -11,6 +13,7 @@ import {
   listMyStudents,
   type MyStudentItem,
   type ParentDashboard,
+  type ParentSessionPage,
   type ParentSpecials,
   type ParentStudyTime,
   type ParentTodayUsage,
@@ -29,6 +32,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentTodayUsage: vi.fn(),
     // 专项学情卡（埋点 Phase 1B）自己取数；不 mock 会打到真 fetch（jsdom 里静默降级）
     getParentSpecials: vi.fn(),
+    // 学习时段卡（PC App 学习管控）自己取数
+    getParentLearningSessions: vi.fn(),
   };
 });
 
@@ -38,6 +43,32 @@ const getDashboardMock = vi.mocked(getParentDashboard);
 const getStudyTimeMock = vi.mocked(getParentStudyTime);
 const getTodayUsageMock = vi.mocked(getParentTodayUsage);
 const getSpecialsMock = vi.mocked(getParentSpecials);
+const getSessionsMock = vi.mocked(getParentLearningSessions);
+
+/** 学习时段卡的两条记录：一条进行中（在线）、一条已退出。 */
+const SESSIONS: ParentSessionPage = {
+  items: [
+    {
+      id: 7,
+      startedAt: '2026-09-23T01:00:00.000Z',
+      endedAt: null,
+      online: true,
+      lockMinutes: 60,
+      lockExpiresAt: '2026-09-23T02:00:00.000Z',
+      unlockedAt: null,
+    },
+    {
+      id: 6,
+      startedAt: '2026-09-22T09:00:00.000Z',
+      endedAt: '2026-09-22T09:40:00.000Z',
+      online: false,
+      lockMinutes: null,
+      lockExpiresAt: null,
+      unlockedAt: null,
+    },
+  ],
+  total: 2,
+};
 
 const BOY: MyStudentItem = { id: 11, parentId: 3, username: 'xiaoming', name: '小明', age: 13, grade: '初一', schoolLevel: 'junior', isActive: true };
 const GIRL: MyStudentItem = { ...BOY, id: 12, username: 'xiaomei', name: '小美' };
@@ -144,6 +175,8 @@ beforeEach(() => {
   });
   getSpecialsMock.mockReset();
   getSpecialsMock.mockResolvedValue(SPECIALS);
+  getSessionsMock.mockReset();
+  getSessionsMock.mockResolvedValue(SESSIONS);
 });
 
 afterEach(() => {
@@ -379,5 +412,78 @@ describe('ParentDashboardPage', () => {
       expect(screen.getByTestId('dashboard-study-time-12').textContent).toContain('10 分钟'),
     );
     expect(screen.getByTestId('dashboard-study-time-12').textContent).not.toContain('1 小时 30 分');
+  });
+});
+
+describe('仪表盘：学习时段卡（spec §6.5）', () => {
+  it('渲染每次进入/退出时刻 + 在线状态', async () => {
+    renderAt('/parent/dashboard');
+
+    expect(await screen.findByTestId('learning-timeline')).toBeInTheDocument();
+    expect(screen.getByTestId('session-7')).toHaveTextContent('进行中');
+    expect(screen.getByTestId('session-6')).toHaveTextContent('已退出');
+  });
+
+  it('**不聚合**：两次会话渲染两行（这是「进出时间」与既有聚合卡的本质区别）', async () => {
+    renderAt('/parent/dashboard');
+    await screen.findByTestId('learning-timeline');
+    expect(screen.getAllByTestId(/^session-/)).toHaveLength(2);
+  });
+
+  it('空态是正常态（不是错误）', async () => {
+    getSessionsMock.mockResolvedValue({ items: [], total: 0 });
+    renderAt('/parent/dashboard');
+    expect(await screen.findByTestId('learning-timeline-empty')).toHaveTextContent(
+      '近 7 天还没有学习记录',
+    );
+  });
+
+  it('加载失败 → 有重试，且**不拖垮同页其他卡**', async () => {
+    getSessionsMock.mockRejectedValue(new ApiError(500, 'boom'));
+    renderAt('/parent/dashboard');
+
+    expect(await screen.findByTestId('learning-timeline-error')).toBeInTheDocument();
+    expect(screen.getByTestId('learning-timeline-retry')).toBeInTheDocument();
+    // 同一孩子的其它卡照常渲染
+    expect(screen.getByTestId('dashboard-student-11')).toBeTruthy();
+    expect(screen.getByTestId('dashboard-study-time-11')).toBeTruthy();
+  });
+
+  it('切孩子 → 重新取该孩子的记录（走 Tab 切换，不是改 store）', async () => {
+    renderAt('/parent/dashboard');
+    await screen.findByTestId('learning-timeline');
+    expect(getSessionsMock).toHaveBeenCalledWith(11, 7, 10);
+
+    // ⚠️ 仪表盘切孩子是**页面本地 activeId**（Tab 按钮）驱动的，改 store 不会切 Tab
+    fireEvent.click(screen.getByRole('tab', { name: '小美' }));
+
+    await waitFor(() => expect(getSessionsMock).toHaveBeenCalledWith(12, 7, 10));
+  });
+
+  it('切孩子时，在途的旧记录不许画到新孩子头上（派生带 studentId 归属）', async () => {
+    renderAt('/parent/dashboard');
+    await screen.findByTestId('learning-timeline');
+    expect(screen.getByTestId('session-7')).toBeInTheDocument();
+
+    // 小美的请求挂在一个**不主动 resolve 的 deferred** 上，制造「已切到小美、数据未到」那一帧
+    let resolveGirl!: (value: ParentSessionPage) => void;
+    const girl = new Promise<ParentSessionPage>((resolve) => {
+      resolveGirl = resolve;
+    });
+    getSessionsMock.mockImplementation((id) =>
+      id === 12 ? girl : Promise.resolve(SESSIONS),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: '小美' }));
+
+    // 小美数据未到：绝不能出现小明（上一个孩子）的记录
+    await waitFor(() => expect(getSessionsMock).toHaveBeenCalledWith(12, 7, 10));
+    expect(screen.queryByTestId('session-7')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-6')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveGirl({ items: [], total: 0 });
+    });
+    expect(await screen.findByTestId('learning-timeline-empty')).toBeInTheDocument();
   });
 });
