@@ -38,3 +38,22 @@ export interface IssuedCommandView {
   learningSessionId: number;
   createdAt: string;
 }
+
+/** 家长端「进出时间」的一行（spec §5.5）。 */
+export interface ParentSessionItem {
+  id: number;
+  startedAt: string;
+  /** `null` = 仍在进行中。 */
+  endedAt: string | null;
+  /** 后端算好下发（阈值真源在后端），前端不重算。 */
+  online: boolean;
+  lockMinutes: number | null;
+  lockExpiresAt: string | null;
+  unlockedAt: string | null;
+}
+
+/** `GET /api/parent/students/:studentId/learning-sessions` 的响应（spec §5.5）。 */
+export interface ParentSessionPage {
+  items: ParentSessionItem[];
+  total: number;
+}

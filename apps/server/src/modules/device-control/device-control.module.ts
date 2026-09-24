@@ -4,6 +4,7 @@ import { DeviceCommandsController } from './device-commands.controller.js';
 import { DeviceControlParentController } from './device-control-parent.controller.js';
 import { LearningSessionsService } from './learning-sessions.service.js';
 import { DeviceCommandsService } from './device-commands.service.js';
+import { LearningSessionLogService } from './learning-session-log.service.js';
 import { LearningSessionsRepository } from '../../database/repositories/learning-sessions.repo.js';
 import { DeviceCommandsRepository } from '../../database/repositories/device-commands.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
@@ -25,6 +26,7 @@ import { ParentModule } from '../parent/parent.module.js';
   providers: [
     LearningSessionsService,
     DeviceCommandsService,
+    LearningSessionLogService,
     LearningSessionsRepository,
     DeviceCommandsRepository,
     ControlsRepository,

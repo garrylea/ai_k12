@@ -2024,13 +2024,21 @@ Expected: FAIL —— 类不存在。
 在 `learning-sessions.repo.ts` 类里加：
 
 ```ts
-  /** 家长端「进出时间」列表：窗口内按开始时间倒序。 */
+  /**
+   * 家长端「进出时间」列表：窗口内按开始时间倒序。
+   *
+   * ⚠️ **必须 `pool.query` 而不是 `pool.execute`**（2026-09-24 修正）：MySQL 对预处理语句的
+   * `LIMIT ?` 直接报 `Incorrect arguments to mysqld_stmt_execute` —— SQL 字符串本身完全正确、
+   * 参数顺序也对，MySQL 依然拒绝执行。初稿抄了 `execute`，被全仓形态护栏
+   * `limit-placeholder.guard.test.ts` 当场拦下（那正是该护栏存在的原因：2026-09-20
+   * `GET /api/parent/alerts` 每调必 500，而当时全部仓储用例是绿的——mockPool 从不真执行 SQL）。
+   */
   async listByStudent(
     studentId: number,
     since: Date,
     limit: number,
   ): Promise<LearningSessionRow[]> {
-    const [rows] = await this.pool.execute<LearningSessionRow[]>(
+    const [rows] = await this.pool.query<LearningSessionRow[]>(
       `SELECT ${SELECT_COLUMNS} FROM learning_sessions
        WHERE student_id = ? AND started_at >= ?
        ORDER BY started_at DESC LIMIT ?`,

@@ -145,6 +145,37 @@ export class LearningSessionsRepository {
   }
 
   /**
+   * 家长端「进出时间」列表：窗口内按开始时间倒序。
+   *
+   * ⚠️ **必须 `pool.query`（客户端转义）而不是 `pool.execute`**：MySQL 对预处理语句的
+   * `LIMIT ?` 直接报 `Incorrect arguments to mysqld_stmt_execute`（SQL 字符串本身完全正确、参数顺序也对）。
+   * 全仓护栏见 `limit-placeholder.guard.test.ts`；2026-09-20 `GET /api/parent/alerts` 每调必 500
+   * 就是这个形态，而当时全部仓储用例是绿的（mockPool 从不真执行 SQL）。
+   */
+  async listByStudent(
+    studentId: number,
+    since: Date,
+    limit: number,
+  ): Promise<LearningSessionRow[]> {
+    const [rows] = await this.pool.query<LearningSessionRow[]>(
+      `SELECT ${SELECT_COLUMNS} FROM learning_sessions
+       WHERE student_id = ? AND started_at >= ?
+       ORDER BY started_at DESC LIMIT ?`,
+      [studentId, since, limit],
+    );
+    return rows;
+  }
+
+  /** 同窗口的总数（不受 limit 影响，供分页/提示）。 */
+  async countByStudent(studentId: number, since: Date): Promise<number> {
+    const [rows] = await this.pool.execute<(RowDataPacket & { total: number })[]>(
+      `SELECT COUNT(*) AS total FROM learning_sessions WHERE student_id = ? AND started_at >= ?`,
+      [studentId, since],
+    );
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  /**
    * 学生端一次轮询的全部副作用（spec §5.3），**同一个事务**：
    *   1. 惰性过期：把超时的 pending 命令置 expired；
    *   2. 心跳：刷新进行中会话的 last_seen_at（轮询兼心跳，判「在线」的唯一依据）；
