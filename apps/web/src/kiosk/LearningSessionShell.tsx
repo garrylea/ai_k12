@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import {
   openStudentLearningSession,
   pollStudentDeviceCommands,
+  type StudentLearningSession,
 } from '@/services/api';
 import {
   LEARNING_SESSION_POLL_MS,
@@ -60,6 +61,26 @@ export default function LearningSessionShell() {
   const [isStudent, setIsStudent] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
+  /**
+   * 把服务端返回的会话落进本地快照 —— **只在「当前登录者仍是同一个学生」时写**。
+   *
+   * ⚠️ 这个写盘**不能放在 `cancelled` 判断之后**（2026-09-24 修）：登录后会有一串客户端跳转，
+   * 本 effect 依赖 `location.pathname` 会被反复重建并清理；若因 `cancelled` 丢掉写盘，
+   * 本地就一直「没有会话」→ `LogoutButton` 的禁退判定读不到锁 → **锁着还能登出**
+   * （用户实测报回，证据：Electron 的 localStorage 里从没出现过带锁会话的记录）。
+   * 服务端返回的是**幂等真值**，重复写同一行无害。
+   */
+  const persistFor = (expectedStudentId: number, session: StudentLearningSession): void => {
+    if (localStorage.getItem('userRole') !== 'student') return;
+    if (Number(localStorage.getItem('userId')) !== expectedStudentId) return;
+    writePersistedSession({
+      studentId: expectedStudentId,
+      id: session.id,
+      lockExpiresAt: session.lockExpiresAt,
+      unlockedAt: session.unlockedAt,
+    });
+  };
+
   // ① 角色闸门 + 建立会话。**只做判定，不直接推学生模式**（推的动作留给 effect ②）。
   useEffect(() => {
     if (!isDesktopShell()) return;
@@ -70,7 +91,8 @@ export default function LearningSessionShell() {
       return;
     }
     setIsStudent(true);
-    if (readPersistedSession() !== null) {
+    const expectedStudentId = Number(localStorage.getItem('userId'));
+    if (readPersistedSession(expectedStudentId) !== null) {
       setResolved(true); // 已有本地会话 → 交给轮询对账，不重复建
       return;
     }
@@ -78,13 +100,8 @@ export default function LearningSessionShell() {
     let cancelled = false;
     openStudentLearningSession()
       .then((session) => {
+        persistFor(expectedStudentId, session); // 先落盘（不受 cancelled 影响）
         if (cancelled) return;
-        writePersistedSession({
-          studentId: Number(localStorage.getItem('userId')),
-          id: session.id,
-          lockExpiresAt: session.lockExpiresAt,
-          unlockedAt: session.unlockedAt,
-        });
         setLock({
           id: session.id,
           lockExpiresAt: session.lockExpiresAt,
@@ -126,19 +143,19 @@ export default function LearningSessionShell() {
         .then((res) => {
           // 服务端是锁定态的**唯一真源**：家长在别处解除时，这里带回的 unlockedAt 非空。
           if (res.lock) {
-            setLock((prev) => {
-              if (prev === null || prev.id !== res.lock!.sessionId) return prev;
-              const next: LockState = {
-                id: prev.id,
-                lockExpiresAt: res.lock!.lockExpiresAt,
-                unlockedAt: res.lock!.unlockedAt,
-              };
-              const studentId = Number(localStorage.getItem('userId'));
-              if (Number.isFinite(studentId)) {
-                writePersistedSession({ studentId, ...next });
-              }
-              return next;
-            });
+            // **服务端也是「哪个会话在进行中」的唯一真源**：本地 id 与服务端不一致时**采纳服务端**，
+            // 不能丢弃（2026-09-24 修）。丢弃过一次的后果：本地卡在旧 id 上，服务端那条带锁的
+            // 会话永远追不上 → 锁形同不存在（用户实测：锁着还能登出）。
+            const studentId = Number(localStorage.getItem('userId'));
+            const next: LockState = {
+              id: res.lock.sessionId,
+              lockExpiresAt: res.lock.lockExpiresAt,
+              unlockedAt: res.lock.unlockedAt,
+            };
+            if (Number.isFinite(studentId)) {
+              writePersistedSession({ studentId, ...next });
+            }
+            setLock(next);
           }
         })
         .catch(() => {

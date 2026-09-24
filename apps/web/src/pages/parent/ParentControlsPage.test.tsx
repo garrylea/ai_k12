@@ -180,14 +180,14 @@ describe('ParentControlsPage：校验与保存', () => {
     renderPage();
 
     const away = await screen.findByTestId('controls-away-input');
-    expect(screen.getByTestId('save-controls')).toBeDisabled();
+    expect(screen.getByTestId('save-alerts')).toBeDisabled();
 
     fireEvent.change(away, { target: { value: '10' } });
-    expect(screen.getByTestId('save-controls')).toBeEnabled();
+    expect(screen.getByTestId('save-alerts')).toBeEnabled();
 
     // 改回原值 → 重新禁用（判脏基准是服务端快照，不是「有没有碰过输入框」）
     fireEvent.change(away, { target: { value: '5' } });
-    expect(screen.getByTestId('save-controls')).toBeDisabled();
+    expect(screen.getByTestId('save-alerts')).toBeDisabled();
   });
 
   it('0 / 181 / 空串 → 行内报错 + 保存禁用 + 不发请求', async () => {
@@ -198,10 +198,10 @@ describe('ParentControlsPage：校验与保存', () => {
     for (const bad of ['0', '181', '']) {
       fireEvent.change(away, { target: { value: bad } });
       expect(screen.getByText('请填 1–180 的整数')).toBeInTheDocument();
-      expect(screen.getByTestId('save-controls')).toBeDisabled();
+      expect(screen.getByTestId('save-alerts')).toBeDisabled();
     }
 
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-alerts'));
     expect(putControlsMock).not.toHaveBeenCalled();
   });
 
@@ -211,7 +211,7 @@ describe('ParentControlsPage：校验与保存', () => {
     fireEvent.change(await screen.findByTestId('controls-away-input'), {
       target: { value: '10' },
     });
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-alerts'));
 
     await waitFor(() => expect(putControlsMock).toHaveBeenCalledTimes(1));
     expect(putControlsMock.mock.calls[0][0]).toBe(1);
@@ -228,7 +228,7 @@ describe('ParentControlsPage：校验与保存', () => {
       target: { value: '10' },
     });
     fireEvent.change(screen.getByTestId('controls-idle-input'), { target: { value: '30' } });
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-alerts'));
 
     await waitFor(() => expect(putControlsMock).toHaveBeenCalledTimes(1));
     expect(putControlsMock.mock.calls[0][1]).toEqual({
@@ -250,7 +250,7 @@ describe('ParentControlsPage：校验与保存', () => {
       sessionLockMinutes: null,
     });
 
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-alerts'));
 
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith(
@@ -261,7 +261,7 @@ describe('ParentControlsPage：校验与保存', () => {
     expect(screen.getByTestId('controls-away-input')).toHaveValue(20);
     expect(screen.getByTestId('controls-idle-input')).toHaveValue(40);
     // 已对齐快照 → 保存重新 disabled
-    expect(screen.getByTestId('save-controls')).toBeDisabled();
+    expect(screen.getByTestId('save-alerts')).toBeDisabled();
   });
 
   it('保存失败 → toast 出服务端文案，草稿保留可重存', async () => {
@@ -271,7 +271,7 @@ describe('ParentControlsPage：校验与保存', () => {
     fireEvent.change(away, { target: { value: '10' } });
     putControlsMock.mockRejectedValueOnce(new ApiError(1001, 'alertAwayMinutes 必须是 1-180 的整数'));
 
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-alerts'));
 
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith(
@@ -281,7 +281,7 @@ describe('ParentControlsPage：校验与保存', () => {
     );
     expect(screen.getByTestId('controls-save-error')).toBeInTheDocument();
     expect(away).toHaveValue(10);
-    expect(screen.getByTestId('save-controls')).toBeEnabled();
+    expect(screen.getByTestId('save-alerts')).toBeEnabled();
   });
 });
 
@@ -297,7 +297,7 @@ describe('ParentControlsPage：两个数据源互不拖累', () => {
     const away = await screen.findByTestId('controls-away-input');
     expect(away).toHaveValue(5);
     fireEvent.change(away, { target: { value: '10' } });
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-alerts'));
     await waitFor(() => expect(putControlsMock).toHaveBeenCalledTimes(1));
   });
 
@@ -358,8 +358,8 @@ describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
     fireEvent.change(input, { target: { value: '481' } });
 
     expect(screen.getByText('请填 1–480 的整数')).toBeInTheDocument();
-    expect(screen.getByTestId('save-controls')).toBeDisabled();
-    fireEvent.click(screen.getByTestId('save-controls'));
+    expect(screen.getByTestId('save-lock')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('save-lock'));
     expect(putControlsMock).not.toHaveBeenCalled();
   });
 
@@ -367,7 +367,7 @@ describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
     renderPage();
     const input = await screen.findByTestId('lock-minutes-input');
     fireEvent.change(input, { target: { value: '' } });
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-lock'));
 
     await waitFor(() =>
       expect(putControlsMock).toHaveBeenCalledWith(1, { sessionLockMinutes: null }),
@@ -378,7 +378,7 @@ describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
     renderPage();
     const input = await screen.findByTestId('lock-minutes-input');
     fireEvent.change(input, { target: { value: '120' } });
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-lock'));
 
     await waitFor(() => expect(putControlsMock).toHaveBeenCalledWith(1, { sessionLockMinutes: 120 }));
   });
@@ -388,7 +388,7 @@ describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
     renderPage();
     const input = await screen.findByTestId('lock-minutes-input');
     fireEvent.change(input, { target: { value: '120' } });
-    fireEvent.click(screen.getByTestId('save-controls'));
+    fireEvent.click(screen.getByTestId('save-lock'));
 
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith('success', expect.stringContaining('120')),
@@ -436,5 +436,53 @@ describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('lock-minutes-input')).toHaveValue(30));
+  });
+});
+
+describe('ParentControlsPage：两张卡各有自己的保存（2026-09-24 用户裁决）', () => {
+  it('只改锁定值 → 只有锁卡可保存，预警卡的保存仍禁用', async () => {
+    renderPage();
+    fireEvent.change(await screen.findByTestId('lock-minutes-input'), {
+      target: { value: '120' },
+    });
+
+    expect(screen.getByTestId('save-lock')).toBeEnabled();
+    expect(screen.getByTestId('save-alerts')).toBeDisabled();
+  });
+
+  it('只改预警值 → 只有预警卡可保存，锁卡的保存仍禁用', async () => {
+    renderPage();
+    fireEvent.change(await screen.findByTestId('controls-away-input'), {
+      target: { value: '10' },
+    });
+
+    expect(screen.getByTestId('save-alerts')).toBeEnabled();
+    expect(screen.getByTestId('save-lock')).toBeDisabled();
+  });
+
+  it('点锁卡的保存**只提交锁定字段**（不会顺带把预警阈值写回去）', async () => {
+    renderPage();
+    fireEvent.change(await screen.findByTestId('lock-minutes-input'), {
+      target: { value: '45' },
+    });
+
+    fireEvent.click(screen.getByTestId('save-lock'));
+
+    await waitFor(() =>
+      expect(putControlsMock).toHaveBeenCalledWith(1, { sessionLockMinutes: 45 }),
+    );
+    expect(Object.keys(putControlsMock.mock.calls[0][1])).toEqual(['sessionLockMinutes']);
+  });
+
+  it('保存失败提示只出现在**发起保存的那张卡**上', async () => {
+    putControlsMock.mockRejectedValue(new ApiError(1001, 'sessionLockMinutes 越界'));
+    renderPage();
+    fireEvent.change(await screen.findByTestId('lock-minutes-input'), {
+      target: { value: '45' },
+    });
+    fireEvent.click(screen.getByTestId('save-lock'));
+
+    await waitFor(() => expect(screen.getByTestId('lock-save-error')).toBeInTheDocument());
+    expect(screen.queryByTestId('controls-save-error')).not.toBeInTheDocument();
   });
 });

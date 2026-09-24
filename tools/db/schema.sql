@@ -863,7 +863,7 @@ CREATE TABLE IF NOT EXISTS goals (
 CREATE TABLE IF NOT EXISTS controls (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   student_id BIGINT NOT NULL,
-  session_lock_minutes SMALLINT DEFAULT NULL COMMENT '单次学习锁定分钟数（1..480）：学生登录起该时间内禁止登出；NULL = 未设锁',
+  session_lock_minutes SMALLINT DEFAULT 30 COMMENT '单次学习锁定分钟数（1..480）：学生登录起该时间内禁止登出；NULL = 家长显式解除设置（未设锁）；默认 30',
   disabled_hours TEXT DEFAULT NULL,
   reward_redemption_enabled TINYINT(1) NOT NULL DEFAULT 1,   -- 兑换总开关：关了兑换端点直接 400
   -- 兑换汇率：多少积分换 1 元（家长可配）。与上面开关配合使用。

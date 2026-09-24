@@ -111,7 +111,7 @@ UX 文档承诺的 PC 能力（`UX-UI设计文档.md:708` 三栏、`:715-716` �
 
 ### 4.1 改名：`controls.daily_time_limit_minutes` → `session_lock_minutes`
 
-- **语义**：`NULL` = 未设锁（学生可自由登出，kiosk 仍全屏）；`1..480` = 登录起算 N 分钟内**禁止登出**。
+- **语义**：`NULL` = 家长显式解除设置（未设锁，学生可自由登出，kiosk 仍全屏）；`1..480` = 登录起算 N 分钟内**禁止登出**；**默认 30**（2026-09-24 用户裁决：新建 controls 行与存量 NULL 都取 30，见迁移 `2026-09-24_session_lock_default_30.sql`）。
 - **为什么改名而不是只改语义**：列名继续叫 `daily_time_limit_minutes` 却存"单次登录锁定分钟数"，就是在撒谎——接手者照名字写逻辑必错。
 - **迁移**：`tools/db/migrations/2026-09-23_session_lock_minutes.sql`，必须**幂等**（先查 `information_schema.COLUMNS` 存在旧列名才 `ALTER TABLE controls RENAME COLUMN`）。同步 `schema.sql:866`。
 - **安全性**：该列实测恒为 NULL（§1.3），重命名不丢数据。

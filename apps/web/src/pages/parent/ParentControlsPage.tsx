@@ -45,6 +45,8 @@ const MINUTES_ERROR = `请填 ${MINUTES_MIN}–${MINUTES_MAX} 的整数`;
 /** 「单次学习锁定」范围（spec §5.6）。null = 未设锁。 */
 const LOCK_MINUTES_MIN = 1;
 const LOCK_MINUTES_MAX = 480;
+/** 与服务端列默认值一致（`controls.session_lock_minutes DEFAULT 30`，2026-09-24 用户裁决）。改一处要同步另一处。 */
+const DEFAULT_LOCK_MINUTES = 30;
 const LOCK_MINUTES_ERROR = `请填 ${LOCK_MINUTES_MIN}–${LOCK_MINUTES_MAX} 的整数`;
 
 /**
@@ -95,7 +97,10 @@ export default function ParentControlsPage() {
   const [controlsFailedStudentId, setControlsFailedStudentId] = useState<number | null>(null);
   const [controlsReload, setControlsReload] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  /** 保存失败提示要**标明是哪张卡**的（两张卡各有自己的保存，混着显示会让家长找错地方）。 */
+  const [saveError, setSaveError] = useState<{ block: 'alerts' | 'lock'; message: string } | null>(
+    null,
+  );
 
   const [points, setPoints] = useState<{ studentId: number; value: PointsSettings } | null>(null);
   const [pointsFailedStudentId, setPointsFailedStudentId] = useState<number | null>(null);
@@ -226,12 +231,19 @@ export default function ParentControlsPage() {
   const lockChanged =
     parsedLock !== undefined && parsedLock !== (loaded?.snapshot.sessionLockMinutes ?? null);
 
-  const dirty = awayChanged || idleChanged || lockChanged;
-  const canSave = dirty && !awayError && !idleError && !lockError && !saving;
   const activePreset =
     parsedAway !== null && parsedIdle !== null
       ? PRESETS.find((p) => p.away === parsedAway && p.idle === parsedIdle)
       : undefined;
+
+  /**
+   * **每张卡各有自己的保存按钮**（2026-09-24 用户裁决，推翻初版「共用一个」）：
+   * 用户原话「按说每个 card 有自己的保存，不能说点上面 card 中的保存 button 也管着下面的 card」。
+   * 两张卡的脏判定 / 可保存条件 / 提交字段都各自独立，互不干涉。
+   */
+  const alertsDirty = awayChanged || idleChanged;
+  const canSaveAlerts = alertsDirty && !awayError && !idleError && !saving;
+  const canSaveLock = lockChanged && !lockError && !saving;
 
   /** 查到了、而且确实没有进行中的会话 → 才禁用「解除」（查失败是未知，保持可点）。 */
   const sessionsKnown = sessions?.studentId === studentId;
@@ -239,14 +251,23 @@ export default function ParentControlsPage() {
   const canUnlock = !unlocking && !knownNoSession;
   const unlockHint = knownNoSession ? '当前没有进行中的学习，无需解除' : null;
 
-  const doSave = async () => {
-    if (!canSave || loaded === null || parsedAway === null || parsedIdle === null) return;
+  /**
+   * 保存 —— **按卡分派**：`alerts` 只发两个预警阈值，`lock` 只发 `sessionLockMinutes`。
+   * 各自的可用条件已在上面算好（`canSaveAlerts` / `canSaveLock`），互不干涉。
+   */
+  const doSave = async (block: 'alerts' | 'lock') => {
+    if (loaded === null) return;
     // 只发改动过的字段：后端语义是「未提供即不动」
     const body: Partial<ParentControls> = {};
-    if (awayChanged) body.alertAwayMinutes = parsedAway;
-    if (idleChanged) body.alertIdleMinutes = parsedIdle;
-    // `null` 是「解除设置」这个**值**，必须显式发出去；漏发等于「不动」，家长会以为保存成功了
-    if (lockChanged && parsedLock !== undefined) body.sessionLockMinutes = parsedLock;
+    if (block === 'alerts') {
+      if (!canSaveAlerts || parsedAway === null || parsedIdle === null) return;
+      if (awayChanged) body.alertAwayMinutes = parsedAway;
+      if (idleChanged) body.alertIdleMinutes = parsedIdle;
+    } else {
+      if (!canSaveLock || parsedLock === undefined) return;
+      // `null` 是「解除设置」这个**值**，必须显式发出去；漏发等于「不动」，家长会以为保存成功了
+      body.sessionLockMinutes = parsedLock;
+    }
     setSaving(true);
     setSaveError(null);
     try {
@@ -266,14 +287,14 @@ export default function ParentControlsPage() {
       // 回显服务端保存后的值：万一输入没被采纳，这句话会把差异摆在眼前（同 P6.5 的教训）
       toast(
         'success',
-        lockChanged
+        block === 'lock'
           ? `已保存：单次学习锁定 ${next.sessionLockMinutes === null ? '未设' : `${next.sessionLockMinutes} 分钟`}`
           : `已保存：离开页面 ${next.alertAwayMinutes} 分钟 / 无操作 ${next.alertIdleMinutes} 分钟`,
       );
     } catch (err: unknown) {
       const message = err instanceof ApiError && err.message ? err.message : '保存失败';
       toast('error', message);
-      setSaveError(message);
+      setSaveError({ block, message });
     } finally {
       setSaving(false);
     }
@@ -331,23 +352,23 @@ export default function ParentControlsPage() {
               </p>
             </div>
             <Button
-              variant={canSave ? 'primary' : 'ghost'}
+              variant={canSaveAlerts ? 'primary' : 'ghost'}
               size="sm"
               loading={saving}
-              disabled={!canSave}
-              data-testid="save-controls"
-              onClick={() => void doSave()}
+              disabled={!canSaveAlerts}
+              data-testid="save-alerts"
+              onClick={() => void doSave('alerts')}
             >
               保存
             </Button>
           </div>
 
-          {saveError && (
+          {saveError?.block === 'alerts' && (
             <p
               data-testid="controls-save-error"
               className="mt-4 rounded-[var(--radius-button)] border border-[var(--error)] px-3 py-2 text-xs text-[var(--error)]"
             >
-              {saveError}
+              {saveError.message}
             </p>
           )}
 
@@ -414,15 +435,37 @@ export default function ParentControlsPage() {
                 <h2 className="text-base font-bold text-[var(--text-primary)]">单次学习锁定</h2>
                 <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
                   孩子登录学习端后，下面这段时间内不能退出登录，到点自动解除；也可以随时手动解除。
-                  留空表示不设锁。
+                  默认 {DEFAULT_LOCK_MINUTES} 分钟；清空输入框并保存表示解除锁定（不设锁）。
                 </p>
               </div>
-              <span data-testid="lock-status" className="text-sm text-[var(--text-secondary)]">
-                {loaded.snapshot.sessionLockMinutes === null
-                  ? '当前：未设锁'
-                  : `当前：${loaded.snapshot.sessionLockMinutes} 分钟`}
-              </span>
+              <div className="flex items-center gap-4">
+                <span data-testid="lock-status" className="text-sm text-[var(--text-secondary)]">
+                  {loaded.snapshot.sessionLockMinutes === null
+                    ? '当前：未设锁'
+                    : `当前：${loaded.snapshot.sessionLockMinutes} 分钟`}
+                </span>
+                {/* 本卡**自己的**保存（只提交 sessionLockMinutes），与上面那张卡互不干涉 */}
+                <Button
+                  variant={canSaveLock ? 'primary' : 'ghost'}
+                  size="sm"
+                  loading={saving}
+                  disabled={!canSaveLock}
+                  data-testid="save-lock"
+                  onClick={() => void doSave('lock')}
+                >
+                  保存
+                </Button>
+              </div>
             </div>
+
+            {saveError?.block === 'lock' && (
+              <p
+                data-testid="lock-save-error"
+                className="mt-4 rounded-[var(--radius-button)] border border-[var(--error)] px-3 py-2 text-xs text-[var(--error)]"
+              >
+                {saveError.message}
+              </p>
+            )}
 
             <div className="mt-5 flex flex-wrap items-end gap-4">
               <Input
