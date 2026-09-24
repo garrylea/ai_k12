@@ -28,3 +28,13 @@ export interface PollView {
    */
   lock: { sessionId: number; lockExpiresAt: string | null; unlockedAt: string | null } | null;
 }
+
+/** `POST /api/parent/students/:studentId/device-commands` 的响应（spec §5.4）。 */
+export interface IssuedCommandView {
+  id: number;
+  command: string;
+  status: 'pending';
+  /** 该命令指向的进行中会话。家长端据此知道「解除了哪一次」。 */
+  learningSessionId: number;
+  createdAt: string;
+}
