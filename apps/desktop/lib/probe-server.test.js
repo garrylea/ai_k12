@@ -69,11 +69,13 @@ describe('probeServer', () => {
     expect(await probeServer(url, 300)).toBe(false);
   });
 
-  it('timeoutMs 非法（0）→ 退化为默认值而不是永不 settle', async () => {
-    const url = await listen((_req, res) => {
-      res.writeHead(200);
-      res.end('ok');
+  it('timeoutMs 非法（0）→ 退化为默认值，不会永不 settle', async () => {
+    // 关键：服务器**接受连接但永不响应** —— 只有「超时确实生效」这次探测才会 settle。
+    // 若把 0 原样传给 socket.setTimeout（Node 里 0 = 不超时），本用例会挂死到 vitest 超时。
+    // 退化后的默认超时是 3000ms，故给用例留 8s 上限。
+    const url = await listen(() => {
+      /* 故意不响应 */
     });
-    expect(await probeServer(url, 0)).toBe(true);
-  });
+    await expect(probeServer(url, 0)).resolves.toBe(false);
+  }, 8000);
 });
