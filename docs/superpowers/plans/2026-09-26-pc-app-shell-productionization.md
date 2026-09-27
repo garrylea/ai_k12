@@ -575,9 +575,13 @@ describe('writeStudentMode', () => {
     expect(readStudentMode(missing)).toBe(true);
   });
 
-  it('非布尔入参被强制成布尔（不写进奇怪的值）', () => {
+  it('非布尔入参被强制成布尔：落盘的是布尔，不是原始值', () => {
     writeStudentMode(dir, 'yes');
-    expect(readStudentMode(dir)).toBe(false);
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, STATE_FILE_NAME), 'utf8'));
+    // Boolean('yes') === true —— 这里是**类型强制**，不是「把真值丢掉」。
+    // 断言用 toBe（严格同一）才能同时钉住「值是 true」与「类型是 boolean」：
+    // 若实现写成 JSON.stringify({ studentMode: on })，落盘会是字符串 'yes'，此断言即红。
+    expect(raw.studentMode).toBe(true);
   });
 });
 ```
@@ -1256,6 +1260,35 @@ function showOfflinePage() {
   });
 ```
 
+- [ ] **Step 4b: 在窗口 `closed` 时清掉重试表（2026-09-27 补）**
+
+`createWindow()` 里原本就有的 `closed` 处理器只置空了 `win`，没管重试表 —— 于是窗口关掉后
+interval 会一直每 5 秒空转一次（被 `tryReconnect()` 的 `!win` 早退挡掉，无害，但没必要）。
+
+⚠️ 这**不是**功能修复：重建窗口后自动重连本来就能工作（`setInterval` 的回调读的是**模块级** `win`，
+不是捕获的旧窗口，所以 `activate` 建了新窗之后，旧表的下一次 tick 就会作用于新窗）。
+改这一段只是因为表不该活得比它的窗口长。
+
+把 `createWindow()` 里这段：
+
+```js
+  win.on('closed', () => {
+    win = null;
+  });
+```
+
+替换为：
+
+```js
+  win.on('closed', () => {
+    // 窗口没了就把重试表停掉，别留一个每 5 秒空转（被 `!win` 挡掉）的定时器。
+    // 注意：这**不是**功能修复 —— 重建窗口后自动重连本来就能工作（interval 回调读的是
+    // 模块级 `win`，不是捕获的旧窗口）。新窗口加载失败时 did-fail-load 会自己重新起表。
+    stopRetry();
+    win = null;
+  });
+```
+
 - [ ] **Step 5: main.js 加「立即重试」的 IPC**
 
 在既有的 `ipcMain.on('kiosk:set-student-mode', ...)` 附近追加：
@@ -1626,9 +1659,9 @@ git commit -m "chore(desktop): 应用图标 1024×1024（由 web 的 favicon.svg
 这两条都在有序列表里，注记必须**缩进 3 空格**才能留在同一条目内。在两行各自末尾换行后追加：
 
 ```markdown
-   > **更正（2026-09-26）**：本条只覆盖「学习中途断网」。**没有覆盖「断网后重新启动壳」** ——
-   > 那条路径当时可逃逸（kiosk 由页面里的渲染层经 IPC 驱动，离线时页面加载不出来、渲染层不执行，
-   > 于是 `studentMode` 恒为 false、窗口不是 kiosk）。已由
+   > **更正（2026-09-26）**：本条之外，当时还有一条**未被覆盖的路径**：**「断网后重新启动壳」** ——
+   > kiosk 由页面里的渲染层经 IPC 驱动，离线时页面加载不出来、渲染层不执行，
+   > 于是 `studentMode` 恒为 false、窗口不是 kiosk，该路径当时可逃逸。已由
    > `2026-09-26-pc-app-shell-productionization-design.md` §4.3 补齐（`studentMode` 持久化到 `userData/shell-state.json`）。
 ```
 
@@ -1751,13 +1784,16 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 | macOS | `~/Library/Application Support/k12-desktop/config.json` |
 | Linux | `~/.config/k12-desktop/config.json` |
 
-内容就一行：
+内容就一行（**把地址替换成服务器的新地址**；照抄下面这行等于没改 —— 它正好是当前默认值）：
 
 ```json
 { "serverUrl": "http://192.168.1.5:5173" }
 ```
 
 - 改完**必须重启 App** 才生效（启动时读取）
+  - ⚠️ **如果窗口关不掉**：学生处于 kiosk（学生模式）时，壳会自己拦掉关闭 / 最小化 / `Cmd+Q` / `Alt+F4`。
+    此时用系统的**强制退出**（macOS `Cmd+Opt+Esc`；Windows 任务管理器；Linux 等价方式）
+    或**直接重启这台机器**，再打开壳。**这是唯一能绕过壳自身拦截的出口** —— 别在窗口上反复点关闭
 - 必须是合法 JSON，且 `serverUrl` 是 `http(s)://` 开头的完整地址；
   **不合法时会被忽略并回退到 `server-url.js` 的默认值，不会让 App 卡住启动**
   （启动日志里会有一行 `warn` 说明为什么忽略）
@@ -1790,7 +1826,7 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 
 1. ☐ **本机 IP 固定** —— 路由器后台把本机 MAC 绑定到固定地址（DHCP 保留/静态 IP）。
    学生机壳里写死的就是这个地址，**IP 一变，所有学生机都要重新出包重装**，
-   或逐台改 `config.json`（见上文「地址变了…」）
+   或逐台改 `config.json`（见下文「地址变了…」）
 2. ☐ **防火墙放行 5173** —— macOS「系统设置 → 网络 → 防火墙」；本机实测当前**防火墙已关闭**，
    故无需额外配置（若日后开启，需放行 `node` 与端口 `5173`）
 3. ☐ **换机实测** —— 拿另一台电脑/手机浏览器打开 `http://<本机IP>:5173`，确认能到登录页
