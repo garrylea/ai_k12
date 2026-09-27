@@ -118,6 +118,10 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // 生产构建关掉 DevTools（spec §4.4）：这是「改 localStorage」这个逃逸面
+      // 价值最高的一道门槛 —— 它也一并封掉 F12 / Cmd+Opt+I / Ctrl+Shift+I。
+      // dev 模式保留（isPackaged 为 false），调试不受影响。
+      devTools: !app.isPackaged,
     },
   });
 
