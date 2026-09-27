@@ -8,6 +8,41 @@
 
 ---
 
+## 2026-09-27 — PC App 壳：**必须禁用系统代理**（否则「连不上本地页」静默失效）
+
+**怎么发现的**：② 合并后用户质疑「Task 6/7 你自己就能跑，为什么让我操作」。controller 遂用 Electron
+远程调试端口（CDP）自行真机验证 —— 读页面 URL 判断是否 `file://…/offline.html`、读视口尺寸判断是否 kiosk。
+结果 **Task 6 全 4 步、Task 7 的 #2/#3/#4/#5/#6、Task 8 的 #8/#12/#13 全部自动验过**（详见
+`.superpowers/sdd/progress.md`），过程中撞出这个缺陷。
+
+**现象**：服务停掉、地址为写死的 LAN 地址 `http://192.168.1.5:5173` 时，启用壳后
+**30 秒内没有任何失败信号** —— 日志连 `Failed to load URL` 都不打，页面停在 pending 的 http URL 上，
+那张「连不上」本地页**永不出现**、探测式重连也不启动。而地址换成 `127.0.0.1:<port>` 就一切正常。
+
+**根因**：本机 macOS 开着 **PAC 代理**（`scutil --proxy` → `ProxyAutoConfigEnable:1`,
+`ProxyAutoConfigURLString: http://127.0.0.1:12223/proxy.pac`）。Chromium 把**局域网地址也交给代理**：
+`127.0.0.1` 被 PAC 判为直连（毫秒拒连、行为正常），而 `192.168.1.5` **走代理 → 请求挂在代理上**。
+对照 `curl`：两个地址在 TCP 层都是 7ms 内拒连 ⇒ **网络本身没问题，差异纯在代理解析**。
+服务恢复时挂着的请求立刻完成，伪装成「0 秒进入」。
+
+**影响面**：任一配了系统代理 / PAC 的机器（校园网、VPN/Clash 类客户端在国内极常见）上，
+**「连不上 → 本地页 + 探测式重连」这套功能静默失效**；而 LAN 地址整条走代理，**正常加载也可能被干扰**。
+静态读代码、单测、mock 都发现不了 —— 只有真跑一遍才会暴露。
+
+**修法**：`main.js` 在 `app.whenReady()` **之前** `app.commandLine.appendSwitch('no-proxy-server')`
+（页面 / `/api` / `/assets` 全同源，④ 的更新源也在同一台服务器，直连正确且最简单）。
+**实测对照**：加开关后同一场景 → 日志出现 `ERR_CONNECTION_REFUSED`、**3 秒**出现本地页、15 秒后仍是本地页。
+
+同步：spec 新增 §4.7 + 冒烟 #18（在配了代理的机器上验）；`docs/constraints/pc-app-学习管控.md`
+新增「必须全局禁用代理（勿删）」一节；README 已知边界补一条；本文件即本条。
+
+**顺带修正的既有认知**：spec 原以为「`ready-to-show` 在离线路径上是否触发」只能人工判定 ——
+CDP 实测**会触发**（预写 `{"studentMode":true}` + 地址不可达时视口 = `1920×1080` 整屏；对照 `false` 为 `1440×868`）。
+另实测 `ERR_ABORTED(-3)` 的排除生效：被 `will-navigate` 拦掉的外链跳转**不会**误触发本地页
+（原 reviewer 担心此处需加错误码白名单，实测不需要）。
+
+---
+
 ## 2026-09-26 — PC App 壳生产化（②）
 
 设计：`docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md`；

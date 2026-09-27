@@ -59,6 +59,22 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - **启动路径不做探测**（只用于重试判定）
 - 本地页地址经 `loadFile` 的 query 传入，**不为此新增 IPC 通道**
 
+### ⚠️ 必须全局禁用代理（`no-proxy-server`，勿删）
+
+`main.js` 在 `app.whenReady()` **之前** `app.commandLine.appendSwitch('no-proxy-server')`。
+**这不是优化，是本地页能否工作的前提**：
+
+- 上面那套「本地页 + 探测式重连」**全靠 `did-fail-load` 触发**；而 Chromium 会把**局域网地址也交给
+  系统代理 / PAC** → 请求**挂在代理上**而不是快速失败 → `did-fail-load` **永不触发** →
+  **本地页永不出现、探测式重连不启动**（2026-09-27 本机 PAC 环境实测：30 秒无任何失败信号，
+  日志连 `Failed to load URL` 都没有；服务恢复时挂着的请求立刻完成，伪装成「0 秒进入」）
+- 直连对本 App 是正确的：页面 / `/api` / `/assets` 全**同源**，④ 的更新源也挂在同一台服务器。
+  **若将来要经代理访问外网，需重新评估**（届时改用 `--proxy-bypass-list` 只绕过服务器地址更合适）
+- **验证办法**：在配了代理/PAC 的机器上（`scutil --proxy`）停掉服务、用**写死的 LAN 地址**启动，
+  应 **≤5 秒**出现本地页且日志有 `ERR_CONNECTION_REFUSED`。**本地页不出现且日志没有失败行 = 代理没禁用**
+- ⚠️ 影响面不止失败路径：配了代理的校园网 / VPN / Clash 类环境里，LAN 地址可能整条走代理，
+  **正常加载也可能被干扰**。部署前应在目标网络形态下验证
+
 ### 生产加固：只做 DevTools，四条「不做」勿补
 
 - `webPreferences.devTools = !app.isPackaged`。dev 保留，生产一并封掉 F12 / `Cmd+Opt+I` / `Ctrl+Shift+I`

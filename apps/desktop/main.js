@@ -7,6 +7,22 @@ const { probeServer } = require('./lib/probe-server.js');
 const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 
 /**
+ * **全局禁用代理**（spec §4.7）。
+ *
+ * ⚠️ 这**不是**可有可无的优化，而是「连不上本地页」能否工作的前提。本机/学校网络常配 PAC 或系统代理，
+ * 而 Chromium 会把**局域网地址也交给代理**：于是请求**挂在代理上**，而不是快速失败 ——
+ * `did-fail-load` 永不触发 → 那张「连不上」本地页**永不出现**、探测式重连也不会启动。
+ * （2026-09-27 在本机 PAC 环境实测：服务停掉后 30 秒内无任何失败信号，日志连
+ * `Failed to load URL` 都没有；加本开关后 2 秒出现本地页。）
+ *
+ * 本壳只跟**自己的**服务器通信：页面、`/api`、`/assets` 全同源，④ 的更新源也计划挂在同一台服务器上
+ * —— 所以直连是正确且最简单的选择。若将来真要经代理访问外网，需重新评估。
+ *
+ * **必须在 `app.whenReady()` 之前调用**（网络栈初始化前）。
+ */
+app.commandLine.appendSwitch('no-proxy-server');
+
+/**
  * K12 智学 PC App —— Electron 壳（spec `2026-09-23-pc-app-study-lockdown-design.md` §6.1）。
  *
  * 本壳**不做任何业务**：它加载与 Web App **完全相同**的 UI，只负责三件事：
