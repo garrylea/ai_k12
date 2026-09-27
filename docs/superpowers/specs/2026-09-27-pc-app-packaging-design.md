@@ -7,6 +7,10 @@
 > **2026-09-27 复核修订**：本文件经一轮逐条实测复核。新增 **§4.0（阻断项）**；修订 §4.2 / §4.3 / §4.4 /
 > §5 / §6-1 与 §9，并给 §7 加了「**要删的旧表述**」一栏。原设计的主体（三层地址来源、白名单、
 > 三平台 matrix、asar 断言）**未改**。
+>
+> **2026-09-27 二次更正（同日、动手前）**：§1 原写「electron-builder 当前主线是 v27」**是错的** ——
+> npm 上**没有稳定 v27**（`dist-tags` 实测 `{ latest: '26.15.3', next: '27.0.0-alpha.9', v26: '26.17.0' }`）。
+> 已把版本前提改为**稳定线 v26**，连带更正 §2-2 / §4.3 第 2 步 / §7 / §8-2（见各处标了「二次更正」的地方）。
 
 ## 0. 本设计在「PC App 正式交付」中的位置
 
@@ -29,8 +33,8 @@
 | **不该进包的** | 5 个 `*.test.js`（默认会被打进 app 目录，必须显式排除）。**测试恰好 38 条**：`server-url` 2 / `config-file` 13 / `resolve-server-url` 7 / `probe-server` 7 / `shell-state` 9 |
 | 图标 | `build/icon.png` = **1024×1024 RGBA** ✓（≥256，mac / win / linux 三平台都能由它生成图标，**不需要额外准备 `.ico` / `.icns`**） |
 | Electron 版本 | `v44.4.5` |
-| electron-builder | **未安装**；当前主线是 **v27**，需 **Node ≥ 22.12**；**v27 是 ESM-only 大版本** → 配置必须走 YAML（**勿改写成 CJS 的 `electron-builder.js`**） |
-| **Electron 44 的连带事实** | **已移除 Windows ia32 构建**；v27 对 ia32 / armv7l 配 `electronVersion >= 44` 会**快速失败**（与「只出 x64」的计划一致）。报错文案：`Use electronVersion <= 43.x to keep building for ${archName} (32-bit is supported until the v43 series reaches end-of-life in January 2027)` |
+| electron-builder | **未安装**。**⚠️ 2026-09-27 二次更正**：npm 上**没有稳定 v27** —— 实测 `npm view electron-builder dist-tags` = `{ latest: '26.15.3', next: '27.0.0-alpha.9', v26: '26.17.0' }`；`npm view electron-builder@27` **404**。即 **v27 只有 alpha**，**稳定线是 v26**（`latest` 指向 26.15.3；engines `{ node: '>=14.0.0' }`）。本设计改用 **`^26.15.3`**，可复现性由 `npm ci` + `package-lock.json` 保证 |
+| **Electron 44 的连带事实** | **已移除 Windows ia32 构建**（这条是 Electron 侧的事实）。原写「v27 对 ia32 / armv7l 配 `electronVersion >= 44` 会**快速失败**」——**那是 v27 alpha 的行为**（报错文案 `Use electronVersion <= 43.x to keep building for ${archName} …`）。**我们装的稳定 26.x 上不保证有这道闸门**，但**无影响**：本设计只出 x64，根本走不到 ia32/armv7l 分支。**真正的验证靠 §8-2 的本机冒烟，不靠这两行纸面结论** |
 | 本机 | macOS **arm64**（Apple M1），node `v25.2.1` |
 | 仓库可见性 | **公开**（匿名 API 200）→ **GitHub Actions 分钟数免费无限**（含 macOS runner） |
 | 仓库体量 | 1132 个已跟踪文件 / `.git` 54MB / 最大文件 1.2MB → CI 检出无压力，**不需要 LFS** |
@@ -51,7 +55,7 @@
 | # | 内容 | 落点 |
 |---|---|---|
 | 1 | electron-builder 配置（标识 / `files` 白名单 / 三平台 target / `artifactName` / `asar`） | 新增 `apps/desktop/electron-builder.yml` |
-| 2 | **把 `electron-builder` 钉进 `devDependencies`（`^27`）**，CI 用本地 bin —— **不用 `npx` 现拉**（否则每次构建都可能换版本、不可复现） | `apps/desktop/package.json` |
+| 2 | **把 `electron-builder` 钉进 `devDependencies`（`^26.15.3` —— 稳定线；v27 只有 alpha，**不用**）**，CI 用本地 bin —— **不用 `npx` 现拉**（否则每次构建都可能换版本、不可复现） | `apps/desktop/package.json` |
 | 3 | **钉死 `userData`**，与 `productName` 解耦 | `apps/desktop/main.js` |
 | 4 | 三平台构建 workflow（含出包前测试门禁 + 产物白名单校验） | 新增 `.github/workflows/desktop-release.yml` |
 | 5 | 发布到本机服务器（`/download/`） | 新增 `tools/publish-installer.sh` + `.gitignore` 两条 |
@@ -211,7 +215,7 @@ macOS 那个标签若在 Actions 里不可用，退回 `macos-latest` —— **�
 标签可用性以**当天** GitHub 的 runner 列表为准（`macos-14` 属较老的镜像，投产前核一下）。
 
 1. `actions/checkout`
-2. `actions/setup-node` → **node 22**（electron-builder v27 要求 ≥ 22.12），并开 npm 缓存（`cache-dependency-path: apps/desktop/package-lock.json`）
+2. `actions/setup-node` → **node 22**（⚠️ **不是**被 electron-builder 逼的：稳定 v26 的 engines 只要求 `node >= 14`；选 22 是为了与仓库其它工具链对齐、并给日后可能升 v27 留余量），并开 npm 缓存（`cache-dependency-path: apps/desktop/package-lock.json`）
 3. `npm ci` —— **只在 `apps/desktop`**（包内不含 web / server 构建产物，CI 因此很快）
 4. **版本一致性校验**：tag 去掉前缀必须等于 `apps/desktop/package.json` 的 `version`，不符直接失败（防版本漂移）
 5. **`npm test`** —— **全绿**才继续（出包前门禁，用户裁决 §3-9）
@@ -379,16 +383,20 @@ cd apps/desktop
 | `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` | §5「② 阶段无法验证的」表里「DevTools 真的打不开」→ 标注已由 ③ 结清（指向本设计） | §8-8「`userData` 目录名会被 ③ 的 `productName` 改掉……**README 里那三条平台路径必须同步改**」→ 加**更正注记**：已由 ③ 显式钉死 `userData` 解决，**不要再按原句去改 README** |
 | `apps/desktop/package.json` | 加 `electron-builder` 到 `devDependencies`（`^27`） | `description` 里「（Electron 壳，dev 模式；本期不出安装包）」→ 过期 |
 | `apps/desktop/server-url.js` | —— | 文件头注释「**③ 的 CI 用环境变量重写本文件**，可产出指向不同服务器的包」与 §4.5 选的机制（**从本文件推导地址、不重写**）不是一回事 → 改成与实际一致（或删掉该句） |
-| `docs/ai-core-changelog.md` | 记录本次（含「electron-builder v27 需 Node ≥22.12 / ESM-only」「Electron 44 移除 ia32」「公开仓库 Actions 免费」「asar 白名单校验」「**根 `.gitignore` 的 `*.yml` 会吃掉新增 YAML**」「macOS 15 移除右键→打开」六条实测事实） | —— |
+| `docs/ai-core-changelog.md` | 记录本次（含「**npm 上 electron-builder 无稳定 v27、只有 `27.0.0-alpha.9`；稳定线 v26 的 engines 是 `node >= 14`**」「Electron 44 移除 Windows ia32」「公开仓库 Actions 免费」「asar 白名单校验」「**根 `.gitignore` 的 `*.yml` 会吃掉新增 YAML**」「**macOS 15 移除右键→打开**」「**AppImage 在 macOS 上要 docker、故本机只能验 `--mac`**」七条实测事实） | —— |
 | `CLAUDE.md` | **不新增章节**（体量纪律：内容进 `docs/constraints/`）；若「开发命令」一节需要提一句 `desktop-v*` tag 发版，至多一行 | —— |
 | `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml` | **无需变更**（本设计不涉及任何端点）—— 明确记录此结论，免得后来者以为漏同步 | —— |
 
 ## 8. 风险
 
 1. **mac 包只能在 macOS runner 上构建** —— 这条是硬约束，若日后想在本机/其它环境出 mac 包必须回到 macOS
-2. **Electron 44 与 electron-builder v27 的组合未经实测** —— 已知 v27 支持 Electron 44 且会拒 ia32/armv7l，
-   但**首个 CI run 之前都是纸面判断**。计划的第一个任务应先在本机跑通 `--dir`（不打包、只产出 app 目录）最小验证，
-   **并紧接着真出一次包（如 `--linux`）确认 `latest-linux.yml` 真的产出、URL 正确** —— 只跑 `--dir` 验不到清单这一步（§4.5）
+2. **Electron 44 与 electron-builder 26.x 的组合完全未经实测**（原「v27 支持 Electron 44 且会拒 ia32/armv7l」
+   这个前提，随 §1 的二次更正一起作废）→ **首个 CI run 之前都是纸面判断**。计划的第一个任务：
+   ① 本机跑通 `--dir`（不打包、只产出 app 目录）最小验证；② **紧接着真出一次包**，确认更新清单真的产出、URL 正确
+   —— 只跑 `--dir` 验不到清单这一步（§4.5）。
+   ⚠️ **② 在本机只能用 `--mac`，不能用 `--linux`**：AppImage 在 macOS 上要 docker，而 §1 已记录本机
+   `wine` / `docker` / `podman` **均未安装**。本机验 `--mac` + `latest-mac.yml` 即可 —— mac 清单虽然 ④ 不会用，
+   但它与 win/linux 走的是**同一段 publish 组装逻辑**，足以证明「CLI 注入能产出清单」这件事成立
 3. **未签名 mac 的首次打开体验**：家长大概率会卡在 Gatekeeper 提示上 → 交付文档必须放在显眼处，
    且下载页/说明里给出一行命令（**注意用 §6-1 的新指引，不要写已被移除的「右键→打开」**）
 4. **地址单一真源的耦合**：`publish.url` 从 `server-url.js` 推导 —— 换地址时只改一处是对的，
