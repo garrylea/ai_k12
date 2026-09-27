@@ -3,6 +3,7 @@ const path = require('node:path');
 const { SERVER_URL } = require('./server-url.js');
 const { readServerUrlFromFile } = require('./lib/config-file.js');
 const { resolveServerUrl } = require('./lib/resolve-server-url.js');
+const { probeServer } = require('./lib/probe-server.js');
 
 /**
  * K12 智学 PC App —— Electron 壳（spec `2026-09-23-pc-app-study-lockdown-design.md` §6.1）。
@@ -41,6 +42,62 @@ let win = null;
  */
 let WEB_URL = null;
 
+/** 重试定时器（null = 未在重试）。 */
+let retryTimer = null;
+/** 探测进行中标记：3 秒超时与 5 秒间隔会叠加，必须防并发探测。 */
+let probing = false;
+
+/** 重试间隔与探测超时（spec §4.2）。 */
+const RETRY_INTERVAL_MS = 5000;
+const PROBE_TIMEOUT_MS = 3000;
+
+/**
+ * 探测式重连：**只有探测通了才导航**（spec §4.2 的修正）。
+ *
+ * ⚠️ **不要改成「每 5 秒无脑 `loadURL`」**：主 frame 导航失败时 Chromium 会用
+ * **它自己的错误页替换掉我们的本地页**，那样本地页只出现一次、之后永久变成
+ * 「无法访问此网站」；而「已在本地页就不再 loadFile」的防闪烁写法会让它再也回不来。
+ */
+async function tryReconnect() {
+  if (!win || win.isDestroyed() || probing) return;
+  probing = true;
+  try {
+    if (await probeServer(WEB_URL, PROBE_TIMEOUT_MS)) {
+      // 通了就停表，把控制权交回正常加载；若这次加载仍失败，
+      // did-fail-load 会重新起表，不会死循环。
+      stopRetry();
+      if (win && !win.isDestroyed()) win.loadURL(WEB_URL);
+    }
+  } finally {
+    probing = false;
+  }
+}
+
+function startRetry() {
+  if (retryTimer) return;
+  retryTimer = setInterval(() => {
+    void tryReconnect();
+  }, RETRY_INTERVAL_MS);
+}
+
+function stopRetry() {
+  if (retryTimer) {
+    clearInterval(retryTimer);
+    retryTimer = null;
+  }
+}
+
+/**
+ * 显示本地页。当前地址经 `loadFile` 的 query 传入，本地页从 `location.search` 读
+ * —— 不为此新增 IPC 通道（spec §4.2）。
+ */
+function showOfflinePage() {
+  if (!win || win.isDestroyed()) return;
+  win.loadFile(path.join(__dirname, 'pages', 'offline.html'), {
+    query: { url: WEB_URL },
+  });
+}
+
 /** 同源判定：只放行壳自己的地址，其余一律拦。 */
 function isSameOrigin(url) {
   try {
@@ -64,6 +121,20 @@ function createWindow() {
   });
 
   win.loadURL(WEB_URL);
+
+  // 连不上 → 本地页 + 探测式重试（spec §4.2）
+  win.webContents.on('did-fail-load', (_event, errorCode, _errorDescription, _url, isMainFrame) => {
+    if (!isMainFrame) return; // 子资源（图片/CSS）失败不算「连不上」
+    if (errorCode === -3) return; // ERR_ABORTED：导航被取消，页面并未失败
+    showOfflinePage();
+    startRetry();
+  });
+
+  win.webContents.on('did-finish-load', () => {
+    if (!win || win.isDestroyed()) return;
+    // 主 frame 加载完成且当前不是本地页（file:）→ 说明连上了，停表
+    if (!win.webContents.getURL().startsWith('file:')) stopRetry();
+  });
 
   // 拦外链：AI 回复的 markdown 会渲染 target="_blank"（AdminChatPage / AuxChatPanel），
   // 不拦就是「大模型吐个链接 → 学生点进浏览器」。
@@ -123,4 +194,9 @@ ipcMain.on('kiosk:set-student-mode', (_event, on) => {
   win.setClosable(!studentMode);
   // setMinimizable 在 macOS 上是 no-op；Windows/Linux 上有效。不是错误，别加平台分支。
   win.setMinimizable(!studentMode);
+});
+
+// 本地页「立即重试」→ 走同一条探测路径（单向通道，spec §4.2）
+ipcMain.on('shell:retry-now', () => {
+  void tryReconnect();
 });

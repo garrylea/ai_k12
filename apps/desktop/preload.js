@@ -19,3 +19,14 @@ contextBridge.exposeInMainWorld('k12Desktop', {
   setStudentMode: (on) => ipcRenderer.send('kiosk:set-student-mode', Boolean(on)),
   isDesktop: true,
 });
+
+/**
+ * 本地页（`pages/offline.html`）用的桥，只有一件事：点「立即重试」时通知主进程
+ * 立刻探测一次（spec §4.2）。
+ *
+ * 它**是无参数、无返回的单向 send**，唯一效果是「再试一次加载连接」——远端页面即使
+ * 拿到它也做不了任何越权的事。因此它不违反上面那条「不要加 invoke / fs」的约束。
+ */
+contextBridge.exposeInMainWorld('k12Shell', {
+  retryNow: () => ipcRenderer.send('shell:retry-now'),
+});

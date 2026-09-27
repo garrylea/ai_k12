@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <!-- 本地页不加载任何外部资源；内联脚本/样式需要显式放行 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>K12 智学系统</title>
+    <style>
+      :root {
+        --brand: #ff6b35;
+        --ink: #1f2328;
+        --muted: #6b7280;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f7f8fa;
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      }
+      main {
+        width: 420px;
+        max-width: 90vw;
+        padding: 32px 28px;
+        text-align: center;
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+      }
+      .spinner {
+        width: 44px;
+        height: 44px;
+        margin: 0 auto 18px;
+        border: 3px solid var(--brand);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0 0 6px;
+        font-size: 13px;
+        line-height: 1.7;
+        color: var(--muted);
+      }
+      button {
+        margin-top: 20px;
+        padding: 9px 22px;
+        font-family: inherit;
+        font-size: 14px;
+        color: #fff;
+        background: var(--brand);
+        border: 0;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        filter: brightness(1.05);
+      }
+      .addr {
+        margin-top: 14px;
+        font-size: 12px;
+        color: var(--muted);
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="spinner" role="img" aria-label="正在重试"></div>
+      <h1>暂时连不上学习服务器，正在重试…</h1>
+      <p>如果一直连不上，请联系家长。</p>
+      <button id="retry" type="button">立即重试</button>
+      <!-- 当前地址由主进程经 loadFile 的 query 传入，便于家长/运营报障时定位。
+           ⚠️ 这里**不显示配置文件路径、不提供任何编辑入口**（spec §3-12） -->
+      <p class="addr" id="addr"></p>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      document.getElementById('addr').textContent = params.get('url') || '';
+      document.getElementById('retry').addEventListener('click', () => {
+        // 主进程走同一条「先探测、再导航」的路径；探测不通时页面不会有任何变化
+        window.k12Shell?.retryNow?.();
+      });
+    </script>
+  </body>
+</html>
