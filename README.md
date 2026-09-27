@@ -73,7 +73,8 @@ PID/日志与 deploy.sh 共用 `tools/deploy/runtime/`；由 deploy.sh 启动的
 cd apps/server && npm run build && node dist/main.js   # 1) 后端 :3001（必须用 dist：npx tsx 的 DI 是坏的）
 cd apps/web    && npm run dev                          # 2) 前端 :5173
 cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm install 会下载 Electron 二进制，约 100MB+，较慢）
-# 壳默认加载 http://localhost:5173；换地址用 K12_WEB_URL=… npm start
+# 壳默认加载 apps/desktop/server-url.js 里写死的地址（当前 http://192.168.1.5:5173）
+# 临时换地址：K12_WEB_URL=http://… npm start
 ```
 
 > 学生登录即进真全屏 kiosk（锁定期间关不掉窗口）；家长/管理员登录是普通窗口。
@@ -123,7 +124,8 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 
 #### 已知边界
 
-- 学生登录即进 kiosk；**锁定期间关不掉窗口、不能登出**，只有家长能解除或到期自动解除
+- 学生登录即进 kiosk；**只要处于 kiosk（学生模式）就关不掉窗口**（与是否在锁定期无关）；
+  「不能登出」才是锁定期间的限制，只有家长能解除或到期自动解除
 - 「**断网 + 杀进程 + 重启**」不再能逃逸：启动时会先读回上次的学生模式，直接进 kiosk
 - Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
   真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）

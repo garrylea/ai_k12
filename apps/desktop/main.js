@@ -128,7 +128,7 @@ function createWindow() {
   // 「偏向多锁」：上次是学生模式就一开机就进 kiosk，不等渲染层（spec §4.3、§6-7）。
   // 在首页真正显示出来之前应用，避免「先普通窗口、再全屏」的可见闪动。
   if (studentMode) {
-    win.once('ready-to-show', () => applyStudentMode(true));
+    win.once('ready-to-show', () => applyStudentMode(studentMode));
   }
 
   win.loadURL(WEB_URL);

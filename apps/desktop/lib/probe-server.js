@@ -17,7 +17,7 @@ const https = require('node:https');
  * 只有**连接失败**（ECONNREFUSED / DNS 失败等）与**超时**才返回 `false`。
  *
  * @param {string} url 形如 `http://192.168.1.5:5173`
- * @param {number} timeoutMs 超时毫秒数（spec 定 3000）
+ * @param {number} timeoutMs 超时毫秒数（spec 定 3000）；非法值（<=0 / 非有限数）退化为 3000
  * @returns {Promise<boolean>}
  */
 function probeServer(url, timeoutMs) {
@@ -29,6 +29,12 @@ function probeServer(url, timeoutMs) {
       resolve(false);
       return;
     }
+
+    // 非法超时会解除 socket 定时器（Node 里 0 = 不超时）→ promise 永不 settle →
+    // 调用方的 in-flight 标记卡在 true、自动重连静默失效。退化为一个安全默认值而不是
+    // 直接返回 false：返回 false 会让「永远探不通」同样表现为重试形同虚设。
+    const effectiveTimeoutMs =
+      Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 3000;
 
     const mod = target.protocol === 'https:' ? https : http;
 
@@ -46,7 +52,7 @@ function probeServer(url, timeoutMs) {
         hostname: target.hostname,
         port: target.port || (target.protocol === 'https:' ? 443 : 80),
         path: target.pathname || '/',
-        timeout: timeoutMs,
+        timeout: effectiveTimeoutMs,
       },
       (res) => {
         res.resume(); // 丢弃 body，尽早释放 socket

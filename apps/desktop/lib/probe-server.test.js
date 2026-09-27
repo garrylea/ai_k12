@@ -68,4 +68,12 @@ describe('probeServer', () => {
     });
     expect(await probeServer(url, 300)).toBe(false);
   });
+
+  it('timeoutMs 非法（0）→ 退化为默认值而不是永不 settle', async () => {
+    const url = await listen((_req, res) => {
+      res.writeHead(200);
+      res.end('ok');
+    });
+    expect(await probeServer(url, 0)).toBe(true);
+  });
 });
