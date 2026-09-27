@@ -3,6 +3,10 @@
 > **架构锚点**：`apps/desktop/`（Electron 壳，② 已交付）、`tools/services.sh`（Web 层托管）、
 > `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md`（②，本设计的前置）、
 > `apps/desktop/server-url.js`（**服务器地址的唯一真源**，本设计复用）。
+>
+> **2026-09-27 复核修订**：本文件经一轮逐条实测复核。新增 **§4.0（阻断项）**；修订 §4.2 / §4.3 / §4.4 /
+> §5 / §6-1 与 §9，并给 §7 加了「**要删的旧表述**」一栏。原设计的主体（三层地址来源、白名单、
+> 三平台 matrix、asar 断言）**未改**。
 
 ## 0. 本设计在「PC App 正式交付」中的位置
 
@@ -22,16 +26,21 @@
 | 事实 | 值 / 结论 |
 |---|---|
 | 壳的运行时资源 | `main.js`、`preload.js`、`server-url.js`、`lib/` 四个模块（`config-file` / `resolve-server-url` / `probe-server` / `shell-state`）、`pages/offline.html`、`build/icon.png` |
-| **不该进包的** | 5 个 `*.test.js`（默认会被打进 app 目录，必须显式排除） |
+| **不该进包的** | 5 个 `*.test.js`（默认会被打进 app 目录，必须显式排除）。**测试恰好 38 条**：`server-url` 2 / `config-file` 13 / `resolve-server-url` 7 / `probe-server` 7 / `shell-state` 9 |
+| 图标 | `build/icon.png` = **1024×1024 RGBA** ✓（≥256，mac / win / linux 三平台都能由它生成图标，**不需要额外准备 `.ico` / `.icns`**） |
 | Electron 版本 | `v44.4.5` |
-| electron-builder | **未安装**；当前主线是 **v27**，需 **Node ≥ 22.12** |
-| **Electron 44 的连带事实** | **已移除 Windows ia32 构建**；v27 对 ia32 / armv7l 配 `electronVersion >= 44` 会**快速失败**（与「只出 x64」的计划一致） |
+| electron-builder | **未安装**；当前主线是 **v27**，需 **Node ≥ 22.12**；**v27 是 ESM-only 大版本** → 配置必须走 YAML（**勿改写成 CJS 的 `electron-builder.js`**） |
+| **Electron 44 的连带事实** | **已移除 Windows ia32 构建**；v27 对 ia32 / armv7l 配 `electronVersion >= 44` 会**快速失败**（与「只出 x64」的计划一致）。报错文案：`Use electronVersion <= 43.x to keep building for ${archName} (32-bit is supported until the v43 series reaches end-of-life in January 2027)` |
 | 本机 | macOS **arm64**（Apple M1），node `v25.2.1` |
 | 仓库可见性 | **公开**（匿名 API 200）→ **GitHub Actions 分钟数免费无限**（含 macOS runner） |
 | 仓库体量 | 1132 个已跟踪文件 / `.git` 54MB / 最大文件 1.2MB → CI 检出无压力，**不需要 LFS** |
 | `apps/desktop/dist/` | **已被根 `.gitignore` 的 `dist/` 忽略** ✓（electron-builder 默认输出目录） |
+| `apps/web/public/download/` | **当前未被忽略**（根 `.gitignore` 无 `*.dmg` / `*.exe` 规则）→ 需按 §4.4 新增一条 ✓ |
+| **⚠️ 根 `.gitignore:53` 的 `*.yml`** | **会命中本设计新增的两个 YAML**（`apps/desktop/electron-builder.yml` + `.github/workflows/desktop-release.yml`）→ **必须按 §4.0 反选**，否则两个文件静默不入库、**CI 永不运行**。原有注释「仓库无已跟踪 `*.yml`，全局忽略安全」已失效（实测 `git ls-files '*.yml'` = 0 条） |
 | 现有 CI | **无**（无 `.github/`） |
 | 版本 / tag | `apps/desktop/package.json` = `0.1.0`；**无任何 tag**；**无 `productName`** |
+| `vite build` 行为 | 会把 `apps/web/public/` 拷进 `apps/web/dist/`，且默认清空 `dist/`（`vite.config.ts` 未改 `publicDir` / `copyPublicDir`，`build.assetsDir: 'static'` 不影响）→ **§4.4 的机制成立** ✓ |
+| **macOS Gatekeeper** | **Sequoia (15) 起 Apple 移除了「右键→打开」这条捷径** → 未签名应用现在只有「系统设置 → 隐私与安全性 → 仍要打开」或 `xattr -dr com.apple.quarantine`（见 §6-1） |
 | `gh` CLI | **token 已失效**（`Failed to log in to github.com account garrylea`）—— 控制器无法在本机观测 CI 结果 |
 | 本机交叉构建工具 | `wine` / `docker` / `podman` **均未安装** |
 
@@ -41,13 +50,15 @@
 
 | # | 内容 | 落点 |
 |---|---|---|
-| 1 | electron-builder 配置（标识 / `files` 白名单 / 三平台 target / `artifactName` / `publish`） | 新增 `apps/desktop/electron-builder.yml` |
-| 2 | **钉死 `userData`**，与 `productName` 解耦 | `apps/desktop/main.js` |
-| 3 | 三平台构建 workflow（含出包前测试门禁 + 产物白名单校验） | 新增 `.github/workflows/desktop-release.yml` |
-| 4 | 发布到本机服务器（`/download/`） | 新增 `tools/publish-installer.sh` + `.gitignore` 一条 |
-| 5 | 更新清单产出（为 ④ 铺路，本期不接更新逻辑） | 由 `publish` 配置带来 |
-| 6 | 交付文档：未签名 mac 的首次打开指引、下载路径、版本/tag 流程 | `README.md` 等 |
-| 7 | 结清 ② 遗留的 ③ 待验项：**生产构建下 DevTools 打不开** | 验收，非代码 |
+| 1 | electron-builder 配置（标识 / `files` 白名单 / 三平台 target / `artifactName` / `asar`） | 新增 `apps/desktop/electron-builder.yml` |
+| 2 | **把 `electron-builder` 钉进 `devDependencies`（`^27`）**，CI 用本地 bin —— **不用 `npx` 现拉**（否则每次构建都可能换版本、不可复现） | `apps/desktop/package.json` |
+| 3 | **钉死 `userData`**，与 `productName` 解耦 | `apps/desktop/main.js` |
+| 4 | 三平台构建 workflow（含出包前测试门禁 + 产物白名单校验） | 新增 `.github/workflows/desktop-release.yml` |
+| 5 | 发布到本机服务器（`/download/`） | 新增 `tools/publish-installer.sh` + `.gitignore` 两条 |
+| 6 | 更新清单产出（为 ④ 铺路，本期不接更新逻辑） | 由 CI 注入的 `publish` 配置带来 |
+| 7 | 交付文档：未签名 mac 的首次打开指引、下载路径、版本/tag 流程 | `README.md` 等 |
+| 8 | 结清 ② 遗留的 ③ 待验项：**生产构建下 DevTools 打不开** | 验收，非代码 |
+| 9 | **⚠️ `.gitignore` 反选两个新增 YAML**（否则整个 ③ 空转，见 §4.0） | `.gitignore` |
 
 ### 本期不做（明确）
 
@@ -65,26 +76,67 @@
 | # | 议题 | 裁决 |
 |---|---|---|
 | 1 | 产物怎么产出 | **GitHub Actions matrix**，三平台各自原生构建（仓库公开 → 分钟数免费；免去在本机装 wine/docker） |
-| 2 | macOS 签名 | **不签不公证**；首次打开由交付文档给「右键→打开」或 `xattr -dr com.apple.quarantine` |
+| 2 | macOS 签名 | **不签不公证**；首次打开由交付文档给指引（**具体指引见下方更正**） |
 | 3 | mac 自动更新 | **不做** —— 自动更新只覆盖 Win/Linux |
 | 4 | 更新清单 | **③ 顺手产出** `latest.yml` / `latest-linux.yml`（electron-builder 自带），**本期不接更新逻辑**，为 ④ 铺路 |
 | 5 | 安装包放哪 | **本机服务器 web 层的 `/download/`**；学生/家长从局域网取，不需要学生机访问公网 |
 | 6 | 应用名与路径 | **钉死 `userData` = `k12-desktop`** + 中文 `productName`（`K12 智学`）→ 应用名好看、救火路径不变 |
 | 7 | mac 产物形态 | **双架构两个 dmg**（x64 + arm64），不用 universal |
 | 8 | `appId` | `com.k12zhixue.desktop`（**发布后改不得**） |
-| 9 | CI 里的测试门禁 | **出包前跑 `apps/desktop` 的 38 条测试**，红则不出包 |
+| 9 | CI 里的测试门禁 | **出包前跑 `apps/desktop` 的测试**，红则不出包（判据是「全绿」，**不写死条数**——条数会随代码漂移） |
+
+> **裁决 2 的更正（2026-09-27 实测）**：Apple 自 macOS 15 Sequoia 起**移除了「右键→打开」**这条绕过
+> Gatekeeper 的捷径。裁决本身（不签不公证、指引写进交付文档）不变，但**指引内容**必须是：
+> ① 主推 `xattr -dr com.apple.quarantine "/Applications/K12 智学.app"`；② GUI 备选是
+> 「系统设置 → 隐私与安全性 → **仍要打开**」。**不要再写「右键→打开」**（家长会卡住，甚至看到「已损坏」）。
 
 ## 4. 设计
+
+### 4.0 ⚠️ 阻断项：根 `.gitignore` 的 `*.yml` 会静默吃掉本设计的两个新文件
+
+**先解决这个，再写任何配置。** 根 `.gitignore` 第 53 行是 `*.yml`（原注释：「仓库无已跟踪 `*.yml`，
+全局忽略安全」）。而本设计新增的**恰好是两个 YAML**。实测：
+
+```
+$ git check-ignore -v apps/desktop/electron-builder.yml .github/workflows/desktop-release.yml
+.gitignore:53:*.yml	apps/desktop/electron-builder.yml
+.gitignore:53:*.yml	.github/workflows/desktop-release.yml
+$ git ls-files '*.yml' | wc -l
+0
+```
+
+**不修的后果**（不是「少个小优化」，是整个 ③ 空转）：
+
+1. workflow 推不上去 → **CI 永远不运行**，§4.3 / §5 的自动化验收全部落空；
+2. `electron-builder.yml` 不入库 → CI 里 electron-builder 读到**默认配置**：`appId` / `productName` /
+   `files` 白名单 / `artifactName` / `asar` **全部不生效**。其中 `files` 白名单失效将直接复现
+   ② spec §8-9 那条「漏 `pages/offline.html` → `loadFile` 失败 → **无节流紧循环、屏幕无 UI**」的危害；
+3. `git add -A` **不会报错**，只会静静跳过 —— 这类问题在 CI 上表现为「什么都没发生」，最难查。
+
+**修法（二选一，推荐 A）**：
+
+```gitignore
+# .gitignore —— 方案 A：反选（注意 `*.yml` 是文件级规则，反选文件即可，无需先反选目录）
+!.github/workflows/*.yml
+!apps/desktop/electron-builder.yml
+```
+
+- **方案 B**：把两个文件改用 `.yaml` 后缀（`*.yml` 不覆盖 `.yaml`）—— 能绕开，但与仓库其它 YAML 命名不一致，不推荐
+- 无论哪种，**都要顺手改掉那句已失效的注释**「仓库无已跟踪 `*.yml`，全局忽略安全」，否则下一个人会照着它再踩一次
+- 加完后**自检**：`git status --short` 必须看到这两个文件是 untracked（而不是消失）
 
 ### 4.1 `apps/desktop/electron-builder.yml`（新建）
 
 ```yaml
 appId: com.k12zhixue.desktop
 productName: K12 智学
+asar: true                       # 显式写：下面的 asar 白名单校验以「产物是 asar」为前提
 directories:
-  buildResources: build          # build/icon.png 会被自动采用
-  output: dist                   # 已被 .gitignore 忽略
-# ⚠️ 白名单而非黑名单：默认会把 app 目录下所有文件打进包，包括 *.test.js
+  buildResources: build          # build/icon.png（1024×1024）会被自动采用
+  output: dist                   # 已被根 .gitignore 的 dist/ 忽略
+# ⚠️ 白名单而非黑名单：默认会把 app 目录下所有文件打进包，包括 *.test.js。
+# ⚠️ `lib/**/*.js` 会匹配 lib/*.test.js，靠最后一条否定排除 —— 否定语义一旦失效，
+#    测试文件就会进包，届时由 §4.3 第 7 步的 asar 断言兜住（会红，不会静默通过）。
 files:
   - main.js
   - preload.js
@@ -103,7 +155,7 @@ mac:
 linux:
   target: [{ target: AppImage, arch: [x64] }]
 # ⚠️ 这里**故意不写 publish** —— 下载地址的唯一真源是 apps/desktop/server-url.js，
-# 写到 yml 里会成为第二处、必然漂移。CI 每次都用 --config.publish.url 注入（§4.5）。
+# 写到 yml 里会成为第二处、必然漂移。CI 每次都用 CLI 注入（写全 provider + url，见 §4.5）。
 ```
 
 **为什么 `artifactName` 必须显式覆盖**：electron-builder 默认是 `${productName}-${version}-${arch}.${ext}` → 会产出
@@ -113,8 +165,14 @@ linux:
 
 **为什么 `appId` 现在就得定**：装过的机器按它认应用身份，④ 的更新也按它认。发布后再改 = 学生机器上等于换了一个应用。
 
-**本地直接跑 `npx electron-builder` 会怎样**：因为没有 `publish`，产出的更新清单里下载地址是空/默认值。
-这**只影响更新清单**（那是给 ④ 用的、由 CI 产出），不影响安装包本身；本地出包只为验证壳能不能装起来。
+**关于 `lib/**/*.js` 里的测试文件**：更稳的做法是**把 4 个 `lib/*.test.js` 挪进
+`apps/desktop/__tests__/`** —— 这样 `lib/**/*.js` 天然干净，**不必依赖否定规则的语义**（否定规则是否
+生效、生效范围如何，是 electron-builder 的实现细节，不该成为「资源是否进包」的唯一保障）。
+两种做法都可接受，但**必须由 §4.3 第 7 步的断言兜底**。
+
+**关于 `publish` 与更新清单**：electron-builder **只在存在 `publish` 配置时才产出** `latest.yml` /
+`latest-linux.yml`。本设计把 `publish` 交给 CLI 注入，所以「清单会不会产出」**取决于注入是否成功** ——
+§4.5 因此要求注入时**写全 `provider` + `url`**，并且这一点要在本机先验（§8-2）。
 
 ### 4.2 `main.js` 钉死 `userData`（解耦 `productName`）
 
@@ -127,58 +185,94 @@ linux:
 app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
 ```
 
-- **dev 下是无操作**：`package.json` 的 `name` 本来就是 `k12-desktop`，路径不变
-- **打包后是修复**：`productName` 变成中文也不影响 `userData` → **README 一字不用改**，同时**消掉 ② spec §8-8 那条风险**
+- **dev 下路径不变**：`package.json` 的 `name` 本来就是 `k12-desktop`，解析结果一致（调用仍会执行，只是无副作用）
+- **打包后是修复**：`productName` 变成中文也不影响 `userData` → 三条救火路径（README 的平台表）**内容仍然正确**
 - ⚠️ **待实测**：`app.setPath('userData', …)` 是否能在 `whenReady` **之前**调用。若不能，退路是放在 `whenReady` 的**第一行**（仍是所有读取之前）。两者都写进实施计划，按实测结论二选一
 
+> **⚠️ 但「README 一字不用改」是错的（2026-09-27 更正）**：路径**内容**不用改，但 README 里有**一句会
+> 变成错误指引的话必须删掉** —— `README.md:118`：
+>
+> > 「⚠️ 若 ③ 给应用设了 `productName`，上表中的 `k12-desktop` 会变成那个名字 —— 届时需同步改本表」
+>
+> 钉死 `userData` 之后这句**是假的**。留着它的后果比不写更糟：后来者会照做，把三条救火路径改成
+> `K12 智学`，**直接毁掉救火通路**（而这是「客户端连不上时唯一的自救手段」，② spec §8-3）。
+> 同一条失效表述还出现在 `docs/constraints/pc-app-学习管控.md`（「`userData` 目录名取 `productName`……
+> 必须同步改」）与 ② spec §8-8 —— 三处都要改成「**已钉死为 `k12-desktop`，不随 `productName` 变**」。
+> 详见 §7。
+
 ### 4.3 `.github/workflows/desktop-release.yml`（新建）
+
+**前置**：先做完 §4.0（否则这个文件根本进不了仓库）。
 
 **触发**：推 `desktop-v*` tag，或手动 `workflow_dispatch`。
 
 **三个 job**（`strategy.matrix.os` = `macos-14` / `windows-latest` / `ubuntu-latest`）：
 macOS 那个标签若在 Actions 里不可用，退回 `macos-latest` —— **架构对本设计不关键**（见下方「关于 runner 架构」）。
+标签可用性以**当天** GitHub 的 runner 列表为准（`macos-14` 属较老的镜像，投产前核一下）。
 
 1. `actions/checkout`
 2. `actions/setup-node` → **node 22**（electron-builder v27 要求 ≥ 22.12），并开 npm 缓存（`cache-dependency-path: apps/desktop/package-lock.json`）
-3. `npm ci` —— **只在 `apps/desktop`**（包内不含 web/server 构建产物，CI 因此很快）
+3. `npm ci` —— **只在 `apps/desktop`**（包内不含 web / server 构建产物，CI 因此很快）
 4. **版本一致性校验**：tag 去掉前缀必须等于 `apps/desktop/package.json` 的 `version`，不符直接失败（防版本漂移）
-5. **`npm test`** —— 38 条全绿才继续（出包前门禁，用户裁决 §3-9）
-6. `npx electron-builder --<platform>`，`--config.publish.url` 由 §4.5 推导后注入
+5. **`npm test`** —— **全绿**才继续（出包前门禁，用户裁决 §3-9）
+6. `apps/desktop` 目录下跑 `./node_modules/.bin/electron-builder --<platform>`（**依赖 §2-2 已把 electron-builder 钉进 devDependencies**；不要用会现拉版本的裸 `npx`），
+   并按 §4.5 注入 `--config.publish.provider=generic --config.publish.url="$SERVER/download"`
 7. **产物白名单校验**（脚本内联，见下）
 8. `actions/upload-artifact`
+
+**关于工作目录（易错点）**：第 6 步的 electron-builder **必须在 `apps/desktop` 下运行**（它按 cwd 找
+`electron-builder.yml` 与 `package.json`）；而 §4.5 的取值命令按**仓库根**写。**两者不能在同一段里同时成立**。
+实现时统一成：在仓库根取好 `SERVER` 变量，再 `cd apps/desktop` 执行构建（`${{ github.workspace }}` 拼绝对路径亦可）。
 
 **产物白名单校验（第 7 步，直接守住 ② spec §8-9 那个「漏资源 → 无节流紧循环」的危害）**：
 找到 `apps/desktop/dist/**/app.asar`，用 `npx @electron/asar list` 列出，然后断言：
 
-- **必须存在**：`main.js`、`preload.js`、`server-url.js`、`lib/config-file.js`、`lib/resolve-server-url.js`、
-  `lib/probe-server.js`、`lib/shell-state.js`、`pages/offline.html`
+- **必须存在**（9 项）：`main.js`、`preload.js`、`server-url.js`、`package.json`、
+  `lib/config-file.js`、`lib/resolve-server-url.js`、`lib/probe-server.js`、`lib/shell-state.js`、`pages/offline.html`
 - **必须不存在**：任何 `*.test.js`
 - 缺一件或混入测试文件 → **job 失败**
+- ⚠️ **路径含中文与空格**：mac 的 asar 落在 `dist/mac/K12 智学.app/Contents/Resources/` 与
+  `dist/mac-arm64/K12 智学.app/...`。**脚本必须用 `find … -print0` / `while IFS= read -r -d ''` 或全程加引号**
+  —— 用 `for f in $(find …)` 会在空格处断词，校验静默失效
+
+**CI 加固（低成本，建议一并加）**：
+
+- `env: CSC_IDENTITY_AUTO_DISCOVERY: false` —— 明确告诉 electron-builder 别去找签名证书，避免 macOS runner 上的噪音或偶发失败（与 §3-2「不签不公证」一致）
+- `permissions: { contents: read }` —— 最小权限
+- `concurrency: { group: desktop-${{ github.ref }}, cancel-in-progress: true }` —— 同一 tag 重复推送时不做两次
 
 **关于 runner 架构**：本设计**不依赖** runner 标签与架构的对应关系 —— mac 产物用 `--x64 --arm64` 显式指定目标架构，
 electron-builder 会下载对应架构的 Electron 再重打包，与 runner 自身架构无关。**硬约束只有一条：
 mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）。
 
 **权限 / 已知限制**：产物以 Actions artifact 形式留存；**公开仓库下载 artifact 需要登录 GitHub**（用户本人有账号，可接受）。
-若日后想免登录取回，可加一步发布到 Release —— **本期不做**（§2-7）。
+若日后想免登录取回，可加一步发布到 Release —— **本期不做**（§2-7）。所以**取回链路是手工的**：
+浏览器登录 GitHub → 下载 artifact（zip）→ 解压 → 挑出安装包 → 跑 `tools/publish-installer.sh`（§4.4）。
 
 ### 4.4 `tools/publish-installer.sh`（新建）
 
 一条命令完成「拷入 + 重建 web + 打印下载地址」：
 
 ```
-用法: bash tools/publish-installer.sh <安装包路径>
-  1. 校验文件存在
-  2. mkdir -p apps/web/public/download && cp <file> 进去
+用法: bash tools/publish-installer.sh <文件1> [文件2 ...]
+  1. 逐个校验文件存在
+  2. mkdir -p apps/web/public/download && 把每个文件 cp 进去
   3. (cd apps/web && npm run build)      # vite 会把 public/ 拷进 dist/
-  4. 从 apps/desktop/server-url.js 读默认地址，打印 http://<addr>/download/<文件名>
+  4. 从 apps/desktop/server-url.js 读默认地址，逐个打印 http://<addr>/download/<文件名>
 ```
 
+- **为什么收多个文件**：④ 需要的不只是安装包，还有 `latest.yml` / `latest-linux.yml`（§9）。**单文件参数会让 §9
+  「更新源已就位」这句话落空** —— 脚本必须能一次把安装包与更新清单一起放上去（多文件是硬要求，不是便利）
 - **为什么不放 Nest**：那会让下载落在内网层，与「只对外暴露 web 层」的架构冲突；也不想起第三个静态服务进程
 - **为什么 `apps/web/public/download/`**：`vite build` 会把 `public/` 原样拷进 `dist/`，所以放进 `public/` 的安装包
   **能在 `npm run build` 之后仍然存活**（`vite build` 默认清空 `dist/`，直接往 `dist/` 里拷会在下次构建时丢失）
 - **代价（用户已接受）**：发布一次安装包要**重建一次 web**（几十秒）
-- **`.gitignore` 新增一条**：`apps/web/public/download/`（安装包上百 MB，绝不能入库）
+- ⚠️ **上一条的副作用要明说**：`(cd apps/web && npm run build)` 会**重建并替换 `apps/web/dist/`**，而本机
+  `:5173` 的 `vite preview`（`tools/services.sh` 起的）正在服务这个目录 → **「发布一次安装包」= 线上前端被重建一次**。
+  这不是缺陷（新的 `/download/` 文件正是靠它才出现的），但它意味着：**跑这个脚本前，工作区里未提交的前端改动会被一起构建并对外生效**
+- **`.gitignore` 新增两条**（都在 §4.0 那一批里一起改）：
+  1. `apps/web/public/download/` —— 安装包上百 MB，绝不能入库
+  2. （见 §4.0）反选两个新增 YAML
 - `vite preview` 按请求读文件，**重建后无需重启 web 服务**即可下载到新文件
 
 ### 4.5 地址的单一真源
@@ -186,9 +280,21 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 `publish.url` 与交付文档里的下载地址都必须指向**学生机能到达的地址**，而这个地址在
 `apps/desktop/server-url.js` 里已经写死了（②）。所以：
 
-- CI 第 6 步：`SERVER=$(node -e "console.log(require('./apps/desktop/server-url.js').SERVER_URL)")`
-  → 注入 `--config.publish.url="$SERVER/download"`
-- `publish-installer.sh` 第 4 步：用同一条命令取地址
+```bash
+# 在仓库根取地址（唯一真源）
+SERVER=$(node -e "console.log(require('./apps/desktop/server-url.js').SERVER_URL)")
+# 再进 apps/desktop 构建，CLI 注入要写全 provider + url
+cd apps/desktop
+./node_modules/.bin/electron-builder --<platform> \
+  --config.publish.provider=generic \
+  --config.publish.url="$SERVER/download"
+```
+
+- **`provider` 必须显式给**：electron-builder 的 `publish` 配置需要 provider 才能组装出更新清单；
+  只给 `url` 属于「半个 publish 配置」，可能报错、也可能**不产出 `latest.yml`**（§8-2 要求本机先验）
+- 若将来 CLI 注入这条路走不通，**退路**是把 `publish` 写回 `electron-builder.yml`（接受「地址出现第二处」的代价），
+  或从环境变量注入整段配置 —— 但**不要**把 URL 硬编码进 yml 就完事（那正是漂移的来源）
+- `publish-installer.sh` 第 4 步用**同一条**取值命令
 
 **这样地址只有一处真源**；换地址时改 `server-url.js` 一行即可，不会出现「壳连 A、更新清单指 B」的漂移。
 
@@ -215,58 +321,76 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 | 项 | 期望 |
 |---|---|
 | 版本一致性校验 | tag 与 `package.json` 不符 → job 失败 |
-| `apps/desktop` 38 条测试 | 全绿 |
+| `apps/desktop` 测试 | **全绿**（判据是「全绿」，不写死条数；当前为 38 条） |
 | 三平台产物产出 | mac **两个** dmg（x64 + arm64）+ win 一个 exe + linux 一个 AppImage |
 | 产物名全 ASCII | 形如 `k12-desktop-0.1.0-arm64.dmg`（**无中文、无空格**） |
-| **asar 白名单** | 必需 8 个文件都在；**任何 `*.test.js` 都不在** |
-| 更新清单产出 | win 有 `latest.yml`、linux 有 `latest-linux.yml`，且其中的下载 URL 指向本机服务器地址 |
+| **asar 白名单** | 必需 **9** 项都在（含 `package.json`）；**任何 `*.test.js` 都不在** |
+| 更新清单产出 | win 有 `latest.yml`、linux 有 `latest-linux.yml`，且其中的下载 URL 指向本机服务器地址。⚠️ **这一项依赖 §4.5 的 CLI 注入成功**；若注入方式不产清单，必须先在本机验出来（§8-2），不能等到 CI 才发现 |
 
 ### 人工验收（真机）
 
 | # | 操作 | 期望 |
 |---|---|---|
-| 1 | 把 mac dmg 拷到一台 mac（最好**另一台**，非构建机）装 | 能装上；首次打开按文档指引可过 Gatekeeper |
+| 1 | 把 mac dmg 拷到一台 mac（最好**另一台**，非构建机）装 | 能装上；按 §6-1 的**新指引**（`xattr -dr` 或「仍要打开」）能过 Gatekeeper |
 | 2 | 启动壳 | 能连上服务器、进登录页 |
 | 3 | **按 `Cmd+Opt+I` / `F12`** | **打不开 DevTools**（`devTools:false` 生效）← ② 遗留项 |
 | 4 | 读启动日志 `[shell] 加载地址:` + 确认 `userData` 路径 | 地址与预期一致；`userData` 仍是 `…/k12-desktop/`（**不是** `K12 智学`） |
 | 5 | 在 `~/Library/Application Support/k12-desktop/` 放一个指向错误地址的 `config.json` → 重启 | 走覆盖文件（证明打包后救火路径仍有效） |
 | 6 | 停掉服务器后启动壳 | ≤5 秒出现本地页（② 的行为在打包后仍然成立） |
-| 7 | `bash tools/publish-installer.sh <包>` | 打印下载地址；浏览器打开该地址能下载 |
+| 7 | 从 CI artifact 解压出安装包与 `latest*.yml` → `bash tools/publish-installer.sh <安装包> <latest*.yml>` | 打印各文件的下载地址；浏览器逐个打开都能下载到 |
 | 8 | Windows 机器装 exe | 能装能启动（无签名会有 SmartScreen 警告，按「仍要运行」） |
 | 9 | Linux 机器跑 AppImage | `chmod +x` 后能跑 |
+| 10 | `git status --short` 看两个新增 YAML | **是 untracked / 已跟踪**（**不是消失**）← §4.0 的自检 |
 
 ## 6. 非目标与已知限制（必须在文档里明说）
 
-1. **macOS 未签名、未公证** → 首次打开会被 Gatekeeper 拦：右键→打开，或
-   `xattr -dr com.apple.quarantine "/Applications/K12 智学.app"`。**这条必须写进交付文档**（否则家长会以为文件坏了）
+1. **macOS 未签名、未公证** → 首次打开会被 Gatekeeper 拦。**「右键→打开」自 macOS 15 Sequoia 起已被 Apple 移除，
+   不要再写**。正确指引（两条都要给，主推第一条）：
+   - `xattr -dr com.apple.quarantine "/Applications/K12 智学.app"`
+   - 或 GUI：**系统设置 → 隐私与安全性 → 仍要打开**
+   若跳过这两条，家长会看到「已损坏，无法打开」并以为下载坏了。**这条必须写进交付文档**
 2. **macOS 不支持自动更新**（无签名 → ShipIt 验签必失败，spec ④ 已记）→ 学生机 ④ 只覆盖 Win/Linux
 3. **CI 依赖 GitHub** → 完全离线的环境出不了包；且 `gh` CLI 在本机 token 已失效，
    **控制器无法观测 CI 结果**，需要用户在浏览器看（或修 token）
-4. **产物以 Actions artifact 留存**：公开仓库下载 artifact **需要登录 GitHub**；本期不发布到 Release
-5. **发布安装包要重建一次 web**（几十秒）—— 4.4 的代价
+4. **产物以 Actions artifact 留存**：公开仓库下载 artifact **需要登录 GitHub**；本期不发布到 Release。
+   因此**取回是手工链路**（浏览器下载 zip → 解压 → 跑 `publish-installer.sh`），没做成自动化（§4.3 末段）
+5. **发布安装包要重建一次 web**（几十秒），并会**替换本机正在服务的 `apps/web/dist/`** —— §4.4 的代价与副作用
 6. **下载目录在 web 层的 `public/` 里**：若某次 `npm run build` 之前 `public/download/` 被清空，下载会 404（脚本会 `mkdir -p`，但手工清理要留意）
 7. **`appId` 发布后不可更改** —— 改了等于换应用
 8. **只出 x64 的 Win/Linux**：arm64 的 Windows/Linux 机器装不了（学生机以 x64 为主，暂不覆盖）
 9. **未做静默安装/批量部署**：学校装机仍需逐台点安装包
+10. **Windows 采用 NSIS 的默认行为**（有意，不额外配置）：**oneClick 一键安装**（没有向导、不能选安装目录）、
+    装到用户目录 `%LOCALAPPDATA%\Programs\`、**装完自动启动应用**。对家长其实更友好，但这是个**有意的决定**，
+    别当成漏配；若日后学校要求「可选目录 / 装到 Program Files」，改 `nsis` 段即可
+11. **`.gitignore` 的 `*.yml` 是个通用陷阱**：以后任何新增 YAML（哪怕不属于本设计）都会被静默忽略。
+    §4.0 的反选是**针对这两个具体文件**的，不是全局放宽
 
 ## 7. 文档同步清单（仓库铁律，实现时必须一起改）
 
-| 文档 | 要改什么 |
-|---|---|
-| `README.md` | PC App 章节补：① 三平台安装包怎么产出（tag 流程）；② **从 `http://<本机IP>:5173/download/` 下载**；③ **未签名 mac 的首次打开指引**（右键→打开 与 `xattr -dr com.apple.quarantine` 两条）；④ 本地开发仍用 `npm start`，装包只是交付形态 |
-| `docs/constraints/pc-app-学习管控.md` | 补 ③ 的硬约束：`userData` 被显式钉死为 `k12-desktop`（勿删那行，删了中文 productName 会改路径）；`files` 是白名单且必须排除 `*.test.js`；`artifactName` 必须 ASCII；mac 包只能在 macOS runner 出 |
-| `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` | §5「② 阶段无法验证的」表里「DevTools 真的打不开」一项 → 标注已由 ③ 结清（并指向本设计） |
-| `docs/ai-core-changelog.md` | 记录本次（含「electron-builder v27 需 Node ≥22.12」「Electron 44 移除 ia32」「公开仓库 Actions 免费」「asar 白名单校验」四条实测事实） |
-| `CLAUDE.md` | **不新增章节**（体量纪律：内容进 `docs/constraints/`）；若「开发命令」一节需要提一句 `desktop-v*` tag 发版，至多一行 |
-| `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml` | **无需变更**（本设计不涉及任何端点）—— 明确记录此结论，免得后来者以为漏同步 |
+> ⚠️ **每一条都要同时问「补什么」和「删什么」**：本设计把 ③ 之前的几条**已生效表述变成了假的**
+> （`productName` 会改 `userData` 路径、「右键→打开」可用、「dev 模式、不出安装包」）。**只加不删 = 留着错误指引**，
+> 后来者会照着旧句子把新设计改回去。下表「要删 / 要改的旧表述」一栏**必须逐条处理**。
+
+| 文档 | 补什么 | **要删 / 要改的旧表述** |
+|---|---|---|
+| `.gitignore` | 反选 `!.github/workflows/*.yml`、`!apps/desktop/electron-builder.yml`；新增 `apps/web/public/download/` | 注释「仓库无已跟踪 `*.yml`，全局忽略安全」**已失效，必须改**（§4.0） |
+| `README.md` | PC App 章节补：① 三平台安装包怎么产出（tag 流程）；② **从 `http://<本机IP>:5173/download/` 下载**；③ **未签名 mac 的首次打开指引**（`xattr -dr` 为主、**「仍要打开」**为备选）；④ 本地开发仍用 `npm start`，装包只是交付形态 | **`README.md:118`「若 ③ 给应用设了 `productName`…需同步改本表」整句删掉**（钉死 userData 后为假，照做会毁掉救火通路）；`:24` 与 `:206` 的「**dev 模式** / 交付物是 dev 壳」改为「已出安装包，交付形态=安装包」 |
+| `docs/constraints/pc-app-学习管控.md` | 补 ③ 的硬约束：`userData` 被显式钉死为 `k12-desktop`（勿删那行，删了中文 productName 会改路径）；`files` 是白名单且必须排除 `*.test.js`；`artifactName` 必须 ASCII；mac 包只能在 macOS runner 出；**新增 YAML 要检查 `.gitignore` 的 `*.yml`**；未签名 mac 的首开指引 | 「`userData` 目录名取 `productName`（若设）否则 `name`…… README 里的三条平台路径必须同步改」→ 改为「**已钉死，不随 `productName` 变**」；首段「（Electron 壳，**dev 模式**；本期不出安装包）」→ 过期，改掉 |
+| `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` | §5「② 阶段无法验证的」表里「DevTools 真的打不开」→ 标注已由 ③ 结清（指向本设计） | §8-8「`userData` 目录名会被 ③ 的 `productName` 改掉……**README 里那三条平台路径必须同步改**」→ 加**更正注记**：已由 ③ 显式钉死 `userData` 解决，**不要再按原句去改 README** |
+| `apps/desktop/package.json` | 加 `electron-builder` 到 `devDependencies`（`^27`） | `description` 里「（Electron 壳，dev 模式；本期不出安装包）」→ 过期 |
+| `apps/desktop/server-url.js` | —— | 文件头注释「**③ 的 CI 用环境变量重写本文件**，可产出指向不同服务器的包」与 §4.5 选的机制（**从本文件推导地址、不重写**）不是一回事 → 改成与实际一致（或删掉该句） |
+| `docs/ai-core-changelog.md` | 记录本次（含「electron-builder v27 需 Node ≥22.12 / ESM-only」「Electron 44 移除 ia32」「公开仓库 Actions 免费」「asar 白名单校验」「**根 `.gitignore` 的 `*.yml` 会吃掉新增 YAML**」「macOS 15 移除右键→打开」六条实测事实） | —— |
+| `CLAUDE.md` | **不新增章节**（体量纪律：内容进 `docs/constraints/`）；若「开发命令」一节需要提一句 `desktop-v*` tag 发版，至多一行 | —— |
+| `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml` | **无需变更**（本设计不涉及任何端点）—— 明确记录此结论，免得后来者以为漏同步 | —— |
 
 ## 8. 风险
 
 1. **mac 包只能在 macOS runner 上构建** —— 这条是硬约束，若日后想在本机/其它环境出 mac 包必须回到 macOS
 2. **Electron 44 与 electron-builder v27 的组合未经实测** —— 已知 v27 支持 Electron 44 且会拒 ia32/armv7l，
-   但**首个 CI run 之前都是纸面判断**；计划的第一个任务应先在本机跑通 `--dir`（不打包、只产出 app 目录）最小验证
+   但**首个 CI run 之前都是纸面判断**。计划的第一个任务应先在本机跑通 `--dir`（不打包、只产出 app 目录）最小验证，
+   **并紧接着真出一次包（如 `--linux`）确认 `latest-linux.yml` 真的产出、URL 正确** —— 只跑 `--dir` 验不到清单这一步（§4.5）
 3. **未签名 mac 的首次打开体验**：家长大概率会卡在 Gatekeeper 提示上 → 交付文档必须放在显眼处，
-   且下载页/说明里给出一行命令
+   且下载页/说明里给出一行命令（**注意用 §6-1 的新指引，不要写已被移除的「右键→打开」**）
 4. **地址单一真源的耦合**：`publish.url` 从 `server-url.js` 推导 —— 换地址时只改一处是对的，
    但**已经发出去的旧更新清单里仍是旧地址**（④ 接手时要意识到这点）
 5. **`app.setPath('userData')` 的调用时机**（§4.2 的 ⚠️）—— 若 `whenReady` 之前调用无效，
@@ -274,6 +398,13 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 6. **CI 产物未做版本归档**：artifact 有过期时间，且被后续构建覆盖不冲突（按名字区分），
    但**没有长期留存策略**（§2-8 有意不做）
 7. **`gh` token 失效** → 控制器看不到 CI 日志，出问题时可能要多轮「用户贴日志」；建议顺手修 token
+8. **⭐ `.gitignore` 的 `*.yml`（§4.0）是本设计最危险的坑**：失效模式是「静默」——
+   `git add` 不报错、CI 不报错、本地看不出来，只有学生装出来的包**缺资源和标识**时才暴露。
+   §4.0 的反选 + §5 的 `git status` 自检（验收 #10）是配套的两道保险
+9. **Gatekeeper 指引会随 macOS 版本继续变**（Apple 每次大版本都在收紧）→ 交付文档里给**命令行**（`xattr -dr`）比给 GUI 路径更耐放；
+   GUI 路径要标注「本指引按 macOS 15+ 写」
+10. **`--config.publish.*` 的 CLI 注入未实测** —— 若 electron-builder 拒绝「只有 url 的半个 publish 配置」，
+    首次 CI 会在出清单这步失败（不影响安装包本身，但 §5 的清单验收与 ④ 的铺垫要改道）；§4.5 已给退路，§8-2 已要求本机先验
 
 ## 9. 交接给 ④（自动更新）
 
@@ -281,6 +412,7 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 
 - **更新源已就位**：安装包 + `latest.yml` / `latest-linux.yml` 都放在 `<server-url>/download`，
   更新的下载地址与 ② 的壳地址**同源同基址**，不需要为更新另起服务
+  —— ⚠️ 前提是 §4.4 的脚本**支持一次传多个文件**（安装包 + 清单），单文件版本会让这句话落空
 - **mac 不接更新**（无签名 → ShipIt 必失败）→ ④ 只需覆盖 Win/Linux
 - ④ 仍需自己裁决的：`electron-updater` 集成方式、**与学习锁定的时机冲突**（更新安装要退出 app，而锁定中禁止退出）、
   失败回滚、以及「更新清单里的地址在服务器地址变更后如何刷新」（见 §8-4）
