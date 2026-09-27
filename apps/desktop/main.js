@@ -1,5 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
+const { SERVER_URL } = require('./server-url.js');
+const { readServerUrlFromFile } = require('./lib/config-file.js');
+const { resolveServerUrl } = require('./lib/resolve-server-url.js');
 
 /**
  * K12 智学 PC App —— Electron 壳（spec `2026-09-23-pc-app-study-lockdown-design.md` §6.1）。
@@ -27,13 +30,16 @@ let studentMode = false;
 let win = null;
 
 /**
- * 壳加载的 Web 地址。本期默认本地 vite dev（`http://localhost:5173`——它已在服务端
- * CORS 白名单里，故本期零 CORS 改动）。
+ * 壳加载的 Web 地址（spec §4.1）。**三层优先级**：
+ *   `K12_WEB_URL` 环境变量（dev/临时） > `userData/config.json` 的 `serverUrl`
+ *   （运维最后手段） > `server-url.js` 的构建时默认值。
  *
- * `K12_WEB_URL` 就是**云端接缝**：下一期把后端部署到公网后改这个环境变量即可，
- * 不需要改代码。云端接入所需的 CORS / HTTPS / 持久化存储**不在本期范围**。
+ * 这里是 Web 层（vite preview，默认 :5173）的地址，不是 API（Nest，默认 :3001）的
+ * —— 学生只认识 Web 层。
+ *
+ * **必须是 `let` 且延迟到 `app.whenReady()` 之后再赋值**：解析要用 `app.getPath('userData')`。
  */
-const WEB_URL = process.env.K12_WEB_URL || 'http://localhost:5173';
+let WEB_URL = null;
 
 /** 同源判定：只放行壳自己的地址，其余一律拦。 */
 function isSameOrigin(url) {
@@ -91,6 +97,14 @@ app.on('before-quit', (event) => {
 });
 
 app.whenReady().then(() => {
+  WEB_URL = resolveServerUrl(
+    process.env.K12_WEB_URL,
+    readServerUrlFromFile(app.getPath('userData')),
+    SERVER_URL,
+  );
+  // 打一行日志：排障时一眼看出壳到底在连哪个地址（人工冒烟 #14/#16 靠它验证）
+  console.log(`[shell] 加载地址: ${WEB_URL}`);
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
