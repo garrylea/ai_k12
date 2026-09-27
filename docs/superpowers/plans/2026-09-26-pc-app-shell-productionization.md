@@ -1260,6 +1260,35 @@ function showOfflinePage() {
   });
 ```
 
+- [ ] **Step 4b: 在窗口 `closed` 时清掉重试表（2026-09-27 补）**
+
+`createWindow()` 里原本就有的 `closed` 处理器只置空了 `win`，没管重试表 —— 于是窗口关掉后
+interval 会一直每 5 秒空转一次（被 `tryReconnect()` 的 `!win` 早退挡掉，无害，但没必要）。
+
+⚠️ 这**不是**功能修复：重建窗口后自动重连本来就能工作（`setInterval` 的回调读的是**模块级** `win`，
+不是捕获的旧窗口，所以 `activate` 建了新窗之后，旧表的下一次 tick 就会作用于新窗）。
+改这一段只是因为表不该活得比它的窗口长。
+
+把 `createWindow()` 里这段：
+
+```js
+  win.on('closed', () => {
+    win = null;
+  });
+```
+
+替换为：
+
+```js
+  win.on('closed', () => {
+    // 窗口没了就把重试表停掉，别留一个每 5 秒空转（被 `!win` 挡掉）的定时器。
+    // 注意：这**不是**功能修复 —— 重建窗口后自动重连本来就能工作（interval 回调读的是
+    // 模块级 `win`，不是捕获的旧窗口）。新窗口加载失败时 did-fail-load 会自己重新起表。
+    stopRetry();
+    win = null;
+  });
+```
+
 - [ ] **Step 5: main.js 加「立即重试」的 IPC**
 
 在既有的 `ipcMain.on('kiosk:set-student-mode', ...)` 附近追加：

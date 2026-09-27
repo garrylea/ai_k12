@@ -158,6 +158,10 @@ function createWindow() {
   });
 
   win.on('closed', () => {
+    // 窗口没了就把重试表停掉，别留一个每 5 秒空转（被 `!win` 挡掉）的定时器。
+    // 注意：这**不是**功能修复 —— 重建窗口后自动重连本来就能工作（interval 回调读的是
+    // 模块级 `win`，不是捕获的旧窗口）。新窗口加载失败时 did-fail-load 会自己重新起表。
+    stopRetry();
     win = null;
   });
 }
