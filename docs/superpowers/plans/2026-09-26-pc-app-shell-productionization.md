@@ -575,9 +575,13 @@ describe('writeStudentMode', () => {
     expect(readStudentMode(missing)).toBe(true);
   });
 
-  it('非布尔入参被强制成布尔（不写进奇怪的值）', () => {
+  it('非布尔入参被强制成布尔：落盘的是布尔，不是原始值', () => {
     writeStudentMode(dir, 'yes');
-    expect(readStudentMode(dir)).toBe(false);
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, STATE_FILE_NAME), 'utf8'));
+    // Boolean('yes') === true —— 这里是**类型强制**，不是「把真值丢掉」。
+    // 断言用 toBe（严格同一）才能同时钉住「值是 true」与「类型是 boolean」：
+    // 若实现写成 JSON.stringify({ studentMode: on })，落盘会是字符串 'yes'，此断言即红。
+    expect(raw.studentMode).toBe(true);
   });
 });
 ```
