@@ -1659,9 +1659,9 @@ git commit -m "chore(desktop): 应用图标 1024×1024（由 web 的 favicon.svg
 这两条都在有序列表里，注记必须**缩进 3 空格**才能留在同一条目内。在两行各自末尾换行后追加：
 
 ```markdown
-   > **更正（2026-09-26）**：本条只覆盖「学习中途断网」。**没有覆盖「断网后重新启动壳」** ——
-   > 那条路径当时可逃逸（kiosk 由页面里的渲染层经 IPC 驱动，离线时页面加载不出来、渲染层不执行，
-   > 于是 `studentMode` 恒为 false、窗口不是 kiosk）。已由
+   > **更正（2026-09-26）**：本条之外，当时还有一条**未被覆盖的路径**：**「断网后重新启动壳」** ——
+   > kiosk 由页面里的渲染层经 IPC 驱动，离线时页面加载不出来、渲染层不执行，
+   > 于是 `studentMode` 恒为 false、窗口不是 kiosk，该路径当时可逃逸。已由
    > `2026-09-26-pc-app-shell-productionization-design.md` §4.3 补齐（`studentMode` 持久化到 `userData/shell-state.json`）。
 ```
 
@@ -1791,7 +1791,7 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 ```
 
 - 改完**必须重启 App** 才生效（启动时读取）
-  - ⚠️ **如果窗口关不掉**：学生处于 kiosk 且锁定中时，壳会自己拦掉关闭 / 最小化 / `Cmd+Q` / `Alt+F4`。
+  - ⚠️ **如果窗口关不掉**：学生处于 kiosk（学生模式）时，壳会自己拦掉关闭 / 最小化 / `Cmd+Q` / `Alt+F4`。
     此时用系统的**强制退出**（macOS `Cmd+Opt+Esc`；Windows 任务管理器；Linux 等价方式）
     或**直接重启这台机器**，再打开壳。**这是唯一能绕过壳自身拦截的出口** —— 别在窗口上反复点关闭
 - 必须是合法 JSON，且 `serverUrl` 是 `http(s)://` 开头的完整地址；

@@ -77,7 +77,7 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 # 临时换地址：K12_WEB_URL=http://… npm start
 ```
 
-> 学生登录即进真全屏 kiosk（锁定期间关不掉窗口）；家长/管理员登录是普通窗口。
+> 学生登录即进真全屏 kiosk（**处于 kiosk 就关不掉窗口**，与是否在锁定期无关）；家长/管理员登录是普通窗口。
 > ⚠️ Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
 > 真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）。见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
 
@@ -109,7 +109,7 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 ```
 
 - 改完**必须重启 App** 才生效（启动时读取）
-  - ⚠️ **如果窗口关不掉**：学生处于 kiosk 且锁定中时，壳会自己拦掉关闭 / 最小化 / `Cmd+Q` / `Alt+F4`。
+  - ⚠️ **如果窗口关不掉**：学生处于 kiosk（学生模式）时，壳会自己拦掉关闭 / 最小化 / `Cmd+Q` / `Alt+F4`。
     此时用系统的**强制退出**（macOS `Cmd+Opt+Esc`；Windows 任务管理器；Linux 等价方式）
     或**直接重启这台机器**，再打开壳。**这是唯一能绕过壳自身拦截的出口** —— 别在窗口上反复点关闭
 - 必须是合法 JSON，且 `serverUrl` 是 `http(s)://` 开头的完整地址；
