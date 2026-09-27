@@ -26,6 +26,9 @@ data/processed/
 dist/
 out/
 *.log
+# 例外：apps/desktop/build/ 是 electron-builder 的 buildResources 目录（应用图标等静态资源，必须入库）；
+# 上层 `build/` 规则会连目录一起忽略，故须整目录反选（只反选文件无效）
+!apps/desktop/build/
 
 ## OS & IDE
 .DS_Store
