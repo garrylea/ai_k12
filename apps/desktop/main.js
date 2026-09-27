@@ -4,6 +4,7 @@ const { SERVER_URL } = require('./server-url.js');
 const { readServerUrlFromFile } = require('./lib/config-file.js');
 const { resolveServerUrl } = require('./lib/resolve-server-url.js');
 const { probeServer } = require('./lib/probe-server.js');
+const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 
 /**
  * K12 智学 PC App —— Electron 壳（spec `2026-09-23-pc-app-study-lockdown-design.md` §6.1）。
@@ -120,6 +121,12 @@ function createWindow() {
     },
   });
 
+  // 「偏向多锁」：上次是学生模式就一开机就进 kiosk，不等渲染层（spec §4.3、§6-7）。
+  // 在首页真正显示出来之前应用，避免「先普通窗口、再全屏」的可见闪动。
+  if (studentMode) {
+    win.once('ready-to-show', () => applyStudentMode(true));
+  }
+
   win.loadURL(WEB_URL);
 
   // 连不上 → 本地页 + 探测式重试（spec §4.2）
@@ -180,6 +187,12 @@ app.whenReady().then(() => {
   // 打一行日志：排障时一眼看出壳到底在连哪个地址（人工冒烟 #14/#16 靠它验证）
   console.log(`[shell] 加载地址: ${WEB_URL}`);
 
+  // 补洞（spec §1.4 / §4.3）：kiosk 由页面里的渲染层经 IPC 驱动，而**离线时页面
+  // 根本加载不出来** → 渲染层不执行 → studentMode 恒为 false → 窗口不是 kiosk
+  // → 学生「关 Wi-Fi + 杀进程 + 重启」就能逃逸。所以先把上次的状态读回来，
+  // 建窗口时就进 kiosk，不等渲染层。
+  studentMode = readStudentMode(app.getPath('userData'));
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -190,14 +203,27 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// 渲染层 → 主进程：学生模式开关。`setKiosk` 是真全屏 + 锁定（比 fullscreen 更彻底）。
-ipcMain.on('kiosk:set-student-mode', (_event, on) => {
+/**
+ * 应用学生模式：落盘 + 驱动窗口的 kiosk 三件套。
+ *
+ * **启动路径（补洞）与 IPC 路径必须走同一段代码**（spec §4.3）—— 两处各写一套必然漂移，
+ * 而漂移的后果是「某个入口忘了落盘」或「某个入口忘了全屏」，正是这次要修的洞。
+ */
+function applyStudentMode(on) {
   studentMode = Boolean(on);
+  // 先落盘：写失败只 warn、绝不抛（写入永不阻断主链路）。落盘是为了下次启动能恢复。
+  writeStudentMode(app.getPath('userData'), studentMode);
+
   if (!win || win.isDestroyed()) return;
   win.setKiosk(studentMode);
   win.setClosable(!studentMode);
   // setMinimizable 在 macOS 上是 no-op；Windows/Linux 上有效。不是错误，别加平台分支。
   win.setMinimizable(!studentMode);
+}
+
+// 渲染层 → 主进程：学生模式开关。`setKiosk` 是真全屏 + 锁定（比 fullscreen 更彻底）。
+ipcMain.on('kiosk:set-student-mode', (_event, on) => {
+  applyStudentMode(on);
 });
 
 // 本地页「立即重试」→ 走同一条探测路径（单向通道，spec §4.2）
