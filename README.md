@@ -49,6 +49,22 @@ bash tools/services.sh log server  # 跟踪 server 日志（log web 同理）
 
 PID/日志与 deploy.sh 共用 `tools/deploy/runtime/`；由 deploy.sh 启动的服务也可用本脚本停止/重启。
 
+#### 局域网部署运维清单（让学生机接入本机服务器）
+
+本机同时是**服务器**：`vite preview`（`:5173`）对外提供页面并反代 `/api`、`/assets`、`/uploads`
+到 Nest（`:3001`），Nest 只在本机内网可达。学生机通过局域网访问 `http://<本机IP>:5173`。
+
+部署前逐条确认：
+
+1. ☐ **本机 IP 固定** —— 路由器后台把本机 MAC 绑定到固定地址（DHCP 保留/静态 IP）。
+   学生机壳里写死的就是这个地址，**IP 一变，所有学生机都要重新出包重装**，
+   或逐台改 `config.json`（见上文「地址变了…」）
+2. ☐ **防火墙放行 5173** —— macOS「系统设置 → 网络 → 防火墙」；本机实测当前**防火墙已关闭**，
+   故无需额外配置（若日后开启，需放行 `node` 与端口 `5173`）
+3. ☐ **换机实测** —— 拿另一台电脑/手机浏览器打开 `http://<本机IP>:5173`，确认能到登录页
+4. ☐ **开机自启**（建议）—— 现在服务靠手动 `bash tools/services.sh start`；
+   **本机一重启服务不会自己起来，所有学生机立刻白屏**。需要配 launchd（macOS）或等价机制
+
 ### PC App (`apps/desktop`，Electron 壳)
 
 本地开发需要**三个进程**（壳加载的是 Web 的页面，不另起一套 UI）：
@@ -63,6 +79,51 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 > 学生登录即进真全屏 kiosk（锁定期间关不掉窗口）；家长/管理员登录是普通窗口。
 > ⚠️ Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
 > 真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）。见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
+
+#### 服务器地址（三层优先级）
+
+壳加载的是 **Web 层地址**（`vite preview`，默认 `:5173`），不是 API 的 `:3001`。解析顺序：
+
+```
+K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop/server-url.js 的默认值
+```
+
+- **默认值**写在 `apps/desktop/server-url.js` 一行里；改它需要**重新出包**
+- **dev 临时改**：`K12_WEB_URL=http://… npm start`
+
+#### ⚠️ 地址变了、而客户端又没法重新装：改覆盖文件救火
+
+**这是客户端连不上时唯一的自救手段。** 手工创建/编辑下面这个文件，然后**重启 App**：
+
+| 平台 | 路径 |
+|---|---|
+| Windows | `%APPDATA%\k12-desktop\config.json` |
+| macOS | `~/Library/Application Support/k12-desktop/config.json` |
+| Linux | `~/.config/k12-desktop/config.json` |
+
+内容就一行：
+
+```json
+{ "serverUrl": "http://192.168.1.5:5173" }
+```
+
+- 改完**必须重启 App** 才生效（启动时读取）
+- 必须是合法 JSON，且 `serverUrl` 是 `http(s)://` 开头的完整地址；
+  **不合法时会被忽略并回退到 `server-url.js` 的默认值，不会让 App 卡住启动**
+  （启动日志里会有一行 `warn` 说明为什么忽略）
+- ⚠️ 若 ③ 给应用设了 `productName`，上表中的 `k12-desktop` 会变成那个名字 —— 届时需同步改本表
+
+#### 连不上服务器时会看到什么
+
+学生打开壳若连不上，会看到一张本地页：「暂时连不上学习服务器，正在重试…」+ 当前地址 +
+「立即重试」按钮。壳**每 5 秒自动探测一次，探测通了就自动进入**，学生不需要做任何事。
+
+#### 已知边界
+
+- 学生登录即进 kiosk；**锁定期间关不掉窗口、不能登出**，只有家长能解除或到期自动解除
+- 「**断网 + 杀进程 + 重启**」不再能逃逸：启动时会先读回上次的学生模式，直接进 kiosk
+- Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
+  真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）
 
 ### Web 端 (`apps/web`)
 
