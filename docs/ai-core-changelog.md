@@ -8,6 +8,31 @@
 
 ---
 
+## 2026-09-26 — PC App 壳生产化（②）
+
+设计：`docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md`；
+计划：`docs/superpowers/plans/2026-09-26-pc-app-shell-productionization.md`。
+
+做了什么：
+- 地址改为**三层来源**（`K12_WEB_URL` env > `userData/config.json` > `server-url.js` 写死值），
+  并新增一个用户可写的覆盖文件作「地址变了但客户端无法重装」时的**最后手段**
+- 「连不上」本地页 + 探测式自动重连（每 5 秒探测 `WEB_URL`，通了才导航）
+- 补洞：`studentMode` 持久化到 `userData/shell-state.json`，启动即进 kiosk
+- 生产构建禁用 DevTools（dev 保留）
+- 应用图标由 `apps/web/public/favicon.svg` 栅格化
+
+**过程中发现并修正的一个设计缺陷（值得记下来）**：原 spec §4.2 写的是「每 5 秒重新
+`loadURL`」，而主 frame 导航失败时 **Chromium 会用它自己的错误页替换掉我们的本地页**
+（`ERR_CONNECTION_REFUSED` 在提交前就失败，文档已被替换）。于是「反复 loadURL」的真实效果是
+本地页只出现一次、之后永久变成「无法访问此网站」；而「已在本地页就不重载」的防闪烁写法会让
+本地页再也回不来。**两者都不是「闪烁」，而是「整页丢失」。** 改成「先探测、再导航」解决。
+教训：**凡是「用户可见的本地页」+「反复尝试加载远端」的组合，都要先问一句
+「失败的那次导航会不会把本地页顶掉」。**
+
+**未在本批验证、留给 ③ 的**：生产构建下 DevTools 是否真的打不开（`devTools` 只在
+`app.isPackaged` 为 true 时生效，本批不出包）；图标在各平台的显示；Windows/Linux 上的行为。
+本批留了 17 条人工冒烟清单（spec §5）。
+
 ## 2026-09-24 CLAUDE.md 深度瘦身（26.8KB → 10.8KB，-60%）+ 新建 `docs/constraints/`
 
 **做法**：把 6 个**按主题**的「勿动」整块**原样**搬到 `docs/constraints/`，根文件只留**跨主题**硬规则 + 索引。
