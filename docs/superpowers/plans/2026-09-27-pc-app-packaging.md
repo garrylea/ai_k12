@@ -1405,7 +1405,8 @@ Expected（两条）：
 
 - **新增 YAML 必须检查 `.gitignore`**：根 `.gitignore` 有一条**文件级全局规则** `*.yml`，
   会**静默**吃掉本该入库的 YAML（`git add` 不报错、CI 不报错，只有产物缺内容时才暴露）。
-  目前靠三条反选放行：`!apps/desktop/electron-builder.yml`、`!.github/workflows/*.yml`。
+  目前靠两条反选放行：`!apps/desktop/electron-builder.yml`、`!.github/workflows/*.yml`
+  （`.gitignore` 里另有第三条反选 `!apps/desktop/build/`，那是给旧的 `build/` 规则用的、与 `*.yml` 无关，别混在一起数）。
   有 `apps/desktop/gitignore.guard.test.js` 钉着，**改 .gitignore 后跑 `npm test`**
 - **`files` 是白名单**（`electron-builder.yml`），且**必须排除 `*.test.js`**。白名单漏一件的后果是
   `pages/offline.html` 那种**无节流紧循环 + 屏幕无 UI**（② spec §8-9）。出包后由
