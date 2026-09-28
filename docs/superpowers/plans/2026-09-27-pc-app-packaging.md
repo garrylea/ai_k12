@@ -578,11 +578,37 @@ function findAsarFiles(distDir) {
 
 /** 取 @electron/asar 的 CLI 入口，用 `node <cli> list <archive>` 调（跨平台、不依赖 .bin 垫片）。 */
 function asarCliPath() {
-  const pkgPath = require.resolve('@electron/asar/package.json');
-  const bin = typeof pkgPath === 'string' ? require('@electron/asar/package.json').bin : null;
+  // ⚠️ 不能 `require.resolve('@electron/asar/package.json')`：v4（实测 4.3.1）的 `exports`
+  //    是**单个字符串** `'./lib/asar.js'`，不含 `'./package.json'` 子路径，会抛
+  //    `ERR_PACKAGE_PATH_NOT_EXPORTED`（Task 3 执行时实测）。所以改成：解析包入口（exports
+  //    字符串对 `require` 条件仍生效）→ 从入口目录**上溯找到包根** → 从磁盘读 `package.json`
+  //    取 `bin`。这样同时兼容 v3 的对象式 `bin`（`bin.asar`）与 v4 的字符串式 `bin`。
+  //    （v4 的 bin 是 `./bin/asar.mjs`，包本身 `"type": "module"` —— 我们用
+  //     `execFileSync(process.execPath, [cli, ...])` 调它，所以 ESM 与否都无所谓。）
+  const entry = require.resolve('@electron/asar');
+  let root = path.dirname(entry);
+  let pkg = null;
+  for (;;) {
+    const pkgFile = path.join(root, 'package.json');
+    if (fs.existsSync(pkgFile)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
+        if (parsed.name === '@electron/asar') {
+          pkg = parsed;
+          break;
+        }
+      } catch {
+        /* 读不了就继续上溯 */
+      }
+    }
+    const parent = path.dirname(root);
+    if (parent === root) throw new Error('找不到 @electron/asar 的包根');
+    root = parent;
+  }
+  const bin = pkg.bin;
   const rel = typeof bin === 'string' ? bin : bin && bin.asar;
   if (!rel) throw new Error('@electron/asar 的 package.json 里没有 bin.asar');
-  return path.join(path.dirname(pkgPath), rel);
+  return path.join(root, rel);
 }
 
 function main() {
