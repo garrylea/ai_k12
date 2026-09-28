@@ -104,6 +104,8 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
   ```bash
   bash tools/publish-installer.sh <安装包> <latest.yml> [latest-linux.yml ...]
   # 会重建一次 web（几十秒）—— vite 会把 public/ 拷进 dist/，所以文件不会在下次构建时丢
+  # ⚠️ 这一步**会替换正在对外服务的 apps/web/dist/**（:5173 的 vite preview 服务的就是它），
+  #    所以工作区里未提交的前端改动会被一并构建、立刻对局域网生效 —— 发布前先确认工作区干净。
   ```
 
 #### ⚠️ macOS 首次打开：会被 Gatekeeper 拦（未签名）

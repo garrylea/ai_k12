@@ -15,7 +15,8 @@
 - **`LEARNING_SESSION_POLL_MS = 10_000` ↔ `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 是镜像**，改一处必须同步另一处；`online` **后端算好下发**，前端不重算。
 - **拔网线不解锁**（有意的严格性）：失败**绝不清锁**，本地截止时间是唯一判据。`session_lock_minutes` 是**单次登录起算的墙钟窗口**（1..480，**默认 30**；`NULL` = 家长**显式解除设置**），**不是**已废除的每日累计；它是**开始时快照**，家长事后改设置不影响本次。
 - **家长下发命令的主防线 = 「没有进行中会话就 409/1001、不写命令」**；惰性过期只是兜底。命令认领与 `unlocked_at` 落库**必须同一事务**。
-- **做不到的别当缺陷修**：拦不住 `Alt+Tab`/`Cmd+Tab`/`Ctrl+Alt+Del`/强制退出；**不区分异常退出**；真·无法切屏靠 OS 级单应用模式（运维）。**非目标**：安装包/自动更新/签名、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
+- **做不到的别当缺陷修**：拦不住 `Alt+Tab`/`Cmd+Tab`/`Ctrl+Alt+Del`/强制退出；**不区分异常退出**；真·无法切屏靠 OS 级单应用模式（运维）。**非目标**：自动更新（属 ④）、签名/公证、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
+  （**更正 2026-09-27**：安装包**已移出**上面这份清单 —— 交付形态就是安装包，见本文末「打包与分发（③）」；自动更新仍属 ④。）
 
 ## 壳生产化（2026-09-26，②）
 
@@ -92,7 +93,8 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 
 - **新增 YAML 必须检查 `.gitignore`**：根 `.gitignore` 有一条**文件级全局规则** `*.yml`，
   会**静默**吃掉本该入库的 YAML（`git add` 不报错、CI 不报错，只有产物缺内容时才暴露）。
-  目前靠三条反选放行：`!apps/desktop/electron-builder.yml`、`!.github/workflows/*.yml`。
+  目前靠**两条**反选放行：`!apps/desktop/electron-builder.yml`、`!.github/workflows/*.yml`
+  （`.gitignore` 里另有一条反选 `!apps/desktop/build/`，那是给旧的 `build/` 规则用的、与 `*.yml` 无关，别混在一起数）。
   有 `apps/desktop/gitignore.guard.test.js` 钉着，**改 .gitignore 后跑 `npm test`**
 - **`files` 是白名单**（`electron-builder.yml`），且**必须排除 `*.test.js`**。白名单漏一件的后果是
   `pages/offline.html` 那种**无节流紧循环 + 屏幕无 UI**（② spec §8-9）。出包后由
