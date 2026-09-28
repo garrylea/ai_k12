@@ -1,0 +1,103 @@
+# PC App 三平台打包与分发 —— spec docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md §4.3
+#
+# ⚠️ 本文件是 YAML：根 .gitignore 有一条全局 `*.yml` 规则，靠里面的反选才进得来。
+#    若它没被推上去，本 workflow **永远不会运行，而且不报错**。
+#    （apps/desktop/gitignore.guard.test.js 钉着这条。）
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # mac 不签不公证（spec §3-2）。yml 里已写 mac.identity: null，这里再加一道：
+  # 免得 runner 上因为找证书而报错，或行为与本机不一致。
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: --mac
+          - os: windows-latest
+            platform: --win
+          - os: ubuntu-latest
+            platform: --linux
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      # node 22 不是被 electron-builder 逼的：稳定 v26 的 engines 只要 node >= 14。
+      # 选 22 是为了与仓库其它工具链对齐，并给日后可能升 v27 留余量（spec §4.3 第 2 步）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 版本一致性校验（tag 必须等于 package.json 的 version）
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#desktop-v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG  package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag（$TAG）与 apps/desktop/package.json 的 version（$PKG）不一致"
+            exit 1
+          fi
+
+      - name: 测试门禁（全绿才继续）
+        run: npm test
+
+      - name: 取服务器地址（唯一真源 = apps/desktop/server-url.js）
+        id: server
+        shell: bash
+        run: |
+          set -euo pipefail
+          S="$(node -e "console.log(require('./server-url.js').SERVER_URL)")"
+          echo "服务器地址 = $S"
+          echo "publish_url=$S/download" >> "$GITHUB_OUTPUT"
+
+      - name: 出包
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/electron-builder ${{ matrix.platform }} \
+            --config.publish.provider=generic \
+            --config.publish.url="${{ steps.server.outputs.publish_url }}"
+
+      - name: 产物白名单校验（asar）
+        run: npm run verify:asar
+
+      # 只收产物本身，**不收** dist/mac*/ 下的 .app 目录 —— 那条路径含中文与空格。
+      - name: 上传产物（安装包 + 更新清单）
+        uses: actions/upload-artifact@v4
+        with:
+          name: k12-desktop-${{ matrix.os }}
+          path: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/latest*.yml
+          if-no-files-found: error
