@@ -364,6 +364,27 @@ cd apps/desktop
 | 图标在各平台显示正确 | 装完后看 Finder / 开始菜单 / 应用列表的图标 |
 | Windows / Linux 上的行为 | 有对应机器时装一次；**mac 上仍验不了这三平台的运行时行为** |
 
+### 4.8 出包入口脚本 `tools/app-build.sh`（2026-09-28 补）
+
+把「怎么出包」收敛到一处：**参数的唯一说明处是脚本自己的 `--help`**，README 只指过来、
+不再抄一遍命令。为什么值得加：这两串命令原先只写在实施计划里，而 README 只讲 CI 流程 ——
+「本机怎么出包」本身就已经是一个会漂移的说明点（尤其 publish 注入的 `provider`+`url` 必须同时给）。
+
+| 模式 | 做什么 |
+|---|---|
+| `--check` | 测试 + 最小出包（`--dir`，只产出 `.app`）+ asar 自检。不产出安装包、不清空 `dist`。**改完壳先跑这个** |
+| `--local` | 清空 `dist` → 出 mac 双架构 dmg → asar 自检 |
+| `--local --manifest` | 同上，并注入 `--config.publish.provider=generic` + `url` 以产出 `latest-mac.yml`（§4.5） |
+| `--online` | 走 CI 出三平台包。**默认只预检并打印要执行的命令；加 `--yes` 才真的打 tag 并推** |
+| `--publish <文件...>` | **转发**给 `tools/publish-installer.sh`（§4.4）—— 同一实现，不重写逻辑 |
+| `--win` / `--linux` | 明确告知本机出不了及原因（NSIS 要 wine、AppImage 要 docker），并指向 `--online` |
+
+`--online` 的预检：工作区必须干净（tag 指向 HEAD）、同名 tag 不得已存在、**先跑测试**
+（与 CI 的门禁一致，但在本地先失败，免得推完 tag 才发现红）、并提示未推送提交数与 CI 页面地址。
+
+**硬约束**：`--online` 的 tag/推送**必须有 `--yes`**；`--publish` 不得复制发布逻辑，只能转发。
+脚本还会在 electron-builder 失败时补一句人话（见 §8-11：网络不通时它的报错完全看不出是网络问题）。
+
 ## 5. 测试与验收
 
 ### 自动化（CI 里就有）
@@ -434,7 +455,7 @@ cd apps/desktop
 | 文档 | 补什么 | **要删 / 要改的旧表述** |
 |---|---|---|
 | `.gitignore` | 反选 `!.github/workflows/*.yml`、`!apps/desktop/electron-builder.yml`；新增 `apps/web/public/download/` | 注释「仓库无已跟踪 `*.yml`，全局忽略安全」**已失效，必须改**（§4.0） |
-| `README.md` | PC App 章节补：① 三平台安装包怎么产出（tag 流程）；② **从 `http://<本机IP>:5173/download/` 下载**；③ **未签名 mac 的首次打开指引**（`xattr -dr` 为主、**「仍要打开」**为备选）；④ 本地开发仍用 `npm start`，装包只是交付形态 | **`README.md:118`「若 ③ 给应用设了 `productName`…需同步改本表」整句删掉**（钉死 userData 后为假，照做会毁掉救火通路）；`:24` 与 `:206` 的「**dev 模式** / 交付物是 dev 壳」改为「已出安装包，交付形态=安装包」 |
+| `README.md` | PC App 章节补：① 三平台安装包怎么产出（tag 流程）；② **从 `http://<本机IP>:5173/download/` 下载**；③ **未签名 mac 的首次打开指引**（`xattr -dr` 为主、**「仍要打开」**为备选）；④ 本地开发仍用 `npm start`，装包只是交付形态；⑤ **出包/发布命令一律指向 `bash tools/app-build.sh --help`**（别把命令抄进 README —— 那是会漂移的第二处，见 §4.8） | **`README.md:118`「若 ③ 给应用设了 `productName`…需同步改本表」整句删掉**（钉死 userData 后为假，照做会毁掉救火通路）；`:24` 与 `:206` 的「**dev 模式** / 交付物是 dev 壳」改为「已出安装包，交付形态=安装包」 |
 | `docs/constraints/pc-app-学习管控.md` | 补 ③ 的硬约束：`userData` 被显式钉死为 `k12-desktop`（勿删那行，删了中文 productName 会改路径）；`files` 是白名单且必须排除 `*.test.js`；`artifactName` 必须 ASCII；mac 包只能在 macOS runner 出；**新增 YAML 要检查 `.gitignore` 的 `*.yml`**；未签名 mac 的首开指引；**三处护栏用例（`gitignore.guard` / `user-data.guard` / `scripts/verify-asar.test`）的存在与意图** | 「`userData` 目录名取 `productName`（若设）否则 `name`…… README 里的三条平台路径必须同步改」→ 改为「**已钉死，不随 `productName` 变**」；首段「（Electron 壳，**dev 模式**；本期不出安装包）」→ 过期，改掉 |
 | `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` | §5「② 阶段无法验证的」表里「DevTools 真的打不开」→ 标注已由 ③ 结清（指向本设计） | §8-8「`userData` 目录名会被 ③ 的 `productName` 改掉……**README 里那三条平台路径必须同步改**」→ 加**更正注记**：已由 ③ 显式钉死 `userData` 解决，**不要再按原句去改 README** |
 | `apps/desktop/package.json` | 加 `electron-builder` 到 `devDependencies`（`^26.15.3`） | `description` 里「（Electron 壳，dev 模式；本期不出安装包）」→ 过期 |
@@ -483,6 +504,14 @@ cd apps/desktop
     `provider` 的理由正在于此（若日后想放宽，须先补一次「只给 url」的实测）。
     另：**清单里不含绝对地址**（基址来自 publish 配置）→ 换地址时**必须同时刷新 publish 配置**，
     否则旧清单里的相对地址会被解析到旧基址（§8-4 已就同一件事警告）
+
+11. **⭐ 打包这一步需要能访问 GitHub，且失败表现极具误导性**（2026-09-28 实测）：electron-builder
+    在「unpacking default Electron distribution」处去取 Electron 发行包，**本机 `~/Library/Caches/electron`
+    里已有完整缓存（`unzip -t` 通过、583 项）也照样联网**；网络不通时报 `read ECONNRESET`
+    （堆栈全是 got/TLS 内部帧，看不出是网络）**或干脆静默卡住约 4 分钟才报错**。
+    实测同一个不含网络的仓库环境里 `registry.npmjs.org` 通、`github.com` 被 reset —— 即**部分网络可达**
+    也会踩到。故 `tools/app-build.sh`（§4.8）在 electron-builder 失败后会补一段人话提示。
+    出路：修好代理/VPN 后重试，或设 `ELECTRON_MIRROR` 指向可达镜像。
 
 ## 9. 交接给 ④（自动更新）
 

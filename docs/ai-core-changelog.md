@@ -8,6 +8,48 @@
 
 ---
 
+## 2026-09-28 · PC App 出包入口脚本 `tools/app-build.sh`
+
+（承上一节：③ 打包分发的收尾补件）
+
+**做了什么**：新增 `tools/app-build.sh`，把「怎么出包 / 怎么发布」收敛到一处，参数由 `--help` 自述：
+`--check`（测试 + `--dir` + asar 自检）／`--local`（双架构 dmg）／`--local --manifest`（再加
+`latest-mac.yml`）／`--online`（走 CI，**默认只预检，加 `--yes` 才打 tag 并推**）／
+`--publish`（**转发**给 `publish-installer.sh`，不重写逻辑）／`--win`·`--linux`（说明本机出不了）。
+为什么加：那两串命令原先只写在实施计划里、README 只讲 CI 流程 —— 「本机怎么出包」本就是个会漂移的说明点。
+README 与 ③ spec §4.8 改为指向 `--help`，命令不再抄第二遍。
+
+### 两条实测事实（都会让失败看起来像别的问题）
+
+- **⚠️ macOS bash 3.2：`$VAR` 后面紧跟中文标点会毁掉变量名。** 仓库统一 `set -euo pipefail`，
+  于是 `$need，`、`$MODE）` 这类写法直接报 `unbound variable`（**不是给空值**），且**只在执行到那一行时才炸**
+  —— 实测让 `--win`/`--linux` 与两个 warn 分支共 4 处全报错，而正常出包路径完全看不出来。
+  修法：写 `${VAR}`。已写进 `docs/constraints/pc-app-学习管控.md`。
+- **⚠️ 打包这一步需要能访问 GitHub，且失败表现极具误导性。** electron-builder 在
+  「unpacking default Electron distribution」处取 Electron 发行包，**本机 `~/Library/Caches/electron`
+  里已有完整缓存（`unzip -t` 通过、583 项）也照样联网**；网络不通时报 `read ECONNRESET`
+  （堆栈全是 got/TLS 内部帧，看不出是网络）**或静默卡住约 4 分钟才报错**。本次同时实测到
+  `registry.npmjs.org` 通、`github.com` 被 reset（**沙箱内外一致**）→ 即**部分网络可达也会踩到**。
+  故脚本在 electron-builder 失败后补一段人话提示；现象与出路记入 ③ spec §8-11
+  （修代理/VPN 后重试，或设 `ELECTRON_MIRROR` 指向可达镜像）。
+  教训：**「本机能出包」依赖网络，不是纯本地能力**。
+
+### 未验证项（如实记录）
+
+本次因 GitHub 不可达（见上），`--check` / `--local` 的**成功路径没能跑通** —— 两次都停在
+electron-builder 取 Electron 那一步（原始命令 `./node_modules/.bin/electron-builder --mac --dir`
+同样失败，故可确认不是脚本问题）。其底层命令在上一节 ③ 的 Task 3 已实测成功
+（`--dir` ≈10s、双架构 dmg ≈58s）。**网络恢复后请补跑一次 `bash tools/app-build.sh --check`。**
+已验过的：`--help` / 无参数 / 未知参数 / 两个模式互斥 / `--win`·`--linux` /
+`--manifest`·`--yes` 在不相干模式下的忽略告警 / `--publish` 转发（含 `--no-build` 透传）/
+`--online` 的预检（「工作区不干净」正确拦住、**未打任何 tag**）/ electron-builder 失败后的人话提示。
+
+### 文档同步
+
+- `README.md`：出包 / 发布改为指向 `bash tools/app-build.sh --help` + 各模式一行示例；补「打包需能访问 GitHub」的告警
+- ③ spec：新增 §4.8（入口脚本与两条硬约束）+ §8-11（网络失败模式）；§7 的 README 行补「命令别抄第二遍」
+- `docs/constraints/pc-app-学习管控.md`：新增「出包 / 发布的入口」小节（含上述两条 ⚠️）
+
 ## 2026-09-27 · PC App 打包与三平台分发（③）
 
 设计：`docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md`；
