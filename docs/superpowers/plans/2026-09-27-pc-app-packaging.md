@@ -38,7 +38,7 @@
 | **D3** | §4.3 只提 CI 的 `CSC_IDENTITY_AUTO_DISCOVERY: false` | 另在 yml 写 `mac.identity: null`，两者都留 | 本机跑 `--mac`（§8-2 要求）时也会去翻钥匙串，写进 yml 才可靠：不会因为本机恰好有 Developer ID 就签出**不一致的产物** |
 | **D4** | spec 未要求测试（§5 只有 CI 验收 + 人工验收） | 新增 3 个测试文件（2 个形态护栏 + 1 个单测） | 本案有**两个静默失效点**（`.gitignore` 吃掉 YAML；asar 漏资源），仓库既有惯例正是用「形态护栏」钉住静默失效（见 `apps/server/src/database/repositories/limit-placeholder.guard.test.ts`）。测试**不承重就是负担**，所以每个护栏都带一条「探针有牙齿」用例防假绿 |
 
-另外 **spec §5 有一条待实测回填**：表格里写「更新清单…其中的下载 URL 指向本机服务器地址」。electron-builder 的 `latest*.yml` 多半只记**相对文件名**（基址来自 publish 配置），若属实则该措辞不准。**Task 3 的 Step 10 会实测**，并给出两种情况各自怎么办。
+另外 **spec §5 有一条待实测回填**：表格里写「更新清单…其中的下载 URL 指向本机服务器地址」。electron-builder 的 `latest*.yml` 多半只记**相对文件名**（基址来自 publish 配置），若属实则该措辞不准。**Task 3 的 Step 10 会实测**，并给出两种情况各自怎么办。（**已完成**：实测为「只记相对文件名」，spec §5 的措辞已按该结论改掉；见 `docs/ai-core-changelog.md` 的 2026-09-27 节。）
 
 ---
 

@@ -47,20 +47,27 @@ README 与 ③ spec §4.8 改为指向 `--help`，命令不再抄第二遍。
   constraints 三处）。
 - **教训**：危险路径（推 tag / 改共享状态）**只能在不碰真远端的沙箱仓库里试**，不能靠「环境大概不行」
   当安全网。本文档里那句「建议在网络恢复后补跑 `--check`」也是同一个问题的另一面。
-- **遗留影响**：`desktop-v0.1.0` 已被占用，且指向的是一个**还没合进 main 的特性分支提交**。
-  所以下次要发正式版，得先把 `apps/desktop/package.json` 的 version 提到 `0.2.0`（`--online` 的预检
-  现在会在「origin 上已有该 tag」时直接拒绝，正是为这种情形准备的）。另外 `--online` 新增一条告警：
-  **在非 main 分支上发版会提醒「产物不对应主线」**（2026-09-28 就是这么发生的一次）。
+- **遗留影响**：`desktop-v0.1.0` 已被占用。它指向的提交后来**已随分支合并进入 main 历史**（只是不在 main 的 tip，
+  差的是纯文档 / 测试提交）→ 那次 CI 产物与主线功能等价。下次发正式版仍应把 version 提到 `0.2.0`
+  （`--online` 的预检现在会在「origin 上已有该 tag」时直接拒绝，正是为这种情形准备的）。另外 `--online`
+  新增一条告警：**在非 main 分支上发版会提醒「产物不对应主线」**（2026-09-28 就是这么发生的一次）。
 
-### 未验证项（如实记录）
+### 验证结果（2026-09-28 补齐 —— 本节原为「未验证项」，现已由真机验收与首次 CI 结清）
 
-本次因 GitHub 不可达（见上），`--check` / `--local` 的**成功路径没能跑通** —— 两次都停在
-electron-builder 取 Electron 那一步（原始命令 `./node_modules/.bin/electron-builder --mac --dir`
-同样失败，故可确认不是脚本问题）。其底层命令在上一节 ③ 的 Task 3 已实测成功
-（`--dir` ≈10s、双架构 dmg ≈58s）。**网络恢复后请补跑一次 `bash tools/app-build.sh --check`。**
-已验过的：`--help` / 无参数 / 未知参数 / 两个模式互斥 / `--win`·`--linux` /
-`--manifest`·`--yes` 在不相干模式下的忽略告警 / `--publish` 转发（含 `--no-build` 透传）/
-`--online` 的预检（「工作区不干净」正确拦住、**未打任何 tag**）/ electron-builder 失败后的人话提示。
+- **打包后的运行时行为：全部通过**（真机人工验收 #3 / #4 / #5 / #6）：`Cmd+Opt+I` 打不开 DevTools、
+  启动日志地址正确、`userData` 实际落在 `~/Library/Application Support/k12-desktop/`（**没有**中文目录
+  → 即 `app.setPath` 放**模块顶层**确实生效，不必退到 `whenReady` 第一行）、写坏 `config.json` 仍走覆盖
+  文件、停服 ≤5 s 出本地页。
+- **CI 首次 run：成功** —— 推 `desktop-v0.1.0` 后 `Desktop Release` 三平台出包通过。
+- **仍未做**：#1（需**另一台** mac 过 Gatekeeper）、#7（发布链路端到端：artifact → `/download/` → 浏览器
+  下载）、#8 / #9（Windows / Linux 真机装）。
+- ⚠️ **`tools/app-build.sh` 本身的本机成功路径仍未跑过一次**（网络原因：HTTPS 到 GitHub 被 reset，
+  electron-builder 取 Electron 那步过不去；原始命令 `./node_modules/.bin/electron-builder --mac --dir`
+  同样失败，故确认不是脚本问题）。**风险已很低**：其底层命令在 ③ 的 Task 3 已实测成功
+  （`--dir` ≈10s、双架构 dmg ≈58s），且 CI 已端到端跑通 —— 但网络恢复后仍建议补跑一次 `--check` 收口。
+  已验过的其它分支：`--help` / 无参数 / 未知参数 / 两个模式互斥 / `--win`·`--linux` /
+  `--manifest`·`--yes` 在不相关模式下的忽略告警 / `--publish` 转发（含 `--no-build` 透传）/
+  `--online` 预检（工作区不干净、origin 已占该 tag、非 main 分支告警）/ electron-builder 失败后的人话提示。
 
 ### 文档同步
 

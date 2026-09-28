@@ -355,7 +355,7 @@ DHCP 保留仍是**主要保障**（避免全校重装），但**不再是唯一
 
 | 项 | 原因 |
 |---|---|
-| DevTools 真的打不开 | `devTools` 只在 `app.isPackaged` 时为 false，**② 不出包** —— **已由 ③ 结清**（2026-09-27，见 2026-09-27-pc-app-packaging-design.md §4.7） |
+| DevTools 真的打不开 | `devTools` 只在 `app.isPackaged` 时为 false，**② 不出包** —— **已由 ③ 结清**（2026-09-27，见 2026-09-27-pc-app-packaging-design.md §4.7），并已**于 2026-09-28 在真机上实测确认**（装包后按 `Cmd+Opt+I` 打不开） |
 | 图标在各平台显示正确 | 需出包 |
 | Windows / Linux 上的行为 | ② 只在本机 macOS 的 dev 壳上验证 |
 

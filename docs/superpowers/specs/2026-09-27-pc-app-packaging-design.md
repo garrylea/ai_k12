@@ -214,7 +214,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
 
 - **dev 下路径不变**：`package.json` 的 `name` 本来就是 `k12-desktop`，解析结果一致（调用仍会执行，只是无副作用）
 - **打包后是修复**：`productName` 变成中文也不影响 `userData` → 三条救火路径（README 的平台表）**内容仍然正确**
-- ⚠️ **待实测**：`app.setPath('userData', …)` 是否能在 `whenReady` **之前**调用。若不能，退路是放在 `whenReady` 的**第一行**（仍是所有读取之前）。两者都写进实施计划，按实测结论二选一。**（③ 状态：已完成出包，但从未启动过打包后的壳 —— 该点因此仍未人工确认，须在 §5 人工验收 #4 里读 `userData` 实际落点来结清。）**
+- ✅ **已实测结清（2026-09-28 人工验收 #4）**：`app.setPath('userData', …)` 放在**模块顶层**（`whenReady` 之前）**确实生效** —— 打包并安装后 `~/Library/Application Support/k12-desktop/` 存在，且**不存在**「K12 智学」目录。因此**不必**退到「放在 `whenReady` 第一行」那条退路。
 
 > **⚠️ 但「README 一字不用改」是错的（2026-09-27 更正）**：路径**内容**不用改，但 README 里有**一句会
 > 变成错误指引的话必须删掉** —— `README.md:118`：
@@ -360,7 +360,7 @@ cd apps/desktop
 
 | ② 遗留项 | ③ 怎么验 |
 |---|---|
-| **生产构建下 DevTools 打不开** | 装 mac dmg → 按 `Cmd+Opt+I` / `F12` → **不应打开**（`app.isPackaged` 为 true 时 `devTools:false`） |
+| **生产构建下 DevTools 打不开** | 装 mac dmg → 按 `Cmd+Opt+I` / `F12` → **不应打开**（`app.isPackaged` 为 true 时 `devTools:false`）—— **2026-09-28 人工验收通过** |
 | 图标在各平台显示正确 | 装完后看 Finder / 开始菜单 / 应用列表的图标 |
 | Windows / Linux 上的行为 | 有对应机器时装一次；**mac 上仍验不了这三平台的运行时行为** |
 
@@ -399,6 +399,11 @@ cd apps/desktop
 | 更新清单产出 | win 有 `latest.yml`、linux 有 `latest-linux.yml`。⚠️ **措辞更正（2026-09-27 实测）**：清单里只有**相对文件名**，**不含绝对地址**（基址来自 publish 配置）→ 判据改为「清单存在 + `version` 与 `package.json` 一致 + 每个 `files[].url` 在 `dist/` 里都有同名文件」。④ 接手时注意基址来自 `--config.publish.url` |
 
 ### 人工验收（真机）
+
+> **2026-09-28 结果**：#3（DevTools 打不开）/ #4（启动日志地址 + `userData` 落点）/ #5（覆盖文件救火）/
+> #6（停服 ≤5 s 出本地页）已在真机上**全部通过**；#10（`.gitignore` 反选自检）由 controller 执行通过。
+> **仍未做**：#1（需**另一台** mac 过 Gatekeeper）、#7（发布链路端到端：CI artifact → `/download/` → 浏览器下载）、
+> #8 / #9（需 Windows / Linux 真机）。
 
 | # | 操作 | 期望 |
 |---|---|---|
@@ -467,16 +472,16 @@ cd apps/desktop
 ## 8. 风险
 
 1. **mac 包只能在 macOS runner 上构建** —— 这条是硬约束，若日后想在本机/其它环境出 mac 包必须回到 macOS
-2. **Electron 44 与 electron-builder 26.x 的组合：出包能力已在本机实测通过，仍未验的是打包后的运行时行为**
+2. **Electron 44 与 electron-builder 26.x 的组合 —— 出包与运行时均已实测通过**
    （原「v27 支持 Electron 44 且会拒 ia32/armv7l」这个前提，随 §1 的二次更正一起作废）。本机
    （macOS arm64）实测：electron-builder 解到 **26.15.3**、配 Electron **44.4.5**，`--dir` ≈ **10 s**，
    `--mac` 双架构 dmg 全量 ≈ **58 s**，产出 `k12-desktop-0.1.0-x64.dmg`（**125 MB**）/
-   `…-arm64.dmg`（**122 MB**）+ `latest-mac.yml`，**文件名全 ASCII**（细节见 changelog）——
-   即「**能不能出包**」已不是纸面判断。**仍未验的是打包后的运行时行为**（DevTools 是否真打不开、
-   `userData` 实际落点、连不上时的本地页）—— 因为**从未启动过打包后的壳**，这几项留给 §5 的人工验收
-   （#3 / #4 / #6）。**CI 侧仍完全未跑**，但「本机先验」的两步**都已执行完毕**（2026-09-27）：
-   ① ✅ 本机跑通 `--dir`（不打包、只产出 app 目录）最小验证；② ✅ 紧接着真出一次包（`--mac`），
-   确认更新清单真的产出。**② 的判据已按实测修正**：清单里**只有相对文件名、不含绝对地址**
+   `…-arm64.dmg`（**122 MB**）+ `latest-mac.yml`，**文件名全 ASCII**（细节见 changelog）。
+   **打包后的运行时行为也已验完**（2026-09-28 人工验收 #3 / #4 / #6 全部通过）：`Cmd+Opt+I` 打不开
+   DevTools、`userData` 实际落在 `…/k12-desktop/`、停服 ≤5 s 出本地页。**CI 亦已跑通**：推
+   `desktop-v0.1.0` 后 `Desktop Release` 三平台出包**成功**（首次 run）。故本项已无未验部分。
+   当初要求的两步「本机先验」也都已执行：① ✅ 本机跑通 `--dir`（不打包、只产出 app 目录）最小验证；
+   ② ✅ 紧接着真出一次包（`--mac`），确认更新清单真的产出。**② 的判据已按实测修正**：清单里**只有相对文件名、不含绝对地址**
    （基址来自 publish 配置），所以判据**不是**「确认…URL 正确」（相对名无从观测绝对地址），
    而是「`version` = `package.json` 版本 **且** 每个 `files[].url` 在 `dist/` 里都有同名文件」——
    只跑 `--dir` 验不到清单这一步（§4.5）。
