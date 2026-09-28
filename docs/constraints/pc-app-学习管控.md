@@ -119,8 +119,10 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - **`--publish` 只转发 `tools/publish-installer.sh`，不许复制发布逻辑**（发布要重建 web 并替换
   正在对外服务的 `apps/web/dist/`，只有一份实现是对的）。
 - **Windows / Linux 包本机出不了**（NSIS 要 wine、AppImage 要 docker）→ 只能 `--online` 走 CI。
-- ⚠️ **打包需要能访问 GitHub**：electron-builder 取 Electron 发行包**即使本机已有完整缓存也会联网**；
-  不通时报 `read ECONNRESET`（堆栈看不出是网络）或静默卡约 4 分钟。别把它当壳坏了。
+- ⚠️ **打包需要能访问 GitHub，而且故障只看 HTTPS(443)**：electron-builder 取 Electron 发行包
+  **即使本机已有完整缓存也会联网**；不通时报 `read ECONNRESET`（堆栈看不出是网络）或静默卡约 4 分钟。
+  **别把它当壳坏了，也别把「能 push」当成「能打包」** —— 2026-09-28 实测本机 HTTPS 到 GitHub 被 reset
+  而 git 走 SSH 一路正常，两条路互不影响（CI 侧 runner 网络是通的，不受本机影响）。
 - ⚠️ **`tools/*.sh` 里 `$VAR` 后面紧跟中文标点必须写成 `${VAR}`**：macOS 自带 **bash 3.2** 会把紧跟的
   UTF-8 字节当成变量名的一部分，在仓库统一的 `set -euo pipefail` 下直接报 `unbound variable`
   （不是给空值），而且**只在执行到那一行时才炸**（2026-09-28 实测：`$need，`、`$MODE）` 让 4 个

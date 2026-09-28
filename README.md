@@ -112,9 +112,11 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 
     推完到 GitHub 的 Actions 页面看 `Desktop Release`，跑完下载 artifact（需要登录 GitHub）。
     **tag 形如 `desktop-v0.1.0`，必须等于 `apps/desktop/package.json` 的 version，否则 CI 直接失败**（防版本漂移）。
-  - ⚠️ **打包这一步会去取 Electron 发行包，需要能访问 GitHub**。连不上时 electron-builder 会报
-    `read ECONNRESET` 或干脆卡住（**即使本机 `~/Library/Caches/electron` 里已有缓存也一样**）——
+  - ⚠️ **打包这一步会去取 Electron 发行包，走的是 HTTPS（443）**。该路径不通时 electron-builder
+    会报 `read ECONNRESET` 或干脆卡住（**即使本机 `~/Library/Caches/electron` 里已有缓存也一样**）——
     那不是壳坏了，先修网络 / 代理再重试。
+    ⚠️ **别把「能 push」当成「能打包」**：2026-09-28 实测本机 HTTPS 到 GitHub 被 reset，
+    而 git 走 SSH 照样能推 tag —— 两条路互不影响。**CI 侧不受影响**（runner 的网络是通的）。
 
 - **怎么发布到服务器**（把从 artifact 或本机 `dist/` 解压/产出的文件拷到 web 层的 `/download/`）：
 

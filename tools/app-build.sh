@@ -155,6 +155,14 @@ mode_online() {
   log "本地版本 $ver → 目标 tag desktop-v$ver"
   tag="desktop-v$ver"
 
+  # 预检 0：从哪个分支发（只告警，不阻塞）—— 从特性分支推 tag，CI 出的产物就**不对应主线**，
+  # 拿到的安装包会是一份没合进 main 的构建。（2026-09-28 真的这么发生过一次。）
+  local branch
+  branch="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)"
+  if [ "$branch" != 'main' ]; then
+    warn "当前在分支「${branch}」上发版（不是 main）—— CI 产出的安装包将对应这个提交，而不是主线"
+  fi
+
   # 预检 1：工作区必须干净 —— tag 指向 HEAD，产物必须与提交一致
   [ -z "$(git -C "$ROOT" status --porcelain)" ] \
     || die "工作区不干净 —— 先提交或丢弃改动（tag 指向 HEAD，产物必须与提交一致）"

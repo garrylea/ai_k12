@@ -505,12 +505,15 @@ cd apps/desktop
     另：**清单里不含绝对地址**（基址来自 publish 配置）→ 换地址时**必须同时刷新 publish 配置**，
     否则旧清单里的相对地址会被解析到旧基址（§8-4 已就同一件事警告）
 
-11. **⭐ 打包这一步需要能访问 GitHub，且失败表现极具误导性**（2026-09-28 实测）：electron-builder
-    在「unpacking default Electron distribution」处去取 Electron 发行包，**本机 `~/Library/Caches/electron`
-    里已有完整缓存（`unzip -t` 通过、583 项）也照样联网**；网络不通时报 `read ECONNRESET`
-    （堆栈全是 got/TLS 内部帧，看不出是网络）**或干脆静默卡住约 4 分钟才报错**。
-    实测同一个不含网络的仓库环境里 `registry.npmjs.org` 通、`github.com` 被 reset —— 即**部分网络可达**
-    也会踩到。故 `tools/app-build.sh`（§4.8）在 electron-builder 失败后会补一段人话提示。
+11. **⭐ 打包这一步需要能访问 GitHub（走 HTTPS），且失败表现极具误导性**（2026-09-28 实测）：
+    electron-builder 在「unpacking default Electron distribution」处去取 Electron 发行包，
+    **本机 `~/Library/Caches/electron` 里已有完整缓存（`unzip -t` 通过、583 项）也照样联网**；
+    网络不通时报 `read ECONNRESET`（堆栈全是 got/TLS 内部帧，看不出是网络）**或干脆静默卡住约 4 分钟**。
+    ⚠️ **要点：这是 HTTPS(443) 专有的故障，与 git 无关** —— 同一次实测里本机 HTTPS 到 GitHub 被 reset
+    （`curl https://github.com` 000、`objects.githubusercontent.com` 超时），**而 `git push` 走 SSH
+    一路正常**（tag 推上去了）。所以「能推 tag」完全不能推出「本机能打包」；反之 CI 侧不受影响
+    （runner 网络是通的）。另外 `registry.npmjs.org` 同时是通的 → **部分网络可达也会踩到**。
+    故 `tools/app-build.sh`（§4.8）在 electron-builder 失败后会补一段人话提示。
     出路：修好代理/VPN 后重试，或设 `ELECTRON_MIRROR` 指向可达镜像。
 
 ## 9. 交接给 ④（自动更新）
