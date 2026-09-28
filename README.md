@@ -21,7 +21,7 @@ The goal is to move away from "blanket teaching" towards "precision learning" by
 
 ## Project Structure
 - `apps/web`: React-based web application.
-- `apps/desktop`: Electron shell for PC App (dev mode; loads the **same UI as Web**). 见 [PC App 学习管控设计](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
+- `apps/desktop`: Electron shell for PC App (loads the **same UI as Web**; 交付形态是安装包，见下文 PC App 章节). 见 [PC App 学习管控设计](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
 - `apps/server`: Node.js backend API (NestJS + ai-core AI Agent Hub).
 - `tools/crawler`: Python-based data crawling and processing service.
 - `packages/`: Shared configurations and types.
@@ -81,6 +81,61 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 > ⚠️ Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
 > 真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）。见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
 
+#### 交付形态：安装包（学生机不需要装 Node）
+
+本地开发才需要上面那三个进程。**发到学生机的是安装包** —— 双击装完就是「K12 智学」应用。
+
+- **从哪下载**：服务器 web 层的 `http://<本机IP>:5173/download/`
+  （学生/家长在局域网内直接取，不需要学生机访问公网）
+  - **发布过之后**，`/download/` 会打开一张由 `tools/publish-installer.sh` 生成的下载页，
+    页面上列出下载目录里实际存在的全部产物（含大小，并标注哪个是本次发布、哪些是早期版本）；逐个点链接即可下载。单文件直链形如
+    `<服务器地址>/download/<文件名>`（例如 `http://192.168.1.5:5173/download/k12-desktop-0.1.0-arm64.dmg`）
+  - ⚠️ **文件名打错不会 404**：`vite preview` 没有目录列表、且用的是 SPA 回退，
+    未命中的路径会返回**学习应用本体**（HTTP 200 + HTML），浏览器会把这份 HTML 存成 `.dmg`。
+    所以**只从下载页点链接**，别手敲文件名。**没发布过之前 `/download/` 里没有下载页**
+    （访问它同样拿到的是应用本体，不是文件列表）
+- **怎么产出**：CI 出包（`apps/desktop` 的版本号 = tag 的版本号）
+
+  ```bash
+  cd apps/desktop
+  # 1) 改 package.json 的 version（例如 0.1.0）
+  # 2) 提交后打 tag 并推送 —— 推送即触发三平台出包
+  git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+  ```
+
+  推 tag 后到 GitHub 的 Actions 页面看 `Desktop Release`，跑完下载 artifact（需要登录 GitHub）。
+  **tag 与 `package.json` 的 version 不一致时 CI 会直接失败**（防版本漂移）。
+
+- **怎么发布到服务器**（把从 artifact 解压出来的文件拷到 web 层的 `/download/`）：
+
+  ```bash
+  bash tools/publish-installer.sh <安装包> <latest.yml> [latest-linux.yml ...]
+  # 建议连每个安装包旁的 .blockmap 一起传（差量更新用；缺了它 ④ 只能回退成全量下载）
+  # 同时会（重新）生成 /download/ 的下载页，页面上列出目录里实际存在的产物，并标注本次发布 / 早期版本
+  # 会重建一次 web（几十秒）—— vite 会把 public/ 拷进 dist/，所以文件不会在下次构建时丢
+  # ⚠️ 这一步**会替换正在对外服务的 apps/web/dist/**（:5173 的 vite preview 服务的就是它），
+  #    所以工作区里未提交的前端改动会被一并构建、立刻对局域网生效 —— 发布前先确认工作区干净。
+  ```
+
+#### ⚠️ macOS 首次打开：会被 Gatekeeper 拦（未签名）
+
+安装包**没有代码签名、也没有公证**，所以首次打开会被系统拦下。按下面任一条处理后即可正常使用：
+
+```bash
+# 推荐：去掉隔离属性（把路径换成实际装的位置）
+xattr -dr com.apple.quarantine "/Applications/K12 智学.app"
+```
+
+或走界面：**系统设置 → 隐私与安全性 → 仍要打开**。
+
+> ⚠️ **不要按老文章去「右键 → 打开」** —— 自 macOS 15 (Sequoia) 起 Apple **已移除**这条捷径，
+> 现在右键打开仍会被拦，甚至提示「已损坏」。这不是文件坏了。
+
+#### ⚠️ Windows 首次打开：会被 SmartScreen 拦（未签名）
+
+`.exe` 安装包**没有代码签名**，所以首次运行会弹 Windows SmartScreen 警告（「Windows 已保护你的电脑」）。
+按 **「更多信息」→「仍要运行」** 即可继续安装。不是文件坏了。
+
 #### 服务器地址（三层优先级）
 
 壳加载的是 **Web 层地址**（`vite preview`，默认 `:5173`），不是 API 的 `:3001`。解析顺序：
@@ -115,7 +170,6 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 - 必须是合法 JSON，且 `serverUrl` 是 `http(s)://` 开头的完整地址；
   **不合法时会被忽略并回退到 `server-url.js` 的默认值，不会让 App 卡住启动**
   （启动日志里会有一行 `warn` 说明为什么忽略）
-- ⚠️ 若 ③ 给应用设了 `productName`，上表中的 `k12-desktop` 会变成那个名字 —— 届时需同步改本表
 
 #### 连不上服务器时会看到什么
 
@@ -203,4 +257,4 @@ cd apps/web && npm run dev                     # http://localhost:5173
 2. Design Hierarchical Knowledge Data Model
 3. Build Node.js Knowledge API
 4. Build React Knowledge Navigation & Display UI
-5. Electron Desktop Integration → **已落地（dev 模式，2026-09-23）**：`apps/desktop` 壳 + kiosk 单次学习锁定，见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)（安装包/签名/自动更新仍非目标）
+5. Electron Desktop Integration → **已落地（2026-09-23；安装包分发 2026-09-27 落地，签名仍未做）**：`apps/desktop` 壳 + kiosk 单次学习锁定，见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)（**签名仍非目标**；自动更新待 ④）

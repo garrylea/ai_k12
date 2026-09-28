@@ -355,7 +355,7 @@ DHCP 保留仍是**主要保障**（避免全校重装），但**不再是唯一
 
 | 项 | 原因 |
 |---|---|
-| DevTools 真的打不开 | `devTools` 只在 `app.isPackaged` 时为 false，**② 不出包** |
+| DevTools 真的打不开 | `devTools` 只在 `app.isPackaged` 时为 false，**② 不出包** —— **已由 ③ 结清**（2026-09-27，见 2026-09-27-pc-app-packaging-design.md §4.7） |
 | 图标在各平台显示正确 | 需出包 |
 | Windows / Linux 上的行为 | ② 只在本机 macOS 的 dev 壳上验证 |
 
@@ -390,6 +390,10 @@ DHCP 保留仍是**主要保障**（避免全校重装），但**不再是唯一
 6. **`did-fail-load` 的行为差异** —— 不同平台的错误码与触发时机可能有别（如 `ERR_ABORTED` 在导航取消时也会触发）。实现时须以人工冒烟 #2–#6 为准，必要时加错误码白名单
 7. **⭐ 重试若写成「反复 `loadURL`」会毁掉本地页**（写计划时发现，已修正 §4.2）—— 主 frame 导航失败会让 Chromium 用它自己的错误页替换我们的本地页，于是「每 5 秒 loadURL」的结果是本地页只出现一次、之后永久变成浏览器的「无法访问此网站」；而「已在本地页就不重载」的防闪烁写法会让它再也回不来。**必须探测通了才导航**。人工冒烟 #3 是这条的专门验收点
 8. **`userData` 目录名会被 ③ 的 `productName` 改掉** —— `app.getPath('userData')` 用的是 `app.getName()`，它取 `productName`（若设了）否则取 `name`。本期 `package.json` 无 `productName`，故路径是 `…/k12-desktop/`。**③ 若设了 `productName`，覆盖文件与状态文件的路径都会变，README 里那三条平台路径必须同步改**；否则文档会指向一个不存在的目录，救火时找不到文件
+   > **更正（2026-09-27，③）**：③ **没有**按本条去改 README —— 而是在 `main.js` 里用
+   > `app.setPath('userData', …)` 把目录**显式钉死**为 `k12-desktop`，与 `productName` 解耦。
+   > 所以 README 那三条平台路径**依然正确**。**不要再按本条原句去同步改 README 的表**，
+   > 那会把文档改错（并连带毁掉救火路径）。详见 ③ spec §4.2。
 9. **③ 打包必须包含壳的运行时资源，否则会静默紧循环** —— `showOfflinePage()` 用
    `loadFile('pages/offline.html')` 加载本地页，**没有失败守卫**。若 ③ 的打包配置漏了这个文件
    （asar / `files` 白名单），`loadFile` 失败 → 触发 `did-fail-load` → 再次 `showOfflinePage()`

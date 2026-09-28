@@ -23,6 +23,23 @@ const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 app.commandLine.appendSwitch('no-proxy-server');
 
 /**
+ * **钉死 userData 目录，与 `productName` 解耦**（spec ③ §4.2）。
+ *
+ * 打包后 `productName` 是中文（`K12 智学`），而 `app.getPath('userData')` 取 `app.getName()`
+ * —— 也就是 `productName`（若设了）否则 `name`。不钉的话 userData 会变成
+ * 「…/K12 智学/」（**中文 + 空格**），README 里那三条救火路径（`config.json` 的位置）就全失效了，
+ * 而那是客户端连不上时**唯一的自救手段**（② spec §8-3）。
+ *
+ * 显式固定为 ASCII，且与 dev 下的路径完全一致（`package.json` 的 `name` 本来就是 `k12-desktop`）
+ * —— 所以 dev 行为不变，打包后才生效。
+ *
+ * ⚠️ **必须在任何 `app.getPath('userData')` 读取之前调用**（本文件里那两处都在 `whenReady` 内，
+ * 且用的是模块级 `app`，所以放在这里一定早于它们）。删掉这行不会有任何测试变红，
+ * 但会让 README 的三条路径全部指向不存在的目录 —— 有 `user-data.guard.test.js` 钉着。
+ */
+app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
+
+/**
  * K12 智学 PC App —— Electron 壳（spec `2026-09-23-pc-app-study-lockdown-design.md` §6.1）。
  *
  * 本壳**不做任何业务**：它加载与 Web App **完全相同**的 UI，只负责三件事：
