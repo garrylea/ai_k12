@@ -36,7 +36,7 @@
 | 事实 | 值 / 结论 |
 |---|---|
 | 壳的运行时资源 | `main.js`、`preload.js`、`server-url.js`、`lib/` 四个模块（`config-file` / `resolve-server-url` / `probe-server` / `shell-state`）、`pages/offline.html`、`build/icon.png` |
-| **不该进包的** | 5 个 `*.test.js`（默认会被打进 app 目录，必须显式排除）。**测试恰好 38 条**：`server-url` 2 / `config-file` 13 / `resolve-server-url` 7 / `probe-server` 7 / `shell-state` 9 |
+| **不该进包的** | 5 个 `*.test.js`（默认会被打进 app 目录，必须显式排除）。**测试恰好 38 条**：`server-url` 2 / `config-file` 13 / `resolve-server-url` 7 / `probe-server` 7 / `shell-state` 9（**注：③ 完成后变为 8 个文件 / 52 条** —— 本行是 2026-09-27 的日期快照，两组计数并存，见 §5） |
 | 图标 | `build/icon.png` = **1024×1024 RGBA** ✓（≥256，mac / win / linux 三平台都能由它生成图标，**不需要额外准备 `.ico` / `.icns`**） |
 | Electron 版本 | `v44.4.5` |
 | electron-builder | **未安装**。**⚠️ 2026-09-27 二次更正**：npm 上**没有稳定 v27** —— 实测 `npm view electron-builder dist-tags` = `{ latest: '26.15.3', next: '27.0.0-alpha.9', v26: '26.17.0' }`；`npm view electron-builder@27` **404**。即 **v27 只有 alpha**，**稳定线是 v26**（`latest` 指向 26.15.3；engines `{ node: '>=14.0.0' }`）。本设计改用 **`^26.15.3`**，可复现性由 `npm ci` + `package-lock.json` 保证 |
@@ -209,7 +209,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
 
 - **dev 下路径不变**：`package.json` 的 `name` 本来就是 `k12-desktop`，解析结果一致（调用仍会执行，只是无副作用）
 - **打包后是修复**：`productName` 变成中文也不影响 `userData` → 三条救火路径（README 的平台表）**内容仍然正确**
-- ⚠️ **待实测**：`app.setPath('userData', …)` 是否能在 `whenReady` **之前**调用。若不能，退路是放在 `whenReady` 的**第一行**（仍是所有读取之前）。两者都写进实施计划，按实测结论二选一
+- ⚠️ **待实测**：`app.setPath('userData', …)` 是否能在 `whenReady` **之前**调用。若不能，退路是放在 `whenReady` 的**第一行**（仍是所有读取之前）。两者都写进实施计划，按实测结论二选一。**（③ 状态：已完成出包，但从未启动过打包后的壳 —— 该点因此仍未人工确认，须在 §5 人工验收 #4 里读 `userData` 实际落点来结清。）**
 
 > **⚠️ 但「README 一字不用改」是错的（2026-09-27 更正）**：路径**内容**不用改，但 README 里有**一句会
 > 变成错误指引的话必须删掉** —— `README.md:118`：
@@ -356,7 +356,7 @@ cd apps/desktop
 | 项 | 期望 |
 |---|---|
 | 版本一致性校验 | tag 与 `package.json` 不符 → job 失败 |
-| `apps/desktop` 测试 | **全绿**（判据是「全绿」，不写死条数；当前为 38 条） |
+| `apps/desktop` 测试 | **全绿**（判据是「全绿」，不写死条数；当前为 8 个文件 / 52 条） |
 | 三平台产物产出 | mac **两个** dmg（x64 + arm64）+ win 一个 exe + linux 一个 AppImage |
 | 产物名全 ASCII | 形如 `k12-desktop-0.1.0-arm64.dmg`（**无中文、无空格**） |
 | **asar 白名单** | 必需 **9** 项都在（含 `package.json`）；**任何 `*.test.js` 都不在** |
@@ -412,7 +412,7 @@ cd apps/desktop
 | `README.md` | PC App 章节补：① 三平台安装包怎么产出（tag 流程）；② **从 `http://<本机IP>:5173/download/` 下载**；③ **未签名 mac 的首次打开指引**（`xattr -dr` 为主、**「仍要打开」**为备选）；④ 本地开发仍用 `npm start`，装包只是交付形态 | **`README.md:118`「若 ③ 给应用设了 `productName`…需同步改本表」整句删掉**（钉死 userData 后为假，照做会毁掉救火通路）；`:24` 与 `:206` 的「**dev 模式** / 交付物是 dev 壳」改为「已出安装包，交付形态=安装包」 |
 | `docs/constraints/pc-app-学习管控.md` | 补 ③ 的硬约束：`userData` 被显式钉死为 `k12-desktop`（勿删那行，删了中文 productName 会改路径）；`files` 是白名单且必须排除 `*.test.js`；`artifactName` 必须 ASCII；mac 包只能在 macOS runner 出；**新增 YAML 要检查 `.gitignore` 的 `*.yml`**；未签名 mac 的首开指引；**三处护栏用例（`gitignore.guard` / `user-data.guard` / `scripts/verify-asar.test`）的存在与意图** | 「`userData` 目录名取 `productName`（若设）否则 `name`…… README 里的三条平台路径必须同步改」→ 改为「**已钉死，不随 `productName` 变**」；首段「（Electron 壳，**dev 模式**；本期不出安装包）」→ 过期，改掉 |
 | `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` | §5「② 阶段无法验证的」表里「DevTools 真的打不开」→ 标注已由 ③ 结清（指向本设计） | §8-8「`userData` 目录名会被 ③ 的 `productName` 改掉……**README 里那三条平台路径必须同步改**」→ 加**更正注记**：已由 ③ 显式钉死 `userData` 解决，**不要再按原句去改 README** |
-| `apps/desktop/package.json` | 加 `electron-builder` 到 `devDependencies`（`^27`） | `description` 里「（Electron 壳，dev 模式；本期不出安装包）」→ 过期 |
+| `apps/desktop/package.json` | 加 `electron-builder` 到 `devDependencies`（`^26.15.3`） | `description` 里「（Electron 壳，dev 模式；本期不出安装包）」→ 过期 |
 | `apps/desktop/server-url.js` | —— | 文件头注释「**③ 的 CI 用环境变量重写本文件**，可产出指向不同服务器的包」与 §4.5 选的机制（**从本文件推导地址、不重写**）不是一回事 → 改成与实际一致（或删掉该句） |
 | `docs/ai-core-changelog.md` | 记录本次（含「**npm 上 electron-builder 无稳定 v27、只有 `27.0.0-alpha.9`；稳定线 v26 的 engines 是 `node >= 14`**」「Electron 44 移除 Windows ia32」「公开仓库 Actions 免费」「asar 白名单校验」「**根 `.gitignore` 的 `*.yml` 会吃掉新增 YAML**」「**macOS 15 移除右键→打开**」「**AppImage 在 macOS 上要 docker、故本机只能验 `--mac`**」七条实测事实） | —— |
 | `CLAUDE.md` | **不新增章节**（体量纪律：内容进 `docs/constraints/`）；若「开发命令」一节需要提一句 `desktop-v*` tag 发版，至多一行 | —— |
@@ -421,8 +421,14 @@ cd apps/desktop
 ## 8. 风险
 
 1. **mac 包只能在 macOS runner 上构建** —— 这条是硬约束，若日后想在本机/其它环境出 mac 包必须回到 macOS
-2. **Electron 44 与 electron-builder 26.x 的组合完全未经实测**（原「v27 支持 Electron 44 且会拒 ia32/armv7l」
-   这个前提，随 §1 的二次更正一起作废）→ **首个 CI run 之前都是纸面判断**。计划的第一个任务：
+2. **Electron 44 与 electron-builder 26.x 的组合：出包能力已在本机实测通过，仍未验的是打包后的运行时行为**
+   （原「v27 支持 Electron 44 且会拒 ia32/armv7l」这个前提，随 §1 的二次更正一起作废）。本机
+   （macOS arm64）实测：electron-builder 解到 **26.15.3**、配 Electron **44.4.5**，`--dir` ≈ **10 s**，
+   `--mac` 双架构 dmg 全量 ≈ **58 s**，产出 `k12-desktop-0.1.0-x64.dmg`（**125 MB**）/
+   `…-arm64.dmg`（**122 MB**）+ `latest-mac.yml`，**文件名全 ASCII**（细节见 changelog）——
+   即「**能不能出包**」已不是纸面判断。**仍未验的是打包后的运行时行为**（DevTools 是否真打不开、
+   `userData` 实际落点、连不上时的本地页）—— 因为**从未启动过打包后的壳**，这几项留给 §5 的人工验收
+   （#3 / #4 / #6）。**CI 侧仍完全未跑**，故「本机先验」的两步纪律照旧：
    ① 本机跑通 `--dir`（不打包、只产出 app 目录）最小验证；② **紧接着真出一次包**，确认更新清单真的产出、URL 正确
    —— 只跑 `--dir` 验不到清单这一步（§4.5）。
    ⚠️ **② 在本机只能用 `--mac`，不能用 `--linux`**：AppImage 在 macOS 上要 docker，而 §1 已记录本机
@@ -442,8 +448,10 @@ cd apps/desktop
    §4.0 的反选 + §5 的 `git status` 自检（验收 #10）是配套的两道保险
 9. **Gatekeeper 指引会随 macOS 版本继续变**（Apple 每次大版本都在收紧）→ 交付文档里给**命令行**（`xattr -dr`）比给 GUI 路径更耐放；
    GUI 路径要标注「本指引按 macOS 15+ 写」
-10. **`--config.publish.*` 的 CLI 注入未实测** —— 若 electron-builder 拒绝「只有 url 的半个 publish 配置」，
-    首次 CI 会在出清单这步失败（不影响安装包本身，但 §5 的清单验收与 ④ 的铺垫要改道）；§4.5 已给退路，§8-2 已要求本机先验
+10. **`--config.publish.*` 的 CLI 注入已实测可用** —— 注入后产出的 `latest-mac.yml` 里 `files[].url`
+    正是期望的相对文件名（§8-2 的 ② 本机验过），故「electron-builder 会拒绝半个 publish 配置」的担心不成立。
+    但**清单里不含绝对地址**（基址来自 publish 配置）→ 换地址时**必须同时刷新 publish 配置**，
+    否则旧清单里的相对地址会被解析到旧基址（§8-4 已就同一件事警告）
 
 ## 9. 交接给 ④（自动更新）
 
