@@ -94,22 +94,35 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
     未命中的路径会返回**学习应用本体**（HTTP 200 + HTML），浏览器会把这份 HTML 存成 `.dmg`。
     所以**只从下载页点链接**，别手敲文件名。**没发布过之前 `/download/` 里没有下载页**
     （访问它同样拿到的是应用本体，不是文件列表）
-- **怎么产出**：CI 出包（`apps/desktop` 的版本号 = tag 的版本号）
+- **怎么产出**：用出包入口脚本，**参数的唯一说明处是它的 `--help`**
 
   ```bash
-  cd apps/desktop
-  # 1) 改 package.json 的 version（例如 0.1.0）
-  # 2) 提交后打 tag 并推送 —— 推送即触发三平台出包
-  git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+  bash tools/app-build.sh --help                # 全部参数与示例
+  bash tools/app-build.sh --check               # 改完壳先跑这个：测试 + 最小出包 + 资源自检（约 10s）
+  bash tools/app-build.sh --local               # 本机出两个 mac dmg：x64 + arm64（约 1min）
+  bash tools/app-build.sh --local --manifest    # 上面两个 dmg 再加更新清单 latest-mac.yml
   ```
 
-  推 tag 后到 GitHub 的 Actions 页面看 `Desktop Release`，跑完下载 artifact（需要登录 GitHub）。
-  **tag 与 `package.json` 的 version 不一致时 CI 会直接失败**（防版本漂移）。
+  - **Windows / Linux 产物本机出不了**（NSIS 要 wine、AppImage 要 docker），只能走 CI：
 
-- **怎么发布到服务器**（把从 artifact 解压出来的文件拷到 web 层的 `/download/`）：
+    ```bash
+    bash tools/app-build.sh --online              # 只预检并打印要推什么（不推）
+    bash tools/app-build.sh --online --yes        # 预检通过后真打 tag 并推，触发三平台出包
+    ```
+
+    推完到 GitHub 的 Actions 页面看 `Desktop Release`，跑完下载 artifact（需要登录 GitHub）。
+    **tag 形如 `desktop-v0.1.0`，必须等于 `apps/desktop/package.json` 的 version，否则 CI 直接失败**（防版本漂移）。
+  - ⚠️ **打包这一步会去取 Electron 发行包，走的是 HTTPS（443）**。该路径不通时 electron-builder
+    会报 `read ECONNRESET` 或干脆卡住（**即使本机 `~/Library/Caches/electron` 里已有缓存也一样**）——
+    那不是壳坏了，先修网络 / 代理再重试。
+    ⚠️ **别把「能 push」当成「能打包」**：2026-09-28 实测本机 HTTPS 到 GitHub 被 reset，
+    而 git 走 SSH 照样能推 tag —— 两条路互不影响。**CI 侧不受影响**（runner 的网络是通的）。
+
+- **怎么发布到服务器**（把从 artifact 或本机 `dist/` 解压/产出的文件拷到 web 层的 `/download/`）：
 
   ```bash
-  bash tools/publish-installer.sh <安装包> <latest.yml> [latest-linux.yml ...]
+  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-0.1.0-arm64.dmg apps/desktop/dist/latest-mac.yml
+  # 等价于 bash tools/publish-installer.sh <安装包> <latest.yml> [latest-linux.yml ...]（同一实现，只是统一了入口）
   # 建议连每个安装包旁的 .blockmap 一起传（差量更新用；缺了它 ④ 只能回退成全量下载）
   # 同时会（重新）生成 /download/ 的下载页，页面上列出目录里实际存在的产物，并标注本次发布 / 早期版本
   # 会重建一次 web（几十秒）—— vite 会把 public/ 拷进 dist/，所以文件不会在下次构建时丢

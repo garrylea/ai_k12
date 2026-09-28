@@ -110,3 +110,22 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   **本机出不了 AppImage**（要 docker）—— 本机验证一律用 `--mac`
 - **不签名 → macOS 15+ 没有「右键→打开」这条路**：交付文档只能给
   `xattr -dr com.apple.quarantine` 或「系统设置 → 隐私与安全性 → 仍要打开」
+
+### 出包 / 发布的入口（2026-09-28 补）
+
+- **出包与发布统一走 `tools/app-build.sh`**（`--check` / `--local` / `--online` / `--publish`）。
+  **参数的唯一说明处是它的 `--help`** —— 文档里别抄命令，指过去即可（抄出来的就是会漂移的第二处）。
+- **`--online` 打 tag / 推 origin 必须有 `--yes`**：打 tag 是对外可见动作，脚本默认只预检并打印要执行的命令。
+- **`--publish` 只转发 `tools/publish-installer.sh`，不许复制发布逻辑**（发布要重建 web 并替换
+  正在对外服务的 `apps/web/dist/`，只有一份实现是对的）。
+- **Windows / Linux 包本机出不了**（NSIS 要 wine、AppImage 要 docker）→ 只能 `--online` 走 CI。
+- ⚠️ **打包需要能访问 GitHub，而且故障只看 HTTPS(443)**：electron-builder 取 Electron 发行包
+  **即使本机已有完整缓存也会联网**；不通时报 `read ECONNRESET`（堆栈看不出是网络）或静默卡约 4 分钟。
+  **别把它当壳坏了，也别把「能 push」当成「能打包」** —— 2026-09-28 实测本机 HTTPS 到 GitHub 被 reset
+  而 git 走 SSH 一路正常，两条路互不影响（CI 侧 runner 网络是通的，不受本机影响）。
+- ⚠️ **`tools/*.sh` 里 `$VAR` 后面紧跟中文标点必须写成 `${VAR}`**：macOS 自带 **bash 3.2** 会把紧跟的
+  UTF-8 字节当成变量名的一部分，在仓库统一的 `set -euo pipefail` 下直接报 `unbound variable`
+  （不是给空值），而且**只在执行到那一行时才炸**（2026-09-28 实测：`$need，`、`$MODE）` 让 4 个
+  分支全报错，而出包主路径完全看不出来）。新增中文文案时留意。
+  **有 `apps/desktop/tools-shell.guard.test.js` 钉着**（扫 `tools/**/*.sh`；`npm test` 即会跑到），
+  所以这条不靠记性 —— 该护栏自己也带「扫描器有牙齿」用例。
