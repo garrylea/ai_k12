@@ -1,0 +1,45 @@
+# PC App 打包配置 —— spec docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md §4.1
+#
+# ⚠️ 本文件是 YAML：根 .gitignore 有一条全局 `*.yml` 规则，靠里面的反选才进得来。
+#    动 .gitignore 时别把反选弄丢（apps/desktop/gitignore.guard.test.js 钉着）。
+
+appId: com.k12zhixue.desktop      # ⚠️ 发布后改不得：装过的机器按它认应用身份，④ 的更新也按它认
+productName: K12 智学             # 中文允许（应用名好看）；路径不受影响，见下面 userData 的说明
+asar: true                        # 显式写：脚本与 CI 的白名单校验都以「产物是 asar」为前提
+
+directories:
+  buildResources: build           # build/icon.png（1024×1024）会被自动采用，不需要另备 .ico/.icns
+  output: dist                    # 已被根 .gitignore 的 `dist/` 忽略
+
+# ⚠️ 白名单，不是黑名单：不写的话默认会把 app 目录下所有文件打进包，**包括 5 个 *.test.js**。
+# ⚠️ `lib/**/*.js` 会匹配 lib/*.test.js，靠最后那条否定规则排掉。
+#    否定语义一旦失效，测试文件就会进包 —— 由 scripts/verify-asar.js 兜住（会红，不静默通过）。
+files:
+  - main.js
+  - preload.js
+  - server-url.js
+  - lib/**/*.js
+  - pages/**
+  - package.json
+  - '!**/*.test.js'
+
+# 产物名必须 ASCII：默认模板是 ${productName}-${version}-${arch}.${ext}，会产出
+# 「K12 智学-0.1.0-arm64.dmg」（中文 + 空格）→ 污染 /download/ 的 URL、复制粘贴变脆。
+# 只用 ${name}/${version}/${arch}/${ext} 这四个确定支持的宏；不引入 ${os}（靠 ${ext} 已能区分平台）。
+artifactName: k12-desktop-${version}-${arch}.${ext}
+
+win:
+  target: [{ target: nsis, arch: [x64] }]
+
+mac:
+  # 显式关闭签名（spec §3-2：不签不公证）。比只依赖 CSC_IDENTITY_AUTO_DISCOVERY 环境变量可靠：
+  # 本机跑 --mac 时也不会因为钥匙串里恰好有 Developer ID 就签出**不一致的产物**。
+  identity: null
+  target: [{ target: dmg, arch: [x64, arm64] }]   # 双架构两个 dmg，不用 universal（spec §3-7）
+
+linux:
+  target: [{ target: AppImage, arch: [x64] }]
+
+# ⚠️ 这里**故意不写 `publish`** —— 下载地址的唯一真源是 apps/desktop/server-url.js，
+#    写进 yml 就成第二处、必然漂移。CI 与本机验证都用 CLI 注入（spec §4.5）：
+#      --config.publish.provider=generic --config.publish.url="$SERVER/download"
