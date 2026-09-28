@@ -127,3 +127,5 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   UTF-8 字节当成变量名的一部分，在仓库统一的 `set -euo pipefail` 下直接报 `unbound variable`
   （不是给空值），而且**只在执行到那一行时才炸**（2026-09-28 实测：`$need，`、`$MODE）` 让 4 个
   分支全报错，而出包主路径完全看不出来）。新增中文文案时留意。
+  **有 `apps/desktop/tools-shell.guard.test.js` 钉着**（扫 `tools/**/*.sh`；`npm test` 即会跑到），
+  所以这条不靠记性 —— 该护栏自己也带「扫描器有牙齿」用例。
