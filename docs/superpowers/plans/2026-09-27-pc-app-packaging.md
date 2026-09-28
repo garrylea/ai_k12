@@ -1514,7 +1514,8 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
 
 - [ ] **Step 3: 写 changelog**
 
-在 `docs/ai-core-changelog.md` 末尾追加一节（日期用今天）：
+在 `docs/ai-core-changelog.md` **顶部**追加一节（日期用今天）—— ⚠️ 该文件头部明确写着「迁出后的新条目
+继续追加在**顶部**」，不是末尾：
 
 ```markdown
 ## 2026-09-27 · PC App 打包与三平台分发（③）
