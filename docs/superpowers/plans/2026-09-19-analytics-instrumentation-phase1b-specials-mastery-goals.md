@@ -26,7 +26,7 @@
 - 语文三专项没有五档 verdict（默写是 boolean、解释/含义是 `correct: null` 的逐项），它们的 `verdict` 映射见 Task 3，**不要**硬套 `progressDelta`。
 
 **掌握度回写的四条规则（spec §4.8）**
-1. 只在该题**绑了 KP** 时写（`question_knowledge_points` 实测只覆盖 **203/530 ≈ 38%**，UI 必须显式展示「未覆盖」计数）。
+1. 只在该题**绑了 KP** 时写（`question_knowledge_points` 只覆盖**一部分**题 —— 2026-09-28 实测 270/597 ≈ 45%；UI 必须显式展示「未覆盖」计数）。
 2. `isCorrect === null`（空答案 / `self_assess` 待评）**不写**。
 3. `questionId == null` **跳过**。
 4. 失败**只 warn，不阻断判题**。

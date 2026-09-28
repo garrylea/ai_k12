@@ -2757,7 +2757,7 @@ paths:
       description: >-
         埋点 Phase 1B。按 `mastery_score ASC, error_count DESC` 取最弱 N 个知识点。
         **覆盖率三项（coveredQuestions / totalQuestions / uncovered）必须一起展示**：
-        题库只有约 38% 的题绑了知识点，不给出「未覆盖」计数会让家长以为孩子的问题只有列出的这几个。
+        题库只覆盖**一部分**题，不给出「未覆盖」计数会让家长以为孩子的问题只有列出的这几个（**别在此写死百分比**，会随数据漂移；实测数字见 docs/ai-core-changelog.md）。
         `masteryScore` 是 0..1 的比值（后端已算好，前端不要再除）。
         **与薄弱知识点（错题数代理）是两套口径、并存不替换**（spec §10）。
         `limit` 缺省 10、上限 50；**越界或非法一律 400**，不静默钳制。归属校验先于取数。
@@ -10696,7 +10696,8 @@ components:
     ParentMasterySummary:
       type: object
       description: >-
-        真掌握度（spec §8.2）。**覆盖率三项必须一起展示**：题库只有约 38% 的题绑了知识点，
+        真掌握度（spec §8.2）。**覆盖率三项必须一起展示**：题库只覆盖**一部分**题
+        （**别写死百分比**，会随数据漂移；实测数字见 docs/ai-core-changelog.md），
         不给出「未覆盖」计数会让家长以为孩子的问题只有列出的这几个。
         **与薄弱知识点（错题数代理）是两套口径、并存不替换**（spec §10）。
       required: [items, coveredQuestions, totalQuestions, uncovered]
@@ -10727,10 +10728,10 @@ components:
                 description: null = 从未见过（不要编成 0）。
         coveredQuestions:
           type: integer
-          description: 题库中**绑了知识点**的题数（实测 203）。
+          description: 题库中**绑了知识点**的题数（**动态值** —— 实测数字不进本文件，见 docs/ai-core-changelog.md）。
         totalQuestions:
           type: integer
-          description: 题库总题数（实测 530）。
+          description: 题库总题数（**动态值** —— 实测数字不进本文件，见 docs/ai-core-changelog.md）。
         uncovered:
           type: integer
           description: "= totalQuestions - coveredQuestions（后端算好，前端不要自己减）"

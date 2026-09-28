@@ -344,7 +344,7 @@ ON DUPLICATE KEY UPDATE
   last_seen_at  = NOW(3);
 ```
 
-四条规则：① 只在该题**绑了 KP** 时写（当前 `question_knowledge_points` 只覆盖 203/529 题，UI 必须显式展示「未覆盖」计数）；② `isCorrect === null`（空答案 / self_assess 待评）**不写**；③ `questionId == null` 跳过；④ 失败只 warn，不阻断判题。
+四条规则：① 只在该题**绑了 KP** 时写（`question_knowledge_points` 只覆盖**一部分**题 —— 2026-09-28 实测 270/597 ≈ 45%；UI 必须显式展示「未覆盖」计数）；② `isCorrect === null`（空答案 / self_assess 待评）**不写**；③ `questionId == null` 跳过；④ 失败只 warn，不阻断判题。
 
 ### 4.9 迁移与 schema 落点
 
@@ -588,7 +588,7 @@ active|hidden --ROUTE_LEAVE|PAGEHIDE--> ended   带 end_reason
 | `/students/:id/study-time` | `from, to`（YYYY-MM-DD，缺省 = 近 7 天） | 只聚合 `status IN ('ended','abandoned')` 或已惰性收尾的会话；窗口由**应用层**算好传参（不用 `CURDATE()`，避免 DB 时区差一天） | `{totalSeconds, activeDays, byDay:[{date, seconds}], byModule:[{module, seconds}], bySubject:[{subjectId, seconds}], source:'sessions'}` |
 | `/students/:id/today-usage` | — | `limitMinutes` 取 `controls.daily_time_limit_minutes`；为 NULL = 未设限 → `exceeded = false`；今日 = 应用层算好的本地日 | `{date, activeSeconds, limitMinutes\|null, exceeded, byModule:[{module, seconds}]}` |
 | `/students/:id/specials` | `from, to` | 四模块各自聚合 `special_practice_logs`；**`rate` 沿用 `answered=0 → null`**（不许写 0） | `{dictation:{units,correct,rate\|null,byDay}, interpretation:{...}, meaning:{...}, vocabulary:{units,correct,rate\|null,newWords,byDay}}` |
-| `/students/:id/mastery` | `limit`（默认 10，上限 50） | 按 `mastery_score ASC` 取最弱；**必须回 `coveredQuestions` / `totalQuestions` / `uncovered` 计数**（KP 只覆盖 203/529 题，不展示会让家长误以为只有这些薄弱点） | `{items:[{knowledgePointId,name,masteryScore,level,correctCount,errorCount,lastSeenAt}], coveredQuestions, totalQuestions, uncovered}` |
+| `/students/:id/mastery` | `limit`（默认 10，上限 50） | 按 `mastery_score ASC` 取最弱；**必须回 `coveredQuestions` / `totalQuestions` / `uncovered` 计数**（KP 只覆盖**一部分**题 —— 2026-09-28 实测 270/597 ≈ 45%，不展示会让家长误以为只有这些薄弱点） | `{items:[{knowledgePointId,name,masteryScore,level,correctCount,errorCount,lastSeenAt}], coveredQuestions, totalQuestions, uncovered}` |
 | `/students/:id/goals/attainment` | — | 读该学生 `goals`（`is_active=1`）；无目标 → 懒初始化默认目标；达成值来源按 `metric` 分派（`daily_study_minutes` ← `study_sessions`、`daily_words` ← `special_practice_logs`、`weekly_passages` ← `special_practice_logs`、`weekly_clear_errors` ← `main_error_books`） | `{items:[{metric, period, target, achieved, rate\|null}]}` |
 
 **返回形状**：家长端点**不得**含任何 `tier='ops'` 派生字段；「建议」文案由后端生成中性结论。
