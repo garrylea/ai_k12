@@ -22,7 +22,8 @@
 - 只出 **x64** 的 win/linux；mac 出 **x64 + arm64 两个 dmg**（不用 universal）
 - 版本号**只**改 `apps/desktop/package.json` 的 `version`；tag 形如 `desktop-v0.1.0`，与 version 不符则 CI 失败
 - 不签名、不公证（mac 也不）→ `mac.identity: null`
-- **代码里不用 emoji**（README / 注释 / 脚本输出都不许有）；`tools/*.sh` 符合仓库既有风格（`set -euo pipefail` + `log()` / `die()`）
+- **UI / 组件 / 面向用户的文案里不用 emoji**（仓库硬规则，`CLAUDE.md` 基本原则 1）；`tools/*.sh` 符合仓库既有风格（`set -euo pipefail` + `log()` / `die()`）
+  - ⚠️ **本约束的正确范围（Task 1 执行中更正）**：`⚠️` / `✅` 这类符号**在代码注释与文档里是本仓既定风格** —— `apps/desktop/main.js` 3 处、`server-url.js` 2 处、`preload.js`、`lib/probe-server.js`、`lib/shell-state.js` 都在用。**不要**为了「无 emoji」去删注释里的 `⚠️`；约束只管**用户可见面**（UI、组件、文案、脚本对用户打印的输出）。
 - 新增 YAML **必须**在 `.gitignore` 里反选（根 `.gitignore` 有全局 `*.yml` 规则，见 Task 1）
 - 不许动 `docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml`（本设计不涉及端点）
 
@@ -95,11 +96,18 @@ import { fileURLToPath } from 'node:url';
  * （`files` 白名单失效 → 直接复现 ② spec §8-9 的「漏 pages/offline.html → loadFile 失败
  * → 无节流紧循环、屏幕无 UI」）时才暴露。
  *
- * 实测行为（本用例的判据就是这么定的）：
- *   git check-ignore -v <path>  命中规则 → status 0 且 stdout = `文件:行:规则\t路径`
- *                               未命中   → status 1
+ * 实测行为（git 2.50.1，本用例的判据就是这么定的；**Task 1 执行中发现的坑**）：
+ *   git check-ignore -v <path>  命中普通规则 → status 0，stdout = `文件:行:规则\t路径`
+ *                               命中**反选规则（!开头）** → **status 仍是 0**，stdout 把
+ *                                 反选规则原样打印（`文件:行:!规则\t路径`）
+ *                                 → 所以**带 -v 时 exit status 不代表「被忽略」**
+ *                               （只有**不带 -v** 时 status 才纯粹表示「是否被忽略」：
+ *                                 被忽略 → 0，未忽略 → 1。）
  *                               不在 git 仓库 → status 128
  *                               没装 git → spawnSync 的 error 有值
+ *
+ * 这个坑会让「反选生效」永远测不绿 —— 计划初稿就踩了：拿 `-v` 的 status 当「被忽略」，
+ * 而反选后 status 恒为 0。下面的判据因此**必须**排除「命中的是反选规则」这一情形。
  */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -120,7 +128,12 @@ function checkIgnore(relPath) {
   });
   if (r.error) return null; // 没装 git
   if (r.status === 128) return null; // 不在 git 仓库里（例如导出的 tarball）
-  return { ignored: r.status === 0, rule: (r.stdout ?? '').trim() };
+  const rule = (r.stdout ?? '').trim();
+  // 见文件头「实测行为」：带 -v 时命中反选规则也 status 0，所以「被忽略」不能只看 status，
+  // 还要排除「命中的是反选规则」。只取 tab 前的 `文件:行:规则` 部分判断，
+  // 避免路径名里恰好含 `:数字:!` 造成误判。
+  const ignored = r.status === 0 && !/:\d+:!/.test(rule.split('\t')[0]);
+  return { ignored, rule };
 }
 
 const probe = checkIgnore(IGNORED_PROBE);
@@ -147,7 +160,7 @@ describe('.gitignore 的 *.yml 陷阱（spec ③ §4.0）', () => {
   it.skipIf(!usable)('安装包目录必须被忽略', () => {
     for (const p of MUST_BE_IGNORED) {
       const r = checkIgnore(p);
-      expect(r.ignored, `${p} 未被忽略 —— 一把 `git add -A` 就会把上百 MB 装进仓库`).toBe(true);
+      expect(r.ignored, `${p} 未被忽略 —— 一把 \`git add -A\` 就会把上百 MB 装进仓库`).toBe(true);
     }
   });
 });
@@ -220,10 +233,14 @@ Expected: PASS（41 passed —— 原 38 + 新增 3）
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
 git status --short          # 应看到 .gitignore 与 gitignore.guard.test.js 是 M / ??
-git check-ignore -v apps/desktop/electron-builder.yml .github/workflows/desktop-release.yml
+git check-ignore apps/desktop/electron-builder.yml .github/workflows/desktop-release.yml
 ```
 
 Expected: `git check-ignore` 输出为空且 **exit code 1**（`echo $?`）—— 即两个路径都不再被忽略。
+
+> ⚠️ **这里必须用不带 `-v` 的形式**（Task 1 执行中实测的坑）：带 `-v` 时，命中**反选规则**
+> 也会返回 exit 0 并把反选行打印出来，所以 `-v` 的退出码**不能**当「是否被忽略」的判据。
+> 不带 `-v` 时语义才是纯粹的：被忽略 → 0，未忽略 → 1。
 
 > **这条是 spec §5 的验收 #10**，也是本任务最关键的证据：**必须用 `git status` 亲眼看到**，别只看测试绿。
 
@@ -1193,10 +1210,12 @@ Expected: 打印 `不一致，按预期失败`，`exit=1`
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
 git status --short .github/
-git check-ignore -v .github/workflows/desktop-release.yml; echo "check-ignore exit=$? （0=被忽略/坏，1=未被忽略/好）"
+git check-ignore .github/workflows/desktop-release.yml; echo "check-ignore exit=$? （0=被忽略/坏，1=未被忽略/好）"
 ```
 
 Expected: `git status` 看到 `?? .github/`（或 `?? .github/workflows/desktop-release.yml`）；`check-ignore` **exit=1**。
+
+> ⚠️ 同样**不要加 `-v`**（理由见 Task 1 Step 6 的注）。
 
 - [ ] **Step 6: 跑全量桌面测试，确认没碰坏**
 
@@ -1486,8 +1505,13 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
   `git ls-files '*.yml'` 当时是 **0 条**（原有注释「仓库无已跟踪 *.yml，全局忽略安全」已失效）。
   失效模式是**静默**：`git add` 不报错、CI 不报错，只有产物缺资源/缺标识时才暴露。
   已加三条反选 + `gitignore.guard.test.js`（含「探针有牙齿」用例防静默变绿）。
-- **`git check-ignore` 的退出码可当判据**：命中规则 0 / 未命中 1 / **不在 git 仓库 128**。
-  护栏用例靠 128 识别「非仓库场景」而不是靠猜。
+- **`git check-ignore` 的退出码可当判据 —— 但只在「不带 `-v`」时**：
+  不带 `-v`：被忽略 0 / 未忽略 1 / **不在 git 仓库 128**。
+  **带 `-v` 时，命中反选规则（`!` 开头）也返回 0**（只是把反选行原样打印），
+  所以 `-v` 的退出码**不能**当「是否被忽略」的判据 —— 计划初稿就踩了这个坑，
+  会让「反选生效」永远测不绿；护栏用例改为「status 0 **且** 命中的不是反选规则」才正确。
+  另：`-v` 的 stdout 形如 `文件:行:规则\t路径`，取 tab 前那段判断可避免路径名里的
+  `:数字:!` 造成误判。
 - **macOS 15 (Sequoia) 起 Apple 移除了「右键→打开」**：未签名应用现在只有
   `xattr -dr com.apple.quarantine` 或「系统设置 → 隐私与安全性 → 仍要打开」。
   原交付文档写「右键→打开」**会让家长卡住甚至看到「已损坏」**，已改。
