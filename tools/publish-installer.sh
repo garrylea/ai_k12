@@ -98,19 +98,22 @@ gen_download_page() {
   done
 
   local primary_count=0 updates_count=0 earlier_count=0
-  local earlier_names="" earlier_kb=0
-  local path name size kind hint tag tag_class href text
+  local earlier_names=""
+  local path name name_lc size kind hint tag tag_class href text
   # 扫描目标目录里**实际存在**的产物（只认本脚本产生的几类，index.html 等自动跳过）
   for path in "$DEST_DIR"/*; do
     [ -f "$path" ] || continue
     name="$(basename "$path")"
+    # 仅用于匹配的小写副本：显示名与 href 仍用原始大小写，否则 `…-X64.DMG` 会被拷入并打印
+    # 直链、却因大小写不匹配被这个 case 跳过，从而不出现在页面上。
+    name_lc="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
     hint=""
-    case "$name" in
+    case "$name_lc" in
       *.exe)      kind=installer; hint="Windows" ;;
-      *.AppImage) kind=installer; hint="Linux" ;;
+      *.appimage) kind=installer; hint="Linux" ;;
       *.dmg)
         kind=installer
-        case "$name" in
+        case "$name_lc" in
           *arm64*) hint="macOS（Apple 芯片 / M 系列）" ;;
           *x64*)   hint="macOS（Intel）" ;;
           *)       hint="macOS" ;;
@@ -202,7 +205,7 @@ ${updates}    </ul>
 <body>
 <main>
   <h1>K12 智学 · PC App 下载</h1>
-  <p class="note">本页由 tools/publish-installer.sh 生成，列出服务器下载目录里实际存在的全部产物（含早期版本）；标注「本次发布」的是最近一次发布。</p>
+  <p class="note">本页由 tools/publish-installer.sh 生成，列出本目录中可识别的产物（含早期版本）；标注「本次发布」的是最近一次发布。</p>
   <h2>安装包</h2>
   <ul class="files">
 ${primary_block}  </ul>
@@ -242,7 +245,7 @@ if [ "$DO_BUILD" -eq 1 ]; then
   log "重建 web（会把 public/ 拷进 dist/）…"
   ( cd "$WEB_DIR" && npm run build )
 else
-  log "跳过重建（--no-build）—— 新文件不会进 dist/；此时 /download/ 返回的是 SPA 的 index.html（不是下载列表），且未发布前 /download/ 根本没有下载页"
+  log "跳过重建（--no-build）—— 新文件不会进 dist/；此时 /download/ 返回的是 SPA 的 index.html（不是下载列表）"
 fi
 
 # 4) 打印下载地址（地址的唯一真源 = apps/desktop/server-url.js）

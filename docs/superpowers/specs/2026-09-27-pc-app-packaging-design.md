@@ -291,7 +291,10 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 用法: bash tools/publish-installer.sh <文件1> [文件2 ...]
   1. 逐个校验文件存在
   2. mkdir -p apps/web/public/download && 把每个文件 cp 进去
-  2.5 生成 apps/web/public/download/index.html（下载页：列出本次发布的每个文件与大小 + 首开说明）
+  2.5 生成 apps/web/public/download/index.html（下载页：**列出下载目录里实际存在的可识别产物**
+      —— 安装包按平台给提示（`.exe`→Windows、`arm64` dmg→macOS Apple 芯片、`x64` dmg→macOS Intel、
+      `.AppImage`→Linux），每个文件标 **本次发布 / 早期版本**；更新用文件（`latest*.yml`、`*.blockmap`）
+      收进默认折叠的「普通用户无需下载」区；附 mac / Windows 首次打开说明）
   3. (cd apps/web && npm run build)      # vite 会把 public/ 拷进 dist/
   4. 从 apps/desktop/server-url.js 读默认地址，打印 /download/ 与各文件的下载地址
 
@@ -317,7 +320,9 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 - **为什么要生成下载页**（2026-09-27 实测）：`vite preview` 无目录列表 + SPA 回退，未命中的
   `/download/` 会返回应用本体（HTTP 200 + 468 B HTML）而**不是 404**，打错文件名还会把 HTML
   存成 `.dmg`（见 §6-6）。生成一个真实的 `index.html` 让 `/download/` 命中静态文件、渲染成列表；
-  它**每次发布都重写**，所以永远不会列出陈旧文件，也不需要把它入库（`public/download/` 整体被忽略）
+  它**每次发布都重写**，所以**页面内容始终跟随目录实际内容**；但脚本**有意不删除**任何已发布产物
+  （版本归档是本期明确的非目标），旧产物会被标成「早期版本」、并在日志里按数量与总大小告警，
+  何时清理由运维决定。`public/download/` 整体仍被忽略，故页面不入库
 - `vite preview` 按请求读文件，**重建后无需重启 web 服务**即可下载到新文件
 
 ### 4.5 地址的单一真源
@@ -408,7 +413,7 @@ cd apps/desktop
    才按自己的类型返回。后果：**学生访问 `/download/` 看到的是学习应用本体**，而打错/未发布的文件名
    会让浏览器把这份 HTML 存成 `.dmg`。**修法**：`publish-installer.sh` 每次运行都生成
    `public/download/index.html`（随构建进 `dist/`），`/download/` 因此命中一个真实静态文件、
-   渲染成「本次发布了哪些文件」的列表；README 也改成「只从下载页点链接，别手敲文件名」。
+   渲染成「下载目录里实际存在哪些产物（区分本次发布与早期版本）」的列表；README 也改成「只从下载页点链接，别手敲文件名」。
    ⚠️ **尚未发布过时 `/download/` 同样返回应用本体**（没有下载页可命中）——所以本条的旧措辞
    「若 `public/download/` 被清空，下载会 404」是**错的**，实际是不 404 而是静默返回 SPA
 7. **`appId` 发布后不可更改** —— 改了等于换应用
