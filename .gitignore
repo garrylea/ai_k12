@@ -49,8 +49,16 @@ tools/runtime/
 # Playwright MCP test artifacts
 .playwright-mcp/
 
-# Playwright MCP 快照（login.yml / targeted.yml 等）——仓库无已跟踪 *.yml，全局忽略安全
+# Playwright MCP 快照（login.yml / targeted.yml 等）
+# 这是**文件级全局规则**，会连本该入库的 YAML 一起吃掉，而且**不报错**
+#    （git add 成功、CI 成功、只有产物缺内容时才暴露）。
+#    **每新增一个需要入库的 YAML，都必须在这里加一条反选**，
+#    并同步 apps/desktop/gitignore.guard.test.js 的 MUST_BE_TRACKABLE。
+# 已反选：electron-builder 配置 + GitHub Actions workflow
+# （spec docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md §4.0）
 *.yml
+!apps/desktop/electron-builder.yml
+!.github/workflows/*.yml
 
 ## KaTeX 字体（由 scripts/setup-katex-fonts.cjs 从 node_modules 生成，dev/build 时自动创建）
 apps/web/public/katex-fonts/
@@ -64,3 +72,6 @@ tools/deploy/runtime/
 
 ## 数据库备份（含学生数据，勿入库）
 tools/db/backups/
+
+## PC App 安装包（tools/publish-installer.sh 放进 apps/web/public/，单个数十~上百 MB，绝不能入库）
+apps/web/public/download/
