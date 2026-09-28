@@ -1938,3 +1938,19 @@ git commit -m "docs: ③ 收尾 —— ② spec 遗留项结清与更正注记 +
 
 见文首「对 spec ③ 的偏离」表（D1–D4）。这 4 条**请在动手前确认** —— 其中 D1（asar 校验脚本化）
 与 D2（`--no-build`）是需要改 spec 措辞的，确认后我一并回填 spec。
+---
+
+## 附：执行后的补件（2026-09-28）
+
+本计划执行完之后，出包这件事又补了一个**统一入口脚本**。本计划正文里的命令（裸
+`electron-builder …` 与 `publish-installer.sh …`）**仍然有效** —— 脚本就是包这两串 ——
+但**以后请用脚本，并且只看它的 `--help`**（那是参数的唯一说明处，README 也只指过去不抄）：
+
+```bash
+bash tools/app-build.sh --help   # --check / --local [--manifest] / --online [--yes] / --publish / --win·--linux
+```
+
+- **设计见** spec ③ §4.8；`--publish` 只是**转发** `publish-installer.sh`（本计划 Task 4 的产物），不重写逻辑
+- 本计划 Task 3 / Task 5 里的 publish 注入**仍必须 provider 与 url 两个都给**（`--local --manifest` 已替你带上）
+- 另新增一条护栏 `apps/desktop/tools-shell.guard.test.js`，钉住 macOS bash 3.2 的「`$VAR` 后紧跟中文标点」坑
+- 实测结论（含一次事故复盘：误推 tag 与「HTTPS 不通但 SSH 通」）记在 `docs/ai-core-changelog.md` 的 2026-09-28 节

@@ -16,7 +16,7 @@ K12 智学系统 — 面向中国学生的自适应 AI 学习平台。双轨（�
 ```
 apps/web/     — Active. React (Vite + TS + Tailwind)
 apps/server/  — Active. Node backend；ai-core AI Agent Hub + HTTP API 层（10 模块）均已实现
-apps/desktop/ — Active(dev). Electron 壳：加载与 Web 相同的 UI + kiosk 学习管控（见下「PC App 学习管控」节）
+apps/desktop/ — Active. Electron 壳：加载与 Web 相同的 UI + kiosk 学习管控；出包/发布入口 `tools/app-build.sh`（见下「PC App 学习管控」节）
                 packages/ — Planned. Shared configs/types
 tools/crawler/ | tools/data-refinery/ | tools/db/  — Active. 爬虫 / 数据管线 / MySQL schema
 docs/         — PRD, API 设计, UX/UI, DB 设计, 数据管线文档
@@ -33,6 +33,8 @@ npm test       # vitest
 
 # tools/*（crawler / data-refinery / db）
 pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络依赖测试标记 network，默认 skip
+
+# PC App 出包/发布：bash tools/app-build.sh --help（--check / --local [--manifest] / --online [--yes] / --publish；发版=改 apps/desktop/package.json 的 version 后 --online --yes）
 ```
 
 ⚠️ **起后端的正确方式**：`node dist/main.js`。`npx tsx src/main.ts` 的 DI 是坏的（见下文 DI 坑）。
