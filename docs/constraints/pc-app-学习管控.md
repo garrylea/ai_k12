@@ -6,7 +6,7 @@
 
 ---
 
-`apps/desktop`（Electron 壳，**dev 模式**；本期不出安装包）+ 「单次学习锁定」。设计见 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`；契约见 API 文档 §4.25/§5.30。
+`apps/desktop`（Electron 壳；**交付形态是安装包**，见 `docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md`）+ 「单次学习锁定」。设计见 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`；契约见 API 文档 §4.25/§5.30。
 
 - **布局：PC App 与 Web 完全相同，不做三栏**（推翻 UX/架构的 P1「三栏」承诺）。角色驱动：学生 → kiosk、`parent`/`admin` → 普通窗口；角色闸门放**路由 effect**（登录/登出是客户端导航、不刷新页面）。
 - **⚠️ kiosk 由「角色」决定，与家长有没有设时长无关** —— 推给壳的是 `setStudentMode(role === 'student')`；`session_lock_minutes` **只决定能不能登出 + 要不要显示 pill**。**这两件事勿合并成一个布尔**（合并过一次：家长没设时长 → 学生登录后完全不被全屏、可随便切应用，用户实测报回）。`UNLOCKED`（学生但无锁/已到期/已解除）**仍是 kiosk 全屏**，只是允许登出。改 `preload.js` 接口名**必须重启壳**（preload 只在窗口创建时加载）。
@@ -35,8 +35,12 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   不该比没有文件更糟（学生机卡在启动就彻底不可用）。
   其中**只有「文件不存在」是完全静默的**（正常路径）；JSON 损坏 / 字段非法 / 非 http(s)
   都会打一行 `console.warn` 说明为什么忽略，便于排障
-- `userData` 目录名取 `productName`（若设）否则 `name`。**③ 若设了 `productName`，
-  覆盖文件与状态文件的路径都会变，README 里的三条平台路径必须同步改**
+- **`userData` 已被显式钉死为 `…/<appData>/k12-desktop`（`main.js` 顶部那行 `app.setPath`）**，
+  与 `productName` 无关。⚠️ **别删那行**：删了之后中文 `productName`（`K12 智学`）会决定
+  `app.getName()`，覆盖文件与状态文件的路径都会变成「…/K12 智学/」（中文 + 空格），
+  README 里那三条平台路径全部失效、救火手段直接没了。有 `user-data.guard.test.js` 钉着。
+  （**更正**：本文件早先写「③ 若设了 `productName`，README 的三条路径要跟着一起改」—— ③ 已用钉死
+  的方式解决了，**不要再按原句去改 README**，那样做反而会把文档改错。）
 
 ### `studentMode` 持久化：启动即进 kiosk（补洞，勿删）
 
@@ -81,3 +85,26 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - **明确不做**（补回来是错的）：**禁右键**（Electron 默认不弹右键菜单，Web 应用也无自定义右键菜单，
   没有东西可禁）、**禁刷新**（不动 localStorage，锁还在，不构成逃逸，禁了让学生出错时无法自救）、
   **禁文本选中**（与防逃逸无关，学生可能要复制）、**禁拖拽**（`will-navigate` 已拦非同源）
+
+## 打包与分发（2026-09-27，③）
+
+来源：`docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md`
+
+- **新增 YAML 必须检查 `.gitignore`**：根 `.gitignore` 有一条**文件级全局规则** `*.yml`，
+  会**静默**吃掉本该入库的 YAML（`git add` 不报错、CI 不报错，只有产物缺内容时才暴露）。
+  目前靠三条反选放行：`!apps/desktop/electron-builder.yml`、`!.github/workflows/*.yml`。
+  有 `apps/desktop/gitignore.guard.test.js` 钉着，**改 .gitignore 后跑 `npm test`**
+- **`files` 是白名单**（`electron-builder.yml`），且**必须排除 `*.test.js`**。白名单漏一件的后果是
+  `pages/offline.html` 那种**无节流紧循环 + 屏幕无 UI**（② spec §8-9）。出包后由
+  `apps/desktop/scripts/verify-asar.js` 断言「必需 9 项齐全、无 `*.test.js`」，**CI 红则不发**
+- **`artifactName` 必须全 ASCII**（`k12-desktop-${version}-${arch}.${ext}`）：默认模板带中文
+  `productName` 与空格，会污染 `/download/` 的 URL
+- **`appId` 发布后改不得**（`com.k12zhixue.desktop`）：装过的机器按它认身份，④ 的更新也按它认
+- **`mac.identity: null` + `CSC_IDENTITY_AUTO_DISCOVERY=false`** 都是有意的（不签不公证，spec §3-2）；
+  别「顺手」打开签名 —— 会产出本机/CI 不一致的产物
+- **`electron-builder.yml` 里故意不写 `publish`**：地址的唯一真源是 `apps/desktop/server-url.js`，
+  CI 与 `tools/publish-installer.sh` 都从它推导。**别把 URL 抄进 yml**（那就是第二处、必然漂移）
+- **mac 包只能在 macOS runner 上构建**（`dmg` 依赖 `hdiutil`）；win/linux 只出 x64。
+  **本机出不了 AppImage**（要 docker）—— 本机验证一律用 `--mac`
+- **不签名 → macOS 15+ 没有「右键→打开」这条路**：交付文档只能给
+  `xattr -dr com.apple.quarantine` 或「系统设置 → 隐私与安全性 → 仍要打开」
