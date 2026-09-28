@@ -4,6 +4,12 @@
 > `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md`（②，本设计的前置）、
 > `apps/desktop/server-url.js`（**服务器地址的唯一真源**，本设计复用）。
 >
+> **2026-09-27 三次修订（动手前定案）**：实施计划（`docs/superpowers/plans/2026-09-27-pc-app-packaging.md`）
+> 提出 4 条偏离，**用户已确认全部采纳**，已回填本文件：**D1** asar 校验从「workflow 内联 bash」
+> 改为 `apps/desktop/scripts/verify-asar.js`（§2-10 / §4.3 第 7 步）；**D2** `publish-installer.sh`
+> 加 `--no-build`（§4.4）；**D3** `mac.identity: null` 写进 yml，与 CI 的 env 互为保险（§4.1 / §4.3）；
+> **D4** 补 3 个测试（2 个形态护栏 + 1 个单测，§2-10）。
+
 > **2026-09-27 复核修订**：本文件经一轮逐条实测复核。新增 **§4.0（阻断项）**；修订 §4.2 / §4.3 / §4.4 /
 > §5 / §6-1 与 §9，并给 §7 加了「**要删的旧表述**」一栏。原设计的主体（三层地址来源、白名单、
 > 三平台 matrix、asar 断言）**未改**。
@@ -63,6 +69,7 @@
 | 7 | 交付文档：未签名 mac 的首次打开指引、下载路径、版本/tag 流程 | `README.md` 等 |
 | 8 | 结清 ② 遗留的 ③ 待验项：**生产构建下 DevTools 打不开** | 验收，非代码 |
 | 9 | **⚠️ `.gitignore` 反选两个新增 YAML**（否则整个 ③ 空转，见 §4.0） | `.gitignore` |
+| 10 | **asar 校验脚本 + 3 个测试**（实现计划 D1/D4 定的，见 §4.3 第 7 步） | 新增 `apps/desktop/scripts/verify-asar.js`、`apps/desktop/scripts/verify-asar.test.js`、`apps/desktop/gitignore.guard.test.js`、`apps/desktop/user-data.guard.test.js` |
 
 ### 本期不做（明确）
 
@@ -155,6 +162,9 @@ artifactName: k12-desktop-${version}-${arch}.${ext}
 win:
   target: [{ target: nsis, arch: [x64] }]
 mac:
+  # 显式关闭签名（§3-2：不签不公证）。比只依赖 CSC_IDENTITY_AUTO_DISCOVERY 环境变量可靠：
+  # 本机跑 --mac 验包时也不会因为钥匙串里恰好有 Developer ID 就签出**不一致的产物**
+  identity: null
   target: [{ target: dmg, arch: [x64, arm64] }]
 linux:
   target: [{ target: AppImage, arch: [x64] }]
@@ -221,7 +231,7 @@ macOS 那个标签若在 Actions 里不可用，退回 `macos-latest` —— **�
 5. **`npm test`** —— **全绿**才继续（出包前门禁，用户裁决 §3-9）
 6. `apps/desktop` 目录下跑 `./node_modules/.bin/electron-builder --<platform>`（**依赖 §2-2 已把 electron-builder 钉进 devDependencies**；不要用会现拉版本的裸 `npx`），
    并按 §4.5 注入 `--config.publish.provider=generic --config.publish.url="$SERVER/download"`
-7. **产物白名单校验**（脚本内联，见下）
+7. **产物白名单校验**（`apps/desktop/scripts/verify-asar.js`，见下）
 8. `actions/upload-artifact`
 
 **关于工作目录（易错点）**：第 6 步的 electron-builder **必须在 `apps/desktop` 下运行**（它按 cwd 找
@@ -229,19 +239,26 @@ macOS 那个标签若在 Actions 里不可用，退回 `macos-latest` —— **�
 实现时统一成：在仓库根取好 `SERVER` 变量，再 `cd apps/desktop` 执行构建（`${{ github.workspace }}` 拼绝对路径亦可）。
 
 **产物白名单校验（第 7 步，直接守住 ② spec §8-9 那个「漏资源 → 无节流紧循环」的危害）**：
-找到 `apps/desktop/dist/**/app.asar`，用 `npx @electron/asar list` 列出，然后断言：
+落在 **`apps/desktop/scripts/verify-asar.js`**（Node；CI 里就是 `npm run verify:asar`），
+它扫 `apps/desktop/dist/**/app.asar`，用 `@electron/asar` 的 CLI 列内容，然后断言：
 
 - **必须存在**（9 项）：`main.js`、`preload.js`、`server-url.js`、`package.json`、
   `lib/config-file.js`、`lib/resolve-server-url.js`、`lib/probe-server.js`、`lib/shell-state.js`、`pages/offline.html`
 - **必须不存在**：任何 `*.test.js`
-- 缺一件或混入测试文件 → **job 失败**
-- ⚠️ **路径含中文与空格**：mac 的 asar 落在 `dist/mac/K12 智学.app/Contents/Resources/` 与
-  `dist/mac-arm64/K12 智学.app/...`。**脚本必须用 `find … -print0` / `while IFS= read -r -d ''` 或全程加引号**
-  —— 用 `for f in $(find …)` 会在空格处断词，校验静默失效
+- 缺一件或混入测试文件 → **退出码 1，job 失败**
+
+**为什么用 Node 而不是 workflow 内联 bash**（实现计划 D1，2026-09-27 定）：
+① mac 的 asar 落在 `dist/mac-arm64/K12 智学.app/Contents/Resources/` —— 路径**含中文与空格**，
+bash 的 `for f in $(find …)` 会在空格处断词（校验静默失效）；Node 用 `execFileSync(可执行文件, argv[])`
+不经过 shell，零引号问题。② §8-2 要求**本机先验**，脚本化才能让本机与 CI 跑同一段逻辑。
+③ 纯函数部分（`parseAsarList` / `checkEntries`）可单测 —— 配套 `scripts/verify-asar.test.js` 还包含
+「必需项都在磁盘上存在」与「覆盖 `main.js` 里所有本地 `require`」两条防漂移断言。
+`@electron/asar` 因此进 `devDependencies`（与 `electron-builder` 一起，§2-2）。
 
 **CI 加固（低成本，建议一并加）**：
 
-- `env: CSC_IDENTITY_AUTO_DISCOVERY: false` —— 明确告诉 electron-builder 别去找签名证书，避免 macOS runner 上的噪音或偶发失败（与 §3-2「不签不公证」一致）
+- `env: CSC_IDENTITY_AUTO_DISCOVERY: false` —— 与 yml 里的 `mac.identity: null`（§4.1）**互为保险**：
+  明确告诉 electron-builder 别去找签名证书，避免 macOS runner 上的噪音或偶发失败（与 §3-2「不签不公证」一致）
 - `permissions: { contents: read }` —— 最小权限
 - `concurrency: { group: desktop-${{ github.ref }}, cancel-in-progress: true }` —— 同一 tag 重复推送时不做两次
 
@@ -263,7 +280,13 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
   2. mkdir -p apps/web/public/download && 把每个文件 cp 进去
   3. (cd apps/web && npm run build)      # vite 会把 public/ 拷进 dist/
   4. 从 apps/desktop/server-url.js 读默认地址，逐个打印 http://<addr>/download/<文件名>
+
+另支持 bash tools/publish-installer.sh --no-build <文件...>   # 只拷不重建（本地验收用）
 ```
+
+- **`--no-build` 是有意加的**（实现计划 D2，2026-09-27 定）：照 `tools/services.sh` 已有的
+  `--no-build` / `SERVICES_NO_BUILD=1` 惯例，让「参数校验 / 多文件 / 地址打印」这些分支
+  不必每次都等 60 秒的 web 重建就能验。**默认行为不变**（不加 `--no-build` 就重建）
 
 - **为什么收多个文件**：④ 需要的不只是安装包，还有 `latest.yml` / `latest-linux.yml`（§9）。**单文件参数会让 §9
   「更新源已就位」这句话落空** —— 脚本必须能一次把安装包与更新清单一起放上去（多文件是硬要求，不是便利）
@@ -379,7 +402,7 @@ cd apps/desktop
 |---|---|---|
 | `.gitignore` | 反选 `!.github/workflows/*.yml`、`!apps/desktop/electron-builder.yml`；新增 `apps/web/public/download/` | 注释「仓库无已跟踪 `*.yml`，全局忽略安全」**已失效，必须改**（§4.0） |
 | `README.md` | PC App 章节补：① 三平台安装包怎么产出（tag 流程）；② **从 `http://<本机IP>:5173/download/` 下载**；③ **未签名 mac 的首次打开指引**（`xattr -dr` 为主、**「仍要打开」**为备选）；④ 本地开发仍用 `npm start`，装包只是交付形态 | **`README.md:118`「若 ③ 给应用设了 `productName`…需同步改本表」整句删掉**（钉死 userData 后为假，照做会毁掉救火通路）；`:24` 与 `:206` 的「**dev 模式** / 交付物是 dev 壳」改为「已出安装包，交付形态=安装包」 |
-| `docs/constraints/pc-app-学习管控.md` | 补 ③ 的硬约束：`userData` 被显式钉死为 `k12-desktop`（勿删那行，删了中文 productName 会改路径）；`files` 是白名单且必须排除 `*.test.js`；`artifactName` 必须 ASCII；mac 包只能在 macOS runner 出；**新增 YAML 要检查 `.gitignore` 的 `*.yml`**；未签名 mac 的首开指引 | 「`userData` 目录名取 `productName`（若设）否则 `name`…… README 里的三条平台路径必须同步改」→ 改为「**已钉死，不随 `productName` 变**」；首段「（Electron 壳，**dev 模式**；本期不出安装包）」→ 过期，改掉 |
+| `docs/constraints/pc-app-学习管控.md` | 补 ③ 的硬约束：`userData` 被显式钉死为 `k12-desktop`（勿删那行，删了中文 productName 会改路径）；`files` 是白名单且必须排除 `*.test.js`；`artifactName` 必须 ASCII；mac 包只能在 macOS runner 出；**新增 YAML 要检查 `.gitignore` 的 `*.yml`**；未签名 mac 的首开指引；**三处护栏用例（`gitignore.guard` / `user-data.guard` / `scripts/verify-asar.test`）的存在与意图** | 「`userData` 目录名取 `productName`（若设）否则 `name`…… README 里的三条平台路径必须同步改」→ 改为「**已钉死，不随 `productName` 变**」；首段「（Electron 壳，**dev 模式**；本期不出安装包）」→ 过期，改掉 |
 | `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` | §5「② 阶段无法验证的」表里「DevTools 真的打不开」→ 标注已由 ③ 结清（指向本设计） | §8-8「`userData` 目录名会被 ③ 的 `productName` 改掉……**README 里那三条平台路径必须同步改**」→ 加**更正注记**：已由 ③ 显式钉死 `userData` 解决，**不要再按原句去改 README** |
 | `apps/desktop/package.json` | 加 `electron-builder` 到 `devDependencies`（`^27`） | `description` 里「（Electron 壳，dev 模式；本期不出安装包）」→ 过期 |
 | `apps/desktop/server-url.js` | —— | 文件头注释「**③ 的 CI 用环境变量重写本文件**，可产出指向不同服务器的包」与 §4.5 选的机制（**从本文件推导地址、不重写**）不是一回事 → 改成与实际一致（或删掉该句） |
