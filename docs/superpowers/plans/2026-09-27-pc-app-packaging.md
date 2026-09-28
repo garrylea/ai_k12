@@ -233,14 +233,17 @@ Expected: PASS（41 passed —— 原 38 + 新增 3）
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
 git status --short          # 应看到 .gitignore 与 gitignore.guard.test.js 是 M / ??
-git check-ignore apps/desktop/electron-builder.yml .github/workflows/desktop-release.yml
+git check-ignore --no-index apps/desktop/electron-builder.yml .github/workflows/desktop-release.yml
 ```
 
 Expected: `git check-ignore` 输出为空且 **exit code 1**（`echo $?`）—— 即两个路径都不再被忽略。
 
-> ⚠️ **这里必须用不带 `-v` 的形式**（Task 1 执行中实测的坑）：带 `-v` 时，命中**反选规则**
-> 也会返回 exit 0 并把反选行打印出来，所以 `-v` 的退出码**不能**当「是否被忽略」的判据。
-> 不带 `-v` 时语义才是纯粹的：被忽略 → 0，未忽略 → 1。
+> ⚠️ **这里必须带 `--no-index`、且不能加 `-v`**（Task 1 执行中 + 终审修复两轮实测的坑）：
+> ① **不加 `--no-index`**：`git check-ignore` 默认**跳过已跟踪文件**，这两个 YAML 一旦提交，
+> 对它恒无输出 + exit 1（看着像「没被忽略」，其实什么都没查）；提交后再自检必须加 `--no-index`。
+> ② **加 `-v`**：命中**反选规则**（`!` 开头）也返回 exit 0 并把反选行打印出来，所以 `-v` 的退出码
+> **不能**当「是否被忽略」的判据。不带 `-v` 时语义才纯粹：被忽略 → 0，未忽略 → 1（配 `--no-index`
+> 对已跟踪文件同样成立）。
 
 > **这条是 spec §5 的验收 #10**，也是本任务最关键的证据：**必须用 `git status` 亲眼看到**，别只看测试绿。
 
@@ -984,12 +987,14 @@ if [ "$DO_BUILD" -eq 1 ]; then
   log "重建 web（会把 public/ 拷进 dist/）…"
   ( cd "$WEB_DIR" && npm run build )
 else
-  log "跳过重建（--no-build）—— 若 dist/ 里还没有这些文件，浏览器会 404"
+  log "跳过重建（--no-build）—— 新文件不会进 dist/；此时 /download/ 返回的是 SPA 的 index.html（不是下载列表）"
 fi
 
 # 4) 打印下载地址（地址的唯一真源 = apps/desktop/server-url.js）
 SERVER_URL="$(cd "$ROOT" && node -e "console.log(require('./apps/desktop/server-url.js').SERVER_URL)")"
-log "下载地址（浏览器打开即可下载）："
+log "下载页（浏览器打开即可看到本次所有文件）："
+printf '  %s/download/\n' "${SERVER_URL%/}"
+log "单文件直链："
 for f in "$@"; do
   printf '  %s/download/%s\n' "${SERVER_URL%/}" "$(basename "$f")"
 done
@@ -1041,14 +1046,22 @@ Expected:
 ```
 [publish-installer] 已拷入 k12-fake.dmg
 [publish-installer] 已拷入 latest.yml
-[publish-installer] 跳过重建（--no-build）—— 若 dist/ 里还没有这些文件，浏览器会 404
-[publish-installer] 下载地址（浏览器打开即可下载）：
+[publish-installer] 已生成下载页 index.html（列出本次 2 个文件）
+[publish-installer] 跳过重建（--no-build）—— 新文件不会进 dist/；此时 /download/ 返回的是 SPA 的 index.html（不是下载列表）
+[publish-installer] 下载页（浏览器打开即可看到本次所有文件）：
+  http://192.168.1.5:5173/download/
+[publish-installer] 单文件直链：
   http://192.168.1.5:5173/download/k12-fake.dmg
   http://192.168.1.5:5173/download/latest.yml
 ```
 
-> ⚠️ 注意第 2 个地址是 `http://192.168.1.5:5173/download/latest.yml`，正好呼应 spec §9：
+> ⚠️ 注意那两个单文件地址是 `…/download/<文件名>`，正好呼应 spec §9：
 > ④ 要的更新清单与安装包**同目录**，所以脚本必须能一次收多个文件（D2 之外的硬要求）。
+>
+> **终审补（2026-09-27）**：脚本在拷入后会**多生成一步** `public/download/index.html`（下载页，
+> 见 spec §4.4 第 2.5 步 / §6-6）—— 因为未命中的 `/download/` 会被 SPA 回退成应用本体（HTTP 200 +
+> HTML）而**不是 404**，打错文件名会把 HTML 存成 `.dmg`；上面实际输出因此多了「已生成下载页」一行、
+> 且打印的地址分成「下载页」与「单文件直链」两组。
 
 - [ ] **Step 6: 确认这些文件不会入库（Task 1 的忽略规则真的生效）**
 
@@ -1262,12 +1275,13 @@ Expected: 打印 `不一致，按预期失败`，`exit=1`
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
 git status --short .github/
-git check-ignore .github/workflows/desktop-release.yml; echo "check-ignore exit=$? （0=被忽略/坏，1=未被忽略/好）"
+git check-ignore --no-index .github/workflows/desktop-release.yml; echo "check-ignore exit=$? （0=被忽略/坏，1=未被忽略/好）"
 ```
 
 Expected: `git status` 看到 `?? .github/`（或 `?? .github/workflows/desktop-release.yml`）；`check-ignore` **exit=1**。
 
-> ⚠️ 同样**不要加 `-v`**（理由见 Task 1 Step 6 的注）。
+> ⚠️ 同样**带 `--no-index`、不要加 `-v`**（理由见 Task 1 Step 6 的注：`--no-index` 才能查到已跟踪文件，
+> `-v` 的退出码不能当判据）。
 
 - [ ] **Step 6: 跑全量桌面测试，确认没碰坏**
 
@@ -1558,9 +1572,15 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
   `apps/desktop/electron-builder.yml` 与 `.github/workflows/desktop-release.yml`；
   `git ls-files '*.yml'` 当时是 **0 条**（原有注释「仓库无已跟踪 *.yml，全局忽略安全」已失效）。
   失效模式是**静默**：`git add` 不报错、CI 不报错，只有产物缺资源/缺标识时才暴露。
-  已加三条反选 + `gitignore.guard.test.js`（含「探针有牙齿」用例防静默变绿）。
-- **`git check-ignore` 的退出码可当判据 —— 但只在「不带 `-v`」时**：
-  不带 `-v`：被忽略 0 / 未忽略 1 / **不在 git 仓库 128**。
+  已加**两条**反选（`!apps/desktop/electron-builder.yml`、`!.github/workflows/*.yml`）
+  + `gitignore.guard.test.js`（含「探针有牙齿」用例防静默变绿）。
+  —— **终审补记**：这两条反选入库后，护栏一度变成**恒真的空断言**（见下一条的 `--no-index`）。
+- **`git check-ignore` 的退出码可当判据 —— 但只在「不带 `-v`」时，且对**已跟踪**文件要加 `--no-index`**：
+  ⚠️ 默认 `git check-ignore` **跳过已跟踪文件**（git 认定「被跟踪就不可能被忽略」），所以两个 YAML 入库后，
+  **不带 `--no-index` 时 check-ignore 对它们恒无输出、exit 1** —— 自检与护栏断言都变成恒真的空操作
+  （护栏「文件入库前能红、入库后永远绿」正是这么来的）。`--no-index` 让 git 无视 tracked 状态、照常评估
+  `.gitignore`（2026-09-27 终审实测：不加 → 无输出 exit 1；加 → 正确报出反选规则）。
+  不带 `-v`：被忽略 0 / 未忽略 1 / **不在 git 仓库 128**（配 `--no-index` 对已跟踪文件同样成立）。
   **带 `-v` 时，命中反选规则（`!` 开头）也返回 0**（只是把反选行原样打印），
   所以 `-v` 的退出码**不能**当「是否被忽略」的判据 —— 计划初稿就踩了这个坑，
   会让「反选生效」永远测不绿；护栏用例改为「status 0 **且** 命中的不是反选规则」才正确。
@@ -1575,8 +1595,15 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
 - `build/icon.png` 是 **1024×1024 RGBA** → mac/win/linux 都能由它生成图标，不需要另备 `.ico`/`.icns`。
 - `apps/desktop` 测试共 38 条（`server-url` 2 / `config-file` 13 / `resolve-server-url` 7 /
   `probe-server` 7 / `shell-state` 9）—— 门禁判据写「全绿」，**不写死条数**（会漂移）。
-- **[Task 3 Step 10 的结论填这里]**：更新清单 `latest-mac.yml` 的实际内容与是否含绝对地址；
-  出包耗时；`identity: null` 是否被 electron-builder 接受；`^26.15.3` 实际解到的版本号。
+- **Task 3 Step 10 实测结论**（本机 macOS arm64）：`^26.15.3` 实际解到 **26.15.3**（**不是** 26.17.0），
+  配 Electron **44.4.5** 正常出包、无「unsupported Electron 44」报错；`mac.identity: null` **被接受**
+  （日志原文 `skipped macOS code signing reason=identity explicitly is set to null`，故 CI 的
+  `CSC_IDENTITY_AUTO_DISCOVERY=false` 只是双保险）；耗时 `--dir` ≈ **10 s**、`--mac` 双架构 dmg ≈ **58 s**；
+  产物 `k12-desktop-0.1.0-x64.dmg`（**125 MB**）/`…-arm64.dmg`（**122 MB**），各带一个 `.blockmap`，
+  另有 `latest-mac.yml`（文件名全 ASCII）。
+  **更新清单只含相对文件名**：`files[].url` = `k12-desktop-0.1.0-x64.dmg`/`…-arm64.dmg`，
+  **不含任何绝对地址**（基址来自 `--config.publish.url`）；`version: 0.1.0`、两个 `files[]` 都能在
+  `dist/` 找到同名文件 → 属 Task 7 Step 2 的**情况 A**（spec §5 措辞已按此回填）。
 
 ### 本批改了什么
 

@@ -87,6 +87,13 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 
 - **从哪下载**：服务器 web 层的 `http://<本机IP>:5173/download/`
   （学生/家长在局域网内直接取，不需要学生机访问公网）
+  - **发布过之后**，`/download/` 会打开一张由 `tools/publish-installer.sh` 生成的下载页，
+    页面上列出本次发布的所有文件（含大小）；逐个点链接即可下载。单文件直链形如
+    `<服务器地址>/download/<文件名>`（例如 `http://192.168.1.5:5173/download/k12-desktop-0.1.0-arm64.dmg`）
+  - ⚠️ **文件名打错不会 404**：`vite preview` 没有目录列表、且用的是 SPA 回退，
+    未命中的路径会返回**学习应用本体**（HTTP 200 + HTML），浏览器会把这份 HTML 存成 `.dmg`。
+    所以**只从下载页点链接**，别手敲文件名。**没发布过之前 `/download/` 里没有下载页**
+    （访问它同样拿到的是应用本体，不是文件列表）
 - **怎么产出**：CI 出包（`apps/desktop` 的版本号 = tag 的版本号）
 
   ```bash
@@ -103,6 +110,8 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 
   ```bash
   bash tools/publish-installer.sh <安装包> <latest.yml> [latest-linux.yml ...]
+  # 建议连每个安装包旁的 .blockmap 一起传（差量更新用；缺了它 ④ 只能回退成全量下载）
+  # 同时会（重新）生成 /download/ 的下载页，页面上实时列出本次发布的所有文件
   # 会重建一次 web（几十秒）—— vite 会把 public/ 拷进 dist/，所以文件不会在下次构建时丢
   # ⚠️ 这一步**会替换正在对外服务的 apps/web/dist/**（:5173 的 vite preview 服务的就是它），
   #    所以工作区里未提交的前端改动会被一并构建、立刻对局域网生效 —— 发布前先确认工作区干净。
@@ -121,6 +130,11 @@ xattr -dr com.apple.quarantine "/Applications/K12 智学.app"
 
 > ⚠️ **不要按老文章去「右键 → 打开」** —— 自 macOS 15 (Sequoia) 起 Apple **已移除**这条捷径，
 > 现在右键打开仍会被拦，甚至提示「已损坏」。这不是文件坏了。
+
+#### ⚠️ Windows 首次打开：会被 SmartScreen 拦（未签名）
+
+`.exe` 安装包**没有代码签名**，所以首次运行会弹 Windows SmartScreen 警告（「Windows 已保护你的电脑」）。
+按 **「更多信息」→「仍要运行」** 即可继续安装。不是文件坏了。
 
 #### 服务器地址（三层优先级）
 

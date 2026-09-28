@@ -136,13 +136,18 @@ $ git ls-files '*.yml' | wc -l
 - 无论哪种，**都要顺手改掉那句已失效的注释**「仓库无已跟踪 `*.yml`，全局忽略安全」，否则下一个人会照着它再踩一次
 - 加完后**自检**：`git status --short` 必须看到这两个文件是 untracked（而不是消失）
 
-> ⚠️ **自检时要用「不带 `-v`」的 `git check-ignore`**（2026-09-27 实测，实现 Task 1 时发现）：
-> 带 `-v` 时，路径命中**反选规则**（`!` 开头）**也返回 exit 0**，只是把反选行原样打印出来
+> ⚠️ **自检要带 `--no-index`，且「是否被忽略」别只看 `-v` 的退出码**（2026-09-27 两轮实测）：
+> ① **必须 `--no-index`**：`git check-ignore` 默认**跳过已跟踪文件**（git 认定「被跟踪就不可能被忽略」）。
+> 这两个 YAML 一旦入库，**不带 `--no-index` 时 check-ignore 对它们恒无输出、exit 1**（看着像「没被忽略」）
+> —— 自检与护栏断言都变成**恒真的空操作**：删掉 `.gitignore` 的反选也不会变红（`gitignore.guard.test.js`
+> 一度正是如此，终审才补上 `--no-index` 恢复牙齿）。`--no-index` 让 git 无视 tracked 状态、照常评估
+> `.gitignore`（实测：不加 → 无输出 exit 1；加 → 正确报出反选规则）。
+> ② 带 `-v` 时，路径命中**反选规则**（`!` 开头）**也返回 exit 0**，只是把反选行原样打印出来
 > （`文件:行:!规则\t路径`）。所以 **`-v` 的退出码不能当「是否被忽略」的判据** —— 用它会把
 > 「反选已生效」误判成「仍被忽略」，护栏用例就永远变不绿（本设计的计划初稿正是这么踩的）。
-> 不带 `-v` 时语义才是纯粹的：被忽略 0 / 未忽略 1 / **不在 git 仓库 128**。
-> 若要同时拿到规则文本（做报错信息/探针），用 `-v` 的 stdout，但「是否被忽略」要另判：
-> 看 tab 前那段规则是否以 `!` 起头（取 tab 前可避免路径名含 `:数字:!` 造成误判）。
+> 不带 `-v` 时语义才是纯粹的：被忽略 0 / 未忽略 1 / **不在 git 仓库 128**（配 `--no-index` 对已跟踪文件
+> 同样成立）。若要同时拿到规则文本（做报错信息/探针），用 `-v --no-index` 的 stdout，但「是否被忽略」
+> 要另判：看 tab 前那段规则是否以 `!` 起头（取 tab 前可避免路径名含 `:数字:!` 造成误判）。
 
 ### 4.1 `apps/desktop/electron-builder.yml`（新建）
 
@@ -240,7 +245,7 @@ macOS 那个标签若在 Actions 里不可用，退回 `macos-latest` —— **�
 6. `apps/desktop` 目录下跑 `./node_modules/.bin/electron-builder --<platform>`（**依赖 §2-2 已把 electron-builder 钉进 devDependencies**；不要用会现拉版本的裸 `npx`），
    并按 §4.5 注入 `--config.publish.provider=generic --config.publish.url="$SERVER/download"`
 7. **产物白名单校验**（`apps/desktop/scripts/verify-asar.js`，见下）
-8. `actions/upload-artifact`
+8. `actions/upload-artifact` —— 上传 `dist/*.dmg`、`dist/*.exe`、`dist/*.AppImage`、`dist/*.blockmap`、`dist/latest*.yml`（**每个安装包旁的 `.blockmap` 差分索引要一并上传**，否则 ④ 的自动更新只能整包重下，见 §9）
 
 **关于工作目录（易错点）**：第 6 步的 electron-builder **必须在 `apps/desktop` 下运行**（它按 cwd 找
 `electron-builder.yml` 与 `package.json`）；而 §4.5 的取值命令按**仓库根**写。**两者不能在同一段里同时成立**。
@@ -286,8 +291,9 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 用法: bash tools/publish-installer.sh <文件1> [文件2 ...]
   1. 逐个校验文件存在
   2. mkdir -p apps/web/public/download && 把每个文件 cp 进去
+  2.5 生成 apps/web/public/download/index.html（下载页：列出本次发布的每个文件与大小 + 首开说明）
   3. (cd apps/web && npm run build)      # vite 会把 public/ 拷进 dist/
-  4. 从 apps/desktop/server-url.js 读默认地址，逐个打印 http://<addr>/download/<文件名>
+  4. 从 apps/desktop/server-url.js 读默认地址，打印 /download/ 与各文件的下载地址
 
 另支持 bash tools/publish-installer.sh --no-build <文件...>   # 只拷不重建（本地验收用）
 ```
@@ -308,6 +314,10 @@ mac 包只能在 macOS runner 上构建**（`dmg` 依赖 macOS 的 `hdiutil`）�
 - **`.gitignore` 新增两条**（都在 §4.0 那一批里一起改）：
   1. `apps/web/public/download/` —— 安装包上百 MB，绝不能入库
   2. （见 §4.0）反选两个新增 YAML
+- **为什么要生成下载页**（2026-09-27 实测）：`vite preview` 无目录列表 + SPA 回退，未命中的
+  `/download/` 会返回应用本体（HTTP 200 + 468 B HTML）而**不是 404**，打错文件名还会把 HTML
+  存成 `.dmg`（见 §6-6）。生成一个真实的 `index.html` 让 `/download/` 命中静态文件、渲染成列表；
+  它**每次发布都重写**，所以永远不会列出陈旧文件，也不需要把它入库（`public/download/` 整体被忽略）
 - `vite preview` 按请求读文件，**重建后无需重启 web 服务**即可下载到新文件
 
 ### 4.5 地址的单一真源
@@ -357,7 +367,7 @@ cd apps/desktop
 |---|---|
 | 版本一致性校验 | tag 与 `package.json` 不符 → job 失败 |
 | `apps/desktop` 测试 | **全绿**（判据是「全绿」，不写死条数；当前为 8 个文件 / 52 条） |
-| 三平台产物产出 | mac **两个** dmg（x64 + arm64）+ win 一个 exe + linux 一个 AppImage |
+| 三平台产物产出 | mac **两个** dmg（x64 + arm64）+ win 一个 exe + linux 一个 AppImage；每个安装包旁各有同名 `.blockmap`（差量更新用，见 §9） |
 | 产物名全 ASCII | 形如 `k12-desktop-0.1.0-arm64.dmg`（**无中文、无空格**） |
 | **asar 白名单** | 必需 **9** 项都在（含 `package.json`）；**任何 `*.test.js` 都不在** |
 | 更新清单产出 | win 有 `latest.yml`、linux 有 `latest-linux.yml`。⚠️ **措辞更正（2026-09-27 实测）**：清单里只有**相对文件名**，**不含绝对地址**（基址来自 publish 配置）→ 判据改为「清单存在 + `version` 与 `package.json` 一致 + 每个 `files[].url` 在 `dist/` 里都有同名文件」。④ 接手时注意基址来自 `--config.publish.url` |
@@ -390,7 +400,17 @@ cd apps/desktop
 4. **产物以 Actions artifact 留存**：公开仓库下载 artifact **需要登录 GitHub**；本期不发布到 Release。
    因此**取回是手工链路**（浏览器下载 zip → 解压 → 跑 `publish-installer.sh`），没做成自动化（§4.3 末段）
 5. **发布安装包要重建一次 web**（几十秒），并会**替换本机正在服务的 `apps/web/dist/`** —— §4.4 的代价与副作用
-6. **下载目录在 web 层的 `public/` 里**：若某次 `npm run build` 之前 `public/download/` 被清空，下载会 404（脚本会 `mkdir -p`，但手工清理要留意）
+6. **下载目录在 web 层的 `public/` 里，但「文件不存在」不会 404**（2026-09-27 对着运行中的服务器实测）：
+   `vite preview` 没开目录列表，`apps/web/vite.config.ts` 又是默认 `appType: 'spa'`，
+   `htmlFallbackMiddleware` 会把**所有未命中路径**改写成 `/index.html` ——
+   `GET /download/`、`GET /totally-missing-dir/`、`GET /download/<不存在的名字>.dmg`
+   **全部是 HTTP 200 + `text/html`（468 B 的 SPA 外壳）**；只有真实存在的文件（如 `/favicon.svg`）
+   才按自己的类型返回。后果：**学生访问 `/download/` 看到的是学习应用本体**，而打错/未发布的文件名
+   会让浏览器把这份 HTML 存成 `.dmg`。**修法**：`publish-installer.sh` 每次运行都生成
+   `public/download/index.html`（随构建进 `dist/`），`/download/` 因此命中一个真实静态文件、
+   渲染成「本次发布了哪些文件」的列表；README 也改成「只从下载页点链接，别手敲文件名」。
+   ⚠️ **尚未发布过时 `/download/` 同样返回应用本体**（没有下载页可命中）——所以本条的旧措辞
+   「若 `public/download/` 被清空，下载会 404」是**错的**，实际是不 404 而是静默返回 SPA
 7. **`appId` 发布后不可更改** —— 改了等于换应用
 8. **只出 x64 的 Win/Linux**：arm64 的 Windows/Linux 机器装不了（学生机以 x64 为主，暂不覆盖）
 9. **未做静默安装/批量部署**：学校装机仍需逐台点安装包
@@ -428,9 +448,12 @@ cd apps/desktop
    `…-arm64.dmg`（**122 MB**）+ `latest-mac.yml`，**文件名全 ASCII**（细节见 changelog）——
    即「**能不能出包**」已不是纸面判断。**仍未验的是打包后的运行时行为**（DevTools 是否真打不开、
    `userData` 实际落点、连不上时的本地页）—— 因为**从未启动过打包后的壳**，这几项留给 §5 的人工验收
-   （#3 / #4 / #6）。**CI 侧仍完全未跑**，故「本机先验」的两步纪律照旧：
-   ① 本机跑通 `--dir`（不打包、只产出 app 目录）最小验证；② **紧接着真出一次包**，确认更新清单真的产出、URL 正确
-   —— 只跑 `--dir` 验不到清单这一步（§4.5）。
+   （#3 / #4 / #6）。**CI 侧仍完全未跑**，但「本机先验」的两步**都已执行完毕**（2026-09-27）：
+   ① ✅ 本机跑通 `--dir`（不打包、只产出 app 目录）最小验证；② ✅ 紧接着真出一次包（`--mac`），
+   确认更新清单真的产出。**② 的判据已按实测修正**：清单里**只有相对文件名、不含绝对地址**
+   （基址来自 publish 配置），所以判据**不是**「确认…URL 正确」（相对名无从观测绝对地址），
+   而是「`version` = `package.json` 版本 **且** 每个 `files[].url` 在 `dist/` 里都有同名文件」——
+   只跑 `--dir` 验不到清单这一步（§4.5）。
    ⚠️ **② 在本机只能用 `--mac`，不能用 `--linux`**：AppImage 在 macOS 上要 docker，而 §1 已记录本机
    `wine` / `docker` / `podman` **均未安装**。本机验 `--mac` + `latest-mac.yml` 即可 —— mac 清单虽然 ④ 不会用，
    但它与 win/linux 走的是**同一段 publish 组装逻辑**，足以证明「CLI 注入能产出清单」这件事成立
@@ -449,8 +472,11 @@ cd apps/desktop
 9. **Gatekeeper 指引会随 macOS 版本继续变**（Apple 每次大版本都在收紧）→ 交付文档里给**命令行**（`xattr -dr`）比给 GUI 路径更耐放；
    GUI 路径要标注「本指引按 macOS 15+ 写」
 10. **`--config.publish.*` 的 CLI 注入已实测可用** —— 注入后产出的 `latest-mac.yml` 里 `files[].url`
-    正是期望的相对文件名（§8-2 的 ② 本机验过），故「electron-builder 会拒绝半个 publish 配置」的担心不成立。
-    但**清单里不含绝对地址**（基址来自 publish 配置）→ 换地址时**必须同时刷新 publish 配置**，
+    正是期望的相对文件名（§8-2 的 ② 本机验过）。⚠️ **但本机验过的、CI 也在用的，只是「`provider` + `url`
+    两个都写全」这一种形态**（`--config.publish.provider=generic --config.publish.url=…`）；
+    只给 `url` 的「半个 publish 配置」**从未被实测过**，因此**不能**据此断言它也行 —— §4.5 要求写全
+    `provider` 的理由正在于此（若日后想放宽，须先补一次「只给 url」的实测）。
+    另：**清单里不含绝对地址**（基址来自 publish 配置）→ 换地址时**必须同时刷新 publish 配置**，
     否则旧清单里的相对地址会被解析到旧基址（§8-4 已就同一件事警告）
 
 ## 9. 交接给 ④（自动更新）
@@ -459,8 +485,12 @@ cd apps/desktop
 
 - **更新源已就位**：安装包 + `latest.yml` / `latest-linux.yml` 都放在 `<server-url>/download`，
   更新的下载地址与 ② 的壳地址**同源同基址**，不需要为更新另起服务
-  —— ⚠️ 前提是 §4.4 的脚本**支持一次传多个文件**（安装包 + 清单），单文件版本会让这句话落空
+  —— ⚠️ 前提是 §4.4 的脚本**支持一次传多个文件**（安装包 + 清单 + `.blockmap`），单文件版本会让这句话落空
   （⚠️ 清单里不含绝对地址，基址由 publish 配置提供 —— ④ 换地址时要同时刷 publish 配置，见 §8-4）
+- **差量更新要的 `.blockmap` 已随安装包一起上传与发布**：④ 靠安装包旁的 `.blockmap`（electron-builder
+  出包时顺带生成的差分索引）做**增量下载**；**缺了它就只能回退成整包重下**。所以 CI 的
+  `upload-artifact` 收了 `dist/*.blockmap`（§4.3 第 8 步），发布时也应连同安装包一起传给
+  `tools/publish-installer.sh`（README 的示例已提示）
 - **mac 不接更新**（无签名 → ShipIt 必失败）→ ④ 只需覆盖 Win/Linux
 - ④ 仍需自己裁决的：`electron-updater` 集成方式、**与学习锁定的时机冲突**（更新安装要退出 app，而锁定中禁止退出）、
   失败回滚、以及「更新清单里的地址在服务器地址变更后如何刷新」（见 §8-4）

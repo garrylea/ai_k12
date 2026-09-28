@@ -91,7 +91,9 @@ jobs:
         run: npm run verify:asar
 
       # 只收产物本身，**不收** dist/mac*/ 下的 .app 目录 —— 那条路径含中文与空格。
-      - name: 上传产物（安装包 + 更新清单）
+      # 每个 dmg/exe 旁都会生成一个同名 `.blockmap`（差量更新的差分索引）—— 一并上传：
+      # 缺了它，④ 的自动更新只能回退成「整包重下」（spec §9）。
+      - name: 上传产物（安装包 + 更新清单 + 差分图）
         uses: actions/upload-artifact@v4
         with:
           name: k12-desktop-${{ matrix.os }}
@@ -99,5 +101,6 @@ jobs:
             apps/desktop/dist/*.dmg
             apps/desktop/dist/*.exe
             apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.blockmap
             apps/desktop/dist/latest*.yml
           if-no-files-found: error

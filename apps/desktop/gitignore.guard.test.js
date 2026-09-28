@@ -14,12 +14,20 @@ import { fileURLToPath } from 'node:url';
  * → 无节流紧循环、屏幕无 UI」）时才暴露。
  *
  * 实测行为（git 2.50.1，本用例的判据就是这么定的）：
- *   git check-ignore -v <path>  命中普通规则 → status 0，stdout = `文件:行:规则\t路径`
+ *   ⚠️ **必须带 `--no-index`**：`git check-ignore` 默认**跳过已跟踪文件**（git 认定「被跟踪
+ *   就不可能被忽略」）。所以两个 YAML 一旦入库，**不带 `--no-index` 时 check-ignore 对它们
+ *   恒无输出、exit 1** —— MUST_BE_TRACKABLE 断言就变成**恒真的空断言**（本用例曾正是如此：
+ *   文件入库前能红、入库后永远绿；删掉 .gitignore 的反选也不会变红，护栏彻底失效）。
+ *   `--no-index` 让 git 无视 tracked 状态、照常评估 .gitignore，断言才重新有牙齿
+ *   （2026-09-27 一轮修复中实测：不带 `--no-index` → 无输出 exit 1；带 → 正确报出反选规则）。
+ *
+ *   git check-ignore --no-index -v <path>
+ *                               命中普通规则 → status 0，stdout = `文件:行:规则\t路径`
  *                               命中**反选规则（!开头）** → **status 仍是 0**，stdout 把
  *                                 反选规则本身原样打印（`文件:行:!规则\t路径`）——所以带 -v 时
  *                                 **exit status 不代表「被忽略」**，必须再看命中的是不是反选规则。
  *                               （只有**不带 -v** 时 status 才纯粹表示「是否被忽略」：
- *                                 被忽略 → 0，未忽略 → 1。）
+ *                                 被忽略 → 0，未忽略 → 1；配 `--no-index` 对已跟踪文件同样成立。）
  *                               不在 git 仓库 → status 128
  *                               没装 git → spawnSync 的 error 有值
  */
@@ -36,7 +44,9 @@ const MUST_BE_TRACKABLE = [
 const MUST_BE_IGNORED = ['apps/web/public/download/k12-desktop-0.1.0-x64.dmg'];
 
 function checkIgnore(relPath) {
-  const r = spawnSync('git', ['check-ignore', '-v', relPath], {
+  // --no-index 是本用例的命门：没有它，已入库的 MUST_BE_TRACKABLE 文件永远不会被报出来，
+  // 断言恒真（见文件头「实测行为」）。
+  const r = spawnSync('git', ['check-ignore', '--no-index', '-v', relPath], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
   });
