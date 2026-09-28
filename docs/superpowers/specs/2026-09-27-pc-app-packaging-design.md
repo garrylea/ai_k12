@@ -360,7 +360,7 @@ cd apps/desktop
 | 三平台产物产出 | mac **两个** dmg（x64 + arm64）+ win 一个 exe + linux 一个 AppImage |
 | 产物名全 ASCII | 形如 `k12-desktop-0.1.0-arm64.dmg`（**无中文、无空格**） |
 | **asar 白名单** | 必需 **9** 项都在（含 `package.json`）；**任何 `*.test.js` 都不在** |
-| 更新清单产出 | win 有 `latest.yml`、linux 有 `latest-linux.yml`，且其中的下载 URL 指向本机服务器地址。⚠️ **这一项依赖 §4.5 的 CLI 注入成功**；若注入方式不产清单，必须先在本机验出来（§8-2），不能等到 CI 才发现 |
+| 更新清单产出 | win 有 `latest.yml`、linux 有 `latest-linux.yml`。⚠️ **措辞更正（2026-09-27 实测）**：清单里只有**相对文件名**，**不含绝对地址**（基址来自 publish 配置）→ 判据改为「清单存在 + `version` 与 `package.json` 一致 + 每个 `files[].url` 在 `dist/` 里都有同名文件」。④ 接手时注意基址来自 `--config.publish.url` |
 
 ### 人工验收（真机）
 
@@ -452,6 +452,7 @@ cd apps/desktop
 - **更新源已就位**：安装包 + `latest.yml` / `latest-linux.yml` 都放在 `<server-url>/download`，
   更新的下载地址与 ② 的壳地址**同源同基址**，不需要为更新另起服务
   —— ⚠️ 前提是 §4.4 的脚本**支持一次传多个文件**（安装包 + 清单），单文件版本会让这句话落空
+  （⚠️ 清单里不含绝对地址，基址由 publish 配置提供 —— ④ 换地址时要同时刷 publish 配置，见 §8-4）
 - **mac 不接更新**（无签名 → ShipIt 必失败）→ ④ 只需覆盖 Win/Linux
 - ④ 仍需自己裁决的：`electron-updater` 集成方式、**与学习锁定的时机冲突**（更新安装要退出 app，而锁定中禁止退出）、
   失败回滚、以及「更新清单里的地址在服务器地址变更后如何刷新」（见 §8-4）

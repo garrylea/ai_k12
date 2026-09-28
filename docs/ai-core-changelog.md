@@ -8,6 +8,90 @@
 
 ---
 
+## 2026-09-27 · PC App 打包与三平台分发（③）
+
+设计：`docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md`；
+计划：`docs/superpowers/plans/2026-09-27-pc-app-packaging.md`。
+
+### 实测事实（写代码前先量过的，供以后省一次）
+
+- **npm 上没有稳定版 electron-builder v27**：`dist-tags` = `{ latest: '26.15.3',
+  next: '27.0.0-alpha.9', v26: '26.17.0' }`；`npm view electron-builder@27` 直接 404。
+  稳定线 **v26** 的 engines 是 `{ node: '>=14.0.0' }`。
+  → 早先「主线 v27 / 需 Node ≥22.12 / ESM-only / 对 ia32 快速失败」四条说法**都只对 alpha 成立**，
+  已从 spec（③ §1）里删掉。教训：**版本前提必须去 registry 查，不能从文章里抄**
+  （那批说法来自一篇 CSDN 汇编文，对着 alpha 写的）。本仓钉 `^26.15.3`。
+- **`^26.15.3` 实际解到 `26.15.3`**（**不是** `26.17.0`），配 Electron `44.4.5`；
+  `electron-builder --mac` **正常出包、无任何「unsupported Electron 44」报错** ——
+  「Electron 44 + electron-builder 26.x 能不能出包」此前只是纸面判断，现已证实。
+- **出包耗时**：`--dir`（只产 app 目录）≈ **10 s**；`--mac` 双架构 dmg 全量 ≈ **58 s**。
+- **产物**：`k12-desktop-0.1.0-x64.dmg`（**125 MB**）、`k12-desktop-0.1.0-arm64.dmg`（**122 MB**），
+  每个 dmg 各配一个 `.blockmap`，另有 `latest-mac.yml`。**文件名全 ASCII**（`artifactName` 覆盖生效）。
+- **`mac.identity: null` 被接受**：日志原文 `skipped macOS code signing reason=identity explicitly is set to null`。
+  → yml 无需改；CI 的 `CSC_IDENTITY_AUTO_DISCOVERY=false` 只是**双保险**，不是必需。
+- **更新清单只含相对文件名**（`dist/latest-mac.yml` 实测）：`files[].url` 是
+  `k12-desktop-0.1.0-x64.dmg` / `k12-desktop-0.1.0-arm64.dmg`，**没有任何绝对 URL**；
+  `version: 0.1.0`、两个 `files[]` 都能在 `dist/` 找到同名文件。基址由 `--config.publish.url` 注入提供
+  → 属计划 Task 7 Step 2 的**情况 A**，③ spec §5 / §9 的措辞已按此回填。
+- **`@electron/asar@4.3.1` 的 `exports` 是裸字符串** `'./lib/asar.js'`，`package.json` 子路径未导出 →
+  `require.resolve('@electron/asar/package.json')` 抛 `ERR_PACKAGE_PATH_NOT_EXPORTED`（本地实测）；
+  该包同时是 `"type": "module"`、`"bin": "./bin/asar.mjs"`。校验脚本改为**解析包入口再上溯到包根**取 `bin`。
+- **根 `.gitignore` 的 `*.yml` 会静默吃掉新增 YAML**（§4.0）。`git check-ignore -v` 实测命中
+  `apps/desktop/electron-builder.yml` 与 `.github/workflows/desktop-release.yml`；
+  `git ls-files '*.yml'` 当时是 **0 条**（原有注释「仓库无已跟踪 *.yml，全局忽略安全」已失效）。
+  失效模式是**静默**：`git add` 不报错、CI 不报错，只有产物缺资源/缺标识时才暴露。
+  已加反选 + `gitignore.guard.test.js`（含「探针有牙齿」用例防静默变绿）。
+- **`git check-ignore` 的退出码可当判据 —— 但只在「不带 `-v`」时**：
+  不带 `-v`：被忽略 0 / 未忽略 1 / **不在 git 仓库 128**。
+  **带 `-v` 时，命中反选规则（`!` 开头）也返回 0**（只是把反选行原样打印），
+  所以 `-v` 的退出码**不能**当「是否被忽略」的判据 —— 计划初稿就踩了这个坑，
+  会让「反选生效」永远测不绿；护栏用例改为「status 0 **且** 命中的不是反选规则」才正确。
+  另：`-v` 的 stdout 形如 `文件:行:规则\t路径`，取 tab 前那段判断可避免路径名里的
+  `:数字:!` 造成误判。
+- **macOS 15 (Sequoia) 起 Apple 移除了「右键→打开」**：未签名应用现在只有
+  `xattr -dr com.apple.quarantine` 或「系统设置 → 隐私与安全性 → 仍要打开」。
+  原交付文档写「右键→打开」**会让家长卡住甚至看到「已损坏」**，已改。
+- **AppImage 在 macOS 上要 docker**：本机 `wine`/`docker`/`podman` 均未安装 →
+  spec §8-2 原写「本机真出一次包（如 `--linux`）」**不可执行**，改为本机验 `--mac` +
+  `latest-mac.yml`（与 win/linux 走同一段 publish 组装逻辑）。
+- `build/icon.png` 是 **1024×1024 RGBA** → mac/win/linux 都能由它生成图标，不需要另备 `.ico`/`.icns`。
+- `apps/desktop` 测试共 **8 个文件 / 52 条**（② 交付时是 5 文件 / 38 条；本批新增
+  `gitignore.guard` 3 / `user-data.guard` 3 / `scripts/verify-asar.test` 8）——
+  门禁判据写「全绿」，**不写死条数**（会漂移）。
+- electron-builder 每次出包都打一条**非致命**警告 `author is missed in the package.json` ——
+  有意不「修」（不在本批范围）。
+- **执行中发现并修正了计划的三处缺陷**（都已回填计划文件）：① `git check-ignore -v` 的退出码
+  被误当「是否被忽略」的判据；② 计划给的 `main.js` 注释里**字面含** `app.getPath('userData')`，
+  破坏了「钉死调用必须排在读取之前」的顺序断言；③ `@electron/asar` 的 `package.json` 解析路径
+  （见上）。教训：**计划里的注释文本也可能被断言/实现当成代码语义**。
+
+### 本批改了什么
+
+- **Task 1**（`6d776a2`）：根 `.gitignore` 反选两个新增 YAML + 忽略 `apps/web/public/download/`；
+  新增 `apps/desktop/gitignore.guard.test.js`（护栏含「探针有牙齿」用例）。
+- **Task 2**（`984b8f0`）：`main.js` 用 `app.setPath('userData', …)` 把目录钉死为 `k12-desktop`，
+  与中文 `productName` 解耦；新增 `apps/desktop/user-data.guard.test.js`。
+- **Task 3**（`f1ff83d`）：新增 `apps/desktop/electron-builder.yml`（白名单 `files`、ASCII
+  `artifactName`、asar、mac x64+arm64 双 dmg、`identity:null`、故意不写 `publish`）+
+  `scripts/verify-asar.js`（必需 9 项 + 无 `*.test.js`）+ 钉 `electron-builder ^26.15.3` /
+  `@electron/asar ^4.3.1`；本机 `--dir` 与 `--mac` 全量出包验证（结论见上）。
+- **Task 4**（`4cb6a27`）：新增 `tools/publish-installer.sh`（一次收多文件：安装包 + 清单；
+  `--no-build` 只拷不重建）。
+- **Task 5**（`a5c4a3d`）：新增 `.github/workflows/desktop-release.yml`（三平台 matrix +
+  出包前测试门禁 + tag/版本一致性校验 + `npm run verify:asar` 断言）。
+- **Task 6**（`8ebf81f` / `e8e61a7`）：交付文档同步（见下）。
+- **本 Task 7**：③ spec 按实测回填「更新清单」措辞（§5 / §9）；② spec 两条注记；
+  本文件即本条。
+
+### 文档同步
+
+- `README.md`：补交付形态/下载路径/mac 首开指引；**删掉**「productName 会改本表」整句（钉死 userData 后为假）
+- `docs/constraints/pc-app-学习管控.md`：补 ③ 硬约束；把「路径随 productName 变」更正为「已钉死」
+- ② spec：§5 的 DevTools 项标注已结清；§8-8 打更正注记（**不要**去改 README 的表）
+- `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml`：**确认无需变更**（③ 不涉及任何端点）
+
+---
+
 ## 2026-09-27 — PC App 壳：**必须禁用系统代理**（否则「连不上本地页」静默失效）
 
 **怎么发现的**：② 合并后用户质疑「Task 6/7 你自己就能跑，为什么让我操作」。controller 遂用 Electron
