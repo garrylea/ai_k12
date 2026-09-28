@@ -89,31 +89,31 @@ PC App 出包入口
 
 模式（一次只能选一个）：
   --check              快速门禁：跑测试 + 最小出包（--dir，只产出 .app，约 10s）+ asar 自检。
-                       不产出安装包、不清空 dist、不碰 web 层。**改完壳先跑这个。**
-  --local              本机出 mac 安装包：**先清空 apps/desktop/dist**，再出 x64 + arm64
+                       不产出安装包、不清空 dist、不碰 web 层。改完壳先跑这个。
+  --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64
                        两个 dmg（约 1min），最后跑 asar 自检。
   --online             GitHub Actions 出三平台包（mac dmg / win exe / linux AppImage）。
-                       默认**只做预检并打印要执行的命令**；**加 --yes 才真的打 tag 并推**。
+                       默认只做预检并打印要执行的命令；加 --yes 才真的打 tag 并推。
   --publish <文件...>  发布安装包到本机服务器 /download/ —— 转发给 tools/publish-installer.sh
-                       （因此也接受它的 --no-build）。⚠️ 会重建 web，替换 :5173 正在服务的 dist/
+                       （因此也接受它的 --no-build）。注意：会重建 web，替换 :5173 正在服务的 dist/
   --win | --linux      本机出不了（NSIS 要 wine、AppImage 要 docker），这里只说明原因与出路。
 
 选项：
   --manifest           配合 --local：额外注入 publish 配置，产出 latest-mac.yml（发布/④ 要用）。
                        不注入就没有更新清单。
-  --yes                配合 --online：预检通过后**真的**打 tag 并推 origin。
+  --yes                配合 --online：预检通过后真的打 tag 并推 origin。
   -h, --help           显示本页。
 
-示例：
-  bash tools/app-build.sh --check                        # 改完壳，快速确认没坏
-  bash tools/app-build.sh --local                        # 出两个 dmg
-  bash tools/app-build.sh --local --manifest             # 出 dmg + latest-mac.yml
-  bash tools/app-build.sh --online                       # 看要推什么（不推）
-  bash tools/app-build.sh --online --yes                 # 预检通过后推 tag，触发 CI
-  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-0.1.0-arm64.dmg
+示例（把 <版本> 换成 apps/desktop/package.json 里的 version）：
+  bash tools/app-build.sh --check                             # 改完壳，快速确认没坏
+  bash tools/app-build.sh --local                             # 出两个 dmg
+  bash tools/app-build.sh --local --manifest                  # 出 dmg + latest-mac.yml
+  bash tools/app-build.sh --online                            # 看要推什么（不推）
+  bash tools/app-build.sh --online --yes                      # 预检通过后推 tag，触发 CI
+  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.dmg
 
 本机限制：mac 包只能在本机出（.dmg 要 hdiutil）；Windows/Linux 产物只能靠 --online。
-发布到服务器会重建 web（几十秒），并替换正在对外服务的 apps/web/dist/。
+打包需要能访问 GitHub（见 README 的说明）；发布到服务器会重建 web 并替换正在服务的 dist/。
 USAGE
 }
 
@@ -130,6 +130,7 @@ mode_local() {
   require_builder
   local args=( --mac )
   if [ "$MANIFEST" -eq 1 ]; then
+    [ -f "$DESKTOP_DIR/server-url.js" ] || die "找不到 $DESKTOP_DIR/server-url.js（服务器地址的唯一真源）"
     local url
     url="$(server_url)"
     log "注入 publish 配置以产出更新清单：$url/download"
@@ -158,9 +159,32 @@ mode_online() {
   [ -z "$(git -C "$ROOT" status --porcelain)" ] \
     || die "工作区不干净 —— 先提交或丢弃改动（tag 指向 HEAD，产物必须与提交一致）"
 
-  # 预检 2：同名 tag 不能被覆盖（打了再改就是换版本，必须走新版本号）
+  # 预检 2：同名 tag 不得已存在，**本地与 origin 都要看**。两者的处置完全不同：
+  #   本地有、origin 没有 = 多半是上次推送失败留下的 → 可安全删掉重来；
+  #   origin 有 = 那是一个已发布的版本 → 必须换版本号，不许删。
+  # ⚠️ 必须先看 origin：只看本地（2026-09-28 评审发现）漏掉了「远端已有、本地没有」的情形。
+  local rs=0 remote_state='unknown'
+  git -C "$ROOT" ls-remote --tags --exit-code origin "refs/tags/$tag" >/dev/null 2>&1 || rs=$?
+  case "$rs" in
+    0) remote_state='exists' ;;
+    2) remote_state='absent' ;;   # ls-remote --exit-code 用 2 表示「没有匹配的 ref」
+    *) remote_state='unknown' ;;  # 多半是网络不通
+  esac
+
+  if [ "$remote_state" = 'exists' ]; then
+    die "tag $tag 已在 origin 上存在（那是一个已发布的版本）—— 改 apps/desktop/package.json 的 version 后再来，不要删它重打"
+  fi
   if git -C "$ROOT" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-    die "tag $tag 已存在 —— 改 apps/desktop/package.json 的 version 后再来（别删旧 tag 重打）"
+    if [ "$remote_state" = 'absent' ]; then
+      die "本地有 tag $tag 但 origin 没有（多半是上次推送失败留下的）—— 删掉重来即可：git tag -d $tag"
+    fi
+    die "本地已有 tag ${tag}，但无法确认它是否已推到 origin（网络不通？）—— 先确认远端状态再重试"
+  fi
+  if [ "$remote_state" = 'unknown' ]; then
+    warn "无法确认 origin 上是否已有 tag ${tag}（网络不通？）"
+    if [ "$CONFIRM" -eq 1 ]; then
+      die "--yes 但无法确认远端状态 —— 联网确认后再推（--online 本来就需要联网）"
+    fi
   fi
 
   # 预检 3：测试门禁。与 CI 的同名门禁一致，但**在本地先失败**，避免推完 tag 才发现红
@@ -181,11 +205,16 @@ mode_online() {
   if [ "$CONFIRM" -eq 1 ]; then
     log "预检通过 → 打 tag 并推 origin（CI 将开始三平台出包）"
     git -C "$ROOT" tag "$tag"
-    git -C "$ROOT" push origin "$tag"
+    # ⚠️ 推送失败必须回滚本地 tag（2026-09-28 评审发现）：否则下次会被「tag 已存在」卡住，
+    # 而那个报错会让人去改版本号 —— 对一个从没推上去的 tag 来说那是错的处置。
+    if ! git -C "$ROOT" push origin "$tag"; then
+      git -C "$ROOT" tag -d "$tag" >/dev/null
+      die "推送失败，已回滚本地 tag ${tag}（免得下次被「tag 已存在」卡住）—— 检查网络/权限后重试"
+    fi
     log "已推 $tag"
     [ -n "$ci_url" ] && log "CI 进度看 $ci_url 的 Desktop Release"
   else
-    log "预检通过。**本次未推任何东西**（缺少 --yes）。要真推就执行："
+    log "预检通过。本次未推任何东西（缺少 --yes）。要真推就执行："
     printf '  git tag %s\n  git push origin %s\n' "$tag" "$tag"
     [ -n "$ci_url" ] && log "推完在 $ci_url 的 Desktop Release 看进度"
     log "或直接重跑：bash tools/app-build.sh --online --yes"
@@ -259,6 +288,18 @@ if [ "$MANIFEST" -eq 1 ] && [ "$MODE" != local ]; then
 fi
 if [ "$CONFIRM" -eq 1 ] && [ "$MODE" != online ]; then
   warn "--yes 只对 --online 有意义（当前模式：--${MODE}），本次已忽略"
+fi
+# --publish 收下它后面的**所有**参数（文件名里可能有空格），所以任何选项写在它后面都会变成文件名。
+# 静默吞掉最糟（2026-09-28 评审发现：`--publish a.dmg --yes` 会让 --yes 无声消失），这里点出来。
+if [ "$MODE" = publish ]; then
+  for _a in "${PUBLISH_ARGS[@]}"; do
+    case "$_a" in
+      --yes|--manifest)
+        die "「${_a}」不能写在 --publish 之后：--publish 会收下它后面的所有参数当文件名（该选项对 --publish 也无意义）。把要传的选项放在模式参数之前。"
+        ;;
+    esac
+  done
+  unset _a
 fi
 
 case "$MODE" in
