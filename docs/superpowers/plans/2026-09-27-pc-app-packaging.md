@@ -1193,7 +1193,7 @@ Expected:
 ```
 name = Desktop Release
 matrix os = ['macos-14', 'windows-latest', 'ubuntu-latest']
-steps = 8
+steps = 9
 working-directory = apps/desktop
 触发 = ['push', 'workflow_dispatch']
 ```
@@ -1249,7 +1249,7 @@ Expected: `git status` 看到 `?? .github/`（或 `?? .github/workflows/desktop-
 cd apps/desktop && npm test
 ```
 
-Expected: PASS（41 passed）
+Expected: PASS（8 文件 / 52 passed —— Task 1–3 新增了 3 个测试文件共 14 条用例，原 38 条）
 
 - [ ] **Step 7: 提交（**先不推 tag**）**
 
