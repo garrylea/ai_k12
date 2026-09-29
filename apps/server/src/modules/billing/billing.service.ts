@@ -107,6 +107,9 @@ export class BillingService {
       throw new NotFoundException({ code: 2005, message: '套餐不存在或已下架' });
     }
 
+    // 下单入口惰性翻转：先清掉超时僵尸 pending，防止被复用或挡住重下（与读路径同一机制）
+    await this.ordersRepo.expireStale();
+
     const pending = await this.ordersRepo.findPendingByParent(parentId);
     if (pending) {
       const pendingSnap = parseOrderSnapshot(pending.plan_snapshot);
@@ -276,7 +279,13 @@ export class BillingService {
       return adapter.failureResponse('订单状态不允许');
     }
 
-    await this.finalizePaidOrder(order, payload.tradeNo);
+    // finalize 抛错也必须给渠道明确应答（口径：handleCallback 永不向外抛）；logger.error 留痕
+    try {
+      await this.finalizePaidOrder(order, payload.tradeNo);
+    } catch (err) {
+      this.logger.error(`[billing] 回调入账失败：orderNo=${order.order_no}: ${err}`);
+      return adapter.failureResponse('入账失败');
+    }
     return adapter.successResponse(); // 'paid' 与并发 'duplicate' 都算成功应答
   }
 

@@ -140,6 +140,16 @@ describe('BillingService.createOrder', () => {
     expect(d.ordersRepo.insertOrder).not.toHaveBeenCalled();
   });
 
+  it('入口先惰性翻转 expireStale，再查 pending（防僵尸单复用/挡重下）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ id: 101, order_no: 'ORD-GEN' }));
+    await mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' });
+    expect(d.ordersRepo.expireStale).toHaveBeenCalledTimes(1);
+    expect(d.ordersRepo.expireStale.mock.invocationCallOrder[0]).toBeLessThan(
+      d.ordersRepo.findPendingByParent.mock.invocationCallOrder[0],
+    );
+  });
+
   it('同套餐同渠道已有 pending -> 复用返回：不新建行、不调适配器、不回写', async () => {
     const d = mkDeps();
     const pending = mkOrder({ channel_qr_content: 'qr://mock' });
@@ -366,6 +376,16 @@ describe('BillingService.handleCallback', () => {
     d.ordersRepo.markPaidTx.mockResolvedValue(0);
     await call(d);
     expect(d.mockAdapter.successResponse).toHaveBeenCalled();
+  });
+
+  it('finalize 抛错（入账失败）-> failureResponse 应答渠道，不向外抛', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.ordersRepo.markPaidTx.mockRejectedValue(new Error('db down'));
+    const res = await call(d);
+    expect(res).toEqual({ httpStatus: 500, body: 'fail', contentType: 'text/plain' });
+    expect(d.mockAdapter.failureResponse).toHaveBeenCalledWith('入账失败');
+    expect(d.mockAdapter.successResponse).not.toHaveBeenCalled();
   });
 });
 
