@@ -5,9 +5,11 @@ import { AuthService } from './auth.service.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { AdminsRepository } from '../../database/repositories/admins.repo.js';
 import { ParentsRepository } from '../../database/repositories/parents.repo.js';
+import { BillingModule } from '../billing/billing.module.js';
 
 @Module({
   imports: [
+    BillingModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'k12-dev-secret',
       signOptions: { expiresIn: '7d' },

@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { AdminsRepository } from '../../database/repositories/admins.repo.js';
 import { ParentsRepository } from '../../database/repositories/parents.repo.js';
+import { SubscriptionsService } from '../billing/subscriptions.service.js';
 
 const PHONE_RE = /^1\d{10}$/;
 
@@ -14,6 +15,7 @@ export class AuthService {
     private adminsRepo: AdminsRepository,
     private parentsRepo: ParentsRepository,
     private jwtService: JwtService,
+    private subscriptionsService: SubscriptionsService,
   ) {}
 
   /**
@@ -80,6 +82,9 @@ export class AuthService {
       passwordHash,
       name: dto.name,
     });
+    // 注册即送 7 天家庭试用（upsert 幂等）。注册路径无事务，直接 await：
+    // 失败让注册可见地失败，保证「注册成功 ⇒ 试用行已存在」。
+    await this.subscriptionsService.ensureTrial(parentId);
     return {
       token: this.jwtService.sign({ sub: parentId, role: 'parent' as const }),
       user: { id: parentId, role: 'parent' as const, name: dto.name ?? null, phone: dto.phone },

@@ -16,11 +16,20 @@ const mkDeps = (overrides: Record<string, any> = {}) => ({
     findByUsername: vi.fn().mockResolvedValue(null),
   },
   jwtService: { sign: vi.fn().mockReturnValue('fake-token') },
+  subscriptionsService: {
+    ensureTrial: vi.fn().mockResolvedValue(undefined),
+  },
   ...overrides,
 });
 
 const mkSvc = (d: ReturnType<typeof mkDeps>) =>
-  new AuthService(d.studentsRepo as any, d.adminsRepo as any, d.parentsRepo as any, d.jwtService as any);
+  new AuthService(
+    d.studentsRepo as any,
+    d.adminsRepo as any,
+    d.parentsRepo as any,
+    d.jwtService as any,
+    d.subscriptionsService as any,
+  );
 
 const student = {
   id: 7, parentId: 3, username: 'xiaoming', passwordHash: HASH,
@@ -81,6 +90,22 @@ describe('AuthService.register 家长注册', () => {
     expect(r.user.role).toBe('parent');
     expect(d.parentsRepo.create).toHaveBeenCalledWith(expect.objectContaining({ phone: '13900000000' }));
     expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 9, role: 'parent' });
+  });
+
+  it('注册成功后送 7 天试用（ensureTrial 以新 parentId 调用）', async () => {
+    const d = mkDeps();
+    await mkSvc(d).register({ phone: '13900000000', password: '123456', name: '乙' });
+    expect(d.subscriptionsService.ensureTrial).toHaveBeenCalledTimes(1);
+    expect(d.subscriptionsService.ensureTrial).toHaveBeenCalledWith(9);
+  });
+
+  it('送试用失败 -> 注册整体失败（不发 token）', async () => {
+    const d = mkDeps({
+      subscriptionsService: { ensureTrial: vi.fn().mockRejectedValue(new Error('db down')) },
+    });
+    await expect(mkSvc(d).register({ phone: '13900000000', password: '123456' }))
+      .rejects.toThrow('db down');
+    expect(d.jwtService.sign).not.toHaveBeenCalled();
   });
 
   it('手机号已存在 -> 1004', async () => {
