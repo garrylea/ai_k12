@@ -5,6 +5,9 @@ import type { INestApplication } from '@nestjs/common';
 import { BillingModule } from './billing.module.js';
 import { DatabaseModule } from '../../database/database.module.js';
 import { QuotaController } from './quota.controller.js';
+import { BillingController } from './billing.controller.js';
+import { BillingCallbackController } from './billing-callback.controller.js';
+import { AdminBillingController } from './admin-billing.controller.js';
 import { SubscriptionsService } from './subscriptions.service.js';
 import { BillingService } from './billing.service.js';
 import { OrdersRepository } from '../../database/repositories/orders.repo.js';
@@ -38,6 +41,10 @@ describe('BillingModule 装配', () => {
     [FamilySubscriptionsRepository],
     SubscriptionsService,
   );
+  // 批② Task 5 的三个 controller：constructor 参数都是类类型，同样手工补 metadata
+  Reflect.defineMetadata('design:paramtypes', [BillingService, SubscriptionsService], BillingController);
+  Reflect.defineMetadata('design:paramtypes', [BillingService], BillingCallbackController);
+  Reflect.defineMetadata('design:paramtypes', [BillingService], AdminBillingController);
 
   const apps: INestApplication[] = [];
 
@@ -91,5 +98,15 @@ describe('BillingModule 装配', () => {
     expect((controller as unknown as { subscriptionsService: SubscriptionsService }).subscriptionsService).toBe(
       service,
     );
+  });
+
+  it('批② Task 5：三组 billing controller 都挂在模块上，能从容器解析（漏注册 controllers 时此用例必红）', async () => {
+    const app = await compileApp();
+    expect(app.get(BillingController)).toBeInstanceOf(BillingController);
+    expect(app.get(BillingCallbackController)).toBeInstanceOf(BillingCallbackController);
+    expect(app.get(AdminBillingController)).toBeInstanceOf(AdminBillingController);
+    const billing = app.get(BillingController) as unknown as Record<string, unknown>;
+    expect(billing.billingService).toBeInstanceOf(BillingService);
+    expect(billing.subscriptionsService).toBeInstanceOf(SubscriptionsService);
   });
 });

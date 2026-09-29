@@ -9,7 +9,9 @@ import * as fs from 'fs';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody: 支付回调验签需要原始请求字节（微信验签串/支付宝原文验签），
+  // 重序列化后的 body 会验签失败 —— BillingCallbackController 里用 req.rawBody 取。
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   app.enableCors({
     origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
