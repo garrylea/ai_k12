@@ -93,13 +93,14 @@ INSERT INTO subscription_plans (plan_code, name, price_cents, duration_days, is_
 VALUES ('month', '月卡', 2000, 30, 1, 1), ('year', '年卡', 19800, 365, 1, 2)
 ON DUPLICATE KEY UPDATE id = id;
 
--- 存量家长回填 7 天试用（重复执行不重复插；新家长走注册钩子，不依赖此句）
+-- 存量家长回填 7 天试用（重复执行不重复插；新家长走注册钩子，不依赖此句）。
+-- 勿加 ON DUPLICATE KEY UPDATE：MySQL 9.x 下 INSERT...SELECT 源含目标表时 ODKU 裸列名报 1052；
+-- 幂等由反连接（WHERE fs.id IS NULL）+ 唯一键 uk_family_subscriptions_parent 保证。
 INSERT INTO family_subscriptions (parent_id, status, trial_ends_at, source)
 SELECT p.id, 'trialing', DATE_ADD(NOW(3), INTERVAL 7 DAY), 'trial'
 FROM parents p
 LEFT JOIN family_subscriptions fs ON fs.parent_id = p.id
-WHERE fs.id IS NULL
-ON DUPLICATE KEY UPDATE id = id;
+WHERE fs.id IS NULL;
 ```
 
 - [ ] **Step 2: schema.sql 同步**——把上面三张表与 seed 原样追加进 `tools/db/schema.sql` 的「9. 奖励」节之后，节标题 `-- 9.5 订阅与计费`。注意 `orders` 注释补一行：`-- coupon_* 本期预留不写（spec §2.3）`。

@@ -1,5 +1,5 @@
 -- 2026-09-29 订阅收费：套餐 / 家庭订阅 / 订单（spec 2026-09-29-subscription-billing-design.md §2）
--- 幂等：CREATE TABLE IF NOT EXISTS + ON DUPLICATE KEY UPDATE id=id 回填
+-- 幂等：CREATE TABLE IF NOT EXISTS + 反连接回填（ODKU 裸列名在 MySQL 9.x INSERT...SELECT 下报 1052，勿加回）
 
 CREATE TABLE IF NOT EXISTS subscription_plans (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
