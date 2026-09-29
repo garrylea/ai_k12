@@ -5,6 +5,7 @@ import { routes } from '@/routes/routeTable';
 import {
   fetchSubjects,
   getParentErrors,
+  getSubscriptionStatus,
   getUnreadMessageCount,
   listMyStudents,
   type MyStudentItem,
@@ -19,6 +20,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     ...actual,
     listMyStudents: vi.fn(),
     getUnreadMessageCount: vi.fn(),
+    // 顶栏订阅提示条（SubscriptionNoticeBar）挂载即拉
+    getSubscriptionStatus: vi.fn(),
     getParentErrors: vi.fn(),
     fetchSubjects: vi.fn(),
   };
@@ -26,6 +29,7 @@ vi.mock('@/services/api', async (importOriginal) => {
 
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMock = vi.mocked(getUnreadMessageCount);
+const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
 const getErrorsMock = vi.mocked(getParentErrors);
 const fetchSubjectsMock = vi.mocked(fetchSubjects);
 
@@ -72,6 +76,16 @@ beforeEach(() => {
   listMyStudentsMock.mockResolvedValue([BOY]);
   getUnreadMock.mockReset();
   getUnreadMock.mockResolvedValue(0);
+  // 顶栏订阅提示条挂载即拉：默认「订阅正常」→ 不渲染
+  getSubscriptionStatusMock.mockReset();
+  getSubscriptionStatusMock.mockResolvedValue({
+    status: 'active',
+    planCode: 'monthly',
+    trialEndsAt: null,
+    currentPeriodEnd: '2026-10-15T00:00:00.000Z',
+    daysRemaining: 12,
+    source: 'order',
+  });
   getErrorsMock.mockReset();
   getErrorsMock.mockResolvedValue(PAGE);
   fetchSubjectsMock.mockReset();

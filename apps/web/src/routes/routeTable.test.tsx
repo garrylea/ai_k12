@@ -257,6 +257,15 @@ beforeEach(() => {
   getWeakPointsMock.mockReset();
   getMyPointRulesMock.mockReset();
   getSubscriptionStatusMock.mockReset();
+  // 顶栏订阅提示条（SubscriptionNoticeBar）挂载即拉：默认「订阅正常」→ 不渲染，不干扰既有用例
+  getSubscriptionStatusMock.mockResolvedValue({
+    status: 'active',
+    planCode: 'monthly',
+    trialEndsAt: null,
+    currentPeriodEnd: '2026-10-15T00:00:00.000Z',
+    daysRemaining: 12,
+    source: 'order',
+  });
   getMyPointRulesMock.mockResolvedValue({
     tasks: [
       {

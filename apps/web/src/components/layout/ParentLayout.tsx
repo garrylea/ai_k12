@@ -4,6 +4,7 @@ import { useThemeStore } from '@/store/themeStore';
 import { ParentNav } from './ParentNav';
 import { StudentSwitcher } from './StudentSwitcher';
 import AlertBanner from '@/components/business/AlertBanner';
+import SubscriptionNoticeBar from '@/pages/parent/SubscriptionNoticeBar';
 import { getUnreadMessageCount } from '@/services/api';
 
 export default function ParentLayout() {
@@ -37,6 +38,9 @@ export default function ParentLayout() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* 顶部预警 Banner（最高优先级）：全部孩子的未读预警，30s 轮询，点击即已读 */}
           <AlertBanner />
+
+          {/* 订阅提示条（付费状态）：与预警 Banner 并列的两个独立组件，点击进订阅中心 */}
+          <SubscriptionNoticeBar />
 
           {/* 顶部栏 */}
           <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0">

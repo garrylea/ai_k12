@@ -3,11 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import ParentLayout from './ParentLayout';
 import {
+  getSubscriptionStatus,
   getUnreadMessageCount,
   getParentUnreadAlerts,
   markParentAlertRead,
   listMyStudents,
   type MyStudentItem,
+  type SubscriptionStatusView,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
@@ -26,6 +28,7 @@ vi.mock('@/services/api', async (importOriginal) => {
     getUnreadMessageCount: vi.fn(),
     getParentUnreadAlerts: vi.fn(),
     markParentAlertRead: vi.fn().mockResolvedValue(null),
+    getSubscriptionStatus: vi.fn(),
   };
 });
 
@@ -33,6 +36,19 @@ const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
 const getParentUnreadAlertsMock = vi.mocked(getParentUnreadAlerts);
 const markParentAlertReadMock = vi.mocked(markParentAlertRead);
+const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
+
+function statusOf(over: Partial<SubscriptionStatusView> = {}): SubscriptionStatusView {
+  return {
+    status: 'active',
+    planCode: 'monthly',
+    trialEndsAt: null,
+    currentPeriodEnd: '2026-10-15T00:00:00.000Z',
+    daysRemaining: 12,
+    source: 'order',
+    ...over,
+  };
+}
 
 const STUDENT: MyStudentItem = {
   id: 1,
@@ -70,6 +86,8 @@ beforeEach(() => {
   getUnreadMessageCountMock.mockReset().mockResolvedValue(0);
   getParentUnreadAlertsMock.mockReset().mockResolvedValue({ items: [], total: 0 });
   markParentAlertReadMock.mockReset().mockResolvedValue(null);
+  // 默认「订阅正常」→ 提示条不渲染，不干扰上面的 Banner 用例
+  getSubscriptionStatusMock.mockReset().mockResolvedValue(statusOf());
   useParentStudentStore.setState({ studentId: null });
 });
 
@@ -132,5 +150,29 @@ describe('ParentLayout', () => {
     renderLayout();
     await waitFor(() => expect(getParentUnreadAlertsMock).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: '立即查看' })).not.toBeInTheDocument();
+  });
+
+  it('订阅正常 → 订阅提示条不渲染', async () => {
+    renderLayout();
+    await waitFor(() => expect(getSubscriptionStatusMock).toHaveBeenCalled());
+    expect(screen.queryByTestId('subscription-notice-bar')).not.toBeInTheDocument();
+  });
+
+  it('护栏：订阅过期时订阅提示条与预警 Banner 同时渲染（两个独立组件，并列不合并）', async () => {
+    getParentUnreadAlertsMock.mockResolvedValue({
+      items: [
+        { id: 1, type: 'idle', level: 'info', message: MESSAGE, studentName: '小刚', createdAt: '2026-09-20T10:00:00.000Z' },
+      ],
+      total: 1,
+    });
+    getSubscriptionStatusMock.mockResolvedValue(statusOf({ status: 'expired', daysRemaining: 0 }));
+    renderLayout();
+
+    // 两者同时在场：预警文案与订阅文案并存于同一渲染树
+    expect(await screen.findByText(MESSAGE)).toBeInTheDocument();
+    const bar = await screen.findByTestId('subscription-notice-bar');
+    expect(bar).toHaveTextContent('订阅已过期，学生端已锁定，请续费');
+    // 是两个独立的元素（不是同一节点的两种状态）
+    expect(bar).not.toBe(screen.getByText(MESSAGE).closest('[role="alert"]'));
   });
 });
