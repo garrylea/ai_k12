@@ -138,6 +138,8 @@ function makeUpdateService(opts: {
   nextLesson?: { id: number; unitId: number } | null;
   practiceComplete?: boolean;
   withPracticeService?: boolean;
+  /** 清零硬门禁（2026-09-29）：hasUnclearedGateErrors 的返回值，默认 false（门禁放行）。 */
+  hasUnclearedErrors?: boolean;
   lesson?: { id: number; unitId: number } | null;
   pointsService?: any;
   lessonCompletionsRepo?: any;
@@ -156,10 +158,14 @@ function makeUpdateService(opts: {
     getLessonCards: async () => ({ cards: opts.cards }),
     getNextLesson: async () => opts.nextLesson ?? null,
   };
-  // 非门禁场景（课程无练习卡）不需要 practiceService；传 true 时校验是否被调用
-  const practiceService = opts.withPracticeService
-    ? { isLessonPracticeComplete: vi.fn().mockResolvedValue(opts.practiceComplete ?? true) }
-    : {};
+  // 清零硬门禁在 updateProgress 的当前课路径上**必然**调用（先于练习完成门禁），
+  // 所以两个分支都必须带 hasUnclearedGateErrors——漏了会用例直接崩而不是静默放行。
+  const practiceService = {
+    hasUnclearedGateErrors: vi.fn().mockResolvedValue(opts.hasUnclearedErrors ?? false),
+    ...(opts.withPracticeService
+      ? { isLessonPracticeComplete: vi.fn().mockResolvedValue(opts.practiceComplete ?? true) }
+      : {}),
+  };
   // 缺省发分 mock：返回 null（未发分）——老用例的响应形状保持不变（points 走 undefined）
   const pointsService = opts.pointsService ?? { award: vi.fn().mockResolvedValue(null) };
   // 完课事件（P6.5）：ProgressService 第 9 参。**必须传**——漏传会是 undefined，
@@ -244,6 +250,74 @@ describe('ProgressService.updateProgress — practice gate', () => {
     expect(res).toEqual({ advanced: false, nextUnlockType: 'lesson' });
     expect(practiceService.isLessonPracticeComplete).not.toHaveBeenCalled();
     expect(progressRepo.updateCardSort).toHaveBeenCalledWith(1, 1, 'lesson');
+  });
+});
+
+// --- updateProgress 清零硬门禁（2026-09-29，§6.1/§7.4） ---
+// 本课之前（lesson_id < 本课）还有未清零的 practice 错题时，本课任何进度更新都被拒。
+// 与前端「错题清零」阶段同一谓词（hasUnclearedGateErrors 复用 getUnclearedErrorDetails）；
+// 本课自身刚产生的错题不在判定范围，因此不阻塞本课的完成推进。
+
+describe('ProgressService.updateProgress — cleanup gate（清零硬门禁）', () => {
+  it('有未清错题 -> 最后一张卡也被拒（cleanup_incomplete），不 advanceLesson、不查练习覆盖', async () => {
+    const { svc, progressRepo, practiceService } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0, subjectId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'practice' },
+      ],
+      hasUnclearedErrors: true,
+      practiceComplete: true,
+      withPracticeService: true,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+    expect(res).toEqual({ advanced: false, reason: 'cleanup_incomplete' });
+    expect(practiceService.hasUnclearedGateErrors).toHaveBeenCalledWith(2, 1, 9);
+    // 清零门禁先于练习覆盖门禁：被清零拦下时不再往后查
+    expect(practiceService.isLessonPracticeComplete).not.toHaveBeenCalled();
+    expect(progressRepo.advanceLesson).not.toHaveBeenCalled();
+    expect(progressRepo.updateCardSort).not.toHaveBeenCalled();
+  });
+
+  it('有未清错题 -> 非最后一张卡的翻页上报同样被拒（不 updateCardSort）', async () => {
+    const { svc, progressRepo } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 0, subjectId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'practice' },
+      ],
+      hasUnclearedErrors: true,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 1);
+    expect(res).toEqual({ advanced: false, reason: 'cleanup_incomplete' });
+    expect(progressRepo.updateCardSort).not.toHaveBeenCalled();
+  });
+
+  it('无未清错题 -> 门禁放行（hasUnclearedGateErrors 以 progress.subjectId 调用），正常推进', async () => {
+    const { svc, progressRepo, practiceService } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentUnitId: 1, currentCardSort: 0, subjectId: 1 },
+      cards: [
+        { id: 5, sortOrder: 1, cardType: 'concept' },
+        { id: 6, sortOrder: 2, cardType: 'summary' },
+      ],
+      nextLesson: { id: 99, unitId: 1 },
+      hasUnclearedErrors: false,
+    });
+    const res = await svc.updateProgress(2, 1, 9, 2);
+    expect(res).toEqual({ advanced: true, nextLessonId: 99 });
+    expect(practiceService.hasUnclearedGateErrors).toHaveBeenCalledWith(2, 1, 9);
+    expect(progressRepo.advanceLesson).toHaveBeenCalledWith(1, 99, null);
+  });
+
+  it('复习旧课（lessonId < currentLessonId）不触发清零门禁（在 not_current_lesson 分支已返回）', async () => {
+    const { svc, practiceService } = makeUpdateService({
+      progress: { id: 1, currentLessonId: 9, currentCardSort: 2, subjectId: 1 },
+      cards: [{ id: 5, sortOrder: 1, cardType: 'concept' }],
+      hasUnclearedErrors: true,
+    });
+    const res = await svc.updateProgress(2, 1, 5, 1);
+    expect(res.reason).toBe('not_current_lesson');
+    expect(practiceService.hasUnclearedGateErrors).not.toHaveBeenCalled();
   });
 });
 

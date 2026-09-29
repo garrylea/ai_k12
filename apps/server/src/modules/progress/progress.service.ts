@@ -262,6 +262,15 @@ export class ProgressService {
       return { advanced: false, reason: 'not_current_lesson', currentLessonId: progress.currentLessonId };
     }
 
+    // 门禁（§6.1/§7.4）：本课之前（lesson_id < 本课）还有未清零的课堂练习错题时，
+    // 不得推进本课任何进度（学习/翻页/完成均拦）。与前端课程详情页「错题清零」阶段
+    // 同一谓词（PracticeService.hasUnclearedGateErrors 复用 getUnclearedErrorDetails），
+    // 把 UI 层门禁补成后端硬门禁——防止绕过前端直接调 API 推进。
+    // 本课自身刚产生的错题不在判定范围内，因此不阻塞本课的完成推进（清零在下一课开始时）。
+    if (await this.practiceService.hasUnclearedGateErrors(studentId, progress.subjectId, lessonId)) {
+      return { advanced: false, reason: 'cleanup_incomplete' };
+    }
+
     // Do not rewind progress when reviewing earlier cards
     if (progress.currentCardSort != null && cardSortOrder < progress.currentCardSort) {
       return { advanced: false, reason: 'reviewing' };

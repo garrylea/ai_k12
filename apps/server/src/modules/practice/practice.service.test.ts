@@ -742,6 +742,49 @@ describe('PracticeService.getUnclearedErrorDetails', () => {
   });
 });
 
+describe('PracticeService.hasUnclearedGateErrors（清零硬门禁，2026-09-29）', () => {
+  // 委托 getUnclearedErrorDetails（同一谓词：同源、同版本过滤、同课时范围、同孤儿行保留），
+  // 课时过滤的完整语义已在上一个 describe 覆盖——这里只钉「委托 + 布尔转换 + currentLessonId 透传」。
+
+  it('本课之前有未清错题 -> true，currentLessonId 透传', async () => {
+    const deps = mk({
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([
+          { id: 1, source_ref_id: 10, question_id: null, question_n: '1', questionText: '前一课错题', lesson_id: 180 },
+        ]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.hasUnclearedGateErrors(1, 1, 181)).resolves.toBe(true);
+    expect(deps.mainErrorRepo.findUnclearedPracticeByStudentSubject).toHaveBeenCalledWith(1, 1, null);
+  });
+
+  it('只剩本课/后续课的错题（课时过滤排除后为空）-> false：不阻塞本课推进', async () => {
+    const deps = mk({
+      mainErrorRepo: {
+        create: vi.fn(),
+        findUnclearedByStudentQuestion: vi.fn(),
+        clearUnclearedByStudentQuestion: vi.fn(),
+        updateDialogueId: vi.fn(),
+        findUnclearedPracticeByStudentSubject: vi.fn().mockResolvedValue([
+          { id: 2, source_ref_id: 11, question_id: null, question_n: '2', questionText: '本课错题', lesson_id: 181 },
+        ]),
+      },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.hasUnclearedGateErrors(1, 1, 181)).resolves.toBe(false);
+  });
+
+  it('无任何未清错题 -> false', async () => {
+    const svc = mkSvc(mk({}));
+    await expect(svc.hasUnclearedGateErrors(1, 1, 181)).resolves.toBe(false);
+  });
+});
+
 describe('PracticeService.getResults', () => {
   it('返回 PracticeResultDto[]，is_correct TINYINT -> boolean', async () => {
     const deps = mk({

@@ -403,6 +403,27 @@ export class PracticeService {
   }
 
   /**
+   * 「错题清零」后端硬门禁（§6.1/§7.4）：本课之前（lesson_id < currentLessonId）
+   * 是否还有未清零的课堂练习错题。有 → 学生不得推进本课任何进度（学习/翻页/完成均拦）。
+   *
+   * 复用 `getUnclearedErrorDetails` 的同一谓词（同源 main_error_books、同版本过滤、
+   * 同课时范围、同「lesson_id 为 null 的孤儿行保守保留」语义），与前端清零阶段
+   * 看到的错误集合严格一致——单一真源，避免 UI 与后端口径漂移。
+   *
+   * 本课自身刚产生的错题不在范围内（课时过滤排除 lesson_id >= currentLessonId），
+   * 因此**不阻塞本课的完成推进**——清零发生在进入下一课之后（PRD §6.1：完课即发分，
+   * 清零门禁在下一课开始时）。
+   */
+  async hasUnclearedGateErrors(
+    studentId: number,
+    subjectId: number,
+    currentLessonId: number,
+  ): Promise<boolean> {
+    const { errors } = await this.getUnclearedErrorDetails(studentId, subjectId, currentLessonId);
+    return errors.length > 0;
+  }
+
+  /**
    * 批量递增错题严重程度（level + 1）。
    * 用于清零后仍有错误的题。studentId 为归属校验（防 IDOR）。
    */
@@ -462,7 +483,8 @@ export class PracticeService {
    *
    * questionId 解析用 content_hash 快查（不调 AI 结构化，避免开抽屉等待）；
    * 未命中则 question_id=null + wrong_answer_text 存题面（与判题 quality=poor 路径一致）。
-   * 错题本记录无论后续答对答错都保留（清除门禁尚未实现，markCleared 暂无调用方）。
+   * discuss 来源记录不参与「错题清零」门禁数据源（门禁只查 source='practice'），
+   * 但答对清零（clearUnclearedByStudentQuestion 按 question_id 清）会一并清掉同题的 discuss 行。
    */
   async startDiscuss(input: DiscussInput): Promise<DiscussOutput> {
     // ① 解析 questionId（快查 content_hash，未命中 null）

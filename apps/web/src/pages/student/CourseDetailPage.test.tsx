@@ -334,4 +334,16 @@ describe('CourseDetailPage 完成态庆祝', () => {
     expect(screen.queryByRole('heading', { name: /恭喜你/ })).not.toBeInTheDocument();
     expect(usePointsStore.getState().queue).toHaveLength(0);
   });
+
+  it('后端硬门禁 cleanup_incomplete（之前课程还有未清零错题）→ 不弹庆祝，显示清零提示', async () => {
+    // 2026-09-29 清零硬门禁：绕过前端「错题清零」阶段直调 API 时被后端拦下，
+    // 完成按钮必须给出与门禁对应的提示，而不是静默无反应。
+    updateProgressMock.mockResolvedValue({ advanced: false, reason: 'cleanup_incomplete' });
+
+    await finishLesson();
+
+    expect(await screen.findByText('还有之前课程的错题未清零，请先完成错题清零')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /恭喜你/ })).not.toBeInTheDocument();
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
 });

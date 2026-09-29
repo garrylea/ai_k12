@@ -488,6 +488,10 @@ export default function CourseDetailPage() {
         // 后端兜底：仍存在未作答的练习（绕过前端拦截时），阻止完成
         setGateError('本课练习未完成，无法结束课程');
         return;
+      } else if (res.reason === 'cleanup_incomplete') {
+        // 后端硬门禁（§6.1/§7.4）：本课之前还有未清零的错题（绕过前端清零阶段时），阻止完成
+        setGateError('还有之前课程的错题未清零，请先完成错题清零');
+        return;
       }
     } catch {
       // ignore

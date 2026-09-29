@@ -481,7 +481,11 @@ paths:
                             description: 当前解锁阶段（lesson / practice）
                           reason:
                             type: string
-                            description: 未推进原因（reviewing / not_current_lesson）
+                            description: >-
+                              未推进原因（reviewing / not_current_lesson / practice_incomplete /
+                              cleanup_incomplete）。cleanup_incomplete = 本课之前还有未清零的
+                              practice 错题（清零硬门禁，2026-09-29，PRD §6.1/§7.4），
+                              与前端「错题清零」阶段同一谓词。
                           currentLessonId:
                             type: integer
                             description: 当前进度中的课程 ID（当 reason=not_current_lesson 时返回，供前端定位下一课）
