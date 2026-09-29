@@ -10,6 +10,7 @@ import {
   getMyPointRules,
   getMyPoints,
   getMyRewards,
+  getSubscriptionStatus,
   getParentAccount,
   getParentAlerts,
   getParentControls,
@@ -79,6 +80,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getKnowledgeGraphMastery: vi.fn(),
     getWeakPoints: vi.fn(),
     getMyPointRules: vi.fn(),
+    // `/student/locked`（订阅锁定页新页）：挂载即拉订阅状态
+    getSubscriptionStatus: vi.fn(),
   };
 });
 
@@ -100,6 +103,7 @@ const getRemediationQuestionsMock = vi.mocked(getRemediationQuestions);
 const getKnowledgeGraphMasteryMock = vi.mocked(getKnowledgeGraphMastery);
 const getWeakPointsMock = vi.mocked(getWeakPoints);
 const getMyPointRulesMock = vi.mocked(getMyPointRules);
+const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
 
 /** P6.6：与后端默认档一致（切走 5 / 无操作 15），恰好等于「标准」预设。 */
 const CONTROLS: ParentControls = {
@@ -252,6 +256,7 @@ beforeEach(() => {
   getKnowledgeGraphMasteryMock.mockReset();
   getWeakPointsMock.mockReset();
   getMyPointRulesMock.mockReset();
+  getSubscriptionStatusMock.mockReset();
   getMyPointRulesMock.mockResolvedValue({
     tasks: [
       {
@@ -752,5 +757,44 @@ describe('路由表：薄弱点图谱页', () => {
 
     expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
     expect(getKnowledgeGraphMasteryMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 订阅锁定页（批③ Task 2）：`/student/locked` 是新页，从零加进路由表。
+ *
+ * 页面自己有组件测试，但那个测试挂的是页面本身、绕过了路由表——
+ * 「路由确实指到这个页面」只有这里能证明。该页**不进任何 Layout**（与训练轨同口径：
+ * 全屏、写死 data-theme="student-day"），登录态校验沿用 RequireRole('student')。
+ */
+describe('路由表：订阅锁定页', () => {
+  it('/student/locked 渲染 StudentLockedPage（订阅状态来自接口），而非无匹配路由', async () => {
+    setStudentSession();
+    getSubscriptionStatusMock.mockResolvedValue({
+      status: 'expired',
+      planCode: null,
+      trialEndsAt: null,
+      currentPeriodEnd: null,
+      daysRemaining: 0,
+      source: 'trial',
+    });
+
+    renderAt('/student/locked');
+
+    // 真页面内容：文案来自 getSubscriptionStatus 的 expired 分支（无匹配路由渲染不出它）
+    expect(await screen.findByText('订阅已过期')).toBeInTheDocument();
+    expect(getSubscriptionStatusMock).toHaveBeenCalled();
+    // 独立全屏页：写死日间主题，无侧栏
+    expect(document.querySelector('[data-theme="student-day"]')).not.toBeNull();
+    expect(document.querySelector('aside')).toBeNull();
+  });
+
+  it('无 token 访问 /student/locked → 回登录页，不拉订阅状态', async () => {
+    localStorage.clear();
+
+    renderAt('/student/locked');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(getSubscriptionStatusMock).not.toHaveBeenCalled();
   });
 });

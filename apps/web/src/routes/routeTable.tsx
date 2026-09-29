@@ -16,6 +16,7 @@ import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage'
 import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
 import WeakPointGraphPage from '@/pages/student/training/WeakPointGraphPage';
+import StudentLockedPage from '@/pages/student/StudentLockedPage';
 import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
 import RemediationRunPage from '@/pages/student/training/RemediationRunPage';
 import ChineseSpecialPage from '@/pages/student/training/chinese/ChineseSpecialPage';
@@ -222,6 +223,16 @@ export const routes: RouteObject[] = [
     element: (
       <RequireRole role="student">
         <WeakPointGraphPage />
+      </RequireRole>
+    ),
+  },
+  // 订阅锁定页（批③ Task 2）：全屏独立页，不进任何 Layout（与训练轨同口径）。
+  // 登录态校验沿用 RequireRole('student')（未登录/会话失效由它挡回登录页）。
+  {
+    path: '/student/locked',
+    element: (
+      <RequireRole role="student">
+        <StudentLockedPage />
       </RequireRole>
     ),
   },
