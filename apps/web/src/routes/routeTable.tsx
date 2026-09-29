@@ -46,6 +46,7 @@ import ParentGoalsPage from '@/pages/parent/ParentGoalsPage';
 import ParentAlertsPage from '@/pages/parent/ParentAlertsPage';
 import ParentControlsPage from '@/pages/parent/ParentControlsPage';
 import ParentAccountPage from '@/pages/parent/ParentAccountPage';
+import ParentSubscriptionPage from '@/pages/parent/ParentSubscriptionPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -364,6 +365,7 @@ export const routes: RouteObject[] = [
       { path: 'controls', element: <ParentControlsPage /> },
       { path: 'rewards', element: <ParentPointsPage /> },
       { path: 'alerts', element: <ParentAlertsPage /> },
+      { path: 'subscription', element: <ParentSubscriptionPage /> },
       { path: 'account', element: <ParentAccountPage /> },
     ],
   },
