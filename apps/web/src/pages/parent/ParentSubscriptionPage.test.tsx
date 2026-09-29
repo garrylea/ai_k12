@@ -230,7 +230,7 @@ describe('ParentSubscriptionPage 下单与支付弹层', () => {
     const jump = await screen.findByRole('button', { name: '跳转支付宝支付' });
     expect(screen.queryByTestId('pay-qr')).not.toBeInTheDocument();
     fireEvent.click(jump);
-    expect(openSpy).toHaveBeenCalledWith('https://openapi.alipay.com/pay?x=1', '_blank');
+    expect(openSpy).toHaveBeenCalledWith('https://openapi.alipay.com/pay?x=1', '_blank', 'noopener,noreferrer');
   });
 
   it('弹层「我已付款」→ confirm 成功进 success；2004 → toast「渠道尚未确认，稍后再试」', async () => {
