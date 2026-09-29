@@ -131,7 +131,7 @@
 | Files | `/api/files` | 文件上传、签名 URL | 基础设施 |
 | ~~ErrorBook~~ | ~~`/api/error-book`~~ | **已废弃（2026-09-20 用户裁决）**：后端 `error-book` 模块已于 2026-08-07 整体删除，本族 9 个端点**从未在现行代码中存在**（文档先于代码写下）。错题**机制**仍在（PRD §7.4，`main_error_books` 表 + `MainErrorBooksRepository`），写入由 practice / training / exams 三个模块承担，读侧为家长端只读聚合；学生端错题练习走 Training `GET /api/training/error-book`。新代码勿引用 | ~~ErrorBook Service~~ |
 | Conversations | `/api/conversations` | 会话创建、消息读写、上下文加载 | ConversationService |
-| Rewards | `/api/rewards` | 奖励发放、领取、兑现记录 | Reward Service |
+| ~~Rewards~~ | ~~`/api/rewards`~~ | **已废弃（2026-09-29 用户裁决，详见 §4.12）**：本族 7 个端点从未实现。闯关激励由 §7.13 积分系统承担，实际端点见 §4.21 / §4.22（Points + 家长端积分/兑换） | ~~Reward Service~~ |
 | Parent | `/api/parent` | 报告、对话回放、目标、管控、预警 | ParentAdmin Service |
 | Quota | `/api/quota` | AI 套餐额度、消耗查询与订阅状态 | AI-Agent 中枢 |
 | Billing | `/api/billing` | 订单创建、支付、优惠券、续费 | Billing Service |
@@ -313,17 +313,19 @@
 | POST | `/api/conversations/{dialogueId}/messages` | 发送用户消息（非流式兜底） | MVP |
 | GET | `/api/conversations/{dialogueId}/context` | 加载截断后的上下文（供 AI-Agent 内部使用） | P1 |
 
-### 4.12 Rewards — `/api/rewards`
+### 4.12 Rewards — `/api/rewards`（**已废弃，2026-09-29 用户裁决**）
+
+> **本族 7 个端点从未实现**（文档先于代码写下，代码里从来没有 RewardsController）。闯关激励已由 **§7.13 积分系统**统一承担（完课即给分、累计升段位、家长按汇率兑换），实际端点见 §4.21（Points，学生端 `/api/points/me*`）与 §4.22（家长端 `/api/parent/students/{id}/points*`、`/reward-catalog`、`/redemptions`）。原「小学虚拟 / 中学物质家长兑现」的独立奖励机制已在 PRD §7.3 废弃（2026-09-29）。新代码勿引用本族端点。
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| GET | `/api/rewards/students/{studentId}` | 学生全部奖励记录 | MVP |
-| GET | `/api/rewards/students/{studentId}/available` | 待领取奖励 | MVP |
-| POST | `/api/rewards/students/{studentId}/claim/{rewardId}` | 领取奖励 | MVP |
-| GET | `/api/rewards/students/{studentId}/history` | 奖励历史 | MVP |
-| GET | `/api/rewards/parents/{parentId}/pending` | 家长端待兑现物质奖励 | MVP |
-| POST | `/api/rewards/{rewardRecordId}/redeem` | 家长确认兑现 | MVP |
-| POST | `/api/rewards/{rewardRecordId}/fulfill` | 标记物质奖励已履约 | MVP |
+| ~~GET~~ | ~~`/api/rewards/students/{studentId}`~~ | **已废弃**：从未实现，学生端积分流水走 `GET /api/points/me/ledger` | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/rewards/students/{studentId}/available`~~ | **已废弃**：从未实现；完课即发分，无「待领取」概念 | ~~MVP~~ |
+| ~~POST~~ | ~~`/api/rewards/students/{studentId}/claim/{rewardId}`~~ | **已废弃**：从未实现；发分由业务动作（完课/交卷）在服务端自动完成，无领取动作 | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/rewards/students/{studentId}/history`~~ | **已废弃**：从未实现；历史走 `GET /api/points/me/ledger` | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/rewards/parents/{parentId}/pending`~~ | **已废弃**：从未实现；家长端看流水走 `GET /api/parent/students/{id}/points/ledger` | ~~MVP~~ |
+| ~~POST~~ | ~~`/api/rewards/{rewardRecordId}/redeem`~~ | **已废弃**：从未实现；兑换走 `POST /api/parent/students/{id}/points/redeem` | ~~MVP~~ |
+| ~~POST~~ | ~~`/api/rewards/{rewardRecordId}/fulfill`~~ | **已废弃**：从未实现；兑换单状态走 `PATCH /api/parent/redemptions/{id}` | ~~MVP~~ |
 
 ### 4.13 Parent — `/api/parent`
 
@@ -354,7 +356,7 @@
 | PUT | `/api/parent/students/{studentId}/controls` | **改预警灵敏度 / 单次学习锁定**。body 三个字段**均可选**：`alertAwayMinutes` / `alertIdleMinutes`（均 `1..180` 整数）、`sessionLockMinutes`（`1..480` 整数**或 `null` = 解除锁定**）。校验链：归属校验 → **至少一个字段**（全缺 → 409/1001）→ 范围越界（409/1001；`sessionLockMinutes` 为 `null` 时跳过范围校验）。**只发改动过的字段**（未提供即不动；**`null` 是「清空」不是「不动」**）；返回**回读库里的完整对象**（不是回声入参）。范围校验**两处都有**（controller 的 Zod 是第一道、service 是最后一道）。见 §4.25、§5.28 | MVP |
 | POST | `/api/parent/students/{studentId}/device-commands` | **下发解除命令（PC App 学习管控，2026-09-23 实现）**。body `{command}`，`command` 本期只认 `'unlock'`（白名单外 **400/1001**）。⚠️ **没有进行中的学习会话 → 409/1001 且不写任何命令** —— 这是主防线：否则一条命令会悬在那里，解锁掉**将来某次**锁定（`pollAndConsume` 的 10 分钟惰性过期只是兜底）。响应 `{id, command, status:'pending', learningSessionId, createdAt}`（`learningSessionId` 让家长端知道「解除了哪一次」）。按 Nest 默认返回 **201**。归属校验：学生不存在 404/1002、不属于本家长 403/1005。见 §4.25 | MVP |
 | GET | `/api/parent/students/{studentId}/learning-sessions` | **进出时间列表（PC App 学习管控，2026-09-23 实现）**。query `days?`（缺省 7、`1..90`）、`limit?`（缺省 50、`1..100`）—— **越界 400/1001，不静默钳制**。响应 `{items:[{id, startedAt, endedAt\|null, online, lockMinutes\|null, lockExpiresAt\|null, unlockedAt\|null}], total}`；`items` 按 `startedAt` 倒序、`total` 是**同窗口总数**（不受 `limit` 影响）。**`online` 由后端算好下发**（阈值 `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 秒、与客户端 10 秒轮询成对；**已结束的会话永远 `false`**），前端不重算。空结果 `items: []` / `total: 0` 是**正常态，不 404**。见 §4.25 | MVP |
-| GET | `/api/parent/students/{studentId}/rewards` | 奖励管理视图 | MVP |
+| ~~GET~~ | ~~`/api/parent/students/{studentId}/rewards`~~ | **已废弃（2026-09-29 用户裁决，详见 §4.12）**：从未实现；奖励管理视图由 §4.22 的 `/reward-catalog`（家长配奖励目录）+ `/redemptions`（兑换单历史）+ `/points/ledger`（流水）承担 | ~~MVP~~ |
 | GET | `/api/parent/alerts` | **异常预警列表 P6.9（2026-09-20 实现）**。query：`studentId?`（给了就校验归属；**不传 = 全部孩子**，列表带 `studentName`）/ `unreadOnly?`（只认 `'1'`）/ `page?`（≥1，默认 1）/ `pageSize?`（1..50，默认 20）。分页壳同 `errors`。`type ∈ off_topic\|emotional\|sensitive\|abusive\|away\|idle`、`level ∈ info\|warning\|critical`；**「建议家长行动」不入库**，由前端按 `type` 静态映射（spec §3.4）。空结果 `items: []` / `total: 0`（**不是错误**）。见 §5.28 | MVP |
 | PATCH | `/api/parent/alerts/{alertId}/read` | **标记预警已读**（幂等，重复标记不报错）。校验链：`alertId` 正整数（否则 409/1001）→ 预警存在（404/1002）→ 属于本家长（403/1005）。返回 `null` | MVP |
 | GET | `/api/parent/alerts/unread` | **未读预警轮询（家长端 Banner，2026-09-20 实现）**。无 query：**不分页、不看单个孩子、只返回 Banner 展示字段**——这是它与 `GET /parent/alerts` 的三点区别。服务端先对名下**全部孩子**跑 `closeStale`（补判走神阈值；失败只 `warn`、**绝不把轮询打成 500**），再查未读。响应 `{items:[{id,type,level,message,studentName,createdAt}], total}`：`items` 截**最新 5 条**、`total` 是未读总数（Banner 文案用）。⚠️ 补判的写入在 `maybeRecordHiddenAlert` 内部仍是 `void`（与随后的 SELECT 存在竞态）→ 补判出的预警通常**下一次轮询**（30s 内）才出现在响应里，不是本次。见 §5.28 | MVP |
@@ -631,9 +633,9 @@ GET /api/progress/students/{id}/overview
   │  POST /api/training/judge（逐题重做；答对即清零 is_cleared=1）
   │  GET /api/practice/uncleared-errors（门禁查询：确认本课之前的错题是否已清）
   │  ▼
-  │  错题清零完成 → Reward Service 发放上一课/单元奖励
-  │  GET /api/rewards/students/{id}/available
-  │  POST /api/rewards/students/{id}/claim/{rewardId}
+  │  错题清零完成（下一课开始时的门禁，不影响上一课已发积分）
+  │  （本课积分已在完课瞬间由服务端自动发放：POST /api/progress/update 返回体携带 points，
+  │    记账走 Points Service 内部流水；无独立「领取奖励」端点，原 /api/rewards/* 已废弃，见 §4.12）
   │  ▼
   │  解锁下一节点，返回星图
   │
@@ -692,7 +694,7 @@ GET /api/assessment/submissions/{sid}/results
 错题写入主线错题本（practice 模块经 `MainErrorBooksRepository` 内部写入；无独立 ErrorBook 服务）
   │
   ▼
-本课学习完成，等待下次进入新课时触发错题清零检查与奖励发放（见流程开头）
+本课学习完成 → 立即发放本课积分（§7.13 `mainline_lesson`，完成即给分）；下次进入新课时触发错题清零检查（见流程开头）
 ```
 
 ### 5.2 辅线自由探索与拍照录入
@@ -822,28 +824,42 @@ Validator 逻辑自洽校验
   │        已于 2026-09-20 标废弃：变式生成本期未实现，见 §9 v4.6）
 ```
 
-### 5.5 奖励领取与兑现
+### 5.5 积分获得与兑换（§7.13，原「奖励领取与兑现」已废弃重写）
 
 ```text
-学生端：P2.9 闯关奖励页
+学生端：业务动作触发发分（无独立领取端点）
   │
   ▼
-GET /api/rewards/students/{id}/available
+完课 / 交卷 / 专项作答等业务动作在服务端自动记积分流水
+（每日上限不发分但任务照常完成，轻反馈「今日该任务积分已达上限」）
   │
   ▼
-POST /api/rewards/students/{id}/claim/{rewardId}
+学生端只读：
+GET /api/points/me（余额 + 段位）
+GET /api/points/me/ledger（流水，分页）
+GET /api/points/me/rules（家长配置的档位，学生开练只能从中选）
+GET /api/points/me/rewards（奖励册：家长配的奖励目录 + affordable/levelOk）
+GET /api/points/levels（静态 9 档段位表）
   │
-  ├─ 小学虚拟奖励：直接入账，GET /api/rewards/students/{id} 查看
-  │  │
-  │  └─ 中学物质奖励：生成待兑现记录
-  │      ▼
-  │      家长端 P6.7 收到待兑现提醒
-  │      GET /api/rewards/parents/{parentId}/pending
-  │      ▼
-  │      家长确认 → POST /api/rewards/{recordId}/redeem
-  │      ▼
-  │      线下履约后 → POST /api/rewards/{recordId}/fulfill
+  ▼
+家长端（P6.7 积分与奖励）：
+GET  /api/parent/students/{id}/points（余额 + 段位概览）
+GET/PUT /api/parent/students/{id}/points/rules（分值/每日上限/启用档位，改完即时生效）
+GET  /api/parent/students/{id}/points/ledger（家长视角流水）
+GET/PUT /api/parent/students/{id}/reward-catalog（自配奖励：积分价 + 段位门槛 + 上/下架）
+  │
+  ▼
+兑换（家长端操作，学生端只读）：
+POST /api/parent/students/{id}/points/redeem
+  │   输入积分数，金额按汇率推导（默认 20 分 = 1 元，汇率家长可配）
+  │   单事务：写兑换单 + 记负流水 + 扣可用余额
+  │   余额不足 / 未达段位门槛 / 奖励下架 / 兑换关闭 → 分别拒绝（3001-3004）
+  ▼
+GET   /api/parent/students/{id}/redemptions（兑换单历史，分页）
+PATCH /api/parent/redemptions/{id}（更新兑换单状态；本期兑换不可撤销，状态位为将来预留）
 ```
+
+> 原 §5.5 描述的 `/api/rewards/*` 领取/兑现流程已随 §4.12 一并废弃（2026-09-29，从未实现）。
 
 ### 5.6 订阅购买与续费
 
@@ -1857,7 +1873,7 @@ POST /api/student/learning-sessions          ← 取或建（幂等，显式 200
 | P2.6 单元检测 | ~~`/student/unit-test`~~ | **页面未实现**（同上）。规划端点：`GET /api/assessment/exams/{id}`, `POST .../submissions`, `POST .../save/submit` |
 | P2.7 期中期末 | ~~`/student/exam`~~ | **页面未实现**（同上）。规划端点：同单元检测，scope 不同 |
 | P2.8 成绩报告 | ~~`/student/scores`~~ | **页面未实现**（同上）。规划端点：`GET /api/assessment/submissions/{id}/results`, `GET /api/knowledge-graph/.../weak-points` |
-| P2.9 闯关奖励 | ~~`/student/reward-unlock`~~ | **页面未实现**（同上）。规划端点：`GET /api/rewards/.../available`, `POST /api/rewards/.../claim/{id}` |
+| P2.9 闯关奖励 | ~~`/student/reward-unlock`~~ | **页面未实现**（同上）。原规划端点 `/api/rewards/*` 已随 §4.12 废弃（2026-09-29，从未实现）；积分发放已在完课/交卷链路内自动完成，学生端只读走 `/api/points/me*` |
 | P3.1 辅线首页 | `/student/auxiliary` | `GET /api/conversations?track=aux` |
 | P3.2 知识点选择 | `/student/auxiliary/selector` | `GET /api/content/knowledge-points` |
 | P3.3 拍照/输入答疑 | `/student/auxiliary/ask` | `POST /api/files/upload`, `POST /api/refinery/extract` |
@@ -2040,6 +2056,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.12 | 2026-09-29 | **PRD §6.1/§7.3 闯关奖励口径修订的文档同步（`/api/rewards/*` 全族标废弃 + 数据流改指积分体系）**。背景：用户裁决把主线循环定为准——完课即发分（§7.13「完成即给分」），错题清零在下一课开始时进行、不影响已发积分；原「清零后发上一课奖励」的独立闯关奖励机制废弃。**接口契约只有废弃标注、无新增端点**：§4.12 Rewards 整节 7 个端点 + §4.13 的 `GET /api/parent/students/{id}/rewards` 标删除线 + 废弃注记（**从未实现**——全仓无 RewardsController、无任何调用方；发分由完课/交卷链路内自动记账，学生端只读走 `/api/points/me*`，兑换走 §4.22）。§2 分组总表 Rewards 行同步废弃；§5.1 主线数据流改写（清零与发分的先后对齐 PRD §6.1 新流程，去 `/api/rewards/*` 调用）；§5.5 整节重写为「积分获得与兑换」真实数据流（points / parent-points / levels 真实端点）；§7 页面↔端点表 P2.9 行订正。`openapi.yaml` 同步：8 个路径的 operation 加 `deprecated: true` + 说明（路径与 schema 保留，避免 `$ref` 悬空，与 error-book 先例一致）。关联文档：PRD §6.1/§7.3/§7.4 重写、架构文档 §4.2.9 重写、AI 辅导流程 §3.2 重排、UX 文档 P2.9 重写与 §9.3 清单更新、数据库设计文档 §3.9 `rewards` 表标遗留、`tools/db/schema.sql` 注释订正。 |
 | v4.11 | 2026-09-26 | **PC App 壳生产化（②）：接口契约零变更（仅登记）**。`docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` 只改 `apps/desktop`（Electron 壳）与若干文档，**未新增/修改/删除任何 HTTP 端点**，故本文件正文与 `docs/api/openapi.yaml` 本批均无需同步。此结论显式登记，避免后来者误以为漏同步（spec §7）。 |
 | v4.10 | 2026-09-24 | **PC App 学习管控（单次学习锁定）**。新增 §4.25 与 §5.30，5 个端点：学生端 3 —— `POST /api/student/learning-sessions`（**取或建，显式 `@HttpCode(200)`，是全仓唯一一处覆盖**：幂等端点用默认 201 会误导「每次都在创建」）、`PATCH /api/student/learning-sessions/{id}/end`（幂等；非本人 → **404/1002 而非 403**，403 属于存在性泄露）、`GET /api/student/device-commands`（**轮询兼心跳**，客户端 10 秒一次；单事务做「惰性过期 + 刷 `last_seen_at` + 取 pending + 认领 consumed + `unlock` 落 `unlocked_at`」，后两步必须同生共死）；家长端 2 —— `POST /api/parent/students/{studentId}/device-commands`（body `{command:'unlock'}`，**没有进行中会话 → 409/1001 且不写命令**，这是防止「一条命令解锁将来某次锁定」的主防线；返回 **201**）、`GET /api/parent/students/{studentId}/learning-sessions`（进出时间，`days` 1..90 缺省 7、`limit` 1..100 缺省 50，**越界 400/1001 不钳制**；`online` **由后端算好下发**，阈值 45 秒与客户端 10 秒轮询成对）。**契约变更**：`controls` 的 GET/PUT 补 `sessionLockMinutes`（`1..480` 或 `null` = 解除；**`null` 是「清空」不是「不动」**）；`GET .../today-usage` **删 `limitMinutes` 与 `exceeded`**（「每日累计上限」概念废除，纯统计）。**列改名**：`controls.daily_time_limit_minutes` → `session_lock_minutes`，语义从「每日累计上限」改为「单次登录起算的禁登出窗口」（改名前该列实测恒为 NULL，零数据丢失）。数据面：新增 `learning_sessions`（条件式 VIRTUAL 生成列 `active_student_id` + 唯一键，**DB 级**保证「每学生至多一个进行中会话」→ 客户端重启不重置时钟）、`device_commands`；迁移 `tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql`。`openapi.yaml` 同步收录 5 端点 + 7 个 schema + `DeviceControl` tag。 |
 | v4.9 | 2026-09-22 | **错题补偿套题（相似题专项练习）**。契约变更：Training 分组 §4.18 新增 5 个补偿套题端点（student JWT；三个 POST 按 Nest 默认返回 **201**，两个 GET 200）——`generate`（学生同意后**同步**建组 + 题库抽题、AI 补题后台跑；`source` 枚举 `exam\|targeted`，`targeted` 必带 `wrongQuestionIds`（≤50）；考试未交卷 400、会话不存在/非本人 404；无错题全 0 返回 `setId:0`）、`me`（active 套题概要 + AI 补题惰性重试）、`questions`（未答对题含渲染数据，**`options` 可为 null**；全对时后端 `deleteSet`）、`answers`（逐题提交，判题 `source='remediation'` **不入错题本/不清零原错题/不参与主线门禁**，首答发分 `remediation_question`、幂等键 `rem:<item.id>`，全对清套）、`self-assess`（套题内主观题自评，**刻意不经 `judgeCore`**，不入错题本/不清零/不发 `error_fix`）。错误码口径：**「无进行中套题 / 题不在套题中 / 该题已答对」一律 400**（`BadRequestException`），**不是 404**。新增 §5.29 数据流。数据面：新增 `remediation_sets` / `remediation_groups` / `remediation_set_items` 三表（DB 设计文档 §3.19；`origin_question_id` 在 **groups** 上、`items.question_id` 是 `ON DELETE RESTRICT`）。积分：新增任务 `remediation_question`（PRD §7.13，档位=题型：选择→3 / 填空→4 / 大题→6，不限每日上限）。`openapi.yaml` 同步收录 5 端点。 |

@@ -2096,6 +2096,10 @@ paths:
       tags: [Rewards]
       summary: 学生奖励记录
       operationId: listRewards
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：闯关激励已由积分系统统一承担（PRD §7.13），
+        学生端流水走 `GET /api/points/me/ledger`。本族端点从未实现，新代码勿引用。
       parameters:
         - name: studentId
           in: path
@@ -2121,6 +2125,10 @@ paths:
       tags: [Rewards]
       summary: 待领取奖励
       operationId: listAvailableRewards
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：完课即发分（PRD §7.13「完成即给分」），
+        无「待领取」概念。本族端点从未实现，新代码勿引用。
       parameters:
         - name: studentId
           in: path
@@ -2146,6 +2154,10 @@ paths:
       tags: [Rewards]
       summary: 领取奖励
       operationId: claimReward
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：发分由业务动作（完课/交卷）在服务端自动完成，
+        无「领取」动作。本族端点从未实现，新代码勿引用。
       parameters:
         - name: studentId
           in: path
@@ -2174,6 +2186,10 @@ paths:
       tags: [Rewards]
       summary: 奖励历史
       operationId: getRewardHistory
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：积分历史走 `GET /api/points/me/ledger`。
+        本族端点从未实现，新代码勿引用。
       parameters:
         - name: studentId
           in: path
@@ -2199,6 +2215,11 @@ paths:
       tags: [Rewards]
       summary: 待兑现奖励
       operationId: listPendingRewards
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：原「中学物质奖励家长兑现」机制已废弃，
+        兑换走 `POST /api/parent/students/{id}/points/redeem`（PRD §7.13）。
+        本族端点从未实现，新代码勿引用。
       parameters:
         - name: parentId
           in: path
@@ -2224,6 +2245,10 @@ paths:
       tags: [Rewards]
       summary: 家长确认兑现
       operationId: redeemReward
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：兑换走 `POST /api/parent/students/{id}/points/redeem`（PRD §7.13）。
+        本族端点从未实现，新代码勿引用。
       parameters:
         - name: rewardRecordId
           in: path
@@ -2242,6 +2267,10 @@ paths:
       tags: [Rewards]
       summary: 标记已履约
       operationId: fulfillReward
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：兑换单状态走 `PATCH /api/parent/redemptions/{id}`（PRD §7.13）。
+        本族端点从未实现，新代码勿引用。
       parameters:
         - name: rewardRecordId
           in: path
@@ -3161,6 +3190,11 @@ paths:
       tags: [Parent]
       summary: 奖励管理视图
       operationId: listParentRewards
+      deprecated: true
+      description: |
+        **已废弃（2026-09-29 用户裁决）**：从未实现。奖励管理由积分体系承担（PRD §7.13）：
+        `/parent/students/{id}/reward-catalog`（奖励目录）+ `/parent/students/{id}/redemptions`（兑换单）
+        + `/parent/students/{id}/points/ledger`（流水）。新代码勿引用。
       parameters:
         - name: studentId
           in: path

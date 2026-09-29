@@ -1150,8 +1150,9 @@ CREATE TABLE IF NOT EXISTS reward_catalog (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 兑换单（家长端操作，线下给现金，不走支付）。
--- **与 `rewards` 表（§9）分工勿混**：rewards 是 PRD §7.3「课级/单元级奖励发放」的实例记录
--- （平台按闯关节点发的），本期不动它；本表是「用积分换」的兑换单。两者语义不同，要合并另开 spec。
+-- **与 `rewards` 表（§9）分工勿混**：rewards 是 PRD §7.3 原闯关奖励机制的遗留表
+-- （平台按闯关节点发的，已被 §7.13 积分系统取代，本期零读写方，列结构保留备复用）；
+-- 本表是 §7.13「用积分换」的兑换单。两者语义不同，要合并另开 spec。
 -- reward_name / cash_amount 都是**快照**（catalog 改名/删除不影响历史）。
 -- 已知限制：本期兑换**不可撤销**，status 已为后续撤销留状态位。
 CREATE TABLE IF NOT EXISTS point_redemptions (
