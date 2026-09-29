@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
+  cancelBillingOrder,
+  confirmBillingOrderPaid,
+  createBillingOrder,
   endStudySession,
+  getAiUsage,
+  getBillingOrder,
   getMyPoints,
   getParentChatLogDetail,
   getParentChatLogs,
@@ -10,7 +15,10 @@ import {
   getParentPointLedger,
   getParentReport,
   getParentStudyTime,
+  getSubscriptionPlans,
+  getSubscriptionStatus,
   heartbeatStudySession,
+  listBillingOrders,
   redeemParentPoints,
   saveParentPointRules,
   setRedemptionStatus,
@@ -27,6 +35,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function stubFetch(status: number, body: unknown) {
@@ -271,5 +280,85 @@ describe('学习会话与学习时长端点：路径、编码与 body', () => {
 
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toBe('/api/study-sessions/a%2Fb%3Fc/end');
+  });
+});
+
+describe('订阅/计费 API：路径与 body', () => {
+  it('getSubscriptionStatus / getSubscriptionPlans → GET /api/quota/*', async () => {
+    const f = stubData({ status: 'trialing', daysRemaining: 7 });
+
+    await getSubscriptionStatus();
+    expect(f.mock.calls[0][0]).toBe('/api/quota/subscription');
+    expect(f.mock.calls[0][1]?.method).toBeUndefined();
+
+    await getSubscriptionPlans();
+    expect(f.mock.calls[1][0]).toBe('/api/quota/plans');
+  });
+
+  it('createBillingOrder → POST /api/billing/orders，body 恰好 {planCode,channel}', async () => {
+    const f = stubFetch(201, { code: 0, message: 'ok', data: { orderNo: 'NO1' } });
+
+    await createBillingOrder('monthly', 'wechat');
+
+    expect(f.mock.calls[0][0]).toBe('/api/billing/orders');
+    expect(f.mock.calls[0][1]?.method).toBe('POST');
+    expect(requestBody(f)).toEqual({ planCode: 'monthly', channel: 'wechat' });
+  });
+
+  it('listBillingOrders → query 带分页', async () => {
+    const f = stubData({ items: [], total: 0, page: 2, pageSize: 10 });
+
+    await listBillingOrders(2, 10);
+
+    expect(f.mock.calls[0][0]).toBe('/api/billing/orders?page=2&pageSize=10');
+  });
+
+  it('getBillingOrder / cancelBillingOrder / confirmBillingOrderPaid → 路径与方法', async () => {
+    const f = stubData({ orderNo: 'NO1', paymentStatus: 'pending' });
+
+    await getBillingOrder('NO1');
+    expect(f.mock.calls[0][0]).toBe('/api/billing/orders/NO1');
+
+    await cancelBillingOrder('NO1');
+    expect(f.mock.calls[1][0]).toBe('/api/billing/orders/NO1/cancel');
+    expect(f.mock.calls[1][1]?.method).toBe('POST');
+
+    await confirmBillingOrderPaid('NO1');
+    expect(f.mock.calls[2][0]).toBe('/api/billing/orders/NO1/confirm-paid');
+    expect(f.mock.calls[2][1]?.method).toBe('POST');
+  });
+});
+
+describe('2001 全局拦截（订阅失效硬门禁）', () => {
+  function stubLocationAssign() {
+    // jsdom 的 Location 成员（含 assign）是实例上的不可配置属性，spy 不动；
+    // 但 window.location 本身可配置，用 vi.stubGlobal 整只替换。
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    return assign;
+  }
+
+  it('code=2001 → window.location.assign 到 /student/locked，且 Promise 永不 resolve（不抛 ApiError）', async () => {
+    const assign = stubLocationAssign();
+    stubFetch(403, { code: 2001, message: '订阅已失效', data: null });
+
+    let outcome: 'resolved' | 'rejected' | 'pending' = 'pending';
+    void getMyPoints().then(
+      () => { outcome = 'resolved'; },
+      () => { outcome = 'rejected'; },
+    );
+
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/student/locked'));
+    // 给微/宏任务留出窗口，确认确实挂起而不是悄悄 settle
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(outcome).toBe('pending');
+  });
+
+  it('其他业务码不触发跳转，仍抛 ApiError', async () => {
+    const assign = stubLocationAssign();
+    stubFetch(403, { code: 1005, message: '无权访问', data: null });
+
+    await expect(getAiUsage()).rejects.toMatchObject({ code: 1005 });
+    expect(assign).not.toHaveBeenCalled();
   });
 });

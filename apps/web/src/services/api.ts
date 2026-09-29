@@ -38,6 +38,11 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const json: ApiResponse<T> = await res.json();
 
   if (json.code !== 0) {
+    if (json.code === 2001) {
+      // 学生端硬门禁：订阅失效。全局跳锁定页（家长角色永远不会收到 2001，跳转对其无影响）。
+      window.location.assign('/student/locked');
+      return new Promise<T>(() => {}); // 不 resolve：让调用方挂起，页面即将整体跳走
+    }
     throw new ApiError(json.code, json.message, json.retryable, res.status);
   }
 
@@ -2876,4 +2881,94 @@ export interface DeviceCommandPoll {
 
 export function pollStudentDeviceCommands(): Promise<DeviceCommandPoll> {
   return fetchApi<DeviceCommandPoll>('/student/device-commands');
+}
+
+// --- 订阅 / 计费（家长端为主；spec §5.2，批③ Task 1） ---
+// 端点：GET /api/quota/{subscription,plans,usage}、POST|GET /api/billing/orders*。
+// `/usage` 仅家长（学生 token → 403/1005）。admin 的 mark-paid 端点是运营工具，前端不接。
+
+export interface SubscriptionStatusView {
+  status: 'trialing' | 'active' | 'expired';
+  planCode: string | null;
+  trialEndsAt: string | null;
+  currentPeriodEnd: string | null;
+  daysRemaining: number;
+  source: 'trial' | 'order' | string;
+}
+
+export interface PlanView {
+  planCode: string;
+  name: string;
+  priceCents: number;
+  durationDays: number;
+}
+
+export interface UsageView {
+  periodStart: string;
+  periodEnd: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** token 量不到（NULL）的调用次数——报表要区分「缺口」与「真实读数」 */
+  tokensUnknown: number;
+  byDay: { date: string; calls: number; tokens: number }[];
+}
+
+export interface BillingOrderView {
+  orderNo: string;
+  paymentStatus: 'pending' | 'paid' | 'cancelled' | 'expired';
+  amountCents: number;
+  planName: string;
+  channel: string;
+  /** 支付渠道下发的内容（如二维码 payload）；未下发为 null */
+  qrContent?: string | null;
+  redirectUrl?: string | null;
+  /** 待支付单的过期时间 */
+  expiresAt?: string;
+  paidAt?: string | null;
+  createdAt: string;
+}
+
+export function getSubscriptionStatus(): Promise<SubscriptionStatusView> {
+  return fetchApi<SubscriptionStatusView>('/quota/subscription');
+}
+
+export function getSubscriptionPlans(): Promise<PlanView[]> {
+  return fetchApi<PlanView[]>('/quota/plans');
+}
+
+export function getAiUsage(): Promise<UsageView> {
+  return fetchApi<UsageView>('/quota/usage');
+}
+
+/** 创建订单。后端 Nest `@Post` 默认 **201**（复用 pending 单时也是 201）。 */
+export function createBillingOrder(planCode: string, channel: 'wechat' | 'alipay'): Promise<BillingOrderView> {
+  return fetchApi<BillingOrderView>('/billing/orders', {
+    method: 'POST',
+    body: JSON.stringify({ planCode, channel }),
+  });
+}
+
+export function listBillingOrders(
+  page: number,
+  pageSize: number,
+): Promise<{ items: BillingOrderView[]; total: number; page: number; pageSize: number }> {
+  const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  return fetchApi(`/billing/orders?${qs.toString()}`);
+}
+
+export function getBillingOrder(orderNo: string): Promise<BillingOrderView> {
+  return fetchApi<BillingOrderView>(`/billing/orders/${encodeURIComponent(orderNo)}`);
+}
+
+/** 取消待支付单。状态迁移端点，后端显式 200。 */
+export function cancelBillingOrder(orderNo: string): Promise<void> {
+  return fetchApi<void>(`/billing/orders/${encodeURIComponent(orderNo)}/cancel`, { method: 'POST' });
+}
+
+/** 「我已付款」兜底。`'paid' | 'duplicate'`（并发已入账）对前端都是已支付。 */
+export function confirmBillingOrderPaid(
+  orderNo: string,
+): Promise<{ orderNo: string; paymentStatus: string; currentPeriodEnd?: string }> {
+  return fetchApi(`/billing/orders/${encodeURIComponent(orderNo)}/confirm-paid`, { method: 'POST' });
 }
