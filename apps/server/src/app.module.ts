@@ -68,7 +68,7 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
     // AnalyticsInterceptor 已由 AnalyticsModule 提供（它依赖同一个 TelemetryService
     // 实例），useClass 会new 出第二个实例、连带第二个 buffer，日志会被劈成两半。
     { provide: APP_INTERCEPTOR, useExisting: AnalyticsInterceptor },
-    // 订阅硬门禁（全局，最后一个 guard）：依赖 AuthMiddleware 填好的 req.user。
+    // 订阅硬门禁（全仓唯一 APP_GUARD，先于所有 controller 级 guard 执行）：依赖 AuthMiddleware 填好的 req.user。
     // 无 user（免 JWT 链路：auth / content / 渠道回调）与非学生角色天然放行；
     // 学生端点默认被锁，豁免清单见 subscription.guard.ts 的 SUBSCRIPTION_EXEMPT。
     { provide: APP_GUARD, useClass: SubscriptionGuard },
