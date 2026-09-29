@@ -15,6 +15,10 @@ export type {
   StudentWordProgressRow,
   RecordWordResultInput,
 } from './student-word-progress.repo.js';
+export { FamilySubscriptionsRepository } from './family-subscriptions.repo.js';
+export type { FamilySubscriptionTimes } from './family-subscriptions.repo.js';
+export { SubscriptionPlansRepository } from './subscription-plans.repo.js';
+export type { SubscriptionPlanRow } from './subscription-plans.repo.js';
 export { ExamPapersRepository } from './exam-papers.repo.js';
 export type { ExamPaperRow, PaperQuestionRow } from './exam-papers.repo.js';
 export { ExamSessionsRepository } from './exam-sessions.repo.js';
