@@ -30,6 +30,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@nestjs/testing": "^10.4.22",
     "@swc-node/register": "^1.12.1",
     "@swc/core": "^1.15.46",
     "@types/bcrypt": "^5.0.2",

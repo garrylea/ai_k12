@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { SubscriptionsService } from './subscriptions.service.js';
+import { QuotaController } from './quota.controller.js';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 
@@ -11,8 +12,11 @@ import { SubscriptionPlansRepository } from '../../database/repositories/subscri
  *   这里不需要 import 它）。
  * - `exports`：`SubscriptionsService`（AuthModule 的注册送试用钩子、批② 的 finalize 事务
  *   都要注入）与两个仓储（批② 的订单/支付模块直接复用，避免重复注册两个实例）。
+ * - `controllers`：`QuotaController`（GET /api/quota/subscription；批② 的 /plans、/usage
+ *   落在同一个 controller，漏注册它端点会静默 404 —— `billing.module.test.ts` 有装配钉子）。
  */
 @Module({
+  controllers: [QuotaController],
   providers: [SubscriptionsService, FamilySubscriptionsRepository, SubscriptionPlansRepository],
   exports: [SubscriptionsService, FamilySubscriptionsRepository, SubscriptionPlansRepository],
 })
