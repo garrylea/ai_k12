@@ -343,6 +343,11 @@ export class BillingService {
   }
 
   private resolveAdapter(channel: string): PayChannelAdapter {
+    // BILLING_USE_MOCK=1：wechat/alipay 也解析到 Mock —— UI 渠道 radio 只有微信/支付宝、
+    // 发不出 channel='mock'，不映射则本地/演示环境 UI 下单必 503「支付渠道未配置」。
+    if (process.env.BILLING_USE_MOCK === '1') {
+      return this.mockAdapter;
+    }
     switch (channel) {
       case 'wechat':
         return this.wechatAdapter;

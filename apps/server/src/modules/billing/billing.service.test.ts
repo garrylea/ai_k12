@@ -220,6 +220,28 @@ describe('BillingService.createOrder', () => {
     expect(view.paidAt).toBeNull();
   });
 
+  it('BILLING_USE_MOCK=1 时 channel=wechat 也解析到 Mock（UI 无 mock radio，本地走查依赖此映射）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ id: 101, order_no: 'ORD-GEN', channel: 'wechat' }));
+    const prevMock = process.env.BILLING_USE_MOCK;
+    process.env.BILLING_USE_MOCK = '1';
+    try {
+      const view = await mkSvc(d).createOrder(3, { planCode: 'month', channel: 'wechat' });
+      expect(d.ordersRepo.insertOrder).toHaveBeenCalledTimes(1);
+      expect((d.ordersRepo.insertOrder.mock.calls[0][0] as { channel: string }).channel).toBe('wechat');
+      expect(d.mockAdapter.createOrder).toHaveBeenCalledWith({
+        orderNo: expect.any(String),
+        amountCents: 2000,
+        description: '月卡',
+      });
+      expect(d.wechatAdapter.createOrder).not.toHaveBeenCalled();
+      expect(view).toMatchObject({ orderNo: 'ORD-GEN', channel: 'wechat' });
+    } finally {
+      if (prevMock === undefined) delete process.env.BILLING_USE_MOCK;
+      else process.env.BILLING_USE_MOCK = prevMock;
+    }
+  });
+
   it('order_no 撞 uk_orders_no -> 重试一次（两次单号不同），第二次成功', async () => {
     const d = mkDeps();
     d.ordersRepo.insertOrder

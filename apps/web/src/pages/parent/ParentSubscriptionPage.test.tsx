@@ -218,6 +218,18 @@ describe('ParentSubscriptionPage 下单与支付弹层', () => {
     await waitFor(() => expect(statusMock.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
+  it('下单响应无 qrContent → 首次轮询回填订单详情后画出二维码', async () => {
+    // 真实后端 POST /api/billing/orders 视图不含 qrContent（spec：凭证来自 GET 订单详情）
+    createOrderMock.mockResolvedValue(orderOf({ qrContent: undefined }));
+    getOrderMock.mockResolvedValue(orderOf()); // pending + qrContent
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: '续费' }));
+
+    expect(await screen.findByTestId('pay-qr')).toBeInTheDocument();
+    expect(getOrderMock).toHaveBeenCalledWith('NO123');
+  });
+
   it('redirectUrl 非空 → 「跳转支付宝支付」按钮，点击 window.open', async () => {
     createOrderMock.mockResolvedValue(orderOf({ qrContent: null, redirectUrl: 'https://openapi.alipay.com/pay?x=1' }));
     // 轮询一直 pending，弹层停留

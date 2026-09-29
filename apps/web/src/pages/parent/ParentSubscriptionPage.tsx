@@ -142,7 +142,10 @@ export default function ParentSubscriptionPage() {
     const check = async () => {
       try {
         const next = await getBillingOrder(orderNo);
-        if (cancelled || next.paymentStatus !== 'paid') return;
+        if (cancelled) return;
+        // 回填订单详情：POST 下单响应不含 qrContent/redirectUrl（spec：凭证来自订单详情轮询）
+        setOrder(next);
+        if (next.paymentStatus !== 'paid') return;
         // paid：先重拉状态（success 要展示新到期时间），再切 success。
         // setView 会令本 effect cleanup，interval 被清掉 —— 先停轮询再切视图。
         const s = await getSubscriptionStatus();
