@@ -525,7 +525,7 @@ export default function ParentSubscriptionPage() {
                 <Button
                   variant="secondary"
                   onClick={() => {
-                    if (order.redirectUrl) window.open(order.redirectUrl, '_blank');
+                    if (order.redirectUrl) window.open(order.redirectUrl, '_blank', 'noopener,noreferrer');
                   }}
                 >
                   跳转支付宝支付
