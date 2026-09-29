@@ -1,10 +1,12 @@
 import { Module, MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
 import { AuthMiddleware } from './common/middleware/auth.middleware.js';
 import { CommonModule } from './common/common.module.js';
 import { DatabaseModule } from './database/database.module.js';
+import { BillingModule } from './modules/billing/billing.module.js';
+import { SubscriptionGuard } from './modules/billing/subscription.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ContentModule } from './modules/content/content.module.js';
 import { ProgressModule } from './modules/progress/progress.module.js';
@@ -54,6 +56,10 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
     KnowledgeGraphModule,
     // PC App 学习管控（2026-09-23）—— 学习会话 + 家长解除命令（学生端 3 + 家长端 2 端点）
     DeviceControlModule,
+    // 订阅收费（2026-09-29）—— 导入以让全局 SubscriptionGuard 在 AppModule 上下文
+    // 注入到 FamilySubscriptionsRepository（BillingModule 已 export 该仓储；
+    // AuthModule 内部也 import 同一模块实例，provider 不会重复注册）。
+    BillingModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
@@ -62,6 +68,10 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
     // AnalyticsInterceptor 已由 AnalyticsModule 提供（它依赖同一个 TelemetryService
     // 实例），useClass 会new 出第二个实例、连带第二个 buffer，日志会被劈成两半。
     { provide: APP_INTERCEPTOR, useExisting: AnalyticsInterceptor },
+    // 订阅硬门禁（全局，最后一个 guard）：依赖 AuthMiddleware 填好的 req.user。
+    // 无 user（免 JWT 链路：auth / content / 渠道回调）与非学生角色天然放行；
+    // 学生端点默认被锁，豁免清单见 subscription.guard.ts 的 SUBSCRIPTION_EXEMPT。
+    { provide: APP_GUARD, useClass: SubscriptionGuard },
   ],
 })
 export class AppModule implements NestModule {
