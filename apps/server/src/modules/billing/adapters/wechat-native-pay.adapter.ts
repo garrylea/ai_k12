@@ -24,6 +24,7 @@ import { randomNonce, rsaSha256Sign, rsaSha256Verify, wechatAesGcmDecrypt } from
  * - 回调验签：`Wechatpay-Timestamp/Nonce/Signature/Serial` 四头，
  *   验签串 `{ts}\n{nonce}\n{rawBody}\n`，用**平台证书**公钥验；
  *   Serial 与所配平台证书不符直接判失败（多证书轮换留后续）。
+ *   Timestamp 做新鲜度校验（与服务器时间差 > 5 分钟判过期，防重放）。
  *   解密 resource 用 APIv3 key 的 AES-256-GCM（`wechatAesGcmDecrypt`）。
  *
  * **URL path 参与签名必须与请求行完全一致（含 query）** —— `buildAuthHeader`
@@ -45,6 +46,12 @@ export class WechatNativePayAdapter implements PayChannelAdapter {
   readonly channel: PayChannel = 'wechat';
 
   private static readonly BASE_URL = 'https://api.mch.weixin.qq.com';
+
+  /** 下单/查单请求超时（毫秒）。 */
+  private static readonly REQUEST_TIMEOUT_MS = 10_000;
+
+  /** 回调时间戳新鲜度窗口（秒）：|服务器时间 - 头时间戳| 超过即判过期。 */
+  private static readonly CALLBACK_TIMESTAMP_TOLERANCE_SECONDS = 300;
 
   private readonly mchId: string | undefined;
   private readonly appId: string | undefined;
@@ -137,6 +144,24 @@ export class WechatNativePayAdapter implements PayChannelAdapter {
     );
   }
 
+  /**
+   * fetch 包一层超时：`AbortSignal.timeout` 中止时（AbortError/TimeoutError）
+   * 转成现有 2003 渠道异常语义；其余错误原样抛出。
+   */
+  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(WechatNativePayAdapter.REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+        throw new HttpException({ code: 2003, message: '支付渠道请求超时' }, 503);
+      }
+      throw err;
+    }
+  }
+
   async createOrder(input: { orderNo: string; amountCents: number; description: string }): Promise<ChannelOrderResult> {
     this.assertConfigured();
     const urlPath = '/v3/pay/transactions/native';
@@ -148,7 +173,7 @@ export class WechatNativePayAdapter implements PayChannelAdapter {
       notify_url: this.notifyUrl,
       amount: { total: input.amountCents },
     });
-    const res = await fetch(`${WechatNativePayAdapter.BASE_URL}${urlPath}`, {
+    const res = await this.fetchWithTimeout(`${WechatNativePayAdapter.BASE_URL}${urlPath}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -171,7 +196,7 @@ export class WechatNativePayAdapter implements PayChannelAdapter {
   async queryOrder(orderNo: string): Promise<ChannelQueryResult> {
     this.assertConfigured();
     const urlPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}?mchid=${encodeURIComponent(this.mchId!)}`;
-    const res = await fetch(`${WechatNativePayAdapter.BASE_URL}${urlPath}`, {
+    const res = await this.fetchWithTimeout(`${WechatNativePayAdapter.BASE_URL}${urlPath}`, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
@@ -218,6 +243,16 @@ export class WechatNativePayAdapter implements PayChannelAdapter {
       throw new Error('微信回调缺少验签头');
     }
 
+    // 新鲜度校验：头值是秒级 epoch 字符串，与服务器时间差 > 5 分钟判过期（防重放）
+    const tsSeconds = Number(timestamp);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (
+      !Number.isFinite(tsSeconds) ||
+      Math.abs(nowSeconds - tsSeconds) > WechatNativePayAdapter.CALLBACK_TIMESTAMP_TOLERANCE_SECONDS
+    ) {
+      throw new Error('微信回调时间戳过期');
+    }
+
     const platformCert = this.loadPlatformCert();
     if (serial.toUpperCase() !== platformCert.serialNo.toUpperCase()) {
       throw new Error(`微信回调证书序列号不匹配: ${serial}`);
@@ -248,8 +283,11 @@ export class WechatNativePayAdapter implements PayChannelAdapter {
       trade_state?: string;
       amount?: { total?: number };
     };
+    if (!payload.out_trade_no) {
+      throw new Error('微信回调缺少 out_trade_no');
+    }
     return {
-      orderNo: payload.out_trade_no ?? '',
+      orderNo: payload.out_trade_no,
       tradeNo: payload.transaction_id ?? '',
       paid: payload.trade_state === 'SUCCESS',
       amountCents: payload.amount?.total ?? 0,

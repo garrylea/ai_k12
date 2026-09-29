@@ -67,7 +67,9 @@ function parseAuthHeader(header: string): { mchid: string; nonce: string; signat
       .slice('WECHATPAY2-SHA256-RSA2048 '.length)
       .split(',')
       .map((kv) => {
-        const [k, v] = kv.split('=');
+        // 按第一个 '=' 切分：base64 签名尾部可能带 padding '='，split('=') 会截掉
+        const k = kv.slice(0, kv.indexOf('='));
+        const v = kv.slice(kv.indexOf('=') + 1);
         return [k.trim(), v.replace(/^"|"$/g, '')];
       }),
   ) as Record<string, string>;
@@ -80,13 +82,14 @@ function parseAuthHeader(header: string): { mchid: string; nonce: string; signat
   };
 }
 
-/** 构造带正确验签四头的回调（用平台私钥签名）。 */
+/** 构造带正确验签四头的回调（用平台私钥签名）。timestampSeconds 可覆盖时间戳（测新鲜度）。 */
 function buildCallbackHeaders(
   rawBody: string,
   serialNo = platformSerialNo,
   signKey = platformPrivatePem,
+  timestampSeconds?: number,
 ): Record<string, string | string[] | undefined> {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const timestamp = (timestampSeconds ?? Math.floor(Date.now() / 1000)).toString();
   const nonce = randomBytes(8).toString('hex');
   const signature = rsaSha256Sign(signKey, `${timestamp}\n${nonce}\n${rawBody}\n`);
   // 刻意用小写头名：适配器必须大小写不敏感取头
@@ -134,6 +137,33 @@ describe('WechatNativePayAdapter', () => {
       expect(auth.serialNo).toBe('TEST-MCH-SERIAL-01');
       const message = `POST\n/v3/pay/transactions/native\n${auth.timestamp}\n${auth.nonce}\n${bodyStr}\n`;
       expect(rsaSha256Verify(merchantPublicPem, message, auth.signature)).toBe(true);
+
+      // 超时保护：fetch 收到 signal，且超时时长为 10s
+      expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('createOrder/queryOrder 的 fetch 带 10s 超时 signal（AbortSignal.timeout(10_000)）', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ code_url: 'weixin://wxpay/bizpayurl?pr=x' }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ trade_state: 'SUCCESS' }), { status: 200 }),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+      const adapter = new WechatNativePayAdapter(ENV);
+
+      await adapter.createOrder({ orderNo: 'R1', amountCents: 1, description: 'x' });
+      await adapter.queryOrder('R1');
+
+      expect(timeoutSpy).toHaveBeenCalledTimes(2);
+      expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+      for (const call of fetchMock.mock.calls) {
+        expect((call[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+      }
+      timeoutSpy.mockRestore();
     });
 
     it('微信返回非 2xx → 抛错（HTTP 状态与响应体进错误信息）', async () => {
@@ -222,6 +252,15 @@ describe('WechatNativePayAdapter', () => {
       ).rejects.toThrow(/证书序列号不匹配/);
     });
 
+    it('时间戳过期（>5 分钟）→ 抛「微信回调时间戳过期」', async () => {
+      const adapter = new WechatNativePayAdapter(ENV);
+      const rawBody = Buffer.from(buildCallbackBody(), 'utf8');
+      const expiredTs = Math.floor(Date.now() / 1000) - 301;
+      await expect(
+        adapter.verifyCallback(buildCallbackHeaders(rawBody.toString('utf8'), platformSerialNo, platformPrivatePem, expiredTs), rawBody),
+      ).rejects.toThrow('微信回调时间戳过期');
+    });
+
     it('签名错误（用商户私钥而非平台私钥签）→ 抛「微信回调验签失败」', async () => {
       const adapter = new WechatNativePayAdapter(ENV);
       const rawBody = Buffer.from(buildCallbackBody(), 'utf8');
@@ -246,6 +285,28 @@ describe('WechatNativePayAdapter', () => {
       body.resource.ciphertext = buf.toString('base64');
       const rawBody = Buffer.from(JSON.stringify(body), 'utf8');
       await expect(adapter.verifyCallback(buildCallbackHeaders(rawBody.toString('utf8')), rawBody)).rejects.toThrow();
+    });
+
+    it('解密后的 payload 缺 out_trade_no → 抛「微信回调缺少 out_trade_no」（不得静默返回空单号）', async () => {
+      const adapter = new WechatNativePayAdapter(ENV);
+      const noOrderNoPlaintext = JSON.stringify({
+        transaction_id: 'wx-txn-0002',
+        trade_state: 'SUCCESS',
+        amount: { total: 29900 },
+      });
+      const nonce = resourceNonce;
+      const body = JSON.stringify({
+        id: 'evt-test-2',
+        resource: {
+          nonce,
+          associated_data: 'transaction',
+          ciphertext: encryptLikeWechat(noOrderNoPlaintext, nonce, 'transaction'),
+        },
+      });
+      const rawBody = Buffer.from(body, 'utf8');
+      await expect(adapter.verifyCallback(buildCallbackHeaders(body), rawBody)).rejects.toThrow(
+        '微信回调缺少 out_trade_no',
+      );
     });
 
     it('AES-GCM 解密往返（APIv3 key 加密样例 resource → 还原明文）', () => {
