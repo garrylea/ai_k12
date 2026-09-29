@@ -4,6 +4,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 export interface FamilySubscriptionTimes {
   trial_ends_at: Date | null;
   current_period_end: Date | null;
+  plan_code: string | null;
 }
 
 interface TimesRow extends RowDataPacket, FamilySubscriptionTimes {}
@@ -21,7 +22,7 @@ export class FamilySubscriptionsRepository {
 
   async findByParentId(parentId: number): Promise<FamilySubscriptionTimes | null> {
     const [rows] = await this.pool.execute<TimesRow[]>(
-      `SELECT trial_ends_at, current_period_end FROM family_subscriptions WHERE parent_id = ?`,
+      `SELECT trial_ends_at, current_period_end, plan_code FROM family_subscriptions WHERE parent_id = ?`,
       [parentId],
     );
     return rows[0] ?? null;
@@ -30,7 +31,7 @@ export class FamilySubscriptionsRepository {
   /** 经 students 表按学生反查其家庭的订阅时间（学生端闸口用）。 */
   async findByStudentId(studentId: number): Promise<FamilySubscriptionTimes | null> {
     const [rows] = await this.pool.execute<TimesRow[]>(
-      `SELECT fs.trial_ends_at, fs.current_period_end
+      `SELECT fs.trial_ends_at, fs.current_period_end, fs.plan_code
          FROM students st
          JOIN family_subscriptions fs ON fs.parent_id = st.parent_id
         WHERE st.id = ?`,

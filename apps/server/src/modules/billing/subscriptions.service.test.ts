@@ -21,6 +21,7 @@ describe('SubscriptionsService.getStatusView', () => {
     d.subsRepo.findByStudentId.mockResolvedValue({
       trial_ends_at: trialEndsAt,
       current_period_end: null,
+      plan_code: null,
     });
     const view = await mkSvc(d).getStatusView({ role: 'student', sub: 7 });
     expect(view).toEqual({
@@ -42,14 +43,34 @@ describe('SubscriptionsService.getStatusView', () => {
     d.subsRepo.findByParentId.mockResolvedValue({
       trial_ends_at: new Date(Date.now() - DAY),
       current_period_end: currentPeriodEnd,
+      plan_code: 'month',
     });
     const view = await mkSvc(d).getStatusView({ role: 'parent', sub: 3 });
     expect(view.status).toBe('active');
     expect(view.source).toBe('order');
+    expect(view.planCode).toBe('month');
     expect(view.daysRemaining).toBe(10);
     expect(view.currentPeriodEnd).toBe(currentPeriodEnd.toISOString());
     expect(d.subsRepo.findByParentId).toHaveBeenCalledWith(3);
     expect(d.subsRepo.findByStudentId).not.toHaveBeenCalled();
+  });
+
+  it('付费行（current_period_end 未来 + plan_code=month）-> {status:active, planCode:month}', async () => {
+    const d = mkDeps();
+    d.subsRepo.findByParentId.mockResolvedValue({
+      trial_ends_at: null,
+      current_period_end: new Date(Date.now() + 5 * DAY),
+      plan_code: 'month',
+    });
+    const view = await mkSvc(d).getStatusView({ role: 'parent', sub: 3 });
+    expect(view).toEqual({
+      status: 'active',
+      planCode: 'month',
+      trialEndsAt: null,
+      currentPeriodEnd: expect.any(String),
+      daysRemaining: 5,
+      source: 'order',
+    });
   });
 
   it('admin 视角同样走 findByParentId', async () => {
@@ -58,6 +79,7 @@ describe('SubscriptionsService.getStatusView', () => {
     d.subsRepo.findByParentId.mockResolvedValue({
       trial_ends_at: trialEndsAt,
       current_period_end: null,
+      plan_code: null,
     });
     const view = await mkSvc(d).getStatusView({ role: 'admin', sub: 1 });
     expect(view.status).toBe('trialing');
@@ -82,6 +104,7 @@ describe('SubscriptionsService.getStatusView', () => {
     d.subsRepo.findByStudentId.mockResolvedValue({
       trial_ends_at: new Date(Date.now() - 2 * DAY),
       current_period_end: null,
+      plan_code: null,
     });
     const view = await mkSvc(d).getStatusView({ role: 'student', sub: 7 });
     expect(view.status).toBe('expired');

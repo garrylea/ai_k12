@@ -61,9 +61,7 @@ export class SubscriptionsService {
 
     return {
       status,
-      // 仓储当前只读 trial_ends_at / current_period_end 两列，plan_code 未取
-      // （trial / 无行场景本就是 null；付费态的 planCode 由批②带 plan 的查询补齐）。
-      planCode: null,
+      planCode: times?.plan_code ?? null,
       trialEndsAt: trialEndsAt != null ? trialEndsAt.toISOString() : null,
       currentPeriodEnd: currentPeriodEnd != null ? currentPeriodEnd.toISOString() : null,
       daysRemaining: remaining,
