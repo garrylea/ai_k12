@@ -13,6 +13,7 @@ import { BillingService } from './billing.service.js';
 import { OrdersRepository } from '../../database/repositories/orders.repo.js';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
+import { LlmUsageRepository } from '../../database/repositories/llm-usage.repo.js';
 
 /**
  * 模块装配钉子：钉住 QuotaController 挂在 BillingModule 的 `controllers` 里、
@@ -38,7 +39,7 @@ describe('BillingModule 装配', () => {
   Reflect.defineMetadata('design:paramtypes', [SubscriptionsService], QuotaController);
   Reflect.defineMetadata(
     'design:paramtypes',
-    [FamilySubscriptionsRepository],
+    [FamilySubscriptionsRepository, SubscriptionPlansRepository, LlmUsageRepository],
     SubscriptionsService,
   );
   // 批② Task 5 的三个 controller：constructor 参数都是类类型，同样手工补 metadata
@@ -77,6 +78,7 @@ describe('BillingModule 装配', () => {
     expect(app.get(SubscriptionsService)).toBeInstanceOf(SubscriptionsService);
     expect(app.get(FamilySubscriptionsRepository)).toBeInstanceOf(FamilySubscriptionsRepository);
     expect(app.get(SubscriptionPlansRepository)).toBeInstanceOf(SubscriptionPlansRepository);
+    expect(app.get(LlmUsageRepository)).toBeInstanceOf(LlmUsageRepository);
   });
 
   it('批②：BillingService / OrdersRepository 可解析（BillingService 全部依赖显式 @Inject，不靠 design:paramtypes）', async () => {

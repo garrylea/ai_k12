@@ -7,6 +7,7 @@ import { AdminBillingController } from './admin-billing.controller.js';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 import { OrdersRepository } from '../../database/repositories/orders.repo.js';
+import { LlmUsageRepository } from '../../database/repositories/llm-usage.repo.js';
 import { BillingService, WECHAT_PAY_ADAPTER, ALIPAY_PAY_ADAPTER, MOCK_PAY_ADAPTER } from './billing.service.js';
 import { WechatNativePayAdapter } from './adapters/wechat-native-pay.adapter.js';
 import { AlipayQrPayAdapter } from './adapters/alipay-qr-pay.adapter.js';
@@ -22,8 +23,8 @@ import { MockPayAdapter } from './adapters/mock-pay.adapter.js';
  *   用 useFactory 显式构造；选用开关（'mock' 仅 test/BILLING_USE_MOCK）在 BillingService。
  * - `exports`：`SubscriptionsService`（AuthModule 注册送试用钩子）与 `BillingService` /
  *   `OrdersRepository`（批③ 的 billing controller 消费），仓储复用避免重复注册实例。
- * - `controllers`：`QuotaController`（GET /api/quota/subscription）+ 批② 三组
- *   （BillingController / BillingCallbackController / AdminBillingController，
+ * - `controllers`：`QuotaController`（GET /api/quota/subscription + 批② /plans、/usage）
+ *   + 批② 三组（BillingController / BillingCallbackController / AdminBillingController，
  *   漏注册端点会静默 404 —— `billing.module.test.ts` 有装配钉子）。
  */
 @Module({
@@ -33,6 +34,7 @@ import { MockPayAdapter } from './adapters/mock-pay.adapter.js';
     FamilySubscriptionsRepository,
     SubscriptionPlansRepository,
     OrdersRepository,
+    LlmUsageRepository,
     { provide: WECHAT_PAY_ADAPTER, useFactory: () => new WechatNativePayAdapter() },
     { provide: ALIPAY_PAY_ADAPTER, useFactory: () => new AlipayQrPayAdapter() },
     { provide: MOCK_PAY_ADAPTER, useFactory: () => new MockPayAdapter(true) },

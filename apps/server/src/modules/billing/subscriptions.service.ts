@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import type { PoolConnection } from 'mysql2/promise';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
+import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
+import { LlmUsageRepository } from '../../database/repositories/llm-usage.repo.js';
 import { effectiveStatus, daysRemaining } from './subscription-status.js';
 import type { SubscriptionStatus } from './subscription-status.js';
 import { TRIAL_DAYS } from './billing.config.js';
@@ -19,9 +21,39 @@ export interface StatusViewer {
   sub: number;
 }
 
+export interface PlanView {
+  planCode: string;
+  name: string;
+  priceCents: number;
+  durationDays: number;
+}
+
+export interface UsageDayView {
+  date: string;
+  calls: number;
+  tokens: number;
+}
+
+export interface UsageView {
+  periodStart: string;
+  periodEnd: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  tokensUnknown: number;
+  byDay: UsageDayView[];
+}
+
+/** 用量统计窗口：rolling 30 天近似（见 getUsageView 注释）。 */
+const USAGE_WINDOW_DAYS = 30;
+
 @Injectable()
 export class SubscriptionsService {
-  constructor(private readonly subsRepo: FamilySubscriptionsRepository) {}
+  constructor(
+    private readonly subsRepo: FamilySubscriptionsRepository,
+    private readonly plansRepo: SubscriptionPlansRepository,
+    private readonly usageRepo: LlmUsageRepository,
+  ) {}
 
   /**
    * 注册送试用：`now + TRIAL_DAYS`，upsert 幂等（行已存在则什么都不改，
@@ -80,5 +112,62 @@ export class SubscriptionsService {
     durationDays: number,
   ): Promise<{ currentPeriodEnd: Date }> {
     return this.subsRepo.renewWithinTx(conn, parentId, planCode, durationDays, new Date());
+  }
+
+  /** 在售套餐目录（active 过滤在 repo 侧，service 只做 snake_case → camelCase 映射）。 */
+  async listPlans(): Promise<PlanView[]> {
+    const rows = await this.plansRepo.listActive();
+    return rows.map((r) => ({
+      planCode: r.plan_code,
+      name: r.name,
+      priceCents: Number(r.price_cents),
+      durationDays: Number(r.duration_days),
+    }));
+  }
+
+  /**
+   * AI 用量聚合视图（仅家长；controller 侧 @Roles('parent') 把学生挡在 403）。
+   *
+   * 口径（批③ PRD 注记同文）：
+   * - `periodEnd = currentPeriodEnd ?? now`（orders 未存 period_start，spec §5.1
+   *   的「当前订阅周期」以下条近似落地）；
+   * - `periodStart = periodEnd - 30 天` —— **rolling 30 天，不按订阅周期起算**；
+   * - 聚合范围 = 该家长名下**所有学生**（repo 侧 JOIN students）；
+   * - `tokensUnknown` 独立计数（NULL = 量不到，绝不按 0 混入）；
+   * - `byDay` 只回有数据日，`tokens = input + output`（单日 SUM 全 NULL 按 0
+   *   参与该和，不影响 tokensUnknown）。
+   */
+  async getUsageView(parentId: number): Promise<UsageView> {
+    const times = await this.subsRepo.findByParentId(parentId);
+    const periodEnd = times?.current_period_end ?? new Date();
+    const periodStart = new Date(periodEnd.getTime() - USAGE_WINDOW_DAYS * 86_400_000);
+
+    const rows = await this.usageRepo.aggregateByDay(parentId, periodStart, periodEnd);
+
+    let calls = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let tokensUnknown = 0;
+    const byDay = rows.map((r) => {
+      const dayCalls = Number(r.calls);
+      // 单日 SUM 全 NULL → mysql2 回 null：tokens 按 0 参与求和，不碰 tokensUnknown
+      const inTok = r.input_tokens == null ? 0 : Number(r.input_tokens);
+      const outTok = r.output_tokens == null ? 0 : Number(r.output_tokens);
+      calls += dayCalls;
+      inputTokens += inTok;
+      outputTokens += outTok;
+      tokensUnknown += Number(r.tokens_unknown);
+      return { date: r.day, calls: dayCalls, tokens: inTok + outTok };
+    });
+
+    return {
+      periodStart: periodStart.toISOString(),
+      periodEnd: periodEnd.toISOString(),
+      calls,
+      inputTokens,
+      outputTokens,
+      tokensUnknown,
+      byDay,
+    };
   }
 }
