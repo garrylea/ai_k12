@@ -76,3 +76,10 @@ export type { WeakMasteryRow } from './student-knowledge-mastery.repo.js';
 export { GoalsRepository } from './goals.repo.js';
 export type { GoalMetric, GoalPeriod, GoalRow } from './goals.repo.js';
 export { LessonCompletionsRepository } from './lesson-completions.repo.js';
+export { OrdersRepository, parseOrderSnapshot } from './orders.repo.js';
+export type {
+  OrderRow,
+  OrderInsertInput,
+  OrderPaymentStatus,
+  OrderPlanSnapshot,
+} from './orders.repo.js';

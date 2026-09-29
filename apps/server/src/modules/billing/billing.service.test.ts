@@ -1,0 +1,572 @@
+import { describe, it, expect, vi } from 'vitest';
+import { BadRequestException, ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
+import { BillingService } from './billing.service';
+import type { OrderRow } from '../../database/repositories/orders.repo.js';
+
+/**
+ * BillingService 状态机用例（brief Step 1 六组 + 状态机边界）。
+ * 全部 mock 依赖：pool（事务骨架）/ ordersRepo / plansRepo / subscriptionsService / 三渠道适配器。
+ * vitest 下 NODE_ENV==='test'，channel='mock' 走 mockAdapter —— 用它驱动全流程。
+ */
+
+const MINUTE = 60_000;
+
+function mkAdapter(channel: string) {
+  return {
+    channel,
+    createOrder: vi.fn().mockResolvedValue({ tradeNo: `T-${channel}`, qrContent: `qr://${channel}`, redirectUrl: null }),
+    queryOrder: vi.fn().mockResolvedValue({ paid: true, tradeNo: `T-${channel}`, amountCents: null }),
+    verifyCallback: vi.fn().mockResolvedValue({ orderNo: 'ORD1', tradeNo: 'T1', paid: true, amountCents: 2000 }),
+    successResponse: vi.fn().mockReturnValue({ httpStatus: 200, body: 'ok', contentType: 'text/plain' }),
+    failureResponse: vi.fn().mockReturnValue({ httpStatus: 500, body: 'fail', contentType: 'text/plain' }),
+  };
+}
+
+function mkConn() {
+  return {
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+  };
+}
+
+function mkDeps() {
+  const conn = mkConn();
+  return {
+    conn,
+    pool: { getConnection: vi.fn().mockResolvedValue(conn) },
+    ordersRepo: {
+      insertOrder: vi.fn().mockResolvedValue(101),
+      findByOrderNo: vi.fn().mockResolvedValue(null),
+      findPendingByParent: vi.fn().mockResolvedValue(null),
+      listByParent: vi.fn().mockResolvedValue({ total: 0, rows: [] }),
+      expireStale: vi.fn().mockResolvedValue(0),
+      markPaidTx: vi.fn().mockResolvedValue(1),
+      setChannelResult: vi.fn().mockResolvedValue(undefined),
+      cancelPending: vi.fn().mockResolvedValue(1),
+    },
+    plansRepo: {
+      findActiveByCode: vi.fn().mockResolvedValue({
+        id: 1,
+        plan_code: 'month',
+        name: '月卡',
+        price_cents: 2000,
+        duration_days: 30,
+      }),
+    },
+    subscriptionsService: {
+      renewWithinTx: vi.fn().mockResolvedValue({ currentPeriodEnd: new Date() }),
+    },
+    wechatAdapter: mkAdapter('wechat'),
+    alipayAdapter: mkAdapter('alipay'),
+    mockAdapter: mkAdapter('mock'),
+  };
+}
+
+type Deps = ReturnType<typeof mkDeps>;
+
+const mkSvc = (d: Deps) =>
+  new BillingService(
+    d.pool as never,
+    d.ordersRepo as never,
+    d.plansRepo as never,
+    d.subscriptionsService as never,
+    d.wechatAdapter as never,
+    d.alipayAdapter as never,
+    d.mockAdapter as never,
+  );
+
+// RowDataPacket 自带 `constructor.name='RowDataPacket'` 品牌属性，plain 字面量无法满足
+// Partial<OrderRow> 的弱类型检查，override 参数里把它剔除（测试里从不覆盖它）。
+type OrderRowOverrides = Partial<Omit<OrderRow, 'constructor'>>;
+
+function mkOrder(over: OrderRowOverrides = {}): OrderRow {
+  return {
+    id: 11,
+    order_no: 'ORD1',
+    parent_id: 3,
+    plan_id: 1,
+    plan_snapshot: { planCode: 'month', name: '月卡', priceCents: 2000, durationDays: 30 },
+    amount_cents: 2000,
+    payment_status: 'pending',
+    channel: 'mock',
+    channel_trade_no: null,
+    channel_qr_content: null,
+    paid_at: null,
+    cancelled_at: null,
+    expires_at: new Date(Date.now() + 60 * MINUTE),
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...over,
+  } as OrderRow;
+}
+
+describe('BillingService.createOrder', () => {
+  it('套餐下架/不存在 -> NotFoundException 404 code=2005，不建单不调渠道', async () => {
+    const d = mkDeps();
+    d.plansRepo.findActiveByCode.mockResolvedValue(null);
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' })).rejects.toMatchObject({
+      status: 404,
+      response: { code: 2005 },
+    });
+    expect(d.ordersRepo.insertOrder).not.toHaveBeenCalled();
+    expect(d.mockAdapter.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('非法渠道（非 wechat/alipay，且非 test 环境的 mock）-> 1001', async () => {
+    const d = mkDeps();
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'paypal' })).rejects.toMatchObject({
+      status: 400,
+      response: { code: 1001 },
+    });
+    expect(d.plansRepo.findActiveByCode).not.toHaveBeenCalled();
+  });
+
+  it("NODE_ENV!=='test' 且未开 BILLING_USE_MOCK 时 channel='mock' 被拒 -> 1001", async () => {
+    const d = mkDeps();
+    const prev = process.env.NODE_ENV;
+    const prevMock = process.env.BILLING_USE_MOCK;
+    process.env.NODE_ENV = 'production';
+    delete process.env.BILLING_USE_MOCK;
+    try {
+      await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' })).rejects.toMatchObject({
+        response: { code: 1001 },
+      });
+    } finally {
+      process.env.NODE_ENV = prev;
+      if (prevMock !== undefined) process.env.BILLING_USE_MOCK = prevMock;
+    }
+    expect(d.ordersRepo.insertOrder).not.toHaveBeenCalled();
+  });
+
+  it('同套餐同渠道已有 pending -> 复用返回：不新建行、不调适配器、不回写', async () => {
+    const d = mkDeps();
+    const pending = mkOrder({ channel_qr_content: 'qr://mock' });
+    d.ordersRepo.findPendingByParent.mockResolvedValue(pending);
+    const view = await mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' });
+    expect(view.orderNo).toBe('ORD1');
+    expect(d.ordersRepo.insertOrder).not.toHaveBeenCalled();
+    expect(d.mockAdapter.createOrder).not.toHaveBeenCalled();
+    expect(d.ordersRepo.setChannelResult).not.toHaveBeenCalled();
+  });
+
+  it('已有 pending 但换套餐 -> 2002（防串单）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findPendingByParent.mockResolvedValue(mkOrder({ plan_snapshot: { planCode: 'year', name: '年卡', priceCents: 19800, durationDays: 365 } }));
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' })).rejects.toMatchObject({
+      response: { code: 2002 },
+    });
+    expect(d.ordersRepo.insertOrder).not.toHaveBeenCalled();
+  });
+
+  it('已有 pending 但换渠道 -> 2002（防串单）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findPendingByParent.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'alipay' })).rejects.toMatchObject({
+      response: { code: 2002 },
+    });
+  });
+
+  it('新建单：pending -> 建单 -> 调适配器 -> 回写 tradeNo/qrContent -> 返回视图', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ id: 101, order_no: 'ORD-GEN' }));
+    const before = Date.now();
+    const view = await mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' });
+
+    expect(d.ordersRepo.insertOrder).toHaveBeenCalledTimes(1);
+    const input = d.ordersRepo.insertOrder.mock.calls[0][0] as {
+      orderNo: string;
+      parentId: number;
+      planId: number;
+      planSnapshot: { planCode: string; name: string; priceCents: number; durationDays: number };
+      amountCents: number;
+      channel: string;
+      expiresAt: Date;
+    };
+    expect(input.orderNo).toMatch(/^ORD\d{14}\d{6}$/);
+    expect(input.parentId).toBe(3);
+    expect(input.planId).toBe(1);
+    expect(input.planSnapshot).toEqual({ planCode: 'month', name: '月卡', priceCents: 2000, durationDays: 30 });
+    expect(input.amountCents).toBe(2000); // 金额来自 DB 套餐行，不信任前端
+    expect(input.channel).toBe('mock');
+    // 2h 超时（ORDER_PENDING_TTL_MINUTES=120），允许 1 分钟误差
+    expect(Math.abs(input.expiresAt.getTime() - (before + 120 * MINUTE))).toBeLessThan(MINUTE);
+
+    expect(d.mockAdapter.createOrder).toHaveBeenCalledWith({
+      orderNo: input.orderNo,
+      amountCents: 2000,
+      description: '月卡',
+    });
+    expect(d.ordersRepo.setChannelResult).toHaveBeenCalledWith(101, 'T-mock', 'qr://mock');
+    expect(view).toMatchObject({
+      orderNo: 'ORD-GEN',
+      paymentStatus: 'pending',
+      amountCents: 2000,
+      planName: '月卡',
+      channel: 'mock',
+    });
+    expect(view.createdAt).toBeTypeOf('string');
+    expect(view.paidAt).toBeNull();
+  });
+
+  it('order_no 撞 uk_orders_no -> 重试一次（两次单号不同），第二次成功', async () => {
+    const d = mkDeps();
+    d.ordersRepo.insertOrder
+      .mockRejectedValueOnce(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' }))
+      .mockResolvedValueOnce(102);
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ id: 102 }));
+    await mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' });
+    expect(d.ordersRepo.insertOrder).toHaveBeenCalledTimes(2);
+    const no1 = (d.ordersRepo.insertOrder.mock.calls[0][0] as { orderNo: string }).orderNo;
+    const no2 = (d.ordersRepo.insertOrder.mock.calls[1][0] as { orderNo: string }).orderNo;
+    expect(no1).not.toBe(no2);
+  });
+
+  it('order_no 连撞两次 -> 向外抛（只重试一次）', async () => {
+    const d = mkDeps();
+    const dup = Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' });
+    d.ordersRepo.insertOrder.mockRejectedValue(dup);
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' })).rejects.toBe(dup);
+    expect(d.ordersRepo.insertOrder).toHaveBeenCalledTimes(2);
+  });
+
+  it('适配器下单抛 2003 -> 原样透传（订单保留 pending，无回写）', async () => {
+    const d = mkDeps();
+    d.mockAdapter.createOrder.mockRejectedValue(new HttpException({ code: 2003, message: '支付渠道异常' }, 503));
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' })).rejects.toMatchObject({
+      status: 503,
+      response: { code: 2003 },
+    });
+    expect(d.ordersRepo.insertOrder).toHaveBeenCalledTimes(1); // 订单保留 pending，可取消/等超时后重下
+    expect(d.ordersRepo.setChannelResult).not.toHaveBeenCalled();
+  });
+
+  it('适配器抛非 HttpException -> 包装成 503/2003', async () => {
+    const d = mkDeps();
+    d.mockAdapter.createOrder.mockRejectedValue(new Error('socket hang up'));
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'mock' })).rejects.toMatchObject({
+      status: 503,
+      response: { code: 2003 },
+    });
+  });
+});
+
+describe('BillingService.finalizePaidOrder（事务骨架）', () => {
+  it('markPaidTx 影响行 1 -> renewWithinTx 同 conn 调用 -> COMMIT -> paid；release 必达', async () => {
+    const d = mkDeps();
+    const now = new Date('2026-09-29T10:00:00.000Z');
+    const result = await mkSvc(d).finalizePaidOrder(mkOrder(), 'T-EXT', now);
+    expect(result).toBe('paid');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T-EXT', now);
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+    expect(d.conn.beginTransaction).toHaveBeenCalledTimes(1);
+    expect(d.conn.commit).toHaveBeenCalledTimes(1);
+    expect(d.conn.rollback).not.toHaveBeenCalled();
+    expect(d.conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('markPaidTx 影响行 0（并发已终态）-> ROLLBACK、不续期 -> duplicate', async () => {
+    const d = mkDeps();
+    d.ordersRepo.markPaidTx.mockResolvedValue(0);
+    const result = await mkSvc(d).finalizePaidOrder(mkOrder(), 'T-EXT');
+    expect(result).toBe('duplicate');
+    expect(d.conn.rollback).toHaveBeenCalledTimes(1);
+    expect(d.conn.commit).not.toHaveBeenCalled();
+    expect(d.subscriptionsService.renewWithinTx).not.toHaveBeenCalled();
+    expect(d.conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('续期抛错 -> ROLLBACK 并原样上抛（订单与订阅同生共死）', async () => {
+    const d = mkDeps();
+    d.subscriptionsService.renewWithinTx.mockRejectedValue(new Error('renew failed'));
+    await expect(mkSvc(d).finalizePaidOrder(mkOrder(), 'T-EXT')).rejects.toThrow('renew failed');
+    expect(d.conn.rollback).toHaveBeenCalledTimes(1);
+    expect(d.conn.commit).not.toHaveBeenCalled();
+    expect(d.conn.release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('BillingService.handleCallback', () => {
+  const call = (d: Deps, channel = 'mock') =>
+    mkSvc(d).handleCallback(channel, { 'content-type': 'application/json' }, Buffer.from('{}'));
+
+  it('验签/解析抛错 -> failureResponse，不碰库', async () => {
+    const d = mkDeps();
+    d.mockAdapter.verifyCallback.mockRejectedValue(new Error('bad signature'));
+    const res = await call(d);
+    expect(res).toEqual({ httpStatus: 500, body: 'fail', contentType: 'text/plain' });
+    expect(d.mockAdapter.failureResponse).toHaveBeenCalled();
+    expect(d.ordersRepo.findByOrderNo).not.toHaveBeenCalled();
+  });
+
+  it('订单不存在 -> failureResponse', async () => {
+    const d = mkDeps();
+    await call(d);
+    expect(d.mockAdapter.failureResponse).toHaveBeenCalled();
+    expect(d.mockAdapter.successResponse).not.toHaveBeenCalled();
+  });
+
+  it('order.channel 与回调渠道不符 -> failureResponse（防串单）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+    await call(d, 'mock');
+    expect(d.mockAdapter.failureResponse).toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('金额不符 -> warn 留痕 + 不 finalize + failureResponse', async () => {
+    const d = mkDeps();
+    d.mockAdapter.verifyCallback.mockResolvedValue({ orderNo: 'ORD1', tradeNo: 'T1', paid: true, amountCents: 999 });
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    await call(d);
+    expect(d.mockAdapter.failureResponse).toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+    expect(d.subscriptionsService.renewWithinTx).not.toHaveBeenCalled();
+  });
+
+  it('非支付通知（paid=false）-> successResponse 确认收到，不 finalize', async () => {
+    const d = mkDeps();
+    d.mockAdapter.verifyCallback.mockResolvedValue({ orderNo: 'ORD1', tradeNo: 'T1', paid: false, amountCents: 2000 });
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    await call(d);
+    expect(d.mockAdapter.successResponse).toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('已 paid 订单重复通知 -> successResponse 幂等，不再 finalize', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid' }));
+    await call(d);
+    expect(d.mockAdapter.successResponse).toHaveBeenCalled();
+    expect(d.pool.getConnection).not.toHaveBeenCalled();
+  });
+
+  it('cancelled/expired 终态订单收到支付回调 -> failureResponse（不入账，人工介入）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'cancelled' }));
+    await call(d);
+    expect(d.mockAdapter.failureResponse).toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('pending + 支付成功 -> finalize 事务（同 conn 续期）-> successResponse', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    const res = await call(d);
+    expect(d.mockAdapter.successResponse).toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T1', expect.any(Date));
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+    expect(d.conn.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('finalize 返回 duplicate（并发竞态）-> 仍 successResponse（幂等）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.ordersRepo.markPaidTx.mockResolvedValue(0);
+    await call(d);
+    expect(d.mockAdapter.successResponse).toHaveBeenCalled();
+  });
+});
+
+describe('BillingService.confirmPaid', () => {
+  it('入口先惰性翻转 expireStale，再找单', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid' }));
+    await mkSvc(d).confirmPaid(3, 'ORD1');
+    expect(d.ordersRepo.expireStale).toHaveBeenCalled();
+    expect(d.ordersRepo.expireStale.mock.invocationCallOrder[0]).toBeLessThan(
+      d.ordersRepo.findByOrderNo.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('查单已支付 -> finalize 事务 -> paid', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.mockAdapter.queryOrder.mockResolvedValue({ paid: true, tradeNo: 'T-Q', amountCents: 2000 });
+    const result = await mkSvc(d).confirmPaid(3, 'ORD1');
+    expect(result).toBe('paid');
+    expect(d.mockAdapter.queryOrder).toHaveBeenCalledWith('ORD1');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T-Q', expect.any(Date));
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+  });
+
+  it('查单未支付 -> HttpException 400 code=2004，不 finalize', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.mockAdapter.queryOrder.mockResolvedValue({ paid: false, tradeNo: null, amountCents: null });
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1')).rejects.toMatchObject({
+      status: 400,
+      response: { code: 2004 },
+    });
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('查单金额与订单不符 -> 2004 且不 finalize', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.mockAdapter.queryOrder.mockResolvedValue({ paid: true, tradeNo: 'T-Q', amountCents: 1 });
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1')).rejects.toMatchObject({ response: { code: 2004 } });
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('订单已 paid -> 直接 duplicate（幂等，不再调渠道）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid' }));
+    const result = await mkSvc(d).confirmPaid(3, 'ORD1');
+    expect(result).toBe('duplicate');
+    expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+  });
+
+  it('cancelled/expired -> 2002', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'expired' }));
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1')).rejects.toMatchObject({ response: { code: 2002 } });
+    expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+  });
+
+  it('不存在或他人订单 -> 403 code=1005', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(null);
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1')).rejects.toMatchObject({
+      status: 403,
+      response: { code: 1005 },
+    });
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ parent_id: 999 }));
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1')).rejects.toMatchObject({ response: { code: 1005 } });
+  });
+});
+
+describe('BillingService.cancel', () => {
+  it('pending -> 置 cancelled 并返回视图（cancelledAt 落库）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    const view = await mkSvc(d).cancel(3, 'ORD1');
+    expect(view.paymentStatus).toBe('cancelled');
+    expect(d.ordersRepo.cancelPending).toHaveBeenCalledWith(11, expect.any(Date));
+  });
+
+  it('非 pending（paid）-> 2002，不动库', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid' }));
+    await expect(mkSvc(d).cancel(3, 'ORD1')).rejects.toMatchObject({ response: { code: 2002 } });
+    expect(d.ordersRepo.cancelPending).not.toHaveBeenCalled();
+  });
+
+  it('他人订单 -> 1005', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ parent_id: 999 }));
+    await expect(mkSvc(d).cancel(3, 'ORD1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('并发竞态：cancelPending 影响 0 行 -> 2002', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.ordersRepo.cancelPending.mockResolvedValue(0);
+    await expect(mkSvc(d).cancel(3, 'ORD1')).rejects.toMatchObject({ response: { code: 2002 } });
+  });
+});
+
+describe('BillingService.adminMarkPaid', () => {
+  it('pending -> finalize，tradeNo=manual-{orderNo}', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    const result = await mkSvc(d).adminMarkPaid('ORD1');
+    expect(result).toBe('paid');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'manual-ORD1', expect.any(Date));
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+  });
+
+  it('已 paid -> duplicate（幂等成功），不再进事务', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid' }));
+    const result = await mkSvc(d).adminMarkPaid('ORD1');
+    expect(result).toBe('duplicate');
+    expect(d.pool.getConnection).not.toHaveBeenCalled();
+  });
+
+  it('cancelled/expired -> 2002', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'expired' }));
+    await expect(mkSvc(d).adminMarkPaid('ORD1')).rejects.toMatchObject({ response: { code: 2002 } });
+  });
+
+  it('订单不存在 -> NotFoundException 404', async () => {
+    const d = mkDeps();
+    await expect(mkSvc(d).adminMarkPaid('ORDX')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('BillingService.getOrder / listOrders（读时惰性翻转 + 分页）', () => {
+  it('getOrder：先 expireStale 再找单；返回 OrderDetailView 含 qrContent/redirectUrl', async () => {
+    const d = mkDeps();
+    const created = new Date('2026-09-29T08:00:00.000Z');
+    const expires = new Date('2026-09-29T10:00:00.000Z');
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ channel_qr_content: 'qr://mock', created_at: created, expires_at: expires }),
+    );
+    const detail = await mkSvc(d).getOrder(3, 'ORD1');
+    expect(d.ordersRepo.expireStale.mock.invocationCallOrder[0]).toBeLessThan(
+      d.ordersRepo.findByOrderNo.mock.invocationCallOrder[0],
+    );
+    expect(detail).toEqual({
+      orderNo: 'ORD1',
+      paymentStatus: 'pending',
+      amountCents: 2000,
+      planName: '月卡',
+      channel: 'mock',
+      createdAt: created.toISOString(),
+      expiresAt: expires.toISOString(),
+      paidAt: null,
+      qrContent: 'qr://mock',
+      redirectUrl: null,
+    });
+  });
+
+  it('getOrder：他人订单 -> 1005', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ parent_id: 999 }));
+    await expect(mkSvc(d).getOrder(3, 'ORD1')).rejects.toMatchObject({ response: { code: 1005 } });
+  });
+
+  it('listOrders：先 expireStale；默认 page=1/pageSize=20 透传 repo', async () => {
+    const d = mkDeps();
+    d.ordersRepo.listByParent.mockResolvedValue({
+      total: 1,
+      rows: [mkOrder({ payment_status: 'paid', paid_at: new Date('2026-09-29T09:00:00.000Z') })],
+    });
+    const res = await mkSvc(d).listOrders(3);
+    expect(d.ordersRepo.expireStale.mock.invocationCallOrder[0]).toBeLessThan(
+      d.ordersRepo.listByParent.mock.invocationCallOrder[0],
+    );
+    expect(d.ordersRepo.listByParent).toHaveBeenCalledWith(3, 1, 20);
+    expect(res).toMatchObject({ total: 1, page: 1, pageSize: 20 });
+    expect(res.items[0]).toMatchObject({
+      orderNo: 'ORD1',
+      paymentStatus: 'paid',
+      paidAt: new Date('2026-09-29T09:00:00.000Z').toISOString(),
+    });
+    expect(res.items[0]).not.toHaveProperty('qrContent');
+  });
+
+  it('listOrders：page/pageSize 显式传参透传', async () => {
+    const d = mkDeps();
+    await mkSvc(d).listOrders(3, 2, 50);
+    expect(d.ordersRepo.listByParent).toHaveBeenCalledWith(3, 2, 50);
+  });
+
+  it.each([
+    ['page=0', 0, 20],
+    ['page=1.5', 1.5, 20],
+    ['pageSize=0', 1, 0],
+    ['pageSize=51', 1, 51],
+    ['pageSize=2.5', 1, 2.5],
+  ])('listOrders 越界（%s）-> 400/1001 不钳制（仓规）', async (_name, page, pageSize) => {
+    const d = mkDeps();
+    await expect(mkSvc(d).listOrders(3, page as number, pageSize as number)).rejects.toMatchObject({
+      status: 400,
+      response: { code: 1001 },
+    });
+    expect(d.ordersRepo.listByParent).not.toHaveBeenCalled();
+  });
+});

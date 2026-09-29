@@ -6,6 +6,8 @@ import { BillingModule } from './billing.module.js';
 import { DatabaseModule } from '../../database/database.module.js';
 import { QuotaController } from './quota.controller.js';
 import { SubscriptionsService } from './subscriptions.service.js';
+import { BillingService } from './billing.service.js';
+import { OrdersRepository } from '../../database/repositories/orders.repo.js';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 
@@ -68,6 +70,18 @@ describe('BillingModule 装配', () => {
     expect(app.get(SubscriptionsService)).toBeInstanceOf(SubscriptionsService);
     expect(app.get(FamilySubscriptionsRepository)).toBeInstanceOf(FamilySubscriptionsRepository);
     expect(app.get(SubscriptionPlansRepository)).toBeInstanceOf(SubscriptionPlansRepository);
+  });
+
+  it('批②：BillingService / OrdersRepository 可解析（BillingService 全部依赖显式 @Inject，不靠 design:paramtypes）', async () => {
+    const app = await compileApp();
+    expect(app.get(BillingService)).toBeInstanceOf(BillingService);
+    expect(app.get(OrdersRepository)).toBeInstanceOf(OrdersRepository);
+    const svc = app.get(BillingService) as unknown as Record<string, unknown>;
+    expect(svc.ordersRepo).toBeInstanceOf(OrdersRepository);
+    expect(svc.subscriptionsService).toBeInstanceOf(SubscriptionsService);
+    expect(svc.wechatAdapter).toBeInstanceOf(Object); // useFactory 构造的三适配器都已注入
+    expect(svc.alipayAdapter).toBeInstanceOf(Object);
+    expect(svc.mockAdapter).toBeInstanceOf(Object);
   });
 
   it('controller 的 service 依赖由容器注入（同一单例，不是游离实例）', async () => {

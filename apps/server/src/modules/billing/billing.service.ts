@@ -1,0 +1,371 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import type { Pool } from 'mysql2/promise';
+import { OrdersRepository, parseOrderSnapshot } from '../../database/repositories/orders.repo.js';
+import type { OrderPlanSnapshot, OrderRow } from '../../database/repositories/orders.repo.js';
+import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
+import { SubscriptionsService } from './subscriptions.service.js';
+import { ORDER_PENDING_TTL_MINUTES } from './billing.config.js';
+import type { CallbackPayload, ChannelHttpResponse, ChannelOrderResult, PayChannelAdapter } from './pay-channel.types.js';
+
+/**
+ * 适配器 DI token：三个适配器**故意没有** @Injectable()（构造参数是原语/env，
+ * emitDecoratorMetadata 会把它标成 Object，Nest 按 token 找不到即启动失败——CLAUDE.md DI 坑）。
+ * 模块里用 useFactory 显式构造（billing.module.ts），这里只声明 token 供注入与装配对齐。
+ */
+export const WECHAT_PAY_ADAPTER = 'WECHAT_PAY_ADAPTER';
+export const ALIPAY_PAY_ADAPTER = 'ALIPAY_PAY_ADAPTER';
+export const MOCK_PAY_ADAPTER = 'MOCK_PAY_ADAPTER';
+
+export interface OrderView {
+  orderNo: string;
+  paymentStatus: 'pending' | 'paid' | 'cancelled' | 'expired';
+  amountCents: number;
+  planName: string;
+  channel: string;
+  createdAt: string;
+  expiresAt: string;
+  paidAt: string | null;
+}
+
+/** 订单详情（支付弹层用）：比列表多二维码/跳转入口两个字段。 */
+export interface OrderDetailView extends OrderView {
+  qrContent: string | null;
+  redirectUrl: string | null;
+}
+
+export interface OrderListResult {
+  items: OrderView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+const ISO = (d: Date | null): string | null => (d != null ? d.toISOString() : null);
+
+/** `ORD` + yyyyMMddHHmmss + 6 位随机数字（23 位，uk_orders_no VARCHAR(32) 内）。 */
+export function buildOrderNo(now: Date): string {
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  const ts =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `ORD${ts}${pad(Math.floor(Math.random() * 1_000_000), 6)}`;
+}
+
+function isDupEntry(err: unknown): boolean {
+  const e = err as { code?: string; errno?: number } | null;
+  return e?.code === 'ER_DUP_ENTRY' || e?.errno === 1062;
+}
+
+/**
+ * 订单状态机（批②核心，spec §5.2/§5.3）。
+ *
+ * - `pending → paid` 唯一入账路径是 {@link finalizePaidOrder}：单事务内
+ *   `markPaidTx`（原子条件更新）+ `renewWithinTx`（家庭订阅顺延），同生共死；
+ *   条件更新影响 0 行 = 并发已入账 → ROLLBACK 返回 'duplicate'，天然幂等。
+ * - 回调 / confirm-paid / admin mark-paid 三个入口都汇入 finalize，互为幂等兜底。
+ * - 错误码：2002 状态不允许 / 2003 渠道异常 / 2004 未确认支付 / 2005 套餐不存在。
+ */
+@Injectable()
+export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
+
+  constructor(
+    @Inject('DATABASE_POOL') private readonly pool: Pool,
+    @Inject(OrdersRepository) private readonly ordersRepo: OrdersRepository,
+    @Inject(SubscriptionPlansRepository) private readonly plansRepo: SubscriptionPlansRepository,
+    @Inject(SubscriptionsService) private readonly subscriptionsService: SubscriptionsService,
+    @Inject(WECHAT_PAY_ADAPTER) private readonly wechatAdapter: PayChannelAdapter,
+    @Inject(ALIPAY_PAY_ADAPTER) private readonly alipayAdapter: PayChannelAdapter,
+    @Inject(MOCK_PAY_ADAPTER) private readonly mockAdapter: PayChannelAdapter,
+  ) {}
+
+  // ---------- 下单 ----------
+
+  /**
+   * 家长下单（spec §5.2 POST /api/billing/orders）。
+   *
+   * 防串单：同家长已有 pending 时——同套餐同渠道 → 复用返回（不新建行、不调渠道）；
+   * 换套餐或换渠道 → 2002（先取消旧单或等 2h 超时）。渠道失败抛 2003，订单保留
+   * pending（可取消重下，不自动删行）。
+   */
+  async createOrder(parentId: number, input: { planCode: string; channel: string }): Promise<OrderView> {
+    const { planCode, channel } = input;
+    if (!this.isChannelAllowed(channel)) {
+      throw new BadRequestException({ code: 1001, message: '不支持的支付渠道' });
+    }
+
+    const plan = await this.plansRepo.findActiveByCode(planCode);
+    if (!plan) {
+      throw new NotFoundException({ code: 2005, message: '套餐不存在或已下架' });
+    }
+
+    const pending = await this.ordersRepo.findPendingByParent(parentId);
+    if (pending) {
+      const pendingSnap = parseOrderSnapshot(pending.plan_snapshot);
+      if (pendingSnap.planCode === planCode && pending.channel === channel) {
+        return this.toView(pending); // 复用：不重复下单、不重复向渠道要码
+      }
+      throw new BadRequestException({
+        code: 2002,
+        message: '已有进行中的支付订单，请先取消原订单或等待 2 小时超时',
+      });
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ORDER_PENDING_TTL_MINUTES * 60_000);
+    const snapshot: OrderPlanSnapshot = {
+      planCode: plan.plan_code,
+      name: plan.name,
+      priceCents: plan.price_cents,
+      durationDays: plan.duration_days,
+    };
+
+    // 撞 uk_orders_no 重试一次（同秒并发 + 随机段碰撞；再撞说明有别的异常，向外抛）
+    let orderNo = '';
+    let orderId = 0;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const candidate = buildOrderNo(now);
+      try {
+        orderId = await this.ordersRepo.insertOrder({
+          orderNo: candidate,
+          parentId,
+          planId: plan.id,
+          planSnapshot: snapshot,
+          amountCents: plan.price_cents,
+          channel,
+          expiresAt,
+        });
+        orderNo = candidate;
+        break;
+      } catch (err) {
+        if (attempt === 1 && isDupEntry(err)) continue;
+        throw err;
+      }
+    }
+
+    const adapter = this.resolveAdapter(channel);
+    let result: ChannelOrderResult;
+    try {
+      result = await adapter.createOrder({ orderNo, amountCents: plan.price_cents, description: plan.name });
+    } catch (err) {
+      if (err instanceof HttpException) throw err; // 适配器自带 503/2003 语义，原样透传
+      this.logger.error(`渠道下单失败 orderNo=${orderNo}: ${err}`);
+      throw new HttpException({ code: 2003, message: '支付渠道异常' }, 503);
+    }
+    await this.ordersRepo.setChannelResult(orderId, result.tradeNo, result.qrContent);
+
+    const row = await this.ordersRepo.findByOrderNo(orderNo);
+    return this.toView(row!); // 同一请求内刚写入，必存在
+  }
+
+  // ---------- 查询 ----------
+
+  async getOrder(parentId: number, orderNo: string): Promise<OrderDetailView> {
+    await this.ordersRepo.expireStale(); // 读时惰性翻转
+    const order = await this.requireOwnedOrder(parentId, orderNo);
+    return { ...this.toView(order), qrContent: order.channel_qr_content, redirectUrl: null };
+  }
+
+  async listOrders(parentId: number, page = 1, pageSize = 20): Promise<OrderListResult> {
+    // 越界 400/1001 不钳制（仓规）
+    if (!Number.isInteger(page) || page < 1) {
+      throw new BadRequestException({ code: 1001, message: 'page 必须是正整数' });
+    }
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 50) {
+      throw new BadRequestException({ code: 1001, message: 'pageSize 必须是 1..50 的整数' });
+    }
+    await this.ordersRepo.expireStale(); // 读时惰性翻转
+    const { total, rows } = await this.ordersRepo.listByParent(parentId, page, pageSize);
+    return { items: rows.map((r) => this.toView(r)), total, page, pageSize };
+  }
+
+  // ---------- 状态迁移（家长侧） ----------
+
+  async cancel(parentId: number, orderNo: string): Promise<OrderView> {
+    const order = await this.requireOwnedOrder(parentId, orderNo);
+    if (order.payment_status !== 'pending') {
+      throw new BadRequestException({ code: 2002, message: '订单状态不允许取消' });
+    }
+    const affected = await this.ordersRepo.cancelPending(order.id, new Date());
+    if (affected === 0) {
+      // 并发竞态：读时还是 pending，写前已被回调/查单终态化
+      throw new BadRequestException({ code: 2002, message: '订单状态不允许取消' });
+    }
+    return { ...this.toView(order), paymentStatus: 'cancelled' };
+  }
+
+  /**
+   * 「我已付款」兜底：家长点按钮后主动查渠道。已支付 → finalize；未支付 → 2004
+   * （前端提示稍后再试）；渠道异常 → 2003（适配器自抛）。
+   */
+  async confirmPaid(parentId: number, orderNo: string): Promise<'paid' | 'duplicate'> {
+    await this.ordersRepo.expireStale(); // 读时惰性翻转
+    const order = await this.requireOwnedOrder(parentId, orderNo);
+    if (order.payment_status === 'paid') return 'duplicate';
+    if (order.payment_status !== 'pending') {
+      throw new BadRequestException({ code: 2002, message: '订单状态不允许该操作' });
+    }
+
+    const adapter = this.resolveAdapter(order.channel);
+    const q = await adapter.queryOrder(order.order_no);
+    if (!q.paid) {
+      throw new BadRequestException({ code: 2004, message: '渠道尚未确认支付，请稍后再试' });
+    }
+    if (q.amountCents != null && q.amountCents !== order.amount_cents) {
+      this.logger.warn(
+        `[billing] 查单金额不符：orderNo=${order.order_no} 渠道报 ${q.amountCents}，订单 ${order.amount_cents}，拒绝入账（人工介入）`,
+      );
+      throw new BadRequestException({ code: 2004, message: '渠道金额与订单不符，未确认支付' });
+    }
+    return this.finalizePaidOrder(order, q.tradeNo ?? order.order_no);
+  }
+
+  // ---------- 状态迁移（回调 / admin） ----------
+
+  /**
+   * 渠道异步回调（spec §5.2 POST /api/billing/callback/{channel}，免 JWT）。
+   * 永远给渠道一个明确应答（success/failure），验签/找单/串单/金额四道闸全过才入账。
+   */
+  async handleCallback(
+    channel: string,
+    headers: Record<string, string | string[] | undefined>,
+    rawBody: Buffer,
+  ): Promise<ChannelHttpResponse> {
+    let adapter: PayChannelAdapter;
+    try {
+      adapter = this.resolveAdapter(channel);
+    } catch {
+      // 未知渠道：没有适配器就没有它的应答格式，返回 500 文本让渠道侧重试/告警
+      return { httpStatus: 500, body: 'unknown channel', contentType: 'text/plain' };
+    }
+
+    let payload: CallbackPayload;
+    try {
+      payload = await adapter.verifyCallback(headers, rawBody);
+    } catch (err) {
+      this.logger.warn(`[billing] 回调验签/解析失败 channel=${channel}: ${err}`);
+      return adapter.failureResponse('验签失败');
+    }
+
+    const order = await this.ordersRepo.findByOrderNo(payload.orderNo);
+    if (!order) return adapter.failureResponse('订单不存在');
+    if (order.channel !== channel) return adapter.failureResponse('订单渠道不符');
+
+    if (payload.amountCents !== order.amount_cents) {
+      // 金额不符：不入账。本批无 alert 表，logger.warn 即 admin 侧留痕，人工对账介入
+      this.logger.warn(
+        `[billing] 回调金额不符：orderNo=${order.order_no} 渠道报 ${payload.amountCents}，订单 ${order.amount_cents}，拒绝入账（人工介入）`,
+      );
+      return adapter.failureResponse('金额不符');
+    }
+
+    if (!payload.paid) return adapter.successResponse(); // 非支付成功通知：确认收到即可
+    if (order.payment_status === 'paid') return adapter.successResponse(); // 重复通知，幂等
+    if (order.payment_status !== 'pending') {
+      this.logger.warn(
+        `[billing] 终态订单收到支付回调：orderNo=${order.order_no} status=${order.payment_status}（人工核对是否需线下处理）`,
+      );
+      return adapter.failureResponse('订单状态不允许');
+    }
+
+    await this.finalizePaidOrder(order, payload.tradeNo);
+    return adapter.successResponse(); // 'paid' 与并发 'duplicate' 都算成功应答
+  }
+
+  /** admin 人工兜底（线下收款）：channel 不变，tradeNo 用 `manual-{orderNo}` 标记来源。 */
+  async adminMarkPaid(orderNo: string): Promise<'paid' | 'duplicate'> {
+    const order = await this.ordersRepo.findByOrderNo(orderNo);
+    if (!order) throw new NotFoundException({ code: 1005, message: '订单不存在' });
+    if (order.payment_status === 'paid') return 'duplicate'; // 幂等成功
+    if (order.payment_status !== 'pending') {
+      throw new BadRequestException({ code: 2002, message: '订单状态不允许该操作' });
+    }
+    return this.finalizePaidOrder(order, `manual-${order.order_no}`);
+  }
+
+  // ---------- 核心：入账事务 ----------
+
+  /**
+   * 单事务入账（brief Step 2 骨架）：`markPaidTx` 条件更新（影响 0 = 并发已入账）
+   * → ROLLBACK 返回 'duplicate'；否则同事务续期家庭订阅后 COMMIT。
+   * 订单与订阅同生共死，任何一步失败整体回滚。
+   */
+  async finalizePaidOrder(order: OrderRow, tradeNo: string, now: Date = new Date()): Promise<'paid' | 'duplicate'> {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const affected = await this.ordersRepo.markPaidTx(conn, order.id, tradeNo, now);
+      if (affected === 0) {
+        await conn.rollback();
+        return 'duplicate';
+      }
+      const snap = parseOrderSnapshot(order.plan_snapshot);
+      await this.subscriptionsService.renewWithinTx(conn, order.parent_id, snap.planCode, snap.durationDays);
+      await conn.commit();
+      return 'paid';
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  }
+
+  // ---------- 内部 ----------
+
+  /**
+   * 渠道选用：'mock' 仅在 `NODE_ENV==='test'` 或 `BILLING_USE_MOCK==='1'` 时放行
+   * （且只解析到 MockPayAdapter）；真实下单只允许 wechat/alipay。
+   */
+  private isChannelAllowed(channel: string): boolean {
+    if (channel === 'wechat' || channel === 'alipay') return true;
+    if (channel === 'mock') {
+      return process.env.NODE_ENV === 'test' || process.env.BILLING_USE_MOCK === '1';
+    }
+    return false;
+  }
+
+  private resolveAdapter(channel: string): PayChannelAdapter {
+    switch (channel) {
+      case 'wechat':
+        return this.wechatAdapter;
+      case 'alipay':
+        return this.alipayAdapter;
+      case 'mock':
+        return this.mockAdapter;
+      default:
+        throw new HttpException({ code: 2003, message: `未知支付渠道：${channel}` }, 503);
+    }
+  }
+
+  /** 归属校验：不存在与不属于同一应答（不泄露订单存在性），403/1005 与 RolesGuard 同码。 */
+  private async requireOwnedOrder(parentId: number, orderNo: string): Promise<OrderRow> {
+    const order = await this.ordersRepo.findByOrderNo(orderNo);
+    if (!order || order.parent_id !== parentId) {
+      throw new ForbiddenException({ code: 1005, message: '无权访问该订单' });
+    }
+    return order;
+  }
+
+  private toView(row: OrderRow): OrderView {
+    const snap = parseOrderSnapshot(row.plan_snapshot);
+    return {
+      orderNo: row.order_no,
+      paymentStatus: row.payment_status,
+      amountCents: row.amount_cents,
+      planName: snap.name,
+      channel: row.channel,
+      createdAt: ISO(row.created_at)!,
+      expiresAt: ISO(row.expires_at)!,
+      paidAt: ISO(row.paid_at),
+    };
+  }
+}

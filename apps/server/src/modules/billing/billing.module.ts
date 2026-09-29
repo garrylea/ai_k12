@@ -3,21 +3,43 @@ import { SubscriptionsService } from './subscriptions.service.js';
 import { QuotaController } from './quota.controller.js';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
+import { OrdersRepository } from '../../database/repositories/orders.repo.js';
+import { BillingService, WECHAT_PAY_ADAPTER, ALIPAY_PAY_ADAPTER, MOCK_PAY_ADAPTER } from './billing.service.js';
+import { WechatNativePayAdapter } from './adapters/wechat-native-pay.adapter.js';
+import { AlipayQrPayAdapter } from './adapters/alipay-qr-pay.adapter.js';
+import { MockPayAdapter } from './adapters/mock-pay.adapter.js';
 
 /**
- * 订阅收费模块（批①）。
+ * 订阅收费模块（批① + 批②订单状态机）。
  *
- * - `providers`：`SubscriptionsService` + 其依赖的两个仓储（跟随 points.module 的惯例：
- *   仓储逐个注册为 provider，`@Inject('DATABASE_POOL')` 由全局 DatabaseModule 提供，
+ * - `providers`：`SubscriptionsService` / `BillingService` 及其仓储依赖（跟随 points.module
+ *   的惯例：仓储逐个注册为 provider，`@Inject('DATABASE_POOL')` 由全局 DatabaseModule 提供，
  *   这里不需要 import 它）。
- * - `exports`：`SubscriptionsService`（AuthModule 的注册送试用钩子、批② 的 finalize 事务
- *   都要注入）与两个仓储（批② 的订单/支付模块直接复用，避免重复注册两个实例）。
+ * - 三个支付适配器**故意没有** @Injectable()（构造参数是原语/env，CLAUDE.md 的 DI 坑），
+ *   用 useFactory 显式构造；选用开关（'mock' 仅 test/BILLING_USE_MOCK）在 BillingService。
+ * - `exports`：`SubscriptionsService`（AuthModule 注册送试用钩子）与 `BillingService` /
+ *   `OrdersRepository`（批③ 的 billing controller 消费），仓储复用避免重复注册实例。
  * - `controllers`：`QuotaController`（GET /api/quota/subscription；批② 的 /plans、/usage
  *   落在同一个 controller，漏注册它端点会静默 404 —— `billing.module.test.ts` 有装配钉子）。
  */
 @Module({
   controllers: [QuotaController],
-  providers: [SubscriptionsService, FamilySubscriptionsRepository, SubscriptionPlansRepository],
-  exports: [SubscriptionsService, FamilySubscriptionsRepository, SubscriptionPlansRepository],
+  providers: [
+    SubscriptionsService,
+    FamilySubscriptionsRepository,
+    SubscriptionPlansRepository,
+    OrdersRepository,
+    { provide: WECHAT_PAY_ADAPTER, useFactory: () => new WechatNativePayAdapter() },
+    { provide: ALIPAY_PAY_ADAPTER, useFactory: () => new AlipayQrPayAdapter() },
+    { provide: MOCK_PAY_ADAPTER, useFactory: () => new MockPayAdapter(true) },
+    BillingService,
+  ],
+  exports: [
+    SubscriptionsService,
+    FamilySubscriptionsRepository,
+    SubscriptionPlansRepository,
+    OrdersRepository,
+    BillingService,
+  ],
 })
 export class BillingModule {}
