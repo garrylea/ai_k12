@@ -60,7 +60,9 @@ describe('MockPayAdapter', () => {
   });
 });
 
-describe('真实适配器骨架（Task 3 才实现）', () => {
+describe('空 env → 2003「支付渠道未配置」', () => {
+  // WechatNativePayAdapter（Task 2 已实现）与 AlipayQrPayAdapter（Task 3 骨架）：
+  // 空 env 下行为一致 —— 所有必需 env 缺失即抛 503/2003，不触网、不读文件。
   const cases: Array<[string, WechatNativePayAdapter | AlipayQrPayAdapter]> = [
     ['WechatNativePayAdapter', new WechatNativePayAdapter({} as NodeJS.ProcessEnv)],
     ['AlipayQrPayAdapter', new AlipayQrPayAdapter({} as NodeJS.ProcessEnv)],
