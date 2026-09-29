@@ -351,6 +351,23 @@ describe('AlipayQrPayAdapter', () => {
       delete fields.total_amount;
       await expect(adapter.verifyCallback({}, buildNotifyBody(fields))).rejects.toThrow('支付宝回调缺少 total_amount');
     });
+
+    it('app_id 与配置不符 → 抛「支付宝回调 app_id 不符」（官方四项校验之一，缺 app_id 同样抛）', async () => {
+      const adapter = new AlipayQrPayAdapter(ENV);
+      const mismatched = baseFields();
+      mismatched.app_id = '2021000999999999';
+      await expect(adapter.verifyCallback({}, buildNotifyBody(mismatched))).rejects.toThrow('支付宝回调 app_id 不符');
+      const missing = baseFields();
+      delete missing.app_id;
+      await expect(adapter.verifyCallback({}, buildNotifyBody(missing))).rejects.toThrow('支付宝回调 app_id 不符');
+    });
+
+    it('缺 trade_no → 抛「支付宝回调缺少 trade_no」（不得静默空串）', async () => {
+      const adapter = new AlipayQrPayAdapter(ENV);
+      const fields = baseFields();
+      delete fields.trade_no;
+      await expect(adapter.verifyCallback({}, buildNotifyBody(fields))).rejects.toThrow('支付宝回调缺少 trade_no');
+    });
   });
 
   describe('successResponse / failureResponse', () => {

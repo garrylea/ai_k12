@@ -303,15 +303,22 @@ export class AlipayQrPayAdapter implements PayChannelAdapter {
       throw new Error('支付宝回调验签失败');
     }
 
+    // 官方异步通知四项校验之 app_id：验签通过后再信任字段，app_id 必须与本应用配置一致
+    if (params.app_id !== this.appId) {
+      throw new Error('支付宝回调 app_id 不符');
+    }
     if (!params.out_trade_no) {
       throw new Error('支付宝回调缺少 out_trade_no');
     }
     if (!params.total_amount) {
       throw new Error('支付宝回调缺少 total_amount');
     }
+    if (!params.trade_no) {
+      throw new Error('支付宝回调缺少 trade_no');
+    }
     return {
       orderNo: params.out_trade_no,
-      tradeNo: params.trade_no ?? '',
+      tradeNo: params.trade_no,
       paid: params.trade_status === 'TRADE_SUCCESS' || params.trade_status === 'TRADE_FINISHED',
       amountCents: yuanToCents(params.total_amount),
     };
