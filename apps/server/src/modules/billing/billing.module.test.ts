@@ -12,6 +12,7 @@ import { SubscriptionsService } from './subscriptions.service.js';
 import { BillingService } from './billing.service.js';
 import { OrdersRepository } from '../../database/repositories/orders.repo.js';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
+import { SubscriptionAdjustmentsRepository } from '../../database/repositories/subscription-adjustments.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 import { LlmUsageRepository } from '../../database/repositories/llm-usage.repo.js';
 
@@ -37,15 +38,18 @@ describe('BillingModule 装配', () => {
    * 下面的用例照样会红 —— 钉子有效性不受影响。
    */
   Reflect.defineMetadata('design:paramtypes', [SubscriptionsService], QuotaController);
+  // 批④ Task 5：SubscriptionsService 增 adjustmentsRepo + pool（@Inject('DATABASE_POOL')，
+  // Pool 是接口 → tsc 产出 Object；Nest 按该参数的 @Inject token 解析，占位 Object 不参与匹配）
   Reflect.defineMetadata(
     'design:paramtypes',
-    [FamilySubscriptionsRepository, SubscriptionPlansRepository, LlmUsageRepository],
+    [FamilySubscriptionsRepository, SubscriptionPlansRepository, LlmUsageRepository, SubscriptionAdjustmentsRepository, Object],
     SubscriptionsService,
   );
   // 批② Task 5 的三个 controller：constructor 参数都是类类型，同样手工补 metadata
   Reflect.defineMetadata('design:paramtypes', [BillingService, SubscriptionsService], BillingController);
   Reflect.defineMetadata('design:paramtypes', [BillingService], BillingCallbackController);
-  Reflect.defineMetadata('design:paramtypes', [BillingService], AdminBillingController);
+  // 批④ Task 5：AdminBillingController 增 SubscriptionsService（家庭订阅管理三端点）
+  Reflect.defineMetadata('design:paramtypes', [BillingService, SubscriptionsService], AdminBillingController);
 
   const apps: INestApplication[] = [];
 
@@ -79,6 +83,13 @@ describe('BillingModule 装配', () => {
     expect(app.get(FamilySubscriptionsRepository)).toBeInstanceOf(FamilySubscriptionsRepository);
     expect(app.get(SubscriptionPlansRepository)).toBeInstanceOf(SubscriptionPlansRepository);
     expect(app.get(LlmUsageRepository)).toBeInstanceOf(LlmUsageRepository);
+  });
+
+  it('批④ Task 5：SubscriptionAdjustmentsRepository 可解析且注入 SubscriptionsService（漏注册 providers 时此用例必红）', async () => {
+    const app = await compileApp();
+    expect(app.get(SubscriptionAdjustmentsRepository)).toBeInstanceOf(SubscriptionAdjustmentsRepository);
+    const svc = app.get(SubscriptionsService) as unknown as Record<string, unknown>;
+    expect(svc.adjustmentsRepo).toBeInstanceOf(SubscriptionAdjustmentsRepository);
   });
 
   it('批②：BillingService / OrdersRepository 可解析（BillingService 全部依赖显式 @Inject，不靠 design:paramtypes）', async () => {

@@ -35,7 +35,12 @@ function makeCallbackController(handleCallback: ReturnType<typeof vi.fn>) {
 }
 
 function makeAdminController(service: Partial<Record<keyof BillingService, ReturnType<typeof vi.fn>>>) {
-  return new AdminBillingController(service as unknown as BillingService);
+  // 批④ Task 5：AdminBillingController 增 SubscriptionsService 依赖（家庭订阅管理三端点）；
+  // 本文件只钉 orders/claims 路由形状，subsService 传占位即可
+  return new AdminBillingController(
+    service as unknown as BillingService,
+    {} as unknown as SubscriptionsService,
+  );
 }
 
 const PARENT: JwtUser = { sub: 7, role: 'parent' };

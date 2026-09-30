@@ -5,6 +5,7 @@ import { BillingController } from './billing.controller.js';
 import { BillingCallbackController } from './billing-callback.controller.js';
 import { AdminBillingController } from './admin-billing.controller.js';
 import { FamilySubscriptionsRepository } from '../../database/repositories/family-subscriptions.repo.js';
+import { SubscriptionAdjustmentsRepository } from '../../database/repositories/subscription-adjustments.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 import { OrdersRepository } from '../../database/repositories/orders.repo.js';
 import { LlmUsageRepository } from '../../database/repositories/llm-usage.repo.js';
@@ -32,6 +33,7 @@ import { MockPayAdapter } from './adapters/mock-pay.adapter.js';
   providers: [
     SubscriptionsService,
     FamilySubscriptionsRepository,
+    SubscriptionAdjustmentsRepository,
     SubscriptionPlansRepository,
     OrdersRepository,
     LlmUsageRepository,
