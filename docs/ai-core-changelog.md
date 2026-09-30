@@ -8,6 +8,34 @@
 
 ---
 
+## 2026-09-30 · 订阅收费批③ Task 7 收尾 — 真渠道人工验收清单
+
+（订阅收费批③的自动化测试与类型检查已全绿：server 147 文件 / 1877 用例、web 100 文件 / 1015 用例、
+两端 tsc 零错误。以下事项**自动化测不了或只能用 Mock 测**，上线前必须用真渠道账号人工过一遍。）
+
+### 真渠道人工验收清单
+
+1. **微信 Native 真实下单扫码回调**：家长端订阅中心选套餐 → 微信渠道下单 → 弹出真二维码 →
+   真机微信扫码支付 → 回调到达后订单变 `paid`、`currentPeriodEnd` 顺延、支付弹层轮询感知关闭。
+2. **支付宝当面付同流程**：同上，渠道换支付宝（precreate 二维码）。
+3. **重复回调幂等**：同一渠道回调重放 ≥2 次（可用网关重试或抓包重放）——订单只 finalize 一次、
+   `trade_no` UNIQUE 生效、第二次回调仍应答 success（微信 `{"code":"SUCCESS"}` / 支付宝 `success`）。
+4. **金额篡改（沙箱）**：回调里改 `total_fee`/`amount` 与订单不符 → 验签或金额比对拒绝、
+   订单**不得**变 paid、渠道收 failure/500。
+5. **PC App 内完整订阅 + 锁定解锁流程**：Electron 壳里走完「订阅过期 → 学生端被 2001 门禁拦截 →
+   家长下单支付 → 订阅生效 → 门禁解除可继续学习」全链路（PC 内嵌页支付回调可达性一并验证）。
+6. **商户密钥 .env 配置项核对**（缺一即下单 2003）：
+   - **WXPAY_\* 7 项**：`WXPAY_MCHID` / `WXPAY_APPID` / `WXPAY_SERIAL_NO` /
+     `WXPAY_PRIVATE_KEY_PATH`（商户私钥） / `WXPAY_APIV3_KEY` / `WXPAY_PLATFORM_CERT_PATH`
+     （平台证书，验回调签） / `WXPAY_NOTIFY_URL`
+     （来源：`apps/server/src/modules/billing/adapters/wechat-native-pay.adapter.ts` 头注）
+   - **ALIPAY_\* 5 项**：`ALIPAY_APP_ID` / `ALIPAY_GATEWAY`（默认 `https://openapi.alipay.com/gateway`） /
+     `ALIPAY_APP_PRIVATE_KEY_PATH`（应用私钥，加签） /
+     `ALIPAY_ALIPAY_PUBLIC_KEY_PATH`（支付宝公钥，验回调签） / `ALIPAY_NOTIFY_URL`
+     （来源：`apps/server/src/modules/billing/adapters/alipay-qr-pay.adapter.ts` 头注）
+   - 注意两处密钥文件路径若给相对路径，以**后端进程 cwd**（`apps/server`）解析；
+     `WXPAY_NOTIFY_URL` / `ALIPAY_NOTIFY_URL` 必须是公网可达地址，内网穿透环境要在本清单 1/2 项时验证。
+
 ## 2026-09-28 · 文档复核刷新（③ 收尾后的一次全仓对账）
 
 起因：用户问「代码都推了吗 / 文档是否都同步」。逐条核对后发现下面几处**已经不对**，已就地改掉：
