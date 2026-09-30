@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 > 本计划在新 session 执行；进度台账续写 `/.superpowers/sdd/progress.md`（已有订阅收费前三批记录，本批新开节「批④」）。
 
-**Goal:** 家长扫码后零点击自动到账（pending 轮询时限频主动查渠道）；「我已付款」未获渠道确认时转管理员裁决（claim 状态机 + 管理端列表/角标/通过/驳回）；管理员全权管理试用与订阅天数（含审计表）。
+**Goal:** 家长扫码后零点击自动到账（真渠道）；线下转账渠道（个人微信收款 + 管理员裁决手工开通，当前主路径）（pending 轮询时限频主动查渠道）；「我已付款」未获渠道确认时转管理员裁决（claim 状态机 + 管理端列表/角标/通过/驳回）；管理员全权管理试用与订阅天数（含审计表）。
 
 **Architecture:** 自动查单是出站调用（本机部署形态下回调不可达的唯一到账途径），挂在既有订单详情轮询上、内存 Map 限频 10s/单；裁决复用 `finalizePaidOrder`（4b5bd64 后 markPaidTx 已放行 pending|expired）与 `adminMarkPaid`（adminId 留痕已有）；管理员调整走新审计表 `subscription_adjustments`。
 
@@ -96,7 +96,22 @@ private async maybeQueryChannel(order: OrderRow): Promise<void> {
 - [ ] **Step 3: admin controller 加 3 端点**：`GET /api/admin/billing/orders/claims?status=&page=&pageSize=`（@Roles('admin')，status 缺省 pending_review，非法值 400/1001）、`POST /api/admin/billing/orders/{orderNo}/claims/approve`、`POST .../claims/reject`（body 可带 reason）。**路由顺序**：`claims` 字面路径必须注册在 `:orderNo` 参数路由**之前**（Nest 路由匹配顺序，别被参数路由吞掉）
 - [ ] **Step 4: Commit** — `git commit -m "feat(billing): 支付裁决链路——claim 状态机 + admin 列表/通过/驳回"`
 
-### Task 4: 试用 / 订阅管理后端
+### Task 4: 线下转账渠道（家长侧 manual，当前主路径）
+
+**Files:**
+- Modify: `apps/server/src/modules/billing/billing.service.ts`（createOrder 放开 manual；confirmPayment 对 manual 跳过查单、note 必填直接落 claim）
+- Test: `billing.service.test.ts` 追加
+
+**Interfaces:**
+- Produces:
+  - `createOrder(parentId, {planCode, channel:'manual'})`：合法；**不走适配器**——订单 pending、`channel_trade_no/channel_qr_content` 均 NULL、无渠道调用；防串单/2h 超时同样适用。返回 OrderView `qrContent=null, redirectUrl=null`
+  - `confirmPayment` 对 manual 单：跳过渠道查单（无渠道可查），**note 必填**（空 → 400/1001「请填写转账备注」）→ 直接落 claim `pending_review`（note 存 claim_note）→ 抛 2004（message 同「渠道尚未确认，已转人工核实」，claimStatus='pending_review'）
+  - 自动查单（Task 2）天然跳过 manual（channel 白名单外）；admin approve 对 manual 单走既有 `adminMarkPaid`（markPaidTx 放行 pending|expired）
+- [ ] **Step 1: 失败测试**：manual 下单成功且无渠道调用、无二维码；manual confirm 无 note → 400/1001；note 有 → claim pending_review；manual 单 GET detail 不触发自动查单；manual 单 2h 超时 expired 照常
+- [ ] **Step 2: 跑失败 → 实现 → 通过**
+- [ ] **Step 3: Commit** — `git commit -m "feat(billing): 家长侧线下转账渠道（manual）——个人微信收款 + 裁决手工开通"`
+
+### Task 5: 试用 / 订阅管理后端
 
 **Files:**
 - Create: `apps/server/src/database/repositories/subscription-adjustments.repo.ts`
@@ -113,7 +128,7 @@ private async maybeQueryChannel(order: OrderRow): Promise<void> {
 - [ ] **Step 2: 跑失败 → 实现 → 通过**
 - [ ] **Step 3: Commit** — `git commit -m "feat(billing): 管理端试用/订阅天数管理（adjustments 审计）"`
 
-### Task 5: 前端——家长弹层 claim 三态
+### Task 6: 前端——家长弹层 claim 三态 + 线下转账
 
 **Files:**
 - Modify: `apps/web/src/services/api.ts`（`confirmBillingOrderPaid(orderNo, note?)`；`BillingOrderView` 加 `claimStatus?: 'pending_review'|'rejected'|'approved'|null`、`claimNote?`）
@@ -121,13 +136,15 @@ private async maybeQueryChannel(order: OrderRow): Promise<void> {
 - Test: 追加
 
 **Interfaces / 行为：**
-- 弹层按 `claimStatus` 三态：`pending_review` → 提示「已转人工核实，管理员确认后自动开通」+ 停用「我已付款」按钮；`rejected` → 「管理员未确认本次支付，请核实后重试」+ 重新点亮按钮 + 备注输入框（选填 ≤200 字，confirmBillingOrderPaid 第二参）；undefined → 现状不变
+- 渠道选择三选：微信支付 / 支付宝 / **线下转账**；选线下转账下单成功后弹层不放二维码，显示「请联系管理员付款（个人微信转账），付款后填写转账备注并点击我已付款」——备注输入框**必填**
+- 微信/支付宝渠道在商户号未配置时下单得到 2003「支付渠道未配置」——错误文案直接展示，引导改选线下转账
+- 弹层按 `claimStatus` 三态：`pending_review` → 提示「已转人工核实，管理员确认后自动开通」+ 停用「我已付款」按钮；`rejected` → 「管理员未确认本次支付，请核实后重试」+ 重新点亮按钮（备注框可改）；undefined → 现状不变
 - 订单历史 pending + claimStatus='pending_review' 行加「人工核实中」徽标
 
 - [ ] **Step 1: 失败测试**（三态渲染 + note 透传 + rejected 后按钮重亮）
 - [ ] **Step 2: 实现 → 通过** → **Commit** — `git commit -m "feat(web): 支付弹层裁决三态（转人工/驳回重试）"`
 
-### Task 6: 前端——管理端 AdminBillingPage + 角标
+### Task 7: 前端——管理端 AdminBillingPage + 角标
 
 **Files:**
 - Create: `apps/web/src/pages/admin/AdminBillingPage.tsx`（骨架参照 `AdminAlertsPage.tsx`）
@@ -141,7 +158,7 @@ private async maybeQueryChannel(order: OrderRow): Promise<void> {
 - [ ] **Step 1: 失败渲染测试**（claims 列表渲染/角标/approve 后行消失/reject 表单/family 调整表单）
 - [ ] **Step 2: 实现 → 通过** → **Commit** — `git commit -m "feat(web): 管理端订阅裁决与家庭订阅管理"`
 
-### Task 7: 收尾
+### Task 8: 收尾
 
 - [ ] **Step 1: 两端全量 + tsc**：`cd apps/server && npm test && npx tsc --noEmit`；`cd apps/web && npm test && npx tsc -b`
 - [ ] **Step 2: 文档同步**：API 文档 v4.16（§4.15 补 confirm-paid 的 note/claimStatus 与自动查单行为、§4.17 admin 加 5 端点、§9 日志）、openapi（+5 admin op + schema 变更）、PRD §7.7 注记补「人工裁决与试用管理已实现（2026-09-30）」

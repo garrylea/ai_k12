@@ -14,6 +14,8 @@
 | 4 | 终态单裁决（沿袭 4b5bd64 口径） | expired 单裁决通过可入账（`markPaidTx` 已放行 pending\|expired）；cancelled 单拒绝 |
 | 5 | 试用/订阅管理 | 管理员可查看每个家庭的订阅状态、**调整试用截止日**、**手动赠送/扣减订阅天数**，全部落审计表 |
 | 6 | 自动查单限频 | **进程内存 Map 限频**（每单 10s 一次渠道查询）；重启丢失可接受（重启后首次轮询多查一次渠道，无害） |
+| 7 | **付费接入主体（2026-09-30 用户裁决）** | 商户号需企业认证（300 元/次），**暂不接入真渠道**：主路径 = 家长选**「线下转账」渠道**下单 → 个人微信转账给管理员 → 点「我已付款」（必填备注）→ 管理员裁决通过 → 手工开通。微信/支付宝在线渠道作为商户号开通后的升级项，代码已就绪 |
+| 8 | 线下转账渠道（新增） | `POST /api/billing/orders` 的 `channel` 枚举放开 `manual` 给家长侧：不下适配器、无二维码；弹层显示「请联系管理员付款，付款后点击我已付款」；confirm 必填备注（转账人/方式）→ claim → 裁决。自动查单天然跳过 manual |
 
 ## 1. 数据模型变更（迁移 `tools/db/migrations/2026-09-30_billing_claims_and_adjustments.sql`，幂等，同步 schema.sql）
 
@@ -65,6 +67,14 @@
 - `PUT /api/admin/billing/families/{parentId}/trial` body `{trialEndsAt: ISO|null}` → 直接 UPDATE `family_subscriptions.trial_ends_at`（null=收回试用）；无行则 upsert；落 `subscription_adjustments(type='trial_set')`；响应返回新 StatusView
 - `POST /api/admin/billing/families/{parentId}/grant` body `{days: int, reason?}` → 事务内：按既有顺延规则调整 `current_period_end`（期内从期末顺延 / 过期从 now 起算；负数扣减，扣到 < now 则置 NULL=回到过期态）+ 落 `subscription_adjustments(type='grant_days')` + 同步冗余 `status` 列（`effectiveStatus` 推导）+ logger.log 审计；响应返回新 StatusView
 - 错误码：沿用 2xxx——2002（对 cancelled 单 approve/reject 之外的非法操作）、1002/1005（找不到/归属）；grant days=0 → 400/1001
+
+### 2.4 线下转账渠道（家长侧 manual，决策 7/8 的落地）
+
+- `POST /api/billing/orders` 的 `channel` 入参放开 `manual`（家长 JWT）：**不走适配器**——无 `channel_trade_no`/`channel_qr_content`，订单直接 `pending`；返回体 `qrContent/redirectUrl` 均为 null
+- `POST /orders/{orderNo}/confirm-paid` 对 manual 单：**跳过渠道查单**（无渠道可查），**备注必填**（body `note` ≤200 字，缺省 400/1001）→ 直接落 claim `pending_review` → 裁决（2.2）
+- 防串单 / 2h 超时 expired / 裁决通过 `markPaidTx`（pending|expired）对 manual 单同样适用；自动查单（2.1）天然跳过 manual
+- 前端：渠道选择三选（微信支付 / 支付宝 / **线下转账**）；选线下转账时弹层不放二维码，显示「请联系管理员付款（个人微信转账），付款后填写转账备注并点击我已付款」；微信/支付宝渠道在商户号未配置时下单会得到 2003「支付渠道未配置」，错误文案直接展示（引导改选线下转账）
+- 明确不做：管理员个人收款码图片展示（家长与管理员相识，第一版文字提示够用；收款码上传留待有 ICP 备案的正式部署）
 
 ## 3. 前端
 
