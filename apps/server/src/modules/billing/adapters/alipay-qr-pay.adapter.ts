@@ -60,8 +60,9 @@ export function alipayTimestamp(now: Date = new Date()): string {
  *   且取 `qr_code`；支付宝当面付**不返回预单号**，查单/回调都按 out_trade_no 定位，
  *   故 createOrder 返回 `tradeNo = out_trade_no`（types 已放宽为 string，Task 1 审定）。
  * - 查单 method=alipay.trade.query；`trade_status ∈ {TRADE_SUCCESS, TRADE_FINISHED}` 即已支付，
- *   取 trade_no / receipt_amount（元字符串转分）。交易不存在（ACQ.TRADE_NOT_EXIST）按未支付处理，
- *   让上层轮询自然等待，而不是把「还没付」当渠道故障抛 500。
+ *   取 trade_no / total_amount（元字符串转分；**不取 receipt_amount**——那是商家实收，
+ *   渠道优惠后会小于订单额，与回调路径/微信路径的订单金额口径不一致，终审必修 2）。交易不存在
+ *   （ACQ.TRADE_NOT_EXIST）按未支付处理，让上层轮询自然等待，而不是把「还没付」当渠道故障抛 500。
  * - 回调验签：form-encoded body；剔除 sign/sign_type 后按 key 升序拼串，
  *   用**支付宝公钥** RSA-SHA256 验 sign。支付宝 notify 无时间戳新鲜度字段，不做防重放校验
  *   （金额与订单一致性校验主责在 service 层，这里只透出 amountCents）。
@@ -262,9 +263,9 @@ export class AlipayQrPayAdapter implements PayChannelAdapter {
       throw new Error(`支付宝查单失败: HTTP ${httpStatus} ${text}`);
     }
     // 交易不存在 → 视为未支付（等用户扫码），不当渠道故障抛
-    let parsed: { alipay_trade_query_response?: { code?: string; sub_code?: string; trade_status?: string; trade_no?: string; receipt_amount?: string } };
+    let parsed: { alipay_trade_query_response?: { code?: string; sub_code?: string; trade_status?: string; trade_no?: string; total_amount?: string } };
     try {
-      parsed = JSON.parse(text) as { alipay_trade_query_response?: { code?: string; sub_code?: string; trade_status?: string; trade_no?: string; receipt_amount?: string } };
+      parsed = JSON.parse(text) as { alipay_trade_query_response?: { code?: string; sub_code?: string; trade_status?: string; trade_no?: string; total_amount?: string } };
     } catch {
       throw new Error(`支付宝响应不是合法 JSON: ${text}`);
     }
@@ -276,11 +277,12 @@ export class AlipayQrPayAdapter implements PayChannelAdapter {
       throw new Error(`支付宝查单业务失败: ${text}`);
     }
     const paid = biz.trade_status === 'TRADE_SUCCESS' || biz.trade_status === 'TRADE_FINISHED';
-    const receiptAmount = typeof biz.receipt_amount === 'string' ? biz.receipt_amount : null;
+    // total_amount（订单金额）而非 receipt_amount（商家实收，渠道优惠后偏小）——终审必修 2
+    const totalAmount = typeof biz.total_amount === 'string' ? biz.total_amount : null;
     return {
       paid,
       tradeNo: typeof biz.trade_no === 'string' && biz.trade_no ? biz.trade_no : null,
-      amountCents: receiptAmount !== null ? yuanToCents(receiptAmount) : null,
+      amountCents: totalAmount !== null ? yuanToCents(totalAmount) : null,
     };
   }
 

@@ -53,8 +53,9 @@ export function parseOrderSnapshot(raw: OrderRow['plan_snapshot']): OrderPlanSna
  * 订单（`orders`，schema 见 tools/db/schema.sql）。
  *
  * - `payment_status` 状态机：pending → paid | cancelled | expired；paid 为唯一入账终态，
- *   `markPaidTx` 用 `WHERE ... AND payment_status='pending'` 的原子条件更新兜住并发
- *   （回调 / confirm-paid / admin mark-paid 三方竞态时只有一个赢家）。
+ *   `markPaidTx` 用 `WHERE ... AND payment_status IN ('pending','expired')` 的原子条件更新兜住并发
+ *   （回调 / confirm-paid / admin mark-paid 三方竞态时只有一个赢家；expired 放行是
+ *   2026-09-30 用户裁决——真实回调晚到照常入账，cancelled 仍被 service 层拒绝）。
  * - 超时时长 `ORDER_PENDING_TTL_MINUTES`（billing.config，2h）由 BillingService 在下单时
  *   算好 `expires_at` 写入；本仓储不读 config，保持纯 SQL 层。
  * - 时间一律应用层传参，不在 SQL 里用 NOW()（与 point-redemptions.repo 同一口径）。
@@ -131,15 +132,17 @@ export class OrdersRepository {
   }
 
   /**
-   * 事务内置 paid：`WHERE payment_status='pending'` 是并发赢家判定 —— 影响行 0 =
-   * 已被其他路径终态化，调用方必须 ROLLBACK 返回 duplicate，绝不重复续期。
+   * 事务内置 paid：`WHERE payment_status IN ('pending','expired')` 是并发赢家判定 ——
+   * 影响行 0 = 已被其他路径终态化，调用方必须 ROLLBACK 返回 duplicate，绝不重复续期。
+   * 放行 expired（2026-09-30 用户裁决）：真实渠道回调晚到（家长付了钱但订单已被惰性
+   * 翻转 expired）时照常入账、订阅顺延；cancelled 仍被 service 层闸门拒绝，到不了这里。
    *
    * @param conn 必须传：与 BEGIN/COMMIT 同一连接（brief Step 2 事务骨架）。
    */
   async markPaidTx(conn: PoolConnection, orderId: number, tradeNo: string, paidAt: Date): Promise<number> {
     const [result] = await conn.execute<ResultSetHeader>(
       `UPDATE orders SET payment_status = 'paid', channel_trade_no = ?, paid_at = ?
-        WHERE id = ? AND payment_status = 'pending'`,
+        WHERE id = ? AND payment_status IN ('pending', 'expired')`,
       [tradeNo, paidAt, orderId],
     );
     return result.affectedRows;

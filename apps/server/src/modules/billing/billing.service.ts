@@ -236,6 +236,8 @@ export class BillingService {
   /**
    * 渠道异步回调（spec §5.2 POST /api/billing/callback/{channel}，免 JWT）。
    * 永远给渠道一个明确应答（success/failure），验签/找单/串单/金额四道闸全过才入账。
+   * 渠道解析走 {@link resolveCallbackAdapter}：BILLING_USE_MOCK=1 时 wechat/alipay
+   * 回调也强制真实适配器验签（裸 JSON 零验签不可入账）。
    */
   async handleCallback(
     channel: string,
@@ -244,7 +246,7 @@ export class BillingService {
   ): Promise<ChannelHttpResponse> {
     let adapter: PayChannelAdapter;
     try {
-      adapter = this.resolveAdapter(channel);
+      adapter = this.resolveCallbackAdapter(channel);
     } catch {
       // 未知渠道：没有适配器就没有它的应答格式，返回 500 文本让渠道侧重试/告警
       return { httpStatus: 500, body: 'unknown channel', contentType: 'text/plain' };
@@ -272,12 +274,16 @@ export class BillingService {
 
     if (!payload.paid) return adapter.successResponse(); // 非支付成功通知：确认收到即可
     if (order.payment_status === 'paid') return adapter.successResponse(); // 重复通知，幂等
-    if (order.payment_status !== 'pending') {
-      this.logger.warn(
-        `[billing] 终态订单收到支付回调：orderNo=${order.order_no} status=${order.payment_status}（人工核对是否需线下处理）`,
+    if (order.payment_status === 'cancelled') {
+      // 用户裁决（2026-09-30 终态单回调方案 A）：cancelled 维持拒绝；本仓无 admin 通知表，
+      // error 级留痕即本期的「显式预警」，需人工处理（钱可能真付了但单已取消）
+      this.logger.error(
+        `[BILLING] 已取消订单收到真支付回调，需人工处理：orderNo=${order.order_no}, tradeNo=${payload.tradeNo}, amount=${payload.amountCents}`,
       );
       return adapter.failureResponse('订单状态不允许');
     }
+    // pending 正常入账；expired 放行（用户裁决：验签+金额已全过的 paid 回调照常入账，
+    // 订阅顺延——家长只是等过了 2h 超时才回调到，钱是真的就不该让订单白过期）
 
     // finalize 抛错也必须给渠道明确应答（口径：handleCallback 永不向外抛）；logger.error 留痕
     try {
@@ -289,15 +295,28 @@ export class BillingService {
     return adapter.successResponse(); // 'paid' 与并发 'duplicate' 都算成功应答
   }
 
-  /** admin 人工兜底（线下收款）：channel 不变，tradeNo 用 `manual-{orderNo}` 标记来源。 */
-  async adminMarkPaid(orderNo: string): Promise<'paid' | 'duplicate'> {
+  /**
+   * admin 人工兜底（线下收款）：channel 不变，tradeNo 用 `manual-{orderNo}` 标记来源。
+   * 审计：操作人 adminId / 单号 / 时间 / 结果（paid|duplicate）一律 logger.log 留痕
+   * （本仓无 admin 操作审计表，日志即留痕；adminId 从 JWT sub 透传，缺省记 unknown）。
+   */
+  async adminMarkPaid(orderNo: string, adminId?: number): Promise<'paid' | 'duplicate'> {
     const order = await this.ordersRepo.findByOrderNo(orderNo);
     if (!order) throw new NotFoundException({ code: 1005, message: '订单不存在' });
-    if (order.payment_status === 'paid') return 'duplicate'; // 幂等成功
+    if (order.payment_status === 'paid') {
+      this.logger.log(
+        `[BILLING] admin mark-paid：adminId=${adminId ?? 'unknown'} orderNo=${orderNo} result=duplicate time=${new Date().toISOString()}`,
+      );
+      return 'duplicate'; // 幂等成功
+    }
     if (order.payment_status !== 'pending') {
       throw new BadRequestException({ code: 2002, message: '订单状态不允许该操作' });
     }
-    return this.finalizePaidOrder(order, `manual-${order.order_no}`);
+    const result = await this.finalizePaidOrder(order, `manual-${order.order_no}`);
+    this.logger.log(
+      `[BILLING] admin mark-paid：adminId=${adminId ?? 'unknown'} orderNo=${orderNo} result=${result} time=${new Date().toISOString()}`,
+    );
+    return result;
   }
 
   // ---------- 核心：入账事务 ----------
@@ -340,6 +359,28 @@ export class BillingService {
       return process.env.NODE_ENV === 'test' || process.env.BILLING_USE_MOCK === '1';
     }
     return false;
+  }
+
+  /**
+   * 回调专用渠道解析：**wechat/alipay 永远解析到真实适配器**，即使 `BILLING_USE_MOCK=1`。
+   * mock 映射只服务于下单/查单（演示模式 UI 渠道 radio 发不出 channel='mock'）；
+   * 若回调也映射到 Mock，则裸 JSON 零验签即可入账（免验签入账洞）。mock 模式的
+   * 入账既定路径是 confirm-paid，不受影响；channel='mock' 的回调仅测试环境放行
+   * （HTTP 层 controller 已把非 wechat/alipay 404 拦掉，这里只为单测直调兜底）。
+   */
+  private resolveCallbackAdapter(channel: string): PayChannelAdapter {
+    switch (channel) {
+      case 'wechat':
+        return this.wechatAdapter;
+      case 'alipay':
+        return this.alipayAdapter;
+      case 'mock':
+        if (process.env.NODE_ENV === 'test' || process.env.BILLING_USE_MOCK === '1') {
+          return this.mockAdapter;
+        }
+        break;
+    }
+    throw new HttpException({ code: 2003, message: `未知支付渠道：${channel}` }, 503);
   }
 
   private resolveAdapter(channel: string): PayChannelAdapter {

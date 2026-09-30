@@ -202,14 +202,14 @@ describe('AlipayQrPayAdapter', () => {
   });
 
   describe('queryOrder', () => {
-    it('TRADE_SUCCESS + receipt_amount "198.00" → paid=true、trade_no、19800 分', async () => {
+    it('TRADE_SUCCESS + total_amount "198.00" → paid=true、trade_no、19800 分；receipt_amount（渠道优惠后偏小）不被采信', async () => {
       const fetchMock = vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
             alipay_trade_query_response: {
               code: '10000', msg: 'Success',
               trade_no: '2026092922001000001', out_trade_no: 'R20260929001',
-              trade_status: 'TRADE_SUCCESS', receipt_amount: '198.00',
+              trade_status: 'TRADE_SUCCESS', total_amount: '198.00', receipt_amount: '0.01',
             },
           }),
           { status: 200 },
@@ -229,13 +229,13 @@ describe('AlipayQrPayAdapter', () => {
       expect(JSON.parse(params.biz_content)).toEqual({ out_trade_no: 'R20260929001' });
     });
 
-    it('TRADE_FINISHED 也算已支付；TRADE_WAIT_BUYER_PAY 算未支付（receipt_amount 缺 → amountCents null）', async () => {
+    it('TRADE_FINISHED 也算已支付；TRADE_WAIT_BUYER_PAY 算未支付（total_amount 缺 → amountCents null）', async () => {
       const adapter = new AlipayQrPayAdapter(ENV);
       vi.stubGlobal(
         'fetch',
         vi.fn().mockResolvedValueOnce(
           new Response(
-            JSON.stringify({ alipay_trade_query_response: { code: '10000', msg: 'Success', trade_no: 'T1', trade_status: 'TRADE_FINISHED', receipt_amount: '1.00' } }),
+            JSON.stringify({ alipay_trade_query_response: { code: '10000', msg: 'Success', trade_no: 'T1', trade_status: 'TRADE_FINISHED', total_amount: '1.00' } }),
             { status: 200 },
           ),
         ),

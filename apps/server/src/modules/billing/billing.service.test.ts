@@ -374,12 +374,51 @@ describe('BillingService.handleCallback', () => {
     expect(d.pool.getConnection).not.toHaveBeenCalled();
   });
 
-  it('cancelled/expired 终态订单收到支付回调 -> failureResponse（不入账，人工介入）', async () => {
+  it('BILLING_USE_MOCK=1 时 wechat 渠道伪造回调（裸 JSON）→ 走真实适配器验签失败 -> failureResponse，不入账', async () => {
+    // 终审必修 1 回归钉：resolveCallbackAdapter 不得把 wechat/alipay 映射到 Mock
+    // （否则裸 JSON 零验签即可入账）。mock 模式入账既定路径是 confirm-paid。
+    const d = mkDeps();
+    d.wechatAdapter.verifyCallback.mockRejectedValue(new Error('验签失败'));
+    const prevMock = process.env.BILLING_USE_MOCK;
+    process.env.BILLING_USE_MOCK = '1';
+    try {
+      const res = await mkSvc(d).handleCallback('wechat', {}, Buffer.from('{"orderNo":"ORD1","paid":true}'));
+      expect(res).toEqual({ httpStatus: 500, body: 'fail', contentType: 'text/plain' });
+      expect(d.wechatAdapter.verifyCallback).toHaveBeenCalled();
+      expect(d.mockAdapter.verifyCallback).not.toHaveBeenCalled();
+      expect(d.ordersRepo.findByOrderNo).not.toHaveBeenCalled();
+      expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+    } finally {
+      if (prevMock === undefined) delete process.env.BILLING_USE_MOCK;
+      else process.env.BILLING_USE_MOCK = prevMock;
+    }
+  });
+
+  it('expired 终态订单 + 验签金额全过的合法支付回调 -> 照常入账（订阅顺延，2026-09-30 方案 A）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'expired' }));
+    await call(d);
+    expect(d.mockAdapter.successResponse).toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T1', expect.any(Date));
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+    expect(d.conn.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancelled 终态订单收到支付回调 -> failureResponse + error 留痕（显式预警，需人工）', async () => {
     const d = mkDeps();
     d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'cancelled' }));
-    await call(d);
+    const svc = mkSvc(d);
+    const errSpy = vi.spyOn(
+      (svc as unknown as { logger: { error: (...a: unknown[]) => void } }).logger,
+      'error',
+    );
+    await svc.handleCallback('mock', { 'content-type': 'application/json' }, Buffer.from('{}'));
     expect(d.mockAdapter.failureResponse).toHaveBeenCalled();
     expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+    expect(d.subscriptionsService.renewWithinTx).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(String(errSpy.mock.calls[0][0])).toContain('已取消订单收到真支付回调');
+    expect(String(errSpy.mock.calls[0][0])).toContain('orderNo=ORD1');
   });
 
   it('pending + 支付成功 -> finalize 事务（同 conn 续期）-> successResponse', async () => {
@@ -517,6 +556,22 @@ describe('BillingService.adminMarkPaid', () => {
     expect(result).toBe('paid');
     expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'manual-ORD1', expect.any(Date));
     expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+  });
+
+  it('审计留痕（2026-09-30 方案 A）：adminId/单号/结果进 logger.log（paid 与 duplicate 两条路径都记）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    const svc = mkSvc(d);
+    const logSpy = vi.spyOn((svc as unknown as { logger: { log: (...a: unknown[]) => void } }).logger, 'log');
+    await expect(svc.adminMarkPaid('ORD1', 42)).resolves.toBe('paid');
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(String(logSpy.mock.calls[0][0])).toContain('adminId=42');
+    expect(String(logSpy.mock.calls[0][0])).toContain('orderNo=ORD1');
+    expect(String(logSpy.mock.calls[0][0])).toContain('result=paid');
+
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid' }));
+    await expect(svc.adminMarkPaid('ORD1', 42)).resolves.toBe('duplicate');
+    expect(String(logSpy.mock.calls[1][0])).toContain('result=duplicate');
   });
 
   it('已 paid -> duplicate（幂等成功），不再进事务', async () => {

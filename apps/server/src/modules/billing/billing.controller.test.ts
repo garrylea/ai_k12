@@ -215,14 +215,15 @@ describe('BillingCallbackController 委派', () => {
 });
 
 describe('AdminBillingController 委派', () => {
-  it('mark-paid：只透传 orderNo（归属不经家长校验），paid/duplicate 都回 paymentStatus=paid', async () => {
+  it('mark-paid：透传 orderNo + 操作人 JWT sub（审计），paid/duplicate 都回 paymentStatus=paid', async () => {
     const adminMarkPaid = vi.fn().mockResolvedValue('paid');
     const controller = makeAdminController(adminMarkPaid);
+    const admin: JwtUser = { sub: 9, role: 'admin' };
 
-    await expect(controller.markPaid('ORD1')).resolves.toEqual({ orderNo: 'ORD1', paymentStatus: 'paid' });
-    expect(adminMarkPaid).toHaveBeenCalledWith('ORD1');
+    await expect(controller.markPaid('ORD1', admin)).resolves.toEqual({ orderNo: 'ORD1', paymentStatus: 'paid' });
+    expect(adminMarkPaid).toHaveBeenCalledWith('ORD1', 9);
 
     (adminMarkPaid as ReturnType<typeof vi.fn>).mockResolvedValue('duplicate');
-    await expect(controller.markPaid('ORD1')).resolves.toEqual({ orderNo: 'ORD1', paymentStatus: 'paid' });
+    await expect(controller.markPaid('ORD1', admin)).resolves.toEqual({ orderNo: 'ORD1', paymentStatus: 'paid' });
   });
 });

@@ -105,6 +105,8 @@ pending ──回调验签成功 / confirm-paid 主动查单确认──► paid
    └── expires_at 超时（读时惰性翻转）──────────────► expired（终态）
 ```
 
+> **终态单回调：expired 入账 / cancelled 拒绝+预警（2026-09-30 用户裁决，方案 A）**——expired 订单收到验签与金额校验通过的 paid 回调照常入账（订阅顺延，`markPaidTx` 的 WHERE 放宽为 `IN ('pending','expired')`，无额外列）；cancelled 维持拒绝并 `logger.error` 留痕（含 orderNo/tradeNo/amount，本仓无 admin 通知表，error 即本期「显式预警」待人工）。已 paid 重复通知的幂等语义不变（更早的闸门直接 success）。
+
 - **续期规则**（`renewSubscription(parentId, plan)`，与订单置 paid 同一事务）：
   - `current_period_end` 在未来 → 从该时刻顺延 `duration_days`（不吞天数）
   - 已过期 / NULL / 试用 → 从 `now` 起算
