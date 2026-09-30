@@ -387,7 +387,9 @@ export class BillingService {
       );
       return 'duplicate'; // 幂等成功
     }
-    if (order.payment_status !== 'pending') {
+    if (order.payment_status !== 'pending' && order.payment_status !== 'expired') {
+      // expired 放行（2026-09-30 用户裁决方案 A：管理员是裁决人，过期单收到真款应可手工入账）；
+      // cancelled 及其他终态仍拒。与 markPaidTx 谓词、approveClaim 内联口径对齐。
       throw new BadRequestException({ code: 2002, message: '订单状态不允许该操作' });
     }
     const result = await this.finalizePaidOrder(order, `manual-${order.order_no}`);

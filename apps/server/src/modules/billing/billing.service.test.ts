@@ -584,10 +584,13 @@ describe('BillingService.adminMarkPaid', () => {
     expect(d.pool.getConnection).not.toHaveBeenCalled();
   });
 
-  it('cancelled/expired -> 2002', async () => {
+  it('cancelled -> 2002；expired -> 照常入账（2026-09-30 方案 A：管理员裁决人手工入账过期单）', async () => {
     const d = mkDeps();
-    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'expired' }));
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'cancelled' }));
     await expect(mkSvc(d).adminMarkPaid('ORD1')).rejects.toMatchObject({ response: { code: 2002 } });
+
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'expired' }));
+    await expect(mkSvc(d).adminMarkPaid('ORD1')).resolves.toBe('paid');
   });
 
   it('订单不存在 -> NotFoundException 404', async () => {
@@ -1006,6 +1009,24 @@ describe('BillingService.manual 线下转账渠道（批④ Task 4）', () => {
     await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'manual' })).rejects.toMatchObject({
       response: { code: 2002 },
     });
+  });
+
+  it('manual pending 单 + 请求 wechat -> 2002（换渠道防串单，Task 8 补钉）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findPendingByParent.mockResolvedValue(mkOrder({ channel: 'manual' }));
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'wechat' })).rejects.toMatchObject({
+      response: { code: 2002 },
+    });
+  });
+
+  it('expired manual 单 adminMarkPaid -> 照常入账（pending|expired 放行，Task 8 补钉）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'manual', payment_status: 'expired' }));
+    const r = await mkSvc(d).adminMarkPaid('ORD1', 9);
+    expect(r).toBe('paid');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(
+      expect.anything(), expect.any(Number), 'manual-ORD1', expect.any(Date),
+    );
   });
 
   it('confirmPaid manual 无 note（缺省/空串/纯空白）-> 400/1001「请填写转账备注」，不查渠道不落 claim', async () => {
