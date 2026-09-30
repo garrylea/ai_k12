@@ -245,7 +245,7 @@ describe('ParentSubscriptionPage 下单与支付弹层', () => {
     expect(openSpy).toHaveBeenCalledWith('https://openapi.alipay.com/pay?x=1', '_blank', 'noopener,noreferrer');
   });
 
-  it('弹层「我已付款」→ confirm 成功进 success；2004 → toast「渠道尚未确认，稍后再试」', async () => {
+  it('弹层「我已付款」→ confirm 成功进 success', async () => {
     createOrderMock.mockResolvedValue(orderOf());
     // 轮询始终 pending，只能走「我已付款」兜底
     getOrderMock.mockResolvedValue(orderOf());
@@ -254,16 +254,6 @@ describe('ParentSubscriptionPage 下单与支付弹层', () => {
     fireEvent.click(await screen.findByRole('button', { name: '续费' }));
     await screen.findByTestId('pay-qr');
 
-    // 先失败（2004）
-    confirmPaidMock.mockRejectedValueOnce(new ApiError(2004, '渠道尚未确认'));
-    fireEvent.click(screen.getByRole('button', { name: '我已付款' }));
-    await waitFor(() =>
-      expect(toastMock).toHaveBeenCalledWith('error', '渠道尚未确认，稍后再试'),
-    );
-    // 弹层留在原地可再试
-    expect(screen.getByTestId('pay-modal')).toBeInTheDocument();
-
-    // 再成功
     confirmPaidMock.mockResolvedValueOnce({ orderNo: 'NO123', paymentStatus: 'paid' });
     fireEvent.click(screen.getByRole('button', { name: '我已付款' }));
     expect(await screen.findByTestId('subscription-success')).toBeInTheDocument();
@@ -318,5 +308,120 @@ describe('ParentSubscriptionPage 下单与支付弹层', () => {
 
     await waitFor(() => expect(cancelOrderMock).toHaveBeenCalledWith('NO123'));
     await waitFor(() => expect(screen.queryByTestId('pay-modal')).not.toBeInTheDocument());
+  });
+});
+
+describe('ParentSubscriptionPage 支付弹层裁决三态与线下转账（批④ Task 6）', () => {
+  it('渠道三选含「线下转账」；选它下单 → createBillingOrder 收到 manual，弹层无二维码、显示转账指引与必填备注框', async () => {
+    createOrderMock.mockResolvedValue(orderOf({ channel: 'manual', qrContent: null }));
+    // 轮询：manual 单无凭证，保持 pending
+    getOrderMock.mockResolvedValue(orderOf({ channel: 'manual', qrContent: null }));
+
+    renderPage();
+    fireEvent.click(await screen.findByLabelText('线下转账'));
+    fireEvent.click(await screen.findByRole('button', { name: '续费' }));
+
+    expect(createOrderMock).toHaveBeenCalledWith('monthly', 'manual');
+    expect(await screen.findByTestId('pay-modal')).toBeInTheDocument();
+    expect(screen.queryByTestId('pay-qr')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pay-manual-guide')).toHaveTextContent(
+      '请联系管理员付款（个人微信转账），付款后填写转账备注并点击我已付款',
+    );
+
+    // 备注必填：空 → 「我已付款」禁用；填写 → 点亮并透传 note
+    const confirmBtn = screen.getByRole('button', { name: '我已付款' });
+    expect(confirmBtn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('pay-note'), { target: { value: '微信号 xx 已转 198 元' } });
+    expect(confirmBtn).toBeEnabled();
+    confirmPaidMock.mockRejectedValueOnce(
+      new ApiError(2004, '渠道尚未确认，已转人工核实', undefined, 400, 'pending_review'),
+    );
+    fireEvent.click(confirmBtn);
+    await waitFor(() =>
+      expect(confirmPaidMock).toHaveBeenCalledWith('NO123', '微信号 xx 已转 198 元'),
+    );
+  });
+
+  it('confirm 2004（错误体带 claimStatus=pending_review）→ 「已转人工核实」提示 + 「我已付款」停用，弹层停留', async () => {
+    createOrderMock.mockResolvedValue(orderOf());
+    getOrderMock.mockResolvedValue(orderOf());
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: '续费' }));
+    await screen.findByTestId('pay-qr');
+
+    confirmPaidMock.mockRejectedValueOnce(
+      new ApiError(2004, '渠道尚未确认，已转人工核实', undefined, 400, 'pending_review'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '我已付款' }));
+
+    expect(await screen.findByTestId('pay-claim-pending')).toHaveTextContent(
+      '已转人工核实，管理员确认后自动开通',
+    );
+    expect(screen.getByRole('button', { name: '我已付款' })).toBeDisabled();
+    // 弹层留在原地（轮询继续，admin 通过后自动到账）
+    expect(screen.getByTestId('pay-modal')).toBeInTheDocument();
+    // 2004 走弹层三态，不再 toast
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  it('轮询带回 claimStatus=rejected → 「管理员未确认」提示 + 按钮重亮 + 备注框回填可改，note 随重试透传', async () => {
+    createOrderMock.mockResolvedValue(orderOf());
+    getOrderMock.mockResolvedValue(
+      orderOf({ claimStatus: 'rejected', claimNote: '说转了但没收到' }),
+    );
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: '续费' }));
+
+    expect(await screen.findByTestId('pay-claim-rejected')).toHaveTextContent(
+      '管理员未确认本次支付，请核实后重试',
+    );
+    const confirmBtn = screen.getByRole('button', { name: '我已付款' });
+    expect(confirmBtn).toBeEnabled();
+    // 备注框回填 admin 驳回前的 claimNote，可修改
+    const noteBox = screen.getByTestId('pay-note') as HTMLTextAreaElement;
+    expect(noteBox.value).toBe('说转了但没收到');
+    fireEvent.change(noteBox, { target: { value: '已重新转账，附凭证' } });
+    confirmPaidMock.mockRejectedValueOnce(
+      new ApiError(2004, '渠道尚未确认，已转人工核实', undefined, 400, 'pending_review'),
+    );
+    fireEvent.click(confirmBtn);
+    await waitFor(() =>
+      expect(confirmPaidMock).toHaveBeenCalledWith('NO123', '已重新转账，附凭证'),
+    );
+  });
+
+  it('微信/支付宝 2003「支付渠道未配置」→ 错误文案原样展示 + 引导改选线下转账', async () => {
+    createOrderMock.mockRejectedValue(new ApiError(2003, '支付渠道未配置', undefined, 503));
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: '续费' }));
+
+    expect(await screen.findByTestId('subscription-create-error')).toHaveTextContent(
+      '支付渠道未配置',
+    );
+    expect(screen.getByTestId('subscription-manual-hint')).toHaveTextContent('线下转账');
+  });
+
+  it('订单历史 pending + claimStatus=pending_review 行加「人工核实中」徽标；无 claim 的 pending 行不加', async () => {
+    listOrdersMock.mockResolvedValue({
+      items: [
+        orderOf({ orderNo: 'NO9', claimStatus: 'pending_review' }),
+        orderOf({ orderNo: 'NO8' }),
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 10,
+    });
+
+    renderPage();
+    await screen.findByTestId('subscription-status-card');
+    fireEvent.click(screen.getByTestId('order-history-toggle'));
+
+    const row9 = await screen.findByTestId('order-row-NO9');
+    expect(within(row9).getByText('人工核实中')).toBeInTheDocument();
+    const row8 = await screen.findByTestId('order-row-NO8');
+    expect(within(row8).queryByText('人工核实中')).not.toBeInTheDocument();
   });
 });

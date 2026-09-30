@@ -9,17 +9,29 @@ export interface ApiResponse<T> {
   retryable?: boolean;  // present on AI/LLM error responses (see mapLLMErrorToClient)
 }
 
+/** 人工核实裁决状态（订阅批④）：confirm 2004 错误体 / 成功响应体 / 订单视图透传。 */
+export type OrderClaimStatus = 'pending_review' | 'rejected' | 'approved';
+
 export class ApiError extends Error {
   code: number;
   retryable?: boolean;
   /** HTTP 状态码（业务码 `code` 之外的原始信号）。网络层失败（DNS/断网）没有响应，为 undefined。
    *  调用方用它区分「客户端 4xx，重试也不会好」与「5xx / 网络抖动，可重试」。 */
   status?: number;
-  constructor(code: number, message: string, retryable?: boolean, status?: number) {
+  /** 错误体里的额外业务字段（如 2004 转人工核实的 claimStatus），过滤器原样透传，无则为 undefined。 */
+  claimStatus?: OrderClaimStatus | null;
+  constructor(
+    code: number,
+    message: string,
+    retryable?: boolean,
+    status?: number,
+    claimStatus?: OrderClaimStatus | null,
+  ) {
     super(message);
     this.code = code;
     this.retryable = retryable;
     this.status = status;
+    this.claimStatus = claimStatus;
     this.name = 'ApiError';
   }
 }
@@ -43,7 +55,13 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
       window.location.assign('/student/locked');
       return new Promise<T>(() => {}); // 不 resolve：让调用方挂起，页面即将整体跳走
     }
-    throw new ApiError(json.code, json.message, json.retryable, res.status);
+    throw new ApiError(
+      json.code,
+      json.message,
+      json.retryable,
+      res.status,
+      (json as ApiResponse<T> & { claimStatus?: OrderClaimStatus | null }).claimStatus,
+    );
   }
 
   return json.data;
@@ -2927,6 +2945,10 @@ export interface BillingOrderView {
   expiresAt?: string;
   paidAt?: string | null;
   createdAt: string;
+  /** 人工核实裁决状态（批④）：confirm 2004/成功体透传；订单视图后端就绪后随轮询回填 */
+  claimStatus?: OrderClaimStatus | null;
+  /** 家长提交的转账备注（裁决参考） */
+  claimNote?: string | null;
 }
 
 export function getSubscriptionStatus(): Promise<SubscriptionStatusView> {
@@ -2941,8 +2963,12 @@ export function getAiUsage(): Promise<UsageView> {
   return fetchApi<UsageView>('/quota/usage');
 }
 
-/** 创建订单。后端 Nest `@Post` 默认 **201**（复用 pending 单时也是 201）。 */
-export function createBillingOrder(planCode: string, channel: 'wechat' | 'alipay'): Promise<BillingOrderView> {
+/** 创建订单。后端 Nest `@Post` 默认 **201**（复用 pending 单时也是 201）。
+ *  `manual` = 线下转账（批④主路径）：不下发凭证（qrContent=null），入账走 admin 裁决。 */
+export function createBillingOrder(
+  planCode: string,
+  channel: 'wechat' | 'alipay' | 'manual',
+): Promise<BillingOrderView> {
   return fetchApi<BillingOrderView>('/billing/orders', {
     method: 'POST',
     body: JSON.stringify({ planCode, channel }),
@@ -2966,9 +2992,18 @@ export function cancelBillingOrder(orderNo: string): Promise<void> {
   return fetchApi<void>(`/billing/orders/${encodeURIComponent(orderNo)}/cancel`, { method: 'POST' });
 }
 
-/** 「我已付款」兜底。`'paid' | 'duplicate'`（并发已入账）对前端都是已支付。 */
+/**
+ * 「我已付款」兜底。`'paid' | 'duplicate'`（并发已入账）对前端都是已支付。
+ * `note`：转账备注（线下转账单必填；其余渠道可选），后端存 claim_note 供 admin 裁决参考；
+ * 2004 错误体 / 成功体都带 claimStatus（pending_review / approved），由 ApiError.claimStatus 透出。
+ */
 export function confirmBillingOrderPaid(
   orderNo: string,
-): Promise<{ orderNo: string; paymentStatus: string; currentPeriodEnd?: string }> {
-  return fetchApi(`/billing/orders/${encodeURIComponent(orderNo)}/confirm-paid`, { method: 'POST' });
+  note?: string,
+): Promise<{ orderNo: string; paymentStatus: string; claimStatus?: OrderClaimStatus | null; currentPeriodEnd?: string }> {
+  return fetchApi(`/billing/orders/${encodeURIComponent(orderNo)}/confirm-paid`, {
+    method: 'POST',
+    // 不带 note 时不发 body（与既有 wire 一致，api.test 有断言）
+    ...(note !== undefined ? { body: JSON.stringify({ note }) } : {}),
+  });
 }

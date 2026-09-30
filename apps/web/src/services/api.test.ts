@@ -74,6 +74,20 @@ describe('fetchApi 错误形状', () => {
     await expect(getMyPoints()).rejects.toMatchObject({ code: 1002, status: 404 });
   });
 
+  it('错误体额外字段 claimStatus 透传到 ApiError（2004 转人工三态的地基）', async () => {
+    stubFetch(400, {
+      code: 2004,
+      message: '渠道尚未确认，已转人工核实',
+      data: null,
+      claimStatus: 'pending_review',
+    });
+
+    await expect(getBillingOrder('NO1')).rejects.toMatchObject({
+      code: 2004,
+      claimStatus: 'pending_review',
+    });
+  });
+
   it('成功响应不抛错，正常返回 data', async () => {
     stubFetch(200, { code: 0, message: 'ok', data: { balance: 120 } });
 
@@ -295,7 +309,7 @@ describe('订阅/计费 API：路径与 body', () => {
     expect(f.mock.calls[1][0]).toBe('/api/quota/plans');
   });
 
-  it('createBillingOrder → POST /api/billing/orders，body 恰好 {planCode,channel}', async () => {
+  it('createBillingOrder → POST /api/billing/orders，body 恰好 {planCode,channel}；manual 渠道原样发出', async () => {
     const f = stubFetch(201, { code: 0, message: 'ok', data: { orderNo: 'NO1' } });
 
     await createBillingOrder('monthly', 'wechat');
@@ -303,6 +317,9 @@ describe('订阅/计费 API：路径与 body', () => {
     expect(f.mock.calls[0][0]).toBe('/api/billing/orders');
     expect(f.mock.calls[0][1]?.method).toBe('POST');
     expect(requestBody(f)).toEqual({ planCode: 'monthly', channel: 'wechat' });
+
+    await createBillingOrder('monthly', 'manual');
+    expect(requestBody(f, 1)).toEqual({ planCode: 'monthly', channel: 'manual' });
   });
 
   it('listBillingOrders → query 带分页', async () => {
@@ -326,6 +343,16 @@ describe('订阅/计费 API：路径与 body', () => {
     await confirmBillingOrderPaid('NO1');
     expect(f.mock.calls[2][0]).toBe('/api/billing/orders/NO1/confirm-paid');
     expect(f.mock.calls[2][1]?.method).toBe('POST');
+    // 不带 note：不带 body（与既有 wire 一致）
+    expect(requestInit(f, 2).body).toBeUndefined();
+  });
+
+  it('confirmBillingOrderPaid 带 note → body 恰好 {note}（线下转账备注透传）', async () => {
+    const f = stubData({ orderNo: 'NO1', paymentStatus: 'paid' });
+
+    await confirmBillingOrderPaid('NO1', '微信号 xx 已转账 198 元');
+
+    expect(requestBody(f)).toEqual({ note: '微信号 xx 已转账 198 元' });
   });
 });
 

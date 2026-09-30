@@ -13,6 +13,7 @@ import {
   getSubscriptionStatus,
   listBillingOrders,
   type BillingOrderView,
+  type OrderClaimStatus,
   type PlanView,
   type SubscriptionStatusView,
   type UsageView,
@@ -30,10 +31,13 @@ import {
  * - **后端防串单**：已有 pending 单时换套餐/换渠道下单 → 后端 400 / code 2002。
  *   UI 收到 2002 不透传后端文案，改为可操作的指引「已有待支付订单，请先在订单历史中取消」，
  *   并展开 + 刷新订单历史让家长能直接取消。2003/2005 等其余错误以 message 原文展示。
- * - **「我已付款」兜底**：`confirmBillingOrderPaid`；2004（渠道尚未确认）只 toast，
- *   弹层留在原地可再试。
+ * - **「我已付款」兜底**：`confirmBillingOrderPaid`（线下转账单带必填备注）；2004（渠道尚未
+ *   确认）→ 弹层切「已转人工核实」态（claimStatus 三态：pending_review 停用按钮 /
+ *   rejected 重新点亮 + 备注可改 / 无 claim 现状不变），轮询继续，admin 通过后自动到账。
+ * - **线下转账（channel='manual'，批④主路径）**：弹层不放凭证，展示转账指引 + 必填备注框；
+ *   入账只走 admin 裁决。微信/支付宝 2003（渠道未配置）时引导改选线下转账。
  * - **订单历史**默认收起，展开才拉 `listBillingOrders(1, 10)`；pending 行可就地取消；
- *   若取消的正是弹层里那张单，同时收回弹层。
+ *   pending + pending_review 行加「人工核实中」徽标；若取消的正是弹层里那张单，同时收回弹层。
  * - **AI 用量卡只展示**：`tokensUnknown > 0` 必须注明「量不到 tokens，未计入」——
  *   仓规 NULL≠0，缺口与真实读数不能混（CLAUDE.md）。
  *
@@ -42,9 +46,13 @@ import {
 
 type ViewState = 'loading' | 'ready' | 'paying' | 'success';
 
-type Channel = 'wechat' | 'alipay';
+type Channel = 'wechat' | 'alipay' | 'manual';
 
-const CHANNEL_LABELS: Record<Channel, string> = { wechat: '微信支付', alipay: '支付宝' };
+const CHANNEL_LABELS: Record<Channel, string> = {
+  wechat: '微信支付',
+  alipay: '支付宝',
+  manual: '线下转账',
+};
 
 /** `priceCents/100`：19800 → ¥198、1980 → ¥19.8（金额来自服务端，前端不做四舍五入）。 */
 function formatYuan(cents: number): string {
@@ -87,10 +95,17 @@ export default function ParentSubscriptionPage() {
   const [selectedPlanCode, setSelectedPlanCode] = useState<string | null>(null);
   const [channel, setChannel] = useState<Channel>('wechat');
 
+  /** 支付弹层裁决三态（批④ Task 6）：confirm 2004 错误体 / 轮询订单视图透传；null = 未触发（现状）。 */
+  const [claimStatus, setClaimStatus] = useState<OrderClaimStatus | null>(null);
+  /** 转账备注：线下转账单必填（空禁用「我已付款」）；rejected 后可改再重试。 */
+  const [claimNote, setClaimNote] = useState('');
+
   /** paying 中那张单（弹层展示用）与它的单号（轮询/取消/确认用）。 */
   const [order, setOrder] = useState<BillingOrderView | null>(null);
   const [orderNo, setOrderNo] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  /** 触发 createError 的业务码：2003（渠道未配置）时追加「改选线下转账」引导。 */
+  const [createErrorCode, setCreateErrorCode] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -145,6 +160,13 @@ export default function ParentSubscriptionPage() {
         if (cancelled) return;
         // 回填订单详情：POST 下单响应不含 qrContent/redirectUrl（spec：凭证来自订单详情轮询）
         setOrder(next);
+        // 裁决状态随轮询回填（如 admin 驳回后 rejected）；后端未带时不覆盖 2004 已落的本地态
+        if (next.claimStatus) {
+          setClaimStatus(next.claimStatus);
+          if (next.claimStatus === 'rejected' && next.claimNote) {
+            setClaimNote((prev) => prev || next.claimNote!);
+          }
+        }
         if (next.paymentStatus !== 'paid') return;
         // paid：先重拉状态（success 要展示新到期时间），再切 success。
         // setView 会令本 effect cleanup，interval 被清掉 —— 先停轮询再切视图。
@@ -193,8 +215,12 @@ export default function ParentSubscriptionPage() {
     if (!selectedPlanCode || creating) return;
     setCreating(true);
     setCreateError(null);
+    setCreateErrorCode(null);
     try {
       const created = await createBillingOrder(selectedPlanCode, channel);
+      // 新单开新弹层：裁决态与备注一并复位
+      setClaimStatus(null);
+      setClaimNote('');
       setOrder(created);
       setOrderNo(created.orderNo);
       setView('paying');
@@ -206,6 +232,8 @@ export default function ParentSubscriptionPage() {
         setHistoryVersion((v) => v + 1);
       } else {
         setCreateError(errorMessage(err, '下单失败，请稍后再试'));
+        // 2003（渠道未配置/异常）：文案原样展示之外，引导改选线下转账
+        setCreateErrorCode(err instanceof ApiError ? err.code : null);
       }
     } finally {
       setCreating(false);
@@ -214,16 +242,21 @@ export default function ParentSubscriptionPage() {
 
   const confirmPaid = async () => {
     if (!orderNo || confirming) return;
+    const note = claimNote.trim();
+    // 线下转账备注必填（按钮禁用是第一道；这里兜底防回车等路径绕过）
+    if (order?.channel === 'manual' && !note) return;
     setConfirming(true);
     try {
-      const res = await confirmBillingOrderPaid(orderNo);
+      const res = await confirmBillingOrderPaid(orderNo, note || undefined);
       const s = await getSubscriptionStatus();
       setStatus(s);
       setSuccessPeriodEnd(res.currentPeriodEnd ?? s.currentPeriodEnd);
       setView('success');
     } catch (err) {
       if (err instanceof ApiError && err.code === 2004) {
-        toast('error', '渠道尚未确认，稍后再试');
+        // 未确认 → 已落 claim 转人工核实：弹层切 pending_review 态（停用按钮），
+        // 轮询继续，admin 通过后自动到账；admin 驳回则轮询带回 rejected 重新点亮。
+        setClaimStatus(err.claimStatus ?? 'pending_review');
       } else {
         toast('error', errorMessage(err, '确认失败，请稍后再试'));
       }
@@ -417,6 +450,14 @@ export default function ParentSubscriptionPage() {
             {createError}
           </p>
         )}
+        {createError && createErrorCode === 2003 && (
+          <p
+            data-testid="subscription-manual-hint"
+            className="mt-1 text-sm text-[var(--text-secondary)]"
+          >
+            可改选「线下转账」：个人微信转账给管理员并填写转账备注，管理员确认后自动开通
+          </p>
+        )}
 
         <div className="mt-4">
           <Button onClick={submitOrder} disabled={creating || !selectedPlanCode}>
@@ -488,6 +529,14 @@ export default function ParentSubscriptionPage() {
                         {formatYuan(item.amountCents)}
                       </span>
                       <span className={clsx('text-xs font-medium', badge.cls)}>{badge.label}</span>
+                      {item.paymentStatus === 'pending' && item.claimStatus === 'pending_review' && (
+                        <span
+                          data-testid={`order-claim-badge-${item.orderNo}`}
+                          className="rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--warning)]"
+                        >
+                          人工核实中
+                        </span>
+                      )}
                       {item.paymentStatus === 'pending' && (
                         <Button variant="secondary" size="sm" onClick={() => cancelFromHistory(item.orderNo)}>
                           取消
@@ -514,7 +563,13 @@ export default function ParentSubscriptionPage() {
             </div>
 
             <div className="mt-4 flex flex-col items-center gap-3">
-              {order.qrContent ? (
+              {order.channel === 'manual' ? (
+                <div data-testid="pay-manual-guide" className="w-full text-center">
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    请联系管理员付款（个人微信转账），付款后填写转账备注并点击我已付款
+                  </p>
+                </div>
+              ) : order.qrContent ? (
                 <div
                   data-testid="pay-qr"
                   className="rounded-[var(--radius-card)] border border-[var(--bg-subtle)] p-3"
@@ -541,8 +596,46 @@ export default function ParentSubscriptionPage() {
               <p className="text-xs text-[var(--text-tertiary)]">支付完成后页面将自动更新</p>
             </div>
 
+            {(order.channel === 'manual' || claimStatus === 'rejected') && (
+              <div className="mt-3">
+                <textarea
+                  data-testid="pay-note"
+                  value={claimNote}
+                  maxLength={200}
+                  rows={2}
+                  onChange={(e) => setClaimNote(e.target.value)}
+                  placeholder="转账备注（必填），如：微信号 xx 已转账 198 元"
+                  className="w-full rounded-[var(--radius-button)] border border-[var(--bg-subtle)] bg-[var(--bg-base)] p-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+                />
+              </div>
+            )}
+
+            {claimStatus === 'pending_review' && (
+              <p
+                data-testid="pay-claim-pending"
+                className="mt-3 text-center text-sm text-[var(--warning)]"
+              >
+                已转人工核实，管理员确认后自动开通
+              </p>
+            )}
+            {claimStatus === 'rejected' && (
+              <p
+                data-testid="pay-claim-rejected"
+                className="mt-3 text-center text-sm text-[var(--error)]"
+              >
+                管理员未确认本次支付，请核实后重试
+              </p>
+            )}
+
             <div className="mt-5 flex items-center justify-center gap-3">
-              <Button onClick={confirmPaid} disabled={confirming}>
+              <Button
+                onClick={confirmPaid}
+                disabled={
+                  confirming ||
+                  claimStatus === 'pending_review' ||
+                  (order.channel === 'manual' && claimNote.trim().length === 0)
+                }
+              >
                 {confirming ? '确认中…' : '我已付款'}
               </Button>
               <Button variant="secondary" onClick={cancelPayingOrder}>
