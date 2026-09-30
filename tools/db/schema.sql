@@ -991,11 +991,15 @@ CREATE TABLE IF NOT EXISTS orders (
   expires_at DATETIME(3) NOT NULL,
   coupon_code VARCHAR(32) DEFAULT NULL,          -- 本期预留不写
   coupon_discount_cents INT DEFAULT NULL,        -- 本期预留不写
+  claim_status VARCHAR(12) DEFAULT NULL,         -- pending_review/rejected/approved；NULL = 从未主张
+  claimed_at DATETIME(3) DEFAULT NULL,
+  claim_note VARCHAR(200) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uk_orders_no (order_no),
   UNIQUE KEY uk_orders_trade_no (channel_trade_no),
   KEY idx_orders_parent_status (parent_id, payment_status, id),
+  KEY idx_orders_claim (claim_status, claimed_at),  -- 管理端待裁决列表：status 过滤 + claimed_at 排序
   CONSTRAINT fk_orders_parent FOREIGN KEY (parent_id) REFERENCES parents (id) ON DELETE CASCADE,
   CONSTRAINT fk_orders_plan FOREIGN KEY (plan_id) REFERENCES subscription_plans (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1004,6 +1008,23 @@ CREATE TABLE IF NOT EXISTS orders (
 INSERT INTO subscription_plans (plan_code, name, price_cents, duration_days, is_active, sort_order)
 VALUES ('month', '月卡', 2000, 30, 1, 1), ('year', '年卡', 19800, 365, 1, 2)
 ON DUPLICATE KEY UPDATE id = id;
+
+-- 管理端人工干预审计流水（批④）：trial_set = 改写试用截止（trial_ends_at 有值）；
+-- grant_days = 追加天数（delta_days 有值，负数 = 扣减）。admin_id 不设外键，
+-- 裁决流水不能随管理账号删除而丢。
+CREATE TABLE IF NOT EXISTS subscription_adjustments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  parent_id BIGINT NOT NULL,
+  admin_id BIGINT NOT NULL,
+  type VARCHAR(12) NOT NULL,                     -- trial_set | grant_days，服务端白名单
+  trial_ends_at DATETIME(3) DEFAULT NULL,        -- type=trial_set 时有值：改写后的试用截止
+  delta_days INT DEFAULT NULL,                   -- type=grant_days 时有值：追加天数（负数=扣减）
+  reason VARCHAR(200) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  KEY idx_sub_adjust_parent (parent_id, id),
+  CONSTRAINT fk_sub_adjust_parent FOREIGN KEY (parent_id) REFERENCES parents (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
 -- 10. 基础设施
