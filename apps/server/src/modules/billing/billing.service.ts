@@ -38,6 +38,9 @@ export interface OrderView {
   createdAt: string;
   expiresAt: string;
   paidAt: string | null;
+  /** 家长端支付弹层裁决三态（批④）：null = 未发起申诉。 */
+  claimStatus: OrderClaimStatus | null;
+  claimNote: string | null;
 }
 
 /** 订单详情（支付弹层用）：比列表多二维码/跳转入口两个字段。 */
@@ -632,6 +635,8 @@ export class BillingService {
       createdAt: ISO(row.created_at)!,
       expiresAt: ISO(row.expires_at)!,
       paidAt: ISO(row.paid_at),
+      claimStatus: row.claim_status ?? null,
+      claimNote: row.claim_note ?? null,
     };
   }
 }

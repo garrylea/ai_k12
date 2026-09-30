@@ -597,7 +597,7 @@ describe('BillingService.adminMarkPaid', () => {
 });
 
 describe('BillingService.getOrder / listOrders（读时惰性翻转 + 分页）', () => {
-  it('getOrder：先 expireStale 再找单；返回 OrderDetailView 含 qrContent/redirectUrl', async () => {
+  it('getOrder：先 expireStale 再找单；返回 OrderDetailView 含 qrContent/redirectUrl/claim 三态', async () => {
     const d = mkDeps();
     const created = new Date('2026-09-29T08:00:00.000Z');
     const expires = new Date('2026-09-29T10:00:00.000Z');
@@ -619,7 +619,19 @@ describe('BillingService.getOrder / listOrders（读时惰性翻转 + 分页）'
       paidAt: null,
       qrContent: 'qr://mock',
       redirectUrl: null,
+      claimStatus: null,
+      claimNote: null,
     });
+  });
+
+  it('getOrder：claim 转人工核实的订单透传 claimStatus/claimNote', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ claim_status: 'pending_review', claim_note: '家长说已付' }),
+    );
+    const detail = await mkSvc(d).getOrder(3, 'ORD1');
+    expect(detail.claimStatus).toBe('pending_review');
+    expect(detail.claimNote).toBe('家长说已付');
   });
 
   it('getOrder：他人订单 -> 1005', async () => {
@@ -644,6 +656,8 @@ describe('BillingService.getOrder / listOrders（读时惰性翻转 + 分页）'
       orderNo: 'ORD1',
       paymentStatus: 'paid',
       paidAt: new Date('2026-09-29T09:00:00.000Z').toISOString(),
+      claimStatus: null,
+      claimNote: null,
     });
     expect(res.items[0]).not.toHaveProperty('qrContent');
   });
