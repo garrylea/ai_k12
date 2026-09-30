@@ -667,3 +667,104 @@ describe('BillingService.getOrder / listOrders（读时惰性翻转 + 分页）'
     expect(d.ordersRepo.listByParent).not.toHaveBeenCalled();
   });
 });
+
+describe('BillingService.getOrder 自动查单（maybeQueryChannel，批④ Task 2）', () => {
+  it('pending wechat 单：GET 自动查渠道，paid -> finalize 入账（零点击到账）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+    // mkAdapter 默认 queryOrder -> { paid: true, tradeNo: 'T-wechat', amountCents: null }
+    await mkSvc(d).getOrder(3, 'ORD1');
+    expect(d.wechatAdapter.queryOrder).toHaveBeenCalledWith('ORD1');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T-wechat', expect.any(Date));
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+    expect(d.conn.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('微信查单 tradeNo=null -> finalize 用 query-{orderNo} 兜底', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+    d.wechatAdapter.queryOrder.mockResolvedValue({ paid: true, tradeNo: null, amountCents: null });
+    await mkSvc(d).getOrder(3, 'ORD1');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'query-ORD1', expect.any(Date));
+  });
+
+  it('10s 限频：间隔内二次 GET 只查一次渠道，跨过 10s 再查（fake timers 推进）', async () => {
+    vi.useFakeTimers();
+    try {
+      const d = mkDeps();
+      d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+      d.wechatAdapter.queryOrder.mockResolvedValue({ paid: false, tradeNo: null, amountCents: null });
+      const svc = mkSvc(d);
+      await svc.getOrder(3, 'ORD1');
+      expect(d.wechatAdapter.queryOrder).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await svc.getOrder(3, 'ORD1');
+      expect(d.wechatAdapter.queryOrder).toHaveBeenCalledTimes(1); // 限频窗口内不再查
+      await vi.advanceTimersByTimeAsync(10_000);
+      await svc.getOrder(3, 'ORD1');
+      expect(d.wechatAdapter.queryOrder).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('渠道查单抛 2003 类异常 -> GET 正常返回 DB 状态，不向外抛、不 finalize', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+    d.wechatAdapter.queryOrder.mockRejectedValue(new HttpException({ code: 2003, message: '支付渠道异常' }, 503));
+    const detail = await mkSvc(d).getOrder(3, 'ORD1');
+    expect(detail.paymentStatus).toBe('pending');
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('expired 单渠道 paid -> 照常 finalize（markPaidTx 已放行 expired，同回调方案 A 口径）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ channel: 'wechat', payment_status: 'expired' }),
+    );
+    d.wechatAdapter.queryOrder.mockResolvedValue({ paid: true, tradeNo: 'T-WX', amountCents: 2000 });
+    await mkSvc(d).getOrder(3, 'ORD1');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T-WX', expect.any(Date));
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+  });
+
+  it("channel='mock' 不触发查单（演示模式的入账只走 confirm-paid）", async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder()); // channel='mock'，pending
+    await mkSvc(d).getOrder(3, 'ORD1');
+    expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.wechatAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('BILLING_USE_MOCK=1 时 wechat 单自动查单仍走真实适配器（不被 mock 截胡，callback 口径回归钉）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+    const prevMock = process.env.BILLING_USE_MOCK;
+    process.env.BILLING_USE_MOCK = '1';
+    try {
+      await mkSvc(d).getOrder(3, 'ORD1');
+      expect(d.wechatAdapter.queryOrder).toHaveBeenCalledWith('ORD1');
+      expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+      expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T-wechat', expect.any(Date));
+    } finally {
+      if (prevMock === undefined) delete process.env.BILLING_USE_MOCK;
+      else process.env.BILLING_USE_MOCK = prevMock;
+    }
+  });
+
+  it('渠道报金额与订单不符 -> 拒绝入账 + warn 留痕（同 confirmPaid/回调口径）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'wechat' }));
+    d.wechatAdapter.queryOrder.mockResolvedValue({ paid: true, tradeNo: 'T-WX', amountCents: 1 });
+    const svc = mkSvc(d);
+    const warnSpy = vi.spyOn(
+      (svc as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
+      'warn',
+    );
+    await svc.getOrder(3, 'ORD1');
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toContain('金额不符');
+  });
+});

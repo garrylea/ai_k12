@@ -77,6 +77,10 @@ function isDupEntry(err: unknown): boolean {
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
 
+  /** 自动查单限频表（批④ Task 2）：orderNo -> 上次查单时刻；入账成功即删除。 */
+  private channelCheckAt = new Map<string, number>();
+  private static CHANNEL_CHECK_INTERVAL_MS = 10_000;
+
   constructor(
     @Inject('DATABASE_POOL') private readonly pool: Pool,
     @Inject(OrdersRepository) private readonly ordersRepo: OrdersRepository,
@@ -174,6 +178,7 @@ export class BillingService {
   async getOrder(parentId: number, orderNo: string): Promise<OrderDetailView> {
     await this.ordersRepo.expireStale(); // 读时惰性翻转
     const order = await this.requireOwnedOrder(parentId, orderNo);
+    await this.maybeQueryChannel(order); // 扫码零点击到账：家长轮询详情时限频主动查渠道（await 完成再返回）
     return { ...this.toView(order), qrContent: order.channel_qr_content, redirectUrl: null };
   }
 
@@ -381,6 +386,42 @@ export class BillingService {
         break;
     }
     throw new HttpException({ code: 2003, message: `未知支付渠道：${channel}` }, 503);
+  }
+
+  /**
+   * 订单详情读路径的自动查单（批④ Task 2）：家长支付弹层约 3s 轮询 getOrder，
+   * 此处限频 10s 主动查真实渠道——扫码后零点击到账，不再依赖家长点「我已付款」。
+   *
+   * 渠道解析走 {@link resolveCallbackAdapter}（callback 口径）：BILLING_USE_MOCK=1 时
+   * wechat/alipay 也不得被 mock 截胡（mock 渠道演示的入账只走 confirm-paid）。
+   * 状态放行 pending + expired：markPaidTx 已放行 expired（2026-09-30 方案 A——钱是真的
+   * 不该让订单白过期），cancelled/paid 直接跳过。
+   * 金额不符拒绝入账（同 confirmPaid/回调口径，warn 留痕人工介入）；
+   * 任何渠道异常只 warn 吞掉，绝不影响家长读路径（查单超时由适配器自身 10s AbortSignal 兜底）。
+   */
+  private async maybeQueryChannel(order: OrderRow): Promise<void> {
+    if (order.payment_status !== 'pending' && order.payment_status !== 'expired') return;
+    if (order.channel !== 'wechat' && order.channel !== 'alipay') return;
+    const now = Date.now();
+    const last = this.channelCheckAt.get(order.order_no) ?? 0;
+    if (now - last < BillingService.CHANNEL_CHECK_INTERVAL_MS) return;
+    this.channelCheckAt.set(order.order_no, now);
+    try {
+      const adapter = this.resolveCallbackAdapter(order.channel); // 真实适配器，不走 BILLING_USE_MOCK 的 mock 映射
+      const r = await adapter.queryOrder(order.order_no);
+      if (r.paid) {
+        if (r.amountCents != null && r.amountCents !== order.amount_cents) {
+          this.logger.warn(
+            `[BILLING] 自动查单金额不符：orderNo=${order.order_no} 渠道报 ${r.amountCents}，订单 ${order.amount_cents}，拒绝入账（人工介入）`,
+          );
+          return;
+        }
+        await this.finalizePaidOrder(order, r.tradeNo ?? `query-${order.order_no}`, new Date());
+        this.channelCheckAt.delete(order.order_no);
+      }
+    } catch (err) {
+      this.logger.warn(`[BILLING] 自动查单失败（不影响家长读路径）: ${order.order_no} ${err}`);
+    }
   }
 
   private resolveAdapter(channel: string): PayChannelAdapter {
