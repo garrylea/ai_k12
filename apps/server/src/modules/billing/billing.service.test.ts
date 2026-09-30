@@ -959,6 +959,105 @@ describe('BillingService.approveClaim / rejectClaim（批④ Task 3）', () => {
   });
 });
 
+describe('BillingService.manual 线下转账渠道（批④ Task 4）', () => {
+  it('createOrder channel=manual -> 建单成功：不走适配器、不回写渠道结果，订单 pending、2h 超时照常', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ id: 101, order_no: 'ORD-GEN', channel: 'manual' }));
+    const before = Date.now();
+    const view = await mkSvc(d).createOrder(3, { planCode: 'month', channel: 'manual' });
+
+    expect(d.ordersRepo.insertOrder).toHaveBeenCalledTimes(1);
+    const input = d.ordersRepo.insertOrder.mock.calls[0][0] as { channel: string; expiresAt: Date };
+    expect(input.channel).toBe('manual');
+    // 2h 超时对 manual 同样适用（允许 1 分钟误差）
+    expect(Math.abs(input.expiresAt.getTime() - (before + 120 * MINUTE))).toBeLessThan(MINUTE);
+    // 不走适配器：三个渠道的 createOrder 都不调，也不回写 tradeNo/qrContent
+    expect(d.wechatAdapter.createOrder).not.toHaveBeenCalled();
+    expect(d.alipayAdapter.createOrder).not.toHaveBeenCalled();
+    expect(d.mockAdapter.createOrder).not.toHaveBeenCalled();
+    expect(d.ordersRepo.setChannelResult).not.toHaveBeenCalled();
+    expect(view).toMatchObject({ orderNo: 'ORD-GEN', paymentStatus: 'pending', channel: 'manual', amountCents: 2000 });
+  });
+
+  it('manual 防串单自然生效：同套餐同渠道 pending 复用；换套餐 2002', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findPendingByParent.mockResolvedValue(mkOrder({ channel: 'manual' }));
+    const view = await mkSvc(d).createOrder(3, { planCode: 'month', channel: 'manual' });
+    expect(view.orderNo).toBe('ORD1');
+    expect(d.ordersRepo.insertOrder).not.toHaveBeenCalled();
+
+    d.ordersRepo.findPendingByParent.mockResolvedValue(
+      mkOrder({ channel: 'manual', plan_snapshot: { planCode: 'year', name: '年卡', priceCents: 19800, durationDays: 365 } }),
+    );
+    await expect(mkSvc(d).createOrder(3, { planCode: 'month', channel: 'manual' })).rejects.toMatchObject({
+      response: { code: 2002 },
+    });
+  });
+
+  it('confirmPaid manual 无 note（缺省/空串/纯空白）-> 400/1001「请填写转账备注」，不查渠道不落 claim', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'manual' }));
+    const svc = mkSvc(d);
+    await expect(svc.confirmPaid(3, 'ORD1')).rejects.toMatchObject({
+      status: 400,
+      response: { code: 1001, message: '请填写转账备注' },
+    });
+    await expect(svc.confirmPaid(3, 'ORD1', '')).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(svc.confirmPaid(3, 'ORD1', '   ')).rejects.toMatchObject({ response: { code: 1001 } });
+    expect(d.wechatAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markClaim).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('confirmPaid manual 有 note -> 跳过渠道查单，直接落 claim pending_review（note 存 claim_note）+ 2004', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'manual' }));
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1', '微信转账给张老师')).rejects.toMatchObject({
+      status: 400,
+      response: { code: 2004, message: '渠道尚未确认，已转人工核实', claimStatus: 'pending_review' },
+    });
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledTimes(1);
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'pending_review', '微信转账给张老师', expect.any(Date));
+    // 无渠道可查：所有适配器 queryOrder 都不调，更不 finalize
+    expect(d.wechatAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.alipayAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('manual 单重复 confirm 幂等：每次刷新 claimed_at（pending_review），错误体口径不变', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'manual' }));
+    const svc = mkSvc(d);
+    await expect(svc.confirmPaid(3, 'ORD1', '已转账')).rejects.toMatchObject({ response: { claimStatus: 'pending_review' } });
+    await expect(svc.confirmPaid(3, 'ORD1', '已转账')).rejects.toMatchObject({ response: { claimStatus: 'pending_review' } });
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledTimes(2);
+  });
+
+  it('getOrder manual pending 单：不触发自动查单（channel 白名单外），qrContent=null', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'manual' }));
+    const detail = await mkSvc(d).getOrder(3, 'ORD1');
+    expect(detail.channel).toBe('manual');
+    expect(detail.qrContent).toBeNull();
+    expect(detail.redirectUrl).toBeNull();
+    expect(d.wechatAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.alipayAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('adminMarkPaid 对 manual 单照常入账（裁决通过走既有路径，tradeNo=manual-{orderNo}）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ channel: 'manual' }));
+    const result = await mkSvc(d).adminMarkPaid('ORD1', 42);
+    expect(result).toBe('paid');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'manual-ORD1', expect.any(Date));
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+  });
+});
+
 describe('BillingService.listClaims（批④ Task 3）', () => {
   const mkClaimRow = (over: Partial<OrderRow & { parent_phone: string }> = {}) => ({
     ...mkOrder({

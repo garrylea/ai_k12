@@ -182,6 +182,14 @@ export class BillingService {
       }
     }
 
+    // 线下转账（批④ Task 4）：无渠道适配器可走——订单 pending 即下单产物，
+    // channel_trade_no/channel_qr_content 保持 NULL；入账只经 admin 裁决
+    // （approveClaim / adminMarkPaid）。防串单复用与 2h 超时上方逻辑已同样适用。
+    if (channel === 'manual') {
+      const row = await this.ordersRepo.findByOrderNo(orderNo);
+      return this.toView(row!); // 同一请求内刚写入，必存在
+    }
+
     const adapter = this.resolveAdapter(channel);
     let result: ChannelOrderResult;
     try {
@@ -239,6 +247,8 @@ export class BillingService {
    * 且**落 claim 转人工核实**（批④ Task 3：claim_status='pending_review'、claimed_at=now、
    * note ≤200 存 claim_note，重复点击刷新时间戳幂等）；渠道异常 → 2003（适配器自抛）。
    * note 超长 → 400/1001（不截断，家长侧输入本就限长）。
+   * manual 线下转账单（批④ Task 4）：跳过渠道查单（无渠道可查），note 必填
+   * （空/纯空白 → 400/1001「请填写转账备注」）→ 直接落 claim pending_review → 2004。
    * 返回值带 claimStatus（成功路径响应体透传；2004 错误体也带 claimStatus='pending_review'）。
    */
   async confirmPaid(
@@ -256,6 +266,20 @@ export class BillingService {
     }
     if (order.payment_status !== 'pending') {
       throw new BadRequestException({ code: 2002, message: '订单状态不允许该操作' });
+    }
+
+    // 线下转账（批④ Task 4）：无渠道可查——note 必填（空/纯空白 → 400/1001），
+    // 直接落 claim 转人工核实（admin 裁决通过后入账）；重复点击刷新 claimed_at 幂等。
+    if (order.channel === 'manual') {
+      if (!note || note.trim().length === 0) {
+        throw new BadRequestException({ code: 1001, message: '请填写转账备注' });
+      }
+      await this.ordersRepo.markClaim(order.id, 'pending_review', note, new Date());
+      throw new BadRequestException({
+        code: 2004,
+        message: '渠道尚未确认，已转人工核实',
+        claimStatus: 'pending_review',
+      });
     }
 
     const adapter = this.resolveAdapter(order.channel);
@@ -498,11 +522,14 @@ export class BillingService {
   // ---------- 内部 ----------
 
   /**
-   * 渠道选用：'mock' 仅在 `NODE_ENV==='test'` 或 `BILLING_USE_MOCK==='1'` 时放行
+   * 渠道选用：'manual'（线下转账，批④ Task 4）永远放行（但 createOrder/confirmPaid
+   * 对其不走适配器）；'mock' 仅在 `NODE_ENV==='test'` 或 `BILLING_USE_MOCK==='1'` 时放行
    * （且只解析到 MockPayAdapter）；真实下单只允许 wechat/alipay。
    */
   private isChannelAllowed(channel: string): boolean {
     if (channel === 'wechat' || channel === 'alipay') return true;
+    // 线下转账（批④ Task 4，当前付费主路径）：合法渠道但**不走适配器**（见 createOrder / confirmPaid）
+    if (channel === 'manual') return true;
     if (channel === 'mock') {
       return process.env.NODE_ENV === 'test' || process.env.BILLING_USE_MOCK === '1';
     }
