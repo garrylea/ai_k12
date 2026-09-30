@@ -45,6 +45,8 @@ function mkDeps() {
       markPaidTx: vi.fn().mockResolvedValue(1),
       setChannelResult: vi.fn().mockResolvedValue(undefined),
       cancelPending: vi.fn().mockResolvedValue(1),
+      markClaim: vi.fn().mockResolvedValue(undefined),
+      findClaims: vi.fn().mockResolvedValue({ total: 0, rows: [] }),
     },
     plansRepo: {
       findActiveByCode: vi.fn().mockResolvedValue({
@@ -466,7 +468,7 @@ describe('BillingService.confirmPaid', () => {
     d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
     d.mockAdapter.queryOrder.mockResolvedValue({ paid: true, tradeNo: 'T-Q', amountCents: 2000 });
     const result = await mkSvc(d).confirmPaid(3, 'ORD1');
-    expect(result).toBe('paid');
+    expect(result.result).toBe('paid');
     expect(d.mockAdapter.queryOrder).toHaveBeenCalledWith('ORD1');
     expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'T-Q', expect.any(Date));
     expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
@@ -495,7 +497,7 @@ describe('BillingService.confirmPaid', () => {
     const d = mkDeps();
     d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid' }));
     const result = await mkSvc(d).confirmPaid(3, 'ORD1');
-    expect(result).toBe('duplicate');
+    expect(result.result).toBe('duplicate');
     expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
   });
 
@@ -766,5 +768,250 @@ describe('BillingService.getOrder 自动查单（maybeQueryChannel，批④ Task
     expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(String(warnSpy.mock.calls[0][0])).toContain('金额不符');
+  });
+});
+
+describe('BillingService.confirmPaid claim 落库（批④ Task 3）', () => {
+  it('查单未支付 -> 2004 落 claim pending_review（note 透传、claimed_at 刷新），错误体带 claimStatus 与新 message', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.mockAdapter.queryOrder.mockResolvedValue({ paid: false, tradeNo: null, amountCents: null });
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1', '已扫码')).rejects.toMatchObject({
+      status: 400,
+      response: { code: 2004, message: '渠道尚未确认，已转人工核实', claimStatus: 'pending_review' },
+    });
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledTimes(1);
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'pending_review', '已扫码', expect.any(Date));
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('重复 confirm 幂等：每次都刷新 claimed_at（两次 markClaim pending_review），错误体同为 pending_review', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    d.mockAdapter.queryOrder.mockResolvedValue({ paid: false, tradeNo: null, amountCents: null });
+    const svc = mkSvc(d);
+    await expect(svc.confirmPaid(3, 'ORD1')).rejects.toMatchObject({ response: { claimStatus: 'pending_review' } });
+    await expect(svc.confirmPaid(3, 'ORD1')).rejects.toMatchObject({ response: { claimStatus: 'pending_review' } });
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledTimes(2);
+    expect(d.ordersRepo.markClaim).toHaveBeenNthCalledWith(2, 11, 'pending_review', undefined, expect.any(Date));
+  });
+
+  it('note 超过 200 字 -> 400/1001，不查渠道不落 claim', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder());
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1', '长'.repeat(201))).rejects.toMatchObject({
+      status: 400,
+      response: { code: 1001 },
+    });
+    expect(d.mockAdapter.queryOrder).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markClaim).not.toHaveBeenCalled();
+  });
+
+  it('查单已支付且 claim=pending_review -> 成功返回 { result: paid, claimStatus: approved }（finalize 挂点闭环）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ claim_status: 'pending_review' }));
+    d.mockAdapter.queryOrder.mockResolvedValue({ paid: true, tradeNo: 'T-Q', amountCents: 2000 });
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1')).resolves.toEqual({ result: 'paid', claimStatus: 'approved' });
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'approved');
+  });
+
+  it('订单已 paid（duplicate）-> claimStatus 原样透传订单行', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ payment_status: 'paid', claim_status: 'approved' }));
+    await expect(mkSvc(d).confirmPaid(3, 'ORD1')).resolves.toEqual({
+      result: 'duplicate',
+      claimStatus: 'approved',
+    });
+  });
+});
+
+describe('BillingService.finalizePaidOrder claim 闭环（批④ Task 3）', () => {
+  it('成功入账且 claim=pending_review -> COMMIT 之后（事务外）一条 UPDATE 置 approved', async () => {
+    const d = mkDeps();
+    const result = await mkSvc(d).finalizePaidOrder(mkOrder({ claim_status: 'pending_review' }), 'T-EXT');
+    expect(result).toBe('paid');
+    expect(d.conn.commit).toHaveBeenCalledTimes(1);
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledTimes(1);
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'approved');
+    // 挂点在 commit 之后
+    expect(d.ordersRepo.markClaim.mock.invocationCallOrder[0]).toBeGreaterThan(d.conn.commit.mock.invocationCallOrder[0]);
+  });
+
+  it('claim 为 null / approved / rejected -> 不再动 claim', async () => {
+    const d = mkDeps();
+    await mkSvc(d).finalizePaidOrder(mkOrder({ claim_status: null }), 'T-EXT');
+    await mkSvc(d).finalizePaidOrder(mkOrder({ claim_status: 'approved' }), 'T-EXT');
+    await mkSvc(d).finalizePaidOrder(mkOrder({ claim_status: 'rejected' }), 'T-EXT');
+    expect(d.ordersRepo.markClaim).not.toHaveBeenCalled();
+  });
+
+  it('claim UPDATE 失败 -> 只 warn，不回滚入账（仍返回 paid）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.markClaim.mockRejectedValue(new Error('db down'));
+    const svc = mkSvc(d);
+    const warnSpy = vi.spyOn((svc as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger, 'warn');
+    const result = await svc.finalizePaidOrder(mkOrder({ claim_status: 'pending_review' }), 'T-EXT');
+    expect(result).toBe('paid');
+    expect(d.conn.commit).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('BillingService.approveClaim / rejectClaim（批④ Task 3）', () => {
+  it('approve：pending 单 + pending_review -> finalize（tradeNo=manual-）+ claim approved，返回 paid', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ claim_status: 'pending_review' }));
+    const result = await mkSvc(d).approveClaim('ORD1', 42);
+    expect(result).toBe('paid');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'manual-ORD1', expect.any(Date));
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'approved');
+    expect(d.subscriptionsService.renewWithinTx).toHaveBeenCalledWith(d.conn, 3, 'month', 30);
+  });
+
+  it('approve：expired 单也放行（markPaidTx 放行 expired）-> paid + approved', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ claim_status: 'pending_review', payment_status: 'expired' }),
+    );
+    const result = await mkSvc(d).approveClaim('ORD1', 42);
+    expect(result).toBe('paid');
+    expect(d.ordersRepo.markPaidTx).toHaveBeenCalledWith(d.conn, 11, 'manual-ORD1', expect.any(Date));
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'approved');
+  });
+
+  it('approve：cancelled -> 2002，不 finalize 不动 claim', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ claim_status: 'pending_review', payment_status: 'cancelled' }),
+    );
+    await expect(mkSvc(d).approveClaim('ORD1', 42)).rejects.toMatchObject({ response: { code: 2002 } });
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markClaim).not.toHaveBeenCalled();
+  });
+
+  it('approve：claim 非 pending_review（null/rejected）-> 2002，不 finalize', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ claim_status: null }));
+    await expect(mkSvc(d).approveClaim('ORD1', 42)).rejects.toMatchObject({ response: { code: 2002 } });
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ claim_status: 'rejected' }));
+    await expect(mkSvc(d).approveClaim('ORD1', 42)).rejects.toMatchObject({ response: { code: 2002 } });
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+  });
+
+  it('approve：已 paid 但 claim 仍 pending_review -> duplicate + 只补 claim approved（不重复入账）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ claim_status: 'pending_review', payment_status: 'paid' }),
+    );
+    const result = await mkSvc(d).approveClaim('ORD1', 42);
+    expect(result).toBe('duplicate');
+    expect(d.ordersRepo.markPaidTx).not.toHaveBeenCalled();
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'approved');
+  });
+
+  it('approve：订单不存在 -> 404/1005', async () => {
+    const d = mkDeps();
+    await expect(mkSvc(d).approveClaim('ORDX', 42)).rejects.toMatchObject({
+      status: 404,
+      response: { code: 1005 },
+    });
+  });
+
+  it('reject：pending_review -> rejected，reason 追加到 claim_note 尾部', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ claim_status: 'pending_review', claim_note: '家长说已付' }),
+    );
+    await mkSvc(d).rejectClaim('ORD1', 42, '渠道查无此单');
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledTimes(1);
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'rejected', '家长说已付；驳回：渠道查无此单');
+  });
+
+  it('reject：无 reason -> 追加「驳回」；无原 note -> 直接以「驳回：…」开头', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ claim_status: 'pending_review', claim_note: 'note1' }));
+    await mkSvc(d).rejectClaim('ORD1', 42);
+    expect(d.ordersRepo.markClaim).toHaveBeenCalledWith(11, 'rejected', 'note1；驳回');
+
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ claim_status: 'pending_review', claim_note: null }));
+    await mkSvc(d).rejectClaim('ORD1', 42, '查无此单');
+    expect(d.ordersRepo.markClaim).toHaveBeenLastCalledWith(11, 'rejected', '驳回：查无此单');
+  });
+
+  it('reject：拼接超过 200 字 -> 截断 200（列宽）', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(
+      mkOrder({ claim_status: 'pending_review', claim_note: 'x'.repeat(195) }),
+    );
+    await mkSvc(d).rejectClaim('ORD1', 42, 'y'.repeat(30));
+    const note = d.ordersRepo.markClaim.mock.calls[0][2] as string;
+    expect(note.length).toBe(200);
+    expect(note.startsWith('xxxxx')).toBe(true);
+  });
+
+  it('reject：claim 非 pending_review -> 2002；订单不存在 -> 404/1005；均不动 claim', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findByOrderNo.mockResolvedValue(mkOrder({ claim_status: 'approved' }));
+    await expect(mkSvc(d).rejectClaim('ORD1', 42)).rejects.toMatchObject({ response: { code: 2002 } });
+    d.ordersRepo.findByOrderNo.mockResolvedValue(null);
+    await expect(mkSvc(d).rejectClaim('ORDX', 42)).rejects.toMatchObject({ response: { code: 1005 } });
+    expect(d.ordersRepo.markClaim).not.toHaveBeenCalled();
+  });
+});
+
+describe('BillingService.listClaims（批④ Task 3）', () => {
+  const mkClaimRow = (over: Partial<OrderRow & { parent_phone: string }> = {}) => ({
+    ...mkOrder({
+      claim_status: 'pending_review',
+      claimed_at: new Date('2026-09-30T08:00:00.000Z'),
+      claim_note: '家长说已付',
+      payment_status: 'pending' as const,
+    }),
+    parent_phone: '13800000000',
+    ...over,
+  });
+
+  it('status 缺省 pending_review；page/pageSize 默认 1/20；item 形状映射', async () => {
+    const d = mkDeps();
+    d.ordersRepo.findClaims.mockResolvedValue({ total: 1, rows: [mkClaimRow()] });
+    const res = await mkSvc(d).listClaims();
+    expect(d.ordersRepo.findClaims).toHaveBeenCalledWith('pending_review', 1, 20);
+    expect(res).toEqual({
+      total: 1,
+      page: 1,
+      pageSize: 20,
+      items: [
+        {
+          orderNo: 'ORD1',
+          parentPhone: '13800000000',
+          planName: '月卡',
+          amountCents: 2000,
+          claimStatus: 'pending_review',
+          claimedAt: '2026-09-30T08:00:00.000Z',
+          claimNote: '家长说已付',
+          paymentStatus: 'pending',
+        },
+      ],
+    });
+  });
+
+  it('status/page/pageSize 显式传参透传 repo', async () => {
+    const d = mkDeps();
+    await mkSvc(d).listClaims('approved', 2, 10);
+    expect(d.ordersRepo.findClaims).toHaveBeenCalledWith('approved', 2, 10);
+  });
+
+  it.each([
+    ['status 非法', 'whatever', 1, 20],
+    ['page=0', 'pending_review', 0, 20],
+    ['pageSize=51', 'pending_review', 1, 51],
+    ['pageSize=2.5', 'pending_review', 1, 2.5],
+  ] as const)('listClaims 越界（%s）-> 400/1001 不钳制（仓规）', async (_name, status, page, pageSize) => {
+    const d = mkDeps();
+    await expect(mkSvc(d).listClaims(status as never, page as number, pageSize as number)).rejects.toMatchObject({
+      status: 400,
+      response: { code: 1001 },
+    });
+    expect(d.ordersRepo.findClaims).not.toHaveBeenCalled();
   });
 });

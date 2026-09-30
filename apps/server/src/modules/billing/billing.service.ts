@@ -9,7 +9,12 @@ import {
 } from '@nestjs/common';
 import type { Pool } from 'mysql2/promise';
 import { OrdersRepository, parseOrderSnapshot } from '../../database/repositories/orders.repo.js';
-import type { OrderPlanSnapshot, OrderRow } from '../../database/repositories/orders.repo.js';
+import type {
+  OrderClaimStatus,
+  OrderPaymentStatus,
+  OrderPlanSnapshot,
+  OrderRow,
+} from '../../database/repositories/orders.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 import { SubscriptionsService } from './subscriptions.service.js';
 import { ORDER_PENDING_TTL_MINUTES } from './billing.config.js';
@@ -43,6 +48,25 @@ export interface OrderDetailView extends OrderView {
 
 export interface OrderListResult {
   items: OrderView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** admin 待裁决列表行（批④ Task 3）。 */
+export interface ClaimView {
+  orderNo: string;
+  parentPhone: string;
+  planName: string;
+  amountCents: number;
+  claimStatus: OrderClaimStatus;
+  claimedAt: string | null;
+  claimNote: string | null;
+  paymentStatus: OrderPaymentStatus;
+}
+
+export interface ClaimListResult {
+  items: ClaimView[];
   total: number;
   page: number;
   pageSize: number;
@@ -212,12 +236,24 @@ export class BillingService {
 
   /**
    * 「我已付款」兜底：家长点按钮后主动查渠道。已支付 → finalize；未支付 → 2004
-   * （前端提示稍后再试）；渠道异常 → 2003（适配器自抛）。
+   * 且**落 claim 转人工核实**（批④ Task 3：claim_status='pending_review'、claimed_at=now、
+   * note ≤200 存 claim_note，重复点击刷新时间戳幂等）；渠道异常 → 2003（适配器自抛）。
+   * note 超长 → 400/1001（不截断，家长侧输入本就限长）。
+   * 返回值带 claimStatus（成功路径响应体透传；2004 错误体也带 claimStatus='pending_review'）。
    */
-  async confirmPaid(parentId: number, orderNo: string): Promise<'paid' | 'duplicate'> {
+  async confirmPaid(
+    parentId: number,
+    orderNo: string,
+    note?: string,
+  ): Promise<{ result: 'paid' | 'duplicate'; claimStatus: OrderClaimStatus | null }> {
+    if (note != null && note.length > 200) {
+      throw new BadRequestException({ code: 1001, message: 'note 不能超过 200 字' });
+    }
     await this.ordersRepo.expireStale(); // 读时惰性翻转
     const order = await this.requireOwnedOrder(parentId, orderNo);
-    if (order.payment_status === 'paid') return 'duplicate';
+    if (order.payment_status === 'paid') {
+      return { result: 'duplicate', claimStatus: order.claim_status };
+    }
     if (order.payment_status !== 'pending') {
       throw new BadRequestException({ code: 2002, message: '订单状态不允许该操作' });
     }
@@ -225,7 +261,13 @@ export class BillingService {
     const adapter = this.resolveAdapter(order.channel);
     const q = await adapter.queryOrder(order.order_no);
     if (!q.paid) {
-      throw new BadRequestException({ code: 2004, message: '渠道尚未确认支付，请稍后再试' });
+      // 渠道未确认：落 claim（转人工核实，admin 列表可见）。重复点击每次刷新 claimed_at，幂等
+      await this.ordersRepo.markClaim(order.id, 'pending_review', note, new Date());
+      throw new BadRequestException({
+        code: 2004,
+        message: '渠道尚未确认，已转人工核实',
+        claimStatus: 'pending_review',
+      });
     }
     if (q.amountCents != null && q.amountCents !== order.amount_cents) {
       this.logger.warn(
@@ -233,7 +275,11 @@ export class BillingService {
       );
       throw new BadRequestException({ code: 2004, message: '渠道金额与订单不符，未确认支付' });
     }
-    return this.finalizePaidOrder(order, q.tradeNo ?? order.order_no);
+    const result = await this.finalizePaidOrder(order, q.tradeNo ?? order.order_no);
+    // finalize 的挂点已把 pending_review → approved；这里按入账结果报最终口径（不回读）
+    const claimStatus: OrderClaimStatus | null =
+      result === 'paid' && order.claim_status === 'pending_review' ? 'approved' : order.claim_status;
+    return { result, claimStatus };
   }
 
   // ---------- 状态迁移（回调 / admin） ----------
@@ -324,6 +370,94 @@ export class BillingService {
     return result;
   }
 
+  // ---------- 裁决链路（claim 状态机，批④ Task 3） ----------
+
+  /**
+   * admin 通过裁决：复用 {@link adminMarkPaid} 的入账语义（finalize + `manual-` tradeNo + 审计留痕），
+   * 但状态闸门放宽到 expired（markPaidTx 本就放行 pending|expired——家长只是超时后才被确认付款，
+   * 钱是真的就不该白过期）；cancelled 仍 2002。claim 非 pending_review → 2002。
+   * claim 置 approved 由 finalize 内挂点完成；「已 paid 但 claim 仍 pending_review」（挂点当时失败）
+   * 在这里补一条幂等 UPDATE。
+   */
+  async approveClaim(orderNo: string, adminId?: number): Promise<'paid' | 'duplicate'> {
+    const order = await this.ordersRepo.findByOrderNo(orderNo);
+    if (!order) throw new NotFoundException({ code: 1005, message: '订单不存在' });
+    if (order.claim_status !== 'pending_review') {
+      throw new BadRequestException({ code: 2002, message: '该订单不在待人工核验状态' });
+    }
+    if (order.payment_status === 'cancelled') {
+      throw new BadRequestException({ code: 2002, message: '订单状态不允许该操作' });
+    }
+    let result: 'paid' | 'duplicate';
+    if (order.payment_status === 'paid') {
+      result = 'duplicate'; // 入账已发生过，不重复续期，只补 claim 闭环
+    } else {
+      result = await this.finalizePaidOrder(order, `manual-${order.order_no}`);
+    }
+    if (result === 'duplicate') {
+      try {
+        await this.ordersRepo.markClaim(order.id, 'approved');
+      } catch (err) {
+        this.logger.warn(`[billing] claim 置 approved 失败 orderNo=${orderNo}: ${err}`);
+      }
+    }
+    this.logger.log(
+      `[BILLING] admin approve-claim：adminId=${adminId ?? 'unknown'} orderNo=${orderNo} result=${result} time=${new Date().toISOString()}`,
+    );
+    return result;
+  }
+
+  /**
+   * admin 驳回裁决：claim 必须为 pending_review（否则 2002）→ 'rejected'。
+   * reason 追加到 claim_note 尾部（`原note；驳回：reason`），截断 200（列宽 VARCHAR(200)）。
+   */
+  async rejectClaim(orderNo: string, adminId?: number, reason?: string): Promise<void> {
+    const order = await this.ordersRepo.findByOrderNo(orderNo);
+    if (!order) throw new NotFoundException({ code: 1005, message: '订单不存在' });
+    if (order.claim_status !== 'pending_review') {
+      throw new BadRequestException({ code: 2002, message: '该订单不在待人工核验状态' });
+    }
+    const parts = [order.claim_note ?? '', reason ? `驳回：${reason}` : '驳回'].filter((s) => s.length > 0);
+    const note = parts.join('；').slice(0, 200);
+    await this.ordersRepo.markClaim(order.id, 'rejected', note);
+    this.logger.log(
+      `[BILLING] admin reject-claim：adminId=${adminId ?? 'unknown'} orderNo=${orderNo} note=${note} time=${new Date().toISOString()}`,
+    );
+  }
+
+  /**
+   * admin 待裁决列表：status 缺省 pending_review、非法值 400/1001；分页校验同 listOrders
+   * （越界 400/1001 不钳制，仓规）。
+   */
+  async listClaims(status?: string, page = 1, pageSize = 20): Promise<ClaimListResult> {
+    if (!Number.isInteger(page) || page < 1) {
+      throw new BadRequestException({ code: 1001, message: 'page 必须是正整数' });
+    }
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 50) {
+      throw new BadRequestException({ code: 1001, message: 'pageSize 必须是 1..50 的整数' });
+    }
+    const st = status ?? 'pending_review';
+    if (st !== 'pending_review' && st !== 'approved' && st !== 'rejected') {
+      throw new BadRequestException({ code: 1001, message: 'status 必须是 pending_review/approved/rejected' });
+    }
+    const { total, rows } = await this.ordersRepo.findClaims(st, page, pageSize);
+    return {
+      items: rows.map((r) => ({
+        orderNo: r.order_no,
+        parentPhone: r.parent_phone,
+        planName: parseOrderSnapshot(r.plan_snapshot).name,
+        amountCents: r.amount_cents,
+        claimStatus: r.claim_status!,
+        claimedAt: ISO(r.claimed_at),
+        claimNote: r.claim_note,
+        paymentStatus: r.payment_status,
+      })),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
   // ---------- 核心：入账事务 ----------
 
   /**
@@ -343,6 +477,15 @@ export class BillingService {
       const snap = parseOrderSnapshot(order.plan_snapshot);
       await this.subscriptionsService.renewWithinTx(conn, order.parent_id, snap.planCode, snap.durationDays);
       await conn.commit();
+      // claim 闭环挂点（批④ Task 3）：放事务**外**——claim 置 approved 失败只 warn，
+      // 绝不回滚入账（admin 列表仍可见 pending_review，可走 approveClaim 补挂）
+      if (order.claim_status === 'pending_review') {
+        try {
+          await this.ordersRepo.markClaim(order.id, 'approved');
+        } catch (err) {
+          this.logger.warn(`[billing] claim 置 approved 失败（入账已完成不回滚）orderNo=${order.order_no}: ${err}`);
+        }
+      }
       return 'paid';
     } catch (err) {
       await conn.rollback();

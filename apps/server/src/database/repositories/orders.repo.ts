@@ -4,6 +4,12 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 export type OrderPaymentStatus = 'pending' | 'paid' | 'cancelled' | 'expired';
 
 /**
+ * 订单裁决（claim）状态（批④ Task 3）：NULL = 家长从未主张过「我已付款」。
+ * pending_review（confirm-paid 查单未确认时落）→ approved（真实入账后自动闭环 / admin 通过）| rejected（admin 驳回）。
+ */
+export type OrderClaimStatus = 'pending_review' | 'approved' | 'rejected';
+
+/**
  * `plan_snapshot` JSON 列的形状（下单时的套餐快照：目录改名/调价/下架不影响历史订单）。
  * finalize 事务从这里取 planCode/durationDays，不回查套餐表（套餐可能已下架）。
  */
@@ -29,6 +35,9 @@ export interface OrderRow extends RowDataPacket {
   paid_at: Date | null;
   cancelled_at: Date | null;
   expires_at: Date;
+  claim_status: OrderClaimStatus | null;
+  claimed_at: Date | null;
+  claim_note: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -164,5 +173,51 @@ export class OrdersRepository {
       [cancelledAt, orderId],
     );
     return result.affectedRows;
+  }
+
+  /**
+   * claim 读写（批④ Task 3）：`status` 必写；`note` 传 undefined = 不动 claim_note
+   * （传 null = 置 NULL，本仓链路不会用到）；`claimedAt` 传 undefined = 不动 claimed_at
+   * （只有落 pending_review 时由调用方传时间刷新——重复 confirm 幂等刷新时间戳）。
+   */
+  async markClaim(
+    orderId: number,
+    status: OrderClaimStatus,
+    note?: string | null,
+    claimedAt?: Date,
+  ): Promise<void> {
+    const sets: string[] = ['claim_status = ?'];
+    const params: (string | Date | number | null)[] = [status];
+    if (note !== undefined) {
+      sets.push('claim_note = ?');
+      params.push(note);
+    }
+    if (claimedAt !== undefined) {
+      sets.push('claimed_at = ?');
+      params.push(claimedAt);
+    }
+    params.push(orderId);
+    await this.pool.execute<ResultSetHeader>(`UPDATE orders SET ${sets.join(', ')} WHERE id = ?`, params);
+  }
+
+  /**
+   * admin 待裁决列表（批④ Task 3）：claim_status 过滤 + claimed_at 倒序（最新主张在前），
+   * JOIN parents 取手机号（admin 复核联系方式用）。分页用池 `query`（`LIMIT ?` 坑，
+   * 同 {@link OrdersRepository.listByParent}）。
+   */
+  async findClaims(status: OrderClaimStatus, page: number, pageSize: number) {
+    const offset = (page - 1) * pageSize;
+    const [[cntRows], [rows]] = await Promise.all([
+      this.pool.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM orders WHERE claim_status = ?`, [status]),
+      this.pool.query<RowDataPacket[]>(
+        `SELECT o.*, p.phone AS parent_phone
+           FROM orders o JOIN parents p ON p.id = o.parent_id
+          WHERE o.claim_status = ?
+          ORDER BY o.claimed_at DESC, o.id DESC
+          LIMIT ? OFFSET ?`,
+        [status, pageSize, offset],
+      ),
+    ]);
+    return { total: Number(cntRows[0].total), rows: rows as (OrderRow & { parent_phone: string })[] };
   }
 }

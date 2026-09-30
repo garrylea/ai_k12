@@ -34,8 +34,8 @@ function makeCallbackController(handleCallback: ReturnType<typeof vi.fn>) {
   return new BillingCallbackController({ handleCallback } as unknown as BillingService);
 }
 
-function makeAdminController(adminMarkPaid: ReturnType<typeof vi.fn>) {
-  return new AdminBillingController({ adminMarkPaid } as unknown as BillingService);
+function makeAdminController(service: Partial<Record<keyof BillingService, ReturnType<typeof vi.fn>>>) {
+  return new AdminBillingController(service as unknown as BillingService);
 }
 
 const PARENT: JwtUser = { sub: 7, role: 'parent' };
@@ -120,6 +120,28 @@ describe('AdminBillingController 路由形状', () => {
   it('@Roles(admin)（家长/学生 token 打不进来）', () => {
     expect(new Reflector().get<string[]>('roles', AdminBillingController)).toEqual(['admin']);
   });
+
+  it('claims 列表 + approve/reject 路由形状：approve/reject 显式 @HttpCode(200)', () => {
+    const listClaims = AdminBillingController.prototype.listClaims;
+    const approveClaim = AdminBillingController.prototype.approveClaim;
+    const rejectClaim = AdminBillingController.prototype.rejectClaim;
+
+    expect(Reflect.getMetadata(METHOD_METADATA, listClaims)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PATH_METADATA, listClaims)).toBe('orders/claims');
+
+    expect(Reflect.getMetadata(METHOD_METADATA, approveClaim)).toBe(RequestMethod.POST);
+    expect(Reflect.getMetadata(PATH_METADATA, approveClaim)).toBe('orders/:orderNo/claims/approve');
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, approveClaim)).toBe(200);
+
+    expect(Reflect.getMetadata(METHOD_METADATA, rejectClaim)).toBe(RequestMethod.POST);
+    expect(Reflect.getMetadata(PATH_METADATA, rejectClaim)).toBe('orders/:orderNo/claims/reject');
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, rejectClaim)).toBe(200);
+  });
+
+  it('路由顺序：claims 字面路由必须注册在 :orderNo 参数路由之前（Nest 按方法声明顺序匹配）', () => {
+    const proto = Object.getOwnPropertyNames(AdminBillingController.prototype);
+    expect(proto.indexOf('listClaims')).toBeLessThan(proto.indexOf('markPaid'));
+  });
 });
 
 describe('BillingController 委派', () => {
@@ -164,18 +186,27 @@ describe('BillingController 委派', () => {
     expect(cancel).toHaveBeenCalledWith(7, 'ORD1');
   });
 
-  it('confirm-paid：service 的 paid/duplicate 都按已支付回，currentPeriodEnd 取自订阅状态视图', async () => {
-    const confirmPaid = vi.fn().mockResolvedValue('paid');
+  it('confirm-paid：service 的 paid/duplicate 都按已支付回，claimStatus/currentPeriodEnd 透传；body.note 可选透传', async () => {
+    const confirmPaid = vi.fn().mockResolvedValue({ result: 'paid', claimStatus: 'approved' });
     const getStatusView = vi.fn().mockResolvedValue({ currentPeriodEnd: '2026-10-30T00:00:00.000Z' });
     const controller = makeBillingController({ confirmPaid }, { getStatusView });
 
-    await expect(controller.confirmPaid('ORD1', PARENT)).resolves.toEqual({
+    await expect(controller.confirmPaid('ORD1', { note: '已扫码付款' }, PARENT)).resolves.toEqual({
       orderNo: 'ORD1',
       paymentStatus: 'paid',
+      claimStatus: 'approved',
       currentPeriodEnd: '2026-10-30T00:00:00.000Z',
     });
-    expect(confirmPaid).toHaveBeenCalledWith(7, 'ORD1');
+    expect(confirmPaid).toHaveBeenCalledWith(7, 'ORD1', '已扫码付款');
     expect(getStatusView).toHaveBeenCalledWith({ role: 'parent', sub: 7 });
+
+    // 无 body / 无 note：归一为 undefined 透传
+    await controller.confirmPaid('ORD1', undefined, PARENT);
+    expect(confirmPaid).toHaveBeenLastCalledWith(7, 'ORD1', undefined);
+    await controller.confirmPaid('ORD1', {}, PARENT);
+    expect(confirmPaid).toHaveBeenLastCalledWith(7, 'ORD1', undefined);
+    await controller.confirmPaid('ORD1', { note: 123 as never }, PARENT);
+    expect(confirmPaid).toHaveBeenLastCalledWith(7, 'ORD1', undefined);
   });
 });
 
@@ -217,7 +248,7 @@ describe('BillingCallbackController 委派', () => {
 describe('AdminBillingController 委派', () => {
   it('mark-paid：透传 orderNo + 操作人 JWT sub（审计），paid/duplicate 都回 paymentStatus=paid', async () => {
     const adminMarkPaid = vi.fn().mockResolvedValue('paid');
-    const controller = makeAdminController(adminMarkPaid);
+    const controller = makeAdminController({ adminMarkPaid });
     const admin: JwtUser = { sub: 9, role: 'admin' };
 
     await expect(controller.markPaid('ORD1', admin)).resolves.toEqual({ orderNo: 'ORD1', paymentStatus: 'paid' });
@@ -225,5 +256,39 @@ describe('AdminBillingController 委派', () => {
 
     (adminMarkPaid as ReturnType<typeof vi.fn>).mockResolvedValue('duplicate');
     await expect(controller.markPaid('ORD1', admin)).resolves.toEqual({ orderNo: 'ORD1', paymentStatus: 'paid' });
+  });
+
+  it('listClaims：query 透传（string→number），status 缺省 undefined 由 service 兜底 pending_review', async () => {
+    const listClaims = vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+    const controller = makeAdminController({ listClaims });
+
+    await controller.listClaims(undefined, '2', '10');
+    expect(listClaims).toHaveBeenCalledWith(undefined, 2, 10);
+
+    await controller.listClaims('rejected', undefined, undefined);
+    expect(listClaims).toHaveBeenLastCalledWith('rejected', undefined, undefined);
+  });
+
+  it('approve / reject：透传 orderNo + 操作人 JWT sub；reject 的 reason 可选（非 string 归一 undefined）', async () => {
+    const approveClaim = vi.fn().mockResolvedValue('paid');
+    const rejectClaim = vi.fn().mockResolvedValue(undefined);
+    const controller = makeAdminController({ approveClaim, rejectClaim });
+    const admin: JwtUser = { sub: 9, role: 'admin' };
+
+    await expect(controller.approveClaim('ORD1', admin)).resolves.toEqual({
+      orderNo: 'ORD1',
+      paymentStatus: 'paid',
+      result: 'paid',
+    });
+    expect(approveClaim).toHaveBeenCalledWith('ORD1', 9);
+
+    await controller.rejectClaim('ORD1', { reason: '渠道查无此单' }, admin);
+    expect(rejectClaim).toHaveBeenCalledWith('ORD1', 9, '渠道查无此单');
+
+    await controller.rejectClaim('ORD1', {}, admin);
+    expect(rejectClaim).toHaveBeenLastCalledWith('ORD1', 9, undefined);
+
+    await controller.rejectClaim('ORD1', { reason: 123 as never }, admin);
+    expect(rejectClaim).toHaveBeenLastCalledWith('ORD1', 9, undefined);
   });
 });

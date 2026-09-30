@@ -64,14 +64,21 @@ export class BillingController {
   }
 
   /**
-   * 「我已付款」兜底。service 返回 'paid' | 'duplicate'（并发已入账），
-   * 两者对前端都是已支付；currentPeriodEnd 从订阅状态视图取，供支付成功页直接展示。
+   * 「我已付款」兜底。body 可带 note（≤200，超长由 service 400/1001）——查单未确认时
+   * 存入 claim_note 供 admin 裁决参考。service 返回 'paid' | 'duplicate'（并发已入账），
+   * 两者对前端都是已支付；claimStatus 随 2004 错误体（pending_review）或成功响应体透传；
+   * currentPeriodEnd 从订阅状态视图取，供支付成功页直接展示。
    */
   @Post('orders/:orderNo/confirm-paid')
   @HttpCode(200)
-  async confirmPaid(@Param('orderNo') orderNo: string, @CurrentUser() user: JwtUser) {
-    await this.billingService.confirmPaid(user.sub, orderNo);
+  async confirmPaid(
+    @Param('orderNo') orderNo: string,
+    @Body() body: { note?: string } | undefined,
+    @CurrentUser() user: JwtUser,
+  ) {
+    const note = typeof body?.note === 'string' ? body.note : undefined;
+    const { claimStatus } = await this.billingService.confirmPaid(user.sub, orderNo, note);
     const status = await this.subscriptionsService.getStatusView({ role: 'parent', sub: user.sub });
-    return { orderNo, paymentStatus: 'paid' as const, currentPeriodEnd: status.currentPeriodEnd };
+    return { orderNo, paymentStatus: 'paid' as const, claimStatus, currentPeriodEnd: status.currentPeriodEnd };
   }
 }
