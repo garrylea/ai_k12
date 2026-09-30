@@ -3007,3 +3007,95 @@ export function confirmBillingOrderPaid(
     ...(note !== undefined ? { body: JSON.stringify({ note }) } : {}),
   });
 }
+
+// --- 管理端：订阅裁决 / 家庭订阅（订阅批④ Task 7；spec §2.3 / §5.25） ---
+// 端点全部在 /api/admin/billing 下（@Roles('admin')）。管理端没有订单详情端点，
+// 「现场核验」= 页面行内刷新 + 线下核实提示，**不调家长端 GET /billing/orders/{orderNo}**。
+
+/** 待裁决列表行（service.listClaims 的映射，批④ Task 3 审定口径）。 */
+export interface AdminBillingClaimView {
+  orderNo: string;
+  parentPhone: string;
+  planName: string;
+  amountCents: number;
+  claimStatus: OrderClaimStatus;
+  claimedAt: string;
+  claimNote: string | null;
+  paymentStatus: string;
+}
+
+/** 家庭订阅列表行（subscriptionsService.listFamilies 的映射，status 实时推导）。 */
+export interface AdminFamilyView {
+  parentId: number;
+  phone: string;
+  studentCount: number;
+  status: 'trialing' | 'active' | 'expired';
+  planCode: string | null;
+  trialEndsAt: string | null;
+  currentPeriodEnd: string | null;
+}
+
+export function listBillingClaims(
+  status: OrderClaimStatus = 'pending_review',
+  page = 1,
+  pageSize = 20,
+): Promise<{ items: AdminBillingClaimView[]; total: number; page: number; pageSize: number }> {
+  const qs = new URLSearchParams({ status, page: String(page), pageSize: String(pageSize) });
+  return fetchApi(`/admin/billing/orders/claims?${qs.toString()}`);
+}
+
+/** 通过（入账 + 开通订阅）。'paid' 与幂等 'duplicate' 对 admin 都是成功。 */
+export function approveBillingClaim(orderNo: string): Promise<{
+  orderNo: string;
+  paymentStatus: string;
+  result: 'paid' | 'duplicate';
+}> {
+  return fetchApi(`/admin/billing/orders/${encodeURIComponent(orderNo)}/claims/approve`, {
+    method: 'POST',
+  });
+}
+
+/** 驳回（reason 追加进 claim_note，后端截断 200）。 */
+export function rejectBillingClaim(
+  orderNo: string,
+  reason?: string,
+): Promise<{ orderNo: string; claimStatus: OrderClaimStatus }> {
+  return fetchApi(`/admin/billing/orders/${encodeURIComponent(orderNo)}/claims/reject`, {
+    method: 'POST',
+    ...(reason !== undefined ? { body: JSON.stringify({ reason }) } : {}),
+  });
+}
+
+export function listBillingFamilies(
+  keyword: string,
+  page = 1,
+  pageSize = 20,
+): Promise<{ items: AdminFamilyView[]; total: number; page: number; pageSize: number }> {
+  const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (keyword.trim().length > 0) qs.set('keyword', keyword.trim());
+  return fetchApi(`/admin/billing/families?${qs.toString()}`);
+}
+
+/** 设定试用截止（null = 收回）。trialEndsAt 键必须存在（null 合法，缺键语义不同）。返回写后新 StatusView。 */
+export function setFamilyTrial(
+  parentId: number,
+  trialEndsAt: string | null,
+): Promise<SubscriptionStatusView> {
+  return fetchApi(`/admin/billing/families/${parentId}/trial`, {
+    method: 'PUT',
+    body: JSON.stringify({ trialEndsAt }),
+  });
+}
+
+/** 赠送 / 扣减订阅天数（正负号即方向，0 由后端 400/1001）。返回写后新 StatusView。 */
+export function grantFamilyDays(
+  parentId: number,
+  days: number,
+  reason?: string,
+): Promise<SubscriptionStatusView> {
+  return fetchApi(`/admin/billing/families/${parentId}/grant`, {
+    method: 'POST',
+    // 不带 reason 时不发该键（与 confirmBillingOrderPaid 同口径）
+    body: JSON.stringify(reason !== undefined ? { days, reason } : { days }),
+  });
+}
