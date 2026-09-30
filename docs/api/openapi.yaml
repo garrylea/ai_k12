@@ -41,6 +41,8 @@ tags:
     description: 管理员中枢（模型配置/封禁/推送/AI 聊天）
   - name: Quota
     description: AI 额度与套餐
+  - name: Billing
+    description: 订阅收费：家长订单、支付渠道回调（免 JWT）、admin 人工补单
   - name: Practice
     description: 课堂练习判对错
   - name: Training
@@ -4035,6 +4037,10 @@ paths:
       tags: [Quota]
       summary: 当前套餐
       operationId: getCurrentQuota
+      deprecated: true
+      description: |
+        **已废弃（2026-09-30）**：P2 占位端点，从未实现（订阅/额度当时无表）。
+        现行订阅状态读 `GET /quota/subscription`。
       responses:
         '200':
           description: 套餐信息
@@ -4047,6 +4053,313 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/Quota'
+  /quota/subscription:
+    get:
+      tags: [Quota]
+      summary: 订阅状态视图（三角色统一口径）
+      description: >-
+        学生按学生反查家庭、家长/管理员按自身。截止时刻当刻仍有效；
+        source 按口径推导：有付费期（current_period_end 非空）→ order，否则一律 trial（含无行 expired）。
+        学生被订阅门禁锁定时本端点豁免（锁定页读状态）。
+      operationId: getSubscriptionStatus
+      responses:
+        '200':
+          description: 订阅状态视图
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubscriptionStatusView'
+  /quota/plans:
+    get:
+      tags: [Quota]
+      summary: 在售套餐目录（subscription_plans.is_active=1）
+      description: DB seed 维护，本期无 admin UI（改价直接 UPDATE）。金额分单位。
+      operationId: listSubscriptionPlans
+      responses:
+        '200':
+          description: 套餐列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SubscriptionPlanView'
+  /quota/usage:
+    get:
+      tags: [Quota]
+      summary: AI 用量聚合（仅家长；rolling 30 天近似口径）
+      description: >-
+        仅家长：学生 token → RolesGuard 403/1005（不是 1003）。JWT sub 即 parent_id，
+        聚合其名下所有学生（JOIN students）。口径：periodEnd = currentPeriodEnd ?? now、
+        periodStart = periodEnd − 30 天（orders 未存 period_start，spec「当前订阅周期」按此落地）；
+        calls 是 COUNT(*)，含失败/重试/fallback 行；tokensUnknown = input 或 output 为 NULL
+        的调用计数（NULL = 量不到，绝不按 0 混入）；byDay 只回有数据日、日界随 DB 会话时区。
+      operationId: getAiUsage
+      responses:
+        '200':
+          description: 用量聚合视图
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UsageView'
+
+  # Billing
+  /billing/orders:
+    post:
+      tags: [Billing]
+      summary: 创建订单（家长）
+      description: >-
+        Nest @Post 默认 201（复用 pending 单时也是 201）。防串单：已有 pending 单时——
+        同套餐同渠道复用返回；换套餐或换渠道 → 400/2002（先取消旧单或等 2h 超时）。
+        套餐不存在/下架 → 404/2005；渠道下单失败 → 503/2003（订单保留 pending，可取消重下）。
+        BILLING_USE_MOCK=1 时 wechat/alipay 也解析到 Mock 适配器（演示模式）。
+        下单响应不含支付凭证——qrContent/redirectUrl 来自订单详情轮询。
+      operationId: createBillingOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingCreateOrderRequest'
+      responses:
+        '201':
+          description: 订单已创建（或复用既有 pending 单）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BillingOrderView'
+        '400':
+          description: 参数错误（1001 不支持的支付渠道）或 2002 已有进行中订单
+        '404':
+          description: 2005 套餐不存在或已下架
+        '503':
+          description: 2003 支付渠道异常
+    get:
+      tags: [Billing]
+      summary: 订单列表（当前家长）
+      description: page 缺省 1；pageSize 缺省 20、1..50；非法值 400/1001 不钳制（仓规）。
+      operationId: listBillingOrders
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: 订单分页列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BillingOrderListResult'
+  /billing/orders/{orderNo}:
+    get:
+      tags: [Billing]
+      summary: 订单详情（含支付凭证）
+      description: >-
+        OrderView + qrContent（二维码内容）/redirectUrl（跳转支付入口，本批恒 null）。
+        家长下单后每 3s 轮询本端点取支付凭证与状态（前端支付弹层轮询间隔）。
+        订单不存在与不属于同一应答 403/1005（不泄露存在性）。
+      operationId: getBillingOrder
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 订单详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BillingOrderDetailView'
+        '403':
+          description: 1005 无权访问该订单
+  /billing/orders/{orderNo}/cancel:
+    post:
+      tags: [Billing]
+      summary: 取消未支付订单（@HttpCode(200)）
+      description: >-
+        非 pending → 400/2002；并发竞态（读时 pending、写前已被终态化）同样 2002。
+      operationId: cancelBillingOrder
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 取消后的订单（paymentStatus='cancelled'）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BillingOrderView'
+        '400':
+          description: 2002 订单状态不允许取消
+        '403':
+          description: 1005 无权访问该订单
+  /billing/orders/{orderNo}/confirm-paid:
+    post:
+      tags: [Billing]
+      summary: 「我已付款」兜底（@HttpCode(200)）
+      description: >-
+        服务端主动向渠道查单：已支付 → 入账（finalizePaidOrder 单事务）；渠道未确认或
+        查单金额不符 → 400/2004。返回 currentPeriodEnd 从订阅状态视图补齐，支付成功页直接展示；
+        幂等 duplicate 对前端同样是已支付。
+      operationId: confirmBillingOrderPaid
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 已入账
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BillingConfirmPaidResult'
+        '400':
+          description: 2004 渠道尚未确认支付（含金额不符）或 2002 状态不允许
+        '403':
+          description: 1005 无权访问该订单
+  /billing/callback/{channel}:
+    post:
+      tags: [Billing]
+      summary: 渠道异步通知（免 JWT，@HttpCode(200)，裸应答）
+      description: >-
+        channel 枚举 wechat|alipay（其余 404/1002）。免 JWT：不挂 JwtAuthGuard/RolesGuard；
+        显式 @HttpCode(200)；用 @Res() 直写响应跳过响应包装拦截器（应答必须是裸 JSON/文本，
+        不能包 {code,data} 壳）。按渠道应答：微信成功 200 JSON {"code":"SUCCESS"}、
+        失败 500 JSON {"code":"FAIL","message"}；支付宝成功与失败都是 200 纯文本 success/failure。
+        安全四道闸：适配器验签（微信 RSA2 四头 + 时间戳 ±300s；支付宝 RSA2 原文验签 + app_id
+        与配置比对）→ 找单 + 渠道串单校验 → 金额比对（不符不入账，留痕人工介入）→ 状态机。
+        幂等：trade_no UNIQUE + 已 paid 直接 success；入账 finalize 是单事务
+        （订单置 paid + 家庭订阅顺延，同生共死），失败给 failure 应答促渠道重试。
+        handleCallback 永不向外抛。
+      operationId: billingChannelCallback
+      security: []
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [wechat, alipay]
+      responses:
+        '200':
+          description: 已受理（成功应答；支付宝失败也是 200 纯文本 failure）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [SUCCESS]
+            text/plain:
+              schema:
+                type: string
+                enum: [success, failure]
+        '500':
+          description: 微信失败应答 {"code":"FAIL","message"}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [FAIL]
+                  message:
+                    type: string
+        '404':
+          description: 1002 未知支付渠道
+  /admin/billing/orders/{orderNo}/mark-paid:
+    post:
+      tags: [Admin]
+      summary: admin 人工兜底：线下收款后补单（@HttpCode(200)，幂等）
+      description: >-
+        只认状态机：非 pending → 400/2002；已 paid 幂等成功；订单不存在 → 404/1005。
+        订单归属不经家长校验（orderNo 全局唯一）；trade_no 记 manual-{orderNo} 标记来源。
+        返回不含 currentPeriodEnd（与家长 confirm-paid 不同——用户裁决维持现状，
+        前端需要到期时间自行再查 GET /quota/subscription）。
+      operationId: adminMarkOrderPaid
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 已入账（'paid' 与幂等 'duplicate' 都返回此形状）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BillingMarkPaidResult'
+        '400':
+          description: 2002 订单状态不允许该操作
+        '404':
+          description: 1005 订单不存在
 
   # Practice
   /practice/judge:
@@ -8510,6 +8823,185 @@ components:
         resetAt:
           type: string
           format: date-time
+
+    SubscriptionStatusView:
+      type: object
+      required: [status, daysRemaining, source]
+      properties:
+        status:
+          type: string
+          enum: [trialing, active, expired]
+          description: 订阅状态（截止时刻当刻仍有效）
+        planCode:
+          type: [string, 'null']
+          description: 当前套餐编码（无付费期时 null）
+        trialEndsAt:
+          type: [string, 'null']
+          format: date-time
+          description: 试用截止时间（ISO 串；无行/无试用为 null）
+        currentPeriodEnd:
+          type: [string, 'null']
+          format: date-time
+          description: 付费期截止时间（ISO 串；无付费期为 null）
+        daysRemaining:
+          type: integer
+          description: 剩余天数（active 按 currentPeriodEnd、trialing 按 trialEndsAt；其余 0）
+        source:
+          type: string
+          enum: [trial, order]
+          description: 口径推导——有付费期 → order，否则一律 trial（含无行 expired）
+
+    SubscriptionPlanView:
+      type: object
+      required: [planCode, name, priceCents, durationDays]
+      properties:
+        planCode:
+          type: string
+        name:
+          type: string
+        priceCents:
+          type: integer
+          description: 价格（分）
+        durationDays:
+          type: integer
+          description: 有效期天数
+
+    UsageDayView:
+      type: object
+      required: [date, calls, tokens]
+      properties:
+        date:
+          type: string
+          description: 日期（yyyy-MM-dd，日界随 DB 会话时区）
+        calls:
+          type: integer
+          description: 当日调用次数（COUNT(*)，含失败/重试/fallback 行）
+        tokens:
+          type: integer
+          description: 当日 tokens 合计（input+output；单日 SUM 全 NULL 按 0 参与该和）
+
+    UsageView:
+      type: object
+      required: [periodStart, periodEnd, calls, inputTokens, outputTokens, tokensUnknown, byDay]
+      properties:
+        periodStart:
+          type: string
+          format: date-time
+          description: 统计窗口起点（periodEnd − 30 天，rolling 近似）
+        periodEnd:
+          type: string
+          format: date-time
+          description: 统计窗口终点（currentPeriodEnd ?? now）
+        calls:
+          type: integer
+          description: 窗口内调用总数（含失败/重试/fallback 行）
+        inputTokens:
+          type: integer
+          description: 输入 tokens 合计（NULL 调用按 0 求和，缺口记入 tokensUnknown）
+        outputTokens:
+          type: integer
+          description: 输出 tokens 合计（同上）
+        tokensUnknown:
+          type: integer
+          description: input 或 output 为 NULL 的调用计数（NULL = 量不到，绝不按 0 混入）
+        byDay:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageDayView'
+
+    BillingCreateOrderRequest:
+      type: object
+      required: [planCode, channel]
+      properties:
+        planCode:
+          type: string
+        channel:
+          type: string
+          enum: [wechat, alipay]
+          description: mock 仅 NODE_ENV=test 或 BILLING_USE_MOCK=1 时放行
+
+    BillingOrderView:
+      type: object
+      required: [orderNo, paymentStatus, amountCents, planName, channel, createdAt, expiresAt]
+      properties:
+        orderNo:
+          type: string
+          description: 'ORD + yyyyMMddHHmmss + 6 位随机（23 位）'
+        paymentStatus:
+          type: string
+          enum: [pending, paid, cancelled, expired]
+        amountCents:
+          type: integer
+          description: 实付金额（分）
+        planName:
+          type: string
+          description: 下单时套餐名快照（plan_snapshot）
+        channel:
+          type: string
+          enum: [wechat, alipay, mock]
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: pending 超时时刻（下单 + 120 分钟）
+        paidAt:
+          type: [string, 'null']
+          format: date-time
+
+    BillingOrderDetailView:
+      allOf:
+        - $ref: '#/components/schemas/BillingOrderView'
+        - type: object
+          properties:
+            qrContent:
+              type: [string, 'null']
+              description: 渠道返回的二维码内容（画码用；未取到为 null）
+            redirectUrl:
+              type: [string, 'null']
+              description: 跳转支付入口（本批恒 null，适配器留接口）
+
+    BillingOrderListResult:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingOrderView'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    BillingConfirmPaidResult:
+      type: object
+      required: [orderNo, paymentStatus, currentPeriodEnd]
+      properties:
+        orderNo:
+          type: string
+        paymentStatus:
+          type: string
+          enum: [paid]
+          description: 'paid 与幂等 duplicate 对前端都是已支付，统一回 paid'
+        currentPeriodEnd:
+          type: [string, 'null']
+          format: date-time
+          description: 从订阅状态视图补齐，支付成功页直接展示
+
+    BillingMarkPaidResult:
+      type: object
+      required: [orderNo, paymentStatus]
+      properties:
+        orderNo:
+          type: string
+        paymentStatus:
+          type: string
+          enum: [paid]
+          description: 幂等 duplicate 同样返回此形状；不含 currentPeriodEnd（用户裁决维持现状）
 
     JudgeRequest:
       type: object

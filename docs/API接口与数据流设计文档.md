@@ -88,7 +88,11 @@
 | 1007 | 优惠券无效或已过期 |
 | 1008 | 订单已支付或已取消 |
 | 1009 | 支付失败（第三方平台返回错误） |
-| 2001 | 学习无关内容（AI 阻断） |
+| 2001 | 学习无关内容（AI 阻断）；**订阅门禁复用**（2026-09-30 起，见下方实现注） |
+| 2002 | 订单状态不允许该操作（已有 pending 单换套餐/渠道下单 / 取消非 pending 单 / 终态单再操作） |
+| 2003 | 支付渠道异常（下单失败 / 渠道未配置，HTTP 503） |
+| 2004 | 渠道尚未确认支付（含查单金额不符，拒绝入账） |
+| 2005 | 套餐不存在或已下架 |
 | 3001 | 积分余额不足（兑换被拒） |
 | 3002 | 未达该奖励的段位门槛 |
 | 3003 | 奖励已下架 |
@@ -102,6 +106,8 @@
 > **2026-08-18 实现注（admin 端点现行语义）**：1009 = 连通性测试失败（`POST /api/admin/routes/validate-connection` 返回，message 含 provider 原始错误，HTTP 502）；上表 1009=支付失败 为 P2 Billing 设计占位（Billing 未实现），两者不冲突。
 
 > **2026-09-18 实现注（家长端学情端点归属校验）**：`/api/parent/students/{studentId}/*`（仪表盘除外的 reports / errors / chat-logs）第一行都过 `requireOwnedStudent`，沿用**两个不同的码**：`studentId` 不存在（或已软删）→ **404 / 1002**；`studentId` 存在但属于**别的家长** → **403 / 1005**（**不是 404**，别照抄「不泄漏存在性」）。`chat-logs/{dialogueId}` 另有二次校验：会话不属于该学生 → **404 / 1002**。非 parent 角色 → 403 / 1005（`RolesGuard`）。
+
+> **2026-09-30 实现注（订阅收费 2xxx 语义）**：`2001`–`2005` 由 billing 模块（§4.14 / §4.15 / §4.17）抛出。`2001` = **订阅门禁**（全局 `SubscriptionGuard`：学生角色订阅过期时一切学生端点 403/`{code:2001}`「订阅已过期，请联系家长续费」，豁免清单见 §4.14 门禁注）——与上表历史规划「学习无关内容（AI 阻断）」并存；AI 内容阻断现行实际用 `1010`（ai-core `errors.ts`）。`2002` = 订单状态机拒绝；`2003` = 支付渠道异常（HTTP 503）；`2004` = 渠道未确认支付（含金额不符）；`2005` = 套餐不存在/下架。billing 内的归属/角色校验沿用 `1005`（家长订单归属校验与 RolesGuard 同码，刻意一致）。
 
 ### 2.5 文件上传约定
 
@@ -133,8 +139,8 @@
 | Conversations | `/api/conversations` | 会话创建、消息读写、上下文加载 | ConversationService |
 | ~~Rewards~~ | ~~`/api/rewards`~~ | **已废弃（2026-09-29 用户裁决，详见 §4.12）**：本族 7 个端点从未实现。闯关激励由 §7.13 积分系统承担，实际端点见 §4.21 / §4.22（Points + 家长端积分/兑换） | ~~Reward Service~~ |
 | Parent | `/api/parent` | 报告、对话回放、目标、管控、预警 | ParentAdmin Service |
-| Quota | `/api/quota` | AI 套餐额度、消耗查询与订阅状态 | AI-Agent 中枢 |
-| Billing | `/api/billing` | 订单创建、支付、优惠券、续费 | Billing Service |
+| Quota | `/api/quota` | 订阅状态视图（三角色）、在售套餐目录、AI 用量聚合（仅家长，rolling 30 天近似口径） | Billing Service（`modules/billing`） |
+| Billing | `/api/billing` | 家长订单（下单/列表/详情/取消/「我已付款」兜底）+ 渠道异步回调（免 JWT）+ admin 人工补单（`/api/admin/billing/*`） | Billing Service（`modules/billing`） |
 | Practice | `/api/practice` | 课堂练习答题判对错（practice 卡片） | Practice Service |
 | Training | `/api/training` | 错题练习与专项训练（辅线学习闭环：错题筛选/重做判题/提示/专项抽题） | Training Service |
 | Exams | `/api/exams` | 真题试卷考试（选卷/开考/逐题作答/交卷/结果，过期自动收卷） | Exams Service |
@@ -367,28 +373,33 @@
 | GET | `/api/parent/messages/unread-count` | 未读消息数（顶部铃铛徽章） | MVP |
 | PATCH | `/api/parent/messages/{id}/read` | 标记某条消息已读 | MVP |
 
-### 4.14 Quota — `/api/quota`
+### 4.14 Quota — `/api/quota`（订阅收费，2026-09-30 实现）
+
+三端点均已实现（`apps/server/src/modules/billing/quota.controller.ts`）。类级 `JwtAuthGuard + RolesGuard`；`/subscription` 与 `/plans` 三角色可读（学生按学生反查家庭、家长/管理员按自身），`/usage` 是 handler 级 `@Roles('parent')`（不能挂类上——会连坐前两个端点）。
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| GET | `/api/quota/current` | 当前家庭套餐与额度 | MVP |
-| GET | `/api/quota/usage` | 本周期 AI 消耗明细 | P1 |
-| GET | `/api/quota/plans` | 可选套餐列表（含价格/折扣信息） | P1 |
-| GET | `/api/quota/subscription` | 当前订阅状态（生效中/即将到期/已过期） | P2 |
+| GET | `/api/quota/subscription` | 订阅状态视图（三角色统一口径）。返回 `{status: trialing\|active\|expired, planCode, trialEndsAt, currentPeriodEnd, daysRemaining, source: 'trial'\|'order'}`。**截止时刻当刻仍有效**；`source` 按口径推导：有付费期（`current_period_end` 非空）→ `order`，否则一律 `trial`（含无行 expired）。学生被订阅门禁锁定时本端点**豁免**（锁定页要靠它读状态，见下方门禁注） | MVP |
+| GET | `/api/quota/plans` | 在售套餐目录（`subscription_plans.is_active=1`），返回 `[{planCode, name, priceCents, durationDays}]`（金额分单位）。DB seed 维护，本期无 admin UI（改价直接 UPDATE） | MVP |
+| GET | `/api/quota/usage` | AI 用量聚合，**仅家长**（学生 token → RolesGuard **403/1005**，不是 1003）。JWT sub 即 parent_id，聚合其名下**所有学生**（repo 侧 JOIN students）。返回 `{periodStart, periodEnd, calls, inputTokens, outputTokens, tokensUnknown, byDay: [{date, calls, tokens}]}`。**口径是 rolling 30 天近似**（spec「当前订阅周期」按此落地）：`periodEnd = currentPeriodEnd ?? now`、`periodStart = periodEnd − 30 天`（orders 未存 period_start）；`calls` 是 `COUNT(*)`，**含失败/重试/fallback 行**；`tokensUnknown` = input 或 output 为 NULL 的调用计数（**NULL = 量不到，绝不按 0 混入**，仓规）；`byDay` 只回有数据日、日界随 DB 会话时区（`DATE_FORMAT(created_at)`），单日 tokens = input+output（当日 SUM 全 NULL 按 0 参与该和，不影响 tokensUnknown） | MVP |
+| ~~GET~~ | ~~`/api/quota/current`~~ | **已废弃（2026-09-30）**：P2 占位端点，从未实现（订阅/额度当时连表都没有）。现行订阅状态读 `/api/quota/subscription` | ~~P2~~ |
 
-### 4.15 Billing — `/api/billing`
+> **订阅门禁（`SubscriptionGuard`，全局 APP_GUARD，2026-09-30）**：学生角色的请求在 `effectiveStatus = 'expired'` 时被拒，**403 / `{code:2001}`**（「订阅已过期，请联系家长续费」）。家长/管理员角色放行（家长必须能进订阅中心）；免 JWT 链路（登录、渠道回调）自然放行；guard 自身查订阅表不经过 guard（防递归）。**豁免清单**（`SUBSCRIPTION_EXEMPT`，有护栏测试钉住——**新增学生端点默认被锁**，要豁免必须显式加清单并同步护栏）：`GET /api/progress/students/{id}/star-map`（锁后学生仍可看星图与锁定态）、`GET /api/quota/subscription`（锁定页读状态）。前端 `services/api.ts` 收到 `code=2001` 统一 `window.location.assign('/student/locked')`。
 
-| 方法 | 路径 | 说明 | 阶段 |
-|---|---|---|---|
-| GET | `/api/billing/orders` | 订单列表 | P2 |
-| POST | `/api/billing/orders` | 创建订阅订单（选套餐 + 应用优惠券） | P2 |
-| GET | `/api/billing/orders/{orderId}` | 订单详情 | P2 |
-| POST | `/api/billing/orders/{orderId}/pay` | 发起支付（返回微信/支付宝支付参数） | P2 |
-| POST | `/api/billing/callback/{channel}` | 支付回调（微信/支付宝异步通知） | P2 |
-| POST | `/api/billing/orders/{orderId}/cancel` | 取消未支付订单 | P2 |
-| GET | `/api/billing/coupons` | 可用优惠券列表 | P2 |
-| POST | `/api/billing/coupons/{code}/apply` | 应用优惠码（下单前校验折扣） | P2 |
-| POST | `/api/billing/subscription/renew` | 续费（创建续费订单） | P2 |
+### 4.15 Billing — `/api/billing`（订阅收费，2026-09-30 实现）
+
+家长端订单端点 5 个（`billing.controller.ts`，类级 `@Roles('parent')`，学生/管理员 token → 403/1005）+ 渠道异步回调 1 个（`billing-callback.controller.ts`，**免 JWT**）。订单归属校验：不存在与不属于同一应答 **403/1005**（`requireOwnedOrder`，不泄露存在性）。所有读路径与下单入口都先 `expireStale()` 惰性翻转超时 pending 单（TTL 120 分钟，`ORDER_PENDING_TTL_MINUTES`）。
+
+| 方法 | 路径 | 状态码 | 说明 | 阶段 |
+|---|---|---|---|---|
+| POST | `/api/billing/orders` | **201** | 创建订单。body `{planCode, channel}`（channel 枚举 `wechat\|alipay`；`mock` 仅 `NODE_ENV=test` 或 `BILLING_USE_MOCK=1` 放行，不支持 → 400/1001）。返回 OrderView `{orderNo, paymentStatus, amountCents, planName, channel, createdAt, expiresAt, paidAt}`。**防串单**：已有 pending 单时——同套餐同渠道**复用返回（不新建行、不调渠道，也是 201）**；换套餐或换渠道 → 400/2002（先取消旧单或等 2h 超时）。套餐不存在/下架 → 404/2005。渠道下单失败 → **503/2003，订单保留 pending**（可取消重下，不自动删行）。`BILLING_USE_MOCK=1` 时 wechat/alipay 也解析到 Mock 适配器（演示模式：UI 渠道 radio 只有微信/支付宝、发不出 `channel='mock'`，不映射则本地演示下单必 503）。**下单响应不含支付凭证**——`qrContent`/`redirectUrl` 来自订单详情轮询 | MVP |
+| GET | `/api/billing/orders` | 200 | 订单列表（当前家长），query `page`（缺省 1）/`pageSize`（缺省 20，1..50），非法值 400/1001 不钳制（仓规）。返回 `{items: OrderView[], total, page, pageSize}` | MVP |
+| GET | `/api/billing/orders/{orderNo}` | 200 | 订单详情：OrderView + `qrContent`（二维码内容，画码用）/`redirectUrl`（跳转支付入口，本批恒 null，适配器留接口）。家长下单后**每 3s 轮询本端点**取支付凭证与状态（前端支付弹层轮询间隔） | MVP |
+| POST | `/api/billing/orders/{orderNo}/cancel` | **200** | 取消未支付订单（显式 `@HttpCode(200)`，状态迁移语义）。非 pending → 400/2002；并发竞态（读时 pending、写前已被回调/查单终态化）同样 2002。成功返回取消后的 OrderView（`paymentStatus:'cancelled'`） | MVP |
+| POST | `/api/billing/orders/{orderNo}/confirm-paid` | **200** | 「我已付款」兜底（显式 `@HttpCode(200)`）：家长点按钮后服务端主动向渠道查单。已支付 → 入账（已 paid 幂等返回）；渠道未确认 → 400/2004（前端提示稍后再试）；查单金额不符同样 2004 且**不入账**。返回 `{orderNo, paymentStatus: 'paid', currentPeriodEnd}`——currentPeriodEnd 从订阅状态视图补齐，支付成功页直接展示（幂等 duplicate 对前端同样是已支付） | MVP |
+| POST | `/api/billing/callback/{channel}` | **200** | 渠道异步通知（`channel` 枚举 `wechat\|alipay`，其余 404/1002——非真实渠道没有适配器也就没有其应答格式）。**免 JWT**：渠道服务器不带我们的 token，不挂 JwtAuthGuard/RolesGuard。**显式 `@HttpCode(200)`**；用 `@Res()` 直写响应**跳过响应包装拦截器**（应答必须是裸 JSON/文本，不能包 `{code,data}` 壳）；`main.ts` 开 `rawBody: true`，验签用原始字节不能用重序列化 body。**按渠道应答**：微信成功 `200` JSON `{"code":"SUCCESS"}`、失败 `500` JSON `{"code":"FAIL","message"}`；支付宝成功与失败都是 `200` 纯文本 `success`/`failure`（失败也 200，靠渠道侧重试机制驱动重发）。**安全四道闸**（service，`handleCallback` 永不向外抛）：① 适配器验签（微信 RSA2 四头验签 + **时间戳 ±300s** 新鲜度；支付宝 RSA2 原文验签 + **app_id 与配置比对**）；② 找单 + 渠道串单校验（订单渠道不符拒）；③ **金额比对**（渠道报的 amountCents ≠ `amount_cents` 不入账，logger.warn 留痕人工介入）；④ 状态机（非支付成功通知确认收到即可；已 paid 重复通知**幂等 success**；终态单收到支付回调 failure + 留痕）。入账走 `finalizePaidOrder` 单事务（见下方注），失败给 failure 应答促渠道重试 | MVP |
+
+> **入账唯一路径 `finalizePaidOrder`（单事务）**：`markPaidTx` 条件更新（影响 0 行 = 并发已入账 → ROLLBACK 返回 `'duplicate'`，天然幂等）+ `renewWithinTx`（家庭订阅顺延：有效期内顺延**不吞天数**、过期从 now 起算），同生共死、任何一步失败整体回滚。**回调 / confirm-paid / admin mark-paid 三个入口都汇入 finalize，互为幂等兜底**。订单号 `ORD + yyyyMMddHHmmss + 6 位随机`（撞 `uk_orders_no` 重试一次）。数据流见 §5.6。
 
 ### 4.16 Practice - `/api/practice`
 
@@ -436,6 +447,7 @@
 | DELETE | `/api/admin/chat/dialogues/{id}` | 删除会话（连带其消息） | MVP |
 | GET | `/api/admin/chat/messages?dialogueId=` | 会话历史消息 | MVP |
 | POST | `/api/admin/chat/stream` | SSE 流式对话（`{dialogueId, message}`；独立 `admin_dialogues`/`admin_messages` 表，**无 K12 学习边界**） | MVP |
+| POST | `/api/admin/billing/orders/{orderNo}/mark-paid` | **admin 人工兜底**（线下收款后补单，2026-09-30，显式 `@HttpCode(200)`）。只认状态机：非 pending → 400/2002；已 paid 幂等成功（返回同样是已入账）；订单不存在 → 404/1005。**订单归属不经家长校验**（orderNo 全局唯一，归属校验是家长端口的职责）；`trade_no` 记 `manual-{orderNo}` 标记来源。返回 `{orderNo, paymentStatus: 'paid'}`，**不含 currentPeriodEnd**（与家长 confirm-paid 不同——用户裁决维持现状，前端需要到期时间自行再查 `GET /api/quota/subscription`）。**不受订阅门禁影响**（非学生角色天然放行） | MVP |
 
 ### 4.18 Training — `/api/training`
 
@@ -861,57 +873,52 @@ PATCH /api/parent/redemptions/{id}（更新兑换单状态；本期兑换不可�
 
 > 原 §5.5 描述的 `/api/rewards/*` 领取/兑现流程已随 §4.12 一并废弃（2026-09-29，从未实现）。
 
-### 5.6 订阅购买与续费
+### 5.6 订阅购买与续费（实现态，2026-09-30）
+
+> 本节为**实现态**重写（订阅收费已实现，`modules/billing`）。原稿里的优惠码（`coupons/apply`）、`orders/{orderId}/pay`、「订阅到期站内信提醒」均未实现——支付凭证（二维码）由**下单后的订单详情轮询**取得，「续费」与购买是**同一条链路**（再下一单），无独立 renew 端点。
+
+**购买 / 续费主链路**：
 
 ```text
-家长端：P6.10 账号设置 / P7.1 订阅中心（P2 新增）
+家长端订阅中心 /parent/subscription（UX P7.1）
   │
-  ├─ 查看套餐
-  │  ▼
-  │  GET /api/quota/plans
-  │  GET /api/quota/subscription（当前订阅状态）
-  │
-  ├─ 应用优惠码
-  │  ▼
-  │  POST /api/billing/coupons/{code}/apply
-  │  │  ├─ 有效 → 返回折扣后价格
-  │  │  └─ 无效/过期 → 返回错误码
+  ├─ 首屏：GET /api/quota/subscription + GET /api/quota/plans + GET /api/quota/usage
+  │  （状态卡三态：生效中（绿）/ 即将到期 ≤7 天（黄）/ 已过期（红）+ 倒计时）
+  ▼
+POST /api/billing/orders  {planCode, channel: wechat|alipay}   → 201 OrderView
+  │  ├─ 已有 pending 单：同套餐同渠道 → 复用返回；不同 → 400/2002（前端展开订单历史引导取消）
+  │  ├─ 渠道下单失败 → 503/2003（订单留 pending，可取消重下）
+  │  └─ 事务内 expireStale() 惰性翻转超时 pending 单（TTL 2h）
+  ▼
+支付弹层（paying）：每 3s 轮询 GET /api/billing/orders/{orderNo} 取 qrContent 画二维码
+  │  （redirectUrl 非空时改「跳转支付宝支付」按钮，本批恒 null）
   │
   ▼
-POST /api/billing/orders（创建订单：套餐 + 优惠码）
+家长扫码支付 → 渠道服务器异步回调
+POST /api/billing/callback/{channel}（免 JWT，@HttpCode(200)，@Res 裸应答）
+  │  ├─ 四道闸：验签（微信时间戳 ±300s / 支付宝 app_id 比对）→ 找单+串单校验 → 金额比对 → 状态机
+  │  ├─ 入账 finalizePaidOrder 单事务：markPaidTx 条件更新（0 行=并发已入账→ROLLBACK 'duplicate'）
+  │  │   + renewWithinTx 家庭订阅顺延（有效期内顺延不吞天数、过期从 now 起算），同生共死
+  │  ├─ 应答：微信 200 {"code":"SUCCESS"} / 500 {"code":"FAIL"}；支付宝 200 纯文本 success/failure
+  │  └─ 幂等：trade_no UNIQUE + 已 paid 直接 success；金额不符不入账（logger.warn 留痕人工介入）
   │
   ▼
-POST /api/billing/orders/{orderId}/pay
-  │  ├─ 微信支付 → 返回 prepay_id / 调起参数
-  │  └─ 支付宝 → 返回 trade_no / 调起参数
-  │
-  ▼
-前端调起微信支付/支付宝
-  │
-  ▼
-支付平台回调
-POST /api/billing/callback/{channel}
-  │  ├─ 成功 → 更新 subscription 状态，重置额度
-  │  └─ 失败/超时 → 订单保持待支付，家长端可重新发起
-  │
-  ▼
-GET /api/quota/subscription（确认生效）
+弹层轮询查到 paymentStatus=paid → 重拉 GET /api/quota/subscription → success 视图（展示新到期时间，3s 自动回 ready）
 ```
 
-**续费流程**：
+**confirm-paid 兜底分支**（支付已完成但回调未到/家长等不及）：
+
 ```text
-GET /api/quota/subscription（检测到即将到期）
-  │
-  ▼
-推送续费提醒（站内信）
-  │
-  ▼
-家长端点击续费
-POST /api/billing/subscription/renew
-  │
-  ▼
-后续同购买流程：创建订单 → 支付 → 回调 → 生效
+弹层 [我已付款] → POST /api/billing/orders/{orderNo}/confirm-paid
+  ├─ 服务端主动向渠道查单：已支付 → 汇入同一 finalizePaidOrder 事务入账
+  │    → 200 {orderNo, paymentStatus:'paid', currentPeriodEnd}（从订阅状态视图补齐）
+  ├─ 渠道未确认（或查单金额不符）→ 400/2004，弹层留在原地可再试
+  └─ 与回调并发：谁先到谁入账，后到的走 'duplicate' 幂等，订阅只续一次
 ```
+
+**admin 人工兜底**：线下收款后 `POST /api/admin/billing/orders/{orderNo}/mark-paid`（幂等；`trade_no='manual-{orderNo}'`；返回不含 currentPeriodEnd，见 §4.17）。三个入账入口（回调 / confirm-paid / mark-paid）互为幂等兜底。
+
+**门禁联动**：学生端 `SubscriptionGuard`（全局）在订阅过期时拒绝一切学生端点（403/2001，豁免清单见 §4.14 门禁注）；前端 `api.ts` 收 2001 统一跳 `/student/locked` 锁定页（读豁免端点 `GET /api/quota/subscription` 展示状态），家长端侧栏/顶栏提示条惰性展示「即将到期/已过期」。续期入账成功后学生下一次请求自然放行，无需任何「解锁」操作。
 
 ### 5.7 手写/主观题提交与 AI 按步骤给分流
 
@@ -1892,10 +1899,10 @@ POST /api/student/learning-sessions          ← 取或建（幂等，显式 200
 | P6.6 行为管控 | `/parent/controls` | `GET/PUT /api/parent/students/{studentId}/controls`（预警灵敏度）+ `GET /api/parent/students/{studentId}/points/settings`（**只读**展示兑换状态，开关本身在奖励管理页改）。见 §5.28 |
 | P6.7 奖励管理 | `/parent/rewards` | `GET /api/parent/students/{studentId}/points`, `GET/PUT .../points/rules`, `GET .../points/ledger`, `GET/PUT .../reward-catalog`, `POST .../points/redeem`, `GET .../redemptions`, `PATCH /api/parent/redemptions/{id}`, `GET/PUT .../points/settings`, `GET /api/points/levels`（`...` = `/api/parent/students/{studentId}`；见 §4.21 / §4.22） |
 | P6.9 异常预警 | `/parent/alerts` | `GET /api/parent/alerts`, `PATCH /api/parent/alerts/{alertId}/read`；**顶栏 Banner（所有家长页）走 `GET /api/parent/alerts/unread`**（30s 轮询、全部孩子、含 info 级；点击即已读并跳本页 —— 2026-09-20「及时可见」批替换了旧的 `GET /api/parent/alerts?studentId=&unreadOnly=1&pageSize=1`）。**侧栏「异常预警」入口为 UX 清单外的偏差**（不加则 Banner 点掉后页面不可达，已回写 UX 文档）。见 §5.28 |
-| P6.10 账号设置 | `/parent/account` | `GET /api/parent/account`, `PATCH /api/parent/password`。⚠️ 原文写的 `GET /api/quota/current`、`GET /api/quota/subscription` **不存在**（订阅/额度无表，属 P7.1 范围），本批**不放占位卡** |
-| **P7.1 订阅中心（P2）** | `/parent/subscription` | `GET /api/quota/plans`, `GET /api/quota/subscription`, `POST /api/billing/orders`, `POST /api/billing/orders/{id}/pay` |
-| **P7.2 订单管理（P2）** | `/parent/orders` | `GET /api/billing/orders`, `GET /api/billing/orders/{id}`, `POST /api/billing/orders/{id}/cancel` |
-| **P7.3 优惠券（P2）** | `/parent/coupons` | `GET /api/billing/coupons`, `POST /api/billing/coupons/{code}/apply` |
+| P6.10 账号设置 | `/parent/account` | `GET /api/parent/account`, `PATCH /api/parent/password`。⚠️ 原文写的 `GET /api/quota/current`、`GET /api/quota/subscription` 当时不存在（2026-09-20 注）——`/api/quota/subscription` 已于 2026-09-30 实现（§4.14）但**仍不在本页**：订阅状态卡在 P7.1 订阅中心，本批不放占位卡 |
+| **P7.1 订阅中心** | `/parent/subscription` | **已实现（2026-09-30）**：`GET /api/quota/subscription`, `GET /api/quota/plans`, `GET /api/quota/usage`, `POST /api/billing/orders`(201), `GET /api/billing/orders/{orderNo}`（支付弹层 3s 轮询）, `POST .../cancel`(200), `POST .../confirm-paid`(200)。订单历史内嵌本页折叠列表（无独立 P7.2 页）；无优惠码（本期不做） |
+| ~~P7.2 订单管理~~ | ~~`/parent/orders`~~ | **页面未实现**：订单历史并入 P7.1 订阅中心折叠列表（`GET /api/billing/orders`, 就地取消 pending 单），无独立路由 |
+| ~~P7.3 优惠券~~ | ~~`/parent/coupons`~~ | **页面未实现**：优惠券/优惠码本期不做（用户裁决，spec §9；表已预留，下期立项） |
 
 ---
 
@@ -2056,6 +2063,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.14 | 2026-09-30 | **订阅收费（Subscription & Billing）文档同步**（实现见 `modules/billing`，spec `2026-09-29-subscription-billing-design.md`）。**契约**：§4.14 Quota 整节重写为 3 个已实现端点——`GET /api/quota/subscription`（三角色状态视图 `{status, planCode, trialEndsAt, currentPeriodEnd, daysRemaining, source}`，截止时刻当刻仍有效）、`GET /api/quota/plans`（在售套餐目录）、`GET /api/quota/usage`（**仅家长**，学生 403/**1005** 非 1003；聚合家长名下所有学生；**rolling 30 天近似口径**：`periodEnd = currentPeriodEnd ?? now`、`periodStart = −30 天`；`calls` COUNT(*) **含失败/重试/fallback 行**；`tokensUnknown` = input 或 output 为 NULL 的调用计数，NULL=量到不到绝不按 0 混入；byDay 日界随 DB 会话时区）；~~`/api/quota/current`~~ P2 占位标废弃（从未实现）。§4.15 Billing 整节重写为家长 5 端点 + 回调：`POST /orders`（**201**；同套餐同渠道 pending 单复用、不同 **2002**；渠道失败 **2003** 订单留 pending；`BILLING_USE_MOCK=1` 时 wechat/alipay 也解析到 Mock）、`GET /orders`、`GET /orders/{orderNo}`（详情含 qrContent/redirectUrl，支付弹层 3s 轮询）、`POST .../cancel`（200）、`POST .../confirm-paid`（200，`{orderNo, paymentStatus:'paid', currentPeriodEnd}`；渠道未确认/金额不符 **2004**）、`POST /callback/{channel}`（**免 JWT**、`@HttpCode(200)`、@Res 裸应答跳过包装拦截器；微信 JSON `{"code":"SUCCESS"}`/失败 500 FAIL、支付宝纯文本 success/failure；验签+微信时间戳 ±300s+支付宝 app_id 比对+金额比对；幂等 trade_no UNIQUE + 已 paid 直接 success）。§4.17 Admin 补 `POST /api/admin/billing/orders/{orderNo}/mark-paid`（200 幂等，**返回不含 currentPeriodEnd**——用户裁决维持现状）。§2 分组总表 Quota/Billing 两行改实现态。§5.6 数据流重写为实现态（下单→二维码→回调→finalize 单事务：markPaidTx 条件更新 + renewWithinTx 顺延同生共死；confirm-paid 兜底分支；无优惠码/renew 端点）。**错误码**：2001 订阅门禁复用（全局 `SubscriptionGuard`：学生过期 403/`{code:2001}`，**豁免清单** = `GET /api/progress/students/{id}/star-map`、`GET /api/quota/subscription`，护栏测试钉住）+ 2002/2003/2004/2005 定义进 §2.4。§6 对照表 P7.1 更新、P7.2/P7.3 标页面未实现（订单历史并入订阅中心、优惠券本期不做）。openapi.yaml 同步：**净增 10 path**（quota 3 + billing 5 + callback 1 + admin 1）+ 10 schema（SubscriptionStatusView/PlanView/UsageView 等），POST /orders 记 `'201'`、cancel/confirm-paid/callback/mark-paid 记 `'200'`、callback 免 JWT（`security: []`）。**本期不做**（PRD §7.7/§9 已注记）：优惠券、AI 额度拦截（usage 仅展示）、退款/发票、自动续费、续费提醒调度。 |
 | v4.13 | 2026-09-29 | **错题清零升级为后端硬门禁（`reason=cleanup_incomplete`，接口行为变更）**。`POST /api/progress/update` 在当前课路径上新增一道校验：本课之前（`lesson_id < 本课`）还有未清零的 `source='practice'` 错题（`main_error_books.is_cleared=0`，按 `progress.textbook_version_id` 版本过滤，孤儿 `lesson_id=NULL` 行保守保留）时，本课**任何**进度更新（翻页上报 / 完成推进）都被拒，返回 `{advanced:false, reason:'cleanup_incomplete'}`——与前端课程详情页「错题清零」阶段**同一谓词**（`PracticeService.hasUnclearedGateErrors` 复用 `getUnclearedErrorDetails`，单一真源），把原先仅 UI 层的门禁补成后端硬门禁，堵住绕过前端直调 API 的口子。**本课自身刚产生的错题不在判定范围**（课时过滤排除 `lesson_id >= 本课`），因此不阻塞本课的完成推进——清零发生在进入下一课之后（PRD §6.1：完课即发分，清零门禁在下一课开始时）。门禁先于练习覆盖门禁（`practice_incomplete`）执行；`cleanup_incomplete` 分支同样不发分。openapi.yaml 同步（reason 枚举描述）。 |
 | v4.12 | 2026-09-29 | **PRD §6.1/§7.3 闯关奖励口径修订的文档同步（`/api/rewards/*` 全族标废弃 + 数据流改指积分体系）**。背景：用户裁决把主线循环定为准——完课即发分（§7.13「完成即给分」），错题清零在下一课开始时进行、不影响已发积分；原「清零后发上一课奖励」的独立闯关奖励机制废弃。**接口契约只有废弃标注、无新增端点**：§4.12 Rewards 整节 7 个端点 + §4.13 的 `GET /api/parent/students/{id}/rewards` 标删除线 + 废弃注记（**从未实现**——全仓无 RewardsController、无任何调用方；发分由完课/交卷链路内自动记账，学生端只读走 `/api/points/me*`，兑换走 §4.22）。§2 分组总表 Rewards 行同步废弃；§5.1 主线数据流改写（清零与发分的先后对齐 PRD §6.1 新流程，去 `/api/rewards/*` 调用）；§5.5 整节重写为「积分获得与兑换」真实数据流（points / parent-points / levels 真实端点）；§7 页面↔端点表 P2.9 行订正。`openapi.yaml` 同步：8 个路径的 operation 加 `deprecated: true` + 说明（路径与 schema 保留，避免 `$ref` 悬空，与 error-book 先例一致）。关联文档：PRD §6.1/§7.3/§7.4 重写、架构文档 §4.2.9 重写、AI 辅导流程 §3.2 重排、UX 文档 P2.9 重写与 §9.3 清单更新、数据库设计文档 §3.9 `rewards` 表标遗留、`tools/db/schema.sql` 注释订正。 |
 | v4.11 | 2026-09-26 | **PC App 壳生产化（②）：接口契约零变更（仅登记）**。`docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` 只改 `apps/desktop`（Electron 壳）与若干文档，**未新增/修改/删除任何 HTTP 端点**，故本文件正文与 `docs/api/openapi.yaml` 本批均无需同步。此结论显式登记，避免后来者误以为漏同步（spec §7）。 |
