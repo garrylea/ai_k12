@@ -4361,6 +4361,226 @@ paths:
         '404':
           description: 1005 订单不存在
 
+  /admin/billing/orders/claims:
+    get:
+      tags: [Admin]
+      summary: 待裁决列表（批④）
+      operationId: listBillingClaims
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending_review, rejected, approved]
+            default: pending_review
+          description: 非法值 400/1001
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 待裁决列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/BillingClaimView'
+                          total: { type: integer }
+                          page: { type: integer }
+                          pageSize: { type: integer }
+
+  /admin/billing/orders/{orderNo}/claims/approve:
+    post:
+      tags: [Admin]
+      summary: 裁决通过（入账 + claim approved；expired 单照常入账）
+      description: claim 必须 pending_review（否则 400/2002）；cancelled → 2002。adminId 留痕。
+      operationId: approveBillingClaim
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 已入账
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          orderNo: { type: string }
+                          paymentStatus: { type: string }
+                          result: { type: string, enum: [paid, duplicate] }
+        '400':
+          description: 2002 状态不允许
+        '404':
+          description: 1005 订单不存在
+
+  /admin/billing/orders/{orderNo}/claims/reject:
+    post:
+      tags: [Admin]
+      summary: 裁决驳回（订单保持 pending，家长可修改后重申）
+      operationId: rejectBillingClaim
+      parameters:
+        - name: orderNo
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: 追加至 claim_note 尾部（截断 200）
+      responses:
+        '200':
+          description: 已驳回
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          orderNo: { type: string }
+                          claimStatus: { type: string, enum: [rejected] }
+        '400':
+          description: 2002 状态不允许
+        '404':
+          description: 1005 订单不存在
+
+  /admin/billing/families:
+    get:
+      tags: [Admin]
+      summary: 家庭订阅列表（keyword 搜手机号/昵称）
+      operationId: listBillingFamilies
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 家庭列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/BillingFamilyView'
+                          total: { type: integer }
+                          page: { type: integer }
+                          pageSize: { type: integer }
+
+  /admin/billing/families/{parentId}/trial:
+    put:
+      tags: [Admin]
+      summary: 设定/收回试用截止（null=收回；落 trial_set 审计）
+      operationId: setFamilyTrial
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trialEndsAt]
+              properties:
+                trialEndsAt:
+                  type: [string, 'null']
+                  format: date-time
+      responses:
+        '200':
+          description: 调整后 StatusView
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubscriptionStatusView'
+
+  /admin/billing/families/{parentId}/grant:
+    post:
+      tags: [Admin]
+      summary: 赠送/扣减订阅天数（0 拒绝；扣穿置过期态；落 grant_days 审计）
+      operationId: grantFamilyDays
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days:
+                  type: integer
+                  description: 正=顺延，负=扣减
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: 调整后 StatusView
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubscriptionStatusView'
+        '400':
+          description: 1001 days=0 或非法
+
   # Practice
   /practice/judge:
     post:
@@ -8917,8 +9137,10 @@ components:
           type: string
         channel:
           type: string
-          enum: [wechat, alipay]
-          description: mock 仅 NODE_ENV=test 或 BILLING_USE_MOCK=1 时放行
+          enum: [wechat, alipay, manual]
+          description: >-
+            manual = 线下转账（批④ 2026-09-30：个人微信转给管理员，无二维码，
+            confirm-paid note 必填转人工裁决）。mock 仅 NODE_ENV=test 或 BILLING_USE_MOCK=1 时放行
 
     BillingOrderView:
       type: object
@@ -8938,7 +9160,7 @@ components:
           description: 下单时套餐名快照（plan_snapshot）
         channel:
           type: string
-          enum: [wechat, alipay, mock]
+          enum: [wechat, alipay, manual, mock]
         createdAt:
           type: string
           format: date-time
@@ -8949,6 +9171,13 @@ components:
         paidAt:
           type: [string, 'null']
           format: date-time
+        claimStatus:
+          type: [string, 'null']
+          enum: [pending_review, rejected, approved, null]
+          description: 人工裁决状态（批④）；null = 家长从未主张已付
+        claimNote:
+          type: [string, 'null']
+          description: 家长转账备注 / 管理员驳回原因（追加，截断 200）
 
     BillingOrderDetailView:
       allOf:
@@ -8974,6 +9203,31 @@ components:
           type: integer
         page:
           type: integer
+
+    BillingClaimView:
+      type: object
+      required: [orderNo, parentPhone, planName, amountCents, claimStatus, claimedAt, paymentStatus]
+      properties:
+        orderNo: { type: string }
+        parentPhone: { type: string }
+        planName: { type: string }
+        amountCents: { type: integer }
+        claimStatus: { type: string, enum: [pending_review, rejected, approved] }
+        claimedAt: { type: string, format: date-time }
+        claimNote: { type: [string, 'null'] }
+        paymentStatus: { type: string }
+
+    BillingFamilyView:
+      type: object
+      required: [parentId, phone, studentCount, status]
+      properties:
+        parentId: { type: integer }
+        phone: { type: string }
+        studentCount: { type: integer }
+        status: { type: string, enum: [trialing, active, expired] }
+        planCode: { type: [string, 'null'] }
+        trialEndsAt: { type: [string, 'null'], format: date-time }
+        currentPeriodEnd: { type: [string, 'null'], format: date-time }
         pageSize:
           type: integer
 

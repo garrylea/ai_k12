@@ -31,7 +31,22 @@ SET @has_col := (
 );
 SET @ddl := IF(
   @has_col = 0,
-  'ALTER TABLE orders ADD COLUMN claim_status VARCHAR(12) DEFAULT NULL COMMENT ''pending_review/rejected/approved；NULL = 从未主张'' AFTER coupon_discount_cents',
+  'ALTER TABLE orders ADD COLUMN claim_status VARCHAR(20) DEFAULT NULL COMMENT ''pending_review/rejected/approved；NULL = 从未主张'' AFTER coupon_discount_cents',
+  'DO 0'
+);
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 1b. 列宽修正：'pending_review' 有 14 字符，初版 VARCHAR(12) 装不下
+--     （2026-09-30 冒烟实测 `Data too long for column 'claim_status'`）。
+SET @col_len := (
+  SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'orders'
+    AND COLUMN_NAME = 'claim_status'
+);
+SET @ddl := IF(
+  @col_len IS NOT NULL AND @col_len < 20,
+  'ALTER TABLE orders MODIFY COLUMN claim_status VARCHAR(20) DEFAULT NULL COMMENT ''pending_review/rejected/approved；NULL = 从未主张''',
   'DO 0'
 );
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;

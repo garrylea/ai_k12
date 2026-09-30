@@ -991,7 +991,7 @@ CREATE TABLE IF NOT EXISTS orders (
   expires_at DATETIME(3) NOT NULL,
   coupon_code VARCHAR(32) DEFAULT NULL,          -- 本期预留不写
   coupon_discount_cents INT DEFAULT NULL,        -- 本期预留不写
-  claim_status VARCHAR(12) DEFAULT NULL,         -- pending_review/rejected/approved；NULL = 从未主张
+  claim_status VARCHAR(20) DEFAULT NULL,         -- pending_review/rejected/approved；NULL = 从未主张
   claimed_at DATETIME(3) DEFAULT NULL,
   claim_note VARCHAR(200) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
