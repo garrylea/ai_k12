@@ -430,4 +430,40 @@ describe('ParentSubscriptionPage 支付弹层裁决三态与线下转账（批�
     const row8 = await screen.findByTestId('order-row-NO8');
     expect(within(row8).queryByText('人工核实中')).not.toBeInTheDocument();
   });
+
+  it('订单历史 pending + claimStatus=rejected 行加「管理员已驳回」徽标 + claimNote 截断展示', async () => {
+    const fullNote = 'x'.repeat(80) + '；驳回：账上没收到钱';
+    listOrdersMock.mockResolvedValue({
+      items: [orderOf({ orderNo: 'NO10', claimStatus: 'rejected', claimNote: fullNote })],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+
+    renderPage();
+    await screen.findByTestId('subscription-status-card');
+    fireEvent.click(screen.getByTestId('order-history-toggle'));
+
+    const row = await screen.findByTestId('order-row-NO10');
+    expect(within(row).getByTestId('order-claim-rejected-NO10')).toHaveTextContent('管理员已驳回');
+    // claimNote 前 60 字 + …；title 属性含全文
+    expect(within(row).getByText('x'.repeat(60) + '…')).toBeInTheDocument();
+    expect(screen.getByTitle(fullNote)).toBeInTheDocument();
+  });
+
+  it('rejected 行仍可取消（既有按钮不回归）', async () => {
+    listOrdersMock.mockResolvedValue({
+      items: [orderOf({ orderNo: 'NO10', claimStatus: 'rejected', claimNote: '驳回' })],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+
+    renderPage();
+    await screen.findByTestId('subscription-status-card');
+    fireEvent.click(screen.getByTestId('order-history-toggle'));
+
+    const row = await screen.findByTestId('order-row-NO10');
+    expect(within(row).getByRole('button', { name: '取消' })).toBeInTheDocument();
+  });
 });

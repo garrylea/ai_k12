@@ -64,6 +64,11 @@ function formatDate(iso: string | null | undefined): string {
   return iso ? iso.slice(0, 10) : '';
 }
 
+/** 60 字截断（驳回原因展示用），title 走全文。 */
+function truncate(text: string, max = 60): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
 function orderStatusBadge(order: BillingOrderView): { label: string; cls: string } {
   switch (order.paymentStatus) {
     case 'pending':
@@ -523,6 +528,11 @@ export default function ParentSubscriptionPage() {
                       <div className="text-xs text-[var(--text-tertiary)]">
                         {`单号 ${item.orderNo} · ${formatDate(item.createdAt)}`}
                       </div>
+                      {item.claimStatus === 'rejected' && item.claimNote && (
+                        <div className="text-xs text-[var(--text-tertiary)]" title={item.claimNote}>
+                          {truncate(item.claimNote)}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="tabular-nums text-[var(--text-primary)]">
@@ -535,6 +545,14 @@ export default function ParentSubscriptionPage() {
                           className="rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--warning)]"
                         >
                           人工核实中
+                        </span>
+                      )}
+                      {item.paymentStatus === 'pending' && item.claimStatus === 'rejected' && (
+                        <span
+                          data-testid={`order-claim-rejected-${item.orderNo}`}
+                          className="rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--error)]"
+                        >
+                          管理员已驳回
                         </span>
                       )}
                       {item.paymentStatus === 'pending' && (
