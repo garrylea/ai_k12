@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import MobileControlsPage from './MobileControlsPage';
 import { useParentStudentStore } from '@/store/parentStudentStore';
-import type { ParentSessionPage } from '@/services/api';
+import type { ParentControls, ParentSessionPage } from '@/services/api';
 
 // 进出时间的真实数据源是 getParentLearningSessions（桌面 ParentDashboardPage
 // LearningTimelineCard 同款 API 与口径），不是 brief 初稿猜的 getParentStudyTime
@@ -74,16 +74,43 @@ describe('MobileControlsPage', () => {
     );
   });
 
-  it('非法输入（越界/非整数）不发起保存，行内报错', async () => {
+  it('非法输入（0/481/500/小数/科学计数法）不发起保存，行内报错', async () => {
     ok();
     render(<MobileControlsPage />);
     await screen.findByDisplayValue('30');
     const input = screen.getByLabelText(/单次锁定/);
-    await userEvent.clear(input);
-    await userEvent.type(input, '500');
-    await userEvent.click(screen.getByTestId('save-lock'));
-    expect(putParentControls).not.toHaveBeenCalled();
-    expect(await screen.findByText('锁定时长需为 1–480 的整数，清空表示解除')).toBeTruthy();
+    // 0 与 481 是端点越界；'1.5' 小数、'1e2' 科学计数法都必须被拒绝
+    // （校验只收纯数字 /^\d+$/，与桌面 parseLockMinutes 同口径，否则 Number('1e2')=100 会蒙混过关）
+    for (const bad of ['0', '481', '500', '1.5', '1e2']) {
+      await userEvent.clear(input);
+      await userEvent.type(input, bad);
+      await userEvent.click(screen.getByTestId('save-lock'));
+      expect(putParentControls).not.toHaveBeenCalled();
+      expect(await screen.findByText('锁定时长需为 1–480 的整数，清空表示解除')).toBeTruthy();
+    }
+  });
+
+  it('快速切孩子：旧孩子在途响应 resolve 后不得覆盖新孩子、不得停在骨架屏（竞态守卫）', async () => {
+    // 孩子 1 的 controls 挂在一个不主动 resolve 的 deferred 上，制造「已切走、旧响应在途」
+    let resolveBoy!: (value: ParentControls) => void;
+    const boyControls = new Promise<ParentControls>((resolve) => { resolveBoy = resolve; });
+    vi.mocked(getParentControls).mockImplementation((id: number) =>
+      id === 1 ? boyControls : Promise.resolve({ ...controls, sessionLockMinutes: 60 }),
+    );
+    vi.mocked(getParentLearningSessions).mockResolvedValue({ items: [], total: 0 });
+
+    render(<MobileControlsPage />);
+    // 孩子 1 的数据未到就切到孩子 2
+    act(() => { useParentStudentStore.setState({ studentId: 2 }); });
+    // 孩子 2 的数据正常到达（没被旧请求卡死）
+    expect(await screen.findByDisplayValue('60')).toBeTruthy();
+    // 旧孩子的响应这时才 resolve —— cancelled 守卫必须把它整个丢弃
+    await act(async () => {
+      resolveBoy({ ...controls, sessionLockMinutes: 90 });
+    });
+    // 仍显示孩子 2 的值：既没被 90 覆盖，也没掉回骨架屏（view 归属判 null 的永久卡死）
+    expect(screen.getByDisplayValue('60')).toBeTruthy();
+    expect(screen.queryByDisplayValue('90')).toBeNull();
   });
 
   it('远程解除走 device-commands，无会话 409 文案原样展示', async () => {

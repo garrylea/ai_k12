@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   getParentControls,
   getParentLearningSessions,
   issueParentDeviceCommand,
   putParentControls,
-  type ParentControls,
   type ParentSessionItem,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
@@ -45,25 +44,40 @@ export default function MobileControlsPage() {
     sessions: ParentSessionItem[];
   } | null>(null);
   const [failedStudentId, setFailedStudentId] = useState<number | null>(null);
+  /** 重试不需要别的钩子，一个自增计数器驱动 effect 重跑（桌面 ParentControlsPage 同款）。 */
+  const [reload, setReload] = useState(0);
   const [lockInput, setLockInput] = useState('');
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [cmdError, setCmdError] = useState<string | null>(null);
   const [cmdOk, setCmdOk] = useState(false);
 
-  const load = useCallback((id: number) => {
-    setState(null);
+  /**
+   * 加载带 cancelled 守卫（桌面 ParentDashboardPage LearningTimelineCard 同款，
+   * 那边有现成的「切孩子在途」回归钉子）：快速切孩子时旧孩子的响应晚 resolve
+   * 也不许写回 —— 否则 `view` 归属守卫判 null，页面会永久停在骨架屏。
+   */
+  useEffect(() => {
+    if (studentId === null) return;
     setFailedStudentId(null);
-    Promise.all([getParentControls(id), getParentLearningSessions(id, 7, 10)])
+    // 这三条是「针对当前这个孩子」的操作结果提示，换孩子必须清空，不许残留给下一个孩子
+    setSaveMsg(null);
+    setCmdError(null);
+    setCmdOk(false);
+    let cancelled = false;
+    Promise.all([getParentControls(studentId), getParentLearningSessions(studentId, 7, 10)])
       .then(([c, s]) => {
-        setState({ studentId: id, controls: c, sessions: s.items });
+        if (cancelled) return;
+        setState({ studentId, controls: c, sessions: s.items });
         setLockInput(c.sessionLockMinutes === null ? '' : String(c.sessionLockMinutes));
       })
-      .catch(() => setFailedStudentId(id));
-  }, []);
-
-  useEffect(() => {
-    if (studentId !== null) load(studentId);
-  }, [studentId, load]);
+      .catch(() => {
+        if (cancelled) return;
+        setFailedStudentId(studentId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, reload]);
 
   // 读取时现算归属：studentId 已切走时旧数据立即不可见（不等 effect 清空）
   const view = state && state.studentId === studentId ? state : null;
@@ -81,7 +95,7 @@ export default function MobileControlsPage() {
       <div data-testid="mobile-page-controls">
         <div className="rounded-2xl bg-white p-8 text-center">
           <p className="text-black/60">加载失败</p>
-          <button data-testid="controls-retry" onClick={() => load(studentId)} className="mt-2 text-[var(--brand-500)]">重试</button>
+          <button data-testid="controls-retry" onClick={() => setReload((n) => n + 1)} className="mt-2 text-[var(--brand-500)]">重试</button>
         </div>
       </div>
     );
@@ -96,15 +110,19 @@ export default function MobileControlsPage() {
 
   const saveLock = () => {
     const raw = lockInput.trim();
-    // '' = 显式解除（NULL 语义，必须显式发出；漏发等于「不动」）；数字限 1..480 整数
-    const patch: Partial<ParentControls> =
-      raw === '' ? { sessionLockMinutes: null } : { sessionLockMinutes: Number(raw) };
-    if (raw !== '' && (!Number.isInteger(patch.sessionLockMinutes) || (patch.sessionLockMinutes as number) < 1 || (patch.sessionLockMinutes as number) > 480)) {
+    // '' = 显式解除（NULL 语义，必须显式发出；漏发等于「不动」）。
+    // 仅收纯数字（/^\d+$/，桌面 parseLockMinutes 同口径）：'1e2'、'1.5'、'-3' 一律拒绝
+    if (raw !== '' && !/^\d+$/.test(raw)) {
+      setSaveMsg('锁定时长需为 1–480 的整数，清空表示解除');
+      return;
+    }
+    const value = raw === '' ? null : Number(raw);
+    if (value !== null && (value < 1 || value > 480)) {
       setSaveMsg('锁定时长需为 1–480 的整数，清空表示解除');
       return;
     }
     setSaveMsg(null);
-    putParentControls(studentId, patch)
+    putParentControls(studentId, { sessionLockMinutes: value })
       .then((c) => {
         setState({ studentId, controls: c, sessions: view.sessions });
         setLockInput(c.sessionLockMinutes === null ? '' : String(c.sessionLockMinutes));
