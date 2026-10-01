@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import LoginPage from './LoginPage';
 import { login } from '@/services/api';
+import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
 /**
  * 登录页渲染测试。
@@ -26,6 +27,8 @@ function renderLoginPage() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/student/entry" element={<div>student-entry-page</div>} />
+        <Route path="/m/parent" element={<div>parent-mobile-home</div>} />
+        <Route path="/parent/students" element={<div>parent-students-page</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -80,5 +83,43 @@ describe('LoginPage', () => {
 
     expect(mockLogin).not.toHaveBeenCalled();
     expect(screen.getByText('请输入用户名和密码')).toBeInTheDocument();
+  });
+});
+
+describe('LoginPage 家长落点按视口分流', () => {
+  it('窄屏（<768px）家长登录落 /m/parent', async () => {
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValue({
+      token: 't',
+      user: { id: 1, role: 'parent', name: null, username: undefined, phone: '13800000000' },
+    });
+    const original = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', {
+      value: MOBILE_VIEWPORT_BREAKPOINT - 1,
+      configurable: true,
+    });
+    try {
+      renderLoginPage();
+      await user.type(screen.getByLabelText('账号'), '13800000000');
+      await user.type(screen.getByLabelText('密码'), 'pw123456');
+      await user.click(screen.getByRole('button', { name: '登录' }));
+      expect(await screen.findByText('parent-mobile-home')).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { value: original, configurable: true });
+    }
+  });
+
+  it('宽屏家长登录仍落 /parent/students（原行为不变）', async () => {
+    // 分流落地后的回归钉子：innerWidth 保持 jsdom 默认 1024，落点应仍为 /parent/students。
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValue({
+      token: 't',
+      user: { id: 1, role: 'parent', name: null, username: undefined, phone: '13800000000' },
+    });
+    renderLoginPage();
+    await user.type(screen.getByLabelText('账号'), '13800000000');
+    await user.type(screen.getByLabelText('密码'), 'pw123456');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    expect(await screen.findByText('parent-students-page')).toBeInTheDocument();
   });
 });

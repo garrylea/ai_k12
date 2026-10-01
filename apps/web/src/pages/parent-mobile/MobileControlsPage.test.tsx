@@ -1,0 +1,188 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import MobileControlsPage from './MobileControlsPage';
+import { useParentStudentStore } from '@/store/parentStudentStore';
+import type { ParentControls, ParentSessionPage } from '@/services/api';
+
+// 进出时间的真实数据源是 getParentLearningSessions（桌面 ParentDashboardPage
+// LearningTimelineCard 同款 API 与口径），不是 brief 初稿猜的 getParentStudyTime
+// （那是按天聚合，与「列表不是聚合」矛盾）。测试 mock 同步修正。
+vi.mock('@/services/api', () => ({
+  getParentControls: vi.fn(),
+  putParentControls: vi.fn(),
+  issueParentDeviceCommand: vi.fn(),
+  getParentLearningSessions: vi.fn(),
+}));
+import {
+  getParentControls,
+  getParentLearningSessions,
+  issueParentDeviceCommand,
+  putParentControls,
+} from '@/services/api';
+
+afterEach(() => {
+  cleanup();
+  useParentStudentStore.setState({ studentId: 1 });
+});
+// brief 初稿只在 afterEach 设 studentId，第 1 个用例跑的时候还是 null（渲染「先选择孩子」
+// 而非表单）。补 beforeEach 保证每个用例从 studentId=1 开始。
+beforeEach(() => {
+  useParentStudentStore.setState({ studentId: 1 });
+  // 清掉上个用例留在 vi.fn() 上的调用历史（如 not.toHaveBeenCalled 断言依赖它）
+  vi.clearAllMocks();
+});
+
+const controls = { alertAwayMinutes: 5, alertIdleMinutes: 15, sessionLockMinutes: 30 };
+
+function ok() {
+  vi.mocked(getParentControls).mockResolvedValue(controls);
+  vi.mocked(getParentLearningSessions).mockResolvedValue({ items: [], total: 0 });
+}
+
+describe('MobileControlsPage', () => {
+  it('渲染当前锁定分钟数与输入框', async () => {
+    ok();
+    render(<MobileControlsPage />);
+    expect(await screen.findByDisplayValue('30')).toBeTruthy();
+  });
+
+  it('保存只发改动字段并回显服务端值', async () => {
+    ok();
+    vi.mocked(putParentControls).mockResolvedValue({ ...controls, sessionLockMinutes: 60 });
+    render(<MobileControlsPage />);
+    await screen.findByDisplayValue('30');
+    const input = screen.getByLabelText(/单次锁定/);
+    await userEvent.clear(input);
+    await userEvent.type(input, '60');
+    await userEvent.click(screen.getByTestId('save-lock'));
+    await waitFor(() =>
+      expect(putParentControls).toHaveBeenCalledWith(1, { sessionLockMinutes: 60 }),
+    );
+    expect(await screen.findByDisplayValue('60')).toBeTruthy();
+  });
+
+  it('清空保存 = 显式解除（sessionLockMinutes: null）', async () => {
+    ok();
+    vi.mocked(putParentControls).mockResolvedValue({ ...controls, sessionLockMinutes: null });
+    render(<MobileControlsPage />);
+    await screen.findByDisplayValue('30');
+    await userEvent.clear(screen.getByLabelText(/单次锁定/));
+    await userEvent.click(screen.getByTestId('save-lock'));
+    await waitFor(() =>
+      expect(putParentControls).toHaveBeenCalledWith(1, { sessionLockMinutes: null }),
+    );
+  });
+
+  it('非法输入（0/481/500/小数/科学计数法）不发起保存，行内报错', async () => {
+    ok();
+    render(<MobileControlsPage />);
+    await screen.findByDisplayValue('30');
+    const input = screen.getByLabelText(/单次锁定/);
+    // 0 与 481 是端点越界；'1.5' 小数、'1e2' 科学计数法都必须被拒绝
+    // （校验只收纯数字 /^\d+$/，与桌面 parseLockMinutes 同口径，否则 Number('1e2')=100 会蒙混过关）
+    for (const bad of ['0', '481', '500', '1.5', '1e2']) {
+      await userEvent.clear(input);
+      await userEvent.type(input, bad);
+      await userEvent.click(screen.getByTestId('save-lock'));
+      expect(putParentControls).not.toHaveBeenCalled();
+      expect(await screen.findByText('锁定时长需为 1–480 的整数，清空表示解除')).toBeTruthy();
+    }
+  });
+
+  it('快速切孩子：旧孩子在途响应 resolve 后不得覆盖新孩子、不得停在骨架屏（竞态守卫）', async () => {
+    // 孩子 1 的 controls 挂在一个不主动 resolve 的 deferred 上，制造「已切走、旧响应在途」
+    let resolveBoy!: (value: ParentControls) => void;
+    const boyControls = new Promise<ParentControls>((resolve) => { resolveBoy = resolve; });
+    vi.mocked(getParentControls).mockImplementation((id: number) =>
+      id === 1 ? boyControls : Promise.resolve({ ...controls, sessionLockMinutes: 60 }),
+    );
+    vi.mocked(getParentLearningSessions).mockResolvedValue({ items: [], total: 0 });
+
+    render(<MobileControlsPage />);
+    // 孩子 1 的数据未到就切到孩子 2
+    act(() => { useParentStudentStore.setState({ studentId: 2 }); });
+    // 孩子 2 的数据正常到达（没被旧请求卡死）
+    expect(await screen.findByDisplayValue('60')).toBeTruthy();
+    // 旧孩子的响应这时才 resolve —— cancelled 守卫必须把它整个丢弃
+    await act(async () => {
+      resolveBoy({ ...controls, sessionLockMinutes: 90 });
+    });
+    // 仍显示孩子 2 的值：既没被 90 覆盖，也没掉回骨架屏（view 归属判 null 的永久卡死）
+    expect(screen.getByDisplayValue('60')).toBeTruthy();
+    expect(screen.queryByDisplayValue('90')).toBeNull();
+  });
+
+  it('切孩在途：旧保存响应 resolve 后不得改写新孩子的输入框（守卫）', async () => {
+    // 保存请求挂在 deferred 上，响应晚于切孩动作到达：无守卫时 setLockInput
+    // 会把新孩子的输入框改写成旧孩子的保存结果。
+    let resolveSave!: (value: ParentControls) => void;
+    const saveP = new Promise<ParentControls>((resolve) => { resolveSave = resolve; });
+    vi.mocked(putParentControls).mockReturnValueOnce(saveP);
+    // 孩子 1 锁 30 分钟、孩子 2 锁 60 分钟，切孩后输入框应显示 60
+    vi.mocked(getParentControls).mockImplementation((id: number) =>
+      Promise.resolve({ ...controls, sessionLockMinutes: id === 2 ? 60 : 30 }));
+    vi.mocked(getParentLearningSessions).mockResolvedValue({ items: [], total: 0 });
+    render(<MobileControlsPage />);
+    await screen.findByDisplayValue('30');
+    const input = screen.getByLabelText(/单次锁定/);
+    await userEvent.clear(input);
+    await userEvent.type(input, '45');
+    await userEvent.click(screen.getByTestId('save-lock'));
+    // 保存响应未到就切到孩子 2（其服务端值为 60）
+    act(() => { useParentStudentStore.setState({ studentId: 2 }); });
+    expect(await screen.findByDisplayValue('60')).toBeTruthy();
+    // 旧孩子的保存响应这时才 resolve —— 守卫必须把它整个丢弃
+    await act(async () => {
+      resolveSave({ ...controls, sessionLockMinutes: 45 });
+    });
+    expect(screen.getByDisplayValue('60')).toBeTruthy();
+    expect(screen.queryByDisplayValue('45')).toBeNull();
+  });
+
+  it('远程解除走 device-commands，无会话 409 文案原样展示', async () => {
+    ok();
+    vi.mocked(issueParentDeviceCommand).mockRejectedValue(new Error('当前没有进行中的学习会话'));
+    render(<MobileControlsPage />);
+    await screen.findByDisplayValue('30');
+    await userEvent.click(screen.getByTestId('unlock-now'));
+    expect(await screen.findByText(/当前没有进行中的学习会话/)).toBeTruthy();
+  });
+
+  it('成功下发显示确认提示', async () => {
+    ok();
+    vi.mocked(issueParentDeviceCommand).mockResolvedValue({
+      id: 3, command: 'unlock', status: 'pending', learningSessionId: 77, createdAt: '2026-10-01T09:00:00Z',
+    });
+    render(<MobileControlsPage />);
+    await screen.findByDisplayValue('30');
+    await userEvent.click(screen.getByTestId('unlock-now'));
+    expect(await screen.findByText(/解除命令已下发/)).toBeTruthy();
+  });
+
+  it('进出时间列表按次展示进入/退出时刻（不聚合）', async () => {
+    ok();
+    // 与桌面 ParentDashboardPage.test 的 SESSIONS 同构：一条进行中（在线）、一条已退出。
+    // 不断言具体墙钟字符串（formatClock 依赖本机时区，脆断）；按次与状态词是硬语义。
+    const page: ParentSessionPage = {
+      items: [
+        {
+          id: 78, startedAt: '2026-10-01T02:00:00.000Z', endedAt: null, online: true,
+          lockMinutes: 30, lockExpiresAt: null, unlockedAt: null,
+        },
+        {
+          id: 77, startedAt: '2026-09-30T09:00:00.000Z', endedAt: '2026-09-30T09:40:00.000Z',
+          online: false, lockMinutes: 30, lockExpiresAt: null, unlockedAt: null,
+        },
+      ],
+      total: 2,
+    };
+    vi.mocked(getParentLearningSessions).mockResolvedValue(page);
+    render(<MobileControlsPage />);
+    expect(await screen.findByTestId('session-78')).toBeTruthy();
+    expect(screen.getByTestId('session-78').textContent).toContain('进行中');
+    expect(screen.getByTestId('session-77').textContent).toContain('已退出');
+    // 两行（不聚合）：两条会话各渲染一行
+    expect(screen.getAllByTestId(/^session-/)).toHaveLength(2);
+  });
+});

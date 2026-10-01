@@ -34,6 +34,7 @@ import ExamResultPage from '@/pages/student/training/ExamResultPage';
 import StudentStayLayout from '@/components/layout/StudentStayLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
+import MobileParentLayout from '@/components/layout/MobileParentLayout';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
 import ParentMessagesPage from '@/pages/parent/ParentMessagesPage';
 import StudentSubjectConfigPage from '@/pages/parent/StudentSubjectConfigPage';
@@ -47,6 +48,11 @@ import ParentAlertsPage from '@/pages/parent/ParentAlertsPage';
 import ParentControlsPage from '@/pages/parent/ParentControlsPage';
 import ParentAccountPage from '@/pages/parent/ParentAccountPage';
 import ParentSubscriptionPage from '@/pages/parent/ParentSubscriptionPage';
+import MobileDashboardPage from '@/pages/parent-mobile/MobileDashboardPage';
+import MobileAlertsPage from '@/pages/parent-mobile/MobileAlertsPage';
+import MobileErrorsPage from '@/pages/parent-mobile/MobileErrorsPage';
+import MobileControlsPage from '@/pages/parent-mobile/MobileControlsPage';
+import MobileMorePage from '@/pages/parent-mobile/MobileMorePage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -369,6 +375,26 @@ export const routes: RouteObject[] = [
       { path: 'alerts', element: <ParentAlertsPage /> },
       { path: 'subscription', element: <ParentSubscriptionPage /> },
       { path: 'account', element: <ParentAccountPage /> },
+    ],
+  },
+  // 家长移动端路由组（家长移动 PWA 计划 Task 2）：PWA manifest 的 start_url 指向这里。
+  // dashboard/alerts/errors/controls 四页为临时占位，Task 5–8 逐个替换为真实现；
+  // more / more/:name 由 MobileMorePage 承接（名单外功能引导回电脑端）。
+  {
+    path: '/m/parent',
+    element: (
+      <RequireRole role="parent">
+        <MobileParentLayout />
+      </RequireRole>
+    ),
+    children: [
+      { path: '', element: <Navigate to="/m/parent/dashboard" replace /> },
+      { path: 'dashboard', element: <MobileDashboardPage /> },
+      { path: 'alerts', element: <MobileAlertsPage /> },
+      { path: 'errors', element: <MobileErrorsPage /> },
+      { path: 'controls', element: <MobileControlsPage /> },
+      { path: 'more', element: <MobileMorePage /> },
+      { path: 'more/:name', element: <MobileMorePage /> },
     ],
   },
   // 学生端主轨落地：`StudentLayout` 外壳与 P2.4–P2.9 / P4.x 占位页已于 2026-09-20 删除

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/base';
 import { login } from '@/services/api';
+import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -28,7 +29,8 @@ export default function LoginPage() {
       if (result.user.role === 'admin') {
         navigate('/admin');
       } else if (result.user.role === 'parent') {
-        navigate('/parent/students');
+        // 家长落点按视口分流：<768px 走移动路由组 /m/parent，否则桌面家长台
+        navigate(window.innerWidth < MOBILE_VIEWPORT_BREAKPOINT ? '/m/parent' : '/parent/students');
       } else {
         navigate('/student/entry');
       }

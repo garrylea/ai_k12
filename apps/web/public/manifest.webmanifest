@@ -1,0 +1,12 @@
+{
+  "name": "K12 智学系统 · 家长端",
+  "short_name": "K12 家长端",
+  "start_url": "/m/parent",
+  "display": "standalone",
+  "theme_color": "#F5F7FA",
+  "background_color": "#F5F7FA",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/icons/parent-touch-180.png", "type": "image/png", "sizes": "180x180", "purpose": "any" }
+  ]
+}

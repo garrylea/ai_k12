@@ -91,10 +91,12 @@
 ### 6.2 预警 `/m/parent/alerts`
 - 数据：`getParentUnreadAlerts`（进页未读数）+ `getParentAlerts`（分页）+ `markParentAlertRead`；裁决通知 `listUnreadBillingNotices` + `ackBillingNotice`（「知道了」就地消失）；站内消息未读 `getUnreadMessageCount`（只显示计数）。
 - 轮询放**移动端自己的 hook**（30s 语义不变；不与桌面页共享定时器实例，避免互相重置）。
+- **落地说明（2026-10-02）**：裁决 / 订阅 / 未读预警三块上移到外壳顶栏（MobileParentLayout 复用 AlertBanner / BillingNoticeBar / SubscriptionNoticeBar，全局可见），预警页内只做**列表 + 逐条 ack + 站内消息未读计数**——覆盖面比本节原稿（页内轮询 + 页内通知条）更广，以实现为准。
 
 ### 6.3 错题本 `/m/parent/errors`
 - 数据：`getParentErrors`（分页 + 学科筛选 + `track=main|training` 口径沿用）。
 - 列表 + 抽屉看题面/学生答案/正确答案（共享 Markdown 渲染配置）。
+- **落地说明（2026-10-02）**：`ParentErrorQuestion` **没有 answer 字段**（`api.ts` 真源），本节原稿「学生答案/正确答案」超出 API 能力——移动端展开详情 = 题面 + 「答案与解析请在电脑端查看」引导，不新造数据源，以实现为准。
 
 ### 6.4 管控 `/m/parent/controls`
 - 数据：`getParentControls` / `putParentControls`（`session_lock_minutes` 1..480，`NULL`=显式解除）、`issueParentDeviceCommand`（远程解除）、`getParentStudyTime`（进出时间**列表**，不是聚合）。
@@ -113,3 +115,20 @@
 - API 文档无端点变化，不更新（仅引用既有端点）。
 - `docs/ai-core-changelog.md` 记录本批。
 - 交付文档：双平台「添加到主屏幕」步骤作为本 spec 附章（实施时补全），不放独立文档。
+
+## 附章 A：家长手机「添加到主屏幕」步骤
+
+前提：手机与服务器在同一局域网，浏览器打开 `http://192.168.1.5:5173`（服务器 IP 变了就换）。
+
+**iOS（Safari）**：
+1. 底部分享按钮（□↑）→ 2. 「添加到主屏幕」→ 3. 确认「添加」。
+   桌面图标全屏打开；状态栏样式为系统默认。
+
+**Android（Chrome）**：
+1. 右上角菜单（⋮）→ 2. 「添加到主屏幕」→ 3. 确认「添加」。
+   注意：局域网 HTTP 下 Chrome 不弹自动安装横幅，必须手动添加；全屏样式不作保证。
+
+**已知降级**：无离线缓存（Service Worker 需 HTTPS）；无系统级推送（本期未实现）。
+预警与通知需打开应用查看（页内 30s 轮询）。
+
+**已知限制**：顶栏行为预警条（AlertBanner）点击后进入移动端预警页（/m/parent/alerts，底部『预警』Tab 同入口）。
