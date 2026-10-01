@@ -4283,7 +4283,7 @@ paths:
       description: >-
         跨页提示条（BillingNoticeBar）数据源，顶栏挂载 + 30s 轮询。无入参、无分页——
         上限 50 条（repo 保证），total = items.length。type 枚举 claim_approved/claim_rejected
-        （approve 的 reason 为 NULL）；按 id 升序。ack 前跨页可见。
+        （approve 的 reason 为 NULL）；按 id 降序（最新在前）。ack 前跨页可见。
       operationId: listUnreadBillingNotices
       responses:
         '200':

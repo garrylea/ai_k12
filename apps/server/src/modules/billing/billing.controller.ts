@@ -14,7 +14,7 @@ import { CurrentUser } from '../../common/decorators/current-user.js';
  * 400/1001 不钳制——仓规）。
  *
  * 状态码口径：`POST /orders` 是唯一创建端点，走 Nest @Post 默认 201；
- * 其余 POST（cancel / confirm-paid）是状态迁移，显式 @HttpCode(200)。
+ * 其余 POST（cancel / confirm-paid / ack）是状态迁移，显式 @HttpCode(200)。
  */
 @Controller('api/billing')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -88,7 +88,7 @@ export class BillingController {
     return this.billingService.listUnreadNotices(user.sub);
   }
 
-  /** 「知道了」标已读。幂等；显式 200（状态迁移语义，本仓第二处 @HttpCode 覆盖）。 */
+  /** 「知道了」标已读。幂等；显式 200（状态迁移语义，与 cancel/confirm-paid 同口径）。 */
   @Post('notices/:id/ack')
   @HttpCode(200)
   ackNotice(@Param('id') id: string, @CurrentUser() user: JwtUser) {
