@@ -86,7 +86,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 2. **以 API 设计文档为主稿**：端点清单（§4）与数据流（§5）定义业务语义；openapi.yaml 是其机器可读实现。
 3. **阶段标记**：openapi.yaml 只收 MVP 端点；P1/P2 在 API 文档里标阶段，进入开发时再补入。
 4. **检查清单**：每次 API 变更后核对两文档的端点路径列表，确认无遗漏。
-5. 注意 **Nest 的 `@Post` 默认返回 201 而非 200**：新端点按实际记 `'201'`，以 `2xx` 判断成功。本仓**唯一**的 `@HttpCode` 覆盖是 `POST /api/student/learning-sessions`（幂等「取或建」，显式 **200**，见「PC App 学习管控」节）。
+5. 注意 **Nest 的 `@Post` 默认返回 201 而非 200**：新端点按实际记 `'201'`，以 `2xx` 判断成功。**状态迁移类 POST 显式 `@HttpCode(200)`**（如 learning-sessions、billing 的 cancel/confirm-paid/ack 等——以 `grep -rn "@HttpCode" apps/server/src` 的实际清单为准，本文件不维护穷举清单）。
 
 ## 工程约定（血泪教训，勿重蹈）
 

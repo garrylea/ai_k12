@@ -8,6 +8,50 @@
 
 ---
 
+## 2026-10-01 · 订阅批④补丁：裁决结果通知（feat/billing-claim-notification）
+
+### 背景与缺陷
+
+批④（订阅收费·人工裁决链路）验收发现两个缺陷：
+
+1. **家长驳回不可见**：管理员驳回人工裁决单后，驳回原因只落在订单历史的 `claimStatus/claimNote`
+   里——家长若停留在订阅页以外的任何页面，永远看不到「管理员未确认本次转账」。
+2. **管理端红点不消失**：管理员裁决后，「待裁决」红点要等切页重挂才刷新，裁决后不即时消失。
+
+### 用户三裁决（2026-10-01）
+
+1. **跨页提示条 + 未读持久化（方案 A）**：新表 `billing_notices`（迁移
+   `tools/db/migrations/2026-10-01_billing_notices.sql`，type 枚举 `claim_approved/claim_rejected`，
+   `idx_parent_unread (parent_id, is_read, id)`），管理端 approve/reject/自动闭环三个迁移挂点各落一行
+   未读通知（落库失败只 warn、**不阻断裁决**）；家长顶栏 `BillingNoticeBar` 挂载 + 30s 轮询
+   `GET /api/billing/notices/unread`，跨页可见。
+2. **点「知道了」才消**：不做自动消红/自动已读；家长逐条 ack（`POST /api/billing/notices/{id}/ack`）
+   置 `is_read=1` 持久化，刷新/重登不再出现。
+3. **裁决两态都发通知**：approve 与 reject 都落通知；**不含** adminMarkPaid 直通入账路径
+   （管理员手动补单不算「裁决结果」，不惊动家长）。
+
+### 实现摘要（7 任务，分支 `feat/billing-claim-notification`，1bf5a47..86dfb3f）
+
+- **后端**：`billing_notices` 表 → `BillingNoticesRepository` + `BillingService` 三个通知挂点 →
+  家长两端点 `GET /api/billing/notices/unread`（无分页上限 50、`total=items.length`）与
+  `POST /api/billing/notices/{id}/ack`（幂等、显式 `@HttpCode(200)`、首次置已读
+  `logger.log` 留痕 noticeId+parentId；1001/1002/1005）。
+- **前端**：`BillingNoticeBar` 挂 `ParentLayout`（顺序护栏：`AlertBanner` → `BillingNoticeBar` →
+  `SubscriptionNoticeBar`）；订单历史补「管理员已驳回」徽标 + `claimNote` 截断展示；
+  `adminBillingBadgeStore` 联动 AdminNav 红点与 AdminBillingPage 裁决后即时刷新。
+- **文档**：API 文档 §4.15 补两端点 + §9 v4.17、openapi.yaml +2 op +3 schema、UX 文档顶栏三 Bar、
+  CLAUDE.md `@HttpCode` 句改为原则表述（删「本仓唯一」——billing 模块已有多处覆盖，穷举清单必然过期）。
+
+### 验证状态
+
+- 自动化：server 149 文件 / 1981 用例、web 103 文件 / 1050 用例、两端 tsc 零错误（全绿）。
+- **mock 冒烟：未执行（阻塞）**——:3001 已有他人启动的后端（`node dist/main.js`，PID 16944，
+  2026-10-01 09:06 起，dist 为旧构建、无 notices 端点，实测 `/api/billing/notices/unread` 404）。
+  按仓规不杀/不重启他人进程、且 build 会覆盖其正在服务的 dist，冒烟待人确认后补做（5 步流程见
+  task brief）。前端徽标/通知条/红点联动逻辑已由渲染测试覆盖，冒烟只差端到端 API 走查。
+
+---
+
 ## 2026-09-30 · 订阅收费批③ Task 7 收尾 — 真渠道人工验收清单
 
 （订阅收费批③的自动化测试与类型检查已全绿：server 147 文件 / 1877 用例、web 100 文件 / 1015 用例、
