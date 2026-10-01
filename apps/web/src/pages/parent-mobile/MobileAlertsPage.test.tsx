@@ -10,6 +10,11 @@ vi.mock('@/services/api', () => ({
   markParentAlertRead: vi.fn(),
   getUnreadMessageCount: vi.fn(),
 }));
+vi.mock('@/components/base', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/base')>()),
+  toast: vi.fn(),
+}));
+import { toast } from '@/components/base';
 import { getUnreadMessageCount, getParentAlerts, markParentAlertRead } from '@/services/api';
 
 // mock 函数跨用例复用：清掉上个用例遗留的 Once 队列与调用记录
@@ -44,6 +49,20 @@ describe('MobileAlertsPage', () => {
     await screen.findByText(/连续 3 次发起闲聊/);
     await userEvent.click(screen.getByTestId('alert-ack-11'));
     await waitFor(() => expect(screen.queryByText(/连续 3 次发起闲聊/)).toBeNull());
+  });
+
+  it('ack 失败：条目不消失且 toast 报错（不静默）', async () => {
+    vi.mocked(getParentAlerts).mockResolvedValue(page1 as never);
+    vi.mocked(getUnreadMessageCount).mockResolvedValue(0);
+    vi.mocked(markParentAlertRead).mockRejectedValue(new Error('x'));
+    render(<MobileAlertsPage />);
+    await screen.findByText(/连续 3 次发起闲聊/);
+    await userEvent.click(screen.getByTestId('alert-ack-11'));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('error', '操作失败，请稍后再试'),
+    );
+    // isRead 未变：条目留在列表里
+    expect(screen.getByText(/连续 3 次发起闲聊/)).toBeTruthy();
   });
 
   it('翻页：第 2 页无数据显示空态', async () => {

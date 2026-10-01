@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { toast } from '@/components/base';
 import {
   getUnreadMessageCount, getParentAlerts, markParentAlertRead,
   type ParentAlertItem,
@@ -40,7 +41,8 @@ export default function MobileAlertsPage() {
   const ack = (id: number) => {
     markParentAlertRead(id)
       .then(() => setItems((prev) => prev?.filter((a) => a.id !== id) ?? prev))
-      .catch(() => {});
+      // 失败不静默：条目留在列表里（isRead 未变），但家长得知道操作没成功
+      .catch(() => toast('error', '操作失败，请稍后再试'));
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

@@ -154,7 +154,9 @@ export default function MobileErrorsPage() {
                 <div className="mt-3 border-t border-black/5 pt-3 text-sm">
                   <StemMarkdown text={questionText(e)} />
                   <p className="mt-2 text-xs text-black/40">
-                    {e.question ? '答案与解析请在电脑端查看' : '题目未入库（以上为入库时保存的题面原文）'}
+                    {e.question
+                      ? '题目详情请在电脑端查看完整解析'
+                      : (e.wrongAnswerText ? '题目未入库（以上为入库时保存的题面原文）' : '题目未入库，且未保存题面')}
                   </p>
                 </div>
               )}

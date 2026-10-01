@@ -77,4 +77,20 @@ describe('MobileErrorsPage', () => {
     await userEvent.click(screen.getByText(/三角形内角和/));
     expect(await screen.findByText(/电脑端/)).toBeTruthy();
   });
+
+  it('展开详情注记三分支：已入库 / 未入库有题面 / 未入库无题面', async () => {
+    const withStem = { ...item, id: 21, wrongAnswerText: '1/2 + 1/3 = 2/5（存的原题面）' };
+    const noStem = { ...item, id: 22, wrongAnswerText: null };
+    vi.mocked(getParentErrors).mockResolvedValue({ items: [withStem, noStem], page: 1, pageSize: 20, total: 2 } as never);
+    useParentStudentStore.setState({ studentId: 1 });
+    render(<MobileErrorsPage />);
+    // 未入库、有题面原文
+    await screen.findByText(/1\/2 \+ 1\/3/);
+    await userEvent.click(screen.getByText(/1\/2 \+ 1\/3/));
+    expect(await screen.findByText('题目未入库（以上为入库时保存的题面原文）')).toBeTruthy();
+    // 未入库、也没存题面
+    const noStemText = screen.getAllByText('（题面缺失）')[0];
+    await userEvent.click(noStemText);
+    expect(await screen.findByText('题目未入库，且未保存题面')).toBeTruthy();
+  });
 });

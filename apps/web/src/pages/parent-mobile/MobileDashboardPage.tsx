@@ -47,11 +47,19 @@ export default function MobileDashboardPage() {
       getParentMastery(id, 5),
     ])
       .then(([d, s, u, m]) => {
+        // 竞态守卫（与 MobileErrorsPage seqRef / MobileControlsPage cancelled 同类）：
+        // 快速切孩子时旧孩子的响应可能晚到，若写回会令 ownerId 归属守卫判永久不等、
+        // 页面卡骨架且无自救。发起时的 id 与 store 当前 studentId 不一致就整包丢弃。
+        if (useParentStudentStore.getState().studentId !== id) return;
         setDash(d); setStudy(s); setUsage(u); setMastery(m);
         setOwnerId(id);
         setStatus('ready');
       })
-      .catch(() => setStatus('error'));
+      .catch(() => {
+        // 失败同样受守卫：旧请求晚到的 reject 不许盖掉新孩子的加载中/已就绪态。
+        if (useParentStudentStore.getState().studentId !== id) return;
+        setStatus('error');
+      });
   }, []);
 
   useEffect(() => {

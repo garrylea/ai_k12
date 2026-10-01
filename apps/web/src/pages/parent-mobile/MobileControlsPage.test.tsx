@@ -113,6 +113,33 @@ describe('MobileControlsPage', () => {
     expect(screen.queryByDisplayValue('90')).toBeNull();
   });
 
+  it('切孩在途：旧保存响应 resolve 后不得改写新孩子的输入框（守卫）', async () => {
+    // 保存请求挂在 deferred 上，响应晚于切孩动作到达：无守卫时 setLockInput
+    // 会把新孩子的输入框改写成旧孩子的保存结果。
+    let resolveSave!: (value: ParentControls) => void;
+    const saveP = new Promise<ParentControls>((resolve) => { resolveSave = resolve; });
+    vi.mocked(putParentControls).mockReturnValueOnce(saveP);
+    // 孩子 1 锁 30 分钟、孩子 2 锁 60 分钟，切孩后输入框应显示 60
+    vi.mocked(getParentControls).mockImplementation((id: number) =>
+      Promise.resolve({ ...controls, sessionLockMinutes: id === 2 ? 60 : 30 }));
+    vi.mocked(getParentLearningSessions).mockResolvedValue({ items: [], total: 0 });
+    render(<MobileControlsPage />);
+    await screen.findByDisplayValue('30');
+    const input = screen.getByLabelText(/单次锁定/);
+    await userEvent.clear(input);
+    await userEvent.type(input, '45');
+    await userEvent.click(screen.getByTestId('save-lock'));
+    // 保存响应未到就切到孩子 2（其服务端值为 60）
+    act(() => { useParentStudentStore.setState({ studentId: 2 }); });
+    expect(await screen.findByDisplayValue('60')).toBeTruthy();
+    // 旧孩子的保存响应这时才 resolve —— 守卫必须把它整个丢弃
+    await act(async () => {
+      resolveSave({ ...controls, sessionLockMinutes: 45 });
+    });
+    expect(screen.getByDisplayValue('60')).toBeTruthy();
+    expect(screen.queryByDisplayValue('45')).toBeNull();
+  });
+
   it('远程解除走 device-commands，无会话 409 文案原样展示', async () => {
     ok();
     vi.mocked(issueParentDeviceCommand).mockRejectedValue(new Error('当前没有进行中的学习会话'));

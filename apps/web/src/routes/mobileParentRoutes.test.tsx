@@ -49,10 +49,11 @@ describe('/m/parent 移动路由组', () => {
     expect(await screen.findByText('该功能请在电脑端使用')).toBeTruthy();
   });
 
-  it('底部导航有四个 Tab 且当前态正确', async () => {
+  it('底部导航有五个 Tab 且当前态正确', async () => {
     renderAt('/m/parent/dashboard');
     expect(await screen.findByTestId('mobile-page-dashboard')).toBeTruthy();
     expect(screen.getByTestId('tab-dashboard').getAttribute('aria-current')).toBe('page');
+    expect(screen.getByTestId('tab-alerts').getAttribute('aria-current')).toBeNull();
     expect(screen.getByTestId('tab-errors')).toBeTruthy();
     expect(screen.getByTestId('tab-controls')).toBeTruthy();
     expect(screen.getByTestId('tab-more')).toBeTruthy();

@@ -125,18 +125,30 @@ export default function MobileControlsPage() {
     setSaveMsg(null);
     putParentControls(studentId, { sessionLockMinutes: value })
       .then((c) => {
+        // 在途切孩守卫：点击时的 studentId 与 store 当前值不一致 = 家长已切到别的孩子，
+        // 晚到的保存响应不许改写 lockInput / saveMsg（它们不带孩子归属，写回必串号）。
+        if (useParentStudentStore.getState().studentId !== studentId) return;
         setState({ studentId, controls: c, sessions: view.sessions });
         setLockInput(c.sessionLockMinutes === null ? '' : String(c.sessionLockMinutes));
         setSaveMsg('已保存，立即生效');
       })
-      .catch((e: unknown) => setSaveMsg(e instanceof Error ? e.message : '保存失败，请稍后再试'));
+      .catch((e: unknown) => {
+        if (useParentStudentStore.getState().studentId !== studentId) return;
+        setSaveMsg(e instanceof Error ? e.message : '保存失败，请稍后再试');
+      });
   };
 
   const unlock = () => {
     setCmdError(null); setCmdOk(false);
     issueParentDeviceCommand(studentId, 'unlock')
-      .then(() => setCmdOk(true))
-      .catch((e: unknown) => setCmdError(e instanceof Error ? e.message : '操作失败，请稍后再试'));
+      .then(() => {
+        if (useParentStudentStore.getState().studentId !== studentId) return;
+        setCmdOk(true);
+      })
+      .catch((e: unknown) => {
+        if (useParentStudentStore.getState().studentId !== studentId) return;
+        setCmdError(e instanceof Error ? e.message : '操作失败，请稍后再试');
+      });
   };
 
   return (
