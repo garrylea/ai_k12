@@ -45,10 +45,13 @@
 ### 验证状态
 
 - 自动化：server 149 文件 / 1981 用例、web 103 文件 / 1050 用例、两端 tsc 零错误（全绿）。
-- **mock 冒烟：未执行（阻塞）**——:3001 已有他人启动的后端（`node dist/main.js`，PID 16944，
-  2026-10-01 09:06 起，dist 为旧构建、无 notices 端点，实测 `/api/billing/notices/unread` 404）。
-  按仓规不杀/不重启他人进程、且 build 会覆盖其正在服务的 dist，冒烟待人确认后补做（5 步流程见
-  task brief）。前端徽标/通知条/红点联动逻辑已由渲染测试覆盖，冒烟只差端到端 API 走查。
+- **mock 冒烟（2026-10-01，BILLING_USE_MOCK=1，5/5 通过）**：① manual 下单 → confirm-paid 带备注
+  → 400/2004 `claimStatus:'pending_review'`；② 管理员驳回（带原因）→ 家长 unread 含 `claim_rejected`
+  行（reason=驳回原因）；③ 订单历史该行 `claimStatus:'rejected'` + `claimNote` 尾部追加「驳回：原因」；
+  ④ ack → 200 `{ok:true}`，重复 ack 幂等 200（留痕日志只一行），unread 清空（is_read 持久化）；
+  ⑤ 再下单 → **同套餐同渠道防串单复用原 pending 单**（2002 规避，spec 行为）→ 管理员通过 → unread 含
+  `claim_approved`（reason=null）、订阅 `status:'active'` 顺延、admin claims 列表清空。完整请求/应答
+  见 `.superpowers/sdd/2026-10-01-billing-claim-notification/task-7-report.md`。
 
 ---
 
