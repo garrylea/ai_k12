@@ -15,6 +15,7 @@ import { FamilySubscriptionsRepository } from '../../database/repositories/famil
 import { SubscriptionAdjustmentsRepository } from '../../database/repositories/subscription-adjustments.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 import { LlmUsageRepository } from '../../database/repositories/llm-usage.repo.js';
+import { BillingNoticesRepository } from '../../database/repositories/billing-notices.repo.js';
 
 /**
  * 模块装配钉子：钉住 QuotaController 挂在 BillingModule 的 `controllers` 里、
@@ -99,6 +100,7 @@ describe('BillingModule 装配', () => {
     const svc = app.get(BillingService) as unknown as Record<string, unknown>;
     expect(svc.ordersRepo).toBeInstanceOf(OrdersRepository);
     expect(svc.subscriptionsService).toBeInstanceOf(SubscriptionsService);
+    expect(svc.noticesRepo).toBeInstanceOf(BillingNoticesRepository);
     expect(svc.wechatAdapter).toBeInstanceOf(Object); // useFactory 构造的三适配器都已注入
     expect(svc.alipayAdapter).toBeInstanceOf(Object);
     expect(svc.mockAdapter).toBeInstanceOf(Object);

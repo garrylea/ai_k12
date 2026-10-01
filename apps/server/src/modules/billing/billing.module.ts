@@ -9,6 +9,7 @@ import { SubscriptionAdjustmentsRepository } from '../../database/repositories/s
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 import { OrdersRepository } from '../../database/repositories/orders.repo.js';
 import { LlmUsageRepository } from '../../database/repositories/llm-usage.repo.js';
+import { BillingNoticesRepository } from '../../database/repositories/billing-notices.repo.js';
 import { BillingService, WECHAT_PAY_ADAPTER, ALIPAY_PAY_ADAPTER, MOCK_PAY_ADAPTER } from './billing.service.js';
 import { WechatNativePayAdapter } from './adapters/wechat-native-pay.adapter.js';
 import { AlipayQrPayAdapter } from './adapters/alipay-qr-pay.adapter.js';
@@ -37,6 +38,7 @@ import { MockPayAdapter } from './adapters/mock-pay.adapter.js';
     SubscriptionPlansRepository,
     OrdersRepository,
     LlmUsageRepository,
+    BillingNoticesRepository, // 裁决结果通知仓储：仅 BillingService 内部消费，不进 exports
     { provide: WECHAT_PAY_ADAPTER, useFactory: () => new WechatNativePayAdapter() },
     { provide: ALIPAY_PAY_ADAPTER, useFactory: () => new AlipayQrPayAdapter() },
     { provide: MOCK_PAY_ADAPTER, useFactory: () => new MockPayAdapter(true) },

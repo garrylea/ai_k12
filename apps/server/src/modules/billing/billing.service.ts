@@ -15,6 +15,7 @@ import type {
   OrderPlanSnapshot,
   OrderRow,
 } from '../../database/repositories/orders.repo.js';
+import { BillingNoticesRepository } from '../../database/repositories/billing-notices.repo.js';
 import { SubscriptionPlansRepository } from '../../database/repositories/subscription-plans.repo.js';
 import { SubscriptionsService } from './subscriptions.service.js';
 import { ORDER_PENDING_TTL_MINUTES } from './billing.config.js';
@@ -116,6 +117,7 @@ export class BillingService {
     @Inject(WECHAT_PAY_ADAPTER) private readonly wechatAdapter: PayChannelAdapter,
     @Inject(ALIPAY_PAY_ADAPTER) private readonly alipayAdapter: PayChannelAdapter,
     @Inject(MOCK_PAY_ADAPTER) private readonly mockAdapter: PayChannelAdapter,
+    @Inject(BillingNoticesRepository) private readonly noticesRepo: BillingNoticesRepository,
   ) {}
 
   // ---------- 下单 ----------
@@ -426,6 +428,8 @@ export class BillingService {
     if (result === 'duplicate') {
       try {
         await this.ordersRepo.markClaim(order.id, 'approved');
+        // 通知挂点：markClaim 成功（迁移真实发生）才通知；paid 路径的通知由 finalize 挂点覆盖，勿重复插
+        await this.notifyClaimResult(order, 'claim_approved', null);
       } catch (err) {
         this.logger.warn(`[billing] claim 置 approved 失败 orderNo=${orderNo}: ${err}`);
       }
@@ -449,6 +453,8 @@ export class BillingService {
     const parts = [order.claim_note ?? '', reason ? `驳回：${reason}` : '驳回'].filter((s) => s.length > 0);
     const note = parts.join('；').slice(0, 200);
     await this.ordersRepo.markClaim(order.id, 'rejected', note);
+    // 通知挂点：驳回迁移真实发生才通知家长（reason 用入参原文，非拼接 claim_note）
+    await this.notifyClaimResult(order, 'claim_rejected', reason ?? null);
     this.logger.log(
       `[BILLING] admin reject-claim：adminId=${adminId ?? 'unknown'} orderNo=${orderNo} note=${note} time=${new Date().toISOString()}`,
     );
@@ -487,6 +493,15 @@ export class BillingService {
     };
   }
 
+  /** 裁决结果通知（spec §2.1）：只在实际迁移发生处调用；失败 warn 不阻断。 */
+  private async notifyClaimResult(order: OrderRow, type: 'claim_approved' | 'claim_rejected', reason: string | null): Promise<void> {
+    try {
+      await this.noticesRepo.insert({ parentId: order.parent_id, type, orderNo: order.order_no, reason });
+    } catch (err) {
+      this.logger.warn(`[billing] 裁决通知落库失败（不阻断裁决）orderNo=${order.order_no} type=${type}: ${err}`);
+    }
+  }
+
   // ---------- 核心：入账事务 ----------
 
   /**
@@ -511,6 +526,8 @@ export class BillingService {
       if (order.claim_status === 'pending_review') {
         try {
           await this.ordersRepo.markClaim(order.id, 'approved');
+          // 通知挂点：闭环迁移真实发生才通知（approveClaim paid 路径经此处覆盖）
+          await this.notifyClaimResult(order, 'claim_approved', null);
         } catch (err) {
           this.logger.warn(`[billing] claim 置 approved 失败（入账已完成不回滚）orderNo=${order.order_no}: ${err}`);
         }
