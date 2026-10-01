@@ -27,12 +27,12 @@ function renderLayout(path: string) {
 }
 
 describe('MobileParentLayout', () => {
-  it('写死 parent 主题，顶栏含学生切换器，底部四 Tab 导航', () => {
+  it('写死 parent 主题，顶栏含学生切换器，底部五 Tab 导航', () => {
     renderLayout('/m/parent/dashboard');
 
     expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
     expect(screen.getByTestId('mobile-student-switcher')).toBeInTheDocument();
-    for (const testId of ['tab-dashboard', 'tab-errors', 'tab-controls', 'tab-more']) {
+    for (const testId of ['tab-dashboard', 'tab-alerts', 'tab-errors', 'tab-controls', 'tab-more']) {
       expect(screen.getByTestId(testId)).toBeInTheDocument();
     }
     // aria-label 是无障碍口径（nav 角色），钉住不丢
@@ -44,6 +44,7 @@ describe('MobileParentLayout', () => {
 
     expect(screen.getByTestId('outlet-probe')).toBeInTheDocument();
     expect(screen.getByTestId('tab-dashboard').getAttribute('aria-current')).toBe('page');
+    expect(screen.getByTestId('tab-alerts').getAttribute('aria-current')).toBeNull();
     expect(screen.getByTestId('tab-more').getAttribute('aria-current')).toBeNull();
   });
 });

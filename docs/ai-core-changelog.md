@@ -56,7 +56,7 @@
 
 `manifest.webmanifest`（`display: standalone`）+ iOS 主屏 meta。**无 Service Worker**（HTTPS 才能注册，
 做了是死代码）、**无系统级推送**（独立一批）。双平台「添加到主屏幕」步骤见 spec 附章 A
-（含已知限制：AlertBanner 点击落点是电脑端预警页，移动版预警请走底部 Tab）。
+（AlertBanner 点击后经移动壳拦截进入移动端预警页 /m/parent/alerts，底部『预警』Tab 同入口——2026-10-02 用户裁决加第 5 Tab，原「点击落电脑端预警页」限制已消除）。
 
 ### 测试与验证
 
