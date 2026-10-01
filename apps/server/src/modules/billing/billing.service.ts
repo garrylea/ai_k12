@@ -502,6 +502,33 @@ export class BillingService {
     }
   }
 
+  // ---------- 家长端通知端点（spec §2.3） ----------
+
+  /** 家长未读裁决通知（spec §2.3）：无分页，上限 50 由 repo 保证；total=items.length。 */
+  async listUnreadNotices(parentId: number) {
+    const rows = await this.noticesRepo.listUnread(parentId);
+    return {
+      items: rows.map((r) => ({ id: r.id, type: r.type, orderNo: r.order_no, reason: r.reason, createdAt: ISO(r.created_at) })),
+      total: rows.length,
+    };
+  }
+
+  /** ack 已读：1001 非法 id / 1002 不存在 / 1005 他人通知；已读幂等不重复 UPDATE。 */
+  async ackNotice(parentId: number, rawId: unknown): Promise<{ ok: true }> {
+    const id = typeof rawId === 'number' ? rawId : Number(rawId);
+    if (!Number.isInteger(id) || id < 1) {
+      throw new BadRequestException({ code: 1001, message: '参数错误' });
+    }
+    const row = await this.noticesRepo.findById(id);
+    if (!row) throw new NotFoundException({ code: 1002, message: '通知不存在' });
+    if (row.parent_id !== parentId) throw new ForbiddenException({ code: 1005, message: '无权操作该通知' });
+    if (row.is_read !== 1) {
+      await this.noticesRepo.markRead(id, parentId);
+      this.logger.log(`[BILLING] notice ack：noticeId=${id} parentId=${parentId} time=${new Date().toISOString()}`);
+    }
+    return { ok: true };
+  }
+
   // ---------- 核心：入账事务 ----------
 
   /**

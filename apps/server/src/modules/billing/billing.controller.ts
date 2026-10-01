@@ -81,4 +81,17 @@ export class BillingController {
     const status = await this.subscriptionsService.getStatusView({ role: 'parent', sub: user.sub });
     return { orderNo, paymentStatus: 'paid' as const, claimStatus, currentPeriodEnd: status.currentPeriodEnd };
   }
+
+  /** 家长未读裁决通知（spec §2.3）：跨页提示条数据源，挂载 + 30s 轮询拉取。 */
+  @Get('notices/unread')
+  listUnreadNotices(@CurrentUser() user: JwtUser) {
+    return this.billingService.listUnreadNotices(user.sub);
+  }
+
+  /** 「知道了」标已读。幂等；显式 200（状态迁移语义，本仓第二处 @HttpCode 覆盖）。 */
+  @Post('notices/:id/ack')
+  @HttpCode(200)
+  ackNotice(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.billingService.ackNotice(user.sub, id);
+  }
 }

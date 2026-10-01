@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
-import { RequestMethod, type RawBodyRequest } from '@nestjs/common';
+import { RequestMethod, HttpException, type RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { Reflector } from '@nestjs/core';
 import { BillingController } from './billing.controller.js';
@@ -297,5 +297,29 @@ describe('AdminBillingController 委派', () => {
 
     await controller.rejectClaim('ORD1', { reason: 123 as never }, admin);
     expect(rejectClaim).toHaveBeenLastCalledWith('ORD1', 9, undefined);
+  });
+});
+
+describe('BillingController 通知端点', () => {
+  it('GET notices/unread 挂 api/billing 下；POST notices/:id/ack 显式 @HttpCode(200)', () => {
+    expect(Reflect.getMetadata(PATH_METADATA, BillingController.prototype.listUnreadNotices)).toBe('notices/unread');
+    const ack = BillingController.prototype.ackNotice;
+    expect(Reflect.getMetadata(PATH_METADATA, ack)).toBe('notices/:id/ack');
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, ack)).toBe(200);
+    expect(Reflect.getMetadata(METHOD_METADATA, ack)).toBe(RequestMethod.POST);
+  });
+
+  it('ack：service 1002 原样冒泡', async () => {
+    const svc = { ackNotice: vi.fn().mockRejectedValue(new HttpException({ code: 1002, message: '通知不存在' }, 404)) };
+    const ctrl = makeBillingController(svc, { getStatusView: vi.fn() });
+    await expect(ctrl.ackNotice('5', PARENT)).rejects.toMatchObject({ response: { code: 1002 } });
+    expect(svc.ackNotice).toHaveBeenCalledWith(7, '5');
+  });
+
+  it('listUnreadNotices：身份透传 user.sub', async () => {
+    const svc = { listUnreadNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }) };
+    const ctrl = makeBillingController(svc, { getStatusView: vi.fn() });
+    await expect(ctrl.listUnreadNotices(PARENT)).resolves.toEqual({ items: [], total: 0 });
+    expect(svc.listUnreadNotices).toHaveBeenCalledWith(7);
   });
 });

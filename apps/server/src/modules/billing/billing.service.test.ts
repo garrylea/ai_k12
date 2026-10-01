@@ -1223,3 +1223,36 @@ describe('BillingService 裁决通知', () => {
     await expect(mkSvc(d).approveClaim('ORD1', 9)).resolves.toBe('paid');
   });
 });
+
+describe('BillingService 通知端点', () => {
+  const ROW = { id: 5, parent_id: 3, type: 'claim_rejected', order_no: 'ORD1', reason: '没收到钱', is_read: 0, created_at: new Date('2026-10-01T08:00:00Z'), updated_at: new Date() };
+
+  it('listUnreadNotices → items 映射 camelCase + total=items.length', async () => {
+    const d = mkDeps();
+    d.noticesRepo.listUnread.mockResolvedValue([ROW, { ...ROW, id: 4, reason: null, type: 'claim_approved' }]);
+    const res = await mkSvc(d).listUnreadNotices(3);
+    expect(res.total).toBe(2);
+    expect(res.items[0]).toEqual({ id: 5, type: 'claim_rejected', orderNo: 'ORD1', reason: '没收到钱', createdAt: '2026-10-01T08:00:00.000Z' });
+  });
+
+  it('ackNotice：非正整数 id → 400/1001；不存在 → 404/1002；他人通知 → 403/1005', async () => {
+    const d = mkDeps();
+    await expect(mkSvc(d).ackNotice(3, 'abc')).rejects.toMatchObject({ status: 400, response: { code: 1001 } });
+    await expect(mkSvc(d).ackNotice(3, 0)).rejects.toMatchObject({ status: 400, response: { code: 1001 } });
+    d.noticesRepo.findById.mockResolvedValue(null);
+    await expect(mkSvc(d).ackNotice(3, 5)).rejects.toMatchObject({ status: 404, response: { code: 1002 } });
+    d.noticesRepo.findById.mockResolvedValue(ROW);
+    await expect(mkSvc(d).ackNotice(999, 5)).rejects.toMatchObject({ status: 403, response: { code: 1005 } });
+  });
+
+  it('ackNotice：已读幂等（不调 markRead）→ 200 {ok:true}；未读 → markRead(id, parentId) 双条件', async () => {
+    const d = mkDeps();
+    d.noticesRepo.findById.mockResolvedValue(ROW);
+    await expect(mkSvc(d).ackNotice(3, 5)).resolves.toEqual({ ok: true });
+    expect(d.noticesRepo.markRead).toHaveBeenCalledWith(5, 3);
+    d.noticesRepo.findById.mockResolvedValue({ ...ROW, is_read: 1 });
+    expect(d.noticesRepo.markRead).toHaveBeenCalledTimes(1); // 上一次的调用数
+    await expect(mkSvc(d).ackNotice(3, 5)).resolves.toEqual({ ok: true });
+    expect(d.noticesRepo.markRead).toHaveBeenCalledTimes(1); // 幂等不再 UPDATE
+  });
+});
