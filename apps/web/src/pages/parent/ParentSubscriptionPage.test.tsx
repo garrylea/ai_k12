@@ -12,6 +12,7 @@ import {
   getSubscriptionPlans,
   getSubscriptionStatus,
   listBillingOrders,
+  listUnreadBillingNotices,
   type BillingOrderView,
   type PlanView,
   type SubscriptionStatusView,
@@ -24,6 +25,8 @@ vi.mock('@/services/api', async (importOriginal) => {
   return {
     ...actual,
     getSubscriptionStatus: vi.fn(),
+    // 顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
+    listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getSubscriptionPlans: vi.fn(),
     getAiUsage: vi.fn(),
     createBillingOrder: vi.fn(),
@@ -40,6 +43,7 @@ vi.mock('@/components/base', async (importOriginal) => {
 });
 
 const statusMock = vi.mocked(getSubscriptionStatus);
+const noticesMock = vi.mocked(listUnreadBillingNotices);
 const plansMock = vi.mocked(getSubscriptionPlans);
 const usageMock = vi.mocked(getAiUsage);
 const createOrderMock = vi.mocked(createBillingOrder);
@@ -102,6 +106,8 @@ function renderPage() {
 
 beforeEach(() => {
   statusMock.mockReset().mockResolvedValue(statusOf());
+  // 顶栏裁决结果条挂载即拉：默认无未读 → 不渲染
+  noticesMock.mockReset().mockResolvedValue({ items: [], total: 0 });
   plansMock.mockReset().mockResolvedValue([PLAN]);
   usageMock.mockReset().mockResolvedValue(usageOf());
   createOrderMock.mockReset();

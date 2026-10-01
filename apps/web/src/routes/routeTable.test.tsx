@@ -11,6 +11,7 @@ import {
   getMyPoints,
   getMyRewards,
   getSubscriptionStatus,
+  listUnreadBillingNotices,
   getParentAccount,
   getParentAlerts,
   getParentControls,
@@ -82,6 +83,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getMyPointRules: vi.fn(),
     // `/student/locked`（订阅锁定页新页）：挂载即拉订阅状态
     getSubscriptionStatus: vi.fn(),
+    // 家长端顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
+    listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   };
 });
 
@@ -104,6 +107,7 @@ const getKnowledgeGraphMasteryMock = vi.mocked(getKnowledgeGraphMastery);
 const getWeakPointsMock = vi.mocked(getWeakPoints);
 const getMyPointRulesMock = vi.mocked(getMyPointRules);
 const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
+const listUnreadBillingNoticesMock = vi.mocked(listUnreadBillingNotices);
 
 /** P6.6：与后端默认档一致（切走 5 / 无操作 15），恰好等于「标准」预设。 */
 const CONTROLS: ParentControls = {
@@ -266,6 +270,9 @@ beforeEach(() => {
     daysRemaining: 12,
     source: 'order',
   });
+  // 顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
+  listUnreadBillingNoticesMock.mockReset();
+  listUnreadBillingNoticesMock.mockResolvedValue({ items: [], total: 0 });
   getMyPointRulesMock.mockResolvedValue({
     tasks: [
       {

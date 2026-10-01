@@ -4,6 +4,7 @@ import { useThemeStore } from '@/store/themeStore';
 import { ParentNav } from './ParentNav';
 import { StudentSwitcher } from './StudentSwitcher';
 import AlertBanner from '@/components/business/AlertBanner';
+import BillingNoticeBar from '@/pages/parent/BillingNoticeBar';
 import SubscriptionNoticeBar from '@/pages/parent/SubscriptionNoticeBar';
 import { getUnreadMessageCount } from '@/services/api';
 
@@ -41,6 +42,9 @@ export default function ParentLayout() {
 
           {/* 订阅提示条（付费状态）：与预警 Banner 并列的两个独立组件，点击进订阅中心 */}
           <SubscriptionNoticeBar />
+
+          {/* 裁决结果条（事件通知）：转账裁决通过/驳回的未读通知，逐条「知道了」 */}
+          <BillingNoticeBar />
 
           {/* 顶部栏 */}
           <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0">

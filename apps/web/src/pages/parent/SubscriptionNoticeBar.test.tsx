@@ -17,6 +17,8 @@ vi.mock('@/services/api', async (importOriginal) => {
   return {
     ...actual,
     getSubscriptionStatus: vi.fn(),
+    // 顶栏裁决结果条（BillingNoticeBar）：若本页树内挂载则默认无未读 → 不渲染
+    listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   };
 });
 

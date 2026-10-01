@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
-import { getParentReport, getParentStudyTime, getParentMastery, getSubscriptionStatus, getUnreadMessageCount, listMyStudents, type MyStudentItem, type ParentLearningReport, type ParentMastery, type ParentStudyTime } from '@/services/api';
+import { getParentReport, getParentStudyTime, getParentMastery, getSubscriptionStatus, getUnreadMessageCount, listMyStudents, listUnreadBillingNotices, type MyStudentItem, type ParentLearningReport, type ParentMastery, type ParentStudyTime } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 import { useThemeStore } from '@/store/themeStore';
 
@@ -40,6 +40,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getUnreadMessageCount: vi.fn(),
     // 顶栏订阅提示条（SubscriptionNoticeBar）挂载即拉
     getSubscriptionStatus: vi.fn(),
+    // 顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
+    listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getParentReport: vi.fn(),
     getParentStudyTime: vi.fn(),
     // 真掌握度卡（埋点 Phase 1B）自己取数
@@ -50,6 +52,7 @@ vi.mock('@/services/api', async (importOriginal) => {
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMock = vi.mocked(getUnreadMessageCount);
 const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
+const listUnreadBillingNoticesMock = vi.mocked(listUnreadBillingNotices);
 const getReportMock = vi.mocked(getParentReport);
 const getStudyTimeMock = vi.mocked(getParentStudyTime);
 const getMasteryMock = vi.mocked(getParentMastery);
@@ -125,6 +128,9 @@ beforeEach(() => {
     daysRemaining: 12,
     source: 'order',
   });
+  // 顶栏裁决结果条挂载即拉：默认无未读 → 不渲染
+  listUnreadBillingNoticesMock.mockReset();
+  listUnreadBillingNoticesMock.mockResolvedValue({ items: [], total: 0 });
   getReportMock.mockReset();
   getReportMock.mockResolvedValue(REPORT);
   getStudyTimeMock.mockReset();

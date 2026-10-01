@@ -8,6 +8,7 @@ import {
   getSubscriptionStatus,
   getUnreadMessageCount,
   listMyStudents,
+  listUnreadBillingNotices,
   type MyStudentItem,
   type ParentErrorPage,
 } from '@/services/api';
@@ -22,6 +23,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getUnreadMessageCount: vi.fn(),
     // 顶栏订阅提示条（SubscriptionNoticeBar）挂载即拉
     getSubscriptionStatus: vi.fn(),
+    // 顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
+    listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getParentErrors: vi.fn(),
     fetchSubjects: vi.fn(),
   };
@@ -30,6 +33,7 @@ vi.mock('@/services/api', async (importOriginal) => {
 const listMyStudentsMock = vi.mocked(listMyStudents);
 const getUnreadMock = vi.mocked(getUnreadMessageCount);
 const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
+const listUnreadBillingNoticesMock = vi.mocked(listUnreadBillingNotices);
 const getErrorsMock = vi.mocked(getParentErrors);
 const fetchSubjectsMock = vi.mocked(fetchSubjects);
 
@@ -86,6 +90,9 @@ beforeEach(() => {
     daysRemaining: 12,
     source: 'order',
   });
+  // 顶栏裁决结果条挂载即拉：默认无未读 → 不渲染
+  listUnreadBillingNoticesMock.mockReset();
+  listUnreadBillingNoticesMock.mockResolvedValue({ items: [], total: 0 });
   getErrorsMock.mockReset();
   getErrorsMock.mockResolvedValue(PAGE);
   fetchSubjectsMock.mockReset();

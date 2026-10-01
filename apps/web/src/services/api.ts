@@ -3008,6 +3008,27 @@ export function confirmBillingOrderPaid(
   });
 }
 
+// --- 家长端：裁决结果通知（批④补丁；spec §3.2） ---
+
+export interface BillingNoticeView {
+  id: number;
+  type: 'claim_approved' | 'claim_rejected';
+  orderNo: string;
+  /** 驳回原因；approve 为 null */
+  reason: string | null;
+  createdAt: string;
+}
+
+/** 未读裁决通知（无分页，服务端上限 50；total=items.length）。首拉失败由组件静默。 */
+export function listUnreadBillingNotices(): Promise<{ items: BillingNoticeView[]; total: number }> {
+  return fetchApi('/billing/notices/unread');
+}
+
+/** 「知道了」标已读。幂等（已读再 ack 仍 200）；1002/1005 由 ApiError 冒泡。 */
+export function ackBillingNotice(id: number): Promise<{ ok: true }> {
+  return fetchApi(`/billing/notices/${encodeURIComponent(String(id))}/ack`, { method: 'POST' });
+}
+
 // --- 管理端：订阅裁决 / 家庭订阅（订阅批④ Task 7；spec §2.3 / §5.25） ---
 // 端点全部在 /api/admin/billing 下（@Roles('admin')）。管理端没有订单详情端点，
 // 「现场核验」= 页面行内刷新 + 线下核实提示，**不调家长端 GET /billing/orders/{orderNo}**。

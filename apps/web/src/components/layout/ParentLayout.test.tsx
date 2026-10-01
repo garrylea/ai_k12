@@ -8,6 +8,7 @@ import {
   getParentUnreadAlerts,
   markParentAlertRead,
   listMyStudents,
+  listUnreadBillingNotices,
   type MyStudentItem,
   type SubscriptionStatusView,
 } from '@/services/api';
@@ -29,6 +30,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentUnreadAlerts: vi.fn(),
     markParentAlertRead: vi.fn().mockResolvedValue(null),
     getSubscriptionStatus: vi.fn(),
+    // 顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
+    listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   };
 });
 
@@ -37,6 +40,7 @@ const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
 const getParentUnreadAlertsMock = vi.mocked(getParentUnreadAlerts);
 const markParentAlertReadMock = vi.mocked(markParentAlertRead);
 const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
+const listUnreadBillingNoticesMock = vi.mocked(listUnreadBillingNotices);
 
 function statusOf(over: Partial<SubscriptionStatusView> = {}): SubscriptionStatusView {
   return {
@@ -88,6 +92,8 @@ beforeEach(() => {
   markParentAlertReadMock.mockReset().mockResolvedValue(null);
   // 默认「订阅正常」→ 提示条不渲染，不干扰上面的 Banner 用例
   getSubscriptionStatusMock.mockReset().mockResolvedValue(statusOf());
+  // 顶栏裁决结果条挂载即拉：默认无未读 → 不渲染
+  listUnreadBillingNoticesMock.mockReset().mockResolvedValue({ items: [], total: 0 });
   useParentStudentStore.setState({ studentId: null });
 });
 
