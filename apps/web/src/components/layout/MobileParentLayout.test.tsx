@@ -9,6 +9,10 @@ afterEach(cleanup);
 vi.mock('@/components/business/AlertBanner', () => ({ default: () => null }));
 vi.mock('@/pages/parent/BillingNoticeBar', () => ({ default: () => null }));
 vi.mock('@/pages/parent/SubscriptionNoticeBar', () => ({ default: () => null }));
+// 切换器（Task 3 起为真实现）自拉数据、有自己的测试文件；外壳测试只关心它被渲染。
+vi.mock('./MobileStudentSwitcher', () => ({
+  default: () => <div data-testid="mobile-student-switcher" />,
+}));
 
 function renderLayout(path: string) {
   return render(
@@ -23,7 +27,7 @@ function renderLayout(path: string) {
 }
 
 describe('MobileParentLayout', () => {
-  it('写死 parent 主题，顶栏含学生切换器占位，底部四 Tab 导航', () => {
+  it('写死 parent 主题，顶栏含学生切换器，底部四 Tab 导航', () => {
     renderLayout('/m/parent/dashboard');
 
     expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
