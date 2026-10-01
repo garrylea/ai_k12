@@ -13,6 +13,7 @@ import {
   type SubscriptionStatusView,
 } from '@/services/api';
 import { toast } from '@/components/base';
+import { useAdminBillingBadgeStore } from '@/store/adminBillingBadgeStore';
 
 /**
  * 管理端「订阅裁决」页回归（订阅批④ Task 7）：
@@ -20,7 +21,8 @@ import { toast } from '@/components/base';
  *
  * 口径钉子：
  * - 「现场核验」= 行内「刷新」+ 以渠道状态为准的提示，**不调任何家长端点**（无 admin 订单详情端点，本期不新增）。
- * - approve / reject 成功后重拉列表（行消失由重拉体现），角标归 AdminNav 自己的拉取，本页不负责。
+ * - approve / reject 成功后重拉列表（行消失由重拉体现），并触发侧栏角标 store
+ *   refresh（adminBillingBadgeStore，pending_review pageSize=1 取 total）。
  * - 调整试用 / 赠送天数成功后用返回的 StatusView **行内更新**，不整页重拉。
  */
 
@@ -94,8 +96,7 @@ function claimPage(items: AdminBillingClaimView[]) {
 }
 
 beforeEach(() => {
-  listClaimsMock.mockReset().mockResolvedValue(claimPage([claimOf()]));
-  approveMock.mockReset();
+  listClaimsMock.mockReset().mockResolvedValue(claimPage([claimOf()]));  approveMock.mockReset();
   rejectMock.mockReset().mockResolvedValue({ orderNo: 'NO1', claimStatus: 'rejected' });
   listFamiliesMock.mockReset().mockResolvedValue({
     items: [familyOf()],
@@ -106,11 +107,14 @@ beforeEach(() => {
   setTrialMock.mockReset();
   grantMock.mockReset();
   toastMock.mockReset();
+  // 角标 store 是模块单例，重置防跨用例泄漏
+  useAdminBillingBadgeStore.setState({ pendingCount: null });
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  useAdminBillingBadgeStore.setState({ pendingCount: null });
 });
 
 describe('AdminBillingPage Tab 1 待裁决', () => {
@@ -165,6 +169,37 @@ describe('AdminBillingPage Tab 1 待裁决', () => {
     });
   });
 
+  it('approve 成功后触发角标 refresh → store.pendingCount 更新为 pending_review total', async () => {
+    approveMock.mockResolvedValue({ orderNo: 'NO1', paymentStatus: 'paid', result: 'paid' });
+    render(<AdminBillingPage />);
+    const row = await screen.findByTestId('claim-row-NO1');
+
+    fireEvent.click(within(row).getByRole('button', { name: '通过' }));
+
+    await waitFor(() => {
+      expect(useAdminBillingBadgeStore.getState().pendingCount).toBe(1);
+    });
+    // refresh 链路签名：pending_review + pageSize=1（区别于页面列表的 pageSize=20）
+    expect(listClaimsMock).toHaveBeenCalledWith('pending_review', 1, 1);
+  });
+
+  it('reject 成功后触发角标 refresh → store.pendingCount 更新', async () => {
+    render(<AdminBillingPage />);
+    const row = await screen.findByTestId('claim-row-NO1');
+
+    fireEvent.click(within(row).getByRole('button', { name: '驳回' }));
+    fireEvent.change(await screen.findByTestId('reject-reason-input'), { target: { value: '未查到到账' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认驳回' }));
+
+    await waitFor(() => {
+      expect(rejectMock).toHaveBeenCalledWith('NO1', '未查到到账');
+    });
+    await waitFor(() => {
+      expect(useAdminBillingBadgeStore.getState().pendingCount).toBe(1);
+    });
+    expect(listClaimsMock).toHaveBeenCalledWith('pending_review', 1, 1);
+  });
+
   it('点「驳回」→ 弹原因表单；确认 → reject(orderNo, reason) + 重拉', async () => {
     render(<AdminBillingPage />);
     const row = await screen.findByTestId('claim-row-NO1');
@@ -195,6 +230,8 @@ describe('AdminBillingPage Tab 1 待裁决', () => {
       expect(toastMock).toHaveBeenCalledWith('error', '订单已入账');
     });
     expect(listClaimsMock.mock.calls.length).toBe(loadsBefore);
+    // 失败路径不触发角标 refresh，store 保持从未拉取的 null
+    expect(useAdminBillingBadgeStore.getState().pendingCount).toBeNull();
   });
 });
 

@@ -11,6 +11,7 @@ import {
   type SubscriptionStatusView,
 } from '@/services/api';
 import { Input, Modal, Skeleton, toast } from '@/components/base';
+import { useAdminBillingBadgeStore } from '@/store/adminBillingBadgeStore';
 
 /**
  * 管理端「订阅裁决」页（订阅批④ Task 7）：Tab 1 待裁决 + Tab 2 家庭订阅。
@@ -20,9 +21,10 @@ import { Input, Modal, Skeleton, toast } from '@/components/base';
  * + 「以渠道支付状态为准，请线下核实」提示，并把这单已有的裁决字段（备注 / 金额 /
  * 主张时间）全部展示在行内。**不新增后端端点，不调任何家长端点。**
  *
- * approve / reject 成功后重拉列表（行消失由重拉体现）；
+ * approve / reject 成功后重拉列表（行消失由重拉体现），并触发侧栏角标
+ * store refresh（adminBillingBadgeStore——AdminNav 在 router 之外不重挂，
+ * 必须由本页主动刷新）。
  * 调整试用 / 赠送天数成功后用返回的 StatusView **行内更新**，不整页重拉。
- * 侧栏角标（pending 数）归 AdminNav 自己惰性拉取，本页不管。
  */
 
 const PAGE_SIZE = 20;
@@ -62,6 +64,8 @@ export default function AdminBillingPage() {
   /** 在途闸门：approve/reject 请求未回来前丢弃同一行的后续点击（照 AdminAlertsPage 的 ref 口径）。 */
   const [busyOrderNo, setBusyOrderNo] = useState<string | null>(null);
 
+  const refreshBadge = useAdminBillingBadgeStore((s) => s.refresh);
+
   const loadClaims = useCallback(() => {
     listBillingClaims('pending_review', 1, PAGE_SIZE)
       .then((res) => {
@@ -87,6 +91,7 @@ export default function AdminBillingPage() {
       await approveBillingClaim(orderNo);
       toast('success', '已入账并开通订阅');
       loadClaims();
+      refreshBadge();
     } catch (err) {
       toast('error', err instanceof Error ? err.message : '操作失败');
     } finally {
@@ -106,6 +111,7 @@ export default function AdminBillingPage() {
       setRejectReason('');
       toast('success', '已驳回');
       loadClaims();
+      refreshBadge();
     } catch (err) {
       toast('error', err instanceof Error ? err.message : '操作失败');
     } finally {

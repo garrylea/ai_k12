@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LogoutButton } from '@/components/base';
-import { listBillingClaims } from '@/services/api';
+import { useAdminBillingBadgeStore } from '@/store/adminBillingBadgeStore';
 
 const navItems = [
   { to: '/admin', label: '总览', end: true },
@@ -17,27 +17,18 @@ const navItems = [
 /**
  * 管理员侧栏（含「订阅裁决」角标，订阅批④ Task 7）。
  *
- * 角标口径（照 SubscriptionNoticeBar 的「失败静默」）：挂载时惰性拉一次
- * pending_review 总数（pageSize=1 只要 total），不做轮询；拉取失败静默 →
- * 不渲染角标，导航永不因计费接口故障而不可用。approve/reject 后管理员
- * 切页重挂自然刷新，不在本组件内做实时联动。
+ * 角标走 adminBillingBadgeStore 联动——AdminBillingPage 裁决后主动 refresh，
+ * 处理完最后一条即消失；本组件挂载时也拉一次（AdminNav 在 router 之外，
+ * 切页不重挂，不能依赖重挂刷新）。拉取失败静默保留旧值，导航永不因计费
+ * 接口故障而不可用。
  */
 export function AdminNav() {
-  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const pendingCount = useAdminBillingBadgeStore((s) => s.pendingCount);
+  const refresh = useAdminBillingBadgeStore((s) => s.refresh);
 
   useEffect(() => {
-    let cancelled = false;
-    listBillingClaims('pending_review', 1, 1)
-      .then((res) => {
-        if (!cancelled) setPendingCount(res.total);
-      })
-      .catch(() => {
-        /* 拉取失败静默：角标永不阻断管理端导航 */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void refresh();
+  }, [refresh]);
 
   return (
     <aside className="w-16 lg:w-56 shrink-0 bg-white border-r border-gray-200 flex flex-col transition-all">
