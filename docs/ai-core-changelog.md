@@ -8,6 +8,67 @@
 
 ---
 
+## 2026-10-01 · 家长端移动 PWA（feat/parent-mobile-pwa，9 任务全部完成）
+
+### 动机与范围
+
+- 设计 spec：`docs/superpowers/specs/2026-10-01-parent-mobile-pwa-design.md`（形态裁决、路由组、
+  降级口径、页面明细均以它为准）。动机：家长管理场景从「iPad 横屏桌面 Web」延伸到手机竖屏，
+  以 **PWA** 形态承载（本机磁盘不足 14GB，原生双端不可行）；不是新功能，是**形态迁移**。
+- v1 = PWA 化（manifest + iOS meta）+ `/m/parent/*` 移动路由组 + 四页（仪表盘/预警/错题本/管控）
+  + 「更多」占位 + 登录落点按视口分流。**零后端改动**（全部只用既有端点）。
+
+### 方案 B 路由组（与 `/parent/*` 平行）
+
+`/m/parent` → Navigate 到 dashboard；`dashboard` / `alerts` / `errors` / `controls` 四实页 +
+`more`（入口列表）+ `more/:name`（「该功能请在电脑端使用」占位）。新外壳 `MobileParentLayout`
+（顶栏：MobileStudentSwitcher + AlertBanner/BillingNoticeBar/SubscriptionNoticeBar 三通知条；
+底部四 Tab：仪表盘/错题/管控/更多）；页面组件放 `src/pages/parent-mobile/` 新目录，不复用桌面页。
+登录落点：`LoginPage` 按视口分流（<768px → `/m/parent`，否则现状 `/parent`）；
+手机上访问 `/parent/*` 不强制跳转（iPad 横屏继续用桌面版）。
+
+### 四页能力与数据源（全为既有端点）
+
+- **仪表盘**：`getParentDashboard` + `getParentStudyTime` + `getParentTodayUsage` + `getParentMastery`；
+  「学习时长（会话）」与「近 7 天活跃天数」两套口径并列展示、文案区分（既有硬约定）。
+- **预警**：`getParentAlerts`（分页）+ `markParentAlertRead` + 裁决通知「知道了」
+  （`listUnreadBillingNotices`/`ackBillingNotice`）+ 站内消息未读计数 `getUnreadMessageCount`；
+  30s 轮询放移动端自己的 hook，不与桌面页共享定时器实例。
+- **错题本**：`getParentErrors`（分页 + 学科筛选 + `track=main|training` 口径沿用），
+  抽屉看题面/答案，共享 Markdown 渲染配置；换孩子回第 1 页。
+- **管控**：`getParentControls`/`putParentControls`（`session_lock_minutes` 1..480，NULL=显式解除）+
+  `issueParentDeviceCommand` 远程解除（409/1001 原样展示，不静默）。
+  **进出时间数据源在 Task 8 实施时修正**：计划 brief 初稿猜的是 `getParentStudyTime`（按天聚合），
+  实际改为 `getParentLearningSessions(studentId, 7, 10)` —— 桌面 LearningTimelineCard 同款 API
+  与口径（进出时间为**列表**：`startedAt`/`endedAt`，`null`=进行中）。
+
+### 对 spec 的两处偏差（均已确认）
+
+1. **「当前孩子」复用 `parentStudentStore`** 而非 spec §4.3 草案的独立 `mobileParentStore`：
+   同一设备同一时刻只渲染一端（移动/桌面互不感知），共用一个「当前孩子」可让两端互切时
+   上下文一致，也少维护一个 store。`MobileStudentSwitcher` 镜像桌面 `StudentSwitcher`
+   四条口径（拉列表、空列表/持久化 id 失效/首次进入三种回落、取消守卫）。
+2. **计划冲突裁决**：移动端孩子切换器补齐「**路由变化静默刷新**」（pathname 变化时静默重拉列表、
+   不闪加载态）——镜像桌面四口径的组成部分，计划代码模板漏写，执行中用户裁决补上
+   （commit 0c4dad2）。
+
+### PWA 降级口径（局域网 HTTP 现状）
+
+`manifest.webmanifest`（`display: standalone`）+ iOS 主屏 meta。**无 Service Worker**（HTTPS 才能注册，
+做了是死代码）、**无系统级推送**（独立一批）。双平台「添加到主屏幕」步骤见 spec 附章 A
+（含已知限制：AlertBanner 点击落点是电脑端预警页，移动版预警请走底部 Tab）。
+
+### 测试与验证
+
+- 7 个新测试文件共 30 例全绿：`mobileParentRoutes.test.tsx`(3) / `MobileParentLayout.test.tsx`(2) /
+  `MobileStudentSwitcher.test.tsx`(5) / `MobileDashboardPage.test.tsx`(3) / `MobileAlertsPage.test.tsx`(4) /
+  `MobileErrorsPage.test.tsx`(5) / `MobileControlsPage.test.tsx`(8)；`LoginPage.test.tsx` 补视口分流 1 例。
+- **桌面端零改动声明**：13 个桌面家长页一行未动，桌面既有测试零改动（唯一共享组件改动是
+  `LoginPage` 的登录落点分流，其测试同步补例）。
+- 全量前端 vitest + lint + tsc 全绿（Task 9 收尾时复跑确认）。
+
+---
+
 ## 2026-10-01 · 订阅批④补丁：裁决结果通知（feat/billing-claim-notification）
 
 ### 背景与缺陷
