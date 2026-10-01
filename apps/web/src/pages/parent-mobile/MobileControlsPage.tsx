@@ -4,6 +4,7 @@ import {
   getParentLearningSessions,
   issueParentDeviceCommand,
   putParentControls,
+  type ParentControls,
   type ParentSessionItem,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
