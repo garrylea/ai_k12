@@ -93,8 +93,14 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* 下半部：表单区 */}
-          <div className="bg-white px-10 pt-7 pb-8 space-y-5">
+          {/* 下半部：表单区。用 <form> 包住输入与按钮，回车即可触发登录 */}
+          <form
+            className="bg-white px-10 pt-7 pb-8 space-y-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleLogin();
+            }}
+          >
             {/* 输入框 */}
             <div className="space-y-4">
               <div>
@@ -143,12 +149,12 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* 登录按钮：橘红底，白字 */}
+            {/* 登录按钮：橘红底，白字。type=submit 由 form onSubmit 触发（回车同样生效） */}
             <Button
               variant="primary"
               size="lg"
+              type="submit"
               className="w-full !bg-[var(--brand-500)] !text-white hover:!bg-[var(--brand-400)] active:!bg-[var(--brand-600)]"
-              onClick={handleLogin}
               disabled={loading}
             >
               {loading ? '登录中…' : '登录'}
@@ -159,11 +165,11 @@ export default function LoginPage() {
               <Link to="/register" className="hover:text-[var(--brand-500)] hover:underline">
                 注册家长账号
               </Link>
-              <button className="hover:text-[var(--brand-500)] hover:underline">
+              <button type="button" className="hover:text-[var(--brand-500)] hover:underline">
                 忘记密码？
               </button>
             </div>
-          </div>
+          </form>
         </div>
       </div>
     </div>

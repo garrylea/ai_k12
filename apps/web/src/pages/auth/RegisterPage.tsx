@@ -61,8 +61,14 @@ export default function RegisterPage() {
             </p>
           </div>
 
-          {/* 下半部：表单区 */}
-          <div className="bg-white px-10 pt-7 pb-8 space-y-5">
+          {/* 下半部：表单区。用 <form> 包住输入与按钮，回车即可触发注册 */}
+          <form
+            className="bg-white px-10 pt-7 pb-8 space-y-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleRegister();
+            }}
+          >
             <div className="space-y-4">
               <div>
                 <label
@@ -130,11 +136,12 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            {/* type=submit 由 form onSubmit 触发（回车同样生效） */}
             <Button
               variant="primary"
               size="lg"
+              type="submit"
               className="w-full !bg-[var(--brand-500)] !text-white hover:!bg-[var(--brand-400)] active:!bg-[var(--brand-600)]"
-              onClick={handleRegister}
               disabled={loading}
             >
               {loading ? '注册中…' : '完成注册'}
@@ -146,7 +153,7 @@ export default function RegisterPage() {
                 返回登录
               </Link>
             </p>
-          </div>
+          </form>
         </div>
       </div>
     </div>
