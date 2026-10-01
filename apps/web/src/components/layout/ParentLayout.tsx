@@ -40,11 +40,11 @@ export default function ParentLayout() {
           {/* 顶部预警 Banner（最高优先级）：全部孩子的未读预警，30s 轮询，点击即已读 */}
           <AlertBanner />
 
-          {/* 订阅提示条（付费状态）：与预警 Banner 并列的两个独立组件，点击进订阅中心 */}
-          <SubscriptionNoticeBar />
-
           {/* 裁决结果条（事件通知）：转账裁决通过/驳回的未读通知，逐条「知道了」 */}
           <BillingNoticeBar />
+
+          {/* 订阅提示条（付费状态）：与预警 Banner 并列的两个独立组件，点击进订阅中心 */}
+          <SubscriptionNoticeBar />
 
           {/* 顶部栏 */}
           <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0">

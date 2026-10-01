@@ -181,4 +181,38 @@ describe('ParentLayout', () => {
     // 是两个独立的元素（不是同一节点的两种状态）
     expect(bar).not.toBe(screen.getByText(MESSAGE).closest('[role="alert"]'));
   });
+
+  it('护栏：三条 Bar 共存且 DOM 顺序为 预警 → 裁决结果条 → 订阅提示条（spec §5，互不吞）', async () => {
+    // 三者各自的数据源都给「有内容」：预警一条、裁决通知一条、订阅 expired
+    getParentUnreadAlertsMock.mockResolvedValue({
+      items: [
+        { id: 1, type: 'idle', level: 'info', message: MESSAGE, studentName: '小刚', createdAt: '2026-09-20T10:00:00.000Z' },
+      ],
+      total: 1,
+    });
+    listUnreadBillingNoticesMock.mockResolvedValue({
+      items: [
+        { id: 21, type: 'claim_rejected', orderNo: 'BJ20261001001', reason: '转账金额与订单不符', createdAt: '2026-10-01T08:00:00.000Z' },
+      ],
+      total: 1,
+    });
+    getSubscriptionStatusMock.mockResolvedValue(statusOf({ status: 'expired', daysRemaining: 0 }));
+    const { container } = renderLayout();
+
+    const alertEl = (await screen.findByText(MESSAGE)).closest('[role="alert"]');
+    const billingEl = await screen.findByTestId('billing-notice-bar');
+    const subscriptionEl = await screen.findByTestId('subscription-notice-bar');
+    expect(alertEl).not.toBeNull();
+    expect(billingEl).toHaveTextContent('管理员未确认本次转账：转账金额与订单不符');
+    expect(subscriptionEl).toHaveTextContent('订阅已过期，学生端已锁定，请续费');
+
+    // DOM 相对顺序：AlertBanner → BillingNoticeBar → SubscriptionNoticeBar
+    expect(
+      alertEl!.compareDocumentPosition(billingEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      billingEl.compareDocumentPosition(subscriptionEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(container).toBeInTheDocument();
+  });
 });
