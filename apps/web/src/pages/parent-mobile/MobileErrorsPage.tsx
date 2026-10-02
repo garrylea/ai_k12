@@ -36,6 +36,24 @@ function questionText(item: ParentErrorItem): string {
 }
 
 /**
+ * 折叠行摘要 = **纯文本**。禁用 Markdown/KaTeX/图片渲染：
+ * `line-clamp-2` 的 `-webkit-box` 对块级子元素（题面图 block img、KaTeX 公式块）在
+ * 不同内核下行为不一致——Chromium 会把图渲染出来撑破 clamp（实测 liH 135/191 vs 正常 90），
+ * iOS Safari 更是「高度撑大、内容被裁」= 两行字下面一大片空白（2026-10-02 用户实测报回）。
+ * 所以折叠行只放纯文本占位摘要；完整题面（含图）只在展开详情里经 StemMarkdown 渲染。
+ */
+function plainExcerpt(item: ParentErrorItem): string {
+  return questionText(item)
+    .replace(/\$\$[\s\S]*?\$\$/g, '[公式]') // display 公式块
+    .replace(/\$[^$\n]+?\$/g, '[公式]') // 行内公式
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '[图]') // markdown 图片
+    .replace(/<img\b[^>]*>/gi, '[图]') // 原生 HTML 图片
+    .replace(/<[^>]+>/g, '') // 其余 HTML 标签
+    .replace(/\s+/g, ' ') // 连续空白（含换行）压成单空格
+    .trim();
+}
+
+/**
  * 题面渲染走共享 Markdown 配置（KaTeX + 原生 HTML 表格 + 图片 resolveAsset +
  * repairHtml 修残缺标签），与学生端 / 桌面端家长错题页同一套，不另起炉灶。
  */
@@ -148,7 +166,7 @@ export default function MobileErrorsPage() {
                   <span>{e.track === 'main' ? '主线' : '训练'} · {SOURCE_LABEL[e.source] ?? e.source}</span>
                   <span>{e.isCleared ? '已清零' : `错 ${e.level} 次`}</span>
                 </div>
-                <div className="mt-1 line-clamp-2 text-sm"><StemMarkdown text={questionText(e)} /></div>
+                <div className="mt-1 line-clamp-2 text-sm">{plainExcerpt(e)}</div>
               </button>
               {openId === e.id && (
                 <div className="mt-3 border-t border-[var(--bg-subtle)] pt-3 text-sm">

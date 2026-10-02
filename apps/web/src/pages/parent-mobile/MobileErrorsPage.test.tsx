@@ -16,6 +16,18 @@ const item = {
 };
 const p1 = { items: [item], page: 1, pageSize: 20, total: 1 };
 
+// 带图 + 公式的题面（复现 2026-10-02 空白 bug 的数据形态）
+const richItem = {
+  id: 6, questionId: 4321, track: 'main' as const, source: 'exam', level: 1,
+  isCleared: false, wrongAnswerText: null, createdAt: '2026-10-01T09:00:00Z',
+  clearedAt: null,
+  question: {
+    content: '如图, 直线 $AB$ 与 $CD$ 相交于点 $O$:\n\n![](questions/math/d455054e/3/stem_01.jpg)\n\n$$\\angle DOE = 90^\\circ$$',
+    type: 'choice', difficulty: 2, knowledgePoints: [],
+  },
+};
+const richPage = { items: [richItem], page: 1, pageSize: 20, total: 1 };
+
 describe('MobileErrorsPage', () => {
   it('渲染错题列表并展示来源与轨道', async () => {
     vi.mocked(getParentErrors).mockResolvedValue(p1 as never);
@@ -26,6 +38,31 @@ describe('MobileErrorsPage', () => {
     expect(screen.getByText(/主线 · /)).toBeTruthy();
     // 首拉只发一次请求（studentId effect 与 page/track effect 不能叠加成两次）
     expect(getParentErrors).toHaveBeenCalledTimes(1);
+  });
+
+  it('折叠行是纯文本摘要（[图]/[公式] 占位，不渲染 img/KaTeX）——line-clamp 撑破空白 bug 回归钉子', async () => {
+    vi.mocked(getParentErrors).mockResolvedValue(richPage as never);
+    useParentStudentStore.setState({ studentId: 1 });
+    render(<MobileErrorsPage />);
+    // 摘要含占位符与题面文字
+    expect(await screen.findByText(/如图, 直线 \[公式\] 与 \[公式\] 相交于点 \[公式\]: \[图\] \[公式\]/)).toBeTruthy();
+    // 折叠行（line-clamp 容器）内不得出现 img 元素
+    const clamp = document.querySelector('.line-clamp-2');
+    expect(clamp).toBeTruthy();
+    expect(clamp?.querySelector('img')).toBeNull();
+    // 页面上也不应有 KaTeX 渲染产物（折叠态不发公式渲染）
+    expect(document.querySelector('.katex')).toBeNull();
+  });
+
+  it('展开详情渲染完整 Markdown（img 与 KaTeX 出现）', async () => {
+    vi.mocked(getParentErrors).mockResolvedValue(richPage as never);
+    useParentStudentStore.setState({ studentId: 1 });
+    render(<MobileErrorsPage />);
+    await screen.findByText(/如图, 直线/);
+    await userEvent.click(screen.getByText(/如图, 直线/).closest('button')!);
+    await waitFor(() => expect(document.querySelector('.line-clamp-2 + * , [class*="border-t"]')).toBeTruthy());
+    expect(document.querySelector('img')).not.toBeNull();
+    expect(document.querySelector('.katex')).not.toBeNull();
   });
 
   it('换孩子回第 1 页并重拉', async () => {
