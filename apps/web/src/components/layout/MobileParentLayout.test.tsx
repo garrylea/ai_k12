@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import MobileParentLayout from './MobileParentLayout';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 // 三条通知条都会发请求：统一静默，聚焦外壳本身（Tab / 主题 / Outlet）。
 vi.mock('@/components/business/AlertBanner', () => ({ default: () => null }));
@@ -18,6 +22,7 @@ function renderLayout(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        <Route path="/login" element={<div data-testid="login-page-probe" />} />
         <Route path="/m/parent" element={<MobileParentLayout />}>
           <Route path="dashboard" element={<div data-testid="outlet-probe">内容</div>} />
         </Route>
@@ -46,5 +51,21 @@ describe('MobileParentLayout', () => {
     expect(screen.getByTestId('tab-dashboard').getAttribute('aria-current')).toBe('page');
     expect(screen.getByTestId('tab-alerts').getAttribute('aria-current')).toBeNull();
     expect(screen.getByTestId('tab-more').getAttribute('aria-current')).toBeNull();
+  });
+
+  it('壳级退出登录：点击后清空鉴权并跳登录页（移动端唯一退出入口，回归钉子）', async () => {
+    localStorage.setItem('token', 't');
+    localStorage.setItem('userId', '1');
+    localStorage.setItem('username', '13800000000');
+    localStorage.setItem('userRole', 'parent');
+    renderLayout('/m/parent/dashboard');
+
+    // aria-label 与全仓 4 个既有 LogoutButton 测试同口径，勿改
+    await userEvent.click(screen.getByLabelText('退出登录'));
+    expect(localStorage.getItem('token')).toBeNull();
+    expect(localStorage.getItem('userId')).toBeNull();
+    expect(localStorage.getItem('username')).toBeNull();
+    expect(localStorage.getItem('userRole')).toBeNull();
+    expect(screen.getByTestId('login-page-probe')).toBeInTheDocument();
   });
 });

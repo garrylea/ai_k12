@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import AlertBanner from '@/components/business/AlertBanner';
 import BillingNoticeBar from '@/pages/parent/BillingNoticeBar';
 import SubscriptionNoticeBar from '@/pages/parent/SubscriptionNoticeBar';
+import { LogoutButton } from '@/components/base';
 import MobileStudentSwitcher from './MobileStudentSwitcher';
 
 const TABS = [
@@ -14,8 +15,10 @@ const TABS = [
 
 /**
  * 家长移动端布局外壳（家长移动 PWA 计划 Task 2；第 5 Tab「预警」为 2026-10-02 用户裁决）：
- * data-theme="parent" 容器 + 顶栏（学生切换器占位 + 三条通知条）+ 底部五 Tab 导航（sticky bottom-0）。
+ * data-theme="parent" 容器 + 顶栏（学生切换器 + 退出登录 + 三条通知条）+ 底部五 Tab 导航（sticky bottom-0）。
  * 通知条复用电脑端同款组件，不另起炉灶。
+ * 退出登录挂壳级（对齐 ParentNav/AdminNav 的桌面惯例）：复用统一 LogoutButton
+ * （清 token/userId/username/userRole → 跳登录页），移动端没有别的退出入口，勿移除。
  */
 export default function MobileParentLayout() {
   const navigate = useNavigate();
@@ -31,7 +34,12 @@ export default function MobileParentLayout() {
   return (
     <div data-theme="parent" className="flex min-h-screen flex-col bg-[var(--bg-base)]">
       <header className="border-b border-[var(--bg-subtle)] bg-white">
-        <MobileStudentSwitcher />
+        <div className="flex items-center">
+          <div className="min-w-0 flex-1">
+            <MobileStudentSwitcher />
+          </div>
+          <LogoutButton className="!p-2 mr-3 shrink-0" />
+        </div>
         <div onClickCapture={interceptAlertBannerClick}>
           <AlertBanner />
         </div>
