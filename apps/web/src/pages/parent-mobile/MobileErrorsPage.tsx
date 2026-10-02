@@ -36,21 +36,30 @@ function questionText(item: ParentErrorItem): string {
 }
 
 /**
- * 折叠行摘要 = **纯文本**。禁用 Markdown/KaTeX/图片渲染：
- * `line-clamp-2` 的 `-webkit-box` 对块级子元素（题面图 block img、KaTeX 公式块）在
- * 不同内核下行为不一致——Chromium 会把图渲染出来撑破 clamp（实测 liH 135/191 vs 正常 90），
- * iOS Safari 更是「高度撑大、内容被裁」= 两行字下面一大片空白（2026-10-02 用户实测报回）。
- * 所以折叠行只放纯文本占位摘要；完整题面（含图）只在展开详情里经 StemMarkdown 渲染。
+ * 折叠行摘要 = **纯文本 + JS 硬截断**。两个坑，都是 2026-10-02 实测抓到的：
+ *
+ * 坑 1（Chromium）：在 line-clamp-2 的 -webkit-box 里渲染完整 Markdown，题面图是
+ * block 元素会直接撑破 clamp（卡片 135/191px vs 正常 88px）→ 折叠行只放纯文本。
+ *
+ * 坑 2（WebKit / iOS Safari，用户实测报回「两行字下面一大片空白」）：
+ * `-webkit-line-clamp` 只管**画**两行，父卡片布局却按**未截断的完整内容高度**占位
+ * （实测泄漏量 = clamp.scrollHeight − 两行可见高度，逐项吻合；max-height/固定高/
+ * 减行数都压不住，泄漏跟着 scrollHeight 走）。所以**必须让内容本身 ≤ 两行**：
+ * JS 按字数截断（36 字 ≈ 最窄机型两行上限），CSS clamp 只作兜底。
  */
+const EXCERPT_MAX_CHARS = 36;
+
 function plainExcerpt(item: ParentErrorItem): string {
-  return questionText(item)
+  const text = questionText(item)
     .replace(/\$\$[\s\S]*?\$\$/g, '[公式]') // display 公式块
     .replace(/\$[^$\n]+?\$/g, '[公式]') // 行内公式
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '[图]') // markdown 图片
     .replace(/<img\b[^>]*>/gi, '[图]') // 原生 HTML 图片
     .replace(/<[^>]+>/g, '') // 其余 HTML 标签
+    .replace(/\\([_*[\]()#~`\\])/g, '$1') // markdown 转义符（\_\_\_\_ → ____）
     .replace(/\s+/g, ' ') // 连续空白（含换行）压成单空格
     .trim();
+  return text.length > EXCERPT_MAX_CHARS ? `${text.slice(0, EXCERPT_MAX_CHARS)}…` : text;
 }
 
 /**

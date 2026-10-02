@@ -44,8 +44,8 @@ describe('MobileErrorsPage', () => {
     vi.mocked(getParentErrors).mockResolvedValue(richPage as never);
     useParentStudentStore.setState({ studentId: 1 });
     render(<MobileErrorsPage />);
-    // 摘要含占位符与题面文字
-    expect(await screen.findByText(/如图, 直线 \[公式\] 与 \[公式\] 相交于点 \[公式\]: \[图\] \[公式\]/)).toBeTruthy();
+    // 摘要含占位符与题面文字（超过 36 字会被 JS 截断，所以只断言前缀）
+    expect(await screen.findByText(/如图, 直线 \[公式\] 与 \[公式\]/)).toBeTruthy();
     // 折叠行（line-clamp 容器）内不得出现 img 元素
     const clamp = document.querySelector('.line-clamp-2');
     expect(clamp).toBeTruthy();

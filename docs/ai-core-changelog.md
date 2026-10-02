@@ -8,6 +8,46 @@
 
 ---
 
+## 2026-10-02 · 家长移动 PWA 合并后修复（配色 token / 退出登录 / 错题列表空白）
+
+合并 `ee32e4b` 后用户手机实测报回三件事，同日修复（`dd804d7` / `74712fe` / `ce1dc17`+本条）：
+
+### 1. 配色：移动页硬编码灰阶 → 全 token
+
+移动页面此前用 `text-black/60`、`text-green-700` 等 Tailwind 快捷写法（36 处），与桌面家长页
+（零硬编码）对比色调漂移。统一替换为 parent 主题 token（text-secondary #4B5563 /
+text-tertiary #9CA3AF / bg-subtle #E5E9F0 / success #10B981 / error #DC2626）。
+**教训已入记忆：新页面配色一律走 token，写前先看同主题桌面页写法，修完 grep 自检为 0。**
+
+### 2. 移动家长端无退出入口（严重）
+
+移动壳此前漏挂退出，家长手机登录后 token 永久留存（网吧场景下一个人直接进家长台）。
+修复：`LogoutButton` 挂 `MobileParentLayout` 顶栏（孩子切换行右侧，对齐 ParentNav/AdminNav
+桌面惯例），复用统一鉴权清理（token/userId/username/userRole → /login）；回归钉子一条。
+
+### 3. 错题列表卡片高度不一 + 大片空白（两个根因，WebKit 实测复现）
+
+- **根因 1（Chromium）**：折叠行在 `line-clamp-2` 的 `-webkit-box` 里渲染完整 Markdown，
+  题面图是 block 元素直接撑破 clamp（卡片 135/191px vs 正常 88px）。
+- **根因 2（WebKit / iOS Safari，用户报的空白）**：`-webkit-line-clamp` 只管**画**两行，
+  父卡片布局却按**未截断的完整内容高度**占位——实测泄漏量 = clamp.scrollHeight − 两行可见
+  高度，逐项吻合；max-height / 固定高 / 减行数都压不住（泄漏跟着 scrollHeight 走）。
+- **修复**：折叠行改 `plainExcerpt` 纯文本摘要（公式→`[公式]`、图→`[图]`、HTML 标签剥离、
+  markdown 转义符剥离、**JS 硬截断 36 字**——内容本身 ≤ 两行才是治本），CSS clamp 只作兜底；
+  展开详情保持 StemMarkdown 完整渲染（题面 + 图全出，无 clamp）。
+- **验证方式（重要）**：Playwright WebKit（iOS 同内核）390×844 视口实测全 7 页，
+  卡片高度 66–84px、0 异常；展开详情 img naturalWidth>0。**桌面 Chromium 复现不了根因 2**
+  ——「测过了」必须指明内核；只有 Chromium 绿不算测过移动端。
+- 验证基建：`playwright-cli install-browser` 已装 WebKit；家长 JWT 可用 `jsonwebtoken`
+  以 `JWT_SECRET` 签 `{sub, role:'parent'}`（2h）注入 localStorage 走完整登录态。
+
+### 遗留
+
+- main 未推送 origin（家长移动 PWA 全批 + 本日修复）。
+- 手机真机人工走查（添加到主屏幕 + 四页走查）。
+
+---
+
 ## 2026-10-01 · 家长端移动 PWA（feat/parent-mobile-pwa，9 任务全部完成）
 
 ### 动机与范围
