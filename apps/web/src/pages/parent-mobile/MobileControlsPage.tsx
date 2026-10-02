@@ -87,7 +87,7 @@ export default function MobileControlsPage() {
   if (studentId === null) {
     return (
       <div data-testid="mobile-page-controls">
-        <p className="rounded-2xl bg-white p-8 text-center text-black/60">先在上方选择孩子</p>
+        <p className="rounded-2xl bg-white p-8 text-center text-[var(--text-secondary)]">先在上方选择孩子</p>
       </div>
     );
   }
@@ -95,7 +95,7 @@ export default function MobileControlsPage() {
     return (
       <div data-testid="mobile-page-controls">
         <div className="rounded-2xl bg-white p-8 text-center">
-          <p className="text-black/60">加载失败</p>
+          <p className="text-[var(--text-secondary)]">加载失败</p>
           <button data-testid="controls-retry" onClick={() => setReload((n) => n + 1)} className="mt-2 text-[var(--brand-500)]">重试</button>
         </div>
       </div>
@@ -155,43 +155,43 @@ export default function MobileControlsPage() {
     <div data-testid="mobile-page-controls" className="space-y-3">
       <section className="rounded-2xl bg-white p-4">
         <h2 className="text-sm font-bold">单次学习锁定</h2>
-        <p className="mt-1 text-xs text-black/40">学生登录起算的墙钟窗口（1–480 分钟），期间禁止登出、到期自动解除；清空并保存 = 显式解除。</p>
+        <p className="mt-1 text-xs text-[var(--text-tertiary)]">学生登录起算的墙钟窗口（1–480 分钟），期间禁止登出、到期自动解除；清空并保存 = 显式解除。</p>
         <div className="mt-3 flex items-center gap-2">
           <input
             aria-label="单次锁定分钟数"
             value={lockInput}
             onChange={(e) => setLockInput(e.target.value)}
             inputMode="numeric"
-            className="w-24 rounded-xl border border-black/10 px-3 py-2 text-sm"
+            className="w-24 rounded-xl border border-[var(--bg-subtle)] px-3 py-2 text-sm"
           />
-          <span className="text-sm text-black/60">分钟</span>
+          <span className="text-sm text-[var(--text-secondary)]">分钟</span>
           <button data-testid="save-lock" onClick={saveLock} className="ml-auto rounded-xl bg-[var(--brand-500)] px-4 py-2 text-sm text-white">
             保存
           </button>
         </div>
-        {saveMsg && <p className="mt-2 text-sm text-black/60">{saveMsg}</p>}
+        {saveMsg && <p className="mt-2 text-sm text-[var(--text-secondary)]">{saveMsg}</p>}
       </section>
       <section className="rounded-2xl bg-white p-4">
         <h2 className="text-sm font-bold">远程解除</h2>
-        <p className="mt-1 text-xs text-black/40">向孩子设备下发解锁命令；仅当孩子有进行中的学习会话时有效。</p>
-        <button data-testid="unlock-now" onClick={unlock} className="mt-3 w-full rounded-xl border border-black/10 py-2 text-sm">
+        <p className="mt-1 text-xs text-[var(--text-tertiary)]">向孩子设备下发解锁命令；仅当孩子有进行中的学习会话时有效。</p>
+        <button data-testid="unlock-now" onClick={unlock} className="mt-3 w-full rounded-xl border border-[var(--bg-subtle)] py-2 text-sm">
           下发解除命令
         </button>
-        {cmdOk && <p className="mt-2 text-sm text-green-700">解除命令已下发，等待学生端轮询领取</p>}
-        {cmdError && <p className="mt-2 text-sm text-red-600" data-testid="unlock-error">{cmdError}</p>}
+        {cmdOk && <p className="mt-2 text-sm text-[var(--success)]">解除命令已下发，等待学生端轮询领取</p>}
+        {cmdError && <p className="mt-2 text-sm text-[var(--error)]" data-testid="unlock-error">{cmdError}</p>}
       </section>
       <section className="rounded-2xl bg-white p-4">
         <h2 className="text-sm font-bold">进出时间</h2>
-        <p className="mt-1 text-xs text-black/40">孩子每次进入和退出学习端的时刻（近 7 天）。只记 PC App 上的学习。</p>
+        <p className="mt-1 text-xs text-[var(--text-tertiary)]">孩子每次进入和退出学习端的时刻（近 7 天）。只记 PC App 上的学习。</p>
         {view.sessions.length === 0 ? (
-          <p className="mt-2 text-sm text-black/60">暂无学习会话记录</p>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">暂无学习会话记录</p>
         ) : (
           <ul className="mt-2 space-y-2 text-sm">
             {view.sessions.map((s) => (
               <li key={s.id} data-testid={`session-${s.id}`} className="flex items-center justify-between gap-2">
                 <span>{formatClock(s.startedAt)}</span>
-                <span className="text-black/60">{s.endedAt === null ? '进行中' : `→ ${formatClock(s.endedAt)}`}</span>
-                <span className={s.endedAt === null ? 'text-[var(--brand-600)]' : 'text-black/40'}>
+                <span className="text-[var(--text-secondary)]">{s.endedAt === null ? '进行中' : `→ ${formatClock(s.endedAt)}`}</span>
+                <span className={s.endedAt === null ? 'text-[var(--brand-600)]' : 'text-[var(--text-tertiary)]'}>
                   {s.endedAt === null ? (s.online ? '在线' : '已断开') : '已退出'}
                 </span>
               </li>

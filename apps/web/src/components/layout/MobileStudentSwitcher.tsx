@@ -102,7 +102,7 @@ export default function MobileStudentSwitcher() {
   if (status === 'error') {
     return (
       <div className="flex items-center justify-between px-4 py-3 text-sm">
-        <span className="text-black/60">孩子列表加载失败</span>
+        <span className="text-[var(--text-secondary)]">孩子列表加载失败</span>
         <button data-testid="mobile-switcher-retry" onClick={load} className="text-[var(--brand-500)]">
           重试
         </button>
@@ -118,7 +118,7 @@ export default function MobileStudentSwitcher() {
         className="flex w-full items-center justify-between text-sm"
       >
         <span className="font-bold">{current ? displayName(current) : '加载中…'}</span>
-        <span aria-hidden className="text-black/40">{open ? '▲' : '▼'}</span>
+        <span aria-hidden className="text-[var(--text-tertiary)]">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <div className="absolute left-4 right-4 top-full z-10 rounded-xl bg-white shadow-lg">

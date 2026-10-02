@@ -19,7 +19,7 @@ export default function MobileMorePage() {
     return (
       <div data-testid="mobile-page-stub" className="rounded-2xl bg-white p-8 text-center">
         <p className="text-lg font-bold">{item?.label ?? '该功能'}</p>
-        <p className="mt-2 text-black/60">该功能请在电脑端使用</p>
+        <p className="mt-2 text-[var(--text-secondary)]">该功能请在电脑端使用</p>
       </div>
     );
   }

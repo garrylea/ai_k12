@@ -51,7 +51,7 @@ export default function MobileAlertsPage() {
     return (
       <div data-testid="mobile-page-alerts">
         <div className="rounded-2xl bg-white p-8 text-center">
-          <p className="text-black/60">加载失败</p>
+          <p className="text-[var(--text-secondary)]">加载失败</p>
           <button data-testid="alerts-retry" onClick={() => load(page)} className="mt-2 text-[var(--brand-500)]">重试</button>
         </div>
       </div>
@@ -66,7 +66,7 @@ export default function MobileAlertsPage() {
       {items === null ? (
         <div className="h-24 animate-pulse rounded-2xl bg-white" />
       ) : items.length === 0 ? (
-        <p className="rounded-2xl bg-white p-8 text-center text-black/60">暂无预警</p>
+        <p className="rounded-2xl bg-white p-8 text-center text-[var(--text-secondary)]">暂无预警</p>
       ) : (
         <ul className="space-y-2">
           {items.map((a) => (
@@ -74,7 +74,7 @@ export default function MobileAlertsPage() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-sm font-bold">{a.message}</p>
-                  <p className="mt-1 text-xs text-black/40">
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                     {a.studentName ?? '未知学生'} · {a.level} · {new Date(a.createdAt).toLocaleString('zh-CN')}
                   </p>
                 </div>

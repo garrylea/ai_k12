@@ -30,7 +30,7 @@ export default function MobileParentLayout() {
 
   return (
     <div data-theme="parent" className="flex min-h-screen flex-col bg-[var(--bg-base)]">
-      <header className="border-b border-black/5 bg-white">
+      <header className="border-b border-[var(--bg-subtle)] bg-white">
         <MobileStudentSwitcher />
         <div onClickCapture={interceptAlertBannerClick}>
           <AlertBanner />
@@ -41,14 +41,14 @@ export default function MobileParentLayout() {
       <main className="flex-1 px-4 py-4">
         <Outlet />
       </main>
-      <nav aria-label="家长移动端主导航" className="sticky bottom-0 grid grid-cols-5 border-t border-black/5 bg-white">
+      <nav aria-label="家长移动端主导航" className="sticky bottom-0 grid grid-cols-5 border-t border-[var(--bg-subtle)] bg-white">
         {TABS.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}
             data-testid={t.testId}
             className={({ isActive }) =>
-              `py-3 text-center text-sm ${isActive ? 'font-bold text-[var(--brand-500)]' : 'text-black/60'}`
+              `py-3 text-center text-sm ${isActive ? 'font-bold text-[var(--brand-500)]' : 'text-[var(--text-secondary)]'}`
             }
           >
             {t.label}

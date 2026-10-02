@@ -69,7 +69,7 @@ export default function MobileDashboardPage() {
   if (studentId === null) {
     return (
       <div data-testid="mobile-page-dashboard">
-        <p className="text-black/60">先在上方选择孩子</p>
+        <p className="text-[var(--text-secondary)]">先在上方选择孩子</p>
       </div>
     );
   }
@@ -77,7 +77,7 @@ export default function MobileDashboardPage() {
     return (
       <div data-testid="mobile-page-dashboard">
         <div className="rounded-2xl bg-white p-8 text-center">
-          <p className="text-black/60">加载失败</p>
+          <p className="text-[var(--text-secondary)]">加载失败</p>
           <button data-testid="dashboard-retry" onClick={() => load(studentId)} className="mt-2 text-[var(--brand-500)]">重试</button>
         </div>
       </div>
@@ -108,7 +108,7 @@ export default function MobileDashboardPage() {
               </li>
             ))}
           </ul>
-        ) : <p className="mt-2 text-sm text-black/60">暂无该孩子的学情数据</p>}
+        ) : <p className="mt-2 text-sm text-[var(--text-secondary)]">暂无该孩子的学情数据</p>}
       </section>
       <section className="rounded-2xl bg-white p-4">
         <h2 className="text-sm font-bold">学习时长</h2>
@@ -116,13 +116,13 @@ export default function MobileDashboardPage() {
           <li className="flex justify-between"><span>近 7 天累计（会话口径）</span><span data-testid="study-time-sessions">{fmtDuration(study.totalSeconds)}</span></li>
           <li className="flex justify-between"><span>今日已学</span><span>{fmtDuration(usage.activeSeconds)}</span></li>
         </ul>
-        <p className="mt-2 text-xs text-black/40">口径说明：时长按学习会话统计；活跃天数按有记录的天数统计，两者独立计算。</p>
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">口径说明：时长按学习会话统计；活跃天数按有记录的天数统计，两者独立计算。</p>
       </section>
       <section className="rounded-2xl bg-white p-4">
         <h2 className="text-sm font-bold">薄弱知识点</h2>
-        <p className="mt-1 text-xs text-black/40">知识点覆盖率 {mastery.coveredQuestions}/{mastery.totalQuestions}，未覆盖 {mastery.uncovered} 题——未覆盖的题不在下列统计内。</p>
+        <p className="mt-1 text-xs text-[var(--text-tertiary)]">知识点覆盖率 {mastery.coveredQuestions}/{mastery.totalQuestions}，未覆盖 {mastery.uncovered} 题——未覆盖的题不在下列统计内。</p>
         <ul className="mt-2 space-y-2 text-sm">
-          {mastery.items.length === 0 && <li className="text-black/60">暂无足够判题数据</li>}
+          {mastery.items.length === 0 && <li className="text-[var(--text-secondary)]">暂无足够判题数据</li>}
           {mastery.items.map((i) => (
             <li key={i.knowledgePointId} className="flex justify-between">
               <span>{i.name}</span><span>掌握度 {Math.round(i.masteryScore * 100)}%</span>
