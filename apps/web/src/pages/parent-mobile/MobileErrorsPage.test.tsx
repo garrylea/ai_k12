@@ -16,7 +16,7 @@ const item = {
 };
 const p1 = { items: [item], page: 1, pageSize: 20, total: 1 };
 
-// 带图 + 公式的题面（复现 2026-10-02 空白 bug 的数据形态）
+// 带图 + 公式的题面（2026-10-02 空白 bug 的数据形态）
 const richItem = {
   id: 6, questionId: 4321, track: 'main' as const, source: 'exam', level: 1,
   isCleared: false, wrongAnswerText: null, createdAt: '2026-10-01T09:00:00Z',
@@ -40,32 +40,17 @@ describe('MobileErrorsPage', () => {
     expect(getParentErrors).toHaveBeenCalledTimes(1);
   });
 
-  it('折叠行是纯文本摘要（[图]/[公式] 占位，不渲染 img/KaTeX）——line-clamp 撑破空白 bug 回归钉子', async () => {
+  it('每张卡直接渲染完整题面（Markdown + KaTeX + 图，与 PC 一致），无 CSS 截断', async () => {
     vi.mocked(getParentErrors).mockResolvedValue(richPage as never);
     useParentStudentStore.setState({ studentId: 1 });
     render(<MobileErrorsPage />);
-    // 摘要含占位符与题面文字（超过 36 字会被 JS 截断，所以只断言前缀）
-    expect(await screen.findByText(/如图, 直线 \[公式\] 与 \[公式\]/)).toBeTruthy();
-    // 折叠行（line-clamp 容器）内不得出现 img 元素
-    const clamp = document.querySelector('.line-clamp-2');
-    expect(clamp).toBeTruthy();
-    expect(clamp?.querySelector('img')).toBeNull();
-    // 页面上也不应有 KaTeX 渲染产物（折叠态不发公式渲染）
-    expect(document.querySelector('.katex')).toBeNull();
-  });
-
-  it('展开 = 就地展开：摘要被全文替换（不叠加第二份题干），img 与 KaTeX 出现', async () => {
-    vi.mocked(getParentErrors).mockResolvedValue(richPage as never);
-    useParentStudentStore.setState({ studentId: 1 });
-    render(<MobileErrorsPage />);
-    await screen.findByText(/如图, 直线/);
-    await userEvent.click(screen.getByText(/如图, 直线/).closest('button')!);
-    // 展开后：摘要行（line-clamp-2）卸载——题干只出现一遍
-    await waitFor(() => expect(document.querySelector('.line-clamp-2')).toBeNull());
-    expect(document.querySelector('img')).not.toBeNull();
+    // 题面文字正常渲染
+    expect(await screen.findByText(/相交于点/)).toBeTruthy();
+    // 公式经 KaTeX 渲染、图片元素存在
     expect(document.querySelector('.katex')).not.toBeNull();
-    // 全文里的题干文字只出现一次（若摘要未卸载会是两份）
-    expect(Array.from(document.querySelectorAll('[data-testid="mobile-page-errors"] p')).filter((p) => p.textContent?.includes('如图')).length).toBeLessThanOrEqual(1);
+    expect(document.querySelector('img')).not.toBeNull();
+    // 不存在任何 CSS 截断容器（WebKit line-clamp 布局泄漏的根源，2026-10-02 用户裁决去除）
+    expect(document.querySelector('.line-clamp-2')).toBeNull();
   });
 
   it('换孩子回第 1 页并重拉', async () => {
@@ -104,7 +89,7 @@ describe('MobileErrorsPage', () => {
     expect(await screen.findByTestId('errors-retry')).toBeTruthy();
   });
 
-  it('展开详情显示完整题面并引导到电脑端看解析（api 无 answer 字段，不新造数据源）', async () => {
+  it('已入库题目引导到电脑端看解析（api 无 answer 字段，不新造数据源）', async () => {
     const qItem = {
       ...item,
       id: 7, questionId: 12, wrongAnswerText: null,
@@ -114,11 +99,10 @@ describe('MobileErrorsPage', () => {
     useParentStudentStore.setState({ studentId: 1 });
     render(<MobileErrorsPage />);
     expect(await screen.findByText(/三角形内角和/)).toBeTruthy();
-    await userEvent.click(screen.getByText(/三角形内角和/));
-    expect(await screen.findByText(/电脑端/)).toBeTruthy();
+    expect(screen.getByText(/电脑端/)).toBeTruthy();
   });
 
-  it('展开详情注记三分支：已入库 / 未入库有题面 / 未入库无题面', async () => {
+  it('注记三分支：已入库 / 未入库有题面 / 未入库无题面', async () => {
     const withStem = { ...item, id: 21, wrongAnswerText: '1/2 + 1/3 = 2/5（存的原题面）' };
     const noStem = { ...item, id: 22, wrongAnswerText: null };
     vi.mocked(getParentErrors).mockResolvedValue({ items: [withStem, noStem], page: 1, pageSize: 20, total: 2 } as never);
@@ -126,11 +110,9 @@ describe('MobileErrorsPage', () => {
     render(<MobileErrorsPage />);
     // 未入库、有题面原文
     await screen.findByText(/1\/2 \+ 1\/3/);
-    await userEvent.click(screen.getByText(/1\/2 \+ 1\/3/));
-    expect(await screen.findByText('题目未入库（以上为入库时保存的题面原文）')).toBeTruthy();
-    // 未入库、也没存题面
-    const noStemText = screen.getAllByText('（题面缺失）')[0];
-    await userEvent.click(noStemText);
-    expect(await screen.findByText('题目未入库，且未保存题面')).toBeTruthy();
+    expect(screen.getByText('题目未入库（以上为入库时保存的题面原文）')).toBeTruthy();
+    // 未入库、也没存题面 → 题面缺失兜底文案
+    expect(screen.getAllByText('（题面缺失）').length).toBe(1);
+    expect(screen.getByText('题目未入库，且未保存题面')).toBeTruthy();
   });
 });

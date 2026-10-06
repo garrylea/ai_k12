@@ -35,32 +35,6 @@ function questionText(item: ParentErrorItem): string {
   return item.question?.content ?? item.wrongAnswerText ?? '（题面缺失）';
 }
 
-/**
- * 折叠行摘要 = **纯文本 + JS 硬截断**。两个坑，都是 2026-10-02 实测抓到的：
- *
- * 坑 1（Chromium）：在 line-clamp-2 的 -webkit-box 里渲染完整 Markdown，题面图是
- * block 元素会直接撑破 clamp（卡片 135/191px vs 正常 88px）→ 折叠行只放纯文本。
- *
- * 坑 2（WebKit / iOS Safari，用户实测报回「两行字下面一大片空白」）：
- * `-webkit-line-clamp` 只管**画**两行，父卡片布局却按**未截断的完整内容高度**占位
- * （实测泄漏量 = clamp.scrollHeight − 两行可见高度，逐项吻合；max-height/固定高/
- * 减行数都压不住，泄漏跟着 scrollHeight 走）。所以**必须让内容本身 ≤ 两行**：
- * JS 按字数截断（36 字 ≈ 最窄机型两行上限），CSS clamp 只作兜底。
- */
-const EXCERPT_MAX_CHARS = 36;
-
-function plainExcerpt(item: ParentErrorItem): string {
-  const text = questionText(item)
-    .replace(/\$\$[\s\S]*?\$\$/g, '[公式]') // display 公式块
-    .replace(/\$[^$\n]+?\$/g, '[公式]') // 行内公式
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '[图]') // markdown 图片
-    .replace(/<img\b[^>]*>/gi, '[图]') // 原生 HTML 图片
-    .replace(/<[^>]+>/g, '') // 其余 HTML 标签
-    .replace(/\\([_*[\]()#~`\\])/g, '$1') // markdown 转义符（\_\_\_\_ → ____）
-    .replace(/\s+/g, ' ') // 连续空白（含换行）压成单空格
-    .trim();
-  return text.length > EXCERPT_MAX_CHARS ? `${text.slice(0, EXCERPT_MAX_CHARS)}…` : text;
-}
 
 /**
  * 题面渲染走共享 Markdown 配置（KaTeX + 原生 HTML 表格 + 图片 resolveAsset +
@@ -86,7 +60,12 @@ function StemMarkdown({ text }: { text: string }) {
  *
  * 展示口径对齐桌面端 ParentErrorsPage：题面二选一（question.content ?? wrongAnswerText）；
  * `ParentErrorQuestion` 只有 content/type/difficulty/knowledgePoints，**没有 answer 字段**，
- * 所以展开详情只做题面 + 「答案与解析请在电脑端查看」引导，不新造数据源。
+ * 所以卡内只做题面 + 「答案与解析请在电脑端查看」引导，不新造数据源。
+ *
+ * **展示形态 = 与 PC 完全一致（2026-10-02 用户裁决）**：每张卡直接渲染完整题面
+ * （Markdown + KaTeX + 图），**不做任何两行摘要/CSS 截断**——WebKit 的
+ * -webkit-line-clamp 有「画两行、占位按全文高度」的布局 bug，任何截断方案在
+ * iOS 上都会留下大片空白；PC 之所以没这个问题，是它从来不截断。
  */
 export default function MobileErrorsPage() {
   const studentId = useParentStudentStore((s) => s.studentId);
@@ -95,7 +74,6 @@ export default function MobileErrorsPage() {
   const [total, setTotal] = useState(0);
   const [track, setTrack] = useState<TrackFilter>('all');
   const [error, setError] = useState(false);
-  const [openId, setOpenId] = useState<number | null>(null);
 
   const seqRef = useRef(0);
   const load = useCallback((id: number, p: number, t: TrackFilter) => {
@@ -113,7 +91,7 @@ export default function MobileErrorsPage() {
   }, []);
 
   // 单一 effect 负责所有重拉（换孩子 / 翻页 / 筛选）：
-  // - 换孩子（硬规则）：回第 1 页 + 清展开态，track 保持不变；
+  // - 换孩子（硬规则）：回第 1 页，track 保持不变；
   // - 用 key 去重：换孩子时 setPage(1) 引发的二次运行不再发请求（首拉只发一次）。
   const lastStudentRef = useRef<number | null>(null);
   const lastKeyRef = useRef<string | null>(null);
@@ -125,7 +103,6 @@ export default function MobileErrorsPage() {
     if (changedStudent) {
       p = 1; // 硬规则：换孩子必须回第 1 页
       if (page !== 1) setPage(1);
-      setOpenId(null);
     }
     const key = `${studentId}|${p}|${track}`;
     if (key === lastKeyRef.current) return;
@@ -168,31 +145,25 @@ export default function MobileErrorsPage() {
         <p className="rounded-2xl bg-white p-8 text-center text-[var(--text-secondary)]">暂无错题</p>
       ) : (
         <ul className="space-y-2">
-          {items.map((e) => {
-            const open = openId === e.id;
-            return (
-              <li key={e.id} className="rounded-2xl bg-white p-4">
-                {/* 就地展开：折叠 = 头部 + 两行摘要；展开 = 头部 + 完整题面（摘要被全文替换，不重复出现） */}
-                <button className="w-full text-left" onClick={() => setOpenId(open ? null : e.id)}>
-                  <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)]">
-                    <span>{e.track === 'main' ? '主线' : '训练'} · {SOURCE_LABEL[e.source] ?? e.source}</span>
-                    <span>{e.isCleared ? '已清零' : `错 ${e.level} 次`}</span>
-                  </div>
-                  {!open && <div className="mt-1 line-clamp-2 text-sm">{plainExcerpt(e)}</div>}
-                </button>
-                {open && (
-                  <div className="mt-1 text-sm">
-                    <StemMarkdown text={questionText(e)} />
-                    <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-                      {e.question
-                        ? '题目详情请在电脑端查看完整解析'
-                        : (e.wrongAnswerText ? '题目未入库（以上为入库时保存的题面原文）' : '题目未入库，且未保存题面')}
-                    </p>
-                  </div>
-                )}
-              </li>
-            );
-          })}
+          {items.map((e) => (
+            <li key={e.id} className="rounded-2xl bg-white p-4">
+              {/* 与 PC 行为一致：每张卡直接渲染完整题面（Markdown + KaTeX + 图），不做摘要/截断
+                  —— WebKit 的 -webkit-line-clamp 有「画两行、占位按全文高度」的布局 bug，
+                  任何 CSS 截断方案在 iOS 上都会留下大片空白，所以彻底不用（2026-10-02 用户裁决） */}
+              <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)]">
+                <span>{e.track === 'main' ? '主线' : '训练'} · {SOURCE_LABEL[e.source] ?? e.source}</span>
+                <span>{e.isCleared ? '已清零' : `错 ${e.level} 次`}</span>
+              </div>
+              <div className="mt-1 text-sm">
+                <StemMarkdown text={questionText(e)} />
+              </div>
+              <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                {e.question
+                  ? '题目详情请在电脑端查看完整解析'
+                  : (e.wrongAnswerText ? '题目未入库（以上为入库时保存的题面原文）' : '题目未入库，且未保存题面')}
+              </p>
+            </li>
+          ))}
         </ul>
       )}
       <div className="flex items-center justify-between px-2 text-sm">

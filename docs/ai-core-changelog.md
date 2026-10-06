@@ -41,6 +41,19 @@ text-tertiary #9CA3AF / bg-subtle #E5E9F0 / success #10B981 / error #DC2626）�
 - 验证基建：`playwright-cli install-browser` 已装 WebKit；家长 JWT 可用 `jsonwebtoken`
   以 `JWT_SECRET` 签 `{sub, role:'parent'}`（2h）注入 localStorage 走完整登录态。
 
+### 第 4 轮（最终形态）：与 PC 行为完全对齐，废除摘要/截断
+
+纯文本摘要 + JS 截断（36 字、`[公式]` 占位）被用户裁决否定：家长要读题面本身，
+占位符不可接受。澄清关键事实——**WebKit 渲染 LaTeX/Markdown/图片与 PC 无任何差别**
+（展开详情在 WebKit 下公式配图全部正常），唯一缺陷是 `-webkit-line-clamp` 的布局 bug，
+而它只存在于「两行摘要」这个 PC 没有的机制里。最终形态（`e890807`）：
+
+- 删除 plainExcerpt / LaTeX→Unicode 转写 / 36 字截断 / 展开交互整套机关（净 -88 行）。
+- 每张卡 = 头部行（轨道 · 来源 | 清零状态）+ **StemMarkdown 完整题面**（与桌面
+  ParentErrorsPage 同构）+ 电脑端引导注记。卡片高度随内容自然增长，无任何截断。
+- WebKit 实测第 1 页 20 卡：`line-clamp` 元素 0 个、KaTeX 111 处、图片 11/11 加载、无空白。
+- 测试重写为 7 例（全文渲染钉子：`.line-clamp-2` 必须不存在 + KaTeX/img 存在）。
+
 ### 遗留
 
 - main 未推送 origin（家长移动 PWA 全批 + 本日修复）。
