@@ -35,6 +35,7 @@ import StudentStayLayout from '@/components/layout/StudentStayLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
 import MobileParentLayout from '@/components/layout/MobileParentLayout';
+import ParentViewportGate from './ParentViewportGate';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
 import ParentMessagesPage from '@/pages/parent/ParentMessagesPage';
 import StudentSubjectConfigPage from '@/pages/parent/StudentSubjectConfigPage';
@@ -357,7 +358,9 @@ export const routes: RouteObject[] = [
     path: '/parent',
     element: (
       <RequireRole role="parent">
-        <ParentLayout />
+        <ParentViewportGate>
+          <ParentLayout />
+        </ParentViewportGate>
       </RequireRole>
     ),
     children: [
