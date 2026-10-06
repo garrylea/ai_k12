@@ -54,15 +54,18 @@ describe('MobileErrorsPage', () => {
     expect(document.querySelector('.katex')).toBeNull();
   });
 
-  it('展开详情渲染完整 Markdown（img 与 KaTeX 出现）', async () => {
+  it('展开 = 就地展开：摘要被全文替换（不叠加第二份题干），img 与 KaTeX 出现', async () => {
     vi.mocked(getParentErrors).mockResolvedValue(richPage as never);
     useParentStudentStore.setState({ studentId: 1 });
     render(<MobileErrorsPage />);
     await screen.findByText(/如图, 直线/);
     await userEvent.click(screen.getByText(/如图, 直线/).closest('button')!);
-    await waitFor(() => expect(document.querySelector('.line-clamp-2 + * , [class*="border-t"]')).toBeTruthy());
+    // 展开后：摘要行（line-clamp-2）卸载——题干只出现一遍
+    await waitFor(() => expect(document.querySelector('.line-clamp-2')).toBeNull());
     expect(document.querySelector('img')).not.toBeNull();
     expect(document.querySelector('.katex')).not.toBeNull();
+    // 全文里的题干文字只出现一次（若摘要未卸载会是两份）
+    expect(Array.from(document.querySelectorAll('[data-testid="mobile-page-errors"] p')).filter((p) => p.textContent?.includes('如图')).length).toBeLessThanOrEqual(1);
   });
 
   it('换孩子回第 1 页并重拉', async () => {

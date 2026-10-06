@@ -168,27 +168,31 @@ export default function MobileErrorsPage() {
         <p className="rounded-2xl bg-white p-8 text-center text-[var(--text-secondary)]">暂无错题</p>
       ) : (
         <ul className="space-y-2">
-          {items.map((e) => (
-            <li key={e.id} className="rounded-2xl bg-white p-4">
-              <button className="w-full text-left" onClick={() => setOpenId(openId === e.id ? null : e.id)}>
-                <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)]">
-                  <span>{e.track === 'main' ? '主线' : '训练'} · {SOURCE_LABEL[e.source] ?? e.source}</span>
-                  <span>{e.isCleared ? '已清零' : `错 ${e.level} 次`}</span>
-                </div>
-                <div className="mt-1 line-clamp-2 text-sm">{plainExcerpt(e)}</div>
-              </button>
-              {openId === e.id && (
-                <div className="mt-3 border-t border-[var(--bg-subtle)] pt-3 text-sm">
-                  <StemMarkdown text={questionText(e)} />
-                  <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-                    {e.question
-                      ? '题目详情请在电脑端查看完整解析'
-                      : (e.wrongAnswerText ? '题目未入库（以上为入库时保存的题面原文）' : '题目未入库，且未保存题面')}
-                  </p>
-                </div>
-              )}
-            </li>
-          ))}
+          {items.map((e) => {
+            const open = openId === e.id;
+            return (
+              <li key={e.id} className="rounded-2xl bg-white p-4">
+                {/* 就地展开：折叠 = 头部 + 两行摘要；展开 = 头部 + 完整题面（摘要被全文替换，不重复出现） */}
+                <button className="w-full text-left" onClick={() => setOpenId(open ? null : e.id)}>
+                  <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)]">
+                    <span>{e.track === 'main' ? '主线' : '训练'} · {SOURCE_LABEL[e.source] ?? e.source}</span>
+                    <span>{e.isCleared ? '已清零' : `错 ${e.level} 次`}</span>
+                  </div>
+                  {!open && <div className="mt-1 line-clamp-2 text-sm">{plainExcerpt(e)}</div>}
+                </button>
+                {open && (
+                  <div className="mt-1 text-sm">
+                    <StemMarkdown text={questionText(e)} />
+                    <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                      {e.question
+                        ? '题目详情请在电脑端查看完整解析'
+                        : (e.wrongAnswerText ? '题目未入库（以上为入库时保存的题面原文）' : '题目未入库，且未保存题面')}
+                    </p>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       <div className="flex items-center justify-between px-2 text-sm">
