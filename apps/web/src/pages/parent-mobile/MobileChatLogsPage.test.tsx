@@ -22,11 +22,11 @@ const detail = { ...logItem, messages: [
 ] };
 
 describe('MobileChatLogsPage', () => {
-  it('渲染会话列表：标题/条数/偏离标记/track 筛选', async () => {
+  it('渲染会话列表：标题/句数/偏离标记/track 筛选', async () => {
     vi.mocked(getParentChatLogs).mockResolvedValue(page1 as never);
     render(<MobileChatLogsPage />);
     expect(await screen.findByText(/一元二次方程讨论/)).toBeTruthy();
-    expect(screen.getByText(/4 条/)).toBeTruthy();
+    expect(screen.getByText(/4 句/)).toBeTruthy();
     expect(screen.getByText(/偏离学习/)).toBeTruthy();
     await userEvent.click(screen.getByTestId('chatlogs-track-mainline'));
     await waitFor(() => expect(getParentChatLogs).toHaveBeenLastCalledWith(expect.objectContaining({ track: 'mainline', page: 1 })));

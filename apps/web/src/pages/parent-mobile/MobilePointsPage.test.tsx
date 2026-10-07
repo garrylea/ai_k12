@@ -76,6 +76,10 @@ describe('MobilePointsPage', () => {
     for (const k of ['rules', 'catalog', 'redeem', 'history']) {
       expect(screen.getByTestId(`points-tab-${k}`)).toBeTruthy();
     }
+    // ARIA 三件套对齐桌面 ParentPointsPage（2B 终审修复）
+    expect(screen.getByRole('tablist')).toBeTruthy();
+    expect(screen.getAllByRole('tab').length).toBe(4);
+    expect(screen.getByRole('tabpanel')).toBeTruthy();
   });
 
   it('切 Tab：有未保存草稿时拦截确认，确认后才切', async () => {

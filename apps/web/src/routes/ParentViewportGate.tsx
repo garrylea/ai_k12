@@ -5,15 +5,16 @@ import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 const MOBILE_SUPPORTED = new Set(['dashboard', 'alerts', 'errors', 'controls', 'messages', 'students', 'goals', 'account', 'points', 'report', 'chat-logs']);
 const MORE_STUBS = new Set(['subscription']);
 
-/** 桌面家长路径 → 移动路径（2A 起支持带 id 的 config 子路径直跳）。 */
-export function mobileParentPath(pathname: string): string {
+/** 桌面家长路径 → 移动路径（2A 起支持带 id 的 config 子路径直跳；search 原样透传）。 */
+export function mobileParentPath(pathname: string, search?: string): string {
+  const query = search ? `?${search.replace(/^\?/, '')}` : '';
   const rest = pathname.replace(/^\/parent\/?/, '');
-  if (/^students\/\d+\/config$/.test(rest)) return `/m/parent/${rest}`;
+  if (/^students\/\d+\/config$/.test(rest)) return `/m/parent/${rest}${query}`;
   const seg = rest.split('/')[0];
-  if (MOBILE_SUPPORTED.has(seg)) return `/m/parent/${seg}`;
-  if (seg === 'rewards') return '/m/parent/points';
-  if (MORE_STUBS.has(seg)) return `/m/parent/more/${seg}`;
-  return '/m/parent/more/students';
+  if (MOBILE_SUPPORTED.has(seg)) return `/m/parent/${seg}${query}`;
+  if (seg === 'rewards') return `/m/parent/points${query}`;
+  if (MORE_STUBS.has(seg)) return `/m/parent/more/${seg}${query}`;
+  return `/m/parent/more/students${query}`;
 }
 
 /**
@@ -26,9 +27,9 @@ export function mobileParentPath(pathname: string): string {
  * 想回桌面版刷新或重新从桌面进即可——不做双向监听，避免旋转时来回弹。
  */
 export default function ParentViewportGate({ children }: { children: ReactNode }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   if (window.innerWidth < MOBILE_VIEWPORT_BREAKPOINT) {
-    return <Navigate to={mobileParentPath(pathname)} replace />;
+    return <Navigate to={mobileParentPath(pathname, search)} replace />;
   }
   return <>{children}</>;
 }

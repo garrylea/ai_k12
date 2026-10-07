@@ -320,7 +320,7 @@ export default function MobileChatLogsPage() {
                   )}
                 </div>
                 <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                  {c.track === 'mainline' ? '主线' : '辅线'} · {c.messageCount} 条 · {formatDateTime(c.updatedAt)}
+                  {c.track === 'mainline' ? '主线' : '辅线'} · {c.messageCount} 句 · {formatDateTime(c.updatedAt)}
                 </p>
               </button>
             </li>

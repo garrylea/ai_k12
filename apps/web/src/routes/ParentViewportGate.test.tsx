@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 import ParentViewportGate, { mobileParentPath } from './ParentViewportGate';
 
 afterEach(() => {
@@ -10,6 +10,12 @@ afterEach(() => {
 });
 
 const desktopProbe = <div data-testid="desktop-parent">desktop-parent-layout</div>;
+
+/** 暴露落地页 search 的探针（query 透传用例消费）。 */
+function SearchProbe({ testid }: { testid: string }) {
+  const { search } = useLocation();
+  return <div data-testid={testid} data-search={search} />;
+}
 
 function renderGate(path: string) {
   const router = createMemoryRouter(
@@ -22,7 +28,7 @@ function renderGate(path: string) {
       { path: '/m/parent/students', element: <div data-testid="m-students" /> },
       { path: '/m/parent/goals', element: <div data-testid="m-goals" /> },
       { path: '/m/parent/account', element: <div data-testid="m-account" /> },
-      { path: '/m/parent/points', element: <div data-testid="m-points" /> },
+      { path: '/m/parent/points', element: <SearchProbe testid="m-points" /> },
       { path: '/m/parent/report', element: <div data-testid="m-report" /> },
       { path: '/m/parent/chat-logs', element: <div data-testid="m-chatlogs" /> },
       { path: '/m/parent/students/:id/config', element: <div data-testid="m-config" /> },
@@ -82,6 +88,20 @@ describe('ParentViewportGate', () => {
     Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
     renderGate('/parent/rewards');
     expect(screen.getByTestId('m-points')).toBeTruthy();
+  });
+
+  it('mobileParentPath：search 原样透传（含带/不带前导 ? 两种写法）', () => {
+    expect(mobileParentPath('/parent/points', '?tab=redeem')).toBe('/m/parent/points?tab=redeem');
+    expect(mobileParentPath('/parent/points', 'tab=redeem')).toBe('/m/parent/points?tab=redeem');
+    expect(mobileParentPath('/parent/points')).toBe('/m/parent/points');
+    expect(mobileParentPath('/parent/unknown-thing', '?x=1')).toBe('/m/parent/more/students?x=1');
+  });
+
+  it('窄屏访问 /parent/points?tab=redeem → 直跳移动积分页并透传 query', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true, writable: true });
+    renderGate('/parent/points?tab=redeem');
+    expect(screen.getByTestId('m-points')).toBeTruthy();
+    expect(screen.getByTestId('m-points').getAttribute('data-search')).toBe('?tab=redeem');
   });
 
   it('宽屏（≥768px，iPad 横屏/PC）桌面家长台原样渲染，不跳转', () => {

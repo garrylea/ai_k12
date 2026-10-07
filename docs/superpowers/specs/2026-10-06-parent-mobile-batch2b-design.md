@@ -54,8 +54,8 @@
 - 奖励项列表 CRUD（含已下架行，整表 PUT 原样带回）；可设段位门槛。
 - 竖屏：每项一卡（名称/所需积分/门槛/上架状态），编辑行内展开。
 
-### 4.4 Tab「记录」（`getParentPointLedger(studentId, page, pageSize?)` 分页 + `getParentRedemptions(studentId, page)` 分页）
-- 积分流水（正/负、任务名、时间）与兑换记录两个子节，各自分页；换孩子回第 1 页。
+### 4.4 Tab「记录」（兑换记录 `RedemptionHistoryPanel`，`getParentRedemptions(studentId, page)` 分页）
+- 兑换记录；换孩子回第 1 页。（勘误 2026-10-06：积分流水桌面端同样未展示，`getParentPointLedger` 在 web 无消费方，本批不对齐；后续如做另立项）
 
 ## 5. 学习报告 `/m/parent/report`
 
@@ -77,7 +77,8 @@
   （track/scene/from/to/q 筛选沿用桌面参数，移动端 v1 先保留 track + q 两个高频筛选，
   其余隐藏）；分页（上一页/下一页）。
 - 回放：点会话 → `getParentChatLogDetail(studentId, dialogueId): ParentChatLogDetail`
-  → 消息按角色分侧（孩子左 / AI 右或反之，与桌面回放一致）+ Markdown 渲染
+  → 消息单列全宽 + 角色「孩子/AI」标签（与桌面回放一致；原稿「分侧」措辞与桌面实际不符，
+  勘误 2026-10-06）+ Markdown 渲染
   （共享配置：图片 / rehype-raw / repairHtml / KaTeX）。
 - 失败语义照搬桌面 `detailFailure`：回放 1002（会话不属于该学生等）显示内联失败条，
   不弹全页错误。

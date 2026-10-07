@@ -252,7 +252,7 @@ export default function MobilePointsPage() {
         </div>
       )}
 
-      <nav className="-mx-1 flex gap-1 overflow-x-auto px-1" aria-label="积分页区块">
+      <nav className="-mx-1 flex gap-1 overflow-x-auto px-1" role="tablist" aria-label="积分页区块">
         {TABS.map((tab) => {
           const selected = tab.key === activeTab;
           return (
@@ -260,7 +260,10 @@ export default function MobilePointsPage() {
               key={tab.key}
               type="button"
               data-testid={`points-tab-${tab.key}`}
+              id={`points-tab-${tab.key}`}
+              role="tab"
               aria-selected={selected}
+              aria-controls="points-tabpanel"
               onClick={() => selectTab(tab.key)}
               className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm transition-colors ${
                 selected
@@ -287,7 +290,7 @@ export default function MobilePointsPage() {
       </nav>
 
       {/* key 里的 studentId 是「切孩子丢弃一切」的机制本体：面板整体重挂载，草稿蒸发 */}
-      <div key={`${studentId}-${activeTab}`}>
+      <div key={`${studentId}-${activeTab}`} id="points-tabpanel" role="tabpanel" aria-labelledby={`points-tab-${activeTab}`}>
         {activeTab === 'rules' && <PointRulesPanel studentId={studentId} />}
         {activeTab === 'catalog' && (
           <RewardCatalogPanel studentId={studentId} onRegisterLeaveGuard={registerLeaveGuard} />
