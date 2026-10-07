@@ -8,6 +8,12 @@
 
 ---
 
+## 2026-10-07 · 登录「记住我」
+
+登录/注册页新增「记住我」勾选（默认不勾，勾选后 token 存 localStorage，否则 sessionStorage 会话级登录）；新增 `services/authStorage` 统一鉴权键读写（登录/注册写入、全部读取点、`getAuthToken` 经它取 token）；登出清理覆盖双 storage；服务端零改动。背景：网吧等公共电脑关浏览器后残留登录态，默认会话级即可随浏览器关闭失效。
+
+---
+
 ## 2026-10-06 · 家长移动端第二批 B（2B：积分兑换 / 学习报告 / AI 对话记录上手机）
 
 分支 `feat/parent-mobile-2b`（5 任务 TDD 分步，spec
