@@ -8,6 +8,78 @@
 
 ---
 
+## 2026-10-06 · 家长移动端第二批 A（2A：学生管理 / 消息 / 学习配置 / 目标 / 账号上手机）
+
+分支 `feat/parent-mobile-2a`（7 任务 TDD 分步，spec
+`docs/superpowers/specs/2026-10-06-parent-mobile-batch2a-design.md`）。延续 v1 全部架构裁决
+（零后端改动、不复用桌面页组件、复用 parent token 与外壳、验收必经 WebKit）。
+
+### 范围裁决
+
+- 分两批：**2A** = 学生管理闭环 + 消息 + 目标 + 账号（本批）；**2B** = 积分兑换 / 学习报告 /
+  AI 对话记录（另立 spec）。
+- **订阅管理不做**（用户裁决：目前意义不大，想做时再立项）。
+- 学生管理的子页**学习配置纳入 2A**——不做则学生管理是半截流程。
+
+### 五页端点与交互要点（全部为 `services/api.ts` 既有导出）
+
+- **消息中心** `/m/parent/messages`：`listMyMessages` / `markMessageRead` +
+  `getUnreadMessageCount` 30s 轮询；列表点条目**就地展开全文、展开即已读**（失败静默，
+  条目不消失）；无分页（桌面同款全量）。
+- **学生管理** `/m/parent/students`：`listMyStudents` / `createStudent`（姓名/用户名/密码/
+  **年龄与年级强制录入**，PRD §7.8，用户名冲突 1004 提示）/ `resetStudentPassword`
+  （确认弹窗 → 成功后展示新密码）/ `setStudentStatus`（停用需确认，状态徽标展示）。
+- **学习配置** `/m/parent/students/:id/config`：`getStudentSubjectConfigs` /
+  `updateStudentSubjectConfig`；**按路径 id 取学生，不读 `parentStudentStore` 锚点**
+  （与桌面 `/parent/students/:id/config` 一致，换孩子锚点不影响该页）；保存返回
+  `reset: true` 必弹「该学科学习进度已重置」toast（沿用桌面语义）。
+- **学习目标** `/m/parent/goals`：`getParentGoalAttainment` / `putParentGoalTarget`；
+  渲染与编辑 key 一律 `subjectId:metric`（api.ts 硬注释口径）；**达成率 >100% 原样展示
+  不截断**，`rate === null` 显示「暂无数据」；编辑正整数校验、非正数行内报错不发请求。
+- **账号设置** `/m/parent/account`：`getParentAccount`（只读：手机号/姓名等）+
+  `changeParentPassword`（新密码 ≥6 位、两次一致；旧密码错误原样展示后端文案）；
+  退出登录不在此页（顶栏已有）。
+
+### 「更多」占位收敛为 4 项 + 视口守卫映射扩充
+
+- `MobileMorePage` 拆两组卡片：**live 4 项**（学生管理 / 消息中心 / 学习目标 / 账号设置，
+  `MOBILE_LIVE_ITEMS` 直链）+ **stub 4 项**（订阅管理 / 积分与兑换 / 学习报告 / AI 对话
+  记录，`MOBILE_STUB_ITEMS` 标「电脑端」）。旧 `MOBILE_MORE_ITEMS` 删除（全仓 grep 确认
+  无外部消费方）。
+- `ParentViewportGate` 映射扩充：`messages` / `students` / `goals` / `account` → 同名移动
+  页；`students/:id/config` → `/m/parent/students/:id/config`（**带 id 直跳**）。底部
+  四 Tab 不变。
+
+### 执行中修复
+
+- **Task 5 换孩竞态（修复轮 1，4 findings）**：`cancelled` 守卫（旧孩子在途 resolve 不
+  覆盖新孩子、reject 不把新孩子打成 error）+ 编辑态跨孩子清空 + save 响应按
+  `initiatorId` 归属 + null 分支 testid 回补。根因与 v1 终审 I-1 同类（派生状态
+  `studentId` 归属 + effect 竞态守卫），修复照抄 `MobileControlsPage` 同款结构。
+  回归钉验证：临时禁用 `cancelled` 判断后两条竞态测试如期失败。
+- **Task 4 ConfirmDialog 适配**：真 props 含 `open`（brief 实现稿缺失），补
+  `open={confirmSubject !== null}`；确认按钮按 `aria-label="确认"` 寻址；toast 断言走
+  mock `@/components/base` 的 `toast`（全仓统一模式，无 ToastContainer 时 `toast()`
+  是 no-op）。
+
+### 测试与验证
+
+- 全量 `npx vitest run`：**119 files / 1129 tests 全过**（基线 114/1105，净增 5 文件
+  24 用例：5 页渲染测试 + 路由/守卫新映射用例 + 竞态回归钉）。
+- `npx tsc -b` 0 error；`npm run build` ✓ built in 3.41s（覆盖共享 dist 属已知行为）。
+- 各任务内 TDD 红→绿记录见 `.superpowers/sdd/2026-10-06-parent-mobile-batch2a/` 各
+  task-report。
+
+### 遗留
+
+- **WebKit 端到端走查已由控制器补做**（spec §5 要求五页 390×844 逐页过，五页全过，2026-10-06）。
+- 手机真机人工走查（含 2A 五页）。
+- 各任务审查 deferred 的小项（见 progress.md）：消息未读计数等 30s tick 才反映本地已读、
+  学生 toggleStatus 连点无防抖、配置确认弹窗无 saving 防双击（幂等）、目标 save 晚到
+  reject 的归属守卫、改密旧密码标错用文案启发式（建议改按 error code）。
+
+---
+
 ## 2026-10-02 · 家长移动 PWA 合并后修复（配色 token / 退出登录 / 错题列表空白）
 
 合并 `ee32e4b` 后用户手机实测报回三件事，同日修复（`dd804d7` / `74712fe` / `ce1dc17`+本条）：

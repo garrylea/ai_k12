@@ -2,6 +2,20 @@ import { Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
+const MOBILE_SUPPORTED = new Set(['dashboard', 'alerts', 'errors', 'controls', 'messages', 'students', 'goals', 'account']);
+const MORE_STUBS = new Set(['subscription', 'points', 'report', 'chat-logs']);
+
+/** 桌面家长路径 → 移动路径（2A 起支持带 id 的 config 子路径直跳）。 */
+export function mobileParentPath(pathname: string): string {
+  const rest = pathname.replace(/^\/parent\/?/, '');
+  if (/^students\/\d+\/config$/.test(rest)) return `/m/parent/${rest}`;
+  const seg = rest.split('/')[0];
+  if (MOBILE_SUPPORTED.has(seg)) return `/m/parent/${seg}`;
+  if (seg === 'rewards') return '/m/parent/more/points';
+  if (MORE_STUBS.has(seg)) return `/m/parent/more/${seg}`;
+  return '/m/parent/more/students';
+}
+
 /**
  * 桌面家长台的窄屏守卫：已登录家长在手机竖屏（<768px）打开 /parent/* 时，
  * 自动跳到移动路由组 /m/parent/*——否则桌面页在手机上挤着「能用」，家长永远
@@ -11,18 +25,6 @@ import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
  * 只在渲染前判断一次：视口从窄变宽（旋转/拉窗口）后家长留在移动版，
  * 想回桌面版刷新或重新从桌面进即可——不做双向监听，避免旋转时来回弹。
  */
-const MOBILE_SUPPORTED = new Set(['dashboard', 'alerts', 'errors', 'controls']);
-/** 「更多」占位页里登记过名目的桌面功能段。 */
-const MORE_ITEMS = new Set(['subscription', 'points', 'report', 'chat-logs', 'goals', 'messages', 'students', 'account']);
-
-export function mobileParentPath(pathname: string): string {
-  const seg = pathname.replace(/^\/parent\/?/, '').split('/')[0];
-  if (MOBILE_SUPPORTED.has(seg)) return `/m/parent/${seg}`;
-  if (seg === 'rewards') return '/m/parent/more/points';
-  if (MORE_ITEMS.has(seg)) return `/m/parent/more/${seg}`;
-  return '/m/parent/more/students';
-}
-
 export default function ParentViewportGate({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   if (window.innerWidth < MOBILE_VIEWPORT_BREAKPOINT) {
