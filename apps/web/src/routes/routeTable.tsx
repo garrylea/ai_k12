@@ -59,6 +59,9 @@ import MobileStudentsPage from '@/pages/parent-mobile/MobileStudentsPage';
 import MobileSubjectConfigPage from '@/pages/parent-mobile/MobileSubjectConfigPage';
 import MobileGoalsPage from '@/pages/parent-mobile/MobileGoalsPage';
 import MobileAccountPage from '@/pages/parent-mobile/MobileAccountPage';
+import MobilePointsPage from '@/pages/parent-mobile/MobilePointsPage';
+import MobileReportPage from '@/pages/parent-mobile/MobileReportPage';
+import MobileChatLogsPage from '@/pages/parent-mobile/MobileChatLogsPage';
 import AdminDashboardPage from '@/pages/admin/AdminDashboardPage';
 import AdminModelsPage from '@/pages/admin/AdminModelsPage';
 import AdminAccountsPage from '@/pages/admin/AdminAccountsPage';
@@ -408,6 +411,9 @@ export const routes: RouteObject[] = [
       { path: 'students/:id/config', element: <MobileSubjectConfigPage /> },
       { path: 'goals', element: <MobileGoalsPage /> },
       { path: 'account', element: <MobileAccountPage /> },
+      { path: 'points', element: <MobilePointsPage /> },
+      { path: 'report', element: <MobileReportPage /> },
+      { path: 'chat-logs', element: <MobileChatLogsPage /> },
     ],
   },
   // 学生端主轨落地：`StudentLayout` 外壳与 P2.4–P2.9 / P4.x 占位页已于 2026-09-20 删除

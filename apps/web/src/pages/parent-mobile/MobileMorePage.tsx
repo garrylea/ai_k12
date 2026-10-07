@@ -1,18 +1,19 @@
 import { Link, useParams } from 'react-router-dom';
 
-/** 2A 起拆两组：live = 已上手机的真实入口；stub = 仍指向电脑端（订阅等用户裁决延后）。 */
+/** 2A 起拆两组：live = 已上手机的真实入口；stub = 仍指向电脑端（订阅等用户裁决延后）。
+ *  2B 起积分/学习报告/AI 对话记录转 live（先占位空壳，Task 2–4 替换），stub 只剩订阅。 */
 export const MOBILE_LIVE_ITEMS = [
   { key: 'students', label: '学生管理', to: '/m/parent/students' },
   { key: 'messages', label: '消息中心', to: '/m/parent/messages' },
   { key: 'goals', label: '学习目标', to: '/m/parent/goals' },
   { key: 'account', label: '账号设置', to: '/m/parent/account' },
+  { key: 'points', label: '积分与兑换', to: '/m/parent/points' },
+  { key: 'report', label: '学习报告', to: '/m/parent/report' },
+  { key: 'chat-logs', label: 'AI 对话记录', to: '/m/parent/chat-logs' },
 ] as const;
 
 export const MOBILE_STUB_ITEMS = [
   { key: 'subscription', label: '订阅管理' },
-  { key: 'points', label: '积分与兑换' },
-  { key: 'report', label: '学习报告' },
-  { key: 'chat-logs', label: 'AI 对话记录' },
 ] as const;
 
 export default function MobileMorePage() {
