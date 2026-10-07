@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/base';
 import { login } from '@/services/api';
 import { saveAuthSession } from '@/services/authStorage';
+import { isDesktopShell } from '@/kiosk/desktopBridge';
 import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
 export default function LoginPage() {
@@ -11,7 +12,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [remember, setRemember] = useState(false);
+  // Web 端默认不勾（会话级登录）；PC App（Electron）默认勾选，保持关 App 重开仍登录的旧行为
+  const [remember, setRemember] = useState(() => isDesktopShell());
 
   const handleLogin = async () => {
     if (!username || !password) {
@@ -159,7 +161,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* 记住我：默认不勾，不勾时登录态仅保留到浏览器关闭（sessionStorage） */}
+            {/* 记住我：Web 默认不勾、PC App 默认勾；不勾时登录态仅保留到浏览器关闭（sessionStorage） */}
             <div className="flex items-center gap-2">
               <input
                 id="remember-me"

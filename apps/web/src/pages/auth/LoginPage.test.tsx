@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import LoginPage from './LoginPage';
 import { login } from '@/services/api';
+import { isDesktopShell } from '@/kiosk/desktopBridge';
 import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
 /**
@@ -19,7 +20,12 @@ vi.mock('@/services/api', () => ({
   login: vi.fn(),
 }));
 
+vi.mock('@/kiosk/desktopBridge', () => ({
+  isDesktopShell: vi.fn(),
+}));
+
 const mockLogin = vi.mocked(login);
+const mockIsDesktopShell = vi.mocked(isDesktopShell);
 
 function renderLoginPage() {
   return render(
@@ -128,6 +134,8 @@ describe('LoginPage 记住我', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    // Web 端（jsdom 无 desktop 桥）：默认不勾；PC App 用例里单独改 true
+    mockIsDesktopShell.mockReturnValue(false);
   });
 
   it('默认不勾「记住我」：登录成功后 token 只写 sessionStorage，不写 localStorage', async () => {
@@ -161,6 +169,26 @@ describe('LoginPage 记住我', () => {
     await user.click(screen.getByRole('button', { name: '登录' }));
     expect(await screen.findByText('student-entry-page')).toBeInTheDocument();
     expect(localStorage.getItem('token')).toBe('jwt-y');
+    expect(sessionStorage.getItem('token')).toBeNull();
+  });
+
+  it('PC App（Electron）环境默认勾选：登录成功后 token 写 localStorage（用户裁决：壳内保持 7 天免登旧行为）', async () => {
+    mockIsDesktopShell.mockReturnValue(true);
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValueOnce({
+      token: 'jwt-pc',
+      user: { id: 9, role: 'student', name: '小明', username: 'xiaoming' },
+    });
+    renderLoginPage();
+
+    const box = screen.getByLabelText('记住我') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+
+    await user.type(screen.getByLabelText('账号'), 'xiaoming');
+    await user.type(screen.getByLabelText('密码'), 'pw123456');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    expect(await screen.findByText('student-entry-page')).toBeInTheDocument();
+    expect(localStorage.getItem('token')).toBe('jwt-pc');
     expect(sessionStorage.getItem('token')).toBeNull();
   });
 });

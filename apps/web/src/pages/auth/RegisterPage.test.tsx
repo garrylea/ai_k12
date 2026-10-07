@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import RegisterPage from './RegisterPage';
 import { registerParent } from '@/services/api';
+import { isDesktopShell } from '@/kiosk/desktopBridge';
 
 /**
  * 注册页渲染测试。
@@ -17,7 +18,12 @@ vi.mock('@/services/api', () => ({
   registerParent: vi.fn(),
 }));
 
+vi.mock('@/kiosk/desktopBridge', () => ({
+  isDesktopShell: vi.fn(),
+}));
+
 const mockRegister = vi.mocked(registerParent);
+const mockIsDesktopShell = vi.mocked(isDesktopShell);
 
 function renderRegisterPage() {
   return render(
@@ -87,6 +93,11 @@ describe('RegisterPage', () => {
 });
 
 describe('RegisterPage 记住我', () => {
+  beforeEach(() => {
+    // Web 端（jsdom 无 desktop 桥）：默认不勾；PC App 用例里单独改 true
+    mockIsDesktopShell.mockReturnValue(false);
+  });
+
   it('默认不勾：注册成功后 token 只写 sessionStorage', async () => {
     const user = userEvent.setup();
     mockRegister.mockResolvedValueOnce({
@@ -121,6 +132,28 @@ describe('RegisterPage 记住我', () => {
 
     await waitFor(() => {
       expect(localStorage.getItem('token')).toBe('jwt-r2');
+    });
+    expect(sessionStorage.getItem('token')).toBeNull();
+  });
+
+  it('PC App（Electron）环境默认勾选：注册成功后 token 写 localStorage（用户裁决：壳内保持 7 天免登旧行为）', async () => {
+    mockIsDesktopShell.mockReturnValue(true);
+    const user = userEvent.setup();
+    mockRegister.mockResolvedValueOnce({
+      token: 'jwt-r-pc',
+      user: { id: 1, role: 'parent', name: null, phone: '13800000000' },
+    });
+    renderRegisterPage();
+
+    const box = screen.getByLabelText('记住我') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+
+    await user.type(screen.getByLabelText('手机号'), '13800000000');
+    await user.type(screen.getByLabelText('设置密码'), 'pw123456');
+    await user.click(screen.getByRole('button', { name: '完成注册' }));
+
+    await waitFor(() => {
+      expect(localStorage.getItem('token')).toBe('jwt-r-pc');
     });
     expect(sessionStorage.getItem('token')).toBeNull();
   });

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/base';
 import { registerParent } from '@/services/api';
 import { saveAuthSession } from '@/services/authStorage';
+import { isDesktopShell } from '@/kiosk/desktopBridge';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -11,7 +12,8 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [remember, setRemember] = useState(false);
+  // Web 端默认不勾（会话级登录）；PC App（Electron）默认勾选，保持关 App 重开仍登录的旧行为
+  const [remember, setRemember] = useState(() => isDesktopShell());
 
   const handleRegister = async () => {
     if (!/^1\d{10}$/.test(phone)) {
