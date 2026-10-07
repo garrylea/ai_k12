@@ -1,10 +1,25 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   getParentGoalAttainment, putParentGoalTarget,
   type ParentGoalAttainmentItem,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
 
+/**
+ * /m/parent/goals 移动端学习目标页（Task 5）。
+ *
+ * - 达成度列表：`rate > 100` 不截断（超额），`rate === null` 显示「暂无数据」。
+ * - 渲染 key 一律 `${subjectId}:${metric}`（api.ts 硬注释：同一 metric 会在多个学科各有一行）。
+ * - 编辑走 `putParentGoalTarget`，用返回行**就地替换**（不重发 GET）。
+ *
+ * `data-testid="mobile-page-goals"` 挂在**所有状态共用的外层容器**上（Task 2 路由测试消费，
+ * MobileAlertsPage/MobileControlsPage 先例），包括「未选择孩子」分支。
+ *
+ * 加载带 cancelled 守卫（MobileControlsPage 同款）：快速切孩子时旧孩子的响应晚 resolve/reject
+ * 都不许写回 —— 否则旧数据 + ownerId 归属掩码会让页面永久停在骨架屏（无在途请求、无出口），
+ * 晚 reject 还会把新孩子打成 error。派生状态同时带 `ownerId` 归属（CLAUDE.md 硬规则）：
+ * 切孩子首帧（effect 清空之前）旧数据必须立即不可见。
+ */
 type LoadStatus = 'loading' | 'ready' | 'error';
 
 export default function MobileGoalsPage() {
@@ -12,28 +27,50 @@ export default function MobileGoalsPage() {
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [items, setItems] = useState<ParentGoalAttainmentItem[] | null>(null);
   const [ownerId, setOwnerId] = useState<number | null>(null);
+  /** 重试不需要别的钩子，一个自增计数器驱动 effect 重跑（MobileControlsPage 同款）。 */
+  const [reload, setReload] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
 
-  const load = useCallback((id: number) => {
-    setStatus('loading');
-    getParentGoalAttainment(id)
-      .then((res) => { setItems(res.items); setOwnerId(id); setStatus('ready'); })
-      .catch(() => setStatus('error'));
-  }, []);
-
   useEffect(() => {
-    if (studentId !== null) load(studentId);
-  }, [studentId, load]);
+    if (studentId === null) return;
+    // 编辑态是「针对当前这个孩子」的本地状态，换孩子必须清空 —— 否则新孩子若有
+    // 同 `${subjectId}:${metric}` 的行，会带着上个孩子的草稿进编辑态，保存即写错目标。
+    setEditing(null);
+    setEditError(null);
+    setDraft('');
+    let cancelled = false;
+    setStatus('loading');
+    getParentGoalAttainment(studentId)
+      .then((res) => {
+        if (cancelled) return;
+        setItems(res.items);
+        setOwnerId(studentId);
+        setStatus('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, reload]);
 
-  if (studentId === null) return <p className="text-[var(--text-secondary)]">先在上方选择孩子</p>;
+  if (studentId === null) {
+    return (
+      <div data-testid="mobile-page-goals">
+        <p className="rounded-2xl bg-white p-8 text-center text-[var(--text-secondary)]">先在上方选择孩子</p>
+      </div>
+    );
+  }
   if (status === 'error') {
     return (
       <div data-testid="mobile-page-goals">
         <div className="rounded-2xl bg-white p-8 text-center">
           <p className="text-[var(--text-secondary)]">加载失败</p>
-          <button data-testid="goals-retry" onClick={() => load(studentId)} className="mt-2 text-[var(--brand-500)]">重试</button>
+          <button data-testid="goals-retry" onClick={() => setReload((n) => n + 1)} className="mt-2 text-[var(--brand-500)]">重试</button>
         </div>
       </div>
     );
@@ -57,8 +94,12 @@ export default function MobileGoalsPage() {
       return;
     }
     setEditError(null);
-    putParentGoalTarget(studentId, item.metric, target, item.subjectId)
+    // 记下发起时的孩子；响应晚于切孩到达时（旧孩子的保存结果）必须整个丢弃，
+    // 否则会把旧孩子的 updated 行替换进新孩子同 key 的行里。
+    const initiatorId = studentId;
+    putParentGoalTarget(initiatorId, item.metric, target, item.subjectId)
       .then((updated) => {
+        if (useParentStudentStore.getState().studentId !== initiatorId) return;
         setItems((prev) => prev?.map((i) => (i.subjectId === updated.subjectId && i.metric === updated.metric ? updated : i)) ?? prev);
         setEditing(null);
       })
