@@ -34,6 +34,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 describe('RegisterPage', () => {
@@ -82,5 +83,45 @@ describe('RegisterPage', () => {
 
     expect(mockRegister).not.toHaveBeenCalled();
     expect(screen.getByText('请输入 11 位手机号')).toBeInTheDocument();
+  });
+});
+
+describe('RegisterPage 记住我', () => {
+  it('默认不勾：注册成功后 token 只写 sessionStorage', async () => {
+    const user = userEvent.setup();
+    mockRegister.mockResolvedValueOnce({
+      token: 'jwt-r',
+      user: { id: 1, role: 'parent', name: null, phone: '13800000000' },
+    });
+    renderRegisterPage();
+
+    await user.type(screen.getByLabelText('手机号'), '13800000000');
+    await user.type(screen.getByLabelText('设置密码'), 'pw123456');
+    expect((screen.getByLabelText('记住我') as HTMLInputElement).checked).toBe(false);
+    await user.click(screen.getByRole('button', { name: '完成注册' }));
+
+    await waitFor(() => {
+      expect(sessionStorage.getItem('token')).toBe('jwt-r');
+    });
+    expect(localStorage.getItem('token')).toBeNull();
+  });
+
+  it('勾选：注册成功后 token 写 localStorage', async () => {
+    const user = userEvent.setup();
+    mockRegister.mockResolvedValueOnce({
+      token: 'jwt-r2',
+      user: { id: 1, role: 'parent', name: null, phone: '13800000000' },
+    });
+    renderRegisterPage();
+
+    await user.type(screen.getByLabelText('手机号'), '13800000000');
+    await user.type(screen.getByLabelText('设置密码'), 'pw123456');
+    await user.click(screen.getByLabelText('记住我'));
+    await user.click(screen.getByRole('button', { name: '完成注册' }));
+
+    await waitFor(() => {
+      expect(localStorage.getItem('token')).toBe('jwt-r2');
+    });
+    expect(sessionStorage.getItem('token')).toBeNull();
   });
 });

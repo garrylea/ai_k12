@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/base';
 import { registerParent } from '@/services/api';
+import { saveAuthSession } from '@/services/authStorage';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -10,6 +11,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   const handleRegister = async () => {
     if (!/^1\d{10}$/.test(phone)) {
@@ -24,10 +26,15 @@ export default function RegisterPage() {
     setError('');
     try {
       const result = await registerParent(phone, password, name || undefined);
-      localStorage.setItem('token', result.token);
-      localStorage.setItem('username', result.user.phone ?? phone);
-      localStorage.setItem('userId', String(result.user.id));
-      localStorage.setItem('userRole', result.user.role);
+      saveAuthSession(
+        {
+          token: result.token,
+          username: result.user.phone ?? phone,
+          userId: String(result.user.id),
+          userRole: result.user.role,
+        },
+        remember,
+      );
       navigate('/parent/students');
     } catch (err: unknown) {
       setError(err instanceof Error ? (err.message || '注册失败，请重试') : '注册失败，请重试');
@@ -134,6 +141,19 @@ export default function RegisterPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                id="remember-me"
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="w-4 h-4 accent-[var(--brand-500)]"
+              />
+              <label htmlFor="remember-me" className="text-sm text-[var(--text-secondary)]">
+                记住我
+              </label>
             </div>
 
             {/* type=submit 由 form onSubmit 触发（回车同样生效） */}
