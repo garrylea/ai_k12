@@ -40,6 +40,19 @@ describe('MobileMessagesPage', () => {
     await waitFor(() => expect(screen.getByTestId('msg-item-2').textContent).toContain('已读'));
   });
 
+  it('展开未读条后立即刷新未读数（不等 30s tick）', async () => {
+    vi.mocked(listMyMessages).mockResolvedValue(msgs as never);
+    // 首次进页 1 条未读；已读成功后服务端口径变 0
+    vi.mocked(getUnreadMessageCount).mockResolvedValueOnce(1).mockResolvedValue(0);
+    vi.mocked(markMessageRead).mockResolvedValue(null);
+    render(<MobileMessagesPage />);
+    await screen.findByText('预警提醒');
+    const callsBefore = vi.mocked(getUnreadMessageCount).mock.calls.length;
+    await userEvent.click(screen.getByTestId('msg-item-2'));
+    await waitFor(() => expect(vi.mocked(getUnreadMessageCount).mock.calls.length).toBeGreaterThan(callsBefore));
+    expect(await screen.findByText(/0 条未读/)).toBeTruthy();
+  });
+
   it('markMessageRead 失败静默：条目仍展开、不消失', async () => {
     vi.mocked(listMyMessages).mockResolvedValue(msgs as never);
     vi.mocked(getUnreadMessageCount).mockResolvedValue(0);

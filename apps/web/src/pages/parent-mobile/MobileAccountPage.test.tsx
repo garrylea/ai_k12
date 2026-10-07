@@ -11,12 +11,13 @@ vi.mock('@/components/base', async (importOriginal) => ({
   toast: vi.fn(),
 }));
 
-vi.mock('@/services/api', () => ({
+vi.mock('@/services/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/api')>()),
   getParentAccount: vi.fn(),
   changeParentPassword: vi.fn(),
 }));
 import { toast } from '@/components/base';
-import { changeParentPassword, getParentAccount } from '@/services/api';
+import { ApiError, changeParentPassword, getParentAccount } from '@/services/api';
 
 // mock spy 是模块级的，调用记录跨用例累积；不清会导致「不应发请求」断言撞上前用例的调用
 beforeEach(() => {
@@ -62,15 +63,29 @@ describe('MobileAccountPage', () => {
     expect(await screen.findByText(/至少 6 位/)).toBeTruthy();
   });
 
-  it('旧密码错误：后端文案原样展示', async () => {
+  it('旧密码错误（ApiError code 1003）：旧密码框标错 + 文案原样展示', async () => {
     vi.mocked(getParentAccount).mockResolvedValue(account as never);
-    vi.mocked(changeParentPassword).mockRejectedValue(new Error('旧密码不正确'));
+    vi.mocked(changeParentPassword).mockRejectedValue(new ApiError(1003, '旧密码错误'));
     render(<MobileAccountPage />);
     await screen.findByText(/18601201380/);
     await userEvent.type(screen.getByLabelText('旧密码'), 'wrong');
     await userEvent.type(screen.getByLabelText('新密码'), 'new123456');
     await userEvent.type(screen.getByLabelText('确认新密码'), 'new123456');
     await userEvent.click(screen.getByTestId('account-password-submit'));
-    expect(await screen.findByText(/旧密码不正确/)).toBeTruthy();
+    expect(await screen.findByText(/旧密码错误/)).toBeTruthy();
+    expect((screen.getByLabelText('旧密码') as HTMLInputElement).className).toContain('border-[var(--error)]');
+  });
+
+  it('409/1001（新旧相同）文案含「旧密码」但不标错旧密码框，文案原样展示', async () => {
+    vi.mocked(getParentAccount).mockResolvedValue(account as never);
+    vi.mocked(changeParentPassword).mockRejectedValue(new ApiError(1001, '新密码不能与旧密码相同'));
+    render(<MobileAccountPage />);
+    await screen.findByText(/18601201380/);
+    await userEvent.type(screen.getByLabelText('旧密码'), 'old123');
+    await userEvent.type(screen.getByLabelText('新密码'), 'old123');
+    await userEvent.type(screen.getByLabelText('确认新密码'), 'old123');
+    await userEvent.click(screen.getByTestId('account-password-submit'));
+    expect(await screen.findByText(/新密码不能与旧密码相同/)).toBeTruthy();
+    expect((screen.getByLabelText('旧密码') as HTMLInputElement).className).not.toContain('border-[var(--error)]');
   });
 });

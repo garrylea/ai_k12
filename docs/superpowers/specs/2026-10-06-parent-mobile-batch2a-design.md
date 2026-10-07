@@ -62,13 +62,13 @@ v1 家长移动端只做了 4 个核心页，其余功能在「更多」里指�
   - 新建学生表单：姓名 / 用户名 / 密码 / 年龄 / 年级（**年龄与年级强制录入**，
     PRD §7.8；`createStudent(req)`，桌面端同款校验：必填、用户名冲突 1004 提示）。
   - 重置密码：`resetStudentPassword(id, newPassword)`，确认弹窗 → 成功后**展示新密码**
-    （沿用桌面交互）。
+    （沿用桌面交互）。（2026-10-06 实现口径：行内展开输入行 + 确认按钮，功能等价）
   - 停用/启用：`setStudentStatus(id, isActive)`；停用需确认弹窗；状态徽标展示。
 - 新建/改名后 `MobileStudentSwitcher` 自动刷新（pathname 重拉机制 v1 已有，无需接线）。
 
 ### 4.3 学习配置 `/m/parent/students/:id/config`
 - 数据：`getStudentSubjectConfigs(studentId): SubjectConfigsResponse`（含学生名/各科当前配置）；
-  选项：`fetchSubjects()` + `fetchVersions(subjectId)`。
+  选项：`getStudentSubjectConfigs` 响应内嵌 `options`（与桌面一致）。
 - 交互：按学科单栏卡片（当前教材/册别）→ 点修改 → 年级代码 + 册别（上/下）+ 版本选择 →
   `updateStudentSubjectConfig(studentId, subjectId, { gradeCode, term, textbookVersionId? })`。
 - **保存返回 `reset: true` 时必须弹「该学科学习进度已重置」提示**（沿用桌面语义，勿删）。

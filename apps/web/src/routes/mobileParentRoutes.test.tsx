@@ -15,6 +15,16 @@ vi.mock('@/services/api', async (importOriginal) => ({
     { id: 1, parentId: 9, username: 'stu1', name: '小明', age: 10, grade: '四年级', schoolLevel: 'primary', isActive: true },
   ]),
   getSubscriptionStatus: vi.fn().mockRejectedValue(new Error('skip')),
+  // 终审修复波新增五页直测：各页取数端点统一静默（reject → 页面错误分支，testid 仍在）
+  listMyMessages: vi.fn().mockRejectedValue(new Error('skip')),
+  getUnreadMessageCount: vi.fn().mockRejectedValue(new Error('skip')),
+  markMessageRead: vi.fn().mockResolvedValue(null),
+  getParentGoalAttainment: vi.fn().mockRejectedValue(new Error('skip')),
+  putParentGoalTarget: vi.fn().mockResolvedValue(null),
+  getParentAccount: vi.fn().mockRejectedValue(new Error('skip')),
+  changeParentPassword: vi.fn().mockResolvedValue(null),
+  getStudentSubjectConfigs: vi.fn().mockRejectedValue(new Error('skip')),
+  updateStudentSubjectConfig: vi.fn().mockResolvedValue(null),
 }));
 
 // RequireRole 按 localStorage 的 token（解 payload 校 exp）+ userRole 守卫
@@ -65,5 +75,31 @@ describe('/m/parent 移动路由组', () => {
     expect(screen.getByTestId('tab-errors')).toBeTruthy();
     expect(screen.getByTestId('tab-controls')).toBeTruthy();
     expect(screen.getByTestId('tab-more')).toBeTruthy();
+  });
+
+  // 终审修复波 M-7：2A 五页经真实 routeTable 直达（钉住路径 → 页面映射，不经 UI 入口）
+  it('messages 直达消息中心', async () => {
+    renderAt('/m/parent/messages');
+    expect(await screen.findByTestId('mobile-page-messages')).toBeTruthy();
+  });
+
+  it('students 直达学生管理', async () => {
+    renderAt('/m/parent/students');
+    expect(await screen.findByTestId('mobile-page-students')).toBeTruthy();
+  });
+
+  it('goals 直达学习目标', async () => {
+    renderAt('/m/parent/goals');
+    expect(await screen.findByTestId('mobile-page-goals')).toBeTruthy();
+  });
+
+  it('account 直达账号设置', async () => {
+    renderAt('/m/parent/account');
+    expect(await screen.findByTestId('mobile-page-account')).toBeTruthy();
+  });
+
+  it('students/7/config 直达学习配置页', async () => {
+    renderAt('/m/parent/students/7/config');
+    expect(await screen.findByTestId('mobile-page-config')).toBeTruthy();
   });
 });

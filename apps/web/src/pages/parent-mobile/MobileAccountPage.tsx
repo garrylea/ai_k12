@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/components/base';
-import { changeParentPassword, getParentAccount, type ParentAccount } from '@/services/api';
+import { ApiError, changeParentPassword, getParentAccount, type ParentAccount } from '@/services/api';
 
 /**
  * /m/parent/account 移动端账号设置页（Task 6）。
@@ -46,7 +46,9 @@ export default function MobileAccountPage() {
       })
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : '修改失败';
-        if (msg.includes('旧密码') || msg.includes('密码不正确')) setOldPasswordError(true);
+        // 标错按 error code 判（后端 401/1003=旧密码错）：409/1001 文案「新密码不能与旧密码相同」
+        // 含「旧密码」三字，按文案判会误标旧密码框。其余错误（含非 ApiError）只展示文案。
+        if (e instanceof ApiError && e.code === 1003) setOldPasswordError(true);
         setFormError(msg);
       });
   };

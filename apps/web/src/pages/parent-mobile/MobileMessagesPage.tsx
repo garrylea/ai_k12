@@ -38,7 +38,11 @@ export default function MobileMessagesPage() {
     setExpandedId(expandedId === m.id ? null : m.id);
     if (!m.isRead) {
       markMessageRead(m.id)
-        .then(() => setMessages((prev) => prev?.map((x) => (x.id === m.id ? { ...x, isRead: true } : x)) ?? prev))
+        .then(() => {
+          setMessages((prev) => prev?.map((x) => (x.id === m.id ? { ...x, isRead: true } : x)) ?? prev);
+          // 已读成功后立即刷新未读数，不等 30s tick
+          getUnreadMessageCount().then(setUnread).catch(() => {});
+        })
         .catch(() => { /* 已读失败静默：条目保留，下次进页以服务端为准 */ });
     }
   };

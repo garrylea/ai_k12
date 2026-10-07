@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { ConfirmDialog, toast } from '@/components/base';
 import {
   getStudentSubjectConfigs, updateStudentSubjectConfig,
@@ -86,7 +86,11 @@ export default function MobileSubjectConfigPage() {
 
   return (
     <div data-testid="mobile-page-config" className="space-y-3">
-      <p className="px-1 text-xs text-[var(--text-tertiary)]">配置对象：{data.studentName ?? `学生 #${studentId}`}。切换教材将重置该学科学习进度（历史记录保留）。</p>
+      <div className="flex items-center justify-between px-1">
+        <Link to="/m/parent/students" className="text-xs text-[var(--brand-500)]">← 返回学生管理</Link>
+        <p className="text-xs text-[var(--text-tertiary)]">配置对象：{data.studentName ?? `学生 #${studentId}`}</p>
+      </div>
+      <p className="px-1 text-xs text-[var(--text-tertiary)]">切换教材将重置该学科学习进度（历史记录保留）。</p>
       {data.subjects.map((s) => {
         const option = data.options.find((o) => o.subjectId === s.subjectId);
         const sel = selections[s.subjectId];

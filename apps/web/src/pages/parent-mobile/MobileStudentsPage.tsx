@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ConfirmDialog } from '@/components/base';
 import { createStudent, listMyStudents, resetStudentPassword, setStudentStatus, type MyStudentItem } from '@/services/api';
 
 type LoadStatus = 'loading' | 'ready' | 'error';
@@ -19,6 +21,8 @@ export default function MobileStudentsPage() {
   const [resetId, setResetId] = useState<number | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  // 停用需确认弹窗（spec §4.2）；启用是恢复性操作，直接执行不弹窗
+  const [disableTarget, setDisableTarget] = useState<MyStudentItem | null>(null);
 
   const load = useCallback(() => {
     setError(false);
@@ -57,11 +61,19 @@ export default function MobileStudentsPage() {
       .catch((e: unknown) => setActionMsg(e instanceof Error ? e.message : '操作失败'));
   };
 
-  const toggleStatus = (s: MyStudentItem) => {
+  const applyStatus = (s: MyStudentItem) => {
     setStudentStatus(s.id, !s.isActive)
       .then(() => setStudents((prev) => prev?.map((x) => (x.id === s.id ? { ...x, isActive: !x.isActive } : x)) ?? prev))
       .then(() => setActionMsg(s.isActive ? `已停用 ${s.name} 的账号` : `已启用 ${s.name} 的账号`))
       .catch((e: unknown) => setActionMsg(e instanceof Error ? e.message : '操作失败'));
+  };
+
+  const toggleStatus = (s: MyStudentItem) => {
+    if (s.isActive) {
+      setDisableTarget(s);
+      return;
+    }
+    applyStatus(s);
   };
 
   return (
@@ -112,7 +124,8 @@ export default function MobileStudentsPage() {
                 </div>
                 <span className="text-xs text-[var(--text-tertiary)]">{s.isActive ? '状态正常' : '已停用'}</span>
               </div>
-              <div className="mt-2 flex gap-2 text-xs">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <Link to={`/m/parent/students/${s.id}/config`} className="rounded-lg border border-[var(--bg-subtle)] px-3 py-1.5">学习配置</Link>
                 <button data-testid={`student-reset-toggle-${s.id}`} onClick={() => { setResetId(resetId === s.id ? null : s.id); setNewPassword(''); }} className="rounded-lg border border-[var(--bg-subtle)] px-3 py-1.5">重置密码</button>
                 <button data-testid={`student-status-toggle-${s.id}`} onClick={() => toggleStatus(s)} className="rounded-lg border border-[var(--bg-subtle)] px-3 py-1.5">{s.isActive ? '停用账号' : '启用账号'}</button>
               </div>
@@ -127,6 +140,15 @@ export default function MobileStudentsPage() {
         </ul>
       )}
       {actionMsg && <p className="px-2 text-sm text-[var(--text-secondary)]">{actionMsg}</p>}
+      {disableTarget && (
+        <ConfirmDialog
+          open={disableTarget !== null}
+          title={`停用 ${disableTarget.name} 的账号`}
+          message="停用后该学生将无法登录学习。确认停用？"
+          onConfirm={() => { const t = disableTarget; setDisableTarget(null); if (t) applyStatus(t); }}
+          onCancel={() => setDisableTarget(null)}
+        />
+      )}
     </div>
   );
 }

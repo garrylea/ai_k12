@@ -55,6 +55,13 @@ describe('MobileSubjectConfigPage', () => {
     expect(getStudentSubjectConfigs).toHaveBeenCalledWith(7);
   });
 
+  it('页内有返回学生管理的链接', async () => {
+    vi.mocked(getStudentSubjectConfigs).mockResolvedValue(resp as never);
+    renderAtId('7');
+    const link = await screen.findByText('← 返回学生管理');
+    expect(link.getAttribute('href')).toBe('/m/parent/students');
+  });
+
   it('改年级后保存：确认弹窗 + reset 提示 + 重拉', async () => {
     vi.mocked(getStudentSubjectConfigs).mockResolvedValue(resp as never);
     vi.mocked(updateStudentSubjectConfig).mockResolvedValue({ subjectId: 2, textbookVersionId: 11, semesterId: 5, reset: true });
