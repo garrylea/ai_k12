@@ -2,8 +2,8 @@ import { Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
-const MOBILE_SUPPORTED = new Set(['dashboard', 'alerts', 'errors', 'controls', 'messages', 'students', 'goals', 'account']);
-const MORE_STUBS = new Set(['subscription', 'points', 'report', 'chat-logs']);
+const MOBILE_SUPPORTED = new Set(['dashboard', 'alerts', 'errors', 'controls', 'messages', 'students', 'goals', 'account', 'points', 'report', 'chat-logs']);
+const MORE_STUBS = new Set(['subscription']);
 
 /** 桌面家长路径 → 移动路径（2A 起支持带 id 的 config 子路径直跳）。 */
 export function mobileParentPath(pathname: string): string {
@@ -11,7 +11,7 @@ export function mobileParentPath(pathname: string): string {
   if (/^students\/\d+\/config$/.test(rest)) return `/m/parent/${rest}`;
   const seg = rest.split('/')[0];
   if (MOBILE_SUPPORTED.has(seg)) return `/m/parent/${seg}`;
-  if (seg === 'rewards') return '/m/parent/more/points';
+  if (seg === 'rewards') return '/m/parent/points';
   if (MORE_STUBS.has(seg)) return `/m/parent/more/${seg}`;
   return '/m/parent/more/students';
 }

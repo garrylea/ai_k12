@@ -59,12 +59,19 @@ describe('/m/parent 移动路由组', () => {
     expect(await screen.findByText('该功能请在电脑端使用')).toBeTruthy();
   });
 
-  it('更多页区分真实入口与占位两组', async () => {
+  it('更多页区分真实入口与占位两组（2B 起积分/报告/对话记录转 live）', async () => {
     renderAt('/m/parent/more');
     expect(await screen.findByTestId('more-live-students')).toBeTruthy();
     expect(screen.getByTestId('more-live-messages')).toBeTruthy();
+    expect(screen.getByTestId('more-live-goals')).toBeTruthy();
+    expect(screen.getByTestId('more-live-account')).toBeTruthy();
+    expect(screen.getByTestId('more-live-points')).toBeTruthy();
+    expect(screen.getByTestId('more-live-report')).toBeTruthy();
+    expect(screen.getByTestId('more-live-chat-logs')).toBeTruthy();
     expect(screen.getByTestId('more-stub-subscription')).toBeTruthy();
-    expect(screen.getByTestId('more-stub-points')).toBeTruthy();
+    expect(screen.queryByTestId('more-stub-points')).toBeNull();
+    expect(screen.queryByTestId('more-stub-report')).toBeNull();
+    expect(screen.queryByTestId('more-stub-chat-logs')).toBeNull();
   });
 
   it('底部导航有五个 Tab 且当前态正确', async () => {
@@ -101,5 +108,21 @@ describe('/m/parent 移动路由组', () => {
   it('students/7/config 直达学习配置页', async () => {
     renderAt('/m/parent/students/7/config');
     expect(await screen.findByTestId('mobile-page-config')).toBeTruthy();
+  });
+
+  // 2B 三页先以占位空壳上线（Task 2–4 替换为真实现），路径 → 页面映射先钉住
+  it('points 直达积分与兑换占位页', async () => {
+    renderAt('/m/parent/points');
+    expect(await screen.findByTestId('mobile-page-points')).toBeTruthy();
+  });
+
+  it('report 直达学习报告占位页', async () => {
+    renderAt('/m/parent/report');
+    expect(await screen.findByTestId('mobile-page-report')).toBeTruthy();
+  });
+
+  it('chat-logs 直达 AI 对话记录占位页', async () => {
+    renderAt('/m/parent/chat-logs');
+    expect(await screen.findByTestId('mobile-page-chatlogs')).toBeTruthy();
   });
 });
