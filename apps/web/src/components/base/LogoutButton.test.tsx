@@ -37,6 +37,7 @@ function seedSession(studentId: number, opts: { lockExpiresAt: string | null; un
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   localStorage.setItem('token', 'jwt');
   localStorage.setItem('username', '小明');
   localStorage.setItem('userRole', 'student');
@@ -53,6 +54,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 describe('LogoutButton：未锁定', () => {
@@ -65,6 +67,20 @@ describe('LogoutButton：未锁定', () => {
     expect(localStorage.getItem('username')).toBeNull();
     expect(localStorage.getItem('userRole')).toBeNull();
     expect(screen.getByText('登录页')).toBeInTheDocument();
+  });
+
+  it('登录态存 sessionStorage 时登出，两个 storage 都清空', () => {
+    sessionStorage.setItem('token', 'jwt-s');
+    sessionStorage.setItem('userId', '9');
+    sessionStorage.setItem('username', '小明');
+    sessionStorage.setItem('userRole', 'student');
+    renderButton();
+    fireEvent.click(screen.getByLabelText('退出登录'));
+
+    for (const key of ['token', 'userId', 'username', 'userRole']) {
+      expect(sessionStorage.getItem(key)).toBeNull();
+      expect(localStorage.getItem(key)).toBeNull();
+    }
   });
 
   it('没有本地会话时也能正常登出（家长/管理员/普通浏览器）', () => {

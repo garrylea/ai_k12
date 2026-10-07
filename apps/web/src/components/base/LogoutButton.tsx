@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { isCurrentStudentLocked } from '@/kiosk/learningLock';
 import { releaseOnLogout } from '@/kiosk/desktopBridge';
+import { clearAuthSession } from '@/services/authStorage';
 import { toast } from './Toast';
 
 interface LogoutButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -69,10 +70,7 @@ export function LogoutButton({
     }
     releaseOnLogout();
     onLogout?.();
-    localStorage.removeItem('token');
-    localStorage.removeItem('userId');
-    localStorage.removeItem('username');
-    localStorage.removeItem('userRole');
+    clearAuthSession();
     navigate('/login');
   };
 
