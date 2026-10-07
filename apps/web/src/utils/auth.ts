@@ -4,13 +4,13 @@
  * 后端签发 JWT 时带 7 天有效期（exp），前端据此判断会话是否仍有效，
  * 避免"角色还在 localStorage 但 token 已过期"时仍进入受保护页面。
  * 注意：这只是 UX 层校验，真正的越权防护由后端 AuthMiddleware/RolesGuard 兜底。
+ * token 读写经 authStorage（sessionStorage 优先、localStorage 兜底），本文件不直连任何 storage。
  */
 
-const TOKEN_KEY = 'token';
-const AUTH_KEYS = ['token', 'userId', 'username', 'userRole'];
+import { clearAuthSession, getAuthToken } from '@/services/authStorage';
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return getAuthToken();
 }
 
 /** 解码 JWT payload（base64url → JSON），失败返回 null */
@@ -47,9 +47,7 @@ export function isSessionValid(): boolean {
   return !isTokenExpired(token);
 }
 
-/** 清除本地登录态（token/用户信息/角色） */
+/** 清除本地登录态（token/用户信息/角色，经 authStorage 覆盖双 storage） */
 export function clearAuth(): void {
-  for (const key of AUTH_KEYS) {
-    localStorage.removeItem(key);
-  }
+  clearAuthSession();
 }

@@ -207,6 +207,9 @@ function renderAt(path: string) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  // 「记住我」用例会把登录态写进 sessionStorage：不清会泄漏到后面的「无 token」用例
+  localStorage.clear();
+  sessionStorage.clear();
   // 主题是模块级单例：挂载的学习沉浸页（如 CourseDetailPage）会按挂钟把它切成 day/night，
   // 不复位会串到下一个用例
   useThemeStore.setState({ mode: 'student-day' });
@@ -732,6 +735,28 @@ describe('路由表：RequireRole 守卫未被放宽', () => {
     expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '个人中心' })).not.toBeInTheDocument();
     expect(getMyPointsMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 终审 Finding 2 回归钉子：「记住我」默认不勾时，登录态四键只写 sessionStorage。
+   * 若闸门仍直连 localStorage 读 token（终审 Finding 1 的事故形态），这里的合法登录态
+   * 会被误判为无效、踢回登录页。sessionStorage 四键必须能过 RequireRole。
+   */
+  it('仅 sessionStorage 登录态可通过路由闸门（默认不勾「记住我」的登录态）', async () => {
+    localStorage.clear();
+    sessionStorage.setItem('token', validToken());
+    sessionStorage.setItem('userId', '9');
+    sessionStorage.setItem('username', 'xiaoming');
+    sessionStorage.setItem('userRole', 'student');
+    getMyPointsMock.mockResolvedValue(POINTS);
+    getMyLedgerMock.mockResolvedValue(LEDGER);
+
+    renderAt('/student/profile');
+
+    // 子页渲染而非跳回登录页
+    expect(await screen.findByRole('heading', { name: '个人中心' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '智学系统' })).not.toBeInTheDocument();
+    expect(getMyPointsMock).toHaveBeenCalled();
   });
 });
 
