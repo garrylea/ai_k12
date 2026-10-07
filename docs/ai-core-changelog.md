@@ -8,6 +8,80 @@
 
 ---
 
+## 2026-10-06 · 家长移动端第二批 B（2B：积分兑换 / 学习报告 / AI 对话记录上手机）
+
+分支 `feat/parent-mobile-2b`（5 任务 TDD 分步，spec
+`docs/superpowers/specs/2026-10-06-parent-mobile-batch2b-design.md`）。延续 v1/2A 全部架构裁决
+（零后端改动、复用 parent token 与外壳、验收必经 WebKit）；唯一差异：积分页**不复用桌面页**而是
+**直接组装桌面面板组件**（见下「面板复用决策」）。
+
+### 三页端点与交互要点（全部为 `services/api.ts` 既有导出）
+
+- **学习报告** `/m/parent/report`：`getParentReport(studentId, period)`（weekly / monthly 切换
+  整页重拉）+ `getParentStudyTime`（会话口径与活跃天数两套口径并列，v1 仪表盘同款文案）。
+  正确率趋势复用 `ChartLine`、各学科答题量复用 `ChartBar`（SVG 自适应宽度）；**`rate === null`
+  的趋势点跳过**——画成 0 会被读成「全错」（桌面同款硬注释）；薄弱知识点取自
+  `getParentReport` 返回。竞态守卫照抄 MobileControlsPage / MobileGoalsPage 的 `cancelled`
+  模式（换孩 / 切周期后旧响应晚到不写回）。
+- **AI 对话记录** `/m/parent/chat-logs`：`getParentChatLogs`（列表，track + q 两个高频筛选，
+  上一页 / 下一页分页）→ `getParentChatLogDetail`（**整页回放** + 页内「返回列表」，不做
+  桌面那种列表 + 右侧详情分栏）。渲染口径：**孩子的输入原样展示不走 markdown**（学生端
+  AuxChatPanel 同因：`2*3*4`、`#` 之类会被 markdown 当语法吃掉）；AI 回复走共享 markdown
+  配置（图片 / rehype-raw / repairHtml / KaTeX）；**`/uploads/` 图片直渲、不过
+  `resolveAsset`**——`resolveAsset` 是给 `/assets/` 相对路径补前缀的（api.ts 硬注释），
+  `/uploads/...` 已是绝对路径；`safety_flag` 命中显示「**偏离学习**」而非「闲聊」
+  （`safety_flag = 1` 有闲聊与越题两个来源，对家长统一表述为偏离学习）。
+- **积分与兑换** `/m/parent/points`：移动页自身只调 `getParentPoints` 拉概览卡
+  （余额 / 累计获得 / 今日已得 / 段位进度条，满级 `nextLevel = null`）；四 Tab 的数据全由
+  复用的桌面面板自取（见下）。页内四区块 Tab 条「规则 / 兑换 / 奖励册 / 记录」可横滑 +
+  `?tab=` 深链（未知 / 缺失归一为首 Tab）；未保存草稿切 Tab / 换孩子**拦截确认**。
+
+### 面板复用决策（本批最重要的架构选择）
+
+- 2A 的裁决是「不复用桌面页组件」（桌面页是双栏结构，硬拆竖屏等于重写）；但积分页不同：
+  桌面 `/parent/points` 的业务已拆成五个**可独立渲染的面板组件**
+  （`PointRulesPanel` / `PointsSettingsPanel` / `RedeemPanel` / `RewardCatalogPanel` /
+  `RedemptionHistoryPanel`），移动端**直接组装这五个面板**（竖屏一 Tab 一区块），**零业务
+  逻辑复写**——规则编辑、兑换校验、奖励册 CRUD、分页全部只有桌面一份真源，桌面改逻辑
+  移动端自动跟着对。
+- 桌面面板对移动环境的两处适配点：① 草稿守卫经 `RewardCatalogPanel.onRegisterLeaveGuard`
+  注册 `LeaveGuard`（五个面板中唯一提供该通道的），移动端接线到「切 Tab / 换孩子前确认
+  弹窗」；② 兑换成功链 `RedeemPanel.onPointsChanged` → 重拉概览 + 历史面板 refreshToken
+  自增，设置保存链 `PointsSettingsPanel.onSettingsChanged` → `settingsVersion` 自增透传
+  给同 Tab 的 `RedeemPanel`（与桌面同款最小耦合通道）。
+
+### 「更多」stub 清零 + 视口守卫映射
+
+- `MOBILE_STUB_ITEMS` 只剩**订阅管理**（用户裁决延后，想做时另立项）；live 7 项
+  （2A 四项 + 积分与兑换 / 学习报告 / AI 对话记录）。
+- `ParentViewportGate` 映射补 `points / report / chat-logs` → 同名移动页；桌面
+  `rewards` → `/m/parent/points`（语义就是积分与兑换）。底部四 Tab 不变。
+
+### 执行中申报（实现与 brief 字面稿的差异）
+
+- **兑换成功链挂点**：brief 字面写的是「settingsVersion 挂在兑换成功上」；实际按桌面真源
+  语义实现——`settingsVersion` 由 `PointsSettingsPanel.onSettingsChanged` 驱动（设置保存
+  成功才自增），兑换成功走 `onPointsChanged`（重拉概览 + 历史 refreshToken）。以桌面
+  语义为准，非偏离。
+- **换孩子**沿用桌面「生效 id 慢一拍」模式：请求发出时锁旧 id，响应按 `initiatorId`
+  归属，晚到不覆盖新孩子（2A 竞态修复的同款结构）。
+
+### 测试与验证
+
+- 全量 `npx vitest run`：**122 files / 1156 tests 全过**（2B 基线 120/1145，净增 2 文件
+  11 用例：三页渲染测试 + 路由 / 守卫新映射用例）。
+- `npx tsc -b` 0 error；`npm run build` 成功（覆盖共享 dist 属已知行为）。
+- 各任务内 TDD 红→绿记录见 `.superpowers/sdd/2026-10-06-parent-mobile-batch2b/` 各
+  task-report。
+
+### 遗留
+
+- **WebKit 端到端走查（390×844）尚未做**（spec §7 验收必经：积分页四 Tab 切换与概览卡 /
+  报告页图表与周期切换 / 对话列表与回放 / 「更多」无 stub）。
+- 手机真机人工走查（含 2B 三页）。
+
+---
+
 ## 2026-10-06 · 家长移动端第二批 A（2A：学生管理 / 消息 / 学习配置 / 目标 / 账号上手机）
 
 分支 `feat/parent-mobile-2a`（7 任务 TDD 分步，spec
