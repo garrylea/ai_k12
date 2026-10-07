@@ -18,6 +18,11 @@ function renderGate(path: string) {
       { path: '/m/parent/alerts', element: <div data-testid="m-alerts" /> },
       { path: '/m/parent/errors', element: <div data-testid="m-errors" /> },
       { path: '/m/parent/controls', element: <div data-testid="m-controls" /> },
+      { path: '/m/parent/messages', element: <div data-testid="m-messages" /> },
+      { path: '/m/parent/students', element: <div data-testid="m-students" /> },
+      { path: '/m/parent/goals', element: <div data-testid="m-goals" /> },
+      { path: '/m/parent/account', element: <div data-testid="m-account" /> },
+      { path: '/m/parent/students/:id/config', element: <div data-testid="m-config" /> },
       { path: '/m/parent/more/:name', element: <div data-testid="m-more" /> },
       { path: '/parent/*', element: <ParentViewportGate>{desktopProbe}</ParentViewportGate> },
     ],
@@ -34,8 +39,21 @@ describe('ParentViewportGate', () => {
     expect(mobileParentPath('/parent/controls')).toBe('/m/parent/controls');
     expect(mobileParentPath('/parent/rewards')).toBe('/m/parent/more/points');
     expect(mobileParentPath('/parent/subscription')).toBe('/m/parent/more/subscription');
-    expect(mobileParentPath('/parent/students/3/config')).toBe('/m/parent/more/students');
     expect(mobileParentPath('/parent/unknown-thing')).toBe('/m/parent/more/students');
+  });
+
+  it('mobileParentPath：新增 2A 段映射到真实移动页（含带 id 的 config）', () => {
+    expect(mobileParentPath('/parent/messages')).toBe('/m/parent/messages');
+    expect(mobileParentPath('/parent/students')).toBe('/m/parent/students');
+    expect(mobileParentPath('/parent/goals')).toBe('/m/parent/goals');
+    expect(mobileParentPath('/parent/account')).toBe('/m/parent/account');
+    expect(mobileParentPath('/parent/students/7/config')).toBe('/m/parent/students/7/config');
+  });
+
+  it('窄屏访问 /parent/students/7/config → 直跳移动配置页', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true, writable: true });
+    renderGate('/parent/students/7/config');
+    expect(screen.getByTestId('m-config')).toBeTruthy();
   });
 
   it('窄屏（<768px）访问桌面家长页 → 跳移动版对应页（旧 token 不经登录的兜底）', () => {

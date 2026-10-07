@@ -49,6 +49,14 @@ describe('/m/parent 移动路由组', () => {
     expect(await screen.findByText('该功能请在电脑端使用')).toBeTruthy();
   });
 
+  it('更多页区分真实入口与占位两组', async () => {
+    renderAt('/m/parent/more');
+    expect(await screen.findByTestId('more-live-students')).toBeTruthy();
+    expect(screen.getByTestId('more-live-messages')).toBeTruthy();
+    expect(screen.getByTestId('more-stub-subscription')).toBeTruthy();
+    expect(screen.getByTestId('more-stub-points')).toBeTruthy();
+  });
+
   it('底部导航有五个 Tab 且当前态正确', async () => {
     renderAt('/m/parent/dashboard');
     expect(await screen.findByTestId('mobile-page-dashboard')).toBeTruthy();
