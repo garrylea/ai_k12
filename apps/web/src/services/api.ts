@@ -1,4 +1,5 @@
 import type { ClientState, EndReason, HiddenReason } from '@/analytics/types';
+import { getAuthToken } from '@/services/authStorage';
 
 const API_BASE = '/api';
 
@@ -37,7 +38,7 @@ export class ApiError extends Error {
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('token');
+  const token = getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options?.headers as Record<string, string>),
@@ -373,7 +374,7 @@ export interface UploadedFileResult {
 }
 
 export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadedFileResult> {
-  const token = localStorage.getItem('token');
+  const token = getAuthToken();
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${API_BASE}/files/upload`, {
@@ -530,7 +531,7 @@ export async function* streamTutorEvents(
   req: TutorStreamRequest,
   signal?: AbortSignal,
 ): AsyncIterable<TutorStreamEvent> {
-  const token = localStorage.getItem('token') ?? '';
+  const token = getAuthToken() ?? '';
   const res = await fetch(`${API_BASE}/ai/tutor/stream`, {
     method: 'POST',
     headers: {
@@ -594,7 +595,7 @@ export async function* streamExtraction(
   taskId: number,
   signal?: AbortSignal,
 ): AsyncIterable<{ type: 'done' | 'error'; message?: string }> {
-  const token = localStorage.getItem('token') ?? '';
+  const token = getAuthToken() ?? '';
   const res = await fetch(`${API_BASE}/refinery/tasks/${taskId}/stream`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     signal,
@@ -823,7 +824,7 @@ export function listAdminChatMessages(dialogueId: number): Promise<AdminChatMess
   return fetchApi(`/admin/chat/messages?dialogueId=${dialogueId}`);
 }
 export async function* streamAdminChat(dialogueId: number, message: string): AsyncGenerator<{ type: string; delta?: string; code?: number; message?: string }> {
-  const token = localStorage.getItem('token');
+  const token = getAuthToken();
   const res = await fetch('/api/admin/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },

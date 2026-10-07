@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { LogoutButton } from '@/components/base';
 import { UserBadge } from '@/components/business';
+import { getAuthItem } from '@/services/authStorage';
 
 const BookIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   <svg
@@ -51,7 +52,7 @@ const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
 export default function EntrySelectPage() {
   const navigate = useNavigate();
   const reduceMotion = useReducedMotion();
-  const username = localStorage.getItem('username') ?? '同学';
+  const username = getAuthItem('username') ?? '同学';
 
   return (
     <div

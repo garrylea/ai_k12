@@ -5,6 +5,8 @@
  * 家长已解除），必须能在没有 DOM / 没有壳的环境里逐条测。
  */
 
+import { getAuthItem } from '@/services/authStorage';
+
 /** localStorage 键：本次学习会话的本地快照。 */
 export const LEARNING_SESSION_STORAGE_KEY = 'k12_learning_session';
 
@@ -90,7 +92,7 @@ export function isLocked(
 /** 当前登录学生是否被锁。未登录 / 非该生 → false。 */
 export function isCurrentStudentLocked(now: number = Date.now()): boolean {
   if (typeof localStorage === 'undefined') return false;
-  const rawUserId = localStorage.getItem('userId');
+  const rawUserId = getAuthItem('userId');
   if (rawUserId === null) return false;
   const studentId = Number(rawUserId);
   if (!Number.isFinite(studentId)) return false;

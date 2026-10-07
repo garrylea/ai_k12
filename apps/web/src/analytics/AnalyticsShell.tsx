@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { useLearnContextStore } from '@/store/learnContextStore';
 import { mapScene } from './sceneMap';
 import * as tracker from './tracker';
+import { getAuthItem } from '@/services/authStorage';
 
 /**
  * 埋点全局壳（spec §7.2）。
@@ -39,7 +40,7 @@ export default function AnalyticsShell() {
     // enabled 恒为 false，`onRouteChange` 第一行就 return —— 学习时长**完全不计**，
     // 而这正是本批要产出的指标。放在这里，登录后的第一次路由变化就把闸门补上。
     // 反向同理：退出登录（同样不刷新）后立刻置回 false，并收掉在跑的会话。
-    tracker.setEnabled(localStorage.getItem('userRole') === 'student');
+    tracker.setEnabled(getAuthItem('userRole') === 'student');
     tracker.onRouteChange(mapScene(location.pathname));
   }, [location.pathname]);
 

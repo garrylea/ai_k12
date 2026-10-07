@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { getAuthToken } from '@/services/authStorage';
 import { useChatStore } from '@/store/chatStore';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import {
@@ -98,7 +99,7 @@ export function useAuxChat(dialogueId: number) {
   // stop (AbortError) keeps the partial content and does NOT fall back to REST.
   const streamTutor = useCallback(
     async (dlgId: number, message: string, attachments?: AttachmentRequest[], retry = false) => {
-      const token = localStorage.getItem('token') ?? '';
+      const token = getAuthToken() ?? '';
       const controller = new AbortController();
       abortRef.current = controller;
       try {

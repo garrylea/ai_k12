@@ -10,6 +10,7 @@ import {
   type KnowledgeGraphNode,
   type WeakPointRecommendation,
 } from '@/services/api';
+import { getAuthItem } from '@/services/authStorage';
 import { MATH_TASK_CODE, pickPracticeCount, usePointTiers } from './point-tiers';
 import { heatForNode, isDashedBorder, summarizeParent } from './weak-point-heat';
 import type { TargetedRunHandoff } from './run-handoff';
@@ -43,7 +44,7 @@ function percent(score: number): string {
  */
 export default function WeakPointGraphPage() {
   const navigate = useNavigate();
-  const studentId = Number(localStorage.getItem('userId')) || 0;
+  const studentId = Number(getAuthItem('userId')) || 0;
 
   const [mastery, setMastery] = useState<KnowledgeGraphMastery | null>(null);
   const [masteryError, setMasteryError] = useState(false);

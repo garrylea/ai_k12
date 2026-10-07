@@ -14,6 +14,7 @@ import {
 } from './learningLock';
 import { isDesktopShell, setDesktopStudentMode } from './desktopBridge';
 import { LockedPill } from './LockedPill';
+import { getAuthItem } from '@/services/authStorage';
 
 interface LockState {
   id: number;
@@ -23,7 +24,7 @@ interface LockState {
 
 /** 从本地快照取初值：**重启后第一帧就应该是锁着的**，不能等接口回来才锁。 */
 function initialLockState(): LockState | null {
-  const rawUserId = typeof localStorage === 'undefined' ? null : localStorage.getItem('userId');
+  const rawUserId = getAuthItem('userId');
   const studentId = rawUserId === null ? null : Number(rawUserId);
   const persisted = readPersistedSession(studentId);
   return persisted
@@ -71,8 +72,8 @@ export default function LearningSessionShell() {
    * 服务端返回的是**幂等真值**，重复写同一行无害。
    */
   const persistFor = (expectedStudentId: number, session: StudentLearningSession): void => {
-    if (localStorage.getItem('userRole') !== 'student') return;
-    if (Number(localStorage.getItem('userId')) !== expectedStudentId) return;
+    if (getAuthItem('userRole') !== 'student') return;
+    if (Number(getAuthItem('userId')) !== expectedStudentId) return;
     writePersistedSession({
       studentId: expectedStudentId,
       id: session.id,
@@ -84,14 +85,14 @@ export default function LearningSessionShell() {
   // ① 角色闸门 + 建立会话。**只做判定，不直接推学生模式**（推的动作留给 effect ②）。
   useEffect(() => {
     if (!isDesktopShell()) return;
-    if (localStorage.getItem('userRole') !== 'student') {
+    if (getAuthItem('userRole') !== 'student') {
       // 家长/管理员登入（或学生已登出）：壳必须回到普通窗口，否则家长也用不了这台机器。
       setIsStudent(false);
       setResolved(true);
       return;
     }
     setIsStudent(true);
-    const expectedStudentId = Number(localStorage.getItem('userId'));
+    const expectedStudentId = Number(getAuthItem('userId'));
     if (readPersistedSession(expectedStudentId) !== null) {
       setResolved(true); // 已有本地会话 → 交给轮询对账，不重复建
       return;
@@ -146,7 +147,7 @@ export default function LearningSessionShell() {
             // **服务端也是「哪个会话在进行中」的唯一真源**：本地 id 与服务端不一致时**采纳服务端**，
             // 不能丢弃（2026-09-24 修）。丢弃过一次的后果：本地卡在旧 id 上，服务端那条带锁的
             // 会话永远追不上 → 锁形同不存在（用户实测：锁着还能登出）。
-            const studentId = Number(localStorage.getItem('userId'));
+            const studentId = Number(getAuthItem('userId'));
             const next: LockState = {
               id: res.lock.sessionId,
               lockExpiresAt: res.lock.lockExpiresAt,

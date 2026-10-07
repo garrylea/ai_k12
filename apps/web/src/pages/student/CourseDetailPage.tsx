@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback, Children } from 'react';
+import { getAuthItem } from '@/services/authStorage';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -204,7 +205,7 @@ export default function CourseDetailPage() {
   const subjectName = (location.state as { subjectName?: string } | null)?.subjectName ?? '';
   const gradeName = (location.state as { gradeName?: string } | null)?.gradeName ?? '';
   const subjectId = (location.state as { subjectId?: number } | null)?.subjectId ?? 0;
-  const username = localStorage.getItem('username') ?? '';
+  const username = getAuthItem('username') ?? '';
   const [data, setData] = useState<LessonCardsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -250,7 +251,7 @@ export default function CourseDetailPage() {
       // 错题清零只出现在「新课」（当前学习进度指向的课）进入时；
       // 复习已学过的课（star-map status !== 'current'）不再显示错题清零阶段。
       let isCurrentLesson = true; // 无进度信息 / 拉取失败时保守按新课处理
-      const studentId = Number(localStorage.getItem('userId')) || 0;
+      const studentId = Number(getAuthItem('userId')) || 0;
       if (studentId && subjectId) {
         try {
           const starMap = await fetchStarMap(studentId, subjectId);

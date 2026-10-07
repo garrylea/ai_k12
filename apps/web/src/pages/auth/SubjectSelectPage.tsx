@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { Subject } from '@/types';
 import { fetchSubjects } from '@/services/api';
+import { getAuthItem } from '@/services/authStorage';
 import { BackButton } from '@/components/base';
 
 interface SubjectConfig {
@@ -39,7 +40,7 @@ export default function SubjectSelectPage() {
   const [subjectIdByCode, setSubjectIdByCode] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    const stored = localStorage.getItem('username');
+    const stored = getAuthItem('username');
     if (stored) setUsername(stored);
     fetchSubjects()
       .then((list) => {

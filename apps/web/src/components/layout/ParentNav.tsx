@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LogoutButton, NavIcon } from '@/components/base';
+import { getAuthItem } from '@/services/authStorage';
 
 const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
   {
@@ -133,7 +134,7 @@ const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
 ];
 
 export function ParentNav() {
-  const stored = localStorage.getItem('username') ?? '';
+  const stored = getAuthItem('username') ?? '';
   // 家长存的是手机号，打码展示；异常情况下兜底显示"家长"
   const phone = /^1\d{10}$/.test(stored) ? `${stored.slice(0, 3)}****${stored.slice(7)}` : '';
 

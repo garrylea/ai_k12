@@ -7,6 +7,7 @@ import { UserBadge } from '@/components/business';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import { useChatStore } from '@/store/chatStore';
 import { useAuxChat } from '@/hooks/useAuxChat';
+import { getAuthItem } from '@/services/authStorage';
 
 const PlusIcon = () => (
   <svg
@@ -31,7 +32,7 @@ export default function AuxiliaryHomePage() {
   // 阈值与后端 fallback.yaml.fallback.detailedExplanationAfterRounds（默认 2）对齐。
   const showAnswerHint = messages.filter((m) => m.role === 'assistant').length >= 2;
 
-  const username = localStorage.getItem('username') ?? '同学';
+  const username = getAuthItem('username') ?? '同学';
 
   const handleNewQuestion = () => {
     reset();

@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchStarMap, type SectionData, type StarMapData } from '@/services/api';
+import { getAuthItem } from '@/services/authStorage';
 import { PageHeader } from '@/components/base';
 import { useLearnContextStore } from '@/store/learnContextStore';
 
@@ -115,7 +116,7 @@ export default function StarMapPage() {
   // Identity from login; subject chosen on the subject-select page.
   // The server derives the trusted studentId from the JWT — studentId here is
   // only the URL resource locator and must match the logged-in user.
-  const studentId = Number(localStorage.getItem('userId')) || 0;
+  const studentId = Number(getAuthItem('userId')) || 0;
   const subjectId = (location.state as { subjectId?: number } | null)?.subjectId ?? 0;
 
   const fetchData = async () => {

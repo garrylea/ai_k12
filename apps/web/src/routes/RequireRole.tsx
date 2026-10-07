@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import { clearAuth, isSessionValid } from '@/utils/auth';
+import { getAuthItem } from '@/services/authStorage';
 
 /**
  * 前端路由守卫：role 不匹配或会话无效（token 缺失/过期）时重定向登录页。
@@ -17,7 +18,7 @@ export default function RequireRole({
     clearAuth();
     return <Navigate to="/login" replace />;
   }
-  const userRole = localStorage.getItem('userRole');
+  const userRole = getAuthItem('userRole');
   if (userRole !== role) {
     return <Navigate to="/login" replace />;
   }
