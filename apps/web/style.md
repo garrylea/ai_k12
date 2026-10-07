@@ -204,6 +204,7 @@
 - 主按钮：`Brand-500 #ff6b35` 背景，白色文字，圆角 12px，高度约 52px，字重 500，带 `shadow-sm`。
 - 错误提示：`Error #C44A3F` 文字，`Error` 10% 透明背景。
 - 底部链接：`Text-Secondary`，强调链接用 `Brand-500`。
+- 「记住我」勾选行：位于主按钮上方，16px 方形勾选框（`accent: Brand-500`）+ `Text-Secondary` 14px 文案，默认**不勾选**；不勾时登录态仅保留到浏览器关闭（sessionStorage），勾选后才持久化（localStorage，随服务端 7 天 JWT）。
 
 #### 2.5.4 禁用项
 

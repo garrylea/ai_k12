@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -121,5 +121,46 @@ describe('LoginPage 家长落点按视口分流', () => {
     await user.type(screen.getByLabelText('密码'), 'pw123456');
     await user.click(screen.getByRole('button', { name: '登录' }));
     expect(await screen.findByText('parent-students-page')).toBeInTheDocument();
+  });
+});
+
+describe('LoginPage 记住我', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it('默认不勾「记住我」：登录成功后 token 只写 sessionStorage，不写 localStorage', async () => {
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValueOnce({
+      token: 'jwt-x',
+      user: { id: 9, role: 'student', name: '小明', username: 'xiaoming' },
+    });
+    renderLoginPage();
+    await user.type(screen.getByLabelText('账号'), 'xiaoming');
+    await user.type(screen.getByLabelText('密码'), 'pw123456');
+    // 默认未勾选：断言 checkbox 存在且 unchecked
+    const box = screen.getByLabelText('记住我') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    expect(await screen.findByText('student-entry-page')).toBeInTheDocument();
+    expect(sessionStorage.getItem('token')).toBe('jwt-x');
+    expect(localStorage.getItem('token')).toBeNull();
+  });
+
+  it('勾选「记住我」：登录成功后 token 写 localStorage（现状行为）', async () => {
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValueOnce({
+      token: 'jwt-y',
+      user: { id: 9, role: 'student', name: '小明', username: 'xiaoming' },
+    });
+    renderLoginPage();
+    await user.type(screen.getByLabelText('账号'), 'xiaoming');
+    await user.type(screen.getByLabelText('密码'), 'pw123456');
+    await user.click(screen.getByLabelText('记住我'));
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    expect(await screen.findByText('student-entry-page')).toBeInTheDocument();
+    expect(localStorage.getItem('token')).toBe('jwt-y');
+    expect(sessionStorage.getItem('token')).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/base';
 import { login } from '@/services/api';
+import { saveAuthSession } from '@/services/authStorage';
 import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
 export default function LoginPage() {
@@ -10,6 +11,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   const handleLogin = async () => {
     if (!username || !password) {
@@ -20,11 +22,17 @@ export default function LoginPage() {
     setError('');
     try {
       const result = await login(username, password);
-      localStorage.setItem('token', result.token);
-      // 家长无 username，存手机号供家长台头部展示（maskPhone 打码）
-      localStorage.setItem('username', result.user.username ?? result.user.phone ?? '');
-      localStorage.setItem('userId', String(result.user.id));
-      localStorage.setItem('userRole', result.user.role);
+      // 「记住我」勾选 → localStorage（随服务端 7 天 JWT 持久化）；不勾 → sessionStorage（关浏览器即清）
+      saveAuthSession(
+        {
+          token: result.token,
+          // 家长无 username，存手机号供家长台头部展示（maskPhone 打码）
+          username: result.user.username ?? result.user.phone ?? '',
+          userId: String(result.user.id),
+          userRole: result.user.role,
+        },
+        remember,
+      );
 
       if (result.user.role === 'admin') {
         navigate('/admin');
@@ -149,6 +157,20 @@ export default function LoginPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* 记住我：默认不勾，不勾时登录态仅保留到浏览器关闭（sessionStorage） */}
+            <div className="flex items-center gap-2">
+              <input
+                id="remember-me"
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="w-4 h-4 accent-[var(--brand-500)]"
+              />
+              <label htmlFor="remember-me" className="text-sm text-[var(--text-secondary)]">
+                记住我
+              </label>
             </div>
 
             {/* 登录按钮：橘红底，白字。type=submit 由 form onSubmit 触发（回车同样生效） */}
