@@ -71,53 +71,61 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-bold text-[var(--text-primary)]">作者</span>
-          <div className="relative">
-            <input
-              className={shortInputClass + ' pr-12'}
-              style={FIELD_BORDER}
-              value={value.author}
-              disabled={disabled}
-              onChange={(e) => onChange({ ...value, author: e.target.value })}
-              placeholder="例如：范仲淹"
-            />
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">{padToggle('author')}</div>
-          </div>
+        {/* 手写板必须渲染在 label 外：label 会把点击/触摸激活转发给关联输入框，
+            手写板在 label 内会导致每次落笔都聚焦输入框（校验框闪烁 bug，2026-10-08） */}
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-bold text-[var(--text-primary)]">作者</span>
+            <div className="relative">
+              <input
+                className={shortInputClass + ' pr-12'}
+                style={FIELD_BORDER}
+                value={value.author}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...value, author: e.target.value })}
+                placeholder="例如：范仲淹"
+              />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2">{padToggle('author')}</div>
+            </div>
+          </label>
           {padField === 'author' && pad}
-        </label>
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-bold text-[var(--text-primary)]">朝代</span>
-          <div className="relative">
-            <input
-              className={shortInputClass + ' pr-12'}
-              style={FIELD_BORDER}
-              value={value.dynasty}
-              disabled={disabled}
-              onChange={(e) => onChange({ ...value, dynasty: e.target.value })}
-              placeholder="例如：宋"
-            />
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">{padToggle('dynasty')}</div>
-          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-bold text-[var(--text-primary)]">朝代</span>
+            <div className="relative">
+              <input
+                className={shortInputClass + ' pr-12'}
+                style={FIELD_BORDER}
+                value={value.dynasty}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...value, dynasty: e.target.value })}
+                placeholder="例如：宋"
+              />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2">{padToggle('dynasty')}</div>
+            </div>
+          </label>
           {padField === 'dynasty' && pad}
-        </label>
+        </div>
       </div>
 
-      <label className="flex flex-col gap-2">
-        <span className="text-sm font-bold text-[var(--text-primary)]">正文</span>
-        <div className="relative">
-          <textarea
-            className="w-full min-h-[220px] p-4 pr-12 rounded-xl bg-white text-[var(--text-primary)] leading-loose outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30 disabled:opacity-70"
-            style={FIELD_BORDER}
-            value={value.body}
-            disabled={disabled}
-            onChange={(e) => onChange({ ...value, body: e.target.value })}
-            placeholder="默写整篇正文（标点与空格不计）"
-          />
-          <div className="absolute right-3 top-3">{padToggle('body')}</div>
-        </div>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-2">
+          <span className="text-sm font-bold text-[var(--text-primary)]">正文</span>
+          <div className="relative">
+            <textarea
+              className="w-full min-h-[220px] p-4 pr-12 rounded-xl bg-white text-[var(--text-primary)] leading-loose outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30 disabled:opacity-70"
+              style={FIELD_BORDER}
+              value={value.body}
+              disabled={disabled}
+              onChange={(e) => onChange({ ...value, body: e.target.value })}
+              placeholder="默写整篇正文（标点与空格不计）"
+            />
+            <div className="absolute right-3 top-3">{padToggle('body')}</div>
+          </div>
+        </label>
         {padField === 'body' && pad}
-      </label>
+      </div>
     </div>
   );
 }

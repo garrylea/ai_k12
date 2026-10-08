@@ -197,33 +197,35 @@ export default function SentenceBlock({
         </div>
       )}
 
-      {/* 行 3：整句翻译 */}
-      <label className="mt-4 flex flex-col gap-1.5">
-        <span className="text-sm font-bold text-[var(--text-primary)]">整句翻译</span>
-        <div className="relative">
-          <textarea
-            className="w-full min-h-[88px] p-3 pr-12 rounded-xl bg-white text-[var(--text-primary)] leading-loose outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30 disabled:opacity-70 disabled:bg-[var(--bg-subtle)]"
-            style={FIELD_BORDER}
-            value={value.translation}
-            disabled={locked}
-            onChange={(e) => onChange({ ...value, translation: e.target.value })}
-            placeholder="把这句话译成白话"
-          />
-          {padField !== 'translation' && (
-            <button
-              type="button"
-              aria-label="切换到手写输入"
-              title="切换到手写输入"
-              onClick={() => setPadField('translation')}
+      {/* 行 3：整句翻译（手写板在 label 外：label 会把落笔激活转发给输入框，致校验框闪烁） */}
+      <div className="mt-4 flex flex-col gap-1.5">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-bold text-[var(--text-primary)]">整句翻译</span>
+          <div className="relative">
+            <textarea
+              className="w-full min-h-[88px] p-3 pr-12 rounded-xl bg-white text-[var(--text-primary)] leading-loose outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30 disabled:opacity-70 disabled:bg-[var(--bg-subtle)]"
+              style={FIELD_BORDER}
+              value={value.translation}
               disabled={locked}
-              className="absolute right-3 top-3 text-[var(--text-secondary)] hover:text-[var(--brand-500)] disabled:opacity-50"
-            >
-              <PenIcon />
-            </button>
-          )}
-        </div>
+              onChange={(e) => onChange({ ...value, translation: e.target.value })}
+              placeholder="把这句话译成白话"
+            />
+            {padField !== 'translation' && (
+              <button
+                type="button"
+                aria-label="切换到手写输入"
+                title="切换到手写输入"
+                onClick={() => setPadField('translation')}
+                disabled={locked}
+                className="absolute right-3 top-3 text-[var(--text-secondary)] hover:text-[var(--brand-500)] disabled:opacity-50"
+              >
+                <PenIcon />
+              </button>
+            )}
+          </div>
+        </label>
         {padField === 'translation' && pad}
-      </label>
+      </div>
       {result && (
         <ItemResultLine
           correct={result.sentence.correct}
