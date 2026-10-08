@@ -3121,3 +3121,28 @@ export function grantFamilyDays(
     body: JSON.stringify(reason !== undefined ? { days, reason } : { days }),
   });
 }
+
+// --- Dev: 手写识别率调研 demo（2026-10-08，dev-only，不进导航） ---
+
+export interface HandwritingModel {
+  key: string;
+  provider: string;
+  modelId: string;
+}
+
+export interface HandwritingRecognizeResult {
+  text: string;
+  modelKey: string;
+  elapsedMs: number;
+}
+
+export function listHandwritingModels(): Promise<{ models: HandwritingModel[] }> {
+  return fetchApi('/dev/handwriting/models');
+}
+
+export function recognizeHandwriting(image: string, modelKey: string): Promise<HandwritingRecognizeResult> {
+  return fetchApi('/dev/handwriting/recognize', {
+    method: 'POST',
+    body: JSON.stringify({ image, modelKey }),
+  });
+}
