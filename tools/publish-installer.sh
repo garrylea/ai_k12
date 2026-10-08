@@ -111,7 +111,7 @@ gen_download_page() {
     case "$name_lc" in
       *.exe)      kind=installer; hint="Windows" ;;
       *.appimage) kind=installer; hint="Linux" ;;
-      *.dmg)
+      *.dmg|*.pkg)
         kind=installer
         case "$name_lc" in
           *arm64*) hint="macOS（Apple 芯片 / M 系列）" ;;
@@ -211,9 +211,12 @@ ${updates}    </ul>
 ${primary_block}  </ul>
 ${updates_block}  <h2>首次打开说明</h2>
   <ul class="notes">
-    <li>macOS（安装包未签名）：首次打开会被系统拦下。可执行
+    <li>macOS（.pkg 安装包，未签名）：双击安装；若提示「无法验证开发者」，到
+      「系统设置 → 隐私与安全性」点「仍要打开」后再双击，按安装器提示输入开机密码完成。
+      全程不需要终端。</li>
+    <li>macOS（早期发布的 .dmg 包）：拖入「应用程序」后首次打开若被拦，需在终端执行
       <code>xattr -dr com.apple.quarantine "/Applications/K12 智学.app"</code>，
-      或到「系统设置 → 隐私与安全性」点「仍要打开」。</li>
+      或走「系统设置 → 隐私与安全性 → 仍要打开」。</li>
     <li>Windows（安装包未签名）：首次运行会弹 SmartScreen 警告，点「更多信息」后选「仍要运行」。</li>
   </ul>
 </main>
