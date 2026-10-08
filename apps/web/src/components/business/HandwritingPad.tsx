@@ -13,8 +13,8 @@ export interface DemoStroke { points: DemoPoint[]; size: number }
 
 const BOARD_W = 720;
 const BOARD_H = 360;
-/** 导出线宽（CSS px）：白板原 2px 偏细，汉字识别需笔画清晰（spec §4.3） */
-const INK_WIDTH = 3;
+/** 笔迹线宽（逻辑 px）：1px 细线让小字也能写清晰，一批可容纳更多字（用户实测 3px 太粗，2026-10-08） */
+const INK_WIDTH = 1;
 const ERASER_HIT_SLOP = 8;
 
 /** 二次贝塞尔平滑渲染（逻辑同 DraftWhiteboard.strokePath，去掉 center 标记分支） */
@@ -183,7 +183,9 @@ const HandwritingPad = forwardRef<
         const strokes = strokesRef.current;
         if (strokes.length === 0) return null;
         const off = document.createElement('canvas');
-        const scale = 2; // 导出 1440×720，给模型足够分辨率
+        // 线宽降到 1px 后学生可写更小的字；导出倍数相应提到 4（2880×1440），
+        // 保证小字在送模型的图里仍有足够像素密度，识别率不因写小字而掉。
+        const scale = 4;
         off.width = BOARD_W * scale;
         off.height = BOARD_H * scale;
         const ctx = off.getContext('2d');
