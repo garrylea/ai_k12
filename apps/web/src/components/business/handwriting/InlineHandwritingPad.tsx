@@ -2,6 +2,7 @@
 import { useRef, useState } from 'react';
 import HandwritingPad, { type HandwritingPadHandle } from '../HandwritingPad';
 import { transcribeHandwriting } from '@/services/api';
+import { KeyboardIcon } from './icons';
 
 /**
  * 内嵌手写板（spec §0 交互 v2）：输入框下方展开，识别文本经 onRecognized 交父组件
@@ -52,10 +53,12 @@ export default function InlineHandwritingPad({ open, onRecognized, onClose, mult
         </span>
         <button
           type="button"
+          aria-label="切换到键盘输入"
+          title="切换到键盘输入"
           onClick={onClose}
-          className="rounded-[var(--radius-button)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-bold text-[var(--text-primary)]"
+          className="text-[var(--text-secondary)] hover:text-[var(--brand-500)]"
         >
-          键盘
+          <KeyboardIcon />
         </button>
       </div>
 

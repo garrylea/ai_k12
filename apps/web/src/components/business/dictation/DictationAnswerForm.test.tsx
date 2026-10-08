@@ -52,16 +52,16 @@ function StatefulHost({
 
 it('三个字段各有一个「手写」按钮，disabled 联动输入框', () => {
   const { rerender } = render(<DictationAnswerForm value={{ author: '', dynasty: '', body: '' }} onChange={vi.fn()} />);
-  const buttons = screen.getAllByRole('button', { name: '手写' });
+  const buttons = screen.getAllByRole('button', { name: '切换到手写输入' });
   expect(buttons).toHaveLength(3);
   rerender(<DictationAnswerForm value={{ author: '', dynasty: '', body: '' }} onChange={vi.fn()} disabled />);
-  for (const b of screen.getAllByRole('button', { name: '手写' })) expect(b).toBeDisabled();
+  for (const b of screen.getAllByRole('button', { name: '切换到手写输入' })) expect(b).toBeDisabled();
 });
 
 it('作者：展开手写板 → 识别直接拼接；再识别一次继续拼接', async () => {
   vi.mocked(transcribeHandwriting).mockResolvedValue(transcribeResult('手写内容'));
   render(<StatefulHost />);
-  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // author
+  fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[0]); // author
   fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
   expect(await screen.findByDisplayValue('手写内容')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
@@ -72,7 +72,7 @@ it('正文：识别结果按换行规则追加（非空先补 \\n）', async () 
   vi.mocked(transcribeHandwriting).mockResolvedValue(transcribeResult('手写内容'));
   render(<StatefulHost initialValue={{ author: '', dynasty: '', body: '先天下' }} />);
   const body = () => screen.getByPlaceholderText('默写整篇正文（标点与空格不计）');
-  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]); // body
+  fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[2]); // body
   fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
   await waitFor(() => expect(body()).toHaveValue('先天下\n手写内容'));
   fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
@@ -82,20 +82,20 @@ it('正文：识别结果按换行规则追加（非空先补 \\n）', async () 
 it('展开态：该字段手写钮隐藏、出现收起钮；收起后手写钮恢复', () => {
   render(<StatefulHost />);
   // 展开 author：author 的手写钮消失，只剩朝代、正文两个
-  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]);
-  expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(2);
-  expect(screen.getByRole('button', { name: '键盘' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '键盘' }));
-  expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(3);
-  expect(screen.queryByRole('button', { name: '键盘' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[0]);
+  expect(screen.getAllByRole('button', { name: '切换到手写输入' })).toHaveLength(2);
+  expect(screen.getByRole('button', { name: '切换到键盘输入' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '切换到键盘输入' }));
+  expect(screen.getAllByRole('button', { name: '切换到手写输入' })).toHaveLength(3);
+  expect(screen.queryByRole('button', { name: '切换到键盘输入' })).not.toBeInTheDocument();
 });
 
 it('互斥：author 展开后点正文的手写钮 → 仅正文的 pad 生效（收起态钮仍在，可切换）', async () => {
   vi.mocked(transcribeHandwriting).mockResolvedValue(transcribeResult('手写内容'));
   render(<StatefulHost />);
-  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // author
+  fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[0]); // author
   // author 展开后其手写钮消失，剩下的第 0 个是 dynasty、第 1 个是 body
-  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[1]); // body
+  fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[1]); // body
   fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
   // 值落到 body（换行规则），author 保持空
   await waitFor(() => expect(screen.getByPlaceholderText('默写整篇正文（标点与空格不计）')).toHaveValue('手写内容'));
@@ -109,7 +109,7 @@ it('识别在途期间键入：resolve 后键入保留，不被陈旧 value 覆�
   );
   render(<StatefulHost initialValue={{ author: '', dynasty: '', body: '先天下' }} />);
   const body = () => screen.getByPlaceholderText('默写整篇正文（标点与空格不计）');
-  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]); // body
+  fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[2]); // body
   fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
   // 识别在途，学生切回键盘继续键入
   fireEvent.change(body(), { target: { value: '先天下XYZ' } });

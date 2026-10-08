@@ -54,7 +54,7 @@ describe('InlineHandwritingPad', () => {
     expect(document.querySelector('canvas')).toBeNull();
     rerender(<InlineHandwritingPad open onRecognized={vi.fn()} onClose={vi.fn()} />);
     expect(document.querySelector('canvas')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '键盘' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '切换到键盘输入' })).toBeTruthy();
   });
 
   it('识别成功：onRecognized 收到原文，面板清空可继续写（再画一笔识别钮恢复可用）', async () => {
@@ -81,7 +81,7 @@ describe('InlineHandwritingPad', () => {
 
   it('【键盘】收起调 onClose；无笔画时识别禁用；disabled 时识别禁用', () => {
     const { onClose } = setup();
-    fireEvent.click(screen.getByRole('button', { name: '键盘' }));
+    fireEvent.click(screen.getByRole('button', { name: '切换到键盘输入' }));
     expect(onClose).toHaveBeenCalled();
 
     // 独立实例（scoped 查询，避免与上一实例混淆）：无笔画 → 识别禁用

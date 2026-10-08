@@ -198,34 +198,34 @@ function StatefulHost(props: Partial<ComponentProps<typeof SentenceBlock>> = {})
 describe('SentenceBlock — 手写入口', () => {
   it('editing 态每个词与翻译各有手写按钮；judged 态锁定禁用', () => {
     const { rerender } = render(<SentenceBlock {...makeProps()} />);
-    expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(3); // 2 词 + 1 翻译
+    expect(screen.getAllByRole('button', { name: '切换到手写输入' })).toHaveLength(3); // 2 词 + 1 翻译
     rerender(<SentenceBlock {...makeProps({ state: 'judged', result: JUDGED })} />);
-    for (const b of screen.getAllByRole('button', { name: '手写' })) expect(b).toBeDisabled();
+    for (const b of screen.getAllByRole('button', { name: '切换到手写输入' })) expect(b).toBeDisabled();
   });
 
   it('词的手写识别直接拼接进 terms；翻译直接拼接进 translation', async () => {
     vi.mocked(transcribeHandwriting).mockResolvedValue(transcribeResult('手写释义'));
     render(<StatefulHost />);
-    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
+    fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[0]); // 词 1
     fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
     expect(await screen.findByDisplayValue('手写释义')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
     expect(await screen.findByDisplayValue('手写释义手写释义')).toBeInTheDocument();
 
     // 收起后手写钮全部恢复（3 个），翻译是 DOM 里最后一个
-    fireEvent.click(screen.getByRole('button', { name: '键盘' }));
-    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]); // 翻译
+    fireEvent.click(screen.getByRole('button', { name: '切换到键盘输入' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[2]); // 翻译
     fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
     await waitFor(() => expect(screen.getByPlaceholderText('把这句话译成白话')).toHaveValue('手写释义'));
   });
 
   it('展开态：该字段手写钮隐藏、出现收起钮；收起后恢复', () => {
     render(<StatefulHost />);
-    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
-    expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(2); // 词 2 + 翻译
-    expect(screen.getByRole('button', { name: '键盘' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '键盘' }));
-    expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(3);
+    fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[0]); // 词 1
+    expect(screen.getAllByRole('button', { name: '切换到手写输入' })).toHaveLength(2); // 词 2 + 翻译
+    expect(screen.getByRole('button', { name: '切换到键盘输入' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '切换到键盘输入' }));
+    expect(screen.getAllByRole('button', { name: '切换到手写输入' })).toHaveLength(3);
   });
 
   it('识别在途期间键入：resolve 后键入保留，不被陈旧 value 覆盖（ref 镜像回归，terms ?? \'\' 分支）', async () => {
@@ -235,7 +235,7 @@ describe('SentenceBlock — 手写入口', () => {
     );
     render(<StatefulHost />);
     const termInput = () => screen.getAllByPlaceholderText('写出这个词的意思')[0]; // 词 1
-    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
+    fireEvent.click(screen.getAllByRole('button', { name: '切换到手写输入' })[0]); // 词 1
     fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
     // 识别在途，学生切回键盘继续键入
     fireEvent.change(termInput(), { target: { value: '我译XYZ' } });
