@@ -1220,6 +1220,21 @@ export function startDictation(payload: {
   });
 }
 
+// --- 语文专项手写输入：手写图 → 大模型转写（2026-10-08，正式学生端点） ---
+
+export interface HandwritingTranscribeResult {
+  text: string;
+  modelKey: string;
+  elapsedMs: number;
+}
+
+export function transcribeHandwriting(image: string): Promise<HandwritingTranscribeResult> {
+  return fetchApi<HandwritingTranscribeResult>('/ai/handwriting/transcribe', {
+    method: 'POST',
+    body: JSON.stringify({ image }),
+  });
+}
+
 export function judgeDictation(payload: {
   passageId: number;
   author: string;
