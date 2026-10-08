@@ -39,7 +39,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
-      this.logger.error(`Unhandled error: ${exception.message}`, exception.stack);
+      // body-parser 超限抛 PayloadTooLargeError —— 普通 Error 带 statusCode=413，
+      // 非 HttpException；按文档口径透传 413（API 文档 §4.27 / openapi 已登记），
+      // 不当作服务器内部错误。
+      const statusCode = (exception as Error & { statusCode?: number }).statusCode;
+      if (statusCode !== HttpStatus.PAYLOAD_TOO_LARGE) {
+        this.logger.error(`Unhandled error: ${exception.message}`, exception.stack);
+      } else {
+        status = statusCode;
+      }
     }
 
     response.status(status).json({
