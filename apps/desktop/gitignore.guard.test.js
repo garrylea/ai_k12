@@ -41,7 +41,10 @@ const MUST_BE_TRACKABLE = [
   '.github/workflows/desktop-release.yml',
 ];
 /** 必须**被忽略**（安装包上百 MB，绝不能入库）—— spec §4.4。 */
-const MUST_BE_IGNORED = ['apps/web/public/download/k12-desktop-0.1.0-x64.dmg'];
+const MUST_BE_IGNORED = [
+  'apps/web/public/download/k12-desktop-0.1.0-x64.dmg',
+  'apps/web/public/download/k12-desktop-0.1.0-arm64.pkg',
+];
 
 function checkIgnore(relPath) {
   // --no-index 是本用例的命门：没有它，已入库的 MUST_BE_TRACKABLE 文件永远不会被报出来，

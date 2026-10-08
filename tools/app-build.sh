@@ -8,8 +8,8 @@
 # 文档只需指过来，不必再抄一遍命令。**发布那一步不重写逻辑**：`--publish` 直接转发给
 # `tools/publish-installer.sh`（单一实现）。
 #
-# 本机限制（实测）：mac 包只能在本机出（.dmg 依赖 hdiutil）；**Windows/Linux 出不了**
-# —— NSIS 要 wine、AppImage 要 docker，本机都没装。三平台产物只能走 `--online`（CI）。
+# 本机限制（实测）：mac 包只能在本机出（封装用的 pkgbuild 是 macOS 自带）；**Windows/Linux
+# 出不了** —— NSIS 要 wine、AppImage 要 docker，本机都没装。三平台产物只能走 `--online`（CI）。
 #
 # 设计见 docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md
 set -euo pipefail
@@ -17,8 +17,8 @@ set -euo pipefail
 # ⚠️ 本文件里「`$VAR` 后面紧跟中文标点」的地方**必须写成 `${VAR}`**（下面有几处就是为此写的，
 #    别当噪音删掉）：macOS 自带的是 **bash 3.2**，它会把紧跟的多字节 UTF-8 字符当成变量名的
 #    一部分，在 `set -u` 下直接报 `unbound variable`（不是给出空值）。而且**只在跑到那一行时才炸**
-#    —— 2026-09-28 实测：`$need，`、`$MODE）` 这类写法让 `--win` / `--linux` 与两个 warn 分支
-#    全部报错，而正常出包路径完全看不出来。新增中文文案时留意这一条。
+#    —— 2026-09-28 实测：`$need` 紧跟全角逗号、`$MODE` 紧跟全角括号的写法，让 `--win` / `--linux`
+#    与两个 warn 分支全部报错，而正常出包路径完全看不出来。新增中文文案时留意这一条。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -74,7 +74,7 @@ list_dist() {
   log "dist 产物："
   (
     cd "$DESKTOP_DIR/dist" 2>/dev/null || return 0
-    for f in *.dmg *.exe *.AppImage *.blockmap latest*.yml; do
+    for f in *.pkg *.exe *.AppImage *.blockmap latest*.yml; do
       [ -f "$f" ] || continue
       printf '  %s (%s)\n' "$f" "$(du -h "$f" | cut -f1)"
     done
@@ -90,29 +90,29 @@ PC App 出包入口
 模式（一次只能选一个）：
   --check              快速门禁：跑测试 + 最小出包（--dir，只产出 .app，约 10s）+ asar 自检。
                        不产出安装包、不清空 dist、不碰 web 层。改完壳先跑这个。
-  --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64
-                       两个 dmg（约 1min），最后跑 asar 自检。
-  --online             GitHub Actions 出三平台包（mac dmg / win exe / linux AppImage）。
+  --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64 两个 .app
+                       （electron-builder --dir）并用 pkgbuild 封装成两个 pkg（约 1min），最后跑 asar 自检。
+  --online             GitHub Actions 出三平台包（mac pkg / win exe / linux AppImage）。
                        默认只做预检并打印要执行的命令；加 --yes 才真的打 tag 并推。
   --publish <文件...>  发布安装包到本机服务器 /download/ —— 转发给 tools/publish-installer.sh
                        （因此也接受它的 --no-build）。注意：会重建 web，替换 :5173 正在服务的 dist/
   --win | --linux      本机出不了（NSIS 要 wine、AppImage 要 docker），这里只说明原因与出路。
 
 选项：
-  --manifest           配合 --local：额外注入 publish 配置，产出 latest-mac.yml（发布/④ 要用）。
+  --manifest           配合 --local：注入 publish 配置（注：mac 产物为 pkg 后通常不产出 latest-mac.yml）。
                        不注入就没有更新清单。
   --yes                配合 --online：预检通过后真的打 tag 并推 origin。
   -h, --help           显示本页。
 
 示例（把 <版本> 换成 apps/desktop/package.json 里的 version）：
   bash tools/app-build.sh --check                             # 改完壳，快速确认没坏
-  bash tools/app-build.sh --local                             # 出两个 dmg
-  bash tools/app-build.sh --local --manifest                  # 出 dmg + latest-mac.yml
+  bash tools/app-build.sh --local                             # 出两个 pkg
+  bash tools/app-build.sh --local --manifest                  # 注入 publish 配置（mac pkg 不产出 latest-mac.yml）
   bash tools/app-build.sh --online                            # 看要推什么（不推）
   bash tools/app-build.sh --online --yes                      # 预检通过后推 tag，触发 CI
-  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.dmg
+  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.pkg
 
-本机限制：mac 包只能在本机出（.dmg 要 hdiutil）；Windows/Linux 产物只能靠 --online。
+本机限制：mac 包只能在本机出（封装要 pkgbuild，macOS 自带）；Windows/Linux 产物只能靠 --online。
 打包需要能访问 GitHub（见 README 的说明）；发布到服务器会重建 web 并替换正在服务的 dist/。
 USAGE
 }
@@ -120,7 +120,7 @@ USAGE
 mode_check() {
   require_builder
   run_tests
-  log "最小出包（--dir：只产出 .app，不打包成 dmg）…"
+  log "最小出包（--dir：只产出 .app，不打包成 pkg）…"
   run_builder --mac --dir
   verify_asar
   log "--check 通过：测试绿 + 壳能装起来 + 包内资源白名单完整。（本次未产出安装包）"
@@ -133,17 +133,47 @@ mode_local() {
     [ -f "$DESKTOP_DIR/server-url.js" ] || die "找不到 $DESKTOP_DIR/server-url.js（服务器地址的唯一真源）"
     local url
     url="$(server_url)"
-    log "注入 publish 配置以产出更新清单：$url/download"
+    log "注入 publish 配置：$url/download"
+    warn "mac 产物为 pkg（dir target），本次不会产出 latest-mac.yml —— ④ 自动更新在 mac 本就不可用；该注入只对将来可能的 zip/electron-updater 路径有意义"
     args+=( --config.publish.provider=generic "--config.publish.url=$url/download" )
   fi
   log "清空 apps/desktop/dist …"
   rm -rf "$DESKTOP_DIR/dist"
-  log "出 mac 包（x64 + arm64 两个 dmg，约 1min）…"
+  log "出 mac .app（双架构 --dir，不打 pkg）…"
+  # ⚠️ 这里**不要**再传 CLI `--dir`：它会整包覆盖 yml 的 mac.target，连 per-target 的
+  #    arch 清单 [x64, arm64] 一起丢掉，只出本机架构（2026-10-08 实测只出了 mac-arm64）。
+  #    dir 这个 target 已写在 electron-builder.yml 的 mac.target 里，交给它即可。
+  #    也不要用 `${args[@]/--mac/--mac --dir}` 这类就地替换（简报原稿写法）：替换结果不会
+  #    按空格重新分词，整串 "--mac --dir" 成了一个参数，直接报 Unknown argument。
   run_builder "${args[@]}"
   verify_asar
+  local arch_dir arch want out
+  for arch_dir in "$DESKTOP_DIR/dist/mac-arm64" "$DESKTOP_DIR/dist/mac"; do
+    [ -d "$arch_dir" ] || die "缺 $arch_dir —— electron-builder --dir 未产出预期目录"
+    arch=arm64; want=arm64; case "$arch_dir" in */mac) arch=x64; want=x86_64 ;; esac
+    # 与 CI 的 mac 封装步骤（desktop-release.yml）同一道架构校验：pkg target 竞态的失效模式
+    # 正是「x64 包里装着 arm64 主程序」，封装前必须拦下，不许静默出坏包。
+    # ⚠️ 主二进制名 = productName「K12 智学」（x64 产物目录名就叫 mac，不带 -arm64 后缀）。
+    local bin actual
+    bin="$arch_dir/K12 智学.app/Contents/MacOS/K12 智学"
+    [ -f "$bin" ] || die "缺主二进制 $bin —— electron-builder --dir 未产出预期的 .app"
+    actual="$(file -b "$bin")"
+    log "$arch_dir 主二进制：$actual"
+    case "$actual" in
+      *"$want"*) ;;
+      *) die "$arch_dir 主二进制架构不符：期望含 ${want}，实际「${actual}」（pkg target 竞态的失效模式，禁止出包）" ;;
+    esac
+    out="$DESKTOP_DIR/dist/k12-desktop-$(pkg_version)-${arch}.pkg"
+    log "封装 $out …"
+    pkgbuild --identifier com.k12zhixue.desktop \
+             --root "$arch_dir" \
+             --scripts "$DESKTOP_DIR/scripts/pkg" \
+             --install-location /Applications \
+             "$out"
+  done
   list_dist
   if [ "$MANIFEST" -eq 0 ]; then
-    warn "本次没有更新清单（未加 --manifest）—— 发布给 ④ / 自动更新用时需要它"
+    warn "本次没有更新清单 —— mac 产物为 pkg 本就不产出 latest-mac.yml（与是否加 --manifest 无关）"
   fi
 }
 
@@ -230,7 +260,7 @@ mode_online() {
 }
 
 mode_publish() {
-  [ "$#" -ge 1 ] || die "--publish 需要至少一个文件，例如：--publish apps/desktop/dist/k12-desktop-0.1.0-arm64.dmg"
+  [ "$#" -ge 1 ] || die "--publish 需要至少一个文件，例如：--publish apps/desktop/dist/k12-desktop-0.1.0-arm64.pkg"
   log "转发给 tools/publish-installer.sh（发布到服务器 /download/）…"
   exec bash "$SCRIPT_DIR/publish-installer.sh" "$@"
 }
@@ -298,7 +328,7 @@ if [ "$CONFIRM" -eq 1 ] && [ "$MODE" != online ]; then
   warn "--yes 只对 --online 有意义（当前模式：--${MODE}），本次已忽略"
 fi
 # --publish 收下它后面的**所有**参数（文件名里可能有空格），所以任何选项写在它后面都会变成文件名。
-# 静默吞掉最糟（2026-09-28 评审发现：`--publish a.dmg --yes` 会让 --yes 无声消失），这里点出来。
+# 静默吞掉最糟（2026-09-28 评审发现：`--publish a.pkg --yes` 会让 --yes 无声消失），这里点出来。
 if [ "$MODE" = publish ]; then
   for _a in "${PUBLISH_ARGS[@]}"; do
     case "$_a" in

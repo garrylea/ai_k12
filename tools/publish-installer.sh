@@ -47,6 +47,12 @@ done
 # 2) 拷入 public/（vite build 会把它带进 dist/）
 mkdir -p "$DEST_DIR"
 for f in "$@"; do
+  # 源与目标同路径时 `cp -f a a` 在 macOS 退出 1，set -e 下整个脚本中止 ——
+  # 例如「重刷下载页」这种用法（--no-build apps/web/public/download/index.html）就会踩中。跳过即可。
+  if [ "$f" -ef "$DEST_DIR/$(basename "$f")" ]; then
+    log "同路径，跳过拷贝：$(basename "$f")"
+    continue
+  fi
   cp -f "$f" "$DEST_DIR/"
   log "已拷入 $(basename "$f")"
 done
@@ -111,7 +117,7 @@ gen_download_page() {
     case "$name_lc" in
       *.exe)      kind=installer; hint="Windows" ;;
       *.appimage) kind=installer; hint="Linux" ;;
-      *.dmg)
+      *.dmg|*.pkg)
         kind=installer
         case "$name_lc" in
           *arm64*) hint="macOS（Apple 芯片 / M 系列）" ;;
@@ -211,9 +217,12 @@ ${updates}    </ul>
 ${primary_block}  </ul>
 ${updates_block}  <h2>首次打开说明</h2>
   <ul class="notes">
-    <li>macOS（安装包未签名）：首次打开会被系统拦下。可执行
+    <li>macOS（.pkg 安装包，未签名）：双击安装；若提示「无法验证开发者」，到
+      「系统设置 → 隐私与安全性」点「仍要打开」后再双击，按安装器提示输入开机密码完成。
+      全程不需要终端。</li>
+    <li>macOS（早期发布的 .dmg 包）：拖入「应用程序」后首次打开若被拦，需在终端执行
       <code>xattr -dr com.apple.quarantine "/Applications/K12 智学.app"</code>，
-      或到「系统设置 → 隐私与安全性」点「仍要打开」。</li>
+      或走「系统设置 → 隐私与安全性 → 仍要打开」。</li>
     <li>Windows（安装包未签名）：首次运行会弹 SmartScreen 警告，点「更多信息」后选「仍要运行」。</li>
   </ul>
 </main>

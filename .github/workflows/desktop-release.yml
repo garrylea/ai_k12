@@ -63,7 +63,7 @@ jobs:
           PKG="$(node -p "require('./package.json').version")"
           echo "tag=$TAG  package.json=$PKG"
           if [ "$TAG" != "$PKG" ]; then
-            echo "::error::tag（$TAG）与 apps/desktop/package.json 的 version（$PKG）不一致"
+            echo "::error::tag（${TAG}）与 apps/desktop/package.json 的 version（${PKG}）不一致"
             exit 1
           fi
 
@@ -87,18 +87,55 @@ jobs:
             --config.publish.provider=generic \
             --config.publish.url="${{ steps.server.outputs.publish_url }}"
 
+      # pkg 封装（仅 mac，2026-10-07 spec）：electron-builder 的 pkg target 有双架构竞态
+      # （并行任务互踩同名中间产物，静默产出装不上 Intel 机器的坏包 —— x64 包里是 arm64 主程序，
+      # 根因与处置已沉淀在 docs/constraints/pc-app-学习管控.md 的「打包与分发」节），已判死刑。
+      # 所以 mac.target 只出 .app（dir），封装收口到这里，用 macOS 自带的 pkgbuild 逐架构做。
+      # ⚠️ x64 的产物目录名就叫 mac（不带 -arm64 后缀），electron-builder 的固定行为。
+      # ⚠️ 封装前用 file 校验主二进制架构 —— 架构错位正是上述竞态的失效模式，必须在这里拦下，
+      #    不许静默出坏包。主二进制名 = productName「K12 智学」（本地实测，2026-10-08）。
+      - name: pkgbuild 封装双架构 pkg（仅 mac）
+        if: matrix.platform == '--mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          for arch_dir in dist/mac-arm64 dist/mac; do
+            [ -d "$arch_dir" ] || { echo "::error::缺 $arch_dir —— electron-builder 未产出预期的 .app 目录"; exit 1; }
+            case "$arch_dir" in
+              */mac-arm64) arch=arm64; want=arm64 ;;
+              */mac)       arch=x64;   want=x86_64 ;;
+            esac
+            bin="$arch_dir/K12 智学.app/Contents/MacOS/K12 智学"
+            [ -f "$bin" ] || { echo "::error::缺主二进制 $bin"; exit 1; }
+            actual="$(file -b "$bin")"
+            echo "$arch_dir 主二进制：$actual"
+            case "$actual" in
+              *"$want"*) ;;
+              *) echo "::error::$arch_dir 主二进制架构不符：期望含 ${want}，实际「${actual}」（pkg target 竞态的失效模式，禁止出包）"; exit 1 ;;
+            esac
+            out="dist/k12-desktop-${VERSION}-${arch}.pkg"
+            echo "封装 $out …"
+            pkgbuild --identifier com.k12zhixue.desktop \
+                     --root "$arch_dir" \
+                     --scripts scripts/pkg \
+                     --install-location /Applications \
+                     "$out"
+          done
+          ls -l dist/*.pkg
+
       - name: 产物白名单校验（asar）
         run: npm run verify:asar
 
       # 只收产物本身，**不收** dist/mac*/ 下的 .app 目录 —— 那条路径含中文与空格。
-      # 每个 dmg/exe 旁都会生成一个同名 `.blockmap`（差量更新的差分索引）—— 一并上传：
-      # 缺了它，④ 的自动更新只能回退成「整包重下」（spec §9）。
+      # .exe 旁的 .blockmap（差量更新差分索引）一并上传：缺了它 ④ 只能回退成全量下载（spec §9）。
+      # mac 产物是 .pkg（2026-10-07 spec）；mac 自动更新本就不可用，pkg 无 blockmap 不构成缺口。
       - name: 上传产物（安装包 + 更新清单 + 差分图）
         uses: actions/upload-artifact@v4
         with:
           name: k12-desktop-${{ matrix.os }}
           path: |
-            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.pkg
             apps/desktop/dist/*.exe
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/*.blockmap
