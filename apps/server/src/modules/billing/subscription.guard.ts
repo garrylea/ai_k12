@@ -15,8 +15,6 @@ import { effectiveStatus } from './subscription-status.js';
 export const SUBSCRIPTION_EXEMPT: { method: string; pattern: RegExp }[] = [
   { method: 'GET', pattern: /^\/api\/progress\/students\/\d+\/star-map$/ }, // 锁后学生仍看星图与锁定态
   { method: 'GET', pattern: /^\/api\/quota\/subscription$/ },               // 锁定页读状态
-  { method: 'GET', pattern: /^\/api\/dev\/handwriting\/models$/ },      // 手写识别 demo（dev-only）
-  { method: 'POST', pattern: /^\/api\/dev\/handwriting\/recognize$/ },  // 同上
 ];
 
 @Injectable()

@@ -77,7 +77,29 @@ it('完整一轮：填对照 → 识别 → 展示准确率与错字清单', asy
   await waitFor(() => expect(screen.getByText(/本轮字级准确率/)).toBeTruthy());
   expect(recognizeHandwriting).toHaveBeenCalledWith('data:image/png;base64,AAA', 'qwen-test');
   expect(screen.getByText('天 → 田')).toBeTruthy(); // 错字清单出现错字
-  expect(screen.getByText(/累计/)).toBeTruthy(); // 累计区出现
+  // 累计 = Σ本轮命中 ÷ Σ本轮对照字数：「今天天气很好」6 字，识别「今天田气很好」命中 5 → 5/6 = 83.3%
+  expect(screen.getByText('累计字级准确率：83.3%（1 轮，5/6 字）')).toBeTruthy();
+});
+
+it('累计口径为 Σ（Σmatched ÷ ΣexpectedLen），不做拼接重算', async () => {
+  // 第 1 轮：「今天」识别「今」→ 命中 1/2；第 2 轮：「天」识别「天天」→ 命中 1/1（多识别一个「天」）
+  vi.mocked(recognizeHandwriting)
+    .mockResolvedValueOnce({ text: '今', modelKey: 'qwen-test', elapsedMs: 1 })
+    .mockResolvedValueOnce({ text: '天天', modelKey: 'qwen-test', elapsedMs: 2 });
+  setup();
+  await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('qwen-test'));
+  fireEvent.click(screen.getByTestId('mock-stroke'));
+  const input = screen.getByLabelText('对照文本');
+  const btn = screen.getByRole('button', { name: '识别' });
+
+  fireEvent.change(input, { target: { value: '今天' } });
+  fireEvent.click(btn);
+  await waitFor(() => expect(screen.getByText(/累计/)).toBeTruthy());
+
+  fireEvent.change(input, { target: { value: '天' } });
+  fireEvent.click(btn);
+  // Σ = (1+1)/(2+1) = 2/3 = 66.7%；拼接重算会得 LCS(今天天, 今天天)=3/3=100%，此处钉死 Σ 口径
+  await waitFor(() => expect(screen.getByText('累计字级准确率：66.7%（2 轮，2/3 字）')).toBeTruthy());
 });
 
 it('识别失败 → 显示错误信息，按钮恢复可用', async () => {

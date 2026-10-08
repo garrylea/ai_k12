@@ -20,7 +20,7 @@ export default function HandwritingDemoPage() {
   const [recognizing, setRecognizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [last, setLast] = useState<{ result: CompareResult; meta: HandwritingRecognizeResult; image: string } | null>(null);
-  const [rounds, setRounds] = useState<{ accuracy: number; expected: string; recognized: string }[]>([]);
+  const [rounds, setRounds] = useState<{ matched: number; expectedLen: number; expected: string; recognized: string }[]>([]);
 
   useEffect(() => {
     listHandwritingModels()
@@ -42,7 +42,10 @@ export default function HandwritingDemoPage() {
       const meta = await recognizeHandwriting(image, modelKey);
       const result = compareHandwriting(expected, meta.text);
       setLast({ result, meta, image });
-      setRounds((rs) => [...rs, { accuracy: result.accuracy, expected: result.expected, recognized: result.recognized }]);
+      setRounds((rs) => [
+        ...rs,
+        { matched: result.matched, expectedLen: result.expected.length, expected: result.expected, recognized: result.recognized },
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : '识别失败');
     } finally {
@@ -50,10 +53,9 @@ export default function HandwritingDemoPage() {
     }
   };
 
-  // 累计口径：所有轮次合并重算（拼接归一化串再比，避免逐轮平均的辛普森悖论）
-  const totalExpected = rounds.map((r) => r.expected).join('');
-  const totalRecognized = rounds.map((r) => r.recognized).join('');
-  const total = rounds.length > 0 ? compareHandwriting(totalExpected, totalRecognized) : null;
+  // 累计口径（2026-10-08 用户裁决 Σ）：Σ本轮命中 ÷ Σ本轮对照字数，不做拼接重算
+  const totalMatched = rounds.reduce((sum, r) => sum + r.matched, 0);
+  const totalExpectedLen = rounds.reduce((sum, r) => sum + r.expectedLen, 0);
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] px-6 py-8 text-[var(--text-primary)]" data-theme="student-day">
@@ -144,11 +146,11 @@ export default function HandwritingDemoPage() {
           </section>
         )}
 
-        {/* 累计区（内存，刷新清空） */}
-        {total && (
+        {/* 累计区（内存，刷新清空）；ΣexpectedLen=0 即无轮次，不渲染 */}
+        {totalExpectedLen > 0 && (
           <section className="rounded-[var(--radius-card)] border border-[var(--bg-subtle)] p-4">
             <h2 className="font-bold">
-              累计字级准确率：{(total.accuracy * 100).toFixed(1)}%（{rounds.length} 轮，{total.matched}/{total.expected.length} 字）
+              累计字级准确率：{((totalMatched / totalExpectedLen) * 100).toFixed(1)}%（{rounds.length} 轮，{totalMatched}/{totalExpectedLen} 字）
             </h2>
           </section>
         )}

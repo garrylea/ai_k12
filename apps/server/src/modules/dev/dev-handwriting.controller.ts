@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.js';
 import { DevHandwritingService } from './dev-handwriting.service.js';
 
-/** 任一已登录角色可调（RolesGuard 无 @Roles 即放行，JWT 由 JwtAuthGuard 把守）。 */
+/** dev-only 调研工具（spec 2026-10-08）：仅 admin 可调（2026-10-08 用户裁决收窄）。 */
 @Controller('api/dev/handwriting')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin')
 export class DevHandwritingController {
   constructor(private readonly service: DevHandwritingService) {}
 
@@ -16,6 +18,10 @@ export class DevHandwritingController {
 
   @Post('recognize')
   recognize(@Body() dto: { image?: string; modelKey?: string }) {
-    return this.service.recognize(dto.image as string, dto.modelKey as string);
+    // 请求体缺失/键缺失时 @Body() 得到 undefined（防 TypeError → 500），与 service 的 400 口径对齐
+    if (!dto?.image || !dto?.modelKey) {
+      throw new BadRequestException({ code: 4003, message: 'image 与 modelKey 必填' });
+    }
+    return this.service.recognize(dto.image, dto.modelKey);
   }
 }
