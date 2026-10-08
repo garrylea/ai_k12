@@ -22,12 +22,20 @@ import { fileURLToPath } from 'node:url';
  * 「本地用例、扫仓库级配置」的形态。同源钉子：`issue #N/A`（本仓无 issue 跟踪）、
  * 说明写在 `docs/constraints/pc-app-学习管控.md` 与 `tools/app-build.sh` 头部注释。
  *
+ * 覆盖范围（2026-10-08 扩）：不只 `tools` 树下的 shell 脚本，还有 `.github/workflows` 下的 yml 里
+ * `shell: bash` 的**内嵌脚本** —— CI 同样跑在 macOS runner（bash 3.2）上，desktop-release.yml
+ * 的报错输出里就溜进来过 `$want，`、`$actual」（`（与 `tools/*.sh` 是同一类事故，只是住址不同）。
+ * 扫法：读 yml 全文、跳过 `#` 开头的 yml 注释行（yml 注释与内嵌 bash 注释里的例子都安全），
+ * 其余行跑同一套 offender 正则。`${{ matrix.platform }}` 这类 GitHub 表达式与 `${VAR}`
+ * 花括号形式天然不命中（`$` 后面紧跟的不是字母）。
+ *
  * 已知**过度近似**（故意的，宁严勿松）：整行注释会被跳过（注释里写例子是安全的），
  * 但 `<<'USAGE'` 这类**引号定界 heredoc** 里的内容其实不会被展开、本可放行 —— 这里仍然报。
  * 撞上时把那个 `$VAR` 加上花括号即可，代价为零。
  */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TOOLS_DIR = path.join(REPO_ROOT, 'tools');
+const WORKFLOWS_DIR = path.join(REPO_ROOT, '.github', 'workflows');
 
 /**
  * 只留会被 bash 当代码解释的行（剔掉整行注释；注释里的 `$VAR，` 不会被展开）。
@@ -56,6 +64,11 @@ function offenders(src) {
 const shellFiles = readdirSync(TOOLS_DIR, { recursive: true })
   .map((f) => String(f))
   .filter((f) => f.endsWith('.sh'))
+  .sort();
+
+const workflowFiles = readdirSync(WORKFLOWS_DIR)
+  .map((f) => String(f))
+  .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
   .sort();
 
 describe('tools/*.sh 的「$VAR 后紧跟中文标点」护栏（macOS bash 3.2）', () => {
@@ -97,6 +110,45 @@ describe('tools/*.sh 的「$VAR 后紧跟中文标点」护栏（macOS bash 3.2�
       }
     }
     // 修法：改成 ${NAME}（macOS bash 3.2 会把紧跟的 UTF-8 字节吃进变量名）
+    expect(bad).toEqual([]);
+  });
+});
+
+describe('.github/workflows/*.yml 内嵌 bash 的同一护栏（macOS runner 也是 bash 3.2）', () => {
+  it('扫描器对 yml 形态有牙齿：内嵌脚本行能报、花括号与 ${{ }} 表达式不误报', () => {
+    // 一段仿 workflow 内嵌脚本的内容：坏写法在 run 块里，注释与 GitHub 表达式都该放行
+    const ymlish = [
+      '      - name: 出包',
+      '        shell: bash',
+      '        run: |',
+      '          set -euo pipefail',
+      '          # 注释里的 $x， 是安全的例子',
+      '          echo "::$TAG）与 $PKG）不一致"', // 坏写法：变量后紧跟全角括号
+      '          echo "期望含 ${want}，实际「${actual}」"',
+      '          ./bin ${{ matrix.platform }}', // GitHub 表达式，不是 shell 变量
+    ].join('\n');
+    expect(offenders(ymlish)).toEqual([
+      { line: 6, name: 'TAG', next: '）' },
+      { line: 6, name: 'PKG', next: '）' },
+    ]);
+  });
+
+  it('确实扫到了 workflow 文件（防"空扫导致假绿"）', () => {
+    expect(workflowFiles.length).toBeGreaterThanOrEqual(1);
+    const total = workflowFiles
+      .map((f) => readFileSync(path.join(WORKFLOWS_DIR, f), 'utf8'))
+      .join('\n');
+    expect(total).toContain('shell: bash');
+  });
+
+  it('没有任何 workflow 内嵌脚本出现未加花括号的 $VAR + 非 ASCII', () => {
+    const bad = [];
+    for (const f of workflowFiles) {
+      const src = readFileSync(path.join(WORKFLOWS_DIR, f), 'utf8');
+      for (const o of offenders(src)) {
+        bad.push(`.github/workflows/${f}:${o.line} $${o.name}${o.next}`);
+      }
+    }
     expect(bad).toEqual([]);
   });
 });

@@ -17,8 +17,8 @@ set -euo pipefail
 # ⚠️ 本文件里「`$VAR` 后面紧跟中文标点」的地方**必须写成 `${VAR}`**（下面有几处就是为此写的，
 #    别当噪音删掉）：macOS 自带的是 **bash 3.2**，它会把紧跟的多字节 UTF-8 字符当成变量名的
 #    一部分，在 `set -u` 下直接报 `unbound variable`（不是给出空值）。而且**只在跑到那一行时才炸**
-#    —— 2026-09-28 实测：`$need，`、`$MODE）` 这类写法让 `--win` / `--linux` 与两个 warn 分支
-#    全部报错，而正常出包路径完全看不出来。新增中文文案时留意这一条。
+#    —— 2026-09-28 实测：`$need` 紧跟全角逗号、`$MODE` 紧跟全角括号的写法，让 `--win` / `--linux`
+#    与两个 warn 分支全部报错，而正常出包路径完全看不出来。新增中文文案时留意这一条。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -147,10 +147,22 @@ mode_local() {
   #    按空格重新分词，整串 "--mac --dir" 成了一个参数，直接报 Unknown argument。
   run_builder "${args[@]}"
   verify_asar
-  local arch_dir arch out
+  local arch_dir arch want out
   for arch_dir in "$DESKTOP_DIR/dist/mac-arm64" "$DESKTOP_DIR/dist/mac"; do
     [ -d "$arch_dir" ] || die "缺 $arch_dir —— electron-builder --dir 未产出预期目录"
-    arch=arm64; case "$arch_dir" in */mac) arch=x64 ;; esac
+    arch=arm64; want=arm64; case "$arch_dir" in */mac) arch=x64; want=x86_64 ;; esac
+    # 与 CI 的 mac 封装步骤（desktop-release.yml）同一道架构校验：pkg target 竞态的失效模式
+    # 正是「x64 包里装着 arm64 主程序」，封装前必须拦下，不许静默出坏包。
+    # ⚠️ 主二进制名 = productName「K12 智学」（x64 产物目录名就叫 mac，不带 -arm64 后缀）。
+    local bin actual
+    bin="$arch_dir/K12 智学.app/Contents/MacOS/K12 智学"
+    [ -f "$bin" ] || die "缺主二进制 $bin —— electron-builder --dir 未产出预期的 .app"
+    actual="$(file -b "$bin")"
+    log "$arch_dir 主二进制：$actual"
+    case "$actual" in
+      *"$want"*) ;;
+      *) die "$arch_dir 主二进制架构不符：期望含 ${want}，实际「${actual}」（pkg target 竞态的失效模式，禁止出包）" ;;
+    esac
     out="$DESKTOP_DIR/dist/k12-desktop-$(pkg_version)-${arch}.pkg"
     log "封装 $out …"
     pkgbuild --identifier com.k12zhixue.desktop \

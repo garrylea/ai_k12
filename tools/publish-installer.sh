@@ -47,6 +47,12 @@ done
 # 2) 拷入 public/（vite build 会把它带进 dist/）
 mkdir -p "$DEST_DIR"
 for f in "$@"; do
+  # 源与目标同路径时 `cp -f a a` 在 macOS 退出 1，set -e 下整个脚本中止 ——
+  # 例如「重刷下载页」这种用法（--no-build apps/web/public/download/index.html）就会踩中。跳过即可。
+  if [ "$f" -ef "$DEST_DIR/$(basename "$f")" ]; then
+    log "同路径，跳过拷贝：$(basename "$f")"
+    continue
+  fi
   cp -f "$f" "$DEST_DIR/"
   log "已拷入 $(basename "$f")"
 done
