@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import HandwritingInputModal from '../handwriting/HandwritingInputModal';
+import InlineHandwritingPad from '../handwriting/InlineHandwritingPad';
 
 export interface DictationAnswerValue {
   author: string;
@@ -16,30 +16,26 @@ interface Props {
 
 type Field = 'author' | 'dynasty' | 'body';
 
-const FIELD_TITLE: Record<Field, string> = {
-  author: '手写输入：作者',
-  dynasty: '手写输入：朝代',
-  body: '手写输入：正文',
-};
-
 const FIELD_BORDER = { border: '1px solid rgba(226, 232, 240, 0.8)' } as const;
 
-/** 三字段作答（作者 / 朝代 / 正文）——设计 spec §3 决策 5；每字段带手写入口（spec 2026-10-08 §4.3）。 */
+/** 三字段作答（作者 / 朝代 / 正文）——设计 spec §3 决策 5；每字段带手写入口（spec 2026-10-08 §4.3，交互 v2 内嵌式）。 */
 export default function DictationAnswerForm({ value, onChange, disabled = false }: Props) {
   const shortInputClass =
     'w-full h-12 px-4 rounded-xl bg-white text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30 disabled:opacity-70';
   const [padField, setPadField] = useState<Field | null>(null);
 
-  const padButton = (field: Field) => (
-    <button
-      type="button"
-      onClick={() => setPadField(field)}
-      disabled={disabled}
-      className="self-start rounded-[var(--radius-button)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-bold text-[var(--text-primary)] disabled:opacity-50"
-    >
-      手写
-    </button>
-  );
+  // 手写切换钮只在收起态渲染；展开时靠手写板上的「键盘」钮收起
+  const padButton = (field: Field) =>
+    padField === field ? null : (
+      <button
+        type="button"
+        onClick={() => setPadField(field)}
+        disabled={disabled}
+        className="self-start rounded-[var(--radius-button)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-bold text-[var(--text-primary)] disabled:opacity-50"
+      >
+        手写
+      </button>
+    );
 
   return (
     <div className="flex flex-col gap-5">
@@ -83,12 +79,23 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
         {padButton('body')}
       </label>
 
-      <HandwritingInputModal
+      {/* key 随 padField 重挂载：切换字段时墨迹天然清零，不会把上个字段的笔迹识别进新字段 */}
+      <InlineHandwritingPad
+        key={padField ?? 'none'}
         open={padField !== null}
-        title={padField ? FIELD_TITLE[padField] : ''}
-        onConfirm={(v) => {
-          if (padField) onChange({ ...value, [padField]: v });
-          setPadField(null);
+        multiline={padField === 'body'}
+        disabled={disabled}
+        onRecognized={(text) => {
+          if (!padField) return;
+          if (padField === 'body') {
+            const prev = value.body;
+            onChange({
+              ...value,
+              body: prev === '' || prev.endsWith('\n') ? prev + text : prev + '\n' + text,
+            });
+          } else {
+            onChange({ ...value, [padField]: value[padField] + text });
+          }
         }}
         onClose={() => setPadField(null)}
       />

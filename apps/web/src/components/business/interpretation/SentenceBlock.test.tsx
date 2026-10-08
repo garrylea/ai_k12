@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { cleanup, render, screen, fireEvent } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import type { InterpretationJudgeResult, InterpretationSentenceItem } from '@/services/api';
@@ -158,14 +159,25 @@ describe('SentenceBlock — 三态', () => {
   });
 });
 
-vi.mock('../handwriting/HandwritingInputModal', () => ({
-  default: ({ open, onConfirm }: { open: boolean; onConfirm: (v: string) => void }) =>
+vi.mock('../handwriting/InlineHandwritingPad', () => ({
+  default: ({ open, onRecognized, onClose }: { open: boolean; onRecognized: (t: string) => void; onClose: () => void }) =>
     open ? (
-      <button type="button" data-testid="mock-pad-confirm" onClick={() => onConfirm('手写释义')}>
-        mock-confirm
-      </button>
+      <div>
+        <button type="button" data-testid="mock-pad" onClick={() => onRecognized('手写释义')}>
+          mock-pad
+        </button>
+        <button type="button" data-testid="mock-pad-close" onClick={onClose}>
+          mock-pad-close
+        </button>
+      </div>
     ) : null,
 }));
+
+/** stateful 宿主：value 真实流转，验证「识别 → 直接拼接」的连续追加。 */
+function StatefulHost(props: Partial<ComponentProps<typeof SentenceBlock>> = {}) {
+  const [value, setValue] = useState<InterpretationAnswerValue>(EMPTY);
+  return <SentenceBlock {...makeProps({ ...props, value, onChange: setValue })} />;
+}
 
 describe('SentenceBlock — 手写入口', () => {
   it('editing 态每个词与翻译各有手写按钮；judged 态锁定禁用', () => {
@@ -175,17 +187,27 @@ describe('SentenceBlock — 手写入口', () => {
     for (const b of screen.getAllByRole('button', { name: '手写' })) expect(b).toBeDisabled();
   });
 
-  it('词的手写确认回填 terms；翻译确认回填 translation', () => {
-    const onChange = vi.fn();
-    const { rerender } = render(<SentenceBlock {...makeProps({ onChange })} />);
-    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]);
-    fireEvent.click(screen.getByTestId('mock-pad-confirm'));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ terms: expect.objectContaining({ '滕子京谪（zhé）守巴陵郡': '手写释义' }) }),
-    );
-    rerender(<SentenceBlock {...makeProps({ onChange })} />);
-    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]); // 翻译是最后一个
-    fireEvent.click(screen.getByTestId('mock-pad-confirm'));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ translation: '手写释义' }));
+  it('词的手写识别直接拼接进 terms；翻译直接拼接进 translation', () => {
+    render(<StatefulHost />);
+    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
+    fireEvent.click(screen.getByTestId('mock-pad'));
+    expect(screen.getByDisplayValue('手写释义')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-pad'));
+    expect(screen.getByDisplayValue('手写释义手写释义')).toBeInTheDocument();
+
+    // 收起后手写钮全部恢复（3 个），翻译是 DOM 里最后一个
+    fireEvent.click(screen.getByTestId('mock-pad-close'));
+    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]); // 翻译
+    fireEvent.click(screen.getByTestId('mock-pad'));
+    expect(screen.getByPlaceholderText('把这句话译成白话')).toHaveValue('手写释义');
+  });
+
+  it('展开态：该字段手写钮隐藏、出现收起钮；收起后恢复', () => {
+    render(<StatefulHost />);
+    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
+    expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(2); // 词 2 + 翻译
+    expect(screen.getByTestId('mock-pad-close')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-pad-close'));
+    expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(3);
   });
 });
