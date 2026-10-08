@@ -35,4 +35,12 @@ it('点手写 → 弹层确认 → 值回填到对应字段', () => {
   fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]);
   fireEvent.click(screen.getByTestId('mock-pad-confirm'));
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ author: '手写内容' }));
+  // 朝代
+  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[1]);
+  fireEvent.click(screen.getByTestId('mock-pad-confirm'));
+  expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ dynasty: '手写内容' }));
+  // 正文
+  fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]);
+  fireEvent.click(screen.getByTestId('mock-pad-confirm'));
+  expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ body: '手写内容' }));
 });

@@ -8,6 +8,26 @@
 
 ---
 
+## 2026-10-08 语文专项手写输入：body limit 修复波（含全局 JSON parser 被顶掉的 P0 事故）
+
+### 事故（fix round 1 → P0）
+
+背景：手写转写端点 `POST /api/ai/handwriting/transcribe`（Task 4 交付）的手写图 base64 可达 ~5.5MB（解码 4MB 上限），Nest 默认 body-parser 100kb 上限直接 413 挡掉合法请求。round 1 的修法是在 `main.ts` 加**路径限定** middleware：`app.use('/api/ai/handwriting', json({ limit: '8mb' }))`。**症状**：手写路径 limit 生效了，但**全站其它端点 `req.body` 全变空**（登录、一切 JSON POST 均失效）——自定义 parser 的导入名同为 `json`（函数名同名），Nest 的 ExpressAdapter 注册默认 parser 时按 **parser 函数名去重**（`registerParserMiddleware` → `isMiddlewareApplied`），误判「已注册」而**跳过了自己的全局 JSON parser**。service 层单测不走 HTTP、全量测试全绿，单测拦不住，靠真服务冒烟（curl login 返回 body 空）才发现——P0。
+
+### 修复（fix round 2，已合入分支 feat/chinese-special-handwriting-input，commit `e1e8b66`）
+
+按复审处方 **bodyParser 全接管**：`NestFactory.create(AppModule, { rawBody: true, bodyParser: false })` 关掉 Nest 默认 parser，在 `main.ts` 显式注册三条——`/api/ai/handwriting` 前缀 `json({limit:'8mb'})` 先注册、全局 `json({limit:'100kb'})` 兜底、全局 `urlencoded({extended:true,limit:'100kb'})`（Nest 默认 json+urlencoded 两条都有，且支付宝回调是 form-urlencoded，漏掉会空 body）。body-parser 靠 `req._body` 对已解析请求自动跳过，一条请求只被一个 parser 消费。**处方外两处必要补全**：① 三个 parser 都带 `verify: rawBodyVerify` 钩子——`bodyParser:false` 后 `req.rawBody` 不再由 Nest 产出，须复刻 `get-body-parser-options` 的 verify 捕获，否则支付回调验签（`billing-callback.controller.ts` 用 `req.rawBody`）静默拿到空；② `http-exception.filter.ts` 对 `statusCode===413` 的普通 Error（body-parser 超限抛的 `PayloadTooLargeError` 不是 HttpException，原被吞成 500/5000）透传 413，对齐两份 API 文档已写的 413 契约（新增 `http-exception.filter.test.ts` 回归钉子；该 500 行为是既有全局行为，非本轮引入）。
+
+### 真服务冒烟覆盖面（`PORT=3999 node dist/main.js`，round 2 五条 + 终审补两条）
+
+round 2：a 登录 JSON 正常解析（401 业务错而非 body 空）/ b 手写路径 200KB 过（8mb 生效）/ c 手写路径 9.5MB → 413 / d 其它端点 100kb 未被放宽（200KB login → 413）/ e urlencoded 解析正常（支付宝回调同型）。终审补：f 支付宝回调验签路径——`POST /api/billing/callback/alipay` form-urlencoded 带 `sign=garbage`（本地临时 RSA 密钥配齐 `ALIPAY_*` env），服务端日志落「支付宝回调验签失败」（走到了验签而非 rawBody 空/解析失败），应答 `failure`；g 手写路径 ~5.5MB 无 token → 401（8mb parser 放行了该体积，JWT 拒在业务校验前）。全量测试 154 files / 2001+ tests 绿。
+
+### 勘误（spec 前提失实）
+
+`docs/superpowers/specs/2026-10-08-chinese-special-handwriting-input.md` §4.1「屏显笔迹随主题变色」的前提失实：两个手写接入页是训练轨全屏页，硬编码 `data-theme="student-day"`（CLAUDE.md 约束），**不进夜间模式**，该能力实际不可见。按「主题随色保留为面向未来的无害能力」处理，不改代码，spec 不回改、以本条为准。
+
+---
+
 ## 2026-10-07 · PC App mac 分发 dmg → pkg（quarantine 局域网事故）
 
 ### 事故经过
