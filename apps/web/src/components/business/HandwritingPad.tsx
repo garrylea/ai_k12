@@ -1,5 +1,5 @@
 // apps/web/src/components/business/HandwritingPad.tsx
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { useThemeStore } from '@/store/themeStore';
 
 /**
@@ -70,8 +70,10 @@ export interface HandwritingPadHandle {
   clear(): void;
 }
 
-const HandwritingPad = forwardRef<HandwritingPadHandle, { onStrokesChange?: (count: number) => void }>(
-  function HandwritingPad({ onStrokesChange }, ref) {
+const HandwritingPad = forwardRef<
+  HandwritingPadHandle,
+  { onStrokesChange?: (count: number) => void; /** 工具行右侧的额外内容（如调用方的切换图标），可选 */ toolbarRight?: ReactNode }
+>(function HandwritingPad({ onStrokesChange, toolbarRight }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const strokesRef = useRef<DemoStroke[]>([]);
     const drawingRef = useRef(false);
@@ -200,7 +202,7 @@ const HandwritingPad = forwardRef<HandwritingPadHandle, { onStrokesChange?: (cou
 
     return (
       <div className="inline-block rounded-[var(--radius-card)] border border-[var(--bg-subtle)] bg-white p-2">
-        <div className="mb-2 flex gap-2">
+        <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
             title="笔"
@@ -229,6 +231,7 @@ const HandwritingPad = forwardRef<HandwritingPadHandle, { onStrokesChange?: (cou
           >
             清空
           </button>
+          {toolbarRight != null && <div className="ml-auto flex items-center gap-2">{toolbarRight}</div>}
         </div>
         <canvas
           ref={canvasRef}

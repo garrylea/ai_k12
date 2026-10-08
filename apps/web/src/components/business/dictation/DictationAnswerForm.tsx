@@ -96,7 +96,6 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
       <InlineHandwritingPad
         key={padField ?? 'none'}
         open={padField !== null}
-        multiline={padField === 'body'}
         disabled={disabled}
         onRecognized={(text) => {
           if (!padField) return;

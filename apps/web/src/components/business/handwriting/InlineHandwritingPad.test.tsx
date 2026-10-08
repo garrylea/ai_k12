@@ -43,7 +43,7 @@ function drawStroke(canvas: HTMLCanvasElement): void {
 function setup(props: Partial<Parameters<typeof InlineHandwritingPad>[0]> = {}) {
   const onRecognized = vi.fn();
   const onClose = vi.fn();
-  render(<InlineHandwritingPad open multiline onRecognized={onRecognized} onClose={onClose} {...props} />);
+  render(<InlineHandwritingPad open onRecognized={onRecognized} onClose={onClose} {...props} />);
   drawStroke(document.querySelector('canvas')!);
   return { onRecognized, onClose };
 }

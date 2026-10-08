@@ -15,7 +15,7 @@ vi.mock('@/services/api', () => ({
 /** jsdom 无画布：mock 底层 HandwritingPad——exportImage 恒有图、笔画数恒为 1（识别钮可点、识别后仍可再点）。 */
 vi.mock('../HandwritingPad', () => ({
   default: forwardRef(function MockHandwritingPad(
-    { onStrokesChange }: { onStrokesChange?: (count: number) => void },
+    { onStrokesChange, toolbarRight }: { onStrokesChange?: (count: number) => void; toolbarRight?: React.ReactNode },
     ref: ForwardedRef<{ exportImage: () => string | null; clear: () => void }>,
   ) {
     useImperativeHandle(ref, () => ({
@@ -24,7 +24,8 @@ vi.mock('../HandwritingPad', () => ({
     }));
     // 真实 pad 识别成功后会把笔画数清零；这里每次渲染恢复成 1，保持「识别并追加」可点
     useEffect(() => { onStrokesChange?.(1); });
-    return <div data-testid="mock-handwriting-board" />;
+    // toolbarRight 槽承载调用方的「键盘」收起图标，透传渲染保证可查可点
+    return <div data-testid="mock-handwriting-board">{toolbarRight}</div>;
   }),
 }));
 

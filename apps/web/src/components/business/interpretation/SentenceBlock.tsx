@@ -247,7 +247,6 @@ export default function SentenceBlock({
       <InlineHandwritingPad
         key={padField ?? 'none'}
         open={padField !== null}
-        multiline={false}
         disabled={locked}
         onRecognized={(text) => {
           const current = valueRef.current;
