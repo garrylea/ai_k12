@@ -1,6 +1,7 @@
 import { Body, Controller, Post, UseGuards, HttpException, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { AIService } from './ai.service.js';
+import { HandwritingService } from './handwriting.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -11,7 +12,7 @@ import type { TutorDto } from './dto/tutor.dto.js';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('student')
 export class AIController {
-  constructor(private readonly aiService: AIService) {}
+  constructor(private readonly aiService: AIService, private readonly handwritingService: HandwritingService) {}
 
   @Post('tutor')
   async tutor(@Body() dto: TutorDto, @CurrentUser() user: JwtUser) {
@@ -63,5 +64,12 @@ export class AIController {
       finished = true;
       res.end();
     }
+  }
+
+  // 手写识别转写（语文专项手写输入，spec 2026-10-08）：图片 → 汉字文本。
+  // 类级 @Roles('student') 继承；非流式；错误 400/502 由 service 抛、全局过滤器统一包装。
+  @Post('handwriting/transcribe')
+  transcribeHandwriting(@Body() dto: { image?: string }) {
+    return this.handwritingService.transcribe(dto?.image as string);
   }
 }

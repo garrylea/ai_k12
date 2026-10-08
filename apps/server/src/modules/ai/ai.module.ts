@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AIController } from './ai.controller.js';
 import { AIService } from './ai.service.js';
+import { HandwritingService } from './handwriting.service.js';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
@@ -42,6 +43,11 @@ import { SubjectsRepository } from '../../database/repositories/subjects.repo.js
       useFactory: (conversationService: ConversationService, safetyAlerts: SafetyAlertsService) =>
         new TutoringCapability(conversationService, { safetyAlerts }),
       inject: [ConversationService, SafetyAlertsService],
+    },
+    {
+      provide: HandwritingService,
+      // 不写 @Injectable()（DI 坑），useFactory 手动实例化（同 TutoringCapability 策略）
+      useFactory: () => new HandwritingService(),
     },
   ],
 })

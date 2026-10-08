@@ -263,6 +263,7 @@
 | POST | `/api/ai/explain` | 生成讲解/重讲 | MVP |
 | POST | `/api/ai/grade` | 主观题按步骤给分 | MVP |
 | POST | `/api/ai/variation` | 生成变式题 | MVP |
+| POST | `/api/ai/handwriting/transcribe` | 手写识别转写（语文专项手写输入），见 §4.27 | MVP |
 | POST | `/api/ai/report` | 生成学情报告内容 | MVP（本期未实现） |
 | POST | `/api/ai/anomaly/detect` | 内部：输入分类（学习/闲聊/异常） | P1 |
 | GET | `/api/ai/quota` | 当前家庭账号 AI 额度 | MVP |
@@ -642,6 +643,14 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 |---|---|---|---|
 | GET | `/api/dev/handwriting/models` | 可用模型清单：`ModelConfigRegistry` 快照映射，只出 `{models:[{key, provider, modelId}]}`（**不带 apiKey**）。registry 未初始化 503/5300 | dev-only |
 | POST | `/api/dev/handwriting/recognize` | 手写图片纯转写（非流式）。请求体 `{image, modelKey}`，键缺失/请求体缺失 400/4003；校验顺序：`image` 须 `data:image/png\|jpeg;base64,` 前缀（400/4001）→ 解码后 ≤4MB（400/4002）→ `modelKey` 在 registry（不在 404/4404）；上游模型失败 502/5502。**成功返回 201**（`@Post` 默认，未显式 `@HttpCode`，如实记录）。响应 `{text, modelKey, elapsedMs}` | dev-only |
+
+### 4.27 AI — `/api/ai/handwriting/transcribe`（手写识别转写，2026-10-08）
+
+语文专项手写输入的后端（spec `docs/superpowers/specs/2026-10-08-chinese-special-handwriting-input-design.md`）：学生端手写板图片 → 简体中文纯文本，前端把文本塞回作答框走既有专项判题。**学生角色**（AIController 类级 `@Roles('student')` 继承）。非流式、不留档（不写 request-log / 对话；只有 LLM 账本，meta 走 HTTP 路径 AsyncLocalStorage 自动归属学生——与 dev 调研端点 `studentId:null` 相反）。模型由 scene `handwriting` + subject `chinese` 路由：本地 llama.cpp（mtmd 多模态）优先、qwen3.8-max 兜底（`model-routes.yaml` + `llm_routes` 表，切云端只改表/admin 端，零发版）；调用带 `thinking:false`。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| POST | `/api/ai/handwriting/transcribe` | 请求体 `{image: dataURL}`（`data:image/png\|jpeg;base64,` 前缀，解码后 ≤4MB；缺失/前缀不符 400/4001、超限 400/4002）；上游模型失败 502/5502。**成功返回 201**（`@Post` 默认）。响应 `{text, modelKey, elapsedMs}`（text 已 trim） | MVP |
 
 ---
 
@@ -2081,6 +2090,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.19 | 2026-10-08 | 新增 §4.27（语文专项手写输入）：`POST /api/ai/handwriting/transcribe`（学生角色，AIController 类级 `@Roles('student')` 继承）——手写图片 dataURL（png\|jpeg，解码 ≤4MB；缺失/前缀不符 400/4001、超限 400/4002、上游失败 502/5502）→ `{text, modelKey, elapsedMs}`，**成功 201**（`@Post` 默认）。非流式、不留档（只有 LLM 账本，meta 走 HTTP 路径 ALS 归属学生）；模型走 scene `handwriting` + subject `chinese` 路由（本地 llama.cpp 优先、qwen3.8-max 兜底，yaml + `llm_routes` 迁移 `2026-10-08_handwriting_scene.sql`，幂等），调用 `thinking:false`。§4.7 AI 表补一行；§5 无 ai 端点清单、数据流不变，无需同步。openapi.yaml 同步（1 path / 1 operation，`'201'`）。dev 调研端点（§4.26）不受影响。 |
 | v4.18 | 2026-10-08 | 新增 Dev 分组 §4.26（手写汉字识别率调研，dev-only）：`GET /api/dev/handwriting/models`（registry 快照，只出 key/provider/modelId）与 `POST /api/dev/handwriting/recognize`（纯转写，校验顺序 image 前缀 → 解码 ≤4MB → modelKey 在 registry；上游失败 502）。**限 admin 角色**（2026-10-08 用户裁决由「任一已登录角色」收窄，`SUBSCRIPTION_EXEMPT` 两条豁免随之删除——admin 天然越过 SubscriptionGuard）；**不落库、无埋点**。recognize **成功返回 201**（`@Post` 默认，未显式 `@HttpCode`）。**openapi.yaml 不收录**（openapi 只收 MVP 端点，此为 dev-only 调研端点）。前端调研页 `/dev/handwriting-demo`，累计准确率为 Σ 口径（Σ本轮命中 ÷ Σ本轮对照字数，不做拼接重算）。 |
 | v4.17 | 2026-10-01 | **裁决结果通知补丁（批④验收缺陷修复）**。背景：批④验收发现两缺陷——① 管理员驳回后**家长无感知**（驳回原因只在订单历史里，家长停留在他页不可见）；② 管理端「待裁决」红点裁决后不消失。用户三裁决：**跨页提示条 + 未读持久化**（方案 A，新表 `billing_notices`）、**点「知道了」才消**（不做自动消红）、**裁决两态都发通知**（不含 adminMarkPaid 直通入账）。契约变更：§4.15 新增 2 端点——`GET /api/billing/notices/unread`（200，`{items:[{id,type,orderNo,reason,createdAt}], total}`，无分页上限 50、`total=items.length`）与 `POST /api/billing/notices/{id}/ack`（**显式 `@HttpCode(200)`**，幂等，body 无，返回 `{ok:true}`；400/1001 非法 id、404/1002 不存在、403/1005 他人通知；**首次置已读时 `logger.log` 留痕一行（noticeId+parentId）**）。新表 `billing_notices`（迁移 `2026-10-01_billing_notices.sql`，type 枚举 `claim_approved/claim_rejected`）。openapi.yaml 同步（2 operation + `BillingNoticeView`/`BillingNoticeListResult`/`BillingNoticeAckResult`，ack 记 `'200'`）。UX 文档同步家长顶栏三 Bar（`AlertBanner` 预警 → `BillingNoticeBar` 裁决结果 → `SubscriptionNoticeBar` 订阅状态）。实施与冒烟详见 `docs/ai-core-changelog.md` 2026-10-01 节 |
 | v4.16 | 2026-09-30 | **订阅批④：自动到账 + 人工裁决链路 + 线下转账渠道 + 试用/订阅管理**。① `GET /api/billing/orders/{orderNo}` pending 时**限频自动查渠道**（内存 Map 每单 10s；manual/mock 跳过；金额不符拒绝；expired 照常入账）——回调不可达的部署形态下的主要到账途径。② **claim 裁决状态机**：orders 加 `claim_status/claimed_at/claim_note` 三列；confirm-paid 未获渠道确认（或线下转账单）→ `pending_review` → 管理端裁决；finalize 五条入账路径统一挂 claim→approved 自动闭环。③ **家长侧 `manual`（线下转账）渠道**：不走适配器、无二维码；confirm **note 必填**。④ admin 新增 6 端点：`GET orders/claims`、`POST .../claims/approve`、`POST .../claims/reject`、`GET families`、`PUT families/{id}/trial`、`POST families/{id}/grant`（新表 `subscription_adjustments` 审计）。⑤ `adminMarkPaid` 放行 expired（对齐方案 A 裁决与 markPaidTx 谓词）。背景：付费主路径 = 个人微信收款 + 管理员手工开通（商户号 300 元认证暂缓，真渠道接入代码已就绪） |

@@ -1511,6 +1511,55 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/AIQuota'
+  /ai/handwriting/transcribe:
+    post:
+      tags: [AI]
+      summary: 手写识别转写（语文专项手写输入）
+      description: >-
+        学生端手写输入：手写汉字图片 → 简体中文纯文本。非流式、不留档
+        （只有 LLM 账本，meta 走 HTTP 路径 ALS 归属学生）。模型由 scene
+        `handwriting` + subject `chinese` 路由（本地 llama.cpp 优先，
+        qwen3.8-max 兜底；可在 llm_routes 表 / admin 端切换，零发版）。
+      operationId: transcribeHandwriting
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  description: 手写图片 dataURL（data:image/png|jpeg;base64,，解码后 ≤4MB）
+      responses:
+        '201':
+          description: 转写成功（@Post 默认）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          text:
+                            type: string
+                            description: 转写出的简体中文纯文本（已 trim）
+                          modelKey:
+                            type: string
+                            description: 实际使用的路由条目 key（≠ modelId）
+                          elapsedMs:
+                            type: integer
+                            description: 端到端耗时（毫秒）
+        '400':
+          description: image 缺失/非 dataURL 前缀（code 4001）；解码后超 4MB（code 4002）
+        '502':
+          description: 上游识别模型调用失败（code 5502）
 
   # Refinery
   /refinery/extract:
