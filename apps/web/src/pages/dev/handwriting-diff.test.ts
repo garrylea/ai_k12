@@ -30,7 +30,7 @@ describe('compareHandwriting', () => {
     expect(r.errors).toEqual([{ expected: '天', got: null }]);
   });
 
-  it('多一个字 → 进 extra，不冲抵准确率', () => {
+  it('错一字+多一字 → errors+extra，不冲抵准确率', () => {
     const r = compareHandwriting('你好', '你号呀');
     // LCS 对齐：「你」配「你」→ 期望「好」对识别「号」是错字，识别「呀」是多出
     expect(r.matched).toBe(1);
