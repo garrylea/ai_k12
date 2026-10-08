@@ -37,7 +37,13 @@ mac:
   identity: null
   # pkg 替代 dmg（2026-10-07 spec）：Installer.app 不向产物传播 quarantine（实测见 spec §2），
   # 「装完连不上服务器」的事故从机制上消失；dmg 拖拽 + 手跑 xattr 的家长路径废止。
-  target: [{ target: pkg, arch: [x64, arm64] }]
+  # ⚠️ target 只出 .app（dir），pkg 封装收口到 tools/app-build.sh 的 pkgbuild 循环。
+  #    为什么不用 electron-builder 的 pkg target：26.15.3 在「未签名 + 双架构单次构建」下，
+  #    两个架构的并行任务共享同一中间产物（com.<bundleId>.pkg / distribution.xml，文件名不含架构）
+  #    互踩竞态，**静默**产出装不上 Intel 机器的坏包（x64 包里是 arm64 主程序）——
+  #    实测与根因见 .superpowers/sdd/2026-10-07-pc-app-mac-pkg-installer/task-1-report.md。
+  #    禁止任何人直接 `electron-builder --mac` 打 pkg 走这条已损坏的路径。
+  target: [{ target: dir, arch: [x64, arm64] }]
 
 linux:
   target: [{ target: AppImage, arch: [x64] }]

@@ -8,8 +8,8 @@
 # 文档只需指过来，不必再抄一遍命令。**发布那一步不重写逻辑**：`--publish` 直接转发给
 # `tools/publish-installer.sh`（单一实现）。
 #
-# 本机限制（实测）：mac 包只能在本机出（.dmg 依赖 hdiutil）；**Windows/Linux 出不了**
-# —— NSIS 要 wine、AppImage 要 docker，本机都没装。三平台产物只能走 `--online`（CI）。
+# 本机限制（实测）：mac 包只能在本机出（封装用的 pkgbuild 是 macOS 自带）；**Windows/Linux
+# 出不了** —— NSIS 要 wine、AppImage 要 docker，本机都没装。三平台产物只能走 `--online`（CI）。
 #
 # 设计见 docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md
 set -euo pipefail
@@ -74,7 +74,7 @@ list_dist() {
   log "dist 产物："
   (
     cd "$DESKTOP_DIR/dist" 2>/dev/null || return 0
-    for f in *.dmg *.exe *.AppImage *.blockmap latest*.yml; do
+    for f in *.dmg *.pkg *.exe *.AppImage *.blockmap latest*.yml; do
       [ -f "$f" ] || continue
       printf '  %s (%s)\n' "$f" "$(du -h "$f" | cut -f1)"
     done
@@ -90,8 +90,8 @@ PC App 出包入口
 模式（一次只能选一个）：
   --check              快速门禁：跑测试 + 最小出包（--dir，只产出 .app，约 10s）+ asar 自检。
                        不产出安装包、不清空 dist、不碰 web 层。改完壳先跑这个。
-  --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64
-                       两个 dmg（约 1min），最后跑 asar 自检。
+  --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64 两个 .app
+                       （electron-builder --dir）并用 pkgbuild 封装成两个 pkg（约 1min），最后跑 asar 自检。
   --online             GitHub Actions 出三平台包（mac dmg / win exe / linux AppImage）。
                        默认只做预检并打印要执行的命令；加 --yes 才真的打 tag 并推。
   --publish <文件...>  发布安装包到本机服务器 /download/ —— 转发给 tools/publish-installer.sh
@@ -106,13 +106,13 @@ PC App 出包入口
 
 示例（把 <版本> 换成 apps/desktop/package.json 里的 version）：
   bash tools/app-build.sh --check                             # 改完壳，快速确认没坏
-  bash tools/app-build.sh --local                             # 出两个 dmg
-  bash tools/app-build.sh --local --manifest                  # 出 dmg + latest-mac.yml
+  bash tools/app-build.sh --local                             # 出两个 pkg
+  bash tools/app-build.sh --local --manifest                  # 出 pkg + latest-mac.yml
   bash tools/app-build.sh --online                            # 看要推什么（不推）
   bash tools/app-build.sh --online --yes                      # 预检通过后推 tag，触发 CI
-  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.dmg
+  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.pkg
 
-本机限制：mac 包只能在本机出（.dmg 要 hdiutil）；Windows/Linux 产物只能靠 --online。
+本机限制：mac 包只能在本机出（封装要 pkgbuild，macOS 自带）；Windows/Linux 产物只能靠 --online。
 打包需要能访问 GitHub（见 README 的说明）；发布到服务器会重建 web 并替换正在服务的 dist/。
 USAGE
 }
@@ -138,9 +138,26 @@ mode_local() {
   fi
   log "清空 apps/desktop/dist …"
   rm -rf "$DESKTOP_DIR/dist"
-  log "出 mac 包（x64 + arm64 两个 dmg，约 1min）…"
+  log "出 mac .app（双架构 --dir，不打 dmg）…"
+  # ⚠️ 这里**不要**再传 CLI `--dir`：它会整包覆盖 yml 的 mac.target，连 per-target 的
+  #    arch 清单 [x64, arm64] 一起丢掉，只出本机架构（2026-10-08 实测只出了 mac-arm64）。
+  #    dir 这个 target 已写在 electron-builder.yml 的 mac.target 里，交给它即可。
+  #    也不要用 `${args[@]/--mac/--mac --dir}` 这类就地替换（简报原稿写法）：替换结果不会
+  #    按空格重新分词，整串 "--mac --dir" 成了一个参数，直接报 Unknown argument。
   run_builder "${args[@]}"
   verify_asar
+  local arch_dir arch out
+  for arch_dir in "$DESKTOP_DIR/dist/mac-arm64" "$DESKTOP_DIR/dist/mac"; do
+    [ -d "$arch_dir" ] || die "缺 $arch_dir —— electron-builder --dir 未产出预期目录"
+    arch=arm64; case "$arch_dir" in */mac) arch=x64 ;; esac
+    out="$DESKTOP_DIR/dist/k12-desktop-$(pkg_version)-${arch}.pkg"
+    log "封装 $out …"
+    pkgbuild --identifier com.k12zhixue.desktop \
+             --root "$arch_dir" \
+             --scripts "$DESKTOP_DIR/scripts/pkg" \
+             --install-location /Applications \
+             "$out"
+  done
   list_dist
   if [ "$MANIFEST" -eq 0 ]; then
     warn "本次没有更新清单（未加 --manifest）—— 发布给 ④ / 自动更新用时需要它"
