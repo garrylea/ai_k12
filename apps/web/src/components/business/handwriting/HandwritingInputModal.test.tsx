@@ -88,14 +88,39 @@ describe('HandwritingInputModal', () => {
     expect(screen.queryByText(/boom/)).toBeNull();
   });
 
-  it('open=false 不渲染；onClose 在点关闭时被调', () => {
+  it('open=false 隐藏不进 a11y 树；onClose 在点关闭时被调', () => {
     const onClose = vi.fn();
     const { rerender } = render(
       <HandwritingInputModal open={false} title="t" onConfirm={vi.fn()} onClose={onClose} />,
     );
-    expect(document.querySelector('canvas')).toBeNull();
+    // 关闭不卸载：子树保持挂载，仅退出 accessibility 树
+    expect(screen.queryByRole('dialog')).toBeNull();
     rerender(<HandwritingInputModal open title="t" onConfirm={vi.fn()} onClose={onClose} />);
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('误关重开：墨迹与校对区保留', async () => {
+    vi.mocked(transcribeHandwriting).mockResolvedValue({ text: '范仲淹', modelKey: 'local', elapsedMs: 100 });
+    const { rerender } = render(
+      <HandwritingInputModal open title="手写输入：作者" onConfirm={vi.fn()} onClose={vi.fn()} />,
+    );
+    const stroke = () => {
+      const canvas = document.querySelector('canvas')!;
+      fireEvent.pointerDown(canvas, { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 100, clientY: 50 });
+      fireEvent.pointerMove(canvas, { pointerId: 1, pointerType: 'mouse', buttons: 1, clientX: 160, clientY: 50 });
+      fireEvent.pointerUp(canvas, { pointerId: 1, pointerType: 'mouse', clientX: 160, clientY: 50 });
+    };
+    stroke();
+    fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '校对区' })).toHaveValue('范仲淹'));
+    // 再写一笔（strokes=1），随后误关
+    stroke();
+    rerender(<HandwritingInputModal open={false} title="手写输入：作者" onConfirm={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // 重开：strokes 仍在（识别按钮可用），校对区草稿保留
+    rerender(<HandwritingInputModal open title="手写输入：作者" onConfirm={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '识别并追加' })).not.toBeDisabled();
+    expect(screen.getByRole('textbox', { name: '校对区' })).toHaveValue('范仲淹');
   });
 });

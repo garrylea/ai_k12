@@ -21,8 +21,6 @@ export default function HandwritingInputModal({ open, title, onConfirm, onClose 
   const [recognizing, setRecognizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!open) return null;
-
   const recognizeDisabled = strokes === 0 || recognizing;
   const confirmDisabled = draft.trim() === '' || recognizing;
 
@@ -57,7 +55,12 @@ export default function HandwritingInputModal({ open, title, onConfirm, onClose 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-label={title}>
+    <div
+      className={`${open ? 'flex' : 'hidden'} fixed inset-0 z-50 items-center justify-center bg-black/40 p-4`}
+      hidden={!open}
+      role="dialog"
+      aria-label={title}
+    >
       <div className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-4 overflow-y-auto rounded-[var(--radius-card)] bg-white p-5 sm:p-6"
         style={{ border: '1px solid rgba(226, 232, 240, 0.8)' }}>
         <div className="flex items-center justify-between">
