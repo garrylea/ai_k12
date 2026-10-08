@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type {
   InterpretationJudgeResult,
@@ -98,6 +98,10 @@ export default function SentenceBlock({
   const locked = state !== 'editing';
   /** 当前展开内嵌手写板的字段：词名 或 'translation'；null = 收起 */
   const [padField, setPadField] = useState<string | null>(null);
+  // ref 镜像：识别是秒级异步，在途期间学生可能继续键入；onRecognized 触发时必须读
+  // valueRef.current（最新值），读渲染闭包里的 value 会把键入内容覆盖丢失。
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const hasUndetermined =
     result != null && (
       result.sentence.correct === null || result.terms.some((t) => t.correct === null)
@@ -237,9 +241,12 @@ export default function SentenceBlock({
         multiline={false}
         disabled={locked}
         onRecognized={(text) => {
-          if (padField === 'translation') onChange({ ...value, translation: value.translation + text });
-          else if (padField) onChange({ ...value, terms: { ...value.terms, [padField]: (value.terms[padField] ?? '') + text } });
+          const current = valueRef.current;
+          if (padField === 'translation') onChange({ ...current, translation: current.translation + text });
+          else if (padField) onChange({ ...current, terms: { ...current.terms, [padField]: (current.terms[padField] ?? '') + text } });
         }}
+        // 识别在途时收起不取消识别：resolve 后结果仍会追加进原字段（异步闭包不受收起影响，
+        // 实测已验证）——有意行为，不做 UI 提示。
         onClose={() => setPadField(null)}
       />
     </section>

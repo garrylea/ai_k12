@@ -8,6 +8,26 @@
 
 ---
 
+## 2026-10-08 · 语文手写输入交互 v2：弹层 → 内嵌手写板（+ ref 镜像修复波）
+
+### 交互改版（弹层 → 内嵌手写板）
+
+实测反馈：v1 弹层（`HandwritingInputModal`）遮挡上下文——解释页弹层一开就看不到要译的句子。用户裁决改**内嵌手写板**：手写模式下的校对框**就是**键盘模式的输入框（唯一真源、永远可见可编辑，无「确认填入」步骤）。点输入框旁【手写】→ 按钮隐藏、输入框下方展开 `InlineHandwritingPad`（HandwritingPad +「识别并追加」+【键盘】收起钮三件套）；识别结果按字段规则直接追加——多行字段（默写正文）非空先补 `\n`（分批写整篇），短字段（作者/朝代/词/翻译）直接拼接；追加后面板清空、保持展开。`HandwritingInputModal.tsx` 及其测试删除，spec（`2026-10-08-chinese-special-handwriting-input-design.md`）§0 记裁决、§3/§4.2/§4.3 与 §1 两行、§6/§7 弹层表述已就地加「（已作废，见 §0 v2）」标注。
+
+### key 清墨迹（用户裁决）
+
+`InlineHandwritingPad` 以 `key={padField ?? 'none'}` 随字段重挂载：切换/收起字段时墨迹天然清零，不会把上个字段的笔迹识别进新字段——取代 v1「弹层关闭不卸载、笔迹保留」的语义。
+
+### ref 镜像修复（终审波）
+
+识别是秒级异步：`onRecognized` 原先读渲染时闭包里的 `props.value`，识别在途期间学生切回键盘继续打字，回调触发时按陈旧 value 回填会把键入内容覆盖丢失。修法：`DictationAnswerForm` / `SentenceBlock` 各加 `valueRef` 每次渲染同步最新值，`onRecognized` 全部改读 `valueRef.current`（含 terms `?? ''` 分支与 body `endsWith('\n')` 判断）。回归测试「识别 pending 期间键入 → resolve 后键入保留」两文件各一例：不再整体 mock `InlineHandwritingPad`，改为 mock 底层 `HandwritingPad`（jsdom 无画布）与 `transcribeHandwriting`（手动 resolve 的 promise），走真实「识别并追加」异步链路；已验证去掉 ref 镜像该用例必红。
+
+### 附带实测勘误
+
+终审项曾记「识别在途收起会丢文本」；实测（jsdom 走真实链路）**收起不取消在途识别**，resolve 后结果仍追加进原字段（异步闭包不受收起/重挂载影响）。已在 `SentenceBlock.tsx` 收起逻辑处按实测行为加注释（有意行为、不做 UI 提示）。
+
+---
+
 ## 2026-10-08 语文专项手写输入：body limit 修复波（含全局 JSON parser 被顶掉的 P0 事故）
 
 ### 事故（fix round 1 → P0）

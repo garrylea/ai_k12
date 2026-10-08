@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import InlineHandwritingPad from '../handwriting/InlineHandwritingPad';
 
 export interface DictationAnswerValue {
@@ -23,6 +23,10 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
   const shortInputClass =
     'w-full h-12 px-4 rounded-xl bg-white text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--brand-500)]/30 disabled:opacity-70';
   const [padField, setPadField] = useState<Field | null>(null);
+  // ref 镜像：识别是秒级异步，在途期间学生可能继续键入；onRecognized 触发时必须读
+  // valueRef.current（最新值），读渲染闭包里的 value 会把键入内容覆盖丢失。
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   // 手写切换钮只在收起态渲染；展开时靠手写板上的「键盘」钮收起
   const padButton = (field: Field) =>
@@ -87,14 +91,15 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
         disabled={disabled}
         onRecognized={(text) => {
           if (!padField) return;
+          const current = valueRef.current;
           if (padField === 'body') {
-            const prev = value.body;
+            const prev = current.body;
             onChange({
-              ...value,
+              ...current,
               body: prev === '' || prev.endsWith('\n') ? prev + text : prev + '\n' + text,
             });
           } else {
-            onChange({ ...value, [padField]: value[padField] + text });
+            onChange({ ...current, [padField]: current[padField] + text });
           }
         }}
         onClose={() => setPadField(null)}

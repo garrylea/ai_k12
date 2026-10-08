@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useState } from 'react';
-import { cleanup, render, screen, fireEvent } from '@testing-library/react';
-import type { ComponentProps } from 'react';
-import type { InterpretationJudgeResult, InterpretationSentenceItem } from '@/services/api';
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import type { ComponentProps, ForwardedRef } from 'react';
+import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import type { HandwritingTranscribeResult, InterpretationJudgeResult, InterpretationSentenceItem } from '@/services/api';
+import { transcribeHandwriting } from '@/services/api';
 import SentenceBlock, { type InterpretationAnswerValue } from './SentenceBlock';
 
 // vitest globals:false 下 @testing-library/react 不会自动注册 afterEach cleanup，
@@ -159,19 +160,34 @@ describe('SentenceBlock — 三态', () => {
   });
 });
 
-vi.mock('../handwriting/InlineHandwritingPad', () => ({
-  default: ({ open, onRecognized, onClose }: { open: boolean; onRecognized: (t: string) => void; onClose: () => void }) =>
-    open ? (
-      <div>
-        <button type="button" data-testid="mock-pad" onClick={() => onRecognized('手写释义')}>
-          mock-pad
-        </button>
-        <button type="button" data-testid="mock-pad-close" onClick={onClose}>
-          mock-pad-close
-        </button>
-      </div>
-    ) : null,
+// 不再整体 mock InlineHandwritingPad：ref 镜像回归用例要走真实 pad 的「识别并追加」异步链路
+// （transcribeHandwriting 在途 → 键入 → resolve），因此 mock 底层画板与 API。
+vi.mock('@/services/api', () => ({
+  transcribeHandwriting: vi.fn(),
 }));
+
+/** jsdom 无画布：mock 底层 HandwritingPad——exportImage 恒有图、笔画数恒为 1（识别钮可点、识别后仍可再点）。 */
+vi.mock('../HandwritingPad', () => ({
+  default: forwardRef(function MockHandwritingPad(
+    { onStrokesChange }: { onStrokesChange?: (count: number) => void },
+    ref: ForwardedRef<{ exportImage: () => string | null; clear: () => void }>,
+  ) {
+    useImperativeHandle(ref, () => ({
+      exportImage: () => 'data:image/png;base64,mock',
+      clear: () => {},
+    }));
+    // 真实 pad 识别成功后会把笔画数清零；这里每次渲染恢复成 1，保持「识别并追加」可点
+    useEffect(() => { onStrokesChange?.(1); });
+    return <div data-testid="mock-handwriting-board" />;
+  }),
+}));
+
+const transcribeResult = (text: string): HandwritingTranscribeResult => ({ text, modelKey: 'mock', elapsedMs: 0 });
+
+afterEach(() => {
+  cleanup();
+  vi.mocked(transcribeHandwriting).mockReset();
+});
 
 /** stateful 宿主：value 真实流转，验证「识别 → 直接拼接」的连续追加。 */
 function StatefulHost(props: Partial<ComponentProps<typeof SentenceBlock>> = {}) {
@@ -187,27 +203,45 @@ describe('SentenceBlock — 手写入口', () => {
     for (const b of screen.getAllByRole('button', { name: '手写' })) expect(b).toBeDisabled();
   });
 
-  it('词的手写识别直接拼接进 terms；翻译直接拼接进 translation', () => {
+  it('词的手写识别直接拼接进 terms；翻译直接拼接进 translation', async () => {
+    vi.mocked(transcribeHandwriting).mockResolvedValue(transcribeResult('手写释义'));
     render(<StatefulHost />);
     fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
-    fireEvent.click(screen.getByTestId('mock-pad'));
-    expect(screen.getByDisplayValue('手写释义')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('mock-pad'));
-    expect(screen.getByDisplayValue('手写释义手写释义')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
+    expect(await screen.findByDisplayValue('手写释义')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
+    expect(await screen.findByDisplayValue('手写释义手写释义')).toBeInTheDocument();
 
     // 收起后手写钮全部恢复（3 个），翻译是 DOM 里最后一个
-    fireEvent.click(screen.getByTestId('mock-pad-close'));
+    fireEvent.click(screen.getByRole('button', { name: '键盘' }));
     fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]); // 翻译
-    fireEvent.click(screen.getByTestId('mock-pad'));
-    expect(screen.getByPlaceholderText('把这句话译成白话')).toHaveValue('手写释义');
+    fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
+    await waitFor(() => expect(screen.getByPlaceholderText('把这句话译成白话')).toHaveValue('手写释义'));
   });
 
   it('展开态：该字段手写钮隐藏、出现收起钮；收起后恢复', () => {
     render(<StatefulHost />);
     fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
     expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(2); // 词 2 + 翻译
-    expect(screen.getByTestId('mock-pad-close')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('mock-pad-close'));
+    expect(screen.getByRole('button', { name: '键盘' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '键盘' }));
     expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(3);
+  });
+
+  it('识别在途期间键入：resolve 后键入保留，不被陈旧 value 覆盖（ref 镜像回归，terms ?? \'\' 分支）', async () => {
+    let promiseResolve!: (v: HandwritingTranscribeResult) => void;
+    vi.mocked(transcribeHandwriting).mockImplementation(
+      () => new Promise<HandwritingTranscribeResult>((resolve) => { promiseResolve = resolve; }),
+    );
+    render(<StatefulHost />);
+    const termInput = () => screen.getAllByPlaceholderText('写出这个词的意思')[0]; // 词 1
+    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]); // 词 1
+    fireEvent.click(screen.getByRole('button', { name: '识别并追加' }));
+    // 识别在途，学生切回键盘继续键入
+    fireEvent.change(termInput(), { target: { value: '我译XYZ' } });
+    expect(termInput()).toHaveValue('我译XYZ');
+    await act(async () => { promiseResolve(transcribeResult('手写')); });
+    // 最终值 = 键入内容 + 识别结果（短字段直接拼接），键入没有被回滚
+    expect(termInput()).toHaveValue('我译XYZ手写');
   });
 });
