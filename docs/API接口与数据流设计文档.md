@@ -650,7 +650,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| POST | `/api/ai/handwriting/transcribe` | 请求体 `{image: dataURL}`（`data:image/png\|jpeg;base64,` 前缀，解码后 ≤4MB；缺失/前缀不符 400/4001、超限 400/4002）；上游模型失败 502/5502。**成功返回 201**（`@Post` 默认）。响应 `{text, modelKey, elapsedMs}`（text 已 trim） | MVP |
+| POST | `/api/ai/handwriting/transcribe` | 请求体 `{image: dataURL}`（`data:image/png\|jpeg;base64,` 前缀，解码后 ≤4MB；缺失/前缀不符 400/4001、超限 400/4002）；body 超 8MB（框架层 body-parser 上限）→ 413，正常不会触达（解码 4MB 上限对应 base64 ~5.5MB）；上游模型失败 502/5502。**成功返回 201**（`@Post` 默认）。响应 `{text, modelKey, elapsedMs}`（text 已 trim） | MVP |
 
 ---
 

@@ -1558,6 +1558,10 @@ paths:
                             description: 端到端耗时（毫秒）
         '400':
           description: image 缺失/非 dataURL 前缀（code 4001）；解码后超 4MB（code 4002）
+        '413':
+          description: >-
+            请求体超框架层 body-parser 上限（该路径放宽为 8MB）；正常不会触达
+            （解码 4MB 上限对应 base64 约 5.5MB）
         '502':
           description: 上游识别模型调用失败（code 5502）
 
