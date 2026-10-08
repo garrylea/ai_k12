@@ -17,6 +17,7 @@ import TargetedConfigPage from '@/pages/student/training/TargetedConfigPage';
 import TargetedRunPage from '@/pages/student/training/TargetedRunPage';
 import WeakPointGraphPage from '@/pages/student/training/WeakPointGraphPage';
 import StudentLockedPage from '@/pages/student/StudentLockedPage';
+import HandwritingDemoPage from '@/pages/dev/HandwritingDemoPage';
 import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
 import RemediationRunPage from '@/pages/student/training/RemediationRunPage';
 import ChineseSpecialPage from '@/pages/student/training/chinese/ChineseSpecialPage';
@@ -253,6 +254,11 @@ export const routes: RouteObject[] = [
         <StudentLockedPage />
       </RequireRole>
     ),
+  },
+  // 手写识别率调研 demo（2026-10-08，dev-only：不进导航；后端 JWT 把守，页面本身不做角色闸）
+  {
+    path: '/dev/handwriting-demo',
+    element: <HandwritingDemoPage />,
   },
   // 语文专项页（全屏沉浸层，独立于任何 Layout；仅「古诗文默写」开放）
   {

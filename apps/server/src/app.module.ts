@@ -27,6 +27,7 @@ import { DeviceControlModule } from './modules/device-control/device-control.mod
 import { AnalyticsModule } from './modules/analytics/analytics.module.js';
 import { AnalyticsInterceptor } from './common/interceptors/analytics.interceptor.js';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware.js';
+import { DevModule } from './modules/dev/dev.module.js';
 
 @Module({
   imports: [
@@ -60,6 +61,8 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
     // 注入到 FamilySubscriptionsRepository（BillingModule 已 export 该仓储；
     // AuthModule 内部也 import 同一模块实例，provider 不会重复注册）。
     BillingModule,
+    // 手写识别率调研 demo（2026-10-08）—— dev-only 两个端点，不落库
+    DevModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
