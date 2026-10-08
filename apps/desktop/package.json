@@ -1,7 +1,7 @@
 {
   "name": "k12-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "K12 智学 PC App（Electron 壳）。安装包由 GitHub Actions 出，见 docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md",
   "main": "main.js",
   "scripts": {
