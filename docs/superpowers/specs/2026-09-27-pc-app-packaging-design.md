@@ -1,5 +1,8 @@
 # PC App 打包与三平台分发（③）— 设计
 
+> **修订（2026-10-07）**：mac 产物形态 dmg → pkg，见 `2026-10-07-pc-app-mac-pkg-installer-design.md`；
+> 本文涉 mac dmg 的章节以修订 spec 为准。
+
 > **架构锚点**：`apps/desktop/`（Electron 壳，② 已交付）、`tools/services.sh`（Web 层托管）、
 > `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md`（②，本设计的前置）、
 > `apps/desktop/server-url.js`（**服务器地址的唯一真源**，本设计复用）。

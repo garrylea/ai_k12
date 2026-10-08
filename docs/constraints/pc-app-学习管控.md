@@ -106,10 +106,18 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   别「顺手」打开签名 —— 会产出本机/CI 不一致的产物
 - **`electron-builder.yml` 里故意不写 `publish`**：地址的唯一真源是 `apps/desktop/server-url.js`，
   CI 与 `tools/publish-installer.sh` 都从它推导。**别把 URL 抄进 yml**（那就是第二处、必然漂移）
-- **mac 包只能在 macOS runner 上构建**（`dmg` 依赖 `hdiutil`）；win/linux 只出 x64。
+- **mac 包只能在 macOS runner 上构建**（`pkg` 走 `productbuild`，macOS 自带）；win/linux 只出 x64。
   **本机出不了 AppImage**（要 docker）—— 本机验证一律用 `--mac`
-- **不签名 → macOS 15+ 没有「右键→打开」这条路**：交付文档只能给
-  `xattr -dr com.apple.quarantine` 或「系统设置 → 隐私与安全性 → 仍要打开」
+- **mac 产物是 `.pkg` 不是 dmg**（2026-10-07 spec）：Installer.app 不向产物传播 quarantine（实测见
+  spec §2），安装零终端；dmg 路线废止的原因是 quarantine 会**静默断掉 App 的局域网访问**
+  （App 能启动但永远「暂时连不上学习服务器」，浏览器却正常 —— 别再当网络/代码问题排查）
+- **禁止任何人直接 `electron-builder --mac` 打 pkg**：electron-builder 26.15.3 的 pkg target 在
+  未签名 + 双架构单次构建下，两个架构的并行任务共享同一批中间产物（`com.<bundleId>.pkg` /
+  `distribution.xml`，文件名不含架构）互踩竞态，**静默**产出装不上 Intel 机器的坏包
+  （x64 包里是 arm64 主程序），时序性出现、无任何报错。所以 yml 的 mac target 用 `dir` 只出 .app，
+  pkg 封装收口到 `tools/app-build.sh` 与 CI 的 `pkgbuild`，且封装前用 `file` 校验主二进制架构
+- **不签名 → pkg 双击首次仍被 Gatekeeper 拦一次**：交付文档给「系统设置 → 隐私与安全性 → 仍要打开」
+  （GUI）；`xattr` 终端命令只作为旧 dmg 包的兜底说明保留
 
 ### 出包 / 发布的入口（2026-09-28 补）
 

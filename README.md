@@ -89,9 +89,9 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
   （学生/家长在局域网内直接取，不需要学生机访问公网）
   - **发布过之后**，`/download/` 会打开一张由 `tools/publish-installer.sh` 生成的下载页，
     页面上列出下载目录里实际存在的全部产物（含大小，并标注哪个是本次发布、哪些是早期版本）；逐个点链接即可下载。单文件直链形如
-    `<服务器地址>/download/<文件名>`（例如 `http://192.168.1.5:5173/download/k12-desktop-0.1.0-arm64.dmg`）
+    `<服务器地址>/download/<文件名>`（例如 `http://192.168.1.5:5173/download/k12-desktop-0.1.0-arm64.pkg`）
   - ⚠️ **文件名打错不会 404**：`vite preview` 没有目录列表、且用的是 SPA 回退，
-    未命中的路径会返回**学习应用本体**（HTTP 200 + HTML），浏览器会把这份 HTML 存成 `.dmg`。
+    未命中的路径会返回**学习应用本体**（HTTP 200 + HTML），浏览器会把这份 HTML 存成 `.pkg`。
     所以**只从下载页点链接**，别手敲文件名。**没发布过之前 `/download/` 里没有下载页**
     （访问它同样拿到的是应用本体，不是文件列表）
 - **怎么产出**：用出包入口脚本，**参数的唯一说明处是它的 `--help`**
@@ -99,8 +99,8 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
   ```bash
   bash tools/app-build.sh --help                # 全部参数与示例
   bash tools/app-build.sh --check               # 改完壳先跑这个：测试 + 最小出包 + 资源自检（约 10s）
-  bash tools/app-build.sh --local               # 本机出两个 mac dmg：x64 + arm64（约 1min）
-  bash tools/app-build.sh --local --manifest    # 上面两个 dmg 再加更新清单 latest-mac.yml
+  bash tools/app-build.sh --local               # 本机出两个 mac pkg：x64 + arm64（约 1min）
+  bash tools/app-build.sh --local --manifest    # 上面两个 pkg 再加更新清单 latest-mac.yml（若仍产出）
   ```
 
   - **Windows / Linux 产物本机出不了**（NSIS 要 wine、AppImage 要 docker），只能走 CI：
@@ -121,7 +121,7 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 - **怎么发布到服务器**（把从 artifact 或本机 `dist/` 解压/产出的文件拷到 web 层的 `/download/`）：
 
   ```bash
-  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-0.1.0-arm64.dmg apps/desktop/dist/latest-mac.yml
+  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-0.1.0-arm64.pkg apps/desktop/dist/latest-mac.yml
   # 等价于 bash tools/publish-installer.sh <安装包> <latest.yml> [latest-linux.yml ...]（同一实现，只是统一了入口）
   # 建议连每个安装包旁的 .blockmap 一起传（差量更新用；缺了它 ④ 只能回退成全量下载）
   # 同时会（重新）生成 /download/ 的下载页，页面上列出目录里实际存在的产物，并标注本次发布 / 早期版本
@@ -130,19 +130,19 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
   #    所以工作区里未提交的前端改动会被一并构建、立刻对局域网生效 —— 发布前先确认工作区干净。
   ```
 
-#### ⚠️ macOS 首次打开：会被 Gatekeeper 拦（未签名）
+#### ⚠️ macOS 安装与首次打开（未签名）
 
-安装包**没有代码签名、也没有公证**，所以首次打开会被系统拦下。按下面任一条处理后即可正常使用：
+安装包是 `.pkg`，**没有代码签名、也没有公证**。双击安装，若提示「无法验证开发者 / 不能打开」：
 
-```bash
-# 推荐：去掉隔离属性（把路径换成实际装的位置）
-xattr -dr com.apple.quarantine "/Applications/K12 智学.app"
-```
+1. 到 **系统设置 → 隐私与安全性**，找到关于 K12 智学 的拦截提示，点 **仍要打开**；
+2. 再次双击 `.pkg`，按安装器「继续 → 安装」，输入开机密码；
+3. 完成后从启动台或「应用程序」打开「K12 智学」。**全程不需要终端。**
 
-或走界面：**系统设置 → 隐私与安全性 → 仍要打开**。
-
-> ⚠️ **不要按老文章去「右键 → 打开」** —— 自 macOS 15 (Sequoia) 起 Apple **已移除**这条捷径，
-> 现在右键打开仍会被拦，甚至提示「已损坏」。这不是文件坏了。
+> pkg 安装器装出的应用**不带隔离属性**，不会出现「能打开却一直『暂时连不上学习服务器』」的
+> quarantine 问题（2026-10-07 事故，见 docs/superpowers/specs/2026-10-07-pc-app-mac-pkg-installer-design.md）。
+> **早期发布的 .dmg 包**仍拖拽安装，若被拦需终端执行
+> `xattr -dr com.apple.quarantine "/Applications/K12 智学.app"` 或走「仍要打开」。
+> 不要按老文章去「右键 → 打开」—— macOS 15 起已移除这条捷径。
 
 #### ⚠️ Windows 首次打开：会被 SmartScreen 拦（未签名）
 

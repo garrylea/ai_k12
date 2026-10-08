@@ -8,6 +8,32 @@
 
 ---
 
+## 2026-10-07 · PC App mac 分发 dmg → pkg（quarantine 局域网事故）
+
+### 事故经过
+
+第二台 MacBook 上装好的「K12 智学」**App 能启动，但永远显示「暂时连不上学习服务器」，同机浏览器访问却完全正常**。排查绕了弯（先怀疑 config.json 覆盖、再怀疑网络），最终根因是：**dmg 拖拽安装的 .app 带 quarantine 隔离属性** —— 它不拦启动，但让包内 Chromium 拿不到局域网访问的沙箱许可，于是壳内所有局域网请求被静默拒绝。终端日志特征：`sandbox_extension_issue_file failed ... (Operation not permitted)`。
+
+**诊断路径（下次遇到先走这条）**：终端直接跑 `"/Applications/K12 智学.app/Contents/MacOS/K12 智学"` 看首行 `[shell] 加载地址`（排除 config.json 覆盖）→ `curl` 直连对照（排除网络）→ 系统设置「本地网络」权限 → `xattr -dr com.apple.quarantine "/Applications/K12 智学.app"` 清隔离验证。
+
+### pkg 改造与实测结论
+
+交付形态从 dmg 改为 pkg（spec `docs/superpowers/specs/2026-10-07-pc-app-mac-pkg-installer-design.md`），实测事实支撑：
+
+- **Installer.app 不向安装产物传播 quarantine**（`pkgbuild` + `installer` 实验：模拟浏览器下载的、带 quarantine 的 pkg，装出来的文件无任何 xattr）—— 这是「装完即用、零终端」的机制依据。
+- **electron-builder 26.15.3 的 pkg target 有双架构竞态**（放弃它的原因）：并行构建两架构时共享 `dist/com.k12zhixue.desktop.pkg` 与 `distribution.xml` 临时文件（文件名不含架构），互踩后 x64 包静默损坏（包内主程序是 arm64 Mach-O，装不上 Intel 机器），时序性抛硬币、无任何报错。故 `electron-builder.yml` 的 mac target 用 `dir` 只出 .app，pkg 封装收口到 `tools/app-build.sh` 与 CI 的 `pkgbuild`，封装前用 `file` 校验主二进制架构。
+- **`-target CurrentUserHomeDirectory` 会把绝对 install-location 拼到 home 下**（pkgbuild 实验），安装位置语义与直觉不符，未采用。
+- **pkg 产物不产出 `latest-mac.yml`**（dir target 无 distributable）；mac 自动更新本就不可用（未签名，既有裁决），该清单只服务 win/linux。
+
+### 改动清单
+
+- `apps/desktop/electron-builder.yml`：mac target `dmg` → `dir`（只出 .app，注释含竞态根因）。
+- `tools/app-build.sh` 与 CI：`pkgbuild` 封装双架构 pkg（封装前 `file` 校验架构）。
+- 下载页（`tools/publish-installer.sh` 生成的页面）：识别并列出 `.pkg`。
+- 文档口径同步：README mac 安装节改 pkg 双击 + Gatekeeper 流程（xattr 只作旧 dmg 包兜底保留）；`docs/constraints/pc-app-学习管控.md` 沉淀根因与禁直接 `electron-builder --mac` 约束；旧打包 spec 顶部加修订注记。
+
+---
+
 ## 2026-10-07 · 登录「记住我」
 
 登录/注册页新增「记住我」勾选（默认不勾，勾选后 token 存 localStorage，否则 sessionStorage 会话级登录）；新增 `services/authStorage` 统一鉴权键读写（登录/注册写入、全部读取点、`getAuthToken` 经它取 token）；登出清理覆盖双 storage；服务端零改动。背景：网吧等公共电脑关浏览器后残留登录态，默认会话级即可随浏览器关闭失效。PC App（Electron）内「记住我」默认勾选（isDesktopShell 判定），保持关 App 重开仍登录的旧行为；Web 端默认不勾。
