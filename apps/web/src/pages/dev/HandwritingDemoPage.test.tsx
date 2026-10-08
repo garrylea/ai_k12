@@ -37,7 +37,7 @@ const MockPad = forwardRef(function MockPad(
   );
 });
 // getter 延迟取 MockPad：vi.mock 工厂被提升到 const MockPad 初始化之前，直接引用会报 TDZ 错
-vi.mock('./DemoSketchPad', () => ({ get default() { return MockPad; } }));
+vi.mock('@/components/business/HandwritingPad', () => ({ get default() { return MockPad; } }));
 
 beforeEach(() => {
   vi.clearAllMocks();

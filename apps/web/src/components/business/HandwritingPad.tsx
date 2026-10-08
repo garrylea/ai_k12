@@ -1,8 +1,9 @@
-// apps/web/src/pages/dev/DemoSketchPad.tsx
+// apps/web/src/components/business/HandwritingPad.tsx
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useThemeStore } from '@/store/themeStore';
 
 /**
- * 手写识别调研 demo 的手写面板：DraftWhiteboard 精简复制（笔/橡皮/清空），
+ * 手写面板（原手写识别调研 demo 的 DemoSketchPad 泛化）：DraftWhiteboard 精简复制（笔/橡皮/清空），
  * 固定 720×360，导出白底黑字 PNG（识别模型对白底黑字最稳，导出不随主题，spec §4.3）。
  * 有意不 import draft-store：无题目隔离需求，笔迹只存组件内。
  */
@@ -64,13 +65,13 @@ function hitStroke(stroke: DemoStroke, x: number, y: number, threshold: number):
   return false;
 }
 
-export interface DemoSketchPadHandle {
+export interface HandwritingPadHandle {
   exportImage(): string | null;
   clear(): void;
 }
 
-const DemoSketchPad = forwardRef<DemoSketchPadHandle, { onStrokesChange?: (count: number) => void }>(
-  function DemoSketchPad({ onStrokesChange }, ref) {
+const HandwritingPad = forwardRef<HandwritingPadHandle, { onStrokesChange?: (count: number) => void }>(
+  function HandwritingPad({ onStrokesChange }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const strokesRef = useRef<DemoStroke[]>([]);
     const drawingRef = useRef(false);
@@ -78,6 +79,8 @@ const DemoSketchPad = forwardRef<DemoSketchPadHandle, { onStrokesChange?: (count
     const toolRef = useRef(tool);
     toolRef.current = tool;
     const drawingStrokeRef = useRef<DemoStroke | null>(null);
+
+    const themeMode = useThemeStore((s) => s.mode);
 
     const redraw = useCallback(() => {
       const canvas = canvasRef.current;
@@ -87,16 +90,16 @@ const DemoSketchPad = forwardRef<DemoSketchPadHandle, { onStrokesChange?: (count
       const dpr = window.devicePixelRatio || 1;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, BOARD_W, BOARD_H);
-      // 屏显笔迹颜色：写死深色（本页整体写死日间，spec §4.1）
-      ctx.strokeStyle = '#111827';
-      ctx.fillStyle = '#111827';
+      // 屏显笔迹颜色随主题（不存色值，重绘时读 CSS 变量，同 DraftWhiteboard）
+      const ink = (getComputedStyle(canvas).getPropertyValue('--text-primary') || '#333').trim();
+      ctx.strokeStyle = ink;
+      ctx.fillStyle = ink;
       for (const s of strokesRef.current) strokePath(ctx, s);
-      if (drawingStrokeRef.current) {
-        ctx.strokeStyle = '#111827';
-        ctx.fillStyle = '#111827';
-        strokePath(ctx, drawingStrokeRef.current);
-      }
+      if (drawingStrokeRef.current) strokePath(ctx, drawingStrokeRef.current);
     }, []);
+
+    // 主题变化：笔迹颜色自适应
+    useEffect(() => { redraw(); }, [themeMode, redraw]);
 
     // 固定尺寸画布：一次设置 dpr 缩放（720×360 逻辑 px）
     useEffect(() => {
@@ -241,4 +244,4 @@ const DemoSketchPad = forwardRef<DemoSketchPadHandle, { onStrokesChange?: (count
   },
 );
 
-export default DemoSketchPad;
+export default HandwritingPad;

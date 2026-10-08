@@ -7,11 +7,11 @@ import {
   type HandwritingRecognizeResult,
 } from '@/services/api';
 import { compareHandwriting, type CompareResult } from './handwriting-diff';
-import DemoSketchPad, { type DemoSketchPadHandle } from './DemoSketchPad';
+import HandwritingPad, { type HandwritingPadHandle } from '@/components/business/HandwritingPad';
 
 /** 手写识别率调研 demo（spec 2026-10-08）。dev-only：不进导航、不留档（内存累计，刷新清空）。 */
 export default function HandwritingDemoPage() {
-  const padRef = useRef<DemoSketchPadHandle>(null);
+  const padRef = useRef<HandwritingPadHandle>(null);
   const [models, setModels] = useState<HandwritingModel[] | null>(null);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelKey, setModelKey] = useState('');
@@ -104,7 +104,7 @@ export default function HandwritingDemoPage() {
           </button>
         </div>
 
-        <DemoSketchPad ref={padRef} onStrokesChange={setStrokes} />
+        <HandwritingPad ref={padRef} onStrokesChange={setStrokes} />
 
         {error && <p className="text-sm text-red-600">识别失败：{error}</p>}
 

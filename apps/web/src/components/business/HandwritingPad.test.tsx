@@ -1,8 +1,8 @@
-// apps/web/src/pages/dev/DemoSketchPad.test.tsx
+// apps/web/src/components/business/HandwritingPad.test.tsx
 import { it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, render, fireEvent } from '@testing-library/react';
 import { createRef } from 'react';
-import DemoSketchPad, { type DemoSketchPadHandle } from './DemoSketchPad';
+import HandwritingPad, { type HandwritingPadHandle } from './HandwritingPad';
 
 beforeEach(() => {
   // jsdom 无 canvas 2d：记录型 stub（模式同 DraftWhiteboard.test.tsx）
@@ -27,18 +27,18 @@ function penLine(canvas: Element, y: number) {
 }
 
 it('初始无笔画：onStrokesChange(0)，exportImage 返回 null', () => {
-  const ref = createRef<DemoSketchPadHandle>();
+  const ref = createRef<HandwritingPadHandle>();
   const onStrokesChange = vi.fn();
-  const { container } = render(<DemoSketchPad ref={ref} onStrokesChange={onStrokesChange} />);
+  const { container } = render(<HandwritingPad ref={ref} onStrokesChange={onStrokesChange} />);
   expect(onStrokesChange).toHaveBeenCalledWith(0);
   expect(ref.current!.exportImage()).toBeNull();
   expect(container.querySelector('canvas')).toBeTruthy();
 });
 
 it('画一条笔画 → count 1；exportImage 返回 dataURL；清空 → count 0 且 export 为 null', () => {
-  const ref = createRef<DemoSketchPadHandle>();
+  const ref = createRef<HandwritingPadHandle>();
   const onStrokesChange = vi.fn();
-  const { container } = render(<DemoSketchPad ref={ref} onStrokesChange={onStrokesChange} />);
+  const { container } = render(<HandwritingPad ref={ref} onStrokesChange={onStrokesChange} />);
   penLine(container.querySelector('canvas')!, 50);
   expect(onStrokesChange).toHaveBeenLastCalledWith(1);
   expect(ref.current!.exportImage()).toBe('data:image/png;base64,AAA');
@@ -48,9 +48,9 @@ it('画一条笔画 → count 1；exportImage 返回 dataURL；清空 → count 
 });
 
 it('橡皮：擦过的笔画整条消失', () => {
-  const ref = createRef<DemoSketchPadHandle>();
+  const ref = createRef<HandwritingPadHandle>();
   const onStrokesChange = vi.fn();
-  const { container } = render(<DemoSketchPad ref={ref} onStrokesChange={onStrokesChange} />);
+  const { container } = render(<HandwritingPad ref={ref} onStrokesChange={onStrokesChange} />);
   const canvas = container.querySelector('canvas')!;
   penLine(canvas, 50);
   fireEvent.click(container.querySelector('button[title="橡皮"]')!);
