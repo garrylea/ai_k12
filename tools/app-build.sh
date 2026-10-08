@@ -74,7 +74,7 @@ list_dist() {
   log "dist 产物："
   (
     cd "$DESKTOP_DIR/dist" 2>/dev/null || return 0
-    for f in *.dmg *.pkg *.exe *.AppImage *.blockmap latest*.yml; do
+    for f in *.pkg *.exe *.AppImage *.blockmap latest*.yml; do
       [ -f "$f" ] || continue
       printf '  %s (%s)\n' "$f" "$(du -h "$f" | cut -f1)"
     done
@@ -92,14 +92,14 @@ PC App 出包入口
                        不产出安装包、不清空 dist、不碰 web 层。改完壳先跑这个。
   --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64 两个 .app
                        （electron-builder --dir）并用 pkgbuild 封装成两个 pkg（约 1min），最后跑 asar 自检。
-  --online             GitHub Actions 出三平台包（mac dmg / win exe / linux AppImage）。
+  --online             GitHub Actions 出三平台包（mac pkg / win exe / linux AppImage）。
                        默认只做预检并打印要执行的命令；加 --yes 才真的打 tag 并推。
   --publish <文件...>  发布安装包到本机服务器 /download/ —— 转发给 tools/publish-installer.sh
                        （因此也接受它的 --no-build）。注意：会重建 web，替换 :5173 正在服务的 dist/
   --win | --linux      本机出不了（NSIS 要 wine、AppImage 要 docker），这里只说明原因与出路。
 
 选项：
-  --manifest           配合 --local：额外注入 publish 配置，产出 latest-mac.yml（发布/④ 要用）。
+  --manifest           配合 --local：注入 publish 配置（注：mac 产物为 pkg 后通常不产出 latest-mac.yml）。
                        不注入就没有更新清单。
   --yes                配合 --online：预检通过后真的打 tag 并推 origin。
   -h, --help           显示本页。
@@ -107,7 +107,7 @@ PC App 出包入口
 示例（把 <版本> 换成 apps/desktop/package.json 里的 version）：
   bash tools/app-build.sh --check                             # 改完壳，快速确认没坏
   bash tools/app-build.sh --local                             # 出两个 pkg
-  bash tools/app-build.sh --local --manifest                  # 出 pkg + latest-mac.yml
+  bash tools/app-build.sh --local --manifest                  # 注入 publish 配置（mac pkg 不产出 latest-mac.yml）
   bash tools/app-build.sh --online                            # 看要推什么（不推）
   bash tools/app-build.sh --online --yes                      # 预检通过后推 tag，触发 CI
   bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.pkg
@@ -120,7 +120,7 @@ USAGE
 mode_check() {
   require_builder
   run_tests
-  log "最小出包（--dir：只产出 .app，不打包成 dmg）…"
+  log "最小出包（--dir：只产出 .app，不打包成 pkg）…"
   run_builder --mac --dir
   verify_asar
   log "--check 通过：测试绿 + 壳能装起来 + 包内资源白名单完整。（本次未产出安装包）"
@@ -133,12 +133,13 @@ mode_local() {
     [ -f "$DESKTOP_DIR/server-url.js" ] || die "找不到 $DESKTOP_DIR/server-url.js（服务器地址的唯一真源）"
     local url
     url="$(server_url)"
-    log "注入 publish 配置以产出更新清单：$url/download"
+    log "注入 publish 配置：$url/download"
+    warn "mac 产物为 pkg（dir target），本次不会产出 latest-mac.yml —— ④ 自动更新在 mac 本就不可用；该注入只对将来可能的 zip/electron-updater 路径有意义"
     args+=( --config.publish.provider=generic "--config.publish.url=$url/download" )
   fi
   log "清空 apps/desktop/dist …"
   rm -rf "$DESKTOP_DIR/dist"
-  log "出 mac .app（双架构 --dir，不打 dmg）…"
+  log "出 mac .app（双架构 --dir，不打 pkg）…"
   # ⚠️ 这里**不要**再传 CLI `--dir`：它会整包覆盖 yml 的 mac.target，连 per-target 的
   #    arch 清单 [x64, arm64] 一起丢掉，只出本机架构（2026-10-08 实测只出了 mac-arm64）。
   #    dir 这个 target 已写在 electron-builder.yml 的 mac.target 里，交给它即可。
@@ -160,7 +161,7 @@ mode_local() {
   done
   list_dist
   if [ "$MANIFEST" -eq 0 ]; then
-    warn "本次没有更新清单（未加 --manifest）—— 发布给 ④ / 自动更新用时需要它"
+    warn "本次没有更新清单 —— mac 产物为 pkg 本就不产出 latest-mac.yml（与是否加 --manifest 无关）"
   fi
 }
 
@@ -247,7 +248,7 @@ mode_online() {
 }
 
 mode_publish() {
-  [ "$#" -ge 1 ] || die "--publish 需要至少一个文件，例如：--publish apps/desktop/dist/k12-desktop-0.1.0-arm64.dmg"
+  [ "$#" -ge 1 ] || die "--publish 需要至少一个文件，例如：--publish apps/desktop/dist/k12-desktop-0.1.0-arm64.pkg"
   log "转发给 tools/publish-installer.sh（发布到服务器 /download/）…"
   exec bash "$SCRIPT_DIR/publish-installer.sh" "$@"
 }
@@ -315,7 +316,7 @@ if [ "$CONFIRM" -eq 1 ] && [ "$MODE" != online ]; then
   warn "--yes 只对 --online 有意义（当前模式：--${MODE}），本次已忽略"
 fi
 # --publish 收下它后面的**所有**参数（文件名里可能有空格），所以任何选项写在它后面都会变成文件名。
-# 静默吞掉最糟（2026-09-28 评审发现：`--publish a.dmg --yes` 会让 --yes 无声消失），这里点出来。
+# 静默吞掉最糟（2026-09-28 评审发现：`--publish a.pkg --yes` 会让 --yes 无声消失），这里点出来。
 if [ "$MODE" = publish ]; then
   for _a in "${PUBLISH_ARGS[@]}"; do
     case "$_a" in
