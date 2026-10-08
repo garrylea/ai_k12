@@ -112,6 +112,24 @@ export default function SentenceBlock({
 
   const termResultOf = (term: string) => result?.terms.find((t) => t.term === term) ?? null;
 
+  // 手写板跟随当前编辑字段渲染（词框下/翻译框下），而非固定在卡片末尾。
+  // key 随 padField 重挂载：切换字段时墨迹天然清零；翻译与词都是短字段，识别结果直接拼接。
+  // 识别在途时收起不取消识别：resolve 后结果仍会追加进原字段（异步闭包不受收起影响，
+  // 实测已验证）——有意行为，不做 UI 提示。
+  const pad = (
+    <InlineHandwritingPad
+      key={padField ?? 'none'}
+      open={padField !== null}
+      disabled={locked}
+      onRecognized={(text) => {
+        const current = valueRef.current;
+        if (padField === 'translation') onChange({ ...current, translation: current.translation + text });
+        else if (padField) onChange({ ...current, terms: { ...current.terms, [padField]: (current.terms[padField] ?? '') + text } });
+      }}
+      onClose={() => setPadField(null)}
+    />
+  );
+
   return (
     <section
       className="rounded-2xl bg-white p-5 sm:p-6"
@@ -162,6 +180,7 @@ export default function SentenceBlock({
                     )}
                   </div>
                 </label>
+                {padField === term && pad}
                 {r && (
                   <div className="pl-[7.75rem]">
                     <ItemResultLine
@@ -203,6 +222,7 @@ export default function SentenceBlock({
             </button>
           )}
         </div>
+        {padField === 'translation' && pad}
       </label>
       {result && (
         <ItemResultLine
@@ -242,21 +262,6 @@ export default function SentenceBlock({
           重新判题
         </button>
       )}
-
-      {/* key 随 padField 重挂载：切换字段时墨迹天然清零；翻译与词都是短字段，识别结果直接拼接 */}
-      <InlineHandwritingPad
-        key={padField ?? 'none'}
-        open={padField !== null}
-        disabled={locked}
-        onRecognized={(text) => {
-          const current = valueRef.current;
-          if (padField === 'translation') onChange({ ...current, translation: current.translation + text });
-          else if (padField) onChange({ ...current, terms: { ...current.terms, [padField]: (current.terms[padField] ?? '') + text } });
-        }}
-        // 识别在途时收起不取消识别：resolve 后结果仍会追加进原字段（异步闭包不受收起影响，
-        // 实测已验证）——有意行为，不做 UI 提示。
-        onClose={() => setPadField(null)}
-      />
     </section>
   );
 }

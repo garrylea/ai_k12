@@ -44,6 +44,30 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
       </button>
     );
 
+  // 手写板跟随当前编辑字段渲染（作者框下/朝代框下/正文框下），而非固定在组件末尾。
+  // key 随 padField 重挂载：切换字段时墨迹天然清零，不会把上个字段的笔迹识别进新字段。
+  const pad = (
+    <InlineHandwritingPad
+      key={padField ?? 'none'}
+      open={padField !== null}
+      disabled={disabled}
+      onRecognized={(text) => {
+        if (!padField) return;
+        const current = valueRef.current;
+        if (padField === 'body') {
+          const prev = current.body;
+          onChange({
+            ...current,
+            body: prev === '' || prev.endsWith('\n') ? prev + text : prev + '\n' + text,
+          });
+        } else {
+          onChange({ ...current, [padField]: current[padField] + text });
+        }
+      }}
+      onClose={() => setPadField(null)}
+    />
+  );
+
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -60,6 +84,7 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2">{padToggle('author')}</div>
           </div>
+          {padField === 'author' && pad}
         </label>
         <label className="flex flex-col gap-2">
           <span className="text-sm font-bold text-[var(--text-primary)]">朝代</span>
@@ -74,6 +99,7 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2">{padToggle('dynasty')}</div>
           </div>
+          {padField === 'dynasty' && pad}
         </label>
       </div>
 
@@ -90,28 +116,8 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
           />
           <div className="absolute right-3 top-3">{padToggle('body')}</div>
         </div>
+        {padField === 'body' && pad}
       </label>
-
-      {/* key 随 padField 重挂载：切换字段时墨迹天然清零，不会把上个字段的笔迹识别进新字段 */}
-      <InlineHandwritingPad
-        key={padField ?? 'none'}
-        open={padField !== null}
-        disabled={disabled}
-        onRecognized={(text) => {
-          if (!padField) return;
-          const current = valueRef.current;
-          if (padField === 'body') {
-            const prev = current.body;
-            onChange({
-              ...current,
-              body: prev === '' || prev.endsWith('\n') ? prev + text : prev + '\n' + text,
-            });
-          } else {
-            onChange({ ...current, [padField]: current[padField] + text });
-          }
-        }}
-        onClose={() => setPadField(null)}
-      />
     </div>
   );
 }
