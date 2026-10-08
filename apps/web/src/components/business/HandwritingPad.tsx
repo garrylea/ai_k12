@@ -124,9 +124,12 @@ const HandwritingPad = forwardRef<
 
     const pointFromEvent = (e: React.PointerEvent<HTMLCanvasElement>): DemoPoint => {
       const rect = e.currentTarget.getBoundingClientRect();
+      // 画布 CSS 宽度随容器自适应（≤720），书写坐标按「逻辑坐标/实际显示宽」等比换算；
+      // jsdom rect 宽为 0，退化为 1（测试坐标即逻辑坐标）。
+      const scale = rect.width > 0 ? BOARD_W / rect.width : 1;
       return {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
+        x: (e.clientX - rect.left) * scale,
+        y: (e.clientY - rect.top) * scale,
         pressure: e.pointerType === 'mouse' ? 0.5 : e.pressure || 0.5,
       };
     };
@@ -201,7 +204,7 @@ const HandwritingPad = forwardRef<
     }));
 
     return (
-      <div className="inline-block rounded-[var(--radius-card)] border border-[var(--bg-subtle)] bg-white p-2">
+      <div className="block w-full max-w-[720px] rounded-[var(--radius-card)] border border-[var(--bg-subtle)] bg-white p-2">
         <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
@@ -235,7 +238,7 @@ const HandwritingPad = forwardRef<
         </div>
         <canvas
           ref={canvasRef}
-          style={{ width: BOARD_W, height: BOARD_H, touchAction: 'none' }}
+          style={{ width: '100%', height: 'auto', aspectRatio: '720 / 360', touchAction: 'none' }}
           className="block rounded-[var(--radius-button)] border border-[var(--bg-subtle)] bg-white"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
