@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type {
   InterpretationJudgeResult,
@@ -5,6 +6,7 @@ import type {
   InterpretationTermItem,
 } from '@/services/api';
 import ItemResultLine from './ItemResultLine';
+import HandwritingInputModal from '../handwriting/HandwritingInputModal';
 
 export interface InterpretationAnswerValue {
   /** term → 学生写的释义 */
@@ -94,6 +96,8 @@ export default function SentenceBlock({
   sentence, value, onChange, state, result, isLast, onNext, onRetry,
 }: Props) {
   const locked = state !== 'editing';
+  /** 当前打开手写弹层的字段：词名 或 'translation'；null = 关闭 */
+  const [padField, setPadField] = useState<string | null>(null);
   const hasUndetermined =
     result != null && (
       result.sentence.correct === null || result.terms.some((t) => t.correct === null)
@@ -138,6 +142,14 @@ export default function SentenceBlock({
                     })}
                     placeholder="写出这个词的意思"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setPadField(term)}
+                    disabled={locked}
+                    className="shrink-0 rounded-[var(--radius-button)] bg-[var(--bg-subtle)] px-3 py-1.5 text-xs font-bold text-[var(--text-primary)] disabled:opacity-50"
+                  >
+                    手写
+                  </button>
                 </label>
                 {r && (
                   <div className="pl-[7.75rem]">
@@ -166,6 +178,14 @@ export default function SentenceBlock({
           onChange={(e) => onChange({ ...value, translation: e.target.value })}
           placeholder="把这句话译成白话"
         />
+        <button
+          type="button"
+          onClick={() => setPadField('translation')}
+          disabled={locked}
+          className="self-start rounded-[var(--radius-button)] bg-[var(--bg-subtle)] px-3 py-1.5 text-xs font-bold text-[var(--text-primary)] disabled:opacity-50"
+        >
+          手写
+        </button>
       </label>
       {result && (
         <ItemResultLine
@@ -205,6 +225,17 @@ export default function SentenceBlock({
           重新判题
         </button>
       )}
+
+      <HandwritingInputModal
+        open={padField !== null}
+        title={padField === 'translation' ? '手写输入：整句翻译' : `手写输入：${padField ?? ''}`}
+        onConfirm={(v) => {
+          if (padField === 'translation') onChange({ ...value, translation: v });
+          else if (padField) onChange({ ...value, terms: { ...value.terms, [padField]: v } });
+          setPadField(null);
+        }}
+        onClose={() => setPadField(null)}
+      />
     </section>
   );
 }

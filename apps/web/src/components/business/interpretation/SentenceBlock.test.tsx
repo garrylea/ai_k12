@@ -157,3 +157,35 @@ describe('SentenceBlock — 三态', () => {
     expect(onNext).toHaveBeenCalledOnce();
   });
 });
+
+vi.mock('../handwriting/HandwritingInputModal', () => ({
+  default: ({ open, onConfirm }: { open: boolean; onConfirm: (v: string) => void }) =>
+    open ? (
+      <button type="button" data-testid="mock-pad-confirm" onClick={() => onConfirm('手写释义')}>
+        mock-confirm
+      </button>
+    ) : null,
+}));
+
+describe('SentenceBlock — 手写入口', () => {
+  it('editing 态每个词与翻译各有手写按钮；judged 态锁定禁用', () => {
+    const { rerender } = render(<SentenceBlock {...makeProps()} />);
+    expect(screen.getAllByRole('button', { name: '手写' })).toHaveLength(3); // 2 词 + 1 翻译
+    rerender(<SentenceBlock {...makeProps({ state: 'judged', result: JUDGED })} />);
+    for (const b of screen.getAllByRole('button', { name: '手写' })) expect(b).toBeDisabled();
+  });
+
+  it('词的手写确认回填 terms；翻译确认回填 translation', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<SentenceBlock {...makeProps({ onChange })} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[0]);
+    fireEvent.click(screen.getByTestId('mock-pad-confirm'));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ terms: expect.objectContaining({ '滕子京谪（zhé）守巴陵郡': '手写释义' }) }),
+    );
+    rerender(<SentenceBlock {...makeProps({ onChange })} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '手写' })[2]); // 翻译是最后一个
+    fireEvent.click(screen.getByTestId('mock-pad-confirm'));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ translation: '手写释义' }));
+  });
+});
