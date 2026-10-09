@@ -12,6 +12,7 @@ const navItems = [
   { to: '/admin/billing', label: '订阅裁决' },
   { to: '/admin/alerts', label: '预警数据' },
   { to: '/admin/security', label: '账号安全' },
+  { to: '/admin/analytics', label: '数据分析' },
 ];
 
 /**
