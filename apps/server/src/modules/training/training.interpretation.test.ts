@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TrainingService } from './training.service';
+import type { EventsService } from '../analytics/events.service.js';
 
 /**
  * 解释专项 service 层单测（纯 mock，不连真 DB、不调真 LLM）。
@@ -53,6 +54,7 @@ function makeService(overrides: {
   award?: unknown;
   awardThrows?: Error;
   todayKey?: string;
+  events?: EventsService;
 } = {}) {
   const dictationRepo = {
     findById: vi.fn().mockResolvedValue(overrides.passage === undefined ? PASSAGE : overrides.passage),
@@ -90,6 +92,7 @@ function makeService(overrides: {
     dictationRepo as never, { generate: vi.fn() } as never, interpretationJudge as never,
     points as never, {} as never,
     specialLogsRepo as never,
+    overrides.events,
   );
   return { service, dictationRepo, interpretationJudge, mainErrorRepo, hiddenRepo, questionHintsRepo, explanationCache, points, specialLogsRepo };
 }
@@ -538,5 +541,21 @@ describe('TrainingService — 解释专项 judgeInterpretation：专项日志（
       terms: [{ term: '谪守', answer: '贬官' }], translation: '庆历四年的春天。',
     });
     expect(res).toHaveProperty('allCorrect');
+  });
+});
+
+describe('TrainingService — 解释专项 judgeInterpretation：埋点 special_unit_judged（Phase 2）', () => {
+  it('判题写专项日志的同时发 special_unit_judged', async () => {
+    const events = { track: vi.fn() } as unknown as EventsService;
+    const { service } = makeService({ events });
+    await service.judgeInterpretation({
+      studentId: 7, passageId: 12, sentenceIndex: 0,
+      terms: [{ term: '谪守', answer: '贬官' }], translation: '庆历四年的春天。',
+    });
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'special_unit_judged', source: 'server', studentId: 7,
+      module: 'chinese_interpretation', refType: 'passage', refId: 12,
+      props: { verdict: 'incorrect' },
+    }));
   });
 });

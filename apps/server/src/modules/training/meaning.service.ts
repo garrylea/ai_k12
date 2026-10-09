@@ -10,6 +10,7 @@ import type { PointsAwardReason } from '../points/dto/points.dto.js';
 import { stripPinyinAnnotation } from '../../common/utils/normalize-chinese.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
+import { EventsService } from '../analytics/events.service.js';
 import type {
   MeaningPassageListItem, MeaningPassageItem, MeaningJudgeResult,
   MeaningTermJudgeItem, MeaningPartJudge,
@@ -36,6 +37,7 @@ export class MeaningService {
     private readonly meaningJudge: ChineseMeaningJudgeCapability,
     private readonly pointsService: PointsService,
     private readonly specialLogsRepo: SpecialPracticeLogsRepository,
+    private readonly events?: EventsService,
   ) {}
 
   /**
@@ -298,6 +300,12 @@ export class MeaningService {
         isCorrect: isCorrectOf(meaningVerdict),
         errorCounted: meaningVerdict === 'incorrect',
         sessionUid: null,
+      });
+      // 埋点（Phase 2）：与 insert 同一作用域、只在其成功路径发；track 自吞异常，双保险不重复包。
+      this.events?.track({
+        event: 'special_unit_judged', source: 'server', studentId: input.studentId,
+        module: 'chinese_meaning', refType: 'passage', refId: passage.id,
+        props: { verdict: meaningVerdict },
       });
     } catch (err) {
       // 埋点绝不阻断判题：失败只 warn

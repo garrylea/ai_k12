@@ -5,6 +5,7 @@ import { StudentWordProgressRepository } from '../../database/repositories/stude
 import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
+import { EventsService } from '../analytics/events.service.js';
 import { isCorrectOf } from '../../common/utils/special-practice.util.js';
 import { EnglishWordJudgeCapability } from '../../ai-core/capabilities/english-word-judge.capability.js';
 import type { EnglishWordJudgeMode } from '../../ai-core/types.js';
@@ -105,6 +106,7 @@ export class VocabularyService {
     private readonly trainingSessionsRepo: TrainingSessionsRepository,
     private readonly specialLogsRepo: SpecialPracticeLogsRepository,
     @Optional() deps?: VocabularyServiceDeps,
+    private readonly events?: EventsService,
   ) {
     this.judgeCapability = deps?.judge ?? new EnglishWordJudgeCapability();
     this.now = deps?.now ?? (() => new Date());
@@ -473,6 +475,12 @@ export class VocabularyService {
         errorCounted: delta.wrongDelta === 1,
         // sessionUid 本期恒 null：1B 不做「学习会话 ↔ 专项作答」串联，留列给后续。
         sessionUid: null,
+      });
+      // 埋点（Phase 2）：与 insert 同一作用域、只在其成功路径发；track 自吞异常，双保险不重复包。
+      this.events?.track({
+        event: 'special_unit_judged', source: 'server', studentId,
+        module: 'en_vocabulary', refType: 'word', refId: row.id,
+        props: { verdict: logVerdict },
       });
     } catch (err) {
       // 埋点绝不阻断判题：失败只 warn

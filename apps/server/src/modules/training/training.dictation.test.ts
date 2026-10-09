@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TrainingService, renderBodyDiff } from './training.service';
+import type { EventsService } from '../analytics/events.service.js';
 
 const PASSAGE = {
   id: 1, work_title: '静夜思', author: '李白', dynasty: '唐',
@@ -19,7 +20,7 @@ const AWARD_OK = { pointsAwarded: 2, balance: 2, totalEarned: 2, levelUp: null }
 
 function makeService(overrides: {
   passage?: unknown; judgeResult?: unknown; feedback?: unknown;
-  award?: unknown; awardThrows?: Error; todayKey?: string;
+  award?: unknown; awardThrows?: Error; todayKey?: string; events?: EventsService;
 } = {}) {
   const dictationRepo = {
     findById: vi.fn().mockResolvedValue(overrides.passage === undefined ? PASSAGE : overrides.passage),
@@ -50,6 +51,7 @@ function makeService(overrides: {
     dictationRepo as never, dictationFeedback as never, {} as never,
     points as never, {} as never,
     specialLogsRepo as never,
+    overrides.events,
   );
   return { service, dictationRepo, judgeCore, dictationFeedback, points, specialLogsRepo };
 }
@@ -295,6 +297,21 @@ describe('TrainingService.judgeDictation — 专项日志（Phase 1B）', () => 
 
     expect(specialLogsRepo.insert).toHaveBeenCalledWith(expect.objectContaining({
       verdict: 'correct', isCorrect: true, errorCounted: false,
+    }));
+  });
+});
+
+describe('TrainingService.judgeDictation — 埋点 special_unit_judged（Phase 2）', () => {
+  it('判题写专项日志的同时发 special_unit_judged', async () => {
+    const events = { track: vi.fn() } as unknown as EventsService;
+    const { service } = makeService({ events });
+    await service.judgeDictation({
+      studentId: 7, passageId: 1, author: '李白', dynasty: '唐', body: '床前明月光，疑是地上霜。',
+    });
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'special_unit_judged', source: 'server', studentId: 7,
+      module: 'chinese_dictation', refType: 'passage', refId: 1,
+      props: { verdict: 'incorrect' },
     }));
   });
 });

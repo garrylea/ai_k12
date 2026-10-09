@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
 import { VocabularyService } from './vocabulary.service.js';
 import type { EnglishWordRow, EnglishWordPoolRow } from '../../database/repositories/english-words.repo.js';
+import type { EventsService } from '../analytics/events.service.js';
 import type {
   VocabularyDirection,
   VocabularyOrder,
@@ -82,6 +83,7 @@ const harness = (opts: {
   random?: () => number;
   now?: () => Date;
   judgeVerdict?: string;
+  events?: EventsService;
 } = {}): Harness => {
   const rows = opts.rows ?? [ADDRESS, CARE];
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -127,6 +129,7 @@ const harness = (opts: {
       random: opts.random ?? (() => 0),
       now: opts.now ?? (() => new Date('2026-09-16T10:00:00+08:00')),
     },
+    opts.events,
   );
   return {
     service, wordsRepo, progressRepo, sessionsRepo, judge, specialLogsRepo,
@@ -706,6 +709,19 @@ describe('VocabularyService.judge — 专项日志（Phase 1B）', () => {
     const res = await h.service.judge(judgeInput({ promptKind: 'cn2en', answer: 'address' }), 7);
     expect(res).toHaveProperty('verdict');
     expect(res.verdict).toBe('correct');
+  });
+});
+
+describe('VocabularyService.judge — 埋点 special_unit_judged（Phase 2）', () => {
+  it('判题写专项日志的同时发 special_unit_judged', async () => {
+    const events = { track: vi.fn() } as unknown as EventsService;
+    const h = harness({ events });
+    await h.service.judge(judgeInput({ promptKind: 'cn2en', answer: 'adress' }), 7);
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'special_unit_judged', source: 'server', studentId: 7,
+      module: 'en_vocabulary', refType: 'word', refId: 1,
+      props: { verdict: 'incorrect' },
+    }));
   });
 });
 
