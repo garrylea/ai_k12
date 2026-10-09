@@ -11,6 +11,7 @@ const mkDeps = (overrides: Record<string, any> = {}) => ({
   parentsRepo: {
     findByPhone: vi.fn().mockResolvedValue(null),
     create: vi.fn().mockResolvedValue(9),
+    updatePassword: vi.fn().mockResolvedValue(undefined),
   },
   adminsRepo: {
     findByUsername: vi.fn().mockResolvedValue(null),
@@ -18,6 +19,10 @@ const mkDeps = (overrides: Record<string, any> = {}) => ({
   jwtService: { sign: vi.fn().mockReturnValue('fake-token') },
   subscriptionsService: {
     ensureTrial: vi.fn().mockResolvedValue(undefined),
+  },
+  resetCodeService: {
+    issue: vi.fn().mockReturnValue({ code: '123456', expiresIn: 300 }),
+    verify: vi.fn(),
   },
   ...overrides,
 });
@@ -29,6 +34,7 @@ const mkSvc = (d: ReturnType<typeof mkDeps>) =>
     d.parentsRepo as any,
     d.jwtService as any,
     d.subscriptionsService as any,
+    d.resetCodeService as any,
   );
 
 const student = {
@@ -113,5 +119,60 @@ describe('AuthService.register 家长注册', () => {
     await expect(mkSvc(d).register({ phone: '13800000000', password: '123456' }))
       .rejects.toMatchObject({ response: { code: 1004, message: '该手机号已注册' } });
     expect(d.parentsRepo.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.requestPasswordReset', () => {
+  it('未注册手机号 -> 1002「该手机号未注册」，不 issue', async () => {
+    const d = mkDeps();
+    await expect(mkSvc(d).requestPasswordReset('13800000000'))
+      .rejects.toMatchObject({ response: { code: 1002, message: '该手机号未注册' } });
+    expect(d.resetCodeService.issue).not.toHaveBeenCalled();
+  });
+
+  it('已注册手机号 -> issue 并返回 {code, expiresIn}', async () => {
+    const d = mkDeps({ parentsRepo: { findByPhone: vi.fn().mockResolvedValue(parent) } });
+    const r = await mkSvc(d).requestPasswordReset('13800000000');
+    expect(r).toEqual({ code: '123456', expiresIn: 300 });
+    expect(d.resetCodeService.issue).toHaveBeenCalledWith('13800000000');
+  });
+});
+
+describe('AuthService.resetPassword', () => {
+  const dto = { phone: '13800000000', code: '123456', newPassword: 'new-pass-1' };
+
+  it('验证码校验失败 -> 原样上抛（1003），不动数据库', async () => {
+    const d = mkDeps({
+      resetCodeService: {
+        issue: vi.fn(),
+        verify: vi.fn().mockImplementation(() => {
+          throw Object.assign(new Error('验证码错误'), {
+            response: { code: 1003, message: '验证码错误' },
+          });
+        }),
+      },
+    });
+    await expect(mkSvc(d).resetPassword(dto)).rejects.toMatchObject({ response: { code: 1003 } });
+    expect(d.parentsRepo.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('验证通过但家长已不存在（竞态）-> 1002，不更新密码', async () => {
+    const d = mkDeps(); // findByPhone 默认 null
+    await expect(mkSvc(d).resetPassword(dto))
+      .rejects.toMatchObject({ response: { code: 1002, message: '该手机号未注册' } });
+    expect(d.parentsRepo.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('成功路径 -> bcrypt 新哈希写入 updatePassword，返回 {success: true}，不签发 token', async () => {
+    const d = mkDeps({ parentsRepo: { findByPhone: vi.fn().mockResolvedValue(parent), updatePassword: vi.fn().mockResolvedValue(undefined) } });
+    const r = await mkSvc(d).resetPassword(dto);
+    expect(r).toEqual({ success: true });
+    expect(d.parentsRepo.updatePassword).toHaveBeenCalledTimes(1);
+    const [id, hash] = (d.parentsRepo.updatePassword as any).mock.calls[0];
+    expect(id).toBe(parent.id);
+    expect(hash).not.toBe(dto.newPassword);
+    // bcrypt 可比对：新哈希确实对应新密码（bcrypt 已在文件顶部 `import * as bcrypt`）
+    expect(await bcrypt.compare(dto.newPassword, hash)).toBe(true);
+    expect(d.jwtService.sign).not.toHaveBeenCalled(); // 不失效/不新发 token
   });
 });
