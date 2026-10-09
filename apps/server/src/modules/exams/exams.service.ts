@@ -238,17 +238,7 @@ export class ExamsService {
       const answers = await this.examSessionsRepo.findAnswersBySession(sessionId);
       return this.summarize(questions.length, answers);
     }
-    const summary = await this.finalizeSession(session);
-    // 埋点：只在真实收卷路径发（幂等重交不是一次新交卷）。track fire-and-forget，异常自吞。
-    this.events?.track({
-      event: 'exam_submitted',
-      source: 'server',
-      studentId,
-      module: 'exam',
-      refType: 'exam_session',
-      refId: sessionId,
-    });
-    return summary;
+    return this.finalizeSession(session);
   }
 
   /** 结果页：仅 submitted 可查（in_progress 409）；items JOIN questions 带 explanation。 */
@@ -375,6 +365,19 @@ export class ExamsService {
     await this.examSessionsRepo.markSubmitted(session.id);
     const points = toPointsAwardDto(await this.awardPaperPoints(session.student_id, session.id));
     const finalAnswers = await this.examSessionsRepo.findAnswersBySession(session.id);
+    // 埋点（Phase 2）：exam_submitted 的唯一收口在 finalizeSession——四条收卷路径
+    // （submit / getSession 超时 / submitAnswer 超时 / createSession 撞过期）都只对
+    // in_progress 会话执行本方法，天然幂等，且超时自动收卷同样发事件。
+    // track fire-and-forget，异常自吞，绝不影响交卷主链路。
+    this.events?.track({
+      event: 'exam_submitted',
+      source: 'server',
+      studentId: session.student_id,
+      module: 'exam',
+      refType: 'exam_session',
+      refId: session.id,
+      props: { paperId: session.paper_id },
+    });
     return { ...this.summarize(questions.length, finalAnswers), points };
   }
 

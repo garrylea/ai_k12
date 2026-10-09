@@ -692,6 +692,29 @@ describe('ExamsService.submit — 埋点（exam_submitted）', () => {
     expect(deps.examSessionsRepo.markSubmitted).not.toHaveBeenCalled();
     expect(deps.events.track).not.toHaveBeenCalled();
   });
+
+  it('getSession 触发超时自动收卷 → track 收到 exam_submitted（含 props.paperId）', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ deadline_at: new Date(Date.now() - 1000) })),
+      },
+    });
+    await mkSvc(deps).getSession(1, 77);
+
+    expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
+    expect(deps.events.track).toHaveBeenCalledTimes(1);
+    expect(deps.events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'exam_submitted',
+      source: 'server',
+      studentId: 1,
+      module: 'exam',
+      refType: 'exam_session',
+      refId: 77,
+      props: { paperId: 5 },
+    }));
+  });
 });
 
 describe('ExamsService.getSession', () => {
