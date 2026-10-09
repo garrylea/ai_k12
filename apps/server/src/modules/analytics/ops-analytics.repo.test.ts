@@ -82,8 +82,9 @@ describe('OpsAnalyticsRepository', () => {
     expect(String(evSql)).toContain("event = 'answer_submitted'");
     expect(String(evSql)).toContain('GROUP BY module');
     expect(evParams).toEqual([W.fromAt, W.toAt]);
-    // 全局约束：聚合 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容）
-    expect(allSql(pool)).not.toContain('execute');
+    // 全局约束：聚合 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容）；mock 池只实现了 query，
+    // repo 若改走 execute 会直接 TypeError，这里显式断言池上不存在 execute。
+    expect(pool.execute).toBeUndefined();
     expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
   });
 
@@ -170,8 +171,8 @@ describe('OpsAnalyticsRepository', () => {
     const [rowsSql, rowsParams] = pool.query.mock.calls[1];
     expect(String(rowsSql)).toContain('LIMIT ?');
     expect(rowsParams).toEqual([W.fromAt, W.toAt, 20, 0]);
-    // 全局约束：聚合/分页 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容）
-    expect(allSql(pool)).not.toContain('execute');
+    // 全局约束：聚合/分页 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容）；mock 池只实现了 query
+    expect(pool.execute).toBeUndefined();
     expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
   });
 });
@@ -340,7 +341,7 @@ describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls 
     expect(params).toEqual([W.fromAt, W.toAt]);
   });
 
-  it('qualityApi：失败口径 = status_code>=500 或 COALESCE(biz_code,5000)<>0（5000 与 filter 默认码一致）', async () => {
+  it('qualityApi：失败口径 = status_code>=500 或 biz_code IS NOT NULL（成功行 biz_code 恒 NULL）', async () => {
     const pool = poolWithQueries([[{ total: 100, failures: 8 }]]);
     const repo = new OpsAnalyticsRepository(pool);
     const r = await repo.qualityApi(W);
@@ -348,11 +349,34 @@ describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls 
     const [sql, params] = pool.query.mock.calls[0];
     expect(String(sql)).toContain('FROM api_request_logs');
     expect(String(sql)).toContain('status_code >= 500');
-    expect(String(sql)).toContain('COALESCE(biz_code, 5000) <> 0');
+    expect(String(sql)).toContain('biz_code IS NOT NULL');
     expect(params).toEqual([W.fromAt, W.toAt]);
   });
 
-  it('qualityErrorCodes：只统计失败行，按 COALESCE(biz_code,5000) 分组', async () => {
+  it('qualityApi：行级口径回归 —— 10 行中 1 行 biz_code=1001、1 行 5xx、8 行成功 → failures=2（apiFailureRate=0.2）', async () => {
+    // 写入方语义（analytics.interceptor）：成功 2xx 行 biz_code=NULL，只有异常路径才写数值 biz_code，
+    // 全表没有 biz_code=0 的行。旧谓词 COALESCE(biz_code,5000)<>0 会把 8 行成功行全判失败
+    // （failures=10、apiFailureRate=1.0）—— 本用例按行构造数据防其回归。
+    const rawRows = [
+      ...Array.from({ length: 8 }, () => ({ status_code: 200, biz_code: null })),
+      { status_code: 200, biz_code: 1001 },
+      { status_code: 503, biz_code: null },
+    ];
+    // mock 池真实消费构造行：按写入方语义逐行判定（成功 ⟺ biz_code IS NULL 且 status<500），
+    // 模拟 MySQL 对 SUM(status_code >= 500 OR biz_code IS NOT NULL) 的求值。
+    const query = vi.fn(async (sql: string) => {
+      if (!/biz_code IS NOT NULL/.test(sql) || /COALESCE\(biz_code/.test(sql)) {
+        throw new Error(`失败谓词漂移，疑似回归到 COALESCE 口径：${sql}`);
+      }
+      const failures = rawRows.filter((r) => r.status_code >= 500 || r.biz_code !== null).length;
+      return [[{ total: rawRows.length, failures }]];
+    });
+    const repo = new OpsAnalyticsRepository({ query } as any);
+    const r = await repo.qualityApi(W);
+    expect(r).toEqual({ total: 10, failures: 2 }); // apiFailureRate = 2/10 = 0.2（service 层 ratio）
+  });
+
+  it('qualityErrorCodes：只统计失败行（5xx 或 biz_code 非 NULL），按 COALESCE(biz_code,5000) 分组', async () => {
     const pool = poolWithQueries([[{ code: 5000, cnt: 5 }]]);
     const repo = new OpsAnalyticsRepository(pool);
     const r = await repo.qualityErrorCodes(W);
@@ -360,6 +384,8 @@ describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls 
     const [sql, params] = pool.query.mock.calls[0];
     expect(String(sql)).toContain('COALESCE(biz_code, 5000) AS code');
     expect(String(sql)).toContain('status_code >= 500');
+    expect(String(sql)).toContain('biz_code IS NOT NULL');
+    expect(String(sql)).not.toContain('COALESCE(biz_code, 5000) <> 0');
     expect(String(sql)).toContain('GROUP BY code');
     expect(params).toEqual([W.fromAt, W.toAt]);
   });
@@ -418,7 +444,7 @@ describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls 
     expect(String(rowsSql)).toContain('LIMIT ?');
     expect(String(rowsSql)).toContain('OFFSET ?');
     expect(rowsParams).toEqual(['tutoring', 'qwen-max', 0, 20, 40]);
-    expect(allSql(pool)).not.toContain('execute');
+    expect(pool.execute).toBeUndefined(); // 分页 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容）
     expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
   });
 

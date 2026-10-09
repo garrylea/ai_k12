@@ -600,13 +600,16 @@ export class OpsAnalyticsRepository {
   }
 
   /**
-   * /quality 的 API 失败面：失败口径 = HTTP 5xx 或 biz_code≠0
-   * （biz_code NULL 按 DEFAULT_BIZ_CODE=5000 归为失败，与 errorCodeDistribution 同一口径）。
+   * /quality 的 API 失败面：失败口径 = HTTP 5xx 或 biz_code 非 NULL。
+   * 写入方语义（analytics.interceptor）：成功 2xx 行 biz_code 恒为 NULL（拦截器读不到最终响应体），
+   * 只有异常路径才写数值 biz_code，全表没有 biz_code=0 的行 —— 所以失败判定用
+   * `biz_code IS NOT NULL`，不能用 `COALESCE(biz_code, 5000) <> 0`（会把成功行全判失败）。
+   * biz_code 非 NULL 的行在 errorCodeDistribution 里按其值归组；纯 5xx（biz_code NULL）归 5000。
    */
   async qualityApi(w: OpsWindow): Promise<QualityApiRow> {
     const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) AS total,
-              COALESCE(SUM(status_code >= 500 OR COALESCE(biz_code, ${DEFAULT_BIZ_CODE}) <> 0), 0) AS failures
+              COALESCE(SUM(status_code >= 500 OR biz_code IS NOT NULL), 0) AS failures
          FROM api_request_logs
         WHERE created_at >= ? AND created_at < ?`,
       [w.fromAt, w.toAt],
@@ -615,13 +618,13 @@ export class OpsAnalyticsRepository {
     return { total: Number(r.total ?? 0), failures: Number(r.failures ?? 0) };
   }
 
-  /** /quality 的错误码分布：只统计失败行，biz_code NULL 按 5000 归组。 */
+  /** /quality 的错误码分布：只统计失败行（5xx 或 biz_code 非 NULL），biz_code NULL 按 5000 归组。 */
   async qualityErrorCodes(w: OpsWindow): Promise<ErrorCodeDistRow[]> {
     const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT COALESCE(biz_code, ${DEFAULT_BIZ_CODE}) AS code, COUNT(*) AS cnt
          FROM api_request_logs
         WHERE created_at >= ? AND created_at < ?
-          AND (status_code >= 500 OR COALESCE(biz_code, ${DEFAULT_BIZ_CODE}) <> 0)
+          AND (status_code >= 500 OR biz_code IS NOT NULL)
         GROUP BY code
         ORDER BY cnt DESC`,
       [w.fromAt, w.toAt],
