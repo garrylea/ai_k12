@@ -4,8 +4,10 @@ import { ApiRequestLogsRepository } from '../../database/repositories/api-reques
 import { StudySessionsRepository } from '../../database/repositories/study-sessions.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
+import { BehaviorEventsRepository } from '../../database/repositories/behavior-events.repo.js';
 import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
 import { TelemetryService } from './telemetry.service.js';
+import { EventsService } from './events.service.js';
 import { StudySessionsService } from './study-sessions.service.js';
 import { AnalyticsController } from './analytics.controller.js';
 import { AnalyticsInterceptor } from '../../common/interceptors/analytics.interceptor.js';
@@ -42,6 +44,9 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
     ControlsRepository,
     StudySessionsService,
     AnalyticsInterceptor,
+    // Phase 2 行为事件流：字典与三道锁（tier 由字典决定 / client 白名单 / 隐私守卫）。
+    BehaviorEventsRepository,
+    EventsService,
     { provide: 'SUBJECTS_REPO_FOR_ANALYTICS', useExisting: SubjectsRepository },
   ],
   exports: [TelemetryService, AnalyticsInterceptor, StudySessionsService],
