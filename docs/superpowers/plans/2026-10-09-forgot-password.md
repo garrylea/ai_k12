@@ -38,7 +38,7 @@
 
 - [ ] **Step 1: 写失败测试**
 
-创建 `apps/server/src/modules/auth/password-reset-code.service.test.ts`：
+创建 `apps/server/src/modules/auth/password-reset-code.service.test.ts`（共 9 个 `it` 用例）：
 
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -222,7 +222,7 @@ export class PasswordResetCodeService {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/password-reset-code.service.test.ts`
-Expected: PASS（10 个用例全绿）
+Expected: PASS（9 个用例全绿）
 
 - [ ] **Step 5: 注册进 AuthModule**
 
