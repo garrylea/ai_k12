@@ -29,4 +29,18 @@ export class AdminAnalyticsController {
   modules(@Query() q: { from?: string; to?: string }) {
     return this.ops.modules(q);
   }
+
+  /** 漏斗：8 模块分步去重人数 + 相对上步转化；module 白名单越界 → 400/1001。 */
+  @Get('funnel')
+  @Roles('admin')
+  funnel(@Query() q: { module: string; from?: string; to?: string }) {
+    return this.ops.funnel(q);
+  }
+
+  /** 事件流：全部 tier（裁决 3），过滤 event/module/from/to，分页 20。 */
+  @Get('events')
+  @Roles('admin')
+  events(@Query() q: { event?: string; module?: string; from?: string; to?: string; page?: string }) {
+    return this.ops.events(q);
+  }
 }

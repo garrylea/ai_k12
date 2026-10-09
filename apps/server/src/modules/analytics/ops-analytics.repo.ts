@@ -45,6 +45,23 @@ export interface ModuleWindowRow {
   correct: number;
 }
 
+/** 漏斗单步过滤：`event = ?` 之外的条件（占位符形式 + 按序参数），由 service 组装。 */
+export interface FunnelStepFilter {
+  event: string;
+  extraWhere?: string;
+  extraParams?: unknown[];
+}
+
+/** /events 分页查询（全部 tier，不按 tier 过滤）。 */
+export interface EventsPageFilter {
+  event?: string;
+  module?: string;
+  fromAt: string;
+  toAt: string;
+  offset: number;
+  limit: number;
+}
+
 /**
  * 运营聚合只读 SQL（Phase 2 母 spec §7，Task 8：overview / modules 两个端点的数据面）。
  *
@@ -170,5 +187,58 @@ export class OpsAnalyticsRepository {
     return [...byModule.values()].sort(
       (a, b) => b.seconds - a.seconds || a.module.localeCompare(b.module),
     );
+  }
+
+  /**
+   * /funnel 数据面：窗口内按「每步条件」统计去重人数，GROUP BY event 一次查完。
+   * 每步条件 = `event = ?` + 该步额外条件（见 FunnelStepFilter）——
+   * mainline 第三步（完课发分）按 ★裁决走 `module IS NULL AND props->>'$.taskCode' = ?`，
+   * 所以不能用一条 `module = ?` 一刀切，必须每步独立 OR 分支。
+   */
+  async funnel(w: OpsWindow, steps: FunnelStepFilter[]): Promise<Map<string, number>> {
+    if (steps.length === 0) return new Map();
+    const stepConds = steps.map((s) => `(event = ?${s.extraWhere ? ` AND ${s.extraWhere}` : ''})`);
+    const params: unknown[] = [w.fromAt, w.toAt];
+    for (const s of steps) params.push(s.event, ...(s.extraParams ?? []));
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT event, COUNT(DISTINCT student_id) AS students
+         FROM behavior_events
+        WHERE student_id IS NOT NULL AND created_at >= ? AND created_at < ?
+          AND ${stepConds.join(' OR ')}
+        GROUP BY event`,
+      params,
+    );
+    const byEvent = new Map<string, number>();
+    for (const r of rows) byEvent.set(String(r.event), Number(r.students));
+    return byEvent;
+  }
+
+  /**
+   * /events 数据面：COUNT + SELECT 两条 SQL；动态条件拼占位符数组
+   * （条件存在才拼，绝不字符串插值用户输入——注入面）。不过滤 tier（delta spec 裁决 3）。
+   */
+  async eventsPage(q: EventsPageFilter): Promise<{ rows: RowDataPacket[]; total: number }> {
+    const conds = ['created_at >= ?', 'created_at < ?'];
+    const params: unknown[] = [q.fromAt, q.toAt];
+    if (q.event !== undefined) {
+      conds.push('event = ?');
+      params.push(q.event);
+    }
+    if (q.module !== undefined) {
+      conds.push('module = ?');
+      params.push(q.module);
+    }
+    const where = conds.join(' AND ');
+    const [countRows, rows] = await Promise.all([
+      this.pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total FROM behavior_events WHERE ${where}`,
+        params,
+      ),
+      this.pool.query<RowDataPacket[]>(
+        `SELECT * FROM behavior_events WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+        [...params, q.limit, q.offset],
+      ),
+    ]);
+    return { rows: rows[0], total: Number(countRows[0][0]?.total ?? 0) };
   }
 }
