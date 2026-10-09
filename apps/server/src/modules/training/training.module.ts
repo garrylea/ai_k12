@@ -7,6 +7,7 @@ import { VocabularyController } from './vocabulary.controller.js';
 import { VocabularyService } from './vocabulary.service.js';
 import { PracticeModule } from '../practice/practice.module.js';
 import { PointsModule } from '../points/points.module.js';
+import { AnalyticsModule } from '../analytics/analytics.module.js';
 import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository, EnglishWordsRepository, StudentWordProgressRepository, TrainingSessionsRepository, SpecialPracticeLogsRepository } from '../../database/repositories/index.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
@@ -52,7 +53,8 @@ import { ExamSessionsRepository } from '../../database/repositories/exam-session
  * `@Injectable()`、构造参数可选，列进 providers 由 Nest 直接零参 new。
  */
 @Module({
-  imports: [PracticeModule, PointsModule],
+  // imports AnalyticsModule（埋点 Phase 2）：TrainingController 注入其导出的 EventsService（hint_requested）
+  imports: [PracticeModule, PointsModule, AnalyticsModule],
   controllers: [TrainingController, VocabularyController, MeaningController, RemediationController],
   providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository, SpecialPracticeLogsRepository, RemediationService, RemediationGeneratorService, RemediationRepository, ExamSessionsRepository, VariationCapability],
 })

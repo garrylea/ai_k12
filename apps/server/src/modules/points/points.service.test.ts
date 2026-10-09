@@ -5,6 +5,7 @@ import { DEFAULT_RULES } from './default-rules.js';
 import type { PointRulesRepository, PointRuleRow } from '../../database/repositories/point-rules.repo.js';
 import type { PointLedgerRepository } from '../../database/repositories/point-ledger.repo.js';
 import type { StudentPointsRepository } from '../../database/repositories/student-points.repo.js';
+import type { EventsService } from '../analytics/events.service.js';
 
 /** 造数据时不需要满足 RowDataPacket 的 `constructor` 约束。 */
 type RuleFixture = Omit<PointRuleRow, 'constructor'>;
@@ -28,7 +29,7 @@ function ruleRow(over: Partial<RuleFixture> = {}): PointRuleRow {
 }
 
 /** 被测服务的全部依赖都是 mock：本用例不连真库。 */
-function harness(startNow = new Date(2026, 8, 17, 10, 0, 0)) {
+function harness(startNow = new Date(2026, 8, 17, 10, 0, 0), events?: { track: ReturnType<typeof vi.fn> }) {
   let current = startNow;
   // 默认时钟读 `current`；setClock 可换成「每次调用返回不同值」的序列钟，用来建模跨午夜读数。
   let clock: () => Date = () => current;
@@ -52,6 +53,7 @@ function harness(startNow = new Date(2026, 8, 17, 10, 0, 0)) {
     ledgerRepo as unknown as PointLedgerRepository,
     pointsRepo as unknown as StudentPointsRepository,
     () => clock(),
+    events as unknown as EventsService,
   );
   return {
     service,
@@ -282,6 +284,56 @@ describe('PointsService.award — 每日上限', () => {
       new Date(2026, 8, 19, 0, 0, 0, 0),
     );
     expect(h.ledgerRepo.insert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PointsService.award — 埋点（points_awarded）', () => {
+  it('成功发分（pointsAwarded>0）→ 发 points_awarded，refType/refId/props 透传', async () => {
+    const events = { track: vi.fn() };
+    const h = harness(new Date(2026, 8, 17, 10, 0, 0), events);
+    stubHappyPath(h);
+
+    await h.service.award({ studentId: 7, taskCode: 'en_vocabulary', tierKey: '10', dedupeKey: 'd1', refType: 'lesson', refId: 5 });
+
+    expect(events.track).toHaveBeenCalledTimes(1);
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'points_awarded',
+      source: 'server',
+      studentId: 7,
+      module: null,
+      refType: 'lesson',
+      refId: 5,
+      props: { taskCode: 'en_vocabulary', points: 2 },
+    }));
+  });
+
+  it('reason 命中（daily_limit）→ 不发事件', async () => {
+    const events = { track: vi.fn() };
+    const h = harness(new Date(2026, 8, 17, 10, 0, 0), events);
+    h.rulesRepo.findByStudent.mockResolvedValue([ruleRow({ daily_limit: 2 })]);
+    h.ledgerRepo.countTodayEarned.mockResolvedValue(2);
+    h.pointsRepo.find.mockResolvedValue({ totalEarned: 100, balance: 100 });
+
+    const result = await h.service.award(INPUT);
+
+    expect(result.reason).toBe('daily_limit');
+    expect(events.track).not.toHaveBeenCalled();
+  });
+
+  it('幂等命中（duplicate）→ 不发事件（即使返回首次分值 > 0）', async () => {
+    const events = { track: vi.fn() };
+    const h = harness(new Date(2026, 8, 17, 10, 0, 0), events);
+    h.rulesRepo.findByStudent.mockResolvedValue([ruleRow()]);
+    h.ledgerRepo.countTodayEarned.mockResolvedValue(0);
+    h.pointsRepo.find.mockResolvedValue({ totalEarned: 500, balance: 498 });
+    h.ledgerRepo.insert.mockResolvedValue({ id: 0, duplicate: true });
+    h.ledgerRepo.findByDedupeKey.mockResolvedValue({ points: 2 });
+
+    const result = await h.service.award(INPUT);
+
+    expect(result.reason).toBe('duplicate');
+    expect(result.pointsAwarded).toBe(2);
+    expect(events.track).not.toHaveBeenCalled();
   });
 });
 

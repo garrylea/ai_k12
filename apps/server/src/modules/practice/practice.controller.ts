@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Optional, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { PracticeService } from './practice.service.js';
+import type { EventsService } from '../analytics/events.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -13,7 +14,11 @@ import type { DiscussCardPracticeDto } from './dto/discuss-card-practice.dto.js'
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('student')
 export class PracticeController {
-  constructor(private readonly practiceService: PracticeService) {}
+  /** 埋点（Phase 2）：hint 端点打 hint_requested。@Optional 让既有零参构造不炸。 */
+  constructor(
+    private readonly practiceService: PracticeService,
+    @Optional() private readonly events?: EventsService,
+  ) {}
 
   @Post('judge')
   async judge(@Body() dto: JudgePracticeDto, @CurrentUser() user: JwtUser) {
@@ -65,6 +70,17 @@ export class PracticeController {
 
   @Post('hint')
   async hint(@Body() dto: HintPracticeDto, @CurrentUser() user: JwtUser) {
+    // 埋点（Phase 2，ops tier）：主线课堂练习要提示。HintPracticeDto 无 questionId 字段
+    //（题由 cardId/lessonId/questionText 定位），refId 无处取 → 传 null。
+    this.events?.track({
+      event: 'hint_requested',
+      source: 'server',
+      studentId: user.sub,
+      module: 'mainline',
+      scene: 'course_detail',
+      refType: 'question',
+      refId: null,
+    });
     return this.practiceService.getHint({
       studentId: user.sub,
       subjectId: dto.subjectId,

@@ -15,6 +15,7 @@ import {
 } from './levels.js';
 import type { LevelInfo } from './levels.js';
 import type { PointLedgerEntry, PointLedgerPage, PointsOverview } from './dto/points.dto.js';
+import type { EventsService } from '../analytics/events.service.js';
 
 export interface AwardInput {
   studentId: number;
@@ -84,6 +85,8 @@ export class PointsService {
     private readonly ledgerRepo: PointLedgerRepository,
     private readonly pointsRepo: StudentPointsRepository,
     @Optional() private readonly now: () => Date = () => new Date(),
+    /** 埋点（Phase 2）：发分成功打 points_awarded。@Optional 让既有测试零参构造不炸。 */
+    @Optional() private readonly events?: EventsService,
   ) {}
 
   /**
@@ -151,12 +154,27 @@ export class PointsService {
 
     // 7. 提交后读新累计，用现成的 detectLevelUp 判跨档（不在这里重写阈值比较）
     const after = await this.pointsRepo.find(studentId);
-    return {
+    const result: AwardResult = {
       pointsAwarded: points,
       balance: after.balance,
       totalEarned: after.totalEarned,
       levelUp: detectLevelUp(before.totalEarned, after.totalEarned),
     };
+    // 埋点：只在「真发分」路径发（no_rule / tier_inactive / daily_limit / duplicate 都不发——
+    // duplicate 虽返回首次分值但并非本次入账）。module 传 null：发分来源多样，事件本身已带 taskCode。
+    // track 是 fire-and-forget，异常自吞，绝不影响发分主链路。
+    if (result.pointsAwarded > 0) {
+      this.events?.track({
+        event: 'points_awarded',
+        source: 'server',
+        studentId: input.studentId,
+        module: null,
+        refType: input.refType ?? null,
+        refId: input.refId ?? null,
+        props: { taskCode: input.taskCode, points: result.pointsAwarded },
+      });
+    }
+    return result;
   }
 
   /**

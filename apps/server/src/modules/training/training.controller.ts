@@ -1,9 +1,10 @@
-import { BadRequestException, Body, Controller, Delete, Get, Logger, NotFoundException, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Logger, NotFoundException, Optional, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { TrainingService } from './training.service.js';
 import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
 import { PointsService } from '../points/points.service.js';
 import type { AwardResult } from '../points/points.service.js';
 import { PointRulesService } from '../points/point-rules.service.js';
+import type { EventsService } from '../analytics/events.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -23,6 +24,8 @@ export class TrainingController {
     private readonly trainingSessionsRepo: TrainingSessionsRepository,
     private readonly pointsService: PointsService,
     private readonly pointRulesService: PointRulesService,
+    /** 埋点（Phase 2）：hint 端点打 hint_requested。@Optional 让既有 4 参测试构造不炸。 */
+    @Optional() private readonly events?: EventsService,
   ) {}
 
   /** 专项练习允许的题型白名单（null = 不过滤题型）。 */
@@ -114,6 +117,16 @@ export class TrainingController {
   /** 训练「提示」：题级 question_hints 缓存（命中直返，未命中 AI 生成 + 写回）。 */
   @Post('hint')
   async hint(@Body() dto: { questionId: number }, @CurrentUser() user: JwtUser) {
+    // 埋点（Phase 2，ops tier）：训练要提示。dto 只有 questionId、无 source 字段——
+    // 不猜 targeted / error_practice，module 传 null（白名单外自动归 NULL，不报错）。
+    this.events?.track({
+      event: 'hint_requested',
+      source: 'server',
+      studentId: user.sub,
+      module: null,
+      refType: 'question',
+      refId: dto.questionId ?? null,
+    });
     return this.trainingService.getHint({ questionId: dto.questionId });
   }
 
