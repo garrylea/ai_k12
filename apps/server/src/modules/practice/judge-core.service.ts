@@ -106,7 +106,7 @@ export interface JudgeCoreQuestionInput {
   subjectId: number;
   questionId: number;        // 题中心：必传（训练题必来自题库）
   studentAnswer: string;
-  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'practice' | 'remediation'
+  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'remediation'
   sourceRefId?: number | null; // 考试传 session_id；practice 沿用现结构不经过此变体
 }
 
@@ -163,12 +163,19 @@ export class JudgeCoreService {
 
   /**
    * answer_submitted 打点 + 连错计数挂接。
-   * verdict 由 isCorrect 派生（JudgeOutput 无独立 verdict 字段）：null（未判定）不进连错逻辑。
+   * verdict 由 isCorrect/method 派生（JudgeOutput 无独立 verdict 字段）：
+   * non-correct/incorrect（unanswered/undetermined）不进连错逻辑。
    * streakKey：input 有 cardId 用 `c<cardId>`，否则 `q<questionId>`，`:studentId` 收尾——
    * card 中心同一题在多卡出现时按卡隔离，题中心按题隔离。
    */
   private trackAnswer(studentId: number, moduleName: string | null, out: JudgeOutput, questionId: number | null, streakKey: string | null): void {
-    const verdict = out.isCorrect === true ? 'correct' : out.isCorrect === false ? 'incorrect' : null;
+    // verdict 派生（母 spec §枚举 correct|incorrect|off_target|unanswered|undetermined；
+    // off_target 本服务派生不出）：
+    //   isCorrect=true -> correct；=false -> incorrect；
+    //   空答案（method='unanswered'）-> unanswered（业务上算一次提交）；
+    //   其余 isCorrect=null（理论不可达，兜底）-> undetermined。
+    // unanswered 不进连错逻辑（非 incorrect 也不非 correct 分支）。
+    const verdict = out.isCorrect === true ? 'correct' : out.isCorrect === false ? 'incorrect' : out.method === 'unanswered' ? 'unanswered' : 'undetermined';
     this.events?.track({
       event: 'answer_submitted', source: 'server', studentId,
       module: moduleName, refType: 'question', refId: questionId,
@@ -329,10 +336,13 @@ export class JudgeCoreService {
         const cleared = await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
         // source='exam' 排除：交卷补判在途题不得额外发订正分（考试分只由 math_paper 一次性给）。
         // 「清掉几条 -> 发不发分」的判决统一在 awardErrorFixOnClear（与 card 路径同一实现）。
+        // exam 清零照发 error_book_cleared（不发分 ≠ 没发生清零）。
         if (input.source !== 'exam') {
           const award = await this.awardErrorFixOnClear(input.studentId, input.questionId, cleared);
           pointsAwarded = award.pointsAwarded;
           awardReason = award.awardReason;
+        } else {
+          this.trackCleared(input.studentId, input.questionId, cleared);
         }
       } catch (err) {
         this.logger.error(`clearUnclearedByStudentQuestionId failed (student=${input.studentId}, question=${input.questionId}): ${err}`);
@@ -570,6 +580,21 @@ export class JudgeCoreService {
    *
    * 刻意吞异常：积分是激励层，发分失败绝不能挡住判题（镜像 exams 的 awardPaperPoints）。
    */
+  /**
+   * error_book_cleared 打点（确实清掉 ≥1 条未清错题才发，clearedCount = affectedRows；
+   * questionId 为 null 的「仅存题面」清零也发生了清零，照发、refId 记 null）。
+   * 独立成助手：exam 来源跳过 awardErrorFixOnClear（不发分）但清零 SQL 照跑，
+   * 事件必须照发——judgeQuestion / recordSelfAssessment 的 exam 分支也调它。
+   */
+  private trackCleared(studentId: number, questionId: number | null, cleared: number): void {
+    if (cleared <= 0) return;
+    this.events?.track({
+      event: 'error_book_cleared', source: 'server', studentId,
+      refType: 'question', refId: questionId,
+      props: { clearedCount: cleared },
+    });
+  }
+
   async awardErrorFixOnClear(
     studentId: number,
     questionId: number | null,
@@ -579,13 +604,7 @@ export class JudgeCoreService {
       // 无可订正目标（spec §7.2 枚举的 not_cleared）。
       return { pointsAwarded: 0, awardReason: 'not_cleared' };
     }
-    // 埋点：确实清掉 ≥1 条未清错题才计 error_book_cleared（clearedCount = affectedRows；
-    // questionId 为 null 的「仅存题面」清零也发生了清零，照发、refId 记 null）。
-    this.events?.track({
-      event: 'error_book_cleared', source: 'server', studentId,
-      refType: 'question', refId: questionId,
-      props: { clearedCount: cleared },
-    });
+    this.trackCleared(studentId, questionId, cleared);
     if (questionId == null) {
       // 仅存题面的错题没有稳定幂等身份：不发分（宁可少发，也不发可被编辑绕过的第二次分）。
       this.logger.debug(
@@ -692,9 +711,11 @@ export class JudgeCoreService {
     try {
       const cleared = await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
       // source='exam'（考试结果页自评）与 judgeQuestion 同款排除：考试分只由 math_paper
-      // 一次性给，自评答对不得冒出额外的订正分。
+      // 一次性给，自评答对不得冒出额外的订正分；但清零照发 error_book_cleared。
       if (input.source !== 'exam') {
         await this.awardErrorFixOnClear(input.studentId, input.questionId, cleared);
+      } else {
+        this.trackCleared(input.studentId, input.questionId, cleared);
       }
     } catch (err) {
       this.logger.error(`clearUnclearedByStudentQuestionId failed (self-assess, student=${input.studentId}, question=${input.questionId}): ${err}`);
