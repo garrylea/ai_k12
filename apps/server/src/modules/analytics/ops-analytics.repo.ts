@@ -62,6 +62,50 @@ export interface EventsPageFilter {
   limit: number;
 }
 
+/** 设备五维列（study_sessions，schema 1433-1467）。列名只从这里取，绝不来自用户输入。 */
+export type DeviceCol = 'platform_class' | 'screen_class' | 'input_type' | 'app_shell' | 'browser';
+export const DEVICE_COLS = [
+  'platform_class', 'screen_class', 'input_type', 'app_shell', 'browser',
+] as const;
+
+/** cohort-compare 的 outcome 列：设备列（study_sessions）或 module（答题/时长两侧各有来源，见各方法 docstring）。 */
+export type CompareOutcomeCol = 'module' | DeviceCol;
+const COMPARE_OUTCOME_COLS: readonly CompareOutcomeCol[] = ['module', ...DEVICE_COLS];
+
+export interface DeviceDistRow {
+  key: string;
+  students: number;
+  seconds: number;
+  sessions: number;
+}
+
+/** 时长侧分组行（totalSeconds / daysActive 数据源）。 */
+export interface SessionOutcomeRow {
+  key: string;
+  students: number;
+  seconds: number;
+  /** 「学生×日期」去重数（daysActive 的分子）。 */
+  studentDays: number;
+}
+
+/** 答题侧分组行（answerCount / accuracy 数据源）。 */
+export interface AnswerOutcomeRow {
+  key: string;
+  students: number;
+  answered: number;
+  correct: number;
+}
+
+export interface MultiDeviceRow {
+  count: number;
+  students: number;
+}
+
+export interface SwitchesRow {
+  count: number;
+  students: number;
+}
+
 /**
  * 运营聚合只读 SQL（Phase 2 母 spec §7，Task 8：overview / modules 两个端点的数据面）。
  *
@@ -240,5 +284,192 @@ export class OpsAnalyticsRepository {
       ),
     ]);
     return { rows: rows[0], total: Number(countRows[0][0]?.total ?? 0) };
+  }
+
+  /**
+   * /devices 数据面：五个设备维度各一条 GROUP BY（列名来自 DEVICE_COLS 常量）。
+   * 口径（brief 原文）：**不过滤 status**——与 overview/modules 的
+   * `status IN ('ended','abandoned')` 不同，秒数含进行中会话已累计的 active_seconds。
+   * 全部 `COUNT(DISTINCT student_id)` 按人头去重（一个学生多会话只算 1 人）。
+   */
+  async deviceDistributions(w: OpsWindow): Promise<Record<DeviceCol, DeviceDistRow[]>> {
+    const all = await Promise.all(
+      DEVICE_COLS.map(async (col) => {
+        const [rows] = await this.pool.query<RowDataPacket[]>(
+          `SELECT ${col} AS k,
+                  COUNT(DISTINCT student_id) AS students,
+                  COALESCE(SUM(active_seconds), 0) AS seconds,
+                  COUNT(*) AS sessions
+             FROM study_sessions
+            WHERE started_at >= ? AND started_at < ? AND ${col} IS NOT NULL
+            GROUP BY ${col}
+            ORDER BY students DESC`,
+          [w.fromAt, w.toAt],
+        );
+        return rows.map((r) => ({
+          key: String(r.k),
+          students: Number(r.students),
+          seconds: Number(r.seconds),
+          sessions: Number(r.sessions),
+        }));
+      }),
+    );
+    return Object.fromEntries(DEVICE_COLS.map((col, i) => [col, all[i]])) as Record<
+      DeviceCol,
+      DeviceDistRow[]
+    >;
+  }
+
+  /**
+   * 答题侧按 outcome 分组。`/devices` 的 platformClass accuracy 与 cohort-compare 的
+   * answerCount/accuracy 共用本方法。
+   *
+   * - outcome='module'：behavior_events 原生 module 列直接 GROUP BY（答题侧口径）。
+   * - outcome=设备列：behavior_events 无设备列，**按学生近似**——「窗口内用过该设备类的
+   *   学生，其窗口内全部 answer_submitted」计入该组（docstring 口径即 brief 裁决原文；
+   *   实现等价于对每组 `student_id IN (SELECT DISTINCT student_id FROM study_sessions
+   *   WHERE 设备列 = ?)`，JOIN 写法一次查完所有组）。学生用过多个设备类时，其答题
+   *   会同时计入多组（重叠分组，非互斥）。
+   */
+  async answersByOutcome(w: OpsWindow, outcome: CompareOutcomeCol): Promise<AnswerOutcomeRow[]> {
+    if (!COMPARE_OUTCOME_COLS.includes(outcome)) {
+      throw new Error(`非法 outcome 列：${String(outcome)}`);
+    }
+    if (outcome === 'module') {
+      const [rows] = await this.pool.query<RowDataPacket[]>(
+        `SELECT module AS k,
+                COUNT(DISTINCT student_id) AS students,
+                COUNT(*) AS answered,
+                COALESCE(SUM(props->>'$.verdict' = 'correct'), 0) AS correct
+           FROM behavior_events
+          WHERE event = 'answer_submitted' AND module IS NOT NULL
+            AND created_at >= ? AND created_at < ?
+          GROUP BY module`,
+        [w.fromAt, w.toAt],
+      );
+      return rows.map((r) => ({
+        key: String(r.k),
+        students: Number(r.students),
+        answered: Number(r.answered),
+        correct: Number(r.correct),
+      }));
+    }
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT p.k,
+              COUNT(DISTINCT be.student_id) AS students,
+              COUNT(*) AS answered,
+              COALESCE(SUM(be.props->>'$.verdict' = 'correct'), 0) AS correct
+         FROM behavior_events be
+         JOIN (SELECT DISTINCT student_id, ${outcome} AS k
+                 FROM study_sessions
+                WHERE started_at >= ? AND started_at < ? AND ${outcome} IS NOT NULL) p
+           ON p.student_id = be.student_id
+        WHERE be.event = 'answer_submitted' AND be.created_at >= ? AND be.created_at < ?
+        GROUP BY p.k`,
+      [w.fromAt, w.toAt, w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({
+      key: String(r.k),
+      students: Number(r.students),
+      answered: Number(r.answered),
+      correct: Number(r.correct),
+    }));
+  }
+
+  /**
+   * 时长侧按 outcome 分组（cohort-compare 的 totalSeconds / daysActive 数据面）。
+   * outcome='module' 取 study_sessions.module（时长侧口径，与答题侧 behavior_events.module 各自独立）。
+   * daysActive 分子按「学生×日期」去重：`COUNT(DISTINCT student_id, DATE(started_at))`。
+   */
+  async sessionsByOutcome(w: OpsWindow, outcome: CompareOutcomeCol): Promise<SessionOutcomeRow[]> {
+    if (!COMPARE_OUTCOME_COLS.includes(outcome)) {
+      throw new Error(`非法 outcome 列：${String(outcome)}`);
+    }
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT ${outcome} AS k,
+              COUNT(DISTINCT student_id) AS students,
+              COALESCE(SUM(active_seconds), 0) AS seconds,
+              COUNT(DISTINCT student_id, DATE(started_at)) AS student_days
+         FROM study_sessions
+        WHERE started_at >= ? AND started_at < ? AND ${outcome} IS NOT NULL
+        GROUP BY ${outcome}`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({
+      key: String(r.k),
+      students: Number(r.students),
+      seconds: Number(r.seconds),
+      studentDays: Number(r.student_days),
+    }));
+  }
+
+  /**
+   * 多设备分档：窗口内用过 >1 种 platform_class 的学生，按档位（cnt）计人头。
+   * platform_class 为 NULL 的会话不参与 DISTINCT 计数。
+   */
+  async multiDevice(w: OpsWindow): Promise<MultiDeviceRow[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT t.cnt, COUNT(*) AS students
+         FROM (SELECT student_id, COUNT(DISTINCT platform_class) AS cnt
+                 FROM study_sessions
+                WHERE started_at >= ? AND started_at < ?
+                GROUP BY student_id
+               HAVING cnt > 1) t
+        GROUP BY t.cnt
+        ORDER BY t.cnt ASC`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({ count: Number(r.cnt), students: Number(r.students) }));
+  }
+
+  /**
+   * 设备切换：相邻两次会话（s2 = 该学生在 s1 之后最早的一列）platform_class 不同即一次切换。
+   * s2 用 `started_at > s1.started_at` 严格大于——秒级同刻并发的极端场景不计（brief 认可）。
+   * platform_class 为 NULL 的会话不参与（`NULL <> x` 为 NULL 被过滤）。
+   */
+  async switches(w: OpsWindow): Promise<SwitchesRow> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt, COUNT(DISTINCT s1.student_id) AS students
+         FROM study_sessions s1
+         JOIN study_sessions s2
+           ON s1.student_id = s2.student_id AND s2.started_at > s1.started_at
+          AND s2.id = (SELECT MIN(m.id) FROM study_sessions m
+                        WHERE m.student_id = s1.student_id AND m.started_at > s1.started_at)
+        WHERE s1.started_at >= ? AND s1.started_at < ?
+          AND s1.platform_class <> s2.platform_class`,
+      [w.fromAt, w.toAt],
+    );
+    const r = rows[0] ?? {};
+    return { count: Number(r.cnt ?? 0), students: Number(r.students ?? 0) };
+  }
+
+  /**
+   * retention 的 cohort：首活跃日 = cohortStart（当日）的学生 id 集
+   * （brief 口径：`MIN(DATE(started_at)) = cohortStart`）。
+   */
+  async retentionCohort(cohortStart: string): Promise<number[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT student_id, MIN(DATE(started_at)) AS first_day
+         FROM study_sessions
+        GROUP BY student_id
+       HAVING first_day = ?`,
+      [cohortStart],
+    );
+    return rows.map((r) => Number(r.student_id));
+  }
+
+  /**
+   * retention 的 D{n}：cohort 学生在 dayAt~dayNextAt（应用层算好的当日边界，左闭右开）
+   * 有会话的人头数。`IN (?)` 数组由 pool.query 展开（勿改 execute）。
+   */
+  async retentionDay(cohortIds: number[], dayAt: string, dayNextAt: string): Promise<number> {
+    if (cohortIds.length === 0) return 0;
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT COUNT(DISTINCT student_id) AS retained
+         FROM study_sessions
+        WHERE student_id IN (?) AND started_at >= ? AND started_at < ?`,
+      [cohortIds, dayAt, dayNextAt],
+    );
+    return Number(rows[0]?.retained ?? 0);
   }
 }

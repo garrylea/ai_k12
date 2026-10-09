@@ -43,4 +43,25 @@ export class AdminAnalyticsController {
   events(@Query() q: { event?: string; module?: string; from?: string; to?: string; page?: string }) {
     return this.ops.events(q);
   }
+
+  /** 留存：cohort = 首活跃日 = cohortStart 的学生，D{n} = 当日有会话人头占比；days 越界 400/1001。 */
+  @Get('retention')
+  @Roles('admin')
+  retention(@Query() q: { cohortStart?: string; days?: string }) {
+    return this.ops.retention(q);
+  }
+
+  /** 设备分布：五维 students/seconds/sessions（仅 platformClass 另有 accuracy）+ 多设备分档与切换。 */
+  @Get('devices')
+  @Roles('admin')
+  devices(@Query() q: { from?: string; to?: string }) {
+    return this.ops.devices(q);
+  }
+
+  /** 分组对比：metric/outcome 白名单越界 400/1001；响应必带 correlation-not-causation 免责声明。 */
+  @Get('cohort-compare')
+  @Roles('admin')
+  cohortCompare(@Query() q: { metric?: string; outcome?: string; from?: string; to?: string }) {
+    return this.ops.cohortCompare(q);
+  }
 }

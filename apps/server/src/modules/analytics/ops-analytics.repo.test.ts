@@ -175,3 +175,114 @@ describe('OpsAnalyticsRepository', () => {
     expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
   });
 });
+
+describe('OpsAnalyticsRepository — Task 10（retention / devices / cohort-compare 数据面）', () => {
+  it('retentionCohort：cohort = 首活跃日 MIN(DATE(started_at)) = cohortStart 的学生', async () => {
+    const pool = poolWithQueries([[{ student_id: 1 }, { student_id: 2 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const ids = await repo.retentionCohort('2026-10-01');
+    expect(ids).toEqual([1, 2]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('MIN(DATE(started_at))');
+    expect(String(sql)).toContain('HAVING first_day = ?');
+    expect(params).toEqual(['2026-10-01']);
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('retentionDay：cohort 限定的当日人头数；日边界应用层传参（无 CURDATE/NOW/DATE_ADD）', async () => {
+    const pool = poolWithQueries([[{ retained: 1 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const retained = await repo.retentionDay([1, 2, 3], '2026-10-02 00:00:00', '2026-10-03 00:00:00');
+    expect(retained).toBe(1);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('COUNT(DISTINCT student_id)');
+    expect(String(sql)).toContain('student_id IN (?)');
+    expect(params).toEqual([[1, 2, 3], '2026-10-02 00:00:00', '2026-10-03 00:00:00']);
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(|DATE_ADD/);
+  });
+
+  it('deviceDistributions：五维各一条 GROUP BY 按人头去重；窗口参数化、无 LIMIT', async () => {
+    const pool = poolWithQueries([
+      [{ k: 'ipad', students: 5, seconds: 6000, sessions: 9 }],
+      [], [], [], [],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.deviceDistributions(W);
+    expect(r.platform_class).toEqual([{ key: 'ipad', students: 5, seconds: 6000, sessions: 9 }]);
+    expect(r.browser).toEqual([]);
+    expect(pool.query).toHaveBeenCalledTimes(5);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('COUNT(DISTINCT student_id)');
+    expect(String(sql)).not.toContain('COUNT(student_id)'); // 防手滑：不许按会话计人头
+    expect(String(sql)).toContain('platform_class IS NOT NULL');
+    expect(String(sql)).toContain('GROUP BY platform_class');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    expect(allSql(pool)).not.toContain('LIMIT');
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('answersByOutcome(module)：behavior_events 原生 module 列直接 GROUP BY', async () => {
+    const pool = poolWithQueries([[{ k: 'mainline', students: 3, answered: 8, correct: 5 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.answersByOutcome(W, 'module');
+    expect(r).toEqual([{ key: 'mainline', students: 3, answered: 8, correct: 5 }]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('FROM behavior_events');
+    expect(String(sql)).toContain('module IS NOT NULL');
+    expect(String(sql)).toContain("event = 'answer_submitted'");
+    expect(String(sql)).toContain("props->>'$.verdict' = 'correct'");
+    expect(String(sql)).not.toContain('JOIN');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+  });
+
+  it('answersByOutcome(设备列)：按「用过该设备类的学生」近似关联答题（DISTINCT 学生×设备列 JOIN）', async () => {
+    const pool = poolWithQueries([[{ k: 'ipad', students: 3, answered: 8, correct: 5 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.answersByOutcome(W, 'platform_class');
+    expect(r).toEqual([{ key: 'ipad', students: 3, answered: 8, correct: 5 }]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('JOIN (SELECT DISTINCT student_id, platform_class AS k');
+    expect(String(sql)).toContain('ON p.student_id = be.student_id');
+    expect(String(sql)).toContain("be.event = 'answer_submitted'");
+    expect(params).toEqual([W.fromAt, W.toAt, W.fromAt, W.toAt]);
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('sessionsByOutcome：时长侧按列分组；daysActive 的去重日按「学生×日期」计', async () => {
+    const pool = poolWithQueries([[{ k: 'ipad', students: 5, seconds: 6000, student_days: 12 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.sessionsByOutcome(W, 'platform_class');
+    expect(r).toEqual([{ key: 'ipad', students: 5, seconds: 6000, studentDays: 12 }]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('COUNT(DISTINCT student_id, DATE(started_at))');
+    expect(String(sql)).toContain('SUM(active_seconds)');
+    expect(String(sql)).toContain('GROUP BY platform_class');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('multiDevice：HAVING cnt > 1 分档按人头，档位升序', async () => {
+    const pool = poolWithQueries([[{ cnt: 2, students: 3 }, { cnt: 3, students: 1 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.multiDevice(W);
+    expect(r).toEqual([{ count: 2, students: 3 }, { count: 3, students: 1 }]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('COUNT(DISTINCT platform_class)');
+    expect(String(sql)).toContain('HAVING cnt > 1');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+  });
+
+  it('switches：相邻会话（s2 = 之后最早一列）平台不同即切换，按人头去重', async () => {
+    const pool = poolWithQueries([[{ cnt: 7, students: 4 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.switches(W);
+    expect(r).toEqual({ count: 7, students: 4 });
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('COUNT(DISTINCT s1.student_id)');
+    expect(String(sql)).toContain('MIN(m.id)');
+    expect(String(sql)).toContain('s2.started_at > s1.started_at');
+    expect(String(sql)).toContain('s1.platform_class <> s2.platform_class');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+});

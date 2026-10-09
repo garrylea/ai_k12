@@ -18,6 +18,15 @@ function svcWith(overrides: Partial<Record<keyof OpsAnalyticsRepository, unknown
     ]),
     funnel: vi.fn(async () => new Map<string, number>()),
     eventsPage: vi.fn(async () => ({ rows: [] as unknown[], total: 0 })),
+    deviceDistributions: vi.fn(async () => ({
+      platform_class: [], screen_class: [], input_type: [], app_shell: [], browser: [],
+    })),
+    answersByOutcome: vi.fn(async () => []),
+    sessionsByOutcome: vi.fn(async () => []),
+    multiDevice: vi.fn(async () => []),
+    switches: vi.fn(async () => ({ count: 0, students: 0 })),
+    retentionCohort: vi.fn(async () => [] as number[]),
+    retentionDay: vi.fn(async () => 0),
     ...overrides,
   } as unknown as OpsAnalyticsRepository;
   return { svc: new OpsAnalyticsService(repo), repo };
@@ -207,5 +216,163 @@ describe('OpsAnalyticsService.events', () => {
     expect((await svc.events({})).page).toBe(1);
     await expect(svc.events({ page: '0' })).rejects.toMatchObject({ response: { code: 1001 } });
     await expect(svc.events({ page: 'abc' })).rejects.toMatchObject({ response: { code: 1001 } });
+  });
+});
+
+describe('OpsAnalyticsService.retention', () => {
+  it('D{n} = cohort 学生在 cohortStart+offset 当日有会话的人数 ÷ cohortSize；日边界应用层算好', async () => {
+    const retentionCohort = vi.fn(async () => [1, 2]);
+    const retentionDay = vi.fn(
+      async (_ids: number[], dayAt: string, _dayNextAt: string) =>
+        dayAt.startsWith('2026-10-02') ? 1 : 2,
+    );
+    const { svc, repo } = svcWith({ retentionCohort, retentionDay });
+    const r = await svc.retention({ cohortStart: '2026-10-01' });
+    expect(r).toEqual({
+      cohortStart: '2026-10-01',
+      cohortSize: 2,
+      days: [
+        { offset: 1, retained: 1, rate: 0.5 },
+        { offset: 7, retained: 2, rate: 1 },
+        { offset: 30, retained: 2, rate: 1 },
+      ],
+    });
+    expect(repo.retentionDay).toHaveBeenCalledTimes(3);
+    // 当日边界由应用层算好传入（cohortStart + offset 天 00:00 起，次日 00:00 止）
+    expect(retentionDay.mock.calls[0][1]).toBe('2026-10-02 00:00:00');
+    expect(retentionDay.mock.calls[0][2]).toBe('2026-10-03 00:00:00');
+    expect(retentionDay.mock.calls[1][1]).toBe('2026-10-08 00:00:00');
+    expect(retentionDay.mock.calls[1][2]).toBe('2026-10-09 00:00:00');
+  });
+
+  it('days 缺省 [1,7,30]；自定义去重升序（"7,1,1" → [1,7]）', async () => {
+    const { svc, repo } = svcWith({ retentionCohort: vi.fn(async () => [1]) });
+    await svc.retention({ cohortStart: '2026-10-01' });
+    expect(repo.retentionDay).toHaveBeenCalledTimes(3);
+    await svc.retention({ cohortStart: '2026-10-01', days: '7,1,1' });
+    expect(repo.retentionDay).toHaveBeenCalledTimes(5);
+    const dayAts = (repo.retentionDay as ReturnType<typeof vi.fn>)
+      .mock.calls.slice(3)
+      .map((c) => c[1]);
+    expect(dayAts).toEqual(['2026-10-02 00:00:00', '2026-10-08 00:00:00']);
+  });
+
+  it('cohortSize=0 → 各 rate null、retained 0，且不查 D{n}', async () => {
+    const { svc, repo } = svcWith({});
+    const r = await svc.retention({ cohortStart: '2026-10-01' });
+    expect(r.cohortSize).toBe(0);
+    expect(r.days).toEqual([
+      { offset: 1, retained: 0, rate: null },
+      { offset: 7, retained: 0, rate: null },
+      { offset: 30, retained: 0, rate: null },
+    ]);
+    expect(repo.retentionDay).not.toHaveBeenCalled();
+  });
+
+  it('cohortStart 缺失 / 非法（含 2026-02-30 滚动日）、days 非法 → 400/1001', async () => {
+    const { svc } = svcWith({});
+    await expect(svc.retention({})).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(svc.retention({ cohortStart: '2026-02-30' })).rejects.toMatchObject({
+      response: { code: 1001 },
+    });
+    await expect(svc.retention({ cohortStart: '2026-10-01', days: '1,x' })).rejects.toMatchObject({
+      response: { code: 1001 },
+    });
+    await expect(svc.retention({ cohortStart: '2026-10-01', days: '0' })).rejects.toMatchObject({
+      response: { code: 1001 },
+    });
+  });
+});
+
+describe('OpsAnalyticsService.devices', () => {
+  it('五维分布组装；accuracy 只给 platformClass（其余维度恒 null），窗口透传一次', async () => {
+    const deviceDistributions = vi.fn(async (_w: OpsWindow) => ({
+      platform_class: [{ key: 'ipad', students: 5, seconds: 6000, sessions: 9 }],
+      screen_class: [{ key: 'desktop', students: 3, seconds: 1000, sessions: 4 }],
+      input_type: [],
+      app_shell: [],
+      browser: [],
+    }));
+    const answersByOutcome = vi.fn(async (_w: OpsWindow, outcome: string) =>
+      outcome === 'platform_class'
+        ? [{ key: 'ipad', students: 3, answered: 8, correct: 4 }]
+        : [],
+    );
+    const { svc, repo } = svcWith({
+      deviceDistributions,
+      answersByOutcome,
+      multiDevice: vi.fn(async () => [{ count: 2, students: 3 }]),
+      switches: vi.fn(async () => ({ count: 7, students: 4 })),
+    });
+    const r = await svc.devices({ from: '2026-10-03', to: '2026-10-09' });
+    expect(r.distributions.platformClass).toEqual([
+      { key: 'ipad', students: 5, seconds: 6000, sessions: 9, accuracy: 0.5 },
+    ]);
+    expect(r.distributions.screenClass).toEqual([
+      { key: 'desktop', students: 3, seconds: 1000, sessions: 4, accuracy: null },
+    ]);
+    expect(r.distributions.inputType).toEqual([]);
+    expect(r.distributions.appShell).toEqual([]);
+    expect(r.distributions.browser).toEqual([]);
+    expect(r.multiDevice).toEqual([{ count: 2, students: 3 }]);
+    expect(r.switches).toEqual({ count: 7, students: 4 });
+    const w = deviceDistributions.mock.calls[0][0];
+    expect(w.fromAt).toBe('2026-10-03 00:00:00');
+    expect(w.toAt).toBe('2026-10-10 00:00:00');
+    expect(repo.answersByOutcome).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OpsAnalyticsService.cohortCompare', () => {
+  it('metric / outcome 白名单越界 → 400/1001（browser 不在 outcome 白名单）', async () => {
+    const { svc } = svcWith({});
+    await expect(
+      svc.cohortCompare({ metric: 'tokens', outcome: 'platform_class' }),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(
+      svc.cohortCompare({ metric: 'totalSeconds', outcome: 'browser' }),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+  });
+
+  it('totalSeconds/daysActive 走时长侧（study_sessions），value=组内人均；0 人 → null；响应必带免责声明', async () => {
+    const sessionsByOutcome = vi.fn(async (_w: OpsWindow) => [
+      { key: 'ipad', students: 4, seconds: 800, studentDays: 10 },
+      { key: 'mac', students: 0, seconds: 0, studentDays: 0 },
+    ]);
+    const { svc, repo } = svcWith({ sessionsByOutcome });
+    const r = await svc.cohortCompare({ metric: 'totalSeconds', outcome: 'platform_class' });
+    expect(r).toEqual({
+      metric: 'totalSeconds',
+      outcome: 'platform_class',
+      groups: [
+        { key: 'ipad', students: 4, value: 200 },
+        { key: 'mac', students: 0, value: null },
+      ],
+      disclaimer: 'correlation-not-causation',
+    });
+    const r2 = await svc.cohortCompare({ metric: 'daysActive', outcome: 'platform_class' });
+    expect(r2.groups[0]).toEqual({ key: 'ipad', students: 4, value: 2.5 });
+    expect(repo.answersByOutcome).not.toHaveBeenCalled();
+    const w = sessionsByOutcome.mock.calls[0][0];
+    expect(w.fromAt).toMatch(/00:00:00$/);
+  });
+
+  it('answerCount/accuracy 走答题侧；module 用 behavior_events 原生列，设备列由 repo 按学生近似', async () => {
+    const answersByOutcome = vi.fn(async (_w: OpsWindow, _outcome: string) => [
+      { key: 'mainline', students: 5, answered: 10, correct: 4 },
+      { key: 'exam', students: 2, answered: 0, correct: 0 },
+    ]);
+    const { svc, repo } = svcWith({ answersByOutcome });
+    const r = await svc.cohortCompare({ metric: 'accuracy', outcome: 'module' });
+    expect(r.groups).toEqual([
+      { key: 'mainline', students: 5, value: 0.4 },
+      { key: 'exam', students: 2, value: null }, // answered=0 → null（不许写 0）
+    ]);
+    expect(r.disclaimer).toBe('correlation-not-causation');
+    expect(answersByOutcome.mock.calls[0][1]).toBe('module');
+    const r2 = await svc.cohortCompare({ metric: 'answerCount', outcome: 'platform_class' });
+    expect(r2.groups[0]).toEqual({ key: 'mainline', students: 5, value: 2 });
+    expect(answersByOutcome.mock.calls[1][1]).toBe('platform_class');
+    expect(repo.sessionsByOutcome).not.toHaveBeenCalled();
   });
 });
