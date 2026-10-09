@@ -57,6 +57,28 @@ describe('EventsService', () => {
     expect((insertMany as any).mock.calls[0][0][0]).toMatchObject({ event: 'page_view', tier: 'ops' });
   });
 
+  it('track：props 循环引用（sanitize 同步抛）不冒泡、只 warn、不写库', () => {
+    const { svc, insertMany } = makeDeps();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const circular: any = {};
+    circular.self = circular;
+    expect(() => svc.track({ event: 'points_awarded', source: 'server', studentId: 1, props: circular } as any)).not.toThrow();
+    expect(warn).toHaveBeenCalled();
+    expect(insertMany).not.toHaveBeenCalled();
+  });
+
+  it('recordMany：混入一条循环引用 props 只计 rejected，其余照常 accepted', async () => {
+    const { svc, insertMany } = makeDeps();
+    const circular: any = {};
+    circular.self = circular;
+    await expect(svc.recordMany([
+      { event: 'page_view', source: 'client', studentId: 7, props: circular } as any,
+      { event: 'page_view', source: 'client', studentId: 7 } as any,
+    ])).resolves.toEqual({ accepted: 1, rejected: 1 });
+    expect((insertMany as any).mock.calls[0][0]).toHaveLength(1);
+    expect((insertMany as any).mock.calls[0][0][0]).toMatchObject({ event: 'page_view' });
+  });
+
   it('recordMany：DB 失败向上抛（controller 转 500）', async () => {
     const { svc, insertMany } = makeDeps();
     insertMany.mockRejectedValueOnce(new Error('db down'));

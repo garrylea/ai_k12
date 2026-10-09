@@ -95,11 +95,17 @@ export class EventsService {
 
   /** 服务端打点入口：fire-and-forget，一切异常只 warn（埋点永不影响主链路）。 */
   track(input: TrackEventInput): void {
-    const row = sanitize(input);
-    if (!row) return;
-    void this.repo.insertMany([row]).catch((err) => {
+    try {
+      // sanitize 本身可能同步抛（如 props 循环引用使 JSON.stringify 抛 TypeError），
+      // 必须连「发起 insertMany」一起包进 try，否则异常在 .catch 挂上之前就冒出去了。
+      const row = sanitize(input);
+      if (!row) return;
+      void this.repo.insertMany([row]).catch((err) => {
+        console.warn('[events] track failed:', (err as Error)?.message);
+      });
+    } catch (err) {
       console.warn('[events] track failed:', (err as Error)?.message);
-    });
+    }
   }
 
   /** 采集端点入口：逐条校验计 rejected；DB 失败向上抛（由 controller 变 500）。 */
@@ -107,7 +113,12 @@ export class EventsService {
     const rows: BehaviorEventRow[] = [];
     let rejected = 0;
     for (const input of inputs) {
-      const row = sanitize(input);
+      let row: BehaviorEventRow | null = null;
+      try {
+        row = sanitize(input);
+      } catch {
+        row = null; // sanitize 同步抛（如 props 循环引用）计 rejected，不影响其余条目
+      }
       if (row) rows.push(row); else rejected += 1;
     }
     if (rows.length > 0) {
