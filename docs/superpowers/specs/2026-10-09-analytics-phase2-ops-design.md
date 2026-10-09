@@ -31,7 +31,7 @@
 | 事件 | 收口点（2026-10-09 已核实存在） |
 |---|---|
 | `answer_submitted` | `JudgeCoreService`（`apps/server/src/modules/practice/judge-core.service.ts:130`，判题唯一出口；practice/training/exam/remediation 全走它；`module` 由调用方显式传，消除漂移） |
-| `consecutive_failures` | 同上；判题出口维护连续错计数，达阈值（≥3）触发一次 |
+| `consecutive_failures` | 同上；同一学生同一 card 内连续判错计数，达 3 触发一次**并清零计数**（再连错 3 次可再触发）；`props.count` = 本次连续错数 |
 | `hint_requested` | 提示端点（AI hint capability 的服务端调用处，落点在计划期钉到行） |
 | `self_assess_answered` | 自评提交收口（含「我不会」，落点同上计划期钉） |
 | `error_book_added` | 错题本 find-or-create 命中「新建」分支处 |
@@ -42,18 +42,20 @@
 | `llm_fallback_triggered` | ModelClient fallback 触发处（信息同时已在 `llm_call_logs`，事件只记 scene/from/to） |
 | `study_session_ended`（server 兜底） | StudySessionsService 5 分钟惰性收尾时补发，`active_seconds` 取服务端累计值 |
 
-## 5. 前端显式事件（client 来源 5 项）
+## 5. 前端显式事件（client 来源 7 项）
 
-- 事件：`page_view`、`card_flipped`、`answer_revealed`、`ai_message_sent`、`study_session_idle`。
+- 事件：`study_session_started`、`study_session_ended`、`page_view`、`card_flipped`、`answer_revealed`、`ai_message_sent`、`study_session_idle`。
+- **session 两事件必须补**（本 spec 审阅修正）：现状 tracker（1A 交付）只有 start/heartbeat/end 三个**会话 API 调用**（`transport.start/heartbeat/end`），没有行为事件队列；漏斗第一步依赖 `study_session_started`，不补则恒无数据。落点：`sessionMachine` 状态迁移的 `effects.start` 副作用出口里，在调会话 API 的同时向事件队列入队对应事件（`study_session_ended` 带 `end_reason`）。
 - 载体：既有 `apps/web/src/analytics/tracker.ts` 队列（10s 定时 / 队列 ≥20 / 路由离开 / pagehide 触发 flush），新增指向 `/api/track/events` 的传输函数；传输失败全 `.catch(() => {})`。
 - **节流**：`page_view` 同一路由 30s 内去重；`card_flipped` 每卡每次进页只记首翻。
+- **`ai_message_sent` 只 client 记（修订母 spec §5.2 的 client+server 双来源）**：双记会重复计数且两侧无共同去重键；client 侧带 `dialogue_id` 上报，服务端不补记。
 
 ## 6. 采集端点
 
 `POST /api/track/events`（student 角色 JWT；`@Post` 默认 201）：
 
 - 入参 `{events:[{event, module?, scene?, subjectId?, refType?, refId?, sessionUid?, props?, clientTsMs?}]}`，批量 ≤ 50，超出 → 400/1001。
-- 逐条校验：`event` 必须在 `EVENT_TIER` 字典内**且属于 client 白名单**（`study_session_started/ended`、`page_view`、`card_flipped`、`answer_revealed`、`ai_message_sent`、`study_session_idle`；服务端权威事件如 `answer_submitted`/`hint_requested` 伪造直接拒，计入 rejected）；`module`/`scene` 白名单、非法存 NULL；`props` 序列化 ≤ 2KB。
+- 逐条校验：`event` 必须在 `EVENT_TIER` 字典内**且属于 client 白名单**（`study_session_started/ended`、`page_view`、`card_flipped`、`answer_revealed`、`ai_message_sent`、`study_session_idle`；服务端权威事件如 `answer_submitted`/`hint_requested` 伪造直接拒，计入 rejected）；`module`/`scene` 白名单、非法存 NULL；`subjectId` 若给需属于该学生可选学科 → 否则 1001（与 study-sessions 同口径）；`props` 序列化 ≤ 2KB。
 - 返回 `{accepted, rejected}`（rejected 计数，不整体失败）。
 - 失败口径与三个 study-sessions 端点一致：DB 失败 500、前端传输层吞掉。
 - 新端点用 `parseInput` 模式转 400/1001（Zod 裸 parse 会 500——忘记密码批踩过的坑）。
