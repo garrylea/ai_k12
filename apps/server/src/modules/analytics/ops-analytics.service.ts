@@ -3,6 +3,7 @@ import {
   OpsAnalyticsRepository,
   type DeviceDistRow,
   type FunnelStepFilter,
+  type LlmTokenGroupBy,
   type OpsWindow,
 } from './ops-analytics.repo.js';
 
@@ -56,6 +57,30 @@ export function parseWindow(from?: string, to?: string): OpsWindow {
 /** 正确率：answered=0 → null（不许写 0，母 spec §7 通用纪律）。 */
 const acc = (correct: number, answered: number): number | null =>
   answered === 0 ? null : correct / answered;
+
+/** 通用比率：分母 0 → null（「缺口」不许写成 0，母 spec §7 通用纪律）。 */
+const ratio = (num: number, den: number): number | null => (den === 0 ? null : num / den);
+
+/** 分页 page 解析：缺省 1；非法（非正整数）→ 400/1001。 */
+function parsePage(raw?: string): number {
+  const page = raw === undefined || raw === '' ? 1 : Number(raw);
+  if (!Number.isInteger(page) || page < 1) {
+    throw new BadRequestException({ code: 1001, message: 'page 应为正整数' });
+  }
+  return page;
+}
+
+/** 整数查询参数解析（status/minLatency）：非法 → 400/1001。 */
+function parseIntParam(label: string, raw: string): number {
+  const v = Number(raw);
+  if (!Number.isInteger(v) || v < 0) {
+    throw new BadRequestException({ code: 1001, message: `${label} 应为非负整数` });
+  }
+  return v;
+}
+
+/** llm-tokens 分组白名单（越界 400/1001）。 */
+const LLM_TOKEN_GROUPS: readonly LlmTokenGroupBy[] = ['scene', 'model', 'day', 'student'];
 
 /** cohort-compare 的 metric 白名单（命名与 delta spec 一致）。 */
 const COMPARE_METRICS = ['totalSeconds', 'answerCount', 'accuracy', 'daysActive'] as const;
@@ -173,10 +198,7 @@ export class OpsAnalyticsService {
 
   /** GET /api/admin/analytics/events。全部 tier；分页 20，page 从 1 起。 */
   async events(q: { event?: string; module?: string; from?: string; to?: string; page?: string }) {
-    const page = q.page === undefined || q.page === '' ? 1 : Number(q.page);
-    if (!Number.isInteger(page) || page < 1) {
-      throw new BadRequestException({ code: 1001, message: 'page 应为正整数' });
-    }
+    const page = parsePage(q.page);
     const pageSize = 20;
     const w = parseWindow(q.from, q.to);
     const { rows, total } = await this.repo.eventsPage({
@@ -324,5 +346,102 @@ export class OpsAnalyticsService {
     }
     groups.sort((a, b) => b.students - a.students || a.key.localeCompare(b.key));
     return { metric, outcome, groups, disclaimer: 'correlation-not-causation' };
+  }
+
+  /**
+   * GET /api/admin/analytics/quality（Task 11）。
+   * 全部比率分母为 0 → null（不许写 0）；passageSkipRate 恒 null（无可靠数据源，
+   * delta spec §7.2）。内容三指标是存量库口径，不随查询窗口变化。
+   */
+  async quality(q: { from?: string; to?: string }) {
+    const w = parseWindow(q.from, q.to);
+    const [api, codes, llm, content] = await Promise.all([
+      this.repo.qualityApi(w),
+      this.repo.qualityErrorCodes(w),
+      this.repo.qualityLlm(w),
+      this.repo.contentQuality(),
+    ]);
+    return {
+      apiFailureRate: ratio(api.failures, api.total),
+      errorCodeDistribution: codes,
+      llmTimeoutRate: ratio(llm.timeouts, llm.calls),
+      llmFallbackRate: ratio(llm.fallbacks, llm.calls),
+      llmAttributionCoverage: ratio(llm.attributed, llm.calls),
+      questionsWithoutStandardAnswer: content.questionsWithoutStandardAnswer,
+      kpCoverage: {
+        covered: content.kpCovered,
+        total: content.kpTotal,
+        rate: ratio(content.kpCovered, content.kpTotal),
+      },
+      globalWordErrorRate: {
+        wrong: content.wordWrong,
+        total: content.wordTotal,
+        rate: ratio(content.wordWrong, content.wordTotal),
+      },
+      passageSkipRate: null,
+    };
+  }
+
+  /**
+   * GET /api/admin/analytics/llm-tokens（Task 11）。
+   * 分组聚合 + 顶层总览两条并行；unavailable 单列（顶层 unavailableCalls 与
+   * items[].unavailableCalls 并存，语义 = 「该范围下量不到的调用数」）。
+   */
+  async llmTokens(q: { groupBy?: string; from?: string; to?: string }) {
+    const groupBy = LLM_TOKEN_GROUPS.find((g) => g === q.groupBy);
+    if (!groupBy) {
+      throw new BadRequestException({ code: 1001, message: 'groupBy 不在白名单内' });
+    }
+    const w = parseWindow(q.from, q.to);
+    const [items, overview] = await Promise.all([
+      this.repo.llmTokenGroups(w, groupBy),
+      this.repo.llmTokensOverview(w),
+    ]);
+    return {
+      groupBy,
+      items,
+      attributed: overview.attributed,
+      unattributed: overview.unattributed,
+      unavailableCalls: overview.unavailableCalls,
+    };
+  }
+
+  /** GET /api/admin/analytics/llm-calls（Task 11）。success 只认 true/false，缺省不过滤。 */
+  async llmCalls(q: { scene?: string; model?: string; success?: string; page?: string }) {
+    const page = parsePage(q.page);
+    let success: number | undefined;
+    if (q.success !== undefined && q.success !== '') {
+      if (q.success === 'true') success = 1;
+      else if (q.success === 'false') success = 0;
+      else throw new BadRequestException({ code: 1001, message: 'success 只认 true/false' });
+    }
+    const pageSize = 20;
+    const { rows, total } = await this.repo.llmCallsPage({
+      scene: q.scene?.trim() || undefined,
+      model: q.model?.trim() || undefined,
+      success,
+      offset: (page - 1) * pageSize,
+      limit: pageSize,
+    });
+    return { items: rows, page, pageSize, total };
+  }
+
+  /** GET /api/admin/analytics/requests（Task 11）。path 走 route LIKE，status/minLatency 非负整数。 */
+  async requests(q: { path?: string; status?: string; minLatency?: string; page?: string }) {
+    const page = parsePage(q.page);
+    const status = q.status !== undefined && q.status !== '' ? parseIntParam('status', q.status) : undefined;
+    const minLatency =
+      q.minLatency !== undefined && q.minLatency !== ''
+        ? parseIntParam('minLatency', q.minLatency)
+        : undefined;
+    const pageSize = 20;
+    const { rows, total } = await this.repo.requestsPage({
+      path: q.path?.trim() || undefined,
+      status,
+      minLatency,
+      offset: (page - 1) * pageSize,
+      limit: pageSize,
+    });
+    return { items: rows, page, pageSize, total };
   }
 }

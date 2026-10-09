@@ -64,4 +64,32 @@ export class AdminAnalyticsController {
   cohortCompare(@Query() q: { metric?: string; outcome?: string; from?: string; to?: string }) {
     return this.ops.cohortCompare(q);
   }
+
+  /** 质量看板：API 失败率/错误码分布 + LLM 超时/fallback/归因 + 内容四指标（passageSkipRate 恒 null）。 */
+  @Get('quality')
+  @Roles('admin')
+  quality(@Query() q: { from?: string; to?: string }) {
+    return this.ops.quality(q);
+  }
+
+  /** LLM 用量分组：groupBy 白名单 scene|model|day|student 越界 400/1001；unavailable 单列不当 0 求和。 */
+  @Get('llm-tokens')
+  @Roles('admin')
+  llmTokens(@Query() q: { groupBy?: string; from?: string; to?: string }) {
+    return this.ops.llmTokens(q);
+  }
+
+  /** LLM 调用流水：scene/model/success 过滤，分页 20（success 只认 true/false）。 */
+  @Get('llm-calls')
+  @Roles('admin')
+  llmCalls(@Query() q: { scene?: string; model?: string; success?: string; page?: string }) {
+    return this.ops.llmCalls(q);
+  }
+
+  /** 请求流水：route LIKE / status_code / minLatency 过滤，分页 20。 */
+  @Get('requests')
+  @Roles('admin')
+  requests(@Query() q: { path?: string; status?: string; minLatency?: string; page?: string }) {
+    return this.ops.requests(q);
+  }
 }

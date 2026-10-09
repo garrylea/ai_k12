@@ -3,8 +3,10 @@ import { OpsAnalyticsService, parseWindow } from './ops-analytics.service.js';
 import type {
   EventsPageFilter,
   FunnelStepFilter,
+  LlmCallsPageFilter,
   OpsAnalyticsRepository,
   OpsWindow,
+  RequestsPageFilter,
 } from './ops-analytics.repo.js';
 
 function svcWith(overrides: Partial<Record<keyof OpsAnalyticsRepository, unknown>>) {
@@ -27,6 +29,16 @@ function svcWith(overrides: Partial<Record<keyof OpsAnalyticsRepository, unknown
     switches: vi.fn(async () => ({ count: 0, students: 0 })),
     retentionCohort: vi.fn(async () => [] as number[]),
     retentionDay: vi.fn(async () => 0),
+    llmTokenGroups: vi.fn(async () => []),
+    llmTokensOverview: vi.fn(async () => ({ attributed: 0, unattributed: 0, unavailableCalls: 0 })),
+    qualityApi: vi.fn(async () => ({ total: 0, failures: 0 })),
+    qualityErrorCodes: vi.fn(async () => [] as { code: number; count: number }[]),
+    qualityLlm: vi.fn(async () => ({ calls: 0, timeouts: 0, fallbacks: 0, attributed: 0 })),
+    contentQuality: vi.fn(async () => ({
+      questionsWithoutStandardAnswer: 0, kpCovered: 0, kpTotal: 0, wordWrong: 0, wordTotal: 0,
+    })),
+    llmCallsPage: vi.fn(async () => ({ rows: [] as unknown[], total: 0 })),
+    requestsPage: vi.fn(async () => ({ rows: [] as unknown[], total: 0 })),
     ...overrides,
   } as unknown as OpsAnalyticsRepository;
   return { svc: new OpsAnalyticsService(repo), repo };
@@ -374,5 +386,145 @@ describe('OpsAnalyticsService.cohortCompare', () => {
     expect(r2.groups[0]).toEqual({ key: 'mainline', students: 5, value: 2 });
     expect(answersByOutcome.mock.calls[1][1]).toBe('platform_class');
     expect(repo.sessionsByOutcome).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpsAnalyticsService.llmTokens（Task 11）', () => {
+  it('groupBy 白名单越界 / 缺失 → 400/1001', async () => {
+    const { svc } = svcWith({});
+    await expect(svc.llmTokens({ groupBy: 'cost' as never })).rejects.toMatchObject({
+      response: { code: 1001 },
+    });
+    await expect(svc.llmTokens({} as never)).rejects.toMatchObject({
+      response: { code: 1001 },
+    });
+  });
+
+  it('按 scene 聚合：unavailable 单列不当 0 求和（items[].unavailableCalls 与顶层 unavailableCalls 并存）', async () => {
+    const llmTokenGroups = vi.fn(async () => [
+      { key: 'tutoring', calls: 3, inputTokens: 100, outputTokens: 0, unavailableCalls: 1 },
+    ]);
+    const llmTokensOverview = vi.fn(async () => ({
+      attributed: 2, unattributed: 1, unavailableCalls: 1,
+    }));
+    const { svc, repo } = svcWith({ llmTokenGroups, llmTokensOverview });
+    const r = await svc.llmTokens({ groupBy: 'scene', from: '2026-10-01', to: '2026-10-07' });
+    expect(r).toEqual({
+      groupBy: 'scene',
+      items: [{ key: 'tutoring', calls: 3, inputTokens: 100, outputTokens: 0, unavailableCalls: 1 }],
+      attributed: 2,
+      unattributed: 1,
+      unavailableCalls: 1,
+    });
+    expect(repo.llmTokenGroups).toHaveBeenCalledTimes(1);
+    expect(repo.llmTokensOverview).toHaveBeenCalledTimes(1);
+    const w = (llmTokenGroups as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpsWindow;
+    expect(w.fromAt).toBe('2026-10-01 00:00:00');
+    expect(w.toAt).toBe('2026-10-08 00:00:00');
+    expect((llmTokenGroups as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('scene');
+  });
+
+  it('groupBy=model 透传 repo（聚合按 model_key）；groupBy=day/student 同样透传', async () => {
+    const llmTokenGroups = vi.fn(async () => []);
+    const { svc } = svcWith({ llmTokenGroups });
+    await svc.llmTokens({ groupBy: 'model' });
+    await svc.llmTokens({ groupBy: 'day' });
+    await svc.llmTokens({ groupBy: 'student' });
+    const called = (llmTokenGroups as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
+    expect(called).toEqual(['model', 'day', 'student']);
+  });
+});
+
+describe('OpsAnalyticsService.quality（Task 11）', () => {
+  it('组装形状；passageSkipRate 恒 null；窗口透传一次', async () => {
+    const qualityApi = vi.fn(async () => ({ total: 100, failures: 8 }));
+    const qualityErrorCodes = vi.fn(async () => [
+      { code: 5000, count: 5 }, { code: 1001, count: 3 },
+    ]);
+    const qualityLlm = vi.fn(async () => ({ calls: 50, timeouts: 2, fallbacks: 3, attributed: 45 }));
+    const contentQuality = vi.fn(async () => ({
+      questionsWithoutStandardAnswer: 4, kpCovered: 90, kpTotal: 100, wordWrong: 30, wordTotal: 600,
+    }));
+    const { svc, repo } = svcWith({ qualityApi, qualityErrorCodes, qualityLlm, contentQuality });
+    const r = await svc.quality({ from: '2026-10-03', to: '2026-10-09' });
+    expect(r).toEqual({
+      apiFailureRate: 0.08,
+      errorCodeDistribution: [{ code: 5000, count: 5 }, { code: 1001, count: 3 }],
+      llmTimeoutRate: 0.04,
+      llmFallbackRate: 0.06,
+      llmAttributionCoverage: 0.9,
+      questionsWithoutStandardAnswer: 4,
+      kpCoverage: { covered: 90, total: 100, rate: 0.9 },
+      globalWordErrorRate: { wrong: 30, total: 600, rate: 0.05 },
+      passageSkipRate: null,
+    });
+    expect(repo.qualityApi).toHaveBeenCalledTimes(1);
+    expect(repo.contentQuality).toHaveBeenCalledTimes(1);
+  });
+
+  it('分母为 0 → 各 rate null（不许写 0），错误码分布空数组', async () => {
+    const { svc } = svcWith({});
+    const r = await svc.quality({});
+    expect(r).toEqual({
+      apiFailureRate: null,
+      errorCodeDistribution: [],
+      llmTimeoutRate: null,
+      llmFallbackRate: null,
+      llmAttributionCoverage: null,
+      questionsWithoutStandardAnswer: 0,
+      kpCoverage: { covered: 0, total: 0, rate: null },
+      globalWordErrorRate: { wrong: 0, total: 0, rate: null },
+      passageSkipRate: null,
+    });
+  });
+});
+
+describe('OpsAnalyticsService.llmCalls（Task 11）', () => {
+  it('过滤与分页透传 repo；pageSize 20', async () => {
+    const llmCallsPage = vi.fn(
+      async (_q: LlmCallsPageFilter) => ({ rows: [{ id: 1 }] as unknown[], total: 41 }),
+    );
+    const { svc, repo } = svcWith({ llmCallsPage });
+    const r = await svc.llmCalls({ scene: 'tutoring', model: 'qwen-max', success: 'false', page: '3' });
+    expect(r).toEqual({ items: [{ id: 1 }], page: 3, pageSize: 20, total: 41 });
+    expect(repo.llmCallsPage).toHaveBeenCalledTimes(1);
+    expect(llmCallsPage.mock.calls[0][0]).toEqual({
+      scene: 'tutoring', model: 'qwen-max', success: 0, offset: 40, limit: 20,
+    });
+  });
+
+  it('success 缺省不过滤；page 缺省 1；非法 success / page → 400/1001', async () => {
+    const llmCallsPage = vi.fn(async (_q: LlmCallsPageFilter) => ({ rows: [], total: 0 }));
+    const { svc } = svcWith({ llmCallsPage });
+    await svc.llmCalls({});
+    expect(llmCallsPage.mock.calls[0][0]).toEqual({ offset: 0, limit: 20 });
+    await expect(svc.llmCalls({ success: 'yes' })).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(svc.llmCalls({ page: '0' })).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(svc.llmCalls({ page: 'abc' })).rejects.toMatchObject({ response: { code: 1001 } });
+  });
+});
+
+describe('OpsAnalyticsService.requests（Task 11）', () => {
+  it('path(LIKE)/status/minLatency 与分页透传 repo', async () => {
+    const requestsPage = vi.fn(
+      async (_q: RequestsPageFilter) => ({ rows: [{ id: 2 }] as unknown[], total: 7 }),
+    );
+    const { svc, repo } = svcWith({ requestsPage });
+    const r = await svc.requests({ path: '/api/practice', status: '500', minLatency: '1000', page: '2' });
+    expect(r).toEqual({ items: [{ id: 2 }], page: 2, pageSize: 20, total: 7 });
+    expect(repo.requestsPage).toHaveBeenCalledTimes(1);
+    expect(requestsPage.mock.calls[0][0]).toEqual({
+      path: '/api/practice', status: 500, minLatency: 1000, offset: 20, limit: 20,
+    });
+  });
+
+  it('缺省不过滤；非法 status / minLatency / page → 400/1001', async () => {
+    const requestsPage = vi.fn(async (_q: RequestsPageFilter) => ({ rows: [], total: 0 }));
+    const { svc } = svcWith({ requestsPage });
+    await svc.requests({});
+    expect(requestsPage.mock.calls[0][0]).toEqual({ offset: 0, limit: 20 });
+    await expect(svc.requests({ status: 'x' })).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(svc.requests({ minLatency: '-1' })).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(svc.requests({ page: '0' })).rejects.toMatchObject({ response: { code: 1001 } });
   });
 });

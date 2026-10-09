@@ -286,3 +286,168 @@ describe('OpsAnalyticsRepository — Task 10（retention / devices / cohort-comp
     expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
   });
 });
+
+describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls / requests 数据面）', () => {
+  it('llmTokenGroups(scene)：unavailable 单列（CASE WHEN usage_source <> unavailable），窗口参数化', async () => {
+    const pool = poolWithQueries([
+      [{ grp: 'tutoring', calls: 3, input_tokens: 100, output_tokens: 0, unavailable_calls: 1 }],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.llmTokenGroups(W, 'scene');
+    expect(r).toEqual([
+      { key: 'tutoring', calls: 3, inputTokens: 100, outputTokens: 0, unavailableCalls: 1 },
+    ]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('FROM llm_call_logs');
+    expect(String(sql)).toContain("CASE WHEN usage_source <> 'unavailable' THEN input_tokens END");
+    expect(String(sql)).toContain("CASE WHEN usage_source <> 'unavailable' THEN output_tokens END");
+    expect(String(sql)).toContain("SUM(usage_source = 'unavailable')");
+    expect(String(sql)).toContain('GROUP BY scene');
+    expect(String(sql)).toContain('ORDER BY calls DESC');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('llmTokenGroups(model)：聚合键是 model_key，绝不用 model_id；day 用 DATE_FORMAT 防时区漂移', async () => {
+    const pool = poolWithQueries([[], []]);
+    const repo = new OpsAnalyticsRepository(pool);
+    await repo.llmTokenGroups(W, 'model');
+    await repo.llmTokenGroups(W, 'day');
+    const [modelSql] = pool.query.mock.calls[0];
+    expect(String(modelSql)).toContain('model_key');
+    expect(String(modelSql)).not.toContain('model_id');
+    expect(String(modelSql)).toContain('GROUP BY model_key');
+    const [daySql] = pool.query.mock.calls[1];
+    expect(String(daySql)).toContain("DATE_FORMAT(created_at, '%Y-%m-%d')");
+  });
+
+  it('llmTokenGroups：groupBy 越界（白名单外）直接拒绝，不发 SQL', async () => {
+    const pool = poolWithQueries([]);
+    const repo = new OpsAnalyticsRepository(pool);
+    await expect(repo.llmTokenGroups(W, 'cost' as never)).rejects.toThrow();
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('llmTokensOverview：attributed/unattributed/unavailableCalls 一条总览', async () => {
+    const pool = poolWithQueries([[{ attributed: 7, unattributed: 2, unavailable_calls: 3 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.llmTokensOverview(W);
+    expect(r).toEqual({ attributed: 7, unattributed: 2, unavailableCalls: 3 });
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('SUM(student_id IS NOT NULL)');
+    expect(String(sql)).toContain('SUM(student_id IS NULL)');
+    expect(String(sql)).toContain("SUM(usage_source = 'unavailable')");
+    expect(params).toEqual([W.fromAt, W.toAt]);
+  });
+
+  it('qualityApi：失败口径 = status_code>=500 或 COALESCE(biz_code,5000)<>0（5000 与 filter 默认码一致）', async () => {
+    const pool = poolWithQueries([[{ total: 100, failures: 8 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.qualityApi(W);
+    expect(r).toEqual({ total: 100, failures: 8 });
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('FROM api_request_logs');
+    expect(String(sql)).toContain('status_code >= 500');
+    expect(String(sql)).toContain('COALESCE(biz_code, 5000) <> 0');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+  });
+
+  it('qualityErrorCodes：只统计失败行，按 COALESCE(biz_code,5000) 分组', async () => {
+    const pool = poolWithQueries([[{ code: 5000, cnt: 5 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.qualityErrorCodes(W);
+    expect(r).toEqual([{ code: 5000, count: 5 }]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('COALESCE(biz_code, 5000) AS code');
+    expect(String(sql)).toContain('status_code >= 500');
+    expect(String(sql)).toContain('GROUP BY code');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+  });
+
+  it('qualityLlm：超时口径 = error_type = TimeoutError（llm_call_logs 实际列），fallback/归因同表', async () => {
+    const pool = poolWithQueries([[{ calls: 50, timeouts: 2, fallbacks: 3, attributed: 45 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.qualityLlm(W);
+    expect(r).toEqual({ calls: 50, timeouts: 2, fallbacks: 3, attributed: 45 });
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain("error_type = 'TimeoutError'");
+    expect(String(sql)).toContain('SUM(is_fallback)');
+    expect(String(sql)).toContain('SUM(student_id IS NOT NULL)');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+  });
+
+  it('contentQuality：内容库三查无窗口参数（questions 无标准答案 / kp 覆盖 / english_words 错次）', async () => {
+    const pool = poolWithQueries([
+      [{ cnt: 4 }],
+      [{ total: 100, covered: 90 }],
+      [{ wrong: 30, total: 600 }],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.contentQuality();
+    expect(r).toEqual({
+      questionsWithoutStandardAnswer: 4, kpCovered: 90, kpTotal: 100, wordWrong: 30, wordTotal: 600,
+    });
+    expect(pool.query).toHaveBeenCalledTimes(3);
+    const [qSql] = pool.query.mock.calls[0];
+    expect(String(qSql)).toContain('FROM questions');
+    expect(String(qSql)).toContain("TRIM(answer) = ''");
+    const [kpSql] = pool.query.mock.calls[1];
+    expect(String(kpSql)).toContain('question_knowledge_points');
+    expect(String(kpSql)).toContain('EXISTS');
+    const [wSql] = pool.query.mock.calls[2];
+    expect(String(wSql)).toContain('FROM english_words');
+    expect(String(wSql)).toContain('SUM(error_count)');
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('llmCallsPage：动态条件只在给出时拼，LIMIT ?/OFFSET ? 参数化且走 pool.query', async () => {
+    const pool = poolWithQueries([[{ total: 41 }], [{ id: 9 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.llmCallsPage({
+      scene: 'tutoring', model: 'qwen-max', success: 0, offset: 40, limit: 20,
+    });
+    expect(r).toEqual({ rows: [{ id: 9 }], total: 41 });
+    const [countSql, countParams] = pool.query.mock.calls[0];
+    expect(String(countSql)).toContain('COUNT(*)');
+    expect(String(countSql)).toContain('scene = ?');
+    expect(String(countSql)).toContain('model_key = ?');
+    expect(String(countSql)).toContain('success = ?');
+    expect(countParams).toEqual(['tutoring', 'qwen-max', 0]);
+    const [rowsSql, rowsParams] = pool.query.mock.calls[1];
+    expect(String(rowsSql)).toContain('ORDER BY created_at DESC, id DESC');
+    expect(String(rowsSql)).toContain('LIMIT ?');
+    expect(String(rowsSql)).toContain('OFFSET ?');
+    expect(rowsParams).toEqual(['tutoring', 'qwen-max', 0, 20, 40]);
+    expect(allSql(pool)).not.toContain('execute');
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('llmCallsPage：无过滤条件时不拼 WHERE', async () => {
+    const pool = poolWithQueries([[{ total: 0 }], []]);
+    const repo = new OpsAnalyticsRepository(pool);
+    await repo.llmCallsPage({ offset: 0, limit: 20 });
+    const [countSql, countParams] = pool.query.mock.calls[0];
+    expect(String(countSql)).not.toContain('WHERE');
+    expect(countParams).toEqual([]);
+    expect(pool.query.mock.calls[1][1]).toEqual([20, 0]);
+  });
+
+  it('requestsPage：route LIKE %path%、status_code = ?、latency_ms >= ?，LIMIT ?/OFFSET ? 参数化', async () => {
+    const pool = poolWithQueries([[{ total: 7 }], [{ id: 2 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.requestsPage({
+      path: '/api/practice', status: 500, minLatency: 1000, offset: 20, limit: 20,
+    });
+    expect(r).toEqual({ rows: [{ id: 2 }], total: 7 });
+    const [countSql, countParams] = pool.query.mock.calls[0];
+    expect(String(countSql)).toContain('route LIKE ?');
+    expect(String(countSql)).toContain('status_code = ?');
+    expect(String(countSql)).toContain('latency_ms >= ?');
+    expect(countParams).toEqual(['%/api/practice%', 500, 1000]);
+    const [rowsSql, rowsParams] = pool.query.mock.calls[1];
+    expect(String(rowsSql)).toContain('ORDER BY created_at DESC, id DESC');
+    expect(String(rowsSql)).toContain('LIMIT ?');
+    expect(rowsParams).toEqual(['%/api/practice%', 500, 1000, 20, 20]);
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+});

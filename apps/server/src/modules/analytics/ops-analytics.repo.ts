@@ -106,6 +106,80 @@ export interface SwitchesRow {
   students: number;
 }
 
+/** llm-tokens 的分组白名单（service 校验后透传；repo 再兜底拒绝）。 */
+export type LlmTokenGroupBy = 'scene' | 'model' | 'day' | 'student';
+
+export interface LlmTokenGroupRow {
+  key: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  unavailableCalls: number;
+}
+
+export interface LlmTokensOverviewRow {
+  attributed: number;
+  unattributed: number;
+  unavailableCalls: number;
+}
+
+export interface QualityApiRow {
+  total: number;
+  failures: number;
+}
+
+export interface ErrorCodeDistRow {
+  code: number;
+  count: number;
+}
+
+export interface QualityLlmRow {
+  calls: number;
+  timeouts: number;
+  fallbacks: number;
+  attributed: number;
+}
+
+export interface ContentQualityRow {
+  questionsWithoutStandardAnswer: number;
+  kpCovered: number;
+  kpTotal: number;
+  wordWrong: number;
+  wordTotal: number;
+}
+
+/** /llm-calls 分页过滤。success 已由 service 解析成 1/0（缺省 undefined = 不过滤）。 */
+export interface LlmCallsPageFilter {
+  scene?: string;
+  model?: string;
+  success?: number;
+  offset: number;
+  limit: number;
+}
+
+/** /requests 分页过滤。status/minLatency 已由 service 解析成整数。 */
+export interface RequestsPageFilter {
+  path?: string;
+  status?: number;
+  minLatency?: number;
+  offset: number;
+  limit: number;
+}
+
+/** llm-tokens 分组键 → SQL 表达式（白名单内才存在，绝不拼接用户输入）。 */
+const LLM_TOKEN_GROUP_EXPRS: Record<LlmTokenGroupBy, string> = {
+  scene: 'scene',
+  model: 'model_key',
+  day: "DATE_FORMAT(created_at, '%Y-%m-%d')",
+  student: 'student_id',
+};
+
+/**
+ * 业务错误码缺省值：http-exception.filter 对未知错误的默认 code 是 **5000**
+ * （非 5001）；api_request_logs.biz_code 为 NULL（无业务码）的失败行按 5000 归组。
+ */
+const DEFAULT_BIZ_CODE = 5000;
+
 /**
  * 运营聚合只读 SQL（Phase 2 母 spec §7，Task 8：overview / modules 两个端点的数据面）。
  *
@@ -471,5 +545,206 @@ export class OpsAnalyticsRepository {
       [cohortIds, dayAt, dayNextAt],
     );
     return Number(rows[0]?.retained ?? 0);
+  }
+
+  /**
+   * /llm-tokens 分组行（Task 11）。分组键按 groupBy 白名单切换（LLM_TOKEN_GROUP_EXPRS），
+   * 聚合按 `model_key`（路由条目 key，**不是** model_id）。
+   *
+   * NULL 语义仓规：input_tokens/output_tokens 只对 `usage_source <> 'unavailable'`
+   * 的行求和——量不到（unavailable）的调用单列 `unavailable_calls`，**绝不混进 0 求和**
+   * （delta spec §7 表 7：items[].unavailableCalls = 该 key 下量不到的调用数）。
+   * day 键用 DATE_FORMAT 直接回字符串（避免 mysql2 把 DATE() 转成本地时区 Date）。
+   * key 为 NULL 的组（scene 未知 / 无归因）映射为 'unknown' / 'unattributed'。
+   */
+  async llmTokenGroups(w: OpsWindow, groupBy: LlmTokenGroupBy): Promise<LlmTokenGroupRow[]> {
+    const expr = LLM_TOKEN_GROUP_EXPRS[groupBy];
+    if (!expr) throw new Error(`非法 llm-tokens groupBy：${String(groupBy)}`);
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT ${expr} AS grp,
+              COUNT(*) AS calls,
+              COALESCE(SUM(CASE WHEN usage_source <> 'unavailable' THEN input_tokens END), 0) AS input_tokens,
+              COALESCE(SUM(CASE WHEN usage_source <> 'unavailable' THEN output_tokens END), 0) AS output_tokens,
+              SUM(usage_source = 'unavailable') AS unavailable_calls
+         FROM llm_call_logs
+        WHERE created_at >= ? AND created_at < ?
+        GROUP BY ${expr}
+        ORDER BY calls DESC`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({
+      key: r.grp === null ? (groupBy === 'student' ? 'unattributed' : 'unknown') : String(r.grp),
+      calls: Number(r.calls),
+      inputTokens: Number(r.input_tokens ?? 0),
+      outputTokens: Number(r.output_tokens ?? 0),
+      unavailableCalls: Number(r.unavailable_calls ?? 0),
+    }));
+  }
+
+  /** /llm-tokens 顶层总览：归因 / 未归因 / 量不到（与分组行同一窗口、独立一条 SQL）。 */
+  async llmTokensOverview(w: OpsWindow): Promise<LlmTokensOverviewRow> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(student_id IS NOT NULL), 0) AS attributed,
+              COALESCE(SUM(student_id IS NULL), 0) AS unattributed,
+              COALESCE(SUM(usage_source = 'unavailable'), 0) AS unavailable_calls
+         FROM llm_call_logs
+        WHERE created_at >= ? AND created_at < ?`,
+      [w.fromAt, w.toAt],
+    );
+    const r = rows[0] ?? {};
+    return {
+      attributed: Number(r.attributed ?? 0),
+      unattributed: Number(r.unattributed ?? 0),
+      unavailableCalls: Number(r.unavailable_calls ?? 0),
+    };
+  }
+
+  /**
+   * /quality 的 API 失败面：失败口径 = HTTP 5xx 或 biz_code≠0
+   * （biz_code NULL 按 DEFAULT_BIZ_CODE=5000 归为失败，与 errorCodeDistribution 同一口径）。
+   */
+  async qualityApi(w: OpsWindow): Promise<QualityApiRow> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(status_code >= 500 OR COALESCE(biz_code, ${DEFAULT_BIZ_CODE}) <> 0), 0) AS failures
+         FROM api_request_logs
+        WHERE created_at >= ? AND created_at < ?`,
+      [w.fromAt, w.toAt],
+    );
+    const r = rows[0] ?? {};
+    return { total: Number(r.total ?? 0), failures: Number(r.failures ?? 0) };
+  }
+
+  /** /quality 的错误码分布：只统计失败行，biz_code NULL 按 5000 归组。 */
+  async qualityErrorCodes(w: OpsWindow): Promise<ErrorCodeDistRow[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT COALESCE(biz_code, ${DEFAULT_BIZ_CODE}) AS code, COUNT(*) AS cnt
+         FROM api_request_logs
+        WHERE created_at >= ? AND created_at < ?
+          AND (status_code >= 500 OR COALESCE(biz_code, ${DEFAULT_BIZ_CODE}) <> 0)
+        GROUP BY code
+        ORDER BY cnt DESC`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({ code: Number(r.code), count: Number(r.cnt) }));
+  }
+
+  /**
+   * /quality 的 LLM 面。超时口径：llm_call_logs 的实际列是 `error_type`
+   * （LLMClientError 子类名），超时值为 'TimeoutError'（网络错误也被 client 归一为它）。
+   */
+  async qualityLlm(w: OpsWindow): Promise<QualityLlmRow> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS calls,
+              COALESCE(SUM(error_type = 'TimeoutError'), 0) AS timeouts,
+              COALESCE(SUM(is_fallback), 0) AS fallbacks,
+              COALESCE(SUM(student_id IS NOT NULL), 0) AS attributed
+         FROM llm_call_logs
+        WHERE created_at >= ? AND created_at < ?`,
+      [w.fromAt, w.toAt],
+    );
+    const r = rows[0] ?? {};
+    return {
+      calls: Number(r.calls ?? 0),
+      timeouts: Number(r.timeouts ?? 0),
+      fallbacks: Number(r.fallbacks ?? 0),
+      attributed: Number(r.attributed ?? 0),
+    };
+  }
+
+  /**
+   * /quality 的内容库三指标（无窗口——内容是存量库，不是埋点流）。
+   *
+   * 口径按 schema.sql 实际结构定（计划里的 `questions LEFT JOIN answers` 不成立：
+   * answers 是**学生作答**表，不是标准答案）：
+   * - questionsWithoutStandardAnswer：questions.answer 为空白（列 NOT NULL，空串 = 未导入标准答案）；
+   * - kpCoverage：EXISTS(question_knowledge_points) 的题 / 总题；
+   * - globalWordErrorRate：english_words 累计错次 SUM(error_count) 与词数 COUNT(*)。
+   */
+  async contentQuality(): Promise<ContentQualityRow> {
+    const [noStdRows, kpRows, wordRows] = await Promise.all([
+      this.pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS cnt FROM questions WHERE TRIM(answer) = ''`,
+      ),
+      this.pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(EXISTS(SELECT 1 FROM question_knowledge_points qkp
+                                     WHERE qkp.question_id = q.id)), 0) AS covered
+           FROM questions q`,
+      ),
+      this.pool.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(error_count), 0) AS wrong, COUNT(*) AS total FROM english_words`,
+      ),
+    ]);
+    const noStd = noStdRows[0][0] ?? {};
+    const kp = kpRows[0][0] ?? {};
+    const word = wordRows[0][0] ?? {};
+    return {
+      questionsWithoutStandardAnswer: Number(noStd.cnt ?? 0),
+      kpCovered: Number(kp.covered ?? 0),
+      kpTotal: Number(kp.total ?? 0),
+      wordWrong: Number(word.wrong ?? 0),
+      wordTotal: Number(word.total ?? 0),
+    };
+  }
+
+  /** /llm-calls 分页：COUNT + SELECT 两条 SQL，动态条件只拼占位符（见 eventsPage 同款纪律）。 */
+  async llmCallsPage(q: LlmCallsPageFilter): Promise<{ rows: RowDataPacket[]; total: number }> {
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    if (q.scene !== undefined) {
+      conds.push('scene = ?');
+      params.push(q.scene);
+    }
+    if (q.model !== undefined) {
+      conds.push('model_key = ?');
+      params.push(q.model);
+    }
+    if (q.success !== undefined) {
+      conds.push('success = ?');
+      params.push(q.success);
+    }
+    const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+    const [countRows, rows] = await Promise.all([
+      this.pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total FROM llm_call_logs ${where}`,
+        params,
+      ),
+      this.pool.query<RowDataPacket[]>(
+        `SELECT * FROM llm_call_logs ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+        [...params, q.limit, q.offset],
+      ),
+    ]);
+    return { rows: rows[0], total: Number(countRows[0][0]?.total ?? 0) };
+  }
+
+  /** /requests 分页：route 用 LIKE（raw_path 才带真实 id，归一化模板才是检索面）。 */
+  async requestsPage(q: RequestsPageFilter): Promise<{ rows: RowDataPacket[]; total: number }> {
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    if (q.path !== undefined) {
+      conds.push('route LIKE ?');
+      params.push(`%${q.path}%`);
+    }
+    if (q.status !== undefined) {
+      conds.push('status_code = ?');
+      params.push(q.status);
+    }
+    if (q.minLatency !== undefined) {
+      conds.push('latency_ms >= ?');
+      params.push(q.minLatency);
+    }
+    const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+    const [countRows, rows] = await Promise.all([
+      this.pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total FROM api_request_logs ${where}`,
+        params,
+      ),
+      this.pool.query<RowDataPacket[]>(
+        `SELECT * FROM api_request_logs ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+        [...params, q.limit, q.offset],
+      ),
+    ]);
+    return { rows: rows[0], total: Number(countRows[0][0]?.total ?? 0) };
   }
 }
