@@ -53,7 +53,23 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
   exports: [TelemetryService, AnalyticsInterceptor, StudySessionsService, EventsService],
 })
 export class AnalyticsModule {
-  constructor(private telemetry: TelemetryService) {
-    setLlmCallSink((entry) => this.telemetry.llmCalls.push(entry));
+  constructor(
+    private telemetry: TelemetryService,
+    // Phase 2（2026-10-09）：llm_fallback_triggered 的发射口（本模块 providers 自有，直接构造注入）。
+    private readonly eventsService: EventsService,
+  ) {
+    // 回调只在真实 LLM 调用时触发（emitLlmCall），不存在「EventsService 未就绪」的启动顺序问题。
+    setLlmCallSink((entry) => {
+      this.telemetry.llmCalls.push(entry);
+      if (entry.isFallback) {
+        // scene 是 LLM 侧自由取值、不在学生场景白名单里 → 走 props 而不是顶层 scene 列。
+        this.eventsService.track({
+          event: 'llm_fallback_triggered',
+          source: 'server',
+          studentId: entry.studentId ?? null,
+          props: { scene: entry.scene ?? null, toModel: entry.modelKey },
+        });
+      }
+    });
   }
 }

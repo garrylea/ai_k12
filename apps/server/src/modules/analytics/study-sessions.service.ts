@@ -1,6 +1,7 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { StudySessionsRepository } from '../../database/repositories/study-sessions.repo.js';
 import type { StudySessionRow } from '../../database/repositories/study-sessions.repo.js';
+import { EventsService } from './events.service.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
 import { SafetyAlertsService } from '../safety/safety-alerts.service.js';
 import { parseUserAgent } from '../../common/utils/user-agent.util.js';
@@ -106,6 +107,9 @@ export class StudySessionsService {
     @Inject('SUBJECTS_REPO_FOR_ANALYTICS') private readonly subjectsRepo: SubjectsRepoLike,
     @Inject(SafetyAlertsService) private readonly safetyAlerts: SafetyAlertsService,
     @Inject(ControlsRepository) private readonly controlsRepo: ControlsRepository,
+    // Phase 2（2026-10-09）：closeStale 兜底事件的发射口。可选尾参——旧构造方（测试）零改动；
+    // AnalyticsModule providers 里有 EventsService，Nest 注入正常，`?.` 只服务直接 new 的测试。
+    @Optional() @Inject(EventsService) private readonly events?: EventsService,
   ) {}
 
   /**
@@ -304,6 +308,11 @@ export class StudySessionsService {
    * 惰性收尾（家长端查询前；不传 studentId 的全库形态是**预留入口**，当前无调用方、
    * 夜间定时任务未实现）。见 repo 的同名方法。
    *
+   * Phase 2（2026-10-09）：对每行收尾会话发一条 `study_session_ended` 兜底事件
+   * （`source='server'`、`props.endReason='closed'`、`activeSeconds` 取服务端累计值）。
+   * `track` 是 fire-and-forget 且自身吞异常（见 `EventsService.track`），本方法不 await、
+   * 失败不影响收尾主链路。
+   *
    * 2026-09-20「及时可见」批（spec §3.1）：收尾出的 hidden 段逐条补判走神阈值——
    * 这是「心跳全断的会话」（后台 tab 被浏览器冻结 / 关闭时 end fetch 被取消）**唯一**的
    * 判定机会。`await` 而不是 `void`：本方法跑在家长查询路径（30s 轮询 / 学情 GET），不是
@@ -314,11 +323,22 @@ export class StudySessionsService {
    * hidden 段数受「学生的并发 stale 会话数」约束（个位数），逐条判定的 DB 往返可控。
    */
   async closeStale(studentId?: number): Promise<number> {
-    const { closedCount, hidden } = await this.repo.closeStale(studentId);
-    for (const session of hidden) {
-      await this.maybeRecordHiddenAlert(session.studentId, session.hiddenReason, session.hiddenSince);
+    const closed = await this.repo.closeStale(studentId);
+    for (const row of closed) {
+      this.events?.track({
+        event: 'study_session_ended',
+        source: 'server',
+        studentId: row.student_id,
+        sessionUid: row.session_uid,
+        props: { endReason: 'closed', activeSeconds: row.active_seconds },
+      });
     }
-    return closedCount;
+    for (const row of closed) {
+      if (row.client_state === 'hidden' && row.hidden_reason !== null && row.hidden_since !== null) {
+        await this.maybeRecordHiddenAlert(row.student_id, row.hidden_reason, row.hidden_since);
+      }
+    }
+    return closed.length;
   }
 }
 

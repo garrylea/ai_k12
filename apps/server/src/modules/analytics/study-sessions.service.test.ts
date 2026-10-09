@@ -5,6 +5,7 @@ import type { StudySessionsRepository, StudySessionRow } from '../../database/re
 import type { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 import type { ControlsRepository } from '../../database/repositories/controls.repo.js';
 import type { SafetyAlertsService } from '../safety/safety-alerts.service.js';
+import type { EventsService } from './events.service.js';
 
 const MAC_CHROME_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -25,7 +26,7 @@ function makeRepo(overrides: Partial<StudySessionsRepository> = {}) {
       hiddenSince: null,
       hiddenReason: null,
     }),
-    closeStale: vi.fn().mockResolvedValue({ closedCount: 0, hidden: [] }),
+    closeStale: vi.fn().mockResolvedValue([]),
     ...overrides,
   } as unknown as StudySessionsRepository;
 }
@@ -51,14 +52,21 @@ function makeControls(overrides: Partial<ControlsRepository> = {}) {
   } as unknown as ControlsRepository;
 }
 
-/** 缺省阈值 5 / 15，缺省 `record` 是 no-op。 */
+/** 缺省阈值 5 / 15，缺省 `record` 是 no-op。第 5 参 events 可选（对应 service 的可选尾参，旧调用零改动）。 */
 function makeService(
   repo: StudySessionsRepository,
   subjects = makeSubjects(),
   safety = makeSafety(),
   controls = makeControls(),
+  events?: { track: ReturnType<typeof vi.fn> },
 ) {
-  return new StudySessionsService(repo, subjects, safety, controls);
+  return new StudySessionsService(
+    repo,
+    subjects,
+    safety,
+    controls,
+    events as unknown as EventsService,
+  );
 }
 
 const baseInput = () => ({
@@ -583,13 +591,63 @@ describe('StudySessionsService.end', () => {
 });
 
 describe('StudySessionsService.closeStale（补判）', () => {
+  /** repo.closeStale 新契约：返回被收尾会话的行数组（含挂机字段）。 */
+  const staleRow = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    student_id: 9,
+    session_uid: 'u1',
+    active_seconds: 300,
+    client_state: 'visible',
+    hidden_reason: null,
+    hidden_since: null,
+    ...over,
+  });
+
+  it('closeStale 对每行收尾会话发 study_session_ended 兜底事件（props.endReason=closed，秒数取服务端累计值）', async () => {
+    const events = { track: vi.fn() };
+    const repo = makeRepo({
+      closeStale: vi.fn().mockResolvedValue([
+        staleRow({ id: 1, student_id: 7, session_uid: 'u1', active_seconds: 300 }),
+        staleRow({ id: 2, student_id: 8, session_uid: 'u2', active_seconds: 45 }),
+      ]),
+    });
+    const service = makeService(repo, makeSubjects(), makeSafety(), makeControls(), events);
+
+    await service.closeStale();
+
+    expect(events.track).toHaveBeenCalledTimes(2);
+    expect(events.track).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'study_session_ended',
+        source: 'server',
+        studentId: 7,
+        sessionUid: 'u1',
+        props: { endReason: 'closed', activeSeconds: 300 },
+      }),
+    );
+    expect(events.track).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'study_session_ended',
+        source: 'server',
+        studentId: 8,
+        sessionUid: 'u2',
+        props: { endReason: 'closed', activeSeconds: 45 },
+      }),
+    );
+  });
+
+  it('events 未注入（旧构造形态）→ 不发事件、也不抛', async () => {
+    const repo = makeRepo({ closeStale: vi.fn().mockResolvedValue([staleRow()]) });
+    const service = makeService(repo);
+    await expect(service.closeStale(9)).resolves.toBe(1);
+  });
+
   it('收尾出的 hidden 会话超阈值 → 补写预警（后台 tab 冻结 / end 丢失场景）', async () => {
     const since = new Date(Date.now() - 30 * 60_000); // 30 分钟前开始挂机
     const repo = makeRepo({
-      closeStale: vi.fn().mockResolvedValue({
-        closedCount: 1,
-        hidden: [{ studentId: 9, hiddenReason: 'away', hiddenSince: since }],
-      }),
+      closeStale: vi.fn().mockResolvedValue([
+        staleRow({ id: 1, client_state: 'hidden', hidden_reason: 'away', hidden_since: since }),
+      ]),
     });
     const safety = makeSafety();
     const service = makeService(repo, makeSubjects(), safety, makeControls());
@@ -610,10 +668,9 @@ describe('StudySessionsService.closeStale（补判）', () => {
   it('收尾出的 hidden 会话走 idle 补偿口径', async () => {
     const since = new Date(Date.now() - (3 * 60_000 + 50_000));
     const repo = makeRepo({
-      closeStale: vi.fn().mockResolvedValue({
-        closedCount: 1,
-        hidden: [{ studentId: 9, hiddenReason: 'idle', hiddenSince: since }],
-      }),
+      closeStale: vi.fn().mockResolvedValue([
+        staleRow({ id: 1, client_state: 'hidden', hidden_reason: 'idle', hidden_since: since }),
+      ]),
     });
     const safety = makeSafety();
     const controls = makeControls({
@@ -628,7 +685,7 @@ describe('StudySessionsService.closeStale（补判）', () => {
 
   it('无 hidden 段 → 不查阈值、不写预警；返回值仍是收尾条数', async () => {
     const repo = makeRepo({
-      closeStale: vi.fn().mockResolvedValue({ closedCount: 2, hidden: [] }),
+      closeStale: vi.fn().mockResolvedValue([staleRow({ id: 1 }), staleRow({ id: 2, session_uid: 'u2' })]),
     });
     const controls = makeControls();
     const service = makeService(repo, makeSubjects(), makeSafety(), controls);
