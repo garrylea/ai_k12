@@ -50,7 +50,7 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
     EventsService,
     { provide: 'SUBJECTS_REPO_FOR_ANALYTICS', useExisting: SubjectsRepository },
   ],
-  exports: [TelemetryService, AnalyticsInterceptor, StudySessionsService],
+  exports: [TelemetryService, AnalyticsInterceptor, StudySessionsService, EventsService],
 })
 export class AnalyticsModule {
   constructor(private telemetry: TelemetryService) {
