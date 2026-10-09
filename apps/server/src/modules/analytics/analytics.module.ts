@@ -10,6 +10,7 @@ import { TelemetryService } from './telemetry.service.js';
 import { EventsService } from './events.service.js';
 import { StudySessionsService } from './study-sessions.service.js';
 import { AnalyticsController } from './analytics.controller.js';
+import { TrackController } from './track.controller.js';
 import { AnalyticsInterceptor } from '../../common/interceptors/analytics.interceptor.js';
 import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
 
@@ -32,7 +33,7 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
  */
 @Module({
   imports: [SafetyAlertsModule],
-  controllers: [AnalyticsController],
+  controllers: [AnalyticsController, TrackController],
   providers: [
     LlmCallLogsRepository,
     ApiRequestLogsRepository,
