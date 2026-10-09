@@ -12,6 +12,7 @@ import {
   type MessageItem,
 } from '@/services/api';
 import { toast } from '@/components/base/Toast';
+import { trackEvent } from '@/analytics/tracker';
 
 // Severe non-retryable errors (quota / auth / permission) warrant a toast in
 // addition to the inline error bubble.
@@ -262,6 +263,9 @@ export function useAuxChat(dialogueId: number) {
       appendMessage({ role: 'user', content: userDisplay, images });
       appendMessage({ role: 'assistant', content: '', streaming: true });
       setIsStreaming(true);
+
+      // 埋点：消息发起即记（只记「发过」，内容不入任何字段）。新对话此刻已拿到真实 id。
+      trackEvent('ai_message_sent', { refType: 'dialogue', refId: dlgId, props: { scene: 'aux_chat' } });
 
       try {
         await streamTutor(dlgId, apiMessage, attachments, false);

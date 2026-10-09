@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as tracker from './tracker';
+import type { TrackEventPayload } from '@/services/api';
+
+/** 显式事件传输假实现（带参数类型，便于 `mock.calls[0][0]` 索引）。 */
+function makeEventTransport() {
+  return { sendEvents: vi.fn(async (_events: TrackEventPayload[]) => ({})) };
+}
 
 function makeTransport() {
   return {
@@ -188,6 +194,86 @@ describe('tracker 会话生命周期', () => {
     // 修正（brief 缺陷）：vitest 的 `advanceTimersByTimeAsync` 签名是 `Promise<VitestUtils>`，
     // 不是 `Promise<void>`，故原 `.resolves.toBeUndefined()` 永远失败。这里只断言「推进定时器不会 reject」。
     await expect(vi.advanceTimersByTimeAsync(0)).resolves.toBeDefined();
+  });
+});
+
+describe('tracker 显式事件队列', () => {
+  /** brief 用例需在用例内再 reset 一次（reset 会把 enabled 也复位），故封装公共前置。 */
+  function resetAndArm() {
+    tracker.__resetForTests();
+    tracker.setEnabled(true);
+    tracker.setTransport(transport);
+    tracker.setSubjectIdProvider(() => 7);
+  }
+
+  it('trackEvent 入队并批量经 eventTransport 发送（≥20 即 flush）', () => {
+    resetAndArm();
+    const { sendEvents } = makeEventTransport();
+    tracker.setEventTransport({ sendEvents });
+    for (let i = 0; i < 20; i++) tracker.trackEvent('page_view');
+    expect(sendEvents).toHaveBeenCalledTimes(1);
+    const body = sendEvents.mock.calls[0][0];
+    expect(body).toHaveLength(20);
+    expect(body[0]).toMatchObject({ event: 'page_view' });
+    expect(body[0].clientTsMs).toBeTypeOf('number');
+  });
+
+  it('page_view 同一路由 30s 内去重（离开再重回也不重复记）', () => {
+    resetAndArm();
+    const { sendEvents } = makeEventTransport();
+    tracker.setEventTransport({ sendEvents });
+    tracker.onRouteChange(STUDY); // 首次进入：page_view + started
+    tracker.onRouteChange(STUDY); // 同场景重复调用：整体 no-op
+    tracker.onRouteChange(NOT_STUDY); // 离开（end + flush；profile 页自己也记一条 page_view）
+    tracker.onRouteChange(STUDY); // 30s 内重回同一路由：不应再记 page_view
+    const pages = sendEvents.mock.calls
+      .flatMap((c) => c[0])
+      .filter((e) => e.event === 'page_view' && e.module === 'training_targeted');
+    expect(pages).toHaveLength(1);
+  });
+
+  it('会话 start/end 自动入队 session 两事件（end 带 endReason，sessionUid 在清空前带上）', () => {
+    resetAndArm();
+    const { sendEvents } = makeEventTransport();
+    tracker.setEventTransport({ sendEvents });
+    tracker.onRouteChange(STUDY);
+    const names = sendEvents.mock.calls.flatMap((c) => c[0]).map((e) => e.event);
+    expect(names).toContain('study_session_started');
+    tracker.onRouteChange(NOT_STUDY);
+    const ended = sendEvents.mock.calls
+      .flatMap((c) => c[0])
+      .find((e) => e.event === 'study_session_ended');
+    expect(ended).toBeDefined();
+    expect(ended?.props?.endReason).toBeTypeOf('string');
+    // ended 事件在 currentUid 清空**之前**入队，必须带上 sessionUid
+    expect(ended?.sessionUid).toBeTypeOf('string');
+  });
+
+  it('sendEvents 抛错被吞（.catch，绝不打断学习）', async () => {
+    resetAndArm();
+    const sendEvents = vi.fn(async () => {
+      throw new Error('net');
+    });
+    tracker.setEventTransport({ sendEvents });
+    expect(() => tracker.trackEvent('page_view')).not.toThrow();
+    // 凑满 20 强制 flush：rejection 必须被吞掉，否则 vitest 以 unhandled rejection 判红
+    for (let i = 0; i < 19; i++) tracker.trackEvent('page_view');
+    expect(sendEvents).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it('10s 定时 flush：不满 20 条也会被定时冲出去', async () => {
+    resetAndArm();
+    const { sendEvents } = makeEventTransport();
+    tracker.setEventTransport({ sendEvents });
+    tracker.onRouteChange(STUDY); // 开会话（armTimers），路由变化已把队首冲空
+    await vi.advanceTimersByTimeAsync(0);
+    const callsAfterRoute = sendEvents.mock.calls.length;
+    tracker.trackEvent('answer_revealed', { refType: 'question', refId: 1 });
+    expect(sendEvents.mock.calls.length).toBe(callsAfterRoute); // 未满 20，还在队里
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(sendEvents.mock.calls.length).toBe(callsAfterRoute + 1);
+    expect(sendEvents.mock.calls[callsAfterRoute][0][0].event).toBe('answer_revealed');
   });
 });
 

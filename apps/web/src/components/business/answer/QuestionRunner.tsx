@@ -18,6 +18,7 @@ import { LatexEditor } from '../LatexEditor';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
 import type { PreviewScrollSync } from '../preview-scroll-sync';
 import { clearDraft } from '../draft-store';
+import { trackEvent } from '@/analytics/tracker';
 import { ChoiceOptionList } from './ChoiceOptionList';
 import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion, RunnerSelfAssessContext } from './types';
 
@@ -240,6 +241,8 @@ export function QuestionRunner({
             error: false,
           });
           setPhase('self_assess');
+          // 埋点：参考答案块首次展示（答案在提交回调里即时可见，故在发起时刻记一次）。
+          trackEvent('answer_revealed', { refType: 'question', refId: res.questionId ?? undefined });
           return;
         }
         // ai 模式 / 客观题语义的返回：noStandardAnswer（空答案守卫）也走这里——中性记录不进自评

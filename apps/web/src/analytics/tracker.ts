@@ -1,4 +1,5 @@
 import { endStudySession, heartbeatStudySession, startStudySession } from '@/services/api';
+import type { TrackEventPayload } from '@/services/api';
 import { sceneKey } from './sceneMap';
 import { transition } from './sessionMachine';
 import { newSessionUid } from './types';
@@ -27,6 +28,12 @@ export const IDLE_TIMEOUT_MS = 120_000;
 const IDLE_CHECK_INTERVAL_MS = 5_000;
 /** 用户活动节流：只在活动停下来时更新 `lastInputAt`，避免 scroll 每次都进回调。 */
 const INPUT_THROTTLE_MS = 5_000;
+/** 显式事件批量阈值：满 20 条立即 flush（服务端单批上限 50，见 /track/events）。 */
+const EVENT_FLUSH_BATCH_SIZE = 20;
+/** 显式事件定时 flush：10s（不满一批也冲出去；测试用 fake timers 驱动）。 */
+const EVENT_FLUSH_INTERVAL_MS = 10_000;
+/** page_view 同路由去重窗口。 */
+const PAGE_VIEW_DEDUPE_MS = 30_000;
 
 export interface StudySessionStartBody {
   sessionUid: string;
@@ -80,6 +87,50 @@ let lastInputAt = 0;
 let lastInputRecordedAt = 0;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let idleTimer: ReturnType<typeof setInterval> | null = null;
+let eventFlushTimer: ReturnType<typeof setInterval> | null = null;
+
+// ------------------------------------------------------ 显式事件（track/events）
+
+/** 显式事件传输。测试注入假实现；生产由 `AnalyticsShell` 接 `api.ts` 的 `trackEvents`。 */
+let eventTransport: { sendEvents(events: TrackEventPayload[]): Promise<unknown> } | null = null;
+let eventQueue: TrackEventPayload[] = [];
+/** page_view 同路由去重：key = `${module}/${scene}`（untracked 路由 module/scene 均为 null，也各自成键）。 */
+const lastPageViewAt = new Map<string, number>();
+
+/**
+ * 显式事件入口（spec：answer_revealed / ai_message_sent / page_view 等）。
+ *
+ * module/scene/sessionUid **入队即快照**（读当时的 `currentInfo` / `sessionUid`）——
+ * 消费方拿到的是事件发生那一刻的归属，不受之后路由切换影响。**永不抛**：
+ * 未启用（非学生角色）或未接传输时 no-op，失败由 `flushEvents` 吞掉。
+ */
+export function trackEvent(
+  event: string,
+  fields?: { refType?: string; refId?: number; props?: Record<string, unknown> },
+): void {
+  if (!eventTransport || !enabled) return;
+  eventQueue.push({
+    event,
+    module: currentInfo?.module ?? undefined,
+    scene: currentInfo?.scene ?? undefined,
+    sessionUid: sessionUid ?? undefined,
+    refType: fields?.refType,
+    refId: fields?.refId,
+    props: fields?.props,
+    clientTsMs: Date.now(),
+  });
+  if (eventQueue.length >= EVENT_FLUSH_BATCH_SIZE) flushEvents();
+}
+
+/** 批量冲出去。失败整批丢弃不重试（与会话传输同款口径：埋点绝不打断学习）。 */
+function flushEvents(): void {
+  if (!eventTransport || eventQueue.length === 0) return;
+  const batch = eventQueue;
+  eventQueue = [];
+  void eventTransport.sendEvents(batch).catch(() => {
+    /* 失败丢弃不重试 */
+  });
+}
 
 // ---------------------------------------------------------------- 对外开关
 
@@ -100,6 +151,13 @@ export function setTransport(next: StudySessionTransport): void {
   transport = next;
 }
 
+/** 注入显式事件传输（生产走 `api.ts` 的 `trackEvents`；测试注入假实现）。 */
+export function setEventTransport(next: {
+  sendEvents(events: TrackEventPayload[]): Promise<unknown>;
+}): void {
+  eventTransport = next;
+}
+
 /** 学科 id 由 `learnContextStore` 提供（见 Task 9），避免 tracker 直接依赖 store。 */
 export function setSubjectIdProvider(fn: () => number | null): void {
   subjectIdProvider = fn;
@@ -111,6 +169,9 @@ export function __resetForTests(): void {
   transport = defaultTransport;
   subjectIdProvider = () => null;
   enabled = false;
+  eventTransport = null;
+  eventQueue = [];
+  lastPageViewAt.clear();
   resetLocalState();
 }
 
@@ -134,7 +195,24 @@ export function onRouteChange(info: SceneInfo): void {
 
   currentKey = key;
   currentInfo = info;
+
+  // page_view：同一路由 30s 内只记一次（React 严格模式双跑 / query 变化 / 短暂往返
+  // 都不算新页面）。入队时 `currentInfo` 已切到新场景、会话尚未重开——归属就是这一次导航。
+  // 完全未命中规则的页面（登录/选择页等）不记——与 sceneMap「不猜」的口径一致。
+  const routeKey = `${info.module ?? ''}/${info.scene ?? ''}`;
+  const now = Date.now();
+  if (
+    (info.module || info.scene) &&
+    now - (lastPageViewAt.get(routeKey) ?? 0) > PAGE_VIEW_DEDUPE_MS
+  ) {
+    lastPageViewAt.set(routeKey, now);
+    trackEvent('page_view');
+  }
+
   if (key !== null) runTransition('ROUTE_ENTER');
+
+  // 路由真变化了：把攒着的显式事件冲出去（含刚入队的 session_ended/page_view）。
+  flushEvents();
 }
 
 /** 用户活动（节流）。用于空闲检测与「hidden → active」的恢复。 */
@@ -155,6 +233,8 @@ export function setVisibility(visible: boolean): void {
 
 /** `window.pagehide`。 */
 export function onPageHide(): void {
+  // 页面即将隐藏：先把攒着的显式事件冲出去（即使当前无会话——page_view 也可能还压在队里）。
+  flushEvents();
   if (!enabled || !sessionUid) return;
   applyEffect({ pageHide: true });
 }
@@ -193,6 +273,11 @@ function beginSession(): void {
 /** 收尾当前会话（若有）。所有「结束」都走这里，避免多处各写一遍。 */
 function endSession(reason: EndReason): void {
   const uid = sessionUid;
+  // 「ended」事件必须在 sessionUid 清空**之前**入队（事件要带上 sessionUid，
+  // 场景归属也仍是会话所属的旧场景——此刻 currentInfo 尚未切换）。
+  // 注意：`setEnabled(false)` → `endSession('closed')` 这条路因 enabled 已置 false
+  // 而不发 ended——退出登录的最后一瞬不补发埋点，可接受。
+  if (uid) trackEvent('study_session_ended', { props: { endReason: reason } });
   resetLocalState();
   if (!uid) return;
   void transport.end(uid, reason).catch(() => {
@@ -242,7 +327,11 @@ function runTransition(event: SessionEvent): void {
   const next = transition(state, event);
   state = next.state;
 
-  if (next.effects.start) beginSession();
+  if (next.effects.start) {
+    beginSession();
+    // started 事件跟在 beginSession 之后：sessionUid / currentInfo 都已就绪，入队即快照。
+    if (sessionUid) trackEvent('study_session_started');
+  }
   if (next.effects.end) return endSession(next.effects.end);
   if (next.effects.heartbeat) {
     // 同步记下「本段挂机的原因」供周期心跳复用（见 `currentHiddenReason` 的注释）。
@@ -271,13 +360,21 @@ function armTimers(): void {
   idleTimer = setInterval(() => {
     if (state === 'active' && Date.now() - lastInputAt >= IDLE_TIMEOUT_MS) runTransition('IDLE_TIMEOUT');
   }, IDLE_CHECK_INTERVAL_MS);
+
+  // 显式事件的 10s 定时 flush（不满一批也冲出去）。只在会话在跑时 armed——
+  // 纯浏览（无会话）攒下的事件由路由变化 / pagehide 兜底。
+  eventFlushTimer = setInterval(flushEvents, EVENT_FLUSH_INTERVAL_MS);
+  // Node 环境不 unref 会阻止进程退出；jsdom / 测试环境无 unref，容错跳过。
+  (eventFlushTimer as unknown as { unref?: () => void }).unref?.();
 }
 
 function disarmTimers(): void {
   if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
   if (idleTimer !== null) clearInterval(idleTimer);
+  if (eventFlushTimer !== null) clearInterval(eventFlushTimer);
   heartbeatTimer = null;
   idleTimer = null;
+  eventFlushTimer = null;
 }
 
 function resetLocalState(): void {
