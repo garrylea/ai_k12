@@ -839,3 +839,18 @@ describe('路由表：订阅锁定页', () => {
     expect(getSubscriptionStatusMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 忘记密码页（2026-10-09 批）：`/forgot-password` 是新页，从零加进路由表。
+ * 公开页（无 RequireRole、不进 Layout），主题写死家长蓝白（同注册页）。
+ */
+describe('路由表：忘记密码页', () => {
+  it('/forgot-password 渲染 ForgotPasswordPage，公开可达且用家长主题', async () => {
+    renderAt('/forgot-password');
+
+    expect(await screen.findByRole('heading', { name: '忘记密码' })).toBeInTheDocument();
+    // 学生口径说明（UX 文档：学生联系家长重置，不走本流程）
+    expect(screen.getByText(/学生密码请联系家长在家长端重置/)).toBeInTheDocument();
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+});

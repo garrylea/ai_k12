@@ -1,6 +1,7 @@
 import { Navigate, type RouteObject } from 'react-router-dom';
 import LoginPage from '@/pages/auth/LoginPage';
 import RegisterPage from '@/pages/auth/RegisterPage';
+import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
 import SubjectSelectPage from '@/pages/auth/SubjectSelectPage';
 import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
@@ -91,6 +92,10 @@ export const routes: RouteObject[] = [
   {
     path: '/register',
     element: <RegisterPage />,
+  },
+  {
+    path: '/forgot-password',
+    element: <ForgotPasswordPage />,
   },
   // 管理员中枢布局路由（子页面在后续 task 逐个替换为真页面）
   {
