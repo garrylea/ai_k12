@@ -191,9 +191,9 @@ export default function LoginPage() {
               <Link to="/register" className="hover:text-[var(--brand-500)] hover:underline">
                 注册家长账号
               </Link>
-              <button type="button" className="hover:text-[var(--brand-500)] hover:underline">
+              <Link to="/forgot-password" className="hover:text-[var(--brand-500)] hover:underline">
                 忘记密码？
-              </button>
+              </Link>
             </div>
           </form>
         </div>

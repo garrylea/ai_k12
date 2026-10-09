@@ -100,6 +100,22 @@ export function registerParent(phone: string, password: string, name?: string): 
   });
 }
 
+/** 忘记密码①：请求模拟验证码。家庭自部署无短信服务，验证码直接返回由页面展示（spec 裁决）。 */
+export function requestPasswordReset(phone: string): Promise<{ code: string; expiresIn: number }> {
+  return fetchApi<{ code: string; expiresIn: number }>('/auth/password/reset-request', {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+}
+
+/** 忘记密码②：验证码 + 新密码重置。成功不失效已登录的其他设备 token。 */
+export function resetPassword(phone: string, code: string, newPassword: string): Promise<{ success: boolean }> {
+  return fetchApi<{ success: boolean }>('/auth/password/reset', {
+    method: 'POST',
+    body: JSON.stringify({ phone, code, newPassword }),
+  });
+}
+
 // --- Parent: student accounts ---
 
 export interface MyStudentItem {

@@ -35,6 +35,7 @@ function renderLoginPage() {
         <Route path="/student/entry" element={<div>student-entry-page</div>} />
         <Route path="/m/parent" element={<div>parent-mobile-home</div>} />
         <Route path="/parent/students" element={<div>parent-students-page</div>} />
+        <Route path="/forgot-password" element={<div>forgot-password-page</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -89,6 +90,16 @@ describe('LoginPage', () => {
 
     expect(mockLogin).not.toHaveBeenCalled();
     expect(screen.getByText('请输入用户名和密码')).toBeInTheDocument();
+  });
+
+  it('「忘记密码？」是可点击的链接，指向 /forgot-password（曾是无 onClick 的死按钮）', async () => {
+    const user = userEvent.setup();
+    renderLoginPage();
+
+    const link = screen.getByRole('link', { name: '忘记密码？' });
+    expect(link).toHaveAttribute('href', '/forgot-password');
+    await user.click(link);
+    expect(screen.getByText('forgot-password-page')).toBeInTheDocument();
   });
 });
 
