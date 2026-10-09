@@ -126,11 +126,23 @@ paths:
                   type: string
       responses:
         '200':
-          description: 请求已发送
+          description: 请求已发送（模拟验证码直接在 data.code 返回，页面展示用；接入短信服务商前临时口径）
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CommonResponse'
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          code:
+                            type: string
+                            description: 6 位数字模拟验证码
+                          expiresIn:
+                            type: integer
+                            description: 有效期（秒），固定 300
   /auth/password/reset:
     post:
       tags: [Auth]
@@ -152,11 +164,19 @@ paths:
                   type: string
       responses:
         '200':
-          description: 密码已重置
+          description: 密码已重置（不失效已签发 token）
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CommonResponse'
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          success:
+                            type: boolean
   /auth/me:
     get:
       tags: [Auth]

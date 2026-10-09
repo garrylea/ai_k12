@@ -1530,3 +1530,11 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 ---
 
 **2026-09-02 新增（refinery：lesson_anchor 页码锚定，db_loader 章归属确定性判定）**：背景--LLM 标签三类归属错误：① 错章（page_092 复习题27 标成「第二十六章 二次函数」、page_119 复习题28 续页同，prompt 规定复习题/小结填 null 继承但 LLM 违规自选错章标签，CLI 无法防御「合法格式的错值」）；② 同名歧义（各章「小结」「数学活动」lesson 同名，`_match_lesson_scoped` 按名取第一个 → 26-30 章约 14 页小结/复习题卡全挂 25 章小结，老书同潜伏）；③ 非 TOC 标签（「复习题 30」会经 `_find_or_create` 建 TOC 外 lesson）。方案（业内标准做法：TOC 页码锚定，最强信号参与判定）--每张卡的章归属由「textbook_page（md 页码）→ TOC 章区间」独立确定，LLM lesson_id 降级为章内小节建议，冲突时锚定赢；**锚定只在 db_loader 挂卡时做**（零 LLM 成本、不动 extract/publish/toc_merge、直接修存量数据；每次 load 重算，重处理任意页不影响结构）。实现--① 新模块 `src/lesson_anchor.py`：章边界两级推导（首选综述卡锚定：每章「第N章」标签卡最小 md 页=章头页，md 空间直接锚零误差、取 min 免疫错章综述标签；兜底首节 printed+偏移众数−3 余量）+ 节时间线 `active_label_at`（错章卡兜底定位活跃节）；② `db_loader.load_book_cards` TOC 模式挂卡前修正（`_build_anchor_ctx` 预查 units/lessons/同名集合，`_anchor_lesson_id` 规则 A 错章重写（content「复习题 N」>时间线活跃节>标题匹配>章综述）/B 同名消歧（按页所在章）/C 复习题归一（挂该章「小结」，用户决策不建「复习题 N」lesson））+ `[anchor] offset/corrected/disambiguated/normalized` 观测日志；无 TOC/对不上整体退化既有匹配。实施修正--首版偏移法实测 P119 误入 29 章+老书 17 个假修正，综述卡锚定后 corrected 17→0、P119 归 28 章小结。验证--451 tests 绿（lesson_anchor 19 + TestAnchorCorrection 9 新增）；真库重载新书 799 卡（corrected=6/disambiguated=119/normalized=6），P92/P93→27 章小结、P119→28 章小结、P177/178/179→30 章小结，各章小结卡分布正常，幂等重跑一致；老书 313 卡重载无错章。数据修复顺带完成--删 7 条测试练习记录（学生 7）解锁新书入库。遗留--老书 9 个「复习题21-29」空壳 lesson（历史 load 遗留 0 卡可清理）；老书 39 张裸编号标签卡 skipped（既有数据质量项）。详见 `docs/superpowers/plans/2026-09-02-lesson-anchor-design.md`。
+
+## 2026-10-09 忘记密码（家长模拟验证码）
+
+- 补齐登录页死按钮：`/forgot-password` 单页表单（家长手机号 → 页面直显模拟验证码 → 新密码）。
+- 后端：`PasswordResetCodeService`（进程内存，5min 有效 / 60s 重发 / 错 5 次作废，不建表）+ `POST /api/auth/password/reset-request`、`POST /api/auth/password/reset`（免 JWT、@HttpCode(200)、ThrottleInterceptor）。
+- 口径：学生不做自助找回（联系家长）；未注册手机号直接报 1002（局域网场景不做防枚举）；重置成功不失效旧 token（与家长端改密码一致）。
+- 验证码直显是家庭自部署的临时口径，将来接短信只换 `issue` 的发送环节。
+- 踩坑记录：Zod 裸 parse 会被全局过滤器兜成 500，新端点用 `parseInput` 转 400/1001（同 parent-points.controller.ts 模式）。

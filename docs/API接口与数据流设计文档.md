@@ -160,8 +160,8 @@
 | POST | `/api/auth/register` | 家长注册（手机号 + 密码 + 可选姓名；**注册即登录**，直接返回 parent token） | MVP |
 | POST | `/api/auth/login` | **三角色统一登录**：按 admins(username) -> parents(手机号) -> students(username) 顺序查询命中，签发带 `role` 的 JWT；限流 10 次/分/IP（超限 1008） | MVP |
 | POST | `/api/auth/logout` | 登出，使当前 Token 失效 | MVP |
-| POST | `/api/auth/password/reset-request` | 请求重置密码（MVP 阶段发送短信验证码） | MVP |
-| POST | `/api/auth/password/reset` | 确认重置密码（验证码 + 新密码） | MVP |
+| POST | `/api/auth/password/reset-request` | 请求重置密码（已实现：MVP 阶段为模拟验证码，直接在响应 `data.code` 返回并展示于页面；未注册手机号报 1002；同号 60s 重发间隔报 1008） | MVP |
+| POST | `/api/auth/password/reset` | 确认重置密码（已实现：验证码 + 新密码；验证码错 5 次作废报 1003；成功不失效旧 token） | MVP |
 | GET | `/api/auth/me` | 获取当前登录身份 | MVP |
 
 ### 4.2 Users — `/api/users`
