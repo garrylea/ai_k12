@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { AnalyticsPageShell, fmtDuration, fmtPct } from './shared';
+import { AnalyticsPageShell, EVENT_LABELS, FUNNEL_MODULES, eventLabel, fmtDuration, fmtPct } from './shared';
 
 afterEach(() => cleanup());
 
@@ -55,7 +55,23 @@ describe('格式化', () => {
   it('fmtDuration：null → —，秒/分/时分段', () => {
     expect(fmtDuration(null)).toBe('—');
     expect(fmtDuration(45)).toBe('45 秒');
-    expect(fmtDuration(125)).toBe('0 小时 2 分');
+    expect(fmtDuration(125)).toBe('2 分');
     expect(fmtDuration(7265)).toBe('2 小时 1 分');
+  });
+
+  // T14 评审裁定①：3599s 用 round 会进位成 '0 小时 60 分'，必须 floor
+  it('fmtDuration：3599 → 59 分（不显示 0 小时 60 分）', () => {
+    expect(fmtDuration(3599)).toBe('59 分');
+    expect(fmtDuration(3600)).toBe('1 小时 0 分');
+  });
+
+  it('EVENT_LABELS：17 事件 + 8 模块，字典外 key 原样返回', () => {
+    const moduleKeys = new Set<string>(FUNNEL_MODULES);
+    const eventKeys = Object.keys(EVENT_LABELS).filter((k) => !moduleKeys.has(k));
+    expect(eventKeys).toHaveLength(17);
+    expect(FUNNEL_MODULES).toHaveLength(8);
+    expect(eventLabel('mainline')).toBe('主线');
+    expect(eventLabel('study_session_started')).toBe('进入学习');
+    expect(eventLabel('unknown_event')).toBe('unknown_event');
   });
 });
