@@ -5,6 +5,9 @@ import { StudySessionsRepository } from '../../database/repositories/study-sessi
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
 import { BehaviorEventsRepository } from '../../database/repositories/behavior-events.repo.js';
+import { OpsAnalyticsRepository } from './ops-analytics.repo.js';
+import { OpsAnalyticsService } from './ops-analytics.service.js';
+import { AdminAnalyticsController } from './admin-analytics.controller.js';
 import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
 import { TelemetryService } from './telemetry.service.js';
 import { EventsService } from './events.service.js';
@@ -33,7 +36,7 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
  */
 @Module({
   imports: [SafetyAlertsModule],
-  controllers: [AnalyticsController, TrackController],
+  controllers: [AnalyticsController, TrackController, AdminAnalyticsController],
   providers: [
     LlmCallLogsRepository,
     ApiRequestLogsRepository,
@@ -48,6 +51,9 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
     // Phase 2 行为事件流：字典与三道锁（tier 由字典决定 / client 白名单 / 隐私守卫）。
     BehaviorEventsRepository,
     EventsService,
+    // Phase 2 运营聚合（母 spec §7 端点 1-2）：只读 SQL 骨架，Task 9-11 追加其余端点。
+    OpsAnalyticsRepository,
+    OpsAnalyticsService,
     { provide: 'SUBJECTS_REPO_FOR_ANALYTICS', useExisting: SubjectsRepository },
   ],
   exports: [TelemetryService, AnalyticsInterceptor, StudySessionsService, EventsService],
