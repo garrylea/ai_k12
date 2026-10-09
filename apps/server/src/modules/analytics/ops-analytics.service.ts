@@ -13,16 +13,25 @@ export function parseWindow(from?: string, to?: string): OpsWindow {
   const fmt = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const DAY = 86_400_000;
+  // 往返校验：Node 对 '2026-02-30' 这类「格式合法但日期无效」的输入会滚动到下月而非 Invalid Date，
+  // 只查 isNaN 拦不住；解析结果格式化回去与输入全等才放行。
+  const parse = (label: 'from' | 'to', s: string): Date => {
+    const d = new Date(`${s}T00:00:00`);
+    if (isNaN(d.getTime()) || fmt(d) !== s) {
+      throw new BadRequestException({ code: 1001, message: `${label} 日期无效` });
+    }
+    return d;
+  };
   const now = new Date();
   let toD = now;
   let fromD = new Date(now.getTime() - 6 * DAY);
   if (to) {
     if (!dateRe.test(to)) throw new BadRequestException({ code: 1001, message: 'to 格式应为 YYYY-MM-DD' });
-    toD = new Date(`${to}T00:00:00`);
+    toD = parse('to', to);
   }
   if (from) {
     if (!dateRe.test(from)) throw new BadRequestException({ code: 1001, message: 'from 格式应为 YYYY-MM-DD' });
-    fromD = new Date(`${from}T00:00:00`);
+    fromD = parse('from', from);
   }
   if (fromD.getTime() > toD.getTime()) {
     throw new BadRequestException({ code: 1001, message: 'from 不能晚于 to' });

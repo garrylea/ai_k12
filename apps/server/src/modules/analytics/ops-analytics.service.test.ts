@@ -51,6 +51,21 @@ describe('parseWindow', () => {
       expect.objectContaining({ response: expect.objectContaining({ code: 1001 }) }),
     );
   });
+
+  it('格式合法但日期无效（如 2026-02-30 / 2026-13-01）→ 400/1001，不放行到 SQL', async () => {
+    await expect(
+      (async () => {
+        const { svc } = svcWith({});
+        return svc.overview({ from: '2026-02-30' });
+      })(),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(
+      (async () => {
+        const { svc } = svcWith({});
+        return svc.overview({ to: '2026-13-01' });
+      })(),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+  });
 });
 
 describe('OpsAnalyticsService.overview', () => {
