@@ -146,6 +146,32 @@ describe('SafetyAlertsService.record —— 去重窗口', () => {
     expect(since.getTime()).toBeGreaterThanOrEqual(before - DEDUPE_WINDOW_MS);
     expect(since.getTime()).toBeLessThanOrEqual(after - DEDUPE_WINDOW_MS);
   });
+
+  it('传 dedupSince → 用它作为去重起点（同一段挂机只报一次，2026-10-10 裁决）', async () => {
+    const alerts = mkAlerts();
+    const svc = mkSvc(alerts);
+
+    const segmentStart = new Date('2026-10-08T14:24:48.751Z');
+    svc.record(input({ type: 'idle', dialogueId: null, level: 'info', dedupSince: segmentStart }));
+    await flush();
+
+    // 去重起点 = 挂机段起点，而不是 now-30min
+    expect(alerts.existsRecent).toHaveBeenCalledWith(9, 'idle', segmentStart);
+  });
+
+  it('不传 dedupSince → 沿用 30 分钟窗口（闲聊等类型行为不变）', async () => {
+    const alerts = mkAlerts();
+    const svc = mkSvc(alerts);
+
+    const before = Date.now();
+    svc.record(input());
+    await flush();
+
+    expect(alerts.existsRecent).toHaveBeenCalledTimes(1);
+    const [, , since] = alerts.existsRecent.mock.calls[0] as [number, string, Date];
+    expect(since.getTime()).toBeGreaterThanOrEqual(before - DEDUPE_WINDOW_MS - 1000);
+    expect(since.getTime()).toBeLessThanOrEqual(Date.now() - DEDUPE_WINDOW_MS + 1000);
+  });
 });
 
 describe('SafetyAlertsService.messageFor —— 面向家长文案的唯一真源（spec §3.4）', () => {

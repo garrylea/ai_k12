@@ -19,6 +19,13 @@ export interface RecordSafetyAlertInput {
   message: string;
   /** 上下文片段：闲聊/情绪/敏感 = 学生消息截断 200 字；走神 = 「切走 N 分钟」。 */
   context: string | null;
+
+  /**
+   * 去重起点覆盖（2026-10-10「同段只报一次」裁决）：传入时用它替代默认的
+   * now-30min 作为 `existsRecent` 的 since。走神预警传 `hidden_since`（挂机段
+   * 起点），同一段挂机只报一次；闲聊/情绪/敏感不传，沿用 30 分钟窗口。
+   */
+  dedupSince?: Date;
 }
 
 /** 去重窗口（spec §3.5）。 */
@@ -49,7 +56,7 @@ export class SafetyAlertsService {
 
   private async doRecord(input: RecordSafetyAlertInput): Promise<void> {
     try {
-      const since = new Date(Date.now() - DEDUPE_WINDOW_MS);
+      const since = input.dedupSince ?? new Date(Date.now() - DEDUPE_WINDOW_MS);
       if (await this.alertsRepo.existsRecent(input.studentId, input.type, since)) return;
 
       const student = await this.studentsRepo.findById(input.studentId);
