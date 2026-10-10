@@ -31,6 +31,7 @@ function svcWith(overrides: Partial<Record<keyof OpsAnalyticsRepository, unknown
     retentionDay: vi.fn(async () => 0),
     llmTokenGroups: vi.fn(async () => []),
     llmTokensOverview: vi.fn(async () => ({ attributed: 0, unattributed: 0, unavailableCalls: 0 })),
+    llmModuleUsage: vi.fn(async () => [] as { module: string | null; calls: number; inputTokens: number; outputTokens: number }[]),
     qualityApi: vi.fn(async () => ({ total: 0, failures: 0 })),
     qualityErrorCodes: vi.fn(async () => [] as { code: number; count: number }[]),
     qualityLlm: vi.fn(async () => ({ calls: 0, timeouts: 0, fallbacks: 0, attributed: 0 })),
@@ -125,12 +126,18 @@ describe('OpsAnalyticsService.overview', () => {
 });
 
 describe('OpsAnalyticsService.modules', () => {
-  it('逐模块组装，answered=0 → accuracy null', async () => {
+  it('逐模块组装，answered=0 → accuracy null；无 LLM 调用（缺省空）三列为真实 0', async () => {
     const { svc } = svcWith({});
     const r = await svc.modules({});
     expect(r.items).toEqual([
-      { module: 'mainline', students: 5, seconds: 6000, answered: 4, correct: 1, accuracy: 0.25 },
-      { module: 'exam', students: 2, seconds: 1200, answered: 0, correct: 0, accuracy: null },
+      {
+        module: 'mainline', students: 5, seconds: 6000, answered: 4, correct: 1, accuracy: 0.25,
+        llmCalls: 0, llmInputTokens: 0, llmOutputTokens: 0,
+      },
+      {
+        module: 'exam', students: 2, seconds: 1200, answered: 0, correct: 0, accuracy: null,
+        llmCalls: 0, llmInputTokens: 0, llmOutputTokens: 0,
+      },
     ]);
   });
 
@@ -140,6 +147,55 @@ describe('OpsAnalyticsService.modules', () => {
     expect(repo.modulesWindow).toHaveBeenCalledTimes(1);
     const w = (repo.modulesWindow as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(w.fromAt).toBe('2026-10-01 00:00:00');
+  });
+});
+
+describe('OpsAnalyticsService.modules — M4（每行三列 LLM 统计）', () => {
+  const BASE = [
+    { module: 'mainline', students: 5, seconds: 6000, sessions: 9, answered: 4, correct: 1 },
+    { module: 'aux_qna', students: 3, seconds: 3000, sessions: 5, answered: 2, correct: 1 },
+    { module: 'training_targeted', students: 2, seconds: 2000, sessions: 4, answered: 3, correct: 2 },
+    { module: 'exam', students: 2, seconds: 1200, sessions: 3, answered: 0, correct: 0 },
+  ];
+
+  it('API 段按映射累加进对应学习模块行（practice→mainline、ai→aux_qna、training→training_targeted、exams→exam），不新增行', async () => {
+    const llmModuleUsage = vi.fn(async (_w: OpsWindow) => [
+      { module: 'practice', calls: 3, inputTokens: 100, outputTokens: 40 }, // → mainline
+      { module: 'ai', calls: 4, inputTokens: 80, outputTokens: 30 }, // → aux_qna
+      { module: 'training', calls: 2, inputTokens: 50, outputTokens: 20 }, // → training_targeted
+      { module: 'exams', calls: 1, inputTokens: 10, outputTokens: 5 }, // → exam
+    ]);
+    const { svc, repo } = svcWith({
+      modulesWindow: vi.fn(async () => BASE),
+      llmModuleUsage,
+    });
+    const r = await svc.modules({ from: '2026-10-03', to: '2026-10-09' });
+    const by = new Map(r.items.map((i: { module: string }) => [i.module, i]));
+    expect(by.get('mainline')).toMatchObject({ llmCalls: 3, llmInputTokens: 100, llmOutputTokens: 40 });
+    expect(by.get('aux_qna')).toMatchObject({ llmCalls: 4, llmInputTokens: 80, llmOutputTokens: 30 });
+    expect(by.get('training_targeted')).toMatchObject({ llmCalls: 2, llmInputTokens: 50, llmOutputTokens: 20 });
+    expect(by.get('exam')).toMatchObject({ llmCalls: 1, llmInputTokens: 10, llmOutputTokens: 5 });
+    // 每段并入自己的模块行，不因 LLM 侧数据新增行
+    expect(r.items).toHaveLength(4);
+    expect(repo.llmModuleUsage).toHaveBeenCalledTimes(1);
+    const w = llmModuleUsage.mock.calls[0][0];
+    expect(w.fromAt).toBe('2026-10-03 00:00:00');
+    expect(w.toAt).toBe('2026-10-10 00:00:00');
+  });
+
+  it('未映射段（parent/admin/未知）与 NULL module 不并入任何行、不新增行', async () => {
+    const llmModuleUsage = vi.fn(async (_w: OpsWindow) => [
+      { module: 'parent', calls: 7, inputTokens: 700, outputTokens: 70 },
+      { module: 'admin', calls: 2, inputTokens: 200, outputTokens: 20 },
+      { module: null, calls: 5, inputTokens: 500, outputTokens: 50 },
+    ]);
+    const { svc } = svcWith({
+      modulesWindow: vi.fn(async () => BASE),
+      llmModuleUsage,
+    });
+    const r = await svc.modules({});
+    expect(r.items.every((i: { llmCalls: number }) => i.llmCalls === 0)).toBe(true);
+    expect(r.items).toHaveLength(4);
   });
 });
 

@@ -288,6 +288,32 @@ describe('OpsAnalyticsRepository — Task 10（retention / devices / cohort-comp
   });
 });
 
+describe('OpsAnalyticsRepository — M4（/modules 每行三列 LLM 统计数据面）', () => {
+  it('llmModuleUsage：按 module（API 第一段）聚合 llm_call_logs，unavailable 的 token 不计求和（与 /llm-tokens 同款 CASE 口径）', async () => {
+    const pool = poolWithQueries([
+      [
+        { module: 'practice', calls: 5, input_tokens: 200, output_tokens: 80 },
+        { module: null, calls: 2, input_tokens: 0, output_tokens: 0 },
+      ],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.llmModuleUsage(W);
+    expect(r).toEqual([
+      { module: 'practice', calls: 5, inputTokens: 200, outputTokens: 80 },
+      { module: null, calls: 2, inputTokens: 0, outputTokens: 0 },
+    ]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('FROM llm_call_logs');
+    expect(String(sql)).toContain("CASE WHEN usage_source <> 'unavailable' THEN input_tokens END");
+    expect(String(sql)).toContain("CASE WHEN usage_source <> 'unavailable' THEN output_tokens END");
+    expect(String(sql)).toContain('GROUP BY module');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    // 聚合 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容的全仓纪律；mock 池只实现 query）
+    expect(pool.execute).toBeUndefined();
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+});
+
 describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls / requests 数据面）', () => {
   it('llmTokenGroups(scene)：unavailable 单列（CASE WHEN usage_source <> unavailable），窗口参数化', async () => {
     const pool = poolWithQueries([

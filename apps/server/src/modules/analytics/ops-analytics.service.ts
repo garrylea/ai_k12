@@ -124,6 +124,24 @@ const FUNNEL_STEPS: Record<string, string[]> = {
  */
 const MAINLINE_LESSON_TASK_CODE = 'mainline_lesson';
 
+/**
+ * 「API 段 → 学习模块」映射（M4，/modules 每行三列 LLM 统计的累加依据，设计 §2.3 第 2 条）。
+ * **仅报表层映射、不落数据**（改映射不迁数据，设计 §5）。
+ *
+ * ⚠️ 命名空间警示：llm_call_logs.module 的值域是 **API 第一段**（moduleFromRoute：
+ * practice/ai/training/exams/parent/admin/chinese-passages/...），与 events 侧
+ * MODULE_WHITELIST（events.service.ts）的学习模块枚举（mainline/aux_qna/
+ * training_targeted/...）**不同源不同值域**——本表就是把前者翻译成后者。
+ * 键 = API 段，值 = /modules 行的学习模块 key。
+ * 未列出的段（parent/admin/NULL/未知）不并入任何行。
+ */
+const LLM_API_SEGMENT_TO_MODULE: Record<string, string> = {
+  practice: 'mainline',
+  ai: 'aux_qna',
+  training: 'training_targeted',
+  exams: 'exam',
+};
+
 @Injectable()
 export class OpsAnalyticsService {
   constructor(private readonly repo: OpsAnalyticsRepository) {}
@@ -146,10 +164,31 @@ export class OpsAnalyticsService {
     };
   }
 
-  /** GET /api/admin/analytics/modules。 */
+  /**
+   * GET /api/admin/analytics/modules。
+   * 每行三列 LLM 统计（M4）：repo 按 API 段聚合（llmModuleUsage）后，在此按
+   * LLM_API_SEGMENT_TO_MODULE 映射**累加**进对应学习模块行——仅报表层、不落数据。
+   * 映射后无对应行的段（如窗口内无会话行的学习模块）与未映射段（parent/admin/NULL）
+   * 不并入也不新增行（LEFT JOIN 语义：列表基线 = 会话/答题侧的模块行）；
+   * 无调用的模块三列 = 0（真实 0，设计 §1.4）。
+   */
   async modules(q: { from?: string; to?: string }) {
     const w = parseWindow(q.from, q.to);
-    const rows = await this.repo.modulesWindow(w);
+    const [rows, llmRows] = await Promise.all([
+      this.repo.modulesWindow(w),
+      this.repo.llmModuleUsage(w),
+    ]);
+    const zero = { llmCalls: 0, llmInputTokens: 0, llmOutputTokens: 0 };
+    const llmByModule = new Map<string, { llmCalls: number; llmInputTokens: number; llmOutputTokens: number }>();
+    for (const r of llmRows) {
+      const target = r.module === null ? undefined : LLM_API_SEGMENT_TO_MODULE[r.module];
+      if (!target) continue;
+      const cur = llmByModule.get(target) ?? { ...zero };
+      cur.llmCalls += r.calls;
+      cur.llmInputTokens += r.inputTokens;
+      cur.llmOutputTokens += r.outputTokens;
+      llmByModule.set(target, cur);
+    }
     return {
       items: rows.map((r) => ({
         module: r.module,
@@ -158,6 +197,7 @@ export class OpsAnalyticsService {
         answered: r.answered,
         correct: r.correct,
         accuracy: acc(r.correct, r.answered),
+        ...(llmByModule.get(r.module) ?? zero),
       })),
     };
   }

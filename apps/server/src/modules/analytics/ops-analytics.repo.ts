@@ -124,6 +124,14 @@ export interface LlmTokensOverviewRow {
   unavailableCalls: number;
 }
 
+/** /modules 三列 LLM 统计的源行（M4）。module 是 llm_call_logs 原值（API 第一段），NULL = 后台调用。 */
+export interface LlmModuleUsageRow {
+  module: string | null;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface QualityApiRow {
   total: number;
   failures: number;
@@ -608,6 +616,35 @@ export class OpsAnalyticsRepository {
       unattributed: Number(r.unattributed ?? 0),
       unavailableCalls: Number(r.unavailable_calls ?? 0),
     };
+  }
+
+  /**
+   * /modules 每行三列 LLM 统计的数据面（M4，设计 §2.3 第 2 条）：窗口内 llm_call_logs
+   * 按 module（API 第一段）GROUP BY，一条 SQL。口径与 llmTokenGroups 同款：
+   * `usage_source <> 'unavailable'` 的 input/output_tokens 才计入求和（量不到不混进 0），
+   * calls 照计不受 usage_source 影响。
+   *
+   * 返回 **API 段原值**（practice/ai/training/exams/parent/.../null），**不在这里做
+   * 学习模块映射**——「API 段 → 学习模块」的映射累加在 service（LLM_API_SEGMENT_TO_MODULE，
+   * 报表层映射不落数据，设计 §5 明确不落库）。
+   */
+  async llmModuleUsage(w: OpsWindow): Promise<LlmModuleUsageRow[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT module,
+              COUNT(*) AS calls,
+              COALESCE(SUM(CASE WHEN usage_source <> 'unavailable' THEN input_tokens END), 0) AS input_tokens,
+              COALESCE(SUM(CASE WHEN usage_source <> 'unavailable' THEN output_tokens END), 0) AS output_tokens
+         FROM llm_call_logs
+        WHERE created_at >= ? AND created_at < ?
+        GROUP BY module`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({
+      module: r.module === null ? null : String(r.module),
+      calls: Number(r.calls),
+      inputTokens: Number(r.input_tokens ?? 0),
+      outputTokens: Number(r.output_tokens ?? 0),
+    }));
   }
 
   /**
