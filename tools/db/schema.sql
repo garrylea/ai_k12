@@ -82,6 +82,15 @@ CREATE TABLE IF NOT EXISTS devices (
   KEY idx_devices_token_hash (token_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  role ENUM('admin','parent','student') NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  token_seq INT UNSIGNED NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_role_user (role, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================
 -- 2. 内容与课程
 -- ============================================================
