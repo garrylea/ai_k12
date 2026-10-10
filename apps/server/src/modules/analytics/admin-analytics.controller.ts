@@ -72,7 +72,7 @@ export class AdminAnalyticsController {
     return this.ops.quality(q);
   }
 
-  /** LLM 用量分组：groupBy 白名单 scene|model|day|student 越界 400/1001；unavailable 单列不当 0 求和。 */
+  /** LLM 用量分组：groupBy 白名单 scene|model|day|student|module 越界 400/1001；unavailable 单列不当 0 求和。 */
   @Get('llm-tokens')
   @Roles('admin')
   llmTokens(@Query() q: { groupBy?: string; from?: string; to?: string }) {

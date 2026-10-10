@@ -329,6 +329,24 @@ describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls 
     expect(pool.query).not.toHaveBeenCalled();
   });
 
+  it('llmTokenGroups(module)：按 module 列聚合；NULL module 自成一组，key 原样输出 null（不转字符串）', async () => {
+    const pool = poolWithQueries([
+      [
+        { grp: 'practice', calls: 5, input_tokens: 200, output_tokens: 80, unavailable_calls: 0 },
+        { grp: null, calls: 2, input_tokens: 0, output_tokens: 0, unavailable_calls: 2 },
+      ],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.llmTokenGroups(W, 'module');
+    expect(r).toEqual([
+      { key: 'practice', calls: 5, inputTokens: 200, outputTokens: 80, unavailableCalls: 0 },
+      { key: null, calls: 2, inputTokens: 0, outputTokens: 0, unavailableCalls: 2 },
+    ]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('GROUP BY module');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+  });
+
   it('llmTokensOverview：attributed/unattributed/unavailableCalls 一条总览', async () => {
     const pool = poolWithQueries([[{ attributed: 7, unattributed: 2, unavailable_calls: 3 }]]);
     const repo = new OpsAnalyticsRepository(pool);

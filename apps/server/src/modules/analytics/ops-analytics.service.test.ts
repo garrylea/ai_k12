@@ -433,6 +433,20 @@ describe('OpsAnalyticsService.llmTokens（Task 11）', () => {
     const called = (llmTokenGroups as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
     expect(called).toEqual(['model', 'day', 'student']);
   });
+
+  it('groupBy=module 在白名单内、透传 repo；NULL module 组的 key 原样透传 null', async () => {
+    const llmTokenGroups = vi.fn(async () => [
+      { key: null, calls: 1, inputTokens: 0, outputTokens: 0, unavailableCalls: 1 },
+    ]);
+    const { svc, repo } = svcWith({ llmTokenGroups });
+    const r = await svc.llmTokens({ groupBy: 'module' });
+    expect(r.groupBy).toBe('module');
+    expect(r.items).toEqual([
+      { key: null, calls: 1, inputTokens: 0, outputTokens: 0, unavailableCalls: 1 },
+    ]);
+    expect((llmTokenGroups as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('module');
+    expect(repo.llmTokenGroups).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('OpsAnalyticsService.quality（Task 11）', () => {

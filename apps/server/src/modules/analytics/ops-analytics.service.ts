@@ -80,7 +80,7 @@ function parseIntParam(label: string, raw: string): number {
 }
 
 /** llm-tokens 分组白名单（越界 400/1001）。 */
-const LLM_TOKEN_GROUPS: readonly LlmTokenGroupBy[] = ['scene', 'model', 'day', 'student'];
+const LLM_TOKEN_GROUPS: readonly LlmTokenGroupBy[] = ['scene', 'model', 'day', 'student', 'module'];
 
 /** cohort-compare 的 metric 白名单（命名与 delta spec 一致）。 */
 const COMPARE_METRICS = ['totalSeconds', 'answerCount', 'accuracy', 'daysActive'] as const;

@@ -107,10 +107,11 @@ export interface SwitchesRow {
 }
 
 /** llm-tokens 的分组白名单（service 校验后透传；repo 再兜底拒绝）。 */
-export type LlmTokenGroupBy = 'scene' | 'model' | 'day' | 'student';
+export type LlmTokenGroupBy = 'scene' | 'model' | 'day' | 'student' | 'module';
 
 export interface LlmTokenGroupRow {
-  key: string;
+  /** module 分组的 NULL 组（无 HTTP 触发链的后台调用）原样输出 null（前端显示「后台任务」，不落 magic value）。 */
+  key: string | null;
   calls: number;
   inputTokens: number;
   outputTokens: number;
@@ -172,6 +173,7 @@ const LLM_TOKEN_GROUP_EXPRS: Record<LlmTokenGroupBy, string> = {
   model: 'model_key',
   day: "DATE_FORMAT(created_at, '%Y-%m-%d')",
   student: 'student_id',
+  module: 'module',
 };
 
 /**
@@ -555,7 +557,9 @@ export class OpsAnalyticsRepository {
    * 的行求和——量不到（unavailable）的调用单列 `unavailable_calls`，**绝不混进 0 求和**
    * （delta spec §7 表 7：items[].unavailableCalls = 该 key 下量不到的调用数）。
    * day 键用 DATE_FORMAT 直接回字符串（避免 mysql2 把 DATE() 转成本地时区 Date）。
-   * key 为 NULL 的组（scene 未知 / 无归因）映射为 'unknown' / 'unattributed'。
+   * key 为 NULL 的组：student → 'unattributed'、scene/model/day → 'unknown'；
+   * **module 例外**：NULL module（无 HTTP 触发链的后台调用）原样输出 null，
+   * 不转字符串（设计 §2.3：避免 '(background)' magic value 污染数据，前端负责显示「后台任务」）。
    */
   async llmTokenGroups(w: OpsWindow, groupBy: LlmTokenGroupBy): Promise<LlmTokenGroupRow[]> {
     const expr = LLM_TOKEN_GROUP_EXPRS[groupBy];
@@ -573,7 +577,14 @@ export class OpsAnalyticsRepository {
       [w.fromAt, w.toAt],
     );
     return rows.map((r) => ({
-      key: r.grp === null ? (groupBy === 'student' ? 'unattributed' : 'unknown') : String(r.grp),
+      key:
+        r.grp === null
+          ? groupBy === 'student'
+            ? 'unattributed'
+            : groupBy === 'module'
+              ? null
+              : 'unknown'
+          : String(r.grp),
       calls: Number(r.calls),
       inputTokens: Number(r.input_tokens ?? 0),
       outputTokens: Number(r.output_tokens ?? 0),
