@@ -4,9 +4,7 @@ import { AuthSessionsRepository } from './auth-sessions.repo.js';
 const mkPool = () => {
   // 单一连接：upsert 与 SELECT LAST_INSERT_ID() 必须跑在同一个 connection 上，
   // 否则 LAST_INSERT_ID() 跨连接不存活（终审 Important：并发交错可同 seq 双活）。
-  const connExecute = vi.fn()
-    .mockResolvedValueOnce([{ affectedRows: 1 }, undefined])          // INSERT..ON DUP
-    .mockResolvedValueOnce([[{ seq: 3 }], undefined]);                // SELECT LAST_INSERT_ID()
+  const connExecute = vi.fn();
   const release = vi.fn();
   const conn = { execute: connExecute, release };
   const getConnection = vi.fn().mockResolvedValue(conn);
@@ -14,14 +12,36 @@ const mkPool = () => {
 };
 
 describe('AuthSessionsRepository', () => {
-  it('bumpAndReturnSeq：取一条连接，upsert（LAST_INSERT_ID(seq+1)）与 LAST_INSERT_ID() 回读同连接，最后 release', async () => {
+  it('bumpAndReturnSeq：INSERT 分支（affectedRows=1，首次登录）短路返回 1，不回读', async () => {
     const { pool, conn, connExecute, release, getConnection } = mkPool();
-    const repo = new AuthSessionsRepository(pool);
+    connExecute
+      .mockResolvedValueOnce([{ affectedRows: 1, insertId: 3 }, undefined]); // INSERT..ON DUP（新建行）
 
-    await expect(repo.bumpAndReturnSeq('student', 7)).resolves.toBe(3);
+    const repo = new AuthSessionsRepository(pool);
+    await expect(repo.bumpAndReturnSeq('student', 7)).resolves.toBe(1);
 
     expect(getConnection).toHaveBeenCalledTimes(1);
-    // 两条语句都跑在同一连接对象上（不是 pool.execute）
+    // 只有一条语句：INSERT 分支不执行 SELECT LAST_INSERT_ID()
+    expect(connExecute).toHaveBeenCalledTimes(1);
+
+    const [sql1, params1] = connExecute.mock.calls[0] as [string, unknown[]];
+    expect(sql1).toContain('ON DUPLICATE KEY UPDATE');
+    expect(sql1).toContain('LAST_INSERT_ID(token_seq + 1)');
+    expect(params1).toEqual(['student', 7]);
+
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('bumpAndReturnSeq：UPDATE 分支（affectedRows=2）回读 LAST_INSERT_ID()，无 bind 参数，同连接，最后 release', async () => {
+    const { pool, conn, connExecute, release, getConnection } = mkPool();
+    connExecute
+      .mockResolvedValueOnce([{ affectedRows: 2 }, undefined])               // INSERT..ON DUP（更新旧行）
+      .mockResolvedValueOnce([[{ seq: 5 }], undefined]);                     // SELECT LAST_INSERT_ID()
+
+    const repo = new AuthSessionsRepository(pool);
+    await expect(repo.bumpAndReturnSeq('student', 7)).resolves.toBe(5);
+
+    expect(getConnection).toHaveBeenCalledTimes(1);
     expect(connExecute).toHaveBeenCalledTimes(2);
 
     const [sql1, params1] = connExecute.mock.calls[0] as [string, unknown[]];
@@ -31,14 +51,19 @@ describe('AuthSessionsRepository', () => {
 
     const [sql2, params2] = connExecute.mock.calls[1] as [string, unknown[]];
     expect(sql2).toContain('LAST_INSERT_ID()');
-    expect(params2).toEqual(['student', 7]);
+    // 回读语句没有占位符，绝不能再带 bind 参数
+    expect(params2).toBeUndefined();
+
+    // 两条语句跑在同一连接对象上（不是 pool.execute）
+    expect(connExecute.mock.instances[0]).toBe(conn);
+    expect(connExecute.mock.instances[1]).toBe(conn);
 
     expect(release).toHaveBeenCalledTimes(1);
   });
 
-  it('bumpAndReturnSeq：upsert 成功但回读为空 → 抛错（fail loud，不再静默回退 seq=1）', async () => {
+  it('bumpAndReturnSeq：UPDATE 分支回读为空 → 抛错（fail loud，不再静默回退 seq=1）', async () => {
     const connExecute = vi.fn()
-      .mockResolvedValueOnce([{ affectedRows: 1 }, undefined])
+      .mockResolvedValueOnce([{ affectedRows: 2 }, undefined])
       .mockResolvedValueOnce([[], undefined]);
     const release = vi.fn();
     const pool = { getConnection: vi.fn().mockResolvedValue({ execute: connExecute, release }) } as any;
