@@ -656,6 +656,28 @@ CREATE TABLE IF NOT EXISTS main_error_books (
   -- 作软引用：dialogue 被删时由 PracticeService.startDiscuss 的 try/catch 兜底重建。
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 辅线错题本（**已废止**，见 DB 设计文档「辅线错题本已取消」：辅线答疑题目写入
+-- main_error_books（source=auxiliary，不参与清零门禁），本表线上零行、代码不再写入）。
+-- 2026-10-10 全量对账补录进 schema——按「死表默认保留」裁决与新环境结构对齐，勿在全新功能里引用。
+CREATE TABLE IF NOT EXISTS aux_error_books (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_id BIGINT NOT NULL,
+  subject_id BIGINT NOT NULL,
+  question_id BIGINT NOT NULL,
+  level SMALLINT NOT NULL DEFAULT 1,
+  is_cleared TINYINT(1) NOT NULL DEFAULT 0,
+  source VARCHAR(20) NOT NULL DEFAULT 'auxiliary',
+  wrong_answer_text TEXT DEFAULT NULL,
+  cleared_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  KEY idx_ae_student_subject (student_id, subject_id),
+  -- question_id 不写显式 KEY：FK 会自动建同名索引 fk_ae_question_id（与线上一致）；subject_id 同理。
+  CONSTRAINT fk_ae_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
+  CONSTRAINT fk_ae_subject_id FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_ae_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================
 -- 学生「不再展示」清单（专项训练选题排除用）
 -- ============================================================

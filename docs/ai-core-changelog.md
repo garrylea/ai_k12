@@ -1586,3 +1586,9 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 - **无翻卡 UI**：card_flipped 字典占位不发射；study_session_idle 同为占位（空闲由心跳 hidden 承载）——别当缺陷修。
 
 遗留人工事项 → **Task 18**（端到端真库冒烟 + 人工验收：mainline 漏斗前两步依赖 tracker 带 module='mainline' 各验一条、funnel OR 分支 EXPLAIN 留底、8 页真库走查）。文档同步（Task 17）：API 主稿 §4.23/§4.28/§5.31/§5.32/§9 v4.20、openapi 12 端点、delta spec §12、CLAUDE.md 工程约定一条。
+
+## 2026-10-10 schema.sql ↔ 线上库 全量结构对账
+
+用户提问「新环境执行 schema.sql 是否建出最新结构」触发首次总对账（此前半年靠逐批纪律、从未整体核过）。方法：`tools/db/schema_reconcile.py`（本次新增）——无建库权限也能跑：在 `ai_k12` 库内为 schema.sql 每张表建 `__schema_check_<name>` 影子表（FK 约束名加 `__chk_` 前缀避开库级唯一性 ERROR 1826），由 MySQL 自身规范化 DDL 后用 information_schema 逐表比对列/索引/主键/外键，完毕即删影子表；全程不动真实表数据。**踩坑**：影子表重建时若丢掉表尾 `CHARSET/COLLATE` 会继承库默认 collation，制造假阳性（billing_notices 差异即此，修正后消失）——对账脚本必须原样保留表尾。
+
+结果（75 张表）：① **`aux_error_books` 线上有、schema.sql 漏收**——已补录进 schema.sql（错题本区），注释标明**已废止**（DB 设计文档「辅线错题本已取消」，线上零行、代码不再写入，按「死表默认保留」裁决作结构对齐保留）；顺带把线上该表 `updated_at` 补上列级 `ON UPDATE CURRENT_TIMESTAMP(3)`（建表迁移遗漏，违反约定；表 0 行，ALTER 零风险）。② `billing_notices` 线上整表 `utf8mb4_0900_ai_ci`（迁移建表未显式指定 collation 吃了服务器默认）——schema.sql 原本就写对，对账工具修正后无差异。③ 7 张表（questions/chinese_passages/main_error_books/goals/controls/remediation_sets/study_sessions）**列集合相同、顺序不同**（历史 ADD COLUMN 所致）——无功能影响（代码全用显式列清单），不追改。对账后结论：**新环境执行 schema.sql 建出的结构与线上库一致**；今后每批 DDL 收尾可顺手重跑该脚本作为「完工判据」。
