@@ -8,6 +8,12 @@
 
 ---
 
+## 2026-10-10 · 家长移动端预警 banner「点了不消失」修复（点击即已读收归组件）
+
+用户真机报障：移动端家长点预警 banner 后不消失。根因：`AlertBanner` 的「点击即已读」（乐观清除 + 并发 `PATCH /parent/alerts/{id}/read`）挂在「立即查看」按钮上，而 `MobileParentLayout` 为把跳转改到移动端预警页，在外层容器 `onClickCapture` + `stopPropagation` 拦截了整条 banner——**只跳转、从不标已读**，路由切换后轮询重新拉到未读，banner 原样挂着（2026-10-02 加第 5 Tab 批引入的拦截壳破坏了 2026-09-20「点击即已读」裁决）。
+
+修法：拦截壳删除，「点击即已读 + 跳转」逻辑收归 `AlertBanner` 组件内（外层 div 接管整条点击，「立即查看」按钮仅作视觉锚点、点击冒泡到外层），跳转目标经新可选 prop `alertsPath` 注入（桌面 `ParentLayout` 用默认 `/parent/alerts`，移动壳传 `/m/parent/alerts`）。回归钉子：① 点 banner 文本区域（非按钮）→ 标已读 + 跳转；② 传 `alertsPath` → 跳指定路径；③ 外壳测试断言 `AlertBanner` 收到 `/m/parent/alerts`。前端 `npm test` 1244/1244（139 文件）。
+
 ## 2026-10-08 · 语文手写输入体验微调批（图标化/自适应/跟随字段/label 转发闪烁坑/线宽）
 
 v2 上线后用户真机实测的四轮微调（均已快进合 main 并推送）：

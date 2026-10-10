@@ -37,14 +37,14 @@ function unread(over: Partial<ParentUnreadAlerts> = {}): ParentUnreadAlerts {
   };
 }
 
-function renderBanner() {
+function renderBanner(props: Parameters<typeof AlertBanner>[0] = {}) {
   const router = createMemoryRouter(
     [
       {
         path: '/parent',
         element: (
           <>
-            <AlertBanner />
+            <AlertBanner {...props} />
             <Outlet />
           </>
         ),
@@ -161,5 +161,38 @@ describe('AlertBanner', () => {
     renderBanner();
     fireEvent.click(await screen.findByRole('button', { name: '立即查看' }));
     await waitFor(() => expect(screen.getByText('预警中心页')).toBeInTheDocument());
+  });
+
+  it('点击 banner 文本区域（非按钮）→ 同样标已读并跳转（移动端整条可点，回归钉子）', async () => {
+    getParentUnreadAlertsMock.mockResolvedValueOnce(unread()).mockResolvedValue({ items: [], total: 0 });
+    renderBanner();
+    fireEvent.click(await screen.findByText('孩子在学习页面 5 分钟无操作'));
+
+    await waitFor(() => expect(markParentAlertReadMock).toHaveBeenCalledWith(26));
+    await waitFor(() => expect(screen.getByText('预警中心页')).toBeInTheDocument());
+  });
+
+  it('传 alertsPath → 点击跳指定路径（移动端壳传 /m/parent/alerts）', async () => {
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/m/parent',
+          element: (
+            <>
+              <AlertBanner alertsPath="/m/parent/alerts" />
+              <Outlet />
+            </>
+          ),
+          children: [{ path: 'alerts', element: <div>移动端预警页</div> }],
+        },
+      ],
+      { initialEntries: ['/m/parent'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    getParentUnreadAlertsMock.mockResolvedValueOnce(unread()).mockResolvedValue({ items: [], total: 0 });
+    fireEvent.click(await screen.findByRole('button', { name: '立即查看' }));
+    await waitFor(() => expect(screen.getByText('移动端预警页')).toBeInTheDocument());
+    expect(markParentAlertReadMock).toHaveBeenCalledWith(26);
   });
 });

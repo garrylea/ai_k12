@@ -13,12 +13,15 @@ export const ALERT_POLL_INTERVAL_MS = 30_000;
  * 家长端全局预警 Banner（「及时可见」批，spec §3.4）：
  * 30s 轮询 + 路由切换即刷 → 有未读就挂在所有家长页顶部；**点击即已读**（2026-09-20
  * 用户裁决：点了 banner 查看信息后 banner 消失，不提供「不看不消失」的关闭钮）。
+ * 点击目标为**整条 banner**（2026-10-10 修复：此前移动端壳在外层 capture 拦截跳转、
+ * 绕过了已读逻辑，导致移动端点了 banner 不消失；现改由组件自持该逻辑，跳转目标经
+ * `alertsPath` 注入——桌面壳默认 /parent/alerts，移动壳传 /m/parent/alerts）。
  *
  * 覆盖家长名下**全部孩子**、**全部级别**（含 info 级走神——上一批「info 只进列表页」
  * 的裁决被本批显式推翻）；配色按最新一条的 `level` 映射：warning/critical → danger（红），
  * 其余（info 走神）→ warning（橙）。
  */
-export default function AlertBanner() {
+export default function AlertBanner({ alertsPath = '/parent/alerts' }: { alertsPath?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [unread, setUnread] = useState<ParentUnreadAlerts | null>(null);
@@ -62,23 +65,24 @@ export default function AlertBanner() {
     setUnread(null);
     skipNextLoadRef.current = true;
     void Promise.allSettled(unread.items.map((alert) => markParentAlertRead(alert.id)));
-    navigate('/parent/alerts');
+    navigate(alertsPath);
   };
 
   return (
-    <Banner
-      type={type}
-      title={title}
-      description={`${latest.studentName ?? '孩子'} · 点击查看详情并标记已读`}
-      action={
-        <button
-          type="button"
-          onClick={handleClick}
-          className="px-4 py-1.5 bg-white text-[var(--error)] rounded-md text-sm font-semibold hover:bg-gray-50 shrink-0"
-        >
-          立即查看
-        </button>
-      }
-    />
+    <div onClick={handleClick} className="cursor-pointer">
+      <Banner
+        type={type}
+        title={title}
+        description={`${latest.studentName ?? '孩子'} · 点击查看详情并标记已读`}
+        action={
+          <button
+            type="button"
+            className="px-4 py-1.5 bg-white text-[var(--error)] rounded-md text-sm font-semibold hover:bg-gray-50 shrink-0"
+          >
+            立即查看
+          </button>
+        }
+      />
+    </div>
   );
 }

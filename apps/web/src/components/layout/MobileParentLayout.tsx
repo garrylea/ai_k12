@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import AlertBanner from '@/components/business/AlertBanner';
 import BillingNoticeBar from '@/pages/parent/BillingNoticeBar';
 import SubscriptionNoticeBar from '@/pages/parent/SubscriptionNoticeBar';
@@ -21,16 +21,6 @@ const TABS = [
  * （清 token/userId/username/userRole → 跳登录页），移动端没有别的退出入口，勿移除。
  */
 export default function MobileParentLayout() {
-  const navigate = useNavigate();
-
-  // AlertBanner 是桌面共享组件，点击跳电脑端 /parent/alerts；移动壳内经此容器
-  // 在 capture 阶段拦截整体点击，改跳移动端预警页（不改动共享组件本身）。
-  const interceptAlertBannerClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    navigate('/m/parent/alerts');
-  };
-
   return (
     <div data-theme="parent" className="flex min-h-screen flex-col bg-[var(--bg-base)]">
       <header className="border-b border-[var(--bg-subtle)] bg-white">
@@ -40,9 +30,8 @@ export default function MobileParentLayout() {
           </div>
           <LogoutButton className="!p-2 mr-3 shrink-0" />
         </div>
-        <div onClickCapture={interceptAlertBannerClick}>
-          <AlertBanner />
-        </div>
+        {/* 点击即已读 + 跳转逻辑在 AlertBanner 内；此处只注入移动端目标路径 */}
+        <AlertBanner alertsPath="/m/parent/alerts" />
         <BillingNoticeBar />
         <SubscriptionNoticeBar />
       </header>

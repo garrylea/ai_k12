@@ -10,7 +10,11 @@ afterEach(() => {
 });
 
 // 三条通知条都会发请求：统一静默，聚焦外壳本身（Tab / 主题 / Outlet）。
-vi.mock('@/components/business/AlertBanner', () => ({ default: () => null }));
+vi.mock('@/components/business/AlertBanner', () => ({
+  default: (props: { alertsPath?: string }) => (
+    <div data-testid="alert-banner-mock" data-alerts-path={props?.alertsPath ?? ''} />
+  ),
+}));
 vi.mock('@/pages/parent/BillingNoticeBar', () => ({ default: () => null }));
 vi.mock('@/pages/parent/SubscriptionNoticeBar', () => ({ default: () => null }));
 // 切换器（Task 3 起为真实现）自拉数据、有自己的测试文件；外壳测试只关心它被渲染。
@@ -42,6 +46,13 @@ describe('MobileParentLayout', () => {
     }
     // aria-label 是无障碍口径（nav 角色），钉住不丢
     expect(screen.getByRole('navigation', { name: '家长移动端主导航' })).toBeInTheDocument();
+  });
+
+  it('AlertBanner 收到 alertsPath="/m/parent/alerts"（点击即已读逻辑在组件内，外壳不再拦截，回归钉子）', () => {
+    renderLayout('/m/parent/dashboard');
+
+    const banner = screen.getByTestId('alert-banner-mock');
+    expect(banner.getAttribute('data-alerts-path')).toBe('/m/parent/alerts');
   });
 
   it('子路由内容经 Outlet 渲染，当前 Tab 标记 aria-current="page"', () => {
