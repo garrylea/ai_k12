@@ -94,7 +94,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **组件改动必须补渲染测试**，别只靠 `tsc + lint + build`（类型检查抓不到「运行时数据形状」问题；`SentenceBlock.test.tsx` 是 React #31 事故的回归钉子，事故经过见该文件头部注释）。
 - **`globals: false`**：`@testing-library/react` 不自动注册 `afterEach(cleanup)`，多用例文件必须自己写 `afterEach(() => cleanup())`，否则上个用例的 DOM 泄漏导致选择器重复命中。
 - **Nest DI 坑**：带 `@Injectable()` 的类会发 `design:paramtypes`，**接口类型**参数运行时被写成 `Object`，Nest 当 token 去容器找不到就**启动直接失败** —— 必须加 `@Optional()`。`ai-core/capabilities/*` 那些类**故意不写 `@Injectable()`**（零参实例化）才没踩到：区别在有没有装饰器。
-- **数据库**：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。schema 在 `tools/db/schema.sql`，迁移在 `tools/db/migrations/YYYY-MM-DD_*.sql`（**无迁移运行器，手工 apply**；必须幂等；新增表/列要同时进 schema.sql）。`updated_at` 一律用**列级** `ON UPDATE CURRENT_TIMESTAMP(3)`，**不要建 `*_updated_at` 触发器**（触发器是独立对象、会随 schema 漂移静默缺失）。
+- **数据库**：`ai_k12/ai_k12@localhost/ai_k12`（`.env` 的 `DB_*`）。schema 在 `tools/db/schema.sql`，迁移在 `tools/db/migrations/YYYY-MM-DD_*.sql`（**无迁移运行器，手工 apply**；必须幂等；新增表/列要同时进 schema.sql）。`updated_at` 一律用**列级** `ON UPDATE CURRENT_TIMESTAMP(3)`，**不要建 `*_updated_at` 触发器**（触发器是独立对象、会随 schema 漂移静默缺失）。含 DDL 的批次收尾跑 `python3 tools/db/schema_reconcile.py`（影子表法对账 schema.sql ↔ 线上库，2026-10-10 首账 75 表一致）。
 - **派生状态必须带 `studentId` 归属**：家长端切孩子不重挂载、`useState` 跨孩子存活，只按自身维度守卫会在切换首帧画出上个孩子的数据（`useEffect(reset)` 在 commit 之后才跑，救不了）—— 派生值必须与 `studentId` 一起存、读取时一并比较。
 - **列表页换孩子必须回第 1 页**：否则带「上个孩子的第 N 页」请求新孩子，页数不够时停在空态且分页控件只在非空分支渲染（家长无法自救）；加 `useEffect(() => setPage(1), [studentId])`。
 - **埋点不得影响请求**：analytics 日志走内存 buffer —— 满时丢最旧、失败批次直接丢弃不重试、**永不抛**；ledger / request-log 写入**绝不在请求路径上 await**。
