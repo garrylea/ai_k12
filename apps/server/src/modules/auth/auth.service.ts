@@ -6,6 +6,8 @@ import { AdminsRepository } from '../../database/repositories/admins.repo.js';
 import { ParentsRepository } from '../../database/repositories/parents.repo.js';
 import { SubscriptionsService } from '../billing/subscriptions.service.js';
 import { PasswordResetCodeService } from './password-reset-code.service.js';
+import { AuthSessionsRepository } from '../../database/repositories/auth-sessions.repo.js';
+import { SessionRegistry } from '../../common/guards/session-registry.js';
 
 const PHONE_RE = /^1\d{10}$/;
 
@@ -20,6 +22,8 @@ export class AuthService {
     private jwtService: JwtService,
     private subscriptionsService: SubscriptionsService,
     private resetCodeService: PasswordResetCodeService,
+    private authSessionsRepo: AuthSessionsRepository,
+    private sessionRegistry: SessionRegistry,
   ) {}
 
   /**
@@ -31,8 +35,9 @@ export class AuthService {
     if (admin) {
       this.assertActive(admin.isActive);
       await this.assertPassword(password, admin.passwordHash);
+      const seq = await this.bumpSession('admin', admin.id);
       return {
-        token: this.jwtService.sign({ sub: admin.id, role: 'admin' as const }),
+        token: this.jwtService.sign({ sub: admin.id, role: 'admin' as const, seq }),
         user: { id: admin.id, role: 'admin' as const, name: admin.name, username: admin.username },
       };
     }
@@ -42,8 +47,9 @@ export class AuthService {
       if (parent) {
         this.assertActive(parent.isActive);
         await this.assertPassword(password, parent.passwordHash);
+        const seq = await this.bumpSession('parent', parent.id);
         return {
-          token: this.jwtService.sign({ sub: parent.id, role: 'parent' as const }),
+          token: this.jwtService.sign({ sub: parent.id, role: 'parent' as const, seq }),
           user: { id: parent.id, role: 'parent' as const, name: parent.name, phone: parent.phone },
         };
       }
@@ -53,12 +59,14 @@ export class AuthService {
     if (student) {
       this.assertActive(student.isActive);
       await this.assertPassword(password, student.passwordHash);
+      const seq = await this.bumpSession('student', student.id);
       return {
         token: this.jwtService.sign({
           sub: student.id,
           role: 'student' as const,
           familyId: student.parentId,
           parentId: student.parentId,
+          seq,
         }),
         user: {
           id: student.id,
@@ -89,8 +97,9 @@ export class AuthService {
     // 注册即送 7 天家庭试用（upsert 幂等）。注册路径无事务，直接 await：
     // 失败让注册可见地失败，保证「注册成功 ⇒ 试用行已存在」。
     await this.subscriptionsService.ensureTrial(parentId);
+    const seq = await this.bumpSession('parent', parentId);
     return {
-      token: this.jwtService.sign({ sub: parentId, role: 'parent' as const }),
+      token: this.jwtService.sign({ sub: parentId, role: 'parent' as const, seq }),
       user: { id: parentId, role: 'parent' as const, name: dto.name ?? null, phone: dto.phone },
     };
   }
@@ -106,6 +115,17 @@ export class AuthService {
     if (!valid) {
       throw new UnauthorizedException({ code: 1003, message: '用户名或密码错误' });
     }
+  }
+
+  /**
+   * 登录 bump（2026-10-10 单点登录互踢）：新登录使该账号所有旧 token 失效。
+   * 必须先于签名 await 完成：写库失败直接抛（→ 500），**绝不能**在 seq 未持久化时
+   * 签发 token——否则两台设备拿到相同 seq，互踢静默失效（spec §2.3）。
+   */
+  private async bumpSession(role: 'admin' | 'parent' | 'student', id: number): Promise<number> {
+    const seq = await this.authSessionsRepo.bumpAndReturnSeq(role, id);
+    this.sessionRegistry.bump(role, id, seq);
+    return seq;
   }
 
   /**

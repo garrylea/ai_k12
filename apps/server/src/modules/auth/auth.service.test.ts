@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
+import { SessionRegistry } from '../../common/guards/session-registry.js';
 
 const HASH = bcrypt.hashSync('pw', 4);
 
@@ -24,6 +25,8 @@ const mkDeps = (overrides: Record<string, any> = {}) => ({
     issue: vi.fn().mockReturnValue({ code: '123456', expiresIn: 300 }),
     verify: vi.fn(),
   },
+  authSessionsRepo: { bumpAndReturnSeq: vi.fn().mockResolvedValue(1) },
+  sessionRegistry: { bump: vi.fn() },
   ...overrides,
 });
 
@@ -35,6 +38,8 @@ const mkSvc = (d: ReturnType<typeof mkDeps>) =>
     d.jwtService as any,
     d.subscriptionsService as any,
     d.resetCodeService as any,
+    d.authSessionsRepo as any,
+    d.sessionRegistry as any,
   );
 
 const student = {
@@ -49,21 +54,23 @@ describe('AuthService.login 三角色', () => {
     const d = mkDeps({ adminsRepo: { findByUsername: vi.fn().mockResolvedValue(admin) } });
     const r = await mkSvc(d).login('admin', 'pw');
     expect(r.user.role).toBe('admin');
-    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 1, role: 'admin' });
+    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 1, role: 'admin', seq: 1 });
+    expect(d.authSessionsRepo.bumpAndReturnSeq).toHaveBeenCalledWith('admin', 1);
   });
 
   it('手机号命中 parents -> parent token', async () => {
     const d = mkDeps({ parentsRepo: { findByPhone: vi.fn().mockResolvedValue(parent) } });
     const r = await mkSvc(d).login('13800000000', 'pw');
     expect(r.user.role).toBe('parent');
-    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 3, role: 'parent' });
+    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 3, role: 'parent', seq: 1 });
+    expect(d.authSessionsRepo.bumpAndReturnSeq).toHaveBeenCalledWith('parent', 3);
   });
 
   it('学生用户名命中 -> student token 带 familyId/parentId', async () => {
     const d = mkDeps({ studentsRepo: { findByUsername: vi.fn().mockResolvedValue(student) } });
     const r = await mkSvc(d).login('xiaoming', 'pw');
     expect(r.user.role).toBe('student');
-    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 7, role: 'student', familyId: 3, parentId: 3 });
+    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 7, role: 'student', familyId: 3, parentId: 3, seq: 1 });
   });
 
   it('密码错误 -> 1003', async () => {
@@ -89,13 +96,54 @@ describe('AuthService.login 三角色', () => {
   });
 });
 
+describe('AuthService 登录 bump（单点登录互踢）', () => {
+  it('登录成功 → bump（写库 + 注册表）先于签名，seq 进入 token', async () => {
+    const d = mkDeps({ studentsRepo: { findByUsername: vi.fn().mockResolvedValue(student) } });
+    d.authSessionsRepo.bumpAndReturnSeq.mockResolvedValue(7);
+    await mkSvc(d).login('xiaoming', 'pw');
+    expect(d.authSessionsRepo.bumpAndReturnSeq).toHaveBeenCalledWith('student', 7);
+    expect(d.sessionRegistry.bump).toHaveBeenCalledWith('student', 7, 7);
+    expect(d.jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 7, role: 'student', seq: 7 }),
+    );
+  });
+
+  it('密码错误 → 不 bump（不产生新会话序号）', async () => {
+    const d = mkDeps({ studentsRepo: { findByUsername: vi.fn().mockResolvedValue(student) } });
+    await expect(mkSvc(d).login('xiaoming', 'wrong'))
+      .rejects.toMatchObject({ response: { code: 1003 } });
+    expect(d.authSessionsRepo.bumpAndReturnSeq).not.toHaveBeenCalled();
+  });
+
+  it('bump 写库失败 → 登录整体失败（500），绝不签发无 seq / 旧 seq 的 token', async () => {
+    const d = mkDeps({ studentsRepo: { findByUsername: vi.fn().mockResolvedValue(student) } });
+    d.authSessionsRepo.bumpAndReturnSeq.mockRejectedValue(new Error('db down'));
+    await expect(mkSvc(d).login('xiaoming', 'pw')).rejects.toThrow('db down');
+    expect(d.jwtService.sign).not.toHaveBeenCalled();
+  });
+
+  it('同账号二次登录 → 第一次的 token seq 失配（互踢语义，服务级链路）', async () => {
+    const registry = new SessionRegistry();
+    // 用真实 SessionRegistry + bumpAndReturnSeq mock 计数 1、2：
+    let n = 0;
+    const d = mkDeps({ studentsRepo: { findByUsername: vi.fn().mockResolvedValue(student) } });
+    d.authSessionsRepo.bumpAndReturnSeq.mockImplementation(async () => ++n);
+    d.sessionRegistry = registry as any; // 用真实实例注入 svc
+    const svc = mkSvc(d);
+    await svc.login('xiaoming', 'pw');
+    await svc.login('xiaoming', 'pw');
+    expect(registry.matches('student', 7, 1)).toBe(false); // 第一个 token 已被踢
+    expect(registry.matches('student', 7, 2)).toBe(true);
+  });
+});
+
 describe('AuthService.register 家长注册', () => {
   it('新手机号 -> 创建 + 发 parent token', async () => {
     const d = mkDeps({ parentsRepo: { findByPhone: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue(9) } as any });
     const r = await mkSvc(d).register({ phone: '13900000000', password: '123456', name: '乙' });
     expect(r.user.role).toBe('parent');
     expect(d.parentsRepo.create).toHaveBeenCalledWith(expect.objectContaining({ phone: '13900000000' }));
-    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 9, role: 'parent' });
+    expect(d.jwtService.sign).toHaveBeenCalledWith({ sub: 9, role: 'parent', seq: 1 });
   });
 
   it('注册成功后送 7 天试用（ensureTrial 以新 parentId 调用）', async () => {
