@@ -5,7 +5,7 @@
 ## 1. 口径裁决
 
 1. **module 的值域 = API 第一段**（复用 `moduleFromRoute`：`/api/practice/...` → `practice`），**不做**「API 段 → 学习模块枚举」的映射改写。理由：与 `api_request_logs.module` **同源同值域**（两本账本口径一致、可 JOIN 互查）；学习模块视图（主线/辅线/专项）在报表层做一次映射展示，改映射不动数据。
-   - 值域实测：`practice`(主线课堂) / `ai`(辅线答疑) / `training`(语文英语专项+数学训练) / `exams` / `chinese-passages` / `points` / `parent` / `admin` 等；`NULL` = 后台任务（解释缓存、标题生成——无 HTTP 上下文，与归属覆盖率口径一致）。
+   - 值域实测：`practice`(主线课堂) / `ai`(辅线答疑) / `training`(语文英语专项+数学训练) / `exams` / `chinese-passages` / `points` / `parent` / `admin` 等；`NULL` = 真正无 HTTP 触发链的调用（如启动期任务）；HTTP 触发的 fire-and-forget（解释缓存/标题生成）与 admin/parent 的 HTTP 调用带触发请求的 module（ALS 随 Promise 链延续，与 §2.2.4 归因边界一致）。
    - 展示层映射（仅前端/报表文案，不落数据）：`practice→主线课堂`、`ai→辅线答疑`、`training→专项训练`、`exams→考试`、`NULL→后台任务`。
 2. **A 与 B 的取舍**（已向用户呈报）：不加列的 request_id JOIN 方案会漏掉解释缓存类后台调用（request_id 有意置空）——恰可能是 token 大头，故取加列。
 3. **历史数据不可补**：module 列从上线起才有值，之前的行恒 NULL（报表单列「后台任务/未归因」，不当 0）。

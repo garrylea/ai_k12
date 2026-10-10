@@ -3,7 +3,8 @@
 -- 设计：docs/superpowers/specs/2026-10-10-llm-module-attribution-design.md §2.1
 -- ============================================================
 -- module = HTTP 请求模块（api 第一段，复用 moduleFromRoute：/api/practice/... → practice），
--- 与 api_request_logs.module 同源同值域；后台任务（解释缓存 / 标题生成 / 探活）无 HTTP 上下文 → NULL。
+-- 与 api_request_logs.module 同源同值域；无 HTTP 触发链的调用为 NULL
+-- （HTTP 触发的 fire-and-forget 如解释缓存/标题生成，经 ALS 随 Promise 链延续带 module）。
 -- 历史行不回填（无可靠来源），上线前的行恒 NULL，报表单列「后台任务/未归因」。
 --
 -- 幂等：MySQL 8/9 没有 ADD COLUMN / ADD INDEX IF NOT EXISTS，
@@ -25,3 +26,10 @@ SET @ddl := IF(@has_idx = 0,
   'ALTER TABLE llm_call_logs ADD KEY idx_lcl_module_time (module, created_at)',
   'SELECT 1');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 3) COMMENT 修正：口径从「后台任务为 NULL」改为「无 HTTP 触发链的调用为 NULL」
+-- （fire-and-forget 经 ALS 延续带 module）。MODIFY 天然幂等，重跑安全。
+ALTER TABLE llm_call_logs
+  MODIFY COLUMN module VARCHAR(32) DEFAULT NULL
+    COMMENT 'HTTP 请求模块（api 第一段，同 api_request_logs.module）；无 HTTP 触发链的调用为 NULL'
+    AFTER scene;
