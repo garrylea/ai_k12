@@ -7,7 +7,9 @@ import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import { EventsService } from './events.service.js';
 import type { TrackEventInput } from './events.service.js';
-import type { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
+// 必须是值导入：构造函数注入 SubjectsRepository，type-only 导入会在运行时被擦除，
+// design:paramtypes 写成 Object 触发仓库 DI 坑（Nest 启动直接失败，见 CLAUDE.md）
+import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 
 /**
  * 采集端点 POST /api/track/events（母 spec §5.2 / delta spec §6）。
