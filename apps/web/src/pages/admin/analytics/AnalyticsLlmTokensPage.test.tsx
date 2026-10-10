@@ -52,6 +52,7 @@ describe('AnalyticsLlmTokensPage', () => {
       groupBy: 'module',
       items: [
         { key: 'practice', calls: 12, inputTokens: 4800, outputTokens: 960, unavailableCalls: 0 },
+        { key: 'brand-new-segment', calls: 2, inputTokens: 60, outputTokens: 15, unavailableCalls: 0 },
         { key: null, calls: 3, inputTokens: 120, outputTokens: 30, unavailableCalls: 1 },
       ],
       attributed: 15,
@@ -74,5 +75,7 @@ describe('AnalyticsLlmTokensPage', () => {
     const nullRow = await screen.findByTestId('token-row-null');
     expect(nullRow.textContent).toContain('后台任务');
     expect(screen.getByTestId('token-row-practice').textContent).toContain('主线课堂');
+    // 字典外 key 原样显示（与 eventLabel 同策略，Minor-2）
+    expect(screen.getByTestId('token-row-brand-new-segment').textContent).toContain('brand-new-segment');
   });
 });

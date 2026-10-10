@@ -160,8 +160,8 @@ export const eventLabel = (key: string): string => EVENT_LABELS[key] ?? key;
 
 /**
  * API 段（moduleFromRoute 值域）→ 中文展示名（LLM 按模块归因 M6，设计 §1.1）。
- * 与 api_request_logs.module / llm_call_logs.module 同源同值域；全集 12 项，字典外
- * key 与 NULL 一律显示「后台任务」（NULL = 无 HTTP 触发链的调用，历史行恒 NULL）。
+ * 与 api_request_logs.module / llm_call_logs.module 同源同值域；全集 12 项，
+ * NULL = 无 HTTP 触发链的调用（历史行恒 NULL）。
  */
 export const API_MODULE_LABELS: Record<string, string> = {
   practice: '主线课堂',
@@ -178,9 +178,9 @@ export const API_MODULE_LABELS: Record<string, string> = {
   dev: '开发调试',
 };
 
-/** API 段 → 中文展示名；NULL/字典外 key → 「后台任务」。 */
+/** API 段 → 中文展示名；仅 NULL → 「后台任务」，字典外 key 原样返回（与 eventLabel 同策略）。 */
 export const apiModuleLabel = (key: string | null): string =>
-  key == null ? '后台任务' : API_MODULE_LABELS[key] ?? '后台任务';
+  key == null ? '后台任务' : API_MODULE_LABELS[key] ?? key;
 
 /**
  * 设备五维 key → 中文展示名。key 真源：

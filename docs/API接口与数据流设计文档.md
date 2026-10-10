@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v4.15
+> 版本：v4.21
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -665,9 +665,9 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 
 ### 4.28 AdminAnalytics — `/api/admin/analytics`（运营分析聚合，admin，2026-10-09 埋点 Phase 2）
 
-运营面只读聚合 11 端点（`admin-analytics.controller.ts` + `ops-analytics.service.ts` + `ops-analytics.repo.ts`），全部 GET、全部 `@Roles('admin')`（家长/学生 token 403/1005）。实现即契约，本节从 service/repo 组装代码逐字段抄。数据流见 §5.32；设计见 delta spec `2026-10-09-analytics-phase2-ops-design.md` §7。
+运营面只读聚合 12 端点（`admin-analytics.controller.ts` + `ops-analytics.service.ts` + `ops-analytics.repo.ts`），全部 GET、全部 `@Roles('admin')`（家长/学生 token 403/1005）。实现即契约，本节从 service/repo 组装代码逐字段抄。数据流见 §5.32；设计见 delta spec `2026-10-09-analytics-phase2-ops-design.md` §7 与 `2026-10-10-llm-module-attribution-design.md`。
 
-**通用纪律（11 端点共享）**：
+**通用纪律（12 端点共享）**：
 
 - 时间窗 `from,to`（YYYY-MM-DD），缺省**近 7 天**（`from` = 今天-6）。窗口边界全部由**应用层** `parseWindow` 算好传参，SQL 内**禁 `CURDATE()`/`NOW()`**（DB 时区差一天会算错窗口）。非法 → **400/1001**；`2026-02-30` 这类**格式合法但日期无效**的输入会被 Node 滚动到下月，`parseWindow` 做**往返校验**（解析结果格式化回去与输入全等才放行）→ 1001；`from > to` → 1001。
 - 「正确率 / 比率」类指标**分母为 0 → `null`，不许写 0**（「缺口」与「真实读数 0」必须可区分）。
@@ -678,7 +678,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 | # | 端点（query 参数见下） | 返回（data） |
 |---|---|---|
 | 1 | `GET /overview` | `{dau, wau, totalSeconds, totalAnswers, accuracy, moduleTop:[{module, students, seconds}]}` |
-| 2 | `GET /modules` | `{items:[{module, students, seconds, sessions, answered, correct, accuracy}]}` |
+| 2 | `GET /modules` | `{items:[{module, students, seconds, sessions, answered, correct, accuracy, llmCalls, llmInputTokens, llmOutputTokens}]}` |
 | 3 | `GET /funnel` | `{module, steps:[{event, students}], conversions:[number\|null]}` |
 | 4 | `GET /events` | `{items:[behavior_events 全列], page, pageSize:20, total}` |
 | 5 | `GET /retention` | `{cohortStart, cohortSize, days:[{offset, retained, rate}]}` |
@@ -688,6 +688,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 | 9 | `GET /llm-tokens` | `{groupBy, items:[{key, calls, inputTokens, outputTokens, unavailableCalls}], attributed, unattributed, unavailableCalls}` |
 | 10 | `GET /llm-calls` | `{items:[llm_call_logs 全列], page, pageSize:20, total}` |
 | 11 | `GET /requests` | `{items:[api_request_logs 全列], page, pageSize:20, total}` |
+| 12 | `GET /api-usage` | `{items:[{module:string\|null, calls, failedCalls, failureRate:number\|null, avgLatencyMs:number\|null}]}`，按 `calls` DESC |
 
 **逐端点 query 参数表**（「校验与错误码」列的 1001 均指 `code=1001` 的 400）：
 
@@ -703,27 +704,29 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 | 7 | `outcome` | string | **是** | — | 白名单 `platform_class` / `screen_class` / `app_shell` / `module`（**browser / input_type 不在列**）→ 越界 1001 |
 | 7 | `from` `to` | string | 否 | 近 7 天 | 通用窗口纪律 |
 | 8 | `from` `to` | string | 否 | 近 7 天 | 通用窗口纪律；内容三指标**不随窗口变化**（存量库口径） |
-| 9 | `groupBy` | string | **是** | — | 白名单 `scene` / `model` / `day` / `student` → 越界 1001；`from` `to` 同上 |
+| 9 | `groupBy` | string | **是** | — | 白名单 `scene` / `model` / `day` / `student` / `module`（2026-10-10 加）→ 越界 1001；`from` `to` 同上 |
 | 10 | `scene` `model` | string | 否 | 不过滤 | trim 后空串视为不过滤；`model` 匹配 `model_key`（路由条目 key，**不是 model_id**） |
 | 10 | `success` | string | 否 | 不过滤 | **只认 `true` / `false`**，其余 1001 |
 | 10 | `page` | string | 否 | 1 | 非正整数 1001 |
 | 11 | `path` | string | 否 | 不过滤 | `route LIKE '%path%'`（归一化模板检索；`raw_path` 才带真实 id） |
 | 11 | `status` `minLatency` | string | 否 | 不过滤 | 非负整数，否则 1001 |
 | 11 | `page` | string | 否 | 1 | 非正整数 1001 |
+| 12 | `from` `to` | string | 否 | 近 7 天 | 通用窗口纪律；无白名单/分页参数（本端点无此概念） |
 
 **逐端点口径（评审裁定必须写明的部分）**：
 
 1. **overview**：`dau` = **今日**（与查询窗口无关）有会话的学生数，**不限 status**；`wau` = **窗口内去重人数**（`COUNT(DISTINCT student_id)`，status IN ended/abandoned）——**勿写死「周活」**，窗口随查询可调，UI 文案用「窗口活跃」；`accuracy` = 窗口内 `answer_submitted` 的 correct/answered（answered=0 → null），correct 取 `props->>'$.verdict'='correct'`；答题**只取 behavior_events**（Phase 2 上线后才有数），`special_practice_logs` **不并入**；`moduleTop` 按时长倒序前 5。
-2. **modules**：会话侧（study_sessions，status IN ended/abandoned）与答题侧（behavior_events）按 module **并集合并**、按时长倒序；behavior_events 里 `module IS NULL` 的行无法归入任何模块，**不进本列表**（总量口径在 overview 不受影响）。
+2. **modules**：会话侧（study_sessions，status IN ended/abandoned）与答题侧（behavior_events）按 module **并集合并**、按时长倒序；behavior_events 里 `module IS NULL` 的行无法归入任何模块，**不进本列表**（总量口径在 overview 不受影响）。**LLM 三列（2026-10-10 加）**：`llmCalls` / `llmInputTokens` / `llmOutputTokens` = 该学习模块行并进的 LLM 调用统计，来源是窗口内 `llm_call_logs` 按 `module`（**API 第一段**值域，见口径 9/12）GROUP BY 后在 service 层按映射表**累加**——映射仅报表层、**不落数据**：`practice→mainline`（主线课堂）、`ai→aux_qna`（辅线答疑）、`training→training_targeted`（专项训练）、`exams→exam`（考试）；**其余段（parent/admin/chinese-passages/points/…）与 NULL 不并入任何行**（列表基线仍是会话/答题侧模块行，不因映射新增行）。三列无调用 = **0（真实 0）**；token 求和口径与 llm-tokens 同款（`usage_source <> 'unavailable'` 才计入，量不到不影响 calls 计数）。
 3. **funnel**：每步 `COUNT(DISTINCT student_id)`（窗口内去重到人）；`conversions[0]` 恒 null，上一步人数 0 → null；**mainline 漏斗第三步 = `points_awarded` 且 `module IS NULL` 且 `props->>'$.taskCode'='mainline_lesson'`**（★裁决：points 打点不带 module，靠完课 taskCode 圈定，其余步骤一律 `module = ?`）。第一步 `study_session_started` 由 client 上报，不过滤 source。
 4. **events**：**返回全部 tier（裁决 3）**——母 spec §8.3「仅 ops tier」的字面被修订，隐私三道锁锁在**家长端查询**（§4.24），admin 排查要看全量。`items` 为 `behavior_events` 全列（`id, actor_role, student_id, event, tier, module, scene, subject_id, ref_type, ref_id, session_uid, request_id, source, props, client_ts_ms, created_at`；`props` 是 JSON 对象、无则 null）。
 5. **retention**：`D{n}` = cohort 学生在 cohortStart+n 当日有会话的人头占比；`cohortSize=0` → 各 `rate` null（retained 为 0）。
 6. **devices**：五维分布 `key` 的**真实取值**由 `user-agent.util.ts` 等决定——`platformClass`: `ipad` / `iphone` / `android_tablet` / `android_phone` / `mac` / `windows` / `linux` / `other`（iPadOS 13+ Safari UA 写 Macintosh，服务端按 `input_type=touch` 校正为 ipad）；`screenClass` / `inputType` / `appShell` / `browser` 为前端上报白名单值或 NULL。**不过滤 status**（含进行中会话已累计的 active_seconds）——与 overview/modules 的 `status IN ('ended','abandoned')` **口径并存**，两者并列展示时需重新裁决（T10 遗留）。全部 `COUNT(DISTINCT student_id)` 按人头不按会话；`accuracy` **只 platformClass 有值**（口径 = 窗口内用过该平台类的学生的窗口内全部 answer_submitted，重叠分组非互斥），其余四维恒 null（页面隐藏该列）；`multiDevice` 只统计 DISTINCT platform_class > 1 的学生按档位计人头；`switches` = 相邻两次会话 platform_class 不同（秒级同刻并发不计）。
 7. **cohort-compare**：每 metric 的 `value` 口径——`totalSeconds` = 组内 SUM(active_seconds) ÷ 组内学生数；`daysActive` = 组内「学生×日期」去重天数 ÷ 组内学生数；`answerCount` = 组内 answer_submitted 计数 ÷ 组内（有答题的）学生数；`accuracy` = correct/answered（answered=0 → null）。时长侧走 study_sessions（module 取 study_sessions.module）、答题侧走 behavior_events（module 取 behavior_events.module），设备列按学生近似关联；**不过滤 status**（同 devices 口径差异）。`groups[].students` = 该 metric 自身侧的去重学生数；排序 students 倒序、key 升序；响应**必带** `disclaimer:'correlation-not-causation'`。
 8. **quality**：`apiFailureRate` 谓词 = **`status_code >= 500 OR biz_code IS NOT NULL`**——写入方语义是「拦截器成功路径不写 biz_code（恒 NULL）」，只有异常路径才写数值 biz_code，全表没有 biz_code=0 的行；所以 **4xx 且 biz_code NULL 计成功**，也不能用 `COALESCE(biz_code,5000)<>0`（会把成功行全判失败，T11 修复的回归钉子盯着）。错误码分布只统计失败行，纯 5xx（biz_code NULL）按 **5000** 归组（http-exception.filter 未知错误默认码）。`llmTimeoutRate` 口径 = `error_type='TimeoutError'`（**网络错误被 client 归一进它**，非纯超时）；`llmFallbackRate` = is_fallback 占比；`llmAttributionCoverage` = `student_id` 非空占比。内容三指标无窗口：`questionsWithoutStandardAnswer` = `TRIM(answer)=''` 计数；`kpCoverage` = 有 question_knowledge_points 关联的题 / 总题；**`globalWordErrorRate` = english_words 累计错次 SUM(error_count) ÷ 词数**（**可 > 1**，分母是词数不是作答次数）；**`passageSkipRate` 恒 null**（实现期确认无可靠数据源，不计为 0）。全部比率分母 0 → null。
-9. **llm-tokens**：按 `model_key` 聚合（不按 model_id，母 spec 陷阱 #5）；`inputTokens`/`outputTokens` 只对 `usage_source <> 'unavailable'` 的行求和，量不到的**单列 `unavailableCalls`、绝不混进 0 求和**（顶层 `unavailableCalls` 与 `items[].unavailableCalls` 并存）；`day` 分组用 `DATE_FORMAT` 直接回字符串（按 DB 墙上时钟，同机部署成立）；`key` 为 NULL 的组映射 `unknown`（scene）/`unattributed`（student）；token 列 NULL = 量不到（仓规）。
+9. **llm-tokens**：按 `model_key` 聚合（不按 model_id，母 spec 陷阱 #5）；`inputTokens`/`outputTokens` 只对 `usage_source <> 'unavailable'` 的行求和，量不到的**单列 `unavailableCalls`、绝不混进 0 求和**（顶层 `unavailableCalls` 与 `items[].unavailableCalls` 并存）；`day` 分组用 `DATE_FORMAT` 直接回字符串（按 DB 墙上时钟，同机部署成立）；`key` 为 NULL 的组映射 `unknown`（scene）/`unattributed`（student）；**`module` 例外（2026-10-10 加分组维度）**：NULL module = **无 HTTP 触发链的调用**（如启动期任务；HTTP 触发的 fire-and-forget——解释缓存/标题生成——ALS 随 Promise 链延续、带触发请求的 module，**不是** NULL），key **原样输出 null 不转字符串**（避免 `"(background)"` magic value 污染数据，前端负责显示「后台任务」）；**历史行不回填**（列自上线起才有值，之前的行恒 NULL，报表单列不当 0）；token 列 NULL = 量不到（仓规）。
 10. **llm-calls**：`items` 为 `llm_call_logs` 全列（`id, requestId, studentId, dialogueId, scene, subject, capability, modelKey, modelId, provider, attempt, requestKind, isFallback, success, errorType, httpStatus, inputTokens, outputTokens, usageSource, latencyMs, createdAt`）；`success` 过滤值 1/0 对应 true/false。
 11. **requests**：`items` 为 `api_request_logs` 全列（`id, requestId, actorRole, studentId, method, route, rawPath, module, statusCode, bizCode, errorCode, latencyMs, isSse, createdAt`）。
+12. **api-usage（2026-10-10 新增）**：窗口内 `api_request_logs` 按 `module`（API 第一段，与 llm_call_logs.module 同源同值域）GROUP BY，NULL module 自成一组原样返回（前端显示「后台任务」）。**失败谓词与 quality 完全同款**：`status_code >= 500 OR biz_code IS NOT NULL`（写入方语义：成功路径 biz_code 恒 NULL，全表没有 biz_code=0 的行——4xx 且 biz_code NULL 计成功，repo 测试从 quality 的 SUM(...) 抽谓词做逐字符同款断言防漂移）。`failureRate` = failedCalls/calls，**分母 0 → null**（口径纪律）；failed=0 → 0 是真实 0。`avgLatencyMs` = AVG(latency_ms) 取整，组内 latency 全缺失 → null；**不含** minLatency/status 过滤（那是 /requests 的排查职责）。排序 calls DESC（repo 已序、service 兜底稳定排序一次）。无分页。
 
 **页面挂载**：admin 8 页（`/admin/analytics` + funnel/retention/modules/quality/llm-tokens/devices/events 七个子页，`AdminNav` 加项）。
 
@@ -2012,7 +2015,7 @@ behavior_events（迁移 2026-10-09_behavior_events.sql；180 天清理归 Phase
 admin 分析 8 页（AdminLayout + AdminNav，/admin/analytics 及 7 个子页）
   · 时间窗选择器：默认近 7 天；窗口变化只改 query，不换页
   ▼
-GET /api/admin/analytics/{overview,modules,funnel,retention,devices,quality,llm-tokens,llm-calls,requests,events,cohort-compare}
+GET /api/admin/analytics/{overview,modules,funnel,retention,devices,quality,llm-tokens,llm-calls,requests,events,cohort-compare,api-usage}
   · 全部 @Roles('admin')，只读 GET，无写路径
   ▼
 OpsAnalyticsService
@@ -2230,6 +2233,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.21 | 2026-10-10 | **LLM 账本按模块归因 + 模块 API 调用聚合（§4.28 三处，openapi.yaml 同步）**。① `GET /modules` 响应每行加三列 `llmCalls`/`llmInputTokens`/`llmOutputTokens`：`llm_call_logs` 按 `module`（API 第一段）聚合后在 service 层按映射累加（`practice→mainline`、`ai→aux_qna`、`training→training_targeted`、`exams→exam`；**仅报表层映射不落数据**，其余段与 NULL 不并入任何行），无调用 = 真实 0；② `GET /llm-tokens` 的 `groupBy` 白名单加 `module`——NULL module = **无 HTTP 触发链的调用**（HTTP fire-and-forget 带 ALS 延续的触发请求 module，不算 NULL），该组 `key` **原样输出 null**（前端显示「后台任务」），**历史行不回填**；③ 新增 `GET /api/admin/analytics/api-usage?from,to`：`api_request_logs` 按 module GROUP BY，`{items:[{module:string\|null, calls, failedCalls, failureRate, avgLatencyMs}]}` 按 calls DESC、无分页；**失败谓词与 /quality 完全同款**（`status_code >= 500 OR biz_code IS NOT NULL`，repo 测试逐字符同款断言防漂移），failureRate 分母 0 → null、failed=0 是真实 0，avgLatencyMs 取整、组内全缺失 → null。均为 admin 角色 GET，窗口纪律与 §4.28 通用条款一致。数据面：`llm_call_logs` 加 `module` 列（迁移 `2026-10-10_llm_call_logs_module.sql`，历史行恒 NULL 不回填）。 |
 | v4.20 | 2026-10-09 | 埋点 Phase 2（Ops 产品面）文档同步。§4.23 补 `POST /api/track/events`（批量 1-50、client 白名单拒伪计 rejected、subjectId 只查在售、`{accepted, rejected}` 201）；新增 §4.28 AdminAnalytics 11 端点逐字段（通用窗口纪律 + 逐端点 query 表 + 口径：mainline 漏斗第三步 taskCode、/events 全 tier、devices 真实 key 取值与 status 口径差异、apiFailureRate 谓词、passageSkipRate 恒 null、globalWordErrorRate 可 >1、llmTimeoutRate 含网络归一、unavailable 单列）；新增 §5.31 显式事件采集链（tracker 四条 flush 条件 + pagehide 丢弃口径）与 §5.32 ops 聚合查询链；openapi.yaml 同步 12 端点。 |
 | v4.19 | 2026-10-08 | 新增 §4.27（语文专项手写输入）：`POST /api/ai/handwriting/transcribe`（学生角色，AIController 类级 `@Roles('student')` 继承）——手写图片 dataURL（png\|jpeg，解码 ≤4MB；缺失/前缀不符 400/4001、超限 400/4002、上游失败 502/5502）→ `{text, modelKey, elapsedMs}`，**成功 201**（`@Post` 默认）。非流式、不留档（只有 LLM 账本，meta 走 HTTP 路径 ALS 归属学生）；模型走 scene `handwriting` + subject `chinese` 路由（本地 llama.cpp 优先、qwen3.8-max 兜底，yaml + `llm_routes` 迁移 `2026-10-08_handwriting_scene.sql`，幂等），调用 `thinking:false`。§4.7 AI 表补一行；§5 无 ai 端点清单、数据流不变，无需同步。openapi.yaml 同步（1 path / 1 operation，`'201'`）。dev 调研端点（§4.26）不受影响。 |
 | v4.18 | 2026-10-08 | 新增 Dev 分组 §4.26（手写汉字识别率调研，dev-only）：`GET /api/dev/handwriting/models`（registry 快照，只出 key/provider/modelId）与 `POST /api/dev/handwriting/recognize`（纯转写，校验顺序 image 前缀 → 解码 ≤4MB → modelKey 在 registry；上游失败 502）。**限 admin 角色**（2026-10-08 用户裁决由「任一已登录角色」收窄，`SUBSCRIPTION_EXEMPT` 两条豁免随之删除——admin 天然越过 SubscriptionGuard）；**不落库、无埋点**。recognize **成功返回 201**（`@Post` 默认，未显式 `@HttpCode`）。**openapi.yaml 不收录**（openapi 只收 MVP 端点，此为 dev-only 调研端点）。前端调研页 `/dev/handwriting-demo`，累计准确率为 Σ 口径（Σ本轮命中 ÷ Σ本轮对照字数，不做拼接重算）。 |

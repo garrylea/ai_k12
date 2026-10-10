@@ -1631,3 +1631,27 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 用户提问「新环境执行 schema.sql 是否建出最新结构」触发首次总对账（此前半年靠逐批纪律、从未整体核过）。方法：`tools/db/schema_reconcile.py`（本次新增）——无建库权限也能跑：在 `ai_k12` 库内为 schema.sql 每张表建 `__schema_check_<name>` 影子表（FK 约束名加 `__chk_` 前缀避开库级唯一性 ERROR 1826），由 MySQL 自身规范化 DDL 后用 information_schema 逐表比对列/索引/主键/外键，完毕即删影子表；全程不动真实表数据。**踩坑**：影子表重建时若丢掉表尾 `CHARSET/COLLATE` 会继承库默认 collation，制造假阳性（billing_notices 差异即此，修正后消失）——对账脚本必须原样保留表尾。
 
 结果（75 张表）：① **`aux_error_books` 线上有、schema.sql 漏收**——已补录进 schema.sql（错题本区），注释标明**已废止**（DB 设计文档「辅线错题本已取消」，线上零行、代码不再写入，按「死表默认保留」裁决作结构对齐保留）；顺带把线上该表 `updated_at` 补上列级 `ON UPDATE CURRENT_TIMESTAMP(3)`（建表迁移遗漏，违反约定；表 0 行，ALTER 零风险）。② `billing_notices` 线上整表 `utf8mb4_0900_ai_ci`（迁移建表未显式指定 collation 吃了服务器默认）——schema.sql 原本就写对，对账工具修正后无差异。③ 7 张表（questions/chinese_passages/main_error_books/goals/controls/remediation_sets/study_sessions）**列集合相同、顺序不同**（历史 ADD COLUMN 所致）——无功能影响（代码全用显式列清单），不追改。对账后结论：**新环境执行 schema.sql 建出的结构与线上库一致**；今后每批 DDL 收尾可顺手重跑该脚本作为「完工判据」。
+
+## 2026-10-10 LLM 账本按模块归因 + 模块 API 调用聚合
+
+分支 `feat/llm-module-attribution`（M1-M6 实现 + M7 文档同步，设计 `docs/superpowers/specs/2026-10-10-llm-module-attribution-design.md`）。背景：埋点 Phase 2 上线后「学习模块 × AI 调用」交叉维度缺失（llm_call_logs 无 module 列；scene 是 AI 任务种类、主线/辅线都走 tutoring 区分不开；api_request_logs 有 module 列但无聚合端点）。
+
+**交付**：
+
+- **A 账本加列**：`llm_call_logs` 加 `module VARCHAR(32)`（迁移 `2026-10-10_llm_call_logs_module.sql`，information_schema 守卫幂等 + schema.sql 同步；索引 `idx_lcl_module_time (module, created_at)`）。
+- **采集链路（ai-core 零依赖改动）**：`moduleFromRoute` 从 analytics.interceptor 迁至 `ai-core/infra/request-context.ts`（ai-core 不能反向 import common，公共纯函数放 ai-core 防漂移）；`RequestContextMiddleware` 建 context 时带 module；AnalyticsModule 的 `setLlmCallSink` 回调从 ALS 读 module enrich 进 entry 再 push——写入仍 fire-and-forget。
+- **查询端**：`/llm-tokens` groupBy 白名单加 `module`（NULL 组 key 原样输出 null）；`/modules` 每行加三列 llmCalls/llmInputTokens/llmOutputTokens；新端点 `GET /api/admin/analytics/api-usage`。
+- **前端（M6）**：ModulesPage 模块表加 LLM 三列 + 底部「各模块 API 调用」表；LlmTokensPage groupBy 下拉加「模块」；api.ts 同步类型与 `getAdminApiUsage`。
+
+**关键口径**：
+
+- **module = API 第一段**（moduleFromRoute：`/api/practice/...` → practice），与 `api_request_logs.module` **同源同值域**、可 JOIN 互查；「API 段 → 学习模块」映射（practice→mainline、ai→aux_qna、training→training_targeted、exams→exam）**仅报表层、不落数据**，其余段（parent/admin/chinese-passages/points/…）不并入 modules 行。
+- **NULL = 真正无 HTTP 触发链的调用**（如启动期任务）；HTTP 触发的 fire-and-forget（解释缓存/标题生成）与 admin/parent 的 HTTP 调用**带触发请求的 module**（ALS 随 Promise 链延续）——「后台转后台所以无 module」是误读。
+- **历史行不回填**（列自上线起才有值，之前的行恒 NULL；报表单列「后台任务/未归因」，不当 0）。
+- **计数 0 是真实 0**（与「answered=0→null」的分母缺位不同族）；token 求和沿用 unavailable 单列口径。
+- **api-usage 失败谓词与 /quality 逐字符同款**（`status_code >= 500 OR biz_code IS NOT NULL`），repo 测试从 quality 的 SUM(...) 抽谓词做同款断言防漂移；failureRate 分母 0 → null；avgLatencyMs 取整、组内全缺失 → null；按 calls DESC、无分页。
+- 前端 `apiModuleLabel`（Minor-2 修订）：仅 NULL 显示「后台任务」，**字典外 key 原样返回**（与 eventLabel 同策略——服务端新增 API 段时不至显示错文案）。
+
+**文档同步（M7）**：API 主稿 §4.28（modules 三列 + 映射口径 / llm-tokens groupBy 加 module / api-usage 新端点条目 + 口径 12，§9 版本 v4.21）+ openapi.yaml（api-usage path、modules 三列、groupBy enum、key nullable）+ 本条。§5.32 端点清单同步补 api-usage。
+
+**遗留**：迁移已 apply、schema_reconcile 收尾重跑属整批完工判据；浏览器真库走查（模块页新表/Token 页 module 维度）随 Task 18 人工验收一并做。
