@@ -2,7 +2,7 @@ import { Injectable, NestMiddleware } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { JwtUser } from '../guards/jwt-auth.guard.js';
-import { runWithRequestContext } from '../../ai-core/infra/request-context.js';
+import { runWithRequestContext, moduleFromRoute } from '../../ai-core/infra/request-context.js';
 
 /**
  * 每请求开一个 AsyncLocalStorage 上下文，让 ai-core 深处的 ModelClient 能归因到学生。
@@ -20,6 +20,9 @@ export class RequestContextMiddleware implements NestMiddleware {
         requestId,
         studentId: user?.role === 'student' ? Number(user.sub) : null,
         role: user?.role ?? null,
+        // LLM 按模块归因（spec §2.2）：与 api_request_logs.module 同源同值域。
+        // 本中间件先于埋点 skip 名单生效，被跳过埋点的路由也照常带 module。
+        module: moduleFromRoute(req.originalUrl ?? req.url ?? ''),
       },
       next,
     );

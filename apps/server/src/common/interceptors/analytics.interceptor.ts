@@ -5,6 +5,10 @@ import type { Request } from 'express';
 import type { JwtUser } from '../guards/jwt-auth.guard.js';
 import type { ApiRequestLogEntry } from '../../database/repositories/api-request-logs.repo.js';
 import { TelemetryService } from '../../modules/analytics/telemetry.service.js';
+// moduleFromRoute 2026-10-10 迁至 ai-core/infra/request-context（spec §2.2：公共纯函数
+// 放 ai-core 供 middleware/sink 共用，ai-core 不得反向 import common）；此处 re-export 保持旧引用不破。
+import { moduleFromRoute } from '../../ai-core/infra/request-context.js';
+export { moduleFromRoute };
 
 /** 不做埋点的路径：自指噪音 + 静态资源 */
 const SKIP_PREFIXES = ['/assets/', '/uploads/'];
@@ -20,12 +24,6 @@ const SKIP_PATTERNS = [
 export function shouldSkipRoute(path: string): boolean {
   if (SKIP_PREFIXES.some((p) => path.startsWith(p))) return true;
   return SKIP_PATTERNS.some((re) => re.test(path));
-}
-
-/** 按第二段路径推导模块名（/api/practice/... -> practice） */
-export function moduleFromRoute(path: string): string | null {
-  const m = /^\/api\/([^/?]+)/.exec(path);
-  return m ? m[1] : null;
 }
 
 /** 优先用 Express 路由模板；拿不到时按形状替换，避免每个 id 一个基数 */

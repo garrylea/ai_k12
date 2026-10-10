@@ -13,6 +13,11 @@ export interface LlmCallLogEntry {
   studentId: number | null;
   dialogueId: number | null;
   scene: string | null;
+  /**
+   * HTTP 请求模块（api 第一段，spec §2.2）。**ai-core 自身不填**：
+   * 由 Nest 层 sink（AnalyticsModule 构造器）从 ALS enrich 回填；后台任务为 null。
+   */
+  module?: string | null;
   subject: string | null;
   capability: string | null;
   modelKey: string | null;
