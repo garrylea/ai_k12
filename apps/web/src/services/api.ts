@@ -3226,7 +3226,18 @@ export type OverviewData = {
 };
 
 export type ModulesData = {
-  items: { module: string; students: number; seconds: number; answered: number; correct: number; accuracy: number | null }[];
+  items: {
+    module: string;
+    students: number;
+    seconds: number;
+    answered: number;
+    correct: number;
+    accuracy: number | null;
+    /** LLM 按模块归因（设计 §2.3）：API 段聚合后映射到学习模块；无调用 = 真实 0 */
+    llmCalls: number;
+    llmInputTokens: number;
+    llmOutputTokens: number;
+  }[];
 };
 
 export type FunnelData = {
@@ -3263,11 +3274,25 @@ export type QualityData = {
 };
 
 export type LlmTokensData = {
+  /** 分组维度：scene / model / day / student / module（module 分组的 NULL key = 无 HTTP 触发链的后台任务） */
   groupBy: string;
-  items: { key: string; calls: number; inputTokens: number; outputTokens: number; unavailableCalls: number }[];
+  items: { key: string | null; calls: number; inputTokens: number; outputTokens: number; unavailableCalls: number }[];
   attributed: number;
   unattributed: number;
   unavailableCalls: number;
+};
+
+/** GET /api/admin/analytics/api-usage（M5）：api_request_logs 按 module 聚合；NULL module = 无归属请求；按 calls DESC。 */
+export type ApiUsageData = {
+  items: {
+    module: string | null;
+    calls: number;
+    failedCalls: number;
+    /** failed=0 → 真实 0；分母 0 → null */
+    failureRate: number | null;
+    /** AVG(latency_ms) 取整；组内 latency 全缺失 → null */
+    avgLatencyMs: number | null;
+  }[];
 };
 
 export type Paged<T> = { items: T[]; page: number; pageSize: number; total: number };
@@ -3321,6 +3346,10 @@ export const getAdminLlmTokens = (w: AdminAnalyticsWindow & { groupBy: string })
   if (w.to) p.set('to', w.to);
   return fetchApi(`/admin/analytics/llm-tokens?${p.toString()}`);
 };
+
+/** API 请求按模块聚合（M5）：calls/失败率/平均耗时；失败谓词与 /quality 同款；无分页。 */
+export const getAdminApiUsage = (w: AdminAnalyticsWindow): Promise<ApiUsageData> =>
+  fetchApi(`/admin/analytics/api-usage${analyticsQs(w)}`);
 
 /** LLM 调用流水。⚠️ 无时间窗（服务端不带 from/to）：过滤参数是 scene/model/success，分页 20。 */
 export const getAdminLlmCalls = (q: { page?: number; scene?: string; model?: string; success?: boolean }): Promise<Paged<Record<string, unknown>>> => {
