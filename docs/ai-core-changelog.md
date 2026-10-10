@@ -8,6 +8,35 @@
 
 ---
 
+## 2026-10-10 · 单点登录互踢 + 走神预警同段只报一次
+
+spec：`docs/superpowers/specs/2026-10-10-single-session-login-design.md`；计划：`docs/superpowers/plans/2026-10-10-single-session-login-and-alert-dedupe.md`（8 任务批，本条为 Task 8 收尾）。
+
+### 裁决
+
+1. **单点登录互踢（PRD §7.8）**：**同账号同角色**互踢（学生在两台设备登录互踢；家长/admin 同理；不同账号互不影响）。被踢端体验 = **401 惰性失效**——旧端在**下一次请求**时收到 401/1013（学习页心跳 30s 内感知，其他页面到下次操作），不做在线探测轮询。实现选 **方案 A：token 版本号（`seq`）+ 进程内注册表**（否决方案 B 会话表逐请求校验——每请求多一次 DB 往返，单机家庭部署 YAGNI；方案 C 只缩短期限不构成互踢）。修改/重置密码**不踢**已发 token（维持现状）；同浏览器多标签页共用同一 token 不受影响。
+2. **走神预警「同段只报一次」**：`dedupSince = hiddenSince`（挂机段起点）取代原「30 分钟重报窗口」——页面挂一夜不再每 30 分钟刷一对预警；学生回到 visible 后再挂机是新段（新 `hidden_since`），照常再报。**闲聊 off_topic 的 30 分钟去重不变**（不传 `dedupSince` 的调用方沿用旧窗口）。
+
+### 实现落点
+
+- **DB**：新表 `auth_sessions`（`role`+`user_id` UNIQUE，`token_seq`；迁移 `tools/db/migrations/2026-10-10_auth_sessions.sql`，已进 `schema.sql`，Task 3 已 apply）。
+- **服务端**：`common/guards/session-registry.ts`（进程内 `Map<role:user, seq>`，仿 `BanRegistry`：`bump`/`matches`/启动 `load` 重建；无行返回 false = 宁踢勿放）；`common/middleware/auth.middleware.ts`（验签后 `matches` 失配 → 401/`{code:1013}`，与封禁 401 同一条穿透路径）；`modules/auth/auth.service.ts`（login/register 三角色都先 `bumpSession`——DB upsert seq+1 → 内存 bump → 签名带 `seq`；**bump 写库失败登录整体 500**，绝不在 seq 未持久化时发 token）；`database/repositories/auth-sessions.repo.ts`、`common/common.module.ts`（接线 + 启动重建）。
+- **前端**：`services/api.ts`（401 且 `code===1013` → 清登录态跳 `/login?kicked=1`，其余 401/1003 行为不变）；`pages/auth/LoginPage.tsx`（展示「账号已在其他设备登录」）。PC App（Electron）跑同一套 web UI 自动生效。
+- **预警**：`modules/safety/safety-alerts.service.ts`（`RecordSafetyAlertInput` 增可选 `dedupSince` 覆盖 `existsRecent` 的 since 起点）；`modules/analytics/study-sessions.service.ts`（走神判定传 `dedupSince: hiddenSince`）。
+- **文档**：API 设计文档 §2.4/§4.1 补 1013 错误码与互踢口径；`openapi.yaml` info 说明 + 401 响应处同步。
+
+### 上线须知
+
+1. **存量 token 全失效需重登**：上线前签发的旧格式 token（无 `seq`）一律 `matches=false` → 1013，所有端（web/PC App/家长 PWA）需重新登录一次，属预期。
+2. **本机重启后端**必须 `cd apps/server && npm run build`（dist 含 ai-core assets 拷贝）+ `export JWT_SECRET` + `node dist/main.js`；`npx tsx src/main.ts` 的 DI 是坏的（仓规）。重启后 `SessionRegistry` 从 `auth_sessions` 全量重建——**重建完成前到达的请求会 1013**（安全默认宁踢勿放），单机自部署窗口极短，属已知边界。
+3. **`SessionRegistry` 单进程假设**：多实例部署会失配（家庭自部署单机成立）；将来多实例需挪共享存储，本期不做。**SSE（raw fetch 流式路径）与 `uploadFile` 绕过 `fetchApi`**，1013/2001 都不跳转——既有同类缺口，非本批引入。
+
+### 验证
+
+服务端 vitest 2139/2139（166 文件）、`tsc --noEmit` 干净（server 无 lint script）；web vitest 1248/1248（139 文件）、lint 仅 2 个存量 error（`tracker.test.ts` `_events` 未用、`MobilePointsPage.test.tsx` rules-of-hooks，与本批无关）+ 24 存量 warning。`schema_reconcile.py`：76 表在账、`auth_sessions` 无结构 diff（7 张「内容相同仅顺序不同」为存量噪音）。
+
+---
+
 ## 2026-10-10 · 家长移动端预警 banner「点了不消失」修复（点击即已读收归组件）
 
 用户真机报障：移动端家长点预警 banner 后不消失。根因：`AlertBanner` 的「点击即已读」（乐观清除 + 并发 `PATCH /parent/alerts/{id}/read`）挂在「立即查看」按钮上，而 `MobileParentLayout` 为把跳转改到移动端预警页，在外层容器 `onClickCapture` + `stopPropagation` 拦截了整条 banner——**只跳转、从不标已读**，路由切换后轮询重新拉到未读，banner 原样挂着（2026-10-02 加第 5 Tab 批引入的拦截壳破坏了 2026-09-20「点击即已读」裁决）。

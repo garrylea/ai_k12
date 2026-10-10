@@ -1,7 +1,12 @@
 openapi: 3.1.0
 info:
   title: K12 智学系统 API
-  description: K12 智学系统 REST API 规范
+  description: >-
+    K12 智学系统 REST API 规范。
+    JWT 保护端点的 401 分两码：1003 = 未登录 / token 失效 / 用户名或密码错误；
+    1013 = 账号已在其他设备登录（单点登录互踢，2026-10-10 起：新登录后旧 token 下次请求失效——
+    惰性失效，学习页心跳 30s 内感知、其他页面到下次操作；同浏览器多标签页共用同一 token 不受影响；
+    修改/重置密码不踢已发 token）。
   version: 1.0.0
 servers:
   - url: http://localhost:3000/api
@@ -3409,7 +3414,8 @@ paths:
       summary: 家长改自己的密码（P6.10）
       description: >-
         校验链：Zod（越界 409/1001）→ 旧密码比对失败（**401/1003**，与登录失败同码）
-        → 新旧相同（409/1001）。返回 `null`。**不失效旧 token**（无 token 版本机制，7 天内仍可用）。
+        → 新旧相同（409/1001）。返回 `null`。**不失效旧 token**（无 token 版本机制，7 天内仍可用；
+        但若 token 已被单点登录互踢，下次请求为 401/1013，见 info 说明）。
       operationId: changeParentPassword
       requestBody:
         required: true
@@ -4119,7 +4125,9 @@ paths:
                       data:
                         $ref: '#/components/schemas/StudentSessionView'
         '401':
-          description: 未登录或 token 无效（code=1003）
+          description: >-
+            未登录或 token 无效（code=1003）；账号已在其他设备登录（code=1013，
+            单点登录互踢：新登录后旧 token 下次请求失效，见 info 说明）
 
   /student/learning-sessions/{id}/end:
     patch:
