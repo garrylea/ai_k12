@@ -12285,21 +12285,21 @@ components:
             type: object
             properties:
               id: { type: integer }
-              actorRole: { type: string, enum: [student, parent, admin, system] }
-              studentId: { type: integer, nullable: true }
+              actor_role: { type: string, enum: [student, parent, admin, system] }
+              student_id: { type: integer, nullable: true }
               event: { type: string }
               tier: { type: string, enum: [parent, ops], description: 写时由字典决定；本端点返回全部 tier（裁决 3） }
               module: { type: string, nullable: true }
               scene: { type: string, nullable: true }
-              subjectId: { type: integer, nullable: true }
-              refType: { type: string, nullable: true }
-              refId: { type: integer, nullable: true }
-              sessionUid: { type: string, nullable: true }
-              requestId: { type: string, nullable: true }
+              subject_id: { type: integer, nullable: true }
+              ref_type: { type: string, nullable: true }
+              ref_id: { type: integer, nullable: true }
+              session_uid: { type: string, nullable: true }
+              request_id: { type: string, nullable: true }
               source: { type: string, enum: [server, client] }
               props: { type: object, nullable: true, additionalProperties: true }
-              clientTsMs: { type: integer, nullable: true }
-              createdAt: { type: string, format: date-time }
+              client_ts_ms: { type: integer, nullable: true }
+              created_at: { type: string, format: date-time }
         page: { type: integer }
         pageSize: { type: integer, enum: [20] }
         total: { type: integer }

@@ -1564,7 +1564,7 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 分支 `feat/analytics-phase2-ops`（16 个功能提交，464cc32 止）。交付内容：
 
 - **表**：`behavior_events`（迁移 `2026-10-09_behavior_events.sql` 幂等 + schema.sql + DB 文档同步；母 spec §4.3 DDL 原文，180 天清理归 Phase 3）。
-- **EventsService + 三道锁**：`EVENT_TIER` 字典（18 事件，写时定 tier、调用方不可覆盖、未登记拒写）；client 白名单拒伪；家长端查询硬过滤 `tier='parent'`（守卫测试 `parent-analytics.privacy-guard.test.ts`）；`track()` 吞一切异常只 warn。
+- **EventsService + 三道锁**：`EVENT_TIER` 字典（17 事件，写时定 tier、调用方不可覆盖、未登记拒写）；client 白名单拒伪；家长端查询硬过滤 `tier='parent'`（守卫测试 `parent-analytics.privacy-guard.test.ts`）；`track()` 吞一切异常只 warn。
 - **`POST /api/track/events`**（student，track.controller.ts）：批量 1-50、parseInput 转 400/1001、逐条 sanitize 计 rejected 不整体失败、`{accepted, rejected}` 201；subjectId 只查在售（与 study-sessions start 同口径）。
 - **服务端 11 项打点挂载**：answer_submitted/连错/错题本加减/points_awarded/exam_submitted（挂 finalizeSession 四路径）/special_unit_judged（四专项）/llm_fallback_triggered（sink 回调）/study_session_ended 兜底（closeStale 5min 惰性收尾补发）。
 - **ops 聚合 11 端点**（`/api/admin/analytics/*`，admin-analytics.controller + ops-analytics.service/repo）：overview/modules/funnel/events/retention/devices/cohort-compare/quality/llm-tokens/llm-calls/requests；窗口 parseWindow 应用层算（往返校验拒 2026-02-30）、SQL 禁 CURDATE/NOW、白名单越界 1001、分母 0→null、聚合 SQL 一律 pool.query。
