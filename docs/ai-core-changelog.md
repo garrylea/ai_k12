@@ -1558,3 +1558,31 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 - 文档同步补全：PRD §7.8 补「忘记密码」条目（此前 PRD 对此沉默，实现依据 UX §240）；UX §240 加落地说明块；家长端学情批待办清单 :334 陈旧行修正（改密码端点 2026-09-20 已有，原文误称「没有」）。
 
 **2026-10-09 验收闭环（多项「遗留人工验收」裁决汇总）**：用户逐项验收后裁决，以下遗留事项状态更新——① **忘记密码**：人工验收通过；真实短信通道未开通，接短信的原子改造（`crypto.randomInt` + 响应体撤 code 字段 + 日志撤明文 + 页面撤直显块）**留待正式上线时做**。② **订阅收费**：浏览器视觉走查已通过；真渠道验收（微信 Native/支付宝当面付需企业号、要收费）与 `plans` 表占位价格 UPDATE **留待正式上线**。③ **PC App mac pkg**：第二台 mac 冒烟（下载 pkg → Gatekeeper 仍要打开 → 装完连 :5173 → xattr 为空 → 升级安装不残留）已做、无问题。④ **数学薄弱点图谱**：人工冒烟通过。⑤ **手写汉字识别 demo**：已验收。⑥ **qwen38 多模态**：端到端手测（原 Task 7）用户裁决**不再需要**。⑦ **埋点现状结论**：Phase 0（token 计量）/1A（学习时长）/1B（专项+掌握度+目标）/P6.5（按学科目标）均已合并推送 main；**Phase 2「运营面」整块未做**——`behavior_events` 表、`/api/track/events` 端点、前端显式事件（提示/看答案/翻卡/发消息/闲置）、ops 聚合 11 端点（含 `/devices`）、admin 分析页与 `AnalyticsDevicesPage` 全部不存在（schema.sql 与代码 grep 证实）；Phase 3（规模治理）spec 标「非必须」。下一步从 Phase 2 开始，先过设计。
+
+## 2026-10-09 埋点 Phase 2（Ops 产品面）
+
+分支 `feat/analytics-phase2-ops`（16 个功能提交，464cc32 止）。交付内容：
+
+- **表**：`behavior_events`（迁移 `2026-10-09_behavior_events.sql` 幂等 + schema.sql + DB 文档同步；母 spec §4.3 DDL 原文，180 天清理归 Phase 3）。
+- **EventsService + 三道锁**：`EVENT_TIER` 字典（18 事件，写时定 tier、调用方不可覆盖、未登记拒写）；client 白名单拒伪；家长端查询硬过滤 `tier='parent'`（守卫测试 `parent-analytics.privacy-guard.test.ts`）；`track()` 吞一切异常只 warn。
+- **`POST /api/track/events`**（student，track.controller.ts）：批量 1-50、parseInput 转 400/1001、逐条 sanitize 计 rejected 不整体失败、`{accepted, rejected}` 201；subjectId 只查在售（与 study-sessions start 同口径）。
+- **服务端 11 项打点挂载**：answer_submitted/连错/错题本加减/points_awarded/exam_submitted（挂 finalizeSession 四路径）/special_unit_judged（四专项）/llm_fallback_triggered（sink 回调）/study_session_ended 兜底（closeStale 5min 惰性收尾补发）。
+- **ops 聚合 11 端点**（`/api/admin/analytics/*`，admin-analytics.controller + ops-analytics.service/repo）：overview/modules/funnel/events/retention/devices/cohort-compare/quality/llm-tokens/llm-calls/requests；窗口 parseWindow 应用层算（往返校验拒 2026-02-30）、SQL 禁 CURDATE/NOW、白名单越界 1001、分母 0→null、聚合 SQL 一律 pool.query。
+- **admin 8 页**（`/admin/analytics` + 7 子页）：AdminNav 加项、共享 Shell/时间窗/fmtDuration、图表复用 recharts；Events 时间列 zh-CN 本地化。
+- **tracker 显式事件队列**：trackEvent 入队 → flush（满 20 / 10s 定时 / 路由离开 / pagehide）→ /api/track/events；session 两事件挂 sessionMachine effects；answer_revealed / ai_message_sent 挂载；page_view 30s 同路由去重。
+
+关键裁决（详见 delta spec §12 / progress.md 台账）：
+
+- `/events` 返回**全部 tier**（裁决 3，修订母 spec §8.3 字面——三道锁锁家长端，admin 排查看全量）。
+- **mainline 漏斗第三步** = points_awarded 且 module IS NULL 且 props.taskCode='mainline_lesson'（★裁决：points 打点不带 module，靠完课码圈定）。
+- **apiFailureRate 谓词** = status_code>=500 OR biz_code IS NOT NULL（4xx 且 biz_code NULL 计成功——拦截器成功路径不写 biz_code）。
+- **quality NULL 口径**：passageSkipRate 恒 null（无可靠数据源）；globalWordErrorRate=累计错次÷词数（可>1）；llmTimeoutRate=error_type='TimeoutError'（含网络错误归一）。
+- devices/cohort-compare **不过滤 status**（与 overview/modules 的 ended/abandoned 口径并存，并列展示需重新裁决）；设备 key 真实取值 ipad/iphone/android_tablet/android_phone/mac/windows/linux/other。
+
+踩坑：
+
+- **biz_code NULL 语义**：不能 `COALESCE(biz_code,5000)<>0` 判失败——会把成功行全判失败（拦截器成功路径不写 biz_code，全表无 0 值行；有行级回归钉子）。
+- **2026-02-30 滚动日期**：Node 对格式合法但日期无效的输入滚动到下月而非 Invalid Date，只查 isNaN 拦不住；parseWindow 做往返校验（格式化回去与输入全等才放行）。
+- **无翻卡 UI**：card_flipped 字典占位不发射；study_session_idle 同为占位（空闲由心跳 hidden 承载）——别当缺陷修。
+
+遗留人工事项 → **Task 18**（端到端真库冒烟 + 人工验收：mainline 漏斗前两步依赖 tracker 带 module='mainline' 各验一条、funnel OR 分支 EXPLAIN 留底、8 页真库走查）。文档同步（Task 17）：API 主稿 §4.23/§4.28/§5.31/§5.32/§9 v4.20、openapi 12 端点、delta spec §12、CLAUDE.md 工程约定一条。
