@@ -103,6 +103,20 @@ describe('LoginPage', () => {
   });
 });
 
+describe('LoginPage 被踢下线提示（单点登录互踢）', () => {
+  it('URL 带 kicked=1 → 页面展示「账号已在其他设备登录，请重新登录」', () => {
+    window.history.replaceState(null, '', '/login?kicked=1');
+    renderLoginPage();
+    expect(screen.getByText('账号已在其他设备登录，请重新登录')).toBeInTheDocument();
+  });
+
+  it('无 kicked 参数 → 不显示该提示', () => {
+    window.history.replaceState(null, '', '/login');
+    renderLoginPage();
+    expect(screen.queryByText('账号已在其他设备登录，请重新登录')).toBeNull();
+  });
+});
+
 describe('LoginPage 家长落点按视口分流', () => {
   it('窄屏（<768px）家长登录落 /m/parent', async () => {
     const user = userEvent.setup();

@@ -389,3 +389,40 @@ describe('2001 全局拦截（订阅失效硬门禁）', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 });
+
+describe('1013 全局拦截（单点登录互踢）', () => {
+  function stubLocationAssign() {
+    // jsdom 的 Location 成员（含 assign）是实例上的不可配置属性，spy 不动；
+    // 但 window.location 本身可配置，用 vi.stubGlobal 整只替换。
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    return assign;
+  }
+
+  it('code=1013 → 清登录态 + window.location.assign 到 /login?kicked=1，Promise 永不 resolve', async () => {
+    const assign = stubLocationAssign();
+    localStorage.setItem('token', 't');
+    sessionStorage.setItem('userRole', 'student');
+    stubFetch(401, { code: 1013, message: '账号已在其他设备登录', data: null });
+
+    let outcome: 'resolved' | 'rejected' | 'pending' = 'pending';
+    void getMyPoints().then(
+      () => { outcome = 'resolved'; },
+      () => { outcome = 'rejected'; },
+    );
+
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/login?kicked=1'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(outcome).toBe('pending');
+    // 两个 storage 的鉴权键都被清掉
+    expect(localStorage.getItem('token')).toBeNull();
+    expect(sessionStorage.getItem('userRole')).toBeNull();
+  });
+
+  it('code=1003（token 过期）→ 行为不变，仍抛 ApiError', async () => {
+    const assign = stubLocationAssign();
+    stubFetch(401, { code: 1003, message: '未登录或 token 已过期', data: null });
+    await expect(getMyPoints()).rejects.toMatchObject({ code: 1003 });
+    expect(assign).not.toHaveBeenCalled();
+  });
+});

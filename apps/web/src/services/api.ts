@@ -1,5 +1,5 @@
 import type { ClientState, EndReason, HiddenReason } from '@/analytics/types';
-import { getAuthToken } from '@/services/authStorage';
+import { clearAuthSession, getAuthToken } from '@/services/authStorage';
 
 const API_BASE = '/api';
 
@@ -51,6 +51,13 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const json: ApiResponse<T> = await res.json();
 
   if (json.code !== 0) {
+    if (json.code === 1013) {
+      // 单点登录互踢（2026-10-10）：该账号已在别处重新登录。清本地登录态并回登录页，
+      // kicked=1 供登录页展示提示。与 2001 同惯例：返回永不 resolve 的 Promise，页面即将整体跳走。
+      clearAuthSession();
+      window.location.assign('/login?kicked=1');
+      return new Promise<T>(() => {});
+    }
     if (json.code === 2001) {
       // 学生端硬门禁：订阅失效。全局跳锁定页（家长角色永远不会收到 2001，跳转对其无影响）。
       window.location.assign('/student/locked');
