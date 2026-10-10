@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Request, Response, NextFunction } from 'express';
 import type { JwtUser } from '../guards/jwt-auth.guard.js';
 import { BanRegistry } from '../guards/ban-registry.js';
+import { SessionRegistry } from '../guards/session-registry.js';
 
 /**
  * Parses the `Authorization: Bearer <jwt>` header and, when the token is valid,
@@ -15,6 +16,7 @@ export class AuthMiddleware implements NestMiddleware {
   constructor(
     private jwtService: JwtService,
     private banRegistry: BanRegistry,
+    private sessionRegistry: SessionRegistry,
   ) {}
 
   use(req: Request, _res: Response, next: NextFunction): void {
@@ -29,6 +31,13 @@ export class AuthMiddleware implements NestMiddleware {
         }
         if (payload.role === 'student' && this.banRegistry.isBanned('student', payload.sub)) {
           throw new UnauthorizedException({ code: 1003, message: '账号已停用' });
+        }
+        // 单点登录互踢（2026-10-10）：token 携带的 seq 与注册表当前 seq 失配 = 已在别处重新
+        // 登录。旧格式 token（无 seq）一律失配 → 上线后存量登录全部重登一次（预期行为）。
+        // 抛 UnauthorizedException 会被下方 catch 捕获再原样重抛（instanceof 分支），与封禁
+        // 401 同一条穿透路径，最终由 HttpExceptionFilter 渲染成 { code: 1013, ... }。
+        if (!this.sessionRegistry.matches(payload.role, payload.sub, payload.seq)) {
+          throw new UnauthorizedException({ code: 1013, message: '账号已在其他设备登录' });
         }
         (req as Request & { user?: JwtUser }).user = {
           sub: payload.sub,
