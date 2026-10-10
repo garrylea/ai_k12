@@ -264,14 +264,16 @@ describe('StudySessionsService.heartbeat', () => {
     // 同步 `toHaveBeenCalled()` 会跑在写入之前，变成不稳定/恒假。
     await vi.waitFor(() => expect(safety.record).toHaveBeenCalledTimes(1));
     expect(controls.findAlertThresholds).toHaveBeenCalledWith(9);
-    expect(safety.record).toHaveBeenCalledWith({
-      studentId: 9,
-      dialogueId: null,
-      type: 'away',
-      level: 'info',
-      message: 'msg:away:6',
-      context: 'ctx:away:6',
-    });
+    expect(safety.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        studentId: 9,
+        dialogueId: null,
+        type: 'away',
+        level: 'info',
+        message: 'msg:away:6',
+        context: 'ctx:away:6',
+      }),
+    );
   });
 
   it('idle 段达到 idle 阈值 → 写 idle 预警', async () => {
@@ -286,6 +288,25 @@ describe('StudySessionsService.heartbeat', () => {
 
     await vi.waitFor(() =>
       expect(safety.record).toHaveBeenCalledWith(expect.objectContaining({ type: 'idle', level: 'info' })),
+    );
+  });
+
+  it('走神预警写入带 dedupSince=hiddenSince（同段只报一次；旧「30 分钟重报」口径废止）', async () => {
+    const since = new Date(Date.now() - 60 * 60_000); // 挂机 1 小时，远超阈值
+    const repo = makeRepo({
+      heartbeat: vi.fn().mockResolvedValue({ activeSeconds: 300, hiddenSince: since, hiddenReason: 'idle' }),
+    });
+    const safety = makeSafety();
+    const controls = makeControls({
+      findAlertThresholds: vi.fn().mockResolvedValue({ awayMinutes: 2, idleMinutes: 15 }),
+    });
+    const service = makeService(repo, makeSubjects(), safety, controls);
+
+    await service.heartbeat({ studentId: 9, sessionUid: baseInput().sessionUid, state: 'hidden', reason: 'idle' });
+    await vi.waitFor(() => expect(safety.record).toHaveBeenCalledTimes(1));
+
+    expect(safety.record).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupSince: since }),
     );
   });
 
@@ -655,14 +676,16 @@ describe('StudySessionsService.closeStale（补判）', () => {
     const closed = await service.closeStale(9);
 
     expect(closed).toBe(1);
-    expect(safety.record).toHaveBeenCalledWith({
-      studentId: 9,
-      dialogueId: null,
-      type: 'away',
-      level: 'info',
-      message: 'msg:away:30',
-      context: 'ctx:away:30',
-    });
+    expect(safety.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        studentId: 9,
+        dialogueId: null,
+        type: 'away',
+        level: 'info',
+        message: 'msg:away:30',
+        context: 'ctx:away:30',
+      }),
+    );
   });
 
   it('收尾出的 hidden 会话走 idle 补偿口径', async () => {

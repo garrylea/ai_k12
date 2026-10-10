@@ -257,7 +257,9 @@ export class StudySessionsService {
    *
    * **整段 try/catch、失败只 warn**：判定与写入绝不阻断主链路——心跳响应与 `active_seconds`
    * 的累加不能因为这里失败而受影响（`record()` 自身也永不抛，见 `SafetyAlertsService`）。
-   * 30 分钟去重窗口在 `SafetyAlertsService` 里，所以挂机期间每次心跳重复命中也只写一条。
+   * 去重口径（2026-10-10 裁决，原「30 分钟重报」废止）：`dedupSince = hiddenSince`，
+   * 即同一段挂机只报一次——页面挂一夜不再每 30 分钟刷一对；学生回到 visible 再挂机
+   * 是新段（新 hidden_since），照常再报。
    *
    * ⚠️ **调用方一律 `void`、不得 `await`**（2026-09-20 Task 4 评审 I-1 的裁决，plan 的
    * Global Constraint 原文：「心跳路径**绝不**拖长 `active_seconds` 的累加与心跳响应」）。
@@ -298,6 +300,7 @@ export class StudySessionsService {
         level: 'info',
         message: this.safetyAlerts.messageFor(hiddenReason, minutes),
         context: this.safetyAlerts.awayContext(hiddenReason, minutes),
+        dedupSince: hiddenSince, // 2026-10-10：同一段挂机只报一次（hidden_since 即段起点）
       });
     } catch (err) {
       this.logger.warn(`走神预警判定失败（已忽略，不影响心跳）：${String(err)}`);

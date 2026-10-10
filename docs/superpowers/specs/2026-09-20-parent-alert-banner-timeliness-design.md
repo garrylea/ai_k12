@@ -41,8 +41,16 @@
 `StudySessionsService.closeStale()`（家长端查询前必跑的惰性收尾）增加一步：**收尾前先取命中行里 `client_state='hidden'` 的（student_id, hidden_reason, hidden_since）**，逐条走既有的 `maybeRecordHiddenAlert` 判定，再关闭。
 
 - 实现落点：`repo.closeStale` 从裸 `UPDATE` 改为「先 SELECT 命中行 → UPDATE → 返回被关会话的挂机信息」（或 UPDATE 前先 SELECT，两者在同一连接上顺序执行；无并发正确性问题——重复判定被 30 分钟去重窗口兜住）。
+
+  > ⚠️ 2026-10-10 起废止：away/idle 的去重改为「同一段挂机（hidden_since 相同）只报一次」
+  >（`dedupSince` 机制，见 plans/2026-10-10-single-session-login-and-alert-dedupe.md 批 A）。
+  > 闲聊（off_topic）等其他类型的 30 分钟去重**不变**。
 - 判定复用 `maybeRecordHiddenAlert`（现为 private，保持在 `StudySessionsService` 内，不外提）。
 - **不重复刷屏**：`closeStale` 只把会话关一次；`SafetyAlertsService` 的 30 分钟去重窗口照旧。
+
+  > ⚠️ 2026-10-10 起废止：away/idle 的去重改为「同一段挂机（hidden_since 相同）只报一次」
+  >（`dedupSince` 机制，见 plans/2026-10-10-single-session-login-and-alert-dedupe.md 批 A）。
+  > 闲聊（off_topic）等其他类型的 30 分钟去重**不变**。
 - 调用方不变：`study-time.service.ts` 的 `closeStaleQuietly`（家长学情查询）+ 新增的 unread 轮询端点（§3.3）。
 
 ### 3.2 服务端：idle 判定改字面语义
