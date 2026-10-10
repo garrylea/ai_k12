@@ -3414,8 +3414,7 @@ paths:
       summary: 家长改自己的密码（P6.10）
       description: >-
         校验链：Zod（越界 409/1001）→ 旧密码比对失败（**401/1003**，与登录失败同码）
-        → 新旧相同（409/1001）。返回 `null`。**不失效旧 token**（无 token 版本机制，7 天内仍可用；
-        但若 token 已被单点登录互踢，下次请求为 401/1013，见 info 说明）。
+        → 新旧相同（409/1001）。返回 `null`。**改密不 bump seq、不踢已发 token，见 §4.1 注**。
       operationId: changeParentPassword
       requestBody:
         required: true
