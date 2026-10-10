@@ -20,6 +20,23 @@ describe('SessionRegistry', () => {
     expect(r.matches('parent', 3, undefined)).toBe(false);
   });
 
+  it('单调写入：bump(3) 后 bump(2) 不回退，matches(3) true / matches(2) false', () => {
+    const r = new SessionRegistry();
+    r.bump('student', 7, 3);
+    r.bump('student', 7, 2); // 旧 seq 迟到写入，必须被忽略
+    expect(r.matches('student', 7, 3)).toBe(true);
+    expect(r.matches('student', 7, 2)).toBe(false);
+  });
+
+  it('单调写入：bump(2) 再 bump(3) 正常推进，bump(1) 同样被忽略', () => {
+    const r = new SessionRegistry();
+    r.bump('parent', 3, 2);
+    r.bump('parent', 3, 3);
+    r.bump('parent', 3, 1);
+    expect(r.matches('parent', 3, 3)).toBe(true);
+    expect(r.matches('parent', 3, 1)).toBe(false);
+  });
+
   it('role 隔离：同 id 不同角色互不影响', () => {
     const r = new SessionRegistry();
     r.bump('student', 1, 5);

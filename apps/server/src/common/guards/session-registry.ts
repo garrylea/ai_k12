@@ -18,8 +18,16 @@ export class SessionRegistry {
     return `${role}:${id}`;
   }
 
+  /**
+   * 单调写入（2026-10-10 终审）：仅当 incoming seq > 当前值（或 key 不存在）才写。
+   * 同账号并发登录时即便 DB 层之外仍有迟到/乱序的 bump 到达，注册表也只会保留
+   * 最大 seq——胜者恒为最新登录，旧 token 必然失配被踢。
+   */
   bump(role: Role, id: number, seq: number): void {
-    this.seqs.set(this.key(role, id), seq);
+    const key = this.key(role, id);
+    const current = this.seqs.get(key);
+    if (current !== undefined && seq <= current) return;
+    this.seqs.set(key, seq);
   }
 
   matches(role: Role, id: number, seq: number | undefined): boolean {

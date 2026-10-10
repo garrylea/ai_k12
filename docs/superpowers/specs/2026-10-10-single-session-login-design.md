@@ -48,14 +48,17 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 位置 `common/guards/session-registry.ts`：
 
 - 进程内 `Map<string, number>`（key = `${role}:${sub}`，value = 当前 seq）。
-- `bump(role, sub, nextSeq)`：登录时调用（写入方是 AuthService，DB upsert 与内存更新同点完成）。
+- `bump(role, sub, nextSeq)`：登录时调用（写入方是 AuthService，DB upsert 与内存更新同点完成）。**单调写入**：仅当 `nextSeq` 大于当前值（或 key 不存在）才写，迟到/乱序的旧 seq 不回退注册表。
 - `matches(role, sub, seq)`：`map.get(key) === seq`。注册表无该账号的行 → 返回 false（安全默认：内存与 DB 失配时宁踢勿放）。
 - `load(rows)`：启动时从 `auth_sessions` 全量重建（接线点与 BanRegistry.load 同处，app 启动 Task 完成）。
 
 ### 2.3 AuthService.login / register
 
-- 命中账号、验密通过后：`INSERT ... ON DUPLICATE KEY UPDATE token_seq = token_seq + 1` → 读回新 seq → `sessionRegistry.bump(...)` → 签名带 seq。
-- **bump 写库失败 → 登录整体失败**（500）：否则两台设备可能拿到相同 seq，互踢静默失效，宁可报错。
+- 命中账号、验密通过后：`INSERT ... ON DUPLICATE KEY UPDATE token_seq = LAST_INSERT_ID(token_seq + 1)` → 同连接 `SELECT LAST_INSERT_ID()` 读回新 seq → `sessionRegistry.bump(...)` → 签名带 seq。
+- **bump 写库失败 → 登录整体失败**（500）：否则两台设备可能拿到相同 seq，互踢静默失效，宁可报错。upsert 成功但回读为空同样抛错（fail loud，不回退 seq=1）。
+- 同账号并发登录语义：同连接 `LAST_INSERT_ID()` 原子 bump 保证每次登录拿到严格递增的 seq；注册表 bump 单调写入，最终注册表值恒为最大 seq——**恰好一个胜者（最高 seq，最新登录），其余 token 失配被踢**。
+
+> ⚠️ 2026-10-10 终审修正：原「非原子但语义正确」（两条语句两次 `pool.execute`、「输家必然被踢」）论断不成立——upsert 与回读跑在不同池连接上有 await 间隙，并发交错可产生同 seq 双活、或注册表残留旧 seq 误踢最新登录。已改同连接 `LAST_INSERT_ID()` 原子 bump（mysql2 中 `LAST_INSERT_ID()` 跨语句存活于同一连接）+ 注册表单调写入；autocommit 下两条语句各自原子且同连接顺序执行，无需显式事务。
 
 ### 2.4 AuthMiddleware
 
