@@ -403,54 +403,92 @@ describe('StudySessionsRepository 挂机累计差值基点', () => {
 });
 
 describe('StudySessionsRepository.closeStale', () => {
-  it('按学生收尾：end_reason=closed、ended_at=最后一次心跳', async () => {
-    const pool = mockPool({ affectedRows: 3 });
+  /** SELECT 命中的将收尾行（新契约：repo 返回这些行，由 service 发兜底事件 + 补判）。 */
+  const staleRows = () => [
+    {
+      id: 11,
+      student_id: 9,
+      session_uid: 'u1',
+      active_seconds: 300,
+      client_state: 'visible',
+      hidden_reason: null,
+      hidden_since: null,
+    },
+    {
+      id: 12,
+      student_id: 9,
+      session_uid: 'u2',
+      active_seconds: 120,
+      client_state: 'hidden',
+      hidden_reason: 'away',
+      hidden_since: new Date('2026-10-09T12:00:00.000Z'),
+    },
+  ];
+
+  it('先 SELECT 将收尾的行，再按 id 集合 UPDATE（乐观锁 status=active 保留），返回行数组', async () => {
+    const rows = staleRows();
+    const pool = {
+      execute: vi.fn().mockResolvedValue([rows, []]),
+      query: vi.fn().mockResolvedValue([{ affectedRows: 2, changedRows: 2 }, []]),
+    };
     const repo = new StudySessionsRepository(pool as any);
     const result = await repo.closeStale(9);
-    expect(result.closedCount).toBe(3);
-    expect(result.hidden).toEqual([]);
 
-    // SELECT 在前（取挂机信息）、UPDATE 在后（收尾）
+    expect(result).toEqual(rows);
+
     const [selectSql, selectParams] = pool.execute.mock.calls[0];
     expect(selectSql).toMatch(/^SELECT/i);
-    expect(selectSql).toContain('hidden_since');
+    expect(selectSql).toContain('id, student_id, session_uid, active_seconds');
+    expect(selectSql).toContain('client_state, hidden_reason, hidden_since');
+    expect(selectSql).toContain("WHERE status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE");
+    expect(selectSql).toContain('AND student_id = ?');
     expect(selectParams).toEqual([9]);
 
-    const [sql, params] = pool.execute.mock.calls[1];
-    expect(sql).toContain("status = 'ended', end_reason = 'closed', ended_at = last_heartbeat_at");
-    expect(sql).toContain("WHERE status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE");
-    expect(sql).toContain('AND student_id = ?');
-    expect(params).toEqual([9]);
+    // UPDATE 走 pool.query（IN (?) 的数组展开只有非 prepared 的 query 支持）
+    const [updateSql, updateParams] = pool.query.mock.calls[0];
+    expect(updateSql).toContain('UPDATE study_sessions');
+    expect(updateSql).toContain("SET status = 'ended', end_reason = 'closed', ended_at = last_heartbeat_at");
+    expect(updateSql).toContain("WHERE id IN (?) AND status = 'active'");
+    expect(updateParams).toEqual([[11, 12]]);
+  });
+
+  it('SELECT 无行 → 不发 UPDATE，返回空数组（幂等）', async () => {
+    const pool = {
+      execute: vi.fn().mockResolvedValue([[], []]),
+      query: vi.fn(),
+    };
+    const repo = new StudySessionsRepository(pool as any);
+    expect(await repo.closeStale(9)).toEqual([]);
+    expect(pool.query).not.toHaveBeenCalled();
   });
 
   it('不传 studentId → 全库收尾（夜间兜底用）', async () => {
-    const pool = mockPool({ affectedRows: 0 });
+    const pool = {
+      execute: vi.fn().mockResolvedValue([staleRows(), []]),
+      query: vi.fn().mockResolvedValue([{ affectedRows: 2, changedRows: 2 }, []]),
+    };
     const repo = new StudySessionsRepository(pool as any);
     await repo.closeStale();
-    const [selectSql] = pool.execute.mock.calls[0];
+
+    const [selectSql, selectParams] = pool.execute.mock.calls[0];
     expect(selectSql).not.toContain('student_id = ?');
-    const [updateSql] = pool.execute.mock.calls[1];
-    const [, updateParams] = pool.execute.mock.calls[1];
+    expect(selectParams).toEqual([]);
+    const [updateSql] = pool.query.mock.calls[0];
     expect(updateSql).not.toContain('student_id = ?');
-    expect(updateParams).toEqual([]);
   });
 
-  it('返回被关会话里 hidden 段的信息（供 service 补判），visible / 无挂机的不返回', async () => {
-    const since = new Date('2026-09-20T18:03:19.869Z');
-    const pool = mockPool({
-      affectedRows: 3,
-      rows: [
-        { student_id: 7, client_state: 'hidden', hidden_reason: 'away', hidden_since: since },
-        { student_id: 7, client_state: 'visible', hidden_reason: null, hidden_since: null },
-        { student_id: 8, client_state: 'hidden', hidden_reason: 'idle', hidden_since: since },
-      ],
-    });
+  it('返回的行带挂机信息（hidden_reason / hidden_since），供 service 补判走神阈值', async () => {
+    const since = new Date('2026-10-09T12:00:00.000Z');
+    const pool = {
+      execute: vi.fn().mockResolvedValue([staleRows(), []]),
+      query: vi.fn().mockResolvedValue([{ affectedRows: 2, changedRows: 2 }, []]),
+    };
     const repo = new StudySessionsRepository(pool as any);
-    const result = await repo.closeStale(7);
-    expect(result.closedCount).toBe(3);
-    expect(result.hidden).toEqual([
-      { studentId: 7, hiddenReason: 'away', hiddenSince: since },
-      { studentId: 8, hiddenReason: 'idle', hiddenSince: since },
-    ]);
+    const rows = await repo.closeStale(9);
+
+    expect(rows[1]).toEqual(
+      expect.objectContaining({ student_id: 9, hidden_reason: 'away', hidden_since: since }),
+    );
+    expect(rows[0]).toEqual(expect.objectContaining({ hidden_reason: null, hidden_since: null }));
   });
 });

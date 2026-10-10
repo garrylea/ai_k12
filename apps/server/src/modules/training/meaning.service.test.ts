@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
 import { MeaningService } from './meaning.service.js';
+import type { EventsService } from '../analytics/events.service.js';
 
 const PASSAGE = {
   id: 12,
@@ -33,7 +34,7 @@ const OK_JUDGE = {
 function makeService(overrides: {
   passage?: unknown; list?: unknown; random?: unknown; byIds?: unknown;
   judged?: unknown; judgeThrows?: Error;
-  award?: unknown; awardThrows?: Error; todayKey?: string;
+  award?: unknown; awardThrows?: Error; todayKey?: string; events?: EventsService;
 } = {}) {
   const repo = {
     findById: vi.fn().mockResolvedValue(overrides.passage === undefined ? PASSAGE : overrides.passage),
@@ -58,7 +59,7 @@ function makeService(overrides: {
   // 专项日志（Phase 1B）：含义判题会写一行 special_practice_logs。
   const specialLogsRepo = { insert: vi.fn().mockResolvedValue(1) };
   return {
-    service: new MeaningService(repo as never, judge as never, points as never, specialLogsRepo as never),
+    service: new MeaningService(repo as never, judge as never, points as never, specialLogsRepo as never, overrides.events),
     repo, judge, points, specialLogsRepo,
   };
 }
@@ -397,5 +398,22 @@ describe('MeaningService.judgeMeaning — 专项日志（Phase 1B）', () => {
       meaning: '写景', emotion: '乐观',
     });
     expect(res).toHaveProperty('allCorrect');
+  });
+});
+
+describe('MeaningService.judgeMeaning — 埋点 special_unit_judged（Phase 2）', () => {
+  it('判题写专项日志的同时发 special_unit_judged', async () => {
+    const events = { track: vi.fn() } as unknown as EventsService;
+    const { service } = makeService({ events });
+    await service.judgeMeaning({
+      studentId: 5, passageId: 12, sentenceIndex: 1,
+      terms: [{ term: '沉（chén）舟', answer: '沉了的船' }],
+      meaning: '写景', emotion: '乐观',
+    });
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'special_unit_judged', source: 'server', studentId: 5,
+      module: 'chinese_meaning', refType: 'passage', refId: 12,
+      props: { verdict: 'incorrect' },
+    }));
   });
 });

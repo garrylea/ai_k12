@@ -101,4 +101,5 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **埋点（学习会话）**：`active_seconds` **只由服务端**按 `last_heartbeat_at` 差值累加、**单次封顶 45s**、只在上一状态 visible 时计（客户端上报秒数不采信）。埋点写入**永不阻断主链路**：三个采集端点的失败由**前端传输层吞掉**（`analytics/tracker.ts` 全 `.catch(() => {})`，故端点允许 DB 失败直接 500）；**嵌在业务流里**的埋点（如家长 GET 的 `closeStale`）必须 catch、失败只 warn。家长端「学习时长（会话）」与「近 7 天活跃天数」是**两套口径、并存不替换**，UI 必须并列展示并区分文案。
 - **`input_tokens` / `output_tokens` 可为 NULL，NULL = 量不到**：量不到就写 NULL，**绝不写 0**（否则报表分不清「缺口」与「真实读数」；本期只记 token，不记价格/成本）。
 - **不用 WebSocket**（2026-09-21 用户裁决）：全仓无 WS 实现、也不再引入。AI 流式一律走 **SSE**（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`）；家长端预警靠 **30s 轮询**（`GET /api/parent/alerts/unread`）。
+- **埋点（behavior_events）写入一律经 `EventsService`**：`EVENT_TIER` 字典写时定 tier（调用方不可覆盖）、未登记事件拒写、`track()` 吞一切异常只 warn；**家长端查询硬过滤 `tier='parent'`**（隐私三道锁，守卫测试 `parent-analytics.privacy-guard.test.ts`，admin `/events` 全 tier 是有意豁免）。
 

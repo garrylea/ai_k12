@@ -10,6 +10,7 @@ import {
   type MessageItem,
 } from '@/services/api';
 import { usePracticeStore } from '@/store/practiceStore';
+import { trackEvent } from '@/analytics/tracker';
 
 export interface DiscussMessage {
   id?: number;
@@ -187,6 +188,12 @@ export function useDiscussChat(opts: UseDiscussChatOpts) {
     const message = opts.mode === 'question'
       ? `这道题目是：\n\n${opts.questionText}\n\n我的问题：${content}`
       : content;
+    // 埋点：消息发起即记（只记「发过」，内容不入任何字段）。dialogueId 全程为 string。
+    trackEvent('ai_message_sent', {
+      refType: 'dialogue',
+      refId: Number(dlgId) || undefined,
+      props: { scene: 'course_detail', channel: 'discuss' },
+    });
     await streamMessage(dlgId, message);
   }, [isStreaming, streamMessage, opts]);
 

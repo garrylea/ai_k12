@@ -83,7 +83,7 @@
 | 8 | `GET /llm-calls` | llm_call_logs | 过滤 `scene,model,success`，分页 20 |
 | 9 | `GET /requests` | api_request_logs | 过滤 `path,status,minLatency`，分页 20 |
 | 10 | `GET /events` | behavior_events | 过滤 `event,module,from,to`，分页 20；**返回全部 tier（裁决 3）** |
-| 11 | `GET /devices` | study_sessions | 三块：① 分布按 `platform_class`（并列 `screen_class`/`input_type`/`app_shell`/`browser` 交叉），指标 = `COUNT(DISTINCT student_id)`（按人头不按会话）+ totalSeconds + accuracy + sessions；② 多设备学生（每生 DISTINCT platform_class 数）分档人数与占比；③ 设备切换（相邻两会话平台不同）次数与人次 |
+| 11 | `GET /devices` | study_sessions | 三块：① 分布按 `platform_class`（并列 `screen_class`/`input_type`/`app_shell`/`browser` 交叉），指标 = `COUNT(DISTINCT student_id)`（按人头不按会话）+ totalSeconds + accuracy + sessions；② 多设备学生（每生 DISTINCT platform_class 数）分档人数与占比；③ 设备切换（相邻两会话平台不同）次数与人次。**key 真实取值（实现期订正）**：`ipad` / `iphone` / `android_tablet` / `android_phone` / `mac` / `windows` / `linux` / `other`（`user-agent.util.ts` 为准；计划期的 desktop 五值系臆造） |
 
 ### 7.1 漏斗定义（母 spec 未细化，此处定死）
 
@@ -105,7 +105,7 @@ module 白名单 = 上述 8 个（不含 `aux_qna`/`admin`/`parent`——无漏�
 | `questionsWithoutStandardAnswer` | questions / answers | 无标准答案的题目计数 |
 | `kpCoverage:{covered,total,rate}` | question_knowledge_points | 有 KP 关联的题 / 总题 |
 | `globalWordErrorRate:{wrong,total,rate}` | english_words.error_count | 全库词错误率 |
-| `passageSkipRate` | **数据源待计划期核实** | 允许返回 `null`（不计为 0）；若核实无可靠来源则该项恒 null 并在响应中带 `source:'unavailable'` |
+| `passageSkipRate` | **数据源待计划期核实** | 允许返回 `null`（不计为 0）；若核实无可靠来源则该项恒 null 并在响应中带 `source:'unavailable'` —— **实现期确认无可靠数据源，恒 null**（见 §12；响应未带 `source` 字段，null 即缺口标记） |
 
 ## 8. admin 分析页（8 页）
 
@@ -145,3 +145,20 @@ module 白名单 = 上述 8 个（不含 `aux_qna`/`admin`/`parent`——无漏�
 - Phase 3 全部内容（rollup / 分区 / prom-client / 大盘缓存）。
 - 母 spec §13 其余不做项照旧（A/B 框架、家长端暴露 ops 信号、价格成本、homeworks 接线等）。
 - 挂载点改造以外的重构（不动 JudgeCoreService/PointsService 既有逻辑，只加 track 调用）。
+
+## 12. 实施期裁决与修订（实现后回填，Task 17）
+
+以下为实现期落定的裁决，一行一条；过程细节**不在此复制**，见 `.superpowers/sdd/2026-10-09-analytics-phase2-ops/progress.md` 对应 Task 条目。
+
+1. **mainline 漏斗第三步口径**（T5/T9 ★裁决）：= `points_awarded` 且 `module IS NULL`（points 打点不带 module）且 `props.taskCode='mainline_lesson'`（`awardLessonPoints` 写死的完课码）；其余步骤一律 `module = ?`。同时 `points_awarded.ref_type` 按**可选**修订（母 spec 标必填，但 `AwardInput` 可选）。
+2. **`/events` 返回全部 tier**（裁决 3，修订母 spec §8.3 字面）：隐私三道锁锁在**家长端查询**，admin 排查看全量。
+3. **`exam_submitted` 挂 `finalizeSession`**（T5 评审修复）：挪进收卷收口后**四条提交路径全覆盖**（正常交卷 / 到时自动收卷等），`props.paperId` 同批补上。
+4. **`card_flipped` 字典占位不发射**：全仓无翻卡 UI；`study_session_idle` 同为占位——空闲信号由心跳 `state:'hidden'` 承载，不单独发事件（T13）。
+5. **`subjectId` 校验口径**（T3 裁定）：只查**在售学科**、不校验「学生是否有权学该学科」，与 study-sessions start 完全同口径。
+6. **devices / cohort-compare 不过滤 status**（T10 遗留口径差异）：与 overview/modules 的 `status IN ('ended','abandoned')` **并存**，秒数含进行中会话已累计值；并列展示需重新裁决。
+7. **设备 key 真实取值**（T16 ★落实）：`ipad`/`iphone`/`android_tablet`/`android_phone`/`mac`/`windows`/`linux`/`other`（`user-agent.util.ts` 为准）；§7 表 11 的 desktop 五值系计划期臆造，已就地订正。
+8. **apiFailureRate 谓词 = `status_code>=500 OR biz_code IS NOT NULL`**（T11 评审修复）：拦截器成功路径不写 biz_code（恒 NULL）、全表无 biz_code=0，故 **4xx 且 biz_code NULL 计成功**；错误码分布纯 5xx 按 5000 归组。
+9. **quality NULL 口径**：`passageSkipRate` 恒 null（§7.2 已就地标注，响应不带 `source` 字段）；`globalWordErrorRate` = 累计错次 ÷ 词数（**可 >1**）；`llmTimeoutRate` 口径 = `error_type='TimeoutError'`（网络错误被 client 归一进它，非纯超时）。
+10. **llm-tokens**：unavailable 单列不当 0 求和（§7 表 7 照实现）；`day` 分组按 DB 墙上时钟（同机部署成立，T11 deferred）。
+11. **前端格式化**：`fmtDuration` 3599s 边界修（T14 brief 骨架缺陷）；Events 页时间列 zh-CN 本地化 + Invalid Date 容错（T16 评审修复）；Overview「周活跃」卡改「窗口活跃」（`wau` = 窗口内去重人数，勿写死周活，T8 deferred / T15 落实）。
+12. **解析与传输细节**：`parseWindow` 往返校验拒 `2026-02-30` 类无效日期（T8 评审修复）；批量 1-50 仅 Zod 层约束（T12）；tracker 传输失败全 `.catch(() => {})`、pagehide 未 flush 丢弃（裁决 4）。

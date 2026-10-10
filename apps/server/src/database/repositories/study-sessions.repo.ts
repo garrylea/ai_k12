@@ -50,17 +50,19 @@ export interface StudySessionInsertInput {
   appShell: string | null;
 }
 
-/** `closeStale` 返回的被关会话挂机段信息（供 service 补判阈值）。 */
-export interface ClosedHiddenSession {
-  studentId: number;
-  hiddenReason: string;
-  hiddenSince: Date;
-}
-
-export interface CloseStaleResult {
-  closedCount: number;
-  /** 可含本次 UPDATE 未命中的行（SELECT→UPDATE 并发窗口），消费方按「SELECT 时点曾挂机」理解。 */
-  hidden: ClosedHiddenSession[];
+/**
+ * `closeStale` 返回的被收尾会话行：`student_id` / `session_uid` / `active_seconds` 供
+ * service 发 `study_session_ended` 兜底事件；`client_state` / `hidden_reason` / `hidden_since`
+ * 供 service 补判走神阈值（spec §3.1）。
+ */
+export interface ClosedStaleSessionRow extends RowDataPacket {
+  id: number;
+  student_id: number;
+  session_uid: string;
+  active_seconds: number;
+  client_state: string;
+  hidden_reason: string | null;
+  hidden_since: Date | null;
 }
 
 const INSERT_COLUMNS =
@@ -294,42 +296,34 @@ export class StudySessionsRepository {
    * `studentId` 可选：家长查单人时传（顺带修正那个人）。不传的**全库收尾形态是预留入口**
    * ——当前**无调用方**、夜间定时任务**未实现**（仓库内没有任何调度器），参数留给后续阶段用。
    *
-   * 2026-09-20「及时可见」批：先 SELECT 命中行、再 UPDATE，返回**被关会话里 hidden 段的
-   * 信息**（student_id / hidden_reason / hidden_since），供 `StudySessionsService.closeStale`
-   * 补判走神阈值（spec §3.1：心跳全断的后台冻结 tab 只有这里能得到判定机会）。
-   * SELECT 与 UPDATE 之间的并发窗口：另一并发收尾抢先关掉时，本侧 UPDATE 命中 0 行，串行的
-   * 重复判定被 `SafetyAlertsService` 的 30 分钟去重窗口兜住；但去重本身是 check-then-insert
-   * （非原子），**并发**双收尾存在毫秒级 TOCTOU 窗口，可能产生重复的 info 级预警（无害，
-   * banner 聚合展示、items 截前 5 条）。
+   * 2026-09-20「及时可见」批：先 SELECT 命中行、再 UPDATE。
+   * Phase 2（2026-10-09）：SELECT 扩到 `id` / `student_id` / `session_uid` / `active_seconds`，
+   * UPDATE 改按 **id 集合**、返回**行数组**——`StudySessionsService.closeStale` 逐行发
+   * `study_session_ended` 兜底事件（props `endReason='closed'`，秒数取服务端累计值），
+   * 并从同一批行里派生 hidden 段补判走神阈值。**幂等由乐观锁保证**：UPDATE 仍带
+   * `status = 'active'` 条件，并发双调时后到者命中 0 行，不会重复收尾；但**两侧行数组**
+   * 都可能非空（SELECT 都发生在任一 UPDATE 前）→ 极端并发下事件可能重复发一条，
+   * 与 hidden 预警的既有并发窗口同性质（无害）。
+   *
+   * UPDATE 走 `pool.query` 而非 `execute`：`IN (?)` 的**数组展开**只有非 prepared 的
+   * query 支持（与 `LIMIT ?` 必须走 query 是同一族约束）。
    */
-  async closeStale(studentId?: number): Promise<CloseStaleResult> {
+  async closeStale(studentId?: number): Promise<ClosedStaleSessionRow[]> {
     const where = studentId === undefined ? '' : ' AND student_id = ?';
     const params = studentId === undefined ? [] : [studentId];
-    const [rows] = await this.pool.execute<
-      (RowDataPacket & {
-        student_id: number;
-        client_state: string;
-        hidden_reason: string | null;
-        hidden_since: Date | null;
-      })[]
-    >(
-      `SELECT student_id, client_state, hidden_reason, hidden_since FROM study_sessions
+    const [rows] = await this.pool.execute<ClosedStaleSessionRow[]>(
+      `SELECT id, student_id, session_uid, active_seconds, client_state, hidden_reason, hidden_since
+       FROM study_sessions
        WHERE status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE${where}`,
       params,
     );
-    const hidden: ClosedHiddenSession[] = rows
-      .filter((r) => r.client_state === 'hidden' && r.hidden_reason !== null && r.hidden_since !== null)
-      .map((r) => ({
-        studentId: r.student_id,
-        hiddenReason: r.hidden_reason as string,
-        hiddenSince: r.hidden_since as Date,
-      }));
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    if (rows.length === 0) return [];
+    await this.pool.query(
       `UPDATE study_sessions
        SET status = 'ended', end_reason = 'closed', ended_at = last_heartbeat_at
-       WHERE status = 'active' AND last_heartbeat_at < NOW(3) - INTERVAL 5 MINUTE${where}`,
-      params,
+       WHERE id IN (?) AND status = 'active'`,
+      [rows.map((r) => r.id)],
     );
-    return { closedCount: result.affectedRows, hidden };
+    return rows;
   }
 }

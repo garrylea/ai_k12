@@ -24,6 +24,7 @@ import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
+import { EventsService } from '../analytics/events.service.js';
 import {
   evaluateDictation,
   normalizeChineseAnswer,
@@ -83,6 +84,7 @@ export class TrainingService {
     private readonly pointsService: PointsService,
     private readonly trainingSessionsRepo: TrainingSessionsRepository,
     private readonly specialLogsRepo: SpecialPracticeLogsRepository,
+    private readonly events?: EventsService,
   ) {}
 
   /**
@@ -266,6 +268,12 @@ export class TrainingService {
         errorCounted: dictationVerdict === 'incorrect',
         // sessionUid 本期恒 null：1B 不做「学习会话 ↔ 专项作答」串联，留列给后续。
         sessionUid: null,
+      });
+      // 埋点（Phase 2）：与 insert 同一作用域、只在其成功路径发；track 自吞异常，双保险不重复包。
+      this.events?.track({
+        event: 'special_unit_judged', source: 'server', studentId: input.studentId,
+        module: 'chinese_dictation', refType: 'passage', refId: passage.id,
+        props: { verdict: dictationVerdict },
       });
     } catch (err) {
       // 埋点绝不阻断判题：失败只 warn
@@ -515,6 +523,12 @@ export class TrainingService {
         isCorrect: isCorrectOf(interpretationVerdict),
         errorCounted: interpretationVerdict === 'incorrect',
         sessionUid: null,
+      });
+      // 埋点（Phase 2）：同上，insert 成功路径才发。
+      this.events?.track({
+        event: 'special_unit_judged', source: 'server', studentId: input.studentId,
+        module: 'chinese_interpretation', refType: 'passage', refId: passage.id,
+        props: { verdict: interpretationVerdict },
       });
     } catch (err) {
       this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);

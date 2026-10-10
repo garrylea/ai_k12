@@ -31,10 +31,14 @@ const mk = (overrides: any = {}) => ({
   pointsService: {
     award: vi.fn().mockResolvedValue(null),
   },
+  // 埋点 Phase 2：exam_submitted。老用例对它无断言，被调用不影响既有断言
+  events: {
+    track: vi.fn(),
+  },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new ExamsService(deps.examPapersRepo, deps.examSessionsRepo, deps.judgeCore, deps.mainErrorRepo, deps.selfAssessRepo, deps.pointsService);
+  new ExamsService(deps.examPapersRepo, deps.examSessionsRepo, deps.judgeCore, deps.mainErrorRepo, deps.selfAssessRepo, deps.pointsService, deps.events);
 
 // 判题体系重构：subjectiveJudgeMode 读 JUDGE_SUBJECTIVE_MODE（缺省 self_assess）。
 // 设过 ai 的用例在 afterEach 清理，避免污染其它用例（铁律：模式间互不串扰）。
@@ -642,6 +646,73 @@ describe('ExamsService.submit — 交卷发分（math_paper）', () => {
     await mkSvc(deps).getSession(1, 77);
     expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
       studentId: 1, taskCode: 'math_paper', dedupeKey: 'paper:77',
+    }));
+  });
+});
+
+describe('ExamsService.submit — 埋点（exam_submitted）', () => {
+  /** 最小可交卷桩：1 题已答对，无未答/在途分支。 */
+  const submitDeps = () =>
+    mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow()),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+        ]),
+      },
+    });
+
+  it('交卷成功（收卷路径）→ 发 exam_submitted：module=exam、refType=exam_session、refId=sessionId', async () => {
+    const deps = submitDeps();
+    await mkSvc(deps).submit(1, 77);
+
+    expect(deps.events.track).toHaveBeenCalledTimes(1);
+    expect(deps.events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'exam_submitted',
+      source: 'server',
+      studentId: 1,
+      module: 'exam',
+      refType: 'exam_session',
+      refId: 77,
+    }));
+  });
+
+  it('幂等重交（已 submitted 直接重算返回）→ 不再发事件', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+      },
+    });
+    await mkSvc(deps).submit(1, 77);
+
+    expect(deps.examSessionsRepo.markSubmitted).not.toHaveBeenCalled();
+    expect(deps.events.track).not.toHaveBeenCalled();
+  });
+
+  it('getSession 触发超时自动收卷 → track 收到 exam_submitted（含 props.paperId）', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ deadline_at: new Date(Date.now() - 1000) })),
+      },
+    });
+    await mkSvc(deps).getSession(1, 77);
+
+    expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
+    expect(deps.events.track).toHaveBeenCalledTimes(1);
+    expect(deps.events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'exam_submitted',
+      source: 'server',
+      studentId: 1,
+      module: 'exam',
+      refType: 'exam_session',
+      refId: 77,
+      props: { paperId: 5 },
     }));
   });
 });

@@ -12,6 +12,7 @@ import { MasteryService } from './mastery.service.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
 import { ContentModule } from '../content/content.module.js';
 import { PointsModule } from '../points/points.module.js';
+import { AnalyticsModule } from '../analytics/analytics.module.js';
 
 /**
  * 课堂练习模块 - 主线练习判对错 + 提示 + 讨论。
@@ -27,7 +28,8 @@ import { PointsModule } from '../points/points.module.js';
  *   答对清零「确实清掉未清错题」时发 `error_fix` 分（PointsModule 已 exports PointsService）。
  */
 @Module({
-  imports: [ConversationsModule, ContentModule, PointsModule],
+  // imports AnalyticsModule：埋点 Phase 2 起 JudgeCoreService 注入 EventsService（判题五事件打点）
+  imports: [ConversationsModule, ContentModule, PointsModule, AnalyticsModule],
   controllers: [PracticeController],
   providers: [
     PracticeService,

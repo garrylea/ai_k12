@@ -72,6 +72,14 @@ import AdminChatPage from '@/pages/admin/AdminChatPage';
 import AdminAlertsPage from '@/pages/admin/AdminAlertsPage';
 import AdminBillingPage from '@/pages/admin/AdminBillingPage';
 import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
+import AnalyticsOverviewPage from '@/pages/admin/analytics/AnalyticsOverviewPage';
+import AnalyticsFunnelPage from '@/pages/admin/analytics/AnalyticsFunnelPage';
+import AnalyticsRetentionPage from '@/pages/admin/analytics/AnalyticsRetentionPage';
+import AnalyticsModulesPage from '@/pages/admin/analytics/AnalyticsModulesPage';
+import AnalyticsDevicesPage from '@/pages/admin/analytics/AnalyticsDevicesPage';
+import AnalyticsQualityPage from '@/pages/admin/analytics/AnalyticsQualityPage';
+import AnalyticsLlmTokensPage from '@/pages/admin/analytics/AnalyticsLlmTokensPage';
+import AnalyticsEventsPage from '@/pages/admin/analytics/AnalyticsEventsPage';
 import RequireRole from './RequireRole';
 import RoleRedirect from './RoleRedirect';
 
@@ -114,6 +122,15 @@ export const routes: RouteObject[] = [
       { path: 'alerts', element: <AdminAlertsPage /> },
       { path: 'billing', element: <AdminBillingPage /> },
       { path: 'security', element: <AdminSecurityPage /> },
+      // 埋点 Phase 2 运营面（Task 14 先通路由，页面 Task 15/16 填实）
+      { path: 'analytics', element: <AnalyticsOverviewPage /> },
+      { path: 'analytics/funnel', element: <AnalyticsFunnelPage /> },
+      { path: 'analytics/retention', element: <AnalyticsRetentionPage /> },
+      { path: 'analytics/modules', element: <AnalyticsModulesPage /> },
+      { path: 'analytics/devices', element: <AnalyticsDevicesPage /> },
+      { path: 'analytics/quality', element: <AnalyticsQualityPage /> },
+      { path: 'analytics/llm-tokens', element: <AnalyticsLlmTokensPage /> },
+      { path: 'analytics/events', element: <AnalyticsEventsPage /> },
     ],
   },
   // 入口选择页（独立全屏，登录后落地，主轨/辅轨分流）

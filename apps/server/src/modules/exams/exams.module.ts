@@ -4,6 +4,7 @@ import { ExamsService } from './exams.service.js';
 import { ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
 import { PracticeModule } from '../practice/practice.module.js';
 import { PointsModule } from '../points/points.module.js';
+import { AnalyticsModule } from '../analytics/analytics.module.js';
 
 /**
  * 考试模块（Task 1 试卷列表/详情 + Task 2 会话生命周期）。
@@ -15,7 +16,8 @@ import { PointsModule } from '../points/points.module.js';
  * imports PointsModule：交卷发分（Task 9，math_paper）注入其导出的 PointsService。
  */
 @Module({
-  imports: [PracticeModule, PointsModule],
+  // imports AnalyticsModule（埋点 Phase 2）：ExamsService 注入其导出的 EventsService（exam_submitted）
+  imports: [PracticeModule, PointsModule, AnalyticsModule],
   controllers: [ExamsController],
   providers: [ExamsService, ExamPapersRepository, ExamSessionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository],
 })

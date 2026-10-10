@@ -104,7 +104,7 @@ describe('JudgeCoreService.judgeQuestion', () => {
 });
 
 /** 构造带 mock 依赖的 JudgeCoreService（capabilities 不会被 self_assess 路径触达，占位即可）。 */
-function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess' | 'points' | 'mastery', any>> = {}) {
+function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess' | 'points' | 'mastery' | 'events', any>> = {}) {
   const questions = overrides.questions ?? {
     findById: vi.fn(async () => null),
   };
@@ -116,6 +116,8 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
   const selfAssess = overrides.selfAssess ?? { create: vi.fn(async () => 1) };
   const pointsService = overrides.points ?? { award: vi.fn(async () => ({ pointsAwarded: 3 })), todayKey: vi.fn(() => '2026-09-17') };
   const masteryService = overrides.mastery ?? { recordFromJudge: vi.fn(async () => undefined) };
+  // 埋点 Phase 2 新增第 9 参：行为事件流（fire-and-forget）
+  const events = overrides.events ?? { track: vi.fn() };
   const svc = new JudgeCoreService(
     questions as unknown as QuestionsRepository,
     mainError as unknown as MainErrorBooksRepository,
@@ -125,8 +127,9 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
     selfAssess as unknown as QuestionSelfAssessmentsRepository,
     pointsService as any, // PointsService（Task 10 错题订正发分）
     masteryService as any, // MasteryService（埋点 Phase 1B 掌握度回写）
+    events as any, // EventsService（埋点 Phase 2 行为事件流）
   );
-  return { svc, questions, mainError, selfAssess, pointsService, masteryService };
+  return { svc, questions, mainError, selfAssess, pointsService, masteryService, events };
 }
 
 const q = (type: string, answer = 'B', explanation: string | null = '解析文本') => ({
@@ -575,5 +578,135 @@ describe('JudgeCoreService.judgeQuestion — 掌握度回写接线（埋点 Phas
     expect(deps.masteryService.recordFromJudge).toHaveBeenCalledWith({
       studentId: 1, questionId: 10, isCorrect: null,
     });
+  });
+});
+
+describe('judge-core 埋点挂载（埋点 Phase 2 Task 4）', () => {
+  // choice + options 带 isCorrect 标记：不依赖 AI 判定，answer 决定对错
+  const choiceQ = (answer = 'B') => ({ id: 10, type: 'choice', answer, options: '[{"label":"A","isCorrect":true},{"label":"B","isCorrect":true}]', explanation: '解析文本', content: '题面', subject_id: 1 });
+
+  it('判题成功后发 answer_submitted，module 由 source 推导', async () => {
+    const { svc, events } = makeService({
+      questions: { findById: vi.fn(async () => choiceQ()) },
+    });
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'B', source: 'targeted' });
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'answer_submitted', source: 'server', studentId: 1, module: 'training_targeted',
+      refType: 'question', refId: 10,
+      props: { verdict: 'correct', isCorrect: true, method: 'exact' },
+    }));
+  });
+
+  it('连错 3 次触发 consecutive_failures 并清零计数（再错 3 次可再触发）', async () => {
+    const { svc, events } = makeService({
+      questions: { findById: vi.fn(async () => choiceQ('A')) },
+    });
+    (svc as any).explanationCache = { ensureExplanation: vi.fn() }; // 判错路径触达解析缓存（makeService 默认占位 {}）
+    const input = { studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'x', source: 'error_practice' } as any;
+    await svc.judgeQuestion(input); await svc.judgeQuestion(input);
+    expect(events.track).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'consecutive_failures' }));
+    await svc.judgeQuestion(input); // 第 3 次错
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'consecutive_failures', module: 'training_error_practice', props: { count: 3 },
+    }));
+    events.track.mockClear();
+    await svc.judgeQuestion(input); // 第 4 次错：计数已清零，不触发
+    expect(events.track).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'consecutive_failures' }));
+    await svc.judgeQuestion(input); await svc.judgeQuestion(input); // 第 5、6 次
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({ event: 'consecutive_failures', props: { count: 3 } }));
+  });
+
+  it('judgeForPractice 的 module 是 mainline', async () => {
+    const { svc, events } = makeService({
+      mainError: {
+        findUnclearedByStudentQuestion: vi.fn(async () => null),
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        create: vi.fn(async () => 101),
+        clearUnclearedByStudentQuestion: vi.fn(async () => 0),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => 0),
+      },
+    });
+    await svc.judgeForPractice({ studentId: 7, subjectId: 1, cardId: 3, lessonId: 5, questionN: '0-1', questionText: '题面', studentAnswer: 'A' } as any, choiceQ('A') as any);
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({ event: 'answer_submitted', module: 'mainline' }));
+  });
+
+  it('错题本新建分支发 error_book_added', async () => {
+    const { svc, events, mainError } = makeService({
+      questions: { findById: vi.fn(async () => choiceQ('A')) },
+    });
+    (svc as any).explanationCache = { ensureExplanation: vi.fn() }; // 判错路径触达解析缓存（makeService 默认占位 {}）
+    mainError.findUnclearedByStudentQuestionId.mockResolvedValueOnce(null);
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'x', source: 'targeted' });
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'error_book_added', refType: 'question', refId: 10, subjectId: 1,
+    }));
+  });
+
+  it('self_assess 早退分支发 self_assess_answered（不重复发 answer_submitted）', async () => {
+    const { svc, events } = makeService({
+      questions: { findById: vi.fn(async () => q('short_answer')) },
+    });
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: '我不确定', source: 'targeted' });
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({ event: 'self_assess_answered' }));
+    expect(events.track).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'answer_submitted' }));
+  });
+
+  it('awardErrorFixOnClear 发 error_book_cleared', async () => {
+    const { svc, events } = makeService();
+    await svc.awardErrorFixOnClear(1, 10, 2);
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'error_book_cleared', refId: 10, props: { clearedCount: 2 },
+    }));
+  });
+
+  it('路由 0（空答案）：answer_submitted 的 verdict=unanswered（母 spec 枚举，不是 null）', async () => {
+    const { svc, events } = makeService({
+      questions: { findById: vi.fn(async () => q('choice', '')) },
+    });
+    const out = await svc.judgeQuestion({ studentId: 7, subjectId: 1, questionId: 10, studentAnswer: 'A', source: 'error_practice' });
+    expect(out.method).toBe('unanswered');
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'answer_submitted', module: 'training_error_practice', refType: 'question', refId: 10,
+      props: { verdict: 'unanswered', isCorrect: null, method: 'unanswered' },
+    }));
+  });
+
+  it('exam 答对清零（judgeQuestion）：不发分但发 error_book_cleared', async () => {
+    const { svc, events, pointsService } = makeService({
+      questions: { findById: vi.fn(async () => choiceQ('A')) },
+      mainError: {
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        create: vi.fn(async () => 101),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => 1),
+      },
+    });
+    const out = await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'A', source: 'exam' });
+    expect(out.isCorrect).toBe(true);
+    expect(out.pointsAwarded).toBe(0);
+    expect(pointsService.award).not.toHaveBeenCalled();
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'error_book_cleared', refType: 'question', refId: 10, props: { clearedCount: 1 },
+    }));
+  });
+
+  it('exam 自评答对清零（recordSelfAssessment）：不发分但发 error_book_cleared', async () => {
+    const { svc, events, pointsService } = makeService({
+      mainError: {
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        create: vi.fn(async () => 101),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => 1),
+      },
+    });
+    await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'correct', source: 'exam', sourceRefId: 55 });
+    expect(pointsService.award).not.toHaveBeenCalled();
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'error_book_cleared', refType: 'question', refId: 10, props: { clearedCount: 1 },
+    }));
+  });
+
+  it('cleared=0（本无未清错题）不发 error_book_cleared', async () => {
+    const { svc, events } = makeService();
+    await svc.awardErrorFixOnClear(1, 10, 0);
+    expect(events.track).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'error_book_cleared' }));
   });
 });

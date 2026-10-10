@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from './routeTable';
 import { useThemeStore } from '@/store/themeStore';
 import {
+  getAdminOverview,
   getExpiredAlertStats,
   getKnowledgeGraphMastery,
   getMyLedger,
@@ -75,6 +76,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getParentAccount: vi.fn(),
     // `/admin/alerts`（管理员端「预警数据」新页）：挂载即拉过期预警统计
     getExpiredAlertStats: vi.fn(),
+    // `/admin/analytics`（埋点 Phase 2 分析页）：挂载即拉总览指标
+    getAdminOverview: vi.fn(),
     // `/student/training/remediation/run`（补偿套题作答页新页）：挂载即拉套题题单
     getRemediationQuestions: vi.fn(),
     // `/student/training/weak-points`（薄弱点图谱页新页）：挂载即拉掌握度 + 推荐，并拉档位
@@ -98,6 +101,7 @@ const getUnreadMessageCountMock = vi.mocked(getUnreadMessageCount);
 const getParentGoalAttainmentMock = vi.mocked(getParentGoalAttainment);
 const getParentAlertsMock = vi.mocked(getParentAlerts);
 const getExpiredAlertStatsMock = vi.mocked(getExpiredAlertStats);
+const getAdminOverviewMock = vi.mocked(getAdminOverview);
 const getParentControlsMock = vi.mocked(getParentControls);
 const putParentControlsMock = vi.mocked(putParentControls);
 const getParentPointsSettingsMock = vi.mocked(getParentPointsSettings);
@@ -249,6 +253,15 @@ beforeEach(() => {
     total: 12,
     unread: 3,
   } satisfies AdminAlertRetentionPreview);
+  getAdminOverviewMock.mockReset();
+  getAdminOverviewMock.mockResolvedValue({
+    dau: 3,
+    wau: 9,
+    totalSeconds: 7200,
+    totalAnswers: 40,
+    accuracy: 0.75,
+    moduleTop: [],
+  });
   getParentControlsMock.mockReset();
   getParentControlsMock.mockResolvedValue(CONTROLS);
   putParentControlsMock.mockReset();
@@ -677,6 +690,29 @@ describe('路由表：管理员端「预警数据」', () => {
     expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '预警数据' })).not.toBeInTheDocument();
     expect(getExpiredAlertStatsMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 埋点 Phase 2（T14 评审裁定③）：`/admin/analytics` 八个分析子页已挂进路由表。
+ * 页面自身有渲染测试，但「路由确实指到这个页面 + AdminNav 有入口」只有这里能证明。
+ */
+describe('路由表：管理员端「数据分析」', () => {
+  it('/admin/analytics 渲染 AnalyticsOverviewPage（非占位），AdminNav「数据分析」入口存在', async () => {
+    setAdminSession();
+
+    renderAt('/admin/analytics');
+
+    // 真页面内容：标题 + 指标卡来自页面自己的 getAdminOverview（占位页渲染不出）
+    expect(await screen.findByRole('heading', { name: '数据总览' })).toBeInTheDocument();
+    expect(await screen.findByTestId('card-今日活跃')).toBeInTheDocument();
+    // 侧边导航入口（对外契约）
+    expect(screen.getByRole('link', { name: '数据分析' })).toHaveAttribute('href', '/admin/analytics');
+    // 分析子页 Tab（AnalyticsPageShell）
+    expect(screen.getByRole('link', { name: '漏斗' })).toBeInTheDocument();
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    // 管理台仍是家长主题（商务白蓝，无日夜切换）
+    expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
   });
 });
 

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useLearnContextStore } from '@/store/learnContextStore';
+import { trackEvents } from '@/services/api';
 import { mapScene } from './sceneMap';
 import * as tracker from './tracker';
 import { getAuthItem } from '@/services/authStorage';
@@ -25,6 +26,9 @@ export default function AnalyticsShell() {
   const location = useLocation();
 
   useEffect(() => {
+    // 显式事件传输（Track 13）：page_view / answer_revealed / ai_message_sent / session 两事件
+    // 都走 `POST /track/events` 批量上报；tracker 内部攒批 + 多路 flush，失败整批丢弃不重试。
+    tracker.setEventTransport({ sendEvents: trackEvents });
     tracker.setSubjectIdProvider(() => useLearnContextStore.getState().subjectId);
     // 卸载收尾：把在跑的会话收掉。已知 dev-only 假象 —— `<StrictMode>`（仅开发构建）
     // 会双跑 effect，这次清理会顺手抹掉去重键，于是每次进场出现一轮 start/end/start；

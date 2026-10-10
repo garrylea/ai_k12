@@ -3177,3 +3177,177 @@ export function recognizeHandwriting(image: string, modelKey: string): Promise<H
     body: JSON.stringify({ image, modelKey }),
   });
 }
+
+// --- Admin: Analytics（运营分析聚合，埋点 Phase 2）+ 学生端埋点上报（2026-10-09） ---
+// 形状与后端 modules/analytics/ops-analytics.service.ts 的返回一一对应；改一边要同步另一边。
+// 窗口参数 from/to 均为 YYYY-MM-DD、可选，缺省近 7 天（服务端 parseWindow）。
+
+export type TrackEventPayload = {
+  event: string;
+  module?: string;
+  scene?: string;
+  subjectId?: number;
+  refType?: string;
+  refId?: number;
+  sessionUid?: string;
+  props?: Record<string, unknown>;
+  clientTsMs?: number;
+};
+
+/** `POST /api/track/events`（student 角色）。批量 1-50 条；伪造/白名单外条目计入 rejected 而非报错。 */
+export function trackEvents(events: TrackEventPayload[]): Promise<{ accepted: number; rejected: number }> {
+  return fetchApi('/track/events', { method: 'POST', body: JSON.stringify({ events }) });
+}
+
+export type AdminAnalyticsWindow = { from?: string; to?: string };
+const analyticsQs = (w: AdminAnalyticsWindow): string => {
+  const p = new URLSearchParams();
+  if (w.from) p.set('from', w.from);
+  if (w.to) p.set('to', w.to);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+};
+
+export type OverviewData = {
+  dau: number;
+  wau: number;
+  totalSeconds: number;
+  totalAnswers: number;
+  /** 无作答时为 null（服务端不许写 0） */
+  accuracy: number | null;
+  moduleTop: { module: string; students: number; seconds: number }[];
+};
+
+export type ModulesData = {
+  items: { module: string; students: number; seconds: number; answered: number; correct: number; accuracy: number | null }[];
+};
+
+export type FunnelData = {
+  module: string;
+  steps: { event: string; students: number }[];
+  conversions: (number | null)[];
+};
+
+export type RetentionData = {
+  cohortStart: string;
+  cohortSize: number;
+  days: { offset: number; retained: number; rate: number | null }[];
+};
+
+export type CohortCompareData = {
+  metric: string;
+  outcome: string;
+  groups: { key: string; students: number; value: number | null }[];
+  /** 恒为 'correlation-not-causation'，UI 必须展示 */
+  disclaimer: string;
+};
+
+export type QualityData = {
+  apiFailureRate: number | null;
+  errorCodeDistribution: { code: number; count: number }[];
+  llmTimeoutRate: number | null;
+  llmFallbackRate: number | null;
+  llmAttributionCoverage: number | null;
+  questionsWithoutStandardAnswer: number;
+  kpCoverage: { covered: number; total: number; rate: number | null };
+  globalWordErrorRate: { wrong: number; total: number; rate: number | null };
+  /** 无可靠数据源，恒 null（delta spec §7.2） */
+  passageSkipRate: null;
+};
+
+export type LlmTokensData = {
+  groupBy: string;
+  items: { key: string; calls: number; inputTokens: number; outputTokens: number; unavailableCalls: number }[];
+  attributed: number;
+  unattributed: number;
+  unavailableCalls: number;
+};
+
+export type Paged<T> = { items: T[]; page: number; pageSize: number; total: number };
+
+export type DeviceDist = { key: string; students: number; seconds: number; sessions: number; accuracy: number | null };
+
+export type DevicesData = {
+  distributions: {
+    platformClass: DeviceDist[];
+    screenClass: DeviceDist[];
+    inputType: DeviceDist[];
+    appShell: DeviceDist[];
+    browser: DeviceDist[];
+  };
+  multiDevice: { count: number; students: number }[];
+  switches: { count: number; students: number };
+};
+
+export const getAdminOverview = (w: AdminAnalyticsWindow): Promise<OverviewData> =>
+  fetchApi(`/admin/analytics/overview${analyticsQs(w)}`);
+
+export const getAdminModules = (w: AdminAnalyticsWindow): Promise<ModulesData> =>
+  fetchApi(`/admin/analytics/modules${analyticsQs(w)}`);
+
+export const getAdminFunnel = (w: AdminAnalyticsWindow & { module: string }): Promise<FunnelData> => {
+  const p = new URLSearchParams({ module: w.module });
+  if (w.from) p.set('from', w.from);
+  if (w.to) p.set('to', w.to);
+  return fetchApi(`/admin/analytics/funnel?${p.toString()}`);
+};
+
+/** cohortStart 必填（YYYY-MM-DD，cohort = 首活跃日当天的学生）；days 缺省服务端取 '1,7,30'。 */
+export const getAdminRetention = (cohortStart: string): Promise<RetentionData> =>
+  fetchApi(`/admin/analytics/retention?cohortStart=${encodeURIComponent(cohortStart)}`);
+
+export const getAdminCohortCompare = (
+  w: AdminAnalyticsWindow & { metric: string; outcome: string },
+): Promise<CohortCompareData> => {
+  const p = new URLSearchParams({ metric: w.metric, outcome: w.outcome });
+  if (w.from) p.set('from', w.from);
+  if (w.to) p.set('to', w.to);
+  return fetchApi(`/admin/analytics/cohort-compare?${p.toString()}`);
+};
+
+export const getAdminQuality = (w: AdminAnalyticsWindow): Promise<QualityData> =>
+  fetchApi(`/admin/analytics/quality${analyticsQs(w)}`);
+
+export const getAdminLlmTokens = (w: AdminAnalyticsWindow & { groupBy: string }): Promise<LlmTokensData> => {
+  const p = new URLSearchParams({ groupBy: w.groupBy });
+  if (w.from) p.set('from', w.from);
+  if (w.to) p.set('to', w.to);
+  return fetchApi(`/admin/analytics/llm-tokens?${p.toString()}`);
+};
+
+/** LLM 调用流水。⚠️ 无时间窗（服务端不带 from/to）：过滤参数是 scene/model/success，分页 20。 */
+export const getAdminLlmCalls = (q: { page?: number; scene?: string; model?: string; success?: boolean }): Promise<Paged<Record<string, unknown>>> => {
+  const p = new URLSearchParams();
+  if (q.scene) p.set('scene', q.scene);
+  if (q.model) p.set('model', q.model);
+  if (q.success !== undefined) p.set('success', String(q.success));
+  if (q.page !== undefined) p.set('page', String(q.page));
+  const s = p.toString();
+  return fetchApi(`/admin/analytics/llm-calls${s ? `?${s}` : ''}`);
+};
+
+/** 请求流水。⚠️ 无时间窗：过滤参数是 path（route LIKE）/status/minLatency，分页 20。 */
+export const getAdminRequests = (q: { page?: number; path?: string; status?: number; minLatency?: number }): Promise<Paged<Record<string, unknown>>> => {
+  const p = new URLSearchParams();
+  if (q.path) p.set('path', q.path);
+  if (q.status !== undefined) p.set('status', String(q.status));
+  if (q.minLatency !== undefined) p.set('minLatency', String(q.minLatency));
+  if (q.page !== undefined) p.set('page', String(q.page));
+  const s = p.toString();
+  return fetchApi(`/admin/analytics/requests${s ? `?${s}` : ''}`);
+};
+
+/** 事件流（全部 tier）。page 缺省 1。行是 behavior_events 原始行（蛇形列名，无 DTO 映射）。 */
+export const getAdminEvents = (q: AdminAnalyticsWindow & { page?: number; event?: string; module?: string }): Promise<Paged<Record<string, unknown>>> => {
+  const p = new URLSearchParams();
+  if (q.event) p.set('event', q.event);
+  if (q.module) p.set('module', q.module);
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.page !== undefined) p.set('page', String(q.page));
+  const s = p.toString();
+  return fetchApi(`/admin/analytics/events${s ? `?${s}` : ''}`);
+};
+
+export const getAdminDevices = (w: AdminAnalyticsWindow): Promise<DevicesData> =>
+  fetchApi(`/admin/analytics/devices${analyticsQs(w)}`);

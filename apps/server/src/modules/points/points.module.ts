@@ -13,6 +13,7 @@ import { RewardCatalogRepository } from '../../database/repositories/reward-cata
 import { PointRedemptionsRepository } from '../../database/repositories/point-redemptions.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
 import { ParentModule } from '../parent/parent.module.js';
+import { AnalyticsModule } from '../analytics/analytics.module.js';
 
 /**
  * 闯关积分与段位模块（spec `2026-09-17-gamification-points-design.md`）。
@@ -29,7 +30,8 @@ import { ParentModule } from '../parent/parent.module.js';
  * 其它模块不需要注入它。
  */
 @Module({
-  imports: [ParentModule],
+  // imports AnalyticsModule（埋点 Phase 2）：PointsService 注入其导出的 EventsService（points_awarded）
+  imports: [ParentModule, AnalyticsModule],
   controllers: [PointsController, ParentPointsController, LevelsController],
   providers: [
     PointsService,

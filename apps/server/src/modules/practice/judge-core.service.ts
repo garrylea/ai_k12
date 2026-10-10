@@ -5,6 +5,7 @@ import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capabili
 import { ExplanationCacheService } from './explanation-cache.service.js';
 import { MasteryService } from './mastery.service.js';
 import { PointsService, type AwardResult } from '../points/points.service.js';
+import { EventsService } from '../analytics/events.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
@@ -105,7 +106,7 @@ export interface JudgeCoreQuestionInput {
   subjectId: number;
   questionId: number;        // 题中心：必传（训练题必来自题库）
   studentAnswer: string;
-  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'practice' | 'remediation'
+  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'remediation'
   sourceRefId?: number | null; // 考试传 session_id；practice 沿用现结构不经过此变体
 }
 
@@ -139,7 +140,68 @@ export class JudgeCoreService {
     private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
     private readonly pointsService: PointsService,
     private readonly masteryService: MasteryService,
+    private readonly events?: EventsService, // 埋点 Phase 2：可选注入（旧测试不传即全 no-op；生产由 DI 提供）
   ) {}
+
+  // ---- 埋点 Phase 2（行为事件流）--------------------------------------------
+  // 全部走 EventsService.track（fire-and-forget，吞异常），绝不影响判题主链路。
+
+  /** source → 埋点 module 映射（brief §3②）；judgeForPractice 固定 mainline 不经此表。 */
+  private static readonly SOURCE_MODULE: Record<string, string> = {
+    targeted: 'training_targeted',
+    error_practice: 'training_error_practice',
+    remediation: 'training_error_practice',
+    exam: 'exam',
+  };
+
+  private static moduleFor(source: string | undefined): string | null {
+    return JudgeCoreService.SOURCE_MODULE[source ?? ''] ?? null;
+  }
+
+  /** 连错计数：进程内存 Map（重启清零可接受，埋点尽力而为）。 */
+  private failStreak = new Map<string, number>();
+
+  /**
+   * answer_submitted 打点 + 连错计数挂接。
+   * verdict 由 isCorrect/method 派生（JudgeOutput 无独立 verdict 字段）：
+   * non-correct/incorrect（unanswered/undetermined）不进连错逻辑。
+   * streakKey：input 有 cardId 用 `c<cardId>`，否则 `q<questionId>`，`:studentId` 收尾——
+   * card 中心同一题在多卡出现时按卡隔离，题中心按题隔离。
+   */
+  private trackAnswer(studentId: number, moduleName: string | null, out: JudgeOutput, questionId: number | null, streakKey: string | null): void {
+    // verdict 派生（母 spec §枚举 correct|incorrect|off_target|unanswered|undetermined；
+    // off_target 本服务派生不出）：
+    //   isCorrect=true -> correct；=false -> incorrect；
+    //   空答案（method='unanswered'）-> unanswered（业务上算一次提交）；
+    //   其余 isCorrect=null（理论不可达，兜底）-> undetermined。
+    // unanswered 不进连错逻辑（非 incorrect 也不非 correct 分支）。
+    const verdict = out.isCorrect === true ? 'correct' : out.isCorrect === false ? 'incorrect' : out.method === 'unanswered' ? 'unanswered' : 'undetermined';
+    this.events?.track({
+      event: 'answer_submitted', source: 'server', studentId,
+      module: moduleName, refType: 'question', refId: questionId,
+      props: { verdict, isCorrect: out.isCorrect ?? null, method: out.method ?? null },
+    });
+    if (!this.events || !streakKey) return;
+    if (verdict === 'incorrect') {
+      this.trackStreak(studentId, streakKey, moduleName, questionId);
+    } else if (verdict === 'correct') {
+      this.failStreak.delete(streakKey); // 答对重置连错
+    }
+  }
+
+  private trackStreak(studentId: number, key: string, moduleName: string | null, questionId: number | null): void {
+    if (!this.events) return;
+    const next = (this.failStreak.get(key) ?? 0) + 1;
+    if (next >= 3) {
+      this.failStreak.set(key, 0); // 触发即清零：再错 3 次可再触发
+      this.events.track({
+        event: 'consecutive_failures', source: 'server', studentId,
+        module: moduleName, refType: 'question', refId: questionId, props: { count: next },
+      });
+    } else {
+      this.failStreak.set(key, next);
+    }
+  }
 
   /**
    * 题中心判题的**统一出口收尾**：把本次对错交给掌握度回写（spec §4.8）。
@@ -165,8 +227,11 @@ export class JudgeCoreService {
   async judgeQuestion(input: JudgeCoreQuestionInput): Promise<JudgeOutput> {
     const q = await this.questionsRepo.findById(input.questionId);
     if (!q) {
+      // 题目不存在（999）：早退不打点——只有真提交到判题的作答才算 submitted。
       throw new HttpException({ code: 4004, message: '题目不存在' }, 400);
     }
+    const moduleName = JudgeCoreService.moduleFor(input.source);
+    const streakKey = `q${input.questionId}:${input.studentId}`;
 
     let isCorrect: boolean | null;
     let method: JudgeOutput['method'];
@@ -180,7 +245,9 @@ export class JudgeCoreService {
     // 空答案题落到 AI 判定会产生无依据判错 + 错题 level 提升；主观题空答案则无
     // 参考答案可自评。不计对错、不入错题本、不触发解析生成。
     if (!q.answer || !q.answer.trim()) {
-      return this.finishJudge(input.studentId, { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 });
+      const out: JudgeOutput = { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 };
+      this.trackAnswer(input.studentId, moduleName, out, q.id, streakKey);
+      return this.finishJudge(input.studentId, out);
     }
 
     if (EXACT_ONLY_TYPES.has(q.type)) {
@@ -194,7 +261,9 @@ export class JudgeCoreService {
     } else if (SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess') {
       // 路由 1c（判题体系重构 2026-09-09）：主观题 self_assess 模式 -> 不判对错。
       // 参考答案/解析随判题返回（前端当场展开自评）；错题本与清零由自评端点处理。
-      return this.finishJudge(input.studentId, {
+      // 埋点：该分支只发 self_assess_answered（自评结果由 recordSelfAssessment 后续产生，
+      // 此时还没有 assessment），不发 answer_submitted。
+      const out: JudgeOutput = {
         questionId: q.id,
         isCorrect: null,
         method: 'self_assess',
@@ -204,7 +273,13 @@ export class JudgeCoreService {
         referenceAnswer: q.answer,
         explanation: q.explanation,
         pointsAwarded: 0,
+      };
+      this.events?.track({
+        event: 'self_assess_answered', source: 'server', studentId: input.studentId,
+        module: moduleName, refType: 'question', refId: input.questionId,
+        props: { assessment: null },
       });
+      return this.finishJudge(input.studentId, out);
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof -> AI 判定
       const questionType = q.type === 'proof' ? 'proof' : 'calculation';
@@ -239,9 +314,9 @@ export class JudgeCoreService {
       if (!isCorrect) {
         this.explanationCache.ensureExplanation(q);
       }
-      return this.finishJudge(input.studentId, {
-        questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0,
-      });
+      const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0 };
+      this.trackAnswer(input.studentId, moduleName, out, q.id, streakKey);
+      return this.finishJudge(input.studentId, out);
     }
 
     if (!isCorrect) {
@@ -261,17 +336,22 @@ export class JudgeCoreService {
         const cleared = await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
         // source='exam' 排除：交卷补判在途题不得额外发订正分（考试分只由 math_paper 一次性给）。
         // 「清掉几条 -> 发不发分」的判决统一在 awardErrorFixOnClear（与 card 路径同一实现）。
+        // exam 清零照发 error_book_cleared（不发分 ≠ 没发生清零）。
         if (input.source !== 'exam') {
           const award = await this.awardErrorFixOnClear(input.studentId, input.questionId, cleared);
           pointsAwarded = award.pointsAwarded;
           awardReason = award.awardReason;
+        } else {
+          this.trackCleared(input.studentId, input.questionId, cleared);
         }
       } catch (err) {
         this.logger.error(`clearUnclearedByStudentQuestionId failed (student=${input.studentId}, question=${input.questionId}): ${err}`);
       }
     }
 
-    return this.finishJudge(input.studentId, { questionId: q.id, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason });
+    const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason };
+    this.trackAnswer(input.studentId, moduleName, out, q.id, streakKey);
+    return this.finishJudge(input.studentId, out);
   }
 
   /**
@@ -304,6 +384,8 @@ export class JudgeCoreService {
     // 还是主线清零阶段都走这一个函数」，主线清零 UI 正是这条 judgePractice 路径）。
     let pointsAwarded = 0;
     let awardReason: JudgeOutput['awardReason'];
+    // 埋点：card 中心固定 mainline；连错按卡隔离（input.cardId 必有）
+    const streakKey = `c${input.cardId}:${input.studentId}`;
 
     // 路由 0（判题体系重构）：空答案守卫（全题型，条件与 judgeQuestion 路由 0 一字不差）——
     // 客观题空答案会被判错污染错题本；主观题（short_answer/proof）空答案进路由 1c 只会
@@ -311,7 +393,9 @@ export class JudgeCoreService {
     // practice_results 由 PracticeService 以 method='unanswered' 落行（保证课程完成
     // 门禁的作答覆盖计数不缺行）。
     if (q && (!q.answer || !q.answer.trim())) {
-      return { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 };
+      const out: JudgeOutput = { questionId: q.id, isCorrect: null, method: 'unanswered', errorType: null, errorBookId: undefined, noStandardAnswer: true, pointsAwarded: 0 };
+      this.trackAnswer(input.studentId, 'mainline', out, q.id, streakKey);
+      return out;
     }
 
     if (q && EXACT_ONLY_TYPES.has(q.type)) {
@@ -326,6 +410,12 @@ export class JudgeCoreService {
     } else if (q && SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess') {
       // 路由 1c（判题体系重构 2026-09-09）：主观题 self_assess 模式 -> 不判对错。
       // 参考答案/解析随判题返回（前端当场展开自评）；错题本与清零由自评端点处理。
+      // 埋点：同 judgeQuestion 路由 1c——只发 self_assess_answered，不发 answer_submitted。
+      this.events?.track({
+        event: 'self_assess_answered', source: 'server', studentId: input.studentId,
+        module: 'mainline', refType: 'question', refId: q.id,
+        props: { assessment: null },
+      });
       return {
         questionId: q.id,
         isCorrect: null,
@@ -434,6 +524,11 @@ export class JudgeCoreService {
             lesson_id: input.lessonId,
             wrong_answer_text: questionId === null ? input.questionText : null,
           });
+          // 埋点：仅新建分支计 error_book_added（同 writeErrorBookOrReuse 口径）
+          this.events?.track({
+            event: 'error_book_added', source: 'server', studentId: input.studentId,
+            subjectId: input.subjectId, refType: 'question', refId: questionId,
+          });
         } catch (err) {
           if (questionCreated && questionId !== null) {
             await this.questionsRepo.deleteById(questionId).catch(() => {});
@@ -460,7 +555,9 @@ export class JudgeCoreService {
       }
     }
 
-    return { questionId, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason };
+    const out: JudgeOutput = { questionId, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason };
+    this.trackAnswer(input.studentId, 'mainline', out, questionId, streakKey);
+    return out;
   }
 
   /**
@@ -483,6 +580,21 @@ export class JudgeCoreService {
    *
    * 刻意吞异常：积分是激励层，发分失败绝不能挡住判题（镜像 exams 的 awardPaperPoints）。
    */
+  /**
+   * error_book_cleared 打点（确实清掉 ≥1 条未清错题才发，clearedCount = affectedRows；
+   * questionId 为 null 的「仅存题面」清零也发生了清零，照发、refId 记 null）。
+   * 独立成助手：exam 来源跳过 awardErrorFixOnClear（不发分）但清零 SQL 照跑，
+   * 事件必须照发——judgeQuestion / recordSelfAssessment 的 exam 分支也调它。
+   */
+  private trackCleared(studentId: number, questionId: number | null, cleared: number): void {
+    if (cleared <= 0) return;
+    this.events?.track({
+      event: 'error_book_cleared', source: 'server', studentId,
+      refType: 'question', refId: questionId,
+      props: { clearedCount: cleared },
+    });
+  }
+
   async awardErrorFixOnClear(
     studentId: number,
     questionId: number | null,
@@ -492,6 +604,7 @@ export class JudgeCoreService {
       // 无可订正目标（spec §7.2 枚举的 not_cleared）。
       return { pointsAwarded: 0, awardReason: 'not_cleared' };
     }
+    this.trackCleared(studentId, questionId, cleared);
     if (questionId == null) {
       // 仅存题面的错题没有稳定幂等身份：不发分（宁可少发，也不发可被编辑绕过的第二次分）。
       this.logger.debug(
@@ -544,7 +657,7 @@ export class JudgeCoreService {
   }): Promise<number> {
     const existing = await this.mainErrorRepo.findUnclearedByStudentQuestionId(input.studentId, input.questionId);
     if (existing) return existing.id;
-    return this.mainErrorRepo.create({
+    const created = await this.mainErrorRepo.create({
       student_id: input.studentId,
       subject_id: input.subjectId,
       question_id: input.questionId,
@@ -554,6 +667,12 @@ export class JudgeCoreService {
       lesson_id: null,
       wrong_answer_text: null,
     });
+    // 埋点：仅 find-or-create 的**新建**分支计 error_book_added（复用既有未清行不算新增）
+    this.events?.track({
+      event: 'error_book_added', source: 'server', studentId: input.studentId,
+      subjectId: input.subjectId, refType: 'question', refId: input.questionId,
+    });
+    return created;
   }
 
   /**
@@ -592,9 +711,11 @@ export class JudgeCoreService {
     try {
       const cleared = await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
       // source='exam'（考试结果页自评）与 judgeQuestion 同款排除：考试分只由 math_paper
-      // 一次性给，自评答对不得冒出额外的订正分。
+      // 一次性给，自评答对不得冒出额外的订正分；但清零照发 error_book_cleared。
       if (input.source !== 'exam') {
         await this.awardErrorFixOnClear(input.studentId, input.questionId, cleared);
+      } else {
+        this.trackCleared(input.studentId, input.questionId, cleared);
       }
     } catch (err) {
       this.logger.error(`clearUnclearedByStudentQuestionId failed (self-assess, student=${input.studentId}, question=${input.questionId}): ${err}`);

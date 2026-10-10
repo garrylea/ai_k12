@@ -4,10 +4,16 @@ import { ApiRequestLogsRepository } from '../../database/repositories/api-reques
 import { StudySessionsRepository } from '../../database/repositories/study-sessions.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
 import { ControlsRepository } from '../../database/repositories/controls.repo.js';
+import { BehaviorEventsRepository } from '../../database/repositories/behavior-events.repo.js';
+import { OpsAnalyticsRepository } from './ops-analytics.repo.js';
+import { OpsAnalyticsService } from './ops-analytics.service.js';
+import { AdminAnalyticsController } from './admin-analytics.controller.js';
 import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
 import { TelemetryService } from './telemetry.service.js';
+import { EventsService } from './events.service.js';
 import { StudySessionsService } from './study-sessions.service.js';
 import { AnalyticsController } from './analytics.controller.js';
+import { TrackController } from './track.controller.js';
 import { AnalyticsInterceptor } from '../../common/interceptors/analytics.interceptor.js';
 import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
 
@@ -30,7 +36,7 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
  */
 @Module({
   imports: [SafetyAlertsModule],
-  controllers: [AnalyticsController],
+  controllers: [AnalyticsController, TrackController, AdminAnalyticsController],
   providers: [
     LlmCallLogsRepository,
     ApiRequestLogsRepository,
@@ -42,12 +48,34 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
     ControlsRepository,
     StudySessionsService,
     AnalyticsInterceptor,
+    // Phase 2 行为事件流：字典与三道锁（tier 由字典决定 / client 白名单 / 隐私守卫）。
+    BehaviorEventsRepository,
+    EventsService,
+    // Phase 2 运营聚合（母 spec §7 端点 1-2）：只读 SQL 骨架，Task 9-11 追加其余端点。
+    OpsAnalyticsRepository,
+    OpsAnalyticsService,
     { provide: 'SUBJECTS_REPO_FOR_ANALYTICS', useExisting: SubjectsRepository },
   ],
-  exports: [TelemetryService, AnalyticsInterceptor, StudySessionsService],
+  exports: [TelemetryService, AnalyticsInterceptor, StudySessionsService, EventsService],
 })
 export class AnalyticsModule {
-  constructor(private telemetry: TelemetryService) {
-    setLlmCallSink((entry) => this.telemetry.llmCalls.push(entry));
+  constructor(
+    private telemetry: TelemetryService,
+    // Phase 2（2026-10-09）：llm_fallback_triggered 的发射口（本模块 providers 自有，直接构造注入）。
+    private readonly eventsService: EventsService,
+  ) {
+    // 回调只在真实 LLM 调用时触发（emitLlmCall），不存在「EventsService 未就绪」的启动顺序问题。
+    setLlmCallSink((entry) => {
+      this.telemetry.llmCalls.push(entry);
+      if (entry.isFallback) {
+        // scene 是 LLM 侧自由取值、不在学生场景白名单里 → 走 props 而不是顶层 scene 列。
+        this.eventsService.track({
+          event: 'llm_fallback_triggered',
+          source: 'server',
+          studentId: entry.studentId ?? null,
+          props: { scene: entry.scene ?? null, toModel: entry.modelKey },
+        });
+      }
+    });
   }
 }

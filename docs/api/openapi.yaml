@@ -38,7 +38,7 @@ tags:
   - name: Parent
     description: 家长端服务
   - name: Admin
-    description: 管理员中枢（模型配置/封禁/推送/AI 聊天）
+    description: 管理员中枢（模型配置/封禁/推送/AI 聊天/运营分析聚合）
   - name: Quota
     description: AI 额度与套餐
   - name: Billing
@@ -3584,6 +3584,512 @@ paths:
                             nullable: true
         '400':
           description: reason 不在枚举内（code=1001）
+
+  # Track —— 显式行为事件采集（埋点 Phase 2，2026-10-09；文档主稿归 §4.23 StudySessions）
+  /track/events:
+    post:
+      tags: [StudySessions]
+      summary: 显式行为事件批量采集（201；逐条拒伪计 rejected）
+      description: >-
+        **201**（Nest `@Post` 默认）。批量 **1-50** 条（`events` 缺失 / 空数组 / >50 → 400/1001）。
+        逐条校验在 `EventsService.recordMany`：`event` 未登记 `EVENT_TIER` 字典 → 计入 rejected；
+        **client 白名单**只认 `study_session_started` / `study_session_ended` / `page_view` /
+        `card_flipped` / `answer_revealed` / `ai_message_sent` / `study_session_idle` 7 项，
+        服务端权威事件（如 `answer_submitted`）伪造**不整体 400**、计入 rejected；
+        `module` / `scene` 不在白名单 → 落 NULL 不报错；`props` 序列化 >2KB → 拒该条；
+        `subjectId` 若给需是**在售学科**（与 start 同口径，有意不校验学生归属）→ 否则 400/1001。
+        `actorRole` / `studentId` / `source` 服务端定，`tier` 由字典写时决定、调用方不可覆盖。
+        `rejected` 只计数、不整体失败。DB 失败 500（前端传输层吞掉）。
+      operationId: trackEvents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrackEventsRequest'
+      responses:
+        '201':
+          description: 已受理（accepted + rejected 计数）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [accepted, rejected]
+                        properties:
+                          accepted:
+                            type: integer
+                            description: 实际写入 behavior_events 的条数
+                          rejected:
+                            type: integer
+                            description: 被拒条数（未登记 / 白名单外伪造 / props 超限），只计数不整体失败
+        '400':
+          description: 入参校验失败（code=1001）：形状非法 / 批量越界（1-50）/ 未知学科
+        '500':
+          description: DB 失败（前端传输层全吞，埋点失败不打断学习）
+
+  # AdminAnalytics —— 运营分析聚合（埋点 Phase 2，2026-10-09；全部只读 @Roles('admin')）
+  /admin/analytics/overview:
+    get:
+      tags: [Admin]
+      summary: 总览：DAU/窗口活跃/时长/答题/正确率/模块 Top
+      description: >-
+        窗口 `from,to`（YYYY-MM-DD）缺省近 7 天；非法 / `2026-02-30` 类无效日期（往返校验）/
+        `from>to` → 400/1001。`dau` = 今日有会话学生数（不限 status，与窗口无关）；
+        `wau` = **窗口内去重人数**（status IN ended/abandoned），勿当「周活」写死；
+        `accuracy` 分母 0 → null；答题只取 behavior_events（special_practice_logs 不并入）。
+      operationId: getAdminOverview
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date }, description: 'YYYY-MM-DD，缺省今天-6' }
+        - { name: to, in: query, required: false, schema: { type: string, format: date }, description: 'YYYY-MM-DD，缺省今天' }
+      responses:
+        '200':
+          description: 总览聚合
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [dau, wau, totalSeconds, totalAnswers, accuracy, moduleTop]
+                        properties:
+                          dau: { type: integer }
+                          wau: { type: integer, description: 窗口内去重学生数 }
+                          totalSeconds: { type: integer }
+                          totalAnswers: { type: integer }
+                          accuracy: { type: number, nullable: true, description: answered=0 → null }
+                          moduleTop:
+                            type: array
+                            description: 按时长倒序前 5
+                            items:
+                              type: object
+                              required: [module, students, seconds]
+                              properties:
+                                module: { type: string }
+                                students: { type: integer }
+                                seconds: { type: integer }
+        '400': { description: '窗口参数非法（code=1001）' }
+  /admin/analytics/modules:
+    get:
+      tags: [Admin]
+      summary: 模块横向对比（人数/时长/会话/答题/正确率）
+      description: >-
+        会话侧（study_sessions，status IN ended/abandoned）与答题侧（behavior_events）按 module
+        并集合并、按时长倒序；behavior_events 里 module IS NULL 的行不进列表。
+      operationId: getAdminModules
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: 模块列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              required: [module, students, seconds, sessions, answered, correct, accuracy]
+                              properties:
+                                module: { type: string }
+                                students: { type: integer }
+                                seconds: { type: integer }
+                                sessions: { type: integer }
+                                answered: { type: integer }
+                                correct: { type: integer }
+                                accuracy: { type: number, nullable: true, description: answered=0 → null }
+        '400': { description: '窗口参数非法（code=1001）' }
+  /admin/analytics/funnel:
+    get:
+      tags: [Admin]
+      summary: 模块漏斗（分步去重人数 + 相对上步转化）
+      description: >-
+        每步 COUNT(DISTINCT student_id)（窗口内去重到人）。**mainline 第三步 = points_awarded
+        且 module IS NULL 且 props.taskCode='mainline_lesson'**（★裁决：points 打点不带 module，
+        靠完课 taskCode 圈定）；其余步骤一律 module = ?。conversions[0] 恒 null，上一步 0 人 → null。
+      operationId: getAdminFunnel
+      parameters:
+        - { name: module, in: query, required: true, schema: { type: string, enum: [mainline, exam, training_targeted, training_error_practice, chinese_dictation, chinese_interpretation, chinese_meaning, en_vocabulary] }, description: '白名单 8 项（不含 aux_qna/admin/parent），越界 400/1001' }
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: 漏斗分步
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [module, steps, conversions]
+                        properties:
+                          module: { type: string }
+                          steps:
+                            type: array
+                            items:
+                              type: object
+                              required: [event, students]
+                              properties:
+                                event: { type: string }
+                                students: { type: integer }
+                          conversions:
+                            type: array
+                            description: 与 steps 等长；[0] 恒 null，上一步 0 人 → null
+                            items: { type: number, nullable: true }
+        '400': { description: 'module 越界或窗口非法（code=1001）' }
+  /admin/analytics/events:
+    get:
+      tags: [Admin]
+      summary: 事件流（全部 tier，分页 20）
+      description: >-
+        **返回全部 tier（裁决 3）**：隐私三道锁锁在家长端查询，admin 排查看全量。
+        过滤 event/module（trim 后空串视为不过滤，不做字典校验）；分页 20/页，page 从 1 起。
+        items 为 behavior_events 全列。
+      operationId: getAdminEvents
+      parameters:
+        - { name: event, in: query, required: false, schema: { type: string } }
+        - { name: module, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: 事件分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BehaviorEventPage'
+        '400': { description: 'page 非正整数或窗口非法（code=1001）' }
+  /admin/analytics/retention:
+    get:
+      tags: [Admin]
+      summary: 留存（cohort = 首活跃日，D{n} 当日有会话人头占比）
+      description: >-
+        cohortStart 必填（YYYY-MM-DD 往返校验）；days 为 1-365 逗号分隔正整数、去重升序、
+        缺省 '1,7,30'。cohortSize=0 → 各 rate null（retained 为 0）。
+      operationId: getAdminRetention
+      parameters:
+        - { name: cohortStart, in: query, required: true, schema: { type: string, format: date } }
+        - { name: days, in: query, required: false, schema: { type: string }, description: "缺省 '1,7,30'" }
+      responses:
+        '200':
+          description: 留存表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [cohortStart, cohortSize, days]
+                        properties:
+                          cohortStart: { type: string, format: date }
+                          cohortSize: { type: integer }
+                          days:
+                            type: array
+                            items:
+                              type: object
+                              required: [offset, retained, rate]
+                              properties:
+                                offset: { type: integer }
+                                retained: { type: integer }
+                                rate: { type: number, nullable: true }
+        '400': { description: 'cohortStart 缺失/非法或 days 越界（code=1001）' }
+  /admin/analytics/devices:
+    get:
+      tags: [Admin]
+      summary: 设备分布（五维）+ 多设备分档 + 切换
+      description: >-
+        **不过滤 status**（含进行中会话已累计的 active_seconds）——与 overview/modules 的
+        ended/abandoned 口径并存，并列展示需重新裁决。全部 COUNT(DISTINCT student_id) 按人头。
+        platformClass key 真实取值：ipad/iphone/android_tablet/android_phone/mac/windows/linux/other
+        （iPadOS 13+ Safari UA 校正 ipad）。accuracy 只 platformClass 有值（学生近似口径、重叠分组），
+        其余四维恒 null。multiDevice 只统计 DISTINCT platform_class >1 的学生；switches = 相邻两会话
+        platform_class 不同。
+      operationId: getAdminDevices
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: 设备三块
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [distributions, multiDevice, switches]
+                        properties:
+                          distributions:
+                            type: object
+                            required: [platformClass, screenClass, inputType, appShell, browser]
+                            properties:
+                              platformClass:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/DeviceDistRow'
+                              screenClass:
+                                type: array
+                                items: { $ref: '#/components/schemas/DeviceDistRow' }
+                              inputType:
+                                type: array
+                                items: { $ref: '#/components/schemas/DeviceDistRow' }
+                              appShell:
+                                type: array
+                                items: { $ref: '#/components/schemas/DeviceDistRow' }
+                              browser:
+                                type: array
+                                items: { $ref: '#/components/schemas/DeviceDistRow' }
+                          multiDevice:
+                            type: array
+                            description: 用过 >1 种平台类的学生按档位（cnt）计人头
+                            items:
+                              type: object
+                              required: [count, students]
+                              properties:
+                                count: { type: integer, description: 平台类种数 }
+                                students: { type: integer }
+                          switches:
+                            type: object
+                            required: [count, students]
+                            properties:
+                              count: { type: integer, description: 相邻会话平台不同次数 }
+                              students: { type: integer }
+        '400': { description: '窗口参数非法（code=1001）' }
+  /admin/analytics/cohort-compare:
+    get:
+      tags: [Admin]
+      summary: 分组对比（相关非因果，必带 disclaimer）
+      description: >-
+        metric/outcome 白名单越界 400/1001（outcome 不含 browser/input_type）。
+        value 口径：totalSeconds = 组内 SUM(active_seconds)÷组内学生数；daysActive = 学生×日期
+        去重天数÷组内学生数；answerCount = 组内 answer_submitted÷组内有答题学生数；accuracy =
+        correct/answered（answered=0 → null）。时长侧走 study_sessions、答题侧走 behavior_events，
+        设备列按学生近似关联（重叠分组非互斥）；**不过滤 status**。groups 按 students 倒序、key 升序；
+        groups[].students = 该 metric 自身侧去重学生数。
+      operationId: getAdminCohortCompare
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [totalSeconds, answerCount, accuracy, daysActive] } }
+        - { name: outcome, in: query, required: true, schema: { type: string, enum: [platform_class, screen_class, app_shell, module] } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: 分组对比
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [metric, outcome, groups, disclaimer]
+                        properties:
+                          metric: { type: string }
+                          outcome: { type: string }
+                          groups:
+                            type: array
+                            items:
+                              type: object
+                              required: [key, students, value]
+                              properties:
+                                key: { type: string }
+                                students: { type: integer }
+                                value: { type: number, nullable: true }
+                          disclaimer:
+                            type: string
+                            enum: [correlation-not-causation]
+        '400': { description: 'metric/outcome 越界或窗口非法（code=1001）' }
+  /admin/analytics/quality:
+    get:
+      tags: [Admin]
+      summary: 质量看板（API 失败率 / LLM 超时 fallback / 内容四指标）
+      description: >-
+        **apiFailureRate 谓词 = status_code>=500 OR biz_code IS NOT NULL**（拦截器成功路径不写
+        biz_code，全表无 biz_code=0；4xx 且 biz_code NULL 计成功）。错误码分布只统计失败行，
+        纯 5xx（biz_code NULL）按 5000 归组。**llmTimeoutRate 口径 = error_type='TimeoutError'**
+        （网络错误被 client 归一进它）。内容三指标为存量库口径、不随窗口变化；
+        **globalWordErrorRate = 累计错次÷词数（可 >1）**；**passageSkipRate 恒 null**（无可靠数据源）。
+        全部比率分母 0 → null。
+      operationId: getAdminQuality
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: 质量指标
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [apiFailureRate, errorCodeDistribution, llmTimeoutRate, llmFallbackRate, llmAttributionCoverage, questionsWithoutStandardAnswer, kpCoverage, globalWordErrorRate, passageSkipRate]
+                        properties:
+                          apiFailureRate: { type: number, nullable: true }
+                          errorCodeDistribution:
+                            type: array
+                            items:
+                              type: object
+                              required: [code, count]
+                              properties:
+                                code: { type: integer, description: 纯 5xx（biz_code NULL）按 5000 归组 }
+                                count: { type: integer }
+                          llmTimeoutRate: { type: number, nullable: true }
+                          llmFallbackRate: { type: number, nullable: true }
+                          llmAttributionCoverage: { type: number, nullable: true }
+                          questionsWithoutStandardAnswer: { type: integer }
+                          kpCoverage:
+                            type: object
+                            required: [covered, total, rate]
+                            properties:
+                              covered: { type: integer }
+                              total: { type: integer }
+                              rate: { type: number, nullable: true }
+                          globalWordErrorRate:
+                            type: object
+                            required: [wrong, total, rate]
+                            properties:
+                              wrong: { type: integer, description: english_words 累计错次 SUM(error_count) }
+                              total: { type: integer, description: 词数 }
+                              rate: { type: number, nullable: true, description: 可 >1（分母是词数不是作答次数） }
+                          passageSkipRate:
+                            type: number
+                            nullable: true
+                            enum: [null]
+                            description: 恒 null（无可靠数据源，不计为 0）
+        '400': { description: '窗口参数非法（code=1001）' }
+  /admin/analytics/llm-tokens:
+    get:
+      tags: [Admin]
+      summary: LLM 用量分组（按 model_key；unavailable 单列）
+      description: >-
+        groupBy 白名单 scene/model/day/student 越界 400/1001。聚合按 model_key（路由条目 key，
+        不是 model_id）；inputTokens/outputTokens 只对 usage_source<>'unavailable' 求和，
+        量不到的**单列 unavailableCalls、绝不混进 0 求和**（顶层与 items[].unavailableCalls 并存）；
+        day 分组按 DB 墙上时钟 DATE_FORMAT；key 为 NULL 的组映射 unknown/unattributed。
+      operationId: getAdminLlmTokens
+      parameters:
+        - { name: groupBy, in: query, required: true, schema: { type: string, enum: [scene, model, day, student] } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: 用量分组
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [groupBy, items, attributed, unattributed, unavailableCalls]
+                        properties:
+                          groupBy: { type: string }
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              required: [key, calls, inputTokens, outputTokens, unavailableCalls]
+                              properties:
+                                key: { type: string, description: 'NULL 组映射 unknown（scene）/ unattributed（student）' }
+                                calls: { type: integer }
+                                inputTokens: { type: integer }
+                                outputTokens: { type: integer }
+                                unavailableCalls: { type: integer, description: 该 key 下量不到的调用数 }
+                          attributed: { type: integer, description: student_id 非空调用数 }
+                          unattributed: { type: integer }
+                          unavailableCalls: { type: integer }
+        '400': { description: 'groupBy 越界或窗口非法（code=1001）' }
+  /admin/analytics/llm-calls:
+    get:
+      tags: [Admin]
+      summary: LLM 调用流水（分页 20）
+      description: >-
+        过滤 scene/model（匹配 model_key，trim 后空串视为不过滤）/success（只认 true/false，否则 1001）。
+        items 为 llm_call_logs 全列。
+      operationId: getAdminLlmCalls
+      parameters:
+        - { name: scene, in: query, required: false, schema: { type: string } }
+        - { name: model, in: query, required: false, schema: { type: string }, description: 匹配 model_key }
+        - { name: success, in: query, required: false, schema: { type: string, enum: ['true', 'false'] } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: 调用分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LlmCallPage'
+        '400': { description: 'success 非 true/false 或 page 非法（code=1001）' }
+  /admin/analytics/requests:
+    get:
+      tags: [Admin]
+      summary: 请求流水（分页 20）
+      description: >-
+        path 走 route LIKE '%path%'（归一化模板检索，raw_path 才带真实 id）；
+        status/minLatency 非负整数否则 1001。items 为 api_request_logs 全列。
+      operationId: getAdminRequests
+      parameters:
+        - { name: path, in: query, required: false, schema: { type: string }, description: route LIKE 模糊匹配 }
+        - { name: status, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: minLatency, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: 请求分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ApiRequestPage'
+        '400': { description: 'status/minLatency/page 非法（code=1001）' }
 
   # DeviceControl —— PC App 学习管控（学生端 3 条，2026-09-23）
   /student/learning-sessions:
@@ -11725,3 +12231,150 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ParentGoalAttainmentItem'
+
+    # ==================== 埋点 Phase 2（Track + AdminAnalytics，2026-10-09） ====================
+    TrackEventsRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: 批量 1-50 条；服务端逐条 sanitize，bad 条目计 rejected 不整体失败
+          items:
+            $ref: '#/components/schemas/TrackEventInputItem'
+    TrackEventInputItem:
+      type: object
+      required: [event]
+      properties:
+        event:
+          type: string
+          description: 必须在 EVENT_TIER 字典内且属 client 白名单（study_session_started/study_session_ended/page_view/card_flipped/answer_revealed/ai_message_sent/study_session_idle），否则计入 rejected
+        module:
+          type: string
+          description: 白名单外落 NULL 不报错
+        scene:
+          type: string
+          description: 白名单外落 NULL 不报错
+        subjectId:
+          type: integer
+          description: 若给需是在售学科（与 start 同口径），否则整体 400/1001
+        refType:
+          type: string
+        refId:
+          type: integer
+        sessionUid:
+          type: string
+          format: uuid
+        props:
+          type: object
+          additionalProperties: true
+          description: 序列化 >2KB 拒该条；只放低基数补充，禁止塞自由文本
+        clientTsMs:
+          type: integer
+          description: 客户端时间戳，仅参考（以服务端 created_at 为准）
+    BehaviorEventPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          description: behavior_events 全列（SELECT *）
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              actor_role: { type: string, enum: [student, parent, admin, system] }
+              student_id: { type: integer, nullable: true }
+              event: { type: string }
+              tier: { type: string, enum: [parent, ops], description: 写时由字典决定；本端点返回全部 tier（裁决 3） }
+              module: { type: string, nullable: true }
+              scene: { type: string, nullable: true }
+              subject_id: { type: integer, nullable: true }
+              ref_type: { type: string, nullable: true }
+              ref_id: { type: integer, nullable: true }
+              session_uid: { type: string, nullable: true }
+              request_id: { type: string, nullable: true }
+              source: { type: string, enum: [server, client] }
+              props: { type: object, nullable: true, additionalProperties: true }
+              client_ts_ms: { type: integer, nullable: true }
+              created_at: { type: string, format: date-time }
+        page: { type: integer }
+        pageSize: { type: integer, enum: [20] }
+        total: { type: integer }
+    DeviceDistRow:
+      type: object
+      required: [key, students, seconds, sessions, accuracy]
+      properties:
+        key:
+          type: string
+          description: platformClass 取值 ipad/iphone/android_tablet/android_phone/mac/windows/linux/other；其余维度为前端白名单值
+        students: { type: integer, description: COUNT(DISTINCT student_id)，按人头不按会话 }
+        seconds: { type: integer, description: 不过滤 status（含进行中会话已累计秒数） }
+        sessions: { type: integer }
+        accuracy:
+          type: number
+          nullable: true
+          description: 只 platformClass 有值（学生近似口径、重叠分组非互斥）；其余四维恒 null
+    LlmCallPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          description: llm_call_logs 全列（SELECT *）
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              requestId: { type: string, nullable: true }
+              studentId: { type: integer, nullable: true }
+              dialogueId: { type: integer, nullable: true }
+              scene: { type: string, nullable: true }
+              subject: { type: string, nullable: true }
+              capability: { type: string, nullable: true }
+              modelKey: { type: string, nullable: true, description: 路由条目 key（不是 model_id） }
+              modelId: { type: string, nullable: true }
+              provider: { type: string }
+              attempt: { type: integer }
+              requestKind: { type: string, enum: [chat, stream] }
+              isFallback: { type: boolean }
+              success: { type: boolean }
+              errorType: { type: string, nullable: true, description: LLMClientError 子类名，如 TimeoutError }
+              httpStatus: { type: integer, nullable: true }
+              inputTokens: { type: integer, nullable: true, description: NULL = 量不到（绝不写 0） }
+              outputTokens: { type: integer, nullable: true, description: NULL = 量不到 }
+              usageSource: { type: string, enum: [provider, estimated, unavailable] }
+              latencyMs: { type: integer }
+              createdAt: { type: string, format: date-time }
+        page: { type: integer }
+        pageSize: { type: integer, enum: [20] }
+        total: { type: integer }
+    ApiRequestPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          description: api_request_logs 全列（SELECT *）
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              requestId: { type: string, nullable: true }
+              actorRole: { type: string, nullable: true }
+              studentId: { type: integer, nullable: true }
+              method: { type: string }
+              route: { type: string, description: 归一化模板（/api/practice/:cardId/results） }
+              rawPath: { type: string, nullable: true, description: 原路径含 id，仅排查用 }
+              module: { type: string, nullable: true }
+              statusCode: { type: integer }
+              bizCode: { type: integer, nullable: true, description: 拦截器成功路径不写（NULL）；异常路径才写数值 }
+              errorCode: { type: string, nullable: true }
+              latencyMs: { type: integer }
+              isSse: { type: boolean }
+              createdAt: { type: string, format: date-time }
+        page: { type: integer }
+        pageSize: { type: integer, enum: [20] }
+        total: { type: integer }

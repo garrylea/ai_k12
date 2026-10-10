@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { ExamPapersRepository } from '../../database/repositories/exam-papers.repo.js';
 // 注意：repo 类必须是值导入（非 import type）——NestJS DI 依赖
 // emitDecoratorMetadata 的设计时类型，type-only import 运行时被擦除会导致
@@ -10,6 +10,7 @@ import { JudgeCoreService, subjectiveJudgeMode, SUBJECTIVE_TYPES } from '../prac
 import { PointsService } from '../points/points.service.js';
 import type { AwardResult } from '../points/points.service.js';
 import { toPointsAwardDto } from '../points/dto/points.dto.js';
+import type { EventsService } from '../analytics/events.service.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import type { ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
 import type { ExamPaperDto, PaperDetailDto, PaperQueryDto } from './dto/paper-query.dto.js';
@@ -44,6 +45,8 @@ export class ExamsService {
     private readonly mainErrorRepo: MainErrorBooksRepository,
     private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
     private readonly pointsService: PointsService,
+    /** 埋点（Phase 2）：交卷打 exam_submitted。@Optional 让既有测试零参构造不炸。 */
+    @Optional() private readonly events?: EventsService,
   ) {}
 
   /** 试卷列表：透传筛选参数给 repo，行 -> ExamPaperDto 映射。 */
@@ -362,6 +365,19 @@ export class ExamsService {
     await this.examSessionsRepo.markSubmitted(session.id);
     const points = toPointsAwardDto(await this.awardPaperPoints(session.student_id, session.id));
     const finalAnswers = await this.examSessionsRepo.findAnswersBySession(session.id);
+    // 埋点（Phase 2）：exam_submitted 的唯一收口在 finalizeSession——四条收卷路径
+    // （submit / getSession 超时 / submitAnswer 超时 / createSession 撞过期）都只对
+    // in_progress 会话执行本方法，天然幂等，且超时自动收卷同样发事件。
+    // track fire-and-forget，异常自吞，绝不影响交卷主链路。
+    this.events?.track({
+      event: 'exam_submitted',
+      source: 'server',
+      studentId: session.student_id,
+      module: 'exam',
+      refType: 'exam_session',
+      refId: session.id,
+      props: { paperId: session.paper_id },
+    });
     return { ...this.summarize(questions.length, finalAnswers), points };
   }
 
