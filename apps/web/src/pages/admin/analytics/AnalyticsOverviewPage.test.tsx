@@ -45,13 +45,13 @@ describe('AnalyticsOverviewPage', () => {
     );
 
     expect(await screen.findByTestId('card-今日活跃')).toHaveTextContent('3');
-    expect(screen.getByTestId('card-周活跃')).toHaveTextContent('9');
+    expect(screen.getByTestId('card-窗口活跃')).toHaveTextContent('9');
     expect(screen.getByTestId('card-总时长')).toHaveTextContent('2 小时 0 分');
     expect(screen.getByTestId('card-正确率')).toHaveTextContent('75%');
 
     const chart = await screen.findByTestId('chart-bar');
     expect(chart.getAttribute('data-count')).toBe('1');
-    expect(chart.textContent).toContain('mainline:3');
+    expect(chart.textContent).toContain('主线:3');
   });
 
   it('moduleTop 空 → 「暂无数据」不渲染图表；accuracy null → 正确率显示 —', async () => {

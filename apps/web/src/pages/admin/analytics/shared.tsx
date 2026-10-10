@@ -158,6 +158,49 @@ export const EVENT_LABELS: Record<string, string> = {
 /** 英文名 → 中文展示名；字典外 key 原样返回（后端新增事件不至显示成空）。 */
 export const eventLabel = (key: string): string => EVENT_LABELS[key] ?? key;
 
+/**
+ * 设备五维 key → 中文展示名。key 真源：
+ * - platform_class：server `common/utils/user-agent.util.ts`（ipad/iphone/…）；
+ * - screen_class / input_type / app_shell：web `analytics/types.ts`；
+ * - browser：server `user-agent.util.ts`。
+ * 前 5 项（desktop/laptop/tablet/mobile/unknown）是 Task 16 brief 指定的兜底映射；
+ * 字典外 key 一律原样显示（与 eventLabel 同策略）。
+ */
+export const DEVICE_LABELS: Record<string, string> = {
+  // brief 指定的兜底映射
+  desktop: '桌面',
+  laptop: '笔记本',
+  tablet: '平板',
+  mobile: '手机',
+  unknown: '未知',
+  // platform_class
+  ipad: 'iPad',
+  iphone: 'iPhone',
+  android_tablet: '安卓平板',
+  android_phone: '安卓手机',
+  mac: 'Mac',
+  windows: 'Windows',
+  linux: 'Linux',
+  other: '其他',
+  // screen_class
+  ipad_landscape: 'iPad 横屏',
+  tablet_portrait: '平板竖屏',
+  // input_type
+  touch: '触摸',
+  mouse: '鼠标',
+  hybrid: '混合',
+  // app_shell / browser
+  web: '浏览器',
+  electron: 'PC App',
+  chrome: 'Chrome',
+  safari: 'Safari',
+  edge: 'Edge',
+  firefox: 'Firefox',
+};
+
+/** 设备 key → 中文展示名；字典外 key 原样返回。 */
+export const deviceLabel = (key: string): string => DEVICE_LABELS[key] ?? key;
+
 /** 漏斗模块下拉的 8 个白名单值（与服务端 FUNNEL_STEPS 同源，delta spec §7.1）。 */
 export const FUNNEL_MODULES = [
   'mainline',

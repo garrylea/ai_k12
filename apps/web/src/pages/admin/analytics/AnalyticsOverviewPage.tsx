@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { getAdminOverview, type OverviewData } from '@/services/api';
 import ChartBar from '@/components/business/parent/ChartBar';
 import { toast } from '@/components/base';
-import { AnalyticsPageShell, useAdminAnalyticsWindow, fmtPct, fmtDuration } from './shared';
+import { AnalyticsPageShell, useAdminAnalyticsWindow, fmtPct, fmtDuration, eventLabel } from './shared';
 
 /**
  * 埋点 Phase 2 · 数据总览（delta spec §7 Task 15）。
  * 4 张指标卡 + 各模块学习人数柱状图；取数模式照 AdminModelsPage（cancelled flag + toast）。
+ * 「窗口活跃」= 当前日期窗内去重人数（wau 字段名沿自早期「周活跃」，口径已改，Task 16 裁定）。
  */
 export default function AnalyticsOverviewPage() {
   const w = useAdminAnalyticsWindow();
@@ -26,7 +27,7 @@ export default function AnalyticsOverviewPage() {
 
   const cards = [
     { label: '今日活跃', value: data ? String(data.dau) : '…' },
-    { label: '周活跃', value: data ? String(data.wau) : '…' },
+    { label: '窗口活跃', value: data ? String(data.wau) : '…' },
     { label: '总时长', value: data ? fmtDuration(data.totalSeconds) : '…' },
     { label: '正确率', value: data ? fmtPct(data.accuracy) : '…' },
   ];
@@ -50,7 +51,7 @@ export default function AnalyticsOverviewPage() {
         ))}
       </div>
       {data && data.moduleTop.length > 0 && (
-        <ChartBar points={data.moduleTop.map((m) => ({ label: m.module, value: m.students }))} emptyText="暂无数据" />
+        <ChartBar points={data.moduleTop.map((m) => ({ label: eventLabel(m.module), value: m.students }))} emptyText="暂无数据" />
       )}
       {data && data.moduleTop.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>暂无数据</p>}
     </AnalyticsPageShell>
