@@ -15,7 +15,7 @@
 SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_call_logs' AND COLUMN_NAME = 'module');
 SET @ddl := IF(@has_col = 0,
-  'ALTER TABLE llm_call_logs ADD COLUMN module VARCHAR(32) DEFAULT NULL COMMENT ''HTTP 请求模块（api 第一段，同 api_request_logs.module）；后台任务为 NULL'' AFTER scene',
+  'ALTER TABLE llm_call_logs ADD COLUMN module VARCHAR(32) DEFAULT NULL COMMENT ''HTTP 请求模块（api 第一段，同 api_request_logs.module）；无 HTTP 触发链的调用为 NULL'' AFTER scene',
   'SELECT 1');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 

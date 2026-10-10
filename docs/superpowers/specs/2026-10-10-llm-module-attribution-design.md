@@ -20,7 +20,7 @@
 -- 写法与 2026-09-20_analytics_ledger.sql 的带守卫 DROP 同套路，方向相反）
 ALTER TABLE llm_call_logs
   ADD COLUMN module VARCHAR(32) DEFAULT NULL
-    COMMENT 'HTTP 请求模块（api 第一段，同 api_request_logs.module）；后台任务为 NULL' AFTER scene,
+    COMMENT 'HTTP 请求模块（api 第一段，同 api_request_logs.module）；无 HTTP 触发链的调用为 NULL' AFTER scene,
   ADD KEY idx_lcl_module_time (module, created_at);
 ```
 
