@@ -37,6 +37,17 @@ const DATA: Paged<Record<string, unknown>> = {
       ref_type: null,
       ref_id: null,
     },
+    {
+      id: 3,
+      created_at: 'not-a-date',
+      event: 'page_viewed',
+      tier: 'student',
+      module: 'mainline',
+      scene: 'learning',
+      student_id: 3,
+      ref_type: null,
+      ref_id: null,
+    },
   ],
   page: 1,
   pageSize: 20,
@@ -44,7 +55,7 @@ const DATA: Paged<Record<string, unknown>> = {
 };
 
 describe('AnalyticsEventsPage', () => {
-  it('渲染筛选输入 + 分页表格（中文事件名、时间截断、ref 拼接）', async () => {
+  it('渲染筛选输入 + 分页表格（中文事件名、时间本地化、ref 拼接、Invalid Date 容错）', async () => {
     getEventsMock.mockResolvedValue(DATA);
 
     render(
@@ -57,8 +68,11 @@ describe('AnalyticsEventsPage', () => {
     expect(screen.getByLabelText('事件筛选')).toBeInTheDocument();
     expect(screen.getByLabelText('模块筛选')).toBeInTheDocument();
 
+    // 时间列已本地化（zh-CN）：期望日期在同环境内计算，规避 CI 时区差异
+    const expectDate = new Date('2026-10-10T08:00:00.000Z').toLocaleDateString('zh-CN');
     const row1 = await screen.findByTestId('event-row-1');
-    expect(row1.textContent).toContain('2026-10-10 08:00:00');
+    expect(row1.textContent).toContain(expectDate);
+    expect(row1.textContent).not.toContain('2026-10-10T');
     expect(row1.textContent).toContain('提交作答');
     expect(row1.textContent).toContain('主线');
     expect(row1.textContent).toContain('question:12');
@@ -66,6 +80,10 @@ describe('AnalyticsEventsPage', () => {
     const row2 = screen.getByTestId('event-row-2');
     expect(row2.textContent).toContain('AI 提问');
     expect(row2.textContent).toContain('—');
+
+    // Invalid Date 容错：显示原值
+    const row3 = screen.getByTestId('event-row-3');
+    expect(row3.textContent).toContain('not-a-date');
 
     // total 21 / pageSize 20 → 共 2 页；第 1 页「上一页」禁用
     expect(screen.getByTestId('events-pagination').textContent).toContain('第 1 / 2 页');

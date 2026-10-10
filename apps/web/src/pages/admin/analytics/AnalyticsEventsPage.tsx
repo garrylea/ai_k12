@@ -7,8 +7,13 @@ type EventRow = Record<string, unknown>;
 
 const s = (v: unknown): string => (v == null ? '—' : String(v));
 
-/** 服务端 created_at 经 JSON 序列化为 ISO；展示成 'YYYY-MM-DD HH:MM:SS'（截去毫秒/时区）。 */
-const fmtTime = (v: unknown): string => (v == null ? '—' : String(v).replace('T', ' ').slice(0, 19));
+/** 服务端 created_at 经 JSON 序列化为 ISO 字符串；本地化为 zh-CN（与同目录其它 admin 页一致），Invalid Date 容错显示原值。 */
+const fmtTime = (v: unknown): string => {
+  if (v == null) return '—';
+  const str = String(v);
+  const d = new Date(str);
+  return Number.isNaN(d.getTime()) ? str : d.toLocaleString('zh-CN', { hour12: false });
+};
 
 const refText = (r: EventRow): string => {
   if (r.ref_id == null) return '—';
