@@ -31,7 +31,7 @@ ALTER TABLE llm_call_logs
 1. **`ai-core/infra/request-context.ts`**：`RequestContext` 加可选字段 `module?: string | null`；把 `moduleFromRoute`（现为 `common/interceptors/analytics.interceptor.ts:26` 的 5 行纯函数）**迁移**到此导出——ai-core 不能反向 import common（循环依赖，文件头注释已有此裁定），公共纯函数放 ai-core 让两侧共用防漂移；`analytics.interceptor.ts` 改 import。
 2. **`RequestContextMiddleware`**（common/middleware）：建 context 时带 `module: moduleFromRoute(req.originalUrl ?? req.url ?? '')`（AuthMiddleware 之后已可用；skip 名单不影响——middleware 先跑）。
 3. **写入点**：`AnalyticsModule` 构造函数的 `setLlmCallSink((entry) => ...)` 回调里，从 ALS 读当前 context 的 module，**enrich 进 entry 再 push**（`{...entry, module: ctx?.module ?? null}`）。ai-core 的 `LlmCallLogEntry` 加可选 `module` 字段（类型层）+ repo INSERT 列清单加列——写入路径仍 fire-and-forget，埋点失败不影响调用。
-4. **归因边界**（与 Phase 0 口径对齐，注释写明）：HTTP 路径的 LLM 调用有 module；后台任务（explanation 缓存 / title / 探活 / admin-chat）ALS 为空 → NULL。explanation 缓存即使带 `meta.studentId` 也无 module（无 HTTP 上下文）。
+4. **归因边界**（与 Phase 0 口径对齐，注释写明）：NULL = 真正无 HTTP 触发链的调用（如启动期任务）；HTTP 触发的 fire-and-forget（解释缓存/标题生成）与 admin/parent 的 HTTP 调用**带触发请求的 module**（ALS 随 Promise 链延续）。
 
 ### 2.3 查询端
 

@@ -18,7 +18,9 @@ export interface RequestContext {
   /**
    * HTTP 请求模块（api 第一段，同 api_request_logs.module 值域；spec §2.2）。
    * 由 RequestContextMiddleware 建上下文时填；ai-core 自身不填。
-   * 后台任务（解释缓存 / 标题 / 探活）无 HTTP 上下文 → null，与归属覆盖率口径一致。
+   * NULL = 真正无 HTTP 触发链的调用（如启动期任务）；HTTP 触发的 fire-and-forget
+   * （解释缓存 / 标题生成）与 admin/parent 的 HTTP 调用带触发请求的 module
+   * （ALS 随 Promise 链延续），与归属覆盖率口径一致。
    */
   module?: string | null;
 }

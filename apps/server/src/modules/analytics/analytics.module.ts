@@ -38,7 +38,7 @@ import { getRequestContext, type RequestContext } from '../../ai-core/infra/requ
 /**
  * LLM 账本的 module enrich（spec §2.2）：ai-core 自身不知道 HTTP 路由，由 Nest 层
  * 在 sink 里从 ALS 回填。抽成纯函数便于单测（AnalyticsModule 构造器依赖 DI 不可直接 new）。
- * 归因边界：无 ALS（后台任务：解释缓存/标题/探活）或 context 未带 module → null，
+ * 归因边界：无 ALS（真正无 HTTP 触发链的调用，如启动期任务）或 context 未带 module → null，
  * 与 Phase 0 归属覆盖率口径一致（NULL = 无 HTTP 上下文，不当 0）。
  */
 export function enrichLlmCallEntry(entry: LlmCallLogEntry, ctx: RequestContext | null): LlmCallLogEntry {

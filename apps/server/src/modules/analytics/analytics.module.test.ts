@@ -37,7 +37,7 @@ describe('LLM sink 的 module enrich（spec §2.2）', () => {
     expect(pushed[0].module).toBe('practice');
   });
 
-  it('无 ALS（后台任务：解释缓存/标题/探活）→ module null（归因边界，与 Phase 0 口径对齐）', () => {
+  it('无 ALS（无 HTTP 触发链的调用）→ module null（归因边界，与 Phase 0 口径对齐）', () => {
     const pushed: LlmCallLogEntry[] = [];
     makeModule(pushed);
     emitLlmCall(makeEntry());
