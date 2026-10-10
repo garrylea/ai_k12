@@ -314,6 +314,46 @@ describe('OpsAnalyticsRepository — M4（/modules 每行三列 LLM 统计数据
   });
 });
 
+describe('OpsAnalyticsRepository — M5（/api-usage 按模块聚合数据面）', () => {
+  it('apiUsage：失败谓词与 qualityApi 同款字符串、GROUP BY module、AVG(latency_ms)、窗口参数化', async () => {
+    const pool = poolWithQueries([
+      [
+        { module: 'practice', calls: 10, failed_calls: 2, avg_latency_ms: 123.6 },
+        { module: null, calls: 3, failed_calls: 0, avg_latency_ms: null },
+      ],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.apiUsage(W);
+    expect(r).toEqual([
+      { module: 'practice', calls: 10, failedCalls: 2, avgLatencyMs: 123.6 },
+      { module: null, calls: 3, failedCalls: 0, avgLatencyMs: null },
+    ]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('FROM api_request_logs');
+    expect(String(sql)).toContain('status_code >= 500 OR biz_code IS NOT NULL');
+    expect(String(sql)).toContain('GROUP BY module');
+    expect(String(sql)).toContain('ORDER BY calls DESC');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    // 聚合 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容的全仓纪律；mock 池只实现 query）
+    expect(pool.execute).toBeUndefined();
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('apiUsage：失败谓词与 qualityApi 逐字符一致（从 qualityApi 的 SUM(...) 里抽出谓词做同款断言）', async () => {
+    const pool = poolWithQueries([[{ total: 1, failures: 0 }], [{ module: 'ai', calls: 1, failed_calls: 0, avg_latency_ms: 5 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    await repo.qualityApi(W);
+    const apiUsage = await repo.apiUsage(W);
+    expect(apiUsage).toEqual([{ module: 'ai', calls: 1, failedCalls: 0, avgLatencyMs: 5 }]);
+    const qSql = String(pool.query.mock.calls[0][0]);
+    const aSql = String(pool.query.mock.calls[1][0]);
+    const m = qSql.match(/SUM\((status_code >= 500 OR biz_code IS NOT NULL)\)/);
+    expect(m).not.toBeNull();
+    // 谓词漂移防护：api-usage 的失败口径必须永远是 quality 的同一串
+    expect(aSql).toContain(`SUM(${m![1]})`);
+  });
+});
+
 describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls / requests 数据面）', () => {
   it('llmTokenGroups(scene)：unavailable 单列（CASE WHEN usage_source <> unavailable），窗口参数化', async () => {
     const pool = poolWithQueries([

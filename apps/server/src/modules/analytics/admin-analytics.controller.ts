@@ -92,4 +92,11 @@ export class AdminAnalyticsController {
   requests(@Query() q: { path?: string; status?: string; minLatency?: string; page?: string }) {
     return this.ops.requests(q);
   }
+
+  /** API 请求按模块聚合（M5）：calls/失败率/平均耗时；失败谓词与 /quality 同款；无分页。 */
+  @Get('api-usage')
+  @Roles('admin')
+  apiUsage(@Query() q: { from?: string; to?: string }) {
+    return this.ops.apiUsage(q);
+  }
 }

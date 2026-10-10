@@ -33,6 +33,7 @@ function svcWith(overrides: Partial<Record<keyof OpsAnalyticsRepository, unknown
     llmTokensOverview: vi.fn(async () => ({ attributed: 0, unattributed: 0, unavailableCalls: 0 })),
     llmModuleUsage: vi.fn(async () => [] as { module: string | null; calls: number; inputTokens: number; outputTokens: number }[]),
     qualityApi: vi.fn(async () => ({ total: 0, failures: 0 })),
+    apiUsage: vi.fn(async () => [] as { module: string | null; calls: number; failedCalls: number; avgLatencyMs: number | null }[]),
     qualityErrorCodes: vi.fn(async () => [] as { code: number; count: number }[]),
     qualityLlm: vi.fn(async () => ({ calls: 0, timeouts: 0, fallbacks: 0, attributed: 0 })),
     contentQuality: vi.fn(async () => ({
@@ -442,6 +443,48 @@ describe('OpsAnalyticsService.cohortCompare', () => {
     expect(r2.groups[0]).toEqual({ key: 'mainline', students: 5, value: 2 });
     expect(answersByOutcome.mock.calls[1][1]).toBe('platform_class');
     expect(repo.sessionsByOutcome).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpsAnalyticsService.apiUsage（M5）', () => {
+  it('形状映射：failureRate=failed/calls（failed=0 → 真实 0，分母 0 防御 → null）、avgLatencyMs 取整、NULL module 透传', async () => {
+    const apiUsage = vi.fn(async (_w: OpsWindow) => [
+      { module: 'practice', calls: 10, failedCalls: 2, avgLatencyMs: 123.6 },
+      { module: null, calls: 3, failedCalls: 0, avgLatencyMs: null },
+      { module: 'ai', calls: 1, failedCalls: 0, avgLatencyMs: 45.2 },
+    ]);
+    const { svc, repo } = svcWith({ apiUsage });
+    const r = await svc.apiUsage({ from: '2026-10-03', to: '2026-10-09' });
+    expect(r.items[0]).toEqual({
+      module: 'practice', calls: 10, failedCalls: 2, failureRate: 0.2, avgLatencyMs: 124,
+    });
+    // failed=0 是真实 0（不许写成 null）；AVG NULL（组内 latency 全缺失）防御 → null
+    expect(r.items[1]).toEqual({
+      module: null, calls: 3, failedCalls: 0, failureRate: 0, avgLatencyMs: null,
+    });
+    expect(r.items[2]).toEqual({
+      module: 'ai', calls: 1, failedCalls: 0, failureRate: 0, avgLatencyMs: 45,
+    });
+    expect(repo.apiUsage).toHaveBeenCalledTimes(1);
+    const w = apiUsage.mock.calls[0][0];
+    expect(w.fromAt).toBe('2026-10-03 00:00:00');
+    expect(w.toAt).toBe('2026-10-10 00:00:00');
+  });
+
+  it('按 calls DESC 排序（repo 乱序输入也在 service 重排）', async () => {
+    const apiUsage = vi.fn(async (_w: OpsWindow) => [
+      { module: 'ai', calls: 1, failedCalls: 0, avgLatencyMs: 10 },
+      { module: 'practice', calls: 9, failedCalls: 0, avgLatencyMs: 10 },
+    ]);
+    const { svc } = svcWith({ apiUsage });
+    const r = await svc.apiUsage({});
+    expect(r.items.map((i: { module: string | null }) => i.module)).toEqual(['practice', 'ai']);
+  });
+
+  it('窗口内无行 → items 空数组；白名单/分页参数不存在（本端点无此概念）', async () => {
+    const { svc } = svcWith({});
+    const r = await svc.apiUsage({});
+    expect(r).toEqual({ items: [] });
   });
 });
 

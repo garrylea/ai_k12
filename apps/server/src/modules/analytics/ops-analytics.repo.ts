@@ -137,6 +137,15 @@ export interface QualityApiRow {
   failures: number;
 }
 
+/** /api-usage 单模块聚合行（M5）。module 为 api_request_logs 原值，NULL = 无 module 归属的请求。 */
+export interface ApiUsageRow {
+  module: string | null;
+  calls: number;
+  failedCalls: number;
+  /** AVG(latency_ms) 原值；组内 latency_ms 全为 NULL 时 MySQL 返回 NULL（service 负责取整与防御）。 */
+  avgLatencyMs: number | null;
+}
+
 export interface ErrorCodeDistRow {
   code: number;
   count: number;
@@ -664,6 +673,35 @@ export class OpsAnalyticsRepository {
     );
     const r = rows[0] ?? {};
     return { total: Number(r.total ?? 0), failures: Number(r.failures ?? 0) };
+  }
+
+  /**
+   * /api-usage 的数据面（M5，设计 §3.1）：窗口内 api_request_logs 按 module GROUP BY，
+   * NULL module 自成一组原样返回（不转字符串，前端显示「后台任务」——与 llm-tokens
+   * 的 module 分组同款纪律）。
+   *
+   * **失败谓词与 qualityApi 逐字符同款**（`status_code >= 500 OR biz_code IS NOT NULL`，
+   * 语义依据见 qualityApi docstring）：repo 测试从 qualityApi 的 SUM(...) 抽谓词做同款断言，
+   * 两处任何一处改动都会被对方抓住。AVG 取整数放在 service（repo 返回账本原貌）。
+   */
+  async apiUsage(w: OpsWindow): Promise<ApiUsageRow[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT module,
+              COUNT(*) AS calls,
+              COALESCE(SUM(status_code >= 500 OR biz_code IS NOT NULL), 0) AS failed_calls,
+              AVG(latency_ms) AS avg_latency_ms
+         FROM api_request_logs
+        WHERE created_at >= ? AND created_at < ?
+        GROUP BY module
+        ORDER BY calls DESC`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({
+      module: r.module === null ? null : String(r.module),
+      calls: Number(r.calls),
+      failedCalls: Number(r.failed_calls ?? 0),
+      avgLatencyMs: r.avg_latency_ms === null ? null : Number(r.avg_latency_ms),
+    }));
   }
 
   /** /quality 的错误码分布：只统计失败行（5xx 或 biz_code 非 NULL），biz_code NULL 按 5000 归组。 */

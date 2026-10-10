@@ -423,6 +423,29 @@ export class OpsAnalyticsService {
   }
 
   /**
+   * GET /api/admin/analytics/api-usage（M5，设计 §3.1）。
+   * 失败率口径：分母 = calls（GROUP BY 后每组 ≥1，分母 0 分支纯防御 → null）；
+   * failed=0 → failureRate=0 是**真实 0**（计数比率与 answered=0→null 的分母缺位不同族）。
+   * avgLatencyMs 取整；AVG 为 NULL（组内 latency 全缺失）→ null。按 calls DESC（repo 已序，
+   * service 再稳定排序一次兜底）。无白名单/分页参数（本端点无此概念）。
+   */
+  async apiUsage(q: { from?: string; to?: string }) {
+    const w = parseWindow(q.from, q.to);
+    const rows = await this.repo.apiUsage(w);
+    return {
+      items: rows
+        .map((r) => ({
+          module: r.module,
+          calls: r.calls,
+          failedCalls: r.failedCalls,
+          failureRate: r.calls === 0 ? null : r.failedCalls / r.calls,
+          avgLatencyMs: r.avgLatencyMs === null ? null : Math.round(r.avgLatencyMs),
+        }))
+        .sort((a, b) => b.calls - a.calls),
+    };
+  }
+
+  /**
    * GET /api/admin/analytics/llm-tokens（Task 11）。
    * 分组聚合 + 顶层总览两条并行；unavailable 单列（顶层 unavailableCalls 与
    * items[].unavailableCalls 并存，语义 = 「该范围下量不到的调用数」）。
