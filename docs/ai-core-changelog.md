@@ -8,6 +8,10 @@
 
 ---
 
+## 2026-10-10 · 词根族排除边复审（5335 词全量重扫）
+
+`vocabulary_roots.py` 的 `EXCLUDE_EDGES` 新增 **47 条**人工审核排除项（2026-10-09 复审：词表扩到 5335 词后全量重扫 463 条同族边逐条过）。典型假阳性三类：人名小写误连（`james`/`peter`/`tony`/`badal`/`billy`）、词源无关的同形前缀（`busy`/`early`/`many`/`topic` 来自拉丁/希腊词干）、族链重排后按新父链需补排的（`importance`/`encounter`）。审查产物流程不变：草稿写 `output/`（gitignore），审完 `--apply` 先清后写 `english_words.root_key/root_affixes`；审核结果固化在 `EXCLUDE_EDGES`（机制见 `docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md` §3.3 与 `docs/data-refinery-使用手册.md`）。
+
 ## 2026-10-10 · 单点登录互踢 + 走神预警同段只报一次
 
 spec：`docs/superpowers/specs/2026-10-10-single-session-login-design.md`；计划：`docs/superpowers/plans/2026-10-10-single-session-login-and-alert-dedupe.md`（8 任务批，本条为 Task 8 收尾）。
