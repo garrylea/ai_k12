@@ -1663,3 +1663,7 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 ## 2026-10-10 PRD §7.14 补充角色权限矩阵
 
 矩阵按三角色 × 八个功能域（学习域/采集上报/家长域/学习管控/运营管理台/订阅运营/数据分析/手写 demo）固化权限边界，全部行经代码核实（@Roles 声明清单 + requireOwnedStudent 归属校验 + admin 域类级 Roles）。要点：管理员不能替学生作答、不能下钻单学生明细（看数据只在聚合分析页）、不经手学习管控与家长域；矩阵为需求级约束，代码真源是 @Roles + RolesGuard，新增端点必须显式声明角色。
+
+## 2026-10-10 PRD §7.14 补充角色模型（无继承/变更路径/生效时机）
+
+全部行经代码核实：① RolesGuard 平面匹配（requiredRoles.includes(user.role)），三角色互斥、无继承无转换，管理员不是「更高权限的家长」；② 创建路径——家长自助注册 / 家长建学生子账号 / 管理员仅 seed-admin.ts（ADMIN_INITIAL_*，无 UI 提升入口）；③ 停用生效时机——setParentStatus 循环连带名下学生 + BanRegistry 进程内即时（旧 token 立即 401，重启从 is_active=0 重建），DB 停用标志只拦登录；④ 改/重置密码不踢旧 token（§7.8 口径不变）；⑤ 审计现状——仅订阅调整有 subscription_adjustments，账号停用/封禁无专门审计表（如需属后续立项）。
