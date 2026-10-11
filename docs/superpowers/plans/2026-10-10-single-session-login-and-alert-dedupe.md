@@ -37,7 +37,7 @@
 - Consumes: 既有 `alertsRepo.existsRecent(studentId, type, since)`（`since` 是任意 Date，签名不变）。
 - Produces: `RecordSafetyAlertInput` 新增可选字段 `dedupSince?: Date`——传入时以它为去重起点（= 同段只报一次）；不传时沿用 30 分钟窗口。后续 Task 2 依赖此字段。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `safety-alerts.service.test.ts` 的既有 `describe` 内新增两例（文件已有 `mkAlerts` / `mkSvc` / `input` / `flush` 辅助，直接用）：
 
@@ -69,12 +69,12 @@ it('不传 dedupSince → 沿用 30 分钟窗口（闲聊等类型行为不变�
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/safety/safety-alerts.service.test.ts`
 Expected: 第一例 FAIL——`existsRecent` 收到的是 `now-30min` 而非 `segmentStart`（`dedupSince` 字段尚不存在，被忽略）。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `safety-alerts.service.ts` 两处改动：
 
@@ -100,12 +100,12 @@ export interface RecordSafetyAlertInput {
 const since = input.dedupSince ?? new Date(Date.now() - DEDUPE_WINDOW_MS);
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/safety/safety-alerts.service.test.ts`
 Expected: 全部 PASS（含既有用例——它们不传 `dedupSince`，行为不变）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/safety/safety-alerts.service.ts apps/server/src/modules/safety/safety-alerts.service.test.ts
@@ -123,7 +123,7 @@ git commit -m "feat(server): SafetyAlertsRecord 支持 dedupSince 去重起点�
 - Consumes: Task 1 的 `dedupSince?: Date`。
 - Produces: 走神预警（away/idle）去重语义 = 「同一段挂机（`hidden_since` 相同）只报一次」。对外 API 无变化。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `study-sessions.service.test.ts` 的阈值判定 describe 内新增（复用文件既有 `makeRepo` / `makeSafety` / `makeControls` / `makeService` / `flushAsync` 辅助，照抄「心跳挂机阈值命中」用例的骨架）：
 
@@ -148,12 +148,12 @@ it('走神预警写入带 dedupSince=hiddenSince（同段只报一次；旧「30
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts`
 Expected: 新例 FAIL——`record` 收到的参数没有 `dedupSince`。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `study-sessions.service.ts` 的 `maybeRecordHiddenAlert` 里 `void this.safetyAlerts.record({...})` 增加 `dedupSince: hiddenSince`：
 
@@ -181,12 +181,12 @@ void this.safetyAlerts.record({
 * 是新段（新 hidden_since），照常再报。
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts src/modules/safety/safety-alerts.service.test.ts`
 Expected: 全部 PASS。若既有用例断言了 `record` 的**精确**入参形状（少一个字段也算不等），按「测试错」原则把该断言改成 `expect.objectContaining`。
 
-- [ ] **Step 5: 旧口径文档标注（保留原文 + 就地注记）**
+- [x] **Step 5: 旧口径文档标注（保留原文 + 就地注记）**
 
 `docs/superpowers/specs/2026-09-20-parent-alert-banner-timeliness-design.md` 中涉及「30 分钟去重窗口」的**走神预警**表述（:43-45 附近两处）就地追加注记，原文保留：
 
@@ -198,7 +198,7 @@ Expected: 全部 PASS。若既有用例断言了 `record` 的**精确**入参形
 
 注意：`docs/UX-UI设计文档.md:537` 与 `parent-controls-and-alerts-design.md` 的「30 分钟去重」说的是**闲聊**，不在本批范围，**不要动**。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/analytics/study-sessions.service.ts apps/server/src/modules/analytics/study-sessions.service.test.ts docs/superpowers/specs/2026-09-20-parent-alert-banner-timeliness-design.md
@@ -218,7 +218,7 @@ git commit -m "feat(server): 走神预警同段只报一次（dedupSince=hiddenS
 **Interfaces:**
 - Produces: 表 `auth_sessions(role, user_id, token_seq)`，唯一键 `uk_role_user(role, user_id)`。Task 4 的仓储读写它。
 
-- [ ] **Step 1: 写迁移文件**（幂等）
+- [x] **Step 1: 写迁移文件**（幂等）
 
 ```sql
 -- 2026-10-10 单点登录互踢：每账号一行，token_seq = 当前有效会话序号（登录 +1）。
@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 应用迁移 + 同步 schema.sql**
+- [x] **Step 2: 应用迁移 + 同步 schema.sql**
 
 ```bash
 mysql -h localhost -P 3306 -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-10-10_auth_sessions.sql
@@ -241,14 +241,14 @@ mysql -h localhost -P 3306 -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-
 
 schema.sql 插入同款 DDL（去掉注释里的「幂等」措辞差异，保持与迁移逐列一致）。
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
 ```bash
 mysql --vertical -h localhost -P 3306 -u ai_k12 -pai_k12 ai_k12 -e "SHOW CREATE TABLE auth_sessions\G" 2>&1 | grep -v "Using a password"
 ```
 Expected: 表存在、唯一键 `uk_role_user` 在。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/db/migrations/2026-10-10_auth_sessions.sql tools/db/schema.sql
@@ -269,7 +269,7 @@ git commit -m "feat(db): auth_sessions 表（单点登录互踢的 seq 持久层
   - `AuthSessionsRepository.bumpAndReturnSeq(role: 'admin'|'parent'|'student', userId: number): Promise<number>`（返回 bump 后的 seq）；`.listAll(): Promise<Array<{ role: 'admin'|'parent'|'student'; user_id: number; token_seq: number }>>`。
   - `SessionRegistry.bump(role, id, seq): void`；`.matches(role, id, seq: number | undefined): boolean`；`.load(rows): void`。Task 5 的中间件与 Task 6 的 AuthService 消费。
 
-- [ ] **Step 1: 写 SessionRegistry 失败测试**（仿 `ban-registry.test.ts`）
+- [x] **Step 1: 写 SessionRegistry 失败测试**（仿 `ban-registry.test.ts`）
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -313,12 +313,12 @@ describe('SessionRegistry', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/common/guards/session-registry.test.ts`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现 SessionRegistry**
+- [x] **Step 3: 实现 SessionRegistry**
 
 `apps/server/src/common/guards/session-registry.ts`：
 
@@ -358,7 +358,7 @@ export class SessionRegistry {
 }
 ```
 
-- [ ] **Step 4: 写 AuthSessionsRepository 失败测试**
+- [x] **Step 4: 写 AuthSessionsRepository 失败测试**
 
 `apps/server/src/database/repositories/auth-sessions.repo.test.ts`（仿同目录其他 repo 测试的假 pool 模式）：
 
@@ -403,7 +403,7 @@ describe('AuthSessionsRepository', () => {
 });
 ```
 
-- [ ] **Step 5: 跑测试确认失败 → 实现仓储 → 跑测试通过**
+- [x] **Step 5: 跑测试确认失败 → 实现仓储 → 跑测试通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/auth-sessions.repo.test.ts src/common/guards/session-registry.test.ts`
 
@@ -453,7 +453,7 @@ export class AuthSessionsRepository {
 }
 ```
 
-- [ ] **Step 6: CommonModule 接线（provide + 启动重建）**
+- [x] **Step 6: CommonModule 接线（provide + 启动重建）**
 
 `common.module.ts`：providers/exports 各加 `SessionRegistry, AuthSessionsRepository`，构造注入 `sessionRegistry` 与 `authSessionsRepo`，`onModuleInit` 里重建：
 
@@ -474,12 +474,12 @@ async onModuleInit() {
 
 （import `Logger` from `@nestjs/common`，类上加 `private readonly logger = new Logger(CommonModule.name);` 则用 `this.logger.error(...)`。）
 
-- [ ] **Step 7: 全量跑 common + repo 相关测试**
+- [x] **Step 7: 全量跑 common + repo 相关测试**
 
 Run: `cd apps/server && npx vitest run src/common src/database/repositories`
 Expected: 全部 PASS。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/common/guards/session-registry.ts apps/server/src/common/guards/session-registry.test.ts apps/server/src/database/repositories/auth-sessions.repo.ts apps/server/src/database/repositories/auth-sessions.repo.test.ts apps/server/src/common/common.module.ts
@@ -497,7 +497,7 @@ git commit -m "feat(server): SessionRegistry + AuthSessionsRepository（互踢�
 - Consumes: Task 4 的 `SessionRegistry.matches(role, id, seq)`。
 - Produces: 鉴权失败语义——seq 失配/缺失 → `UnauthorizedException({ code: 1013, message: '账号已在其他设备登录' })`。Task 7 前端消费该码。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `apps/server/src/common/middleware/auth.middleware.test.ts`（新文件；该中间件此前无单测，整文件新建，无需 cleanup——纯函数式用例）：
 
@@ -582,12 +582,12 @@ describe('AuthMiddleware —— 单点登录互踢（seq 校验）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/common/middleware/auth.middleware.test.ts`
 Expected: FAIL——`AuthMiddleware` 构造函数只收 2 参（第三参 undefined → matches 报错或恒 false 的意外行为）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `jwt-auth.guard.ts` 的 `JwtUser` 加一行：
 
@@ -615,12 +615,12 @@ if (!this.sessionRegistry.matches(payload.role, payload.sub, payload.seq)) {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/common`
 Expected: 全部 PASS（含既有 ban-registry / roles.guard 用例——中间件构造参数变了，若有**直接 new AuthMiddleware** 的既有测试须同步补第三参，没有则无事）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/common/guards/jwt-auth.guard.ts apps/server/src/common/middleware/auth.middleware.ts apps/server/src/common/middleware/auth.middleware.test.ts
@@ -638,7 +638,7 @@ git commit -m "feat(server): AuthMiddleware 校验 token seq，失配 401/1013�
 - Consumes: Task 4 的 `AuthSessionsRepository.bumpAndReturnSeq` / `SessionRegistry.bump`。
 - Produces: token payload 带 `seq`；`POST /api/auth/login` 与 `POST /api/auth/register` 的返回形状不变（`{ token, user }`），差异只在 token 内容。
 
-- [ ] **Step 1: 更新失败测试**
+- [x] **Step 1: 更新失败测试**
 
 `auth.service.test.ts`：
 
@@ -697,12 +697,12 @@ it('同账号二次登录 → 第一次的 token seq 失配（互踢语义，服
 
 （尖括号处填该文件既有的账号/密码 mock 入参，与相邻用例保持同一形态。admin/parent 分支的 bump 断言若既有用例覆盖了三种角色登录，各补 `toHaveBeenCalledWith('admin'|'parent', <id>)` 一行即可。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/auth.service.test.ts`
 Expected: FAIL——`d.authSessionsRepo` 为 undefined（构造缺参）或 sign 断言缺 seq。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `auth.service.ts`：
 
@@ -748,12 +748,12 @@ import { CommonModule } from '../../common/common.module.js';
 // imports: [BillingModule, CommonModule, JwtModule.register({...})]
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/auth`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/auth/auth.service.ts apps/server/src/modules/auth/auth.module.ts apps/server/src/modules/auth/auth.service.test.ts
@@ -771,7 +771,7 @@ git commit -m "feat(server): 登录/注册 bump 会话 seq（同账号同角色�
 - Consumes: 服务端 401 响应体 `{ code: 1013, message: '账号已在其他设备登录', data: null }`（HttpExceptionFilter 渲染）；`authStorage.ts` 既有 `clearAuthSession()`。
 - Produces: 全局行为——任意 API 返回 1013 → 清登录态 → 跳 `/login?kicked=1`。三端（学生/家长/管理）与 PC App 共用。
 
-- [ ] **Step 1: 写 api.test.ts 失败测试**（照 2001 用例同款骨架，:368 附近；`stubFetch` / `stubLocationAssign` 为该文件既有辅助）
+- [x] **Step 1: 写 api.test.ts 失败测试**（照 2001 用例同款骨架，:368 附近；`stubFetch` / `stubLocationAssign` 为该文件既有辅助）
 
 ```ts
 it('code=1013 → 清登录态 + window.location.assign 到 /login?kicked=1，Promise 永不 resolve', async () => {
@@ -802,12 +802,12 @@ it('code=1003（token 过期）→ 行为不变，仍抛 ApiError', async () => 
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/services/api.test.ts`
 Expected: 1013 例 FAIL——现实现走 `throw new ApiError`，不跳转、不清 storage。
 
-- [ ] **Step 3: 实现 fetchApi 分支**
+- [x] **Step 3: 实现 fetchApi 分支**
 
 `api.ts` 顶部加 `import { clearAuthSession } from '@/services/authStorage';`（`getAuthToken` 已从该模块导入，合并进同一行）。`fetchApi` 的 `json.code === 2001` 分支**之前**插入：
 
@@ -821,7 +821,7 @@ if (json.code === 1013) {
 }
 ```
 
-- [ ] **Step 4: 写 LoginPage 失败测试 → 实现**
+- [x] **Step 4: 写 LoginPage 失败测试 → 实现**
 
 `LoginPage.test.tsx` 新增两例（渲染方式照该文件既有 helper）：
 
@@ -851,12 +851,12 @@ const [error, setError] = useState(
 
 （提示复用既有 `error` 红字样式块（:156-158），无需新 UI。用户开始输入后照常可被 `setError('')` 清掉。）
 
-- [ ] **Step 5: 跑两端测试确认通过**
+- [x] **Step 5: 跑两端测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/services/api.test.ts src/pages/auth/LoginPage.test.tsx`
 Expected: 全部 PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/services/api.test.ts apps/web/src/pages/auth/LoginPage.tsx apps/web/src/pages/auth/LoginPage.test.tsx
@@ -872,7 +872,7 @@ git commit -m "feat(web): 401/1013 全局拦截清登录态回登录页，登录
 
 **Interfaces:** 无代码接口；文档与实现一致性的收尾。
 
-- [ ] **Step 1: API 文档补 1013**
+- [x] **Step 1: API 文档补 1013**
 
 §4.1（统一登录）的错误码清单加一行（紧邻 1003）：
 
@@ -882,14 +882,14 @@ git commit -m "feat(web): 401/1013 全局拦截清登录态回登录页，登录
 
 并在 §4.1 或 §5 相应数据流处补一句口径：惰性失效——旧端在**下一次请求**时感知（学习页心跳 30s，其他页面到下次操作）；同浏览器多标签页共用同一登录态不受影响；修改/重置密码不踢已发 token。openapi.yaml 中凡是描述 401/1003 的响应处同步补 1013（`grep -n "1003" docs/api/openapi.yaml` 定位）。
 
-- [ ] **Step 2: schema 对账**
+- [x] **Step 2: schema 对账**
 
 ```bash
 python3 tools/db/schema_reconcile.py
 ```
 Expected: `auth_sessions` 在账、总表数 75→76、无 diff。
 
-- [ ] **Step 3: 全量测试 + lint**
+- [x] **Step 3: 全量测试 + lint**
 
 ```bash
 cd apps/server && npm test && npm run lint
@@ -897,11 +897,11 @@ cd ../web && npm test && npm run lint
 ```
 Expected: 全部 PASS（lint 的 2 个存量 error 在 tracker.test.ts / MobilePointsPage.test.tsx，与本批无关，勿顺手修）。
 
-- [ ] **Step 4: changelog 条目**
+- [x] **Step 4: changelog 条目**
 
 `docs/ai-core-changelog.md` 顶部追加 `## 2026-10-10 · 单点登录互踢 + 走神预警同段只报一次`：记录裁决（同账号同角色、401 惰性失效、方案 A token seq、预警同段只报一次）、实现落点、**上线须知**（① 存量 token 全失效需重登；② 本机重启后端须 `npm run build` + `export JWT_SECRET` + `node dist/main.js`；③ `SessionRegistry` 单进程假设）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml docs/ai-core-changelog.md

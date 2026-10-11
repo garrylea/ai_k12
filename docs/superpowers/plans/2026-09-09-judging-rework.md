@@ -30,7 +30,7 @@
 - Modify: `tools/db/schema.sql`（折回，先例：训练模块表区块注释「install_mysql.sh 只执行 schema.sql，迁移需同步折回」）
 - Modify: `docs/K12智学系统-数据库设计文档.md`
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 `tools/db/migrations/2026-09-09_add_question_self_assessments.sql`：
 
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS question_self_assessments (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 折回 schema.sql**
+- [x] **Step 2: 折回 schema.sql**
 
 在 `tools/db/schema.sql` 的 `practice_results` 表（:555-579）之后、`error_redo_logs` 之前插入同一份 CREATE TABLE，并带区块注释：
 
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS question_self_assessments (
 -- 折回自 migrations/2026-09-09_add_question_self_assessments.sql。
 ```
 
-- [ ] **Step 3: 应用到本地库**
+- [x] **Step 3: 应用到本地库**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-09_add_question_self_assessments.sql
@@ -69,11 +69,11 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW CREATE TABLE question_self_assessments\
 
 Expected: 表存在，含 `idx_qsa_student_question` 索引与两个 FK。
 
-- [ ] **Step 4: 更新 DB 设计文档**
+- [x] **Step 4: 更新 DB 设计文档**
 
 在 `docs/K12智学系统-数据库设计文档.md` 中 questions 相关表章节（`grep -n "practice_results" docs/K12智学系统-数据库设计文档.md` 定位插入点）加入与 schema.sql 相同的字段说明表；`exam_answers.method` 的注释同步扩为 `exact | ai | self_assess | unanswered | failed`（后文 Task 3 会用到 `self_assess`/`unanswered` 取值），`practice_results.method` 注释扩为 `exact | ai | self_assess | unanswered`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-09_add_question_self_assessments.sql tools/db/schema.sql docs/K12智学系统-数据库设计文档.md
@@ -89,7 +89,7 @@ git commit -m "feat(db): question_self_assessments 自评留痕表（判题体�
 - Modify: `apps/server/src/database/repositories/index.ts`
 - Test: `apps/server/src/database/repositories/question-self-assessments.repo.test.ts`
 
-- [ ] **Step 1: 写失败测试**（mockPool 模式照抄 `student-hidden-questions.repo.test.ts`）
+- [x] **Step 1: 写失败测试**（mockPool 模式照抄 `student-hidden-questions.repo.test.ts`）
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -144,12 +144,12 @@ describe('QuestionSelfAssessmentsRepository.findLatestByStudentAndQuestionIds', 
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/question-self-assessments.repo.test.ts`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现 repo**
+- [x] **Step 3: 实现 repo**
 
 ```typescript
 import { Injectable, Inject } from '@nestjs/common';
@@ -202,12 +202,12 @@ export class QuestionSelfAssessmentsRepository {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/question-self-assessments.repo.test.ts`
 Expected: PASS（3 个用例）。
 
-- [ ] **Step 5: 导出 + 注册**
+- [x] **Step 5: 导出 + 注册**
 
 `apps/server/src/database/repositories/index.ts` 按字母序插入：
 
@@ -217,12 +217,12 @@ export { QuestionSelfAssessmentsRepository } from './question-self-assessments.r
 
 `apps/server/src/modules/practice/practice.module.ts` providers 数组加入 `QuestionSelfAssessmentsRepository`（import 自 `../../database/repositories/index.js`）——JudgeCoreService（本模块）与 PracticeService 都要注入它。
 
-- [ ] **Step 6: 全量测试 + tsc**
+- [x] **Step 6: 全量测试 + tsc**
 
 Run: `cd apps/server && npm test && npm run build`
 Expected: 全绿（72+ 用例）、tsc 无错误。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/ apps/server/src/modules/practice/practice.module.ts
@@ -237,7 +237,7 @@ git commit -m "feat(server): QuestionSelfAssessmentsRepository 自评留痕 repo
 - Modify: `apps/server/src/modules/practice/judge-core.service.ts`
 - Test: `apps/server/src/modules/practice/judge-core.service.test.ts`（新建，此前无测试文件）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `apps/server/src/modules/practice/judge-core.service.test.ts`：
 
@@ -352,7 +352,7 @@ describe('recordSelfAssessment', () => {
 Run: `cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts`
 Expected: FAIL（subjectiveJudgeMode 未导出、recordSelfAssessment 不存在、构造参数不匹配）。
 
-- [ ] **Step 2: 改造 judge-core.service.ts**
+- [x] **Step 2: 改造 judge-core.service.ts**
 
 按下述要点修改（保持既有注释风格）：
 
@@ -475,7 +475,7 @@ export interface JudgeOutput {
 
 构造函数末尾加 `private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,`（import 值导入自 `../../database/repositories/index.js`，注意 repo 须值导入——NestJS DI 依赖设计时类型，参考 exams.service.ts 头部注释）。
 
-- [ ] **Step 3: 修 PracticeService.judge 的落库分支**
+- [x] **Step 3: 修 PracticeService.judge 的落库分支**
 
 `apps/server/src/modules/practice/practice.service.ts` `judge()` 中，判题后插入两个早退（在 `practiceResultsRepo.upsert` 之前）：
 
@@ -509,17 +509,17 @@ export interface JudgeOutput {
     }
 ```
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts`
 Expected: PASS（全部用例）。若有既有测试因 `JudgeOutput` 类型变化报错（如 practice 相关测试 mock 判题返回），以本计划契约为准修测试数据（`isCorrect` 可为 null、method 加新枚举）。
 
-- [ ] **Step 5: 全量测试 + tsc**
+- [x] **Step 5: 全量测试 + tsc**
 
 Run: `cd apps/server && npm test && npm run build`
 Expected: 全绿。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/
@@ -535,7 +535,7 @@ git commit -m "feat(server): JudgeCore 四路由（主观题 self_assess 早退 
 - Modify: `apps/server/src/database/repositories/questions.repo.ts:85-111`
 - Test: `apps/server/src/database/repositories/questions.repo.test.ts`（追加用例）
 
-- [ ] **Step 1: TARGETED_TYPES 加 calculation**
+- [x] **Step 1: TARGETED_TYPES 加 calculation**
 
 ```typescript
   private static readonly TARGETED_TYPES = ['choice', 'fill_blank', 'true_false', 'short_answer', 'proof', 'calculation'] as const;
@@ -543,7 +543,7 @@ git commit -m "feat(server): JudgeCore 四路由（主观题 self_assess 早退 
 
 同文件 `startTargetedPractice` 的 400 文案同步为 `'type 仅允许 choice | fill_blank | true_false | short_answer | proof | calculation 或 null'`。
 
-- [ ] **Step 2: 抽题守卫扩到全题型**
+- [x] **Step 2: 抽题守卫扩到全题型**
 
 `questions.repo.ts` `findRandomByKpAndType` 的 SQL 中：
 
@@ -564,7 +564,7 @@ git commit -m "feat(server): JudgeCore 四路由（主观题 self_assess 早退 
    *  模式）没有参考答案可对照自评——两类都不进专项练习（终审备忘语义扩展）。
 ```
 
-- [ ] **Step 3: 追加 repo 测试用例**
+- [x] **Step 3: 追加 repo 测试用例**
 
 在 `questions.repo.test.ts` 中追加（沿用文件内既有 mockPool 风格；先读文件确认 helper 名）：
 
@@ -579,7 +579,7 @@ it('findRandomByKpAndType：空答案题全题型排除（q.answer <> \'\'）', 
 });
 ```
 
-- [ ] **Step 4: 跑测试 + Commit**
+- [x] **Step 4: 跑测试 + Commit**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/questions.repo.test.ts && npm test`
 Expected: PASS。
@@ -598,7 +598,7 @@ git commit -m "feat(server): 专项练习支持 calculation 题型；抽题空�
 - Modify: `apps/server/src/modules/training/training.controller.ts`
 - Modify: `apps/server/src/modules/training/training.service.ts`
 
-- [ ] **Step 1: DTO**
+- [x] **Step 1: DTO**
 
 `apps/server/src/modules/training/dto/self-assess.dto.ts`（interface 风格与 judge-training.dto.ts 一致）：
 
@@ -614,7 +614,7 @@ export interface SelfAssessTrainingDto {
 }
 ```
 
-- [ ] **Step 2: Service 方法**
+- [x] **Step 2: Service 方法**
 
 `training.service.ts` 加（`judgeTraining` 之后）：
 
@@ -634,7 +634,7 @@ export interface SelfAssessTrainingDto {
   }
 ```
 
-- [ ] **Step 3: Controller 端点**
+- [x] **Step 3: Controller 端点**
 
 `training.controller.ts` 加（`judge` 端点之后；import type SelfAssessTrainingDto）：
 
@@ -665,7 +665,7 @@ export interface SelfAssessTrainingDto {
 
 DTO 加可选 `sourceRefId?: number`。
 
-- [ ] **Step 4: tsc + 测试 + Commit**
+- [x] **Step 4: tsc + 测试 + Commit**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: 通过。
@@ -684,7 +684,7 @@ git commit -m "feat(server): POST /api/training/self-assess 主观题自评端�
 - Modify: `apps/server/src/modules/practice/practice.service.ts`
 - Modify: `apps/server/src/modules/practice/practice.module.ts`
 
-- [ ] **Step 1: Service 方法**
+- [x] **Step 1: Service 方法**
 
 `practice.service.ts` 加（构造函数注入 `QuestionSelfAssessmentsRepository selfAssessRepo`；`judge()` 之后）：
 
@@ -758,7 +758,7 @@ git commit -m "feat(server): POST /api/training/self-assess 主观题自评端�
   }
 ```
 
-- [ ] **Step 2: Controller 端点**
+- [x] **Step 2: Controller 端点**
 
 `practice.controller.ts` 加（`judge` 端点之后；参数校验风格与 training 一致）：
 
@@ -801,11 +801,11 @@ git commit -m "feat(server): POST /api/training/self-assess 主观题自评端�
 
 （BadRequestException 若未导入则补 import；controller 现有 judge 端点的入参风格见 `practice.controller.ts:18-29`。）
 
-- [ ] **Step 3: 模块注册**
+- [x] **Step 3: 模块注册**
 
 `practice.module.ts` providers 确认含 `QuestionSelfAssessmentsRepository`（Task 2 已加；PracticeService 现在也注入它，同一 provider 即可）。
 
-- [ ] **Step 4: tsc + 测试 + Commit**
+- [x] **Step 4: tsc + 测试 + Commit**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: 通过。
@@ -825,7 +825,7 @@ git commit -m "feat(server): POST /api/practice/self-assess 课堂练习主观�
 - Modify: `apps/server/src/modules/exams/dto/session-create.dto.ts`（ExamSummaryDto / ExamResultItem）
 - Modify: `apps/server/src/modules/exams/exams.module.ts`（如 QuestionSelfAssessmentsRepository 需注册——仅 getResults 读留痕需要）
 
-- [ ] **Step 1: repo 查询带回参考答案 + 已有自评**
+- [x] **Step 1: repo 查询带回参考答案 + 已有自评**
 
 `exam-sessions.repo.ts`：
 
@@ -837,7 +837,7 @@ git commit -m "feat(server): POST /api/practice/self-assess 课堂练习主观�
 
 `findAnswersWithQuestions` 的 SELECT 加 `q.answer AS answer,`（`q.explanation` 旁）。
 
-- [ ] **Step 2: exams.service 改造**
+- [x] **Step 2: exams.service 改造**
 
 2a. import：`subjectiveJudgeMode, SUBJECTIVE_TYPES` 需从 judge-core.service.ts 导出——**先在 judge-core.service.ts 导出 `SUBJECTIVE_TYPES`**（`export const SUBJECTIVE_TYPES = new Set(...)`）。
 
@@ -926,7 +926,7 @@ git commit -m "feat(server): POST /api/practice/self-assess 课堂练习主观�
   }
 ```
 
-- [ ] **Step 3: DTO 更新**
+- [x] **Step 3: DTO 更新**
 
 `session-create.dto.ts`：
 
@@ -944,7 +944,7 @@ git commit -m "feat(server): POST /api/practice/self-assess 课堂练习主观�
 
 （先读该文件确认类型名与字段命名风格，按其注释风格补注释。）
 
-- [ ] **Step 4: tsc + 测试 + Commit**
+- [x] **Step 4: tsc + 测试 + Commit**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: 通过；若既有 exams 测试断言 `isCorrect ?? 0` 语义或 summarize 口径，按新契约修测试（铁律：测试错改测试）。
@@ -961,7 +961,7 @@ git commit -m "feat(server): 考试主观题 self_assess 模式（不判题/结�
 **Files:**
 - Modify: `apps/web/src/services/api.ts`
 
-- [ ] **Step 1: JudgeResult 契约扩展**（`// --- Practice` 区段，:574-582）
+- [x] **Step 1: JudgeResult 契约扩展**（`// --- Practice` 区段，:574-582）
 
 ```typescript
 export interface JudgeResult {
@@ -980,7 +980,7 @@ export interface JudgeResult {
 }
 ```
 
-- [ ] **Step 2: 自评 API 函数**（Training 区段，`getTrainingExplanations` 附近）：
+- [x] **Step 2: 自评 API 函数**（Training 区段，`getTrainingExplanations` 附近）：
 
 ```typescript
 /** 主观题学生自评（self_assess 模式）：incorrect 入错题本 / correct 清零。 */
@@ -1015,7 +1015,7 @@ export function selfAssessPractice(payload: {
 }
 ```
 
-- [ ] **Step 3: 考试结果类型**（`ExamSummary` / `ExamResultItem` 定义处，`grep -n "interface ExamResultItem" apps/web/src/services/api.ts` 定位）：
+- [x] **Step 3: 考试结果类型**（`ExamSummary` / `ExamResultItem` 定义处，`grep -n "interface ExamResultItem" apps/web/src/services/api.ts` 定位）：
 
 ```typescript
 // ExamSummary 加：
@@ -1028,7 +1028,7 @@ export function selfAssessPractice(payload: {
   selfAssessment?: 'correct' | 'incorrect' | null;
 ```
 
-- [ ] **Step 4: 类型检查 + Commit**
+- [x] **Step 4: 类型检查 + Commit**
 
 Run: `cd apps/web && npx tsc -b --noEmit 2>/dev/null || npm run build`
 Expected: 编译错误只可能出现在消费 isCorrect 的地方——这些在 Task 10/11 修；本任务先允许 `ExamResultPage` 等处的既有消费报错，**须在 Task 11 内清零**。若要独立提交，临时用 `isCorrect: it.isCorrect === 1` 兼容旧行为，Task 11 再改。
@@ -1047,7 +1047,7 @@ git commit -m "feat(web): 判题/自评 API 契约（needsSelfAssessment + selfA
 - Modify: `apps/web/src/components/business/answer/QuestionRunner.tsx`
 - Test: `apps/web/src/components/business/answer/QuestionRunner.test.tsx`（追加 describe）
 
-- [ ] **Step 1: types.ts 扩展**
+- [x] **Step 1: types.ts 扩展**
 
 ```typescript
 /** 单题作答记录：onFinish 快照交给父层，由父层决定后续（结果页/错题本等）。 */
@@ -1081,7 +1081,7 @@ export interface RunnerSelfAssessContext {
 
 （`RunnerAnswerRecord.isCorrect` 保持 boolean——自评结果落为布尔后再记。）
 
-- [ ] **Step 2: QuestionRunner 改造**
+- [x] **Step 2: QuestionRunner 改造**
 
 2a. props 加：
 
@@ -1263,7 +1263,7 @@ export interface RunnerSelfAssessContext {
 
 （modal 外壳的 `{phase === 'answering' && modalExtras}` 改为 `{(phase === 'answering' || phase === 'self_assess') && modalExtras}`，保证自评态仍可打开讨论抽屉。）
 
-- [ ] **Step 3: 追加测试**
+- [x] **Step 3: 追加测试**
 
 在 `QuestionRunner.test.tsx` 末尾追加（沿用文件顶部已导入的 render/screen/userEvent/cleanup 与 makeQuestions 风格）：
 
@@ -1340,7 +1340,7 @@ describe('主观题自评（self_assess 模式）', () => {
 Run: `cd apps/web && npx vitest run src/components/business/answer/QuestionRunner.test.tsx`
 Expected: PASS（含既有回填用例不回归）。
 
-- [ ] **Step 4: build + Commit**
+- [x] **Step 4: build + Commit**
 
 Run: `cd apps/web && npm run build`
 Expected: 通过。
@@ -1357,7 +1357,7 @@ git commit -m "feat(web): QuestionRunner 主观题同步提交 + 强制自评视
 **Files:**
 - Modify: `apps/web/src/components/business/AnswerResultList.tsx`
 
-- [ ] **Step 1: 契约扩展**
+- [x] **Step 1: 契约扩展**
 
 `AnswerRecord` 接口加：
 
@@ -1377,7 +1377,7 @@ git commit -m "feat(web): QuestionRunner 主观题同步提交 + 强制自评视
   onSelfAssess?: (n: string, assessment: 'correct' | 'incorrect') => Promise<void>;
 ```
 
-- [ ] **Step 2: 统计口径**
+- [x] **Step 2: 统计口径**
 
 ```typescript
   const failedCount = questions.filter(q => answers[q.n]?.failed).length;
@@ -1398,7 +1398,7 @@ Header 统计区在「未判定」之后追加：
             )}
 ```
 
-- [ ] **Step 3: 条目渲染**
+- [x] **Step 3: 条目渲染**
 
 列表项内（`const failed = ...` 旁）加：
 
@@ -1504,7 +1504,7 @@ Header 统计区在「未判定」之后追加：
 
 （展开条件统一为 `{expanded && !failed && (subjective ? (explanation || referenceAnswers?.[q.n]) : (!correct && explanation)) && ...}`——按现文件结构把原 `{expanded && !correct && !failed && explanation && ...}` 的条件改写为兼容两态。）
 
-- [ ] **Step 3: build + Commit**
+- [x] **Step 3: build + Commit**
 
 Run: `cd apps/web && npm run build`
 Expected: 通过。
@@ -1525,7 +1525,7 @@ git commit -m "feat(web): AnswerResultList 主观题条目（无对错 + 参考�
 - Modify: `apps/web/src/components/business/AnswerModal.tsx`
 - Modify: `apps/web/src/components/business/CleanupPhase.tsx`
 
-- [ ] **Step 1: TargetedRunPage**
+- [x] **Step 1: TargetedRunPage**
 
 1a. import `selfAssessTraining`（`judgeTraining` 旁）。
 
@@ -1559,11 +1559,11 @@ git commit -m "feat(web): AnswerResultList 主观题条目（无对错 + 参考�
 
 （`byN` 的写入保持不变。）
 
-- [ ] **Step 2: ErrorPracticeRunPage**
+- [x] **Step 2: ErrorPracticeRunPage**
 
 同款接线：`onSelfAssess` 用 `source: 'error_practice'`；`handleFinish` 的解析收集做同款 `|| r.method === 'self_assess'` 扩展（读文件定位其 wrongIds 收集段，结构与 TargetedRunPage 一致）。仍错 bump 逻辑不动（自评 incorrect 的记录 isCorrect=false，自然进仍错集合）。
 
-- [ ] **Step 3: AnswerModal（课堂练习）**
+- [x] **Step 3: AnswerModal（课堂练习）**
 
 3a. import `selfAssessPractice`；`QuestionRunner` 加：
 
@@ -1584,7 +1584,7 @@ git commit -m "feat(web): AnswerResultList 主观题条目（无对错 + 参考�
 
 3b. 判题进度外壳文案兼容：主观题同步提交期间 `progress[q.n]='judging'` 已由 `handleRunnerSubmit` 覆盖（自评视图渲染时 QuestionRunner 处于 `self_assess` phase，进度外壳不干扰）。
 
-- [ ] **Step 4: CleanupPhase（错题清零）**
+- [x] **Step 4: CleanupPhase（错题清零）**
 
 读文件定位其 `handleSubmit`（:82 附近 `judgePractice({...})` 用 error 记录的 cardId/lessonId）。加同款 `onSelfAssess`——context 从其 `errorByN` 映射取 cardId/lessonId（变量名以文件实际为准）：
 
@@ -1604,7 +1604,7 @@ git commit -m "feat(web): AnswerResultList 主观题条目（无对错 + 参考�
       }}
 ```
 
-- [ ] **Step 5: ExamResultPage**
+- [x] **Step 5: ExamResultPage**
 
 5a. `answers` 映射改造（:110-124）：
 
@@ -1716,7 +1716,7 @@ git commit -m "feat(web): AnswerResultList 主观题条目（无对错 + 参考�
 
 5e. 解析初始化段（:60-67）：`it.isCorrect === 0` 的收集条件改为 `it.isCorrect === 0 || (it.isCorrect === null && it.selfAssessment === 'incorrect')`（自评做错的主观题也补拉解析）。
 
-- [ ] **Step 6: build + lint + Commit**
+- [x] **Step 6: build + lint + Commit**
 
 Run: `cd apps/web && npm run build && npm run lint`
 Expected: 通过。
@@ -1736,11 +1736,11 @@ git commit -m "feat(web): 四场景自评接线（专项/错题/课堂/考试结
 - Modify: `apps/server/src/ai-core/prompts/judgment/math-calculation.md`
 - Modify: 前端题型标签映射（`grep -rn "short_answer" apps/web/src --include="*.tsx" --include="*.ts" -l | grep -iv test` 定位，通常在训练配置页/题面标签组件）
 
-- [ ] **Step 1: labeler 白名单**
+- [x] **Step 1: labeler 白名单**
 
 `question_labeler.py` 的 `_VALID_TYPES` 加 `'calculation'`（读文件确认集合写法后追加）。
 
-- [ ] **Step 2: 标注 prompt 规则**
+- [x] **Step 2: 标注 prompt 规则**
 
 `prompts/exam_questions.txt` 题型说明区追加一行规则（读文件定位题型枚举段后插入，增量编辑勿重写全文）：
 
@@ -1748,7 +1748,7 @@ git commit -m "feat(web): 四场景自评接线（专项/错题/课堂/考试结
 - calculation：计算题——答案是一个简短最终结果（数值/表达式/坐标），过程性论述或证明不归此类（归 short_answer/proof）
 ```
 
-- [ ] **Step 3: judgment prompt 措辞**
+- [x] **Step 3: judgment prompt 措辞**
 
 `apps/server/src/ai-core/prompts/judgment/math-calculation.md` 的「判断规则」列表追加（增量 Edit，勿动其余规则）：
 
@@ -1756,11 +1756,11 @@ git commit -m "feat(web): 四场景自评接线（专项/错题/课堂/考试结
 6. 学生答案与标准答案**等价**即判对（如 $0.5$ 与 $\frac{1}{2}$、$x=3$ 与 $3$、$(-2,1)$ 与 $(1,-2)$ 当且仅当语义相同），解法不必与参考答案相同。
 ```
 
-- [ ] **Step 4: 前端题型标签**
+- [x] **Step 4: 前端题型标签**
 
 定位题型中文映射（如 `{ choice: '选择', fill_blank: '填空', ... }`），加 `calculation: '计算'`；专项训练配置页的题型选项列表同步加「计算」（TargetedRunPage 的配置页文件按 `grep -rn "专项" apps/web/src/pages/student/training/ -l` 定位）。
 
-- [ ] **Step 5: 测试 + Commit**
+- [x] **Step 5: 测试 + Commit**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_labeler.py -q`
 Expected: PASS（若有用例断言合法类型集合，同步扩展断言）。
@@ -1780,7 +1780,7 @@ git commit -m "feat: calculation 题型配套（labeler/prompt/前端标签）"
 - Modify: `CLAUDE.md`
 - Modify: `docs/ai-core-changelog.md`
 
-- [ ] **Step 1: openapi.yaml** 加两个端点（找到 `/api/training/judge` 的定义块，同款风格追加）：
+- [x] **Step 1: openapi.yaml** 加两个端点（找到 `/api/training/judge` 的定义块，同款风格追加）：
 
 ```yaml
   /api/training/self-assess:
@@ -1852,17 +1852,17 @@ git commit -m "feat: calculation 题型配套（labeler/prompt/前端标签）"
 
 （按文件内既有缩进与 tags 命名对齐；`/api/exams/sessions/{id}/results` 的响应 schema 同步加 `answer`/`needsSelfAssessment`/`selfAssessment`/`subjectiveCount` 字段说明。）
 
-- [ ] **Step 2: API 设计文档** `docs/API接口与数据流设计文档.md`：§4 端点清单加两行；§6 数据流补「主观题自评」时序（提交 → needsSelfAssessment → 前端展开参考答案 → 自评落库 → 错题本/清零）；`GET /exams/sessions/:id/results` 条目说明补新字段。**跑对照检查**：`grep -n "self-assess" docs/api/openapi.yaml docs/API接口与数据流设计文档.md` 两边都有。
+- [x] **Step 2: API 设计文档** `docs/API接口与数据流设计文档.md`：§4 端点清单加两行；§6 数据流补「主观题自评」时序（提交 → needsSelfAssessment → 前端展开参考答案 → 自评落库 → 错题本/清零）；`GET /exams/sessions/:id/results` 条目说明补新字段。**跑对照检查**：`grep -n "self-assess" docs/api/openapi.yaml docs/API接口与数据流设计文档.md` 两边都有。
 
-- [ ] **Step 3: CLAUDE.md** 「判题与解析分离」条目后追加一段（增量 Edit）：
+- [x] **Step 3: CLAUDE.md** 「判题与解析分离」条目后追加一段（增量 Edit）：
 
 ```markdown
 - **判题体系分层（2026-09-09 起）**：`JudgeCoreService` 四路由——choice/true_false 程序比对；fill_blank/calculation 归一化比对 + AI 等价判断；short_answer/proof 由 `JUDGE_SUBJECTIVE_MODE` 控制（默认 `self_assess`：不判对错，学生自评「我做对了/做错了」走 `recordSelfAssessment` 留痕 + 错题本写入/清零；`ai`：原 JudgmentCapability 逻辑保留可切回）。calculation 为新增题型（结果型计算题，从 short_answer 拆出）。考试主观题 `is_correct=NULL`、成绩只算客观题；课堂练习主观题 practice_results 推迟到自评端点落行。设计见 `docs/superpowers/specs/2026-09-09-judging-rework-design.md`。
 ```
 
-- [ ] **Step 4: changelog** `docs/ai-core-changelog.md` 顶部加条目（沿用文件内既有格式）：日期 2026-09-09、变更摘要、动机（国产模型判题准确率不足）、局限/待办（存量 short_answer 拆 calculation 依赖 answer_importer 批次回写）。
+- [x] **Step 4: changelog** `docs/ai-core-changelog.md` 顶部加条目（沿用文件内既有格式）：日期 2026-09-09、变更摘要、动机（国产模型判题准确率不足）、局限/待办（存量 short_answer 拆 calculation 依赖 answer_importer 批次回写）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/api/openapi.yaml docs/API接口与数据流设计文档.md CLAUDE.md docs/ai-core-changelog.md
@@ -1873,11 +1873,11 @@ git commit -m "docs: 判题体系重构文档同步（openapi/API 设计/CLAUDE.
 
 ### Task 14: 端到端验证
 
-- [ ] **Step 1: 重启服务**
+- [x] **Step 1: 重启服务**
 
 用户环境用 services.sh（构建 + vite preview 5173）+ server。提醒用户重启（或自己跑 `cd apps/web && npm run build` 后由用户 restart）。**改了没变化先对 restart 与源码修改时间线**（记忆约定）。
 
-- [ ] **Step 2: curl 验证服务端**（lc1/123456 登录取 token；**用 curl 不用截图**——记忆约定）
+- [x] **Step 2: curl 验证服务端**（lc1/123456 登录取 token；**用 curl 不用截图**——记忆约定）
 
 ```bash
 # 登录
@@ -1912,7 +1912,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT id,is_cleared FROM main_error_books W
 
 浏览器只验交互细节，数据正确性以 Step 2 的 curl/DB 为准。
 
-- [ ] **Step 4: 收尾 Commit（如有零星修正）**
+- [x] **Step 4: 收尾 Commit（如有零星修正）**
 
 ```bash
 git add -A && git commit -m "fix: 判题体系重构端到端联调修正"

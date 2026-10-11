@@ -53,7 +53,7 @@ docs/UX-UI设计文档.md                                     # Task 7（§5.10 
 - Consumes: 既有 `MobileMorePage.MOBILE_MORE_ITEMS`、`ParentViewportGate.mobileParentPath`。
 - Produces: `mobileParentPath` 支持带 id 子路径；`MobileMorePage` 导出 `MOBILE_LIVE_ITEMS`（`Array<{key,label,to}>`）与 `MOBILE_STUB_ITEMS`（`Array<{key,label}>`）。
 
-- [ ] **Step 1: 更新守卫与更多页测试（先失败）**
+- [x] **Step 1: 更新守卫与更多页测试（先失败）**
 
 `ParentViewportGate.test.tsx`：在现有 `describe` 内追加两条用例，并给 router 增加 `/m/parent/students`、`/m/parent/messages`、`/m/parent/goals`、`/m/parent/account`、`/m/parent/students/7/config` 桩路由：
 
@@ -88,7 +88,7 @@ it('更多页区分真实入口与占位两组', async () => {
 Run: `cd apps/web && npx vitest run src/routes/ src/pages/parent-mobile/MobileMorePage.test.tsx 2>/dev/null || npx vitest run src/routes/`
 Expected: FAIL（映射不存在、入口不存在）
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 `ParentViewportGate.tsx` 全文替换为：
 
@@ -185,12 +185,12 @@ export default function MobileMorePage() {
 { path: 'account', element: <MobileAccountPage /> },
 ```
 
-- [ ] **Step 3: 跑测试 + 全量 + tsc**
+- [x] **Step 3: 跑测试 + 全量 + tsc**
 
 Run: `cd apps/web && npx vitest run src/routes/ src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b`
 Expected: PASS；全量绿（含 `routeTable.test.tsx`、既有 `ParentViewportGate` 用例）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端 2A 路由骨架 + 视口守卫映射扩充 + 更多页入口分组（Task 1）"
@@ -208,7 +208,7 @@ git add -A && git commit -m "feat(web): 移动端 2A 路由骨架 + 视口守卫
 - Consumes: `listMyMessages(): Promise<ParentMessageItem[]>`、`getUnreadMessageCount(): Promise<number>`、`markMessageRead(id): Promise<null>`（api.ts:881-884）；`ParentMessageItem = { id, type, title, content, isRead, isBroadcast, createdAt }`。
 - Produces: `data-testid="mobile-page-messages"`（外层容器，所有状态可见）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobileMessagesPage.test.tsx
@@ -278,12 +278,12 @@ describe('MobileMessagesPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileMessagesPage.test.tsx`
 Expected: FAIL（占位空壳）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobileMessagesPage.tsx
@@ -369,12 +369,12 @@ export default function MobileMessagesPage() {
 }
 ```
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端消息中心（展开即已读 + 未读轮询）（Task 2）"
@@ -392,7 +392,7 @@ git add -A && git commit -m "feat(web): 移动端消息中心（展开即已读 
 - Consumes: `listMyStudents(): Promise<MyStudentItem[]>`（`MyStudentItem = { id, parentId, username, name, age, grade, schoolLevel, isActive }`）、`createStudent(req: { name, username, password, age: number, grade: string }): Promise<{ id: number }>`、`resetStudentPassword(id, newPassword): Promise<null>`、`setStudentStatus(id, isActive): Promise<null>`。
 - Produces: `data-testid="mobile-page-students"`；`GRADES` 年级数组（Task 4 不用，仅本页）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobileStudentsPage.test.tsx
@@ -487,12 +487,12 @@ describe('MobileStudentsPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileStudentsPage.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobileStudentsPage.tsx
@@ -630,12 +630,12 @@ export default function MobileStudentsPage() {
 }
 ```
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端学生管理（新建/重置密码/停用启用）（Task 3）"
@@ -658,7 +658,7 @@ git add -A && git commit -m "feat(web): 移动端学生管理（新建/重置密
 - 有改动的科目才显示保存按钮（dirty = 与 `SubjectConfigState` 三元组不等）。
 - 保存前弹确认（`ConfirmDialog`，文案含「切换教材将重置该学科学习进度」）；保存后 `res.reset === true` → toast `已切换 X 教材，该学科学习进度已重置`，否则 `已保存 X 教材配置`；随后 `load()` 重拉。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobileSubjectConfigPage.test.tsx
@@ -741,12 +741,12 @@ describe('MobileSubjectConfigPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileSubjectConfigPage.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobileSubjectConfigPage.tsx
@@ -907,12 +907,12 @@ export default function MobileSubjectConfigPage() {
 
 ⚠️ 实施第一步核对 `ConfirmDialog` 的真实 props（`apps/web/src/components/base/ConfirmDialog.tsx`；桌面 `CourseDetailPage.tsx:14` 有用法）。若 props 形状不同（如 `confirmText`），以真源为准适配，测试的 `config-confirm-ok` 改成实际确认按钮的可寻址方式（如 `getByRole('button', { name: '确认' })`）。
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端学习配置（学科教材/册别选择 + reset 提示）（Task 4）"
@@ -930,7 +930,7 @@ git add -A && git commit -m "feat(web): 移动端学习配置（学科教材/册
 - Consumes: `useParentStudentStore`；`getParentGoalAttainment(studentId): Promise<ParentGoalAttainment>`；`putParentGoalTarget(studentId, metric: ParentGoalMetric, target: number, subjectId: number): Promise<ParentGoalAttainmentItem>`；`ParentGoalAttainmentItem = { metric, subjectId, subjectName, period: 'daily'|'weekly', title, target, achieved, rate: number|null }`（**渲染 key 必须用 `${subjectId}:${metric}`**）。
 - Produces: `data-testid="mobile-page-goals"`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobileGoalsPage.test.tsx
@@ -991,12 +991,12 @@ describe('MobileGoalsPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileGoalsPage.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobileGoalsPage.tsx
@@ -1101,12 +1101,12 @@ export default function MobileGoalsPage() {
 }
 ```
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端学习目标（达成度展示 + 目标编辑）（Task 5）"
@@ -1124,7 +1124,7 @@ git add -A && git commit -m "feat(web): 移动端学习目标（达成度展示 
 - Consumes: `getParentAccount(): Promise<ParentAccount>`（`{ id, name: string|null, phone }`）、`changeParentPassword(oldPassword, newPassword): Promise<null>`（失败口径：旧密码错 → 401/1003；新密码过短或与旧密码相同 → 409/1001；**改后不失效旧 token**）。
 - Produces: `data-testid="mobile-page-account"`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobileAccountPage.test.tsx
@@ -1195,12 +1195,12 @@ function unmountHelper() { /* 上一用例卸载：直接 cleanup() */ cleanup()
 
 ⚠️ `unmountHelper` 这种间接写法不好——实施时直接在用例开头各自 `render`（`afterEach(cleanup)` 已保证隔离），删掉这个 helper，把第二个用例拆成独立 `it`。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileAccountPage.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobileAccountPage.tsx
@@ -1285,12 +1285,12 @@ export default function MobileAccountPage() {
 }
 ```
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端账号设置（只读信息 + 修改密码）（Task 6）"
@@ -1303,22 +1303,22 @@ git add -A && git commit -m "feat(web): 移动端账号设置（只读信息 + �
 **Files:**
 - Modify: `docs/ai-core-changelog.md`、`docs/UX-UI设计文档.md`（§5.10 扩充）
 
-- [ ] **Step 1: UX 文档 §5.10 扩充**
+- [x] **Step 1: UX 文档 §5.10 扩充**
 
 在「家长移动端」小节（v1 建立于 §5.10）补一段：2A 新增五页（消息中心 / 学生管理 / 学习配置 / 学习目标 / 账号设置）已上手机，「更多」里仍指向电脑端的为订阅管理 / 积分与兑换 / 学习报告 / AI 对话记录；导航形态不变（底部四 Tab + 更多）。
 
-- [ ] **Step 2: changelog 新条目**
+- [x] **Step 2: changelog 新条目**
 
 `docs/ai-core-changelog.md` 顶部按既有格式补 `## 2026-10-06 · 家长移动端第二批 A`：范围裁决（分两批、订阅移出、学习配置纳入）、5 页端点与交互要点、占位收敛为 4 项、测试与 WebKit 走查结果。
 
-- [ ] **Step 3: 全量验证 + WebKit 走查**
+- [x] **Step 3: 全量验证 + WebKit 走查**
 
 Run: `cd apps/web && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run lint 2>&1 | tail -1 && npm run build 2>&1 | tail -1`
 Expected: 全量绿、tsc 0、lint 0 error、build 成功。
 
 WebKit 走查（390×844，家长 JWT 注入法同 v1）：五页逐页过——渲染/交互/配色（全 token）/无空白卡片；「更多」页两组入口正确。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/ai-core-changelog.md docs/UX-UI设计文档.md

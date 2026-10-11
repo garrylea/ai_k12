@@ -38,7 +38,7 @@
 **Files:**
 - Modify: `tools/data-refinery/src/models.py`
 
-- [ ] **Step 1: 修改 `ImageInfo` dataclass**
+- [x] **Step 1: 修改 `ImageInfo` dataclass**
 
 ```python
 @dataclass
@@ -54,7 +54,7 @@ class ImageInfo:
     position_in_text: int  # 在 text_content 中的字符偏移
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add tools/data-refinery/src/models.py
@@ -68,7 +68,7 @@ git commit -m "feat(data-refinery): add scaled_width/scaled_height to ImageInfo"
 **Files:**
 - Modify: `tools/data-refinery/src/image_scan.py`
 
-- [ ] **Step 1: 替换整个文件**
+- [x] **Step 1: 替换整个文件**
 
 ```python
 """图片扫描器：扫描 Markdown 文件中的图片引用，通过 PIL 读取实际宽高并计算折算字数。
@@ -167,7 +167,7 @@ def scan_page(md_path: Path) -> list[ImageInfo]:
     return results
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add tools/data-refinery/src/image_scan.py
@@ -181,7 +181,7 @@ git commit -m "feat(data-refinery): update image_scan constants and cost formula
 **Files:**
 - Modify: `tools/data-refinery/src/card_splitter.py`
 
-- [ ] **Step 1: 替换整个文件**
+- [x] **Step 1: 替换整个文件**
 
 ```python
 """卡片拆分器：将教材 Markdown 拆分为 ≤400 字文字 + ≤700 字总计（含图片折算）的卡片。
@@ -451,7 +451,7 @@ def split_page(md_path: Path, text: str, images: list[ImageInfo]) -> list[CardFr
     return all_fragments
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add tools/data-refinery/src/card_splitter.py
@@ -465,7 +465,7 @@ git commit -m "feat(data-refinery): rewrite card_splitter with 400/700 limits an
 **Files:**
 - Modify: `tools/data-refinery/src/extract_cli.py`
 
-- [ ] **Step 1: 在 `extract_cli.py` 顶部导入区之后新增 `pre_filter_page` 函数**
+- [x] **Step 1: 在 `extract_cli.py` 顶部导入区之后新增 `pre_filter_page` 函数**
 
 ```python
 import re
@@ -496,7 +496,7 @@ def is_front_matter(text: str, page_num: int) -> bool:
     return False
 ```
 
-- [ ] **Step 2: 在 `main()` 的循环体中，在 `image_scan` 之前插入预过滤**
+- [x] **Step 2: 在 `main()` 的循环体中，在 `image_scan` 之前插入预过滤**
 
 找到这段代码（约 line 250 附近）：
 
@@ -536,7 +536,7 @@ def is_front_matter(text: str, page_num: int) -> bool:
 
 现在已经提前读 text 了，所以把原来那行 `text = ...` 删掉，只保留 `cards = split_page(...)`。
 
-- [ ] **Step 3: 修正 LLM 失败 fallback**
+- [x] **Step 3: 修正 LLM 失败 fallback**
 
 找到 fallback 代码（约 line 288-296）：
 
@@ -564,7 +564,7 @@ def is_front_matter(text: str, page_num: int) -> bool:
                 )
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/data-refinery/src/extract_cli.py
@@ -579,7 +579,7 @@ git commit -m "feat(data-refinery): add front_matter pre-filter and conservative
 - Create: `tools/data-refinery/tests/test_image_scan.py`
 - Create: `tools/data-refinery/tests/test_card_splitter.py`
 
-- [ ] **Step 1: 写 `test_image_scan.py`**
+- [x] **Step 1: 写 `test_image_scan.py`**
 
 ```python
 from pathlib import Path
@@ -625,7 +625,7 @@ def test_scan_page(mock_open):
     assert results[0].char_cost == 720
 ```
 
-- [ ] **Step 2: 写 `test_card_splitter.py`**
+- [x] **Step 2: 写 `test_card_splitter.py`**
 
 ```python
 from pathlib import Path
@@ -699,7 +699,7 @@ def test_solo_image_card():
     assert cards[0].image_char_cost == 720
 ```
 
-- [ ] **Step 3: 跑测试**
+- [x] **Step 3: 跑测试**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/tools/data-refinery
@@ -708,7 +708,7 @@ python -m pytest tests/test_image_scan.py tests/test_card_splitter.py -v
 
 Expected: 全部 PASS
 
-- [ ] **Step 4: 跑实际回归（九年级下册 page_005-010）**
+- [x] **Step 4: 跑实际回归（九年级下册 page_005-010）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/tools/data-refinery
@@ -720,7 +720,7 @@ python -m src.extract_cli \
 
 检查 `output/extracted/.../page_005.jsonl`、`page_006.jsonl`、`page_007.jsonl` 应不存在或为空；`page_009.jsonl`、`page_010.jsonl` 应正常有内容。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/tests/test_image_scan.py tools/data-refinery/tests/test_card_splitter.py
@@ -734,7 +734,7 @@ git commit -m "test(data-refinery): add image_scan and card_splitter tests"
 **Files:**
 - Modify: `apps/web/src/styles/global.css`
 
-- [ ] **Step 1: 在 `:root` 区块末尾（`--motion-ease` 之后）新增 learn 页 token**
+- [x] **Step 1: 在 `:root` 区块末尾（`--motion-ease` 之后）新增 learn 页 token**
 
 ```css
   /* ===== Learn Page Tokens (P2.2 CourseDetail) =====
@@ -755,7 +755,7 @@ git commit -m "test(data-refinery): add image_scan and card_splitter tests"
   --lh-learn-body: 1.625;              /* 26px */
 ```
 
-- [ ] **Step 2: 在 `.textbook-prose` 区块之后新增 learn 页 prose 样式**
+- [x] **Step 2: 在 `.textbook-prose` 区块之后新增 learn 页 prose 样式**
 
 ```css
 /* ===== Learn Page Prose (reference page styles) ===== */
@@ -805,7 +805,7 @@ git commit -m "test(data-refinery): add image_scan and card_splitter tests"
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/styles/global.css
@@ -819,7 +819,7 @@ git commit -m "feat(web): add learn page design tokens and prose styles"
 **Files:**
 - Modify: `apps/web/style.md`
 
-- [ ] **Step 1: 在 §2.4 "三层视觉体系" 表格之后新增小节**
+- [x] **Step 1: 在 §2.4 "三层视觉体系" 表格之后新增小节**
 
 ```markdown
 ### 2.5 学习沉浸页专用 Token（P2.2 CourseDetail）
@@ -846,7 +846,7 @@ git commit -m "feat(web): add learn page design tokens and prose styles"
 ```
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add apps/web/style.md
@@ -860,7 +860,7 @@ git commit -m "docs(style): document learn page tokens"
 **Files:**
 - Modify: `apps/web/src/pages/student/CourseDetailPage.tsx`
 
-- [ ] **Step 1: 替换整个文件**
+- [x] **Step 1: 替换整个文件**
 
 ```tsx
 import { useEffect, useState, useMemo } from 'react';
@@ -1203,7 +1203,7 @@ export default function CourseDetailPage() {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add apps/web/src/pages/student/CourseDetailPage.tsx

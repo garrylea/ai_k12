@@ -48,7 +48,7 @@ docs/UX-UI设计文档.md                                     # Task 5（§5.10�
 - Consumes: 2A 的 `MOBILE_LIVE_ITEMS` / `MOBILE_STUB_ITEMS` 结构。
 - Produces: `mobileParentPath` 支持 `points/report/chat-logs`；`rewards` 仍映射 `/m/parent/points`。
 
-- [ ] **Step 1: 更新测试（先失败）**
+- [x] **Step 1: 更新测试（先失败）**
 
 `ParentViewportGate.test.tsx` 追加（router 桩路由加 `m-points/m-report/m-chatlogs`）：
 
@@ -63,12 +63,12 @@ it('mobileParentPath：2B 段映射（rewards 沿用指向积分页）', () => {
 
 `mobileParentRoutes.test.tsx` 的「更多页两组」用例改为：stub 组只剩 `more-stub-subscription`；live 组增加 `more-live-points/report/chat-logs`；并追加 3 条直测用例（经真实 routeTable 访问 `/m/parent/points|report|chat-logs` 断言各自 testid，api mock 补静默 stub）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/routes/`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `ParentViewportGate.tsx`：`MOBILE_SUPPORTED` 追加 `'points', 'report', 'chat-logs'`；`MORE_STUBS` 收敛为 `new Set(['subscription'])`（`rewards → /m/parent/points` 的特判保留在 seg 判断之后）。
 
@@ -76,12 +76,12 @@ Expected: FAIL
 
 `routeTable.tsx`：`/m/parent` children 追加 `points/report/chat-logs` 三条（占位空壳 import）。
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/routes/ src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端 2B 路由骨架 + 守卫映射 + 更多页占位收敛（Task 1）"
@@ -99,7 +99,7 @@ git add -A && git commit -m "feat(web): 移动端 2B 路由骨架 + 守卫映射
 - Consumes: `useParentStudentStore`；`getParentReport(studentId, period: 'weekly'|'monthly'): Promise<ParentLearningReport>`（`{ stats, trend: ParentTrendPoint[{date,answered,correct,rate}], subjects, weakPoints, weakPointsUncoveredCount, exams }`）；`getParentStudyTime(studentId, from?)`。
 - Produces: `data-testid="mobile-page-report"`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobileReportPage.test.tsx
@@ -163,12 +163,12 @@ describe('MobileReportPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileReportPage.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobileReportPage.tsx
@@ -289,12 +289,12 @@ export default function MobileReportPage() {
 
 ⚠️ 实施第一步核对 `ParentLearningReport.stats` 与 `weakPoints` 行的**实际字段名**（`knowledgePointName/errorCount` 是按桌面页用法推断）——以 api.ts 真源为准同步修正代码与测试 mock（桌面 `ParentReportPage.tsx` 怎么取就怎么取）。
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端学习报告（周期切换 + ChartLine/ChartBar 复用）（Task 2）"
@@ -325,7 +325,7 @@ git add -A && git commit -m "feat(web): 移动端学习报告（周期切换 + C
 - 换孩子：`leaveGuardDirty` 同样先确认；确认后清守卫 + 回默认 Tab + 重拉概览。
 - 兑换成功链：`RedeemPanel.onPointsChanged` → 重拉 `getParentPoints` + `setRefreshToken(n+1)`（历史面板重拉）+ `setSettingsVersion(n+1)`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobilePointsPage.test.tsx
@@ -403,12 +403,12 @@ describe('MobilePointsPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobilePointsPage.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobilePointsPage.tsx
@@ -582,12 +582,12 @@ export default function MobilePointsPage() {
 
 ⚠️ 实施注意：① 上面 `guardLeave/pendingAction` 的挂起结构比较绕——实施时允许重构成更直白的单一 `pendingRef`（记录挂起动作 + 弹窗文案），**行为语义以四条测试为准**（拦截面板切换、拦截换孩、确认后执行、取消不切）。② `MyPoints.level`/`nextLevel` 的字段名（`code/name`）以 api.ts 真源为准核对。③ 桌面 `ParentPointsPage.tsx` 的 `commitTab`/换孩拦截细节（:224 起）是行为真源，实施前先读。
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿（桌面面板测试原样通过）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端积分与兑换（概览卡 + 四 Tab 组装桌面面板 + 草稿守卫）（Task 3）"
@@ -612,7 +612,7 @@ git add -A && git commit -m "feat(web): 移动端积分与兑换（概览卡 + �
   `images[]` 是 `/uploads/` 绝对路径，**直接 `<img src>`，不要 `resolveAsset`**。
 - 分页换孩回第 1 页；列表与回放数据带 studentId 归属守卫。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // MobileChatLogsPage.test.tsx
@@ -684,12 +684,12 @@ describe('MobileChatLogsPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileChatLogsPage.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // MobileChatLogsPage.tsx —— 列表态与回放态共用一个组件（activeDialogueId state 切换）
@@ -854,12 +854,12 @@ export default function MobileChatLogsPage() {
 
 ⚠️ 实施第一步：**先读桌面 `ParentChatLogsPage.tsx`**（476 行）核对——回放气泡的角色分侧方向、偏离标记文案、`detailFailure` 的展示条件（它是「仅当失败会话 = 当前选中态」的守卫）、以及 `q` 搜索是否防抖（桌面若防抖则照抄节流参数）。语义冲突处以桌面为真源。
 
-- [ ] **Step 4: 跑测试 + 全量 + tsc + build**
+- [x] **Step 4: 跑测试 + 全量 + tsc + build**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/ && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run build 2>&1 | tail -1`
 Expected: PASS；全量绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(web): 移动端 AI 对话记录（列表 + 整页回放 + 偏离标记）（Task 4）"
@@ -872,11 +872,11 @@ git add -A && git commit -m "feat(web): 移动端 AI 对话记录（列表 + 整
 **Files:**
 - Modify: `docs/ai-core-changelog.md`、`docs/UX-UI设计文档.md`（§5.10）
 
-- [ ] **Step 1: UX 文档 §5.10 扩充**
+- [x] **Step 1: UX 文档 §5.10 扩充**
 
 「更多」页此时 **stub 清零**（订阅待用户立项时回归）：补一段 2B 三页（积分与兑换四区块 Tab / 学习报告周期切换 / AI 对话记录整页回放）。
 
-- [ ] **Step 2: changelog 新条目**
+- [x] **Step 2: changelog 新条目**
 
 `## 2026-10-06 · 家长移动端第二批 B`：三页端点与交互要点；**面板复用决策**（积分页不复写业务逻辑，直接组装桌面五个 `points/*Panel` 组件，草稿守卫接线）；`/uploads/` 图片不过 resolveAsset 的硬注释；WebKit 走查结果。
 
@@ -887,7 +887,7 @@ Expected: 全量绿、tsc 0、lint 0 error、build 成功。
 
 WebKit 走查（390×844）：三页逐页过——积分页四 Tab 切换与概览卡、报告页图表与周期切换、对话列表与回放；「更多」页无 stub。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/ai-core-changelog.md docs/UX-UI设计文档.md

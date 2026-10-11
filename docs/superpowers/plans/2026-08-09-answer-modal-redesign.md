@@ -30,7 +30,7 @@
 **Files:**
 - Modify: `apps/web/src/components/business/SymbolPalette.tsx`
 
-- [ ] **Step 1: Rewrite SymbolPalette with dividers, no group labels**
+- [x] **Step 1: Rewrite SymbolPalette with dividers, no group labels**
 
 Replace the entire contents of `apps/web/src/components/business/SymbolPalette.tsx` with:
 
@@ -92,17 +92,17 @@ export function SymbolPalette({ onInsert }: { onInsert: (latex: string) => void 
 
 Key changes: `分式` label → `½`, `->` → `→`, group name labels removed from render, `gi > 0` inserts a `1px` vertical divider (`w-px h-[22px] bg-[var(--bg-subtle)]`) between groups.
 
-- [ ] **Step 2: Run lint to verify no errors**
+- [x] **Step 2: Run lint to verify no errors**
 
 Run: `cd apps/web && npm run lint`
 Expected: PASS (no errors in SymbolPalette.tsx)
 
-- [ ] **Step 3: Run build to verify type-check passes**
+- [x] **Step 3: Run build to verify type-check passes**
 
 Run: `cd apps/web && npm run build`
 Expected: PASS (tsc + vite build succeeds)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/components/business/SymbolPalette.tsx
@@ -123,7 +123,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/components/business/AnswerModal.tsx`
 
-- [ ] **Step 1: Rewrite AnswerModal with new layout, hint drawer, toast auto-advance**
+- [x] **Step 1: Rewrite AnswerModal with new layout, hint drawer, toast auto-advance**
 
 Replace the entire contents of `apps/web/src/components/business/AnswerModal.tsx` with:
 
@@ -311,17 +311,17 @@ Key changes from old version:
 - **Discuss**: Closes modal then navigates to `/student/ai-discuss` with `{ cardId, lessonId }` state
 - **Removed**: Old "退出" text button, old "提交" text button, old `idx+1` auto-advance without toast
 
-- [ ] **Step 2: Run lint to verify no errors**
+- [x] **Step 2: Run lint to verify no errors**
 
 Run: `cd apps/web && npm run lint`
 Expected: PASS (no errors in AnswerModal.tsx)
 
-- [ ] **Step 3: Run build to verify type-check passes**
+- [x] **Step 3: Run build to verify type-check passes**
 
 Run: `cd apps/web && npm run build`
 Expected: **FAIL** - `CourseDetailPage.tsx` will error because it doesn't pass the new `cardId` and `lessonId` props yet. This is expected; Task 3 fixes it.
 
-- [ ] **Step 4: Commit (despite expected build failure - will be fixed in Task 3)**
+- [x] **Step 4: Commit (despite expected build failure - will be fixed in Task 3)**
 
 ```bash
 git add apps/web/src/components/business/AnswerModal.tsx
@@ -345,7 +345,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/pages/student/CourseDetailPage.tsx` (lines ~875-892, the `<AnswerModal>` invocation)
 
-- [ ] **Step 1: Add cardId and lessonId props to AnswerModal invocation**
+- [x] **Step 1: Add cardId and lessonId props to AnswerModal invocation**
 
 In `apps/web/src/pages/student/CourseDetailPage.tsx`, find the `<AnswerModal>` JSX block (around line 875). It currently looks like:
 
@@ -369,17 +369,17 @@ Change it to add the two new props after `startIndex={modalStart}`:
 
 The rest of the `<AnswerModal>` block (`onSubmit`, `onFinish`, `onClose`) stays unchanged.
 
-- [ ] **Step 2: Run lint to verify no errors**
+- [x] **Step 2: Run lint to verify no errors**
 
 Run: `cd apps/web && npm run lint`
 Expected: PASS
 
-- [ ] **Step 3: Run build to verify type-check passes**
+- [x] **Step 3: Run build to verify type-check passes**
 
 Run: `cd apps/web && npm run build`
 Expected: PASS (tsc + vite build succeeds - the prop mismatch from Task 2 is now resolved)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/pages/student/CourseDetailPage.tsx
@@ -397,7 +397,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/components/business/AnswerResultList.tsx`
 
-- [ ] **Step 1: Rewrite AnswerResultList with stats header, status icons, expandable analysis**
+- [x] **Step 1: Rewrite AnswerResultList with stats header, status icons, expandable analysis**
 
 Replace the entire contents of `apps/web/src/components/business/AnswerResultList.tsx` with:
 
@@ -536,17 +536,17 @@ Key changes from old version:
 - **Analysis**: Collapsed by default. Wrong items show 【查看解析】button. Click toggles `expandedN` state. Expanded view: 错因 type + Markdown+LaTeX rendered analysis in warm left-bordered box
 - **Removed**: Old `openN` single-expand state, old "✓ 对"/"✗ 错" text, old "解析" button
 
-- [ ] **Step 2: Run lint to verify no errors**
+- [x] **Step 2: Run lint to verify no errors**
 
 Run: `cd apps/web && npm run lint`
 Expected: PASS
 
-- [ ] **Step 3: Run build to verify type-check passes**
+- [x] **Step 3: Run build to verify type-check passes**
 
 Run: `cd apps/web && npm run build`
 Expected: PASS (tsc + vite build succeeds)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/components/business/AnswerResultList.tsx
@@ -569,12 +569,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - None (verification only)
 
-- [ ] **Step 1: Start dev server**
+- [x] **Step 1: Start dev server**
 
 Run: `cd apps/web && npm run dev`
 Expected: Vite dev server starts at `http://localhost:5173`
 
-- [ ] **Step 2: Manual verification - navigate to a practice card**
+- [x] **Step 2: Manual verification - navigate to a practice card**
 
 1. Open `http://localhost:5173` in a browser
 2. Log in as a student (non-phone username)
@@ -583,13 +583,13 @@ Expected: Vite dev server starts at `http://localhost:5173`
 5. Click a question to open the AnswerModal
 
 Verify:
-- [ ] Top section shows rendered question (bold, math symbols rendered, NOT raw LaTeX)
-- [ ] Right side has two stacked icon buttons (Hint = amber lightbulb, Discuss = blue chat bubble)
-- [ ] Middle section: left has symbol toolbar (no Chinese labels, thin dividers between groups) + textarea; right has live preview
-- [ ] Bottom section: Close (X circle) on LEFT, Submit (paper-plane orange circle) on RIGHT
-- [ ] Type in textarea → right preview updates (debounced ~150ms)
+- [x] Top section shows rendered question (bold, math symbols rendered, NOT raw LaTeX)
+- [x] Right side has two stacked icon buttons (Hint = amber lightbulb, Discuss = blue chat bubble)
+- [x] Middle section: left has symbol toolbar (no Chinese labels, thin dividers between groups) + textarea; right has live preview
+- [x] Bottom section: Close (X circle) on LEFT, Submit (paper-plane orange circle) on RIGHT
+- [x] Type in textarea → right preview updates (debounced ~150ms)
 
-- [ ] **Step 3: Manual verification - submit flow**
+- [x] **Step 3: Manual verification - submit flow**
 
 1. Type an answer in the editor
 2. Click the Submit (paper-plane) button
@@ -597,13 +597,13 @@ Verify:
 4. Verify: after ~1.5s, auto-advances to next question (or if last question, modal closes and result list appears)
 5. Verify: answer field is cleared on the new question
 
-- [ ] **Step 4: Manual verification - hint drawer**
+- [x] **Step 4: Manual verification - hint drawer**
 
 1. Click the Hint (lightbulb) button
 2. Verify: a warm-colored drawer slides in below the question with a Socratic nudge message
 3. Click Hint again → drawer collapses
 
-- [ ] **Step 5: Manual verification - result list**
+- [x] **Step 5: Manual verification - result list**
 
 1. Answer all questions in the practice card (some correct, some wrong)
 2. Verify: AnswerResultList appears after the last question
@@ -615,18 +615,18 @@ Verify:
 8. Click again → collapses
 9. Click "完成" → result list closes, returns to CourseDetailPage
 
-- [ ] **Step 6: Manual verification - close button**
+- [x] **Step 6: Manual verification - close button**
 
 1. Open AnswerModal
 2. Click Close (X) button
 3. Verify: modal closes, returns to CourseDetailPage (unsaved answer discarded)
 
-- [ ] **Step 7: Final lint + build check**
+- [x] **Step 7: Final lint + build check**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: Both PASS
 
-- [ ] **Step 8: Final commit (if any cleanup needed)**
+- [x] **Step 8: Final commit (if any cleanup needed)**
 
 If all checks pass, no additional commit needed. The feature is complete.
 

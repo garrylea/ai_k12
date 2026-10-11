@@ -61,7 +61,7 @@
 
 > ⚠️ 本任务**只编写、不执行**。执行放在 Task 9 —— 代码（Task 2–8）与库要一起切换，中间态会让应用读不到表。
 
-- [ ] **Step 1: 写迁移脚本**
+- [x] **Step 1: 写迁移脚本**
 
 创建 `tools/db/migrations/2026-09-15_chinese_passages.sql`：
 
@@ -79,7 +79,7 @@
 >    `RENAME INDEX` 静默空转（本仓 `2026-09-13_ensure_uniq_q_content_hash.sql` 记过同一个坑）；
 > 3. 用法行补「**不要加 `--force`**」——中止闸门靠报错让 mysql 停下，`--force` 会拆掉它。
 
-- [ ] **Step 2: 折回 schema.sql**
+- [x] **Step 2: 折回 schema.sql**
 
 把 `tools/db/schema.sql` 里 `dictation_passages` 那一段（约 300–322 行，从注释 `-- 语文古诗文默写篇目（2026-09-13）` 到 `ENGINE=InnoDB ...;`）整段替换为：
 
@@ -113,14 +113,14 @@ CREATE TABLE IF NOT EXISTS chinese_passages (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 3: 核对列顺序一致**
+- [x] **Step 3: 核对列顺序一致**
 
 迁移路径（老库）的列顺序 = 原顺序去掉 `question_id`、`is_active` 追加在 `memorize_required` 之后：
 `id, work_title, author, dynasty, body, grade_band, grade, semester, sort_order, source_ref, verified, memorize_required, is_active, created_at, updated_at`
 
 上面 schema.sql 的书写顺序必须与之一致（新装库与迁移库列序相同，避免日后 `SELECT *` 踩坑）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-15_chinese_passages.sql tools/db/schema.sql
@@ -137,7 +137,7 @@ git commit -m "feat(db): chinese_passages 迁移脚本（dictation_passages 改�
 - Delete: `apps/server/src/database/repositories/dictation-passages.repo.ts`（及 `.test.ts`）
 - Modify: `apps/server/src/database/repositories/index.ts:8-9`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/server/src/database/repositories/chinese-passages.repo.test.ts`：
 
@@ -269,12 +269,12 @@ describe('ChinesePassagesRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/chinese-passages.repo.test.ts`
 Expected: FAIL —— `Failed to resolve import "./chinese-passages.repo"`
 
-- [ ] **Step 3: 实现 repo**
+- [x] **Step 3: 实现 repo**
 
 创建 `apps/server/src/database/repositories/chinese-passages.repo.ts`：
 
@@ -430,12 +430,12 @@ export class ChinesePassagesRepository {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/chinese-passages.repo.test.ts`
 Expected: PASS（10 个）
 
-- [ ] **Step 5: 删旧文件、改导出**
+- [x] **Step 5: 删旧文件、改导出**
 
 ```bash
 git rm apps/server/src/database/repositories/dictation-passages.repo.ts \
@@ -456,7 +456,7 @@ export { ChinesePassagesRepository, buildDictationPrompt } from './chinese-passa
 export type { ChinesePassageRow, ChinesePassageUpsertInput } from './chinese-passages.repo.js';
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A apps/server/src/database/repositories
@@ -471,7 +471,7 @@ git commit -m "refactor(db): dictation-passages.repo -> chinese-passages.repo，
 - Modify: `apps/server/src/modules/practice/judge-core.service.ts:93-108`（类型）、`:220-256`（方法）
 - Modify: `apps/server/src/modules/practice/judge-core.dictation.test.ts`（整文件重写）
 
-- [ ] **Step 1: 重写测试**
+- [x] **Step 1: 重写测试**
 
 把 `apps/server/src/modules/practice/judge-core.dictation.test.ts` **整个文件**替换为：
 
@@ -558,12 +558,12 @@ describe('JudgeCoreService.judgeDictation', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/judge-core.dictation.test.ts`
 Expected: FAIL —— `mainErrorRepo.create` 被调用过 / `expected` 参数不认识 `studentId` 等
 
-- [ ] **Step 3: 改类型**
+- [x] **Step 3: 改类型**
 
 `apps/server/src/modules/practice/judge-core.service.ts`，把 `JudgeDictationInput` / `JudgeDictationOutput`（约 93–108 行）改为：
 
@@ -581,7 +581,7 @@ export interface JudgeDictationOutput {
 }
 ```
 
-- [ ] **Step 4: 改方法**
+- [x] **Step 4: 改方法**
 
 同文件，把 `judgeDictation`（约 220–256 行）改为：
 
@@ -608,12 +608,12 @@ export interface JudgeDictationOutput {
   }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/judge-core.dictation.test.ts`
 Expected: PASS（5 个）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/judge-core.service.ts apps/server/src/modules/practice/judge-core.dictation.test.ts
@@ -628,7 +628,7 @@ git commit -m "refactor(judging): judgeDictation 去 questions 与错题本写�
 - Modify: `apps/server/src/modules/training/training.service.ts:11`（import）、`:23`（`CHINESE_SUBJECT_ID`）、`:57`（构造参数）、`:95-215`（五个方法）
 - Modify: `apps/server/src/modules/training/training.dictation.test.ts`（整文件重写）
 
-- [ ] **Step 1: 重写测试**
+- [x] **Step 1: 重写测试**
 
 把 `apps/server/src/modules/training/training.dictation.test.ts` **整个文件**替换为：
 
@@ -801,12 +801,12 @@ describe('TrainingService.generateDictationFeedback（错因：可选、失败�
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.dictation.test.ts`
 Expected: FAIL —— `passageId` 与 `findById` 尚不存在
 
-- [ ] **Step 3: 改 import 与构造参数**
+- [x] **Step 3: 改 import 与构造参数**
 
 `apps/server/src/modules/training/training.service.ts`：
 
@@ -836,7 +836,7 @@ import { ChinesePassagesRepository, buildDictationPrompt } from '../../database/
     private readonly dictationRepo: ChinesePassagesRepository,
 ```
 
-- [ ] **Step 4a: 替换前三个方法**
+- [x] **Step 4a: 替换前三个方法**
 
 同文件，把 `listDictationPassages`（约 95–106 行）/ `startDictation`（约 108–132 行）/
 `judgeDictation`（约 134–175 行）**三个方法整体**替换为下面的代码。
@@ -956,7 +956,7 @@ import { ChinesePassagesRepository, buildDictationPrompt } from '../../database/
     } catch (err) {
 ```
 
-- [ ] **Step 4b: 改 `generateDictationFeedback` 的两处**
+- [x] **Step 4b: 改 `generateDictationFeedback` 的两处**
 
 **只做这两处替换，方法体其余部分（含 `catch` 块）一字不动：**
 
@@ -975,12 +975,12 @@ import { ChinesePassagesRepository, buildDictationPrompt } from '../../database/
 > `questionId`。在「只动 2 个文件」的约束下这 3 条不可能消除，属**跨任务依赖**，不是本任务失败。
 > 真正该消失的是初版那 6 条（import 旧路径 + `studentId`/`questionId`/`errorBookId`）。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.dictation.test.ts`
 Expected: PASS（**12 个** —— `renderBodyDiff` 1 + `listDictationPassages` 1 + `startDictation` 2 + `judgeDictation` 4 + `generateDictationFeedback` 4；初版写「11 个」是数错了）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/training/training.service.ts apps/server/src/modules/training/training.dictation.test.ts
@@ -1004,7 +1004,7 @@ git commit -m "refactor(training): 默写 questionId->passageId，题面由篇�
 - Modify: `apps/server/src/modules/training/training.module.ts:5,21`
 - Modify: `apps/server/src/modules/training/training.controller.dictation.test.ts`（整文件重写）
 
-- [ ] **Step 1: 重写 controller 测试**
+- [x] **Step 1: 重写 controller 测试**
 
 把 `apps/server/src/modules/training/training.controller.dictation.test.ts` **整个文件**替换为：
 
@@ -1117,12 +1117,12 @@ describe('TrainingController dictation 端点', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.controller.dictation.test.ts`
 Expected: FAIL —— `passageIds` 校验未实现
 
-- [ ] **Step 3: 重写 DTO**
+- [x] **Step 3: 重写 DTO**
 
 把 `apps/server/src/modules/training/dto/dictation.dto.ts` **整个文件**替换为：
 
@@ -1165,7 +1165,7 @@ export interface DictationFeedbackResult {
 }
 ```
 
-- [ ] **Step 4: 改 controller 四个端点**
+- [x] **Step 4: 改 controller 四个端点**
 
 `apps/server/src/modules/training/training.controller.ts`，把「语文古诗文默写」段（约 140–205 行）替换为：
 
@@ -1240,21 +1240,21 @@ export interface DictationFeedbackResult {
 
 > `@CurrentUser()` / `JwtUser` 在本段已不再使用——若文件其它端点仍在用则保持 import 不动。
 
-- [ ] **Step 5: 改 module**
+- [x] **Step 5: 改 module**
 
 `apps/server/src/modules/training/training.module.ts`：第 5 行 import 里 `DictationPassagesRepository` → `ChinesePassagesRepository`；第 21 行 providers 里同样替换。
 
-- [ ] **Step 6: 跑测试确认通过**
+- [x] **Step 6: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.controller.dictation.test.ts`
 Expected: PASS（**11 个** —— 计划给出的测试文件内容本身就是 11 个 `it`；初版写「10 个」是数错了）
 
-- [ ] **Step 7: 全量服务器测试**
+- [x] **Step 7: 全量服务器测试**
 
 Run: `cd apps/server && npm test`
 Expected: 全绿（改造前 497 passed）
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/modules/training
@@ -1268,7 +1268,7 @@ git commit -m "refactor(training): 默写端点 questionId->passageId，DTO 与 
 **Files:**
 - Modify: `apps/server/src/scripts/seed-dictation-fixture.ts`（整文件重写）
 
-- [ ] **Step 1: 重写脚本**
+- [x] **Step 1: 重写脚本**
 
 把 `apps/server/src/scripts/seed-dictation-fixture.ts` **整个文件**替换为：
 
@@ -1362,12 +1362,12 @@ main().catch((err) => {
 });
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 Run: `cd apps/server && npx tsc --noEmit`
 Expected: 无错误
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/scripts/seed-dictation-fixture.ts
@@ -1383,7 +1383,7 @@ git commit -m "refactor(scripts): 默写种子改走 chinese_passages，不再�
 - Modify: `tools/data-refinery/src/dictation_cli.py:446-451`
 - Modify: `tools/data-refinery/tests/test_dictation_loader.py`（整文件重写）
 
-- [ ] **Step 1: 重写测试**
+- [x] **Step 1: 重写测试**
 
 把 `tools/data-refinery/tests/test_dictation_loader.py` **整个文件**替换为：
 
@@ -1552,12 +1552,12 @@ class TestReadJsonl:
         assert DictationLoader.read_jsonl(p)[0]["work_title"] == "岳阳楼记"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_dictation_loader.py -q`
 Expected: FAIL —— loader 仍写 `questions`、仍查 `subjects`
 
-- [ ] **Step 3: 重写 loader**
+- [x] **Step 3: 重写 loader**
 
 把 `tools/data-refinery/src/dictation_loader.py` **整个文件**替换为：
 
@@ -1665,12 +1665,12 @@ class DictationLoader:
                 Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_dictation_loader.py -q`
 Expected: PASS（**10 个** —— `TestNoQuestionsWrites` 2 + `TestIdempotency` 6 + `TestReadJsonl` 2；初版写「9 个」是数错了）
 
-- [ ] **Step 5: 改 CLI 输出**
+- [x] **Step 5: 改 CLI 输出**
 
 `tools/data-refinery/src/dictation_cli.py:446-451`，把：
 
@@ -1690,12 +1690,12 @@ Expected: PASS（**10 个** —— `TestNoQuestionsWrites` 2 + `TestIdempotency`
 
 同时把该文件 `--term` 帮助文本里的 `写入 dictation_passages.semester` 改为 `写入 chinese_passages.semester`。
 
-- [ ] **Step 6: 全量 pytest**
+- [x] **Step 6: 全量 pytest**
 
 Run: `cd tools/data-refinery && python -m pytest -q`
 Expected: 全绿（2026-09-15 实测基线 **891 passed, 10 skipped**；初版写的「237 passed」是过期数字）
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tools/data-refinery/src/dictation_loader.py tools/data-refinery/src/dictation_cli.py tools/data-refinery/tests/test_dictation_loader.py
@@ -1711,7 +1711,7 @@ git commit -m "refactor(data-refinery): 默写 loader 改走 chinese_passages，
 - Modify: `apps/web/src/pages/student/training/chinese/DictationConfigPage.tsx`
 - Modify: `apps/web/src/pages/student/training/chinese/DictationRunPage.tsx:79`
 
-- [ ] **Step 1: 改 api.ts**
+- [x] **Step 1: 改 api.ts**
 
 `apps/web/src/services/api.ts` 里 `// --- Training · 语文古诗文默写（2026-09-13） ---` 段：
 
@@ -1784,7 +1784,7 @@ export function fetchDictationFeedback(payload: {
 }
 ```
 
-- [ ] **Step 2: 改 DictationConfigPage**
+- [x] **Step 2: 改 DictationConfigPage**
 
 `apps/web/src/pages/student/training/chinese/DictationConfigPage.tsx`：把 `togglePick` 与勾选相关的 `questionId` 全部改为 `passageId`：
 
@@ -1806,7 +1806,7 @@ export function fetchDictationFeedback(payload: {
 
 模板里 `key={p.questionId}` → `key={p.passageId}`、`checked={picked.includes(p.questionId)}` → `p.passageId`、`onChange={() => togglePick(p.questionId)}` → `p.passageId`。
 
-- [ ] **Step 3: 改 DictationRunPage**
+- [x] **Step 3: 改 DictationRunPage**
 
 `apps/web/src/pages/student/training/chinese/DictationRunPage.tsx:79`：
 
@@ -1816,7 +1816,7 @@ export function fetchDictationFeedback(payload: {
 
 > 题单经 `sessionStorage`（key `training:dictation`）交接，字段名变了。旧标签页里遗留的题单会带 `questionId` → `current.passageId` 为 `undefined` → 提交 400。`sessionStorage` 关标签页即清，**不为此加兼容代码**；手测时若撞上，刷新配置页重开即可。
 
-- [ ] **Step 4: 类型检查 + lint**
+- [x] **Step 4: 类型检查 + lint**
 
 Run: `cd apps/web && npm run build`
 Expected: `tsc -b` 与 `vite build` 均通过（若 `DictationRunPage` 有 `res.errorBookId` 的残留引用会在此暴露）
@@ -1824,7 +1824,7 @@ Expected: `tsc -b` 与 `vite build` 均通过（若 `DictationRunPage` 有 `res.
 Run: `cd apps/web && npm run lint`
 Expected: 无错误
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/pages/student/training/chinese
@@ -1851,7 +1851,7 @@ git commit -m "refactor(web): 默写接口字段 questionId->passageId，去掉 
 
 **Files:** 无（只跑命令）
 
-- [ ] **Step 1: 备份（**必须放持久目录**）**
+- [x] **Step 1: 备份（**必须放持久目录**）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1866,7 +1866,7 @@ Expected: 文件非空（改造前 50 题 + 50 篇目 + 7 错题行）
 
 > ⚠️ **从 Task 1 到本步之间，不要重放 `tools/db/schema.sql`，也不要跑 `tools/db/install_mysql.sh`**。`install_mysql.sh` 的 `apply_schema()` 对**已有库也会无脑重放** `schema.sql`，而 `schema.sql` 现在已含 `CREATE TABLE IF NOT EXISTS chinese_passages` —— 那会在 populated 的 `dictation_passages` 旁边建出一张**空** `chinese_passages`，让迁移第 3 步 `RENAME` 报 1050 且无法自愈（迁移脚本第 0a 步的闸门会在**任何删除之前**中止，正是为这个场景准备的）。
 
-- [ ] **Step 2: 前置检查（**执行迁移前必跑**）**
+- [x] **Step 2: 前置检查（**执行迁移前必跑**）**
 
 `DELETE FROM questions WHERE type='poem_dictation'` 会被 `ON DELETE RESTRICT` 外键拦住，而**哪些表有行是数据依赖的、不能只看 schema**。六列必须全为 0：
 
@@ -1886,14 +1886,14 @@ Expected: `0 0 0 0 0 0`（2026-09-15 实测已确认）。**任一列非 0 就�
 > - `aux_error_books` 只存在于线上库、**不在 `tools/db/schema.sql` 里**（漂移表）。按 `schema.sql` 新建的库上这一列会报 `ERROR 1146` 而不是返回 0 —— 那种库上本迁移无事可做。
 > - 上面六列之外，迁移脚本**自己**还有两道中止闸门会在任何删除之前拦住：① 两表并存；② 挂在默写题上却 `source<>'dictation'` 的错题行（第 1 步按 source 删、不是按 question_id 删，这类行会漏删并让第 2 步被 RESTRICT 拦停）。两者实测均为安全值（1 / 0）。
 
-- [ ] **Step 3: 执行迁移**
+- [x] **Step 3: 执行迁移**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-15_chinese_passages.sql
 ```
 Expected: 输出 `migration 2026-09-15_chinese_passages done`
 
-- [ ] **Step 4: 验库**
+- [x] **Step 4: 验库**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 -e "
@@ -1912,7 +1912,7 @@ Expected:
 - 残留默写题 **0**、残留默写错题 **0**
 - 索引为 `uniq_chinese_passages_work` / `idx_chinese_passages_filter`，**无** `fk_dp_question` 相关外键
 
-- [ ] **Step 5: 重跑迁移验幂等**
+- [x] **Step 5: 重跑迁移验幂等**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-15_chinese_passages.sql
@@ -1920,7 +1920,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) FROM chinese_passages;"
 ```
 Expected: 再次输出 done，篇目仍为 50（不重复、不报错）
 
-- [ ] **Step 6: 全量测试**
+- [x] **Step 6: 全量测试**
 
 ```bash
 cd apps/server && npm test
@@ -1947,7 +1947,7 @@ Expected: 三条全绿
    Expected: 两次数字相同（答错不新增行）。若变大，说明错题本写入被改回来了。
 5. 数学专项页无回归（`训练 → 数学 → 专项练习` 仍可正常抽题判题）。
 
-- [ ] **Step 8: Commit（若有零星修正）**
+- [x] **Step 8: Commit（若有零星修正）**
 
 **只能 `git add` 本次任务实际改到的文件路径。严禁 `git add -A` / `git add .`** —— 工作区还有一批与本次改造无关的未提交改动（2026-09-14 的代码改动 + 更早的文档），卷进来会把两个不相干的变更集混进同一段历史。
 
@@ -1969,7 +1969,7 @@ git commit -m "test: 独立化改造后全链路验证修正"
 
 > 同步规则（CLAUDE.md）：API 设计文档与 `openapi.yaml` **必须互为对照**，改一份必改另一份；改代码须同步所有引用该实现的设计文档。
 
-- [ ] **Step 1: 改 API 设计文档**
+- [x] **Step 1: 改 API 设计文档**
 
 `docs/API接口与数据流设计文档.md`：
 
@@ -1980,7 +1980,7 @@ git commit -m "test: 独立化改造后全链路验证修正"
 5. `/api/training/dictation/feedback` 行：`questionId` → `passageId`；删掉「重复调 `judgeDictation` 会二次写 `main_error_books`」的括号说明（已不可能发生）。
 6. 全局 `grep -n "questionId" docs/API接口与数据流设计文档.md` 复核：**非 dictation 段落**的 `questionId` 一律不动（那是题目体系，与本次无关）。
 
-- [ ] **Step 2: 改 openapi.yaml**
+- [x] **Step 2: 改 openapi.yaml**
 
 `docs/api/openapi.yaml`：与上一步逐条对应（`/training/dictation/*` 四个 path 的 parameters / requestBody / responses 字段名、描述文案；删掉 `errorBookId` 属性；删掉「待实施」提示段）。
 
@@ -1999,7 +1999,7 @@ print(json.dumps(p.get('requestBody', {}), ensure_ascii=False)[:300])
 ```
 Expected: 解析通过；`requestBody` 里是 `passageId`
 
-- [ ] **Step 3: 端点清单对照（铁律检查）**
+- [x] **Step 3: 端点清单对照（铁律检查）**
 
 ```bash
 grep -o "/training/dictation/[a-z]*" docs/API接口与数据流设计文档.md | sort -u
@@ -2007,7 +2007,7 @@ grep -o "/training/dictation/[a-z]*" docs/api/openapi.yaml | sort -u
 ```
 Expected: 两份输出完全一致（4 个端点）
 
-- [ ] **Step 4: 改数据库设计文档**
+- [x] **Step 4: 改数据库设计文档**
 
 `docs/K12智学系统-数据库设计文档.md` §3.14：
 
@@ -2015,14 +2015,14 @@ Expected: 两份输出完全一致（4 个端点）
 - 表定义里：`author` / `dynasty` 当前实为 **NOT NULL**（设计稿写的是可空，实际未改），按实现修正；`key_terms`/`sentences`/`full_translation` 三行前加标记「**待实施**」。
 - §8 变更日志 v2.2 条目：把「设计已定、表尚未建」改为「已实施（独立化部分）」。
 
-- [ ] **Step 5: 改 data-refinery 使用手册**
+- [x] **Step 5: 改 data-refinery 使用手册**
 
 `docs/data-refinery-使用手册.md` §4.9：
 
 - 删掉「⚠️ 改造待实施（2026-09-15）」整段提示（已完成）。
 - 段首那句「产物进 `chinese_passages`」后面补「（2026-09-15 独立化后不再写 `questions`）」。
 
-- [ ] **Step 6: 更新上游 spec 的 12 号决策状态**
+- [x] **Step 6: 更新上游 spec 的 12 号决策状态**
 
 `docs/superpowers/specs/2026-09-15-chinese-interpretation-special-design.md`：在 §2 末尾或 §13 实施顺序处追加一行状态：
 
@@ -2033,7 +2033,7 @@ Expected: 两份输出完全一致（4 个端点）
 > 计划见 `docs/superpowers/plans/2026-09-15-chinese-passages-standalone.md`。
 ```
 
-- [ ] **Step 7: 对照检查**
+- [x] **Step 7: 对照检查**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -2041,7 +2041,7 @@ grep -rn "dictation_passages" docs/ --include="*.md" --include="*.yaml" | grep -
 ```
 Expected: **无输出**（旧表名只应留在 2026-09-13 那份历史 spec 的「取代说明」里，以及迁移脚本自身）
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add docs
@@ -2052,10 +2052,10 @@ git commit -m "docs: 同步古诗文专项独立化——API 两份 + 数据库�
 
 ## 完成标准
 
-- [ ] `chinese_passages` 存在且**无 `question_id`、无外键**；`dictation_passages` 已不存在
-- [ ] `questions` 中 `type='poem_dictation'` 行数为 0；`main_error_books(source='dictation')` 行数为 0
-- [ ] `apps/server` vitest 全绿、`tools/data-refinery` pytest 全绿、`apps/web` build + lint 通过
+- [x] `chinese_passages` 存在且**无 `question_id`、无外键**；`dictation_passages` 已不存在
+- [x] `questions` 中 `type='poem_dictation'` 行数为 0；`main_error_books(source='dictation')` 行数为 0
+- [x] `apps/server` vitest 全绿、`tools/data-refinery` pytest 全绿、`apps/web` build + lint 通过
 - [ ] 真机走通默写全链路；**答错后 `main_error_books` 无新增**
-- [ ] 迁移脚本重跑幂等
-- [ ] API 两份文档端点清单一致（铁律）
-- [ ] 全仓 `grep "dictation_passages"` 只剩历史 spec 与迁移脚本
+- [x] 迁移脚本重跑幂等
+- [x] API 两份文档端点清单一致（铁律）
+- [x] 全仓 `grep "dictation_passages"` 只剩历史 spec 与迁移脚本

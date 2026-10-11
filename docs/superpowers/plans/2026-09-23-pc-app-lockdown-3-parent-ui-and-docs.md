@@ -51,7 +51,7 @@
   - `export function getParentLearningSessions(studentId: number, days?: number, limit?: number): Promise<ParentSessionPage>`
   - `export function issueParentDeviceCommand(studentId: number, command: 'unlock'): Promise<{ id: number; command: string; status: 'pending'; learningSessionId: number; createdAt: string }>`
 
-- [ ] **Step 1: 扩展 API 层**
+- [x] **Step 1: 扩展 API 层**
 
 > **实施时修正（2026-09-24，五处 —— 本任务初稿内部自相矛盾，按下面已修正的版本执行）**
 >
@@ -148,7 +148,7 @@ export function issueParentDeviceCommand(
 }
 ```
 
-- [ ] **Step 2: 写失败的测试（追加到 `ParentControlsPage.test.tsx`）**
+- [x] **Step 2: 写失败的测试（追加到 `ParentControlsPage.test.tsx`）**
 
 在该文件顶部 mock 里补两个新函数，并加新 describe：
 
@@ -305,12 +305,12 @@ describe('ParentControlsPage：单次学习锁定（spec §6.5）', () => {
 > 要补 `sessionLockMinutes: null`；② `apps/web/src/routes/routeTable.test.tsx` 里的
 > `const CONTROLS: ParentControls = { alertAwayMinutes: 5, alertIdleMinutes: 15 }` 同样要补。
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentControlsPage.test.tsx`
 Expected: FAIL —— `lock-minutes-input` / `unlock-button` 找不到。
 
-- [ ] **Step 4: 改页面头部注释（**别跳过这步**）**
+- [x] **Step 4: 改页面头部注释（**别跳过这步**）**
 
 `ParentControlsPage.tsx:22-23` 现在写着：
 
@@ -333,7 +333,7 @@ Expected: FAIL —— `lock-minutes-input` / `unlock-button` 找不到。
 
 并把第一段「本页**只有两块**」改为「本页**共三块**」。
 
-- [ ] **Step 5: 实现第三块**
+- [x] **Step 5: 实现第三块**
 
 在 `ParentControlsPage.tsx` 里：
 
@@ -549,17 +549,17 @@ interface LoadedControls {
 > 也管着下面的 card」。已改为**每张卡各自的保存**：`save-alerts`（只提交两个预警阈值）与 `save-lock`（只提交 `sessionLockMinutes`），
 > 脏判定 / 可保存条件 / 提交字段 / 失败提示（`saveError` 带 `block`）全部独立。**别再合回一个按钮**。
 
-- [ ] **Step 6: 跑测试**
+- [x] **Step 6: 跑测试**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentControlsPage.test.tsx`
 Expected: PASS（含原有全部用例）。
 
-- [ ] **Step 7: 跑全量 + 类型 + lint**
+- [x] **Step 7: 跑全量 + 类型 + lint**
 
 Run: `cd apps/web && npm test && npx tsc -b && npm run lint`
 Expected: 全绿、无输出、0 error。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/pages/parent/ParentControlsPage.tsx apps/web/src/pages/parent/ParentControlsPage.test.tsx
@@ -578,7 +578,7 @@ git commit -m "feat(parent-controls): 单次学习锁定设置与解除按钮（
 - Consumes: `getParentLearningSessions`、`ParentSessionItem`（Task 1）
 - Produces: 页面内组件 `LearningTimelineCard`（**不导出**，与同文件既有的 `StudyTimePanel` 一致）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 在 `ParentDashboardPage.test.tsx` 追加（并在顶部 `vi.mock('@/services/api', …)` 里补 `getParentLearningSessions: vi.fn()`）：
 
@@ -692,12 +692,12 @@ describe('仪表盘：学习时段卡（spec §6.5）', () => {
 > 4. 本任务测试代码里的 `renderPage()` 应写成本文件既有的 **`renderAt('/parent/dashboard')`**
 >    （`ParentDashboardPage.test.tsx` 里没有 `renderPage` 这个 helper，那是 Task 1 那个文件的）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentDashboardPage.test.tsx`
 Expected: FAIL —— `learning-timeline` 找不到。
 
-- [ ] **Step 3: 实现卡片**
+- [x] **Step 3: 实现卡片**
 
 在 `ParentDashboardPage.tsx` 里新增（与既有 `StudyTimePanel` 同风格：局部状态 + 归属标记 + 独立失败态）：
 
@@ -795,17 +795,17 @@ function LearningTimelineCard({ studentId }: { studentId: number }) {
 
 在页面 JSX 里，把这张卡放在既有「学习时长」卡附近（`{studentId !== null && <LearningTimelineCard studentId={studentId} />}`），**插在既不遮住「今日已用」也不抢首位的位置**——它是补充信息，不是主指标。
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentDashboardPage.test.tsx`
 Expected: PASS。
 
-- [ ] **Step 5: 跑全量 + 类型 + lint**
+- [x] **Step 5: 跑全量 + 类型 + lint**
 
 Run: `cd apps/web && npm test && npx tsc -b && npm run lint`
 Expected: 全绿。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/pages/parent/ParentDashboardPage.tsx apps/web/src/pages/parent/ParentDashboardPage.test.tsx
@@ -818,7 +818,7 @@ git commit -m "feat(parent-dashboard): 学习时段卡（列表不聚合，在�
 
 **Files:** 无（验证任务）
 
-- [ ] **Step 1: 起四个进程**
+- [x] **Step 1: 起四个进程**
 
 ```bash
 cd apps/server && npm run build && node dist/main.js   # 终端 1
@@ -840,11 +840,11 @@ cd apps/web && npm run preview                          # 可选：验证生产�
 | 7 | 家长清空锁定输入框并保存 | 「当前：未设锁」；学生重新登录后无 pill、可随时登出 |
 | 8 | 学生**断网**后家长点解除 | 学生端**仍然锁着**（拔网线不解锁）；恢复网络后 ≤10 秒解锁 |
 
-- [ ] **Step 3: 失败即修，并把结论写进 changelog**
+- [x] **Step 3: 失败即修，并把结论写进 changelog**
 
 若第 8 条不符预期，说明"拔网线不解锁"没做对——**先改设计再改代码**（本仓纪律），不要在实现里打补丁绕过去。
 
-- [ ] **Step 4: Commit（若有修正）**
+- [x] **Step 4: Commit（若有修正）**
 
 ```bash
 git add -A
@@ -866,14 +866,14 @@ git commit -m "fix(parent-ui): 端到端联调第 N 条 — <现象>"
 
 > ⚠️ **其中三处是推翻既有明文裁决**（PRD 的三栏/无密码校验、P6.6 的"时长不做"）。不改就是没做——下个接手者会照旧文档反向实现。
 
-- [ ] **Step 1: PRD**
+- [x] **Step 1: PRD**
 
 `docs/K12智学系统-产品需求文档.md`：
 1. §7.7 家长端附近新增一小节 **「PC App 学习管控（正式版）」**：单次学习锁定（1..480 分钟，学生登录起算、期间禁止登出、到期自动解除、家长可远程解除）、家长端可见每次进入/退出时刻。
 2. `:224`「MVP 阶段…**无需额外的 PIN 码、图形锁或独立密码等安全校验**」加脚注：这是 **MVP 同设备共存**口径；PC App 的锁定与家长解除属**正式版**能力，与 §13 的「物理设备隔离」（`:225`）同源。
 3. `:341-343`（输入方式）保持不变。
 
-- [ ] **Step 2: UX/UI**
+- [x] **Step 2: UX/UI**
 
 `docs/UX-UI设计文档.md`：
 1. `:708`「**PC App**：扩展为三栏（导航+卡片+讨论），右侧增加学情侧边栏」→ 改为「**PC App**：布局与 Web 完全一致（**不做三栏**，2026-09-23 用户裁决）」。
@@ -881,17 +881,17 @@ git commit -m "fix(parent-ui): 端到端联调第 N 条 — <现象>"
 3. `:233-234`「MVP 阶段家长与学生可共用同一设备，退出登录切换身份即可；正式版迭代时再做物理设备隔离」→ 追加指向本设计（`docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md`），并说明"物理设备隔离"的落地形态就是 PC App 的 kiosk + 家长解除。
 4. 新增一节 **PC App 学习管控页规格**：`/parent/controls` 第三块（锁定时长输入 1..480 + 解除按钮 + 当前状态文案）、仪表盘「学习时段」卡（列表、在线/已断开/已退出三态）、学生端锁定中的剩余时间 pill（顶部居中）。
 
-- [ ] **Step 3: 架构文档**
+- [x] **Step 3: 架构文档**
 
 `docs/K12智学系统-架构设计文档.md`：
 1. `:1145`（§10.2 P1）「PC App 三栏布局」→ 改为「PC App（Electron 壳 + kiosk 学习管控）」。
 2. `:41` 客户端层那行 `│ PC App │ (Electron)` 旁加注释：PC App 加载与 Web 相同的 UI；学生角色进 kiosk、家长/管理员为普通窗口；**真·无法切屏需 OS 级单应用模式（运维配置）**。
 
-- [ ] **Step 4: style.md**
+- [x] **Step 4: style.md**
 
 `apps/web/style.md:485`「**PC App**：学习沉浸层可扩展为三栏…非学习页卡片保持居中最大宽度」→ 改为「**PC App**：与 Web 使用同一套布局（≥1280px 不另做三栏）。锁定中的剩余时间 pill 用 `--brand-*` 令牌，不使用第二套配色」。
 
-- [ ] **Step 5: 数据库设计文档**
+- [x] **Step 5: 数据库设计文档**
 
 `docs/K12智学系统-数据库设计文档.md`：
 1. `controls` 一节：`daily_time_limit_minutes` → `session_lock_minutes`，注释写「单次学习锁定分钟数（1..480），学生登录起算；`NULL` = 未设锁」。
@@ -899,7 +899,7 @@ git commit -m "fix(parent-ui): 端到端联调第 N 条 — <现象>"
 3. `study_sessions` 的 `app_shell` 说明补一句：Electron 壳的学生端同时会写 `learning_sessions`（登录粒度），两者**粒度不同、不要合并**。
 4. `:1118` 附近若有「`daily_time_limit_minutes` 恒为 NULL」的表述，一并更新为「已改名并改为单次锁定语义，读写在 2026-09-23 落地」。
 
-- [ ] **Step 6: 待办清单与 P6.6 spec**
+- [x] **Step 6: 待办清单与 P6.6 spec**
 
 `docs/家长端学情批-完成情况与待办清单.md:301`「**只算不拦** … 没有任何地方阻止学生继续用。家长设了会以为有用」→ 改为已完成（2026-09-23）：每日累计上限**已废除**，改为「单次学习锁定」（期间禁止登出，到期自动解除，家长可远程解除），并附 spec 路径。
 
@@ -910,7 +910,7 @@ git commit -m "fix(parent-ui): 端到端联调第 N 条 — <现象>"
 > —— 即当年记的「需要时单独立项」那次立项。注意语义已从「每日累计上限」改为「单次登录起算的锁定窗口」。
 ```
 
-- [ ] **Step 7: 复核（用 grep 而不是眼睛）**
+- [x] **Step 7: 复核（用 grep 而不是眼睛）**
 
 > **实施时修正（2026-09-24）**：下面这条命令**范围太宽**，会把两类**不该改的**也算成失败：
 > ① 历史归档（`docs/superpowers/plans/2026-09-19-*`、`2026-09-20-*`、`docs/ai-core-changelog.md`
@@ -938,7 +938,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && echo "--- 应为 0（三栏承
 ```
 Expected: 前两段无输出，第三段 ≥ 1。**有输出就是漏改**。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add docs/K12智学系统-产品需求文档.md docs/UX-UI设计文档.md docs/K12智学系统-架构设计文档.md apps/web/style.md docs/K12智学系统-数据库设计文档.md docs/家长端学情批-完成情况与待办清单.md docs/superpowers/specs/2026-09-20-parent-controls-and-alerts-design.md
@@ -954,7 +954,7 @@ git commit -m "docs: 同步 PC App 学习管控 —— 推翻三栏承诺与 P6.
 - Modify: `docs/ai-core-changelog.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: `CLAUDE.md` 四处改动**
+- [x] **Step 1: `CLAUDE.md` 四处改动**
 
 1. **家长端章节**：删掉「P6.6 只做「预警灵敏度 + 奖励兑换只读」：每日时长 / 禁用时段 / 辅线开关 / 拍照开关**不做、页面上也不出现**」里的「每日时长」，改为「禁用时段 / 辅线开关 / 拍照开关**仍不做、页面上也不出现**（`controls` 表那几列保留待用）」。
 2. **家长端章节**补一条：`controls` 端点现在含**三个**字段（两个预警阈值 + `session_lock_minutes`）。⚠️ 这里仍要保留「同一字段不做两个归属」的口径说明（兑换字段仍归 `points/settings`）。
@@ -970,7 +970,7 @@ git commit -m "docs: 同步 PC App 学习管控 —— 推翻三栏承诺与 P6.
    - **做不到的别当缺陷修**：Electron 拦不住 `Alt+Tab`/`Ctrl+Alt+Del`/强制退出；不区分异常退出；真·无法切屏靠 OS 级单应用模式（运维）。
    - **本期非目标**：安装包/自动更新/签名、Web 端管控、`force_close` 命令、云端部署（壳留 `K12_WEB_URL` 接缝）。
 
-- [ ] **Step 2: changelog**
+- [x] **Step 2: changelog**
 
 在 `docs/ai-core-changelog.md` **顶部**（该文件最新在最上）追加一条 `2026-09-23` 条目，写清：
 - 做了什么（三份计划各自的产出）；
@@ -978,7 +978,7 @@ git commit -m "docs: 同步 PC App 学习管控 —— 推翻三栏承诺与 P6.
 - **踩到什么坑 / 与设计不符之处**（这是 changelog 的主要价值）；
 - 遗留（例：`LockedPill` 定位是否需微调、是否有设计缺口）。
 
-- [ ] **Step 3: README**
+- [x] **Step 3: README**
 
 `README.md`：
 1. `Roadmap` 的「Electron Desktop Integration」→ 改为已落地（dev 模式）并指向本设计。
@@ -994,7 +994,7 @@ cd apps/desktop && npm install && npm start            # 3) 壳
 
 3. 结构一节里 `apps/desktop` 前的「Planned」去掉。
 
-- [ ] **Step 4: 复核 CLAUDE.md 体量**
+- [x] **Step 4: 复核 CLAUDE.md 体量**
 
 Run:
 ```bash
@@ -1002,7 +1002,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && wc -c CLAUDE.md && grep -c "^"
 ```
 Expected: ≤ 约 15KB（本文件有体量纪律）。**超了就只留硬约束**——把细节挪进 `docs/ai-core-changelog.md`，别删约束本身。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add CLAUDE.md docs/ai-core-changelog.md README.md

@@ -98,7 +98,7 @@
 **Interfaces:**
 - Produces: 供管线计划使用的爬取参数——`--subject 语文`、`--publisher <实际标签>`、`--grade 九年级`、`--semester 上册|下册`。
 
-- [ ] **Step 1: 安装爬虫依赖**
+- [x] **Step 1: 安装爬虫依赖**
 
 ```bash
 cd tools/crawler
@@ -107,7 +107,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-- [ ] **Step 2: dry-run 列出所有语文教材**
+- [x] **Step 2: dry-run 列出所有语文教材**
 
 ```bash
 python src/crawler_cli.py --site smartedu --subject 语文 --dry-run --output ./data
@@ -115,7 +115,7 @@ python src/crawler_cli.py --site smartedu --subject 语文 --dry-run --output ./
 
 Expected: 逐行打印将要下载的教材（书名 + 分类维度），**不落盘**。若输出为空或参数校验失败，执行 Step 3。
 
-- [ ] **Step 3: 按九年级收窄**
+- [x] **Step 3: 按九年级收窄**
 
 ```bash
 python src/crawler_cli.py --site smartedu --subject 语文 --level 初中 --grade 九年级 --dry-run --output ./data
@@ -123,11 +123,11 @@ python src/crawler_cli.py --site smartedu --subject 语文 --level 初中 --grad
 
 Expected: 只列出九年级语文教材。记录每本的 `publisher` 标签与 `semester`。
 
-- [ ] **Step 4: 向用户汇报并索要确认**
+- [x] **Step 4: 向用户汇报并索要确认**
 
 汇报必须含：平台上有哪几本九年级语文教材、出版社标签、上下册是否齐全、总页数量级。**用户确认后才可继续 Task 2。** 若平台上没有九年级语文教材，**停止本计划**。
 
-- [ ] **Step 5: 若与 spec 不一致则更新 spec 并提交**
+- [x] **Step 5: 若与 spec 不一致则更新 spec 并提交**
 
 ```bash
 git add docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md
@@ -144,7 +144,7 @@ git commit -m "docs(specs): 按平台实测修正语文教材版本标签"
 **Interfaces:**
 - Produces: 表 `dictation_passages`，列 `id / question_id / work_title / author / dynasty / body / grade_band / grade / semester / sort_order / source_ref / verified / created_at / updated_at`；唯一键 `uniq_dp_question(question_id)` 与 `uniq_dp_work(work_title, semester)`。
 
-- [ ] **Step 1: 在 schema.sql 追加建表语句**
+- [x] **Step 1: 在 schema.sql 追加建表语句**
 
 ```sql
 -- 语文古诗文默写篇目（2026-09-13）。questions 行作锚点（错题本/隐藏/提示都挂 question_id），
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS dictation_passages (
 >
 > **若本地库已按旧的可空 DDL 建过表**：`CREATE TABLE IF NOT EXISTS` 不会修改已存在的表，必须先 `DROP TABLE dictation_passages`（该表此时无数据）再重跑 `schema.sql`。
 
-- [ ] **Step 2: 在本地库执行建表**
+- [x] **Step 2: 在本地库执行建表**
 
 ```bash
 MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/schema.sql
@@ -186,7 +186,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/schema.sql
 
 Expected: 无报错（`CREATE TABLE IF NOT EXISTS` 对既有表幂等）。
 
-- [ ] **Step 3: 验证表结构**
+- [x] **Step 3: 验证表结构**
 
 ```bash
 MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SHOW CREATE TABLE dictation_passages;"
@@ -194,7 +194,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SHOW CREATE TABLE dictation_passa
 
 Expected: 输出含 `uniq_dp_question`、`uniq_dp_work`、`idx_dp_filter`，以及外键 `fk_dp_question` 指向 `questions(id)`。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/db/schema.sql
@@ -217,7 +217,7 @@ git commit -m "feat(db): 新增 dictation_passages 表（语文古诗文默写�
   - `type DictationDiffOp = { type: 'equal'; text: string } | { type: 'wrong'; expected: string; actual: string } | { type: 'missing'; text: string } | { type: 'extra'; text: string }`
   - `diffChinese(expected: string, actual: string): DictationDiffOp[]`（入参须已归一化）
 
-- [ ] **Step 1: 导出并扩展标点常量**
+- [x] **Step 1: 导出并扩展标点常量**
 
 把 `apps/server/src/common/utils/content-hash.util.ts:20`：
 
@@ -235,7 +235,7 @@ export const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()�
 
 **为什么直接扩展而不另建一套**：写两套标点表迟早漂移（spec §5「归一化标点集」要求单一来源）。本改动让 `normalizeForPrefix` 更宽松（多剥几种中文标点），只影响 `findByContentPrefix` 模糊匹配，方向是「更能匹配上」，无破坏性。
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
 创建 `apps/server/src/common/utils/normalize-chinese.util.test.ts`：
 
@@ -322,7 +322,7 @@ describe('diffChinese', () => {
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/common/utils/normalize-chinese.util.test.ts
@@ -330,7 +330,7 @@ cd apps/server && npx vitest run src/common/utils/normalize-chinese.util.test.ts
 
 Expected: FAIL —— `Failed to resolve import "./normalize-chinese.util.js"`。
 
-- [ ] **Step 4: 实现工具**
+- [x] **Step 4: 实现工具**
 
 创建 `apps/server/src/common/utils/normalize-chinese.util.ts`：
 
@@ -421,7 +421,7 @@ export function diffChinese(expected: string, actual: string): DictationDiffOp[]
 }
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/common/utils/normalize-chinese.util.test.ts
@@ -429,7 +429,7 @@ cd apps/server && npx vitest run src/common/utils/normalize-chinese.util.test.ts
 
 Expected: PASS，13 个用例全绿。
 
-- [ ] **Step 6: 跑全量测试确认没打破 prefix 匹配**
+- [x] **Step 6: 跑全量测试确认没打破 prefix 匹配**
 
 ```bash
 cd apps/server && npm test
@@ -437,7 +437,7 @@ cd apps/server && npm test
 
 Expected: 全绿。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/common/utils/content-hash.util.ts apps/server/src/common/utils/normalize-chinese.util.ts apps/server/src/common/utils/normalize-chinese.util.test.ts
@@ -465,7 +465,7 @@ git commit -m "feat(server): 新增语文答案归一化与逐字差异定位工
     - `findVerifiedByQuestionIds(subjectId, questionIds): Promise<DictationListRow[]>`
     - `upsert(row: DictationUpsertInput): Promise<void>`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/database/repositories/dictation-passages.repo.test.ts`：
 
@@ -566,7 +566,7 @@ describe('DictationPassagesRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/dictation-passages.repo.test.ts
@@ -574,7 +574,7 @@ cd apps/server && npx vitest run src/database/repositories/dictation-passages.re
 
 Expected: FAIL —— 找不到模块。
 
-- [ ] **Step 3: 实现 repo**
+- [x] **Step 3: 实现 repo**
 
 创建 `apps/server/src/database/repositories/dictation-passages.repo.ts`：
 
@@ -705,14 +705,14 @@ export class DictationPassagesRepository {
 }
 ```
 
-- [ ] **Step 4: 在 repositories/index.ts 导出**
+- [x] **Step 4: 在 repositories/index.ts 导出**
 
 ```ts
 export { DictationPassagesRepository } from './dictation-passages.repo.js';
 export type { DictationPassageRow, DictationListRow, DictationUpsertInput } from './dictation-passages.repo.js';
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/dictation-passages.repo.test.ts
@@ -720,7 +720,7 @@ cd apps/server && npx vitest run src/database/repositories/dictation-passages.re
 
 Expected: PASS，7 个用例全绿。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/dictation-passages.repo.ts apps/server/src/database/repositories/dictation-passages.repo.test.ts apps/server/src/database/repositories/index.ts
@@ -740,7 +740,7 @@ git commit -m "feat(server): 新增 dictation_passages 仓储"
 - Consumes: `DictationPassagesRepository.upsert`（Task 4）、`computeContentHash`（既有）
 - Produces: 库中 2 行 `questions`（`type='poem_dictation'`, `subject_id=2`, `answer_verified=0`, `source='DEV-FIXTURE'`）+ 2 行 `dictation_passages`（`verified=1`）
 
-- [ ] **Step 1: 写脚本**
+- [x] **Step 1: 写脚本**
 
 创建 `apps/server/src/scripts/seed-dictation-fixture.ts`：
 
@@ -835,7 +835,7 @@ main().catch((err) => {
 });
 ```
 
-- [ ] **Step 2: 运行脚本**
+- [x] **Step 2: 运行脚本**
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
@@ -843,7 +843,7 @@ cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
 
 Expected: 打印两行 `seeded questionId=... 《静夜思》` / `《登鹳雀楼》`。
 
-- [ ] **Step 3: 重跑一次验证幂等**
+- [x] **Step 3: 重跑一次验证幂等**
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
@@ -852,7 +852,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT COUNT(*) AS p FROM dictation_
 
 Expected: 第二次打印的 questionId 与第一次相同；两个计数都是 `2`（不是 4）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/scripts/seed-dictation-fixture.ts
@@ -880,7 +880,7 @@ git commit -m "chore(server): 新增语文默写开发假数据种子脚本（�
   - `interface DictationFeedbackResponse { content: string; reasoning?: string }`
   - `class DictationFeedbackCapability { generate(req): Promise<DictationFeedbackResponse> }`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts`：
 
@@ -929,7 +929,7 @@ describe('DictationFeedbackCapability', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/ai-core/capabilities/dictation-feedback.capability.test.ts
@@ -937,7 +937,7 @@ cd apps/server && npx vitest run src/ai-core/capabilities/dictation-feedback.cap
 
 Expected: FAIL —— 找不到模块。
 
-- [ ] **Step 3: 扩展 types.ts**
+- [x] **Step 3: 扩展 types.ts**
 
 `apps/server/src/ai-core/types.ts:15`：
 
@@ -972,7 +972,7 @@ export interface DictationFeedbackResponse {
 }
 ```
 
-- [ ] **Step 4: 写 prompt 模板**
+- [x] **Step 4: 写 prompt 模板**
 
 创建 `apps/server/src/ai-core/prompts/dictation/feedback.md`：
 
@@ -1023,7 +1023,7 @@ description: "语文古诗文默写 - 针对程序定位出的错处，写一段
 
 > `{{fieldMatch.author}}` 渲染为 `true` / `false`。HTML 转义已关闭（`prompt-builder.ts:46-48`），数学符号与中文标点原样保留。
 
-- [ ] **Step 5: 扩展 PromptBuilder 模板路由**
+- [x] **Step 5: 扩展 PromptBuilder 模板路由**
 
 在 `apps/server/src/ai-core/infra/prompt-builder.ts` 的 `resolveTemplatePath` 中，`structuring` 分支（约 93-95 行）之前插入：
 
@@ -1033,7 +1033,7 @@ description: "语文古诗文默写 - 针对程序定位出的错处，写一段
     }
 ```
 
-- [ ] **Step 6: 实现 capability**
+- [x] **Step 6: 实现 capability**
 
 创建 `apps/server/src/ai-core/capabilities/dictation-feedback.capability.ts`：
 
@@ -1113,7 +1113,7 @@ export class DictationFeedbackCapability {
 }
 ```
 
-- [ ] **Step 7: 运行测试确认通过**
+- [x] **Step 7: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/ai-core/capabilities/dictation-feedback.capability.test.ts
@@ -1121,7 +1121,7 @@ cd apps/server && npx vitest run src/ai-core/capabilities/dictation-feedback.cap
 
 Expected: PASS，4 个用例全绿。
 
-- [ ] **Step 8: 加 model-routes.yaml 路由**
+- [x] **Step 8: 加 model-routes.yaml 路由**
 
 在 `apps/server/src/ai-core/model-routes.yaml` 的 `title:` 块之后、`default:` 之前插入：
 
@@ -1134,7 +1134,7 @@ Expected: PASS，4 个用例全绿。
       fallback: deepseek-v4-flash
 ```
 
-- [ ] **Step 9: 加 retry.yaml 超时**
+- [x] **Step 9: 加 retry.yaml 超时**
 
 在 `apps/server/src/ai-core/retry.yaml` 的 `timeout:` 块内追加：
 
@@ -1142,7 +1142,7 @@ Expected: PASS，4 个用例全绿。
   dictation_feedback: 30000
 ```
 
-- [ ] **Step 10: 写补路由脚本（给已 seed 的库）**
+- [x] **Step 10: 写补路由脚本（给已 seed 的库）**
 
 **先读既有的同型脚本**：`apps/server/src/scripts/set-title-route.ts` —— 它就是「给已 seed 的库补一个场景路由」的范例，与本步需求一字不差。**注意 `llm_routes` 的列是 `primary_model_key` / `fallback_model_key` 两个模型 key 字符串，不是模型 id 外键**；写法是「先按 `(scene, subject)` 查，有则 UPDATE、无则 INSERT」，且主模型不在库时降级用 fallback 顶上。下面脚本按此镜像。
 
@@ -1228,7 +1228,7 @@ main().catch((e) => { console.error(`[${SCENE}] 失败:`, e); process.exit(1); }
 1. `apps/server/src/modules/admin/admin-models.service.ts:8` 的 `SCENES` 数组加入 `'dictation_feedback'`（后台模型管理页按它渲染场景下拉，不加则新场景在后台不可见）。
 2. 确认 `routeConfig.routes` 的类型来源（`grep -n "routes" apps/server/src/ai-core/config.ts`）。若是**手写**的 interface/type（而非从 YAML 推断的宽松类型），补上 `dictation_feedback` 字段，否则上面 `routeConfig.routes.dictation_feedback` 会 TS 报错。
 
-- [ ] **Step 11: 跑脚本并验证**
+- [x] **Step 11: 跑脚本并验证**
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-feedback-route.ts
@@ -1237,7 +1237,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT scene, subject, primary_model
 
 Expected: 打印 `[dictation_feedback] 路由 dictation_feedback/* 已插入 -> local / deepseek-v4-flash`（若 `local` 未 seed 则为降级后的输出），并查到 1 行路由。**再跑一次脚本验证幂等**：第二次应打印「已更新」且 `llm_routes` 仍只有 1 行。
 
-- [ ] **Step 12: 跑全量测试**
+- [x] **Step 12: 跑全量测试**
 
 ```bash
 cd apps/server && npm test
@@ -1245,7 +1245,7 @@ cd apps/server && npm test
 
 Expected: 全绿。
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add apps/server/src/ai-core/types.ts apps/server/src/ai-core/prompts/dictation/feedback.md apps/server/src/ai-core/capabilities/dictation-feedback.capability.ts apps/server/src/ai-core/capabilities/dictation-feedback.capability.test.ts apps/server/src/ai-core/infra/prompt-builder.ts apps/server/src/ai-core/model-routes.yaml apps/server/src/ai-core/retry.yaml apps/server/src/modules/admin/admin-models.service.ts apps/server/src/scripts/seed-dictation-feedback-route.ts
@@ -1267,7 +1267,7 @@ git commit -m "feat(ai-core): 新增语文默写错因能力 dictation_feedback�
   - `interface JudgeDictationOutput { questionId: number; isCorrect: boolean; method: 'exact'; fields: { author: {match:boolean}; dynasty: {match:boolean}; body: {match:boolean} }; bodyDiff: DictationDiffOp[]; errorBookId?: number }`
   - `JudgeCoreService.judgeDictation(input: JudgeDictationInput): Promise<JudgeDictationOutput>`
 
-- [ ] **Step 1: 确认 `writeErrorBookOrReuse` 的真实形状（已核实，按此写）**
+- [x] **Step 1: 确认 `writeErrorBookOrReuse` 的真实形状（已核实，按此写）**
 
 已读源码核实（`judge-core.service.ts:359-375`）：
 
@@ -1286,7 +1286,7 @@ private async writeErrorBookOrReuse(input: {
 
 **不要改 `judge-core.service.ts` 里既有的 `writeErrorBookOrReuse` 与其调用方**——本任务只新增 `judgeDictation`。
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
 创建 `apps/server/src/modules/practice/judge-core.dictation.test.ts`：
 
@@ -1383,7 +1383,7 @@ describe('JudgeCoreService.judgeDictation', () => {
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/practice/judge-core.dictation.test.ts
@@ -1391,7 +1391,7 @@ cd apps/server && npx vitest run src/modules/practice/judge-core.dictation.test.
 
 Expected: FAIL —— `service.judgeDictation is not a function`。
 
-- [ ] **Step 4: 加导入与类型**
+- [x] **Step 4: 加导入与类型**
 
 在 `judge-core.service.ts` 既有 import 之后追加：
 
@@ -1420,7 +1420,7 @@ export interface JudgeDictationOutput {
 }
 ```
 
-- [ ] **Step 5: 加方法实现**
+- [x] **Step 5: 加方法实现**
 
 在 `judgeQuestion` 方法结束（约 198 行 `}`）之后插入：
 
@@ -1471,7 +1471,7 @@ export interface JudgeDictationOutput {
   }
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [x] **Step 6: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/practice/judge-core.dictation.test.ts
@@ -1479,7 +1479,7 @@ cd apps/server && npx vitest run src/modules/practice/judge-core.dictation.test.
 
 Expected: PASS，5 个用例全绿。
 
-- [ ] **Step 7: 跑全量测试**
+- [x] **Step 7: 跑全量测试**
 
 ```bash
 cd apps/server && npm test
@@ -1487,7 +1487,7 @@ cd apps/server && npm test
 
 Expected: 全绿。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/judge-core.service.ts apps/server/src/modules/practice/judge-core.dictation.test.ts
@@ -1512,7 +1512,7 @@ git commit -m "feat(server): JudgeCore 新增语文默写纯程序判题分支"
   - `TrainingService.judgeDictation(input: { studentId; questionId; author; dynasty; body }): Promise<DictationJudgeResult>`
   - `export function renderBodyDiff(ops: DictationDiffOp[]): string`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/modules/training/training.dictation.test.ts`：
 
@@ -1644,7 +1644,7 @@ describe('TrainingService.judgeDictation', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/training.dictation.test.ts
@@ -1652,7 +1652,7 @@ cd apps/server && npx vitest run src/modules/training/training.dictation.test.ts
 
 Expected: FAIL —— `service.listDictationPassages is not a function`。
 
-- [ ] **Step 3: 写 DTO 文件**
+- [x] **Step 3: 写 DTO 文件**
 
 创建 `apps/server/src/modules/training/dto/dictation.dto.ts`：
 
@@ -1687,7 +1687,7 @@ export interface DictationJudgeResult {
 }
 ```
 
-- [ ] **Step 4: 改 training.service.ts**
+- [x] **Step 4: 改 training.service.ts**
 
 顶部追加导入：
 
@@ -1830,7 +1830,7 @@ export function renderBodyDiff(ops: DictationDiffOp[]): string {
   }
 ```
 
-- [ ] **Step 5: 改 training.module.ts**
+- [x] **Step 5: 改 training.module.ts**
 
 追加导入：
 
@@ -1841,7 +1841,7 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 
 `providers` 数组追加 `DictationPassagesRepository, DictationFeedbackCapability`。
 
-- [ ] **Step 6: 运行测试确认通过**
+- [x] **Step 6: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/training.dictation.test.ts
@@ -1849,7 +1849,7 @@ cd apps/server && npx vitest run src/modules/training/training.dictation.test.ts
 
 Expected: PASS，9 个用例全绿。
 
-- [ ] **Step 7: 类型检查 + 全量测试**
+- [x] **Step 7: 类型检查 + 全量测试**
 
 ```bash
 cd apps/server && npm run build && npm test
@@ -1857,7 +1857,7 @@ cd apps/server && npm run build && npm test
 
 Expected: 两者都通过。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/modules/training/dto/dictation.dto.ts apps/server/src/modules/training/training.service.ts apps/server/src/modules/training/training.dictation.test.ts apps/server/src/modules/training/training.module.ts
@@ -1879,7 +1879,7 @@ git commit -m "feat(server): 语文默写 service（篇目清单/开练/判题+�
   - `POST /api/training/dictation/start`，body `{ semester: '上册'|'下册'|null, questionIds: number[]|null, count: 1..20 }`
   - `POST /api/training/dictation/judge`，body `{ questionId: number, author: string, dynasty: string, body: string }`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/modules/training/training.controller.dictation.test.ts`：
 
@@ -1956,7 +1956,7 @@ describe('TrainingController dictation 端点', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/training.controller.dictation.test.ts
@@ -1964,7 +1964,7 @@ cd apps/server && npx vitest run src/modules/training/training.controller.dictat
 
 Expected: FAIL —— `controller.listDictationPassages is not a function`。
 
-- [ ] **Step 3: 加端点**
+- [x] **Step 3: 加端点**
 
 在 `startTargetedPractice` 方法之后插入：
 
@@ -2024,7 +2024,7 @@ Expected: FAIL —— `controller.listDictationPassages is not a function`。
   }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/training.controller.dictation.test.ts
@@ -2032,7 +2032,7 @@ cd apps/server && npx vitest run src/modules/training/training.controller.dictat
 
 Expected: PASS，7 个用例全绿。
 
-- [ ] **Step 5: 跑全量测试 + 构建**
+- [x] **Step 5: 跑全量测试 + 构建**
 
 ```bash
 cd apps/server && npm test && npm run build
@@ -2040,7 +2040,7 @@ cd apps/server && npm test && npm run build
 
 Expected: 都通过。
 
-- [ ] **Step 6: 手动验证端点已挂载**
+- [x] **Step 6: 手动验证端点已挂载**
 
 ```bash
 cd apps/server && (npx tsx src/main.ts &) && sleep 4
@@ -2050,7 +2050,7 @@ pkill -f "tsx src/main.ts"
 
 Expected: `401`（未带 JWT，说明路由存在且被鉴权守卫拦住；若 `404` 说明端点没挂上）。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/modules/training/training.controller.ts apps/server/src/modules/training/training.controller.dictation.test.ts
@@ -2074,7 +2074,7 @@ git commit -m "feat(server): 新增语文默写三端点（篇目清单/开练/�
   - `startDictation(payload)`
   - `judgeDictation(payload)`
 
-- [ ] **Step 1: 追加类型与函数**
+- [x] **Step 1: 追加类型与函数**
 
 ```ts
 // --- Training · 语文古诗文默写（2026-09-13） ---
@@ -2139,7 +2139,7 @@ export function judgeDictation(payload: {
 }
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 ```bash
 cd apps/web && npx tsc -b --noEmit
@@ -2147,7 +2147,7 @@ cd apps/web && npx tsc -b --noEmit
 
 Expected: 无错误。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -2165,7 +2165,7 @@ git commit -m "feat(web): 新增语文默写 API（篇目清单/开练/判题）
 **Interfaces:**
 - Produces: 路由 `/student/training/chinese/special`；「古诗文默写」卡跳 `/student/training/chinese/dictation`；「古诗文解释」为禁用态
 
-- [ ] **Step 1: 写页面**
+- [x] **Step 1: 写页面**
 
 创建 `apps/web/src/pages/student/training/chinese/ChineseSpecialPage.tsx`：
 
@@ -2262,7 +2262,7 @@ export default function ChineseSpecialPage() {
 }
 ```
 
-- [ ] **Step 2: 加路由**
+- [x] **Step 2: 加路由**
 
 `apps/web/src/routes/index.tsx` 顶部 import 区加：
 
@@ -2284,7 +2284,7 @@ import ChineseSpecialPage from '@/pages/student/training/chinese/ChineseSpecialP
   },
 ```
 
-- [ ] **Step 3: 类型检查 + lint**
+- [x] **Step 3: 类型检查 + lint**
 
 ```bash
 cd apps/web && npx tsc -b --noEmit && npm run lint
@@ -2292,7 +2292,7 @@ cd apps/web && npx tsc -b --noEmit && npm run lint
 
 Expected: 无错误。
 
-- [ ] **Step 4: 目视验证**
+- [x] **Step 4: 目视验证**
 
 ```bash
 cd apps/web && npm run dev
@@ -2301,7 +2301,7 @@ cd apps/web && npm run dev
 打开 `http://localhost:5173/student/training/chinese/special`（需登录学生账号）。
 Expected: 两卡并列；「古诗文默写」可点，「古诗文解释」灰化带「敬请期待」角标；无 emoji。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/chinese/ChineseSpecialPage.tsx apps/web/src/routes/index.tsx
@@ -2320,7 +2320,7 @@ git commit -m "feat(web): 新增语文专项页（默写/解释两卡）"
 - Consumes: `fetchDictationPassages`、`startDictation`（Task 10）
 - Produces: 路由 `/student/training/chinese/dictation`；开练成功后把题单写入 `sessionStorage['training:dictation']` 并跳 `/student/training/chinese/dictation/run`（镜像 `TargetedConfigPage`）
 
-- [ ] **Step 1: 写页面**
+- [x] **Step 1: 写页面**
 
 创建 `apps/web/src/pages/student/training/chinese/DictationConfigPage.tsx`：
 
@@ -2515,7 +2515,7 @@ export default function DictationConfigPage() {
 }
 ```
 
-- [ ] **Step 2: 加路由**
+- [x] **Step 2: 加路由**
 
 `apps/web/src/routes/index.tsx` 顶部加 import：
 
@@ -2537,7 +2537,7 @@ import DictationConfigPage from '@/pages/student/training/chinese/DictationConfi
   },
 ```
 
-- [ ] **Step 3: 类型检查 + lint**
+- [x] **Step 3: 类型检查 + lint**
 
 ```bash
 cd apps/web && npx tsc -b --noEmit && npm run lint
@@ -2545,7 +2545,7 @@ cd apps/web && npx tsc -b --noEmit && npm run lint
 
 Expected: 无错误。
 
-- [ ] **Step 4: 目视验证**
+- [x] **Step 4: 目视验证**
 
 ```bash
 cd apps/web && npm run dev
@@ -2554,7 +2554,7 @@ cd apps/web && npm run dev
 打开 `/student/training/chinese/dictation`。
 Expected: 能选范围与题量；展开后列出《静夜思》《登鹳雀楼》（dev 假数据）；勾选后按钮文案变为「开始默写（指定 N 篇）」。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/chinese/DictationConfigPage.tsx apps/web/src/routes/index.tsx
@@ -2572,7 +2572,7 @@ git commit -m "feat(web): 新增语文默写配置页（范围/题量/指定篇�
 - Consumes: `DictationDiffOp`（Task 10）
 - Produces: `<DictationDiffView ops={DictationDiffOp[]} />`——按 op 类型着色渲染逐字对比
 
-- [ ] **Step 1: 写组件**
+- [x] **Step 1: 写组件**
 
 创建 `apps/web/src/components/business/dictation/DictationDiffView.tsx`：
 
@@ -2628,7 +2628,7 @@ export default function DictationDiffView({ ops, className = '' }: Props) {
 }
 ```
 
-- [ ] **Step 2: 类型检查 + lint**
+- [x] **Step 2: 类型检查 + lint**
 
 ```bash
 cd apps/web && npx tsc -b --noEmit && npm run lint
@@ -2636,7 +2636,7 @@ cd apps/web && npx tsc -b --noEmit && npm run lint
 
 Expected: 无错误。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/components/business/dictation/DictationDiffView.tsx
@@ -2658,7 +2658,7 @@ git commit -m "feat(web): 新增默写正文差异高亮组件"
   - `<DictationAnswerForm value={{author,dynasty,body}} onChange={...} disabled={boolean} />`
   - 路由 `/student/training/chinese/dictation/run`；读 `sessionStorage['training:dictation']`，空题单踢回配置页
 
-- [ ] **Step 1: 写作答表单组件**
+- [x] **Step 1: 写作答表单组件**
 
 创建 `apps/web/src/components/business/dictation/DictationAnswerForm.tsx`：
 
@@ -2726,7 +2726,7 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
 }
 ```
 
-- [ ] **Step 2: 写答题页**
+- [x] **Step 2: 写答题页**
 
 创建 `apps/web/src/pages/student/training/chinese/DictationRunPage.tsx`：
 
@@ -2906,7 +2906,7 @@ export default function DictationRunPage() {
 }
 ```
 
-- [ ] **Step 3: 加路由**
+- [x] **Step 3: 加路由**
 
 `apps/web/src/routes/index.tsx` 加 import：
 
@@ -2928,7 +2928,7 @@ import DictationRunPage from '@/pages/student/training/chinese/DictationRunPage'
   },
 ```
 
-- [ ] **Step 4: 类型检查 + lint**
+- [x] **Step 4: 类型检查 + lint**
 
 ```bash
 cd apps/web && npx tsc -b --noEmit && npm run lint
@@ -2936,7 +2936,7 @@ cd apps/web && npx tsc -b --noEmit && npm run lint
 
 Expected: 无错误。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/business/dictation/DictationAnswerForm.tsx apps/web/src/pages/student/training/chinese/DictationRunPage.tsx apps/web/src/routes/index.tsx
@@ -2954,7 +2954,7 @@ git commit -m "feat(web): 新增语文默写答题页（三字段作答 + 差异
 - Consumes: 路由 `/student/training/chinese/special`（Task 11）、原数学路由 `/student/training/home`（既有）
 - Produces: `TrainingSubjectPage` 语文 `enabled:true`，`handleSelect` 按学科跳转
 
-- [ ] **Step 1: 改学科表**
+- [x] **Step 1: 改学科表**
 
 `apps/web/src/pages/student/TrainingSubjectPage.tsx:12-16` 改为：
 
@@ -2967,7 +2967,7 @@ const SUBJECTS: TrainingSubject[] = [
 ];
 ```
 
-- [ ] **Step 2: 改跳转**
+- [x] **Step 2: 改跳转**
 
 `TrainingSubjectPage.tsx:35-39` 改为：
 
@@ -2983,7 +2983,7 @@ const SUBJECTS: TrainingSubject[] = [
   };
 ```
 
-- [ ] **Step 3: 类型检查 + lint**
+- [x] **Step 3: 类型检查 + lint**
 
 ```bash
 cd apps/web && npx tsc -b --noEmit && npm run lint
@@ -2991,7 +2991,7 @@ cd apps/web && npx tsc -b --noEmit && npm run lint
 
 Expected: 无错误。
 
-- [ ] **Step 4: 目视验证**
+- [x] **Step 4: 目视验证**
 
 ```bash
 cd apps/web && npm run dev
@@ -3000,7 +3000,7 @@ cd apps/web && npm run dev
 打开 `/student/training`。
 Expected: 语文卡可点，副标题「古诗文默写」；英语卡仍灰化「敬请期待」；点语文进入语文专项页；点数学仍进入原三卡页。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/student/TrainingSubjectPage.tsx
@@ -3043,7 +3043,7 @@ cd apps/web && npm run dev
 
 Expected: 7 条全部符合。**若第 4 条错因提醒为空**，确认本地 `LLM_BASE_URL`（`LOCAL_LLM_BASE_URL`）可用，或接受「暂时无法生成错因提醒」的兜底展示。
 
-- [ ] **Step 2: 把三端点写入 API 设计文档**
+- [x] **Step 2: 把三端点写入 API 设计文档**
 
 在 `docs/API接口与数据流设计文档.md` 的 §4 端点清单中加入（格式对齐同文件中既有 training 端点条目）：
 
@@ -3053,11 +3053,11 @@ Expected: 7 条全部符合。**若第 4 条错因提醒为空**，确认本地 
 
 并在 §6 数据流补一条「语文默写练习」流程：配置页拉篇目 → 开练抽题 → 三字段提交 → 程序判对错 + 差异定位 → 错题入 `main_error_books(source='dictation')` → LLM 生成错因（失败不阻断）。
 
-- [ ] **Step 3: 把三端点写入 openapi.yaml**
+- [x] **Step 3: 把三端点写入 openapi.yaml**
 
 在 `docs/api/openapi.yaml` 的 training 相关 paths 下加入同样三个端点，schema 与 Step 2 一致；**路径、方法、参数名、响应字段必须与文档完全一致**。
 
-- [ ] **Step 4: 交叉校验两份文档无遗漏**
+- [x] **Step 4: 交叉校验两份文档无遗漏**
 
 ```bash
 grep -n "dictation" docs/API接口与数据流设计文档.md
@@ -3066,11 +3066,11 @@ grep -n "dictation" docs/api/openapi.yaml
 
 Expected: 两处都能搜到三条 `dictation` 路径，且路径字符串完全一致。
 
-- [ ] **Step 5: 记录变更日志**
+- [x] **Step 5: 记录变更日志**
 
 在 `docs/ai-core-changelog.md` 追加一条日期条目（`2026-09-13`），记录：新增语文默写专项（`poem_dictation` 题型、`dictation_passages` 表、`judgeDictation` 纯程序判题、`dictation_feedback` 场景与本地优先路由、三端点），并写明「局限/待办：九年级必背篇目全量内容与逐字校验见内容管线计划；语文错题练习页未做」。
 
-- [ ] **Step 6: 跑最终全量校验**
+- [x] **Step 6: 跑最终全量校验**
 
 ```bash
 cd apps/server && npm test && npm run build
@@ -3082,7 +3082,7 @@ cd apps/web && npm run lint && npm run build
 
 Expected: 全部通过。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml docs/ai-core-changelog.md
@@ -3109,7 +3109,7 @@ git commit -m "docs(api): 同步语文默写三端点与数据流，记录变更
 - Consumes: `tools/db/migrations/` 既有约定（纯 SQL、手动执行、文件名 `YYYY-MM-DD_描述.sql`；`install_mysql.sh` **不**执行 migrations）
 - Produces: 幂等迁移 + 种子脚本的 `assertContentHashUniqueIndex(pool): Promise<void>` 守卫（缺失时抛错）
 
-- [ ] **Step 1: 写幂等迁移**
+- [x] **Step 1: 写幂等迁移**
 
 创建 `tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql`：
 
@@ -3160,7 +3160,7 @@ DEALLOCATE PREPARE stmt;
 >
 > **为什么按「是否存在**单列**唯一索引」判定，而不是按索引名、也不是按「某列 NON_UNIQUE=0」**：漂移库里的遗留索引名是 `idx_q_content_hash`（非唯一），与目标名不同，按名判定会误建重复键名；而复合唯一索引（如 `UNIQUE (content_hash, source)`）在 `information_schema.STATISTICS` 里**每一列**都记 `NON_UNIQUE=0`，只按行判定会误以为 `content_hash` 已唯一而静默跳过——那正是本迁移要堵的洞。故用 `GROUP BY INDEX_NAME + COUNT(*)=1 + MIN(COLUMN_NAME)='content_hash'` 锁定「单列且列名正确」。
 
-- [ ] **Step 2: 执行迁移（两次，验证幂等）**
+- [x] **Step 2: 执行迁移（两次，验证幂等）**
 
 ```bash
 MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql
@@ -3169,7 +3169,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 < tools/db/migrations/2026-09-13_ensure_
 
 Expected: 两次都不报错。第一次会真正建索引（若无），第二次走 `SELECT 1` 无操作分支。
 
-- [ ] **Step 3: 验证索引已是唯一**
+- [x] **Step 3: 验证索引已是唯一**
 
 ```bash
 MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='ai_k12' AND TABLE_NAME='questions' AND COLUMN_NAME='content_hash';"
@@ -3177,7 +3177,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SELECT INDEX_NAME, NON_UNIQUE, CO
 
 Expected: 至少一行 `NON_UNIQUE: 0`（唯一索引存在）。
 
-- [ ] **Step 4: 给种子脚本加守卫**
+- [x] **Step 4: 给种子脚本加守卫**
 
 在 `apps/server/src/scripts/seed-dictation-fixture.ts` 中，`main()` 开头（建 pool 之后、写数据之前）插入守卫，并新增该函数：
 
@@ -3212,7 +3212,7 @@ async function assertContentHashUniqueIndex(pool: mysql.Pool): Promise<void> {
   await assertContentHashUniqueIndex(pool);
 ```
 
-- [ ] **Step 5: 验证守卫的失败路径（非破坏性 RED）**
+- [x] **Step 5: 验证守卫的失败路径（非破坏性 RED）**
 
 不要为了验证而真的删索引（那是破坏性操作）。改为**临时把守卫的判定条件改成必然不成立**：
 
@@ -3224,7 +3224,7 @@ cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
 
 Expected: 报错退出（exit code 1），错误信息含 `缺少唯一索引`。**随后还原**，并确认 `git diff` 里没有遗留这个临时改动。
 
-- [ ] **Step 6: 还原后跑通 + 幂等复验**
+- [x] **Step 6: 还原后跑通 + 幂等复验**
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts && npx tsx src/scripts/seed-dictation-fixture.ts
@@ -3233,7 +3233,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT COUNT(*) AS passages FROM dic
 
 Expected: 两次都打印同样的 `questionId`；计数恒为 `2` / `2`。
 
-- [ ] **Step 7: 全量测试**
+- [x] **Step 7: 全量测试**
 
 ```bash
 cd apps/server && npm test
@@ -3241,7 +3241,7 @@ cd apps/server && npm test
 
 Expected: 全绿。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-13_ensure_uniq_q_content_hash.sql apps/server/src/scripts/seed-dictation-fixture.ts

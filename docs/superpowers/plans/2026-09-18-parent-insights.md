@@ -56,7 +56,7 @@
   - `listTrackedSubjectIds(studentId: number): Promise<number[]>`
   - `getActivitySummary(studentId: number, windowStart: Date): Promise<{ lastActiveAt: Date | null; activeDays: number }>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/server/src/database/repositories/parent-insights.repo.test.ts`：
 
@@ -154,12 +154,12 @@ describe('ParentInsightsRepository：活跃度', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: FAIL — `Failed to resolve import "./parent-insights.repo.js"`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 创建 `apps/server/src/database/repositories/parent-insights.repo.ts`：
 
@@ -254,12 +254,12 @@ export class ParentInsightsRepository {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/parent-insights.repo.ts apps/server/src/database/repositories/parent-insights.repo.test.ts
@@ -284,7 +284,7 @@ git commit -m "feat(parent-insights): 新增家长端聚合仓储（已开始学
   - `getSelfAssessBySubject(studentId: number, from?: Date, to?: Date): Promise<SelfAssessRow[]>`
   - `getExamCounts(studentId: number, from?: Date, to?: Date): Promise<SubjectCountRow[]>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `parent-insights.repo.test.ts`：
 
@@ -367,12 +367,12 @@ describe('ParentInsightsRepository：自评与考试场次', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: FAIL — `repo.getAccuracyBySubject is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `parent-insights.repo.ts` 的 import 之后加行类型：
 
@@ -489,12 +489,12 @@ export interface SubjectCountRow {
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/parent-insights.repo.ts apps/server/src/database/repositories/parent-insights.repo.test.ts
@@ -519,7 +519,7 @@ git commit -m "feat(parent-insights): 正确率合并口径 + 自评 + 考试场
   - `getWeakPoints(studentId: number, limit: number): Promise<WeakPointRow[]>`
   - `countUncoveredUnclearedErrors(studentId: number): Promise<number>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `parent-insights.repo.test.ts`：
 
@@ -586,12 +586,12 @@ describe('ParentInsightsRepository：错题统计', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: FAIL — `repo.getErrorBookSummary is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 追加行类型：
 
@@ -712,12 +712,12 @@ export interface WeakPointRow {
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/parent-insights.repo.ts apps/server/src/database/repositories/parent-insights.repo.test.ts
@@ -740,7 +740,7 @@ git commit -m "feat(parent-insights): 错题统计与薄弱点聚合（含未标
   - `getAccuracyTrend(studentId: number, from: Date, to: Date): Promise<TrendRow[]>`
   - `listSubmittedExams(studentId: number, limit: number): Promise<ExamSummaryRow[]>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `parent-insights.repo.test.ts`：
 
@@ -812,12 +812,12 @@ describe('ParentInsightsRepository：趋势与考试列表', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: FAIL — `repo.getAccuracyTrend is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 追加行类型：
 
@@ -925,12 +925,12 @@ function toLocalDayString(d: Date): string {
 > 从 `database/repositories/` 反向 import 模块层是分层倒挂。两处各自保留一份 4 行实现是有意的，
 > **不要**为了 DRY 把它们抽成跨层共享。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/parent-insights.repo.ts apps/server/src/database/repositories/parent-insights.repo.test.ts
@@ -966,7 +966,7 @@ git commit -m "feat(parent-insights): 按天趋势与考试记录聚合"
 > **静默消失**——家长看不到孩子的作业错题，而且不会报错。反向排除对新 source 天然免疫。
 > （顺带：`main_error_books.source` 无 CHECK 约束，实际写入值由代码决定，白名单无法穷举。）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `parent-insights.repo.test.ts`：
 
@@ -1117,12 +1117,12 @@ describe('ParentInsightsRepository：本页错题的知识点', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: FAIL — `repo.listParentErrors is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 追加行类型与筛选类型：
 
@@ -1302,12 +1302,12 @@ export interface ErrorKnowledgePointRow {
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/parent-insights.repo.ts apps/server/src/database/repositories/parent-insights.repo.test.ts
@@ -1331,7 +1331,7 @@ git commit -m "feat(parent-insights): 家长端错题列表（筛选 + 分页，
 
 > **本任务的仓储不负责读消息正文**：`chat-logs/:dialogueId` 的消息直接用既有的 `AiMessagesRepository.findByDialogue(dialogueId)`（在 `ConversationsService` 里已被验证过），Task 10 注入它即可。这样同一份读逻辑不会在 plan 里出现两遍。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `parent-insights.repo.test.ts`：
 
@@ -1413,12 +1413,12 @@ it('筛选下推：轨道 / 场景 / 时间窗（按最后一条消息时间）/
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: FAIL — `repo.listParentChatLogs is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 追加行类型与筛选类型：
 
@@ -1559,12 +1559,12 @@ export interface ParentChatLogRow {
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-insights.repo.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/parent-insights.repo.ts apps/server/src/database/repositories/parent-insights.repo.test.ts
@@ -1599,7 +1599,7 @@ git commit -m "feat(parent-insights): 会话列表聚合（消息数/闲聊标�
 
 > `toRate` 与 `resolveWindow` 在 Task 7 就抽成独立 util（不是写在 dashboard 里），因为 Task 8 的报告页要用**同一份**口径。两个小 util 各自带测试，是「口径唯一实现」这个硬要求的落地方式。
 
-- [ ] **Step 1: 写 window.util 的失败测试**
+- [x] **Step 1: 写 window.util 的失败测试**
 
 创建 `apps/server/src/modules/parent-insights/window.util.test.ts`：
 
@@ -1658,12 +1658,12 @@ describe('window.util', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts`
 Expected: FAIL — `Failed to resolve import "./window.util.js"`
 
-- [ ] **Step 3: 实现 window.util**
+- [x] **Step 3: 实现 window.util**
 
 创建 `apps/server/src/modules/parent-insights/window.util.ts`：
 
@@ -1723,12 +1723,12 @@ export function resolveWindow(period: ReportPeriod): ReportWindow {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 写并实现 rate.util（含测试）**
+- [x] **Step 5: 写并实现 rate.util（含测试）**
 
 创建 `apps/server/src/modules/parent-insights/rate.util.test.ts`：
 
@@ -1772,7 +1772,7 @@ export function toRate(answered: number, correct: number): number | null {
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/rate.util.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 写 dashboard.service 的失败测试**
+- [x] **Step 6: 写 dashboard.service 的失败测试**
 
 创建 `apps/server/src/modules/parent-insights/dashboard.service.test.ts`：
 
@@ -1952,12 +1952,12 @@ describe('DashboardService', () => {
 });
 ```
 
-- [ ] **Step 7: 跑测试确认失败**
+- [x] **Step 7: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/dashboard.service.test.ts`
 Expected: FAIL — `Failed to resolve import "./dashboard.service.js"`
 
-- [ ] **Step 8: 写 DTO**
+- [x] **Step 8: 写 DTO**
 
 创建 `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts`：
 
@@ -2021,7 +2021,7 @@ export interface ParentDashboard {
 }
 ```
 
-- [ ] **Step 9: 实现 DashboardService**
+- [x] **Step 9: 实现 DashboardService**
 
 创建 `apps/server/src/modules/parent-insights/dashboard.service.ts`：
 
@@ -2185,12 +2185,12 @@ export class DashboardService {
 }
 ```
 
-- [ ] **Step 10: 跑 dashboard 测试确认通过**
+- [x] **Step 10: 跑 dashboard 测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/dashboard.service.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 11: 写 controller**
+- [x] **Step 11: 写 controller**
 
 创建 `apps/server/src/modules/parent-insights/parent-insights.controller.ts`：
 
@@ -2229,7 +2229,7 @@ export class ParentInsightsController {
 }
 ```
 
-- [ ] **Step 12: 写模块并注册进 AppModule**
+- [x] **Step 12: 写模块并注册进 AppModule**
 
 创建 `apps/server/src/modules/parent-insights/parent-insights.module.ts`：
 
@@ -2282,7 +2282,7 @@ import { ParentInsightsModule } from './modules/parent-insights/parent-insights.
     ParentInsightsModule,
 ```
 
-- [ ] **Step 13: 真启动一次（DI 缺依赖只在启动时暴露，tsc 抓不到）**
+- [x] **Step 13: 真启动一次（DI 缺依赖只在启动时暴露，tsc 抓不到）**
 
 > ⚠️ **不要用 `pkill -f 'node dist/main.js'`**：开发机上很可能有别人（或控制侧）已经跑着的后端，
 > 一句 pkill 会把它一起杀掉。用**独立端口 + 按 PID 精确收尾**：
@@ -2302,12 +2302,12 @@ Expected: 构建无错；日志出现 `ParentInsightsModule dependencies initial
 若日志报 `Nest can't resolve dependencies of DashboardService (...)`，就是 `providers` 少列了仓储。若报 `EADDRINUSE`，
 说明 3399 也被占用，**换一个端口重试**，不要 kill 占用者。
 
-- [ ] **Step 14: 跑全量后端测试**
+- [x] **Step 14: 跑全量后端测试**
 
 Run: `cd apps/server && npm test`
 Expected: 全绿（原先 748 个用例 + 本批新增）
 
-- [ ] **Step 15: 提交**
+- [x] **Step 15: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights apps/server/src/app.module.ts
@@ -2332,7 +2332,7 @@ git commit -m "feat(parent-insights): 家长仪表盘模块与端点（多孩聚
   - `class ReportService { getReport(studentId: number, period: ReportPeriod): Promise<LearningReport> }`
   - 端点 `GET /api/parent/students/:studentId/reports`（`period` 非法 → 回落 `weekly`，见 spec §6）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/server/src/modules/parent-insights/report.service.test.ts`：
 
@@ -2487,12 +2487,12 @@ describe('ReportService', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/report.service.test.ts`
 Expected: FAIL — `Failed to resolve import "./report.service.js"`
 
-- [ ] **Step 3: 追加 DTO**
+- [x] **Step 3: 追加 DTO**
 
 追加到 `dto/parent-insights.dto.ts`：
 
@@ -2569,7 +2569,7 @@ export interface LearningReport {
 }
 ```
 
-- [ ] **Step 4: 实现 ReportService**
+- [x] **Step 4: 实现 ReportService**
 
 创建 `apps/server/src/modules/parent-insights/report.service.ts`：
 
@@ -2681,12 +2681,12 @@ export class ReportService {
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/report.service.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 加端点**
+- [x] **Step 6: 加端点**
 
 修改 `parent-insights.controller.ts`：把 import 区与类体改成下面这样（新增 `Query`、`Param`、`ParseIntPipe`、`z`、`BadRequestException`、`ParentService`、`ReportService`）：
 
@@ -2757,12 +2757,12 @@ export class ParentInsightsController {
   ],
 ```
 
-- [ ] **Step 7: 跑全量后端测试 + 真启动**
+- [x] **Step 7: 跑全量后端测试 + 真启动**
 
 Run: `cd apps/server && npm test && npm run build`
 Expected: 全绿 + 构建无错。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights
@@ -2791,7 +2791,7 @@ git commit -m "feat(parent-insights): 学情报告端点（实时聚合，周/�
 
 > **service 要负责把「本页错题」与「本页知识点」拼起来**：仓储的分页查询**刻意不 JOIN 知识点**（一题多 KP 会让行翻倍、把分页算错，见 Task 5 的说明），知识点由 `listErrorKnowledgePoints(本页去重后的 questionIds)` 另查一次，再按 questionId 聚成 `question.knowledgePoints[]`。本页没有错题、或本页的错题全都没有 `question_id` 时，**跳过这次查询**。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/server/src/modules/parent-insights/errors.service.test.ts`：
 
@@ -2900,12 +2900,12 @@ describe('ErrorsService', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/errors.service.test.ts`
 Expected: FAIL — `Failed to resolve import "./errors.service.js"`
 
-- [ ] **Step 3: 追加 DTO**
+- [x] **Step 3: 追加 DTO**
 
 追加到 `dto/parent-insights.dto.ts`：
 
@@ -2948,7 +2948,7 @@ export interface ParentErrorPage {
 }
 ```
 
-- [ ] **Step 4: 实现 ErrorsService**
+- [x] **Step 4: 实现 ErrorsService**
 
 创建 `apps/server/src/modules/parent-insights/errors.service.ts`：
 
@@ -3046,12 +3046,12 @@ export class ErrorsService {
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/errors.service.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 加端点**
+- [x] **Step 6: 加端点**
 
 在 `parent-insights.controller.ts` 的 import 区加：
 
@@ -3096,12 +3096,12 @@ import { DEFAULT_PAGE, parsePositiveInt } from '../points/pagination.util.js';
 
 `parent-insights.module.ts` 的 `providers` 加 `ErrorsService`。
 
-- [ ] **Step 7: 跑全量后端测试 + 构建**
+- [x] **Step 7: 跑全量后端测试 + 构建**
 
 Run: `cd apps/server && npm test && npm run build`
 Expected: 全绿 + 构建无错。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights
@@ -3127,7 +3127,7 @@ git commit -m "feat(parent-insights): 错题查看端点（只读 + 筛选 + 固
   - `interface ChatLogsQuery { track?: 'mainline' | 'auxiliary'; scene?: string; from?: string; to?: string; q?: string; page: number }`
   - 端点 `GET /api/parent/students/:studentId/chat-logs` 与 `GET /api/parent/students/:studentId/chat-logs/:dialogueId`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/server/src/modules/parent-insights/chat-logs.service.test.ts`：
 
@@ -3249,12 +3249,12 @@ describe('ChatLogsService：详情', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/chat-logs.service.test.ts`
 Expected: FAIL — `Failed to resolve import "./chat-logs.service.js"`
 
-- [ ] **Step 3: 追加 DTO**
+- [x] **Step 3: 追加 DTO**
 
 追加到 `dto/parent-insights.dto.ts`：
 
@@ -3299,7 +3299,7 @@ export interface ParentChatLogPage {
 }
 ```
 
-- [ ] **Step 4: 实现 ChatLogsService**
+- [x] **Step 4: 实现 ChatLogsService**
 
 创建 `apps/server/src/modules/parent-insights/chat-logs.service.ts`：
 
@@ -3405,12 +3405,12 @@ export class ChatLogsService {
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/chat-logs.service.test.ts`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 加端点**
+- [x] **Step 6: 加端点**
 
 在 `parent-insights.controller.ts` 加 import：
 
@@ -3475,7 +3475,7 @@ import type { ParentChatLogDetail, ParentChatLogPage } from './dto/parent-insigh
   ],
 ```
 
-- [ ] **Step 7: 跑全量后端测试 + 真启动 + 构建**
+- [x] **Step 7: 跑全量后端测试 + 真启动 + 构建**
 
 ```bash
 cd apps/server && npm run build
@@ -3488,7 +3488,7 @@ kill "$SMOKE_PID"
 Expected: 测试全绿、构建无错、`curl` 返回 `401`（无 token 被守卫拦下，说明 DI 装配正常）。
 **不要用 `pkill`** —— 会连带杀掉开发机上别人在跑的后端（只按 `$SMOKE_PID` 收尾）。端口占用就换一个，别 kill 占用者。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights
@@ -3519,12 +3519,12 @@ git commit -m "feat(parent-insights): AI 对话回放端点（列表 + 详情 + 
 > 必须在挂载后经 `getComputedStyle` 取出真实色值。**家长主题的变量挂在 `[data-theme="parent"]` 容器上、不在 `:root`**，从 `documentElement` 读到的是学生端橙色 —— 所以要从元素向上找最近的 `[data-theme]`。
 > `readChartColor` 带一个与 `style.md` 一致的兜底值：jsdom 对自定义属性支持不完整，且生产环境若变量缺失，图表会静默变成黑色（比报错更难发现）。
 
-- [ ] **Step 1: 装依赖**
+- [x] **Step 1: 装依赖**
 
 Run: `cd apps/web && npm install recharts`
 Expected: `package.json` 的 `dependencies` 里出现 `"recharts": "^2.x"`。
 
-- [ ] **Step 2: 写 chart-theme 的失败测试**
+- [x] **Step 2: 写 chart-theme 的失败测试**
 
 创建 `apps/web/src/components/business/parent/chart-theme.test.ts`：
 
@@ -3561,12 +3561,12 @@ describe('readChartColor', () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/chart-theme.test.ts`
 Expected: FAIL — `Failed to resolve import "./chart-theme"`
 
-- [ ] **Step 4: 实现 chart-theme**
+- [x] **Step 4: 实现 chart-theme**
 
 创建 `apps/web/src/components/business/parent/chart-theme.ts`：
 
@@ -3601,7 +3601,7 @@ export function readChartColor(token: string, container: Element | null): string
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/chart-theme.test.ts`
 Expected: PASS（本任务新增的用例全绿）
@@ -3611,7 +3611,7 @@ Expected: PASS（本任务新增的用例全绿）
 > 所以第 1 个用例照写即可，**不要**为了让它通过而把断言放宽成「等于内联值或兜底值」——
 > 那种「两个都可能」的断言等于什么都没验证。
 
-- [ ] **Step 6: 写图表封装的失败测试**
+- [x] **Step 6: 写图表封装的失败测试**
 
 创建 `apps/web/src/components/business/parent/ChartLine.test.tsx`：
 
@@ -3754,12 +3754,12 @@ describe('ChartBar', () => {
 });
 ```
 
-- [ ] **Step 7: 跑测试确认失败**
+- [x] **Step 7: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/`
 Expected: FAIL — `Failed to resolve import "./ChartLine"`
 
-- [ ] **Step 8: 实现两个封装**
+- [x] **Step 8: 实现两个封装**
 
 创建 `apps/web/src/components/business/parent/ChartLine.tsx`：
 
@@ -3942,12 +3942,12 @@ export default function ChartBar({
 > 正确写法是**挂载后读取**：`useState` 存色值 + `useLayoutEffect(..., [colorToken])` 里 `setState`。layout effect 在浏览器 paint 之前同步 flush，所以不会先闪一帧兜底色。
 > 落盘实现见 `apps/web/src/components/business/parent/ChartLine.tsx` 与 `ChartBar.tsx`；对应的**回归钉子**是每个组件各一条「容器上给 `--brand-500: #123456`，断言 series 的 `data-stroke`/`data-fill` 等于 `#123456`」——只断言 `!== '#8884d8'` 是**无效断言**（读容器与用兜底都会通过，因为兜底本身就是 `#2563EB`）。
 
-- [ ] **Step 9: 跑测试确认通过**
+- [x] **Step 9: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/parent/`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 10: 提交**
+- [x] **Step 10: 提交**
 
 ```bash
 git add apps/web/package.json apps/web/package-lock.json apps/web/src/components/business/parent
@@ -3973,7 +3973,7 @@ git commit -m "feat(parent): 引入 recharts 并封装折线/柱状图（CSS 变
 
 > 类型名一律加 `Parent` 前缀，避免与已有的 `MyPoints` / `ErrorItem` 之类冲突（`api.ts` 是单文件、命名空间全局）。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 追加到 `apps/web/src/services/api.test.ts`（文件顶部已从 `vitest` 导入 `describe/it/expect/vi`；若没有 `afterEach`，一并补进那条 import）：
 
@@ -4046,12 +4046,12 @@ describe('家长端学情端点：路径与 query', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/services/api.test.ts`
 Expected: FAIL — `getParentDashboard is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `apps/web/src/services/api.ts` 的「Parent: student accounts」区块之后追加：
 
@@ -4298,12 +4298,12 @@ export function getParentChatLogDetail(
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/services/api.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/services/api.test.ts
@@ -4323,7 +4323,7 @@ git commit -m "feat(parent): 学情可见性五个 api 方法与类型"
 - Produces: `interface PaginationProps { page: number; totalPages: number; onChange: (page: number) => void }`
 - 注意：`RedemptionHistoryPanel.tsx` **本批不动**（它已被测试覆盖，改它属于无关重构，风险大于收益）；它只是本组件的「第 1 个使用者形态」参考。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/components/base/Pagination.test.tsx`：
 
@@ -4374,12 +4374,12 @@ describe('Pagination', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/components/base/Pagination.test.tsx`
 Expected: FAIL — `Failed to resolve import "./Pagination"`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 创建 `apps/web/src/components/base/Pagination.tsx`：
 
@@ -4437,12 +4437,12 @@ export { Pagination } from './Pagination';
 export type { PaginationProps } from './Pagination';
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/base/Pagination.test.tsx`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/web/src/components/base/Pagination.tsx apps/web/src/components/base/index.ts apps/web/src/components/base/Pagination.test.tsx
@@ -4478,7 +4478,7 @@ git commit -m "feat(web): 抽出分页基座组件"
 > - 想验「**没有选孩子**」的空态 → 必须让 `listMyStudents()` 返回 **`[]`**（同时把 store 的 `studentId` 置 `null`），否则切换器会把锚点补成第一个孩子、页面立刻开始取数，断言「不发请求」必然失败；
 > - 想验「**跟指定孩子取数**」→ `beforeEach` 里 `useParentStudentStore.setState({ studentId: <id> })` 即可（该 id 在 mock 列表里就会被保留）。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/pages/parent/ParentDashboardPage.test.tsx`：
 
@@ -4675,12 +4675,12 @@ describe('ParentDashboardPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentDashboardPage.test.tsx`
 Expected: FAIL — 路由仍指向 `Placeholder`，找不到 `dashboard-student-11`
 
-- [ ] **Step 3: 实现页面**
+- [x] **Step 3: 实现页面**
 
 创建 `apps/web/src/pages/parent/ParentDashboardPage.tsx`：
 
@@ -4922,7 +4922,7 @@ export default function ParentDashboardPage() {
 }
 ```
 
-- [ ] **Step 4: 接入路由**
+- [x] **Step 4: 接入路由**
 
 `apps/web/src/routes/routeTable.tsx`：
 1. 在 `import ParentPointsPage from '@/pages/parent/ParentPointsPage';` 之后加
@@ -4938,17 +4938,17 @@ export default function ParentDashboardPage() {
    { path: 'dashboard', element: <ParentDashboardPage /> },
    ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentDashboardPage.test.tsx`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 全量前端测试 + 构建**
+- [x] **Step 6: 全量前端测试 + 构建**
 
 Run: `cd apps/web && npm test && npm run build`
 Expected: 全绿 + 构建无错。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add apps/web/src/pages/parent/ParentDashboardPage.tsx apps/web/src/pages/parent/ParentDashboardPage.test.tsx apps/web/src/routes/routeTable.tsx
@@ -4974,7 +4974,7 @@ git commit -m "feat(parent): 家长仪表盘页（多孩 Tab + 学科卡片 + �
 - 数字卡（stats）→ 折线（trend.rate，null 当 0 处理会误导，**跳过 null 点**）→ 柱状（subjects 用 `answered`，正确率另列文字）→ 薄弱点列表 + **「另有 N 道错题未标注知识点」提示** → 考试表格。
 - 薄弱点为空时也要显示「未标注」提示（否则家长会以为没问题）。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/pages/parent/ParentReportPage.test.tsx`：
 
@@ -5184,12 +5184,12 @@ describe('ParentReportPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentReportPage.test.tsx`
 Expected: FAIL — 路由仍指向 `Placeholder`
 
-- [ ] **Step 3: 实现页面**
+- [x] **Step 3: 实现页面**
 
 创建 `apps/web/src/pages/parent/ParentReportPage.tsx`：
 
@@ -5443,17 +5443,17 @@ export default function ParentReportPage() {
 }
 ```
 
-- [ ] **Step 4: 接入路由**
+- [x] **Step 4: 接入路由**
 
 `routeTable.tsx`：加 `import ParentReportPage from '@/pages/parent/ParentReportPage';`，并把
 `<Placeholder title="学情报告 P6.2" />` 换成 `<ParentReportPage />`。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentReportPage.test.tsx`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/pages/parent/ParentReportPage.tsx apps/web/src/pages/parent/ParentReportPage.test.tsx apps/web/src/routes/routeTable.tsx
@@ -5481,7 +5481,7 @@ git commit -m "feat(parent): 学情报告页（周/月切换 + 趋势折线 + �
 - 行可展开：显示题干、题型、难度、知识点；`question === null` 时**只显示 `wrongAnswerText`**。
 - `Pagination`：「自报家门」守卫——响应里的 `page` 与当前页不符就不渲染（防翻页时页码与内容错配）。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/pages/parent/ParentErrorsPage.test.tsx`：
 
@@ -5691,12 +5691,12 @@ describe('ParentErrorsPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentErrorsPage.test.tsx`
 Expected: FAIL — 路由仍指向 `Placeholder`
 
-- [ ] **Step 3: 实现页面**
+- [x] **Step 3: 实现页面**
 
 创建 `apps/web/src/pages/parent/ParentErrorsPage.tsx`：
 
@@ -6076,17 +6076,17 @@ export default function ParentErrorsPage() {
 }
 ```
 
-- [ ] **Step 4: 接入路由**
+- [x] **Step 4: 接入路由**
 
 `routeTable.tsx`：加 `import ParentErrorsPage from '@/pages/parent/ParentErrorsPage';`，把
 `<Placeholder title="错题查看 P6.3" />` 换成 `<ParentErrorsPage />`。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentErrorsPage.test.tsx`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/pages/parent/ParentErrorsPage.tsx apps/web/src/pages/parent/ParentErrorsPage.test.tsx apps/web/src/routes/routeTable.tsx
@@ -6113,7 +6113,7 @@ git commit -m "feat(parent): 错题查看页（主线/辅线 Tab + 筛选 + 分�
 - `blockCount > 0` 的会话在列表里也标红点。
 - 删除 `/parent/children-switch` 冗余占位（顶栏 `StudentSwitcher` 已是真实实现）。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/pages/parent/ParentChatLogsPage.test.tsx`：
 
@@ -6323,12 +6323,12 @@ describe('路由清理', () => {
 > 本用例不需要 `render`，`ParentChatLogsPage.test.tsx` 的 `beforeEach` 里那些 mock 不影响它。
 > 若 `routeTable.test.tsx` 里也有引用 `children-switch` 的断言，一并删掉（测试跟随实现变更）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentChatLogsPage.test.tsx`
 Expected: FAIL — 路由仍指向 `Placeholder`
 
-- [ ] **Step 3: 实现页面**
+- [x] **Step 3: 实现页面**
 
 创建 `apps/web/src/pages/parent/ParentChatLogsPage.tsx`：
 
@@ -6715,7 +6715,7 @@ export default function ParentChatLogsPage() {
 }
 ```
 
-- [ ] **Step 4: 接入路由 + 删除冗余占位**
+- [x] **Step 4: 接入路由 + 删除冗余占位**
 
 `apps/web/src/routes/routeTable.tsx`：
 1. 加 `import ParentChatLogsPage from '@/pages/parent/ParentChatLogsPage';`
@@ -6723,18 +6723,18 @@ export default function ParentChatLogsPage() {
 3. **删除**这一行：`{ path: 'children-switch', element: <Placeholder title="多孩切换 P6.8" /> },`
    —— 顶栏 `StudentSwitcher`（`ParentLayout.tsx:57`）是真实实现，这条路由从来没被导航到过。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent/ParentChatLogsPage.test.tsx`
 Expected: PASS（本任务新增的用例全绿）
 
-- [ ] **Step 6: 全量前端测试 + lint + 构建**
+- [x] **Step 6: 全量前端测试 + lint + 构建**
 
 Run: `cd apps/web && npm test && npm run lint && npm run build`
 Expected: 全绿 + 构建无错。
 注意：`routeTable.test.tsx` 里若有断言引用 `children-switch`，同步删掉那条断言（测试跟随实现变更）。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add apps/web/src/pages/parent/ParentChatLogsPage.tsx apps/web/src/pages/parent/ParentChatLogsPage.test.tsx apps/web/src/routes/routeTable.tsx apps/web/src/routes/routeTable.test.tsx
@@ -6755,7 +6755,7 @@ git commit -m "feat(parent): AI 对话回放页（左列表右详情 + 闲聊红
 
 **这是硬规则，不能省**：CLAUDE.md 明写「`API接口与数据流设计文档.md` 与 `openapi.yaml` 必须始终一致」，且「任何一方变更时，另一方必须同步更新」。
 
-- [ ] **Step 1: 改 openapi.yaml**
+- [x] **Step 1: 改 openapi.yaml**
 
 六处改动（照 spec §7 的表）：
 
@@ -6774,7 +6774,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n 'parent/students/{stud
 ```
 Expected: 无输出（两份文档里都删干净了）。
 
-- [ ] **Step 2: 改 API 设计文档**
+- [x] **Step 2: 改 API 设计文档**
 
 1. §4.13 端点表：删 `/api/parent/students/{studentId}/reports/{reportId}` 一行；`reports` 那行语义改成「实时聚合学情报告（不落库）」；`errors` / `chat-logs` 补上新 query 参数说明。
 2. §6.8「学情报告生成与展示」**整节重写**：
@@ -6798,17 +6798,17 @@ Expected: 无输出（两份文档里都删干净了）。
 4. **删掉「页面-接口」映射表里的 `P6.8 多孩切换 → /parent/children-switch` 那一行**（约 `:1593`）：该路由已随 Task 17 删除（顶栏 `StudentSwitcher` 才是真实实现）。
 5. `errors` 端点的 `ErrorItem.source` enum 按**实际的 6 个值**补齐：`practice` / `discuss` / `exam` / `targeted` / `error_practice` / `auxiliary`（原 enum 缺 `exam`/`targeted`/`error_practice`，且多出 `homework`/`unit_test`/`midterm`/`final` 四个当前没有任何写入点的值）。
 
-- [ ] **Step 3: 改 UX 文档**
+- [x] **Step 3: 改 UX 文档**
 
 1. §5.6 P6.1：把「今日学习时长」改成「近 7 天活跃天数 + 最近活跃时间」，并加一句口径说明（系统当前无学习时长埋点）。
 2. §5.6 P6.2：把「学习时长曲线」改成「答题量与正确率趋势」、「薄弱点雷达图」改成「薄弱知识点 Top（按未清零错题数）」，并注明「薄弱点为错题数代理，仅统计已标注知识点的错题，页面会显示未标注条数」。
 3. §5.6 P6.4：筛选维度由「按日期/学科/课程筛选」改成「按轨道/场景/时间/标题关键词筛选」，并加一句「不提供学科筛选：`ai_dialogues.subject_id` 约 76% 为空」。
 
-- [ ] **Step 4: 改 PRD**
+- [x] **Step 4: 改 PRD**
 
 §7.7 第一条「查看学习报告：按学科查看学习时长、完成进度、正确率、薄弱点」→ 把「学习时长」标注为后续迭代（与当前口径一致），其余不动。改动要最小。
 
-- [ ] **Step 5: 追加 changelog**
+- [x] **Step 5: 追加 changelog**
 
 在 `docs/ai-core-changelog.md` **顶部**追加本批条目，包含：
 
@@ -6816,7 +6816,7 @@ Expected: 无输出（两份文档里都删干净了）。
 - **实测数据**（写进文档，未来判断口径时有用）：错题 139 条仅 40% 能映射知识点；`exam_answers` 564 行 vs `practice_results` 1 行（正确率主源是考试）；`ai_dialogues.subject_id` 76% 为 NULL；`ai_messages.safety_flag=1` 共 22 条。
 - **遗留风险 / 已知限制**：照 spec §9 八条抄进 changelog（学习时长为代理指标、`practice_results` 是覆盖式最新态、关键词只搜标题、`unreadAlerts` 恒 0 等）。
 
-- [ ] **Step 6: 判断 CLAUDE.md 要不要改**
+- [x] **Step 6: 判断 CLAUDE.md 要不要改**
 
 只有当本批引入了**新的、未来必须遵守的硬约束**时才改。本批值得写进 CLAUDE.md 的只有一条判断标准：
 
@@ -6824,7 +6824,7 @@ Expected: 无输出（两份文档里都删干净了）。
 
 若决定写入，加在「独立子系统」节后面，一两句话，**不要**把带日期的细节写进 CLAUDE.md（照项目约定，日期日志进 changelog）。
 
-- [ ] **Step 7: 一致性自检**
+- [x] **Step 7: 一致性自检**
 
 Run:
 ```bash
@@ -6834,7 +6834,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && \
 ```
 Expected: 两份列表逐一对应（openapi 里的父路径 + 方法 vs API 文档 §4.13 的表）。有出入就补齐。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add docs/

@@ -117,7 +117,7 @@ apps/web/src/
 - Create: `apps/server/src/database/repositories/questions.repo.ts`
 - Modify: `apps/server/src/database/database.module.ts`
 
-- [ ] **Step 1.1: 定义 AiDialogue / AiMessage TypeScript 接口**
+- [x] **Step 1.1: 定义 AiDialogue / AiMessage TypeScript 接口**
 
 在 `apps/server/src/database/repositories/types.ts` 追加（若不存在则创建）：
 
@@ -208,7 +208,7 @@ export interface QuestionRow {
 }
 ```
 
-- [ ] **Step 1.2: 创建 AiDialoguesRepository**
+- [x] **Step 1.2: 创建 AiDialoguesRepository**
 
 `apps/server/src/database/repositories/ai-dialogues.repo.ts`:
 
@@ -274,7 +274,7 @@ export class AiDialoguesRepository {
 }
 ```
 
-- [ ] **Step 1.3: 创建 AiMessagesRepository**
+- [x] **Step 1.3: 创建 AiMessagesRepository**
 
 `apps/server/src/database/repositories/ai-messages.repo.ts`:
 
@@ -321,7 +321,7 @@ export class AiMessagesRepository {
 }
 ```
 
-- [ ] **Step 1.4: 创建 AuxErrorBooksRepository**
+- [x] **Step 1.4: 创建 AuxErrorBooksRepository**
 
 `apps/server/src/database/repositories/aux-error-books.repo.ts`:
 
@@ -378,7 +378,7 @@ export class AuxErrorBooksRepository {
 }
 ```
 
-- [ ] **Step 1.5: 创建 ExtractTasksRepository**
+- [x] **Step 1.5: 创建 ExtractTasksRepository**
 
 `apps/server/src/database/repositories/extract-tasks.repo.ts`:
 
@@ -417,7 +417,7 @@ export class ExtractTasksRepository {
 }
 ```
 
-- [ ] **Step 1.6: 创建 SafetyAlertsRepository**
+- [x] **Step 1.6: 创建 SafetyAlertsRepository**
 
 `apps/server/src/database/repositories/safety-alerts.repo.ts`:
 
@@ -457,7 +457,7 @@ export class SafetyAlertsRepository {
 }
 ```
 
-- [ ] **Step 1.7: 创建 QuestionsRepository**
+- [x] **Step 1.7: 创建 QuestionsRepository**
 
 `apps/server/src/database/repositories/questions.repo.ts`:
 
@@ -497,7 +497,7 @@ export class QuestionsRepository {
 }
 ```
 
-- [ ] **Step 1.8: 创建 UploadedFilesRepository**
+- [x] **Step 1.8: 创建 UploadedFilesRepository**
 
 `apps/server/src/database/repositories/uploaded-files.repo.ts`:
 
@@ -539,7 +539,7 @@ export class UploadedFilesRepository {
 }
 ```
 
-- [ ] **Step 1.9: 在 DatabaseModule 注册仓库**
+- [x] **Step 1.9: 在 DatabaseModule 注册仓库**
 
 `apps/server/src/database/database.module.ts` 的 `providers` 数组追加：
 
@@ -555,7 +555,7 @@ UploadedFilesRepository,
 
 并在 `exports` 中同样导出。
 
-- [ ] **Step 1.10: 运行 ai-core 测试确认无回归**
+- [x] **Step 1.10: 运行 ai-core 测试确认无回归**
 
 ```bash
 cd apps/server
@@ -564,7 +564,7 @@ npm test
 
 Expected: 现有 72 个测试全部通过（仓库层尚未被使用，不应影响测试）。
 
-- [ ] **Step 1.11: Commit**
+- [x] **Step 1.11: Commit**
 
 ```bash
 git add apps/server/src/database/
@@ -582,7 +582,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `apps/server/src/services/conversation/types.ts`
 - Create: `apps/server/src/services/conversation/conversation.service.spec.ts`
 
-- [ ] **Step 2.1: 更新 ConversationService 类型定义**
+- [x] **Step 2.1: 更新 ConversationService 类型定义**
 
 `apps/server/src/services/conversation/types.ts`:
 
@@ -622,7 +622,7 @@ export interface CompleteDialogueRequest {
 }
 ```
 
-- [ ] **Step 2.2: 重写 ConversationService 为 DB 持久化**
+- [x] **Step 2.2: 重写 ConversationService 为 DB 持久化**
 
 `apps/server/src/services/conversation/index.ts`:
 
@@ -744,7 +744,7 @@ export class ConversationService {
 }
 ```
 
-- [ ] **Step 2.3: 更新导出的 Repository index**
+- [x] **Step 2.3: 更新导出的 Repository index**
 
 若不存在 `apps/server/src/database/repositories/index.ts`，创建它：
 
@@ -758,7 +758,7 @@ export { QuestionsRepository } from './questions.repo.js';
 export { UploadedFilesRepository } from './uploaded-files.repo.js';
 ```
 
-- [ ] **Step 2.4: 编写 ConversationService 单元测试**
+- [x] **Step 2.4: 编写 ConversationService 单元测试**
 
 `apps/server/src/services/conversation/conversation.service.spec.ts`:
 
@@ -840,7 +840,7 @@ describe('ConversationService', () => {
 });
 ```
 
-- [ ] **Step 2.5: 运行测试**
+- [x] **Step 2.5: 运行测试**
 
 ```bash
 cd apps/server
@@ -849,7 +849,7 @@ npm test
 
 Expected: 新增测试通过；现有 ai-core 测试可能因类型签名变化需要同步调整。
 
-- [ ] **Step 2.6: 修复 ai-core 测试中的类型变化**
+- [x] **Step 2.6: 修复 ai-core 测试中的类型变化**
 
 如果 `TutoringCapability` 测试注入的是旧的内存 `ConversationService`，需要更新为可注入 fake repositories 的形式，或保持旧构造函数兼容。优先让 `ConversationService` 支持无参构造（用于旧测试）和依赖注入构造。
 
@@ -864,7 +864,7 @@ constructor(
 
 若未注入，方法内部 throw 明确错误，避免运行时静默失败。
 
-- [ ] **Step 2.7: Commit**
+- [x] **Step 2.7: Commit**
 
 ```bash
 git add apps/server/src/services/conversation/
@@ -882,7 +882,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/server/src/ai-core/prompts/structuring/question.md`
 - Create: `apps/server/src/ai-core/capabilities/question-structuring.capability.spec.ts`
 
-- [ ] **Step 3.1: 创建 question-structuring prompt**
+- [x] **Step 3.1: 创建 question-structuring prompt**
 
 `apps/server/src/ai-core/prompts/structuring/question.md`:
 
@@ -929,7 +929,7 @@ description: "将学生输入或图片 OCR 结果结构化为题库题目"
 }
 ```
 
-- [ ] **Step 3.2: 创建 QuestionStructuringCapability**
+- [x] **Step 3.2: 创建 QuestionStructuringCapability**
 
 `apps/server/src/ai-core/capabilities/question-structuring.capability.ts`:
 
@@ -994,7 +994,7 @@ export class QuestionStructuringCapability {
 }
 ```
 
-- [ ] **Step 3.3: 在 ai-core types 中补充类型**
+- [x] **Step 3.3: 在 ai-core types 中补充类型**
 
 `apps/server/src/ai-core/types.ts` 追加：
 
@@ -1028,7 +1028,7 @@ export interface StructuredQuestion {
 }
 ```
 
-- [ ] **Step 3.4: 更新 PromptBuilder 路由**
+- [x] **Step 3.4: 更新 PromptBuilder 路由**
 
 `apps/server/src/ai-core/infra/prompt-builder.ts` 中，为 capability `structuring` 增加路由：
 
@@ -1038,7 +1038,7 @@ if (capability === 'structuring') {
 }
 ```
 
-- [ ] **Step 3.5: 编写单元测试**
+- [x] **Step 3.5: 编写单元测试**
 
 `apps/server/src/ai-core/capabilities/question-structuring.capability.spec.ts`:
 
@@ -1074,7 +1074,7 @@ describe('QuestionStructuringCapability', () => {
 });
 ```
 
-- [ ] **Step 3.6: 运行测试**
+- [x] **Step 3.6: 运行测试**
 
 ```bash
 cd apps/server
@@ -1083,7 +1083,7 @@ npm test
 
 Expected: 新增测试通过。
 
-- [ ] **Step 3.7: Commit**
+- [x] **Step 3.7: Commit**
 
 ```bash
 git add apps/server/src/ai-core/
@@ -1101,7 +1101,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/server/src/modules/files/files.controller.ts`
 - Create: `apps/server/src/modules/files/files.service.ts`
 
-- [ ] **Step 4.1: 创建 FilesService**
+- [x] **Step 4.1: 创建 FilesService**
 
 `apps/server/src/modules/files/files.service.ts`:
 
@@ -1143,7 +1143,7 @@ export class FilesService {
 }
 ```
 
-- [ ] **Step 4.2: 创建 FilesController**
+- [x] **Step 4.2: 创建 FilesController**
 
 `apps/server/src/modules/files/files.controller.ts`:
 
@@ -1166,7 +1166,7 @@ export class FilesController {
 }
 ```
 
-- [ ] **Step 4.3: 创建 FilesModule**
+- [x] **Step 4.3: 创建 FilesModule**
 
 `apps/server/src/modules/files/files.module.ts`:
 
@@ -1184,14 +1184,14 @@ import { UploadedFilesRepository } from '../../database/repositories/uploaded-fi
 export class FilesModule {}
 ```
 
-- [ ] **Step 4.4: 安装 multer 类型（若未安装）**
+- [x] **Step 4.4: 安装 multer 类型（若未安装）**
 
 ```bash
 cd apps/server
 npm install --save-dev @types/multer
 ```
 
-- [ ] **Step 4.5: Commit**
+- [x] **Step 4.5: Commit**
 
 ```bash
 git add apps/server/src/modules/files/ apps/server/package.json apps/server/package-lock.json
@@ -1210,7 +1210,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/server/src/modules/refinery/refinery.controller.ts`
 - Create: `apps/server/src/modules/refinery/refinery.module.ts`
 
-- [ ] **Step 5.1: 创建 MinerUService**
+- [x] **Step 5.1: 创建 MinerUService**
 
 `apps/server/src/modules/refinery/mineru.service.ts`:
 
@@ -1264,7 +1264,7 @@ export class MinerUService {
 }
 ```
 
-- [ ] **Step 5.2: 创建 RefineryService**
+- [x] **Step 5.2: 创建 RefineryService**
 
 `apps/server/src/modules/refinery/refinery.service.ts`:
 
@@ -1337,7 +1337,7 @@ export class RefineryService {
 }
 ```
 
-- [ ] **Step 5.3: 创建 RefineryController**
+- [x] **Step 5.3: 创建 RefineryController**
 
 `apps/server/src/modules/refinery/refinery.controller.ts`:
 
@@ -1368,7 +1368,7 @@ export class RefineryController {
 }
 ```
 
-- [ ] **Step 5.4: 创建 RefineryModule**
+- [x] **Step 5.4: 创建 RefineryModule**
 
 `apps/server/src/modules/refinery/refinery.module.ts`:
 
@@ -1389,7 +1389,7 @@ import { QuestionStructuringCapability } from '../../ai-core/capabilities/questi
 export class RefineryModule {}
 ```
 
-- [ ] **Step 5.5: Commit**
+- [x] **Step 5.5: Commit**
 
 ```bash
 git add apps/server/src/modules/refinery/
@@ -1408,7 +1408,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/server/src/modules/conversations/conversations.service.ts`
 - Create: `apps/server/src/modules/conversations/dto/*.ts`
 
-- [ ] **Step 6.1: 创建 DTO**
+- [x] **Step 6.1: 创建 DTO**
 
 `apps/server/src/modules/conversations/dto/create-conversation.dto.ts`:
 
@@ -1455,7 +1455,7 @@ export class AppendMessageDto {
 }
 ```
 
-- [ ] **Step 6.2: 创建 ConversationsService**
+- [x] **Step 6.2: 创建 ConversationsService**
 
 `apps/server/src/modules/conversations/conversations.service.ts`:
 
@@ -1517,7 +1517,7 @@ export class ConversationsService {
 }
 ```
 
-- [ ] **Step 6.3: 创建 ConversationsController**
+- [x] **Step 6.3: 创建 ConversationsController**
 
 `apps/server/src/modules/conversations/conversations.controller.ts`:
 
@@ -1564,7 +1564,7 @@ export class ConversationsController {
 }
 ```
 
-- [ ] **Step 6.4: 创建 ConversationsModule**
+- [x] **Step 6.4: 创建 ConversationsModule**
 
 `apps/server/src/modules/conversations/conversations.module.ts`:
 
@@ -1582,7 +1582,7 @@ import { AiDialoguesRepository, AiMessagesRepository } from '../../database/repo
 export class ConversationsModule {}
 ```
 
-- [ ] **Step 6.5: Commit**
+- [x] **Step 6.5: Commit**
 
 ```bash
 git add apps/server/src/modules/conversations/
@@ -1601,7 +1601,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/server/src/modules/ai/ai.service.ts`
 - Create: `apps/server/src/modules/ai/dto/tutor.dto.ts`
 
-- [ ] **Step 7.1: 创建 TutorDto**
+- [x] **Step 7.1: 创建 TutorDto**
 
 `apps/server/src/modules/ai/dto/tutor.dto.ts`:
 
@@ -1644,7 +1644,7 @@ export class TutorDto {
 }
 ```
 
-- [ ] **Step 7.2: 创建 AIService**
+- [x] **Step 7.2: 创建 AIService**
 
 `apps/server/src/modules/ai/ai.service.ts`:
 
@@ -1706,7 +1706,7 @@ export class AIService {
 }
 ```
 
-- [ ] **Step 7.3: 在 ConversationsService 增加 appendAssistantMessage**
+- [x] **Step 7.3: 在 ConversationsService 增加 appendAssistantMessage**
 
 `apps/server/src/modules/conversations/conversations.service.ts` 追加：
 
@@ -1728,7 +1728,7 @@ async appendAssistantMessage(dialogueId: number, studentId: number, content: str
 }
 ```
 
-- [ ] **Step 7.4: 创建 AIController**
+- [x] **Step 7.4: 创建 AIController**
 
 `apps/server/src/modules/ai/ai.controller.ts`:
 
@@ -1748,7 +1748,7 @@ export class AIController {
 }
 ```
 
-- [ ] **Step 7.5: 创建 AIModule**
+- [x] **Step 7.5: 创建 AIModule**
 
 `apps/server/src/modules/ai/ai.module.ts`:
 
@@ -1766,7 +1766,7 @@ import { ConversationsModule } from '../conversations/conversations.module.js';
 export class AIModule {}
 ```
 
-- [ ] **Step 7.6: Commit**
+- [x] **Step 7.6: Commit**
 
 ```bash
 git add apps/server/src/modules/ai/
@@ -1785,7 +1785,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/server/src/modules/error-book/error-book.service.ts`
 - Create: `apps/server/src/modules/error-book/dto/create-aux-error.dto.ts`
 
-- [ ] **Step 8.1: 创建 CreateAuxErrorDto**
+- [x] **Step 8.1: 创建 CreateAuxErrorDto**
 
 `apps/server/src/modules/error-book/dto/create-aux-error.dto.ts`:
 
@@ -1809,7 +1809,7 @@ export class CreateAuxErrorDto {
 }
 ```
 
-- [ ] **Step 8.2: 创建 content_hash 工具函数**
+- [x] **Step 8.2: 创建 content_hash 工具函数**
 
 `apps/server/src/modules/error-book/content-hash.util.ts`:
 
@@ -1830,7 +1830,7 @@ export function computeContentHash(content: string): string {
 }
 ```
 
-- [ ] **Step 8.3: 创建 ErrorBookService**
+- [x] **Step 8.3: 创建 ErrorBookService**
 
 `apps/server/src/modules/error-book/error-book.service.ts`:
 
@@ -1922,7 +1922,7 @@ export class ErrorBookService {
 }
 ```
 
-- [ ] **Step 8.4: 创建 ErrorBookController**
+- [x] **Step 8.4: 创建 ErrorBookController**
 
 `apps/server/src/modules/error-book/error-book.controller.ts`:
 
@@ -1962,7 +1962,7 @@ export class ErrorBookController {
 }
 ```
 
-- [ ] **Step 8.5: 创建 ErrorBookModule**
+- [x] **Step 8.5: 创建 ErrorBookModule**
 
 `apps/server/src/modules/error-book/error-book.module.ts`:
 
@@ -1981,7 +1981,7 @@ import { QuestionStructuringCapability } from '../../ai-core/capabilities/questi
 export class ErrorBookModule {}
 ```
 
-- [ ] **Step 8.6: Commit**
+- [x] **Step 8.6: Commit**
 
 ```bash
 git add apps/server/src/modules/error-book/
@@ -1997,7 +1997,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/server/src/app.module.ts`
 
-- [ ] **Step 9.1: 导入新模块**
+- [x] **Step 9.1: 导入新模块**
 
 ```typescript
 import { FilesModule } from './modules/files/files.module.js';
@@ -2017,7 +2017,7 @@ RefineryModule,
 ErrorBookModule,
 ```
 
-- [ ] **Step 9.2: 运行 tsc 类型检查**
+- [x] **Step 9.2: 运行 tsc 类型检查**
 
 ```bash
 cd apps/server
@@ -2026,7 +2026,7 @@ npm run build
 
 Expected: 无类型错误。
 
-- [ ] **Step 9.3: 运行 vitest**
+- [x] **Step 9.3: 运行 vitest**
 
 ```bash
 cd apps/server
@@ -2035,7 +2035,7 @@ npm test
 
 Expected: 所有测试通过。
 
-- [ ] **Step 9.4: Commit**
+- [x] **Step 9.4: Commit**
 
 ```bash
 git add apps/server/src/app.module.ts
@@ -2051,7 +2051,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Create/Modify: `apps/web/src/services/api.ts`
 
-- [ ] **Step 10.1: 添加 auxiliary 相关 API 方法**
+- [x] **Step 10.1: 添加 auxiliary 相关 API 方法**
 
 `apps/web/src/services/api.ts` 追加：
 
@@ -2134,7 +2134,7 @@ export const api = {
 };
 ```
 
-- [ ] **Step 10.2: Commit**
+- [x] **Step 10.2: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -2152,7 +2152,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/web/src/store/chatStore.ts`
 - Create: `apps/web/src/store/refineryStore.ts`
 
-- [ ] **Step 11.1: auxiliaryStore**
+- [x] **Step 11.1: auxiliaryStore**
 
 `apps/web/src/store/auxiliaryStore.ts`:
 
@@ -2187,7 +2187,7 @@ export const useAuxiliaryStore = create<AuxiliaryState>((set) => ({
 }));
 ```
 
-- [ ] **Step 11.2: chatStore**
+- [x] **Step 11.2: chatStore**
 
 `apps/web/src/store/chatStore.ts`:
 
@@ -2233,7 +2233,7 @@ export const useChatStore = create<ChatState>((set) => ({
 }));
 ```
 
-- [ ] **Step 11.3: refineryStore**
+- [x] **Step 11.3: refineryStore**
 
 `apps/web/src/store/refineryStore.ts`:
 
@@ -2267,7 +2267,7 @@ export const useRefineryStore = create<RefineryState>((set) => ({
 }));
 ```
 
-- [ ] **Step 11.4: Commit**
+- [x] **Step 11.4: Commit**
 
 ```bash
 git add apps/web/src/store/
@@ -2288,7 +2288,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/web/src/components/business/AuxEmptyState.tsx`
 - Create: `apps/web/src/pages/student/AuxiliaryHomePage.tsx`
 
-- [ ] **Step 12.1: AuxiliaryLayout**
+- [x] **Step 12.1: AuxiliaryLayout**
 
 `apps/web/src/components/business/AuxiliaryLayout.tsx`:
 
@@ -2314,7 +2314,7 @@ export default function AuxiliaryLayout({ sidebar, children }: Props) {
 }
 ```
 
-- [ ] **Step 12.2: ConversationList**
+- [x] **Step 12.2: ConversationList**
 
 `apps/web/src/components/business/ConversationList.tsx`:
 
@@ -2370,7 +2370,7 @@ export default function ConversationList() {
 }
 ```
 
-- [ ] **Step 12.3: AuxEmptyState**
+- [x] **Step 12.3: AuxEmptyState**
 
 `apps/web/src/components/business/AuxEmptyState.tsx`:
 
@@ -2391,7 +2391,7 @@ export default function AuxEmptyState({ onNew }: { onNew: () => void }) {
 }
 ```
 
-- [ ] **Step 12.4: AuxiliaryHomePage**
+- [x] **Step 12.4: AuxiliaryHomePage**
 
 `apps/web/src/pages/student/AuxiliaryHomePage.tsx`:
 
@@ -2437,7 +2437,7 @@ export default function AuxiliaryHomePage() {
 }
 ```
 
-- [ ] **Step 12.5: 更新路由表**
+- [x] **Step 12.5: 更新路由表**
 
 `apps/web/src/routes/index.tsx` 中替换：
 
@@ -2457,7 +2457,7 @@ import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
 { path: 'auxiliary', element: <AuxiliaryHomePage /> },
 ```
 
-- [ ] **Step 12.6: Commit**
+- [x] **Step 12.6: Commit**
 
 ```bash
 git add apps/web/src/components/business/AuxiliaryLayout.tsx apps/web/src/components/business/ConversationList.tsx apps/web/src/components/business/AuxEmptyState.tsx apps/web/src/pages/student/AuxiliaryHomePage.tsx apps/web/src/routes/index.tsx
@@ -2476,7 +2476,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `apps/web/src/components/business/AuxChatPanel.tsx`
 - Modify: `apps/web/src/components/business/AuxInputBar.tsx`
 
-- [ ] **Step 13.1: useAuxChat hook**
+- [x] **Step 13.1: useAuxChat hook**
 
 `apps/web/src/hooks/useAuxChat.ts`:
 
@@ -2550,7 +2550,7 @@ export function useAuxChat(dialogueId: number) {
 }
 ```
 
-- [ ] **Step 13.2: AuxChatPanel**
+- [x] **Step 13.2: AuxChatPanel**
 
 `apps/web/src/components/business/AuxChatPanel.tsx`:
 
@@ -2583,7 +2583,7 @@ export default function AuxChatPanel() {
 }
 ```
 
-- [ ] **Step 13.3: AuxInputBar**
+- [x] **Step 13.3: AuxInputBar**
 
 `apps/web/src/components/business/AuxInputBar.tsx`:
 
@@ -2644,7 +2644,7 @@ export default function AuxInputBar({ onSend, onUpload }: Props) {
 }
 ```
 
-- [ ] **Step 13.4: AuxChatPage**
+- [x] **Step 13.4: AuxChatPage**
 
 `apps/web/src/pages/student/AuxChatPage.tsx`:
 
@@ -2705,7 +2705,7 @@ export default function AuxChatPage() {
 }
 ```
 
-- [ ] **Step 13.5: 更新路由表**
+- [x] **Step 13.5: 更新路由表**
 
 `apps/web/src/routes/index.tsx` 中导入并替换：
 
@@ -2717,7 +2717,7 @@ import AuxChatPage from '@/pages/student/AuxChatPage';
 { path: 'auxiliary/chat', element: <AuxChatPage /> },
 ```
 
-- [ ] **Step 13.6: Commit**
+- [x] **Step 13.6: Commit**
 
 ```bash
 git add apps/web/src/hooks/useAuxChat.ts apps/web/src/components/business/AuxChatPanel.tsx apps/web/src/components/business/AuxInputBar.tsx apps/web/src/pages/student/AuxChatPage.tsx apps/web/src/routes/index.tsx
@@ -2750,7 +2750,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `apps/web/src/pages/student/KnowledgeSelectorPage.tsx`
 - Create: `apps/web/src/pages/student/PhotoAskPage.tsx`
 
-- [ ] **Step 14.1: KnowledgeSelectorPage**
+- [x] **Step 14.1: KnowledgeSelectorPage**
 
 `apps/web/src/pages/student/KnowledgeSelectorPage.tsx`:
 
@@ -2792,7 +2792,7 @@ export default function KnowledgeSelectorPage() {
 }
 ```
 
-- [ ] **Step 14.2: PhotoAskPage**
+- [x] **Step 14.2: PhotoAskPage**
 
 `apps/web/src/pages/student/PhotoAskPage.tsx`:
 
@@ -2870,7 +2870,7 @@ export default function PhotoAskPage() {
 }
 ```
 
-- [ ] **Step 14.3: 更新路由表**
+- [x] **Step 14.3: 更新路由表**
 
 `apps/web/src/routes/index.tsx` 导入并替换：
 
@@ -2884,7 +2884,7 @@ import PhotoAskPage from '@/pages/student/PhotoAskPage';
 { path: 'auxiliary/ask', element: <PhotoAskPage /> },
 ```
 
-- [ ] **Step 14.4: Commit**
+- [x] **Step 14.4: Commit**
 
 ```bash
 git add apps/web/src/pages/student/KnowledgeSelectorPage.tsx apps/web/src/pages/student/PhotoAskPage.tsx apps/web/src/routes/index.tsx
@@ -2901,7 +2901,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `apps/web/src/types/index.ts`（按需扩展 TrackType 用法）
 - Modify: `apps/web/src/components/business/ErrorBookCard.tsx`（已支持 auxiliary tag，确认可用）
 
-- [ ] **Step 15.1: 运行前端构建**
+- [x] **Step 15.1: 运行前端构建**
 
 ```bash
 cd apps/web
@@ -2910,7 +2910,7 @@ npm run build
 
 Expected: TypeScript 类型检查通过，无构建错误。
 
-- [ ] **Step 15.2: 修复 lint 错误**
+- [x] **Step 15.2: 修复 lint 错误**
 
 ```bash
 cd apps/web
@@ -2919,7 +2919,7 @@ npm run lint
 
 修复 ESLint 报错。
 
-- [ ] **Step 15.3: Commit**
+- [x] **Step 15.3: Commit**
 
 ```bash
 git add apps/web/
@@ -2935,7 +2935,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Create: `apps/server/test/auxiliary.e2e-spec.ts`（或 `src/modules/.../*.e2e-spec.ts`）
 
-- [ ] **Step 16.1: 编写辅助轨 E2E 测试**
+- [x] **Step 16.1: 编写辅助轨 E2E 测试**
 
 `apps/server/test/auxiliary.e2e-spec.ts`:
 
@@ -2981,7 +2981,7 @@ describe('Auxiliary Track E2E', () => {
 });
 ```
 
-- [ ] **Step 16.2: 运行 E2E 测试**
+- [x] **Step 16.2: 运行 E2E 测试**
 
 ```bash
 cd apps/server
@@ -2997,7 +2997,7 @@ Expected: 测试通过（可能需要 mock 模型调用）。
 3. 登录学生账号 → 入口选择页 → 点击「答疑」占位（此时需先解锁入口，见 Task 17）
 4. 验证 P3.1 页面、P3.4 聊天、P3.3 拍照提取流程。
 
-- [ ] **Step 16.4: Commit**
+- [x] **Step 16.4: Commit**
 
 ```bash
 git add apps/server/test/auxiliary.e2e-spec.ts
@@ -3013,7 +3013,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/pages/auth/EntrySelectPage.tsx`
 
-- [ ] **Step 17.1: 将锁定卡片改为可点击按钮**
+- [x] **Step 17.1: 将锁定卡片改为可点击按钮**
 
 替换当前「答疑」锁定 `div` 为 `button`，样式使用紫色渐变徽章，点击导航到 `/student/auxiliary`。
 
@@ -3038,7 +3038,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 </button>
 ```
 
-- [ ] **Step 17.2: Commit**
+- [x] **Step 17.2: Commit**
 
 ```bash
 git add apps/web/src/pages/auth/EntrySelectPage.tsx

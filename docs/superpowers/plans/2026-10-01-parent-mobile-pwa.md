@@ -63,7 +63,7 @@ docs/superpowers/specs/2026-10-01-parent-mobile-pwa-design.md  # Task 9（附章
 - Consumes: 既有 `/favicon.svg`。
 - Produces: 无代码接口；后续任务依赖「iOS 添加主屏后全屏」这条交付预期。
 
-- [ ] **Step 1: 写护栏测试（先失败）**
+- [x] **Step 1: 写护栏测试（先失败）**
 
 ```ts
 // apps/web/src/pwa.pwa.test.ts
@@ -91,12 +91,12 @@ describe('PWA 静态资产护栏', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pwa.pwa.test.ts`
 Expected: FAIL（manifest 不存在）
 
-- [ ] **Step 3: 写 manifest 与 index.html**
+- [x] **Step 3: 写 manifest 与 index.html**
 
 ```json
 {
@@ -122,12 +122,12 @@ Expected: FAIL（manifest 不存在）
 
 ⚠️ `.gitignore` 的 `*.yml` 文件级规则与 `.webmanifest` 无关，无需反选；但 `git add` 后必须 `git status` 确认文件真的进了暂存区（本仓有过静态资产被静默忽略的前科类别）。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pwa.pwa.test.ts`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/public/manifest.webmanifest apps/web/index.html apps/web/src/pwa.pwa.test.ts
@@ -148,7 +148,7 @@ git commit -m "feat(web): PWA manifest + iOS 主屏 meta（家长移动端 Task 
 - Consumes: `RequireRole`（`@/routes/RequireRole`）、`useParentStudentStore`（`@/store/parentStudentStore`，Task 3 才有真正切换器，本任务先用占位条）、`AlertBanner`（`@/components/business/AlertBanner`）、`BillingNoticeBar` / `SubscriptionNoticeBar`（`@/pages/parent/`，无 props 自包含组件）。
 - Produces: 路由组 `{ path: '/m/parent', element: <RequireRole role="parent"><MobileParentLayout /></RequireRole>, children: [...] }`；`MobileMorePage` 导出 `MOBILE_MORE_ITEMS`（`Array<{ label: string; to: string }>`）供占位页复用。
 
-- [ ] **Step 1: 写路由测试（先失败）**
+- [x] **Step 1: 写路由测试（先失败）**
 
 ```tsx
 // apps/web/src/routes/mobileParentRoutes.test.tsx
@@ -198,12 +198,12 @@ describe('/m/parent 移动路由组', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/routes/mobileParentRoutes.test.tsx`
 Expected: FAIL（路由不存在，渲染错误页）
 
-- [ ] **Step 3: 实现 MobileParentLayout + MobileMorePage + 路由块**
+- [x] **Step 3: 实现 MobileParentLayout + MobileMorePage + 路由块**
 
 ```tsx
 // apps/web/src/components/layout/MobileParentLayout.tsx
@@ -321,12 +321,12 @@ export default function MobileStudentSwitcher() {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `cd apps/web && npx vitest run src/routes/mobileParentRoutes.test.tsx && npx vitest run`
 Expected: 新测试 PASS；全量无回归（桌面用例零改动）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/layout/MobileParentLayout.tsx apps/web/src/components/layout/MobileParentLayout.test.tsx apps/web/src/components/layout/MobileStudentSwitcher.tsx apps/web/src/pages/parent-mobile/ apps/web/src/routes/routeTable.tsx apps/web/src/routes/mobileParentRoutes.test.tsx
@@ -347,7 +347,7 @@ git commit -m "feat(web): /m/parent 移动路由组 + MobileParentLayout 底部�
 
 镜像桌面 `StudentSwitcher` 的四条口径（该文件头注释）：唯一数据源与校验点、单孩也渲染、拉取失败只降级这一块、有数据时静默刷新。移动端差异：失败降级改为「下方一窄条提示 + 重试按钮」（顶部空间小，不用下拉形态）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // apps/web/src/components/layout/MobileStudentSwitcher.test.tsx
@@ -408,12 +408,12 @@ describe('MobileStudentSwitcher', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/components/layout/MobileStudentSwitcher.test.tsx`
 Expected: FAIL（占位版没有这些行为）
 
-- [ ] **Step 3: 实现切换器**
+- [x] **Step 3: 实现切换器**
 
 ```tsx
 // apps/web/src/components/layout/MobileStudentSwitcher.tsx
@@ -511,12 +511,12 @@ export default function MobileStudentSwitcher() {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `cd apps/web && npx vitest run src/components/layout/MobileStudentSwitcher.test.tsx && npx vitest run`
 Expected: PASS；桌面 `StudentSwitcher.test.tsx` 不受影响（不同文件）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/layout/MobileStudentSwitcher.tsx apps/web/src/components/layout/MobileStudentSwitcher.test.tsx
@@ -535,7 +535,7 @@ git commit -m "feat(web): MobileStudentSwitcher 复用 parentStudentStore（Task
 - Consumes: 既有 `login()` 与 localStorage 写入逻辑（不动）。
 - Produces: 家长登录落点 = `window.innerWidth < 768` ? `/m/parent` : `/parent/students`。导出常量 `MOBILE_VIEWPORT_BREAKPOINT = 768`（从 `src/constants.ts`；若无该文件则新建，只放这一个常量）供测试与将来复用。
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 ```tsx
 // 追加到 apps/web/src/pages/auth/LoginPage.test.tsx 末尾（mock 与 renderLoginPage 复用文件顶部既有设施）
@@ -578,12 +578,12 @@ describe('LoginPage 家长落点按视口分流', () => {
 
 ⚠️ 实施时先读该测试文件顶部：既有 `renderLoginPage` 的 Routes 里若没有 `/m/parent` 与 `/parent/students` 的桩路由（`<div>parent-mobile-home</div>` / `<div>parent-students-page</div>`），补上这两个 `<Route>`。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/auth/LoginPage.test.tsx`
 Expected: 新增窄屏用例 FAIL（当前落 /parent/students）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 新建 `apps/web/src/constants.ts`：
 
@@ -602,12 +602,12 @@ export const MOBILE_VIEWPORT_BREAKPOINT = 768;
 
 （import 区补 `import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';`。注意该文件顶部若已有「家长落点」注释，同步改写为新口径。）
 
-- [ ] **Step 4: 跑测试确认通过 + lint + 全量**
+- [x] **Step 4: 跑测试确认通过 + lint + 全量**
 
 Run: `cd apps/web && npx vitest run src/pages/auth/LoginPage.test.tsx && npm run lint && npx vitest run`
 Expected: PASS；lint 0 error（本仓基线 7 warning 属既有）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/constants.ts apps/web/src/pages/auth/LoginPage.tsx apps/web/src/pages/auth/LoginPage.test.tsx
@@ -628,7 +628,7 @@ git commit -m "feat(web): 家长登录落点按视口分流（<768px 走 /m/pare
 
 页面状态机（spec「骨架 + 空态 + 错误重试三态」落到每张卡）：`idle → loading | ready | error`，`studentId` 变化 → 整页重置回 loading 并重拉。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileDashboardPage.test.tsx
@@ -716,12 +716,12 @@ describe('MobileDashboardPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileDashboardPage.test.tsx`
 Expected: FAIL（占位空壳无内容）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileDashboardPage.tsx
@@ -831,12 +831,12 @@ export default function MobileDashboardPage() {
 
 ⚠️ `ParentDashboardSubject` 的字段名（`progress`/`accuracy`）以 `api.ts` 实际定义为准——实施第一步先读该 interface，若字段名不同以 api.ts 为真源修正上面代码与测试 mock。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileDashboardPage.test.tsx src/routes/mobileParentRoutes.test.tsx`
 Expected: PASS（含 Task 2 路由测试，`data-testid` 兼容）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/parent-mobile/MobileDashboardPage.tsx apps/web/src/pages/parent-mobile/MobileDashboardPage.test.tsx
@@ -855,7 +855,7 @@ git commit -m "feat(web): 移动端学情仪表盘（双口径并列+掌握度�
 - Consumes: `getParentAlerts(params: ParentAlertListParams): Promise<ParentAlertPage>`、`markParentAlertRead(alertId): Promise<null>`、`getUnreadMessageCount(): Promise<number>`；裁决/订阅条已在外壳（不在此页重复）。
 - Produces: 无。30s 轮询 hook `useUnreadAlertPolling`（本页内定义，不导出）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileAlertsPage.test.tsx
@@ -920,12 +920,12 @@ describe('MobileAlertsPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileAlertsPage.test.tsx`
 Expected: FAIL（文件不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileAlertsPage.tsx
@@ -1017,12 +1017,12 @@ export default function MobileAlertsPage() {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileAlertsPage.test.tsx`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/parent-mobile/MobileAlertsPage.tsx apps/web/src/pages/parent-mobile/MobileAlertsPage.test.tsx
@@ -1041,7 +1041,7 @@ git commit -m "feat(web): 移动端预警页（30s 未读轮询+分页+知道了
 - Consumes: `useParentStudentStore`、`getParentErrors(params: ParentErrorListParams): Promise<ParentErrorPage>`、共享 Markdown 组件 `@/components/markdown`（默认导出，图片/rehype-raw/repairHtml/KaTeX 配置内置）。
 - Produces: 无。换孩子回第 1 页的钉子用例在本任务。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileErrorsPage.test.tsx
@@ -1108,12 +1108,12 @@ describe('MobileErrorsPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileErrorsPage.test.tsx`
 Expected: FAIL（文件不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileErrorsPage.tsx
@@ -1234,12 +1234,12 @@ export default function MobileErrorsPage() {
 
 ⚠️ `ParentErrorQuestion` 的字段（`content`/`answer`）实施时先读 `api.ts` 定义对齐；若它不含 `answer`（只有题面），解析展示改为列表内仅题面 + 引导到电脑端看解析（桌面 `ParentErrorsPage` 怎么展示就怎么对齐，读它 10 行）。
 
-- [ ] **Step 4: 跑测试确认通过 + 全量**
+- [x] **Step 4: 跑测试确认通过 + 全量**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileErrorsPage.test.tsx && npx vitest run`
 Expected: PASS；全量回归绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/parent-mobile/MobileErrorsPage.tsx apps/web/src/pages/parent-mobile/MobileErrorsPage.test.tsx
@@ -1258,7 +1258,7 @@ git commit -m "feat(web): 移动端错题本（轨道筛选+展开详情+换孩�
 - Consumes: `useParentStudentStore`、`getParentControls(studentId): Promise<ParentControls>`、`putParentControls(studentId, patch): Promise<ParentControls>`、`issueParentDeviceCommand(studentId, 'unlock')`、`getParentStudyTime(studentId): Promise<ParentStudyTime>`。
 - Produces: 无。关键行为：409/1001 错误文案**原样展示**（ApiError 的 message 就是后端人类可读文案，`fetchApi` 已归一）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileControlsPage.test.tsx
@@ -1345,12 +1345,12 @@ describe('MobileControlsPage', () => {
 
 ⚠️ 上面最后一个用例的 `MobileDesktopPage` 是**故意写的笔误钉子**吗——不是。实施时直接写 `MobileControlsPage`；此处只提醒：测试文件里出现不存在的导入会直接 FAIL，属预期失败路径，修正即可。另外「进出时间列表」的真实数据源是 `getParentStudyTime` 的 `byDay`（按天汇总）——**桌面端「进出时刻列表」另有数据源**，实施第一步先读桌面 `ParentControlsPage` 的进出时间区块用的是什么 API，移动端对齐同一 API 与口径（列表不是聚合，spec §6.4）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileControlsPage.test.tsx`
 Expected: FAIL（文件不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // apps/web/src/pages/parent-mobile/MobileControlsPage.tsx
@@ -1477,12 +1477,12 @@ export default function MobileControlsPage() {
 
 ⚠️ 实施时以桌面 `ParentControlsPage` 进出时间区块的**实际 API 与行字段**为准替换 `sessions` 的来源与字段名（`getParentStudyTime` 没有 `sessions` 行数组的话就换成桌面用的那个函数；类型从 `api.ts` import，不要本地再造 interface）。
 
-- [ ] **Step 4: 跑测试确认通过 + 全量 + lint**
+- [x] **Step 4: 跑测试确认通过 + 全量 + lint**
 
 Run: `cd apps/web && npx vitest run src/pages/parent-mobile/MobileControlsPage.test.tsx && npm run lint && npx vitest run`
 Expected: PASS；lint 0 error。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/parent-mobile/MobileControlsPage.tsx apps/web/src/pages/parent-mobile/MobileControlsPage.test.tsx
@@ -1497,7 +1497,7 @@ git commit -m "feat(web): 移动端管控页（锁定设置/远程解除/进出�
 - Modify: `docs/ai-core-changelog.md`（顶部按日期新增条目）
 - Modify: `docs/superpowers/specs/2026-10-01-parent-mobile-pwa-design.md`（附章 A）
 
-- [ ] **Step 1: spec 补附章 A「添加到主屏幕步骤」**
+- [x] **Step 1: spec 补附章 A「添加到主屏幕步骤」**
 
 在 spec 末尾追加（双平台各 3 步 + 降级说明）：
 
@@ -1518,16 +1518,16 @@ git commit -m "feat(web): 移动端管控页（锁定设置/远程解除/进出�
 预警与通知需打开应用查看（页内 30s 轮询）。
 ```
 
-- [ ] **Step 2: changelog 新增条目**
+- [x] **Step 2: changelog 新增条目**
 
 `docs/ai-core-changelog.md` 顶部按既有格式补一条 `**2026-10-01 新增（家长端移动 PWA）**`，内容覆盖：动机（spec 链接）、方案 B 路由组结构、四页能力与数据源、复用 parentStudentStore 的偏差及理由、PWA 降级口径（无 SW/无推送/HTTP）、测试（引用各 test 文件与用例数）、桌面端零改动声明。
 
-- [ ] **Step 3: 全量验证**
+- [x] **Step 3: 全量验证**
 
 Run: `cd apps/web && npx vitest run && npm run lint && npx tsc -b`
 Expected: 全部绿。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/ai-core-changelog.md docs/superpowers/specs/2026-10-01-parent-mobile-pwa-design.md

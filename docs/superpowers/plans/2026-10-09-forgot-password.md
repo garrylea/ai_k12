@@ -36,7 +36,7 @@
   - `verify(phone: string, code: string): void` —— 校验通过即消费（删除）；不匹配抛 1003「验证码错误」并计次；过期抛 1003「验证码已过期，请重新获取」；累计错 5 次作废
 - Task 2 的 `AuthService` 依赖这两个方法签名。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/modules/auth/password-reset-code.service.test.ts`（共 9 个 `it` 用例）：
 
@@ -142,12 +142,12 @@ describe('PasswordResetCodeService', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/password-reset-code.service.test.ts`
 Expected: FAIL（模块不存在，编译报错）
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/server/src/modules/auth/password-reset-code.service.ts`：
 
@@ -219,12 +219,12 @@ export class PasswordResetCodeService {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/password-reset-code.service.test.ts`
 Expected: PASS（9 个用例全绿）
 
-- [ ] **Step 5: 注册进 AuthModule**
+- [x] **Step 5: 注册进 AuthModule**
 
 修改 `apps/server/src/modules/auth/auth.module.ts`：
 
@@ -262,12 +262,12 @@ export class AuthModule {}
 
 （该类零构造参数、无装饰器依赖注入问题，不受 CLAUDE.md 的 DI 坑影响。）
 
-- [ ] **Step 6: 跑 auth 模块全部测试确认无回归**
+- [x] **Step 6: 跑 auth 模块全部测试确认无回归**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/modules/auth/password-reset-code.service.ts apps/server/src/modules/auth/password-reset-code.service.test.ts apps/server/src/modules/auth/auth.module.ts
@@ -289,7 +289,7 @@ git commit -m "feat(auth): 忘记密码内存验证码服务（5min 有效/60s �
   - `POST /api/auth/password/reset-request`，body `{phone}`；成功（200）`data: {code: string, expiresIn: number}`；错误：400/1001 格式错、404/1002 未注册、429/1008 重发过频
   - `POST /api/auth/password/reset`，body `{phone, code, newPassword}`；成功（200）`data: {success: true}`；错误：400/1001 格式错、401/1003 验证码错误或过期、404/1002 未注册
 
-- [ ] **Step 1: 写失败测试（AuthService 新方法）**
+- [x] **Step 1: 写失败测试（AuthService 新方法）**
 
 修改 `apps/server/src/modules/auth/auth.service.test.ts`。注意：`AuthService` 构造函数新增第 6 个参数 `resetCodeService`，**现有 `mkDeps`/`mkSvc` 必须同步加**，否则全部既有用例编译失败。
 
@@ -389,12 +389,12 @@ describe('AuthService.resetPassword', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/auth.service.test.ts`
 Expected: FAIL（`requestPasswordReset is not a function` 等）
 
-- [ ] **Step 3: 实现 AuthService 两个方法**
+- [x] **Step 3: 实现 AuthService 两个方法**
 
 修改 `apps/server/src/modules/auth/auth.service.ts`：
 
@@ -456,12 +456,12 @@ export class AuthService {
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/auth.service.test.ts`
 Expected: PASS（既有 + 新增用例全绿）
 
-- [ ] **Step 5: Controller 加两个端点**
+- [x] **Step 5: Controller 加两个端点**
 
 修改 `apps/server/src/modules/auth/auth.controller.ts`（完整替换为）：
 
@@ -549,12 +549,12 @@ export class AuthController {
 
 （既有 `login`/`register` 保持裸 `.parse()` 不动——本任务不顺手重构它们，避免扩大变更面。）
 
-- [ ] **Step 6: 跑后端全量测试**
+- [x] **Step 6: 跑后端全量测试**
 
 Run: `cd apps/server && npm test`
 Expected: PASS（全量无回归）
 
-- [ ] **Step 7: 本机冒烟（可选但推荐，需后端已 build）**
+- [x] **Step 7: 本机冒烟（可选但推荐，需后端已 build）**
 
 Run: `cd apps/server && npm run build && node dist/main.js &` 后：
 
@@ -569,7 +569,7 @@ curl -s -X POST localhost:3000/api/auth/login -H 'Content-Type: application/json
 
 冒烟后把该家长密码改回原值（或告知用户已改动）。完成后 kill 冒烟进程（按 PID，别 pkill）。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/modules/auth/auth.service.ts apps/server/src/modules/auth/auth.service.test.ts apps/server/src/modules/auth/auth.controller.ts
@@ -591,7 +591,7 @@ git commit -m "feat(auth): POST /api/auth/password/reset-request + /reset 忘记
   - `requestPasswordReset(phone: string): Promise<{ code: string; expiresIn: number }>`
   - `resetPassword(phone: string, code: string, newPassword: string): Promise<{ success: boolean }>`
 
-- [ ] **Step 1: 写失败测试（LoginPage 链接钉子）**
+- [x] **Step 1: 写失败测试（LoginPage 链接钉子）**
 
 修改 `apps/web/src/pages/auth/LoginPage.test.tsx`。`renderLoginPage` 的 `Routes` 里加一条路由（供链接跳转目标渲染）：
 
@@ -613,12 +613,12 @@ git commit -m "feat(auth): POST /api/auth/password/reset-request + /reset 忘记
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/auth/LoginPage.test.tsx`
 Expected: FAIL（`getByRole('link', { name: '忘记密码？' })` 找不到——现在是 `<button>`）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `apps/web/src/pages/auth/LoginPage.tsx:194-196` 替换为：
 
@@ -648,12 +648,12 @@ export function resetPassword(phone: string, code: string, newPassword: string):
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/auth/LoginPage.test.tsx`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/pages/auth/LoginPage.tsx apps/web/src/pages/auth/LoginPage.test.tsx
@@ -674,7 +674,7 @@ git commit -m "feat(web): 登录页忘记密码按钮接链 + api 层两个重�
 - Consumes: Task 3 的 `requestPasswordReset` / `resetPassword`
 - Produces: 路由 `/forgot-password`（公开页，无 RequireRole）；页面不导出供他人使用的接口
 
-- [ ] **Step 1: 写失败测试（页面渲染测试）**
+- [x] **Step 1: 写失败测试（页面渲染测试）**
 
 创建 `apps/web/src/pages/auth/ForgotPasswordPage.test.tsx`：
 
@@ -809,12 +809,12 @@ describe('ForgotPasswordPage', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/auth/ForgotPasswordPage.test.tsx`
 Expected: FAIL（页面不存在）
 
-- [ ] **Step 3: 实现页面**
+- [x] **Step 3: 实现页面**
 
 创建 `apps/web/src/pages/auth/ForgotPasswordPage.tsx`：
 
@@ -1097,12 +1097,12 @@ export default function ForgotPasswordPage() {
 
 注意：`Button` 组件来自 `@/components/base`（与 LoginPage/RegisterPage 同一导入）。若其 props 不含 `onClick`/`disabled`/`type` 的某项，以该组件实际类型为准调整（LoginPage 用了 `type="submit"` 与 `disabled`，RegisterPage 同，`onClick` 见 LoginPage 对 `variant/size/className/disabled` 的用法，预计齐备）。
 
-- [ ] **Step 4: 跑页面测试确认通过**
+- [x] **Step 4: 跑页面测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/auth/ForgotPasswordPage.test.tsx`
 Expected: PASS（7 个用例全绿）
 
-- [ ] **Step 5: 注册路由 + 路由级测试**
+- [x] **Step 5: 注册路由 + 路由级测试**
 
 修改 `apps/web/src/routes/routeTable.tsx`：
 
@@ -1140,17 +1140,17 @@ describe('路由表：忘记密码页', () => {
 });
 ```
 
-- [ ] **Step 6: 跑路由测试 + 前端全量测试**
+- [x] **Step 6: 跑路由测试 + 前端全量测试**
 
 Run: `cd apps/web && npx vitest run src/routes/routeTable.test.tsx && npm test`
 Expected: PASS（全量无回归）
 
-- [ ] **Step 7: lint + build 验证**
+- [x] **Step 7: lint + build 验证**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 0 error
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/web/src/pages/auth/ForgotPasswordPage.tsx apps/web/src/pages/auth/ForgotPasswordPage.test.tsx apps/web/src/routes/routeTable.tsx apps/web/src/routes/routeTable.test.tsx
@@ -1168,7 +1168,7 @@ git commit -m "feat(web): /forgot-password 忘记密码页（模拟验证码直�
 
 **Interfaces:** 无代码接口；纯文档。铁律：两份 API 文档必须同步。
 
-- [ ] **Step 1: openapi.yaml 补响应 data 形状**
+- [x] **Step 1: openapi.yaml 补响应 data 形状**
 
 `docs/api/openapi.yaml` 中 `/auth/password/reset-request` 的 200 响应改为：
 
@@ -1216,7 +1216,7 @@ git commit -m "feat(web): /forgot-password 忘记密码页（模拟验证码直�
 
 错误语义在 description 里点一句（可选）：reset-request 的 404/1002=未注册、429/1008=60s 重发过频；reset 的 401/1003=验证码错误/过期（错 5 次作废）。
 
-- [ ] **Step 2: API 设计文档标注已实现**
+- [x] **Step 2: API 设计文档标注已实现**
 
 `docs/API接口与数据流设计文档.md:163-164` 两行改为：
 
@@ -1225,7 +1225,7 @@ git commit -m "feat(web): /forgot-password 忘记密码页（模拟验证码直�
 | POST | `/api/auth/password/reset` | 确认重置密码（已实现：验证码 + 新密码；验证码错 5 次作废报 1003；成功不失效旧 token） | MVP |
 ```
 
-- [ ] **Step 3: changelog 追加日志**
+- [x] **Step 3: changelog 追加日志**
 
 `docs/ai-core-changelog.md` 文末追加（格式对齐该文件既有条目风格）：
 
@@ -1239,12 +1239,12 @@ git commit -m "feat(web): /forgot-password 忘记密码页（模拟验证码直�
 - 踩坑记录：Zod 裸 parse 会被全局过滤器兜成 500，新端点用 `parseInput` 转 400/1001（同 parent-points.controller.ts 模式）。
 ```
 
-- [ ] **Step 4: 端点清单一致性核对（仓库铁律）**
+- [x] **Step 4: 端点清单一致性核对（仓库铁律）**
 
 Run: `grep -n "password/reset" docs/API接口与数据流设计文档.md docs/api/openapi.yaml apps/server/src/modules/auth/auth.controller.ts`
 Expected: 三处端点路径一致（reset-request / reset 各两文档 + 控制器装饰器）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/api/openapi.yaml docs/API接口与数据流设计文档.md docs/ai-core-changelog.md

@@ -31,7 +31,7 @@
 - Consumes: 无（纯 SQL）。
 - Produces: 表 `exam_papers`、`paper_questions`、`question_hints`、`exam_sessions`、`exam_answers`；后续所有任务依赖这些表名与列名。
 
-- [ ] **Step 1: 写迁移 SQL 文件**
+- [x] **Step 1: 写迁移 SQL 文件**
 
 ```sql
 -- 2026-09-02_add_training_tables.sql
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS exam_answers (
 
 注意：本迁移无需 ALTER 已有表（paper_questions 用关联表而非 questions.paper_id 列——spec §6.1 已定）。
 
-- [ ] **Step 2: 在本地库执行迁移并验证**
+- [x] **Step 2: 在本地库执行迁移并验证**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-02_add_training_tables.sql
@@ -128,7 +128,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW CREATE TABLE exam_papers\G SHOW CREATE 
 
 Expected: 两表创建成功，无 SQL 报错；重复执行迁移文件不报错（幂等）。
 
-- [ ] **Step 3: db_loader 守卫纳入 exam_answers**
+- [x] **Step 3: db_loader 守卫纳入 exam_answers**
 
 `tools/data-refinery/src/db_loader.py` 第 345 行改为：
 
@@ -148,12 +148,12 @@ Expected: 两表创建成功，无 SQL 报错；重复执行迁移文件不报�
 
 （实现时以现有 purge_business_data 的实际代码模式为准——镜像 `error_redo_logs` 的清除写法，把 `exam_sessions` 插到 `error_redo_logs` 同一位置，`exam_answers` 走 QUESTIONS_BLOCKERS 既有路径。上面伪代码仅示意位置，实现必须复刻现有行的风格。）
 
-- [ ] **Step 4: 跑 refinery 测试确认守卫不回归**
+- [x] **Step 4: 跑 refinery 测试确认守卫不回归**
 
 Run: `cd tools/data-refinery && pytest tests/test_db_loader.py tests/test_db_loader_cli.py -q`
 Expected: 全部 PASS（现有守卫测试 + 新增行为共存）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-02_add_training_tables.sql tools/data-refinery/src/db_loader.py
@@ -191,7 +191,7 @@ def parse_paper_meta(rel_path: str) -> PaperMeta | None:
     解析失败返回 None（调用方跳过该文件并 WARN）。"""
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_paper_meta.py
@@ -233,12 +233,12 @@ def test_parse_invalid_returns_none():
     assert parse_paper_meta("") is None
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_paper_meta.py -q`
 Expected: FAIL（`ModuleNotFoundError: src.paper_meta` 或 ImportError）。
 
-- [ ] **Step 3: 实现 paper_meta.py**
+- [x] **Step 3: 实现 paper_meta.py**
 
 ```python
 # src/paper_meta.py
@@ -302,12 +302,12 @@ def parse_paper_meta(rel_path: str) -> PaperMeta | None:
     )
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_paper_meta.py -q`
 Expected: 4 passed。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/paper_meta.py tools/data-refinery/tests/test_paper_meta.py
@@ -338,7 +338,7 @@ class DbLoader:
         paper 为 None 时行为与现状完全一致（无试卷上下文的调用方）。"""
 ```
 
-- [ ] **Step 1: 写失败测试（追加到 test_db_loader.py，复用现有 fixture 模式——先看文件里已有的 mock conn 模式，下面按其既有风格写）**
+- [x] **Step 1: 写失败测试（追加到 test_db_loader.py，复用现有 fixture 模式——先看文件里已有的 mock conn 模式，下面按其既有风格写）**
 
 ```python
 # tests/test_db_loader.py 追加（import 区补：from src.paper_meta import PaperMeta）
@@ -371,12 +371,12 @@ def test_find_or_create_paper_inserts_when_missing():
 2. `load_questions(questions, paper=(meta, 1))`：① 新题 INSERT questions 后 INSERT IGNORE paper_questions，question_no 按行序 1..n；② content_hash 命中已有题（`SELECT id ... LIMIT 1` 返回 `(123,)`）时不 INSERT questions 但**仍** INSERT IGNORE paper_questions（question_id=123）；③ 结束时 UPDATE exam_papers SET question_count = n；
 3. `load_questions(questions)`（paper=None）不产生任何 paper_questions/paper 相关 SQL（回归）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_db_loader.py -q -k paper`
 Expected: FAIL（方法不存在）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `db_loader.py` 顶部 import 区加 `from paper_meta import PaperMeta`（同目录模块，参照文件内其他同目录 import 的写法——注意该文件内现有 import 风格是否带 `src.` 前缀，保持一致）。
 
@@ -480,12 +480,12 @@ Expected: FAIL（方法不存在）。
 
 `db_loader_cli.py` import 区加 `from paper_meta import parse_paper_meta`（与文件内现有同目录 import 风格一致）。
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 Run: `cd tools/data-refinery && pytest tests/test_db_loader.py tests/test_db_loader_cli.py -q`
 Expected: 全部 PASS（含既有 load_questions 测试——paper=None 默认参数保证向后兼容）。
 
-- [ ] **Step 5: 真实库增量回填（可选但推荐，本机有数据）**
+- [x] **Step 5: 真实库增量回填（可选但推荐，本机有数据）**
 
 ```bash
 cd tools/data-refinery && python src/db_loader_cli.py --load-cards <按 docs/data-refinery-使用手册.md 的既有参数>
@@ -499,7 +499,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT id, title, question_count FROM exam_p
 
 Expected: exam_papers 行数 = 已发布试卷数；paper_questions 计数与 questions 中来自试卷的题量相当（跨卷重复题表现为两卷引用同一 question_id）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/data-refinery/src/db_loader.py tools/data-refinery/src/db_loader_cli.py tools/data-refinery/tests/test_db_loader.py
@@ -551,7 +551,7 @@ async clearUnclearedByStudentQuestionId(studentId: number, questionId: number): 
 async findById(id: number): Promise<QuestionRow | null>;
 ```
 
-- [ ] **Step 1: repo 方法 + 失败测试**
+- [x] **Step 1: repo 方法 + 失败测试**
 
 `main-error-books.repo.ts` 追加（镜像 66-82 行 `findUnclearedByStudentQuestion` 的写法）：
 
@@ -677,12 +677,12 @@ describe('JudgeCoreService.judgeQuestion', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现 JudgeCoreService**
+- [x] **Step 3: 实现 JudgeCoreService**
 
 把 `practice.service.ts` 的 `judge()` 三路由主体（142-293 行：路由判定、错题本 find-or-create、清零）抽到新文件，`PracticeService.judge` 保留 card 定位/结构化未入库题/practice_results 持久化，判题与错题本部分委托 JudgeCore。**抽取方式**：JudgeCore 暴露两个方法——
 
@@ -731,12 +731,12 @@ export class JudgeCoreService {
 
 **红线**：`/api/practice/judge` 对外行为不变——跑完 practice.service.test.ts 全部 40+ 用例必须原样绿（这是抽取正确性的验收标准；测试本身不改，若与实现冲突按「测试错」规则审视，但预期不需要）。
 
-- [ ] **Step 4: 全量回归**
+- [x] **Step 4: 全量回归**
 
 Run: `cd apps/server && npm test`
 Expected: 全绿（既有 72+ 用例 + judge-core 新用例）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/ apps/server/src/database/repositories/main-error-books.repo.ts apps/server/src/database/repositories/questions.repo.ts
@@ -765,7 +765,7 @@ interface Props {
 export function ChoiceOptionList({ options, value, onChange, disabled }: Props): JSX.Element;
 ```
 
-- [ ] **Step 1: 实现组件**
+- [x] **Step 1: 实现组件**
 
 ```tsx
 // apps/web/src/components/business/answer/ChoiceOptionList.tsx
@@ -826,12 +826,12 @@ export function ChoiceOptionList({ options, value, onChange, disabled = false }:
 }
 ```
 
-- [ ] **Step 2: lint + build**
+- [x] **Step 2: lint + build**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 无错误。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/components/business/answer/ChoiceOptionList.tsx
@@ -887,7 +887,7 @@ interface QuestionRunnerProps {
 }
 ```
 
-- [ ] **Step 1: 实现 types.ts + QuestionRunner.tsx**
+- [x] **Step 1: 实现 types.ts + QuestionRunner.tsx**
 
 实现要点（对照 `CleanupPhase.tsx` 的 answering 态 172-228 行与 `AnswerModal.tsx` 的 hint/进度逻辑）：
 
@@ -915,16 +915,16 @@ export function QuestionRunner(props: QuestionRunnerProps) {
 
 8. **不做的事**（YAGNI，计划 2/3 各页自管）：庆祝页、bumpErrorLevels、讨论抽屉（DiscussDrawer 是主线卡上下文专属，训练不带）、AnswerResultList 渲染（onFinish 后父层负责）。
 
-- [ ] **Step 2: lint + build**
+- [x] **Step 2: lint + build**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 无错误（组件未被页面引用也须通过 tsc）。
 
-- [ ] **Step 3: 手动冒烟（可选）**
+- [x] **Step 3: 手动冒烟（可选）**
 
 在任一现有页面临时挂载 `<QuestionRunner questions={[{n:'1', text:'计算 $1+1$', type:'choice', options:[{label:'A',text:'2'},{label:'B',text:'3'}]}]} .../>` 验证点选/草稿/提交流，验证后删掉临时代码。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/components/business/answer/
@@ -944,7 +944,7 @@ git commit -m "feat(web): QuestionRunner 共享答题组件（草稿/点选/提�
 - Consumes: 无。
 - Produces: 路由 `/student/training`（学科选择页，数学可入、其余禁用）；入口页第三张卡「训练」。计划 2/3 的子路由（`/student/training/exam|targeted|errors`）挂它下面。
 
-- [ ] **Step 1: EntrySelectPage 加第三张卡**
+- [x] **Step 1: EntrySelectPage 加第三张卡**
 
 中部 `grid grid-cols-1 md:grid-cols-2 gap-8`（67 行）改 `md:grid-cols-3 gap-6`，在答疑卡后追加训练卡（复制答疑卡结构，改三处：aria-label「进入训练」、onClick `navigate('/student/training')`、图标与文案）：
 
@@ -959,7 +959,7 @@ const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
 
 训练卡视觉：与另两卡一致的白卡 + 线性图标；图标底渐变用品牌橘红系（`linear-gradient(to top right, #FF6B35, #FFB25A)`——与学习卡同色系但更亮，保持 style.md 单一色系约束；**不用蓝紫**，蓝色已留给答疑）。卡内文案「训练」。
 
-- [ ] **Step 2: TrainingSubjectPage 学科选择页**
+- [x] **Step 2: TrainingSubjectPage 学科选择页**
 
 复刻 `SubjectSelectPage.tsx` 的布局骨架（先读该文件，沿用其卡片网格、学段/主题容器写法），差异：
 
@@ -976,7 +976,7 @@ const SUBJECTS = [
 
 页面容器挂 `data-theme="student-day"` + `student-theme-container`（镜像 EntrySelectPage 的容器写法），顶部 BackButton 回 `/student/entry`。禁用学科卡片 `opacity-50 cursor-not-allowed`、角标「敬请期待」。
 
-- [ ] **Step 3: 注册路由**
+- [x] **Step 3: 注册路由**
 
 `routes/index.tsx` 在 `/student/auxiliary/conversations` 块后加：
 
@@ -1000,7 +1000,7 @@ Run: `cd apps/web && npm run lint && npm run build`
 手动：登录学生账号 → 入口页见三卡 → 点训练 → 学科页数学可入、语文英语禁用 → BackButton 回入口。
 Expected: 全部正常，无 emoji，iPad 宽度下三卡不挤压。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/auth/EntrySelectPage.tsx apps/web/src/pages/student/TrainingSubjectPage.tsx apps/web/src/routes/index.tsx

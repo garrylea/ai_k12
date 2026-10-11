@@ -75,7 +75,7 @@
 **Interfaces:**
 - Produces: `SERVER_URL: string` —— 由 `server-url.js` `module.exports` 导出；Task 6 会 require 它
 
-- [ ] **Step 1: 装 vitest 并加 test script**
+- [x] **Step 1: 装 vitest 并加 test script**
 
 ```bash
 cd apps/desktop && npm install --save-dev 'vitest@^3.2.7'
@@ -90,7 +90,7 @@ cd apps/desktop && npm install --save-dev 'vitest@^3.2.7'
   },
 ```
 
-- [ ] **Step 2: 写失败的测试**
+- [x] **Step 2: 写失败的测试**
 
 创建 `apps/desktop/server-url.test.js`：
 
@@ -114,7 +114,7 @@ describe('server-url.js：构建时写死点', () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试，确认失败**
+- [x] **Step 3: 跑测试，确认失败**
 
 ```bash
 cd apps/desktop && npx vitest run server-url.test.js
@@ -122,7 +122,7 @@ cd apps/desktop && npx vitest run server-url.test.js
 
 期望：FAIL —— 找不到模块 `./server-url.js`。
 
-- [ ] **Step 4: 写实现**
+- [x] **Step 4: 写实现**
 
 创建 `apps/desktop/server-url.js`：
 
@@ -146,7 +146,7 @@ cd apps/desktop && npx vitest run server-url.test.js
 module.exports = { SERVER_URL: 'http://192.168.1.5:5173' };
 ```
 
-- [ ] **Step 5: 跑测试，确认通过**
+- [x] **Step 5: 跑测试，确认通过**
 
 ```bash
 cd apps/desktop && npx vitest run server-url.test.js
@@ -154,7 +154,7 @@ cd apps/desktop && npx vitest run server-url.test.js
 
 期望：`2 passed`。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/package.json apps/desktop/package-lock.json apps/desktop/server-url.js apps/desktop/server-url.test.js
@@ -172,7 +172,7 @@ git commit -m "feat(desktop): 测试设施（vitest）+ 服务器地址写死点
 **Interfaces:**
 - Produces: `resolveServerUrl(envUrl: string|undefined, fileUrl: string|null, fallback: string): string` —— Task 6 调用
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/desktop/lib/resolve-server-url.test.js`：
 
@@ -216,7 +216,7 @@ describe('resolveServerUrl：三层优先级', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认失败**
+- [x] **Step 2: 跑测试，确认失败**
 
 ```bash
 cd apps/desktop && npx vitest run lib/resolve-server-url.test.js
@@ -224,7 +224,7 @@ cd apps/desktop && npx vitest run lib/resolve-server-url.test.js
 
 期望：FAIL —— 找不到模块。
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/desktop/lib/resolve-server-url.js`：
 
@@ -257,7 +257,7 @@ function resolveServerUrl(envUrl, fileUrl, fallback) {
 module.exports = { resolveServerUrl };
 ```
 
-- [ ] **Step 4: 跑测试，确认通过**
+- [x] **Step 4: 跑测试，确认通过**
 
 ```bash
 cd apps/desktop && npx vitest run lib/resolve-server-url.test.js
@@ -265,7 +265,7 @@ cd apps/desktop && npx vitest run lib/resolve-server-url.test.js
 
 期望：`7 passed`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/lib/resolve-server-url.js apps/desktop/lib/resolve-server-url.test.js
@@ -288,7 +288,7 @@ git commit -m "feat(desktop): 服务器地址三层优先级判定（纯函数�
   - `readServerUrlFromFile(userDataDir: string): string|null` —— Task 6 调用
   - `CONFIG_FILE_NAME`（常量，值为 `'config.json'`，测试用）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/desktop/lib/config-file.test.js`：
 
@@ -386,7 +386,7 @@ describe('readServerUrlFromFile', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认失败**
+- [x] **Step 2: 跑测试，确认失败**
 
 ```bash
 cd apps/desktop && npx vitest run lib/config-file.test.js
@@ -394,7 +394,7 @@ cd apps/desktop && npx vitest run lib/config-file.test.js
 
 期望：FAIL —— 找不到模块。
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/desktop/lib/config-file.js`：
 
@@ -472,7 +472,7 @@ function readServerUrlFromFile(userDataDir) {
 module.exports = { readServerUrlFromFile, CONFIG_FILE_NAME };
 ```
 
-- [ ] **Step 4: 跑测试，确认通过**
+- [x] **Step 4: 跑测试，确认通过**
 
 ```bash
 cd apps/desktop && npx vitest run lib/config-file.test.js
@@ -480,7 +480,7 @@ cd apps/desktop && npx vitest run lib/config-file.test.js
 
 期望：`13 passed`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/lib/config-file.js apps/desktop/lib/config-file.test.js
@@ -501,7 +501,7 @@ git commit -m "feat(desktop): userData/config.json 覆盖地址的读取与降�
   - `writeStudentMode(userDataDir: string, on: boolean): void` —— Task 8 调用
   - `STATE_FILE_NAME`（常量，值为 `'shell-state.json'`，测试用）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/desktop/lib/shell-state.test.js`：
 
@@ -586,7 +586,7 @@ describe('writeStudentMode', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认失败**
+- [x] **Step 2: 跑测试，确认失败**
 
 ```bash
 cd apps/desktop && npx vitest run lib/shell-state.test.js
@@ -594,7 +594,7 @@ cd apps/desktop && npx vitest run lib/shell-state.test.js
 
 期望：FAIL —— 找不到模块。
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/desktop/lib/shell-state.js`：
 
@@ -662,7 +662,7 @@ function writeStudentMode(userDataDir, on) {
 module.exports = { readStudentMode, writeStudentMode, STATE_FILE_NAME };
 ```
 
-- [ ] **Step 4: 跑测试，确认通过**
+- [x] **Step 4: 跑测试，确认通过**
 
 ```bash
 cd apps/desktop && npx vitest run lib/shell-state.test.js
@@ -670,7 +670,7 @@ cd apps/desktop && npx vitest run lib/shell-state.test.js
 
 期望：`9 passed`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/lib/shell-state.js apps/desktop/lib/shell-state.test.js
@@ -690,7 +690,7 @@ git commit -m "feat(desktop): 学生模式状态的持久化存储层（补断�
 **Interfaces:**
 - Produces: `probeServer(url: string, timeoutMs: number): Promise<boolean>` —— Task 7 调用
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/desktop/lib/probe-server.test.js`：
 
@@ -768,7 +768,7 @@ describe('probeServer', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认失败**
+- [x] **Step 2: 跑测试，确认失败**
 
 ```bash
 cd apps/desktop && npx vitest run lib/probe-server.test.js
@@ -776,7 +776,7 @@ cd apps/desktop && npx vitest run lib/probe-server.test.js
 
 期望：FAIL —— 找不到模块。
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/desktop/lib/probe-server.js`：
 
@@ -849,7 +849,7 @@ function probeServer(url, timeoutMs) {
 module.exports = { probeServer };
 ```
 
-- [ ] **Step 4: 跑测试，确认通过**
+- [x] **Step 4: 跑测试，确认通过**
 
 ```bash
 cd apps/desktop && npx vitest run lib/probe-server.test.js
@@ -857,7 +857,7 @@ cd apps/desktop && npx vitest run lib/probe-server.test.js
 
 期望：`6 passed`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/lib/probe-server.js apps/desktop/lib/probe-server.test.js
@@ -878,7 +878,7 @@ git commit -m "feat(desktop): 服务器可达性探测（探测式重试的判�
 - Consumes: `SERVER_URL`（Task 1）、`resolveServerUrl`（Task 2）、`readServerUrlFromFile`（Task 3）
 - Produces: 模块级 `let WEB_URL` —— Task 7 与既有 `isSameOrigin()` 都用它
 
-- [ ] **Step 1: 加 require**
+- [x] **Step 1: 加 require**
 
 把 `main.js` 顶部的这两行：
 
@@ -897,7 +897,7 @@ const { readServerUrlFromFile } = require('./lib/config-file.js');
 const { resolveServerUrl } = require('./lib/resolve-server-url.js');
 ```
 
-- [ ] **Step 2: 把 WEB_URL 改成延迟解析**
+- [x] **Step 2: 把 WEB_URL 改成延迟解析**
 
 把这一整段（含它上面的注释块）：
 
@@ -928,7 +928,7 @@ const WEB_URL = process.env.K12_WEB_URL || 'http://localhost:5173';
 let WEB_URL = null;
 ```
 
-- [ ] **Step 3: 在 whenReady 里解析**
+- [x] **Step 3: 在 whenReady 里解析**
 
 把：
 
@@ -995,7 +995,7 @@ rm -f "$UD/config.json"
 
 期望：三次打印的地址分别与「默认值 / 覆盖文件 / 环境变量」一致。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/main.js
@@ -1021,7 +1021,7 @@ git commit -m "feat(desktop): 壳接入地址三层来源（env > config.json > 
   - IPC 通道：`shell:retry-now`
   - 渲染层全局：`window.k12Shell.retryNow()`
 
-- [ ] **Step 1: 扩展 preload，加单向重试通道**
+- [x] **Step 1: 扩展 preload，加单向重试通道**
 
 把 `apps/desktop/preload.js` 的**最后一行**：
 
@@ -1052,7 +1052,7 @@ contextBridge.exposeInMainWorld('k12Shell', {
 });
 ```
 
-- [ ] **Step 2: 写本地页**
+- [x] **Step 2: 写本地页**
 
 创建目录与文件 `apps/desktop/pages/offline.html`：
 
@@ -1164,7 +1164,7 @@ contextBridge.exposeInMainWorld('k12Shell', {
 </html>
 ```
 
-- [ ] **Step 3: main.js 加 require 与重试状态/函数**
+- [x] **Step 3: main.js 加 require 与重试状态/函数**
 
 在 `main.js` 的 require 区（Task 6 之后的样子）末尾追加一行：
 
@@ -1232,7 +1232,7 @@ function showOfflinePage() {
 }
 ```
 
-- [ ] **Step 4: main.js 挂上导航事件**
+- [x] **Step 4: main.js 挂上导航事件**
 
 在 `createWindow()` 里（**注意：`tryReconnect()` 里也有一处 `win.loadURL(WEB_URL)`，但那行带 `if (…)` 前缀，与本行的两空格缩进不同 —— 别改错**），把这一行：
 
@@ -1260,7 +1260,7 @@ function showOfflinePage() {
   });
 ```
 
-- [ ] **Step 4b: 在窗口 `closed` 时清掉重试表（2026-09-27 补）**
+- [x] **Step 4b: 在窗口 `closed` 时清掉重试表（2026-09-27 补）**
 
 `createWindow()` 里原本就有的 `closed` 处理器只置空了 `win`，没管重试表 —— 于是窗口关掉后
 interval 会一直每 5 秒空转一次（被 `tryReconnect()` 的 `!win` 早退挡掉，无害，但没必要）。
@@ -1289,7 +1289,7 @@ interval 会一直每 5 秒空转一次（被 `tryReconnect()` 的 `!win` 早退
   });
 ```
 
-- [ ] **Step 5: main.js 加「立即重试」的 IPC**
+- [x] **Step 5: main.js 加「立即重试」的 IPC**
 
 在既有的 `ipcMain.on('kiosk:set-student-mode', ...)` 附近追加：
 
@@ -1333,7 +1333,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && bash tools/services.sh start
 
 期望：全部通过。**#3 是这一步的核心验收点**，如果出现 Chromium 的「无法访问此网站」，说明重试退化成了「反复 loadURL」，回去检查 `tryReconnect()`。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/desktop/pages/offline.html apps/desktop/preload.js apps/desktop/main.js
@@ -1354,7 +1354,7 @@ git commit -m "feat(desktop): 连不上本地页 + 探测式自动重连（先�
 - Consumes: `readStudentMode` / `writeStudentMode`（Task 4）
 - Produces: `main.js` 内部 `applyStudentMode(on: boolean): void` —— 启动路径与 IPC 路径**共用**它
 
-- [ ] **Step 1: 加 require**
+- [x] **Step 1: 加 require**
 
 在 require 区末尾追加：
 
@@ -1362,7 +1362,7 @@ git commit -m "feat(desktop): 连不上本地页 + 探测式自动重连（先�
 const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 ```
 
-- [ ] **Step 2: 把 IPC 处理器抽成共用函数**
+- [x] **Step 2: 把 IPC 处理器抽成共用函数**
 
 把 `main.js` 末尾这段：
 
@@ -1405,7 +1405,7 @@ ipcMain.on('kiosk:set-student-mode', (_event, on) => {
 });
 ```
 
-- [ ] **Step 3: 启动时读回状态（在 createWindow 之前）**
+- [x] **Step 3: 启动时读回状态（在 createWindow 之前）**
 
 把 Task 6 之后 `app.whenReady()` 的开头：
 
@@ -1443,7 +1443,7 @@ app.whenReady().then(() => {
   createWindow();
 ```
 
-- [ ] **Step 4: 建窗口时应用 kiosk**
+- [x] **Step 4: 建窗口时应用 kiosk**
 
 在 `createWindow()` 里，把 **Task 7 Step 4 刚加好的这一整块**（从 `win.loadURL(WEB_URL);` 到 `did-finish-load` 处理器结束）：
 
@@ -1516,7 +1516,7 @@ echo '{oops' > "$UD/shell-state.json"
 cat "$UD/shell-state.json"     # 确认写坏
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/main.js
@@ -1536,7 +1536,7 @@ git commit -m "fix(desktop): 学生模式持久化，启动即进 kiosk —— �
 **Interfaces:**
 - 无新增导出
 
-- [ ] **Step 1: 改 webPreferences**
+- [x] **Step 1: 改 webPreferences**
 
 把 `createWindow()` 里的 `webPreferences` 块：
 
@@ -1564,7 +1564,7 @@ git commit -m "fix(desktop): 学生模式持久化，启动即进 kiosk —— �
     },
 ```
 
-- [ ] **Step 2: 代码检查**
+- [x] **Step 2: 代码检查**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "devTools" apps/desktop/main.js
@@ -1572,7 +1572,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "devTools" apps/deskto
 
 期望：输出一行 `devTools: !app.isPackaged,`。
 
-- [ ] **Step 3: 确认 dev 模式仍开着 DevTools**
+- [x] **Step 3: 确认 dev 模式仍开着 DevTools**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && bash tools/services.sh start
@@ -1581,7 +1581,7 @@ cd apps/desktop && npm start
 
 在窗口里按 `Cmd+Opt+I`（macOS）。期望：**DevTools 打开** —— 说明 dev 模式没被误伤（`app.isPackaged === false` 时 `devTools === true`）。关掉 DevTools 与窗口。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/main.js
@@ -1598,7 +1598,7 @@ git commit -m "feat(desktop): 生产构建禁用 DevTools（dev 模式保留）"
 **Interfaces:**
 - Produces: `apps/desktop/build/icon.png`（1024×1024 PNG）—— ③ 的 electron-builder 配置会引用它
 
-- [ ] **Step 1: 确认工具在**
+- [x] **Step 1: 确认工具在**
 
 ```bash
 which rsvg-convert && rsvg-convert --version
@@ -1606,13 +1606,13 @@ which rsvg-convert && rsvg-convert --version
 
 期望：路径为 `/opt/homebrew/bin/rsvg-convert`，版本 `2.62.x`（本机已装 librsvg；若报未找到，先跑 `brew install librsvg`）。
 
-- [ ] **Step 2: 生成 PNG**
+- [x] **Step 2: 生成 PNG**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop && mkdir -p build && rsvg-convert -w 1024 -h 1024 ../web/public/favicon.svg -o build/icon.png
 ```
 
-- [ ] **Step 3: 验证尺寸与格式**
+- [x] **Step 3: 验证尺寸与格式**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop && file build/icon.png && ls -l build/icon.png
@@ -1620,7 +1620,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop && file build/icon.p
 
 期望：`build/icon.png: PNG image data, 1024 x 1024, ...`，且文件非空（约数 KB～数十 KB）。
 
-- [ ] **Step 4: 目视确认**
+- [x] **Step 4: 目视确认**
 
 用系统预览打开：
 
@@ -1630,7 +1630,7 @@ open /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop/build/icon.png
 
 期望：品牌橘（`#ff6b35`）圆角方块 + 白色线性书本，**边缘不糊、不变形**。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/build/icon.png
@@ -1649,7 +1649,7 @@ git commit -m "chore(desktop): 应用图标 1024×1024（由 web 的 favicon.svg
 **Interfaces:**
 - 无代码接口
 
-- [ ] **Step 1: 给旧 spec 的三处打更正注记**
+- [x] **Step 1: 给旧 spec 的三处打更正注记**
 
 在 `docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md` 里改三处，**只加注记、不改写原文**（本仓风格：就地标注）。三处的锚点已核实如下：
 
@@ -1677,7 +1677,7 @@ git commit -m "chore(desktop): 应用图标 1024×1024（由 web 的 favicon.svg
 **不专门处理**（杀进程换不来自由，见 §8 局限 2）（**2026-09-26 限定**：此处「杀进程换不来自由」仅在**服务器仍可达**时成立；服务器不可达 + 杀进程 + 重启原可逃逸，已由 `2026-09-26-pc-app-shell-productionization-design.md` §4.3 补齐）
 ```
 
-- [ ] **Step 2: 往权威约束文档追加一节**
+- [x] **Step 2: 往权威约束文档追加一节**
 
 在 `docs/constraints/pc-app-学习管控.md` **末尾**追加一节：
 
@@ -1730,7 +1730,7 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   **禁文本选中**（与防逃逸无关，学生可能要复制）、**禁拖拽**（`will-navigate` 已拦非同源）
 ```
 
-- [ ] **Step 3: 复核没写进 `CLAUDE.md`**
+- [x] **Step 3: 复核没写进 `CLAUDE.md`**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && wc -c CLAUDE.md && grep -c "config.json\|shell-state" CLAUDE.md || true
@@ -1739,7 +1739,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && wc -c CLAUDE.md && grep -c "co
 期望：`CLAUDE.md` 体积仍在 ~11KB 量级（不因本次增长），且第二行输出 **`0`**
 （= 不含 `config.json` / `shell-state` 的细节，内容都在 `docs/constraints/`，符合体量纪律）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md docs/constraints/pc-app-学习管控.md docs/superpowers/plans/2026-09-26-pc-app-shell-productionization.md
@@ -1758,7 +1758,7 @@ README 是**唯一**披露覆盖文件路径的地方（spec §3-12）。漏写 
 **Interfaces:**
 - 无代码接口
 
-- [ ] **Step 1: 改「PC App」章节**
+- [x] **Step 1: 改「PC App」章节**
 
 在 `README.md` 的「### PC App (`apps/desktop`，Electron 壳)」这一节里：**原有的三进程启动命令与 kiosk 说明原样保留**，在它们**之后**追加下面四块（用 `####` 作子标题）：
 
@@ -1812,7 +1812,7 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
   真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）
 ```
 
-- [ ] **Step 2: 新增「① 局域网部署」运维清单**
+- [x] **Step 2: 新增「① 局域网部署」运维清单**
 
 在 `README.md` 的「### 部署与日常启停」小节之后插入：
 
@@ -1834,7 +1834,7 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
    **本机一重启服务不会自己起来，所有学生机立刻白屏**。需要配 launchd（macOS）或等价机制
 ```
 
-- [ ] **Step 3: 核对三条路径与实际一致**
+- [x] **Step 3: 核对三条路径与实际一致**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "k12-desktop" README.md && grep -n '"name"' apps/desktop/package.json && grep -n '"productName"' apps/desktop/package.json || echo "(无 productName —— 与 README 里的 k12-desktop 一致)"
@@ -1842,7 +1842,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "k12-desktop" README.m
 
 期望：README 里三处路径都含 `k12-desktop`，且 `apps/desktop/package.json` 的 `name` 是 `k12-desktop`、**没有** `productName`。不一致就改 README。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md
@@ -1860,7 +1860,7 @@ git commit -m "docs(README): PC App 地址三层来源与救火步骤 + 局域�
 **Interfaces:**
 - 无代码接口
 
-- [ ] **Step 1: 往 changelog 追加一条（加在顶部）**
+- [x] **Step 1: 往 changelog 追加一条（加在顶部）**
 
 `docs/ai-core-changelog.md` 的约定是「**迁出后的新条目继续追加在顶部**」（该文件开头第 3 行明写），
 且现有条目按日期倒序排列。所以把下面这条**插到第一个 `## ` 标题之前** ——
@@ -1893,7 +1893,7 @@ git commit -m "docs(README): PC App 地址三层来源与救火步骤 + 局域�
 本批留了 17 条人工冒烟清单（spec §5）。
 ```
 
-- [ ] **Step 2: 在 API 文档的变更日志表里登记「契约零变更」**
+- [x] **Step 2: 在 API 文档的变更日志表里登记「契约零变更」**
 
 `docs/API接口与数据流设计文档.md` 的 `## 9. 变更日志`（第 2039 行起）是一张
 `| 版本 | 日期 | 说明 |` 的表，**最新在前**，当前最新是 `v4.10`。
@@ -1903,7 +1903,7 @@ git commit -m "docs(README): PC App 地址三层来源与救火步骤 + 局域�
 | v4.11 | 2026-09-26 | **PC App 壳生产化（②）：接口契约零变更（仅登记）**。`docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md` 只改 `apps/desktop`（Electron 壳）与若干文档，**未新增/修改/删除任何 HTTP 端点**，故本文件正文与 `docs/api/openapi.yaml` 本批均无需同步。此结论显式登记，避免后来者误以为漏同步（spec §7）。 |
 ```
 
-- [ ] **Step 3: 核对两档仍一致（本仓铁律）**
+- [x] **Step 3: 核对两档仍一致（本仓铁律）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && git diff --stat -- docs/api/openapi.yaml docs/API接口与数据流设计文档.md
@@ -1920,7 +1920,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "^## " docs/ai-core-ch
 
 期望：第一行是 `…:## 2026-09-26 — PC App 壳生产化（②）`。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/ai-core-changelog.md docs/API接口与数据流设计文档.md
@@ -1931,7 +1931,7 @@ git commit -m "docs: changelog 记录壳生产化（含重试设计缺陷的发�
 
 ## 完成后的总验收
 
-- [ ] **全量单测**
+- [x] **全量单测**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop && npm test
@@ -1939,7 +1939,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop && npm test
 
 期望：5 个测试文件全过（`server-url`、`resolve-server-url`、`config-file`、`shell-state`、`probe-server`），共 37 个用例。
 
-- [ ] **确认没碰 `apps/web` 与后端**
+- [x] **确认没碰 `apps/web` 与后端**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && git diff --stat origin/main -- apps/web apps/server
@@ -1952,6 +1952,6 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && git diff --stat origin/main --
 逐条对照 spec `2026-09-26-pc-app-shell-productionization-design.md` §5「人工冒烟」表。
 **#3（等 20 秒本地页仍在、绝不出现 Chromium 错误页）与 #8（杀进程+断网重启仍是 kiosk）是核心两条。**
 
-- [ ] **明确不在本批验证的三项**（spec §5 末表）
+- [x] **明确不在本批验证的三项**（spec §5 末表）
 
 DevTools 生产禁用、图标各平台显示、Windows/Linux 行为 —— 全部留给 ③ 出包后。

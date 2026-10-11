@@ -60,14 +60,14 @@ docs/API接口与数据流设计文档.md + docs/api/openapi.yaml
 **Interfaces:**
 - Produces（Task 2/3 消费）：默认导出 `HandwritingPad`，`forwardRef<DemoSketchPadHandle 同名改为 HandwritingPadHandle>`；props `{ onStrokesChange?: (count: number) => void }`；句柄 `{ exportImage(): string | null; clear(): void }` 语义不变。
 
-- [ ] **Step 1: git mv 两个文件**
+- [x] **Step 1: git mv 两个文件**
 
 ```bash
 git mv apps/web/src/pages/dev/DemoSketchPad.tsx apps/web/src/components/business/HandwritingPad.tsx
 git mv apps/web/src/pages/dev/DemoSketchPad.test.tsx apps/web/src/components/business/HandwritingPad.test.tsx
 ```
 
-- [ ] **Step 2: 改组件名与屏显笔迹颜色**
+- [x] **Step 2: 改组件名与屏显笔迹颜色**
 
 `HandwritingPad.tsx` 内：
 1. 组件函数名与导出：`DemoSketchPad` → `HandwritingPad`（默认导出与 `HandwritingPadHandle` interface 保留原名 `HandwritingPadHandle`）。
@@ -101,18 +101,18 @@ const themeMode = useThemeStore((s) => s.mode);
 useEffect(() => { redraw(); }, [themeMode, redraw]);
 ```
 
-- [ ] **Step 3: demo 页与测试改 import**
+- [x] **Step 3: demo 页与测试改 import**
 
 - `HandwritingDemoPage.tsx`：`import DemoSketchPad, { type DemoSketchPadHandle } from './DemoSketchPad'` → `import HandwritingPad, { type HandwritingPadHandle } from '@/components/business/HandwritingPad'`，JSX 与 ref 类型同步改名。
 - `HandwritingDemoPage.test.tsx`：`vi.mock('./DemoSketchPad', ...)` → `vi.mock('@/components/business/HandwritingPad', ...)`，getter 返回键名同步 `default: MockPad`。
 - `HandwritingPad.test.tsx`：import 改 `./HandwritingPad`、`type HandwritingPadHandle`。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npm test -- --run HandwritingPad HandwritingDemoPage`
 Expected: PASS（迁移后用例数不变：pad 3 个 + demo 页 3 个）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A apps/web/src/pages/dev apps/web/src/components/business
@@ -132,7 +132,7 @@ git commit -m "refactor: DemoSketchPad 泛化为共享 HandwritingPad（屏显�
 - Consumes: Task 1 `HandwritingPad`（默认导出 + `HandwritingPadHandle`）；后端 Task 4 端点 `{ text, modelKey, elapsedMs }`（前端只消费 `text`）。
 - Produces（Task 3 消费）：`transcribeHandwriting(image: string): Promise<HandwritingTranscribeResult>`（api.ts）；`HandwritingInputModal` props `{ open: boolean; title: string; onConfirm(value: string): void; onClose(): void }`。
 
-- [ ] **Step 1: api.ts 加函数**
+- [x] **Step 1: api.ts 加函数**
 
 在 `judgeDictation` 定义之前插入：
 
@@ -153,7 +153,7 @@ export function transcribeHandwriting(image: string): Promise<HandwritingTranscr
 }
 ```
 
-- [ ] **Step 2: 写弹层失败测试**
+- [x] **Step 2: 写弹层失败测试**
 
 ```tsx
 // apps/web/src/components/business/handwriting/HandwritingInputModal.test.tsx
@@ -259,12 +259,12 @@ it('open=false 不渲染；onClose 在点关闭时被调', () => {
 
 （实施时若 `screen.getByRole('textbox')` 命中多个可编辑区，给校对区加 `aria-label="校对区"` 并用 `getByRole('textbox', { name: '校对区' }`。）
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `cd apps/web && npm test -- --run HandwritingInputModal`
 Expected: FAIL（组件不存在）
 
-- [ ] **Step 4: 实现弹层组件**
+- [x] **Step 4: 实现弹层组件**
 
 ```tsx
 // apps/web/src/components/business/handwriting/HandwritingInputModal.tsx
@@ -385,12 +385,12 @@ export default function HandwritingInputModal({ open, title, onConfirm, onClose 
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npm test -- --run HandwritingInputModal`
 Expected: PASS（4 用例）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/components/business/handwriting
@@ -411,7 +411,7 @@ git commit -m "feat: 手写输入弹层（分批识别追加+校对回填）与 
 - Consumes: Task 2 `HandwritingInputModal`（props 见上）；两表单自身的受控 value/onChange（**不改对外 Props 签名**）。
 - Produces: 无（叶子接入）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `DictationAnswerForm.test.tsx`（新建，文件不存在）：
 
@@ -495,12 +495,12 @@ describe('SentenceBlock — 手写入口', () => {
 
 （若该文件尚未 import `fireEvent`，在 import 行补上。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npm test -- --run DictationAnswerForm SentenceBlock`
 Expected: FAIL（按钮不存在）
 
-- [ ] **Step 3: 接入 DictationAnswerForm**
+- [x] **Step 3: 接入 DictationAnswerForm**
 
 ```tsx
 // DictationAnswerForm.tsx 改造后全文（文件小，直接给全文）
@@ -603,7 +603,7 @@ export default function DictationAnswerForm({ value, onChange, disabled = false 
 }
 ```
 
-- [ ] **Step 4: 接入 SentenceBlock**
+- [x] **Step 4: 接入 SentenceBlock**
 
 `SentenceBlock.tsx`（改动点，其余不动）：
 
@@ -663,12 +663,12 @@ import HandwritingInputModal from '../handwriting/HandwritingInputModal';
       />
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npm test -- --run DictationAnswerForm SentenceBlock DictationRunPage InterpretationRunPage`
 Expected: PASS（新用例 + 两页既有回归全过）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/business/dictation apps/web/src/components/business/interpretation
@@ -693,7 +693,7 @@ git commit -m "feat: 默写/解释作答字段接入手写输入弹层"
 - Consumes: `ModelRouter.route({scene, subject}): RouteResult`（`ai-core/infra/model-router.ts`，RouteResult.primary/fallback 为 RoutedModel，scene/modelKey 已打标）；`ModelClient.chat(request)`。
 - Produces: `POST /api/ai/handwriting/transcribe`（学生角色）→ `{ text, modelKey, elapsedMs }`；400/4001、400/4002、502/5502。Task 2 的 `transcribeHandwriting` 按此消费（已实现）。
 
-- [ ] **Step 1: Scene union 与枚举引用点**
+- [x] **Step 1: Scene union 与枚举引用点**
 
 1. `types.ts:15` 的 `Scene` union 里追加 `| 'handwriting'`（放在 `chinese_meaning_judge` 之后）。
 2. 找出所有需要跟着扩的枚举引用点并逐个加 `'handwriting'`（只加枚举值，不改行为）：
@@ -704,7 +704,7 @@ grep -rn "chinese_meaning_judge" apps/server/src apps/web/src --include="*.ts" -
 
 重点核对：admin 模型路由保存接口的 scene 校验（`apps/server/src/modules/admin/` 下）、`apps/web/src/pages/admin/AdminModelsPage.tsx` 的 scene 下拉/文案表。凡是有 scene 字面量清单的地方加 `'handwriting'`（展示名可用「手写识别」）。
 
-- [ ] **Step 2: yaml 路由**
+- [x] **Step 2: yaml 路由**
 
 `model-routes.yaml` 的 `routes:` 里、`chinese_meaning_judge` 段之后加：
 
@@ -718,7 +718,7 @@ grep -rn "chinese_meaning_judge" apps/server/src apps/web/src --include="*.ts" -
       fallback: qwen3.8-max
 ```
 
-- [ ] **Step 3: 写 service 失败测试**
+- [x] **Step 3: 写 service 失败测试**
 
 ```ts
 // apps/server/src/modules/ai/handwriting.service.test.ts
@@ -788,12 +788,12 @@ describe('HandwritingService.transcribe', () => {
 });
 ```
 
-- [ ] **Step 4: 跑测试确认失败**
+- [x] **Step 4: 跑测试确认失败**
 
 Run: `cd apps/server && npm test -- --run handwriting.service`
 Expected: FAIL（模块不存在）
 
-- [ ] **Step 5: 实现 service**
+- [x] **Step 5: 实现 service**
 
 ```ts
 // apps/server/src/modules/ai/handwriting.service.ts
@@ -874,7 +874,7 @@ export class HandwritingService {
 }
 ```
 
-- [ ] **Step 6: controller + module**
+- [x] **Step 6: controller + module**
 
 `ai.controller.ts`：构造器加 `private readonly handwritingService: HandwritingService`（import 之），类内加方法：
 
@@ -901,7 +901,7 @@ export class HandwritingService {
 
 （import `HandwritingService` 加到文件头。）
 
-- [ ] **Step 7: controller 守卫测试**
+- [x] **Step 7: controller 守卫测试**
 
 新建 `apps/server/src/modules/ai/ai.controller.test.ts`（无则建；同 `points.controller.test.ts` 先例，断言 `@Roles('student')` 元数据经 RolesGuard 生效）：
 
@@ -923,12 +923,12 @@ describe('AIController — 手写转写端点守卫', () => {
 
 （若 points.controller.test 的先例写法不同，以先例为准调整，断言目标不变：student 放行、parent/admin 403、未登录 401 由 RolesGuard/JwtAuthGuard 语义保证。）
 
-- [ ] **Step 8: 跑后端测试确认通过**
+- [x] **Step 8: 跑后端测试确认通过**
 
 Run: `cd apps/server && npm test -- --run handwriting ai.controller`
 Expected: PASS（service 3 + controller 守卫 1；既有 ai 模块测试不受影响）
 
-- [ ] **Step 9: 迁移 SQL**
+- [x] **Step 9: 迁移 SQL**
 
 `tools/db/migrations/2026-10-08_handwriting_scene.sql`：
 
@@ -943,13 +943,13 @@ WHERE NOT EXISTS (
 
 （schema.sql 无新表/列，不动；`scene VARCHAR(30)`/`subject VARCHAR(20)` 容量足够。手工 apply：`mysql ai_k12 < tools/db/migrations/2026-10-08_handwriting_scene.sql`；DB 没跑迁移时 yaml 兜底同路由，系统照常工作。）
 
-- [ ] **Step 10: API 文档同步（两份）**
+- [x] **Step 10: API 文档同步（两份）**
 
 1. `docs/API接口与数据流设计文档.md`：§4 新增小节（建议 §4.27，紧随现有 ai/dev 相关小节），内容：`POST /api/ai/handwriting/transcribe`（学生角色）——用途（语文专项手写输入转写）、body `{image: dataURL(png|jpeg, ≤4MB)}`、返回 `{text, modelKey, elapsedMs}`、错误 400/4001、400/4002、502/5502、成功 201（`@Post` 默认）、模型由 scene `handwriting` + subject `chinese` 路由（local 优先 qwen3.8-max 兜底）、不留档只有 LLM 账本。§5 数据流如该文档对 ai 端点有清单，同步补一行。§9 变更日志加一行。
 2. `docs/api/openapi.yaml`：`paths` 加 `/api/ai/handwriting/transcribe`（post，requestBody `{image: string}`，`'201'` 响应 `{text, modelKey, elapsedMs}`，400/502；security student bearer）——对照文件内既有 POST 端点条目格式。
 3. 核对清单：两文档端点路径列表一致（CLAUDE.md API 同步规则）。
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/server/src/ai-core/types.ts apps/server/src/ai-core/model-routes.yaml \
@@ -964,7 +964,7 @@ git commit -m "feat: 手写转写端点 /api/ai/handwriting/transcribe + scene h
 
 **Files:** 无新文件（验证收尾）
 
-- [ ] **Step 1: 全量测试 + 类型 + lint**
+- [x] **Step 1: 全量测试 + 类型 + lint**
 
 ```bash
 cd apps/web && npm test && npm run lint && npx tsc -b --noEmit
@@ -972,7 +972,7 @@ cd ../server && npm test && npm run build
 ```
 Expected: 全 PASS、0 error（web lint 既有 MobilePointsPage.test.tsx:46 error 属历史遗留，不在本计划范围）；server build 覆盖 dist 需向用户披露（正在跑的后端要重启）。
 
-- [ ] **Step 2: 手测清单（用户执行）**
+- [x] **Step 2: 手测清单（用户执行）**
 
 1. `mysql ai_k12 < tools/db/migrations/2026-10-08_handwriting_scene.sql`；重启后端 `node dist/main.js`（dist 已重建）；web 刷新。
 2. 学生账号 → 训练 → 语文 → 专项 → 默写：三字段各点「手写」→ 分批写正文 → 校对区改错 → 确认填入 → 提交，判题结果与键盘输入一致。
@@ -981,7 +981,7 @@ Expected: 全 PASS、0 error（web lint 既有 MobilePointsPage.test.tsx:46 erro
 5. 识别失败重试、误关弹层重开内容保留。
 6. admin 端模型路由页（若有 scene 下拉）确认出现「handwriting/手写识别」。
 
-- [ ] **Step 3: Commit（如有微调）**
+- [x] **Step 3: Commit（如有微调）**
 
 ```bash
 git add -A && git commit -m "chore: 语文专项手写输入回归收尾"

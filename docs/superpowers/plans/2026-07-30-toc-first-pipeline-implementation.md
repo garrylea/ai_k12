@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `tools/data-refinery/src/checkpoint.py`
 
-- [ ] **Step 1: 添加 _toc_parsed 集合及方法**
+- [x] **Step 1: 添加 _toc_parsed 集合及方法**
 
 在 `RefineryCheckpoint` 类中添加 `_toc_parsed` 集合和对应方法，与现有 `_converted` / `_extracted` / `_published` 模式完全一致。
 
@@ -68,7 +68,7 @@ class RefineryCheckpoint:
         )
 ```
 
-- [ ] **Step 2: 运行现有测试验证不破坏兼容性**
+- [x] **Step 2: 运行现有测试验证不破坏兼容性**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_checkpoint.py -v
@@ -76,7 +76,7 @@ cd tools/data-refinery && python -m pytest tests/test_checkpoint.py -v
 
 Expected: all existing tests pass.
 
-- [ ] **Step 3: 编写新测试 test_toc_parsed**
+- [x] **Step 3: 编写新测试 test_toc_parsed**
 
 在 `tests/test_checkpoint.py` 中添加：
 
@@ -108,7 +108,7 @@ class TestTocParsed:
         assert ckpt2.is_toc_parsed("b")
 ```
 
-- [ ] **Step 4: 运行测试**
+- [x] **Step 4: 运行测试**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_checkpoint.py -v
@@ -116,7 +116,7 @@ cd tools/data-refinery && python -m pytest tests/test_checkpoint.py -v
 
 Expected: 3 new tests pass.
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/checkpoint.py tools/data-refinery/tests/test_checkpoint.py
@@ -130,7 +130,7 @@ git commit -m "feat(checkpoint): add toc_parsed tracking set for TOC parse step"
 **Files:**
 - Create: `tools/data-refinery/src/prompts/toc_parse.txt`
 
-- [ ] **Step 1: 创建 prompt 文件**
+- [x] **Step 1: 创建 prompt 文件**
 
 ```text
 你是 K12 教材目录解析专家。从教材目录页 Markdown 中提取章→节→子节层级。
@@ -198,7 +198,7 @@ git commit -m "feat(checkpoint): add toc_parsed tracking set for TOC parse step"
 - 没有 supplements 的，supplements 为空数组
 ```
 
-- [ ] **Step 2: 添加加载 prompt 的测试**
+- [x] **Step 2: 添加加载 prompt 的测试**
 
 在 `tests/test_extract_cli.py` 的 `TestLoadPrompt` 类中添加：
 
@@ -212,7 +212,7 @@ git commit -m "feat(checkpoint): add toc_parsed tracking set for TOC parse step"
 
 注意：`_load_prompt` 在 `extract_cli.py` 中定义，需要验证它也能加载 toc_parse.txt。
 
-- [ ] **Step 3: 运行测试**
+- [x] **Step 3: 运行测试**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_extract_cli.py::TestLoadPrompt -v
@@ -220,7 +220,7 @@ cd tools/data-refinery && python -m pytest tests/test_extract_cli.py::TestLoadPr
 
 Expected: new test passes (test_loads_toc_parse_prompt).
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add tools/data-refinery/src/prompts/toc_parse.txt tools/data-refinery/tests/test_extract_cli.py
@@ -235,7 +235,7 @@ git commit -m "feat(prompts): add toc_parse prompt for TOC page LLM extraction"
 - Create: `tools/data-refinery/src/toc_parse_cli.py`
 - Create: `tools/data-refinery/tests/test_toc_parse_cli.py`
 
-- [ ] **Step 1: 实现 TOC 页面扫描函数**
+- [x] **Step 1: 实现 TOC 页面扫描函数**
 
 在 `toc_parse_cli.py` 中实现目录页发现逻辑——扫描教材目录前 10 页（或 20 页），找包含 `目录` heading 的页。
 
@@ -390,7 +390,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: 编写 dry-run 测试**
+- [x] **Step 2: 编写 dry-run 测试**
 
 创建 `tests/test_toc_parse_cli.py`：
 
@@ -499,7 +499,7 @@ class TestTocParseCliMain:
         assert ckpt2.is_toc_parsed("数学/人教版/九年级/下册/书")
 ```
 
-- [ ] **Step 3: 运行测试**
+- [x] **Step 3: 运行测试**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_toc_parse_cli.py -v
@@ -507,7 +507,7 @@ cd tools/data-refinery && python -m pytest tests/test_toc_parse_cli.py -v
 
 Expected: all tests pass.
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add tools/data-refinery/src/toc_parse_cli.py tools/data-refinery/tests/test_toc_parse_cli.py
@@ -522,7 +522,7 @@ git commit -m "feat(toc_parse): add toc_parse_cli for LLM-based TOC page extract
 - Modify: `tools/data-refinery/src/db_loader.py`
 - Modify: `tools/data-refinery/tests/test_db_loader_integration.py`
 
-- [ ] **Step 1: 新增 _match_lesson_by_name() 方法**
+- [x] **Step 1: 新增 _match_lesson_by_name() 方法**
 
 在 `DbLoader` 类中添加按 lesson name 查找的方法：
 
@@ -535,7 +535,7 @@ git commit -m "feat(toc_parse): add toc_parse_cli for LLM-based TOC page extract
         return None
 ```
 
-- [ ] **Step 2: 新增 load_toc_structure() 方法**
+- [x] **Step 2: 新增 load_toc_structure() 方法**
 
 在 `DbLoader` 类中添加：
 
@@ -635,7 +635,7 @@ def _grade_band_from_path(toc_path: str) -> str:
     return "junior"
 ```
 
-- [ ] **Step 3: 修改 load_book_cards() 支持 toc_path 参数**
+- [x] **Step 3: 修改 load_book_cards() 支持 toc_path 参数**
 
 修改 `load_book_cards()` 方法签名，新增可选参数：
 
@@ -682,7 +682,7 @@ def _grade_band_from_path(toc_path: str) -> str:
         return count
 ```
 
-- [ ] **Step 4: 编写测试**
+- [x] **Step 4: 编写测试**
 
 在 `tests/test_db_loader_integration.py` 中添加 TOC 相关测试。由于需要 MySQL 连接，添加跳过标记：
 
@@ -701,7 +701,7 @@ class TestTocStructure:
         pass
 ```
 
-- [ ] **Step 5: 运行单元测试（不含集成测试）**
+- [x] **Step 5: 运行单元测试（不含集成测试）**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/ -v --ignore=tests/test_db_loader_integration.py
@@ -709,7 +709,7 @@ cd tools/data-refinery && python -m pytest tests/ -v --ignore=tests/test_db_load
 
 Expected: all existing tests pass.
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add tools/data-refinery/src/db_loader.py tools/data-refinery/tests/test_db_loader_integration.py
@@ -723,7 +723,7 @@ git commit -m "feat(db_loader): add load_toc_structure() and _match_lesson_by_na
 **Files:**
 - Modify: `tools/data-refinery/src/db_loader_cli.py`
 
-- [ ] **Step 1: 添加新参数并重构 main()**
+- [x] **Step 1: 添加新参数并重构 main()**
 
 ```python
 def parse_args(argv=None):
@@ -804,7 +804,7 @@ def main(argv=None):
         loader.close()
 ```
 
-- [ ] **Step 2: 验证向后兼容**
+- [x] **Step 2: 验证向后兼容**
 
 ```bash
 cd tools/data-refinery && python src/db_loader_cli.py --help
@@ -812,7 +812,7 @@ cd tools/data-refinery && python src/db_loader_cli.py --help
 
 Expected: `--load-toc`、`--load-cards`、`--toc-path` 出现在 help 中。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add tools/data-refinery/src/db_loader_cli.py
@@ -827,7 +827,7 @@ git commit -m "feat(db_loader_cli): add --load-toc / --load-cards / --toc-path f
 - Modify: `tools/data-refinery/src/extract_cli.py`
 - Modify: `tools/data-refinery/tests/test_extract_cli.py`
 
-- [ ] **Step 1: 新增 _levenshtein() 和 validate_and_correct() 函数**
+- [x] **Step 1: 新增 _levenshtein() 和 validate_and_correct() 函数**
 
 在 `extract_cli.py` 末尾添加（或新文件 `toc_validator.py`，根据文件大小决定）：
 
@@ -922,7 +922,7 @@ def validate_and_correct(cards_jsonl_files: dict, toc: dict, output_dir: Path) -
     return diff_report
 ```
 
-- [ ] **Step 2: 修改 main() 添加 --toc 参数和调用**
+- [x] **Step 2: 修改 main() 添加 --toc 参数和调用**
 
 在 `parse_args()` 中添加：
 
@@ -965,7 +965,7 @@ def validate_and_correct(cards_jsonl_files: dict, toc: dict, output_dir: Path) -
             print(f"[WARN] TOC file not found: {args.toc}", flush=True)
 ```
 
-- [ ] **Step 3: 将 TOC 合法 lesson_id 注入 LLM prompt（可选增强）**
+- [x] **Step 3: 将 TOC 合法 lesson_id 注入 LLM prompt（可选增强）**
 
 在 `card_labeler.py` 的 `label()` 方法中，如果传入了 `toc_labels`，追加到 prompt：
 
@@ -982,7 +982,7 @@ def label(self, cards_text, page_number, prev_lesson_id=None, toc_labels=None):
 
 在 `extract_cli.py` 的 `main()` 中，如果 `--toc` 指定了，解析 TOC 并在创建 `CardLabeler` 前提取 labels，传给 labeler 或通过 labeler.label() 传入。
 
-- [ ] **Step 4: 编写测试**
+- [x] **Step 4: 编写测试**
 
 在 `tests/test_extract_cli.py` 中添加：
 
@@ -1061,7 +1061,7 @@ class TestValidateAndCorrect:
         assert report["corrected"][0]["corrected"] == "26.1 反比例函数"
 ```
 
-- [ ] **Step 5: 运行测试**
+- [x] **Step 5: 运行测试**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_extract_cli.py -v
@@ -1069,7 +1069,7 @@ cd tools/data-refinery && python -m pytest tests/test_extract_cli.py -v
 
 Expected: all tests pass, including new Levenshtein/validate tests.
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add tools/data-refinery/src/extract_cli.py tools/data-refinery/tests/test_extract_cli.py
@@ -1082,7 +1082,7 @@ git commit -m "feat(extract_cli): add --toc param, Levenshtein-based validate_an
 
 **Files:** none (manual verification)
 
-- [ ] **Step 1: 用九年级下册真实数据跑 TOC 解析**
+- [x] **Step 1: 用九年级下册真实数据跑 TOC 解析**
 
 ```bash
 cd tools/data-refinery
@@ -1092,7 +1092,7 @@ cat output/toc/数学/人教版/九年级/下册_*.json | python -m json.tool | 
 
 Expected: TOC JSON 包含 4 章（26-29）、各级节、supplements（小结、复习题等）。
 
-- [ ] **Step 2: 建骨架**
+- [x] **Step 2: 建骨架**
 
 ```bash
 python src/db_loader_cli.py --load-toc --toc-path output/toc/数学/人教版/九年级/义务教育教科书·数学九年级下册_toc.json
@@ -1100,7 +1100,7 @@ python src/db_loader_cli.py --load-toc --toc-path output/toc/数学/人教版/�
 
 Expected: units 有 4 章，lessons 数 ≥ 20。
 
-- [ ] **Step 3: 增量 card 入库**
+- [x] **Step 3: 增量 card 入库**
 
 ```bash
 python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/人教版/九年级/义务教育教科书·数学九年级下册_toc.json --source smartedu
@@ -1108,7 +1108,7 @@ python src/db_loader_cli.py --load-cards --toc-path output/toc/数学/人教版/
 
 Expected: 26 章的 cards 挂到已有 lessons 下，27-29 章 lessons 仍无 card。
 
-- [ ] **Step 4: 不带 TOC 的向后兼容验证**
+- [x] **Step 4: 不带 TOC 的向后兼容验证**
 
 ```bash
 python src/db_loader_cli.py --source smartedu
@@ -1124,7 +1124,7 @@ Expected: 行为与之前完全一致。
 - Modify: `docs/CLAUDE.md`
 - Modify: `CLAUDE.md`（repo root）
 
-- [ ] **Step 1: 在 docs/CLAUDE.md 阅读优先级中添加**
+- [x] **Step 1: 在 docs/CLAUDE.md 阅读优先级中添加**
 
 在 `docs/CLAUDE.md` 阅读优先级部分添加：
 
@@ -1132,7 +1132,7 @@ Expected: 行为与之前完全一致。
 - 做数据管线开发 → 先读 PRD + data-refinery-管线总结与后续 + TOC目录优先管线设计
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add docs/CLAUDE.md

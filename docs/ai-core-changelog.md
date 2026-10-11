@@ -8,6 +8,26 @@
 
 ---
 
+## 2026-10-11 · 数据清理：DEV-FIXTURE 假数据删除 +《十五从军征》(id=114) 补齐 3 句含义
+
+用户裁决：① 清掉 DEV-FIXTURE 假数据；②《十五从军征》按最新版（统编九下、带对话引号的正文）补齐留空的 3 句含义。
+
+### DEV-FIXTURE 清理（行备份 `tools/db/backups/20261011_dev_fixture_rows.sql`）
+
+- 删 `chinese_passages` id 1,2（静夜思/登鹳雀楼 fixture，memorize_required=1，是默写抽题池仅有的两篇）——**默写抽题池随之清空，待必背标定（全部 memorize_required=0）完成后才有真篇目**。这两行同时载有从 `诗深层含义.md` 导入的逐句含义（小学篇目，真源在 md，不丢）。
+- 删 `english_words` id 9,14（useless/ice-cream fixture）+ `student_word_progress` 两行孤儿进度（student 7）。
+- 前置已查：`special_practice_logs` 对这些 id **零引用**，删除无业务残留。dev 种子脚本（`seed-*-fixture.ts`）保留，仅手动可跑。
+
+### 《十五从军征》id=114（九下）补 3 句含义（行备份 `tools/db/backups/20261011_shiwucongjunzheng_id114.sql`）
+
+- 上/下册两行是已知设计（md 去重说明：上下册重复收录 5 首合并为一条）；九下正文是统编版（含对话引号），3 句含义因与 md 切句文本对不上（标点/引号位置差异）当年整篇留 null。
+- 本次**只 UPDATE `sentence_meanings` 一列**，1,2,3 三个 null 位取自 id=42（九上同源内容）；脚本内置守卫：填前断言目标位为 null、两行仅汉字序列全等（标点差异放过）、事后全列 diff 确认只动 `sentence_meanings`+`updated_at`。
+- **为什么不走 `meaning_cli --apply`**：该命令按句原文归一定位后对同名**所有行**写库——若把 md 的 3 个 `###` 标题改成九下带引号文本，九上行 42 会有 3 句落空 → 非全空 → 照写库，把 42 行已填的 3 句**抹成 null**。md 保持原样未动。
+- 现状：`chinese_passages` 诗歌含义已无 null 缺口（剩余 `%null%` 行全是文言文 14 条，md 范围本来就只覆盖 31 首诗歌，设计内留空）。
+- 遗留观察（未动）：id=114 的 `sentences` 切句带引号残片（如 `“遥看是君家…` / `”兔从…`），是统编版对话引号跨切分边界的解析痕迹；修它要动 `sentences` 并重对齐 `key_terms`/练习记录，如需处理单独立项。
+
+---
+
 ## 2026-10-11 · 错题升级变式（PRD §7.10 接线，补齐 P0-3）
 
 spec 依据：PRD §7.10 + API 文档 §5.4（整节重写）+ §9 v4.20。计划：`/Users/lichao/.codebuddy/plans/radiant-forging-curie-90JYTSLr.md`。

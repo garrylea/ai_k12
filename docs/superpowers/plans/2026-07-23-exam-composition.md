@@ -22,7 +22,7 @@
 
 **说明:** `schema.sql` 由 `install_mysql.sh` 加载（详见 DB 设计文档 §3.12 Seed 约定）。新增表放在 `assessments` 表之后，种子数据用 `INSERT IGNORE`（幂等安全）。
 
-- [ ] **Step 1: 在 schema.sql 的 assessments 表后添加 exam_presets 建表语句**
+- [x] **Step 1: 在 schema.sql 的 assessments 表后添加 exam_presets 建表语句**
 
 在 `assessments` 表的 `CREATE TABLE` 语句之后插入以下内容：
 
@@ -55,7 +55,7 @@ END;
 DELIMITER ;
 ```
 
-- [ ] **Step 2: 在 schema.sql 末尾的 seed 区域添加种子数据**
+- [x] **Step 2: 在 schema.sql 末尾的 seed 区域添加种子数据**
 
 在 schema.sql 已有的 seed 区域（`subjects` 的 `INSERT IGNORE` 之后）追加：
 
@@ -66,7 +66,7 @@ INSERT IGNORE INTO exam_presets (exam_type, total_questions, difficulty_ratio, t
 ('final',     35, '{"easy":8,"medium":17,"hard":10}', '{"choice":15,"fill":10,"solve":10}', 0.90, 90);
 ```
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add tools/db/schema.sql
@@ -80,7 +80,7 @@ git commit -m "feat(db): add exam_presets table with seed data for unit_test/mid
 **Files:**
 - Create: `apps/server/src/services/assessment/exam-composer.types.ts`
 
-- [ ] **Step 1: 创建类型文件**
+- [x] **Step 1: 创建类型文件**
 
 ```typescript
 // apps/server/src/services/assessment/exam-composer.types.ts
@@ -195,7 +195,7 @@ export interface CoverageResult {
 }
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add apps/server/src/services/assessment/exam-composer.types.ts
@@ -210,7 +210,7 @@ git commit -m "feat(assessment): add exam composer type definitions"
 - Create: `apps/server/src/services/assessment/coverage-tracker.ts`
 - Test: `apps/server/src/services/assessment/__tests__/coverage-tracker.test.ts`
 
-- [ ] **Step 1: 编写 CoverageTracker 的测试**
+- [x] **Step 1: 编写 CoverageTracker 的测试**
 
 ```typescript
 // apps/server/src/services/assessment/__tests__/coverage-tracker.test.ts
@@ -265,7 +265,7 @@ describe('CoverageTracker', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/services/assessment/__tests__/coverage-tracker.test.ts
@@ -273,7 +273,7 @@ cd apps/server && npx vitest run src/services/assessment/__tests__/coverage-trac
 
 Expected: FAIL — CoverageTracker 未定义
 
-- [ ] **Step 3: 实现 CoverageTracker**
+- [x] **Step 3: 实现 CoverageTracker**
 
 ```typescript
 // apps/server/src/services/assessment/coverage-tracker.ts
@@ -316,7 +316,7 @@ export class CoverageTracker {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/services/assessment/__tests__/coverage-tracker.test.ts
@@ -324,7 +324,7 @@ cd apps/server && npx vitest run src/services/assessment/__tests__/coverage-trac
 
 Expected: 4 PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/services/assessment/coverage-tracker.ts \
@@ -340,7 +340,7 @@ git commit -m "feat(assessment): add CoverageTracker with novelty-based priority
 - Create: `apps/server/src/services/assessment/quota-calculator.ts`
 - Test: `apps/server/src/services/assessment/__tests__/quota-calculator.test.ts`
 
-- [ ] **Step 1: 编写配额测试**
+- [x] **Step 1: 编写配额测试**
 
 ```typescript
 // apps/server/src/services/assessment/__tests__/quota-calculator.test.ts
@@ -391,13 +391,13 @@ describe('calculateQuotas', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/services/assessment/__tests__/quota-calculator.test.ts
 ```
 
-- [ ] **Step 3: 实现配额计算器**
+- [x] **Step 3: 实现配额计算器**
 
 ```typescript
 // apps/server/src/services/assessment/quota-calculator.ts
@@ -447,7 +447,7 @@ export function calculateQuotas(preset: ExamPreset): QuotaGrid {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/services/assessment/__tests__/quota-calculator.test.ts
@@ -455,7 +455,7 @@ cd apps/server && npx vitest run src/services/assessment/__tests__/quota-calcula
 
 Expected: 3 PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/services/assessment/quota-calculator.ts \
@@ -473,7 +473,7 @@ git commit -m "feat(assessment): add quota calculator for type-difficulty distri
 
 **依赖:** Content Service、KG Service、ExamPreset Repository（通过接口注入）
 
-- [ ] **Step 1: 定义依赖接口**
+- [x] **Step 1: 定义依赖接口**
 
 在 `exam-composer.ts` 中先定义 ExamComposer 所需的依赖接口：
 
@@ -518,7 +518,7 @@ export interface ExamPresetRepo {
 }
 ```
 
-- [ ] **Step 2: 编写 ExamComposer 单元测试（mock 所有依赖）**
+- [x] **Step 2: 编写 ExamComposer 单元测试（mock 所有依赖）**
 
 ```typescript
 // apps/server/src/services/assessment/__tests__/exam-composer.test.ts
@@ -647,13 +647,13 @@ describe('ExamComposer', () => {
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/services/assessment/__tests__/exam-composer.test.ts
 ```
 
-- [ ] **Step 4: 实现 ExamComposer**
+- [x] **Step 4: 实现 ExamComposer**
 
 ```typescript
 // apps/server/src/services/assessment/exam-composer.ts (续)
@@ -853,7 +853,7 @@ export class ExamComposer {
 }
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/services/assessment/__tests__/exam-composer.test.ts
@@ -861,7 +861,7 @@ cd apps/server && npx vitest run src/services/assessment/__tests__/exam-composer
 
 Expected: 4 PASS
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/server/src/services/assessment/exam-composer.ts \
@@ -876,7 +876,7 @@ git commit -m "feat(assessment): add ExamComposer with coverage-driven selection
 **Files:**
 - 不创建新文件，只做验证。
 
-- [ ] **Step 1: 运行全部 assessment 测试**
+- [x] **Step 1: 运行全部 assessment 测试**
 
 ```bash
 cd apps/server && npx vitest run src/services/assessment/
@@ -884,7 +884,7 @@ cd apps/server && npx vitest run src/services/assessment/
 
 Expected: 所有测试通过（Task 3 的 4 个 + Task 4 的 3 个 + Task 5 的 4 个 = 11 tests）
 
-- [ ] **Step 2: 对照 Spec 逐条检查**
+- [x] **Step 2: 对照 Spec 逐条检查**
 
 | Spec 要求 | 实现位置 |
 |-----------|---------|
@@ -897,7 +897,7 @@ Expected: 所有测试通过（Task 3 的 4 个 + Task 4 的 3 个 + Task 5 的 
 | §6 P1 AI 补题 | 预留设计，Task 5 中 aiGeneratedCount 固定为 0 |
 | §8 边界处理 | 预设缺失→使用默认值；题库不足→放宽约束 |
 
-- [ ] **Step 3: 提交（如需修正）**
+- [x] **Step 3: 提交（如需修正）**
 
 ```bash
 git add -A
@@ -908,9 +908,9 @@ git commit -m "chore(assessment): verification - all tests pass, spec coverage c
 
 ### 后续任务（不在本计划范围，标记为 P1）
 
-- [ ] `ExamPresetRepo` 的 MySQL 实现（`findByType` 查询 `exam_presets` 表）
-- [ ] `StudentHistoryQuery` 的 MySQL 实现（UNION 查询 answers + submissions）
-- [ ] `ContentServiceQuery` 的 question query 实现（JOIN question_knowledge_points）
-- [ ] `KGServiceScope` 的 `getKnowledgePointsByUnits` 实现
-- [ ] Assessment Service 路由：`POST /api/assessment/compose`
-- [ ] P1: `aiGenerateSupplement` 调用 VariationCapability
+- [x] `ExamPresetRepo` 的 MySQL 实现（`findByType` 查询 `exam_presets` 表）
+- [x] `StudentHistoryQuery` 的 MySQL 实现（UNION 查询 answers + submissions）
+- [x] `ContentServiceQuery` 的 question query 实现（JOIN question_knowledge_points）
+- [x] `KGServiceScope` 的 `getKnowledgePointsByUnits` 实现
+- [x] Assessment Service 路由：`POST /api/assessment/compose`
+- [x] P1: `aiGenerateSupplement` 调用 VariationCapability

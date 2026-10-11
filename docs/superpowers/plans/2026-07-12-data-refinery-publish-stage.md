@@ -120,39 +120,39 @@ class AssetStore(Protocol):
 
 ### Task 1: `asset_store.py` — `AssetStore` 抽象 + `LocalAssetStore`
 
-- [ ] Step 1: 实现 `AssetStore` Protocol + `LocalAssetStore`（复制文件到 `output/assets/<rel>`，幂等、自动建目录）
-- [ ] Step 2: 测试（`test_asset_store.py`：put 后 exists、重复 put 幂等、子目录自动创建）
+- [x] Step 1: 实现 `AssetStore` Protocol + `LocalAssetStore`（复制文件到 `output/assets/<rel>`，幂等、自动建目录）
+- [x] Step 2: 测试（`test_asset_store.py`：put 后 exists、重复 put 幂等、子目录自动创建）
 
 ### Task 2: `image_rewrite.py` — 图片引用解析与改写
 
-- [ ] Step 1: 实现 `rewrite_item(item, kind, md_images_dir, asset_store, asset_prefix)`：扫描 `content`/`options`/`explanation` 的 `![](images/xxx.jpg)`，按 §9 规范名复制图片，改写路径，填充 `content_metadata.images[]` / `options[].image_url`
-- [ ] Step 2: 测试（`test_image_rewrite.py`：题干图→stem_NN、选项图→opt_a、卡片图→page_NN_fig_NN、无图记录原样返回）
+- [x] Step 1: 实现 `rewrite_item(item, kind, md_images_dir, asset_store, asset_prefix)`：扫描 `content`/`options`/`explanation` 的 `![](images/xxx.jpg)`，按 §9 规范名复制图片，改写路径，填充 `content_metadata.images[]` / `options[].image_url`
+- [x] Step 2: 测试（`test_image_rewrite.py`：题干图→stem_NN、选项图→opt_a、卡片图→page_NN_fig_NN、无图记录原样返回）
 
 ### Task 3: `db_loader.py` — 批量入库 MySQL
 
-- [ ] Step 1: 实现两阶段入库（INSERT 拿 ID → 物化 → UPDATE content 路径）；解析 `subject_id`/`lesson_id`
-- [ ] Step 2: 测试（用 sqlite/mysql mock 或 `pytest-mysql`；验证行数、ID 回填、content 路径已改写）
+- [x] Step 1: 实现两阶段入库（INSERT 拿 ID → 物化 → UPDATE content 路径）；解析 `subject_id`/`lesson_id`
+- [x] Step 2: 测试（用 sqlite/mysql mock 或 `pytest-mysql`；验证行数、ID 回填、content 路径已改写）
 
 ### Task 4: `publish_cli.py` — publish 子命令入口
 
-- [ ] Step 1: 实现 CLI（`--input-dir`=extracted、`--source`、`--force`、`--dry-run`、`--db-url`），串联 asset_store + image_rewrite + db_loader，复用 checkpoint
-- [ ] Step 2: 测试（`test_publish_cli.py`：dry-run 打印计划、端到端跑通一份试卷 + 一本教材页）
+- [x] Step 1: 实现 CLI（`--input-dir`=extracted、`--source`、`--force`、`--dry-run`、`--db-url`），串联 asset_store + image_rewrite + db_loader，复用 checkpoint
+- [x] Step 2: 测试（`test_publish_cli.py`：dry-run 打印计划、端到端跑通一份试卷 + 一本教材页）
 
 ### Task 5: 静态服务接线 + 文档同步
 
-- [ ] Step 1: 在 `apps/server`（就绪后）或开发期静态服务器暴露 `output/assets/`，配置 `ASSET_BASE_URL`
-- [ ] Step 2: 更新 `docs/文档转换设计.md` 增补 publish 阶段章节；更新 `README.md` 用法；更新 `docs/API接口与数据流设计文档.md` 与 `openapi.yaml`（如涉及 `/api/content/cards/{id}` 返回的图片 URL 约定）
-- [ ] Step 3: 更新 `docs/data-refinery-文档对齐总结.md` 3.7 节状态
+- [x] Step 1: 在 `apps/server`（就绪后）或开发期静态服务器暴露 `output/assets/`，配置 `ASSET_BASE_URL`
+- [x] Step 2: 更新 `docs/文档转换设计.md` 增补 publish 阶段章节；更新 `README.md` 用法；更新 `docs/API接口与数据流设计文档.md` 与 `openapi.yaml`（如涉及 `/api/content/cards/{id}` 返回的图片 URL 约定）
+- [x] Step 3: 更新 `docs/data-refinery-文档对齐总结.md` 3.7 节状态
 
 ## 7. 自检清单
 
-- [ ] `content`/`options`/`explanation` 中无残留 `images/xxx.jpg` 原始路径
-- [ ] 所有图片在 `output/assets/` 下可按规范路径访问
-- [ ] `cards.content_metadata.images[].url`、`questions.options[].image_url` 已填充
-- [ ] DB `cards`/`questions` 行数与 JSONL 记录数一致
-- [ ] 资源路径符合 §9（`{question_id}` / `{lesson_id}`）
-- [ ] `AssetStore` 抽象可替换为 OSS 实现而不改 db_loader / image_rewrite
-- [ ] 前端 `resolveAssetUrl()` 拼接后可取到图片
+- [x] `content`/`options`/`explanation` 中无残留 `images/xxx.jpg` 原始路径
+- [x] 所有图片在 `output/assets/` 下可按规范路径访问
+- [x] `cards.content_metadata.images[].url`、`questions.options[].image_url` 已填充
+- [x] DB `cards`/`questions` 行数与 JSONL 记录数一致
+- [x] 资源路径符合 §9（`{question_id}` / `{lesson_id}`）
+- [x] `AssetStore` 抽象可替换为 OSS 实现而不改 db_loader / image_rewrite
+- [x] 前端 `resolveAssetUrl()` 拼接后可取到图片
 
 ## 8. 未决问题（实现前需确认）
 

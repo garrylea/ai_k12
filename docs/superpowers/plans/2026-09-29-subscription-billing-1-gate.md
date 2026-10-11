@@ -30,7 +30,7 @@
 **Interfaces:**
 - Produces: 表 `subscription_plans` / `family_subscriptions` / `orders`（列定义见 spec §2，此处逐字落地）；plans seed 两行（month=2000 分 / year=19800 分——占位价，上线前家长自行 UPDATE，spec §2.1 约定）
 
-- [ ] **Step 1: 写迁移 SQL**
+- [x] **Step 1: 写迁移 SQL**
 
 ```sql
 -- 2026-09-29 订阅收费：套餐 / 家庭订阅 / 订单（spec 2026-09-29-subscription-billing-design.md §2）
@@ -103,9 +103,9 @@ LEFT JOIN family_subscriptions fs ON fs.parent_id = p.id
 WHERE fs.id IS NULL;
 ```
 
-- [ ] **Step 2: schema.sql 同步**——把上面三张表与 seed 原样追加进 `tools/db/schema.sql` 的「9. 奖励」节之后，节标题 `-- 9.5 订阅与计费`。注意 `orders` 注释补一行：`-- coupon_* 本期预留不写（spec §2.3）`。
+- [x] **Step 2: schema.sql 同步**——把上面三张表与 seed 原样追加进 `tools/db/schema.sql` 的「9. 奖励」节之后，节标题 `-- 9.5 订阅与计费`。注意 `orders` 注释补一行：`-- coupon_* 本期预留不写（spec §2.3）`。
 
-- [ ] **Step 3: 本机 apply 并验证幂等**（用户本机 MySQL，直接执行不问询——迁移是本仓常规操作）
+- [x] **Step 3: 本机 apply 并验证幂等**（用户本机 MySQL，直接执行不问询——迁移是本仓常规操作）
 
 ```bash
 mysql -h localhost -u root ai_k12 < tools/db/migrations/2026-09-29_subscription_billing.sql 2>/dev/null || mysql ai_k12 < tools/db/migrations/2026-09-29_subscription_billing.sql
@@ -115,7 +115,7 @@ mysql --vertical ai_k12 -e "SELECT plan_code, price_cents FROM subscription_plan
 
 Expected: 两行套餐（2000/19800）；`sub_rows` = 家长数；第二遍执行无错误。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-29_subscription_billing.sql tools/db/schema.sql
@@ -140,7 +140,7 @@ git commit -m "feat(billing): 订阅收费三表迁移（plans/family_subscripti
   - `effectiveStatus(now: Date, t: { trialEndsAt: Date | null; currentPeriodEnd: Date | null }): SubscriptionStatus`
   - `daysRemaining(now: Date, end: Date): number`（ceil，≥0）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 // subscription-status.test.ts
@@ -178,12 +178,12 @@ describe('daysRemaining', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/billing/subscription-status.test.ts`
 Expected: FAIL（模块不存在）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 ```typescript
 // billing.config.ts
@@ -212,9 +212,9 @@ export function daysRemaining(now: Date, end: Date): number {
 }
 ```
 
-- [ ] **Step 4: 跑测试通过** — 同 Step 2 命令，Expected: PASS
+- [x] **Step 4: 跑测试通过** — 同 Step 2 命令，Expected: PASS
 
-- [ ] **Step 5: Commit** — `git commit -m "feat(billing): effectiveStatus 纯函数 + 计费配置常量"`
+- [x] **Step 5: Commit** — `git commit -m "feat(billing): effectiveStatus 纯函数 + 计费配置常量"`
 
 ---
 
@@ -237,7 +237,7 @@ export function daysRemaining(now: Date, end: Date): number {
     - `listActive(): Promise<PlanRow[]>`（`{id, plan_code, name, price_cents, duration_days}`，`is_active=1 ORDER BY sort_order`）
     - `findActiveByCode(planCode: string): Promise<PlanRow | null>`
 
-- [ ] **Step 1: 写 family-subscriptions.repo.ts**
+- [x] **Step 1: 写 family-subscriptions.repo.ts**
 
 ```typescript
 import { Injectable } from '@nestjs/common';
@@ -316,13 +316,13 @@ export class FamilySubscriptionsRepository {
 
 （`upsertTrial` 无事务直接 `pool.execute` 即可；`renewWithinTx` 全程只走传入的 `conn`。）
 
-- [ ] **Step 2: 写 subscription-plans.repo.ts**（两个查询方法，`pool.execute`，形状照 Step 1 风格）
+- [x] **Step 2: 写 subscription-plans.repo.ts**（两个查询方法，`pool.execute`，形状照 Step 1 风格）
 
-- [ ] **Step 3: repos/index.ts 追加 export**
+- [x] **Step 3: repos/index.ts 追加 export**
 
-- [ ] **Step 4: repo 集成测试**（连本机 DB；用一个固定测试家长 id 范围 `900000+`，用例内自行 INSERT/DELETE parents 行，测 `upsertTrial` 幂等、`renewWithinTx` 期内顺延不吞天数、`findByStudentId` JOIN 命中）。参照 `reward-catalog.repo.test.ts` 现有 beforeAll/afterAll 清理模式。
+- [x] **Step 4: repo 集成测试**（连本机 DB；用一个固定测试家长 id 范围 `900000+`，用例内自行 INSERT/DELETE parents 行，测 `upsertTrial` 幂等、`renewWithinTx` 期内顺延不吞天数、`findByStudentId` JOIN 命中）。参照 `reward-catalog.repo.test.ts` 现有 beforeAll/afterAll 清理模式。
 
-- [ ] **Step 5: 跑测试 + Commit** — `npx vitest run src/database/repositories/family-subscriptions.repo.test.ts` PASS 后 `git commit -m "feat(billing): 订阅/套餐仓储（含事务续期 renewWithinTx）"`
+- [x] **Step 5: 跑测试 + Commit** — `npx vitest run src/database/repositories/family-subscriptions.repo.test.ts` PASS 后 `git commit -m "feat(billing): 订阅/套餐仓储（含事务续期 renewWithinTx）"`
 
 ---
 
@@ -340,14 +340,14 @@ export class FamilySubscriptionsRepository {
   - `SubscriptionsService.getStatusView(viewer: {role: 'student'|'parent'|'admin'; sub: number}): Promise<StatusView>`，`StatusView = { status: SubscriptionStatus; planCode: string|null; trialEndsAt: string|null; currentPeriodEnd: string|null; daysRemaining: number; source: string }`——学生按 `findByStudentId`，家长/管理员按 `findByParentId`
   - `SubscriptionsService.renewWithinTx(conn, parentId, planCode, durationDays)`（透传 repo，批② 的 finalize 事务调用）
 
-- [ ] **Step 1: 写失败测试**（mock `FamilySubscriptionsRepository`）：
+- [x] **Step 1: 写失败测试**（mock `FamilySubscriptionsRepository`）：
   - 学生视角：`findByStudentId` 返回 `{trial_ends_at: 未来3天, current_period_end: null}` → `{status:'trialing', daysRemaining:3, trialEndsAt: ISO, currentPeriodEnd:null, planCode:null, source:'trial'}`（ISO 字符串序列化，DTO 不裸露 Date）
   - 无行 → `{status:'expired', ...null 字段, daysRemaining:0}`
   - `ensureTrial` 调 `upsertTrial(parentId, now+7d)`（允许 ±1 分钟误差）
 
-- [ ] **Step 2: 跑失败 → 实现 → 跑通过**（TDD 三步，实现即上述接口的直白组装；Date→ISO 用 `.toISOString()`，DB 返回的 DATETIME 是 Date 对象）
+- [x] **Step 2: 跑失败 → 实现 → 跑通过**（TDD 三步，实现即上述接口的直白组装；Date→ISO 用 `.toISOString()`，DB 返回的 DATETIME 是 Date 对象）
 
-- [ ] **Step 3: 注册钩子**——读 `apps/server/src/modules/auth/auth.service.ts` 的家长注册方法（创建 parents 行处），在 parents 行插入成功后、返回响应前追加：
+- [x] **Step 3: 注册钩子**——读 `apps/server/src/modules/auth/auth.service.ts` 的家长注册方法（创建 parents 行处），在 parents 行插入成功后、返回响应前追加：
 
 ```typescript
 await this.subscriptionsService.ensureTrial(parent.id);
@@ -355,7 +355,7 @@ await this.subscriptionsService.ensureTrial(parent.id);
 
 （`auth.module.ts` imports 加 `BillingModule` 并 export `SubscriptionsService`；若注册逻辑包在事务里则把 conn 透传给 `ensureTrial(conn, parentId)`——以实际代码为准，保证**注册成功 ⇒ 试用行已存在**。）同批在 `auth.service.test.ts` 补一个用例：注册成功后 `upsertTrial` 被调用。
 
-- [ ] **Step 4: 全量相关测试 + Commit** — `npx vitest run src/modules/billing src/modules/auth` PASS → `git commit -m "feat(billing): SubscriptionsService + 家长注册送 7 天试用钩子"`
+- [x] **Step 4: 全量相关测试 + Commit** — `npx vitest run src/modules/billing src/modules/auth` PASS → `git commit -m "feat(billing): SubscriptionsService + 家长注册送 7 天试用钩子"`
 
 ---
 
@@ -370,7 +370,7 @@ await this.subscriptionsService.ensureTrial(parent.id);
 - Consumes: `FamilySubscriptionsRepository.findByStudentId` + `effectiveStatus`
 - Produces: 全局 guard；豁免清单常量 `SUBSCRIPTION_EXEMPT: {method: string; pattern: RegExp}[]`
 
-- [ ] **Step 1: 写 guard**
+- [x] **Step 1: 写 guard**
 
 ```typescript
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
@@ -411,14 +411,14 @@ export class SubscriptionGuard implements CanActivate {
 }
 ```
 
-- [ ] **Step 2: 测试**（mock repo + 构造 ExecutionContext `{switchToHttp: () => ({getRequest: () => req})}`）：
+- [x] **Step 2: 测试**（mock repo + 构造 ExecutionContext `{switchToHttp: () => ({getRequest: () => req})}`）：
   - trial 未过期放行；过期 → ForbiddenException 且 `code===2001`
   - `role: 'parent'` / 无 user → 放行且**不查 repo**
   - 星图 GET 放行；同路径 POST 不豁免（仍被查）
   - **护栏**：断言 `SUBSCRIPTION_EXEMPT` 里每一项 method ∈ {GET, POST}、pattern 以 `^\/api\/` 开头且以 `$` 结尾（防手滑写成宽松前缀匹配，豁免面失控）
-- [ ] **Step 3: app.module.ts 注册**——在既有 `JwtAuthGuard`/`RolesGuard` 的 APP_GUARD 之后追加 `{ provide: APP_GUARD, useClass: SubscriptionGuard }`。注意：渠道回调（批②）与 auth 是免 JWT 链路，`req.user` 为 undefined，guard 天然放行，无需额外开关。
-- [ ] **Step 4: 跑 guard 测试 + 手工冒烟**（后端 `node dist/main.js` 需先 build；或临时 `npx tsx` 验证语义后弃用）——用一个真实学生 JWT curl 一个业务端点（如 `GET /api/points/me`）：试用期内 200；`UPDATE family_subscriptions SET trial_ends_at = NOW() - INTERVAL 1 DAY WHERE parent_id = <该家长>` 后重试 → 403 `{"code":2001}`。冒烟完把时刻改回。
-- [ ] **Step 5: Commit** — `git commit -m "feat(billing): SubscriptionGuard 学生端硬门禁 + 豁免清单护栏"`
+- [x] **Step 3: app.module.ts 注册**——在既有 `JwtAuthGuard`/`RolesGuard` 的 APP_GUARD 之后追加 `{ provide: APP_GUARD, useClass: SubscriptionGuard }`。注意：渠道回调（批②）与 auth 是免 JWT 链路，`req.user` 为 undefined，guard 天然放行，无需额外开关。
+- [x] **Step 4: 跑 guard 测试 + 手工冒烟**（后端 `node dist/main.js` 需先 build；或临时 `npx tsx` 验证语义后弃用）——用一个真实学生 JWT curl 一个业务端点（如 `GET /api/points/me`）：试用期内 200；`UPDATE family_subscriptions SET trial_ends_at = NOW() - INTERVAL 1 DAY WHERE parent_id = <该家长>` 后重试 → 403 `{"code":2001}`。冒烟完把时刻改回。
+- [x] **Step 5: Commit** — `git commit -m "feat(billing): SubscriptionGuard 学生端硬门禁 + 豁免清单护栏"`
 
 ---
 
@@ -431,9 +431,9 @@ export class SubscriptionGuard implements CanActivate {
 **Interfaces:**
 - Produces: `GET /api/quota/subscription` → 200 `{status, planCode, trialEndsAt, currentPeriodEnd, daysRemaining, source}`（家长查自己、学生查自己家；openapi 形状以此为准）
 
-- [ ] **Step 1: controller**——`@Get('subscription')` + `@UseGuards(JwtAuthGuard, RolesGuard)`（角色不设限：student/parent/admin 都可读），直接 `return this.subscriptionsService.getStatusView(user)`。
-- [ ] **Step 2: 测试**——controller 级 mock service：student 请求 → service 收到 `{role:'student', sub}`；200 形状断言。
-- [ ] **Step 3: 跑测试 + 全量 + Commit**
+- [x] **Step 1: controller**——`@Get('subscription')` + `@UseGuards(JwtAuthGuard, RolesGuard)`（角色不设限：student/parent/admin 都可读），直接 `return this.subscriptionsService.getStatusView(user)`。
+- [x] **Step 2: 测试**——controller 级 mock service：student 请求 → service 收到 `{role:'student', sub}`；200 形状断言。
+- [x] **Step 3: 跑测试 + 全量 + Commit**
 
 ```bash
 cd apps/server && npx vitest run src/modules/billing && npm test 2>&1 | tail -3

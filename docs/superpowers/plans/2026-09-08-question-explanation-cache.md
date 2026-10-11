@@ -59,7 +59,7 @@
 - Modify: `apps/server/src/ai-core/infra/prompt-builder.ts:77`
 - Modify: `apps/server/src/ai-core/retry.yaml:12`
 
-- [ ] **Step 1: 写 solution.md**
+- [x] **Step 1: 写 solution.md**
 
 ```markdown
 ---
@@ -96,7 +96,7 @@ description: "标准题解生成 - 与具体学生作答无关，可入库复用
 请生成标准题解。
 ```
 
-- [ ] **Step 2: 扩展 ExplanationMode 与 ExplanationRequest**
+- [x] **Step 2: 扩展 ExplanationMode 与 ExplanationRequest**
 
 `apps/server/src/ai-core/types.ts:53`：
 
@@ -118,7 +118,7 @@ export interface ExplanationRequest {
 }
 ```
 
-- [ ] **Step 3: prompt-builder 加 solution 分支**
+- [x] **Step 3: prompt-builder 加 solution 分支**
 
 `apps/server/src/ai-core/infra/prompt-builder.ts:77`：
 
@@ -130,7 +130,7 @@ export interface ExplanationRequest {
     }
 ```
 
-- [ ] **Step 4: explanation 超时 60s→120s**
+- [x] **Step 4: explanation 超时 60s→120s**
 
 `apps/server/src/ai-core/retry.yaml:12`：
 
@@ -138,7 +138,7 @@ export interface ExplanationRequest {
   explanation: 120000
 ```
 
-- [ ] **Step 5: 验证 tsc + 现有测试**
+- [x] **Step 5: 验证 tsc + 现有测试**
 
 Run: `cd apps/server && npm run build`
 Expected: 编译通过。
@@ -146,7 +146,7 @@ Expected: 编译通过。
 Run: `npm test`
 Expected: 全绿（现有 72 测试，本任务只加模式分支，无行为变化）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/ai-core
@@ -163,7 +163,7 @@ git commit -m "feat(ai-core): 新增 explanation solution 模式 prompt（标准
 - Modify: `apps/server/src/ai-core/capabilities/judgment.capability.ts:14-18,64-74`
 - Modify: `apps/server/src/ai-core/types.ts`（JudgmentResult）
 
-- [ ] **Step 1: 简化 judgment/math-calculation.md**
+- [x] **Step 1: 简化 judgment/math-calculation.md**
 
 读文件后用增量 Edit 修改：删除「并在 analysis 中说明错因与正确解法」、删除「输出格式」里 `"analysis": "..."` 字段与描述。最终 System Prompt 的「判断规则」第 3 条改为：
 
@@ -184,11 +184,11 @@ git commit -m "feat(ai-core): 新增 explanation solution 模式 prompt（标准
 errorType 枚举：logic（逻辑错）/ calculation（计算错）/ format（格式歧义）/ missing（漏步）。答对时 errorType 为 null。
 ```
 
-- [ ] **Step 2: 简化 judgment/math-proof.md**
+- [x] **Step 2: 简化 judgment/math-proof.md**
 
 同样修改：第 3 条改为标注 errorType；输出格式只保留 `{ "isCorrect": false, "errorType": "logic" }`；删除 analysis 相关说明与字段。
 
-- [ ] **Step 3: judgment.capability schema 去 analysis 必填**
+- [x] **Step 3: judgment.capability schema 去 analysis 必填**
 
 `apps/server/src/ai-core/capabilities/judgment.capability.ts:14-18`：
 
@@ -200,7 +200,7 @@ const JudgmentResultSchema = z.object({
 });
 ```
 
-- [ ] **Step 4: types.ts JudgmentResult 可空**
+- [x] **Step 4: types.ts JudgmentResult 可空**
 
 `apps/server/src/ai-core/types.ts` 中 `JudgmentResult`（约 :16）analysis 改为可空：
 
@@ -212,12 +212,12 @@ export interface JudgmentResult {
 }
 ```
 
-- [ ] **Step 5: 验证测试绿**
+- [x] **Step 5: 验证测试绿**
 
 Run: `cd apps/server && npm test`
 Expected: 全绿。若 `__tests__/safety-classification.ts` 或 judgment 相关测试断言 analysis 非空，更新断言为允许 null（测试错则改测试——CLAUDE.md 铁律）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/ai-core
@@ -231,7 +231,7 @@ git commit -m "feat(ai-core): 判题 prompt 只输出 isCorrect/errorType，去 
 **Files:**
 - Modify: `apps/server/src/database/repositories/questions.repo.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `apps/server/src/database/repositories/questions.repo.test.ts` 追加：
 
@@ -249,12 +249,12 @@ describe('updateExplanation', () => {
 
 （mockPool 沿用文件顶部既有 mock 模式；若现有测试无 mockPool 导出，按该文件既有的 mock 方式构造。）
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run src/database/repositories/questions.repo.test.ts -t updateExplanation`
 Expected: FAIL —— `updateExplanation is not a function`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `apps/server/src/database/repositories/questions.repo.ts` 加方法：
 
@@ -268,12 +268,12 @@ Expected: FAIL —— `updateExplanation is not a function`。
   }
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `npx vitest run src/database/repositories/questions.repo.test.ts -t updateExplanation`
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/questions.repo.ts
@@ -288,7 +288,7 @@ git commit -m "feat(server): QuestionsRepository.updateExplanation（解析缓�
 - Create: `apps/server/src/modules/practice/explanation-cache.service.ts`
 - Test: `apps/server/src/modules/practice/explanation-cache.service.test.ts`
 
-- [ ] **Step 1: 写失败测试（覆盖全部行为）**
+- [x] **Step 1: 写失败测试（覆盖全部行为）**
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -390,12 +390,12 @@ describe('ExplanationCacheService', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run src/modules/practice/explanation-cache.service.test.ts`
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```typescript
 // apps/server/src/modules/practice/explanation-cache.service.ts
@@ -530,12 +530,12 @@ export class ExplanationCacheService {
 }
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `npx vitest run src/modules/practice/explanation-cache.service.test.ts`
 Expected: PASS（6 例）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/explanation-cache.service.ts apps/server/src/modules/practice/explanation-cache.service.test.ts
@@ -551,15 +551,15 @@ git commit -m "feat(server): ExplanationCacheService——判错后台异步生�
 - Modify: `apps/server/src/modules/practice/practice.module.ts`
 - Test: `apps/server/src/modules/practice/practice.service.test.ts`（现有 judge 测试）
 
-- [ ] **Step 1: 更新 practice.module 提供新依赖**
+- [x] **Step 1: 更新 practice.module 提供新依赖**
 
 `apps/server/src/modules/practice/practice.module.ts`：imports 加 `ExplanationCapability`（`../../ai-core/capabilities/explanation.capability.js`），providers 加 `ExplanationCacheService`、`ExplanationCapability`。
 
-- [ ] **Step 2: 更新现有测试（practice.service.test.ts）**
+- [x] **Step 2: 更新现有测试（practice.service.test.ts）**
 
 现有 judge 测试构造 mock 依赖数组（约 :14 附近），加第 12 参 `explanationCache` mock：`{ ensureExplanation: vi.fn() }`。并在断言处把 `analysis` 相关断言删除或改为 `undefined`。
 
-- [ ] **Step 3: 实现 judge-core 变更**
+- [x] **Step 3: 实现 judge-core 变更**
 
 `apps/server/src/modules/practice/judge-core.service.ts`：
 
@@ -575,17 +575,17 @@ git commit -m "feat(server): ExplanationCacheService——判错后台异步生�
    - 判错分支：q 非空 → `ensureExplanation(q)`；q 为 null 且结构化 `findOrCreate` 成功（questionId 非空）→ `ensureExplanation({ id: created.id, answer: structured.answer, explanation: structured.explanation })`；questionId 为 null → 不触发
    - 返回对象删 `analysis` 字段（:169、:300）
 
-- [ ] **Step 4: 运行测试**
+- [x] **Step 4: 运行测试**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/practice.service.test.ts`
 Expected: PASS。若仍断言 analysis，按 CLAUDE.md 铁律改测试断言。
 
-- [ ] **Step 5: 全量测试 + build**
+- [x] **Step 5: 全量测试 + build**
 
 Run: `npm test && npm run build`
 Expected: 全绿、tsc 通过。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/practice
@@ -601,20 +601,20 @@ git commit -m "feat(server): judge-core 判题响应去 analysis、判错触发�
 - Modify: `apps/server/src/modules/exams/exams.service.ts:195-205`（submitAnswer upsert analysis→null）
 - Modify: `apps/server/src/modules/training/training.service.ts`（judgeTraining 透传不变，无需改；确认返回类型）
 
-- [ ] **Step 1: practice.service.ts judge 落库**
+- [x] **Step 1: practice.service.ts judge 落库**
 
 `apps/server/src/modules/practice/practice.service.ts` 约 :108：`analysis: result.analysis,` → `analysis: null,`（判题响应已无 analysis；列保留存历史）。
 
-- [ ] **Step 2: exams.service.ts submitAnswer 落库**
+- [x] **Step 2: exams.service.ts submitAnswer 落库**
 
 `apps/server/src/modules/exams/exams.service.ts` 约 :202：`analysis: out.analysis,` → `analysis: null,`。`getResults` 的 `analysis: row.analysis` 保留（历史数据兜底展示）。
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
 Run: `cd apps/server && npm test && npm run build`
 Expected: 全绿、tsc 通过。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/practice.service.ts apps/server/src/modules/exams/exams.service.ts
@@ -632,7 +632,7 @@ git commit -m "feat(server): 判题响应去 analysis 后落库侧同步（pract
 - Modify: `apps/server/src/modules/training/training.controller.ts`
 - Modify: `apps/server/src/modules/training/training.module.ts`
 
-- [ ] **Step 1: 建 admin_notifications 表**
+- [x] **Step 1: 建 admin_notifications 表**
 
 `tools/db/schema.sql` 在 `admin_messages` 表之后追加：
 
@@ -653,7 +653,7 @@ CREATE TABLE IF NOT EXISTS admin_notifications (
 
 若本机已装库，手动执行一次 `mysql -uai_k12 -pai_k12 ai_k12 < <(sed -n '/admin_notifications/,/ENGINE/p' tools/db/schema.sql)`。
 
-- [ ] **Step 2: 写 repo 失败测试**
+- [x] **Step 2: 写 repo 失败测试**
 
 `apps/server/src/database/repositories/admin-notifications.repo.test.ts`（mock pool 沿用项目惯例）：
 
@@ -671,7 +671,7 @@ describe('AdminNotificationsRepository', () => {
 });
 ```
 
-- [ ] **Step 3: 实现 repo**
+- [x] **Step 3: 实现 repo**
 
 ```typescript
 // apps/server/src/database/repositories/admin-notifications.repo.ts
@@ -729,11 +729,11 @@ export class AdminNotificationsRepository {
 }
 ```
 
-- [ ] **Step 4: repositories/index.ts 导出**
+- [x] **Step 4: repositories/index.ts 导出**
 
 追加 `export { AdminNotificationsRepository } from './admin-notifications.repo.js';` 及类型。
 
-- [ ] **Step 5: training.service 加两个方法与通知写入**
+- [x] **Step 5: training.service 加两个方法与通知写入**
 
 `apps/server/src/modules/training/training.service.ts`：
 
@@ -773,7 +773,7 @@ export class AdminNotificationsRepository {
 
 3. 构造函数注入 `private readonly explanationCache: ExplanationCacheService`（import 自 `../practice/explanation-cache.service.js`）。
 
-- [ ] **Step 6: training.controller 加两端点**
+- [x] **Step 6: training.controller 加两端点**
 
 ```typescript
   /** 批量拉解析（末题后结果页）：ids 逗号分隔；后端等 in-flight（60s 兜底）。 */
@@ -790,18 +790,18 @@ export class AdminNotificationsRepository {
   }
 ```
 
-- [ ] **Step 7: training.module 提供新依赖**
+- [x] **Step 7: training.module 提供新依赖**
 
 **重要**（T5 代码审查修正）：`ExplanationCacheService` 是有状态单例（in-flight 队列），必须由 `PracticeModule` **导出**、TrainingModule 经已 import 的 `PracticeModule` 注入同一实例——**不能**在 training.module 重复 provide（会产生第二个空队列实例，看不到判题侧 in-flight 生成）。故：
 - `PracticeModule` 在 T5 已 `exports` 加 `ExplanationCacheService`
 - training.module providers 只加 `AdminNotificationsRepository`（`../../database/repositories/admin-notifications.repo.js`），不再加 ExplanationCacheService/ExplanationCapability（随 PracticeModule 注入）
 
-- [ ] **Step 8: 验证**
+- [x] **Step 8: 验证**
 
 Run: `cd apps/server && npm test && npm run build`
 Expected: 全绿、tsc 通过。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/server tools/db/schema.sql
@@ -817,7 +817,7 @@ git commit -m "feat(server): training explanations 批量端点 + explanation-wa
 - Modify: `apps/server/src/modules/admin/admin.module.ts`
 - Modify: `apps/server/src/modules/admin/admin.controller.ts`
 
-- [ ] **Step 1: service（复刻 AdminMessagesService 形态）**
+- [x] **Step 1: service（复刻 AdminMessagesService 形态）**
 
 ```typescript
 // apps/server/src/modules/admin/admin-notifications.service.ts
@@ -837,11 +837,11 @@ export class AdminNotificationsService {
 }
 ```
 
-- [ ] **Step 2: admin.module providers + exports**
+- [x] **Step 2: admin.module providers + exports**
 
 providers 加 `AdminNotificationsRepository`、`AdminNotificationsService`；exports 加 `AdminNotificationsService`。
 
-- [ ] **Step 3: admin.controller 三端点**
+- [x] **Step 3: admin.controller 三端点**
 
 ```typescript
   @Get('notifications') notifications() { return this.notificationsService.list(); }
@@ -856,12 +856,12 @@ providers 加 `AdminNotificationsRepository`、`AdminNotificationsService`；exp
 
 构造函数注入 `AdminNotificationsService`。
 
-- [ ] **Step 4: 验证**
+- [x] **Step 4: 验证**
 
 Run: `cd apps/server && npm test && npm run build`
 Expected: 全绿、tsc 通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/admin
@@ -876,15 +876,15 @@ git commit -m "feat(server): admin 通知三端点（列表/未读数/已读）"
 - Modify: `apps/web/src/services/api.ts`
 - Modify: `apps/web/src/components/business/answer/types.ts`
 
-- [ ] **Step 1: JudgeResult 删 analysis**
+- [x] **Step 1: JudgeResult 删 analysis**
 
 `apps/web/src/services/api.ts:588-595` 的 `JudgeResult` 删 `analysis: string | null;`。
 
-- [ ] **Step 2: answer/types.ts 删 analysis**
+- [x] **Step 2: answer/types.ts 删 analysis**
 
 `apps/web/src/components/business/answer/types.ts`：`RunnerAnswerRecord.analysis` 与 `RunnerJudgeOutcome.analysis` 删除。
 
-- [ ] **Step 3: 加批量/单题拉解析函数**
+- [x] **Step 3: 加批量/单题拉解析函数**
 
 `apps/web/src/services/api.ts`（training 相关区域）：
 
@@ -900,7 +900,7 @@ export function waitTrainingExplanation(questionId: number): Promise<{ explanati
 }
 ```
 
-- [ ] **Step 4: 加 admin 通知 API**
+- [x] **Step 4: 加 admin 通知 API**
 
 ```typescript
 export interface AdminNotificationItem {
@@ -911,16 +911,16 @@ export function adminNotificationsUnreadCount(): Promise<number> { return fetchA
 export function markAdminNotificationRead(id: number): Promise<null> { return fetchApi(`/admin/notifications/${id}/read`, { method: 'POST' }); }
 ```
 
-- [ ] **Step 5: 修 ExamRunPage 占位 JudgeResult**
+- [x] **Step 5: 修 ExamRunPage 占位 JudgeResult**
 
 `apps/web/src/pages/student/training/ExamRunPage.tsx:187` 的占位对象删 `analysis: null`。
 
-- [ ] **Step 6: 验证**
+- [x] **Step 6: 验证**
 
 Run: `cd apps/web && npm run lint && npx tsc -b`
 Expected: 通过。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/components/business/answer/types.ts apps/web/src/pages/student/training/ExamRunPage.tsx
@@ -934,7 +934,7 @@ git commit -m "feat(web): api 类型去 analysis、新增批量/单题拉解析�
 **Files:**
 - Modify: `apps/web/src/components/business/AnswerResultList.tsx`
 
-- [ ] **Step 1: 新 Props 设计**
+- [x] **Step 1: 新 Props 设计**
 
 `AnswerResultList` 增加（父层负责末题后批量拉解析，结果经 prop 传入；组件只负责展示 + 单题刷新）：
 
@@ -957,7 +957,7 @@ interface Props {
 - `explanations: Record<string, string | null>`（key = q.n，初值 initialExplanations）
 - `refreshingN: string | null` + `countdown: number | null`（120s 倒计时）
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 核心逻辑（展开解析时首次触发的批量拉在父层做、把结果经 `initialExplanations` prop 传入；组件内只处理「解析为 null 的题显示正在生成中+刷新」）：
 
@@ -994,12 +994,12 @@ useEffect(() => {
 
 删除原 `a.analysis` 的所有引用。
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
 Run: `cd apps/web && npm run lint && npx tsc -b`
 Expected: 通过（此时父层尚未传新 props，会报 TS 错误——先让父层 Task 11 一起完成再 build）。
 
-- [ ] **Step 4: Commit（与 Task 11 一起，见 Task 11 Step 6）**
+- [x] **Step 4: Commit（与 Task 11 一起，见 Task 11 Step 6）**
 
 ---
 
@@ -1011,7 +1011,7 @@ Expected: 通过（此时父层尚未传新 props，会报 TS 错误——先让
 - Modify: `apps/web/src/pages/student/training/ExamResultPage.tsx`
 - Modify: `apps/web/src/components/business/CleanupPhase.tsx`
 
-- [ ] **Step 1: TargetedRunPage**
+- [x] **Step 1: TargetedRunPage**
 
 `handleFinish` 中：`Promise.allSettled` 已由 QuestionRunner 完成 → 收集错题 questionId（`results` 中 `isCorrect=false` 且非 failed 的条目，经 `entryByN` 取 questionId）→ 批量拉解析后进入结果页：
 
@@ -1042,24 +1042,24 @@ const handleFinish = useCallback(async (results: Record<string, RunnerAnswerReco
 
 AnswerResultList 传 `initialExplanations={explanations}`、`questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}`、`onWaitExplanation={waitTrainingExplanation}`。保留现有「不再展示」/草稿等逻辑不变。
 
-- [ ] **Step 2: ErrorPracticeRunPage**
+- [x] **Step 2: ErrorPracticeRunPage**
 
 同样在 `handleFinish` 收集错题（`entries` 的 errorBookId→questionId），拉批量解析，传 `initialExplanations`。注意 `bumpErrorLevels` 逻辑保留。
 
-- [ ] **Step 3: ExamResultPage**
+- [x] **Step 3: ExamResultPage**
 
 mount 后（`getExamResults` 返回）对「isCorrect=0 且 analysis/explanation 皆空」的条目收集 questionId → `getTrainingExplanations` 补齐；AnswerResultList 的 `initialExplanations` key = String(questionNo)。answers 映射中 `analysis: it.analysis ?? it.explanation` 改为 `analysis: null`（解析统一走 explanations prop；历史 analysis 可经 initialExplanations 合成：对 explanation 为空的项，把 it.analysis 作为初始值）。
 
-- [ ] **Step 4: CleanupPhase 适配**
+- [x] **Step 4: CleanupPhase 适配**
 
 CleanupPhase（错题巩固）的错题有 question_id（或孤儿 null）：`questionIdOf` 返回该题 question_id（`finalResults` 键为 questionN，用 phase 父层传入的 entries 映射）；`initialExplanations` 由父层在进入结果页前对非空 question_id 批量拉取；`onWaitExplanation={waitTrainingExplanation}`。questionId 为 null 的孤儿题 → 显示「暂无解析，试试让 AI 讲一讲」（`questionIdOf` 返回 null 时组件不渲染刷新按钮）。
 
-- [ ] **Step 5: 全量验证**
+- [x] **Step 5: 全量验证**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: tsc + vite 构建通过。
 
-- [ ] **Step 6: Commit（含 Task 10）**
+- [x] **Step 6: Commit（含 Task 10）**
 
 ```bash
 git add apps/web/src/components/business/AnswerResultList.tsx apps/web/src/components/business/CleanupPhase.tsx apps/web/src/pages/student/training
@@ -1073,7 +1073,7 @@ git commit -m "feat(web): 结果页末题后批量拉解析 + 生成中刷新倒
 **Files:**
 - Modify: `apps/web/src/pages/admin/AdminDashboardPage.tsx`
 
-- [ ] **Step 1: 实现通知区**
+- [x] **Step 1: 实现通知区**
 
 在 Dashboard 现有内容下方（或右侧）加「解析失败通知」区块：
 - mount 拉 `adminNotificationsUnreadCount()` + `listAdminNotifications()`
@@ -1082,12 +1082,12 @@ git commit -m "feat(web): 结果页末题后批量拉解析 + 生成中刷新倒
 
 遵循 admin 端样式惯例（现有 Dashboard 的白卡片 + border-gray-200）。
 
-- [ ] **Step 2: 验证**
+- [x] **Step 2: 验证**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 通过。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/pages/admin/AdminDashboardPage.tsx
@@ -1103,23 +1103,23 @@ git commit -m "feat(web): Admin Dashboard 解析失败通知区（未读徽章+�
 - Modify: `docs/api/openapi.yaml`
 - Modify: `docs/ai-core-changelog.md`
 
-- [ ] **Step 1: API 设计文档**
+- [x] **Step 1: API 设计文档**
 
 §4 Training 端点清单：`/training/judge`、`/practice/judge`、exam answers 响应**删除 analysis 字段说明**；新增 `GET /api/training/questions/explanations`、`GET /api/training/questions/{questionId}/explanation-wait`；§4 Admin 加 `/admin/notifications` 三端点。同步版本日志。
 
-- [ ] **Step 2: openapi.yaml**
+- [x] **Step 2: openapi.yaml**
 
 同步 `/training/judge`、`/practice/judge`、exam answers 响应 schema 去 analysis；加 explanations / explanation-wait / admin notifications 三端点 + schema。
 
-- [ ] **Step 3: 核对一致性**
+- [x] **Step 3: 核对一致性**
 
 Run: 对比两份文档端点路径列表（CLAUDE.md 同步规则），grep `analysis` 确认判题响应 schema 已移除。
 
-- [ ] **Step 4: ai-core-changelog**
+- [x] **Step 4: ai-core-changelog**
 
 新增条目：判题只判对错、解析缓存化（ExplanationCacheService + solution prompt + explanation-wait + admin_notifications）、局限（进程内队列/多实例重复生成）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs

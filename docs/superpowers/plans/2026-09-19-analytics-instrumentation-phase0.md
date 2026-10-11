@@ -89,7 +89,7 @@
 - Consumes: 无
 - Produces: 表 `llm_call_logs`、`api_request_logs`（**不含**任何价格/成本列）；效果——早期误加在 `llm_models` 与 `llm_call_logs` 上的 5 个价格/成本列被清除。后续任务依赖的确切列名是 `input_tokens` / `output_tokens` / `usage_source`。
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 Create `tools/db/migrations/2026-09-20_analytics_ledger.sql`：
 
@@ -210,7 +210,7 @@ SET @ddl := IF(@has_col = 1, 'ALTER TABLE llm_models DROP COLUMN output_price_pe
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 ```
 
-- [ ] **Step 2: 同步 `tools/db/schema.sql`（两处）**
+- [x] **Step 2: 同步 `tools/db/schema.sql`（两处）**
 
 **2a. `llm_models` 不加任何列。** 价格口径已取消（用户 2026-09-19 裁决：只记 token，不记价格/成本），所以 `llm_models` 保持原状。早期版本曾在此加过 `input_price_per_1k` / `output_price_per_1k` 两列并已应用到 dev 库——那两列的清除由 **Task 5R** 负责。
 
@@ -223,7 +223,7 @@ PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- 见 tools/db/migrations/2026-09-20_analytics_ledger.sql 的头部注释（口径与幂等说明）。
 ```
 
-- [ ] **Step 3: 应用迁移到 dev 库并验证幂等**
+- [x] **Step 3: 应用迁移到 dev 库并验证幂等**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -233,14 +233,14 @@ mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_analytics_ledge
 ```
 Expected: 两次都无错误输出。
 
-- [ ] **Step 4: 断言结构与列名**
+- [x] **Step 4: 断言结构与列名**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM llm_call_logs; SHOW COLUMNS FROM api_request_logs;"
 ```
 Expected: `llm_call_logs` 含 `input_tokens` / `output_tokens` / `usage_source`，且这两个 token 列的 `Null=YES`；**不含** `cost` / `input_price_per_1k` / `output_price_per_1k`。`api_request_logs` 含 `route` / `raw_path` / `is_sse`。
 
-- [ ] **Step 5: 断言价格/成本列已彻底消失（库 + schema.sql 双向）**
+- [x] **Step 5: 断言价格/成本列已彻底消失（库 + schema.sql 双向）**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "
@@ -253,7 +253,7 @@ grep -c "price_per_1k" tools/db/schema.sql || echo "0（grep 无匹配）"
 ```
 **为什么这条检查重要**：`cost` 若留着会恒为 0，而 0 表示「真免费」——将来查成本的人会看到「全部 0 元」并可能信以为真。**一个不存在的字段，比一个永远为 0 的字段安全得多**。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-20_analytics_ledger.sql tools/db/schema.sql
@@ -274,7 +274,7 @@ git commit -m "feat(db): llm_call_logs + api_request_logs 建表（埋点 Phase 
 - Consumes: Task 1 的列 `input_price_per_1k` / `output_price_per_1k`
 - Produces: `LlmModel` 接口新增 `inputPricePer1k: number`、`outputPricePer1k: number`（Task 3 的 registry、Task 4 的 service、Task 5 的 API 都按这两个**驼峰名**用）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/server/src/database/repositories/llm-models.repo.test.ts`：
 
@@ -338,14 +338,14 @@ describe('LlmModelsRepository 单价映射', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/database/repositories/llm-models.repo.test.ts
 ```
 Expected: FAIL —— `m.inputPricePer1k` 是 `undefined`（`expected undefined to be close to 0.012`）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 修改 `apps/server/src/database/repositories/llm-models.repo.ts`：
 
@@ -404,7 +404,7 @@ export interface LlmModel {
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [x] **Step 4: 跑测试确认通过 + 全量回归**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/database/repositories/llm-models.repo.test.ts && npm test 2>&1 | tail -20
@@ -412,7 +412,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src
 Expected: 新文件 3 passed；全量测试此前是 1166，现在应为 1169 通过、0 失败。
 **注意**：`admin-models.service.test.ts:15` 的 `dbModel()` 固定装置缺两个新字段——若 tsc 报错，给它补 `inputPricePer1k: 0, outputPricePer1k: 0`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/llm-models.repo.ts apps/server/src/database/repositories/llm-models.repo.test.ts apps/server/src/modules/admin/admin-models.service.test.ts
@@ -434,7 +434,7 @@ git commit -m "feat(repo): LlmModelsRepository 支持输入/输出单价（DECIM
 - Consumes: Task 2 的 `LlmModel.inputPricePer1k` / `outputPricePer1k`
 - Produces: registry 快照里的 `models[key].costPer1K = { input, output }` 为**真实价格**（Task 8 的 `ModelClient` 用它算 cost）；脚本命令 `npx tsx src/scripts/seed-llm-prices.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `ModelConfigRegistry` 的依赖走**构造函数**注入（`model-config-registry.ts:42` `constructor(private deps?: RegistryDeps)`），`RegistryDeps` 形状是 `{ llmModelsRepo: Pick<LlmModelsRepository,'listEnabled'>; llmRoutesRepo: Pick<LlmRoutesRepository,'listAll'> }`（`:34-37`）。在该测试文件末尾追加：
 
@@ -457,14 +457,14 @@ describe('ModelConfigRegistry 单价来自 DB（不再写死 0）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/model-config-registry.test.ts
 ```
 Expected: FAIL —— `costPer1K` 实际是 `{ input: 0, output: 0 }`。
 
-- [ ] **Step 3: 实现 registry 读真价**
+- [x] **Step 3: 实现 registry 读真价**
 
 修改 `apps/server/src/ai-core/infra/model-config-registry.ts`，把第 70 行的写死值换成读列（`m` 的类型是 Task 2 的 `LlmModel`）：
 
@@ -474,14 +474,14 @@ Expected: FAIL —— `costPer1K` 实际是 `{ input: 0, output: 0 }`。
           costPer1K: { input: m.inputPricePer1k, output: m.outputPricePer1k },
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/model-config-registry.test.ts
 ```
 Expected: PASS。
 
-- [ ] **Step 5: 写回填脚本**
+- [x] **Step 5: 写回填脚本**
 
 Create `apps/server/src/scripts/seed-llm-prices.ts`：
 
@@ -529,14 +529,14 @@ main().catch((err) => {
 });
 ```
 
-- [ ] **Step 6: 跑脚本验证（需 DB 可达）**
+- [x] **Step 6: 跑脚本验证（需 DB 可达）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx tsx src/scripts/seed-llm-prices.ts
 ```
 Expected: 打印每个已存在模型的价格与「回填完成：更新 N 个模型」（N ≥ 1）。再跑一次，输出完全相同（幂等）。若全部 `DB 无此模型`，说明 dev 库 `llm_models` 还没 seed——那是既有状态，脚本行为正确，不阻塞后续任务。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/model-config-registry.ts apps/server/src/ai-core/infra/model-config-registry.test.ts apps/server/src/scripts/seed-llm-prices.ts
@@ -559,7 +559,7 @@ git commit -m "feat(ai-core): costPer1K 改读 DB 单价列，附 YAML→DB 幂�
 - Consumes: Task 2 的 `LlmModelsRepository.create/update` 价格参数
 - Produces: 端点 `POST /api/admin/models` 与 `PATCH /api/admin/models/:modelKey` 接受 `inputPricePer1k` / `outputPricePer1k`（number，≥0）；`GET /api/admin/models` 返回它们（Task 5 的前端依赖）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `apps/server/src/modules/admin/admin-models.service.test.ts` 的 `describe('AdminModelsService', ...)` 内追加：
 
@@ -597,14 +597,14 @@ git commit -m "feat(ai-core): costPer1K 改读 DB 单价列，附 YAML→DB 幂�
 const dbModel = (key: string) => ({ modelKey: key, name: key, providerType: 'kimi', modelId: key, baseUrl: 'https://x', apiKey: 'sk-secret123', contextWindow: 8, maxOutputTokens: 8, isEnabled: true, inputPricePer1k: 0, outputPricePer1k: 0 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/modules/admin/admin-models.service.test.ts
 ```
 Expected: FAIL —— `create` 收到的对象不含 `inputPricePer1k`。
 
-- [ ] **Step 3: 实现 service**
+- [x] **Step 3: 实现 service**
 
 修改 `apps/server/src/modules/admin/admin-models.service.ts` 的 `create` 与 `update`（替换 `admin-models.service.ts:32-55`）：
 
@@ -639,7 +639,7 @@ Expected: FAIL —— `create` 收到的对象不含 `inputPricePer1k`。
   }
 ```
 
-- [ ] **Step 4: 实现 controller 校验**
+- [x] **Step 4: 实现 controller 校验**
 
 修改 `apps/server/src/modules/admin/admin.controller.ts` 的 `ModelSchema`（`admin.controller.ts:15-24`）——价格**允许 0**，用 `nonnegative()`：
 
@@ -660,7 +660,7 @@ const ModelSchema = z.object({
 ```
 `ModelUpdateSchema` 由 `ModelSchema.partial()` 派生（`admin.controller.ts:26`），**不用改**。
 
-- [ ] **Step 5: 消除 admin-chat 硬编码**
+- [x] **Step 5: 消除 admin-chat 硬编码**
 
 `admin-chat.service.ts:84` 的硬编码就在私有方法 `toModelConfig(m: LlmModel)` 里（`:77-88`），而它拿到的正是**带价格列的 DB `LlmModel`**（`requireEnabledModel()` 走 `modelsRepo.listEnabled()`，`:69-74`）。所以直接替换那一行：
 
@@ -672,14 +672,14 @@ const ModelSchema = z.object({
 
 **判断标准**：改完 `toModelConfig` 里不再出现字面量 `0`。`ModelConfigRegistry.reload()` 的同类映射（Task 3 已改）与这里保持一致——两处都从 `llm_models` 价格列来。
 
-- [ ] **Step 6: 跑测试 + 类型检查**
+- [x] **Step 6: 跑测试 + 类型检查**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/modules/admin/ && npx tsc --noEmit
 ```
 Expected: 全部 PASS；tsc 无错误。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/modules/admin/admin-models.service.ts apps/server/src/modules/admin/admin-models.service.test.ts apps/server/src/modules/admin/admin.controller.ts apps/server/src/modules/admin/admin-chat.service.ts
@@ -709,11 +709,11 @@ git commit -m "feat(admin): 模型单价增改接口 + 消除 admin-chat 的 cos
 - Consumes: Task 1 的迁移文件与 `schema.sql`；Task 2/4 的产出
 - Produces: 库与 `schema.sql` 中**不存在**任何价格/成本列；`LlmModel` 恢复为无价格字段；`tsc --noEmit` 仍为 **0 错**
 
-- [ ] **Step 1: 改迁移文件——加上 5 段带守卫的 DROP COLUMN**
+- [x] **Step 1: 改迁移文件——加上 5 段带守卫的 DROP COLUMN**
 
 按 Task 1 Step 1 里「收敛：删掉早期误加的价格/成本列」那一段的**原文**补进 `tools/db/migrations/2026-09-20_analytics_ledger.sql` 的**末尾**（必须在两个 `CREATE TABLE` 之后）。同时确认该文件的 `llm_call_logs` 建表语句里**没有** `cost` / `input_price_per_1k` / `output_price_per_1k` 三行。
 
-- [ ] **Step 2: 应用迁移并验证收敛**
+- [x] **Step 2: 应用迁移并验证收敛**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -723,7 +723,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_analytics_ledge
 ```
 Expected: 两次都无错误。
 
-- [ ] **Step 3: 断言 5 列在库里已消失（Task 1 Step 5 的两条检查）**
+- [x] **Step 3: 断言 5 列在库里已消失（Task 1 Step 5 的两条检查）**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "
@@ -736,7 +736,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) AS llm_models_rows FROM llm_
 ```
 **第二条断言是必须的**：本批有过一次「未经守卫的删操作静默清空数据」的历史事故，所以任何 DDL 之后都要证明行数没变。
 
-- [ ] **Step 4: 回退代码**
+- [x] **Step 4: 回退代码**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -757,11 +757,11 @@ git diff 3c641dd -- apps/server/src/database/repositories/llm-models.repo.ts
 ```
 **不要**整行删掉 `costPer1K`——会让 `tsc` 报错。
 
-- [ ] **Step 5: 同步 `schema.sql`**
+- [x] **Step 5: 同步 `schema.sql`**
 
 删掉 `llm_models` 定义里的两列价格（`schema.sql` 约 947-950），并确认 §14 埋点段里的两个 `CREATE TABLE` 与迁移文件**逐字一致**（都不含 cost/价格列）。
 
-- [ ] **Step 6: 跑检查**
+- [x] **Step 6: 跑检查**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx tsc --noEmit && npm test 2>&1 | tail -6
@@ -769,7 +769,7 @@ grep -c "price_per_1k" ../../tools/db/schema.sql || echo "0（grep 无匹配）"
 ```
 Expected: `tsc` **0 错**；测试全绿（数量比 Task 4 后少掉被删的价格用例，属预期）；`schema.sql` 里 `price_per_1k` 出现 **0** 次。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A tools/db apps/server/src
@@ -787,7 +787,7 @@ git commit -m "refactor: 清掉价格/成本（口径取消）——迁移收敛
 - Consumes: Task 4 的端点字段 `inputPricePer1k` / `outputPricePer1k`
 - Produces: 无（终端 UI）
 
-- [ ] **Step 1: 扩展 API 层**
+- [x] **Step 1: 扩展 API 层**
 
 修改 `apps/web/src/services/api.ts`（`api.ts:731-741`）：**保留现有字段**，`AdminModelItem` 追加：
 
@@ -799,7 +799,7 @@ git commit -m "refactor: 清掉价格/成本（口径取消）——迁移收敛
 ```
 `createAdminModel` 参数类型追加 `inputPricePer1k?: number; outputPricePer1k?: number`；`updateAdminModel` 的 `Partial<{...}>` 里追加 `inputPricePer1k: number; outputPricePer1k: number`。
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
 Create `apps/web/src/pages/admin/AdminModelsPage.test.tsx`：
 
@@ -836,14 +836,14 @@ describe('AdminModelsPage 单价展示', () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/web && npx vitest run src/pages/admin/AdminModelsPage.test.tsx
 ```
 Expected: FAIL —— 找不到 `输入单价`（页面上还没有这两列）。
 
-- [ ] **Step 4: 实现页面改动**
+- [x] **Step 4: 实现页面改动**
 
 修改 `apps/web/src/pages/admin/AdminModelsPage.tsx`，五处改动：
 
@@ -912,7 +912,7 @@ Expected: FAIL —— 找不到 `输入单价`（页面上还没有这两列）�
                   <td className="px-5 py-3">{m.outputPricePer1k}</td>
 ```
 
-- [ ] **Step 5: 跑测试确认通过 + 前端全量回归**
+- [x] **Step 5: 跑测试确认通过 + 前端全量回归**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/web && npx vitest run src/pages/admin/AdminModelsPage.test.tsx && npm test 2>&1 | tail -15
@@ -920,7 +920,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/web && npx vitest run src/pa
 Expected: 新文件 1 passed；全量此前 573，现在应为 574 通过。
 ⚠️ **若在 18:00–06:00 跑**，`routes/routeTable.test.tsx` 会多 1 条红（`StudentLayout` 挂载时按挂钟切 `data-theme`）——那是**既有问题、与本批无关**，别算到这次改动头上。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/pages/admin/AdminModelsPage.tsx apps/web/src/pages/admin/AdminModelsPage.test.tsx
@@ -944,7 +944,7 @@ git commit -m "feat(admin-ui): 模型表单与列表展示输入/输出单价（
 - Consumes: 无（与 Task 2/3 独立）
 - Produces: `UsageSource`；`ChatResponse.usage: { inputTokens: number | null; outputTokens: number | null; cost: number | null; source?: UsageSource }`；`StreamChunk.usage?`；`estimateTokens(text: string): number`（Task 7、8 依赖）
 
-- [ ] **Step 1: 写估算函数的失败测试**
+- [x] **Step 1: 写估算函数的失败测试**
 
 Create `apps/server/src/ai-core/infra/usage-estimate.test.ts`：
 
@@ -978,14 +978,14 @@ describe('estimateTokens（流式拿不到 usage 时的兜底）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/usage-estimate.test.ts
 ```
 Expected: FAIL —— `Failed to resolve import "./usage-estimate"`。
 
-- [ ] **Step 3: 实现估算函数**
+- [x] **Step 3: 实现估算函数**
 
 Create `apps/server/src/ai-core/infra/usage-estimate.ts`：
 
@@ -1013,7 +1013,7 @@ export function estimateTokens(text: string): number {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/usage-estimate.test.ts
@@ -1021,7 +1021,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src
 Expected: 5 passed。
 （这 5 个期望值已用 node 实测确认：`'你好世界'`→4、`'abcdefgh'`→2、`'abcde'`→2、`'你好吗abcdefgh'`→5、`'hello, world!'`→3、空白/空串→0。）
 
-- [ ] **Step 5: 扩类型**
+- [x] **Step 5: 扩类型**
 
 修改 `apps/server/src/ai-core/types.ts`。在 `ChatResponse` 之前加：
 
@@ -1065,7 +1065,7 @@ export interface StreamChunk {
 }
 ```
 
-- [ ] **Step 6: 修请求体与本地端点例外**
+- [x] **Step 6: 修请求体与本地端点例外**
 
 **6a.** `openai-compatible-client.ts` 的 `buildRequestBody`（`openai-compatible-client.ts:23-27`）：
 
@@ -1122,7 +1122,7 @@ export interface StreamChunk {
 
 **6e.** `gemini-client.ts:70-84` 的 usage 对象补 `source: 'provider' as const`（数值语义不变）。
 
-- [ ] **Step 7: 先写估算档的失败测试**
+- [x] **Step 7: 先写估算档的失败测试**
 
 输入与输出是**两个独立的量**，各有自己的数据源——输入估自 `request.messages`，输出估自响应正文。不要用「一个 estimated 就一起含糊过去」的写法。
 
@@ -1176,14 +1176,14 @@ describe('流式拿不到 usage 时的估算（输入/输出各自的数据源�
 });
 ```
 
-- [ ] **Step 8: 跑测试确认失败**
+- [x] **Step 8: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/model-client/model-client.test.ts
 ```
 Expected: FAIL —— `res.usage.source` 是 `undefined`（旧代码返回 `{inputTokens:0,outputTokens:0,cost:0}`，没有 source），`inputTokens` 是 0 而非 2。
 
-- [ ] **Step 9: 实现流式聚合（本任务核心）**
+- [x] **Step 9: 实现流式聚合（本任务核心）**
 
 替换 `apps/server/src/ai-core/infra/model-client/index.ts:82-102` 的 `aggregateStream`，并在类外（文件靠上、`ModelClient` 定义之前）加两个辅助函数：
 
@@ -1271,7 +1271,7 @@ function buildStreamUsage(
 
 同文件顶部 import 追加：`estimateTokens`（来自 `../usage-estimate.js`），并把 `ChatMessage`、`contentToText` 加进 `../../types.js` 的 import（`contentToText` 是**值**不是类型，不能放 `import type` 里）。
 
-- [ ] **Step 10: 跑测试确认通过 + 类型检查 + 全量回归**
+- [x] **Step 10: 跑测试确认通过 + 类型检查 + 全量回归**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/ && npx tsc --noEmit && npm test 2>&1 | tail -6
@@ -1279,7 +1279,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src
 Expected: 全绿（含 Step 7 新加的两条）；tsc 无错误。
 **注意**：能力测试里大量固定装置写了 `usage: { inputTokens: 10, outputTokens: 5, cost: 0 }`（如 `grading.capability.test.ts:52`）——`source` 是可选的，**这些文件不需要改**。若 tsc 报 usage 相关错误，说明我把某字段写成了必填，回去检查。
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/usage-estimate.ts apps/server/src/ai-core/infra/usage-estimate.test.ts apps/server/src/ai-core/types.ts apps/server/src/ai-core/infra/model-client/
@@ -1307,7 +1307,7 @@ git commit -m "fix(ai-core): 流式 usage 三级降级——输入/输出分别�
   - `LlmCallLogsRepository.insertMany(rows)`、`ApiRequestLogsRepository.insertMany(rows)`（Task 9 用）
   - `TelemetryBuffer<T>`：`push` / `flushNow` / `start` / `stop` / `size` / `dropped` / `failed`（Task 9 用）
 
-- [ ] **Step 1: 定义 sink 类型**
+- [x] **Step 1: 定义 sink 类型**
 
 Create `apps/server/src/ai-core/infra/llm-call-log.ts`：
 
@@ -1363,7 +1363,7 @@ export function emitLlmCall(entry: LlmCallLogEntry): void {
 }
 ```
 
-- [ ] **Step 2: 写两个 repo 的失败测试**
+- [x] **Step 2: 写两个 repo 的失败测试**
 
 Create `apps/server/src/database/repositories/analytics-logs.repo.test.ts`：
 
@@ -1440,14 +1440,14 @@ describe('ApiRequestLogsRepository.insertMany', () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/database/repositories/analytics-logs.repo.test.ts
 ```
 Expected: FAIL —— 无法解析 `./llm-call-logs.repo`。
 
-- [ ] **Step 4: 实现两个 repo**
+- [x] **Step 4: 实现两个 repo**
 
 Create `apps/server/src/database/repositories/llm-call-logs.repo.ts`：
 
@@ -1535,14 +1535,14 @@ export class ApiRequestLogsRepository {
 }
 ```
 
-- [ ] **Step 5: 跑 repo 测试确认通过**
+- [x] **Step 5: 跑 repo 测试确认通过**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/database/repositories/analytics-logs.repo.test.ts
 ```
 Expected: PASS。列下标由 `COLUMNS` 常量决定，当前顺序（**19 列**）下为：`input_tokens`=15、`output_tokens`=16、`is_fallback`=11、`success`=12，共 19 列（2 行 → 38 个参数）。**若日后调整 `COLUMNS` 顺序，这些下标断言与 `toHaveLength(38)` 必须一起改。**
 
-- [ ] **Step 6: 写 buffer 的失败测试**
+- [x] **Step 6: 写 buffer 的失败测试**
 
 Create `apps/server/src/modules/analytics/telemetry-buffer.test.ts`：
 
@@ -1606,14 +1606,14 @@ describe('TelemetryBuffer', () => {
 });
 ```
 
-- [ ] **Step 7: 跑测试确认失败**
+- [x] **Step 7: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/modules/analytics/telemetry-buffer.test.ts
 ```
 Expected: FAIL —— 无法解析 `./telemetry-buffer`。
 
-- [ ] **Step 8: 实现 buffer**
+- [x] **Step 8: 实现 buffer**
 
 Create `apps/server/src/modules/analytics/telemetry-buffer.ts`：
 
@@ -1699,7 +1699,7 @@ export class TelemetryBuffer<T> {
 }
 ```
 
-- [ ] **Step 9: 导出 repo + 跑测试**
+- [x] **Step 9: 导出 repo + 跑测试**
 
 在 `apps/server/src/database/repositories/index.ts` 末尾追加：
 
@@ -1714,7 +1714,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src
 ```
 Expected: 全绿。
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/llm-call-log.ts apps/server/src/database/repositories/llm-call-logs.repo.ts apps/server/src/database/repositories/api-request-logs.repo.ts apps/server/src/database/repositories/analytics-logs.repo.test.ts apps/server/src/database/repositories/index.ts apps/server/src/modules/analytics/
@@ -1738,7 +1738,7 @@ git commit -m "feat(analytics): 账本/请求日志仓储 + TelemetryBuffer（�
 - Consumes: Task 6 的 `usage.source` / `buildStreamUsage` / `estimateInputTokens`；Task 7 的 `emitLlmCall` / `LlmCallLogEntry`
 - Produces: `RequestContext` / `runWithRequestContext` / `getRequestContext`（Task 9 用）；`RoutedModel` 带 `scene`/`subject`/`modelKey`/`isFallbackEntry`；`ChatRequest.meta`；效果——**两个写入点**：`chat()` 每次尝试一行（`attempt` 递增），`streamChat()` 每次调用一行（`requestKind='stream'`，`attempt` 恒 1）。**两个都不能漏**：只埋 `chat()` 会让 AI 讨论/答疑（很可能是 token 消耗最大的场景）在账本里完全缺席，直接违背用户「哪个学生 token 用得最多」的目标。
 
-- [ ] **Step 1: 写 ALS 的失败测试**
+- [x] **Step 1: 写 ALS 的失败测试**
 
 Create `apps/server/src/ai-core/infra/request-context.test.ts`：
 
@@ -1766,14 +1766,14 @@ describe('request-context（ALS）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/request-context.test.ts
 ```
 Expected: FAIL —— 无法解析 `./request-context`。
 
-- [ ] **Step 3: 实现 ALS**
+- [x] **Step 3: 实现 ALS**
 
 Create `apps/server/src/ai-core/infra/request-context.ts`：
 
@@ -1808,14 +1808,14 @@ export function getRequestContext(): RequestContext | null {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/request-context.test.ts
 ```
 Expected: 3 passed。
 
-- [ ] **Step 5: 扩类型与 router 打标**
+- [x] **Step 5: 扩类型与 router 打标**
 
 **5a.** `apps/server/src/ai-core/types.ts`——替换 `types.ts:41-42`：
 
@@ -1864,7 +1864,7 @@ export type RoutedModel = ModelConfig & {
     };
 ```
 
-- [ ] **Step 6: 写 router 打标的失败测试**
+- [x] **Step 6: 写 router 打标的失败测试**
 
 在 `apps/server/src/ai-core/infra/model-router.test.ts` 追加（**若该文件已有构造方式，照它写**）：
 
@@ -1883,14 +1883,14 @@ export type RoutedModel = ModelConfig & {
   });
 ```
 
-- [ ] **Step 7: 跑测试确认失败**
+- [x] **Step 7: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/model-router.test.ts
 ```
 Expected: FAIL —— `result.primary.scene` 是 `undefined`。
 
-- [ ] **Step 8: 实现 ModelClient 记账**
+- [x] **Step 8: 实现 ModelClient 记账**
 
 修改 `apps/server/src/ai-core/infra/model-client/index.ts`：
 
@@ -2037,7 +2037,7 @@ import { getRequestContext } from '../request-context.js';
 
 同时把 Task 8 开头 Files/Interfaces 里的「账本写入点」补成**两处**：`chat()`（每次尝试一行）与 `streamChat()`（每次调用一行）。
 
-- [ ] **Step 9: 写 ModelClient 记账的失败测试**
+- [x] **Step 9: 写 ModelClient 记账的失败测试**
 
 在 `apps/server/src/ai-core/infra/model-client/model-client.test.ts` 追加（顶部补 `afterEach` 与 `setLlmCallSink` 的 import）：
 
@@ -2164,14 +2164,14 @@ describe('ModelClient 写 llm_call_logs', () => {
 });
 ```
 
-- [ ] **Step 10: 跑测试确认通过 + 全量回归**
+- [x] **Step 10: 跑测试确认通过 + 全量回归**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/ && npx tsc --noEmit && npm test 2>&1 | tail -6
 ```
 Expected: 全绿；tsc 无错误。
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/request-context.ts apps/server/src/ai-core/infra/request-context.test.ts apps/server/src/ai-core/types.ts apps/server/src/ai-core/infra/model-router.ts apps/server/src/ai-core/infra/model-router.test.ts apps/server/src/ai-core/infra/model-client/
@@ -2199,7 +2199,7 @@ git commit -m "feat(ai-core): ModelClient 记 llm_call_logs（含重试尝试/�
 3. 后果直接打在指标上：既有漏记（NULL）也有**错记**（记到别的学生头上），而后者更难发现。
 4. 现有优先级链 `request.meta?.studentId ?? ctx?.studentId ?? null` **无法表达「显式不归属」**——`null ?? x` 会穿透到 `x`（Task 8 评审的 Minor #4 正是这条）。所以必须先让语义可表达。
 
-- [ ] **Step 1: 写两条失败测试**
+- [x] **Step 1: 写两条失败测试**
 
 在 `model-client.test.ts` 的 `describe('ModelClient 写 llm_call_logs', ...)` 内追加（顶部补 `runWithRequestContext` 的 import）：
 
@@ -2237,14 +2237,14 @@ git commit -m "feat(ai-core): ModelClient 记 llm_call_logs（含重试尝试/�
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/infra/model-client/model-client.test.ts
 ```
 Expected: 第一条 FAIL（`studentId` 是 `9`，因为 `null ?? 9` 穿透了）；第二条应已通过。
 
-- [ ] **Step 3: 修 `recordCall` 的解析**
+- [x] **Step 3: 修 `recordCall` 的解析**
 
 在 `model-client/index.ts` 的 `recordCall` 内，把 studentId 的表达式抽成局部变量（放在 `const llmErr = ...` 之后）：
 
@@ -2263,7 +2263,7 @@ Expected: 第一条 FAIL（`studentId` 是 `9`，因为 `null ?? 9` 穿透了）
       studentId,
 ```
 
-- [ ] **Step 4: 给解释缓存显式标注「不归属」**
+- [x] **Step 4: 给解释缓存显式标注「不归属」**
 
 修改 `apps/server/src/ai-core/capabilities/explanation.capability.ts` 的 `modelClient.chat({...})` 调用（约 `:63`），补一个 `meta`：
 
@@ -2282,14 +2282,14 @@ Expected: 第一条 FAIL（`studentId` 是 `9`，因为 `null ?? 9` 穿透了）
 
 **为什么 title 生成不在此列**：会话标题是**会话级**的，会话属于某个学生，ALS 归属正确——不要顺手也给它传 null。
 
-- [ ] **Step 5: 跑测试 + 类型检查 + 全量回归**
+- [x] **Step 5: 跑测试 + 类型检查 + 全量回归**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/ai-core/ && npx tsc --noEmit && npm test 2>&1 | tail -6
 ```
 Expected: 全绿（新增 2 条）；tsc **0 错**。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/model-client/ apps/server/src/ai-core/capabilities/explanation.capability.ts
@@ -2313,7 +2313,7 @@ git commit -m "fix(ai-core): 归属语义收紧——meta 显式 null = 明确�
 - Consumes: Task 7 的两个 repo + `TelemetryBuffer`；Task 8 的 `setLlmCallSink` / `runWithRequestContext`
 - Produces: 效果——每请求一行 `api_request_logs`；`llm_call_logs` 的 sink 已注册且 buffer 已启动
 
-- [ ] **Step 1: 写拦截器纯函数的失败测试**
+- [x] **Step 1: 写拦截器纯函数的失败测试**
 
 Create `apps/server/src/common/interceptors/analytics.interceptor.test.ts`：
 
@@ -2355,14 +2355,14 @@ describe('shouldSkipRoute', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/common/interceptors/analytics.interceptor.test.ts
 ```
 Expected: FAIL —— 无法解析模块（文件还没建）。
 
-- [ ] **Step 3: 实现中间件**
+- [x] **Step 3: 实现中间件**
 
 Create `apps/server/src/common/middleware/request-context.middleware.ts`：
 
@@ -2396,7 +2396,7 @@ export class RequestContextMiddleware implements NestMiddleware {
 }
 ```
 
-- [ ] **Step 4: 实现遥测服务与模块**
+- [x] **Step 4: 实现遥测服务与模块**
 
 Create `apps/server/src/modules/analytics/telemetry.service.ts`：
 
@@ -2473,7 +2473,7 @@ export class AnalyticsModule {
 }
 ```
 
-- [ ] **Step 5: 实现拦截器**
+- [x] **Step 5: 实现拦截器**
 
 Create `apps/server/src/common/interceptors/analytics.interceptor.ts`：
 
@@ -2567,7 +2567,7 @@ export class AnalyticsInterceptor implements NestInterceptor {
 
 **关于 SSE**：`@Res()` 直写的流式端点（`/api/ai/tutor/stream`、`/api/admin/chat/stream`）里 `next.handle()` 的 `tap` 在处理器返回时触发，`latencyMs` 与 `is_sse` 即该时刻的值——**这正是我们要的「整段流时长」**。
 
-- [ ] **Step 6: 接线 app.module 与 main.ts**
+- [x] **Step 6: 接线 app.module 与 main.ts**
 
 **6a.** `apps/server/src/app.module.ts`：
 
@@ -2608,14 +2608,14 @@ imports 数组末尾加 `AnalyticsModule`；providers 改为：
   app.enableShutdownHooks();
 ```
 
-- [ ] **Step 7: 跑测试 + 构建**
+- [x] **Step 7: 跑测试 + 构建**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npx vitest run src/common/ src/modules/analytics/ && npx tsc --noEmit && npm run build
 ```
 Expected: 测试全绿；tsc 无错误；`build` 成功。
 
-- [ ] **Step 8: 冒烟——起服务确认 DI 没炸**
+- [x] **Step 8: 冒烟——起服务确认 DI 没炸**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && PORT=3099 node dist/main.js > /tmp/k12_smoke.log 2>&1 & echo $! > /tmp/k12_smoke.pid
@@ -2626,7 +2626,7 @@ kill "$(cat /tmp/k12_smoke.pid)"; rm -f /tmp/k12_smoke.pid
 Expected: 输出一个 HTTP 状态码（200 或 401 都算健康——**关键是进程没崩**）。若进程退出且日志里有 Nest DI 错误，检查 `app.module.ts` 的 `useExisting` 写法与 `AnalyticsModule` 的 `exports`。
 **注意**：**不要** `pkill -f 'node dist/main.js'`（会杀掉本机在跑的服务）。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/server/src/common/middleware/request-context.middleware.ts apps/server/src/common/interceptors/analytics.interceptor.ts apps/server/src/common/interceptors/analytics.interceptor.test.ts apps/server/src/modules/analytics/telemetry.service.ts apps/server/src/modules/analytics/analytics.module.ts apps/server/src/app.module.ts apps/server/src/main.ts
@@ -2673,7 +2673,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT scene, model_key, provider, attempt, 
 - 第 2 条 `input_tokens = 0` → 说明输入估算没接上（`estimateInputTokens(request.messages)` 未生效），回去查 Task 6 的 `aggregateStream`。
 - 第 3 条为空且来源是学生端接口 → 查 `RequestContextMiddleware` 是否排在 `AuthMiddleware` 之后（Task 9 Step 6）。
 
-- [ ] **Step 2: 同步 API 文档（主稿）**
+- [x] **Step 2: 同步 API 文档（主稿）**
 
 `docs/API接口与数据流设计文档.md`：
 
@@ -2699,15 +2699,15 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT scene, model_key, provider, attempt, 
    钱由 token 换算，平台不必自己算。
 ```
 
-- [ ] **Step 3: 同步 openapi.yaml**
+- [x] **Step 3: 同步 openapi.yaml**
 
 **本步不需要改 `/api/admin/models`**（价格字段已取消）。本批 Phase 0 不新增任何端点，故 openapi 的改动只有：若 Phase 0 期间新增了 `/api/track/*` 或 `/api/study-sessions/*`（属 Phase 1，本计划不含），则另说。**Phase 0 对 openapi 无改动**——确认这一点后跳过本步。
 
-- [ ] **Step 4: 同步数据库设计文档**
+- [x] **Step 4: 同步数据库设计文档**
 
 `docs/K12智学系统-数据库设计文档.md`：按该文档既有表清单格式追加 `llm_call_logs`、`api_request_logs` 两张表。**两表都不含任何价格/成本列**；口径直接引用 spec §4.6。
 
-- [ ] **Step 5: 追加 changelog**
+- [x] **Step 5: 追加 changelog**
 
 `docs/ai-core-changelog.md` **顶部**追加（按该文件既有格式）：
 
@@ -2727,7 +2727,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT scene, model_key, provider, attempt, 
 - 已知待办（属 Phase 2）：归属覆盖率、`/api/admin/analytics/*` 查询端与页面
 ```
 
-- [ ] **Step 6: 全量回归 + 最终提交**
+- [x] **Step 6: 全量回归 + 最终提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npm test 2>&1 | tail -6

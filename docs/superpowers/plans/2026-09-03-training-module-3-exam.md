@@ -50,7 +50,7 @@ export class ExamPapersRepository {
 }
 ```
 
-- [ ] **Step 1: 写失败测试**（exams.service.test.ts，mk/mkSvc 模式仿 training.service.test.ts）
+- [x] **Step 1: 写失败测试**（exams.service.test.ts，mk/mkSvc 模式仿 training.service.test.ts）
 
 ```ts
 // 用例组：
@@ -61,9 +61,9 @@ export class ExamPapersRepository {
 // 4. paper 不存在 -> 404
 ```
 
-- [ ] **Step 2: 跑测试确认失败**（模块不存在）
+- [x] **Step 2: 跑测试确认失败**（模块不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 repo SQL：
 
@@ -78,7 +78,7 @@ repo SQL：
 
 service：`computeRecommendedDuration(questions: Array<{type: string}>): number` 纯函数（1min/3min 求和 → Math.ceil(n/15)*15 → clamp(30,180)）；getPaperDetail 组装（options 复用 training.service 的 parseOptions 模式——拷贝为模块内私有或提取共享 util，**推荐提取**到 `apps/server/src/common/utils/parse-options.util.ts`，training.service 同步改 import，单一实现）。controller：两个 GET 端点，student JWT（同 training 模式）；:id 用 ParseIntPipe。module：providers [ExamsService, ExamPapersRepository]，无 imports 需求（Task 2 才 import PracticeModule）。
 
-- [ ] **Step 4: 全量回归 npm test + Commit**
+- [x] **Step 4: 全量回归 npm test + Commit**
 
 ```bash
 git commit -m "feat(server): exams 模块骨架 + 试卷列表/详情端点（推荐时长）"
@@ -122,7 +122,7 @@ export class ExamSessionsRepository {
 //   JOIN questions 取 explanation
 ```
 
-- [ ] **Step 1: 写失败测试**（核心场景，mock repo + judgeCore）：
+- [x] **Step 1: 写失败测试**（核心场景，mock repo + judgeCore）：
 
 ```ts
 // 1. createSession：无 in_progress -> 新建（deadline = now + duration）；有 in_progress -> 返回既有（断言 repo.create 未调）
@@ -136,7 +136,7 @@ export class ExamSessionsRepository {
 
 **注意**：judgeCore.judgeQuestion 的入参是 studentAnswer——未作答题不走 judgeCore（无答案可判），直接写 exam_answers（is_correct=0, method='unanswered'）+ mainErrorRepo.create（question_id, source='exam', source_ref_id=sessionId）。已在途判题（fire-and-forget 提交后学生没等到判完就交卷——本设计中单题提交是 await 判题完成再返回还是 fire-and-forget？**设计决定：单题提交端点同步判题**（exact 即返，AI 最长 judgment 90s）——前端 QuestionRunner 的 onSubmit await 它，学生切题时请求在后台继续（fetch 不 abort），与错题练习体验一致。submit 时的「在途补判」仅兜：提交后 answer 落库但判题 HTTP 尚未返回的窗口（崩溃/断网场景，is_correct IS NULL 且 answer_text 非空）。）
 
-- [ ] **Step 2: 失败 → Step 3: 实现**
+- [x] **Step 2: 失败 → Step 3: 实现**
 
 service 核心流程：
 - `createSession`：findInProgressByStudentPaper 命中返回；否则 deadline_at = new Date(now + duration*60000)，create，返回题单（复用 getPaperDetail 的查询）。
@@ -145,7 +145,7 @@ service 核心流程：
 - `getSession`：过期 → autoSubmit（复用 submit 内部逻辑）；answered map 只含 answerText。
 - `getResults`：仅 submitted 可查（in_progress 409）；items JOIN questions 带 explanation。
 
-- [ ] **Step 4: 全量回归 + Commit**
+- [x] **Step 4: 全量回归 + Commit**
 
 ```bash
 git commit -m "feat(server): 考试会话生命周期（创建/续考/单题判题/交卷/自动收卷/结果）"
@@ -157,7 +157,7 @@ git commit -m "feat(server): 考试会话生命周期（创建/续考/单题判�
 
 **Files:** 无新代码（执行既有 db_loader_cli）。
 
-- [ ] **Step 1: 执行增量回填**
+- [x] **Step 1: 执行增量回填**
 
 ```bash
 cd tools/data-refinery && python src/db_loader_cli.py --load-cards
@@ -165,7 +165,7 @@ cd tools/data-refinery && python src/db_loader_cli.py --load-cards
 
 （参数按 docs/data-refinery-使用手册.md 既有惯例——published 目录指向 output/published；增量模式不动业务数据。）
 
-- [ ] **Step 2: 验证归组结果**
+- [x] **Step 2: 验证归组结果**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT id, title, year, district, exam_type, question_count FROM exam_papers;"
@@ -174,9 +174,9 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT paper_id, COUNT(*), MIN(question_no),
 
 Expected: exam_papers ≈ 已发布数学试卷数（published/数学 下每卷一行，含化学目录则化学卷也归组——subject 按目录首段推导，正确行为）；每卷 question_no 1..n 连续。**含化学卷**：题库 subject 按路径推导（publish 修正过），化学卷归组为 subject_id=chemistry 的 paper——前端只查 subjectId=1（数学）不会显示，无害。
 
-- [ ] **Step 3: 冒烟 GET /api/exams/papers**（server 起来后 curl 或推迟到 Task 5 联调一起做——记录选择）
+- [x] **Step 3: 冒烟 GET /api/exams/papers**（server 起来后 curl 或推迟到 Task 5 联调一起做——记录选择）
 
-- [ ] **Step 4: 无代码提交**（纯数据操作；若有发现归组 bug 则回计划 1 的 Task 3 修复路径，单独 fix commit）
+- [x] **Step 4: 无代码提交**（纯数据操作；若有发现归组 bug 则回计划 1 的 Task 3 修复路径，单独 fix commit）
 
 ---
 
@@ -203,9 +203,9 @@ export interface ExamResultItem { questionId: number; questionNo: number; text: 
 export function getExamResults(sessionId: number): Promise<{ correctCount: number; totalCount: number; accuracy: number; items: ExamResultItem[] }>;
 ```
 
-- [ ] **Step 1: ExamListPage**：沉浸层容器（镜像 ErrorPracticePage）；顶栏 BackButton 回 /student/training + 标题「考试」；筛选（年份下拉=全部/2024/2025…从数据去重、地区、考试类型）；试卷卡片列表（title、题量、年份地区类型 Tag）；点击卡片 → 时长选择弹层（Modal：60/90/120 分钟三档 Chip + 推荐值标注「推荐」——**推荐值需要 paper detail**，简化：点卡片时调 getExamPaperDetail(id) 拿推荐时长再弹层）→ 「开始考试」→ createExamSession → sessionStorage('exam:session', JSON.stringify(sessionInfo)) → navigate /student/training/exam/run/:sessionId。空态提示「暂无试卷」。
-- [ ] **Step 2: 路由**：/student/training/exam 替换占位 → ExamListPage；/student/training/exam/run/:sessionId 与 /student/training/exam/result/:sessionId 注册（Task 5 实现）。
-- [ ] **Step 3: lint + build + Commit**
+- [x] **Step 1: ExamListPage**：沉浸层容器（镜像 ErrorPracticePage）；顶栏 BackButton 回 /student/training + 标题「考试」；筛选（年份下拉=全部/2024/2025…从数据去重、地区、考试类型）；试卷卡片列表（title、题量、年份地区类型 Tag）；点击卡片 → 时长选择弹层（Modal：60/90/120 分钟三档 Chip + 推荐值标注「推荐」——**推荐值需要 paper detail**，简化：点卡片时调 getExamPaperDetail(id) 拿推荐时长再弹层）→ 「开始考试」→ createExamSession → sessionStorage('exam:session', JSON.stringify(sessionInfo)) → navigate /student/training/exam/run/:sessionId。空态提示「暂无试卷」。
+- [x] **Step 2: 路由**：/student/training/exam 替换占位 → ExamListPage；/student/training/exam/run/:sessionId 与 /student/training/exam/result/:sessionId 注册（Task 5 实现）。
+- [x] **Step 3: lint + build + Commit**
 
 ```bash
 git commit -m "feat(web): 考试试卷列表页（筛选 + 时长选择）"
@@ -223,7 +223,7 @@ git commit -m "feat(web): 考试试卷列表页（筛选 + 时长选择）"
 **Interfaces:**
 - Consumes: QuestionRunner（showResultFeedback=false、headerExtra 倒计时）、Task 4 API。
 
-- [ ] **Step 1: ExamRunPage**
+- [x] **Step 1: ExamRunPage**
 
 核心逻辑：
 
@@ -243,8 +243,8 @@ git commit -m "feat(web): 考试试卷列表页（筛选 + 时长选择）"
 // 5. 防误退：页面无 BackButton（考试中不可返回；浏览器后退由路由守卫简化——MVP 接受，记录）。
 ```
 
-- [ ] **Step 2: ExamResultPage**：mount getExamSession 判 status（非 submitted 踢回 run 页）→ getExamResults → 顶部得分卡（正确数/总数/正确率百分比大字）→ AnswerResultList（items 映射 PracticeQuestion{n: String(questionNo), text} + answers 记录：{isCorrect, method, analysis, studentAnswer: answerText ?? '', failed: method==='failed'}——explanation 并入 analysis 展示：analysis ?? explanation）→ onClose 回 /student/training/exam。
-- [ ] **Step 3: 路由注册两条（RequireRole student）。**
+- [x] **Step 2: ExamResultPage**：mount getExamSession 判 status（非 submitted 踢回 run 页）→ getExamResults → 顶部得分卡（正确数/总数/正确率百分比大字）→ AnswerResultList（items 映射 PracticeQuestion{n: String(questionNo), text} + answers 记录：{isCorrect, method, analysis, studentAnswer: answerText ?? '', failed: method==='failed'}——explanation 并入 analysis 展示：analysis ?? explanation）→ onClose 回 /student/training/exam。
+- [x] **Step 3: 路由注册两条（RequireRole student）。**
 - [ ] **Step 4: lint + build + 手动走查（联调：Task 3 已回填数据；走一遍 选卷→限时做 2 题→手动交卷→结果页；倒计时归零自动交卷可用短时长卷验证）+ Commit**
 
 ```bash
@@ -259,9 +259,9 @@ git commit -m "feat(web): 考试进行页（倒计时/续考/自动交卷）+ �
 - Modify: `docs/API接口与数据流设计文档.md`（§4 新增「Exams — /api/exams」小节：7 端点，阶段=MVP；§6 补考试数据流）
 - Modify: `docs/api/openapi.yaml`
 
-- [ ] **Step 1: 以 exams.controller.ts 为唯一真相同步两文档**（7 端点：papers 列表/详情/sessions 创建/恢复/answers 提交/submit/results；白名单响应、409 过期语义、自动收卷行为都写清）。
-- [ ] **Step 2: grep 两文档端点清单核对一致 + yaml 语法校验。**
-- [ ] **Step 3: Commit**：`docs(api): 考试模块 API 双文档同步`。
+- [x] **Step 1: 以 exams.controller.ts 为唯一真相同步两文档**（7 端点：papers 列表/详情/sessions 创建/恢复/answers 提交/submit/results；白名单响应、409 过期语义、自动收卷行为都写清）。
+- [x] **Step 2: grep 两文档端点清单核对一致 + yaml 语法校验。**
+- [x] **Step 3: Commit**：`docs(api): 考试模块 API 双文档同步`。
 
 ---
 
@@ -279,21 +279,21 @@ git commit -m "feat(web): 考试进行页（倒计时/续考/自动交卷）+ �
 3. **若收敛中发现 QuestionRunner 与两旧组件行为差异不可调和（如 modal 布局细节），允许降级**：保留旧组件不动，报告说明原因，收敛移出本计划（风险控制——主线是已上线核心路径，不为收敛冒回归险）。
 4. 顺带清理终审遗留：悬空 BumpErrorLevelsDto 导出（删或接线）；空 hint 文案改「暂无提示」。
 
-- [ ] **Steps: 修订 PRD/style.md → commit（docs(prd): 入口三轨 + §7.4 错题本语义修订）；组件收敛 → lint+build+走查 → commit（refactor(web): AnswerModal/CleanupPhase 收敛到 QuestionRunner）**
+- [x] **Steps: 修订 PRD/style.md → commit（docs(prd): 入口三轨 + §7.4 错题本语义修订）；组件收敛 → lint+build+走查 → commit（refactor(web): AnswerModal/CleanupPhase 收敛到 QuestionRunner）**
 
 ---
 
 ### Task 8: 全链路手动回归 + 收尾
 
-- [ ] **Step 1: 三套测试全绿**（server npm test / refinery pytest / web build）。
+- [x] **Step 1: 三套测试全绿**（server npm test / refinery pytest / web build）。
 - [ ] **Step 2: 手动走查清单**：
   - 主线：课程详情答题（AnswerModal 收敛后）→ 错题清零（CleanupPhase 收敛后）→ 门禁解锁
   - 错题练习：列表筛选（时间/题型/专项）→ 选题 → 做题（选择题显示选项）→ 答对清零联动主线 → 仍错 bump
   - 专项练习：配置（KP 级联）→ 抽题 → 做题带提示 → 结果
   - 考试：选卷 → 时长 → 做题（倒计时/无对错反馈/选择题点选）→ 手动交卷 → 结果页；刷新续考；倒计时归零自动交卷
   - 主题：日夜模式 × 训练各页
-- [ ] **Step 3: 计划 2/3 遗留项清理确认**（Task 7 顺带项是否完成）。
-- [ ] **Step 4: 最终 commit + 汇总报告。**
+- [x] **Step 3: 计划 2/3 遗留项清理确认**（Task 7 顺带项是否完成）。
+- [x] **Step 4: 最终 commit + 汇总报告。**
 
 ---
 

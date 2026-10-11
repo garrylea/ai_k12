@@ -49,7 +49,7 @@
 - Create: `tools/db/migrations/2026-08-11_add_practice_results.sql`
 - Modify: `docs/K12智学系统-数据库设计文档.md`（§3.6 `main_error_books` 后；§8 日志）
 
-- [ ] **Step 1: 在 `tools/db/schema.sql` 的 `main_error_books` 建表语句之后插入新表**
+- [x] **Step 1: 在 `tools/db/schema.sql` 的 `main_error_books` 建表语句之后插入新表**
 
 在 `main_error_books` 表的 `ENGINE=InnoDB ...;` 行之后插入：
 
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS practice_results (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 在 `tools/db/schema.sql` 第 11 节触发器区（`trg_main_error_books_updated_at` 之后）插入触发器**
+- [x] **Step 2: 在 `tools/db/schema.sql` 第 11 节触发器区（`trg_main_error_books_updated_at` 之后）插入触发器**
 
 ```sql
 DROP TRIGGER IF EXISTS trg_practice_results_updated_at;
@@ -93,7 +93,7 @@ FOR EACH ROW
 SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 ```
 
-- [ ] **Step 3: 创建迁移 `tools/db/migrations/2026-08-11_add_practice_results.sql`**
+- [x] **Step 3: 创建迁移 `tools/db/migrations/2026-08-11_add_practice_results.sql`**
 
 ```sql
 -- 迁移：新建 practice_results 表（课堂练习判题结果持久化）
@@ -132,7 +132,7 @@ FOR EACH ROW
 SET NEW.updated_at = CURRENT_TIMESTAMP(3);
 ```
 
-- [ ] **Step 4: 对本地库执行迁移并验证表结构**
+- [x] **Step 4: 对本地库执行迁移并验证表结构**
 
 Run: `mysql -u ai_k12 -p ai_k12 < tools/db/migrations/2026-08-11_add_practice_results.sql`
 Expected: 无报错。
@@ -141,7 +141,7 @@ Expected: 无报错。
 Run: `mysql -u ai_k12 -p ai_k12 -e "SHOW CREATE TABLE practice_results\G" | grep -E "uniq_pr_student_card_qn|fk_pr_card_id|trg_practice_results"`
 Expected: 输出含 `uniq_pr_student_card_qn`、`fk_pr_card_id` 三行（触发器不在此输出，单独验证）。
 
-- [ ] **Step 5: 在 `docs/K12智学系统-数据库设计文档.md` §3.6 `main_error_books` 小节之后新增 `practice_results` 小节**
+- [x] **Step 5: 在 `docs/K12智学系统-数据库设计文档.md` §3.6 `main_error_books` 小节之后新增 `practice_results` 小节**
 
 ```markdown
 #### practice_results（课堂练习判题结果持久化）
@@ -174,7 +174,7 @@ Expected: 输出含 `uniq_pr_student_card_qn`、`fk_pr_card_id` 三行（触发�
 - Index: `idx_pr_student_lesson` ON `(student_id, lesson_id)` -- 课程级 reset
 ```
 
-- [ ] **Step 6: 修正同一文档陈旧的 `main_error_books` 列表**
+- [x] **Step 6: 修正同一文档陈旧的 `main_error_books` 列表**
 
 在 `main_error_books` 列表中 `source_ref_id` 行之后补 `lesson_id` 行、`wrong_answer_text` 行之后补 `dialogue_id` 行，并把 `source` 列说明改为含 `discuss`：
 
@@ -188,13 +188,13 @@ Expected: 输出含 `uniq_pr_student_card_qn`、`fk_pr_card_id` 三行（触发�
 | source | VARCHAR(20) | NO | - | `homework` / `unit_test` / `midterm` / `final` / `practice`（课堂练习答错）/ `discuss`（打开讨论即入错题本） |
 ```
 
-- [ ] **Step 7: 在该文档 §8 变更日志末尾加 v1.5 条目**
+- [x] **Step 7: 在该文档 §8 变更日志末尾加 v1.5 条目**
 
 ```markdown
 | v1.5 | 2026-08-11 | 新增 `practice_results` 表（课堂练习判题结果持久化，UNIQUE(student_id,card_id,question_n) 支撑单题重做 upsert）；修正 `main_error_books` 列表补 `lesson_id`/`dialogue_id` 列与 `source` 的 `discuss` 枚举 |
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tools/db/schema.sql tools/db/migrations/2026-08-11_add_practice_results.sql docs/K12智学系统-数据库设计文档.md
@@ -211,7 +211,7 @@ git commit -m "feat(db): 新增 practice_results 表 + 迁移 + DB 设计文档"
 - Create: `apps/server/src/database/repositories/practice-results.repo.ts`
 - Test: `apps/server/src/database/repositories/practice-results.repo.test.ts`
 
-- [ ] **Step 1: 写失败测试 `practice-results.repo.test.ts`**（镜像 `main-error-books.repo.test.ts` 的 `mockPool`）
+- [x] **Step 1: 写失败测试 `practice-results.repo.test.ts`**（镜像 `main-error-books.repo.test.ts` 的 `mockPool`）
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -298,12 +298,12 @@ describe('PracticeResultsRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/practice-results.repo.test.ts`
 Expected: FAIL - `Cannot find module './practice-results.repo'`
 
-- [ ] **Step 3: 在 `types.ts` 末尾追加 `PracticeResultRow`**
+- [x] **Step 3: 在 `types.ts` 末尾追加 `PracticeResultRow`**
 
 ```ts
 export interface PracticeResultRow extends RowDataPacket {
@@ -326,12 +326,12 @@ export interface PracticeResultRow extends RowDataPacket {
 }
 ```
 
-- [ ] **Step 4: 在 `index.ts` barrel 加导出**
+- [x] **Step 4: 在 `index.ts` barrel 加导出**
 
 在 value export 区加：`export { PracticeResultsRepository } from './practice-results.repo.js';`
 在 type export 行加 `PracticeResultRow`（追加到现有 `export type { ... } from './types.js';` 列表）。
 
-- [ ] **Step 5: 实现 `practice-results.repo.ts`**
+- [x] **Step 5: 实现 `practice-results.repo.ts`**
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -402,12 +402,12 @@ export class PracticeResultsRepository {
 }
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [x] **Step 6: 运行测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/practice-results.repo.test.ts`
 Expected: PASS（5 tests）
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/practice-results.repo.ts apps/server/src/database/repositories/practice-results.repo.test.ts apps/server/src/database/repositories/types.ts apps/server/src/database/repositories/index.ts
@@ -422,7 +422,7 @@ git commit -m "feat(practice): PracticeResultsRepository + PracticeResultRow"
 - Modify: `apps/server/src/database/repositories/main-error-books.repo.ts`
 - Test: `apps/server/src/database/repositories/main-error-books.repo.test.ts`
 
-- [ ] **Step 1: 在 `main-error-books.repo.test.ts` 末尾（`updateDialogueId` 用例后）加失败测试**
+- [x] **Step 1: 在 `main-error-books.repo.test.ts` 末尾（`updateDialogueId` 用例后）加失败测试**
 
 ```ts
   it('clearUnclearedByStudentQuestion 批量清零该题未清记录（questionId 非空）', async () => {
@@ -449,12 +449,12 @@ git commit -m "feat(practice): PracticeResultsRepository + PracticeResultRow"
   });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/main-error-books.repo.test.ts`
 Expected: FAIL - `repo.clearUnclearedByStudentQuestion is not a function`
 
-- [ ] **Step 3: 在 `main-error-books.repo.ts` 的 `markCleared` 方法之后追加 `clearUnclearedByStudentQuestion`**
+- [x] **Step 3: 在 `main-error-books.repo.ts` 的 `markCleared` 方法之后追加 `clearUnclearedByStudentQuestion`**
 
 ```ts
   /**
@@ -480,12 +480,12 @@ Expected: FAIL - `repo.clearUnclearedByStudentQuestion is not a function`
   }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/main-error-books.repo.test.ts`
 Expected: PASS（含新增 2 例）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/main-error-books.repo.ts apps/server/src/database/repositories/main-error-books.repo.test.ts
@@ -501,7 +501,7 @@ git commit -m "feat(practice): MainErrorBooksRepository.clearUnclearedByStudentQ
 - Modify: `apps/server/src/modules/practice/practice.service.test.ts`
 - Modify: `apps/server/src/modules/practice/dto/judge-practice.dto.ts`
 
-- [ ] **Step 1: 改 `practice.service.test.ts` 的 `mk` 默认值，加 `practiceResultsRepo` 与 `clearUnclearedByStudentQuestion`**
+- [x] **Step 1: 改 `practice.service.test.ts` 的 `mk` 默认值，加 `practiceResultsRepo` 与 `clearUnclearedByStudentQuestion`**
 
 替换现有 `mainErrorRepo` 默认行与 `mk` 末尾，使其变为（在 `lessonsRepo` 行后加 `practiceResultsRepo`，`mainErrorRepo` 加 `clearUnclearedByStudentQuestion`）：
 
@@ -531,7 +531,7 @@ git commit -m "feat(practice): MainErrorBooksRepository.clearUnclearedByStudentQ
   ...overrides,
 ```
 
-- [ ] **Step 2: 改 `mkSvc` 构造函数，加第 9 个参数 `practiceResultsRepo`**
+- [x] **Step 2: 改 `mkSvc` 构造函数，加第 9 个参数 `practiceResultsRepo`**
 
 原：
 ```ts
@@ -544,7 +544,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
   new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.lessonsRepo as any, deps.practiceResultsRepo as any);
 ```
 
-- [ ] **Step 3: 给 `describe('PracticeService.judge')` 块内全部 11 个 `svc.judge({...})` 调用加 `questionN`**
+- [x] **Step 3: 给 `describe('PracticeService.judge')` 块内全部 11 个 `svc.judge({...})` 调用加 `questionN`**
 
 该块内每个 judge 调用形如 `svc.judge({ studentId: 1, subjectId: 1, cardId: 5, lessonId: 9, questionText: '...', studentAnswer: '...' })`。在每个调用的 `lessonId: 9,` 之后、`questionText:` 之前插入 `questionN: '0-1',`。
 
@@ -558,7 +558,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
 ```
 对其余 10 个 judge 调用做同样插入（`describe('PracticeService.judge')` 块内，共 11 处，均含 `studentAnswer:`）。**注意：`getHint`/`startDiscuss`/`startCardDiscuss` 调用不要改**（它们不含 `studentAnswer:`，且其入参类型无 `questionN`）。
 
-- [ ] **Step 4: 在 `describe('PracticeService.judge')` 块末尾（line ~218 `})` 前）追加新用例**
+- [x] **Step 4: 在 `describe('PracticeService.judge')` 块末尾（line ~218 `})` 前）追加新用例**
 
 ```ts
   it('judge 答对 -> upsert practice_results(is_correct=true) + clearUnclearedByStudentQuestion，不入错题本', async () => {
@@ -638,7 +638,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
   });
 ```
 
-- [ ] **Step 5: 在文件末尾追加 `getResults` / `resetCard` / `resetLesson` 测试 describe 块**
+- [x] **Step 5: 在文件末尾追加 `getResults` / `resetCard` / `resetLesson` 测试 describe 块**
 
 ```ts
 describe('PracticeService.getResults', () => {
@@ -683,12 +683,12 @@ describe('PracticeService.resetCard / resetLesson', () => {
 });
 ```
 
-- [ ] **Step 6: 运行测试确认失败（judge 改造尚未实现）**
+- [x] **Step 6: 运行测试确认失败（judge 改造尚未实现）**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/practice.service.test.ts`
 Expected: FAIL - 新用例失败（`practiceResultsRepo` 未被调用 / `questionN` 不在 JudgeInput / `clearUnclearedByStudentQuestion` 未调用）；旧用例可能因 `questionN` 缺失报 TS 错（vitest 用 esbuild 不做类型检查，应运行但断言失败）。
 
-- [ ] **Step 7: 改 `practice.service.ts` - import 加 `PracticeResultsRepository`**
+- [x] **Step 7: 改 `practice.service.ts` - import 加 `PracticeResultsRepository`**
 
 原 import 行：
 ```ts
@@ -699,7 +699,7 @@ import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, Lessons
 import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, LessonsRepository, PracticeResultsRepository } from '../../database/repositories/index.js';
 ```
 
-- [ ] **Step 8: 改 `JudgeInput` 加 `questionN`**
+- [x] **Step 8: 改 `JudgeInput` 加 `questionN`**
 
 原：
 ```ts
@@ -725,7 +725,7 @@ export interface JudgeInput {
 }
 ```
 
-- [ ] **Step 9: 在 `JudgeOutput` 接口之后追加 `PracticeResultDto`**
+- [x] **Step 9: 在 `JudgeOutput` 接口之后追加 `PracticeResultDto`**
 
 ```ts
 export interface PracticeResultDto {
@@ -739,7 +739,7 @@ export interface PracticeResultDto {
 }
 ```
 
-- [ ] **Step 10: 构造函数追加第 9 个注入 `practiceResultsRepo`**
+- [x] **Step 10: 构造函数追加第 9 个注入 `practiceResultsRepo`**
 
 原：
 ```ts
@@ -769,7 +769,7 @@ export interface PracticeResultDto {
   ) {}
 ```
 
-- [ ] **Step 11: 改 `judge()` 错题本块为 find-or-create + 答对清错题 + 对/错都 upsert**
+- [x] **Step 11: 改 `judge()` 错题本块为 find-or-create + 答对清错题 + 对/错都 upsert**
 
 定位 `judge()` 中 `// 路由 3：答错 -> 入主线错题本` 注释起的 `if (!isCorrect) { ... }` 块及其后的 `return` 语句。原：
 ```ts
@@ -929,7 +929,7 @@ export interface PracticeResultDto {
     return { questionId, isCorrect, method, analysis, errorType, errorBookId };
 ```
 
-- [ ] **Step 12: 在 `judge()` 方法之后追加 `getResults` / `resetCard` / `resetLesson` 方法**
+- [x] **Step 12: 在 `judge()` 方法之后追加 `getResults` / `resetCard` / `resetLesson` 方法**
 
 ```ts
   /** 取该学生在该卡的持久化判题结果（is_correct TINYINT -> boolean）。 */
@@ -957,7 +957,7 @@ export interface PracticeResultDto {
   }
 ```
 
-- [ ] **Step 13: 改 `dto/judge-practice.dto.ts` 加 `questionN`**
+- [x] **Step 13: 改 `dto/judge-practice.dto.ts` 加 `questionN`**
 
 原：
 ```ts
@@ -981,17 +981,17 @@ export interface JudgePracticeDto {
 }
 ```
 
-- [ ] **Step 14: 运行测试确认通过**
+- [x] **Step 14: 运行测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/practice.service.test.ts`
 Expected: PASS（全部含新增用例）
 
-- [ ] **Step 15: 类型检查 + 全量测试**
+- [x] **Step 15: 类型检查 + 全量测试**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: tsc 通过；全部测试 PASS。
 
-- [ ] **Step 16: Commit**
+- [x] **Step 16: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/practice.service.ts apps/server/src/modules/practice/practice.service.test.ts apps/server/src/modules/practice/dto/judge-practice.dto.ts
@@ -1006,7 +1006,7 @@ git commit -m "feat(practice): judge 持久化结果 + 答错 find-or-create + �
 - Modify: `apps/server/src/modules/practice/practice.controller.ts`
 - Modify: `apps/server/src/modules/practice/practice.module.ts`
 
-- [ ] **Step 1: 改 `practice.controller.ts` import 行加 `BadRequestException`、`Delete`**
+- [x] **Step 1: 改 `practice.controller.ts` import 行加 `BadRequestException`、`Delete`**
 
 原：
 ```ts
@@ -1017,7 +1017,7 @@ import { Body, Controller, Get, ParseIntPipe, Post, Query, UseGuards } from '@ne
 import { BadRequestException, Body, Controller, Delete, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 ```
 
-- [ ] **Step 2: 改 `judge` 端点透传 `questionN`**
+- [x] **Step 2: 改 `judge` 端点透传 `questionN`**
 
 原：
 ```ts
@@ -1049,7 +1049,7 @@ import { BadRequestException, Body, Controller, Delete, Get, ParseIntPipe, Post,
   }
 ```
 
-- [ ] **Step 3: 在 `previous-errors` 端点之前追加 `results` 的 GET / DELETE 端点**
+- [x] **Step 3: 在 `previous-errors` 端点之前追加 `results` 的 GET / DELETE 端点**
 
 ```ts
   @Get('results')
@@ -1080,7 +1080,7 @@ import { BadRequestException, Body, Controller, Delete, Get, ParseIntPipe, Post,
   }
 ```
 
-- [ ] **Step 4: 改 `practice.module.ts` 注册 `PracticeResultsRepository`**
+- [x] **Step 4: 改 `practice.module.ts` 注册 `PracticeResultsRepository`**
 
 原 import 行：
 ```ts
@@ -1092,12 +1092,12 @@ import { QuestionsRepository, MainErrorBooksRepository, CardsRepository, Lessons
 ```
 原 providers 数组末尾 `LessonsRepository,` 后追加 `PracticeResultsRepository,`（即 providers 列表加一项）。
 
-- [ ] **Step 5: 类型检查**
+- [x] **Step 5: 类型检查**
 
 Run: `cd apps/server && npm run build`
 Expected: tsc 通过。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/practice.controller.ts apps/server/src/modules/practice/practice.module.ts
@@ -1111,7 +1111,7 @@ git commit -m "feat(practice): GET/DELETE /api/practice/results 端点 + 注册 
 **Files:**
 - Modify: `apps/web/src/services/api.ts`
 
-- [ ] **Step 1: `judgePractice` payload 加 `questionN`**
+- [x] **Step 1: `judgePractice` payload 加 `questionN`**
 
 原：
 ```ts
@@ -1145,7 +1145,7 @@ export function judgePractice(payload: {
 }
 ```
 
-- [ ] **Step 2: 在 `judgePractice` 之后追加 `PracticeResult` 类型与三个函数**
+- [x] **Step 2: 在 `judgePractice` 之后追加 `PracticeResult` 类型与三个函数**
 
 ```ts
 // --- Practice results（课堂练习判题结果持久化） ---
@@ -1173,12 +1173,12 @@ export function resetPracticeLesson(lessonId: number): Promise<void> {
 }
 ```
 
-- [ ] **Step 3: 类型检查 + 构建**
+- [x] **Step 3: 类型检查 + 构建**
 
 Run: `cd apps/web && npm run build`
 Expected: tsc + vite 构建通过。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -1192,7 +1192,7 @@ git commit -m "feat(web): PracticeResult 类型 + getPracticeResults/resetPracti
 **Files:**
 - Modify: `apps/web/src/store/practiceStore.ts`
 
-- [ ] **Step 1: import 加 `PracticeResult` 类型**
+- [x] **Step 1: import 加 `PracticeResult` 类型**
 
 原：
 ```ts
@@ -1203,14 +1203,14 @@ import type { JudgeResult } from '../services/api';
 import type { JudgeResult, PracticeResult } from '../services/api';
 ```
 
-- [ ] **Step 2: `PracticeState` 接口加 `loadResults` 签名**
+- [x] **Step 2: `PracticeState` 接口加 `loadResults` 签名**
 
 在 `setSession` 签名行之后加：
 ```ts
   loadResults: (cardId: number, questions: { n: string; text: string }[], results: PracticeResult[]) => void;
 ```
 
-- [ ] **Step 3: 实现 `loadResults`（合并语义：同卡重入保留在途作答）**
+- [x] **Step 3: 实现 `loadResults`（合并语义：同卡重入保留在途作答）**
 
 在 `setSession` 实现之后加：
 ```ts
@@ -1239,12 +1239,12 @@ import type { JudgeResult, PracticeResult } from '../services/api';
   }),
 ```
 
-- [ ] **Step 4: 类型检查 + 构建**
+- [x] **Step 4: 类型检查 + 构建**
 
 Run: `cd apps/web && npm run build`
 Expected: 通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/store/practiceStore.ts
@@ -1258,7 +1258,7 @@ git commit -m "feat(web): practiceStore.loadResults 持久化结果填充（合�
 **Files:**
 - Modify: `apps/web/src/components/business/AnswerModal.tsx`
 
-- [ ] **Step 1: 改 Props 的 `onSubmit` 签名加 `n`**
+- [x] **Step 1: 改 Props 的 `onSubmit` 签名加 `n`**
 
 原：
 ```ts
@@ -1273,7 +1273,7 @@ git commit -m "feat(web): practiceStore.loadResults 持久化结果填充（合�
   }>;
 ```
 
-- [ ] **Step 2: 改 `handleSubmit` 调用 `onSubmit` 传 `q.n`**
+- [x] **Step 2: 改 `handleSubmit` 调用 `onSubmit` 传 `q.n`**
 
 原：
 ```ts
@@ -1284,14 +1284,14 @@ git commit -m "feat(web): practiceStore.loadResults 持久化结果填充（合�
     const p = Promise.resolve(onSubmit(q.text, submittedAnswer, q.n))
 ```
 
-- [ ] **Step 3: 类型检查 + 构建**
+- [x] **Step 3: 类型检查 + 构建**
 
 Run: `cd apps/web && npm run build`
 Expected: 报错 - `CourseDetailPage` 传给 `onSubmit` 的回调签名仍是两参（下一个 Task 修）。本步先不构建通过，记下错误，于 Task 10 一并修复。
 
 > 说明：`onSubmit` 签名变更会引发 `CourseDetailPage` 的回调类型不匹配，属预期，Task 10 接线时消除。
 
-- [ ] **Step 4: Commit（与 Task 10 合并提交，避免中间态构建失败）**
+- [x] **Step 4: Commit（与 Task 10 合并提交，避免中间态构建失败）**
 
 暂不单独提交，待 Task 10 完成后一并提交。
 
@@ -1302,7 +1302,7 @@ Expected: 报错 - `CourseDetailPage` 传给 `onSubmit` 的回调签名仍是两
 **Files:**
 - Modify: `apps/web/src/components/business/AnswerResultList.tsx`
 
-- [ ] **Step 1: 改 Props `onRetry` 为 `onClose`**
+- [x] **Step 1: 改 Props `onRetry` 为 `onClose`**
 
 原：
 ```ts
@@ -1325,7 +1325,7 @@ interface Props {
 export function AnswerResultList({ questions, answers, onClose }: Props) {
 ```
 
-- [ ] **Step 2: 改「完成」按钮 `onClick` 由 `onRetry` 改 `onClose`**
+- [x] **Step 2: 改「完成」按钮 `onClick` 由 `onRetry` 改 `onClose`**
 
 原：
 ```ts
@@ -1346,9 +1346,9 @@ export function AnswerResultList({ questions, answers, onClose }: Props) {
           </button>
 ```
 
-- [ ] **Step 3: 暂不构建（待 Task 10 接线 `onClose` 后一并构建）**
+- [x] **Step 3: 暂不构建（待 Task 10 接线 `onClose` 后一并构建）**
 
-- [ ] **Step 4: Commit（与 Task 10 合并）**
+- [x] **Step 4: Commit（与 Task 10 合并）**
 
 ---
 
@@ -1357,7 +1357,7 @@ export function AnswerResultList({ questions, answers, onClose }: Props) {
 **Files:**
 - Modify: `apps/web/src/pages/student/CourseDetailPage.tsx`
 
-- [ ] **Step 1: import 加 `useEffect, useRef`（react）与新 API 函数**
+- [x] **Step 1: import 加 `useEffect, useRef`（react）与新 API 函数**
 
 定位文件顶部 react import（含 `useMemo` 的那行），追加 `useEffect, useRef`。
 
@@ -1370,7 +1370,7 @@ import { fetchLessonCards, getPreviousLessonErrors, updateProgress, judgePractic
 import { fetchLessonCards, getPreviousLessonErrors, updateProgress, judgePractice, getPracticeHint, getPracticeResults, resetPracticeCard, resetPracticeLesson, type LessonCard, type LessonCardsData, type PracticeGroupMeta } from '@/services/api';
 ```
 
-- [ ] **Step 2: store 解构加 `loadResults`**
+- [x] **Step 2: store 解构加 `loadResults`**
 
 原：
 ```ts
@@ -1381,14 +1381,14 @@ const { cardId: sessionCardId, setSession, record, answers, questions: sessionQu
 const { cardId: sessionCardId, setSession, loadResults, record, answers, questions: sessionQuestions, reset, hints, setHint } = usePracticeStore();
 ```
 
-- [ ] **Step 3: 加 `useRef` 标记已加载的 cardId**
+- [x] **Step 3: 加 `useRef` 标记已加载的 cardId**
 
 在 store 解构行之后加：
 ```ts
   const loadedResultsRef = useRef<number | null>(null);
 ```
 
-- [ ] **Step 4: 加进卡加载持久化结果的 effect**
+- [x] **Step 4: 加进卡加载持久化结果的 effect**
 
 在 `fallbackPractice` 的 `useMemo` 之后加：
 ```ts
@@ -1407,7 +1407,7 @@ const { cardId: sessionCardId, setSession, loadResults, record, answers, questio
   }, [card?.id]);
 ```
 
-- [ ] **Step 5: 改 `handleOpenModal` 不再 `setSession` 清空**
+- [x] **Step 5: 改 `handleOpenModal` 不再 `setSession` 清空**
 
 原：
 ```ts
@@ -1442,7 +1442,7 @@ const { cardId: sessionCardId, setSession, loadResults, record, answers, questio
   };
 ```
 
-- [ ] **Step 6: 改 AnswerModal 的 `onSubmit` 回调，直传 `n` + `questionN`**
+- [x] **Step 6: 改 AnswerModal 的 `onSubmit` 回调，直传 `n` + `questionN`**
 
 原：
 ```ts
@@ -1497,7 +1497,7 @@ const { cardId: sessionCardId, setSession, loadResults, record, answers, questio
             }}
 ```
 
-- [ ] **Step 7: 改 AnswerResultList 接线 `onClose`（移除 reset）**
+- [x] **Step 7: 改 AnswerResultList 接线 `onClose`（移除 reset）**
 
 原：
 ```tsx
@@ -1520,7 +1520,7 @@ const { cardId: sessionCardId, setSession, loadResults, record, answers, questio
       )}
 ```
 
-- [ ] **Step 8: 在练习卡题块列表上方加 reset 工具条**
+- [x] **Step 8: 在练习卡题块列表上方加 reset 工具条**
 
 定位练习卡题块列表渲染处（`card.cardType === 'practice'` 分支内、题块列表之前）。在其前插入工具条：
 
@@ -1553,12 +1553,12 @@ const { cardId: sessionCardId, setSession, loadResults, record, answers, questio
 
 > 若该练习卡题块列表渲染处已有 `card?.cardType === 'practice'` 守卫的父容器，可将工具条直接放在该容器内列表之前，外层守卫可省略；以实际 JSX 结构为准，工具条代码不变。
 
-- [ ] **Step 9: 类型检查 + 构建**
+- [x] **Step 9: 类型检查 + 构建**
 
 Run: `cd apps/web && npm run build`
 Expected: tsc + vite 构建通过（Task 8/9 的签名变更于此消除）。
 
-- [ ] **Step 10: Commit（含 Task 8/9/10）**
+- [x] **Step 10: Commit（含 Task 8/9/10）**
 
 ```bash
 git add apps/web/src/components/business/AnswerModal.tsx apps/web/src/components/business/AnswerResultList.tsx apps/web/src/pages/student/CourseDetailPage.tsx
@@ -1574,7 +1574,7 @@ git commit -m "feat(web): 练习结果持久化回显 + 单卡/课程级 reset +
 - Modify: `docs/API接口与数据流设计文档.md`
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: `openapi.yaml` - `JudgeRequest` schema 加 `questionN`**
+- [x] **Step 1: `openapi.yaml` - `JudgeRequest` schema 加 `questionN`**
 
 在 `JudgeRequest` 的 `properties` 中 `studentAnswer` 之前加：
 ```yaml
@@ -1584,7 +1584,7 @@ git commit -m "feat(web): 练习结果持久化回显 + 单卡/课程级 reset +
 ```
 并把 `required` 改为 `[cardId, lessonId, subjectId, questionN, questionText, studentAnswer]`。
 
-- [ ] **Step 2: `openapi.yaml` - 在 `/practice/previous-errors` path 之前加 `GET/DELETE /practice/results`**
+- [x] **Step 2: `openapi.yaml` - 在 `/practice/previous-errors` path 之前加 `GET/DELETE /practice/results`**
 
 ```yaml
   /practice/results:
@@ -1647,7 +1647,7 @@ git commit -m "feat(web): 练习结果持久化回显 + 单卡/课程级 reset +
                   message: { type: string, example: 须指定 cardId 或 lessonId }
 ```
 
-- [ ] **Step 3: `openapi.yaml` - 在 practice schemas 区（`PreviousErrorsResult` 之后）加 `PracticeResult` schema**
+- [x] **Step 3: `openapi.yaml` - 在 practice schemas 区（`PreviousErrorsResult` 之后）加 `PracticeResult` schema**
 
 ```yaml
 PracticeResult:
@@ -1662,7 +1662,7 @@ PracticeResult:
     errorType: { type: string, nullable: true, enum: [logic, calculation, format, missing] }
 ```
 
-- [ ] **Step 4: API 设计文档 §4.16 表加两行**
+- [x] **Step 4: API 设计文档 §4.16 表加两行**
 
 在 `/api/practice/discuss-card` 行之后、`GET /api/practice/previous-errors` 行之前（或表末）加：
 ```markdown
@@ -1670,7 +1670,7 @@ PracticeResult:
 | DELETE | `/api/practice/results?cardId={cardId}` 或 `?lessonId={lessonId}` | 重置练习记录：`cardId` 清单卡、`lessonId` 清本课全部练习卡（二者互斥，同传/都缺 400）。只删 `practice_results`，不动 `main_error_books` | MVP |
 ```
 
-- [ ] **Step 5: API 设计文档 §6.9 judge 数据流补语义**
+- [x] **Step 5: API 设计文档 §6.9 judge 数据流补语义**
 
 在 §6.9 流程图末尾「响应返回前端」之前，把「答错（!isCorrect）-> 写入主线错题本」段说明由直接 create 改为 find-or-create，并在响应返回前补 `practice_results` 落库 + 答对清错题。具体：在该段 `mainErrorRepo.create({...})` 后加注释行：
 ```text
@@ -1683,7 +1683,7 @@ PracticeResult:
 对/错都 upsert practice_results（best-effort；UNIQUE student_id+card_id+question_n，单题重做覆盖）
 ```
 
-- [ ] **Step 6: API 设计文档新增 §6.x 数据流（在 §6.13 之后）**
+- [x] **Step 6: API 设计文档新增 §6.x 数据流（在 §6.13 之后）**
 
 ```text
 ### 6.14 课堂练习结果持久化与 reset
@@ -1705,24 +1705,24 @@ practiceStore.loadResults 填充 answers -> 题块显示 ✓/✗（analysis 供�
   │  （reset 只删 practice_results，不碰 main_error_books）
 ```
 
-- [ ] **Step 7: API 设计文档 §10 变更日志加 v1.7**
+- [x] **Step 7: API 设计文档 §10 变更日志加 v1.7**
 
 ```markdown
 | v1.7 | 2026-08-11 | 新增 `GET/DELETE /api/practice/results`（判题结果持久化 + 两级 reset）；`JudgeRequest` 加 `questionN`；新增 §6.14 数据流；§6.9 judge 流程补「答错 find-or-create 错题本、答对清错题、对/错都落 `practice_results`」 |
 ```
 
-- [ ] **Step 8: `CLAUDE.md` 追加实现记录段（在最后一组「2026-08-10 新增…」之后）**
+- [x] **Step 8: `CLAUDE.md` 追加实现记录段（在最后一组「2026-08-10 新增…」之后）**
 
 ```markdown
 **2026-08-11 新增（课堂练习对错持久化）**：① DB--新建 `practice_results` 表（一行=学生×卡×题判题结果，UNIQUE `student_id+card_id+question_n` 支撑单题重做 upsert；`schema.sql` + 迁移 + 触发器 + DB 设计文档同步；顺带修正 `main_error_books` 列表陈旧的 `lesson_id`/`dialogue_id`/`discuss`）。② `PracticeResultsRepository`（`upsert` 走 `INSERT ... ON DUPLICATE KEY UPDATE`、`findByStudentCard`、`deleteByStudentCard`/`deleteByStudentLesson`，best-effort 由 `judge` try/catch）。③ `judge()` 改造--`JudgeInput` 加 `questionN`；对/错都 best-effort upsert `practice_results`；**答错改 find-or-create 错题本**（`findUnclearedByStudentQuestion` 命中复用、未命中才 create，避免重复答错堆积，孤儿题回滚补偿仅新建分支保留）；**答对调新方法 `clearUnclearedByStudentQuestion`**（镜像 find 条件批量 `is_cleared=1`，不限 source，影响跨课门禁计数；接线此前未接线的 markCleared 语义）。④ 新端点 `GET /api/practice/results?cardId=`（取持久化结果）、`DELETE /api/practice/results?cardId=|lessonId=`（单卡/课程级 reset，互斥校验，只删 `practice_results` 不动 `main_error_books`）。⑤ 前端--`practiceStore.loadResults`（合并语义：同卡重入保留在途作答、DB 填空缺，防加载晚于作答覆盖）；`CourseDetailPage` 进卡 effect 拉取结果回显 ✓/✗、`handleOpenModal` 不再 `setSession` 清空、reset 工具条（重置本卡/清空本课）、`onSubmit` 直传 `n`（消除题面文本反查）；**`AnswerResultList`「完成」由 `onRetry` 改 `onClose`、移除 `reset()`**（修核心 bug：关闭结果表单不再清空 ✓/✗）。⑥ 验证：server tsc + 测试绿、web tsc 绿。详见 `docs/superpowers/plans/2026-08-11-practice-results-persistence.md`。
 ```
 
-- [ ] **Step 9: 端点对齐检查**
+- [x] **Step 9: 端点对齐检查**
 
 Run: `grep -n "/practice/results" docs/api/openapi.yaml docs/API接口与数据流设计文档.md`
 Expected: 两文档均命中 `GET` 与 `DELETE` 的 `/practice/results` 路径。
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add docs/api/openapi.yaml docs/API接口与数据流设计文档.md CLAUDE.md
@@ -1733,12 +1733,12 @@ git commit -m "docs: 同步 practice_results 持久化端点/数据流/CLAUDE.md
 
 ## 端到端验证（全部 Task 完成后）
 
-- [ ] **后端全量测试绿**
+- [x] **后端全量测试绿**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: tsc 通过、全部测试 PASS（含新增 repo/service 用例）。
 
-- [ ] **前端构建绿**
+- [x] **前端构建绿**
 
 Run: `cd apps/web && npm run build`
 Expected: tsc + vite 通过。

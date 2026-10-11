@@ -61,7 +61,7 @@ async findErrorBookEntries(studentId: number, subjectId: number, filters: {
 }): Promise<Array<{...}>>  // 动态 WHERE，默认 is_cleared=0
 ```
 
-- [ ] **Step 1: 写失败测试**（training.service.test.ts，mock 模式仿 practice.service.test.ts 的 mk()）
+- [x] **Step 1: 写失败测试**（training.service.test.ts，mock 模式仿 practice.service.test.ts 的 mk()）
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -104,12 +104,12 @@ describe('TrainingService.getErrorBookEntries', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.service.test.ts`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `main-error-books.repo.ts` 新增（动态 WHERE，参数化防注入；kpId 过滤用 EXISTS 子查询保证不因 JOIN 产生重复行）：
 
@@ -141,12 +141,12 @@ Expected: FAIL（模块不存在）。
 
 `training.service.ts`：`getErrorBookEntries(studentId, subjectId, filters)`——调 repo，按 errorBookId 聚合 kpIds，映射 DTO（created_at.toISOString()）。`training.controller.ts`：`@Controller('api/training')` + `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles('student')`，GET error-book 端点（Query 参数 from/to/type 为 string，kpId/subjectId ParseIntPipe）。`training.module.ts`：imports `[PracticeModule]`（复用 JudgeCoreService），providers `[TrainingService, MainErrorBooksRepository, QuestionsRepository]`，controllers `[TrainingController]`。`app.module.ts` imports 加 TrainingModule。DTO 用 plain interface（项目惯例）。
 
-- [ ] **Step 4: 全量回归**
+- [x] **Step 4: 全量回归**
 
 Run: `cd apps/server && npm test`
 Expected: 全绿（既有 265 + 新增）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/training/ apps/server/src/app.module.ts apps/server/src/database/repositories/main-error-books.repo.ts
@@ -173,7 +173,7 @@ git commit -m "feat(server): training 模块骨架 + 错题练习筛选端点"
 // POST /api/training/bump-error-levels {errorBookIds: number[]} -> void（复用既有 repo.bumpLevels）
 ```
 
-- [ ] **Step 1: 写失败测试（追加）**
+- [x] **Step 1: 写失败测试（追加）**
 
 ```ts
 describe('TrainingService.judgeTraining', () => {
@@ -186,7 +186,7 @@ describe('TrainingService.judgeTraining', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败 → Step 3: 实现**
+- [x] **Step 2: 跑测试确认失败 → Step 3: 实现**
 
 `training.service.ts`：
 
@@ -199,7 +199,7 @@ describe('TrainingService.judgeTraining', () => {
 
 controller 的 judge 端点 body 校验 source 只接受 'targeted' | 'error_practice'（白名单，非法 400）；bump-error-levels 端点镜像 practice.controller.ts:106-112 的写法。
 
-- [ ] **Step 4: 回归 + Commit**
+- [x] **Step 4: 回归 + Commit**
 
 ```bash
 git commit -m "feat(server): training 判题端点（JudgeCore 封装）+ 仍错 bump"
@@ -230,7 +230,7 @@ export class QuestionHintsRepository {
 }
 ```
 
-- [ ] **Step 1: 失败测试（追加，hint 语义三态：缓存命中 / 生成+写回 / AI 失败 503）**
+- [x] **Step 1: 失败测试（追加，hint 语义三态：缓存命中 / 生成+写回 / AI 失败 503）**
 
 ```ts
 describe('TrainingService.getHint', () => {
@@ -250,7 +250,7 @@ describe('TrainingService.getHint', () => {
 
 （mkSvc2 = 含 questionHintsRepo/hint 的构造；service 构造函数在 Task 1 基础上追加 2 个依赖，既有测试 mk() 同步补占位——机械调整。）
 
-- [ ] **Step 2: 失败 → Step 3: 实现（镜像 practice.service.ts:475-510 的 getHint 三段式：查缓存→生成→写回）**
+- [x] **Step 2: 失败 → Step 3: 实现（镜像 practice.service.ts:475-510 的 getHint 三段式：查缓存→生成→写回）**
 
 repo SQL：
 
@@ -270,7 +270,7 @@ repo SQL：
 
 service：getHint 先 questionsRepo.findById 拿题面（404 若无）→ 查缓存 → 未命中 `this.hint.generate({ questionContent: q.content, subject: 'math' })` → upsert best-effort → 返回。module providers 加 QuestionHintsRepository + HintCapability（可直接实例化，镜像 practice.module 模式）。
 
-- [ ] **Step 4: 回归 + Commit**
+- [x] **Step 4: 回归 + Commit**
 
 ```bash
 git commit -m "feat(server): training 提示端点（question_hints 题级缓存）"
@@ -297,9 +297,9 @@ export function bumpTrainingErrorLevels(errorBookIds: number[]): Promise<void>;
 export function getTrainingHint(questionId: number): Promise<HintResult>;
 ```
 
-- [ ] **Step 1: api.ts 追加**（fetchApi 模式照抄 judgePractice 附近写法；from/to 为 YYYY-MM-DD 字符串，URL 拼接 encodeURIComponent）
+- [x] **Step 1: api.ts 追加**（fetchApi 模式照抄 judgePractice 附近写法；from/to 为 YYYY-MM-DD 字符串，URL 拼接 encodeURIComponent）
 
-- [ ] **Step 2: ErrorPracticePage**
+- [x] **Step 2: ErrorPracticePage**
 
 页面结构（容器镜像 CourseDetailPage.tsx:555 的沉浸层写法：`student-theme-container` + `data-theme={mode}` + `data-school`；themeStore 的 mode/autoToggleNightMode 在 useEffect 挂一次）：
 
@@ -309,9 +309,9 @@ export function getTrainingHint(questionId: number): Promise<HintResult>;
 - 空态：无可练错题时居中提示「当前筛选下没有待练错题」+线性 SVG 图标。
 - 数据加载：mount 时 getTrainingErrorBook({subjectId: 1})（数学硬编码 MATH_SUBJECT_ID=1，与现有页一致）。
 
-- [ ] **Step 3: 路由注册**：`/student/training/errors`（RequireRole student，独立全屏路由，与 /student/training 同层）。
+- [x] **Step 3: 路由注册**：`/student/training/errors`（RequireRole student，独立全屏路由，与 /student/training 同层）。
 
-- [ ] **Step 4: lint + build + Commit**
+- [x] **Step 4: lint + build + Commit**
 
 ```bash
 git commit -m "feat(web): 错题练习列表页（时间/题型筛选 + 选题）"
@@ -329,7 +329,7 @@ git commit -m "feat(web): 错题练习列表页（时间/题型筛选 + 选题�
 - Consumes: QuestionRunner（计划 1）、Task 4 API、AnswerResultList（components/business/）。
 - Produces: 完整错题练习闭环。
 
-- [ ] **Step 1: 实现 run 页**
+- [x] **Step 1: 实现 run 页**
 
 核心逻辑（镜像 CleanupPhase 的收尾语义但走 training 端点）：
 
@@ -350,9 +350,9 @@ git commit -m "feat(web): 错题练习列表页（时间/题型筛选 + 选题�
 
 容器同 Task 4 沉浸层写法。AnswerResultList 是全屏 modal 样式（fixed inset-0），直接在 result 态渲染即可（CleanupPhase 的 hasErrors 态同款用法）。
 
-- [ ] **Step 2: 路由注册**：`/student/training/errors/run`。
+- [x] **Step 2: 路由注册**：`/student/training/errors/run`。
 
-- [ ] **Step 3: lint + build + Commit**
+- [x] **Step 3: lint + build + Commit**
 
 ```bash
 git commit -m "feat(web): 错题练习答题页（判题/提示/答对清零/仍错 bump）"
@@ -385,13 +385,13 @@ def build_kp_seed_sql(tree: list[dict], subject_id: int = 1) -> str:
 # tools/db/migrations/YYYY-MM-DD_add_math_knowledge_points.sql，grade_band='junior'。
 ```
 
-- [ ] **Step 1: 失败测试**（build_kp_seed_sql 纯函数：两级树→SQL 文本断言；非法输入（空名/重复名/超界数量）抛 ValueError；LLM 不参与——mock）
+- [x] **Step 1: 失败测试**（build_kp_seed_sql 纯函数：两级树→SQL 文本断言；非法输入（空名/重复名/超界数量）抛 ValueError；LLM 不参与——mock）
 
-- [ ] **Step 2: 失败 → Step 3: 实现**
+- [x] **Step 2: 失败 → Step 3: 实现**
 
 prompt（kp_tree.txt）核心要求：按义务教育数学课程标准（2022 版）梳理初中数学知识点两级树；一级为领域（数与式/方程与不等式/函数/三角形/四边形/圆/图形变换/统计与概率等），二级为可考查知识点；只输出 JSON：`[{"name": "...", "children": [{"name": "..."}]}]`；不得输出其他文本。
 
-- [ ] **Step 4: 跑测试通过 + 执行生成**（`cd tools/data-refinery && python src/generate_kp_tree.py`，人工过目产出的 SQL 后执行入库）+ Commit
+- [x] **Step 4: 跑测试通过 + 执行生成**（`cd tools/data-refinery && python src/generate_kp_tree.py`，人工过目产出的 SQL 后执行入库）+ Commit
 
 ```bash
 git commit -m "feat(data-refinery): KP 树 LLM 生成脚本 + 初中数学种子 SQL"
@@ -410,7 +410,7 @@ git commit -m "feat(data-refinery): KP 树 LLM 生成脚本 + 初中数学种子
 - Consumes: `create_llm_client`；`knowledge_points` 表（Task 6 种子）；`questions` 表。
 - Produces: `question_knowledge_points` 填充（role='primary'，每题 1-3 个 kp）。
 
-- [ ] **Step 1: 失败测试**（核心纯函数 + mock LLM，镜像 test_card_labeler.py 的手法）：
+- [x] **Step 1: 失败测试**（核心纯函数 + mock LLM，镜像 test_card_labeler.py 的手法）：
 
 ```python
 # 被测核心：parse_kp_response(raw: str, whitelist: dict[int, str]) -> list[int]
@@ -419,11 +419,11 @@ git commit -m "feat(data-refinery): KP 树 LLM 生成脚本 + 初中数学种子
 # 主流程幂等：SELECT 未标注题（LEFT JOIN qkp IS NULL）只处理无记录题
 ```
 
-- [ ] **Step 2: 失败 → Step 3: 实现**
+- [x] **Step 2: 失败 → Step 3: 实现**
 
 脚本主流程（镜像 backfill_practice_questions.py 结构）：连接 DB（cfg 同款 pymysql.connect）→ 加载 KP 白名单（`SELECT id, name FROM knowledge_points WHERE subject_id=1`）→ 分批（每批 10 题）调 LLM（prompt 附白名单清单 + 每题 id/题面截断 500 字，要求输出 `{"items": [{"qid": 123, "kps": [1, 17]}]}`）→ 白名单校验 → `INSERT IGNORE INTO question_knowledge_points (question_id, knowledge_point_id, role) VALUES ...` → 打印统计（标注/跳过/失败清单，失败可重跑）。
 
-- [ ] **Step 4: 测试通过 + 执行回填**（全量 ~447 题，本地 Qwen 批量）+ 验证：
+- [x] **Step 4: 测试通过 + 执行回填**（全量 ~447 题，本地 Qwen 批量）+ 验证：
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) FROM question_knowledge_points;"
@@ -462,9 +462,9 @@ async findRandomByKpAndType(subjectId: number, kpId: number, type: string | null
 //      ORDER BY RAND() LIMIT ?
 ```
 
-- [ ] **Step 1: 失败测试**：service 层透传参数 + 空结果处理（抽不到题返回空数组，controller 层 404「该组合下暂无题目」）；repo 的 SQL 断言（mock pool execute 断言 SQL 文本含 JOIN/answer='' 过滤/RAND()）。
-- [ ] **Step 2: 失败 → Step 3: 实现**（knowledge-points.repo.ts：`findBySubject(subjectId)` 返回平铺列表，树形组装放前端；抽题题单映射剥离 answer/explanation 字段——白名单序列化，防答案泄露）。
-- [ ] **Step 4: 回归 + Commit**
+- [x] **Step 1: 失败测试**：service 层透传参数 + 空结果处理（抽不到题返回空数组，controller 层 404「该组合下暂无题目」）；repo 的 SQL 断言（mock pool execute 断言 SQL 文本含 JOIN/answer='' 过滤/RAND()）。
+- [x] **Step 2: 失败 → Step 3: 实现**（knowledge-points.repo.ts：`findBySubject(subjectId)` 返回平铺列表，树形组装放前端；抽题题单映射剥离 answer/explanation 字段——白名单序列化，防答案泄露）。
+- [x] **Step 4: 回归 + Commit**
 
 ```bash
 git commit -m "feat(server): 专项练习端点（KP 树 + 随机抽题）"
@@ -484,13 +484,13 @@ git commit -m "feat(server): 专项练习端点（KP 树 + 随机抽题）"
 **Interfaces:**
 - Consumes: Task 8 端点、QuestionRunner、AnswerResultList、Task 4 judgeTraining（source='targeted'）/getTrainingHint。
 
-- [ ] **Step 1: api.ts 追加**（getKnowledgePoints、startTargetedPractice）
+- [x] **Step 1: api.ts 追加**（getKnowledgePoints、startTargetedPractice）
 
-- [ ] **Step 2: TargetedConfigPage**：沉浸层容器；KP 两级级联选择（一级 Chip 组 + 二级列表，单选二级）；题型下拉（全部/选择/填空/判断/解答/证明，映射 questions.type 枚举）；题量档（3/5/8/10，Chip 单选）；「开始练习」→ startTargetedPractice → 题单 sessionStorage('training:targeted') → run 页；空题库提示「该专项暂无足够题目」。
+- [x] **Step 2: TargetedConfigPage**：沉浸层容器；KP 两级级联选择（一级 Chip 组 + 二级列表，单选二级）；题型下拉（全部/选择/填空/判断/解答/证明，映射 questions.type 枚举）；题量档（3/5/8/10，Chip 单选）；「开始练习」→ startTargetedPractice → 题单 sessionStorage('training:targeted') → run 页；空题库提示「该专项暂无足够题目」。
 
-- [ ] **Step 3: TargetedRunPage**：镜像 Task 5 run 页（draftKeyPrefix='tp'；source='targeted'；onFinish 后 AnswerResultList，仍错题**不入** bump——专项练习答错已由 JudgeCore 自动入错题本，收尾无需 bump；onClose 回配置页）。题单 RunnerQuestion：n=String(questionId)。
+- [x] **Step 3: TargetedRunPage**：镜像 Task 5 run 页（draftKeyPrefix='tp'；source='targeted'；onFinish 后 AnswerResultList，仍错题**不入** bump——专项练习答错已由 JudgeCore 自动入错题本，收尾无需 bump；onClose 回配置页）。题单 RunnerQuestion：n=String(questionId)。
 
-- [ ] **Step 4: TrainingSubjectPage 数学卡导航改 '/student/training/targeted'**（占位的 exam 路由保留——学生从专项页顶部 Tab 或后续考试任务进入考试；本任务在配置页顶栏加「考试」文字链接到 /student/training/exam 占位页，保持可达）。
+- [x] **Step 4: TrainingSubjectPage 数学卡导航改 '/student/training/targeted'**（占位的 exam 路由保留——学生从专项页顶部 Tab 或后续考试任务进入考试；本任务在配置页顶栏加「考试」文字链接到 /student/training/exam 占位页，保持可达）。
 
 - [ ] **Step 5: lint + build + 手动走查**（登录 → 训练 → 数学 → 专项配置 → 抽题 → 做题 → 提示按钮 → 结果页）+ Commit
 
@@ -506,8 +506,8 @@ git commit -m "feat(web): 专项练习配置页 + 答题页"
 - Modify: `docs/API接口与数据流设计文档.md`（§4 新增「Training — /api/training」小节：error-book/judge/hint/knowledge-points/targeted/bump-error-levels 六端点，阶段=MVP；§6 补错题练习与专项练习数据流）
 - Modify: `docs/api/openapi.yaml`（同步收录全部端点，JWT bearer + student role）
 
-- [ ] **Step 1: 两文档同步更新**（端点路径/方法/参数/响应结构逐一对照实现）。
-- [ ] **Step 2: 一致性核对**：
+- [x] **Step 1: 两文档同步更新**（端点路径/方法/参数/响应结构逐一对照实现）。
+- [x] **Step 2: 一致性核对**：
 
 ```bash
 grep -o "'/api/training[^']*'" docs/API接口与数据流设计文档.md | sort -u

@@ -48,7 +48,7 @@
 豪放不羁的浪漫情思，带着微醺的迷惘与好奇。
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `test_meaning_cli.py` 追加：
 
@@ -113,12 +113,12 @@ def test_parse_uidoc_篇名去掉作者括号():
     assert not any("刘禹锡" in k for k in got)
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_meaning_cli.py -k uidoc -v`
 Expected: FAIL —— `ImportError: cannot import name 'parse_uidoc'`
 
-- [ ] **Step 3: 实现 parse_uidoc**
+- [x] **Step 3: 实现 parse_uidoc**
 
 在 `meaning_cli.py` 内新增（与 `parse_template` 并列；**不改 `parse_template` 行为**）：
 
@@ -154,11 +154,11 @@ def parse_uidoc(text: str) -> dict[str, list[tuple[str, str, str]]]:
 
 （实现要点：以 `##` 起篇、`###` 起句、`####` 起字段；`关键字词` 字段内容**读入即丢**；字段正文按行累加到下一个 `####`/`###`/`##` 为止。结构与既有 `parse_template` 同形，可直接照抄其状态机。）
 
-- [ ] **Step 4: `--apply` 自动识别两种格式**
+- [x] **Step 4: `--apply` 自动识别两种格式**
 
 `--apply` 与 `--export` 的 `--input` 现在要能喂两种文件。做法：读入文本后先试 `parse_uidoc`（判据：文本里出现 `^###\s` 且出现 `^####\s+深层含义`），命中就用它，否则回退 `parse_template`。
 
-- [ ] **Step 5: 加一条「永不写 key_terms」的钉子**
+- [x] **Step 5: 加一条「永不写 key_terms」的钉子**
 
 ```python
 def test_apply_的_UPDATE_语句只动_sentence_meanings():
@@ -167,12 +167,12 @@ def test_apply_的_UPDATE_语句只动_sentence_meanings():
         assert banned not in _UPDATE_SQL
 ```
 
-- [ ] **Step 6: 跑测试 + 全量**
+- [x] **Step 6: 跑测试 + 全量**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_meaning_cli.py -v && python -m pytest -q`
 Expected: 全绿
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add tools/data-refinery/src/meaning_cli.py tools/data-refinery/tests/test_meaning_cli.py
@@ -193,7 +193,7 @@ git commit -m "feat(refinery): meaning_cli 支持用户手写文档格式（关�
 
 **为什么不用 `split_sentences`**：它在 `？！` 处也断句，会把「云横秦岭家何在？雪拥蓝关马不前。」切成两句；库里已有 15 首是按**一联一句**切的。所以按用户文档给的**切分位置**切，而**字面文本一律取自库里的 `body`**——这样不变式在构造上成立，也顺带修掉半角/全角引号那类排版差异。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `tools/data-refinery/tests/test_meaning_backfill.py`：
 
@@ -233,12 +233,12 @@ def test_切分对不上就抛错_绝不猜():
         slice_by_doc_boundaries(body, doc)
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_meaning_backfill.py -v`
 Expected: FAIL —— `ModuleNotFoundError: src.meaning_backfill_cli`
 
-- [ ] **Step 3: 实现切片核心**
+- [x] **Step 3: 实现切片核心**
 
 ```python
 _QUOTE_FOLD = str.maketrans({
@@ -270,7 +270,7 @@ def slice_by_doc_boundaries(body: str, doc_sentences: list[str]) -> list[str]:
    `end = positions[cursor + len(d) - 1] + 1`；再把紧随其后的空白并入本段（保证拼回原文）。
 5. 尾部若有剩余空白，并入最后一段。
 
-- [ ] **Step 4: 实现 CLI 骨架**
+- [x] **Step 4: 实现 CLI 骨架**
 
 ```python
 def parse_args(argv=None): ...
@@ -297,12 +297,12 @@ _UPDATE_SENTENCES_SQL = (
 写库 `UPDATE ... WHERE id = %s AND sentences IS NULL`（并发守卫：取数到写库之间
 别的管线可能改过这行），影响行数 ≠ 1 时报「未生效」而不是声称成功。
 
-- [ ] **Step 5: dry-run 核对全 16 首**
+- [x] **Step 5: dry-run 核对全 16 首**
 
 Run: `cd tools/data-refinery && python src/meaning_backfill_cli.py --dry-run --input /Users/lichao/Downloads/诗深层含义.md`
 Expected: 16 首全部切片成功、`join == body`；`丑奴儿·书博山道中壁` 也应通过（引号差异由 body 切片吸收）。
 
-- [ ] **Step 6: 跑测试 + 全量 + 提交**
+- [x] **Step 6: 跑测试 + 全量 + 提交**
 
 Run: `cd tools/data-refinery && python -m pytest -q`
 
@@ -317,18 +317,18 @@ git commit -m "feat(refinery): 按用户文档边界补切句（字面取自 bod
 
 **Files:** 无（数据操作 + 验收）
 
-- [ ] **Step 1: 备份要动的两列**
+- [x] **Step 1: 备份要动的两列**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT id, work_title, key_terms, sentences, sentence_meanings FROM chinese_passages ORDER BY id" > /tmp/chinese_passages_backup_before_import.tsv
 ```
 
-- [ ] **Step 2: 补切句**
+- [x] **Step 2: 补切句**
 
 Run: `cd tools/data-refinery && python src/meaning_backfill_cli.py --apply --input /Users/lichao/Downloads/诗深层含义.md`
 Expected: 写 16 行（只 `sentences` + `full_translation`）。
 
-- [ ] **Step 3: 灌含义/情感**
+- [x] **Step 3: 灌含义/情感**
 
 Run: `cd tools/data-refinery && python src/meaning_cli.py --apply --input /Users/lichao/Downloads/诗深层含义.md`
 Expected: 写 31 行（只 `sentence_meanings`）。
@@ -340,7 +340,7 @@ Expected: 写 31 行（只 `sentence_meanings`）。
 > 不是归一能修的范围。那 3 句在该行会写成 `null`，清单里以「留空的句子」出现；
 > 要补齐得先人工修 id=114 的 `sentences` 或正文，另开一单。
 
-- [ ] **Step 4: 核对「一个字节都没多写」**
+- [x] **Step 4: 核对「一个字节都没多写」**
 
 ```bash
 # key_terms 必须与备份逐字一致（16 首新切句的仍为 NULL；15 首诗的保持原值）
@@ -354,7 +354,7 @@ FROM chinese_passages;"
 
 Expected：有字词的篇目 = 与备份前一致；有含义的篇目 = 31；状态位 = 50。
 
-- [ ] **Step 5: 抽查含义池与文言文排除**
+- [x] **Step 5: 抽查含义池与文言文排除**
 
 ```bash
 # 含义池只应有 31 首诗，不含岳阳楼记等 10 首文言文
@@ -370,10 +370,10 @@ WHERE work_title IN ('岳阳楼记','醉翁亭记','湖心亭看雪','曹刿论�
 
 Expected: 第一问 = 31（考虑上下册重复收录，按行数可能更多，须核对是否都是诗）；第二问 = **0**。
 
-- [ ] **Step 6: 端到端抽查一首**
+- [x] **Step 6: 端到端抽查一首**
 
 起后端，对新增的一首（如 `月夜忆舍弟`）走一次 `start` + `judge`，确认下发无泄题、判题返回真实对错。
 
-- [ ] **Step 7: 报告结果**
+- [x] **Step 7: 报告结果**
 
 把上述核对数字与抽查结论写进 `.superpowers/sdd/progress.md`。

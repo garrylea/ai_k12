@@ -53,7 +53,7 @@ Modify:
 **Interfaces:**
 - Produces: 表 `billing_notices`，列 `id BIGINT PK AI / parent_id INT NOT NULL FK→parents(id) / type ENUM('claim_approved','claim_rejected') NOT NULL / order_no VARCHAR(64) NOT NULL / reason VARCHAR(200) NULL / is_read TINYINT(1) NOT NULL DEFAULT 0 / created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) / updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)`，`KEY idx_parent_unread (parent_id, is_read, id)`
 
-- [ ] **Step 1: 写迁移**
+- [x] **Step 1: 写迁移**
 
 ```sql
 -- 订阅裁决结果通知（批④补丁）：approve/reject/自动闭环各落一行未读，家长 ack 后 is_read=1。
@@ -73,9 +73,9 @@ CREATE TABLE IF NOT EXISTS billing_notices (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订阅裁决结果通知（批④补丁）';
 ```
 
-- [ ] **Step 2: schema.sql 同步**——同一定义（含 COMMENT）插进 9.5 节尾；注意迁移与 schema.sql 逐列一致（批④备查：claim_status 曾漂移，勿重蹈）
-- [ ] **Step 3: 本机 apply 两遍验证幂等**——`mysql ai_k12 < tools/db/migrations/2026-10-01_billing_notices.sql` 连跑两次均不报错；`SHOW CREATE TABLE billing_notices --vertical` 目检列与 KEY
-- [ ] **Step 4: Commit** — `git commit -m "feat(billing): billing_notices 裁决结果通知表"`
+- [x] **Step 2: schema.sql 同步**——同一定义（含 COMMENT）插进 9.5 节尾；注意迁移与 schema.sql 逐列一致（批④备查：claim_status 曾漂移，勿重蹈）
+- [x] **Step 3: 本机 apply 两遍验证幂等**——`mysql ai_k12 < tools/db/migrations/2026-10-01_billing_notices.sql` 连跑两次均不报错；`SHOW CREATE TABLE billing_notices --vertical` 目检列与 KEY
+- [x] **Step 4: Commit** — `git commit -m "feat(billing): billing_notices 裁决结果通知表"`
 
 ### Task 2: repo + service 通知挂点
 
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS billing_notices (
   - `BillingService` 构造第 8 参 `noticesRepo: BillingNoticesRepository`（**全仓唯一手工构造点是 billing.service.test.ts:72 的 mkSvc，别处靠 DI**）
   - 私有 `notifyClaimResult(order, type, reason)`：INSERT + catch warn
 
-- [ ] **Step 1: 写失败测试**（先补 mock 骨架再写用例）
+- [x] **Step 1: 写失败测试**（先补 mock 骨架再写用例）
 
 `mkDeps()` 加 `noticesRepo: { insert: vi.fn().mockResolvedValue(undefined), listUnread: vi.fn().mockResolvedValue([]), findById: vi.fn().mockResolvedValue(null), markRead: vi.fn().mockResolvedValue(undefined) }`；`mkSvc` 末尾追加 `d.noticesRepo as never`。用例（挂 `describe('BillingService 裁决通知')`）：
 
@@ -160,8 +160,8 @@ it('通知 insert 抛错 → approve/reject 主链路不受影响（不抛、结
 
 （注：`mkOrder` 现无 claim 列默认值——`OrderRow` 含 `claim_status/claimed_at/claim_note`，在 `mkOrder` 基础对象里补 `claim_status: null, claimed_at: null, claim_note: null`。）
 
-- [ ] **Step 2: 跑失败** — `npx vitest run src/modules/billing/billing.service.test.ts`，预期新用例全红（noticesRepo 未注入/insert 未被调）
-- [ ] **Step 3: 实现**
+- [x] **Step 2: 跑失败** — `npx vitest run src/modules/billing/billing.service.test.ts`，预期新用例全红（noticesRepo 未注入/insert 未被调）
+- [x] **Step 3: 实现**
 
 repo（照 `subscription-adjustments.repo.ts` 模式）：
 
@@ -231,8 +231,8 @@ private async notifyClaimResult(order: OrderRow, type: 'claim_approved' | 'claim
 
 module：`providers` 加 `BillingNoticesRepository`（不加 exports——仅 service 内部消费）。
 
-- [ ] **Step 4: 跑通过** — `npx vitest run src/modules/billing && npx tsc --noEmit` 全绿（若 `billing.module.test.ts` 装配钉子精确断言 providers 数组，同步补该 repo）
-- [ ] **Step 5: Commit** — `git commit -m "feat(billing): 裁决迁移落 billing_notices 通知（approve/reject/自动闭环三挂点，失败不阻断）"`
+- [x] **Step 4: 跑通过** — `npx vitest run src/modules/billing && npx tsc --noEmit` 全绿（若 `billing.module.test.ts` 装配钉子精确断言 providers 数组，同步补该 repo）
+- [x] **Step 5: Commit** — `git commit -m "feat(billing): 裁决迁移落 billing_notices 通知（approve/reject/自动闭环三挂点，失败不阻断）"`
 
 ### Task 3: 家长端两通知端点
 
@@ -248,7 +248,7 @@ module：`providers` 加 `BillingNoticesRepository`（不加 exports——仅 se
   - `BillingService.ackNotice(parentId: number, rawId: unknown): Promise<{ ok: true }>`
   - `GET /api/billing/notices/unread`（200）与 `POST /api/billing/notices/:id/ack`（**@HttpCode(200)**），类级 `@Roles('parent')` 已有
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 service 用例：
 
@@ -315,8 +315,8 @@ describe('BillingController 通知端点', () => {
 });
 ```
 
-- [ ] **Step 2: 跑失败**（路由形状/方法不存在的红）
-- [ ] **Step 3: 实现**
+- [x] **Step 2: 跑失败**（路由形状/方法不存在的红）
+- [x] **Step 3: 实现**
 
 service：
 
@@ -366,8 +366,8 @@ ackNotice(@Param('id') id: string, @CurrentUser() user: JwtUser) {
 }
 ```
 
-- [ ] **Step 4: 跑通过** — `npx vitest run src/modules/billing && npx tsc --noEmit`
-- [ ] **Step 5: Commit** — `git commit -m "feat(billing): 家长未读裁决通知端点（unread 列表 + ack 已读幂等）"`
+- [x] **Step 4: 跑通过** — `npx vitest run src/modules/billing && npx tsc --noEmit`
+- [x] **Step 5: Commit** — `git commit -m "feat(billing): 家长未读裁决通知端点（unread 列表 + ack 已读幂等）"`
 
 ### Task 4: 前端——api + BillingNoticeBar + ParentLayout 接入
 
@@ -384,7 +384,7 @@ ackNotice(@Param('id') id: string, @CurrentUser() user: JwtUser) {
   - `listUnreadBillingNotices(): Promise<{ items: BillingNoticeView[]; total: number }>`、`ackBillingNotice(id: number): Promise<{ ok: true }>`
   - `<BillingNoticeBar />`：无 props，全空/首拉失败不渲染 DOM
 
-- [ ] **Step 1: api.ts 增补**
+- [x] **Step 1: api.ts 增补**
 
 ```typescript
 // --- 家长端：裁决结果通知（批④补丁；spec §3.2） ---
@@ -409,7 +409,7 @@ export function ackBillingNotice(id: number): Promise<{ ok: true }> {
 }
 ```
 
-- [ ] **Step 2: 写失败渲染测试**（`BillingNoticeBar.test.tsx`，`afterEach(cleanup)` 铁律）
+- [x] **Step 2: 写失败渲染测试**（`BillingNoticeBar.test.tsx`，`afterEach(cleanup)` 铁律）
 
 ```typescript
 vi.mock('@/services/api', () => ({
@@ -425,7 +425,7 @@ vi.mock('@/services/api', () => ({
 // ⑥ ack reject → toast('error', '操作失败，请稍后再试') 且条目保留
 ```
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 import { useCallback, useEffect, useState } from 'react';
@@ -498,8 +498,8 @@ export default function BillingNoticeBar() {
 
 `ParentLayout.tsx`：import 并在 `<AlertBanner />` 与 `<SubscriptionNoticeBar />` 之间插 `<BillingNoticeBar />`，注释补「裁决结果条（事件通知）」。
 
-- [ ] **Step 4: 既有测试补 mock + 跑通过**——`grep -rl "getSubscriptionStatus: vi.fn" apps/web/src`（ParentLayout.test / 各家长页 test）：每个文件的 api mock 对象补 `listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 })`；`cd apps/web && npx vitest run && npx tsc -b` 全绿
-- [ ] **Step 5: Commit** — `git commit -m "feat(web): 家长顶栏裁决结果条（未读轮询 + 逐条知道了）"`
+- [x] **Step 4: 既有测试补 mock + 跑通过**——`grep -rl "getSubscriptionStatus: vi.fn" apps/web/src`（ParentLayout.test / 各家长页 test）：每个文件的 api mock 对象补 `listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 })`；`cd apps/web && npx vitest run && npx tsc -b` 全绿
+- [x] **Step 5: Commit** — `git commit -m "feat(web): 家长顶栏裁决结果条（未读轮询 + 逐条知道了）"`
 
 ### Task 5: 订单历史驳回徽标
 
@@ -511,7 +511,7 @@ export default function BillingNoticeBar() {
 - Consumes: `BillingOrderView.claimStatus/claimNote`（已有）
 - Produces: pending + `claimStatus==='rejected'` 行渲染 `data-testid="order-claim-rejected-{orderNo}"` 红徽标 + claimNote 次要文字（60 字截断，title 放全文）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 it('订单历史 pending + claimStatus=rejected 行加「管理员已驳回」徽标 + claimNote 截断展示', async () => {
@@ -525,7 +525,7 @@ it('rejected 行仍可取消（既有按钮不回归）', async () => {
 });
 ```
 
-- [ ] **Step 2: 实现**——文件内加 helper：
+- [x] **Step 2: 实现**——文件内加 helper：
 
 ```typescript
 /** 60 字截断（驳回原因展示用），title 走全文。 */
@@ -557,8 +557,8 @@ function truncate(text: string, max = 60): string {
 )}
 ```
 
-- [ ] **Step 3: 跑通过** — `npx vitest run src/pages/parent/ParentSubscriptionPage.test.tsx && npx tsc -b`
-- [ ] **Step 4: Commit** — `git commit -m "fix(web): 订单历史补「管理员已驳回」徽标与原因展示（批④驳回不可见缺陷）"`
+- [x] **Step 3: 跑通过** — `npx vitest run src/pages/parent/ParentSubscriptionPage.test.tsx && npx tsc -b`
+- [x] **Step 4: Commit** — `git commit -m "fix(web): 订单历史补「管理员已驳回」徽标与原因展示（批④驳回不可见缺陷）"`
 
 ### Task 6: 管理端红点 store 联动
 
@@ -574,7 +574,7 @@ function truncate(text: string, max = 60): string {
   - `useAdminBillingBadgeStore`：`{ pendingCount: number | null; setPendingCount(n): void; refresh(): Promise<void> }`——refresh 拉 `listBillingClaims('pending_review',1,1)`，失败静默保留旧值
   - AdminNav 角标渲染条件不变（`pendingCount !== null && > 0`，`data-testid="billing-pending-badge"`）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `AdminNav.test.tsx`（新文件）：
 
@@ -599,7 +599,7 @@ it('approve 成功后触发角标 refresh', async () => {
 // reject 同款一钉
 ```
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 store（照 themeStore 风格）：
 
@@ -633,22 +633,22 @@ export const useAdminBillingBadgeStore = create<AdminBillingBadgeState>((set) =>
 
 `AdminBillingPage.tsx`：`const refreshBadge = useAdminBillingBadgeStore((s) => s.refresh);`；`handleApprove` 与 `handleReject` 的成功路径 `loadClaims();` 之后各加 `refreshBadge();`。
 
-- [ ] **Step 3: 跑通过** — `npx vitest run src/components/layout/AdminNav.test.tsx src/pages/admin/AdminBillingPage.test.tsx && npx tsc -b`
-- [ ] **Step 4: Commit** — `git commit -m "fix(web): 管理端待裁决红点改 store 联动（裁决后即时刷新，修正切页重挂错误假设）"`
+- [x] **Step 3: 跑通过** — `npx vitest run src/components/layout/AdminNav.test.tsx src/pages/admin/AdminBillingPage.test.tsx && npx tsc -b`
+- [x] **Step 4: Commit** — `git commit -m "fix(web): 管理端待裁决红点改 store 联动（裁决后即时刷新，修正切页重挂错误假设）"`
 
 ### Task 7: 收尾——全量 + 文档 + 冒烟
 
-- [ ] **Step 1: 两端全量 + tsc**——`cd apps/server && npm test && npx tsc --noEmit`；`cd apps/web && npm test && npx tsc -b`
-- [ ] **Step 2: 文档同步**
+- [x] **Step 1: 两端全量 + tsc**——`cd apps/server && npm test && npx tsc --noEmit`；`cd apps/web && npm test && npx tsc -b`
+- [x] **Step 2: 文档同步**
   - API 文档 §4.15 补两端点（GET unread / POST ack，ack 记 `'200'`）；§9 日志补 ack 留痕一行
   - `docs/api/openapi.yaml`：+2 op（`/api/billing/notices/unread`、`/api/billing/notices/{id}/ack`）+ `BillingNoticeView` schema；两文档端点清单核对
   - UX 文档：家长顶栏组件清单补 `BillingNoticeBar`（预警 → 裁决结果 → 订阅状态，三条并列）
   - **CLAUDE.md**「API 文档同步规则」节：「本仓**唯一**的 `@HttpCode` 覆盖」改为两处（`learning-sessions` + 本 ack 端点）
   - `docs/ai-core-changelog.md`：2026-10-01 节记录两缺陷、三裁决、修复要点与冒烟结果
-- [ ] **Step 3: mock 冒烟**——build 后 `BILLING_USE_MOCK=1 node dist/main.js`：
+- [x] **Step 3: mock 冒烟**——build 后 `BILLING_USE_MOCK=1 node dist/main.js`：
   1. 家长 manual 下单 → 填备注点「我已付款」→ 2004 转人工
   2. 管理员驳回（带原因）→ 家长**另一页面**（非订阅页）30s 内顶栏出现「管理员未确认本次转账：原因」
   3. 订单历史该行出现「管理员已驳回」徽标 + 原因
   4. 点「知道了」→ 条目消失；刷新页面不再出现（is_read 持久化）
   5. 再来一单 → 管理员通过 → 顶栏「您的订阅已开通」+ 订阅状态卡生效；管理端红点在通过后消失
-- [ ] **Step 4: 台账收尾 + Commit**——`.superpowers/sdd/progress.md` 补丁节（含冒烟结果与披露项）；`git commit -m "docs: 裁决结果通知补丁文档同步（API/openapi/UX/CLAUDE.md/changelog）"`
+- [x] **Step 4: 台账收尾 + Commit**——`.superpowers/sdd/progress.md` 补丁节（含冒烟结果与披露项）；`git commit -m "docs: 裁决结果通知补丁文档同步（API/openapi/UX/CLAUDE.md/changelog）"`

@@ -19,7 +19,7 @@
 - Modify: `tools/data-refinery/src/card_splitter.py` — 新增 `_split_inline_questions`，修改 `_split_paragraphs`
 - Modify: `tools/data-refinery/tests/test_card_splitter.py` — 新增单测
 
-- [ ] **Step 1: 在 card_splitter.py 新增正则和 `_split_inline_questions` 函数**
+- [x] **Step 1: 在 card_splitter.py 新增正则和 `_split_inline_questions` 函数**
 
 在 `_split_paragraphs` 函数上方（约 line 65）插入：
 
@@ -38,7 +38,7 @@ def _split_inline_questions(paragraph: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 ```
 
-- [ ] **Step 2: 修改 `_split_paragraphs`，调用 `_split_inline_questions`**
+- [x] **Step 2: 修改 `_split_paragraphs`，调用 `_split_inline_questions`**
 
 替换现有的 `_split_paragraphs`（lines 65-68）：
 
@@ -55,7 +55,7 @@ def _split_paragraphs(text: str) -> list[str]:
 
 同时更新文件顶部的 import 处的函数引用说明（无需改 import，仅确保 `_split_inline_questions` 在 `_split_paragraphs` 之前定义）。
 
-- [ ] **Step 3: 更新测试文件的 import**
+- [x] **Step 3: 更新测试文件的 import**
 
 在 `tools/data-refinery/tests/test_card_splitter.py` 的 import 行（line 4）加入 `_split_inline_questions`：
 
@@ -64,7 +64,7 @@ from card_splitter import split_page, _count_text_chars, _CHARS_PER_LINE
 from card_splitter import _split_paragraphs, _make_bundles, _current_heading, _split_inline_questions
 ```
 
-- [ ] **Step 4: 新增 `_split_inline_questions` 单测**
+- [x] **Step 4: 新增 `_split_inline_questions` 单测**
 
 在 `test_card_splitter.py` 末尾追加测试类：
 
@@ -123,7 +123,7 @@ class TestSplitInlineQuestions:
         assert len(result) == 1
 ```
 
-- [ ] **Step 5: 跑 card_splitter 测试确认通过**
+- [x] **Step 5: 跑 card_splitter 测试确认通过**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_card_splitter.py -v
@@ -131,7 +131,7 @@ cd tools/data-refinery && python -m pytest tests/test_card_splitter.py -v
 
 Expected: 所有测试 PASS（包括既有测试和新增的 TestSplitInlineQuestions）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/data-refinery/src/card_splitter.py tools/data-refinery/tests/test_card_splitter.py
@@ -153,7 +153,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `tools/data-refinery/src/db_loader.py` — 新增 `rebuild_practice_content`，修改 `_insert_card`
 - Modify: `tools/data-refinery/tests/test_db_loader.py` — 新增单测
 
-- [ ] **Step 1: 在 db_loader.py 新增 `rebuild_practice_content` 函数**
+- [x] **Step 1: 在 db_loader.py 新增 `rebuild_practice_content` 函数**
 
 在 `build_content_metadata` 函数之后（约 line 103）、`parse_book_rel_path` 之前插入：
 
@@ -174,7 +174,7 @@ def rebuild_practice_content(intro: str | None, questions: list[dict]) -> str:
     return "\n\n".join(parts)
 ```
 
-- [ ] **Step 2: 修改 `_insert_card`，对 practice 卡重组 content**
+- [x] **Step 2: 修改 `_insert_card`，对 practice 卡重组 content**
 
 在 `_insert_card` 方法中（约 line 667），修改 practice 卡 content_metadata 处理段落。当前逻辑：
 
@@ -234,7 +234,7 @@ def _insert_card(self, lesson_id: int, sort_order: int, c: dict):
 
 注意：`card_content` 原来是 `c.get("content")` 不变，仅在 practice 卡有 validated questions 时替换为重组后的 content。
 
-- [ ] **Step 3: 更新测试文件的 import**
+- [x] **Step 3: 更新测试文件的 import**
 
 在 `tools/data-refinery/tests/test_db_loader.py` 的 import 行加入 `rebuild_practice_content`：
 
@@ -251,7 +251,7 @@ from db_loader import (
 )
 ```
 
-- [ ] **Step 4: 新增 `rebuild_practice_content` 单测**
+- [x] **Step 4: 新增 `rebuild_practice_content` 单测**
 
 在 `test_db_loader.py` 末尾追加测试类：
 
@@ -302,7 +302,7 @@ class TestRebuildPracticeContent:
         assert "$\\frac{1}{2}x^{2}+3x-5=0$" in result
 ```
 
-- [ ] **Step 5: 跑 db_loader 测试确认通过**
+- [x] **Step 5: 跑 db_loader 测试确认通过**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_db_loader.py -v
@@ -310,7 +310,7 @@ cd tools/data-refinery && python -m pytest tests/test_db_loader.py -v
 
 Expected: 所有测试 PASS（包括既有测试和新增的 TestRebuildPracticeContent）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/data-refinery/src/db_loader.py tools/data-refinery/tests/test_db_loader.py
@@ -332,7 +332,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/pages/student/CourseDetailPage.tsx` — 删除 lines 167-169
 
-- [ ] **Step 1: 删除 step 2.5 的代码和注释**
+- [x] **Step 1: 删除 step 2.5 的代码和注释**
 
 在 `apps/web/src/pages/student/CourseDetailPage.tsx`，删除 lines 167-169：
 
@@ -345,7 +345,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 使用 Edit 工具精确删除这三行。删除后，原 line 166（step 2 的 replace）应直接接原 line 170（step 3 的 replace）。
 
-- [ ] **Step 2: 验证前端构建通过**
+- [x] **Step 2: 验证前端构建通过**
 
 ```bash
 cd apps/web && npm run build
@@ -353,7 +353,7 @@ cd apps/web && npm run build
 
 Expected: tsc 类型检查 + Vite 构建均成功，无新增错误。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/pages/student/CourseDetailPage.tsx
@@ -373,7 +373,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `docs/K12智学系统-Card内容生成与渲染设计文档.md` — 更新 §9.4 状态
 
-- [ ] **Step 1: 将 §9.4 标记从"待实施"改为"已实施"**
+- [x] **Step 1: 将 §9.4 标记从"待实施"改为"已实施"**
 
 修改 `docs/K12智学系统-Card内容生成与渲染设计文档.md` 中 §9.4 的标题：
 
@@ -393,7 +393,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
   - 实施日期：2026-08-08；card_splitter._split_inline_questions ✅ / db_loader.rebuild_practice_content ✅ / 前端 step 2.5 已删除 ✅
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/K12智学系统-Card内容生成与渲染设计文档.md

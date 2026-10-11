@@ -62,7 +62,7 @@
 **Interfaces:**
 - Produces: 表 `learning_sessions`（列 `id, student_id, app_shell, started_at, last_seen_at, ended_at, lock_minutes, lock_expires_at, unlocked_at, unlocked_by_parent_id, active_student_id(VIRTUAL), created_at, updated_at`）、表 `device_commands`（列 `id, student_id, command, status, issued_by_parent_id, created_at, consumed_at`）、列 `controls.session_lock_minutes`
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 创建 `tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql`：
 
@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS device_commands (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 同步 `tools/db/schema.sql`**
+- [x] **Step 2: 同步 `tools/db/schema.sql`**
 
 把 `tools/db/schema.sql:866` 的
 
@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS device_commands (
 
 并在 `controls` 表定义结束（`schema.sql:881` 的 `) ENGINE=InnoDB …;`）之后，追加 Step 1 里第 2、3 节的两条 `CREATE TABLE IF NOT EXISTS`（**原样复制**，含注释）。
 
-- [ ] **Step 3: 应用迁移（第一次）**
+- [x] **Step 3: 应用迁移（第一次）**
 
 Run:
 ```bash
@@ -165,7 +165,7 @@ mysql -h127.0.0.1 -uai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-23_lear
 ```
 Expected: 无输出、退出码 0。若报 `Unknown database` 或拒连，先核对 `apps/server/.env` 的 `DB_*`。
 
-- [ ] **Step 4: 验证结果**
+- [x] **Step 4: 验证结果**
 
 Run:
 ```bash
@@ -181,7 +181,7 @@ mysql -h127.0.0.1 -uai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM controls LIKE '
 ```
 Expected: 前者有 1 行 `Non_unique=0`；后者有 1 行。
 
-- [ ] **Step 5: 幂等复验（第二次跑）**
+- [x] **Step 5: 幂等复验（第二次跑）**
 
 Run:
 ```bash
@@ -189,7 +189,7 @@ mysql -h127.0.0.1 -uai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-23_lear
 ```
 Expected: 与第一次一样成功、无报错（守卫生效）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql tools/db/schema.sql
@@ -212,7 +212,7 @@ git commit -m "feat(db): controls 列改名 session_lock_minutes + learning_sess
   - `findSessionLockMinutes(studentId: number): Promise<number | null>`
   - `update(studentId, patch): Promise<number>`
 
-- [ ] **Step 1: 确认是否已有该 repo 的测试文件**
+- [x] **Step 1: 确认是否已有该 repo 的测试文件**
 
 Run:
 ```bash
@@ -220,7 +220,7 @@ ls apps/server/src/database/repositories/ | grep -i controls
 ```
 Expected: 只有 `controls.repo.ts`（本仓仓储层普遍无单测，业务规则在 service 层测）。**若确实没有**，本任务的测试写在 Task 3 的 service 测试里，跳过本任务的 Step 2–4，直接做 Step 5。
 
-- [ ] **Step 2: 改 `ControlsSnapshot` 与 `ControlsPatch`（若上一步判定需要测）**
+- [x] **Step 2: 改 `ControlsSnapshot` 与 `ControlsPatch`（若上一步判定需要测）**
 
 在 `apps/server/src/database/repositories/controls.repo.ts` 的 `ControlsSnapshot` 末尾加：
 
@@ -236,7 +236,7 @@ Expected: 只有 `controls.repo.ts`（本仓仓储层普遍无单测，业务规
   sessionLockMinutes?: number | null;
 ```
 
-- [ ] **Step 3: 改名 `findDailyTimeLimit` → `findSessionLockMinutes` 并重写注释**
+- [x] **Step 3: 改名 `findDailyTimeLimit` → `findSessionLockMinutes` 并重写注释**
 
 把 `controls.repo.ts:111-131` 整段（含 docblock）替换为：
 
@@ -264,7 +264,7 @@ Expected: 只有 `controls.repo.ts`（本仓仓储层普遍无单测，业务规
   }
 ```
 
-- [ ] **Step 4: `findByStudent` 带上新列**
+- [x] **Step 4: `findByStudent` 带上新列**
 
 把 `controls.repo.ts:63-83` 的 SELECT 与返回对象改为：
 
@@ -299,7 +299,7 @@ Expected: 只有 `controls.repo.ts`（本仓仓储层普遍无单测，业务规
   }
 ```
 
-- [ ] **Step 5: `update()` 白名单加新列（注意参数数组要能装 `null`）**
+- [x] **Step 5: `update()` 白名单加新列（注意参数数组要能装 `null`）**
 
 把 `controls.repo.ts:141-168` 的 `update` 改为：
 
@@ -339,7 +339,7 @@ Expected: 只有 `controls.repo.ts`（本仓仓储层普遍无单测，业务规
   }
 ```
 
-- [ ] **Step 6: 复验已无 `findDailyTimeLimit` 引用**
+- [x] **Step 6: 复验已无 `findDailyTimeLimit` 引用**
 
 Run:
 ```bash
@@ -347,7 +347,7 @@ cd apps/server && grep -rn "findDailyTimeLimit\|daily_time_limit" src/ || echo "
 ```
 Expected: `NO REFERENCES`。**若还有引用**（`study-time.service.ts:61` 一定有），本任务先不 commit，做完 Task 4 再一起提交——两处必须同时改，否则 server 编译不过。
 
-- [ ] **Step 7: Commit（与 Task 3、Task 4 合并提交亦可）**
+- [x] **Step 7: Commit（与 Task 3、Task 4 合并提交亦可）**
 
 ```bash
 git add apps/server/src/database/repositories/controls.repo.ts
@@ -371,7 +371,7 @@ git commit -m "refactor(controls): findDailyTimeLimit 改为 findSessionLockMinu
   - `export const SESSION_LOCK_MINUTES_MIN = 1` / `SESSION_LOCK_MINUTES_MAX = 480`
   - `export interface ControlsUpdatePatch { alertAwayMinutes?: number; alertIdleMinutes?: number; sessionLockMinutes?: number | null }`
 
-- [ ] **Step 1: 写失败的测试（service 层）**
+- [x] **Step 1: 写失败的测试（service 层）**
 
 在 `apps/server/src/modules/parent-insights/controls.service.test.ts` 的 `SNAPSHOT` 常量里加一行、并新增用例：
 
@@ -431,7 +431,7 @@ describe('ControlsService：单次学习锁定（spec §5.6）', () => {
     ]);
 ```
 
-- [ ] **Step 2: 跑测试，确认失败**
+- [x] **Step 2: 跑测试，确认失败**
 
 Run:
 ```bash
@@ -439,7 +439,7 @@ cd apps/server && npx vitest run src/modules/parent-insights/controls.service.te
 ```
 Expected: FAIL —— `out.sessionLockMinutes` 为 `undefined`、越界值未被拒绝。
 
-- [ ] **Step 3: 实现 `controls.service.ts`**
+- [x] **Step 3: 实现 `controls.service.ts`**
 
 把 `controls.service.ts` 顶部常量与接口改为：
 
@@ -527,7 +527,7 @@ export interface ControlsUpdatePatch {
 
 并更新类级 docblock 里「响应**只含两个阈值**」那句为「响应含**预警两个阈值 + 单次学习锁定分钟数**；兑换汇率/开关仍不在此」。
 
-- [ ] **Step 4: 实现 DTO 与 controller schema**
+- [x] **Step 4: 实现 DTO 与 controller schema**
 
 `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts` 的 `ParentControls`：
 
@@ -558,7 +558,7 @@ const ControlsPatchSchema = z.object({
 
 ⚠️ **范围必须在两处都有**（controller 的 Zod 是 400/409 的第一道、service 是最后一道）——这是该端点既有设计，别只留一处。
 
-- [ ] **Step 5: 跑测试**
+- [x] **Step 5: 跑测试**
 
 Run:
 ```bash
@@ -566,7 +566,7 @@ cd apps/server && npx vitest run src/modules/parent-insights/controls.service.te
 ```
 Expected: PASS。`parent-insights.controller.test.ts` 里 `makeController` 的 controls mock 若断言了返回字段，一并补 `sessionLockMinutes`。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/parent-insights/ apps/server/src/database/repositories/controls.repo.ts
@@ -587,7 +587,7 @@ git commit -m "feat(parent-controls): 行为管控暴露 sessionLockMinutes（1.
 - Produces: `export interface TodayUsageSummary { date: string; activeSeconds: number; byModule: Array<{ module: string; seconds: number }> }`
 - Consumes: 无（本任务**移除**对 `ControlsRepository.findDailyTimeLimit` 的依赖）
 
-- [ ] **Step 1: 改测试（先让旧的期望失败）**
+- [x] **Step 1: 改测试（先让旧的期望失败）**
 
 `study-time.service.test.ts`：把 `makeControls` 与三参构造全部改掉。整体替换这两处：
 
@@ -625,7 +625,7 @@ describe('StudyTimeService.getTodayUsage（spec §5.7：每日上限概念已废
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认失败**
+- [x] **Step 2: 跑测试，确认失败**
 
 Run:
 ```bash
@@ -633,7 +633,7 @@ cd apps/server && npx vitest run src/modules/parent-insights/study-time.service.
 ```
 Expected: FAIL —— 构造参数个数不符 / `limitMinutes` 仍存在。
 
-- [ ] **Step 3: 改 `study-time.service.ts`**
+- [x] **Step 3: 改 `study-time.service.ts`**
 
 删掉 `import { ControlsRepository } from '../../database/repositories/controls.repo.js';` 与构造函数的第三个参数，把构造改为：
 
@@ -669,7 +669,7 @@ Expected: FAIL —— 构造参数个数不符 / `limitMinutes` 仍存在。
   }
 ```
 
-- [ ] **Step 4: 改 DTO**
+- [x] **Step 4: 改 DTO**
 
 `parent-insights.dto.ts` 的 `TodayUsageSummary` 替换为：
 
@@ -685,7 +685,7 @@ export interface TodayUsageSummary {
 }
 ```
 
-- [ ] **Step 5: 跑全量 server 测试与编译**
+- [x] **Step 5: 跑全量 server 测试与编译**
 
 Run:
 ```bash
@@ -693,7 +693,7 @@ cd apps/server && npm test && npx tsc --noEmit
 ```
 Expected: 全绿、tsc 无输出。若 `parent-insights.module.ts` 报依赖解析错误，检查 `StudyTimeService` 是否已不再需要第三个 provider（`ControlsRepository` 仍要保留——`ControlsService` 在用）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/parent-insights/
@@ -725,7 +725,7 @@ git commit -m "refactor(parent-insights): today-usage 收缩，移除每日上�
   - `LearningSessionRow → StudentSessionView`（见 DTO）
   - `LearningSessionsService.openOrGet(studentId: number): Promise<StudentSessionView>`
 
-- [ ] **Step 1: 写 DTO 文件**
+- [x] **Step 1: 写 DTO 文件**
 
 创建 `apps/server/src/modules/device-control/dto/device-control.dto.ts`：
 
@@ -746,7 +746,7 @@ export interface StudentSessionView {
 }
 ```
 
-- [ ] **Step 2: 写失败的 service 测试**
+- [x] **Step 2: 写失败的 service 测试**
 
 创建 `apps/server/src/modules/device-control/learning-sessions.service.test.ts`：
 
@@ -835,7 +835,7 @@ describe('LearningSessionsService.openOrGet（spec §5.1）', () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试，确认失败**
+- [x] **Step 3: 跑测试，确认失败**
 
 Run:
 ```bash
@@ -843,7 +843,7 @@ cd apps/server && npx vitest run src/modules/device-control/learning-sessions.se
 ```
 Expected: FAIL —— 模块/类不存在。
 
-- [ ] **Step 4: 实现 `learning-sessions.repo.ts`（本步只写 openOrGet 需要的方法）**
+- [x] **Step 4: 实现 `learning-sessions.repo.ts`（本步只写 openOrGet 需要的方法）**
 
 创建 `apps/server/src/database/repositories/learning-sessions.repo.ts`：
 
@@ -971,7 +971,7 @@ export class LearningSessionsRepository {
 }
 ```
 
-- [ ] **Step 5: 实现 `learning-sessions.service.ts`**
+- [x] **Step 5: 实现 `learning-sessions.service.ts`**
 
 ```ts
 import { Inject, Injectable } from '@nestjs/common';
@@ -1032,7 +1032,7 @@ export class LearningSessionsService {
 }
 ```
 
-- [ ] **Step 6: 跑 service 测试**
+- [x] **Step 6: 跑 service 测试**
 
 Run:
 ```bash
@@ -1040,7 +1040,7 @@ cd apps/server && npx vitest run src/modules/device-control/learning-sessions.se
 ```
 Expected: PASS。
 
-- [ ] **Step 7: 写 controller + module**
+- [x] **Step 7: 写 controller + module**
 
 创建 `apps/server/src/modules/device-control/device-control.controller.ts`：
 
@@ -1103,7 +1103,7 @@ import { ControlsRepository } from '../../database/repositories/controls.repo.js
 export class DeviceControlModule {}
 ```
 
-- [ ] **Step 8: 注册模块**
+- [x] **Step 8: 注册模块**
 
 `apps/server/src/app.module.ts`：加 import
 
@@ -1118,7 +1118,7 @@ import { DeviceControlModule } from './modules/device-control/device-control.mod
     DeviceControlModule,
 ```
 
-- [ ] **Step 9: 写 controller 测试**
+- [x] **Step 9: 写 controller 测试**
 
 创建 `apps/server/src/modules/device-control/device-control.controller.test.ts`：
 
@@ -1150,7 +1150,7 @@ describe('DeviceControlController', () => {
 });
 ```
 
-- [ ] **Step 10: 跑测试 + 编译 + 起服务**
+- [x] **Step 10: 跑测试 + 编译 + 起服务**
 
 Run:
 ```bash
@@ -1164,7 +1164,7 @@ cd apps/server && npm run build && node dist/main.js
 ```
 Expected: 启动日志里出现 `api/student/learning-sessions` 路由，无 "can't resolve dependencies"。
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/server/src/modules/device-control/ apps/server/src/database/repositories/learning-sessions.repo.ts apps/server/src/app.module.ts
@@ -1189,7 +1189,7 @@ git commit -m "feat(device-control): 模块骨架 + learning_sessions 仓储 + �
   - `LearningSessionsRepository.endById(id: number, studentId: number): Promise<void>`
   - `LearningSessionsService.end(studentId: number, id: number): Promise<EndSessionView>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 在 `learning-sessions.service.test.ts` 追加：
 
@@ -1231,12 +1231,12 @@ describe('LearningSessionsService.end（spec §5.2）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control/learning-sessions.service.test.ts`
 Expected: FAIL —— `end` 不存在。
 
-- [ ] **Step 3: 加仓储方法**
+- [x] **Step 3: 加仓储方法**
 
 在 `learning-sessions.repo.ts` 的 `findById` 之后插入：
 
@@ -1260,7 +1260,7 @@ Expected: FAIL —— `end` 不存在。
   }
 ```
 
-- [ ] **Step 4: 加 service 方法**
+- [x] **Step 4: 加 service 方法**
 
 在 `learning-sessions.service.ts` 的 `openOrGet` 之后插入（并在文件顶部 `import { NotFoundException } from '@nestjs/common';` 合并进已有的 `@nestjs/common` 导入）：
 
@@ -1293,7 +1293,7 @@ Expected: FAIL —— `end` 不存在。
 
 在同文件 `import type { StudentSessionView } from './dto/device-control.dto.js';` 一行加上 `EndSessionView`。
 
-- [ ] **Step 5: 加 DTO 与 controller 路由**
+- [x] **Step 5: 加 DTO 与 controller 路由**
 
 `dto/device-control.dto.ts` 追加：
 
@@ -1318,7 +1318,7 @@ export interface EndSessionView {
   }
 ```
 
-- [ ] **Step 6: 加 controller 测试用例**
+- [x] **Step 6: 加 controller 测试用例**
 
 `device-control.controller.test.ts` 追加：
 
@@ -1332,12 +1332,12 @@ export interface EndSessionView {
   });
 ```
 
-- [ ] **Step 7: 跑测试**
+- [x] **Step 7: 跑测试**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control && npx tsc --noEmit`
 Expected: PASS + tsc 无输出。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/modules/device-control/ apps/server/src/database/repositories/learning-sessions.repo.ts
@@ -1366,7 +1366,7 @@ git commit -m "feat(device-control): 学生端结束学习会话端点（幂等�
   - `LearningSessionsService.poll(studentId: number): Promise<PollView>`
   - `DeviceCommandsRepository.insert(input: { studentId: number; command: string; issuedByParentId: number }): Promise<DeviceCommandRow>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 在 `learning-sessions.service.test.ts` 追加（`mkSessionsRepo` 需补 `pollAndConsume`）：
 
@@ -1415,12 +1415,12 @@ describe('LearningSessionsService.poll（spec §5.3）', () => {
   pollAndConsume: vi.fn().mockResolvedValue({ commands: [], openSession: null }),
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control/learning-sessions.service.test.ts`
 Expected: FAIL —— `poll` 不存在。
 
-- [ ] **Step 3: 实现跨两表的轮询事务（写在 `learning-sessions.repo.ts`）**
+- [x] **Step 3: 实现跨两表的轮询事务（写在 `learning-sessions.repo.ts`）**
 
 在 `learning-sessions.repo.ts` 顶部加常量与类型：
 
@@ -1525,7 +1525,7 @@ export interface PollResult {
 > `INTERVAL ?` 的预处理是正常的，见 Task 5 `insertOpen` 的修正说明。这里保留字面量插值只是因为它更简单，
 > 不是因为有语法障碍。）
 
-- [ ] **Step 4: 实现 service 的 `poll`**
+- [x] **Step 4: 实现 service 的 `poll`**
 
 `dto/device-control.dto.ts` 追加：
 
@@ -1568,7 +1568,7 @@ export interface PollView {
   }
 ```
 
-- [ ] **Step 5: 新建 `device-commands.controller.ts`（本端点的路径是 `api/student/device-commands`，不是 `learning-sessions` 的子路径，所以**必须另起一个 controller 类**，不能在 `device-control.controller.ts` 里加）**
+- [x] **Step 5: 新建 `device-commands.controller.ts`（本端点的路径是 `api/student/device-commands`，不是 `learning-sessions` 的子路径，所以**必须另起一个 controller 类**，不能在 `device-control.controller.ts` 里加）**
 
 创建 `apps/server/src/modules/device-control/device-commands.controller.ts`：
 
@@ -1599,7 +1599,7 @@ export class DeviceCommandsController {
 
 并把 `device-control.module.ts` 的 `controllers` 改为 `[DeviceControlController, DeviceCommandsController]`。
 
-- [ ] **Step 6: 建 `device-commands.repo.ts`（Task 8 用，本步先落骨架）**
+- [x] **Step 6: 建 `device-commands.repo.ts`（Task 8 用，本步先落骨架）**
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -1649,12 +1649,12 @@ export class DeviceCommandsRepository {
 }
 ```
 
-- [ ] **Step 7: 跑测试 + 编译**
+- [x] **Step 7: 跑测试 + 编译**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control && npx tsc --noEmit`
 Expected: PASS + tsc 无输出。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/modules/device-control/ apps/server/src/database/repositories/
@@ -1678,7 +1678,7 @@ git commit -m "feat(device-control): 学生端命令轮询端点（惰性过期+
   - `export interface IssuedCommandView { id: number; command: string; status: 'pending'; learningSessionId: number; createdAt: string }`
   - `DeviceCommandsService.issue(studentId: number, parentId: number, command: DeviceCommandName): Promise<IssuedCommandView>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/server/src/modules/device-control/device-commands.service.test.ts`：
 
@@ -1738,12 +1738,12 @@ describe('DeviceCommandsService.issue（spec §5.4）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control/device-commands.service.test.ts`
 Expected: FAIL —— 类不存在。
 
-- [ ] **Step 3: 实现 service**
+- [x] **Step 3: 实现 service**
 
 ```ts
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
@@ -1795,7 +1795,7 @@ export class DeviceCommandsService {
 }
 ```
 
-- [ ] **Step 4: 加 DTO 与家长端 controller**
+- [x] **Step 4: 加 DTO 与家长端 controller**
 
 `dto/device-control.dto.ts` 追加：
 
@@ -1865,7 +1865,7 @@ export class DeviceControlParentController {
 }
 ```
 
-- [ ] **Step 5: 装配模块**
+- [x] **Step 5: 装配模块**
 
 `device-control.module.ts` 改为：
 
@@ -1905,7 +1905,7 @@ import { ParentModule } from '../parent/parent.module.js';
 export class DeviceControlModule {}
 ```
 
-- [ ] **Step 6: 跑测试 + 起服务验证路由**
+- [x] **Step 6: 跑测试 + 起服务验证路由**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control && npx tsc --noEmit`
 Expected: PASS + tsc 无输出。
@@ -1916,7 +1916,7 @@ cd apps/server && npm run build && node dist/main.js
 ```
 Expected: 启动无 "can't resolve dependencies"，日志里能看到 `api/parent/students/:studentId/device-commands`。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/modules/device-control/
@@ -1944,7 +1944,7 @@ git commit -m "feat(device-control): 家长下发解除命令端点（无进行�
   - `LearningSessionsRepository.listByStudent(studentId, since: Date, limit: number): Promise<LearningSessionRow[]>`
   - `LearningSessionsRepository.countByStudent(studentId, since: Date): Promise<number>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `learning-session-log.service.test.ts`：
 
@@ -2014,12 +2014,12 @@ describe('LearningSessionLogService.list（spec §5.5）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control/learning-session-log.service.test.ts`
 Expected: FAIL —— 类不存在。
 
-- [ ] **Step 3: 加仓储查询**
+- [x] **Step 3: 加仓储查询**
 
 在 `learning-sessions.repo.ts` 类里加：
 
@@ -2057,7 +2057,7 @@ Expected: FAIL —— 类不存在。
   }
 ```
 
-- [ ] **Step 4: 实现 service**
+- [x] **Step 4: 实现 service**
 
 创建 `learning-session-log.service.ts`：
 
@@ -2119,7 +2119,7 @@ export class LearningSessionLogService {
 }
 ```
 
-- [ ] **Step 5: 加 DTO**
+- [x] **Step 5: 加 DTO**
 
 `dto/device-control.dto.ts` 追加：
 
@@ -2144,7 +2144,7 @@ export interface ParentSessionPage {
 }
 ```
 
-- [ ] **Step 6: 加 controller 路由**
+- [x] **Step 6: 加 controller 路由**
 
 `device-control-parent.controller.ts`：把 `import { Body, Controller, Param, ParseIntPipe, Post, UseGuards }` 补上 `Get` 与 `Query`，并追加：
 
@@ -2172,11 +2172,11 @@ export interface ParentSessionPage {
 
 标签：`ParentSessionPage` 一并加入 type import；`parsePositiveInt` 从 `parent-insights.controller.ts` 的同一 import 源引入；构造函数注入 `private readonly logs: LearningSessionLogService`。
 
-- [ ] **Step 7: 装配模块**
+- [x] **Step 7: 装配模块**
 
 `device-control.module.ts`：`providers` 加 `LearningSessionLogService`。
 
-- [ ] **Step 8: 跑测试 + 编译 + 起服务**
+- [x] **Step 8: 跑测试 + 编译 + 起服务**
 
 Run: `cd apps/server && npx vitest run src/modules/device-control && npx tsc --noEmit`
 Expected: PASS + tsc 无输出。
@@ -2184,12 +2184,12 @@ Expected: PASS + tsc 无输出。
 Run: `cd apps/server && npm run build && node dist/main.js`
 Expected: 两个家长端路由都出现在启动日志，无依赖解析错误。
 
-- [ ] **Step 9: 跑全量测试**
+- [x] **Step 9: 跑全量测试**
 
 Run: `cd apps/server && npm test`
 Expected: 全绿。**若 `parent-insights.controller.test.ts` 因 `parsePositiveInt` 或 controls mock 形状报错，按测试错误修测试**（测试断言与设计文档冲突时测试错）。
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/server/src/modules/device-control/ apps/server/src/database/repositories/learning-sessions.repo.ts
@@ -2208,7 +2208,7 @@ git commit -m "feat(device-control): 家长端进出时间列表端点（online 
 - Consumes: Task 3、4、5～9 的全部端点与字段
 - Produces: 两份文档对同一组端点/字段的一致描述（本仓铁律：**必须同步**）
 
-- [ ] **Step 1: 列出实际路由作为唯一依据**
+- [x] **Step 1: 列出实际路由作为唯一依据**
 
 Run:
 ```bash
@@ -2221,7 +2221,7 @@ Expected: 逐条核对出这 5 条新路由（**以启动日志为准**，不要
 - `POST /api/parent/students/:studentId/device-commands`（201）
 - `GET /api/parent/students/:studentId/learning-sessions`
 
-- [ ] **Step 2: 改 API 设计文档**
+- [x] **Step 2: 改 API 设计文档**
 
 在 `docs/API接口与数据流设计文档.md` 中：
 1. §4 端点清单新增一组 **`api/student/learning-sessions` + `api/student/device-commands` + `api/parent/.../device-commands` + `api/parent/.../learning-sessions`**，各条写清：方法、路径、鉴权角色、参数与范围、成功码、错误码（1001 / 1002 / 1005 / 401 / 403）、响应形状（照抄 spec §5.1–5.5）。
@@ -2230,7 +2230,7 @@ Expected: 逐条核对出这 5 条新路由（**以启动日志为准**，不要
 4. 该端点原有的「`controls.daily_time_limit_minutes`」表述全部改成 `session_lock_minutes`，并注明语义是「单次登录起算」。
 5. §5 数据流里补一条「学生登录 → 取或建学习会话 → 轮询兼心跳 → 家长解除 → unlocked_at 落库」的流程说明。
 
-- [ ] **Step 3: 改 `openapi.yaml`**
+- [x] **Step 3: 改 `openapi.yaml`**
 
 1. 新增 5 条路径（含 `requestBody`/`responses`/`parameters`），错误响应复用文件里既有的错误 schema。
 2. `POST /api/student/learning-sessions` 的 `responses` 写 **`'200'`**（不是 201）——它是本仓唯一的 `@HttpCode` 覆盖，**必须在 yaml 里体现**。
@@ -2238,7 +2238,7 @@ Expected: 逐条核对出这 5 条新路由（**以启动日志为准**，不要
 4. `controls` 的 `GET`/`PUT` schema 补 `sessionLockMinutes`（`integer` + `nullable`，`minimum: 1`、`maximum: 480`）。
 5. `today-usage` 响应 schema 删掉 `limitMinutes` / `exceeded`。
 
-- [ ] **Step 4: 逐条核对两档一致（本仓要求「端点路径列表比对」）**
+- [x] **Step 4: 逐条核对两档一致（本仓要求「端点路径列表比对」）**
 
 Run:
 ```bash
@@ -2246,7 +2246,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && for p in student/learning-sess
 ```
 Expected: 四个路径的 `api-doc` 与 `openapi` 计数都 **> 0**。计数为 0 的那份就是漏了。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml

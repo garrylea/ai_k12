@@ -63,7 +63,7 @@
 - Produces: `ChatRequest.thinking?: boolean`（`false` = 下发 `enable_thinking:false`；`undefined`/`true` = 下发 `true`）。
 - 后续任务不依赖本任务产出（独立）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `openai-compatible-client.test.ts` 的 `describe` 内追加：
 
@@ -85,12 +85,12 @@
     expect(mockChat.mock.calls[0][0].thinking).toBe(false);
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run src/ai-core/infra/model-client/openai-compatible-client.test.ts src/ai-core/capabilities/judgment.capability.test.ts`
 Expected: FAIL —— `enable_thinking` 恒为 `true`（新用例断言 `false` 失败）；judgment 用例 `thinking` 为 `undefined`。
 
-- [ ] **Step 3: 类型加 `thinking`**
+- [x] **Step 3: 类型加 `thinking`**
 
 `src/ai-core/types.ts` 的 `ChatRequest`（约 122–133 行）在 `stream?: boolean;` 之后加：
 
@@ -99,7 +99,7 @@ Expected: FAIL —— `enable_thinking` 恒为 `true`（新用例断言 `false` 
   thinking?: boolean;
 ```
 
-- [ ] **Step 4: 请求体改为可配**
+- [x] **Step 4: 请求体改为可配**
 
 `src/ai-core/infra/model-client/openai-compatible-client.ts` 的 `buildRequestBody` 内，把 `body.enable_thinking = true;` 改为：
 
@@ -107,7 +107,7 @@ Expected: FAIL —— `enable_thinking` 恒为 `true`（新用例断言 `false` 
     body.enable_thinking = request.thinking !== false;
 ```
 
-- [ ] **Step 5: 判题两次调用都关 thinking**
+- [x] **Step 5: 判题两次调用都关 thinking**
 
 `src/ai-core/capabilities/judgment.capability.ts` 的 `callModel` 内，`modelClient.chat({...})` 加一行（放在 `responseFormat` 之后）：
 
@@ -115,17 +115,17 @@ Expected: FAIL —— `enable_thinking` 恒为 `true`（新用例断言 `false` 
       thinking: false,
 ```
 
-- [ ] **Step 6: 运行确认通过**
+- [x] **Step 6: 运行确认通过**
 
 Run: `npx vitest run src/ai-core/infra/model-client/openai-compatible-client.test.ts src/ai-core/capabilities/judgment.capability.test.ts`
 Expected: PASS。
 
-- [ ] **Step 7: 全量测试 + 构建**
+- [x] **Step 7: 全量测试 + 构建**
 
 Run: `npm test && npm run build`
 Expected: 全部通过（420 tests 左右）、tsc 无错误。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/ai-core/types.ts \
@@ -149,7 +149,7 @@ git commit -m "feat(ai-core): per-request thinking flag; judgment runs without t
 - Consumes: Task 1 无依赖。
 - Produces: 模型 key `qwen3.8-max`（modelId 同名）；`judgment` 路由 `primary: local / fallback: qwen3.8-max`；不再有 `transcribe` 场景路由与 VL 模型条目。后续 Task 3/5/6 依赖这些名字。
 
-- [ ] **Step 1: 更新路由测试断言（先失败）**
+- [x] **Step 1: 更新路由测试断言（先失败）**
 
 整体替换 `src/ai-core/infra/model-router.test.ts`：
 
@@ -222,12 +222,12 @@ describe('ModelRouter', () => {
 
 `src/ai-core/infra/model-router-dynamic.test.ts`：把两处 `'qwen3.7-max'` 改为 `'qwen3.8-max'`（第 8、15 行）。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run src/ai-core/infra/model-router.test.ts src/ai-core/infra/model-router-dynamic.test.ts`
 Expected: FAIL（仍返回 `qwen3.7-max` / `qwen-vl-max` / judgment fallback `deepseek-v4-flash`）。
 
-- [ ] **Step 3: 改 YAML 模型定义**
+- [x] **Step 3: 改 YAML 模型定义**
 
 `src/ai-core/model-routes.yaml`：把 `qwen3.7-max:` 块（15–25 行）整体替换为：
 
@@ -247,7 +247,7 @@ Expected: FAIL（仍返回 `qwen3.7-max` / `qwen-vl-max` / judgment fallback `de
 
 删除 `qwen-vl-max:`（65–77）与 `qwen3-vl-plus:`（79–91）两个块（含其上注释）。
 
-- [ ] **Step 4: 改 YAML 路由**
+- [x] **Step 4: 改 YAML 路由**
 
 - 全文把路由里的 `qwen3.7-max` 改为 `qwen3.8-max`（tutoring、grading、explanation、hint、variation、analysis、structuring，以及 `grading` 注释 119 行、`default.primary` 174 行）。
 - 删除 `transcribe:` 路由块（95–100，含其上注释）。
@@ -264,17 +264,17 @@ Expected: FAIL（仍返回 `qwen3.7-max` / `qwen-vl-max` / judgment fallback `de
 
 - `src/ai-core/retry.yaml`：删除 `transcribe: 60000` 行（含行内注释）。
 
-- [ ] **Step 5: 运行确认通过**
+- [x] **Step 5: 运行确认通过**
 
 Run: `npx vitest run src/ai-core/infra/model-router.test.ts src/ai-core/infra/model-router-dynamic.test.ts`
 Expected: PASS。
 
-- [ ] **Step 6: 全量测试 + 构建**
+- [x] **Step 6: 全量测试 + 构建**
 
 Run: `npm test && npm run build`
 Expected: 全部通过；tsc 无错误（此时 `transcribe` 代码仍在，仅配置与路由测试变了——若 `npm test` 因 Vitest 收集报错，说明还有测试引用旧断言，逐一改到 qwen3.8-max）。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/ai-core/model-routes.yaml \
@@ -306,7 +306,7 @@ git commit -m "feat(ai-core): rename qwen3.7-max to qwen3.8-max; drop VL models 
 
 > **本任务必须一次完成**：删除的类型被 `ai.service.ts` 引用，分两步会让 tsc 失败。按步骤顺序做，最后统一跑测试。
 
-- [ ] **Step 1: 删 `TutoringCapability` 的 VL 原语**
+- [x] **Step 1: 删 `TutoringCapability` 的 VL 原语**
 
 `src/ai-core/capabilities/tutoring.capability.ts`：
 
@@ -320,7 +320,7 @@ git commit -m "feat(ai-core): rename qwen3.7-max to qwen3.8-max; drop VL models 
 
 3. 文件首行 import 中删除 `TranscribeResult, TranscribedProblem`；删除 `SelectionClassification`（若在同一 import 列表）。保留 `ContentPart, ChatMessage, Subject, TextPart, Attachment` 等仍在用的。
 
-- [ ] **Step 2: 删 prompt-builder 的 transcribe 分支**
+- [x] **Step 2: 删 prompt-builder 的 transcribe 分支**
 
 `src/ai-core/infra/prompt-builder.ts`：删除
 
@@ -332,7 +332,7 @@ git commit -m "feat(ai-core): rename qwen3.7-max to qwen3.8-max; drop VL models 
 
 并删除 `apps/server/src/ai-core/prompts/transcribe/math.md`（连同空目录）。
 
-- [ ] **Step 3: 删 types.ts 的 transcribe / flow 契约**
+- [x] **Step 3: 删 types.ts 的 transcribe / flow 契约**
 
 `src/ai-core/types.ts`：
 
@@ -349,7 +349,7 @@ git commit -m "feat(ai-core): rename qwen3.7-max to qwen3.8-max; drop VL models 
   // （图片直接作为 image_url 部件送给辅导模型）
 ```
 
-- [ ] **Step 4: 删 `AIService` 的 flow 状态机**
+- [x] **Step 4: 删 `AIService` 的 flow 状态机**
 
 `src/modules/ai/ai.service.ts`：
 
@@ -391,7 +391,7 @@ git commit -m "feat(ai-core): rename qwen3.7-max to qwen3.8-max; drop VL models 
 6. `buildRequest`（384）：删除 `...(dto.flowAction ? { flowAction: dto.flowAction } : {}),`。
 7. 删除分支后 `const context = await this.conversationService.loadContext(dialogueId);` 与其 `if (!context) throw ...`（87–88）会变成未使用——一并删除（对话存在性已由 `resolveDialogue` → `conversationsService.get` 校验）。若 `hasImage`/`Attachment`/`TutoringRequest` 等 import 随之不再使用，按 tsc 报错删除。
 
-- [ ] **Step 5: 删 DTO / conversation / repo 的 flow**
+- [x] **Step 5: 删 DTO / conversation / repo 的 flow**
 
 1. `src/modules/ai/dto/tutor.dto.ts`：删除 `flowAction?: 'confirm' | 'reidentify' | 'correct';`（17 及其注释）。
 2. `src/services/conversation/index.ts`：
@@ -401,16 +401,16 @@ git commit -m "feat(ai-core): rename qwen3.7-max to qwen3.8-max; drop VL models 
 4. **保留** `src/database/repositories/types.ts` 的 `flow_state` 字段（忠实镜像 DB 列，删除反而要改 `mapRow`）。
 5. `src/modules/admin/admin-models.service.ts`：`SCENES`（8）去掉 `'transcribe'`。
 
-- [ ] **Step 6: 更新 tutoring 测试**
+- [x] **Step 6: 更新 tutoring 测试**
 
 `src/ai-core/capabilities/tutoring.capability.test.ts`：删除所有引用 `transcribeImage`/`classifySelection`/transcribe 场景/flow 的用例；保留并把「图片以 `image_url` 部件送达辅导模型」用例中的 mock 模型名从 `qwen-vl-max` 改为 `qwen3.8-max`（约 211 行），断言不变（断言消息里出现 `image_url` 部件）。把 176–178 的注释改为「图片直接作为 image_url 部件送入辅导模型（不再两阶段）」。
 
-- [ ] **Step 7: 全量测试 + 构建**
+- [x] **Step 7: 全量测试 + 构建**
 
 Run: `npm test && npm run build`
 Expected: 全部通过；tsc 无错误。若 tsc 报「未使用 import」，按报错删除。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A apps/server/src/ai-core apps/server/src/modules apps/server/src/services apps/server/src/database
@@ -431,7 +431,7 @@ git commit -m "refactor(ai-core): drop image two-stage flow; send images straigh
 - Consumes: Task 3（后端不再发 flow 事件）。
 - Produces: 前端不再有 `ChatFlow`/`flowAction`/确认按钮；图片直接发送。
 
-- [ ] **Step 1: 替换 chatStore**
+- [x] **Step 1: 替换 chatStore**
 
 整体替换 `apps/web/src/store/chatStore.ts`：
 
@@ -533,7 +533,7 @@ export const useChatStore = create<ChatState>((set) => ({
 }));
 ```
 
-- [ ] **Step 2: 改 useAuxChat**
+- [x] **Step 2: 改 useAuxChat**
 
 `apps/web/src/hooks/useAuxChat.ts`：
 
@@ -544,23 +544,23 @@ export const useChatStore = create<ChatState>((set) => ({
 5. 删除 `confirmQuestion` / `reidentify`（306–308）。
 6. 返回值（347）改为 `return { send, stop, retry, isLoadingHistory, deleteMsg };`
 
-- [ ] **Step 3: 改 AuxChatPanel**
+- [x] **Step 3: 改 AuxChatPanel**
 
 `apps/web/src/components/business/AuxChatPanel.tsx`：
 
 1. Props 去掉 `onConfirm?: () => void;` 与 `onReidentify?: () => void;`（13–14，含注释）。
 2. 删除整个 flow UI 块（366–393：`{m.flow && !isError && !isStreaming && ( ... )}`）。
 
-- [ ] **Step 4: 改 AuxiliaryHomePage**
+- [x] **Step 4: 改 AuxiliaryHomePage**
 
 `apps/web/src/pages/student/AuxiliaryHomePage.tsx`：从 `useAuxChat(...)` 解构（42）去掉 `confirmQuestion, reidentify`；删除传给 `AuxChatPanel` 的 `onConfirm`/`onReidentify`（98 附近）。
 
-- [ ] **Step 5: 构建 + lint**
+- [x] **Step 5: 构建 + lint**
 
 Run: `npm run build && npm run lint`（apps/web）
 Expected: tsc + vite build 通过；lint 无新增错误。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/store/chatStore.ts \
@@ -583,7 +583,7 @@ git commit -m "refactor(web): remove image two-stage confirm/select UI"
 - Consumes: Task 2（YAML 已有 `qwen3.8-max` 模型与 judgment 路由；已无 VL/transcribe）。
 - Produces: 幂等脚本，把已 seed 的库切到新配置。
 
-- [ ] **Step 1: 创建迁移脚本**
+- [x] **Step 1: 创建迁移脚本**
 
 创建 `apps/server/src/scripts/migrate-qwen38-multimodal.ts`：
 
@@ -690,7 +690,7 @@ async function main() {
 main().catch((e) => { console.error('[migrate-qwen38] 失败:', e); process.exit(1); });
 ```
 
-- [ ] **Step 2: 构建 + 运行 + 校验**
+- [x] **Step 2: 构建 + 运行 + 校验**
 
 Run: `npm run build`
 Expected: tsc 无错误。
@@ -704,18 +704,18 @@ mysql -uai_k12 -pai_k12 ai_k12 -e "SELECT model_key FROM llm_models ORDER BY mod
 ```
 Expected: 模型表含 `qwen3.8-max`，不含 `qwen3.7-max` / `qwen3-vl-plus` / `qwen-vl-max`；路由只有 `judgment | math | local | qwen3.8-max`，无 `transcribe`。
 
-- [ ] **Step 3: 幂等复验**
+- [x] **Step 3: 幂等复验**
 
 Run: `npx tsx src/scripts/migrate-qwen38-multimodal.ts`（再跑一次）
 Expected: 各步 0 或「已更新」，无重复行，Step 2 的查询结果不变。
 
-- [ ] **Step 4: 部署脚本改名**
+- [x] **Step 4: 部署脚本改名**
 
 - `tools/deploy/apply-llm-config.mjs:22`：`qwen: 'qwen3.7-max',` → `qwen: 'qwen3.8-max',`
 - `tools/deploy.sh:315`：`def_model='qwen3.7-max'` → `def_model='qwen3.8-max'`
 - 检查 `apply-llm-config.mjs` 顶部注释里的模型示例（第 10 行）一并改为 `qwen3.8-max`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/scripts/migrate-qwen38-multimodal.ts tools/deploy/apply-llm-config.mjs tools/deploy.sh
@@ -736,13 +736,13 @@ git commit -m "feat(server): idempotent migration to qwen3.8-max and VL removal"
 - Consumes: Tasks 1–5 的实际实现与脚本名。
 - Produces: 无代码接口。
 
-- [ ] **Step 1: 更新 CLAUDE.md**
+- [x] **Step 1: 更新 CLAUDE.md**
 
 - 「模型 ID（勿改）」（约 174 行）：`qwen3.7-max` → `qwen3.8-max`；并补 `Qwen3.8-27B`（本地 llama.cpp，`local` provider）。
 - 「场景路由（勿随意切换）」（约 178 行）：`qwen3.7-max` → `qwen3.8-max`；删去「图片转录走独立 `transcribe` 场景（`qwen3-vl-plus`，fallback qwen-vl-max），辅导不因带图切换模型」，改为「图片直接作为 `image_url` 部件随消息送给辅导模型（`qwen3.8-max` 多模态），无转录/确认两阶段」；judgment 段补「判题调用不带 thinking（`ChatRequest.thinking=false`）」。
 - 在 ai-core 关键约定处补一条：`qwen3.8-max` 支持多模态；两阶段图片流程与 VL 模型已删除（`qwen-vl-max`/`qwen3-vl-plus` 不再存在）；`ai_dialogues.flow_state/pending_question(s)` 为遗留死数据。
 
-- [ ] **Step 2: 追加 changelog 条目**
+- [x] **Step 2: 追加 changelog 条目**
 
 在 `docs/ai-core-changelog.md` 的 intro `---` 之后、`## 2026-09-11 训练模块判题默认走本地模型` 之前插入：
 
@@ -758,12 +758,12 @@ git commit -m "feat(server): idempotent migration to qwen3.8-max and VL removal"
 ---
 ```
 
-- [ ] **Step 3: 同步设计文档**
+- [x] **Step 3: 同步设计文档**
 
 - `docs/K12智学系统-AI-Agent中枢设计文档.md`：§4.4.2「两阶段设计」改为「直送多模态」（描述图片作为 `image_url` 部件随消息送给辅导模型）；全文 `qwen3.7-max` → `qwen3.8-max`；删除 `qwen-vl-max`/`qwen3-vl-plus`/`transcribe` 场景相关描述。用 `grep -n "qwen3.7-max\|qwen-vl\|qwen3-vl\|transcribe\|两阶段"` 定位后逐一处理。
 - `docs/K12智学系统-数据库设计文档.md`：`qwen3.7-max` 示例改 `qwen3.8-max`；`ai_dialogues.flow_state`/`pending_question`/`pending_questions` 三列标注「已弃用（遗留死数据，勿再读写）」。
 
-- [ ] **Step 4: 复查无遗漏**
+- [x] **Step 4: 复查无遗漏**
 
 Run:
 ```bash
@@ -772,7 +772,7 @@ grep -rn "qwen3\.7-max" CLAUDE.md docs/ai-core-changelog.md docs/K12智学系统
 ```
 Expected: 代码/脚本中除历史 changelog/spec/plan 与 `dist/` 外无残留；上述四份文档无残留（历史条目除外）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add CLAUDE.md docs/ai-core-changelog.md docs/K12智学系统-AI-Agent中枢设计文档.md docs/K12智学系统-数据库设计文档.md

@@ -55,7 +55,7 @@ function InlineHandwritingPad(props: {
 
 （设计裁决：追加规则**由父组件实现**——本组件只把识别原文交给 `onRecognized`，`multiline` 只用于按钮下方提示文案「识别后换行续写 / 识别后直接拼接」。）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // InlineHandwritingPad.test.tsx
@@ -134,9 +134,9 @@ it('【键盘】收起调 onClose；无笔画时识别禁用；disabled 时识�
 
 （最后一个用例第二条 rerender 后 pad 无笔画，识别禁用由「无笔画」就成立——为让 disabled 断言有区分度，先画一笔再 rerender disabled。实施时按此调整：写一笔 → rerender disabled → 断言仍禁用且 disabled 传 истин。）
 
-- [ ] **Step 2: 跑失败** → `cd apps/web && npm test -- --run InlineHandwritingPad`，Expected FAIL（组件不存在）
+- [x] **Step 2: 跑失败** → `cd apps/web && npm test -- --run InlineHandwritingPad`，Expected FAIL（组件不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```tsx
 // InlineHandwritingPad.tsx
@@ -218,8 +218,8 @@ export default function InlineHandwritingPad({ open, onRecognized, onClose, mult
 }
 ```
 
-- [ ] **Step 4: 跑通过** → Expected PASS（4 用例）
-- [ ] **Step 5: Commit**
+- [x] **Step 4: 跑通过** → Expected PASS（4 用例）
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/business/handwriting
@@ -243,7 +243,7 @@ git commit -m "feat: 内嵌手写板组件（识别并追加进输入框，取�
 - body：`onChange({ ...value, body: prev.endsWith('\n') || prev === '' ? prev + text : prev + '\n' + text })`——注意函数式取值：用 `onChange` 回调收到的最新 value；若组件 value 可能陈旧，改用「value.body」即时读（两表单的 value 都是父层受控传下的 props，直接读 props.value 即可，与现实现同模式）。
 - author/dynasty/terms/translation：`prev + text` 直接拼接。
 
-- [ ] **Step 1: 改测试（先改测试再改实现）**
+- [x] **Step 1: 改测试（先改测试再改实现）**
 
 `DictationAnswerForm.test.tsx`：把 `vi.mock('../handwriting/HandwritingInputModal')` 换成 `vi.mock('../handwriting/InlineHandwritingPad')`，mock 组件暴露两件事：`data-testid="mock-pad"`（点击 = 调 `onRecognized('手写内容')`）与 `data-testid="mock-pad-close"`（点击 = 调 `onClose`）。用例改造：
 1. 三字段「手写」按钮存在、disabled 联动（保留原断言）。
@@ -254,9 +254,9 @@ git commit -m "feat: 内嵌手写板组件（识别并追加进输入框，取�
 
 `SentenceBlock.test.tsx`：同款替换 mock（terms 直接拼接、translation 直接拼接；判定 translation 用 mock-pad 出现位置即可），保留既有守卫断言（锁定态按钮禁用）。删除旧 HandwritingInputModal 相关断言（若有）。
 
-- [ ] **Step 2: 跑失败** → `npm test -- --run DictationAnswerForm SentenceBlock`，Expected FAIL
+- [x] **Step 2: 跑失败** → `npm test -- --run DictationAnswerForm SentenceBlock`，Expected FAIL
 
-- [ ] **Step 3: 改造 DictationAnswerForm**
+- [x] **Step 3: 改造 DictationAnswerForm**
 
 结构（伪代码骨架，风格对齐现有文件）：
 
@@ -293,20 +293,20 @@ const [padField, setPadField] = useState<Field | null>(null);
 
 注意：`InlineHandwritingPad open={padField !== null}` 会把三个字段各自按钮的展开统一为「组件末尾一个 pad 实例」——这符合互斥且 pad 不随字段切换卸载（openField 从 author 改点 body 的手写钮时 pad 保持挂载、墨迹丢失？**注意**：openField 变更时 pad 不卸载（组件未卸载），墨迹保留但归属新字段——可接受还是应丢弃？裁决：**切换字段时清空墨迹**（setPadField 前调 `padRef.clear()`）会让组件持有 padRef……简化方案：**给 InlineHandwritingPad 加 `key={padField ?? 'none'}`**，openField 变更即重挂载、墨迹天然清零，无需父组件持有 ref。计划采用 key 方案（在两处 JSX 上都写 `key={padField ?? 'none'}`）。
 
-- [ ] **Step 4: 改造 SentenceBlock**
+- [x] **Step 4: 改造 SentenceBlock**
 
 同款：`padField: string | null`（词名或 'translation'）；词钮在 label 内 input 之后（收起态才渲染）；翻译钮在翻译 label 内；组件末尾 `<InlineHandwritingPad key={padField ?? 'none'} open={padField !== null} multiline={false} disabled={locked} onRecognized={(text) => { if (padField === 'translation') onChange({ ...value, translation: value.translation + text }); else if (padField) onChange({ ...value, terms: { ...value.terms, [padField]: (value.terms[padField] ?? '') + text } }); }} onClose={() => setPadField(null)} />`。
 
-- [ ] **Step 5: 删除弹层**
+- [x] **Step 5: 删除弹层**
 
 ```bash
 git rm apps/web/src/components/business/handwriting/HandwritingInputModal.tsx apps/web/src/components/business/handwriting/HandwritingInputModal.test.tsx
 grep -rn "HandwritingInputModal" apps/web/src   # 必须零命中
 ```
 
-- [ ] **Step 6: 跑通过** → `npm test -- --run DictationAnswerForm SentenceBlock DictationRunPage InterpretationRunPage HandwritingDemoPage HandwritingPad`，Expected 全 PASS
+- [x] **Step 6: 跑通过** → `npm test -- --run DictationAnswerForm SentenceBlock DictationRunPage InterpretationRunPage HandwritingDemoPage HandwritingPad`，Expected 全 PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A apps/web/src
@@ -317,15 +317,15 @@ git commit -m "feat: 手写板内嵌输入框（键盘/手写双模式切换）�
 
 ### Task 3: 回归 + 手测清单
 
-- [ ] **Step 1**: `cd apps/web && npm test && npm run lint && npx tsc -b --noEmit`；`cd ../server && npm test`（应与合并时持平：1203+/2004 上下，无新增失败；lint 既有 MobilePointsPage error 不算）。
-- [ ] **Step 2**: `npm run build`（web）——覆盖 dist 需向用户披露（preview 服务 5173 刷新即得）。
-- [ ] **Step 3: 手测清单（用户执行）**
+- [x] **Step 1**: `cd apps/web && npm test && npm run lint && npx tsc -b --noEmit`；`cd ../server && npm test`（应与合并时持平：1203+/2004 上下，无新增失败；lint 既有 MobilePointsPage error 不算）。
+- [x] **Step 2**: `npm run build`（web）——覆盖 dist 需向用户披露（preview 服务 5173 刷新即得）。
+- [x] **Step 3: 手测清单（用户执行）**
   1. 默写：正文点【手写】→ 输入框变手写板 → 分批写/识别（换行续写）→ 切【键盘】→ 内容在输入框可改 → 提交判题与键盘路径一致。
   2. 作者/朝代手写：直接拼接、可改。
   3. 解释：词/翻译手写直接拼接；锁定态（判后）按钮禁用。
   4. 互斥：同页同时只开一个手写板；切换字段墨迹清零。
   5. 识别失败重试、笔迹保留。
-- [ ] **Step 4**: Commit（如有微调）。
+- [x] **Step 4**: Commit（如有微调）。
 
 ---
 

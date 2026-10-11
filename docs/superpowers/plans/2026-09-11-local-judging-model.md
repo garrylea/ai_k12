@@ -73,7 +73,7 @@
   - `protected calculateCost(inputTokens: number, outputTokens: number, costPer1K: { input: number; output: number }): number`
   - `class KimiClient extends OpenAICompatibleClient`，构造 `(apiKey: string, providerName?: string)`（默认 `'Kimi'`）——签名与改动前完全一致。
 
-- [ ] **Step 1: 写基类请求体测试（先失败）**
+- [x] **Step 1: 写基类请求体测试（先失败）**
 
 创建 `src/ai-core/infra/model-client/openai-compatible-client.test.ts`：
 
@@ -106,12 +106,12 @@ describe('OpenAICompatibleClient.buildRequestBody', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `npx vitest run src/ai-core/infra/model-client/openai-compatible-client.test.ts`
 Expected: FAIL —— 无法解析导入 `./openai-compatible-client.js`（模块不存在）。
 
-- [ ] **Step 3: 创建基类**
+- [x] **Step 3: 创建基类**
 
 创建 `src/ai-core/infra/model-client/openai-compatible-client.ts`（把原 `kimi-client.ts` 实现原样搬入，仅抽出 `buildRequestBody`）：
 
@@ -288,7 +288,7 @@ export class OpenAICompatibleClient implements ProviderAdapter {
 
 > 请求体逐字段复刻改动前：非流式 `{model, messages, temperature, max_tokens, stop, enable_thinking, response_format}`，流式 `{model, messages, temperature, max_tokens, stream, enable_thinking, response_format}`。
 
-- [ ] **Step 4: 把 KimiClient 改成薄子类**
+- [x] **Step 4: 把 KimiClient 改成薄子类**
 
 整体替换 `src/ai-core/infra/model-client/kimi-client.ts`：
 
@@ -303,7 +303,7 @@ export class KimiClient extends OpenAICompatibleClient {
 }
 ```
 
-- [ ] **Step 5: QwenClient / DeepSeekClient 换基类**
+- [x] **Step 5: QwenClient / DeepSeekClient 换基类**
 
 整体替换 `src/ai-core/infra/model-client/qwen-client.ts`：
 
@@ -331,17 +331,17 @@ export class DeepSeekClient extends OpenAICompatibleClient {
 }
 ```
 
-- [ ] **Step 6: 运行新测试确认通过**
+- [x] **Step 6: 运行新测试确认通过**
 
 Run: `npx vitest run src/ai-core/infra/model-client/openai-compatible-client.test.ts`
 Expected: PASS（2 tests）。
 
-- [ ] **Step 7: 跑全量测试与构建确认无回归**
+- [x] **Step 7: 跑全量测试与构建确认无回归**
 
 Run: `npm test && npm run build`
 Expected: 全部测试通过（在现有 72 基础上新增 2 个 base 测试）；tsc 无错误。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/model-client/openai-compatible-client.ts \
@@ -368,7 +368,7 @@ git commit -m "refactor(ai-core): extract OpenAICompatibleClient base from KimiC
 - Consumes: Task 1 的 `OpenAICompatibleClient`（`buildRequestBody` 可 override）。
 - Produces: `class LocalClient extends OpenAICompatibleClient`，构造 `(apiKey: string)`；`ModelClient` 支持 `provider: 'local'`；`Provider` 联合类型含 `'local'`。
 
-- [ ] **Step 1: `Provider` 加 `'local'`**
+- [x] **Step 1: `Provider` 加 `'local'`**
 
 `src/ai-core/types.ts:17` 改为：
 
@@ -376,7 +376,7 @@ git commit -m "refactor(ai-core): extract OpenAICompatibleClient base from KimiC
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 ```
 
-- [ ] **Step 2: 写 LocalClient 测试（先失败）**
+- [x] **Step 2: 写 LocalClient 测试（先失败）**
 
 创建 `src/ai-core/infra/model-client/local-client.test.ts`：
 
@@ -413,12 +413,12 @@ describe('LocalClient', () => {
 });
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 Run: `npx vitest run src/ai-core/infra/model-client/local-client.test.ts`
 Expected: FAIL —— 无法解析导入 `./local-client.js`。
 
-- [ ] **Step 4: 创建 LocalClient**
+- [x] **Step 4: 创建 LocalClient**
 
 创建 `src/ai-core/infra/model-client/local-client.ts`：
 
@@ -442,7 +442,7 @@ export class LocalClient extends OpenAICompatibleClient {
 }
 ```
 
-- [ ] **Step 5: ModelClient 分支接线**
+- [x] **Step 5: ModelClient 分支接线**
 
 `src/ai-core/infra/model-client/index.ts`：
 
@@ -455,12 +455,12 @@ import { LocalClient } from './local-client.js';
         case 'local': client = new LocalClient(key); break;
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [x] **Step 6: 运行测试确认通过**
 
 Run: `npx vitest run src/ai-core/infra/model-client/local-client.test.ts`
 Expected: PASS（3 tests）。
 
-- [ ] **Step 7: 后台 provider 下拉加 `'local'`**
+- [x] **Step 7: 后台 provider 下拉加 `'local'`**
 
 `src/modules/admin/admin-models.service.ts:7` 改为：
 
@@ -474,7 +474,7 @@ export const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_com
 const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible', 'local'];
 ```
 
-- [ ] **Step 8: 前端 lint + 后端全量测试构建**
+- [x] **Step 8: 前端 lint + 后端全量测试构建**
 
 Run: `npm test && npm run build`（apps/server）
 Expected: 全部测试通过（含新增 3 个 LocalClient 测试）；tsc 无错误。
@@ -482,7 +482,7 @@ Expected: 全部测试通过（含新增 3 个 LocalClient 测试）；tsc 无�
 Run: `npm run lint`（apps/web）
 Expected: 无新增错误（该改动只加一个字符串常量）。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/server/src/ai-core/types.ts \
@@ -506,7 +506,7 @@ git commit -m "feat(ai-core): add local (llama.cpp) provider for judging"
 - Consumes: Task 2 的 `Provider` 含 `'local'`；`src/ai-core/types.ts` 的 `RoutedModel`、`PromptBuildResult`；`src/ai-core/infra/model-router.js` 的 `ModelRouter`。
 - Produces: `JudgmentCapabilityDeps` 增可选 `modelRouter?: ModelRouter`；`judge()` 行为 = primary 成功即返回，任何失败且有 fallback 时用 fallback 重试一次，两者皆败抛组合错误。
 
-- [ ] **Step 1: 写回退测试（先失败）**
+- [x] **Step 1: 写回退测试（先失败）**
 
 整体替换 `src/ai-core/capabilities/judgment.capability.test.ts`：
 
@@ -613,12 +613,12 @@ describe('JudgmentCapability', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `npx vitest run src/ai-core/capabilities/judgment.capability.test.ts`
 Expected: FAIL —— 新增 4 个回退用例失败（`modelRouter` 未接线，primary 抛错后不会调 fallback；`mockChat` 只被调用 1 次）。
 
-- [ ] **Step 3: 实现 fallback**
+- [x] **Step 3: 实现 fallback**
 
 整体替换 `src/ai-core/capabilities/judgment.capability.ts`：
 
@@ -725,17 +725,17 @@ export class JudgmentCapability {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `npx vitest run src/ai-core/capabilities/judgment.capability.test.ts`
 Expected: PASS（6 tests）。
 
-- [ ] **Step 5: 全量测试与构建**
+- [x] **Step 5: 全量测试与构建**
 
 Run: `npm test && npm run build`
 Expected: 全部测试通过（judgment 测试 6 个）；tsc 无错误。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/ai-core/capabilities/judgment.capability.ts \
@@ -757,7 +757,7 @@ git commit -m "feat(ai-core): fall back to ds v4 flash when local judging model 
 - Consumes: Task 2 的 provider `'local'`；Task 3 的 fallback 逻辑读取 `routeResult.fallback`。
 - Produces: `judgment/math` 路由 = primary `local`（modelId `Qwen3.8-27B`）、fallback `deepseek-v4-flash`；env 变量 `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_API_KEY`。
 
-- [ ] **Step 1: env 增加本地模型两项**
+- [x] **Step 1: env 增加本地模型两项**
 
 `apps/server/.env` 在 `DEEPSEEK_API_KEY=...` 行之后插入：
 
@@ -769,7 +769,7 @@ LOCAL_LLM_API_KEY=local
 
 `apps/server/.env.example` 在 `DEEPSEEK_API_KEY=` 行之后插入同样三行（`LOCAL_LLM_API_KEY=local`）。
 
-- [ ] **Step 2: YAML 新增 `local` 模型**
+- [x] **Step 2: YAML 新增 `local` 模型**
 
 `src/ai-core/model-routes.yaml` 在 `deepseek-v4-flash:` 块之后、`# Task 14a` 之前插入：
 
@@ -789,7 +789,7 @@ LOCAL_LLM_API_KEY=local
     supportsStreaming: true
 ```
 
-- [ ] **Step 3: YAML 改 judgment 路由**
+- [x] **Step 3: YAML 改 judgment 路由**
 
 `src/ai-core/model-routes.yaml` 的 `judgment:` 块整体替换为：
 
@@ -802,7 +802,7 @@ LOCAL_LLM_API_KEY=local
       fallback: deepseek-v4-flash
 ```
 
-- [ ] **Step 4: 更新路由测试断言**
+- [x] **Step 4: 更新路由测试断言**
 
 `src/ai-core/infra/model-router.test.ts` 的 `routes math judgment ...` 用例整体替换为：
 
@@ -815,17 +815,17 @@ LOCAL_LLM_API_KEY=local
   });
 ```
 
-- [ ] **Step 5: 运行路由测试确认通过**
+- [x] **Step 5: 运行路由测试确认通过**
 
 Run: `npx vitest run src/ai-core/infra/model-router.test.ts`
 Expected: PASS（全部用例，含更新的 judgment 断言）。
 
-- [ ] **Step 6: 全量测试与构建**
+- [x] **Step 6: 全量测试与构建**
 
 Run: `npm test && npm run build`
 Expected: 全部测试通过；tsc 无错误。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/.env.example \
@@ -847,7 +847,7 @@ git commit -m "feat(ai-core): route math judgment to local model with ds-v4-flas
 - Consumes: Task 4 的 YAML（`routeConfig.models.local`、`routeConfig.routes.judgment[0]`）；`src/common/utils/api-key-crypto.js` 的 `encryptApiKey`。
 - Produces: 幂等脚本，`llm_models` 的 `local` 行 + `llm_routes` 的 `judgment/math` 行被 upsert。无导出 API。
 
-- [ ] **Step 1: 创建 upsert 脚本**
+- [x] **Step 1: 创建 upsert 脚本**
 
 创建 `src/scripts/set-judging-local.ts`：
 
@@ -935,12 +935,12 @@ async function main() {
 main().catch((e) => { console.error('[judging-local] 失败:', e); process.exit(1); });
 ```
 
-- [ ] **Step 2: 构建确认脚本类型正确**
+- [x] **Step 2: 构建确认脚本类型正确**
 
 Run: `npm run build`
 Expected: tsc 无错误（脚本被 tsconfig 包含）。
 
-- [ ] **Step 3: 运行脚本（写开发库）**
+- [x] **Step 3: 运行脚本（写开发库）**
 
 Run: `npx tsx src/scripts/set-judging-local.ts`
 Expected 输出包含：
@@ -950,7 +950,7 @@ Expected 输出包含：
 [judging-local] 完成。重启后端（或后台保存路由）后生效。
 ```
 
-- [ ] **Step 4: 校验 DB 结果**
+- [x] **Step 4: 校验 DB 结果**
 
 Run:
 ```bash
@@ -958,12 +958,12 @@ mysql -uai_k12 -pai_k12 ai_k12 -e "SELECT model_key, provider_type, model_id, ba
 ```
 Expected: `local | local | Qwen3.8-27B | http://192.168.1.8:12345 | 1`；`judgment | math | local | deepseek-v4-flash`。
 
-- [ ] **Step 5: 幂等复验**
+- [x] **Step 5: 幂等复验**
 
 Run: `npx tsx src/scripts/set-judging-local.ts`
 Expected: 输出「模型 local 已更新」「路由 judgment/math 已更新」，DB 无重复行（Step 4 查询结果不变）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/scripts/set-judging-local.ts
@@ -982,7 +982,7 @@ git commit -m "feat(server): add idempotent script to point judgment route at lo
 - Consumes: Task 4/5 的实际配置值与脚本名。
 - Produces: 无代码接口。
 
-- [ ] **Step 1: 更新 CLAUDE.md 场景路由条目**
+- [x] **Step 1: 更新 CLAUDE.md 场景路由条目**
 
 `CLAUDE.md:178` 该行整体替换为（保留原有其它场景信息，只改 judgment 部分）：
 
@@ -990,7 +990,7 @@ git commit -m "feat(server): add idempotent script to point judgment route at lo
 - **场景路由（勿随意切换）**：judgment（训练模块专项/考试/错题判题）primary 是 `local`（本地 llama.cpp `Qwen3.8-27B`，`LOCAL_LLM_BASE_URL`/`LOCAL_LLM_API_KEY`），fallback 是 `deepseek-v4-flash`——`JudgmentCapability` 对 primary 任何失败（连接/超时/4xx/5xx/解析失败）自动回退一次；grading/structuring/hint 的 primary 仍是 `deepseek-v4-flash`（快模型，同题 ~19s 判对）；`qwen3.7-max` 是 reasoner（难几何题 >90s 仍超时），只作 fallback；tutoring 辅导主模型 `qwen3.7-max`；图片转录走独立 `transcribe` 场景（`qwen3-vl-plus`，fallback qwen-vl-max），辅导不因带图切换模型。已 seed 的库用 `npx tsx src/scripts/set-judging-local.ts` 幂等切换路由（YAML 只服务新装/DB 空时）。
 ```
 
-- [ ] **Step 2: 追加 changelog 条目**
+- [x] **Step 2: 追加 changelog 条目**
 
 在 `docs/ai-core-changelog.md` 的 `---`（第 12 行之后）之上、`## 2026-09-10 判题体系重构…` 之前插入：
 
@@ -1006,7 +1006,7 @@ git commit -m "feat(server): add idempotent script to point judgment route at lo
 ---
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add CLAUDE.md docs/ai-core-changelog.md docs/superpowers/specs/2026-09-11-local-judging-model-design.md
@@ -1021,12 +1021,12 @@ git commit -m "docs(ai-core): record local judging model routing and fallback"
 
 **Files:** 无（纯运行验证）
 
-- [ ] **Step 1: 启动后端并确认路由生效**
+- [x] **Step 1: 启动后端并确认路由生效**
 
 Run: `npm run start:dev`（apps/server；实际执行 `node --watch --loader @swc-node/register/esm src/main.ts`）
 然后 `curl -s localhost:3000/api/admin/routes`（带管理员 JWT）或直接查 DB，确认 `judgment/math` = `local / deepseek-v4-flash`。
 
-- [ ] **Step 2: 本地模型在线时判一题**
+- [x] **Step 2: 本地模型在线时判一题**
 
 本地 llama.cpp 在线（`curl -s http://192.168.1.8:12345/v1/models` 有响应）时，用训练判题接口提交一道 `fill_blank`/`calculation` 且答案不等价于标准答案的题（会走 AI 路由），确认返回正常且耗时符合本地推理预期。
 
@@ -1034,6 +1034,6 @@ Run: `npm run start:dev`（apps/server；实际执行 `node --watch --loader @sw
 
 停掉本地 llama.cpp（或改 `.env` 的 `LOCAL_LLM_BASE_URL` 指向不可达端口并重启后端），重复 Step 2，确认判题仍成功返回 —— 即回退 `deepseek-v4-flash` 生效。预期多等约 1–3s（重试退避）+ ds 调用时间。
 
-- [ ] **Step 4: 记录实测结论**
+- [x] **Step 4: 记录实测结论**
 
 把 Step 2/3 的实际耗时与是否成功写入 `docs/ai-core-changelog.md` 的 2026-09-11 条目「局限/待办」下方（新增一行 `- **实测**：...`），若 llama.cpp 拒绝 `response_format` 则同时新建 follow-up 任务改 `LocalClient.buildRequestBody`。

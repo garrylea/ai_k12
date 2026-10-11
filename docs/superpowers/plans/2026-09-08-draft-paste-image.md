@@ -21,7 +21,7 @@
 **Files:**
 - Modify: `apps/web/src/components/business/draft-store.ts`
 
-- [ ] **Step 1: 追加 DraftImage 类型与并行存储 API**
+- [x] **Step 1: 追加 DraftImage 类型与并行存储 API**
 
 在 `draft-store.ts` 末尾追加（不动既有 `Stroke`/`store`/`getDraft`/`setDraft`）：
 
@@ -47,7 +47,7 @@ export function setDraftImages(key: string, images: DraftImage[]): void {
 }
 ```
 
-- [ ] **Step 2: clearDraft 改为双清**
+- [x] **Step 2: clearDraft 改为双清**
 
 把既有：
 
@@ -68,12 +68,12 @@ export function clearDraft(key: string): void {
 
 同时把文件头注释第 1 行补一句贴图说明（`草稿白板内存缓存：模块级 Map，随题（key）隔离。` 后追加 `笔迹与贴图两个并行 Map，clearDraft 同时清两者。`）。
 
-- [ ] **Step 3: 类型检查**
+- [x] **Step 3: 类型检查**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 无输出（通过）
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/components/business/draft-store.ts
@@ -87,7 +87,7 @@ git commit -m "feat(web): draft-store 扩展贴图存储——DraftImage 并行 
 **Files:**
 - Create: `apps/web/src/components/business/draft-image-utils.ts`
 
-- [ ] **Step 1: 写入完整文件**
+- [x] **Step 1: 写入完整文件**
 
 ```ts
 // apps/web/src/components/business/draft-image-utils.ts
@@ -150,12 +150,12 @@ export async function fileToDraftImage(
 }
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 无输出（通过）
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/components/business/draft-image-utils.ts
@@ -169,7 +169,7 @@ git commit -m "feat(web): 草稿贴图工具——压缩(≤1600)/初始尺寸(6
 **Files:**
 - Create: `apps/web/src/components/business/DraftImageLayer.tsx`
 
-- [ ] **Step 1: 写入完整文件**
+- [x] **Step 1: 写入完整文件**
 
 ```tsx
 // apps/web/src/components/business/DraftImageLayer.tsx
@@ -347,12 +347,12 @@ export function DraftImageLayer({ images, onImagesChange, interactive }: Props) 
 
 注意：`onDragMove` 里的 `boardW/boardH/img` 暂未用于夹取（void 掉防 lint 未用告警），夹取只做了负方向——图片右侧/下侧允许超界由 board 裁切，这是有意的（spec 未约束，YAGNI）。
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 无输出（通过）
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/components/business/DraftImageLayer.tsx
@@ -366,7 +366,7 @@ git commit -m "feat(web): DraftImageLayer 贴图层——拖动/四角等比缩�
 **Files:**
 - Modify: `apps/web/src/components/business/DraftWhiteboard.tsx`
 
-- [ ] **Step 1: 导入与类型**
+- [x] **Step 1: 导入与类型**
 
 文件顶部 import 区追加：
 
@@ -382,7 +382,7 @@ import { fileToDraftImage, isEditableTarget } from './draft-image-utils';
 type Tool = 'pen' | 'eraser' | 'move';
 ```
 
-- [ ] **Step 2: MoveIcon（四向箭头线性 SVG）**
+- [x] **Step 2: MoveIcon（四向箭头线性 SVG）**
 
 在 `TrashIcon` 定义之后追加：
 
@@ -399,7 +399,7 @@ const MoveIcon = () => (
 );
 ```
 
-- [ ] **Step 3: 图片状态 + ref 镜像 + updateImages/insertImages**
+- [x] **Step 3: 图片状态 + ref 镜像 + updateImages/insertImages**
 
 组件内（`themeMode` 声明之后）追加：
 
@@ -432,7 +432,7 @@ const MoveIcon = () => (
   }, [scrollMode, updateImages]);
 ```
 
-- [ ] **Step 4: 粘贴监听（document 级，挂载期生效）**
+- [x] **Step 4: 粘贴监听（document 级，挂载期生效）**
 
 在 `insertImages` 定义之后追加：
 
@@ -454,7 +454,7 @@ const MoveIcon = () => (
   }, [insertImages]);
 ```
 
-- [ ] **Step 5: 切题加载贴图**
+- [x] **Step 5: 切题加载贴图**
 
 既有加载 effect：
 
@@ -476,7 +476,7 @@ const MoveIcon = () => (
   }, [questionId, persist, redraw]);
 ```
 
-- [ ] **Step 6: 清空含贴图**
+- [x] **Step 6: 清空含贴图**
 
 `handleClear` 改为：
 
@@ -490,7 +490,7 @@ const MoveIcon = () => (
   };
 ```
 
-- [ ] **Step 7: canvas 移动档穿透**
+- [x] **Step 7: canvas 移动档穿透**
 
 `canvasEl` 的 style 改为（追加 pointerEvents；cursor 移动档为 default）：
 
@@ -498,7 +498,7 @@ const MoveIcon = () => (
       style={{ touchAction: 'none', pointerEvents: tool === 'move' ? 'none' : 'auto', cursor: tool === 'move' ? 'default' : tool === 'eraser' ? 'cell' : 'crosshair' }}
 ```
 
-- [ ] **Step 8: 渲染层挂载（两种模式都在 canvas 之前）+ 工具条 + 拖放**
+- [x] **Step 8: 渲染层挂载（两种模式都在 canvas 之前）+ 工具条 + 拖放**
 
 (a) 工具条橡皮按钮之后追加：
 
@@ -541,12 +541,12 @@ const MoveIcon = () => (
         </div>
 ```
 
-- [ ] **Step 9: 类型检查 + lint**
+- [x] **Step 9: 类型检查 + lint**
 
 Run: `cd apps/web && npx tsc -b && npm run lint 2>&1 | tail -3`
 Expected: tsc 无输出；lint 0 error（既有 warning 不变）
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/web/src/components/business/DraftWhiteboard.tsx
@@ -559,7 +559,7 @@ git commit -m "feat(web): 草稿白板贴图集成——移动工具/粘贴/拖�
 
 **Files:** 无新改动
 
-- [ ] **Step 1: 生产构建**
+- [x] **Step 1: 生产构建**
 
 Run: `cd apps/web && npm run build`
 Expected: `✓ built in ...`（服务跑的是 vite preview，必须重建才可见——见 CLAUDE.md/记忆）
@@ -574,7 +574,7 @@ Expected: `✓ built in ...`（服务跑的是 vite preview，必须重建才可
 6. PreviewDraftPanel 场景：切 tab 回来图片还在；提交后清空
 7. 暗色主题下边框/控制点配色正常
 
-- [ ] **Step 3: 全量回归**
+- [x] **Step 3: 全量回归**
 
 Run: `cd apps/web && npx tsc -b && npm run lint 2>&1 | tail -2`
 Expected: 通过、0 error

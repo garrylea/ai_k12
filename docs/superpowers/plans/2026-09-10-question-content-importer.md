@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces: 列 `questions.approach TEXT NULL`、`questions.answer_verified TINYINT(1) NOT NULL DEFAULT 0`（后续所有任务依赖）。
 
-- [ ] **Step 1: 写迁移脚本**
+- [x] **Step 1: 写迁移脚本**
 
 `tools/db/migrations/2026-09-10_add_questions_approach_verified.sql`：
 
@@ -48,7 +48,7 @@ ALTER TABLE questions
   ADD COLUMN answer_verified TINYINT(1) NOT NULL DEFAULT 0;
 ```
 
-- [ ] **Step 2: 折回 schema.sql**
+- [x] **Step 2: 折回 schema.sql**
 
 在 `tools/db/schema.sql:220` 的 `explanation TEXT DEFAULT NULL,` 之后插入一行：
 
@@ -75,12 +75,12 @@ ALTER TABLE questions
   is_active TINYINT(1) NOT NULL DEFAULT 1,
 ```
 
-- [ ] **Step 3: 确认 db_loader 无需改动**
+- [x] **Step 3: 确认 db_loader 无需改动**
 
 Run: `grep -n "INSERT INTO questions" tools/data-refinery/src/db_loader.py`
 Expected: 命中一行，形如 `INSERT INTO questions (subject_id, group_id, ... content_hash) VALUES (...)`——**显式列清单**，新列走 DEFAULT，无需改动。若为 `SELECT *` 语义才需补列（本仓库当前为显式清单）。
 
-- [ ] **Step 4: 应用迁移并验证列**
+- [x] **Step 4: 应用迁移并验证列**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-10_add_questions_approach_verified.sql
@@ -89,7 +89,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM questions LIKE 'approach';
 
 Expected: 两行；`approach` Default NULL、`answer_verified` Default `0`。
 
-- [ ] **Step 5: 更新 DB 设计文档**
+- [x] **Step 5: 更新 DB 设计文档**
 
 `docs/K12智学系统-数据库设计文档.md` 的 questions 字段表，在 `| explanation | ... |` 行后加：
 
@@ -103,7 +103,7 @@ Expected: 两行；`approach` Default NULL、`answer_verified` Default `0`。
 | answer_verified | TINYINT(1) | NO | 0 | 人工/AI 核验导入标记（answer_importer 成功写入任一字段时置 1） |
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-10_add_questions_approach_verified.sql tools/db/schema.sql docs/K12智学系统-数据库设计文档.md
@@ -128,7 +128,7 @@ git commit -m "feat(db): questions 新增 approach 解题思路列 + answer_veri
   - `VALID_TYPES: set[str]`、`CONTENT_FIELDS: tuple[str, ...]`
   - Task 3/4/5 均 import 这些符号。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `tools/data-refinery/tests/test_answer_records.py`：
 
@@ -266,12 +266,12 @@ class TestExport:
         assert build_export_jsonl([]) == ""
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_records.py -q`
 Expected: FAIL（`ModuleNotFoundError: No module named 'answer_records'`）。
 
-- [ ] **Step 3: 实现 answer_records.py**
+- [x] **Step 3: 实现 answer_records.py**
 
 `tools/data-refinery/src/answer_records.py`：
 
@@ -453,12 +453,12 @@ def build_export_jsonl(rows: list[ExportRow]) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_records.py -q`
 Expected: PASS（全部用例）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_records.py tools/data-refinery/tests/test_answer_records.py
@@ -482,7 +482,7 @@ git commit -m "feat(data-refinery): answer_records JSONL 解析/校验 + export 
   - `doc_to_records(doc: AnswerDoc, paper_id: int) -> list[AnswerRecord]`
   - Task 5 的 CLI import 这些符号。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `tools/data-refinery/tests/test_answer_doc.py`：
 
@@ -596,12 +596,12 @@ class TestToRecords:
         assert rec.type is None
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_doc.py -q`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现 answer_doc.py**
+- [x] **Step 3: 实现 answer_doc.py**
 
 `tools/data-refinery/src/answer_doc.py`：
 
@@ -732,12 +732,12 @@ def doc_to_records(doc: AnswerDoc, paper_id: int) -> list[AnswerRecord]:
     return records
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_doc.py -q`
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_doc.py tools/data-refinery/tests/test_answer_doc.py
@@ -765,7 +765,7 @@ git commit -m "feat(data-refinery): answer_doc Markdown 按卷文档解析（含
   - `locate_paper(title, papers) -> tuple[int | None, list]`
   - `format_report(*, target, diff, unmatched, out_of_scope, warnings, apply) -> str`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `tools/data-refinery/tests/test_answer_importer.py`：
 
@@ -923,12 +923,12 @@ class TestReport:
         assert "幂等重跑" in out
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer.py -q`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现 answer_importer.py**
+- [x] **Step 3: 实现 answer_importer.py**
 
 `tools/data-refinery/src/answer_importer.py`：
 
@@ -1160,12 +1160,12 @@ def format_report(
     return "\n".join(lines)
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer.py -q`
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_importer.py tools/data-refinery/tests/test_answer_importer.py
@@ -1184,7 +1184,7 @@ git commit -m "feat(data-refinery): answer_importer 范围SQL/分类/diff/报告
 - Consumes: Task 2 的 `AnswerRecord`/`AnswerRecordError`/`ExportRow`/`build_export_jsonl`/`parse_answer_records`；Task 3 的 `AnswerDocError`/`doc_to_records`/`parse_answer_doc`；Task 4 的 `ScopeFilter`/`QuestionRow`/`build_diff`/`build_scope_sql`/`classify`/`format_report`/`locate_paper`。
 - Produces（供测试与执行）：`parse_args`、`parse_int_set`、`build_scope`、`build_update_sql`、`build_export_sql`、`connect`、`main`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `tools/data-refinery/tests/test_answer_importer_cli.py`：
 
@@ -1297,12 +1297,12 @@ class TestExportSql:
         assert params == [3, 3, 5]
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer_cli.py -q`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现 answer_importer_cli.py**
+- [x] **Step 3: 实现 answer_importer_cli.py**
 
 `tools/data-refinery/src/answer_importer_cli.py`：
 
@@ -1661,17 +1661,17 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer_cli.py -q`
 Expected: PASS。
 
-- [ ] **Step 5: 全量回归**
+- [x] **Step 5: 全量回归**
 
 Run: `cd tools/data-refinery && pytest -q`
 Expected: 全绿（既有用例不回归）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_importer_cli.py tools/data-refinery/tests/test_answer_importer_cli.py
@@ -1688,7 +1688,7 @@ git commit -m "feat(data-refinery): answer_importer_cli 连库编排（export/dr
 - Modify: `docs/superpowers/plans/2026-09-09-answer-importer.md`（顶部加取代说明）
 - Modify: `CLAUDE.md`（data-refinery「现状」段补一句）
 
-- [ ] **Step 1: 使用手册加 §4.8**
+- [x] **Step 1: 使用手册加 §4.8**
 
 在 `docs/data-refinery-使用手册.md` 中 `### 4.7 pipeline_cli` 章节结束、`## 5. 推荐工作流` 之前插入：
 
@@ -1753,7 +1753,7 @@ python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty -
 **安全须知**：默认 dry-run；`--apply` 需交互输 `yes`；`--limit` 默认 500（超出拒绝）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。
 ```
 
-- [ ] **Step 2: 管线总结加记录**
+- [x] **Step 2: 管线总结加记录**
 
 `docs/data-refinery-管线总结与后续.md` §6 已知遗留列表末尾追加第 8 条：
 
@@ -1761,7 +1761,7 @@ python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty -
 8. **题目内容缺口**：`answer_importer`（2026-09-10）已建成，可按单题/批量/按卷/按缺口回写 `answer`/`approach`（新增解题思路列）/`explanation`/`type`。存量约 188 道空答案、451 道无解析待按卷（或按 `--where ..._empty` 导出模板）补全；用法见 `docs/data-refinery-使用手册.md` §4.8，设计见 `docs/superpowers/specs/2026-09-10-question-content-importer-design.md`。
 ```
 
-- [ ] **Step 3: 标注旧计划已被取代**
+- [x] **Step 3: 标注旧计划已被取代**
 
 在 `docs/superpowers/plans/2026-09-09-answer-importer.md` 标题行之后插入：
 
@@ -1769,7 +1769,7 @@ python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty -
 > **已扩展取代**：本计划的三层架构、dry-run/幂等约定已并入 `docs/superpowers/specs/2026-09-10-question-content-importer-design.md`（新增 `questions.approach` 解题思路列、JSONL 主输入、`--where` 选择器与 `--export` 模板）。实现以新 spec 对应的计划为准。
 ```
 
-- [ ] **Step 4: CLAUDE.md data-refinery 现状补一句**
+- [x] **Step 4: CLAUDE.md data-refinery 现状补一句**
 
 在 `CLAUDE.md` 的 data-refinery「**现状**」段（`管线已端到端跑通…` 那句所在段落）末尾追加一句：
 
@@ -1777,7 +1777,7 @@ python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty -
 题目内容回写工具 `answer_importer`（2026-09-10）在 `tools/data-refinery/src/`：JSONL/Markdown 输入，按单题/批量/按卷/按缺口回写 questions 的 answer/approach/explanation/type（`--export` 导出待补模板，`--apply` 幂等写入）。
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/data-refinery-使用手册.md docs/data-refinery-管线总结与后续.md docs/superpowers/plans/2026-09-09-answer-importer.md CLAUDE.md
@@ -1793,7 +1793,7 @@ git commit -m "docs(data-refinery): answer_importer 使用手册 §4.8 + 管线�
 **Interfaces:**
 - Consumes: Task 1–6 全部产物。
 
-- [ ] **Step 1: 列候选试卷**
+- [x] **Step 1: 列候选试卷**
 
 ```bash
 cd tools/data-refinery && python src/answer_importer_cli.py --list-papers 模拟
@@ -1801,7 +1801,7 @@ cd tools/data-refinery && python src/answer_importer_cli.py --list-papers 模拟
 
 Expected: 输出 `#id  题数  标题` 列表（至少一行）。
 
-- [ ] **Step 2: 选一题导出模板并检查形态**
+- [x] **Step 2: 选一题导出模板并检查形态**
 
 ```bash
 python src/answer_importer_cli.py --export --question-id <上一步某卷首题 id> --out /tmp/fill.jsonl
@@ -1810,7 +1810,7 @@ cat /tmp/fill.jsonl
 
 Expected: 一行 JSON，含 `question_id`、空的 `answer`/`approach`/`explanation`，`_ref` 内含题干与库内现值。
 
-- [ ] **Step 3: 填 2-3 题并 dry-run**
+- [x] **Step 3: 填 2-3 题并 dry-run**
 
 按上一步导出（可再用 `--paper-id` 多导几题）手工填 `answer`/`approach`/`explanation`（其中一条故意留着空串验证「空串=不改」，另加一条不存在的题号验证「定位失败」），跑：
 
@@ -1820,7 +1820,7 @@ python src/answer_importer_cli.py --records /tmp/fill.jsonl
 
 Expected: 「将更新 N 题」+ 旧→新 diff + 「定位失败 1 条」；**未写入**（无 `--apply`）。
 
-- [ ] **Step 4: --apply 写入并复查**
+- [x] **Step 4: --apply 写入并复查**
 
 ```bash
 python src/answer_importer_cli.py --records /tmp/fill.jsonl --apply   # 输 yes
@@ -1829,7 +1829,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT id, type, answer_verified, approach, 
 
 Expected: `answer`/`approach`/`explanation` 按填写更新，未填字段保持原值，`answer_verified=1`。
 
-- [ ] **Step 5: 幂等重跑**
+- [x] **Step 5: 幂等重跑**
 
 ```bash
 python src/answer_importer_cli.py --records /tmp/fill.jsonl
@@ -1837,7 +1837,7 @@ python src/answer_importer_cli.py --records /tmp/fill.jsonl
 
 Expected: 「（无变化——与库内数据一致，幂等重跑）」，不发 UPDATE。（若仍显示更新，检查 `build_diff` 的比较是否忽略了空白差异。）
 
-- [ ] **Step 6: 按试卷 Markdown 路径验证**
+- [x] **Step 6: 按试卷 Markdown 路径验证**
 
 取某卷 3 个题号写 `/tmp/doc.md`（含一题只写答案、一题带思路、一题带 `题型：calculation`），跑：
 
@@ -1847,7 +1847,7 @@ python src/answer_importer_cli.py --doc /tmp/doc.md --paper-id <卷id>
 
 Expected: 正确匹配印刷题号并出 diff；`题型` 变化显示在报告中。
 
-- [ ] **Step 7: 如有修正则提交**
+- [x] **Step 7: 如有修正则提交**
 
 ```bash
 git add -A tools/data-refinery && git commit -m "fix(data-refinery): answer_importer 真库联调修正"

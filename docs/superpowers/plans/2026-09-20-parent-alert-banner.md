@@ -25,7 +25,7 @@
 - Modify: `apps/server/src/database/repositories/study-sessions.repo.ts`（`closeStale`，约 284-295 行）
 - Test: `apps/server/src/database/repositories/study-sessions.repo.test.ts`（`describe('StudySessionsRepository.closeStale')`，约 405 行起）
 
-- [ ] **Step 1: 改造既有测试 + 写失败的新测试**
+- [x] **Step 1: 改造既有测试 + 写失败的新测试**
 
 既有两条用例断言 `await repo.closeStale(9)).toBe(3)` 且 `mock.calls[0]` 是 UPDATE —— 行为变更后 SELECT 会排在 UPDATE 之前。把它们改造成新签名，并新增「返回 hidden 段信息」用例。把 `describe('StudySessionsRepository.closeStale')` 整块替换为：
 
@@ -82,12 +82,12 @@ describe('StudySessionsRepository.closeStale', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/study-sessions.repo.test.ts`
 Expected: 新用例 FAIL（`result.hidden` 为 undefined / `closedCount` undefined），既有用例 FAIL（`.toBe(3)` 收到对象）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `study-sessions.repo.ts` 中 `StudySessionInsertInput` 接口之后加两个导出类型：
 
@@ -156,17 +156,17 @@ export interface CloseStaleResult {
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/study-sessions.repo.test.ts`
 Expected: PASS（3 用例）。
 
-- [ ] **Step 5: 跑服务层测试确认只影响预期范围**
+- [x] **Step 5: 跑服务层测试确认只影响预期范围**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts`
 Expected: 可能有 FAIL —— `makeRepo` 里 `closeStale: vi.fn().mockResolvedValue(0)` 的默认 mock 现在返回的是裸数字而 service 将消费新形状。若 fail，把默认改为 `vi.fn().mockResolvedValue({ closedCount: 0, hidden: [] })`（Task 3 会再动它）。改完应 PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/study-sessions.repo.ts apps/server/src/database/repositories/study-sessions.repo.test.ts apps/server/src/modules/analytics/study-sessions.service.test.ts
@@ -181,7 +181,7 @@ git commit -m "feat(analytics): closeStale 返回被关会话的挂机信息（�
 - Modify: `apps/server/src/modules/analytics/study-sessions.service.ts`（`maybeRecordHiddenAlert`，约 254-281 行）
 - Test: `apps/server/src/modules/analytics/study-sessions.service.test.ts`（`describe('StudySessionsService.heartbeat')` 内追加）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 在 `describe('StudySessionsService.heartbeat')` 的「idle 段达到 idle 阈值 → 写 idle 预警」用例之后追加：
 
@@ -225,12 +225,12 @@ git commit -m "feat(analytics): closeStale 返回被关会话的挂机信息（�
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts`
 Expected: 第一条新用例 FAIL（当前口径 230s < 300s 不写预警）；第二条 PASS（当前也不写）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `study-sessions.service.ts` 顶部（`END_REASONS` 常量附近）加导出常量：
 
@@ -266,12 +266,12 @@ export const CLIENT_IDLE_DETECTION_SECONDS = 120;
 
 （`minutes` 的计算 `Math.floor(elapsedSeconds / 60)` 在后面，不用动——它自动用上有效值。）
 
-- [ ] **Step 4: 跑测试确认全部通过**
+- [x] **Step 4: 跑测试确认全部通过**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts`
 Expected: PASS。既有 idle 用例（16 分钟 > 15）在新口径下有效值 18 分钟，仍过；away 用例全部不受影响。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/analytics/study-sessions.service.ts apps/server/src/modules/analytics/study-sessions.service.test.ts
@@ -286,7 +286,7 @@ git commit -m "feat(analytics): idle 走神判定改字面语义（+120s 检测�
 - Modify: `apps/server/src/modules/analytics/study-sessions.service.ts`（`closeStale`，约 287-289 行）
 - Test: `apps/server/src/modules/analytics/study-sessions.service.test.ts`（新增 describe 块）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 在 `describe('StudySessionsService.end')` 之后追加：
 
@@ -348,12 +348,12 @@ describe('StudySessionsService.closeStale（补判）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts`
 Expected: 前两条 FAIL（当前 `closeStale` 不判阈值、`safety.record` 不被调）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 把 `StudySessionsService.closeStale` 替换为：
 
@@ -377,17 +377,17 @@ Expected: 前两条 FAIL（当前 `closeStale` 不判阈值、`safety.record` �
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts`
 Expected: PASS（含新 describe 3 条）。
 
-- [ ] **Step 5: 跑学情侧测试确认 `closeStaleQuietly` 调用方不受影响**
+- [x] **Step 5: 跑学情侧测试确认 `closeStaleQuietly` 调用方不受影响**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/study-time.service.test.ts`
 Expected: PASS（`closeStaleQuietly` 的 mock 是 `closeStale: vi.fn().mockResolvedValue(...)`，若其默认形状是裸数字导致 FAIL，同步改为 `{ closedCount: n, hidden: [] }`）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/analytics/study-sessions.service.ts apps/server/src/modules/analytics/study-sessions.service.test.ts apps/server/src/modules/parent-insights/study-time.service.test.ts
@@ -405,7 +405,7 @@ git commit -m "feat(analytics): closeStale 补判走神阈值（修后台 tab �
 - Test: `apps/server/src/modules/parent-insights/alerts.service.test.ts`
 - Test: `apps/server/src/modules/parent-insights/parent-insights.controller.test.ts`
 
-- [ ] **Step 1: DTO**
+- [x] **Step 1: DTO**
 
 `parent-insights.dto.ts` 的 `ParentAlertPage` 接口之后追加：
 
@@ -427,7 +427,7 @@ export interface ParentUnreadAlerts {
 }
 ```
 
-- [ ] **Step 2: 写失败的服务测试**
+- [x] **Step 2: 写失败的服务测试**
 
 `alerts.service.test.ts` 顶部 import 区补：
 
@@ -501,12 +501,12 @@ describe('AlertsService.unread（轮询端点 + 补判）', () => {
 
 （若该测试文件尚无 `Logger` import，从 `@nestjs/common` 补。）
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/alerts.service.test.ts`
 Expected: FAIL（`AlertsService` 构造函数只收 1 参 / 无 `unread` 方法）。
 
-- [ ] **Step 4: 实现 AlertsService**
+- [x] **Step 4: 实现 AlertsService**
 
 `alerts.service.ts` 全量改造（import 区新增 + 构造函数 + `unread` 方法 + 映射函数）：
 
@@ -585,12 +585,12 @@ function toUnreadItem(row: SafetyAlertRowWithStudentName): ParentUnreadAlertItem
 
 **注意（DI 铁律，CLAUDE.md）**：`StudySessionsService` 与 `StudentsRepository` 都是类 token，`ParentInsightsModule` 已分别 `imports: [AnalyticsModule]`（导出 `StudySessionsService`）且 `providers` 里有 `StudentsRepository`，**模块文件不用改**。
 
-- [ ] **Step 5: 跑服务测试确认通过**
+- [x] **Step 5: 跑服务测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/alerts.service.test.ts`
 Expected: PASS。
 
-- [ ] **Step 6: 写失败的控制器测试**
+- [x] **Step 6: 写失败的控制器测试**
 
 `parent-insights.controller.test.ts` 中 `makeController` 的 `alerts` 假实现补一个方法：
 
@@ -618,12 +618,12 @@ describe('ParentInsightsController 未读轮询端点', () => {
 });
 ```
 
-- [ ] **Step 7: 跑测试确认失败**
+- [x] **Step 7: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/parent-insights.controller.test.ts`
 Expected: FAIL（`controller.listUnreadAlerts` 不是函数）。
 
-- [ ] **Step 8: 实现控制器 handler**
+- [x] **Step 8: 实现控制器 handler**
 
 `parent-insights.controller.ts`：import 区把 `ParentAlertPage` 的类型 import 扩为同时取 `ParentUnreadAlerts`（该文件从 `./dto/parent-insights.dto.js` import 类型的既有行上补）。在 `@Get('alerts')` 的 handler **之前**插入（同方法前缀无路径冲突，放前面只为可读性）：
 
@@ -639,7 +639,7 @@ Expected: FAIL（`controller.listUnreadAlerts` 不是函数）。
   }
 ```
 
-- [ ] **Step 9: 跑控制器测试 + 全模块回归**
+- [x] **Step 9: 跑控制器测试 + 全模块回归**
 
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/`
 Expected: PASS。
@@ -656,7 +656,7 @@ curl -s http://localhost:3000/parent/alerts/unread -H "Authorization: Bearer <to
 
 Expected: 200，`{ items: [...], total: N }`；库里那两条未读 idle 预警（id 25/26）应出现在 items 里。验证后停掉服务。
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/server/src/modules/parent-insights/
@@ -670,7 +670,7 @@ git commit -m "feat(parent): GET /parent/alerts/unread 轮询端点（自带 clo
 **Files:**
 - Modify: `apps/web/src/services/api.ts`（`markParentAlertRead` 附近，约 2430-2436 行）
 
-- [ ] **Step 1: 加类型与函数**
+- [x] **Step 1: 加类型与函数**
 
 在 `ParentAlertPage` 相关类型附近（`markParentAlertRead` 之前）追加：
 
@@ -695,12 +695,12 @@ export function getParentUnreadAlerts(): Promise<ParentUnreadAlerts> {
 }
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 无错误。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -717,7 +717,7 @@ git commit -m "feat(web): getParentUnreadAlerts API（Task 5）"
 - Modify: `apps/web/src/components/layout/ParentLayout.tsx`
 - Modify: `apps/web/src/components/layout/ParentLayout.test.tsx`
 
-- [ ] **Step 1: 写失败的组件测试**
+- [x] **Step 1: 写失败的组件测试**
 
 `apps/web/src/components/business/AlertBanner.test.tsx`：
 
@@ -867,12 +867,12 @@ describe('AlertBanner', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/components/business/AlertBanner.test.tsx`
 Expected: FAIL（组件文件不存在）。
 
-- [ ] **Step 3: 实现组件**
+- [x] **Step 3: 实现组件**
 
 `apps/web/src/components/business/AlertBanner.tsx`：
 
@@ -952,19 +952,19 @@ export default function AlertBanner() {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/AlertBanner.test.tsx`
 Expected: PASS（7 用例）。注意 `globals: false` 铁律——本文件已自带 `afterEach(cleanup)`。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/business/AlertBanner.tsx apps/web/src/components/business/AlertBanner.test.tsx
 git commit -m "feat(web): AlertBanner 组件（30s 轮询 + 点击即已读，Task 6）"
 ```
 
-- [ ] **Step 6: 改造 ParentLayout（替换旧 banner 逻辑）**
+- [x] **Step 6: 改造 ParentLayout（替换旧 banner 逻辑）**
 
 `ParentLayout.tsx`：
 1. 删除 ` getParentAlerts, type ParentAlertItem ` 的 import（保留 `getUnreadMessageCount`）；
@@ -985,7 +985,7 @@ git commit -m "feat(web): AlertBanner 组件（30s 轮询 + 点击即已读，Ta
           <header className="h-16 ...">
 ```
 
-- [ ] **Step 7: 改造 ParentLayout 测试**
+- [x] **Step 7: 改造 ParentLayout 测试**
 
 `ParentLayout.test.tsx`：
 1. mock 区：`getParentAlerts: vi.fn()` 替换为 `getParentUnreadAlerts: vi.fn()`，并 mock `markParentAlertRead: vi.fn().mockResolvedValue(null)`；
@@ -1034,12 +1034,12 @@ git commit -m "feat(web): AlertBanner 组件（30s 轮询 + 点击即已读，Ta
 
 （`fireEvent` 若该文件尚未 import 则补；`MESSAGE` 常量与 `alertItem`/`page` 辅助函数若不再被引用则删除。）
 
-- [ ] **Step 8: 跑 Layout 测试 + 类型检查**
+- [x] **Step 8: 跑 Layout 测试 + 类型检查**
 
 Run: `cd apps/web && npx vitest run src/components/layout/ParentLayout.test.tsx && npx tsc -b`
 Expected: PASS / 无错误。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/web/src/components/layout/ParentLayout.tsx apps/web/src/components/layout/ParentLayout.test.tsx
@@ -1056,7 +1056,7 @@ git commit -m "feat(web): ParentLayout 挂 AlertBanner 替换旧 banner（全孩
 - Modify: `CLAUDE.md`（「家长端『管得住』批」段的走神条目）
 - Modify: `docs/ai-core-changelog.md`（新条目）
 
-- [ ] **Step 1: API 设计文档**
+- [x] **Step 1: API 设计文档**
 
 §4 端点清单的 parent 段加一行（对齐既有行的格式）：
 
@@ -1079,7 +1079,7 @@ git commit -m "feat(web): ParentLayout 挂 AlertBanner 替换旧 banner（全孩
    Banner 交互：点击即已读（逐条 `PATCH /parent/alerts/:id/read`）+ 跳预警中心。
 ```
 
-- [ ] **Step 2: openapi.yaml**
+- [x] **Step 2: openapi.yaml**
 
 在 `GET /parent/alerts` 的 path 定义之后（同级缩进）加：
 
@@ -1123,7 +1123,7 @@ git commit -m "feat(web): ParentLayout 挂 AlertBanner 替换旧 banner（全孩
 
 **评审补充（2026-09-20）**：`Controls` schema 的 `alertIdleMinutes` 字段 description 里也留着旧口径（「两者相加才是家长感知的报警延迟」），必须同批改写为新口径（字面语义 + 阈值 ≤ 2 分钟生效值约 2 分钟的边界），与本节 §6.28 的修订一致。
 
-- [ ] **Step 3: CLAUDE.md**
+- [x] **Step 3: CLAUDE.md**
 
 「家长端『管得住』批」段落里找到走神条目（「**走神两个『分钟数』不是一回事**」那条），替换为：
 
@@ -1131,11 +1131,11 @@ git commit -m "feat(web): ParentLayout 挂 AlertBanner 替换旧 banner（全孩
 - **走神预警「及时可见」批（2026-09-20）**：① idle 阈值已是**字面语义**（从最后一次操作起算；服务端 `CLIENT_IDLE_DETECTION_SECONDS = 120` 镜像前端 `IDLE_TIMEOUT_MS`，**改一处必须同步另一处**）；② 心跳全断的会话（后台 tab 冻结 / end 丢失）由 **`closeStale` 补判**兜底——判定时机现在是**心跳、end、closeStale 三处**；③ 家长端 Banner = `AlertBanner`（`ParentLayout` 顶部、30s 轮询 `GET /parent/alerts/unread`、**点击即已读**、覆盖全部孩子**含 info 级**——上一批「info 只进列表页」的 banner 裁决已被本批推翻，预警列表页行为不变）。`study_sessions` 的 `hidden_*` 四列仍**不参与**学习时长口径；`UPDATE ... SET` 列顺序承重的铁律不变。
 ```
 
-- [ ] **Step 4: changelog**
+- [x] **Step 4: changelog**
 
 `docs/ai-core-changelog.md` 顶部加一条日期条目：背景（1 小时实测无感知的复盘：会话 13 心跳全断 → away 永不判；alerts 25/26 其实已落库但无任何推送面）、本批四项改动、验证结果。
 
-- [ ] **Step 5: 全量回归**
+- [x] **Step 5: 全量回归**
 
 Run: `cd apps/server && npm test`
 Expected: 全部 PASS（103+ 文件）。
@@ -1153,7 +1153,7 @@ Expected: 构建成功。
 3. 家长端另一浏览器登录 → 停留在任意家长页（如 `/parent/controls`）；
 4. Expected：~2 分钟后（away 阈值 2 分钟）顶部出现橙色 Banner；点击 → 跳预警中心、Banner 消失、该预警变为已读。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml CLAUDE.md docs/ai-core-changelog.md

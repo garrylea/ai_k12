@@ -68,7 +68,7 @@ export interface PayChannelAdapter {
 }
 ```
 
-- [ ] **Step 1: 写 `pay-signing.ts`**（两个适配器共用，node:crypto）
+- [x] **Step 1: 写 `pay-signing.ts`**（两个适配器共用，node:crypto）
 
 ```typescript
 import { createSign, createVerify, createDecipheriv } from 'node:crypto';
@@ -105,11 +105,11 @@ export function randomNonce(): string {
 }
 ```
 
-- [ ] **Step 2: 写 MockPayAdapter**（测试/无商户号环境兜底）：`createOrder` 返回 `{tradeNo: 'MOCK-'+orderNo, qrContent: 'mock://pay/'+orderNo, redirectUrl: null}`；`queryOrder` 按构造开关 `autoPaid` 返回；`verifyCallback` 解析 rawBody JSON `{orderNo, tradeNo, paid, amountCents}`；success/failure 返回 JSON。
+- [x] **Step 2: 写 MockPayAdapter**（测试/无商户号环境兜底）：`createOrder` 返回 `{tradeNo: 'MOCK-'+orderNo, qrContent: 'mock://pay/'+orderNo, redirectUrl: null}`；`queryOrder` 按构造开关 `autoPaid` 返回；`verifyCallback` 解析 rawBody JSON `{orderNo, tradeNo, paid, amountCents}`；success/failure 返回 JSON。
 
-- [ ] **Step 3: 渠道未配置语义**——真实适配器构造时读 env（Task 3/4 列清单），任何必需项缺失 → `createOrder/queryOrder` 直接 `throw new HttpException({ code: 2003, message: '支付渠道未配置' }, 503)`。工厂（`billing.module.ts` providers）始终注册真实适配器 + Mock；`MockPayAdapter` 仅在 `NODE_ENV==='test'` 或 `BILLING_USE_MOCK==='1'` 时被 `BillingService` 选用。
+- [x] **Step 3: 渠道未配置语义**——真实适配器构造时读 env（Task 3/4 列清单），任何必需项缺失 → `createOrder/queryOrder` 直接 `throw new HttpException({ code: 2003, message: '支付渠道未配置' }, 503)`。工厂（`billing.module.ts` providers）始终注册真实适配器 + Mock；`MockPayAdapter` 仅在 `NODE_ENV==='test'` 或 `BILLING_USE_MOCK==='1'` 时被 `BillingService` 选用。
 
-- [ ] **Step 4: Commit** — `git commit -m "feat(billing): 渠道适配器接口 + 签名工具 + Mock 适配器"`
+- [x] **Step 4: Commit** — `git commit -m "feat(billing): 渠道适配器接口 + 签名工具 + Mock 适配器"`
 
 ---
 
@@ -125,7 +125,7 @@ export function randomNonce(): string {
 
 env 清单（缺一即 2003）：`WXPAY_MCHID`、`WXPAY_APPID`、`WXPAY_SERIAL_NO`、`WXPAY_PRIVATE_KEY_PATH`、`WXPAY_APIV3_KEY`、`WXPAY_PLATFORM_CERT_PATH`、`WXPAY_NOTIFY_URL`。
 
-- [ ] **Step 1: 写适配器**（要点全列，fetch + node:crypto，无第三方 SDK）
+- [x] **Step 1: 写适配器**（要点全列，fetch + node:crypto，无第三方 SDK）
 
 ```typescript
 // 下单：POST https://api.mch.weixin.qq.com/v3/pay/transactions/native
@@ -148,11 +148,11 @@ env 清单（缺一即 2003）：`WXPAY_MCHID`、`WXPAY_APPID`、`WXPAY_SERIAL_N
 
 按以上注释逐条实现（每条一个私有方法：`buildAuthHeader(method, urlPath, body)`、`createOrder`、`queryOrder`、`verifyCallback`）。URL path 参与签名必须与请求行完全一致（含 query）。
 
-- [ ] **Step 2: 测试**（生成测试 RSA 密钥对 + 假平台证书，`crypto.generateKeyPairSync('rsa', 2048)`）：
+- [x] **Step 2: 测试**（生成测试 RSA 密钥对 + 假平台证书，`crypto.generateKeyPairSync('rsa', 2048)`）：
   - `createOrder` 发出的 Authorization 头可用公钥验签还原签名串；body 含 `out_trade_no/amount.total`
   - `verifyCallback`：用私钥签 `{ts}\n{n}\n{raw}\n` 构造 headers → 验签通过；payload 解密出 `out_trade_no/transaction_id/amount.total`；错签 → 抛错（由 service 转 failure 应答）
   - AES-GCM 解密往返：用 APIv3 key 加密样例 resource → decrypt 还原
-- [ ] **Step 3: 跑测试 + Commit** — `git commit -m "feat(billing): 微信 Native 适配器（APIv3 下单/查单/回调验签解密）"`
+- [x] **Step 3: 跑测试 + Commit** — `git commit -m "feat(billing): 微信 Native 适配器（APIv3 下单/查单/回调验签解密）"`
 
 ---
 
@@ -167,7 +167,7 @@ env 清单（缺一即 2003）：`WXPAY_MCHID`、`WXPAY_APPID`、`WXPAY_SERIAL_N
 
 env 清单：`ALIPAY_APP_ID`、`ALIPAY_GATEWAY`（默认 `https://openapi.alipay.com/gateway`）、`ALIPAY_APP_PRIVATE_KEY_PATH`、`ALIPAY_ALIPAY_PUBLIC_KEY_PATH`、`ALIPAY_NOTIFY_URL`。
 
-- [ ] **Step 1: 实现**（要点）：
+- [x] **Step 1: 实现**（要点）：
 
 ```text
 公共参数（form-urlencoded POST 到 gateway）：app_id, method, format=JSON, charset=utf-8,
@@ -183,8 +183,8 @@ env 清单：`ALIPAY_APP_ID`、`ALIPAY_GATEWAY`（默认 `https://openapi.alipay
   trade_status ∈ {TRADE_SUCCESS, TRADE_FINISHED}；应答纯文本 success / failure（HTTP 都 200）
 ```
 
-- [ ] **Step 2: 测试**（同 Task 2 手法：生成密钥对、构造签名报文、验证签名串与参数序、金额分↔元换算边界如 `1` -> `"0.01"`、`19800` -> `"198.00"`）
-- [ ] **Step 3: 跑测试 + Commit**
+- [x] **Step 2: 测试**（同 Task 2 手法：生成密钥对、构造签名报文、验证签名串与参数序、金额分↔元换算边界如 `1` -> `"0.01"`、`19800` -> `"198.00"`）
+- [x] **Step 3: 跑测试 + Commit**
 
 ---
 
@@ -208,14 +208,14 @@ env 清单：`ALIPAY_APP_ID`、`ALIPAY_GATEWAY`（默认 `https://openapi.alipay
   - `BillingService.adminMarkPaid(orderNo)`（channel='manual'，tradeNo=`manual-${orderNo}`，已 paid 幂等成功，非 pending → 2002）
   - orders.repo：`insertOrder / findByOrderNo / findPendingByParent / listByParent(分页) / expireStale() / markPaidTx(conn, orderId, tradeNo, paidAt): Promise<number>`；`ORDER_EXPIRE_MINUTES = 120`
 
-- [ ] **Step 1: 写失败测试**（重点用例，全部 mock 依赖）：
+- [x] **Step 1: 写失败测试**（重点用例，全部 mock 依赖）：
   1. `createOrder`：套餐下架 → 2005；同套餐同渠道已有 pending → 复用返回且**不**新建行、**不**调适配器；换套餐 → 2002；适配器抛错 → 2003 且订单仍 pending
   2. `finalizePaidOrder`：markPaidTx 影响行 1 → 续期被调、COMMIT、返回 'paid'；影响行 0 → ROLLBACK、不续期、返回 'duplicate'
   3. `handleCallback`：金额不符 → 不 finalize、返回 failureResponse；已 paid 订单重复通知 → success 且**不**再 finalize；order.channel 不符 → failure；验签抛错 → failureResponse
   4. `confirmPaid`：查单 paid → finalize 'paid'；未支付 → HttpException 2004
   5. `cancel`：非 pending → 2002；pending → cancelled
   6. `getOrder/listOrders` 先调 `expireStale()`（惰性翻转）
-- [ ] **Step 2: 跑失败 → 实现 → 通过**。事务骨架：
+- [x] **Step 2: 跑失败 → 实现 → 通过**。事务骨架：
 
 ```typescript
 async finalizePaidOrder(order: OrderRow, tradeNo: string, now = new Date()): Promise<'paid' | 'duplicate'> {
@@ -233,7 +233,7 @@ async finalizePaidOrder(order: OrderRow, tradeNo: string, now = new Date()): Pro
 }
 ```
 
-- [ ] **Step 3: orders.repo 实现**——**分页查询用 `pool.query`**：
+- [x] **Step 3: orders.repo 实现**——**分页查询用 `pool.query`**：
 
 ```typescript
 async listByParent(parentId: number, page: number, pageSize: number) {
@@ -251,7 +251,7 @@ async listByParent(parentId: number, page: number, pageSize: number) {
 
 `markPaidTx`：`UPDATE orders SET payment_status='paid', channel_trade_no=?, paid_at=? WHERE id=? AND payment_status='pending'` → `affectedRows`。
 
-- [ ] **Step 4: Commit** — `git commit -m "feat(billing): 订单状态机 + finalize 事务续期 + 回调处理"`
+- [x] **Step 4: Commit** — `git commit -m "feat(billing): 订单状态机 + finalize 事务续期 + 回调处理"`
 
 ---
 
@@ -273,10 +273,10 @@ async listByParent(parentId: number, page: number, pageSize: number) {
   - `POST /api/billing/callback/{channel}` → `@HttpCode(200)` 返回适配器应答（微信 JSON / 支付宝纯文本），取参 `@Param('channel') channel: PayChannel` + `@Req() req: RawBodyRequest<Request>`（`req.rawBody!`）+ `@Headers() headers`
   - `POST /api/admin/billing/orders/{orderNo}/mark-paid` → 200；已 paid 幂等成功，非 pending → 2002
 
-- [ ] **Step 1: 写三个 controller**（薄层：参数校验 DTO/管道按仓内既有 controller 风格；callback 里 `channel` 不在 `['wechat','alipay']` → 404/1002）
-- [ ] **Step 2: 测试**——callback：mock service，断言 rawBody 透传、微信 success 应答 httpStatus=200；`POST /orders` 返回 201（Nest 默认）；admin mark-paid 归属不经家长校验。
-- [ ] **Step 3: main.ts rawBody + module wiring**（`BillingModule` imports 进 `AppModule`；`SubscriptionsService` export 给 `AuthModule` 批①已完成）
-- [ ] **Step 4: 全量测试 + Commit** — `npm test` 全绿 → `git commit -m "feat(billing): billing 三组端点 + 免 JWT 验签回调 + admin mark-paid"`
+- [x] **Step 1: 写三个 controller**（薄层：参数校验 DTO/管道按仓内既有 controller 风格；callback 里 `channel` 不在 `['wechat','alipay']` → 404/1002）
+- [x] **Step 2: 测试**——callback：mock service，断言 rawBody 透传、微信 success 应答 httpStatus=200；`POST /orders` 返回 201（Nest 默认）；admin mark-paid 归属不经家长校验。
+- [x] **Step 3: main.ts rawBody + module wiring**（`BillingModule` imports 进 `AppModule`；`SubscriptionsService` export 给 `AuthModule` 批①已完成）
+- [x] **Step 4: 全量测试 + Commit** — `npm test` 全绿 → `git commit -m "feat(billing): billing 三组端点 + 免 JWT 验签回调 + admin mark-paid"`
 
 ---
 
@@ -292,8 +292,8 @@ async listByParent(parentId: number, page: number, pageSize: number) {
   - `GET /api/quota/plans` → `[{planCode, name, priceCents, durationDays}]`（家长+学生+admin 可读）
   - `GET /api/quota/usage`（**仅家长**，学生 403/1003）→ `{periodStart, periodEnd, calls, inputTokens, outputTokens, tokensUnknown, byDay}`
 
-- [ ] **Step 1: 口径定死**（写入 service 注释）：`periodEnd = currentPeriodEnd ?? now`；`periodStart = periodEnd - 30 天`（rolling 30 天，**不按订阅周期起算**——orders 未存 period_start，spec §5.1 的「当前订阅周期」以该近似口径落地，批③ PRD 注记写明）；聚合范围 = 该家长名下所有学生。
-- [ ] **Step 2: 聚合查询**（NULL 语义仓规：NULL = 量不到，**绝不按 0 混入**，单列计数）：
+- [x] **Step 1: 口径定死**（写入 service 注释）：`periodEnd = currentPeriodEnd ?? now`；`periodStart = periodEnd - 30 天`（rolling 30 天，**不按订阅周期起算**——orders 未存 period_start，spec §5.1 的「当前订阅周期」以该近似口径落地，批③ PRD 注记写明）；聚合范围 = 该家长名下所有学生。
+- [x] **Step 2: 聚合查询**（NULL 语义仓规：NULL = 量不到，**绝不按 0 混入**，单列计数）：
 
 ```sql
 SELECT DATE(created_at) AS day, COUNT(*) AS calls,
@@ -305,16 +305,16 @@ GROUP BY DATE(created_at) ORDER BY day
 ```
 
 服务层把 `SUM(*)` 的 NULL（窗口内无行/全 NULL）归零、`tokensUnknown` 保留独立计数；`byDay` 补空日为 0 调用（前端画图友好，可省——实施时从简，只回有数据的 day）。
-- [ ] **Step 3: 测试**（mock repo）：家长视角聚合形状；学生调 usage → 403/1003；plans 只含 active。
-- [ ] **Step 4: 全量 + Commit** — `git commit -m "feat(billing): /api/quota/plans + /usage（AI 用量只展示聚合）"`
+- [x] **Step 3: 测试**（mock repo）：家长视角聚合形状；学生调 usage → 403/1003；plans 只含 active。
+- [x] **Step 4: 全量 + Commit** — `git commit -m "feat(billing): /api/quota/plans + /usage（AI 用量只展示聚合）"`
 
 ---
 
 ### Task 7: 批② 收尾
 
-- [ ] **Step 1: 全量测试 + tsc**：`cd apps/server && npm test && npx tsc --noEmit` 全绿
-- [ ] **Step 2: 手工冒烟（BILLING_USE_MOCK=1）**：`node dist/main.js` 起服务 → 家长 JWT 下单（mock 码）→ mock 回调 POST（构造 rawBody JSON）→ `GET /api/quota/subscription` 看 `current_period_end` 顺延 → 学生 JWT 打业务端点仍 200；`trial_ends_at` 改过期后 → 403/2001
-- [ ] **Step 3: Commit 收尾 + push 由用户决定**（本批无文档同步，批③统一做）
+- [x] **Step 1: 全量测试 + tsc**：`cd apps/server && npm test && npx tsc --noEmit` 全绿
+- [x] **Step 2: 手工冒烟（BILLING_USE_MOCK=1）**：`node dist/main.js` 起服务 → 家长 JWT 下单（mock 码）→ mock 回调 POST（构造 rawBody JSON）→ `GET /api/quota/subscription` 看 `current_period_end` 顺延 → 学生 JWT 打业务端点仍 200；`trial_ends_at` 改过期后 → 403/2001
+- [x] **Step 3: Commit 收尾 + push 由用户决定**（本批无文档同步，批③统一做）
 
 ### 批② 交付边界
 

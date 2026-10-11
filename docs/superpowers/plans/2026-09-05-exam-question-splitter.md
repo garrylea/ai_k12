@@ -49,7 +49,7 @@
 **Interfaces:**
 - Produces: `is_date_trap(line) -> bool`、`is_group_header(line) -> tuple[bool, str|None]`、`is_main_stem(line) -> tuple[bool, int|None]`、`is_sub_stem(line) -> bool`、`is_answer_keyword(line) -> bool`、`split_inline_stems(line) -> list[tuple[int, str]]`
 
-- [ ] **Step 1: 写失败测试（题号识别各场景）**
+- [x] **Step 1: 写失败测试（题号识别各场景）**
 
 Create `tools/data-refinery/tests/test_question_splitter.py`:
 
@@ -131,12 +131,12 @@ def test_split_inline_stems_no_match():
     assert split_inline_stems("无题号的纯文字") == []
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_splitter.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'question_splitter'`
 
-- [ ] **Step 3: 实现题号识别工具函数**
+- [x] **Step 3: 实现题号识别工具函数**
 
 Create `tools/data-refinery/src/question_splitter.py`:
 
@@ -218,12 +218,12 @@ def split_inline_stems(line: str) -> list[tuple[int, str]]:
     return results
 ```
 
-- [ ] **Step 4: 运行测试验证通过**
+- [x] **Step 4: 运行测试验证通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_splitter.py -v`
 Expected: PASS — 全部 11 个测试通过
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/question_splitter.py tools/data-refinery/tests/test_question_splitter.py
@@ -245,7 +245,7 @@ question_splitter.py 的题号识别正则工具：主题号(行首 N.\\D)、小
 - Produces: `RawQuestion` dataclass、`split_page(text, md_path) -> list[RawQuestion]`（本任务只实现题干切分，答案字段留空）
 - 主题号"N."剥离存 `group_order`，content 不含"9."字符；小问号"(3)"保留在 content
 
-- [ ] **Step 1: 写失败测试（题干切分场景）**
+- [x] **Step 1: 写失败测试（题干切分场景）**
 
 Append to `tools/data-refinery/tests/test_question_splitter.py`:
 
@@ -331,12 +331,12 @@ def test_split_page_preserves_image_refs():
 
 记得在文件顶部加 `from pathlib import Path`。
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_splitter.py -v`
 Expected: FAIL — `ImportError: cannot import name 'RawQuestion' from 'question_splitter'` 或 `split_page` 返回空
 
-- [ ] **Step 3: 实现 RawQuestion + split_page（题干切分部分）**
+- [x] **Step 3: 实现 RawQuestion + split_page（题干切分部分）**
 
 Append to `tools/data-refinery/src/question_splitter.py`:
 
@@ -432,12 +432,12 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
     return questions
 ```
 
-- [ ] **Step 4: 运行测试验证通过**
+- [x] **Step 4: 运行测试验证通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_splitter.py -v`
 Expected: PASS — 全部测试通过（Task 1 的 11 个 + Task 2 新增 7 个）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/question_splitter.py tools/data-refinery/tests/test_question_splitter.py
@@ -460,7 +460,7 @@ RawQuestion dataclass + split_page 函数：按行扫描，主题号开新题、
 - Extends: `split_page` 在切分时同步对齐答案（`in_answer_section` 标志切换题干/答案）
 - Produces: `RawQuestion.answer` / `RawQuestion.explanation` 填好
 
-- [ ] **Step 1: 写失败测试（答案对齐场景）**
+- [x] **Step 1: 写失败测试（答案对齐场景）**
 
 Append to `tools/data-refinery/tests/test_question_splitter.py`:
 
@@ -552,12 +552,12 @@ def test_answer_keyword_only_section_header():
     assert "参考答案" not in result[0].answer
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_splitter.py -v`
 Expected: Task 3 新增的 6 个测试 FAIL（answer 字段为空）
 
-- [ ] **Step 3: 在 split_page 里实现答案对齐**
+- [x] **Step 3: 在 split_page 里实现答案对齐**
 
 Modify `split_page` in `tools/data-refinery/src/question_splitter.py`，把 `in_answer_section` 标志用起来，并在主题号分支处理答案：
 
@@ -677,12 +677,12 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
     return questions
 ```
 
-- [ ] **Step 4: 运行测试验证通过**
+- [x] **Step 4: 运行测试验证通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_splitter.py -v`
 Expected: PASS — 全部测试通过（Task 1+2+3 共 24 个）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/question_splitter.py tools/data-refinery/tests/test_question_splitter.py
@@ -703,7 +703,7 @@ split_page 内 in_answer_section 标志切换题干/答案，紧凑格式行内�
 **Interfaces:**
 - Produces: `maybe_merge_answer_md(md_path: Path, text: str) -> str`——检测 text 末尾是否含答案关键字；若无，找同名"-答案.md"（文件名里"-试卷"替换为"-答案"），存在则把内容追加到 text 末尾返回
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `tools/data-refinery/tests/test_answer_merger.py`:
 
@@ -739,12 +739,12 @@ def test_answer_md_merged_when_no_answer_in_paper(tmp_path):
     assert "9. 答案" in result
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_merger.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'answer_merger'`
 
-- [ ] **Step 3: 实现 maybe_merge_answer_md**
+- [x] **Step 3: 实现 maybe_merge_answer_md**
 
 Create `tools/data-refinery/src/answer_merger.py`:
 
@@ -783,12 +783,12 @@ def maybe_merge_answer_md(md_path: Path, text: str) -> str:
     return text + "\n\n" + answer_text
 ```
 
-- [ ] **Step 4: 运行测试验证通过**
+- [x] **Step 4: 运行测试验证通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_answer_merger.py -v`
 Expected: PASS — 3 个测试全过
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/answer_merger.py tools/data-refinery/tests/test_answer_merger.py
@@ -811,7 +811,7 @@ git commit -m "feat(data-refinery): 答案合并检测 maybe_merge_answer_md
 - Produces: `LabeledQuestion` dataclass（RawQuestion + type/difficulty/knowledge_points/suggested_new_kps）、`QuestionLabeler` 类（`__init__(llm, prompt, knowledge_points, fallback_labeler=None)`、`label(questions, batch_size=1) -> list[LabeledQuestion]`、`confirm_new_kps(labeled) -> list[LabeledQuestion]`——confirm_new_kps 在 Task 6 实现）
 - 知识点列表由调用方（extract_cli）从 DB 查询后注入，question_labeler 不直接查 DB（便于单测 mock）
 
-- [ ] **Step 1: 写 prompt 模板**
+- [x] **Step 1: 写 prompt 模板**
 
 Create `tools/data-refinery/src/prompts/question_labeler.txt`:
 
@@ -844,7 +844,7 @@ Create `tools/data-refinery/src/prompts/question_labeler.txt`:
 {{question}}
 ```
 
-- [ ] **Step 2: 写失败测试（mock LLM 标注）**
+- [x] **Step 2: 写失败测试（mock LLM 标注）**
 
 Create `tools/data-refinery/tests/test_question_labeler.py`:
 
@@ -949,12 +949,12 @@ def test_label_llm_failure_returns_empty_fields():
     assert labeled[0].knowledge_points == []
 ```
 
-- [ ] **Step 3: 运行测试验证失败**
+- [x] **Step 3: 运行测试验证失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_labeler.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'question_labeler'`
 
-- [ ] **Step 4: 实现 QuestionLabeler（不含 confirm_new_kps，Task 6 再加）**
+- [x] **Step 4: 实现 QuestionLabeler（不含 confirm_new_kps，Task 6 再加）**
 
 Create `tools/data-refinery/src/question_labeler.py`:
 
@@ -1090,12 +1090,12 @@ class QuestionLabeler:
         labeled.suggested_new_kps = list(item.get("suggested_new_kps", []) or [])
 ```
 
-- [ ] **Step 5: 运行测试验证通过**
+- [x] **Step 5: 运行测试验证通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_labeler.py -v`
 Expected: PASS — 4 个测试全过
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add tools/data-refinery/src/question_labeler.py tools/data-refinery/src/prompts/question_labeler.txt tools/data-refinery/tests/test_question_labeler.py
@@ -1117,7 +1117,7 @@ QuestionLabeler 类：LLM 标 type/difficulty/knowledge_points/suggested_new_kps
 **Interfaces:**
 - Produces: `QuestionLabeler.confirm_new_kps(labeled: list[LabeledQuestion]) -> list[LabeledQuestion]`——AND 逻辑：两个模型都认为新增才填入 `_confirmed_new_kps`，任一不认同就不新增
 
-- [ ] **Step 1: 写失败测试（双模型确认场景）**
+- [x] **Step 1: 写失败测试（双模型确认场景）**
 
 Append to `tools/data-refinery/tests/test_question_labeler.py`:
 
@@ -1201,12 +1201,12 @@ def test_confirm_new_kps_no_fallback_labeler_skipped():
     assert confirmed[0]._confirmed_new_kps == []
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_labeler.py -v`
 Expected: Task 6 新增 4 个测试 FAIL — `AttributeError: 'QuestionLabeler' object has no attribute 'confirm_new_kps'`
 
-- [ ] **Step 3: 实现 confirm_new_kps**
+- [x] **Step 3: 实现 confirm_new_kps**
 
 Append to `tools/data-refinery/src/question_labeler.py`:
 
@@ -1270,12 +1270,12 @@ Append to `tools/data-refinery/src/question_labeler.py`:
             return {"is_new": False, "matched_existing_code": None}
 ```
 
-- [ ] **Step 4: 运行测试验证通过**
+- [x] **Step 4: 运行测试验证通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_question_labeler.py -v`
 Expected: PASS — 8 个测试全过（Task 5 的 4 个 + Task 6 的 4 个）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/question_labeler.py tools/data-refinery/tests/test_question_labeler.py
@@ -1298,7 +1298,7 @@ confirm_new_kps：收集主模型 suggested_new_kps，调 fallback 模型确认�
 - Consumes: `question_splitter.split_page`、`question_labeler.QuestionLabeler`、`answer_merger.maybe_merge_answer_md`、`publish_cli._kind_for`（或 extract_cli 内复刻同款）
 - Produces: extract_cli.py main() 内 kind 分支，输出 ExamQuestion JSONL
 
-- [ ] **Step 1: 写失败测试（kind 判定 + 参数解析）**
+- [x] **Step 1: 写失败测试（kind 判定 + 参数解析）**
 
 Append to `tools/data-refinery/tests/test_extract_cli.py`（若已存在）或创建新文件：
 
@@ -1333,12 +1333,12 @@ def test_parse_args_label_batch_size_custom():
     assert args.label_batch_size == 10
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd tools/data-refinery && pytest tests/test_extract_cli.py -v`
 Expected: FAIL — `_kind_for` 不存在 或 `--label-batch-size` 未识别
 
-- [ ] **Step 3: 修改 extract_cli.py**
+- [x] **Step 3: 修改 extract_cli.py**
 
 修改点：
 1. 加 `--subject`（默认"数学"）和 `--label-batch-size`（默认 1）参数
@@ -1445,7 +1445,7 @@ prompt 加载（main() 开头）：
 prompt_questions = _load_prompt("question_labeler")  # 新 prompt
 ```
 
-- [ ] **Step 4: 在 db_loader.py 加 query_knowledge_points 辅助函数**
+- [x] **Step 4: 在 db_loader.py 加 query_knowledge_points 辅助函数**
 
 Modify `tools/data-refinery/src/db_loader.py`（或独立模块 `kp_loader.py`），加：
 
@@ -1470,12 +1470,12 @@ def query_knowledge_points(config, subject_code: str) -> list[dict]:
         conn.close()
 ```
 
-- [ ] **Step 5: 运行测试验证通过**
+- [x] **Step 5: 运行测试验证通过**
 
 Run: `cd tools/data-refinery && pytest tests/test_extract_cli.py -v`
 Expected: PASS — 新增 4 个测试 + 原有测试全过
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add tools/data-refinery/src/extract_cli.py tools/data-refinery/src/db_loader.py tools/data-refinery/tests/test_extract_cli.py
@@ -1494,7 +1494,7 @@ _kind_for 按文件名判 questions/cards；questions 路径调 question_splitte
 **Files:**
 - 无新文件，跑命令验证
 
-- [ ] **Step 1: 跑 extract_cli 切西城模拟二（只切题 + 标注，不 publish 不入库）**
+- [x] **Step 1: 跑 extract_cli 切西城模拟二（只切题 + 标注，不 publish 不入库）**
 
 Run:
 ```bash
@@ -1505,7 +1505,7 @@ python src/extract_cli.py --source zgkao \
 ```
 Expected: `[ok] (1/1) ... -> N items (questions)`，N ≈ 28 道
 
-- [ ] **Step 2: 检查 JSONL 内容**
+- [x] **Step 2: 检查 JSONL 内容**
 
 Run:
 ```bash
@@ -1530,12 +1530,12 @@ Expected:
 - 第 17 题 answer 含"3 + 4 × ..."（验证解答题答案对齐）
 - content 含图片引用 `![](images/xxx.jpg)`（验证图保留）
 
-- [ ] **Step 3: 跑回归测试（教材卡路径不破坏）**
+- [x] **Step 3: 跑回归测试（教材卡路径不破坏）**
 
 Run: `cd tools/data-refinery && pytest -v`
 Expected: PASS — 全部测试通过（含原教材卡测试 + 新增 question_splitter/labeler/answer_merger/extract_cli 测试）
 
-- [ ] **Step 4: 提交验证记录（可选）**
+- [x] **Step 4: 提交验证记录（可选）**
 
 ```bash
 git add --all

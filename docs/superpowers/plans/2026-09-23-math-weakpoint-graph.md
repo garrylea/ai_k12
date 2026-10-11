@@ -107,7 +107,7 @@
 
 **⚠️ 两处查询都用 `meb` 作为 `main_error_books` 的别名**（`parent-insights.repo.ts:484`、`main-error-books.repo.ts:168`），所以片段可以逐字共用。若将来给某一边换别名，必须同步改片段或改用参数化别名。
 
-- [ ] **Step 1: 写失败的仓储测试**
+- [x] **Step 1: 写失败的仓储测试**
 
 `apps/server/src/database/repositories/knowledge-points.repo.test.ts` —— **该文件已存在（25 行）**，不要覆盖。它顶部已有 `mockPool(rows)`（只有 `execute`，够本用例用）与 `KnowledgePointsRepository` 的 import。把下面这个 `describe` **追加到文件末尾**，**不新增任何 import**：
 
@@ -283,12 +283,12 @@ describe('sql-fragments.UNCOVERED_ERROR_PREDICATE', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/knowledge-points.repo.test.ts src/database/repositories/student-knowledge-mastery.repo.test.ts src/database/repositories/main-error-books.repo.test.ts src/database/sql-fragments.test.ts`
 Expected: FAIL —— `repo.countAvailableQuestionsByKp is not a function`（三个新方法都不存在）与 `Cannot find module './sql-fragments'`
 
-- [ ] **Step 3: 实现 `KnowledgePointsRepository.countAvailableQuestionsByKp`**
+- [x] **Step 3: 实现 `KnowledgePointsRepository.countAvailableQuestionsByKp`**
 
 在 `apps/server/src/database/repositories/knowledge-points.repo.ts` 的 `findById` 之后追加（类内）：
 
@@ -324,7 +324,7 @@ Expected: FAIL —— `repo.countAvailableQuestionsByKp is not a function`（三
   }
 ```
 
-- [ ] **Step 4: 实现两个 `StudentKnowledgeMasteryRepository` 方法**
+- [x] **Step 4: 实现两个 `StudentKnowledgeMasteryRepository` 方法**
 
 在 `apps/server/src/database/repositories/student-knowledge-mastery.repo.ts` 的 `countQuestionCoverage()` 之后追加（类内）：
 
@@ -398,7 +398,7 @@ Expected: FAIL —— `repo.countAvailableQuestionsByKp is not a function`（三
   }
 ```
 
-- [ ] **Step 5: 新建共享片段 `sql-fragments.ts`**
+- [x] **Step 5: 新建共享片段 `sql-fragments.ts`**
 
 创建 `apps/server/src/database/sql-fragments.ts`：
 
@@ -433,7 +433,7 @@ export const UNCOVERED_ERROR_PREDICATE =
   'NOT EXISTS (SELECT 1 FROM question_knowledge_points qkp WHERE qkp.question_id = meb.question_id)';
 ```
 
-- [ ] **Step 6: 实现 `MainErrorBooksRepository.countUncoveredUncleared`**
+- [x] **Step 6: 实现 `MainErrorBooksRepository.countUncoveredUncleared`**
 
 在 `apps/server/src/database/repositories/main-error-books.repo.ts` 的 `countClearedBetween` 之后追加（类内）：
 
@@ -463,7 +463,7 @@ export const UNCOVERED_ERROR_PREDICATE =
 import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 ```
 
-- [ ] **Step 7: 让家长端也用同一片段**
+- [x] **Step 7: 让家长端也用同一片段**
 
 改 `apps/server/src/database/repositories/parent-insights.repo.ts` 的 `countUncoveredUnclearedErrors`（约 481-492 行）——**只动这一处**，把内联的 `NOT EXISTS (...)` 换成常量：
 
@@ -497,7 +497,7 @@ import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 
 **⚠️ 不要改这个方法的签名、不要改它的 `subject_id` 缺失（那是家长端跨学科口径）、不要动该文件里的任何其它方法。** 既有的 `parent-insights.repo.test.ts` 有用例钉着这个方法（`toContain('NOT EXISTS')`、`toContain('is_cleared = 0')`），改完必须仍然通过。
 
-- [ ] **Step 7b: 给家长端那条 SQL 钉子也加上「共用常量」断言**
+- [x] **Step 7b: 给家长端那条 SQL 钉子也加上「共用常量」断言**
 
 改 `apps/server/src/database/repositories/parent-insights.repo.test.ts` 的「未标注知识点的未清零错题单独计数」用例（约 246-254 行）——在现有两条 `toContain` 之后**加一行**，并在该文件顶部 import 区加 `import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments';`：
 
@@ -509,12 +509,12 @@ import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 
 **为什么两处都要加**：`UNCOVERED_ERROR_PREDICATE` 的唯一价值就是「两处共用」，而 mockPool 不看 SQL 文本 —— 只钉子串的话，重新内联不会被任何测试发现。
 
-- [ ] **Step 8: 跑测试确认通过**
+- [x] **Step 8: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/knowledge-points.repo.test.ts src/database/repositories/student-knowledge-mastery.repo.test.ts src/database/repositories/main-error-books.repo.test.ts src/database/sql-fragments.test.ts src/database/repositories/parent-insights.repo.test.ts src/modules/parent-insights/report.service.test.ts`
 Expected: PASS（6 文件全绿；后两个是既有家长端用例，验证这次重构没打破它们）
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**
 
 ```bash
 git add apps/server/src/database/sql-fragments.ts \
@@ -549,7 +549,7 @@ git commit -m "feat(server): 图谱读侧仓储——可抽题数/按学科掌�
   - `export interface KnowledgeGraphMastery { subjectId: number; nodes: KnowledgeGraphNode[]; coverage: { coveredQuestions: number; totalQuestions: number; uncoveredUnclearedErrors: number }; }`
   - `KnowledgeGraphService.getMastery(studentId: number, subjectId: number): Promise<KnowledgeGraphMastery>`
 
-- [ ] **Step 1: 写失败的 service 测试**
+- [x] **Step 1: 写失败的 service 测试**
 
 创建 `apps/server/src/modules/knowledge-graph/knowledge-graph.service.test.ts`：
 
@@ -689,12 +689,12 @@ describe('KnowledgeGraphService.getMastery', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/knowledge-graph/knowledge-graph.service.test.ts`
 Expected: FAIL —— `Cannot find module './knowledge-graph.service.js'`
 
-- [ ] **Step 3: 写 DTO**
+- [x] **Step 3: 写 DTO**
 
 创建 `apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts`：
 
@@ -766,7 +766,7 @@ export interface KnowledgeGraphMastery {
 }
 ```
 
-- [ ] **Step 4: 写 service 的 `getMastery`**
+- [x] **Step 4: 写 service 的 `getMastery`**
 
 创建 `apps/server/src/modules/knowledge-graph/knowledge-graph.service.ts`：
 
@@ -882,12 +882,12 @@ export class KnowledgeGraphService {
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/knowledge-graph/knowledge-graph.service.test.ts`
 Expected: PASS（7 用例全绿）
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts \
@@ -912,7 +912,7 @@ git commit -m "feat(server): 图谱 service 组装全树 overlay（null≠0、co
   - `export interface WeakPointRecommendation { subjectId: number; candidates: WeakPointCandidate[]; recommendation: WeakPointCandidate | null; reason: 'ok' | 'no_qualified_candidate'; }`
   - `KnowledgeGraphService.getWeakPoints(studentId: number, subjectId: number, limit: number): Promise<WeakPointRecommendation>`
 
-- [ ] **Step 1: 写失败的测试（追加到 `knowledge-graph.service.test.ts` 末尾）**
+- [x] **Step 1: 写失败的测试（追加到 `knowledge-graph.service.test.ts` 末尾）**
 
 ```ts
 describe('KnowledgeGraphService.getWeakPoints', () => {
@@ -1132,12 +1132,12 @@ describe('KnowledgeGraphService.getWeakPoints', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/knowledge-graph/knowledge-graph.service.test.ts -t getWeakPoints`
 Expected: FAIL —— `svc.getWeakPoints is not a function`
 
-- [ ] **Step 3: 追加 DTO 类型**
+- [x] **Step 3: 追加 DTO 类型**
 
 在 `apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts` 末尾追加：
 
@@ -1167,7 +1167,7 @@ export interface WeakPointRecommendation {
 }
 ```
 
-- [ ] **Step 4: 实现 `getWeakPoints`**
+- [x] **Step 4: 实现 `getWeakPoints`**
 
 在 `knowledge-graph.service.ts` 的 `getMastery` 之后、`confidenceFor` 之前插入（类内）：
 
@@ -1261,12 +1261,12 @@ import {
 } from './dto/knowledge-graph.dto.js';
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/knowledge-graph/knowledge-graph.service.test.ts`
 Expected: PASS（16 用例全绿）
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/server/src/modules/knowledge-graph/dto/knowledge-graph.dto.ts \
@@ -1291,7 +1291,7 @@ git commit -m "feat(server): 薄弱点推荐——四道闸门 + 稳定排序，
   - `GET /api/knowledge-graph/students/:studentId/mastery?subjectId=1` → `KnowledgeGraphMastery`
   - `GET /api/knowledge-graph/students/:studentId/weak-points?subjectId=1&limit=1` → `WeakPointRecommendation`
 
-- [ ] **Step 1: 写失败的 controller 测试**
+- [x] **Step 1: 写失败的 controller 测试**
 
 创建 `apps/server/src/modules/knowledge-graph/knowledge-graph.controller.test.ts`：
 
@@ -1397,12 +1397,12 @@ describe('KnowledgeGraphController 透传', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/knowledge-graph/knowledge-graph.controller.test.ts`
 Expected: FAIL —— `Cannot find module './knowledge-graph.controller.js'`
 
-- [ ] **Step 3: 写 controller**
+- [x] **Step 3: 写 controller**
 
 创建 `apps/server/src/modules/knowledge-graph/knowledge-graph.controller.ts`：
 
@@ -1495,12 +1495,12 @@ export class KnowledgeGraphController {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/knowledge-graph/knowledge-graph.controller.test.ts`
 Expected: PASS（8 用例全绿）
 
-- [ ] **Step 5: 写 module**
+- [x] **Step 5: 写 module**
 
 创建 `apps/server/src/modules/knowledge-graph/knowledge-graph.module.ts`：
 
@@ -1535,7 +1535,7 @@ import { MainErrorBooksRepository } from '../../database/repositories/main-error
 export class KnowledgeGraphModule {}
 ```
 
-- [ ] **Step 6: 在 `app.module.ts` 注册**
+- [x] **Step 6: 在 `app.module.ts` 注册**
 
 在 `apps/server/src/app.module.ts` 顶部 import 区（`ParentInsightsModule` 之后）加：
 
@@ -1550,12 +1550,12 @@ import { KnowledgeGraphModule } from './modules/knowledge-graph/knowledge-graph.
     KnowledgeGraphModule,
 ```
 
-- [ ] **Step 7: 全量后端测试 + 类型检查**
+- [x] **Step 7: 全量后端测试 + 类型检查**
 
 Run: `cd apps/server && npm test && npx tsc --noEmit`
 Expected: 全部 PASS；`tsc` 无输出（0 error）
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/server/src/modules/knowledge-graph/knowledge-graph.controller.ts \
@@ -1584,7 +1584,7 @@ git commit -m "feat(server): 图谱两个 GET 端点 + 模块注册（403/1005�
   - `export function getKnowledgeGraphMastery(studentId: number, subjectId: number): Promise<KnowledgeGraphMastery>`
   - `export function getWeakPoints(studentId: number, subjectId: number, limit?: number): Promise<WeakPointRecommendation>`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/services/api.weak-point-graph.test.ts`：
 
@@ -1645,12 +1645,12 @@ describe('getWeakPoints', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/services/api.weak-point-graph.test.ts`
 Expected: FAIL —— `getKnowledgeGraphMastery is not a function`
 
-- [ ] **Step 3: 追加类型与函数**
+- [x] **Step 3: 追加类型与函数**
 
 在 `apps/web/src/services/api.ts` 的 `getMyRewards()` 之后（积分区块末尾）追加：
 
@@ -1732,12 +1732,12 @@ export function getWeakPoints(
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/services/api.weak-point-graph.test.ts`
 Expected: PASS（3 用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/services/api.weak-point-graph.test.ts
@@ -1768,7 +1768,7 @@ git commit -m "feat(web): 图谱 API 层——两个 GET + 与后端同形的类
 
 **为什么抽模块：** 热力色若在页面里内联，一级汇总、二级 chip、详情栏三处会各算一遍；档位选择若内联，`TargetedConfigPage` 与本页会各有一份。抽出来后测试能直接钉住边界，页面测试只验渲染。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/pages/student/training/weak-point-heat.test.ts`：
 
@@ -1926,12 +1926,12 @@ describe('pickPracticeCount', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/weak-point-heat.test.ts src/pages/student/training/point-tiers.test.ts`
 Expected: FAIL —— `Cannot find module './weak-point-heat'` 且 `pickPracticeCount is not a function`
 
-- [ ] **Step 3: 写 `weak-point-heat.ts`**
+- [x] **Step 3: 写 `weak-point-heat.ts`**
 
 创建 `apps/web/src/pages/student/training/weak-point-heat.ts`：
 
@@ -2040,7 +2040,7 @@ export function summarizeParent(
 }
 ```
 
-- [ ] **Step 4: 在 `point-tiers.ts` 追加档位选择**
+- [x] **Step 4: 在 `point-tiers.ts` 追加档位选择**
 
 在 `apps/web/src/pages/student/training/point-tiers.ts` 末尾追加：
 
@@ -2082,7 +2082,7 @@ export function pickPracticeCount(tiers: Array<{ tierKey: string }>): number | n
 }
 ```
 
-- [ ] **Step 4b: 让专项配置页改用同一常量**
+- [x] **Step 4b: 让专项配置页改用同一常量**
 
 改 `apps/web/src/pages/student/training/TargetedConfigPage.tsx`：删掉文件里的私有 `const MATH_TASK_CODE = 'math_targeted';`（约第 16 行），改成从 `./point-tiers` import：
 
@@ -2092,12 +2092,12 @@ import { MATH_TASK_CODE, tierStatus, usePointTiers } from './point-tiers';
 
 **行为零变化**（值一样），目的是让两页共用一份真源。既有 `TargetedConfigPage.test.tsx` 全部用例必须仍通过。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/weak-point-heat.test.ts src/pages/student/training/point-tiers.test.ts src/pages/student/training/TargetedConfigPage.test.tsx`
 Expected: PASS（两文件全绿）
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/pages/student/training/weak-point-heat.ts \
@@ -2134,7 +2134,7 @@ git commit -m "feat(web): 热力梯度与开练题量抽取（单一实现 + 边
 [页脚] 覆盖 x/y 道题 · 另有 N 道未标注知识点的题，不计入上图 · [去错题页看]
 ```
 
-- [ ] **Step 1: 写失败的页面测试**
+- [x] **Step 1: 写失败的页面测试**
 
 创建 `apps/web/src/pages/student/training/WeakPointGraphPage.test.tsx`：
 
@@ -2580,12 +2580,12 @@ describe('WeakPointGraphPage 页脚与错误态', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/WeakPointGraphPage.test.tsx`
 Expected: FAIL —— `Cannot find module './WeakPointGraphPage'`
 
-- [ ] **Step 3: 写页面**
+- [x] **Step 3: 写页面**
 
 创建 `apps/web/src/pages/student/training/WeakPointGraphPage.tsx`：
 
@@ -3084,12 +3084,12 @@ function PracticeAction({
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/WeakPointGraphPage.test.tsx`
 Expected: PASS（25 用例全绿：折叠树 4 + 详情栏 4 + 推荐条 6 + **档位状态 4** + confidence 三态 2 + 页脚与错误态 5）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/web/src/pages/student/training/WeakPointGraphPage.tsx \
@@ -3111,7 +3111,7 @@ git commit -m "feat(web): 薄弱点图谱页——折叠树 + 右栏详情（窄
 - Consumes: Task 7 的 `WeakPointGraphPage`
 - Produces: 路由 `/student/training/weak-points`；四卡网格
 
-- [ ] **Step 1: 写失败的测试（追加到 `TrainingHomePage.test.tsx` 末尾）**
+- [x] **Step 1: 写失败的测试（追加到 `TrainingHomePage.test.tsx` 末尾）**
 
 先在该文件顶部的 `createMemoryRouter` 路由数组里补一个桩（否则点击会报无匹配路由）：
 
@@ -3156,12 +3156,12 @@ describe('TrainingHomePage 薄弱点图谱入口（第 4 张卡）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/TrainingHomePage.test.tsx`
 Expected: FAIL —— `Unable to find an element with the text: 薄弱点图谱`
 
-- [ ] **Step 3: 改 `TrainingHomePage` 为四卡**
+- [x] **Step 3: 改 `TrainingHomePage` 为四卡**
 
 在 `TrainingHomePage.tsx` 的 `RedoIcon` 之后加第 4 个图标：
 
@@ -3234,7 +3234,7 @@ const GraphIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
 
 同时更新页面顶部注释里的「训练三卡选择页」为「训练四卡选择页（PRD §6.3 三类训练 + 薄弱点图谱）」。
 
-- [ ] **Step 4: 注册路由**
+- [x] **Step 4: 注册路由**
 
 在 `apps/web/src/routes/routeTable.tsx` 顶部 import 区（`TargetedRunPage` 之后）加：
 
@@ -3256,7 +3256,7 @@ import WeakPointGraphPage from '@/pages/student/training/WeakPointGraphPage';
   },
 ```
 
-- [ ] **Step 4b: 补 routeTable 级集成钉子（`apps/web/src/routes/routeTable.test.tsx`）**
+- [x] **Step 4b: 补 routeTable 级集成钉子（`apps/web/src/routes/routeTable.test.tsx`）**
 
 **为什么必须补**：Task 7 的页面测试挂的是**页面本身**、Step 1 的卡片测试给这条路径挂了**桩** —— 两处都绕过了真路由表，所以「路由确实指到 `WeakPointGraphPage`」**没有任何测试证明**：`path` 写错一个字符，卡片照样 `navigate`，落到 React Router 的无匹配路由，而**所有测试依旧全绿**。本仓对此有先例与自述理由（同文件的 `describe('路由表：补偿套题作答页')`：*「页面自己有组件测试，但那个测试挂的是页面本身、绕过了路由表——『路由确实指到这个页面』只有这里能证明」*）。
 
@@ -3351,12 +3351,12 @@ describe('路由表：薄弱点图谱页', () => {
 });
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/TrainingHomePage.test.tsx src/routes/routeTable.test.tsx`
 Expected: PASS（TrainingHomePage 原 6 用例 + 新 3 用例；routeTable 原有用例 + 新 2 用例，全绿）
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/routes/routeTable.tsx \
@@ -3380,7 +3380,7 @@ git commit -m "feat(web): 训练页四卡 + 薄弱点图谱路由注册（含 ro
 
 **为什么必须改：** spec §6.3 说「学生端错题页已支持按知识点过滤 → 直接带上即可」。**实测这句话只对了一半**：`GET /api/training/error-book` 确实收 `kpId`（`training.controller.ts:39`），但 `ErrorPracticePage` 的 `kpId` 是纯内部 `useState('')`（`ErrorPracticePage.tsx:79`），**不读 URL 参数**。不改这里，「看这个知识点的错题」跳过去只会看到全部错题。
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/pages/student/training/ErrorPracticePage.test.tsx`：
 
@@ -3460,12 +3460,12 @@ describe('ErrorPracticePage ?kpId= 预填', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/ErrorPracticePage.test.tsx`
 Expected: FAIL —— 第一条用例得到 `kpId: undefined`（URL 参数被忽略）
 
-- [ ] **Step 3: 让页面读 URL 参数**
+- [x] **Step 3: 让页面读 URL 参数**
 
 在 `ErrorPracticePage.tsx` 顶部 import 加 `useSearchParams`：
 
@@ -3487,12 +3487,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 
 **不要改那个 `<select>` 的 `aria-label`**——它已经是 `aria-label="专项筛选"`（`ErrorPracticePage.tsx:215`），改掉会破坏既有测试与读屏文案。本任务只加 `useSearchParams` + 惰性初始化两处。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npx vitest run src/pages/student/training/ErrorPracticePage.test.tsx`
 Expected: PASS（3 用例全绿）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/web/src/pages/student/training/ErrorPracticePage.tsx \
@@ -3514,7 +3514,7 @@ git commit -m "feat(web): 错题页支持 ?kpId= 预填（图谱「看这个知�
 
 **为什么是硬要求：** CLAUDE.md「API 文档同步规则」——两份文档**必须始终一致**，任何一方变更时另一方必须同步（路径、方法、参数、响应结构）。且 API 设计文档是主稿。
 
-- [ ] **Step 1: 改 API 设计文档 §4.5**
+- [x] **Step 1: 改 API 设计文档 §4.5**
 
 把 `docs/API接口与数据流设计文档.md` 第 204-212 行的表格替换为：
 
@@ -3544,11 +3544,11 @@ git commit -m "feat(web): 错题页支持 ?kpId= 预填（图谱「看这个知�
 - `recommendation = candidates[0] ?? null`；**无候选仍返回 200**（`reason='no_qualified_candidate'`），前端据此转引导态——**不是错误**。
 ```
 
-- [ ] **Step 2: 改 API 设计文档版本号**
+- [x] **Step 2: 改 API 设计文档版本号**
 
 把第 3 行 `> 版本：v4.9` 改为 `> 版本：v4.10`。
 
-- [ ] **Step 3: 改 openapi.yaml 的两个端点与 schema**
+- [x] **Step 3: 改 openapi.yaml 的两个端点与 schema**
 
 把 `docs/api/openapi.yaml` 中 `/knowledge-graph/students/{studentId}/mastery` 与 `/knowledge-graph/students/{studentId}/weak-points` 两段（约 897-950 行）替换为：
 
@@ -3732,7 +3732,7 @@ git commit -m "feat(web): 错题页支持 ?kpId= 预填（图谱「看这个知�
           enum: [ok, no_qualified_candidate]
 ```
 
-- [ ] **Step 3b: 从 openapi 移除 P1 的 `relations`（用户裁决，CLAUDE.md 规则 3）**
+- [x] **Step 3b: 从 openapi 移除 P1 的 `relations`（用户裁决，CLAUDE.md 规则 3）**
 
 ⚠️ **原文勘误（Task 10 评审标为 Important，用户裁决「按 CLAUDE.md 规则移除」）**：Step 3 原写「`relations` 端点降级 P1 但 schema 先留着」，**与 CLAUDE.md 规则 3「openapi.yaml 只收 MVP 端点；P1/P2 在 API 文档里标阶段」冲突**。证据：同一张 §4.5 表里 P1 的 `learning-path` 被正确排除在 openapi 之外，而 P1 的 `relations` 却在 —— openapi 自己对「P1 该不该收」自相矛盾（且这处不一致是本次提交新造的：改前两边都是 MVP）。
 
@@ -3741,7 +3741,7 @@ git commit -m "feat(web): 错题页支持 ?kpId= 预填（图谱「看这个知�
 2. 删掉 components 里的 **`KnowledgeRelation`** schema —— 先 `grep -n "KnowledgeRelation" docs/api/openapi.yaml` 确认除该 schema 定义与其 `$ref` 外**无其它引用**，有引用就停下报告。
 3. `docs/API接口与数据流设计文档.md` §4.5 的 `relations` 行**保持 P1 不动**（主稿是阶段真源）。
 
-- [ ] **Step 3c: 给两个端点补 `'400'` 响应（用户裁决）**
+- [x] **Step 3c: 给两个端点补 `'400'` 响应（用户裁决）**
 
 ⚠️ 评审 Minor（用户裁决「补上」）：主稿 §4.5 明写「`subjectId` 非 1 一律 400 / code 1001」，但 openapi 两个端点都**没有 `'400'` 响应**，而 CLAUDE.md 规则 1 把「响应结构」列为必须同步的字段（实现确实返回 400，已由 `knowledge-graph.controller.test.ts` 钉住）。
 
@@ -3752,7 +3752,7 @@ git commit -m "feat(web): 错题页支持 ?kpId= 预填（图谱「看这个知�
           description: subjectId 非 1（code 1001）
 ```
 
-- [ ] **Step 4: 校验 openapi 可解析 + 端点清单对齐**
+- [x] **Step 4: 校验 openapi 可解析 + 端点清单对齐**
 
 ⚠️ **原文勘误（我预检核实，两处）**：① 原命令 `cd /Users/lichao/Downloads/claude/imooc/ai_k12` 指向**父仓库**，读到的会是未改动的 `openapi.yaml`（假通过）——必须在工作树内执行；② 原命令用 `require('js-yaml')`，但本仓**无根 `package.json`**，js-yaml 无法解析。`python3` 的 PyYAML 可用（已实测 6.0.2）。
 
@@ -3770,7 +3770,7 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 
 再人工核对（CLAUDE.md 检查清单第 4 条）：API 文档 §4.5 表格的 **4** 条路径里，**2 条 MVP** 必须与 openapi 的 `paths` 键**逐字对上**（除 `/api` 前缀）；**2 条 P1**（`relations` / `learning-path`）**按规则 3 只存在于主稿**——这个不对称是**预期且正确**的。
 
-- [ ] **Step 5: 改 UX 文档**
+- [x] **Step 5: 改 UX 文档**
 
 ⚠️ **原文勘误（我预检核实）**：本节原写「在训练轨页面清单里新增一行（与既有 `/student/training/errors` 等条目同格式）」——**该清单不存在**。`docs/UX-UI设计文档.md` 里没有任何 `| \`/student/training…` 表格行；§5.0 页面总览表只覆盖 P1.x–P7.x，且 §5.7 开头明确写着「训练轨页面此前**从未进入本文档**…其余训练轨页面待后续单独立项补齐」。
 
@@ -3804,7 +3804,7 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 - **薄弱点诊断：未实现**（本期仅训练轨 `/student/training/weak-points`）。将来两处入口共用同一后端服务（`KnowledgeGraphService`）。
 ```
 
-- [ ] **Step 6: 改 PRD（先确认再改）**
+- [x] **Step 6: 改 PRD（先确认再改）**
 
 ⚠️ CLAUDE.md：「PRD 覆盖任何设计决策；有冲突必须先与用户确认再实现」。在 §7.4（错题本节）与 §7.6（测评节）的「推荐」处各补一句指向本设计，**不改动原意**：
 
@@ -3818,7 +3818,7 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 
 ✅ **冲突条件已由我预检排除（不必再停）**：§7.4 第 175 行原文为「支持薄弱点图谱生成和针对性内容推荐。」（位于 §7.4 错题本与薄弱点诊断内）；§7.6 第 194 行原文为「测评后推荐薄弱点专项练习。」。两者都是**方向性表述**，与「仅数学 / 掌握度口径 / 一条推荐」**不冲突**（§7.6 的「推荐专项练习」正对应本页「开始补这个」的开练动作）。按上文「不改动原意、只补落地说明」执行即可。
 
-- [ ] **Step 7: 改根 CLAUDE.md（体量纪律）**
+- [x] **Step 7: 改根 CLAUDE.md（体量纪律）**
 
 在「家长端」小节之后新增一小节（只写仍生效的「勿动」，日期日志进 changelog）：
 
@@ -3837,7 +3837,7 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
 - **页脚必须给覆盖口径**（`covered/total` + 未标注错题数）：不说明会让学生以为「只有这些问题」。
 ```
 
-- [ ] **Step 8: 补 changelog**
+- [x] **Step 8: 补 changelog**
 
 在 `docs/ai-core-changelog.md` 顶部追加一条（与既有条目同格式）：
 
@@ -3862,7 +3862,7 @@ Expected: 先打印 **2**，再是 `/knowledge-graph/students/{studentId}/master
   **无 source 分支**，四个来源（practice/training/exams/remediation）都回写。
 ```
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml \
@@ -3877,24 +3877,24 @@ git commit -m "docs: 同步薄弱点图谱契约（API §4.5 / openapi / UX / PR
 
 **Files:** 无（只跑命令）
 
-- [ ] **Step 1: 后端全量**
+- [x] **Step 1: 后端全量**
 
 Run: `cd apps/server && npm test && npx tsc --noEmit`
 Expected: 全部 PASS（含本批新增 ~40 用例）；`tsc` 无输出
 
-- [ ] **Step 2: 后端 build（确认 `copy-assets` 不受影响）**
+- [x] **Step 2: 后端 build（确认 `copy-assets` 不受影响）**
 
 Run: `cd apps/server && npm run build`
 Expected: 成功；`dist/main.js` 生成
 
 ⚠️ **注意**：本仓 `npm run build` 会覆盖 `apps/server/dist/`——若用户本机有 `node dist/main.js` 在跑，其进程已加载旧代码。**build 后主动告知用户**，不要擅自回退或重启用户的服务。
 
-- [ ] **Step 3: 前端全量**
+- [x] **Step 3: 前端全量**
 
 Run: `cd apps/web && npm test && npx tsc -b && npm run lint`
 Expected: 全部 PASS；`tsc -b` 无输出；`lint` 0 error
 
-- [ ] **Step 4: 人工冒烟（真数据，可选但推荐）**
+- [x] **Step 4: 人工冒烟（真数据，可选但推荐）**
 
 按 CLAUDE.md 起后端：`node dist/main.js`（**不要用 `npx tsx src/main.ts`**，DI 是坏的）。前端 `npm run dev`。用学生账号登录：
 
@@ -3905,7 +3905,7 @@ Expected: 全部 PASS；`tsc -b` 无输出；`lint` 0 error
 5. 在**详情栏**点「看这个知识点的错题」→ 错题页应预填该知识点且列表已按它过滤
 6. 页脚应显示「知识点覆盖 205 / 457 道题」与（若有）「另有 N 道未标注知识点的题」
 
-- [ ] **Step 5: 确认无遗留分支 / 未提交改动**
+- [x] **Step 5: 确认无遗留分支 / 未提交改动**
 
 Run: `git status --short && git log --oneline -12`
 Expected: 工作区干净；本批提交按序在列（数量随计划修正提交累计而变，不必对数字）

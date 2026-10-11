@@ -65,7 +65,7 @@ export interface CompareResult {
 }
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // apps/web/src/pages/dev/handwriting-diff.test.ts
@@ -119,12 +119,12 @@ describe('compareHandwriting', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npm test -- handwriting-diff`
 Expected: FAIL（模块不存在）
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 ```ts
 // apps/web/src/pages/dev/handwriting-diff.ts
@@ -193,12 +193,12 @@ export function compareHandwriting(expected: string, recognized: string): Compar
 
 注意 LCS 错字语义：一对 `expected≠got` 只在「错字」时出现；若期望「天」识别缺字，回溯会给 `expected:'天', got:null`。`errors` 同时覆盖错字与漏字。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npm test -- handwriting-diff`
 Expected: PASS（全部用例）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/dev/handwriting-diff.ts apps/web/src/pages/dev/handwriting-diff.test.ts
@@ -221,7 +221,7 @@ git commit -m "feat: 手写识别 demo 字级比对纯函数（归一化+LCS）"
 - Consumes: `getModelConfigRegistry()`（`apps/server/src/ai-core/infra/model-config-registry.ts:91`）、`ModelClient.chat({ model: RoutedModel, messages, timeout, meta })`（`apps/server/src/ai-core/infra/model-client/index.ts:110`）、`timeoutConfig.timeout.default`（`apps/server/src/ai-core/config.ts`）。
 - Produces: `GET /api/dev/handwriting/models` → `{ models: [{ key, provider, modelId }] }`；`POST /api/dev/handwriting/recognize` body `{ image, modelKey }` → `{ text, modelKey, elapsedMs }`。Task 4 的前端 `api.ts` 按此消费。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // apps/server/src/modules/dev/dev-handwriting.service.test.ts
@@ -330,12 +330,12 @@ describe('recognize', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npm test -- dev-handwriting`
 Expected: FAIL（模块不存在）
 
-- [ ] **Step 3: 实现 service**
+- [x] **Step 3: 实现 service**
 
 ```ts
 // apps/server/src/modules/dev/dev-handwriting.service.ts
@@ -435,7 +435,7 @@ export class DevHandwritingService {
 }
 ```
 
-- [ ] **Step 4: 实现 controller + module**
+- [x] **Step 4: 实现 controller + module**
 
 ```ts
 // apps/server/src/modules/dev/dev-handwriting.controller.ts
@@ -476,7 +476,7 @@ import { DevHandwritingService } from './dev-handwriting.service.js';
 export class DevModule {}
 ```
 
-- [ ] **Step 5: 注册进 AppModule + 订阅豁免**
+- [x] **Step 5: 注册进 AppModule + 订阅豁免**
 
 `apps/server/src/app.module.ts`：import 区加 `import { DevModule } from './modules/dev/dev.module.js';`，imports 数组末尾（`BillingModule,` 之后）加：
 
@@ -492,12 +492,12 @@ export class DevModule {}
   { method: 'POST', pattern: /^\/api\/dev\/handwriting\/recognize$/ },  // 同上
 ```
 
-- [ ] **Step 6: 跑测试确认通过**
+- [x] **Step 6: 跑测试确认通过**
 
 Run: `cd apps/server && npm test -- dev-handwriting`
 Expected: PASS（9 个用例）
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/modules/dev apps/server/src/app.module.ts apps/server/src/modules/billing/subscription.guard.ts
@@ -526,7 +526,7 @@ function DemoSketchPad(props: {
 }): import('react').RefForwardingComponent  // forwardRef 暴露 DemoSketchPadHandle
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```tsx
 // apps/web/src/pages/dev/DemoSketchPad.test.tsx
@@ -592,12 +592,12 @@ it('橡皮：擦过的笔画整条消失', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npm test -- DemoSketchPad`
 Expected: FAIL（组件不存在）
 
-- [ ] **Step 3: 实现组件**
+- [x] **Step 3: 实现组件**
 
 ```tsx
 // apps/web/src/pages/dev/DemoSketchPad.tsx
@@ -843,12 +843,12 @@ export default DemoSketchPad;
 
 （若 `var(--radius-lg)` / `var(--border-primary)` 等 token 名与 `apps/web/style.md` §2 实际名不符，以 style.md 为准替换，勿新造 token。）
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/web && npm test -- DemoSketchPad`
 Expected: PASS（3 个用例）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/dev/DemoSketchPad.tsx apps/web/src/pages/dev/DemoSketchPad.test.tsx
@@ -869,7 +869,7 @@ git commit -m "feat: demo 手写面板（笔/橡皮/清空 + 白底黑字导出�
 - Consumes: Task 1 `compareHandwriting/CompareResult`；Task 2 端点形状 `{ models: [{key,provider,modelId}] }`、`{ text, modelKey, elapsedMs }`；Task 3 `DemoSketchPadHandle`。
 - Produces: 路由 `/dev/handwriting-demo`。
 
-- [ ] **Step 1: api.ts 追加两个函数**
+- [x] **Step 1: api.ts 追加两个函数**
 
 在 `apps/web/src/services/api.ts` 末尾追加：
 
@@ -900,7 +900,7 @@ export function recognizeHandwriting(image: string, modelKey: string): Promise<H
 }
 ```
 
-- [ ] **Step 2: 写页面失败测试**
+- [x] **Step 2: 写页面失败测试**
 
 ```tsx
 // apps/web/src/pages/dev/HandwritingDemoPage.test.tsx
@@ -989,12 +989,12 @@ it('识别失败 → 显示错误信息，按钮恢复可用', async () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `cd apps/web && npm test -- HandwritingDemoPage`
 Expected: FAIL（页面不存在）
 
-- [ ] **Step 4: 实现页面**
+- [x] **Step 4: 实现页面**
 
 页面状态机（spec §4.4 + 评审确认）：
 
@@ -1167,7 +1167,7 @@ export default function HandwritingDemoPage() {
 
 注意实现细节：错误文案用 `text-red-600`（`CourseDetailPage.tsx:841` 等已有先例；本页是 dev-only 页，不属于正式学生/家长页面，可用基础色）。
 
-- [ ] **Step 5: 注册路由**
+- [x] **Step 5: 注册路由**
 
 `apps/web/src/routes/routeTable.tsx`：import 区加
 
@@ -1185,12 +1185,12 @@ import HandwritingDemoPage from '@/pages/dev/HandwritingDemoPage';
   },
 ```
 
-- [ ] **Step 6: 跑测试确认通过**
+- [x] **Step 6: 跑测试确认通过**
 
 Run: `cd apps/web && npm test -- HandwritingDemoPage`
 Expected: PASS（3 个用例）
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/pages/dev apps/web/src/services/api.ts apps/web/src/routes/routeTable.tsx
@@ -1203,7 +1203,7 @@ git commit -m "feat: 手写识别调研页 /dev/handwriting-demo（三栏结果+
 
 **Files:** 无新文件（验证收尾）
 
-- [ ] **Step 1: 全量测试**
+- [x] **Step 1: 全量测试**
 
 ```bash
 cd apps/web && npm test
@@ -1211,7 +1211,7 @@ cd ../server && npm test
 ```
 Expected: 全 PASS，无新增失败。
 
-- [ ] **Step 2: lint + 类型**
+- [x] **Step 2: lint + 类型**
 
 ```bash
 cd apps/web && npm run lint && npx tsc -b --noEmit
@@ -1219,7 +1219,7 @@ cd ../server && npm run build
 ```
 Expected: 0 error。⚠️ 披露：`apps/server npm run build` 会写 `dist/`——若你本机 `node dist/main.js` 正在跑，重启后端才生效；web 侧 dev server（vite）不受影响。
 
-- [ ] **Step 3: 手测清单（用户在 iPad/浏览器执行）**
+- [x] **Step 3: 手测清单（用户在 iPad/浏览器执行）**
 
 1. `cd apps/server && node dist/main.js`；web `npm run dev` 打开 `http://localhost:5173/dev/handwriting-demo`（需先登录任意角色）。
 2. 模型下拉应列出 DB 里已启用模型；选多模态的（qwen3.8-max）。
@@ -1227,7 +1227,7 @@ Expected: 0 error。⚠️ 披露：`apps/server npm run build` 会写 `dist/`�
 4. 连续多轮不同内容，观察顶部累计准确率；切换不同模型重复对比。
 5. 橡皮/清空行为；无笔画时识别按钮禁用；空对照文本禁用。
 
-- [ ] **Step 4: Commit（如有 lint/类型微调）**
+- [x] **Step 4: Commit（如有 lint/类型微调）**
 
 ```bash
 git add -A && git commit -m "chore: 手写识别 demo 回归收尾"

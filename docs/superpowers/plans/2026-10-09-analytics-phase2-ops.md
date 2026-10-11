@@ -77,7 +77,7 @@ docs/API接口与数据流设计文档.md / docs/api/openapi.yaml / docs/ai-core
 **Interfaces:**
 - Produces: 表 `behavior_events`（列与索引见下，delta spec §2 = 母 spec §4.3 原文）
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 ```sql
 -- 2026-10-09_behavior_events.sql
@@ -110,16 +110,16 @@ CREATE TABLE IF NOT EXISTS behavior_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: schema.sql 同步**——把同一 DDL（去掉注释头）插入 `tools/db/schema.sql` 的 analytics 表区（`special_practice_logs` 建表语句之前，约 :1470 处），加一行区块注释 `-- ---- behavior_events：行为事件流（母 spec §4.3；2026-10-09 Phase 2） ----`。
+- [x] **Step 2: schema.sql 同步**——把同一 DDL（去掉注释头）插入 `tools/db/schema.sql` 的 analytics 表区（`special_practice_logs` 建表语句之前，约 :1470 处），加一行区块注释 `-- ---- behavior_events：行为事件流（母 spec §4.3；2026-10-09 Phase 2） ----`。
 
-- [ ] **Step 3: apply 到本机库并验幂等**
+- [x] **Step 3: apply 到本机库并验幂等**
 
 Run: `mysql -u root -p ai_k12 < tools/db/migrations/2026-10-09_behavior_events.sql && mysql -u root -p ai_k12 < tools/db/migrations/2026-10-09_behavior_events.sql && mysql -u root -p ai_k12 --vertical -e "SHOW CREATE TABLE behavior_events\G" | head -5`
 Expected: 两次执行都无报错；`SHOW CREATE TABLE` 能看到表。（本机 mysql 9.5 非交互 `-e` 不认 `\G`，必须 `--vertical`。）
 
-- [ ] **Step 4: DB 设计文档**——`docs/K12智学系统-数据库设计文档.md` 在 analytics 三表（study_sessions 等）之后加 `behavior_events` 小节：用途一句话 + 列表 + 「tier 写时定、家长端查询硬过滤」注记 + 版本号递增。
+- [x] **Step 4: DB 设计文档**——`docs/K12智学系统-数据库设计文档.md` 在 analytics 三表（study_sessions 等）之后加 `behavior_events` 小节：用途一句话 + 列表 + 「tier 写时定、家长端查询硬过滤」注记 + 版本号递增。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/db/migrations/2026-10-09_behavior_events.sql tools/db/schema.sql docs/K12智学系统-数据库设计文档.md
@@ -147,7 +147,7 @@ git commit -m "feat(analytics): behavior_events 建表（迁移+schema+DB文档�
   - `EventsService.recordMany(inputs: TrackEventInput[]): { accepted: number; rejected: number }`——采集端点用，**会抛**（校验失败计 rejected，DB 失败向上抛 500）。
   - `BehaviorEventsRepository.insertMany(rows: BehaviorEventRow[]): Promise<void>`——多行 INSERT，占位符动态，走 `pool.query`。
 
-- [ ] **Step 1: 写 repo 失败测试**
+- [x] **Step 1: 写 repo 失败测试**
 
 ```ts
 // apps/server/src/database/repositories/behavior-events.repo.test.ts
@@ -183,12 +183,12 @@ describe('BehaviorEventsRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/behavior-events.repo.test.ts`
 Expected: FAIL（模块不存在）
 
-- [ ] **Step 3: 实现 repo**
+- [x] **Step 3: 实现 repo**
 
 ```ts
 // apps/server/src/database/repositories/behavior-events.repo.ts
@@ -220,12 +220,12 @@ export class BehaviorEventsRepository {
 }
 ```
 
-- [ ] **Step 4: 跑 repo 测试确认通过**
+- [x] **Step 4: 跑 repo 测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/behavior-events.repo.test.ts`
 Expected: PASS（2 例）
 
-- [ ] **Step 5: 写 EventsService 失败测试**
+- [x] **Step 5: 写 EventsService 失败测试**
 
 ```ts
 // apps/server/src/modules/analytics/events.service.test.ts
@@ -296,12 +296,12 @@ describe('EventsService', () => {
 });
 ```
 
-- [ ] **Step 6: 跑测试确认失败**
+- [x] **Step 6: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/events.service.test.ts`
 Expected: FAIL
 
-- [ ] **Step 7: 实现 EventsService**
+- [x] **Step 7: 实现 EventsService**
 
 ```ts
 // apps/server/src/modules/analytics/events.service.ts
@@ -426,12 +426,12 @@ export class EventsService {
 
 > ⚠️ 上面的 `_pending` hack 是错的——不要用。正确做法：`recordMany` 声明为 `async`，`await this.repo.insertMany(rows)` 后返回计数。测试 Step 5 里两条「不抛 / 抛」用例按 async/await 改写（`await expect(...).resolves.toEqual(...)` 与 `await expect(...).rejects.toThrow()`）。实现与测试都按 async 版本落。
 
-- [ ] **Step 8: 跑 EventsService 测试确认通过**
+- [x] **Step 8: 跑 EventsService 测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/events.service.test.ts`
 Expected: PASS（7 例，含 async 改写后的 recordMany 两例）
 
-- [ ] **Step 9: 隐私守卫测试（三道锁之三）**
+- [x] **Step 9: 隐私守卫测试（三道锁之三）**
 
 ```ts
 // apps/server/src/database/repositories/parent-analytics.privacy-guard.test.ts
@@ -452,9 +452,9 @@ describe('parent-analytics.repo 隐私守卫', () => {
 Run: `cd apps/server && npx vitest run src/database/repositories/parent-analytics.privacy-guard.test.ts`
 Expected: PASS（现在就该绿——锁是防未来的）
 
-- [ ] **Step 10: 模块注册**——`analytics.module.ts` providers 加 `BehaviorEventsRepository, EventsService`（imports 处从 `../../database/repositories/behavior-events.repo.js` 引入）。
+- [x] **Step 10: 模块注册**——`analytics.module.ts` providers 加 `BehaviorEventsRepository, EventsService`（imports 处从 `../../database/repositories/behavior-events.repo.js` 引入）。
 
-- [ ] **Step 11: tsc + 提交**
+- [x] **Step 11: tsc + 提交**
 
 Run: `cd apps/server && npx tsc --noEmit`
 Expected: 0 error
@@ -478,7 +478,7 @@ git commit -m "feat(analytics): EventsService 事件字典与隐私三道锁 + B
 - Consumes: `EventsService.recordMany`（Task 2）、`SubjectsRepository`（analytics.module 已有 provider，study-sessions 同款校验用）
 - Produces: `POST /api/track/events` → 201 `{accepted:number, rejected:number}`（ResponseInterceptor 包 `{code:0,message:'ok',data}`）；越界 400/1001
 
-- [ ] **Step 1: 写 controller 失败测试**
+- [x] **Step 1: 写 controller 失败测试**
 
 ```ts
 // apps/server/src/modules/analytics/track.controller.test.ts
@@ -530,12 +530,12 @@ describe('TrackController POST /api/track/events', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/track.controller.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: 实现 controller**
+- [x] **Step 3: 实现 controller**
 
 ```ts
 // apps/server/src/modules/analytics/track.controller.ts
@@ -608,18 +608,18 @@ export class TrackController {
 
 > ⚠️ `recordMany` 签名在 Task 2 是 `(inputs)`；这里需要 rejected 计入伪造条目。统一改为：Task 2 的 `recordMany(inputs: TrackEventInput[])` **保持不变**，白名单过滤放 `sanitize()` 里——给 `TrackEventInput` 加 `enforceClientWhitelist?: boolean`，采集路径 `recordMany` 内部对 `source==='client'` 的输入一律校验白名单、字典外或白名单外都计 rejected。Step 7 实现与 Step 5 测试相应调整（`recordMany` 里 rejected 的第三个来源）。上面 controller 的 `allowed` 过滤删掉，直接 `return this.events.recordMany(acceptedInputs)`。**以此为准**：白名单判定在 EventsService，controller 不判。
 
-- [ ] **Step 4: 对齐 Task 2 的 recordMany**——`events.service.ts` 的 `sanitize` 加第二参 `source: 'server' | 'client'` 已经在 input 里；`recordMany` 中：`if (input.source === 'client' && !CLIENT_ALLOWED_EVENTS.has(input.event)) { rejected += 1; continue; }`。Task 2 测试里「服务端权威事件 client 伪造」用例正是打这条路径，无需改用例。
+- [x] **Step 4: 对齐 Task 2 的 recordMany**——`events.service.ts` 的 `sanitize` 加第二参 `source: 'server' | 'client'` 已经在 input 里；`recordMany` 中：`if (input.source === 'client' && !CLIENT_ALLOWED_EVENTS.has(input.event)) { rejected += 1; continue; }`。Task 2 测试里「服务端权威事件 client 伪造」用例正是打这条路径，无需改用例。
 
-- [ ] **Step 5: SubjectsRepository 归属方法核对**——study-sessions 校验 subjectId 用的是 `SubjectsRepository` 哪个方法（`findOwnedById` 为占位名），打开 `apps/server/src/database/repositories/subjects.repo.ts` 找实际方法名并在 controller/test 里替换；若无现成方法，用 `SELECT id FROM subjects WHERE id=? AND ...`（照 study-sessions.service.ts 里的既有校验抄）。
+- [x] **Step 5: SubjectsRepository 归属方法核对**——study-sessions 校验 subjectId 用的是 `SubjectsRepository` 哪个方法（`findOwnedById` 为占位名），打开 `apps/server/src/database/repositories/subjects.repo.ts` 找实际方法名并在 controller/test 里替换；若无现成方法，用 `SELECT id FROM subjects WHERE id=? AND ...`（照 study-sessions.service.ts 里的既有校验抄）。
 
-- [ ] **Step 6: interceptor skip 名单**——打开 `apps/server/src/common/interceptors/analytics.interceptor.ts`，确认 skip 数组含 `'/api/track/events'`（母 spec §6.2 要求）；缺则补（挂在 `api_request_logs` 自指放大会污染失败率）。
+- [x] **Step 6: interceptor skip 名单**——打开 `apps/server/src/common/interceptors/analytics.interceptor.ts`，确认 skip 数组含 `'/api/track/events'`（母 spec §6.2 要求）；缺则补（挂在 `api_request_logs` 自指放大会污染失败率）。
 
-- [ ] **Step 7: 模块注册 + 测试通过 + tsc**
+- [x] **Step 7: 模块注册 + 测试通过 + tsc**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/track.controller.test.ts && npx tsc --noEmit`
 Expected: PASS + 0 error
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/modules/analytics/track.controller.ts apps/server/src/modules/analytics/track.controller.test.ts apps/server/src/modules/analytics/events.service.ts apps/server/src/modules/analytics/analytics.module.ts apps/server/src/common/interceptors/analytics.interceptor.ts
@@ -648,7 +648,7 @@ git commit -m "feat(analytics): POST /api/track/events 批量采集端点（clie
 judgeForPractice（practice.service.ts:101 调用）→ 'mainline'
 ```
 
-- [ ] **Step 1: 写失败测试**（追加到 `judge-core.service.test.ts`；`makeService`/构造处补第 9 参 `events` mock）
+- [x] **Step 1: 写失败测试**（追加到 `judge-core.service.test.ts`；`makeService`/构造处补第 9 参 `events` mock）
 
 ```ts
 // makeService 内：const events = overrides.events ?? { track: vi.fn() };
@@ -709,12 +709,12 @@ it('awardErrorFixOnClear 发 error_book_cleared', async () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts`
 Expected: FAIL（构造参数不足 / track 未被调用）
 
-- [ ] **Step 3: 实现**（`judge-core.service.ts`）
+- [x] **Step 3: 实现**（`judge-core.service.ts`）
 
 ```ts
 // ① 构造函数追加第 9 参：
@@ -780,19 +780,19 @@ private trackStreak(studentId: number, key: string, module: string | null, quest
 //    verdict === 'correct' 时清零该 key（答对重置连错）。
 ```
 
-- [ ] **Step 4: AnalyticsModule exports + module imports**
+- [x] **Step 4: AnalyticsModule exports + module imports**
 
 ```ts
 // analytics.module.ts @Module({ ..., exports: [EventsService] })
 // judge-core 所在 module（providers 含 JudgeCoreService 的那个）imports 加 AnalyticsModule
 ```
 
-- [ ] **Step 5: 跑 judge-core 测试全量**
+- [x] **Step 5: 跑 judge-core 测试全量**
 
 Run: `cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts`
 Expected: PASS（既有用例不红——events 未传时全部 no-op）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/judge-core.service.ts apps/server/src/modules/practice/judge-core.service.test.ts apps/server/src/modules/analytics/analytics.module.ts
@@ -812,7 +812,7 @@ git commit -m "feat(analytics): judge-core 挂载 answer_submitted/连错/错题
 **Interfaces:**
 - Consumes: `EventsService.track`（Task 2）；PointsModule / ExamsModule / PracticeModule / TrainingModule 的 imports 需含 `AnalyticsModule`（缺则补）
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 // points.service.test.ts 追加
@@ -839,12 +839,12 @@ it('submit 成功发 exam_submitted', async () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/points/points.service.test.ts src/modules/exams/exams.service.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```ts
 // points.service.ts award(:96) 内，算出 result 且 result.pointsAwarded > 0 时：
@@ -872,12 +872,12 @@ this.events?.track({
 //   有什么用什么；实在没有就传 module: null——scene 由白名单兜成 NULL，不报错）
 ```
 
-- [ ] **Step 4: 跑两个测试文件 + tsc**
+- [x] **Step 4: 跑两个测试文件 + tsc**
 
 Run: `cd apps/server && npx vitest run src/modules/points/points.service.test.ts src/modules/exams/exams.service.test.ts && npx tsc --noEmit`
 Expected: PASS + 0 error
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/points/points.service.ts apps/server/src/modules/points/points.service.test.ts apps/server/src/modules/exams/exams.service.ts apps/server/src/modules/exams/exams.service.test.ts apps/server/src/modules/practice/practice.controller.ts apps/server/src/modules/training/training.controller.ts
@@ -898,7 +898,7 @@ git commit -m "feat(analytics): 挂载 points_awarded / exam_submitted / hint_re
 - Consumes: `EventsService.track`；TrainingModule imports AnalyticsModule（应已具备——判题链路同模块）
 - Produces: 每次专项判题落库 `special_practice_logs` 的同时发 1 条 `special_unit_judged`（tier=parent）
 
-- [ ] **Step 1: 失败测试**（以 meaning 为例，其余三处同构、module 换名）
+- [x] **Step 1: 失败测试**（以 meaning 为例，其余三处同构、module 换名）
 
 ```ts
 // meaning.service.test.ts 追加
@@ -914,12 +914,12 @@ it('判题写 special_practice_logs 的同时发 special_unit_judged', async () 
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/training/meaning.service.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**——四处 `await this.specialLogsRepo.insert({...})` 的**同一作用域**内、insert 成功后加：
+- [x] **Step 3: 实现**——四处 `await this.specialLogsRepo.insert({...})` 的**同一作用域**内、insert 成功后加：
 
 ```ts
 // training.service.ts:257 一带（默写）
@@ -935,12 +935,12 @@ this.events?.track({
 
 四处构造函数各加 `events?: EventsService`。日志失败不回滚业务的既有 try/catch 语义不变（track 本身也吞异常，双保险）。
 
-- [ ] **Step 4: 四个测试文件全绿 + tsc**
+- [x] **Step 4: 四个测试文件全绿 + tsc**
 
 Run: `cd apps/server && npx vitest run src/modules/training/ && npx tsc --noEmit`
 Expected: PASS + 0 error
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/training/training.service.ts apps/server/src/modules/training/meaning.service.ts apps/server/src/modules/training/vocabulary.service.ts apps/server/src/modules/training/*.test.ts
@@ -961,7 +961,7 @@ git commit -m "feat(analytics): 四个专项判题点挂载 special_unit_judged"
 - Consumes: `LlmCallLogEntry`（`ai-core/infra/llm-call-log.ts:11-31`，字段含 `modelKey`/`scene`/`isFallback`）；`EventsService.track`
 - Produces: fallback 记账行额外触发 `llm_fallback_triggered`（props `{scene, toModel}`）；5 分钟惰性收尾每行触发 1 条 `study_session_ended`（`props.endReason='closed'`，activeSeconds 取服务端累计值）
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 // study-sessions.service.test.ts 追加
@@ -980,12 +980,12 @@ it('closeStale 对每行收尾会话发 study_session_ended 兜底事件', async
 
 （analytics.module 的 sink 回调改动用**集成冒烟验证**，不单测——见 Task 13。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```ts
 // ① study-sessions.repo.ts closeStale(:305)：由「一条 UPDATE 返回受影响行数」改为：
@@ -1018,12 +1018,12 @@ setLlmCallSink((entry) => {
 //   注意构造顺序：EventsService 必须在回调首次触发前可用，回调只在真实 LLM 调用时触发，无启动顺序问题）
 ```
 
-- [ ] **Step 4: 测试全绿 + tsc**
+- [x] **Step 4: 测试全绿 + tsc**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts src/database/repositories/study-sessions.repo.test.ts && npx tsc --noEmit`
 Expected: PASS + 0 error（repo 签名变化处，调用方 grep `closeStale` 逐一核对返回值用法）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/analytics/analytics.module.ts apps/server/src/database/repositories/study-sessions.repo.ts apps/server/src/database/repositories/study-sessions.repo.test.ts apps/server/src/modules/analytics/study-sessions.service.ts apps/server/src/modules/analytics/study-sessions.service.test.ts
@@ -1055,7 +1055,7 @@ GET /overview  →  { dau:number, wau:number, totalSeconds:number, totalAnswers:
 GET /modules   →  { items:[{ module, students, seconds, answered, correct, accuracy:number|null }] }
 ```
 
-- [ ] **Step 1: repo 失败测试**
+- [x] **Step 1: repo 失败测试**
 
 ```ts
 // ops-analytics.repo.test.ts
@@ -1085,12 +1085,12 @@ describe('OpsAnalyticsRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/ops-analytics.repo.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: 实现 repo（overview + modulesWindow）**
+- [x] **Step 3: 实现 repo（overview + modulesWindow）**
 
 ```ts
 // ops-analytics.repo.ts
@@ -1124,12 +1124,12 @@ export class OpsAnalyticsRepository {
 
 > ⚠️ `CURDATE()` 在上面 SELECT CASE 里出现——**这违反全局约束**（DB 时区）。实现时把「今日」也算进窗口参数：service 层把 `today 00:00` 作为额外参数 `todayAt` 传入，SQL 写 `started_at >= ?`。**最终 SQL 不允许出现 CURDATE/NOW。**
 
-- [ ] **Step 4: 跑 repo 测试通过**
+- [x] **Step 4: 跑 repo 测试通过**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/ops-analytics.repo.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: service + controller**
+- [x] **Step 5: service + controller**
 
 ```ts
 // ops-analytics.service.ts（节选；parseWindow 是全 service 共享）
@@ -1198,7 +1198,7 @@ export class AdminAnalyticsController {
 }
 ```
 
-- [ ] **Step 6: service 测试**（窗口默认值、非法 from 400/1001、answered=0 → accuracy null）
+- [x] **Step 6: service 测试**（窗口默认值、非法 from 400/1001、answered=0 → accuracy null）
 
 ```ts
 // ops-analytics.service.test.ts 关键用例
@@ -1208,7 +1208,7 @@ const r = await svcWith({ answered: 0, correct: 0 }).overview({});          // m
 expect(r.accuracy).toBeNull();
 ```
 
-- [ ] **Step 7: 全绿 + tsc + Commit**
+- [x] **Step 7: 全绿 + tsc + Commit**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/ops-analytics && npx tsc --noEmit`
 
@@ -1245,7 +1245,7 @@ const FUNNEL_STEPS: Record<string, string[]> = {
 };
 ```
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 // service：白名单越界 1001
@@ -1261,7 +1261,7 @@ expect(sql).toContain('event IN');
 expect(sql).toContain('LIMIT ?');
 ```
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 ```ts
 // repo.funnel(w, module)：
@@ -1275,9 +1275,9 @@ expect(sql).toContain('LIMIT ?');
 //   动态条件拼占位符数组（不要字符串插值用户输入——注入面）。
 ```
 
-- [ ] **Step 3: controller 追加两端点**（模式同 Task 8 Step 5：`@Get('funnel')` / `@Get('events')`，query 透传 service）
+- [x] **Step 3: controller 追加两端点**（模式同 Task 8 Step 5：`@Get('funnel')` / `@Get('events')`，query 透传 service）
 
-- [ ] **Step 4: 全绿 + tsc + Commit**
+- [x] **Step 4: 全绿 + tsc + Commit**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/ops-analytics && npx tsc --noEmit`
 
@@ -1299,7 +1299,7 @@ git commit -m "feat(analytics): /funnel（8 模块漏斗）+ /events（全 tier 
   - `GET /devices` → `{ distributions:{ platformClass:[{key,students,seconds,sessions,accuracy|null}], screenClass:[...], inputType:[...], appShell:[...], browser:[...] }, multiDevice:[{count,students}], switches:{count,students} }`
   - `GET /cohort-compare?metric=&outcome=` → `{ metric, outcome, groups:[{key, students, value:number|null}], disclaimer:'correlation-not-causation' }`
 
-- [ ] **Step 1: 失败测试（关键口径各一条）**
+- [x] **Step 1: 失败测试（关键口径各一条）**
 
 ```ts
 // retention：D1 = 首活跃日+1 有会话的学生数 / cohortSize
@@ -1316,7 +1316,7 @@ const r2 = await svcWithGroups().cohortCompare({ metric: 'totalSeconds', outcome
 expect(r2.disclaimer).toBe('correlation-not-causation');
 ```
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 ```ts
 // retention（三段 SQL）：
@@ -1351,7 +1351,7 @@ expect(r2.disclaimer).toBe('correlation-not-causation');
 //   accuracy → 组内 acc()
 ```
 
-- [ ] **Step 3: controller 追加三端点 + 全绿 + tsc + Commit**
+- [x] **Step 3: controller 追加三端点 + 全绿 + tsc + Commit**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/ops-analytics && npx tsc --noEmit`
 
@@ -1374,7 +1374,7 @@ git commit -m "feat(analytics): /retention + /devices + /cohort-compare（按人
   - `GET /llm-calls?scene=&model=&success=&page=` → `{ items, page, pageSize:20, total }`
   - `GET /requests?path=&status=&minLatency=&page=` → `{ items, page, pageSize:20, total }`
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 // llm-tokens：groupBy 白名单
@@ -1390,7 +1390,7 @@ expect((await svc.quality({})).passageSkipRate).toBeNull();
 // llm-calls / requests：分页 LIMIT ? 走 query
 ```
 
-- [ ] **Step 2: 实现（SQL 要点）**
+- [x] **Step 2: 实现（SQL 要点）**
 
 ```sql
 -- llm-tokens（聚合键按 groupBy 切：scene / model_key / DATE(created_at) / student_id）：
@@ -1420,7 +1420,7 @@ SELECT {key} AS grp, COUNT(*) AS calls,
 -- requests：SELECT * FROM api_request_logs WHERE route LIKE ?/status_code=?/latency_ms>=? 动态拼接 LIMIT ? OFFSET ?
 ```
 
-- [ ] **Step 3: controller 追加四端点 + 全绿 + tsc + Commit**
+- [x] **Step 3: controller 追加四端点 + 全绿 + tsc + Commit**
 
 Run: `cd apps/server && npx vitest run src/modules/analytics/ops-analytics && npx tsc --noEmit`
 
@@ -1442,7 +1442,7 @@ git commit -m "feat(analytics): /quality + /llm-tokens + /llm-calls + /requests�
   - `export type AdminAnalyticsWindow = { from?: string; to?: string }`
   - 11 个只读函数（签名逐条见下）
 
-- [ ] **Step 1: 类型与函数**（追加在 admin 分节区，`// --- Admin: Analytics (2026-10-09) ---`）
+- [x] **Step 1: 类型与函数**（追加在 admin 分节区，`// --- Admin: Analytics (2026-10-09) ---`）
 
 ```ts
 export type TrackEventPayload = {
@@ -1494,7 +1494,7 @@ export const getAdminEvents = (w: AdminAnalyticsWindow & { page: number; event?:
 export const getAdminDevices = (w: AdminAnalyticsWindow) => fetchApi<DevicesData>(`/admin/analytics/devices${qs(w)}`);
 ```
 
-- [ ] **Step 2: tsc + Commit**
+- [x] **Step 2: tsc + Commit**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 0 error
@@ -1521,7 +1521,7 @@ git commit -m "feat(web): trackEvents 传输与 adminAnalytics 11 端点 API 层
   - `trackEvent(event: string, fields?: { refType?: string; refId?: number; props?: Record<string, unknown> }): void`——module/scene 自动取当前 SceneInfo，未登录/禁用时 no-op，**永不抛**
   - session 状态机 effects.start/end 时自动入队 `study_session_started`/`study_session_ended`
 
-- [ ] **Step 1: 失败测试**（追加 `tracker.test.ts`；`vi.useFakeTimers()` 惯例已在该文件）
+- [x] **Step 1: 失败测试**（追加 `tracker.test.ts`；`vi.useFakeTimers()` 惯例已在该文件）
 
 ```ts
 it('trackEvent 入队并批量经 eventTransport 发送（≥20 或 flushNow）', async () => {
@@ -1569,12 +1569,12 @@ it('sendEvents 抛错被吞（.catch）', async () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/analytics/tracker.test.ts`
 Expected: FAIL（setEventTransport 不存在）
 
-- [ ] **Step 3: 实现 tracker.ts**
+- [x] **Step 3: 实现 tracker.ts**
 
 ```ts
 // —— 追加实现（与既有 setTransport(:99)/runTransition(:241)/onRouteChange(:128) 融合）——
@@ -1623,12 +1623,12 @@ export function trackEvent(event: string, fields?: { refType?: string; refId?: n
 // __resetForTests(:109)：追加复位 eventQueue/lastPageViewAt/eventTransport/lastScene/currentUid。
 ```
 
-- [ ] **Step 4: tracker 测试全绿**
+- [x] **Step 4: tracker 测试全绿**
 
 Run: `cd apps/web && npx vitest run src/analytics/tracker.test.ts`
 Expected: PASS（既有用例不红）
 
-- [ ] **Step 5: 显式事件挂载（3 处）**
+- [x] **Step 5: 显式事件挂载（3 处）**
 
 ```tsx
 // ① QuestionRunner.tsx:371-378 self_assess 提交后展示参考答案处（首次渲染该块时）：
@@ -1644,7 +1644,7 @@ trackEvent('ai_message_sent', { refType: 'dialogue', refId: dialogueId, props: {
 
 > `card_flipped` 本期**无发射点**（全仓无翻卡 UI，字典占位）。词族展开若未来要算翻卡，另行立项。
 
-- [ ] **Step 6: web 全量测试 + tsc + Commit**
+- [x] **Step 6: web 全量测试 + tsc + Commit**
 
 Run: `cd apps/web && npm test && npx tsc -b`
 Expected: 全绿
@@ -1669,7 +1669,7 @@ git commit -m "feat(web): tracker 显式事件队列 + session 两事件 + answe
   - `AnalyticsPageShell({ title, description, window, onWindowChange, children })`——页头 + 日期窗（近 7 天默认，两个 `<input type="date">`）+ 子页 tab 条（8 页互链）
   - `useAdminAnalyticsWindow()`——`{ from, to, setFrom, setTo }` state（YYYY-MM-DD，默认今天-6 到今天）
   - `fmtPct(v: number|null)` / `fmtDuration(sec)`——null → '—'；秒 → 'X 小时 Y 分'
-- [ ] **Step 1: shared 组件与测试**
+- [x] **Step 1: shared 组件与测试**
 
 ```tsx
 // shared.tsx（骨架；样式全 token，参照 AdminAlertsPage.tsx:71-78 页头模式）
@@ -1718,7 +1718,7 @@ describe('AnalyticsPageShell', () => {
 });
 ```
 
-- [ ] **Step 2: AdminNav + 路由**
+- [x] **Step 2: AdminNav + 路由**
 
 ```tsx
 // AdminNav.tsx navItems 追加（末尾）：{ to: '/admin/analytics', label: '数据分析' }
@@ -1733,7 +1733,7 @@ describe('AnalyticsPageShell', () => {
 { path: 'analytics/events', element: <AnalyticsEventsPage /> },
 ```
 
-- [ ] **Step 3: 测试 + tsc + Commit**
+- [x] **Step 3: 测试 + tsc + Commit**
 
 Run: `cd apps/web && npx vitest run src/pages/admin/analytics/shared.test.tsx && npx tsc -b`
 Expected: PASS（页面文件先建空壳占位以让路由不炸——8 个页面在 Task 15/16 填实；空壳仅 `export default function X(){return null}` 会挂 Shell，临时代码）
@@ -1760,7 +1760,7 @@ git commit -m "feat(web): 分析页共享件（Shell/日期窗/格式化）+ Adm
 - **Funnel**：模块下拉（8 个白名单值）+ 步骤条（每步 event 中文名 + students + 相对上步 fmtPct 转化，第一步转化列显示 '—'）。
 - **Retention**：cohortStart 日期输入 + 表（cohortSize、每行 offset/retained/rate）。
 
-- [ ] **Step 1: Overview 页完整实现**（作为四页模板，其余三页同构替换数据源与呈现）
+- [x] **Step 1: Overview 页完整实现**（作为四页模板，其余三页同构替换数据源与呈现）
 
 ```tsx
 // AnalyticsOverviewPage.tsx
@@ -1799,7 +1799,7 @@ export default function AnalyticsOverviewPage() {
 }
 ```
 
-- [ ] **Step 2: 每页一条渲染测试**（模板；四页各一份，mock 对应 api 函数）
+- [x] **Step 2: 每页一条渲染测试**（模板；四页各一份，mock 对应 api 函数）
 
 ```tsx
 // AnalyticsOverviewPage.test.tsx
@@ -1821,7 +1821,7 @@ describe('AnalyticsOverviewPage', () => {
 });
 ```
 
-- [ ] **Step 3: 四页 + 测试全绿 + tsc + Commit**
+- [x] **Step 3: 四页 + 测试全绿 + tsc + Commit**
 
 Run: `cd apps/web && npx vitest run src/pages/admin/analytics/ && npx tsc -b`
 Expected: PASS
@@ -1848,9 +1848,9 @@ git commit -m "feat(web): 分析页 Overview/Modules/Funnel/Retention"
 - **LlmTokens**：groupBy 下拉（scene/model/day/student）+ 明细表（key/calls/inputTokens/outputTokens/unavailableCalls）+ 顶部三行汇总（attributed/unattributed/unavailableCalls，注释「用量缺失不计入 0 求和」）。
 - **Events**：event/module 两个筛选输入 + 分页表格（时间/event/tier/module/scene/student_id/ref）+ 上一页/下一页（page state）。
 
-- [ ] **Step 1: 四页实现**（模板照 Task 15 Overview 页：useEffect + cancelled + Shell；每页替换数据源/呈现/控件）
-- [ ] **Step 2: 每页一条渲染测试**（mock 对应 api；Events 页断言筛选输入存在、LlmTokens 页断言「用量缺失」行存在）
-- [ ] **Step 3: 全绿 + tsc + Commit**
+- [x] **Step 1: 四页实现**（模板照 Task 15 Overview 页：useEffect + cancelled + Shell；每页替换数据源/呈现/控件）
+- [x] **Step 2: 每页一条渲染测试**（mock 对应 api；Events 页断言筛选输入存在、LlmTokens 页断言「用量缺失」行存在）
+- [x] **Step 3: 全绿 + tsc + Commit**
 
 Run: `cd apps/web && npm test && npx tsc -b`
 Expected: 全绿
@@ -1871,10 +1871,10 @@ git commit -m "feat(web): 分析页 Devices/Quality/LlmTokens/Events"
 - Modify: 根 `CLAUDE.md`「工程约定」加一行：`埋点写入一律经 EventsService（EVENT_TIER 字典定 tier、未登记拒写）；家长端查询硬过滤 tier='parent'（隐私三道锁，守卫测试在 parent-analytics.privacy-guard.test.ts）`。若 CLAUDE.md 超 15KB 上限，改为 `docs/constraints/analytics-privacy.md` + CLAUDE.md 一行指针。
 - Modify: `docs/ai-core-changelog.md`（末尾追加本批条目：交付内容 + 测试数据 + 踩坑）
 
-- [ ] **Step 1: API 文档**（逐端点：入参表、校验表、错误码表、响应 JSON 示例——从 repo/service 测试里的真实形状抄）
-- [ ] **Step 2: openapi.yaml**（12 端点 path + request/response schema；`/api/track/events` 的 batch 50 上限写进 description）
-- [ ] **Step 3: CLAUDE.md / changelog**
-- [ ] **Step 4: Commit**
+- [x] **Step 1: API 文档**（逐端点：入参表、校验表、错误码表、响应 JSON 示例——从 repo/service 测试里的真实形状抄）
+- [x] **Step 2: openapi.yaml**（12 端点 path + request/response schema；`/api/track/events` 的 batch 50 上限写进 description）
+- [x] **Step 3: CLAUDE.md / changelog**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml docs/K12智学系统-数据库设计文档.md CLAUDE.md docs/ai-core-changelog.md

@@ -35,11 +35,11 @@
   - `scrollMode='scroll-y'`：canvas 包在固定高度画板 div 内，外层容器 `overflow-y-auto overflow-x-hidden`，画板高 = 容器高 × 1.6（实现里常量 `SCROLL_Y_FACTOR = 1.6`）。
   - `persist=false`：不读写 `draft-store`，`strokesRef` 纯本地；`questionId` 变化时清空笔迹。
 
-- [ ] **Step 1: 读文件确认现状**
+- [x] **Step 1: 读文件确认现状**
 
 Run: `cat apps/web/src/components/business/DraftWhiteboard.tsx` 阅读全文件（当前 222 行）。确认要改的 4 处：函数签名（:75）、画布尺寸 effect（:92-109）、切题加载 effect（:114-118）、三个写 store 的调用点（`eraseAt` :129-136 / `handlePointerUp` :163-167 / `handleClear` :169-173）。
 
-- [ ] **Step 2: 改签名与常量**
+- [x] **Step 2: 改签名与常量**
 
 将函数签名（:75）与顶部常量区改为：
 
@@ -61,7 +61,7 @@ export function DraftWhiteboard({
 }) {
 ```
 
-- [ ] **Step 3: 改 ref 声明**（:79-80 处，在 `wrapRef`/`canvasRef` 后加 `boardRef`）
+- [x] **Step 3: 改 ref 声明**（:79-80 处，在 `wrapRef`/`canvasRef` 后加 `boardRef`）
 
 ```tsx
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -69,7 +69,7 @@ export function DraftWhiteboard({
   const boardRef = useRef<HTMLDivElement>(null);
 ```
 
-- [ ] **Step 4: 改画布尺寸 effect（支持两种模式）**
+- [x] **Step 4: 改画布尺寸 effect（支持两种模式）**
 
 将 :92-109 的尺寸 effect 整体替换为：
 
@@ -104,7 +104,7 @@ export function DraftWhiteboard({
   }, [redraw, scrollMode, boardRef]);
 ```
 
-- [ ] **Step 5: 改切题加载 effect（persist 分支）**
+- [x] **Step 5: 改切题加载 effect（persist 分支）**
 
 将 :114-118 的 effect 替换为：
 
@@ -116,7 +116,7 @@ export function DraftWhiteboard({
   }, [questionId, persist, redraw]);
 ```
 
-- [ ] **Step 6: 三个写 store 调用点加 `persist` 守卫**
+- [x] **Step 6: 三个写 store 调用点加 `persist` 守卫**
 
 在 `eraseAt`（:129-136）中把 `setDraft` 包一层：
 
@@ -151,7 +151,7 @@ export function DraftWhiteboard({
   };
 ```
 
-- [ ] **Step 7: 改渲染 JSX（两种画布结构）**
+- [x] **Step 7: 改渲染 JSX（两种画布结构）**
 
 将 :207-218 的 wrap+canvas 块替换为：
 
@@ -186,17 +186,17 @@ export function DraftWhiteboard({
       )}
 ```
 
-- [ ] **Step 8: 类型检查**
+- [x] **Step 8: 类型检查**
 
 Run: `npm run build`
 Expected: tsc 通过、vite 打包成功。若报 `boardRef` 或常量未使用等错误，检查上一步替换是否完整。
 
-- [ ] **Step 9: Lint**
+- [x] **Step 9: Lint**
 
 Run: `npm run lint`
 Expected: 无 error。
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/web/src/components/business/DraftWhiteboard.tsx
@@ -220,7 +220,7 @@ git commit -m "feat(web): DraftWhiteboard 支持 scrollMode(fit/scroll-y) 与 pe
   - `export function DraftDrawer({ questionId, onClose }: { questionId: string; onClose: () => void })`
   - `export function DraftIconButton({ onClick }: { onClick: () => void })`
 
-- [ ] **Step 1: 写文件**
+- [x] **Step 1: 写文件**
 
 创建 `apps/web/src/components/business/DraftDrawer.tsx`，内容如下（样式抄 `DiscussDrawer.tsx` 抽屉外壳，宽度两档 `45%↔70%` 与它 card 模式一致）：
 
@@ -318,17 +318,17 @@ export function DraftIconButton({ onClick }: { onClick: () => void }) {
 }
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 Run: `npm run build`
 Expected: tsc 通过、打包成功。
 
-- [ ] **Step 3: Lint**
+- [x] **Step 3: Lint**
 
 Run: `npm run lint`
 Expected: 无 error。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/components/business/DraftDrawer.tsx
@@ -352,7 +352,7 @@ git commit -m "feat(web): 新增 DraftDrawer 草稿抽屉与 DraftIconButton 入
   - mount 与每次 `idx` 变化时调用 `onQuestionChange(q, idx)`。
 - Consumes: 无（纯新增 prop + 一行 `enabled` 改动）。
 
-- [ ] **Step 1: 加 prop 到接口**
+- [x] **Step 1: 加 prop 到接口**
 
 在 `QuestionRunnerProps`（`QuestionRunner.tsx:47` 起）的 `modalExtras?: ReactNode;`（:81）附近追加：
 
@@ -361,7 +361,7 @@ git commit -m "feat(web): 新增 DraftDrawer 草稿抽屉与 DraftIconButton 入
   onQuestionChange?: (q: RunnerQuestion, idx: number) => void;
 ```
 
-- [ ] **Step 2: 解构新 prop**
+- [x] **Step 2: 解构新 prop**
 
 在 `QuestionRunner({ ... })` 解构（:84-105）里加：
 
@@ -369,7 +369,7 @@ git commit -m "feat(web): 新增 DraftDrawer 草稿抽屉与 DraftIconButton 入
   onQuestionChange,
 ```
 
-- [ ] **Step 3: 加调用 effect**
+- [x] **Step 3: 加调用 effect**
 
 在 `const q = questions[idx];`（:123）之后加：
 
@@ -384,7 +384,7 @@ git commit -m "feat(web): 新增 DraftDrawer 草稿抽屉与 DraftIconButton 入
 
 > 用 ref 持有最新回调 + `useLayoutEffect([idx, q])`，避免父层回调引用不稳定导致重复触发。已 import `useLayoutEffect`（:7）与 `useRef`（:7），无需新增 import。注意需在 `q` 非空判断（`if (!q) return null;` :199）之前定义。
 
-- [ ] **Step 4: 下线内嵌草稿（enabled 改 false）**
+- [x] **Step 4: 下线内嵌草稿（enabled 改 false）**
 
 将 `PreviewDraftPanel` 的 `enabled`（:339）改为：
 
@@ -394,16 +394,16 @@ git commit -m "feat(web): 新增 DraftDrawer 草稿抽屉与 DraftIconButton 入
 
 > `PreviewDraftPanel` 收到 `enabled=false` 走它自己的 `if (!enabled) return <LatexPreview value={answer} />;` 分支（纯预览，无草稿 tab）。组件本身不改。
 
-- [ ] **Step 5: 清理不再使用的 MATH_SUBJECT_ID 相关**
+- [x] **Step 5: 清理不再使用的 MATH_SUBJECT_ID 相关**
 
 若 `MATH_SUBJECT_ID`（:23）在此文件中仅剩 :339 一处使用（改后已无使用处），删除该常量定义与注释，避免 lint 未使用告警。
 
-- [ ] **Step 6: 类型检查 + Lint**
+- [x] **Step 6: 类型检查 + Lint**
 
 Run: `npm run build && npm run lint`
 Expected: tsc 通过、无 lint error。若 `MATH_SUBJECT_ID` 仍在别处使用则不要删（搜索确认）。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/business/answer/QuestionRunner.tsx
@@ -425,7 +425,7 @@ git commit -m "feat(web): QuestionRunner 下线内嵌草稿并新增 onQuestionC
 - Consumes: `DraftDrawer` + `DraftIconButton`（Task 2）、`QuestionRunner.onQuestionChange`（Task 3）。
 - Produces: run 页接入模式（Task 5/6 照抄）：`draftOpen` + `currentQ` state；`onQuestionChange`；图标 wrapper + `{draftOpen && currentQ && <DraftDrawer questionId={currentQ.n} />}`。
 
-- [ ] **Step 1: 加 import**
+- [x] **Step 1: 加 import**
 
 在 import 区（:6 附近 `DiscussDrawer` 那行后）加：
 
@@ -433,7 +433,7 @@ git commit -m "feat(web): QuestionRunner 下线内嵌草稿并新增 onQuestionC
 import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer';
 ```
 
-- [ ] **Step 2: 加 state**
+- [x] **Step 2: 加 state**
 
 在 `discussQ` state（:34）附近加：
 
@@ -443,7 +443,7 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
 ```
 
-- [ ] **Step 3: `QuestionRunner` 加 prop**
+- [x] **Step 3: `QuestionRunner` 加 prop**
 
 在 `onFinish={handleFinish}`（:199）附近加：
 
@@ -453,7 +453,7 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
 
 > `setCurrentQ` 是 `useState` 的 setter，React 保证引用稳定，不会让 Task 3 的 effect 重跑。
 
-- [ ] **Step 4: 渲染图标 + 抽屉**
+- [x] **Step 4: 渲染图标 + 抽屉**
 
 在 `QuestionRunner` 的兄弟节点区（`{discussQ && phase === 'answering' && (...DiscussDrawer...)}` :202-209 之后，`</>` 之前）加：
 
@@ -470,12 +470,12 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
             )}
 ```
 
-- [ ] **Step 5: 类型检查 + Lint**
+- [x] **Step 5: 类型检查 + Lint**
 
 Run: `npm run build && npm run lint`
 Expected: 通过。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/TargetedRunPage.tsx
@@ -495,7 +495,7 @@ git commit -m "feat(web): 专项答题页右上角草稿图标与抽屉
 - Consumes: 同 Task 4。
 - Produces: 同 Task 4（照抄）。
 
-- [ ] **Step 1: 加 import**
+- [x] **Step 1: 加 import**
 
 :6（DiscussDrawer import）后加：
 
@@ -503,7 +503,7 @@ git commit -m "feat(web): 专项答题页右上角草稿图标与抽屉
 import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer';
 ```
 
-- [ ] **Step 2: 加 state**
+- [x] **Step 2: 加 state**
 
 在 `discussQ` state（:33）附近加：
 
@@ -513,7 +513,7 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
 ```
 
-- [ ] **Step 3: `QuestionRunner` 加 prop**
+- [x] **Step 3: `QuestionRunner` 加 prop**
 
 在 `onFinish={handleFinish}`（:177）附近加：
 
@@ -521,7 +521,7 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
               onQuestionChange={setCurrentQ}
 ```
 
-- [ ] **Step 4: 渲染图标 + 抽屉**
+- [x] **Step 4: 渲染图标 + 抽屉**
 
 在 `{discussQ && phase === 'answering' && (...DiscussDrawer...)}`（:180-188）之后、`</>` 之前加：
 
@@ -538,12 +538,12 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
             )}
 ```
 
-- [ ] **Step 5: 类型检查 + Lint**
+- [x] **Step 5: 类型检查 + Lint**
 
 Run: `npm run build && npm run lint`
 Expected: 通过。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx
@@ -561,7 +561,7 @@ git commit -m "feat(web): 错题答题页右上角草稿图标与抽屉"
 - Consumes: 同 Task 4 + 页容器需补 `relative`。
 - Produces: 同 Task 4。
 
-- [ ] **Step 1: 加 import**
+- [x] **Step 1: 加 import**
 
 在 import 区（:4 `RunExitGuard` 后）加：
 
@@ -569,7 +569,7 @@ git commit -m "feat(web): 错题答题页右上角草稿图标与抽屉"
 import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer';
 ```
 
-- [ ] **Step 2: 加 state**
+- [x] **Step 2: 加 state**
 
 在 `answeredNs` state（:57）附近加：
 
@@ -579,7 +579,7 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
 ```
 
-- [ ] **Step 3: 页容器补 `relative`**
+- [x] **Step 3: 页容器补 `relative`**
 
 主渲染容器（:223）改 className：
 
@@ -589,7 +589,7 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
 
 > 注意 loading/error 分支的容器（:197）也要补 `relative`（保持结构一致，虽然该分支无答题无抽屉，加了无副作用）。
 
-- [ ] **Step 4: `QuestionRunner` 加 prop**
+- [x] **Step 4: `QuestionRunner` 加 prop**
 
 在 `onFinish={handleFinish}`（:246）附近加：
 
@@ -597,7 +597,7 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
           onQuestionChange={setCurrentQ}
 ```
 
-- [ ] **Step 5: 渲染图标 + 抽屉**
+- [x] **Step 5: 渲染图标 + 抽屉**
 
 在 `QuestionRunner`（:224-246）之后、`RunExitGuard`（:249）之前加：
 
@@ -617,12 +617,12 @@ import { DraftDrawer, DraftIconButton } from '@/components/business/DraftDrawer'
 
 > 考试交卷即 `navigate` 到结果路由（`handleSubmitExam` :138-140），ExamRunPage 整体 unmount，不存在"结果页图标残留"问题。
 
-- [ ] **Step 6: 类型检查 + Lint**
+- [x] **Step 6: 类型检查 + Lint**
 
 Run: `npm run build && npm run lint`
 Expected: 通过。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/ExamRunPage.tsx
@@ -636,7 +636,7 @@ git commit -m "feat(web): 考试答题页右上角草稿图标与抽屉（容器
 **Files:**
 - 无代码改动；验收产物。
 
-- [ ] **Step 1: 全量 build + lint**
+- [x] **Step 1: 全量 build + lint**
 
 Run: `npm run build && npm run lint`
 Expected: tsc 通过、vite 打包成功、无 lint error。

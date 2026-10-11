@@ -17,7 +17,7 @@
 **Files:**
 - Modify: `apps/web/src/components/business/DraftDrawer.tsx`（整文件内容替换为下方代码）
 
-- [ ] **Step 1: 用以下完整内容覆盖文件**
+- [x] **Step 1: 用以下完整内容覆盖文件**
 
 ```tsx
 // apps/web/src/components/business/DraftDrawer.tsx
@@ -200,7 +200,7 @@ export function DraftIconButton({ onClick }: { onClick: () => void }) {
 - `endResize` 幂等：`pointerup` 与 `lostpointercapture` 都会触发一次，靠 `resizeStartRef.current` 判空短路。
 - `group`/`group-hover`：Tailwind marker class，拖拽条 hover 时竖线加深。
 
-- [ ] **Step 2: 确认改动只涉及这一个文件**
+- [x] **Step 2: 确认改动只涉及这一个文件**
 
 Run: `cd apps/web && git status --short`
 Expected: 仅 `M apps/web/src/components/business/DraftDrawer.tsx`（如还有本任务前已在工作区的其他改动，跳过即可，勿动）。
@@ -209,12 +209,12 @@ Expected: 仅 `M apps/web/src/components/business/DraftDrawer.tsx`（如还有�
 
 **Files:** 无改动（验证用）
 
-- [ ] **Step 1: 类型检查 + 构建**
+- [x] **Step 1: 类型检查 + 构建**
 
 Run: `cd apps/web && npm run build`
 Expected: 退出码 0，无 tsc 报错（Tailwind `group`、`touch-none`、`cursor-col-resize`、`select-none`、`transition-none` 均为合法工具类）。
 
-- [ ] **Step 2: lint**
+- [x] **Step 2: lint**
 
 Run: `cd apps/web && npm run lint`
 Expected: 退出码 0，无 ESLint 报错。
@@ -225,31 +225,31 @@ Expected: 退出码 0，无 ESLint 报错。
 
 前置：应用已运行（用户惯用 `tools/services.sh` 构建 + vite preview 5173；改代码后必须重建才生效，见 memory `preview-mode-requires-rebuild`）。实测清单（设计 §4）：
 
-- [ ] **Step 1: 拖拽连续调宽 + 夹紧**
+- [x] **Step 1: 拖拽连续调宽 + 夹紧**
 进入任一训练轨答题页（错题巩固 / 考试 / 定向练习），打开草稿抽屉，按住左缘拖拽条左右拖动：宽度应连续变化、无过渡动画滞后；拖到极左≈40%、极右≈85% 被夹紧。
 
-- [ ] **Step 2: 关闭再开宽度保持（会话记忆）**
+- [x] **Step 2: 关闭再开宽度保持（会话记忆）**
 拖到中间值（如 60%），点 X 关闭抽屉，再点草稿入口重开：宽度回到 60%。
 
-- [ ] **Step 3: 跨页保持**
+- [x] **Step 3: 跨页保持**
 当前宽度下切到另一个训练页并打开抽屉：宽度保持；刷新页面后回默认 45%。
 
-- [ ] **Step 4: 按钮快照仍可用**
+- [x] **Step 4: 按钮快照仍可用**
 拖拽到 60% 后点「放大」→ 70%，再点「缩小」→ 45%（按按钮态快照，可预测）；拖拽后图标仍显示正确的「放大/缩小」。
 
-- [ ] **Step 5: 拖拽不误触画布**
+- [x] **Step 5: 拖拽不误触画布**
 拖拽条下方无穿透：拖动过程中左缘竖线握把随 hover 变深，松开后无残留选中态。
 
 ### Task 4: 提交
 
-- [ ] **Step 1: Commit**
+- [x] **Step 1: Commit**
 
 ```bash
 cd apps/web && git add src/components/business/DraftDrawer.tsx
 git commit -m "feat(web): 草稿抽屉左缘拖拽连续调宽（40-85%）+ 两档快照保留 + 会话内宽度记忆"
 ```
 
-- [ ] **Step 2: 同步设计/计划文档（仓库铁律）**
+- [x] **Step 2: 同步设计/计划文档（仓库铁律）**
 
 设计文档已先于本计划提交；本计划不改任何 API/数据流，无需再同步 openapi.yaml 或 API 设计文档。若实现过程偏离设计文档（如夹紧范围/交互），回到 `docs/superpowers/specs/2026-09-09-draft-drawer-width-resize-design.md` 同步。
 

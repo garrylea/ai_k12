@@ -36,7 +36,7 @@
 - Consumes: 现有 `_GRADE_PATTERN`（`tools/crawler/src/parser.py:15`）
 - Produces: `IndexParser._extract_district(text: str, match: re.Match) -> str`；`PaperItem.district` 取值修正
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tools/crawler/tests/adapters/test_zgkao_parser.py` 末尾追加：
 
@@ -79,12 +79,12 @@ class TestParseHeaderDistrict:
         assert with_qu["district"] == without_qu["district"] == "海淀"
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_parser.py::TestParseHeaderDistrict -v`
 Expected: 前两个用例 FAIL（实际得到 `-2025学年` / `-2026学年海淀区`）；`test_district_without_academic_year_range_unchanged` PASS
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 把 `tools/crawler/src/parser.py` 的 `_parse_header` 替换为：
 
@@ -124,12 +124,12 @@ Expected: 前两个用例 FAIL（实际得到 `-2025学年` / `-2026学年海淀
         return district[:-1] if district.endswith("区") else district
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_parser.py -v`
 Expected: 全部 PASS（含原有 `test_extracts_district_from_header` 等）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -152,7 +152,7 @@ git commit -m "fix(crawler): 修正 zgkao 索引页区县解析，学年不再�
   - `_FIRST_SEMESTER_MONTHS: set[int]`、`_SECOND_SEMESTER_MONTHS: set[int]`
   - `resolve_semester(exam_type: str, title: str = "", filename: str = "") -> str | None`（返回 `"first"` / `"second"` / `None`）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tools/crawler/tests/adapters/test_zgkao_classifier.py` 末尾追加（并把首行 import 改为 `from classifier import Classification, Classifier, resolve_semester`）：
 
@@ -198,12 +198,12 @@ class TestResolveSemester:
         assert resolve_semester("期末", filename="2025上海初三期末数学.pdf") is None
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_classifier.py::TestResolveSemester -v`
 Expected: FAIL，`ImportError: cannot import name 'resolve_semester'`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `tools/crawler/src/classifier.py` 顶部把 `import` 区改为：
 
@@ -274,12 +274,12 @@ def resolve_semester(exam_type: str, title: str = "", filename: str = "") -> Opt
     return _semester_from_month(filename) or _semester_from_month(title)
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_classifier.py -v`
 Expected: 全部 PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -303,7 +303,7 @@ git commit -m "feat(crawler): 新增学期判定纯函数 resolve_semester"
     （`key` = 单份试卷标识，`group` = 组标识；两者都可为 None）
   - `SemesterResolver.unresolved: list[str]`（判不出且未询问时的条目；追加 label）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tools/crawler/tests/adapters/test_zgkao_classifier.py` 末尾追加（import 改为 `from classifier import Classification, Classifier, SemesterResolver, resolve_semester`）：
 
@@ -362,12 +362,12 @@ class TestSemesterResolver:
         assert resolver.unresolved == ["初三-月考-2024"]
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_classifier.py::TestSemesterResolver -v`
 Expected: FAIL，`ImportError: cannot import name 'SemesterResolver'`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `tools/crawler/src/classifier.py` import 区补 `Callable`：
 
@@ -449,12 +449,12 @@ class SemesterResolver:
             self._file_cache[key] = semester
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_classifier.py -v`
 Expected: 全部 PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -477,7 +477,7 @@ git commit -m "feat(crawler): 新增 SemesterResolver，判不出时询问并缓
   - `ZgkaoAdapter.supported_filters()` 返回 `{"years", "subjects", "districts", "grades"}`
   - `ZgkaoAdapter._build_classification(item, link, is_split, semester)`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tools/crawler/tests/adapters/test_zgkao_adapter.py` 文件末尾追加：
 
@@ -639,12 +639,12 @@ DOWNLOAD_PAGE_HTML = """
 """
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_adapter.py -v`
 Expected: 新增用例 FAIL（`TypeError: __init__() got an unexpected keyword argument 'semester_resolver'`、`TypeError: _download_pdf() got an unexpected keyword argument`、`ImportError`）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 把 `tools/crawler/src/adapters/zgkao.py` 改造成下面内容（删掉文件顶部的 `_EXAM_TYPE_SEMESTER` 整块）：
 
@@ -818,12 +818,12 @@ class ZgkaoAdapter(SiteAdapter):
         return True
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/crawler && pytest tests/adapters/test_zgkao_adapter.py -v`
 Expected: 全部 PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -845,7 +845,7 @@ git commit -m "feat(crawler): zgkao 适配器接入学期判定与年级过滤"
 - Consumes: `ZgkaoAdapter(..., semester_resolver=)`（Task 4）、`SemesterResolver`（Task 3）、`core.crawler.Crawler`、`PdfStore`/`ImageStore`
 - Produces: `crawler_cli.parse_args(argv=None)`、`crawler_cli.main(argv=None) -> int`（`0` 正常，`2` 有未决学期）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `tools/crawler/tests/test_crawler_cli.py`：
 
@@ -1034,12 +1034,12 @@ class TestMainSemesterContract:
         assert seen == {}
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/crawler && pytest tests/test_crawler_cli.py -v`
 Expected: FAIL，`ModuleNotFoundError: No module named 'crawler_cli'`
 
-- [ ] **Step 3: 实现 `crawler_cli.py`**
+- [x] **Step 3: 实现 `crawler_cli.py`**
 
 创建 `tools/crawler/src/crawler_cli.py`：
 
@@ -1215,7 +1215,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: 删除旧入口与旧测试**
+- [x] **Step 4: 删除旧入口与旧测试**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1226,12 +1226,12 @@ git rm tools/crawler/tests/test_cli.py tools/crawler/tests/adapters/test_zgkao.p
 （`tests/adapters/test_zgkao.py` 的唯一独有覆盖——二级索引递归——已在 Task 4 迁移到 `test_zgkao_adapter.py`；
 其 `TestParseArgs`/`TestCrawlerFilter` 覆盖由 `tests/test_crawler_cli.py` 与适配器过滤用例替代。）
 
-- [ ] **Step 5: 运行全部测试确认通过**
+- [x] **Step 5: 运行全部测试确认通过**
 
 Run: `cd tools/crawler && pytest -q`
 Expected: 全部 PASS，无 `main` / `cli` 相关 collection 错误
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1251,7 +1251,7 @@ git commit -m "refactor(crawler): 合并 main.py 与 cli.py 为唯一入口 craw
 - Consumes: `PdfStore.save(dir_relpath, filename, content, source_url, file_type, classification)`（`tools/crawler/src/core/storage.py:119-138`）
 - Produces: `core.storage` 只导出 `BaseStore` / `PdfStore` / `ImageStore` / `ResourceStore`（`Storage` 不再存在）
 
-- [ ] **Step 1: 改造测试（先让它在 `Storage` 仍存在时也能过）**
+- [x] **Step 1: 改造测试（先让它在 `Storage` 仍存在时也能过）**
 
 把 `tools/crawler/tests/core/test_storage.py` 的 import 改为：
 
@@ -1296,12 +1296,12 @@ def save_pdf(store, cls, content=b"fake-pdf-content", source_url="https://cdn.zg
 把直接 `Storage(...)` 的两处（`test_record_has_type_answer_for_答案`、`TestRobotsCheckedFlag`）改为 `PdfStore(...)` 并改用 `save_pdf(...)`；
 把 `test_meta_has_config_section` 的断言从 `== "1.0.0"` 改为 `== "2.0.0"`（`PdfStore` 默认 `crawler_version`）。
 
-- [ ] **Step 2: 运行测试确认通过（此时 PdfStore 路径生效）**
+- [x] **Step 2: 运行测试确认通过（此时 PdfStore 路径生效）**
 
 Run: `cd tools/crawler && pytest tests/core/test_storage.py -v`
 Expected: 全部 PASS（已不再依赖 `Storage.save_pdf`）
 
-- [ ] **Step 3: 删除 `Storage` 类**
+- [x] **Step 3: 删除 `Storage` 类**
 
 从 `tools/crawler/src/core/storage.py` 删除文件末尾的整段：
 
@@ -1320,12 +1320,12 @@ from classifier import Classification, Classifier
 
 （`Classification` 与 `Classifier` 在 `storage.py` 里只被 `Storage.save_pdf` 使用，删除后整行都成了未使用 import。）
 
-- [ ] **Step 4: 运行全部测试确认通过**
+- [x] **Step 4: 运行全部测试确认通过**
 
 Run: `cd tools/crawler && pytest -q`
 Expected: 全部 PASS；`grep -rn "import Storage\|Storage(" tools/crawler` 无结果
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1344,7 +1344,7 @@ git commit -m "refactor(crawler): 删除仅旧入口使用的 Storage 兼容壳"
 - Consumes: Task 5 的最终 CLI 参数表
 - Produces: 与代码一致的 README
 
-- [ ] **Step 1: 改「用法」章节**
+- [x] **Step 1: 改「用法」章节**
 
 把「多站点 CLI（推荐）」小节标题改为「CLI」，并把所有 `python src/cli.py` 替换为 `python src/crawler_cli.py`（第 28、37、43、49、52、69、77、80、83、86 行）。
 
@@ -1355,7 +1355,7 @@ git commit -m "refactor(crawler): 删除仅旧入口使用的 Storage 兼容壳"
 > 旧命令 `python src/main.py --url ...` 不再可用。
 ```
 
-- [ ] **Step 2: zgkao 参数表补 `--grade`**
+- [x] **Step 2: zgkao 参数表补 `--grade`**
 
 在 zgkao 参数表（原第 55-64 行）的 `--district` 行之后插入：
 
@@ -1374,7 +1374,7 @@ python src/crawler_cli.py --site zgkao \
 ```
 ````
 
-- [ ] **Step 3: 新增「学期判定」小节**
+- [x] **Step 3: 新增「学期判定」小节**
 
 在「输出结构」之前插入：
 
@@ -1393,7 +1393,7 @@ python src/crawler_cli.py --site zgkao \
 `--dry-run` 不询问、不因判不出报错。
 ```
 
-- [ ] **Step 4: 更新架构与输出结构**
+- [x] **Step 4: 更新架构与输出结构**
 
 把「架构」小节里 `main.py # 旧版 zgkao CLI（向后兼容）` 与 `cli.py # 新版多站点 CLI 入口` 两行合并为：
 
@@ -1416,7 +1416,7 @@ data/
 
 （区县写成 `海淀` 而非 `海淀区`：解析时已统一去掉末尾「区」，与 README 参数表里的 `--district 海淀,西城` 一致。）
 
-- [ ] **Step 5: 更新「测试」小节**
+- [x] **Step 5: 更新「测试」小节**
 
 把 README「测试」小节里的 `- tests/test_cli.py - CLI 参数解析测试` 改为：
 
@@ -1424,14 +1424,14 @@ data/
 - `tests/test_crawler_cli.py` - CLI 参数解析测试
 ```
 
-- [ ] **Step 6: 校验无残留用法引用**
+- [x] **Step 6: 校验无残留用法引用**
 
 注意：Step 1 要求的变更说明里会**故意**写出旧命令 `python src/main.py ...`，所以校验时要排除引用块（`>` 开头）的那一行。
 
 Run: `cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n "python src/main\.py\|python src/cli\.py\|python -m pytest tests/test_cli\.py" tools/crawler/README.md | grep -v '^[0-9]*:>'`
 Expected: 无输出
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1452,7 +1452,7 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 - Consumes: Task 7 的最终 README 文案
 - Produces: 全仓库不再出现指向 `src/cli.py` / `src/main.py` 的用法说明
 
-- [ ] **Step 1: 更新用户手册 §3**
+- [x] **Step 1: 更新用户手册 §3**
 
 在 `docs/data-refinery-使用手册.md` 中把 §3「爬虫（Crawler）」的入口行改为：
 
@@ -1473,7 +1473,7 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 **输出结构**：`data/{学科}/初中/{first|second}/{年份}/{试卷名}.pdf`（学期由页面自动识别，判不出时交互询问）
 ```
 
-- [ ] **Step 2: 给历史设计文档加变更说明**
+- [x] **Step 2: 给历史设计文档加变更说明**
 
 在 `docs/superpowers/specs/2026-07-04-smartedu-textbook-crawler-design.md` 标题下方插入一行：
 
@@ -1485,7 +1485,7 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 
 对该文档中出现的 `python src/main.py --site ...` 示例（约第 297、303 行）就地替换为 `python src/crawler_cli.py --site ...`。
 
-- [ ] **Step 3: 设计文档补实现结果**
+- [x] **Step 3: 设计文档补实现结果**
 
 在 `docs/superpowers/specs/2026-09-12-crawler-entry-merge-and-semester-classification-design.md` 末尾追加：
 
@@ -1495,7 +1495,7 @@ git commit -m "docs(crawler): README 同步新入口、年级过滤与学期判�
 （实现完成后填写：各 Task 提交号、`pytest` 通过数、87761 与 89047 两个入口页的真实落盘路径抽查结果。）
 ```
 
-- [ ] **Step 4: 校验无残留用法引用**
+- [x] **Step 4: 校验无残留用法引用**
 
 注意：README 的变更说明里会**故意**写出旧命令 `python src/main.py ...`，并且单文件 grep 的输出没有文件名前缀，所以用 `^[0-9]*:>` 排除引用块那行。两个文件分开跑，避免多文件 grep 加上文件名前缀导致过滤失效。
 
@@ -1507,7 +1507,7 @@ grep -n "python src/cli\.py\|python src/main\.py" docs/data-refinery-使用手�
 ```
 Expected: 两条命令都无输出（第一条在 Task 7 完成后即应为空；第二条在本任务完成后为空）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1528,12 +1528,12 @@ git commit -m "docs(crawler): 同步用户手册与设计文档的新入口和�
 - Consumes: Task 1-8 的全部成果
 - Produces: 验收证据（落盘路径抽查）
 
-- [ ] **Step 1: 跑全量测试**
+- [x] **Step 1: 跑全量测试**
 
 Run: `cd tools/crawler && pytest -q`
 Expected: 全部 PASS，且无 `network` 用例被误跑（`pytest.ini` 已 `-m "not network"`）
 
-- [ ] **Step 2: dry-run 检查 87761，确认只列初三**
+- [x] **Step 2: dry-run 检查 87761，确认只列初三**
 
 Run:
 ```bash
@@ -1543,7 +1543,7 @@ cd tools/crawler && python src/crawler_cli.py --site zgkao \
 ```
 Expected: `Downloaded` 计数 > 0，无 `Unresolved` 输出，退出码 0
 
-- [ ] **Step 3: 真实下载 87761 的初三，检查落盘路径**
+- [x] **Step 3: 真实下载 87761 的初三，检查落盘路径**
 
 Run:
 ```bash
@@ -1555,7 +1555,7 @@ ls /tmp/crawler-acceptance/数学/初中/first/*/
 Expected: 目录为 `first`（不是 `second`）；文件名形如 `数学-初三(上)-202607-海淀-期末-试卷.pdf`
 （学期 `(上)`、区县 `海淀`，不再出现 `--2025学年`）
 
-- [ ] **Step 4: 检查初一/初二也正确落在 first**
+- [x] **Step 4: 检查初一/初二也正确落在 first**
 
 Run:
 ```bash
@@ -1566,7 +1566,7 @@ ls /tmp/crawler-acceptance2/数学/初中/first
 ```
 Expected: 无 `second` 目录；`first` 下同时存在初一的 `数学-初一(上)-...` 与初三的 `数学-初三(上)-...`
 
-- [ ] **Step 5: 回归 89047（二模），确认行为不变且不触发询问**
+- [x] **Step 5: 回归 89047（二模），确认行为不变且不触发询问**
 
 Run:
 ```bash
@@ -1577,7 +1577,7 @@ ls /tmp/crawler-acceptance3/数学/初中/second/2026 | head
 ```
 Expected: 落在 `second`，文件名形如 `数学-初三(下)-202607-海淀-模拟二-试卷.pdf`；无交互提示、无 `Unresolved`、退出码 0
 
-- [ ] **Step 6: 回填实现结果并提交**
+- [x] **Step 6: 回填实现结果并提交**
 
 把 Step 1-5 的实测结果与各 Task 提交号写入设计文档「实现结果」小节。
 

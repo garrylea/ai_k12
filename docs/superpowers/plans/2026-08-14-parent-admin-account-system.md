@@ -26,7 +26,7 @@
 - Modify: `tools/db/schema.sql`（§1 用户与权限节）
 - Modify: `docs/K12智学系统-数据库设计文档.md`（版本号 + admins 表 + 字段说明）
 
-- [ ] **Step 1: 写迁移 SQL**
+- [x] **Step 1: 写迁移 SQL**
 
 ```sql
 -- 2026-08-14 三角色账号体系：admins 表 + parents/students is_active。
@@ -57,12 +57,12 @@ UPDATE students SET school_level = CASE
 UPDATE students SET age = 11 WHERE age IS NULL OR age = 0;
 ```
 
-- [ ] **Step 2: 在 MySQL 执行迁移**
+- [x] **Step 2: 在 MySQL 执行迁移**
 
 Run: `mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-08-14_add_admins_and_active_flags.sql && mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW TABLES LIKE 'admins'; SHOW COLUMNS FROM students LIKE 'is_active';"`
 Expected: `admins` 出现在表清单、`is_active` 列存在、无报错。
 
-- [ ] **Step 3: 同步 `tools/db/schema.sql`**
+- [x] **Step 3: 同步 `tools/db/schema.sql`**
 
 在 `parents` 表 `avatar_url` 行后加：
 
@@ -72,11 +72,11 @@ Expected: `admins` 出现在表清单、`is_active` 列存在、无报错。
 
 在 `students` 表 `school_level` 行后加同上一行。在 `students` 表定义之后（`student_settings` 之前）插入 Task 1 Step 1 的完整 `CREATE TABLE IF NOT EXISTS admins (...)` 块，并把文件头部注释「版本 v1.5」升为 v1.7（v1.6 已被 2026-08-12 占用）。
 
-- [ ] **Step 4: 同步 DB 设计文档**
+- [x] **Step 4: 同步 DB 设计文档**
 
 `docs/K12智学系统-数据库设计文档.md`：版本日志加 v1.7 条目（admins 表、parents/students.is_active）；§3.1 加 admins 表字段表（对齐 parents 节格式）；parents/students 字段表各加 `is_active` 行，含义「账号启停开关，0=停用（登录被拒，数据保留）」。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/db/migrations/2026-08-14_add_admins_and_active_flags.sql tools/db/schema.sql docs/K12智学系统-数据库设计文档.md
@@ -92,7 +92,7 @@ git commit -m "feat(db): admins 表 + parents/students is_active 迁移与文档
 - Create: `apps/server/src/database/repositories/parents.repo.ts`
 - Modify: `apps/server/src/database/repositories/index.ts`（如该文件做统一导出）
 
-- [ ] **Step 1: 写 `admins.repo.ts`**（对齐 `students.repo.ts` 风格）
+- [x] **Step 1: 写 `admins.repo.ts`**（对齐 `students.repo.ts` 风格）
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -139,7 +139,7 @@ export class AdminsRepository {
 }
 ```
 
-- [ ] **Step 2: 写 `parents.repo.ts`**
+- [x] **Step 2: 写 `parents.repo.ts`**
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -195,19 +195,19 @@ export class ParentsRepository {
 }
 ```
 
-- [ ] **Step 3: `index.ts` 追加导出**（若该文件按名字导出各 repo，加两行；否则跳过）
+- [x] **Step 3: `index.ts` 追加导出**（若该文件按名字导出各 repo，加两行；否则跳过）
 
 ```ts
 export { AdminsRepository } from './admins.repo.js';
 export { ParentsRepository } from './parents.repo.js';
 ```
 
-- [ ] **Step 4: 验证编译**
+- [x] **Step 4: 验证编译**
 
 Run: `cd apps/server && npm run build`
 Expected: tsc 无错误。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/admins.repo.ts apps/server/src/database/repositories/parents.repo.ts apps/server/src/database/repositories/index.ts
@@ -221,11 +221,11 @@ git commit -m "feat(server): AdminsRepository + ParentsRepository"
 **Files:**
 - Modify: `apps/server/src/database/repositories/students.repo.ts`
 
-- [ ] **Step 1: 扩展 `StudentRow`/`Student` 类型**
+- [x] **Step 1: 扩展 `StudentRow`/`Student` 类型**
 
 `StudentRow` 加 `is_active: number;`；`Student` 加 `isActive: boolean;`；`mapRow` 加 `isActive: row.is_active === 1,`。现有 `SELECT *` 会自动带出该列，无需改 SQL。
 
-- [ ] **Step 2: 追加三个方法**（加在 `create` 之后）
+- [x] **Step 2: 追加三个方法**（加在 `create` 之后）
 
 ```ts
   /** 家长控制台列表：自己名下、未软删的学生，按创建时间倒序。 */
@@ -260,12 +260,12 @@ git commit -m "feat(server): AdminsRepository + ParentsRepository"
   }
 ```
 
-- [ ] **Step 3: 验证编译与既有测试**
+- [x] **Step 3: 验证编译与既有测试**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: tsc 无错误；172+ 既有测试全绿（students.repo 无专属测试文件，无回归面）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/students.repo.ts
@@ -280,7 +280,7 @@ git commit -m "feat(server): students repo 加 is_active/findByParentId/updatePa
 - Modify: `apps/server/src/common/guards/jwt-auth.guard.ts:7-13`
 - Modify: `apps/server/src/common/middleware/auth.middleware.ts:22-27`
 
-- [ ] **Step 1: 改 `JwtUser`**（`familyId` 变可选，role 加 `'admin'`）
+- [x] **Step 1: 改 `JwtUser`**（`familyId` 变可选，role 加 `'admin'`）
 
 ```ts
 export interface JwtUser {
@@ -292,14 +292,14 @@ export interface JwtUser {
 }
 ```
 
-- [ ] **Step 2: 改 `AuthMiddleware`**（`familyId: payload.familyId` 类型天然兼容可选，无需改逻辑；仅确认编译通过。若 tsc 报 `familyId` 必填相关错误，把赋值行改成条件赋值：`...(payload.familyId !== undefined ? { familyId: payload.familyId } : {}),`）
+- [x] **Step 2: 改 `AuthMiddleware`**（`familyId: payload.familyId` 类型天然兼容可选，无需改逻辑；仅确认编译通过。若 tsc 报 `familyId` 必填相关错误，把赋值行改成条件赋值：`...(payload.familyId !== undefined ? { familyId: payload.familyId } : {}),`）
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
 Run: `cd apps/server && npm run build`
 Expected: tsc 无错误（唯一引用方是 auth.service.ts 的学生 payload，本就传 familyId）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/common/guards/jwt-auth.guard.ts apps/server/src/common/middleware/auth.middleware.ts
@@ -315,7 +315,7 @@ git commit -m "feat(server): JwtUser 扩展 admin 角色，familyId 改可选"
 - Modify: `apps/server/src/modules/auth/auth.service.ts`
 - Modify: `apps/server/src/modules/auth/auth.module.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -398,12 +398,12 @@ const HASH = bcrypt.hashSync('pw', 4);
 ```
 并把上面三个 fixture 的 `passwordHash: '$2a$10$hash'` 换成 `HASH`（登录密码均为 `'pw'`）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/auth.service.test.ts`
 Expected: FAIL（构造函数签名不匹配 / register 未定义等）。
 
-- [ ] **Step 3: 重写 `auth.service.ts`**
+- [x] **Step 3: 重写 `auth.service.ts`**
 
 ```ts
 import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
@@ -511,7 +511,7 @@ export class AuthService {
 
 （旧的学生 `register` 方法整体删除。）
 
-- [ ] **Step 4: 更新 `auth.module.ts` providers**
+- [x] **Step 4: 更新 `auth.module.ts` providers**
 
 ```ts
 import { AdminsRepository } from '../../database/repositories/admins.repo.js';
@@ -520,12 +520,12 @@ import { ParentsRepository } from '../../database/repositories/parents.repo.js';
   providers: [AuthService, StudentsRepository, AdminsRepository, ParentsRepository],
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/auth/auth.service.test.ts`
 Expected: 7 PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/auth/
@@ -540,7 +540,7 @@ git commit -m "feat(server): 统一三角色登录 + 家长注册（service 层�
 - Modify: `apps/server/src/modules/auth/auth.controller.ts`
 - Create: `apps/server/src/common/interceptors/throttle.interceptor.ts`
 
-- [ ] **Step 1: 写限流拦截器**
+- [x] **Step 1: 写限流拦截器**
 
 ```ts
 import { Injectable, NestInterceptor, ExecutionContext, CallHandler, HttpException, HttpStatus } from '@nestjs/common';
@@ -581,7 +581,7 @@ export class ThrottleInterceptor implements NestInterceptor {
 }
 ```
 
-- [ ] **Step 2: 重写 `auth.controller.ts`**（学生注册端点下线，家长注册上线，登录加限流）
+- [x] **Step 2: 重写 `auth.controller.ts`**（学生注册端点下线，家长注册上线，登录加限流）
 
 ```ts
 import { Controller, Post, Body, UseInterceptors } from '@nestjs/common';
@@ -620,12 +620,12 @@ export class AuthController {
 }
 ```
 
-- [ ] **Step 3: 验证全量测试 + 编译**
+- [x] **Step 3: 验证全量测试 + 编译**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: tsc 无错误、全测试绿（旧 register 若被任何测试引用，改测试引用新签名——测试错改测试，不改实现）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/modules/auth/auth.controller.ts apps/server/src/common/interceptors/throttle.interceptor.ts
@@ -640,7 +640,7 @@ git commit -m "feat(server): 登录限流 + 家长注册端点（学生注册下
 - Test: `apps/server/src/common/guards/roles.guard.test.ts`（新建）
 - Modify: `apps/server/src/modules/practice/practice.controller.ts`、`modules/ai/ai.controller.ts`、`modules/conversations/conversations.controller.ts`、`modules/progress/progress.controller.ts`
 
-- [ ] **Step 1: 写 RolesGuard 失败测试**
+- [x] **Step 1: 写 RolesGuard 失败测试**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -689,12 +689,12 @@ describe('RolesGuard', () => {
 
 （并在文件顶部 import `UnauthorizedException`。）
 
-- [ ] **Step 2: 跑测试**
+- [x] **Step 2: 跑测试**
 
 Run: `cd apps/server && npx vitest run src/common/guards/roles.guard.test.ts`
 Expected: 改 guard 前 FAIL（return false 而非 throw）；改后 3 PASS。
 
-- [ ] **Step 3: 四个学生控制器接线**
+- [x] **Step 3: 四个学生控制器接线**
 
 对 `practice.controller.ts`、`ai.controller.ts`、`conversations.controller.ts`、`progress.controller.ts` 各做同样修改——把类装饰器行
 
@@ -718,12 +718,12 @@ import { Roles } from '../../common/decorators/roles.js';
 
 （各文件 import 相对路径以现状为准：progress/conversations 在 `modules/<x>/` 下，同层级即 `../../common/...`。）
 
-- [ ] **Step 4: 验证全量**
+- [x] **Step 4: 验证全量**
 
 Run: `cd apps/server && npm run build && npm test`
 Expected: tsc 无错误、全测试绿（若既有 e2e/集成测试用非 student token 打这些端点，改测试 token 的 role 为 student——测试错改测试）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/common/guards/ apps/server/src/modules/
@@ -741,7 +741,7 @@ git commit -m "feat(server): 学生接口全部套 RolesGuard(student)，防家�
 - Create: `apps/server/src/modules/parent/parent.service.test.ts`
 - Modify: `apps/server/src/app.module.ts`（注册 ParentModule）
 
-- [ ] **Step 1: 写失败测试 `parent.service.test.ts`**
+- [x] **Step 1: 写失败测试 `parent.service.test.ts`**
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -808,12 +808,12 @@ describe('ParentService 学生子账号管理', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/parent/parent.service.test.ts`
 Expected: FAIL（模块不存在）。
 
-- [ ] **Step 3: 写 `parent.service.ts`**
+- [x] **Step 3: 写 `parent.service.ts`**
 
 ```ts
 import { Injectable, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common';
@@ -888,7 +888,7 @@ export class ParentService {
 }
 ```
 
-- [ ] **Step 4: 写 `parent.controller.ts` 与 `parent.module.ts`**
+- [x] **Step 4: 写 `parent.controller.ts` 与 `parent.module.ts`**
 
 ```ts
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards, Request } from '@nestjs/common';
@@ -969,12 +969,12 @@ export class ParentModule {}
 
 在 `app.module.ts` 的 imports 数组加 `ParentModule,`（import 行加 `import { ParentModule } from './modules/parent/parent.module.js';`）。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/parent/parent.service.test.ts && npm run build && npm test`
 Expected: 6 PASS；tsc 无错误；全量绿。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/parent/ apps/server/src/app.module.ts
@@ -989,7 +989,7 @@ git commit -m "feat(server): ParentModule 学生子账号管理（建/列表/重
 - Create: `apps/server/src/scripts/seed-admin.ts`
 - Modify: `apps/server/.env.example`（加 ADMIN_INITIAL_* 与 DB_* 说明）
 
-- [ ] **Step 1: 写脚本**（风格对齐 `backfill-error-question-n.ts`：dotenv + mysql2 直连）
+- [x] **Step 1: 写脚本**（风格对齐 `backfill-error-question-n.ts`：dotenv + mysql2 直连）
 
 ```ts
 /**
@@ -1062,7 +1062,7 @@ main().catch((err) => {
 });
 ```
 
-- [ ] **Step 2: `.env.example` 追加**
+- [x] **Step 2: `.env.example` 追加**
 
 ```
 # Admin seed (scripts/seed-admin.ts)
@@ -1079,12 +1079,12 @@ DB_NAME=ai_k12
 
 （DB 段若 .env.example 尚无则一并补上；本地 `apps/server/.env` 已含 DB_*，不动。）
 
-- [ ] **Step 3: 运行验证**
+- [x] **Step 3: 运行验证**
 
 Run: `cd apps/server && npx tsx src/scripts/seed-admin.ts && npx tsx src/scripts/seed-admin.ts`
 Expected: 第一次输出两行「已创建」；第二次输出两行「已存在，跳过」（幂等）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/scripts/seed-admin.ts apps/server/.env.example
@@ -1098,7 +1098,7 @@ git commit -m "feat(server): seed-admin 脚本（管理员 + 占位家长 id=1�
 **Files:**
 - Modify: `apps/web/src/services/api.ts`（`// --- Auth ---` 节）
 
-- [ ] **Step 1: 替换 Auth 节**
+- [x] **Step 1: 替换 Auth 节**
 
 ```ts
 // --- Auth ---
@@ -1178,12 +1178,12 @@ export function setStudentStatus(id: number, isActive: boolean): Promise<null> {
 }
 ```
 
-- [ ] **Step 2: 验证编译**
+- [x] **Step 2: 验证编译**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 无错误（旧 `login` 调用点 LoginPage 的 `result.user.username` 改为可选后，LoginPage 在 Task 11 同步调整；本步若 LoginPage 报错属预期，直接进入 Task 11）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -1198,7 +1198,7 @@ git commit -m "feat(web): 家长注册/学生子账号管理 API"
 - Modify: `apps/web/src/pages/auth/LoginPage.tsx`
 - Create: `apps/web/src/pages/auth/RegisterPage.tsx`
 
-- [ ] **Step 1: 改 `LoginPage.tsx` 的 `handleLogin`**（role 以后端为准；旧代码只认 parent/student）
+- [x] **Step 1: 改 `LoginPage.tsx` 的 `handleLogin`**（role 以后端为准；旧代码只认 parent/student）
 
 ```tsx
   const handleLogin = async () => {
@@ -1243,7 +1243,7 @@ git commit -m "feat(web): 家长注册/学生子账号管理 API"
 
 （文件头补 `import { Link } from 'react-router-dom';`，具体位置贴紧现有按钮下方、卡片内边距容器里。）
 
-- [ ] **Step 2: 写 `RegisterPage.tsx`**（家长蓝白风格，`data-theme="parent"`；结构对齐 LoginPage 的卡片式）
+- [x] **Step 2: 写 `RegisterPage.tsx`**（家长蓝白风格，`data-theme="parent"`；结构对齐 LoginPage 的卡片式）
 
 ```tsx
 import { useState } from 'react';
@@ -1354,12 +1354,12 @@ export default function RegisterPage() {
 
 （若 `Input`/`Button` 的 props 与 `@/components/base` 现有签名不完全一致——如 `loading` 不存在——以 base 组件实际 API 为准调整，保持视觉规范即可。）
 
-- [ ] **Step 3: 验证编译**
+- [x] **Step 3: 验证编译**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 无错误。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/pages/auth/
@@ -1375,7 +1375,7 @@ git commit -m "feat(web): 登录三角色路由 + 家长注册页"
 - Create: `apps/web/src/components/layout/AdminLayout.tsx`
 - Modify: `apps/web/src/routes/index.tsx`
 
-- [ ] **Step 1: 写 `RequireRole.tsx`**
+- [x] **Step 1: 写 `RequireRole.tsx`**
 
 ```tsx
 import { Navigate } from 'react-router-dom';
@@ -1397,7 +1397,7 @@ export default function RequireRole({
 }
 ```
 
-- [ ] **Step 2: 写 `AdminLayout.tsx`**（极简占位，复用 LogoutButton）
+- [x] **Step 2: 写 `AdminLayout.tsx`**（极简占位，复用 LogoutButton）
 
 ```tsx
 import { Outlet } from 'react-router-dom';
@@ -1426,7 +1426,7 @@ export default function AdminLayout() {
 }
 ```
 
-- [ ] **Step 3: 改 `routes/index.tsx`**
+- [x] **Step 3: 改 `routes/index.tsx`**
 
 1. 根路由 `'/'` 的 element 改为按 role 分流的小组件（文件内定义）：
 
@@ -1477,12 +1477,12 @@ const RoleRedirect = () => {
 
 5. 文件头补 import：`RegisterPage`、`ParentStudentsPage`（Task 13 创建，可先注释一行并在 Task 13 解开；更简单的顺序是先做 Task 13 再回来——**本计划按 Task 13 先创建页面文件再执行本步**调整执行顺序：若 Task 13 未完成，先跳到 Task 13 再回来）。
 
-- [ ] **Step 4: 验证编译 + lint**
+- [x] **Step 4: 验证编译 + lint**
 
 Run: `cd apps/web && npx tsc -b && npm run lint`
 Expected: 无错误（0 error；既有 warning 不增加）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/routes/ apps/web/src/components/layout/AdminLayout.tsx
@@ -1498,7 +1498,7 @@ git commit -m "feat(web): RequireRole 路由守卫 + /admin 占位 + 三角色�
 
 （在 Task 12 Step 3 之前完成，否则 routes/index.tsx 引用会编译失败。）
 
-- [ ] **Step 1: 写页面**（交互对齐参考 `k12-AI-learning/src/pages/parent/Accounts.tsx`，用本项目 base 组件与 parent 主题 CSS 变量；Toast 用 base 组件）
+- [x] **Step 1: 写页面**（交互对齐参考 `k12-AI-learning/src/pages/parent/Accounts.tsx`，用本项目 base 组件与 parent 主题 CSS 变量；Toast 用 base 组件）
 
 ```tsx
 import { useEffect, useState } from 'react';
@@ -1727,12 +1727,12 @@ export default function ParentStudentsPage() {
 
 （`Button`/`Input`/`Modal`/`Toast` 的实际 props 以 `@/components/base` 现有导出为准——先看一眼 `src/components/base/index.ts` 再落笔，签名不一致就按实际调整，视觉规范不变：无 emoji、线性图标、parent 主题变量。）
 
-- [ ] **Step 2: 验证编译 + lint**
+- [x] **Step 2: 验证编译 + lint**
 
 Run: `cd apps/web && npx tsc -b && npm run lint`
 Expected: 无错误。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/pages/parent/ParentStudentsPage.tsx
@@ -1760,12 +1760,12 @@ git commit -m "feat(web): 家长端学生账号管理页（建/列表/重置密�
 9. 11 次连续错误登录 -> 第 11 次返回 1008「请求过于频繁」。
 10. 未登录直接访问 `/parent/students` -> 重定向 `/login`。
 
-- [ ] **Step 2: 全量回归**
+- [x] **Step 2: 全量回归**
 
 Run: `cd apps/server && npm run build && npm test && cd ../web && npm run build && npm run lint`
 Expected: 全绿。
 
-- [ ] **Step 3: Commit（如有修复）**
+- [x] **Step 3: Commit（如有修复）**
 
 ```bash
 git add -A && git commit -m "fix: 端到端验收修复"
@@ -1780,14 +1780,14 @@ git add -A && git commit -m "fix: 端到端验收修复"
 - Modify: `docs/API接口与数据流设计文档.md`
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: openapi.yaml**
+- [x] **Step 1: openapi.yaml**
 
 - `POST /api/auth/login`：requestBody `username` 语义改为「管理员用户名/家长手机号/学生用户名」；响应 `user.role` 枚举 `admin|parent|student`，`user` 加 `phone?`/`parentId?`，去掉 `username` 必填（家长无 username）。
 - `POST /api/auth/register`：改为家长注册 `{ phone, password, name? }`，响应同 login（role 恒为 parent）；删除原学生注册描述。
 - 新增 `paths`：`/api/parent/students`（GET 列表 / POST 新建，`MyStudentItem` schema）与 `/api/parent/students/{id}/reset-password`、`/api/parent/students/{id}/status`（PATCH）。
 - 错误码表（若有该节）补 1005（无权操作该学生）、1008（请求过于频繁）。
 
-- [ ] **Step 2: API 设计文档**
+- [x] **Step 2: API 设计文档**
 
 - §4 端点清单同步上述变更；§6 加「家长创建学生子账号数据流」小节（家长 token -> ParentGuard -> 归属校验 -> students + student_settings 写入）；版本日志加 v1.9（v1.8 已被 08-12 占用）。
 - 按 CLAUDE.md「API 文档同步规则」跑一次端点列表 grep 对照，确认两文档路径一致：
@@ -1795,11 +1795,11 @@ git add -A && git commit -m "fix: 端到端验收修复"
 Run: `grep -oE "'?/api/[a-z/-]+[a-z]" docs/api/openapi.yaml | sort -u > /tmp/openapi-paths.txt && grep -cE "/api/" docs/API接口与数据流设计文档.md`
 Expected: 人工比对两清单无遗漏。
 
-- [ ] **Step 3: CLAUDE.md 追加实现记录 note**
+- [x] **Step 3: CLAUDE.md 追加实现记录 note**
 
 在「2026-08-14 修正」note 之后追加一段「2026-08-14 新增（三角色账号体系）」：admins 表 + is_active、统一三角色登录（admins->parents->students）、家长注册（注册即登录）、RolesGuard 接线（practice/ai/conversations/progress 四控制器）、ParentModule（/api/parent/students 建列表重置停用）、ThrottleInterceptor 登录限流（10 次/分/IP）、seed-admin.ts、前端 RequireRole + /admin 占位 + RegisterPage + ParentStudentsPage、局限（无刷新 token/管理员改密 UI 待管理员台子项目）。分支 `feat/parent-admin-account-system`。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/api/openapi.yaml docs/API接口与数据流设计文档.md CLAUDE.md

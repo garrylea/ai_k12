@@ -27,7 +27,7 @@
 - Modify: `tools/db/schema.sql`（questions 表折回）
 - Modify: `docs/K12智学系统-数据库设计文档.md`（questions 字段表）
 
-- [ ] **Step 1: 写迁移并折回 schema.sql**
+- [x] **Step 1: 写迁移并折回 schema.sql**
 
 `tools/db/migrations/2026-09-09_add_questions_answer_verified.sql`：
 
@@ -48,7 +48,7 @@ ALTER TABLE questions ADD COLUMN answer_verified TINYINT(1) NOT NULL DEFAULT 0;
 
 同时检查 `tools/data-refinery/src/db_loader.py:1113` 的 `INSERT INTO questions (...)` 列清单——若显式列出全部列则不需动（新列走 DEFAULT 0）；若用 `SELECT *` 语义则同步补列。执行时 grep 确认。
 
-- [ ] **Step 2: 应用 + 验证**
+- [x] **Step 2: 应用 + 验证**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-09_add_questions_answer_verified.sql
@@ -57,7 +57,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW COLUMNS FROM questions LIKE 'answer_ver
 
 Expected: 一行，Default `0`。
 
-- [ ] **Step 3: 更新 DB 设计文档 + Commit**
+- [x] **Step 3: 更新 DB 设计文档 + Commit**
 
 `docs/K12智学系统-数据库设计文档.md` questions 字段表加 `answer_verified` 行（说明同上）。
 
@@ -74,7 +74,7 @@ git commit -m "feat(db): questions.answer_verified 人工核验标记列"
 - Create: `tools/data-refinery/src/answer_doc.py`
 - Test: `tools/data-refinery/tests/test_answer_doc.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 """answer_doc：答案文档 Markdown 解析。"""
@@ -165,7 +165,7 @@ Expected: FAIL（模块不存在）。
 
 **注意**：tests/ 的 import 风格以既有测试为准——先看 `tests/test_answer_merger.py` 头部（`from answer_merger import ...` 还是 `from src.answer_merger import ...`），本计划按前者写，若为后者则统一调整 import 行。
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 ```python
 """答案文档解析：把「人工+AI 产出」的试卷答案 Markdown 解析成结构化数据。
@@ -283,7 +283,7 @@ def _validate(doc: AnswerDoc) -> None:
 Run: `cd tools/data-refinery && pytest tests/test_answer_doc.py -q`
 Expected: PASS（全部用例）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_doc.py tools/data-refinery/tests/test_answer_doc.py
@@ -298,7 +298,7 @@ git commit -m "feat(data-refinery): answer_doc 答案文档 Markdown 解析"
 - Create: `tools/data-refinery/src/answer_importer.py`
 - Test: `tools/data-refinery/tests/test_answer_importer.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 """answer_importer：题目匹配 + diff 构建 + 报告格式化（纯函数，不连库）。"""
@@ -397,7 +397,7 @@ class TestReport:
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer.py -q`
 Expected: FAIL。
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 ```python
 """answer_importer：题目匹配 + diff 构建 + 报告格式化（纯函数层）。
@@ -539,7 +539,7 @@ def format_report(
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer.py -q`
 Expected: PASS。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_importer.py tools/data-refinery/tests/test_answer_importer.py
@@ -554,7 +554,7 @@ git commit -m "feat(data-refinery): answer_importer 匹配/diff/报告纯函数�
 - Create: `tools/data-refinery/src/answer_importer_cli.py`
 - Test: `tools/data-refinery/tests/test_answer_importer_cli.py`
 
-- [ ] **Step 1: 写失败测试**（argparse 与回写 SQL 生成可单测；真库操作走 Task 6 集成验证）
+- [x] **Step 1: 写失败测试**（argparse 与回写 SQL 生成可单测；真库操作走 Task 6 集成验证）
 
 ```python
 """answer_importer_cli：参数解析与回写 SQL 语句构造。"""
@@ -598,7 +598,7 @@ class TestApplySql:
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer_cli.py -q`
 Expected: FAIL。
 
-- [ ] **Step 2: 实现 CLI**
+- [x] **Step 2: 实现 CLI**
 
 ```python
 """answer_importer_cli：答案文档回写题库（人工+AI 补全的入库通道）。
@@ -747,7 +747,7 @@ if __name__ == "__main__":
 Run: `cd tools/data-refinery && pytest tests/test_answer_importer_cli.py -q`
 Expected: PASS。
 
-- [ ] **Step 3: 全量回归 + Commit**
+- [x] **Step 3: 全量回归 + Commit**
 
 Run: `cd tools/data-refinery && pytest -q`
 Expected: 全绿（既有用例不回归）。
@@ -765,7 +765,7 @@ git commit -m "feat(data-refinery): answer_importer_cli 连库编排（定位/�
 - Modify: `docs/data-refinery-使用手册.md`（新增 answer_importer 使用章节）
 - Modify: `docs/data-refinery-管线总结与后续.md`（后续清单记录）
 
-- [ ] **Step 1: 使用手册加章节**（增量 Edit，对齐文件内既有 CLI 章节格式；**勿整体重写**——memory 约定）：
+- [x] **Step 1: 使用手册加章节**（增量 Edit，对齐文件内既有 CLI 章节格式；**勿整体重写**——memory 约定）：
 
 ```markdown
 ## answer_importer：答案文档回写题库
@@ -790,9 +790,9 @@ git commit -m "feat(data-refinery): answer_importer_cli 连库编排（定位/�
 回写语义：answer 无条件覆盖、explanation 不抹旧、type 按标注改、`answer_verified=1`（人工核验标记）。幂等：同文档重跑报告「无变化」不写。**首次导入先小批验证**：拿一份试卷的 2-3 题跑 dry-run 确认匹配无误再放量；全量导入前先 `mysqldump ... questions` 做快照。
 ```
 
-- [ ] **Step 2: 管线总结文档**：后续待办区加记录「answer_importer 已建成（2026-09-09），存量 188 道空答案/451 道无解析待按卷补全」。
+- [x] **Step 2: 管线总结文档**：后续待办区加记录「answer_importer 已建成（2026-09-09），存量 188 道空答案/451 道无解析待按卷补全」。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/data-refinery-使用手册.md docs/data-refinery-管线总结与后续.md
@@ -803,7 +803,7 @@ git commit -m "docs(data-refinery): answer_importer 使用手册与管线总结�
 
 ### Task 6: 真库端到端验证（小批先行）
 
-- [ ] **Step 1: 列候选试卷**
+- [x] **Step 1: 列候选试卷**
 
 ```bash
 cd tools/data-refinery && python src/answer_importer_cli.py --list-papers 模拟
@@ -811,7 +811,7 @@ cd tools/data-refinery && python src/answer_importer_cli.py --list-papers 模拟
 
 Expected: 输出 `#id  题数  标题` 列表。
 
-- [ ] **Step 2: 造一份 2-3 题的小文档 dry-run**
+- [x] **Step 2: 造一份 2-3 题的小文档 dry-run**
 
 选一个 paper_id，取其 2-3 道题的题号：
 
@@ -827,7 +827,7 @@ python src/answer_importer_cli.py --doc /tmp/test_answers.md --paper-id <id>
 
 Expected: 报告「将更新 N 题」+ 旧→新 diff + `#999 未找到` 提示；**未写入**（无 --apply）。
 
-- [ ] **Step 3: --apply 写入并验证幂等**
+- [x] **Step 3: --apply 写入并验证幂等**
 
 ```bash
 python src/answer_importer_cli.py --doc /tmp/test_answers.md --paper-id <id> --apply   # 输 yes
@@ -837,7 +837,7 @@ python src/answer_importer_cli.py --doc /tmp/test_answers.md --paper-id <id>    
 
 Expected: answer/explanation 已更新、`answer_verified=1`、type 按标注改写；重跑报告「无变化——幂等重跑」且不发 UPDATE。
 
-- [ ] **Step 4: Commit（如有零星修正）**
+- [x] **Step 4: Commit（如有零星修正）**
 
 ```bash
 git add -A tools/data-refinery && git commit -m "fix(data-refinery): answer_importer 真库联调修正"

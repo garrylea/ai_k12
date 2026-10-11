@@ -80,7 +80,7 @@
 - Modify: `tools/db/schema.sql:309-335`（`chinese_passages` 建表语句）
 - Modify: `apps/server/src/database/repositories/chinese-passages.repo.ts:4-22`（`ChinesePassageRow`）
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 创建 `tools/db/migrations/2026-09-17_chinese_sentence_meanings.sql`：
 
@@ -116,12 +116,12 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 ```
 
-- [ ] **Step 2: 手工 apply 到本机库**
+- [x] **Step 2: 手工 apply 到本机库**
 
 Run: `mysql -u ai_k12 -p ai_k12 < tools/db/migrations/2026-09-17_chinese_sentence_meanings.sql`
 Expected: 无报错；再跑一次同样无报错（幂等）。
 
-- [ ] **Step 3: 同步 schema.sql**
+- [x] **Step 3: 同步 schema.sql**
 
 在 `tools/db/schema.sql` 的 `chinese_passages` 建表语句里，`sentences` 之后加一行：
 
@@ -129,7 +129,7 @@ Expected: 无报错；再跑一次同样无报错（幂等）。
   sentence_meanings JSON DEFAULT NULL,   -- [{"meaning":"…","emotion":"…"}]，与 sentences 下标对齐
 ```
 
-- [ ] **Step 4: 类型定义同步**
+- [x] **Step 4: 类型定义同步**
 
 `chinese-passages.repo.ts` 的 `ChinesePassageRow` 里，`sentences: unknown;` 之后加：
 
@@ -138,7 +138,7 @@ Expected: 无报错；再跑一次同样无报错（幂等）。
   sentence_meanings: unknown;
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/db/migrations/2026-09-17_chinese_sentence_meanings.sql tools/db/schema.sql apps/server/src/database/repositories/chinese-passages.repo.ts
@@ -156,7 +156,7 @@ git commit -m "feat(db): chinese_passages 加 sentence_meanings 列（古诗含�
 - Consumes: Task 1 的 `sentence_meanings` 列与 `ChinesePassageRow.sentence_meanings`
 - Produces: `toSentenceMeanings()`、`findVerifiedForMeaning()`、`findRandomVerifiedForMeaning()`、`findVerifiedByIdsForMeaning()`
 
-- [ ] **Step 1: 加解析函数**
+- [x] **Step 1: 加解析函数**
 
 在 `chinese-passages.repo.ts` 的 `toSentences` 之后加：
 
@@ -184,7 +184,7 @@ export function toSentenceMeanings(raw: unknown): Array<PassageSentenceMeaning |
 }
 ```
 
-- [ ] **Step 2: SELECT_COLS 加列**
+- [x] **Step 2: SELECT_COLS 加列**
 
 把 `SELECT_COLS`（`:93-96`）的 `dp.key_terms, dp.sentences, dp.full_translation,` 改成：
 
@@ -195,7 +195,7 @@ const SELECT_COLS = `dp.id, dp.work_title, dp.author, dp.dynasty, dp.body,
   dp.memorize_required, dp.is_active`;
 ```
 
-- [ ] **Step 3: 加 gate 与三个抽题方法**
+- [x] **Step 3: 加 gate 与三个抽题方法**
 
 在 `findVerifiedByIdsForInterpretation` 之后追加：
 
@@ -263,12 +263,12 @@ const SELECT_COLS = `dp.id, dp.work_title, dp.author, dp.dynasty, dp.body,
   }
 ```
 
-- [ ] **Step 4: 类型检查**
+- [x] **Step 4: 类型检查**
 
 Run: `cd apps/server && npx tsc --noEmit -p tsconfig.json`
 Expected: PASS（无输出）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/chinese-passages.repo.ts
@@ -284,7 +284,7 @@ git commit -m "feat(repo): 含义专项抽题池与 sentence_meanings 解析"
 
 **Interfaces:** 后续 Task 5/6/10 全部依赖这里的类型名。
 
-- [ ] **Step 1: 写 DTO**
+- [x] **Step 1: 写 DTO**
 
 ```ts
 /**
@@ -372,7 +372,7 @@ export interface MeaningJudgeResult {
 }
 ```
 
-- [ ] **Step 2: 类型检查并提交**
+- [x] **Step 2: 类型检查并提交**
 
 Run: `cd apps/server && npx tsc --noEmit -p tsconfig.json` → PASS
 
@@ -399,7 +399,7 @@ git commit -m "feat(dto): 古诗含义专项出入参类型"
 **Interfaces:**
 - Produces: `ChineseMeaningJudgeCapability.generate(request: ChineseMeaningJudgeRequest): Promise<ChineseMeaningJudgeResponse>`
 
-- [ ] **Step 1: types.ts 两个 union 加场景**
+- [x] **Step 1: types.ts 两个 union 加场景**
 
 ```ts
 // types.ts:15 —— Scene
@@ -409,7 +409,7 @@ export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'varia
 export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge';
 ```
 
-- [ ] **Step 2: types.ts 加 Request/Response**
+- [x] **Step 2: types.ts 加 Request/Response**
 
 在 `InterpretationJudgeResponse`（`:665-670`）之后追加：
 
@@ -461,7 +461,7 @@ export interface ChineseMeaningJudgeResponse {
 }
 ```
 
-- [ ] **Step 3: model-routes.yaml 加路由**
+- [x] **Step 3: model-routes.yaml 加路由**
 
 在 `english_word_judge:` 块（`:164-167`）之后、`default:` 之前插入：
 
@@ -475,7 +475,7 @@ export interface ChineseMeaningJudgeResponse {
       fallback: deepseek-flash
 ```
 
-- [ ] **Step 4: retry.yaml 加超时**
+- [x] **Step 4: retry.yaml 加超时**
 
 在 `interpretation_judge: 30000`（`:17`）之后加一行：
 
@@ -483,7 +483,7 @@ export interface ChineseMeaningJudgeResponse {
   chinese_meaning_judge: 30000
 ```
 
-- [ ] **Step 5: 写 prompt 模板**
+- [x] **Step 5: 写 prompt 模板**
 
 创建 `apps/server/src/ai-core/prompts/meaning/judge.md`：
 
@@ -579,7 +579,7 @@ description: "语文古诗文「含义」- 逐句判定深层含义、作者情�
 请按上述口径判定，并只输出规定的 JSON。
 ```
 
-- [ ] **Step 6: prompt-builder 加分支**
+- [x] **Step 6: prompt-builder 加分支**
 
 在 `prompt-builder.ts:96-98` 的 `interpretation_judge` 分支之后插入：
 
@@ -589,7 +589,7 @@ description: "语文古诗文「含义」- 逐句判定深层含义、作者情�
     }
 ```
 
-- [ ] **Step 7: 写 capability**
+- [x] **Step 7: 写 capability**
 
 创建 `apps/server/src/ai-core/capabilities/chinese-meaning-judge.capability.ts`：
 
@@ -712,7 +712,7 @@ export class ChineseMeaningJudgeCapability {
 }
 ```
 
-- [ ] **Step 8: seed 脚本**
+- [x] **Step 8: seed 脚本**
 
 创建 `apps/server/src/scripts/seed-chinese-meaning-judge-route.ts`（镜像 `seed-interpretation-judge-route.ts`，
 只改 `SCENE` 常量与注释；`llm_routes` 存的是 `model_key` 字符串，不是模型 id）：
@@ -795,7 +795,7 @@ main().catch((e) => { console.error(`[${SCENE}] 失败:`, e); process.exit(1); }
 Run: `cd apps/server && npx tsx src/scripts/seed-chinese-meaning-judge-route.ts`
 Expected: 输出 `路由 chinese_meaning_judge/* 已插入 -> local / deepseek-flash`
 
-- [ ] **Step 9: SCENES 白名单**
+- [x] **Step 9: SCENES 白名单**
 
 `admin-models.service.ts:13` 的数组末尾 `... 'english_word_judge',` 之后加 `'chinese_meaning_judge'`：
 
@@ -803,7 +803,7 @@ Expected: 输出 `路由 chinese_meaning_judge/* 已插入 -> local / deepseek-f
 export const SCENES = ['tutoring', 'grading', 'judgment', 'hint', 'explanation', 'variation', 'structuring', 'title', 'dictation_feedback', 'interpretation_judge', 'english_word_judge', 'chinese_meaning_judge', 'analysis', 'safety'] as const;
 ```
 
-- [ ] **Step 10: 写 capability 单测**
+- [x] **Step 10: 写 capability 单测**
 
 创建 `apps/server/src/ai-core/capabilities/chinese-meaning-judge.capability.test.ts`，
 照 `interpretation-judge.capability.test.ts` 的结构写三条：
@@ -867,12 +867,12 @@ describe('ChineseMeaningJudgeCapability', () => {
 });
 ```
 
-- [ ] **Step 11: 跑测试**
+- [x] **Step 11: 跑测试**
 
 Run: `cd apps/server && npx vitest run src/ai-core/capabilities/chinese-meaning-judge.capability.test.ts`
 Expected: PASS（3 tests）
 
-- [ ] **Step 12: 全量回归 + 提交**
+- [x] **Step 12: 全量回归 + 提交**
 
 Run: `cd apps/server && npx vitest run` → 全部 PASS（含既有 `SCENES` 漂移守卫用例）
 
@@ -925,7 +925,7 @@ git commit -m "feat(ai-core): 新增 chinese_meaning_judge 判题场景（local 
 5. `passages.slice(0, count)`
 6. 白名单：响应里**只允许** `passageId` / `workTitle` / `semester` / `sentences[].{index,text,terms,answerable}`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/modules/training/meaning.service.test.ts`：
 
@@ -1101,12 +1101,12 @@ describe('MeaningService.judgeMeaning', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/training/meaning.service.test.ts`
 Expected: FAIL —— `Cannot find module './meaning.service.js'`
 
-- [ ] **Step 3: 实现 service**
+- [x] **Step 3: 实现 service**
 
 创建 `apps/server/src/modules/training/meaning.service.ts`：
 
@@ -1299,12 +1299,12 @@ export class MeaningService {
 
 > 注意 `MeaningMethod` 若在上面未被直接引用，从 import 里删掉（避免 lint 报未使用）。
 
-- [ ] **Step 4: 跑测试通过**
+- [x] **Step 4: 跑测试通过**
 
 Run: `cd apps/server && npx vitest run src/modules/training/meaning.service.test.ts`
 Expected: PASS（9 tests）
 
-- [ ] **Step 5: lint + 提交**
+- [x] **Step 5: lint + 提交**
 
 Run: `cd apps/server && npx eslint src/modules/training/meaning.service.ts src/modules/training/meaning.service.test.ts` → 无 error
 
@@ -1334,7 +1334,7 @@ git commit -m "feat(meaning): 含义专项 service（纯 LLM 判题，无归一�
 | `POST start` | `count` 必须是 1–3 整数；`semester` 只能是 `上册`/`下册`/`null`；`passageIds` 必须是正整数数组或 `null` | `{passages:[MeaningPassageItem]}` |
 | `POST judge` | `passageId` 正整数；`sentenceIndex` 非负整数；`terms` 非数组时降级 `[]`，其中 `term` 非字符串丢弃、`answer` 非字符串降级 `''`；`meaning`/`emotion` 非字符串降级 `''` | `MeaningJudgeResult` |
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/modules/training/meaning.controller.test.ts`：
 
@@ -1405,12 +1405,12 @@ describe('MeaningController.judge', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/server && npx vitest run src/modules/training/meaning.controller.test.ts`
 Expected: FAIL —— `Cannot find module './meaning.controller.js'`
 
-- [ ] **Step 3: 实现 controller**
+- [x] **Step 3: 实现 controller**
 
 ```ts
 import { BadRequestException, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
@@ -1503,7 +1503,7 @@ export class MeaningController {
 }
 ```
 
-- [ ] **Step 4: 注册进模块**
+- [x] **Step 4: 注册进模块**
 
 `training.module.ts` 三处修改：
 
@@ -1520,12 +1520,12 @@ controllers: [TrainingController, VocabularyController, MeaningController],
 providers: [..., EnglishWordJudgeCapability, MeaningService, ChineseMeaningJudgeCapability],
 ```
 
-- [ ] **Step 5: 跑测试 + 全量回归**
+- [x] **Step 5: 跑测试 + 全量回归**
 
 Run: `cd apps/server && npx vitest run src/modules/training/meaning.controller.test.ts` → PASS（6 tests）
 Run: `cd apps/server && npx vitest run` → 全部 PASS
 
-- [ ] **Step 6: 构建 + 提交**
+- [x] **Step 6: 构建 + 提交**
 
 Run: `cd apps/server && npm run build` → PASS（`copy-assets.mjs` 会把 `prompts/meaning/judge.md` 复制进 dist）
 
@@ -1542,7 +1542,7 @@ git commit -m "feat(meaning): 含义专项三个端点与模块注册"
 - Modify: `docs/api/openapi.yaml`
 - Modify: `docs/API接口与数据流设计文档.md`
 
-- [ ] **Step 1: openapi.yaml 加三个路径**
+- [x] **Step 1: openapi.yaml 加三个路径**
 
 在语文专项相关端点（`interpretation/*`）附近追加：
 
@@ -1696,12 +1696,12 @@ git commit -m "feat(meaning): 含义专项三个端点与模块注册"
         '404': { description: 篇目不存在 }
 ```
 
-- [ ] **Step 2: API 设计文档同步**
+- [x] **Step 2: API 设计文档同步**
 
 在 `docs/API接口与数据流设计文档.md` §4 端点清单补三行（与解释专项并列），
 在 §6 数据流补一段说明：**逐句判题、纯 LLM、无程序短路、`undetermined` 语义**。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add docs/api/openapi.yaml docs/API接口与数据流设计文档.md
@@ -1716,7 +1716,7 @@ git commit -m "docs(api): 同步古诗含义专项三个端点契约"
 - Modify: `apps/web/src/routes/index.tsx:236-253` 之后
 - Modify: `apps/web/src/pages/student/training/chinese/ChineseSpecialPage.tsx:23-86`
 
-- [ ] **Step 1: 加两个 import 与两条路由**
+- [x] **Step 1: 加两个 import 与两条路由**
 
 `routes/index.tsx` 顶部加：
 
@@ -1748,7 +1748,7 @@ import MeaningRunPage from '@/pages/student/training/chinese/MeaningRunPage';
   },
 ```
 
-- [ ] **Step 2: 专项页加第三张卡**
+- [x] **Step 2: 专项页加第三张卡**
 
 `ChineseSpecialPage.tsx`：在文件顶部加一个线性 SVG 图标（**无 emoji**）：
 
@@ -1787,11 +1787,11 @@ const MeaningIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
           </button>
 ```
 
-- [ ] **Step 3: 类型检查**
+- [x] **Step 3: 类型检查**
 
 Run: `cd apps/web && npx tsc -b --noEmit` → 会因为两个新页面不存在而报错，Task 9/10 解决
 
-- [ ] **Step 4: 提交（与 Task 9 一起提，避免中间态编译不过）**
+- [x] **Step 4: 提交（与 Task 9 一起提，避免中间态编译不过）**
 
 留到 Task 9 提交。
 
@@ -1816,7 +1816,7 @@ count: 1 | 2 | 3（默认 1）
 selectedIds: number[]（勾选上限 = count，超出时禁勾并提示）
 ```
 
-- [ ] **Step 1: api.ts 加类型与三个函数**
+- [x] **Step 1: api.ts 加类型与三个函数**
 
 在 `apps/web/src/services/api.ts` 的 `judgeInterpretation`（`:1138-1148`）之后追加：
 
@@ -1902,7 +1902,7 @@ export function judgeMeaning(payload: {
 }
 ```
 
-- [ ] **Step 2: 写配置页**
+- [x] **Step 2: 写配置页**
 
 创建 `apps/web/src/pages/student/training/chinese/MeaningConfigPage.tsx`
 （结构与 `InterpretationConfigPage.tsx` 一致，只换端点、文案与 sessionStorage key）：
@@ -2127,7 +2127,7 @@ export default function MeaningConfigPage() {
 }
 ```
 
-- [ ] **Step 3: 类型检查 + 提交**
+- [x] **Step 3: 类型检查 + 提交**
 
 Run: `cd apps/web && npx tsc -b --noEmit`（会因 MeaningRunPage 缺失报错，Task 10 补）
 Run: `cd apps/web && npm run lint` → 无 error
@@ -2189,7 +2189,7 @@ type StackItem =
 - `PassageOverviewBar` 渲染**全部**句子（含 `answerable:false`），当前句高亮、已答置灰，可折叠。
 - `ResultStack` 渲染顺序 = 数组顺序，新项 `unshift` → **最新在最前**。
 
-- [ ] **Step 1: 写 ResultStack 的失败测试（倒序钉子）**
+- [x] **Step 1: 写 ResultStack 的失败测试（倒序钉子）**
 
 创建 `apps/web/src/components/business/meaning/ResultStack.test.tsx`：
 
@@ -2238,12 +2238,12 @@ describe('ResultStack', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/components/business/meaning/ResultStack.test.tsx`
 Expected: FAIL —— `Cannot find module './ResultStack'`
 
-- [ ] **Step 3: 实现 types.ts / ResultItem.tsx / ResultStack.tsx**
+- [x] **Step 3: 实现 types.ts / ResultItem.tsx / ResultStack.tsx**
 
 创建 `apps/web/src/components/business/meaning/types.ts`：
 
@@ -2441,11 +2441,11 @@ export default function ResultStack({ items, onRetry }: Props) {
 }
 ```
 
-- [ ] **Step 4: 跑 ResultStack 测试通过**
+- [x] **Step 4: 跑 ResultStack 测试通过**
 
 Run: `cd apps/web && npx vitest run src/components/business/meaning/ResultStack.test.tsx` → PASS（2 tests）
 
-- [ ] **Step 5: 写 AnswerBlock 的失败测试**
+- [x] **Step 5: 写 AnswerBlock 的失败测试**
 
 创建 `apps/web/src/components/business/meaning/AnswerBlock.test.tsx`：
 
@@ -2475,7 +2475,7 @@ describe('AnswerBlock', () => {
 });
 ```
 
-- [ ] **Step 6: 跑测试确认失败 → 实现 AnswerBlock → 通过**
+- [x] **Step 6: 跑测试确认失败 → 实现 AnswerBlock → 通过**
 
 创建 `apps/web/src/components/business/meaning/AnswerBlock.tsx`：
 
@@ -2572,7 +2572,7 @@ export function AnswerBlock({ sentence, onSubmit }: Props) {
 
 Run: `cd apps/web && npx vitest run src/components/business/meaning/AnswerBlock.test.tsx` → PASS（2 tests）
 
-- [ ] **Step 7: 实现 PassageOverviewBar**
+- [x] **Step 7: 实现 PassageOverviewBar**
 
 创建 `apps/web/src/components/business/meaning/PassageOverviewBar.tsx`：
 
@@ -2631,7 +2631,7 @@ export default function PassageOverviewBar({ sentences, currentIndex, judgedInde
 }
 ```
 
-- [ ] **Step 8: 实现 MeaningRunPage**
+- [x] **Step 8: 实现 MeaningRunPage**
 
 创建 `apps/web/src/pages/student/training/chinese/MeaningRunPage.tsx`：
 
@@ -2845,12 +2845,12 @@ export default function MeaningRunPage() {
 }
 ```
 
-- [ ] **Step 9: 全量前端回归**
+- [x] **Step 9: 全量前端回归**
 
 Run: `cd apps/web && npm test` → 全部 PASS（含新增 4 条渲染测试）
 Run: `cd apps/web && npm run build` → PASS
 
-- [ ] **Step 10: 提交**
+- [x] **Step 10: 提交**
 
 ```bash
 git add apps/web/src/components/business/meaning apps/web/src/pages/student/training/chinese/MeaningRunPage.tsx
@@ -2903,7 +2903,7 @@ python src/meaning_cli.py --apply  --input inputs/meaning/诗词含义.md   # �
    `verified` / `is_active` / `memorize_required` 在语句里根本不出现）
 7. 写 `-review.md`：每篇句数、填了几句、跳过了哪几句
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `tools/data-refinery/tests/test_meaning_cli.py`：
 
@@ -2968,12 +2968,12 @@ def test_build_meanings_array_对不上的原文进 skipped():
     assert len(skipped) == 2
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_meaning_cli.py -v`
 Expected: FAIL —— `ModuleNotFoundError: src.meaning_cli`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 创建 `tools/data-refinery/src/meaning_cli.py`，至少包含：
 
@@ -3003,11 +3003,11 @@ cur.execute("UPDATE chinese_passages SET sentence_meanings = %s WHERE id = %s",
 
 > 配置读取沿用 `from config import RefineryConfig`；本管线**不调 LLM**。
 
-- [ ] **Step 4: 跑测试通过**
+- [x] **Step 4: 跑测试通过**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_meaning_cli.py -v` → PASS（4 tests 起步；后补防丢回归用例后为 15 tests）
 
-- [ ] **Step 5: 全量回归 + 提交**
+- [x] **Step 5: 全量回归 + 提交**
 
 Run: `cd tools/data-refinery && python -m pytest` → 全部 PASS
 
@@ -3022,14 +3022,14 @@ git commit -m "feat(refinery): 古诗含义内容管线 meaning_cli（--export /
 
 **Files:** 无（验证；发现问题就地修）
 
-- [ ] **Step 1: 灌一篇诗的含义数据**
+- [x] **Step 1: 灌一篇诗的含义数据**
 
 手工在库里挑一首已 `verified=1` 的诗（如《酬乐天扬州初逢席上见赠》），
 `--export` 出模板 → 填 2–3 句 → `--apply` 入库。
 Run: `mysql -u ai_k12 -p ai_k12 -e "SELECT work_title, JSON_LENGTH(sentence_meanings) FROM chinese_passages WHERE sentence_meanings IS NOT NULL;"`
 Expected: 能看到该篇与条数。
 
-- [ ] **Step 2: 起后端并跑一遍接口**
+- [x] **Step 2: 起后端并跑一遍接口**
 
 Run: `cd apps/server && npm run build && node dist/main.js`
 
@@ -3042,7 +3042,7 @@ curl -s -X POST localhost:3000/api/training/meaning/start \
   -d '{"semester":null,"passageIds":null,"count":1}'
 ```
 
-- [ ] **Step 3: 前端跑一遍完整流程**
+- [x] **Step 3: 前端跑一遍完整流程**
 
 Run: `cd apps/web && npm run dev`
 

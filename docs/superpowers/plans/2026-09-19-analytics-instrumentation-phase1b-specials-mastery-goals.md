@@ -137,7 +137,7 @@
 - 写端点要「按 metric upsert」，所以需要**唯一键 `(student_id, metric)`**。MySQL 的唯一索引允许多个 `NULL`，故回填后剩下的 `NULL` 行（被停用的重复行）不会互相冲突。
 - **`period` 不是列**：它由 `metric` 决定（`daily_study_minutes`/`daily_words` → `daily`；`weekly_passages`/`weekly_clear_errors` → `weekly`），由代码派生。`goals.period` 列仍要填，见 Task 6。
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 创建 `tools/db/migrations/2026-09-22_special_practice_logs_and_goals.sql`，内容**逐字**如下（顶部注释块是本仓迁移的既有惯例：写清「做什么 / 为什么 / 怎么回滚」）：
 
@@ -215,7 +215,7 @@ SET @ddl := IF(@idx_exists = 0,
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 ```
 
-- [ ] **Step 2: 手工 apply 迁移**
+- [x] **Step 2: 手工 apply 迁移**
 
 仓库**没有迁移运行器**，在仓库根手工执行：
 
@@ -228,7 +228,7 @@ Expected: **无任何输出**（成功即静默）。若报 `ERROR 1064` 说明 
 
 > ⚠️ 本机 mysql 客户端是 Homebrew 9.5，**非交互 `-e` 下不认 `\G`**——要看建表语句请用 `--vertical`。
 
-- [ ] **Step 3: 验证表与键（5 项断言，逐条跑）**
+- [x] **Step 3: 验证表与键（5 项断言，逐条跑）**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 -N -e "
@@ -252,7 +252,7 @@ Expected: `columns=13`、`fk=1`、`datetim3=1`、`triggers=0`、`goals_metric=1`
 
 > 2026-09-22 执行订正：原写 `columns=14` 是数错——Step 1 的 DDL 就是 13 列（`id`/`student_id`/`module`/`subject_id`/`ref_type`/`ref_id`/`ref_key`/`sentence_index`/`verdict`/`is_correct`/`error_counted`/`session_uid`/`created_at`），实测库中亦为 13。**以 DDL 为准，不是补一列。**
 
-- [ ] **Step 4: 幂等复跑**
+- [x] **Step 4: 幂等复跑**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-22_special_practice_logs_and_goals.sql && echo "RE-APPLY OK（幂等）"
@@ -260,7 +260,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-22_special_practic
 
 Expected: `RE-APPLY OK（幂等）`，且 Step 3 的六条数字不变。
 
-- [ ] **Step 5: 同步 `tools/db/schema.sql`**
+- [x] **Step 5: 同步 `tools/db/schema.sql`**
 
 两处改动：
 
@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS goals (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 6: 验证迁移与 `schema.sql` 的建表语句逐字一致**
+- [x] **Step 6: 验证迁移与 `schema.sql` 的建表语句逐字一致**
 
 这是本仓的硬约定（无迁移运行器，两处必须同源）：
 
@@ -316,7 +316,7 @@ diff <(sed -n '/^CREATE TABLE IF NOT EXISTS goals/,/^) ENGINE=InnoDB/p' tools/db
 
 Expected: 两行 `IDENTICAL` / 都在。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add tools/db/migrations/2026-09-22_special_practice_logs_and_goals.sql tools/db/schema.sql
@@ -348,7 +348,7 @@ git commit -m "feat(db): special_practice_logs 建表 + goals 加 metric 与唯�
 - **`units` = `COUNT(*)`**：因为每个专项的**一行 = 一个作答单位**（默写=一篇、解释/含义=一句、背单词=一道题）。所以三张专项共用同一个计数表达式，不需要按 module 分别写。
 - **`answered` = `SUM(is_correct IS NOT NULL)`**：与家长端既有正确率口径一致（**排除** `unanswered`/`undetermined` 这类「没有明确对错」的行）。`rate` 在 service 层用 `toRate(answered, correct)` 算，**注意该函数签名是 `(answered, correct)`**，别把顺序写反。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/database/repositories/special-practice-logs.repo.test.ts`：
 
@@ -461,7 +461,7 @@ describe('SpecialPracticeLogsRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/special-practice-logs.repo.test.ts
@@ -469,7 +469,7 @@ cd apps/server && npx vitest run src/database/repositories/special-practice-logs
 
 Expected: FAIL —— `Failed to resolve import "./special-practice-logs.repo.js"`（文件还不存在）。
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/server/src/database/repositories/special-practice-logs.repo.ts`：
 
@@ -638,7 +638,7 @@ export class SpecialPracticeLogsRepository {
 }
 ```
 
-- [ ] **Step 4: 加 barrel 导出**
+- [x] **Step 4: 加 barrel 导出**
 
 在 `apps/server/src/database/repositories/index.ts` **末尾**追加两行（不要重排该文件）：
 
@@ -651,7 +651,7 @@ export type {
 } from './special-practice-logs.repo.js';
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/special-practice-logs.repo.test.ts && npx tsc --noEmit
@@ -659,7 +659,7 @@ cd apps/server && npx vitest run src/database/repositories/special-practice-logs
 
 Expected: `6 passed`，`tsc` 无输出（通过）。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/special-practice-logs.repo.ts \
@@ -690,7 +690,7 @@ git commit -m "feat(analytics): SpecialPracticeLogsRepository —— 专项日�
 - 塌缩**不能只看 `correct`**：按现有实现，`unanswered` 的项也是 `correct: false`（见 `training.service.ts` 的 slot 构造），所以必须**结合 `method`**。
 - 优先级（顺序就是语义，别调换）：**确定错 → 没能判定 → 没作答 → 全对**。理由：「LLM 判错」比「LLM 失败」更确定；「LLM 失败」比「孩子没写」更值得记为待查；只有全部为真才是 `correct`。
 
-- [ ] **Step 1: 写失败测试（表驱动）**
+- [x] **Step 1: 写失败测试（表驱动）**
 
 创建 `apps/server/src/common/utils/special-practice.util.test.ts`：
 
@@ -738,7 +738,7 @@ describe('collapseUnitVerdict', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/common/utils/special-practice.util.test.ts
@@ -746,7 +746,7 @@ cd apps/server && npx vitest run src/common/utils/special-practice.util.test.ts
 
 Expected: FAIL —— `Failed to resolve import "./special-practice.util.js"`。
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/server/src/common/utils/special-practice.util.ts`：
 
@@ -792,7 +792,7 @@ export function collapseUnitVerdict(items: ReadonlyArray<UnitItem>): SpecialPrac
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/common/utils/special-practice.util.test.ts
@@ -800,7 +800,7 @@ cd apps/server && npx vitest run src/common/utils/special-practice.util.test.ts
 
 Expected: `9 passed`（1 个 isCorrectOf + 7 个 it.each + 1 个纯函数用例）。
 
-- [ ] **Step 5: 接线 —— 三个写入点**
+- [x] **Step 5: 接线 —— 三个写入点**
 
 三个写入点的**共同写法**（照抄这个骨架，只换 payload）：
 
@@ -892,7 +892,7 @@ try {
 - 语文三专项没有 `off_target` 这个概念，也不复用英语的 `progressDelta`（它只吃英语的五档枚举）。这里的口径是：**只有 `incorrect` 计错**，`unanswered` / `undetermined` 都不计——精神与 `progressDelta` 一致（只算「确定错」），但**实现必须是本文件这套**，不要去 import 英语那个函数。
 - `sessionUid` 本期恒 `null`：1B 不做「把这次学习会话与做的专项串起来」，留列给后续（`study_sessions.session_uid` 已在 1A 落地）。
 
-- [ ] **Step 6: 加一条写入点测试（钉住「失败不阻断判题」+ payload 形状）**
+- [x] **Step 6: 加一条写入点测试（钉住「失败不阻断判题」+ payload 形状）**
 
 在 `apps/server/src/modules/training/training.service.test.ts`（已存在）追加一条；若 `meaning.service.ts` 有自己的测试文件则在其中追加一条同构用例：
 
@@ -917,7 +917,7 @@ try {
 
 > 该用例需要 `mkDeps()` 里多一个 `specialLogsRepo: { insert: vi.fn() }`，并在 `mkService` 里作为新构造参数传入——**先读该文件现有的 mkDeps/mkService 再改**，别照抄本段示例的名字。
 
-- [ ] **Step 7: 跑该模块测试 + 全量后端测试 + 类型检查**
+- [x] **Step 7: 跑该模块测试 + 全量后端测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training src/common/utils/special-practice.util.test.ts && npx tsc --noEmit
@@ -926,7 +926,7 @@ cd apps/server && npm test 2>&1 | tail -5
 
 Expected: 定向用例全绿；`tsc` 无输出；全量为 **`103 passed` 文件、`1268 + 新增` 条全绿**（1A 结束时是 1268）。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/server/src/common/utils/special-practice.util.ts \
@@ -953,7 +953,7 @@ git commit -m "feat(analytics): 语文三专项判题点写 special_practice_log
 2. **`errorCounted` 必须复用 `progressDelta(outcome.verdict)` 的 `wrongDelta`**，不另写一套判断（spec §4.4 明文要求）。注意要用**原始 verdict**（`'wrong'`）去调它，不是映射后的。
 3. **义项下标本期不入库**（见 Step 2 的说明）。
 
-- [ ] **Step 1: 追加测试**
+- [x] **Step 1: 追加测试**
 
 在 `apps/server/src/modules/training/vocabulary.service.test.ts` 追加：
 
@@ -1000,7 +1000,7 @@ git commit -m "feat(analytics): 语文三专项判题点写 special_practice_log
 
 > 该文件若无 `specialLogsRepo` 字段，需在 `mkDeps()` 里补一个 `{ insert: vi.fn() }` 并作为新构造参数传给 `mkService` —— **先读文件再改**。
 
-- [ ] **Step 2: 实现接线**
+- [x] **Step 2: 实现接线**
 
 在 `vocabulary.service.ts` 里：
 1. 构造函数注入 `private readonly specialLogsRepo: SpecialPracticeLogsRepository`；
@@ -1036,7 +1036,7 @@ git commit -m "feat(analytics): 语文三专项判题点写 special_practice_log
     }
 ```
 
-- [ ] **Step 3: 跑测试 + 类型检查**
+- [x] **Step 3: 跑测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/vocabulary.service.test.ts && npx tsc --noEmit
@@ -1044,7 +1044,7 @@ cd apps/server && npx vitest run src/modules/training/vocabulary.service.test.ts
 
 Expected: 全绿（含新增 3 条），`tsc` 无输出。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add apps/server/src/modules/training/vocabulary.service.ts \
@@ -1081,7 +1081,7 @@ git commit -m "feat(analytics): 英语背单词判题点写 special_practice_log
 3. `questionId == null` **跳过**。
 4. 失败**只 warn，不阻断判题**。
 
-- [ ] **Step 1: 写仓储测试**
+- [x] **Step 1: 写仓储测试**
 
 创建 `apps/server/src/database/repositories/student-knowledge-mastery.repo.test.ts`：
 
@@ -1159,7 +1159,7 @@ describe('StudentKnowledgeMasteryRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/student-knowledge-mastery.repo.test.ts
@@ -1167,7 +1167,7 @@ cd apps/server && npx vitest run src/database/repositories/student-knowledge-mas
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 写仓储实现**
+- [x] **Step 3: 写仓储实现**
 
 创建 `apps/server/src/database/repositories/student-knowledge-mastery.repo.ts`：
 
@@ -1276,7 +1276,7 @@ export class StudentKnowledgeMasteryRepository {
 }
 ```
 
-- [ ] **Step 4: 给 `questions.repo.ts` 加按题取 KP**
+- [x] **Step 4: 给 `questions.repo.ts` 加按题取 KP**
 
 在 `apps/server/src/database/repositories/questions.repo.ts` 追加（紧邻既有的 `bindKnowledgePoint`）：
 
@@ -1295,7 +1295,7 @@ export class StudentKnowledgeMasteryRepository {
 
 同时把 `StudentKnowledgeMasteryRepository` 加进 `repositories/index.ts` 的 barrel（与 Task 2 同款两行）。
 
-- [ ] **Step 5: 写 `MasteryService` 的测试**
+- [x] **Step 5: 写 `MasteryService` 的测试**
 
 创建 `apps/server/src/modules/practice/mastery.service.test.ts`：
 
@@ -1369,7 +1369,7 @@ describe('MasteryService.recordFromJudge', () => {
 });
 ```
 
-- [ ] **Step 6: 写 `MasteryService`**
+- [x] **Step 6: 写 `MasteryService`**
 
 创建 `apps/server/src/modules/practice/mastery.service.ts`：
 
@@ -1425,7 +1425,7 @@ export class MasteryService {
 }
 ```
 
-- [ ] **Step 7: 挂到判题出口 + 模块接线**
+- [x] **Step 7: 挂到判题出口 + 模块接线**
 
 **(a)** `judge-core.service.ts`：构造函数注入 `private readonly masteryService: MasteryService`；在 `judgeQuestion` 的**统一返回点之前**（现约 `:240` 的 `return { questionId, isCorrect, ... }` 之前）插入：
 
@@ -1441,7 +1441,7 @@ export class MasteryService {
 
 **(b)** `practice.module.ts`：`providers` 加 `StudentKnowledgeMasteryRepository` 与 `MasteryService`；`exports` 加 `MasteryService`（供将来别的模块复用，与 `ExplanationCacheService` 同款做法）。**注意**：`StudentKnowledgeMasteryRepository` 只在本模块 provide 一次（重复 provide 会得到两份实例）。
 
-- [ ] **Step 8: 补 `judge-core.service.test.ts` 的接线用例**
+- [x] **Step 8: 补 `judge-core.service.test.ts` 的接线用例**
 
 在既有测试文件里追加（`mkDeps()` 需补 `masteryService: { recordFromJudge: vi.fn() }`）：
 
@@ -1481,7 +1481,7 @@ export class MasteryService {
 
 > 若该文件既有的用例用 `mkService` 而非 `mkSvc`，按实际名字来。
 
-- [ ] **Step 9: 跑全部相关测试 + 类型检查 + 全量**
+- [x] **Step 9: 跑全部相关测试 + 类型检查 + 全量**
 
 ```bash
 cd apps/server && npx vitest run src/modules/practice src/database/repositories/student-knowledge-mastery.repo.test.ts && npx tsc --noEmit
@@ -1490,7 +1490,7 @@ cd apps/server && npm test 2>&1 | tail -5
 
 Expected: 全绿；`tsc` 无输出；全量文件数 `103 passed`，用例数为 `1268 + Task 2/3/4/5 新增`。
 
-- [ ] **Step 10: 提交**
+- [x] **Step 10: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/student-knowledge-mastery.repo.ts \
@@ -1524,7 +1524,7 @@ git commit -m "feat(analytics): 掌握度回写 —— MasteryService 挂判题�
 - **懒初始化必须用 `INSERT IGNORE`**，不能用 `ON DUPLICATE KEY UPDATE`：后者会把家长**已经设过**的目标值覆盖回默认值（唯一键是 `(student_id, metric)`，冲突时会走 UPDATE）。`INSERT IGNORE` 遇到已存在就跳过——正是「只补缺失的默认目标」的语义。
 - **显式保存（PUT）才用 `ON DUPLICATE KEY UPDATE`**，并把 `is_active` 置回 1（家长重新启用一个曾被停用的目标）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `apps/server/src/database/repositories/goals.repo.test.ts`：
 
@@ -1600,7 +1600,7 @@ describe('GoalsRepository', () => {
 >
 > 💡 教训（值得记进 CLAUDE.md 的工程约定）：**「只断言自己传给仓储的 payload」的单测证明不了落库语义**。凡是「参数顺序 ↔ 列清单」这类映射，要么按列名配对断言，要么用真库跑一次（事务 + ROLLBACK）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/goals.repo.test.ts
@@ -1608,7 +1608,7 @@ cd apps/server && npx vitest run src/database/repositories/goals.repo.test.ts
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 创建 `apps/server/src/database/repositories/goals.repo.ts`：
 
@@ -1716,7 +1716,7 @@ export class GoalsRepository {
 }
 ```
 
-- [ ] **Step 4: barrel + 跑测试**
+- [x] **Step 4: barrel + 跑测试**
 
 `repositories/index.ts` 追加（与 Task 2 同款）：
 
@@ -1731,7 +1731,7 @@ cd apps/server && npx vitest run src/database/repositories/goals.repo.test.ts &&
 
 Expected: `4 passed`，`tsc` 无输出。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/goals.repo.ts \
@@ -1762,7 +1762,7 @@ git commit -m "feat(analytics): GoalsRepository —— 懒初始化用 INSERT IG
 
 **`rate` 口径**（两个 service 都涉及）：`toRate(answered, correct)` —— **注意签名是 `(answered, correct)`**，别把参数顺序写反；`answered = 0` 返回 `null`，**不是 0**。
 
-- [ ] **Step 1: 写 `SpecialsService` 的失败测试**
+- [x] **Step 1: 写 `SpecialsService` 的失败测试**
 
 创建 `apps/server/src/modules/parent-insights/specials.service.test.ts`：
 
@@ -1837,7 +1837,7 @@ describe('SpecialsService', () => {
 });
 ```
 
-- [ ] **Step 2: 写 `SpecialsService` 实现**
+- [x] **Step 2: 写 `SpecialsService` 实现**
 
 创建 `apps/server/src/modules/parent-insights/specials.service.ts`：
 
@@ -1904,7 +1904,7 @@ export class SpecialsService {
 
 > `resolveRange` 返回的字段名以 `window.util.ts` 实际为准（1A 的实现里是 `from` / `toExclusive`）；若字段名不同，用实际的那两个。**先读该文件**。
 
-- [ ] **Step 3: 写 `ParentMasteryService` 的失败测试**
+- [x] **Step 3: 写 `ParentMasteryService` 的失败测试**
 
 创建 `apps/server/src/modules/parent-insights/parent-mastery.service.test.ts`：
 
@@ -1954,7 +1954,7 @@ describe('ParentMasteryService', () => {
 });
 ```
 
-- [ ] **Step 4: 写 `ParentMasteryService` 实现**
+- [x] **Step 4: 写 `ParentMasteryService` 实现**
 
 创建 `apps/server/src/modules/parent-insights/parent-mastery.service.ts`：
 
@@ -1994,7 +1994,7 @@ export class ParentMasteryService {
 }
 ```
 
-- [ ] **Step 5: 加 DTO（两处，Task 8 的 controller 要用）**
+- [x] **Step 5: 加 DTO（两处，Task 8 的 controller 要用）**
 
 在 `apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts` **末尾**追加：
 
@@ -2044,7 +2044,7 @@ export interface MasterySummary {
 }
 ```
 
-- [ ] **Step 6: 跑两个 service 的测试 + 类型检查**
+- [x] **Step 6: 跑两个 service 的测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights/specials.service.test.ts src/modules/parent-insights/parent-mastery.service.test.ts && npx tsc --noEmit
@@ -2054,7 +2054,7 @@ Expected: `SpecialsService` 5 条 + `ParentMasteryService` 3 条全绿；`tsc` �
 
 > 若 `tsc` 报 `resolveRange` 的返回字段名不对，去读 `window.util.ts` 用它的真实字段名——**不要**为迁就本 plan 去改 `window.util.ts`（1A 已交付并有测试）。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights/specials.service.ts \
@@ -2120,7 +2120,7 @@ COUNT(DISTINCT ref_id) WHERE module IN ('chinese_dictation','chinese_interpretat
 
 ---
 
-- [ ] **Step 1: 两个仓储新查询 + 一处失实注释订正**
+- [x] **Step 1: 两个仓储新查询 + 一处失实注释订正**
 
 **(a)** `special-practice-logs.repo.ts` 追加（紧邻 `countDistinctCorrectWords` 之后，写法与它同款）：
 
@@ -2181,7 +2181,7 @@ COUNT(DISTINCT ref_id) WHERE module IN ('chinese_dictation','chinese_interpretat
   /** 最弱的 N 个知识点（家长端 `/mastery`）；`limit` 由 controller 校验为 1..50（越界 400，不钳制）。 */
 ```
 
-- [ ] **Step 2: 加仓储测试（两条）**
+- [x] **Step 2: 加仓储测试（两条）**
 
 `special-practice-logs.repo.test.ts` 追加：
 
@@ -2242,7 +2242,7 @@ describe('MainErrorBooksRepository.countClearedBetween', () => {
 });
 ```
 
-- [ ] **Step 3: 加 DTO（两组类型）**
+- [x] **Step 3: 加 DTO（两组类型）**
 
 `dto/parent-insights.dto.ts` 末尾追加：
 
@@ -2270,7 +2270,7 @@ export interface GoalAttainmentSummary {
 
 > 需在文件顶部 `import type { GoalMetric, GoalPeriod } from '../../../database/repositories/goals.repo.js';`（DTO 文件目前没有任何 import，这是第一处——加在文件最上方）。
 
-- [ ] **Step 4: 写 `GoalsService`（含两个窗口常量）**
+- [x] **Step 4: 写 `GoalsService`（含两个窗口常量）**
 
 ```ts
 import { Injectable } from '@nestjs/common';
@@ -2399,7 +2399,7 @@ export class GoalsService {
 }
 ```
 
-- [ ] **Step 5: 写 `GoalsService` 测试（表驱动 + 边界）**
+- [x] **Step 5: 写 `GoalsService` 测试（表驱动 + 边界）**
 
 创建 `apps/server/src/modules/parent-insights/goals.service.test.ts`：
 
@@ -2522,7 +2522,7 @@ describe('GoalsService.upsertTarget', () => {
 });
 ```
 
-- [ ] **Step 6: 控制器加 4 个端点**
+- [x] **Step 6: 控制器加 4 个端点**
 
 `parent-insights.controller.ts` 四处改动：
 
@@ -2648,7 +2648,7 @@ const UpsertGoalSchema = z.object({ target: z.number().int().min(1).max(9999) })
 > - 不存在「路径撞车」问题——那边只有文档、没有路由；
 > - Task 12 的「标废弃」要按**「文档里记了但从未实现，且无 `metric` 维度」**来写，不要写成「保留仅供存量调用方兼容」（没有调用方，那是假话）。
 
-- [ ] **Step 7: 模块接线**
+- [x] **Step 7: 模块接线**
 
 `parent-insights.module.ts`：providers 追加 6 项（**服务在前、仓储在后**，与现有顺序风格一致）：
 
@@ -2669,7 +2669,7 @@ const UpsertGoalSchema = z.object({ target: z.number().int().min(1).max(9999) })
 
 > `MainErrorBooksRepository` 目前**不在**本模块 providers 里（Task 8 是第一个需要它的家长端点），`ParentAnalyticsRepository` 已在。漏加任何一项 → Nest **启动直接失败**（"can't resolve dependencies"），Step 9 的启动冒烟会立刻抓到。
 
-- [ ] **Step 8: 控制器测试（改 `makeController` + 4 条用例）**
+- [x] **Step 8: 控制器测试（改 `makeController` + 4 条用例）**
 
 **(a)** `makeController` 必须补 3 个位置参数（放在 `studyTime` 之后），否则所有既有用例都会因构造参数错位而炸：
 
@@ -2753,7 +2753,7 @@ describe('ParentInsightsController 专项 / 掌握度 / 目标端点', () => {
 });
 ```
 
-- [ ] **Step 9: 定向测试 + 全量 + 类型检查 + 启动冒烟**
+- [x] **Step 9: 定向测试 + 全量 + 类型检查 + 启动冒烟**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights src/database/repositories && npx tsc --noEmit
@@ -2780,7 +2780,7 @@ Expected: `Nest application successfully started` + 三条新路由被 mapped。
 > ③ 冒烟会**真的写库**（懒初始化 4 行 `goals`、PUT 改目标值、判题会写 `special_practice_logs` 并可能发积分）。**判题那条链最好不要端到端跑**（会给学生发分、动 `point_ledger`），家长端点那条链副作用只有 `goals`，跑完按需清理。
 > ④ 收尾：`kill <自己起的 PID>`，**别** `pkill -f 'node dist/main.js'`（用户本机可能在跑自己的服务——2026-09-22 实测当时就有一个已跑 1 小时的实例）。
 
-- [ ] **Step 10: 提交**
+- [x] **Step 10: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/special-practice-logs.repo.ts \
@@ -2813,7 +2813,7 @@ git commit -m "feat(parent): 暴露专项/掌握度/目标达成 4 个端点（G
 - 目标的 `rate` **允许 > 100**（超额），前端不要 `Math.min(100, …)`。
 - 四个模块**后端保证都在**，前端不需要判空兜底；但 `byDay` 可能是空数组。
 
-- [ ] **Step 1: 追加类型与方法**
+- [x] **Step 1: 追加类型与方法**
 
 在 `api.ts` 的家长端学情段（`getParentTodayUsage` 之后）追加，风格照抄既有的 `ParentStudyTime` / `getParentStudyTime`（`URLSearchParams` 只在有值时 set、`fetchApi<T>`、不手工包 `{code,message,data}`）：
 
@@ -2936,7 +2936,7 @@ export function putParentGoalTarget(
 }
 ```
 
-- [ ] **Step 2: 验证**
+- [x] **Step 2: 验证**
 
 ```bash
 cd apps/web && npx tsc -b && npm run lint
@@ -2944,7 +2944,7 @@ cd apps/web && npx tsc -b && npm run lint
 
 Expected: 均无输出/无错。本步骤**不加测试**（纯类型 + 薄封装，行为由 Task 10/11 的页面测试覆盖）。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -2982,7 +2982,7 @@ git commit -m "feat(parent): api 层加专项/掌握度/目标达成 4 个方法
 | 行级 `saved` | 保存成功 | 用响应 item 原地替换该行（`target`/`achieved`/`rate` 一起更新），无 toast 也可（页面自带反馈：数字变了） |
 | 行级 `save-failed` | 保存失败 | 该行下方红字错误（`data-testid={`goal-error-${metric}`}`），**保留家长输入不回滚**，按钮恢复可点 |
 
-- [ ] **Step 1: 写实现**
+- [x] **Step 1: 写实现**
 
 ```tsx
 import { useEffect, useState } from 'react';
@@ -3074,7 +3074,7 @@ export default function ParentGoalsPage() {
 
 > `Card` / `Skeleton` 从 `@/components/base` 具名导入（与 `ParentReportPage` 同款）。`Input` 若基座组件的 props 不便，直接写 `<input type="number" className="…">` 也可以——**不要**为了复用而改基座组件。
 
-- [ ] **Step 2: 渲染分支（骨架）**
+- [x] **Step 2: 渲染分支（骨架）**
 
 ```tsx
   if (studentId === null) { /* goals-no-student 卡 + <Link to="/parent/students"> */ }
@@ -3095,7 +3095,7 @@ export default function ParentGoalsPage() {
   //     {saveError?.metric === item.metric && <p data-testid={`goal-error-${item.metric}`} className="text-[var(--error)]">{saveError.message}</p>}
 ```
 
-- [ ] **Step 3: 写测试（8 条，逐态一条）**
+- [x] **Step 3: 写测试（8 条，逐态一条）**
 
 新建 `ParentGoalsPage.test.tsx`，照抄 `ParentReportPage.test.tsx` 的骨架：`vi.mock('@/services/api', importOriginal)` 只 mock 本页用到的四个方法、`createMemoryRouter(routes)` + `validToken()`、`beforeEach` 里 `useParentStudentStore.setState({ studentId: 11 })`、`afterEach` 里 `cleanup()` + 复位两个 store。
 
@@ -3109,7 +3109,7 @@ export default function ParentGoalsPage() {
 7. `studentId === null` → `goals-no-student`；`err.code === 1005` → `goals-student-forbidden`。
 8. 切孩子不闪旧数据（Pin 反闪）：先 `studentId=11` 渲染出 A 的目标，再 `act(() => useParentStudentStore.setState({ studentId: 12 }))` 且让 12 的请求挂起 → 断言**看不到** A 的数字（`goals-skeleton` 出现或内容为空）。
 
-- [ ] **Step 4: 路由替换 + 路由钉子**
+- [x] **Step 4: 路由替换 + 路由钉子**
 
 ```tsx
 // routeTable.tsx 顶部
@@ -3130,7 +3130,7 @@ import ParentGoalsPage from '@/pages/parent/ParentGoalsPage';
 
 > 该文件既有 Parent 路由用例的写法是什么样，就照那个写法来（先读再改，别照抄本段的 cast 写法）。
 
-- [ ] **Step 5: 跑测试 + 类型检查 + lint**
+- [x] **Step 5: 跑测试 + 类型检查 + lint**
 
 ```bash
 cd apps/web && npx vitest run src/pages/parent/ParentGoalsPage.test.tsx src/routes/routeTable.test.tsx && npx tsc -b && npm run lint
@@ -3139,7 +3139,7 @@ cd apps/web && npx vitest run src/pages/parent/ParentGoalsPage.test.tsx src/rout
 Expected: 全绿；`tsc`/lint 无输出。
 ⚠️ 既有红：`routeTable.test.tsx` 里「主轨侧边导航不含辅轨入口」那条断言 `[data-theme="student-day"]`，`StudentLayout` 按挂钟 18:00–06:00 切夜间 → **夜间跑必红**，与本任务无关（清单文档 §3.3 第 6 项）。**不要**顺手去改它。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/pages/parent/ParentGoalsPage.tsx \
@@ -3184,7 +3184,7 @@ git commit -m "feat(parent): /parent/goals 从占位变真页（读四目标 + �
 - 空态：`items.length === 0` → 「暂无掌握度数据」（**但覆盖率句仍要显示**——否则家长分不清「没数据」与「没覆盖」）
 - 取数失败：卡内错误文案 + 「重试」（`data-testid="mastery-error"`）；**不得**影响同页其它卡（尤其 `report-weak-points`）
 
-- [ ] **Step 1: 写两个组件（含反闪写法）+ 各自的渲染测试**
+- [x] **Step 1: 写两个组件（含反闪写法）+ 各自的渲染测试**
 
 测试重点（组件级，直接 `<SpecialsPanel studentId={11} />` 渲染，**不走路由表**）：
 
@@ -3204,7 +3204,7 @@ git commit -m "feat(parent): /parent/goals 从占位变真页（读四目标 + �
 
 `afterEach(() => cleanup())` 必须写（`globals: false`，不自动 cleanup）。
 
-- [ ] **Step 2: 接到两个页面**
+- [x] **Step 2: 接到两个页面**
 
 **(a)** `ParentDashboardPage.tsx` 的 `StudentPanel` 内，`<StudyTimePanel … />` 之后：
 
@@ -3234,7 +3234,7 @@ git commit -m "feat(parent): /parent/goals 从占位变真页（读四目标 + �
 
 > 该文件已 mock 整个 `@/services/api`；`MasteryPanel` 会调 `getParentMastery`，**必须在 mock 里补上这个方法**（否则是 `undefined` → 组件抛错）。这是本任务最容易漏的一步。
 
-- [ ] **Step 3: 跑测试 + 类型检查 + lint + 构建**
+- [x] **Step 3: 跑测试 + 类型检查 + lint + 构建**
 
 ```bash
 cd apps/web && npx vitest run src/components/business/parent src/pages/parent && npx tsc -b && npm run lint && npm run build
@@ -3242,7 +3242,7 @@ cd apps/web && npx vitest run src/components/business/parent src/pages/parent &&
 
 Expected: 全绿；`tsc`/lint 无输出；`vite build` 成功。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add apps/web/src/components/business/parent/SpecialsPanel.tsx \
@@ -3268,7 +3268,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 
 **⚠️ 本任务是「同一事实写五处」，逐处核对，别只改两份 API 文档。**
 
-- [ ] **Step 1: `docs/API接口与数据流设计文档.md`**
+- [x] **Step 1: `docs/API接口与数据流设计文档.md`**
 
 **(a) §4.13 表格**（4 列：`方法 | 路径 | 说明 | 阶段`）追加 4 行，写法照抄 §4.13 既有的 `study-time` 行（单行、把校验与返回形状都写在「说明」列里）：
 
@@ -3314,7 +3314,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 | v4.3 | 2026-09-22 | **埋点 Phase 1B：专项学情 / 真掌握度 / 目标达成**。契约变更：新增 `GET /api/parent/students/{studentId}/specials`、`/mastery`、`/goals/attainment` 与 `PUT /api/parent/students/{studentId}/goals/{metric}`（§4.13 四行 + §4.24 总览，`openapi.yaml` 同步）；旧 `goals` CRUD 四条**从未实现**（文档先于代码写下、无 handler）且无 `metric` 维度，**标废弃**。数据面：`special_practice_logs` 新表（DB 文档 §3.17）、`goals` 加 `metric` 列与唯一键 `(student_id, metric)`（迁移 `2026-09-22_special_practice_logs_and_goals.sql`）。两条口径裁决（2026-09-22 用户确认）：① `weekly_passages` 的达成值 = 三个语文专项**去重篇目数**（不要用行数——解释/含义是一句一行，会把「8 句」当「8 篇」）；② 默认目标 60 分钟/20 词/8 篇/10 道。四处新增口径：专项日志一行 = 一个作答单位、`rate` 分母为 0 时恒 `null`、掌握度**与 `weakPoints` 并存不替换**、埋点写入**永不阻断判题**。顺带修 spec §4.8 的 UPSERT 算式 bug（`ON DUPLICATE KEY UPDATE` 的 SET 从左到右读到的已是更新后的列，原式把本次增量算了两遍：1 对 1 错实测 0.333，应为 0.500） | 
 ```
 
-- [ ] **Step 2: `docs/api/openapi.yaml`**
+- [x] **Step 2: `docs/api/openapi.yaml`**
 
 **(a)** 在 `/parent/students/{studentId}/study-time` 与 `/parent/students/{studentId}/today-usage` 之后、旧的 `/parent/students/{studentId}/goals:` **之前**，插 4 个 path item。逐条照抄 `study-time` 的写法：`tags: [Parent]`、`operationId` 驼峰、响应 `allOf: [CommonResponse, {type: object, properties: {data: <Schema>}}]`、成功码 `'200'`、**`studentId` 的 schema 用 `type: integer`**（新端点一律 integer；旧 goals 那几条写的是 `string`，属历史不一致，**不要跟着抄**）。
 
@@ -3326,7 +3326,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 
 **(c)** `components.schemas` 末尾（`EndSessionRequest` 之后）追加 3 个 schema：`SpecialModuleSummary`、`SpecialsSummary`、`ParentMasterySummary`、`GoalAttainmentItem`、`GoalAttainmentSummary`（PascalCase、feature-prefixed；`rate` 用 `nullable: true` + `type: number`，与 `TodayUsageSummary.limitMinutes` 同款——**不要**用 `type: [number,'null']`，本文件既有风格是 `nullable`）。
 
-- [ ] **Step 3: `docs/K12智学系统-数据库设计文档.md`**
+- [x] **Step 3: `docs/K12智学系统-数据库设计文档.md`**
 
 **(a)** 新增 `### 3.17 专项练习日志（Phase 1B，2026-09-22）`：插在 §3.16 之后、`## 4. 枚举值汇总` 之前。照 §3.16 的骨架写（`>` blockquote 三行：实施状态 / 背景 / 设计指针 → `#### special_practice_logs（…）` → 5 列表格 `列名|类型|可空|默认值|说明` → `PK/FK/Index/口径` 项目符号）。**必须写清**：只挂 `student_id` 一个外键（`ref_id` 故意不设，理由同 `student_word_progress.word_id`）、`verdict` 是跨专项统一字典（**没有 `wrong`**，英语入库前映射成 `incorrect`）、`error_counted` 必须复用 `progressDelta`。
 
@@ -3336,7 +3336,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 
 **(d)** §8 变更日志：表头下插 `v2.5` 行。
 
-- [ ] **Step 4: `docs/ai-core-changelog.md`**
+- [x] **Step 4: `docs/ai-core-changelog.md`**
 
 在引言 `---` 之后、现有最新条目之上，追加：
 
@@ -3350,7 +3350,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 - 前端：`/parent/goals` 从占位变真页；仪表盘加「专项学情」卡；报告页加「真掌握度」卡（**与「薄弱知识点」并存不替换**，spec §10）。
 ```
 
-- [ ] **Step 5: `CLAUDE.md` 订正失实描述**
+- [x] **Step 5: `CLAUDE.md` 订正失实描述**
 
 「家长端学情」节那条现在写「知识点掌握度底层无数据，用错题数代理替代」——**Phase 1B 起前半句已不成立**。改成（**只加半句、不新增段落**，本文件已 22.9KB、超 ~15KB 维护目标）：
 
@@ -3358,7 +3358,7 @@ git commit -m "feat(parent): 仪表盘专项卡 + 报告页真掌握度卡（与
 - 学习时长走会话口径（`study_sessions`，1A）；知识点掌握度自 Phase 1B 起由 `student_knowledge_mastery` 实时回写（**与「错题数代理」的 `weakPoints` 并存不替换**，两卡标题必须不同）；专项学情/目标达成为只读实时聚合。薄弱点必须同时给「未标注知识点的错题数」，否则家长会误读成「只有这些问题」。口径见 `docs/API接口与数据流设计文档.md` §6.27 与 `docs/ai-core-changelog.md` 本批条目。
 ```
 
-- [ ] **Step 6: 两份 API 文档的端点清单核对（本仓硬规则）**
+- [x] **Step 6: 两份 API 文档的端点清单核对（本仓硬规则）**
 
 文档类改动**没有自动化测试**，只能靠这道人工核验；逐条比对两份文档的路径列表：
 
@@ -3376,7 +3376,7 @@ grep -n "已废弃" docs/API接口与数据流设计文档.md | head
 
 Expected: 两边都能找到对应路径；openapi 里 `deprecated: true` **恰好 4 处**（旧 goals 的 4 个 operation）；API 文档里有一处「已废弃」引用块。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml \

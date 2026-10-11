@@ -101,7 +101,7 @@ spec §7.1/§7.5 把 `beacon.ts`、事件批量队列、`/api/track/events` 写�
 - Consumes: 无
 - Produces: 表 `study_sessions`，列名以 spec §4.2 为准（后续任务依赖：`session_uid` / `student_id` / `module` / `scene` / `subject_id` / `status` / `client_state` / `active_seconds` / `heartbeat_count` / `started_at` / `last_heartbeat_at` / `ended_at` / `end_reason` / `platform_class` / `browser` / `screen_class` / `input_type` / `app_shell`）
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 Create `tools/db/migrations/2026-09-21_study_sessions.sql`：
 
@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS study_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 同步 `tools/db/schema.sql`**
+- [x] **Step 2: 同步 `tools/db/schema.sql`**
 
 在 `tools/db/schema.sql` 的 §15 说明块之后、`SET FOREIGN_KEY_CHECKS = 1;` 之前（当前约 1231 行）插入：
 
@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS study_sessions (
 
 （`...` 处粘贴 Step 1 的完整列定义——**不要**真的写省略号，两处必须逐字一致。)
 
-- [ ] **Step 3: 手工 apply 迁移**
+- [x] **Step 3: 手工 apply 迁移**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -189,7 +189,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-21_study_sessions.
 
 Expected: 无输出（成功）。再跑一次同样无输出（幂等）。
 
-- [ ] **Step 4: 确认表与列已建**
+- [x] **Step 4: 确认表与列已建**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "SHOW COLUMNS FROM study_sessions" | grep -c "session_uid\|active_seconds\|platform_class\|input_type\|app_shell"
@@ -197,7 +197,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "SHOW COLUMNS FROM study_sessions"
 
 Expected: `5`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-21_study_sessions.sql tools/db/schema.sql
@@ -220,7 +220,7 @@ git commit -m "feat(db): study_sessions 表 + schema.sql 同步（埋点 Phase 1
   - `parseUserAgent(ua: string | null | undefined): { platformClass: PlatformClass | null; browser: BrowserClass | null }`（**memoized**，同一 UA 字符串返回**同一个对象引用**）
   - `clearUserAgentCache(): void`（测试用）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/server/src/common/utils/user-agent.util.test.ts`：
 
@@ -288,7 +288,7 @@ describe('parseUserAgent', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/common/utils/user-agent.util.test.ts
@@ -296,7 +296,7 @@ cd apps/server && npx vitest run src/common/utils/user-agent.util.test.ts
 
 Expected: FAIL —— `Failed to resolve import "./user-agent.util.js"`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/server/src/common/utils/user-agent.util.ts`：
 
@@ -381,7 +381,7 @@ export function parseUserAgent(ua: string | null | undefined): UserAgentInfo {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/common/utils/user-agent.util.test.ts
@@ -389,7 +389,7 @@ cd apps/server && npx vitest run src/common/utils/user-agent.util.test.ts
 
 Expected: PASS（13 条）。若 `iPad Safari` 那条失败，检查 `detectPlatform` 里 `Macintosh` 分支是否被 `/iPad/` 抢先——注意上面那台 iPad 的 UA **确实**含 `Macintosh`，所以此处预期就是 `mac`（校正发生在服务层）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/common/utils/user-agent.util.ts apps/server/src/common/utils/user-agent.util.test.ts
@@ -417,7 +417,7 @@ git commit -m "feat(analytics): UA 粗分类工具（平台/浏览器 + memoize�
     - `end(sessionUid: string, studentId: number, reason: string): Promise<{ activeSeconds: number; endedAt: Date } | null>`
     - `closeStale(studentId?: number): Promise<number>`（把 `active` 且心跳超 5 分钟的会话收尾，返回行数）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/server/src/database/repositories/study-sessions.repo.test.ts`：
 
@@ -562,7 +562,7 @@ describe('StudySessionsRepository.closeStale', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/study-sessions.repo.test.ts
@@ -570,7 +570,7 @@ cd apps/server && npx vitest run src/database/repositories/study-sessions.repo.t
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/server/src/database/repositories/study-sessions.repo.ts`：
 
@@ -775,7 +775,7 @@ export class StudySessionsRepository {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/study-sessions.repo.test.ts
@@ -783,7 +783,7 @@ cd apps/server && npx vitest run src/database/repositories/study-sessions.repo.t
 
 Expected: PASS（8 条）
 
-- [ ] **Step 5: 加进 barrel**
+- [x] **Step 5: 加进 barrel**
 
 在 `apps/server/src/database/repositories/index.ts` 末尾追加：
 
@@ -792,7 +792,7 @@ export { StudySessionsRepository } from './study-sessions.repo.js';
 export type { StudySessionRow, StudySessionInsertInput } from './study-sessions.repo.js';
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/study-sessions.repo.ts apps/server/src/database/repositories/study-sessions.repo.test.ts apps/server/src/database/repositories/index.ts
@@ -819,7 +819,7 @@ git commit -m "feat(analytics): StudySessionsRepository（心跳封顶增量 + �
     - `end(input: { studentId; sessionUid; reason }): Promise<{ activeSeconds: number | null; endedAt: Date | null }>`
     - `closeStale(studentId?: number): Promise<number>`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/server/src/modules/analytics/study-sessions.service.test.ts`：
 
@@ -1001,7 +1001,7 @@ describe('StudySessionsService.end', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts
@@ -1009,7 +1009,7 @@ cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.te
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/server/src/modules/analytics/study-sessions.service.ts`：
 
@@ -1218,7 +1218,7 @@ export function correctIpad(
 
 > **DI 说明**：第二个构造参数是**接口** `SubjectsRepoLike`——按仓库的 DI 坑，**必须**显式 `@Inject(token)`，否则 Nest 会把 `design:paramtypes` 写成 `Object` 并启动失败。本计划用 `'SUBJECTS_REPO_FOR_ANALYTICS'` 作为 token，并在 `AnalyticsModule` 里 `{ provide: 'SUBJECTS_REPO_FOR_ANALYTICS', useExisting: SubjectsRepository }`（见 Task 5）。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.test.ts
@@ -1226,7 +1226,7 @@ cd apps/server && npx vitest run src/modules/analytics/study-sessions.service.te
 
 Expected: PASS（15 条）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/analytics/study-sessions.service.ts apps/server/src/modules/analytics/study-sessions.service.test.ts
@@ -1250,7 +1250,7 @@ git commit -m "feat(analytics): StudySessionsService（白名单 + iPad 校正 +
   - `PATCH /api/study-sessions/:uid/heartbeat` → 200 `{ activeSeconds: number | null }`
   - `PATCH /api/study-sessions/:uid/end` → 200 `{ activeSeconds: number | null, endedAt: Date | null }`
 
-- [ ] **Step 1: 写失败测试（心跳不进 api_request_logs）**
+- [x] **Step 1: 写失败测试（心跳不进 api_request_logs）**
 
 在 `apps/server/src/common/interceptors/analytics.interceptor.test.ts` 的 `describe('shouldSkipRoute', ...)` 里补一条：
 
@@ -1263,7 +1263,7 @@ git commit -m "feat(analytics): StudySessionsService（白名单 + iPad 校正 +
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/common/interceptors/analytics.interceptor.test.ts
@@ -1271,7 +1271,7 @@ cd apps/server && npx vitest run src/common/interceptors/analytics.interceptor.t
 
 Expected: FAIL —— 第一条断言返回 `false`。
 
-- [ ] **Step 3: 改跳过名单**
+- [x] **Step 3: 改跳过名单**
 
 `apps/server/src/common/interceptors/analytics.interceptor.ts` 第 11 行改为：
 
@@ -1286,7 +1286,7 @@ const SKIP_PATTERNS = [
 ];
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/common/interceptors/analytics.interceptor.test.ts
@@ -1294,7 +1294,7 @@ cd apps/server && npx vitest run src/common/interceptors/analytics.interceptor.t
 
 Expected: PASS
 
-- [ ] **Step 5: 实现 controller**
+- [x] **Step 5: 实现 controller**
 
 Create `apps/server/src/modules/analytics/analytics.controller.ts`：
 
@@ -1378,7 +1378,7 @@ export class AnalyticsController {
 }
 ```
 
-- [ ] **Step 6: 接线 `AnalyticsModule`**
+- [x] **Step 6: 接线 `AnalyticsModule`**
 
 `apps/server/src/modules/analytics/analytics.module.ts` 全文改为：
 
@@ -1431,13 +1431,13 @@ export class AnalyticsModule {
 }
 ```
 
-- [ ] **Step 6b: 订正 `study-sessions.repo.ts` 的过期注释（只改一句）**
+- [x] **Step 6b: 订正 `study-sessions.repo.ts` 的过期注释（只改一句）**
 
 `apps/server/src/database/repositories/study-sessions.repo.ts:54` 的「两条纪律」第 2 条写的是「所有写入……调用方（service）必须包 try/catch，失败只 warn、绝不 500」。这句写在 2026-09-19 的**收窄裁决之前**，现在是错的：生效义务只落在**嵌在别的业务流里的埋点写入**（如家长 GET 里的 `closeStale`），而本任务的三个采集端点**是例外**——允许 DB 失败直接 500。
 
 把**这一句**改成收窄后的说法（保持中文、`**加粗**` 承重点、一句话讲清，别顺手改这个文件的其它行）。
 
-- [ ] **Step 7: 构建 + 全量后端测试**
+- [x] **Step 7: 构建 + 全量后端测试**
 
 ```bash
 cd apps/server && npm run build && npm test
@@ -1445,7 +1445,7 @@ cd apps/server && npm run build && npm test
 
 Expected: 构建通过；测试全绿（Phase 0 的 1166 条 + 本计划新增）。
 
-- [ ] **Step 8: 冒烟（独立端口 + 按 PID 收尾）**
+- [x] **Step 8: 冒烟（独立端口 + 按 PID 收尾）**
 
 ```bash
 cd apps/server && PORT=3199 node dist/main.js &
@@ -1457,7 +1457,7 @@ kill $SERVER_PID
 
 Expected: `401`（未登录被 `JwtAuthGuard` 拒——**不是** 500，说明模块 DI 正常、路由已注册）。若输出 `500`，检查 `SUBJECTS_REPO_FOR_ANALYTICS` 是否配好。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/server/src/modules/analytics/analytics.controller.ts apps/server/src/modules/analytics/analytics.module.ts apps/server/src/common/interceptors/analytics.interceptor.ts apps/server/src/common/interceptors/analytics.interceptor.test.ts apps/server/src/database/repositories/study-sessions.repo.ts
@@ -1486,7 +1486,7 @@ git commit -m "feat(analytics): /api/study-sessions 采集端点 + 模块接线 
     - `getStudyTimeBySubject(...): Promise<SubjectSeconds[]>`
     - `getActiveDays(...): Promise<number>`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/server/src/database/repositories/parent-analytics.repo.test.ts`：
 
@@ -1584,7 +1584,7 @@ describe('隐私守卫：家长端仓储不含 ops 信号', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/parent-analytics.repo.test.ts
@@ -1592,7 +1592,7 @@ cd apps/server && npx vitest run src/database/repositories/parent-analytics.repo
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/server/src/database/repositories/parent-analytics.repo.ts`：
 
@@ -1711,7 +1711,7 @@ export class ParentAnalyticsRepository {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/parent-analytics.repo.test.ts
@@ -1719,7 +1719,7 @@ cd apps/server && npx vitest run src/database/repositories/parent-analytics.repo
 
 Expected: PASS（6 条）
 
-- [ ] **Step 5: 加进 barrel**
+- [x] **Step 5: 加进 barrel**
 
 在 `apps/server/src/database/repositories/index.ts` 末尾追加：
 
@@ -1728,7 +1728,7 @@ export { ParentAnalyticsRepository } from './parent-analytics.repo.js';
 export type { DaySeconds, ModuleSeconds, SubjectSeconds } from './parent-analytics.repo.js';
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/parent-analytics.repo.ts apps/server/src/database/repositories/parent-analytics.repo.test.ts apps/server/src/database/repositories/index.ts
@@ -1756,11 +1756,11 @@ git commit -m "feat(analytics): ParentAnalyticsRepository（学习时长聚合 +
   - DTO 类型 `StudyTimeSummary` / `TodayUsageSummary`（Task 8 的 controller 与前端 `api.ts` 都按这两个形状对齐）
   - `class StudyTimeService`：`getStudyTime(studentId, from?, to?)` 与 `getTodayUsage(studentId)`
 
-- [ ] **Step 0: 先把两个 DTO 类型加到 `dto/parent-insights.dto.ts` 末尾**
+- [x] **Step 0: 先把两个 DTO 类型加到 `dto/parent-insights.dto.ts` 末尾**
 
 `StudyTimeService` 的返回类型就是这两个接口，所以**本任务必须先加它们**，否则 `tsc` 会红（Task 8 只消费、不再新增）。照 plan 的 Task 8 Step 1 里那两段 `export interface StudyTimeSummary` / `export interface TodayUsageSummary` 逐字粘贴到文件末尾。
 
-- [ ] **Step 1: 写 `resolveRange` 的失败测试**
+- [x] **Step 1: 写 `resolveRange` 的失败测试**
 
 在 `apps/server/src/modules/parent-insights/window.util.test.ts` 追加。
 **注意**：该文件已存在，当前 import 是 `import { startOfDaysAgo, resolveWindow } from './window.util.js';`——必须先把 `resolveRange` 加进这一行（否则新用例直接报 `resolveRange is not a function`）。
@@ -1804,7 +1804,7 @@ describe('resolveRange', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts
@@ -1812,7 +1812,7 @@ cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts
 
 Expected: FAIL —— `resolveRange is not a function`。
 
-- [ ] **Step 3: 实现 `resolveRange`**
+- [x] **Step 3: 实现 `resolveRange`**
 
 在 `apps/server/src/modules/parent-insights/window.util.ts` 中：把 `toDayString` 前的 `function` 改为 `export function`，并在文件末尾追加：
 
@@ -1858,7 +1858,7 @@ export function resolveRange(from?: string, to?: string): ReportWindow {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts
@@ -1866,7 +1866,7 @@ cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts
 
 Expected: PASS
 
-- [ ] **Step 5: 加 `ControlsRepository.findDailyTimeLimit`**
+- [x] **Step 5: 加 `ControlsRepository.findDailyTimeLimit`**
 
 在 `apps/server/src/database/repositories/controls.repo.ts` 的 `findByStudent` 之后加：
 
@@ -1916,7 +1916,7 @@ describe('ControlsRepository.findDailyTimeLimit', () => {
 
 （若 `controls.repo.test.ts` 不存在，新建并在顶部加 `import { describe, it, expect, vi } from 'vitest';` 与 `import { ControlsRepository } from './controls.repo.js';`。）
 
-- [ ] **Step 6: 写 `StudyTimeService` 的失败测试**
+- [x] **Step 6: 写 `StudyTimeService` 的失败测试**
 
 Create `apps/server/src/modules/parent-insights/study-time.service.test.ts`：
 
@@ -2001,7 +2001,7 @@ describe('StudyTimeService.getTodayUsage', () => {
 });
 ```
 
-- [ ] **Step 7: 实现 `StudyTimeService`**
+- [x] **Step 7: 实现 `StudyTimeService`**
 
 Create `apps/server/src/modules/parent-insights/study-time.service.ts`：
 
@@ -2093,7 +2093,7 @@ export class StudyTimeService {
 }
 ```
 
-- [ ] **Step 8: 跑测试确认通过**
+- [x] **Step 8: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts src/database/repositories/controls.repo.test.ts src/modules/parent-insights/study-time.service.test.ts
@@ -2101,7 +2101,7 @@ cd apps/server && npx vitest run src/modules/parent-insights/window.util.test.ts
 
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/server/src/modules/parent-insights/window.util.ts apps/server/src/modules/parent-insights/window.util.test.ts apps/server/src/database/repositories/controls.repo.ts apps/server/src/database/repositories/controls.repo.test.ts apps/server/src/modules/parent-insights/study-time.service.ts apps/server/src/modules/parent-insights/study-time.service.test.ts apps/server/src/modules/parent-insights/dto/parent-insights.dto.ts
@@ -2124,7 +2124,7 @@ git commit -m "feat(parent): StudyTimeService + resolveRange + controls 每日�
   - `GET /api/parent/students/:studentId/study-time?from=&to=` → `StudyTimeSummary`
   - `GET /api/parent/students/:studentId/today-usage` → `TodayUsageSummary`
 
-- [ ] **Step 1: 确认 DTO 类型已就位（**不要重复定义**）**
+- [x] **Step 1: 确认 DTO 类型已就位（**不要重复定义**）**
 
 `StudyTimeSummary` / `TodayUsageSummary` 已在 Task 7 Step 0 加进 `dto/parent-insights.dto.ts` 末尾。这里只需 `grep` 确认两个 `export interface` 都在，然后直接进 Step 2。若你出于任何原因发现它们缺失，说明 Task 7 没做全——**先回报，不要在这里补抄一份**（两处定义会让 `tsc` 报 duplicate identifier，而且这两个形状是 `StudyTimeService` 的契约，必须只有一处真源）。
 
@@ -2158,7 +2158,7 @@ export interface TodayUsageSummary {
 }
 ```
 
-- [ ] **Step 2: 加 controller 端点**
+- [x] **Step 2: 加 controller 端点**
 
 `apps/server/src/modules/parent-insights/parent-insights.controller.ts`：
 顶部 import 加
@@ -2206,7 +2206,7 @@ import type { StudyTimeSummary, TodayUsageSummary } from './dto/parent-insights.
   }
 ```
 
-- [ ] **Step 3: 模块接线**
+- [x] **Step 3: 模块接线**
 
 `apps/server/src/modules/parent-insights/parent-insights.module.ts`：
 - imports 加 `AnalyticsModule`（为了拿到 `StudySessionsService`）与 `ControlsRepository`：
@@ -2222,7 +2222,7 @@ import { ControlsRepository } from '../../database/repositories/controls.repo.js
 - `providers` 追加 `StudyTimeService, ParentAnalyticsRepository, ControlsRepository`
 - 模块 JSDoc 补一句：`imports: [AnalyticsModule]` 是为了 `StudyTimeService` 注入 `StudySessionsService`（`AnalyticsModule` 已 `exports: [StudySessionsService]`）。
 
-- [ ] **Step 4: 写归属校验测试**
+- [x] **Step 4: 写归属校验测试**
 
 若 `parent-insights.controller.test.ts` 不存在，Create（否则追加一个 describe）：
 
@@ -2278,7 +2278,7 @@ describe('ParentInsightsController 学习时长端点', () => {
 });
 ```
 
-- [ ] **Step 5: 跑测试 + 构建**
+- [x] **Step 5: 跑测试 + 构建**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights && npm run build
@@ -2286,7 +2286,7 @@ cd apps/server && npx vitest run src/modules/parent-insights && npm run build
 
 Expected: 测试 PASS；构建通过。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/parent-insights/
@@ -2306,7 +2306,7 @@ git commit -m "feat(parent): study-time / today-usage 两个端点 + 模块接�
 - Produces: `useLearnContextStore.getState().subjectId: number | null`（`AnalyticsShell` 的 `subjectIdProvider` 读它）
 - 注意：`StudentLayout.tsx:9` 用解构 `const { subjectName, gradeName, publisher } = useLearnContextStore();`——加字段**不会**破坏它，不要去改它。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/web/src/store/learnContextStore.test.ts`：
 
@@ -2344,7 +2344,7 @@ describe('learnContextStore', () => {
 });
 ```
 
-- [ ] **Step 2: 跑 RED —— 注意真正的 RED 在 `tsc`，不在 vitest**
+- [x] **Step 2: 跑 RED —— 注意真正的 RED 在 `tsc`，不在 vitest**
 
 ```bash
 cd apps/web && npx vitest run src/store/learnContextStore.test.ts
@@ -2358,7 +2358,7 @@ cd apps/web && npx tsc -b
 
 Expected: FAIL —— `Property 'subjectId' does not exist on type 'LearnContextState'`（约 4 处：store 接口、`setContext` 参数、初始化对象、`StarMapPage` 调用点）。**这才是本任务的 RED**，也是唯一的守卫：`npm test`（vitest）不做类型检查，只有 `npm run build` 里的 `tsc -b` 会。
 
-- [ ] **Step 3: 实现 store 改动**
+- [x] **Step 3: 实现 store 改动**
 
 `apps/web/src/store/learnContextStore.ts` 全文改为：
 
@@ -2396,7 +2396,7 @@ export const useLearnContextStore = create<LearnContextState>((set) => ({
 }));
 ```
 
-- [ ] **Step 4: 让 StarMapPage 写入 `subjectId`**
+- [x] **Step 4: 让 StarMapPage 写入 `subjectId`**
 
 `apps/web/src/pages/student/StarMapPage.tsx` 的 `setContext` 调用（约 130 行）改为：
 
@@ -2411,7 +2411,7 @@ export const useLearnContextStore = create<LearnContextState>((set) => ({
 
 （`subjectId` 是该组件已有的局部变量，来自 `location.state`，见 `StarMapPage.tsx:119`——无需新增变量。）
 
-- [ ] **Step 5: 跑测试确认通过 + 前端全量测试**
+- [x] **Step 5: 跑测试确认通过 + 前端全量测试**
 
 ```bash
 cd apps/web && npx vitest run src/store/learnContextStore.test.ts && npm test
@@ -2419,7 +2419,7 @@ cd apps/web && npx vitest run src/store/learnContextStore.test.ts && npm test
 
 Expected: 新用例 PASS；全量 573+ 条仍绿（`StudentLayout` 的解构不受影响）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/store/learnContextStore.ts apps/web/src/store/learnContextStore.test.ts apps/web/src/pages/student/StarMapPage.tsx
@@ -2441,7 +2441,7 @@ git commit -m "feat(web): learnContextStore 记住 subjectId（埋点上报用�
   - 类型 `StudyModule` / `StudyScene` / `SessionState` / `SessionEvent` / `EndReason` / `ClientState` / `ScreenClass` / `InputType` / `AppShell` / `SceneInfo`
   - `mapScene(pathname: string): SceneInfo`（**唯一真源**：pathname 正则 → module/scene/isStudyScene）
 
-- [ ] **Step 1: 写类型**
+- [x] **Step 1: 写类型**
 
 Create `apps/web/src/analytics/types.ts`：
 
@@ -2544,7 +2544,7 @@ export function newSessionUid(): string {
 }
 ```
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
 Create `apps/web/src/analytics/sceneMap.test.ts`：
 
@@ -2600,7 +2600,7 @@ describe('mapScene', () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/sceneMap.test.ts
@@ -2608,7 +2608,7 @@ cd apps/web && npx vitest run src/analytics/sceneMap.test.ts
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 4: 实现 `sceneMap.ts`**
+- [x] **Step 4: 实现 `sceneMap.ts`**
 
 Create `apps/web/src/analytics/sceneMap.ts`：
 
@@ -2683,7 +2683,7 @@ export function sceneKey(info: SceneInfo): string | null {
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/sceneMap.test.ts
@@ -2691,7 +2691,7 @@ cd apps/web && npx vitest run src/analytics/sceneMap.test.ts
 
 Expected: PASS（约 25 条）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/analytics/types.ts apps/web/src/analytics/sceneMap.ts apps/web/src/analytics/sceneMap.test.ts
@@ -2712,7 +2712,7 @@ git commit -m "feat(web): analytics 类型 + sceneMap（pathname → module/scen
   - `interface SessionTransition { state: SessionState; effects: { start: boolean; end: EndReason | null; heartbeat: ClientState | null } }`
   - `transition(prev: SessionState, event: SessionEvent): SessionTransition`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/web/src/analytics/sessionMachine.test.ts`：
 
@@ -2803,7 +2803,7 @@ describe('sessionMachine.transition', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/sessionMachine.test.ts
@@ -2811,7 +2811,7 @@ cd apps/web && npx vitest run src/analytics/sessionMachine.test.ts
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/web/src/analytics/sessionMachine.ts`：
 
@@ -2897,7 +2897,7 @@ export function transition(prev: SessionState, event: SessionEvent): SessionTran
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/sessionMachine.test.ts
@@ -2907,7 +2907,7 @@ Expected: PASS（**22 条**——9 个整形状 `it` + 12 个 `it.each` 幂等/�
 
 ⚠️ 覆盖面说明：4 状态 × 6 事件 = **24 格**，本表显式断言 **22 格**，缺的两格是 `active + ROUTE_ENTER` 与 `hidden + ROUTE_ENTER`（都落在 `default` 分支 → 状态不变、无副作用）。缺它们是因为**这两格在生产里不可达**：`onRouteChange` 对同一场景会先去重、对不同场景一定先发 `ROUTE_LEAVE`（把状态推回 `idle`）再发 `ROUTE_ENTER`，而 `hidden` 蕴含 `sessionUid != null`（`resetLocalState` 同时清 uid 与状态）。留着未断言，是为了不把「不可达行为」写成契约；Task 12 有一条**顺序钉子**（hidden → 切场景 → 必须先 end 再 start）守着这个前提。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/analytics/sessionMachine.ts apps/web/src/analytics/sessionMachine.test.ts
@@ -2939,7 +2939,7 @@ git commit -m "feat(web): analytics 会话状态机（纯 reducer，表驱动）
 
 > **执行顺序提醒**：本任务 import `@/services/api` 的三个会话方法，它们由 Task 14 落地。若按顺序执行，请**先做 Task 14 的 api.ts 部分**（只加方法与类型，不加页面），或在 Task 12 之前先跑一次 `npx tsc -b` 确认 import 解析。两条路都可以，但不要留下编译不过的中间态。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/web/src/analytics/tracker.test.ts`：
 
@@ -3120,7 +3120,7 @@ describe('tracker 设备分档', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/tracker.test.ts
@@ -3128,7 +3128,7 @@ cd apps/web && npx vitest run src/analytics/tracker.test.ts
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/web/src/analytics/tracker.ts`：
 
@@ -3437,7 +3437,7 @@ export function collectDeviceInfo(): {
 > `ROUTE_ENTER` 带 `heartbeat: 'visible'`（开完会话立刻补一次心跳）不是为了凑数：`start` 那条 INSERT 用的是库默认 `client_state='visible'`，若标签页是**在后台被打开/恢复**的，这一次心跳至少会把后端的 `client_state` 拉正、`heartbeat_count` 从 0 起算。
 > ⚠️ **已知边界（本批不修，记入终审）**：`AnalyticsShell` 只在收到 `visibilitychange` **事件**时上报可见性，**不读挂载时的初始 `document.visibilityState`**。所以「页面在后台标签里被打开」的场景下，开头最多 ≤120s（直到空闲定时器把它判成 hidden）会被算进时长。要修的话是在 shell 挂载时把初始可见性同步给 tracker；影响有限（仅后台加载场景、且上界 120s），故未纳入本批。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/tracker.test.ts
@@ -3445,7 +3445,7 @@ cd apps/web && npx vitest run src/analytics/tracker.test.ts
 
 Expected: PASS（**15 条**——12 条生命周期 + 3 条设备分档）。⚠️ 周期心跳那两条用例必须**断言「新增的第 N 条」**（先取 `mock.calls.length` 再推进定时器），不能只写 `toHaveBeenCalledWith(...)`：`ROUTE_ENTER` 在 t=0 就发过一次 `visible` 心跳，弱断言会被它白送——删掉整个 `heartbeatTimer` 也照样绿。若 `screenClass` 断言失败，检查 jsdom 的 `window.innerWidth`（默认 1024×768 → `ipad_landscape`）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/analytics/tracker.ts apps/web/src/analytics/tracker.test.ts
@@ -3465,7 +3465,7 @@ git commit -m "feat(web): analytics tracker（会话编排 + 心跳定时器 + �
 - Consumes: `mapScene`（Task 10）、`tracker`（Task 12）、`useLearnContextStore`（Task 9）
 - Produces: `<AnalyticsShell />`（pathless 壳，渲染 `<Outlet />`）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `apps/web/src/analytics/AnalyticsShell.test.tsx`：
 
@@ -3555,7 +3555,7 @@ describe('AnalyticsShell', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/AnalyticsShell.test.tsx
@@ -3563,7 +3563,7 @@ cd apps/web && npx vitest run src/analytics/AnalyticsShell.test.tsx
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/web/src/analytics/AnalyticsShell.tsx`：
 
@@ -3628,7 +3628,7 @@ export default function AnalyticsShell() {
 }
 ```
 
-- [ ] **Step 4: 路由包壳**
+- [x] **Step 4: 路由包壳**
 
 `apps/web/src/routes/index.tsx` 全文改为：
 
@@ -3652,7 +3652,7 @@ export function AppRouter() {
 }
 ```
 
-- [ ] **Step 5: 跑测试 + 全量前端测试**
+- [x] **Step 5: 跑测试 + 全量前端测试**
 
 ```bash
 cd apps/web && npx vitest run src/analytics/AnalyticsShell.test.tsx && npm test
@@ -3660,7 +3660,7 @@ cd apps/web && npx vitest run src/analytics/AnalyticsShell.test.tsx && npm test
 
 Expected: 新用例 PASS；全量仍绿（`routeTable.test.tsx` 直接挂 `routes`，不含 shell，不受影响）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/analytics/AnalyticsShell.tsx apps/web/src/analytics/AnalyticsShell.test.tsx apps/web/src/routes/index.tsx
@@ -3682,7 +3682,7 @@ git commit -m "feat(web): AnalyticsShell + 路由包壳（会话采集接进真�
   - `ParentStudyTime` / `getParentStudyTime(studentId, from?, to?)`
   - `ParentTodayUsage` / `getParentTodayUsage(studentId)`
 
-- [ ] **Step 1: 追加类型与方法**
+- [x] **Step 1: 追加类型与方法**
 
 在 `apps/web/src/services/api.ts` 的「// --- Parent: 学情可见性…」段之后（`getParentReport` 之后、`ParentErrorQuestion` 之前）插入：
 
@@ -3784,7 +3784,7 @@ export function endStudySession(
 }
 ```
 
-- [ ] **Step 2: 构建校验**
+- [x] **Step 2: 构建校验**
 
 ```bash
 cd apps/web && npm run build
@@ -3792,7 +3792,7 @@ cd apps/web && npm run build
 
 Expected: `tsc -b` + `vite build` 通过。**这一步同时验证 Task 12 的 import**（`startStudySession` 等已存在）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -3813,7 +3813,7 @@ git commit -m "feat(web): api 层补会话采集方法与家长学习时长类�
 - Consumes: `getParentStudyTime` / `getParentTodayUsage`（Task 14）
 - Produces: `formatDuration(seconds: number): string`（如 `2 小时 5 分` / `48 分钟` / `0 分钟`）
 
-- [ ] **Step 1: 写 `formatDuration` 测试**
+- [x] **Step 1: 写 `formatDuration` 测试**
 
 Create `apps/web/src/utils/duration.test.ts`：
 
@@ -3848,7 +3848,7 @@ describe('formatDuration', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/web && npx vitest run src/utils/duration.test.ts
@@ -3856,7 +3856,7 @@ cd apps/web && npx vitest run src/utils/duration.test.ts
 
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 Create `apps/web/src/utils/duration.ts`：
 
@@ -3880,7 +3880,7 @@ export function formatDuration(seconds: number): string {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/web && npx vitest run src/utils/duration.test.ts
@@ -3888,7 +3888,7 @@ cd apps/web && npx vitest run src/utils/duration.test.ts
 
 Expected: PASS
 
-- [ ] **Step 5: 给仪表盘加两张卡**
+- [x] **Step 5: 给仪表盘加两张卡**
 
 `apps/web/src/pages/parent/ParentDashboardPage.tsx`：
 
@@ -4000,7 +4000,7 @@ function StudyTimePanel({
 
 **5d. 顶栏那行「近 7 天活跃」保持不变**——它是旧口径，必须并存（spec §10）。
 
-- [ ] **Step 6: 补页面测试**
+- [x] **Step 6: 补页面测试**
 
 `apps/web/src/pages/parent/ParentDashboardPage.test.tsx`：
 1. import 区把两个新方法加进来，并像既有的 `getDashboardMock` 一样取出 mock 句柄：
@@ -4078,7 +4078,7 @@ const getTodayUsageMock = vi.mocked(getParentTodayUsage);
   });
 ```
 
-- [ ] **Step 7: 跑测试**
+- [x] **Step 7: 跑测试**
 
 ```bash
 cd apps/web && npx vitest run src/utils/duration.test.ts src/pages/parent/ParentDashboardPage.test.tsx
@@ -4086,7 +4086,7 @@ cd apps/web && npx vitest run src/utils/duration.test.ts src/pages/parent/Parent
 
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/web/src/utils/duration.ts apps/web/src/utils/duration.test.ts apps/web/src/pages/parent/ParentDashboardPage.tsx apps/web/src/pages/parent/ParentDashboardPage.test.tsx
@@ -4105,7 +4105,7 @@ git commit -m "feat(parent): 仪表盘学习时长/今日已用卡片（与活�
 - Consumes: `getParentStudyTime`（Task 14）、`formatDuration`（Task 15）
 - 报告窗口 `data.windowStart` / `data.windowEnd` 是**含两端**的 `YYYY-MM-DD`，与 `study-time` 的 `from`/`to` 语义一致，可直接透传。
 
-- [ ] **Step 1: 加取数与派生**
+- [x] **Step 1: 加取数与派生**
 
 `apps/web/src/pages/parent/ParentReportPage.tsx`：
 
@@ -4184,7 +4184,7 @@ import { formatDuration } from '@/utils/duration';
 
 > 柱状图的值用**分钟**（不是秒）：秒的数量级在刻度上读不出意义。
 
-- [ ] **Step 2: 补页面测试**
+- [x] **Step 2: 补页面测试**
 
 `apps/web/src/pages/parent/ParentReportPage.test.tsx`：
 1. `vi.mock('@/services/api', ...)` 里补 `getParentStudyTime: vi.fn()`；
@@ -4233,7 +4233,7 @@ import { formatDuration } from '@/utils/duration';
   });
 ```
 
-- [ ] **Step 3: 跑测试**
+- [x] **Step 3: 跑测试**
 
 ```bash
 cd apps/web && npx vitest run src/pages/parent/ParentReportPage.test.tsx
@@ -4241,7 +4241,7 @@ cd apps/web && npx vitest run src/pages/parent/ParentReportPage.test.tsx
 
 Expected: PASS
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add apps/web/src/pages/parent/ParentReportPage.tsx apps/web/src/pages/parent/ParentReportPage.test.tsx
@@ -4263,7 +4263,7 @@ git commit -m "feat(parent): 报告页学习时长数字卡 + 每日学习时长
 - Consumes: 全部实现（Task 1–16）
 - **规则**：`docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml` 是**互为对照、必须同步**的两份（CLAUDE.md 的同步铁律）。以 API 设计文档为主稿。
 
-- [ ] **Step 1: API 设计文档补端点**
+- [x] **Step 1: API 设计文档补端点**
 
 在 `docs/API接口与数据流设计文档.md`：
 1. **§4.13 Parent 下**新增两行（与既有 5 个家长端点同表）：
@@ -4277,7 +4277,7 @@ git commit -m "feat(parent): 报告页学习时长数字卡 + 每日学习时长
 
 3. **新增 §6.25 数据流「会话心跳 → 学习时长聚合」**：前端 `AnalyticsShell` → `POST /api/study-sessions` → 30s `PATCH .../heartbeat`（`visible`/`hidden`）→ `PATCH .../end`；服务端按 `last_heartbeat_at` 差值累加，**单次封顶 45s**；`active` 且心跳超 5 分钟由 `closeStale` 惰性收尾；家长端读侧走 `parent-analytics.repo.ts`，只统计已结束（含孤儿）会话。**并写明与旧口径的关系**。
 
-- [ ] **Step 2: openapi.yaml 逐字段同步**
+- [x] **Step 2: openapi.yaml 逐字段同步**
 
 在 `docs/api/openapi.yaml`：
 1. `paths` 下新增 `/parent/students/{studentId}/study-time` 与 `/parent/students/{studentId}/today-usage`（**必须是 parent 角色的安全定义**，与同文件既有家长端点一致）；
@@ -4285,7 +4285,7 @@ git commit -m "feat(parent): 报告页学习时长数字卡 + 每日学习时长
 3. `components.schemas` 新增 `StudyTimeSummary` / `TodayUsageSummary` / `StartStudySessionRequest` / `HeartbeatRequest` / `EndSessionRequest`，字段名与实现**逐字对应**（`totalSeconds` / `activeDays` / `byDay[{date,seconds}]` / `byModule[{module,seconds}]` / `bySubject[{subjectId,seconds}]` / `source`；`date` / `activeSeconds` / `limitMinutes`(nullable) / `exceeded` / `byModule`）；
 4. 补 `201` 响应（`@Post` 默认 201，本仓无端点用 `@HttpCode` 覆盖）。
 
-- [ ] **Step 3: 核对两份文档端点清单**
+- [x] **Step 3: 核对两份文档端点清单**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -4295,7 +4295,7 @@ grep -n "study-sessions\|study-time\|today-usage" docs/api/openapi.yaml
 
 Expected: 两份都出现 3 个采集端点 + 2 个家长端点，路径字符串完全一致。
 
-- [ ] **Step 4: 数据库设计文档 + changelog + CLAUDE.md**
+- [x] **Step 4: 数据库设计文档 + changelog + CLAUDE.md**
 
 1. `docs/K12智学系统-数据库设计文档.md`：新增 `study_sessions` 表设计（照 schema.sql 的列 + 索引 + 三条口径注释：服务端累计秒数、设备只到类别、iPad 校正）。
 2. `docs/ai-core-changelog.md`：顶部追加一条 `2026-09-XX 埋点 Phase 1A：学习时长端到端`，记录：新增表与端点、`§10 并存不替换` 的硬约束、`active_seconds` 封顶 45s 的理由（不封顶会把「关标签 2 小时」算成 2 小时）、`closeStale` 惰性收尾、`subject_id` 改从 `learnContextStore` 取（spec §7.3 原写法的偏差已修正）、`behavior_events` 留 Phase 2。
@@ -4305,7 +4305,7 @@ Expected: 两份都出现 3 个采集端点 + 2 个家长端点，路径字符�
 - **埋点（学习会话）的两条纪律**：`active_seconds` **只由服务端**按 `last_heartbeat_at` 差值累加、**单次封顶 45s**（客户端上报的秒数一律不采信；不封顶时「关标签 2 小时」会被算成 2 小时）；埋点写入**永不阻断主链路**（`study_sessions` 直写但必须 catch，失败只 warn）。家长端「学习时长（会话）」与既有「近 7 天活跃天数」是**两套口径、并存不替换**（spec §10），UI 必须并列展示并区分文案。
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml docs/K12智学系统-数据库设计文档.md docs/ai-core-changelog.md CLAUDE.md
@@ -4318,7 +4318,7 @@ git commit -m "docs: 同步埋点 Phase 1A（采集端点 §4.23 / 数据流 §6
 
 **Files:** 无（只跑命令）
 
-- [ ] **Step 1: 后端全量测试 + 构建**
+- [x] **Step 1: 后端全量测试 + 构建**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npm test && npm run build
@@ -4326,7 +4326,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && npm test && npm ru
 
 Expected: 全绿（Phase 0 的 1166 条 + 本计划新增约 50 条）；构建通过。
 
-- [ ] **Step 2: 前端全量测试 + 构建 + lint**
+- [x] **Step 2: 前端全量测试 + 构建 + lint**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/web && npm test && npm run build && npm run lint
@@ -4336,7 +4336,7 @@ Expected: 全绿（573 条 + 本计划新增约 60 条）；构建与 lint 通�
 
 > ⚠️ 既有已知问题：`routes/routeTable.test.tsx` 的「主轨侧边导航不含辅轨入口」在本地 **18:00–06:00 跑必红**（`StudentLayout` 挂载时按挂钟切主题），**与本批无关**，别算到新改动头上（见 `docs/家长端学情批-完成情况与待办清单.md` §1.5 / §3.3 第 6 项）。
 
-- [ ] **Step 3: 端到端冒烟（独立端口 + 按 PID 收尾）**
+- [x] **Step 3: 端到端冒烟（独立端口 + 按 PID 收尾）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server
@@ -4353,7 +4353,7 @@ kill $SERVER_PID
 
 Expected: 三行都是 `401`。**不要**用 `pkill -f 'node dist/main.js'`（会杀掉你本机在跑的服务）。
 
-- [ ] **Step 4: 迁移幂等复查**
+- [x] **Step 4: 迁移幂等复查**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -4376,7 +4376,7 @@ Expected: 有 1 行 `status='ended'`、`end_reason='route_change'`；`active_sec
 
 3. 家长端打开仪表盘：应同时看到「近 7 天活跃 N 天」（旧口径）与「学习时长（近 7 天）」（新口径），两个数字**可以不同**——这正是 spec §10 要的效果。报告页的「每日学习时长」柱状图应出现今天的柱子。
 
-- [ ] **Step 6: Commit（若 Step 5 有微调）**
+- [x] **Step 6: Commit（若 Step 5 有微调）**
 
 ```bash
 git add -A

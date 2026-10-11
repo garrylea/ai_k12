@@ -39,7 +39,7 @@
 - Move: `src/storage.py` → `src/core/storage.py`
 - Keep: `src/parser.py` 和 `src/classifier.py` 仍在 `src/`（zgkao 专用）
 
-- [ ] **Step 1: 创建目录结构**
+- [x] **Step 1: 创建目录结构**
 
 ```bash
 mkdir -p tools/crawler/src/core tools/crawler/src/adapters
@@ -50,7 +50,7 @@ git mv tools/crawler/src/validator.py tools/crawler/src/core/validator.py
 git mv tools/crawler/src/storage.py tools/crawler/src/core/storage.py
 ```
 
-- [ ] **Step 2: 更新 `conftest.py` 的 `sys.path` 注入**
+- [x] **Step 2: 更新 `conftest.py` 的 `sys.path` 注入**
 
 ```python
 import sys
@@ -60,7 +60,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent / "src" / "core"))
 ```
 
-- [ ] **Step 3: 创建临时兼容 shim，让未迁移的测试仍能找到模块**
+- [x] **Step 3: 创建临时兼容 shim，让未迁移的测试仍能找到模块**
 
 Create `src/fetcher.py`, `src/robots.py`, `src/checkpoint.py`, `src/validator.py`, `src/storage.py` with:
 
@@ -71,7 +71,7 @@ from core.fetcher import Fetcher  # noqa: F401
 
 Repeat for robots/checkpoint/validator/storage.
 
-- [ ] **Step 4: 运行现有测试确认未破坏**
+- [x] **Step 4: 运行现有测试确认未破坏**
 
 ```bash
 cd tools/crawler && pytest tests/ -q
@@ -79,7 +79,7 @@ cd tools/crawler && pytest tests/ -q
 
 Expected: 140 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/core tools/crawler/src/adapters tools/crawler/src/fetcher.py tools/crawler/src/robots.py tools/crawler/src/checkpoint.py tools/crawler/src/validator.py tools/crawler/src/storage.py tools/crawler/conftest.py
@@ -100,7 +100,7 @@ git commit -m "refactor: move shared crawler modules to src/core/"
 - Move: `tests/test_storage.py` → `tests/core/test_storage.py`
 - Move: `tests/test_main.py`, `tests/test_parser.py`, `tests/test_classifier.py` → `tests/adapters/test_zgkao.py`（后续合并，本任务先移动）
 
-- [ ] **Step 1: 移动测试文件**
+- [x] **Step 1: 移动测试文件**
 
 ```bash
 cd tools/crawler
@@ -115,7 +115,7 @@ git mv tests/test_parser.py tests/adapters/test_zgkao_parser.py
 git mv tests/test_classifier.py tests/adapters/test_zgkao_classifier.py
 ```
 
-- [ ] **Step 2: 更新 `pytest.ini` 的 `testpaths`**
+- [x] **Step 2: 更新 `pytest.ini` 的 `testpaths`**
 
 ```ini
 [pytest]
@@ -126,7 +126,7 @@ python_classes = Test*
 python_functions = test_*
 ```
 
-- [ ] **Step 3: 运行测试**
+- [x] **Step 3: 运行测试**
 
 ```bash
 pytest tests/ -q
@@ -134,7 +134,7 @@ pytest tests/ -q
 
 Expected: 140 passed（移动文件位置不影响导入，因 `sys.path` 已包含 `src/` 和 `src/core/`）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/crawler/tests tools/crawler/pytest.ini
@@ -151,7 +151,7 @@ git commit -m "test: reorganize tests into core/ and adapters/"
 - Modify: `src/core/validator.py`
 - Test: `tests/core/test_validator.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/core/test_validator.py` 末尾追加：
 
@@ -207,7 +207,7 @@ class TestImageValidator:
         assert result.file_size_bytes == len(JPEG_BYTES)
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/core/test_validator.py::TestImageValidator -v
@@ -215,7 +215,7 @@ pytest tests/core/test_validator.py::TestImageValidator -v
 
 Expected: `ImportError: cannot import name 'ImageValidator'`.
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 在 `src/core/validator.py` 追加：
 
@@ -255,7 +255,7 @@ class ImageValidator:
         )
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/core/test_validator.py -q
@@ -263,7 +263,7 @@ pytest tests/core/test_validator.py -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/core/validator.py tools/crawler/tests/core/test_validator.py
@@ -278,7 +278,7 @@ git commit -m "feat(core): add ImageValidator with jpeg magic number check"
 - Modify: `src/core/fetcher.py`
 - Test: `tests/core/test_fetcher.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/core/test_fetcher.py` 末尾追加（若不存在则创建该文件）：
 
@@ -313,7 +313,7 @@ class TestFetchHead:
         assert status == 200
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/core/test_fetcher.py::TestFetchHead -v
@@ -321,7 +321,7 @@ pytest tests/core/test_fetcher.py::TestFetchHead -v
 
 Expected: `AttributeError: 'Fetcher' object has no attribute 'fetch_head'`.
 
-- [ ] **Step 3: 实现 `fetch_head`**
+- [x] **Step 3: 实现 `fetch_head`**
 
 在 `src/core/fetcher.py` 的 `Fetcher` 类中 `fetch_text` 之前插入：
 
@@ -362,7 +362,7 @@ Expected: `AttributeError: 'Fetcher' object has no attribute 'fetch_head'`.
         raise requests.HTTPError(f"failed after {self._max_retries} retries: {url}")
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/core/test_fetcher.py -q
@@ -370,7 +370,7 @@ pytest tests/core/test_fetcher.py -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/core/fetcher.py tools/crawler/tests/core/test_fetcher.py
@@ -385,7 +385,7 @@ git commit -m "feat(core): add Fetcher.fetch_head for smartedu page detection"
 - Modify: `src/core/storage.py`
 - Test: `tests/core/test_storage.py`
 
-- [ ] **Step 1: 写失败测试（接口已存在但 PdfStore 未实现）**
+- [x] **Step 1: 写失败测试（接口已存在但 PdfStore 未实现）**
 
 先改写 `tests/core/test_storage.py` 顶部导入：
 
@@ -402,7 +402,7 @@ pytest tests/core/test_storage.py -q
 
 Expected: `ImportError: cannot import name 'PdfStore'`。
 
-- [ ] **Step 2: 重构 `storage.py` 保留行为**
+- [x] **Step 2: 重构 `storage.py` 保留行为**
 
 ```python
 """存储模块：ResourceStore 接口 + PdfStore/ImageStore 实现。"""
@@ -585,7 +585,7 @@ class Storage:
         )
 ```
 
-- [ ] **Step 3: 运行测试确认通过**
+- [x] **Step 3: 运行测试确认通过**
 
 ```bash
 pytest tests/core/test_storage.py -q
@@ -593,7 +593,7 @@ pytest tests/core/test_storage.py -q
 
 Expected: all passed.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/crawler/src/core/storage.py tools/crawler/tests/core/test_storage.py
@@ -608,7 +608,7 @@ git commit -m "refactor(core): introduce ResourceStore and PdfStore"
 - Modify: `src/core/storage.py`
 - Test: `tests/core/test_storage.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/core/test_storage.py` 追加：
 
@@ -688,7 +688,7 @@ class TestImageStore:
         assert {f["page"] for f in rebuilt} == {1, 3}
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/core/test_storage.py::TestImageStore -v
@@ -696,7 +696,7 @@ pytest tests/core/test_storage.py::TestImageStore -v
 
 Expected: `ImportError` / `AttributeError`。
 
-- [ ] **Step 3: 实现 `ImageStore`**
+- [x] **Step 3: 实现 `ImageStore`**
 
 在 `src/core/storage.py` 中 `PdfStore` 之后追加：
 
@@ -764,7 +764,7 @@ class ImageStore(BaseStore):
         return files
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/core/test_storage.py -q
@@ -772,7 +772,7 @@ pytest tests/core/test_storage.py -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/core/storage.py tools/crawler/tests/core/test_storage.py
@@ -786,7 +786,7 @@ git commit -m "feat(core): add ImageStore for multi-page textbook images"
 **Files:**
 - Create: `src/adapters/base.py`
 
-- [ ] **Step 1: 创建文件**
+- [x] **Step 1: 创建文件**
 
 ```python
 """站点适配器抽象接口。"""
@@ -860,7 +860,7 @@ class SiteAdapter(ABC):
         raise NotImplementedError
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/base.py
@@ -875,7 +875,7 @@ git commit -m "feat(adapters): define SiteAdapter interface"
 - Create: `src/core/crawler.py`
 - Test: `tests/core/test_crawler.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `tests/core/test_crawler.py`:
 
@@ -941,7 +941,7 @@ class TestCrawlerRun:
         assert result.robots_blocked is True
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/core/test_crawler.py -v
@@ -949,7 +949,7 @@ pytest tests/core/test_crawler.py -v
 
 Expected: `ModuleNotFoundError: No module named 'core.crawler'`。
 
-- [ ] **Step 3: 实现 `core/crawler.py`**
+- [x] **Step 3: 实现 `core/crawler.py`**
 
 ```python
 """通用爬虫编排：按 SiteAdapter 驱动 fetcher/store/checkpoint/validator。"""
@@ -1010,7 +1010,7 @@ class Crawler:
         return result
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/core/test_crawler.py -q
@@ -1018,7 +1018,7 @@ pytest tests/core/test_crawler.py -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/core/crawler.py tools/crawler/tests/core/test_crawler.py
@@ -1036,7 +1036,7 @@ git commit -m "feat(core): add generic Crawler orchestration"
 - Modify: `src/main.py`（临时保持旧入口，先让 zgkao adapter 可用）
 - Test: `tests/adapters/test_zgkao.py`
 
-- [ ] **Step 1: 创建 `adapters/zgkao.py`**
+- [x] **Step 1: 创建 `adapters/zgkao.py`**
 
 ```python
 """zgkao.com 试卷站点适配器。"""
@@ -1213,7 +1213,7 @@ class ZgkaoAdapter(SiteAdapter):
         return True
 ```
 
-- [ ] **Step 2: 合并 zgkao 测试到 `tests/adapters/test_zgkao.py`**
+- [x] **Step 2: 合并 zgkao 测试到 `tests/adapters/test_zgkao.py`**
 
 将 `test_main.py`、`test_parser.py`、`test_classifier.py` 的内容合并到 `tests/adapters/test_zgkao.py`，并更新 import：
 
@@ -1250,7 +1250,7 @@ def crawler(adapter, tmp_path, storage, checkpoint):
 
 `test_main.py` 中 `TestCrawlerNormalRun.test_downloads_and_saves_pdf` 等用例改为通过 `crawler.run({})` 调用。
 
-- [ ] **Step 3: 运行测试**
+- [x] **Step 3: 运行测试**
 
 ```bash
 pytest tests/adapters/test_zgkao.py -q
@@ -1258,7 +1258,7 @@ pytest tests/adapters/test_zgkao.py -q
 
 Expected: all passed.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/zgkao.py tools/crawler/tests/adapters/test_zgkao.py tools/crawler/tests/adapters/test_zgkao_parser.py tools/crawler/tests/adapters/test_zgkao_classifier.py
@@ -1275,7 +1275,7 @@ git commit -m "feat(adapters): add zgkao adapter wrapping existing parser/classi
 - Create: `src/adapters/smartedu.py`（逐步增长）
 - Test: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 import pytest
@@ -1313,7 +1313,7 @@ class TestSmartEduTagCache:
         }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduTagCache -v
@@ -1321,7 +1321,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduTagCache -v
 
 Expected: `ImportError`。
 
-- [ ] **Step 3: 实现 `SmartEduTagCache`**
+- [x] **Step 3: 实现 `SmartEduTagCache`**
 
 在 `src/adapters/smartedu.py` 写入：
 
@@ -1374,7 +1374,7 @@ class SmartEduTagCache:
         return result
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduTagCache -q
@@ -1382,7 +1382,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduTagCache -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -1397,7 +1397,7 @@ git commit -m "feat(adapters): smartedu tag cache and standardization"
 - Modify: `src/adapters/smartedu.py`
 - Test: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 PART_100 = [
@@ -1425,7 +1425,7 @@ class TestSmartEduCatalog:
         assert items[0].title == "义务教育教科书·数学九年级上册"
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduCatalog -v
@@ -1433,7 +1433,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduCatalog -v
 
 Expected: `AttributeError`。
 
-- [ ] **Step 3: 实现 catalog 解析**
+- [x] **Step 3: 实现 catalog 解析**
 
 在 `SmartEduAdapter`（尚未完整）中加入：
 
@@ -1488,7 +1488,7 @@ class SmartEduAdapter(SiteAdapter):
         return result
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduCatalog -q
@@ -1496,7 +1496,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduCatalog -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -1511,7 +1511,7 @@ git commit -m "feat(adapters): smartedu catalog parsing and latest-only dedup"
 - Modify: `src/adapters/smartedu.py`
 - Test: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class TestSmartEduFilters:
@@ -1540,7 +1540,7 @@ class TestSmartEduFilters:
         assert adapter._matches(item, {}) is True
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduFilters -v
@@ -1548,7 +1548,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduFilters -v
 
 Expected: `AttributeError`。
 
-- [ ] **Step 3: 实现 `_matches`**
+- [x] **Step 3: 实现 `_matches`**
 
 ```python
     def _matches(self, item: Item, filters: dict) -> bool:
@@ -1562,7 +1562,7 @@ Expected: `AttributeError`。
         return True
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduFilters -q
@@ -1570,7 +1570,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduFilters -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -1585,7 +1585,7 @@ git commit -m "feat(adapters): smartedu item filtering"
 - Modify: `src/adapters/smartedu.py`
 - Test: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class TestSmartEduPageDetection:
@@ -1623,7 +1623,7 @@ class TestSmartEduPageDetection:
         assert adapter._detect_page_count(HeadFetcher(), "https://example.com/{N}.jpg") == 500
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduPageDetection -v
@@ -1631,7 +1631,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduPageDetection -v
 
 Expected: `AttributeError`。
 
-- [ ] **Step 3: 实现 `_detect_page_count`**
+- [x] **Step 3: 实现 `_detect_page_count`**
 
 ```python
     _MAX_PAGES = 500
@@ -1645,7 +1645,7 @@ Expected: `AttributeError`。
         return self._MAX_PAGES
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduPageDetection -q
@@ -1653,7 +1653,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduPageDetection -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -1668,7 +1668,7 @@ git commit -m "feat(adapters): smartedu page count detection via HEAD"
 - Modify: `src/adapters/smartedu.py`
 - Test: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class TestSmartEduPageDownload:
@@ -1733,7 +1733,7 @@ class TestSmartEduPageDownload:
         assert path is None
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduPageDownload -v
@@ -1741,7 +1741,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduPageDownload -v
 
 Expected: `AttributeError`。
 
-- [ ] **Step 3: 实现 `_download_page`**
+- [x] **Step 3: 实现 `_download_page`**
 
 ```python
     def _download_page(self, fetcher, store, dir_relpath: Path, page: int, url: str, validator=None):
@@ -1767,7 +1767,7 @@ Expected: `AttributeError`。
         return None
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduPageDownload -q
@@ -1775,7 +1775,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduPageDownload -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -1790,7 +1790,7 @@ git commit -m "feat(adapters): smartedu single page download with one retry"
 - Modify: `src/adapters/smartedu.py`
 - Test: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class TestSmartEduCircuitBreaker:
@@ -1848,7 +1848,7 @@ class TestSmartEduCircuitBreaker:
         assert result.files_downloaded == 1
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduCircuitBreaker -v
@@ -1856,7 +1856,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduCircuitBreaker -v
 
 Expected: `ImportError`。
 
-- [ ] **Step 3: 实现 CircuitBreakerError 和 `_download_book`**
+- [x] **Step 3: 实现 CircuitBreakerError 和 `_download_book`**
 
 ```python
 class CircuitBreakerError(Exception):
@@ -1926,7 +1926,7 @@ class SmartEduAdapter(SiteAdapter):
         return Path(*parts)
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduCircuitBreaker -q
@@ -1934,7 +1934,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduCircuitBreaker -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -1949,7 +1949,7 @@ git commit -m "feat(adapters): smartedu circuit breaker and checkpoint integrati
 - Modify: `src/adapters/smartedu.py`
 - Test: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class TestSmartEduDownloadItem:
@@ -2004,7 +2004,7 @@ class TestSmartEduDownloadItem:
         assert result.files_skipped == 1
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduDownloadItem -v
@@ -2012,7 +2012,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduDownloadItem -v
 
 Expected: `NotImplementedError` or `AttributeError`。
 
-- [ ] **Step 3: 实现 `download_item`**
+- [x] **Step 3: 实现 `download_item`**
 
 ```python
     def download_item(self, item: Item, ctx: DownloadContext) -> DownloadResult:
@@ -2029,7 +2029,7 @@ Expected: `NotImplementedError` or `AttributeError`。
         )
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduDownloadItem -q
@@ -2037,7 +2037,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduDownloadItem -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -2051,7 +2051,7 @@ git commit -m "feat(adapters): smartedu download_item with complete/partial stat
 **Files:**
 - Modify: `tests/adapters/test_smartedu.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class TestSmartEduEndToEnd:
@@ -2101,7 +2101,7 @@ class TestSmartEduEndToEnd:
         assert len(meta["files"]) == 3
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduEndToEnd -v
@@ -2109,7 +2109,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduEndToEnd -v
 
 Expected: `_fetch_catalog` not found。
 
-- [ ] **Step 3: 实现 `_fetch_catalog` 并让 `list_items` 调用它**
+- [x] **Step 3: 实现 `_fetch_catalog` 并让 `list_items` 调用它**
 
 ```python
     def list_items(self, filters: dict) -> Iterator[Item]:
@@ -2138,7 +2138,7 @@ Expected: `_fetch_catalog` not found。
         return SmartEduTagCache(tag_data), parts
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/adapters/test_smartedu.py::TestSmartEduEndToEnd -q
@@ -2146,7 +2146,7 @@ pytest tests/adapters/test_smartedu.py::TestSmartEduEndToEnd -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/adapters/smartedu.py tools/crawler/tests/adapters/test_smartedu.py
@@ -2163,7 +2163,7 @@ git commit -m "test(adapters): smartedu end-to-end mocked flow"
 - Modify: `src/main.py`
 - Test: `tests/test_cli.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 Create `tests/test_cli.py`:
 
@@ -2192,7 +2192,7 @@ class TestCliParseArgs:
             parse_args(["--site", "zgkao", "--url", "https://example.com", "--grade", "九年级"])
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 pytest tests/test_cli.py -v
@@ -2200,7 +2200,7 @@ pytest tests/test_cli.py -v
 
 Expected: `ImportError` / `ModuleNotFoundError`。
 
-- [ ] **Step 3: 实现 `src/main.py`**
+- [x] **Step 3: 实现 `src/main.py`**
 
 ```python
 """CLI 入口：按 --site 选择 adapter 并运行通用 Crawler。"""
@@ -2339,7 +2339,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 pytest tests/test_cli.py -q
@@ -2347,7 +2347,7 @@ pytest tests/test_cli.py -q
 
 Expected: all passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/crawler/src/main.py tools/crawler/tests/test_cli.py
@@ -2364,7 +2364,7 @@ git commit -m "feat(cli): dispatcher for zgkao and smartedu adapters"
 - Modify: `tests/core/test_storage.py` import 路径
 - Modify: `tests/adapters/test_zgkao.py` import 路径
 
-- [ ] **Step 1: 删除 shim 文件**
+- [x] **Step 1: 删除 shim 文件**
 
 ```bash
 cd tools/crawler
@@ -2372,7 +2372,7 @@ rm src/fetcher.py src/robots.py src/checkpoint.py src/validator.py src/storage.p
 rm tests/adapters/test_zgkao_parser.py tests/adapters/test_zgkao_classifier.py
 ```
 
-- [ ] **Step 2: 更新所有 import 为新的绝对路径**
+- [x] **Step 2: 更新所有 import 为新的绝对路径**
 
 Search/replace:
 - `from fetcher import` → `from core.fetcher import`
@@ -2382,7 +2382,7 @@ Search/replace:
 - `from storage import` → `from core.storage import`
 - `from main import Crawler` → `from adapters.zgkao import ZgkaoAdapter`（在 test_zgkao.py）
 
-- [ ] **Step 3: 运行全部测试**
+- [x] **Step 3: 运行全部测试**
 
 ```bash
 pytest tests/ -q
@@ -2390,7 +2390,7 @@ pytest tests/ -q
 
 Expected: 140 existing + new tests passed.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/crawler/
@@ -2405,7 +2405,7 @@ git commit -m "cleanup: remove compatibility shims and finalize imports"
 - Create: `tests/test_smoke_network.py`
 - Modify: `pytest.ini`
 
-- [ ] **Step 1: 创建烟雾测试**
+- [x] **Step 1: 创建烟雾测试**
 
 ```python
 import pytest
@@ -2444,7 +2444,7 @@ def test_smartedu_download_one_book(tmp_path):
     assert result.items_downloaded >= 1
 ```
 
-- [ ] **Step 2: 更新 `pytest.ini`**
+- [x] **Step 2: 更新 `pytest.ini`**
 
 ```ini
 [pytest]
@@ -2457,7 +2457,7 @@ markers =
 addopts = -m "not network"
 ```
 
-- [ ] **Step 3: 运行测试（烟雾测试被跳过）**
+- [x] **Step 3: 运行测试（烟雾测试被跳过）**
 
 ```bash
 pytest tests/ -q
@@ -2465,7 +2465,7 @@ pytest tests/ -q
 
 Expected: all passed except network marker skipped.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/crawler/tests/test_smoke_network.py tools/crawler/pytest.ini
@@ -2479,7 +2479,7 @@ git commit -m "test: add optional smartedu network smoke test"
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: 在 README 中新增 adapter 架构和 smartedu 用法**
+- [x] **Step 1: 在 README 中新增 adapter 架构和 smartedu 用法**
 
 在“模块”节后追加：
 
@@ -2516,7 +2516,7 @@ python src/main.py --site smartedu \
 - 单页失败会重试 1 次；连续 3 页失败触发熔断并停止。
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add tools/crawler/README.md
@@ -2530,29 +2530,29 @@ git commit -m "docs: update README with multi-site architecture and smartedu usa
 计划写完后必须运行以下检查：
 
 1. **Spec 覆盖检查**：对照 `docs/superpowers/specs/2026-07-04-smartedu-textbook-crawler-design.md`：
-   - [ ] SiteAdapter 接口已定义（§2）
-   - [ ] core/crawler.py 通用编排已规划（§2）
-   - [ ] smartedu JSON catalog + HEAD 探测 + 图片下载已规划（§3）
-   - [ ] ImageValidator + ImageStore 已规划（§4、§7）
-   - [ ] CLI --site + 参数校验已规划（§5）
-   - [ ] 熔断 + 断点续传 + meta.json 生命周期已规划（§6）
-   - [ ] 140 个现有测试迁移路径已规划（§7）
-   - [ ] 烟雾测试已规划（§7）
+   - [x] SiteAdapter 接口已定义（§2）
+   - [x] core/crawler.py 通用编排已规划（§2）
+   - [x] smartedu JSON catalog + HEAD 探测 + 图片下载已规划（§3）
+   - [x] ImageValidator + ImageStore 已规划（§4、§7）
+   - [x] CLI --site + 参数校验已规划（§5）
+   - [x] 熔断 + 断点续传 + meta.json 生命周期已规划（§6）
+   - [x] 140 个现有测试迁移路径已规划（§7）
+   - [x] 烟雾测试已规划（§7）
 
 2. **Placeholder 扫描**：搜索以下禁用词，确保不存在：
-   - [ ] `TBD`、`TODO`、`implement later`、`fill in details`
-   - [ ] 空泛的 "add error handling" / "write tests" 无代码描述
-   - [ ] 未定义的类型/函数引用
+   - [x] `TBD`、`TODO`、`implement later`、`fill in details`
+   - [x] 空泛的 "add error handling" / "write tests" 无代码描述
+   - [x] 未定义的类型/函数引用
 
 3. **类型一致性检查**：
-   - [ ] `DownloadContext` 字段名在 `adapters/base.py`、所有 adapter、`core/crawler.py`、`main.py` 中一致
-   - [ ] `CrawlResult` 字段名在 `core/crawler.py`、`main.py`、测试中一致
-   - [ ] `ImageStore.save_page` 签名与测试、smartedu adapter 中调用一致
-   - [ ] `fetch_head` 返回 `tuple[int, dict]` 与测试、adapter 一致
+   - [x] `DownloadContext` 字段名在 `adapters/base.py`、所有 adapter、`core/crawler.py`、`main.py` 中一致
+   - [x] `CrawlResult` 字段名在 `core/crawler.py`、`main.py`、测试中一致
+   - [x] `ImageStore.save_page` 签名与测试、smartedu adapter 中调用一致
+   - [x] `fetch_head` 返回 `tuple[int, dict]` 与测试、adapter 一致
 
 4. **迁移安全**：
-   - [ ] 迁移期间保留 `src/fetcher.py` 等兼容 shim，Task 19 再删除
-   - [ ] 每步 commit 后都跑测试，确保 140 个断言不被破坏
+   - [x] 迁移期间保留 `src/fetcher.py` 等兼容 shim，Task 19 再删除
+   - [x] 每步 commit 后都跑测试，确保 140 个断言不被破坏
 
 ---
 

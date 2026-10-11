@@ -27,7 +27,7 @@
 - Modify: `apps/web/src/components/business/DiscussDrawer.tsx`
 - Modify: `apps/web/src/components/business/AnswerModal.tsx:140-151`（讲一讲按钮抽取共用）
 
-- [ ] **Step 1: useDiscussChat 加 training 模式**
+- [x] **Step 1: useDiscussChat 加 training 模式**
 
 `apps/web/src/hooks/useDiscussChat.ts`：
 
@@ -113,7 +113,7 @@ function cacheKey(opts: UseDiscussChatOpts): string {
 
 其余（续接缓存 / 拉历史 / 不自动发种子）不动——training 模式同样由用户主动发第一条（消息自动带题面前缀）。
 
-- [ ] **Step 2: DiscussDrawer 加 training props**
+- [x] **Step 2: DiscussDrawer 加 training props**
 
 `apps/web/src/components/business/DiscussDrawer.tsx`：
 
@@ -154,7 +154,7 @@ type TrainingProps = {
 
 （training 对齐题目级：w-[55%]/放大铺满，标题「AI 讲一讲」。）
 
-- [ ] **Step 3: 抽取共用 DiscussIconButton**
+- [x] **Step 3: 抽取共用 DiscussIconButton**
 
 `DiscussDrawer.tsx` 底部追加导出组件（样式取自 AnswerModal 现有讲一讲按钮，info 色）：
 
@@ -176,7 +176,7 @@ export function DiscussIconButton({ onClick }: { onClick: () => void }) {
 }
 ```
 
-- [ ] **Step 4: AnswerModal 改用共用按钮**
+- [x] **Step 4: AnswerModal 改用共用按钮**
 
 `apps/web/src/components/business/AnswerModal.tsx`：
 
@@ -189,12 +189,12 @@ export function DiscussIconButton({ onClick }: { onClick: () => void }) {
       )}
 ```
 
-- [ ] **Step 5: lint + build**
+- [x] **Step 5: lint + build**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 均通过。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/hooks/useDiscussChat.ts apps/web/src/components/business/DiscussDrawer.tsx apps/web/src/components/business/AnswerModal.tsx
@@ -211,7 +211,7 @@ git commit -m "feat(web): DiscussDrawer/useDiscussChat 新增 training 模式（
 - Modify: `apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx:156`
 - Modify: `apps/web/src/pages/student/training/ExamRunPage.tsx:228`
 
-- [ ] **Step 1: 题面字号按 variant 区分**
+- [x] **Step 1: 题面字号按 variant 区分**
 
 `QuestionRunner.tsx` 约 238 行，把：
 
@@ -229,7 +229,7 @@ git commit -m "feat(web): DiscussDrawer/useDiscussChat 新增 training 模式（
 
 （弹窗 variant 维持 text-xl——2026-08-09 commit 444e830 用户确认的参数；全屏 embedded 降 text-lg。）
 
-- [ ] **Step 2: 题面区限高 + 答题区保底**
+- [x] **Step 2: 题面区限高 + 答题区保底**
 
 约 235 行，把：
 
@@ -257,18 +257,18 @@ git commit -m "feat(web): DiscussDrawer/useDiscussChat 新增 training 模式（
 
 （题干超长时题面区内部滚动，答题区保底 280px 始终可用。）
 
-- [ ] **Step 3: 三个 run 页容器加 padding**
+- [x] **Step 3: 三个 run 页容器加 padding**
 
 - `TargetedRunPage.tsx:136`：`<div className="h-screen flex flex-col bg-[var(--bg-page)] text-[var(--text-primary)]">` → `<div className="h-screen flex flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">`
 - `ErrorPracticeRunPage.tsx:156`：同上改法。
 - `ExamRunPage.tsx:228`：`<div className="flex h-screen flex-col bg-[var(--bg-page)] text-[var(--text-primary)]">` → `<div className="flex h-screen flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">`
 
-- [ ] **Step 4: lint + build**
+- [x] **Step 4: lint + build**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 均通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/business/answer/QuestionRunner.tsx apps/web/src/pages/student/training/TargetedRunPage.tsx apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx apps/web/src/pages/student/training/ExamRunPage.tsx
@@ -284,7 +284,7 @@ git commit -m "fix(web): 答题页留白 + 题面区限高保底答题区 + embe
 - Modify: `apps/web/src/pages/student/training/TargetedRunPage.tsx`
 - Modify: `apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx`
 
-- [ ] **Step 1: QuestionRunner gate headerActions**
+- [x] **Step 1: QuestionRunner gate headerActions**
 
 `QuestionRunner.tsx` 约 244 行，把：
 
@@ -313,7 +313,7 @@ git commit -m "fix(web): 答题页留白 + 题面区限高保底答题区 + embe
 
 （AnswerModal 传的讲一讲按钮自动获得同一行为——课堂练习与训练轨全端统一；考试两者皆不传，不受影响。）
 
-- [ ] **Step 2: TargetedRunPage 接线讲一讲**
+- [x] **Step 2: TargetedRunPage 接线讲一讲**
 
 `TargetedRunPage.tsx`：
 
@@ -358,16 +358,16 @@ import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussD
 
 （若 Task 2 已给容器加了 p-4 sm:p-6，此处只补 `relative`。）
 
-- [ ] **Step 3: ErrorPracticeRunPage 接线（镜像 Step 2）**
+- [x] **Step 3: ErrorPracticeRunPage 接线（镜像 Step 2）**
 
 与 Step 2 完全同构：import、`discussQ` state、`headerActions` prop、容器加 `relative`、抽屉渲染（`phase === 'answering'` 守卫）。
 
-- [ ] **Step 4: lint + build**
+- [x] **Step 4: lint + build**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 均通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/business/answer/QuestionRunner.tsx apps/web/src/pages/student/training/TargetedRunPage.tsx apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx
@@ -385,7 +385,7 @@ git commit -m "feat(web): 提示->讲一讲渐进式交互（课堂练习与训�
 - Modify: `apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx`
 - Modify: `apps/web/src/pages/student/training/ExamRunPage.tsx`
 
-- [ ] **Step 1: 新建 RunExitGuard 组件**
+- [x] **Step 1: 新建 RunExitGuard 组件**
 
 新建 `apps/web/src/components/business/answer/RunExitGuard.tsx`：
 
@@ -458,7 +458,7 @@ export function RunExitGuard({
 }
 ```
 
-- [ ] **Step 2: QuestionRunner onClose 传出已答数**
+- [x] **Step 2: QuestionRunner onClose 传出已答数**
 
 `QuestionRunner.tsx`：
 
@@ -484,7 +484,7 @@ export function RunExitGuard({
 
 （AnswerModal 传 `onClose={handleClose}`，handleClose 不收参数——TS 兼容，行为不变。）
 
-- [ ] **Step 3: TargetedRunPage 退出接线**
+- [x] **Step 3: TargetedRunPage 退出接线**
 
 1. import 区追加：
 
@@ -541,11 +541,11 @@ import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
           />
 ```
 
-- [ ] **Step 4: ErrorPracticeRunPage 退出接线（镜像 Step 3）**
+- [x] **Step 4: ErrorPracticeRunPage 退出接线（镜像 Step 3）**
 
 与 Step 3 完全同构，差异仅一处：确认退出 navigate 目标为 `'/student/training/errors'`（replace: true）。其余文案/结构一致。
 
-- [ ] **Step 5: ExamRunPage 退出守卫（无 X，只拦截）**
+- [x] **Step 5: ExamRunPage 退出守卫（无 X，只拦截）**
 
 1. import 区追加：
 
@@ -591,12 +591,12 @@ import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 
 （考试页容器同样已在 Task 2 加过 p-4 sm:p-6，无 relative 需求——考试无抽屉。）
 
-- [ ] **Step 6: lint + build**
+- [x] **Step 6: lint + build**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 均通过。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/business/answer/RunExitGuard.tsx apps/web/src/components/business/answer/QuestionRunner.tsx apps/web/src/pages/student/training/TargetedRunPage.tsx apps/web/src/pages/student/training/ErrorPracticeRunPage.tsx apps/web/src/pages/student/training/ExamRunPage.tsx
@@ -612,7 +612,7 @@ git commit -m "feat(web): 答题页退出确认 + 浏览器返回拦截 + 考试
 - Modify: `apps/web/src/pages/student/training/ErrorPracticePage.tsx:167`
 - Modify: `apps/web/src/pages/student/training/TargetedConfigPage.tsx:186`
 
-- [ ] **Step 1: 三个页面容器加 pt**
+- [x] **Step 1: 三个页面容器加 pt**
 
 - `ExamListPage.tsx:214`：`<div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pb-16">` → `<div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">`
 - `ErrorPracticePage.tsx:167`：`<div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pb-32">` → 同位置加 `pt-6 sm:pt-8 `（保持 pb-32 不变）。
@@ -620,7 +620,7 @@ git commit -m "feat(web): 答题页退出确认 + 浏览器返回拦截 + 考试
 
 （TrainingHomePage 无 PageHeader（居中卡片页），不涉及；StarMapPage 为风格基准页，不动。）
 
-- [ ] **Step 2: 全量验证**
+- [x] **Step 2: 全量验证**
 
 Run: `cd apps/web && npm run lint && npm run build`
 Expected: 均通过。
@@ -639,7 +639,7 @@ Expected: 全绿（server 无改动，回归确认）。
 - 列表/配置页 PageHeader 顶部有留白。
 发现问题回改对应 Task。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/ExamListPage.tsx apps/web/src/pages/student/training/ErrorPracticePage.tsx apps/web/src/pages/student/training/TargetedConfigPage.tsx

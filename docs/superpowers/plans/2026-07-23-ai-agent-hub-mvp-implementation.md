@@ -102,7 +102,7 @@ apps/server/
 - Create: `apps/server/tsconfig.json`
 - Create: `apps/server/src/ai-core/` directory structure
 
-- [ ] **Step 1: Initialize package.json**
+- [x] **Step 1: Initialize package.json**
 
 ```bash
 mkdir -p apps/server/src/ai-core/infra/model-client
@@ -112,7 +112,7 @@ mkdir -p apps/server/src/ai-core/__tests__
 mkdir -p apps/server/src/services/conversation
 ```
 
-- [ ] **Step 2: Write package.json**
+- [x] **Step 2: Write package.json**
 
 ```json
 {
@@ -143,7 +143,7 @@ mkdir -p apps/server/src/services/conversation
 }
 ```
 
-- [ ] **Step 3: Write tsconfig.json**
+- [x] **Step 3: Write tsconfig.json**
 
 ```json
 {
@@ -163,12 +163,12 @@ mkdir -p apps/server/src/services/conversation
 }
 ```
 
-- [ ] **Step 4: Install dependencies and verify**
+- [x] **Step 4: Install dependencies and verify**
 
 Run: `cd apps/server && npm install`
 Expected: Dependencies installed without errors
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/package.json apps/server/tsconfig.json
@@ -182,7 +182,7 @@ git commit -m "chore(server): initialize apps/server project with dependencies"
 **Files:**
 - Create: `apps/server/src/ai-core/types.ts`
 
-- [ ] **Step 1: Write types.ts with all DTOs from design doc Appendix B.1**
+- [x] **Step 1: Write types.ts with all DTOs from design doc Appendix B.1**
 
 ```typescript
 // ========== Model Router Types (§3.1.2) ==========
@@ -554,12 +554,12 @@ export interface Message {
 }
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 Run: `cd apps/server && npx tsc --noEmit`
 Expected: No type errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/types.ts
@@ -577,7 +577,7 @@ git commit -m "feat(ai-core): add complete DTO type definitions"
 - Create: `apps/server/src/ai-core/fallback.yaml`
 - Create: `apps/server/src/ai-core/config.ts`
 
-- [ ] **Step 1: Write model-routes.yaml**
+- [x] **Step 1: Write model-routes.yaml**
 
 ```yaml
 # Model connection configs (§7.2, Appendix C.1)
@@ -689,7 +689,7 @@ default:
   fallback: deepseek-v4-flash
 ```
 
-- [ ] **Step 2: Write retry.yaml**
+- [x] **Step 2: Write retry.yaml**
 
 ```yaml
 retry:
@@ -713,7 +713,7 @@ streaming:
   interTokenTimeoutMs: 10000
 ```
 
-- [ ] **Step 3: Write safety.yaml**
+- [x] **Step 3: Write safety.yaml**
 
 ```yaml
 safety:
@@ -741,7 +741,7 @@ safety:
     randomPick: true
 ```
 
-- [ ] **Step 4: Write fallback.yaml**
+- [x] **Step 4: Write fallback.yaml**
 
 ```yaml
 fallback:
@@ -763,7 +763,7 @@ fallback:
     - 学习建议
 ```
 
-- [ ] **Step 5: Write config.ts — config loader with env var injection**
+- [x] **Step 5: Write config.ts — config loader with env var injection**
 
 ```typescript
 import { readFileSync } from 'fs';
@@ -845,12 +845,12 @@ export function getModelApiKey(modelId: string): string {
 export { __dirname as templateBasePath };
 ```
 
-- [ ] **Step 6: Verify config loading**
+- [x] **Step 6: Verify config loading**
 
 Run: `cd apps/server && node -e "import('./src/ai-core/config.js').then(c => console.log(Object.keys(c.routeConfig.models)))"` (after creating a minimal tsx runner)
 Expected: Lists model keys without errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/ai-core/model-routes.yaml apps/server/src/ai-core/retry.yaml apps/server/src/ai-core/safety.yaml apps/server/src/ai-core/fallback.yaml apps/server/src/ai-core/config.ts
@@ -865,7 +865,7 @@ git commit -m "feat(ai-core): add YAML config files and loader with env var inje
 - Create: `apps/server/src/ai-core/infra/model-router.ts`
 - Create: `apps/server/src/ai-core/infra/model-router.test.ts`
 
-- [ ] **Step 1: Write failing test for route matching**
+- [x] **Step 1: Write failing test for route matching**
 
 ```typescript
 // model-router.test.ts
@@ -913,12 +913,12 @@ describe('ModelRouter', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/server && npx vitest run src/ai-core/infra/model-router.test.ts`
 Expected: FAIL — ModelRouter not found
 
-- [ ] **Step 3: Implement ModelRouter**
+- [x] **Step 3: Implement ModelRouter**
 
 ```typescript
 // model-router.ts
@@ -984,12 +984,12 @@ export class ModelRouter {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd apps/server && npx vitest run src/ai-core/infra/model-router.test.ts`
 Expected: All 6 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/model-router.ts apps/server/src/ai-core/infra/model-router.test.ts
@@ -1004,7 +1004,7 @@ git commit -m "feat(ai-core): implement ModelRouter with route table matching an
 - Create: `apps/server/src/ai-core/infra/prompt-builder.ts`
 - Create: `apps/server/src/ai-core/infra/prompt-builder.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```typescript
 // prompt-builder.test.ts
@@ -1101,12 +1101,12 @@ describe('PromptBuilder', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/server && npx vitest run src/ai-core/infra/prompt-builder.test.ts`
 Expected: FAIL — PromptBuilder not found
 
-- [ ] **Step 3: Implement PromptBuilder**
+- [x] **Step 3: Implement PromptBuilder**
 
 ```typescript
 // prompt-builder.ts
@@ -1238,12 +1238,12 @@ export class PromptBuilder {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd apps/server && npx vitest run src/ai-core/infra/prompt-builder.test.ts`
 Expected: All 3 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/prompt-builder.ts apps/server/src/ai-core/infra/prompt-builder.test.ts
@@ -1262,7 +1262,7 @@ git commit -m "feat(ai-core): implement PromptBuilder with Mustache templates, p
 - Create: `apps/server/src/ai-core/infra/model-client/deepseek-client.ts`
 - Create: `apps/server/src/ai-core/infra/model-client/gemini-client.ts`
 
-- [ ] **Step 1: Write model-client/types.ts**
+- [x] **Step 1: Write model-client/types.ts**
 
 ```typescript
 // model-client/types.ts
@@ -1274,7 +1274,7 @@ export interface ProviderAdapter {
 }
 ```
 
-- [ ] **Step 2: Write kimi-client.ts (OpenAI-compatible)**
+- [x] **Step 2: Write kimi-client.ts (OpenAI-compatible)**
 
 ```typescript
 // kimi-client.ts
@@ -1392,7 +1392,7 @@ export class KimiClient implements ProviderAdapter {
 }
 ```
 
-- [ ] **Step 3: Write qwen-client.ts (identical structure, different base path)**
+- [x] **Step 3: Write qwen-client.ts (identical structure, different base path)**
 
 The Qwen client is identical to KimiClient — both use OpenAI-compatible API. Create as a class extending or copying the same structure.
 
@@ -1412,7 +1412,7 @@ import { KimiClient } from './kimi-client.js';
 export class QwenClient extends KimiClient {}
 ```
 
-- [ ] **Step 4: Write deepseek-client.ts**
+- [x] **Step 4: Write deepseek-client.ts**
 
 ```typescript
 // deepseek-client.ts
@@ -1422,7 +1422,7 @@ import { KimiClient } from './kimi-client.js';
 export class DeepSeekClient extends KimiClient {}
 ```
 
-- [ ] **Step 5: Write gemini-client.ts (stub for MVP — Gemini API has different protocol)**
+- [x] **Step 5: Write gemini-client.ts (stub for MVP — Gemini API has different protocol)**
 
 ```typescript
 // gemini-client.ts
@@ -1485,7 +1485,7 @@ export class GeminiClient implements ProviderAdapter {
 }
 ```
 
-- [ ] **Step 6: Write model-client/index.ts — unified interface with retry**
+- [x] **Step 6: Write model-client/index.ts — unified interface with retry**
 
 ```typescript
 // model-client/index.ts
@@ -1564,7 +1564,7 @@ export class ModelClient {
 }
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/model-client/
@@ -1579,7 +1579,7 @@ git commit -m "feat(ai-core): implement ModelClient with Kimi/Qwen/DeepSeek/Gemi
 - Create: `apps/server/src/ai-core/infra/response-parser.ts`
 - Create: `apps/server/src/ai-core/infra/response-parser.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```typescript
 // response-parser.test.ts
@@ -1664,12 +1664,12 @@ describe('ResponseParser', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/server && npx vitest run src/ai-core/infra/response-parser.test.ts`
 Expected: FAIL — ResponseParser not found
 
-- [ ] **Step 3: Implement ResponseParser**
+- [x] **Step 3: Implement ResponseParser**
 
 ```typescript
 // response-parser.ts
@@ -1770,12 +1770,12 @@ export class ResponseParser {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd apps/server && npx vitest run src/ai-core/infra/response-parser.test.ts`
 Expected: All 6 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/response-parser.ts apps/server/src/ai-core/infra/response-parser.test.ts
@@ -1790,7 +1790,7 @@ git commit -m "feat(ai-core): implement ResponseParser with JSON 3-level fallbac
 - Create: `apps/server/src/services/conversation/types.ts`
 - Create: `apps/server/src/services/conversation/index.ts`
 
-- [ ] **Step 1: Write conversation/types.ts**
+- [x] **Step 1: Write conversation/types.ts**
 
 ```typescript
 // conversation/types.ts
@@ -1826,7 +1826,7 @@ export interface CompleteDialogueRequest {
 }
 ```
 
-- [ ] **Step 2: Write conversation/index.ts — in-memory implementation**
+- [x] **Step 2: Write conversation/index.ts — in-memory implementation**
 
 ```typescript
 // conversation/index.ts
@@ -1935,7 +1935,7 @@ export class ConversationService {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/services/conversation/
@@ -1958,7 +1958,7 @@ git commit -m "feat(server): add ConversationService skeleton with in-memory sto
 - Create: `apps/server/src/ai-core/prompts/safety/classifier.md`
 - Create: `apps/server/src/ai-core/prompts/safety/gentle-block.yaml`
 
-- [ ] **Step 1: Write gentle-block.yaml (static phrase library, §5.8.2)**
+- [x] **Step 1: Write gentle-block.yaml (static phrase library, §5.8.2)**
 
 ```yaml
 off_topic:
@@ -1980,7 +1980,7 @@ sensitive:
   - "我是你的学习助手，只擅长回答学习相关的问题。有什么不会的题目发给我看看？"
 ```
 
-- [ ] **Step 2: Write classifier.md (content classifier prompt, §5.8.1)**
+- [x] **Step 2: Write classifier.md (content classifier prompt, §5.8.1)**
 
 ```markdown
 ---
@@ -2032,7 +2032,7 @@ Output: {"classification": "anomaly", "confidence": 0.85, "reason": "情绪发�
 {{userMessage}}
 ```
 
-- [ ] **Step 3: Write failing test for SafetyGuard**
+- [x] **Step 3: Write failing test for SafetyGuard**
 
 ```typescript
 // safety-guard.test.ts
@@ -2088,7 +2088,7 @@ describe('SafetyGuard', () => {
 });
 ```
 
-- [ ] **Step 4: Implement SafetyGuard**
+- [x] **Step 4: Implement SafetyGuard**
 
 ```typescript
 // safety-guard.ts
@@ -2241,12 +2241,12 @@ export class SafetyGuard {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `cd apps/server && npx vitest run src/ai-core/infra/safety-guard.test.ts`
 Expected: All 5 tests PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/safety-guard.ts apps/server/src/ai-core/infra/safety-guard.test.ts apps/server/src/ai-core/prompts/safety/
@@ -2262,7 +2262,7 @@ git commit -m "feat(ai-core): implement SafetyGuard with 3-tier classification, 
 - Create: `apps/server/src/ai-core/infra/fallback-handler.test.ts`
 - Create: `apps/server/src/ai-core/prompts/fallback/full-explanation.md`
 
-- [ ] **Step 1: Write full-explanation.md (§5.8.3)**
+- [x] **Step 1: Write full-explanation.md (§5.8.3)**
 
 ```markdown
 ---
@@ -2312,7 +2312,7 @@ description: "兜底完整解析模板"
 {{/dialogueHistory}}
 ```
 
-- [ ] **Step 2: Write FallbackHandler**
+- [x] **Step 2: Write FallbackHandler**
 
 ```typescript
 // fallback-handler.ts
@@ -2386,7 +2386,7 @@ export class FallbackHandler {
 }
 ```
 
-- [ ] **Step 3: Write fallback-handler.test.ts**
+- [x] **Step 3: Write fallback-handler.test.ts**
 
 ```typescript
 // fallback-handler.test.ts
@@ -2407,7 +2407,7 @@ describe('FallbackHandler', () => {
 });
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/fallback-handler.ts apps/server/src/ai-core/infra/fallback-handler.test.ts apps/server/src/ai-core/prompts/fallback/
@@ -2423,7 +2423,7 @@ git commit -m "feat(ai-core): implement FallbackHandler with full explanation te
 - Create: `apps/server/src/ai-core/prompts/system/socratic-rules.md`
 - Create: `apps/server/src/ai-core/prompts/system/safety-rules.md`
 
-- [ ] **Step 1: Write socratic-rules.md (§5.7.1)**
+- [x] **Step 1: Write socratic-rules.md (§5.7.1)**
 
 ```markdown
 ---
@@ -2452,7 +2452,7 @@ description: "所有学科的苏格拉底辅导通用规则片段"
 - ❌ 在学生卡住时继续追问（连续 3 次失败应建议兜底）
 ```
 
-- [ ] **Step 2: Write safety-rules.md**
+- [x] **Step 2: Write safety-rules.md**
 
 ```markdown
 ---
@@ -2467,7 +2467,7 @@ description: "安全边界规则（所有模板引用）"
 - 当学生表达情绪困扰时，温和安抚并引导回学习
 ```
 
-- [ ] **Step 3: Write base.md**
+- [x] **Step 3: Write base.md**
 
 ```markdown
 ---
@@ -2481,7 +2481,7 @@ description: "通用系统提示"
 {{> safety-rules}}
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/ai-core/prompts/system/
@@ -2496,7 +2496,7 @@ git commit -m "feat(ai-core): add system-level prompt partials (socratic rules, 
 - Create: `apps/server/src/ai-core/prompts/tutoring/math/mainline.md`
 - Create: `apps/server/src/ai-core/prompts/tutoring/math/auxiliary.md`
 
-- [ ] **Step 1: Write mainline.md (math mainline tutoring, §5.4.1)**
+- [x] **Step 1: Write mainline.md (math mainline tutoring, §5.4.1)**
 
 ```markdown
 ---
@@ -2570,7 +2570,7 @@ description: "数学主线苏格拉底辅导 — 严格限定卡片范围"
 {{userMessage}}
 ```
 
-- [ ] **Step 2: Write auxiliary.md (math auxiliary, §5.4.2)**
+- [x] **Step 2: Write auxiliary.md (math auxiliary, §5.4.2)**
 
 ```markdown
 ---
@@ -2629,7 +2629,7 @@ description: "数学辅线苏格拉底辅导 — 开放范围"
 {{userMessage}}
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/prompts/tutoring/
@@ -2644,7 +2644,7 @@ git commit -m "feat(ai-core): add math mainline and auxiliary tutoring prompt te
 - Create: `apps/server/src/ai-core/capabilities/tutoring.capability.ts`
 - Create: `apps/server/src/ai-core/capabilities/tutoring.capability.test.ts`
 
-- [ ] **Step 1: Write tutoring.capability.ts (§4.1.5)**
+- [x] **Step 1: Write tutoring.capability.ts (§4.1.5)**
 
 ```typescript
 // tutoring.capability.ts
@@ -2808,7 +2808,7 @@ export class TutoringCapability {
 }
 ```
 
-- [ ] **Step 2: Write tutoring.capability.test.ts**
+- [x] **Step 2: Write tutoring.capability.test.ts**
 
 ```typescript
 // tutoring.capability.test.ts
@@ -2864,7 +2864,7 @@ describe('TutoringCapability', () => {
 });
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/capabilities/tutoring.capability.ts apps/server/src/ai-core/capabilities/tutoring.capability.test.ts
@@ -2885,7 +2885,7 @@ git commit -m "feat(ai-core): implement TutoringCapability with full 9-step flow
 - Create: `apps/server/src/ai-core/prompts/grading/math-proof.md`
 - Create: `apps/server/src/ai-core/prompts/grading/math-calculation.md`
 
-- [ ] **Step 1: Write math-proof.md (design doc A.7)**
+- [x] **Step 1: Write math-proof.md (design doc A.7)**
 
 ```markdown
 ---
@@ -2948,7 +2948,7 @@ description: "数学证明题按步骤批改"
 满分：{{maxScore}} 分
 ```
 
-- [ ] **Step 2: Write math-calculation.md (design doc A.8)**
+- [x] **Step 2: Write math-calculation.md (design doc A.8)**
 
 ```markdown
 ---
@@ -3006,7 +3006,7 @@ description: "数学计算题/解答题按步骤批改"
 满分：{{maxScore}} 分
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/prompts/grading/
@@ -3019,7 +3019,7 @@ git commit -m "feat(ai-core): add math proof and calculation grading prompt temp
 - Create: `apps/server/src/ai-core/capabilities/grading.capability.ts`
 - Create: `apps/server/src/ai-core/capabilities/grading.capability.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```typescript
 // grading.capability.test.ts
@@ -3063,12 +3063,12 @@ describe('GradingCapability', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/server && npx vitest run src/ai-core/capabilities/grading.capability.test.ts`
 Expected: FAIL — GradingCapability not found
 
-- [ ] **Step 3: Implement GradingCapability**
+- [x] **Step 3: Implement GradingCapability**
 
 ```typescript
 // grading.capability.ts
@@ -3172,12 +3172,12 @@ export class GradingCapability {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd apps/server && npx vitest run src/ai-core/capabilities/grading.capability.test.ts`
 Expected: All 3 tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/ai-core/capabilities/grading.capability.ts apps/server/src/ai-core/capabilities/grading.capability.test.ts
@@ -3190,7 +3190,7 @@ git commit -m "feat(ai-core): implement GradingCapability with JSON parsing, Zod
 - Create: `apps/server/src/ai-core/prompts/explanation/error-analysis.md`
 - Create: `apps/server/src/ai-core/prompts/explanation/knowledge-retry.md`
 
-- [ ] **Step 1: Write error-analysis.md (design doc A.17)**
+- [x] **Step 1: Write error-analysis.md (design doc A.17)**
 
 ```markdown
 ---
@@ -3221,7 +3221,7 @@ description: "错题解析 — 分析错因并给出正确解法"
 请帮我分析错因并给出正确解法。
 ```
 
-- [ ] **Step 2: Write knowledge-retry.md (design doc A.18)**
+- [x] **Step 2: Write knowledge-retry.md (design doc A.18)**
 
 ```markdown
 ---
@@ -3254,7 +3254,7 @@ description: "知识点重讲 — 学生反复出错时换角度重新讲解"
 {{/errorHistory}}
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/prompts/explanation/
@@ -3267,7 +3267,7 @@ git commit -m "feat(ai-core): add error analysis and knowledge retry explanation
 - Create: `apps/server/src/ai-core/capabilities/explanation.capability.ts`
 - Create: `apps/server/src/ai-core/capabilities/explanation.capability.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```typescript
 // explanation.capability.test.ts
@@ -3287,7 +3287,7 @@ describe('ExplanationCapability', () => {
 });
 ```
 
-- [ ] **Step 2: Implement ExplanationCapability**
+- [x] **Step 2: Implement ExplanationCapability**
 
 ```typescript
 // explanation.capability.ts
@@ -3350,7 +3350,7 @@ export class ExplanationCapability {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/capabilities/explanation.capability.ts apps/server/src/ai-core/capabilities/explanation.capability.test.ts
@@ -3371,7 +3371,7 @@ git commit -m "feat(ai-core): implement ExplanationCapability with error_analysi
 - Create: `apps/server/src/ai-core/prompts/variation/generate.md`
 - Create: `apps/server/src/ai-core/prompts/analytics/report.md`
 
-- [ ] **Step 1: Write generate.md (design doc A.11)**
+- [x] **Step 1: Write generate.md (design doc A.11)**
 
 ```markdown
 ---
@@ -3422,7 +3422,7 @@ description: "数学变式题生成"
 **目标难度**：{{difficulty}}
 ```
 
-- [ ] **Step 2: Write report.md (design doc A.16)**
+- [x] **Step 2: Write report.md (design doc A.16)**
 
 ```markdown
 ---
@@ -3474,7 +3474,7 @@ description: "学情报告生成"
 {{/stats.topWeakPoints}}
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/prompts/variation/ apps/server/src/ai-core/prompts/analytics/
@@ -3487,7 +3487,7 @@ git commit -m "feat(ai-core): add variation generation and analytics report prom
 - Create: `apps/server/src/ai-core/capabilities/variation.capability.ts`
 - Create: `apps/server/src/ai-core/capabilities/variation.capability.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```typescript
 // variation.capability.test.ts
@@ -3507,7 +3507,7 @@ describe('VariationCapability', () => {
 });
 ```
 
-- [ ] **Step 2: Implement VariationCapability**
+- [x] **Step 2: Implement VariationCapability**
 
 ```typescript
 // variation.capability.ts
@@ -3585,7 +3585,7 @@ export class VariationCapability {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/capabilities/variation.capability.ts apps/server/src/ai-core/capabilities/variation.capability.test.ts
@@ -3598,7 +3598,7 @@ git commit -m "feat(ai-core): implement VariationCapability with Qwen-based gene
 - Create: `apps/server/src/ai-core/capabilities/analytics.capability.ts`
 - Create: `apps/server/src/ai-core/capabilities/analytics.capability.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```typescript
 // analytics.capability.test.ts
@@ -3618,7 +3618,7 @@ describe('AnalyticsCapability', () => {
 });
 ```
 
-- [ ] **Step 2: Implement AnalyticsCapability**
+- [x] **Step 2: Implement AnalyticsCapability**
 
 ```typescript
 // analytics.capability.ts
@@ -3695,7 +3695,7 @@ export class AnalyticsCapability {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/ai-core/capabilities/analytics.capability.ts apps/server/src/ai-core/capabilities/analytics.capability.test.ts
@@ -3707,7 +3707,7 @@ git commit -m "feat(ai-core): implement AnalyticsCapability with Kimi-based repo
 **Files:**
 - Create: `apps/server/src/ai-core/infra/logger.ts`
 
-- [ ] **Step 1: Implement Logger**
+- [x] **Step 1: Implement Logger**
 
 ```typescript
 // logger.ts
@@ -3755,7 +3755,7 @@ export function createLogger(traceId?: string): Logger {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/logger.ts
@@ -3767,7 +3767,7 @@ git commit -m "feat(ai-core): add structured JSON logger with traceId propagatio
 **Files:**
 - Create: `apps/server/src/ai-core/infra/metrics.ts`
 
-- [ ] **Step 1: Implement Metrics**
+- [x] **Step 1: Implement Metrics**
 
 ```typescript
 // metrics.ts
@@ -3839,7 +3839,7 @@ export async function getMetrics(): Promise<string> {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add apps/server/src/ai-core/infra/metrics.ts
@@ -3853,7 +3853,7 @@ git commit -m "feat(ai-core): add Prometheus metrics (8 counters/histograms/gaug
 - Create: `apps/server/src/ai-core/__tests__/tutoring-quality.ts`
 - Create: `apps/server/src/ai-core/__tests__/safety-classification.ts`
 
-- [ ] **Step 1: Write grading-accuracy.ts**
+- [x] **Step 1: Write grading-accuracy.ts**
 
 ```typescript
 // grading-accuracy.ts
@@ -3919,7 +3919,7 @@ async function runGradingTests() {
 runGradingTests();
 ```
 
-- [ ] **Step 2: Write tutoring-quality.ts**
+- [x] **Step 2: Write tutoring-quality.ts**
 
 ```typescript
 // tutoring-quality.ts
@@ -3981,7 +3981,7 @@ async function runTutoringTests() {
 runTutoringTests();
 ```
 
-- [ ] **Step 3: Write safety-classification.ts**
+- [x] **Step 3: Write safety-classification.ts**
 
 ```typescript
 // safety-classification.ts
@@ -4026,7 +4026,7 @@ function runSafetyTests() {
 runSafetyTests();
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/ai-core/__tests__/

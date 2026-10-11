@@ -58,7 +58,7 @@
 **Files:**
 - Modify: `tools/db/schema.sql`（在 `main_error_books` 建表之后、`practice_results` 之前加新表）
 
-- [ ] **Step 1: 在 schema.sql 加建表语句**
+- [x] **Step 1: 在 schema.sql 加建表语句**
 
 在 `tools/db/schema.sql` 第 530 行（`main_error_books` 表结束的 `) ENGINE=InnoDB ...;` 之后、`practice_results` 注释之前）插入：
 
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS student_hidden_questions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 本地建表（幂等，不影响既有数据）**
+- [x] **Step 2: 本地建表（幂等，不影响既有数据）**
 
 Run:
 ```bash
@@ -111,7 +111,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "DESC student_hidden_questions;"
 ```
 Expected: 输出 6 行字段（id/student_id/subject_id/question_id/created_at/updated_at）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tools/db/schema.sql
@@ -132,7 +132,7 @@ git commit -m "feat(db): 新增 student_hidden_questions 表（专项训练不�
 - Produces: `StudentHiddenQuestionsRepository` 类，方法 `mark(studentId, subjectId, questionId): Promise<void>`、`unmark(studentId, questionId): Promise<number>`、`unmarkAll(studentId): Promise<number>`、`findAllByStudent(studentId, subjectId): Promise<HiddenQuestionRow[]>`
 - 供 Task 4 `TrainingService` 注入
 
-- [ ] **Step 1: 在 types.ts 加 Row 类型**
+- [x] **Step 1: 在 types.ts 加 Row 类型**
 
 在 `apps/server/src/database/repositories/types.ts` 末尾加：
 
@@ -156,7 +156,7 @@ export interface HiddenQuestionListRow extends RowDataPacket {
 }
 ```
 
-- [ ] **Step 2: 在 index.ts 加导出**
+- [x] **Step 2: 在 index.ts 加导出**
 
 在 `apps/server/src/database/repositories/index.ts` 末尾加（按字母序插在 `StudentsRepository`/`SubjectsRepository` 附近，但实际位置不影响功能，放末尾即可）：
 
@@ -166,7 +166,7 @@ export { StudentHiddenQuestionsRepository } from './student-hidden-questions.rep
 
 并在同文件 `export type { ... } from './types.js';` 行的 type 列表里加 `StudentHiddenQuestionRow, HiddenQuestionListRow`。
 
-- [ ] **Step 3: 先写 repo 单测（TDD，验证 SQL 与参数）**
+- [x] **Step 3: 先写 repo 单测（TDD，验证 SQL 与参数）**
 
 创建 `apps/server/src/database/repositories/student-hidden-questions.repo.test.ts`：
 
@@ -245,12 +245,12 @@ describe('StudentHiddenQuestionsRepository.findAllByStudent', () => {
 });
 ```
 
-- [ ] **Step 4: 跑测试确认失败（类未定义）**
+- [x] **Step 4: 跑测试确认失败（类未定义）**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/student-hidden-questions.repo.test.ts`
 Expected: FAIL，`StudentHiddenQuestionsRepository is not defined`。
 
-- [ ] **Step 5: 实现 repo**
+- [x] **Step 5: 实现 repo**
 
 创建 `apps/server/src/database/repositories/student-hidden-questions.repo.ts`：
 
@@ -320,12 +320,12 @@ export class StudentHiddenQuestionsRepository {
 }
 ```
 
-- [ ] **Step 6: 跑测试确认通过**
+- [x] **Step 6: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/student-hidden-questions.repo.test.ts`
 Expected: PASS，4 个测试全绿。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/student-hidden-questions.repo.ts \
@@ -348,7 +348,7 @@ git commit -m "feat(server): StudentHiddenQuestionsRepository 仓储 + 单测"
 - Produces: `findRandomByKpAndType(studentId, subjectId, kpId, type, count)` —— 供 Task 4 `TrainingService` 调用
 - 破坏性签名变更：首个参数从 `subjectId` 改为 `studentId`，所有调用方须同步（仅 `TrainingService.startTargetedPractice` 一处）
 
-- [ ] **Step 1: 先改测试（TDD，体现新签名与 SQL）**
+- [x] **Step 1: 先改测试（TDD，体现新签名与 SQL）**
 
 修改 `apps/server/src/database/repositories/questions.repo.test.ts`，把 3 个测试里的 `findRandomByKpAndType` 调用都加 `studentId` 前置参数，并在 SQL 断言里加 `LEFT JOIN student_hidden_questions` 和 `shq.id IS NULL`：
 
@@ -404,12 +404,12 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败（旧实现签名不匹配）**
+- [x] **Step 2: 跑测试确认失败（旧实现签名不匹配）**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/questions.repo.test.ts`
 Expected: FAIL（旧实现第一个参数当 `studentId` 用，SQL 无 LEFT JOIN，断言全挂）。
 
-- [ ] **Step 3: 改 `questions.repo.ts` 实现**
+- [x] **Step 3: 改 `questions.repo.ts` 实现**
 
 修改 `apps/server/src/database/repositories/questions.repo.ts` 的 `findRandomByKpAndType`（line 68-93）为：
 
@@ -452,12 +452,12 @@ Expected: FAIL（旧实现第一个参数当 `studentId` 用，SQL 无 LEFT JOIN
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/database/repositories/questions.repo.test.ts`
 Expected: PASS，3 个测试全绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/questions.repo.ts \
@@ -477,7 +477,7 @@ git commit -m "feat(server): findRandomByKpAndType 排除已标记不再展示�
 - Consumes: `StudentHiddenQuestionsRepository`（Task 2）、新签名 `findRandomByKpAndType`（Task 3）
 - Produces: `startTargetedPractice({ studentId, subjectId, kpId, type, count })`、`markHidden(studentId, subjectId, questionId)`、`unmarkHidden(studentId, questionId)`、`unmarkAllHidden(studentId)`、`listHidden(studentId, subjectId)` —— 供 Task 5 controller 调用
 
-- [ ] **Step 1: 先更新 `training.service.test.ts` 的 `mk` factory 与 `startTargetedPractice` 测试**
+- [x] **Step 1: 先更新 `training.service.test.ts` 的 `mk` factory 与 `startTargetedPractice` 测试**
 
 修改 `apps/server/src/modules/training/training.service.test.ts`：
 
@@ -657,12 +657,12 @@ describe('TrainingService.listHidden', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败（service 签名/构造函数未变）**
+- [x] **Step 2: 跑测试确认失败（service 签名/构造函数未变）**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.service.test.ts`
 Expected: FAIL（`new TrainingService(...)` 参数数不匹配 / `startTargetedPractice` 缺 studentId / 新方法未定义）。
 
-- [ ] **Step 3: 改 `training.service.ts`**
+- [x] **Step 3: 改 `training.service.ts`**
 
 修改 `apps/server/src/modules/training/training.service.ts`：
 
@@ -748,12 +748,12 @@ import { StudentHiddenQuestionsRepository } from '../../database/repositories/st
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/server && npx vitest run src/modules/training/training.service.test.ts`
 Expected: PASS，全部测试绿（原 12 + 新 6 = 18 个）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/training/training.service.ts \
@@ -773,7 +773,7 @@ git commit -m "feat(server): TrainingService 加不再展示 4 方法 + startTar
 - Consumes: `TrainingService` 5 个方法（Task 4）
 - Produces: 5 个 REST 端点（`POST /api/training/targeted/start` + 4 个 hidden 端点）
 
-- [ ] **Step 1: 改 `training.controller.ts`**
+- [x] **Step 1: 改 `training.controller.ts`**
 
 1.1 顶部 import 加 `Delete, Param`（已有 `Body, Controller, Get, ParseIntPipe, Post, Query, UseGuards`）：
 
@@ -855,7 +855,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe
   }
 ```
 
-- [ ] **Step 2: 在 `training.module.ts` 注册新 repo**
+- [x] **Step 2: 在 `training.module.ts` 注册新 repo**
 
 修改 `apps/server/src/modules/training/training.module.ts`，`providers` 加 `StudentHiddenQuestionsRepository`：
 
@@ -875,7 +875,7 @@ import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 export class TrainingModule {}
 ```
 
-- [ ] **Step 3: 跑全量后端测试 + tsc 类型检查**
+- [x] **Step 3: 跑全量后端测试 + tsc 类型检查**
 
 Run:
 ```bash
@@ -883,7 +883,7 @@ cd apps/server && npx tsc --noEmit && npm test
 ```
 Expected: tsc 通过；vitest 全绿（原 72 + Task 2 新 4 + Task 3 改 3 + Task 4 新 6 = 85 个左右）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/modules/training/training.controller.ts \
@@ -901,7 +901,7 @@ git commit -m "feat(server): TrainingController 加不再展示 4 端点 + start
 **Interfaces:**
 - Produces: `HiddenQuestion` 类型、`markTrainingHidden` / `listTrainingHidden` / `unmarkTrainingHidden` / `unmarkAllTrainingHidden` 4 个函数
 
-- [ ] **Step 1: 在 api.ts 加类型与函数**
+- [x] **Step 1: 在 api.ts 加类型与函数**
 
 在 `apps/web/src/services/api.ts` 的 `startTargetedPractice` 函数之后（line 863 之后、`// --- Exams` 注释之前）插入：
 
@@ -945,7 +945,7 @@ export function unmarkAllTrainingHidden(): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: 类型检查 + lint**
+- [x] **Step 2: 类型检查 + lint**
 
 Run:
 ```bash
@@ -953,7 +953,7 @@ cd apps/web && npx tsc --noEmit && npm run lint
 ```
 Expected: 通过（无类型错误、无 lint 报错）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -970,7 +970,7 @@ git commit -m "feat(web): api.ts 加不再展示 4 个函数 + HiddenQuestion �
 **Interfaces:**
 - Produces: 可选 prop `questionMetaActions?: (q: RunnerQuestion) => ReactNode`，始终渲染（不 gate）；现有 `headerActions` 行为不变
 
-- [ ] **Step 1: 加 prop 类型**
+- [x] **Step 1: 加 prop 类型**
 
 在 `apps/web/src/components/business/answer/QuestionRunner.tsx` 的 `QuestionRunnerProps` interface（line 90 附近的 `headerActions?: (q: RunnerQuestion) => ReactNode;`）之后加一行：
 
@@ -979,7 +979,7 @@ git commit -m "feat(web): api.ts 加不再展示 4 个函数 + HiddenQuestion �
   questionMetaActions?: (q: RunnerQuestion) => ReactNode;
 ```
 
-- [ ] **Step 2: 解构 + 渲染**
+- [x] **Step 2: 解构 + 渲染**
 
 在 props 解构（line 114 附近的 `headerActions,`）之后加 `questionMetaActions,`。
 
@@ -1010,7 +1010,7 @@ git commit -m "feat(web): api.ts 加不再展示 4 个函数 + HiddenQuestion �
             )}
 ```
 
-- [ ] **Step 3: 类型检查 + lint + build**
+- [x] **Step 3: 类型检查 + lint + build**
 
 Run:
 ```bash
@@ -1018,7 +1018,7 @@ cd apps/web && npx tsc --noEmit && npm run lint && npm run build
 ```
 Expected: 通过（现有调用方不传 `questionMetaActions`，行为不变）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/components/business/answer/QuestionRunner.tsx
@@ -1035,7 +1035,7 @@ git commit -m "feat(web): QuestionRunner 加 questionMetaActions ungated 插槽"
 **Interfaces:**
 - Consumes: `QuestionRunner.questionMetaActions`（Task 7）、`markTrainingHidden`（Task 6）、`Modal`（`@/components/base`）、`toast`（`@/components/base/Toast`）
 
-- [ ] **Step 1: 加 import**
+- [x] **Step 1: 加 import**
 
 在 `apps/web/src/pages/student/training/TargetedRunPage.tsx` 的 import 区加：
 
@@ -1046,7 +1046,7 @@ import { toast } from '@/components/base/Toast';
 
 `Modal` 已 import（line 8）。
 
-- [ ] **Step 2: 加 state**
+- [x] **Step 2: 加 state**
 
 在 `const [exitConfirm, ...]` 之后（line 36 附近）加：
 
@@ -1058,7 +1058,7 @@ import { toast } from '@/components/base/Toast';
   const [marking, setMarking] = useState(false);
 ```
 
-- [ ] **Step 3: 加确认处理函数**
+- [x] **Step 3: 加确认处理函数**
 
 在 `handleFinish`（line 133）之后加：
 
@@ -1078,7 +1078,7 @@ import { toast } from '@/components/base/Toast';
   }, [markConfirm.questionId]);
 ```
 
-- [ ] **Step 4: 给 `QuestionRunner` 传 `questionMetaActions`**
+- [x] **Step 4: 给 `QuestionRunner` 传 `questionMetaActions`**
 
 把 `<QuestionRunner>` 调用（line 154-168）改成：
 
@@ -1121,7 +1121,7 @@ import { toast } from '@/components/base/Toast';
             />
 ```
 
-- [ ] **Step 5: 加确认 Modal**
+- [x] **Step 5: 加确认 Modal**
 
 在 `{exitConfirm.open && (...)}`（line 180）之后加：
 
@@ -1155,7 +1155,7 @@ import { toast } from '@/components/base/Toast';
         )}
 ```
 
-- [ ] **Step 6: 类型检查 + lint + build**
+- [x] **Step 6: 类型检查 + lint + build**
 
 Run:
 ```bash
@@ -1163,7 +1163,7 @@ cd apps/web && npx tsc --noEmit && npm run lint && npm run build
 ```
 Expected: 通过。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/TargetedRunPage.tsx
@@ -1180,7 +1180,7 @@ git commit -m "feat(web): TargetedRunPage 答题页加「不再展示」按钮 +
 **Interfaces:**
 - Consumes: `listTrainingHidden` / `unmarkTrainingHidden` / `unmarkAllTrainingHidden`（Task 6）、`Button` / `Card` / `PageHeader` / `Skeleton` / `Modal` / `toast`、`useThemeStore`
 
-- [ ] **Step 1: 创建清单页**
+- [x] **Step 1: 创建清单页**
 
 创建 `apps/web/src/pages/student/training/HiddenQuestionsPage.tsx`：
 
@@ -1382,7 +1382,7 @@ export default function HiddenQuestionsPage() {
 }
 ```
 
-- [ ] **Step 2: 类型检查 + lint**
+- [x] **Step 2: 类型检查 + lint**
 
 Run:
 ```bash
@@ -1390,7 +1390,7 @@ cd apps/web && npx tsc --noEmit && npm run lint
 ```
 Expected: 通过。
 
-- [ ] **Step 3: Commit（暂不验证路由——下一 Task 接）**
+- [x] **Step 3: Commit（暂不验证路由——下一 Task 接）**
 
 ```bash
 git add apps/web/src/pages/student/training/HiddenQuestionsPage.tsx
@@ -1405,7 +1405,7 @@ git commit -m "feat(web): 新建 HiddenQuestionsPage 不再展示清单页"
 - Modify: `apps/web/src/routes/index.tsx`
 - Modify: `apps/web/src/pages/student/training/TargetedConfigPage.tsx`
 
-- [ ] **Step 1: 加路由**
+- [x] **Step 1: 加路由**
 
 在 `apps/web/src/routes/index.tsx` 顶部 import 区（line 14-15 附近）加：
 
@@ -1427,7 +1427,7 @@ import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
   },
 ```
 
-- [ ] **Step 2: 在 `TargetedConfigPage` 加清单入口**
+- [x] **Step 2: 在 `TargetedConfigPage` 加清单入口**
 
 在 `apps/web/src/pages/student/training/TargetedConfigPage.tsx` 的 `<PageHeader />`（line 188）之后、`<Card>`（line 191）之前加工具条：
 
@@ -1444,7 +1444,7 @@ import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
           </div>
 ```
 
-- [ ] **Step 3: 类型检查 + lint + build**
+- [x] **Step 3: 类型检查 + lint + build**
 
 Run:
 ```bash
@@ -1452,7 +1452,7 @@ cd apps/web && npx tsc --noEmit && npm run lint && npm run build
 ```
 Expected: 通过。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/routes/index.tsx \
@@ -1469,7 +1469,7 @@ git commit -m "feat(web): 不再展示清单页路由 + 配置页入口按钮"
 
 **Spec §5 题池耗尽**：后端返回空 + 前端提示"已练完，可在清单页重置"。
 
-- [ ] **Step 1: 调整 emptyHint 文案**
+- [x] **Step 1: 调整 emptyHint 文案**
 
 修改 `apps/web/src/pages/student/training/TargetedConfigPage.tsx` 的 emptyHint 提示（line 302-304）：
 
@@ -1481,7 +1481,7 @@ git commit -m "feat(web): 不再展示清单页路由 + 配置页入口按钮"
               )}
 ```
 
-- [ ] **Step 2: 类型检查 + build**
+- [x] **Step 2: 类型检查 + build**
 
 Run:
 ```bash
@@ -1489,7 +1489,7 @@ cd apps/web && npx tsc --noEmit && npm run build
 ```
 Expected: 通过。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/TargetedConfigPage.tsx
@@ -1507,7 +1507,7 @@ git commit -m "feat(web): emptyHint 文案提示可在清单页重置"
 
 按 CLAUDE.md「API 文档同步规则」两份文档保持一致。
 
-- [ ] **Step 1: openapi.yaml 加 4 个端点**
+- [x] **Step 1: openapi.yaml 加 4 个端点**
 
 在 `docs/api/openapi.yaml` 的 `/api/training/targeted/start` 端点定义之后加：
 
@@ -1596,7 +1596,7 @@ git commit -m "feat(web): emptyHint 文案提示可在清单页重置"
         markedAt: { type: string, format: date-time }
 ```
 
-- [ ] **Step 2: API 设计文档加端点与数据流**
+- [x] **Step 2: API 设计文档加端点与数据流**
 
 在 `docs/API接口与数据流设计文档.md` §4 端点清单的训练模块下加 4 行：
 
@@ -1617,7 +1617,7 @@ git commit -m "feat(web): emptyHint 文案提示可在清单页重置"
 题池排除后为空 -> 返回 { questions: [] }，前端 emptyHint 提示「可在清单页重置」
 ```
 
-- [ ] **Step 3: changelog 加条目**
+- [x] **Step 3: changelog 加条目**
 
 在 `docs/ai-core-changelog.md` 顶部加：
 
@@ -1633,7 +1633,7 @@ git commit -m "feat(web): emptyHint 文案提示可在清单页重置"
 - 实施计划：`docs/superpowers/plans/2026-09-04-targeted-practice-exclude-marked.md`
 ```
 
-- [ ] **Step 4: 端点对照检查**
+- [x] **Step 4: 端点对照检查**
 
 Run:
 ```bash
@@ -1642,7 +1642,7 @@ grep -oE '/api/training/hidden[^ ]*' docs/API接口与数据流设计文档.md |
 ```
 Expected: 两份文档都出现 4 个端点路径，无遗漏。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/api/openapi.yaml \
@@ -1655,7 +1655,7 @@ git commit -m "docs(server): 不再展示 4 端点同步 openapi + API 设计文
 
 ## Task 13: 全量验证
 
-- [ ] **Step 1: 后端全量测试 + 类型检查**
+- [x] **Step 1: 后端全量测试 + 类型检查**
 
 Run:
 ```bash
@@ -1663,7 +1663,7 @@ cd apps/server && npx tsc --noEmit && npm test
 ```
 Expected: tsc 通过；vitest 全绿。
 
-- [ ] **Step 2: 前端 lint + build**
+- [x] **Step 2: 前端 lint + build**
 
 Run:
 ```bash
@@ -1692,7 +1692,7 @@ cd apps/web && npm run dev
 
 Expected: 全部通过。
 
-- [ ] **Step 4: 检查其他选题路径未受影响**
+- [x] **Step 4: 检查其他选题路径未受影响**
 
 在主线练习（课堂练习）/ 错题重做 / 考试模块各开一次练习，验证：
 - 已标记「不再展示」的题在这些路径下**仍然会出现**（排除仅专项训练生效）

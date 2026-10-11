@@ -29,7 +29,7 @@
 - Modify: `tools/db/schema.sql`（训练表家族，`training_sessions` 建表段之后）
 - Modify: `tools/data-refinery/`（`--purge-business-data` 的 FK 安全清理序）
 
-- [ ] **Step 1: 写迁移文件**
+- [x] **Step 1: 写迁移文件**
 
 创建 `tools/db/migrations/2026-09-21_remediation_sets.sql`：
 
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS remediation_set_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 折回 schema.sql**
+- [x] **Step 2: 折回 schema.sql**
 
 在 `tools/db/schema.sql` 中 `training_sessions` 建表语句之后（约 1160 行，`-- 14. 埋点与账本` 注释之前）插入与迁移文件**完全相同**的三段 `CREATE TABLE IF NOT EXISTS`，并在其前加注释行：
 
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS remediation_set_items (
 -- 设计：docs/superpowers/specs/2026-09-21-remediation-set-design.md
 ```
 
-- [ ] **Step 3: 更新 db_loader 的业务数据清理序**
+- [x] **Step 3: 更新 db_loader 的业务数据清理序**
 
 `remediation_set_items` 对 `questions` 有 RESTRICT 外键，full-reload 清 questions 前必须先清套题。在 `tools/data-refinery/` 中定位 purge 清理清单：
 
@@ -118,7 +118,7 @@ grep -rn "purge-business-data\|main_error_books" tools/data-refinery --include="
 
 （清单若是 SQL 文本列表，按同样位置加同样的语句。）
 
-- [ ] **Step 4: 手工 apply 迁移并验证**
+- [x] **Step 4: 手工 apply 迁移并验证**
 
 ```bash
 mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-21_remediation_sets.sql
@@ -127,7 +127,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW CREATE TABLE remediation_groups\G" | he
 
 Expected: 三张表存在，`remediation_groups` 有 `uniq_rgroups_triple` 唯一键。再跑一次迁移文件验证幂等（无报错、无变化）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/db/migrations/2026-09-21_remediation_sets.sql tools/db/schema.sql tools/data-refinery
@@ -142,7 +142,7 @@ git commit -m "feat(db): 错题补偿套题三表（sets/groups/items）迁移�
 - Modify: `apps/server/src/modules/points/default-rules.ts`
 - Test: `apps/server/src/modules/points/default-rules.test.ts`
 
-- [ ] **Step 1: 先改测试（失败测试）**
+- [x] **Step 1: 先改测试（失败测试）**
 
 打开 `apps/server/src/modules/points/default-rules.test.ts`，把对任务数/规则条数的断言更新为「9 类任务、18 条默认档位」（原 8 类 15 条——具体断言写法以现文件为准，找到计数的 `expect` 改数值），并新增档位断言：
 
@@ -161,7 +161,7 @@ git commit -m "feat(db): 错题补偿套题三表（sets/groups/items）迁移�
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/points/default-rules.test.ts
@@ -169,7 +169,7 @@ cd apps/server && npx vitest run src/modules/points/default-rules.test.ts
 
 Expected: FAIL（`remediation_question` 规则不存在）。
 
-- [ ] **Step 3: 实现默认规则**
+- [x] **Step 3: 实现默认规则**
 
 `apps/server/src/modules/points/default-rules.ts`：`TASK_NAMES` 对象末尾（`en_vocabulary` 之后）加一行；`DEFAULT_RULES` 数组在 `error_fix`（sortOrder 40）之后插入三条（占 35–37 空档，紧邻数学专项）：
 
@@ -185,7 +185,7 @@ Expected: FAIL（`remediation_question` 规则不存在）。
 
 存量学生无需回填脚本——`PointsService.award()` 的 `insertIgnoreBatch` 与 `PointRulesService.ensureRules()` 只补缺失的 `(taskCode, tierKey)`，新增任务零迁移（spec §7）。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/points/default-rules.test.ts
@@ -193,7 +193,7 @@ cd apps/server && npx vitest run src/modules/points/default-rules.test.ts
 
 Expected: PASS（全部用例）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/points/default-rules.ts apps/server/src/modules/points/default-rules.test.ts
@@ -209,7 +209,7 @@ git commit -m "feat(points): 新任务 remediation_question 按题型三档（�
 - Modify: `apps/server/src/database/repositories/knowledge-points.repo.ts`（加 `findById`）
 - Modify: `apps/server/src/database/repositories/training-sessions.repo.ts`（若缺 `findById` 则补）
 
-- [ ] **Step 1: questions.repo.ts 加三个方法**
+- [x] **Step 1: questions.repo.ts 加三个方法**
 
 在 `QuestionsRepository` 类的 `findRandomByKpAndType` 方法之后（类闭括号前）加入：
 
@@ -272,7 +272,7 @@ git commit -m "feat(points): 新任务 remediation_question 按题型三档（�
   }
 ```
 
-- [ ] **Step 2: knowledge-points.repo.ts 加 findById**
+- [x] **Step 2: knowledge-points.repo.ts 加 findById**
 
 先 `grep -n "async" apps/server/src/database/repositories/knowledge-points.repo.ts` 看现有方法与行接口名；若已有 `findById` 跳过此步。否则在类中加入（行接口沿用该文件已定义/导入的那个）：
 
@@ -289,7 +289,7 @@ git commit -m "feat(points): 新任务 remediation_question 按题型三档（�
 
 （若该文件没有导出的行接口，先看 `findBySubject` 返回什么类型，照它定义/复用；`knowledge_points` 表至少有 `id`/`name` 列。）
 
-- [ ] **Step 3: training-sessions.repo.ts 确认/补 findById**
+- [x] **Step 3: training-sessions.repo.ts 确认/补 findById**
 
 ```bash
 grep -n "findById" apps/server/src/database/repositories/training-sessions.repo.ts
@@ -308,7 +308,7 @@ grep -n "findById" apps/server/src/database/repositories/training-sessions.repo.
   }
 ```
 
-- [ ] **Step 4: 类型检查**
+- [x] **Step 4: 类型检查**
 
 ```bash
 cd apps/server && npx tsc --noEmit
@@ -316,7 +316,7 @@ cd apps/server && npx tsc --noEmit
 
 Expected: 无新增报错（存量报错如有，与本次改动无关则忽略）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/questions.repo.ts apps/server/src/database/repositories/knowledge-points.repo.ts apps/server/src/database/repositories/training-sessions.repo.ts
@@ -332,7 +332,7 @@ git commit -m "feat(repo): 补偿套题抽题/批量取题/primary考点映射 +
 - Modify: `apps/server/src/modules/practice/judge-core.service.ts:233-260`（副作用块）
 - Test: `apps/server/src/modules/practice/judge-core.service.test.ts`
 
-- [ ] **Step 1: 先写失败测试**
+- [x] **Step 1: 先写失败测试**
 
 在 `judge-core.service.test.ts` 中新增用例（mock 依赖的写法照该文件现有 harness；关键断言：source='remediation' 判错时**不调** `mainErrorRepo.create`/`findUnclearedByStudentQuestionId`，判对时**不调** `clearUnclearedByStudentQuestionId`，且不走 error_fix 发分）：
 
@@ -356,7 +356,7 @@ git commit -m "feat(repo): 补偿套题抽题/批量取题/primary考点映射 +
 
 （mock 对象名以该测试文件现有 harness 为准——若 harness 里叫别的名字，用现有名字。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts
@@ -364,7 +364,7 @@ cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts
 
 Expected: FAIL（当前 remediation 判错会走 `writeErrorBookOrReuse`，mock 被调用）。
 
-- [ ] **Step 3: 改 judge-core**
+- [x] **Step 3: 改 judge-core**
 
 `judge-core.service.ts:108` 的来源注释改为：
 
@@ -388,7 +388,7 @@ Expected: FAIL（当前 remediation 判错会走 `writeErrorBookOrReuse`，mock 
     }
 ```
 
-- [ ] **Step 4: 跑测试确认通过（含既有用例防回归）**
+- [x] **Step 4: 跑测试确认通过（含既有用例防回归）**
 
 ```bash
 cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts
@@ -396,7 +396,7 @@ cd apps/server && npx vitest run src/modules/practice/judge-core.service.test.ts
 
 Expected: PASS（新用例 + 既有 targeted/exam 来源用例全绿——早退分支只对 `'remediation'` 生效）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/practice/judge-core.service.ts apps/server/src/modules/practice/judge-core.service.test.ts
@@ -411,7 +411,7 @@ git commit -m "feat(judge-core): remediation 来源跳过错题本/清零/error_
 - Create: `apps/server/src/database/repositories/remediation.repo.ts`
 - Test: `apps/server/src/database/repositories/remediation.repo.test.ts`（可选，若仓库无单测文化可跳过；本计划要求至少一个 repo 冒烟测试，mock pool）
 
-- [ ] **Step 1: 实现仓储**
+- [x] **Step 1: 实现仓储**
 
 创建 `apps/server/src/database/repositories/remediation.repo.ts`：
 
@@ -561,7 +561,7 @@ export class RemediationRepository {
 }
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 ```bash
 cd apps/server && npx tsc --noEmit
@@ -569,7 +569,7 @@ cd apps/server && npx tsc --noEmit
 
 Expected: 无新增报错。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/server/src/database/repositories/remediation.repo.ts
@@ -586,7 +586,7 @@ git commit -m "feat(repo): 错题补偿套题三表仓储（RemediationRepositor
 
 > **延后项（本期未实现）**：spec §5.3 的「数学题过逻辑自洽校验（§7.10 风控要求）」本期未实现，延后到后续批次 —— 需新增「题目逻辑自洽性」校验能力，范围超出本期；服务端亦无 `validator_passed` 写入方。
 
-- [ ] **Step 1: 写测试（失败）**
+- [x] **Step 1: 写测试（失败）**
 
 `apps/server/src/modules/training/remediation-generator.service.test.ts`，mock questionsRepo/knowledgePointsRepo/remediationRepo/variation，构造 service 新实例：
 
@@ -651,7 +651,7 @@ describe('RemediationGeneratorService.buildGroups', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/remediation-generator.service.test.ts
@@ -659,7 +659,7 @@ cd apps/server && npx vitest run src/modules/training/remediation-generator.serv
 
 Expected: FAIL（服务文件不存在）。
 
-- [ ] **Step 3: 实现服务**
+- [x] **Step 3: 实现服务**
 
 创建 `apps/server/src/modules/training/remediation-generator.service.ts`：
 
@@ -837,7 +837,7 @@ export class RemediationGeneratorService {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/remediation-generator.service.test.ts
@@ -845,7 +845,7 @@ cd apps/server && npx vitest run src/modules/training/remediation-generator.serv
 
 Expected: PASS。如失败，按测试输出修服务（保持 spec 不变，修测试或服务代码）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/training/remediation-generator.service.ts apps/server/src/modules/training/remediation-generator.service.test.ts
@@ -860,7 +860,7 @@ git commit -m "feat(training): 补偿套题生成器（三元组成组/题库抽
 - Create: `apps/server/src/modules/training/remediation.service.ts`
 - Create: `apps/server/src/modules/training/remediation.service.test.ts`
 
-- [ ] **Step 1: 写测试（失败）**
+- [x] **Step 1: 写测试（失败）**
 
 `apps/server/src/modules/training/remediation.service.test.ts` 用纯 mock：
 
@@ -925,7 +925,7 @@ describe('submitAnswer', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/remediation.service.test.ts
@@ -933,7 +933,7 @@ cd apps/server && npx vitest run src/modules/training/remediation.service.test.t
 
 Expected: FAIL（服务文件不存在）。
 
-- [ ] **Step 3: 实现服务**
+- [x] **Step 3: 实现服务**
 
 创建 `apps/server/src/modules/training/remediation.service.ts`：
 
@@ -1207,7 +1207,7 @@ export class RemediationService {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/remediation.service.test.ts
@@ -1215,7 +1215,7 @@ cd apps/server && npx vitest run src/modules/training/remediation.service.test.t
 
 Expected: PASS。如有冲突按「测试错」原则修正测试或服务代码，不改 spec。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/training/remediation.service.ts apps/server/src/modules/training/remediation.service.test.ts
@@ -1232,7 +1232,7 @@ git commit -m "feat(training): 补偿套题编排服务（generate/overview/answ
 - Create: `apps/server/src/modules/training/remediation.controller.test.ts`
 - Modify: `apps/server/src/modules/training/training.module.ts`
 
-- [ ] **Step 1: 写 DTO（纯 TS 接口，仓库习惯）**
+- [x] **Step 1: 写 DTO（纯 TS 接口，仓库习惯）**
 
 创建 `apps/server/src/modules/training/dto/remediation.dto.ts`：
 
@@ -1258,7 +1258,7 @@ export interface RemediationSelfAssessDto {
 }
 ```
 
-- [ ] **Step 2: 写 Controller**
+- [x] **Step 2: 写 Controller**
 
 创建 `apps/server/src/modules/training/remediation.controller.ts`：
 
@@ -1332,7 +1332,7 @@ export class RemediationController {
 }
 ```
 
-- [ ] **Step 3: 注册模块**
+- [x] **Step 3: 注册模块**
 
 `apps/server/src/modules/training/training.module.ts`：
 
@@ -1362,7 +1362,7 @@ import { VariationCapability } from '../../ai-core/capabilities/variation.capabi
 
 说明：`VariationCapability` 无 `@Injectable()` 但构造参数可选，直接列 provider 由 Nest new 出零参实例（与 `HintCapability`/`QuestionStructuringCapability` 同一模式）；`JudgeCoreService`/`PointsService` 继续由 `imports: [PracticeModule, PointsModule]` 提供，不得重复 provide。
 
-- [ ] **Step 4: 写 controller 测试**
+- [x] **Step 4: 写 controller 测试**
 
 `apps/server/src/modules/training/remediation.controller.test.ts`，mock 服务测边界校验：
 
@@ -1385,7 +1385,7 @@ describe('RemediationController.generate', () => {
 });
 ```
 
-- [ ] **Step 5: 跑测试 + 类型检查**
+- [x] **Step 5: 跑测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/modules/training/remediation.controller.test.ts
@@ -1394,7 +1394,7 @@ cd apps/server && npx tsc --noEmit
 
 Expected: PASS（controller 测试） + tsc 无新增报错。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/training/dto apps/server/src/modules/training/remediation.controller.ts apps/server/src/modules/training/remediation.controller.test.ts apps/server/src/modules/training/training.module.ts
@@ -1408,7 +1408,7 @@ git commit -m "feat(training): 补偿套题 REST 端点与模块注册"
 **Files:**
 - Modify: `apps/web/src/services/api.ts`（在 `// --- Training: targeted practice ---` 与 `// --- Training · 语文古诗文默写 ---` 之间插入新区块）
 
-- [ ] **Step 1: 加类型与函数**
+- [x] **Step 1: 加类型与函数**
 
 在 `apps/web/src/services/api.ts` 找到 `// --- Training: targeted practice ---` 区块（约 970 行）末尾、`// --- Training · 语文古诗文默写 ---` 之前插入：
 
@@ -1502,7 +1502,7 @@ export function selfAssessRemediation(payload: {
 }
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 ```bash
 cd apps/web && npx tsc --noEmit
@@ -1510,7 +1510,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: 无新增报错。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -1525,7 +1525,7 @@ git commit -m "feat(api): 补偿套题前端接口函数"
 - Create: `apps/web/src/components/business/RemediationOfferCard.tsx`
 - Create: `apps/web/src/components/business/RemediationOfferCard.test.tsx`
 
-- [ ] **Step 1: 写测试（失败）**
+- [x] **Step 1: 写测试（失败）**
 
 `apps/web/src/components/business/RemediationOfferCard.test.tsx`：
 
@@ -1574,7 +1574,7 @@ describe('RemediationOfferCard', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd apps/web && npx vitest run src/components/business/RemediationOfferCard.test.tsx
@@ -1582,7 +1582,7 @@ cd apps/web && npx vitest run src/components/business/RemediationOfferCard.test.
 
 Expected: FAIL（组件不存在）。
 
-- [ ] **Step 3: 实现组件**
+- [x] **Step 3: 实现组件**
 
 创建 `apps/web/src/components/business/RemediationOfferCard.tsx`：
 
@@ -1662,7 +1662,7 @@ export function RemediationOfferCard({ source, sessionId, wrongCount, wrongQuest
 
 > ⚠️ **按钮配色（勿照抄上面的 `bg-blue-600`）**：按钮一律用 `base/Button` 的 `primary` / `secondary` 变体（brand 橘红 token），计划片段里的 `bg-blue-600` / `border-blue-300 text-blue-900` 是笔误，**勿照抄**（`style.md` §2 主 CTA = Brand-500 `#ff6b35`；Tailwind 原生蓝是家长端主题色，学生端不得使用）。本卡实际实现：`<Button variant="primary" size="sm">生成练习</Button>` + `<Button variant="secondary" size="sm">跳过</Button>`。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd apps/web && npx vitest run src/components/business/RemediationOfferCard.test.tsx
@@ -1670,7 +1670,7 @@ cd apps/web && npx vitest run src/components/business/RemediationOfferCard.test.
 
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/business/RemediationOfferCard.tsx apps/web/src/components/business/RemediationOfferCard.test.tsx
@@ -1685,7 +1685,7 @@ git commit -m "feat(web): 补偿套题询问卡组件"
 - Modify: `apps/web/src/pages/student/training/TrainingHomePage.tsx`
 - Create: `apps/web/src/pages/student/training/TrainingHomePage.test.tsx`
 
-- [ ] **Step 1: 改页面**
+- [x] **Step 1: 改页面**
 
 在 `TrainingHomePage.tsx`：
 1. 引入 `Banner`、`getRemediationOverview`：
@@ -1736,7 +1736,7 @@ import { getTrainingErrorBook, getRemediationOverview } from '@/services/api';
 
 > ⚠️ **按钮配色（勿照抄上面的 `bg-blue-600`）**：按钮一律用 `base/Button` 的 `primary` / `secondary` 变体（brand 橘红 token），计划片段里的 `bg-blue-600` 是笔误，**勿照抄**（`style.md` §2 主 CTA = Brand-500 `#ff6b35`）。此处「开始练习」应为 `<Button variant="primary" size="sm" onClick={…}>开始练习</Button>`。
 
-- [ ] **Step 2: 写测试**
+- [x] **Step 2: 写测试**
 
 创建 `apps/web/src/pages/student/training/TrainingHomePage.test.tsx`：
 
@@ -1783,7 +1783,7 @@ describe('TrainingHomePage remediation banner', () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试 + 类型检查**
+- [x] **Step 3: 跑测试 + 类型检查**
 
 ```bash
 cd apps/web && npx vitest run src/pages/student/training/TrainingHomePage.test.tsx
@@ -1792,7 +1792,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: PASS + tsc 无新增报错。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/TrainingHomePage.tsx apps/web/src/pages/student/training/TrainingHomePage.test.tsx
@@ -1809,7 +1809,7 @@ git commit -m "feat(web): 三卡页顶部提示条——待完成相似题专项
 - Modify: `apps/web/src/routes/routeTable.tsx`
 - Modify: `apps/web/src/routes/routeTable.test.tsx`
 
-- [ ] **Step 1: 新页面**
+- [x] **Step 1: 新页面**
 
 创建 `apps/web/src/pages/student/training/RemediationRunPage.tsx`：
 
@@ -2034,7 +2034,7 @@ export default function RemediationRunPage() {
 - 若 `DiscussDrawer` 未在文件顶部 import，加上 `import { DiscussDrawer } from '@/components/business/DiscussDrawer';`。
 - 若 `Modal` 未使用/未 import，可把 `onClose={() => setExitConfirm(true)}` 直接换成 `guardRef.current = false; navigate(...)` 并删除 Modal 分支；`RunExitGuard` 已经自带 confirm UI。优先用 `RunExitGuard` 自带的 confirm 弹窗，不要自己再写一个 Modal。上面的 Modal 是兜底写法，**建议删除 Modal 分支**，只保留 `RunExitGuard`（它本身会接管 `beforeunload` 与 X 退出）。让 Task 执行者参考 `TargetedRunPage.tsx` 底部 309 行之后的 exit guard 用法，保持一致。
 
-- [ ] **Step 2: 注册路由**
+- [x] **Step 2: 注册路由**
 
 `apps/web/src/routes/routeTable.tsx`，在 `/student/training/exam/result/:sessionId` 路由之后（或训练轨路由区任意合适位置）插入：
 
@@ -2056,7 +2056,7 @@ export default function RemediationRunPage() {
 import RemediationRunPage from '../pages/student/training/RemediationRunPage';
 ```
 
-- [ ] **Step 3: routeTable.test.tsx 钉路由映射**
+- [x] **Step 3: routeTable.test.tsx 钉路由映射**
 
 在 `apps/web/src/routes/routeTable.test.tsx` 中，仿照现有训练轨路径断言新增一条：
 
@@ -2069,7 +2069,7 @@ import RemediationRunPage from '../pages/student/training/RemediationRunPage';
 
 （具体断言 API 以现文件为准；若用对象引用比较，直接插入即可。）
 
-- [ ] **Step 4: 写 RemediationRunPage 渲染测试**
+- [x] **Step 4: 写 RemediationRunPage 渲染测试**
 
 `apps/web/src/pages/student/training/RemediationRunPage.test.tsx`：
 
@@ -2118,7 +2118,7 @@ describe('RemediationRunPage', () => {
 });
 ```
 
-- [ ] **Step 5: 跑测试 + 类型检查**
+- [x] **Step 5: 跑测试 + 类型检查**
 
 ```bash
 cd apps/web && npx vitest run src/pages/student/training/RemediationRunPage.test.tsx src/routes/routeTable.test.tsx
@@ -2127,7 +2127,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: PASS + tsc 无新增报错。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/RemediationRunPage.tsx apps/web/src/pages/student/training/RemediationRunPage.test.tsx apps/web/src/routes/routeTable.tsx apps/web/src/routes/routeTable.test.tsx
@@ -2144,7 +2144,7 @@ git commit -m "feat(web): 补偿套题作答页 + 路由"
 - Modify: `apps/web/src/pages/student/training/TargetedRunPage.tsx`（result 阶段）
 - Modify: `apps/web/src/pages/student/training/TargetedRunPage.test.tsx`
 
-- [ ] **Step 1: ExamResultPage 挂询问卡**
+- [x] **Step 1: ExamResultPage 挂询问卡**
 
 `apps/web/src/pages/student/training/ExamResultPage.tsx`：
 
@@ -2178,7 +2178,7 @@ import { RemediationOfferCard } from '@/components/business/RemediationOfferCard
 
 （保留原有的未自评横幅/得分卡位置不变；实际以现文件结构为准，把 RemediationOfferCard 加到 headerExtra 里即可。）
 
-- [ ] **Step 2: ExamResultPage 测试补断言**
+- [x] **Step 2: ExamResultPage 测试补断言**
 
 `apps/web/src/pages/student/training/ExamResultPage.test.tsx`：
 
@@ -2202,7 +2202,7 @@ it('有错题时显示补偿套题询问卡', async () => {
 });
 ```
 
-- [ ] **Step 3: TargetedRunPage 挂询问卡**
+- [x] **Step 3: TargetedRunPage 挂询问卡**
 
 `apps/web/src/pages/student/training/TargetedRunPage.tsx`：
 
@@ -2246,13 +2246,13 @@ import { RemediationOfferCard } from '@/components/business/RemediationOfferCard
             }
 ```
 
-- [ ] **Step 4: TargetedRunPage 测试补断言**
+- [x] **Step 4: TargetedRunPage 测试补断言**
 
 `apps/web/src/pages/student/training/TargetedRunPage.test.tsx`：
 
 mock `generateRemediationSet`/`getRemediationOverview` 并断言：完成结果页渲染错题时，询问卡出现。测试结构与现文件一致，不再展开；关键是触发 `handleFinish` 后进入 result phase，然后查文本 `/生成相似题专项练习/`。
 
-- [ ] **Step 5: 跑测试 + 类型检查**
+- [x] **Step 5: 跑测试 + 类型检查**
 
 ```bash
 cd apps/web && npx vitest run src/pages/student/training/ExamResultPage.test.tsx src/pages/student/training/TargetedRunPage.test.tsx
@@ -2261,7 +2261,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: PASS + tsc 无新增报错。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/pages/student/training/ExamResultPage.tsx apps/web/src/pages/student/training/ExamResultPage.test.tsx apps/web/src/pages/student/training/TargetedRunPage.tsx apps/web/src/pages/student/training/TargetedRunPage.test.tsx
@@ -2280,7 +2280,7 @@ git commit -m "feat(web): 考试结果页与专项完成页挂补偿套题询问
 - Modify: `docs/UX-UI设计文档.md`
 - Modify: `docs/superpowers/specs/2026-09-21-remediation-set-design.md`（第 4 节数据模型精修：origin_question_id 放在 groups 而非 items）
 
-- [ ] **Step 1: API 设计文档（端点清单 + 数据流）**
+- [x] **Step 1: API 设计文档（端点清单 + 数据流）**
 
 `docs/API接口与数据流设计文档.md`：
 - §4（端点清单）的训练轨表格里新增四行：
@@ -2299,7 +2299,7 @@ git commit -m "feat(web): 考试结果页与专项完成页挂补偿套题询问
   3. 三卡页轮询 `GET /me` 提示
   4. 作答页 `GET /questions` + `POST /answers`/`self-assess` → 全对 `deleteSet`
 
-- [ ] **Step 2: openapi.yaml**
+- [x] **Step 2: openapi.yaml**
 
 `docs/api/openapi.yaml` 在 `/api/training` 路径组附近新增 5 个 path（与 API 文档保持同步）：
 
@@ -2427,14 +2427,14 @@ git commit -m "feat(web): 考试结果页与专项完成页挂补偿套题询问
         '201': { description: 已记录自评，结构与 /answers 一致 }
 ```
 
-- [ ] **Step 3: PRD 更新**
+- [x] **Step 3: PRD 更新**
 
 `docs/K12智学系统-产品需求文档.md`：
 - §6.3 训练轨第 4 点后新增第 5 条「相似题专项练习（错题补偿套题）」，说明：数学考试/专项判错后征得学生同意，按（考点+题型+难度）生成相似题，每组 3 题，逐题作答、答对清零、全对清套、按题型发积分。
 - §7.10 末尾加姊妹说明：本功能与变式生成互补；变式是错题**再次**做错时触发，本功能是考/练**完成后**主动推送。
 - §7.13 积分任务表新增一行：`remediation_question | 相似题专项 | 题型 | 选择→3 / 填空→4 / 大题→6 | 不限`。
 
-- [ ] **Step 4: DB 设计文档 + UX-UI 文档**
+- [x] **Step 4: DB 设计文档 + UX-UI 文档**
 
 `docs/K12智学系统-数据库设计文档.md`：
 - 在训练表/题库相关章节插入 `remediation_sets`/`remediation_groups`/`remediation_set_items` 三表说明（或索引）。
@@ -2442,11 +2442,11 @@ git commit -m "feat(web): 考试结果页与专项完成页挂补偿套题询问
 `docs/UX-UI设计文档.md`：
 - 在训练轨页面清单中新增「相似题专项作答页 `/student/training/remediation/run`」，并说明三卡页提示条、考试/专项结果页询问卡。
 
-- [ ] **Step 5: 修正 spec 数据模型说明**
+- [x] **Step 5: 修正 spec 数据模型说明**
 
 `docs/superpowers/specs/2026-09-21-remediation-set-design.md` 第 4 节表格：把 `origin_question_id` 从 `remediation_set_items` 移到 `remediation_groups`（因为组即三元组，触发原错题是组级审计字段），并加一句说明。这是实现层面的小精修，不推翻之前用户裁决。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml docs/K12智学系统-产品需求文档.md docs/K12智学系统-数据库设计文档.md docs/UX-UI设计文档.md docs/superpowers/specs/2026-09-21-remediation-set-design.md
@@ -2457,7 +2457,7 @@ git commit -m "docs: 补偿套题 API/PRD/DB/UX/openapi 同步更新"
 
 ### Task 15: 全量构建与回归
 
-- [ ] **Step 1: 后端全量测试**
+- [x] **Step 1: 后端全量测试**
 
 ```bash
 cd apps/server && npm test
@@ -2465,7 +2465,7 @@ cd apps/server && npm test
 
 Expected: 全部通过（含本次新增 5 个测试文件 + 既有判题/训练/积分用例）。
 
-- [ ] **Step 2: 后端构建与启动**
+- [x] **Step 2: 后端构建与启动**
 
 ```bash
 cd apps/server && npm run build
@@ -2480,7 +2480,7 @@ cd apps/server && npx tsx src/ai-core/__tests__/safety-classification.ts
 
 Expected: 安全回归无异常；后端 3000 端口启动无 Nest DI 报错。
 
-- [ ] **Step 3: 前端 lint / test / build**
+- [x] **Step 3: 前端 lint / test / build**
 
 ```bash
 cd apps/web && npm run lint
@@ -2490,7 +2490,7 @@ cd apps/web && npm run build
 
 Expected: lint 无新增错误、测试全绿、build 成功。
 
-- [ ] **Step 4: 手工 smoke（用测试账号 lc1/123456）**
+- [x] **Step 4: 手工 smoke（用测试账号 lc1/123456）**
 
 在浏览器/Postman 联调（记忆：本地 5173，测试账号 lc1/123456）：
 
@@ -2508,7 +2508,7 @@ Expected: lint 无新增错误、测试全绿、build 成功。
 curl -s -H "Authorization: Bearer <token>" http://localhost:3000/api/training/remediation/me | jq .
 ```
 
-- [ ] **Step 5: 最终 Commit（如无修正则无需单独 commit；若有修正，逐条 commit）**
+- [x] **Step 5: 最终 Commit（如无修正则无需单独 commit；若有修正，逐条 commit）**
 
 若 smoke 中发现小 bug，按外科手术原则单条修正并 commit；若无需修正，本任务不产生单独 commit。
 

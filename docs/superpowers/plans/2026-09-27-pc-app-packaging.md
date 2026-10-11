@@ -76,7 +76,7 @@
 - Consumes: 无
 - Produces: 仓库能被 git 跟踪的两个 YAML 路径常量 —— `apps/desktop/electron-builder.yml`、`.github/workflows/desktop-release.yml`（Task 3 / Task 6 依赖它们真的能 `git add`）
 
-- [ ] **Step 1: 先写失败的护栏测试**
+- [x] **Step 1: 先写失败的护栏测试**
 
 新建 `apps/desktop/gitignore.guard.test.js`：
 
@@ -166,7 +166,7 @@ describe('.gitignore 的 *.yml 陷阱（spec ③ §4.0）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认它失败**
+- [x] **Step 2: 跑测试，确认它失败**
 
 ```bash
 cd apps/desktop && npx vitest run gitignore.guard.test.js
@@ -180,7 +180,7 @@ apps/desktop/electron-builder.yml 被「.gitignore:53:*.yml	apps/desktop/electro
 
 （「探针有牙齿」那条应当 **PASS** —— 它证明确实是 `.gitignore` 在作祟，不是探针坏了。）
 
-- [ ] **Step 3: 改 `.gitignore`**
+- [x] **Step 3: 改 `.gitignore`**
 
 把 `.gitignore` 第 52-53 行：
 
@@ -212,7 +212,7 @@ apps/desktop/electron-builder.yml 被「.gitignore:53:*.yml	apps/desktop/electro
 apps/web/public/download/
 ```
 
-- [ ] **Step 4: 跑测试，确认全绿**
+- [x] **Step 4: 跑测试，确认全绿**
 
 ```bash
 cd apps/desktop && npx vitest run gitignore.guard.test.js
@@ -220,7 +220,7 @@ cd apps/desktop && npx vitest run gitignore.guard.test.js
 
 Expected: PASS（3 passed）
 
-- [ ] **Step 5: 跑全量测试，确认没碰坏别的**
+- [x] **Step 5: 跑全量测试，确认没碰坏别的**
 
 ```bash
 cd apps/desktop && npm test
@@ -228,7 +228,7 @@ cd apps/desktop && npm test
 
 Expected: PASS（41 passed —— 原 38 + 新增 3）
 
-- [ ] **Step 6: 手工确认 git 真的看得见这两个路径**
+- [x] **Step 6: 手工确认 git 真的看得见这两个路径**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -247,7 +247,7 @@ Expected: `git check-ignore` 输出为空且 **exit code 1**（`echo $?`）—�
 
 > **这条是 spec §5 的验收 #10**，也是本任务最关键的证据：**必须用 `git status` 亲眼看到**，别只看测试绿。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -270,7 +270,7 @@ git commit -m "chore(gitignore): 反选 electron-builder 与 workflow 两个 YAM
 - Consumes: 无
 - Produces: 打包后 `app.getPath('userData')` 永远是 `<appData>/k12-desktop` —— README 的三条救火路径（`config.json` 位置）与 `shell-state.json` 的位置都依赖它
 
-- [ ] **Step 1: 先写失败的护栏测试**
+- [x] **Step 1: 先写失败的护栏测试**
 
 新建 `apps/desktop/user-data.guard.test.js`：
 
@@ -343,7 +343,7 @@ describe('userData 钉死护栏（spec ③ §4.2）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认它失败**
+- [x] **Step 2: 跑测试，确认它失败**
 
 ```bash
 cd apps/desktop && npx vitest run user-data.guard.test.js
@@ -351,7 +351,7 @@ cd apps/desktop && npx vitest run user-data.guard.test.js
 
 Expected: **FAIL** —— 第一条报 `expected '…' to match /app\.setPath\(\s*'userData'/`（还没这行）。
 
-- [ ] **Step 3: 在 `main.js` 加钉死代码**
+- [x] **Step 3: 在 `main.js` 加钉死代码**
 
 在 `apps/desktop/main.js` 里，紧跟这一段之后（即 `app.commandLine.appendSwitch('no-proxy-server');` 之后、下一个注释块之前）：
 
@@ -383,7 +383,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
 
 （`path` 已在文件首部 `require('node:path')`，无需新增 import。）
 
-- [ ] **Step 4: 跑测试，确认全绿**
+- [x] **Step 4: 跑测试，确认全绿**
 
 ```bash
 cd apps/desktop && npx vitest run user-data.guard.test.js
@@ -391,7 +391,7 @@ cd apps/desktop && npx vitest run user-data.guard.test.js
 
 Expected: PASS（3 passed）
 
-- [ ] **Step 5: 确认 dev 行为没变（路径是同一个）**
+- [x] **Step 5: 确认 dev 行为没变（路径是同一个）**
 
 ```bash
 cd apps/desktop && node -e "
@@ -403,7 +403,7 @@ node -e "console.log('appData 下的目标目录名 =', require('./package.json'
 
 Expected: 打印 `k12-desktop` —— 与钉死的目录名一致（这就是「dev 不变」的含义）。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -433,7 +433,7 @@ git commit -m "fix(desktop): 钉死 userData 为 k12-desktop，与中文 product
   - `apps/desktop/scripts/verify-asar.js` —— 导出 `REQUIRED: string[]`、`parseAsarList(stdout: string): Set<string>`、`checkEntries(entries: Set<string>): string[]`；CLI：`node scripts/verify-asar.js [distDir]`，通过时退出码 0 并打印 `asar 白名单校验通过`，否则退出码 1
   - npm script `verify:asar`（Task 6 的 CI 会用同名脚本）
 
-- [ ] **Step 1: 写校验脚本的失败测试**
+- [x] **Step 1: 写校验脚本的失败测试**
 
 新建 `apps/desktop/scripts/verify-asar.test.js`：
 
@@ -512,7 +512,7 @@ describe('REQUIRED 与本仓库的真实形态一致（防漂移）', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认它失败**
+- [x] **Step 2: 跑测试，确认它失败**
 
 ```bash
 cd apps/desktop && npx vitest run scripts/verify-asar.test.js
@@ -520,7 +520,7 @@ cd apps/desktop && npx vitest run scripts/verify-asar.test.js
 
 Expected: **FAIL** —— `Cannot find module './verify-asar.js'`。
 
-- [ ] **Step 3: 写 `apps/desktop/scripts/verify-asar.js`**
+- [x] **Step 3: 写 `apps/desktop/scripts/verify-asar.js`**
 
 ```js
 'use strict';
@@ -692,7 +692,7 @@ if (require.main === module) main();
 module.exports = { REQUIRED, parseAsarList, checkEntries, findAsarFiles };
 ```
 
-- [ ] **Step 4: 跑测试，确认全绿**
+- [x] **Step 4: 跑测试，确认全绿**
 
 ```bash
 cd apps/desktop && npx vitest run scripts/verify-asar.test.js
@@ -702,7 +702,7 @@ Expected: PASS（8 passed）
 
 > ⚠️ 若 `覆盖 main.js 里所有 require('./…')` 那条红了，说明 `REQUIRED` 漏了模块 —— **补 REQUIRED，别改测试**（测试是判据）。
 
-- [ ] **Step 5: 钉依赖 + 加 script + 修过期的 description**
+- [x] **Step 5: 钉依赖 + 加 script + 修过期的 description**
 
 在 `apps/desktop` 下执行（**让 lockfile 一起更新**，CI 用 `npm ci` 依赖它）：
 
@@ -742,7 +742,7 @@ Expected: 安装成功；`package.json` 的 `devDependencies` 出现这两个包
 
 （原 `description` 是「（Electron 壳，dev 模式；本期不出安装包）」—— ③ 之后这句过期，spec §7 点名要改。）
 
-- [ ] **Step 6: 新建 `apps/desktop/electron-builder.yml`**
+- [x] **Step 6: 新建 `apps/desktop/electron-builder.yml`**
 
 ```yaml
 # PC App 打包配置 —— spec docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md §4.1
@@ -792,7 +792,7 @@ linux:
 #      --config.publish.provider=generic --config.publish.url="$SERVER/download"
 ```
 
-- [ ] **Step 7: 本机最小验证 —— `--dir` 出包（spec §8-2 ①）**
+- [x] **Step 7: 本机最小验证 —— `--dir` 出包（spec §8-2 ①）**
 
 ```bash
 cd apps/desktop && rm -rf dist && ./node_modules/.bin/electron-builder --mac --dir
@@ -810,7 +810,7 @@ Expected: `dist/mac-arm64/K12 智学.app/Contents/Resources/app.asar`
 > electron-builder 不认识 Electron 44 之类，**停下来**：把报错原文记下来，按 spec §8-2 的退路
 > （钉精确版本 / 改 CI 的 node 版本）处理，并把结论回填 spec §1，再继续。
 
-- [ ] **Step 8: 用校验脚本验收这个包（这一步才是「资源真的进包了」的证据）**
+- [x] **Step 8: 用校验脚本验收这个包（这一步才是「资源真的进包了」的证据）**
 
 ```bash
 cd apps/desktop && node scripts/verify-asar.js
@@ -823,7 +823,7 @@ Expected:
 asar 白名单校验通过（1 个包）
 ```
 
-- [ ] **Step 9: 反向验证「校验脚本真的会红」（别只信绿）**
+- [x] **Step 9: 反向验证「校验脚本真的会红」（别只信绿）**
 
 ```bash
 cd apps/desktop && node -e "
@@ -839,7 +839,7 @@ console.log('反向验证通过：校验器确实有牙齿');
 
 Expected: 打印问题列表 + `反向验证通过：校验器确实有牙齿`
 
-- [ ] **Step 10: 真出一次包，验证更新清单真的产出（spec §8-2 ②）+ 实测 §5 那条待回填的措辞**
+- [x] **Step 10: 真出一次包，验证更新清单真的产出（spec §8-2 ②）+ 实测 §5 那条待回填的措辞**
 
 ```bash
 cd apps/desktop
@@ -888,7 +888,7 @@ Expected: `version = 0.1.0`、`缺失的产物 = []`、最后打印 `清单与�
 > 若 electron-builder 因 `identity: null` 报错，改成只依赖 `CSC_IDENTITY_AUTO_DISCOVERY=false` 环境变量，
 > 并把结论回填 spec §4.1 的 yml 片段。
 
-- [ ] **Step 11: 跑一次打包后的壳，验证 userData 与「连不上本地页」（人工，需要屏）**
+- [x] **Step 11: 跑一次打包后的壳，验证 userData 与「连不上本地页」（人工，需要屏）**
 
 ```bash
 open "apps/desktop/dist/mac-arm64/K12 智学.app"
@@ -903,7 +903,7 @@ Expected（对照 spec §5 人工验收 #4 / #6）：
 
 > 这是在**本机**（有屏）验；spec §5 人工验收 #1 要求的是**另一台** mac 装 dmg —— 那一步留在 Task 9。
 
-- [ ] **Step 12: 提交**
+- [x] **Step 12: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -930,7 +930,7 @@ git commit -m "feat(desktop): 打包配置 + asar 白名单校验脚本（含本
 - Consumes: Task 1 的 `apps/web/public/download/` 忽略规则；`apps/desktop/server-url.js` 的 `SERVER_URL`
 - Produces: CLI `bash tools/publish-installer.sh [--no-build] <文件1> [文件2 ...]` —— 用法/参数错误与非空校验失败时退出码 1 并打印 `[publish-installer] [ERROR] …`；成功时把文件拷进 `apps/web/public/download/`，并**重新生成下载页 `index.html`**（安装包按平台分区 + 更新用文件折叠 + 标注本次发布/早期版本）；**只在真正重建过 web 时**才打印 `<SERVER_URL>/download/` 与单文件直链，`--no-build` 下只说明下载页落在哪、并声明 `/download/` 在下次构建前仍返回应用本体
 
-- [ ] **Step 1: 写脚本**
+- [x] **Step 1: 写脚本**
 
 新建 `tools/publish-installer.sh`（**注意：无 emoji**）：
 
@@ -1202,7 +1202,7 @@ else
 fi
 ```
 
-- [ ] **Step 2: 让脚本可执行**
+- [x] **Step 2: 让脚本可执行**
 
 ```bash
 chmod +x /Users/lichao/Downloads/claude/imooc/ai_k12/tools/publish-installer.sh
@@ -1210,7 +1210,7 @@ chmod +x /Users/lichao/Downloads/claude/imooc/ai_k12/tools/publish-installer.sh
 
 （调用方式是 `bash tools/…`，所以这不是必需的；但与 `tools/deploy.sh` / `tools/services.sh` 保持一致。）
 
-- [ ] **Step 3: 负例 1 —— 无参数**
+- [x] **Step 3: 负例 1 —— 无参数**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && bash tools/publish-installer.sh; echo "exit=$?"
@@ -1223,7 +1223,7 @@ Expected:
 exit=1
 ```
 
-- [ ] **Step 4: 负例 2 —— 文件不存在（必须在拷贝前就拦住）**
+- [x] **Step 4: 负例 2 —— 文件不存在（必须在拷贝前就拦住）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1234,7 +1234,7 @@ ls apps/web/public/download/ 2>/dev/null || echo "（仍不存在 —— 校验�
 
 Expected: `exit=1`，报 `找不到文件: /tmp/不存在的包.dmg`，且**目录未被创建**（`mkdir` 在校验之后）。
 
-- [ ] **Step 5: 正例（不重建 web，只验路径与地址）**
+- [x] **Step 5: 正例（不重建 web，只验路径与地址）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1269,7 +1269,7 @@ Expected:
 > ⚠️ 注意那两个单文件地址是 `…/download/<文件名>`，正好呼应 spec §9：
 > ④ 要的更新清单与安装包**同目录**，所以脚本必须能一次收多个文件（D2 之外的硬要求）。
 
-- [ ] **Step 6: 确认这些文件不会入库（Task 1 的忽略规则真的生效）**
+- [x] **Step 6: 确认这些文件不会入库（Task 1 的忽略规则真的生效）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1278,7 +1278,7 @@ git status --short apps/web/public/download/
 
 Expected: **无输出**（目录被忽略）。若看到 `?? apps/web/public/download/…`，说明 Task 1 的规则没生效，**回去修**。
 
-- [ ] **Step 7: 清理测试残留**
+- [x] **Step 7: 清理测试残留**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1286,7 +1286,7 @@ rm -f apps/web/public/download/k12-fake.dmg apps/web/public/download/latest.yml 
 ls -A apps/web/public/download/ 2>/dev/null; echo "（应为空）"
 ```
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1309,7 +1309,7 @@ git commit -m "feat(tools): publish-installer.sh —— 安装包与更新清单
 - Consumes: Task 3 的 `verify:asar` script 与 `electron-builder.yml`；Task 1 的 `.gitignore` 反选
 - Produces: tag `desktop-v<version>` 推送后三平台产物 + artifact `k12-desktop-<os>`（内含 dmg/exe/AppImage + `latest*.yml`）
 
-- [ ] **Step 1: 新建 `.github/workflows/desktop-release.yml`**
+- [x] **Step 1: 新建 `.github/workflows/desktop-release.yml`**
 
 ```yaml
 # PC App 三平台打包与分发 —— spec docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md §4.3
@@ -1417,7 +1417,7 @@ jobs:
           if-no-files-found: error
 ```
 
-- [ ] **Step 2: 校验 YAML 能解析**
+- [x] **Step 2: 校验 YAML 能解析**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1446,7 +1446,7 @@ working-directory = apps/desktop
 > 注意：YAML 1.1 会把裸 `on:` 解析成布尔 `True`（Python 的已知怪癖），所以上面用 `True in d` 兜了一下 ——
 > 这不是文件写错了。
 
-- [ ] **Step 3: 本机复现「版本一致性校验」这段 shell（它是 CI 里最容易写错、又最该早失败的一段）**
+- [x] **Step 3: 本机复现「版本一致性校验」这段 shell（它是 CI 里最容易写错、又最该早失败的一段）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop
@@ -1462,7 +1462,7 @@ GITHUB_REF_NAME=desktop-v0.1.0 bash -c '
 
 Expected: `tag=0.1.0  package.json=0.1.0` + `一致 OK`
 
-- [ ] **Step 4: 负例 —— 不一致时必须失败**
+- [x] **Step 4: 负例 —— 不一致时必须失败**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop
@@ -1476,7 +1476,7 @@ GITHUB_REF_NAME=desktop-v9.9.9 bash -c '
 
 Expected: 打印 `不一致，按预期失败`，`exit=1`
 
-- [ ] **Step 5: 确认 workflow 真的能被 git 跟踪**
+- [x] **Step 5: 确认 workflow 真的能被 git 跟踪**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1489,7 +1489,7 @@ Expected: `git status` 看到 `?? .github/`（或 `?? .github/workflows/desktop-
 > ⚠️ 同样**带 `--no-index`、不要加 `-v`**（理由见 Task 1 Step 6 的注：`--no-index` 才能查到已跟踪文件，
 > `-v` 的退出码不能当判据）。
 
-- [ ] **Step 6: 跑全量桌面测试，确认没碰坏**
+- [x] **Step 6: 跑全量桌面测试，确认没碰坏**
 
 ```bash
 cd apps/desktop && npm test
@@ -1497,7 +1497,7 @@ cd apps/desktop && npm test
 
 Expected: PASS（8 文件 / 52 passed —— Task 1–3 新增了 3 个测试文件共 14 条用例，原 38 条）
 
-- [ ] **Step 7: 提交（**先不推 tag**）**
+- [x] **Step 7: 提交（**先不推 tag**）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1528,7 +1528,7 @@ matrix = macos-14 / windows-latest / ubuntu-latest；tag desktop-v* 或手动触
 > **本任务的核心不是「加」，是「删」**（spec §7 的加粗警告）：③ 让三条旧表述**变成错的**，
 > 而它们都是「照着做会更糟」的那种错。
 
-- [ ] **Step 1: 删掉 README 里那句会毁掉救火通路的警告**
+- [x] **Step 1: 删掉 README 里那句会毁掉救火通路的警告**
 
 先看现状：
 
@@ -1546,7 +1546,7 @@ Expected:
 这句是**假的**；留着它，后来者会照做、把三条救火路径改成 `K12 智学`，从而毁掉「客户端连不上时唯一
 的自救手段」（② spec §8-3）。
 
-- [ ] **Step 2: 在 README 的 PC App 章节补三块**
+- [x] **Step 2: 在 README 的 PC App 章节补三块**
 
 在 `README.md` 的 `### PC App (`apps/desktop`，Electron 壳)` 小节里、`#### 服务器地址（三层优先级）`
 之前插入：
@@ -1593,7 +1593,7 @@ xattr -dr com.apple.quarantine "/Applications/K12 智学.app"
 
 ````
 
-- [ ] **Step 3: 修掉 README 里过期的「dev 模式」措辞**
+- [x] **Step 3: 修掉 README 里过期的「dev 模式」措辞**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n 'dev 模式\|dev mode' README.md
@@ -1612,7 +1612,7 @@ Expected（两条）：
 - `:206` —— 把 `**已落地（dev 模式，2026-09-23）**` 改成 `**已落地（2026-09-23；安装包分发 2026-09-27 落地，签名仍未做）**`，并把句尾的
   `（安装包/签名/自动更新仍非目标）` 改成 `（**签名仍非目标**；自动更新待 ④）`
 
-- [ ] **Step 4: 改 `docs/constraints/pc-app-学习管控.md` 里那条已失效的表述**
+- [x] **Step 4: 改 `docs/constraints/pc-app-学习管控.md` 里那条已失效的表述**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12 && grep -n 'productName\|dev 模式' docs/constraints/pc-app-学习管控.md
@@ -1640,7 +1640,7 @@ Expected（两条）：
   的方式解决了，**不要再按原句去改 README**，那样做反而会把文档改错。）
 ```
 
-- [ ] **Step 5: 在 constraints 里补 ③ 的硬约束（新小节）**
+- [x] **Step 5: 在 constraints 里补 ③ 的硬约束（新小节）**
 
 在 `docs/constraints/pc-app-学习管控.md` 末尾追加：
 
@@ -1670,7 +1670,7 @@ Expected（两条）：
   `xattr -dr com.apple.quarantine` 或「系统设置 → 隐私与安全性 → 仍要打开」
 ```
 
-- [ ] **Step 6: 删掉 `apps/desktop/server-url.js` 里与实现不符的注释**
+- [x] **Step 6: 删掉 `apps/desktop/server-url.js` 里与实现不符的注释**
 
 现状（第 9 行附近）：
 
@@ -1685,7 +1685,7 @@ Expected（两条）：
  *      publish 配置与交付文档 —— 地址因此只有这一处真源）
 ```
 
-- [ ] **Step 7: 确认没有残留的旧表述**
+- [x] **Step 7: 确认没有残留的旧表述**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1701,7 +1701,7 @@ grep -n 'dev 模式' README.md docs/constraints/pc-app-学习管控.md apps/desk
 
 Expected: 四条都输出 `OK`。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1729,7 +1729,7 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
 - Consumes: Task 3 的实测结论（清单里有没有绝对地址）、Task 1–6 的全部产物
 - Produces: ② spec 的遗留项标为结清；changelog 记下七条实测事实
 
-- [ ] **Step 1: 给 ② spec 打两条注记**
+- [x] **Step 1: 给 ② spec 打两条注记**
 
 在 `docs/superpowers/specs/2026-09-26-pc-app-shell-productionization-design.md`：
 
@@ -1744,7 +1744,7 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
    > 那会把文档改错（并连带毁掉救火路径）。详见 ③ spec §4.2。
 ```
 
-- [ ] **Step 2: 按 Task 3 Step 10 的实测结论回填 ③ spec**
+- [x] **Step 2: 按 Task 3 Step 10 的实测结论回填 ③ spec**
 
 - **情况 A（清单只含相对文件名）**：把 §5 自动化的「更新清单产出」一行改为：
 
@@ -1758,7 +1758,7 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
 - **情况 B（清单含绝对地址）**：不改 §5 那一行，改为在 §8 追加一条风险：
   `11. 清单里嵌了绝对地址 → 换服务器地址后，**已发出的清单会指向旧地址**（与 §8-4 同源，④ 必须处理）`
 
-- [ ] **Step 3: 写 changelog**
+- [x] **Step 3: 写 changelog**
 
 在 `docs/ai-core-changelog.md` **顶部**追加一节（日期用今天）—— ⚠️ 该文件头部明确写着「迁出后的新条目
 继续追加在**顶部**」，不是末尾：
@@ -1823,7 +1823,7 @@ git commit -m "docs: ③ 的交付说明 + 删除三处已被 ③ 变成错的�
 - `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml`：**确认无需变更**（③ 不涉及任何端点）
 ```
 
-- [ ] **Step 4: 跑全量桌面测试 + 用 CI 的同一段命令自检**
+- [x] **Step 4: 跑全量桌面测试 + 用 CI 的同一段命令自检**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop && npm test && node scripts/verify-asar.js
@@ -1855,7 +1855,7 @@ Expected: 第一条存在；第二条报 `No such file or directory` —— **�
 > 正在服务，请**先问**，或另起一个假端口、把 `config.json` 指过去验「连不上」。
 > 收尾一律按 PID 对照，**不要 `pkill`**。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12

@@ -32,9 +32,9 @@ M1: 核心基础设施 ──► M2: 辅导能力 ──► M3: 评估能力 ─
 ### 1.3 前置条件
 
 - [x] AI-Agent 中枢设计文档已完成
-- [ ] `apps/server/` 项目初始化（Node.js + TypeScript + 包管理）
-- [ ] 至少一个 LLM 厂商 API Key 可用（推荐 Qwen 或 DeepSeek 起步）
-- [ ] 设计文档中附录 A 的完整 Prompt 模板文本准备就绪
+- [x] `apps/server/` 项目初始化（Node.js + TypeScript + 包管理）
+- [x] 至少一个 LLM 厂商 API Key 可用（推荐 Qwen 或 DeepSeek 起步）
+- [x] 设计文档中附录 A 的完整 Prompt 模板文本准备就绪
 
 ---
 

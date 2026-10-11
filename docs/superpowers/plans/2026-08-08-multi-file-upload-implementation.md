@@ -18,7 +18,7 @@
 - Modify: `apps/server/src/ai-core/types.ts:383-389`
 - Modify: `apps/server/src/modules/ai/dto/tutor.dto.ts:1-4`
 
-- [ ] **Step 1: 扩展 ai-core Attachment 类型**
+- [x] **Step 1: 扩展 ai-core Attachment 类型**
 
 在 `types.ts` 中修改 `Attachment` 接口，新增 `extractedText`、`extractedImages` 字段，`type` 新增 `'file'`：
 
@@ -33,7 +33,7 @@ export interface Attachment {
 }
 ```
 
-- [ ] **Step 2: 扩展 TutorAttachment DTO**
+- [x] **Step 2: 扩展 TutorAttachment DTO**
 
 在 `tutor.dto.ts` 中修改 `TutorAttachment` 接口，新增 `taskId`：
 
@@ -45,7 +45,7 @@ export interface TutorAttachment {
 }
 ```
 
-- [ ] **Step 3: 构建验证**
+- [x] **Step 3: 构建验证**
 
 ```bash
 cd apps/server && npx tsc --noEmit
@@ -53,7 +53,7 @@ cd apps/server && npx tsc --noEmit
 
 Expected: 编译通过（新增字段为可选，不破坏现有代码）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/ai-core/types.ts apps/server/src/modules/ai/dto/tutor.dto.ts
@@ -73,7 +73,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/services/api.ts:258-286`
 
-- [ ] **Step 1: 扩展 AttachmentRequest 类型**
+- [x] **Step 1: 扩展 AttachmentRequest 类型**
 
 找到 `AttachmentRequest` 接口（约第 260 行），改为：
 
@@ -85,7 +85,7 @@ export interface AttachmentRequest {
 }
 ```
 
-- [ ] **Step 2: 新增 streamExtraction SSE 函数**
+- [x] **Step 2: 新增 streamExtraction SSE 函数**
 
 在 `api.ts` 中 `extract()` 函数附近（约第 290 行之后），新增：
 
@@ -124,7 +124,7 @@ export async function* streamExtraction(
 }
 ```
 
-- [ ] **Step 3: 前端构建验证**
+- [x] **Step 3: 前端构建验证**
 
 ```bash
 cd apps/web && npx tsc --noEmit
@@ -132,7 +132,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: 编译通过。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -149,7 +149,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `apps/server/src/modules/refinery/refinery.service.ts:1-10,80-90`
 - Modify: `apps/server/src/modules/refinery/refinery.controller.ts:1-26`
 
-- [ ] **Step 1: RefineryService 添加 EventEmitter**
+- [x] **Step 1: RefineryService 添加 EventEmitter**
 
 在 `refinery.service.ts` 顶部添加 import：
 
@@ -164,7 +164,7 @@ import { EventEmitter } from 'node:events';
 readonly events = new EventEmitter();
 ```
 
-- [ ] **Step 2: runExtraction 中 emit 事件**
+- [x] **Step 2: runExtraction 中 emit 事件**
 
 找到 `runExtraction` 方法中 `await this.tasksRepo.updateStatus(taskId, 'completed', ...)` 那行（约第 79 行），在更新成功后添加 emit：
 
@@ -186,7 +186,7 @@ await this.tasksRepo.updateStatus(taskId, 'failed', undefined, err.message);
 this.events.emit(`task:${taskId}`, { type: 'error', message: (err as Error).message });
 ```
 
-- [ ] **Step 3: RefineryController 新增 SSE 端点**
+- [x] **Step 3: RefineryController 新增 SSE 端点**
 
 在 `refinery.controller.ts` 中添加 import：
 
@@ -260,7 +260,7 @@ async streamTask(
 }
 ```
 
-- [ ] **Step 4: 构建验证**
+- [x] **Step 4: 构建验证**
 
 ```bash
 cd apps/server && npx tsc --noEmit
@@ -268,7 +268,7 @@ cd apps/server && npx tsc --noEmit
 
 Expected: 编译通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/server/src/modules/refinery/refinery.service.ts apps/server/src/modules/refinery/refinery.controller.ts
@@ -290,7 +290,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `apps/server/src/modules/files/files.service.ts:1-41`
 - Modify: `apps/server/src/modules/files/files.module.ts:1-11`
 
-- [ ] **Step 1: FilesService 注入 RefineryService**
+- [x] **Step 1: FilesService 注入 RefineryService**
 
 在 `files.service.ts` 中：
 
@@ -318,7 +318,7 @@ export class FilesService {
   ) {}
 ```
 
-- [ ] **Step 2: upload 方法中检测 PDF 并启动提取**
+- [x] **Step 2: upload 方法中检测 PDF 并启动提取**
 
 修改 `upload` 方法的返回逻辑（DB insert 之后），添加 PDF 检测：
 
@@ -354,7 +354,7 @@ async upload(file: Express.Multer.File, uploaderId: number, source: string): Pro
 }
 ```
 
-- [ ] **Step 3: FilesModule 导入 RefineryModule**
+- [x] **Step 3: FilesModule 导入 RefineryModule**
 
 在 `files.module.ts` 中：
 
@@ -374,11 +374,11 @@ import { RefineryModule } from '../refinery/refinery.module.js';  // 新增
 export class FilesModule {}
 ```
 
-- [ ] **Step 4: 更新 FilesController 响应类型**
+- [x] **Step 4: 更新 FilesController 响应类型**
 
 `files.controller.ts` 中 `upload` 方法的返回类型自动推断，无需改动。`UploadedFileResult` 接口已扩展 `taskId?`，TypeScript 自动兼容。
 
-- [ ] **Step 5: 构建验证**
+- [x] **Step 5: 构建验证**
 
 ```bash
 cd apps/server && npx tsc --noEmit
@@ -386,7 +386,7 @@ cd apps/server && npx tsc --noEmit
 
 Expected: 编译通过。注意循环依赖问题——RefineryModule 和 FilesModule 都是独立模块，RefineryModule 不 import FilesModule，所以不会循环。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/files/files.service.ts apps/server/src/modules/files/files.module.ts
@@ -408,7 +408,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `apps/server/src/modules/ai/ai.module.ts:1-37`
 - Maybe modify: `apps/server/src/ai-core/capabilities/tutoring.capability.ts`
 
-- [ ] **Step 1: 注入 ExtractTasksRepository**
+- [x] **Step 1: 注入 ExtractTasksRepository**
 
 在 `ai.module.ts` 中添加 `ExtractTasksRepository` provider。
 
@@ -430,7 +430,7 @@ providers: [
 ],
 ```
 
-- [ ] **Step 2: AIService 注入 ExtractTasksRepository**
+- [x] **Step 2: AIService 注入 ExtractTasksRepository**
 
 在 `ai.service.ts` 构造函数参数中添加：
 
@@ -447,7 +447,7 @@ constructor(
 ) {}
 ```
 
-- [ ] **Step 3: 修改 resolveAttachments 方法**
+- [x] **Step 3: 修改 resolveAttachments 方法**
 
 找到 `resolveAttachments` 方法（约第 136 行），将整个方法替换为：
 
@@ -545,7 +545,7 @@ private async resolveAttachments(dto: TutorDto, userId: number): Promise<Attachm
 }
 ```
 
-- [ ] **Step 4: 修改 TutoringCapability 以支持文本附件**
+- [x] **Step 4: 修改 TutoringCapability 以支持文本附件**
 
 读取 `tutoring.capability.ts` 中找到 `buildPrompt` 或构建 user message 的位置。在构建 `TutoringRequest` 的 user message 时，检测 `attachments` 中的 `type === 'file'` 项，将 `extractedText` 拼入消息内容。
 
@@ -568,7 +568,7 @@ for (const fa of fileAttachments) {
 
 注意：需要读实际的 `tutoring.capability.ts` 文件以确定精确的插入位置和变量名。
 
-- [ ] **Step 5: 构建验证**
+- [x] **Step 5: 构建验证**
 
 ```bash
 cd apps/server && npx tsc --noEmit
@@ -576,7 +576,7 @@ cd apps/server && npx tsc --noEmit
 
 Expected: 编译通过。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/modules/ai/ai.service.ts apps/server/src/modules/ai/ai.module.ts apps/server/src/ai-core/capabilities/tutoring.capability.ts
@@ -600,13 +600,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 这是本计划最大的改动。需要先完整读取现网文件以确保不丢失现有功能。
 
-- [ ] **Step 1: 读取现网文件**
+- [x] **Step 1: 读取现网文件**
 
 ```bash
 wc -l apps/web/src/components/business/AuxInputBar.tsx
 ```
 
-- [ ] **Step 2: 重写 AuxInputBar**
+- [x] **Step 2: 重写 AuxInputBar**
 
 现网文件 272 行，重构要点：
 
@@ -769,7 +769,7 @@ const doSend = useCallback(() => {
 }, [text, fileState, isStreaming, onSend]);
 ```
 
-- [ ] **Step 3: 前端构建验证**
+- [x] **Step 3: 前端构建验证**
 
 ```bash
 cd apps/web && npx tsc --noEmit
@@ -777,7 +777,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: 编译通过。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/components/business/AuxInputBar.tsx
@@ -801,7 +801,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/web/src/hooks/useAuxChat.ts:185-228`
 
-- [ ] **Step 1: send() 透传 taskId**
+- [x] **Step 1: send() 透传 taskId**
 
 `useAuxChat` 的 `send` 函数已经接收 `attachments?: AttachmentRequest[]`，而 `AttachmentRequest` 已在 Task 2 扩展了 `taskId` 字段。`send` 函数直接将 `attachments` 传给 `streamTutor`/`fallbackToRest`，它们将其序列化为 JSON body 发给 `/api/ai/tutor/stream`。
 
@@ -821,7 +821,7 @@ const send = useCallback(
 
 AuxInputBar 的 `onSend` props 类型也需要更新（Task 6 中已通过 `AttachmentRequest` 类型完成）。
 
-- [ ] **Step 2: 确认无改动后的构建验证**
+- [x] **Step 2: 确认无改动后的构建验证**
 
 ```bash
 cd apps/web && npx tsc --noEmit
@@ -829,7 +829,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: 编译通过（类型自动兼容）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 # useAuxChat.ts 无改动，但 AuxInputBar.tsx 的 onSend props 在 Task 6 已更新
@@ -849,7 +849,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Files:**
 - 所有已修改文件
 
-- [ ] **Step 1: 后端编译 + 测试**
+- [x] **Step 1: 后端编译 + 测试**
 
 ```bash
 cd apps/server && npx tsc --noEmit && npm test
@@ -857,7 +857,7 @@ cd apps/server && npx tsc --noEmit && npm test
 
 Expected: tsc 通过，所有现有测试绿（72 tests）。EventEmitter 改动不影响现有测试（无新方法调用签名变更）。
 
-- [ ] **Step 2: 前端编译**
+- [x] **Step 2: 前端编译**
 
 ```bash
 cd apps/web && npx tsc --noEmit
@@ -869,18 +869,18 @@ Expected: 编译通过。
 
 启动服务后验证：
 
-- [ ] 图片上传：拖拽/粘贴/点+选图片 → 缩略图预览 → 发送 → LLM 正常回复
-- [ ] TXT 上传：点+选 .txt → 文档图标预览 → 发送 → 内容拼接正确
-- [ ] MD 上传：点+选 .md → 文档图标预览 → 发送 → 内容拼接正确
-- [ ] PDF 上传：点+选 .pdf → PDF 图标 + "提取中..." → spinner → "已就绪" → 发送
-- [ ] PDF 超时（如果可能）：模拟 MinerU 挂起 → 120s 后 toast "提取超时"
-- [ ] 不支持格式：选不支持的文件 → toast "不支持的文件格式"
-- [ ] 单文件替换：已有文件时再选新文件 → 旧文件被替换
-- [ ] 移除文件：点「移除」→ 文件预览消失
-- [ ] HEIC 图片：拖入 HEIC → 转换 → 上传 → 发送正常
-- [ ] 纯文本发送：不选文件，输入文字 → 发送正常（不退化）
+- [x] 图片上传：拖拽/粘贴/点+选图片 → 缩略图预览 → 发送 → LLM 正常回复
+- [x] TXT 上传：点+选 .txt → 文档图标预览 → 发送 → 内容拼接正确
+- [x] MD 上传：点+选 .md → 文档图标预览 → 发送 → 内容拼接正确
+- [x] PDF 上传：点+选 .pdf → PDF 图标 + "提取中..." → spinner → "已就绪" → 发送
+- [x] PDF 超时（如果可能）：模拟 MinerU 挂起 → 120s 后 toast "提取超时"
+- [x] 不支持格式：选不支持的文件 → toast "不支持的文件格式"
+- [x] 单文件替换：已有文件时再选新文件 → 旧文件被替换
+- [x] 移除文件：点「移除」→ 文件预览消失
+- [x] HEIC 图片：拖入 HEIC → 转换 → 上传 → 发送正常
+- [x] 纯文本发送：不选文件，输入文字 → 发送正常（不退化）
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -898,7 +898,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Modify: `docs/api/openapi.yaml`
 - Modify: `docs/API接口与数据流设计文档.md`
 
-- [ ] **Step 1: 同步辅助系统设计文档**
+- [x] **Step 1: 同步辅助系统设计文档**
 
 在 `2026-08-02-auxiliary-track-design.md` 中：
 - §3.1 高层组件图：更新文件上传通道描述（图片 → 图片+文本+PDF）
@@ -907,7 +907,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 具体修改内容需读取目标文档后精确定位。
 
-- [ ] **Step 2: 同步 openapi.yaml**
+- [x] **Step 2: 同步 openapi.yaml**
 
 在 `openapi.yaml` 中：
 
@@ -915,14 +915,14 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 2. 新增 `GET /api/refinery/tasks/{taskId}/stream` SSE 端点定义
 3. 更新 `POST /api/ai/tutor` 和 `POST /api/ai/tutor/stream` 的 `TutorAttachment` schema，`type` 枚举加 `'file'`，加 `taskId` 可选字段
 
-- [ ] **Step 3: 同步 API 设计文档**
+- [x] **Step 3: 同步 API 设计文档**
 
 在 `API接口与数据流设计文档.md` 中：
 - §4 端点清单：添加新端点 `GET /api/refinery/tasks/{taskId}/stream`
 - §6 数据流：添加 PDF 上传→提取→SSE 通知时序
 - 更新附件类型定义
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-08-02-auxiliary-track-design.md docs/api/openapi.yaml docs/API接口与数据流设计文档.md

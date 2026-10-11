@@ -68,7 +68,7 @@
 - Modify: `tools/data-refinery/src/card_splitter.py`
 - Test: `tools/data-refinery/tests/test_card_splitter.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `tests/test_card_splitter.py`：
 
@@ -96,12 +96,12 @@ def test_same_section_fill_pulls_sentence_from_next():
     assert len(bundles) >= 2
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_card_splitter.py::test_current_heading_tracks_markdown_heading -v`
 Expected: FAIL（`_current_heading` 不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `card_splitter.py` 顶部工具函数区加：
 
@@ -192,12 +192,12 @@ def _last_heading_of(current_texts: list[str]) -> str | None:
 
 > 注：同节判断需在循环里用 `last_heading` 变量记录封存前的 heading；实现时把 `_last_heading_of` 替换为循环局部变量 `last_heading`。这是实现提示，落地时按循环结构调整。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_card_splitter.py -v`
 Expected: PASS（含既有用例不回归）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/card_splitter.py tools/data-refinery/tests/test_card_splitter.py
@@ -213,7 +213,7 @@ git commit -m "feat(data-refinery): card_splitter heading-aware fill + (N) atomi
 - Modify: `tools/data-refinery/src/prompts/textbook_cards.txt`
 - Test: `tools/data-refinery/tests/test_card_labeler.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `tests/test_card_labeler.py`：
 
@@ -244,12 +244,12 @@ def test_label_result_questions_none_for_non_practice(monkeypatch):
     assert result.labels[0].questions is None
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_card_labeler.py -v`
 Expected: FAIL（`QuestionMarker` 不存在 / questions 未解析）
 
-- [ ] **Step 3: 实现 card_labeler.py**
+- [x] **Step 3: 实现 card_labeler.py**
 
 在 `card_labeler.py` 加 dataclass 并修改解析：
 
@@ -294,7 +294,7 @@ for idx, item in enumerate(raw_items):
     ))
 ```
 
-- [ ] **Step 4: 增量改提示词**
+- [x] **Step 4: 增量改提示词**
 
 `tools/data-refinery/src/prompts/textbook_cards.txt` — 在 `【card_type -- 卡片类型】` 段之后追加（**增量 Edit，不重写既有内容**）：
 
@@ -312,12 +312,12 @@ for idx, item in enumerate(raw_items):
 
 并修改输出格式示例，在 practice 项里加 `intro` 与 `questions`（参考 spec §5.1 JSON）。
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 Run: `cd tools/data-refinery && python -m pytest tests/test_card_labeler.py -v`
 Expected: PASS
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add tools/data-refinery/src/card_labeler.py tools/data-refinery/src/prompts/textbook_cards.txt tools/data-refinery/tests/test_card_labeler.py
@@ -332,7 +332,7 @@ git commit -m "feat(data-refinery): card_labeler outputs intro+questions for pra
 - Modify: `tools/data-refinery/src/db_loader.py`
 - Test: `tools/data-refinery/tests/test_db_loader.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 from db_loader import build_content_metadata, question_text_valid
@@ -354,9 +354,9 @@ def test_build_content_metadata_merges_and_marks_fallback():
     assert md2.get("questions") in (None, [])
 ```
 
-- [ ] **Step 2: 运行确认失败** — `cd tools/data-refinery && python -m pytest tests/test_db_loader.py::test_question_text_valid_substring -v` → FAIL
+- [x] **Step 2: 运行确认失败** — `cd tools/data-refinery && python -m pytest tests/test_db_loader.py::test_question_text_valid_substring -v` → FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `db_loader.py` 加：
 
@@ -394,9 +394,9 @@ def build_content_metadata(intro: str | None, questions: list[dict] | None,
 
 在 db_loader 写 `cards` 行处（`INSERT INTO cards ... content_metadata=?`），用 `build_content_metadata(label.intro, label.questions_raw, card_content, existing_metadata)` 生成 JSON 字符串写入。`label.questions_raw` 为 `[{"n":q.n,"text":q.text} for q in (label.questions or [])]`。
 
-- [ ] **Step 4: 运行测试通过** — `python -m pytest tests/test_db_loader.py -v`
+- [x] **Step 4: 运行测试通过** — `python -m pytest tests/test_db_loader.py -v`
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add tools/data-refinery/src/db_loader.py tools/data-refinery/tests/test_db_loader.py
@@ -410,7 +410,7 @@ git commit -m "feat(data-refinery): persist practice questions to content_metada
 **Files:**
 - Create: `tools/data-refinery/src/backfill_practice_questions.py`
 
-- [ ] **Step 1: 实现回填脚本**
+- [x] **Step 1: 实现回填脚本**
 
 ```python
 """一次性回填：为已入库的 practice 卡补 content_metadata.questions。
@@ -443,16 +443,16 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: 确认 .env**
+- [x] **Step 2: 确认 .env**
 
 确认 `tools/data-refinery/.env` 的 `LLM_MODEL=deepseek-v4-flash`（取消注释，Gemma 那行注释掉）。若未切，手动切。
 
-- [ ] **Step 3: 干跑校验**
+- [x] **Step 3: 干跑校验**
 
 Run: `cd tools/data-refinery && python -m pytest tests/ -k "card_splitter or card_labeler or db_loader" -v`
 Expected: 全 PASS，无回归。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add tools/data-refinery/src/backfill_practice_questions.py
@@ -469,7 +469,7 @@ git commit -m "feat(data-refinery): add practice questions backfill script"
 - Modify: `apps/server/src/modules/error-book/content-hash.util.ts`
 - Modify: `apps/server/src/modules/error-book/content-hash.util.spec.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `content-hash.util.spec.ts`：
 
@@ -490,9 +490,9 @@ describe('content-hash NFKC alignment', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败** — `cd apps/server && npx vitest run src/modules/error-book/content-hash.util.spec.ts` → FAIL（当前实现删标点且不 NFKC）
+- [x] **Step 2: 运行确认失败** — `cd apps/server && npx vitest run src/modules/error-book/content-hash.util.spec.ts` → FAIL（当前实现删标点且不 NFKC）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 替换 `content-hash.util.ts` 的 `normalizeForHash`：
 
@@ -516,9 +516,9 @@ export function computeContentHash(content: string): string {
 
 > Node 的 `String.prototype.normalize('NFKC')` 等价于 Python `unicodedata.normalize('NFKC', s)`，二者对同一字符串产出相同码点序列，哈希一致。
 
-- [ ] **Step 4: 运行测试通过** — `npx vitest run src/modules/error-book/content-hash.util.spec.ts`
+- [x] **Step 4: 运行测试通过** — `npx vitest run src/modules/error-book/content-hash.util.spec.ts`
 
-- [ ] **Step 5: aux rehash 迁移脚本（一次性）**
+- [x] **Step 5: aux rehash 迁移脚本（一次性）**
 
 Create `apps/server/src/migrations/rehash-questions.mjs`：
 
@@ -537,7 +537,7 @@ console.log(`rehashed ${rows.length} questions`);
 await pool.end();
 ```
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/server/src/modules/error-book/content-hash.util.ts apps/server/src/modules/error-book/content-hash.util.spec.ts apps/server/src/migrations/rehash-questions.mjs
@@ -553,7 +553,7 @@ git commit -m "fix(error-book): align content_hash with refinery NFKC normalizat
 - Modify: `apps/server/src/database/repositories/types.ts`, `index.ts`
 - Test: `apps/server/src/database/repositories/main-error-books.repo.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 // main-error-books.repo.test.ts
@@ -573,9 +573,9 @@ describe('MainErrorBooksRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败** — `cd apps/server && npx vitest run src/database/repositories/main-error-books.repo.test.ts` → FAIL（模块不存在）
+- [x] **Step 2: 运行确认失败** — `cd apps/server && npx vitest run src/database/repositories/main-error-books.repo.test.ts` → FAIL（模块不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `types.ts` 加：
 
@@ -640,9 +640,9 @@ export class MainErrorBooksRepository {
 
 `index.ts` 导出 `MainErrorBooksRepository`。
 
-- [ ] **Step 4: 运行测试通过** — `npx vitest run src/database/repositories/main-error-books.repo.test.ts`
+- [x] **Step 4: 运行测试通过** — `npx vitest run src/database/repositories/main-error-books.repo.test.ts`
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/main-error-books.repo.ts apps/server/src/database/repositories/main-error-books.repo.test.ts apps/server/src/database/repositories/types.ts apps/server/src/database/repositories/index.ts
@@ -659,7 +659,7 @@ git commit -m "feat(db): add MainErrorBooksRepository"
 - Create: `apps/server/src/ai-core/prompts/judgment/math-calculation.md`
 - Create: `apps/server/src/ai-core/prompts/judgment/math-proof.md`
 
-- [ ] **Step 1: 写提示词（math-calculation.md）**
+- [x] **Step 1: 写提示词（math-calculation.md）**
 
 ```markdown
 ---
@@ -705,9 +705,9 @@ errorType 枚举：logic（逻辑错）/ calculation（计算错）/ format（�
 请判断对错并输出 JSON。
 ```
 
-- [ ] **Step 2: 写 math-proof.md**（同结构，`description: "判断证明题对错"`，规则强调"证明逻辑链完整、每步依据正确"）。
+- [x] **Step 2: 写 math-proof.md**（同结构，`description: "判断证明题对错"`，规则强调"证明逻辑链完整、每步依据正确"）。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add apps/server/src/ai-core/prompts/judgment/
@@ -725,7 +725,7 @@ git commit -m "feat(ai-core): add judgment prompts for math calculation/proof"
 - Create: `apps/server/src/ai-core/capabilities/judgment.capability.ts`
 - Test: `apps/server/src/ai-core/capabilities/judgment.capability.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 // judgment.capability.test.ts
@@ -765,9 +765,9 @@ describe('JudgmentCapability', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败** — `npx vitest run src/ai-core/capabilities/judgment.capability.test.ts` → FAIL
+- [x] **Step 2: 运行确认失败** — `npx vitest run src/ai-core/capabilities/judgment.capability.test.ts` → FAIL
 
-- [ ] **Step 3: 加类型**
+- [x] **Step 3: 加类型**
 
 `types.ts`：
 
@@ -792,7 +792,7 @@ export interface JudgmentResult {
 }
 ```
 
-- [ ] **Step 4: model-routes.yaml + router**
+- [x] **Step 4: model-routes.yaml + router**
 
 `model-routes.yaml` 在 grading scene 旁加 judgment（同模型）：
 
@@ -809,7 +809,7 @@ export interface JudgmentResult {
 
 `retry.yaml` / `config.ts`：timeout 加 `judgment: 45000`（或复用 grading）。
 
-- [ ] **Step 5: 实现 JudgmentCapability**
+- [x] **Step 5: 实现 JudgmentCapability**
 
 ```typescript
 import { z } from 'zod';
@@ -878,9 +878,9 @@ export class JudgmentCapability {
 
 > 若 `PromptBuilder` 需显式注册 capability->prompt 映射，在 `prompt-builder.ts` 把 'judgment' 加入（镜像 'grading'），使 `prompts/judgment/{subject}-{questionType}.md` 被加载。
 
-- [ ] **Step 6: 运行测试通过** — `npx vitest run src/ai-core/capabilities/judgment.capability.test.ts`
+- [x] **Step 6: 运行测试通过** — `npx vitest run src/ai-core/capabilities/judgment.capability.test.ts`
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add apps/server/src/ai-core/
@@ -901,7 +901,7 @@ git commit -m "feat(ai-core): add JudgmentCapability (对错判定, 非判分)"
 - Test: `apps/server/src/modules/practice/practice.service.test.ts`
 - Modify: `apps/server/src/app.module.ts`
 
-- [ ] **Step 1: 写失败测试（三路由 + 错题入库）**
+- [x] **Step 1: 写失败测试（三路由 + 错题入库）**
 
 ```typescript
 // practice.service.test.ts
@@ -957,9 +957,9 @@ describe('PracticeService.judge', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败** — `npx vitest run src/modules/practice/practice.service.test.ts` → FAIL
+- [x] **Step 2: 运行确认失败** — `npx vitest run src/modules/practice/practice.service.test.ts` → FAIL
 
-- [ ] **Step 3: 实现 dto**
+- [x] **Step 3: 实现 dto**
 
 ```typescript
 // dto/judge-practice.dto.ts
@@ -973,7 +973,7 @@ export class JudgePracticeDto {
 }
 ```
 
-- [ ] **Step 4: 实现 PracticeService**
+- [x] **Step 4: 实现 PracticeService**
 
 ```typescript
 // practice.service.ts
@@ -1088,7 +1088,7 @@ export class PracticeService {
 > `main_error_books.question_id` 是 NOT NULL——当 `questionId === null`（质量差仅存题面）时，需用 `wrong_answer_text` 存题面且 `question_id` 给一个哨兵值或放宽列约束。**落地时**：若坚持 NOT NULL，则质量差时不入 `main_error_books`（只在前端标记错题，session 态），或对 `main_error_books.question_id` 做 `DROP NOT NULL` 迁移。**推荐**：迁移 `question_id` 为可空（与 `aux_error_books` 一致），脚本：
 > `ALTER TABLE main_error_books MODIFY question_id BIGINT NULL;` 并改 repo 的 `question_id: row.question_id`（可空）。此迁移纳入本任务。
 
-- [ ] **Step 5: 实现 controller + module**
+- [x] **Step 5: 实现 controller + module**
 
 ```typescript
 // practice.controller.ts
@@ -1132,15 +1132,15 @@ export class PracticeModule {}
 
 > repos 的提供方式参照既有 `error-book.module.ts`（注入 `DATABASE_POOL` 并实例化 repos）。落地时对齐既有模式。
 
-- [ ] **Step 6: 注册到 app.module.ts**
+- [x] **Step 6: 注册到 app.module.ts**
 
 把 `PracticeModule` 加入 `imports`。
 
-- [ ] **Step 7: 运行测试通过** — `npx vitest run src/modules/practice/practice.service.test.ts`
+- [x] **Step 7: 运行测试通过** — `npx vitest run src/modules/practice/practice.service.test.ts`
 
-- [ ] **Step 8: tsc 检查** — `cd apps/server && npm run build` → 无类型错误
+- [x] **Step 8: tsc 检查** — `cd apps/server && npm run build` → 无类型错误
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**
 
 ```bash
 git add apps/server/src/modules/practice/ apps/server/src/app.module.ts
@@ -1156,7 +1156,7 @@ git commit -m "feat(practice): add /api/practice/judge endpoint with 3-route jud
 **Files:**
 - Create: `apps/web/src/components/business/SymbolPalette.tsx`
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 ```tsx
 import { clsx } from 'clsx';
@@ -1214,7 +1214,7 @@ export function SymbolPalette({ onInsert }: { onInsert: (latex: string) => void 
 }
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add apps/web/src/components/business/SymbolPalette.tsx
@@ -1228,7 +1228,7 @@ git commit -m "feat(web): add SymbolPalette component"
 **Files:**
 - Create: `apps/web/src/components/business/LatexEditor.tsx`
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 ```tsx
 import { useRef } from 'react';
@@ -1273,7 +1273,7 @@ export function LatexEditor({ value, onChange }: Props) {
 }
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add apps/web/src/components/business/LatexEditor.tsx
@@ -1287,7 +1287,7 @@ git commit -m "feat(web): add LatexEditor with cursor-accurate symbol insertion"
 **Files:**
 - Create: `apps/web/src/components/business/LatexPreview.tsx`
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 ```tsx
 import { useEffect, useState } from 'react';
@@ -1319,7 +1319,7 @@ export function LatexPreview({ value }: { value: string }) {
 }
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add apps/web/src/components/business/LatexPreview.tsx
@@ -1333,7 +1333,7 @@ git commit -m "feat(web): add LatexPreview live render"
 **Files:**
 - Create: `apps/web/src/components/business/AnswerModal.tsx`
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 ```tsx
 import { useState } from 'react';
@@ -1415,7 +1415,7 @@ export function AnswerModal({ questions, startIndex, onSubmit, onFinish, onClose
 }
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add apps/web/src/components/business/AnswerModal.tsx
@@ -1432,7 +1432,7 @@ git commit -m "feat(web): add AnswerModal (question/editor/preview/submit)"
 - Modify: `apps/web/src/services/api.ts`
 - Create: `apps/web/src/store/practiceStore.ts`
 
-- [ ] **Step 1: api.ts 加 judgePractice**
+- [x] **Step 1: api.ts 加 judgePractice**
 
 ```typescript
 export interface JudgeResult {
@@ -1457,7 +1457,7 @@ export async function judgePractice(payload: {
 }
 ```
 
-- [ ] **Step 2: practiceStore**
+- [x] **Step 2: practiceStore**
 
 ```typescript
 import { create } from 'zustand';
@@ -1487,7 +1487,7 @@ export const usePracticeStore = create<PracticeState>((set) => ({
 }));
 ```
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/store/practiceStore.ts
@@ -1502,7 +1502,7 @@ git commit -m "feat(web): add judgePractice API + practiceStore"
 - Modify: `apps/web/src/pages/student/CourseDetailPage.tsx`
 - Create: `apps/web/src/components/business/AnswerResultList.tsx`
 
-- [ ] **Step 1: AnswerResultList 组件**
+- [x] **Step 1: AnswerResultList 组件**
 
 ```tsx
 import { useState } from 'react';
@@ -1550,7 +1550,7 @@ export function AnswerResultList({ questions, answers, onRetry }: Props) {
 }
 ```
 
-- [ ] **Step 2: CourseDetailPage 接入**
+- [x] **Step 2: CourseDetailPage 接入**
 
 在 `CourseDetailPage.tsx` 顶部 import：
 
@@ -1643,7 +1643,7 @@ modal 触发时初始化 session：
 )}
 ```
 
-- [ ] **Step 3: 正则兜底增强（needsFallback 卡）**
+- [x] **Step 3: 正则兜底增强（needsFallback 卡）**
 
 在 `preprocessContent` 步骤 1.5 改为 NFKC 归一 `(N)` 标记：
 
@@ -1655,7 +1655,7 @@ result = result.normalize('NFKC');
 
 并增强 `EXERCISE_ITEM_RE` 兼容 `N.` 编号：`/^\(?([1-9]\d?)[\.\)]/`。
 
-- [ ] **Step 4: 类型补全 + tsc**
+- [x] **Step 4: 类型补全 + tsc**
 
 `apps/web/src/services/api.ts` 的 `LessonCard` 加 `contentMetadata`；`npm --prefix apps/web run build` 通过。
 
@@ -1663,7 +1663,7 @@ result = result.normalize('NFKC');
 
 启动前后端，进入一张 practice 卡，点题 -> modal -> 作答 -> 提交 -> 下一题 -> 答题列表 -> 错题解析。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/pages/student/CourseDetailPage.tsx apps/web/src/components/business/AnswerResultList.tsx apps/web/src/services/api.ts
@@ -1681,7 +1681,7 @@ git commit -m "feat(web): structured practice rendering + answer modal integrati
 - Modify: `docs/API接口与数据流设计文档.md`
 - Modify: `docs/K12智学系统-数据库设计文档.md`
 
-- [ ] **Step 1: openapi.yaml 加 `/api/practice/judge`**
+- [x] **Step 1: openapi.yaml 加 `/api/practice/judge`**
 
 ```yaml
   /api/practice/judge:
@@ -1717,9 +1717,9 @@ git commit -m "feat(web): structured practice rendering + answer modal integrati
                   errorBookId: { type: integer }
 ```
 
-- [ ] **Step 2: API 设计文档 §4 加端点、§6 加数据流说明**（遵循 [[update-related-docs-together]]）。
-- [ ] **Step 3: DB 设计文档补 `cards.content_metadata.questions` 结构**（intro / questions[{n,text}] / needs_fallback）。
-- [ ] **Step 4: 提交**
+- [x] **Step 2: API 设计文档 §4 加端点、§6 加数据流说明**（遵循 [[update-related-docs-together]]）。
+- [x] **Step 3: DB 设计文档补 `cards.content_metadata.questions` 结构**（intro / questions[{n,text}] / needs_fallback）。
+- [x] **Step 4: 提交**
 
 ```bash
 git add docs/api/openapi.yaml "docs/API接口与数据流设计文档.md" "docs/K12智学系统-数据库设计文档.md"

@@ -165,7 +165,7 @@
 - `hidden_since` 是**当前连续挂机段的起点**（`DATETIME(3) DEFAULT NULL`，回到 visible 时置 NULL）；`hidden_reason` 是**当前段的原因**（`VARCHAR(10) DEFAULT NULL`，`away` / `idle`）。
 - 为什么不复用 `end_reason`：`end_reason` 是**会话级**的（一个会话只有一个），而挂机段可以有很多个。
 
-- [ ] **Step 1: 写迁移**
+- [x] **Step 1: 写迁移**
 
 创建 `tools/db/migrations/2026-09-20_parent_controls_and_alerts.sql`：
 
@@ -246,7 +246,7 @@ SET @ddl := IF(@col_exists = 0,
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 ```
 
-- [ ] **Step 2: 手工 apply**
+- [x] **Step 2: 手工 apply**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -257,7 +257,7 @@ Expected: `APPLY OK`，无输出报错。
 
 > ⚠️ 本机 mysql 9.5 非交互 `-e` 下不认 `\G`，要看表结构用 `--vertical`。
 
-- [ ] **Step 3: 验证（4 项断言）+ 幂等复跑**
+- [x] **Step 3: 验证（4 项断言）+ 幂等复跑**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -278,7 +278,7 @@ mysql -h127.0.0.1 -uai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_pare
 
 Expected: `controls_new_cols=2`、`ss_new_cols=4`、`away_default=5`、`idle_default=15`、`RE-APPLY OK`。
 
-- [ ] **Step 4: 同步 `tools/db/schema.sql`**
+- [x] **Step 4: 同步 `tools/db/schema.sql`**
 
 **(a)** `controls` 段（:861-877）在 `break_reminder_minutes` 之后、`created_at` 之前插入两行：
 
@@ -296,7 +296,7 @@ Expected: `controls_new_cols=2`、`ss_new_cols=4`、`away_default=5`、`idle_def
   hidden_reason       VARCHAR(10) DEFAULT NULL COMMENT '当前挂机段原因 away|idle；回到 visible 时置 NULL',
 ```
 
-- [ ] **Step 5: 验证两处列清单一致**
+- [x] **Step 5: 验证两处列清单一致**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -310,7 +310,7 @@ grep -c "hidden_away_seconds\|hidden_idle_seconds\|hidden_since\|hidden_reason" 
 
 Expected: 两条 db 计数都是 1；`schema.sql` 的 `grep -c` 分别 ≥ 2 与 ≥ 4。
 
-- [ ] **Step 6: 改 `types.ts` 的枚举**
+- [x] **Step 6: 改 `types.ts` 的枚举**
 
 `apps/server/src/database/repositories/types.ts:82`：
 
@@ -320,7 +320,7 @@ Expected: 两条 db 计数都是 1；`schema.sql` 的 `grep -c` 分别 ≥ 2 与
 
 （`abusive` **保留**：`pickGentleBlockMessage` 仍映射它，虽然 `detectAnomalyType` 目前不可达。）
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add tools/db/migrations/2026-09-20_parent_controls_and_alerts.sql tools/db/schema.sql \
@@ -351,7 +351,7 @@ git commit -m "feat(db): controls 预警灵敏度两列 + study_sessions 走神�
 2. **去重窗口 30 分钟**（spec §3.5）：同一 `student_id` + 同一 `type` 在窗口内只写一条。心跳每 30 秒一次，不去重会刷屏。`since` 由**服务层算好**（`new Date(Date.now() - 30*60*1000)`），仓储不写 `NOW()` 以外的业务窗口。
 3. **`parent_id` 由服务层解析**（`studentsRepo.findById`）——仓储的 `create` 要求它，而调用方（ai-core / analytics）只知道 `studentId`。学生不存在 → 跳过并 `warn`（不抛）。
 
-- [ ] **Step 1: 扩展仓储**
+- [x] **Step 1: 扩展仓储**
 
 在 `safety-alerts.repo.ts` 追加（保留既有 `create` / `findByParent` / `markRead` 不动）：
 
@@ -415,7 +415,7 @@ export interface SafetyAlertRowWithStudentName extends SafetyAlertRow {
 }
 ```
 
-- [ ] **Step 2: 写服务**
+- [x] **Step 2: 写服务**
 
 `modules/safety/safety-alerts.service.ts`：
 
@@ -537,7 +537,7 @@ import { StudentsRepository } from '../../database/repositories/students.repo.js
 export class SafetyAlertsModule {}
 ```
 
-- [ ] **Step 3: 测试**
+- [x] **Step 3: 测试**
 
 `modules/safety/safety-alerts.service.test.ts` 必测：
 1. 去重命中（`existsRecent` 回 true）→ **不调 `create`**。
@@ -547,7 +547,7 @@ export class SafetyAlertsModule {}
 5. `messageFor` 五个 type 的文案逐字断言（含 `away`/`idle` 的分钟数插值）。
 6. `existsRecent` 的 `since` 是**应用层算的 Date**（断言 SQL 里不含 `NOW()` / `CURDATE()`，且 params[2] 是 Date）。
 
-- [ ] **Step 4: 跑测试 + 类型检查**
+- [x] **Step 4: 跑测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/modules/safety src/database/repositories/safety-alerts.repo.test.ts 2>/dev/null || npx vitest run src/modules/safety && npx tsc --noEmit
@@ -555,7 +555,7 @@ cd apps/server && npx vitest run src/modules/safety src/database/repositories/sa
 
 Expected: 全绿；`tsc` 无输出。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/modules/safety apps/server/src/database/repositories/safety-alerts.repo.ts
@@ -582,9 +582,9 @@ git commit -m "feat(safety): 预警写入口 SafetyAlertsService（去重 + pare
 - `update` 的白名单加两条 `sets.push`（照既有 `pointsPerYuan` 写法）。
 - `findAlertThresholds` 单独一条轻量 SELECT（心跳路径每 30 秒调一次，**不要**顺手读其它列）。
 
-- [ ] **Step 1: 改仓储**（按上面口径）
+- [x] **Step 1: 改仓储**（按上面口径）
 
-- [ ] **Step 2: 补测试**
+- [x] **Step 2: 补测试**
 
 必测：
 1. `findByStudent` 断言 SQL 含四列、返回对象含两个新字段。
@@ -593,7 +593,7 @@ git commit -m "feat(safety): 预警写入口 SafetyAlertsService（去重 + pare
 4. `findAlertThresholds` → 只 SELECT 两列、无数据回 `{ awayMinutes: 5, idleMinutes: 15 }`。
 5. `ensure` 无副作用断言**保持**。
 
-- [ ] **Step 3: 跑测试 + 类型检查 + 提交**
+- [x] **Step 3: 跑测试 + 类型检查 + 提交**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/controls.repo.test.ts && npx tsc --noEmit
@@ -655,7 +655,7 @@ SET hidden_away_seconds = hidden_away_seconds
 
 > ⚠️ 实施时**先写 SQL 再数占位符**：SET 里 4 个 `?` + WHERE 2 个 = 6 个，与上面 6 个参数**逐位**核对。**不要凭记忆**（`state` 出现两次，最容易漏）。
 
-- [ ] **Step 1: 前端类型与状态机**
+- [x] **Step 1: 前端类型与状态机**
 
 `analytics/types.ts` 加：
 
@@ -683,7 +683,7 @@ export type HiddenReason = 'away' | 'idle';
 
 **`hidden` 状态对后续事件的处理不变**（`HIDDEN` / `IDLE_TIMEOUT` 仍是空操作）——spec §9 已记录副作用：先 idle 后切走时该段仍记为 `idle`。
 
-- [ ] **Step 2: 前端 tracker**
+- [x] **Step 2: 前端 tracker**
 
 - `sendHeartbeat(next: { state, reason })` → `transport.heartbeat(uid, next.state, subjectIdProvider(), next.reason)`
 - `StudySessionTransport.heartbeat` 签名加第 4 个参数 `reason: HiddenReason | null`
@@ -691,12 +691,12 @@ export type HiddenReason = 'away' | 'idle';
 
 > 周期心跳没有新事件可喂状态机，所以**需要一个模块级变量记住「当前挂机段的原因」**（`currentHiddenReason`），在 `runTransition` 收到 `effects.heartbeat` 时同步更新，`resetLocalState()` 里清空。**别**在 tick 里重新推断。
 
-- [ ] **Step 3: 前端测试**
+- [x] **Step 3: 前端测试**
 
 - `sessionMachine.test.ts`：四条产出点的 `heartbeat` 形状改断言（`toEqual` 的对象形状变了 → 必红，改它）；`NO_FX` 常量同步。
 - `tracker.test.ts`：`makeTransport` 的 `heartbeat` mock 加第 4 参数；凡 `toEqual([uid, 'visible', 7])` 的用例改为 `toEqual([uid, 'visible', 7, null])`；`hidden` 的用例改为 `toEqual([uid, 'hidden', 7, 'idle'])` / `'away'`（按触发路径）。**新增**：① `IDLE_TIMEOUT` 触发的心跳 `reason='idle'`；② `setVisibility(false)` 触发的心跳 `reason='away'`；③ 回到 visible 后 `reason=null`。
 
-- [ ] **Step 4: 服务端协议与透传**
+- [x] **Step 4: 服务端协议与透传**
 
 - `analytics.controller.ts` 的 `HeartbeatSchema`（:34-37）加 `reason: z.enum(['away', 'idle']).optional()`（**可选**是为兼容旧客户端；spec §3.3）。
 - `study-sessions.service.ts` 的 `heartbeat` 入参加 `reason?: string`；**缺失**归一为 `null`（同 `subjectId` 的处理）。⚠️ **非法值到不了 service**：HTTP 路径上 `HeartbeatSchema.reason` 是 `z.enum(['away','idle']).optional()`，非法值在 controller 层就 400/1001（service 的宽容只服务非 HTTP 调用方）。
@@ -709,7 +709,7 @@ export type HiddenReason = 'away' | 'idle';
   - **⚠️ 判定方法（`maybeRecordHiddenAlert`）的调用点一律 `void`、不得 `await`**（2026-09-20 实施时写成 `await`，评审 I-1 指出）。理由见上面 Global Constraints 的「预警写入永不阻断主链路」：它内部 `await findAlertThresholds`（一次 DB 往返），学生 hidden 时每 30 秒的心跳都会多等这一次往返；前端 fire-and-forget，用户无感、日志看不出。`void` 安全的前提是该方法**永不 reject**（整段 try/catch 含 `await` 的拒绝）——**先确认这一点再改**，并在 docstring 里写明「调用方一律 `void`、不得 `await`」防止后人「顺手 await 一下好测试」改回去。测试侧对应改用 `await vi.waitFor(() => expect(safety.record).toHaveBeenCalledWith(...))`，**不要**只删 `await` 留同步断言（会在写入前跑，恒假/不稳定）。
 - `analytics.module.ts`：import `SafetyAlertsModule`；providers 加 `ControlsRepository`；`StudySessionsService` 构造函数注入 `SafetyAlertsService` 与 `ControlsRepository`。
 
-- [ ] **Step 5: 服务端仓储**
+- [x] **Step 5: 服务端仓储**
 
 按上面「目标顺序」改写 `heartbeat`，并让 `end` 也在置 `status='ended'` 前累加最后一段挂机秒数（同一 SET 顺序规则）。
 
@@ -721,7 +721,7 @@ export type HiddenReason = 'away' | 'idle';
 
 （既有调用方只读 `activeSeconds`，加字段是向后兼容的；但 **`study-sessions.service.test.ts` 与 controller 的返回形状断言要同步**。）
 
-- [ ] **Step 6: 服务端测试**
+- [x] **Step 6: 服务端测试**
 
 - `study-sessions.repo.test.ts`：**顺序钉子用例必须同步**（params 位置变了 → 会红，这是好事）；新增：`away` 只累加 `hidden_away_seconds`、`idle` 只累加 `hidden_idle_seconds`、`hidden_since` 建立与回到 visible 清空、`hidden_reason` 维护。
   - **⚠️ 映射必须按列名配对断言，不许只断言参数数组字面量**（Global Constraints 的「仓储测试」条 + 2026-09-22 的 `goals` 事故）。本语句是最容易错的一类：`state` 出现两次、占位符还藏在 `IF(...)` / `COALESCE(...)` **内部**。做法：写一个 `zipSet(sql, params)`——**按顶层逗号切分 SET 赋值子句（算括号深度，别在 `IF(...)` 内部的逗号上切）→ 取子句首部列名 → 把子句内的 `?` 依序归到该列名下**——断言 `{ client_state: 'hidden', hidden_reason: 'away', hidden_since: 'hidden', subject_id: 2 }`，再用 `restAfterSet` 断言 WHERE 的两项 `['uid-1', 9]`。⚠️ **不能照抄 `controls.repo.test.ts` 的 `zipSet`**（它用 `(\w+)\s*=\s*\?` 只认「列 = ?」，会漏掉 `IF(...)`/`COALESCE(...)` 里的两列，而它们恰恰是最容易写反的一对）。`end` 同理：`zipSet` = `{ end_reason }`、`restAfterSet` = `['uid-1', 9]`。
@@ -732,7 +732,7 @@ export type HiddenReason = 'away' | 'idle';
   - 因为判定是 `void` 出去的：命中写入的断言用 `await vi.waitFor(...)`；「未达阈值不写」要先 `await flushAsync()`（让出一个宏任务）**再断言「没写」**，否则是恒真。
   - **「预警写入失败不阻断心跳」这条用例必须保持有意义**：`void` 之后「心跳仍返回 200」由构造保证、不再是被测行为。断言重心移到真正还在被测的三件事：① 心跳响应本身正常；② 失败被 `logger.warn` 吞掉；③ **`void` 出去的那个 promise 没有逃逸成 unhandled rejection**（`void` 引入的新风险，用 run 级 `process.on('unhandledRejection')` 探针钉住——这是唯一能观测到它的方式）。再加一条「判定被挂住时心跳仍立刻返回、放行后才写预警」的用例，直接钉「心跳路径不 `await` 判定」这条硬约束。
 
-- [ ] **Step 7: 跑测试 + 类型检查（两端）**
+- [x] **Step 7: 跑测试 + 类型检查（两端）**
 
 ```bash
 cd apps/server && npx vitest run src/modules/analytics src/database/repositories/study-sessions.repo.test.ts && npx tsc --noEmit
@@ -741,7 +741,7 @@ cd apps/web && npx vitest run src/analytics && npx tsc -b
 
 Expected: 全绿；`tsc` 无输出。**若顺序钉子用例变红且不是「参数位置」原因** → 说明 SET 顺序被改错，回去对齐注释。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/web/src/analytics apps/server/src/modules/analytics \
@@ -774,7 +774,7 @@ git commit -m "feat(analytics): 走神分 away/idle 两口径累计 + 阈值处�
 2. **`countConsecutiveOffTopic` 与 `safetyConfig.safety.off_topic.*` 保留但不再被 `check()` 调用**（spec §9，含其单测）。
 3. **⚠️ 必须同时回写 `ai_messages.safety_flag`**（spec §3.2）：闲聊不再产生 `block` 消息 ⇒ 若不回写，家长端「对话回放」的闲聊标签与计数会**全部归零**。
 
-- [ ] **Step 1: `safety-guard.ts`**
+- [x] **Step 1: `safety-guard.ts`**
 
 删掉 :65-72 的辅线豁免，把 :83-106 的 off_topic 分支替换为：
 
@@ -795,7 +795,7 @@ git commit -m "feat(analytics): 走神分 away/idle 两口径累计 + 阈值处�
 
 anomaly 分支（:108-125）**不动**（继续阻断 + `alertPayload`）。
 
-- [ ] **Step 2: `tutoring.capability.ts`**
+- [x] **Step 2: `tutoring.capability.ts`**
 
 **(a)** `TutoringCapabilityDeps` 加 sink：
 
@@ -946,7 +946,7 @@ function isOffTopicMarkerOnLastLine(content: string): boolean {
 - `prepare()`：在 anomaly 的 `shouldBlock` 分支里、`saveMessages` **之后**调 `recordSafetySignals`。**取 `type`/`level` 时消费 `safetyResult.alertPayload`**（`alertPayload.type` / `alertPayload.level`）—— **这是 `alertPayload` 第一次被真正消费**（spec §2.2；brief 也硬要求「真的把它用起来，而不是另起一套」）。
   > 原 plan 这一句自相矛盾：既说「`type` 取 `safetyResult.anomalyType`、`level` 取 `safetyResult.alertLevel`」，又说「`alertPayload` 第一次被消费」。**两者逐值等价** —— `alertPayload.type === anomalyType`、`alertPayload.level === alertLevel`（同一三目表达式，`safety-guard.ts:83-99`），所以**行为中性**；但只有取 `alertPayload` 才满足 spec §2.2 的「消费」意图。实现选择消费 `alertPayload`，并由变异证明（把 `alertPayload.type` 改成与派生值不同的值 → 用例 RED）。
 
-- [ ] **Step 3: `safety_flag` 回写 + 家长端文案口径（用户 2026-09-20 裁决）**
+- [x] **Step 3: `safety_flag` 回写 + 家长端文案口径（用户 2026-09-20 裁决）**
 
 **取值规则（两处写同一表达式，保持一致）**：
 
@@ -984,7 +984,7 @@ safety_flag = Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))
 **另**：`ai-core/types.ts` 的 `SaveMessageEntry`（:610-623）加 `safetyFlag?: boolean;`（注释说明语义变更：从「被硬阻断的轮次」→「被模型判为闲聊 **或** 被阻断的轮次」）。
 `services/conversation/index.ts:152` 与 `modules/conversations/conversations.service.ts:207` 都改成上面那个表达式。
 
-- [ ] **Step 4: 模块接线**
+- [x] **Step 4: 模块接线**
 
 `ai.module.ts`：import `SafetyAlertsModule`；factory 改为
 
@@ -997,7 +997,7 @@ safety_flag = Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))
     },
 ```
 
-- [ ] **Step 5: 测试改写 + 新增**
+- [x] **Step 5: 测试改写 + 新增**
 
 - `safety-guard.test.ts`：该文件**原本就没有** `check()`/`shouldBlock` 断言（plan 原写「删」是错的，无可删 —— GAP-1）→ 改为**新增**三条 `check()` 用例：① 主线 off_topic 不再阻断；② **辅线 off_topic 同样走统一的 off_topic 分支**（⚠️ 断言必须能区分两个分支：`classification === 'off_topic'` **且** `isLearningRelated === false`；**不能只断言 `shouldBlock === false`** —— 被删的旧辅线豁免段返回体也是 `shouldBlock: false`，只断言它则把豁免段注入回去仍全绿，是**假钉**，钉不住 spec §3.1 的「删掉辅线豁免段」）；③ anomaly 仍阻断 + `alertPayload`。
 - `__tests__/safety-classification.ts`：off_topic 用例（:47-56）改为断言「不再判 shouldBlock」（注释说明原因）。
@@ -1006,7 +1006,7 @@ safety_flag = Number(msg.safetyFlag ?? (msg.type === 'block' ? 1 : 0))
 - `services/conversation` 与 `modules/conversations` 的既有测试：新增「`safetyFlag` 显式传入时优先于 `type==='block'` 推导；未传时行为不变」。**再补一条**：`safetyFlag=true`（闲聊，`type='socratic'`）与 `type='block'`（anomaly）**都**落成 `safety_flag = 1`（两类口径）。
 - `ParentChatLogsPage.test.tsx`：`:127` 的断言改 `'偏离学习'`；新增「计数文案是『偏离学习 N』、不含『闲聊』」（钉住本次文案口径变更）。
 
-- [ ] **Step 6: 跑测试 + 类型检查 + 重新跑标记验证门**
+- [x] **Step 6: 跑测试 + 类型检查 + 重新跑标记验证门**
 
 ```bash
 cd apps/server && npx vitest run src/ai-core src/services/conversation src/modules/conversations && npx tsc --noEmit
@@ -1025,7 +1025,7 @@ cd ../web && npx vitest run src/pages/parent/ParentChatLogsPage.test.tsx && npx 
 > ⚠️ 该文件**不在本 Task 的 Files 清单里**，但在 `git add apps/server/src/ai-core` 的路径范围内；
 > 不改它则本 Step 永久 2/3 且输出误导结论。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add apps/server/src/ai-core apps/server/src/services/conversation \
@@ -1064,7 +1064,7 @@ git commit -m "feat(ai-core): 闲聊改模型自报标记（不硬拦）+ safety
 
 > ⚠️ 两个 controller 都是 `@Controller('api/parent')`，**新增路径不得与既有路径撞车**。既有路径清单见本计划「现状要点」与 `parent-insights.controller.ts:98-259` / `parent.controller.ts:37-102`。
 
-- [ ] **Step 1: `ControlsService`（spec §4.1/§4.2）**
+- [x] **Step 1: `ControlsService`（spec §4.1/§4.2）**
 
 校验链照 spec 逐条实现：至少一个字段（409/1001）→ 范围 1..180（409/1001）。`PUT` 逻辑 `ensure` → `update` → **回读** `findByStudent` → 返回完整对象。响应形状**只含两个阈值**（`{ alertAwayMinutes, alertIdleMinutes }`）。
 
@@ -1073,25 +1073,25 @@ git commit -m "feat(ai-core): 闲聊改模型自报标记（不硬拦）+ safety
 > 原文把这段写在 Step 1/2 的 service 校验链里、Step 3 又写「controller 每个 handler 都先 `requireOwnedStudent`」——同一道校验两处归属，照 Step 1/2 实现会**重复查库**、错误码来源也会分叉。所以 `ControlsService` 只管「至少一个字段 + 范围 + `ensure`/`update`/回读」。
 > **例外（预警归属）：`PATCH alerts/:alertId/read` 的 `alert.parent_id === parentId` 只能留在 service** —— 该端点没有 `studentId`，必须先 `findById` 拿到 `parent_id` 才判得了，controller 无从下手（见 Step 2）。
 
-- [ ] **Step 2: `AlertsService`（spec §4.3/§4.4）**
+- [x] **Step 2: `AlertsService`（spec §4.3/§4.4）**
 
 - `list(parentId, { studentId?, unreadOnly?, page, pageSize })`：调 `alertsRepo.listByParent`；映射 DTO（`studentName` 取不到 → 前端显示「未知学生」，后端不做非空断言）。**不在 service 里做归属校验**（`studentId` 的归属由 controller 先做，见 Step 1 的分层说明）。
 - `markRead(parentId, alertId)`：`alertId` 正整数（409/1001）→ `findById` 不存在（404/1002）→ `parent_id !== parentId`（403/1005）→ `markRead`（幂等）。**预警归属只能留在这里**（理由见 Step 1 的例外说明）。
 
-- [ ] **Step 3: controller + module + DTO**
+- [x] **Step 3: controller + module + DTO**
 
 - `parent-insights.controller.ts` 加 4 个 handler（`@Get('students/:studentId/controls')`、`@Put('students/:studentId/controls')`、`@Get('alerts')`、`@Patch('alerts/:alertId/read')`）。**按学生的归属校验在 controller**：前三个（凡带 `studentId` 的）第一件事就是 `requireOwnedStudent`；`PATCH alerts/:alertId/read` 不带 `studentId`，其预警归属在 `AlertsService`（见 Step 2）。
 - `GET alerts` 的 `studentId` 是**可选** query 参数：用 `parseOptionalPositiveInt`（`../points/pagination.util.js`，未传/空串 → `undefined` = 不筛选），**不要**写成 `parsePositiveInt(studentId, 'studentId', 1)` —— `1` 恰好是合法学生 id，空串会静默变成「按 1 号孩子筛选」并去校验归属（Fix 1 修的 Minor 3-3）。
 - `parent-insights.module.ts`：import `SafetyAlertsModule`；providers 加 `ControlsService` / `AlertsService`（`SafetyAlertsRepository` 由 `SafetyAlertsModule` 导出）。
 - `dto/parent-insights.dto.ts` 加 `ParentControls` / `ParentAlertItem` / `ParentAlertPage`，并把 `DashboardStudent.unreadAlerts` 的注释「本期恒 0」改掉。
 
-- [ ] **Step 4: `unreadAlerts` 改真查**
+- [x] **Step 4: `unreadAlerts` 改真查**
 
 `dashboard.service.ts:85,90` 改为真查（未读 = `is_read = 0` 的 `safety_alerts` 数）：顶层 = 该家长全部孩子未读；学生级 = 该孩子未读。用一个新仓储方法（`countUnread(parentId, studentId?)`）或复用 `listByParent` 的 count。**改 `dashboard.service.test.ts:179-184`** 那条「恒为 0」的用例为真查后的行为。
 
 > ⚠️ **不要为了拿 count 而调 `listByParent`**：它带 `LIMIT ? OFFSET ?`，真库上只有走 `pool.query` 才执行得动（`pool.execute` 会报 `Incorrect arguments to mysqld_stmt_execute`；本仓铁律见 `parent-insights.repo.ts:210-211`）。这也是本计划推荐独立 `countUnread` 的原因之一 —— 仪表盘只要一个数字，不该顺手取一整页行。
 
-- [ ] **Step 5: account / password**
+- [x] **Step 5: account / password**
 
 - `parents.repo.ts` 加 `updatePassword(id: number, passwordHash: string): Promise<void>`（照 `admins.repo.ts:41`）。
 - `parent.service.ts` 注入 `ParentsRepository`，加：
@@ -1100,7 +1100,7 @@ git commit -m "feat(ai-core): 闲聊改模型自报标记（不硬拦）+ safety
 - `parent.controller.ts` 加 `@Get('account')` / `@Patch('password')`（Zod schema 照 spec §4.6）。
 - `parent.module.ts` providers 加 `ParentsRepository`。
 
-- [ ] **Step 6: 测试**
+- [x] **Step 6: 测试**
 
 必测（每条对应一个真实翻车点）：
 1. `controls` PUT：空 patch → 409/1001 **且不写库**；越界 0/181 → 409/1001；合法 → 回读后返回完整对象。
@@ -1111,7 +1111,7 @@ git commit -m "feat(ai-core): 闲聊改模型自报标记（不硬拦）+ safety
 6. `password`：旧密码错 → 401/1003；新旧相同 → 409/1001；长度越界 → 409/1001；成功 → `updatePassword` 收到 bcrypt hash（不是明文）。
 7. `dashboard.unreadAlerts`：真查（造 2 条未读 → 回 2）。
 
-- [ ] **Step 7: 跑测试 + 类型检查 + 启动冒烟**
+- [x] **Step 7: 跑测试 + 类型检查 + 启动冒烟**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights src/modules/parent && npx tsc --noEmit && npm run build
@@ -1124,7 +1124,7 @@ kill $(cat /tmp/boot_pc.pid) && rm -f /tmp/boot_pc.pid /tmp/boot_pc.log
 Expected: 启动成功、6 条新路由 mapped（controls GET/PUT、alerts GET、alerts PATCH read、account GET、password PATCH）、无 `can't resolve`。
 ⚠️ **按 PID 收尾**（用户本机有自己的 `node dist/main.js` 在跑，**绝不能** `pkill`）。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights apps/server/src/modules/parent \
@@ -1161,9 +1161,9 @@ export function getParentAlerts(params: { studentId?: number; unreadOnly?: boole
 export function markParentAlertRead(alertId: number): Promise<null>
 ```
 
-- [ ] **Step 1: api 层**（上面两个 + Task 8 的三个 controls/account 函数可一并加）
+- [x] **Step 1: api 层**（上面两个 + Task 8 的三个 controls/account 函数可一并加）
 
-- [ ] **Step 2: 真 Banner（spec §5.1 状态机）**
+- [x] **Step 2: 真 Banner（spec §5.1 状态机）**
 
 > ⚠️ **本步产物已被 2026-09-20「及时可见」批整体替换**（`plans/2026-09-20-parent-alert-banner.md` Task 6）：改为独立组件 `AlertBanner` + 新端点 `GET /parent/alerts/unread`（30s 轮询、全部孩子、含 `info`）。下面保留原始设计作对照。
 
@@ -1183,13 +1183,13 @@ export function markParentAlertRead(alertId: number): Promise<null>
 - 刷新时机沿用既有 `location.pathname` 依赖模式（与未读数一致）
 - ⚠️ **派生状态带 `studentId` 归属**（切孩子不重挂载）：存 `{ studentId, item }`
 
-- [ ] **Step 3: 侧栏入口**
+- [x] **Step 3: 侧栏入口**
 
 `ParentNav.tsx` 的 `navItems` 加第 11 项「异常预警」→ `/parent/alerts`（复用 `NavIcon`，线性 SVG，无 emoji）。位置放在「AI 对话回放」之后、「目标设定」之前（监管类聚在一起）。
 
 ⚠️ `ParentNav.test.tsx` 的 `expected` 数组要同步加一项；用例标题里的「10 个入口」改成 11。
 
-- [ ] **Step 4: 预警中心页（spec §5.2 状态机）**
+- [x] **Step 4: 预警中心页（spec §5.2 状态机）**
 
 四态（加载 Skeleton / 失败重试卡 / 空态 / 列表）+ 交互（只看未读筛选 → 回第 1 页并重拉；换孩子 → 回第 1 页并重拉；标记已读 → 就地更新不整页重拉；有 `dialogueId` → 「查看对话」跳 `/parent/chat-logs`）。
 
@@ -1198,24 +1198,24 @@ export function markParentAlertRead(alertId: number): Promise<null>
 - 列表默认**全部孩子**（带孩子名），支持按孩子筛选（spec §3.7）
 - 家长端全程日间：**不加** `data-theme`、不用 `.student-theme-container`
 
-- [ ] **Step 5: 路由换真页**
+- [x] **Step 5: 路由换真页**
 
 `routeTable.tsx:334` 的 `{ path: 'alerts', element: <Placeholder title="异常预警中心 P6.9" /> }` → `<ParentAlertsPage />`。
 
-- [ ] **Step 6: 测试**
+- [x] **Step 6: 测试**
 
 - `ParentLayout.test.tsx`：**改写** `:76-83` 那条「假 Banner 仍在」用例 → 三条：有 `warning`/`critical` 未读时渲染；无或只有 `info` 时不渲染；请求失败时不渲染。mock 加 `getParentAlerts`。
 - `ParentNav.test.tsx`：`expected` 加「异常预警」项。
 - `ParentAlertsPage.test.tsx`（新建）：四态、筛选回第 1 页、换孩子回第 1 页、标记已读就地更新、`dialogueId` 链接、多孩不串（派生状态带 `studentId`）。
 - `routeTable.test.tsx`：`/parent/alerts` 渲染真页（断言无 `PLACEHOLDER_TEXT`）、侧栏「异常预警」指向 `/parent/alerts`。
 
-- [ ] **Step 7: 跑测试 + 类型检查 + lint + build**
+- [x] **Step 7: 跑测试 + 类型检查 + lint + build**
 
 ```bash
 cd apps/web && npx vitest run src/pages/parent src/components/layout src/routes && npx tsc -b && npm run lint && npm run build
 ```
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/components/layout \
@@ -1245,7 +1245,7 @@ export function getParentAccount(): Promise<ParentAccount>
 export function changeParentPassword(oldPassword: string, newPassword: string): Promise<null>
 ```
 
-- [ ] **Step 1: 行为管控页（spec §5.3 状态机）**
+- [x] **Step 1: 行为管控页（spec §5.3 状态机）**
 
 - 两个数据源：`GET .../controls` + `GET .../points/settings`（后者只读展示「奖励兑换」状态）
 - 预设档**纯前端常量**（spec §3.6）：宽松 15/30、标准 5/15、严格 2/5 —— 点预设只填输入框，**不改服务端**
@@ -1256,29 +1256,29 @@ export function changeParentPassword(oldPassword: string, newPassword: string): 
 - `studentId == null` → 空态「请先选择孩子」
 - **派生状态带 `studentId` 归属**
 
-- [ ] **Step 2: 账号设置页（spec §5.4 状态机）**
+- [x] **Step 2: 账号设置页（spec §5.4 状态机）**
 
 - `GET /account` 加载中 Skeleton / 失败重试卡 / 就绪 → 账号信息卡（姓名、手机号**只读**）+ 修改密码卡 + 退出登录（复用 `LogoutButton`）
 - 改密码：本地校验（旧密码非空、新密码 6..32、两次一致）→ 不发请求；提交 → 按钮 loading/禁用；成功 → `toast('success','密码已修改')` + 清空三个输入框；失败 → `toast('error', 服务端 message)`，**1003 时给旧密码框标错**（用 `Input` 的 `error` prop）
 
-- [ ] **Step 3: 路由换真页**
+- [x] **Step 3: 路由换真页**
 
 `routeTable.tsx:332` `/parent/controls` → `ParentControlsPage`；`:335` `/parent/account` → `ParentAccountPage`。
 
-- [ ] **Step 4: 测试**
+- [x] **Step 4: 测试**
 
 - `ParentControlsPage.test.tsx`（新建）：预设填值；手动改 → 预设高亮消失；本地校验 0/181 → 不发请求；**无改动 → 保存 disabled**；**只发改动字段**（断言 `putParentControls` 收到的 patch 只有改过的那一个键）；toast 回显服务端值；points 失败只影响该卡片；切孩子不串。
 - `ParentAccountPage.test.tsx`（新建）：信息只读（三个字段渲染、无可编辑控件）；密码三段校验（旧空 / 新 <6 / 新 >32 / 两次不一致 → 不发请求）；1003 → 旧密码框标错；成功 → 清空输入框 + toast。
 - `routeTable.test.tsx`：两条新用例（渲染真页、无占位文案）。
 
-- [ ] **Step 5: 跑测试 + 类型检查 + lint + build**
+- [x] **Step 5: 跑测试 + 类型检查 + lint + build**
 
 ```bash
 cd apps/web && npx vitest run src/pages/parent src/routes && npx tsc -b && npm run lint && npm run build
 cd apps/web && TZ=UTC npx vitest run src/pages/parent src/routes   # 防挂钟依赖
 ```
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add apps/web/src/pages/parent/ParentControlsPage.tsx apps/web/src/pages/parent/ParentControlsPage.test.tsx \
@@ -1303,7 +1303,7 @@ git commit -m "feat(parent): 行为管控页（预警灵敏度 + 奖励兑换只
 - PRD / UX 的 §P6.6 / §P6.9 加批注（四项不做、侧栏补「异常预警」），**不删需求原文**。
 - changelog 记 10 条裁决 + Task 0 的 3/3 结果 + `off_topic` 硬阻断被删的理由（关键词分类器 6/12 误判）。
 
-- [ ] **Step 1: 逐处改，然后脚本核对两份 API 文档**
+- [x] **Step 1: 逐处改，然后脚本核对两份 API 文档**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1313,7 +1313,7 @@ grep -n "parent/alerts\|parent/controls\|parent/account\|parent/password" docs/A
 
 Expected: 两份文档都出现 4 个路径（`alerts/{id}/read` 另计），无遗漏。
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml \
@@ -1402,7 +1402,7 @@ kill $(cat /tmp/smoke_pc.pid); rm -f /tmp/smoke_pc.pid /tmp/p.jwt /tmp/smoke_pc.
 Expected: controls 回 `{alertAwayMinutes:5,alertIdleMinutes:15}` → PUT 后 `alertAwayMinutes:2`；空 patch **409/1001**；alerts 回分页结构；account 回 `{id,name,phone}`；错旧密码 **401/1003**。
 ⚠️ **这个 PUT 会真写库**（该孩子的 `alert_away_minutes` 被改成 2）——跑完改回 5，或在报告里说明。**按 PID 收尾**。
 
-- [ ] **Step 3: 门禁**
+- [x] **Step 3: 门禁**
 
 ```bash
 cd apps/server && npm test 2>&1 | tail -3 && npx tsc --noEmit && npm run build

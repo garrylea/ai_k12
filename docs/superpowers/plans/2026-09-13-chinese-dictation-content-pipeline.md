@@ -81,7 +81,7 @@
 **Interfaces:**
 - Produces: `dictation_passages.memorize_required TINYINT(1) NOT NULL DEFAULT 0`；`DictationPassageRow.memorize_required: number`；`DictationUpsertInput.memorizeRequired: number`；三条抽题查询均含 `AND dp.memorize_required = 1`。
 
-- [ ] **Step 1: 写幂等迁移**
+- [x] **Step 1: 写幂等迁移**
 
 创建 `tools/db/migrations/2026-09-13_add_dictation_memorize_required.sql`（镜像既有 `2026-09-13_ensure_uniq_q_content_hash.sql` 的写法：查 `information_schema` 再决定是否 `ALTER`，避免重复执行报错；不用存储过程，因为本机 `log_bin=ON` 且 `log_bin_trust_function_creators=OFF`，存储过程/触发器需要 SUPER）：
 
@@ -114,7 +114,7 @@ DEALLOCATE PREPARE stmt;
 
 > `'SELECT 1'` 作无操作分支：`PREPARE` 可执行语句清单包含 `ALTER TABLE` 与 `SELECT`，但不包含 `DO`。
 
-- [ ] **Step 2: 折回 schema.sql**
+- [x] **Step 2: 折回 schema.sql**
 
 在 `tools/db/schema.sql` 的 `dictation_passages` 建表块里，`verified` 行之后插入：
 
@@ -124,7 +124,7 @@ DEALLOCATE PREPARE stmt;
   memorize_required TINYINT(1) NOT NULL DEFAULT 0,
 ```
 
-- [ ] **Step 3: 执行迁移并验证**
+- [x] **Step 3: 执行迁移并验证**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -135,7 +135,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -E -e "SELECT COLUMN_NAME, COLUMN_TYPE, 
 
 Expected: 两次执行都不报错；查询出 `memorize_required | tinyint(1) | NO | 0`。
 
-- [ ] **Step 4: 改仓储（类型 + 列清单 + upsert）**
+- [x] **Step 4: 改仓储（类型 + 列清单 + upsert）**
 
 `apps/server/src/database/repositories/dictation-passages.repo.ts`：
 
@@ -161,13 +161,13 @@ Expected: 两次执行都不报错；查询出 `memorize_required | tinyint(1) |
       ],
 ```
 
-- [ ] **Step 5: 三条抽题查询加门禁**
+- [x] **Step 5: 三条抽题查询加门禁**
 
 `findRandomVerified`、`findVerifiedBySubject`、`findVerifiedByQuestionIds` 三处的 `WHERE` 子句，把 `AND dp.verified = 1` 改成 `AND dp.verified = 1 AND dp.memorize_required = 1`，并在 `findRandomVerified` 的注释里补一句「抽题池 = 已校验 且 必背」。
 
 `findByQuestionId`（判题取篇目）**保持不加门**——功能设计阶段已裁决（见默写功能 spec §6 注记），本次不改变。
 
-- [ ] **Step 6: 更新测试**
+- [x] **Step 6: 更新测试**
 
 `apps/server/src/database/repositories/dictation-passages.repo.test.ts`：
 
@@ -185,7 +185,7 @@ Expected: 两次执行都不报错；查询出 `memorize_required | tinyint(1) |
 
 3. `upsert` 调用的入参对象增加 `memorizeRequired: 0,`。
 
-- [ ] **Step 7: 假数据置必背**
+- [x] **Step 7: 假数据置必背**
 
 `apps/server/src/scripts/seed-dictation-fixture.ts`：两处 `repo.upsert({...})` 调用的入参里，`verified: 1,` 之后加 `memorizeRequired: 1,`。并在该行上方补一行注释说明原因：
 
@@ -196,7 +196,7 @@ Expected: 两次执行都不报错；查询出 `memorize_required | tinyint(1) |
 
 同时把文件头注释里「生产篇目由内容管线导入」那段补一句：真篇目入库时 `memorizeRequired=0`，待用户标定。
 
-- [ ] **Step 8: 跑测试与构建**
+- [x] **Step 8: 跑测试与构建**
 
 ```bash
 cd apps/server && npm test && npm run build
@@ -213,7 +213,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT id, work_title, verified, mem
 
 Expected: 两行都变为 `verified=1, memorize_required=1`（脚本原地 UPDATE，`id` 不变）。
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add tools/db/schema.sql tools/db/migrations/2026-09-13_add_dictation_memorize_required.sql apps/server/src/database/repositories/dictation-passages.repo.ts apps/server/src/database/repositories/dictation-passages.repo.test.ts apps/server/src/scripts/seed-dictation-fixture.ts
@@ -229,7 +229,7 @@ git commit -m "feat(dictation): dictation_passages 增加 memorize_required，�
 **Interfaces:**
 - Produces: `tools/crawler/data/语文/初中/统编版/九年级/上册/<书名>/page_NNN.jpg` 与 `tools/data-refinery/output/md/语文/初中/统编版/九年级/上册/<书名>/page_NNN.md`。后续任务的 `--book` 参数用 `九年级/上册` 定位。
 
-- [ ] **Step 1: 爬取**
+- [x] **Step 1: 爬取**
 
 ```bash
 cd tools/crawler
@@ -239,7 +239,7 @@ python src/crawler_cli.py --site smartedu --subject 语文 --publisher 统编版
 Expected: 打印下载进度；结束落盘 `data/语文/初中/统编版/九年级/上册/<书名>/page_NNN.jpg`。爬虫自带 checkpoint，中断可重跑。
 `--level 初中` 必须精确匹配——平台另有 `初中（五•四学制）` 副本，不在范围内。
 
-- [ ] **Step 2: 转换（不动该工具）**
+- [x] **Step 2: 转换（不动该工具）**
 
 ```bash
 cd tools/data-refinery
@@ -248,7 +248,7 @@ python src/convert_cli.py --source smartedu --subject 语文 --term 上册
 
 Expected: **每个输入图片产出一个 MD**（`page_001.md`、`page_002.md`…），落在 `output/md/语文/初中/统编版/九年级/上册/<书名>/` 下。MinerU 按批（10 个/批）调用并批间暂停 15s，页数多时会跑一段时间；自带 resume，中断可重跑。
 
-- [ ] **Step 3: 核实 MD 形态（闸门证据）**
+- [x] **Step 3: 核实 MD 形态（闸门证据）**
 
 ```bash
 cd tools/data-refinery
@@ -266,7 +266,7 @@ sed -n '1,40p' "$(ls "$D"/*/page_001.md | head -1)"
 4. 正文里 OCR 是否插入了多余的空格/换行；
 5. 目录页在第几页（`toc_parse_cli` 要找它）。
 
-- [ ] **Step 4: 向用户汇报并等待确认**
+- [x] **Step 4: 向用户汇报并等待确认**
 
 把上面 5 点连同 1–2 页真实 MD 片段贴给用户，**确认后才继续 Task 3**。若形态与设计假设不符（例如 MD 不是逐页而是整本一个文件），停下来重新评估抽取方案，不要硬套。
 
@@ -281,7 +281,7 @@ sed -n '1,40p' "$(ls "$D"/*/page_001.md | head -1)"
 **Interfaces:**
 - Produces: `output/toc/语文/初中/统编版/九年级/上册/<书名>.json`（结构与数学一致：`chapters[].{label, sections[].{label, printed_page}, supplements[].{label, printed_page}}`）。后续抽取按 `chapters` 逐单元喂给 LLM。
 
-- [ ] **Step 1: 跑目录解析**
+- [x] **Step 1: 跑目录解析**
 
 ```bash
 cd tools/data-refinery
@@ -290,7 +290,7 @@ python src/toc_parse_cli.py --source smartedu --subject 语文 --publisher 统�
 
 Expected: `output/toc/语文/初中/统编版/九年级/上册/<书名>.json`，打印 `[ok] ... -> N chapter(s)`。
 
-- [ ] **Step 2: 核对结构**
+- [x] **Step 2: 核对结构**
 
 ```bash
 cd tools/data-refinery
@@ -310,7 +310,7 @@ for ch in d.get('chapters',[]):
 
 Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 岳阳楼记`）。**若 `chapters` 为空或明显不是课文列表**（例如把版权页当地目录），说明 `toc_parse_cli` 的目录页识别对语文教材不适用 —— 停下来报告，不要硬往下走。
 
-- [ ] **Step 3: 生成候选清单交用户确认**
+- [x] **Step 3: 生成候选清单交用户确认**
 
 **候选必须同时收 `sections` 与 `supplements`**（Task 12 实测发现：「课外古诗词诵读」下的诗题落在 `supplements` 里而不是 `sections`，只收 sections 会整块丢掉）。另外**把栏目行本身也作为候选**（如 `课外古诗词诵读 159`）——它带印刷页码，能给该单元一个页锚点；否则「课外古诗词诵读」这一组的候选全无 `printed_page`，Task 7 算不出页窗、整组会被丢掉。
 
@@ -318,7 +318,7 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 
 **向用户确认后才能进入 Task 4。** 这一步的意义是：目录解析质量决定了候选是否漏收，而漏收意味着学生练不到。
 
-- [ ] **Step 4: 记录确认结果**
+- [x] **Step 4: 记录确认结果**
 
 把用户确认后的最终候选清单写入 `output/dictation/语文/上册/candidates.json`（**路径须与 Task 7 的默认值一致**：`out_root / SUBJECT_DIR / args.term / "candidates.json"`），数组，每项 `{label, printed_page, unit_label, unit_index}`，作为 Task 4/7 的输入。`output/` 在 gitignore 内，故**同时把确认后的范围记进 spec**（§4 第 3 步闸门注记）。
 
@@ -344,7 +344,7 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 
 > **逐条容错（Task 4 评审 Important，必须实现）**：`LocateResult.model_validate` 是**整体**校验，模型返回一条畸形数据（如 `genre: "诗"`、`is_classical` 缺失、裸数组顶层）就会让**整个单元**被 Task 7 的 `except Exception` 丢掉——实测一次坏 token 可损失 10 篇（第三单元的全部）。故本模块必须**逐条独立校验**：好的留下、坏的进 `rejected` 并带上原因；`genre` 白名单外**归一到 `other`**（与默认值同义，不让单条幻觉毁掉整页）；`is_classical` 缺失/非法则**只丢该条**（**不得默认 True**，那会静默放宽收录范围）。仓库既有同款先例：`card_labeler.py:207-209`「白名单外回退 concept，不让单卡幻觉导致整页 pydantic 校验失败」。
 
-- [ ] **Step 1: 写 prompt 模板**
+- [x] **Step 1: 写 prompt 模板**
 
 创建 `tools/data-refinery/src/prompts/dictation_locate.txt`：
 
@@ -396,7 +396,7 @@ Expected: 打印出各单元与课文标题（形如 `第三单元 ...` / `10 �
 - `reason`：一句话说明你凭什么判断它是古诗文、以及锚点取自哪里，供人工复核。
 ```
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
 创建 `tools/data-refinery/tests/test_dictation_locate.py`：
 
@@ -472,7 +472,7 @@ def test_defaults_when_optional_fields_missing():
     assert isinstance(LocateResult(passages=[p]), LocateResult)
 ```
 
-- [ ] **Step 3: 运行测试确认失败**
+- [x] **Step 3: 运行测试确认失败**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_locate.py -v
@@ -480,7 +480,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_locate.py -v
 
 Expected: FAIL —— `ModuleNotFoundError: No module named 'dictation_locate'`。
 
-- [ ] **Step 4: 实现模块**
+- [x] **Step 4: 实现模块**
 
 创建 `tools/data-refinery/src/dictation_locate.py`：
 
@@ -533,7 +533,7 @@ def locate_unit(llm: LLMClient, unit_label: str, unit_text: str, prompt: str) ->
     return LocateResult.model_validate(_parse_json_object(response.content))
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_locate.py -v
@@ -541,7 +541,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_locate.py -v
 
 Expected: PASS，4 个用例全绿。
 
-- [ ] **Step 6: 跑全量 Python 测试**
+- [x] **Step 6: 跑全量 Python 测试**
 
 ```bash
 cd tools/data-refinery && python -m pytest -q
@@ -549,7 +549,7 @@ cd tools/data-refinery && python -m pytest -q
 
 Expected: 既有用例全绿 + 新增 4 个。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tools/data-refinery/src/dictation_locate.py tools/data-refinery/src/prompts/dictation_locate.txt tools/data-refinery/tests/test_dictation_locate.py
@@ -571,7 +571,7 @@ git commit -m "feat(data-refinery): 新增语文默写篇目定位模块（LLM �
   - `slice_body(full_text: str, start_anchor: str, end_anchor: str) -> str | None` —— 含两端锚点取中间原文；任一锚点缺失/找不到返回 `None`
   - `normalize_body(raw: str) -> str` —— 去换行与空白，保留标点
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `tools/data-refinery/tests/test_dictation_slice.py`：
 
@@ -722,7 +722,7 @@ class TestCutPageAnnotations:
 
 > 注意：切片结果的「去尾部注释」是靠**末句锚点**（正文内的最后一句）实现的，不是靠找「注释」二字——这正是设计里修正过的点。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_slice.py -v
@@ -730,7 +730,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_slice.py -v
 
 Expected: FAIL —— `ModuleNotFoundError: No module named 'dictation_slice'`。
 
-- [ ] **Step 3: 实现模块**
+- [x] **Step 3: 实现模块**
 
 创建 `tools/data-refinery/src/dictation_slice.py`：
 
@@ -818,7 +818,7 @@ def normalize_body(raw: str) -> str:
     return _WS_RE.sub("", _INLINE_MARKER_RE.sub("", raw))
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_slice.py -v
@@ -826,7 +826,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_slice.py -v
 
 Expected: PASS，全部用例绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/dictation_slice.py tools/data-refinery/tests/test_dictation_slice.py
@@ -847,7 +847,7 @@ git commit -m "feat(data-refinery): 新增语文默写正文切片器（首末�
   - `check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> CheckResult`
   - `CHECK_MIN_LEN: dict[str, int]`、`REGULATED_SHI_LENS: set[int]`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `tools/data-refinery/tests/test_dictation_check.py`：
 
@@ -944,7 +944,7 @@ class TestReviewFlags:
         assert r.needs_review is False
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_check.py -v
@@ -952,7 +952,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_check.py -v
 
 Expected: FAIL —— `ModuleNotFoundError: No module named 'dictation_check'`。
 
-- [ ] **Step 3: 实现模块**
+- [x] **Step 3: 实现模块**
 
 创建 `tools/data-refinery/src/dictation_check.py`：
 
@@ -1064,7 +1064,7 @@ def check_body(body: str, work_title: str, genre: str, chrome: set[str]) -> Chec
     return r
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_check.py -v
@@ -1072,7 +1072,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_check.py -v
 
 Expected: PASS，全部用例绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/dictation_check.py tools/data-refinery/tests/test_dictation_check.py
@@ -1102,7 +1102,7 @@ git commit -m "feat(data-refinery): 新增语文默写正文自检（错误项 +
 
 > 注意结尾 `verified`：自检 `errors` 为空则 `1`，否则该条**不进 JSONL**（改写入 unresolved 报告）——即「入库的必是自检通过的」。`_needs_review` 只影响清单排序与标注。
 
-- [ ] **Step 1: 写 CLI 骨架与参数**
+- [x] **Step 1: 写 CLI 骨架与参数**
 
 创建 `tools/data-refinery/src/dictation_cli.py`，先实现参数解析与 `--extract` 的编排（`--load` 在 Task 9 补）：
 
@@ -1155,7 +1155,7 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 ```
 
-- [ ] **Step 2: 实现页序、偏移与单元页窗（纯函数，可单测）**
+- [x] **Step 2: 实现页序、偏移与单元页窗（纯函数，可单测）**
 
 在 `dictation_cli.py` 追加：
 
@@ -1281,7 +1281,7 @@ def _units_without_page(candidates: list[dict]) -> list[str]:
     return [u for u, has_page in seen.items() if not has_page]
 ```
 
-- [ ] **Step 3: 实现 --extract 主流程与产物写出**
+- [x] **Step 3: 实现 --extract 主流程与产物写出**
 
 ```python
 def run_extract(args, config) -> int:
@@ -1417,7 +1417,7 @@ def run_extract(args, config) -> int:
 
 > 关键设计：**自检未通过的篇目不进 JSONL**（只进 unresolved 报告），因此「入库的必是自检通过的」，`verified` 恒为 1——门禁在写文件时就生效，入库器不需要再判。
 
-- [ ] **Step 4: 写失败测试**
+- [x] **Step 4: 写失败测试**
 
 创建 `tools/data-refinery/tests/test_dictation_cli.py`，覆盖**不依赖网络与 LLM 的部分**（页序解析、偏移众数、单元页窗），用 `tmp_path` 造假教材目录：
 
@@ -1518,7 +1518,7 @@ class TestParseArgs:
         assert args.all
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_cli.py -v
@@ -1526,7 +1526,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_cli.py -v
 
 Expected: PASS。
 
-- [ ] **Step 6: 跑全量 Python 测试**
+- [x] **Step 6: 跑全量 Python 测试**
 
 ```bash
 cd tools/data-refinery && python -m pytest -q
@@ -1534,7 +1534,7 @@ cd tools/data-refinery && python -m pytest -q
 
 Expected: 全绿。
 
-- [ ] **Step 7: 真跑九上（需要 Task 2/3 的产物）**
+- [x] **Step 7: 真跑九上（需要 Task 2/3 的产物）**
 
 ```bash
 cd tools/data-refinery && python src/dictation_cli.py --extract --book "九年级/上册" --term 上册
@@ -1547,7 +1547,7 @@ Expected: 打印定位模式与「入库候选 N 篇，待人工处理 M 项」�
 2. **《岳阳楼记》与《出师表》的正文长度**应是全篇（前者约 360 字、后者约 600 字量级，去标点后）。若明显偏短，说明末句锚点取错了（切到了半篇）。
 3. **九上候选 24 篇的落地数**：JSONL 条数应为 24（若有进 unresolved 的，逐条看原因是否合理）。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tools/data-refinery/src/dictation_cli.py tools/data-refinery/tests/test_dictation_cli.py
@@ -1567,7 +1567,7 @@ git commit -m "feat(data-refinery): 新增语文默写抽取 CLI（--extract：�
 - Produces:
   - `class DictationLoader`：`__init__(self, host, port, user, password, db)`、`close()`、`load_passages(items: list[dict]) -> dict`（返回 `{"inserted": n, "updated": n, "passages_upserted": n}`）
 
-- [ ] **Step 1: 写失败测试（用假连接）**
+- [x] **Step 1: 写失败测试（用假连接）**
 
 创建 `tools/data-refinery/tests/test_dictation_loader.py`。核心是验证**按业务键找已有题 → 原地 UPDATE（不插重复）**这条幂等策略：
 
@@ -1675,7 +1675,7 @@ def test_question_content_uses_prompt_convention():
     assert any(str(x).startswith("作者：范仲淹") for x in ins)
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_loader.py -v
@@ -1683,7 +1683,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_loader.py -v
 
 Expected: FAIL —— `ModuleNotFoundError: No module named 'dictation_loader'`。
 
-- [ ] **Step 3: 实现模块**
+- [x] **Step 3: 实现模块**
 
 创建 `tools/data-refinery/src/dictation_loader.py`：
 
@@ -1788,7 +1788,7 @@ class DictationLoader:
 
 > 关键点：`memorize_required` 显式写 `0`（本次全量非必背，必背由用户后续标定）；`answer_verified` 显式写 `0`（管线提取的原始数据，与人工/AI 回写区分的既有约定一致）；`ON DUPLICATE KEY UPDATE` **不动 `memorize_required`**——否则重跑会把用户已标的必背刷回 0。
 
-- [ ] **Step 4: 运行测试确认通过 + 全量**
+- [x] **Step 4: 运行测试确认通过 + 全量**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_loader.py -v && python -m pytest -q
@@ -1796,7 +1796,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_loader.py -v && 
 
 Expected: 全绿。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/dictation_loader.py tools/data-refinery/tests/test_dictation_loader.py
@@ -1813,7 +1813,7 @@ git commit -m "feat(data-refinery): 新增语文默写入库器（按篇目业�
 **Interfaces:**
 - Consumes: `dictation_loader.DictationLoader.read_jsonl`
 
-- [ ] **Step 1: 补 --load 分支**
+- [x] **Step 1: 补 --load 分支**
 
 在 `dictation_cli.py` 追加（`DictationLoader` 在 Task 8 实现）：
 
@@ -1870,7 +1870,7 @@ if __name__ == "__main__":
 
 > 注意：`--load` 不重跑抽取，它只吃 `--extract` 已落盘的 JSONL —— 这样人工过目（Task 7 Step 7）可以在入库**之前**发生，用户否决的篇目直接从 JSONL 里删掉即可。
 
-- [ ] **Step 2: 跑测试**
+- [x] **Step 2: 跑测试**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_dictation_cli.py -v
@@ -1878,7 +1878,7 @@ cd tools/data-refinery && python -m pytest tests/test_dictation_cli.py -v
 
 Expected: 全绿。
 
-- [ ] **Step 3: 真库入库九上**
+- [x] **Step 3: 真库入库九上**
 
 ```bash
 cd tools/data-refinery && python src/dictation_cli.py --load --book "九年级/上册" --term 上册
@@ -1900,7 +1900,7 @@ Expected：① 九上篇目数 = 该册古诗文/文言文总数，`其中必背
 
 把两个查询结果给用户确认。
 
-- [ ] **Step 5: 幂等复验**
+- [x] **Step 5: 幂等复验**
 
 ```bash
 cd tools/data-refinery && python src/dictation_cli.py --load --book "九年级/上册" --term 上册
@@ -1909,7 +1909,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT COUNT(*) FROM dictation_passa
 
 Expected: 第二次全部走 `updated` 分支，`INSERT` 数为 0，篇目总数不变。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools/data-refinery/src/dictation_cli.py
@@ -1922,14 +1922,14 @@ git commit -m "feat(data-refinery): dictation_cli 补 --load/--all（入库九�
 
 **Files:** 无新代码（复用 Task 2–9 的 CLI，只换册次参数）；若九下暴露了不兼容的版式差异，则在此修 `dictation_*` 模块并补测试。
 
-- [ ] **Step 1: 爬取 + 转换九下**
+- [x] **Step 1: 爬取 + 转换九下**
 
 ```bash
 cd tools/crawler && python src/crawler_cli.py --site smartedu --subject 语文 --publisher 统编版 --level 初中 --grade 九年级 --semester 下册 --output ./data
 cd tools/data-refinery && python src/convert_cli.py --source smartedu --subject 语文 --term 下册
 ```
 
-- [ ] **Step 2: 目录解析九下**
+- [x] **Step 2: 目录解析九下**
 
 ```bash
 cd tools/data-refinery && python src/toc_parse_cli.py --source smartedu --subject 语文 --publisher 统编版 --grade 九下
@@ -1937,7 +1937,7 @@ cd tools/data-refinery && python src/toc_parse_cli.py --source smartedu --subjec
 
 把候选清单交用户确认（同 Task 3 的闸门），确认后落 `candidates.json`。
 
-- [ ] **Step 3: 抽取 + 入库**
+- [x] **Step 3: 抽取 + 入库**
 
 ```bash
 cd tools/data-refinery && python src/dictation_cli.py --all --book "九年级/下册" --term 下册
@@ -1952,7 +1952,7 @@ MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT work_title, author, dynasty, 
 
 Expected: 上下册篇目齐备；下册 `必背=0`；逐行看一眼篇名/作者/朝代/正文字数是否合理（字数明显偏小的多半切短了）。
 
-- [ ] **Step 5: Commit（若有代码改动）**
+- [x] **Step 5: Commit（若有代码改动）**
 
 ```bash
 git add tools/data-refinery/src tools/data-refinery/tests
@@ -1973,11 +1973,11 @@ git commit -m "fix(data-refinery): 语文默写管线适配九下版式差异"
 - Modify: `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md` §4.2（其 DDL 块早于 `memorize_required`，需补上该列并与 §4.3 口径一致）
 - Modify: `apps/server/src/modules/training/training.service.ts:95`（注释仍写「只出 verified=1」）与 `apps/server/src/database/repositories/dictation-passages.repo.ts:46`（类注释同上）——两处 Task 1 评审记下的陈旧注释
 
-- [ ] **Step 0: 清掉 Task 1 遗留的两处陈旧注释**
+- [x] **Step 0: 清掉 Task 1 遗留的两处陈旧注释**
 
 `training.service.ts` 的 `listDictationPassages` 注释与 `dictation-passages.repo.ts` 的类注释都还写着「只出 verified=1 / 只向抽题池暴露 verified=1」，现已多加 `memorize_required` 门禁。改准（并顺带在仓储 `upsert` 的冲突分支加一行注释说明：**此处按入参覆盖 `memorize_required`，而管线的 loader 有意不在冲突分支动它**——否则将来有人「统一」两处写法，重跑管线就会把用户标好的必背刷回 0）。
 
-- [ ] **Step 1: 数学管线回归**
+- [x] **Step 1: 数学管线回归**
 
 ```bash
 cd tools/data-refinery && python -m pytest -q          # Python 全量绿
@@ -1986,21 +1986,21 @@ cd apps/server && npm test && npm run build            # TS 全量绿（抽题�
 
 再手工确认数学专项抽题仍可用：`GET /api/training/targeted/start` 用数学 KP 抽一次题（或跑既有数学相关用例——门禁只加在 `dictation_passages` 的三条查询上，数学走的是 `questions.findRandomByKpAndType`，理论上无交集，但要有证据）。
 
-- [ ] **Step 2: 更新 changelog + 同步两份 API 文档**
+- [x] **Step 2: 更新 changelog + 同步两份 API 文档**
 
 在 `docs/ai-core-changelog.md` 顶部加一条 `## 2026-09-13 新增（语文默写内容管线：九年级教材 → 题库）`，写清：新增 CLI 与模块、`memorize_required` 字段与抽题池收紧、实际入库篇目数、自检与人工过目的结论、以及「必背标定与注释抽取留给后续」。
 
 再同步**互为对照的两份 API 文档**（仓库铁律，任何一方变更另一方必须同时改）：`docs/API接口与数据流设计文档.md` §4.18 与 `docs/api/openapi.yaml` 里 `GET /api/training/dictation/passages` 的说明——把「只出 `verified=1` 的已校验篇目」改为「只出 `verified=1` **且** `memorize_required=1` 的篇目」；并确认 `POST /dictation/start` 的三条抽题路径描述也提到该门禁。改完用 grep 交叉核对两份文档的端点路径与措辞一致。最后把 `docs/superpowers/specs/2026-09-13-chinese-dictation-special-design.md` §4.2 的建表 DDL 补上 `memorize_required` 列（该块早于本列，现与实现不符）。
 
-- [ ] **Step 3: 更新管线总结文档**
+- [x] **Step 3: 更新管线总结文档**
 
 在 `docs/data-refinery-管线总结与后续.md` 增一节，说明这条「只服务语文默写」的旁路管线：为什么独立于四阶段（不波及其他学科）、三步复用 + 三步新建、产物目录、运行命令。
 
-- [ ] **Step 4: spec 补「实现结果」**
+- [x] **Step 4: spec 补「实现结果」**
 
 在 spec 末尾加一节，记录：实际篇目数与分布、`unresolved` 报告里最终遗留了什么（用户是否处理完）、偏移众数是否可靠（还是退化用了滑窗）、低频字标记命中了几篇。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/
@@ -2029,7 +2029,7 @@ git commit -m "docs: 记录语文默写内容管线落地结果（篇目数/遗�
   - `get_profile(subject: str | None) -> TextbookProfile`（未注册学科回退 `TextbookProfile`）
   - `profile_for_md_path(md_path: Path) -> TextbookProfile`（从 MD 路径首段推学科：`语文/初中/…` → chinese；推不出则回退数学档以保持既有行为）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `tools/data-refinery/tests/test_textbook_profile.py`。**最重要的一组是数学黄金回归**——重构后数学判定必须与重构前逐条一致：
 
@@ -2147,7 +2147,7 @@ class TestRegistry:
 
 > 若 `MATH_TOC_NEGATIVE` 里的某条在重构**前**其实为 True（说明我举的例子不对），**以实现为准改用例并在报告里说明**——黄金回归的意义是「与重构前一致」，不是「与我举的例子一致」。落笔前请先用重构前的两条正则跑一遍这些用例确认预期。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_textbook_profile.py -v
@@ -2155,7 +2155,7 @@ cd tools/data-refinery && python -m pytest tests/test_textbook_profile.py -v
 
 Expected: FAIL —— `ModuleNotFoundError: No module named 'textbook_profile'`。
 
-- [ ] **Step 3: 实现 textbook_profile.py**
+- [x] **Step 3: 实现 textbook_profile.py**
 
 创建 `tools/data-refinery/src/textbook_profile.py`：
 
@@ -2266,7 +2266,7 @@ def profile_for_md_path(md_path: Path) -> TextbookProfile:
     return MathTextbookProfile()
 ```
 
-- [ ] **Step 4: 运行测试确认通过（含黄金回归）**
+- [x] **Step 4: 运行测试确认通过（含黄金回归）**
 
 ```bash
 cd tools/data-refinery && python -m pytest tests/test_textbook_profile.py -v
@@ -2274,7 +2274,7 @@ cd tools/data-refinery && python -m pytest tests/test_textbook_profile.py -v
 
 Expected: PASS。**特别注意数学黄金回归必须全绿**——它是本次重构的安全绳。
 
-- [ ] **Step 5: 接进 toc_parse_cli**
+- [x] **Step 5: 接进 toc_parse_cli**
 
 `toc_parse_cli.py` 的三处改动：
 
@@ -2284,7 +2284,7 @@ Expected: PASS。**特别注意数学黄金回归必须全绿**——它是本�
 
 > 数学路径取到 `MathTextbookProfile`，两条判定与改前一致；语文路径取到 `ChineseTextbookProfile`。
 
-- [ ] **Step 6: 接进 card_splitter**
+- [x] **Step 6: 接进 card_splitter**
 
 `card_splitter.py`：
 
@@ -2294,7 +2294,7 @@ Expected: PASS。**特别注意数学黄金回归必须全绿**——它是本�
    `profile = profile_for_md_path(md_path)` 后传入；
 4. 删除文件内的 `_PAGE_NUMBER_HEADER_RE` 常量（避免留下两处真相），其注释里那句「页码标注：如 "3 第二十一章 一元二次方程"」迁到 `MathTextbookProfile` 的文档串。
 
-- [ ] **Step 7: 跑全量 Python 测试（数学行为回归的最终证据）**
+- [x] **Step 7: 跑全量 Python 测试（数学行为回归的最终证据）**
 
 ```bash
 cd tools/data-refinery && python -m pytest -q
@@ -2317,7 +2317,7 @@ for ch in d.get('chapters',[]): print(' ', ch.get('label'))
 
 Expected: 解析出语文的**多个单元**（至少含第三单元「古诗文」与第六单元），而不是像重构前只出 page_004 一个单元。把输出贴进报告。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add tools/data-refinery/src/textbook_profile.py tools/data-refinery/tests/test_textbook_profile.py tools/data-refinery/src/toc_parse_cli.py tools/data-refinery/src/card_splitter.py tools/data-refinery/tests

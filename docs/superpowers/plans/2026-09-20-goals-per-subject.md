@@ -150,7 +150,7 @@ UNIQUE KEY uniq_goals_student_scope_metric (student_id, scope_subject_id, metric
 - **`lesson_completions.lesson_id` 不设外键**：`lessons` 是内容表、会全量重灌，设入向外键会把重灌卡死（同 `special_practice_logs.ref_id`、`student_word_progress.word_id` 的教训）。
 - **`subject_id` 在 `lesson_completions` 里 NOT NULL**：写入时从 `progress.subject_id` 取（该列 NOT NULL），不需要可空。
 
-- [ ] **Step 1: 写迁移**
+- [x] **Step 1: 写迁移**
 
 创建 `tools/db/migrations/2026-09-20_goals_per_subject_and_lesson_completions.sql`：
 
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS lesson_completions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-- [ ] **Step 2: 手工 apply**
+- [x] **Step 2: 手工 apply**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -240,7 +240,7 @@ Expected: 无输出。若报 `ERROR 1553`（cannot drop index needed in a foreig
 
 > ⚠️ 本机 mysql 9.5 非交互 `-e` 下不认 `\G`，要看建表用 `--vertical`。
 
-- [ ] **Step 3: 验证（5 项断言）**
+- [x] **Step 3: 验证（5 项断言）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -264,7 +264,7 @@ SELECT CONCAT('lc_uniq=', COUNT(*)) FROM information_schema.STATISTICS
 
 Expected: `gen_col=1`、`new_key_cols=3`、`old_key=0`、`lc_fk=1`、`lc_uniq=2`。
 
-- [ ] **Step 4: 验证「同 metric 多学科」真的能共存 + 幂等复跑**
+- [x] **Step 4: 验证「同 metric 多学科」真的能共存 + 幂等复跑**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -283,7 +283,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-09-20_goals_per_subje
 
 Expected: `same_metric_two_subjects=2`、`upsert_hit=9`（唯一键命中，不是新增第二行）、`RE-APPLY OK`，且 Step 3 的 5 个数字不变。
 
-- [ ] **Step 5: 同步 `tools/db/schema.sql`**
+- [x] **Step 5: 同步 `tools/db/schema.sql`**
 
 **(a)** 改 `goals` 段：把 `metric` 列的注释扩到 5 个值；`subject_id` 行加「按学科目标：NOT NULL 语义（历史停用行可能为 NULL）」；在 `subject_id` 之后加生成列；把 `UNIQUE KEY uniq_goals_student_metric (student_id, metric)` 换成 `UNIQUE KEY uniq_goals_student_scope_metric (student_id, scope_subject_id, metric)`。改完该表为：
 
@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS goals (
 <把 Step 1 的 CREATE TABLE 语句整段粘到这里，一个字符都不要改>
 ```
 
-- [ ] **Step 6: 验证两处建表语句逐字一致**
+- [x] **Step 6: 验证两处建表语句逐字一致**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -337,7 +337,7 @@ diff <(sed -n '/^CREATE TABLE IF NOT EXISTS goals/,/^) ENGINE=InnoDB/p' tools/db
 
 Expected: `IDENTICAL` / 都在。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add tools/db/migrations/2026-09-20_goals_per_subject_and_lesson_completions.sql tools/db/schema.sql
@@ -364,7 +364,7 @@ git commit -m "feat(db): goals 改按学科（生成列 + 新唯一键）+ 新�
 - 写入用 **`INSERT IGNORE`**：唯一键 `(student_id, lesson_id)` 保证「一课只记一次」。完成不可逆，重复上报/重放都该被吞掉，**不是错误**。
 - **best-effort**：写失败只 `warn`，**绝不能**让「学完一课」这个主动作失败（同 `awardLessonPoints` 的处理）。
 
-- [ ] **Step 1: 仓储 + 测试**
+- [x] **Step 1: 仓储 + 测试**
 
 `lesson-completions.repo.ts`：
 
@@ -480,7 +480,7 @@ describe('LessonCompletionsRepository', () => {
 });
 ```
 
-- [ ] **Step 2: 写入点（`ProgressService`）**
+- [x] **Step 2: 写入点（`ProgressService`）**
 
 在 `progress.service.ts` 的「学完一课」分支（现约 `:282-300`，`isLastCard` 内、`advanceLesson` / `markCompleted` 之后）插入。**先读该段再改**，变量名以文件为准（`progress` / `lessonId` / `studentId`）：
 
@@ -501,7 +501,7 @@ describe('LessonCompletionsRepository', () => {
 > 构造函数注入 `LessonCompletionsRepository`；`progress.module.ts` 的 `providers` 加它（漏了 Nest 启动直接失败）。
 > `subjectId` 用 `progress.subject_id`（该行就是这门学科的游标，NOT NULL）。**不要**用请求里传来的 subjectId——那是「当前选中的学科」，不一定是这一课所属学科。
 
-- [ ] **Step 3: barrel + 跑测试 + 类型检查**
+- [x] **Step 3: barrel + 跑测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/lesson-completions.repo.test.ts src/modules/progress && npx tsc --noEmit
@@ -509,7 +509,7 @@ cd apps/server && npx vitest run src/database/repositories/lesson-completions.re
 
 Expected: 全绿；`tsc` 无输出。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/lesson-completions.repo.ts \
@@ -538,7 +538,7 @@ git commit -m "feat(progress): 新增 lesson_completions 完课事件（每周�
 2. **`subjectId` 可选、非法值不 500**：非正整数 → 按 `null` 处理（等同于「没带」）。心跳是尽力而为，报错只会污染前端日志。
 3. **⚠️ SET 顺序**：`IF(client_state = 'visible', ...)` **必须仍排在 `client_state = ?` 之前**（那是 1A 的时长口径钉子，见该方法注释）。`subject_id = COALESCE(subject_id, ?)` 与 `IF` 无交互，放在 `client_state` 之后、`heartbeat_count` 之前即可；**但改完必须跑顺序钉子用例**。
 
-- [ ] **Step 1: 改仓储（含顺序钉子）**
+- [x] **Step 1: 改仓储（含顺序钉子）**
 
 `study-sessions.repo.ts` 的 `heartbeat`：
 
@@ -572,13 +572,13 @@ git commit -m "feat(progress): 新增 lesson_completions 完课事件（每周�
 - 既有顺序钉子用例：断言 params 顺序改为 `['visible', null, uid, studentId]`（**参数位置变了，这条不改会红**——这是好事，说明钉子有效）。
 - 新用例：「已带学科的会话，后续心跳传别的学科**不改写**」——用 `zipInsert` 式思路断言 SQL 里是 `COALESCE(subject_id, ?)` 而**不是** `subject_id = ?`（后者会覆盖）。真语义由 Task 9 的真库冒烟验证。
 
-- [ ] **Step 2: service / controller / DTO**
+- [x] **Step 2: service / controller / DTO**
 
 - `study-sessions.service.ts` 的 `heartbeat(input)`：入参加 `subjectId?: number`，转成 `const subjectId = Number.isInteger(input.subjectId) && (input.subjectId as number) > 0 ? (input.subjectId as number) : null;` 再传给仓储。
 - `analytics.controller.ts` 的心跳端点：从 body 取 `subjectId`（**不做 Zod 强校验**——非法按没带给，见口径 2），加进 service 入参。
 - 若心跳 DTO 里有 Zod schema，则加 `subjectId: z.number().int().positive().optional()`；**但 controller 仍要容忍它缺失**。
 
-- [ ] **Step 3: 前端 tracker 带上 `subjectId`**
+- [x] **Step 3: 前端 tracker 带上 `subjectId`**
 
 `apps/web/src/analytics/tracker.ts` 的心跳处（现约 `:160-168` 一带，读文件确认）：把当时可得的 `subjectIdProvider()` 结果放进心跳 body（**有才带**，同 start 的写法）：
 
@@ -588,7 +588,7 @@ git commit -m "feat(progress): 新增 lesson_completions 完课事件（每周�
     body: JSON.stringify({ state, ...(subjectId !== null ? { subjectId } : {}) }),
 ```
 
-- [ ] **Step 4: 跑测试 + 类型检查（两端）**
+- [x] **Step 4: 跑测试 + 类型检查（两端）**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/study-sessions.repo.test.ts src/modules/analytics && npx tsc --noEmit
@@ -597,7 +597,7 @@ cd apps/web && npx vitest run src/analytics && npx tsc -b
 
 Expected: 全绿；`tsc` 无输出。**若顺序钉子用例变红**：说明 SET 顺序被改动了，回去对齐注释里的要求。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/study-sessions.repo.ts \
@@ -622,11 +622,11 @@ git commit -m "fix(analytics): 心跳补写 subject_id（按学科学习时长�
 - 时长沿用 `getStudyTimeBySubject` 的同一套过滤（`subject_id = ?` + `EFFECTIVE_SESSION`），**新增单学科标量版**（把那个方法的 SQL 抄过来加 `AND subject_id = ?`，别改原方法——它给 `bySubject` 用）。
 - `findSubjectIdsByStudent` 取 `progress` 表的 `DISTINCT subject_id`，**按 `subject_id` 升序**（稳定顺序，页面分组依赖它）。
 
-- [ ] **Step 1: 写两个方法 + 各自的仓储测试**
+- [x] **Step 1: 写两个方法 + 各自的仓储测试**
 
 测试照本仓既有仓储存根式（假 pool + 断言 SQL 关键片段 + `Number()` 化 + **无 `CURDATE()`**）。
 
-- [ ] **Step 2: 跑测试 + 类型检查**
+- [x] **Step 2: 跑测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/parent-analytics.repo.test.ts src/database/repositories/progress.repo.test.ts 2>/dev/null || npx vitest run src/database/repositories && npx tsc --noEmit
@@ -634,7 +634,7 @@ cd apps/server && npx vitest run src/database/repositories/parent-analytics.repo
 
 > `progress.repo.ts` 可能**没有**测试文件；没有就新建 `progress.repo.test.ts`（只覆盖本方法）。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/parent-analytics.repo.ts \
@@ -662,19 +662,19 @@ git commit -m "feat(db): 单学科窗口时长 + 在学学科清单两个查询"
 **⚠️ 本任务的最高风险点：占位符顺序**
 列清单是 `(student_id, subject_id, metric, title, period, target_value, reminder_enabled, is_active)` —— **`subject_id` 紧跟 `student_id`**，`title` 在 `period` 之前。1B 就在这里把 `title`/`period` 写反过（`goals.repo.ts:57-61` 已有警告注释）。**每条 SQL 写完都要用 `zipInsert` 断言到列名**。
 
-- [ ] **Step 1: 改三处 SQL**
+- [x] **Step 1: 改三处 SQL**
 
 - `findActiveByStudent`：`SELECT id, subject_id, metric, period, target_value, title FROM goals WHERE student_id = ? AND is_active = 1 ORDER BY subject_id, id`（`subject_id` 升序，与 Task 4 的学科顺序一致）；映射 result 加 `subjectId: r.subject_id === null ? null : Number(r.subject_id)`。
 - `ensureDefaults`：占位符改为 `(?, ?, ?, ?, ?, ?, 0, 1)` + 参数 `[studentId, d.subjectId, d.metric, d.title, d.period, d.target]`；仍用 **`INSERT IGNORE`**（不覆盖家长已改的值）。唯一键已换成 `(student_id, scope_subject_id, metric)`，`INSERT IGNORE` 照旧生效。
 - `upsertTarget`：同样 6 个占位符 + `ON DUPLICATE KEY UPDATE target_value = new.target_value, period = new.period, title = new.title, subject_id = new.subject_id, is_active = 1`（**`subject_id` 也写回**，让「从 A 学科挪到 B 学科」这种调用也一致；正常调用不会挪）。`reminder_enabled` 仍写 0（裁决 1：提醒本期不做）。
 
-- [ ] **Step 2: 更新测试（既有断言必改 + 新增）**
+- [x] **Step 2: 更新测试（既有断言必改 + 新增）**
 
 - 既有 `zipInsert` 断言：期望对象加 `subject_id`。
 - 新增：「同一 metric 不同学科各一行，互不覆盖」——两次 `upsertTarget(7, 1, 'daily_study_minutes', ...)` / `(7, 2, ...)` 参数里 `subject_id` 分别是 1 / 2（唯一键维度正确）。
 - 新增：「`weekly_lessons` 是合法 metric」（类型层面已保证，测试里断言它进 SQL 不报错、注释与枚举一致）。
 
-- [ ] **Step 3: 跑测试 + 类型检查**
+- [x] **Step 3: 跑测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/database/repositories/goals.repo.test.ts && npx tsc --noEmit
@@ -682,7 +682,7 @@ cd apps/server && npx vitest run src/database/repositories/goals.repo.test.ts &&
 
 Expected: 全绿；`tsc` 无输出（注意：`GoalsService` 会因 `GoalMetric` 多了一个值而**报穷尽检查错误**，那是任务 6 要修的——本步可以先只跑 goals.repo 测试，`tsc` 留给 Task 6 结束时统一清）。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add apps/server/src/database/repositories/goals.repo.ts apps/server/src/database/repositories/goals.repo.test.ts
@@ -705,7 +705,7 @@ git commit -m "feat(goals): 仓储改按学科（(学科, 指标) 二元组 + we
   - `upsertTarget(studentId, subjectId, metric, target): Promise<GoalAttainmentItem>`
   - `GOAL_TEMPLATES`（学科 × 指标 × 默认值，**唯一真源**）
 
-- [ ] **Step 1: 重写常量与模板**
+- [x] **Step 1: 重写常量与模板**
 
 ```ts
 /** MVP 学科白名单（PRD 的 MVP 只有数学/语文/英语；subjects 表里有 9 个，别全建）。 */
@@ -741,11 +741,11 @@ const PERIOD_BY_METRIC = ...  // 同上
 export const SUBJECTS_BY_METRIC = ...  // 同上
 ```
 
-- [ ] **Step 2: 加 `subjectId` 到「每周清零错题」的计数**
+- [x] **Step 2: 加 `subjectId` 到「每周清零错题」的计数**
 
 `MainErrorBooksRepository.countClearedBetween` 加第 2 个参数 `subjectId: number`（SQL 加 `AND subject_id = ?`），并同步它的测试（1B 写的两条断言要改参数数组）。`main_error_books.subject_id` 是 `NOT NULL`，天然可按学科。
 
-- [ ] **Step 3: 达成值分派（按学科）**
+- [x] **Step 3: 达成值分派（按学科）**
 
 ```ts
   private async achievedOf(studentId: number, subjectId: number, metric: GoalMetric): Promise<number> {
@@ -770,7 +770,7 @@ export const SUBJECTS_BY_METRIC = ...  // 同上
   }
 ```
 
-- [ ] **Step 4: `getAttainment` / `upsertTarget`**
+- [x] **Step 4: `getAttainment` / `upsertTarget`**
 
 ```ts
   async getAttainment(studentId: number): Promise<GoalAttainmentSummary> {
@@ -810,7 +810,7 @@ export const SUBJECTS_BY_METRIC = ...  // 同上
   }
 ```
 
-- [ ] **Step 5: `resolveLearningSubjects` / `buildDefaults`**
+- [x] **Step 5: `resolveLearningSubjects` / `buildDefaults`**
 
 ```ts
   /**
@@ -827,7 +827,7 @@ export const SUBJECTS_BY_METRIC = ...  // 同上
   private buildDefaults(subjects: Array<{ id: number; code: string }>) { /* 见上表 */ }
 ```
 
-- [ ] **Step 6: 重写 service 测试**
+- [x] **Step 6: 重写 service 测试**
 
 必测（每条都对应一个真实翻车点）：
 1. 在学学科 = `progress` 行 ∪ {语文,英语} ∩ 白名单 —— 学生只配了数学时，仍会建语文/英语的专项目标（背单词/古诗文得有位置）。
@@ -840,7 +840,7 @@ export const SUBJECTS_BY_METRIC = ...  // 同上
 8. `rate` 复用 `toRate(target, achieved)`：达标 100 / 超额 >100 / target=0 → null。
 9. 窗口：daily = 今天、weekly = 近 7 天（半开区间、绝不用 `CURDATE()`）。
 
-- [ ] **Step 7: 跑测试 + 类型检查**
+- [x] **Step 7: 跑测试 + 类型检查**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights/goals.service.test.ts src/database/repositories && npx tsc --noEmit
@@ -848,7 +848,7 @@ cd apps/server && npx vitest run src/modules/parent-insights/goals.service.test.
 
 > `tsc` 这时应已全清（Task 5 的穷尽检查错误在本任务补齐 case 后消失）。若还报 `never` 相关错误，说明 `GOAL_TEMPLATES` 与 switch 不同步。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights/goals.service.ts \
@@ -882,7 +882,7 @@ git commit -m "feat(parent): 目标模型改 (学科, 指标) —— 模板/默�
 
 > 第 5 步需要「在学学科」集合：让 `GoalsService` 暴露一个 `isLearningSubject(studentId, subjectId): Promise<boolean>`（内部复用 Task 6 的 `resolveLearningSubjects`），controller 调用它校验——**别在 controller 里重写一遍学科解析逻辑**。
 
-- [ ] **Step 1: 改 controller**
+- [x] **Step 1: 改 controller**
 
 ```ts
 /** 目标维度白名单（与 `goals.metric` 的列注释逐字一致）。 */
@@ -901,11 +901,11 @@ const UpsertGoalSchema = z.object({
 
 `putGoalTarget` 的 handler 按上面的校验链路重排（4、5 两步新增），并把 `goalsService.upsertTarget(studentId, subjectId, metric, target)` 的调用补上学科。
 
-- [ ] **Step 2: 模块接线**
+- [x] **Step 2: 模块接线**
 
 `parent-insights.module.ts` 的 providers 追加 `LessonCompletionsRepository`（`ParentAnalyticsRepository` / `StudentsRepository` / `SubjectsRepository` 已在）。
 
-- [ ] **Step 3: 控制器测试**
+- [x] **Step 3: 控制器测试**
 
 必测：
 1. `getGoalAttainment`：归属校验先于取数（既有风格不变）。
@@ -917,7 +917,7 @@ const UpsertGoalSchema = z.object({
 7. 合法 → `upsertTarget(studentId, subjectId, metric, target)` 参数正确。
 8. 归属校验失败 → 不写库（403 不泄漏存在性）。
 
-- [ ] **Step 4: 跑测试 + 类型检查 + 启动冒烟**
+- [x] **Step 4: 跑测试 + 类型检查 + 启动冒烟**
 
 ```bash
 cd apps/server && npx vitest run src/modules/parent-insights && npx tsc --noEmit && npm run build
@@ -930,7 +930,7 @@ kill $(cat /tmp/boot_goals.pid) && rm -f /tmp/boot_goals.pid /tmp/boot_goals.log
 Expected: 启动成功、两条 goals 路由 mapped、无 `can't resolve`。
 ⚠️ **按 PID 收尾**（用户本机有自己的 `node dist/main.js` 在跑，**绝不能** `pkill`）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/server/src/modules/parent-insights/
@@ -950,7 +950,7 @@ git commit -m "feat(parent): goals 端点按学科（PUT 必填 subjectId + metr
 
 **同时修掉 1B 的输入框缺陷**：数字输入改用基座 `Input`（`border-2` + 聚焦变蓝 + 48px 高），让「能改」一眼可见。
 
-- [ ] **Step 1: api 层**
+- [x] **Step 1: api 层**
 
 ```ts
 export type ParentGoalMetric =
@@ -982,7 +982,7 @@ export function putParentGoalTarget(
 }
 ```
 
-- [ ] **Step 2: 页面按学科分组**
+- [x] **Step 2: 页面按学科分组**
 
 - 数据按 `subjectId` 分组（用 `subjectName` 做组标题），组内按后端给的顺序渲染 —— **前端不重排**。
 - 行 key / 草稿 / 保存态键一律 `rowKey(item) = `${item.subjectId}:${item.metric}``。
@@ -991,7 +991,7 @@ export function putParentGoalTarget(
 - 输入框换基座 `Input`（`type="number" min=1 max=9999`，`aria-label={`${item.title}目标值`}`），与「保存」按钮同组。
 - `weekly_lessons` 的单位是「课」，`daily_study_minutes` 是「分钟」——行内文案带上单位（`已达成 1 / 2 课`），别让家长猜。
 
-- [ ] **Step 3: 重写页面测试**
+- [x] **Step 3: 重写页面测试**
 
 必测（在 1B 的 9 条基础上改）：
 1. **按学科分组**：语文组里同时有「每周古诗文篇目」和「每周完课」，两组标题都在。
@@ -1004,7 +1004,7 @@ export function putParentGoalTarget(
 8. 切孩子反闪（沿用 1B 的挂起 promise 写法）。
 9. **输入框可辨识**：断言数字输入用的是基座 `Input` 的类（`border-2` + `focus-within:border-[var(--brand-500)]`）——这是直接把 1B 那个走查缺陷钉住。
 
-- [ ] **Step 4: 跑测试 + 类型检查 + lint + build**
+- [x] **Step 4: 跑测试 + 类型检查 + lint + build**
 
 ```bash
 cd apps/web && npx vitest run src/pages/parent src/routes/routeTable.test.tsx && npx tsc -b && npm run lint && npm run build
@@ -1012,7 +1012,7 @@ cd apps/web && npx vitest run src/pages/parent src/routes/routeTable.test.tsx &&
 
 > `routeTable.test.tsx` 的 goals 钉子会因响应形状变化而红：它的 mock 里 `getParentGoalAttainment` 得补 `subjectId`/`subjectName`，否则页面渲染不出行 —— **同步改它**（不是放宽断言）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/web/src/services/api.ts apps/web/src/pages/parent/ParentGoalsPage.tsx \
@@ -1046,7 +1046,7 @@ git commit -m "feat(parent): 目标页按学科分组（行 key 改 subjectId:me
 - changelog 要点：三条用户裁决；**复盘「1B 按 spec 的四个全局目标偏离了 PRD/UX 的按学科」**（我应当先发现的）；`subject_id` 全 NULL 的采集缺口与修法；心跳 SET 顺序这条 1A 就写过的教训我在 1B 又踩了一次。
 - API 文档 §4.24 要更新那句「四个全局 metric」的表述为「(学科, 指标)」，并说明「无在学学科 → items 为空，不编造默认目标」。
 
-- [ ] **Step 1: 逐处改，然后用脚本核对两份 API 文档的路径/字段**
+- [x] **Step 1: 逐处改，然后用脚本核对两份 API 文档的路径/字段**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1063,7 +1063,7 @@ console.log('item 有 subjectId:', !!d.components.schemas.ParentGoalAttainmentIt
 
 Expected: `PUT subjectId 必填: ["target","subjectId"]`、enum 含 `weekly_lessons`、`item 有 subjectId: true`。
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 git add docs/API接口与数据流设计文档.md docs/api/openapi.yaml \

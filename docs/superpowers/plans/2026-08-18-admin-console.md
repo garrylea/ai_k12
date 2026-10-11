@@ -24,7 +24,7 @@
 - Create: `tools/db/migrations/2026-08-18_add_admin_console.sql`
 - Modify: `tools/db/schema.sql`、`docs/K12智学系统-数据库设计文档.md`
 
-- [ ] **Step 1: 写迁移并执行**
+- [x] **Step 1: 写迁移并执行**
 
 ```sql
 -- 2026-08-18 管理员中枢：模型池/路由/站内消息/管理员聊天五张表。一次性运行。
@@ -101,9 +101,9 @@ CREATE TABLE IF NOT EXISTS admin_messages (
 Run: `mysql -u ai_k12 -pai_k12 ai_k12 < tools/db/migrations/2026-08-18_add_admin_console.sql && mysql -u ai_k12 -pai_k12 ai_k12 -e "SHOW TABLES LIKE 'llm%'; SHOW TABLES LIKE '%messages'; SHOW TABLES LIKE 'admin%';"`
 Expected: 6 张新表列出（llm_models/llm_routes/parent_messages/message_reads/admin_dialogues/admin_messages）。
 
-- [ ] **Step 2: schema.sql 同步**（§合适位置追加上述全部建表块，头部版本 v1.7->v1.8）
-- [ ] **Step 3: DB 设计文档**（版本日志 v1.8 + 五表字段表，格式对齐 parents 节）
-- [ ] **Step 4: Commit**
+- [x] **Step 2: schema.sql 同步**（§合适位置追加上述全部建表块，头部版本 v1.7->v1.8）
+- [x] **Step 3: DB 设计文档**（版本日志 v1.8 + 五表字段表，格式对齐 parents 节）
+- [x] **Step 4: Commit**
 
 ```bash
 git add tools/db/migrations/2026-08-18_add_admin_console.sql tools/db/schema.sql docs/K12智学系统-数据库设计文档.md
@@ -118,7 +118,7 @@ git commit -m "feat(db): 管理员中枢五张表迁移（模型池/路由/消�
 - Create: `apps/server/src/common/utils/api-key-crypto.ts`
 - Test: `apps/server/src/common/utils/api-key-crypto.test.ts`
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -143,8 +143,8 @@ describe('api-key-crypto', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**（模块不存在）
-- [ ] **Step 3: 实现**
+- [x] **Step 2: 跑测试确认失败**（模块不存在）
+- [x] **Step 3: 实现**
 
 ```ts
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
@@ -182,7 +182,7 @@ export function decryptApiKey(cipherText: string): string {
 
 `.env.example` 追加：`LLM_CONFIG_ENC_KEY=`（注释：64 hex 字符，可用 `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` 生成）。
 
-- [ ] **Step 4: 测试过 + Commit**（`git add apps/server/src/common/utils/ .env.example`，`feat(server): apiKey AES-256-GCM 加解密工具`）
+- [x] **Step 4: 测试过 + Commit**（`git add apps/server/src/common/utils/ .env.example`，`feat(server): apiKey AES-256-GCM 加解密工具`）
 
 ---
 
@@ -192,7 +192,7 @@ export function decryptApiKey(cipherText: string): string {
 - Create: `apps/server/src/database/repositories/llm-models.repo.ts`、`llm-routes.repo.ts`、`parent-messages.repo.ts`、`admin-chat.repo.ts`
 - Modify: `apps/server/src/database/repositories/index.ts`
 
-- [ ] **Step 1: `llm-models.repo.ts`**
+- [x] **Step 1: `llm-models.repo.ts`**
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -267,7 +267,7 @@ export class LlmModelsRepository {
 }
 ```
 
-- [ ] **Step 2: `llm-routes.repo.ts`**
+- [x] **Step 2: `llm-routes.repo.ts`**
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -320,7 +320,7 @@ export class LlmRoutesRepository {
 }
 ```
 
-- [ ] **Step 3: `parent-messages.repo.ts`**
+- [x] **Step 3: `parent-messages.repo.ts`**
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -402,7 +402,7 @@ export class ParentMessagesRepository {
 }
 ```
 
-- [ ] **Step 4: `admin-chat.repo.ts`**
+- [x] **Step 4: `admin-chat.repo.ts`**
 
 ```ts
 import { Injectable, Inject } from '@nestjs/common';
@@ -454,7 +454,7 @@ export class AdminChatRepository {
 }
 ```
 
-- [ ] **Step 5: index.ts 追加四个导出 + `npm run build` 过 + Commit**（`feat(server): 管理员中枢四 Repository`）
+- [x] **Step 5: index.ts 追加四个导出 + `npm run build` 过 + Commit**（`feat(server): 管理员中枢四 Repository`）
 
 ---
 
@@ -464,7 +464,7 @@ export class AdminChatRepository {
 - Create: `apps/server/src/ai-core/infra/model-config-registry.ts`
 - Test: `apps/server/src/ai-core/infra/model-config-registry.test.ts`
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -518,9 +518,9 @@ describe('ModelConfigRegistry', () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败（模块不存在）**
+- [x] **Step 2: 确认失败（模块不存在）**
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```ts
 import { routeConfig } from '../config.js';
@@ -598,7 +598,7 @@ export class ModelConfigRegistry {
 
 注意：`ModelConfig.provider` 把 `openai_compatible` 映射为 `'kimi'`（复用 OpenAI 风格适配器）；若 `ModelConfig` 类型缺 `costPer1K` 等字段以实际 types.ts 为准补齐。
 
-- [ ] **Step 4: 测试过 + Commit**（`feat(ai-core): ModelConfigRegistry 内存快照 + YAML 兜底`）
+- [x] **Step 4: 测试过 + Commit**（`feat(ai-core): ModelConfigRegistry 内存快照 + YAML 兜底`）
 
 ---
 
@@ -610,7 +610,7 @@ export class ModelConfigRegistry {
 - Modify: 8 个 capability 文件（`new ModelRouter()` -> `new ModelRouter(getModelConfigRegistry())`）
 - Test: `apps/server/src/ai-core/infra/model-router-dynamic.test.ts`
 
-- [ ] **Step 1: registry 追加单例 getter**（文件末尾）
+- [x] **Step 1: registry 追加单例 getter**（文件末尾）
 
 ```ts
 /** 模块级单例：capability 无 DI 场景取用（Nest 启动时由 AppModule 注入 repo 并 reload）。 */
@@ -627,7 +627,7 @@ export function setModelConfigRegistry(reg: ModelConfigRegistry): void {
 
 （`ModelConfigRegistry` 构造已接受可选 repo，单例在 AppModule 初始化时用真 repo 创建并 `setModelConfigRegistry`。）
 
-- [ ] **Step 2: 失败测试**
+- [x] **Step 2: 失败测试**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -655,7 +655,7 @@ describe('ModelRouter + registry', () => {
 });
 ```
 
-- [ ] **Step 3: 改 ModelRouter**（保持无参路径逐字节兼容）
+- [x] **Step 3: 改 ModelRouter**（保持无参路径逐字节兼容）
 
 ```ts
 import { routeConfig } from '../config.js';
@@ -731,7 +731,7 @@ export class ModelRouter {
 
 注意：YAML 路径下 `routeConfig.models` 本就含明文 apiKey（env 插值后），原来构造时剥离、`ModelClient` 再从 env 取；现在**不再剥离**（`getModel` 对外暴露 apiKey 可接受--服务端内部），简化数据流。若既有测试断言 `getModel()` 结果不含 apiKey，改测试（内部一致性让位于新设计）。
 
-- [ ] **Step 4: capability 接线**（8 个文件同改）
+- [x] **Step 4: capability 接线**（8 个文件同改）
 
 `apps/server/src/ai-core/capabilities/{tutoring,grading,judgment,explanation,hint,variation,analytics,question-structuring}.capability.ts` 中 `new ModelRouter()` 改为：
 
@@ -743,7 +743,7 @@ this.modelRouter = new ModelRouter(getModelConfigRegistry());
 
 （类字段初始化或构造函数内两处形式按各文件现状改，保持 DI mock 注入路径不变。）
 
-- [ ] **Step 5: 全量测试过（`npm test`，既有 202+ 全绿）+ Commit**（`feat(ai-core): ModelRouter 支持 registry 快照路由，capability 接线`）
+- [x] **Step 5: 全量测试过（`npm test`，既有 202+ 全绿）+ Commit**（`feat(ai-core): ModelRouter 支持 registry 快照路由，capability 接线`）
 
 ---
 
@@ -753,7 +753,7 @@ this.modelRouter = new ModelRouter(getModelConfigRegistry());
 - Modify: `apps/server/src/ai-core/infra/model-client/index.ts`
 - Test: `apps/server/src/ai-core/infra/model-client/model-client.test.ts`
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -800,9 +800,9 @@ describe('ModelClient apiKey 优先级', () => {
   });
 ```
 
-- [ ] **Step 2: 确认失败（getProvider 签名不匹配/编译错）**
+- [x] **Step 2: 确认失败（getProvider 签名不匹配/编译错）**
 
-- [ ] **Step 3: 改 `index.ts`**
+- [x] **Step 3: 改 `index.ts`**
 
 ```ts
   private getProvider(provider: string, apiKey?: string): ProviderAdapter {
@@ -830,7 +830,7 @@ describe('ModelClient apiKey 优先级', () => {
 
 `chat`/`chatStream` 内的 `this.getProvider(request.model.provider)` 全部改传 `request.model.apiKey`。（`KimiClient` 构造第二参 providerName 已存在，传 'OpenAI-Compatible' 只影响错误文案；`openai_compatible` 在 registry 里已映射为 provider='kimi'，故无需新 case。）
 
-- [ ] **Step 4: 全量测试过 + Commit**（`feat(ai-core): ModelClient apiKey 随模型条目，支持自定义 OpenAI 兼容模型`）
+- [x] **Step 4: 全量测试过 + Commit**（`feat(ai-core): ModelClient apiKey 随模型条目，支持自定义 OpenAI 兼容模型`）
 
 ---
 
@@ -841,7 +841,7 @@ describe('ModelClient apiKey 优先级', () => {
 - Create: `apps/server/src/scripts/seed-llm-config.ts`
 - Modify: `apps/server/.env.example`
 
-- [ ] **Step 1: 新 `ConfigModule`（`apps/server/src/modules/config/config.module.ts`）**
+- [x] **Step 1: 新 `ConfigModule`（`apps/server/src/modules/config/config.module.ts`）**
 
 ```ts
 import { Module, OnModuleInit } from '@nestjs/common';
@@ -869,7 +869,7 @@ export class ConfigModule implements OnModuleInit {
 
 AppModule imports 加 `ConfigModule`。
 
-- [ ] **Step 2: seed 脚本**
+- [x] **Step 2: seed 脚本**
 
 ```ts
 /**
@@ -925,7 +925,7 @@ main().catch((e) => { console.error('[seed] 失败:', e); process.exit(1); });
 
 Run: `npx tsx src/scripts/seed-llm-config.ts`，再跑一遍验证幂等（全部“已存在，跳过”）。
 
-- [ ] **Step 3: build+test 过 + Commit**（`feat(server): ConfigModule 装配 registry + LLM 配置 seed`）
+- [x] **Step 3: build+test 过 + Commit**（`feat(server): ConfigModule 装配 registry + LLM 配置 seed`）
 
 ---
 
@@ -936,7 +936,7 @@ Run: `npx tsx src/scripts/seed-llm-config.ts`，再跑一遍验证幂等（全�
 - Modify: `apps/server/src/common/middleware/auth.middleware.ts`
 - Test: `apps/server/src/common/guards/ban-registry.test.ts`
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -955,7 +955,7 @@ describe('BanRegistry', () => {
 });
 ```
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 ```ts
 import { Injectable } from '@nestjs/common';
@@ -998,7 +998,7 @@ AuthMiddleware：`request.user` 赋值后追加（middleware 构造注入 `BanRe
 
 （`middleware` 抛 401 会被全局 HttpExceptionFilter 捕获返回统一 JSON。）
 
-- [ ] **Step 3: 测试过 + 全量绿 + Commit**（`feat(server): BanRegistry 进程内封禁即时生效`）
+- [x] **Step 3: 测试过 + 全量绿 + Commit**（`feat(server): BanRegistry 进程内封禁即时生效`）
 
 ---
 
@@ -1007,7 +1007,7 @@ AuthMiddleware：`request.user` 赋值后追加（middleware 构造注入 `BanRe
 **Files:**
 - Create: `apps/server/src/modules/admin/admin.module.ts`、`admin.controller.ts`、`admin-models.service.ts`（+ `admin-models.service.test.ts`）
 
-- [ ] **Step 1: 失败测试**（mock repo，验证：列表打码、新增重复 1004、编辑空 key 不改、停用被引用 1004、路由全量保存坏 key 拒整批）
+- [x] **Step 1: 失败测试**（mock repo，验证：列表打码、新增重复 1004、编辑空 key 不改、停用被引用 1004、路由全量保存坏 key 拒整批）
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -1066,7 +1066,7 @@ describe('AdminModelsService', () => {
 });
 ```
 
-- [ ] **Step 2: 实现 service**（打码逻辑：`apiKey.length > 8 ? apiKey.slice(0,2)+'***'+apiKey.slice(-3) : '***'`；create/update/setEnabled/saveRoutes 成功后均 `registry.reload()`）
+- [x] **Step 2: 实现 service**（打码逻辑：`apiKey.length > 8 ? apiKey.slice(0,2)+'***'+apiKey.slice(-3) : '***'`；create/update/setEnabled/saveRoutes 成功后均 `registry.reload()`）
 
 ```ts
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
@@ -1142,7 +1142,7 @@ export class AdminModelsService {
 }
 ```
 
-- [ ] **Step 3: controller（模型池+路由+validate-connection）**
+- [x] **Step 3: controller（模型池+路由+validate-connection）**
 
 ```ts
 import { Body, Controller, Get, HttpException, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
@@ -1247,7 +1247,7 @@ export class AdminModule {}
 
 （ConfigModule onModuleInit 先于 AdminModule 的请求期执行，全局单例已带 repo；若时序异常，service 里 `reload()` 也是无害空操作。）AppModule imports 加 `AdminModule`。
 
-- [ ] **Step 4: 测试过 + 全量绿 + Commit**（`feat(server): 管理台模型池/路由接口（保存即生效）`）
+- [x] **Step 4: 测试过 + 全量绿 + Commit**（`feat(server): 管理台模型池/路由接口（保存即生效）`）
 
 ---
 
@@ -1257,7 +1257,7 @@ export class AdminModule {}
 - Create: `apps/server/src/modules/admin/admin-accounts.service.ts`（+ test）
 - Modify: `apps/server/src/modules/admin/admin.controller.ts`、`admin.module.ts`
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -1302,7 +1302,7 @@ describe('AdminAccountsService', () => {
 });
 ```
 
-- [ ] **Step 2: 实现 service + repo 增量**
+- [x] **Step 2: 实现 service + repo 增量**
 
 `ParentsRepository` 加 `search(q)`（`WHERE phone LIKE ? OR name LIKE ? AND deleted_at IS NULL`，附名下学生数子查询）与 `setActive`、`findById`；`StudentsRepository` 加 `search(q)`。
 
@@ -1328,7 +1328,7 @@ async setStudentStatus(studentId: number, active: boolean) {
 
 controller 加：`GET parents?search=`、`PATCH parents/:id/status`、`GET students?search=`、`PATCH students/:id/status`（Zod 校验 search 长度<=50）。admin.module providers 加 AdminAccountsService/BanRegistry/ParentsRepository/StudentsRepository。
 
-- [ ] **Step 3: 测试过 + Commit**（`feat(server): 管理台账号管理（封家长连封学生+即时生效）`）
+- [x] **Step 3: 测试过 + Commit**（`feat(server): 管理台账号管理（封家长连封学生+即时生效）`）
 
 ---
 
@@ -1338,7 +1338,7 @@ controller 加：`GET parents?search=`、`PATCH parents/:id/status`、`GET stude
 - Create: `apps/server/src/modules/admin/admin-messages.service.ts`（+ test）
 - Modify: `admin.controller.ts`、`admin.module.ts`、`apps/server/src/modules/parent/parent.controller.ts`、`parent.module.ts`
 
-- [ ] **Step 1: 失败测试**（mock ParentMessagesRepository：发送定向/广播、家长列表合并广播、unread 计数、markRead 定向/广播分路、非本人定向返回 false）
+- [x] **Step 1: 失败测试**（mock ParentMessagesRepository：发送定向/广播、家长列表合并广播、unread 计数、markRead 定向/广播分路、非本人定向返回 false）
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -1381,11 +1381,11 @@ describe('AdminMessagesService', () => {
 });
 ```
 
-- [ ] **Step 2: 实现 + 接线**
+- [x] **Step 2: 实现 + 接线**
 
 service（发送/管理列表/撤回 delete/家长侧三读法直透 repo，type 校验 `promo|learning|system`）。controller 加 `GET/POST/DELETE api/admin/messages`；`ParentController` 加 `GET api/parent/messages`、`GET api/parent/messages/unread-count`、`PATCH api/parent/messages/:id/read`（service 复用 AdminMessagesService 或直接注入 repo，择简：ParentModule import AdminModule 的 providers 不可跨模块--改为 ParentModule 自 providers `[AdminMessagesService, ParentMessagesRepository, ParentsRepository]`，AdminModule export AdminMessagesService 且 ParentModule import AdminModule 更干净。**实现取后者**。）
 
-- [ ] **Step 3: 测试过 + Commit**（`feat(server): 站内消息中心（admin 发送/家长已读）`）
+- [x] **Step 3: 测试过 + Commit**（`feat(server): 站内消息中心（admin 发送/家长已读）`）
 
 ---
 
@@ -1396,7 +1396,7 @@ service（发送/管理列表/撤回 delete/家长侧三读法直透 repo，type
 - Modify: `admin.controller.ts`、`admin.module.ts`
 - Create: `apps/server/src/ai-core/prompts/admin-chat.md`（简单通用助手 system prompt，无学习边界）
 
-- [ ] **Step 1: 失败测试**（mock ModelClient + AdminChatRepository：新建会话校验模型启用、流式事件序列 content/done、落库 user+assistant、会话归属校验 1005）
+- [x] **Step 1: 失败测试**（mock ModelClient + AdminChatRepository：新建会话校验模型启用、流式事件序列 content/done、落库 user+assistant、会话归属校验 1005）
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
@@ -1441,7 +1441,7 @@ describe('AdminChatService', () => {
 });
 ```
 
-- [ ] **Step 2: 实现 service**
+- [x] **Step 2: 实现 service**
 
 ```ts
 // 关键：chatStream 生成器（仿 tutoring.capability 流式聚合，但无 SafetyGuard/无苏格拉底约束）
@@ -1479,7 +1479,7 @@ async *chatStream(dto: { dialogueId: number; message: string }, adminId: number)
 
 controller 加 4 个端点；`POST chat/stream` 完全仿 `ai.controller.ts` 的 SSE 模式（`@Res()` 手写响应 + `data: JSON\n\n`）。admin.module providers 加 AdminChatService/AdminChatRepository。
 
-- [ ] **Step 3: 测试过 + Commit**（`feat(server): 管理员 AI 聊天（独立会话+SSE 流式）`）
+- [x] **Step 3: 测试过 + Commit**（`feat(server): 管理员 AI 聊天（独立会话+SSE 流式）`）
 
 ---
 
@@ -1489,7 +1489,7 @@ controller 加 4 个端点；`POST chat/stream` 完全仿 `ai.controller.ts` 的
 - Create: `apps/server/src/modules/admin/admin-dashboard.service.ts`（+ test）
 - Modify: `admin.controller.ts`、`admin.module.ts`
 
-- [ ] **Step 1: 失败测试**
+- [x] **Step 1: 失败测试**
 
 ```ts
 // dashboard：四个计数 SQL 透传（mock pool 不必，直接 mock repos/countQueries）
@@ -1498,7 +1498,7 @@ controller 加 4 个端点；`POST chat/stream` 完全仿 `ai.controller.ts` 的
 
 （test 细节：dashboard service 注入 `Pool` mock `SELECT COUNT(*)` 系列查询；改密 mock AdminsRepository.findById/updatePassword + bcrypt hashSync 比对。）
 
-- [ ] **Step 2: 实现**（dashboard：`SELECT COUNT(*) FROM parents WHERE deleted_at IS NULL` / `students WHERE deleted_at IS NULL` / `ai_dialogues WHERE created_at >= CURDATE()` / `llm_models WHERE is_enabled=1` + recentParents 前 10；改密：bcrypt.compare 旧密码，错则 `401 1003 旧密码错误`，对则 hash 新密码 update。controller 加 `GET dashboard`、`PATCH password`。`AdminsRepository` 补 `updatePassword`。）
+- [x] **Step 2: 实现**（dashboard：`SELECT COUNT(*) FROM parents WHERE deleted_at IS NULL` / `students WHERE deleted_at IS NULL` / `ai_dialogues WHERE created_at >= CURDATE()` / `llm_models WHERE is_enabled=1` + recentParents 前 10；改密：bcrypt.compare 旧密码，错则 `401 1003 旧密码错误`，对则 hash 新密码 update。controller 加 `GET dashboard`、`PATCH password`。`AdminsRepository` 补 `updatePassword`。）
 
 - [ ] **Step 3: 测试过 + 全量绿 + 手测：** admin token 调 dashboard 返回四计数；改密后新密码可登录。**Commit**（`feat(server): 管理台 dashboard + 管理员改密`）
 
@@ -1512,7 +1512,7 @@ controller 加 4 个端点；`POST chat/stream` 完全仿 `ai.controller.ts` 的
 - Create: `apps/web/src/components/layout/AdminNav.tsx`
 - Modify: `apps/web/src/routes/index.tsx`
 
-- [ ] **Step 1: api.ts 追加**
+- [x] **Step 1: api.ts 追加**
 
 ```ts
 // --- Admin: models & routes ---
@@ -1603,7 +1603,7 @@ export function getUnreadMessageCount(): Promise<number> { return fetchApi('/par
 export function markMessageRead(id: number): Promise<null> { return fetchApi(`/parent/messages/${id}/read`, { method: 'PATCH' }); }
 ```
 
-- [ ] **Step 2: AdminNav（仿 ParentNav：导航 + 底部用户卡）**
+- [x] **Step 2: AdminNav（仿 ParentNav：导航 + 底部用户卡）**
 
 ```tsx
 import { NavLink } from 'react-router-dom';
@@ -1652,7 +1652,7 @@ export function AdminNav() {
 
 AdminLayout 改为 `<AdminNav/> + <main><Outlet/></main>` 结构（data-theme="parent"）。routes：`/admin` 改为带 children 的布局路由（dashboard=AdminDashboardPage 等 6 个子路由，全部在 `/admin` 布局层包一次 `RequireRole role="admin"`）。
 
-- [ ] **Step 3: tsc/lint 过 + Commit**（`feat(web): 管理台 API 层 + AdminNav 布局`）
+- [x] **Step 3: tsc/lint 过 + Commit**（`feat(web): 管理台 API 层 + AdminNav 布局`）
 
 ---
 
@@ -1660,19 +1660,19 @@ AdminLayout 改为 `<AdminNav/> + <main><Outlet/></main>` 结构（data-theme="p
 
 每页均：新建 `apps/web/src/pages/admin/<Page>.tsx`（家长消息页 `apps/web/src/pages/parent/ParentMessagesPage.tsx`），base 组件 + parent 主题变量，无 emoji/线性图标，tsc+lint 绿后独立 commit。
 
-- [ ] **Task 15 AdminDashboardPage**：`useEffect` 拉 `fetchAdminDashboard`；四张统计卡（grid-cols-2 lg:grid-cols-4，数值大字+小标签）+ 最近注册家长表格（手机号打码 `${p.slice(0,3)}****${p.slice(7)}`/姓名/日期）。Commit: `feat(web): 管理台总览页`。
+- [x] **Task 15 AdminDashboardPage**：`useEffect` 拉 `fetchAdminDashboard`；四张统计卡（grid-cols-2 lg:grid-cols-4，数值大字+小标签）+ 最近注册家长表格（手机号打码 `${p.slice(0,3)}****${p.slice(7)}`/姓名/日期）。Commit: `feat(web): 管理台总览页`。
 
-- [ ] **Task 16 AdminModelsPage**：上半模型池表格（key/名称/modelId/baseUrl/key打码/类型/状态徽章/操作：编辑-停用-测试连接）；Modal 新增/编辑表单（providerType 下拉 5 项；编辑时 apiKey 输入框 placeholder“留空则不修改”，提交时空则不传 apiKey 字段）；测试连接按钮调 `validateModelConnection` toast 显示 `连通成功 · 832ms` 或错误。下半路由表：`routes` state 渲染行（scene 文本/subject 文本/主模型 select/备选 select，options=`models.filter(m=>m.isEnabled)`，备选含“无”），行尾删除按钮 + 「新增规则」行（scene/subject 文本输入 + 两个 select）+ 顶部「保存路由表」调 `saveAdminRoutes` 成功 toast“路由已生效”。Commit: `feat(web): 模型配置页（模型池+路由表）`。
+- [x] **Task 16 AdminModelsPage**：上半模型池表格（key/名称/modelId/baseUrl/key打码/类型/状态徽章/操作：编辑-停用-测试连接）；Modal 新增/编辑表单（providerType 下拉 5 项；编辑时 apiKey 输入框 placeholder“留空则不修改”，提交时空则不传 apiKey 字段）；测试连接按钮调 `validateModelConnection` toast 显示 `连通成功 · 832ms` 或错误。下半路由表：`routes` state 渲染行（scene 文本/subject 文本/主模型 select/备选 select，options=`models.filter(m=>m.isEnabled)`，备选含“无”），行尾删除按钮 + 「新增规则」行（scene/subject 文本输入 + 两个 select）+ 顶部「保存路由表」调 `saveAdminRoutes` 成功 toast“路由已生效”。Commit: `feat(web): 模型配置页（模型池+路由表）`。
 
-- [ ] **Task 17 AdminAccountsPage**：Tab 家长/学生；搜索框 debounce 300ms 调 searchParents/searchStudents；家长行：打码手机/姓名/学生数/状态徽章/封禁-解封按钮（封禁前 `ConfirmDialog`：“将连带停用其名下 {studentCount} 个学生账号，确认封禁？”调 `setParentStatus(id,false)`）；学生行：用户名/姓名/年级/状态/单独封禁解封（无确认弹窗，直接执行）。Commit: `feat(web): 管理台账号管理页`。
+- [x] **Task 17 AdminAccountsPage**：Tab 家长/学生；搜索框 debounce 300ms 调 searchParents/searchStudents；家长行：打码手机/姓名/学生数/状态徽章/封禁-解封按钮（封禁前 `ConfirmDialog`：“将连带停用其名下 {studentCount} 个学生账号，确认封禁？”调 `setParentStatus(id,false)`）；学生行：用户名/姓名/年级/状态/单独封禁解封（无确认弹窗，直接执行）。Commit: `feat(web): 管理台账号管理页`。
 
-- [ ] **Task 18 AdminMessagesPage + ParentMessagesPage + 铃铛**：
+- [x] **Task 18 AdminMessagesPage + ParentMessagesPage + 铃铛**：
   - Admin 发送表单（type select 优惠/学情/系统公告、标题 Input、正文 textarea、范围 radio 广播/指定家长（广播默认；指定家长时显示搜索框选一个家长））+「发送」；下方已发列表（类型 Tag/标题/触达/已读/撤回按钮 ConfirmDialog 后 delete）。
   - ParentMessagesPage：列表（未读加粗+小圆点/类型 Tag/标题/时间），点击展开正文并 `markMessageRead` 后刷新未读。
   - ParentLayout 头部右侧加铃铛按钮（svg 图标+未读数徽章，`useEffect` 拉 `getUnreadMessageCount`，点击跳 `/parent/messages`）；ParentNav navItems 头部加 `{ to: '/parent/messages', label: '消息' }`。
   Commit: `feat(web): 消息推送页 + 家长消息中心 + 未读铃铛`。
 
-- [ ] **Task 19 AdminChatPage + AdminSecurityPage**：
+- [x] **Task 19 AdminChatPage + AdminSecurityPage**：
   - Chat：三栏中的两栏（左会话列表：新建按钮（Modal 选模型=启用中模型 select）、切换、删除；右聊天窗：消息气泡（assistant 用 ReactMarkdown+KaTeX 渲染，参照 DiscussChat 原语直接 import 复用）、底部输入框+发送、流式期间禁用发送）。本地 state（不建全局 store，页面级 useState 足够）：dialogues/currentId/messages/streaming；发送时 `for await (const e of streamAdminChat(id, text))` 追加 delta。顶部小字提示“此聊天不受 K12 学习边界限制”。
   - Security：旧密码/新密码/确认新密码三个 Input + 提交（校验两次一致、6-32 位）调 `changeAdminPassword`，成功 toast 并清空。
   Commit: `feat(web): 管理员 AI 聊天页 + 账号安全页`。
@@ -1685,16 +1685,16 @@ AdminLayout 改为 `<AdminNav/> + <main><Outlet/></main>` 结构（data-theme="p
 
 前置：`mysql` 迁移已跑、`seed-admin`/`seed-llm-config` 已跑、server `npm run start:dev`、web `npm run dev`。
 
-- [ ] ① admin 登录 -> /admin 总览四计数正确（家长1/学生3/模型6/今日调用>=0）。
-- [ ] ② 模型配置页：模型池 6 条 seed 数据 key 打码；编辑 qwen3.7-max 的 baseUrl 加错前缀保存 -> 「测试连接」报 1009；改回正确值 -> 连通成功显示延迟。
-- [ ] ③ 新增自定义模型（openai_compatible，用任一真实 OpenAI 兼容 endpoint）-> 测试连接成功。
-- [ ] ④ 路由表把 math/tutoring 主模型改为自定义模型 -> 保存“已生效” -> 学生端发起辅导 -> 服务端日志显示走新模型（或改 judgment 后判题走新模型）。
-- [ ] ⑤ 停用被路由引用的模型 -> 1004 拒绝；先改路由再停用 -> 成功。
-- [ ] ⑥ 注册两个测试家长 -> 广播一条优惠消息 -> 两家长铃铛均+1 -> 各自点击阅读 -> 管理台已发列表已读数 2/2；定向消息只目标家长可见；撤回后家长列表消失。
-- [ ] ⑦ 封禁测试家长 A（连带其学生）-> A 学生已登录的旧 token 立即 401；A 家长登录被拒；解封 -> 全恢复。封禁另一家长 B 的单个学生 -> B 家长不受影响。
-- [ ] ⑧ 管理员 AI 聊天：新建会话选自定义模型 -> 问“今天天气怎么样”正常回答（不受学习边界阻断）-> 刷新页面历史还在；删除会话。
-- [ ] ⑨ 改密：错旧密码 1003；正确改密 -> 旧密码失效新密码可登录（改回原密码保持环境干净）。
-- [ ] ⑩ 全量回归：server `npm run build && npm test`、web `npm run build && npm run lint` 全绿。
+- [x] ① admin 登录 -> /admin 总览四计数正确（家长1/学生3/模型6/今日调用>=0）。
+- [x] ② 模型配置页：模型池 6 条 seed 数据 key 打码；编辑 qwen3.7-max 的 baseUrl 加错前缀保存 -> 「测试连接」报 1009；改回正确值 -> 连通成功显示延迟。
+- [x] ③ 新增自定义模型（openai_compatible，用任一真实 OpenAI 兼容 endpoint）-> 测试连接成功。
+- [x] ④ 路由表把 math/tutoring 主模型改为自定义模型 -> 保存“已生效” -> 学生端发起辅导 -> 服务端日志显示走新模型（或改 judgment 后判题走新模型）。
+- [x] ⑤ 停用被路由引用的模型 -> 1004 拒绝；先改路由再停用 -> 成功。
+- [x] ⑥ 注册两个测试家长 -> 广播一条优惠消息 -> 两家长铃铛均+1 -> 各自点击阅读 -> 管理台已发列表已读数 2/2；定向消息只目标家长可见；撤回后家长列表消失。
+- [x] ⑦ 封禁测试家长 A（连带其学生）-> A 学生已登录的旧 token 立即 401；A 家长登录被拒；解封 -> 全恢复。封禁另一家长 B 的单个学生 -> B 家长不受影响。
+- [x] ⑧ 管理员 AI 聊天：新建会话选自定义模型 -> 问“今天天气怎么样”正常回答（不受学习边界阻断）-> 刷新页面历史还在；删除会话。
+- [x] ⑨ 改密：错旧密码 1003；正确改密 -> 旧密码失效新密码可登录（改回原密码保持环境干净）。
+- [x] ⑩ 全量回归：server `npm run build && npm test`、web `npm run build && npm run lint` 全绿。
 - [ ] 清理测试数据（测试家长/学生/消息），Commit 修复（如有）：`fix: 管理员中枢端到端验收修复`。
 
 ---

@@ -61,7 +61,7 @@
   - `export interface DeviceCommandPoll { commands: Array<{ id: number; command: string }>; lock: { sessionId: number; lockExpiresAt: string | null; unlockedAt: string | null } | null }`
   - `export function pollStudentDeviceCommands(): Promise<DeviceCommandPoll>`
 
-- [ ] **Step 1: 追加代码**
+- [x] **Step 1: 追加代码**
 
 在 `apps/web/src/services/api.ts` 末尾追加（沿用该文件既有风格：`fetchApi` + 显式返回类型 + 上一条注释说明契约）：
 
@@ -110,12 +110,12 @@ export function pollStudentDeviceCommands(): Promise<DeviceCommandPoll> {
 }
 ```
 
-- [ ] **Step 2: 类型检查**
+- [x] **Step 2: 类型检查**
 
 Run: `cd apps/web && npx tsc -b`
 Expected: 无输出（干净）。若有 `fetchApi` 未使用的类型参数告警，检查 `fetchApi<T>` 的泛型是否被推断成 `unknown`。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/web/src/services/api.ts
@@ -143,7 +143,7 @@ git commit -m "feat(web/api): 学生端学习会话与设备命令的 API 层与
   - `formatRemaining(ms: number): string`
   - `isCurrentStudentLocked(now?: number): boolean`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/kiosk/learningLock.test.ts`：
 
@@ -277,12 +277,12 @@ describe('remainingMs / formatRemaining', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/kiosk/learningLock.test.ts`
 Expected: FAIL —— `Failed to resolve import './learningLock'`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 创建 `apps/web/src/kiosk/learningLock.ts`：
 
@@ -401,12 +401,12 @@ export function formatRemaining(ms: number): string {
 }
 ```
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 Run: `cd apps/web && npx vitest run src/kiosk/learningLock.test.ts`
 Expected: PASS（全 20+ 用例）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/kiosk/learningLock.ts apps/web/src/kiosk/learningLock.test.ts
@@ -429,7 +429,7 @@ git commit -m "feat(kiosk): 锁定判定的纯逻辑 + 常量（含跨学生隔�
   - `export function setDesktopStudentMode(locked: boolean): void`
   - `export function releaseOnLogout(): void`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/kiosk/desktopBridge.test.ts`：
 
@@ -527,12 +527,12 @@ describe('releaseOnLogout', () => {
 
 > 用 `await import(...)` 而不是顶层 import：`isDesktopShell()` 读 `window`，必须在 stub 装好之后再取用。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/kiosk/desktopBridge.test.ts`
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 创建 `apps/web/src/kiosk/desktopBridge.ts`：
 
@@ -593,12 +593,12 @@ export function releaseOnLogout(): void {
 }
 ```
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 Run: `cd apps/web && npx vitest run src/kiosk/desktopBridge.test.ts`
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/kiosk/desktopBridge.ts apps/web/src/kiosk/desktopBridge.test.ts
@@ -617,7 +617,7 @@ git commit -m "feat(kiosk): Electron 桥接层与登出收尾（失败不阻断�
 - Consumes: `formatRemaining`（Task 2）
 - Produces: `export function LockedPill({ remainingMs }: { remainingMs: number }): JSX.Element`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/kiosk/LockedPill.test.tsx`：
 
@@ -647,12 +647,12 @@ describe('LockedPill', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/kiosk/LockedPill.test.tsx`
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 创建 `apps/web/src/kiosk/LockedPill.tsx`：
 
@@ -683,12 +683,12 @@ export function LockedPill({ remainingMs }: { remainingMs: number }) {
 }
 ```
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 Run: `cd apps/web && npx vitest run src/kiosk/LockedPill.test.tsx`
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/kiosk/LockedPill.tsx apps/web/src/kiosk/LockedPill.test.tsx
@@ -708,7 +708,7 @@ git commit -m "feat(kiosk): 锁定中的剩余时间 pill"
 - Consumes: Task 1/2/3 全部产物
 - Produces: `export default function LearningSessionShell()`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/kiosk/LearningSessionShell.test.tsx`：
 
@@ -927,12 +927,12 @@ describe('LearningSessionShell：本地快照', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/kiosk/LearningSessionShell.test.tsx`
 Expected: FAIL —— 组件不存在。
 
-- [ ] **Step 3: 实现 `LearningSessionShell.tsx`**
+- [x] **Step 3: 实现 `LearningSessionShell.tsx`**
 
 > **实施时修正（2026-09-24，两处）**：
 > 1. **推送锁定态只留一个出口，并加 `resolved` 门**。初稿在 effect ① 里对「非学生角色」直接
@@ -1106,12 +1106,12 @@ export default function LearningSessionShell() {
 }
 ```
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 Run: `cd apps/web && npx vitest run src/kiosk/LearningSessionShell.test.tsx`
 Expected: PASS。
 
-- [ ] **Step 5: 挂载**
+- [x] **Step 5: 挂载**
 
 `apps/web/src/routes/index.tsx` 改为（**嵌套两个 pathless wrapper**，不碰 `routeTable.tsx`——它的测试用 `createMemoryRouter(routes)` 挂真实表，往里加组件会破坏「纯配置」约束）：
 
@@ -1142,12 +1142,12 @@ export function AppRouter() {
 }
 ```
 
-- [ ] **Step 6: 跑全量前端测试 + 类型检查 + lint**
+- [x] **Step 6: 跑全量前端测试 + 类型检查 + lint**
 
 Run: `cd apps/web && npm test && npx tsc -b && npm run lint`
 Expected: 全绿、无输出、0 error。**若 `routeTable.test.tsx` 因嵌套包装器报错，说明它没有用 `createMemoryRouter(routes)` 而是渲染了整个 router** —— 修测试（本仓铁律），不要为了迁就测试改动 `routeTable.tsx`。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/kiosk/ apps/web/src/routes/index.tsx
@@ -1167,7 +1167,7 @@ git commit -m "feat(kiosk): LearningSessionShell 三态状态机（建会话/推
 - Consumes: `isCurrentStudentLocked`（Task 2）、`releaseOnLogout`（Task 3）
 - Produces: 无新导出（行为变更 + `data-locked` 属性）
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 创建 `apps/web/src/components/base/LogoutButton.test.tsx`：
 
@@ -1318,12 +1318,12 @@ describe('LogoutButton：锁定中', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd apps/web && npx vitest run src/components/base/LogoutButton.test.tsx`
 Expected: FAIL —— 锁定中的用例失败（当前会照常登出）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 把 `apps/web/src/components/base/LogoutButton.tsx` 的上半部分（imports + 组件签名 + `handleLogout`）改为：
 
@@ -1444,12 +1444,12 @@ export function LogoutButton({
     >
 ```
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 Run: `cd apps/web && npx vitest run src/components/base/LogoutButton.test.tsx`
 Expected: PASS。
 
-- [ ] **Step 5: 跑全量前端测试（确认没打破那 4 个「断言存在」的用例）**
+- [x] **Step 5: 跑全量前端测试（确认没打破那 4 个「断言存在」的用例）**
 
 Run: `cd apps/web && npm test`
 Expected: 全绿。重点是 `routeTable.test.tsx`、`ParentAccountPage.test.tsx`、`AuxiliaryHomePage.test.tsx`、`EntrySelectPage.test.tsx`、`CourseDetailPage.test.tsx`、`UserBadge.test.tsx` 仍通过。
@@ -1457,7 +1457,7 @@ Expected: 全绿。重点是 `routeTable.test.tsx`、`ParentAccountPage.test.tsx
 Run: `cd apps/web && npx tsc -b && npm run lint`
 Expected: 无输出、0 error。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/base/LogoutButton.tsx apps/web/src/components/base/LogoutButton.test.tsx
@@ -1478,7 +1478,7 @@ git commit -m "feat(logout): 锁定中拒绝登出（aria-disabled + toast 解�
 - Consumes: `window.k12Desktop.setStudentMode(boolean)` 契约（Task 3 的 `K12DesktopBridge`）
 - Produces: 可 `npm start` 运行的 dev 壳
 
-- [ ] **Step 1: 建 `package.json` 并装 Electron**
+- [x] **Step 1: 建 `package.json` 并装 Electron**
 
 创建 `apps/desktop/package.json`：
 
@@ -1501,7 +1501,7 @@ cd apps/desktop && npm install --save-dev electron
 ```
 Expected: 装成功。**记下实际装到的版本**（写进本任务 Step 5 的提交信息）；不要手写一个猜的版本号。
 
-- [ ] **Step 2: 写 `preload.js`**
+- [x] **Step 2: 写 `preload.js`**
 
 ```js
 const { contextBridge, ipcRenderer } = require('electron');
@@ -1522,7 +1522,7 @@ contextBridge.exposeInMainWorld('k12Desktop', {
 });
 ```
 
-- [ ] **Step 3: 写 `main.js`**
+- [x] **Step 3: 写 `main.js`**
 
 ```js
 const { app, BrowserWindow, ipcMain } = require('electron');
@@ -1632,13 +1632,13 @@ ipcMain.on('kiosk:set-student-mode', (_event, next) => {
 });
 ```
 
-- [ ] **Step 4: 写 `.gitignore`**
+- [x] **Step 4: 写 `.gitignore`**
 
 ```
 node_modules/
 ```
 
-- [ ] **Step 5: 跑起来（三进程 dev 拓扑）**
+- [x] **Step 5: 跑起来（三进程 dev 拓扑）**
 
 依次起三个进程：
 
@@ -1655,7 +1655,7 @@ cd apps/desktop && npm start
 
 Expected: 弹出一个 1440×900 的窗口，加载出登录页（与浏览器里一模一样）。此时**不是**全屏 kiosk（还没登录）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/package.json apps/desktop/package-lock.json apps/desktop/main.js apps/desktop/preload.js apps/desktop/.gitignore
@@ -1668,7 +1668,7 @@ git commit -m "feat(desktop): Electron 壳（kiosk / 拦关闭 / 拦逃逸导航
 
 **Files:** 无（纯验证）。**壳层与真全屏无法单测**，这一份清单就是它们的验收证据。
 
-- [ ] **Step 1: 准备两个账号**
+- [x] **Step 1: 准备两个账号**
 
 用管理员在家长端建一个学生；在家长端 `/parent/controls` 把「单次学习锁定」设成 **2 分钟**并保存（该页面在计划 3 才做；**若计划 3 未完成**，直接用 SQL 设置：`UPDATE controls SET session_lock_minutes = 2 WHERE student_id = <id>;`）。
 
@@ -1691,11 +1691,11 @@ git commit -m "feat(desktop): Electron 壳（kiosk / 拦关闭 / 拦逃逸导航
 | 13 | 家长端「进出时间」列表 | 每次进出都有记录，时间与操作**对得上**；在线时是「进行中」 |
 | 14 | 把锁定设成 `NULL`（解除设置）后学生重新登录 | 全屏但**可以随时登出**（无 pill） |
 
-- [ ] **Step 3: 记录结果**
+- [x] **Step 3: 记录结果**
 
 把未通过的条目、实际现象、以及**是否为设计缺口**（区别于实现失误）写进计划 3 的文档同步里（`docs/ai-core-changelog.md` 的一次条目）。若发现设计缺口，**先改 spec 再改代码**（本仓纪律：设计定了再改）。
 
-- [ ] **Step 4: Commit（若有修正）**
+- [x] **Step 4: Commit（若有修正）**
 
 ```bash
 git add -A

@@ -28,7 +28,7 @@
 **Interfaces:**
 - Produces: `apps/desktop/dist/k12-desktop-<version>-{arm64,x64}.pkg` 两个产物；后续 Task 2-4 都以 `.pkg` 为准。
 
-- [ ] **Step 1: 改 mac target 与注释**
+- [x] **Step 1: 改 mac target 与注释**
 
 `electron-builder.yml` 第 26-28 行注释改为：
 
@@ -50,12 +50,12 @@ mac:
   target: [{ target: pkg, arch: [x64, arm64] }]
 ```
 
-- [ ] **Step 2: 跑 --check（测试 + 最小出包 + asar 自检）**
+- [x] **Step 2: 跑 --check（测试 + 最小出包 + asar 自检）**
 
 Run: `bash tools/app-build.sh --check`
 Expected: 测试全绿 + asar 自检通过（`--dir` 不受 target 影响，若这里红说明改坏了别的）。
 
-- [ ] **Step 3: 跑 --local 实测 pkg target（决策门）**
+- [x] **Step 3: 跑 --local 实测 pkg target（决策门）**
 
 Run: `bash tools/app-build.sh --local`
 Expected: `apps/desktop/dist/` 下产出 `k12-desktop-<version>-arm64.pkg` 与 `k12-desktop-<version>-x64.pkg`，无报错。
@@ -64,7 +64,7 @@ Expected: `apps/desktop/dist/` 下产出 `k12-desktop-<version>-arm64.pkg` 与 `
 ls -la apps/desktop/dist/*.pkg
 ```
 
-- [ ] **Step 4: 验证 latest 清单与 pkg 内容**
+- [x] **Step 4: 验证 latest 清单与 pkg 内容**
 
 ```bash
 ls apps/desktop/dist/latest*.yml 2>/dev/null || echo "（无 latest 清单）"
@@ -73,12 +73,12 @@ npx --yes @electron/asar extract-file "apps/desktop/dist/mac-arm64/K12 智学.ap
 
 Expected: `main.js` 含 `no-proxy-server`（记录 latest*.yml 是否仍产出 —— CI 上传路径与 README 发布示例按实测结果写，见 Task 4/5）。
 
-- [ ] **Step 5: 决策门判定**
+- [x] **Step 5: 决策门判定**
 
 - pkg 双架构都产出且内容正确 → 继续 Task 2（不做 Task 1b）。
 - electron-builder pkg target 在未签名组合下报错/产物损坏 → **执行 Task 1b（退路），跳过本任务的产物形态，其余 Task 不变**。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/electron-builder.yml
@@ -93,7 +93,7 @@ git commit -m "feat(desktop): mac 打包 target 从 dmg 换成 pkg —— 安装
 - Create: `apps/desktop/scripts/pkg/postinstall`
 - Modify: `apps/desktop/tools/app-build.sh` 的 `mode_local`（出包段）
 
-- [ ] **Step 1: 建 postinstall 脚本**
+- [x] **Step 1: 建 postinstall 脚本**
 
 `apps/desktop/scripts/pkg/postinstall`（可执行）：
 
@@ -105,7 +105,7 @@ git commit -m "feat(desktop): mac 打包 target 从 dmg 换成 pkg —— 安装
 exit 0
 ```
 
-- [ ] **Step 2: mode_local 出包段改为 --dir + pkgbuild**
+- [x] **Step 2: mode_local 出包段改为 --dir + pkgbuild**
 
 ```bash
   log "出 mac .app（--dir，不打 dmg）…"
@@ -127,7 +127,7 @@ exit 0
 
 注意：`--root` 指向**包含** `K12 智学.app` 的目录（装完落在 `/Applications/K12 智学.app`）；x64 目录名是 `dist/mac`。
 
-- [ ] **Step 3: 验证 + Commit**
+- [x] **Step 3: 验证 + Commit**
 
 ```bash
 bash tools/app-build.sh --local && ls apps/desktop/dist/*.pkg
@@ -147,7 +147,7 @@ git commit -m "feat(desktop): electron-builder pkg target 不可用时改用 pkg
 - Consumes: Task 1 产出的 `dist/*.pkg`。
 - Produces: `list_dist` 能列出 `*.pkg`；`--help` 文案与实际产物一致。
 
-- [ ] **Step 1: 逐处替换（保留原注释风格，别动无关行）**
+- [x] **Step 1: 逐处替换（保留原注释风格，别动无关行）**
 
 1. `:11` 头注：`.dmg 依赖 hdiutil` → `.pkg 走 productbuild（macOS 自带）`，其余保留。
 2. `:77` `list_dist` 循环：
@@ -169,13 +169,13 @@ git commit -m "feat(desktop): electron-builder pkg target 不可用时改用 pkg
 7. `:141`（`mode_local` 内日志）`出 mac 包（x64 + arm64 两个 dmg，约 1min）…` → `…两个 pkg…`。
 8. `:233` die 提示示例 `.dmg` → `.pkg`。
 
-- [ ] **Step 2: 跑护栏与自检**
+- [x] **Step 2: 跑护栏与自检**
 
 Run: `cd apps/desktop && npm test`（tools-shell.guard 扫 `tools/**/*.sh` 的 bash 3.2 规则）
 Run: `bash tools/app-build.sh --help`
 Expected: 测试全绿；`--help` 里不再出现 dmg（历史注释里「不再出 dmg」的说明性文字除外）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tools/app-build.sh
@@ -193,7 +193,7 @@ git commit -m "docs(tools): app-build.sh 的产物口径从 dmg 换成 pkg"
 - Consumes: 下载目录里的 `*.pkg` 文件。
 - Produces: 下载页把 `.pkg` 列为安装包并给 macOS 架构提示；mac 说明为 GUI 流程。
 
-- [ ] **Step 1: case 分支合并 dmg/pkg**
+- [x] **Step 1: case 分支合并 dmg/pkg**
 
 第 111-120 行改为（dmg 分支保留，供历史产物渲染）：
 
@@ -210,7 +210,7 @@ git commit -m "docs(tools): app-build.sh 的产物口径从 dmg 换成 pkg"
       latest*.yml|*.blockmap) kind=updates ;;
 ```
 
-- [ ] **Step 2: 重写「首次打开说明」mac 部分**
+- [x] **Step 2: 重写「首次打开说明」mac 部分**
 
 第 213-218 行 `<ul class="notes">` 改为：
 
@@ -226,7 +226,7 @@ git commit -m "docs(tools): app-build.sh 的产物口径从 dmg 换成 pkg"
   </ul>
 ```
 
-- [ ] **Step 3: 本机验证下载页渲染**
+- [x] **Step 3: 本机验证下载页渲染**
 
 ```bash
 cp apps/desktop/dist/k12-desktop-*-arm64.pkg /tmp/fake-9.9.9-arm64.pkg 2>/dev/null || printf x > /tmp/fake-9.9.9-arm64.pkg
@@ -239,7 +239,7 @@ bash tools/publish-installer.sh --no-build apps/web/public/download/index.html
 grep -c "fake-9.9.9" apps/web/public/download/index.html || echo "页面已刷干净"
 ```
 
-- [ ] **Step 4: 跑护栏 + Commit**
+- [x] **Step 4: 跑护栏 + Commit**
 
 ```bash
 cd apps/desktop && npm test
@@ -259,7 +259,7 @@ git commit -m "feat(tools): 下载页识别 .pkg 安装包，mac 说明改为 pk
 - Consumes: Task 1 产出的 `dist/*.pkg`。
 - Produces: CI mac job 上传 `*.pkg`；若 latest*.yml 不再产出（以 Task 1 Step 4 实测为准）则从 path 删 `latest*.yml`（win/linux 仍产出 latest*.yml 时**保留**该行）。
 
-- [ ] **Step 1: 改上传 path 与注释**
+- [x] **Step 1: 改上传 path 与注释**
 
 `:96-106` 步骤改为：
 
@@ -280,7 +280,7 @@ git commit -m "feat(tools): 下载页识别 .pkg 安装包，mac 说明改为 pk
           if-no-files-found: error
 ```
 
-- [ ] **Step 2: gitignore 护栏加 .pkg 样例**
+- [x] **Step 2: gitignore 护栏加 .pkg 样例**
 
 `gitignore.guard.test.js:44`：
 
@@ -288,7 +288,7 @@ git commit -m "feat(tools): 下载页识别 .pkg 安装包，mac 说明改为 pk
 const MUST_BE_IGNORED = ['apps/web/public/download/k12-desktop-0.1.0-x64.dmg', 'apps/web/public/download/k12-desktop-0.1.0-arm64.pkg'];
 ```
 
-- [ ] **Step 3: 跑测试 + Commit**
+- [x] **Step 3: 跑测试 + Commit**
 
 ```bash
 cd apps/desktop && npm test
@@ -306,7 +306,7 @@ git commit -m "ci(desktop): mac 产物上传 *.pkg；gitignore 护栏补 .pkg �
 - Modify: `docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md`（顶部注记）
 - Modify: `docs/ai-core-changelog.md`（文件头追加一节）
 
-- [ ] **Step 1: README 四处**
+- [x] **Step 1: README 四处**
 
 1. `:92` 示例 URL：`k12-desktop-0.1.0-arm64.dmg` → `k12-desktop-0.1.0-arm64.pkg`。
 2. `:102-103`：
@@ -335,7 +335,7 @@ git commit -m "ci(desktop): mac 产物上传 *.pkg；gitignore 护栏补 .pkg �
 > 不要按老文章去「右键 → 打开」—— macOS 15 起已移除这条捷径。
 ```
 
-- [ ] **Step 2: constraints 文档**
+- [x] **Step 2: constraints 文档**
 
 `docs/constraints/pc-app-学习管控.md:109-112` 替换为：
 
@@ -349,7 +349,7 @@ git commit -m "ci(desktop): mac 产物上传 *.pkg；gitignore 护栏补 .pkg �
   （GUI）；`xattr` 终端命令只作为旧 dmg 包的兜底说明保留
 ```
 
-- [ ] **Step 3: 旧 spec 顶部注记 + changelog**
+- [x] **Step 3: 旧 spec 顶部注记 + changelog**
 
 旧 spec `2026-09-27-pc-app-packaging-design.md` 头部状态行后加：
 
@@ -360,7 +360,7 @@ git commit -m "ci(desktop): mac 产物上传 *.pkg；gitignore 护栏补 .pkg �
 
 `docs/ai-core-changelog.md` 文件头按现有格式追加一节：2026-10-07 事故（第二台 MacBook quarantine → App 局域网全断、浏览器正常、`sandbox_extension_issue_file` 日志特征）+ pkg 改造 + `pkgbuild`/`installer` 实验结论（Installer 不传播 quarantine；`-target CurrentUserHomeDirectory` 会把绝对 install-location 拼到 home 下）。
 
-- [ ] **Step 4: 自检 + Commit**
+- [x] **Step 4: 自检 + Commit**
 
 ```bash
 grep -rn "dmg" README.md docs/constraints/pc-app-学习管控.md | grep -v "旧\|历史\|早期\|废止\|不是 dmg"
@@ -376,14 +376,14 @@ Expected: grep 只剩「旧 dmg 兜底」类表述；无把 dmg 当现行产物�
 
 **Files:** 无新改动（验收门）。
 
-- [ ] **Step 1: 全量测试**
+- [x] **Step 1: 全量测试**
 
 ```bash
 cd apps/desktop && npm test
 ```
 Expected: 全绿（含 gitignore/tools-shell/user-data 护栏）。
 
-- [ ] **Step 2: 端到端出包**
+- [x] **Step 2: 端到端出包**
 
 ```bash
 bash tools/app-build.sh --local
@@ -392,7 +392,7 @@ node apps/desktop/scripts/verify-asar.js
 ```
 Expected: 双架构 pkg + asar 自检通过 + `list_dist` 列出 pkg。
 
-- [ ] **Step 3: 汇报人工冒烟清单（转交用户，需第二台 mac）**
+- [x] **Step 3: 汇报人工冒烟清单（转交用户，需第二台 mac）**
 
 1. 从下载页下载 `.pkg` → 双击 → 出现 Gatekeeper 拦截对话框；
 2. 「系统设置 → 隐私与安全性 → 仍要打开」→ 再双击 → 安装器完成、输密码装进 /Applications；

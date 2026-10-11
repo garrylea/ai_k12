@@ -50,14 +50,14 @@
 
 **Files:** `apps/server/src/database/repositories/safety-alerts.repo.ts`（改）、`safety-alerts.repo.test.ts`（改）
 
-- [ ] 新增 `countOlderThan(cutoff: Date): Promise<{ total: number; unread: number }>`
+- [x] 新增 `countOlderThan(cutoff: Date): Promise<{ total: number; unread: number }>`
 
 ```ts
 // SELECT COUNT(*) AS n, SUM(is_read = 0) AS unread FROM safety_alerts WHERE created_at < ?
 // 注意：0 行时 SUM(...) 返回 NULL → 必须 Number(rows[0]?.unread ?? 0)
 ```
 
-- [ ] 新增 `deleteOlderThan(cutoff: Date): Promise<number>`
+- [x] 新增 `deleteOlderThan(cutoff: Date): Promise<number>`
 
 ```ts
 // DELETE FROM safety_alerts WHERE created_at < ?
@@ -66,7 +66,7 @@
 
 参照既有 `affectedRows` 模式：`student-hidden-questions.repo.ts:28-34`。
 
-- [ ] 测试钉子：SQL 形状含 `created_at < ?`；参数就是传入的 `Date`；`SUM(is_read=0)` 为 `NULL` 时返回 `0`；`COUNT` 字符串转数字；`deleteOlderThan` 返回 `affectedRows`；两者 SQL **不得含 `NOW(`**。
+- [x] 测试钉子：SQL 形状含 `created_at < ?`；参数就是传入的 `Date`；`SUM(is_read=0)` 为 `NULL` 时返回 `0`；`COUNT` 字符串转数字；`deleteOlderThan` 返回 `affectedRows`；两者 SQL **不得含 `NOW(`**。
 
 ### Task 2 — 新建 `AdminAlertsService`
 
@@ -79,9 +79,9 @@ preview(): Promise<{ retentionDays: number; cutoff: string; total: number; unrea
 purge():   Promise<{ retentionDays: number; cutoff: string; deleted: number }>
 ```
 
-- [ ] `cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)`，ISO 字符串返回给前端展示。
-- [ ] 无 scheduler、无定时任务——**只由管理员手动触发**。
-- [ ] 测试钉子：`cutoff = now - 30 天`（用容差窗口断言，照 `safety-alerts.service.test.ts:146-147` 的 before/after 写法）；`preview` 透传仓储结果；`purge` 返回 `deleted`。
+- [x] `cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)`，ISO 字符串返回给前端展示。
+- [x] 无 scheduler、无定时任务——**只由管理员手动触发**。
+- [x] 测试钉子：`cutoff = now - 30 天`（用容差窗口断言，照 `safety-alerts.service.test.ts:146-147` 的 before/after 写法）；`preview` 透传仓储结果；`purge` 返回 `deleted`。
 
 ### Task 3 — 两个端点（加在既有 `AdminController`）
 
@@ -94,18 +94,18 @@ purge():   Promise<{ retentionDays: number; cutoff: string; deleted: number }>
 | `GET` | `/api/admin/alerts/expired` | 无入参 | `preview()` | **200** | `{ retentionDays: 30, cutoff: "<ISO>", total: N, unread: M }` |
 | `DELETE` | `/api/admin/alerts/expired` | 无入参 | `purge()` | **200** | `{ retentionDays: 30, cutoff: "<ISO>", deleted: K }` |
 
-- [ ] 两者同一资源（「已过期预警」）：`GET` 看有多少、`DELETE` 清掉。对称、自解释。
-- [ ] 用 `@Delete`（→ 200）而不是 `@Post`（→ 201，对「清理」语义不对）。**本仓无端点用 `@HttpCode` 覆盖**，保持惯例。
-- [ ] 无错误分支（无入参、固定 30 天）。唯一失败面是 DB 异常 → 走全局过滤器 → 5000。
-- [ ] 不需要 Zod（无 body / 无 query）。
+- [x] 两者同一资源（「已过期预警」）：`GET` 看有多少、`DELETE` 清掉。对称、自解释。
+- [x] 用 `@Delete`（→ 200）而不是 `@Post`（→ 201，对「清理」语义不对）。**本仓无端点用 `@HttpCode` 覆盖**，保持惯例。
+- [x] 无错误分支（无入参、固定 30 天）。唯一失败面是 DB 异常 → 走全局过滤器 → 5000。
+- [x] 不需要 Zod（无 body / 无 query）。
 
 ### Task 4 — 模块装配
 
 **Files:** `apps/server/src/modules/admin/admin.module.ts`（改）
 
-- [ ] `imports: [CommonModule, SafetyAlertsModule]`
-- [ ] `providers` 加 `AdminAlertsService`
-- [ ] ⚠️ **绝不重复 provide `SafetyAlertsRepository`**（见全局约束）。
+- [x] `imports: [CommonModule, SafetyAlertsModule]`
+- [x] `providers` 加 `AdminAlertsService`
+- [x] ⚠️ **绝不重复 provide `SafetyAlertsRepository`**（见全局约束）。
 
 ---
 
@@ -115,15 +115,15 @@ purge():   Promise<{ retentionDays: number; cutoff: string; deleted: number }>
 
 **Files:** `tools/db/migrations/2026-09-20_safety_alerts_retention_indexes.sql`（新建）、`tools/db/schema.sql`（改）
 
-- [ ] 迁移文件头按惯例写：做什么 / 为什么 / 幂等 / 回滚。
-- [ ] 两个索引，各用 `information_schema.STATISTICS` 幂等守卫（`> 0`）：
+- [x] 迁移文件头按惯例写：做什么 / 为什么 / 幂等 / 回滚。
+- [x] 两个索引，各用 `information_schema.STATISTICS` 幂等守卫（`> 0`）：
 
 | 索引 | 服务哪条查询 |
 |---|---|
 | `idx_sa_parent_created (parent_id, created_at)` | 家长端列表 + 顶部 Banner：`WHERE parent_id=? [AND is_read=0] ORDER BY created_at DESC` → 免 filesort |
 | `idx_sa_created_at (created_at)` | 本次的 `countOlderThan` / `deleteOlderThan`（`WHERE created_at < ?`）→ 区间扫描而非全表扫 |
 
-- [ ] `tools/db/schema.sql` 的 `safety_alerts` CREATE TABLE（约 `:803-822`）补上同样两行 `KEY`，与迁移一致。
+- [x] `tools/db/schema.sql` 的 `safety_alerts` CREATE TABLE（约 `:803-822`）补上同样两行 `KEY`，与迁移一致。
 
 ---
 
@@ -167,17 +167,17 @@ export function purgeExpiredAlerts(): Promise<{ retentionDays: number; cutoff: s
                             └─ 取消 → 关闭，不发请求
 ```
 
-- [ ] 样式照 admin 页惯例（见全局约束）；确认框用 `ConfirmDialog`（`title="提示："`），照 `AdminAccountsPage.tsx:251-262` 的「把计数插进 message」写法。
-- [ ] `data-testid`：`alerts-stats-loading` / `alerts-stats-error` / `alerts-stats` / `alerts-purge-btn`。
-- [ ] 测试钉子：四态（加载/失败/就绪/`total=0` 时按钮 disabled）；点按钮出确认框且 message 含条数；**确认 → 调 DELETE + toast + 重新拉统计**；**取消 → 不调 DELETE**。
+- [x] 样式照 admin 页惯例（见全局约束）；确认框用 `ConfirmDialog`（`title="提示："`），照 `AdminAccountsPage.tsx:251-262` 的「把计数插进 message」写法。
+- [x] `data-testid`：`alerts-stats-loading` / `alerts-stats-error` / `alerts-stats` / `alerts-purge-btn`。
+- [x] 测试钉子：四态（加载/失败/就绪/`total=0` 时按钮 disabled）；点按钮出确认框且 message 含条数；**确认 → 调 DELETE + toast + 重新拉统计**；**取消 → 不调 DELETE**。
 
 ### Task 8 — 侧栏 + 路由
 
 **Files:** `apps/web/src/components/layout/AdminNav.tsx`（改）、`apps/web/src/routes/routeTable.tsx`（改）、`routeTable.test.tsx`（改）
 
-- [ ] `navItems` 追加 `{ to: '/admin/alerts', label: '预警数据' }`（无图标，与该文件现有 6 项一致）。
-- [ ] `routeTable.tsx` 加 import + admin children 加 `{ path: 'alerts', element: <AdminAlertsPage /> }`。
-- [ ] 测试：加 admin 会话 + admin API mock，断言 `/admin/alerts` 渲染真页（非占位）且侧栏「预警数据」指向 `/admin/alerts`。
+- [x] `navItems` 追加 `{ to: '/admin/alerts', label: '预警数据' }`（无图标，与该文件现有 6 项一致）。
+- [x] `routeTable.tsx` 加 import + admin children 加 `{ path: 'alerts', element: <AdminAlertsPage /> }`。
+- [x] 测试：加 admin 会话 + admin API mock，断言 `/admin/alerts` 渲染真页（非占位）且侧栏「预警数据」指向 `/admin/alerts`。
 
 ---
 
@@ -185,18 +185,18 @@ export function purgeExpiredAlerts(): Promise<{ retentionDays: number; cutoff: s
 
 **Files:** 见下表
 
-- [ ] `docs/API接口与数据流设计文档.md`：admin 段补两条端点（方法/路径/无参/200/返回形状），与 openapi 互为对照。
-- [ ] `docs/api/openapi.yaml`：补 `/admin/alerts/expired` 的 `get` + `delete` 两个 operation + 两个 response schema（都记 `'200'`）。
-- [ ] `docs/superpowers/specs/2026-09-20-parent-controls-and-alerts-design.md` §9 已知限制补一行：**预警无自动保留期**，只能管理员手动清理；并记录本次两个索引。
-- [ ] `docs/K12智学系统-数据库设计文档.md`：`safety_alerts` 补两个索引（实施时先确认该文档是否已列索引）。
+- [x] `docs/API接口与数据流设计文档.md`：admin 段补两条端点（方法/路径/无参/200/返回形状），与 openapi 互为对照。
+- [x] `docs/api/openapi.yaml`：补 `/admin/alerts/expired` 的 `get` + `delete` 两个 operation + 两个 response schema（都记 `'200'`）。
+- [x] `docs/superpowers/specs/2026-09-20-parent-controls-and-alerts-design.md` §9 已知限制补一行：**预警无自动保留期**，只能管理员手动清理；并记录本次两个索引。
+- [x] `docs/K12智学系统-数据库设计文档.md`：`safety_alerts` 补两个索引（实施时先确认该文档是否已列索引）。
 
 ---
 
 ## 五、变异验证（每条都要实测 RED 后 `cp` 还原并核 md5）
 
-- [ ] 把 `cutoff` 改成 `new Date()`（不减去 30 天）→ 服务测试 RED
-- [ ] 把 `DELETE` 的 `created_at < ?` 改成 `created_at > ?` → 仓储形状钉子 RED
-- [ ] 前端确认框「取消」改成也调 DELETE → 取消用例 RED
+- [x] 把 `cutoff` 改成 `new Date()`（不减去 30 天）→ 服务测试 RED
+- [x] 把 `DELETE` 的 `created_at < ?` 改成 `created_at > ?` → 仓储形状钉子 RED
+- [x] 前端确认框「取消」改成也调 DELETE → 取消用例 RED
 
 ---
 
@@ -223,9 +223,9 @@ cd apps/web && npx tsc -b && npm run lint && npm run build
 
 ## 七、收尾
 
-- [ ] 删除之前给用户看的 6 行测试数据（`safety_alerts` id 14–19）—— **需用户确认后执行**。
-- [ ] SDD ledger（`.superpowers/sdd/progress.md`）记一条。
-- [ ] `ENV-1`/`ENV-2`（用户的 :3001/:5173 正跑本分支）依旧有效，本次 `build` 会再次覆盖 `dist/`，**再披露一次**。
+- [x] 删除之前给用户看的 6 行测试数据（`safety_alerts` id 14–19）—— **需用户确认后执行**。
+- [x] SDD ledger（`.superpowers/sdd/progress.md`）记一条。
+- [x] `ENV-1`/`ENV-2`（用户的 :3001/:5173 正跑本分支）依旧有效，本次 `build` 会再次覆盖 `dist/`，**再披露一次**。
 
 ---
 
