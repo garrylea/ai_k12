@@ -104,7 +104,7 @@ describe('JudgeCoreService.judgeQuestion', () => {
 });
 
 /** 构造带 mock 依赖的 JudgeCoreService（capabilities 不会被 self_assess 路径触达，占位即可）。 */
-function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess' | 'points' | 'mastery' | 'events', any>> = {}) {
+function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'selfAssess' | 'points' | 'mastery' | 'events' | 'explanationCache', any>> = {}) {
   const questions = overrides.questions ?? {
     findById: vi.fn(async () => null),
   };
@@ -118,18 +118,19 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
   const masteryService = overrides.mastery ?? { recordFromJudge: vi.fn(async () => undefined) };
   // 埋点 Phase 2 新增第 9 参：行为事件流（fire-and-forget）
   const events = overrides.events ?? { track: vi.fn() };
+  const explanationCache = overrides.explanationCache ?? { ensureExplanation: vi.fn() };
   const svc = new JudgeCoreService(
     questions as unknown as QuestionsRepository,
     mainError as unknown as MainErrorBooksRepository,
     {} as any, // QuestionStructuringCapability（self_assess 路径不触达）
     {} as any, // JudgmentCapability（self_assess 路径不触达）
-    {} as any, // ExplanationCacheService（self_assess 路径不触达）
+    explanationCache as any, // ExplanationCacheService（判错触发解析缓存）
     selfAssess as unknown as QuestionSelfAssessmentsRepository,
     pointsService as any, // PointsService（Task 10 错题订正发分）
     masteryService as any, // MasteryService（埋点 Phase 1B 掌握度回写）
     events as any, // EventsService（埋点 Phase 2 行为事件流）
   );
-  return { svc, questions, mainError, selfAssess, pointsService, masteryService, events };
+  return { svc, questions, mainError, selfAssess, pointsService, masteryService, events, explanationCache };
 }
 
 const q = (type: string, answer = 'B', explanation: string | null = '解析文本') => ({
@@ -521,6 +522,83 @@ describe('JudgeCoreService.judgeQuestion — remediation 来源（补偿套题�
     const svc = mkSvc(deps);
     await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 11, studentAnswer: 'A', source: 'targeted' });
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({ source: 'targeted', question_id: 11 }));
+  });
+});
+
+describe('JudgeCoreService.judgeQuestion — variation 来源（错题升级变式，PRD §7.10，2026-10-11）', () => {
+  // 题型 choice + 无 isCorrect 标记 -> 走 exact 字符串比对，不依赖 AI 判定：
+  // answer='B'，答 'A' 判错、答 'B' 判对。
+  const variationQ = {
+    id: 12, subject_id: 1, type: 'choice', difficulty: 1,
+    content: '2+2=?', options: JSON.stringify([{ label: 'A', text: '3' }, { label: 'B', text: '4' }]),
+    answer: 'B', explanation: null, source: 'variation', content_hash: null, is_active: 1, created_at: new Date(),
+  };
+  /** cleared=1：若隔离分支失效、误走清零路径，award 会被真的调到 —— 让「不发 error_fix」断言有区分力。 */
+  const mkVariationDeps = () => mk({
+    questionsRepo: {
+      findById: vi.fn().mockResolvedValue(variationQ),
+      findByContentHash: vi.fn(), findOrCreate: vi.fn(), deleteById: vi.fn(),
+    },
+    mainErrorRepo: {
+      create: vi.fn().mockResolvedValue(42),
+      findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
+      clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
+    },
+  });
+  const judge = (svc: JudgeCoreService, studentAnswer: string) =>
+    svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 12, studentAnswer, source: 'variation' });
+
+  it('判错：不入错题本（create/findUncleared 都不调），仍触发解析缓存', async () => {
+    const deps = mkVariationDeps();
+    const svc = mkSvc(deps);
+    const r = await judge(svc, 'A');
+    expect(r.isCorrect).toBe(false);
+    expect(r.errorBookId).toBeUndefined();
+    expect(r.pointsAwarded).toBe(0);
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.mainErrorRepo.findUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+    // 解析缓存保留（fire-and-forget，供变式作答反馈复用；无害）
+    expect(deps.explanationCache.ensureExplanation).toHaveBeenCalledWith(variationQ);
+  });
+
+  it('判对：不清零原错题、不发 error_fix 分（纯加练，清零只看原题重做）', async () => {
+    const deps = mkVariationDeps();
+    const svc = mkSvc(deps);
+    const r = await judge(svc, 'B');
+    expect(r.isCorrect).toBe(true);
+    expect(r.errorBookId).toBeUndefined();
+    expect(r.pointsAwarded).toBe(0);
+    expect(r.awardReason).toBeUndefined();
+    expect(deps.mainErrorRepo.clearUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+    expect(deps.pointsService.award).not.toHaveBeenCalled();
+    expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
+  });
+
+  it('掌握度回写保留（出口收尾与判题来源无关）', async () => {
+    const deps = mkVariationDeps();
+    const svc = mkSvc(deps);
+    await judge(svc, 'A');
+    await Promise.resolve();
+    expect(deps.masteryService.recordFromJudge).toHaveBeenCalledWith({
+      studentId: 1, questionId: 12, isCorrect: false,
+    });
+  });
+
+  it('SOURCE_MODULE 归因：variation -> training_error_practice（D5，不新增 module 枚举）', async () => {
+    // mkSvc 不传第 9 参 events，归因断言用带 events 的 makeService 桩
+    const { svc, events } = makeService({
+      questions: { findById: vi.fn(async () => variationQ) },
+      mainError: {
+        create: vi.fn(async () => 42),
+        findUnclearedByStudentQuestionId: vi.fn(async () => null),
+        clearUnclearedByStudentQuestionId: vi.fn(async () => 1),
+      },
+    });
+    await svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 12, studentAnswer: 'A', source: 'variation' });
+    await Promise.resolve();
+    expect(events.track).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'answer_submitted', module: 'training_error_practice' }),
+    );
   });
 });
 

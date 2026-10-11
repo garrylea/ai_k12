@@ -21,6 +21,7 @@ import {
   getParentPoints,
   getParentPointsSettings,
   getRemediationQuestions,
+  getTrainingVariations,
   getUnreadMessageCount,
   getWeakPoints,
   listMyStudents,
@@ -80,6 +81,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getAdminOverview: vi.fn(),
     // `/student/training/remediation/run`（补偿套题作答页新页）：挂载即拉套题题单
     getRemediationQuestions: vi.fn(),
+    // `/student/training/variations/run`（错题升级变式作答页，2026-10-11）：挂载即拉 pending 变式
+    getTrainingVariations: vi.fn(),
     // `/student/training/weak-points`（薄弱点图谱页新页）：挂载即拉掌握度 + 推荐，并拉档位
     getKnowledgeGraphMastery: vi.fn(),
     getWeakPoints: vi.fn(),
@@ -107,6 +110,7 @@ const putParentControlsMock = vi.mocked(putParentControls);
 const getParentPointsSettingsMock = vi.mocked(getParentPointsSettings);
 const getParentAccountMock = vi.mocked(getParentAccount);
 const getRemediationQuestionsMock = vi.mocked(getRemediationQuestions);
+const getTrainingVariationsMock = vi.mocked(getTrainingVariations);
 const getKnowledgeGraphMasteryMock = vi.mocked(getKnowledgeGraphMastery);
 const getWeakPointsMock = vi.mocked(getWeakPoints);
 const getMyPointRulesMock = vi.mocked(getMyPointRules);
@@ -273,6 +277,7 @@ beforeEach(() => {
   getParentAccountMock.mockReset();
   getParentAccountMock.mockResolvedValue(ACCOUNT);
   getRemediationQuestionsMock.mockReset();
+  getTrainingVariationsMock.mockReset();
   getKnowledgeGraphMasteryMock.mockReset();
   getWeakPointsMock.mockReset();
   getMyPointRulesMock.mockReset();
@@ -748,6 +753,38 @@ describe('路由表：补偿套题作答页', () => {
 
     expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
     expect(getRemediationQuestionsMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 错题升级变式作答页（2026-10-11 批）：`/student/training/variations/run` 新页进路由表。
+ * 同补偿套题的钉法：页面组件测试绕过路由表，「路由确实指到这个页」只有这里能证明。
+ */
+describe('路由表：错题升级变式作答页', () => {
+  it('/student/training/variations/run 渲染 VariationRunPage（题面来自接口），而非无匹配路由', async () => {
+    setStudentSession();
+    getTrainingVariationsMock.mockResolvedValue({
+      variations: [
+        { variationId: 501, questionId: 88, errorBookId: 33, text: '变式题干钉子', type: 'fill_blank', options: null, difficulty: 1 },
+      ],
+    });
+
+    renderAt('/student/training/variations/run');
+
+    // 真页面内容：题面来自 getTrainingVariations（无匹配路由 / 占位页都不可能渲染出它）
+    expect(await screen.findByText('变式题干钉子')).toBeInTheDocument();
+    expect(getTrainingVariationsMock).toHaveBeenCalled();
+    // 学习沉浸层（UX §1.5 第 58 行那一类）
+    expect(document.querySelector('.student-theme-container')).not.toBeNull();
+  });
+
+  it('无 token 访问 /student/training/variations/run → 回登录页，不拉题', async () => {
+    localStorage.clear();
+
+    renderAt('/student/training/variations/run');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(getTrainingVariationsMock).not.toHaveBeenCalled();
   });
 });
 

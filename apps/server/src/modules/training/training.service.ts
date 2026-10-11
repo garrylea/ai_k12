@@ -1,6 +1,7 @@
 import { Injectable, Logger, HttpException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { JudgeCoreService } from '../practice/judge-core.service.js';
 import { ExplanationCacheService } from '../practice/explanation-cache.service.js';
+import { VariationGeneratorService } from './variation-generator.service.js';
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
@@ -84,6 +85,7 @@ export class TrainingService {
     private readonly pointsService: PointsService,
     private readonly trainingSessionsRepo: TrainingSessionsRepository,
     private readonly specialLogsRepo: SpecialPracticeLogsRepository,
+    private readonly variationGenerator: VariationGeneratorService,
     private readonly events?: EventsService,
   ) {}
 
@@ -573,9 +575,17 @@ export class TrainingService {
     return result;
   }
 
-  /** 仍错 bump：错题重做仍答错时提升 level（镜像 PracticeService.bumpErrorLevels）。studentId 为归属校验（防 IDOR）。 */
+  /** 仍错 bump：错题重做仍答错时提升 level（镜像 PracticeService.bumpErrorLevels）。studentId 为归属校验（防 IDOR）。
+   *  bump 成功升级后逐条 fire-and-forget 触发错题升级变式生成（PRD §7.10，2026-10-11）：
+   *  仅训练轨此端点触发（主线 CleanupPhase 走 practice 版 bump 不经此处）；
+   *  生成器内部做归属/清零/孤儿/pending 去重校验，失败只 warn 绝不影响 bump 返回。 */
   async bumpErrorLevels(errorBookIds: number[], studentId?: number): Promise<void> {
     await this.mainErrorRepo.bumpLevels(errorBookIds, studentId);
+    if (studentId != null) {
+      for (const id of errorBookIds) {
+        void this.variationGenerator.generateForErrorItem(id, studentId);
+      }
+    }
   }
 
   /**

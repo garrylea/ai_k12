@@ -1187,6 +1187,60 @@ export function selfAssessRemediation(payload: {
   });
 }
 
+// --- Training: variations（错题升级变式，PRD §7.10 接线，2026-10-11） ---
+
+export interface TrainingVariationItem {
+  variationId: number;
+  questionId: number;
+  errorBookId: number;
+  text: string;
+  type: string;
+  options: Array<{ label: string; text: string }> | null;
+  difficulty: number;
+}
+
+export function getTrainingVariations(params?: { errorBookId?: number }): Promise<{
+  variations: TrainingVariationItem[];
+}> {
+  const qs = params?.errorBookId != null ? `?errorBookId=${params.errorBookId}` : '';
+  return fetchApi<{ variations: TrainingVariationItem[] }>(`/training/variations/me${qs}`);
+}
+
+/**
+ * 判题结果（RunnerJudgeOutcome 的结构超集）。
+ * **无 points 字段**：变式是纯加练、不发分（2026-10-11 用户裁决，与 RemediationAnswerResult 的差异点）；
+ * 也无 setCompleted（变式无「套」概念，完成 = pending 清空）。
+ */
+export interface VariationAnswerResult {
+  isCorrect: boolean | null;
+  method: string;
+  errorType: string | null;
+  needsSelfAssessment: boolean;
+  referenceAnswer: string | null;
+  explanation: string | null;
+  remainingCount: number;
+}
+
+export function submitVariationAnswer(payload: {
+  questionId: number;
+  studentAnswer: string;
+}): Promise<VariationAnswerResult> {
+  return fetchApi<VariationAnswerResult>('/training/variations/answers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function selfAssessVariation(payload: {
+  questionId: number;
+  assessment: 'correct' | 'incorrect';
+}): Promise<VariationAnswerResult> {
+  return fetchApi<VariationAnswerResult>('/training/variations/self-assess', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // --- Training · 语文古诗文默写（2026-09-13） ---
 
 export interface DictationPassageItem {

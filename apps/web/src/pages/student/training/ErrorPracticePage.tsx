@@ -8,7 +8,12 @@ import {
   MarkdownImg,
 } from '@/components/markdown';
 import { Button, Card, PageHeader, Skeleton, Tag } from '@/components/base';
-import { getKnowledgePoints, getTrainingErrorBook, type TrainingErrorBookEntry } from '@/services/api';
+import {
+  getKnowledgePoints,
+  getTrainingErrorBook,
+  getTrainingVariations,
+  type TrainingErrorBookEntry,
+} from '@/services/api';
 
 /** id 对应 subjects 表 seed（1=数学），与现有页一致。 */
 const MATH_SUBJECT_ID = 1;
@@ -87,6 +92,8 @@ export default function ErrorPracticePage() {
   const [error, setError] = useState<string | null>(null);
   // 已勾选的 errorBookId 集合
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // 每条错题条目的 pending 变式数（2026-10-11 变式入口）：key = errorBookId
+  const [pendingVarCount, setPendingVarCount] = useState<Map<number, number>>(new Map());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,6 +141,28 @@ export default function ErrorPracticePage() {
       })
       .catch(() => {
         // KP 拉取失败不阻断错题列表：专项下拉保持「全部」占位
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // mount 时拉 pending 变式计数（与错题列表并行）：失败静默（入口退化不显示，不阻断列表）。
+  // 生成由 bump 端点后台触发，本页只读；一个数据源（GET /training/variations/me）两处消费
+  //（此处 + 重做结果页提示卡），不在 error-book 端点上扩展。
+  useEffect(() => {
+    let cancelled = false;
+    getTrainingVariations()
+      .then((res) => {
+        if (cancelled) return;
+        const counts = new Map<number, number>();
+        for (const v of res.variations) {
+          counts.set(v.errorBookId, (counts.get(v.errorBookId) ?? 0) + 1);
+        }
+        setPendingVarCount(counts);
+      })
+      .catch(() => {
+        // 失败保持空 Map：条目不显示变式入口
       });
     return () => {
       cancelled = true;
@@ -254,6 +283,7 @@ export default function ErrorPracticePage() {
               entries.map((entry) => {
                 const isSelected = selected.has(entry.errorBookId);
                 const isOrphan = entry.questionId == null;
+                const varCount = pendingVarCount.get(entry.errorBookId) ?? 0;
                 return (
                   <Card
                     key={entry.errorBookId}
@@ -307,6 +337,32 @@ export default function ErrorPracticePage() {
                           <p className="text-xs text-[var(--learn-text-tertiary)]">
                             该题未入库，暂不支持线上重做
                           </p>
+                        )}
+                        {/* 错题升级变式入口（2026-10-11）：整块是按钮，stopPropagation 防触发条目勾选 */}
+                        {varCount > 0 && (
+                          <button
+                            type="button"
+                            data-testid={`variation-entry-${entry.errorBookId}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/student/training/variations/run?errorBookId=${entry.errorBookId}`);
+                            }}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--learn-text-secondary)] hover:text-[var(--brand-600)] transition-colors cursor-pointer"
+                          >
+                            <svg
+                              className="w-3.5 h-3.5"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
+                            </svg>
+                            {varCount} 道变式待练
+                          </button>
                         )}
                       </div>
                     </div>

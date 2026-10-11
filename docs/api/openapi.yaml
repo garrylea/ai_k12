@@ -6811,6 +6811,109 @@ paths:
         '400':
           description: 参数非法 / 无进行中套题 / 该题不在当前套题中 / 该题已答对
 
+  # Training: variations（错题升级变式，2026-10-11，PRD §7.10）
+  /training/variations/me:
+    get:
+      tags: [Training]
+      summary: 学生 pending 变式列表
+      description: >-
+        错题升级变式（student JWT）。生成由 POST /api/training/bump-error-levels 内
+        fire-and-forget 触发（仅训练轨错题重做；主线 CleanupPhase 的 practice 版 bump
+        不触发），本端点只读。可选 query errorBookId（正整数，非法 400）只取某条错题
+        条目的变式；缺省取全部（错题本页与重做结果页提示卡共用本端点）。变式题被下线
+        （is_active=0）时直接落定为答错并从结果剔除（防「N 道待练」死计数）。
+        绝不下发 answer/explanation。
+      operationId: getTrainingVariations
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: errorBookId
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: 可选：只取该错题条目的 pending 变式
+      responses:
+        '200':
+          description: pending 变式列表（可能为空数组）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/VariationsResult'
+        '400':
+          description: errorBookId 非法
+
+  /training/variations/answers:
+    post:
+      tags: [Training]
+      summary: 变式逐题提交作答
+      description: >-
+        逐题提交（student JWT）。请求体 {questionId, studentAnswer}；questionId 须正整数、
+        studentAnswer 须 string（否则 400）。判题复用 JudgeCoreService（source='variation'，
+        纯加练完全隔离：不入错题本、不清零原错题、不发 error_fix）。一次作答即落定
+        （2026-10-11 用户裁决）：判对判错都写 variation_questions.is_correct + answered_at
+        （CAS，affectedRows=0 = 并发已答 → 400），答错不重出；主观题（isCorrect=null）
+        不落定、原样带回等自评。响应无 points 字段（不发分）。Nest @Post 默认返回 201。
+      operationId: submitVariationAnswer
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VariationAnswerRequest'
+      responses:
+        '201':
+          description: 判题与落定结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/VariationAnswerResult'
+        '400':
+          description: 参数非法 / 不在待练清单或已作答（含 CAS 竞态）
+
+  /training/variations/self-assess:
+    post:
+      tags: [Training]
+      summary: 变式内主观题自评
+      description: >-
+        变式内主观题自评（student JWT）。请求体 {questionId, assessment}；assessment
+        枚举 correct|incorrect（非法 400）。刻意不经 judgeCore（镜像补偿套题裁决：
+        recordSelfAssessment 无 variation 分支且会碰错题本），只做变式行落定；
+        不写 question_self_assessments 留痕、不校验题型。Nest @Post 默认返回 201。
+      operationId: selfAssessVariation
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VariationSelfAssessRequest'
+      responses:
+        '201':
+          description: 自评落定结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/VariationAnswerResult'
+        '400':
+          description: 参数非法 / 不在待练清单或已作答（含 CAS 竞态）
+
   # Exams
   /exams/papers:
     get:
@@ -10450,6 +10553,99 @@ components:
           type: string
           enum: [correct, incorrect]
           description: 学生自评对错（非法 400）
+
+    VariationsResult:
+      type: object
+      description: pending（未作答）变式列表。
+      properties:
+        variations:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariationItem'
+      required: [variations]
+
+    VariationItem:
+      type: object
+      description: >-
+        一道待练变式（白名单序列化，answer/explanation 一律剥离）。variationId 与
+        questionId 分开：落定 CAS 以 variation_questions.id 为准。
+      properties:
+        variationId:
+          type: integer
+          description: variation_questions.id
+        questionId:
+          type: integer
+          description: 题库题目 id（作答提交用）
+        errorBookId:
+          type: integer
+          description: 原错题条目 id（main_error_books.id）
+        text:
+          type: string
+          description: 题面原文
+        type:
+          type: string
+          description: 题型（choice/fill_blank/short_answer/proof；true_false 不生成变式）
+        options:
+          type: array
+          nullable: true
+          description: 选项数组（DB JSON 字符串 parse 后）；题无选项/坏 JSON 时为 null
+          items: {}
+        difficulty:
+          type: integer
+          description: 难度（取自原错题行，1-3）
+      required: [variationId, questionId, errorBookId, text, type, options, difficulty]
+
+    VariationAnswerRequest:
+      type: object
+      required: [questionId, studentAnswer]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（须正整数，否则 400）
+        studentAnswer:
+          type: string
+          description: 学生提交的答案文本（须 string，否则 400）
+
+    VariationSelfAssessRequest:
+      type: object
+      required: [questionId, assessment]
+      properties:
+        questionId:
+          type: integer
+          description: 题库题目 id（须正整数，否则 400）
+        assessment:
+          type: string
+          enum: [correct, incorrect]
+          description: 学生自评对错（非法 400）
+
+    VariationAnswerResult:
+      type: object
+      description: >-
+        判题与落定结果。无 points 字段（变式是纯加练、不发分，2026-10-11 用户裁决），
+        也无 setCompleted（变式无「套」概念）。
+      properties:
+        isCorrect:
+          type: boolean
+          nullable: true
+          description: null = 主观题待自评（未落定）
+        method:
+          type: string
+          description: exact/ai/self_assess/unanswered/undetermined（同 judge-core 口径）
+        errorType:
+          type: string
+          nullable: true
+        needsSelfAssessment:
+          type: boolean
+        referenceAnswer:
+          type: string
+          nullable: true
+        explanation:
+          type: string
+          nullable: true
+        remainingCount:
+          type: integer
+          description: 落定后剩余 pending 变式数
+      required: [isCorrect, method, errorType, needsSelfAssessment, referenceAnswer, explanation, remainingCount]
 
     RemediationPointsAward:
       type: object

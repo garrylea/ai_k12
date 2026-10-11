@@ -3,10 +3,9 @@ import { QuestionsRepository } from '../../database/repositories/questions.repo.
 import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
 import { RemediationRepository } from '../../database/repositories/remediation.repo.js';
 import { VariationCapability } from '../../ai-core/capabilities/variation.capability.js';
-import { compareAnswer } from '../practice/judge-core.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
-import type { Difficulty, VariationQuestion } from '../../ai-core/types.js';
+import { toDifficulty, toStoredAnswer, variationRejectionReason } from './variation-question.util.js';
 
 export interface BuildGroupsResult {
   groupsCreated: number;
@@ -17,33 +16,6 @@ export interface BuildGroupsResult {
 
 const GROUP_SIZE = 3;
 const MATH_SUBJECT_ID = 1;
-
-/** DB 的 difficulty 是 SMALLINT（number），ai-core 的 Difficulty 是 1|2|3 字面量联合；
- *  套题难度来自原错题行，题库口径恒为 1–3，此处按边界收敛（不做静默放大）。 */
-function toDifficulty(value: number): Difficulty {
-  if (value <= 1) return 1;
-  if (value >= 3) return 3;
-  return 2;
-}
-
-/** choice 题入库答案归一：前端提交的是选项 label（ChoiceOptionList 提交 opt.label），
- *  而 judge-core.compareAnswer 只按 **label** 命中选项（`opts.find(o => normalizeAnswer(o.label) === a)`），
- *  且入库时 options 已剥掉 isCorrect、判题必然退化为「label === answer」比对 ——
- *  故 answer 必须以正确选项的 label 入库。否则 AI 若把 answer 写成选项文本（如 "2"），
- *  学生提交 label（如 "B"）会**恒判错**。
- *  调用前必须已过 variationRejectionReason 的「恰有 1 个 isCorrect」校验。
- *
- *  ⚠️ 已知限制：`true_false` **未**做同类归一（本函数只处理 choice，variationRejectionReason
- *  的校验也仅对 choice 生效）。前端 true_false 走默认选项 `对`/`错`
- *  （见 apps/web/src/components/business/answer/QuestionRunner.tsx 的 `q.type === 'true_false'`
- *  分支），若 AI 把 answer 写成「正确」/「T」之类，学生提交 `对`/`错` 同样会恒判错。
- *  当前**不可达**：套题组类型只能来自原错题题型，而数学题库（subject_id=1）无 true_false 题。
- *  若将来题库引入判断题，**必须**同样把 answer 归一到 `对`/`错` 并强制 `options=null`。 */
-function toStoredAnswer(v: VariationQuestion, type: string): string {
-  if (type !== 'choice') return v.answer;
-  const correct = (v.options ?? []).find((o) => o.isCorrect === true);
-  return correct?.label ?? v.answer;
-}
 
 @Injectable()
 export class RemediationGeneratorService {
@@ -201,7 +173,7 @@ export class RemediationGeneratorService {
       const existing = new Set([...excludeQuestionIds, ...setItems.map((i) => i.question_id)]);
 
       for (const v of res.variations) {
-        const reason = this.variationRejectionReason(v, group.type);
+        const reason = variationRejectionReason(v, group.type);
         if (reason) {
           rejected++;
           // 校验不通过：不入库、不入套题（spec §5.3），留日志便于事后定位被丢弃的题
@@ -239,31 +211,5 @@ export class RemediationGeneratorService {
       // 无论成败都清缺口（spec §5.3）：失败则维持题库抽到的题；悬挂重试只管进程重启场景
       await this.remediationRepo.updateGroupAiPending(groupId, 0);
     }
-  }
-
-  /** 轻校验（spec §5.3）：返回拒绝原因，null = 通过。 */
-  private variationRejectionReason(v: VariationQuestion, type: string): string | null {
-    if (!v.content.trim()) return '题干为空';
-    if (!v.answer.trim()) return '无可解答案';
-    if (type === 'choice') {
-      if (!Array.isArray(v.options) || v.options.length < 2) {
-        return `choice 选项不足 2 个（实际 ${v.options?.length ?? 0}）`;
-      }
-      // 有且仅有一个正确选项：多个/零个都会让判题（choice 走程序比对）行为不确定
-      const correct = v.options.filter((o) => o.isCorrect === true);
-      if (correct.length !== 1) {
-        return `choice 正确选项应恰有 1 个（实际 ${correct.length}）`;
-      }
-      // 答案与正确选项一致：与 judge-core.compareAnswer 同口径（归一化后比对）——
-      // 命中正确选项的 label，或命中其 text（题库 choice 题答案常直接写选项文本）。
-      const optsJson = JSON.stringify(v.options);
-      if (
-        !compareAnswer(v.answer, correct[0].label, optsJson) &&
-        !compareAnswer(v.answer, correct[0].text, optsJson)
-      ) {
-        return `choice 答案与正确选项不一致（answer=${v.answer}，正确项 ${correct[0].label}）`;
-      }
-    }
-    return null;
   }
 }

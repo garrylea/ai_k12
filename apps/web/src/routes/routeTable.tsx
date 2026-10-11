@@ -21,6 +21,7 @@ import StudentLockedPage from '@/pages/student/StudentLockedPage';
 import HandwritingDemoPage from '@/pages/dev/HandwritingDemoPage';
 import HiddenQuestionsPage from '@/pages/student/training/HiddenQuestionsPage';
 import RemediationRunPage from '@/pages/student/training/RemediationRunPage';
+import VariationRunPage from '@/pages/student/training/VariationRunPage';
 import ChineseSpecialPage from '@/pages/student/training/chinese/ChineseSpecialPage';
 import DictationConfigPage from '@/pages/student/training/chinese/DictationConfigPage';
 import DictationRunPage from '@/pages/student/training/chinese/DictationRunPage';
@@ -255,6 +256,16 @@ export const routes: RouteObject[] = [
     element: (
       <RequireRole role="student">
         <RemediationRunPage />
+      </RequireRole>
+    ),
+  },
+  // 错题升级变式练习（PRD §7.10，2026-10-11）：全屏沉浸层，题单由服务端持有；
+  // 可选 ?errorBookId= 只练某条错题的变式（错题本条目入口），缺省练全部 pending
+  {
+    path: '/student/training/variations/run',
+    element: (
+      <RequireRole role="student">
+        <VariationRunPage />
       </RequireRole>
     ),
   },

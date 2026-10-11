@@ -40,6 +40,8 @@ const mk = (overrides: any = {}) => ({
   trainingSessionsRepo: { create: vi.fn().mockResolvedValue(101) },
   // 专项日志（Phase 1B）：语文三专项判题各写一行 `special_practice_logs`。
   specialLogsRepo: { insert: vi.fn().mockResolvedValue(1) },
+  // 错题升级变式（2026-10-11）：bump 后 fire-and-forget 触发生成。
+  variationGenerator: { generateForErrorItem: vi.fn().mockResolvedValue(undefined) },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
@@ -51,6 +53,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
     deps.pointsService as never,
     deps.trainingSessionsRepo as never,
     deps.specialLogsRepo as never,
+    deps.variationGenerator as never,
   );
 
 /**
@@ -209,6 +212,32 @@ describe('TrainingService.bumpErrorLevels', () => {
     const svc = mkSvc(deps);
     await svc.bumpErrorLevels([1, 2, 3], 7);
     expect(deps.mainErrorRepo.bumpLevels).toHaveBeenCalledWith([1, 2, 3], 7);
+  });
+
+  it('升级后逐 id fire-and-forget 触发变式生成（PRD §7.10）', async () => {
+    const deps = mk();
+    const svc = mkSvc(deps);
+    await svc.bumpErrorLevels([1, 2, 3], 7);
+    expect(deps.variationGenerator.generateForErrorItem).toHaveBeenCalledTimes(3);
+    expect(deps.variationGenerator.generateForErrorItem).toHaveBeenNthCalledWith(1, 1, 7);
+    expect(deps.variationGenerator.generateForErrorItem).toHaveBeenNthCalledWith(2, 2, 7);
+    expect(deps.variationGenerator.generateForErrorItem).toHaveBeenNthCalledWith(3, 3, 7);
+  });
+
+  it('钉子：绝不 await 生成（LLM 永不 resolve 时 bump 仍立即返回）', async () => {
+    const deps = mk({
+      variationGenerator: { generateForErrorItem: vi.fn().mockReturnValue(new Promise(() => undefined)) },
+    });
+    const svc = mkSvc(deps);
+    await expect(svc.bumpErrorLevels([1], 7)).resolves.toBeUndefined();
+    expect(deps.variationGenerator.generateForErrorItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('studentId 缺省（旧调用形状）不触发生成', async () => {
+    const deps = mk();
+    const svc = mkSvc(deps);
+    await svc.bumpErrorLevels([1, 2]);
+    expect(deps.variationGenerator.generateForErrorItem).not.toHaveBeenCalled();
   });
 });
 

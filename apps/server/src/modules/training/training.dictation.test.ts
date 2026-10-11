@@ -51,6 +51,7 @@ function makeService(overrides: {
     dictationRepo as never, dictationFeedback as never, {} as never,
     points as never, {} as never,
     specialLogsRepo as never,
+    {} as never,
     overrides.events,
   );
   return { service, dictationRepo, judgeCore, dictationFeedback, points, specialLogsRepo };

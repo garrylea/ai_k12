@@ -773,8 +773,12 @@ CREATE TABLE IF NOT EXISTS variation_questions (
   question_id BIGINT NOT NULL,
   difficulty SMALLINT NOT NULL,
   validator_passed TINYINT(1) NOT NULL DEFAULT 0,
+  -- 作答结果：NULL=待练（pending）；0=答错（一次落定不重出）；1=答对（2026-10-11 迁移）
+  is_correct TINYINT(1) DEFAULT NULL,
+  answered_at DATETIME(3) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_vq_error_item (error_book_type, original_error_item_id),
+  KEY idx_vq_student_pending (student_id, is_correct),
   CONSTRAINT fk_vq_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_vq_question_id FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

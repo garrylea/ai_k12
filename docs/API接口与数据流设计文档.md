@@ -313,7 +313,7 @@
 | ~~POST~~ | ~~`/api/error-book/items/{errorItemId}/redo`~~ | ~~提交错题重做答案~~ | ~~MVP~~ |
 | ~~POST~~ | ~~`/api/error-book/items/{errorItemId}/clear`~~ | ~~标记错题已清零~~ | ~~MVP~~ |
 | ~~GET~~ | ~~`/api/error-book/items/{errorItemId}/explanation`~~ | ~~获取 AI 解析~~ | ~~MVP~~ |
-| ~~GET~~ | ~~`/api/error-book/items/{errorItemId}/variations`~~ | ~~获取变式题列表~~ | ~~MVP~~ |
+| ~~GET~~ | ~~`/api/error-book/items/{errorItemId}/variations`~~ | ~~获取变式题列表~~（变式下发现由 §4.18 的 `GET /api/training/variations/me` 承担，2026-10-11 实现错题升级变式） | ~~MVP~~ |
 | ~~POST~~ | ~~`/api/error-book/items/{errorItemId}/variations/{variationId}/submit`~~ | ~~提交变式题答案~~ | ~~MVP~~ |
 | ~~GET~~ | ~~`/api/error-book/students/{studentId}/stats`~~ | ~~错题统计与薄弱点（默认当前学科，可传 `?subject=` 筛选）~~ | ~~MVP~~ |
 | ~~GET~~ | ~~`/api/error-book/students/{studentId}/clear-status`~~ | ~~当前待清零状态（默认当前学科，可传 `?subject=` 筛选；用于解锁判断）~~ | ~~MVP~~ |
@@ -511,6 +511,9 @@
 | GET | `/api/training/remediation/questions` | 作答页拉取未答对题目（含渲染数据，白名单序列化）：`{questionId, text, type, options}`，`options` 为 JSON 字符串 parse 后的数组，**可为 `null`**（题无选项/坏 JSON）。题目被下线（`is_active=0`）时直接标对（防套题死锁）；**全对时后端 `deleteSet`** 并返回 `{questions: [], itemCount: N, correctCount: N}`。**200**。响应：`{questions: [...], itemCount, correctCount}`。 | MVP |
 | POST | `/api/training/remediation/answers` | 逐题提交作答。请求体：`{questionId, studentAnswer}`；`questionId` 须正整数、`studentAnswer` 须 string（否则 400）。判题复用 `JudgeCoreService`（`source='remediation'`，**不入错题本、不清零原错题、不参与主线清零门禁**）；**首次作答即发分**（`task_code='remediation_question'`、幂等键 `dedupe_key='rem:<item.id>'`、`ref_type='question'`、`ref_id=questions.id`），答对置 `is_correct=1`，**全部答对时清套题**（物理删除）。400：无进行中套题 / 该题不在当前套题中 / 该题已答对无需重复作答 / 参数非法。**201**。响应：`{isCorrect(nullable), method, errorType(nullable), needsSelfAssessment, referenceAnswer(nullable), explanation(nullable), points(nullable 对象), setCompleted, remainingCount}`。 | MVP |
 | POST | `/api/training/remediation/self-assess` | 套题内主观题自评。请求体：`{questionId, assessment}`；`assessment` 枚举 `correct\|incorrect`（非法 400）。**刻意不经 `judgeCore.recordSelfAssessment`**：直接 `requireItem` + `applyOutcome`，故套题内自评同样不入错题本 / 不清零 / 不发 `error_fix`（`method='self_assess'`，`errorType`/`referenceAnswer`/`explanation` 为 null）。400：同 `/answers` 三条 + `questionId`/`assessment` 非法。**201**。响应结构与 `/answers` 完全一致（含 `points`/`setCompleted`/`remainingCount`）。 | MVP |
+| GET | `/api/training/variations/me` | **错题升级变式（2026-10-11，PRD §7.10）**：学生 pending（未作答）变式列表。生成由 `POST /api/training/bump-error-levels`（§4.18）内 fire-and-forget 触发，本端点只读。可选 query `errorBookId`（正整数，非法 400）只取某条错题条目的变式（错题本条目入口）；缺省取全部（错题本页与重做结果页提示卡共用本端点，前端按 `errorBookId` 分组计数）。变式题被下线（`is_active=0`）时直接落定为答错（`is_correct=0`，防「N 道待练」死计数）并从结果剔除。**200**。响应：`{variations: [{variationId, questionId, errorBookId, text, type, options(nullable，parse 后数组), difficulty}]}`，**绝不下发 `answer`/`explanation`**。 | MVP |
+| POST | `/api/training/variations/answers` | 变式逐题提交。请求体：`{questionId, studentAnswer}`；`questionId` 须正整数、`studentAnswer` 须 string（否则 400）。判题复用 `JudgeCoreService`（`source='variation'`，**纯加练完全隔离：不入错题本、不清零原错题、不发 error_fix**）。**一次作答即落定**（2026-10-11 用户裁决）：判对判错都写 `variation_questions.is_correct` + `answered_at`（CAS，affectedRows=0 = 并发已答 → 400），**答错不重出**；主观题（`isCorrect=null`）不落定、原样带回等自评。400：不在待练清单/已作答/参数非法。**201**。响应：`{isCorrect(nullable), method, errorType(nullable), needsSelfAssessment, referenceAnswer(nullable), explanation(nullable), remainingCount}` —— **无 `points`/`setCompleted` 字段**（不发分，与补偿套题返回形状的差异点）。 | MVP |
+| POST | `/api/training/variations/self-assess` | 变式内主观题自评。请求体：`{questionId, assessment}`；`assessment` 枚举 `correct\|incorrect`（非法 400）。**刻意不经 `judgeCore`**（镜像补偿套题裁决：`recordSelfAssessment` 无 variation 分支且会碰错题本），只做变式行落定；不写 `question_self_assessments` 留痕、不校验题型。400：不在待练清单/已作答/CAS 竞态/参数非法。**201**。响应：`{isCorrect, method:'self_assess', errorType:null, needsSelfAssessment:false, referenceAnswer:null, explanation:null, remainingCount}`。 | MVP |
 
 ### 4.19 Exams — `/api/exams`
 
@@ -908,7 +911,7 @@ SafetyGuard 判断：
   │      连续失败 3 次 → FallbackHandler 输出完整解析 + 知识点总结
 ```
 
-### 5.4 错题升级与变式生成
+### 5.4 错题升级与变式生成（2026-10-11 实现）
 
 ```text
 学生在训练轨错题练习重做 → POST /api/training/judge
@@ -917,28 +920,38 @@ SafetyGuard 判断：
 再次做错
   │
   ▼
-POST /api/training/bump-error-levels（提升错题级别 L1→L2→...→L5）
+重做轮收尾 → POST /api/training/bump-error-levels（提升错题级别 L1→L2→…→L5）
   │
   ▼
-POST /api/ai/variation
-  │  请求参数：原题知识点、题型、难度、当前级别
+bump 端点内逐条 fire-and-forget 触发 VariationGeneratorService.generateForErrorItem
+（不 await；生成器内部校验：非本人/已清零/孤儿条目/原题下线/空答案/true_false/无 primary
+ 考点 → 跳过；已有 pending 变式 → 去重跳过）
   │
   ▼
-AI-Agent 提取二级知识点 + 题型 + 难度
+VariationCapability.generate（原题题面+答案+难度、primary 考点、count=2、targetDifficulty=原题难度）
   │
   ▼
-动态生成 1-2 道变式题（换数/换场景/调整条件）
+AI 生成 1-2 道变式题（换数/换场景/调整条件）
   │
   ▼
-Validator 逻辑自洽校验
-  │  ├─ 失败 → 重新生成，最多 N 次（如 3 次）
-  │  │
+轻校验（与补偿套题同口径：题干/答案非空、choice 恰 1 个 isCorrect、answer 与正确项一致）
+  │  ├─ 拒绝 / 与原题同文（同 content_hash）→ 丢弃不入库（0 道通过不补偿）
   │  └─ 通过
   │      ▼
-  │      变式题存入 variation_questions
+  │      questions 表 findOrCreate（source='variation'，options 剥 isCorrect、choice answer
+  │      归一为正确项 label）→ variation_questions 落行（validator_passed=1）
   │      ▼
-  │      （变式下发端点为原 §4.10 `/api/error-book/.../variations`，
-  │        已于 2026-09-20 标废弃：变式生成本期未实现，见 §9 v4.6）
+  │      下发：GET /api/training/variations/me（pending 列表）
+  │      ▼
+  │      作答：POST /api/training/variations/answers（客观题，source='variation' 判题）
+  │             POST /api/training/variations/self-assess（主观题自评）
+  │      ▼
+  │      一次作答即落定（判对判错都写 is_correct+answered_at，答错不重出）
+  │
+  └─ 口径：纯加练完全隔离——不入错题本、不清零原错题、不发分；
+     原错题清零门禁仍只看原题重做做对（§7.4）。
+     旧下发端点原 §4.10 `/api/error-book/.../variations` 保持废弃
+    （2026-09-20 标废弃，见 §9 v4.6），现由 `/api/training/variations/me` 承担。
 ```
 
 ### 5.5 积分获得与兑换（§7.13，原「奖励领取与兑现」已废弃重写）
@@ -2236,6 +2249,7 @@ POST /api/error-book/items/{errorItemId}/redo
 | v4.21 | 2026-10-10 | **LLM 账本按模块归因 + 模块 API 调用聚合（§4.28 三处，openapi.yaml 同步）**。① `GET /modules` 响应每行加三列 `llmCalls`/`llmInputTokens`/`llmOutputTokens`：`llm_call_logs` 按 `module`（API 第一段）聚合后在 service 层按映射累加（`practice→mainline`、`ai→aux_qna`、`training→training_targeted`、`exams→exam`；**仅报表层映射不落数据**，其余段与 NULL 不并入任何行），无调用 = 真实 0；② `GET /llm-tokens` 的 `groupBy` 白名单加 `module`——NULL module = **无 HTTP 触发链的调用**（HTTP fire-and-forget 带 ALS 延续的触发请求 module，不算 NULL），该组 `key` **原样输出 null**（前端显示「后台任务」），**历史行不回填**；③ 新增 `GET /api/admin/analytics/api-usage?from,to`：`api_request_logs` 按 module GROUP BY，`{items:[{module:string\|null, calls, failedCalls, failureRate, avgLatencyMs}]}` 按 calls DESC、无分页；**失败谓词与 /quality 完全同款**（`status_code >= 500 OR biz_code IS NOT NULL`，repo 测试逐字符同款断言防漂移），failureRate 分母 0 → null、failed=0 是真实 0，avgLatencyMs 取整、组内全缺失 → null。均为 admin 角色 GET，窗口纪律与 §4.28 通用条款一致。数据面：`llm_call_logs` 加 `module` 列（迁移 `2026-10-10_llm_call_logs_module.sql`，历史行恒 NULL 不回填）。 |
 | v4.20 | 2026-10-09 | 埋点 Phase 2（Ops 产品面）文档同步。§4.23 补 `POST /api/track/events`（批量 1-50、client 白名单拒伪计 rejected、subjectId 只查在售、`{accepted, rejected}` 201）；新增 §4.28 AdminAnalytics 11 端点逐字段（通用窗口纪律 + 逐端点 query 表 + 口径：mainline 漏斗第三步 taskCode、/events 全 tier、devices 真实 key 取值与 status 口径差异、apiFailureRate 谓词、passageSkipRate 恒 null、globalWordErrorRate 可 >1、llmTimeoutRate 含网络归一、unavailable 单列）；新增 §5.31 显式事件采集链（tracker 四条 flush 条件 + pagehide 丢弃口径）与 §5.32 ops 聚合查询链；openapi.yaml 同步 12 端点。 |
 | v4.19 | 2026-10-08 | 新增 §4.27（语文专项手写输入）：`POST /api/ai/handwriting/transcribe`（学生角色，AIController 类级 `@Roles('student')` 继承）——手写图片 dataURL（png\|jpeg，解码 ≤4MB；缺失/前缀不符 400/4001、超限 400/4002、上游失败 502/5502）→ `{text, modelKey, elapsedMs}`，**成功 201**（`@Post` 默认）。非流式、不留档（只有 LLM 账本，meta 走 HTTP 路径 ALS 归属学生）；模型走 scene `handwriting` + subject `chinese` 路由（本地 llama.cpp 优先、qwen3.8-max 兜底，yaml + `llm_routes` 迁移 `2026-10-08_handwriting_scene.sql`，幂等），调用 `thinking:false`。§4.7 AI 表补一行；§5 无 ai 端点清单、数据流不变，无需同步。openapi.yaml 同步（1 path / 1 operation，`'201'`）。dev 调研端点（§4.26）不受影响。 |
+| v4.20 | 2026-10-11 | **错题升级变式（PRD §7.10 接线，补齐 P0-3）**。契约变更：Training 分组 §4.18 新增 3 个端点（student JWT；两个 POST 按 Nest 默认返回 **201**，GET 200）——`GET /api/training/variations/me`（pending 变式列表，可选 `errorBookId` 过滤，非法 400；下线变式题直接落定为答错并剔除）、`POST /api/training/variations/answers`（判题 `source='variation'`，**纯加练完全隔离**：不入错题本/不清零原错题/不发 error_fix；**一次作答即落定**，CAS 防并发重复作答；响应**无 points 字段**）、`POST /api/training/variations/self-assess`（主观题自评，**刻意不经 `judgeCore`**，镜像补偿套题裁决）。**触发**：`POST /api/training/bump-error-levels`（仅训练轨）内逐条 fire-and-forget 触发 `VariationGeneratorService.generateForErrorItem`（主线 CleanupPhase 的 practice 版 bump 不触发）；生成器跳过条件：非本人/已清零/孤儿条目/原题下线/空答案/`true_false`/无 primary 考点/已有 pending 变式；每次升级生成 **2 道**（PRD 1-2 道取上限），轻校验拒绝或与原题同文（同 `content_hash`）不入库。§5.4 整节重写（去掉 2026-09-20「本期未实现」尾注）；§4.10 废弃的 variations 端点行补「现由 `/api/training/variations/me` 承担」。数据面：`variation_questions` 加列 `is_correct TINYINT(1) NULL`（NULL=待练，一次落定不重出）+ `answered_at DATETIME(3) NULL` + 索引 `idx_vq_student_pending`（迁移 `2026-10-11_variation_answer_columns.sql`，schema.sql 同步；原表 2026-08 就已建好、本期首次启用，零数据）。前端：作答页 `/student/training/variations/run`（支持 `?errorBookId=`）、错题本条目「N 道变式待练」入口、错题重做结果页提示卡。judge-core 埋点 `SOURCE_MODULE.variation = 'training_error_practice'`（不新增 module 枚举）。openapi.yaml 同步（3 path + schema）。 |
 | v4.18 | 2026-10-08 | 新增 Dev 分组 §4.26（手写汉字识别率调研，dev-only）：`GET /api/dev/handwriting/models`（registry 快照，只出 key/provider/modelId）与 `POST /api/dev/handwriting/recognize`（纯转写，校验顺序 image 前缀 → 解码 ≤4MB → modelKey 在 registry；上游失败 502）。**限 admin 角色**（2026-10-08 用户裁决由「任一已登录角色」收窄，`SUBSCRIPTION_EXEMPT` 两条豁免随之删除——admin 天然越过 SubscriptionGuard）；**不落库、无埋点**。recognize **成功返回 201**（`@Post` 默认，未显式 `@HttpCode`）。**openapi.yaml 不收录**（openapi 只收 MVP 端点，此为 dev-only 调研端点）。前端调研页 `/dev/handwriting-demo`，累计准确率为 Σ 口径（Σ本轮命中 ÷ Σ本轮对照字数，不做拼接重算）。 |
 | v4.17 | 2026-10-01 | **裁决结果通知补丁（批④验收缺陷修复）**。背景：批④验收发现两缺陷——① 管理员驳回后**家长无感知**（驳回原因只在订单历史里，家长停留在他页不可见）；② 管理端「待裁决」红点裁决后不消失。用户三裁决：**跨页提示条 + 未读持久化**（方案 A，新表 `billing_notices`）、**点「知道了」才消**（不做自动消红）、**裁决两态都发通知**（不含 adminMarkPaid 直通入账）。契约变更：§4.15 新增 2 端点——`GET /api/billing/notices/unread`（200，`{items:[{id,type,orderNo,reason,createdAt}], total}`，无分页上限 50、`total=items.length`）与 `POST /api/billing/notices/{id}/ack`（**显式 `@HttpCode(200)`**，幂等，body 无，返回 `{ok:true}`；400/1001 非法 id、404/1002 不存在、403/1005 他人通知；**首次置已读时 `logger.log` 留痕一行（noticeId+parentId）**）。新表 `billing_notices`（迁移 `2026-10-01_billing_notices.sql`，type 枚举 `claim_approved/claim_rejected`）。openapi.yaml 同步（2 operation + `BillingNoticeView`/`BillingNoticeListResult`/`BillingNoticeAckResult`，ack 记 `'200'`）。UX 文档同步家长顶栏三 Bar（`AlertBanner` 预警 → `BillingNoticeBar` 裁决结果 → `SubscriptionNoticeBar` 订阅状态）。实施与冒烟详见 `docs/ai-core-changelog.md` 2026-10-01 节 |
 | v4.16 | 2026-09-30 | **订阅批④：自动到账 + 人工裁决链路 + 线下转账渠道 + 试用/订阅管理**。① `GET /api/billing/orders/{orderNo}` pending 时**限频自动查渠道**（内存 Map 每单 10s；manual/mock 跳过；金额不符拒绝；expired 照常入账）——回调不可达的部署形态下的主要到账途径。② **claim 裁决状态机**：orders 加 `claim_status/claimed_at/claim_note` 三列；confirm-paid 未获渠道确认（或线下转账单）→ `pending_review` → 管理端裁决；finalize 五条入账路径统一挂 claim→approved 自动闭环。③ **家长侧 `manual`（线下转账）渠道**：不走适配器、无二维码；confirm **note 必填**。④ admin 新增 6 端点：`GET orders/claims`、`POST .../claims/approve`、`POST .../claims/reject`、`GET families`、`PUT families/{id}/trial`、`POST families/{id}/grant`（新表 `subscription_adjustments` 审计）。⑤ `adminMarkPaid` 放行 expired（对齐方案 A 裁决与 markPaidTx 谓词）。背景：付费主路径 = 个人微信收款 + 管理员手工开通（商户号 300 元认证暂缓，真渠道接入代码已就绪） |

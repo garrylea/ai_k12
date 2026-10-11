@@ -6,6 +6,7 @@ import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
+import { VariationOfferCard } from '@/components/business/VariationOfferCard';
 import { CelebrationOverlay } from '@/components/business';
 import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
@@ -13,10 +14,12 @@ import {
   bumpTrainingErrorLevels,
   getTrainingExplanations,
   getTrainingHint,
+  getTrainingVariations,
   judgeTraining,
   selfAssessTraining,
   waitTrainingExplanation,
   type TrainingErrorBookEntry,
+  type TrainingVariationItem,
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
 import { usePointsFeedback } from './points-feedback';
@@ -48,6 +51,9 @@ export default function ErrorPracticeRunPage() {
   const [entries, setEntries] = useState<TrainingErrorBookEntry[] | null>(null);
   // 结果页错题解析：末题后批量拉取（key = q.n）；孤儿题（questionId null）无解析不拉
   const [explanations, setExplanations] = useState<Record<string, string | null>>({});
+  // 结果页变式提示卡（PRD §7.10）：null = 未查询/查询中；8s 补查的一次性 timer
+  const [varPending, setVarPending] = useState<TrainingVariationItem[] | null>(null);
+  const varRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // StrictMode 下 effect 会跑两次：ref 守卫保证「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无题单而踢回列表页。
@@ -82,6 +88,13 @@ export default function ErrorPracticeRunPage() {
       navigate('/student/training/errors', { replace: true });
     }
   }, [entries, navigate]);
+
+  // 卸载时清掉变式 8s 补查 timer（一次性 setTimeout，非轮询）
+  useEffect(() => {
+    return () => {
+      if (varRetryTimerRef.current != null) clearTimeout(varRetryTimerRef.current);
+    };
+  }, []);
 
   // n（= String(errorBookId)）-> 错题条目映射
   const entryByN = useMemo(() => {
@@ -165,6 +178,26 @@ export default function ErrorPracticeRunPage() {
         }
       }
 
+      // 变式提示卡（PRD §7.10）：bump 后服务端已 fire-and-forget 生成变式（LLM 10-30s），
+      // 立即查大概率还没落库——立即查一次，空则 8s 后补查一次（D7，非轮询），仍未命中静默
+      //（错题本条目入口是兜底，不承诺）。卡片文案是「本次仍错的错题」，故仅在仍错 >0 时走整套
+      //（无仍错不查：查到旧 pending 也会因文案不符而不该弹）。查询失败 = null = 卡不渲染。
+      if (stillWrongIds.length > 0) {
+        const fetchVarPending = () =>
+          getTrainingVariations()
+            .then((r) => r.variations)
+            .catch(() => null);
+        void fetchVarPending().then((v) => {
+          setVarPending(v);
+          if ((v ?? []).length === 0) {
+            if (varRetryTimerRef.current != null) clearTimeout(varRetryTimerRef.current);
+            varRetryTimerRef.current = setTimeout(() => {
+              void fetchVarPending().then((late) => setVarPending(late));
+            }, 8000);
+          }
+        });
+      }
+
       // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉。
       // 客观题答错 + 主观题（self_assess，无论自评对错）都要解析。
       const wrongQids: number[] = [];
@@ -199,17 +232,28 @@ export default function ErrorPracticeRunPage() {
     <div className="student-theme-container" data-theme="student-day" data-school="junior">
       <div className="relative h-screen flex flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
         {phase === 'result' ? (
-          <AnswerResultList
-            questions={resultQuestions}
-            answers={finalResults ?? {}}
-            initialExplanations={explanations}
-            questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
-            onWaitExplanation={async (qid) => {
-              const res = await waitTrainingExplanation(qid);
-              return res.explanation;
-            }}
-            onClose={() => navigate('/student/training/errors')}
-          />
+          <div className="flex-1 min-h-0 flex flex-col">
+            {/* 变式提示卡槽位：varPending 为 null/空时连槽位都不渲染（宿主镜像卡片自身守卫），
+                否则 AnswerResultList 会多画分隔线（同 remediation-offer-slot 的约定）。 */}
+            {varPending != null && varPending.length > 0 && (
+              <div className="shrink-0 px-1 pb-3" data-testid="variation-offer-slot">
+                <VariationOfferCard variations={varPending} />
+              </div>
+            )}
+            <div className="flex-1 min-h-0">
+              <AnswerResultList
+                questions={resultQuestions}
+                answers={finalResults ?? {}}
+                initialExplanations={explanations}
+                questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
+                onWaitExplanation={async (qid) => {
+                  const res = await waitTrainingExplanation(qid);
+                  return res.explanation;
+                }}
+                onClose={() => navigate('/student/training/errors')}
+              />
+            </div>
+          </div>
         ) : (
           <>
             {/* 答题区与草稿面板并排：草稿占真实空间（不再是浮层遮挡），答题列随之被挤窄 */}

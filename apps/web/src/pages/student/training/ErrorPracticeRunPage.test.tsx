@@ -5,6 +5,7 @@ import ErrorPracticeRunPage from './ErrorPracticeRunPage';
 import {
   bumpTrainingErrorLevels,
   getTrainingExplanations,
+  getTrainingVariations,
   judgeTraining,
   type JudgeResult,
   type TrainingErrorBookEntry,
@@ -24,6 +25,9 @@ import { PointsToast } from '@/components/business/PointsToast';
  * 轻反馈组件 `PointsToast` 一并挂上：它是全站唯一渲染队列的地方，
  * 只断言 store 会漏掉「文案其实没渲染出来」这类问题。
  *
+ * 2026-10-11 增补：结果页变式提示卡——进 result 立即查 pending，仍错>0 且首次为空
+ * 则 8s 补查一次（D7）；查到即渲染 VariationOfferCard。
+ *
  * vitest globals:false —— 必须显式 import + 自己写 afterEach(cleanup)。
  */
 afterEach(() => {
@@ -40,12 +44,14 @@ vi.mock('@/services/api', async (importOriginal) => {
     judgeTraining: vi.fn(),
     bumpTrainingErrorLevels: vi.fn(),
     getTrainingExplanations: vi.fn(),
+    getTrainingVariations: vi.fn(),
   };
 });
 
 const judgeMock = vi.mocked(judgeTraining);
 const bumpMock = vi.mocked(bumpTrainingErrorLevels);
 const explanationsMock = vi.mocked(getTrainingExplanations);
+const variationsMock = vi.mocked(getTrainingVariations);
 
 const ENTRY: TrainingErrorBookEntry = {
   errorBookId: 9001,
@@ -95,8 +101,10 @@ describe('ErrorPracticeRunPage 发分反馈', () => {
     judgeMock.mockReset();
     bumpMock.mockReset();
     explanationsMock.mockReset();
+    variationsMock.mockReset();
     bumpMock.mockResolvedValue(undefined);
     explanationsMock.mockResolvedValue({ explanations: {} });
+    variationsMock.mockResolvedValue({ variations: [] });
     sessionStorage.setItem('training:errors', JSON.stringify([ENTRY]));
   });
 
@@ -151,5 +159,125 @@ describe('ErrorPracticeRunPage 发分反馈', () => {
     expect(screen.queryByRole('button', { name: '确认离开' })).toBeNull();
     expect(screen.queryByRole('button', { name: '继续答题' })).toBeNull();
     expect(await screen.findByText('已回到错题列表')).toBeTruthy();
+  });
+});
+
+describe('ErrorPracticeRunPage 变式提示卡（2026-10-11）', () => {
+  beforeEach(() => {
+    judgeMock.mockReset();
+    bumpMock.mockReset();
+    explanationsMock.mockReset();
+    variationsMock.mockReset();
+    bumpMock.mockResolvedValue(undefined);
+    explanationsMock.mockResolvedValue({ explanations: {} });
+    variationsMock.mockResolvedValue({ variations: [] });
+    sessionStorage.setItem('training:errors', JSON.stringify([ENTRY]));
+  });
+
+  it('有仍错题且查到 pending 变式 → 结果页渲染提示卡', async () => {
+    // 答错（仍错 → bump）后服务端已生成变式
+    judgeMock.mockResolvedValue(judged({ isCorrect: false, pointsAwarded: 0 }));
+    variationsMock.mockResolvedValue({
+      variations: [
+        { variationId: 501, questionId: 88, errorBookId: 9001, text: '变式一', type: 'choice', options: null, difficulty: 1 },
+      ],
+    });
+
+    await answerOnlyQuestion();
+    await screen.findByText('答题结果');
+
+    expect(await screen.findByTestId('variation-offer-slot')).toBeInTheDocument();
+    expect(screen.getByText(/已为本次仍错的错题生成 1 道变式练习/)).toBeInTheDocument();
+  });
+
+  it('全答对（无仍错题）→ 不查变式、不渲染卡', async () => {
+    judgeMock.mockResolvedValue(judged({ isCorrect: true, pointsAwarded: 0 }));
+
+    await answerOnlyQuestion();
+    await screen.findByText('答题结果');
+
+    // 等一拍确认没有补查发生
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(variationsMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('variation-offer-slot')).toBeNull();
+  });
+
+  /**
+   * fake timers 与 waitFor、findBy 系列不兼容（轮询靠 setTimeout 会挂死），
+   * 两个 8s 补查用例全用 getBy/queryBy + advanceTimersByTimeAsync 手动驱动。
+   */
+  const flushFake = async () => {
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+    }
+  };
+
+  it('仍错但首次查询为空（LLM 还在生成）→ 8s 后补查一次，查到即出卡（D7）', async () => {
+    vi.useFakeTimers();
+    try {
+      judgeMock.mockResolvedValue(judged({ isCorrect: false, pointsAwarded: 0 }));
+      variationsMock
+        .mockResolvedValueOnce({ variations: [] }) // 立即查：还没生成完
+        .mockResolvedValueOnce({
+          variations: [
+            { variationId: 501, questionId: 88, errorBookId: 9001, text: '变式一', type: 'choice', options: null, difficulty: 1 },
+          ],
+        }); // 8s 后补查：已落库
+
+      renderPage();
+      fireEvent.click(screen.getAllByRole('radio')[1]);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '提交' }));
+      });
+      await flushFake();
+
+      expect(screen.getByText('答题结果')).toBeTruthy();
+      expect(screen.queryByTestId('variation-offer-slot')).toBeNull();
+      expect(variationsMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000);
+      });
+      await flushFake();
+
+      expect(screen.getByTestId('variation-offer-slot')).toBeTruthy();
+      expect(screen.getByText(/已为本次仍错的错题生成 1 道变式练习/)).toBeTruthy();
+      // 只补查一次（非轮询）
+      expect(variationsMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('8s 补查仍为空 → 静默不渲染（错题本入口是兜底）', async () => {
+    vi.useFakeTimers();
+    try {
+      judgeMock.mockResolvedValue(judged({ isCorrect: false, pointsAwarded: 0 }));
+      variationsMock.mockResolvedValue({ variations: [] });
+
+      renderPage();
+      fireEvent.click(screen.getAllByRole('radio')[1]);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '提交' }));
+      });
+      await flushFake();
+
+      expect(screen.getByText('答题结果')).toBeTruthy();
+      expect(screen.queryByTestId('variation-offer-slot')).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000);
+      });
+      await flushFake();
+
+      expect(screen.queryByTestId('variation-offer-slot')).toBeNull();
+      expect(variationsMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

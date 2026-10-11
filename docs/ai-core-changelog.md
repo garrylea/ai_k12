@@ -8,6 +8,32 @@
 
 ---
 
+## 2026-10-11 · 错题升级变式（PRD §7.10 接线，补齐 P0-3）
+
+spec 依据：PRD §7.10 + API 文档 §5.4（整节重写）+ §9 v4.20。计划：`/Users/lichao/.codebuddy/plans/radiant-forging-curie-90JYTSLr.md`。
+
+### 裁决（用户 2026-10-11 确认）
+
+1. **与补偿套题的区分**（此前两词都叫「变式」易混）：页面上的「相似题专项」= 补偿套题（2026-09-21 已实现，考/练完成后按考点成组抽题）；本次实现的是 **P0-3 错题升级变式**——错题重做**再错升级**（L1→L5）时为该原题生成 2 道变式（PRD 1-2 道取上限）。
+2. **触发范围：仅训练轨**错题重做收尾的 `POST /api/training/bump-error-levels`；主线 CleanupPhase 的 practice 版 bump 不触发。
+3. **判题口径：纯加练完全隔离**（同套题）——不入错题本、不清零原错题、不发分；原错题清零门禁口径不变。
+4. **一次作答即落定（D1）**：判对判错都写 `variation_questions.is_correct` + `answered_at`，**答错不重出**（否则「N 道变式待练」徽章永远清不了零；旧 AI 辅导文档的「直到做对」不采）。原错题下次再错升级自然生成新变式。
+5. **下发 UI：错题本条目「N 道变式待练」入口 + 重做结果页提示卡**（旧 P4.3 页面规格已废止，新定）；提示卡「立即查 + 8s 补查一次」（D7，LLM 生成需时，非轮询）。
+
+### 实现落点
+
+- **DB**：`variation_questions` 加列 `is_correct TINYINT(1) NULL`（NULL=待练）+ `answered_at` + 索引 `idx_vq_student_pending`（迁移 `2026-10-11_variation_answer_columns.sql` 幂等已 apply×2、schema.sql 同步；该表 2026-08 就建好、本期首次启用，零存量数据）。
+- **共享抽取**：`modules/training/variation-question.util.ts`——`toDifficulty`/`toStoredAnswer`/`variationRejectionReason` 从 remediation-generator 原样迁出，套题改引共享版（既有 20 测试全绿）。
+- **生成器**：`VariationGeneratorService.generateForErrorItem`（fire-and-forget + inFlight 进程内去重 + `hasPendingByErrorItem` DB 层去重）；跳过条件：非本人(IDOR)/已清零/孤儿条目/原题下线/空答案/`true_false`（答案归一未实现，防将来静默判错）/无 primary 考点；轻校验拒绝 + **同 content_hash 防呆**（AI 吐回原题）不入库；入库口径与套题一致（剥 isCorrect、choice answer 归一 label、created 才挂 KP）。接线：`TrainingService.bumpErrorLevels` 内逐 id `void generateForErrorItem`（studentId 缺省不触发；「绝不 await」有钉子测试）。
+- **判题**：judge-core 加 `source='variation'` 早退分支（镜像 remediation 隔离分支）；`SOURCE_MODULE.variation = 'training_error_practice'`（不新增 module 枚举）。
+- **端点**（`api/training/variations`，student JWT；两 POST 默认 201）：`GET me`（pending 列表 + **下线题收口** markAnswered(0) 防死计数 + 可选 `errorBookId` 过滤）、`POST answers`（CAS 落定，主观题 isCorrect=null 不落定等自评，**响应无 points 字段**）、`POST self-assess`（刻意不经 judgeCore，镜像套题裁决）。
+- **前端**：`VariationRunPage`（镜像 RemediationRunPage 骨架；`?errorBookId=` 深链；空 pending 静默回错题本；q.n=variationId、提交用 questionId 反查映射）、`VariationOfferCard`（两态，无 generating）、`ErrorPracticeRunPage` 结果页提示卡 + `ErrorPracticePage` 条目入口（stopPropagation 防勾选）。
+
+### 文档与验证
+
+- 文档：API 文档 §4.18 加 3 端点 + §5.4 重写 + §4.10 废弃行补指引 + v4.20；openapi.yaml 3 path + 5 schema（YAML 可解析已验）；UX §5.11（编号排末尾避让 §5.9/§5.10 跨文档引用，§5.7 加互补指引）；学情批清单该行已完成化。
+- 测试：server 新增 util/repo/generator/service+controller/judge-core/training.service 共 7 个测试文件全绿（含既有 remediation-generator 20 例回归钉）；web 新增/增补 5 个测试文件全绿；web `tsc -b`、server `tsc --noEmit` 干净；新改文件配色 token 自检 grep 为 0。全量回归与真库冒烟见后续记录。
+
 ## 2026-10-10 · 词根族排除边复审（5335 词全量重扫）
 
 `vocabulary_roots.py` 的 `EXCLUDE_EDGES` 新增 **47 条**人工审核排除项（2026-10-09 复审：词表扩到 5335 词后全量重扫 463 条同族边逐条过）。典型假阳性三类：人名小写误连（`james`/`peter`/`tony`/`badal`/`billy`）、词源无关的同形前缀（`busy`/`early`/`many`/`topic` 来自拉丁/希腊词干）、族链重排后按新父链需补排的（`importance`/`encounter`）。审查产物流程不变：草稿写 `output/`（gitignore），审完 `--apply` 先清后写 `english_words.root_key/root_affixes`；审核结果固化在 `EXCLUDE_EDGES`（机制见 `docs/superpowers/specs/2026-09-16-english-vocabulary-special-design.md` §3.3 与 `docs/data-refinery-使用手册.md`）。

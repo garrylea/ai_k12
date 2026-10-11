@@ -106,7 +106,7 @@ export interface JudgeCoreQuestionInput {
   subjectId: number;
   questionId: number;        // 题中心：必传（训练题必来自题库）
   studentAnswer: string;
-  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'remediation'
+  source: string;            // 'targeted' | 'error_practice' | 'exam' | 'remediation' | 'variation'
   sourceRefId?: number | null; // 考试传 session_id；practice 沿用现结构不经过此变体
 }
 
@@ -151,6 +151,7 @@ export class JudgeCoreService {
     targeted: 'training_targeted',
     error_practice: 'training_error_practice',
     remediation: 'training_error_practice',
+    variation: 'training_error_practice',
     exam: 'exam',
   };
 
@@ -311,6 +312,18 @@ export class JudgeCoreService {
     //（原错题已按 §7.4 入本，套题内做错不重复记账）。答错仍触发解析缓存（fire-and-forget，
     // 无害）供套题作答反馈复用；掌握度回写保留（finishJudge，派生数据与判题来源无关）。
     if (input.source === 'remediation') {
+      if (!isCorrect) {
+        this.explanationCache.ensureExplanation(q);
+      }
+      const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0 };
+      this.trackAnswer(input.studentId, moduleName, out, q.id, streakKey);
+      return this.finishJudge(input.studentId, out);
+    }
+
+    // 错题升级变式（PRD §7.10，2026-10-11）：纯加练完全隔离——不入错题本、不清零原错题、
+    // 不发 error_fix（用户裁决，与补偿套题同口径）。答错仍触发解析缓存（无害，作答反馈复用）；
+    // 掌握度回写保留（finishJudge）。
+    if (input.source === 'variation') {
       if (!isCorrect) {
         this.explanationCache.ensureExplanation(q);
       }
