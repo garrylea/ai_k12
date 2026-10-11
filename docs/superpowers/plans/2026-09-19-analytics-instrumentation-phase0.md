@@ -2647,7 +2647,7 @@ git commit -m "feat(analytics): API 请求拦截器 + ALS 中间件 + 模块接�
 - Consumes: 前面全部任务
 - Produces: 无（验收 + 文档）
 
-- [ ] **Step 1: 端到端验收——真实调用是否落账本且 token 不为 0**
+- [x] **Step 1: 端到端验收——真实调用是否落账本且 token 不为 0**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/server && PORT=3099 node dist/main.js > /tmp/k12_smoke.log 2>&1 & echo $! > /tmp/k12_smoke.pid

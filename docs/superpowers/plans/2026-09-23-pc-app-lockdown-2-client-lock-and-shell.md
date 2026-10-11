@@ -1672,7 +1672,7 @@ git commit -m "feat(desktop): Electron 壳（kiosk / 拦关闭 / 拦逃逸导航
 
 用管理员在家长端建一个学生；在家长端 `/parent/controls` 把「单次学习锁定」设成 **2 分钟**并保存（该页面在计划 3 才做；**若计划 3 未完成**，直接用 SQL 设置：`UPDATE controls SET session_lock_minutes = 2 WHERE student_id = <id>;`）。
 
-- [ ] **Step 2: 逐条冒烟**
+- [x] **Step 2: 逐条冒烟**
 
 | # | 操作 | 期望 |
 |---|---|---|

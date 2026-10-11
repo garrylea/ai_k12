@@ -960,7 +960,7 @@ app.whenReady().then(() => {
 });
 ```
 
-- [ ] **Step 4: 人工验证三条优先级**
+- [x] **Step 4: 人工验证三条优先级**
 
 先确认 web 服务在跑：
 
@@ -1300,7 +1300,7 @@ ipcMain.on('shell:retry-now', () => {
 });
 ```
 
-- [ ] **Step 6: 人工验证（spec §5 冒烟 #2–#6）**
+- [x] **Step 6: 人工验证（spec §5 冒烟 #2–#6）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1491,7 +1491,7 @@ app.whenReady().then(() => {
   });
 ```
 
-- [ ] **Step 5: 人工验证（spec §5 冒烟 #7–#10、#12、#13）**
+- [x] **Step 5: 人工验证（spec §5 冒烟 #7–#10、#12、#13）**
 
 先起服务：
 
@@ -1947,7 +1947,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12 && git diff --stat origin/main --
 
 期望：**输出为空**（本批只动 `apps/desktop/` 与文档）。
 
-- [ ] **跑一遍 spec §5 的全部人工冒烟（#1–#17）**
+- [x] **跑一遍 spec §5 的全部人工冒烟（#1–#17）**
 
 逐条对照 spec `2026-09-26-pc-app-shell-productionization-design.md` §5「人工冒烟」表。
 **#3（等 20 秒本地页仍在、绝不出现 Chromium 错误页）与 #8（杀进程+断网重启仍是 kiosk）是核心两条。**

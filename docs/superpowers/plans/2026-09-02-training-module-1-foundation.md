@@ -994,7 +994,7 @@ const SUBJECTS = [
 
 import 区加 `import TrainingSubjectPage from '@/pages/student/TrainingSubjectPage';`。
 
-- [ ] **Step 4: lint + build + 手动走查**
+- [x] **Step 4: lint + build + 手动走查**
 
 Run: `cd apps/web && npm run lint && npm run build`
 手动：登录学生账号 → 入口页见三卡 → 点训练 → 学科页数学可入、语文英语禁用 → BackButton 回入口。

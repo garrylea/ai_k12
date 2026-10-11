@@ -1929,7 +1929,7 @@ cd ../../apps/web && npm run build && npm run lint
 ```
 Expected: 三条全绿
 
-- [ ] **Step 7: 手测（真机）**
+- [x] **Step 7: 手测（真机）**
 
 用学生账号 `lc1/123456` 走 `训练 → 语文 → 专项 → 古诗文默写`：
 
@@ -2055,7 +2055,7 @@ git commit -m "docs: 同步古诗文专项独立化——API 两份 + 数据库�
 - [x] `chinese_passages` 存在且**无 `question_id`、无外键**；`dictation_passages` 已不存在
 - [x] `questions` 中 `type='poem_dictation'` 行数为 0；`main_error_books(source='dictation')` 行数为 0
 - [x] `apps/server` vitest 全绿、`tools/data-refinery` pytest 全绿、`apps/web` build + lint 通过
-- [ ] 真机走通默写全链路；**答错后 `main_error_books` 无新增**
+- [x] 真机走通默写全链路；**答错后 `main_error_books` 无新增**
 - [x] 迁移脚本重跑幂等
 - [x] API 两份文档端点清单一致（铁律）
 - [x] 全仓 `grep "dictation_passages"` 只剩历史 spec 与迁移脚本

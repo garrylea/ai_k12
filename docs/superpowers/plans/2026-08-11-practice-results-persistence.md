@@ -1743,7 +1743,7 @@ Expected: tsc 通过、全部测试 PASS（含新增 repo/service 用例）。
 Run: `cd apps/web && npm run build`
 Expected: tsc + vite 通过。
 
-- [ ] **浏览器端到端实测（7 条，对应 spec §8）**
+- [x] **浏览器端到端实测（7 条，对应 spec §8）**
 
 1. 答完一张卡 -> 关闭结果表单 -> ✓/✗ 仍显示在卡上（修 bug 验证）。
 2. 刷新页面 / 重新进卡 -> ✓/✗ 仍在（持久化验证）。

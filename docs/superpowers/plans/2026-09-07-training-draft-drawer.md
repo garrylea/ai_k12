@@ -641,7 +641,7 @@ git commit -m "feat(web): 考试答题页右上角草稿图标与抽屉（容器
 Run: `npm run build && npm run lint`
 Expected: tsc 通过、vite 打包成功、无 lint error。
 
-- [ ] **Step 2: 手测（起 dev server 逐项过 spec §5 清单）**
+- [x] **Step 2: 手测（起 dev server 逐项过 spec §5 清单）**
 
 Run: `npm run dev` 后浏览器打开三个 run 页（专项：`/student/training/targeted/run`；错题：配置好错题单后 `/student/training/errors/run`；考试：开一张数学卷后 `/student/training/exam/run/:sessionId`）。逐项确认：
 
@@ -664,7 +664,7 @@ Run: `npm run dev` 后浏览器打开三个 run 页（专项：`/student/trainin
 
 > 已知可接受行为（本次不做处理）：讲一讲与草稿两个抽屉可同时打开且后渲染者（DraftDrawer，DOM 最后）覆盖前者；DiscussDrawer 打开时盖住右上角草稿图标是预期叠放（图标 DOM 前移后其 X 可点）。若手测发现图标与答题内容在 <920px 宽屏重叠，属次要 UI 问题，记录后另行处理。
 
-- [ ] **Step 3: 收尾提交（若手测有改动）**
+- [x] **Step 3: 收尾提交（若手测有改动）**
 
 若手测中发现并修复了问题，把改动单独提交：
 

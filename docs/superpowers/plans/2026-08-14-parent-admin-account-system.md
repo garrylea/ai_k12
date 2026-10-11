@@ -1747,7 +1747,7 @@ git commit -m "feat(web): 家长端学生账号管理页（建/列表/重置密�
 
 前置：`apps/server` 起 dev（`npm run start:dev`）、`apps/web` 起 dev（`npm run dev`）、MySQL 已跑 Task 1 迁移 + Task 9 seed。
 
-- [ ] **Step 1: 按清单逐项验收**
+- [x] **Step 1: 按清单逐项验收**
 
 1. `admin`/`admin123`（或 .env 设置值）登录 -> 落 `/admin` 占位页，LogoutButton 可退出。
 2. `/register` 注册新手机号 -> 直接落 `/parent/students`（注册即登录）。

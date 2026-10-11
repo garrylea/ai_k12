@@ -1671,7 +1671,7 @@ cd apps/web && npm run lint && npm run build
 ```
 Expected: 通过。
 
-- [ ] **Step 3: 启动后端 + 前端，手测端到端流程**
+- [x] **Step 3: 启动后端 + 前端，手测端到端流程**
 
 启动：
 ```bash
@@ -1699,7 +1699,7 @@ Expected: 全部通过。
 
 Expected: 主线/错题/考试路径行为不变。
 
-- [ ] **Step 5: 最终 commit（如有手测中发现的小修）**
+- [x] **Step 5: 最终 commit（如有手测中发现的小修）**
 
 ```bash
 git status --short

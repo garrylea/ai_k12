@@ -245,7 +245,7 @@ git commit -m "feat(web): 考试试卷列表页（筛选 + 时长选择）"
 
 - [x] **Step 2: ExamResultPage**：mount getExamSession 判 status（非 submitted 踢回 run 页）→ getExamResults → 顶部得分卡（正确数/总数/正确率百分比大字）→ AnswerResultList（items 映射 PracticeQuestion{n: String(questionNo), text} + answers 记录：{isCorrect, method, analysis, studentAnswer: answerText ?? '', failed: method==='failed'}——explanation 并入 analysis 展示：analysis ?? explanation）→ onClose 回 /student/training/exam。
 - [x] **Step 3: 路由注册两条（RequireRole student）。**
-- [ ] **Step 4: lint + build + 手动走查（联调：Task 3 已回填数据；走一遍 选卷→限时做 2 题→手动交卷→结果页；倒计时归零自动交卷可用短时长卷验证）+ Commit**
+- [x] **Step 4: lint + build + 手动走查（联调：Task 3 已回填数据；走一遍 选卷→限时做 2 题→手动交卷→结果页；倒计时归零自动交卷可用短时长卷验证）+ Commit**
 
 ```bash
 git commit -m "feat(web): 考试进行页（倒计时/续考/自动交卷）+ 结果页"
@@ -286,7 +286,7 @@ git commit -m "feat(web): 考试进行页（倒计时/续考/自动交卷）+ �
 ### Task 8: 全链路手动回归 + 收尾
 
 - [x] **Step 1: 三套测试全绿**（server npm test / refinery pytest / web build）。
-- [ ] **Step 2: 手动走查清单**：
+- [x] **Step 2: 手动走查清单**：
   - 主线：课程详情答题（AnswerModal 收敛后）→ 错题清零（CleanupPhase 收敛后）→ 门禁解锁
   - 错题练习：列表筛选（时间/题型/专项）→ 选题 → 做题（选择题显示选项）→ 答对清零联动主线 → 仍错 bump
   - 专项练习：配置（KP 级联）→ 抽题 → 做题带提示 → 结果

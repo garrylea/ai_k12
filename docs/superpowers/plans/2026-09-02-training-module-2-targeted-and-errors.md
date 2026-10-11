@@ -492,7 +492,7 @@ git commit -m "feat(server): 专项练习端点（KP 树 + 随机抽题）"
 
 - [x] **Step 4: TrainingSubjectPage 数学卡导航改 '/student/training/targeted'**（占位的 exam 路由保留——学生从专项页顶部 Tab 或后续考试任务进入考试；本任务在配置页顶栏加「考试」文字链接到 /student/training/exam 占位页，保持可达）。
 
-- [ ] **Step 5: lint + build + 手动走查**（登录 → 训练 → 数学 → 专项配置 → 抽题 → 做题 → 提示按钮 → 结果页）+ Commit
+- [x] **Step 5: lint + build + 手动走查**（登录 → 训练 → 数学 → 专项配置 → 抽题 → 做题 → 提示按钮 → 结果页）+ Commit
 
 ```bash
 git commit -m "feat(web): 专项练习配置页 + 答题页"

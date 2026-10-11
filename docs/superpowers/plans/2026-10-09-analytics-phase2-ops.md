@@ -1885,16 +1885,16 @@ git commit -m "docs(analytics): Phase 2 API/openapi/DB/CLAUDE/changelog 同步"
 
 ### Task 18: 全量回归 + 端到端冒烟 + 合并
 
-- [ ] **Step 1: 双端全量测试**
+- [x] **Step 1: 双端全量测试**
 
 Run: `cd apps/server && npm test && cd ../web && npm test`
 Expected: 全绿（夜间 18:00–06:00 跑 web 会红 `routeTable.test.tsx` 主题用例——既有已知问题，`TZ=America/Los_Angeles npm test` 复跑或白天跑）
 
-- [ ] **Step 2: 构建 + 起服务**（⚠️ build 会覆盖用户 dev server 正在服务的 dist——**先跟用户确认**再 build）
+- [x] **Step 2: 构建 + 起服务**（⚠️ build 会覆盖用户 dev server 正在服务的 dist——**先跟用户确认**再 build）
 
 Run: `cd apps/server && npm run build && node dist/main.js`（独立端口 `PORT=3101`，日志 /tmp，**按 PID 收尾**）
 
-- [ ] **Step 3: curl 冒烟**（学生 JWT 走登录接口取；admin 用 admin 账号）
+- [x] **Step 3: curl 冒烟**（学生 JWT 走登录接口取；admin 用 admin 账号）
 
 ```bash
 # ① 采集：student token
@@ -1913,7 +1913,7 @@ curl -s ":3101/api/admin/analytics/funnel?module=aux_qna" -H "Authorization: Bea
 # ⑥ 判题链路：真做一道主线练习 → behavior_events 出现 answer_submitted（tier=parent, module=mainline）
 ```
 
-- [ ] **Step 4: Commit（如有冒烟修出的补丁）+ 合并准备**
+- [x] **Step 4: Commit（如有冒烟修出的补丁）+ 合并准备**
 
 ```bash
 git checkout main && git merge --no-ff feat/analytics-phase2-ops -m "merge: 埋点 Phase 2 运营面（behavior_events + 采集 + ops 11 端点 + admin 8 页）"

@@ -1832,7 +1832,7 @@ cd /Users/lichao/Downloads/claude/imooc/ai_k12/apps/desktop && npm test && node 
 Expected: 测试全绿；`asar 白名单校验通过（1 个包）`（用的是 Task 3 Step 7 留下的 `--dir` 产物；
 若已清理，先重跑 `./node_modules/.bin/electron-builder --mac --dir` 再校验）。
 
-- [ ] **Step 5: 本机把 spec §5 的人工验收表跑一遍（有屏的那几条）**
+- [x] **Step 5: 本机把 spec §5 的人工验收表跑一遍（有屏的那几条）**
 
 逐条对照 spec §5「人工验收（真机）」，本机能做的先做掉：
 

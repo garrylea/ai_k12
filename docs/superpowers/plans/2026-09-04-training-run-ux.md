@@ -628,7 +628,7 @@ Expected: 均通过。
 Run: `cd apps/server && npm test`
 Expected: 全绿（server 无改动，回归确认）。
 
-- [ ] **Step 3: 浏览器走查（dev server 起着的前提下）**
+- [x] **Step 3: 浏览器走查（dev server 起着的前提下）**
 
 逐项确认：
 - 三个答题页顶部/底部留白舒适；题面 18px。

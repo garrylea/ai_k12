@@ -4363,7 +4363,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 --vertical -e "SHOW COLUMNS FROM study_sessions"
 
 Expected: 第二次执行无报错；计数 `3`。
 
-- [ ] **Step 5: 真机验证（手动）**
+- [x] **Step 5: 真机验证（手动）**
 
 1. 学生端登录，进 `/student/training/targeted/run` 停留 ~90s，切后台 30s 再回来，然后回星图。
 2. 库内确认：

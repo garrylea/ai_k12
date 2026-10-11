@@ -1659,7 +1659,7 @@ result = result.normalize('NFKC');
 
 `apps/web/src/services/api.ts` 的 `LessonCard` 加 `contentMetadata`；`npm --prefix apps/web run build` 通过。
 
-- [ ] **Step 5: 手动验收**
+- [x] **Step 5: 手动验收**
 
 启动前后端，进入一张 practice 卡，点题 -> modal -> 作答 -> 提交 -> 下一题 -> 答题列表 -> 错题解析。
 

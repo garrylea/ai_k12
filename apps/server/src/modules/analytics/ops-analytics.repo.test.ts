@@ -116,6 +116,10 @@ describe('OpsAnalyticsRepository', () => {
     expect(String(sql)).toContain('GROUP BY event');
     // ★裁决：mainline 第三步 = points_awarded 且 module IS NULL 且完课 taskCode
     expect(String(sql)).toContain("module IS NULL AND props->>'$.taskCode' = ?");
+    // AND 优先级高于 OR：多步 OR 组必须整体包在一层括号里，
+    // 否则第 2+ 步逃出 student_id/时间窗守卫（EXPLAIN 留底发现的真 bug）
+    expect(String(sql).replace(/\s+/g, ' ')).toContain('AND ((');
+    expect(String(sql).replace(/\s+/g, ' ')).toContain(')) GROUP BY event');
     // 每步条件拼占位符（event=? + 额外条件），不插值用户输入
     expect(params).toEqual([
       W.fromAt, W.toAt,

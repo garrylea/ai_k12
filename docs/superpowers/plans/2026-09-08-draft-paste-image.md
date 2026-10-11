@@ -564,7 +564,7 @@ git commit -m "feat(web): 草稿白板贴图集成——移动工具/粘贴/拖�
 Run: `cd apps/web && npm run build`
 Expected: `✓ built in ...`（服务跑的是 vite preview，必须重建才可见——见 CLAUDE.md/记忆）
 
-- [ ] **Step 2: 人工走查（用户在浏览器执行，spec §测试 7 条）**
+- [x] **Step 2: 人工走查（用户在浏览器执行，spec §测试 7 条）**
 
 1. 答题页开草稿抽屉 → 截图 Cmd+V → 图片落在可视区中央、宽约 60%，多贴几张级联偏移
 2. 移动工具：拖动图片；四角缩放（等比、≥40px、北/西角锚定对角）；× 删除；Delete 键删除

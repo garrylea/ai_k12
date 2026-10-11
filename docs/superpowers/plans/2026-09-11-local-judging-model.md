@@ -1030,7 +1030,7 @@ Run: `npm run start:dev`（apps/server；实际执行 `node --watch --loader @sw
 
 本地 llama.cpp 在线（`curl -s http://192.168.1.8:12345/v1/models` 有响应）时，用训练判题接口提交一道 `fill_blank`/`calculation` 且答案不等价于标准答案的题（会走 AI 路由），确认返回正常且耗时符合本地推理预期。
 
-- [ ] **Step 3: 本地模型离线时判一题（关键验收）**
+- [x] **Step 3: 本地模型离线时判一题（关键验收）**
 
 停掉本地 llama.cpp（或改 `.env` 的 `LOCAL_LLM_BASE_URL` 指向不可达端口并重启后端），重复 Step 2，确认判题仍成功返回 —— 即回退 `deepseek-v4-flash` 生效。预期多等约 1–3s（重试退避）+ ds 调用时间。
 

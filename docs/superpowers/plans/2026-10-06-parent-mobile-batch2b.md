@@ -880,7 +880,7 @@ git add -A && git commit -m "feat(web): 移动端 AI 对话记录（列表 + 整
 
 `## 2026-10-06 · 家长移动端第二批 B`：三页端点与交互要点；**面板复用决策**（积分页不复写业务逻辑，直接组装桌面五个 `points/*Panel` 组件，草稿守卫接线）；`/uploads/` 图片不过 resolveAsset 的硬注释；WebKit 走查结果。
 
-- [ ] **Step 3: 全量验证 + WebKit 走查**
+- [x] **Step 3: 全量验证 + WebKit 走查**
 
 Run: `cd apps/web && npx vitest run 2>&1 | grep -E "Test Files|Tests " && npx tsc -b && npm run lint 2>&1 | tail -1 && npm run build 2>&1 | tail -1`
 Expected: 全量绿、tsc 0、lint 0 error、build 成功。

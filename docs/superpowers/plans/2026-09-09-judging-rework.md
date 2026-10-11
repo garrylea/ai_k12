@@ -1904,7 +1904,7 @@ mysql -u ai_k12 -pai_k12 ai_k12 -e "SELECT id,is_cleared FROM main_error_books W
 
 （auth 端点路径与响应结构以 `apps/server/src/modules/auth` 实际为准，先 `curl -s http://localhost:3000/api/...` 探测；server 端口同理。）
 
-- [ ] **Step 3: 浏览器过三个结果页**（lc1 账号，5173）
+- [x] **Step 3: 浏览器过三个结果页**（lc1 账号，5173）
 
 - 专项训练选含主观题的知识点开练：主观题提交后出现「对照参考答案，自评这道题」视图，不点按钮点不了下一题；
 - 考试：作答阶段主观题无反馈，交卷后结果页客观题对错 + 主观题自评按钮 + 未自评横幅，自评完横幅消失、刷新后已自评状态保留；

@@ -1500,7 +1500,7 @@ controller 加 4 个端点；`POST chat/stream` 完全仿 `ai.controller.ts` 的
 
 - [x] **Step 2: 实现**（dashboard：`SELECT COUNT(*) FROM parents WHERE deleted_at IS NULL` / `students WHERE deleted_at IS NULL` / `ai_dialogues WHERE created_at >= CURDATE()` / `llm_models WHERE is_enabled=1` + recentParents 前 10；改密：bcrypt.compare 旧密码，错则 `401 1003 旧密码错误`，对则 hash 新密码 update。controller 加 `GET dashboard`、`PATCH password`。`AdminsRepository` 补 `updatePassword`。）
 
-- [ ] **Step 3: 测试过 + 全量绿 + 手测：** admin token 调 dashboard 返回四计数；改密后新密码可登录。**Commit**（`feat(server): 管理台 dashboard + 管理员改密`）
+- [x] **Step 3: 测试过 + 全量绿 + 手测：** admin token 调 dashboard 返回四计数；改密后新密码可登录。**Commit**（`feat(server): 管理台 dashboard + 管理员改密`）
 
 ---
 
@@ -1695,7 +1695,7 @@ AdminLayout 改为 `<AdminNav/> + <main><Outlet/></main>` 结构（data-theme="p
 - [x] ⑧ 管理员 AI 聊天：新建会话选自定义模型 -> 问“今天天气怎么样”正常回答（不受学习边界阻断）-> 刷新页面历史还在；删除会话。
 - [x] ⑨ 改密：错旧密码 1003；正确改密 -> 旧密码失效新密码可登录（改回原密码保持环境干净）。
 - [x] ⑩ 全量回归：server `npm run build && npm test`、web `npm run build && npm run lint` 全绿。
-- [ ] 清理测试数据（测试家长/学生/消息），Commit 修复（如有）：`fix: 管理员中枢端到端验收修复`。
+- [x] 清理测试数据（测试家长/学生/消息），Commit 修复（如有）：`fix: 管理员中枢端到端验收修复`。
 
 ---
 

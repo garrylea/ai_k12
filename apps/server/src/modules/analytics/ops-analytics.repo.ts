@@ -331,6 +331,8 @@ export class OpsAnalyticsRepository {
    * 每步条件 = `event = ?` + 该步额外条件（见 FunnelStepFilter）——
    * mainline 第三步（完课发分）按 ★裁决走 `module IS NULL AND props->>'$.taskCode' = ?`，
    * 所以不能用一条 `module = ?` 一刀切，必须每步独立 OR 分支。
+   * ⚠️ OR 组必须**整体再包一层括号**：AND 优先级高于 OR，不包的话第 2+ 步会逃出
+   * `student_id`/时间窗守卫（EXPLAIN 留底时发现的真 bug，repo 测试钉着括号结构）。
    */
   async funnel(w: OpsWindow, steps: FunnelStepFilter[]): Promise<Map<string, number>> {
     if (steps.length === 0) return new Map();
@@ -341,7 +343,7 @@ export class OpsAnalyticsRepository {
       `SELECT event, COUNT(DISTINCT student_id) AS students
          FROM behavior_events
         WHERE student_id IS NOT NULL AND created_at >= ? AND created_at < ?
-          AND ${stepConds.join(' OR ')}
+          AND (${stepConds.join(' OR ')})
         GROUP BY event`,
       params,
     );

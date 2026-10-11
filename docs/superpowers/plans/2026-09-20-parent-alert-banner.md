@@ -644,7 +644,7 @@ Expected: FAIL（`controller.listUnreadAlerts` 不是函数）。
 Run: `cd apps/server && npx vitest run src/modules/parent-insights/`
 Expected: PASS。
 
-- [ ] **Step 10: 启动冒烟（真库验证端点）**
+- [x] **Step 10: 启动冒烟（真库验证端点）**
 
 Run: `cd apps/server && npm run build && node dist/main.js`（后台起），然后：
 
@@ -1146,7 +1146,7 @@ Expected: 全部 PASS（72+ 文件）。
 Run: `cd apps/web && npm run build`
 Expected: 构建成功。
 
-- [ ] **Step 6: 端到端手工验证（真浏览器）**
+- [x] **Step 6: 端到端手工验证（真浏览器）**
 
 1. `services.sh` 或 dev 起前后端；
 2. 学生端（lc1/123456）进任意学习页 → 切走 tab；

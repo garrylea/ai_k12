@@ -204,7 +204,7 @@ cd apps/server && npm test && npm run build
 
 Expected: 全绿（原 478 个 + 本次不新增用例、仅加断言），build 干净。
 
-- [ ] **Step 9: 真库验证门禁生效**
+- [x] **Step 9: 真库验证门禁生效**
 
 ```bash
 cd apps/server && npx tsx src/scripts/seed-dictation-fixture.ts
@@ -1886,7 +1886,7 @@ cd tools/data-refinery && python src/dictation_cli.py --load --book "九年级/�
 
 Expected: 打印 `inserted=N, updated=M, passages_upserted=N+M`。
 
-- [ ] **Step 4: 真库验收（三条）**
+- [x] **Step 4: 真库验收（三条）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1943,7 +1943,7 @@ cd tools/data-refinery && python src/toc_parse_cli.py --source smartedu --subjec
 cd tools/data-refinery && python src/dictation_cli.py --all --book "九年级/下册" --term 下册
 ```
 
-- [ ] **Step 4: 真库验收**
+- [x] **Step 4: 真库验收**
 
 ```bash
 MYSQL_PWD=ai_k12 mysql -u ai_k12 ai_k12 -e "SELECT semester, COUNT(*) AS 篇目, SUM(memorize_required) AS 必背 FROM dictation_passages GROUP BY semester;"
@@ -2302,7 +2302,7 @@ cd tools/data-refinery && python -m pytest -q
 
 Expected: 全绿。**若有既有用例失败，先判断是「签名变化需同步调用」还是「行为被改坏」**——后者必须修实现，不许改断言。
 
-- [ ] **Step 8: 真数据端到端验语文目录（本任务的验收核心）**
+- [x] **Step 8: 真数据端到端验语文目录（本任务的验收核心）**
 
 ```bash
 cd tools/data-refinery && python src/toc_parse_cli.py --source smartedu --subject 语文 --publisher 统编版 --grade 九上

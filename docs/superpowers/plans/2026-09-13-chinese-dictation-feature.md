@@ -3019,7 +3019,7 @@ git commit -m "feat(web): 训练学科页开放语文并接入语文专项入口
 - Consumes: 全部前序任务
 - Produces: 三端点写入两份 API 文档；`docs/ai-core-changelog.md` 变更记录
 
-- [ ] **Step 1: 端到端手测（含数学回归）**
+- [x] **Step 1: 端到端手测（含数学回归）**
 
 启动后端与前端：
 

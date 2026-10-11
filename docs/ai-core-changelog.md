@@ -8,13 +8,34 @@
 
 ---
 
+## 2026-10-11 · 埋点 Task 18 收口 + funnel OR 分支括号 bug 修复
+
+### Task 18 收口（浏览器走查用户完成 + DB 侧复核）
+
+- 浏览器侧：用户确认漏斗/模块页/Token 页显示正确。
+- DB 侧复核：`behavior_events` module 维度真实落库（mainline/page_view 2026-10-10、training_error_practice/self_assess_answered 2026-10-11）；`llm_call_logs` 新数据全部带 module（training 477/2681、admin 69/31 tokens），123 行 `module=NULL` 是列加入前的存量、属预期；token 记数正常（NULL=量不到口径未被破坏）。漏斗形状靠真库继续积累。
+
+### funnel OR 分支括号 bug（EXPLAIN 留底时发现，已修复）
+
+- **bug**：`ops-analytics.repo.ts` 的 funnel SQL 拼成 `WHERE 守卫 AND (step1) OR (step2) OR (step3)`——SQL 里 AND 优先级高于 OR，**第 2+ 步分支逃出 `student_id IS NOT NULL` 与时间窗守卫**，全部历史的答题/发分事件都会计入漏斗第 2/3 步（跨窗去重 → 虚高）。EXPLAIN 前后留底（主库实测）：修复前 Filter 树为 `(guard AND step1) OR (step2) OR (step3)`；修复后 `student_id is not null AND ((step1) OR (step2) OR (step3))`，且 `idx_be_module_time` 的 index condition 每个分支都带时间窗。
+- **修复**：OR 组整体再包一层括号（一行改动）+ repo 测试新增括号结构断言（`AND ((`…`)) GROUP BY event`）+ 函数注释写明为什么必须包。
+- **为什么单测没拦住**：原测试只钉了参数数组与 SQL 片段，没钉括号结构——「测试断言与设计冲突时测试错」此条补上后全量绿（171 文件 / 2231 测试）。
+- ⚠️ 该修复在 `apps/server` 源码里，**运行中的 dev server（dist）要重新 build/restart 才生效**（涉及 :3001，已向用户披露）。
+
+### 其余收尾（用户 2026-10-11 裁决）
+
+- 30 份计划的人工走查/冒烟/真库验证项打勾 48 项（「其余人工走查都已经做」）；`2026-09-11-qwen38-multimodal.md` Task 7 五项**保持未勾**——当时裁决是「手测不需要做」，属关闭非完成，要不要一并勾由用户定。
+- 支付真渠道人工验收：**明确不用做**（真渠道接入留待正式上线另行立项）。
+
+---
+
 ## 2026-10-11 · 数据清理：DEV-FIXTURE 假数据删除 +《十五从军征》(id=114) 补齐 3 句含义
 
 用户裁决：① 清掉 DEV-FIXTURE 假数据；②《十五从军征》按最新版（统编九下、带对话引号的正文）补齐留空的 3 句含义。
 
 ### DEV-FIXTURE 清理（行备份 `tools/db/backups/20261011_dev_fixture_rows.sql`）
 
-- 删 `chinese_passages` id 1,2（静夜思/登鹳雀楼 fixture，memorize_required=1，是默写抽题池仅有的两篇）——**默写抽题池随之清空，待必背标定（全部 memorize_required=0）完成后才有真篇目**。这两行同时载有从 `诗深层含义.md` 导入的逐句含义（小学篇目，真源在 md，不丢）。
+- 删 `chinese_passages` id 1,2（静夜思/登鹳雀楼 fixture，memorize_required=1）。**勘误（同日）**：初稿写「默写池随之清空、待必背标定」是错的——必背标定**早在 2026-09-18 就已完成**（47 行真篇目当日全部置 1），fixture 删除后默写抽题池仍为 **48 篇**（34 诗 + 14 文言文，全初中），不为空。这两行同时载有从 `诗深层含义.md` 导入的逐句含义（小学篇目，真源在 md，不丢）。
 - 删 `english_words` id 9,14（useless/ice-cream fixture）+ `student_word_progress` 两行孤儿进度（student 7）。
 - 前置已查：`special_practice_logs` 对这些 id **零引用**，删除无业务残留。dev 种子脚本（`seed-*-fixture.ts`）保留，仅手动可跑。
 

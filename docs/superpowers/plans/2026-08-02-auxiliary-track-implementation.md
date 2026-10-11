@@ -2990,7 +2990,7 @@ npx vitest run test/auxiliary.e2e-spec.ts
 
 Expected: 测试通过（可能需要 mock 模型调用）。
 
-- [ ] **Step 16.3: 端到端人工验收**
+- [x] **Step 16.3: 端到端人工验收**
 
 1. 启动后端：`cd apps/server && npm run build && node dist/main.js`
 2. 启动前端：`cd apps/web && npm run dev`

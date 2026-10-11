@@ -865,7 +865,7 @@ cd apps/web && npx tsc --noEmit
 
 Expected: 编译通过。
 
-- [ ] **Step 3: 手动功能验证清单**
+- [x] **Step 3: 手动功能验证清单**
 
 启动服务后验证：
 

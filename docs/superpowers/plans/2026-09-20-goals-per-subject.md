@@ -1078,7 +1078,7 @@ git commit -m "docs: 同步 P6.5 按学科目标（含提醒本期不做的批�
 
 **Files:** 无（只跑验证）
 
-- [ ] **Step 1: 真库验证三条新链路（事务 + ROLLBACK，不留脏数据）**
+- [x] **Step 1: 真库验证三条新链路（事务 + ROLLBACK，不留脏数据）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1111,7 +1111,7 @@ ROLLBACK;
 
 Expected: `subject_id=1`（**不被第二次覆盖**）、完课 `1`、目标 `SUM=12/2 行`（5+7 / 两行）。
 
-- [ ] **Step 2: 端到端冒烟（家长端点，真 dev 库）**
+- [x] **Step 2: 端到端冒烟（家长端点，真 dev 库）**
 
 用 1B 用过的方式自签家长 token（`JWT_SECRET` 签 `{sub, role:'parent'}`，家长 1 名下有 student 1/2/4），在独立端口跑：
 
@@ -1131,7 +1131,7 @@ kill $(cat /tmp/smoke_goals.pid); rm -f /tmp/smoke_goals.pid /tmp/p.jwt /tmp/smo
 Expected: `attainment` 返回按学科分组的 items（student 7 只配了数学 → 数学 3 项 + 语文/英语兜底共 11 项）；第一个 PUT 成功、第二个 **400 且提示只适用英语**。
 ⚠️ **这个 PUT 会真写库**（student 7 的英语目标被改成 9）——跑完要么改回 20，要么在报告里说明。**按 PID 收尾**。
 
-- [ ] **Step 3: 门禁 + 人工走查清单**
+- [x] **Step 3: 门禁 + 人工走查清单**
 
 ```bash
 cd apps/server && npm test 2>&1 | tail -3 && npx tsc --noEmit && npm run build

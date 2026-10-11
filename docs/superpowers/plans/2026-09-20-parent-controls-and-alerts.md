@@ -1328,7 +1328,7 @@ git commit -m "docs: 同步家长端「管得住」批（P6.6/P6.9/P6.10 契约�
 
 **Files:** 无（只跑验证）
 
-- [ ] **Step 1: 真库验证四条链路（事务 + ROLLBACK，不留脏数据）**
+- [x] **Step 1: 真库验证四条链路（事务 + ROLLBACK，不留脏数据）**
 
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
@@ -1380,7 +1380,7 @@ ROLLBACK;
 
 Expected: `away_only: away=30 idle=0 active=0`（**只累加 away**、差值基点是 `last_heartbeat_at` 的 30 秒；若得 `away=45` 说明基点写成了 `hidden_since`，是 bug）、`defaults: away=5 idle=15`。
 
-- [ ] **Step 2: 端到端冒烟（真 dev 库，独立端口）**
+- [x] **Step 2: 端到端冒烟（真 dev 库，独立端口）**
 
 自签家长 token（`JWT_SECRET` 签 `{sub, role:'parent'}`）：
 
@@ -1409,7 +1409,7 @@ cd apps/server && npm test 2>&1 | tail -3 && npx tsc --noEmit && npm run build
 cd apps/web && npm test 2>&1 | tail -3 && npx tsc -b && npm run lint && npm run build
 ```
 
-- [ ] **Step 4: 人工走查清单（交付时一并给出）**
+- [x] **Step 4: 人工走查清单（交付时一并给出）**
 
 1. 辅线发一条语文理解题 → **不被拒答**（修复验证，§7.4-1）
 2. 辅线发一条闲聊 → 模型温和引导，且家长端预警中心出现 `off_topic` 预警
