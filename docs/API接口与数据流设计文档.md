@@ -686,8 +686,8 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 | 7 | `GET /cohort-compare` | `{metric, outcome, groups:[{key, students, value}], disclaimer:'correlation-not-causation'}` |
 | 8 | `GET /quality` | `{apiFailureRate, errorCodeDistribution:[{code, count}], llmTimeoutRate, llmFallbackRate, llmAttributionCoverage, questionsWithoutStandardAnswer, kpCoverage:{covered, total, rate}, globalWordErrorRate:{wrong, total, rate}, passageSkipRate}` |
 | 9 | `GET /llm-tokens` | `{groupBy, items:[{key, calls, inputTokens, outputTokens, unavailableCalls}], attributed, unattributed, unavailableCalls}` |
-| 10 | `GET /llm-calls` | `{items:[llm_call_logs 全列], page, pageSize:20, total}` |
-| 11 | `GET /requests` | `{items:[api_request_logs 全列], page, pageSize:20, total}` |
+| 10 | `GET /llm-calls` | `{items:[llm_call_logs 全列（SELECT * 蛇形原列，含 module）], page, pageSize:20, total}` |
+| 11 | `GET /requests` | `{items:[api_request_logs 全列（SELECT * 蛇形原列）], page, pageSize:20, total}` |
 | 12 | `GET /api-usage` | `{items:[{module:string\|null, calls, failedCalls, failureRate:number\|null, avgLatencyMs:number\|null}]}`，按 `calls` DESC |
 
 **逐端点 query 参数表**（「校验与错误码」列的 1001 均指 `code=1001` 的 400）：

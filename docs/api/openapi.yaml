@@ -12384,31 +12384,32 @@ components:
       properties:
         items:
           type: array
-          description: llm_call_logs 全列（SELECT *）
+          description: llm_call_logs 全列（SELECT *，蛇形原列；module=API 第一段，无 HTTP 触发链为 NULL）
           items:
             type: object
             properties:
               id: { type: integer }
-              requestId: { type: string, nullable: true }
-              studentId: { type: integer, nullable: true }
-              dialogueId: { type: integer, nullable: true }
+              request_id: { type: string, nullable: true }
+              student_id: { type: integer, nullable: true }
+              dialogue_id: { type: integer, nullable: true }
               scene: { type: string, nullable: true }
+              module: { type: string, nullable: true, description: API 第一段；无 HTTP 触发链为 NULL }
               subject: { type: string, nullable: true }
               capability: { type: string, nullable: true }
-              modelKey: { type: string, nullable: true, description: 路由条目 key（不是 model_id） }
-              modelId: { type: string, nullable: true }
+              model_key: { type: string, nullable: true, description: 路由条目 key（不是 model_id） }
+              model_id: { type: string, nullable: true }
               provider: { type: string }
               attempt: { type: integer }
-              requestKind: { type: string, enum: [chat, stream] }
-              isFallback: { type: boolean }
+              request_kind: { type: string, enum: [chat, stream] }
+              is_fallback: { type: boolean }
               success: { type: boolean }
-              errorType: { type: string, nullable: true, description: LLMClientError 子类名，如 TimeoutError }
-              httpStatus: { type: integer, nullable: true }
-              inputTokens: { type: integer, nullable: true, description: NULL = 量不到（绝不写 0） }
-              outputTokens: { type: integer, nullable: true, description: NULL = 量不到 }
-              usageSource: { type: string, enum: [provider, estimated, unavailable] }
-              latencyMs: { type: integer }
-              createdAt: { type: string, format: date-time }
+              error_type: { type: string, nullable: true, description: LLMClientError 子类名，如 TimeoutError }
+              http_status: { type: integer, nullable: true }
+              input_tokens: { type: integer, nullable: true, description: NULL = 量不到（绝不写 0） }
+              output_tokens: { type: integer, nullable: true, description: NULL = 量不到 }
+              usage_source: { type: string, enum: [provider, estimated, unavailable] }
+              latency_ms: { type: integer }
+              created_at: { type: string, format: date-time }
         page: { type: integer }
         pageSize: { type: integer, enum: [20] }
         total: { type: integer }
@@ -12418,24 +12419,24 @@ components:
       properties:
         items:
           type: array
-          description: api_request_logs 全列（SELECT *）
+          description: api_request_logs 全列（SELECT *，蛇形原列）
           items:
             type: object
             properties:
               id: { type: integer }
-              requestId: { type: string, nullable: true }
-              actorRole: { type: string, nullable: true }
-              studentId: { type: integer, nullable: true }
+              request_id: { type: string, nullable: true }
+              actor_role: { type: string, nullable: true }
+              student_id: { type: integer, nullable: true }
               method: { type: string }
               route: { type: string, description: 归一化模板（/api/practice/:cardId/results） }
-              rawPath: { type: string, nullable: true, description: 原路径含 id，仅排查用 }
+              raw_path: { type: string, nullable: true, description: 原路径含 id，仅排查用 }
               module: { type: string, nullable: true }
-              statusCode: { type: integer }
-              bizCode: { type: integer, nullable: true, description: 拦截器成功路径不写（NULL）；异常路径才写数值 }
-              errorCode: { type: string, nullable: true }
-              latencyMs: { type: integer }
-              isSse: { type: boolean }
-              createdAt: { type: string, format: date-time }
+              status_code: { type: integer }
+              biz_code: { type: integer, nullable: true, description: 拦截器成功路径不写（NULL）；异常路径才写数值 }
+              error_code: { type: string, nullable: true }
+              latency_ms: { type: integer }
+              is_sse: { type: boolean }
+              created_at: { type: string, format: date-time }
         page: { type: integer }
         pageSize: { type: integer, enum: [20] }
         total: { type: integer }
