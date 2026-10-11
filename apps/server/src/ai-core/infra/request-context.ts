@@ -15,9 +15,28 @@ export interface RequestContext {
   requestId: string | null;
   studentId: number | null;
   role: string | null;
+  /**
+   * HTTP 请求模块（api 第一段，同 api_request_logs.module 值域；spec §2.2）。
+   * 由 RequestContextMiddleware 建上下文时填；ai-core 自身不填。
+   * NULL = 真正无 HTTP 触发链的调用（如启动期任务）；HTTP 触发的 fire-and-forget
+   * （解释缓存 / 标题生成）与 admin/parent 的 HTTP 调用带触发请求的 module
+   * （ALS 随 Promise 链延续），与归属覆盖率口径一致。
+   */
+  module?: string | null;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
+
+/**
+ * 按第二段路径推导模块名（/api/practice/... -> practice）。
+ * 2026-10-10 自 common/interceptors/analytics.interceptor.ts 迁入：ai-core 不能反向
+ * import common（循环依赖，见文件头注释），公共纯函数放 ai-core 两侧共用防漂移。
+ * 定死行为：裸 `/api`、`/api/`、无 /api 前缀 → null。
+ */
+export function moduleFromRoute(path: string): string | null {
+  const m = /^\/api\/([^/?]+)/.exec(path);
+  return m ? m[1] : null;
+}
 
 export function runWithRequestContext<T>(ctx: RequestContext, fn: () => T): T {
   return storage.run(ctx, fn);

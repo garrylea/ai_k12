@@ -12,8 +12,12 @@ const entry = () => ({
   capability: 'judgment', modelKey: 'local', modelId: 'Qwen3.8-27B', provider: 'local',
   attempt: 1, requestKind: 'chat' as const, isFallback: false, success: true,
   errorType: null, httpStatus: null, inputTokens: 120, outputTokens: 8,
-  usageSource: 'provider' as const, latencyMs: 1180,
+  usageSource: 'provider' as const, latencyMs: 1180, module: 'practice',
 });
+
+// COLUMNS 下标（0-based，见实现）：scene=3、module=4、is_fallback=12、success=13、
+// input_tokens=16、output_tokens=17、latency_ms=19（最后一列）。module 在 scene 之后，
+// 与迁移 2026-10-10_llm_call_logs_module.sql 的 AFTER scene 一致。
 
 describe('LlmCallLogsRepository.insertMany', () => {
   it('多行 INSERT 走 pool.query（占位符数量动态，不能用 execute）', async () => {
@@ -23,7 +27,7 @@ describe('LlmCallLogsRepository.insertMany', () => {
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).toContain('INSERT INTO llm_call_logs');
     expect(sql).toContain('student_id');
-    expect(params).toHaveLength(38); // 2 行 × 19 列（列数见实现 COLUMNS）
+    expect(params).toHaveLength(40); // 2 行 × 20 列（列数见实现 COLUMNS）
     expect(params[0]).toBe('r1');
   });
 
@@ -39,9 +43,8 @@ describe('LlmCallLogsRepository.insertMany', () => {
       { ...entry(), usageSource: 'unavailable', inputTokens: null, outputTokens: null },
     ]);
     const [, params] = pool.query.mock.calls[0];
-    // COLUMNS 里的下标：input_tokens=15、output_tokens=16（0-based，见实现 COLUMNS）
-    expect(params[15]).toBeNull();
     expect(params[16]).toBeNull();
+    expect(params[17]).toBeNull();
     expect(params[params.length - 1]).toBe(1180); // latency_ms 是最后一列
   });
 
@@ -49,8 +52,26 @@ describe('LlmCallLogsRepository.insertMany', () => {
     const pool = mockPool();
     await new LlmCallLogsRepository(pool as any).insertMany([{ ...entry(), isFallback: true, success: false }]);
     const [, params] = pool.query.mock.calls[0];
-    expect(params[11]).toBe(1); // is_fallback
-    expect(params[12]).toBe(0); // success
+    expect(params[12]).toBe(1); // is_fallback
+    expect(params[13]).toBe(0); // success
+  });
+
+  it('module 按列名配对写入（紧随 scene，同 api_request_logs.module 值域）', async () => {
+    const pool = mockPool();
+    await new LlmCallLogsRepository(pool as any).insertMany([entry()]);
+    const [sql, params] = pool.query.mock.calls[0];
+    // 列清单里 module 紧随 scene（配对靠 COLUMNS 顺序 + args 同序，SQL 侧可核对）
+    expect(sql).toMatch(/scene, module,/);
+    expect(params[3]).toBe('judgment'); // scene
+    expect(params[4]).toBe('practice'); // module
+  });
+
+  it('module 缺省（后台任务入口未 enrich）写 null，不写 undefined', async () => {
+    const pool = mockPool();
+    const { module: _drop, ...noModule } = entry();
+    await new LlmCallLogsRepository(pool as any).insertMany([noModule as any]);
+    const [, params] = pool.query.mock.calls[0];
+    expect(params[4]).toBeNull();
   });
 });
 

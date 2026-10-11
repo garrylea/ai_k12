@@ -72,7 +72,7 @@ export class AdminAnalyticsController {
     return this.ops.quality(q);
   }
 
-  /** LLM 用量分组：groupBy 白名单 scene|model|day|student 越界 400/1001；unavailable 单列不当 0 求和。 */
+  /** LLM 用量分组：groupBy 白名单 scene|model|day|student|module 越界 400/1001；unavailable 单列不当 0 求和。 */
   @Get('llm-tokens')
   @Roles('admin')
   llmTokens(@Query() q: { groupBy?: string; from?: string; to?: string }) {
@@ -91,5 +91,12 @@ export class AdminAnalyticsController {
   @Roles('admin')
   requests(@Query() q: { path?: string; status?: string; minLatency?: string; page?: string }) {
     return this.ops.requests(q);
+  }
+
+  /** API 请求按模块聚合（M5）：calls/失败率/平均耗时；失败谓词与 /quality 同款；无分页。 */
+  @Get('api-usage')
+  @Roles('admin')
+  apiUsage(@Query() q: { from?: string; to?: string }) {
+    return this.ops.apiUsage(q);
   }
 }

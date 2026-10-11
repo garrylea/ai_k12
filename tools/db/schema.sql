@@ -1393,6 +1393,7 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   -- 可空：探活/管理员对话构造的模型配置没有路由归因，scene 真的未知（见 spec §6.5 第 5 条）；
   -- 账本是批量 INSERT，一个 NULL 不能毒掉整批。
   scene               VARCHAR(30)   DEFAULT NULL,
+  module              VARCHAR(32)   DEFAULT NULL COMMENT 'HTTP 请求模块（api 第一段，同 api_request_logs.module）；无 HTTP 触发链的调用为 NULL',
   subject             VARCHAR(20)   DEFAULT NULL,
   capability          VARCHAR(30)   DEFAULT NULL,
   model_key           VARCHAR(50)   DEFAULT NULL COMMENT '路由条目 key（聚合按它，不按 model_id）',
@@ -1410,6 +1411,7 @@ CREATE TABLE IF NOT EXISTS llm_call_logs (
   latency_ms          INT           NOT NULL,
   created_at          DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY idx_lcl_scene_time    (scene, created_at),
+  KEY idx_lcl_module_time   (module, created_at),
   KEY idx_lcl_model_time    (model_key, created_at),
   KEY idx_lcl_student_time  (student_id, created_at),
   KEY idx_lcl_fallback_time (is_fallback, created_at),

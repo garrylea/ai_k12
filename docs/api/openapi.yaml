@@ -3684,10 +3684,14 @@ paths:
   /admin/analytics/modules:
     get:
       tags: [Admin]
-      summary: 模块横向对比（人数/时长/会话/答题/正确率）
+      summary: 模块横向对比（人数/时长/会话/答题/正确率 + LLM 三列）
       description: >-
         会话侧（study_sessions，status IN ended/abandoned）与答题侧（behavior_events）按 module
         并集合并、按时长倒序；behavior_events 里 module IS NULL 的行不进列表。
+        LLM 三列（2026-10-10）：llm_call_logs 按 module（API 第一段）聚合后在 service 层按映射累加
+        —— practice→mainline、ai→aux_qna、training→training_targeted、exams→exam（仅报表层映射
+        不落数据），其余段（parent/admin/…）与 NULL 不并入任何行；无调用 = 真实 0；
+        token 求和口径与 /llm-tokens 同款（usage_source<>'unavailable' 才计入）。
       operationId: getAdminModules
       parameters:
         - { name: from, in: query, required: false, schema: { type: string, format: date } }
@@ -3710,7 +3714,7 @@ paths:
                             type: array
                             items:
                               type: object
-                              required: [module, students, seconds, sessions, answered, correct, accuracy]
+                              required: [module, students, seconds, sessions, answered, correct, accuracy, llmCalls, llmInputTokens, llmOutputTokens]
                               properties:
                                 module: { type: string }
                                 students: { type: integer }
@@ -3719,6 +3723,9 @@ paths:
                                 answered: { type: integer }
                                 correct: { type: integer }
                                 accuracy: { type: number, nullable: true, description: answered=0 → null }
+                                llmCalls: { type: integer, description: '该模块行并进的 LLM 调用数（API 段映射累加），无调用 = 真实 0' }
+                                llmInputTokens: { type: integer, description: 同上；usage_source<>'unavailable' 才计入求和 }
+                                llmOutputTokens: { type: integer, description: 同上 }
         '400': { description: '窗口参数非法（code=1001）' }
   /admin/analytics/funnel:
     get:
@@ -4002,15 +4009,17 @@ paths:
   /admin/analytics/llm-tokens:
     get:
       tags: [Admin]
-      summary: LLM 用量分组（按 model_key；unavailable 单列）
+      summary: LLM 用量分组（按 model_key 或 module；unavailable 单列）
       description: >-
-        groupBy 白名单 scene/model/day/student 越界 400/1001。聚合按 model_key（路由条目 key，
+        groupBy 白名单 scene/model/day/student/module 越界 400/1001。聚合按 model_key（路由条目 key，
         不是 model_id）；inputTokens/outputTokens 只对 usage_source<>'unavailable' 求和，
         量不到的**单列 unavailableCalls、绝不混进 0 求和**（顶层与 items[].unavailableCalls 并存）；
-        day 分组按 DB 墙上时钟 DATE_FORMAT；key 为 NULL 的组映射 unknown/unattributed。
+        day 分组按 DB 墙上时钟 DATE_FORMAT；key 为 NULL 的组映射 unknown（scene）/unattributed（student）；
+        module 例外：NULL = 无 HTTP 触发链的调用，key 原样输出 null（前端显示「后台任务」），
+        历史行不回填（列自 2026-10-10 上线起才有值）。
       operationId: getAdminLlmTokens
       parameters:
-        - { name: groupBy, in: query, required: true, schema: { type: string, enum: [scene, model, day, student] } }
+        - { name: groupBy, in: query, required: true, schema: { type: string, enum: [scene, model, day, student, module] } }
         - { name: from, in: query, required: false, schema: { type: string, format: date } }
         - { name: to, in: query, required: false, schema: { type: string, format: date } }
       responses:
@@ -4034,7 +4043,10 @@ paths:
                               type: object
                               required: [key, calls, inputTokens, outputTokens, unavailableCalls]
                               properties:
-                                key: { type: string, description: 'NULL 组映射 unknown（scene）/ unattributed（student）' }
+                                key:
+                                  type: string
+                                  nullable: true
+                                  description: 'NULL 组映射 unknown（scene）/ unattributed（student）；groupBy=module 时 NULL 原样输出（无 HTTP 触发链的调用）'
                                 calls: { type: integer }
                                 inputTokens: { type: integer }
                                 outputTokens: { type: integer }
@@ -4095,6 +4107,48 @@ paths:
                       data:
                         $ref: '#/components/schemas/ApiRequestPage'
         '400': { description: 'status/minLatency/page 非法（code=1001）' }
+  /admin/analytics/api-usage:
+    get:
+      tags: [Admin]
+      summary: 各模块 API 调用聚合（次数/失败率/平均耗时）
+      description: >-
+        窗口内 api_request_logs 按 module（API 第一段，与 llm_call_logs.module 同源同值域）
+        GROUP BY，NULL module 自成一组原样返回（前端显示「后台任务」）。
+        失败谓词与 /quality 完全同款：status_code >= 500 OR biz_code IS NOT NULL
+        （成功路径 biz_code 恒 NULL，4xx 且 biz_code NULL 计成功）。
+        failureRate 分母 0 → null；failed=0 → 0 是真实 0。
+        avgLatencyMs = AVG(latency_ms) 取整，组内全缺失 → null；
+        不含 minLatency/status 过滤（排查职责在 /requests）。按 calls DESC，无分页。
+      operationId: getAdminApiUsage
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: 模块 API 调用聚合
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              required: [module, calls, failedCalls, failureRate, avgLatencyMs]
+                              properties:
+                                module: { type: string, nullable: true, description: 'API 第一段原值；NULL = 无 module 归属的请求' }
+                                calls: { type: integer }
+                                failedCalls: { type: integer, description: 'status_code>=500 OR biz_code IS NOT NULL 的行数' }
+                                failureRate: { type: number, nullable: true, description: failedCalls/calls；分母 0 → null }
+                                avgLatencyMs: { type: number, nullable: true, description: AVG(latency_ms) 取整；组内全缺失 → null }
+        '400': { description: '窗口参数非法（code=1001）' }
 
   # DeviceControl —— PC App 学习管控（学生端 3 条，2026-09-23）
   /student/learning-sessions:

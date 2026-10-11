@@ -5,7 +5,7 @@
 ## 1. 口径裁决
 
 1. **module 的值域 = API 第一段**（复用 `moduleFromRoute`：`/api/practice/...` → `practice`），**不做**「API 段 → 学习模块枚举」的映射改写。理由：与 `api_request_logs.module` **同源同值域**（两本账本口径一致、可 JOIN 互查）；学习模块视图（主线/辅线/专项）在报表层做一次映射展示，改映射不动数据。
-   - 值域实测：`practice`(主线课堂) / `ai`(辅线答疑) / `training`(语文英语专项+数学训练) / `exams` / `chinese-passages` / `points` / `parent` / `admin` 等；`NULL` = 后台任务（解释缓存、标题生成——无 HTTP 上下文，与归属覆盖率口径一致）。
+   - 值域实测：`practice`(主线课堂) / `ai`(辅线答疑) / `training`(语文英语专项+数学训练) / `exams` / `chinese-passages` / `points` / `parent` / `admin` 等；`NULL` = 真正无 HTTP 触发链的调用（如启动期任务）；HTTP 触发的 fire-and-forget（解释缓存/标题生成）与 admin/parent 的 HTTP 调用带触发请求的 module（ALS 随 Promise 链延续，与 §2.2.4 归因边界一致）。
    - 展示层映射（仅前端/报表文案，不落数据）：`practice→主线课堂`、`ai→辅线答疑`、`training→专项训练`、`exams→考试`、`NULL→后台任务`。
 2. **A 与 B 的取舍**（已向用户呈报）：不加列的 request_id JOIN 方案会漏掉解释缓存类后台调用（request_id 有意置空）——恰可能是 token 大头，故取加列。
 3. **历史数据不可补**：module 列从上线起才有值，之前的行恒 NULL（报表单列「后台任务/未归因」，不当 0）。
@@ -20,7 +20,7 @@
 -- 写法与 2026-09-20_analytics_ledger.sql 的带守卫 DROP 同套路，方向相反）
 ALTER TABLE llm_call_logs
   ADD COLUMN module VARCHAR(32) DEFAULT NULL
-    COMMENT 'HTTP 请求模块（api 第一段，同 api_request_logs.module）；后台任务为 NULL' AFTER scene,
+    COMMENT 'HTTP 请求模块（api 第一段，同 api_request_logs.module）；无 HTTP 触发链的调用为 NULL' AFTER scene,
   ADD KEY idx_lcl_module_time (module, created_at);
 ```
 
@@ -31,7 +31,7 @@ ALTER TABLE llm_call_logs
 1. **`ai-core/infra/request-context.ts`**：`RequestContext` 加可选字段 `module?: string | null`；把 `moduleFromRoute`（现为 `common/interceptors/analytics.interceptor.ts:26` 的 5 行纯函数）**迁移**到此导出——ai-core 不能反向 import common（循环依赖，文件头注释已有此裁定），公共纯函数放 ai-core 让两侧共用防漂移；`analytics.interceptor.ts` 改 import。
 2. **`RequestContextMiddleware`**（common/middleware）：建 context 时带 `module: moduleFromRoute(req.originalUrl ?? req.url ?? '')`（AuthMiddleware 之后已可用；skip 名单不影响——middleware 先跑）。
 3. **写入点**：`AnalyticsModule` 构造函数的 `setLlmCallSink((entry) => ...)` 回调里，从 ALS 读当前 context 的 module，**enrich 进 entry 再 push**（`{...entry, module: ctx?.module ?? null}`）。ai-core 的 `LlmCallLogEntry` 加可选 `module` 字段（类型层）+ repo INSERT 列清单加列——写入路径仍 fire-and-forget，埋点失败不影响调用。
-4. **归因边界**（与 Phase 0 口径对齐，注释写明）：HTTP 路径的 LLM 调用有 module；后台任务（explanation 缓存 / title / 探活 / admin-chat）ALS 为空 → NULL。explanation 缓存即使带 `meta.studentId` 也无 module（无 HTTP 上下文）。
+4. **归因边界**（与 Phase 0 口径对齐，注释写明）：NULL = 真正无 HTTP 触发链的调用（如启动期任务）；HTTP 触发的 fire-and-forget（解释缓存/标题生成）与 admin/parent 的 HTTP 调用**带触发请求的 module**（ALS 随 Promise 链延续）。
 
 ### 2.3 查询端
 

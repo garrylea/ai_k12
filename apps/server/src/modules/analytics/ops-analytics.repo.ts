@@ -107,10 +107,11 @@ export interface SwitchesRow {
 }
 
 /** llm-tokens 的分组白名单（service 校验后透传；repo 再兜底拒绝）。 */
-export type LlmTokenGroupBy = 'scene' | 'model' | 'day' | 'student';
+export type LlmTokenGroupBy = 'scene' | 'model' | 'day' | 'student' | 'module';
 
 export interface LlmTokenGroupRow {
-  key: string;
+  /** module 分组的 NULL 组（无 HTTP 触发链的后台调用）原样输出 null（前端显示「后台任务」，不落 magic value）。 */
+  key: string | null;
   calls: number;
   inputTokens: number;
   outputTokens: number;
@@ -123,9 +124,26 @@ export interface LlmTokensOverviewRow {
   unavailableCalls: number;
 }
 
+/** /modules 三列 LLM 统计的源行（M4）。module 是 llm_call_logs 原值（API 第一段），NULL = 后台调用。 */
+export interface LlmModuleUsageRow {
+  module: string | null;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface QualityApiRow {
   total: number;
   failures: number;
+}
+
+/** /api-usage 单模块聚合行（M5）。module 为 api_request_logs 原值，NULL = 无 module 归属的请求。 */
+export interface ApiUsageRow {
+  module: string | null;
+  calls: number;
+  failedCalls: number;
+  /** AVG(latency_ms) 原值；组内 latency_ms 全为 NULL 时 MySQL 返回 NULL（service 负责取整与防御）。 */
+  avgLatencyMs: number | null;
 }
 
 export interface ErrorCodeDistRow {
@@ -172,6 +190,7 @@ const LLM_TOKEN_GROUP_EXPRS: Record<LlmTokenGroupBy, string> = {
   model: 'model_key',
   day: "DATE_FORMAT(created_at, '%Y-%m-%d')",
   student: 'student_id',
+  module: 'module',
 };
 
 /**
@@ -555,7 +574,9 @@ export class OpsAnalyticsRepository {
    * 的行求和——量不到（unavailable）的调用单列 `unavailable_calls`，**绝不混进 0 求和**
    * （delta spec §7 表 7：items[].unavailableCalls = 该 key 下量不到的调用数）。
    * day 键用 DATE_FORMAT 直接回字符串（避免 mysql2 把 DATE() 转成本地时区 Date）。
-   * key 为 NULL 的组（scene 未知 / 无归因）映射为 'unknown' / 'unattributed'。
+   * key 为 NULL 的组：student → 'unattributed'、scene/model/day → 'unknown'；
+   * **module 例外**：NULL module（无 HTTP 触发链的后台调用）原样输出 null，
+   * 不转字符串（设计 §2.3：避免 '(background)' magic value 污染数据，前端负责显示「后台任务」）。
    */
   async llmTokenGroups(w: OpsWindow, groupBy: LlmTokenGroupBy): Promise<LlmTokenGroupRow[]> {
     const expr = LLM_TOKEN_GROUP_EXPRS[groupBy];
@@ -573,7 +594,14 @@ export class OpsAnalyticsRepository {
       [w.fromAt, w.toAt],
     );
     return rows.map((r) => ({
-      key: r.grp === null ? (groupBy === 'student' ? 'unattributed' : 'unknown') : String(r.grp),
+      key:
+        r.grp === null
+          ? groupBy === 'student'
+            ? 'unattributed'
+            : groupBy === 'module'
+              ? null
+              : 'unknown'
+          : String(r.grp),
       calls: Number(r.calls),
       inputTokens: Number(r.input_tokens ?? 0),
       outputTokens: Number(r.output_tokens ?? 0),
@@ -600,6 +628,35 @@ export class OpsAnalyticsRepository {
   }
 
   /**
+   * /modules 每行三列 LLM 统计的数据面（M4，设计 §2.3 第 2 条）：窗口内 llm_call_logs
+   * 按 module（API 第一段）GROUP BY，一条 SQL。口径与 llmTokenGroups 同款：
+   * `usage_source <> 'unavailable'` 的 input/output_tokens 才计入求和（量不到不混进 0），
+   * calls 照计不受 usage_source 影响。
+   *
+   * 返回 **API 段原值**（practice/ai/training/exams/parent/.../null），**不在这里做
+   * 学习模块映射**——「API 段 → 学习模块」的映射累加在 service（LLM_API_SEGMENT_TO_MODULE，
+   * 报表层映射不落数据，设计 §5 明确不落库）。
+   */
+  async llmModuleUsage(w: OpsWindow): Promise<LlmModuleUsageRow[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT module,
+              COUNT(*) AS calls,
+              COALESCE(SUM(CASE WHEN usage_source <> 'unavailable' THEN input_tokens END), 0) AS input_tokens,
+              COALESCE(SUM(CASE WHEN usage_source <> 'unavailable' THEN output_tokens END), 0) AS output_tokens
+         FROM llm_call_logs
+        WHERE created_at >= ? AND created_at < ?
+        GROUP BY module`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({
+      module: r.module === null ? null : String(r.module),
+      calls: Number(r.calls),
+      inputTokens: Number(r.input_tokens ?? 0),
+      outputTokens: Number(r.output_tokens ?? 0),
+    }));
+  }
+
+  /**
    * /quality 的 API 失败面：失败口径 = HTTP 5xx 或 biz_code 非 NULL。
    * 写入方语义（analytics.interceptor）：成功 2xx 行 biz_code 恒为 NULL（拦截器读不到最终响应体），
    * 只有异常路径才写数值 biz_code，全表没有 biz_code=0 的行 —— 所以失败判定用
@@ -616,6 +673,35 @@ export class OpsAnalyticsRepository {
     );
     const r = rows[0] ?? {};
     return { total: Number(r.total ?? 0), failures: Number(r.failures ?? 0) };
+  }
+
+  /**
+   * /api-usage 的数据面（M5，设计 §3.1）：窗口内 api_request_logs 按 module GROUP BY，
+   * NULL module 自成一组原样返回（不转字符串，前端显示「后台任务」——与 llm-tokens
+   * 的 module 分组同款纪律）。
+   *
+   * **失败谓词与 qualityApi 逐字符同款**（`status_code >= 500 OR biz_code IS NOT NULL`，
+   * 语义依据见 qualityApi docstring）：repo 测试从 qualityApi 的 SUM(...) 抽谓词做同款断言，
+   * 两处任何一处改动都会被对方抓住。AVG 取整数放在 service（repo 返回账本原貌）。
+   */
+  async apiUsage(w: OpsWindow): Promise<ApiUsageRow[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT module,
+              COUNT(*) AS calls,
+              COALESCE(SUM(status_code >= 500 OR biz_code IS NOT NULL), 0) AS failed_calls,
+              AVG(latency_ms) AS avg_latency_ms
+         FROM api_request_logs
+        WHERE created_at >= ? AND created_at < ?
+        GROUP BY module
+        ORDER BY calls DESC`,
+      [w.fromAt, w.toAt],
+    );
+    return rows.map((r) => ({
+      module: r.module === null ? null : String(r.module),
+      calls: Number(r.calls),
+      failedCalls: Number(r.failed_calls ?? 0),
+      avgLatencyMs: r.avg_latency_ms === null ? null : Number(r.avg_latency_ms),
+    }));
   }
 
   /** /quality 的错误码分布：只统计失败行（5xx 或 biz_code 非 NULL），biz_code NULL 按 5000 归组。 */

@@ -288,6 +288,72 @@ describe('OpsAnalyticsRepository — Task 10（retention / devices / cohort-comp
   });
 });
 
+describe('OpsAnalyticsRepository — M4（/modules 每行三列 LLM 统计数据面）', () => {
+  it('llmModuleUsage：按 module（API 第一段）聚合 llm_call_logs，unavailable 的 token 不计求和（与 /llm-tokens 同款 CASE 口径）', async () => {
+    const pool = poolWithQueries([
+      [
+        { module: 'practice', calls: 5, input_tokens: 200, output_tokens: 80 },
+        { module: null, calls: 2, input_tokens: 0, output_tokens: 0 },
+      ],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.llmModuleUsage(W);
+    expect(r).toEqual([
+      { module: 'practice', calls: 5, inputTokens: 200, outputTokens: 80 },
+      { module: null, calls: 2, inputTokens: 0, outputTokens: 0 },
+    ]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('FROM llm_call_logs');
+    expect(String(sql)).toContain("CASE WHEN usage_source <> 'unavailable' THEN input_tokens END");
+    expect(String(sql)).toContain("CASE WHEN usage_source <> 'unavailable' THEN output_tokens END");
+    expect(String(sql)).toContain('GROUP BY module');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    // 聚合 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容的全仓纪律；mock 池只实现 query）
+    expect(pool.execute).toBeUndefined();
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+});
+
+describe('OpsAnalyticsRepository — M5（/api-usage 按模块聚合数据面）', () => {
+  it('apiUsage：失败谓词与 qualityApi 同款字符串、GROUP BY module、AVG(latency_ms)、窗口参数化', async () => {
+    const pool = poolWithQueries([
+      [
+        { module: 'practice', calls: 10, failed_calls: 2, avg_latency_ms: 123.6 },
+        { module: null, calls: 3, failed_calls: 0, avg_latency_ms: null },
+      ],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.apiUsage(W);
+    expect(r).toEqual([
+      { module: 'practice', calls: 10, failedCalls: 2, avgLatencyMs: 123.6 },
+      { module: null, calls: 3, failedCalls: 0, avgLatencyMs: null },
+    ]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('FROM api_request_logs');
+    expect(String(sql)).toContain('status_code >= 500 OR biz_code IS NOT NULL');
+    expect(String(sql)).toContain('GROUP BY module');
+    expect(String(sql)).toContain('ORDER BY calls DESC');
+    expect(params).toEqual([W.fromAt, W.toAt]);
+    // 聚合 SQL 一律 pool.query（LIMIT ? 与 execute 不兼容的全仓纪律；mock 池只实现 query）
+    expect(pool.execute).toBeUndefined();
+    expect(allSql(pool)).not.toMatch(/CURDATE|NOW\(/);
+  });
+
+  it('apiUsage：失败谓词与 qualityApi 逐字符一致（从 qualityApi 的 SUM(...) 里抽出谓词做同款断言）', async () => {
+    const pool = poolWithQueries([[{ total: 1, failures: 0 }], [{ module: 'ai', calls: 1, failed_calls: 0, avg_latency_ms: 5 }]]);
+    const repo = new OpsAnalyticsRepository(pool);
+    await repo.qualityApi(W);
+    const apiUsage = await repo.apiUsage(W);
+    expect(apiUsage).toEqual([{ module: 'ai', calls: 1, failedCalls: 0, avgLatencyMs: 5 }]);
+    const qSql = String(pool.query.mock.calls[0][0]);
+    const aSql = String(pool.query.mock.calls[1][0]);
+    const m = qSql.match(/SUM\((status_code >= 500 OR biz_code IS NOT NULL)\)/);
+    expect(m).not.toBeNull();
+    // 谓词漂移防护：api-usage 的失败口径必须永远是 quality 的同一串
+    expect(aSql).toContain(`SUM(${m![1]})`);
+  });
+});
+
 describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls / requests 数据面）', () => {
   it('llmTokenGroups(scene)：unavailable 单列（CASE WHEN usage_source <> unavailable），窗口参数化', async () => {
     const pool = poolWithQueries([
@@ -327,6 +393,24 @@ describe('OpsAnalyticsRepository — Task 11（quality / llm-tokens / llm-calls 
     const repo = new OpsAnalyticsRepository(pool);
     await expect(repo.llmTokenGroups(W, 'cost' as never)).rejects.toThrow();
     expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('llmTokenGroups(module)：按 module 列聚合；NULL module 自成一组，key 原样输出 null（不转字符串）', async () => {
+    const pool = poolWithQueries([
+      [
+        { grp: 'practice', calls: 5, input_tokens: 200, output_tokens: 80, unavailable_calls: 0 },
+        { grp: null, calls: 2, input_tokens: 0, output_tokens: 0, unavailable_calls: 2 },
+      ],
+    ]);
+    const repo = new OpsAnalyticsRepository(pool);
+    const r = await repo.llmTokenGroups(W, 'module');
+    expect(r).toEqual([
+      { key: 'practice', calls: 5, inputTokens: 200, outputTokens: 80, unavailableCalls: 0 },
+      { key: null, calls: 2, inputTokens: 0, outputTokens: 0, unavailableCalls: 2 },
+    ]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(String(sql)).toContain('GROUP BY module');
+    expect(params).toEqual([W.fromAt, W.toAt]);
   });
 
   it('llmTokensOverview：attributed/unattributed/unavailableCalls 一条总览', async () => {

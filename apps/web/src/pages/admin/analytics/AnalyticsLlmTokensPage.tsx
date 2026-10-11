@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { getAdminLlmTokens, type LlmTokensData } from '@/services/api';
 import { toast } from '@/components/base';
-import { AnalyticsPageShell, useAdminAnalyticsWindow } from './shared';
+import { AnalyticsPageShell, useAdminAnalyticsWindow, apiModuleLabel } from './shared';
 
 const GROUPS: { key: string; label: string }[] = [
   { key: 'scene', label: '场景' },
   { key: 'model', label: '模型' },
   { key: 'day', label: '日期' },
   { key: 'student', label: '学生' },
+  { key: 'module', label: '模块' },
 ];
 
 /**
@@ -95,8 +96,10 @@ export default function AnalyticsLlmTokensPage() {
               </tr>
             )}
             {data?.items.map((it) => (
-              <tr key={it.key} className="border-b border-gray-200 last:border-b-0" data-testid={`token-row-${it.key}`}>
-                <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>{it.key}</td>
+              <tr key={it.key ?? 'null'} className="border-b border-gray-200 last:border-b-0" data-testid={`token-row-${it.key ?? 'null'}`}>
+                <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>
+                  {groupBy === 'module' ? apiModuleLabel(it.key) : (it.key ?? '后台任务')}
+                </td>
                 <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>{it.calls}</td>
                 <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>{it.inputTokens}</td>
                 <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>{it.outputTokens}</td>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { lastValueFrom, of, throwError } from 'rxjs';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
-import { normalizeRoute, moduleFromRoute, shouldSkipRoute, AnalyticsInterceptor } from './analytics.interceptor.js';
+import { normalizeRoute, shouldSkipRoute, AnalyticsInterceptor, moduleFromRoute } from './analytics.interceptor.js';
 import type { ApiRequestLogEntry } from '../../database/repositories/api-request-logs.repo.js';
 import type { TelemetryService } from '../../modules/analytics/telemetry.service.js';
 
@@ -19,11 +19,11 @@ describe('normalizeRoute', () => {
   });
 });
 
-describe('moduleFromRoute', () => {
+// moduleFromRoute 的表驱动用例已随函数迁至 ai-core/infra/request-context.test.ts（spec §2.2）；
+// 这里保留一条防「re-export 断链」的冒烟。
+describe('moduleFromRoute（re-export 自 ai-core）', () => {
   it('按第二段路径推导 module', () => {
     expect(moduleFromRoute('/api/practice/12/judge')).toBe('practice');
-    expect(moduleFromRoute('/api/training/vocabulary/judge')).toBe('training');
-    expect(moduleFromRoute('/api/admin/models')).toBe('admin');
     expect(moduleFromRoute('/health')).toBeNull();
   });
 });

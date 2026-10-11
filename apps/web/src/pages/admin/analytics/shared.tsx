@@ -159,6 +159,30 @@ export const EVENT_LABELS: Record<string, string> = {
 export const eventLabel = (key: string): string => EVENT_LABELS[key] ?? key;
 
 /**
+ * API 段（moduleFromRoute 值域）→ 中文展示名（LLM 按模块归因 M6，设计 §1.1）。
+ * 与 api_request_logs.module / llm_call_logs.module 同源同值域；全集 12 项，
+ * NULL = 无 HTTP 触发链的调用（历史行恒 NULL）。
+ */
+export const API_MODULE_LABELS: Record<string, string> = {
+  practice: '主线课堂',
+  ai: '辅线答疑',
+  training: '专项训练',
+  exams: '考试',
+  'chinese-passages': '语文专项',
+  points: '积分',
+  parent: '家长端',
+  admin: '管理端',
+  auth: '认证',
+  'study-sessions': '学习会话',
+  track: '埋点',
+  dev: '开发调试',
+};
+
+/** API 段 → 中文展示名；仅 NULL → 「后台任务」，字典外 key 原样返回（与 eventLabel 同策略）。 */
+export const apiModuleLabel = (key: string | null): string =>
+  key == null ? '后台任务' : API_MODULE_LABELS[key] ?? key;
+
+/**
  * 设备五维 key → 中文展示名。key 真源：
  * - platform_class：server `common/utils/user-agent.util.ts`（ipad/iphone/…）；
  * - screen_class / input_type / app_shell：web `analytics/types.ts`；

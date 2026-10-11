@@ -15,7 +15,8 @@ import { StudySessionsService } from './study-sessions.service.js';
 import { AnalyticsController } from './analytics.controller.js';
 import { TrackController } from './track.controller.js';
 import { AnalyticsInterceptor } from '../../common/interceptors/analytics.interceptor.js';
-import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
+import { setLlmCallSink, type LlmCallLogEntry } from '../../ai-core/infra/llm-call-log.js';
+import { getRequestContext, type RequestContext } from '../../ai-core/infra/request-context.js';
 
 /**
  * 埋点模块。
@@ -34,6 +35,17 @@ import { setLlmCallSink } from '../../ai-core/infra/llm-call-log.js';
  * （绝不在本模块重复 provide，否则会分裂实例与去重语义）；`ControlsRepository` 是本地 provider
  * （家长可调的预警灵敏度两个阈值，心跳路径按学生读）。
  */
+/**
+ * LLM 账本的 module enrich（spec §2.2）：ai-core 自身不知道 HTTP 路由，由 Nest 层
+ * 在 sink 里从 ALS 回填。抽成纯函数便于单测（AnalyticsModule 构造器依赖 DI 不可直接 new）。
+ * 归因边界：无 ALS（真正无 HTTP 触发链的调用，如启动期任务）或 context 未带 module → null，
+ * 不当 0。NULL 口径与 Phase 0 归属覆盖率是两个维度：coverage 里解释缓存显式不归属 student_id，
+ * 但 HTTP 触发的调用在 module 维度会带值。
+ */
+export function enrichLlmCallEntry(entry: LlmCallLogEntry, ctx: RequestContext | null): LlmCallLogEntry {
+  return { ...entry, module: ctx?.module ?? null };
+}
+
 @Module({
   imports: [SafetyAlertsModule],
   controllers: [AnalyticsController, TrackController, AdminAnalyticsController],
@@ -65,15 +77,17 @@ export class AnalyticsModule {
     private readonly eventsService: EventsService,
   ) {
     // 回调只在真实 LLM 调用时触发（emitLlmCall），不存在「EventsService 未就绪」的启动顺序问题。
+    // 记账失败不影响调用：emitLlmCall 已 try/catch 吞 sink 异常（llm-call-log.ts 纪律），这里不再包一层。
     setLlmCallSink((entry) => {
-      this.telemetry.llmCalls.push(entry);
-      if (entry.isFallback) {
+      const enriched = enrichLlmCallEntry(entry, getRequestContext());
+      this.telemetry.llmCalls.push(enriched);
+      if (enriched.isFallback) {
         // scene 是 LLM 侧自由取值、不在学生场景白名单里 → 走 props 而不是顶层 scene 列。
         this.eventsService.track({
           event: 'llm_fallback_triggered',
           source: 'server',
-          studentId: entry.studentId ?? null,
-          props: { scene: entry.scene ?? null, toModel: entry.modelKey },
+          studentId: enriched.studentId ?? null,
+          props: { scene: enriched.scene ?? null, toModel: enriched.modelKey },
         });
       }
     });
