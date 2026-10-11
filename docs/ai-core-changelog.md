@@ -1655,3 +1655,7 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 **文档同步（M7）**：API 主稿 §4.28（modules 三列 + 映射口径 / llm-tokens groupBy 加 module / api-usage 新端点条目 + 口径 12，§9 版本 v4.21）+ openapi.yaml（api-usage path、modules 三列、groupBy enum、key nullable）+ 本条。§5.32 端点清单同步补 api-usage。
 
 **遗留**：迁移已 apply、schema_reconcile 收尾重跑属整批完工判据；浏览器真库走查（模块页新表/Token 页 module 维度）随 Task 18 人工验收一并做。
+
+## 2026-10-10 PRD 补立 §7.14「运营端」
+
+运营管理台自 2026-08-18 上线以来从未在 PRD 立节（历史欠账）；借「LLM 按模块归因」批次完成之机一次收录：管理职责（模型配置/账号/消息/管理员 AI 助手/订阅运营/学习管控查看）+ 数据分析（埋点采集层、分析页 8 个、隐私三道锁、本期不做清单），细节指向 API 设计文档 §4.28 与埋点母 spec。运营端能力的产品语义自此以本节为真源。
