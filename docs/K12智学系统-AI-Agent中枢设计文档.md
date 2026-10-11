@@ -1453,6 +1453,8 @@ interface ExplanationRequest {
 | **生成** | Qwen-3.8-Max 生成变式题 | ✅ 实现 | — |
 | **校验** | Gemini-3.1-Pro 校验逻辑自洽性 | ❌ 跳过（MVP 直接信任生成结果） | ✅ 实现 |
 
+> **2026-10-11 实现口径更新**：错题升级变式已接线（API 文档 §5.4 / v4.20），校验采用**程序轻校验**（题干/答案非空、choice 恰一个正确项、答案与正确项一致、与原题同 content_hash 拒收——与补偿套题 AI 补题共享同一套 util），**不是**上表 P1 的 LLM Validator；LLM 级校验仍属后续可选增强。触发方 = `POST /api/training/bump-error-levels` 内 fire-and-forget（无独立 `/api/ai/variation` HTTP 端点）。
+
 #### 4.4.3 变式类型
 
 | 类型 | 操作 | 示例 |

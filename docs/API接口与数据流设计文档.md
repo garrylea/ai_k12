@@ -272,7 +272,7 @@
 | POST | `/api/ai/hint` | 生成下一步提示 | MVP |
 | POST | `/api/ai/explain` | 生成讲解/重讲 | MVP |
 | POST | `/api/ai/grade` | 主观题按步骤给分 | MVP |
-| POST | `/api/ai/variation` | 生成变式题 | MVP |
+| POST | `/api/ai/variation` | 生成变式题（**无独立 HTTP 端点、从未实现**：`VariationCapability` 仅内部使用——补偿套题 AI 补题 + 错题升级变式（§5.4，由 bump-error-levels 内 fire-and-forget 触发）。独立端点留待有直接调用需求时再评估） | MVP（本期未实现） |
 | POST | `/api/ai/handwriting/transcribe` | 手写识别转写（语文专项手写输入），见 §4.27 | MVP |
 | POST | `/api/ai/report` | 生成学情报告内容 | MVP（本期未实现） |
 | POST | `/api/ai/anomaly/detect` | 内部：输入分类（学习/闲聊/异常） | P1 |
