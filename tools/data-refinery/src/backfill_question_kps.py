@@ -1,13 +1,13 @@
 """一次性回填：用 LLM 给题库每题标 1-3 个知识点（question_knowledge_points，role='primary'）。
 
 流程（main，镜像 backfill_practice_questions.py）：
-1. 加载 KP 白名单（knowledge_points，subject_id=1 即数学）。
-2. SELECT 未标注的数学题（LEFT JOIN question_knowledge_points qkp ... IS NULL，
-   且 q.subject_id=1 与白名单学科一致——库中含化学等他科题，不限定会把数学
+1. 加载 KP 白名单（knowledge_points，按 --subject 的学科过滤；默认 math）。
+2. SELECT 未标注的本学科题（LEFT JOIN question_knowledge_points qkp ... IS NULL，
+   且 q.subject_id 与白名单学科一致——库中含他科题，不限定会把本科
    KP 错标到他科题上）——幂等，已有 qkp 记录的题不再处理。
 3. 每批 10 题调 LLM（prompt 附白名单 id+name 清单 + 每题 qid/题面截断 500 字），
    要求输出 {"items": [{"qid": 123, "kps": [1, 17]}]}，按 qid 对回每题
-   （LLM 漏答/输出非法的题记失败，可重跑补齐）。
+   （LLM 漏答/输出非法的题记失败，可重跑补齐）。语文用 question_kps_chinese 提示词。
 4. 白名单校验（parse_batch_response 内过滤）后 INSERT IGNORE 写入
    （question_knowledge_points 有 uniq_qkp_q_kp 唯一键，重复执行不插重）。
 5. 打印统计：标注数 / 失败题 id 清单。
@@ -15,7 +15,9 @@
 纯函数（可测，LLM 不参与）：parse_kp_response / parse_batch_response /
 build_user_message / _filter_kps。LLM 与 DB 只出现在 main。
 
-用法：cd tools/data-refinery && python src/backfill_question_kps.py
+用法：cd tools/data-refinery
+    python src/backfill_question_kps.py                  # 数学（默认）
+    python src/backfill_question_kps.py --subject chinese
 """
 
 import json
@@ -194,9 +196,12 @@ def main():
     from llm import create_llm_client
 
     # --limit N：小样本验证（如 --limit 5 先验证标注质量再全量跑）
+    # --subject：学科 code（默认 math；语文 chinese 需先跑语文 KP 种子迁移）
     parser = argparse.ArgumentParser(description="题目 KP 标注回填")
     parser.add_argument("--limit", type=int, default=None,
                         help="只标注前 N 题（验证质量用；缺省全量）")
+    parser.add_argument("--subject", default="math",
+                        help="学科 code（默认 math；语文用 chinese）")
     args = parser.parse_args()
 
     cfg = RefineryConfig.from_env()
@@ -214,7 +219,9 @@ def main():
         thinking=cfg.llm_thinking,
         enable_cache=cfg.llm_enable_cache,
     )
-    system_prompt = _load_prompt("question_kps")
+    system_prompt = _load_prompt(
+        "question_kps_chinese" if args.subject == "chinese" else "question_kps"
+    )
 
     # DB 连接（与 DbLoader.__init__ 同款 pymysql.connect）
     conn = pymysql.connect(
@@ -226,20 +233,29 @@ def main():
         charset="utf8mb4",
     )
     try:
+        # 0. 学科 code -> id（--subject，默认 math）
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name FROM subjects WHERE code = %s", (args.subject,))
+            row = cur.fetchone()
+        if not row:
+            print(f"[error] 未知学科 code={args.subject!r}", flush=True)
+            return
+        subject_id, subject_name = row
+
         # 1. KP 白名单
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, name FROM knowledge_points WHERE subject_id = %s",
-                (SUBJECT_ID_MATH,),
+                (subject_id,),
             )
             whitelist = {row[0]: row[1] for row in cur.fetchall()}
         if not whitelist:
-            print("[error] knowledge_points 为空（subject_id=1），先跑 "
-                  "generate_kp_tree.py 种子", flush=True)
+            print(f"[error] {subject_name} 的 knowledge_points 为空（subject_id={subject_id}），"
+                  f"先跑对应 KP 种子迁移", flush=True)
             return
 
-        # 2. 幂等：只取无 qkp 记录的数学题（subject 过滤与白名单一致——
-        #    KP 白名单是数学知识点，库中的化学等他科题不能参与标注）
+        # 2. 幂等：只取无 qkp 记录的本学科题（subject 过滤与白名单一致——
+        #    KP 白名单是本科知识点，他科题不能参与标注）
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT q.id, q.content FROM questions q "
@@ -248,7 +264,7 @@ def main():
                 "WHERE qkp.question_id IS NULL "
                 "  AND q.subject_id = %s "
                 "ORDER BY q.id",
-                (SUBJECT_ID_MATH,),
+                (subject_id,),
             )
             rows = cur.fetchall()
 

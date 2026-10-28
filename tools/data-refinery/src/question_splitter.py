@@ -36,6 +36,14 @@ _DATE_TRAP_RE = re.compile(r'^\s*\d{4}\.\d')
 # 答案关键字（行内搜索）：不匹配单独的"答案"（"试题答案"会误匹配），
 # 只匹配"参考答案"/"答案及评分"/"评分参考"等标题特征
 _ANSWER_KEYWORD_RE = re.compile(r'参考答案|答案及评分|评分参考')
+# 行内粘连的大题标题（OCR 把下一节标题并在上一题题干末尾）：
+# '16.…（100 字左右）四、现代文阅读（共 23分）' -> 题干去掉尾部标题，后续题归「四」
+_INLINE_GROUP_RE = re.compile(
+    r'[（(]?\s*([一二三四五六七八九十]{1,3})、([^。；\n]{2,20}?)[（(]共?\s*\d+\s*分[）)]\s*$')
+# 子小节标题：（一）（共 6 分）/ ## （二）（共 10 分）——材料归属的边界
+_SECTION_HEADER_RE = re.compile(r'^#{0,6}\s*[（(]\s*[一二三四五六七八九十]+\s*[）)]')
+# 材料块标题：材料一 / 材料 1 / ## 材料二
+_MATERIAL_HEAD_RE = re.compile(r'^#{0,6}\s*材料\s*[一二三四五六七八九十\d]')
 
 
 def is_date_trap(line: str) -> bool:
@@ -172,8 +180,9 @@ def parse_group_scores(header: str) -> tuple[str, object | None]:
 
 # 选项标记：(A)/(a)/（A）/（a）
 _OPTION_MARK_RE = re.compile(r'[\(（]([A-Da-d])[\)）]')
-# 裸字母行内标记：'A. 文本'（点后须空格+内容——防 'A、B、C、D' 枚举误切，顿号后无空格）
-_BARE_INLINE_RE = re.compile(r'(?:^|(?<=\s))([A-D])[.．](?=\s*\S)')
+# 裸字母行内标记：'A. 文本'（点后须有内容）。前导不可是英文/数字（排除 '△ABC.'、'1A.' 之类），
+# 但允许紧跟中文标点或括号（语文卷常见 '…的一项是(2分)A.呼之欲出 B.恰到好处'，无空格）。
+_BARE_INLINE_RE = re.compile(r'(?<![A-Za-z0-9])([A-D])[.．](?=\s*\S)')
 # 裸字母竖排行：行首单独 'A' / 'A.' / 'A、'（选项内容/配图在标记行之间）
 _BARE_LINE_RE = re.compile(r'^\s*([A-D])\s*[.、．]?\s*$')
 
@@ -375,6 +384,7 @@ class RawQuestion:
     answer: str = ""                # 答案（答案对齐阶段填入）
     explanation: str | None = None  # 解析（答案对齐阶段填入）
     score: int | None = None        # 每题满分（分组标题解析），无则为 None
+    material_text: str | None = None  # 同节共享材料（语文阅读；attach_material 开启时填）
 
 
 def _strip_main_stem_prefix(line: str) -> str:
@@ -392,12 +402,28 @@ def _strip_answer_prefix(text: str) -> str:
     return re.sub(r'^\s*(解|证明|原式|原不等式组)[：:]\s*', '', text.strip())
 
 
-def split_page(text: str, md_path: Path) -> list[RawQuestion]:
+def split_inline_group_header(text: str) -> tuple[str, str | None]:
+    """拆出行尾粘连的大题标题。
+
+    语文/OCR 常把下一节标题并在上一题题干末尾：
+    '…（100 字左右）四、现代文阅读（共 23分）' -> ('…（100 字左右）', '四')
+    无匹配返回 (原文, None)。
+    """
+    m = _INLINE_GROUP_RE.search(text)
+    if not m:
+        return text, None
+    return text[:m.start()].rstrip(), m.group(1)
+
+
+def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[RawQuestion]:
     """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。
 
     Args:
         text: 试卷 MD 全文（已 strip_chrome + normalize_fullwidth_parens）
         md_path: MD 文件路径（用于诊断日志，本函数不读）
+        attach_material: 是否把「题号之前的小节材料」归到该节每道题（语文阅读必需）。
+            材料按小节（大题标题 / （一）（二）子标题 / 材料N 行）分块，只在该节内共享；
+            默认关闭，数学等学科行为不变。
 
     Returns:
         RawQuestion 列表，按题号顺序
@@ -412,6 +438,28 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
     current_answer_lines: list[str] = []  # 当前累积的答案文本（多行）
     current_answer_n: int | None = None  # 当前答案属于哪个题号
     last_answer_n = 0  # 答案段已见最大题号（守卫：题号必须递增，回退数字是评分细则编号）
+    # 材料分段（attach_material）：scope = 一个大题/子小节/材料块
+    scope_id = 0
+    scope_pending: list[str] = []
+    scope_materials: dict[int, str] = {}
+    scope_has_stem = False
+
+    def _start_scope() -> None:
+        """进入新小节：重置待归属材料。"""
+        nonlocal scope_id, scope_pending, scope_has_stem
+        scope_id += 1
+        scope_pending = []
+        scope_has_stem = False
+
+    def _material_for_new_stem() -> str | None:
+        """首题到来：把此前累积的材料锁定为该节共享材料。"""
+        nonlocal scope_has_stem
+        if not scope_has_stem:
+            text_ = "\n".join(scope_pending).strip()
+            if text_:
+                scope_materials[scope_id] = text_
+            scope_has_stem = True
+        return scope_materials.get(scope_id)
 
     def _flush_answer():
         """把累积的答案塞入对应题。"""
@@ -462,6 +510,8 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
                     questions.append(current)
                     current = None
             current_group_id = gid
+            if attach_material:
+                _start_scope()
             # 解析每题分数（选择/填空'每题N分'统一分，解答题'第X题N分'逐题 map）
             score_kind, score_val = parse_group_scores(line)
             if score_kind == 'unified':
@@ -544,6 +594,35 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
             continue
 
         # 题干区
+        if attach_material and not in_answer_section:
+            # 材料块标题（材料一/材料二…）先判：同一节内连续材料并入同批；跨节时开启新集
+            if _MATERIAL_HEAD_RE.match(line):
+                if scope_has_stem:
+                    if current is not None:
+                        questions.append(current)
+                        current = None
+                    _start_scope()
+                scope_pending.append(line)
+                continue
+            # markdown 小标题（非大题/非部分/非材料标题）：新的材料块
+            # （如「活动概况」「前沿科技体验」）。若本节还没出题，说明仍是同一批材料，
+            # 继续累积（「## 蜘蛛的信」「## 苔藓的回信」同属 (二) 的材料）。
+            if line.lstrip().startswith("#"):
+                if scope_has_stem:
+                    if current is not None:
+                        questions.append(current)
+                        current = None
+                    _start_scope()
+                scope_pending.append(line)
+                continue
+            # 子小节标题（（一）（二）…）：新材料集开始，关闭上一题
+            if _SECTION_HEADER_RE.match(line):
+                if current is not None:
+                    questions.append(current)
+                    current = None
+                _start_scope()
+                continue
+
         if ok:
             if current is not None:
                 questions.append(current)
@@ -554,12 +633,27 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
                 q_score = current_unified_score
             else:
                 q_score = None
+            content = _strip_main_stem_prefix(line)
+            material = _material_for_new_stem() if attach_material else None
+            # 行尾粘连的下一节标题：题干去掉标题，后续题归新分组
+            content, inline_gid = split_inline_group_header(content)
             current = RawQuestion(
                 group_order=n,
                 group_id=current_group_id,
-                content=_strip_main_stem_prefix(line),
+                content=content,
                 score=q_score,
+                material_text=material,
             )
+            if inline_gid:
+                # 行内标题属于下一节：本题（上一节最后一题）到此结束，
+                # 否则后续材料段落会被吞进本题题干
+                questions.append(current)
+                current = None
+                current_group_id = inline_gid
+                current_unified_score = None
+                current_score_map = None
+                if attach_material:
+                    _start_scope()
             continue
 
         if is_sub_stem(line):
@@ -568,7 +662,20 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
             continue
 
         if current is not None:
-            current.content += "\n" + line
+            body, inline_gid = split_inline_group_header(line)
+            if body:
+                current.content += "\n" + body
+            if inline_gid:
+                current_group_id = inline_gid
+                current_unified_score = None
+                current_score_map = None
+                if attach_material:
+                    _start_scope()
+            continue
+
+        # 题号之前的共享材料（语文阅读：材料写在题号前面）
+        if attach_material and not scope_has_stem:
+            scope_pending.append(line)
 
     # 末尾 flush 残留答案 + 残留题
     if in_answer_section:

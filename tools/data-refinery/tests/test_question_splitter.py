@@ -685,3 +685,114 @@ def test_split_page_mixed_half_and_fullwidth_dots():
     assert by_order[1].answer == "A（2 分）"
     assert by_order[2].answer == "B（2 分）"
     assert by_order[3].answer == "C"
+
+
+def test_inline_group_header_split_from_stem():
+    """OCR 把下一节标题粘在题干末尾：题干去掉标题，后续题归新分组。"""
+    text = (
+        "## 三、名著阅读（5 分）\n"
+        "16. 名著题题干（100 字左右）四、现代文阅读（共 23分）\n"
+        "材料一 某段材料\n"
+        "17. 第一题\n"
+        "18. 第二题\n"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert "现代文阅读" not in by_order[16].content
+    assert "100 字左右" in by_order[16].content
+    assert by_order[16].group_id == "三"
+    assert by_order[17].group_id == "四"
+    assert by_order[18].group_id == "四"
+
+
+def test_inline_group_header_on_continuation_line():
+    text = (
+        "## 三、名著阅读（5 分）\n"
+        "16. 名著题题干\n"
+        "续行文字三、语言文字运用（共 10分）\n"
+        "17. 下一题\n"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert "语言文字运用" not in by_order[16].content
+    assert "续行文字" in by_order[16].content
+    assert by_order[17].group_id == "三"
+
+
+def test_attach_material_section_scoped():
+    """attach_material：材料按（一）（二）分块，只归本节题；不跨节污染。"""
+    text = (
+        "## 四、现代文阅读（共 10 分）\n"
+        "（一）（共 5 分）\n"
+        "材料一 甲材料 ![](images/a.jpg)\n"
+        "17. 第一题\n"
+        "18. 第二题\n"
+        "（二）（共 5 分）\n"
+        "材料二 乙材料\n"
+        "19. 第三题\n"
+    )
+    result = split_page(text, Path("test.md"), attach_material=True)
+    by_order = {q.group_order: q for q in result}
+    assert "甲材料" in by_order[17].material_text
+    assert "images/a.jpg" in by_order[17].material_text
+    assert "甲材料" in by_order[18].material_text
+    assert "乙材料" in by_order[19].material_text
+    assert "甲材料" not in by_order[19].material_text
+    # 材料不重复进题干
+    assert "甲材料" not in by_order[17].content
+
+
+def test_attach_material_off_by_default():
+    text = "## 一、选择题\n材料一 甲材料\n1. 第一题\n"
+    result = split_page(text, Path("test.md"))
+    assert result[0].material_text is None
+
+
+def test_material_heads_accumulate_before_first_stem():
+    """材料一/二/三 连续出现时并入同一批（不能各自开新集）。"""
+    text = (
+        "## 四、现代文阅读（共 9 分）\n"
+        "材料一 甲\n"
+        "材料二 乙\n"
+        "材料三 丙\n"
+        "17. 第一题\n"
+        "18. 第二题\n"
+    )
+    result = split_page(text, Path("test.md"), attach_material=True)
+    by_order = {q.group_order: q for q in result}
+    for no in (17, 18):
+        assert "甲" in by_order[no].material_text
+        assert "乙" in by_order[no].material_text
+        assert "丙" in by_order[no].material_text
+
+
+def test_inline_group_header_closes_current_question():
+    """行内标题之后是下一节材料：材料不能被吞进上一题题干。"""
+    text = (
+        "## 三、名著阅读（5 分）\n"
+        "16. 名著题题干四、现代文阅读（共 8 分）\n"
+        "## 材料一\n"
+        "正文段落\n"
+        "17. 第一题\n"
+    )
+    result = split_page(text, Path("test.md"), attach_material=True)
+    by_order = {q.group_order: q for q in result}
+    assert by_order[16].content == "名著题题干"
+    assert "正文段落" not in by_order[16].content
+    assert "正文段落" in by_order[17].material_text
+
+
+def test_split_options_bare_inline_glued_after_punctuation():
+    """语文卷无空格裸字母选项：'…的一项是(2分)A.甲 B.乙 C.丙 D.丁'。"""
+    content = "下列成语使用不恰当的一项是(2分)A.呼之欲出 B.恰到好处 C.条分缕析 D.耳目一新"
+    stem, opts = split_options(content)
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[0]["text"] == "呼之欲出"
+    assert stem.endswith("(2分)")
+
+
+def test_split_options_bare_inline_after_chinese_punctuation():
+    """选项紧跟句号/逗号也不能漏拆（题17/24 同类格式）。"""
+    content = "下列说法不符合文意的一项是。A.甲项。B.乙项。C.丙项。D.丁项。"
+    stem, opts = split_options(content)
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]

@@ -105,6 +105,7 @@ class LabeledQuestion:
     is_complete: bool = True
     completeness_issues: list = None    # ["选项不足4个", "题干截断", ...]
     regenerated: dict = None            # {content, options, material_text, answer} 修复后
+    material_text: str | None = None    # 同节共享材料（切分器按小节归属，语文阅读用）
 
     @classmethod
     def from_raw(cls, q: "RawQuestion") -> "LabeledQuestion":
@@ -115,6 +116,7 @@ class LabeledQuestion:
             answer=q.answer,
             explanation=q.explanation,
             score=q.score,
+            material_text=q.material_text,
             knowledge_points=[],
             suggested_new_kps=[],
             _confirmed_new_kps=[],
@@ -126,6 +128,15 @@ class LabeledQuestion:
 def _format_kp_list(kps: list[dict]) -> str:
     """格式化 KP 列表为 prompt 文本（每行 code + name）。"""
     return "\n".join(f"- {kp['code']} {kp['name']}" for kp in kps)
+
+
+def _render_with_material(q) -> str:
+    """把同节共享材料一并呈现给 LLM（语文阅读题的材料在题号之前，单看题干会误判截断）。"""
+    text = _render_content(q.content)
+    material = (getattr(q, "material_text", None) or "").strip()
+    if material:
+        return f"[同题材料，供判断完整性，不要复述]\n{material}\n\n[本题]\n{text}"
+    return text
 
 
 def _render_content(content: str) -> str:
@@ -235,7 +246,7 @@ class QuestionLabeler:
                 .replace("{{group_order}}", str(q.group_order))
                 .replace("{{group_id}}", q.group_id or "(无)")
                 .replace("{{score}}", str(q.score) if q.score is not None else "(未给)")
-                .replace("{{content}}", _render_content(q.content))
+                .replace("{{content}}", _render_with_material(q))
                 .replace("{{answer}}", q.answer or "(无)")
                 .replace("{{knowledge_points}}", self._kps_text))
 
@@ -245,7 +256,7 @@ class QuestionLabeler:
         for q in batch:
             parts.append(
                 f"## 题 {q.group_order}（分组 {q.group_id or '无'}，满分 {q.score or '未给'}）\n"
-                f"题目：{_render_content(q.content)}\n已对齐答案：{q.answer or '无'}"
+                f"题目：{_render_with_material(q)}\n已对齐答案：{q.answer or '无'}"
             )
         joined = "\n\n".join(parts)
         return (self._prompt.replace("{{knowledge_points}}", self._kps_text)

@@ -802,3 +802,29 @@ class TestExtractCliLessonId:
         self._run(md_root, out_dir, page_results)
         items2 = self._read_jsonl(out_dir, "数学/书/page_002.jsonl")
         assert items2[0]["lesson_id"] == "26.1 反比例函数"
+
+
+def test_is_placeholder_text_guard():
+    """LLM 修复产出的占位说明不得入库（A3 质量防线）。"""
+    from question_extract import is_placeholder_text
+
+    assert is_placeholder_text("【注：此处应填入该题目对应的完整阅读理解文章材料】")
+    assert is_placeholder_text("（此处缺失原文，需根据实际试卷补全）")
+    assert not is_placeholder_text("根据材料一中的图1、图2和相关文字信息，概括结论。")
+    assert not is_placeholder_text("")
+    assert not is_placeholder_text(None)
+
+
+def test_fallback_label_keeps_question():
+    """标注失败兜底：题不丢，题型按选项判定。"""
+    from question_extract import _fallback_label
+    from question_splitter import RawQuestion
+
+    q = RawQuestion(group_order=3, group_id="一", content="下列正确的是 A.甲 B.乙 C.丙 D.丁",
+                    answer="A")
+    lab = _fallback_label(q)
+    assert lab.group_order == 3
+    assert lab.type == "choice"
+    assert lab.difficulty == 2
+    assert lab.answer == "A"
+    assert lab.is_complete is True

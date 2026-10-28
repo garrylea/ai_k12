@@ -60,27 +60,27 @@ def _is_scoring_note(inner: str) -> bool:
 
 
 def _extract_scoring_notes(answer_text: str) -> tuple[str, str]:
-    """把答案里的评分说明括号拆出来。
+    """把答案里的评分说明/评分表拆出来。
 
-    - 答案**末尾**的纯分值括号（'（2 分）'）只剥离，不动正文中间的同形括号（评分表内）
-    - 含评分特征词的括号（'（共 2分。……给分）'）全文剥离
+    - 答案**末尾**的纯分值括号（'（2 分）'）直接丢弃（选择/填空题答案是 `C` 即可，
+      分值没有解析价值；不写进「解析」列避免噪声）
+    - 含评分特征词的括号（'（共 2分。……给分）'）移入「解析」列
+    - 答案主体是评分表（作文评分标准 HTML table）：表整体移入「解析」列，
+      答案只留标题（'评分参考'）
     - 剥离后答案为空时回退原文（宁啰嗦不空）
 
     Returns:
-        (干净答案, 评分说明)。说明之间用换行连接。
+        (干净答案, 解析文本)。说明之间用换行连接。
     """
     notes: list[str] = []
     text = answer_text.strip()
 
     # 1) 末尾纯分值（可连续多个）：'C（2 分）' -> 'C'
-    tail_notes: list[str] = []
     while True:
         m = _TRAILING_SCORE_NOTE_RE.search(text)
         if not m:
             break
-        tail_notes.append(m.group(0).strip())
         text = text[:m.start()].rstrip()
-    notes.extend(tail_notes)
 
     # 2) 带评分特征词的括号（任意位置）
     def _take(m: re.Match) -> str:
@@ -92,8 +92,17 @@ def _extract_scoring_notes(answer_text: str) -> tuple[str, str]:
     cleaned = _PAREN_RE.sub(_take, text)
     cleaned = re.sub(r"\n{2,}", "\n", cleaned)
     cleaned = "\n".join(ln.strip() for ln in cleaned.split("\n") if ln.strip())
+
+    # 3) 评分表答案（作文）：表格及其后说明整体进解析，答案只留标题
+    if "<table" in cleaned:
+        idx = cleaned.find("<table")
+        head = cleaned[:idx].strip() or "评分参考"
+        notes.insert(0, cleaned[idx:].strip())
+        cleaned = head
+        return cleaned, "\n".join(notes)
+
     if not cleaned.strip():
-        # 全是评分说明（如作文评分框架）：保留原文，宁可啰嗦不可空
+        # 全是评分说明：保留原文，宁可啰嗦不可空
         return answer_text.strip(), "\n".join(notes)
     return cleaned.strip(), "\n".join(notes)
 

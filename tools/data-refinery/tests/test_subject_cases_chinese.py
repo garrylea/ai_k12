@@ -52,9 +52,9 @@ SAMPLE = """# 2025 海淀 初三 模拟二
 def test_extract_basic_alignment_and_clean_answer():
     answers = {a.no: a for a in _case(SAMPLE)}
     assert sorted(answers) == [1, 2, 3, 4, 5]
-    # 选择题：答案只留字母，分值进解析
+    # 选择题：答案只留字母，纯分值不进解析（避免「（2 分）」噪声）
     assert answers[1].answer == "C"
-    assert "2 分" in answers[1].explanation
+    assert answers[1].explanation == ""
     # 示例答案：保留正文，评分说明进解析
     assert answers[2].answer.startswith("示例：集知识性")
     assert "给分" in answers[2].explanation
@@ -179,3 +179,17 @@ def test_subject_codes_shared_mapping():
     assert subject_code_for_path(P("化学/初中/second/2025/x-试卷")) == "chemistry"
     # 识别不出回退 math（历史资产路径兼容），不会把语文误判成数学之外的值
     assert subject_code_for_path(P("音乐/初中/second/2025/x-试卷")) == "math"
+
+
+def test_scoring_table_moved_to_explanation():
+    """作文题的评分表整体进解析，答案只留标题。"""
+    text = (
+        "# 卷\n\n1. 第一题\n\n# 参考答案\n\n"
+        "1．评分参考\n"
+        "<table><tr><td>项目等级</td><td>内容(36分)</td></tr></table>\n"
+        "说明：1. 字数不足 600字，每少 50字扣 1分。\n"
+    )
+    answers = {a.no: a for a in _case(text)}
+    assert answers[1].answer == "评分参考"
+    assert "<table" in answers[1].explanation
+    assert "字数不足" in answers[1].explanation
