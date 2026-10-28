@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const { SERVER_URL } = require('./server-url.js');
 const { readServerUrlFromFile } = require('./lib/config-file.js');
 const { resolveServerUrl } = require('./lib/resolve-server-url.js');
@@ -167,9 +168,16 @@ function createWindow() {
   win.loadURL(WEB_URL);
 
   // 连不上 → 本地页 + 探测式重试（spec §4.2）
-  win.webContents.on('did-fail-load', (_event, errorCode, _errorDescription, _url, isMainFrame) => {
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
     if (!isMainFrame) return; // 子资源（图片/CSS）失败不算「连不上」
     if (errorCode === -3) return; // ERR_ABORTED：导航被取消，页面并未失败
+    // ⚠️ 错误码必须落盘：Finder 启动时主进程 stdout 进了黑洞，这是现场唯一能拿到
+    // net::ERR_xxx 的地方（2026-10-13 排查本地网络静默拒绝时补）。
+    const line = `[${new Date().toISOString()}] did-fail-load code=${errorCode} (${errorDescription}) url=${_url}\n`;
+    console.error(`[shell] ${line.trim()}`);
+    try {
+      fs.appendFileSync(path.join(app.getPath('userData'), 'load-error.log'), line);
+    } catch { /* 日志写失败绝不影响主流程 */ }
     showOfflinePage();
     startRetry();
   });

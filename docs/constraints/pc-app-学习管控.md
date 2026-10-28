@@ -111,6 +111,11 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - **mac 产物是 `.pkg` 不是 dmg**（2026-10-07 spec）：Installer.app 不向产物传播 quarantine（实测见
   spec §2），安装零终端；dmg 路线废止的原因是 quarantine 会**静默断掉 App 的局域网访问**
   （App 能启动但永远「暂时连不上学习服务器」，浏览器却正常 —— 别再当网络/代码问题排查）
+- **⚠️ `mac.extendInfo` 必须带 `NSLocalNetworkUsageDescription`**（2026-10-13 事故）：macOS 14.2+
+  （Sequoia 起强制）对缺该声明的 App **静默拒绝局域网连接、授权弹窗都不出现** —— 症状是「Finder
+  启动永远离线页，终端启动却正常」（终端启动的访问归属到终端的权限）、浏览器正常、拨本地网络
+  开关/删 App/重启/重装全无效。纯 IP http 不需要 `NSBonjourServices`。排查时先
+  `plutil -p .app/Contents/Info.plist | grep -i localnetwork` 验包，别再走权限/网络弯路
 - **禁止任何人直接 `electron-builder --mac` 打 pkg**：electron-builder 26.15.3 的 pkg target 在
   未签名 + 双架构单次构建下，两个架构的并行任务共享同一批中间产物（`com.<bundleId>.pkg` /
   `distribution.xml`，文件名不含架构）互踩竞态，**静默**产出装不上 Intel 机器的坏包
