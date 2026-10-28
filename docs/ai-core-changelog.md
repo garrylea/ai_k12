@@ -53,6 +53,13 @@
 
 **裁决（当日）**：作文题不进抽题池，做法=不标 KP（最小改动，试卷入口仍可见）。已移除题27 的全部 `question_knowledge_points`；抽题池现为 26/27 题（题27 除外）。新导入含作文的卷需同样处理——当前无题型字段区分作文，后续可在导入脚本按卷末大题排除，或引入 `essay` 题型。
 
+## 2026-10-12 · 语文专项手写板三项反馈修复（默写/翻译/解释共用 HandwritingPad）
+
+- **线宽加倍**：`HandwritingPad.tsx` 的 `INK_WIDTH` 1 → 2（用户要求线条粗细为原来的 2 倍）。导出倍数仍 4（2880×1440），笔画同步变粗、比例不变。
+- **清空两段式确认**：第一次点「清空」只进入待确认态（按钮变红字「确认清空」，title 提示再点一次），3s 内再点才真清空，超时自动还原；板上一笔都没有时点击无副作用。
+- **笔/橡皮快捷键**：全局 `keydown`，按 `p`（含大写）切笔、`e` 切橡皮；带 Ctrl/Meta/Alt 修饰或焦点在 input/textarea/select/contenteditable 时放行（不干扰打字与 IME 组字）。守卫须先判 `typeof el.closest === 'function'`——事件 target 可能是 window（jsdom 测试踩到）。
+- 测试：`HandwritingPad.test.tsx` 清空用例改两段式 + 新增超时还原/快捷键切换/输入焦点不劫持 3 条；web 全量绿，tsc -b、eslint 干净（lint 全仓 2 个 error 为 `tracker.test.ts`、`MobilePointsPage.test.tsx` 既有遗留，与本次无关）。
+
 ---
 
 ## 2026-10-11 · 埋点 Task 18 收口 + funnel OR 分支括号 bug 修复

@@ -13,8 +13,8 @@ export interface DemoStroke { points: DemoPoint[]; size: number }
 
 const BOARD_W = 720;
 const BOARD_H = 360;
-/** 笔迹线宽（逻辑 px）：1px 细线让小字也能写清晰，一批可容纳更多字（用户实测 3px 太粗，2026-10-08） */
-const INK_WIDTH = 1;
+/** 笔迹线宽（逻辑 px）：2026-10-12 用户要求在 1px 基础上加粗一倍，墨迹更接近真实笔迹观感 */
+const INK_WIDTH = 2;
 const ERASER_HIT_SLOP = 8;
 
 /** 二次贝塞尔平滑渲染（逻辑同 DraftWhiteboard.strokePath，去掉 center 标记分支） */
@@ -81,6 +81,29 @@ const HandwritingPad = forwardRef<
     const toolRef = useRef(tool);
     toolRef.current = tool;
     const drawingStrokeRef = useRef<DemoStroke | null>(null);
+    // 清空两段式确认：第一次点击进入待确认态（按钮变「确认清空」），3s 内再点才真清空，超时自动还原
+    const [confirmingClear, setConfirmingClear] = useState(false);
+
+    useEffect(() => {
+      if (!confirmingClear) return;
+      const timer = window.setTimeout(() => setConfirmingClear(false), 3000);
+      return () => window.clearTimeout(timer);
+    }, [confirmingClear]);
+
+    // 笔/橡皮快捷键：p → 笔，e → 橡皮。焦点在输入类元素上时放行（不干扰正常打字/IME 组字）
+    useEffect(() => {
+      const onKey = (e: KeyboardEvent) => {
+        if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+        const el = e.target as HTMLElement | null;
+        // target 可能是非 Element（如 window），closest 仅在 Element 上可用
+        if (el && typeof el.closest === 'function' && el.closest('input, textarea, select, [contenteditable]')) return;
+        const key = e.key.toLowerCase();
+        if (key === 'p') setTool('pen');
+        else if (key === 'e') setTool('eraser');
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, []);
 
     const themeMode = useThemeStore((s) => s.mode);
 
@@ -210,7 +233,7 @@ const HandwritingPad = forwardRef<
         <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
-            title="笔"
+            title="笔（快捷键 P）"
             onClick={() => setTool('pen')}
             className={`rounded-[var(--radius-button)] px-3 py-1 text-sm ${tool === 'pen' ? 'bg-[var(--brand-600)] text-white' : 'bg-[var(--bg-subtle)] text-[var(--text-primary)]'}`}
           >
@@ -218,7 +241,7 @@ const HandwritingPad = forwardRef<
           </button>
           <button
             type="button"
-            title="橡皮"
+            title="橡皮（快捷键 E）"
             onClick={() => setTool('eraser')}
             className={`rounded-[var(--radius-button)] px-3 py-1 text-sm ${tool === 'eraser' ? 'bg-[var(--brand-600)] text-white' : 'bg-[var(--bg-subtle)] text-[var(--text-primary)]'}`}
           >
@@ -226,15 +249,21 @@ const HandwritingPad = forwardRef<
           </button>
           <button
             type="button"
-            title="清空"
+            title={confirmingClear ? '再点一次确认清空全部笔迹' : '清空'}
             onClick={() => {
+              if (strokesRef.current.length === 0) return;
+              if (!confirmingClear) {
+                setConfirmingClear(true);
+                return;
+              }
+              setConfirmingClear(false);
               strokesRef.current = [];
               notifyCount();
               redraw();
             }}
-            className="rounded-[var(--radius-button)] bg-[var(--bg-subtle)] px-3 py-1 text-sm text-[var(--text-primary)]"
+            className={`rounded-[var(--radius-button)] px-3 py-1 text-sm ${confirmingClear ? 'bg-[var(--error)] text-white' : 'bg-[var(--bg-subtle)] text-[var(--text-primary)]'}`}
           >
-            清空
+            {confirmingClear ? '确认清空' : '清空'}
           </button>
           {toolbarRight != null && <div className="ml-auto flex items-center gap-2">{toolbarRight}</div>}
         </div>
