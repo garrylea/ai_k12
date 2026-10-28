@@ -19,20 +19,12 @@ from answer_merger import maybe_merge_answer_md
 from question_splitter import split_page, split_options
 from question_labeler import QuestionLabeler, LabeledQuestion
 from qr_detect import strip_qr_images
-
-# 中文学科名 -> subject code（与 publish_cli._subject_code_for 一致）
-_SUBJECT_NAME_TO_CODE = {
-    "数学": "math", "语文": "chinese", "英语": "english",
-    "物理": "physics", "化学": "chemistry", "生物": "biology",
-    "历史": "history", "地理": "geography", "道德与法治": "politics",
-}
+from subject_codes import subject_code_for_parts
 
 
 def _subject_code_for(rel_parts: tuple[str, ...]) -> str:
     """从文件相对路径首段（中文学科名）推导 subject code。"""
-    if rel_parts:
-        return _SUBJECT_NAME_TO_CODE.get(rel_parts[0], "math")
-    return "math"
+    return subject_code_for_parts(rel_parts)
 
 
 def _grade_band_for(filename: str) -> str:

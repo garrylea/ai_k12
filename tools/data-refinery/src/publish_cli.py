@@ -19,26 +19,7 @@ from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from image_rewrite import rewrite_item
 from models import ExamQuestion, TextbookCard
-
-# 中文学科名 -> subject code（与 db_loader._subject_code_by_name_fallback 一致）
-_SUBJECT_NAME_TO_CODE = {
-    "数学": "math", "语文": "chinese", "英语": "english",
-    "物理": "physics", "化学": "chemistry", "生物": "biology",
-    "历史": "history", "地理": "geography", "道德与法治": "politics",
-}
-_DEFAULT_SUBJECT_CODE = "math"  # 识别不出学科时回退（兼容旧资产路径）
-
-
-def _subject_code_for(rel_file: Path) -> str:
-    """从文件相对路径首段（中文学科名）推导 subject code。
-
-    rel 形如 ``数学/初中/.../page_001`` 或 ``化学/初中/second/2024/xxx-试卷``，
-    首段即学科。修复前 SUBJECT_CODE 硬编码 "math"，化学等学科资产路径被误标。
-    """
-    parts = rel_file.parts
-    if parts:
-        return _SUBJECT_NAME_TO_CODE.get(parts[0], _DEFAULT_SUBJECT_CODE)
-    return _DEFAULT_SUBJECT_CODE
+from subject_codes import subject_code_for_path as _subject_code_for
 
 
 def parse_args(argv=None):
@@ -123,8 +104,12 @@ def main(argv=None):
     if args.dry_run:
         for p in jsonl_files:
             rel = p.relative_to(extracted_dir).with_suffix("")
-            if _match_source(rel, args.source):
-                print(f"[dry-run] {rel}.jsonl ({_kind_for(rel)})")
+            if not _match_source(rel, args.source):
+                continue
+            # --book 与正式发布同口径（否则预演范围偏大，误导重发布判断）
+            if args.book and args.book not in str(rel):
+                continue
+            print(f"[dry-run] {rel}.jsonl ({_kind_for(rel)})")
         return
 
     # --reconvert：清理匹配文件的 checkpoint + 删除已有 published 文件

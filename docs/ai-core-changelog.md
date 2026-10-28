@@ -8,6 +8,28 @@
 
 ---
 
+## 2026-10-28 · 语文试卷入题库打通 + 答案提取按学科 case 分派
+
+**背景**：首次用真实语文卷（2025 海淀初三二模，`tools/crawler/data/语文/初中/second/2025/`）跑四阶段管线，27 题入库成功（`questions` chinese 0→27、`exam_papers#17`、`paper_questions` 27 行、content_hash 全写入），但答案严重错位：25 题答案为空，题1/题2 的 answer 是作文扣分说明。学生端抽题硬过滤 `answer<>''`，这批题进不了抽题池。
+
+**根因（两个，都在纯 Python 层，与 LLM 无关）**：
+1. `question_splitter` 题号正则只认半角 `.`/`:`，语文参考答案段写作 `1．C（2 分）`（全角 `．` U+FF0E），整段答案行不被识别 → 丢弃/漂移。题干区用半角 `1.` 所以题分得对，只有答案段坏。
+2. 作文评分细则的编号 `1．字数不足600字…` 被当成题号 1，串到第 1 题（这就是错答案的产生路径）。
+
+**修复**：
+- 正则支持全角句点/冒号（`_MAIN_STEM_RE`/`_STEM_PREFIX_RE`/`_INLINE_STEM_RE`/`_has_next_stem`）；答案段题号加**递增守卫**（回退编号=续行）；解析不出题号的表格（作文评分标准表）并入当前题答案而非丢弃。
+- 新增 `src/subject_cases/`（一科一函数：chinese 独立实现，math/english/physics/chemistry/politics 委托 generic）+ `src/answer_extract_cli.py`（试卷 md → 答案文档）+ `src/subject_codes.py`（学科映射唯一化，publish/extract 共用）。语文 case 五步：答案段分离 → 标点归一（仅解析，1:1）→ 题号对齐 → 评分说明拆到解析列 → 空答案留空+issue，全程不调 LLM。
+- `publish_cli` 的学科区分经核实**早已修复**（`_subject_code_for` 按路径首段推导），本次只把映射迁到 `subject_codes.py` 去重，并删除文档里过时的「SUBJECT_CODE 硬编码」遗留条目。
+
+**验收**：`answer_extract_cli` 提取 27/27 题答案（0 issues）→ `answer_importer --doc --paper-id 17` 写入 27 题（`answer_verified=1`）→ DB 复核：题1=`C`、题2=示例答案、无「字数不足」污染；`pytest tools/data-refinery/tests` 1175 passed / 10 skipped。
+
+**踩坑（勿重蹈）**：语文标点归一化**不要映射「、」**——它是中文大题序号分隔符（`三、名著阅读`），归一后 `is_group_header` 失效，大题标题会混进上一题答案（本次实测复现后修正）。
+
+**顺手修复**：`publish_cli --dry-run` 之前不应用 `--book` 过滤（预演列出全库素材，误导管线范围），已与正式发布同口径 + 回归测试。
+
+**遗留**：`db_loader --load-cards` 全量重载已入库教材卡会撞 `uniq_cards_lesson_sort`（既有 bug，与语文无关，本次绕法=单学科临时 input-dir）；语文题进抽题池仍需知识点标定（现有标定脚本硬编码数学白名单）。
+
+
 ## 2026-10-11 · 埋点 Task 18 收口 + funnel OR 分支括号 bug 修复
 
 ### Task 18 收口（浏览器走查用户完成 + DB 侧复核）

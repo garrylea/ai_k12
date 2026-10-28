@@ -609,6 +609,8 @@ card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_mer
 
 把人工或 AI 产出的题目内容回写 `questions` 表：`answer`（答案）、`approach`（解题思路）、`explanation`（详细解析）、`type`（题型）。默认 dry-run 只出 diff 报告，`--apply` 才写入；幂等可重跑。
 
+> **从试卷自动生成答案文档（2026-10-28）**：先跑 `python src/answer_extract_cli.py --file "<试卷 md 相对路径子串>"`，按学科 case 从「参考答案」段提取（纯程序，不调 LLM），产出 `output/answers/<卷名>.md`，再用本文档的 `--doc --paper-id` 回写。语文/数学走各自 case；提取不到的答案留空并记 `output/answer_issues.jsonl`，绝不猜。完整命令见 `docs/data-refinery-管线总结与后续.md` §4。
+
 **输入一：JSONL（推荐，可编程批量）** 每行一条记录：
 
 ```jsonl

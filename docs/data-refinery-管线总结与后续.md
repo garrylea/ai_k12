@@ -1,16 +1,19 @@
 # Data Refinery 管线总结与后续
 
-> 进展截止：2026-07-13。本文是 data-refinery 数据管线的现状总结与后续工作指引，供后续开发参考。
+> 进展截止：2026-10-28。本文是 data-refinery 数据管线的现状总结与后续工作指引，供后续开发参考。
 
 ## 1. 管线概览
 
-四阶段顺序管线 + 一个编排入口，全部在 `tools/data-refinery/`：
+四阶段顺序管线 + 答案提取支线 + 一个编排入口，全部在 `tools/data-refinery/`：
 
 ```
 convert_cli  ->  extract_cli  ->  publish_cli  ->  db_loader_cli
    (MinerU)      (LLM 提取)       (物化图片)      (入库 MySQL)
                                                    ^
                               refinery_cli 串联 publish + db_loader
+
+试卷答案补录（独立支线，可选）：
+answer_extract_cli（按学科 case 提取答案 -> 答案文档）-> answer_importer_cli --doc（回写库）
 ```
 
 | 阶段 | 程序 | 输入 | 输出 | 状态 |
@@ -19,6 +22,8 @@ convert_cli  ->  extract_cli  ->  publish_cli  ->  db_loader_cli
 | 2 extract | `src/extract_cli.py` | `output/md/*.md` | `output/extracted/<stem>.jsonl` | ✅ 跑通（25 文件） |
 | 3 publish | `src/publish_cli.py` | `output/extracted/*.jsonl` | `output/published/<stem>.jsonl` + `output/assets/` | ✅ 跑通（25 + 211 assets） |
 | 4 db_loader | `src/db_loader_cli.py` | `output/published/*.jsonl` | MySQL `ai_k12` | ✅ 跑通（34 cards + 466 questions） |
+| 答案提取 | `src/answer_extract_cli.py` | `output/md/*.md` | `output/answers/*.md`（答案文档） | ✅ 语文首发（2026-10-28） |
+| 答案回写 | `src/answer_importer_cli.py --doc` | 答案文档 + `paper_id` | `questions.answer/explanation`（`answer_verified=1`） | ✅ |
 | 编排 | `src/refinery_cli.py` | - | 串联 publish -> db_loader | ✅ |
 
 DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + schema + subjects seed）。
@@ -48,12 +53,28 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 ### extract（试卷 question）
 - **答案只提取不生成**：从原文"参考答案"按题号提取（选择题填字母、填空填值、解答题填解题过程）；原文无答案填 `""`。**绝不自行推断/计算**（模型答案不可靠，系统另有获取答案机制）。
 - **按题号切分**：同一题号的 (1)(2)(3) 小问合并为一个 item，不拆分。
+- **答案对齐是纯 Python 状态机**（`question_splitter.split_page`），LLM 只标注元数据、不碰答案。
+- **题号正则支持全角句点/冒号**（2026-10-28）：`[.．]` / `[:：]`。语文参考答案段写作 `1．C（2 分）`（全角 `．`），修复前整段不被识别 → 答案丢弃或串题（2025 海淀语文卷题1 曾把作文扣分说明当成答案入库）。
+- **答案段题号必须递增**（2026-10-28）：回退编号当作当前答案续行。语文作文评分细则常写 `1．字数不足600字…`，若不设守卫会串到第 1 题。
+- 无题号/答案的表格（如作文评分标准表）整表并入当前题答案，不丢弃。
 - **JSON 兼容**：`extract.py` 的 `_parse_json_object` 去除 ```` ```json ```` 代码块 + 修复 LaTeX 反斜杠漏转义（`\_`/`\%` 等非法转义补双反斜杠），保留合法 `\n`/`\t`/`\uXXXX`。
 - 跳过 `content` 为 null/空的 item（纯图片片段偶发 null，避免整页失败）。
 
 ### publish
 - 物化图片到 `output/assets/`，路径改写为源相对稳定键（`questions/{subject}/{hash}/{idx}`、`textbooks/{subject}/{hash}/{sort_order}`），填 `content_metadata.images[]` / `options[].image_url`。
-- ⚠️ **遗留 bug**：`SUBJECT_CODE="math"` 硬编码（`publish_cli.py:23,107,110`），化学题资产路径会被误标 `math`。DB 的 subject_id 仍正确（来自 jsonl）。
+- **subject 按素材路径首段推导**（`subject_codes.subject_code_for_path`）：`数学/`->math、`语文/`->chinese、`化学/`->chemistry。映射表唯一维护在 `src/subject_codes.py`（publish / extract / 答案提取共用），识别不出时回退 `math`（历史兼容）。
+
+### 答案提取（按学科 case 分派，2026-10-28）
+两段式，答案只提取不生成、全程纯程序（不调 LLM）：
+
+1. `src/answer_extract_cli.py --file <相对路径子串>`：定位唯一的试卷 md → 按路径首段识别学科 → 调 `subject_cases.get_case(subject)` → 输出 `answer_doc` 规范文档（`# 试卷：<标题>` / `## 题号` / `答案：` / `解析：`）+ `output/answer_issues.jsonl`。
+2. `src/answer_importer_cli.py --doc <文档> --paper-id <id> [--apply]`：按 `(paper_id, question_no)` 回写，语义=缺省不改/非空覆盖/空串不改/幂等/写 `answer_verified=1`。
+
+分派结构（`src/subject_cases/`）：`chinese` 独立实现，`math/english/physics/chemistry/politics` 委托 `generic`（复用 `split_page`，与主管线一致）。新增学科时实现一个 case 函数并登记，未登记学科直接报错（不静默走错流程）。
+
+语文 case 五步：答案段分离 → 标点归一（仅解析，1:1 映射，不回写文本）→ 题号对齐（递增守卫）→ 评分说明拆到「解析」列（纯分值 `（2 分）` 只剥末尾；`（共 2分。…给分）` 全文剥）→ 校验（空答案留空 + issue）。
+
+⚠️ 归一化不要映射「、」：它是中文大题序号分隔符（`三、名著阅读`），归一后 `is_group_header` 失效，大题标题会混进上一题答案。
 
 ### db_loader
 - **subject 归一**：`SUBJECT_ALIASES`（`chem`->`chemistry` 等）-> canonical code -> subjects.id。cards 按 rel_path 学科名查、questions 按 jsonl subject_id 查。
@@ -99,39 +120,46 @@ python src/refinery_cli.py --source all --dry-run
 python src/refinery_cli.py --skip-publish       # 只 db_loader
 python src/refinery_cli.py --skip-load          # 只 publish
 
+# 试卷答案补录（两段式，答案只提取不生成）
+python src/answer_extract_cli.py --file "语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷" --dry-run
+python src/answer_extract_cli.py --file "<同上>"            # -> output/answers/<卷名>.md
+python src/answer_importer_cli.py --doc output/answers/<卷名>.md --paper-id 17          # dry-run 看 diff
+echo yes | python src/answer_importer_cli.py --doc output/answers/<卷名>.md --paper-id 17 --apply
+
 # 测试
-pytest tests/ -q                                # 105 passed
+pytest tests/ -q                                # 1175 passed, 10 skipped
 ```
 
 ## 5. 测试
 
-`tools/data-refinery/tests/`，105 个测试全绿：
-- 单元：extract 解析/escape 修复、db_loader 纯函数（subject 归一、rel_path 解析、中文数字、lesson_id 解析、sort_order 重排）、CLI dry-run/过滤。
+`tools/data-refinery/tests/`，1175 个测试全绿（10 个集成/网络测试默认 skip）：
+- 单元：extract 解析/escape 修复、db_loader 纯函数（subject 归一、rel_path 解析、中文数字、lesson_id 解析、sort_order 重排）、CLI dry-run/过滤、语文答案 case（全角题号/评分说明拆分/空答案不猜）、答案文档渲染与 `parse_answer_doc` 衔接。
 - 集成：db_loader 连真实 ai_k12 库（find-or-create、入库、幂等），每个测试前后清派生表。
 
 ## 6. 已知遗留（按优先级）
 
-1. **`publish_cli` SUBJECT_CODE 硬编码**（化学资产路径误标）--小修。
-2. **`install_mysql.sh` CREATE USER 不重置密码**--小修（改 `CREATE OR REPLACE USER`）。
-3. **题目数据质量**：466 题里多数是 gemma 旧提示词抽的（答案有捏造、解答题被拆分），需用新提示词 + deepseek 重抽，再 `refinery_cli` 重跑（full-reload 幂等）。
-4. **教材 card 覆盖不全**：只有下册 16 页（34 cards），整本下册 50 页 + 上册 + 其它学科教材未抽。
-5. **增量加载**：db_loader 用 full-reload，无 checkpoint 增量。
-6. **资产静态服务**：开发期用 `python -m http.server` 临时方案，生产需 CDN/OSS（`ASSET_BASE_URL`）。
-7. **`questions.content` 字面 `\n` 双转义未还原**（2026-09-04 发现）--LLM 输出 JSON 时把换行写成 `\\n`（双反斜杠+n），`json.loads` 解析后变成**字面 `\n` 两字符**（0x5C 0x6E，反斜杠+n），而非真换行 0x0A。`extract.py:_repair_json_escapes` 把 `\\` 当合法 JSON 转义跳过，没修正，字面 `\n` 一路进 DB。`react-markdown` 不认字面 `\n`（CommonMark 反斜杠转义只对 ASCII 标点生效），原样显示成可见文本。**MVP 阶段前端兼容处理**：`QuestionRunner`/`ChoiceOptionList` 的 `preprocessMarkdown` 把 `\n`（后非字母）还原成真换行，避开 LaTeX 命令（`\ne` `\newline` `\nonumber` `\nabla` `\neg` `\nu` 等）。将来在管线层统一修复（`_repair_json_escapes` 增加 `\\n` → `\n` 的规范化，或 LLM 提示词强调换行用真 0x0A），改完撤掉前端的 `preprocessMarkdown` 兼容层。
-8. **题目内容缺口**：`answer_importer`（2026-09-10）已建成，可按单题/批量/按卷/按缺口回写 `answer`/`approach`（新增解题思路列）/`explanation`/`type`。存量约 188 道空答案、451 道无解析待按卷（或按 `--where ..._empty` 导出模板）补全；用法见 `docs/data-refinery-使用手册.md` §4.8，设计见 `docs/superpowers/specs/2026-09-10-question-content-importer-design.md`。
+1. **`install_mysql.sh` CREATE USER 不重置密码**--小修（改 `CREATE OR REPLACE USER`）。
+2. **题目数据质量**：466 题里多数是 gemma 旧提示词抽的（答案有捏造、解答题被拆分），需用新提示词 + deepseek 重抽，再 `refinery_cli` 重跑（full-reload 幂等）。
+3. **教材 card 覆盖不全**：只有下册 16 页（34 cards），整本下册 50 页 + 上册 + 其它学科教材未抽。
+4. **增量加载**：db_loader 用 full-reload，无 checkpoint 增量。
+5. **资产静态服务**：开发期用 `python -m http.server` 临时方案，生产需 CDN/OSS（`ASSET_BASE_URL`）。
+6. **`questions.content` 字面 `\n` 双转义未还原**（2026-09-04 发现）--LLM 输出 JSON 时把换行写成 `\\n`（双反斜杠+n），`json.loads` 解析后变成**字面 `\n` 两字符**（0x5C 0x6E，反斜杠+n），而非真换行 0x0A。`extract.py:_repair_json_escapes` 把 `\\` 当合法 JSON 转义跳过，没修正，字面 `\n` 一路进 DB。`react-markdown` 不认字面 `\n`（CommonMark 反斜杠转义只对 ASCII 标点生效），原样显示成可见文本。**MVP 阶段前端兼容处理**：`QuestionRunner`/`ChoiceOptionList` 的 `preprocessMarkdown` 把 `\n`（后非字母）还原成真换行，避开 LaTeX 命令（`\ne` `\newline` `\nonumber` `\nabla` `\neg` `\nu` 等）。将来在管线层统一修复（`_repair_json_escapes` 增加 `\\n` → `\n` 的规范化，或 LLM 提示词强调换行用真 0x0A），改完撤掉前端的 `preprocessMarkdown` 兼容层。
+7. **题目内容缺口**：`answer_importer`（2026-09-10）已建成，可按单题/批量/按卷/按缺口回写 `answer`/`approach`（新增解题思路列）/`explanation`/`type`。存量约 188 道空答案、451 道无解析待按卷（或按 `--where ..._empty` 导出模板）补全；用法见 `docs/data-refinery-使用手册.md` §4.8，设计见 `docs/superpowers/specs/2026-09-10-question-content-importer-design.md`。
+8. **`db_loader --load-cards` 全量重载撞 `uniq_cards_lesson_sort`**（2026-10-28 实测）：重跑已入库教材卡时每 lesson 的 sort_order 全局重排会与存量行撞唯一键，导致整批加载中断（后续学科的试卷题不再处理）。绕法：把目标学科 published 目录单独拷到临时 `--input-dir` 只加载该学科；根治需在 `load_book_cards` 里先清该 lesson 旧卡或按新旧映射分批 update。
 
 ## 7. 下一步（最大缺口）
 
-**后端 API（`apps/server`）**--当前系统还没真正可用：前端 `apps/web` 已存在，但**没有后端可连**（`apps/server` 未建）。API 已设计好（`docs/api/openapi.yaml` + `docs/API接口与数据流设计文档.md`），就等实现。做了它前端才能查 cards/questions、学习进度等，系统才闭环。
+**后端 API（`apps/server`）**--若从零起步时的结论；当前 `apps/server` 已实现（ai-core + HTTP API），此节仅保留历史背景，实际待办以 §6 清单为准。
 
-建议顺序：先做两个小修（1、2），再进入后端 API；数据重抽（3、4）可后台并行。
+建议顺序：先做小修（§6 的 1），再处理数据重抽（2、3）可后台并行。
 
 ---
 
 ## 8. 旁路管线：语文古诗文默写（2026-09-14 新增）
 
 四阶段主管线（convert → extract → publish → db_loader）服务的是**数学/化学教材卡片与试卷
-题目**，产物进 `textbook_cards` / `questions`。语文默写是**另一条独立旁路**，产物进
+题目**（语文试卷题 2026-10-28 起也走同一主管线，答案补录走独立的 `answer_extract_cli` 支线），
+产物进 `textbook_cards` / `questions`。语文默写是**另一条独立旁路**，产物进
 `chinese_passages`（2026-09-15 独立化改名，原名 `dictation_passages`、已摘除 `question_id`）——
 它刻意不接进四阶段，避免动到主链路的表结构与幂等语义。
 

@@ -12,14 +12,15 @@ from pathlib import Path
 # 主题号（行首）：1-2 位数字 + . + 非数字字符（不要求空格，兼容 9.xxx / 9. xxx / 9.$...$），
 # 或 + 4 位年份+中文（'6.2025年...'，. 后是年份数字仍算题号），或 + :（'21: 在...' 冒号格式）。
 # 仍排除小数（9.5）与 4 位日期（2026.5）。
+# 语文参考答案段常用全角句点（'1．C（2 分）'），故分隔符含 ．(U+FF0E) / ：(U+FF1A)。
 _MAIN_STEM_RE = re.compile(
-    r'^\s*(\d{1,2})\.(?:\D|(?:19|20)\d{2}\s*[年月])'
-    r'|^\s*(\d{1,2}):\s*\S'
+    r'^\s*(\d{1,2})[.．](?:\D|(?:19|20)\d{2}\s*[年月])'
+    r'|^\s*(\d{1,2})[:：]\s*\S'
 )
-# 主题号前缀剥离：只消费 ^\s*\d{1,2}[.:]，不消费其后内容字符（避免无空格格式 '9.若' 丢首字）
-_STEM_PREFIX_RE = re.compile(r'^\s*\d{1,2}[.:]')
+# 主题号前缀剥离：只消费 ^\s*\d{1,2}[.:．：]，不消费其后内容字符（避免无空格格式 '9.若' 丢首字）
+_STEM_PREFIX_RE = re.compile(r'^\s*\d{1,2}[.:．：]')
 # 紧凑格式（行内，答案区一行多题号）：(?<!\d) 防止把 19.5 的小数点误切
-_INLINE_STEM_RE = re.compile(r'(?<!\d)(\d{1,2})\.\D')
+_INLINE_STEM_RE = re.compile(r'(?<!\d)(\d{1,2})[.．]\D')
 # 小问号：行首 (N) 或（N）
 _SUB_STEM_RE = re.compile(r'^\s*[\(（](\d{1,2})[\)）]')
 # 大题分组标题：行首可选 markdown # 前缀 + 中文序号 + 、（兼容 "## 一、选择题"）
@@ -85,7 +86,7 @@ def _has_next_stem(lines: list[str], start: int, n: int) -> bool:
             return False
         if is_date_trap(line):
             continue
-        m = re.match(r'^(\d{1,2})[.:]\S', line)
+        m = re.match(r'^(\d{1,2})[.:．：]\S', line)
         if m and int(m.group(1)) > n:
             return True
         # 该行是题干续行（非题号），继续找
@@ -410,10 +411,11 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
     in_answer_section = False
     current_answer_lines: list[str] = []  # 当前累积的答案文本（多行）
     current_answer_n: int | None = None  # 当前答案属于哪个题号
+    last_answer_n = 0  # 答案段已见最大题号（守卫：题号必须递增，回退数字是评分细则编号）
 
     def _flush_answer():
         """把累积的答案塞入对应题。"""
-        nonlocal current_answer_lines, current_answer_n
+        nonlocal current_answer_lines, current_answer_n, last_answer_n
         if current_answer_n is None or not current_answer_lines:
             current_answer_lines = []
             current_answer_n = None
@@ -426,6 +428,7 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
                 else:
                     q.answer = answer_text
                 break
+        last_answer_n = max(last_answer_n, current_answer_n)
         current_answer_lines = []
         current_answer_n = None
 
@@ -492,28 +495,43 @@ def split_page(text: str, md_path: Path) -> list[RawQuestion]:
         if in_answer_section:
             # 表格格式选择题答案（<table>...<tr><td>题号</td>...<td>答案</td>...</table>）
             if '<table>' in line or '<table ' in line:
-                _flush_answer()
                 table_answers = parse_answer_table(line)
-                for tn, tans in table_answers.items():
-                    current_answer_n = tn
-                    current_answer_lines = [tans]
+                if not table_answers and current_answer_n is not None:
+                    # 题号/答案表解析不出（如作文评分标准表）：作为当前题答案续行
+                    current_answer_lines.append(line)
+                else:
                     _flush_answer()
-                current_answer_n = None
+                    for tn, tans in table_answers.items():
+                        current_answer_n = tn
+                        current_answer_lines = [tans]
+                        _flush_answer()
+                    current_answer_n = None
                 continue
             if inline_stems:
-                # 紧凑格式：一行多题号答案
+                # 紧凑格式：一行多题号答案（只收递增题号；回退数字是评分细则编号）
+                fresh = [(sn, st) for sn, st in inline_stems if sn > last_answer_n]
+                if not fresh:
+                    if current_answer_n is not None:
+                        current_answer_lines.append(line)
+                    continue
                 _flush_answer()  # 先把上一段答案塞入
-                if len(inline_stems) == 1:
-                    current_answer_n = inline_stems[0][0]
-                    current_answer_lines = [inline_stems[0][1]]
+                if len(fresh) == 1:
+                    current_answer_n = fresh[0][0]
+                    current_answer_lines = [fresh[0][1]]
                 else:
                     # 多个题号一行：每个题号独立成段，立即 flush
-                    for stem_n, stem_text in inline_stems:
+                    for stem_n, stem_text in fresh:
                         current_answer_n = stem_n
                         current_answer_lines = [stem_text]
                         _flush_answer()
                     current_answer_n = None
             elif ok:
+                if n <= last_answer_n:
+                    # 题号回退（如作文评分细则 '1．字数不足600字…'）：当作当前答案续行，
+                    # 不新建答案段——否则会串到第 1 题（2025 海淀语文卷实测事故）
+                    if current_answer_n is not None:
+                        current_answer_lines.append(line)
+                    continue
                 # 展开格式：行首单题号，开始新答案段
                 _flush_answer()
                 rest = _strip_main_stem_prefix(line)

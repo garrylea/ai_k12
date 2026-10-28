@@ -115,3 +115,23 @@ class TestPublishCli:
 
         assert (out / "published/数学/初中/人教版/九年级/上册/书A/page_001.jsonl").exists()
         assert not (out / "published/数学/初中/人教版/九年级/上册/书B/page_001.jsonl").exists()
+
+    def test_dry_run_applies_book_filter(self, tmp_path, capsys):
+        """回归：--dry-run 必须与正式发布同口径应用 --book（曾忽略，预演范围偏大）。"""
+        out = tmp_path / "out"
+        for name in ("语文/初中/second/2025/语文-海淀-模拟二-试卷",
+                     "数学/初中/second/2025/数学-海淀-模拟二-试卷"):
+            d = out / "extracted" / name
+            d.mkdir(parents=True)
+            q = {"subject_id": "math", "type": "choice", "difficulty": 1,
+                 "content": "题干", "options": [], "answer": "A"}
+            (d / f"{Path(name).name}.jsonl").write_text(
+                json.dumps(q, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--dry-run", "--book", "语文/"])
+
+        captured = capsys.readouterr()
+        assert "语文/初中/second/2025/语文-海淀-模拟二-试卷" in captured.out
+        assert "数学/初中/second/2025" not in captured.out

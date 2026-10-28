@@ -638,3 +638,50 @@ def test_split_page_colon_stem():
     assert by_order[21].content.startswith("在平面直角坐标系")
     assert "(1) 求" in by_order[21].content
     assert "20. 第二十题" not in by_order[21].content
+
+
+def test_is_main_stem_fullwidth_dot():
+    """语文参考答案全角句点 '1．C（2 分）'：当题号（U+FF0E）。"""
+    ok, n = is_main_stem("1．C（2 分）")
+    assert ok and n == 1
+    ok, n = is_main_stem("8．益慕圣贤之道（1分。有错该空不得分）")
+    assert ok and n == 8
+
+
+def test_strip_main_stem_prefix_fullwidth_dot():
+    assert _strip_main_stem_prefix("8．益慕圣贤之道") == "益慕圣贤之道"
+
+
+def test_split_page_fullwidth_dot_answers():
+    """语文卷答案段全角题号：答案按题号对齐，不漂移、不丢。"""
+    text = (
+        "1. 第一题题干\n"
+        "2. 第二题题干\n"
+        "# 参考答案\n"
+        "## 一、基础·运用（共 4 分）\n"
+        "1．C（2 分）\n"
+        "2．示例：集知识性、创新性、趣味性于一体的科技盛会。（共 2分）"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert by_order[1].answer == "C（2 分）"
+    assert by_order[2].answer.startswith("示例：集知识性")
+    assert "一、基础" not in by_order[2].answer
+
+
+def test_split_page_mixed_half_and_fullwidth_dots():
+    """同页答案半角/全角题号混排：都能识别。"""
+    text = (
+        "1. 第一题\n"
+        "2. 第二题\n"
+        "3. 第三题\n"
+        "# 参考答案\n"
+        "1．A（2 分）\n"
+        "2. B（2 分）\n"
+        "3．C"
+    )
+    result = split_page(text, Path("test.md"))
+    by_order = {q.group_order: q for q in result}
+    assert by_order[1].answer == "A（2 分）"
+    assert by_order[2].answer == "B（2 分）"
+    assert by_order[3].answer == "C"
