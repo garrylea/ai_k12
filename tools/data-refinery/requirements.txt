@@ -3,3 +3,4 @@ openai>=1.0
 python-dotenv>=1.0
 pymysql>=1.0
 opencv-python-headless>=4.8
+Pillow>=10.0
