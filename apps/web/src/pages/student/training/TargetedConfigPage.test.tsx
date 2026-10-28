@@ -39,8 +39,8 @@ const getRulesMock = vi.mocked(getMyPointRules);
 const startMock = vi.mocked(startTargetedPractice);
 
 const KPS: TrainingKnowledgePoint[] = [
-  { id: 1, name: '数与代数', parentKpId: null, gradeBand: 'junior' },
-  { id: 2, name: '一元二次方程', parentKpId: 1, gradeBand: 'junior' },
+  { id: 1, name: '数与代数', parentKpId: null, gradeBand: 'junior', questionCount: 10 },
+  { id: 2, name: '一元二次方程', parentKpId: 1, gradeBand: 'junior', questionCount: 5 },
 ];
 
 function tier(
@@ -64,6 +64,7 @@ const STARTED_QUESTION: TargetedPracticeQuestion = {
   text: '1 + 1 = ?',
   type: 'choice',
   options: ['A. 1', 'B. 2'],
+  materialText: null,
 };
 
 /** 别的任务排在前面：按 taskCode 挑，而不是拿 tasks[0]。 */
@@ -81,14 +82,14 @@ function rulesOf(tiers: PointRuleTier[]): MyPointRules {
 }
 
 /** 知识点与档位都在 useEffect 里异步拉取，render 必须包在 act 里等它们落地。 */
-async function renderPage() {
+async function renderPage(initialEntries: string[] = ['/']) {
   const router = createMemoryRouter(
     [
       { path: '/', element: <TargetedConfigPage /> },
       // 开练成功会 navigate 到 run 页；这里要有落点，否则测试环境报「无匹配路由」
       { path: '/student/training/targeted/run', element: <div /> },
     ],
-    { initialEntries: ['/'] },
+    { initialEntries },
   );
   let result!: ReturnType<typeof render>;
   await act(async () => {
@@ -99,7 +100,7 @@ async function renderPage() {
 
 function selectKps() {
   fireEvent.click(screen.getByRole('button', { name: '数与代数' }));
-  fireEvent.click(screen.getByRole('button', { name: '一元二次方程' }));
+  fireEvent.click(screen.getByRole('button', { name: /一元二次方程/ }));
 }
 
 async function clickStart() {
@@ -247,5 +248,58 @@ describe('TargetedConfigPage sessionId 交接链', () => {
 
     const stored: unknown = JSON.parse(sessionStorage.getItem('training:targeted') ?? 'null');
     expect(stored).toEqual({ sessionId: null, questions: [STARTED_QUESTION] });
+  });
+});
+
+
+describe('TargetedConfigPage 语文（subjectId=2）', () => {
+  beforeEach(() => {
+    getKpsMock.mockReset();
+    getRulesMock.mockReset();
+    startMock.mockReset();
+    getKpsMock.mockResolvedValue([
+      { id: 11, name: '积累与运用', parentKpId: null, gradeBand: 'junior', questionCount: 8 },
+      { id: 12, name: '字词', parentKpId: 11, gradeBand: 'junior', questionCount: 0 },
+      { id: 13, name: '病句', parentKpId: 11, gradeBand: 'junior', questionCount: 3 },
+    ]);
+    getRulesMock.mockResolvedValue({
+      tasks: [{
+        taskCode: 'cn_targeted',
+        taskName: '语文专项',
+        tiers: [tier({ tierKey: '3', tierLabel: '3 题', points: 8 })],
+      }],
+    });
+    startMock.mockResolvedValue({ questions: [], sessionId: null });
+  });
+
+  it('读学科 query：标题「语文 · 专项」、档位取 cn_targeted、题量来自该组', async () => {
+    await renderPage(['/?subjectId=2']);
+
+    expect(screen.getByText('语文 · 专项')).toBeTruthy();
+    // 只有 cn_targeted 组（数学/英语组不显示）
+    expect(screen.getByRole('button', { name: /^3 题/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^15 词/ })).toBeNull();
+  });
+
+  it('题型下拉按学科裁剪：全部/选择/填空/简答', async () => {
+    await renderPage(['/?subjectId=2']);
+
+    const options = Array.from(
+      screen.getByLabelText('题型筛选').querySelectorAll('option'),
+    ).map((o) => o.textContent);
+    expect(options).toEqual(['全部', '选择', '填空', '简答']);
+  });
+
+  it('0 题考点置灰不可选，并显示「暂无题目」', async () => {
+    await renderPage(['/?subjectId=2']);
+    fireEvent.click(screen.getByRole('button', { name: '积累与运用' }));
+
+    const empty = screen.getByRole('button', { name: /字词/ }) as HTMLButtonElement;
+    expect(empty.disabled).toBe(true);
+    expect(empty.textContent).toContain('暂无题目');
+    // 有题的考点仍可选，并显示题量
+    const available = screen.getByRole('button', { name: /病句/ });
+    expect((available as HTMLButtonElement).disabled).toBe(false);
+    expect(available.textContent).toContain('3 题');
   });
 });

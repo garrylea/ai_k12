@@ -17,7 +17,7 @@
 - **流式用空闲超时，不是墙钟硬超时**：阈值取 `retry.yaml` 的 `streaming.firstTokenTimeoutMs`（3s）/ `interTokenTimeoutMs`（10s），有数据就重置，reasoner 思考 >45s 不会被砍。空闲抛 `TimeoutError`（408）→ 前端 1009；外部 `request.signal` 走 `AbortError`。**副作用**：`request.timeout` 只在 `streaming.*` 缺失时兜底且每收一字节重新 arm，「持续吐思考 token」的调用**没有墙钟上限** —— **凡把 LLM 调用放请求关键路径都要意识到。**
 - **`PromptBuilder`**：`customVariables` 已展平进 Mustache 视图（可传对象/数组）；**已关闭 HTML 转义**（数学符号 `=<>` 必须原样保留）；`{{> partial}}` 加载 `system/*.md` 并剥 frontmatter；模板用 `## System Prompt` / `## User Message` 分段。
 - **判题与解析分离**：判题（`judgment`）只判对错，prompt **勿加回 analysis 输出**；判错解析由 `ExplanationCacheService` 后台生成入 `questions.explanation` 一次性复用。⚠️ 该服务**必须由 `PracticeModule` 导出后注入同一实例**，**勿在其它模块重复 provide**（会分裂 in-flight 队列）。
-- **判题体系分层**：`choice`/`true_false` 程序比对；`fill_blank`/`calculation` 归一化比对 + AI 等价判断；`short_answer`/`proof` 由 `JUDGE_SUBJECTIVE_MODE` 控制（默认 `self_assess`：不判对错、学生自评）。空答案不计对错。设计见 `docs/superpowers/specs/2026-09-09-judging-rework-design.md`。
+- **判题体系分层**：`choice`/`true_false` 程序比对；`fill_blank`/`calculation` 归一化比对 + AI 等价判断；`short_answer`/`proof` 由 `JUDGE_SUBJECTIVE_MODE` 控制（默认 `self_assess`：不判对错、学生自评）。空答案不计对错。**语文（`subject_id=2`）非客观题例外，不看 env**：填空/简答一律 `self_assess`（2026-10-28 裁决——语文参考答案多为「示例：…」，归一化全等不可靠；AI 判题提示词只有数学，硬走会误判）。该分支必须排在 `fill_blank` 归一化判等之前，否则语文填空「恰好与参考答案逐字相同」会被判成 exact。设计见 `docs/superpowers/specs/2026-09-09-judging-rework-design.md`。
 - **`npm run build` 经 `scripts/copy-assets.mjs` 把 `ai-core/*.yaml` 与 `prompts/` 复制进 `dist/ai-core`**，使 `node dist/main.js` 与 `tsx src/...` 读到同一份配置。
 
 **已知限制与历史实现细节**（metrics 未接入 capability、ConversationService 内存存储无上限、gemini 流式未实现、多模态图片直送、辅线「详细解析」走题库、会话标题路由等）已迁至 `docs/ai-core-changelog.md`。

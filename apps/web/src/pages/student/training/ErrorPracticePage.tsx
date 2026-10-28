@@ -8,15 +8,13 @@ import {
   MarkdownImg,
 } from '@/components/markdown';
 import { Button, Card, PageHeader, Skeleton, Tag } from '@/components/base';
+import { parseSubjectId, subjectHomePath, SUBJECT_CHINESE, SUBJECT_MATH } from '@/constants';
 import {
   getKnowledgePoints,
   getTrainingErrorBook,
   getTrainingVariations,
   type TrainingErrorBookEntry,
 } from '@/services/api';
-
-/** id 对应 subjects 表 seed（1=数学），与现有页一致。 */
-const MATH_SUBJECT_ID = 1;
 
 /** 题型枚举与后端 questions.type 一致（见 ai-core/types.ts QuestionType）。 */
 const TYPE_OPTIONS = [
@@ -80,6 +78,8 @@ export default function ErrorPracticePage() {
   // 筛选条件。kpId 支持从 URL 预填（薄弱点图谱「看这个知识点的错题」跳进来时带 ?kpId=）——
   // 用 useState 惰性初始化，mount 时的 load() 就会带上它，不需要额外的同步 effect。
   const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
+  const subjectQuery = `?subjectId=${subjectId}`;
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [type, setType] = useState('');
@@ -100,7 +100,7 @@ export default function ErrorPracticePage() {
     setError(null);
     try {
       const data = await getTrainingErrorBook({
-        subjectId: MATH_SUBJECT_ID,
+        subjectId,
         from: from || undefined,
         to: to || undefined,
         type: type || undefined,
@@ -115,7 +115,7 @@ export default function ErrorPracticePage() {
     } finally {
       setLoading(false);
     }
-  }, [from, to, type, kpId]);
+  }, [subjectId, from, to, type, kpId]);
 
   // mount 时拉默认列表（全部数学错题；仅 mount 一次，筛选由「查询」按钮触发）
   useEffect(() => {
@@ -127,7 +127,7 @@ export default function ErrorPracticePage() {
   // label 为「一级名 / 二级名」（一级自身是分组概念，不做筛选项）；失败静默（下拉退化为「全部」）。
   useEffect(() => {
     let cancelled = false;
-    getKnowledgePoints(MATH_SUBJECT_ID)
+    getKnowledgePoints(subjectId)
       .then((kps) => {
         if (cancelled) return;
         const nameById = new Map(kps.map((k) => [k.id, k.name]));
@@ -145,7 +145,7 @@ export default function ErrorPracticePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [subjectId]);
 
   // mount 时拉 pending 变式计数（与错题列表并行）：失败静默（入口退化不显示，不阻断列表）。
   // 生成由 bump 端点后台触发，本页只读；一个数据源（GET /training/variations/me）两处消费
@@ -189,7 +189,7 @@ export default function ErrorPracticePage() {
     const chosen = entries.filter((e) => selected.has(e.errorBookId));
     // 题单交给 run 页（读后即删），避免 URL 超长
     sessionStorage.setItem('training:errors', JSON.stringify(chosen));
-    navigate('/student/training/errors/run');
+    navigate(`/student/training/errors/run${subjectQuery}`);
   };
 
   return (
@@ -197,7 +197,11 @@ export default function ErrorPracticePage() {
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-32">
           {/* 顶栏 */}
-          <PageHeader to="/student/training/home" caption="返回训练" title="错题练习" />
+          <PageHeader
+            to={subjectHomePath(subjectId)}
+            caption="返回训练"
+            title={subjectId === SUBJECT_CHINESE ? '语文 · 错题' : '错题练习'}
+          />
 
           {/* 筛选区 */}
           <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
@@ -339,7 +343,7 @@ export default function ErrorPracticePage() {
                           </p>
                         )}
                         {/* 错题升级变式入口（2026-10-11）：整块是按钮，stopPropagation 防触发条目勾选 */}
-                        {varCount > 0 && (
+                        {varCount > 0 && subjectId === SUBJECT_MATH && (
                           <button
                             type="button"
                             data-testid={`variation-entry-${entry.errorBookId}`}

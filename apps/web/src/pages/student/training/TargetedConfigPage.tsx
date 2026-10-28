@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import {
   getKnowledgePoints,
@@ -8,12 +8,13 @@ import {
 } from '@/services/api';
 import { MATH_TASK_CODE, tierStatus, usePointTiers } from './point-tiers';
 import type { TargetedRunHandoff } from './run-handoff';
+import { parseSubjectId, subjectHomePath, SUBJECT_CHINESE } from '@/constants';
 
-/** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
-const MATH_SUBJECT_ID = 1;
+/** 语文专项四档走独立任务码（家长端分组/发分口径不同）。 */
+const CN_TASK_CODE = 'cn_targeted';
 
 /** 题型枚举与后端 questions.type 一致；空串 = 全部（payload type 传 null）。 */
-const TYPE_OPTIONS = [
+const MATH_TYPE_OPTIONS = [
   { value: '', label: '全部' },
   { value: 'choice', label: '选择' },
   { value: 'fill_blank', label: '填空' },
@@ -21,6 +22,14 @@ const TYPE_OPTIONS = [
   { value: 'short_answer', label: '解答' },
   { value: 'proof', label: '证明' },
   { value: 'calculation', label: '计算' },
+] as const;
+
+/** 语文题库只有选择/填空/简答三类，题型下拉按学科裁剪。 */
+const CN_TYPE_OPTIONS = [
+  { value: '', label: '全部' },
+  { value: 'choice', label: '选择' },
+  { value: 'fill_blank', label: '填空' },
+  { value: 'short_answer', label: '简答' },
 ] as const;
 
 const selectClassName =
@@ -101,26 +110,32 @@ function TierChip({
   );
 }
 
-/** 二级知识点列表项（单选）。 */
+/** 二级知识点列表项（单选）。count=0 的考点没有可抽题，置灰不可选。 */
 function KpListItem({
   name,
+  count,
   active,
   onClick,
 }: {
   name: string;
+  count: number;
   active: boolean;
   onClick: () => void;
 }) {
+  const empty = count === 0;
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={empty}
       aria-pressed={active}
       className={
         'flex items-center gap-3 rounded-[var(--radius-card)] border px-4 py-3 text-left text-sm transition-colors ' +
-        (active
-          ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--learn-text-primary)]'
-          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] hover:border-[var(--brand-500)]')
+        (empty
+          ? 'cursor-not-allowed border-[var(--learn-card-border)] bg-[var(--bg-base)] text-[var(--learn-text-tertiary)] opacity-70'
+          : active
+            ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--learn-text-primary)]'
+            : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] hover:border-[var(--brand-500)]')
       }
     >
       <span
@@ -130,13 +145,21 @@ function KpListItem({
         }
         aria-hidden="true"
       />
-      <span className="min-w-0 truncate">{name}</span>
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <span className="shrink-0 text-xs text-[var(--learn-text-tertiary)]">
+        {empty ? '暂无题目' : `${count} 题`}
+      </span>
     </button>
   );
 }
 
 export default function TargetedConfigPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
+  const isChinese = subjectId === SUBJECT_CHINESE;
+  const subjectQuery = `?subjectId=${subjectId}`;
+  const typeOptions = isChinese ? CN_TYPE_OPTIONS : MATH_TYPE_OPTIONS;
 
   // KP 平铺列表（mount 拉一次）
   const [kps, setKps] = useState<TrainingKnowledgePoint[] | null>(null);
@@ -154,7 +177,7 @@ export default function TargetedConfigPage() {
     setTierKey,
     error: tiersError,
     retry: loadTiers,
-  } = usePointTiers(MATH_TASK_CODE);
+  } = usePointTiers(isChinese ? CN_TASK_CODE : MATH_TASK_CODE);
 
   // 开练状态
   const [starting, setStarting] = useState(false);
@@ -164,13 +187,13 @@ export default function TargetedConfigPage() {
   const loadKps = useCallback(async () => {
     setLoadError(null);
     try {
-      const data = await getKnowledgePoints(MATH_SUBJECT_ID);
+      const data = await getKnowledgePoints(subjectId);
       setKps(data);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : '加载知识点失败');
       setKps([]);
     }
-  }, []);
+  }, [subjectId]);
 
   useEffect(() => {
     void loadKps();
@@ -203,7 +226,7 @@ export default function TargetedConfigPage() {
     setEmptyHint(false);
     try {
       const res = await startTargetedPractice({
-        subjectId: MATH_SUBJECT_ID,
+        subjectId,
         kpId: childKpId,
         type: type || null,
         // tierKey 对这两个任务是纯数字字符串（家长端不能新增档位），直接当题量
@@ -218,7 +241,7 @@ export default function TargetedConfigPage() {
       // 丢掉它 run 页就没法调 completeTrainingSession（可能是 null = 降级不发分）
       const handoff: TargetedRunHandoff = { sessionId: res.sessionId, questions: res.questions };
       sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
-      navigate('/student/training/targeted/run');
+      navigate(`/student/training/targeted/run${subjectQuery}`);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : '开练失败，请重试');
     } finally {
@@ -231,14 +254,18 @@ export default function TargetedConfigPage() {
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">
           {/* 顶栏 */}
-          <PageHeader to="/student/training/home" caption="返回训练" title="专项练习" />
+          <PageHeader
+            to={subjectHomePath(subjectId)}
+            caption="返回训练"
+            title={isChinese ? '语文 · 专项' : '专项练习'}
+          />
 
           {/* 工具条：不再展示清单入口 */}
           <div className="flex justify-end mb-3">
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => navigate('/student/training/targeted/hidden')}
+              onClick={() => navigate(`/student/training/targeted/hidden${subjectQuery}`)}
             >
               我的不再展示清单
             </Button>
@@ -288,6 +315,7 @@ export default function TargetedConfigPage() {
                           <KpListItem
                             key={kp.id}
                             name={kp.name}
+                            count={kp.questionCount}
                             active={childKpId === kp.id}
                             onClick={() => {
                               setChildKpId(kp.id);
@@ -314,7 +342,7 @@ export default function TargetedConfigPage() {
                   className={selectClassName}
                   aria-label="题型筛选"
                 >
-                  {TYPE_OPTIONS.map((opt) => (
+                  {typeOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>

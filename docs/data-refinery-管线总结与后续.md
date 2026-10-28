@@ -257,3 +257,22 @@ pytest tests/ -q                                # 1175 passed, 10 skipped
 - **古诗文解释专项**：需要本管线丢弃的教材注释（图片留在本地，重跑第 2–5 步即可）。
 - **开发假数据清理**：真篇目必背标定完成后清理两篇 `DEV-FIXTURE`。
 
+
+---
+
+## 语文试卷着重号/下划线回填（2026-10-28）
+
+MinerU 的 Markdown 没有下划线语义，着重号也只能偶尔识别成 `<sub>．．</sub>`，导致「文段中加点词语」「画横线句」类题目丢指令。新增**旁路步骤**（不改主管线顺序）：
+
+```bash
+cd tools/data-refinery/src
+python emphasis_cli.py --paper-id 17          # 预演：检测 + 打印将变化的题
+python emphasis_cli.py --paper-id 17 --apply  # 备份完整行 → 只改展示字段
+python emphasis_cli.py --all-chinese          # 全部语文卷预演（--apply 需 --yes）
+```
+
+- 检测实现在 `pdf_emphasis.py`：下划线取 PDF 细矩形；着重号取字符下方 3pt 窄带内的小墨点（4x 灰度渲染 + 连通域），排除表格区域（`page.find_tables()`）。
+- 输出 `<u>…</u>` / **逐字** `<span class="cn-emphasis-dot">字</span>`；前端 `global.css` 用 `::after` 画 0.15em 纯黑字下点，下划线 2px 深色（视觉反馈：点要更精更黑、线要更重）。
+- 匹配用上下文唯一性（8→2 字）；选项按 `A./B．` 行 + 纯汉字上下文；题干只做 `<sub>` 归一化，不套标注。
+- 安全：默认 dry-run、幂等；只 UPDATE `content/material_text/options/content_hash`，写后逐列校验其它列未变；备份在 `tools/db/backups/`。
+- 适用范围：**电子版（有文字层）PDF**；纯扫描件需 OCR 字符框，本期不做。

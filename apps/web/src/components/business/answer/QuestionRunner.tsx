@@ -21,6 +21,7 @@ import { clearDraft } from '../draft-store';
 import { trackEvent } from '@/analytics/tracker';
 import { ChoiceOptionList } from './ChoiceOptionList';
 import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion, RunnerSelfAssessContext } from './types';
+import { isMathLikeSubject } from '@/constants';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用内嵌草稿（PRD §7.12） */
 const MATH_SUBJECT_ID = 1;
@@ -61,6 +62,13 @@ export interface QuestionRunnerProps {
   draftDisabled?: boolean;
   /** 默认 'auto'：type=choice/true_false 且有 options 时点选作答，否则文本作答 */
   answerMode?: 'auto' | 'text';
+  /**
+   * 文本作答的输入形态（2026-10-28）：
+   * - `'latex'`：左输入 + 右预览两栏（数学/物理/化学需要公式与预览）
+   * - `'plain'`：整宽纯文本框（语文/英语等文字学科不需要 LaTeX 预览）
+   * 缺省按 `subjectId` 自动判定（见 `isMathLikeSubject`）。
+   */
+  answerInput?: 'latex' | 'plain';
   enableHint?: boolean;
   /** 提示缓存（key = q.n），父层持有（session 缓存） */
   hints?: Record<string, string>;
@@ -105,6 +113,7 @@ export function QuestionRunner({
   variant,
   draftDisabled = false,
   answerMode = 'auto',
+  answerInput,
   enableHint = false,
   hints,
   onRequestHint,
@@ -126,6 +135,8 @@ export function QuestionRunner({
 }: QuestionRunnerProps) {
   const [idx, setIdx] = useState(startIndex ?? 0);
   const [answer, setAnswer] = useState('');
+  // 文本作答形态：理科（数学/物理/化学）保留左输入+右预览；语文/英语等单栏纯文本
+  const latexInput = (answerInput ?? (isMathLikeSubject(subjectId) ? 'latex' : 'plain')) === 'latex';
   // 左输入区 → 右预览区的滚动跟随通道（ref 而非 state：滚动 60fps 不触发本组件重渲染，
   // 否则题干 ReactMarkdown 每帧重解析；机制见 PreviewScrollSync 注释）
   const previewScrollSync = useRef<PreviewScrollSync>({ ratio: 0 });
@@ -436,6 +447,17 @@ export function QuestionRunner({
         {/* 题面 + 提示按钮 + 提示抽屉：超出滚动。选择题题干最多占卡片 60%（选项区紧凑、
             可被压缩，长题干优先展开展示）；其它题型维持 1/3，给下方作答区留出 2/3 */}
         <div className={`shrink-0 overflow-y-auto p-4 border-b border-[var(--bg-subtle)] ${choiceOptions ? 'max-h-[60%]' : 'max-h-[33%]'}`}>
+          {/* 同节共享材料（语文阅读/文段题）：独立滚动区，长材料不把题面挤出可视区 */}
+          {q.material && (
+            <div
+              data-testid="question-material"
+              className="mb-3 max-h-[38vh] overflow-y-auto rounded-lg border border-[var(--learn-card-border)] bg-[var(--bg-base)] px-3 py-2.5 text-sm text-[var(--text-primary)] leading-[1.7]"
+            >
+              <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
+                {preprocessMarkdown(q.material)}
+              </ReactMarkdown>
+            </div>
+          )}
           <div className="flex gap-3">
             <div className="flex-1 min-w-0">
               <div
@@ -502,12 +524,16 @@ export function QuestionRunner({
             <div className="flex-1 min-h-0 overflow-auto">
               <ChoiceOptionList options={choiceOptions} value={answer} onChange={updateAnswer} />
             </div>
-          ) : (
+          ) : latexInput ? (
             <>
               {/* min-w-0：训练轨草稿面板并排占位后答题列会窄到 ~440px，两个 50% 分栏默认
                   min-width:auto 会被内容撑破、把面板顶出可视区 */}
               <div className="w-1/2 min-w-0 border-r border-[var(--bg-subtle)] flex flex-col">
-                <LatexEditor value={answer} onChange={updateAnswer} scrollSync={previewScrollSync} />
+                <LatexEditor
+                  value={answer}
+                  onChange={updateAnswer}
+                  scrollSync={previewScrollSync}
+                />
               </div>
               {/* 右半区：预览 / 草稿 tab。主线保留数学草稿（PRD §7.12）；训练轨答题页传 draftDisabled
                   关闭——页面级 DraftPanel 取代内嵌草稿，其余上下文（AnswerModal 弹窗 / CleanupPhase
@@ -521,6 +547,17 @@ export function QuestionRunner({
                 />
               </div>
             </>
+          ) : (
+            /* 语文/英语等文字学科：整宽纯文本，不渲染 LaTeX 符号面板与右侧预览（2026-10-28） */
+            <div className="flex-1 min-w-0 flex flex-col">
+              <textarea
+                value={answer}
+                onChange={(e) => updateAnswer(e.target.value)}
+                placeholder="请在此作答"
+                aria-label="作答区"
+                className="flex-1 w-full p-4 resize-none outline-none bg-transparent text-[var(--text-primary)] text-base leading-[1.8]"
+              />
+            </div>
           )}
         </div>
 

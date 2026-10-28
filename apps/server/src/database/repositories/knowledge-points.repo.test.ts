@@ -6,10 +6,10 @@ const mockPool = (rows: any[] = []) => ({
 });
 
 describe('KnowledgePointsRepository.findBySubject', () => {
-  it('按 subject_id 查平铺列表（id/name/parentKpId/gradeBand 别名映射）', async () => {
+  it('按 subject_id 查平铺列表（id/name/parentKpId/gradeBand + questionCount）', async () => {
     const rows = [
-      { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
-      { id: 2, name: '有理数', parentKpId: 1, gradeBand: 'junior' },
+      { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior', questionCount: 12 },
+      { id: 2, name: '有理数', parentKpId: 1, gradeBand: 'junior', questionCount: 0 },
     ];
     const pool = mockPool(rows);
     const repo = new KnowledgePointsRepository(pool as any);
@@ -20,6 +20,11 @@ describe('KnowledgePointsRepository.findBySubject', () => {
     expect(sql).toContain('subject_id = ?');
     expect(sql).toContain('parent_kp_id AS parentKpId');
     expect(sql).toContain('grade_band AS gradeBand');
+    // 可抽题数子查询与 findRandomByKpAndType 核心谓词同源（is_active + 有答案）
+    expect(sql).toContain('question_knowledge_points');
+    expect(sql).toContain('q.is_active = 1');
+    expect(sql).toContain("q.answer <> ''");
+    expect(sql).toContain('AS questionCount');
     expect(params).toEqual([1]);
   });
 });

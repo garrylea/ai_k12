@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
@@ -12,9 +12,7 @@ import {
   type JudgeResult,
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
-
-/** 数学 subject_id（subjects seed 首行）——考试 MVP 仅数学。 */
-const MATH_SUBJECT_ID = 1;
+import { parseSubjectId } from '@/constants';
 
 /** 列表页开考时写入的会话键（读后即删，防止刷新后重复消费旧会话）。 */
 const SESSION_KEY = 'exam:session';
@@ -49,6 +47,8 @@ export default function ExamRunPage() {
   const { sessionId } = useParams();
   const sid = Number(sessionId);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
 
   const [session, setSession] = useState<ExamSessionInfo | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
@@ -105,7 +105,7 @@ export default function ExamRunPage() {
 
       // 已交卷（如别处已自动收卷）：直接去结果页
       if (info.status === 'submitted') {
-        navigate(`/student/training/exam/result/${sid}`, { replace: true });
+        navigate(`/student/training/exam/result/${sid}?subjectId=${subjectId}`, { replace: true });
         return;
       }
       setSession(info);
@@ -122,7 +122,7 @@ export default function ExamRunPage() {
     };
 
     void boot();
-  }, [sid, navigate]);
+  }, [sid, navigate, subjectId]);
 
   // 倒计时：以服务端 remainingSeconds 为锚，本地每秒递减（不依赖本地时钟绝对值）；减到 0 停止
   useEffect(() => {
@@ -145,13 +145,13 @@ export default function ExamRunPage() {
       // 不在这里接住就永远拿不到。积分为可选（幂等/早退分支响应里没有这个键）——
       // 没有就**整个不带 state**：否则 history entry 上会挂一个 `{ points: undefined }`，
       // 结果页的 `location.state == null` 哨兵永远为假，白白触发一次 replace 导航。
-      const to = `/student/training/exam/result/${sid}`;
+      const to = `/student/training/exam/result/${sid}?subjectId=${subjectId}`;
       navigate(to, summary.points ? { replace: true, state: { points: summary.points } } : { replace: true });
     } catch (err) {
       submittingRef.current = false;
       setSubmitError(err instanceof Error ? err.message : '交卷失败，请重试');
     }
-  }, [sid, navigate]);
+  }, [sid, navigate, subjectId]);
 
   // 倒计时归零：自动交卷
   useEffect(() => {
@@ -166,6 +166,7 @@ export default function ExamRunPage() {
         text: q.text,
         type: q.type,
         options: normalizeOptions(q.options),
+        material: q.materialText,
       })),
     [session],
   );
@@ -223,7 +224,7 @@ export default function ExamRunPage() {
             <>
               <p className="text-sm text-[var(--text-secondary)]">{loadError}</p>
               <button
-                onClick={() => navigate('/student/training/exam')}
+                onClick={() => navigate(`/student/training/exam?subjectId=${subjectId}`)}
                 className="h-10 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] px-4 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-base)]"
               >
                 返回考试列表
@@ -250,7 +251,7 @@ export default function ExamRunPage() {
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">
             <QuestionRunner
               questions={questions}
-              subjectId={MATH_SUBJECT_ID}
+              subjectId={subjectId}
               draftKeyPrefix={`exam-${sid}`}
               variant="embedded"
               draftDisabled  // 内嵌草稿由页面级草稿面板替代（2026-09-07）

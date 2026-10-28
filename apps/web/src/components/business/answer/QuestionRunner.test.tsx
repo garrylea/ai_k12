@@ -254,3 +254,119 @@ describe('主观题自评（self_assess 模式）', () => {
     });
   });
 });
+
+describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
+  it('material 非空时题干上方渲染材料块（含图片走 resolveAsset），无 material 不渲染', () => {
+    const withMaterial: RunnerQuestion[] = [{
+      n: '1',
+      text: '根据材料回答',
+      type: 'choice',
+      options: [{ label: 'A', text: '选项A' }],
+      material: '## 材料一\n\n这是阅读材料\n\n![图1](chinese/paper/fig1.png)',
+    }];
+    const { unmount } = render(
+      <QuestionRunner
+        questions={withMaterial}
+        subjectId={2}
+        draftKeyPrefix="mat"
+        variant="embedded"
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+        onFinish={async () => {}}
+      />,
+    );
+
+    const block = screen.getByTestId('question-material');
+    expect(block.textContent).toContain('这是阅读材料');
+    expect(block.querySelector('img')?.getAttribute('src')).toContain('/assets/chinese/paper/fig1.png');
+    unmount();
+
+    render(
+      <QuestionRunner
+        questions={[{ n: '1', text: '纯题面', type: 'choice', options: [{ label: 'A', text: '选项A' }] }]}
+        subjectId={1}
+        draftKeyPrefix="mat2"
+        variant="embedded"
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+        onFinish={async () => {}}
+      />,
+    );
+    expect(screen.queryByTestId('question-material')).toBeNull();
+  });
+});
+
+describe('QuestionRunner 文本作答形态（2026-10-28：理科两栏 / 文字学科单栏）', () => {
+  const textQ: RunnerQuestion[] = [{ n: '1', text: '请谈谈你的理解', type: 'short_answer' }];
+
+  function renderText(
+    subjectId: number,
+    answerInput?: 'latex' | 'plain',
+    onSubmit = vi.fn(async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: null, method: 'self_assess', needsSelfAssessment: true })),
+  ) {
+    render(
+      <QuestionRunner
+        questions={textQ}
+        subjectId={subjectId}
+        answerInput={answerInput}
+        draftKeyPrefix="input-mode"
+        variant="embedded"
+        draftDisabled
+        onSubmit={onSubmit}
+        onFinish={async () => {}}
+      />,
+    );
+    return { onSubmit };
+  }
+
+  it('语文（subjectId=2）：整宽纯文本，不渲染「预览/草稿」右栏与 LaTeX 输入提示', () => {
+    renderText(2);
+    expect(screen.getByLabelText('作答区')).toBeTruthy();
+    expect(screen.getByPlaceholderText('请在此作答')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '预览' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '草稿' })).toBeNull();
+    expect(screen.queryByPlaceholderText(/LaTeX/)).toBeNull();
+  });
+
+  it('英语（subjectId=3）同样走单栏纯文本', () => {
+    renderText(3);
+    expect(screen.getByLabelText('作答区')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '预览' })).toBeNull();
+  });
+
+  it('数学/物理/化学仍保留左输入 + 右预览两栏', () => {
+    for (const id of [1, 4, 5]) {
+      const { unmount } = render(
+        <QuestionRunner
+          questions={textQ}
+          subjectId={id}
+          draftKeyPrefix={`input-mode-${id}`}
+          variant="embedded"
+          draftDisabled
+          onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+          onFinish={async () => {}}
+        />,
+      );
+      // draftDisabled 下右栏是纯预览（无 tab 按钮），用 LaTeX 输入提示区分两栏形态
+      expect(screen.getByPlaceholderText(/LaTeX/)).toBeTruthy();
+      expect(screen.queryByLabelText('作答区')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('显式 answerInput="latex" 可覆盖学科默认（参数优先）', () => {
+    renderText(2, 'latex');
+    expect(screen.getByPlaceholderText(/LaTeX/)).toBeTruthy();
+    expect(screen.queryByLabelText('作答区')).toBeNull();
+  });
+
+  it('纯文本作答会原样提交给 onSubmit', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderText(2);
+    await user.type(screen.getByLabelText('作答区'), '写出了自己的理解');
+    // 单人题：提交按钮在底部（aria-label=提交）
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ n: '1' }),
+      '写出了自己的理解',
+    ));
+  });
+});

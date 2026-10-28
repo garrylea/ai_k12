@@ -340,17 +340,43 @@ describe('TrainingService.startTargetedPractice', () => {
     expect(deps.questionsRepo.findRandomByKpAndType).toHaveBeenCalledWith(7, 1, 3, 'proof', 10);
   });
 
-  it('白名单序列化：只出 questionId/text/type/options，剥离 answer/explanation/material', async () => {
+  it('白名单序列化：出 questionId/text/type/options/materialText，剥离 answer/explanation', async () => {
     const deps = mk({
       questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([questionRow]) },
     });
     const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: 'choice', count: 5 });
     expect(r.questions).toHaveLength(1);
     const q = r.questions[0];
-    expect(q).toEqual({ questionId: 10, text: '题面文本', type: 'choice', options: ['A. 1', 'B. 2'] });
-    expect(Object.keys(q).sort()).toEqual(['options', 'questionId', 'text', 'type']);
+    expect(q).toEqual({ questionId: 10, text: '题面文本', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null });
+    expect(Object.keys(q).sort()).toEqual(['materialText', 'options', 'questionId', 'text', 'type']);
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');
+  });
+
+  it('语文专项：材料随题返回，会话 task_code=cn_targeted（家长端分组/发分口径）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findRandomByKpAndType: vi.fn().mockResolvedValue([{
+          ...questionRow, subject_id: 2, material_text: '阅读材料原文',
+        }]),
+      },
+    });
+    const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 2, kpId: 112, type: null, count: 5 });
+
+    expect(r.questions[0].materialText).toBe('阅读材料原文');
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      student_id: 7, task_code: 'cn_targeted', subject_id: 2, tier_key: '5',
+    }));
+  });
+
+  it('数学专项会话仍用 math_targeted（语文分支不污染数学）', async () => {
+    const deps = mk({
+      questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([questionRow]) },
+    });
+    await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: null, count: 5 });
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      task_code: 'math_targeted',
+    }));
   });
 
   it('options 为 null 时原样返回 null，不抛错', async () => {

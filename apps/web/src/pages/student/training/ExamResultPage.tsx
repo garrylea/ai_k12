@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { CelebrationOverlay } from '@/components/business';
 import { RemediationOfferCard } from '@/components/business/RemediationOfferCard';
@@ -13,9 +13,7 @@ import {
   type ExamSummary,
 } from '@/services/api';
 import { usePointsFeedback } from './points-feedback';
-
-/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
-const MATH_SUBJECT_ID = 1;
+import { parseSubjectId, subjectName, SUBJECT_MATH } from '@/constants';
 
 const SPINNER_SVG = (
   <svg
@@ -41,6 +39,8 @@ export default function ExamResultPage() {
   const sid = Number(sessionId);
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
 
   /**
    * 交卷发分结果由 `ExamRunPage` 经导航 state 交接（结果页自己的 `getExamResults`
@@ -84,7 +84,7 @@ export default function ExamResultPage() {
         const s = await getExamSession(sid);
         if (cancelled) return;
         if (s.status !== 'submitted') {
-          navigate(`/student/training/exam/run/${sid}`, { replace: true });
+          navigate(`/student/training/exam/run/${sid}?subjectId=${subjectId}`, { replace: true });
           return;
         }
         const res = await getExamResults(sid);
@@ -134,7 +134,7 @@ export default function ExamResultPage() {
     return () => {
       cancelled = true;
     };
-  }, [sid, navigate]);
+  }, [sid, navigate, subjectId]);
 
   // 一次性消费：抓到 points 后立刻把导航 state 从 history entry 里剥掉（`state: null`）。
   // 上面已把值抓进本地 state，所以剥掉**不会**影响本次庆祝；剥掉后 F5 / 前进后退
@@ -157,17 +157,17 @@ export default function ExamResultPage() {
     award({
       pointsAwarded: examPoints.awarded,
       levelUp: examPoints.levelUp,
-      title: '数学测验',
+      title: `${subjectName(subjectId)}测验`,
       celebrate: {
         title: '本套试卷已交卷！',
         subtitle: `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}%`,
         primaryLabel: '查看成绩',
       },
     });
-  }, [examPoints, summary, award]);
+  }, [examPoints, summary, award, subjectId]);
 
   const resultQuestions = useMemo(
-    () => (items ?? []).map((it) => ({ n: String(it.questionNo), text: it.text })),
+    () => (items ?? []).map((it) => ({ n: String(it.questionNo), text: it.text, material: it.materialText })),
     [items],
   );
 
@@ -215,14 +215,16 @@ export default function ExamResultPage() {
   // 与后端 examWrongIds 同口径：只数 is_correct === 0。
   // 自评为「做错」的主观题（isCorrect === null）不算——后端不为它建相似题组，
   // 前端若算进去，卡片会承诺一个后端不会兑现的数字。
+  // 补偿套题当前只支持数学（后端 remediation 只认 math_targeted/exam 数学卷），语文不显示。
   const remediationWrongCount = (items ?? []).filter((it) => it.isCorrect === 0).length;
+  const remediationSupported = subjectId === SUBJECT_MATH;
 
   // 镜像 RemediationOfferCard 自身的守卫（RemediationOfferCard.tsx:17 的
   // `wrongCount === 0 || sessionId == null || state === 'done'`，宿主只能知道前两项）。
   // 宿主必须自己知道卡片会不会渲染：本页槽位挂在**始终渲染**的 headerExtra 块里，
   // 若无条件渲染槽位，全对试卷的分数卡下方会多出一条 16px 空白条。
   // 卡片内部 state === 'done'（点「生成练习」/「跳过」后自隐）宿主观察不到，故槽位另加 empty:hidden 兜底。
-  const remediationOfferVisible = remediationWrongCount > 0 && sid != null;
+  const remediationOfferVisible = remediationSupported && remediationWrongCount > 0 && sid != null;
 
   // 自评提交后更新本地态（消除 needsSelfAssess / 记录 selfAssessment），未自评横幅随之消失
   const handleSelfAssess = async (n: string, assessment: 'correct' | 'incorrect') => {
@@ -230,7 +232,7 @@ export default function ExamResultPage() {
     if (qid == null) return;
     await selfAssessTraining({
       questionId: qid,
-      subjectId: MATH_SUBJECT_ID,
+      subjectId,
       assessment,
       source: 'exam',
       sourceRefId: sid,
@@ -251,7 +253,7 @@ export default function ExamResultPage() {
             <>
               <p className="text-sm text-[var(--text-secondary)]">{error}</p>
               <button
-                onClick={() => navigate('/student/training/exam')}
+                onClick={() => navigate(`/student/training/exam?subjectId=${subjectId}`)}
                 className="h-10 rounded-[var(--radius-button)] border border-[var(--bg-subtle)] px-4 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-base)]"
               >
                 返回考试列表
@@ -339,7 +341,7 @@ export default function ExamResultPage() {
               </div>
             )
           }
-          onClose={() => navigate('/student/training/exam')}
+          onClose={() => navigate(`/student/training/exam?subjectId=${subjectId}`)}
         />
       </div>
       {/* 段位晋升 / 交卷全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}

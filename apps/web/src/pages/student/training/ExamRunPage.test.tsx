@@ -40,7 +40,7 @@ const SESSION: ExamSessionInfo = {
   sessionId: 77,
   status: 'in_progress',
   remainingSeconds: 600,
-  questions: [{ questionId: 101, questionNo: 1, text: '1 + 1 = ?', type: 'choice', options: ['A. 1', 'B. 2'] }],
+  questions: [{ questionId: 101, questionNo: 1, text: '1 + 1 = ?', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null }],
 };
 
 /** RunExitGuard 用 useBlocker —— 必须是 data router；结果页给个占位元素。 */

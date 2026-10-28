@@ -98,3 +98,14 @@ describe('markdown 块级 HTML 后的内容渲染', () => {
     expect(html).toContain('class="katex"');
   });
 });
+
+describe('语文试卷标注（着重号 / 下划线）渲染', () => {
+  it('span.cn-emphasis-dot 与 <u> 都按原生 HTML 保留，供 CSS 画字下点', () => {
+    const html = render(
+      '初夏<span class="cn-emphasis-dot">高</span><span class="cn-emphasis-dot">涨</span>，交织的<u>嘉年华</u>',
+    );
+    expect(html).toContain('<span class="cn-emphasis-dot">高</span>');
+    expect(html).toContain('<span class="cn-emphasis-dot">涨</span>');
+    expect(html).toContain('<u>嘉年华</u>');
+  });
+});

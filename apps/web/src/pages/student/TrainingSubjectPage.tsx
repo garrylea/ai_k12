@@ -11,7 +11,7 @@ interface TrainingSubject {
 // id 对应 subjects 表 seed（1=数学, 2=语文, 3=英语）；语文已开放古诗文专项，英语已开放背单词
 const SUBJECTS: TrainingSubject[] = [
   { id: 1, name: '数学', enabled: true, desc: '考试 / 专项练习 / 错题练习' },
-  { id: 2, name: '语文', enabled: true, desc: '古诗文默写 / 古诗文解释' },
+  { id: 2, name: '语文', enabled: true, desc: '真题考试 / 专项练习 / 古诗文专项' },
   { id: 3, name: '英语', enabled: true, desc: '背单词' },
 ];
 

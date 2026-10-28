@@ -127,6 +127,17 @@ export interface JudgeDictationOutput {
  * 从 PracticeService.judge 抽取，供 practice（card 中心）与训练模块（题中心）复用。
  * 不写 practice_results（card_id NOT NULL 的卡上下文持久化留在 PracticeService）。
  */
+/**
+ * 语文非客观题：一律自评（2026-10-28 裁决）。
+ *
+ * 语文填空/简答的参考答案多为「示例：…」句式，归一化全等几乎不可能；
+ * 且 AI 判题模板目前只有数学（prompts/judgment/math-*），走 AI 会被数学提示词误判。
+ * 选择题/判断题仍走 exact。
+ */
+function isChineseNonObjective(q: { subject_id?: number | null; type: string }): boolean {
+  return Number(q.subject_id) === 2 && q.type !== 'choice' && q.type !== 'true_false';
+}
+
 @Injectable()
 export class JudgeCoreService {
   private readonly logger = new Logger(JudgeCoreService.name);
@@ -255,11 +266,8 @@ export class JudgeCoreService {
       // 路由 1：choice/true_false -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
       method = 'exact';
-    } else if ((q.type === 'fill_blank' || q.type === 'calculation') && compareAnswer(input.studentAnswer, q.answer, q.options)) {
-      // 路由 1b：fill_blank/calculation 归一化相等 -> exact 判对（省 AI）；不等走 AI 复核
-      isCorrect = true;
-      method = 'exact';
-    } else if (SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess') {
+    } else if (isChineseNonObjective(q) ||
+               (SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess')) {
       // 路由 1c（判题体系重构 2026-09-09）：主观题 self_assess 模式 -> 不判对错。
       // 参考答案/解析随判题返回（前端当场展开自评）；错题本与清零由自评端点处理。
       // 埋点：该分支只发 self_assess_answered（自评结果由 recordSelfAssessment 后续产生，
@@ -281,6 +289,12 @@ export class JudgeCoreService {
         props: { assessment: null },
       });
       return this.finishJudge(input.studentId, out);
+    } else if ((q.type === 'fill_blank' || q.type === 'calculation')
+               && compareAnswer(input.studentAnswer, q.answer, q.options)) {
+      // 路由 1b：fill_blank/calculation 归一化相等 -> exact 判对（省 AI）；不等走 AI 复核。
+      // 语文非客观题已在上一个分支自评，不会走到这里；数学行为保持不变。
+      isCorrect = true;
+      method = 'exact';
     } else {
       // 路由 2：fill_blank 不等 / short_answer / proof -> AI 判定
       const questionType = q.type === 'proof' ? 'proof' : 'calculation';

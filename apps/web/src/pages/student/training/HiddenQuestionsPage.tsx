@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import { Modal } from '@/components/base';
 import { toast } from '@/components/base/Toast';
+import { parseSubjectId, SUBJECT_CHINESE } from '@/constants';
 import {
   listTrainingHidden,
   unmarkTrainingHidden,
   unmarkAllTrainingHidden,
   type HiddenQuestion,
 } from '@/services/api';
-
-const MATH_SUBJECT_ID = 1;
 
 const TYPE_LABEL: Record<string, string> = {
   choice: '选择',
@@ -21,6 +21,9 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function HiddenQuestionsPage() {
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
+  const subjectQuery = `?subjectId=${subjectId}`;
   const [items, setItems] = useState<HiddenQuestion[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [unmarkingId, setUnmarkingId] = useState<number | null>(null);
@@ -30,13 +33,13 @@ export default function HiddenQuestionsPage() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const data = await listTrainingHidden(MATH_SUBJECT_ID);
+      const data = await listTrainingHidden(subjectId);
       setItems(data);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : '加载失败');
       setItems([]);
     }
-  }, []);
+  }, [subjectId]);
 
   useEffect(() => {
     void load();
@@ -74,9 +77,9 @@ export default function HiddenQuestionsPage() {
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">
           <PageHeader
-            to="/student/training/targeted"
+            to={`/student/training/targeted${subjectQuery}`}
             caption="返回专项练习"
-            title="我的不再展示清单"
+            title={subjectId === SUBJECT_CHINESE ? '语文 · 不再展示' : '我的不再展示清单'}
           />
 
           <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">

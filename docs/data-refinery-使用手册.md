@@ -947,9 +947,45 @@ python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
 python src/import_cli.py --subject 语文 --year 2025             # 正式导入
 ```
 
+### 4.12 emphasis_cli — 语文试卷着重号/下划线回填（2026-10-28）
+
+**问题**：MinerU 输出 Markdown 没有下划线语义；着重号只能偶尔被识别成 `<sub>．．</sub>`。语文卷的「文段中加点词语」「画横线句」一旦丢标记，题目就无法作答。
+
+**做法**：不靠 OCR/LLM，直接读 PDF：
+
+- 下划线 = 字符底部高度 < 1.6pt 的填充矩形，按字符框重叠映射；
+- 着重号 = 页面渲染成灰度图后，检查汉字下方 3pt 内的小墨点（排除下划线与表格区域）。
+
+命中后注入前端可渲染的 HTML：`<u>嘉年华</u>`、逐字 `<span class="cn-emphasis-dot">高</span><span class="cn-emphasis-dot">涨</span>`（`apps/web` 的 `global.css` 用 `::after` 画 0.15em 纯黑字下点；下划线 2px 深色）。
+
+```bash
+cd tools/data-refinery/src
+
+# 预演（默认不改库）：检测 + 打印将变化的题目/字段
+python emphasis_cli.py --paper-id 17
+
+# 写库（先备份完整行到 tools/db/backups/，只改 content/material_text/options/content_hash）
+python emphasis_cli.py --paper-id 17 --apply
+
+# 全部语文卷预演；确认后再加 --apply --yes
+python emphasis_cli.py --all-chinese
+```
+
+**约束**：
+
+- 只处理 `subjects.code='chinese'`；其它学科直接跳过。
+- 只写 `questions.content` / `material_text` / `options` / `content_hash` 四列；写入后逐列校验 answer/explanation 等其它列未变。
+- 幂等：已带标记的文本不会重复包裹，重跑输出「需要更新 0 题」。
+- 题干（content）只做 `<sub>` 归一化、不套 PDF 标记——题干里的「画横线的‘X’」是引用，原卷并未画线。
+- 选项与材料分开匹配：选项行按 `A.`/`B．` 前缀识别，用「纯汉字上下文」匹配（选项文本会去掉前缀与着重号本身）。
+- 电子版 PDF 效果最好；**纯扫描件**（无文字层）需要 OCR 字符框，本期不做。
+- 若后续重新跑 extract/publish，新数据不会自带标记——需在入库后再跑一次本命令（或等它接进 `import_cli`）。
+
 ## 5. 推荐工作流
 
 ### 5.0 单科/单卷一键导入（import_cli，2026-10-28 新增）
+
+> 语文试卷导入后若需恢复着重号/下划线，再执行 `python emphasis_cli.py --paper-id <id> --apply`（见 §4.12）。
 
 素材已在 `tools/crawler/data/` 时，一条命令走完 **convert → extract → publish → 入库**，
 全部阶段共用统一范围参数，入库固定增量（不会 full-reload、不碰其他学科）：

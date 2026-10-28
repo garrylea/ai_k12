@@ -288,6 +288,7 @@ CREATE TABLE IF NOT EXISTS paper_questions (
   question_no SMALLINT NOT NULL,
   group_id VARCHAR(50) DEFAULT NULL,
   group_order SMALLINT DEFAULT NULL,
+  in_exam TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否进入真题考试（0=仅试卷入口可见，不组卷）',
   PRIMARY KEY (paper_id, question_id),
   KEY idx_pq_question (question_id),
   CONSTRAINT fk_pq_paper FOREIGN KEY (paper_id) REFERENCES exam_papers (id) ON DELETE CASCADE,

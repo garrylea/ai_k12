@@ -192,6 +192,56 @@ describe('judgeQuestion 四路由（self_assess 模式）', () => {
   });
 });
 
+describe('judgeQuestion 语文（subject_id=2）非客观题自评（2026-10-28 裁决）', () => {
+  const cn = (type: string, answer = '示例：写出一个即可') => ({ ...q(type, answer), subject_id: 2 });
+
+  it('语文 fill_blank -> 直接自评，不调 AI、不写错题本，带回参考答案', async () => {
+    const { svc, mainError } = makeService({
+      questions: { findById: vi.fn(async () => cn('fill_blank', '示例：长风破浪会有时')) },
+    });
+    (svc as any).judgment = { judge: vi.fn() };
+
+    const out = await svc.judgeQuestion({
+      studentId: 7, subjectId: 2, questionId: 10, studentAnswer: '长风破浪会有时', source: 'exam',
+    });
+
+    expect(out).toMatchObject({
+      questionId: 10,
+      isCorrect: null,
+      method: 'self_assess',
+      needsSelfAssessment: true,
+      referenceAnswer: '示例：长风破浪会有时',
+    });
+    expect((svc as any).judgment.judge).not.toHaveBeenCalled();
+    expect(mainError.create).not.toHaveBeenCalled();
+  });
+
+  it('语文 fill_blank 即使与标准答案逐字相同也自评（不能先被 1b 归一化判等截走）', async () => {
+    const { svc, mainError } = makeService({
+      questions: { findById: vi.fn(async () => cn('fill_blank', '会当凌绝顶')) },
+    });
+
+    const out = await svc.judgeQuestion({
+      studentId: 7, subjectId: 2, questionId: 10, studentAnswer: '会当凌绝顶', source: 'targeted',
+    });
+
+    expect(out).toMatchObject({ isCorrect: null, method: 'self_assess' });
+    expect(mainError.clearUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+  });
+
+  it('语文 choice / true_false 仍走 exact 比对（客观题不甩给自评）', async () => {
+    const { svc } = makeService({
+      questions: { findById: vi.fn(async () => ({ ...cn('choice', 'A'), options: null })) },
+    });
+
+    const out = await svc.judgeQuestion({
+      studentId: 7, subjectId: 2, questionId: 10, studentAnswer: 'A', source: 'exam',
+    });
+
+    expect(out).toMatchObject({ isCorrect: true, method: 'exact' });
+  });
+});
+
 describe('judgeQuestion 空答案守卫（路由 0）', () => {
   it('空答案题（error_practice 重抽不过滤）-> 不计对错早退，不入错题本不触发解析', async () => {
     const { svc, mainError } = makeService({

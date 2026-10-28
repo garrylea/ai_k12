@@ -10,6 +10,8 @@ export interface RunnerQuestion {
   type?: string;
   /** 选择题选项；true_false 可缺省，缺省时组件渲染 对/错 两个选项 */
   options?: Array<{ label: string; text: string }>;
+  /** 同节共享材料（语文阅读/文段题，Markdown+图片）；数学题通常缺省 */
+  material?: string | null;
 }
 
 /** 单题作答记录：onFinish 快照交给父层，由父层决定后续（结果页/错题本等）。 */

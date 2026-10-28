@@ -11,7 +11,9 @@ export interface DefaultRule {
 export const TASK_NAMES: Record<string, string> = {
   mainline_lesson: '学完一课',
   math_paper: '数学卷子一套',
+  cn_paper: '语文卷子一套',
   math_targeted: '数学专项',
+  cn_targeted: '语文专项',
   error_fix: '错题订正',
   cn_dictation: '古诗文默写',
   cn_interpretation: '古诗文翻译',
@@ -36,6 +38,7 @@ export const TASK_NAMES: Record<string, string> = {
 export const DEFAULT_RULES: DefaultRule[] = [
   { taskCode: 'mainline_lesson',   taskName: '学完一课',     tierKey: 'default', tierLabel: '一课',   points: 10, dailyLimit: null, sortOrder: 10 },
   { taskCode: 'math_paper',        taskName: '数学卷子一套', tierKey: 'default', tierLabel: '一套',   points: 50, dailyLimit: null, sortOrder: 20 },
+  { taskCode: 'cn_paper',          taskName: '语文卷子一套', tierKey: 'default', tierLabel: '一套',   points: 50, dailyLimit: null, sortOrder: 25 },
   { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '1',       tierLabel: '1 题',   points: 2,  dailyLimit: 5,    sortOrder: 30 },
   { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '3',       tierLabel: '3 题',   points: 8,  dailyLimit: 5,    sortOrder: 31 },
   { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 32 },
@@ -52,4 +55,8 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { taskCode: 'en_vocabulary',     taskName: '英语背单词',   tierKey: '10',      tierLabel: '10 词',  points: 2,  dailyLimit: 2,    sortOrder: 80 },
   { taskCode: 'en_vocabulary',     taskName: '英语背单词',   tierKey: '15',      tierLabel: '15 词',  points: 4,  dailyLimit: 2,    sortOrder: 81 },
   { taskCode: 'en_vocabulary',     taskName: '英语背单词',   tierKey: '20',      tierLabel: '20 词',  points: 7,  dailyLimit: 2,    sortOrder: 82 },
+  { taskCode: 'cn_targeted',       taskName: '语文专项',     tierKey: '1',       tierLabel: '1 题',   points: 2,  dailyLimit: 5,    sortOrder: 90 },
+  { taskCode: 'cn_targeted',       taskName: '语文专项',     tierKey: '3',       tierLabel: '3 题',   points: 8,  dailyLimit: 5,    sortOrder: 91 },
+  { taskCode: 'cn_targeted',       taskName: '语文专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 92 },
+  { taskCode: 'cn_targeted',       taskName: '语文专项',     tierKey: '10',      tierLabel: '10 题',  points: 35, dailyLimit: 5,    sortOrder: 93 },
 ];

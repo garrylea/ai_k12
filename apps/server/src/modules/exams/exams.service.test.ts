@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 /** 会话测试公共 fixtures。 */
-const paperRow = { id: 5, subject_id: 2, title: '2025 年期末卷', year: 2025, district: '海淀', exam_type: '期末', grade_band: 'junior', question_count: 3 };
+const paperRow = { id: 5, subject_id: 1, title: '2025 年期末卷', year: 2025, district: '海淀', exam_type: '期末', grade_band: 'junior', question_count: 3 };
 const paperQuestions = [
   { questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: '["A. 1", "B. 2"]' },
   { questionId: 11, questionNo: 2, text: '填空题', type: 'fill_blank', options: null },
@@ -57,7 +57,7 @@ const sessionRow = (o: any = {}) => ({
   id: 77,
   student_id: 1,
   paper_id: 5,
-  subject_id: 2,
+  subject_id: 1,
   status: 'in_progress',
   duration_minutes: 30,
   started_at: new Date(Date.now() - 60000),
@@ -152,7 +152,7 @@ describe('ExamsService.getPaperDetail', () => {
     expect(r.id).toBe(1);
     expect(r.title).toBe('2025 年期末卷');
     expect(r.questions).toHaveLength(3);
-    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'] });
+    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null });
     expect(r.questions[2].options).toBeNull();
   });
 
@@ -181,7 +181,7 @@ describe('ExamsService.getPaperDetail', () => {
     });
     const r = await mkSvc(deps).getPaperDetail(1);
     const q = r.questions[0];
-    expect(Object.keys(q).sort()).toEqual(['options', 'questionId', 'questionNo', 'text', 'type']);
+    expect(Object.keys(q).sort()).toEqual(['materialText', 'options', 'questionId', 'questionNo', 'text', 'type']);
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');
   });
@@ -223,11 +223,11 @@ describe('ExamsService.createSession', () => {
     expect(deps.examSessionsRepo.findInProgressByStudentPaper).toHaveBeenCalledWith(1, 5);
     expect(deps.examSessionsRepo.create).toHaveBeenCalledTimes(1);
     const arg = deps.examSessionsRepo.create.mock.calls[0][0];
-    expect(arg).toMatchObject({ studentId: 1, paperId: 5, subjectId: 2, durationMinutes: 30 });
+    expect(arg).toMatchObject({ studentId: 1, paperId: 5, subjectId: 1, durationMinutes: 30 });
     expect(arg.deadlineAt.getTime()).toBeGreaterThan(Date.now() + 29 * 60000);
     expect(r.sessionId).toBe(1);
     expect(r.questions).toHaveLength(3);
-    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'] });
+    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null });
     expect(r.remainingSeconds).toBeGreaterThanOrEqual(1790);
     expect(r.remainingSeconds).toBeLessThanOrEqual(1800);
   });
@@ -289,7 +289,7 @@ describe('ExamsService.submitAnswer', () => {
     });
     const r = await mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' });
     expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
-      studentId: 1, subjectId: 2, questionId: 10, studentAnswer: 'A', source: 'exam', sourceRefId: 77,
+      studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'A', source: 'exam', sourceRefId: 77,
     });
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith({
       sessionId: 77, questionId: 10, questionOrder: 1, answerText: 'A',
@@ -334,7 +334,7 @@ describe('ExamsService.submitAnswer', () => {
     });
     const r = await mkSvc(deps).submitAnswer(1, 77, { questionId: 12, answerText: '因为 AB 平行...' });
     expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
-      studentId: 1, subjectId: 2, questionId: 12, studentAnswer: '因为 AB 平行...', source: 'exam', sourceRefId: 77,
+      studentId: 1, subjectId: 1, questionId: 12, studentAnswer: '因为 AB 平行...', source: 'exam', sourceRefId: 77,
     });
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenLastCalledWith(expect.objectContaining({
       sessionId: 77, questionId: 12, isCorrect: 1, method: 'ai',
@@ -356,7 +356,7 @@ describe('ExamsService.submitAnswer', () => {
       sessionId: 77, questionId: 10, isCorrect: 0, method: 'unanswered',
     }));
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith({
-      student_id: 1, subject_id: 2, question_id: 10, source: 'exam', source_ref_id: 77,
+      student_id: 1, subject_id: 1, question_id: 10, source: 'exam', source_ref_id: 77,
       question_n: null, lesson_id: null, wrong_answer_text: null,
     });
   });
@@ -405,6 +405,91 @@ describe('ExamsService.submitAnswer', () => {
   });
 });
 
+describe('ExamsService 语文考试（subject_id=2，2026-10-28）', () => {
+  /** 语文卷 fixture：卷/会话 subject=2，题单沿用公共 3 题（choice/fill_blank/proof）。 */
+  const cnPaper = { ...paperRow, subject_id: 2 };
+  const cnDeps = (over: any = {}) =>
+    mk({
+      examPapersRepo: {
+        findPapers: vi.fn().mockResolvedValue([]),
+        findById: vi.fn().mockResolvedValue(cnPaper),
+        findQuestionsByPaperId: vi.fn().mockResolvedValue(paperQuestions),
+      },
+      examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow({ subject_id: 2 })) },
+      ...over,
+    });
+
+  it('单题提交：语文填空题不调 judgeCore，直接落 self_assess 行', async () => {
+    const deps = cnDeps();
+    await mkSvc(deps).submitAnswer(1, 77, { questionId: 11, answerText: '会当凌绝顶' });
+
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenLastCalledWith({
+      sessionId: 77, questionId: 11, questionOrder: 2, answerText: '会当凌绝顶',
+      isCorrect: null, method: 'self_assess', judgedAt: expect.any(Date),
+    });
+  });
+
+  it('单题提交：语文选择题仍走 exact 判题（judgeQuestion 收到真实 subjectId=2）', async () => {
+    const deps = cnDeps({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: true, method: 'exact' }) },
+    });
+    await mkSvc(deps).submitAnswer(1, 77, { questionId: 10, answerText: 'A' });
+
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
+      studentId: 1, subjectId: 2, questionId: 10, studentAnswer: 'A', source: 'exam', sourceRefId: 77,
+    });
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenLastCalledWith(expect.objectContaining({
+      sessionId: 77, questionId: 10, isCorrect: 1, method: 'exact',
+    }));
+  });
+
+  it('交卷：语文未作答的填空/简答按自评落库，不判错、不进错题本；只有客观未答入本', async () => {
+    const deps = cnDeps();
+    await mkSvc(deps).submit(1, 77);
+
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 11, isCorrect: null, method: 'self_assess',
+    }));
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 12, isCorrect: null, method: 'self_assess',
+    }));
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 10, isCorrect: 0, method: 'unanswered',
+    }));
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(1);
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      question_id: 10, subject_id: 2,
+    }));
+  });
+
+  it('交卷发分：语文用 cn_paper（家长端显示「语文卷子一套」）', async () => {
+    const pointsService = { award: vi.fn().mockResolvedValue(awardResult()) };
+    const deps = cnDeps({ pointsService });
+    await mkSvc(deps).submit(1, 77);
+
+    expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 1, taskCode: 'cn_paper', dedupeKey: 'paper:77',
+    }));
+  });
+
+  it('结果页：materialText 透传（语文阅读材料随题返回）', async () => {
+    const deps = mk({
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ subject_id: 2, status: 'submitted' })),
+        findAnswersWithQuestions: vi.fn().mockResolvedValue([{
+          question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, analysis: null,
+          text: '题面', type: 'choice', options: null, explanation: null, answer: 'A',
+          material_text: '材料原文',
+        }]),
+      },
+    });
+    const r = await mkSvc(deps).getResults(1, 77);
+    expect(r.items[0].materialText).toBe('材料原文');
+  });
+});
+
 describe('ExamsService.submit', () => {
   it('1 题未答（客观）+ 1 题主观未答 + 1 题已答对：客观未答按错计 + 入错题本；主观统一 self_assess 行', async () => {
     // 收卷前只查到 q10 已答；markSubmitted 后复查返回三题终态（q11 unanswered / q12 self_assess）
@@ -435,7 +520,7 @@ describe('ExamsService.submit', () => {
     // 错题本只入 q11（主观题不写错题本）
     expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(1);
     expect(deps.mainErrorRepo.create).toHaveBeenCalledWith({
-      student_id: 1, subject_id: 2, question_id: 11, source: 'exam', source_ref_id: 77,
+      student_id: 1, subject_id: 1, question_id: 11, source: 'exam', source_ref_id: 77,
       question_n: null, lesson_id: null, wrong_answer_text: null,
     });
     expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
@@ -482,7 +567,7 @@ describe('ExamsService.submit', () => {
     });
     const r = await mkSvc(deps).submit(1, 77);
     expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
-      studentId: 1, subjectId: 2, questionId: 11, studentAnswer: '2/3', source: 'exam', sourceRefId: 77,
+      studentId: 1, subjectId: 1, questionId: 11, studentAnswer: '2/3', source: 'exam', sourceRefId: 77,
     });
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 77, questionId: 11, answerText: '2/3', isCorrect: 1, method: 'exact',
@@ -561,7 +646,7 @@ describe('ExamsService.submit', () => {
     const r = await mkSvc(deps).submit(1, 77);
     // q12 在途主观题 -> ai 补判；q10/q11 未答 -> unanswered 入错题本
     expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({
-      studentId: 1, subjectId: 2, questionId: 12, studentAnswer: '因为...', source: 'exam', sourceRefId: 77,
+      studentId: 1, subjectId: 1, questionId: 12, studentAnswer: '因为...', source: 'exam', sourceRefId: 77,
     });
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 77, questionId: 12, isCorrect: 0, method: 'ai',
@@ -796,6 +881,7 @@ describe('ExamsService.getResults', () => {
     expect(r.subjectiveCount).toBe(0);
     expect(r.items[0]).toEqual({
       questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'],
+      materialText: null,
       answerText: 'A', isCorrect: 1, analysis: null, explanation: '选 A 因为...',
       answer: 'A', needsSelfAssessment: false, selfAssessment: null,
     });

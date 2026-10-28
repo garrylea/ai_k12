@@ -72,6 +72,7 @@ const ITEM: ExamResultItem = {
   analysis: null,
   explanation: null,
   answer: 'B',
+  materialText: null,
 };
 
 const SUMMARY: ExamSummary = { correctCount: 18, totalCount: 20, accuracy: 90 };
@@ -92,7 +93,7 @@ const SESSION: ExamSessionInfo = {
   sessionId: 77,
   status: 'submitted',
   remainingSeconds: 0,
-  questions: [{ questionId: 101, questionNo: 1, text: '1 + 1 = ?', type: 'choice', options: ['A. 1', 'B. 2'] }],
+  questions: [{ questionId: 101, questionNo: 1, text: '1 + 1 = ?', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null }],
 };
 
 /** 建真 data router（`RunExitGuard` 依赖 data router，因此不能用 `MemoryRouter`）。 */

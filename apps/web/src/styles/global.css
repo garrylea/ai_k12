@@ -422,3 +422,32 @@ body {
 }
 .thinking-dot:nth-child(2) { animation-delay: 0.15s; }
 .thinking-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/* 语文试卷着重号（加点字）：PDF 标注提取后由 data-refinery 注入**逐字** span。
+   用伪元素画字下实心点，而不是 text-emphasis —— 后者的大小/颜色不可调，
+   用户反馈点发灰、不够利落，且 text-emphasis 无法单独调大小/颜色；这里直径 0.15em、纯黑、紧贴字底。
+
+   下划线同理：浏览器默认 1px 且继承正文色，太轻；统一 2px 深色并下移 3px。
+   （<u> 目前只由语文卷标注注入使用，全局样式不会影响其它已用元素。） */
+.cn-emphasis-dot {
+  position: relative;
+}
+.cn-emphasis-dot::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -0.1em;
+  width: 0.15em;
+  height: 0.15em;
+  margin-left: -0.075em;
+  border-radius: 50%;
+  background: #000;
+}
+
+u {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: #111;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+}

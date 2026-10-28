@@ -26,6 +26,8 @@ export interface SessionQuestionDto {
   text: string;
   type: string;
   options: unknown[] | null;
+  /** 同节共享材料（语文阅读/文段题）；数学卷为 null。 */
+  materialText: string | null;
 }
 
 /** POST /api/exams/sessions 响应（新建/续考同构；续考不重置时长）。
@@ -65,6 +67,8 @@ export interface ExamResultItemDto {
   text: string;
   type: string;
   options: unknown[] | null;
+  /** 同节共享材料（语文阅读/文段题）；数学卷为 null。 */
+  materialText: string | null;
   answerText: string | null;
   isCorrect: number | null; // 0 | 1；null = 主观题待自评（self_assess 模式不判对错）
   analysis: string | null;

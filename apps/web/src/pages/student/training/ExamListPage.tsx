@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, Modal, PageHeader, Skeleton, Tag } from '@/components/base';
 import {
   createExamSession,
@@ -7,12 +7,10 @@ import {
   getExamPapers,
   type ExamPaper,
 } from '@/services/api';
-
-/** id 对应 subjects 表 seed（1=数学），与现有训练页一致。 */
-const MATH_SUBJECT_ID = 1;
+import { parseSubjectId, subjectHomePath, SUBJECT_CHINESE } from '@/constants';
 
 /** 时长档（分钟）；推荐时长四舍五入到最近档位。 */
-const DURATION_OPTIONS = [60, 90, 120] as const;
+const DURATION_OPTIONS = [60, 75, 90, 120] as const;
 
 const selectClassName =
   'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
@@ -93,6 +91,8 @@ interface SelectedPaper {
 
 export default function ExamListPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
 
   // 筛选条件
   const [year, setYear] = useState('');
@@ -110,7 +110,7 @@ export default function ExamListPage() {
     setError(null);
     try {
       const data = await getExamPapers({
-        subjectId: MATH_SUBJECT_ID,
+        subjectId,
         year: year ? Number(year) : undefined,
         district: district || undefined,
         examType: examType || undefined,
@@ -124,7 +124,7 @@ export default function ExamListPage() {
     } finally {
       setLoading(false);
     }
-  }, [year, district, examType]);
+  }, [subjectId, year, district, examType]);
 
   // mount 时拉默认列表（仅一次，筛选由「查询」按钮触发）
   useEffect(() => {
@@ -192,7 +192,7 @@ export default function ExamListPage() {
       const session = await createExamSession(selectedPaper.id, duration);
       // 会话交给 run 页（Task 5 实现），避免 URL 传参
       sessionStorage.setItem('exam:session', JSON.stringify(session));
-      navigate(`/student/training/exam/run/${session.sessionId}`);
+      navigate(`/student/training/exam/run/${session.sessionId}?subjectId=${subjectId}`);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : '开考失败，请重试');
       setStarting(false);
@@ -204,7 +204,11 @@ export default function ExamListPage() {
       <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
         <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 pt-6 sm:pt-8 pb-16">
           {/* 顶栏 */}
-          <PageHeader to="/student/training/home" caption="返回训练" title="考试" />
+          <PageHeader
+            to={subjectHomePath(subjectId)}
+            caption="返回训练"
+            title={subjectId === SUBJECT_CHINESE ? '语文 · 真题' : '考试'}
+          />
 
           {/* 筛选区 */}
           <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">

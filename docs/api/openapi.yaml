@@ -10380,6 +10380,12 @@ components:
         gradeBand:
           type: string
           description: 学段（primary/junior/senior）
+        questionCount:
+          type: integer
+          description: >-
+            该考点**全局可抽题数**（is_active=1 且有答案，与 findRandomByKpAndType 同源；
+            不含该生「不再展示」这层个人维度）。0 = 前端置灰不可选。
+      required: [id, name, parentKpId, gradeBand, questionCount]
 
     TargetedStartRequest:
       type: object
@@ -10429,6 +10435,11 @@ components:
           items: {}
           nullable: true
           description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
+        materialText:
+          type: string
+          nullable: true
+          description: 同节共享材料（语文阅读/文段题，Markdown+图片）；数学题通常 null
+      required: [questionId, text, type, options, materialText]
 
     RemediationGenerateRequest:
       type: object
@@ -11483,7 +11494,7 @@ components:
           description: 学段（可空）
         questionCount:
           type: integer
-          description: 题目数量
+          description: 可考题目数（paper_questions.in_exam=1 且 questions.is_active=1；语文卷剔除阅读/作文后为实际进卷题数）
       required: [id, title, year, district, examType, gradeBand, questionCount]
 
     ExamQuestionMeta:
@@ -11507,7 +11518,11 @@ components:
           items: {}
           nullable: true
           description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
-      required: [questionId, questionNo, text, type, options]
+        materialText:
+          type: string
+          nullable: true
+          description: 同节共享材料（语文阅读/文段题，Markdown+图片）；数学卷为 null
+      required: [questionId, questionNo, text, type, options, materialText]
 
     ExamPaperDetail:
       type: object
@@ -11651,7 +11666,7 @@ components:
             points:
               allOf:
                 - $ref: '#/components/schemas/PointsAwardDto'
-              description: 交卷发分结果（math_paper，丙类埋点，2026-09-17）
+              description: 交卷发分结果（数学卷 math_paper / 语文卷 cn_paper，丙类埋点，2026-09-17；2026-10-28 加语文）
 
     ExamResultItem:
       type: object
@@ -11674,6 +11689,10 @@ components:
           items: {}
           nullable: true
           description: 选项数组（DB JSON 字符串 parse 后；无/坏 JSON 为 null）
+        materialText:
+          type: string
+          nullable: true
+          description: 同节共享材料（语文阅读/文段题，Markdown+图片）；数学卷为 null
         answerText:
           type: string
           nullable: true
@@ -11703,7 +11722,7 @@ components:
           type: string
           nullable: true
           description: 题库解析
-      required: [questionId, questionNo, text, type, options, answerText, isCorrect, answer, needsSelfAssessment, selfAssessment, analysis, explanation]
+      required: [questionId, questionNo, text, type, options, materialText, answerText, isCorrect, answer, needsSelfAssessment, selfAssessment, analysis, explanation]
 
     ExamResults:
       type: object

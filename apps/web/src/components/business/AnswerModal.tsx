@@ -9,7 +9,7 @@ import type { RunnerJudgeOutcome, RunnerQuestion } from './answer/types';
 import { DiscussDrawer, DiscussIconButton } from './DiscussDrawer';
 import { selfAssessPractice } from '@/services/api';
 
-export interface PracticeQuestion { n: string; text: string; }
+export interface PracticeQuestion { n: string; text: string; material?: string | null; }
 
 /** 单题判题状态：等待 / 判题中 / 已判完 / 判定失败（进度页外壳用，key = q.n） */
 type JudgeStatus = 'pending' | 'judging' | 'done' | 'failed';

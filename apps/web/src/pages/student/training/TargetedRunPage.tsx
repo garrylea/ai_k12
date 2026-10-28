@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from '@/components/business/answer/types';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
@@ -24,9 +24,7 @@ import { normalizeOptions } from './normalizeOptions';
 import { parseRunHandoff } from './run-handoff';
 import { useSessionPointsCompletion } from './session-completion';
 import { SessionPointsRetryNotice } from './SessionPointsRetryNotice';
-
-/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
-const MATH_SUBJECT_ID = 1;
+import { parseSubjectId, subjectName, SUBJECT_CHINESE } from '@/constants';
 
 /** 配置页写入的题单键（读后即删，防止刷新后重复进入旧题单）。 */
 const SESSION_KEY = 'training:targeted';
@@ -35,6 +33,11 @@ type Phase = 'answering' | 'result';
 
 export default function TargetedRunPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
+  const subjectQuery = `?subjectId=${subjectId}`;
+  /** 补偿套题当前只支持数学（后端 remediation 不认语文会话）。 */
+  const remediationSupported = subjectId !== SUBJECT_CHINESE;
 
   const [phase, setPhase] = useState<Phase>('answering');
   const [hints, setHints] = useState<Record<string, string>>({});
@@ -62,7 +65,7 @@ export default function TargetedRunPage() {
 
   // 完成发分（乙类会话页唯一入口）：末题收尾时调 complete；失败可重试
   const { complete: completeSession, retry, needsRetry, unrecoverable, retrying, celebrationProps } =
-    useSessionPointsCompletion(sessionId, `数学专项 · ${entries?.length ?? 0} 题`);
+    useSessionPointsCompletion(sessionId, `${subjectName(subjectId)}专项 · ${entries?.length ?? 0} 题`);
 
   // StrictMode 下 effect 会跑两次：ref 守卫保证「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无题单而踢回配置页。
@@ -83,9 +86,9 @@ export default function TargetedRunPage() {
   // 空题单（直接访问 / 解析失败 / 刷新后读不到）回配置页
   useEffect(() => {
     if (entries !== null && entries.length === 0) {
-      navigate('/student/training/targeted', { replace: true });
+      navigate(`/student/training/targeted${subjectQuery}`, { replace: true });
     }
-  }, [entries, navigate]);
+  }, [entries, navigate, subjectQuery]);
 
   // n（= String(questionId)）-> 题单条目映射
   const entryByN = useMemo(() => {
@@ -101,13 +104,14 @@ export default function TargetedRunPage() {
         text: e.text,
         type: e.type,
         options: normalizeOptions(e.options),
+        material: e.materialText,
       })),
     [entries],
   );
 
   // AnswerResultList 的题目输入（n/text 与 RunnerQuestion 一致，共用 questionId 键）
   const resultQuestions: PracticeQuestion[] = useMemo(
-    () => (entries ?? []).map((e) => ({ n: String(e.questionId), text: e.text })),
+    () => (entries ?? []).map((e) => ({ n: String(e.questionId), text: e.text, material: e.materialText })),
     [entries],
   );
 
@@ -132,7 +136,7 @@ export default function TargetedRunPage() {
   // 都画一条 border-b（AnswerResultList.tsx:157-158）——若无条件渲染包裹槽位，全对轮次
   // 会凭空多出一条分隔线与 16px 空带（空 div 仍让外层 space-y-3 非空、headerExtra 仍 truthy）。
   // 卡片内部 state === 'done'（点「生成练习」/「跳过」后自隐）宿主观察不到，故槽位另加 empty:hidden 兜底。
-  const remediationOfferVisible = remediationWrongIds.length > 0 && sessionId != null;
+  const remediationOfferVisible = remediationSupported && remediationWrongIds.length > 0 && sessionId != null;
 
   const handleSubmit = useCallback(
     async (q: RunnerQuestion, answer: string) => {
@@ -142,14 +146,14 @@ export default function TargetedRunPage() {
       }
       return judgeTraining({
         questionId: entry.questionId,
-        subjectId: MATH_SUBJECT_ID,
+        subjectId,
         studentAnswer: answer,
         source: 'targeted',
         // 会话留痕（后端累加 judged_count）；sessionId 为 null 时不带这个字段
         ...(sessionId != null ? { sessionId } : {}),
       });
     },
-    [entryByN, sessionId],
+    [entryByN, sessionId, subjectId],
   );
 
   const handleRequestHint = useCallback(
@@ -211,7 +215,7 @@ export default function TargetedRunPage() {
     if (markConfirm.questionId == null) return;
     setMarking(true);
     try {
-      await markTrainingHidden({ questionId: markConfirm.questionId, subjectId: MATH_SUBJECT_ID });
+      await markTrainingHidden({ questionId: markConfirm.questionId, subjectId });
       toast('success', '已加入不再展示清单');
     } catch (err) {
       toast('error', err instanceof Error ? err.message : '标记失败，请重试');
@@ -219,7 +223,7 @@ export default function TargetedRunPage() {
       setMarking(false);
       setMarkConfirm({ open: false, questionId: null });
     }
-  }, [markConfirm.questionId]);
+  }, [markConfirm.questionId, subjectId]);
 
   // mount 读取中 / 空题单（正在被踢回配置页）：不渲染内容
   if (entries == null || entries.length === 0) return null;
@@ -268,7 +272,7 @@ export default function TargetedRunPage() {
               const res = await waitTrainingExplanation(qid);
               return res.explanation;
             }}
-            onClose={() => navigate('/student/training/targeted')}
+            onClose={() => navigate(`/student/training/targeted${subjectQuery}`)}
           />
         ) : (
           <>
@@ -277,7 +281,7 @@ export default function TargetedRunPage() {
               <div className="flex-1 min-w-0 min-h-0 flex flex-col">
                 <QuestionRunner
                   questions={questions}
-                  subjectId={MATH_SUBJECT_ID}
+                  subjectId={subjectId}
                   draftKeyPrefix="tp"
                   variant="embedded"
                   draftDisabled  // 内嵌草稿由页面级草稿面板替代（2026-09-07）
@@ -314,7 +318,7 @@ export default function TargetedRunPage() {
                     if (!entry) throw new Error('题单条目缺失，无法自评');
                     await selfAssessTraining({
                       questionId: entry.questionId,
-                      subjectId: MATH_SUBJECT_ID,
+                      subjectId,
                       assessment,
                       source: 'targeted',
                     });
@@ -368,7 +372,7 @@ export default function TargetedRunPage() {
               <button
                 onClick={() => {
                   guardRef.current = false;
-                  navigate('/student/training/targeted', { replace: true });
+                  navigate(`/student/training/targeted${subjectQuery}`, { replace: true });
                 }}
                 className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)]"
               >

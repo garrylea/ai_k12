@@ -34,5 +34,7 @@ export interface PaperDetailDto {
     text: string;
     type: string;
     options: unknown[] | null;
+    /** 同节共享材料（语文阅读/文段题）；数学卷为 null。 */
+    materialText: string | null;
   }>;
 }

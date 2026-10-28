@@ -23,6 +23,21 @@ import type {
 const MIN_DURATION = 10;
 const MAX_DURATION = 300;
 
+/** 纯客观题型：精确判分。 */
+const OBJECTIVE_TYPES = new Set(['choice', 'true_false']);
+
+/**
+ * 是否按「自评」处理（不判对错、结果页对照参考答案自评）。
+ *
+ * - 数学：沿用判题体系重构口径（short_answer/proof + JUDGE_SUBJECTIVE_MODE=self_assess）
+ * - 语文：**非客观题一律自评**（2026-10-28 裁决）——填空/简答答案多为「示例：…」，
+ *   精确判对几乎不可能，且 AI 判题模板目前只有数学，语文走 AI 会被数学提示词误判。
+ */
+export function shouldSelfAssess(subjectId: number, type: string): boolean {
+  if (Number(subjectId) === 2 && !OBJECTIVE_TYPES.has(type)) return true;
+  return subjectiveJudgeMode() === 'self_assess' && SUBJECTIVE_TYPES.has(type);
+}
+
 /**
  * 考试模块 service。
  *
@@ -195,8 +210,8 @@ export class ExamsService {
       answerText: dto.answerText,
     });
 
-    // 主观题 self_assess 模式（判题体系重构）：不判题，作答已落库；结果页对照参考答案自评。
-    if (subjectiveJudgeMode() === 'self_assess' && SUBJECTIVE_TYPES.has(q.type)) {
+    // 自评（数学主观题 / 语文非客观题）：不判题，作答已落库；结果页对照参考答案自评。
+    if (shouldSelfAssess(session.subject_id, q.type)) {
       await this.examSessionsRepo.upsertAnswer({
         sessionId,
         questionId: dto.questionId,
@@ -222,7 +237,7 @@ export class ExamsService {
       questionId: dto.questionId,
       questionOrder: q.questionNo,
       answerText: dto.answerText,
-      isCorrect: out.isCorrect ? 1 : 0,
+      isCorrect: out.isCorrect === null ? null : (out.isCorrect ? 1 : 0),
       method: out.method,
       errorType: out.errorType ?? null,
       judgedAt: new Date(),
@@ -259,6 +274,7 @@ export class ExamsService {
       text: row.text,
       type: row.type,
       options: parseOptions(row.options),
+      materialText: row.material_text ?? null,
       answerText: row.answer_text,
       isCorrect: row.is_correct,               // null = 主观题待自评
       analysis: row.analysis,
@@ -297,9 +313,9 @@ export class ExamsService {
     const byQuestion = new Map(answers.map((a) => [a.question_id, a]));
 
     for (const q of questions) {
-      // 主观题 self_assess 模式：不判题不按错计（无论是否作答），统一落
+      // 自评（数学主观题 / 语文非客观题）：不判题不按错计（无论是否作答），统一落
       // is_correct=NULL + method='self_assess'，结果页对照参考答案自评。
-      if (subjectiveJudgeMode() === 'self_assess' && SUBJECTIVE_TYPES.has(q.type)) {
+      if (shouldSelfAssess(session.subject_id, q.type)) {
         const a0 = byQuestion.get(q.questionId);
         await this.examSessionsRepo.upsertAnswer({
           sessionId: session.id,
@@ -341,7 +357,7 @@ export class ExamsService {
             questionId: q.questionId,
             questionOrder: q.questionNo,
             answerText: a.answer_text,
-            isCorrect: out.isCorrect ? 1 : 0,
+            isCorrect: out.isCorrect === null ? null : (out.isCorrect ? 1 : 0),
             method: out.method,
             errorType: out.errorType ?? null,
             judgedAt: new Date(),
@@ -363,7 +379,9 @@ export class ExamsService {
     }
 
     await this.examSessionsRepo.markSubmitted(session.id);
-    const points = toPointsAwardDto(await this.awardPaperPoints(session.student_id, session.id));
+    const points = toPointsAwardDto(
+      await this.awardPaperPoints(session.student_id, session.id, session.subject_id),
+    );
     const finalAnswers = await this.examSessionsRepo.findAnswersBySession(session.id);
     // 埋点（Phase 2）：exam_submitted 的唯一收口在 finalizeSession——四条收卷路径
     // （submit / getSession 超时 / submitAnswer 超时 / createSession 撞过期）都只对
@@ -384,11 +402,16 @@ export class ExamsService {
   /** 交卷发分（学完一张卷）。刻意吞掉异常：积分是激励层，发分失败绝不能挡住交卷。
    *  `submit()` 已有「已 submitted 直接重算」的幂等判重，但本方法所在的 `finalizeSession`
    *  也会被超时自动收卷路径调用——`dedupe_key`（一个会话只能发一次）是第二道保险。 */
-  private async awardPaperPoints(studentId: number, sessionId: number): Promise<AwardResult | null> {
+  private async awardPaperPoints(
+    studentId: number,
+    sessionId: number,
+    subjectId: number,
+  ): Promise<AwardResult | null> {
     try {
       return await this.pointsService.award({
         studentId,
-        taskCode: 'math_paper',
+        // 语文走独立任务码（家长端显示「语文卷子一套」）；其余学科暂沿用数学码
+        taskCode: Number(subjectId) === 2 ? 'cn_paper' : 'math_paper',
         dedupeKey: `paper:${sessionId}`,
         refType: 'exam_session',
         refId: sessionId,
@@ -447,13 +470,17 @@ export class ExamsService {
     return questions.map((q) => this.toSessionQuestion(q));
   }
 
-  private toSessionQuestion(q: { questionId: number; questionNo: number; text: string; type: string; options: string | null }): SessionQuestionDto {
+  private toSessionQuestion(q: {
+    questionId: number; questionNo: number; text: string; type: string;
+    options: string | null; materialText: string | null;
+  }): SessionQuestionDto {
     return {
       questionId: q.questionId,
       questionNo: q.questionNo,
       text: q.text,
       type: q.type,
       options: parseOptions(q.options),
+      materialText: q.materialText ?? null,
     };
   }
 

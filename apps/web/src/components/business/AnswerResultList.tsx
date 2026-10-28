@@ -199,6 +199,16 @@ export function AnswerResultList({
                     </div>
                     {/* Content */}
                     <div className="flex-1 min-w-0">
+                      {q.material && (
+                        <div
+                          data-testid="result-material"
+                          className="mb-2 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[13px] text-[var(--text-primary)] leading-[1.7]"
+                        >
+                          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                            {preprocessMarkdown(q.material)}
+                          </ReactMarkdown>
+                        </div>
+                      )}
                       <div className="text-sm font-medium text-[var(--text-primary)] leading-[1.6]">
                         <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
                           {preprocessMarkdown(q.text)}

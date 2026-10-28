@@ -58,6 +58,7 @@ export interface ExamResultRow {
   options: string | null;
   explanation: string | null;
   answer: string | null; // 参考答案（主观题 self_assess 模式结果页自评展示）
+  material_text: string | null; // 同节共享材料（语文阅读/文段题）
 }
 
 /**
@@ -147,7 +148,8 @@ export class ExamSessionsRepository {
   async findAnswersWithQuestions(sessionId: number): Promise<ExamResultRow[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT ea.question_id, ea.question_order, ea.answer_text, ea.is_correct, ea.analysis,
-              q.content AS text, q.type, q.options, q.explanation, q.answer AS answer
+              q.content AS text, q.type, q.options, q.explanation, q.answer AS answer,
+              q.material_text
        FROM exam_answers ea JOIN questions q ON q.id = ea.question_id
        WHERE ea.session_id = ?
        ORDER BY ea.question_order`,

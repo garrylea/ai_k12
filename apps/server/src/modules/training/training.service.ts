@@ -632,7 +632,9 @@ export class TrainingService {
   /** 专项练习 KP 树：平铺列表透传（树形组装放前端）。 */
   async getKnowledgePoints(
     subjectId: number,
-  ): Promise<Array<{ id: number; name: string; parentKpId: number | null; gradeBand: string }>> {
+  ): Promise<Array<{
+    id: number; name: string; parentKpId: number | null; gradeBand: string; questionCount: number;
+  }>> {
     return this.knowledgePointsRepo.findBySubject(subjectId);
   }
 
@@ -657,7 +659,10 @@ export class TrainingService {
     type: string | null;
     count: number;
   }): Promise<{
-    questions: Array<{ questionId: number; text: string; type: string; options: unknown[] | null }>;
+    questions: Array<{
+      questionId: number; text: string; type: string;
+      options: unknown[] | null; materialText: string | null;
+    }>;
     /** 未抽到题时为 null（没有可完成的会话）。 */
     sessionId: number | null;
   }> {
@@ -673,6 +678,7 @@ export class TrainingService {
       text: q.content,
       type: q.type,
       options: parseOptions(q.options),
+      materialText: q.material_text ?? null,
     }));
 
     // 建会话失败**只丢这一轮的积分，不能 500 掉开练**：积分是激励层，绝不能挡住学习路径。
@@ -680,9 +686,10 @@ export class TrainingService {
     let sessionId: number | null = null;
     if (rows.length > 0) {
       try {
+        const taskCode = Number(input.subjectId) === 2 ? 'cn_targeted' : 'math_targeted';
         sessionId = await this.trainingSessionsRepo.create({
           student_id: input.studentId,
-          task_code: 'math_targeted',
+          task_code: taskCode,
           subject_id: input.subjectId,
           tier_key: String(input.count),
           expected_count: rows.length,
@@ -691,7 +698,7 @@ export class TrainingService {
         });
       } catch (err) {
         this.logger.warn(
-          `training_sessions.create failed (taskCode=math_targeted, studentId=${input.studentId}, tierKey=${input.count}): ${err instanceof Error ? err.message : String(err)}`,
+          `training_sessions.create failed (taskCode=${Number(input.subjectId) === 2 ? 'cn_targeted' : 'math_targeted'}, studentId=${input.studentId}, tierKey=${input.count}): ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

@@ -20,13 +20,26 @@ export class KnowledgePointsRepository {
 
   async findBySubject(
     subjectId: number,
-  ): Promise<Array<{ id: number; name: string; parentKpId: number | null; gradeBand: string }>> {
+  ): Promise<Array<{
+    id: number; name: string; parentKpId: number | null; gradeBand: string; questionCount: number;
+  }>> {
+    // questionCount = 该考点**全局可抽题数**（is_active + 有答案），与
+    // findRandomByKpAndType 的核心谓词一致；不含「该生已隐藏」这层（那是学生维度，
+    // 这里只用于前端把 0 题的考点置灰，不用于精确预测）。
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, name, parent_kp_id AS parentKpId, grade_band AS gradeBand
-       FROM knowledge_points WHERE subject_id = ? ORDER BY id`,
+      `SELECT k.id, k.name, k.parent_kp_id AS parentKpId, k.grade_band AS gradeBand,
+              (SELECT COUNT(DISTINCT q.id)
+                 FROM question_knowledge_points qkp
+                 JOIN questions q ON q.id = qkp.question_id
+                WHERE qkp.knowledge_point_id = k.id
+                  AND q.subject_id = k.subject_id
+                  AND q.is_active = 1 AND q.answer <> '') AS questionCount
+       FROM knowledge_points k WHERE k.subject_id = ? ORDER BY k.id`,
       [subjectId],
     );
-    return rows as Array<{ id: number; name: string; parentKpId: number | null; gradeBand: string }>;
+    return rows as Array<{
+      id: number; name: string; parentKpId: number | null; gradeBand: string; questionCount: number;
+    }>;
   }
 
   /** 单个知识点（补偿套题 AI 生成需要考点名，2026-09-21）。 */

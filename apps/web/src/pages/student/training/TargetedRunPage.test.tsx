@@ -56,6 +56,7 @@ const QUESTION: TargetedPracticeQuestion = {
   text: '1 + 1 = ?',
   type: 'choice',
   options: ['A. 1', 'B. 2'],
+  materialText: null,
 };
 
 const JUDGED: JudgeResult = {

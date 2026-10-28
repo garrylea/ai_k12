@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerAnswerRecord, RunnerQuestion } from '@/components/business/answer/types';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
@@ -23,9 +23,7 @@ import {
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
 import { usePointsFeedback } from './points-feedback';
-
-/** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——训练轨 MVP 仅数学。 */
-const MATH_SUBJECT_ID = 1;
+import { parseSubjectId } from '@/constants';
 
 /** 列表页写入的题单键（读后即删，防止刷新后重复进入旧题单）。 */
 const SESSION_KEY = 'training:errors';
@@ -34,6 +32,9 @@ type Phase = 'answering' | 'result';
 
 export default function ErrorPracticeRunPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
+  const subjectQuery = `?subjectId=${subjectId}`;
 
   const [phase, setPhase] = useState<Phase>('answering');
   const [hints, setHints] = useState<Record<string, string>>({});
@@ -85,9 +86,9 @@ export default function ErrorPracticeRunPage() {
   // 空题单（直接访问 / 解析失败 / 刷新后读不到）回列表页
   useEffect(() => {
     if (entries !== null && entries.length === 0) {
-      navigate('/student/training/errors', { replace: true });
+      navigate(`/student/training/errors${subjectQuery}`, { replace: true });
     }
-  }, [entries, navigate]);
+  }, [entries, navigate, subjectQuery]);
 
   // 卸载时清掉变式 8s 补查 timer（一次性 setTimeout，非轮询）
   useEffect(() => {
@@ -130,14 +131,14 @@ export default function ErrorPracticeRunPage() {
       // 发分是后端的事，这里只读响应；答对但本无未清错题（not_cleared）等 0 分由决策层静默
       const res = await judgeTraining({
         questionId: entry.questionId,
-        subjectId: MATH_SUBJECT_ID,
+        subjectId,
         studentAnswer: answer,
         source: 'error_practice',
       });
       award({ pointsAwarded: res.pointsAwarded, awardReason: res.awardReason, title: '错题订正' });
       return res;
     },
-    [entryByN, award],
+    [entryByN, award, subjectId],
   );
 
   const handleRequestHint = useCallback(
@@ -250,7 +251,7 @@ export default function ErrorPracticeRunPage() {
                   const res = await waitTrainingExplanation(qid);
                   return res.explanation;
                 }}
-                onClose={() => navigate('/student/training/errors')}
+                onClose={() => navigate(`/student/training/errors${subjectQuery}`)}
               />
             </div>
           </div>
@@ -261,7 +262,7 @@ export default function ErrorPracticeRunPage() {
               <div className="flex-1 min-w-0 min-h-0 flex flex-col">
                 <QuestionRunner
                   questions={questions}
-                  subjectId={MATH_SUBJECT_ID}
+                  subjectId={subjectId}
                   draftKeyPrefix="errp"
                   variant="embedded"
                   draftDisabled  // 内嵌草稿由页面级草稿面板替代（2026-09-07）
@@ -278,7 +279,7 @@ export default function ErrorPracticeRunPage() {
                     if (!entry || entry.questionId == null) throw new Error('该题未入库，无法自评');
                     await selfAssessTraining({
                       questionId: entry.questionId,
-                      subjectId: MATH_SUBJECT_ID,
+                      subjectId,
                       assessment,
                       source: 'error_practice',
                     });
@@ -333,7 +334,7 @@ export default function ErrorPracticeRunPage() {
               <button
                 onClick={() => {
                   guardRef.current = false;
-                  navigate('/student/training/errors', { replace: true });
+                  navigate(`/student/training/errors${subjectQuery}`, { replace: true });
                 }}
                 className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)]"
               >

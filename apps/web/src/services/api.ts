@@ -1021,6 +1021,8 @@ export interface TrainingKnowledgePoint {
   name: string;
   parentKpId: number | null;
   gradeBand: string;
+  /** 该考点全局可抽题数（与抽题谓词同源）；0 = 前端置灰不可选 */
+  questionCount: number;
 }
 
 /** 专项练习 KP 树：后端平铺透传（parentKpId 为 null 是一级），树形组装放前端。 */
@@ -1035,6 +1037,8 @@ export interface TargetedPracticeQuestion {
   text: string;
   type: string;
   options: unknown[] | null;
+  /** 同节共享材料（语文阅读/文段题）；数学题通常 null */
+  materialText: string | null;
 }
 
 /** 专项练习开练：type 为 null 表示不限题型；抽不到题返回空数组（前端判空提示）。 */
@@ -1735,6 +1739,8 @@ export interface ExamQuestion {
   text: string;
   type: string;
   options: ExamQuestionOptions;
+  /** 同节共享材料（语文阅读/文段题）；数学卷为 null */
+  materialText: string | null;
 }
 
 /** 试卷详情：题目元数据 + 推荐时长（不含 answer/explanation，防答案泄露）。 */
@@ -1786,6 +1792,8 @@ export interface ExamResultItem {
   text: string;
   type: string;
   options: ExamQuestionOptions;
+  /** 同节共享材料（语文阅读/文段题）；数学卷为 null */
+  materialText: string | null;
   answerText: string | null;
   /** null = 主观题待自评 */
   isCorrect: number | null;

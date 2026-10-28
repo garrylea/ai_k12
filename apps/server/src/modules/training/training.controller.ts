@@ -164,7 +164,9 @@ export class TrainingController {
     @CurrentUser() user: JwtUser,
   ) {
     const { count } = dto;
-    const allowed = await this.pointRulesService.listTierKeys(user.sub, 'math_targeted');
+    // 语文与数学各有独立任务码/档位（cn_targeted / math_targeted），家长端分组不同
+    const taskCode = Number(dto.subjectId) === 2 ? 'cn_targeted' : 'math_targeted';
+    const allowed = await this.pointRulesService.listTierKeys(user.sub, taskCode);
     if (!allowed.includes(String(count))) {
       throw new BadRequestException(`题量仅允许 ${allowed.join(' | ')}`);
     }

@@ -88,6 +88,56 @@
 
 **多学科守卫**：只给 `--file` 不给 `--subject` 时，子串可能命中多科（实测 `202507-海淀-模拟二-试卷` 命中 语文/数学/物理 3 科）。学科本身由路径首段判定、不会导错，但会顺带改别科，故正式执行**直接拒绝**（返回 2）并列出命中学科；`--dry-run` 仅告警并继续，便于查看清单。给 `--subject` 或把 `--file` 写完整即可通过。
 
+### 2026-10-28（续）· 语文真题考试 + 语文专项练习（首期）
+
+**背景**：语文题库已有 27 题（2025 海淀初三二模，#17 卷），但训练轨只有三个古诗文专项；真题考试/专项练习页面全部硬编码 `MATH_SUBJECT_ID=1`，语文学生看不到题库类训练。
+
+**已定口径（用户裁决）**：① 语文专项练习复用数学「选知识点 → 选题型 → 抽题」；② 语文训练页由 3 卡扩为 **6 卡**（默写/解释/含义/真题/专项/错题）；③ **语文非客观题（填空/简答）一律自评**，不接中文 AI 判题，选择题/判断题仍精确判分；④ 首期考试剔除现代文阅读与作文（卷 #17 的 17-27 不进卷，只考 1-16）；⑤ 新增积分任务码 `cn_paper`（50 分）/ `cn_targeted`（2/8/15/35，日限 5）；⑥ 语文错题照常入主线错题本、参与清零门禁。
+
+**数据面**：`paper_questions` 加 `in_exam TINYINT(1) NOT NULL DEFAULT 1`（迁移 `2026-10-28_paper_question_in_exam.sql`，information_schema 守卫幂等；`schema.sql` 同步）。按 `source_key LIKE '语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷%'` 把题号 ≥17 置 0（不写死 paper_id）。**为什么用显式标记而不是「有没有 material_text」**：语文基础运用 1-7 也带材料，靠字段区分不了；后续支持阅读/作文时改回 1 即可。
+
+**后端**：
+- 考试：列表 `questionCount` 改为「`in_exam=1` 且 `is_active=1`」子查询计数（16 而非 27）；detail/会话/结果三处透传 `materialText`；detail + 题单硬过滤 `in_exam=1`。
+- 自评：`ExamsService.shouldSelfAssess(subjectId,type)`（语文非 choice/true_false 一律 true）用于单题提交与 finalize；语文未作答的填空/简答落 `self_assess`、**不判错不入本**；`isCorrect=null` 不再被写成 0。
+- `judge-core`：语文非客观题自评分支**必须排在 fill_blank 归一化判等之前**（否则「恰好与参考答案逐字相同」会被 exact 截走）；数学行为不变。
+- 积分：`DEFAULT_RULES` 加 5 行（18→23 行、9→11 组）；交卷按学科选 `cn_paper`/`math_paper`；专项档位校验与会话 `task_code` 按学科选 `cn_targeted`/`math_targeted`。
+- KP 列表加 `questionCount`（全局可抽题数，与抽题谓词同源；不含「该生不再展示」这层）。
+- **无积分迁移**：`PointsService.award` 自身 `INSERT IGNORE` 默认规则，存量学生首次发分即补；只在「读规则」端点上才走 `ensureRules`。
+
+**前端**：
+- 新增 `src/constants.ts` 的学科常量/`subjectHomePath`/`parseSubjectId`（缺省数学，兼容既有不带参链接）。
+- 语文训练页 6 卡（标题「语文 · 训练」）。
+- 考试列表/作答/结果、专项配置/作答、不再展示清单、错题列表/作答全部按 `?subjectId=` 参数化；语文不显示补偿套题/变式入口（后端仍只支持数学）。
+- `RunnerQuestion`/`PracticeQuestion` 加 `material`，`QuestionRunner`/`AnswerResultList` 在题干上方渲染材料块（共享 markdown 配置：图片 `resolveAsset`、HTML、表格）。
+- **文本作答形态按学科分叉**：`QuestionRunner` 新增 `answerInput?: 'latex' | 'plain'`，缺省由 `isMathLikeSubject(subjectId)`（数学 1 / 物理 4 / 化学 5）决定——理科保留「左 LaTeX 输入 + 右预览」两栏，语文/英语等文字学科改为**整宽纯文本框**（无预览区、无数学符号面板，placeholder「请在此作答」）。
+- 考试时长档加 75 分钟。
+
+**踩坑**：
+- `paper_questions` 用了表别名 `p` 后，筛选列忘记加前缀会报 ambiguous；repo 测试专门钉了 `p.subject_id = ?`。
+- 语文专项的知识点按钮可访问名变成「病句 3 题」，既有测试用精确名 `一元二次方程` 会挂 —— 改正则匹配，别把题量从 a11y 名里摘掉。
+- 补偿套题/变式后端只认数学，前端语文必须显式隐藏入口，否则卡片会承诺一个后端不会兑现的能力。
+
+**验证**：server 2246 测试绿（新增语文自评/cn_paper/cn_targeted/materialText/in_exam 用例）；web 1286 测试绿、`tsc -b` 干净、lint 仅既有 2 个 error（`tracker.test.ts`/`MobilePointsPage.test.tsx`）；`schema_reconcile.py` 76 表对账无真实差异。
+
+### 2026-10-28（续）· 语文试卷着重号/下划线恢复（pdf_emphasis + emphasis_cli）
+
+**问题**：卷 #17 第 1 题原文四个加点词（高涨/启幕/采撷/汇聚）入库只剩 `高涨<sub>．．</sub>`，第 3 题四个成语的着重号全丢，第 2 题「嘉年华」画横线在 MinerU md 里完全没有——学生看不到指令指向哪里。根因是 Markdown 没有下划线语义、着重号识别不稳定，**不是文字识别错**。
+
+**方案（确定性，不调 LLM）**：新增 `tools/data-refinery/src/pdf_emphasis.py`：
+- 下划线：PDF 细填充矩形（高 < 1.6pt）按字符框重叠映射；
+- 着重号：页面渲染 4x 灰度图，检查汉字下方 3pt 窄带内的小连通域；排除下划线字符与 `find_tables()` 表格区域；
+- 注入 `<u>…</u>` / **逐字** `<span class="cn-emphasis-dot">字</span>`；前端 `global.css` 用 `::after` 画字下实心点（直径 0.15em、纯黑；`text-emphasis` 无法调大小/颜色，`<sub>．．</sub>` 会显示成字后小点）。下划线统一 2px 深色、下移 3px（默认 1px 太轻）。
+
+**匹配策略**：上下文从 8 字逐步缩到 2 字找唯一落点；重复/歧义直接跳过不猜。材料只用「非选项行」的标注，选项只用 `A./B．` 开头行的标注 + 纯汉字上下文（选项文本已去前缀和着重号本身）。题干只做 `<sub>` 归一化、不套 PDF 标注（题干里「画横线的‘X’」是引用，原卷没画线）。
+
+**安全**：`emphasis_cli.py` 默认 dry-run；`--apply` 前把完整行备份到 `tools/db/backups/`，只 UPDATE `content/material_text/options/content_hash`，写后逐列校验 answer/explanation 等未变；幂等（重跑 0 更新）。只处理语文卷。
+
+**卷 #17 实测**：检测 17 处着重号 + 7 处下划线；更新 12 题（题1/2 材料 4 词 + 嘉年华下划线、题3 四成语、题4/5 画线句、题11/12 诗句下划线、题13 选项「方」等）。API 复核：`papers/17` 的 materialText 带 span/u，16 题不变；答案/解析列未变。
+
+**验证**：`pytest tools/data-refinery/tests/test_pdf_emphasis.py` 10 项全绿（含真实 PDF 集成用例，CI 无 PDF 时跳过）；web markdown 渲染用例 + build 通过。
+
+**待推广**：目前只跑了 #17。效果确认后：① 用 `--all-chinese --apply` 回填其余语文卷（当前只有 1 套入库）；② 把这一步接进 `import_cli`/`pipeline_cli`，新语文卷入库后自动执行；③ 纯扫描件（无文字层）需要 OCR 字符框，本期不做。
+
 ## 2026-10-12 · 语文专项手写板三项反馈修复（默写/翻译/解释共用 HandwritingPad）
 
 - **线宽加倍**：`HandwritingPad.tsx` 的 `INK_WIDTH` 1 → 2（用户要求线条粗细为原来的 2 倍）。导出倍数仍 4（2880×1440），笔画同步变粗、比例不变。
