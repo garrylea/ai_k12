@@ -20,6 +20,7 @@ from pathlib import Path
 
 from config import RefineryConfig
 from paper_meta import parse_paper_meta
+from scope_filter import build_scope, match_scope
 from subject_cases import UnknownSubjectError, detect_subject, get_case
 
 DEFAULT_ISSUES_FILE = "answer_issues.jsonl"
@@ -29,16 +30,24 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description="按学科提取试卷答案，输出 answer_importer 答案文档")
     p.add_argument("--file", required=True, help="试卷 md 的相对路径子串（须唯一命中）")
     p.add_argument("--out", help="输出文档路径（默认 output/answers/<卷名>.md）")
-    p.add_argument("--subject", help="学科 code（默认按路径首段识别）")
+    p.add_argument("--subject", help="学科 code（默认按路径首段识别；语文 chinese）")
+    p.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior）")
+    p.add_argument("--term", help="学期过滤（上/下 或 first/second；教材路径也可写 上册/下册）")
+    p.add_argument("--year", help="年份过滤（4 位，如 2025）")
     p.add_argument("--input-dir", help="md 输入根目录（默认 output/md）")
     p.add_argument("--output-dir", help="输出根目录（默认 output）")
     p.add_argument("--dry-run", action="store_true", help="只打印统计与预览，不写文件")
     return p.parse_args(argv)
 
 
-def find_paper_md(md_dir: Path, keyword: str) -> Path | None:
-    """按相对路径子串找唯一试卷 md；命中多个/0 个打印候选并返回 None。"""
+def find_paper_md(md_dir: Path, keyword: str, scope=None) -> Path | None:
+    """按相对路径子串找唯一试卷 md；命中多个/0 个打印候选并返回 None。
+
+    scope（scope_filter.Scope）非空时先按学科/学段/学期/年份过滤。
+    """
     hits = [p for p in sorted(md_dir.rglob("*.md")) if keyword in str(p.relative_to(md_dir))]
+    if scope is not None and scope.active:
+        hits = [p for p in hits if match_scope(p.relative_to(md_dir), scope)]
     if len(hits) == 1:
         return hits[0]
     if not hits:
@@ -104,7 +113,8 @@ def main(argv=None) -> int:
     md_dir = Path(args.input_dir) if args.input_dir else config.output_dir / "md"
     out_root = Path(args.output_dir) if args.output_dir else config.output_dir
 
-    md_path = find_paper_md(md_dir, args.file)
+    md_path = find_paper_md(md_dir, args.file, build_scope(
+        stage=args.stage, term=args.term, year=args.year))
     if md_path is None:
         return 2
     rel_md = md_path.relative_to(md_dir)

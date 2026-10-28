@@ -309,3 +309,63 @@ class TestCollectTocFiles:
     def test_resolve_book_toc_missing(self, tmp_path):
         from db_loader_cli import _resolve_book_toc
         assert _resolve_book_toc(tmp_path / "toc", "数学/书") is None
+
+
+class TestScopeFilters:
+    """P0 范围过滤：--subject / --file / --questions-only / --cards-only。"""
+
+    def _tree(self, tmp_path: Path) -> Path:
+        published = tmp_path / "published"
+        book = published / "数学/初中/人教版/九年级/下册/书名"
+        book.mkdir(parents=True)
+        (book / "page_001.jsonl").write_text("{}", encoding="utf-8")
+        exam = published / "语文/初中/second/2025/语文-某卷-试卷"
+        exam.mkdir(parents=True)
+        (exam / "语文-某卷-试卷.jsonl").write_text("{}", encoding="utf-8")
+        return published
+
+    def test_subject_filter_accepts_chinese_name(self, tmp_path, capsys):
+        published = self._tree(tmp_path)
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main(["--input-dir", str(published), "--subject", "语文", "--load-cards", "--dry-run"])
+        out = capsys.readouterr().out
+        assert "语文-某卷-试卷.jsonl" in out
+        assert "page_001.jsonl" not in out
+        assert "[scope] subject=语文 -> 1 个文件" in out
+
+    def test_subject_filter_accepts_code(self, tmp_path, capsys):
+        published = self._tree(tmp_path)
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main(["--input-dir", str(published), "--subject", "chinese", "--load-cards", "--dry-run"])
+        out = capsys.readouterr().out
+        assert "语文-某卷-试卷.jsonl" in out
+        assert "page_001.jsonl" not in out
+
+    def test_questions_only_skips_cards(self, tmp_path, capsys):
+        published = self._tree(tmp_path)
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main(["--input-dir", str(published), "--questions-only", "--load-cards", "--dry-run"])
+        out = capsys.readouterr().out
+        assert "语文-某卷-试卷.jsonl" in out
+        assert "page_001.jsonl" not in out
+
+    def test_file_filter_matches_substring(self, tmp_path, capsys):
+        published = self._tree(tmp_path)
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main(["--input-dir", str(published), "--file", "人教版", "--load-cards", "--dry-run"])
+        out = capsys.readouterr().out
+        assert "page_001.jsonl" in out
+        assert "语文-某卷-试卷.jsonl" not in out
+
+    def test_scope_filter_rejected_with_full_reload(self, tmp_path, capsys):
+        """范围过滤 + full-reload 会删全库，必须拒绝（不重写已完成数据）。"""
+        published = self._tree(tmp_path)
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main(["--input-dir", str(published), "--subject", "语文"])
+        out = capsys.readouterr().out
+        assert "只能配合 --load-cards" in out

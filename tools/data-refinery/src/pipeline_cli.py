@@ -23,6 +23,7 @@ from db_loader_cli import main as db_loader_main
 from env_bootstrap import ensure_refinery_env
 from extract_cli import main as extract_main
 from publish_cli import main as publish_main
+from scope_filter import scope_argv
 from toc_merge import run_merge
 from toc_parse_cli import main as toc_parse_main
 
@@ -46,6 +47,11 @@ def parse_args(argv=None):
     parser.add_argument("--book", help="只处理指定书目（rel_path 子串匹配，如 '九年级/下册'），"
                         "作用于 toc_parse 和 extract")
     parser.add_argument("--pages", help="只提取指定页码（如 '8-30'），作用于 extract")
+    parser.add_argument("--subject", help="学科过滤（中文名或 code，如 语文 / chinese），逗号分隔多个")
+    parser.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior），逗号分隔多个")
+    parser.add_argument("--term", help="学期过滤（上/下 或 first/second；教材也可写 上册/下册），逗号分隔多个")
+    parser.add_argument("--year", help="年份过滤（4 位，仅试卷素材，如 2025），逗号分隔多个")
+    parser.add_argument("--file", help="只处理相对路径包含该子串的素材（单卷/单书）")
     parser.add_argument("--dry-run", action="store_true", help="所有步骤只打印，不写盘/不入库")
     parser.add_argument("--reconvert", action="store_true",
                         help="忽略已提取/已发布记录，重新切割 + LLM 标注 + 重新发布"
@@ -109,7 +115,8 @@ def _main(argv=None):
     dry = ["--dry-run"] if args.dry_run else []
     redo = ["--reconvert"] if args.reconvert else []
     redo_toc = ["--reconvert"] if args.reconvert_toc else []
-    scope = (["--book", args.book] if args.book else []) \
+    scope = scope_argv(args) \
+        + (["--book", args.book] if args.book else []) \
         + (["--pages", args.pages] if args.pages else [])
 
     # 1. toc_parse（仅教材；zgkao 试卷无目录；--reconvert 不连带目录重解析——
@@ -141,7 +148,7 @@ def _main(argv=None):
         # 5. db_loader（默认增量：先按 merged TOC 建骨架，再挂卡；
         #    --purge-business-data 时全量重载）
         print("=== db_loader（published → MySQL） ===", flush=True)
-        load_args = ["--source", args.source, "--toc-dir", str(toc_dir)] + dry
+        load_args = ["--source", args.source, "--toc-dir", str(toc_dir)] + scope_argv(args) + dry
         if args.purge_business_data:
             load_args.append("--purge-business-data")
         else:

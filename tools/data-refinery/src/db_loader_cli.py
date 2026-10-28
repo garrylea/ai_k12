@@ -14,6 +14,7 @@ from pathlib import Path
 from config import RefineryConfig
 from db_loader import DbLoader
 from paper_meta import parse_paper_meta
+from scope_filter import describe, match_scope, scope_from_args
 
 
 def parse_args(argv=None):
@@ -34,8 +35,27 @@ def parse_args(argv=None):
     parser.add_argument("--purge-paper-data", action="store_true",
                         help="配合 --reload-source：该卷题被 answers/错题本/变式题等业务表引用时，"
                              "显式删这些业务记录后重载（学生数据不可恢复）")
+    parser.add_argument("--subject",
+                        help="学科过滤（中文名或 code，如 语文 / chinese），逗号分隔多个；"
+                             "按素材路径首段匹配，未命中学科一律不碰")
+    parser.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior），逗号分隔多个")
+    parser.add_argument("--term", help="学期过滤（上/下 或 first/second；教材也可写 上册/下册），逗号分隔多个")
+    parser.add_argument("--year", help="年份过滤（4 位，仅试卷素材，如 2025），逗号分隔多个")
+    parser.add_argument("--file", help="只加载相对路径包含该子串的素材（单卷/单书，如 '202507-海淀-模拟二-试卷'）")
+    kind_group = parser.add_mutually_exclusive_group()
+    kind_group.add_argument("--questions-only", action="store_true", help="只加载试卷题，不碰教材卡")
+    kind_group.add_argument("--cards-only", action="store_true", help="只加载教材卡，不碰试卷题")
     parser.add_argument("--dry-run", action="store_true", help="只打印，不入库")
     return parser.parse_args(argv)
+
+
+def _match_kind(rel: Path, args) -> bool:
+    """题/卡类型过滤（--questions-only / --cards-only）。"""
+    if args.questions_only and _kind(rel.name) != "questions":
+        return False
+    if args.cards_only and _kind(rel.name) != "cards":
+        return False
+    return True
 
 
 def _kind(name: str) -> str:
@@ -156,12 +176,35 @@ def main(argv=None):
 
     # === Normal mode: card/question loading ===
     published_dir = Path(args.input_dir) if args.input_dir else cfg.output_dir / "published"
-    files = [p for p in sorted(published_dir.rglob("*.jsonl")) if _match_source(p.name, args.source)]
+    scope = scope_from_args(args)
+    kind_filtered = args.questions_only or args.cards_only
+    files = [
+        p for p in sorted(published_dir.rglob("*.jsonl"))
+        if _match_source(p.name, args.source)
+        and match_scope(p.relative_to(published_dir), scope)
+        and _match_kind(p.relative_to(published_dir), args)
+    ]
+    if scope.active or kind_filtered:
+        desc = describe(scope)
+        if kind_filtered:
+            desc = f"{desc} {'questions-only' if args.questions_only else 'cards-only'}"
+        print(f"[scope] {desc} -> {len(files)} 个文件", flush=True)
+    if not files:
+        print("[scope] 没有匹配任何素材文件，未做任何改动", flush=True)
+        return
 
     if args.dry_run:
         for p in files:
             print(f"{p.relative_to(published_dir)} ({_kind(p.name)})", flush=True)
         print(f"共 {len(files)} 个文件", flush=True)
+        return
+
+    # 范围过滤与 full-reload 互斥：full-reload 会 DELETE 全库 cards/questions，
+    # 与「只改指定范围、不重写已完成数据」的原则冲突
+    if not args.load_cards and (scope.active or kind_filtered):
+        print("[ERROR] --subject / --stage / --term / --year / --file / --questions-only / "
+              "--cards-only 只能配合 --load-cards 使用（默认 full-reload 会删除全库卡片/题目）",
+              flush=True)
         return
 
     loader = DbLoader(cfg.db_host, cfg.db_port, cfg.db_user, cfg.db_pass, cfg.db_name)

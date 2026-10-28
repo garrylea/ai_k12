@@ -21,6 +21,7 @@ from llm import create_llm_client
 from page_chrome import compute_book_chrome, strip_chrome
 from markdown_scanner import MarkdownScanner, MarkdownSource
 from models import TextbookCard
+from scope_filter import build_scope, describe, match_scope
 
 import re
 
@@ -89,6 +90,10 @@ def parse_args(argv=None):
     parser.add_argument("--file", help="只提取匹配的文件（相对路径子串匹配）")
     parser.add_argument("--pages", help="只提取指定页码，如 '1-6' 或 '1,3,5-8'")
     parser.add_argument("--book", help="只提取指定教材（路径子串匹配，如'九年级/上册'）")
+    parser.add_argument("--subject", help="学科过滤（中文名或 code，如 语文 / chinese），逗号分隔多个")
+    parser.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior），逗号分隔多个")
+    parser.add_argument("--term", help="学期过滤（上/下 或 first/second；教材也可写 上册/下册），逗号分隔多个")
+    parser.add_argument("--year", help="年份过滤（4 位，仅试卷素材，如 2025），逗号分隔多个")
     parser.add_argument("--force", action="store_true", help="强制重新提取（忽略 checkpoint，但不删除已有输出）")
     parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 JSONL，重新提取匹配页")
     parser.add_argument("--toc", help="TOC JSON 路径，用于校验 lesson_id + 自动修正（单文件模式）")
@@ -433,6 +438,10 @@ def main(argv=None):
     err_log_path = config.output_dir / "labeling_errors.jsonl"
 
     sources = [s for s in scanner.scan() if _match_source(s, args.source)]
+    scope = build_scope(subject=args.subject, stage=args.stage, term=args.term, year=args.year)
+    if scope.active:
+        sources = [s for s in sources if match_scope(s.rel_path / s.md_path.name, scope)]
+        print(f"[scope] {describe(scope)} -> {len(sources)} 个文件", flush=True)
     if args.file:
         sources = [s for s in sources if args.file in str(s.rel_path / s.md_path.name)]
     if args.pages:

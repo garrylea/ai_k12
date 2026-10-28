@@ -7,6 +7,8 @@ from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from convert import Converter, MineruRunner
 from scanner import Material, MaterialScanner
+from scope_filter import build_scope, match_scope
+from scope_filter import parse_dimensions as _parse_dimensions  # 兼容旧引用/单测
 
 
 def parse_args(argv=None):
@@ -37,51 +39,6 @@ def _match_source(material: Material, source: str) -> bool:
     return False
 
 
-# 学期别名：目录段值 -> 规范键（first=上学期/上册，second=下学期/下册）
-_TERM_ALIASES = {
-    "first": "first", "上": "first", "上册": "first", "上学期": "first",
-    "second": "second", "下": "second", "下册": "second", "下学期": "second",
-}
-
-# 学段别名：爬虫目录用中文，PaperMeta/DB 用英文
-_STAGE_ALIASES = {
-    "primary": "primary", "小学": "primary",
-    "junior": "junior", "初中": "junior",
-    "senior": "senior", "高中": "senior",
-}
-
-
-def _parse_dimensions(rel_path: Path) -> dict[str, str | None]:
-    """按爬虫目录约定拆出 rel_path 的维度段，缺的维度为 None。
-
-    试卷：{学科}/{学段}/{first|second}/{年份}/{试卷名}
-    教材：{学科}/{学段}/{出版社}/{年级}/{上册|下册}/{书名}
-    """
-    parts = rel_path.as_posix().split("/")
-    if len(parts) < 5:
-        return {"subject": None, "stage": None, "term": None, "year": None}
-
-    dims: dict[str, str | None] = {
-        "subject": parts[0],
-        "stage": _STAGE_ALIASES.get(parts[1]),
-        "term": None,
-        "year": None,
-    }
-    if parts[2] in ("first", "second") and len(parts[3]) == 4 and parts[3].isdigit():
-        dims["term"] = _TERM_ALIASES[parts[2]]
-        dims["year"] = parts[3]
-    else:
-        dims["term"] = _TERM_ALIASES.get(parts[4])
-    return dims
-
-
-def _split_filters(raw: str | None) -> list[str]:
-    """逗号分隔的多值参数 -> 去空白后的列表（如 `2024,2026` -> ['2024', '2026']）。"""
-    if not raw:
-        return []
-    return [v.strip() for v in raw.split(",") if v.strip()]
-
-
 def _match_filters(
     material: Material,
     subject: str | None = None,
@@ -89,26 +46,8 @@ def _match_filters(
     term: str | None = None,
     year: str | None = None,
 ) -> bool:
-    """按学科/学段/学期/年份精确过滤；逗号分隔的多值取并集，参数之间取交集。
-
-    与 --materials 子串过滤同样取交集。
-    """
-    subjects = _split_filters(subject)
-    stages = {_STAGE_ALIASES.get(s, s) for s in _split_filters(stage)}
-    terms = {_TERM_ALIASES.get(t, t) for t in _split_filters(term)}
-    years = _split_filters(year)
-    if not any((subjects, stages, terms, years)):
-        return True
-    dims = _parse_dimensions(material.rel_path)
-    if subjects and dims["subject"] not in subjects:
-        return False
-    if stages and dims["stage"] not in stages:
-        return False
-    if terms and dims["term"] not in terms:
-        return False
-    if years and dims["year"] not in years:
-        return False
-    return True
+    """按学科/学段/学期/年份精确过滤（语义与 extract/publish/db_loader 一致）。"""
+    return match_scope(material.rel_path, build_scope(subject, stage, term, year))
 
 
 def _load_material_entries(materials: str | None, materials_file: str | None) -> list[str]:

@@ -53,6 +53,41 @@
 
 **裁决（当日）**：作文题不进抽题池，做法=不标 KP（最小改动，试卷入口仍可见）。已移除题27 的全部 `question_knowledge_points`；抽题池现为 26/27 题（题27 除外）。新导入含作文的卷需同样处理——当前无题型字段区分作文，后续可在导入脚本按卷末大题排除，或引入 `essay` 题型。
 
+### 2026-10-28（续）· 入库范围过滤 + 原地 upsert（P0/P1）
+
+**背景（用户两条原则）**：① 一科导入不能因别科的问题失败；② 导入一科不能把之前已完成的数据重新导入/重写。原 `db_loader --load-cards` 扫全库且无 TOC 分支「不删旧卡直接插」→ 重载已入库数学书必撞 `uniq_cards_lesson_sort`，整批中断（2026-10-28 实测：导语文死在数学卡上）。
+
+- **P0 范围过滤**：`db_loader_cli` 新增 `--subject`（code 或中文名，按路径首段匹配）、`--file`（相对路径子串）、`--questions-only` / `--cards-only`。范围过滤与 full-reload 互斥（`DELETE` 全库会违背原则），CLI 直接拒绝；dry-run 打印 `[scope] ... -> N 个文件`。
+- **P1 卡片原地 upsert**：无 TOC 分支改按唯一键 `(lesson_id, sort_order)` upsert——`id` 不变、内容不变跳过、仅变化行 UPDATE；不再删旧卡重插（会换 id，`practice_results.card_id` CASCADE、`ai_dialogues.card_id` 置 NULL）。published 少页导致的陈旧行只告警不删。
+- **P1 题目原址更新**：带试卷上下文按 `(paper_id, question_no)` 定位旧题更新，解决「重抽后 content_hash 变化→插重复题」；`answer_verified=1` 不覆盖，新内容撞他人 hash 时保留原题并告警。
+- **验证**：数学卡 287 个文件全部 upsert 通过（0 更新，无撞键；测试中新 insert 的 6 张已回滚）；语文题重导 0 新增、27 题/27 已核验/27 关联不变；临时卷验证「改内容→原址更新」「已核验→不覆盖」均符合预期。新增 8 个单测（范围过滤/归一/拒绝组合/卡片 payload）。
+- **注意**：`--load-cards` 现在幂等但**不删**新文件中已消失的题号；整卷删题/重排仍需 `--reload-source`。
+
+### 2026-10-28（续）· 统一范围参数（subject/stage/term/year/file）
+
+**问题**：各阶段过滤参数分裂——convert 有 `--subject/--stage/--term/--year`，extract/publish 只有 `--file/--book`，db_loader 只有 `--subject/--file/--kind`。用户想「只导语文」得记 3-4 套参数，且容易漏掉入库或误碰别科；`extract_cli --subject 语文` 直接报 `unrecognized arguments`。
+
+**改动**：新增 `src/scope_filter.py` 作为唯一实现（维度解析、别名归一、交集匹配、参数注册/透传），全阶段同名同义：
+- `--subject`（中文名或 code，如 语文/chinese）、`--stage`（初中/junior）、`--term`（上/下、上册/下册、first/second）、`--year`（4 位）、`--file`（相对路径子串）。
+- 接入：convert（替换原内部实现，行为不变）、extract、publish、db_loader、pipeline_cli、refinery_cli（编排时透传给子阶段）、answer_extract（stage/term/year 用于定位，`--subject` 仍是覆盖识别）。
+- `refinery_cli` 带范围时自动追加 `--load-cards`（否则会走 full-reload 被 db_loader 拒绝）。
+- 各阶段干跑打印 `[scope] ... -> N 个文件`。
+
+**验证**：`extract --subject 语文` 334 个文件、0 个非语文；`--subject 语文 --year 2025` 收敛到 2 张卷；convert/publish/db_loader/refinery/answer_extract 干跑范围一致；新增 `tests/test_scope_filter.py`，全量 1202 passed / 10 skipped。
+
+### 2026-10-28（续）· import_cli 一键导入（convert→extract→publish→db_loader）
+
+新增 `src/import_cli.py`：单科/单卷日常导入只跑一条命令，四阶段共用统一范围参数（`--subject/--stage/--term/--year/--file`），**入库固定 `--load-cards` 增量**（永不隐式 full-reload）。
+
+- 阶段映射：`--file` → convert 的 `--materials`、extract 的 `--file`、publish 的 `--book`、db_loader 的 `--file`（各 CLI 参数名不同，由 import_cli 适配）。
+- 控制开关：`--skip-convert/extract/publish/load`、`--reconvert`（重跑 MinerU）、`--re-extract`、`--re-publish`、`--redo`（三者合一）、`--questions-only`/`--cards-only`、`--interval/--batch-size/--batch-sleep`。
+- 失败即停（异常向上抛，已完成的阶段有 checkpoint 可续跑）；`KeyboardInterrupt` 返回 130。
+- 答案补录仍独立两步（`answer_extract_cli` → `answer_importer_cli`），不并入本命令。
+
+**验证**：`--subject 语文 --year 2025 --dry-run` 四阶段依次走完且范围一致（convert 2 张 PDF / extract 2 份 md / publish 1 份 jsonl / db_loader 1 份）；单卷实跑链路（全部 checkpoint 命中）题数不变。新增 `tests/test_import_cli.py`（argv 映射/阶段顺序/跳过/互斥），全量 1210 passed / 10 skipped。
+
+**多学科守卫**：只给 `--file` 不给 `--subject` 时，子串可能命中多科（实测 `202507-海淀-模拟二-试卷` 命中 语文/数学/物理 3 科）。学科本身由路径首段判定、不会导错，但会顺带改别科，故正式执行**直接拒绝**（返回 2）并列出命中学科；`--dry-run` 仅告警并继续，便于查看清单。给 `--subject` 或把 `--file` 写完整即可通过。
+
 ## 2026-10-12 · 语文专项手写板三项反馈修复（默写/翻译/解释共用 HandwritingPad）
 
 - **线宽加倍**：`HandwritingPad.tsx` 的 `INK_WIDTH` 1 → 2（用户要求线条粗细为原来的 2 倍）。导出倍数仍 4（2880×1440），笔画同步变粗、比例不变。

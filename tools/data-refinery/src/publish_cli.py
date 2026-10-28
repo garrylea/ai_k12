@@ -19,6 +19,7 @@ from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from image_rewrite import rewrite_item
 from models import ExamQuestion, TextbookCard
+from scope_filter import build_scope, describe, match_scope
 from subject_codes import subject_code_for_path as _subject_code_for
 
 
@@ -29,6 +30,10 @@ def parse_args(argv=None):
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
     parser.add_argument("--book", help="只发布匹配的教材/试卷（rel_path 子串匹配，如'九年级/上册'）")
     parser.add_argument("--pages", help="页码过滤，如 '1-6' 或 '1,3,5-8'")
+    parser.add_argument("--subject", help="学科过滤（中文名或 code，如 语文 / chinese），逗号分隔多个")
+    parser.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior），逗号分隔多个")
+    parser.add_argument("--term", help="学期过滤（上/下 或 first/second；教材也可写 上册/下册），逗号分隔多个")
+    parser.add_argument("--year", help="年份过滤（4 位，仅试卷素材，如 2025），逗号分隔多个")
     parser.add_argument("--force", action="store_true", help="强制重新发布（忽略 checkpoint，但不删除已有输出）")
     parser.add_argument("--reconvert", action="store_true", help="清除 checkpoint + 删除已有 published 文件，重新发布")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要发布的 JSONL")
@@ -100,6 +105,15 @@ def main(argv=None):
     page_nums = _parse_pages(args.pages) if args.pages else None
     if page_nums is not None:
         jsonl_files = [p for p in jsonl_files if _match_pages(p.name, page_nums)]
+
+    # 统一范围过滤（学科/学段/学期/年份），与 extract/db_loader 同语义
+    scope = build_scope(subject=args.subject, stage=args.stage, term=args.term, year=args.year)
+    if scope.active:
+        jsonl_files = [
+            p for p in jsonl_files
+            if match_scope(p.relative_to(extracted_dir).with_suffix(""), scope)
+        ]
+        print(f"[scope] {describe(scope)} -> {len(jsonl_files)} 个文件", flush=True)
 
     if args.dry_run:
         for p in jsonl_files:

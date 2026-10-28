@@ -1029,6 +1029,9 @@ class DbLoader:
         unit_ord: dict[int, int] = {}  # chapter -> 已分配的节序（不含综述 0）
         touched_units: set[int] = set()
         count = 0
+        updated = 0
+        unchanged = 0
+        max_sort: dict[int, int] = {}  # lesson_id -> 本次导入的最大 sort_order（陈旧行检测用）
         for lid in order:
             p = parse_lesson_id(lid)
             if p is None:
@@ -1045,15 +1048,41 @@ class DbLoader:
                 unit_ord[chapter] = lesson_sort
             lesson_id_db = self._find_or_create_lesson(unit_id, lid, lesson_sort)
             for i, c in enumerate(grouped[lid], 1):
-                self._insert_card(lesson_id_db, i, c)
-                count += 1
+                # 增量幂等：原地 upsert（唯一键 lesson_id+sort_order），不删旧卡、id 不变
+                status = self._upsert_card(lesson_id_db, i, c)
+                if status == "inserted":
+                    count += 1
+                elif status == "updated":
+                    updated += 1
+                else:
+                    unchanged += 1
+                max_sort[lesson_id_db] = max(max_sort.get(lesson_id_db, 0), i)
         self._conn.commit()
+        # 陈旧行只告警不删除：published 可能只发布了部分页（--pages），
+        # 直接删会毁掉未参与本次导入的完整数据（用户原则：不重写已完成数据）
+        stale = 0
+        for lesson_id, limit in max_sort.items():
+            row = self._query("SELECT COUNT(*) FROM cards WHERE lesson_id=%s AND sort_order>%s",
+                              (lesson_id, limit))
+            stale += int(row[0][0]) if row else 0
+        if stale:
+            print(f"[WARN] 本次导入后仍有 {stale} 张卡的 sort_order 超出本次范围"
+                  f"（published 可能未含全部页）；未删除，如需清理请显式重建",
+                  flush=True)
+        if updated or unchanged:
+            print(f"[upsert] 新增 {count} / 更新 {updated} / 未变 {unchanged} 张卡", flush=True)
         # 重排涉及 unit 的 sort_order，防止新旧 lesson 顺序错乱或重复
         for uid in touched_units:
             self._renumber_lessons(uid)
         return count
 
-    def _insert_card(self, lesson_id: int, sort_order: int, c: dict):
+    @staticmethod
+    def _card_payload(c: dict) -> tuple:
+        """把 card dict 规整成入库值（content_metadata 校验/重组 + JSON 序列化）。
+
+        返回 (card_type, title, content, content_metadata_json, knowledge_point_ids_json,
+        textbook_page)，供 insert / upsert 共用，保证两条路径写入一致。
+        """
         cm = c.get("content_metadata")
         card_content = c.get("content") or ""
         card_type = c.get("card_type")
@@ -1072,15 +1101,52 @@ class DbLoader:
                 card_content = rebuild_practice_content(validated_groups)
 
         kp = c.get("knowledge_point_ids") or []
+        return (
+            card_type,
+            c.get("title"),
+            card_content,
+            json.dumps(cm, ensure_ascii=False) if cm else None,
+            json.dumps(kp, ensure_ascii=False),
+            c.get("textbook_page"),
+        )
+
+    def _insert_card(self, lesson_id: int, sort_order: int, c: dict):
+        card_type, title, card_content, cm_json, kp_json, page = self._card_payload(c)
         self._exec(
             "INSERT INTO cards (lesson_id, sort_order, card_type, title, content, "
             "content_metadata, knowledge_point_ids, textbook_page) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (lesson_id, sort_order, card_type, c.get("title"), card_content,
-             json.dumps(cm, ensure_ascii=False) if cm else None,
-             json.dumps(kp, ensure_ascii=False),
-             c.get("textbook_page")),
+            (lesson_id, sort_order, card_type, title, card_content, cm_json, kp_json, page),
         )
+
+    def _upsert_card(self, lesson_id: int, sort_order: int, c: dict) -> str:
+        """原地 upsert 一张卡（唯一键 lesson_id + sort_order），**不删旧行、id 不变**。
+
+        用于增量入库（无 TOC 动态建结构分支）：重复导入同一本书时，
+        只有内容变化的卡被 UPDATE，其余跳过——不动已完成的数据，
+        也不会破坏 practice_results / ai_dialogues 对 card_id 的引用。
+
+        Returns:
+            'inserted' | 'updated' | 'unchanged'
+        """
+        payload = self._card_payload(c)
+        row = self._query(
+            "SELECT id, card_type, title, content, content_metadata, knowledge_point_ids, textbook_page "
+            "FROM cards WHERE lesson_id=%s AND sort_order=%s",
+            (lesson_id, sort_order),
+        )
+        if not row:
+            self._insert_card(lesson_id, sort_order, c)
+            return "inserted"
+        old = tuple(row[0][1:])
+        if old == payload:
+            return "unchanged"
+        self._exec(
+            "UPDATE cards SET card_type=%s, title=%s, content=%s, content_metadata=%s, "
+            "knowledge_point_ids=%s, textbook_page=%s WHERE id=%s",
+            (*payload, row[0][0]),
+        )
+        return "updated"
 
     def _find_or_create_paper(self, meta: PaperMeta, subject_id: int, source_key: str) -> int:
         """按 source_key 唯一键 find-or-create exam_papers，返回 paper_id。
@@ -1111,37 +1177,83 @@ class DbLoader:
         - 去重：content_hash 命中已有题则复用（不动 questions 行），跨卷重复题
           两卷共享同一 question 行（INSERT IGNORE paper_questions，主键 (paper_id,
           question_id) 保证重跑幂等）。
+        - 同卷重导（paper 非 None）：按 (paper_id, question_no) 定位旧题原址更新——
+          重抽会让 content_hash 变化，只按 hash 去重会插出重复题；
+          已 answer_verified=1 的题不覆盖（人工核验内容优先）。
         - question_no = JSONL 行序 1..n（原卷全局题号，非 group_order）。
         - paper=None：无试卷上下文的调用方，行为与旧版完全一致。
         返回新插入题数（不含复用）。
         """
         count = 0
         linked = 0
+        updated = 0
         for i, q in enumerate(questions, 1):
             sid = self._subject_id_by_code(normalize_subject(q.get("subject_id")))
             opts = q.get("options")
             content = q.get("content") or ""
             chash = content_hash(content)
-            # 去重：content_hash 命中已有题则复用（PRD §7.10）
-            row = self._query("SELECT id FROM questions WHERE content_hash=%s LIMIT 1", (chash,))
-            if row:
-                qid = int(row[0][0])
-            else:
-                self._exec(
-                    "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, full_score, "
-                    "content, options, answer, explanation, material_text, material_url, "
-                    "grade_band, source, source_year, content_hash) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
-                     q.get("full_score"),
-                     content,
-                     json.dumps(opts, ensure_ascii=False) if opts is not None else None,
-                     q.get("answer") or "", q.get("explanation"), q.get("material_text"),
-                     q.get("material_url"), q.get("grade_band"), q.get("source"), q.get("source_year"),
-                     chash),
+            qid: int | None = None
+
+            # 1) 同卷同题号：原地更新，避免重抽后 hash 变化插出重复题
+            if paper is not None:
+                exist = self._query(
+                    "SELECT q.id, q.content_hash, q.answer_verified FROM paper_questions pq "
+                    "JOIN questions q ON q.id = pq.question_id "
+                    "WHERE pq.paper_id=%s AND pq.question_no=%s",
+                    (paper[1], i),
                 )
-                qid = int(self._query("SELECT LAST_INSERT_ID()")[0][0])
-                count += 1
+                if exist:
+                    qid = int(exist[0][0])
+                    old_hash = exist[0][1]
+                    verified = int(exist[0][2] or 0)
+                    if old_hash != chash:
+                        other = self._query(
+                            "SELECT id FROM questions WHERE content_hash=%s AND id<>%s LIMIT 1",
+                            (chash, qid),
+                        )
+                        if verified:
+                            print(f"[WARN] paper={paper[1]} 题{i} 内容有变但 answer_verified=1，"
+                                  f"保留人工核验内容不覆盖", flush=True)
+                        elif other:
+                            print(f"[WARN] paper={paper[1]} 题{i} 新内容与已有题 "
+                                  f"#{int(other[0][0])} 重复，保留原题不覆盖", flush=True)
+                        else:
+                            self._exec(
+                                "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, "
+                                "type=%s, difficulty=%s, full_score=%s, content=%s, options=%s, "
+                                "answer=%s, explanation=%s, material_text=%s, material_url=%s, "
+                                "grade_band=%s, source=%s, source_year=%s, content_hash=%s "
+                                "WHERE id=%s",
+                                (sid, q.get("group_id"), q.get("group_order"), q.get("type"),
+                                 q.get("difficulty"), q.get("full_score"), content,
+                                 json.dumps(opts, ensure_ascii=False) if opts is not None else None,
+                                 q.get("answer") or "", q.get("explanation"), q.get("material_text"),
+                                 q.get("material_url"), q.get("grade_band"), q.get("source"),
+                                 q.get("source_year"), chash, qid),
+                            )
+                            updated += 1
+
+            # 2) 其它情况：按 content_hash 复用 / 插入
+            if qid is None:
+                row = self._query("SELECT id FROM questions WHERE content_hash=%s LIMIT 1", (chash,))
+                if row:
+                    qid = int(row[0][0])
+                else:
+                    self._exec(
+                        "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, full_score, "
+                        "content, options, answer, explanation, material_text, material_url, "
+                        "grade_band, source, source_year, content_hash) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
+                         q.get("full_score"),
+                         content,
+                         json.dumps(opts, ensure_ascii=False) if opts is not None else None,
+                         q.get("answer") or "", q.get("explanation"), q.get("material_text"),
+                         q.get("material_url"), q.get("grade_band"), q.get("source"), q.get("source_year"),
+                         chash),
+                    )
+                    qid = int(self._query("SELECT LAST_INSERT_ID()")[0][0])
+                    count += 1
             if paper is not None:
                 self._exec(
                     "INSERT IGNORE INTO paper_questions "
@@ -1154,6 +1266,8 @@ class DbLoader:
             self._exec(
                 "UPDATE exam_papers SET question_count=%s WHERE id=%s", (linked, paper[1]))
         self._conn.commit()
+        if updated:
+            print(f"[upsert] 同卷原址更新 {updated} 题", flush=True)
         return count
 
     def delete_questions_by_source(self, source: str, purge_paper_data: bool = False) -> dict:

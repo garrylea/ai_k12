@@ -849,3 +849,26 @@ class TestBusinessDataSummaryVerifiedGuard:
         loader._column_exists = lambda t, c: False
         summary = loader.business_data_summary(reset_cards=False, reset_questions=True)
         assert DbLoader.VERIFIED_QUESTIONS_KEY not in summary
+
+
+class TestCardPayload:
+    """_card_payload：insert / upsert 共用的规整结果（upsert 判定「未变」靠它）。"""
+
+    def test_plain_card_payload_stable(self):
+        from db_loader import DbLoader
+
+        c = {"card_type": "concept", "title": "t", "content": "正文",
+             "content_metadata": {"images": []}, "knowledge_point_ids": [1, 2],
+             "textbook_page": "P1"}
+        a = DbLoader._card_payload(c)
+        b = DbLoader._card_payload(dict(c))
+        assert a == b
+        assert a[0] == "concept" and a[2] == "正文"
+        assert '"images"' in a[3] and a[4] == "[1, 2]"
+
+    def test_content_change_changes_payload(self):
+        from db_loader import DbLoader
+
+        base = {"card_type": "concept", "content": "旧"}
+        changed = {"card_type": "concept", "content": "新"}
+        assert DbLoader._card_payload(base) != DbLoader._card_payload(changed)

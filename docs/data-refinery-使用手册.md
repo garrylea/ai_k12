@@ -214,6 +214,24 @@ python src/crawler_cli.py --site smartedu --subject 数学 --level 初中 --dry-
 **位置**：`tools/data-refinery/`  
 **工作目录**：所有命令从 `tools/data-refinery/` 运行
 
+### 4.0 统一范围参数（所有阶段同名同义，2026-10-28）
+
+从 convert 到入库的各阶段支持**同一套**范围参数，逗号分隔可多值，参数之间取交集：
+
+| 参数 | 取值 | 说明 |
+|---|---|---|
+| `--subject` | `语文` / `chinese`（可混写） | 学科（按素材路径第 1 段匹配） |
+| `--stage` | `初中` / `junior`（`小学/小学 primary`、`高中/senior`） | 学段 |
+| `--term` | `上/下`、`first/second`；教材也可写 `上册/下册` | 学期 |
+| `--year` | 4 位年份，如 `2025` | 仅试卷有该维度 |
+| `--file` | 相对路径子串，如 `202507-海淀` | 单卷/单书 |
+| `--pages` | `1-6` / `1,3,5-8` | 仅 extract/publish |
+
+- `--questions-only` / `--cards-only` 是入库阶段（db_loader）专属的题/卡类型过滤。
+- 干跑时各阶段会打印 `[scope] subject=语文 year=2025 -> N 个文件`，可先确认范围。
+- 示例：`python src/extract_cli.py --subject 语文 --year 2025 --dry-run`
+- 注：`answer_extract_cli` 的 `--subject` 是「覆盖学科识别」（文件名不规范时用），不是过滤条件；它同样支持 `--stage/--term/--year` 过滤定位。
+
 ### 4.1 convert_cli — PDF/图片转 Markdown
 
 调用 MinerU 将爬虫产出的 PDF/JPG 转为 Markdown。
@@ -505,7 +523,30 @@ python src/db_loader_cli.py --reload-source "数学-初三(上)-202507-海淀-�
 - **不 reset 其他表**：不像模式 A 那样 `DELETE questions` 全量，其余卷与教材骨架都不受影响。
 - **业务数据保护**：该卷题被 `answers`/错题本/变式题引用时，默认**保留旧题行**（仅清 `paper_questions` 关联后重插，日志会列出被挡住的表与行数，跨卷共享的题也保留）；要连旧题行一起删再加 `--purge-paper-data`（学生数据不可恢复）。
 - 元数据解析失败时会打印 `[WARN] 无法解析试卷元数据，跳过删除直接重插`——题照样入库但不归组，此时重复跑会产生重复题。
-- **不能替代单卷重载**：模式 C 的 `--load-cards` 会遍历 `published/` 下所有文件逐题入库（`content_hash` 相同的题复用、不会重复插），但改过内容的题会**新插一行、旧行留在库里成脏数据**；单卷更新必须走 `--reload-source`。
+- **与模式 E 的区别**：模式 E 的 `--load-cards` 按 `(paper_id, question_no)` 原址更新（2026-10-28 起），改题不会插重复行；但它**不会删除**新文件里已不存在的题号——整卷重排/删题仍需本模式。
+
+#### 模式 E：范围过滤（单科 / 单卷增量，2026-10-28 推荐）
+
+默认模式会扫 `published/` 全库并把所有学科都处理一遍；只想导某一科/某一卷时加范围过滤，**只碰指定素材，其他学科完全不参与**（不会重载、不会重写）。
+
+```bash
+# 只导语文的试卷题（不碰任何教材卡）
+python src/db_loader_cli.py --load-cards --subject 语文 --questions-only
+
+# 只导某一张卷 / 某一本书（相对路径子串）
+python src/db_loader_cli.py --load-cards --file "202507-海淀-模拟二-试卷"
+
+# 只导数学教材卡
+python src/db_loader_cli.py --load-cards --subject 数学 --cards-only
+
+# 先看范围（不入库）
+python src/db_loader_cli.py --load-cards --subject 语文 --questions-only --dry-run
+```
+
+- `--subject` 接受学科 code（`chinese`）或中文目录名（`语文`），按**素材路径首段**匹配，逗号分隔可多选。
+- 卡片入库改为**原地 upsert**（唯一键 `lesson_id + sort_order`）：已有卡片 `id` 不变、内容没变就跳过，只有变化行才 UPDATE——不会因为重跑而重写已完成的数据，也不会破坏 `practice_results` / `ai_dialogues` 对 `card_id` 的引用。
+- 题目入库按 `(paper_id, question_no)` 原址更新；`answer_verified=1` 的题**不覆盖**（人工核验优先）。
+- **范围过滤只能配 `--load-cards`**：默认 full-reload 会 `DELETE` 全库卡片/题目，二者语义冲突，CLI 会直接拒绝执行。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -517,6 +558,10 @@ python src/db_loader_cli.py --reload-source "数学-初三(上)-202507-海淀-�
 | `--toc-dir` | path | — | TOC 目录（如 `output/toc`）：按书自动匹配 merged TOC（优先 `.merged.json`，fallback 初始 `.json`）；`--load-cards` 时对命中的书先建骨架（幂等）再挂卡。优先于 `--toc-path` |
 | `--reload-source` | str | — | 模式 D：只重载该卷（文件名去扩展名）；published 下找不到则报错退出 |
 | `--purge-paper-data` | flag | 否 | 配合 `--reload-source`：该卷题被业务表引用时，显式删这些业务记录后重载（**不可恢复**） |
+| `--subject` | str | — | 模式 E：只加载指定学科（code 或中文名，逗号分隔），按素材路径首段匹配 |
+| `--file` | str | — | 模式 E：只加载相对路径包含该子串的素材（单卷/单书） |
+| `--questions-only` | flag | 否 | 模式 E：只加载试卷题，不碰教材卡 |
+| `--cards-only` | flag | 否 | 模式 E：只加载教材卡，不碰试卷题 |
 | `--purge-business-data` | flag | 否 | full-reload 前清空引用 cards/questions 的业务数据（answers/错题本/变式题/作业提交/progress，**不可恢复**）；默认遇业务数据报错退出 |
 | `--dry-run` | flag | 否 | 只打印不入库 |
 
@@ -892,7 +937,46 @@ WHERE JSON_LENGTH(sentences) > 0
   AND (JSON_SEARCH(sentences, 'one', NULL) IS NOT NULL OR JSON_LENGTH(key_terms) = 0);
 ```
 
+### 4.11 import_cli — 一键导入（convert → extract → publish → db_loader）
+
+把四个阶段串成一条命令，全部阶段共用 §4.0 的统一范围参数，入库固定增量（`--load-cards`）。
+适合「导入某科某年的试卷」这类日常操作，用法与示例见 §5.0。
+
+```bash
+python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
+python src/import_cli.py --subject 语文 --year 2025             # 正式导入
+```
+
 ## 5. 推荐工作流
+
+### 5.0 单科/单卷一键导入（import_cli，2026-10-28 新增）
+
+素材已在 `tools/crawler/data/` 时，一条命令走完 **convert → extract → publish → 入库**，
+全部阶段共用统一范围参数，入库固定增量（不会 full-reload、不碰其他学科）：
+
+```bash
+cd tools/data-refinery
+
+# 先看范围（4 个阶段都只打印）
+python src/import_cli.py --subject 语文 --year 2025 --dry-run
+
+# 正式导入
+python src/import_cli.py --subject 语文 --year 2025
+
+# 单卷
+python src/import_cli.py --file "202507-海淀-模拟二-试卷"
+
+# 只重抽 + 重发布（已有 md，不动 MinerU）
+python src/import_cli.py --subject 语文 --year 2025 --re-extract --re-publish
+
+# 分步跳过
+python src/import_cli.py --subject 语文 --skip-convert --skip-extract
+```
+
+- `--redo` = 重转（MinerU）+ 重抽 + 重发布；`--reconvert`/`--re-extract`/`--re-publish` 可单独用。
+- `--questions-only` / `--cards-only` 控制入库只写题或只写卡。
+- **`--file` 不写 `--subject` 时有多学科守卫**：子串命中多个学科（如 `202507-海淀-模拟二-试卷` 同时命中语文/数学/物理）会**拒绝执行**并列出学科；`--dry-run` 可继续查看完整清单。学科始终由素材路径首段判定，不会导错科目，但范围会超出预期——建议要么加 `--subject`，要么把 `--file` 写完整（如 `语文/初中/second/2025/...`）。
+- 答案补录仍走两段式（`answer_extract_cli` → `answer_importer_cli`，见 §4.8），不在本命令内。
 
 ### 5.1 一站式（pipeline_cli，推荐）
 
