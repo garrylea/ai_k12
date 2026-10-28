@@ -1,6 +1,7 @@
 """zgkao.com 试卷站点适配器。"""
 
 import re
+from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import unquote, urlsplit
 
@@ -10,6 +11,33 @@ from parser import DetailParser, IndexParser, UNKNOWN_LOCATION
 
 
 _FILE_TYPE_MAP = {"试卷": "paper", "答案": "answer"}
+
+
+def _human_size(num_bytes: int) -> str:
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def _absolute(store, rel_path: str) -> str:
+    base = Path(getattr(store, "base_dir", Path(".")))
+    return str((base / rel_path).resolve())
+
+
+def _saved_location(store, saved_path) -> tuple[Path, str]:
+    """把 store 返回的路径还原成（绝对路径, 相对输出目录的路径）。
+
+    撞名改名时实际文件名与分类名不同，必须以 store 真正写下的 path 为准。
+    """
+    base = Path(getattr(store, "base_dir", Path("."))).resolve()
+    actual = Path(saved_path).resolve()
+    try:
+        return actual, str(actual.relative_to(base))
+    except ValueError:
+        return actual, str(actual)
 
 _GRADE_IN_NAME = re.compile(r"(初一|初二|初三|高一|高二|高三)")
 
@@ -92,7 +120,13 @@ class ZgkaoAdapter(SiteAdapter):
         if not self._passes_filter(paper):
             return result
 
-        detail_html = ctx.fetcher.fetch_text(item.id)
+        try:
+            detail_html = ctx.fetcher.fetch_text(item.id)
+        except Exception as exc:  # 网络/解析异常都要变成可读日志，不能静默中断这一项
+            print(f"抓取失败：{item.id} — {exc}")
+            result.files_failed += 1
+            return result
+
         pdf_links = DetailParser.parse(detail_html)
 
         if pdf_links:
@@ -113,12 +147,18 @@ class ZgkaoAdapter(SiteAdapter):
                 and not ctx.dry_run
                 and result.files_failed == 0
                 and result.files_unresolved == 0
-                and result.files_downloaded > 0
+                and result.file_locations
             ):
-                ctx.checkpoint.mark_downloaded(item.id)
+                known = ctx.checkpoint.files_for_item(item.id)
+                ctx.checkpoint.mark_item(
+                    item.id, list(dict.fromkeys([*known, *result.file_locations])),
+                )
             return result
 
         sub_items = IndexParser.parse(detail_html)
+        if not sub_items:
+            print(f"跳过：详情页没有可下载文件（{item.id}）")
+            return result
         for sub in sub_items:
             sub_result = self.download_item(
                 Item(
@@ -133,10 +173,6 @@ class ZgkaoAdapter(SiteAdapter):
         return result
 
     def _download_pdf(self, ctx, paper, link, is_split: bool, result: DownloadResult, page_title: str = "") -> None:
-        if not ctx.force and ctx.checkpoint and ctx.checkpoint.is_downloaded(link.url):
-            result.files_skipped += 1
-            return
-
         if ctx.dry_run:
             result.files_downloaded += 1
             return
@@ -153,37 +189,86 @@ class ZgkaoAdapter(SiteAdapter):
             result.files_unresolved += 1
             return
 
-        content = ctx.fetcher.fetch_bytes(link.url)
         district, school = self._resolve_location(paper, link, page_title)
         classification = self._build_classification(paper, link, is_split, semester, district, school)
         dir_relpath = Classifier.storage_dir(classification, base_dir="")
         filename = Classifier.filename(classification)
+        expected_rel = str(dir_relpath / filename)
 
-        path = ctx.store.save(
-            dir_relpath=dir_relpath,
-            filename=filename,
-            content=content,
-            source_url=link.url,
-            file_type=_FILE_TYPE_MAP.get(classification.file_type, "paper"),
-            classification={
-                "subject": classification.subject,
-                "level": classification.level,
-                "semester": classification.semester,
-                "year": classification.year,
-            },
-            origin=paper.detail_url,
-        )
+        if not ctx.force and ctx.checkpoint and ctx.checkpoint.is_downloaded(link.url):
+            existing = (
+                ctx.checkpoint.path_for_file(link.url)
+                or self._path_from_meta(ctx, dir_relpath, link.url)
+                or expected_rel
+            )
+            print(f"已存在：{_absolute(ctx.store, existing)}（跳过，--force 可重下）")
+            if ctx.checkpoint:
+                # 旧 checkpoint 只有 URL，这里顺手补上「PDF URL → 文件路径」映射
+                ctx.checkpoint.mark_downloaded(link.url, existing)
+            result.file_locations.append(existing)
+            result.files_skipped += 1
+            return
+
+        try:
+            content = ctx.fetcher.fetch_bytes(link.url)
+        except Exception as exc:
+            print(f"下载失败：{link.url} — {exc}")
+            result.files_failed += 1
+            return
+
+        try:
+            path = ctx.store.save(
+                dir_relpath=dir_relpath,
+                filename=filename,
+                content=content,
+                source_url=link.url,
+                file_type=_FILE_TYPE_MAP.get(classification.file_type, "paper"),
+                classification={
+                    "subject": classification.subject,
+                    "level": classification.level,
+                    "semester": classification.semester,
+                    "year": classification.year,
+                },
+                origin=paper.detail_url,
+            )
+        except OSError as exc:
+            print(f"保存失败：{_absolute(ctx.store, expected_rel)} — {exc}")
+            result.files_failed += 1
+            return
+
+        actual_path, actual_rel = _saved_location(ctx.store, path)
 
         if ctx.validator:
-            validation = ctx.validator.validate(str(path))
+            try:
+                validation = ctx.validator.validate(str(path))
+            except Exception as exc:
+                path.unlink(missing_ok=True)
+                print(f"校验失败：{actual_path} — {exc}")
+                result.files_failed += 1
+                return
             if not validation.is_valid:
                 path.unlink(missing_ok=True)
+                print(f"校验失败：{actual_path}（不是有效 PDF，已删除）")
                 result.files_failed += 1
                 return
 
         if ctx.checkpoint:
-            ctx.checkpoint.mark_downloaded(link.url)
+            ctx.checkpoint.mark_downloaded(link.url, actual_rel)
+        print(f"已下载：{actual_path}（{_human_size(len(content))}）")
+        result.file_locations.append(actual_rel)
         result.files_downloaded += 1
+
+    @staticmethod
+    def _path_from_meta(ctx, dir_relpath, source_url: str) -> Optional[str]:
+        """从同目录 meta.json 反查该来源之前落成的文件名（旧 checkpoint 回填用）。"""
+        try:
+            meta = ctx.store.read_meta(dir_relpath)
+        except Exception:
+            return None
+        for record in (meta or {}).get("files", []):
+            if record.get("source_url") == source_url and record.get("filename"):
+                return str(dir_relpath / record["filename"])
+        return None
 
     @staticmethod
     def _build_classification(item, link, is_split: bool, semester: str,
@@ -223,6 +308,9 @@ class ZgkaoAdapter(SiteAdapter):
 
         print(f"警告：无法确定区县/学校，暂记「{UNKNOWN_LOCATION}」：{link.filename}（{paper.detail_url}）")
         return UNKNOWN_LOCATION, ""
+
+    def accepts(self, item: Item) -> bool:
+        return self._passes_filter(item.raw["paper"])
 
     def _passes_filter(self, item) -> bool:
         if "years" in self._filters and item.year not in self._filters["years"]:

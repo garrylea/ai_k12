@@ -35,6 +35,9 @@ class FakeAdapter:
     def required_args(self):
         return set()
 
+    def accepts(self, item):
+        return True
+
 
 class FakeFetcher:
     def fetch_text(self, url: str) -> str:
@@ -67,8 +70,10 @@ class TestCrawlerRun:
         class FakeCheckpoint:
             def is_downloaded(self, item_id):
                 return item_id == "a"
-            def mark_downloaded(self, item_id):
+            def mark_downloaded(self, item_id, path=None):
                 pass
+            def files_for_item(self, item_id):
+                return ["数学/初中/first/2026/a.pdf"]
 
         adapter = FakeAdapter()
         crawler = Crawler(adapter=adapter, fetcher=FakeFetcher(), checkpoint=FakeCheckpoint())
@@ -81,10 +86,60 @@ class TestCrawlerRun:
         class FakeCheckpoint:
             def is_downloaded(self, item_id):
                 return True
-            def mark_downloaded(self, item_id):
+            def mark_downloaded(self, item_id, path=None):
                 pass
+            def files_for_item(self, item_id):
+                return []
 
         adapter = FakeAdapter()
         crawler = Crawler(adapter=adapter, fetcher=FakeFetcher(), checkpoint=FakeCheckpoint(), force=True)
         result = crawler.run(filters={})
         assert result.items_downloaded == 2
+
+
+class _PathCheckpoint:
+    """is_downloaded 全真；files_for_item 可配置。"""
+
+    def __init__(self, locations):
+        self._locations = locations
+        self.marked_files = []
+
+    def is_downloaded(self, url):
+        return True
+
+    def files_for_item(self, url):
+        return list(self._locations)
+
+    def path_for_file(self, url):
+        return None
+
+    def mark_downloaded(self, url, path=None):
+        self.marked_files.append((url, path))
+
+
+class TestSkipLogging:
+    def test_prints_file_paths_for_skipped_item(self, capsys):
+        adapter = FakeAdapter()
+        crawler = Crawler(
+            adapter=adapter, fetcher=FakeFetcher(),
+            checkpoint=_PathCheckpoint(["数学/初中/first/2026/a.pdf"]),
+        )
+        result = crawler.run(filters={})
+
+        out = capsys.readouterr().out
+        assert "已下载过：" in out and "a.pdf" in out
+        assert "（跳过）" in out
+        assert adapter.downloaded == []  # 有映射就真跳过，不再抓详情页
+        assert result.items_skipped == 2
+
+    def test_backfills_mapping_when_checkpoint_has_no_paths(self, capsys):
+        """旧 checkpoint 只有 URL：走一次 adapter 补文件位置，而不是静默跳过。"""
+        adapter = FakeAdapter()
+        crawler = Crawler(
+            adapter=adapter, fetcher=FakeFetcher(), checkpoint=_PathCheckpoint([]),
+        )
+        crawler.run(filters={})
+
+        out = capsys.readouterr().out
+        assert out.count("补记文件位置：") == 2
+        assert adapter.downloaded == ["a", "b"]

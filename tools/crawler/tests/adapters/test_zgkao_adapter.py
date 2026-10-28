@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -636,3 +637,60 @@ class TestLocationFromText:
     def test_location_from_text(self, text, expected):
         from adapters.zgkao import location_from_text
         assert location_from_text(text) == expected
+
+
+class TestDownloadLog:
+    def test_prints_saved_path(self, tmp_path, capsys):
+        """每落盘一个 PDF 打一行「已下载：<绝对路径>（大小）」，否则长任务只有最后一行汇总，
+        用户无法判断到底下没下（2026-10-28 语文批次的反馈）。"""
+        fetcher = MockFetcher()
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        items = list(adapter.list_items({}))
+        adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
+
+        expected = (tmp_path / "数学/初中/second/2026/数学-初三(下)-202607-西城-模拟二-试卷.pdf").resolve()
+        out = capsys.readouterr().out
+        assert f"已下载：{expected}" in out
+        assert re.search(r"（\d+(?:\.\d+)? (?:B|KB|MB|GB)）", out)
+
+    def test_prints_existing_path_when_skipped(self, tmp_path, capsys):
+        """已下载过的文件要指出「在哪个目录、叫什么」，不能只打一行汇总。"""
+        fetcher = MockFetcher()
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        items = list(adapter.list_items({}))
+
+        checkpoint = Checkpoint(tmp_path / ".checkpoint.json")
+        checkpoint.load()
+        store = PdfStore(
+            base_dir=str(tmp_path),
+            entry_url="https://www.zgkao.com/shitiku/89047.html",
+            crawl_time=datetime(2026, 7, 4, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        ctx = DownloadContext(
+            fetcher=fetcher, store=store, checkpoint=checkpoint, validator=PdfValidator(),
+        )
+        adapter.download_item(items[0], ctx)
+        capsys.readouterr()
+
+        adapter_again = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        adapter_again.download_item(items[0], ctx)
+
+        expected = (tmp_path / "数学/初中/second/2026/数学-初三(下)-202607-西城-模拟二-试卷.pdf").resolve()
+        out = capsys.readouterr().out
+        assert f"已存在：{expected}（跳过，--force 可重下）" in out
+
+    def test_prints_error_when_pdf_fetch_fails(self, tmp_path, capsys):
+        """下载失败必须打印错误信息，不能只让 Failed 计数 +1。"""
+
+        class BrokenFetcher(MockFetcher):
+            def fetch_bytes(self, url: str) -> bytes:
+                raise RuntimeError("连接超时")
+
+        fetcher = BrokenFetcher()
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        items = list(adapter.list_items({}))
+        result = adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
+
+        out = capsys.readouterr().out
+        assert "下载失败：" in out and "连接超时" in out
+        assert result.files_failed == 1

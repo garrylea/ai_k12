@@ -85,6 +85,11 @@ class BaseStore(ResourceStore):
     def _abs_dir(self, dir_relpath: Path) -> Path:
         return self._base_dir / dir_relpath
 
+    @property
+    def base_dir(self) -> Path:
+        """输出根目录。日志里要把相对路径还原成绝对路径给用户看。"""
+        return self._base_dir
+
     def read_meta(self, dir_relpath: Path) -> Optional[dict]:
         meta_path = self._abs_dir(dir_relpath) / "meta.json"
         if not meta_path.exists():
@@ -117,7 +122,8 @@ class BaseStore(ResourceStore):
         }
 
     def _file_record(
-        self, filename: str, file_type: str, source_url: str, content: bytes, page: Optional[int] = None,
+        self, filename: str, file_type: str, source_url: str, content: bytes,
+        page: Optional[int] = None, origin: Optional[str] = None,
     ) -> dict:
         record = {
             "filename": filename,
@@ -127,6 +133,10 @@ class BaseStore(ResourceStore):
             "size_bytes": len(content),
             "md5": hashlib.md5(content).hexdigest(),
         }
+        if origin:
+            # 详情页 URL。有了它，之后可以从 meta.json 反查「哪个详情页落了哪些文件」，
+            # 不必依赖 checkpoint（换机器/删 checkpoint 后仍可解释跳过）。
+            record["origin"] = origin
         if page is not None:
             record["page"] = page
         return record
@@ -152,7 +162,7 @@ class PdfStore(BaseStore):
         file_path.write_bytes(content)
 
         meta["files"] = [f for f in meta["files"] if f["filename"] != filename]
-        meta["files"].append(self._file_record(filename, file_type, source_url, content))
+        meta["files"].append(self._file_record(filename, file_type, source_url, content, origin=origin))
         self.write_meta(dir_relpath, meta)
         return file_path
 

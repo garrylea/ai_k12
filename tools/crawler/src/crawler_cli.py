@@ -150,12 +150,25 @@ def main(argv=None) -> int:
         dry_run=args.dry_run,
     )
 
+    # 先报运行上下文：长任务里用户要能立刻确认「跑的是哪一页、写到哪、过滤是否生效」
+    print(f"入口：{args.url or '（smartedu 内置入口）'}")
+    print(f"输出目录：{output_path.resolve()}")
+    if filters:
+        printable = ", ".join(f"{k}={','.join(sorted(v))}" for k, v in filters.items())
+        print(f"过滤条件：{printable}")
+    if args.dry_run:
+        print("模式：dry-run（不落盘）")
+
     result = crawler.run(filters)
+    matched = result.items_total - getattr(result, "items_filtered", 0)
     print(
-        f"Total: {result.items_total}, Downloaded: {result.items_downloaded}, "
+        f"Total: {result.items_total} (matched {matched}), "
+        f"Downloaded: {result.items_downloaded}, "
         f"Skipped: {result.items_skipped}, Failed: {result.items_failed}, "
         f"Unresolved(files): {result.items_unresolved}"
     )
+    if result.items_downloaded == 0 and result.items_skipped > 0:
+        print("提示：本次没有新文件，上面逐条列出了已存在文件的位置；要重新下载请加 --force。")
 
     if resolver and resolver.unresolved:
         unresolved = _unique_keep_order(resolver.unresolved)

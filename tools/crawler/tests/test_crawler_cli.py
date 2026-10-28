@@ -181,3 +181,41 @@ class TestMainSemesterContract:
 
         assert crawler_cli.main(["--site", "smartedu", "--subject", "数学"]) == 0
         assert seen == {}
+
+
+class TestZeroDownloadHint:
+    """Downloaded: 0 + Skipped > 0 时要说清「不是没下，是之前下过」。"""
+
+    def _run_with(self, monkeypatch, downloaded, skipped):
+        class _Result:
+            items_total = 201
+            items_downloaded = downloaded
+            items_skipped = skipped
+            items_failed = 0
+            items_unresolved = 0
+
+        class _Crawler:
+            def __init__(self, **kwargs):
+                pass
+
+            def run(self, filters):
+                return _Result()
+
+        class StubResolver:
+            def __init__(self, prompt_fn=None):
+                self.unresolved = []
+
+        _stub_main_collaborators(monkeypatch, StubResolver)
+        monkeypatch.setattr(crawler_cli, "Crawler", _Crawler)
+        monkeypatch.setattr(crawler_cli.sys, "stdin", _FakeStdin(tty=False))
+        return crawler_cli.main(["--site", "zgkao", "--url", "https://e.com"])
+
+    def test_prints_hint_when_everything_skipped(self, monkeypatch, capsys):
+        self._run_with(monkeypatch, downloaded=0, skipped=104)
+        out = capsys.readouterr().out
+        assert "本次没有新文件" in out
+        assert "--force" in out
+
+    def test_no_hint_when_files_downloaded(self, monkeypatch, capsys):
+        self._run_with(monkeypatch, downloaded=6, skipped=0)
+        assert "本次没有新文件" not in capsys.readouterr().out
