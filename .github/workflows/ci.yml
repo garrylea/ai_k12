@@ -1,0 +1,113 @@
+# CI：data-refinery（pytest） + server（真库集成测试 + build） + web（test + build）
+#
+# 触发：push / PR 到 main，或手动 workflow_dispatch。
+# 说明：
+# - server 的 repositories/*.repo.test.ts 是**真库集成测试**（自建自清），
+#   因此这里起 MySQL service 并加载 tools/db/schema.sql（含 subjects seed）。
+# - web 的 lint 目前有 2 个既有 error（tracker.test.ts / MobilePointsPage.tsx，
+#   2026-10-12 记录），暂以 continue-on-error 运行：能看到结果但不阻断合并。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  data-refinery:
+    name: data-refinery (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/data-refinery
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: tools/data-refinery/requirements.txt
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: pytest
+        run: python -m pytest tests -q
+
+  server:
+    name: server (vitest + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/server
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ai_k12
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USER: root
+      DB_PASS: root
+      DB_NAME: ai_k12
+      JWT_SECRET: ci-test-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/server/package-lock.json
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+      - name: Load schema
+        working-directory: .
+        run: |
+          mysql -h127.0.0.1 -uroot -proot --default-character-set=utf8mb4 ai_k12 \
+            < tools/db/schema.sql
+      - name: vitest
+        run: npm test
+      - name: build
+        run: npm run build
+
+  web:
+    name: web (vitest + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+      - name: vitest
+        run: npm test
+      - name: build
+        run: npm run build
+      - name: lint (non-blocking)
+        continue-on-error: true
+        run: npm run lint
