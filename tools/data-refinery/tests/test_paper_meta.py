@@ -72,3 +72,12 @@ def test_parse_nested_dir_name_mismatch_returns_none():
         )
         is None
     )
+
+
+def test_district_with_school_keeps_only_district_in_column():
+    """爬虫汇总表文件名是 `海淀·一零一中学`：入库 district 必须是 `海淀`，
+    否则 /exams 的 district 精确筛选（p.district = ?）会漏掉这些卷子。"""
+    m = parse_paper_meta("数学/初中/first/2025/数学-初三(上)-202507-海淀·一零一中学-（上）期中-试卷.jsonl")
+    assert m is not None
+    assert m.district == "海淀"
+    assert m.title == "2025 海淀·一零一中学 初三 （上）期中"

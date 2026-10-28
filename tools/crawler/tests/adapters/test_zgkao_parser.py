@@ -197,6 +197,90 @@ class TestIndexParser:
         assert "https://www.zgkao.com/zk/202305/61530.html" in urls
         assert "https://www.zgkao.com/zk/202305/61551.html" in urls
 
+    def test_reads_region_and_school_columns_with_rowspan(self):
+        """汇总表的「区域」「学校」用 rowspan 合并，后续行只写科目 + 年份链接。
+
+        回归 `北京各` 事故：不展开 rowspan 就读不到这两列，整表落在表头的
+        `北京各区` 上；展开后每行必须拿到真实的区县（以及可选的学校）。
+        """
+        html = """
+        <html><body>
+        <table>
+          <tr><td colspan="5"><strong>2024-2025学年北京各区初三（上）期中试卷&答案汇总</strong></td></tr>
+          <tr><td>区域</td><td>学校</td><td>科目</td><td>2025</td><td>2024</td></tr>
+          <tr>
+            <td rowspan="3">海淀区</td>
+            <td rowspan="2">——</td>
+            <td>语文</td>
+            <td><a href="https://www.zgkao.com/shitiku/86409.html">试卷 | 答案</a></td>
+            <td>/</td>
+          </tr>
+          <tr>
+            <td>数学</td>
+            <td><a href="https://www.zgkao.com/shitiku/86419.html">试卷 | 答案</a></td>
+            <td>/</td>
+          </tr>
+          <tr>
+            <td>人大附中</td>
+            <td>语文</td>
+            <td>收集中</td>
+            <td><a href="https://www.zgkao.com/shitiku/76272.html">试卷 | 答案</a></td>
+          </tr>
+          <tr>
+            <td rowspan="1">西城区</td>
+            <td rowspan="1">北京四中</td>
+            <td>数学</td>
+            <td><a href="https://www.zgkao.com/shitiku/76280.html">试卷</a></td>
+            <td>/</td>
+          </tr>
+        </table>
+        </body></html>
+        """
+        items = IndexParser.parse(html)
+        assert len(items) == 4
+
+        by_url = {i.detail_url: i for i in items}
+        assert by_url["https://www.zgkao.com/shitiku/86409.html"].district == "海淀"
+        assert by_url["https://www.zgkao.com/shitiku/86409.html"].school == ""
+        assert by_url["https://www.zgkao.com/shitiku/86419.html"].district == "海淀"
+        assert by_url["https://www.zgkao.com/shitiku/86419.html"].school == ""
+        assert by_url["https://www.zgkao.com/shitiku/76272.html"].district == "海淀"
+        assert by_url["https://www.zgkao.com/shitiku/76272.html"].school == "人大附中"
+        assert by_url["https://www.zgkao.com/shitiku/76272.html"].year == "2024"
+        assert by_url["https://www.zgkao.com/shitiku/76280.html"].district == "西城"
+        assert by_url["https://www.zgkao.com/shitiku/76280.html"].school == "北京四中"
+
+    def test_generic_summary_header_does_not_become_district(self):
+        """`北京各区` 是“全北京各区汇总”，不是区县 —— 必须归空交给下一级回退。"""
+        html = """
+        <html><body>
+        <table>
+          <tr><td colspan="3"><strong>2024-2025学年北京各区初三（上）期中试卷&答案汇总</strong></td></tr>
+          <tr><td>科目</td><td>2025</td><td>2024</td></tr>
+          <tr><td>数学</td><td><a href="https://www.zgkao.com/shitiku/86419.html">试卷</a></td><td>/</td></tr>
+        </table>
+        </body></html>
+        """
+        items = IndexParser.parse(html)
+        assert len(items) == 1
+        assert items[0].district == ""
+        assert items[0].school == ""
+
+    def test_district_prefix_year_is_stripped(self):
+        """`2024年大兴区初三一模` 曾解析出 `年大兴`（文件名里就是 `…-年大兴-…`）。"""
+        html = """
+        <html><body>
+        <table>
+          <tr><td colspan="2"><strong>2024年大兴区初三一模试卷&答案</strong></td></tr>
+          <tr><td>科目</td><td>2024</td></tr>
+          <tr><td>数学</td><td><a href="https://www.zgkao.com/shitiku/70323.html">试卷</a></td></tr>
+        </table>
+        </body></html>
+        """
+        items = IndexParser.parse(html)
+        assert len(items) == 1
+        assert items[0].district == "大兴"
+
 
 class TestDetailParser:
     def test_extracts_pdf_url(self):
@@ -338,9 +422,19 @@ class TestParseHeaderDistrict:
         assert info["exam_type"] == "期末"
 
     def test_district_after_academic_year_range_with_city_prefix(self):
+        """`北京海淀区` 要收成 `海淀`，与 `海淀区…` 表头落到同一个值。
+
+        不统一的话精确匹配的 `--district 海淀` 会漏掉带城市前缀的那批，
+        同一目录里也会出现 `海淀` 与 `北京海淀` 两种写法。
+        """
         header = "2025-2026学年北京海淀区初一期末试卷&答案汇总"
         info = IndexParser._parse_header(header)
-        assert info["district"] == "北京海淀"
+        assert info["district"] == "海淀"
+
+    def test_city_prefix_kept_when_not_a_district(self):
+        """`北京四中` 里的「北京」是校名，不能被当作城市前缀去掉。"""
+        assert IndexParser._clean_region("北京四中") == "北京四中"
+        assert IndexParser._clean_region("北京海淀区") == "海淀"
 
     def test_district_without_academic_year_range_unchanged(self):
         header = "2026海淀初三二模试卷&答案"

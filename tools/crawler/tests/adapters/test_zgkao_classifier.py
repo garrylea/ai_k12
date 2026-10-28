@@ -56,6 +56,26 @@ class TestFilename:
         assert Classifier.filename(cls).endswith(".pdf")
 
 
+class TestLocationInFilename:
+    """区县 + 学校都进文件名；用 `·` 连接，保证下游按 `-` 切分的解析器不用改。"""
+
+    def test_district_only(self):
+        cls = make_classification(district="海淀", school="")
+        assert Classifier.filename(cls) == "数学-初三(上)-202607-海淀-期末-试卷.pdf"
+
+    def test_district_and_school(self):
+        cls = make_classification(district="海淀", school="一零一中学")
+        assert Classifier.filename(cls) == "数学-初三(上)-202607-海淀·一零一中学-期末-试卷.pdf"
+
+    def test_school_only_when_district_unknown(self):
+        cls = make_classification(district="", school="北京四中")
+        assert Classifier.filename(cls) == "数学-初三(上)-202607-北京四中-期末-试卷.pdf"
+
+    def test_school_equal_to_district_not_duplicated(self):
+        cls = make_classification(district="海淀", school="海淀")
+        assert Classifier.filename(cls) == "数学-初三(上)-202607-海淀-期末-试卷.pdf"
+
+
 class TestStorageDir:
     def test_storage_dir_matches_plan_structure(self):
         cls = make_classification()

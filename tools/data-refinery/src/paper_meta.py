@@ -44,16 +44,20 @@ def _parse_with_dirs(level: str, semester: str, year_dir: str, filename: str) ->
     sem = _SEMESTER_CN[m.group("sem_cn")]
     if sem != semester or year != int(year_dir):
         return None  # 文件名与目录不一致，视为脏数据
+    # 地点字段可能是 `海淀` 或 `海淀·一零一中学`（爬虫汇总表带学校列时的写法）。
+    # 入库的 district 只留区县，保证 /exams 的 district 精确筛选能命中；学校仍保留在 title 里。
+    location = m.group("district")
+    district = location.split("·", 1)[0]
     return PaperMeta(
         subject=m.group("subject"),
         grade=m.group("grade"),
         grade_band=_LEVEL_TO_BAND[level],
         semester=semester,
         year=year,
-        district=m.group("district"),
+        district=district,
         exam_type=m.group("exam_type"),
         file_type=m.group("file_type"),
-        title=f"{year} {m.group('district')} {m.group('grade')} {m.group('exam_type')}",
+        title=f"{year} {location} {m.group('grade')} {m.group('exam_type')}",
     )
 
 

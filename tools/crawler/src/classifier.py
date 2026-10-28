@@ -28,11 +28,24 @@ class Classification:
     district: str
     exam_type: str
     file_type: str
+    school: str = ""
     level: str = field(default=None)
 
     def __post_init__(self) -> None:
         if self.level is None:
             self.level = Classifier.derive_level(self.grade)
+
+    @property
+    def location(self) -> str:
+        """文件名里的地点字段：`海淀` / `海淀·一零一中学` / `一零一中学`。
+
+        汇总表的「区域」「学校」两列都要保留 —— 只写区县无法区分同区不同学校，
+        只写学校又丢了区县维度。用 `·` 连接而不是 `-`，下游按 `-` 切分文件名的
+        解析器（data-refinery/paper_meta.py）不用改。
+        """
+        if self.district and self.school and self.school != self.district:
+            return f"{self.district}·{self.school}"
+        return self.school or self.district
 
 
 class Classifier:
@@ -40,7 +53,7 @@ class Classifier:
     def filename(cls: Classification) -> str:
         semester_cn = _SEMESTER_CN[cls.semester]
         exam = Classifier.normalize_exam_type(cls.exam_type)
-        return f"{cls.subject}-{cls.grade}({semester_cn})-{cls.year_code}-{cls.district}-{exam}-{cls.file_type}.pdf"
+        return f"{cls.subject}-{cls.grade}({semester_cn})-{cls.year_code}-{cls.location}-{exam}-{cls.file_type}.pdf"
 
     @staticmethod
     def storage_dir(cls: Classification, base_dir: str = "data") -> Path:

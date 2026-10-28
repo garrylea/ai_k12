@@ -534,10 +534,105 @@ class TestZgkaoOriginPropagation:
 
         assert result.files_downloaded == 2
         pdf_dir = tmp_path / "数学" / "初中" / "first" / "2024"
+        # 表里写的是「北京各区」这种汇总占位词，文件名/标题也猜不出 → 记「待确认」，不再产出 `北京各`
         assert sorted(p.name for p in pdf_dir.glob("*.pdf")) == [
-            "数学-初三(上)-202407-北京各-（上）期中-试卷-76319.pdf",
-            "数学-初三(上)-202407-北京各-（上）期中-试卷.pdf",
+            "数学-初三(上)-202407-待确认-（上）期中-试卷-76319.pdf",
+            "数学-初三(上)-202407-待确认-（上）期中-试卷.pdf",
         ]
         meta = json.loads((pdf_dir / "meta.json").read_text(encoding="utf-8"))
         assert len(meta["files"]) == 2
         assert "警告：文件名冲突" in capsys.readouterr().out
+
+
+class TestLocationFallback:
+    """汇总表拿不到区县/学校时的三级回退：PDF 原名 → 详情页标题 → 待确认。"""
+
+    ENTRY = "https://www.zgkao.com/shitiku/89047.html"
+    DETAIL = "https://www.zgkao.com/shitiku/86419.html"
+    PDF = "https://cdn.zgkao.com/zixunzhan/86419.pdf"
+
+    INDEX = f"""
+    <html><body>
+    <table>
+      <tr><td colspan="2"><strong>2024-2025学年北京各区初三（上）期中试卷&答案汇总</strong></td></tr>
+      <tr><td>科目</td><td>2024</td></tr>
+      <tr><td>数学</td><td><a href="{DETAIL}">试卷</a></td></tr>
+    </table>
+    </body></html>
+    """
+
+    def _fetcher(self, pdf_name: str, title: str = "") -> MockFetcher:
+        fetcher = MockFetcher()
+        fetcher._routes.update({
+            self.ENTRY: ("text", self.INDEX),
+            self.DETAIL: ("text", f"""
+                <html><body>
+                <h1>{title}</h1>
+                <script id="__NUXT_DATA__" type="application/json">
+                ["Reactive", "{pdf_name}", "{self.PDF}"]
+                </script>
+                </body></html>
+            """),
+            self.PDF: ("bytes", make_pdf_bytes()),
+        })
+        return fetcher
+
+    def _run(self, tmp_path, pdf_name: str, title: str = "") -> Path:
+        fetcher = self._fetcher(pdf_name, title)
+        adapter = ZgkaoAdapter(fetcher, self.ENTRY, {})
+        items = list(adapter.list_items({}))
+        ctx = DownloadContext(
+            fetcher=fetcher,
+            store=PdfStore(base_dir=str(tmp_path), entry_url=self.ENTRY,
+                           crawl_time=datetime(2026, 7, 4, 10, 0, 0, tzinfo=timezone.utc)),
+            checkpoint=None,
+            validator=PdfValidator(),
+        )
+        adapter.download_item(items[0], ctx)
+        return tmp_path / "数学" / "初中" / "first" / "2024"
+
+    def test_uses_pdf_filename_when_table_has_no_location(self, tmp_path):
+        # 「北京」只在后面跟区县时才当城市前缀去掉（北京海淀 → 海淀）；
+        # 后面是校名时必须保留（北京四中 ≠ 四中）。
+        pdf_dir = self._run(tmp_path, "2024北京人大附中朝阳学校初三（上）期中数学.pdf")
+        assert [p.name for p in pdf_dir.glob("*.pdf")] == [
+            "数学-初三(上)-202407-北京人大附中朝阳学校-（上）期中-试卷.pdf",
+        ]
+
+    def test_district_in_pdf_filename_is_shortened(self, tmp_path):
+        pdf_dir = self._run(tmp_path, "2024北京海淀区初三（上）期中数学.pdf")
+        assert [p.name for p in pdf_dir.glob("*.pdf")] == [
+            "数学-初三(上)-202407-海淀-（上）期中-试卷.pdf",
+        ]
+
+    def test_falls_back_to_detail_title(self, tmp_path):
+        pdf_dir = self._run(tmp_path, "数学期中试卷.pdf", "2024年北京西城初三（上）期中数学试卷在哪下载")
+        assert [p.name for p in pdf_dir.glob("*.pdf")] == [
+            "数学-初三(上)-202407-西城-（上）期中-试卷.pdf",
+        ]
+
+    def test_grade_in_pdf_filename_beats_table_header(self, tmp_path):
+        """汇总表表头写初三，但 PDF 原名写初二 —— 逐份证据优先，避免把初二卷标成初三。"""
+        pdf_dir = self._run(tmp_path, "2024北京海淀初二（上）期中数学.pdf")
+        assert [p.name for p in pdf_dir.glob("*.pdf")] == [
+            "数学-初二(上)-202407-海淀-（上）期中-试卷.pdf",
+        ]
+
+
+class TestLocationFromText:
+    """从 PDF 原名 / 页面标题猜地点。"""
+
+    @pytest.mark.parametrize("text,expected", [
+        ("2025北京海淀初三（上）期中数学   有答案.pdf", "海淀"),          # 城市前缀 + 区县
+        ("2024北京海淀区初三（上）期中数学.pdf", "海淀"),                  # 末尾「区」去掉
+        ("2025北京人大附中朝阳学校初三（上）期中数学.pdf", "北京人大附中朝阳学校"),
+        ("2024北京四中初三（上）期中数学.pdf", "北京四中"),                # 「北京」是校名的一部分
+        ("2025北京北京中学初三（上）期中数学.pdf", "北京中学"),            # 城市前缀撞校名
+        ("2025-2026德胜中学九上数学期中考试卷.pdf", "德胜中学"),           # 九上 不是初一/二/三
+        ("2024北京各区初三（上）期中数学试卷.pdf", ""),                    # 汇总占位词，不是地点
+        ("数学期中试卷.pdf", ""),
+        ("2024%E5%8C%97%E4%BA%AC%E4%BA%BA%E5%A4%A7%E9%99%84%E4%B8%AD%E5%88%9D%E4%B8%89.pdf", "北京人大附中"),
+    ])
+    def test_location_from_text(self, text, expected):
+        from adapters.zgkao import location_from_text
+        assert location_from_text(text) == expected
