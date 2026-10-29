@@ -796,3 +796,314 @@ def test_split_options_bare_inline_after_chinese_punctuation():
     content = "下列说法不符合文意的一项是。A.甲项。B.乙项。C.丙项。D.丁项。"
     stem, opts = split_options(content)
     assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+
+
+def test_split_options_chinese_three_cn_labels():
+    """语文 3 选项 + 甲乙丙：必须拆出 3 项，label 归一 A/B/C，原标签保留。"""
+    content = (
+        "阅读全文，下列说法不恰当的一项是（2分）\n"
+        "【甲】第②段举北斗卫星团队中青年人的例子，证明了青年人要珍惜时间。\n"
+        "【乙】第④段“宝剑锋从磨砺出”论证人生道路上总会遇到荆棘坎坷。\n"
+        "【丙】第⑤段引用习近平总书记的话，意在证明奋斗无止境。"
+    )
+    stem, opts = split_options(content, subject="chinese")
+    assert [o["label"] for o in opts] == ["A", "B", "C"]
+    assert [o["original_label"] for o in opts] == ["甲", "乙", "丙"]
+    assert "北斗卫星" in opts[0]["text"]
+    assert "奋斗无止境" in opts[2]["text"]
+
+
+def test_split_options_chinese_three_latin_labels():
+    """语文 3 选项 + A/B/C：不能再要求必须 4 项。"""
+    content = "你认为发言有误的学生是(2分)A.小兴 B.小红 C.小明"
+    _, opts = split_options(content, subject="chinese")
+    assert [o["text"] for o in opts] == ["小兴", "小红", "小明"]
+
+
+def test_split_options_math_still_requires_four():
+    """数学默认规则不变：只有 3 个 A/B/C 时不拆（避免误判非选择题）。"""
+    content = "你认为正确的是(2分)A.甲 B.乙 C.丙"
+    assert split_options(content)[1] is None
+    assert split_options(content, subject="chinese")[1] is not None
+
+
+def test_material_title_between_questions_moves_block():
+    """两题之间的「文段标题 + 长段落」应归下一题材料，不能并进上一题正文。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "一、基础运用（共 10 分）\n"
+        "绿绸叠翠\n\n"
+        "登鼓楼南望，青翠如绸，绿意绵延，勾勒出丰盈通达的中轴绿廊。驻足于小巷人家，"
+        "极具老北京情调的葫芦、丝瓜爬满藤架，处处绿意盎然。\n\n"
+        "4.文段中的画线句存在问题，请你修改。(2分）\n\n"
+        "流光溢彩\n\n"
+        "夜幕降临，北京城的大街小巷都沉浸在五彩斑斓的灯海中。这夜京城从黑到亮再到靓，"
+        "历经了上百年，【甲】建国十周年之际路灯遍及北京大街小巷。【乙】林立的摩天大楼霓虹闪烁。\n\n"
+        "5.小组成员对【甲】【乙】两处使用的标点疑问，你认为正确的一项是（2分）"
+        "A.【甲】；【乙】； B.【甲】；【乙】，C.【甲】。【乙】； D.【甲】。【乙】，\n"
+    )
+    questions = split_page(text, _Path("x.md"), attach_material=True)
+    q4 = next(q for q in questions if q.group_order == 4)
+    q5 = next(q for q in questions if q.group_order == 5)
+    assert "夜幕降临" not in q4.content
+    assert q5.material_text and "夜幕降临" in q5.material_text
+    assert "【甲】" in q5.material_text and "【乙】" in q5.material_text
+
+
+def test_part_header_starts_new_material_scope():
+    """「第一部分 北京城市发展史上的水源问题」是材料分区，不是题型分区：
+    其后正文必须归下一题材料，不能沿用上一部分的「前言」。
+    东直门 2024 题3/5/6 因沿用前言，被模型判「材料不完整」。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "一、基础·运用（共13分）\n\n"
+        "前言 江河与文明\n\n"
+        "如果说水是生命之源，江河就是承载生命流动的血脉，人类文明起源于江河。\n\n"
+        "1. 请用正楷字书写这十二个字。（1分）\n\n"
+        "2. 对文段中画波浪线词语判断正确的一项是（2分）\n"
+        "A. 起源 B. 滔滔 C. 奔踊 D. 广袤\n\n"
+        "第一部分 北京城市发展史上的水源问题\n\n"
+        "北京城早期城市功能有限，对地表水源的需求不多。10世纪初叶以后，北京逐步发展"
+        "成为一个全国性的政治中心，城市功能渐趋复杂化。\n\n"
+        "北京的水源存蓄，经历了【甲】【乙】【丙】的过程。\n\n"
+        "3. 为文中【甲】【乙】【丙】三处选择词语最恰当的一项是（2分）\n"
+        "A.修库 疏道 造河 B.造河 疏道 修库\n\n"
+        "第三部分 北京河流的新变化\n\n"
+        "亮马河曾是一条平平无奇的河流，这确是行之有效的，游客络绎不绝，令人心旷神怡。\n\n"
+        "4. 下列成语使用不恰当的一项是（2分）\n"
+        "A. 行之有效 B. 持之以恒\n"
+    )
+    questions = split_page(text, _Path("x.md"), attach_material=True)
+
+    q2 = next(q for q in questions if q.group_order == 2)
+    q3 = next(q for q in questions if q.group_order == 3)
+    q4 = next(q for q in questions if q.group_order == 4)
+
+    assert "前言" in q2.material_text and "【甲】" not in q2.material_text
+    assert "第一部分" in q3.material_text and "【甲】" in q3.material_text
+    assert "第三部分" in q4.material_text and "行之有效" in q4.material_text
+
+
+def test_incomplete_option_label_run_is_not_split():
+    """OCR 丢了 B 的点号（A. ① B ② C. ③ D. ④）时不能拿 C/D 当选项：
+    否则 C/D 被重编号成 A/B，A/B 的内容并进题干，学生看到错位选项。"""
+    from question_splitter import split_options
+
+    content = "其中未使用修辞方法的一句是(2分)\nA. ① B ② C. ③ D. ④"
+    stem, opts = split_options(content, subject="chinese")
+    assert opts is None
+    assert stem == content          # 原文完整保留，交标注判缺陷
+
+
+def test_complete_four_labels_still_split():
+    from question_splitter import split_options
+
+    _, opts = split_options("题干\nA. ① B. ② C. ③ D. ④", subject="chinese")
+    assert [o["text"] for o in opts] == ["①", "②", "③", "④"]
+
+
+def test_chinese_cn_labels_as_blank_placeholders_not_options():
+    """【甲】【乙】【丙】三处填空（题干无选择提示）不能拆成 A/B/C 选项：
+    拆了会把三段正文当选项，题干只剩「任务三」。"""
+    from question_splitter import split_options
+
+    content = (
+        "任务三：品悟情感内涵\n"
+        "我的分析：（共 3 分）\n"
+        "【甲】文张岱记「崇祯五年」雪夜独往湖心亭看雪，表现他遗世独立的高洁情怀。\n"
+        "【乙】文高濂雪后独登镇海楼赏积雪炊烟，表达他赏景的愉悦满足。\n"
+        "【丙】诗中「孤舟」「独钓」写出柳宗元内心的孤寂。"
+    )
+    assert split_options(content, subject="chinese")[1] is None
+
+
+def test_chinese_cn_labels_with_choice_hint_are_options():
+    from question_splitter import split_options
+
+    content = (
+        "阅读全文，下列说法不恰当的一项是（2分）\n"
+        "【甲】第②段举北斗卫星团队的例子，证明青年人要珍惜时间。\n"
+        "【乙】第④段论证人生道路上总会遇到荆棘坎坷。\n"
+        "【丙】第⑤段引用名言证明奋斗无止境。"
+    )
+    _, opts = split_options(content, subject="chinese")
+    assert len(opts) == 3
+    assert [o["original_label"] for o in opts] == ["甲", "乙", "丙"]
+
+
+def test_glued_next_stem_is_split_out():
+    """MinerU 把选项行和下一题合成一行（'…楼房。16.根据材料三…'）时，
+    题16 不能消失、也不能留在题15 的选项 D 里。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "一、基础·运用（共13分）\n\n"
+        "15.根据以上三则材料，下列情况不成立的是（2分）\n"
+        "A.甲 B.乙 C.丙 D.70年代中期，建筑工人在北京旧城内新建的建筑大多为 6层以下楼房。"
+        "16.根据材料三的图文信息，在文中横线处补写恰当的内容。（2分）答：\n\n"
+        "17.为以上三则材料分别选择最恰当的小标题。（3分）\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+
+    assert [q.group_order for q in questions] == [15, 16, 17]
+    q15 = next(q for q in questions if q.group_order == 15)
+    q16 = next(q for q in questions if q.group_order == 16)
+    assert "16.根据材料三" not in q15.content
+    assert "根据材料三的图文信息" in q16.content
+
+
+def test_exam_notice_numbers_are_not_split():
+    """卷首考试说明（'150分钟。2.在试卷…'）不能被当成题号。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "本试卷满分100分。考试时间150分钟。2.在试卷和答题卡上准确填写学校名称。"
+        "3.试题答案一律填涂或书写在答题纸上。\n\n"
+        "一、基础·运用（共13分）\n\n"
+        "1.下列词语中加点字读音正确的是（2分）\nA.甲 B.乙 C.丙 D.丁\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+    assert [q.group_order for q in questions] == [1]
+
+
+def test_stem_with_sub_number_without_dot():
+    """'8（1）转朱阁…'：题号后直接跟小问号，OCR 丢了点。不能把题8 整题丢掉。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "7. 文段中的画线句存在问题，请你修改。（2分）\n\n"
+        "8（1）转朱阁，____，照无眠。（苏轼《水调歌头》）（1分）\n"
+        "(2) ____，愁云惨淡万里凝。（岑参《白雪歌送武判官归京》）（1分）\n\n"
+        "9. 下列加点字意思相同的一项是（2分）\nA.甲 B.乙 C.丙 D.丁\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+    assert [q.group_order for q in questions] == [7, 8, 9]
+    q8 = next(q for q in questions if q.group_order == 8)
+    assert q8.content.startswith("（1）转朱阁")
+
+
+def test_stem_as_markdown_heading():
+    """MinerU 会把题号行识别成 '## 2. 甲组同学推荐…'，不能被当成小标题吞掉。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "1. 在封面上用正楷字书写主题。（1分）\n\n"
+        "## 2. 甲组同学推荐「天下第一山」——泰山\n\n"
+        "泰山，风景壮丽。\n\n"
+        "## 3. 乙组同学推荐「山城」——重庆\n\n"
+        "重庆，地处华夏西南。\n\n"
+        "4. 下列说法正确的一项是（2分）\nA.甲 B.乙 C.丙 D.丁\n"
+    )
+    questions = split_page(text, _Path("x.md"), attach_material=True)
+    assert [q.group_order for q in questions] == [1, 2, 3, 4]
+    q2 = next(q for q in questions if q.group_order == 2)
+    assert "甲组同学推荐" in q2.content
+
+
+def test_ocr_tens_digit_error_is_corrected():
+    """OCR 把 23 认成 33（22 之后出现 33，再往后是 24）→ 按 23 处理，
+    否则题23 消失、还多出一个 33。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "22. 文章回忆了小时候的一次拍照经历，作者为什么还要写？（2分）\n\n"
+        "33. 结合文章内容，说说你对第②段加点词「概念」的理解。（3分）\n\n"
+        "24. 作者是否自相矛盾？请简要分析。（4分）\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+    assert [q.group_order for q in questions] == [22, 23, 24]
+
+
+def test_essay_requirements_are_not_new_questions():
+    """作文题后的「要求：1. 文体不限 2. 字数…」不是新题：
+    题号回退（24 → 1）一律当上一题续行，否则拆出 4 道没有题干的空题。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "24. 请以「疾风知劲草」为题目写一篇文章。\n\n"
+        "要求:\n\n"
+        "1. 文体不限(诗歌除外)。\n\n"
+        "2. 字数在 600-800 之间。\n\n"
+        "3. 文中不要出现真实的人名和校名。\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+
+    assert [q.group_order for q in questions] == [24]
+    assert "字数在 600-800" in questions[0].content
+
+
+def test_answer_section_without_overall_heading():
+    """没有「参考答案」总标题、逐题写「6.答案：…」的卷子也要进答案区，
+    否则整段答案会被当题目切出来（和平街一中 2024：38 题、题9 只剩「C（2分）」）。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "9. 下列加点字意思相同的一项是（2分）\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "10. 下列翻译正确的一项是（2分）\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "6..答案：②直挂云帆济沧海\n\n"
+        "9．C （2分）\n\n"
+        "10．D （2 分）\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+
+    assert [q.group_order for q in questions] == [9, 10]
+    q9 = next(q for q in questions if q.group_order == 9)
+    assert q9.answer.strip().startswith("C")
+    assert "D （2 分）" not in q9.content
+
+
+def test_exam_notice_numbers_do_not_create_duplicates():
+    """卷首考试说明「1. 本试卷共12页…」不能占题号：否则真题1 重复，
+    入库按 (paper_id, question_no) 互相覆盖（延庆 2025 重复 1-4）。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "1. 本试卷共12页，共五道大题，24个小题，满分100分。考试时间150分钟。\n\n"
+        "2. 在试卷和答题纸上准确填写班级、姓名、学号。\n\n"
+        "3. 答案一律填写在答题纸、机读卡上，在试卷上作答无效。\n\n"
+        "1. 你画出了四处文字，下列说法正确的一项是（2分）\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "2. 在文中【甲】【乙】两处填入标点，正确的一项是（2分）\nA.甲 B.乙 C.丙 D.丁\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+
+    assert [q.group_order for q in questions] == [1, 2]
+    assert "你画出了四处文字" in questions[0].content
+
+
+def test_duplicate_stem_is_skipped_not_renumbered():
+    """重复题号跳过，不能顺延：顺延会连锁撞上后面的真实题号，一路膨胀。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "1. 真题一（2分）\nA.甲 B.乙\n\n"
+        "2. 真题二（2分）\nA.甲 B.乙\n\n"
+        "2. 重复的题号（2分）\nA.甲 B.乙\n\n"
+        "3. 真题三（2分）\nA.甲 B.乙\n"
+    )
+    questions = split_page(text, _Path("x.md"))
+
+    assert [q.group_order for q in questions] == [1, 2, 3]

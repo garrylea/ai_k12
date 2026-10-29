@@ -14,13 +14,25 @@ from pathlib import Path
 # 仍排除小数（9.5）与 4 位日期（2026.5）。
 # 语文参考答案段常用全角句点（'1．C（2 分）'），故分隔符含 ．(U+FF0E) / ：(U+FF1A)。
 _MAIN_STEM_RE = re.compile(
-    r'^\s*(\d{1,2})[.．](?:\D|(?:19|20)\d{2}\s*[年月])'
-    r'|^\s*(\d{1,2})[:：]\s*\S'
+    # 允许 markdown 标题前缀：MinerU 常把题号行识别成 `## 2. 甲组同学推荐…`
+    # `(?![ \t]+\d)` 排除子题号被空格拆开的形态（`1.1 材料` → `1. 1 材料`），
+    # 否则同一道题会被切成题1 两次（昌平一中 2024 实测）。
+    r'^\s*#{0,6}\s*(\d{1,2})[.．](?![ \t]+\d)(?:\D|(?:19|20)\d{2}\s*[年月])'
+    r'|^\s*#{0,6}\s*(\d{1,2})[:：]\s*\S'
+    # '8（1）转朱阁…'：题号后直接跟小问号，OCR 丢了点。语文默写题常见。
+    r'|^\s*#{0,6}\s*(\d{1,2})\s*[（(]\s*\d{1,2}\s*[）)](?=\s*\S)'
 )
 # 主题号前缀剥离：只消费 ^\s*\d{1,2}[.:．：]，不消费其后内容字符（避免无空格格式 '9.若' 丢首字）
-_STEM_PREFIX_RE = re.compile(r'^\s*\d{1,2}[.:．：]')
+# 另支持 '8（1）…'：只剥题号 8，保留小问号（由 is_sub_stem 继续处理）
+# 以及 `## 2. …`：MinerU 会把题号行识别成 markdown 标题
+_STEM_PREFIX_RE = re.compile(
+    r'^\s*#{0,6}\s*\d{1,2}[.:．：]'
+    r'|^\s*#{0,6}\s*\d{1,2}(?=\s*[（(]\s*\d{1,2}\s*[）)])'
+)
 # 紧凑格式（行内，答案区一行多题号）：(?<!\d) 防止把 19.5 的小数点误切
 _INLINE_STEM_RE = re.compile(r'(?<!\d)(\d{1,2})[.．]\D')
+# 题干区行内粘连的下一题：句末标点 + 题号 + 内容（'…楼房。16.根据…'）
+_GLUED_STEM_RE = re.compile(r'[。；！？]\s*(\d{1,2})[.．]\s*(?=[^\d\s])')
 # 小问号：行首 (N) 或（N）
 _SUB_STEM_RE = re.compile(r'^\s*[\(（](\d{1,2})[\)）]')
 # 大题分组标题：行首可选 markdown # 前缀 + 中文序号 + 、（兼容 "## 一、选择题"）
@@ -35,15 +47,32 @@ _DATE_TRAP_RE = re.compile(r'^\s*\d{4}\.\d')
 # 答案关键字（行内搜索）
 # 答案关键字（行内搜索）：不匹配单独的"答案"（"试题答案"会误匹配），
 # 只匹配"参考答案"/"答案及评分"/"评分参考"等标题特征
-_ANSWER_KEYWORD_RE = re.compile(r'参考答案|答案及评分|评分参考')
+# 答案段入口：总标题「参考答案 / 评分参考」，或逐题「6.答案：…」。
+# 后者没有总标题（和平街一中 2024 直接从「6..答案：」开始），只认总标题会把
+# 整段答案当成题目切出来（38 题、题9 内容只剩「C（2分）」）。
+# **不能**收裸的「答案：」——阅读材料里的问答（昌平一中 2024「跑步知识问答」
+# 的「答案: 这是一种…」）会被误判成答案区入口，题14 之后整段消失。
+_ANSWER_KEYWORD_RE = re.compile(
+    r'参考答案|答案及评分|评分参考'
+    r'|^\s*#{0,6}\s*\d{1,2}[.．]{1,2}\s*答案[：:]'
+)
 # 行内粘连的大题标题（OCR 把下一节标题并在上一题题干末尾）：
 # '16.…（100 字左右）四、现代文阅读（共 23分）' -> 题干去掉尾部标题，后续题归「四」
 _INLINE_GROUP_RE = re.compile(
     r'[（(]?\s*([一二三四五六七八九十]{1,3})、([^。；\n]{2,20}?)[（(]共?\s*\d+\s*分[）)]\s*$')
 # 子小节标题：（一）（共 6 分）/ ## （二）（共 10 分）——材料归属的边界
 _SECTION_HEADER_RE = re.compile(r'^#{0,6}\s*[（(]\s*[一二三四五六七八九十]+\s*[）)]')
+# 卷首考试说明：`1. 本试卷共9页…` / `2. 在试卷和答题卡上…`。它们带有序号，
+# 会被 is_main_stem 当成题1/2，之后真题再建一次 → 同卷两道题1，入库互相覆盖。
+_NOTICE_RE = re.compile(
+    r'本试卷|答题[卡纸]|机读卡|考试时间|考试结束|满分|共\s*\d+\s*页|准考证|班级'
+)
+
 # 材料块标题：材料一 / 材料 1 / ## 材料二
 _MATERIAL_HEAD_RE = re.compile(r'^#{0,6}\s*材料\s*[一二三四五六七八九十\d]')
+# 语文选择题的题干提示：中文标签（甲乙丙/①②③）既可能是选项也可能是填空占位，
+# 只有题干出现这些词才按选项拆（「我的分析：【甲】文…」是三处填空，不是 A/B/C）。
+_CHOICE_STEM_RE = re.compile(r'一项|下列|选择|选出|正确|错误|不恰当|最恰当|哪一')
 
 
 def is_date_trap(line: str) -> bool:
@@ -109,7 +138,7 @@ def is_main_stem(line: str) -> tuple[bool, int | None]:
     """
     m = _MAIN_STEM_RE.match(line)
     if m:
-        return True, int(m.group(1) or m.group(2))
+        return True, int(m.group(1) or m.group(2) or m.group(3))
     return False, None
 
 
@@ -152,6 +181,22 @@ def split_inline_stems(line: str) -> list[tuple[int, str]]:
     return results
 
 
+def _split_glued_next_stem(line: str, expected: int) -> tuple[str, int, str] | None:
+    """题干区一行内粘连的下一题：``…6层以下楼房。16.根据材料三…``。
+
+    MinerU 偶尔把选项行与下一题题干合成一行，行首匹配找不到 16，整段被吞进
+    上一题的选项 D（大兴 2024 题15/16 实测）。只有题号正好等于「上一题+1」
+    才拆——卷首「考试时间150分钟。2.在试卷…」那时还没有 current，调用方不会进来。
+    """
+    for m in _GLUED_STEM_RE.finditer(line):
+        if int(m.group(1)) != expected:
+            continue
+        tail = line[m.end():].strip()
+        if tail:
+            return line[: m.start() + 1], expected, tail
+    return None
+
+
 def parse_group_scores(header: str) -> tuple[str, object | None]:
     """解析分组标题的每题分数。
 
@@ -185,6 +230,87 @@ _OPTION_MARK_RE = re.compile(r'[\(（]([A-Da-d])[\)）]')
 _BARE_INLINE_RE = re.compile(r'(?<![A-Za-z0-9])([A-D])[.．](?=\s*\S)')
 # 裸字母竖排行：行首单独 'A' / 'A.' / 'A、'（选项内容/配图在标记行之间）
 _BARE_LINE_RE = re.compile(r'^\s*([A-D])\s*[.、．]?\s*$')
+
+# 语文选项常用标签：甲乙丙丁、①②③④，以及可扩展的 A-F。
+# 语文卷选择题不一定是 4 项（文言文/现代文常见 3 项：「甲乙丙三句，全都正确的一项」）。
+# 必须限定行首：题干里「对【甲】【乙】两处…」是引用，不是选项定义。
+_CN_OPTION_RES = (
+    re.compile(r'(?m)^[ \t]*【\s*([甲乙丙丁])\s*】'),
+    re.compile(r'(?m)^[ \t]*[（(]\s*([甲乙丙丁])\s*[）)]'),
+    re.compile(r'(?m)^[ \t]*([甲乙丙丁])\s*[.．、](?=\s*\S)'),
+)
+_CIRCLED_OPTION_RE = re.compile(r'(?m)^[ \t]*([①②③④])')
+_LATIN_FLEX_RE = re.compile(r'(?<![A-Za-z0-9])([A-F])\s*[.．、](?=\s*\S)')
+
+
+def _consecutive_run(matches, labels: str) -> list[tuple[int, int, str]]:
+    """从一组匹配里取最长的连续标签序列（A→B→C / 甲→乙→丙 / ①②③）。"""
+    run: list[tuple[int, int, str]] = []
+    best: list[tuple[int, int, str]] = []
+    order = {ch: i for i, ch in enumerate(labels)}
+    for m in matches:
+        label = m.group(1)
+        if label not in order:
+            continue
+        if run and order[label] == order[run[-1][2]] + 1:
+            run.append((m.start(), m.end(), label))
+        else:
+            if len(run) > len(best):
+                best = run
+            run = [(m.start(), m.end(), label)]
+    if len(run) > len(best):
+        best = run
+    return best
+
+
+def _find_option_marks_cn(content: str) -> list[tuple[int, int, str]] | None:
+    """语文选项：找最长的连续标签序列（2 项起），支持 A-F / 甲乙丙丁 / ①②③④。
+
+    序列必须从该体系的首个标签开始（A / 甲 / ①）。OCR 偶尔丢掉一个选项的点号
+    （`A. ① B ② C. ③ D. ④` 的 B 没有点），此时最长连续段是 `C,D`，若照用会把
+    C/D 重编号成 A/B、把 A/B 的内容并进题干——学生看到的选项是错的。这种情况
+    直接放弃拆分，保留原文交给标注判缺陷（标待复核），不产出错位选项。
+    """
+    latin_matches = list(_LATIN_FLEX_RE.finditer(content))
+    if len(latin_matches) >= 2:
+        latin = _consecutive_run(latin_matches, "ABCDEF")
+        if not latin or latin[0][2] != "A":
+            return None
+
+    candidates: list[list[tuple[int, int, str]]] = []
+    if len(latin_matches) >= 2:
+        candidates.append(_consecutive_run(latin_matches, "ABCDEF"))
+    for pattern in _CN_OPTION_RES:
+        run = _consecutive_run(list(pattern.finditer(content)), "甲乙丙丁")
+        if len(run) >= 2 and run[0][2] == "甲":
+            candidates.append(run)
+    circled = _consecutive_run(list(_CIRCLED_OPTION_RE.finditer(content)), "①②③④")
+    if len(circled) >= 2 and circled[0][2] == "①":
+        candidates.append(circled)
+    if not candidates:
+        return None
+    # 选项最多的一组；同样长时取出现更早的（避免把题干里的「甲乙」当选项）
+    best = max(candidates, key=lambda run: (len(run), -run[0][0]))
+    return best if len(best) >= 2 else None
+
+
+def _split_by_marks(content: str, marks: list[tuple[int, int, str]]) -> tuple[str, list[dict]] | None:
+    """按标签序列切选项（语文专用，支持 2-6 项；label 归一为 A/B/C…，原标签保留）。"""
+    stem = content[:marks[0][0]].strip()
+    opts: list[dict] = []
+    for i, (_, end, original) in enumerate(marks):
+        stop = marks[i + 1][0] if i + 1 < len(marks) else len(content)
+        text = content[end:stop].strip()
+        if not text:
+            return None
+        opts.append({
+            "label": "ABCDEF"[i],
+            "text": text,
+            "original_label": original,
+        })
+    if not opts:
+        return None
+    return stem, opts
 
 
 def _find_option_marks(content: str) -> list[tuple[int, int, str]] | None:
@@ -244,8 +370,12 @@ def _first_image_line_above(lines: list[str], li: int) -> int | None:
     return None
 
 
-def split_options(content: str) -> tuple[str, list[dict] | None]:
-    """把选择题的题干与 4 个选项拆开（Python 确定性，不丢图）。
+def split_options(content: str, subject: str | None = None) -> tuple[str, list[dict] | None]:
+    """把选择题的题干与选项拆开（Python 确定性，不丢图）。
+
+    subject="chinese" 时走语文规则：支持 3-6 个选项、甲乙丙丁、①②③④，
+    label 归一为 A/B/C…（原标签放在 `original_label`，供答案映射）。
+    其它学科保持原行为：必须找到连续 A,B,C,D 四个标记。
 
     content 里找连续的 A,B,C,D 选项标记序列（括号式 (A)(B)(C)(D) 或裸字母式
     'A. x B. y' / 竖排 'A' 单独成行）：
@@ -266,6 +396,20 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
       尾部内容（题干配图等）归题干、D 只取本行剩余，否则 D 取到 content 末尾
       （自配图不被截走归题干）
     """
+    if subject == "chinese":
+        cn_marks = _find_option_marks_cn(content)
+        # 「【甲】【乙】【丙】」「①②③」既可能是选项，也可能是填空占位：
+        # 「我的分析：【甲】文张岱…【乙】文高濂…【丙】诗…」是三处填空，
+        # 拆成选项会把三段正文当成 A/B/C、题干只剩「任务三」。只有题干出现
+        # 选择提示（一项/下列/选择/最恰当…）时才按选项处理。
+        if cn_marks and cn_marks[0][2] in "甲乙丙丁①②③④":
+            if not _CHOICE_STEM_RE.search(content[: cn_marks[0][0]]):
+                cn_marks = None
+        if cn_marks:
+            result = _split_by_marks(content, cn_marks)
+            if result is not None:
+                return result
+
     marks = _find_option_marks(content)
     if not marks:
         return content, None
@@ -415,6 +559,47 @@ def split_inline_group_header(text: str) -> tuple[str, str | None]:
     return text[:m.start()].rstrip(), m.group(1)
 
 
+def _looks_like_between_material(current_content: str, line: str) -> bool:
+    """上一题选项已完整时，空行后的长段落是否像下一题的共享材料。
+
+    仅语文（attach_material）调用；要求：段落够长、不是标题/图片/选项续行，
+    且上一题确实能确定性拆出 3 个以上选项（说明它的正文已经结束）。
+    """
+    text = line.strip()
+    if len(text) < 40:
+        return False
+    if text.startswith(("#", "![", "<table", "材料")):
+        return False
+    _, opts = split_options(current_content, subject="chinese")
+    return bool(opts) and len(opts) >= 3 and all(o["text"].strip() for o in opts)
+
+
+def _is_material_title(lines: list[str], index: int, line: str) -> bool:
+    """语文文段标题：短、纯中文、后面紧跟长段落（如「绿绸叠翠」「流光溢彩」）。
+
+    这类标题出现在两题之间时，表示下一题换了一段材料；旧逻辑会把整段材料
+    并进上一题正文（大兴 2024 题4 吞掉题5 的【甲】【乙】文段）。
+    """
+    text = line.strip()
+    if not (2 <= len(text) <= 12):
+        return False
+    if re.search(r'[。！？；：:，,、0-9A-Za-z]', text):
+        return False
+    if text.startswith(("#", "材料", "（", "(")):
+        return False
+    for j in range(index + 1, min(index + 4, len(lines))):
+        nxt = lines[j].strip()
+        if not nxt:
+            continue
+        return (
+            len(nxt) >= 30
+            and not is_main_stem(nxt)[0]
+            and not is_group_header(nxt)[0]
+            and not is_part_header(nxt)[0]
+        )
+    return False
+
+
 def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[RawQuestion]:
     """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。
 
@@ -438,18 +623,26 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
     current_answer_lines: list[str] = []  # 当前累积的答案文本（多行）
     current_answer_n: int | None = None  # 当前答案属于哪个题号
     last_answer_n = 0  # 答案段已见最大题号（守卫：题号必须递增，回退数字是评分细则编号）
+    last_stem_no = 0   # 题干区已建的最大题号（纠正 OCR 十位错认，如 23→33）
+    seen_stems: set[int] = set()  # 已建题号（防答案区/考试说明重复建题）
+    warned_dup = False            # 重复题号只告警一次，避免刷屏
     # 材料分段（attach_material）：scope = 一个大题/子小节/材料块
     scope_id = 0
     scope_pending: list[str] = []
     scope_materials: dict[int, str] = {}
     scope_has_stem = False
+    # 两题之间的独立材料段（语文常见：题4选项后、题5之前的一整段文段）。
+    # 旧逻辑会把它并进上一题正文，导致下一题缺材料。这里先挂起，遇到下一题再归属。
+    between_material: list[str] = []
+    blank_before = False
 
     def _start_scope() -> None:
         """进入新小节：重置待归属材料。"""
-        nonlocal scope_id, scope_pending, scope_has_stem
+        nonlocal scope_id, scope_pending, scope_has_stem, between_material
         scope_id += 1
         scope_pending = []
         scope_has_stem = False
+        between_material = []
 
     def _material_for_new_stem() -> str | None:
         """首题到来：把此前累积的材料锁定为该节共享材料。"""
@@ -484,7 +677,10 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
     current_part_kind: str | None = None  # 状态机：当前所在部分（'choice'/'non_choice'）
     for i, line in enumerate(lines):
         if not line.strip():
+            blank_before = True
             continue
+        has_blank_before = blank_before
+        blank_before = False
 
         if is_date_trap(line):
             continue
@@ -499,9 +695,47 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
                 questions.append(current)
                 current = None
             current_part_kind = part_kind
+            # 不带「选择/非选择」字样的部分标题（'第一部分 北京城市发展史上的水源问题'）
+            # 是材料分区，不是题型分区：标题 + 其后正文是下一题的共享材料，必须开新 scope。
+            # 否则下一题仍挂着上一部分的材料 —— 东直门 2024 题3/5/6 全部拿到了「前言」，
+            # 模型只能判「材料不完整」，把正常题标成待复核。
+            if attach_material and part_kind is None:
+                _start_scope()
+                scope_pending.append(line)
             continue
 
         ok, gid = is_group_header(line)
+
+        # 题干区行内粘连（MinerU 把选项行与下一题合并成一行）：
+        # '…6层以下楼房。16.根据材料三…'。不拆的话整段被吞进上一题的选项 D，
+        # 题16 直接消失（大兴 2024 实测）。只在题号 == 上一题+1 时生效。
+        if not ok and not in_answer_section and current is not None:
+            glued = _split_glued_next_stem(line, current.group_order + 1)
+            if glued is not None:
+                head, tail_no, tail = glued
+                body, inline_gid = split_inline_group_header(head)
+                if body:
+                    current.content += "\n" + body
+                if inline_gid:
+                    current_group_id = inline_gid
+                    current_unified_score = None
+                    current_score_map = None
+                questions.append(current)
+                if current_score_map is not None:
+                    q_score = current_score_map.get(tail_no)
+                elif current_unified_score is not None:
+                    q_score = current_unified_score
+                else:
+                    q_score = None
+                current = RawQuestion(
+                    group_order=tail_no,
+                    group_id=current_group_id,
+                    content=tail,
+                    score=q_score,
+                    material_text=_material_for_new_stem() if attach_material else None,
+                )
+                continue
+
         if ok:
             if in_answer_section:
                 _flush_answer()
@@ -595,6 +829,13 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
 
         # 题干区
         if attach_material and not in_answer_section:
+            # 文段标题（「绿绸叠翠」「流光溢彩」）：下一题换材料，上一题到此结束
+            if current is not None and has_blank_before and _is_material_title(lines, i, line):
+                questions.append(current)
+                current = None
+                _start_scope()
+                scope_pending.append(line)
+                continue
             # 材料块标题（材料一/材料二…）先判：同一节内连续材料并入同批；跨节时开启新集
             if _MATERIAL_HEAD_RE.match(line):
                 if scope_has_stem:
@@ -607,7 +848,8 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
             # markdown 小标题（非大题/非部分/非材料标题）：新的材料块
             # （如「活动概况」「前沿科技体验」）。若本节还没出题，说明仍是同一批材料，
             # 继续累积（「## 蜘蛛的信」「## 苔藓的回信」同属 (二) 的材料）。
-            if line.lstrip().startswith("#"):
+            # `## 2. 甲组同学推荐…` 是题号行（MinerU 把它识别成标题），交给下面的 ok 分支。
+            if line.lstrip().startswith("#") and not ok:
                 if scope_has_stem:
                     if current is not None:
                         questions.append(current)
@@ -624,6 +866,37 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
                 continue
 
         if ok:
+            # 作文题后的「要求：1. 文体不限 2. 字数…」会被 is_main_stem 认成
+            # 1/2/3/4，拆出来就是 4 道没有题干的空题（北京五中 2024 实测）。
+            # 只在「卷末大题（≥20）之后回到个位数」时合并——MinerU 输出顺序错乱
+            # 时也会有 18→14 这类回退（汇文 2024 题18 排在题14 前面），那是真题，
+            # 不能并进上一题。
+            if last_stem_no >= 20 and n <= 5:
+                if current is not None:
+                    current.content += "\n" + line
+                continue
+            # 卷首考试说明（题1 之前）：直接丢弃，不占题号
+            if last_stem_no == 0 and _NOTICE_RE.search(line):
+                continue
+            # 重复题号：答案区残留或 OCR 重复（同一题号出现两次）。直接跳过，
+            # 保留第一次出现的真题。**不能顺延**：OCR 把大段内容识别成重复题号时，
+            # 顺延会连锁撞上后面的真实题号，题号一路膨胀（一零一 2024 从 4 溢到 29）。
+            if n in seen_stems:
+                if not warned_dup:
+                    print(f"[WARN] 题号重复（{n} 起），重复段已跳过；缺的题请看缺号告警",
+                          flush=True)
+                    warned_dup = True
+                continue
+            seen_stems.add(n)
+            # OCR 十位错认：22 之后写成 33、再往后又是 24 → 33 实际是 23
+            # （清华附中 2024 题23 实测）。只在前跳一位且个位吻合时纠正，
+            # 真跳号（试卷本身缺题）不动，留给缺号告警。
+            if (last_stem_no and n > last_stem_no + 1
+                    and n % 10 == (last_stem_no + 1) % 10):
+                print(f"[WARN] 题号疑似 OCR 错认：{last_stem_no} 之后出现 {n}，"
+                      f"按 {last_stem_no + 1} 处理", flush=True)
+                n = last_stem_no + 1
+            last_stem_no = max(last_stem_no, n)
             if current is not None:
                 questions.append(current)
             # 从分组分数状态确定本题分数
@@ -635,6 +908,10 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
                 q_score = None
             content = _strip_main_stem_prefix(line)
             material = _material_for_new_stem() if attach_material else None
+            if attach_material and between_material:
+                extra = "\n".join(between_material).strip()
+                material = (f"{material}\n\n{extra}".strip() if material else extra)
+                between_material = []
             # 行尾粘连的下一节标题：题干去掉标题，后续题归新分组
             content, inline_gid = split_inline_group_header(content)
             current = RawQuestion(
@@ -659,6 +936,13 @@ def split_page(text: str, md_path: Path, attach_material: bool = False) -> list[
         if is_sub_stem(line):
             if current is not None:
                 current.content += "\n" + line
+            continue
+
+        # 两题之间的独立文段（语文综合运用/阅读常见）：上一题选项已完整，
+        # 空行后的长段落归下一题材料，不能并进上一题正文（大兴 2024 题4/题5 实测）。
+        if (attach_material and current is not None and has_blank_before
+                and _looks_like_between_material(current.content, line)):
+            between_material.append(line)
             continue
 
         if current is not None:

@@ -274,6 +274,11 @@ def detect_decorations(pdf_path: str | Path) -> list[Decoration]:
     """检测整份 PDF 的下划线与着重号（按页、按行顺序）。"""
     import fitz  # 延迟导入：只有真正跑检测时才依赖 PyMuPDF
 
+    # 部分试卷 PDF 缺 ExtGState 资源（`cannot find ExtGState 'KSPE109'`），
+    # 渲染时报几十行 MuPDF error 刷屏但结果不受影响。批量跑 32 卷时会把
+    # 真正的告警淹没，这里静音（只影响显示，不改渲染结果）。
+    fitz.TOOLS.mupdf_display_errors(False)
+    fitz.TOOLS.mupdf_display_warnings(False)
     path = Path(pdf_path)
     doc = fitz.open(path)
     try:

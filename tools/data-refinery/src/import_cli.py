@@ -1,4 +1,4 @@
-"""import_cli：一条命令把素材导入题库（convert → extract → publish → db_loader）。
+"""import_cli：一条命令把素材导入题库（convert → extract → publish → db_loader → 答案回填）。
 
 面向「单科/单卷」的日常导入，全部阶段共用同一套范围参数
 （`--subject/--stage/--term/--year/--file`，见 scope_filter）：
@@ -11,15 +11,17 @@
 - **只碰指定范围**：每个子阶段都带同样的范围参数；未指定范围时才会全量。
 - **增量入库**：固定使用 `--load-cards`（原地 upsert），**不会** full-reload；
   需要全量重建请直接用 `db_loader_cli` 并显式加 `--purge-business-data`。
-- **分步可跳过/重做**：`--skip-convert/extract/publish/load`、
+- **分步可跳过/重做**：`--skip-convert/extract/publish/load/answers`、
   `--reconvert`（重跑 MinerU）、`--re-extract`、`--re-publish`，或 `--redo` 全部重做。
 
-答案补录（`answer_extract_cli` → `answer_importer_cli --doc`）仍是独立两步，
-不在本命令内：抽题时已按参考答案对齐答案，补录是用来规范评分说明/补缺口的。
+答案回填是第 5 步（2026-10-28 并入）：默认只补空答案，已有内容不动；
+`--re-answer` 才覆盖；`--skip-answers` 可跳过。
 """
 
 import argparse
 
+from answer_backfill import backfill as answers_backfill
+from config import RefineryConfig
 from convert_cli import main as convert_main
 from db_loader_cli import main as db_loader_main
 from extract_cli import main as extract_main
@@ -47,6 +49,9 @@ def parse_args(argv=None):
     parser.add_argument("--skip-extract", action="store_true", help="跳过 extract")
     parser.add_argument("--skip-publish", action="store_true", help="跳过 publish")
     parser.add_argument("--skip-load", action="store_true", help="跳过 db_loader（只到 published）")
+    parser.add_argument("--skip-answers", action="store_true", help="跳过第 5 步答案回填")
+    parser.add_argument("--re-answer", action="store_true",
+                        help="答案回填覆盖已有内容（默认只补空答案）")
     parser.add_argument("--reconvert", action="store_true", help="重跑 MinerU（删除已有 md 重新转换）")
     parser.add_argument("--re-extract", action="store_true", help="重新切题+LLM 标注（保留 md）")
     parser.add_argument("--re-publish", action="store_true", help="重新物化图片+改写路径")
@@ -159,6 +164,16 @@ def _subjects_for_file(args) -> set[str]:
     return _matched_subjects(_scan_rel_paths(cfg.input_dir, cfg.output_dir / "md"), args.file)
 
 
+def _answers_entry(args):
+    """第 5 步不是子 CLI（要逐卷查 paper_id 再调 importer），包装成同样的 (label, fn, argv) 形状。"""
+    def run(_argv=None):
+        cfg = RefineryConfig.from_env()
+        answers_backfill(
+            cfg, scope_from_args(args), dry_run=args.dry_run, overwrite=args.re_answer,
+        )
+    return run
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     scope = scope_from_args(args)
@@ -182,19 +197,28 @@ def main(argv=None) -> int:
 
     stages = []
     if not args.skip_convert:
-        stages.append(("1/4 convert（素材 → md）", convert_main, convert_argv(args)))
+        stages.append(("1/5 convert（素材 → md）", convert_main, convert_argv(args)))
     if not args.skip_extract:
-        stages.append(("2/4 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
+        stages.append(("2/5 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
     if not args.skip_publish:
-        stages.append(("3/4 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
+        stages.append(("3/5 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
     if not args.skip_load:
-        stages.append(("4/4 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
+        stages.append(("4/5 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
+    # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起
+    if not args.skip_answers and not args.cards_only and not args.skip_load:
+        stages.append(("5/5 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
 
     try:
         for label, fn, sub_argv in stages:
             print(f"=== {label} ===", flush=True)
-            print(f"    argv: {' '.join(sub_argv)}", flush=True)
-            fn(sub_argv)
+            if sub_argv:
+                print(f"    argv: {' '.join(sub_argv)}", flush=True)
+            rc = fn(sub_argv)
+            # 子 CLI 出错时是「return 2」而不是抛异常（如 MinerU token 过期）；
+            # 不能忽略返回值，否则会带着半截数据继续跑后面的阶段。
+            if rc not in (None, 0):
+                print(f"[ERROR] {label} 返回 {rc}，已停止；后续阶段未执行", flush=True)
+                return rc
     except KeyboardInterrupt:
         print("\n[中断] 已停止；已完成阶段有 checkpoint，可从断点继续", flush=True)
         return 130

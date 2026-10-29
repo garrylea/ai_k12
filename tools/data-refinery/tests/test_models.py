@@ -59,3 +59,14 @@ def test_textbook_card_validates_card_type():
         content="例题内容",
     )
     assert c.card_type == "example"
+
+
+def test_exam_question_accepts_calculation_type():
+    """labeler 允许 calculation，publish 的 Literal 也必须收，否则会整卷发布失败。"""
+    q = ExamQuestion(subject_id="math", type="calculation", difficulty=2, content="求值", answer="1")
+    assert q.type == "calculation"
+
+
+def test_exam_question_keeps_needs_review_flag():
+    q = ExamQuestion(subject_id="chinese", type="choice", difficulty=2, content="题干", answer="A", needs_review=True)
+    assert q.needs_review is True

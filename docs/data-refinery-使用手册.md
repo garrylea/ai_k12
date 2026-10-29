@@ -68,7 +68,7 @@ LLM_ENABLE_CACHE=false               # 开启 provider 侧 prompt 缓存
 # === MinerU 配置（convert）===
 MINERU_BIN=mineru-open-api           # MinerU CLI 命令（外部依赖，需单独安装）
 MINERU_TIMEOUT=300
-MINERU_TOKEN=xxx                     # MinerU API token
+MINERU_TOKEN=xxx                     # MinerU API token（见下方格式说明）
 
 # === MySQL 配置（db_loader）===
 DB_HOST=localhost
@@ -81,6 +81,8 @@ DB_NAME=ai_k12
 REFINERY_INPUT_DIR=tools/crawler/data       # 默认（convert 的素材输入目录）
 REFINERY_OUTPUT_DIR=tools/data-refinery/output  # 默认（输出根：md/extracted/toc/published 都在其下）
 ```
+
+**MINERU_TOKEN 格式（2026-10-28 实测）**：控制台现在发的是 `sk-` 开头的 API Key（约 50 字符），旧版是 `eyJ` 开头的 JWT（约 400 字符，90 天有效），两种都能用。注意：从某些客户端配置页复制到的可能是 `mineru-api/sk-...`（带 provider 前缀），**必须裁掉 `mineru-api/` 只留 `sk-...`**，否则 MinerU 返回 `401 A0202 user authenticate failed`。`convert` 启动时会本地校验格式并给出提示。
 
 ### 2.2 依赖安装
 
@@ -654,7 +656,7 @@ card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_mer
 
 把人工或 AI 产出的题目内容回写 `questions` 表：`answer`（答案）、`approach`（解题思路）、`explanation`（详细解析）、`type`（题型）。默认 dry-run 只出 diff 报告，`--apply` 才写入；幂等可重跑。
 
-> **从试卷自动生成答案文档（2026-10-28）**：先跑 `python src/answer_extract_cli.py --file "<试卷 md 相对路径子串>"`，按学科 case 从「参考答案」段提取（纯程序，不调 LLM），产出 `output/answers/<卷名>.md`，再用本文档的 `--doc --paper-id` 回写。语文/数学走各自 case；提取不到的答案留空并记 `output/answer_issues.jsonl`，绝不猜。完整命令见 `docs/data-refinery-管线总结与后续.md` §4。
+> **从试卷自动生成答案文档（2026-10-28）**：`import_cli` 第 5 步已自动完成这一步（默认只补空答案）；需要单独重跑或人工修正时，再按本节两段式操作：先跑 `python src/answer_extract_cli.py --file "<试卷 md 相对路径子串>"`，按学科 case 从「参考答案」段提取（纯程序，不调 LLM），产出 `output/answers/<卷名>.md`，再用本文档的 `--doc --paper-id` 回写。语文/数学走各自 case；提取不到的答案留空并记 `output/answer_issues.jsonl`，绝不猜。完整命令见 `docs/data-refinery-管线总结与后续.md` §4。
 
 **输入一：JSONL（推荐，可编程批量）** 每行一条记录：
 
@@ -690,6 +692,7 @@ card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_mer
 ```bash
 python src/answer_importer_cli.py --records edits.jsonl                 # dry-run：diff 报告，不写库
 python src/answer_importer_cli.py --records edits.jsonl --apply         # 确认后写入（输 yes）
+python src/answer_importer_cli.py --records edits.jsonl --apply --yes   # 跳过交互确认（编排调用用）
 python src/answer_importer_cli.py --doc 答案.md --paper-id 3
 python src/answer_importer_cli.py --export --where answer_empty --out to_fill.jsonl
 python src/answer_importer_cli.py --list-papers 海淀                    # 标题重名时列候选
@@ -697,19 +700,35 @@ python src/answer_importer_cli.py --list-papers 海淀                    # 标�
 
 **选择器 `--where`（只圈范围，不承载内容）**：`--question-id 1,2,10-20`、`--paper-id` / `--paper-title`（+`--question-no`）、`--where answer_empty,approach_empty,explanation_empty`、`--source`（LIKE）/`--type`/`--difficulty`/`--content-hash`。
 
-**导出待补模板 → 填写 → 回导**（批量补缺口的两步法）：
+**导出待补模板 → 外部模型作答 → 回导**（批量补缺口的推荐做法，脚本本身不调模型）：
 
 ```bash
-python src/answer_importer_cli.py --export --where answer_empty --out to_fill.jsonl
-# 填写 to_fill.jsonl 顶层的 answer/approach/explanation（_ref 是只读参考，不要改）
-python src/answer_importer_cli.py --records to_fill.jsonl --where answer_empty --apply
+# 1. 导出：只圈语文、只圈空答案，limit 要大于缺口数（默认 500 会截断）
+python src/answer_importer_cli.py --export --where answer_empty --subject chinese \
+  --limit 2000 --out output/answers_to_fill_chinese.jsonl
+
+# 2. 把整个 jsonl 交给外部模型，要求「返回同样的 JSONL，只把顶层 answer 填上，
+#    _ref 原样保留、question_id 不得改」；_ref 里含题干、material_text（阅读材料）、
+#    options、题型，模型据此作答。
+
+# 3. 回导：默认 dry-run 打印逐题 diff，确认后加 --apply（需输 yes）
+python src/answer_importer_cli.py --records output/answers_to_fill_chinese.filled.jsonl \
+  --subject chinese --where answer_empty
+python src/answer_importer_cli.py --records output/answers_to_fill_chinese.filled.jsonl \
+  --subject chinese --where answer_empty --apply
 ```
+
+- `--subject` 同时用于**导出范围**和**回导护栏**：记录里若混入别的学科的 question_id，不在范围内会跳过并报告，不会串科。
+- `_ref.material_text` 是语文阅读题的共享材料；缺了它模型看不到文章，无法作答（导出时自动带上）。
+- 回导时 `--where answer_empty` 会再校验一次目标题仍为空答案，已被别处补上的题不会覆盖。
+- 顶层留空（`""`）表示「不修改」，所以可以只填一部分题。
+- 未填写/答案非法的记录不会写库；写成功的记录会让 `answer_verified=1`（标记为已核验来源）。
 
 导入时 `--where` 会校验每条记录的目标题仍满足条件，不满足的跳过并报告。
 
 **回写语义**：`answer`/`approach`/`explanation` 提供了非空值即覆盖；`type` 仅在标注且与原值不同时改；任一字段实际写入 → `answer_verified=1`（人工/AI 核验标记）；无变化的记录不发 UPDATE（幂等）。
 
-**安全须知**：默认 dry-run；`--apply` 需交互输 `yes`；`--limit` 默认 500——**导入**时超过即拒绝，**导出**时取前 N 条（达到上限会打印截断警告，需调大后重导）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。另注：`db_loader` 的 full-reload 会把 `answer_verified=1` 计入守卫，未被 purge 时中止，不会静默覆盖已核验内容。
+**安全须知**：默认 dry-run；`--apply` 默认需交互输 `yes`（编排场景显式加 `--yes` 跳过）；`--limit` 默认 500——**导入**时超过即拒绝，**导出**时取前 N 条（达到上限会打印截断警告，需调大后重导）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。另注：`db_loader` 的 full-reload 会把 `answer_verified=1` 计入守卫，未被 purge 时中止，不会静默覆盖已核验内容。
 
 ### 4.9 dictation_cli — 语文古诗文默写采集入库（旁路管线）
 
@@ -937,10 +956,18 @@ WHERE JSON_LENGTH(sentences) > 0
   AND (JSON_SEARCH(sentences, 'one', NULL) IS NOT NULL OR JSON_LENGTH(key_terms) = 0);
 ```
 
-### 4.11 import_cli — 一键导入（convert → extract → publish → db_loader）
+### 4.11 import_cli — 一键导入（convert → extract → publish → db_loader → 答案回填）
 
-把四个阶段串成一条命令，全部阶段共用 §4.0 的统一范围参数，入库固定增量（`--load-cards`）。
-适合「导入某科某年的试卷」这类日常操作，用法与示例见 §5.0。
+把五个阶段串成一条命令，全部阶段共用 §4.0 的统一范围参数，入库固定增量（`--load-cards`）。
+第 5 步「答案回填」（2026-10-28 并入）按学科 case 从试卷 md 提取参考答案并写回
+`questions.answer`，默认 **只补空答案**（已有内容不动），`--re-answer` 才覆盖；没有
+「参考答案」段的卷会跳过并打印原因。适合「导入某科某年的试卷」这类日常操作，用法与示例见 §5.0。
+
+**AI 修复题默认待复核**：切题时 LLM 判 `is_complete=false` 并补全缺失内容（选项/材料/画线句）的题，
+会打 `needs_review=true`，入库 `is_active=0` —— 保留在库里但**不进入练习抽题池**。
+原因是实测 LLM 会编造原文没有的内容（详见 `docs/ai-core-changelog.md` 2026-10-28 续5）。
+复核 `output/labeling_issues.jsonl` 后，把对应题的 `is_active` 手动置 1 才放行；
+存量回刷：`python mark_needs_review.py`（dry-run）/ `--apply`（写库，按 issues 里的 source+题号匹配）。
 
 ```bash
 python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
@@ -987,16 +1014,16 @@ python emphasis_cli.py --all-chinese
 
 > 语文试卷导入后若需恢复着重号/下划线，再执行 `python emphasis_cli.py --paper-id <id> --apply`（见 §4.12）。
 
-素材已在 `tools/crawler/data/` 时，一条命令走完 **convert → extract → publish → 入库**，
+素材已在 `tools/crawler/data/` 时，一条命令走完 **convert → extract → publish → 入库 → 答案回填**，
 全部阶段共用统一范围参数，入库固定增量（不会 full-reload、不碰其他学科）：
 
 ```bash
 cd tools/data-refinery
 
-# 先看范围（4 个阶段都只打印）
+# 先看范围（5 个阶段都只打印）
 python src/import_cli.py --subject 语文 --year 2025 --dry-run
 
-# 正式导入
+# 正式导入（含答案回填，默认只补空答案）
 python src/import_cli.py --subject 语文 --year 2025
 
 # 单卷
@@ -1007,12 +1034,15 @@ python src/import_cli.py --subject 语文 --year 2025 --re-extract --re-publish
 
 # 分步跳过
 python src/import_cli.py --subject 语文 --skip-convert --skip-extract
+
+# 只跳到入库就停（不跑答案回填）
+python src/import_cli.py --subject 语文 --skip-answers
 ```
 
 - `--redo` = 重转（MinerU）+ 重抽 + 重发布；`--reconvert`/`--re-extract`/`--re-publish` 可单独用。
 - `--questions-only` / `--cards-only` 控制入库只写题或只写卡。
 - **`--file` 不写 `--subject` 时有多学科守卫**：子串命中多个学科（如 `202507-海淀-模拟二-试卷` 同时命中语文/数学/物理）会**拒绝执行**并列出学科；`--dry-run` 可继续查看完整清单。学科始终由素材路径首段判定，不会导错科目，但范围会超出预期——建议要么加 `--subject`，要么把 `--file` 写完整（如 `语文/初中/second/2025/...`）。
-- 答案补录仍走两段式（`answer_extract_cli` → `answer_importer_cli`，见 §4.8），不在本命令内。
+- **答案回填**（第 5 步）：默认 `--where answer_empty`，只补空答案，人工改过的行一律不动；`--re-answer` 才覆盖。卷内没有「参考答案」段的会跳过并打印 `[answers] 跳过（没有参考答案段）`。仍可单独跑 `answer_extract_cli` → `answer_importer_cli`（§4.8）做人工修正。
 
 ### 5.1 一站式（pipeline_cli，推荐）
 

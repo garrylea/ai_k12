@@ -5,7 +5,7 @@ from pathlib import Path
 
 from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
-from convert import Converter, MineruRunner
+from convert import Converter, MineruRunner, token_problem_message
 from scanner import Material, MaterialScanner
 from scope_filter import build_scope, match_scope
 from scope_filter import parse_dimensions as _parse_dimensions  # 兼容旧引用/单测
@@ -114,6 +114,12 @@ def main(argv=None):
         _warn_unmatched_entries(entries, scanned)
         _warn_no_match(materials, filters_active)
         return
+
+    # token 缺失/格式不对/过期时 MinerU 只回 401/A0202，先在本地拦下并说清怎么修
+    problem = token_problem_message(config.mineru_token)
+    if problem:
+        print(f"[ERROR] {problem}", flush=True)
+        return 2
 
     converted = 0
     skipped = 0

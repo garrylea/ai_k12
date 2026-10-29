@@ -149,3 +149,20 @@ class TestReport:
         out = format_report(target="T", diff=[], unmatched=[], out_of_scope=[],
                             warnings=[], apply=False)
         assert "幂等重跑" in out
+
+
+class TestSubjectScope:
+    def test_subject_filters_by_code(self):
+        where, params = build_scope_sql(ScopeFilter(subject="chinese"))
+        assert "q.subject_id = (SELECT id FROM subjects WHERE code = %s)" in where
+        assert params == ["chinese"]
+
+    def test_subject_counts_as_non_empty_scope(self):
+        assert ScopeFilter(subject="chinese").is_empty() is False
+
+    def test_subject_combined_with_gap(self):
+        where, params = build_scope_sql(
+            ScopeFilter(subject="chinese", gaps={"answer_empty"})
+        )
+        assert "(q.answer IS NULL OR q.answer = '')" in where
+        assert params == ["chinese"]

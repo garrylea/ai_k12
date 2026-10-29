@@ -46,8 +46,18 @@ tools/data-refinery/
 │   ├── generate_kp_tree.py   # 知识点树生成（LLM -> 校验 -> 种子 SQL）
 │   ├── prompts/              # Prompt 模板
 │   │   ├── textbook_cards.txt
-│   │   ├── question_labeler.txt
-│   │   ├── question_kps.txt
+│   │   ├── question_labeler/ # 标注提示词：_common.txt + 每学科一份
+│   │   │   ├── _common.txt   #   JSON 契约/字段/知识点约束（唯一真源）
+│   │   │   ├── chinese.txt   #   语文：3 选项、画线句/链接材料只报告不修复
+│   │   │   ├── math.txt      #   数学：4 选项、纯图选项不算缺陷
+│   │   │   ├── english.txt   #   英语：完形填空共用选项池
+│   │   │   ├── physics.txt / chemistry.txt / politics.txt
+│   │   │   └── _generic.txt  #   未单独配置的学科（生物/历史/地理）
+│   │   ├── question_kps/     # 知识点标定：_common.txt + 每学科一份
+│   │   │   ├── _common.txt   #   白名单约束/JSON 输出（唯一真源）
+│   │   │   ├── chinese.txt / math.txt / english.txt
+│   │   │   ├── physics.txt / chemistry.txt / politics.txt
+│   │   │   └── _generic.txt  #   未单独配置的学科
 │   │   ├── kp_tree.txt
 │   │   ├── toc_parse.txt
 │   │   └── exam_questions.txt
@@ -103,6 +113,9 @@ n 取消）。带参数运行时跳过向导直接执行。
 重复执行只处理新增/未完成部分；入库默认增量（`--load-cards` + merged TOC 建骨架）。
 card 分析发现的新小节由 `toc_merge` 在入库前合并进
 `output/toc/{书名}.merged.json`（不回写初始 toc.json），新小节会建成自己的 lesson 行。
+
+> **只导试卷（zgkao）请用 `import_cli`**：它在同样四步之后多一个第 5 步「答案回填」
+> （试卷 md → `questions.answer`，默认只补空答案）。见使用手册 §4.11 / §5.0。
 
 ### 1. convert：素材 → Markdown
 
@@ -218,6 +231,7 @@ python src/refinery_cli.py --purge-business-data   # 库里有业务数据时显
 ```bash
 python src/answer_importer_cli.py --records edits.jsonl                 # dry-run：diff 报告，不写库
 python src/answer_importer_cli.py --records edits.jsonl --apply         # 确认后写入（需输 yes）
+python src/answer_importer_cli.py --records edits.jsonl --apply --yes   # 跳过交互确认（编排调用用）
 python src/answer_importer_cli.py --doc 答案.md --paper-id 3            # Markdown 按卷回写
 python src/answer_importer_cli.py --export --where answer_empty --out to_fill.jsonl   # 导出待补模板
 python src/answer_importer_cli.py --list-papers 海淀                    # 标题重名时列候选

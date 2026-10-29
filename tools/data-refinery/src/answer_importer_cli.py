@@ -54,11 +54,15 @@ def parse_args(argv=None):
     p.add_argument("--where", dest="where", default=None,
                    help="缺口条件，逗号分隔：" + "/".join(GAP_CHOICES))
     p.add_argument("--source", default=None, help="来源关键词（LIKE）")
+    p.add_argument("--subject", default=None,
+                   help="学科 code（如 chinese），用于导出/回写时限定学科")
     p.add_argument("--type", dest="type", default=None, help="题型（逗号分隔）")
     p.add_argument("--difficulty", type=int, default=None, help="难度 1/2/3")
     p.add_argument("--content-hash", dest="content_hash", default=None, help="题干哈希")
     p.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help=f"安全阀（默认 {DEFAULT_LIMIT}）")
     p.add_argument("--apply", action="store_true", help="实际写入（默认 dry-run）")
+    p.add_argument("--yes", action="store_true",
+                   help="配合 --apply 跳过交互确认（供 import_cli 等编排调用）")
     p.add_argument("--list-papers", metavar="KEYWORD", default=None, help="按关键词列候选试卷")
     return p.parse_args(argv)
 
@@ -98,6 +102,7 @@ def build_scope(args, paper_id: int | None = None) -> ScopeFilter:
         scope.types = [t.strip() for t in args.type.split(",") if t.strip()]
     scope.difficulty = args.difficulty
     scope.content_hash = args.content_hash
+    scope.subject = args.subject
     return scope
 
 
@@ -130,14 +135,15 @@ def build_export_sql(scope: ScopeFilter, limit: int) -> tuple[str, list]:
         pid = scope.paper_ids[0]
         sql = (
             "SELECT q.id, q.content, q.options, q.type, q.answer, q.approach, q.explanation, "
-            "pq.question_no "
+            "q.material_text, pq.question_no "
             "FROM questions q "
             "LEFT JOIN paper_questions pq ON pq.question_id = q.id AND pq.paper_id = %s "
             f"WHERE {where} ORDER BY q.id LIMIT %s"
         )
         return sql, [pid] + params + [limit]
     sql = (
-        "SELECT q.id, q.content, q.options, q.type, q.answer, q.approach, q.explanation "
+        "SELECT q.id, q.content, q.options, q.type, q.answer, q.approach, q.explanation, "
+        "q.material_text "
         f"FROM questions q WHERE {where} ORDER BY q.id LIMIT %s"
     )
     return sql, params + [limit]
@@ -237,14 +243,15 @@ def load_export_rows(conn, scope: ScopeFilter, limit: int) -> list[ExportRow]:
     with conn.cursor() as cur:
         cur.execute(sql, params)
         for r in cur.fetchall():
-            if len(r) == 8:
+            if len(r) == 9:
                 rows.append(ExportRow(question_id=r[0], content=r[1] or "", type=r[3],
                                       answer=r[4] or "", options=r[2], approach=r[5],
-                                      explanation=r[6], paper_id=scope.paper_ids[0], question_no=r[7]))
+                                      explanation=r[6], material_text=r[7],
+                                      paper_id=scope.paper_ids[0], question_no=r[8]))
             else:
                 rows.append(ExportRow(question_id=r[0], content=r[1] or "", type=r[3],
                                       answer=r[4] or "", options=r[2], approach=r[5],
-                                      explanation=r[6]))
+                                      explanation=r[6], material_text=r[7]))
     return rows
 
 
@@ -326,14 +333,15 @@ def _run(conn, args) -> int:
         print("（无变化，未写入——幂等重跑。）")
         return 0
 
-    try:
-        answer = input(f"确认写入 {len(diff)} 题？输入 yes 执行：").strip()
-    except EOFError:
-        print("已取消（未收到确认输入；交互式终端输入 yes，或先 `echo yes |` 再执行）。")
-        return 1
-    if answer != "yes":
-        print("已取消。")
-        return 1
+    if not args.yes:
+        try:
+            answer = input(f"确认写入 {len(diff)} 题？输入 yes 执行：").strip()
+        except EOFError:
+            print("已取消（未收到确认输入；交互式终端输入 yes，或先 `echo yes |` 再执行）。")
+            return 1
+        if answer != "yes":
+            print("已取消。")
+            return 1
 
     diff_qids = {d.question_id for d in diff}
     written = 0

@@ -25,11 +25,13 @@ class ScopeFilter:
     types: list[str] | None = None
     difficulty: int | None = None
     content_hash: str | None = None
+    subject: str | None = None
 
     def is_empty(self) -> bool:
         return not any([
             self.question_ids, self.paper_ids, self.question_nos, self.gaps,
             self.sources, self.types, self.difficulty, self.content_hash,
+            self.subject,
         ])
 
 
@@ -76,6 +78,9 @@ def build_scope_sql(scope: ScopeFilter) -> tuple[str, list]:
     if scope.content_hash:
         conds.append("q.content_hash = %s")
         params.append(scope.content_hash)
+    if scope.subject:
+        conds.append("q.subject_id = (SELECT id FROM subjects WHERE code = %s)")
+        params.append(scope.subject)
     return (" AND ".join(conds) if conds else "1=1"), params
 
 

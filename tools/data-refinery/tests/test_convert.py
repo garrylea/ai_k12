@@ -88,3 +88,85 @@ class TestConverter:
 
         runner.run.assert_called_once_with([pdf], target)
         assert result == target
+
+
+class TestTokenExpiry:
+    """MinerU 过期 token 只回 401/A0202，本地提前给出可读原因。"""
+
+    @staticmethod
+    def _jwt(exp):
+        import base64, json
+        head = base64.urlsafe_b64encode(b'{"alg":"none"}').decode().rstrip("=")
+        body = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+        return f"{head}.{body}.sig"
+
+    def test_expired_token_reports_when_and_how_to_fix(self):
+        from convert import token_problem_message
+
+        msg = token_problem_message(self._jwt(1_700_000_000))
+        assert msg and "过期" in msg
+        assert "mineru.net/apiManage/token" in msg
+        assert "MINERU_TOKEN" in msg
+
+    def test_valid_token_passes(self):
+        import time
+
+        from convert import token_problem_message
+
+        assert token_problem_message(self._jwt(int(time.time()) + 3600)) is None
+
+    def test_provider_prefixed_key_tells_to_strip_prefix(self):
+        from convert import token_problem_message
+
+        msg = token_problem_message("mineru-api/sk-abcdef")
+        assert msg and "provider 前缀" in msg
+        assert "mineru-api/sk-xxx" in msg
+
+    def test_sk_key_is_accepted(self):
+        from convert import token_problem_message
+
+        assert token_problem_message("sk-abcdef") is None
+
+    def test_unknown_format_rejected(self):
+        from convert import token_problem_message
+
+        assert token_problem_message("not-a-token") and "格式不对" in token_problem_message("not-a-token")
+
+    def test_no_token_passes_local_check(self):
+        from convert import token_problem_message
+
+        assert token_problem_message(None) is None
+        assert token_problem_message("") is None
+
+
+class TestRunnerLogging:
+    """PDF 是「一份文档」，日志不该说成 pages 1-1/1，也不该每份睡 15s。"""
+
+    def test_pdf_logs_document_not_pages(self, tmp_path, capsys, monkeypatch):
+        import convert as convert_mod
+
+        monkeypatch.setattr(convert_mod.time, "sleep", lambda s: None)
+        runner = MineruRunner()
+        monkeypatch.setattr(runner, "_run", lambda cmd: None)
+
+        pdf = tmp_path / "a.pdf"
+        pdf.write_bytes(b"x")
+        runner.run([pdf], tmp_path / "out")
+
+        out = capsys.readouterr().out
+        assert "[doc] a.pdf done" in out
+        assert "pages 1-1/1" not in out
+
+    def test_images_keep_page_log(self, tmp_path, capsys, monkeypatch):
+        import convert as convert_mod
+
+        monkeypatch.setattr(convert_mod.time, "sleep", lambda s: None)
+        runner = MineruRunner()
+        monkeypatch.setattr(runner, "_run", lambda cmd: None)
+
+        img = tmp_path / "page_001.jpg"
+        img.write_bytes(b"x")
+        runner.run([img], tmp_path / "out")
+
+        out = capsys.readouterr().out
+        assert "[batch] pages 1-1/1 done" in out

@@ -1222,14 +1222,18 @@ class DbLoader:
                                 "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, "
                                 "type=%s, difficulty=%s, full_score=%s, content=%s, options=%s, "
                                 "answer=%s, explanation=%s, material_text=%s, material_url=%s, "
-                                "grade_band=%s, source=%s, source_year=%s, content_hash=%s "
+                                "grade_band=%s, source=%s, source_year=%s, content_hash=%s, "
+                                "is_active=LEAST(is_active, %s) "
                                 "WHERE id=%s",
                                 (sid, q.get("group_id"), q.get("group_order"), q.get("type"),
                                  q.get("difficulty"), q.get("full_score"), content,
                                  json.dumps(opts, ensure_ascii=False) if opts is not None else None,
                                  q.get("answer") or "", q.get("explanation"), q.get("material_text"),
                                  q.get("material_url"), q.get("grade_band"), q.get("source"),
-                                 q.get("source_year"), chash, qid),
+                                 q.get("source_year"), chash,
+                                 # 复核过的不因重导被重新激活；修复过的必须置 0
+                                 0 if q.get("needs_review") else 1,
+                                 qid),
                             )
                             updated += 1
 
@@ -1242,15 +1246,17 @@ class DbLoader:
                     self._exec(
                         "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, full_score, "
                         "content, options, answer, explanation, material_text, material_url, "
-                        "grade_band, source, source_year, content_hash) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "grade_band, source, source_year, content_hash, is_active) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
                          q.get("full_score"),
                          content,
                          json.dumps(opts, ensure_ascii=False) if opts is not None else None,
                          q.get("answer") or "", q.get("explanation"), q.get("material_text"),
                          q.get("material_url"), q.get("grade_band"), q.get("source"), q.get("source_year"),
-                         chash),
+                         chash,
+                         # LLM 补全/修复过的内容默认不进抽题池，人工复核后再置 1
+                         0 if q.get("needs_review") else 1),
                     )
                     qid = int(self._query("SELECT LAST_INSERT_ID()")[0][0])
                     count += 1

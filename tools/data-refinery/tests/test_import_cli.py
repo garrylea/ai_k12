@@ -116,3 +116,68 @@ def test_file_with_subject_skips_guard(monkeypatch):
     rc = import_cli.main(["--file", "202507-海淀", "--subject", "语文"])
     assert rc == 0
     assert len(calls) == 4
+
+
+def _stub_all(monkeypatch):
+    calls = []
+    for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: calls.append(n))
+    monkeypatch.setattr(
+        import_cli, "answers_backfill",
+        lambda cfg, scope, **kw: calls.append(("answers", kw)),
+    )
+    return calls
+
+
+def test_answers_stage_runs_after_db_loader(monkeypatch):
+    calls = _stub_all(monkeypatch)
+    assert import_cli.main(["--subject", "语文"]) == 0
+    assert calls == [
+        "convert_main", "extract_main", "publish_main", "db_loader_main",
+        ("answers", {"dry_run": False, "overwrite": False}),
+    ]
+
+
+def test_skip_answers(monkeypatch):
+    calls = _stub_all(monkeypatch)
+    import_cli.main(["--subject", "语文", "--skip-answers"])
+    assert all(not (isinstance(c, tuple) and c[0] == "answers") for c in calls)
+
+
+def test_skip_load_also_skips_answers(monkeypatch):
+    calls = _stub_all(monkeypatch)
+    import_cli.main(["--subject", "语文", "--skip-load"])
+    assert "db_loader_main" not in calls
+    assert all(not (isinstance(c, tuple) and c[0] == "answers") for c in calls)
+
+
+def test_cards_only_does_not_backfill_answers(monkeypatch):
+    calls = _stub_all(monkeypatch)
+    import_cli.main(["--subject", "数学", "--cards-only"])
+    assert all(not (isinstance(c, tuple) and c[0] == "answers") for c in calls)
+
+
+def test_re_answer_passes_overwrite(monkeypatch):
+    calls = _stub_all(monkeypatch)
+    import_cli.main(["--subject", "语文", "--re-answer"])
+    assert ("answers", {"dry_run": False, "overwrite": True}) in calls
+
+
+def test_stops_when_stage_returns_nonzero(monkeypatch, capsys):
+    """子 CLI 用 return 2 报错（MinerU token 过期等），不能忽略返回值继续跑。"""
+    calls = []
+
+    def boom(argv):
+        calls.append("convert")
+        return 2
+
+    monkeypatch.setattr(import_cli, "convert_main", boom)
+    monkeypatch.setattr(import_cli, "extract_main", lambda argv: calls.append("extract"))
+    monkeypatch.setattr(import_cli, "publish_main", lambda argv: calls.append("publish"))
+    monkeypatch.setattr(import_cli, "db_loader_main", lambda argv: calls.append("db_loader"))
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: calls.append("answers"))
+
+    rc = import_cli.main(["--subject", "语文"])
+    assert rc == 2
+    assert calls == ["convert"]
+    assert "已停止" in capsys.readouterr().out

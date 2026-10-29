@@ -62,6 +62,11 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - **行内粘连标题**（2026-10-28）：OCR 会把下一节标题并在上一题题干末尾（`…（100 字左右）四、现代文阅读（共 23分）`）。切分器拆出标题、本题留在原分组、后续题归新分组，并关闭本题（否则后续材料被吞）。
 - **选择题选项边界**（2026-10-28）：语文卷选项紧贴标点无空格（`…的一项是(2分)A.呼之欲出 B.…`）。裸字母标记的前导边界从「空白」放宽为「非英文/数字」，能拆 4 个选项的题确定性校正为 `choice`（LLM 偶发误标 short_answer）。
 - **标注失败不丢题**（2026-10-28）：LLM 网关抖动会随机挂 1 题；失败时用确定性兜底（题型按选项判定、难度 2、知识点空、不做修复），日志记 `label_failed_fallback`，不再整题跳过（曾导致重载后试卷少题）。
+- **Python 已拆出完整选项时的冲突处理**（2026-10-28 首版，2026-10-29 修订）：LLM 要**重写** options 且与 Python 拆分不一致 → 拒绝（防丢内容/编造），第 3 次走「只标注」：强制 `is_complete=true`、丢弃 `regenerated`，只取 type/difficulty/知识点。LLM **只判 false、不重写** 时按缺陷类型分流（`_defect_kind`）：提到材料/画线/图片/题干截断等 → 接受 false（真缺陷，标待复核）；只提选项或说不出缺陷 → 视为误判，以 Python 为准。此前一律当作冲突，会把真实的材料缺失用「只标注」抹成完整题。LLM 调用失败日志带 HTTP 状态与 message。
+- **标注提示词按学科拆**（2026-10-29）：`prompts/question_labeler/` = `_common.txt`（JSON 契约/字段/知识点约束，唯一真源）+ `chinese/math/english/physics/chemistry/politics.txt`，未配置学科回退 `_generic.txt`。九科共用一份提示词时，模型只能按数学标准处理语文：语文 3 选项被判「不足 4 个」、画线句/链接材料丢失被判「可修复」后编造。学科文件负责「什么叫完整、哪些缺陷可修复、题型映射、难度分层」。
+- **原文缺失型缺陷只报告不修复**（2026-10-29）：语文/道法/史地生（`_UNREPAIRED_OK`）的 `is_complete=false` **允许 `regenerated=null`**——画线句指向、加点字、图片内文字、未随卷给出的链接材料/时政原文，任何补全都是编造。这类题以原文入库 + `needs_review=true`（`is_active=0`，不进抽题池），不再重试三次后走「知识点为空」的确定性兜底。数学/物理/化学的缺选项、缺单位仍有上下文残片可依，仍要求修复后才通过。
+- **语文拆选项/材料按学科处理**（2026-10-28）：`split_options(subject="chinese")` 支持 3-6 项、`【甲】【乙】【丙】`、`①②③`，label 归一为 A/B/C 并保留 `original_label`（参考答案写「乙」时映射为 B）；两题之间的「文段标题 + 长段落」（如「流光溢彩」）归下一题 `material_text`，不再被上一题正文吞掉。数学仍要求 A-D 四项，行为不变。
+- **AI 修复题默认待复核**（2026-10-28）：`is_complete=false`（LLM 补过选项/材料）在 extract 打 `needs_review=true`，db_loader 入库置 `is_active=0` → 不进抽题池（抽题 SQL 过滤 `is_active=1`），人工看 `labeling_issues.jsonl` 后手动置 1。原因：实测会编造原文没有的内容（大兴题12 补出「D.三人都正确」、大兴题5 编了两句【甲】【乙】、房山题25 补出「D.…放弃奋斗」）。存量库用 `python mark_needs_review.py --apply` 回刷（幂等）。
 - **占位文本防线**（2026-10-28）：LLM 修复产出的 `【注：此处应填入…】`/`待补充` 一类占位说明不得入库，命中即回退原始切分内容。
 - 无题号/答案的表格（如作文评分标准表）整表并入当前题答案，不丢弃。
 - **JSON 兼容**：`extract.py` 的 `_parse_json_object` 去除 ```` ```json ```` 代码块 + 修复 LaTeX 反斜杠漏转义（`\_`/`\%` 等非法转义补双反斜杠），保留合法 `\n`/`\t`/`\uXXXX`。
@@ -71,8 +76,8 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - 物化图片到 `output/assets/`，路径改写为源相对稳定键（`questions/{subject}/{hash}/{idx}`、`textbooks/{subject}/{hash}/{sort_order}`），填 `content_metadata.images[]` / `options[].image_url`。
 - **subject 按素材路径首段推导**（`subject_codes.subject_code_for_path`）：`数学/`->math、`语文/`->chinese、`化学/`->chemistry。映射表唯一维护在 `src/subject_codes.py`（publish / extract / 答案提取共用），识别不出时回退 `math`（历史兼容）。
 
-### 答案提取（按学科 case 分派，2026-10-28）
-两段式，答案只提取不生成、全程纯程序（不调 LLM）：
+### 答案提取（按学科 case 分派，2026-10-28；已并入 import_cli 第 5 步）
+`import_cli` 的第 5 步会自动完成「试卷 md → 答案文档 → questions.answer」：逐卷查 `exam_papers.source_key` 拿 paper_id，**默认 `--where answer_empty` 只补空答案**，`--re-answer` 才覆盖；没有「参考答案」段的卷跳过并打印原因。下面两段式仍保留，用于单独重跑或人工修正：
 
 1. `src/answer_extract_cli.py --file <相对路径子串>`：定位唯一的试卷 md → 按路径首段识别学科 → 调 `subject_cases.get_case(subject)` → 输出 `answer_doc` 规范文档（`# 试卷：<标题>` / `## 题号` / `答案：` / `解析：`）+ `output/answer_issues.jsonl`。
 2. `src/answer_importer_cli.py --doc <文档> --paper-id <id> [--apply]`：按 `(paper_id, question_no)` 回写，语义=缺省不改/非空覆盖/空串不改/幂等/写 `answer_verified=1`。
@@ -95,7 +100,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 | 现代文阅读 | 内容概括与信息筛选、词句理解与赏析、人物形象（人物特点）、中心思想与主旨、表达方式、写作手法（表现手法与结构）、说明方法与说明文阅读、论证方法与议论文阅读、开放性探究与迁移 |
 | 写作 | 命题作文、半命题作文、材料作文、话题作文、应用文写作 |
 
-- **标定命令**：`python src/backfill_question_kps.py --subject chinese`（默认 math；语文用 `prompts/question_kps_chinese.txt`）。幂等，只处理无 qkp 的题。
+- **标定命令**：`python src/backfill_question_kps.py --subject chinese`（默认 math）。提示词按学科取 `prompts/question_kps/<subject>.txt`（公共契约 `_common.txt`，未配置学科回退 `_generic.txt`）；此前只有数学/语文两版，其它学科会用「初中数学老师」的角色标 KP。幂等，只处理无 qkp 的题。
 - **作文题不标 KP**（2026-10-28 用户裁决）：作文题的 `answer` 是评分参考而非可判答案，标了 KP 就会被专项练习抽到。导入含作文的卷后，需把作文题从 `question_knowledge_points` 移除（本卷题27 已移）。当前无字段区分作文，后续要么加题型（如 `essay`），要么在导入脚本里按卷末大题排除。
 - **LLM 标注需人工抽检**：2026-10-28 实测 27 题中有 3 题偏差（文言人物理解被标成现代文「人物形象」、文言填空被标成「古诗文默写」、二选一作文漏「半命题作文」），已人工校正。抽检维度：文言/古诗题不该出现现代文考点；作文题按命题/半命题/材料归类。
 
@@ -142,10 +147,12 @@ python src/extract_cli.py --file "2024/...西城-模拟二-试卷"  # 单文件
 python src/extract_cli.py --subject 语文 --year 2025 --dry-run  # 统一范围参数（各阶段同义）
 python src/publish_cli.py --subject 语文 --dry-run              # 同上；配合 --book 更细
 
-# 一键导入（convert → extract → publish → 入库，增量）
+# 一键导入（convert → extract → publish → 入库 → 答案回填，增量）
 python src/import_cli.py --subject 语文 --year 2025 --dry-run
 python src/import_cli.py --subject 语文 --year 2025
 python src/import_cli.py --file "202507-海淀-模拟二-试卷" --re-extract --re-publish
+python src/import_cli.py --subject 语文 --skip-answers        # 只到入库，不回填答案
+python src/import_cli.py --subject 语文 --re-answer           # 覆盖已有答案（默认只补空）
 
 # 后段（一键）
 python src/refinery_cli.py --source all         # publish + db_loader
@@ -159,7 +166,7 @@ python src/db_loader_cli.py --load-cards --subject 语文 --questions-only --dry
 python src/db_loader_cli.py --load-cards --file "202507-海淀-模拟二-试卷"          # 只导单卷/单书
 python src/db_loader_cli.py --load-cards --subject 数学 --cards-only              # 只导数学教材卡
 
-# 试卷答案补录（两段式，答案只提取不生成）
+# 答案回填已并入 import_cli 第 5 步；需要单独重跑/人工修正时仍可两段式：
 python src/answer_extract_cli.py --file "语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷" --dry-run
 python src/answer_extract_cli.py --file "<同上>"            # -> output/answers/<卷名>.md
 python src/answer_importer_cli.py --doc output/answers/<卷名>.md --paper-id 17          # dry-run 看 diff
@@ -260,9 +267,13 @@ pytest tests/ -q                                # 1175 passed, 10 skipped
 
 ---
 
-## 语文试卷着重号/下划线回填（2026-10-28）
+## 语文试卷着重号/下划线（2026-10-28 落库回填 / 2026-10-29 前置到切题后）
 
-MinerU 的 Markdown 没有下划线语义，着重号也只能偶尔识别成 `<sub>．．</sub>`，导致「文段中加点词语」「画横线句」类题目丢指令。新增**旁路步骤**（不改主管线顺序）：
+MinerU 的 Markdown 没有下划线语义，着重号也只能偶尔识别成 `<sub>．．</sub>`，导致「文段中加点词语」「画横线句」类题目丢指令。
+
+**现行做法（2026-10-29 起）**：`question_extract` 在 `split_page` 之后、**标注之前**调 `_pdf_decorations` + `_apply_emphasis`，把标记直接注入 `RawQuestion.content/material_text`。顺序不能反——模型标注时看不到标记，就会把「画线句」判成原文缺失（东直门 2024 题2/4/7/11/20/24）。扫描件无文字层，检测为空，日志打 `[emphasis] … 无文字层或未检出标记（扫描件），跳过`。
+
+**存量回填**（入库后补，仍可用）：
 
 ```bash
 cd tools/data-refinery/src
@@ -273,6 +284,6 @@ python emphasis_cli.py --all-chinese          # 全部语文卷预演（--apply 
 
 - 检测实现在 `pdf_emphasis.py`：下划线取 PDF 细矩形；着重号取字符下方 3pt 窄带内的小墨点（4x 灰度渲染 + 连通域），排除表格区域（`page.find_tables()`）。
 - 输出 `<u>…</u>` / **逐字** `<span class="cn-emphasis-dot">字</span>`；前端 `global.css` 用 `::after` 画 0.15em 纯黑字下点，下划线 2px 深色（视觉反馈：点要更精更黑、线要更重）。
-- 匹配用上下文唯一性（8→2 字）；选项按 `A./B．` 行 + 纯汉字上下文；题干只做 `<sub>` 归一化，不套标注。
-- 安全：默认 dry-run、幂等；只 UPDATE `content/material_text/options/content_hash`，写后逐列校验其它列未变；备份在 `tools/db/backups/`。
-- 适用范围：**电子版（有文字层）PDF**；纯扫描件需 OCR 字符框，本期不做。
+- 匹配用上下文唯一性（8→2 字）；选项按 `A./B．` 行 + 纯汉字上下文；题干只做 `<sub>` 归一化，不套标注。步骤幂等（`decorate_text` 见 `already_marked` 跳过），extract 与 emphasis_cli 都跑不会重复插标签。
+- 安全：`emphasis_cli` 默认 dry-run、幂等；只 UPDATE `content/material_text/options/content_hash`，写后逐列校验其它列未变；备份在 `tools/db/backups/`。
+- 适用范围：**电子版（有文字层）PDF**（实测大兴 36 处、五中 14 处）；纯扫描件 0 命中，需 OCR 字符框 + 图像层横线检测或视觉模型，本期不做，这类题一律 `needs_review`。

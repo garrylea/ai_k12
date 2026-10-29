@@ -149,6 +149,8 @@ class ExportRow:
     explanation: str | None = None
     paper_id: int | None = None
     question_no: int | None = None
+    # 语文阅读题的共享材料：外部模型看不到文章就无法作答，必须带上
+    material_text: str | None = None
 
 
 def build_export_jsonl(rows: list[ExportRow]) -> str:
@@ -162,6 +164,7 @@ def build_export_jsonl(rows: list[ExportRow]) -> str:
             "explanation": "",
             "_ref": {
                 "content": r.content,
+                "material_text": r.material_text,
                 "options": r.options,
                 "type": r.type,
                 "answer": r.answer,

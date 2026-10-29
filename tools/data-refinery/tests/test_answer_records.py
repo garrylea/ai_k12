@@ -129,3 +129,18 @@ class TestExport:
 
     def test_empty_rows(self):
         assert build_export_jsonl([]) == ""
+
+
+def test_export_includes_material_text_in_ref():
+    """语文阅读题的材料必须进 _ref：外部模型看不到文章就无法作答。"""
+    import json
+
+    from answer_records import ExportRow, build_export_jsonl
+
+    line = build_export_jsonl([ExportRow(
+        question_id=1, content="请赏析画线句", type="short_answer", answer="",
+        material_text="文章第一段……", options=None,
+    )]).strip()
+    obj = json.loads(line)
+    assert obj["_ref"]["material_text"] == "文章第一段……"
+    assert obj["answer"] == ""

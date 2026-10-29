@@ -21,14 +21,46 @@ from image_scan import _IMAGE_REF_RE, _resolve_disk_path
 # 而「大图角落贴二维码」仅 0.014 —— 0.3 与误删场景有 20 倍以上安全间隔。
 _MIN_QR_AREA_RATIO = 0.3
 
+# 带 logo 水印的二维码（公众号码中间盖一块「北京中考」绿标）opencv 的
+# detectAndDecode 完全解不出（detect 也返回 None），只能靠形态兜底。
+# 实测这批：126-176 正方、Otsu 后黑占比 0.44-0.47、Canny 边缘密度 0.19-0.29；
+# 真实配图黑占比 0.05-0.06、边缘 0.07、宽高比 1.3-2.7。四条同时满足才判，
+# 且尺寸上限 400 保证「大图角落贴码」不会命中。
+_QR_FALLBACK_MAX_SIDE = 400
+_QR_FALLBACK_MIN_SIDE = 60
+_QR_FALLBACK_BLACK = (0.35, 0.62)
+_QR_FALLBACK_EDGE = 0.15
+_QR_FALLBACK_ASPECT = (0.85, 1.18)
+
 # 检测器构造有开销，模块级复用（detectAndDecode 无状态）
 _qr_detector = cv2.QRCodeDetector()
 
 
+def _looks_like_qr(img) -> bool:
+    """解码失败时的形态兜底：小尺寸、近正方、黑白各半、边缘密集。
+
+    只看统计特征，不依赖可解码性。阈值与真实配图有 5 倍以上间隔，
+    宁可漏判（留下二维码）也不误删配图。
+    """
+    height, width = img.shape[:2]
+    if not (_QR_FALLBACK_MIN_SIDE <= min(height, width)
+            and max(height, width) <= _QR_FALLBACK_MAX_SIDE):
+        return False
+    if not (_QR_FALLBACK_ASPECT[0] <= width / height <= _QR_FALLBACK_ASPECT[1]):
+        return False
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    black = float((binary == 0).mean())
+    if not (_QR_FALLBACK_BLACK[0] <= black <= _QR_FALLBACK_BLACK[1]):
+        return False
+    return float((cv2.Canny(gray, 100, 200) > 0).mean()) >= _QR_FALLBACK_EDGE
+
+
 def is_qr_code(disk_path: Path) -> bool:
-    """图片是否为二维码（解码成功且二维码占图面积达标）。
+    """图片是否为二维码（解码成功且占图面积达标，或形态高度疑似）。
 
     任何读取/解码异常一律返回 False（保守放过，绝不因质检报错而丢内容）。
+    带 logo 水印的码解不出，走 `_looks_like_qr` 的形态兜底。
     """
     try:
         buf = np.fromfile(str(disk_path), dtype=np.uint8)
@@ -42,13 +74,13 @@ def is_qr_code(disk_path: Path) -> bool:
     except Exception:
         return False
 
-    if not data or points is None:
-        return False
-    height, width = img.shape[:2]
-    if width == 0 or height == 0:
-        return False
-    area_ratio = cv2.contourArea(points.astype(np.float32)) / (width * height)
-    return area_ratio >= _MIN_QR_AREA_RATIO
+    if data and points is not None:
+        height, width = img.shape[:2]
+        if width == 0 or height == 0:
+            return False
+        area_ratio = cv2.contourArea(points.astype(np.float32)) / (width * height)
+        return area_ratio >= _MIN_QR_AREA_RATIO
+    return _looks_like_qr(img)
 
 
 def strip_qr_images(text: str, md_images_dir: Path) -> str:

@@ -385,3 +385,154 @@ def test_validate_allows_keep_existing_answer():
     assert res[0].type == "proof"
     assert res[0].is_complete is False
     assert res[0].regenerated["answer"] == "$AB=CD$"
+
+
+def test_labels_only_retry_when_python_options_complete():
+    """Python 已拆出完整 4 选项、LLM 两次都要重写选项 → 第三次只标注，不再整题降级。"""
+    content = ("如图, 则 $\\angle AOE$ 的大小为 (A) $25^{\\circ}$ "
+               "(B) $35^{\\circ}$ (C) $45^{\\circ}$ (D) $55^{\\circ}$")
+    bad = ('{"type":"choice","difficulty":2,"knowledge_points":[],"suggested_new_kps":[],'
+           '"completeness":{"is_complete":false,"issues":["选项D内容缺失"]},'
+           '"regenerated":{"content":"如图...","options":'
+           '[{"label":"A","text":"1"},{"label":"B","text":"2"},'
+           '{"label":"C","text":"3"},{"label":"D","text":"(编造)"}]}}')
+    # 第三次是「只标注」响应：仍故意带 is_complete=false，验证代码会强制 complete
+    llm = _seq_llm(bad, bad, _good_item("choice", complete=False))
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS)
+    q = RawQuestion(group_order=4, group_id=None, content=content)
+
+    res = labeler.label([q], batch_size=1)
+
+    assert llm.called == 3
+    assert res[0] is not None
+    assert res[0].type == "choice"
+    assert res[0].is_complete is True
+    assert res[0].knowledge_points == ["M0101"]
+
+
+def test_error_log_includes_status_and_body(capsys):
+    """APIStatusError 只打类名无法定位（402 余额不足 / 401 key 错），要把 message 带上。"""
+    class BoomLLM:
+        def complete(self, system, user):
+            raise RuntimeError("402 Insufficient Balance")
+
+    labeler = QuestionLabeler(llm=BoomLLM(), prompt="{{content}}", knowledge_points=KPS)
+    q = RawQuestion(group_order=1, group_id=None, content="题干")
+    labeler.label([q], batch_size=1)
+
+    out = capsys.readouterr().out
+    assert "402 Insufficient Balance" in out
+
+
+def test_chinese_three_options_labels_only_after_fabricated_fourth():
+    """语文 3 选项：LLM 两次判不完整并补第 4 项 → 第三次只标注，保留 Python 的 3 项。"""
+    content = (
+        "阅读全文，下列说法不恰当的一项是（2分）\n"
+        "【甲】第②段举北斗卫星团队中青年人的例子，证明了青年人要珍惜时间。\n"
+        "【乙】第④段“宝剑锋从磨砺出”论证人生道路上总会遇到荆棘坎坷。\n"
+        "【丙】第⑤段引用习近平总书记的话，意在证明奋斗无止境。"
+    )
+    bad = ('{"type":"choice","difficulty":2,"knowledge_points":[],"suggested_new_kps":[],'
+           '"completeness":{"is_complete":false,"issues":["选项不足4个"]},'
+           '"regenerated":{"content":"阅读全文...","options":'
+           '[{"label":"A","text":"甲"},{"label":"B","text":"乙"},'
+           '{"label":"C","text":"丙"},{"label":"D","text":"编造"}]}}')
+    llm = _seq_llm(bad, bad, _good_item("choice"))
+    labeler = QuestionLabeler(
+        llm=llm, prompt="{{content}}", knowledge_points=KPS, subject="chinese",
+    )
+    q = RawQuestion(group_order=25, group_id=None, content=content)
+
+    res = labeler.label([q], batch_size=1)
+
+    assert llm.called == 3
+    assert res[0].type == "choice"
+    assert res[0].is_complete is True
+
+
+def test_chinese_unrepairable_defect_accepted_without_retry():
+    """语文画线句丢失属原文缺失型缺陷：只报告不修复，接受标注并标待复核，
+    不能重试三次再整题降级（那样会丢知识点）。"""
+    item = ('{"type":"short_answer","difficulty":3,"knowledge_points":["M0101"],'
+            '"suggested_new_kps":[],"completeness":{"is_complete":false,'
+            '"issues":["画线句具体内容缺失，无法定位是哪一句"]}}')
+    llm = _seq_llm(item)
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                             subject="chinese")
+    q = RawQuestion(group_order=5, group_id=None, content="请赏析第⑥段画线句。")
+
+    res = labeler.label([q], batch_size=1)
+
+    assert llm.called == 1                      # 不重试
+    assert res[0].is_complete is False          # 缺陷如实保留 → needs_review
+    assert res[0].knowledge_points == ["M0101"]  # 知识点没丢
+    assert "画线" in res[0].completeness_issues[0]
+
+
+def test_math_missing_repair_is_still_rejected():
+    """数学缺选项属于可修复缺陷：只报告不修复仍判失败，要求重试。"""
+    item = ('{"type":"choice","difficulty":2,"knowledge_points":["M0101"],'
+            '"suggested_new_kps":[],"completeness":{"is_complete":false,'
+            '"issues":["选项D缺失"]}}')
+    llm = _seq_llm(item, _good_item("choice"))
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                             subject="math")
+    q = RawQuestion(group_order=2, group_id=None, content="下列正确的是 A.1 B.2 C.3")
+
+    labeler.label([q], batch_size=1)
+
+    assert llm.called == 2
+
+
+def test_chinese_material_defect_wins_over_complete_options():
+    """Python 已拆出完整选项、LLM 指出缺材料 → 接受 false（标待复核），
+    不能用「只标注」把真实材料缺陷抹掉。"""
+    content = ("根据链接材料回答问题。\nA.甲句\nB.乙句\nC.丙句")
+    item = ('{"type":"choice","difficulty":3,"knowledge_points":["M0101"],'
+            '"suggested_new_kps":[],"completeness":{"is_complete":false,'
+            '"issues":["缺少链接材料原文，无法作答"]}}')
+    llm = _seq_llm(item)
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                             subject="chinese")
+    q = RawQuestion(group_order=9, group_id=None, content=content)
+
+    res = labeler.label([q], batch_size=1)
+
+    assert llm.called == 1
+    assert res[0].is_complete is False
+    assert "链接材料" in res[0].completeness_issues[0]
+
+
+def test_chinese_option_only_defect_still_ignored():
+    """Python 已完整拆出选项、LLM 只说选项有问题（说不出具体内容缺陷）→ 以 Python 为准。"""
+    content = "下列正确的一项是\nA.甲\nB.乙\nC.丙"
+    item = ('{"type":"choice","difficulty":2,"knowledge_points":["M0101"],'
+            '"suggested_new_kps":[],"completeness":{"is_complete":false,'
+            '"issues":["选项不足4个"]}}')
+    llm = _seq_llm(item, _good_item("choice"))
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                             subject="chinese")
+    q = RawQuestion(group_order=4, group_id=None, content=content)
+
+    res = labeler.label([q], batch_size=1)
+
+    assert llm.called == 2          # 第一次被拒，重试后按完整处理
+    assert res[0].is_complete is True
+
+
+def test_chinese_option_truncation_not_treated_as_material_defect():
+    """「选项C截断/缺少D」是选项类问题：语文 3 项合法，以 Python 拆分为准，
+    不能被当成材料缺陷标成待复核。"""
+    content = "翻译文中三处画线语句，有误的一项是\nA.甲\nB.乙\nC.丙"
+    item = ('{"type":"choice","difficulty":3,"knowledge_points":["M0101"],'
+            '"suggested_new_kps":[],"completeness":{"is_complete":false,'
+            '"issues":["选项C的内容在‘滁人游也’后截断","缺少选项D"]}}')
+    llm = _seq_llm(item, _good_item("choice"))
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                             subject="chinese")
+    q = RawQuestion(group_order=11, group_id=None, content=content)
+
+    res = labeler.label([q], batch_size=1)
+
+    assert llm.called == 2
+    assert res[0].is_complete is True

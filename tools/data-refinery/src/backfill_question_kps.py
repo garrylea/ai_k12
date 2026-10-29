@@ -7,7 +7,8 @@
    KP 错标到他科题上）——幂等，已有 qkp 记录的题不再处理。
 3. 每批 10 题调 LLM（prompt 附白名单 id+name 清单 + 每题 qid/题面截断 500 字），
    要求输出 {"items": [{"qid": 123, "kps": [1, 17]}]}，按 qid 对回每题
-   （LLM 漏答/输出非法的题记失败，可重跑补齐）。语文用 question_kps_chinese 提示词。
+   （LLM 漏答/输出非法的题记失败，可重跑补齐）。提示词按学科取自
+   `prompts/question_kps/<subject>.txt`（公共契约在 `_common.txt`）。
 4. 白名单校验（parse_batch_response 内过滤）后 INSERT IGNORE 写入
    （question_knowledge_points 有 uniq_qkp_q_kp 唯一键，重复执行不插重）。
 5. 打印统计：标注数 / 失败题 id 清单。
@@ -181,10 +182,30 @@ def build_user_message(whitelist: dict[int, str],
 # main（LLM + DB）
 # ---------------------------------------------------------------------------
 
-def _load_prompt(name: str) -> str:
-    """加载 prompts/{name}.txt（与 backfill_practice_questions 同款）。"""
-    prompt_path = Path(__file__).parent / "prompts" / f"{name}.txt"
-    return prompt_path.read_text(encoding="utf-8")
+_SUBJECT_NAMES = {
+    "math": "数学", "chinese": "语文", "english": "英语", "physics": "物理",
+    "chemistry": "化学", "politics": "道德与法治",
+    "biology": "生物", "history": "历史", "geography": "地理",
+}
+
+
+def _load_kps_prompt(subject: str) -> str:
+    """知识点标定提示词 = 公共契约 + 学科选点规则。
+
+    此前只有「数学版」和「语文版」两份：英语/物理/化学/道法标 KP 时用的是
+    「你是经验丰富的初中数学老师」，选点规则也按数学写。拆成一科一份后，
+    公共 JSON 契约只在 `_common.txt` 维护，学科差异写在 `<subject>.txt`。
+    """
+    base = Path(__file__).parent / "prompts" / "question_kps"
+    common = (base / "_common.txt").read_text(encoding="utf-8")
+    subject_file = base / f"{subject}.txt" if subject else None
+    if subject_file is None or not subject_file.exists():
+        subject_file = base / "_generic.txt"
+    return (
+        common
+        .replace("{{subject_name}}", _SUBJECT_NAMES.get(subject, "学科"))
+        .replace("{{subject_rules}}", subject_file.read_text(encoding="utf-8").strip())
+    )
 
 
 def main():
@@ -219,9 +240,7 @@ def main():
         thinking=cfg.llm_thinking,
         enable_cache=cfg.llm_enable_cache,
     )
-    system_prompt = _load_prompt(
-        "question_kps_chinese" if args.subject == "chinese" else "question_kps"
-    )
+    system_prompt = _load_kps_prompt(args.subject)
 
     # DB 连接（与 DbLoader.__init__ 同款 pymysql.connect）
     conn = pymysql.connect(

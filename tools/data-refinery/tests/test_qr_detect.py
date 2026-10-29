@@ -204,3 +204,19 @@ def test_extract_questions_file_drops_qr_image(tmp_path, monkeypatch):
         "上体育课时, 在操场上随机抽取 25 名学生",
         "将全校的学生名字输入电脑程序，在电脑中随机抽取 100 名学生",
     ]
+
+
+def test_is_qr_code_true_for_logo_qr():
+    """带 logo 水印的公众号码 opencv 解不出（detect 都返回 None），
+    靠形态兜底判出。样本取自 2024 东直门中学卷。"""
+    assert is_qr_code(FIXTURES / "qr_wechat_logo.jpg") is True
+
+
+def test_fallback_does_not_delete_large_figure():
+    """形态兜底必须尊重尺寸上限：大图角落贴码仍保留整图。"""
+    from qr_detect import _looks_like_qr
+    import cv2
+    import numpy as np
+
+    img = np.full((700, 900, 3), 255, dtype=np.uint8)
+    assert _looks_like_qr(img) is False

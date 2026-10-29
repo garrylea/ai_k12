@@ -23,6 +23,66 @@
 
 **回归**：`QuestionRunner.test.tsx` 新增「题面高度比例」4 例（非理科/理科/选择题/材料区），并把 `question-stem`、`question-answer` 加 `data-testid` 供断言；`apps/web` 全量 1291 测试通过。
 
+## 2026-10-29 · 语文 32 卷入库 + 「外部生成答案 → 回导」通道
+
+**入库结果**：32 份语文卷（2024 十九 + 2025 十三）→ 798 题；可用 586、待复核 212；知识点覆盖 798/798（标定 762 题，0 失败）。答案回填 14 卷成功（PDF 自带参考答案段），18 卷无答案段。
+
+**补答案不走本地模型**（用户裁决）：国内模型作答质量不够，答案由用户用外部模型生成。`answer_importer_cli` 本来就支持 `--export` / `--records` 两步，本次补两处能力缺口：
+
+- **`--subject`**（`ScopeFilter.subject`）同时用于导出范围和回导护栏：导出只圈语文；回导时记录里混入别科 question_id 会被范围校验跳过，不会串科。
+- **`_ref.material_text`**：导出必须带阅读材料——语文阅读题看不到文章无法作答，此前 `_ref` 只有 content/options/type。
+- 交付：`output/to_fill_chinese/<paper_id>.jsonl` 28 份（480 题）+ `_index.md`（文件 ↔ 试卷对照）。填好的文件用 `cat` 合并后 `--records ... --where answer_empty [--apply]` 回导；`--where` 会再校验目标题仍为空答案，不覆盖别处补上的值。
+
+**未新增脚本**：`answer_generate_cli.py`（调本地 LLM 作答）写完即删——方向与用户裁决不符，避免留死代码。
+
+---
+
+## 2026-10-29 · 标注提示词按学科拆分：语文不再按数学标准「补全」
+
+**背景**：语文试卷重抽时连续出现 `is_complete=false 但缺 regenerated`，重试三次后整题降级为确定性兜底（知识点为空，抽题池抽不到）。同时 `labeling_issues.jsonl` 里出现大量原文没有的内容：大兴题12 补出 `D. 三人都正确`、大兴题5 编了两句【甲】【乙】、房山题25 补出 `D.…放弃奋斗`。
+
+**根因**：九个学科共用一份 `prompts/question_labeler.txt`。这份提示词按数学的形态定义「完整」——选择题必须 4 项、缺内容要修复。语文的真实形态完全不同：
+
+- 选项 3 项合法（`【甲】【乙】【丙】`、`A/B/C`），不需要第 4 项；
+- 阅读材料常排在题号之前（已由切分器挂 `material_text`），模型看不到材料就判「题干截断」；
+- 画线句、加点字、图片内文字、未随卷给出的「链接材料」在 PDF 转文字时必然丢失，**任何人都无法从上下文还原**。提示词却要求「is_complete=false 时必须修复」，模型只能编。
+
+**修复**：
+- 提示词拆成 `prompts/question_labeler/`：`_common.txt`（JSON 契约/字段/知识点约束，唯一真源）+ `chinese/math/english/physics/chemistry/politics.txt` + `_generic.txt`（生物/历史/地理回退）。加载器 `_load_labeler_prompt(subject)` 用 `{{subject_rules}}` 拼接，公共契约只维护一份。删除原 `question_labeler.txt`。
+- 学科文件负责「什么叫完整、哪些缺陷可修复、题型映射、难度分层」：语文明确「3 项合法」「画线句/链接材料只报告不修复」；数学「4 项、纯图选项不算缺文字」；英语「完形填空一空四选项共用选项池，不得判缺上下文」；化学「方程式缺反应条件不算缺陷」。
+- 校验放宽为按学科：`_UNREPAIRED_OK`（语文/道法/史地生）允许 `is_complete=false` + `regenerated=null`，题材按 Python 原文入库、`needs_review=true`（`is_active=0`，不进抽题池），不再重试到丢知识点。数学/物理/化学仍要求修复后才通过。
+- 冲突分流 `_defect_kind`：Python 已拆出完整选项时，LLM 只判 false 不重写 —— issues 提到材料/画线/图片 → 接受 false；只提选项或说不出缺陷 → 以 Python 为准。「选项C截断/缺少D」归选项类，语文按 3 项合法处理，不再误标待复核。
+- 日志文案区分「已用 LLM 修复」与「不可修复，按 Python 原文入库并标待复核」，汇总行给出修复/仅报告各自数量；`regenerated` 为空时内容与选项仍取自 Python 拆分（此前会丢 options）。
+
+**同源问题一并处理（知识点标定）**：`question_kps.txt` 写死「初中数学老师」，`question_kps_chinese.txt` 是唯一的学科特化，英语/物理/化学/道法标 KP 时会落到数学版。现拆为 `prompts/question_kps/`：`_common.txt`（白名单约束/JSON 输出）+ `chinese/math/english/physics/chemistry/politics.txt` + `_generic.txt`，角色名由 `_SUBJECT_NAMES` 注入；`backfill_question_kps.py` 按 `--subject` 加载。删除原两份文件。
+
+**不改**：`kp_tree.txt` 仍只服务数学 KP 树初始化（内容基于《义务教育数学课程标准》，不是换角色能通用），其它学科建树需单独写课程标准提示词。
+
+**追加（同日，东直门中学卷复验暴露的三处误判）**：
+- **部分标题是材料边界**（`question_splitter.py`）：`第一部分 北京城市发展史上的水源问题` 这类不带「选择/非选择」字样的部分标题，`is_part_header` 返回 `part_kind=None`，但命中时只关闭当前题、**没有开新 scope**，导致题3/5/6 全部沿用上一节的「前言」材料，模型判「材料不完整」。现在 `part_kind is None` 时 `_start_scope()` 并把标题本身并入新材料。实测题3 材料 440 字含【甲】、题5 353 字含①②③④、题6 282 字含四个成语。
+- **带 logo 的二维码解不出**（`qr_detect.py`）：这批卷的公众号码中间盖了「北京中考」绿标，`cv2.QRCodeDetector.detectAndDecode` 返回空、`detect` 也返回 None，`is_qr_code` 一直 False，二维码留在题面里（题3 因此被判「【甲】【乙】【丙】在图片中」）。加形态兜底 `_looks_like_qr`：网格近正方、Otsu 黑占比 0.35-0.62、Canny 边缘密度 ≥0.15、边长 60-400。与真实配图（黑占比 0.05-0.06、边缘 0.07、宽高比 1.3-2.7）有 5 倍以上间隔，且 400 上限保住「大图角落贴码」。样本 `tests/fixtures/qr_wechat_logo.jpg`。
+- **语文提示词补三条正常形态**：选项是 ①②③④ 序号且材料有对应标号句 → 完整；【甲】【乙】【丙】是填空占位符 → 完整；题干没写「如图/图表」时，正文里单独出现的图片引用（二维码/水印/logo）不计入完整性。
+- **选项标记不完整时不拆**（`question_splitter._find_option_marks_cn`）：OCR 丢了某个选项的点号（`A. ① B ② C. ③ D. ④` 的 B），最长连续段变成 `C,D`，旧逻辑把 C/D 重编号成 A/B、A/B 的内容并进题干——学生看到的是**错位选项**（东直门题5 实测）。现在序列必须从 A/甲/① 开始，否则放弃拆分、保留原文由标注判缺陷。
+- **选择题无选项 → 待复核**（`question_extract`）：`type=choice` 但 Python 拆不出 options（选项标记残缺或全为图片）时，写 `needs_review=true`。此前这类题 `is_complete=true` 就会进抽题池，学生看到没有选项的选择题（东直门题5/16）。知识点保留，只挡抽题。
+- **着重号/下划线前置到标注之前**（`question_extract._pdf_decorations/_apply_emphasis`）：切题后、`labeler.label` 前从 PDF 检测并注入 `<u>`/着重号。顺序不能反——模型标注时看不到标记，就会把「画线句」判成原文缺失。实测大兴 36 处标记注入 30 处，题19 的模型判定从「材料缺画线」变成「有下划线但缺第⑥段标号」（真实缺陷）。扫描件无文字层，检测为空，日志明示跳过。`emphasis_cli` 保留用于存量回填，两者幂等（`already_marked`）。
+- **行内粘连题号**（`question_splitter._split_glued_next_stem`）：MinerU 把选项行与下一题合成一行（`…6层以下楼房。16.根据材料三…`），只有行首匹配会漏掉 16，整段被吞进题15 的选项 D。现在题号 == 上一题+1 时拆开；卷首「考试时间150分钟。2.在试卷…」因 `current is None` 不触发。
+- **题号缺号告警**：切题后检查连续性，`[WARN] … 题号不连续，缺 [18]（原文可能未转换出这些题）`。大兴 2024 题18 正文确实没转出来，只能人工核对 PDF。
+- **【甲】【乙】【丙】区分选项与填空占位**（`split_options`）：中文标签既可能是选项也可能是填空占位（`我的分析：【甲】文…【乙】文…`），只有题干含「一项/下列/选择/最恰当…」才按选项拆。此前题13 的三处填空被拆成 A/B/C，题干只剩「任务三」。
+- **题号格式三处补全**（`_MAIN_STEM_RE`）：① `8（1）转朱阁…` 题号后直接跟小问号（OCR 丢点），默写题常见，此前整题消失（东直门题8）；② `## 2. 甲组同学推荐…` MinerU 把题号行识别成 markdown 标题，此前被当材料小标题吞掉（陈经纶 2024 缺 2/3/4/5/7/10）；③ OCR 十位错认 `22 → 33 → 24`，现在按「前跳一位且个位吻合」纠正为 23（清华附中 2024），并打 `[WARN] 题号疑似 OCR 错认`。
+- **作文「要求：1./2./3.」不再拆题**：题24 之后的有序列表被 `is_main_stem` 认成题 1/2/3，拆出 4 道没有题干的空题（北京五中 2024）。现在「卷末大题（≥20）之后回到个位数」一律并进上一题续行；不能用「题号必须递增」的强判据 —— MinerU 输出顺序错乱时会出现 18→14 的真实回退（汇文 2024 题18 排在题14 前面），强判据会把真题并掉。
+- **逐题「答案：」也进答案区**：`_ANSWER_KEYWORD_RE` 只认「参考答案/评分参考」，和平街一中 2024 直接从 `6..答案：…` 开始，整段答案被当题目切出来（38 题、题9 内容只剩「C（2分）」）。补 `^\s*(#*\s*\d{1,2}[.．]{1,2}\s*)?答案[：:]`。**但裸「答案：」不能收**——昌平一中 2024「跑步知识问答」材料里的「答案: 这是一种…」会被误判成答案区入口，题14 之后整段消失。
+- **卷首考试说明不占题号**：`1. 本试卷共12页…` / `2. 在试卷和答题纸上…` 带序号，被 `is_main_stem` 当成题1/2，之后真题1/2 再建一次 → 同卷两道题1，入库按 `(paper_id, question_no)` 互相覆盖（延庆 2025 重复 1-4）。现在题1 之前命中 `_NOTICE_RE`（本试卷/答题[卡纸]/机读卡/考试时间/满分/共X页/准考证/班级）的行直接丢弃。**重复题号一律跳过、不能顺延**：顺延会连锁撞上后面的真实题号，一零一 2024 从题4 一路溢到 29。
+- **`1.1` 子题号不再被拆成两道题1**：OCR 把 `1.1 材料…` 拆成 `1. 1 材料…`，`_MAIN_STEM_RE` 加 `(?![ \t]+\d)` 排除「点+空格+数字」（昌平一中 2024 题1 重复）。
+- **缺号告警**：终态 32 卷里 13 卷有缺号（共 15 处），全部是 md 里确实没有该题（MinerU 漏转），切题器补不了，日志逐卷打出题号让人核对 PDF。
+
+**MinerU 的真实边界（不是 bug）**：`语文/初中/first` 32 份里 16 份是扫描件（无文字层，第 2 页 `extract_text()` 为 0）。MinerU 用 OCR 能转出文字，但 Markdown 不表达下划线/加点/波浪线——这些是图像像素，不在 OCR 文本里。`emphasis_cli`（`pdf_emphasis.py`）靠 PDF 字体坐标 + 图形层检测，扫描件检出 0 命中，只有文字版有效（大兴 36 处、五中 14 处）。扫描件要还原画线句，需要 OCR 字符框 + 图像层横线检测，或视觉模型，暂不做；这类题一律 `needs_review`。
+
+**验证**：东直门卷重抽，完整性缺陷 11 → 10 条，待复核 11 题（10 条缺陷 + 题16 选择题无选项），0 题知识点为空。消除的误判：题3（二维码被当成材料来源）、题5（①②③④ 序号选项被判「缺句子」→ 现因 B 缺标点判缺陷，选项不再错位）、题6（材料挂成上一节的「前言」）。余下均为真实缺陷：6 条扫描件画线/加点/段落标号、2 条外部材料未随卷给出、1 条图表内文字、1 条选项标记残缺。data-refinery 1280 passed / 10 skipped。
+
+**验证**：昌平卷重抽，8 题完整性缺陷中 **0 题修复**（全部只报告），24 题里 8 题 `needs_review`、0 题知识点为空；题11 的 3 个选项保留。data-refinery 1274 passed / 10 skipped。
+
+---
+
 ## 2026-10-28 · 爬虫文件名「北京各」：区县读的是表头而不是行内「区域/学校」
 
 **背景**：`tools/crawler/data` 下 71 个文件叫 `数学-初三(上)-202507-北京各-（上）期中-试卷[-86593].pdf`，无法辨认区县与学校。
@@ -54,6 +114,99 @@
 - `meta.json` 的 file 记录补 `origin`（详情页 URL），换机器/删 checkpoint 后仍可反查。
 
 **验证**：`92320 --subject 语文 --grade 初三` 首次补记后，第二次运行逐条打印 32 个绝对路径，`Total: 201 (matched 35), Skipped: 33`；crawler 273 passed。
+
+### 2026-10-28（续2）· 答案回填并入 import_cli 第 5 步
+
+**背景**：用户质疑「答案回填为什么不在管道里」——原设计把 `answer_extract_cli` → `answer_importer_cli --doc --paper-id` 留成独立两段，导完卷还要手工补答案，不合理。
+
+**历史原因（保留记录）**：`answer_extract_cli` 是 2026-10-28 为语文评分说明/全角题号单独做的确定性提取；`answer_importer_cli` 同时承担人工/AI 改答案的通用入口，默认 dry-run + 交互 `yes`，不适合直接串进无人值守的管道。
+
+**改动**：
+- 新增 `src/answer_backfill.py`：按范围遍历 published 里的试卷 jsonl → 定位同名 md → `subject_cases` 提取 → `output/answers/<卷名>.md` → 按 `source_key` 查 `exam_papers.id` → 调 importer 回写。
+- `import_cli` 增加第 5 步（默认开启）：`--skip-answers` 跳过、`--re-answer` 覆盖；`--skip-load` / `--cards-only` 自动不跑（没有 paper_id / 不是试卷）。
+- 安全口径：默认 `--where answer_empty` **只补空答案**，人工改过的行不动；没有「参考答案」段的卷跳过并打印原因；单卷失败不影响其他卷。
+- `answer_importer_cli` 新增 `--yes`（配合 `--apply` 跳过交互确认，仅编排调用用）。
+- `--dry-run` 只打印将回填的卷，不写文档、不连库。
+
+**数据现实**：本批 32 份初三语文期中卷只有 14 份 PDF 自带「参考答案」段，其余 18 份管道也变不出答案，会明确跳过。
+
+**验证**：`import_cli --subject 语文 --year 2025 --dry-run` 输出 5/5 阶段并把 1 份已发布卷列为「将回填答案」；data-refinery 1236 passed / 10 skipped。
+
+### 2026-10-28（续3）· MinerU 401 A0202：新 token 是 `sk-`，不能带 `mineru-api/` 前缀
+
+**现象**：导语文卷时 `convert` 报 `HTTP 401 {"msgCode":"A0202","msg":"user authenticate failed"}`。
+
+**根因（两层）**：
+1. 旧 `MINERU_TOKEN` 是 `eyJ` JWT，已于 2026-10-09 过期（本地解 exp 确认）。
+2. 换的新 key 在控制台/客户端里显示为 `mineru-api/sk-...`。直连官方 API 实测：带前缀 → 401 A0202；**只取 `sk-...` 那段 → HTTP 200 建任务成功**。`mineru-api/` 是 provider 前缀，不是 token 的一部分。
+
+**修复**：
+- `.env` 与 `~/.zshrc` 写入不带前缀的 `sk-...`。
+- `convert` 启动前本地校验 `MINERU_TOKEN`：带 `/` → 提示裁掉前缀；`sk-` 开头的 key 直接放行（不再要求 JWT）；`eyJ` JWT 仍检查 exp；其余格式报错。三种情况都返回 2，`import_cli` 遇非零返回立即停止。
+- 文档补充两种 token 形态与前缀坑。
+
+**踩坑（勿重蹈）**：`config.py` 用 `load_dotenv(override=False)`，**shell 里的 `export MINERU_TOKEN` 优先于 `.env`**。改完 `.env` 仍报旧 token 的错时，先 `echo $MINERU_TOKEN` 看 shell 环境；建议只维护 `.env`，别在 `~/.zshrc` 重复 export。
+
+**验证**：`sk-...` 直连 API 返回 `{"code":0,...task_id}`；`convert --materials "202507-海淀-（上）期中"` 真实转换 1 份卷成功（md 34KB、含参考答案段）。
+
+**顺手修**：`convert` 对整份 PDF 也打印 `[batch] pages 1-1/1 done`（那是教材拆页图片的日志），并且每份 PDF 后固定 `sleep(15)` —— 32 份白等约 8 分钟。现按输入类型分流：PDF/Office → `[doc] <文件名> done` 且不 sleep；教材图片保留原有 pages 批次日志与节流。
+
+### 2026-10-28（续4）· 标注失败：本地模型被选项校验拒，兜底 DeepSeek 余额为 0
+
+**现象**（语文卷 extract）：`题4/16 标注校验失败(main/main-retry): Python 已拆出完整选项，LLM 重写 options 与拆分不一致` → `标注失败(fallback): APIStatusError` → 2 题用确定性兜底（题型按选项、难度 2、知识点空）。
+
+**根因（两个，都已核实）**：
+1. **本地 Qwen 被调用了两次并返回了结果**，不是没调。它把 Python 已确定性拆出的 4 个选项判成「缺失」，重写后的 options 与 Python 拆分不一致，被一致性守卫拒绝（守卫本身是对的：防止 LLM 编造选项）。
+2. 第 3 次切兜底 DeepSeek 直接报错；实测该 key 请求 `/v1/chat/completions` 返回 **402 Insufficient Balance**（余额不足），models 列表能查只是不校验余额。原日志只打 `APIStatusError` 类名，看不到原因。
+
+**修复**：
+- `_label_one` 增加第 3 次「只标注」尝试（在兜底之前）：主模型带追加指令，**强制 `is_complete=true`、丢弃 `regenerated`**，只取 type/difficulty/知识点 → Python 拆出的选项原样保留，不再整题降级。
+- LLM 调用异常日志改为 `类名: message`（最多 300 字），`402 Insufficient Balance` / `401` 等一眼可见。
+- **提示词纠正**：`question_labeler.txt` 原来写「K12 数学教育内容结构化专家 / 初中数学题」，语文卷也在用 → 改为学科通用；type 枚举补 `calculation`（与代码一致）；难度例子去掉「几何压轴题」；「已拆分不得重写 options」写成硬性要求。
+- 文案/文档同步；单测覆盖「两次选项冲突 → 第三次只标注成功」与「错误信息带状态码」。
+
+**待办**：DeepSeek 兜底目前不可用（账户余额 0）。要么充值，要么把 `LLM_FALLBACK_*` 指到另一个可用 provider；本地主模型本身工作正常。此前已降级的 2 题需对该卷 `--re-extract` 才会补回知识点。
+
+### 2026-10-28（续5）· AI 修复题改为待复核（is_active=0）
+
+**问题**：`is_complete=false → LLM 修复后入库` 会编造原文没有的内容。抽查三例：
+- 大兴题12 原文只有 A/B/C，LLM 补出 `D. 三人都正确`；
+- 大兴题5 原文没有【甲】【乙】两句，LLM 编了“北京的城市色彩…”；
+- 房山题25 原文只有【甲】【乙】【丙】，LLM 补出 `D. 第③段引用史铁生…应该放弃奋斗`。
+
+这类题进入练习池等于让学生做假题，比缺题更糟。
+
+**用户裁决（2026-10-28）**：标记待复核、不入池；存量也一起处理。
+
+**实现**：
+- extract：`is_complete=false` 的题写 `needs_review=true`；
+- `models.ExamQuestion` 增加 `needs_review`（顺带把 `type` 的 Literal 补上 `calculation`，与 labeler 一致，避免发布校验失败）；
+- db_loader：INSERT 时 `is_active = 0 if needs_review else 1`；重导 UPDATE 用 `LEAST(is_active, 0/1)`，复核过的不会被重导重新激活、修复过的必定置 0；
+- 新增 `tools/data-refinery/mark_needs_review.py`：按 `labeling_issues.jsonl` 的 `(source, group_order)` 回刷存量，默认 dry-run、`--apply` 写库、幂等；
+- 首轮回刷：命中并置 0 共 **112 题**（库内共 559 题，其余 447 保持 active）。
+
+**注意**：正在运行的 import 进程用的是旧代码，本次新入库的修复题不会被自动标记；那批跑完后需再执行一次 `python mark_needs_review.py --apply`。之后新导入自动生效。
+
+**复核方式**：看 `output/labeling_issues.jsonl` 的 `original_content` vs `regenerated`，确认修复内容有原文依据后，把对应 `questions.is_active` 置 1。
+
+### 2026-10-28（续6）· 语文拆题按学科处理：3 选项/甲乙丙/两题之间的材料
+
+**背景**：用户指出前面在“围绕大模型能力做文章”，要求回到 Python 拆解本身。核实：`question_splitter.py` 是通用规则，**没有按学科分派**（只有答案提取有 `subject_cases`），拆题/拆选项语文数学共用一套。
+
+**根因（两条，均用真实卷复现）**：
+1. `split_options` 只认连续 A/B/C/D **四项**。语文常见 3 选项（大兴题12「小兴/小红/小明」、五中题12「甲乙丙三句」）和 `【甲】【乙】【丙】` 选项（房山题25），Python 直接返回 None，交给 LLM“补全”，于是补出原文没有的 D（大兴「D.三人都正确」、房山「D.…放弃奋斗」）。
+2. 材料归属只处理“本节第一题之前”的段落。两题之间的「文段标题 + 长段落」（大兴「流光溢彩」+【甲】【乙】文段）被并进上一题正文：题4 多出无关材料，题5 缺材料，LLM 只好编两句。
+
+**修复**：
+- `split_options(content, subject="chinese")`：支持 3-6 项、`【甲】【乙】【丙】`、`①②③`；label 归一 A/B/C…，原标签存 `original_label`；参考答案「乙」在写库前映射为 B（判题按 label 比较）。数学仍要求 A-D 四项，行为不变。
+- 语文标签必须**行首**才认（`^【甲】`），避免题干里「对【甲】【乙】两处…」的引用被当成选项。
+- 两题之间的「短标题 + 长段落」归下一题 `material_text`，上一题正文不再吞材料。
+- labeler 校验按学科放宽（语文 2-6 项），prompt 明确“语文可能只有 3 项，不要补第 4 项”。
+- 修掉 `len(None)` 崩溃（题型校正里先判空）。
+
+**验证**：房山题25 由 Python 拆出 3 项（甲/乙/丙），不再触发 LLM 补 D；大兴题5 材料已含【甲】【乙】，题4 不再吞它。1257 passed。
+
+**待办**：已抽过的语文卷需要 `--re-extract` 才会用上新规则（旧 JSONL 仍是 LLM 修复版）。
 
 ---
 

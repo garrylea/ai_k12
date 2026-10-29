@@ -9,7 +9,7 @@ class ExamQuestion(BaseModel):
     subject_id: str
     group_id: str | None = None
     group_order: int | None = None
-    type: Literal["choice", "fill_blank", "true_false", "short_answer", "proof"]
+    type: Literal["choice", "fill_blank", "true_false", "short_answer", "proof", "calculation"]
     difficulty: int = Field(..., ge=1, le=5)  # 难度 1-5
     full_score: int | None = None          # 每题满分（试卷分组标题解析）
     content: str
@@ -21,6 +21,8 @@ class ExamQuestion(BaseModel):
     grade_band: str | None = None
     source: str | None = None
     source_year: int | None = None
+    # 内容由 LLM 补全/修复过（is_complete=false），入库置 is_active=0，人工复核后再放行
+    needs_review: bool = False
 
 
 class TextbookCard(BaseModel):
