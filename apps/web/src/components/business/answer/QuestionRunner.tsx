@@ -137,6 +137,9 @@ export function QuestionRunner({
   const [answer, setAnswer] = useState('');
   // 文本作答形态：理科（数学/物理/化学）保留左输入+右预览；语文/英语等单栏纯文本
   const latexInput = (answerInput ?? (isMathLikeSubject(subjectId) ? 'latex' : 'plain')) === 'latex';
+  // 非理科（语文/英语等文字学科）：阅读量大、作答字数少 —— 题干上限提到 2/3，作答区不再留 280px 保底；
+  // 理科反过来（题干 1/3、作答区 2/3），因为它要写演算过程。两套比例的取舍见下方两处 className。
+  const nonScienceSubject = !isMathLikeSubject(subjectId);
   // 左输入区 → 右预览区的滚动跟随通道（ref 而非 state：滚动 60fps 不触发本组件重渲染，
   // 否则题干 ReactMarkdown 每帧重解析；机制见 PreviewScrollSync 注释）
   const previewScrollSync = useRef<PreviewScrollSync>({ ratio: 0 });
@@ -444,14 +447,23 @@ export function QuestionRunner({
         className="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[var(--learn-card-border)] shadow-sm"
         style={{ backgroundColor: 'var(--learn-card-bg)' }}
       >
-        {/* 题面 + 提示按钮 + 提示抽屉：超出滚动。选择题题干最多占卡片 60%（选项区紧凑、
-            可被压缩，长题干优先展开展示）；其它题型维持 1/3，给下方作答区留出 2/3 */}
-        <div className={`shrink-0 overflow-y-auto p-4 border-b border-[var(--bg-subtle)] ${choiceOptions ? 'max-h-[60%]' : 'max-h-[33%]'}`}>
-          {/* 同节共享材料（语文阅读/文段题）：独立滚动区，长材料不把题面挤出可视区 */}
+        {/* 题面 + 提示按钮 + 提示抽屉：超出滚动。非理科（语文/英语）阅读量大 → 上限 2/3，
+            够短则按内容完整显示、剩下的全给作答区；理科维持原比例（选择题 60% 靠选项区可压缩，
+            其它题型 1/3，给演算作答留 2/3）。 */}
+        <div
+          data-testid="question-stem"
+          className={`shrink-0 overflow-y-auto p-4 border-b border-[var(--bg-subtle)] ${
+            nonScienceSubject ? 'max-h-[66.67%]' : choiceOptions ? 'max-h-[60%]' : 'max-h-[33%]'
+          }`}
+        >
+          {/* 同节共享材料（语文阅读/文段题）：理科保留独立滚动区（题目短路，避免材料把题面推出可视区）；
+              非理科去掉独立上限，交给上面这层统一滚动 —— 否则 38vh 会先卡住，题干区多出的空间白给 */}
           {q.material && (
             <div
               data-testid="question-material"
-              className="mb-3 max-h-[38vh] overflow-y-auto rounded-lg border border-[var(--learn-card-border)] bg-[var(--bg-base)] px-3 py-2.5 text-sm text-[var(--text-primary)] leading-[1.7]"
+              className={`mb-3 rounded-lg border border-[var(--learn-card-border)] bg-[var(--bg-base)] px-3 py-2.5 text-sm text-[var(--text-primary)] leading-[1.7] ${
+                nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'
+              }`}
             >
               <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
                 {preprocessMarkdown(q.material)}
@@ -517,9 +529,13 @@ export function QuestionRunner({
         </div>
 
         {/* 作答区：选择题点选（flex-1 吃剩余空间、无保底——题干可占 60%，选项靠内部滚动兜底，
-            避免 280px 保底把底部提交按钮顶出可视区）/ 文本作答（左编辑右预览草稿，占卡片 2/3：
-            flex-[2] + 保底高度，题面限高 1/3 时不被挤没；题面更短时本区继续吃满剩余空间） */}
-        <div className={choiceOptions ? 'flex-1 min-h-0 flex' : 'flex-[2] min-h-[280px] flex'}>
+            避免 280px 保底把底部提交按钮顶出可视区）/ 理科文本作答（左编辑右预览草稿，占卡片 2/3：
+            flex-[2] + 保底高度，题面限高 1/3 时不被挤没）/ 非理科文本作答（单栏 textarea，题干可占
+            2/3，故无保底：带保底会与 66.67% 的题干相加溢出卡片、把提交按钮裁掉） */}
+        <div
+          data-testid="question-answer"
+          className={choiceOptions || nonScienceSubject ? 'flex-1 min-h-0 flex' : 'flex-[2] min-h-[280px] flex'}
+        >
           {choiceOptions ? (
             <div className="flex-1 min-h-0 overflow-auto">
               <ChoiceOptionList options={choiceOptions} value={answer} onChange={updateAnswer} />

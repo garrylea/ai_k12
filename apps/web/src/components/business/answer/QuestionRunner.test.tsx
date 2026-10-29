@@ -294,6 +294,66 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
   });
 });
 
+describe('QuestionRunner 题面高度比例（非理科 2/3 / 理科 1/3）', () => {
+  function renderQ(subjectId: number, q: RunnerQuestion) {
+    return render(
+      <QuestionRunner
+        questions={[q]}
+        subjectId={subjectId}
+        draftKeyPrefix={`stem-ratio-${subjectId}`}
+        variant="embedded"
+        draftDisabled
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+        onFinish={async () => {}}
+      />,
+    );
+  }
+  const textQ: RunnerQuestion = { n: '1', text: '长文段题干', type: 'short_answer' };
+  const choiceQ: RunnerQuestion = { n: '1', text: '选择题题干', type: 'choice', options: [{ label: 'A', text: '选项A' }] };
+
+  it('语文/英语（非理科）：题干上限 66.67%，作答区无 280px 保底', () => {
+    for (const id of [2, 3]) {
+      const { unmount } = renderQ(id, textQ);
+      expect(screen.getByTestId('question-stem').className).toContain('max-h-[66.67%]');
+      expect(screen.getByTestId('question-stem').className).not.toContain('max-h-[33%]');
+      expect(screen.getByTestId('question-answer').className).not.toContain('min-h-[280px]');
+      unmount();
+    }
+  });
+
+  it('数学/物理/化学（理科）：题干上限 1/3，作答区保留 280px 保底', () => {
+    for (const id of [1, 4, 5]) {
+      const { unmount } = renderQ(id, textQ);
+      expect(screen.getByTestId('question-stem').className).toContain('max-h-[33%]');
+      expect(screen.getByTestId('question-answer').className).toContain('min-h-[280px]');
+      unmount();
+    }
+  });
+
+  it('选择题：语文仍是 66.67%，理科维持 60%（选项区可压缩）', () => {
+    const { unmount } = renderQ(2, choiceQ);
+    expect(screen.getByTestId('question-stem').className).toContain('max-h-[66.67%]');
+    unmount();
+
+    renderQ(1, choiceQ);
+    expect(screen.getByTestId('question-stem').className).toContain('max-h-[60%]');
+    expect(screen.getByTestId('question-answer').className).not.toContain('min-h-[280px]');
+  });
+
+  it('阅读材料：非理科去掉 38vh 独立上限（交给题干区统一滚动），理科保留', () => {
+    const withMaterial: RunnerQuestion = { ...choiceQ, material: '## 材料一\n\n这是阅读材料' };
+
+    const { unmount } = renderQ(2, withMaterial);
+    const chineseMaterial = screen.getByTestId('question-material');
+    expect(chineseMaterial.className).not.toContain('max-h-[38vh]');
+    expect(chineseMaterial.className).not.toContain('overflow-y-auto');
+    unmount();
+
+    renderQ(1, withMaterial);
+    expect(screen.getByTestId('question-material').className).toContain('max-h-[38vh]');
+  });
+});
+
 describe('QuestionRunner 文本作答形态（2026-10-28：理科两栏 / 文字学科单栏）', () => {
   const textQ: RunnerQuestion[] = [{ n: '1', text: '请谈谈你的理解', type: 'short_answer' }];
 
