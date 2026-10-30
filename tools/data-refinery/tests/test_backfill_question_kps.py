@@ -92,7 +92,7 @@ def test_parse_batch_truncates_per_question():
 # ===== build_user_message =====
 
 def test_build_user_message_contains_whitelist_and_questions():
-    questions = [(101, "解方程 $x^2=4$"), (102, "证明三角形全等")]
+    questions = [(101, "解方程 $x^2=4$", None), (102, "证明三角形全等", None)]
     msg = build_user_message(WHITELIST, questions)
     # 白名单 id+name 清单
     assert "1: 有理数的运算" in msg
@@ -103,8 +103,29 @@ def test_build_user_message_contains_whitelist_and_questions():
     assert "[qid 102]" in msg
 
 
+def test_build_user_message_includes_options():
+    """题干只有「下列说法正确的是」时，选项才是真正的题面。
+
+    物理/化学的客观题普遍靠选项承载考点；只喂题干会让模型瞎标
+    （2026-10-30 实测：题12 火箭热值被标成「力与运动的关系」、
+    题16 能源分类被标成「电流的磁效应」）。
+    """
+    options = ('[{"label": "A", "text": "太阳能电池可将太阳能转化为电能"},'
+               ' {"label": "B", "text": "核能是可再生能源"}]')
+    msg = build_user_message(WHITELIST, [(101, "下列说法正确的是", options)])
+
+    assert "太阳能电池可将太阳能转化为电能" in msg
+    assert "核能是可再生能源" in msg
+
+
+def test_build_user_message_tolerates_bad_options():
+    msg = build_user_message(WHITELIST, [(101, "下列说法正确的是", "not-json")])
+    assert "[qid 101]" in msg
+    assert "下列说法正确的是" in msg
+
+
 def test_build_user_message_truncates_content_to_500():
     long_content = "字" * 600
-    msg = build_user_message(WHITELIST, [(1, long_content)])
+    msg = build_user_message(WHITELIST, [(1, long_content, None)])
     assert "字" * 500 in msg
     assert "字" * 501 not in msg

@@ -164,17 +164,49 @@ def parse_batch_response(raw: str, whitelist: dict[int, str]) -> dict[int, list[
 # user message 构建（纯函数）
 # ---------------------------------------------------------------------------
 
+def _format_options(raw) -> str:
+    """DB 里的 options JSON -> `A. xxx B. yyy` 一行；解析不了返回空串。"""
+    if not raw:
+        return ""
+    data = raw
+    if isinstance(raw, (str, bytes)):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return ""
+    if not isinstance(data, list):
+        return ""
+    parts = []
+    for opt in data:
+        if not isinstance(opt, dict):
+            continue
+        label = str(opt.get("label") or "").strip()
+        text = str(opt.get("text") or "").strip()
+        if text:
+            parts.append(f"{label}. {text}" if label else text)
+    return " ".join(parts)
+
+
 def build_user_message(whitelist: dict[int, str],
-                       questions: list[tuple[int, str]]) -> str:
-    """白名单 id+name 清单 + 每题 [qid n] 题面（截断 MAX_CONTENT_LEN 字）。"""
+                       questions: list[tuple[int, str, object]]) -> str:
+    """白名单 id+name 清单 + 每题 [qid n] 题面（截断 MAX_CONTENT_LEN 字）。
+
+    题面必须带上选项：物理/化学大量客观题的题干只有「下列说法正确的是」，
+    真正的考点全在选项里，只给题干会让模型瞎标（2026-10-30 实测）。
+    第三个元素可以是 options 的 JSON 字符串（DB 原样）、已解析列表或 None。
+    """
     lines = ["知识点白名单（id: 名称）："]
     for kp_id, name in whitelist.items():
         lines.append(f"{kp_id}: {name}")
     lines.append("")
     lines.append("题目（[qid 编号] 题面）：")
-    for qid, content in questions:
+    for qid, content, options in questions:
         truncated = (content or "")[:MAX_CONTENT_LEN]
-        lines.append(f"[qid {qid}] {truncated}")
+        line = f"[qid {qid}] {truncated}"
+        opts_text = _format_options(options)
+        if opts_text:
+            line += f"\n  选项：{opts_text}"
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -277,7 +309,7 @@ def main():
         #    KP 白名单是本科知识点，他科题不能参与标注）
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT q.id, q.content FROM questions q "
+                "SELECT q.id, q.content, q.options FROM questions q "
                 "LEFT JOIN question_knowledge_points qkp "
                 "  ON qkp.question_id = q.id "
                 "WHERE qkp.question_id IS NULL "
@@ -303,7 +335,7 @@ def main():
             batch = rows[i:i + BATCH_SIZE]
             batch_no = i // BATCH_SIZE + 1
             user_msg = build_user_message(whitelist,
-                                          [(r[0], r[1]) for r in batch])
+                                          [(r[0], r[1], r[2]) for r in batch])
             try:
                 response = llm.complete(system_prompt, user_msg)
             except Exception as e:
@@ -314,7 +346,8 @@ def main():
 
             kps_map = parse_batch_response(response.content, whitelist)
             batch_failed = 0
-            for qid, _content in batch:
+            for row in batch:
+                qid = row[0]
                 kps = kps_map.get(qid)
                 if not kps:
                     # LLM 漏答 / 输出全非法：记失败，可重跑补齐

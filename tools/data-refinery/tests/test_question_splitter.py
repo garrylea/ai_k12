@@ -43,6 +43,19 @@ def test_is_main_stem_rejects_decimal():
     assert not ok  # . 后是数字，不是 \D
 
 
+def test_is_main_stem_accepts_space_before_year():
+    # 西城北京四中 2024 期中题12：「12. 2024 年 4 月 25 日，搭载着神舟十八号…」
+    # 空格后是 4 位年份，不能被「空格+数字」的子题号护栏挡掉，否则整题被上一题吞掉
+    ok, n = is_main_stem("12. 2024 年 4 月 25 日，搭载着神舟十八号载人飞船的长征二号 F 遥十八运载火箭")
+    assert ok and n == 12
+
+
+def test_is_main_stem_rejects_split_sub_number():
+    # 昌平一中 2024：'1.1 材料' 被 OCR 拆成 '1. 1 材料'，不能当成主题号
+    ok, _ = is_main_stem("1. 1 材料")
+    assert not ok
+
+
 def test_is_sub_stem_half_and_full_width():
     assert is_sub_stem("(1) 求证")
     assert is_sub_stem("（2）解：")

@@ -815,6 +815,35 @@ def test_is_placeholder_text_guard():
     assert not is_placeholder_text(None)
 
 
+def test_strip_broken_images_guard(tmp_path):
+    """修复文本里的图片引用必须指向磁盘上真实存在的文件。
+
+    2026-10-30 实测：LLM 抄 64 位哈希文件名时会漏字符（`…cf4041aa4…` 被抄成
+    `…cf041aa4…`），产物里留一个永远打不开的图；同一次修复还会把整块图片复制两遍。
+    """
+    from question_extract import strip_broken_images
+
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "ok.jpg").write_bytes(b"x")
+
+    text = "题干\n![](images/ok.jpg)\n![](images/gone.jpg)\n![乙](images/ok.jpg)"
+    cleaned, dropped = strip_broken_images(text, tmp_path)
+
+    assert "gone.jpg" not in cleaned
+    assert cleaned.count("ok.jpg") == 1
+    assert set(dropped) == {"images/gone.jpg", "images/ok.jpg"}
+
+
+def test_strip_broken_images_keeps_remote_and_plain_text(tmp_path):
+    from question_extract import strip_broken_images
+
+    text = "![](https://cdn.example.com/a.jpg)\n没有图片的题干"
+    cleaned, dropped = strip_broken_images(text, tmp_path)
+
+    assert cleaned == text
+    assert dropped == []
+
+
 def test_fallback_label_keeps_question():
     """标注失败兜底：题不丢，题型按选项判定。"""
     from question_extract import _fallback_label

@@ -141,11 +141,45 @@ def is_placeholder_text(text: str | None) -> bool:
     return any(hint in text for hint in _PLACEHOLDER_HINTS)
 
 
-def _safe_regenerated(regen: dict, q) -> tuple[str, object, str | None, str]:
+_IMAGE_REF_RE = re.compile(r"!\[[^\]]*\]\(\s*([^)\s]+)\s*\)")
+
+
+def strip_broken_images(text: str | None, md_dir) -> tuple[str, list[str]]:
+    """丢掉文本里「磁盘上不存在」和「重复出现」的图片引用，返回 (新文本, 被丢的引用)。
+
+    只用于 LLM 修复文本：Python 切分出的原文引用来自 Markdown 本身，不必校验。
+    2026-10-30 实测：修复时模型抄 64 位哈希文件名会漏字符（`…cf4041aa4…` 抄成
+    `…cf041aa4…`），产物里留一个永远打不开的图；同一次修复还会把整块图片复制两遍。
+    http(s) 外链不校验（不在本地磁盘上）。
+    """
+    if not text:
+        return text or "", []
+
+    dropped: list[str] = []
+    seen: set[str] = set()
+
+    def _sub(match: re.Match) -> str:
+        target = match.group(1)
+        if target.startswith(("http://", "https://")):
+            return match.group(0)
+        if target in seen:
+            dropped.append(target)
+            return ""
+        seen.add(target)
+        if not (Path(md_dir) / target).exists():
+            dropped.append(target)
+            return ""
+        return match.group(0)
+
+    return _IMAGE_REF_RE.sub(_sub, text), dropped
+
+
+def _safe_regenerated(regen: dict, q, md_dir=None) -> tuple[str, object, str | None, str]:
     """取修复后内容，但占位文本一律回退原始切分结果。
 
     2026-10-28 实测：材料归属缺失时 LLM 曾把 material_text 写成
     「【注：此处应填入…】」占位说明，直接入库会污染题库。
+    md_dir 给出时再校验图片引用（见 strip_broken_images）。
     """
     content = regen.get("content") or q.content
     if is_placeholder_text(content):
@@ -155,6 +189,23 @@ def _safe_regenerated(regen: dict, q) -> tuple[str, object, str | None, str]:
     if is_placeholder_text(material):
         material = q.material_text
     answer = regen.get("answer", q.answer) or q.answer
+
+    if md_dir is not None:
+        content, dropped = strip_broken_images(content, md_dir)
+        if dropped:
+            print(f"[WARN] 题{q.group_order} 修复内容含无效/重复图片引用，已剔除：{dropped}", flush=True)
+        if material:
+            material, dropped_m = strip_broken_images(material, md_dir)
+            if dropped_m:
+                print(f"[WARN] 题{q.group_order} 修复材料含无效/重复图片引用，已剔除：{dropped_m}",
+                      flush=True)
+        if isinstance(options, list):
+            fixed = []
+            for opt in options:
+                if isinstance(opt, dict) and isinstance(opt.get("text"), str):
+                    opt = {**opt, "text": strip_broken_images(opt["text"], md_dir)[0]}
+                fixed.append(opt)
+            options = fixed
     return content, options, material, answer
 
 
@@ -226,7 +277,8 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 regen = q.regenerated or {}
                 if regen:
                     # 修复路径：LLM 补全了原文残片，用修复后内容入库
-                    item_content, item_options, item_material_text, item_answer = _safe_regenerated(regen, q)
+                    item_content, item_options, item_material_text, item_answer = _safe_regenerated(
+                        regen, q, md_dir=source.md_path.parent)
                     if is_placeholder_text((regen.get("material_text") or "")) or \
                             is_placeholder_text(regen.get("content")):
                         print(f"[WARN] 题{q.group_order} 修复内容含占位文本，已回退原始切分结果",
