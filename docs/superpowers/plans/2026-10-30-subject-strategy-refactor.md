@@ -1229,6 +1229,13 @@ git commit -m "refactor(splitter): subject_cases 并入 subject_strategies，答
 
 ### Task 7: 物理端到端回归 + 文档
 
+> ⚠️ **本小节为原始草稿，实际交付以 `docs/ai-core-changelog.md` 的 2026-10-30 条目与
+> `docs/data-refinery-管线总结与后续.md` 的「学科策略（切题 / 选项 / 材料 / 答案，2026-10-30）」节为准。**
+> 执行时有两处偏离草稿：① 没用 `extract_cli --reconvert` 重跑（LLM 标注不设 temperature、结果不可复现，
+> JSONL diff 是噪声），改为 splitter 级 parity —— 直接用 `split_page(strategy=get_strategy("physics"))`
+> 与重构前拍的黄金快照逐题比 `no/hash/mat/gid/score`；② 回归结论按实测改口径（见 Step 4 段落）。
+> 下方 Step 1–2 的命令保留为历史草稿，**不要照抄**。
+
 **Files:**
 - Modify: `docs/data-refinery-管线总结与后续.md`（新增「学科策略」小节）
 - Modify: `docs/ai-core-changelog.md`（顶部加 2026-10-30 条目）
@@ -1288,7 +1295,7 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
 | 钩子 | 说明 |
 |---|---|
 | `is_stem(line)` | 该行是否主题号（语文全角句点、英语篇章标签、数学小问号等差异都写在这里） |
-| `split_options(content)` | 题干/选项拆分（语文 3–6 项甲乙丙丁；其余 A–D 四项） |
+| `split_options(content)` | 题干/选项拆分（语文 2–6 项甲乙丙丁；其余 A–D 四项） |
 | `material_policy()` | 题号前的短文是否挂到题上（语文/英语 true，其余 false） |
 | `extract_answers(text, md_path)` | 答案段提取（原 `subject_cases`，已并入） |
 
@@ -1308,11 +1315,11 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
 ```markdown
 ## 2026-10-30 · 切题/选项/答案改为按学科显式实现
 
-**动因**：用户指出各学科差异大、提示词也不同，不该把学科逻辑埋在 972 行的公共切分器里。核查后确认：提示词与答案提取**已经**分科，缺口在题号切分与选项拆分（4 处 `if subject == "chinese"`），且英语材料归属从未打开。
+**动因**：用户指出各学科差异大、提示词也不同，不该把学科逻辑埋在 972 行的公共切分器里。核查后确认：提示词与答案提取**已经**分科，缺口在题号切分与选项拆分（`split_options` 的 1 处 `if subject == "chinese"` 分支 + 1 处硬编码 `subject="chinese"` 调用 + 贯通 10 处的 `attach_material` 开关），且英语材料归属从未打开。
 
 **改动**：新增 `src/subject_strategies/`（每科一份 `is_stem / split_options / material_policy / extract_answers`），`get_strategy` 未登记即报错；`subject_cases/` 并入后删除；`split_page` 由 `attach_material: bool` 改为接收策略对象。
 
-**回归**：87 例切分测试断言未改（仅改签名）+ 每科 8 份抽样的黄金快照零差异；四中物理卷重跑 35 题、题干哈希与重构前一致。英语阅读理解短文开始进入 `material_text`（此前为空）。
+**回归**：87 例切分测试断言未改（仅改签名）+ 每科 8 份抽样的黄金快照零差异；四中物理卷按新策略重切 35 题、逐题题干/材料/分组/分值哈希与基线全同（**splitter 级 parity，未重跑 extract**）。英语阅读理解短文开始进入 `material_text`（此前为空）。
 ```
 
 - [ ] **Step 5: 最终全量回归**
