@@ -110,17 +110,23 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 
 | 钩子 | 说明 |
 |---|---|
-| `is_stem(line)` | 该行是否主题号（返回 `(是, 题号)`）。当前各科都委托内核 `is_main_stem`，是**扩展点**——题号规则一旦分科，写在本文件，内核不再加学科分支 |
+| `is_stem(line)` | 该行是否主题号（返回 `(是, 题号)`）。**内核主切分循环与 `_has_next_stem` 都走它**（`_has_next_stem` 收 `is_stem` 入参、默认 `is_main_stem`），所以覆盖它就真的改行为。当前各科都委托内核 `is_main_stem`——题号规则一旦分科，写在本文件，内核不再加学科分支 |
 | `split_options(content)` | 题干/选项拆分（语文 2–6 项甲乙丙丁/①②③，label 归一 A/B/C；其余 A–D 四项） |
+| `split_bounds()` / `choice_bounds()` | 项数区间，**两件事别混**：`split_bounds` = 「拆出几项算拆成功」（语文 2–6，其余 4–4，labeler 用）；`choice_bounds` = 「算不算一道完整选择题」（语文 3–6，其余 4–4，extract 的题型校正用） |
 | `material_policy()` | 题号前的短文是否挂到题上（语文/英语 true，其余 false） |
-| `extract_answers(text, md_path)` | 答案段提取（原 `subject_cases`，已并入） |
+| `extract_answers(text, md_path)` | 答案段提取（原 `subject_cases`，已并入）；generic 实现收 `strategy` 入参，答案与题干按同一套切分对齐 |
 
 - 当前已登记：`generic`（公共实现，没有任何学科目录映射到它，只作基类/实现来源）、`math` / `physics` / `chemistry` / `politics`（继承 `generic.NaturalScienceStrategy`，只声明归属）、`chinese`、`english`。
 - `get_strategy(code)` 未登记学科**直接抛 `UnknownStrategyError`**，不回退 generic；
   `question_extract._subject_code_for` 识别不出学科目录时返回 `None`，同样报错——目录名写错/新学科没登记会立刻暴露，不会被静默当成数学题抽走。
 - 内核 `question_splitter.py` 只保留与学科无关的扫描（行内粘连、日期陷阱、OCR 错认纠正），
   回归判据：`grep -n '"chinese"' src/question_splitter.py` 无命中；该判据已固化为
-  `tests/test_no_subject_conditionals.py`（去注释后断言无 `subject ==` / `"chinese"`）。
+  `tests/test_no_subject_conditionals.py`（去注释后断言无 `subject` / `subject_code`
+  上的 `==` / `!=` / `in`，单双引号都查）。守卫只管内核这一份文件——`question_labeler.py` /
+  `question_extract.py` 里仍有学科分支（PDF 下划线注入等）是有意保留的例外。
+- 「策略写了却没人问」是这轮重构最大风险（`is_stem` 一度是死钩子：单测全绿、管线无视），
+  `tests/test_stem_strategy_hook.py` 用一个 `is_stem` 恒为 `(True, 42)` 的假策略钉住
+  `split_page` 真的按策略切。
 - 行为回归靠 `scripts/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
   每科至多 8 份试卷抽样，逐题记录题号 / 题干哈希 / 材料哈希 / 大题分组 / 分值），
   重构任何一步都必须零差异。抽样只取 `output/md` 里实际存在的「试卷」md：当前快照

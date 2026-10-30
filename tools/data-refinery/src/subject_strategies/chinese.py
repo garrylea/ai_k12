@@ -1,4 +1,4 @@
-"""语文策略：选项体系（甲乙丙丁 / ①②③ / 3–6 项）、材料归属与答案提取。
+"""语文策略：选项体系（甲乙丙丁 / ①②③ / 2–6 项）、材料归属与答案提取。
 
 选项与材料规则原先以 `if subject == "chinese"` 分支和两个材料谓词的形式写在
 question_splitter.py 里；搬到这里之后内核不再出现任何学科判断，改语文规则
@@ -135,6 +135,14 @@ class ChineseStrategy:
             if result is not None:
                 return result
         return split_options_abcd(content)
+
+    def split_bounds(self) -> tuple[int, int]:
+        # 「能拆出几项」：语文 2 项（甲乙）也算拆成功（labeler 据此判 Python 拆分够不够）
+        return (2, 6)
+
+    def choice_bounds(self) -> tuple[int, int]:
+        # 「算不算完整选择题」：语文 3 项起（「甲乙丙三句，全都正确的一项」很常见）
+        return (3, 6)
 
     def material_policy(self) -> MaterialPolicy:
         return ChineseMaterialPolicy(attach=True)

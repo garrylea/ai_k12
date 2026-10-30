@@ -37,6 +37,26 @@ def test_politics_registered_with_generic_answers():
     assert strategy.answers is get_strategy("math").answers
 
 
+@pytest.mark.parametrize(("code", "split", "choice"), [
+    ("chinese", (2, 6), (3, 6)),
+    ("generic", (4, 4), (4, 4)),
+    ("math", (4, 4), (4, 4)),
+    ("physics", (4, 4), (4, 4)),
+    ("chemistry", (4, 4), (4, 4)),
+    ("politics", (4, 4), (4, 4)),
+    ("english", (4, 4), (4, 4)),
+])
+def test_option_bounds_are_per_subject(code, split, choice):
+    """项数区间只有策略一份：split_bounds（拆出几项算拆成功）≠ choice_bounds（算不算选择题）。
+
+    语文分别是 2–6 / 3–6，其余学科都是 4–4。此前这三个数散在 chinese.py、
+    question_labeler.py、question_extract.py 三处，改一处漏两处。
+    """
+    strategy = get_strategy(code)
+    assert strategy.split_bounds() == split
+    assert strategy.choice_bounds() == choice
+
+
 def test_material_policy_defaults_do_not_attach():
     policy = MaterialPolicy()
     assert policy.attach is False

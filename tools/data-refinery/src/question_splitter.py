@@ -107,28 +107,6 @@ def is_part_header(line: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def _has_next_stem(lines: list[str], start: int, n: int) -> bool:
-    """lines[start:] 里（答案区/下一部分标题前）是否有比 n 更大的下一主题号。
-
-    状态机判定用：选择题区行首 '数字.数字'（如 '6.2025年' 或小数 '9.5'），
-    若后续能找到下一题号（'7.'/'7:' 等 >6 的行），则当前行是题号而非小数。
-    扫描在答案关键字/部分标题/大分组标题前停止（那些不是题干续行）。
-    """
-    for j in range(start, len(lines)):
-        line = lines[j].strip()
-        if not line:
-            continue
-        if is_answer_keyword(line) or is_part_header(line)[0] or is_group_header(line)[0]:
-            return False
-        if is_date_trap(line):
-            continue
-        m = re.match(r'^(\d{1,2})[.:．：]\S', line)
-        if m and int(m.group(1)) > n:
-            return True
-        # 该行是题干续行（非题号），继续找
-    return False
-
-
 def is_main_stem(line: str) -> tuple[bool, int | None]:
     """行首是否为主题号（如 '9.' '9. ' '9.$...$' '6.2025年' '21: 在...'）。
 
@@ -139,6 +117,32 @@ def is_main_stem(line: str) -> tuple[bool, int | None]:
     if m:
         return True, int(m.group(1) or m.group(2) or m.group(3))
     return False, None
+
+
+def _has_next_stem(lines: list[str], start: int, n: int,
+                   is_stem=is_main_stem) -> bool:
+    """lines[start:] 里（答案区/下一部分标题前）是否有比 n 更大的下一主题号。
+
+    状态机判定用：选择题区行首 '数字.数字'（如 '6.2025年' 或小数 '9.5'），
+    若后续能找到下一题号（'7.'/'7:' 等 >6 的行），则当前行是题号而非小数。
+    扫描在答案关键字/部分标题/大分组标题前停止（那些不是题干续行）。
+
+    `is_stem` 与主循环用同一个学科策略谓词（默认 `is_main_stem`）——题号规则
+    一旦分科，「下一行是不是新题」必须跟着同一套规则判，否则策略只改一半。
+    """
+    for j in range(start, len(lines)):
+        line = lines[j].strip()
+        if not line:
+            continue
+        if is_answer_keyword(line) or is_part_header(line)[0] or is_group_header(line)[0]:
+            return False
+        if is_date_trap(line):
+            continue
+        ok, stem_no = is_stem(line)
+        if ok and stem_no is not None and stem_no > n:
+            return True
+        # 该行是题干续行（非题号），继续找
+    return False
 
 
 def is_sub_stem(line: str) -> bool:
@@ -635,12 +639,15 @@ def split_page(text: str, md_path: Path,
 
         # 主题号处理（含紧凑格式一行多题号）
         inline_stems = split_inline_stems(line) if in_answer_section else []
-        ok, n = is_main_stem(line)
+        # 题号判定走学科策略（`is_stem`），内核不再自己判——
+        # 各科的 is_stem 目前都委托 is_main_stem，行为等价。
+        ok, n = strategy.is_stem(line)
         if not ok and not in_answer_section and current_part_kind == 'choice':
             # 状态机：选择题区行首 '数字.数字'（题号+年份 '6.2025年' 或疑似小数
             # '9.5'）——若后续存在更大题号（'7.'），说明当前行是题号而非小数
             amb = _AMBIGUOUS_NUM_RE.match(line)
-            if amb and _has_next_stem(lines, i + 1, int(amb.group(1))):
+            if amb and _has_next_stem(lines, i + 1, int(amb.group(1)),
+                                      is_stem=strategy.is_stem):
                 ok, n = True, int(amb.group(1))
 
         if in_answer_section:

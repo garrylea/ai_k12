@@ -21,6 +21,16 @@
 
 **回归**：`tests/test_question_splitter.py` 87 例断言一行未改（仅改调用签名），全绿；`scripts/split_snapshot.py --check` 26 份抽样（数学/物理/语文各 8、化学 2）零差异；四中物理卷按新策略重切 35 题、题号连续、逐题题干/材料/分组/分值哈希与基线全同（切分是确定性的，不跑非确定的 LLM 重抽比 JSONL）。英语阅读理解短文开始进入 `material_text`（此前为空），靠 `test_english.py` 的「A 篇只归题1、B 篇只归题2」正反断言守护。
 
+**同日下午 · 全分支审查修复**（I1–I4 / M1–M4，明细见 `.superpowers/sdd/2026-10-30-subject-strategy-refactor/final-fix-report.md`）：
+
+- **`is_stem` 死钩子**：主切分循环与 `_has_next_stem` 仍直接调模块级 `is_main_stem`，策略覆盖 `is_stem` 只有单测生效、管线无视。改为 `strategy.is_stem(line)`；`_has_next_stem` 增收 `is_stem` 入参（默认 `is_main_stem`，`is_main_stem` 因此上移到它之前定义——默认值在 def 时求值）。新增 `tests/test_stem_strategy_hook.py`：`is_stem` 恒 `(True, 42)` 的假策略，改前切出 0 题、改后切出第 42 题。
+- **英语竖排选项被当篇章标签**：`is_material_title` 把单独一行的 `A`–`E` 当分篇标签，把「字母单独成行、正文在下一行」的选项整段搬进材料。判据改为「数该行所在两个题号之间区段里的裸单字母行数，>1 即选项列表」——比审查建议的「只看后面还有没有第二个单字母行」更严：只往后看会漏掉竖排选项的最后一项 D（它后面再没有字母，仍被吞）。
+- **项数阈值上移到策略**：新增 `split_bounds()`（拆出几项算拆成功：语文 2–6、其余 4–4）与 `choice_bounds()`（算不算完整选择题：语文 3–6、其余 4–4），分别给 `question_labeler._python_options_complete` 与 `question_extract` 的题型校正用；`question_labeler.py` / `question_extract.py` 不再有 `subject == "chinese"`（`question_extract.py:408` 的 PDF 下划线注入是另一件事，保留）。
+- **答案对齐也要传策略**：`extract_generic_answers(text, md_path, strategy=None)`，`NaturalScienceStrategy` / `EnglishStrategy` 的 `extract_answers` 都传 `strategy=self`——此前永远按 generic 切分对齐答案，某科一旦覆盖 `split_options` / material 就会静默错位。
+- 其他：`test_no_subject_conditionals` 放宽到 `subject(_code)? (==|!=|in)` + 单双引号；英语 `looks_like_between_material` 补「选项文本全部非空」；`answer_extract_cli` 的学科报错补回文件路径；`chinese.py` docstring 3–6 → 2–6。
+
+**回归（修复后）**：`pytest tests` 1343 passed / 10 skipped（基线 1333 + 新增 10 例）；快照仍 26 份零差异；`test_question_splitter.py` 一字未动。
+
 ## 2026-10-30 · 爬虫汇总行拆成「条目 / 文件」两行（203 vs 200 对不上账）
 
 **动因**：用户跑 92320（2026,2025,2024 + 初三）时 `Total: 203` 而 `Downloaded 45 + Skipped 155 = 200`，dry-run 又是 `165 + 33`，三组数字都凑不上，怀疑漏下载。

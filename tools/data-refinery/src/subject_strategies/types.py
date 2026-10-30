@@ -54,6 +54,18 @@ class QuestionStrategy(Protocol):
         """题干/选项拆分；拆不出返回 (原 content, None)。"""
         ...
 
+    def split_bounds(self) -> tuple[int, int]:
+        """`split_options` 拆出几项才算「拆成功」的闭区间（语文 2–6，其余 4–4）。
+
+        与 `choice_bounds` 是两件事，名字必须区分：这里管「能不能拆」，
+        `choice_bounds` 管「拆出来的算不算一道完整的选择题」。
+        """
+        ...
+
+    def choice_bounds(self) -> tuple[int, int]:
+        """选项数落在哪个闭区间才算完整选择题（语文 3–6，其余 4–4）。"""
+        ...
+
     def material_policy(self) -> MaterialPolicy:
         ...
 

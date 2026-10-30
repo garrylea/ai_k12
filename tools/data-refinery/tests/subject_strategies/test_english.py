@@ -33,3 +33,42 @@ def test_each_reading_passage_attached_to_its_own_question():
     assert "healthy diet" not in (questions[0].material_text or "")
     assert "healthy diet" in (questions[1].material_text or "")
     assert "three tips" not in (questions[1].material_text or "")
+
+
+# 竖排选项：字母单独成行、选项正文在下一行（真实排版，内核 _BARE_LINE_RE 就是为它写的）。
+# 选项正文故意都超过 30 字，旧实现会把 A 当篇章标签、关闭当前题，选项全变成下一篇材料。
+_VERTICAL_OPTIONS_PAPER = """# 英语试卷
+
+1. What can we learn from the passage?
+
+A
+
+Students should keep a reading habit and read for thirty minutes every day.
+
+B
+
+Students should pick books that are interesting and easy enough to finish.
+
+C
+
+Students should read only when they feel relaxed and never take any notes.
+
+D
+
+Students should talk about what they read with their parents and teachers.
+"""
+
+
+def test_vertical_options_are_not_mistaken_for_passage_labels():
+    """裸字母 A/B/C/D 各占一行 + 正文在下一行 → 仍是选项，不能被当分篇吞掉。"""
+    from question_splitter import split_page
+
+    strategy = get_strategy("english")
+    questions = split_page(_VERTICAL_OPTIONS_PAPER, Path("x.md"), strategy=strategy)
+
+    assert [q.group_order for q in questions] == [1]
+    # 选项正文不许被搬去材料（旧实现把 A 之后的整段并进了下一篇材料）
+    assert "Students should" not in (questions[0].material_text or "")
+    _, opts = strategy.split_options(questions[0].content)
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert all(o["text"].strip() for o in opts)

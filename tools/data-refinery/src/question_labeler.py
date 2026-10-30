@@ -23,7 +23,11 @@ _LABELS_ONLY_SUFFIX = (
 
 
 def _python_options_complete(q: RawQuestion, subject: str = "") -> bool:
-    """Python 是否已从原题拆出完整的选项（语文允许 3 项，数学要求 4 项）。"""
+    """Python 是否已从原题拆出完整的选项。
+
+    项数区间由策略 `split_bounds()` 决定（语文 2–6，其余 4–4）——这是「拆出几项
+    算拆成功」，与 `choice_bounds()`（算不算完整选择题）是两件事，不要合并。
+    """
     from subject_strategies import get_strategy
 
     strategy = get_strategy(subject) if subject else None
@@ -31,9 +35,8 @@ def _python_options_complete(q: RawQuestion, subject: str = "") -> bool:
                else split_options(q.content))
     if not opts:
         return False
-    if subject == "chinese":
-        return 2 <= len(opts) <= 6 and all(o["text"].strip() for o in opts)
-    return len(opts) == 4 and all(o["text"].strip() for o in opts)
+    low, high = strategy.split_bounds() if strategy else (4, 4)
+    return low <= len(opts) <= high and all(o["text"].strip() for o in opts)
 
 
 # LLM 报告的缺陷归类：决定「Python 已完整拆出选项、LLM 却判不完整」时该信谁。

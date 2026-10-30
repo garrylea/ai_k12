@@ -126,7 +126,9 @@ def main(argv=None) -> int:
     try:
         strategy = get_strategy(subject)
     except UnknownStrategyError as e:
-        print(f"错误：{e}", file=sys.stderr)
+        # 报错必须带文件：一批 md 里认不出学科的往往只有几份，不给路径就没法定位
+        # 该补哪条目录映射（重构前 detect_subject 的报错带路径，这里补回来）。
+        print(f"错误：{rel_md}：{e}", file=sys.stderr)
         return 2
 
     text = md_path.read_text(encoding="utf-8")

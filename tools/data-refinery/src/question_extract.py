@@ -448,12 +448,13 @@ def extract_questions_file(source, config, llm, fb_llm,
         ]
     labeled = labeler.confirm_new_kps(labeled)
     # 确定性题型校正：能拆出完整选项的一律按选择题入库（LLM 偶发把选择题标成 short_answer）。
-    # 语文允许 3 项（甲乙丙/三选项），其它学科仍要求 4 项。
+    # 「完整」的项数区间由策略 `choice_bounds()` 决定（语文 3–6，其余 4–4）。
+    choice_low, choice_high = strategy.choice_bounds()
     for lab in labeled:
         _, opts = strategy.split_options(lab.content)
         if not opts:
             continue
-        enough = (3 <= len(opts) <= 6) if subject_code == "chinese" else (len(opts) == 4)
+        enough = choice_low <= len(opts) <= choice_high
         if enough and lab.type != "choice":
             lab.type = "choice"
 
