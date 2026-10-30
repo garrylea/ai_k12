@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import answer_backfill
 from scope_filter import build_scope
-from subject_cases import ExtractedAnswer
+from subject_strategies.types import ExtractedAnswer
 
 
 def _cfg(tmp_path: Path):
@@ -27,8 +27,10 @@ def _make_paper(tmp_path: Path, rel: str = "语文/初中/first/2025",
     return jsonl, md
 
 
-def _stub_case(answers):
-    return lambda text, md_path: list(answers)
+def _stub_strategy(answers):
+    return SimpleNamespace(
+        extract_answers=lambda text, md_path: list(answers),
+    )
 
 
 def test_iter_paper_jsonl_filters_scope_and_kind(tmp_path):
@@ -56,8 +58,8 @@ def test_source_key_matches_db_loader(tmp_path):
 def _run(tmp_path, monkeypatch, *, overwrite=False, answers=None):
     _make_paper(tmp_path)
     payload = answers if answers is not None else [ExtractedAnswer(no=1, answer="A", explanation="")]
-    monkeypatch.setattr(answer_backfill, "get_case", lambda subject: _stub_case(payload))
-    monkeypatch.setattr(answer_backfill, "detect_subject", lambda rel: "chinese")
+    monkeypatch.setattr(answer_backfill, "get_strategy", lambda code: _stub_strategy(payload))
+    monkeypatch.setattr(answer_backfill, "subject_code_for_path", lambda rel, default=None: "chinese")
     monkeypatch.setattr(answer_backfill, "_connect", lambda cfg: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(answer_backfill, "_lookup_paper_id", lambda conn, key: 42)
     calls = []
@@ -97,8 +99,23 @@ def test_skips_when_no_answer_section(tmp_path, monkeypatch, capsys):
 def test_skips_when_md_missing(tmp_path, monkeypatch, capsys):
     _make_paper(tmp_path)
     (tmp_path / "md").rename(tmp_path / "md_moved")
-    monkeypatch.setattr(answer_backfill, "get_case", _stub_case([]))
+    monkeypatch.setattr(answer_backfill, "get_strategy", lambda code: _stub_strategy([]))
     monkeypatch.setattr(answer_backfill, "_connect", lambda cfg: SimpleNamespace(close=lambda: None))
     stats = answer_backfill.backfill(_cfg(tmp_path), build_scope(subject="语文"))
     assert stats["no_md"] == 1
     assert "无 md 1" in capsys.readouterr().out
+
+
+def test_unknown_subject_dir_is_skipped_not_guessed_as_math(tmp_path, monkeypatch, capsys):
+    """路径首段不是已知学科：跳过并打印原因，绝不按默认 math 回填答案。"""
+    _make_paper(tmp_path, rel="音乐/初中/first/2025", stem="音乐-初三(上)-202507-试卷")
+    monkeypatch.setattr(answer_backfill, "_connect", lambda cfg: SimpleNamespace(close=lambda: None))
+    calls = []
+    monkeypatch.setattr(answer_backfill, "importer_main", lambda argv: calls.append(argv) or 0)
+
+    stats = answer_backfill.backfill(_cfg(tmp_path), build_scope())
+
+    assert stats["skipped"] == 1
+    assert stats["filled"] == 0
+    assert calls == []
+    assert "音乐" in capsys.readouterr().out

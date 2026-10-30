@@ -5,10 +5,8 @@
 物理卷目前没有参考答案段（39 张上学期卷实测 0 命中），走 generic 的「无答案」路径。
 """
 
-from subject_cases.generic import physics_answers
 from subject_strategies.generic import NaturalScienceStrategy
 
 
 class PhysicsStrategy(NaturalScienceStrategy):
     code = "physics"
-    answers = staticmethod(physics_answers)

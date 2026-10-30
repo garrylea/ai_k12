@@ -9,7 +9,7 @@
 from pathlib import Path
 
 from question_splitter import is_main_stem, split_options
-from subject_cases.generic import english_answers
+from subject_strategies.generic import extract_generic_answers
 from subject_strategies.types import ExtractedAnswer, MaterialPolicy
 
 _PASSAGE_LABELS = {"A", "B", "C", "D", "E"}
@@ -54,4 +54,5 @@ class EnglishStrategy:
         return EnglishMaterialPolicy(attach=True)
 
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:
-        return english_answers(text, md_path)
+        # 答案与其余学科同一份实现（整卷对齐）；英语目前没有答案段的特殊规则
+        return extract_generic_answers(text, md_path)
