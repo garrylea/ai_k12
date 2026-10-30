@@ -694,3 +694,37 @@ class TestDownloadLog:
         out = capsys.readouterr().out
         assert "下载失败：" in out and "连接超时" in out
         assert result.files_failed == 1
+
+
+class TestZgkaoUncountableRows:
+    """站点常见两种「一行换不来一个文件」：重复登记的详情页、正文没有附件的页面。
+
+    它们只该进 Total，不能让汇总行的下载/跳过口径失真 —— 2026-10-30 用户拿
+    92320 的 203 行跟 45+155=200 对不上账，就是这两种行外加单位混用造成的。
+    """
+
+    def test_page_without_downloadable_file_is_counted_separately(self, tmp_path, capsys):
+        fetcher = MockFetcher()
+        fetcher._routes["https://www.zgkao.com/shitiku/90304.html"] = ("text", "<html><body>本文没有附件</body></html>")
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        items = list(adapter.list_items({}))
+
+        result = adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
+
+        assert result.items_without_file == 1
+        assert result.files_downloaded == 0
+        assert result.files_skipped == 0
+        assert "没有可下载文件" in capsys.readouterr().out
+
+    def test_same_detail_page_twice_counts_duplicate(self, tmp_path):
+        fetcher = MockFetcher()
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        items = list(adapter.list_items({}))
+        ctx = _make_ctx(tmp_path, fetcher)
+
+        adapter.download_item(items[0], ctx)
+        second = adapter.download_item(items[0], ctx)
+
+        assert second.items_duplicate == 1
+        assert second.files_downloaded == 0
+        assert second.files_skipped == 0

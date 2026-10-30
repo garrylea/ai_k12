@@ -52,7 +52,7 @@ class TestCrawlerRun:
         adapter = FakeAdapter()
         crawler = Crawler(adapter=adapter, fetcher=FakeFetcher())
         result = crawler.run(filters={})
-        assert result.items_downloaded == 2
+        assert result.files_downloaded == 2
         assert adapter.downloaded == ["a", "b"]
 
     def test_respects_robots_disallow(self):
@@ -63,7 +63,7 @@ class TestCrawlerRun:
         adapter = FakeAdapter()
         crawler = Crawler(adapter=adapter, fetcher=DisallowFetcher())
         result = crawler.run(filters={})
-        assert result.items_downloaded == 0
+        assert result.files_downloaded == 0
         assert result.robots_blocked is True
 
     def test_skips_checkpoint_items(self):
@@ -78,7 +78,7 @@ class TestCrawlerRun:
         adapter = FakeAdapter()
         crawler = Crawler(adapter=adapter, fetcher=FakeFetcher(), checkpoint=FakeCheckpoint())
         result = crawler.run(filters={})
-        assert result.items_downloaded == 1
+        assert result.files_downloaded == 1
         assert adapter.downloaded == ["b"]
         assert result.items_skipped == 1
 
@@ -94,7 +94,7 @@ class TestCrawlerRun:
         adapter = FakeAdapter()
         crawler = Crawler(adapter=adapter, fetcher=FakeFetcher(), checkpoint=FakeCheckpoint(), force=True)
         result = crawler.run(filters={})
-        assert result.items_downloaded == 2
+        assert result.files_downloaded == 2
 
 
 class _PathCheckpoint:
@@ -143,3 +143,37 @@ class TestSkipLogging:
         out = capsys.readouterr().out
         assert out.count("补记文件位置：") == 2
         assert adapter.downloaded == ["a", "b"]
+
+
+class TestCounterUnits:
+    """Total 数条目、新下载/已存在数文件，两套单位必须分桶报，重复行单列。"""
+
+    def test_duplicate_row_counted_once(self):
+        """站点把同一详情页登记两行时，第二行只记一条「重复」，不能再算下载/跳过。"""
+        adapter = FakeAdapter()
+        adapter.items.append(Item(id="a", title="A", tags={}, raw={}))
+        crawler = Crawler(adapter=adapter, fetcher=FakeFetcher())
+
+        result = crawler.run(filters={})
+
+        assert result.items_total == 3
+        assert result.items_duplicate == 1
+        assert result.files_downloaded == 2
+        assert adapter.downloaded == ["a", "b"]
+
+    def test_item_level_counts_from_adapter_are_aggregated(self):
+        class MixedAdapter(FakeAdapter):
+            def download_item(self, item, ctx):
+                self.downloaded.append(item.id)
+                return DownloadResult(
+                    files_downloaded=1, files_skipped=2,
+                    items_without_file=1, items_duplicate=1,
+                )
+
+        crawler = Crawler(adapter=MixedAdapter(), fetcher=FakeFetcher())
+        result = crawler.run(filters={})
+
+        assert result.files_downloaded == 2
+        assert result.files_skipped == 4
+        assert result.items_without_file == 2
+        assert result.items_duplicate == 2

@@ -74,10 +74,14 @@ class TestBuildFilters:
 
 class _FakeResult:
     items_total = 1
-    items_downloaded = 1
+    items_filtered = 0
     items_skipped = 0
-    items_failed = 0
-    items_unresolved = 0
+    items_duplicate = 0
+    items_without_file = 0
+    files_downloaded = 1
+    files_skipped = 0
+    files_failed = 0
+    files_unresolved = 0
 
 
 class _FakeCrawler:
@@ -184,15 +188,19 @@ class TestMainSemesterContract:
 
 
 class TestZeroDownloadHint:
-    """Downloaded: 0 + Skipped > 0 时要说清「不是没下，是之前下过」。"""
+    """新下载 0 + 之前已下 > 0 时要说清「不是没下，是之前下过」。"""
 
     def _run_with(self, monkeypatch, downloaded, skipped):
         class _Result:
             items_total = 201
-            items_downloaded = downloaded
+            items_filtered = 0
             items_skipped = skipped
-            items_failed = 0
-            items_unresolved = 0
+            items_duplicate = 0
+            items_without_file = 0
+            files_downloaded = downloaded
+            files_skipped = 0
+            files_failed = 0
+            files_unresolved = 0
 
         class _Crawler:
             def __init__(self, **kwargs):
@@ -219,3 +227,61 @@ class TestZeroDownloadHint:
     def test_no_hint_when_files_downloaded(self, monkeypatch, capsys):
         self._run_with(monkeypatch, downloaded=6, skipped=0)
         assert "本次没有新文件" not in capsys.readouterr().out
+
+
+class TestSummaryFormat:
+    """汇总必须把「条目」和「文件」分开报。
+
+    Total 数的是索引页的行，下载/已存在数的是文件，一行可以换 0 个或 2 个文件；
+    混在一行里用户就会拿 Total 去减，对不上便以为漏下载（2026-10-30 的 203 vs 200）。
+    """
+
+    def _run_with(self, monkeypatch, capsys, dry_run=False, **fields):
+        class _Result:
+            items_total = fields["items_total"]
+            items_filtered = 0
+            items_skipped = fields["items_skipped"]
+            items_duplicate = fields["items_duplicate"]
+            items_without_file = fields["items_without_file"]
+            files_downloaded = fields["files_downloaded"]
+            files_skipped = fields["files_skipped"]
+            files_failed = 0
+            files_unresolved = 0
+
+        class _Crawler:
+            def __init__(self, **kwargs):
+                pass
+
+            def run(self, filters):
+                return _Result()
+
+        class StubResolver:
+            def __init__(self, prompt_fn=None):
+                self.unresolved = []
+
+        _stub_main_collaborators(monkeypatch, StubResolver)
+        monkeypatch.setattr(crawler_cli, "Crawler", _Crawler)
+        monkeypatch.setattr(crawler_cli.sys, "stdin", _FakeStdin(tty=False))
+        argv = ["--site", "zgkao", "--url", "https://e.com"] + (["--dry-run"] if dry_run else [])
+        crawler_cli.main(argv)
+        return capsys.readouterr().out
+
+    def test_item_line_and_file_line_are_separate(self, monkeypatch, capsys):
+        out = self._run_with(
+            monkeypatch, capsys, items_total=203, items_skipped=33, items_duplicate=3,
+            items_without_file=4, files_downloaded=45, files_skipped=152,
+        )
+        assert "条目：总计 203" in out
+        assert "重复 3" in out and "无文件 4" in out
+        assert "文件：新下载 45" in out and "已存在 152" in out
+        # 旧口径（把文件数写成 Downloaded/Skipped）必须消失，否则又是一次误读
+        assert "Downloaded:" not in out and "Skipped:" not in out
+
+    def test_dry_run_says_would_download_not_downloaded(self, monkeypatch, capsys):
+        """dry-run 一个文件都没下，就不能写「新下载 N」。"""
+        out = self._run_with(
+            monkeypatch, capsys, dry_run=True, items_total=203, items_skipped=33,
+            items_duplicate=3, items_without_file=4, files_downloaded=165, files_skipped=0,
+        )
+        assert "文件：将下载 165" in out
+        assert "新下载" not in out

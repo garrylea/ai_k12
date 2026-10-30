@@ -114,6 +114,7 @@ class ZgkaoAdapter(SiteAdapter):
         paper = item.raw["paper"]
 
         if item.id in self._visited:
+            result.items_duplicate += 1
             return result
         self._visited.add(item.id)
 
@@ -158,6 +159,8 @@ class ZgkaoAdapter(SiteAdapter):
         sub_items = IndexParser.parse(detail_html)
         if not sub_items:
             print(f"跳过：详情页没有可下载文件（{item.id}）")
+            # 这一行换不来任何文件，只进 Total；单独一桶记账，免得汇总行的下载/跳过对不上账
+            result.items_without_file += 1
             return result
         for sub in sub_items:
             sub_result = self.download_item(

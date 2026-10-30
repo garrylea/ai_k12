@@ -8,6 +8,26 @@
 
 ---
 
+## 2026-10-30 · 爬虫汇总行拆成「条目 / 文件」两行（203 vs 200 对不上账）
+
+**动因**：用户跑 92320（2026,2025,2024 + 初三）时 `Total: 203` 而 `Downloaded 45 + Skipped 155 = 200`，dry-run 又是 `165 + 33`，三组数字都凑不上，怀疑漏下载。
+
+**根因**（实测核对，非推测）：
+
+- `CrawlResult` 字段叫 `items_*`，实际装的是 `files_*`（`crawler.py` 直接把 `download_result.files_*` 加进去），而 `items_skipped` 那条路径又是**按条目 +1** —— 两套单位混在一个桶里。
+- 索引页 203 行只对应 **200 个不同详情页**：76464 / 76140 / 85039 被站点重复登记两行（区/校标签不同）。适配器 `_visited` 去重后第二行返回空结果，什么都不计。
+- 其中 **4 个详情页正文没有 PDF**（76649 / 76509 / 76555 / 93498），只进 Total，不进任何计数。
+- dry-run 在 `_download_pdf` 一进函数就 `files_downloaded += 1` 返回，从不查文件级 checkpoint —— 它数的是「页面上有几个 PDF 链接」，跟实跑的「新下载」不是一个东西。
+
+**改动**：
+
+- `CrawlResult` 拆成 `items_*`（行：total / filtered / skipped / duplicate / without_file）与 `files_*`（文件：downloaded / skipped / failed / unresolved）；`DownloadResult` 增 `items_duplicate` / `items_without_file`。
+- `crawler.run` 自己维护 `seen_ids`：同一 id 第二次出现记「重复」，不再走 checkpoint 分支重复打印「已下载过」（`zgkao._visited` 保留，仍负责递归子页去重）。
+- `zgkao` 在「详情页没有可下载文件」时 `items_without_file += 1`。
+- CLI 汇总改成两行 `条目：… / 文件：…`；dry-run 那行写「将下载」，并在括号里注明不落盘、不查已下文件。
+
+**验证**：`92320` 实跑输出 `条目：总计 203（命中 203，重复 3，整项已下 196，无文件 4）` —— 196+3+4=203 闭合；dry-run 同口径。爬虫 279 测试通过（新增 5 例：重复行只计一次、适配器条目级计数聚合、无附件页单列、汇总两行分列、dry-run 用「将下载」）。
+
 ## 2026-10-29 · 非理科题面高度从 1/3 上限提到 2/3
 
 **动因**：语文/英语题阅读量大、作答字数少，而题面区上限只有 1/3，长阅读只能在窄条里滚动；理科（数学/物理/化学）相反，要留 2/3 写演算，比例不动。

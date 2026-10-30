@@ -93,6 +93,29 @@ def _unique_keep_order(items):
     return list(dict.fromkeys(items))
 
 
+def _print_summary(result, dry_run: bool = False) -> None:
+    """分两行报账：条目和文件不是一种东西，混在一行会被拿去相减。
+
+    条目 = 索引页/表格的行数；文件 = 真正落盘或已存在的 PDF 个数。
+    一行可能换不来文件（正文没附件）、也可能换 2 个（试卷 + 答案），
+    还会整项跳过（连详情页都不抓），所以条目数永远不等于「新下载 + 已存在」。
+    """
+    matched = result.items_total - result.items_filtered
+    print(
+        f"条目：总计 {result.items_total}（命中 {matched}，重复 {result.items_duplicate}，"
+        f"整项已下 {result.items_skipped}，无文件 {result.items_without_file}）"
+    )
+    if dry_run:
+        # dry-run 在 _download_pdf 里一进函数就返回，既不落盘也不查文件级断点，
+        # 所以这个数只等于「页面上有几个 PDF 链接」，不能叫「新下载」。
+        print(f"文件：将下载 {result.files_downloaded}（dry-run 不落盘、不查已下文件）")
+        return
+    print(
+        f"文件：新下载 {result.files_downloaded}，已存在 {result.files_skipped}，"
+        f"失败 {result.files_failed}，学期未定 {result.files_unresolved}"
+    )
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
 
@@ -160,14 +183,8 @@ def main(argv=None) -> int:
         print("模式：dry-run（不落盘）")
 
     result = crawler.run(filters)
-    matched = result.items_total - getattr(result, "items_filtered", 0)
-    print(
-        f"Total: {result.items_total} (matched {matched}), "
-        f"Downloaded: {result.items_downloaded}, "
-        f"Skipped: {result.items_skipped}, Failed: {result.items_failed}, "
-        f"Unresolved(files): {result.items_unresolved}"
-    )
-    if result.items_downloaded == 0 and result.items_skipped > 0:
+    _print_summary(result, dry_run=args.dry_run)
+    if result.files_downloaded == 0 and (result.items_skipped + result.files_skipped) > 0:
         print("提示：本次没有新文件，上面逐条列出了已存在文件的位置；要重新下载请加 --force。")
 
     if resolver and resolver.unresolved:

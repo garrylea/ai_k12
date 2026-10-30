@@ -51,6 +51,7 @@ class Crawler:
         )
 
         base_dir = getattr(self._store, "base_dir", Path("."))
+        seen_ids: set[str] = set()
 
         for item in self._adapter.list_items(filters):
             result.items_total += 1
@@ -58,6 +59,13 @@ class Crawler:
             if not self._adapter.accepts(item):
                 result.items_filtered += 1
                 continue
+
+            # 站点会把同一个详情页登记成多行（只是区/校标签不同）。第二行起单独记「重复」，
+            # 不能算下载也不能算跳过 —— 否则汇总行看起来像在重复计数（2026-10-30 的 3 行）。
+            if item.id in seen_ids:
+                result.items_duplicate += 1
+                continue
+            seen_ids.add(item.id)
 
             if self._checkpoint and self._checkpoint.is_downloaded(item.id) and not self._force:
                 locations = self._checkpoint.files_for_item(item.id)
@@ -73,12 +81,15 @@ class Crawler:
             try:
                 download_result = self._adapter.download_item(item, ctx)
             except CircuitBreakerError:
-                result.items_failed += 1
+                # 熔断时整个站点都在失败，逐项记一次失败即可；归到文件桶是因为它至少含 1 个文件
+                result.files_failed += 1
                 continue
 
-            result.items_downloaded += download_result.files_downloaded
-            result.items_skipped += download_result.files_skipped
-            result.items_failed += download_result.files_failed
-            result.items_unresolved += download_result.files_unresolved
+            result.files_downloaded += download_result.files_downloaded
+            result.files_skipped += download_result.files_skipped
+            result.files_failed += download_result.files_failed
+            result.files_unresolved += download_result.files_unresolved
+            result.items_duplicate += download_result.items_duplicate
+            result.items_without_file += download_result.items_without_file
 
         return result
