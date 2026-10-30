@@ -25,6 +25,7 @@ _PAPERS = {
     "english": _GENERIC_PAPER,
     "physics": _GENERIC_PAPER,
     "chemistry": _GENERIC_PAPER,
+    "politics": _GENERIC_PAPER,
 }
 
 

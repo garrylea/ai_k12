@@ -82,7 +82,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 1. `src/answer_extract_cli.py --file <相对路径子串>`：定位唯一的试卷 md → 按路径首段识别学科（`subject_codes.subject_code_for_path`）→ 调 `get_strategy(subject).extract_answers` → 输出 `answer_doc` 规范文档（`# 试卷：<标题>` / `## 题号` / `答案：` / `解析：`）+ `output/answer_issues.jsonl`。
 2. `src/answer_importer_cli.py --doc <文档> --paper-id <id> [--apply]`：按 `(paper_id, question_no)` 回写，语义=缺省不改/非空覆盖/空串不改/幂等/写 `answer_verified=1`。
 
-分派结构（`src/subject_strategies/`，2026-10-30 起）：`chinese.py` 独立实现，`math/physics/chemistry` 继承 `generic.py` 的默认答案提取（复用 `split_page`，与主管线一致），`english.py` 直接用同一份 generic 实现。新增学科时在策略文件里实现 `extract_answers` 并 `register()`，未登记学科抛 `UnknownStrategyError`（不静默回退 generic；`politics` 等尚无策略）。
+分派结构（`src/subject_strategies/`，2026-10-30 起）：`chinese.py` 独立实现，`math/physics/chemistry/politics` 继承 `generic.py` 的默认答案提取（复用 `split_page`，与主管线一致），`english.py` 直接用同一份 generic 实现。新增学科时在策略文件里实现 `extract_answers` 并 `register()`；未登记学科（生物/历史/地理）抛 `UnknownStrategyError`，不静默回退 generic。
 
 语文答案提取五步：答案段分离 → 标点归一（仅解析，1:1 映射，不回写文本）→ 题号对齐（递增守卫）→ 评分说明拆到「解析」列（纯分值 `（2 分）` 只剥末尾；`（共 2分。…给分）` 全文剥）→ 校验（空答案留空 + issue）。
 

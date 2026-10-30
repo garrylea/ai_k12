@@ -6,9 +6,7 @@
 
 from pathlib import Path
 
-import pytest
-
-from subject_strategies import UnknownStrategyError, get_strategy
+from subject_strategies import get_strategy
 from subject_strategies.types import ExtractedAnswer
 
 
@@ -148,13 +146,6 @@ def test_markdown_heading_question_number():
 """
     answers = {a.no: a for a in _case(text)}
     assert answers[2].answer.startswith("评分参考")
-
-
-def test_unregistered_subject_raises_unknown_strategy():
-    """政治（旧答案提取模块有 politics case）没有登记策略，必须报错而不是猜。"""
-    with pytest.raises(UnknownStrategyError) as exc:
-        get_strategy("politics")
-    assert "politics" in str(exc.value)
 
 
 def test_subject_codes_shared_mapping():

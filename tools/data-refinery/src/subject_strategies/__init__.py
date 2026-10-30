@@ -35,10 +35,12 @@ register(GenericStrategy())
 from subject_strategies.math import MathStrategy  # noqa: E402
 from subject_strategies.physics import PhysicsStrategy  # noqa: E402
 from subject_strategies.chemistry import ChemistryStrategy  # noqa: E402
+from subject_strategies.politics import PoliticsStrategy  # noqa: E402
 
 register(MathStrategy())
 register(PhysicsStrategy())
 register(ChemistryStrategy())
+register(PoliticsStrategy())
 
 from subject_strategies.chinese import ChineseStrategy  # noqa: E402
 

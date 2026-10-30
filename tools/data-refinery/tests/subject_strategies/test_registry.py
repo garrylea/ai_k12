@@ -25,6 +25,18 @@ def test_get_strategy_none_raises():
         get_strategy(None)
 
 
+def test_politics_registered_with_generic_answers():
+    """道法：重构前 `get_case("politics")` 明确 fallback 到 generic，策略化后必须保持。
+
+    这条是防「顺手缩能力」的钉子——politics 一旦漏登记，答案回填会把道法卷
+    计入 skipped，看着像「没答案段」，实际是学科没接上。
+    """
+    strategy = get_strategy("politics")
+    assert strategy.code == "politics"
+    # 与数学共用同一份 generic 实现（不是复制一份，也不是空实现）
+    assert strategy.answers is get_strategy("math").answers
+
+
 def test_material_policy_defaults_do_not_attach():
     policy = MaterialPolicy()
     assert policy.attach is False
