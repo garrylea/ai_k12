@@ -1022,8 +1022,13 @@ def test_each_reading_passage_attached_to_its_own_question():
 
     assert [q.group_order for q in questions] == [1, 2]
     assert "three tips" in (questions[0].material_text or "")
+    assert "healthy diet" not in (questions[0].material_text or "")
     assert "healthy diet" in (questions[1].material_text or "")
+    assert "three tips" not in (questions[1].material_text or "")
 ```
+
+> 断言在评审后加强：只验「A 篇在题1、B 篇在题2」时，若两题都挂着 A+B 两段（或题2 同时保留上一篇），
+> 弱断言仍会通过；补两条 `not in` 交叉否定才真正钉住「各归各的题」。
 
 - [ ] **Step 3: 跑测试确认失败**
 

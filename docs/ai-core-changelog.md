@@ -8,6 +8,19 @@
 
 ---
 
+## 2026-10-30 · 切题/选项/答案改为按学科显式实现
+
+**动因**：用户指出各学科差异大、提示词也不同，不该把学科逻辑埋在 972 行的公共切分器里。核查后确认：提示词与答案提取**已经**分科，缺口在题号切分与选项拆分——`split_options` 里的 `if subject == "chinese"` 分支、一处硬编码 `subject="chinese"` 的调用，以及贯通切分器 10 处的 `attach_material: bool` 开关（只能表达「语文开、其它关」）；英语材料归属从未打开。
+
+**改动**：
+
+- 新增 `src/subject_strategies/`，每科一份 `is_stem / split_options / material_policy / extract_answers`：`generic.py` 提供默认实现（A–D 四项、无材料、答案走通用切分），`math` / `physics` / `chemistry` / `politics` 继承 `NaturalScienceStrategy` 只声明归属，`chinese.py` / `english.py` 各自实现差异。
+- 注册表 `get_strategy(code)`：未登记学科（生物/历史/地理）与空 code **直接抛 `UnknownStrategyError`**，不回退 generic；`question_extract._subject_code_for` 同步改为「识别不出目录返回 `None`」，目录名写错/新学科漏登记会当场报错，不再被静默当成数学题。
+- `subject_cases/` 并入 `subject_strategies/` 后删除；`split_page` 由 `attach_material: bool` 改为接收策略对象（`strategy=`）；`split_options(subject=...)` 的 `subject=` 参数删除（传了是 `TypeError`）。
+- 新增 `tests/test_no_subject_conditionals.py`：去注释后断言内核无 `subject ==` / `"chinese"`，防止学科判断回流。
+
+**回归**：`tests/test_question_splitter.py` 87 例断言一行未改（仅改调用签名），全绿；`scripts/split_snapshot.py --check` 26 份抽样（数学/物理/语文各 8、化学 2）零差异；四中物理卷按新策略重切 35 题、题号连续、逐题题干/材料/分组/分值哈希与基线全同（切分是确定性的，不跑非确定的 LLM 重抽比 JSONL）。英语阅读理解短文开始进入 `material_text`（此前为空），靠 `test_english.py` 的「A 篇只归题1、B 篇只归题2」正反断言守护。
+
 ## 2026-10-30 · 爬虫汇总行拆成「条目 / 文件」两行（203 vs 200 对不上账）
 
 **动因**：用户跑 92320（2026,2025,2024 + 初三）时 `Total: 203` 而 `Downloaded 45 + Skipped 155 = 200`，dry-run 又是 `165 + 33`，三组数字都凑不上，怀疑漏下载。
