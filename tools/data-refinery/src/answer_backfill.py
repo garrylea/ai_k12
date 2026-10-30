@@ -1,7 +1,7 @@
 """答案回填：试卷 md → 答案文档 → questions.answer（import_cli 第 5 步）。
 
 为什么需要这一步：切题阶段（extract）虽然会做一次答案对齐，但它面向通用格式，
-语文的评分说明、全角题号、作文评分细则等需要按学科 case 再走一遍确定性提取；
+语文的评分说明、全角题号、作文评分细则等需要按学科策略再走一遍确定性提取；
 另外已有卷子里答案缺失的题也靠它补齐。
 
 安全口径：
@@ -18,7 +18,8 @@ from answer_extract_cli import paper_title, render_answer_doc
 from answer_importer_cli import main as importer_main
 from db_loader_cli import _kind
 from scope_filter import Scope, match_scope
-from subject_cases import UnknownSubjectError, detect_subject, get_case
+from subject_codes import subject_code_for_path
+from subject_strategies import UnknownStrategyError, get_strategy
 
 
 def iter_paper_jsonl(published_dir: Path, scope: Scope) -> list[Path]:
@@ -81,15 +82,17 @@ def backfill(cfg, scope: Scope, *, dry_run: bool = False, overwrite: bool = Fals
                 continue
 
             rel_md = md_path.relative_to(md_dir)
+            # 路径首段不是已知学科目录时 subject_code_for_path 返回 ""（不给默认
+            # math）：get_strategy 随即报错跳过。答案提取错学科比失败更危险。
             try:
-                case = get_case(detect_subject(rel_md))
-            except UnknownSubjectError as exc:
+                strategy = get_strategy(subject_code_for_path(rel_md, default=""))
+            except UnknownStrategyError as exc:
                 print(f"[answers] 跳过（{exc}）：{rel}")
                 stats["skipped"] += 1
                 continue
 
             text = md_path.read_text(encoding="utf-8")
-            answers = case(text, md_path)
+            answers = strategy.extract_answers(text, md_path)
             if not any((a.answer or "").strip() for a in answers):
                 print(f"[answers] 跳过（没有参考答案段）：{rel}")
                 stats["no_answer"] += 1

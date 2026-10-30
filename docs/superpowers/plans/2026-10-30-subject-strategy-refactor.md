@@ -20,6 +20,17 @@
 
 ---
 
+> **执行顺序调整（2026-10-30，执行期修订）**：按 Task 0 → 1 → 4 → **2+3 合并** → 5 → 6 → 7 执行。
+> 原因：黄金快照抽样覆盖语文/数学/物理/化学四科，而 Task 2 结束时只有 `generic` 登记过，
+> `split_snapshot.py --check` 与 `tests/test_qr_detect.py` 会在数学卷上抛 `UnknownStrategyError`，
+> Task 2 的「零差异 + 全量绿」判据无法达成。于是先把 Task 4 提前（登记数理化，无行为变化），
+> 再把 Task 2 与 Task 3 合并成一次提交——Task 2 里那个「临时转发版 chinese.py」本来就是为了给
+> Task 3 替换的，合并后直接写真实实现，省掉一次空转。
+> Task 编号不变，下文小节标题仍按原编号引用；合并执行要点见
+> `.superpowers/sdd/2026-10-30-subject-strategy-refactor/task-2+3-brief.md`。
+
+---
+
 ### Task 0: 黄金快照（动代码之前先拍基线）
 
 **Files:**
@@ -83,8 +94,14 @@ def snapshot(md_root: Path) -> dict:
         snap[rel] = {
             "count": len(questions),
             "items": [
+                # 五个维度都要钉：题干哈希之外，材料哈希（语文材料归属）、
+                # 大题分组、分值一并有值，否则 attach_material / 分组标题解析
+                # 坏掉时快照不会报差异。
                 {"no": q.group_order,
-                 "hash": hashlib.sha1(q.content.encode("utf-8")).hexdigest()[:12]}
+                 "hash": hashlib.sha1(q.content.encode("utf-8")).hexdigest()[:12],
+                 "mat": hashlib.sha1((q.material_text or "").encode("utf-8")).hexdigest()[:12],
+                 "gid": q.group_id,
+                 "score": q.score}
                 for q in questions
             ],
         }
@@ -178,12 +195,12 @@ def test_compare_reports_content_change_and_missing_file():
 - [ ] **Step 3: 跑单测**
 
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_split_snapshot.py -q`
-Expected: `3 passed`
+Expected: `5 passed`（上述 3 个 compare 用例 + 抽样只收试卷 + 只改 `mat` 必须报差异）
 
 - [ ] **Step 4: 生成基线（用重构前的代码）**
 
 Run: `cd tools/data-refinery && python3 scripts/split_snapshot.py --write`
-Expected: `[ok] 基线已写入 …/tests/fixtures/split_snapshot.json（N 份）`，N ≈ 32（语文/数学/物理/化学各 8）
+Expected: `[ok] 基线已写入 …/tests/fixtures/split_snapshot.json（N 份）`，N = 26（语数物各 8 份试卷，化学试卷仅 2 份；只抽文件名含「试卷」的 md）
 
 - [ ] **Step 5: 验证基线可复现**
 
@@ -194,8 +211,10 @@ Expected: `[ok] N 份快照零差异`
 
 ```bash
 git add tools/data-refinery/scripts/split_snapshot.py tools/data-refinery/tests/test_split_snapshot.py tools/data-refinery/tests/fixtures/split_snapshot.json
-git commit -m "test(splitter): 切题黄金快照基线（题数 + 题干哈希，32 份抽样）"
+git commit -m "test(splitter): 切题黄金快照基线（题数/题干/材料/分组/分值，26 份试卷抽样）"
 ```
+
+> **落地实况（与本节快照的差异）**：交付版本比上面两段代码更严——① 抽样只收文件名含「试卷」的 md（教科书单页切出 0 题，纳入只会得到空断言）；② `compare()` 的差异行改为只列出变动的字段（`第 1 项 mat '…' -> '…'`），不再是整份 dict 对打；③ 单测共 5 个：上述 3 个 compare 用例之外，另有「抽样只收试卷」和「只改 `mat` 也必须报差异」两条。
 
 ---
 
@@ -1003,8 +1022,13 @@ def test_each_reading_passage_attached_to_its_own_question():
 
     assert [q.group_order for q in questions] == [1, 2]
     assert "three tips" in (questions[0].material_text or "")
+    assert "healthy diet" not in (questions[0].material_text or "")
     assert "healthy diet" in (questions[1].material_text or "")
+    assert "three tips" not in (questions[1].material_text or "")
 ```
+
+> 断言在评审后加强：只验「A 篇在题1、B 篇在题2」时，若两题都挂着 A+B 两段（或题2 同时保留上一篇），
+> 弱断言仍会通过；补两条 `not in` 交叉否定才真正钉住「各归各的题」。
 
 - [ ] **Step 3: 跑测试确认失败**
 
@@ -1205,6 +1229,13 @@ git commit -m "refactor(splitter): subject_cases 并入 subject_strategies，答
 
 ### Task 7: 物理端到端回归 + 文档
 
+> ⚠️ **本小节为原始草稿，实际交付以 `docs/ai-core-changelog.md` 的 2026-10-30 条目与
+> `docs/data-refinery-管线总结与后续.md` 的「学科策略（切题 / 选项 / 材料 / 答案，2026-10-30）」节为准。**
+> 执行时有两处偏离草稿：① 没用 `extract_cli --reconvert` 重跑（LLM 标注不设 temperature、结果不可复现，
+> JSONL diff 是噪声），改为 splitter 级 parity —— 直接用 `split_page(strategy=get_strategy("physics"))`
+> 与重构前拍的黄金快照逐题比 `no/hash/mat/gid/score`；② 回归结论按实测改口径（见 Step 4 段落）。
+> 下方 Step 1–2 的命令保留为历史草稿，**不要照抄**。
+
 **Files:**
 - Modify: `docs/data-refinery-管线总结与后续.md`（新增「学科策略」小节）
 - Modify: `docs/ai-core-changelog.md`（顶部加 2026-10-30 条目）
@@ -1239,7 +1270,8 @@ entry = snap.get(rel)
 if entry is None:
     print(f"该卷不在抽样快照里，需手工前后比对：{rel}")
 else:
-    base = entry["items"]
+    # 物理卷没有材料归属，只比对题号与题干哈希（基线条目另有 mat/gid/score）
+    base = [{k: it[k] for k in ("no", "hash")} for it in entry["items"]]
     now = [{"no": r["group_order"],
             "hash": hashlib.sha1(r["content"].encode()).hexdigest()[:12]} for r in rows]
     diff = [i for i, (a, b) in enumerate(zip(now, base)) if a != b]
@@ -1263,7 +1295,7 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
 | 钩子 | 说明 |
 |---|---|
 | `is_stem(line)` | 该行是否主题号（语文全角句点、英语篇章标签、数学小问号等差异都写在这里） |
-| `split_options(content)` | 题干/选项拆分（语文 3–6 项甲乙丙丁；其余 A–D 四项） |
+| `split_options(content)` | 题干/选项拆分（语文 2–6 项甲乙丙丁；其余 A–D 四项） |
 | `material_policy()` | 题号前的短文是否挂到题上（语文/英语 true，其余 false） |
 | `extract_answers(text, md_path)` | 答案段提取（原 `subject_cases`，已并入） |
 
@@ -1272,7 +1304,8 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
 - 内核 `question_splitter.py` 只保留与学科无关的扫描（行内粘连、日期陷阱、OCR 错认纠正），
   回归判据：`grep -n '"chinese"' src/question_splitter.py` 无命中。
 - 行为回归靠 `scripts/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
-  每科 8 份抽样的题数 + 题干哈希），重构任何一步都必须零差异。
+  每科至多 8 份试卷抽样，逐题记录题号 / 题干哈希 / 材料哈希 / 大题分组 / 分值），
+  重构任何一步都必须零差异。
 ```
 
 - [ ] **Step 4: 写 changelog**
@@ -1282,11 +1315,11 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
 ```markdown
 ## 2026-10-30 · 切题/选项/答案改为按学科显式实现
 
-**动因**：用户指出各学科差异大、提示词也不同，不该把学科逻辑埋在 972 行的公共切分器里。核查后确认：提示词与答案提取**已经**分科，缺口在题号切分与选项拆分（4 处 `if subject == "chinese"`），且英语材料归属从未打开。
+**动因**：用户指出各学科差异大、提示词也不同，不该把学科逻辑埋在 972 行的公共切分器里。核查后确认：提示词与答案提取**已经**分科，缺口在题号切分与选项拆分（`split_options` 的 1 处 `if subject == "chinese"` 分支 + 1 处硬编码 `subject="chinese"` 调用 + 贯通 10 处的 `attach_material` 开关），且英语材料归属从未打开。
 
 **改动**：新增 `src/subject_strategies/`（每科一份 `is_stem / split_options / material_policy / extract_answers`），`get_strategy` 未登记即报错；`subject_cases/` 并入后删除；`split_page` 由 `attach_material: bool` 改为接收策略对象。
 
-**回归**：87 例切分测试断言未改（仅改签名）+ 每科 8 份抽样的黄金快照零差异；四中物理卷重跑 35 题、题干哈希与重构前一致。英语阅读理解短文开始进入 `material_text`（此前为空）。
+**回归**：87 例切分测试断言未改（仅改签名）+ 每科 8 份抽样的黄金快照零差异；四中物理卷按新策略重切 35 题、逐题题干/材料/分组/分值哈希与基线全同（**splitter 级 parity，未重跑 extract**）。英语阅读理解短文开始进入 `material_text`（此前为空）。
 ```
 
 - [ ] **Step 5: 最终全量回归**

@@ -1,13 +1,18 @@
-"""语文答案提取 case 单测（纯函数，不连库、不调 LLM）。"""
+"""语文答案提取单测（纯函数，不连库、不调 LLM）。
+
+2026-10-30 答案提取并入 `subject_strategies/chinese.py` 时从旧的答案提取测试
+文件迁来，一律经 `get_strategy("chinese")` 入口调用。
+"""
 
 from pathlib import Path
 
-from subject_cases import ExtractedAnswer, UnknownSubjectError, detect_subject, get_case
-from subject_cases import chinese
+from subject_strategies import get_strategy
+from subject_strategies.types import ExtractedAnswer
 
 
 def _case(text: str) -> list[ExtractedAnswer]:
-    return chinese.extract_answers(text, Path("语文/初中/second/2025/卷-试卷.md"))
+    return get_strategy("chinese").extract_answers(
+        text, Path("语文/初中/second/2025/卷-试卷.md"))
 
 
 SAMPLE = """# 2025 海淀 初三 模拟二
@@ -143,42 +148,18 @@ def test_markdown_heading_question_number():
     assert answers[2].answer.startswith("评分参考")
 
 
-def test_detect_subject_by_path_segment():
-    assert detect_subject(Path("语文/初中/second/2025/x-试卷.md")) == "chinese"
-    assert detect_subject(Path("数学/初中/second/2025/x-试卷.md")) == "math"
-
-
-def test_detect_subject_unknown_raises():
-    try:
-        detect_subject(Path("音乐/初中/second/2025/x-试卷.md"))
-    except UnknownSubjectError as e:
-        assert "无法从路径识别学科" in str(e)
-    else:  # pragma: no cover
-        raise AssertionError("未知学科应抛错")
-
-
-def test_get_case_dispatch():
-    assert get_case("chinese") is chinese.extract_answers
-    assert get_case("math") is not chinese.extract_answers
-    try:
-        get_case("music")
-    except UnknownSubjectError as e:
-        assert "music" in str(e)
-    else:  # pragma: no cover
-        raise AssertionError("未支持学科应抛错")
-
-
 def test_subject_codes_shared_mapping():
     """publish/extract/答案提取共用一份学科映射（subject_codes）。"""
-    from pathlib import Path as P
-
     from subject_codes import SUBJECT_NAME_TO_CODE, subject_code_for_path
 
     assert SUBJECT_NAME_TO_CODE["语文"] == "chinese"
-    assert subject_code_for_path(P("语文/初中/second/2025/x-试卷")) == "chinese"
-    assert subject_code_for_path(P("化学/初中/second/2025/x-试卷")) == "chemistry"
+    assert subject_code_for_path(Path("语文/初中/second/2025/x-试卷")) == "chinese"
+    assert subject_code_for_path(Path("化学/初中/second/2025/x-试卷")) == "chemistry"
     # 识别不出回退 math（历史资产路径兼容），不会把语文误判成数学之外的值
-    assert subject_code_for_path(P("音乐/初中/second/2025/x-试卷")) == "math"
+    assert subject_code_for_path(Path("音乐/初中/second/2025/x-试卷")) == "math"
+    # 答案提取显式传 default="" —— 未知学科目录返回空串、由 get_strategy 报错
+    # （绝不能猜成 math：答案写错学科比提取失败更危险）
+    assert subject_code_for_path(Path("音乐/初中/second/2025/x-试卷"), default="") == ""
 
 
 def test_scoring_table_moved_to_explanation():

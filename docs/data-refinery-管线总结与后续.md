@@ -58,14 +58,14 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - **答案对齐是纯 Python 状态机**（`question_splitter.split_page`），LLM 只标注元数据、不碰答案。
 - **题号正则支持全角句点/冒号**（2026-10-28）：`[.．]` / `[:：]`。语文参考答案段写作 `1．C（2 分）`（全角 `．`），修复前整段不被识别 → 答案丢弃或串题（2025 海淀语文卷题1 曾把作文扣分说明当成答案入库）。
 - **答案段题号必须递增**（2026-10-28）：回退编号当作当前答案续行。语文作文评分细则常写 `1．字数不足600字…`，若不设守卫会串到第 1 题。
-- **同节材料归属**（2026-10-28，`attach_material=True`，仅语文启用）：语文阅读材料写在题号**之前**（材料一/二/三、两封信、文章原文），切分器按「大题标题 / （一）（二）子标题 / markdown 小标题 / 材料N」分段，把本节材料挂到**本节每道题**的 `material_text`（含图片引用）。不归属时材料被吞进上一题题干、题面缺材料只能靠 LLM 重写（实测 19/27 题触发）。
+- **同节材料归属**（2026-10-28，策略 `material_policy().attach`，仅语文启用）：语文阅读材料写在题号**之前**（材料一/二/三、两封信、文章原文），切分器按「大题标题 / （一）（二）子标题 / markdown 小标题 / 材料N」分段，把本节材料挂到**本节每道题**的 `material_text`（含图片引用）。不归属时材料被吞进上一题题干、题面缺材料只能靠 LLM 重写（实测 19/27 题触发）。
 - **行内粘连标题**（2026-10-28）：OCR 会把下一节标题并在上一题题干末尾（`…（100 字左右）四、现代文阅读（共 23分）`）。切分器拆出标题、本题留在原分组、后续题归新分组，并关闭本题（否则后续材料被吞）。
 - **选择题选项边界**（2026-10-28）：语文卷选项紧贴标点无空格（`…的一项是(2分)A.呼之欲出 B.…`）。裸字母标记的前导边界从「空白」放宽为「非英文/数字」，能拆 4 个选项的题确定性校正为 `choice`（LLM 偶发误标 short_answer）。
 - **标注失败不丢题**（2026-10-28）：LLM 网关抖动会随机挂 1 题；失败时用确定性兜底（题型按选项判定、难度 2、知识点空、不做修复），日志记 `label_failed_fallback`，不再整题跳过（曾导致重载后试卷少题）。
 - **Python 已拆出完整选项时的冲突处理**（2026-10-28 首版，2026-10-29 修订）：LLM 要**重写** options 且与 Python 拆分不一致 → 拒绝（防丢内容/编造），第 3 次走「只标注」：强制 `is_complete=true`、丢弃 `regenerated`，只取 type/difficulty/知识点。LLM **只判 false、不重写** 时按缺陷类型分流（`_defect_kind`）：提到材料/画线/图片/题干截断等 → 接受 false（真缺陷，标待复核）；只提选项或说不出缺陷 → 视为误判，以 Python 为准。此前一律当作冲突，会把真实的材料缺失用「只标注」抹成完整题。LLM 调用失败日志带 HTTP 状态与 message。
 - **标注提示词按学科拆**（2026-10-29）：`prompts/question_labeler/` = `_common.txt`（JSON 契约/字段/知识点约束，唯一真源）+ `chinese/math/english/physics/chemistry/politics.txt`，未配置学科回退 `_generic.txt`。九科共用一份提示词时，模型只能按数学标准处理语文：语文 3 选项被判「不足 4 个」、画线句/链接材料丢失被判「可修复」后编造。学科文件负责「什么叫完整、哪些缺陷可修复、题型映射、难度分层」。
 - **原文缺失型缺陷只报告不修复**（2026-10-29）：语文/道法/史地生（`_UNREPAIRED_OK`）的 `is_complete=false` **允许 `regenerated=null`**——画线句指向、加点字、图片内文字、未随卷给出的链接材料/时政原文，任何补全都是编造。这类题以原文入库 + `needs_review=true`（`is_active=0`，不进抽题池），不再重试三次后走「知识点为空」的确定性兜底。数学/物理/化学的缺选项、缺单位仍有上下文残片可依，仍要求修复后才通过。
-- **语文拆选项/材料按学科处理**（2026-10-28）：`split_options(subject="chinese")` 支持 3-6 项、`【甲】【乙】【丙】`、`①②③`，label 归一为 A/B/C 并保留 `original_label`（参考答案写「乙」时映射为 B）；两题之间的「文段标题 + 长段落」（如「流光溢彩」）归下一题 `material_text`，不再被上一题正文吞掉。数学仍要求 A-D 四项，行为不变。
+- **语文拆选项/材料按学科处理**（2026-10-28，入口 2026-10-30 改为策略对象）：语文走 `get_strategy("chinese").split_options(content)`，支持 2–6 项、`【甲】【乙】【丙】`、`①②③`，label 归一为 A/B/C 并保留 `original_label`（参考答案写「乙」时映射为 B）；两题之间的「文段标题 + 长段落」（如「流光溢彩」）归下一题 `material_text`，不再被上一题正文吞掉。数学仍要求 A-D 四项，行为不变。**「3 项起」是 extract 侧的口径、不是拆选项能力**：`question_extract.py` 判定语文「选项完整」用 `3 <= len(opts) <= 6`（其它学科仍 `== 4`），2 项能拆但不会因此把题校正成选择题。原 `split_options(subject="chinese")` 的 `subject=` 参数已随重构删除（再传是 `TypeError`）。
 - **AI 修复题默认待复核**（2026-10-28）：`is_complete=false`（LLM 补过选项/材料）在 extract 打 `needs_review=true`，db_loader 入库置 `is_active=0` → 不进抽题池（抽题 SQL 过滤 `is_active=1`），人工看 `labeling_issues.jsonl` 后手动置 1。原因：实测会编造原文没有的内容（大兴题12 补出「D.三人都正确」、大兴题5 编了两句【甲】【乙】、房山题25 补出「D.…放弃奋斗」）。存量库用 `python mark_needs_review.py --apply` 回刷（幂等）。
 - **占位文本防线**（2026-10-28）：LLM 修复产出的 `【注：此处应填入…】`/`待补充` 一类占位说明不得入库，命中即回退原始切分内容。
 - 无题号/答案的表格（如作文评分标准表）整表并入当前题答案，不丢弃。
@@ -76,15 +76,15 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - 物化图片到 `output/assets/`，路径改写为源相对稳定键（`questions/{subject}/{hash}/{idx}`、`textbooks/{subject}/{hash}/{sort_order}`），填 `content_metadata.images[]` / `options[].image_url`。
 - **subject 按素材路径首段推导**（`subject_codes.subject_code_for_path`）：`数学/`->math、`语文/`->chinese、`化学/`->chemistry。映射表唯一维护在 `src/subject_codes.py`（publish / extract / 答案提取共用），识别不出时回退 `math`（历史兼容）。
 
-### 答案提取（按学科 case 分派，2026-10-28；已并入 import_cli 第 5 步）
+### 答案提取（按学科策略分派，2026-10-28 起；已并入 import_cli 第 5 步）
 `import_cli` 的第 5 步会自动完成「试卷 md → 答案文档 → questions.answer」：逐卷查 `exam_papers.source_key` 拿 paper_id，**默认 `--where answer_empty` 只补空答案**，`--re-answer` 才覆盖；没有「参考答案」段的卷跳过并打印原因。下面两段式仍保留，用于单独重跑或人工修正：
 
-1. `src/answer_extract_cli.py --file <相对路径子串>`：定位唯一的试卷 md → 按路径首段识别学科 → 调 `subject_cases.get_case(subject)` → 输出 `answer_doc` 规范文档（`# 试卷：<标题>` / `## 题号` / `答案：` / `解析：`）+ `output/answer_issues.jsonl`。
+1. `src/answer_extract_cli.py --file <相对路径子串>`：定位唯一的试卷 md → 按路径首段识别学科（`subject_codes.subject_code_for_path`）→ 调 `get_strategy(subject).extract_answers` → 输出 `answer_doc` 规范文档（`# 试卷：<标题>` / `## 题号` / `答案：` / `解析：`）+ `output/answer_issues.jsonl`。
 2. `src/answer_importer_cli.py --doc <文档> --paper-id <id> [--apply]`：按 `(paper_id, question_no)` 回写，语义=缺省不改/非空覆盖/空串不改/幂等/写 `answer_verified=1`。
 
-分派结构（`src/subject_cases/`）：`chinese` 独立实现，`math/english/physics/chemistry/politics` 委托 `generic`（复用 `split_page`，与主管线一致）。新增学科时实现一个 case 函数并登记，未登记学科直接报错（不静默走错流程）。
+分派结构（`src/subject_strategies/`，2026-10-30 起）：`chinese.py` 独立实现，`math/physics/chemistry/politics` 继承 `generic.py` 的默认答案提取（复用 `split_page`，与主管线一致），`english.py` 直接用同一份 generic 实现。新增学科时在策略文件里实现 `extract_answers` 并 `register()`；未登记学科（生物/历史/地理）抛 `UnknownStrategyError`，不静默回退 generic。
 
-语文 case 五步：答案段分离 → 标点归一（仅解析，1:1 映射，不回写文本）→ 题号对齐（递增守卫）→ 评分说明拆到「解析」列（纯分值 `（2 分）` 只剥末尾；`（共 2分。…给分）` 全文剥）→ 校验（空答案留空 + issue）。
+语文答案提取五步：答案段分离 → 标点归一（仅解析，1:1 映射，不回写文本）→ 题号对齐（递增守卫）→ 评分说明拆到「解析」列（纯分值 `（2 分）` 只剥末尾；`（共 2分。…给分）` 全文剥）→ 校验（空答案留空 + issue）。
 
 ⚠️ 归一化不要映射「、」：它是中文大题序号分隔符（`三、名著阅读`），归一后 `is_group_header` 失效，大题标题会混进上一题答案。
 
@@ -103,6 +103,35 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - **标定命令**：`python src/backfill_question_kps.py --subject chinese`（默认 math）。提示词按学科取 `prompts/question_kps/<subject>.txt`（公共契约 `_common.txt`，未配置学科回退 `_generic.txt`）；此前只有数学/语文两版，其它学科会用「初中数学老师」的角色标 KP。幂等，只处理无 qkp 的题。
 - **作文题不标 KP**（2026-10-28 用户裁决）：作文题的 `answer` 是评分参考而非可判答案，标了 KP 就会被专项练习抽到。导入含作文的卷后，需把作文题从 `question_knowledge_points` 移除（本卷题27 已移）。当前无字段区分作文，后续要么加题型（如 `essay`），要么在导入脚本里按卷末大题排除。
 - **LLM 标注需人工抽检**：2026-10-28 实测 27 题中有 3 题偏差（文言人物理解被标成现代文「人物形象」、文言填空被标成「古诗文默写」、二选一作文漏「半命题作文」），已人工校正。抽检维度：文言/古诗题不该出现现代文考点；作文题按命题/半命题/材料归类。
+
+### 学科策略（切题 / 选项 / 材料 / 答案，2026-10-30）
+
+四件事各科一份实现，位于 `tools/data-refinery/src/subject_strategies/`：
+
+| 钩子 | 说明 |
+|---|---|
+| `is_stem(line)` | 该行是否主题号（返回 `(是, 题号)`）。**内核主切分循环与 `_has_next_stem` 都走它**（`_has_next_stem` 收 `is_stem` 入参、默认 `is_main_stem`），所以覆盖它就真的改行为。当前各科都委托内核 `is_main_stem`——题号规则一旦分科，写在本文件，内核不再加学科分支 |
+| `split_options(content)` | 题干/选项拆分（语文 2–6 项甲乙丙丁/①②③，label 归一 A/B/C；其余 A–D 四项） |
+| `split_bounds()` / `choice_bounds()` | 项数区间，**两件事别混**：`split_bounds` = 「拆出几项算拆成功」（语文 2–6，其余 4–4，labeler 用）；`choice_bounds` = 「算不算一道完整选择题」（语文 3–6，其余 4–4，extract 的题型校正用） |
+| `material_policy()` | 题号前的短文是否挂到题上（语文/英语 true，其余 false） |
+| `extract_answers(text, md_path)` | 答案段提取（原 `subject_cases`，已并入）；generic 实现收 `strategy` 入参，答案与题干按同一套切分对齐 |
+
+- 当前已登记：`generic`（公共实现，没有任何学科目录映射到它，只作基类/实现来源）、`math` / `physics` / `chemistry` / `politics`（继承 `generic.NaturalScienceStrategy`，只声明归属）、`chinese`、`english`。
+- `get_strategy(code)` 未登记学科**直接抛 `UnknownStrategyError`**，不回退 generic；
+  `question_extract._subject_code_for` 识别不出学科目录时返回 `None`，同样报错——目录名写错/新学科没登记会立刻暴露，不会被静默当成数学题抽走。
+- 内核 `question_splitter.py` 只保留与学科无关的扫描（行内粘连、日期陷阱、OCR 错认纠正），
+  回归判据：`grep -n '"chinese"' src/question_splitter.py` 无命中；该判据已固化为
+  `tests/test_no_subject_conditionals.py`（去注释后断言无 `subject` / `subject_code`
+  上的 `==` / `!=` / `in`，单双引号都查）。守卫只管内核这一份文件——`question_labeler.py` /
+  `question_extract.py` 里仍有学科分支（PDF 下划线注入等）是有意保留的例外。
+- 「策略写了却没人问」是这轮重构最大风险（`is_stem` 一度是死钩子：单测全绿、管线无视），
+  `tests/test_stem_strategy_hook.py` 用一个 `is_stem` 恒为 `(True, 42)` 的假策略钉住
+  `split_page` 真的按策略切。
+- 行为回归靠 `scripts/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
+  每科至多 8 份试卷抽样，逐题记录题号 / 题干哈希 / 材料哈希 / 大题分组 / 分值），
+  重构任何一步都必须零差异。抽样只取 `output/md` 里实际存在的「试卷」md：当前快照
+  26 份（数学/物理/语文各 8、化学 2），英语无试卷 md 故无条目，英语行为由
+  `tests/subject_strategies/test_english.py` + fixture 覆盖。
 
 ### db_loader
 - **subject 归一**：`SUBJECT_ALIASES`（`chem`->`chemistry` 等）-> canonical code -> subjects.id。cards 按 rel_path 学科名查、questions 按 jsonl subject_id 查。

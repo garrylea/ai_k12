@@ -1,7 +1,7 @@
 """answer_extract_cli：按学科提取试卷答案，产出 answer_importer 可消费的答案文档。
 
 两段式回写（答案只提取不生成）：
-    1) 本 CLI：试卷 md → 分学科 case 提取 → 规范答案文档（Markdown）
+    1) 本 CLI：试卷 md → 分学科策略提取 → 规范答案文档（Markdown）
     2) answer_importer_cli --doc <文档> --paper-id <id>：写回 questions.answer/explanation
 
 用法（cd tools/data-refinery）：
@@ -10,7 +10,7 @@
     python src/answer_extract_cli.py --file "..." --subject chinese --out /tmp/a.md
 
 学科默认从路径首段识别（语文/数学/…），识别不了要显式 --subject；
-各学科走 subject_cases 里各自的函数，互不影响。
+各学科走 subject_strategies 里各自的策略，互不影响。
 """
 
 import argparse
@@ -21,7 +21,8 @@ from pathlib import Path
 from config import RefineryConfig
 from paper_meta import parse_paper_meta
 from scope_filter import build_scope, match_scope
-from subject_cases import UnknownSubjectError, detect_subject, get_case
+from subject_codes import subject_code_for_path
+from subject_strategies import UnknownStrategyError, get_strategy
 
 DEFAULT_ISSUES_FILE = "answer_issues.jsonl"
 
@@ -119,15 +120,19 @@ def main(argv=None) -> int:
         return 2
     rel_md = md_path.relative_to(md_dir)
 
-    subject = args.subject or detect_subject(rel_md)
+    # 路径首段不是已知学科目录时 subject_code_for_path 返回 ""（不给默认 math），
+    # 由 get_strategy 报错并退出 —— 答案提取错学科比失败更危险。
+    subject = args.subject or subject_code_for_path(rel_md, default="")
     try:
-        case = get_case(subject)
-    except UnknownSubjectError as e:
-        print(f"错误：{e}", file=sys.stderr)
+        strategy = get_strategy(subject)
+    except UnknownStrategyError as e:
+        # 报错必须带文件：一批 md 里认不出学科的往往只有几份，不给路径就没法定位
+        # 该补哪条目录映射（重构前 detect_subject 的报错带路径，这里补回来）。
+        print(f"错误：{rel_md}：{e}", file=sys.stderr)
         return 2
 
     text = md_path.read_text(encoding="utf-8")
-    answers = case(text, md_path)
+    answers = strategy.extract_answers(text, md_path)
 
     with_answer = [a for a in answers if (a.answer or "").strip()]
     issue_count = sum(len(a.issues) for a in answers)

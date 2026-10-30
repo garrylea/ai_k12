@@ -20,11 +20,17 @@ from question_splitter import split_page, split_options
 from question_labeler import QuestionLabeler, LabeledQuestion
 from qr_detect import strip_qr_images
 from subject_codes import subject_code_for_parts
+from subject_strategies import get_strategy
 
 
-def _subject_code_for(rel_parts: tuple[str, ...]) -> str:
-    """从文件相对路径首段（中文学科名）推导 subject code。"""
-    return subject_code_for_parts(rel_parts)
+def _subject_code_for(rel_parts: tuple[str, ...]) -> str | None:
+    """从文件相对路径首段（中文学科名）推导 subject code。
+
+    识别不出时返回 None（而不是默认数学）——`get_strategy(None)` 会抛
+    UnknownStrategyError，让「目录名写错/新学科没登记」立刻暴露，
+    而不是被静默当成数学题处理。
+    """
+    return subject_code_for_parts(rel_parts, default=None)
 
 
 def _grade_band_for(filename: str) -> str:
@@ -105,7 +111,9 @@ def _fallback_label(q, subject: str = ""):
     from question_labeler import LabeledQuestion
 
     lab = LabeledQuestion.from_raw(q)
-    _, opts = split_options(q.content, subject=subject or None)
+    strategy = get_strategy(subject) if subject else None
+    _, opts = (strategy.split_options(q.content) if strategy
+               else split_options(q.content))
     lab.type = "choice" if opts else "short_answer"
     lab.difficulty = 2
     lab.is_complete = True  # 不做 LLM 修复，保持切分原文
@@ -257,6 +265,7 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                                  subject_code: str, grade_band: str,
                                  source_year: int):
     """组装 ExamQuestion JSONL（扩展字段带下划线前缀，publish 原样保留）。"""
+    strategy = get_strategy(subject_code)
     rel_file = source.rel_path / source.md_path.name
     out_file = extracted_dir / rel_file.with_suffix(".jsonl")
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -266,7 +275,7 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
         for q in labeled:
             if q.is_complete:
                 # 正常路径：Python 确定性拆选项，content 保留所有题干配图
-                stem, opts = split_options(q.content, subject=subject_code or None)
+                stem, opts = strategy.split_options(q.content)
                 item_content, item_options = stem, opts
                 item_material_text = q.material_text or None
                 item_answer = q.answer
@@ -287,7 +296,7 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 else:
                     # 只报告路径：原文缺失型缺陷（画线句/图片内文字/外部材料）不可修复，
                     # 内容仍用 Python 确定性切分结果，不拿模型编的内容顶替。
-                    stem, opts = split_options(q.content, subject=subject_code or None)
+                    stem, opts = strategy.split_options(q.content)
                     item_content, item_options = stem, opts
                     item_material_text = q.material_text or None
                     item_answer = q.answer
@@ -375,13 +384,14 @@ def extract_questions_file(source, config, llm, fb_llm,
 
     # 3. 元数据（学科决定切分策略，需在切分前）
     subject_code = _subject_code_for(rel_parts)
+    strategy = get_strategy(subject_code)
     grade_band = _grade_band_for(filename)
     source_year = _source_year_for(filename)
 
     # 4. 题号切分 + 答案对齐（一次扫描）
-    # 语文阅读材料写在题号之前（材料一/二/三），按小节归属到每道题；
-    # 其他学科保持旧行为（材料不归属）。
-    questions = split_page(text, md_path, attach_material=(subject_code == "chinese"))
+    # 材料归属（语文阅读材料写在题号之前、按小节归属到每道题）由学科策略决定，
+    # 其它学科的策略 attach=False，行为不变。
+    questions = split_page(text, md_path, strategy=strategy)
     if not questions:
         return 0
 
@@ -438,12 +448,13 @@ def extract_questions_file(source, config, llm, fb_llm,
         ]
     labeled = labeler.confirm_new_kps(labeled)
     # 确定性题型校正：能拆出完整选项的一律按选择题入库（LLM 偶发把选择题标成 short_answer）。
-    # 语文允许 3 项（甲乙丙/三选项），其它学科仍要求 4 项。
+    # 「完整」的项数区间由策略 `choice_bounds()` 决定（语文 3–6，其余 4–4）。
+    choice_low, choice_high = strategy.choice_bounds()
     for lab in labeled:
-        _, opts = split_options(lab.content, subject=subject_code or None)
+        _, opts = strategy.split_options(lab.content)
         if not opts:
             continue
-        enough = (3 <= len(opts) <= 6) if subject_code == "chinese" else (len(opts) == 4)
+        enough = choice_low <= len(opts) <= choice_high
         if enough and lab.type != "choice":
             lab.type = "choice"
 

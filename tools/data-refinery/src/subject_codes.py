@@ -1,7 +1,7 @@
 """学科名 ↔ subject code 的唯一定义（publish / extract / 答案提取共用）。
 
 中文学科名是素材目录的第 1 段（如 ``语文/初中/second/...``）。新增学科时只改这里，
-避免 publish_cli / question_extract / subject_cases 各存一份映射漂移。
+避免 publish_cli / question_extract / 答案提取各存一份映射漂移。
 """
 
 from pathlib import Path
@@ -18,7 +18,7 @@ DEFAULT_SUBJECT_CODE = "math"
 
 
 def subject_code_for_parts(rel_parts: tuple[str, ...] | list[str] | None,
-                           default: str = DEFAULT_SUBJECT_CODE) -> str:
+                           default: str | None = DEFAULT_SUBJECT_CODE) -> str | None:
     """从相对路径分段的首段（中文学科名）推导 subject code。"""
     if rel_parts:
         return SUBJECT_NAME_TO_CODE.get(str(rel_parts[0]), default)

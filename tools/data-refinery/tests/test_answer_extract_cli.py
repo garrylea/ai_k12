@@ -4,7 +4,7 @@ from pathlib import Path
 
 from answer_doc import parse_answer_doc
 from answer_extract_cli import find_paper_md, render_answer_doc
-from subject_cases import ExtractedAnswer
+from subject_strategies.types import ExtractedAnswer
 
 
 def _answers():

@@ -6,6 +6,7 @@ from question_splitter import (
 )
 from question_splitter import split_page, RawQuestion
 from question_splitter import _strip_main_stem_prefix
+from subject_strategies import get_strategy
 
 
 def test_is_date_trap_matches_year_dot_month():
@@ -744,7 +745,7 @@ def test_attach_material_section_scoped():
         "材料二 乙材料\n"
         "19. 第三题\n"
     )
-    result = split_page(text, Path("test.md"), attach_material=True)
+    result = split_page(text, Path("test.md"), strategy=get_strategy("chinese"))
     by_order = {q.group_order: q for q in result}
     assert "甲材料" in by_order[17].material_text
     assert "images/a.jpg" in by_order[17].material_text
@@ -771,7 +772,7 @@ def test_material_heads_accumulate_before_first_stem():
         "17. 第一题\n"
         "18. 第二题\n"
     )
-    result = split_page(text, Path("test.md"), attach_material=True)
+    result = split_page(text, Path("test.md"), strategy=get_strategy("chinese"))
     by_order = {q.group_order: q for q in result}
     for no in (17, 18):
         assert "甲" in by_order[no].material_text
@@ -788,7 +789,7 @@ def test_inline_group_header_closes_current_question():
         "正文段落\n"
         "17. 第一题\n"
     )
-    result = split_page(text, Path("test.md"), attach_material=True)
+    result = split_page(text, Path("test.md"), strategy=get_strategy("chinese"))
     by_order = {q.group_order: q for q in result}
     assert by_order[16].content == "名著题题干"
     assert "正文段落" not in by_order[16].content
@@ -819,7 +820,7 @@ def test_split_options_chinese_three_cn_labels():
         "【乙】第④段“宝剑锋从磨砺出”论证人生道路上总会遇到荆棘坎坷。\n"
         "【丙】第⑤段引用习近平总书记的话，意在证明奋斗无止境。"
     )
-    stem, opts = split_options(content, subject="chinese")
+    stem, opts = get_strategy("chinese").split_options(content)
     assert [o["label"] for o in opts] == ["A", "B", "C"]
     assert [o["original_label"] for o in opts] == ["甲", "乙", "丙"]
     assert "北斗卫星" in opts[0]["text"]
@@ -829,7 +830,7 @@ def test_split_options_chinese_three_cn_labels():
 def test_split_options_chinese_three_latin_labels():
     """语文 3 选项 + A/B/C：不能再要求必须 4 项。"""
     content = "你认为发言有误的学生是(2分)A.小兴 B.小红 C.小明"
-    _, opts = split_options(content, subject="chinese")
+    _, opts = get_strategy("chinese").split_options(content)
     assert [o["text"] for o in opts] == ["小兴", "小红", "小明"]
 
 
@@ -837,7 +838,7 @@ def test_split_options_math_still_requires_four():
     """数学默认规则不变：只有 3 个 A/B/C 时不拆（避免误判非选择题）。"""
     content = "你认为正确的是(2分)A.甲 B.乙 C.丙"
     assert split_options(content)[1] is None
-    assert split_options(content, subject="chinese")[1] is not None
+    assert get_strategy("chinese").split_options(content)[1] is not None
 
 
 def test_material_title_between_questions_moves_block():
@@ -858,7 +859,7 @@ def test_material_title_between_questions_moves_block():
         "5.小组成员对【甲】【乙】两处使用的标点疑问，你认为正确的一项是（2分）"
         "A.【甲】；【乙】； B.【甲】；【乙】，C.【甲】。【乙】； D.【甲】。【乙】，\n"
     )
-    questions = split_page(text, _Path("x.md"), attach_material=True)
+    questions = split_page(text, _Path("x.md"), strategy=get_strategy("chinese"))
     q4 = next(q for q in questions if q.group_order == 4)
     q5 = next(q for q in questions if q.group_order == 5)
     assert "夜幕降临" not in q4.content
@@ -892,7 +893,7 @@ def test_part_header_starts_new_material_scope():
         "4. 下列成语使用不恰当的一项是（2分）\n"
         "A. 行之有效 B. 持之以恒\n"
     )
-    questions = split_page(text, _Path("x.md"), attach_material=True)
+    questions = split_page(text, _Path("x.md"), strategy=get_strategy("chinese"))
 
     q2 = next(q for q in questions if q.group_order == 2)
     q3 = next(q for q in questions if q.group_order == 3)
@@ -909,7 +910,7 @@ def test_incomplete_option_label_run_is_not_split():
     from question_splitter import split_options
 
     content = "其中未使用修辞方法的一句是(2分)\nA. ① B ② C. ③ D. ④"
-    stem, opts = split_options(content, subject="chinese")
+    stem, opts = get_strategy("chinese").split_options(content)
     assert opts is None
     assert stem == content          # 原文完整保留，交标注判缺陷
 
@@ -917,7 +918,7 @@ def test_incomplete_option_label_run_is_not_split():
 def test_complete_four_labels_still_split():
     from question_splitter import split_options
 
-    _, opts = split_options("题干\nA. ① B. ② C. ③ D. ④", subject="chinese")
+    _, opts = get_strategy("chinese").split_options("题干\nA. ① B. ② C. ③ D. ④")
     assert [o["text"] for o in opts] == ["①", "②", "③", "④"]
 
 
@@ -933,7 +934,7 @@ def test_chinese_cn_labels_as_blank_placeholders_not_options():
         "【乙】文高濂雪后独登镇海楼赏积雪炊烟，表达他赏景的愉悦满足。\n"
         "【丙】诗中「孤舟」「独钓」写出柳宗元内心的孤寂。"
     )
-    assert split_options(content, subject="chinese")[1] is None
+    assert get_strategy("chinese").split_options(content)[1] is None
 
 
 def test_chinese_cn_labels_with_choice_hint_are_options():
@@ -945,7 +946,7 @@ def test_chinese_cn_labels_with_choice_hint_are_options():
         "【乙】第④段论证人生道路上总会遇到荆棘坎坷。\n"
         "【丙】第⑤段引用名言证明奋斗无止境。"
     )
-    _, opts = split_options(content, subject="chinese")
+    _, opts = get_strategy("chinese").split_options(content)
     assert len(opts) == 3
     assert [o["original_label"] for o in opts] == ["甲", "乙", "丙"]
 
@@ -1021,7 +1022,7 @@ def test_stem_as_markdown_heading():
         "重庆，地处华夏西南。\n\n"
         "4. 下列说法正确的一项是（2分）\nA.甲 B.乙 C.丙 D.丁\n"
     )
-    questions = split_page(text, _Path("x.md"), attach_material=True)
+    questions = split_page(text, _Path("x.md"), strategy=get_strategy("chinese"))
     assert [q.group_order for q in questions] == [1, 2, 3, 4]
     q2 = next(q for q in questions if q.group_order == 2)
     assert "甲组同学推荐" in q2.content
