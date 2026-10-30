@@ -36,39 +36,126 @@ def test_each_reading_passage_attached_to_its_own_question():
 
 
 # 竖排选项：字母单独成行、选项正文在下一行（真实排版，内核 _BARE_LINE_RE 就是为它写的）。
-# 选项正文故意都超过 30 字，旧实现会把 A 当篇章标签、关闭当前题，选项全变成下一篇材料。
+# 内核跨行分支在 A/B/C 三段都不含图时，会把 D 行之后的尾部并入题干、D 变空
+# （数学/语文共用的既有行为，不改内核）；英语策略必须先按竖排切，否则选项静默错位入库。
 _VERTICAL_OPTIONS_PAPER = """# 英语试卷
 
 1. What can we learn from the passage?
 
 A
 
-Students should keep a reading habit and read for thirty minutes every day.
+Students should read only when they feel relaxed.
 
 B
 
-Students should pick books that are interesting and easy enough to finish.
+Reading aloud helps remember new words.
 
 C
 
-Students should read only when they feel relaxed and never take any notes.
+Sharing books with friends makes reading fun.
 
 D
 
-Students should talk about what they read with their parents and teachers.
+Talking about what they read helps understanding.
 """
 
+_VERTICAL_EXPECTED = {
+    "A": "Students should read only when they feel relaxed.",
+    "B": "Reading aloud helps remember new words.",
+    "C": "Sharing books with friends makes reading fun.",
+    "D": "Talking about what they read helps understanding.",
+}
 
-def test_vertical_options_are_not_mistaken_for_passage_labels():
-    """裸字母 A/B/C/D 各占一行 + 正文在下一行 → 仍是选项，不能被当分篇吞掉。"""
+
+def test_vertical_options_keep_body_aligned_with_label():
+    """竖排 A/B/C/D：正文必须与字母一一对应，D 不能空、D 的正文不能跑进题干。"""
     from question_splitter import split_page
 
     strategy = get_strategy("english")
     questions = split_page(_VERTICAL_OPTIONS_PAPER, Path("x.md"), strategy=strategy)
-
     assert [q.group_order for q in questions] == [1]
-    # 选项正文不许被搬去材料（旧实现把 A 之后的整段并进了下一篇材料）
-    assert "Students should" not in (questions[0].material_text or "")
-    _, opts = strategy.split_options(questions[0].content)
+
+    stem, opts = strategy.split_options(questions[0].content)
     assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert [o["text"] for o in opts] == [_VERTICAL_EXPECTED[k] for k in "ABCD"]
     assert all(o["text"].strip() for o in opts)
+    assert stem == "What can we learn from the passage?"
+    assert "Talking about what they read" not in stem
+    assert "Students should" not in stem
+    # 选项正文不许被搬去材料
+    assert "Students should" not in (questions[0].material_text or "")
+    assert "Talking about" not in (questions[0].material_text or "")
+
+
+# 「A 篇 / 题1（竖排 A–D）/ B 篇 / 题2」：篇章标签 B 后面是长段落、紧接着题 2，
+# 不能因为题 1 的竖排选项也在同一大段里就把 B 判成选项标记。
+_TWO_PASSAGES_PAPER = """# 英语试卷
+
+## 一、阅读理解
+
+A
+
+Many students find it hard to keep a reading habit, but reading every day helps them learn new words.
+
+1. What is the first passage mainly about?
+
+A
+
+Students should read for thirty minutes every day after school.
+
+B
+
+Students should choose books that are easy and interesting to finish.
+
+C
+
+Students should never take notes while they are reading at home.
+
+D
+
+Students should talk about their books with parents and teachers.
+
+B
+
+A healthy diet matters more than you think, and doctors keep saying that vegetables and fruit belong on every plate.
+
+2. What is the second passage mainly about?
+
+A
+
+Children should eat more vegetables and fruit every day.
+
+B
+
+Children should sleep for at least eight hours every night.
+
+C
+
+Children should do more exercise instead of eating snacks.
+
+D
+
+Children should drink less water when they feel hungry.
+"""
+
+
+def test_second_passage_label_after_vertical_options():
+    """题1 的竖排选项之后的 B 是第二篇的标签，不是第五个选项标记。"""
+    from question_splitter import split_page
+
+    strategy = get_strategy("english")
+    questions = split_page(_TWO_PASSAGES_PAPER, Path("x.md"), strategy=strategy)
+    assert [q.group_order for q in questions] == [1, 2]
+
+    q1, q2 = questions
+    assert "keep a reading habit" in (q1.material_text or "")
+    assert "healthy diet" not in (q1.material_text or "")
+    assert "healthy diet" in (q2.material_text or "")
+    assert "keep a reading habit" not in (q2.material_text or "")
+    assert "keep a reading habit" not in q1.content
+
+    stem, opts = strategy.split_options(q1.content)
+    assert stem == "What is the first passage mainly about?"
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[3]["text"] == (
+        "Students should talk about their books with parents and teachers.")
