@@ -44,3 +44,10 @@ def test_register_does_not_allow_silent_override():
     assert get_strategy("faketest").code == "faketest"
     with pytest.raises(ValueError):
         register(Fake())  # 重复注册直接报错，避免顺序依赖
+
+
+def test_unknown_subject_dir_is_not_silently_math():
+    from question_extract import _subject_code_for
+
+    assert _subject_code_for(("科学", "初中", "first")) is None
+    assert _subject_code_for(("物理", "初中", "first")) == "physics"

@@ -18,7 +18,7 @@ DEFAULT_SUBJECT_CODE = "math"
 
 
 def subject_code_for_parts(rel_parts: tuple[str, ...] | list[str] | None,
-                           default: str = DEFAULT_SUBJECT_CODE) -> str:
+                           default: str | None = DEFAULT_SUBJECT_CODE) -> str | None:
     """从相对路径分段的首段（中文学科名）推导 subject code。"""
     if rel_parts:
         return SUBJECT_NAME_TO_CODE.get(str(rel_parts[0]), default)

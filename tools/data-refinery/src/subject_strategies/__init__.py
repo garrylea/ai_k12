@@ -43,3 +43,7 @@ register(ChemistryStrategy())
 from subject_strategies.chinese import ChineseStrategy  # noqa: E402
 
 register(ChineseStrategy())
+
+from subject_strategies.english import EnglishStrategy  # noqa: E402
+
+register(EnglishStrategy())

@@ -23,9 +23,14 @@ from subject_codes import subject_code_for_parts
 from subject_strategies import get_strategy
 
 
-def _subject_code_for(rel_parts: tuple[str, ...]) -> str:
-    """从文件相对路径首段（中文学科名）推导 subject code。"""
-    return subject_code_for_parts(rel_parts)
+def _subject_code_for(rel_parts: tuple[str, ...]) -> str | None:
+    """从文件相对路径首段（中文学科名）推导 subject code。
+
+    识别不出时返回 None（而不是默认数学）——`get_strategy(None)` 会抛
+    UnknownStrategyError，让「目录名写错/新学科没登记」立刻暴露，
+    而不是被静默当成数学题处理。
+    """
+    return subject_code_for_parts(rel_parts, default=None)
 
 
 def _grade_band_for(filename: str) -> str:
