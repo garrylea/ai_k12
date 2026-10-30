@@ -31,3 +31,11 @@ def get_strategy(code: str | None) -> QuestionStrategy:
 from subject_strategies.generic import GenericStrategy  # noqa: E402
 
 register(GenericStrategy())
+
+from subject_strategies.math import MathStrategy  # noqa: E402
+from subject_strategies.physics import PhysicsStrategy  # noqa: E402
+from subject_strategies.chemistry import ChemistryStrategy  # noqa: E402
+
+register(MathStrategy())
+register(PhysicsStrategy())
+register(ChemistryStrategy())
