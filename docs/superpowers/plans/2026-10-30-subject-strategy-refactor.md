@@ -83,8 +83,14 @@ def snapshot(md_root: Path) -> dict:
         snap[rel] = {
             "count": len(questions),
             "items": [
+                # 五个维度都要钉：题干哈希之外，材料哈希（语文材料归属）、
+                # 大题分组、分值一并有值，否则 attach_material / 分组标题解析
+                # 坏掉时快照不会报差异。
                 {"no": q.group_order,
-                 "hash": hashlib.sha1(q.content.encode("utf-8")).hexdigest()[:12]}
+                 "hash": hashlib.sha1(q.content.encode("utf-8")).hexdigest()[:12],
+                 "mat": hashlib.sha1((q.material_text or "").encode("utf-8")).hexdigest()[:12],
+                 "gid": q.group_id,
+                 "score": q.score}
                 for q in questions
             ],
         }
@@ -178,12 +184,12 @@ def test_compare_reports_content_change_and_missing_file():
 - [ ] **Step 3: 跑单测**
 
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_split_snapshot.py -q`
-Expected: `3 passed`
+Expected: `5 passed`（上述 3 个 compare 用例 + 抽样只收试卷 + 只改 `mat` 必须报差异）
 
 - [ ] **Step 4: 生成基线（用重构前的代码）**
 
 Run: `cd tools/data-refinery && python3 scripts/split_snapshot.py --write`
-Expected: `[ok] 基线已写入 …/tests/fixtures/split_snapshot.json（N 份）`，N ≈ 32（语文/数学/物理/化学各 8）
+Expected: `[ok] 基线已写入 …/tests/fixtures/split_snapshot.json（N 份）`，N = 26（语数物各 8 份试卷，化学试卷仅 2 份；只抽文件名含「试卷」的 md）
 
 - [ ] **Step 5: 验证基线可复现**
 
@@ -194,8 +200,10 @@ Expected: `[ok] N 份快照零差异`
 
 ```bash
 git add tools/data-refinery/scripts/split_snapshot.py tools/data-refinery/tests/test_split_snapshot.py tools/data-refinery/tests/fixtures/split_snapshot.json
-git commit -m "test(splitter): 切题黄金快照基线（题数 + 题干哈希，32 份抽样）"
+git commit -m "test(splitter): 切题黄金快照基线（题数/题干/材料/分组/分值，26 份试卷抽样）"
 ```
+
+> **落地实况（与本节快照的差异）**：交付版本比上面两段代码更严——① 抽样只收文件名含「试卷」的 md（教科书单页切出 0 题，纳入只会得到空断言）；② `compare()` 的差异行改为只列出变动的字段（`第 1 项 mat '…' -> '…'`），不再是整份 dict 对打；③ 单测共 5 个：上述 3 个 compare 用例之外，另有「抽样只收试卷」和「只改 `mat` 也必须报差异」两条。
 
 ---
 
@@ -1239,7 +1247,8 @@ entry = snap.get(rel)
 if entry is None:
     print(f"该卷不在抽样快照里，需手工前后比对：{rel}")
 else:
-    base = entry["items"]
+    # 物理卷没有材料归属，只比对题号与题干哈希（基线条目另有 mat/gid/score）
+    base = [{k: it[k] for k in ("no", "hash")} for it in entry["items"]]
     now = [{"no": r["group_order"],
             "hash": hashlib.sha1(r["content"].encode()).hexdigest()[:12]} for r in rows]
     diff = [i for i, (a, b) in enumerate(zip(now, base)) if a != b]
@@ -1272,7 +1281,8 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
 - 内核 `question_splitter.py` 只保留与学科无关的扫描（行内粘连、日期陷阱、OCR 错认纠正），
   回归判据：`grep -n '"chinese"' src/question_splitter.py` 无命中。
 - 行为回归靠 `scripts/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
-  每科 8 份抽样的题数 + 题干哈希），重构任何一步都必须零差异。
+  每科至多 8 份试卷抽样，逐题记录题号 / 题干哈希 / 材料哈希 / 大题分组 / 分值），
+  重构任何一步都必须零差异。
 ```
 
 - [ ] **Step 4: 写 changelog**
