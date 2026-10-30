@@ -24,7 +24,11 @@ _LABELS_ONLY_SUFFIX = (
 
 def _python_options_complete(q: RawQuestion, subject: str = "") -> bool:
     """Python 是否已从原题拆出完整的选项（语文允许 3 项，数学要求 4 项）。"""
-    _, opts = split_options(q.content, subject=subject or None)
+    from subject_strategies import get_strategy
+
+    strategy = get_strategy(subject) if subject else None
+    _, opts = (strategy.split_options(q.content) if strategy
+               else split_options(q.content))
     if not opts:
         return False
     if subject == "chinese":
@@ -75,6 +79,8 @@ def _validate_item(item: dict, q: RawQuestion, subject: str = "") -> list[str]:
     - 一致性：Python 已拆出完整选项时，重写 options 与拆分不一致 → 缺陷（防丢内容/编造）；
       只判 false 不重写时，缺陷在材料/题干则接受，只提选项或说不出缺陷则视为误判
     """
+    from subject_strategies import get_strategy
+
     issues: list[str] = []
     t = item.get("type")
     if t not in _VALID_TYPES:
@@ -119,7 +125,8 @@ def _validate_item(item: dict, q: RawQuestion, subject: str = "") -> list[str]:
     # - LLM 要重写 options：必须与 Python 拆分逐项一致，否则拒绝（防丢内容/编造）
     # - LLM 只判 false、不重写：若缺陷在材料/题干，接受（真缺陷，标待复核）；
     #   若只提选项或说不出缺陷，说明是误判，以 Python 为准
-    _, py_opts = split_options(q.content, subject=subject or None)
+    _, py_opts = (get_strategy(subject).split_options(q.content) if subject
+                  else split_options(q.content))
     py_complete = _python_options_complete(q, subject)
     if py_complete and isinstance(comp, dict) and not bool(comp.get("is_complete", True)):
         if isinstance(regen, dict):
@@ -208,7 +215,11 @@ def _render_content(content: str, subject: str = "") -> str:
     （题干：/选项A：.../选项D：...），完整性检测基于确定性拆分结果判，
     避免对 content-above 等排版误判缺陷后用 regenerated 覆盖正确拆分；
     拆分失败（非选择题/格式不符）时用原文。"""
-    stem, opts = split_options(content, subject=subject or None)
+    from subject_strategies import get_strategy
+
+    strategy = get_strategy(subject) if subject else None
+    stem, opts = (strategy.split_options(content) if strategy
+                  else split_options(content))
     if not opts:
         return content
     parts = [f"题干：{stem}"]

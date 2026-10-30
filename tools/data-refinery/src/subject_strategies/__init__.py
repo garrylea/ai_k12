@@ -39,3 +39,7 @@ from subject_strategies.chemistry import ChemistryStrategy  # noqa: E402
 register(MathStrategy())
 register(PhysicsStrategy())
 register(ChemistryStrategy())
+
+from subject_strategies.chinese import ChineseStrategy  # noqa: E402
+
+register(ChineseStrategy())

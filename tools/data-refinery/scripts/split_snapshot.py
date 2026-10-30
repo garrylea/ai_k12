@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from question_splitter import split_page  # noqa: E402
 from subject_codes import subject_code_for_path  # noqa: E402
+from subject_strategies import get_strategy  # noqa: E402
 
 SAMPLE_PER_SUBJECT = 8
 BASELINE = ROOT / "tests" / "fixtures" / "split_snapshot.json"
@@ -48,7 +49,7 @@ def snapshot(md_root: Path) -> dict:
         code = subject_code_for_path(path.relative_to(md_root), default="math")
         questions = split_page(
             path.read_text(encoding="utf-8"), path,
-            attach_material=(code == "chinese"),
+            strategy=get_strategy(code),
         )
         snap[rel] = {
             "count": len(questions),
