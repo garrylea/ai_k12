@@ -30,4 +30,6 @@ def test_each_reading_passage_attached_to_its_own_question():
 
     assert [q.group_order for q in questions] == [1, 2]
     assert "three tips" in (questions[0].material_text or "")
+    assert "healthy diet" not in (questions[0].material_text or "")
     assert "healthy diet" in (questions[1].material_text or "")
+    assert "three tips" not in (questions[1].material_text or "")
