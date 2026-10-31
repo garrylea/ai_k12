@@ -20,11 +20,8 @@
 
 import getpass
 import json
-import os
 import re
-import shlex
 import shutil
-import subprocess
 import sys
 import tempfile
 from datetime import datetime
@@ -284,59 +281,68 @@ def _from_file(paper_md_dir: Path, raw: str | None = None) -> str | None:
         return None
 
 
-def _editor_command() -> list[str] | None:
-    for env in ("VISUAL", "EDITOR"):
-        value = os.environ.get(env)
-        if value:
-            return shlex.split(value)
-    for cand in ("nano", "vim", "vi"):
-        if shutil.which(cand):
-            return [cand]
-    return None
+_EDIT_HINT = "d N 删第N行 · c N 内容 改第N行 · i N 内容 在第N行后插入 · p 重看 · w 完成 · q 放弃"
 
 
-def _edit_in_editor(text: str) -> str | None:
-    """把内容丢进 $EDITOR 让人改（终端里粘错的多行没法逐字删，只能这样改）。
+def _line_edit(text: str) -> str | None:
+    """内置逐行编辑：不调用 vim/nano，改完按 w 返回；q 放弃（返回 None）。
 
-    返回改后的正文；没有编辑器或编辑失败时返回 None，调用方保留原内容。
+    2026-10-31 事故：`e` 直接拉 $EDITOR，用户卡在 vim/nano 里出不来
+    （Esc 没用、`:q` 也只是被当正文）。全屏编辑器一旦上手不顺就会把人困住，
+    所以改成在终端里逐行改：删行、改行、插入行，都是普通一行文字。
     """
-    cmd = _editor_command()
-    if cmd is None:
-        return None
-    fd, name = tempfile.mkstemp(suffix=".md", prefix="k12-fix-")
-    path = Path(name)
     c = console()
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-        # 说清楚"接下来屏幕会被编辑器接管"，否则用户会以为是程序把 e 吃掉了
-        proven = Path(cmd[0]).name
-        if proven in ("vim", "vi", "nvim"):
-            # vim 会清屏，先停下来让人看清怎么退，再进编辑器
-            c.info(f"即将用 {proven} 打开编辑器 —— 退出方法：按 Esc，输入 :wq 回车保存退出；"
-                   f"输入 :q! 回车放弃修改")
-            c.prompt("按回车进入编辑器（输 q 取消）› ")
-            if (_read_line() or "").strip().lower() == "q":
-                c.warn("已取消编辑，题面保持原样")
-                return None
-        elif proven.startswith("nano"):
-            c.info("正在用 nano 打开编辑器 —— Ctrl+O 回车保存、Ctrl+X 退出；"
-                   "直接 Ctrl+X 就是不改")
-        else:
-            c.info(f"正在用 {proven} 打开编辑器；保存退出后自动读回，不改就退出")
-        try:
-            code = subprocess.call(cmd + [str(path)])
-        except OSError as exc:
-            c.err(f"打不开编辑器：{exc}")
+    lines = text.splitlines()
+
+    def show() -> None:
+        numbered = "\n".join(f"{i:>3}  {line}" for i, line in enumerate(lines, 1))
+        c.block(f"题面（共 {len(lines)} 行）", numbered, max_lines=20)
+
+    show()
+    c.legend([("d N", "删第 N 行"), ("c N 内容", "改第 N 行"),
+              ("i N 内容", "第 N 行后插入"), ("p", "重看"), ("w", "完成"), ("q", "放弃")])
+    while True:
+        c.prompt("编辑› ")
+        raw = _read_line()
+        if raw is None:
+            return "\n".join(lines)
+        raw = raw.strip()
+        if not raw:
+            continue
+        cmd, _, rest = raw.partition(" ")
+        cmd = cmd.lower()
+        if cmd in ("w", "save"):
+            return "\n".join(lines)
+        if cmd in ("q", "quit"):
             return None
-        if code != 0:
-            c.warn(f"编辑器返回 {code}，内容按未修改处理")
-            return None
-        edited = path.read_text(encoding="utf-8").strip()
-        c.ok(f"已从编辑器读回 {len(edited.splitlines())} 行")
-        return edited
-    finally:
-        path.unlink(missing_ok=True)
+        if cmd == "p":
+            show()
+            continue
+        if cmd in ("d", "c", "i"):
+            head, _, body = rest.partition(" ")
+            try:
+                no = int(head)
+            except ValueError:
+                c.warn("用法：" + _EDIT_HINT)
+                continue
+            limit = len(lines) + (1 if cmd == "i" else 0)
+            if not 1 <= no <= max(limit, 1):
+                c.warn(f"行号超出范围（1–{max(len(lines), 1)}）")
+                continue
+            body = body.strip()
+            if cmd == "d":
+                del lines[no - 1]
+                c.ok(f"已删除第 {no} 行，现在共 {len(lines)} 行")
+            elif not body:
+                c.warn("缺少新内容，例如：c 3 新的这一行")
+            elif cmd == "c":
+                lines[no - 1] = body
+                c.ok(f"已改第 {no} 行")
+            else:
+                lines.insert(no, body)
+                c.ok(f"已在第 {no} 行后插入，现在共 {len(lines)} 行")
+            continue
+        c.warn("指令不认识；" + _EDIT_HINT)
 
 
 def _confirm_text(text: str) -> tuple[str, str]:
@@ -351,7 +357,7 @@ def _confirm_text(text: str) -> tuple[str, str]:
     if ans in ("r", "redo"):
         return "redo", ""
     if ans in ("e", "edit"):
-        edited = _edit_in_editor(text)
+        edited = _line_edit(text)
         if edited is None:
             c.warn("没找到可用的编辑器（$VISUAL/$EDITOR/nano/vim），已保留原内容")
             return "ok", text
@@ -505,7 +511,7 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
 
             # 只认**小写**单字母：英语选项答案可能是大写 E，不能被当成命令
             if answer in ("e", "edit"):
-                edited = _edit_in_editor(body)
+                edited = _line_edit(body)
                 if edited is None:
                     c.warn("没找到可用的编辑器（$VISUAL/$EDITOR/nano/vim），题面未改")
                 elif not edited.strip():

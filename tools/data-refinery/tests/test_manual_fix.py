@@ -491,19 +491,19 @@ def test_confirm_redo_discards_previous_text(tmp_path, monkeypatch):
     assert manual_fix._collect_content(tmp_path) == "第二版正确"
 
 
-def test_confirm_edit_uses_editor(tmp_path, monkeypatch):
+def test_confirm_edit_uses_line_editor(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("原始内容\nEOF\ne\n\n\n"))
-    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: "编辑器改过的内容")
+    monkeypatch.setattr(manual_fix, "_line_edit", lambda text: "改过的内容")
 
-    assert manual_fix._collect_content(tmp_path) == "编辑器改过的内容"
+    assert manual_fix._collect_content(tmp_path) == "改过的内容"
 
 
-def test_confirm_edit_without_editor_keeps_original(tmp_path, monkeypatch, capsys):
+def test_confirm_edit_cancelled_keeps_original(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO("原始内容\nEOF\ne\n\n\n"))
-    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: None)
+    monkeypatch.setattr(manual_fix, "_line_edit", lambda text: None)
 
     assert manual_fix._collect_content(tmp_path) == "原始内容"
-    assert "没找到可用的编辑器" in capsys.readouterr().out
+    assert True  # 取消编辑时静默保留，不再提外部编辑器
 
 
 def test_confirm_skip_returns_none(tmp_path, monkeypatch):
@@ -512,9 +512,7 @@ def test_confirm_skip_returns_none(tmp_path, monkeypatch):
     assert manual_fix._collect_content(tmp_path) is None
 
 
-def test_editor_command_prefers_env(monkeypatch):
-    monkeypatch.setenv("EDITOR", "my-editor --wait")
-    assert manual_fix._editor_command() == ["my-editor", "--wait"]
+
 
 
 # ---------- 答案这一步也能返工（e 改题面 / r 重录 / s 放弃） ----------
@@ -524,12 +522,12 @@ def test_answer_e_edits_stem_instead_of_becoming_answer(tmp_path, monkeypatch):
     path = _prep_n(tmp_path, monkeypatch)
     issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     monkeypatch.setattr("sys.stdin", io.StringIO("1\n原始题面内容\nEOF\n\ne\n\n"))
-    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: "编辑器改后的题面")
+    monkeypatch.setattr(manual_fix, "_line_edit", lambda text: "改后的题面")
 
     recs = manual_fix._ask(issue, tmp_path)
 
     assert len(recs) == 1
-    assert recs[0]["content"] == "编辑器改后的题面"
+    assert recs[0]["content"] == "改后的题面"
     assert recs[0]["answer"] == "", "e 不能被当成答案存下来"
 
 
@@ -558,7 +556,7 @@ def test_answer_edit_without_editor_keeps_stem(tmp_path, monkeypatch):
     path = _prep_n(tmp_path, monkeypatch)
     issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     monkeypatch.setattr("sys.stdin", io.StringIO("1\n原题面\nEOF\n\ne\n\n"))
-    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: None)
+    monkeypatch.setattr(manual_fix, "_line_edit", lambda text: None)
 
     recs = manual_fix._ask(issue, tmp_path)
 
@@ -585,35 +583,42 @@ def test_uppercase_E_is_still_a_valid_answer(tmp_path, monkeypatch):
     assert recs[0]["answer"] == "E"
 
 
-def test_vim_hint_tells_how_to_leave(monkeypatch, capsys):
-    """用 vim 时必须告诉人怎么退出去（Esc :wq / :q!）。"""
-    monkeypatch.setattr(manual_fix, "_editor_command", lambda: ["vim"])
-    monkeypatch.setattr(manual_fix.subprocess, "call", lambda cmd: 0)
-    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
-
-    manual_fix._edit_in_editor("题面")
-
-    out = capsys.readouterr().out
-    assert "Esc" in out and ":wq" in out and ":q!" in out
 
 
-def test_nano_hint(monkeypatch, capsys):
-    monkeypatch.setattr(manual_fix, "_editor_command", lambda: ["nano"])
-    monkeypatch.setattr(manual_fix.subprocess, "call", lambda cmd: 0)
+# ---------- 内置逐行编辑（不依赖 vim/nano） ----------
 
-    manual_fix._edit_in_editor("题面")
-
-    out = capsys.readouterr().out
-    assert "Ctrl+O" in out and "Ctrl+X" in out
+def _edit_with(monkeypatch, *commands):
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n".join(commands) + "\n"))
+    return manual_fix._line_edit("第一行\n第二行\n第三行")
 
 
-def test_vim_gate_can_be_cancelled(monkeypatch, capsys):
-    """按 q 不进 vim（免得人卡在里面）。"""
-    called = []
-    monkeypatch.setattr(manual_fix, "_editor_command", lambda: ["vim"])
-    monkeypatch.setattr(manual_fix.subprocess, "call", lambda cmd: called.append(cmd))
-    monkeypatch.setattr("sys.stdin", io.StringIO("q\n"))
+def test_line_edit_delete_line(monkeypatch):
+    assert _edit_with(monkeypatch, "d 2", "w") == "第一行\n第三行"
 
-    assert manual_fix._edit_in_editor("题面") is None
-    assert called == []
-    assert "已取消编辑" in capsys.readouterr().out
+
+def test_line_edit_replace_line(monkeypatch):
+    assert _edit_with(monkeypatch, "c 2 替换后的第二行", "w") == "第一行\n替换后的第二行\n第三行"
+
+
+def test_line_edit_insert_after(monkeypatch):
+    assert _edit_with(monkeypatch, "i 1 插到第一行后面", "w") == \
+        "第一行\n插到第一行后面\n第二行\n第三行"
+
+
+def test_line_edit_quit_returns_none(monkeypatch):
+    assert _edit_with(monkeypatch, "q") is None
+
+
+def test_line_edit_bad_command_reprompts(monkeypatch, capsys):
+    assert _edit_with(monkeypatch, "x 1", "d 1", "w") == "第二行\n第三行"
+    assert "指令不认识" in capsys.readouterr().out
+
+
+def test_line_edit_out_of_range_warns(monkeypatch, capsys):
+    assert _edit_with(monkeypatch, "d 9", "w") == "第一行\n第二行\n第三行"
+    assert "行号超出范围" in capsys.readouterr().out
+
+
+def test_line_edit_show_and_save(monkeypatch, capsys):
+    assert _edit_with(monkeypatch, "p", "w") == "第一行\n第二行\n第三行"
+    assert "题面（共 3 行）" in capsys.readouterr().out
