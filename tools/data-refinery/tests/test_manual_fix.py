@@ -583,3 +583,37 @@ def test_uppercase_E_is_still_a_valid_answer(tmp_path, monkeypatch):
     recs = manual_fix._ask(issue, tmp_path)
 
     assert recs[0]["answer"] == "E"
+
+
+def test_vim_hint_tells_how_to_leave(monkeypatch, capsys):
+    """用 vim 时必须告诉人怎么退出去（Esc :wq / :q!）。"""
+    monkeypatch.setattr(manual_fix, "_editor_command", lambda: ["vim"])
+    monkeypatch.setattr(manual_fix.subprocess, "call", lambda cmd: 0)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+
+    manual_fix._edit_in_editor("题面")
+
+    out = capsys.readouterr().out
+    assert "Esc" in out and ":wq" in out and ":q!" in out
+
+
+def test_nano_hint(monkeypatch, capsys):
+    monkeypatch.setattr(manual_fix, "_editor_command", lambda: ["nano"])
+    monkeypatch.setattr(manual_fix.subprocess, "call", lambda cmd: 0)
+
+    manual_fix._edit_in_editor("题面")
+
+    out = capsys.readouterr().out
+    assert "Ctrl+O" in out and "Ctrl+X" in out
+
+
+def test_vim_gate_can_be_cancelled(monkeypatch, capsys):
+    """按 q 不进 vim（免得人卡在里面）。"""
+    called = []
+    monkeypatch.setattr(manual_fix, "_editor_command", lambda: ["vim"])
+    monkeypatch.setattr(manual_fix.subprocess, "call", lambda cmd: called.append(cmd))
+    monkeypatch.setattr("sys.stdin", io.StringIO("q\n"))
+
+    assert manual_fix._edit_in_editor("题面") is None
+    assert called == []
+    assert "已取消编辑" in capsys.readouterr().out

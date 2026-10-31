@@ -310,8 +310,20 @@ def _edit_in_editor(text: str) -> str | None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         # 说清楚"接下来屏幕会被编辑器接管"，否则用户会以为是程序把 e 吃掉了
-        c.info(f"正在用 {' '.join(cmd)} 打开编辑器；保存退出（vim: :wq  nano: Ctrl+O 回车 "
-               f"Ctrl+X）后自动读回，不改就退出")
+        proven = Path(cmd[0]).name
+        if proven in ("vim", "vi", "nvim"):
+            # vim 会清屏，先停下来让人看清怎么退，再进编辑器
+            c.info(f"即将用 {proven} 打开编辑器 —— 退出方法：按 Esc，输入 :wq 回车保存退出；"
+                   f"输入 :q! 回车放弃修改")
+            c.prompt("按回车进入编辑器（输 q 取消）› ")
+            if (_read_line() or "").strip().lower() == "q":
+                c.warn("已取消编辑，题面保持原样")
+                return None
+        elif proven.startswith("nano"):
+            c.info("正在用 nano 打开编辑器 —— Ctrl+O 回车保存、Ctrl+X 退出；"
+                   "直接 Ctrl+X 就是不改")
+        else:
+            c.info(f"正在用 {proven} 打开编辑器；保存退出后自动读回，不改就退出")
         try:
             code = subprocess.call(cmd + [str(path)])
         except OSError as exc:
