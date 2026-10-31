@@ -187,14 +187,7 @@ def _subject_of(issue: dict) -> str:
     return subject_code_for_path(rel, default="") or "generic"
 
 
-def _ask(issue: dict, paper_md_dir: Path) -> list[dict]:
-    """引导补一道或多道题；返回记录列表（空列表 = 跳过）。
-
-    粘贴里如果带多个题号（比如把 27、28 一起贴进来），按题号拆成多条记录，
-    各自保留自己的题号 —— 这样「改短题 27 + 补出题 28」一次就能做完。
-    """
-    strategy = get_strategy(_subject_of(issue))
-
+def _print_context(issue: dict) -> None:
     print("─" * 72, flush=True)
     print(f"【{issue['source']}】第 {issue['group_order']} 题有问题")
     print(f"原文件：{issue.get('pdf') or '（未找到对应 PDF）'}")
@@ -207,25 +200,50 @@ def _ask(issue: dict, paper_md_dir: Path) -> list[dict]:
         for line in issue["excerpt"].splitlines()[:12]:
             print("    " + line)
     print("─" * 72)
+
+
+def _targets(issue: dict) -> list[tuple[int, str]]:
+    """这次要依次录入哪些题号：先修「吸收了内容的那一题」，再补缺的这一题。
+
+    一题一录（2026-10-31 用户裁决）：不要在一次粘贴里塞多道题，而是
+    引导完一题再引导下一题，各自以 EOF 结束。
+    """
+    suspect = issue.get("suspect_group_order")
+    seq: list[tuple[int, str]] = []
+    if isinstance(suspect, int) and suspect != issue["group_order"]:
+        seq.append((suspect, "这一题的正文里混进了下一题，请只保留本题自己的内容"))
+    seq.append((issue["group_order"], "这一题是缺失/被吞的，请录入完整题目"))
+    return seq
+
+
+def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
+             strategy, step: str) -> list[dict]:
+    """引导录入一道题（允许粘贴里带多个题号，但提示按一题一录）。"""
+    print("", flush=True)
+    print(f"──── {step}：录入第 {target_no} 题 ────", flush=True)
+    if note:
+        print(f"（{note}）", flush=True)
     print("请提供真题：1) 直接粘贴 Markdown（出现 EOF 即结束）"
           "  2) 图片路径（自动转 md）  3) @文件路径")
-    print("             s) 跳过   q) 退出")
+    print("             s) 跳过本题   q) 退出")
 
     content = _collect_content(paper_md_dir)
-    if content is None or not content.strip():
-        if content is not None:
-            print("[跳过] 内容为空，未记录", flush=True)
+    if content is None:
+        print(f"[跳过] 第 {target_no} 题未录入", flush=True)
+        return []
+    if not content.strip():
+        print("[跳过] 内容为空，未记录", flush=True)
         return []
 
     parts = split_questions(content, strategy)
-    multi = len(parts) > 1
-    if multi:
-        print(f"[拆分] 这段内容里有 {len(parts)} 道题："
-              f"{[no if no is not None else '无题号' for no, _ in parts]}", flush=True)
+    if len(parts) > 1:
+        print(f"[提示] 这段里出现了 {len(parts)} 个题号，已分别记录"
+              f"（下次可以一题一录，更不容易串题）", flush=True)
 
     records: list[dict] = []
+    multi = len(parts) > 1
     for no, body in parts:
-        target = no if no is not None else issue["group_order"]
+        target = no if no is not None else target_no
         stem, options = strategy.split_options(body)
         if options:
             print(f"[题{target}] 题干 {len(stem)} 字，选项 "
@@ -252,6 +270,19 @@ def _ask(issue: dict, paper_md_dir: Path) -> list[dict]:
             "applied": False,
         })
         print(f"[ok] 已记录：第 {target} 题，{len(stem.strip())} 字", flush=True)
+    return records
+
+
+def _ask(issue: dict, paper_md_dir: Path) -> list[dict]:
+    """逐题引导：先修被吞的那一题，再补缺失的那一题；每题各自以 EOF 结束。"""
+    strategy = get_strategy(_subject_of(issue))
+    _print_context(issue)
+
+    targets = _targets(issue)
+    records: list[dict] = []
+    for i, (no, note) in enumerate(targets, 1):
+        step = f"第 {i}/{len(targets)} 步" if len(targets) > 1 else "本题"
+        records.extend(_ask_one(issue, no, note, paper_md_dir, strategy, step))
     return records
 
 

@@ -312,3 +312,70 @@ def test_review_writes_all_records_from_one_paste(tmp_path, monkeypatch):
     statuses = [_json.loads(l)["status"] for l in path.read_text(encoding="utf-8").splitlines()]
     assert statuses == ["resolved", "resolved"]
     assert res["fixed"] == 2 and res["skipped"] == 0, "已收口的题不该再问一遍"
+
+
+# ---------- 逐题引导（先修被吞的题，再补缺的题） ----------
+
+def _prep_pair(tmp_path, monkeypatch):
+    """造一条「题 28 缺失，疑被题 27 吸收」的 issue。"""
+    md_dir = tmp_path / "md" / "物理" / "初中" / "first" / "2024" / "卷A"
+    md_dir.mkdir(parents=True, exist_ok=True)
+    (md_dir / "卷A.md").write_text("", encoding="utf-8")
+    issue = {"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+             "group_order": 28, "kind": "missing", "reasons": ["missing_stem"],
+             "suspect_group_order": 27, "excerpt": "",
+             "pdf": None, "md": str(md_dir / "卷A.md"), "status": "pending"}
+    path = tmp_path / "issues.jsonl"
+    path.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    return issue, path
+
+
+def test_targets_puts_suspect_first():
+    issue = {"group_order": 28, "suspect_group_order": 27}
+    assert [no for no, _ in manual_fix._targets(issue)] == [27, 28]
+
+
+def test_targets_single_when_no_suspect():
+    issue = {"group_order": 28, "suspect_group_order": None}
+    assert [no for no, _ in manual_fix._targets(issue)] == [28]
+
+
+def test_ask_guides_two_questions_one_at_a_time(tmp_path, monkeypatch, capsys):
+    """先录 27（改短）、再录 28（补缺），两块输入各以 EOF 结束。"""
+    issue, _ = _prep_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "27 题改短后的正文\nEOF\n\n"      # 题 27 正文 + 答案留空
+        "28 题补出来的正文\nEOF\n\n"))    # 题 28 正文 + 答案留空
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert [r["group_order"] for r in recs] == [27, 28]
+    assert recs[0]["content"] == "27 题改短后的正文"
+    assert recs[1]["content"] == "28 题补出来的正文"
+    out = capsys.readouterr().out
+    assert "第 1/2 步：录入第 27 题" in out
+    assert "第 2/2 步：录入第 28 题" in out
+
+
+def test_ask_skipping_first_still_prompts_second(tmp_path, monkeypatch, capsys):
+    issue, _ = _prep_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("s\n28 题正文\nEOF\n\n"))
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert [r["group_order"] for r in recs] == [28]
+    assert "第 27 题未录入" in capsys.readouterr().out
+
+
+def test_review_pair_records_both_numbers(tmp_path, monkeypatch):
+    issue, path = _prep_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "27 正文\nEOF\n\n28 正文\nEOF\n\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    lines = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [_json.loads(l)["group_order"] for l in lines] == [27, 28]
+    assert res["fixed"] == 2
+    assert _json.loads(path.read_text(encoding="utf-8"))["status"] == "resolved"
