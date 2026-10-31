@@ -234,9 +234,22 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
             f.write(json.dumps(it, ensure_ascii=False) + "\n")
             added += 1
             known.add(key)
-    if added:
-        print(f"[ok] 新增 {added} 条识别问题 -> {ISSUES_FILE.relative_to(ROOT)}"
-              f"（累计 {len(known)} 条）；用 scripts/fix_question_cli.py 逐条补", flush=True)
-    else:
-        print(f"[ok] 无新增识别问题（清单累计 {len(known)} 条）", flush=True)
+    # 本次扫到的卷里还有多少条没处理 —— 这才是「要不要进人工」的判据，
+    # 只看「新增 0」会误以为全部解析正常。
+    pending_by_source: dict[str, list] = {}
+    for rec in records + [{"source": i["source"], "group_order": i["group_order"],
+                           "kind": i["kind"], "status": "pending"} for i in all_issues
+                          if (i["source"], i["group_order"], i["kind"]) not in
+                          {(r["source"], r["group_order"], r["kind"]) for r in records}]:
+        if rec.get("status") == "pending" and rec.get("source") in scanned:
+            pending_by_source.setdefault(rec["source"], []).append(
+                f"{rec['group_order']}({rec['kind']})")
+    total_pending = sum(len(v) for v in pending_by_source.values())
+    for src in sorted(pending_by_source):
+        items = pending_by_source[src]
+        head = "、".join(items[:8]) + (f" 等 {len(items)} 条" if len(items) > 8 else "")
+        print(f"[pending] {src}: {head}", flush=True)
+    print(f"[ok] 本次检出 {len(all_issues)} 处，其中 {total_pending} 条待人工处理"
+          f"（新增 {added} 条记录）；补题命令：python3 scripts/fix_question_cli.py --source <卷名>",
+          flush=True)
     return all_issues

@@ -295,10 +295,12 @@ def main(argv=None):
                 print(f"[WARN] {rel}: 无法解析试卷元数据，题目照常入库但不归组", flush=True)
             n = loader.load_questions(qs, paper=paper_ctx)
             total_q += n
-            print(f"[ok] {rel} -> {n} questions"
+            # n 只是「本次新增」；重跑时全为 0 很容易被读成「这卷没题」，所以补上总数
+            print(f"[ok] {rel} -> 新增 {n} 题 / 本卷共 {len(qs)} 题"
                   + (f"（paper={paper_ctx[1]}）" if paper_ctx else ""), flush=True)
 
-        print(f"Loaded: {total_cards} cards, {total_q} questions"
+        print(f"Loaded: 新增 {total_cards} 张卡 / 新增 {total_q} 题"
+              f"（增量模式：已存在或已更新的不计入）"
               + (f"（{failed_books} 本书因业务数据守卫被跳过）" if failed_books else ""),
               flush=True)
     finally:
