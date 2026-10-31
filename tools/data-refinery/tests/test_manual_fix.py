@@ -354,8 +354,8 @@ def test_ask_guides_two_questions_one_at_a_time(tmp_path, monkeypatch, capsys):
     assert recs[0]["content"] == "27 题改短后的正文"
     assert recs[1]["content"] == "28 题补出来的正文"
     out = capsys.readouterr().out
-    assert "第 1/2 步：录入第 27 题" in out
-    assert "第 2/2 步：录入第 28 题" in out
+    assert "第 1/2 步" in out and "录入第 27 题" in out
+    assert "第 2/2 步" in out and "录入第 28 题" in out
 
 
 def test_ask_skipping_first_still_prompts_second(tmp_path, monkeypatch, capsys):

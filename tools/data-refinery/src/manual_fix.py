@@ -24,6 +24,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from cli_ui import Console
 from subject_codes import subject_code_for_path
 from subject_strategies import get_strategy
 
@@ -32,6 +33,55 @@ ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
 FIXES_DIR = ROOT / "output" / "manual_fixes"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 _END_MARKERS = {"EOF", "END", "结束"}
+
+
+_CONSOLE: Console | None = None
+
+
+def console() -> Console:
+    """进程内复用一个 Console（颜色/宽度只探测一次）。"""
+    global _CONSOLE
+    if _CONSOLE is None:
+        _CONSOLE = Console()
+    return _CONSOLE
+
+
+_REASON_TEXT = {
+    "missing_stem": "题号缺失",
+    "md_has_no_such_stem": "原 Markdown 里找不到该题号",
+    "md_uses_punct_separator": "原 Markdown 用的是顿号题号（如「18、」）",
+    "prev_has_two_option_blocks": "上一题里混入了两组选项",
+    "prev_has_second_subq_series": "上一题里出现了第二组小问",
+    "next_starts_with_subq_no_stem": "下一题以 (1) 开头却没有题干",
+    "content_looks_like_page_chrome": "这行是卷首页脚/署名，不是题目",
+}
+
+
+def humanize_reasons(reasons: list[str]) -> list[str]:
+    """把扫描器的机器标记翻成人话（认不出的原样保留）。"""
+    out: list[str] = []
+    for reason in reasons or []:
+        if reason in _REASON_TEXT:
+            out.append(_REASON_TEXT[reason])
+            continue
+        m = re.match(r"prev_len_(\d+)_vs_median_(\d+)", reason)
+        if m:
+            out.append(f"上一题 {m.group(1)} 字（全卷中位 {m.group(2)} 字）")
+            continue
+        m = re.match(r"prev_repair_shrank_(\d+)_to_(\d+)", reason)
+        if m:
+            out.append(f"上一题被自动修复砍短（{m.group(1)}→{m.group(2)} 字）")
+            continue
+        m = re.match(r"repair_shrank_(\d+)_to_(\d+)", reason)
+        if m:
+            out.append(f"自动修复把内容砍短（{m.group(1)}→{m.group(2)} 字）")
+            continue
+        m = re.match(r"md_stem_appears_(\d+)x", reason)
+        if m:
+            out.append(f"原 Markdown 里该题号出现 {m.group(1)} 次")
+            continue
+        out.append(reason)
+    return out
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -88,8 +138,7 @@ def _split_at_marker(text: str) -> tuple[str, bool]:
 
 def _read_block(first_chunk: str = "") -> str:
     """读到结束标记为止，返回正文；first_chunk 是已经读到的那一段。"""
-    print("（粘贴 Markdown，出现 EOF 即结束，大小写不限；s 跳过 / q 退出）",
-          flush=True)
+    c = console()
     body, done = _split_at_marker(first_chunk)
     lines = body.splitlines() if body else []
     while not done:
@@ -100,8 +149,8 @@ def _read_block(first_chunk: str = "") -> str:
         if body:
             lines.extend(body.splitlines())
             if len(lines) % 10 == 0:
-                print(f"  …已收到 {len(lines)} 行（输入 EOF 结束）", flush=True)
-    print(f"[已收到 {len(lines)} 行]", flush=True)
+                c.info(f"已收到 {len(lines)} 行…")
+    c.ok(f"已收到 {len(lines)} 行")
     return "\n".join(lines).strip()
 
 
@@ -153,8 +202,10 @@ def _image_to_markdown(image: Path, paper_md_dir: Path) -> str:
 
 def _collect_content(paper_md_dir: Path) -> str | None:
     """读人工输入；返回 Markdown 正文，跳过时返回 None。"""
+    c = console()
     while True:
-        first = _read_line("> ")
+        c.prompt("› ")
+        first = _read_line()
         if first is None:
             return None
         first = first.strip()
@@ -170,12 +221,12 @@ def _collect_content(paper_md_dir: Path) -> str | None:
 
         candidate = Path(first).expanduser()
         if candidate.suffix.lower() in IMAGE_SUFFIXES and candidate.exists():
-            print(f"[mineru] 正在把 {candidate.name} 转成 Markdown…", flush=True)
+            c.info(f"调用 MinerU 识别 {candidate.name} …")
             text = _image_to_markdown(candidate, paper_md_dir)
-            print("--- MinerU 结果 ---")
-            print(text)
-            print("--- 结果结束 ---")
-            if (_read_line("用这段内容吗？[Y/n] ") or "").strip().lower() in ("n", "no"):
+            c.write("")
+            c.block("识别结果", text, max_lines=12)
+            c.prompt("用这段内容吗？[Y/n] ")
+            if (_read_line() or "").strip().lower() in ("n", "no"):
                 continue
             return text
 
@@ -187,19 +238,35 @@ def _subject_of(issue: dict) -> str:
     return subject_code_for_path(rel, default="") or "generic"
 
 
-def _print_context(issue: dict) -> None:
-    print("─" * 72, flush=True)
-    print(f"【{issue['source']}】第 {issue['group_order']} 题有问题")
-    print(f"原文件：{issue.get('pdf') or '（未找到对应 PDF）'}")
-    print(f"MD 文件：{issue.get('md')}")
-    print(f"判定：{'；'.join(issue.get('reasons') or [])}")
+_KIND_TEXT = {
+    "missing": "题号缺失",
+    "punct_stem": "顿号题号未识别",
+    "repair_truncated": "自动修复砍短了内容",
+    "junk_question": "卷首页脚被当成题目",
+}
+
+
+def _print_context(issue: dict, index: int | None = None, total: int | None = None) -> None:
+    c = console()
+    kind = _KIND_TEXT.get(issue.get("kind"), issue.get("kind") or "识别问题")
+    counter = f"[{index}/{total}]" if index and total else ""
+    no_text = f"第 {issue['group_order']} 题"
+    tail = f"  {c.paint(counter, 'grey')}" if counter else ""
+    c.write("")
+    c.write(f"{c.paint(no_text, 'bold')}{c.paint(' · ' + kind, 'cyan')}{tail}")
+    pairs = [("卷", issue["source"]),
+             ("原卷", issue.get("pdf") or "（未找到对应 PDF）"),
+             ("文本", issue.get("md") or "—"),
+             ("依据", " · ".join(humanize_reasons(issue.get("reasons") or [])))]
     if issue.get("suspect_group_order"):
-        print(f"疑点：题 {issue['suspect_group_order']} 可能吸收了本题内容")
-    if issue.get("excerpt"):
-        print("证据片段：")
-        for line in issue["excerpt"].splitlines()[:12]:
-            print("    " + line)
-    print("─" * 72)
+        pairs.append(("疑点", f"第 {issue['suspect_group_order']} 题的正文里可能混进了本题"))
+    c.kv([p for p in pairs if p[0] != "依据"], label_width=4)
+    reasons = humanize_reasons(issue.get("reasons") or [])
+    if reasons:
+        from cli_ui import wrap_items
+        for i, line in enumerate(wrap_items(reasons, c.width - 8)):
+            c.write(f"  {c.paint('依据' if i == 0 else '    ', 'dim')}  {line}")
+    c.block("证据", issue.get("excerpt") or "", max_lines=5)
 
 
 def _targets(issue: dict) -> list[tuple[int, str]]:
@@ -217,28 +284,24 @@ def _targets(issue: dict) -> list[tuple[int, str]]:
 
 
 def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
-             strategy, step: str) -> list[dict]:
+             strategy, index: int = 1, total: int = 1) -> list[dict]:
     """引导录入一道题（允许粘贴里带多个题号，但提示按一题一录）。"""
-    print("", flush=True)
-    print(f"──── {step}：录入第 {target_no} 题 ────", flush=True)
-    if note:
-        print(f"（{note}）", flush=True)
-    print("请提供真题：1) 直接粘贴 Markdown（出现 EOF 即结束）"
-          "  2) 图片路径（自动转 md）  3) @文件路径")
-    print("             s) 跳过本题   q) 退出")
+    c = console()
+    c.step(index, total, f"录入第 {target_no} 题", note)
+    c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "@文件"),
+              ("s", "跳过本题"), ("q", "退出")])
 
     content = _collect_content(paper_md_dir)
     if content is None:
-        print(f"[跳过] 第 {target_no} 题未录入", flush=True)
+        c.warn(f"第 {target_no} 题未录入，已跳过")
         return []
     if not content.strip():
-        print("[跳过] 内容为空，未记录", flush=True)
+        c.warn("内容为空，未记录")
         return []
 
     parts = split_questions(content, strategy)
     if len(parts) > 1:
-        print(f"[提示] 这段里出现了 {len(parts)} 个题号，已分别记录"
-              f"（下次可以一题一录，更不容易串题）", flush=True)
+        c.warn(f"这段里出现了 {len(parts)} 个题号，已分别记录（建议下次一题一录）")
 
     records: list[dict] = []
     multi = len(parts) > 1
@@ -246,12 +309,12 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
         target = no if no is not None else target_no
         stem, options = strategy.split_options(body)
         if options:
-            print(f"[题{target}] 题干 {len(stem)} 字，选项 "
-                  f"{[o['label'] for o in options]}", flush=True)
+            c.ok(f"第 {target} 题 · 题干 {len(stem)} 字 · 选项 "
+                 f"{'/'.join(o['label'] for o in options)}")
         else:
-            print(f"[题{target}] 未识别出选项，整段作为题干（{len(body)} 字）", flush=True)
-        answer = (_read_line(f"题{target} 答案（可留空）：" if multi else "答案（可留空）：")
-                  or "").strip()
+            c.ok(f"第 {target} 题 · 题干 {len(body)} 字 · 无选项（按简答题处理）")
+        c.prompt(f"第 {target} 题答案（可留空）› " if multi else "答案（可留空）› ")
+        answer = (_read_line() or "").strip()
         records.append({
             "source": issue["source"],
             "rel_path": issue["rel_path"],
@@ -269,20 +332,20 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             "status": "ready",
             "applied": False,
         })
-        print(f"[ok] 已记录：第 {target} 题，{len(stem.strip())} 字", flush=True)
+        c.ok(f"已记录第 {target} 题（{len(stem.strip())} 字）")
     return records
 
 
-def _ask(issue: dict, paper_md_dir: Path) -> list[dict]:
+def _ask(issue: dict, paper_md_dir: Path,
+         index: int | None = None, total: int | None = None) -> list[dict]:
     """逐题引导：先修被吞的那一题，再补缺失的那一题；每题各自以 EOF 结束。"""
     strategy = get_strategy(_subject_of(issue))
-    _print_context(issue)
+    _print_context(issue, index, total)
 
     targets = _targets(issue)
     records: list[dict] = []
     for i, (no, note) in enumerate(targets, 1):
-        step = f"第 {i}/{len(targets)} 步" if len(targets) > 1 else "本题"
-        records.extend(_ask_one(issue, no, note, paper_md_dir, strategy, step))
+        records.extend(_ask_one(issue, no, note, paper_md_dir, strategy, i, len(targets)))
     return records
 
 
@@ -297,28 +360,54 @@ def pending_issues(sources: set[str] | None = None,
     return issues
 
 
+def _print_table(issues: list[dict]) -> None:
+    """只列清单：每条形如「卷  题号  类型」，下一行缩进给依据。"""
+    from cli_ui import pad, truncate_middle
+
+    c = console()
+    w_src = min(44, c.width - 24)
+    c.write("")
+    c.write("  " + c.paint(f"{pad('卷', w_src)}  题号  类型", "dim"))
+    c.rule("─")
+    for it in issues:
+        kind = _KIND_TEXT.get(it.get("kind"), it.get("kind") or "")
+        reasons = [h for h in humanize_reasons(it.get("reasons") or []) if h != kind]
+        src = pad(truncate_middle(it["source"], w_src), w_src)
+        c.write(f"  {src}  {it['group_order']:>4}  {c.paint(kind, 'cyan')}")
+        if reasons:
+            from cli_ui import wrap_items
+            for line in wrap_items(reasons, c.width - 8):
+                c.write("      " + c.paint(line, "dim"))
+    c.write("")
+    c.info(f"共 {len(issues)} 条待处理")
+
+
 def review_pending(sources: set[str] | None = None,
                    file: str | None = None,
                    *, list_only: bool = False,
                    fixes_dir: Path | None = None,
                    limit: int | None = None) -> dict:
     """逐条引导补题。返回 {"pending", "fixed", "skipped"}。"""
+    c = console()
     issues = pending_issues(sources, file)
     result = {"pending": len(issues), "fixed": 0, "skipped": 0}
     if not issues:
-        print("[done] 没有待处理的问题", flush=True)
+        c.write("")
+        c.ok("没有待人工处理的题")
         return result
 
     if list_only:
-        for i in issues:
-            print(f"{i['source'][:34]} 题{i['group_order']:<3} {i['kind']:<16} "
-                  f"{'；'.join(i.get('reasons') or [])}")
-        print(f"共 {len(issues)} 条")
+        _print_table(issues)
         return result
+
+    c.banner("识别问题补录",
+             f"待处理 {len(issues)} 条 · 一题一录，出现 EOF 结束 · s 跳过 · q 退出")
 
     all_issues = _read_jsonl(ISSUES_FILE)   # 写回时要用全量
     out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
-    for issue in (issues[:limit] if limit else issues):
+    todo = issues[:limit] if limit else issues
+    for n, issue in enumerate(todo, 1):
+        total_now = len(todo)
         # 一次粘贴可能顺带补好别的题号：轮到它时已经 resolved，别再问一遍
         live = next((it for it in all_issues
                      if it["source"] == issue["source"]
@@ -328,10 +417,10 @@ def review_pending(sources: set[str] | None = None,
             continue
         paper_md_dir = Path(issue["md"]).parent if issue.get("md") else None
         if paper_md_dir is None:
-            print(f"[skip] {issue['source']} 题{issue['group_order']}：缺 md 路径", flush=True)
+            c.warn(f"第 {issue['group_order']} 题缺少 md 路径，已跳过")
             result["skipped"] += 1
             continue
-        records = _ask(issue, paper_md_dir)
+        records = _ask(issue, paper_md_dir, n, total_now)
         if not records:
             result["skipped"] += 1
             continue
@@ -354,11 +443,13 @@ def review_pending(sources: set[str] | None = None,
         _write_jsonl(ISSUES_FILE, all_issues)
         result["fixed"] += len(records)
 
-    print(f"\n[完成] 本次补了 {result['fixed']} 题，跳过 {result['skipped']} 条；"
-          f"文件在 {out_dir}", flush=True)
+    remaining = len(pending_issues(sources, file))
+    c.summary([("本次补录", f"{result['fixed']} 题"),
+               ("跳过", f"{result['skipped']} 条"),
+               ("仍待处理", f"{remaining} 条"),
+               ("落盘", str(out_dir))])
     if result["fixed"]:
-        print("下一步：python3 scripts/apply_fixes_cli.py --dry-run 预览，再 --apply 入库",
-              flush=True)
+        c.info("下一步：python3 scripts/apply_fixes_cli.py --dry-run 预览，再加 --apply 入库")
     return result
 
 
