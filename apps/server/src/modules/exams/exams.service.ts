@@ -12,6 +12,7 @@ import type { AwardResult } from '../points/points.service.js';
 import { toPointsAwardDto } from '../points/dto/points.dto.js';
 import type { EventsService } from '../analytics/events.service.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
+import { selfAssessSkipsJudging } from '../../common/subject-config.js';
 import type { ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
 import type { ExamPaperDto, PaperDetailDto, PaperQueryDto } from './dto/paper-query.dto.js';
 import type {
@@ -23,18 +24,18 @@ import type {
 const MIN_DURATION = 10;
 const MAX_DURATION = 300;
 
-/** 纯客观题型：精确判分。 */
-const OBJECTIVE_TYPES = new Set(['choice', 'true_false']);
-
 /**
- * 是否按「自评」处理（不判对错、结果页对照参考答案自评）。
+ * 是否按「自评」处理（不判对错、结果页对照参考答案自评）—— 闸门①。
  *
- * - 数学：沿用判题体系重构口径（short_answer/proof + JUDGE_SUBJECTIVE_MODE=self_assess）
- * - 语文：**非客观题一律自评**（2026-10-28 裁决）——填空/简答答案多为「示例：…」，
+ * - 语文：非客观题一律自评（2026-10-28 裁决）——填空/简答答案多为「示例：…」，
  *   精确判对几乎不可能，且 AI 判题模板目前只有数学，语文走 AI 会被数学提示词误判。
+ * - 物理/化学/道法：**仅 short_answer/proof 跳过判题**；fill_blank/calculation 必须
+ *   进 JudgeCore 先做归一化比对，否则化学填空永远判不对（spec 2026-10-31 §3.5）。
+ * - 数学：沿用 JUDGE_SUBJECTIVE_MODE（默认 self_assess）。**闸门①先于模式开关**——
+ *   新学科即使配 ai 模式也跳过 short_answer/proof，避免无参考答案的主观题被 AI 误判。
  */
 export function shouldSelfAssess(subjectId: number, type: string): boolean {
-  if (Number(subjectId) === 2 && !OBJECTIVE_TYPES.has(type)) return true;
+  if (selfAssessSkipsJudging(subjectId, type)) return true;
   return subjectiveJudgeMode() === 'self_assess' && SUBJECTIVE_TYPES.has(type);
 }
 
@@ -340,7 +341,7 @@ export class ExamsService {
           method: 'unanswered',
           judgedAt: new Date(),
         });
-        await this.writeExamErrorBook(session, q.questionId);
+        await this.writeExamErrorBookIfAnswerable(session, q);
       } else if (a.is_correct == null) {
         // 在途：judgeCore 补判；失败按错计 method='failed' 仍入错题本
         try {
@@ -420,6 +421,17 @@ export class ExamsService {
       this.logger.warn(`awardPaperPoints failed (student=${studentId}, session=${sessionId}): ${err}`);
       return null;
     }
+  }
+
+  /** 未作答按错计入错题本；**无参考答案的题不入本**——否则错题练习再遇到它走空答案守卫，
+   *  既不自评也不清零，学生在 App 里永远清不掉（物理 51/52/53 号卷即此情况）。
+   *  `hasAnswer` 是 MySQL 0/1 数；测试 fixture 缺该字段时 `=== 0` 不成立，保持旧行为。 */
+  private async writeExamErrorBookIfAnswerable(
+    session: ExamSessionRow,
+    q: { questionId: number; hasAnswer?: number },
+  ): Promise<void> {
+    if (q.hasAnswer === 0) return;
+    await this.writeExamErrorBook(session, q.questionId);
   }
 
   /** 考试来源错题本写入（未作答按错计 / 补判失败兜底共用）。

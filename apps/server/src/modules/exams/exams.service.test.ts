@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ExamsService, computeRecommendedDuration } from './exams.service';
+import { ExamsService, computeRecommendedDuration, shouldSelfAssess } from './exams.service';
 
 const mk = (overrides: any = {}) => ({
   examPapersRepo: {
@@ -926,5 +926,70 @@ describe('ExamsService.getResults', () => {
       examSessionsRepo: { ...mk().examSessionsRepo, findById: vi.fn().mockResolvedValue(sessionRow({ student_id: 42 })) },
     });
     await expect(mkSvc(deps2).getResults(1, 77)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+// ============================================================
+// Task 3：闸门①收窄（selfAssessSkipsJudging）+ 无参考答案题不入错题本
+// ============================================================
+
+describe('ExamsService.shouldSelfAssess（闸门①）', () => {
+  it('语文非客观题放行，客观题不放行', () => {
+    expect(shouldSelfAssess(2, 'fill_blank')).toBe(true);
+    expect(shouldSelfAssess(2, 'choice')).toBe(false);
+  });
+
+  it('新学科只有 short_answer/proof 跳过判题，填空/计算必须进判题', () => {
+    expect(shouldSelfAssess(4, 'short_answer')).toBe(true);
+    expect(shouldSelfAssess(5, 'short_answer')).toBe(true);
+    expect(shouldSelfAssess(9, 'short_answer')).toBe(true);
+    expect(shouldSelfAssess(4, 'calculation')).toBe(false);
+    expect(shouldSelfAssess(5, 'fill_blank')).toBe(false);
+  });
+
+  it('数学主观题沿用 JUDGE_SUBJECTIVE_MODE=self_assess', () => {
+    expect(shouldSelfAssess(1, 'short_answer')).toBe(true);
+    expect(shouldSelfAssess(1, 'fill_blank')).toBe(false);
+  });
+
+  it('新学科即使 JUDGE_SUBJECTIVE_MODE=ai 也跳过判题（闸门①先于模式开关）', () => {
+    process.env.JUDGE_SUBJECTIVE_MODE = 'ai';
+    expect(shouldSelfAssess(4, 'short_answer')).toBe(true);
+    expect(shouldSelfAssess(5, 'short_answer')).toBe(true);
+    expect(shouldSelfAssess(9, 'proof')).toBe(true);
+    expect(shouldSelfAssess(1, 'short_answer')).toBe(false);
+  });
+});
+
+describe('ExamsService.finalizeSession 无答案题', () => {
+  it('未作答且无参考答案 -> 记 0 分但不写错题本', async () => {
+    const deps = mk();
+    deps.examPapersRepo.findById.mockResolvedValue(paperRow);
+    deps.examPapersRepo.findQuestionsByPaperId.mockResolvedValue([
+      { questionId: 10, questionNo: 1, text: '无答案题', type: 'choice', options: null, materialText: null, hasAnswer: 0 },
+    ]);
+    deps.examSessionsRepo.findAnswersBySession.mockResolvedValue([]);
+    deps.examSessionsRepo.findById.mockResolvedValue(sessionRow());
+
+    await mkSvc(deps).submit(1, 77);
+
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 10, isCorrect: 0, method: 'unanswered',
+    }));
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('未作答但有参考答案 -> 仍写错题本（旧行为）', async () => {
+    const deps = mk();
+    deps.examPapersRepo.findById.mockResolvedValue(paperRow);
+    deps.examPapersRepo.findQuestionsByPaperId.mockResolvedValue([
+      { questionId: 10, questionNo: 1, text: '正常题', type: 'choice', options: null, materialText: null, hasAnswer: 1 },
+    ]);
+    deps.examSessionsRepo.findAnswersBySession.mockResolvedValue([]);
+    deps.examSessionsRepo.findById.mockResolvedValue(sessionRow());
+
+    await mkSvc(deps).submit(1, 77);
+
+    expect(deps.mainErrorRepo.create).toHaveBeenCalled();
   });
 });

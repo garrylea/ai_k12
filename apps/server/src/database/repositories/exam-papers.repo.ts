@@ -13,7 +13,9 @@ export interface ExamPaperRow {
   question_count: number;
 }
 
-/** 试卷题目元数据行（paper_questions JOIN questions，不含 answer/explanation）。 */
+/** 试卷题目元数据行（paper_questions JOIN questions，不含 answer/explanation 正文）。
+ *  `hasAnswer` 只暴露布尔标记（1 = 有参考答案；0 = 空答案，交卷时不入错题本）；服务端内部用，
+ *  不进 toSessionQuestion，对客户端不可见。 */
 export interface PaperQuestionRow {
   questionId: number;
   questionNo: number;
@@ -22,6 +24,8 @@ export interface PaperQuestionRow {
   options: string | null;
   /** 同节共享材料（语文阅读/文段题）；数学卷为 null。 */
   materialText: string | null;
+  /** 1 = 有参考答案；0 = 空答案（判不了分，交卷时不入错题本）。 */
+  hasAnswer: number;
 }
 
 /**
@@ -81,11 +85,13 @@ export class ExamPapersRepository {
     return (rows[0] as unknown as ExamPaperRow) ?? null;
   }
 
-  /** 试卷题目元数据（仅激活题 + 进入考试的题，按卷内题号排序；不含 answer/explanation 列）。 */
+  /** 试卷题目元数据（仅激活题 + 进入考试的题，按卷内题号排序；不含 answer/explanation 列，
+   *  但带 hasAnswer 标记：交卷时无参考答案的题不入错题本）。 */
   async findQuestionsByPaperId(paperId: number): Promise<PaperQuestionRow[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT q.id AS questionId, pq.question_no AS questionNo, q.content AS text, q.type,
-              q.options, q.material_text AS materialText
+              q.options, q.material_text AS materialText,
+              (q.answer IS NOT NULL AND TRIM(q.answer) <> '') AS hasAnswer
        FROM paper_questions pq JOIN questions q ON q.id = pq.question_id
        WHERE pq.paper_id = ? AND q.is_active = 1 AND pq.in_exam = 1
        ORDER BY pq.question_no`,
