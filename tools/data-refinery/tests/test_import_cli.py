@@ -384,4 +384,5 @@ def test_apply_entry_declined_keeps_records(monkeypatch, capsys):
     import_cli._apply_entry(_apply_args())([])
 
     assert all("--apply" not in c for c in calls)
-    assert "跳过" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "未写库，本次未写入的 1 条" in out and "卷A" in out, "回车后要把清单再贴一遍"

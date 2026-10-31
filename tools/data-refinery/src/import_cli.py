@@ -333,7 +333,16 @@ def _apply_entry(args):
         if ans not in ("y", "yes"):
             cmd = "python3 scripts/apply_fixes_cli.py --dry-run" + (
                 " " + " ".join(scope) if scope else "")
-            print("[跳过] 未写库；补题记录仍在 output/manual_fixes/", flush=True)
+            # 把清单再贴一遍：预览可能已经滚上去，这里是屏幕上最后的记录
+            print(f"[跳过] 未写库，本次未写入的 {len(recs)} 条：", flush=True)
+            for rec in recs[:12]:
+                label = rec.get("source", "?")
+                if "202407-" in label:
+                    label = label.split("202407-", 1)[1]
+                print(f"       {label}  题{rec.get('group_order', '?')}", flush=True)
+            if len(recs) > 12:
+                print(f"       …另有 {len(recs) - 12} 条", flush=True)
+            print("       补题记录仍在 output/manual_fixes/", flush=True)
             print(f"       再看一遍上面的预览：{cmd}", flush=True)
             print("       确认要写时：把 --dry-run 换成 --apply", flush=True)
             return 0

@@ -160,7 +160,7 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
 
     files = sorted(Path(args.fixes_dir).glob("*.jsonl"))
     if not files:
-        print(f"[done] {args.fixes_dir} 下没有补题记录")
+        print(f"[done] {args.fixes_dir} 下没有补题记录", flush=True)
         return 0
 
     cfg = RefineryConfig.from_env()
@@ -182,7 +182,8 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                     todo = [r for r in todo if args.source in r["source"]]
                 for rec in todo:
                     msg = apply_record(cur, rec, args.apply)
-                    print(f"[{rec['source'][:26]}] 题{rec['group_order']}: {msg}")
+                    print(f"[{rec['source'][:26]}] 题{rec['group_order']}: {msg}",
+                          flush=True)
                     if not args.apply:
                         previewed += 1
                         continue
@@ -203,13 +204,13 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                 mark_issue(source, go, "resolved", note="已写入题库", fix_file=f)
             for source, go, _ in rejected_keys:
                 mark_issue(source, go, "pending", note="补录内容被拒（疑似界面文字），请重新补录")
-            print(f"\n[ok] 已写入 {total} 题")
+            print(f"\n[ok] 已写入 {total} 题", flush=True)
         else:
             conn.rollback()
             if via_pipeline:
-                print(f"\n[预览] 共 {previewed} 条，均未写库")
+                print(f"\n[预览] 共 {previewed} 条，均未写库", flush=True)
             else:
-                print(f"\n[dry-run] 预览 {previewed} 条；确认后加 --apply")
+                print(f"\n[dry-run] 预览 {previewed} 条；确认后加 --apply", flush=True)
     finally:
         conn.close()
     return 0
