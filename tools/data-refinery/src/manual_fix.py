@@ -1,19 +1,20 @@
 """逐条引导人工补题：把识别漏掉的题目补回来，落到 manual_fixes/，稍后统一入库。
 
-流程（对应 output/recognition_issues.jsonl 的 pending 项）：
-1. 打印问题上下文：哪份卷、第几题、原 PDF 路径、md 路径、判定原因、可疑片段；
-2. 人工给真题：粘贴 Markdown / 给图片路径（自动调 MinerU 转 md）/ 读本地文件；
-3. 自动拆选项（走该学科策略）、可选填答案与材料；
-4. 写入 output/manual_fixes/<卷名>.jsonl（status=ready），并把 issue 标 resolved。
-
-入库不在这里做 —— 收集完之后跑 scripts/apply_fixes_cli.py。
-
 入口：
     import_cli 第 7 步在 TTY 下自动调用 review_pending()；
     也可以单独跑 scripts/fix_question_cli.py（同一套逻辑）。
+
+一次交互的输入约定：
+- 直接粘贴 Markdown，最后单独一行输入 `EOF`（大小写均可，也认 END / 结束）；
+- 或输入图片路径（.png/.jpg/…），自动调 MinerU 转成 Markdown 并落图；
+- 或输入 `@某个文件路径` 直接读取本地 md/txt；
+- `s` 跳过本题，`q` 退出。
+
+输入层用 `sys.stdin.readline()` 而不是 `input()`：终端把整段粘贴当一坨塞进来时
+（bracketed paste），readline 会一次返回多行，旧实现只按行匹配 EOF，把标记连同
+正文一起吞掉后继续等下一行 —— 用户看到的就是「加了 EOF 还卡住」。
 """
 
-import argparse
 import getpass
 import json
 import shutil
@@ -22,15 +23,14 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from subject_codes import subject_code_for_path
+from subject_strategies import get_strategy
+
 ROOT = Path(__file__).resolve().parents[1]
-
-from subject_codes import subject_code_for_path  # noqa: E402
-from subject_strategies import get_strategy  # noqa: E402
-
 ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
 FIXES_DIR = ROOT / "output" / "manual_fixes"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-MULTILINE_END = "EOF"
+_END_MARKERS = {"EOF", "END", "结束"}
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -41,21 +41,50 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
-    path.write_text(text, encoding="utf-8")
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                    encoding="utf-8")
 
 
-def _read_multiline() -> str:
-    print(f"（粘贴 Markdown，结束后单独一行输入 {MULTILINE_END}）")
-    lines = []
-    while True:
-        try:
-            line = input()
-        except EOFError:
+def _read_line(prompt: str = "") -> str | None:
+    """读一行；输入流结束时返回 None（不抛 EOFError，避免半路崩栈）。"""
+    if prompt:
+        print(prompt, end="", flush=True)
+    line = sys.stdin.readline()
+    if line == "":
+        return None
+    return line.rstrip("\n")
+
+
+def _split_at_marker(text: str) -> tuple[str, bool]:
+    """按结束标记切开一段输入；返回 (标记之前的正文, 是否遇到标记)。
+
+    一段输入可能是多行（终端整段粘贴时 readline 一次返回一坨），所以必须逐行扫，
+    不能只看第一行。
+    """
+    kept: list[str] = []
+    for line in text.splitlines():
+        if line.strip().upper() in _END_MARKERS:
+            return "\n".join(kept).strip(), True
+        kept.append(line)
+    return "\n".join(kept).strip(), False
+
+
+def _read_block(first_chunk: str = "") -> str:
+    """读到结束标记为止，返回正文；first_chunk 是已经读到的那一段。"""
+    print("（粘贴 Markdown，结束后单独一行输入 EOF，大小写均可；s 跳过 / q 退出）",
+          flush=True)
+    body, done = _split_at_marker(first_chunk)
+    lines = body.splitlines() if body else []
+    while not done:
+        chunk = sys.stdin.readline()
+        if chunk == "":          # 输入流结束：当成正文到此为止，不卡死
             break
-        if line.strip() == MULTILINE_END:
-            break
-        lines.append(line)
+        body, done = _split_at_marker(chunk)
+        if body:
+            lines.extend(body.splitlines())
+            if len(lines) % 10 == 0:
+                print(f"  …已收到 {len(lines)} 行（输入 EOF 结束）", flush=True)
+    print(f"[已收到 {len(lines)} 行]", flush=True)
     return "\n".join(lines).strip()
 
 
@@ -70,7 +99,6 @@ def _image_to_markdown(image: Path, paper_md_dir: Path) -> str:
         if not mds:
             raise RuntimeError("MinerU 没有产出 Markdown")
         text = mds[0].read_text(encoding="utf-8").strip()
-        # 图片引用是 images/<hash>.jpg，按同名拷到该卷目录，引用即可直接生效
         src_images = out / "images"
         if src_images.is_dir():
             dst = paper_md_dir / "images"
@@ -81,34 +109,35 @@ def _image_to_markdown(image: Path, paper_md_dir: Path) -> str:
     return text
 
 
-def _collect_content(issue: dict, paper_md_dir: Path) -> str | None:
+def _collect_content(paper_md_dir: Path) -> str | None:
     """读人工输入；返回 Markdown 正文，跳过时返回 None。"""
-    first = input("> ").strip()
-    if first in ("s", "S"):
-        return None
-    if first in ("q", "Q"):
-        raise SystemExit(0)
+    while True:
+        first = _read_line("> ")
+        if first is None:
+            return None
+        first = first.strip()
+        if first.lower() == "s":
+            return None
+        if first.lower() == "q":
+            raise SystemExit(0)
+        if first.startswith("@"):
+            path = Path(first[1:]).expanduser()
+            return path.read_text(encoding="utf-8").strip()
+        if not first:
+            return _read_block("")
 
-    if first.startswith("@"):
-        path = Path(first[1:]).expanduser()
-        return path.read_text(encoding="utf-8").strip()
+        candidate = Path(first).expanduser()
+        if candidate.suffix.lower() in IMAGE_SUFFIXES and candidate.exists():
+            print(f"[mineru] 正在把 {candidate.name} 转成 Markdown…", flush=True)
+            text = _image_to_markdown(candidate, paper_md_dir)
+            print("--- MinerU 结果 ---")
+            print(text)
+            print("--- 结果结束 ---")
+            if (_read_line("用这段内容吗？[Y/n] ") or "").strip().lower() in ("n", "no"):
+                continue
+            return text
 
-    candidate = Path(first).expanduser()
-    if first and candidate.suffix.lower() in IMAGE_SUFFIXES and candidate.exists():
-        print(f"[mineru] 正在把 {candidate.name} 转成 Markdown…", flush=True)
-        text = _image_to_markdown(candidate, paper_md_dir)
-        print("--- MinerU 结果 ---")
-        print(text)
-        print("--- 结果结束 ---")
-        if input("用这段内容吗？[Y/n] ").strip().lower() in ("n", "no"):
-            return _collect_content(issue, paper_md_dir)
-        return text
-
-    if first:
-        # 单行输入当作题干首行，继续读到 EOF
-        rest = _read_multiline()
-        return "\n".join([first, rest]).strip() if rest else first
-    return _read_multiline()
+        return _read_block(first)
 
 
 def _subject_of(issue: dict) -> str:
@@ -117,10 +146,9 @@ def _subject_of(issue: dict) -> str:
 
 
 def _ask(issue: dict, paper_md_dir: Path) -> dict | None:
-    subject = _subject_of(issue)
-    strategy = get_strategy(subject)
+    strategy = get_strategy(_subject_of(issue))
 
-    print("─" * 72)
+    print("─" * 72, flush=True)
     print(f"【{issue['source']}】第 {issue['group_order']} 题有问题")
     print(f"原文件：{issue.get('pdf') or '（未找到对应 PDF）'}")
     print(f"MD 文件：{issue.get('md')}")
@@ -136,18 +164,21 @@ def _ask(issue: dict, paper_md_dir: Path) -> dict | None:
           "  2) 图片路径（自动转 md）  3) @文件路径")
     print("             s) 跳过   q) 退出")
 
-    content = _collect_content(issue, paper_md_dir)
+    content = _collect_content(paper_md_dir)
     if content is None:
+        return None
+    if not content.strip():
+        print("[跳过] 内容为空，未记录", flush=True)
         return None
 
     stem, options = strategy.split_options(content)
     if options:
         print(f"[拆分] 题干 {len(stem)} 字，选项 {len(options)} 项："
-              f"{[o['label'] for o in options]}")
+              f"{[o['label'] for o in options]}", flush=True)
     else:
-        print(f"[拆分] 未识别出选项，整段作为题干（{len(content)} 字）")
+        print(f"[拆分] 未识别出选项，整段作为题干（{len(content)} 字）", flush=True)
 
-    answer = input("答案（可留空）：").strip()
+    answer = (_read_line("答案（可留空）：") or "").strip()
     record = {
         "source": issue["source"],
         "rel_path": issue["rel_path"],
@@ -165,7 +196,7 @@ def _ask(issue: dict, paper_md_dir: Path) -> dict | None:
         "status": "ready",
         "applied": False,
     }
-    print(f"[ok] 已记录：第 {record['group_order']} 题，{len(record['content'])} 字")
+    print(f"[ok] 已记录：第 {record['group_order']} 题，{len(record['content'])} 字", flush=True)
     return record
 
 
@@ -185,10 +216,7 @@ def review_pending(sources: set[str] | None = None,
                    *, list_only: bool = False,
                    fixes_dir: Path | None = None,
                    limit: int | None = None) -> dict:
-    """逐条引导补题。返回 {"pending", "fixed", "skipped"}。
-
-    list_only=True 只打印清单；fixes_dir 缺省 output/manual_fixes。
-    """
+    """逐条引导补题。返回 {"pending", "fixed", "skipped"}。"""
     issues = pending_issues(sources, file)
     result = {"pending": len(issues), "fixed": 0, "skipped": 0}
     if not issues:
@@ -204,7 +232,7 @@ def review_pending(sources: set[str] | None = None,
 
     all_issues = _read_jsonl(ISSUES_FILE)   # 写回时要用全量
     out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
-    for issue in issues[: limit] if limit else issues:
+    for issue in (issues[:limit] if limit else issues):
         paper_md_dir = Path(issue["md"]).parent if issue.get("md") else None
         if paper_md_dir is None:
             print(f"[skip] {issue['source']} 题{issue['group_order']}：缺 md 路径", flush=True)
@@ -239,14 +267,14 @@ def review_pending(sources: set[str] | None = None,
 
 def main() -> int:
     global ISSUES_FILE
+    import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", help="卷名子串过滤，如 人大附中")
-    parser.add_argument("--issues", default=str(ISSUES_FILE))
     parser.add_argument("--fixes-dir", default=str(FIXES_DIR))
     parser.add_argument("--list", action="store_true", help="只列清单，不进入交互")
     args = parser.parse_args()
 
-    ISSUES_FILE = Path(args.issues)
     review_pending(file=args.source, list_only=args.list, fixes_dir=Path(args.fixes_dir))
     return 0
 
