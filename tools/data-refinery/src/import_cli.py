@@ -20,12 +20,13 @@
 
 第 6 步扫识别问题（缺号/被吞/卷首页脚），第 7 步在**交互终端**下直接逐条引导
 人工补题（粘贴 md 或给图片走 MinerU），补好的内容落 output/manual_fixes/；
-非交互终端只打印补题命令，不会卡住 CI。补完用 scripts/apply_fixes_cli.py --apply
-统一写库；`--skip-review` 可关掉第 7 步。
+第 8 步先预览「会改哪些题」，交互终端下问一次 `y` 才写库。非交互终端只打印
+命令，不会卡住 CI。`--skip-review` 可关掉第 7/8 步。
 """
 
 import argparse
 import copy
+import sys
 
 from answer_backfill import backfill as answers_backfill
 from config import RefineryConfig
@@ -252,24 +253,26 @@ def _execute(args) -> int:
 
     stages = []
     if not args.skip_convert:
-        stages.append(("1/7 convert（素材 → md）", convert_main, convert_argv(args)))
+        stages.append(("1/8 convert（素材 → md）", convert_main, convert_argv(args)))
     if not args.skip_extract:
-        stages.append(("2/7 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
+        stages.append(("2/8 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
     if not args.skip_publish:
-        stages.append(("3/7 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
+        stages.append(("3/8 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
     if not args.skip_load:
-        stages.append(("4/7 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
+        stages.append(("4/8 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
     # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起
     if not args.skip_answers and not args.cards_only and not args.skip_load:
-        stages.append(("5/7 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
+        stages.append(("5/8 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
     # 识别问题扫描：缺号 / 被吞 / 卷首页脚被当题，落 output/recognition_issues.jsonl，
     # 供 scripts/fix_question_cli.py 逐条人工补题（不阻塞入库，可随时补跑）
     if not args.cards_only:
-        stages.append(("6/7 识别问题扫描（缺号/被吞/噪声题）", _scan_entry(args), []))
+        stages.append(("6/8 识别问题扫描（缺号/被吞/噪声题）", _scan_entry(args), []))
         # 扫完直接引导人工补题：交互终端下会逐条问，非交互（CI/管道）只打印命令，
         # 避免 CI 卡在 input() 上。补完的内容在 output/manual_fixes/，
         # 用 scripts/apply_fixes_cli.py --apply 统一写库。
-        stages.append(("7/7 人工补题（逐条确认，可跳过）", _fix_entry(args), []))
+        stages.append(("7/8 人工补题（逐条确认，可跳过）", _fix_entry(args), []))
+        # 补完就地入库：先跑一遍预览，TTY 下问一次 y 才写
+        stages.append(("8/8 补题入库（预览后确认）", _apply_entry(args), []))
 
     try:
         for label, fn, sub_argv in stages:
@@ -299,6 +302,39 @@ def _file_keywords(args) -> list[str]:
     """--files 拆成关键字列表（兼容中文逗号）。"""
     raw = (args.files or "").replace("，", ",")
     return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def _apply_entry(args):
+    """把第 7 步补的题写进库：先预览，交互终端下确认一次才真写。"""
+    def _run(_argv) -> int:
+        from apply_fixes import main as apply_main, pending_records
+
+        recs = pending_records(args.subject, args.file)
+        if not recs:
+            print("[补题] 没有待入库的补题记录", flush=True)
+            return 0
+
+        scope = []
+        if args.subject:
+            scope += ["--subject", args.subject]
+        if args.file:
+            scope += ["--source", args.file]
+        print(f"[补题] 待写入 {len(recs)} 条，先预览：", flush=True)
+        apply_main(["--dry-run"] + scope)
+        if args.dry_run:
+            return 0
+        if args.skip_review or not sys.stdin.isatty():
+            print("       确认后写入：python3 scripts/apply_fixes_cli.py --apply"
+                  + (" " + " ".join(scope) if scope else ""), flush=True)
+            return 0
+
+        print("\n现在写入题库？[y/N] ", end="", flush=True)
+        ans = (sys.stdin.readline() or "").strip().lower()
+        if ans not in ("y", "yes"):
+            print("[跳过] 记录留在 output/manual_fixes/，随时可 --apply", flush=True)
+            return 0
+        return apply_main(["--apply"] + scope)
+    return _run
 
 
 def main(argv=None) -> int:

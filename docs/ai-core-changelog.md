@@ -8,6 +8,19 @@
 
 ---
 
+## 2026-10-31 · 补完题自动入库（import_cli 第 8 步）
+
+**背景**：此前第 7 步只把补题写进 `output/manual_fixes/`，还要人记得再跑 `apply_fixes_cli.py --dry-run` → `--apply`，漏了就等于「补了但没进库」。
+
+**改动**：
+
+- `import_cli` 增加第 8 步「补题入库」：先跑一遍预览（会改哪几题、更新还是新增），交互终端下问一次 `现在写入题库？[y/N]`，答 `y` 才真写；`--dry-run` / 非交互 / `--skip-review` 一律只预览并打印命令。
+- `apply_fixes` 实现从 `scripts/` 移到 `src/`（`scripts/apply_fixes_cli.py` 保留为薄壳），并支持 `--source <卷名子串>` 与传 `argv`。
+- 新增 `pending_records(subject, source)`：只挑 `applied != true` 的记录，`_discarded/` 不参与。
+- 预览计数口径修正：`[dry-run] 预览 N 条` 不再显示 `—`。
+
+用例 +9（第 8 步无待办 / 仅预览 / 非交互只打印 / 答 y 才写 / 答空跳过；pending_records 跳过已应用、按学科与卷名筛选、忽略 `_discarded/`）。
+
 ## 2026-10-31 · 补题确认改成必须选号；在错误位置敲 d 3 会被告知先按 2
 
 **现象**：用户按提示敲 `d 3` 毫无反应，以为「在输入框里只能输入」。

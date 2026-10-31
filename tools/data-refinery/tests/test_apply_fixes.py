@@ -1,5 +1,6 @@
 """apply_fixes_cli：人工补题的写库分支（新增/更新/跳过/幂等）。"""
 
+import json
 import sys
 from pathlib import Path
 
@@ -119,3 +120,43 @@ def test_refuses_record_that_is_terminal_ui_echo():
 
     assert msg.startswith("跳过")
     assert not any(sql.startswith(("INSERT", "UPDATE")) for sql, _ in cur.sql)
+
+
+# ---------- 待入库记录的筛选 ----------
+
+def _write_fix(tmp_path, rows):
+    f = tmp_path / "fixes" / "卷A.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                 encoding="utf-8")
+    return f.parent
+
+
+def test_pending_records_skips_applied(tmp_path):
+    d = _write_fix(tmp_path, [
+        {"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+         "group_order": 28, "applied": True},
+        {"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+         "group_order": 27, "applied": False},
+    ])
+    assert [r["group_order"] for r in A.pending_records(fixes_dir=d)] == [27]
+
+
+def test_pending_records_filters_subject_and_source(tmp_path):
+    d = _write_fix(tmp_path, [
+        {"source": "物理-海淀·一零一中学-试卷", "rel_path": "物理/初中/first/2024/一零一"},
+        {"source": "物理-海淀·人大附中-试卷", "rel_path": "物理/初中/first/2024/人大附中"},
+        {"source": "语文-海淀·一零一中学-试卷", "rel_path": "语文/初中/first/2024/一零一"},
+    ])
+    assert len(A.pending_records("物理", fixes_dir=d)) == 2
+    assert [r["source"] for r in A.pending_records("物理", "人大附中", fixes_dir=d)] == \
+        ["物理-海淀·人大附中-试卷"]
+
+
+def test_pending_records_ignores_discarded_dir(tmp_path):
+    d = tmp_path / "fixes"
+    (d / "_discarded").mkdir(parents=True)
+    (d / "_discarded" / "旧.jsonl").write_text(
+        json.dumps({"source": "物理-卷A", "rel_path": "物理/x", "group_order": 1}) + "\n",
+        encoding="utf-8")
+    assert A.pending_records(fixes_dir=d) == []

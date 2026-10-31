@@ -311,3 +311,77 @@ def test_keyboard_interrupt_outside_stage_loop_is_130(monkeypatch):
     monkeypatch.setattr(import_cli, "_execute", boom)
 
     assert import_cli.main(["--subject", "物理"]) == 130
+
+
+# ---------- 第 8 步：补题入库（预览 + 确认） ----------
+
+class _TtyStdin:
+    def __init__(self, text=""):
+        self._lines = text.splitlines(keepends=True)
+
+    def isatty(self):
+        return True
+
+    def readline(self):
+        return self._lines.pop(0) if self._lines else ""
+
+
+def _apply_args(extra=None):
+    return parse_args(["--subject", "物理"] + (extra or []))
+
+
+def test_apply_entry_no_pending(monkeypatch, capsys):
+    import apply_fixes
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [])
+
+    assert import_cli._apply_entry(_apply_args())([]) == 0
+    assert "没有待入库的补题记录" in capsys.readouterr().out
+
+
+def test_apply_entry_dry_run_only_previews(monkeypatch):
+    import apply_fixes
+    calls = []
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+
+    assert import_cli._apply_entry(_apply_args(["--dry-run"]))([]) == 0
+    assert len(calls) == 1 and "--dry-run" in calls[0]
+
+
+def test_apply_entry_non_tty_prints_command(monkeypatch, capsys):
+    import apply_fixes
+    calls = []
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+    monkeypatch.setattr("sys.stdin", _FakeStdin(tty=False))
+
+    import_cli._apply_entry(_apply_args())([])
+    out = capsys.readouterr().out
+    assert "确认后写入" in out and "apply_fixes_cli.py --apply" in out
+    assert len(calls) == 1 and "--dry-run" in calls[0], "非交互只预览，不许写库"
+
+
+def test_apply_entry_writes_after_yes(monkeypatch, capsys):
+    import apply_fixes
+    calls = []
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+    monkeypatch.setattr("sys.stdin", _TtyStdin("y\n"))
+
+    import_cli._apply_entry(_apply_args())([])
+
+    assert calls[-1][0] == "--apply", "确认后要真写"
+    assert "--dry-run" not in calls[-1]
+
+
+def test_apply_entry_declined_keeps_records(monkeypatch, capsys):
+    import apply_fixes
+    calls = []
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+    monkeypatch.setattr("sys.stdin", _TtyStdin("\n"))
+
+    import_cli._apply_entry(_apply_args())([])
+
+    assert all("--apply" not in c for c in calls)
+    assert "跳过" in capsys.readouterr().out
