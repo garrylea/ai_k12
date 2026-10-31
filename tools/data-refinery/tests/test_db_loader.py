@@ -807,6 +807,51 @@ class TestLoadQuestionsPaperGrouping:
         upd = [a for sql, a in queries if "UPDATE exam_papers SET question_count" in sql]
         assert upd == [(2, 9)]
 
+    def test_same_stem_different_options_are_two_questions(self):
+        """题干都是「下列说法正确的是」、只有选项不同 → 必须留两题。
+
+        2026-10-31 实测：北师大实验卷题7/题17 题干完全相同，只按 content_hash
+        去重会把第 17 题复用成第 7 题，整卷少一题。
+        """
+        qs = [
+            {"subject_id": "math", "content": "下列说法正确的是", "type": "choice",
+             "group_order": 7,
+             "options": [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}]},
+            {"subject_id": "math", "content": "下列说法正确的是", "type": "choice",
+             "group_order": 17,
+             "options": [{"label": "A", "text": "丙"}, {"label": "B", "text": "丁"}]},
+        ]
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM questions WHERE content_hash": [
+                [],  # 第一题：没有同哈希题
+                [(501, '[{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}]')],  # 第二题命中第一题
+            ],
+            "LAST_INSERT_ID": [[(501,)], [(502,)]],
+        })
+        n = loader.load_questions(qs, paper=(_paper_meta(), 9))
+
+        assert n == 2, "两题选项不同，必须各插一行"
+        linked = [a for sql, a in queries if "INSERT IGNORE INTO paper_questions" in sql]
+        assert [row[1] for row in linked] == [501, 502]
+
+    def test_same_stem_same_options_reuses(self):
+        """题干与选项都相同才算同一题（跨卷复用照旧）。"""
+        q = {"subject_id": "math", "content": "下列说法正确的是", "type": "choice",
+             "group_order": 3,
+             "options": [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}]}
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM questions WHERE content_hash": [
+                [(777, '[{"label": "B", "text": "乙 "}, {"label": "A", "text": "甲"}]')],  # 顺序/空白不同
+            ],
+        })
+        n = loader.load_questions([q], paper=(_paper_meta(), 9))
+
+        assert n == 0
+        linked = [a for sql, a in queries if "INSERT IGNORE INTO paper_questions" in sql]
+        assert linked[0][1] == 777
+
     def test_paper_none_no_paper_sql(self):
         """paper=None（无试卷上下文）：行为与旧版完全一致，零 paper SQL。"""
         loader, queries = _make_loader_seq({

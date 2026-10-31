@@ -218,7 +218,7 @@ def main(argv=None):
                         "UPDATE questions SET content=%s, material_text=%s, options=%s, content_hash=%s "
                         "WHERE id=%s",
                         (new["content"], new["material_text"] or None, new["options"],
-                         content_hash(new["content"]), row["id"]),
+                         content_hash(new["content"], new["options"]), row["id"]),
                     )
                     after = _fetch_row(cur, row["id"])
                     _assert_other_columns_unchanged(before, after)

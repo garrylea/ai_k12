@@ -32,6 +32,8 @@ ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
 _STEM_ANY_RE = re.compile(r"(?m)^\s*#{0,6}\s*(\d{1,2})\s*[.．、]\s*\S")
 _OPTION_BLOCK_RE = re.compile(r"(?m)^\s*[A-D]\s*[.．、]\s*\S")
 _EXCERPT_LIMIT = 600
+# 卷首/卷尾的非题目文字（北师大实验卷实测：试卷说明的第 4 条「命题人:…」被切成第 4 题）
+_JUNK_RE = re.compile(r"命题人|审核人|校对人|命题学校|第\s*\d+\s*页\s*共|共\s*\d+\s*页")
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -149,6 +151,13 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
         if m:
             add(no, "punct_stem", ["md_uses_punct_separator"],
                 m.group(0), )
+
+    # ④ 不是题的"题"：卷首说明/卷尾署名被当成题目（占掉了真实题号）
+    for r in rows:
+        body = (r.get("content") or "").strip()
+        if body and len(body) <= 60 and _JUNK_RE.search(body) and not r.get("options"):
+            add(r.get("group_order"), "junk_question",
+                ["content_looks_like_page_chrome"], body)
 
     # ③ 修复步骤删过内容：把被删片段留档（原文还能在这里找回）
     for rec in labeling_issues:

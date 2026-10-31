@@ -93,7 +93,7 @@ def apply_record(cur, rec: dict, apply: bool) -> str:
     if not apply:
         return f"{action}：paper={paper_id} 第{go}题（question_id={qid or '—'}）"
 
-    chash = content_hash(rec["content"])
+    chash = content_hash(rec["content"], rec.get("options"))
     options = rec.get("options")
     if qid:
         cur.execute(

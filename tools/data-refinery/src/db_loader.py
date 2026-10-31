@@ -48,9 +48,48 @@ def normalize_content(content: str | None) -> str:
     return s.lower()
 
 
-def content_hash(content: str | None) -> str:
-    """题干规范化后的 SHA-256 哈希（64 位 hex），存入 questions.content_hash 用于去重。"""
-    return hashlib.sha256(normalize_content(content).encode("utf-8")).hexdigest()
+def content_hash(content: str | None, options=None) -> str:
+    """题干（+ 选项）规范化后的 SHA-256（64 位 hex），存 questions.content_hash 用于去重。
+
+    必须带选项：`下列说法正确的是` 这类客观题题干完全相同、只有选项不同
+    （2026-10-31 实测北师大实验卷题7/题17），只按题干哈希会把第 17 题判成第 7 题，
+    而 questions.content_hash 上有唯一索引，重复哈希直接插不进去。
+    无选项（填空/解答）时与旧口径完全一致。
+    """
+    base = normalize_content(content)
+    sig = options_signature(options)
+    if sig:
+        base = f"{base}\x1f{sig}"
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()
+
+
+def options_signature(options) -> str:
+    """选项归一签名：只看 label + 文本，不看顺序。
+
+    content_hash 只覆盖题干，而「下列说法正确的是」「下列说法中正确的是」这类
+    客观题题干完全相同、只有选项不同（物理/化学极常见，2026-10-31 实测：
+    北师大实验卷题7 与题17 因此被当成同一题合并，整卷少了 1 题）。
+    去重时用本签名做二次判定：题干哈希相同但选项不同 => 不是同一道题。
+    无选项（填空/解答）返回空串，与原行为一致。
+    """
+    if not options:
+        return ""
+    data = options
+    if isinstance(data, (str, bytes)):
+        try:
+            data = json.loads(data)
+        except Exception:
+            return normalize_content(str(options))
+    if not isinstance(data, list):
+        return ""
+    items = []
+    for opt in data:
+        if not isinstance(opt, dict):
+            continue
+        items.append((str(opt.get("label") or "").strip(),
+                      normalize_content(str(opt.get("text") or ""))))
+    items.sort()
+    return json.dumps(items, ensure_ascii=False)
 
 
 # ---------- practice 题面子串校验 ----------
@@ -1170,6 +1209,19 @@ class DbLoader:
         code = _subject_code_by_name_fallback(normalize_subject(meta.subject))
         return self._find_or_create_paper(meta, self._subject_id_by_code(code), source_key)
 
+    def _reusable_question(self, chash: str, options, exclude_id: int | None = None) -> int | None:
+        """按 content_hash 找可复用的题；题干同但选项不同视为不同题（见 options_signature）。"""
+        rows = self._query("SELECT id, options FROM questions WHERE content_hash=%s", (chash,))
+        sig = options_signature(options)
+        for row in rows or []:
+            qid = int(row[0])
+            if exclude_id is not None and qid == exclude_id:
+                continue
+            stored = row[1] if len(row) > 1 else None
+            if options_signature(stored) == sig:
+                return qid
+        return None
+
     def load_questions(self, questions: list[dict],
                        paper: tuple[PaperMeta, int] | None = None) -> int:
         """入库题目；paper 非 None 时同步按行序归组（写 paper_questions）。
@@ -1191,7 +1243,7 @@ class DbLoader:
             sid = self._subject_id_by_code(normalize_subject(q.get("subject_id")))
             opts = q.get("options")
             content = q.get("content") or ""
-            chash = content_hash(content)
+            chash = content_hash(content, opts)
             qid: int | None = None
 
             # 1) 同卷同题号：原地更新，避免重抽后 hash 变化插出重复题
@@ -1207,16 +1259,13 @@ class DbLoader:
                     old_hash = exist[0][1]
                     verified = int(exist[0][2] or 0)
                     if old_hash != chash:
-                        other = self._query(
-                            "SELECT id FROM questions WHERE content_hash=%s AND id<>%s LIMIT 1",
-                            (chash, qid),
-                        )
+                        other = self._reusable_question(chash, opts, exclude_id=qid)
                         if verified:
                             print(f"[WARN] paper={paper[1]} 题{i} 内容有变但 answer_verified=1，"
                                   f"保留人工核验内容不覆盖", flush=True)
                         elif other:
                             print(f"[WARN] paper={paper[1]} 题{i} 新内容与已有题 "
-                                  f"#{int(other[0][0])} 重复，保留原题不覆盖", flush=True)
+                                  f"#{other} 重复，保留原题不覆盖", flush=True)
                         else:
                             self._exec(
                                 "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, "
@@ -1237,12 +1286,10 @@ class DbLoader:
                             )
                             updated += 1
 
-            # 2) 其它情况：按 content_hash 复用 / 插入
+            # 2) 其它情况：按（题干哈希 + 选项签名）复用 / 插入
             if qid is None:
-                row = self._query("SELECT id FROM questions WHERE content_hash=%s LIMIT 1", (chash,))
-                if row:
-                    qid = int(row[0][0])
-                else:
+                qid = self._reusable_question(chash, opts)
+                if qid is None:
                     self._exec(
                         "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, full_score, "
                         "content, options, answer, explanation, material_text, material_url, "
