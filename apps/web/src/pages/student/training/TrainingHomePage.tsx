@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Banner, Button, PageHeader } from '@/components/base';
 import { getRemediationOverview, getTrainingErrorBook, type RemediationOverview } from '@/services/api';
-
-/** id 对应 subjects 表 seed（1=数学），与训练轨各页一致。 */
-const MATH_SUBJECT_ID = 1;
+import { parseSubjectId, subjectName, SUBJECT_MATH } from '@/constants';
 
 /** 专项练习：靶心（线性 SVG）。 */
 const TargetIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
@@ -84,13 +82,20 @@ const GraphIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
  */
 export default function TrainingHomePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
+  const isMath = subjectId === SUBJECT_MATH;
+  // 数学保持原 URL（不带参），新学科带 subjectId —— 数学的既有链接/测试逐字不变
+  const subjectQuery = isMath ? '' : `?subjectId=${subjectId}`;
   // null = 载入中/失败（显示「--」），不阻塞三卡导航
   const [unclearedCount, setUnclearedCount] = useState<number | null>(null);
   // 相似题专项练习：null = 载入中/失败（不显示提示条）
   const [remediation, setRemediation] = useState<RemediationOverview | null>(null);
   const [remediationDismissed, setRemediationDismissed] = useState(false);
 
+  // 相似题 overview 仅数学有（新学科尚未接入），非数学直接跳过 —— 不发请求、不渲染提示条
   useEffect(() => {
+    if (!isMath) return;
     let cancelled = false;
     getRemediationOverview()
       .then((overview) => {
@@ -102,11 +107,11 @@ export default function TrainingHomePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isMath]);
 
   useEffect(() => {
     let cancelled = false;
-    getTrainingErrorBook({ subjectId: MATH_SUBJECT_ID })
+    getTrainingErrorBook({ subjectId })
       .then((entries) => {
         if (!cancelled) setUnclearedCount(entries.length);
       })
@@ -116,7 +121,7 @@ export default function TrainingHomePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [subjectId]);
 
   const errorCountText =
     unclearedCount == null
@@ -128,7 +133,7 @@ export default function TrainingHomePage() {
   // 待完成题数 = 总题数 - 已答对。差值 0 时不显示提示条：套题全对正常会被删除，
   // 但数据管线按卷 purge 可能留下 0 题的 active 套题，此处兜底避免「待完成 0 题」的荒谬文案。
   const remediationPending = remediation ? remediation.itemCount - remediation.correctCount : 0;
-  const showRemediation = remediation?.active === true && !remediationDismissed && remediationPending > 0;
+  const showRemediation = isMath && remediation?.active === true && !remediationDismissed && remediationPending > 0;
 
   return (
     <div
@@ -141,7 +146,7 @@ export default function TrainingHomePage() {
         <PageHeader
           to="/student/training"
           caption="返回选学科"
-          title="数学 · 训练"
+          title={`${subjectName(subjectId)} · 训练`}
           titleClassName="text-4xl font-extrabold"
         />
 
@@ -176,7 +181,7 @@ export default function TrainingHomePage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-12">
           {/* 专项练习 */}
           <button
-            onClick={() => navigate('/student/training/targeted')}
+            onClick={() => navigate(`/student/training/targeted${subjectQuery}`)}
             className="h-64 rounded-3xl bg-white p-8 flex flex-col items-center justify-center gap-4 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
@@ -206,7 +211,7 @@ export default function TrainingHomePage() {
 
           {/* 真题考试 */}
           <button
-            onClick={() => navigate('/student/training/exam')}
+            onClick={() => navigate(`/student/training/exam${subjectQuery}`)}
             className="h-64 rounded-3xl bg-white p-8 flex flex-col items-center justify-center gap-4 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
@@ -236,7 +241,7 @@ export default function TrainingHomePage() {
 
           {/* 错题练习（唯一带状态徽标的入口） */}
           <button
-            onClick={() => navigate('/student/training/errors')}
+            onClick={() => navigate(`/student/training/errors${subjectQuery}`)}
             className="h-64 rounded-3xl bg-white p-8 flex flex-col items-center justify-center gap-4 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
@@ -270,7 +275,7 @@ export default function TrainingHomePage() {
 
           {/* 薄弱点图谱（第 4 张卡，2026-09-23）：纯导航，无状态徽标 */}
           <button
-            onClick={() => navigate('/student/training/weak-points')}
+            onClick={() => navigate(`/student/training/weak-points${subjectQuery}`)}
             className="h-64 rounded-3xl bg-white p-8 flex flex-col items-center justify-center gap-4 transition-all duration-300 hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',

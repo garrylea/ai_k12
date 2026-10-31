@@ -54,6 +54,25 @@ function renderPage() {
   return { router, ...render(<RouterProvider router={router} />) };
 }
 
+/**
+ * 学科参数化用例（Task 9）：可从任意 entry 渲染本页，并补全四卡目标路由桩，
+ * 以便断言「带 ?subjectId= 跳转」时不报「No routes matched location」。
+ */
+function renderAt(path: string) {
+  const router = createMemoryRouter(
+    [
+      { path: '/student/training/home', element: <TrainingHomePage /> },
+      { path: '/student/training/targeted', element: <div>专项页桩</div> },
+      { path: '/student/training/exam', element: <div>考试页桩</div> },
+      { path: '/student/training/errors', element: <div>错题页桩</div> },
+      { path: '/student/training/weak-points', element: <div>图谱页桩</div> },
+      { path: '/student/training/remediation/run', element: <div>作答页桩</div> },
+    ],
+    { initialEntries: [path] },
+  );
+  return { router, ...render(<RouterProvider router={router} />) };
+}
+
 /** 等 effect 落地：三卡渲染 + overview 请求已发出。 */
 async function renderSettled() {
   const utils = renderPage();
@@ -157,5 +176,30 @@ describe('TrainingHomePage 薄弱点图谱入口（第 4 张卡）', () => {
     expect(grid?.className).toContain('sm:grid-cols-2');
     expect(grid?.className).not.toContain('lg:grid-cols-4');
     expect(grid?.querySelectorAll('button')).toHaveLength(4);
+  });
+});
+
+describe('TrainingHomePage 学科参数化', () => {
+  it('?subjectId=4：标题、错题学科、四卡链接都带物理', async () => {
+    getRemediationOverview.mockResolvedValue(overview());
+    const { router } = renderAt('/student/training/home?subjectId=4');
+
+    expect(await screen.findByText('物理 · 训练')).toBeTruthy();
+    await waitFor(() => expect(getTrainingErrorBook).toHaveBeenCalledWith({ subjectId: 4 }));
+    // 新学科不发相似题请求、不渲染提示条
+    expect(getRemediationOverview).not.toHaveBeenCalled();
+    expect(screen.queryByText(/相似题专项练习待完成/)).toBeNull();
+
+    fireEvent.click(screen.getByLabelText(/进入专项练习/));
+    expect(router.state.location.pathname).toBe('/student/training/targeted');
+    expect(router.state.location.search).toBe('?subjectId=4');
+  });
+
+  it('不带参：仍是数学标题且请求相似题（旧行为）', async () => {
+    getRemediationOverview.mockResolvedValue(overview());
+    renderAt('/student/training/home');
+    expect(await screen.findByText('数学 · 训练')).toBeTruthy();
+    await waitFor(() => expect(getRemediationOverview).toHaveBeenCalled());
+    expect(getTrainingErrorBook).toHaveBeenCalledWith({ subjectId: 1 });
   });
 });
