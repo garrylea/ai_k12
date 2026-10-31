@@ -160,3 +160,15 @@ def test_pending_records_ignores_discarded_dir(tmp_path):
         json.dumps({"source": "物理-卷A", "rel_path": "物理/x", "group_order": 1}) + "\n",
         encoding="utf-8")
     assert A.pending_records(fixes_dir=d) == []
+
+
+def test_dry_run_preview_shows_lengths_and_snippet():
+    """预览必须能看出「改成什么」，不能只报更新/新增。"""
+    cur = FakeCursor(paper=(54, 4), existing=6058, renumber_rows=[(6058, 28)])
+    rec = dict(REC, content="新的题干内容" * 3)
+
+    msg = A.apply_record(cur, rec, apply=False)
+
+    assert "更新" in msg and "新内容 18 字" in msg
+    assert "内容：新的题干内容" in msg
+    assert not any(sql.startswith(("INSERT", "UPDATE")) for sql, _ in cur.sql)

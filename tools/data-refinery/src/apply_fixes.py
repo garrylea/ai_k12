@@ -114,7 +114,16 @@ def apply_record(cur, rec: dict, apply: bool) -> str:
     action = "更新" if qid else "新增"
 
     if not apply:
-        return f"{action}：paper={paper_id} 第{go}题（question_id={qid or '—'}）"
+        # 预览要能判断"内容对不对"，只报更新/新增没用（用户 2026-10-31 指出）
+        detail = (f"{action}：paper={paper_id} 第{go}题（question_id={qid or '—'}）"
+                  f" · 新内容 {len(rec.get('content') or '')} 字")
+        if qid:
+            cur.execute("SELECT CHAR_LENGTH(content) FROM questions WHERE id=%s", (qid,))
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                detail += f"（原来 {int(row[0])} 字）"
+        snippet = (rec.get("content") or "").replace("\n", " ")[:36]
+        return f"{detail}\n        内容：{snippet}…"
 
     chash = content_hash(rec["content"], rec.get("options"))
     options = rec.get("options")
