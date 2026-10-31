@@ -17,6 +17,7 @@
 
 import getpass
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -55,15 +56,26 @@ def _read_line(prompt: str = "") -> str | None:
     return line.rstrip("\n")
 
 
+_END_SUFFIX_RE = re.compile(r"(?:^|\s)(EOF|END|结束)\s*$", re.IGNORECASE)
+
+
 def _split_at_marker(text: str) -> tuple[str, bool]:
     """按结束标记切开一段输入；返回 (标记之前的正文, 是否遇到标记)。
 
-    一段输入可能是多行（终端整段粘贴时 readline 一次返回一坨），所以必须逐行扫，
-    不能只看第一行。
+    两种写法都认：
+    - 单独一行 `EOF`；
+    - 行尾带标记（`…</table> EOF`）—— 粘贴时手一顺就写在最后一行末尾，
+      旧实现只认独占一行，于是标记被当成正文吞掉、程序继续等下一行。
     """
     kept: list[str] = []
     for line in text.splitlines():
         if line.strip().upper() in _END_MARKERS:
+            return "\n".join(kept).strip(), True
+        m = _END_SUFFIX_RE.search(line)
+        if m:
+            tail = line[: m.start()].rstrip()
+            if tail:
+                kept.append(tail)
             return "\n".join(kept).strip(), True
         kept.append(line)
     return "\n".join(kept).strip(), False
@@ -86,6 +98,31 @@ def _read_block(first_chunk: str = "") -> str:
                 print(f"  …已收到 {len(lines)} 行（输入 EOF 结束）", flush=True)
     print(f"[已收到 {len(lines)} 行]", flush=True)
     return "\n".join(lines).strip()
+
+
+_STEM_PREFIX_RE = re.compile(r"^\s*\d{1,2}\s*[.．、:：]\s*")
+
+
+def split_questions(text: str, strategy) -> list[tuple[int | None, str]]:
+    """把一段粘贴按题号拆成多道题；没有题号就整段当一道。
+
+    返回 [(题号 or None, 去掉题号前缀的正文)]。
+    """
+    parts: list[tuple[int | None, list[str]]] = []
+    cur_no: int | None = None
+    cur: list[str] = []
+    for line in text.splitlines():
+        ok, no = strategy.is_stem(line)
+        if ok:
+            if cur:
+                parts.append((cur_no, cur))
+            cur_no, cur = no, [_STEM_PREFIX_RE.sub("", line, count=1)]
+        else:
+            cur.append(line)
+    if cur:
+        parts.append((cur_no, cur))
+    out = [(no, "\n".join(lines).strip()) for no, lines in parts if "\n".join(lines).strip()]
+    return out or [(None, text.strip())]
 
 
 def _image_to_markdown(image: Path, paper_md_dir: Path) -> str:
@@ -145,7 +182,12 @@ def _subject_of(issue: dict) -> str:
     return subject_code_for_path(rel, default="") or "generic"
 
 
-def _ask(issue: dict, paper_md_dir: Path) -> dict | None:
+def _ask(issue: dict, paper_md_dir: Path) -> list[dict]:
+    """引导补一道或多道题；返回记录列表（空列表 = 跳过）。
+
+    粘贴里如果带多个题号（比如把 27、28 一起贴进来），按题号拆成多条记录，
+    各自保留自己的题号 —— 这样「改短题 27 + 补出题 28」一次就能做完。
+    """
     strategy = get_strategy(_subject_of(issue))
 
     print("─" * 72, flush=True)
@@ -165,39 +207,47 @@ def _ask(issue: dict, paper_md_dir: Path) -> dict | None:
     print("             s) 跳过   q) 退出")
 
     content = _collect_content(paper_md_dir)
-    if content is None:
-        return None
-    if not content.strip():
-        print("[跳过] 内容为空，未记录", flush=True)
-        return None
+    if content is None or not content.strip():
+        if content is not None:
+            print("[跳过] 内容为空，未记录", flush=True)
+        return []
 
-    stem, options = strategy.split_options(content)
-    if options:
-        print(f"[拆分] 题干 {len(stem)} 字，选项 {len(options)} 项："
-              f"{[o['label'] for o in options]}", flush=True)
-    else:
-        print(f"[拆分] 未识别出选项，整段作为题干（{len(content)} 字）", flush=True)
+    parts = split_questions(content, strategy)
+    multi = len(parts) > 1
+    if multi:
+        print(f"[拆分] 这段内容里有 {len(parts)} 道题："
+              f"{[no if no is not None else '无题号' for no, _ in parts]}", flush=True)
 
-    answer = (_read_line("答案（可留空）：") or "").strip()
-    record = {
-        "source": issue["source"],
-        "rel_path": issue["rel_path"],
-        "group_order": issue["group_order"],
-        "content": stem.strip(),
-        "options": options,
-        "answer": answer,
-        "material_text": None,
-        "issue_kind": issue["kind"],
-        "issue_reasons": issue.get("reasons") or [],
-        "pdf": issue.get("pdf"),
-        "md": issue.get("md"),
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "operator": getpass.getuser(),
-        "status": "ready",
-        "applied": False,
-    }
-    print(f"[ok] 已记录：第 {record['group_order']} 题，{len(record['content'])} 字", flush=True)
-    return record
+    records: list[dict] = []
+    for no, body in parts:
+        target = no if no is not None else issue["group_order"]
+        stem, options = strategy.split_options(body)
+        if options:
+            print(f"[题{target}] 题干 {len(stem)} 字，选项 "
+                  f"{[o['label'] for o in options]}", flush=True)
+        else:
+            print(f"[题{target}] 未识别出选项，整段作为题干（{len(body)} 字）", flush=True)
+        answer = (_read_line(f"题{target} 答案（可留空）：" if multi else "答案（可留空）：")
+                  or "").strip()
+        records.append({
+            "source": issue["source"],
+            "rel_path": issue["rel_path"],
+            "group_order": target,
+            "content": stem.strip(),
+            "options": options,
+            "answer": answer,
+            "material_text": None,
+            "issue_kind": issue["kind"],
+            "issue_reasons": issue.get("reasons") or [],
+            "pdf": issue.get("pdf"),
+            "md": issue.get("md"),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "operator": getpass.getuser(),
+            "status": "ready",
+            "applied": False,
+        })
+        print(f"[ok] 已记录：第 {target} 题，{len(stem.strip())} 字", flush=True)
+    return records
 
 
 def pending_issues(sources: set[str] | None = None,
@@ -233,29 +283,40 @@ def review_pending(sources: set[str] | None = None,
     all_issues = _read_jsonl(ISSUES_FILE)   # 写回时要用全量
     out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
     for issue in (issues[:limit] if limit else issues):
+        # 一次粘贴可能顺带补好别的题号：轮到它时已经 resolved，别再问一遍
+        live = next((it for it in all_issues
+                     if it["source"] == issue["source"]
+                     and it["group_order"] == issue["group_order"]
+                     and it["kind"] == issue["kind"]), None)
+        if live is not None and live.get("status") != "pending":
+            continue
         paper_md_dir = Path(issue["md"]).parent if issue.get("md") else None
         if paper_md_dir is None:
             print(f"[skip] {issue['source']} 题{issue['group_order']}：缺 md 路径", flush=True)
             result["skipped"] += 1
             continue
-        record = _ask(issue, paper_md_dir)
-        if record is None:
+        records = _ask(issue, paper_md_dir)
+        if not records:
             result["skipped"] += 1
             continue
-        out_file = out_dir / f"{record['source']}.jsonl"
+        out_file = out_dir / f"{issue['source']}.jsonl"
         rows = _read_jsonl(out_file)
-        rows = [r for r in rows if r["group_order"] != record["group_order"]]
-        rows.append(record)
+        for record in records:
+            rows = [r for r in rows if r["group_order"] != record["group_order"]]
+            rows.append(record)
         _write_jsonl(out_file, rows)
 
+        # 本次补到的题号（含一次粘贴里带出来的其它题）对同卷同题的 issue 一并收口
+        fixed_numbers = {r["group_order"] for r in records}
         for it in all_issues:
-            if (it["source"] == issue["source"] and it["group_order"] == issue["group_order"]
-                    and it["kind"] == issue["kind"]):
+            if (it["source"] == issue["source"] and it.get("status") == "pending"
+                    and it["group_order"] in fixed_numbers
+                    and it["kind"] in ("missing", "punct_stem", "repair_truncated")):
                 it["status"] = "resolved"
-                it["resolved_at"] = record["created_at"]
+                it["resolved_at"] = records[0]["created_at"]
                 it["fix_file"] = str(out_file)
         _write_jsonl(ISSUES_FILE, all_issues)
-        result["fixed"] += 1
+        result["fixed"] += len(records)
 
     print(f"\n[完成] 本次补了 {result['fixed']} 题，跳过 {result['skipped']} 条；"
           f"文件在 {out_dir}", flush=True)

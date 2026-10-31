@@ -190,8 +190,10 @@ def test_ask_records_choice_options(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin",
                         io.StringIO("下列说法正确的是\nA. 甲\nB. 乙\nC. 丙\nD. 丁\nEOF\nA\n"))
 
-    rec = manual_fix._ask(issue, tmp_path)
+    recs = manual_fix._ask(issue, tmp_path)
 
+    assert len(recs) == 1
+    rec = recs[0]
     assert rec["content"] == "下列说法正确的是"
     assert [o["label"] for o in rec["options"]] == ["A", "B", "C", "D"]
     assert rec["answer"] == "A"
@@ -203,7 +205,7 @@ def test_ask_returns_none_on_empty_content(tmp_path, monkeypatch):
     issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     monkeypatch.setattr("sys.stdin", io.StringIO("\nEOF\n"))
 
-    assert manual_fix._ask(issue, tmp_path) is None
+    assert manual_fix._ask(issue, tmp_path) == []
 
 
 def test_review_marks_issue_resolved_and_writes_fix_file(tmp_path, monkeypatch):
@@ -268,3 +270,43 @@ def test_review_list_only_does_not_touch_stdin(tmp_path, monkeypatch):
     assert res["pending"] == 2 and res["fixed"] == 0
     assert all(_json.loads(l)["status"] == "pending"
                for l in path.read_text(encoding="utf-8").splitlines())
+
+
+# ---------- 行尾标记 / 一次粘贴多题 ----------
+
+def test_split_at_marker_accepts_trailing_marker_on_last_line():
+    """`…</table> EOF` 这种写在行尾的标记也要认（粘贴最常见的落法）。"""
+    body, done = manual_fix._split_at_marker("第一行\n最后一行 EOF\n")
+    assert done is True
+    assert body == "第一行\n最后一行"
+
+
+def test_ask_splits_multi_question_paste_into_records(tmp_path, monkeypatch):
+    """一次粘贴里带 27、28 两个题号 → 两条记录，各留各的题号。"""
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "27. 甲题题干\n(1) 小问\n28. 乙题题干\n(1) 小问\nEOF\n答案甲\n答案乙\n"))
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert [r["group_order"] for r in recs] == [27, 28]
+    assert recs[0]["content"].startswith("甲题题干")
+    assert recs[1]["content"].startswith("乙题题干")
+    assert [r["answer"] for r in recs] == ["答案甲", "答案乙"]
+
+
+def test_review_writes_all_records_from_one_paste(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch, n=2)   # 题 10、11 都待补
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "10. 甲\n11. 乙\nEOF\n\n"          # 一次粘贴两题，第二题答案留空
+        "s\n"))                                # 第二条 issue 已被顺带解决，再遇就跳过
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    lines = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [ _json.loads(l)["group_order"] for l in lines] == [10, 11]
+    # 两条 issue 都因这次粘贴而收口，不再重复询问
+    statuses = [_json.loads(l)["status"] for l in path.read_text(encoding="utf-8").splitlines()]
+    assert statuses == ["resolved", "resolved"]
+    assert res["fixed"] == 2 and res["skipped"] == 0, "已收口的题不该再问一遍"
