@@ -200,6 +200,32 @@ def _image_to_markdown(image: Path, paper_md_dir: Path) -> str:
     return text
 
 
+# 这些串只会出现在我们自己的输出里，正文里不可能有 —— 命中任意一条就拒收
+_STRONG_ECHO = ("请提供真题", "s) 跳过", "答案（可留空）", "▸ 第",
+                "识别问题补录", "本次补录")
+# 这些理论上可能出现在题目里（如「已收到」），只在命中多条时才判定为回显
+_WEAK_ECHO = ("粘贴 Markdown，出现 EOF", "已收到")
+_ECHO_MARKERS = _STRONG_ECHO + _WEAK_ECHO
+_ECHO_RULE_RE = re.compile(r"^[─-]{10,}$")
+
+
+def looks_like_ui_echo(text: str) -> bool:
+    """这段输入其实是终端回显/复制的界面文字，不是真题。
+
+    用户从终端里连界面一起复制时，读到的会是「> 1 / ──── / 请提供真题…」
+    这类我们自己打印的行；直接入库会把界面文案写进题库。
+    """
+    lines = [l for l in (text or "").splitlines() if l.strip()]
+    if not lines:
+        return False
+    if any(m in l for l in lines for m in _STRONG_ECHO):
+        return True
+    if any(_ECHO_RULE_RE.match(l.strip()) for l in lines):
+        return True
+    weak = sum(1 for l in lines if any(m in l for m in _WEAK_ECHO))
+    return weak >= 2
+
+
 def _collect_content(paper_md_dir: Path) -> str | None:
     """读人工输入；返回 Markdown 正文，跳过时返回 None。"""
     c = console()
@@ -217,7 +243,12 @@ def _collect_content(paper_md_dir: Path) -> str | None:
             path = Path(first[1:]).expanduser()
             return path.read_text(encoding="utf-8").strip()
         if not first:
-            return _read_block("")
+            text = _read_block("")
+            if looks_like_ui_echo(text):
+                console().err("这段内容像是把界面文字也粘进来了（含「请提供真题」等），"
+                              "已拒收，请只粘贴题目本身")
+                continue
+            return text
 
         candidate = Path(first).expanduser()
         if candidate.suffix.lower() in IMAGE_SUFFIXES and candidate.exists():
@@ -230,7 +261,12 @@ def _collect_content(paper_md_dir: Path) -> str | None:
                 continue
             return text
 
-        return _read_block(first)
+        text = _read_block(first)
+        if looks_like_ui_echo(text):
+            console().err("这段内容像是把界面文字也粘进来了（含「请提供真题」等），"
+                          "已拒收，请只粘贴题目本身")
+            continue
+        return text
 
 
 def _subject_of(issue: dict) -> str:
@@ -306,6 +342,9 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
     records: list[dict] = []
     multi = len(parts) > 1
     for no, body in parts:
+        if looks_like_ui_echo(body) or len(body.strip()) < 2:
+            c.err("这段内容不像题目（过短或含界面文字），已跳过本条")
+            continue
         target = no if no is not None else target_no
         stem, options = strategy.split_options(body)
         if options:
@@ -315,6 +354,9 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             c.ok(f"第 {target} 题 · 题干 {len(body)} 字 · 无选项（按简答题处理）")
         c.prompt(f"第 {target} 题答案（可留空）› " if multi else "答案（可留空）› ")
         answer = (_read_line() or "").strip()
+        if any(m in answer for m in _ECHO_MARKERS):
+            c.warn("答案里混进了界面文字，已置空")
+            answer = ""
         records.append({
             "source": issue["source"],
             "rel_path": issue["rel_path"],

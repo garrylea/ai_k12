@@ -84,6 +84,10 @@ def _renumber(cur, paper_id: int) -> int:
 
 
 def apply_record(cur, rec: dict, apply: bool) -> str:
+    from manual_fix import looks_like_ui_echo
+
+    if looks_like_ui_echo(rec.get("content") or ""):
+        return "跳过：内容疑似终端界面文字（不是真题），请重新补录"
     found = _paper_row(cur, rec["rel_path"], rec["source"])
     if not found:
         return "跳过：库里没有这份卷（先跑 import_cli 入库）"

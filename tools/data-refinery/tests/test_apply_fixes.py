@@ -108,3 +108,14 @@ def test_hash_includes_options_so_same_stem_does_not_collide():
     a = content_hash("下列说法正确的是", [{"label": "A", "text": "甲"}])
     b = content_hash("下列说法正确的是", [{"label": "A", "text": "乙"}])
     assert a != b
+
+
+def test_refuses_record_that_is_terminal_ui_echo():
+    """界面文字被误当题目录进来时，写库这一步必须拦住。"""
+    cur = FakeCursor(paper=(54, 4), existing=6058)
+    rec = dict(REC, content="1\n──────────────\n请提供真题：1) 直接粘贴 Markdown")
+
+    msg = A.apply_record(cur, rec, apply=True)
+
+    assert msg.startswith("跳过")
+    assert not any(sql.startswith(("INSERT", "UPDATE")) for sql, _ in cur.sql)

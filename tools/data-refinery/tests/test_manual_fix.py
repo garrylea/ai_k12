@@ -301,7 +301,7 @@ def test_ask_splits_multi_question_paste_into_records(tmp_path, monkeypatch):
 def test_review_writes_all_records_from_one_paste(tmp_path, monkeypatch):
     path = _prep_n(tmp_path, monkeypatch, n=2)   # 题 10、11 都待补
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "10. 甲\n11. 乙\nEOF\n\n"          # 一次粘贴两题，第二题答案留空
+        "10. 甲题正文\n11. 乙题正文\nEOF\n\n"   # 一次粘贴两题，第二题答案留空
         "s\n"))                                # 第二条 issue 已被顺带解决，再遇就跳过
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
@@ -379,3 +379,41 @@ def test_review_pair_records_both_numbers(tmp_path, monkeypatch):
     assert [_json.loads(l)["group_order"] for l in lines] == [27, 28]
     assert res["fixed"] == 2
     assert _json.loads(path.read_text(encoding="utf-8"))["status"] == "resolved"
+
+
+# ---------- 界面文字被误当题目时的拦截 ----------
+
+def test_looks_like_ui_echo_detects_pasted_terminal_output():
+    bad = ("1\n" + "─" * 40 + "\n"
+           "请提供真题：1) 直接粘贴 Markdown（结束输入 EOF）\n"
+           "             s) 跳过   q) 退出")
+    assert manual_fix.looks_like_ui_echo(bad) is True
+
+
+def test_looks_like_ui_echo_accepts_real_question():
+    good = ("3. 如图所示，电源两端电压保持不变，闭合开关后电流表示数为 0.3A，\n"
+            "(1) 求电阻 R 的阻值；\n(2) 若将滑片向右移动，电流表示数如何变化？")
+    assert manual_fix.looks_like_ui_echo(good) is False
+
+
+def test_collect_content_rejects_echo_then_accepts_next_input(tmp_path, monkeypatch, capsys):
+    """粘错一次（连界面一起粘）要被拒收并重新提示，而不是直接存下来。"""
+    bad = "1\n" + "─" * 30 + "\n请提供真题：1) 直接粘贴 Markdown（结束输入 EOF）\ns) 跳过   q) 退出\nEOF\n"
+    good = "27. 题目正文内容\nEOF\n"
+    monkeypatch.setattr("sys.stdin", io.StringIO(bad + good))
+
+    text = manual_fix._collect_content(tmp_path)
+
+    assert text.startswith("27. 题目正文内容")
+    assert "拒收" in capsys.readouterr().out
+
+
+def test_answer_containing_ui_text_is_cleared(tmp_path, monkeypatch):
+    issue, _ = _prep_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "27 题正文\nEOF\ns) 跳过   q) 退出\n"          # 答案位置混进界面文字
+        "28 题正文\nEOF\n\n"))
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert recs[0]["answer"] == "", "界面文字不能当答案"
