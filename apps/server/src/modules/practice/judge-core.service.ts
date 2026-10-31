@@ -8,6 +8,7 @@ import { PointsService, type AwardResult } from '../points/points.service.js';
 import { EventsService } from '../analytics/events.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
+import { isSelfAssessSubject, prefersExactBeforeSelfAssess } from '../../common/subject-config.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
 /** 仅走 exact 比对的客观题：选项/判断标签形式固定，可靠，不等即判错。
@@ -128,14 +129,13 @@ export interface JudgeDictationOutput {
  * 不写 practice_results（card_id NOT NULL 的卡上下文持久化留在 PracticeService）。
  */
 /**
- * 语文非客观题：一律自评（2026-10-28 裁决）。
- *
- * 语文填空/简答的参考答案多为「示例：…」句式，归一化全等几乎不可能；
- * 且 AI 判题模板目前只有数学（prompts/judgment/math-*），走 AI 会被数学提示词误判。
- * 选择题/判断题仍走 exact。
+ * 闸门②：该学科的非客观题在归一化比对失败后一律自评。
+ * 语文自 2026-10-28 起如此（语文填空/简答的参考答案多为「示例：…」句式，归一化全等几乎不可能；
+ * 且 AI 判题模板目前只有数学 prompts，走 AI 会被数学提示词误判）；
+ * 物理/化学/道法沿用同一口径（spec 2026-10-31 §3.5）。选择题/判断题仍走 exact。
  */
-function isChineseNonObjective(q: { subject_id?: number | null; type: string }): boolean {
-  return Number(q.subject_id) === 2 && q.type !== 'choice' && q.type !== 'true_false';
+function isSelfAssessNonObjective(q: { subject_id?: number | null; type: string }): boolean {
+  return isSelfAssessSubject(Number(q.subject_id)) && !EXACT_ONLY_TYPES.has(q.type);
 }
 
 @Injectable()
@@ -266,9 +266,17 @@ export class JudgeCoreService {
       // 路由 1：choice/true_false -> exact 比对（标签形式固定，可靠）
       isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
       method = 'exact';
-    } else if (isChineseNonObjective(q) ||
+    } else if (prefersExactBeforeSelfAssess(Number(q.subject_id))
+               && (q.type === 'fill_blank' || q.type === 'calculation')
+               && compareAnswer(input.studentAnswer, q.answer, q.options)) {
+      // 新学科：填空/计算先做归一化比对，命中即判对（语文不走这里，仍直接自评）
+      isCorrect = true;
+      method = 'exact';
+    } else if (isSelfAssessNonObjective(q) ||
                (SUBJECTIVE_TYPES.has(q.type) && subjectiveJudgeMode() === 'self_assess')) {
       // 路由 1c（判题体系重构 2026-09-09）：主观题 self_assess 模式 -> 不判对错。
+      // 语文/物理/化学/道法的非客观题经 isSelfAssessNonObjective 也落这里（新学科填空/计算
+      // 已在上一个分支命中才判对，未命中的差异答案交还学生自评，见 spec 2026-10-31 §3.5）。
       // 参考答案/解析随判题返回（前端当场展开自评）；错题本与清零由自评端点处理。
       // 埋点：该分支只发 self_assess_answered（自评结果由 recordSelfAssessment 后续产生，
       // 此时还没有 assessment），不发 answer_submitted。
@@ -292,7 +300,7 @@ export class JudgeCoreService {
     } else if ((q.type === 'fill_blank' || q.type === 'calculation')
                && compareAnswer(input.studentAnswer, q.answer, q.options)) {
       // 路由 1b：fill_blank/calculation 归一化相等 -> exact 判对（省 AI）；不等走 AI 复核。
-      // 语文非客观题已在上一个分支自评，不会走到这里；数学行为保持不变。
+      // 语文/物理/化学/道法已在上面两个分支处理（自评或先比对），走到这里的只有数学（等表外学科）。
       isCorrect = true;
       method = 'exact';
     } else {

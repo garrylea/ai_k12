@@ -101,6 +101,65 @@ describe('JudgeCoreService.judgeQuestion', () => {
       delete process.env.JUDGE_SUBJECTIVE_MODE;
     }
   });
+
+  const subjectQuestion = (subjectId: number, type: string, answer: string) => ({
+    questionsRepo: {
+      findById: vi.fn().mockResolvedValue({ id: 30, subject_id: subjectId, type, answer, options: null }),
+      findByContentHash: vi.fn(),
+      findOrCreate: vi.fn(),
+      deleteById: vi.fn(),
+    },
+  });
+
+  it('化学填空：归一化相等 -> exact 判对，不进自评', async () => {
+    const deps = mk(subjectQuestion(5, 'fill_blank', 'CO2'));
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 5, questionId: 30, studentAnswer: ' co2 ', source: 'targeted',
+    });
+    expect(r.isCorrect).toBe(true);
+    expect(r.method).toBe('exact');
+    expect(r.needsSelfAssessment).toBeUndefined();
+  });
+
+  it('化学填空：不等 -> self_assess（不调 AI）', async () => {
+    const deps = mk(subjectQuestion(5, 'fill_blank', 'CO2'));
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 5, questionId: 30, studentAnswer: 'O2', source: 'targeted',
+    });
+    expect(r.isCorrect).toBeNull();
+    expect(r.method).toBe('self_assess');
+    expect(r.needsSelfAssessment).toBe(true);
+    expect(r.referenceAnswer).toBe('CO2');
+    expect(deps.judgment.judge).not.toHaveBeenCalled();
+  });
+
+  it('物理计算题：不等 -> self_assess（不调 AI）', async () => {
+    const deps = mk(subjectQuestion(4, 'calculation', '0.5A'));
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 4, questionId: 30, studentAnswer: '1A', source: 'exam',
+    });
+    expect(r.method).toBe('self_assess');
+    expect(deps.judgment.judge).not.toHaveBeenCalled();
+  });
+
+  it('语文填空仍直接自评（回归钉子：第 3 步不抢语文）', async () => {
+    const deps = mk(subjectQuestion(2, 'fill_blank', '春风又绿江南岸'));
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 2, questionId: 30, studentAnswer: '春风又绿江南岸', source: 'targeted',
+    });
+    expect(r.method).toBe('self_assess');
+    expect(r.isCorrect).toBeNull();
+  });
+
+  it('数学填空不等仍走 AI（回归钉子：数学分支不变）', async () => {
+    const deps = mk(subjectQuestion(1, 'fill_blank', '2/3'));
+    deps.judgment.judge.mockResolvedValue({ isCorrect: true, errorType: null });
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 1, questionId: 30, studentAnswer: '0.66', source: 'targeted',
+    });
+    expect(deps.judgment.judge).toHaveBeenCalled();
+    expect(r.method).toBe('ai');
+  });
 });
 
 /** 构造带 mock 依赖的 JudgeCoreService（capabilities 不会被 self_assess 路径触达，占位即可）。 */
