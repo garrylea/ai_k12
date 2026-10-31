@@ -1273,7 +1273,9 @@ class DbLoader:
                     if old_hash != chash:
                         other = self._reusable_question(chash, opts, exclude_id=qid)
                         if verified:
-                            print(f"[WARN] paper={paper[1]} 题{i} 内容有变但 answer_verified=1，"
+                            # 报卷面题号（group_order），不是文件里的第几行
+                            no = go if go is not None else i
+                            print(f"[WARN] paper={paper[1]} 题{no} 内容有变但 answer_verified=1，"
                                   f"保留人工核验内容不覆盖", flush=True)
                         elif other:
                             # 新内容在库里已有同一题：把本行改指向它，而不是保留旧内容。
@@ -1284,8 +1286,9 @@ class DbLoader:
                             self._exec(
                                 "DELETE FROM paper_questions WHERE paper_id=%s AND question_id=%s",
                                 (paper[1], qid))
-                            print(f"[WARN] paper={paper[1]} 题{i} 新内容与已有题 "
-                                  f"#{other} 相同，改为复用该题（原行 #{qid} 解除关联）", flush=True)
+                            print(f"[WARN] paper={paper[1]} 题{go if go is not None else i} "
+                                  f"新内容与已有题 #{other} 相同，改为复用该题"
+                                  f"（原行 #{qid} 解除关联）", flush=True)
                             qid = other
                         else:
                             self._exec(
