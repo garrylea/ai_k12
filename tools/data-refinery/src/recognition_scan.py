@@ -65,6 +65,19 @@ def _option_block_count(text: str) -> int:
     return blocks
 
 
+def locate_pdf(pdf_root: Path, rel_dir: Path, source: str) -> Path:
+    """素材 PDF 的位置：`<学科>/<学段>/<学期>/<年>/<卷名>.pdf`。
+
+    注意 md 是 `<...>/<年>/<卷名>/<卷名>.md`，比 PDF 多一层目录 ——
+    早期版本按 md 的结构去找，永远找不到（2026-10-31 实测「未找到对应 PDF」）。
+    """
+    candidate = Path(pdf_root) / rel_dir.parent / f"{rel_dir.name}.pdf"
+    if candidate.exists():
+        return candidate
+    legacy = Path(pdf_root) / rel_dir / f"{source}.pdf"
+    return legacy if legacy.exists() else candidate
+
+
 def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
                pdf_path: Path | None, labeling_issues: list[dict]) -> list[dict]:
     """单卷扫描，返回 issue 列表（一条=一处需要人工确认的问题）。"""
@@ -197,7 +210,7 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
         if file and file not in source:
             continue
         md_path = md_root / rel_dir / f"{source}.md"
-        pdf_path = pdf_root / rel_dir / f"{source}.pdf"
+        pdf_path = locate_pdf(pdf_root, rel_dir, source)
         rows = _read_jsonl(jsonl_path)
         found = scan_paper(source, rel_dir, md_path, rows,
                            pdf_path if pdf_path.exists() else None, labeling_issues)
@@ -221,9 +234,21 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
             rec["status"] = "resolved"
             rec["note"] = "已由切题过滤修复（该行不再被当成题目）"
             closed += 1
-    if closed:
+    # 老记录里 pdf 为空（早期版本路径算错）时，用这次算出来的补上
+    by_key = {(i["source"], i["group_order"], i["kind"]): i for i in all_issues}
+    filled = 0
+    for rec in records:
+        key = (rec.get("source"), rec.get("group_order"), rec.get("kind"))
+        fresh = by_key.get(key)
+        if fresh and fresh.get("pdf") and not rec.get("pdf"):
+            rec["pdf"] = fresh["pdf"]
+            filled += 1
+    if closed or filled:
         _write_jsonl(ISSUES_FILE, records)
-        print(f"[ok] 自动收口 {closed} 条噪声题记录", flush=True)
+        if closed:
+            print(f"[ok] 自动收口 {closed} 条噪声题记录", flush=True)
+        if filled:
+            print(f"[ok] 补全 {filled} 条记录的原 PDF 路径", flush=True)
     known = {(i["source"], i["group_order"], i["kind"]) for i in records}
     added = 0
     with ISSUES_FILE.open("a", encoding="utf-8") as f:

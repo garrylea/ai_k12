@@ -1,6 +1,7 @@
 """manual_fix：待补题筛选（import_cli 第 7 步按本次扫描到的卷精确取）。"""
 
 import json
+from pathlib import Path
 
 import manual_fix
 
@@ -35,3 +36,15 @@ def test_pending_issues_filters_by_substring(tmp_path, monkeypatch):
     monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
 
     assert [i["group_order"] for i in manual_fix.pending_issues(file="人大附中")] == [7]
+
+
+def test_locate_pdf_uses_sibling_of_paper_dir(tmp_path):
+    """PDF 比 md 少一层目录：<年>/<卷名>.pdf vs <年>/<卷名>/<卷名>.md。"""
+    from recognition_scan import locate_pdf
+
+    rel = tmp_path / "物理" / "初中" / "first" / "2024" / "卷A"
+    rel.mkdir(parents=True)
+    pdf = rel.parent / "卷A.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+
+    assert locate_pdf(tmp_path, Path("物理/初中/first/2024/卷A"), "卷A") == pdf
