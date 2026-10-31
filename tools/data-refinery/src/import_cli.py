@@ -19,6 +19,7 @@
 """
 
 import argparse
+import copy
 
 from answer_backfill import backfill as answers_backfill
 from config import RefineryConfig
@@ -38,12 +39,16 @@ def parse_args(argv=None):
   python src/import_cli.py --subject 语文 --year 2025 --dry-run
   python src/import_cli.py --subject 语文 --year 2025
   python src/import_cli.py --file "202507-海淀-模拟二-试卷"
+  python src/import_cli.py --subject 物理 --files "一零一中学,人大附中,北师大实验"
   python src/import_cli.py --subject 语文 --re-extract --re-publish   # 只重抽+重发布
         """,
     )
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all",
                         help="素材来源过滤（默认 all）")
     add_scope_args(parser)
+    parser.add_argument("--files", metavar="KW[,KW...]",
+                        help="逗号分隔的多个卷名关键字：等价于对每个关键字各跑一遍 --file，"
+                             "一次导入多份卷（与 --file 互斥）")
     parser.add_argument("--dry-run", action="store_true", help="每步只打印，不写盘/不入库")
     parser.add_argument("--skip-convert", action="store_true", help="跳过 convert（复用已有 md）")
     parser.add_argument("--skip-extract", action="store_true", help="跳过 extract")
@@ -67,6 +72,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.questions_only and args.cards_only:
         parser.error("--questions-only 与 --cards-only 互斥")
+    if args.files and args.file:
+        parser.error("--files 与 --file 只能用一个（--files 就是多个 --file）")
     return args
 
 
@@ -189,8 +196,8 @@ def _scan_entry(args):
     return _run
 
 
-def main(argv=None) -> int:
-    args = parse_args(argv)
+def _execute(args) -> int:
+    """按 args 里的范围跑完整管线（单卷/单批）。"""
     scope = scope_from_args(args)
     print(f"=== import_cli：范围 {describe(scope)} "
           f"{'(dry-run)' if args.dry_run else ''} ===", flush=True)
@@ -248,6 +255,31 @@ def main(argv=None) -> int:
 
     print("=== 完成 ===", flush=True)
     return 0
+
+
+def _file_keywords(args) -> list[str]:
+    """--files 拆成关键字列表（兼容中文逗号）。"""
+    raw = (args.files or "").replace("，", ",")
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    keywords = _file_keywords(args)
+    if not keywords:
+        return _execute(args)
+
+    rc = 0
+    for idx, kw in enumerate(keywords, 1):
+        sub = copy.copy(args)
+        sub.file = kw
+        sub.files = None
+        print(f"\n=== [批量 {idx}/{len(keywords)}] {kw} ===", flush=True)
+        code = _execute(sub)
+        if code not in (None, 0):
+            rc = code
+            print(f"[WARN] {kw} 返回 {code}，继续处理下一份", flush=True)
+    return rc
 
 
 if __name__ == "__main__":

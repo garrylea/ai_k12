@@ -181,3 +181,23 @@ def test_stops_when_stage_returns_nonzero(monkeypatch, capsys):
     assert rc == 2
     assert calls == ["convert"]
     assert "已停止" in capsys.readouterr().out
+
+
+# ---------- --files（一次导入多份卷） ----------
+
+def test_files_splits_keywords_and_tolerates_chinese_comma():
+    args = parse_args(["--subject", "物理",
+                       "--files", "一零一中学, 人大附中，北师大实验 "])
+    assert import_cli._file_keywords(args) == ["一零一中学", "人大附中", "北师大实验"]
+
+
+def test_files_empty_when_not_given():
+    args = parse_args(["--subject", "物理"])
+    assert import_cli._file_keywords(args) == []
+
+
+def test_files_and_file_are_mutually_exclusive():
+    import pytest
+
+    with pytest.raises(SystemExit):
+        parse_args(["--subject", "物理", "--file", "海淀", "--files", "人大附中"])
