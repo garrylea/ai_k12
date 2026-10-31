@@ -346,26 +346,44 @@ def _line_edit(text: str) -> str | None:
 
 
 def _confirm_text(text: str) -> tuple[str, str]:
-    """录入后确认；返回 (动作, 正文)，动作 ∈ ok / redo / skip。"""
+    """录入后必须显式选号确认；返回 (动作, 正文)，动作 ∈ ok / redo / skip。
+
+    为什么不再用「回车=确认」：粘贴内容尾部常带空行，回车会被这些空行瞬间吃掉，
+    用户还没看清就跳到下一步，然后在答案处敲编辑指令、以为程序没反应。
+    """
     c = console()
-    c.block("将记录这一题", text, max_lines=8)
-    c.legend([("回车", "确认"), ("e", "编辑"), ("r", "重新输入"), ("s", "跳过本题")])
-    c.prompt("› ")
-    ans = (_read_line() or "").strip().lower()
-    if ans in ("s", "skip"):
-        return "skip", ""
-    if ans in ("r", "redo"):
-        return "redo", ""
-    if ans in ("e", "edit"):
-        edited = _line_edit(text)
-        if edited is None:
-            c.warn("没找到可用的编辑器（$VISUAL/$EDITOR/nano/vim），已保留原内容")
+    while True:
+        c.block("内容已收到", text, max_lines=6)
+        c.legend([("1", "确认继续"), ("2", "逐行编辑"), ("3", "重新粘贴"), ("4", "放弃本题")])
+        c.prompt("选择 › ")
+        raw = _read_line()
+        if raw is None:                 # 输入流结束：当作放弃，避免死等
+            return "skip", ""
+        ans = raw.strip()
+        if not ans:                     # 粘贴尾巴的空行：不当作确认
+            continue
+        low = ans.lower()
+
+        if ans == "1" or low in ("y", "yes"):
             return "ok", text
-        if not edited.strip():
-            c.warn("编辑后内容为空，已退回重输")
+        if ans == "2" or low in ("e", "edit"):
+            edited = _line_edit(text)
+            if edited is None:
+                c.warn("已放弃编辑，保留原内容")
+                continue
+            if not edited.strip():
+                c.warn("编辑后内容为空，请重新选择")
+                continue
+            text = edited
+            continue
+        if ans == "3" or low in ("r", "redo"):
             return "redo", ""
-        return "ok", edited
-    return "ok", text
+        if ans == "4" or low in ("s", "skip"):
+            return "skip", ""
+        if re.match(r"^[dci]\s+\d+", ans):
+            c.warn("要删/改行，请先按 2 进入编辑")
+            continue
+        c.warn("请按 1/2/3/4 选择（1 确认 / 2 编辑 / 3 重粘 / 4 放弃）")
 
 
 def _collect_content(paper_md_dir: Path) -> str | None:
@@ -530,6 +548,9 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 c.warn(f"第 {target} 题已放弃，不记录")
                 break
 
+            if re.match(r"^[dci]\s+\d+", answer):
+                c.warn("要删/改行，请按 e 进入编辑后再改")
+                continue
             if any(m in answer for m in _ECHO_MARKERS):
                 c.warn("答案里混进了界面文字，已置空")
                 answer = ""
