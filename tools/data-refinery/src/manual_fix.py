@@ -305,16 +305,24 @@ def _edit_in_editor(text: str) -> str | None:
         return None
     fd, name = tempfile.mkstemp(suffix=".md", prefix="k12-fix-")
     path = Path(name)
+    c = console()
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
+        # 说清楚"接下来屏幕会被编辑器接管"，否则用户会以为是程序把 e 吃掉了
+        c.info(f"正在用 {' '.join(cmd)} 打开编辑器；保存退出（vim: :wq  nano: Ctrl+O 回车 "
+               f"Ctrl+X）后自动读回，不改就退出")
         try:
             code = subprocess.call(cmd + [str(path)])
-        except OSError:
+        except OSError as exc:
+            c.err(f"打不开编辑器：{exc}")
             return None
         if code != 0:
+            c.warn(f"编辑器返回 {code}，内容按未修改处理")
             return None
-        return path.read_text(encoding="utf-8").strip()
+        edited = path.read_text(encoding="utf-8").strip()
+        c.ok(f"已从编辑器读回 {len(edited.splitlines())} 行")
+        return edited
     finally:
         path.unlink(missing_ok=True)
 
@@ -361,6 +369,10 @@ def _collect_content(paper_md_dir: Path) -> str | None:
         if low == "q":
             raise SystemExit(0)
 
+        if first in ("e", "r"):
+            # 还没录内容就想改：说清楚该按什么，别把这个字母吃进正文
+            c.warn("还没有可修改的内容；请按 1 粘贴正文 / 2 图片路径 / 3 文件路径")
+            continue
         if low == "1" or first == "":
             text = _read_block("")
         elif low == "2":
@@ -463,39 +475,65 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
     records: list[dict] = []
     multi = len(parts) > 1
     for no, body in parts:
-        if looks_like_ui_echo(body) or len(body.strip()) < 2:
-            c.err("这段内容不像题目（过短或含界面文字），已跳过本条")
-            continue
         target = no if no is not None else target_no
-        stem, options = strategy.split_options(body)
-        if options:
-            c.ok(f"第 {target} 题 · 题干 {len(stem)} 字 · 选项 "
-                 f"{'/'.join(o['label'] for o in options)}")
-        else:
-            c.ok(f"第 {target} 题 · 题干 {len(body)} 字 · 无选项（按简答题处理）")
-        c.prompt(f"第 {target} 题答案（可留空）› " if multi else "答案（可留空）› ")
-        answer = (_read_line() or "").strip()
-        if any(m in answer for m in _ECHO_MARKERS):
-            c.warn("答案里混进了界面文字，已置空")
-            answer = ""
-        records.append({
-            "source": issue["source"],
-            "rel_path": issue["rel_path"],
-            "group_order": target,
-            "content": stem.strip(),
-            "options": options,
-            "answer": answer,
-            "material_text": None,
-            "issue_kind": issue["kind"],
-            "issue_reasons": issue.get("reasons") or [],
-            "pdf": issue.get("pdf"),
-            "md": issue.get("md"),
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "operator": getpass.getuser(),
-            "status": "ready",
-            "applied": False,
-        })
-        c.ok(f"已记录第 {target} 题（{len(stem.strip())} 字）")
+        # 录入确认之后仍允许返工：答案这一步也认 e 改题面 / r 重录 / s 放弃
+        while True:
+            if looks_like_ui_echo(body) or len(body.strip()) < 2:
+                c.err("这段内容不像题目（过短或含界面文字），已跳过本条")
+                break
+            stem, options = strategy.split_options(body)
+            if options:
+                c.ok(f"第 {target} 题 · 题干 {len(stem)} 字 · 选项 "
+                     f"{'/'.join(o['label'] for o in options)}")
+            else:
+                c.ok(f"第 {target} 题 · 题干 {len(body)} 字 · 无选项（按简答题处理）")
+            hint = "答案（可留空；e 改题面 / r 重录 / s 放弃本题）› "
+            c.prompt(f"第 {target} 题{hint}" if multi else hint)
+            answer = (_read_line() or "").strip()
+
+            # 只认**小写**单字母：英语选项答案可能是大写 E，不能被当成命令
+            if answer in ("e", "edit"):
+                edited = _edit_in_editor(body)
+                if edited is None:
+                    c.warn("没找到可用的编辑器（$VISUAL/$EDITOR/nano/vim），题面未改")
+                elif not edited.strip():
+                    c.warn("编辑后内容为空，已忽略")
+                else:
+                    body = edited
+                continue
+            if answer in ("r", "redo"):
+                fresh = _collect_content(paper_md_dir)
+                if fresh and fresh.strip():
+                    body = fresh
+                else:
+                    c.warn("没有收到新内容，保留原题面")
+                continue
+            if answer in ("s", "skip"):
+                c.warn(f"第 {target} 题已放弃，不记录")
+                break
+
+            if any(m in answer for m in _ECHO_MARKERS):
+                c.warn("答案里混进了界面文字，已置空")
+                answer = ""
+            records.append({
+                "source": issue["source"],
+                "rel_path": issue["rel_path"],
+                "group_order": target,
+                "content": stem.strip(),
+                "options": options,
+                "answer": answer,
+                "material_text": None,
+                "issue_kind": issue["kind"],
+                "issue_reasons": issue.get("reasons") or [],
+                "pdf": issue.get("pdf"),
+                "md": issue.get("md"),
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "operator": getpass.getuser(),
+                "status": "ready",
+                "applied": False,
+            })
+            c.ok(f"已记录第 {target} 题（{len(stem.strip())} 字）")
+            break
     return records
 
 

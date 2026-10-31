@@ -515,3 +515,71 @@ def test_confirm_skip_returns_none(tmp_path, monkeypatch):
 def test_editor_command_prefers_env(monkeypatch):
     monkeypatch.setenv("EDITOR", "my-editor --wait")
     assert manual_fix._editor_command() == ["my-editor", "--wait"]
+
+
+# ---------- 答案这一步也能返工（e 改题面 / r 重录 / s 放弃） ----------
+
+def test_answer_e_edits_stem_instead_of_becoming_answer(tmp_path, monkeypatch):
+    """用户反馈：按 e 结果 e 成了答案 —— 现在必须进编辑器改题面。"""
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n原始题面内容\nEOF\n\ne\n\n"))
+    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: "编辑器改后的题面")
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert len(recs) == 1
+    assert recs[0]["content"] == "编辑器改后的题面"
+    assert recs[0]["answer"] == "", "e 不能被当成答案存下来"
+
+
+def test_answer_r_recollects_content(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "1\n旧题面内容\nEOF\n\nr\n"          # 答案处按 r → 重新录入
+        "1\n新题面内容\nEOF\n\nA\n"))        # 新题面 + 答案 A
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert [r["content"] for r in recs] == ["新题面内容"]
+    assert recs[0]["answer"] == "A"
+
+
+def test_answer_s_discards_question(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n要放弃的题面\nEOF\n\ns\n"))
+
+    assert manual_fix._ask(issue, tmp_path) == []
+
+
+def test_answer_edit_without_editor_keeps_stem(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n原题面\nEOF\n\ne\n\n"))
+    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: None)
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert recs[0]["content"] == "原题面"
+    assert recs[0]["answer"] == ""
+
+
+def test_menu_e_before_content_hints_instead_of_swallowing(tmp_path, monkeypatch, capsys):
+    """还没录内容就按 e：不能把 e 当正文，要提示按 1/2/3。"""
+    monkeypatch.setattr("sys.stdin", io.StringIO("e\n1\n正文\nEOF\n\n\n"))
+
+    assert manual_fix._collect_content(tmp_path) == "正文"
+    assert "还没有可修改的内容" in capsys.readouterr().out
+
+
+def test_uppercase_E_is_still_a_valid_answer(tmp_path, monkeypatch):
+    """英语七选五答案可能是 E：大写不能当命令。"""
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n题面内容\nEOF\n\nE\n"))
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert recs[0]["answer"] == "E"
