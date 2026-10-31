@@ -1,19 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { BackButton } from '@/components/base';
-
-interface TrainingSubject {
-  id: number;
-  name: string;
-  enabled: boolean;
-  desc: string;
-}
-
-// id 对应 subjects 表 seed（1=数学, 2=语文, 3=英语）；语文已开放古诗文专项，英语已开放背单词
-const SUBJECTS: TrainingSubject[] = [
-  { id: 1, name: '数学', enabled: true, desc: '考试 / 专项练习 / 错题练习' },
-  { id: 2, name: '语文', enabled: true, desc: '真题考试 / 专项练习 / 古诗文专项' },
-  { id: 3, name: '英语', enabled: true, desc: '背单词' },
-];
+import { TRAINING_SUBJECTS, type TrainingSubjectConfig } from '@/subjectConfig';
 
 const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   <svg
@@ -32,20 +19,9 @@ const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
 export default function TrainingSubjectPage() {
   const navigate = useNavigate();
 
-  const handleSelect = (subject: TrainingSubject) => {
+  const handleSelect = (subject: TrainingSubjectConfig) => {
     if (!subject.enabled) return;
-    // 数学 → 三卡选择页（专项/考试/错题，PRD §6.3）；语文 → 语文专项页；英语 → 背单词配置页
-    if (subject.id === 2) {
-      navigate('/student/training/chinese/special');
-      return;
-    }
-    // 英语目前只有背单词一个功能，故不建二选一的 special 页（语文那页是因为有两个专项），
-    // 直接进配置页；以后加了听写/语法再补。
-    if (subject.id === 3) {
-      navigate('/student/training/english/vocabulary');
-      return;
-    }
-    navigate('/student/training/home');
+    navigate(subject.homePath);
   };
 
   return (
@@ -65,7 +41,7 @@ export default function TrainingSubjectPage() {
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
-          {SUBJECTS.map((subject) =>
+          {TRAINING_SUBJECTS.map((subject) =>
             subject.enabled ? (
               <button
                 key={subject.id}
@@ -109,9 +85,9 @@ export default function TrainingSubjectPage() {
                 }}
                 aria-label={`${subject.name}训练暂未开放`}
               >
-                {/* 角标：敬请期待 */}
+                {/* 角标：未开放学科展示 badge（默认「敬请期待」） */}
                 <span className="absolute top-4 right-4 px-2.5 py-1 text-xs font-medium rounded-full text-[var(--text-secondary)] bg-[var(--bg-subtle)]">
-                  敬请期待
+                  {subject.badge ?? '敬请期待'}
                 </span>
                 <div
                   className="w-20 h-20 rounded-2xl flex items-center justify-center text-slate-500 shadow-sm"
