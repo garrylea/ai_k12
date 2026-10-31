@@ -59,6 +59,8 @@
 | `apps/server/src/modules/exams/exams.service.ts:37` | `shouldSelfAssess`：只有语文非客观题自评 |
 | `apps/server/src/modules/exams/exams.service.ts:414` | `subjectId===2 ? 'cn_paper' : 'math_paper'` |
 | `apps/server/src/modules/practice/judge-core.service.ts:137-139` | `isChineseNonObjective()` 只认 `subject_id===2` |
+| `apps/server/src/modules/exams/exams.service.ts:332-344` | 交卷未作答按错计 + 写错题本，**不看该题有没有参考答案** |
+| `apps/web/src/components/business/answer/QuestionRunner.tsx:241` | 内联自评闸门写死 `type === 'short_answer' \|\| 'proof'` |
 | `apps/server/src/modules/knowledge-graph/knowledge-graph.controller.ts:81-85` | `assertMathSubject()`：非 1 直接 400 + 1001 |
 | `apps/server/src/modules/points/default-rules.ts:11-62` | 任务码只有 math/cn 两套 |
 
@@ -98,6 +100,7 @@ export interface TrainingSubjectConfig {
 | 9 | 道德与法治 | 内容准备中 | false | `/student/training/home?subjectId=9` | 全部/选择/填空/简答 | `politics_targeted` | false |
 
 - `constants.ts` 的 `parseSubjectId` 白名单扩到 `1|2|3|4|5|9`；**缺省与未知值仍回落数学**（保持现有链接兼容），但不再把 4/5/9 当成数学。`SubjectId` 联合类型同步扩为这六个值。
+- `subjectConfig.ts` 另导出 `selfAssessEligible(subjectId, type)`（对应 §3.5 闸门 ③）：数学 `short_answer`/`proof`；非数学学科一切非 `choice`/`true_false`。`QuestionRunner.tsx:241` 改用它，**数学分支与今天逐字等价**，语文填空顺带修好。
 - `subjectName` / `subjectHomePath` 改为查表；表外学科仍按原口径回落数学，行为不变。
 - `isMathLikeSubject` 改为读配置（4/5 为 true，9 为 false），`QuestionRunner` 的 LaTeX 作答区不动。
 
@@ -111,7 +114,11 @@ export const SELF_ASSESS_SUBJECTS: ReadonlySet<number>;
 export function targetedTaskCode(subjectId: number): string;  // 表外回落 math_targeted
 export function paperTaskCode(subjectId: number): string;     // 表外回落 math_paper
 export function isSelfAssessSubject(subjectId: number): boolean;
+/** 闸门 ①：考试侧「跳过判题直接自评」。语文=非客观；新学科=short_answer/proof。 */
+export function selfAssessSkipsJudging(subjectId: number, type: string): boolean;
 ```
+
+`exams.service.ts` 现有导出 `shouldSelfAssess` **保留签名与导出位置**（测试直接 import 它），内部改为委托 `selfAssessSkipsJudging`。
 
 表外回落是**有意保留**：6/7/8（生物/历史/地理）尚无入口，不为其建配置；但入口一旦误开，行为与今天一致（数学口径），不会 500。
 
@@ -153,20 +160,35 @@ export function isSelfAssessSubject(subjectId: number): boolean;
 
 ### 3.5 判题口径
 
-规则（对所有学科统一表述，仅自评学科集合不同）：
+判题链路上有**三道闸门**，语义不同，不能合并成一个判断：
 
-1. `choice` / `true_false` → 精确比对（`compareAnswer`，优先 `options.isCorrect`）。
-2. `fill_blank` / `calculation` → 先归一化相等判对（`normalizeAnswer`，`\frac{a}{b}` → `a/b` 等）；**不等时不进 AI**，转第 3 步。**语文除外**：语文填空仍直接自评（2026-10-28 裁决，行为不变）。
-3. 学科属于 `SELF_ASSESS_SUBJECTS` 且题型非客观 → 自评（返回 `needsSelfAssessment` + 参考答案/解析）。
-4. 其余（数学 `short_answer`/`proof` 且 `JUDGE_SUBJECTIVE_MODE=self_assess`）→ 维持现状。
-5. 空答案题 → `unanswered`（现有守卫，物理 106 道空答案题不会被误判错）。
+| 闸门 | 位置 | 作用 | 口径 |
+|---|---|---|---|
+| ① 考试跳过判题 | `exams.service.ts:36` `shouldSelfAssess` | 为 true 时**根本不调 JudgeCore**，直接落 `is_correct=NULL, method='self_assess'` | 语文：非客观题（不变）；物理/化学/道法：**仅 `short_answer` / `proof`** |
+| ② 判题兜底自评 | `judge-core.service.ts:137` `isChineseNonObjective` → `isSelfAssessNonObjective` | 归一化比对失败后的兜底 | 语文：非客观题；物理/化学/道法：非客观题（含填空/计算不等时） |
+| ③ 前端内联自评 UI | `QuestionRunner.tsx:241` | 决定「同步等判题并弹自评视图」还是「fire-and-forget 直接下一题」 | 抽成 `selfAssessEligible(subjectId, type)`（见 §3.1）：数学 `short_answer`/`proof`（**与今天完全一致**）；非数学学科一切非 `choice`/`true_false` |
 
-实现要点：
+**为什么 ① 必须比 ② 窄**：`exams.service.ts:214,318` 是先问 ① 再决定要不要调判题。若 ① 对 `fill_blank`/`calculation` 也返回 true，化学填空就永远走不到「归一化相等判对」——而化学是唯一答案完整、真正能考的内容。① 只放真正主观的 `short_answer`/`proof`，`fill_blank`/`calculation` 一律进 JudgeCore 走 ②。
 
-- `exams.service.ts:36-39`：`Number(subjectId) === 2` → `isSelfAssessSubject(subjectId)`。
-- `judge-core.service.ts:137`：`isChineseNonObjective` 泛化为 `isSelfAssessNonObjective(q)`（读 `q.subject_id` ∈ `SELF_ASSESS_SUBJECTS` 且非 choice/true_false）。
-- **分支顺序必须调整**：新学科要在自评分支**之前**插入一条「`fill_blank`/`calculation` 归一化相等 → exact」，否则化学填空会被直接自评。该分支只对 `SELF_ASSESS_SUBJECTS` 且非语文生效，**语文与数学的分支顺序与结果完全不变**（语文填空仍走自评，这是 2026-10-28 裁决）。
-- `judgeForPractice`（主线课程路径）不动：主线只跑数学课程，新学科不经过该路径。
+**为什么 ③ 必须同步改**：不在 ③ 名单里的题型，服务端即使返回 `needsSelfAssessment: true`，前端也会把结果记成 `isCorrect: res.isCorrect ?? false`（`QuestionRunner.tsx:287`），学生看到「错」且没有自评入口。语文 `fill_blank` 今天就是这个状态（语文填空服务端返回自评、前端不弹），本次顺带修好；数学保持 fire-and-forget 不变。
+
+`judgeQuestion`（训练/考试共用入口）的分支顺序：
+
+1. 空答案守卫 → `unanswered`（现有 `judge-core.service.ts:257-262`，物理 106 道空答案题不会被误判错）。
+2. `choice` / `true_false` → 精确比对（`compareAnswer`，优先 `options.isCorrect`）。
+3. **新增**：`subjectId ∈ {4,5,9}` 且 `type ∈ {fill_blank, calculation}` 且 `compareAnswer` 相等 → `exact` 判对。
+4. ② 命中（语文 + 新学科的非客观题）→ `self_assess`，返回 `needsSelfAssessment` + 参考答案/解析。
+5. 现有：`fill_blank`/`calculation` 归一化相等 → `exact`（数学路径，行为不变）。
+6. 现有：`SUBJECTIVE_TYPES` + `JUDGE_SUBJECTIVE_MODE=self_assess` → `self_assess`。
+7. 其余 → AI 判定。
+
+顺序调整只影响 4/5/9：语文仍在第 4 步自评（填空不被第 3 步抢走，第 3 步限定 4/5/9）；数学不进第 3 步，第 5/6/7 步与今天一字不差。**不变量：新学科的任何题型都不会调用 `JudgmentCapability`**（写死 `subject:'math'` 的 AI 判题对新学科不可达）。
+
+`judgeForPractice`（主线课程路径）不改：已核对调用面，主线只跑数学课程，新学科不经过该路径。
+
+**交卷口径（无参考答案的题）**：`finalizeSession` 的「未作答按错计」保持不变（`is_correct=0`），但**只有 `q.answer` 非空时才写错题本**。否则物理 51/52/53 号卷（分别 34/33/34 道无答案题）会在交卷时往错题本灌入大量条目，而错题练习再遇到它们走空答案守卫、既不自评也不清零 —— 学生在 App 里永远清不掉。数学卷题都有答案，行为不变。
+
+> 附带行为（可接受）：化学/物理的 `fill_blank`/`calculation` 若在作答时已因「不等」落成 `self_assess`（`is_correct=NULL`），交卷补判会再走一次 JudgeCore（闸门 ① 不拦它们）。判题幂等、无错题本副作用，仅多一次调用。
 
 ### 3.6 薄弱点图谱门禁
 
@@ -204,6 +226,7 @@ export function isSelfAssessSubject(subjectId: number): boolean;
 | 学科无知识点（化学/道法） | 专项页显示空考点列表；开练不可点（既有空态） |
 | 学科无试卷（道法） | 试卷列表空态 |
 | 学科题目全空答案（物理 3 套卷） | 判题返回 `unanswered`（不计对错、不进错题本、不生成解析） |
+| 交卷时未作答且该题无参考答案 | 记 `is_correct=0` 计入卷面（与未作答同口径），但**不写错题本**——否则生成 App 内永久清不掉的错题 |
 | 积分规则缺失（家长手动下架全部档位） | 既有「档位加载失败/停用」空态 |
 | 图谱学科不支持 | 400 + 1001（仅 6/7/8 可达） |
 
@@ -213,6 +236,7 @@ export function isSelfAssessSubject(subjectId: number): boolean;
 
 1. `docs/API接口与数据流设计文档.md`
    - §5 弱科图谱端点：`subjectId` 允许值 1 → `1/4/5/9`。
+   - §5 考试交卷（约 :1428）：补「无参考答案的题未作答不计入错题本」与「语文外的自评学科（物理/化学/道法）非客观题自评」。
    - 训练轨积分段落：补 6 个新任务码及「新学科非客观题自评」口径。
    - 明确点掉「其余学科沿用数学码」「subjectId 仅支持 1（数学）」两处旧表述。
 2. `docs/api/openapi.yaml`：`weak-points` / `mastery` 的 `subjectId` 参数描述同步。
@@ -227,8 +251,8 @@ export function isSelfAssessSubject(subjectId: number): boolean;
 | 文件 | 用例 |
 |---|---|
 | 新增 `subject-config.test.ts` | 三个映射表的 1/2/4/5/9 取值；表外回落（6 → math_*）；`isSelfAssessSubject(4/5/9) === true`、`(1/3) === false` |
-| `exams.service.test.ts` | 物理 `short_answer` → `shouldSelfAssess === true`；数学 `short_answer` 行为不变；交卷发分任务码 4 → `physics_paper`、5 → `chemistry_paper`、9 → `politics_paper`、1 → `math_paper` |
-| `judge-core.service.test.ts` | 化学 `fill_blank` 归一化相等 → `method='exact', isCorrect=true`（不进自评）；不等 → `method='self_assess'`；物理 `calculation` 同上；语文 `fill_blank` 仍 `self_assess`（回归钉子）；空答案 → `unanswered` |
+| `exams.service.test.ts` | 物理 `short_answer` → `shouldSelfAssess === true`；**化学 `fill_blank` → `shouldSelfAssess === false`（必须进 JudgeCore 判）**；数学 `short_answer` 行为不变；交卷发分任务码 4 → `physics_paper`、5 → `chemistry_paper`、9 → `politics_paper`、1 → `math_paper`；交卷时「无答案题未作答」不入错题本、「有答案题未作答」仍入 |
+| `judge-core.service.test.ts` | 化学 `fill_blank` 归一化相等 → `method='exact', isCorrect=true`（不进自评）；不等 → `method='self_assess'`；物理 `calculation` 同上；语文 `fill_blank` 仍 `self_assess`（回归钉子）；空答案 → `unanswered`；**不变量：4/5/9 任意题型都不调用 `JudgmentCapability.judge`** |
 | `training.controller.test.ts` | `targeted/start` subjectId=4 校验档位走 `physics_targeted`；建档 `task_code='physics_targeted'`、`subject_id=4` |
 | `knowledge-graph.controller.test.ts` | 现有「非 1 → 400」用例改成 6 → 400；1/4/5/9 放行并透传 |
 | `default-rules.test.ts` | 条数 23 → 38；新码唯一性/排序断言；快照更新 |
@@ -242,6 +266,7 @@ export function isSelfAssessSubject(subjectId: number): boolean;
 | `constants.test.ts`（若无则新增） | `parseSubjectId('4'|'5'|'9')` 原样返回；`'6'`/`null` 回落 1；`subjectName(4/5/9)`；`subjectHomePath(4)` 带参 |
 | `TargetedConfigPage.test.tsx` | subjectId=4 时题型下拉为物理五档、档位请求 `physics_targeted`；subjectId=5 时四档、`chemistry_targeted` |
 | `WeakPointGraphPage.test.tsx` | 带 `?subjectId=4` 时请求带该学科 |
+| `QuestionRunner.test.tsx` | 化学 `fill_blank` / 物理 `calculation` 返回 `needsSelfAssessment` 时进入自评视图（提交后调 `onSelfAssess` 落库）；**数学 `fill_blank` 仍走 fire-and-forget（回归钉子）** |
 
 ### 手工冒烟（交付前）
 
@@ -273,7 +298,9 @@ export function isSelfAssessSubject(subjectId: number): boolean;
 - [ ] 训练选科页六卡；道法不可点且显示「内容准备中」。
 - [ ] 物理/化学四卡可用，标题、错题数、四个入口链接均带正确 `subjectId`。
 - [ ] 数学入口不显示相似题提示条的回归未被破坏（数学仍显示）。
-- [ ] 化学填空等值答案判对（`exact`），不等转自评；语文填空仍自评。
+- [ ] 化学填空等值答案判对（`exact`），不等转自评；语文填空仍自评；数学填空仍走 AI 判定（三条回归钉子都在）。
+- [ ] 新学科任意题型都不会触发 AI 判题（`JudgmentCapability` 不被调用）。
+- [ ] 物理 51/52/53 号卷交卷后错题本不新增条目；有答案卷的未作答照旧入错题本。
 - [ ] 物理/化学/道法专项完成发分到各自任务码；家长端可见独立分组。
 - [ ] 图谱对 1/4/5/9 放行，6/7/8 仍 400 + 1001。
 - [ ] 全量 `npm test`（server + web）通过；`npm run build` 通过。
