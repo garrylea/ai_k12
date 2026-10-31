@@ -342,7 +342,7 @@ def test_apply_entry_dry_run_only_previews(monkeypatch):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+    monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
 
     assert import_cli._apply_entry(_apply_args(["--dry-run"]))([]) == 0
     assert len(calls) == 1 and "--dry-run" in calls[0]
@@ -352,7 +352,7 @@ def test_apply_entry_non_tty_prints_command(monkeypatch, capsys):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+    monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _FakeStdin(tty=False))
 
     import_cli._apply_entry(_apply_args())([])
@@ -365,7 +365,7 @@ def test_apply_entry_writes_after_yes(monkeypatch, capsys):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+    monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _TtyStdin("y\n"))
 
     import_cli._apply_entry(_apply_args())([])
@@ -378,7 +378,7 @@ def test_apply_entry_declined_keeps_records(monkeypatch, capsys):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "main", lambda argv: calls.append(argv))
+    monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _TtyStdin("\n"))
 
     import_cli._apply_entry(_apply_args())([])

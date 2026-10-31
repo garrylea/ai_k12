@@ -146,7 +146,7 @@ def apply_record(cur, rec: dict, apply: bool) -> str:
     return f"{action}：paper={paper_id} 第{go}题 -> question_id={qid}"
 
 
-def main(argv=None) -> int:
+def run(argv=None, *, via_pipeline: bool = False) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fixes-dir", default=str(FIXES_DIR))
     parser.add_argument("--subject", help="学科中文名过滤（按 rel_path 首段）")
@@ -206,10 +206,17 @@ def main(argv=None) -> int:
             print(f"\n[ok] 已写入 {total} 题")
         else:
             conn.rollback()
-            print(f"\n[dry-run] 预览 {previewed} 条；确认后加 --apply")
+            if via_pipeline:
+                print(f"\n[预览] 共 {previewed} 条，均未写库")
+            else:
+                print(f"\n[dry-run] 预览 {previewed} 条；确认后加 --apply")
     finally:
         conn.close()
     return 0
+
+
+def main(argv=None) -> int:
+    return run(argv)
 
 
 if __name__ == "__main__":

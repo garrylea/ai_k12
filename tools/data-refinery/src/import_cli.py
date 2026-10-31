@@ -307,7 +307,7 @@ def _file_keywords(args) -> list[str]:
 def _apply_entry(args):
     """把第 7 步补的题写进库：先预览，交互终端下确认一次才真写。"""
     def _run(_argv) -> int:
-        from apply_fixes import main as apply_main, pending_records
+        from apply_fixes import pending_records, run as apply_run
 
         recs = pending_records(args.subject, args.file)
         if not recs:
@@ -320,7 +320,7 @@ def _apply_entry(args):
         if args.file:
             scope += ["--source", args.file]
         print(f"[补题] 待写入 {len(recs)} 条，先预览：", flush=True)
-        apply_main(["--dry-run"] + scope)
+        apply_run(["--dry-run"] + scope, via_pipeline=True)
         if args.dry_run:
             return 0
         if args.skip_review or not sys.stdin.isatty():
@@ -328,12 +328,12 @@ def _apply_entry(args):
                   + (" " + " ".join(scope) if scope else ""), flush=True)
             return 0
 
-        print("\n现在写入题库？[y/N] ", end="", flush=True)
+        print("\n是否现在写入题库？ y=写入 / 直接回车=暂不写 › ", end="", flush=True)
         ans = (sys.stdin.readline() or "").strip().lower()
         if ans not in ("y", "yes"):
             print("[跳过] 记录留在 output/manual_fixes/，随时可 --apply", flush=True)
             return 0
-        return apply_main(["--apply"] + scope)
+        return apply_run(["--apply"] + scope, via_pipeline=True)
     return _run
 
 
