@@ -176,6 +176,11 @@ def _trunc(s: str | None, n: int = 40) -> str:
     return s if len(s) <= n else s[:n] + "…"
 
 
+def _line_prefix(rec: AnswerRecord) -> str:
+    """记录来自文件时才有行号；内存构造的记录（line_no=0）不打印「第 0 行」。"""
+    return f"第 {rec.line_no} 行 " if rec.line_no else ""
+
+
 def _field_line(name: str, old: str | None, new: str | None) -> str | None:
     if new is None:
         return None
@@ -213,12 +218,13 @@ def format_report(
         lines.append(f"—— 定位失败 {len(unmatched)} 条（不写入）——")
         for rec in unmatched:
             note = f"（{rec.note}）" if rec.note else ""
-            lines.append(f"  第 {rec.line_no} 行 {rec.locator()}{note}")
+            lines.append(f"  {_line_prefix(rec)}{rec.locator()}{note}")
         lines.append("")
     if out_of_scope:
-        lines.append(f"—— 范围外跳过 {len(out_of_scope)} 条（不满足 --where，不写入）——")
+        lines.append(f"—— 范围外跳过 {len(out_of_scope)} 条"
+                     f"（这些题库里已有答案，按「只补空」不覆盖）——")
         for rec, row in out_of_scope:
-            lines.append(f"  第 {rec.line_no} 行 {rec.locator()} -> questions#{row.question_id}")
+            lines.append(f"  {_line_prefix(rec)}{rec.locator()} -> questions#{row.question_id}")
         lines.append("")
     if warnings:
         lines.append(f"—— 警告 {len(warnings)} 条 ——")

@@ -139,6 +139,22 @@ class TestReport:
         assert "示例警告" in out
         assert "dry-run" in out
 
+    def test_out_of_scope_section_explains_why(self):
+        """跳过原因要说人话：库里已有答案、只补空不覆盖。"""
+        m = classify([AnswerRecord(question_id=3, answer="C", line_no=1)], [_row(3)],
+                     in_scope_ids=set())
+        out = format_report(target="T", diff=[], unmatched=m.unresolved,
+                            out_of_scope=m.out_of_scope, warnings=[], apply=False)
+        assert "已有答案" in out and "不覆盖" in out
+
+    def test_memory_records_do_not_print_line_zero(self):
+        """内存构造的记录 line_no=0，不该显示「第 0 行」。"""
+        m = classify([AnswerRecord(question_id=3, answer="C", line_no=0)], [_row(3)],
+                     in_scope_ids=set())
+        out = format_report(target="T", diff=[], unmatched=[],
+                            out_of_scope=m.out_of_scope, warnings=[], apply=False)
+        assert "第 0 行" not in out
+
     def test_out_of_scope_section(self):
         m = classify([AnswerRecord(question_id=3, answer="C", line_no=1)], [_row(3)], in_scope_ids=set())
         out = format_report(target="T", diff=[], unmatched=m.unresolved,
