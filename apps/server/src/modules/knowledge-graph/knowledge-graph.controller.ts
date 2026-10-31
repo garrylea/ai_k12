@@ -13,14 +13,20 @@ import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.j
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
+import {
+  SUBJECT_MATH,
+  SUBJECT_PHYSICS,
+  SUBJECT_CHEMISTRY,
+  SUBJECT_POLITICS,
+} from '../../common/subject-config.js';
 import type { KnowledgeGraphMastery, WeakPointRecommendation } from './dto/knowledge-graph.dto.js';
-
-/** 本期只支持数学（spec §2/§3 裁决 1）。 */
-const MATH_SUBJECT_ID = 1;
 
 /** `limit` 默认值与上界（spec §5.3）。 */
 const DEFAULT_LIMIT = 1;
 const MAX_LIMIT = 10;
+
+/** 图谱目前开放的学科：数学 + 物理/化学/道法（服务层按 subjectId 通用，仅这里设门禁）。 */
+const SUPPORTED_SUBJECTS = new Set([SUBJECT_MATH, SUBJECT_PHYSICS, SUBJECT_CHEMISTRY, SUBJECT_POLITICS]);
 
 /**
  * 数学薄弱点图谱（API 文档 §4.5）。
@@ -43,7 +49,7 @@ export class KnowledgeGraphController {
     @Query('subjectId', ParseIntPipe) subjectId: number,
   ): Promise<KnowledgeGraphMastery> {
     this.assertSelf(studentId, user.sub);
-    this.assertMathSubject(subjectId);
+    this.assertSupportedSubject(subjectId);
     return this.service.getMastery(studentId, subjectId);
   }
 
@@ -56,7 +62,7 @@ export class KnowledgeGraphController {
     @Query('limit') limitStr?: string,
   ): Promise<WeakPointRecommendation> {
     this.assertSelf(studentId, user.sub);
-    this.assertMathSubject(subjectId);
+    this.assertSupportedSubject(subjectId);
 
     // 空串等同缺省（前端 URLSearchParams 不会产出空串，但手拼 URL 会）
     const limit =
@@ -77,10 +83,10 @@ export class KnowledgeGraphController {
     }
   }
 
-  /** 本期只支持数学。 */
-  private assertMathSubject(subjectId: number): void {
-    if (subjectId !== MATH_SUBJECT_ID) {
-      throw new BadRequestException({ code: 1001, message: 'subjectId 仅支持 1（数学）' });
+  /** 图谱目前开放的学科：数学 + 物理/化学/道法。 */
+  private assertSupportedSubject(subjectId: number): void {
+    if (!SUPPORTED_SUBJECTS.has(subjectId)) {
+      throw new BadRequestException({ code: 1001, message: 'subjectId 仅支持 1 / 4 / 5 / 9' });
     }
   }
 }

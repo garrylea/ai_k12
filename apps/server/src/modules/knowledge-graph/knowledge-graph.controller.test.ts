@@ -32,20 +32,25 @@ describe('KnowledgeGraphController 归属校验', () => {
 });
 
 describe('KnowledgeGraphController subjectId 校验', () => {
-  it('subjectId 非 1 → 400 + code 1001', async () => {
+  it.each([1, 4, 5, 9])('subjectId=%i 放行并透传', async (subjectId) => {
     const { ctrl, service } = makeCtrl();
+    service.getMastery.mockResolvedValue({});
+    await ctrl.getMastery(7, user, subjectId);
+    expect(service.getMastery).toHaveBeenCalledWith(7, subjectId);
+  });
 
-    await expect(ctrl.getMastery(7, user, 2)).rejects.toMatchObject({
+  it.each([6, 7, 8])('未开放学科 %i -> 400 + code 1001', async (subjectId) => {
+    const { ctrl, service } = makeCtrl();
+    await expect(ctrl.getMastery(7, user, subjectId)).rejects.toMatchObject({
       response: { code: 1001 },
       status: 400,
     });
     expect(service.getMastery).not.toHaveBeenCalled();
   });
 
-  it('weak-points 的 subjectId 非 1 → 400 + code 1001', async () => {
-    const { ctrl, service } = makeCtrl();
-
-    await expect(ctrl.getWeakPoints(7, user, 3, undefined)).rejects.toMatchObject({
+  it('weak-points 同样拒绝未开放学科', async () => {
+    const { ctrl } = makeCtrl();
+    await expect(ctrl.getWeakPoints(7, user, 6, undefined)).rejects.toMatchObject({
       response: { code: 1001 },
       status: 400,
     });
