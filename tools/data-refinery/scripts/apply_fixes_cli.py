@@ -100,7 +100,7 @@ def apply_record(cur, rec: dict, apply: bool) -> str:
     if qid:
         cur.execute(
             "UPDATE questions SET content=%s, options=%s, answer=%s, material_text=%s, "
-            "content_hash=%s, is_active=1, needs_review=0 WHERE id=%s",
+            "content_hash=%s, is_active=1 WHERE id=%s",
             (rec["content"],
              json.dumps(options, ensure_ascii=False) if options else None,
              rec.get("answer") or "", rec.get("material_text"), chash, qid))
