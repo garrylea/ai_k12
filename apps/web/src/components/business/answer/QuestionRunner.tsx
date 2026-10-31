@@ -21,7 +21,7 @@ import { clearDraft } from '../draft-store';
 import { trackEvent } from '@/analytics/tracker';
 import { ChoiceOptionList } from './ChoiceOptionList';
 import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion, RunnerSelfAssessContext } from './types';
-import { isMathLikeSubject } from '@/constants';
+import { isMathLikeSubject, selfAssessEligible } from '@/constants';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用内嵌草稿（PRD §7.12） */
 const MATH_SUBJECT_ID = 1;
@@ -238,7 +238,9 @@ export function QuestionRunner({
     // 主观题（解答/证明）：同步等待判题返回——self_assess 模式即时返回待自评
     // （进入自评视图，强制自评后放行）；ai 模式返回判定结果（记录后切题）。
     // showResultFeedback=false（考试）：不在此自评（交卷后结果页自评），走 fire-and-forget。
-    const inlineSelfAssess = showResultFeedback && (question.type === 'short_answer' || question.type === 'proof');
+    // 主观题/新学科非客观题：同步等判题返回——needsSelfAssessment 时进入自评视图。
+    // 名单由 subjectConfig.selfAssessEligible 统一口径（数学与历史行为逐字一致）。
+    const inlineSelfAssess = showResultFeedback && selfAssessEligible(subjectId, question.type);
     if (inlineSelfAssess) {
       setPhase('judging');
       try {

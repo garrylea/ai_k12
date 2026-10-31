@@ -255,6 +255,55 @@ describe('主观题自评（self_assess 模式）', () => {
   });
 });
 
+const SA_FILL_QUESTIONS: RunnerQuestion[] = [
+  { n: '1', text: '化学填空题干', type: 'fill_blank' },
+];
+
+describe('内联自评闸门按学科开放（闸门③）', () => {
+  it('化学填空返回 needsSelfAssessment 时进入自评视图', async () => {
+    const user = userEvent.setup();
+    const onSelfAssess = vi.fn(async () => {});
+    render(
+      <QuestionRunner
+        questions={SA_FILL_QUESTIONS}
+        subjectId={5}
+        draftKeyPrefix="chem"
+        variant="embedded"
+        draftDisabled
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({
+          isCorrect: null, method: 'self_assess', needsSelfAssessment: true, referenceAnswer: 'CO2',
+        })}
+        onSelfAssess={onSelfAssess}
+        onFinish={() => {}}
+      />,
+    );
+    await user.type(screen.getByRole('textbox'), 'CO2');
+    await user.click(screen.getByTitle('提交'));
+    expect(await screen.findByText('CO2')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '我做对了' }));
+    expect(onSelfAssess).toHaveBeenCalledTimes(1);
+  });
+
+  it('数学填空保持 fire-and-forget：不弹自评、直接记结果', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    render(
+      <QuestionRunner
+        questions={[{ n: '1', text: '数学填空题干', type: 'fill_blank' }]}
+        subjectId={1}
+        draftKeyPrefix="math"
+        variant="embedded"
+        draftDisabled
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+        onFinish={onFinish}
+      />,
+    );
+    await user.type(screen.getByRole('textbox'), '2/3');
+    await user.click(screen.getByTitle('提交'));
+    await waitFor(() => expect(onFinish).toHaveBeenCalled());
+  });
+});
+
 describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
   it('material 非空时题干上方渲染材料块（含图片走 resolveAsset），无 material 不渲染', () => {
     const withMaterial: RunnerQuestion[] = [{
