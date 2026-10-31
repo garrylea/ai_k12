@@ -23,6 +23,7 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
+import { targetedTaskCode } from '../../common/subject-config.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
 import { EventsService } from '../analytics/events.service.js';
@@ -686,7 +687,7 @@ export class TrainingService {
     let sessionId: number | null = null;
     if (rows.length > 0) {
       try {
-        const taskCode = Number(input.subjectId) === 2 ? 'cn_targeted' : 'math_targeted';
+        const taskCode = targetedTaskCode(input.subjectId);
         sessionId = await this.trainingSessionsRepo.create({
           student_id: input.studentId,
           task_code: taskCode,
@@ -698,7 +699,7 @@ export class TrainingService {
         });
       } catch (err) {
         this.logger.warn(
-          `training_sessions.create failed (taskCode=${Number(input.subjectId) === 2 ? 'cn_targeted' : 'math_targeted'}, studentId=${input.studentId}, tierKey=${input.count}): ${err instanceof Error ? err.message : String(err)}`,
+          `training_sessions.create failed (taskCode=${targetedTaskCode(input.subjectId)}, studentId=${input.studentId}, tierKey=${input.count}): ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

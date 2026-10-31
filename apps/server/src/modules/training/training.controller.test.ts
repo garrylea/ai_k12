@@ -56,4 +56,16 @@ describe('TrainingController.startTargetedPractice — 学科任务码（cn_targ
     ).rejects.toThrow('题量仅允许');
     expect(pointRulesService.listTierKeys).toHaveBeenCalledWith(7, 'math_targeted');
   });
+
+  it('物理（subjectId=4）按 physics_targeted 校验档位', async () => {
+    const { controller, pointRulesService } = makeTargetedController(['1', '3', '5', '10']);
+    await controller.startTargetedPractice({ subjectId: 4, kpId: 900, type: null, count: 5 }, USER);
+    expect(pointRulesService.listTierKeys).toHaveBeenCalledWith(7, 'physics_targeted');
+  });
+
+  it('化学（subjectId=5）按 chemistry_targeted 校验档位', async () => {
+    const { controller, pointRulesService } = makeTargetedController(['1', '3', '5', '10']);
+    await controller.startTargetedPractice({ subjectId: 5, kpId: 901, type: null, count: 3 }, USER);
+    expect(pointRulesService.listTierKeys).toHaveBeenCalledWith(7, 'chemistry_targeted');
+  });
 });

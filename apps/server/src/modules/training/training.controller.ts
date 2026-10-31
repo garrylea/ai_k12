@@ -12,6 +12,7 @@ import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { ErrorBookQueryDto } from './dto/error-book-query.dto.js';
 import type { JudgeTrainingDto } from './dto/judge-training.dto.js';
 import type { SelfAssessTrainingDto } from './dto/self-assess.dto.js';
+import { targetedTaskCode } from '../../common/subject-config.js';
 
 @Controller('api/training')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -164,8 +165,8 @@ export class TrainingController {
     @CurrentUser() user: JwtUser,
   ) {
     const { count } = dto;
-    // 语文与数学各有独立任务码/档位（cn_targeted / math_targeted），家长端分组不同
-    const taskCode = Number(dto.subjectId) === 2 ? 'cn_targeted' : 'math_targeted';
+    // 学科 -> 任务码查表（spec 2026-10-31 §3.1）：数学/语文/物理/化学/道法各有独立档位
+    const taskCode = targetedTaskCode(dto.subjectId);
     const allowed = await this.pointRulesService.listTierKeys(user.sub, taskCode);
     if (!allowed.includes(String(count))) {
       throw new BadRequestException(`题量仅允许 ${allowed.join(' | ')}`);

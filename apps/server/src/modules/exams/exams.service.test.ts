@@ -993,3 +993,23 @@ describe('ExamsService.finalizeSession 无答案题', () => {
     expect(deps.mainErrorRepo.create).toHaveBeenCalled();
   });
 });
+
+describe('ExamsService 交卷发分任务码', () => {
+  it.each([
+    [4, 'physics_paper'],
+    [5, 'chemistry_paper'],
+    [9, 'politics_paper'],
+    [1, 'math_paper'],
+    [2, 'cn_paper'],
+  ])('subjectId=%i -> %s', async (subjectId, taskCode) => {
+    const deps = mk();
+    deps.examPapersRepo.findById.mockResolvedValue({ ...paperRow, subject_id: subjectId });
+    deps.examPapersRepo.findQuestionsByPaperId.mockResolvedValue([]);
+    deps.examSessionsRepo.findAnswersBySession.mockResolvedValue([]);
+    deps.examSessionsRepo.findById.mockResolvedValue(sessionRow({ subject_id: subjectId }));
+
+    await mkSvc(deps).submit(1, 77);
+
+    expect(deps.pointsService.award).toHaveBeenCalledWith(expect.objectContaining({ taskCode }));
+  });
+});

@@ -379,6 +379,16 @@ describe('TrainingService.startTargetedPractice', () => {
     }));
   });
 
+  it('物理专项会话 task_code=physics_targeted（学科不串到数学）', async () => {
+    const deps = mk({
+      questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([{ ...questionRow, subject_id: 4 }]) },
+    });
+    await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 4, kpId: 900, type: null, count: 5 });
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      task_code: 'physics_targeted', subject_id: 4, tier_key: '5',
+    }));
+  });
+
   it('options 为 null 时原样返回 null，不抛错', async () => {
     const deps = mk({
       questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([{ ...questionRow, options: null }]) },

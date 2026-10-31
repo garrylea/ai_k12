@@ -12,7 +12,7 @@ import type { AwardResult } from '../points/points.service.js';
 import { toPointsAwardDto } from '../points/dto/points.dto.js';
 import type { EventsService } from '../analytics/events.service.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
-import { selfAssessSkipsJudging } from '../../common/subject-config.js';
+import { selfAssessSkipsJudging, paperTaskCode } from '../../common/subject-config.js';
 import type { ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
 import type { ExamPaperDto, PaperDetailDto, PaperQueryDto } from './dto/paper-query.dto.js';
 import type {
@@ -411,8 +411,8 @@ export class ExamsService {
     try {
       return await this.pointsService.award({
         studentId,
-        // 语文走独立任务码（家长端显示「语文卷子一套」）；其余学科暂沿用数学码
-        taskCode: Number(subjectId) === 2 ? 'cn_paper' : 'math_paper',
+        // 学科 -> 任务码查表（spec 2026-10-31 §3.1）：各学科各自独立口径
+        taskCode: paperTaskCode(subjectId),
         dedupeKey: `paper:${sessionId}`,
         refType: 'exam_session',
         refId: sessionId,
