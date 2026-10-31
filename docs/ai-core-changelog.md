@@ -8,6 +8,32 @@
 
 ---
 
+## 2026-10-31 · 训练轨新增物理 / 化学 / 道德与法治三学科
+
+**做了什么**：训练轨选科页从 3 卡（数/语/英）扩到 6 卡（+ 物 4 / 化 5 / 道 9），物/化的四卡（专项练习 / 真题考试 / 错题练习 / 薄弱点图谱）与数学同构；道法 `enabled=false` 灰卡「内容准备中」。学科差异集中到前后端各一份配置表（`apps/server/src/common/subject-config.ts` 与 `apps/web/src/subjectConfig.ts`），新增学科=加一行配置 + 一张卡，**不要在各页写 `if subject ===`**。
+
+**积分**：新增 6 个任务码 `physics_paper` / `chemistry_paper` / `politics_paper`（50 分 / 不限次）与 `physics_targeted` / `chemistry_targeted` / `politics_targeted`（1→2/3→8/5→15/10→35、每日上限 5 次），与数学同档同价、独立计数。`DEFAULT_RULES` 懒初始化（`PointRulesService.ensureRules` 按 `(task_code, tier_key)` 补缺、不覆盖家长改过的值），**零迁移**——存量学生首次读取时自动补齐。
+
+**判题三道闸门为何分开**（不能合并成一个判断）：
+- 闸门① `selfAssessSkipsJudging`（`exams.service.ts:36`）：考试侧「跳过判题直接自评」。语文=非客观题；物/化/道=**仅 `short_answer`/`proof`**。**比闸门②窄**：化学填空等值答案要能走 `exact` 判对（不等才转自评），不能在①就被抢去自评。
+- 闸门② `isSelfAssessNonObjective`（`judge-core.service.ts:137`）：归一化比对失败的兜底。语文 + 物/化/道的非客观题（含 `fill_blank`/`calculation` 不等时）转 `self_assess`。
+- 闸门③ `selfAssessEligible`（`QuestionRunner.tsx:241`）：前端是否「同步等判题 + 弹自评视图」。数学 `short_answer`/`proof`（与今天一致），非数学学科一切非 `choice`/`true_false`。**不在名单里的题型，服务端返回 `needsSelfAssessment: true` 也会被记成 `isCorrect: false`**（学生看到「错」且无自评入口）——语文填空今天就是这个状态，本次顺带修好。
+
+**交卷无参考答案题**：`finalizeSession` 的「未作答按错计」保持 `is_correct=0` 计入卷面分，但**只有 `q.answer <> ''` 才写错题本**。物理 51/52/53 号卷分别 34/33/34 道无答案题——若进错题本，学生在 App 里永远清不掉（错题练习走空答案守卫、既不自评也不清零）。数学卷题都有答案，行为不变。
+
+**不变量**：物理/化学/道法任意题型都不会调用 `JudgmentCapability`（AI 判题写死 `subject:'math'`，新学科不可达）。
+
+**物理数据缺口**（本次只做代码与入口，数据排期见 spec §7）：
+- 物理 132 题中**仅 26 题有答案**（专项抽题池谓词 `answer <> ''` 决定实际可抽 26 道）；39 张卷中 4 张可考（51/52/53/54），其中 51/52/53 三套卷基本无答案。
+- 化学 75 题全有答案但**全无知识点标注**（`question_knowledge_points` 0 行），专项页选不出考点；2 套卷可考。
+- 道法 0 题 / 0 知识点 / 0 试卷，入口开启前数据为空（数据管线的 `subject_strategies/politics.py` 已存在）。
+
+**文档同步**（5 份）：API 设计文档（v4.23，§4.5 知识图谱允许值 / §5.17 考试交卷无答案题不入错题本 / §5.24 积分 6 新任务码，**删掉「其余学科沿用 math_targeted」「subjectId 仅支持 1（数学）」两处旧表述**）；openapi.yaml（`weak-points`/`mastery` 的 `subjectId` description 与 enum 同步）；PRD §7.13 积分表加 6 行；UX-UI 设计文档 §5.13 选科页六卡 + 专项配置按学科裁剪题型；`constraints/专项子系统.md` 题库类训练按 subjectId 参数化段落。
+
+**验证**：server / web `npm test` 全绿、`npm run build` 通过（具体计数见 task-12-report.md）。
+
+---
+
 ## 2026-10-31 · 第 8 步预览文案拆开：管道内不再说「加 --apply」
 
 **问题**：第 8 步预览后打印 `[dry-run] 预览 6 条；确认后加 --apply`，紧接着又问 `现在写入题库？[y/N]` —— 两句互相矛盾（一句让你加参数，一句让你按 y），用户不知道到底该做什么。

@@ -905,7 +905,7 @@ paths:
   /knowledge-graph/students/{studentId}/mastery:
     get:
       tags: [KnowledgeGraph]
-      summary: 学生知识点掌握度 overlay（仅数学）
+      summary: 学生知识点掌握度 overlay（数学/物理/化学/道法）
       operationId: getMastery
       parameters:
         - name: studentId
@@ -916,10 +916,10 @@ paths:
         - name: subjectId
           in: query
           required: true
-          description: 本期仅支持 1（数学）；其它值 400
+          description: 本期支持 1（数学）/ 4（物理）/ 5（化学）/ 9（道法）；其它值 400 + 1001
           schema:
             type: integer
-            enum: [1]
+            enum: [1, 4, 5, 9]
       responses:
         '200':
           description: 全树 + 掌握度 overlay
@@ -933,13 +933,13 @@ paths:
                       data:
                         $ref: '#/components/schemas/KnowledgeGraphMastery'
         '400':
-          description: subjectId 非 1（code 1001）
+          description: subjectId 不在 {1,4,5,9}（code 1001，文案「subjectId 仅支持 1 / 4 / 5 / 9」）
         '403':
           description: studentId 非本人（code 1005）
   /knowledge-graph/students/{studentId}/weak-points:
     get:
       tags: [KnowledgeGraph]
-      summary: 薄弱点候选 + 一条推荐（仅数学）
+      summary: 薄弱点候选 + 一条推荐（数学/物理/化学/道法）
       operationId: getWeakPoints
       parameters:
         - name: studentId
@@ -950,10 +950,10 @@ paths:
         - name: subjectId
           in: query
           required: true
-          description: 本期仅支持 1（数学）；其它值 400
+          description: 本期支持 1（数学）/ 4（物理）/ 5（化学）/ 9（道法）；其它值 400 + 1001
           schema:
             type: integer
-            enum: [1]
+            enum: [1, 4, 5, 9]
         - name: limit
           in: query
           required: false
@@ -976,7 +976,7 @@ paths:
                       data:
                         $ref: '#/components/schemas/WeakPointRecommendation'
         '400':
-          description: subjectId 非 1（code 1001）
+          description: subjectId 不在 {1,4,5,9}（code 1001，文案「subjectId 仅支持 1 / 4 / 5 / 9」）
         '403':
           description: studentId 非本人（code 1005）
 
@@ -7734,8 +7734,10 @@ paths:
       tags: [Training]
       summary: 训练会话完成发分（乙类整批发分）
       description: >-
-        **201**。只 math_targeted / en_vocabulary 用（档位打包价，整轮结束才发一次）。
-        分值取会话里记录的档位、不取前端入参（乙类唯一的防伪造点）。幂等：重复调用回
+        **201**。覆盖 math_targeted / cn_targeted / physics_targeted /
+        chemistry_targeted / politics_targeted / en_vocabulary 六个乙类任务码
+        （档位打包价，整轮结束才发一次）。分值取会话里记录的档位、不取前端入参
+        （乙类唯一的防伪造点）。幂等：重复调用回
         reason='already_completed' + pointsAwarded=0，不报错。发分失败可恢复：
         award 抛错（DB 故障）时不把会话置 completed，回 balance/totalEarned=null +
         reason='award_failed'（真实余额不是 0，回 0 会污染前端快照），会话留在
@@ -11666,7 +11668,7 @@ components:
             points:
               allOf:
                 - $ref: '#/components/schemas/PointsAwardDto'
-              description: 交卷发分结果（数学卷 math_paper / 语文卷 cn_paper，丙类埋点，2026-09-17；2026-10-28 加语文）
+              description: 交卷发分结果（按学科取 taskCode：math_paper / cn_paper / physics_paper / chemistry_paper / politics_paper，丙类埋点，2026-09-17；2026-10-28 加语文；2026-10-31 加物/化/道法）
 
     ExamResultItem:
       type: object

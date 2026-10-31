@@ -741,6 +741,31 @@ K12 智学系统是一款面向小学到高中（6-18 岁）学生的 AI 智能�
 - **专项作答**：材料随题展示；判题后非客观题走自评；收尾积分标题「语文专项 · N 题」；不显示补偿套题卡。
 - **错题列表/作答**：标题「语文 · 错题」，数据源仍为主线错题本（`subjectId=2` 未清零）；语文不显示变式入口（变式目前只有数学）。
 
+### 5.13 训练轨：选科页六卡 + 物/化/道法参数化（2026-10-31）
+
+> 训练轨页面一律**全屏、写死 `data-theme="student-day"`、不在任何 Layout 下**（既有规则）。
+
+#### 训练选科页 `/student/training`
+- **功能**：训练轨入口，列出所有可选学科。每张卡：图标徽章 + 学科名 + 一行能力副标题。
+- **布局**：`PageHeader`（返回 `/student/entry`、标题「选择训练学科」）；下方 `md` 三列网格 **6 张卡**（两行）：数学 / 语文 / 英语 / 物理 / 化学 / 道德与法治。
+- **卡片状态**：`enabled=true` 为白卡可点（同 §2.7 入口卡样式：白底 + 线性 SVG 徽章 + hover 提升阴影 `-translate-y-1`）；`enabled=false` 为**灰卡**（`opacity-50` + `cursor-not-allowed` + 浅灰渐变徽章 + 右上角 `badge` 角标）。**道法 `enabled=false`**，角标文案「内容准备中」（学科配置真源 `apps/web/src/subjectConfig.ts`，开启只需把 `enabled` 改为 `true`，不要在各页加 `if subject ===`）。
+- **跳转**：数学 → `/student/training/home`（不带参，与今天一致）；语文 → `/student/training/chinese/special`；英语 → `/student/training/english/vocabulary`；物/化 → `/student/training/home?subjectId=4|5`；道法灰卡不可点。
+
+#### 物理/化学训练首页 `/student/training/home?subjectId=4|5`
+- **布局**：`PageHeader`（回训练选科、标题「{学科} · 训练」）；下方四卡：专项练习 / 真题考试 / 错题练习 / 薄弱点图谱（与数学四卡同构，链接均带 `?subjectId=`）。
+- **空态**：化学无知识点 → 专项页二级考点列表空、开练不可点；物理 132 题仅 26 题有答案 → 部分考点 0 题置灰「暂无题目」；道法入口开启前数据为空（按 spec §7 排期）。
+- **相似题专项提示条**：只在 `subjectId=1` 时请求并渲染；物/化/道法**不请求、不渲染**（数学专属能力，spec §3.3）。
+
+#### 专项配置页按学科裁剪题型
+- **题型下拉**由 `subjectConfig.ts` 的 `typeOptions` 决定（**不要在页面内写 `if subject ===`**）：
+  - 数学：全部 / 选择 / 填空 / 判断 / 解答 / 证明 / 计算
+  - 语文：全部 / 选择 / 填空 / 简答
+  - 物理：全部 / 选择 / 填空 / 简答 / **计算**（含计算题，与数学同含 `calculation`）
+  - 化学：全部 / 选择 / 填空 / 简答
+  - 道法（开启后）：全部 / 选择 / 填空 / 简答
+- **档位任务码**：标题「{学科} · 专项」、档位请求按学科取 `physics_targeted` / `chemistry_targeted` / `politics_targeted`（数学 `math_targeted`、语文 `cn_targeted`）；档位下拉仍只读 `GET /api/points/me/rules?taskCode=...`。
+- **作答区**：物/化 `isMathLike=true`（左 LaTeX 输入 + 右预览，含草稿 tab）；道法 `isMathLike=false`（整宽纯文本框）。判题三道闸门见 spec §3.5。
+
 ---
 
 ## 6. 交互规范

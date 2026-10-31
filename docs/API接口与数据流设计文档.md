@@ -221,13 +221,13 @@
 
 ### 4.5 Knowledge Graph — `/api/knowledge-graph`
 
-**仅数学**（`subjectId=1`；语文/英语无知识点体系）。全部为**只读**端点，`studentId` 必须等于 JWT 的 `sub`（不符 403 / code 1005），`subjectId` 非 1 一律 400 / code 1001。
+**支持学科**：数学 / 物理 / 化学 / 道法（`subjectId ∈ {1, 4, 5, 9}`；语文/英语无知识点体系，2/3 一律 400 / code 1001）。全部为**只读**端点，`studentId` 必须等于 JWT 的 `sub`（不符 403 / code 1005），`subjectId` 不在 `{1,4,5,9}` 一律 400 / code 1001（错误文案：「subjectId 仅支持 1 / 4 / 5 / 9」）。
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
 | GET | `/api/knowledge-graph/knowledge-points/{id}/relations` | 知识点前置/包含关系（`knowledge_relations` 表零数据，**降级 P1**） | P1 |
-| GET | `/api/knowledge-graph/students/{studentId}/mastery` | 学生知识点掌握度 overlay：全树 + 掌握度，`?subjectId=1` | MVP |
-| GET | `/api/knowledge-graph/students/{studentId}/weak-points` | 薄弱点候选 + 一条推荐，`?subjectId=1&limit=1`（limit 1–10） | MVP |
+| GET | `/api/knowledge-graph/students/{studentId}/mastery` | 学生知识点掌握度 overlay：全树 + 掌握度，`?subjectId=1|4|5|9` | MVP |
+| GET | `/api/knowledge-graph/students/{studentId}/weak-points` | 薄弱点候选 + 一条推荐，`?subjectId=1|4|5|9&limit=1`（limit 1–10） | MVP |
 | GET | `/api/knowledge-graph/students/{studentId}/learning-path` | 基于薄弱点的建议复习路径 | P1 |
 
 **`mastery` 返回**：`{ subjectId, nodes[], coverage }`。`nodes[]` 每项含 `id / name / parentId / masteryScore / level / correctCount / errorCount / lastSeenAt / sampleSize / confidence / availableQuestionCount`。
@@ -235,7 +235,7 @@
 - `masteryScore` 为 **`null` 表示从未作答**（**不是 0**——0 是「很弱」，语义相反）。
 - `confidence` 由后端算好下发（`none` 从未作答 / `insufficient` 样本 < 5 / `ok` 可下结论），**前端不重算阈值**（`MIN_SAMPLE_SIZE = 5` 是唯一真源）。
 - `availableQuestionCount` 谓词与专项抽题同源：`is_active=1 AND answer <> '' AND` 排除该生「不再展示」。
-- `coverage` = `{ coveredQuestions, totalQuestions, uncoveredUnclearedErrors }`，**均为数学口径**。
+- `coverage` = `{ coveredQuestions, totalQuestions, uncoveredUnclearedErrors }`，**为请求 `subjectId` 对应学科的口径**（数学/物理/化学/道法四套，按 `subject_id` 过滤）。
 
 **`weak-points` 返回**：`{ subjectId, candidates[], recommendation, reason }`。
 
@@ -485,8 +485,8 @@
 | GET | `/api/training/questions/explanations?ids={ids}` | 批量拉取题目解析（结果页末题后）。`ids` 为逗号分隔 questionId 列表；DB 已有直返；解析仍在后台生成中（判错触发的 in-flight）等待其完成（总超时 60s 兜底）；既无解析也无在途生成返回 null（**不触发**新生成）。解析为题级公开数据（不分学生）。响应：`{explanations: {[questionId]: string\|null}}`。 | MVP |
 | GET | `/api/training/questions/{questionId}/explanation-wait` | 单题刷新等待解析（结果页「解析生成中」的刷新入口，前端 120s 倒计时）。DB 已有直返；在途生成等待；无在途且无解析（曾失败）**重新触发**生成再等待（上限 120s）。题目不存在/停用返回 null（不触发生成）；超时/失败返回 null 并写 `admin_notifications`（type=explanation_failed，同题未读去重）通知管理员人工补题解。响应：`{explanation: string\|null}`。 | MVP |
 | GET | `/api/training/knowledge-points?subjectId={subjectId}` | 专项练习知识点平铺列表（`subjectId` 必填 integer；树形组装放前端，按 `parentKpId` 自行组树）。响应：`[{id, name, parentKpId(nullable), gradeBand, questionCount}]`——`questionCount` 是该考点**全局可抽题数**（`is_active=1` 且有答案，与抽题谓词同源；不含该生「不再展示」这层个人维度），0 = 前端置灰不可选。 | MVP |
-| POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options, materialText}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`materialText` 是同节共享材料（语文阅读/文段题，Markdown+图片），数学题通常 null；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。**学科任务码（2026-10-28）**：`subjectId=2`（语文）按 `cn_targeted` 四档校验、会话落 `task_code='cn_targeted'`；其余学科沿用 `math_targeted`。**选题基于 JWT user.sub（studentId）排除该生已标记的「不再展示」题**（LEFT JOIN `student_hidden_questions` ... IS NULL，请求体不变）；题池排除后为空时返回 `{ questions: [] }`。 | MVP |
-| POST | `/api/training/sessions/{id}/complete` | 训练会话完成发分（乙类整批发分，只 `math_targeted` / `cn_targeted` / `en_vocabulary` 用，2026-09-17 新增；`cn_targeted` 2026-10-28 新增）。**201**。分值取**会话里记录的档位**（不取前端入参——这是乙类唯一的防伪造点），所以整轮结束才发一次。**幂等**：重复调用（前端重试）回 `reason='already_completed'` + `pointsAwarded: 0`，不报错。**发分失败可恢复**：award 抛错（DB 故障）时**不把会话置 completed**，回 `balance: null` / `totalEarned: null` + `reason='award_failed'`（真实余额不是 0，回 0 会污染前端快照），会话留在 `in_progress`，下次 `complete` 用同一幂等键 `tsess/vsess:<sessionId>` 补发且只补发一次。会话不存在/非本人 404（`code=1002`）。响应：`{pointsAwarded, balance, totalEarned, levelUp: {from, to}\|null, reason?}`；`reason` ∈ `daily_limit \| already_completed \| no_rule \| tier_inactive \| award_failed`。 | MVP |
+| POST | `/api/training/targeted/start` | 专项练习开练（按学科 + 知识点随机抽题）。请求体：`{subjectId, kpId, type, count}`；`count` 限 1-20 整数（越界/非整数 400）；`type` 白名单 `choice\|fill_blank\|true_false\|short_answer\|proof\|calculation` 或 `null`（不限题型，非法 400）。响应：`{questions: [{questionId, text, type, options, materialText}]}`——**白名单序列化**，`answer`/`explanation` 等字段一律剥离（防答案泄露）；`materialText` 是同节共享材料（语文阅读/文段题，Markdown+图片），数学题通常 null；`options` 为 JSON 字符串 parse 后的数组（无/坏 JSON 为 null）；抽不到题返回空数组（空集合非错误，前端判空显示提示）。**学科任务码（2026-10-28 起按学科查表）**：`subjectId=1`→`math_targeted` / `2`→`cn_targeted` / `4`→`physics_targeted` / `5`→`chemistry_targeted` / `9`→`politics_targeted`，按对应任务码四档校验、会话落对应 `task_code`（2026-10-31 加物/化/道法，**不再「其余学科沿用 math_targeted」**；表外学科回落 `math_targeted` 仅作兜底，不报错）。**选题基于 JWT user.sub（studentId）排除该生已标记的「不再展示」题**（LEFT JOIN `student_hidden_questions` ... IS NULL，请求体不变）；题池排除后为空时返回 `{ questions: [] }`。 | MVP |
+| POST | `/api/training/sessions/{id}/complete` | 训练会话完成发分（乙类整批发分，覆盖 `math_targeted` / `cn_targeted` / `physics_targeted` / `chemistry_targeted` / `politics_targeted` / `en_vocabulary`，2026-09-17 新增；`cn_targeted` 2026-10-28；物/化/道法 2026-10-31）。**201**。分值取**会话里记录的档位**（不取前端入参——这是乙类唯一的防伪造点），所以整轮结束才发一次。**幂等**：重复调用（前端重试）回 `reason='already_completed'` + `pointsAwarded: 0`，不报错。**发分失败可恢复**：award 抛错（DB 故障）时**不把会话置 completed**，回 `balance: null` / `totalEarned: null` + `reason='award_failed'`（真实余额不是 0，回 0 会污染前端快照），会话留在 `in_progress`，下次 `complete` 用同一幂等键 `tsess/vsess:<sessionId>` 补发且只补发一次。会话不存在/非本人 404（`code=1002`）。响应：`{pointsAwarded, balance, totalEarned, levelUp: {from, to}\|null, reason?}`；`reason` ∈ `daily_limit \| already_completed \| no_rule \| tier_inactive \| award_failed`。 | MVP |
 | GET | `/api/training/dictation/passages` | 语文默写篇目清单（配置页用）。仅返回 `chinese_passages` 中 `verified=1` **且 `memorize_required=1`** 且 `is_active=1` 的篇目（三道闸门：`verified` 是内容已校验、`memorize_required` 是教学上要求背诵、`is_active` 是停用开关），按 `sort_order, id` 排序。**只出篇名 + 册次**——作者/朝代/正文是学生要作答的三个判题字段，一律不下发（防答案泄露）。响应：`{passages: [{passageId, workTitle, semester}]}`。 | MVP |
 | POST | `/api/training/dictation/start` | 语文默写开练。请求体：`{semester, passageIds, count}`；`count` 限 1-20 整数（越界/非整数 400）；`semester` 限 `上册\|下册\|null`（`null`=全部册次，非法 400）；`passageIds` 为正整数数组或 `null`——非空时按指定篇目出题（**忽略 `semester`**，仅保留抽题池内篇目），否则按册次随机抽题。**两条路径都只从抽题池取题**（`verified=1` 且 `memorize_required=1` 且 `is_active=1`，三道闸门）；「全部册次」随机抽时按篇名去重（九上/九下有 9 篇重复收录，跨册取 `MIN(id)`）。**题面由篇名服务端生成**（`请默写《X》`，不落库）。响应：`{questions: [{passageId, prompt, workTitle, semester}]}`——**白名单序列化**，`author`/`dynasty`/正文一律剥离（防答案泄露，与 `targeted/start` 同规矩）。题池为空返回 `{questions: []}`。 | MVP |
 | POST | `/api/training/dictation/judge` | 语文默写判题（**纯程序化判对错，不调用 LLM，不写任何学生状态**）。请求体：`{passageId, author, dynasty, body}`；`passageId` 须正整数（非法 400），篇目不存在 404。判对错口径：三字段各自 `normalizeChineseAnswer`（NFKC 全半角归一 → 去空白 → 去中英文标点 → 小写）后全等，**三项全对才 `isCorrect=true`**（故学生正文带不带标点、全半角、空格不影响判定）；正文不等时由 `diffChineseInOriginalText`（LCS 逐字差异 + 原文标点回投）定位错处，相邻「漏写+多写」合并为一个 `wrong`（写错字）、连续同类项合并成段——**判对错仍忽略标点，但 `bodyDiff` 各段文本回投原文标点**（学生要能读成整句，见 §5.20）。**不入错题本、不清零**（古诗文专项是独立子系统，PRD §6.3 / §7.4 例外；`reference` 判题响应即下发）。**错因与判题解耦**：本端点不等 LLM（实测 ~25ms），答错时回 `feedbackPending=true`，错因由 `POST /training/dictation/feedback` 另取。响应：`{passageId, isCorrect, fields: {author: {match}, dynasty: {match}, body: {match}}, bodyDiff: [{type:'equal'\|'wrong'\|'missing'\|'extra', ...}], reference: {author, dynasty, body}, feedback(恒 null), feedbackPending(bool), pointsAwarded: number, awardReason?(enum: daily_limit\|no_rule\|tier_inactive\|genre_unset\|not_cleared)}`。**积分字段（2026-09-17）**：`pointsAwarded` 是本次调用**实际入账**的积分（甲类 `cn_dictation`，完成即给、不看对错），`0` = 本次未加分——篇目未标定体裁（`genre_unset`）/ 档位未启用 / 已达每日上限 / 无规则 / 幂等命中 / 发分失败；`awardReason` 是未发分原因，**幂等命中（`duplicate`）刻意静默**——回 `pointsAwarded: 0` 但不带原因（`duplicate` 会带回历史分值，报出去会让前端弹假 `+N 分`）。 | MVP |
@@ -525,8 +525,8 @@
 | GET | `/api/exams/papers/{id}` | 试卷详情：题目元数据 + 推荐时长。`durationMinutes` 按题型估算（choice/true_false 每题 1 分钟、其余每题 3 分钟），总和向上取整到 15 的倍数，clamp 到 [30, 180]。**白名单**：questions 只含 `questionId/questionNo/text/type/options/materialText`（`options` 为 JSON 字符串 parse 后的数组，无/坏 JSON 为 null；`materialText` 为同节共享材料），无 `answer`/`explanation`。**只下发 `paper_questions.in_exam=1` 的题**（语文首期剔除现代文阅读与作文，`in_exam=0` 仅试卷入口可见、不组卷）。试卷不存在 404。响应：`{id, title, durationMinutes, questions}`。 | MVP |
 | POST | `/api/exams/sessions` | 开考/续考。请求体：`{paperId, durationMinutes}`；`durationMinutes` 限 10-300 整数（越界/非整数 400）；试卷不存在 404。**续考语义**：同学生同卷已有 `in_progress` 会话直接返回既有会话（`deadlineAt` 不变、**不重置时长**），否则新建（deadline = now + duration）；命中的续考会话**已超时**则先自动收卷（与 GET 会话同语义）再返回 `status='submitted'`（不新建，前端据此直接踢结果页）。响应（新建/续考同构）：`{sessionId, status?('submitted' 仅命中超时会话时返回，缺省视为 in_progress), deadlineAt, remainingSeconds, questions}`。 | MVP |
 | GET | `/api/exams/sessions/{id}` | 会话状态（断线恢复）。会话不存在 404；非本人 403。响应：`{sessionId, status: 'in_progress'\|'submitted', remainingSeconds, questions, answered}`；`answered` 为 `questionId -> {answerText}` map（**只含作答文本，判题字段一律剥离**）。发现已超 deadline 的 `in_progress` 会话时服务端**自动收卷**（与手动交卷同一 finalize 逻辑）后返回 `status='submitted'`、`remainingSeconds=0`。 | MVP |
-| POST | `/api/exams/sessions/{id}/answers` | 单题提交（同步判题）。请求体：`{questionId, answerText}`；题目不在该卷题单 400；已交卷再提交 409（`code=4101`）；超 deadline **先自动收卷再 409**（`code=4102`，未作答按错计一并落库）。判题走 JudgeCore（客观题 exact 即返，AI 判定最长 90s per-scene timeout）；**语文非客观题（非 choice/true_false）不走判题**，直接落 `is_correct=NULL + method='self_assess'` 供结果页自评；**先落「在途行」再判题**（`answerText` + `is_correct` NULL）——判题在途窗口内倒计时归零触发自动收卷时按「在途补判」而非「未作答」处理，判题失败时在途行已落库（交卷时统一补判）、错误透传前端重试。响应（**白名单，不回传对错——考试防作弊设计**）：`{saved: true}`。 | MVP |
-| POST | `/api/exams/sessions/{id}/submit` | 交卷（**幂等**：已 submitted 直接重算汇总返回）。收卷三分支：未作答 -> 客观题直接判错入错题本（`method='unanswered'`，无答案可判不走判题），**语文非客观题未作答落 self_assess（不判错、不入本）**；在途（有作答、无判题结果）-> JudgeCore 补判，失败按错计（`method='failed'`）仍入错题本；已判题 -> 跳过。响应：`{correctCount, totalCount, accuracy, subjectiveCount, points?}`（`accuracy` 为百分比一位小数，如 33.3；`subjectiveCount` 为主观题数，`self_assess` 模式下不计对错）。`points` = `{awarded, balance, levelUp: {from, to}\|null}`（`from`/`to` 是**段位 code 字符串**），为交卷发分结果（丙类：数学卷 `math_paper` / 语文卷 `cn_paper`；2026-09-17 首次，2026-10-28 加语文）。**仅 submit 响应带 `points`**——结果页 `GET /api/exams/sessions/{id}/results` 只读已交卷汇总、不补发分，其内嵌汇总里该键缺省；交卷未发分（如超时自动收卷的补判路径）或发分故障时同样缺省（JSON 里没有，不是 0）。 | MVP |
+| POST | `/api/exams/sessions/{id}/answers` | 单题提交（同步判题）。请求体：`{questionId, answerText}`；题目不在该卷题单 400；已交卷再提交 409（`code=4101`）；超 deadline **先自动收卷再 409**（`code=4102`，未作答按错计一并落库）。判题走 JudgeCore（客观题 exact 即返，AI 判定最长 90s per-scene timeout）；**自评学科的非客观题不走判题**——语文 = 非 `choice`/`true_false`；物理/化学/道法 = 仅 `short_answer`/`proof`（**闸门①**，2026-10-31），直接落 `is_correct=NULL + method='self_assess'` 供结果页自评；物/化/道的 `fill_blank`/`calculation` 仍进 JudgeCore：归一化相等 `exact` 判对，不等才落 `self_assess`（**闸门②**）。**先落「在途行」再判题**（`answerText` + `is_correct` NULL）——判题在途窗口内倒计时归零触发自动收卷时按「在途补判」而非「未作答」处理，判题失败时在途行已落库（交卷时统一补判）、错误透传前端重试。响应（**白名单，不回传对错——考试防作弊设计**）：`{saved: true}`。 | MVP |
+| POST | `/api/exams/sessions/{id}/submit` | 交卷（**幂等**：已 submitted 直接重算汇总返回）。收卷三分支：未作答 -> 客观题直接判错入错题本（`method='unanswered'`，无答案可判不走判题），**语文非客观题未作答落 self_assess（不判错、不入本）**；**未作答且该题无参考答案（`q.answer = ''`）：记 `is_correct=0` 计入卷面分但 `不写错题本`**（物理 51/52/53 号卷大量无答案题，进错题本后学生清不掉，2026-10-31）；在途（有作答、无判题结果）-> JudgeCore 补判，失败按错计（`method='failed'`）仍入错题本；已判题 -> 跳过。响应：`{correctCount, totalCount, accuracy, subjectiveCount, points?}`（`accuracy` 为百分比一位小数，如 33.3；`subjectiveCount` 为主观题数，`self_assess` 模式下不计对错）。`points` = `{awarded, balance, levelUp: {from, to}\|null}`（`from`/`to` 是**段位 code 字符串**），为交卷发分结果（丙类：按学科 `math_paper` / `cn_paper` / `physics_paper` / `chemistry_paper` / `politics_paper`；数学/语文 2026-09-17 首发，物理/化学/道法 2026-10-31 新增）。**仅 submit 响应带 `points`**——结果页 `GET /api/exams/sessions/{id}/results` 只读已交卷汇总、不补发分，其内嵌汇总里该键缺省；交卷未发分（如超时自动收卷的补判路径）或发分故障时同样缺省（JSON 里没有，不是 0）。 | MVP |
 | GET | `/api/exams/sessions/{id}/results` | 结果页：仅 `submitted` 会话可查（`in_progress` 409，`code=4103`）。响应：`{correctCount, totalCount, accuracy, subjectiveCount, items: [{questionId, questionNo, text, type, options, materialText(nullable, 同节共享材料), answerText(nullable), isCorrect(0\|1\|null), answer(nullable, 参考答案——自评对照展示), needsSelfAssessment(boolean, 主观题待自评), selfAssessment(correct\|incorrect\|null, 该生最近一次自评留痕), analysis(nullable), explanation(nullable)}]}`（items JOIN questions 带解析）。**主观题口径（self_assess 模式）**：主观题 `is_correct=NULL` 不计对错——`correctCount`/`accuracy` 只算客观题（accuracy 分母为客观题数），`subjectiveCount` 单列（结果页展示「客观题 X/Y · 主观题 N 题」）；`selfAssessment` 从 `question_self_assessments` 恢复该生最近一次自评（刷新/重进不丢自评态）。跨模式口径：`subjectiveCount` 按 `is_correct NULL` 推断，遗留 `ai` 模式已判主观行（`is_correct` 非 NULL）计为客观错题。 | MVP |
 
 ### 4.20 Points — `/api/points`（学生端积分，只读）
@@ -1406,10 +1406,12 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
   │
   ▼
 考试进行页逐题作答 -> POST /api/exams/sessions/{id}/answers {questionId, answerText}
-  ├─ 语文非客观题（非 choice/true_false）-> 不判题，落 is_correct=NULL + method='self_assess'
-  │    （结果页对照参考答案自评；2026-10-28 起语文不接中文 AI 判题）
+  ├─ 自评学科的非客观题（闸门①，2026-10-31）-> 不判题，落 is_correct=NULL + method='self_assess'
+  │    语文 = 非 choice/true_false（结果页对照参考答案自评；2026-10-28 起语文不接中文 AI 判题）
+  │    物理/化学/道法 = 仅 short_answer/proof（fill_blank/calculation 仍进 JudgeCore：相等 exact、不等 self_assess）
   ├─ 其余 -> JudgeCore 同步判题（source='exam', sourceRefId=sessionId）
   │    客观题 exact 即返；数学主观题 AI 判定（judgment per-scene 90s）
+  │    **不变量：物理/化学/道法任意题型都不调用 JudgmentCapability**（AI 判题写死 subject:'math'）
   ├─ 判题结果全量落 exam_answers（is_correct 0|1 / method / analysis / errorType）
   ├─ 答错 -> JudgeCore 写 main_error_books（source='exam'，与练习同语义）
   ├─ 判题失败 -> 先落 answerText（在途，is_correct NULL），错误透传；交卷时补判
@@ -1426,8 +1428,11 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
 交卷 -> POST /api/exams/sessions/{id}/submit（幂等：已交卷直接重算汇总返回）
   └─ finalize 三分支（手动交卷与超时自动收卷共用）：
        未作答 -> 客观题直接判错（method='unanswered'）+ 写 main_error_books；
-                 语文非客观题未作答落 self_assess（不判错、不入本）
-       发分：数学卷 taskCode='math_paper'、语文卷 'cn_paper'（dedupeKey=paper:<sessionId>）
+                 语文非客观题未作答落 self_assess（不判错、不入本）；
+                 **有参考答案（q.answer <> ''）才写错题本**——否则只记 is_correct=0 计入卷面分
+                 （物理 51/52/53 号卷大量无答案题：错题本里它们走空答案守卫、永不清零，故不写）
+       发分：按学科取 taskCode —— 数学 math_paper / 语文 cn_paper / 物理 physics_paper
+                 / 化学 chemistry_paper / 道法 politics_paper（dedupeKey=paper:<sessionId>）
        在途（有作答、is_correct NULL）-> JudgeCore 补判；
          失败按错计（method='failed'）仍入错题本
        已判题 -> 跳过
@@ -1694,7 +1699,7 @@ MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
 积分是**平台级**的激励层（不分学科、不分轨道，段位全局唯一），加在既有流程**旁边**而不是里面：**不影响任何门禁**（不清零错题、不替代错题本、不参与主线解锁判定）。只有「完成任务」产生积分，辅线答疑不产生。
 
 ```text
-9 类任务的完成事件（粒度分三类，spec §6.1）
+9 类任务的完成事件（粒度分三类，spec §6.1；2026-10-31 起新增物/化/道法 6 个任务码沿用甲/乙/丙三类，**不再「其余学科沿用数学码」**——见 §5.20–§5.23 修订与 PRD §7.13）
   ├─ 甲类 · 逐目标发分（每完成一个「目标物」发一次，不新增端点）
   │    cn_dictation / cn_interpretation → 篇目判题端点里发（按该篇 genre 取档：诗 2 / 文言文 5）
   │    cn_meaning → 该篇**最后一个可作答句**判完时发（整篇答完一次，见下）
@@ -1704,11 +1709,15 @@ MeaningRunPage 逐句作答（一字词 / 二含义 / 三情感）：
   │    判题响应内联 pointsAwarded / awardReason（§4.18 语文三专项 + practice/training judge）；
   │    相似题专项内联的是 points 对象（§4.18 remediation/answers）
   ├─ 乙类 · 整批发分（分值由学生开练时选的**档位**决定，必须整轮发）
-  │    math_targeted / en_vocabulary → POST /api/training/sessions/:id/complete
+  │    math_targeted / cn_targeted / physics_targeted / chemistry_targeted / politics_targeted
+  │      / en_vocabulary → POST /api/training/sessions/:id/complete
   │    分值取**会话记录里的档位**、不取前端入参；start 时把题单规模写进 expected_count
+  │    （物/化/道法 2026-10-31 新增，四档与数学同价 1→2 / 3→8 / 5→15 / 10→35，每日上限 5 次）
   └─ 丙类 · 既有完整事件点直接埋
        mainline_lesson → POST /api/progress/update 推进到下一课/完成时（响应带 points）
-       math_paper      → POST /api/exams/sessions/:id/submit 交卷后（响应带 points）
+       *_paper → POST /api/exams/sessions/:id/submit 交卷后（响应带 points）
+         （数学 math_paper / 语文 cn_paper / 物理 physics_paper / 化学 chemistry_paper / 道法 politics_paper；
+          物/化/道法 2026-10-31 新增，均为 50 分 / 不限次）
   ▼
 PointsService.award —— 9 条路径的**唯一**发分入口，顺序固定（每步都有理由）
   0 确保规则存在（INSERT IGNORE 补默认档位：INSERT 撞键即跳过，家长改过的值永不回溯）
@@ -1766,7 +1775,7 @@ student_points **只减 balance**（earnedDelta 恒为 0）——SQL 里根本�
 
 **`cn_meaning` 为什么用「最后一个可作答句」而不是 `sentences.length - 1`**：末句可能没有标准含义（`sentence_meanings[i] == null`、`answerable:false`、根本不出题），按下标 `length - 1` 判定会让这类篇目**永远拿不到分**。正确口径是「最大的 `i` 使 `meanings[i] != null`」，实现在 `meaning.service.ts`。**解释专项**同理：它没有「整篇答完」的概念，但 `fullTranslation` 只在被判的是**最后一句**时下发（提前下发整篇译文等于泄题）。
 
-**`math_targeted` 为什么也要每日上限（默认 5 次）**：四档是**打包价**（「3 题 8 分」不是 3×2），档位由**学生自选**、幂等键按 `sessionId`（每次开练都是新 key）。若不限次，把题池缩到 1 题就能用 `10` 档（35 分）反复 complete 无限刷。每日上限按 `task_code` 计数、四档**共用 5 次**（与 `en_vocabulary` 三档共用 2 次同口径）。每日上限是主要（也是唯一）防刷手段。
+**`math_targeted` 为什么也要每日上限（默认 5 次）**：四档是**打包价**（「3 题 8 分」不是 3×2），档位由**学生自选**、幂等键按 `sessionId`（每次开练都是新 key）。若不限次，把题池缩到 1 题就能用 `10` 档（35 分）反复 complete 无限刷。每日上限按 `task_code` 计数、四档**共用 5 次**（与 `en_vocabulary` 三档共用 2 次同口径）。每日上限是主要（也是唯一）防刷手段。**`physics_targeted` / `chemistry_targeted` / `politics_targeted` 同口径（2026-10-31 新增，四档共用 5 次/日）**；`*_paper` 50 分固定、不限次，与 `math_paper` / `cn_paper` 一致。
 
 **兑换为什么写 `earnedDelta: 0`**：`student_points.total_earned` 是段位唯一依据，语义上不可回退。兑换扣的是「可用余额」`balance`，若同事务里把 `total_earned` 也减掉，段位立刻会降，破坏 spec §3 定案 #2。所以兑换的扣减 SQL **只 `SET balance`**、结构性保证不触碰 `total_earned`（见 `student-points.repo.ts` 的 `deductBalanceIfEnough`）。
 
@@ -2251,6 +2260,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.23 | 2026-10-31 | **训练轨新增物理（subjectId=4）/化学（5）/道法（9）三学科**。① 选科页：六卡遍历配置表渲染，道法 `enabled=false` 灰卡「内容准备中」。② 知识图谱：`weak-points` / `mastery` 的 `subjectId` 允许值由 `{1}` 扩到 `{1,4,5,9}`，错误文案改「subjectId 仅支持 1 / 4 / 5 / 9」（**删除「仅支持 1」旧表述**）。③ 判题三道闸门（语义不同不能合并）：闸门①考试跳过判题——语文=非客观题、物/化/道=仅 `short_answer`/`proof`；闸门②JudgeCore 兜底——`subjectId∈{2,4,5,9}` 的 `fill_blank`/`calculation` 归一化相等判 `exact`、不等转 `self_assess`；闸门③前端内联自评 UI——抽成 `selfAssessEligible(subjectId, type)`，数学分支与今天一字不差，语文填空顺带修好。④ 交卷：未作答按错计但**只有 `q.answer <> ''` 才写错题本**（物理 51/52/53 号卷大量无答案题，进错题本后学生清不掉）；发分按学科取 `math_paper`/`cn_paper`/`physics_paper`/`chemistry_paper`/`politics_paper`。⑤ 积分：新增 6 个任务码 `physics_paper`/`chemistry_paper`/`politics_paper`（50 分/不限次）与 `physics_targeted`/`chemistry_targeted`/`politics_targeted`（1→2/3→8/5→15/10→35、每日上限 5），`DEFAULT_RULES` 懒初始化、零迁移；**删除「其余学科沿用 math_targeted」旧表述**。⑥ 配置：前后端各一份学科配置表（`apps/server/src/common/subject-config.ts`、`apps/web/src/subjectConfig.ts`），新增学科=加一行配置 + 一张卡，**不要在各页写 `if subject ===`**。⑦ 数据缺口：物理 132 题仅 26 题有答案、化学 75 题全无知识点、道法 0 题，本次只做代码与入口，数据排期见 spec §7。openapi.yaml 同步（`weak-points`/`mastery` 的 `subjectId` description）。 |
 | v4.22 | 2026-10-28 | **语文真题考试 + 语文专项练习（首期）**。① 考试：`GET /api/exams/papers` 的 `questionCount` 改为**可考题目数**（`paper_questions.in_exam=1` 且题激活）；试卷详情/会话/结果三处题单元数据加 **`materialText`**（同节共享材料，语文阅读/文段题）；detail + 题单**只下发 `in_exam=1`**；语文非客观题（非 choice/true_false）不判对错、落 `is_correct=NULL + self_assess`，交卷/超时收卷同样不按错计；交卷发分新增 **`cn_paper`**（语文卷，50 分）。② 专项：`GET /api/training/knowledge-points` 响应加 **`questionCount`**（全局可抽题数，0 = 前端置灰）；`targeted/start` 响应题单加 `materialText`，语文按 **`cn_targeted`** 四档校验并把会话 `task_code` 落为 `cn_targeted`；`sessions/{id}/complete` 支持 `cn_targeted`。③ 判题：`judge-core` 语文非客观题走自评分支（数学 fill_blank 归一化判等行为不变）。④ 数据面：`paper_questions` 加 `in_exam TINYINT(1) NOT NULL DEFAULT 1`（迁移 `2026-10-28_paper_question_in_exam.sql`，schema.sql 同步）；语文卷 #17 题 17-27（现代文阅读+作文）置 0。⑤ 前端：语文训练页扩为六卡（默写/解释/含义/真题/专项/错题），考试/专项/错题页面按 `?subjectId=` 参数化并新增材料渲染（共享 markdown 配置，图片走 `resolveAsset`）。openapi.yaml 同步（`materialText`/`questionCount`/`cn_paper` 描述）。 |
 | v4.21 | 2026-10-10 | **LLM 账本按模块归因 + 模块 API 调用聚合（§4.28 三处，openapi.yaml 同步）**。① `GET /modules` 响应每行加三列 `llmCalls`/`llmInputTokens`/`llmOutputTokens`：`llm_call_logs` 按 `module`（API 第一段）聚合后在 service 层按映射累加（`practice→mainline`、`ai→aux_qna`、`training→training_targeted`、`exams→exam`；**仅报表层映射不落数据**，其余段与 NULL 不并入任何行），无调用 = 真实 0；② `GET /llm-tokens` 的 `groupBy` 白名单加 `module`——NULL module = **无 HTTP 触发链的调用**（HTTP fire-and-forget 带 ALS 延续的触发请求 module，不算 NULL），该组 `key` **原样输出 null**（前端显示「后台任务」），**历史行不回填**；③ 新增 `GET /api/admin/analytics/api-usage?from,to`：`api_request_logs` 按 module GROUP BY，`{items:[{module:string\|null, calls, failedCalls, failureRate, avgLatencyMs}]}` 按 calls DESC、无分页；**失败谓词与 /quality 完全同款**（`status_code >= 500 OR biz_code IS NOT NULL`，repo 测试逐字符同款断言防漂移），failureRate 分母 0 → null、failed=0 是真实 0，avgLatencyMs 取整、组内全缺失 → null。均为 admin 角色 GET，窗口纪律与 §4.28 通用条款一致。数据面：`llm_call_logs` 加 `module` 列（迁移 `2026-10-10_llm_call_logs_module.sql`，历史行恒 NULL 不回填）。 |
 | v4.20 | 2026-10-09 | 埋点 Phase 2（Ops 产品面）文档同步。§4.23 补 `POST /api/track/events`（批量 1-50、client 白名单拒伪计 rejected、subjectId 只查在售、`{accepted, rejected}` 201）；新增 §4.28 AdminAnalytics 11 端点逐字段（通用窗口纪律 + 逐端点 query 表 + 口径：mainline 漏斗第三步 taskCode、/events 全 tier、devices 真实 key 取值与 status 口径差异、apiFailureRate 谓词、passageSkipRate 恒 null、globalWordErrorRate 可 >1、llmTimeoutRate 含网络归一、unavailable 单列）；新增 §5.31 显式事件采集链（tracker 四条 flush 条件 + pagehide 丢弃口径）与 §5.32 ops 聚合查询链；openapi.yaml 同步 12 端点。 |
