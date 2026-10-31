@@ -8,29 +8,14 @@ import {
 } from '@/services/api';
 import { MATH_TASK_CODE, tierStatus, usePointTiers } from './point-tiers';
 import type { TargetedRunHandoff } from './run-handoff';
-import { parseSubjectId, subjectHomePath, SUBJECT_CHINESE } from '@/constants';
-
-/** 语文专项四档走独立任务码（家长端分组/发分口径不同）。 */
-const CN_TASK_CODE = 'cn_targeted';
-
-/** 题型枚举与后端 questions.type 一致；空串 = 全部（payload type 传 null）。 */
-const MATH_TYPE_OPTIONS = [
-  { value: '', label: '全部' },
-  { value: 'choice', label: '选择' },
-  { value: 'fill_blank', label: '填空' },
-  { value: 'true_false', label: '判断' },
-  { value: 'short_answer', label: '解答' },
-  { value: 'proof', label: '证明' },
-  { value: 'calculation', label: '计算' },
-] as const;
-
-/** 语文题库只有选择/填空/简答三类，题型下拉按学科裁剪。 */
-const CN_TYPE_OPTIONS = [
-  { value: '', label: '全部' },
-  { value: 'choice', label: '选择' },
-  { value: 'fill_blank', label: '填空' },
-  { value: 'short_answer', label: '简答' },
-] as const;
+import {
+  getTrainingSubject,
+  MATH_TYPE_OPTIONS,
+  parseSubjectId,
+  subjectHomePath,
+  subjectName,
+  SUBJECT_MATH,
+} from '@/constants';
 
 const selectClassName =
   'h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] ' +
@@ -157,9 +142,9 @@ export default function TargetedConfigPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const subjectId = parseSubjectId(searchParams.get('subjectId'));
-  const isChinese = subjectId === SUBJECT_CHINESE;
+  const subject = getTrainingSubject(subjectId);
+  const typeOptions = subject?.typeOptions ?? MATH_TYPE_OPTIONS;
   const subjectQuery = `?subjectId=${subjectId}`;
-  const typeOptions = isChinese ? CN_TYPE_OPTIONS : MATH_TYPE_OPTIONS;
 
   // KP 平铺列表（mount 拉一次）
   const [kps, setKps] = useState<TrainingKnowledgePoint[] | null>(null);
@@ -177,7 +162,7 @@ export default function TargetedConfigPage() {
     setTierKey,
     error: tiersError,
     retry: loadTiers,
-  } = usePointTiers(isChinese ? CN_TASK_CODE : MATH_TASK_CODE);
+  } = usePointTiers(subject?.targetedTaskCode ?? MATH_TASK_CODE);
 
   // 开练状态
   const [starting, setStarting] = useState(false);
@@ -257,7 +242,7 @@ export default function TargetedConfigPage() {
           <PageHeader
             to={subjectHomePath(subjectId)}
             caption="返回训练"
-            title={isChinese ? '语文 · 专项' : '专项练习'}
+            title={subjectId === SUBJECT_MATH ? '专项练习' : `${subjectName(subjectId)} · 专项`}
           />
 
           {/* 工具条：不再展示清单入口 */}

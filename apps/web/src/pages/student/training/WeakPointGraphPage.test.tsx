@@ -66,7 +66,7 @@ function recommendation(): WeakPointRecommendation {
   };
 }
 
-function renderPage() {
+function renderPage(initialEntry: string = '/student/training/weak-points') {
   const router = createMemoryRouter(
     [
       { path: '/student/training/weak-points', element: <WeakPointGraphPage /> },
@@ -75,7 +75,7 @@ function renderPage() {
       { path: '/student/training/targeted', element: <div>专项配置页桩</div> },
       { path: '/student/training/exam', element: <div>考试页桩</div> },
     ],
-    { initialEntries: ['/student/training/weak-points'] },
+    { initialEntries: [initialEntry] },
   );
   return { router, ...render(<RouterProvider router={router} />) };
 }
@@ -432,5 +432,26 @@ describe('WeakPointGraphPage 页脚与错误态', () => {
     expect(screen.queryByText('暂无数据')).toBeNull();
     expect(screen.getByText('数与式')).toBeInTheDocument();
     expect(screen.getByText('未开始')).toBeInTheDocument();
+  });
+});
+
+describe('WeakPointGraphPage 按学科取图谱与档位（Task 11）', () => {
+  it('?subjectId=4 时按物理请求图谱与档位', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue({
+      subjectId: 4,
+      candidates: [],
+      recommendation: null,
+      reason: 'no_qualified_candidate',
+    });
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'physics_targeted', taskName: '物理专项', tiers: [{ tierKey: '3' }] }],
+    });
+
+    renderPage('/student/training/weak-points?subjectId=4');
+
+    await waitFor(() => expect(getKnowledgeGraphMastery).toHaveBeenCalledWith(7, 4));
+    expect(getWeakPoints).toHaveBeenCalledWith(7, 4, 1);
+    expect(getMyPointRules).toHaveBeenCalledWith('physics_targeted');
   });
 });

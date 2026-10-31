@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import TargetedConfigPage from './TargetedConfigPage';
 import {
@@ -82,14 +82,18 @@ function rulesOf(tiers: PointRuleTier[]): MyPointRules {
 }
 
 /** 知识点与档位都在 useEffect 里异步拉取，render 必须包在 act 里等它们落地。 */
-async function renderPage(initialEntries: string[] = ['/']) {
+async function renderPage(initialEntries: string | string[] = '/') {
+  const entries = Array.isArray(initialEntries) ? initialEntries : [initialEntries];
   const router = createMemoryRouter(
     [
+      // 兼容既有用例：用 '/' 渲染本页
       { path: '/', element: <TargetedConfigPage /> },
+      // Task 11：也允许用生产路径 '/student/training/targeted' 渲染本页（spec 真源路径）
+      { path: '/student/training/targeted', element: <TargetedConfigPage /> },
       // 开练成功会 navigate 到 run 页；这里要有落点，否则测试环境报「无匹配路由」
       { path: '/student/training/targeted/run', element: <div /> },
     ],
-    { initialEntries },
+    { initialEntries: entries },
   );
   let result!: ReturnType<typeof render>;
   await act(async () => {
@@ -301,5 +305,45 @@ describe('TargetedConfigPage 语文（subjectId=2）', () => {
     const available = screen.getByRole('button', { name: /病句/ });
     expect((available as HTMLButtonElement).disabled).toBe(false);
     expect(available.textContent).toContain('3 题');
+  });
+});
+
+describe('按学科取题型与任务码', () => {
+  beforeEach(() => {
+    getKpsMock.mockReset();
+    getRulesMock.mockReset();
+    startMock.mockReset();
+    getKpsMock.mockResolvedValue(KPS);
+  });
+
+  it('物理：题型下拉含「计算」，档位请求 physics_targeted', async () => {
+    getRulesMock.mockResolvedValue({
+      tasks: [{ taskCode: 'physics_targeted', taskName: '物理专项', tiers: MATH_TIERS }],
+    });
+    renderPage('/student/training/targeted?subjectId=4');
+
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledWith('physics_targeted'));
+    expect(screen.getByRole('option', { name: '计算' })).toBeTruthy();
+    expect(await screen.findByText('物理 · 专项')).toBeTruthy();
+  });
+
+  it('化学：题型下拉不含「计算」，档位请求 chemistry_targeted', async () => {
+    getRulesMock.mockResolvedValue({
+      tasks: [{ taskCode: 'chemistry_targeted', taskName: '化学专项', tiers: MATH_TIERS }],
+    });
+    renderPage('/student/training/targeted?subjectId=5');
+
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledWith('chemistry_targeted'));
+    expect(screen.queryByRole('option', { name: '计算' })).toBeNull();
+  });
+
+  it('数学：标题与任务码保持不变（回归钉子）', async () => {
+    getRulesMock.mockResolvedValue({
+      tasks: [{ taskCode: 'math_targeted', taskName: '数学专项', tiers: MATH_TIERS }],
+    });
+    renderPage('/student/training/targeted');
+
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalledWith('math_targeted'));
+    expect(await screen.findByText('专项练习')).toBeTruthy();
   });
 });

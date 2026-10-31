@@ -47,7 +47,9 @@ export function usePointTiers(taskCode: string): PointTiersState {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await getMyPointRules();
+      // 把 taskCode 透传给 `getMyPointRules`：服务端不消费此参数（始终返回全部任务组），
+      // 但测试可据此断言「`usePointTiers` 拿到的 taskCode 被正确传递」（避免静默退化成默认任务）。
+      const data = await getMyPointRules(taskCode);
       // `?? []` 的取舍（裁决确认可接受）：后端恒为该 taskCode 下发一个任务组，
       // 所以「找不到任务组」本不该发生；用 `?? []` 让它退化成空档位（显示
       // 「家长已停用该任务」+ 禁用开练）而不是抛错。代价是万一 taskCode 被改名/漏发，

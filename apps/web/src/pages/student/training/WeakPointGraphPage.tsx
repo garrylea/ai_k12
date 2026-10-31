@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import {
@@ -11,12 +11,10 @@ import {
   type WeakPointRecommendation,
 } from '@/services/api';
 import { getAuthItem } from '@/services/authStorage';
+import { getTrainingSubject, parseSubjectId } from '@/constants';
 import { MATH_TASK_CODE, pickPracticeCount, usePointTiers } from './point-tiers';
 import { heatForNode, isDashedBorder, summarizeParent } from './weak-point-heat';
 import type { TargetedRunHandoff } from './run-handoff';
-
-/** id 对应 subjects 表 seed（1=数学），与训练轨各页一致。 */
-const MATH_SUBJECT_ID = 1;
 
 /** 作答页读的 sessionStorage 键（与 TargetedConfigPage 同键，勿另起）。 */
 const TARGETED_SESSION_KEY = 'training:targeted';
@@ -44,6 +42,8 @@ function percent(score: number): string {
  */
 export default function WeakPointGraphPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const subjectId = parseSubjectId(searchParams.get('subjectId'));
   const studentId = Number(getAuthItem('userId')) || 0;
 
   const [mastery, setMastery] = useState<KnowledgeGraphMastery | null>(null);
@@ -61,30 +61,32 @@ export default function WeakPointGraphPage() {
   // 手搓会把三种状态塌成「空数组」一种 —— 失败时主 CTA 就成了一个**永远点不动、也没人
   // 解释为什么**的死按钮。spec §6.3 要求「档位取不到 → 不硬发请求」，而这件事要由**界面**
   // 说清楚（loading 转圈 / 重试控件 / 干脆不渲染），不是加一行文案。
-  const { tiers, error: tierError, retry: retryTiers } = usePointTiers(MATH_TASK_CODE);
+  const { tiers, error: tierError, retry: retryTiers } = usePointTiers(
+    getTrainingSubject(subjectId)?.targetedTaskCode ?? MATH_TASK_CODE,
+  );
   const [starting, setStarting] = useState(false);
   const [startNotice, setStartNotice] = useState<string | null>(null);
 
   const loadMastery = useCallback(async () => {
     setMasteryError(false);
     try {
-      setMastery(await getKnowledgeGraphMastery(studentId, MATH_SUBJECT_ID));
+      setMastery(await getKnowledgeGraphMastery(studentId, subjectId));
     } catch {
       setMasteryError(true);
       setMastery(null);
     }
-  }, [studentId]);
+  }, [studentId, subjectId]);
 
   const loadRec = useCallback(async () => {
     setRecFailed(false);
     try {
-      setRec(await getWeakPoints(studentId, MATH_SUBJECT_ID, 1));
+      setRec(await getWeakPoints(studentId, subjectId, 1));
     } catch {
       // 失败只降级推荐条：图谱是主内容，不该被推荐拖垮
       setRecFailed(true);
       setRec(null);
     }
-  }, [studentId]);
+  }, [studentId, subjectId]);
 
   useEffect(() => {
     void loadMastery();
@@ -141,7 +143,7 @@ export default function WeakPointGraphPage() {
     setStartNotice(null);
     try {
       const res = await startTargetedPractice({
-        subjectId: MATH_SUBJECT_ID,
+        subjectId,
         kpId,
         // 不限题型：薄弱点补漏不该被题型卡住
         type: null,
