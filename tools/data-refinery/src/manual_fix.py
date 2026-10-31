@@ -56,22 +56,27 @@ def _read_line(prompt: str = "") -> str | None:
     return line.rstrip("\n")
 
 
-_END_SUFFIX_RE = re.compile(r"(?:^|\s)(EOF|END|结束)\s*$", re.IGNORECASE)
+_END_WORD_RE = re.compile(r"(?:^|\s)(END|结束)\s*$", re.IGNORECASE)
 
 
 def _split_at_marker(text: str) -> tuple[str, bool]:
     """按结束标记切开一段输入；返回 (标记之前的正文, 是否遇到标记)。
 
-    两种写法都认：
-    - 单独一行 `EOF`；
-    - 行尾带标记（`…</table> EOF`）—— 粘贴时手一顺就写在最后一行末尾，
-      旧实现只认独占一行，于是标记被当成正文吞掉、程序继续等下一行。
+    规则（2026-10-31 用户裁决）：**文本里任意位置出现 `EOF` 就算结束**，
+    它之后的内容一律丢弃。这样不管 EOF 是独占一行、写在行尾，还是整段粘贴
+    里的某一行中间，都能可靠收住 —— 早期只认"独占一行"，用户把标记写在
+    最后一行末尾时会被当成正文吞掉，程序就一直等下去。
+    另外仍兼容 `END` / `结束`，但这两个要求独占一行（避免误伤正文里的词）。
     """
+    idx = text.upper().find("EOF")
+    if idx != -1:
+        return text[:idx].strip(), True
+
     kept: list[str] = []
     for line in text.splitlines():
         if line.strip().upper() in _END_MARKERS:
             return "\n".join(kept).strip(), True
-        m = _END_SUFFIX_RE.search(line)
+        m = _END_WORD_RE.search(line)
         if m:
             tail = line[: m.start()].rstrip()
             if tail:
@@ -83,7 +88,7 @@ def _split_at_marker(text: str) -> tuple[str, bool]:
 
 def _read_block(first_chunk: str = "") -> str:
     """读到结束标记为止，返回正文；first_chunk 是已经读到的那一段。"""
-    print("（粘贴 Markdown，结束后单独一行输入 EOF，大小写均可；s 跳过 / q 退出）",
+    print("（粘贴 Markdown，出现 EOF 即结束，大小写不限；s 跳过 / q 退出）",
           flush=True)
     body, done = _split_at_marker(first_chunk)
     lines = body.splitlines() if body else []
@@ -202,7 +207,7 @@ def _ask(issue: dict, paper_md_dir: Path) -> list[dict]:
         for line in issue["excerpt"].splitlines()[:12]:
             print("    " + line)
     print("─" * 72)
-    print("请提供真题：1) 直接粘贴 Markdown（结束输入 EOF）"
+    print("请提供真题：1) 直接粘贴 Markdown（出现 EOF 即结束）"
           "  2) 图片路径（自动转 md）  3) @文件路径")
     print("             s) 跳过   q) 退出")
 

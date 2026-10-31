@@ -117,6 +117,8 @@ import pytest
     ("a\nb", "a\nb", False),
     ("EOF\n", "", True),
     ("a\nEOF\n多余的尾巴", "a", True),
+    ("题干正文 EOF 标记后面的都不算", "题干正文", True),   # 任意位置出现即结束
+    ("a\nb\nEND\n", "a\nb", True),
 ])
 def test_split_at_marker(text, body, done):
     assert manual_fix._split_at_marker(text) == (body, done)
