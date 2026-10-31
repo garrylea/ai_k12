@@ -386,3 +386,18 @@ def test_apply_entry_declined_keeps_records(monkeypatch, capsys):
     assert all("--apply" not in c for c in calls)
     out = capsys.readouterr().out
     assert "未写库，本次未写入的 1 条" in out and "卷A" in out, "回车后要把清单再贴一遍"
+
+
+def test_preview_log_written_with_records(tmp_path, monkeypatch, capsys):
+    import import_cli as ic
+
+    monkeypatch.setattr(ic, "__file__", str(tmp_path / "src" / "import_cli.py"))
+    recs = [{"source": "物理-卷A-试卷", "group_order": 27, "_file": "/x/a.jsonl"},
+            {"source": "物理-卷A-试卷", "group_order": 28, "_file": "/x/a.jsonl"}]
+
+    path = ic._write_preview_log(recs, ["--subject", "物理"])
+
+    assert path is not None and path.exists()
+    text = path.read_text(encoding="utf-8")
+    assert "待写入 2 条" in text and "题27" in text and "题28" in text
+    assert "清单已存到" in capsys.readouterr().out

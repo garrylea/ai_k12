@@ -27,6 +27,8 @@
 import argparse
 import copy
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from answer_backfill import backfill as answers_backfill
 from config import RefineryConfig
@@ -304,6 +306,25 @@ def _file_keywords(args) -> list[str]:
     return [k.strip() for k in raw.split(",") if k.strip()]
 
 
+def _write_preview_log(recs: list[dict], scope: list[str]) -> Path | None:
+    """把本次待写入清单写到 output/apply_preview.log（覆盖写，只保留最近一次）。"""
+    try:
+        out_dir = Path(__file__).resolve().parents[1] / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / "apply_preview.log"
+        lines = [f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 范围: {' '.join(scope) or '全部学科'}"
+                 f" · 待写入 {len(recs)} 条"]
+        for rec in recs:
+            lines.append(f"  {rec.get('source', '?')}  题{rec.get('group_order', '?')}"
+                         f"  （{rec.get('_file', '')}）")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"[日志] 清单已存到 {path}（看不清屏幕就打开它）", flush=True)
+        return path
+    except OSError as exc:                      # 日志失败绝不能挡住写库流程
+        print(f"[WARN] 写预览日志失败：{exc}", flush=True)
+        return None
+
+
 def _apply_entry(args):
     """把第 7 步补的题写进库：先预览，交互终端下确认一次才真写。"""
     def _run(_argv) -> int:
@@ -321,6 +342,8 @@ def _apply_entry(args):
             scope += ["--source", args.file]
         print(f"[补题] 待写入 {len(recs)} 条，先预览：", flush=True)
         apply_run(["--dry-run"] + scope, via_pipeline=True)
+        # 终端可能滚动或被别的程序接管输出，把清单同时落一份文件，随时可查
+        log_path = _write_preview_log(recs, scope)
         if args.dry_run:
             return 0
         if args.skip_review or not sys.stdin.isatty():
