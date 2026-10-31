@@ -4,7 +4,8 @@ import io
 
 import pytest
 
-from cli_ui import Console, display_width, pad, truncate_middle, wrap_items
+from cli_ui import (Console, display_width, install_interrupt_handler, pad,
+                    truncate_middle, wrap_items)
 
 
 def test_display_width_counts_cjk_as_two():
@@ -78,3 +79,51 @@ def test_block_folds_images_and_caps_lines(capsys):
     out = capsys.readouterr().out
     assert "[图]" in out and "abc1.jpg" not in out
     assert "还有 6 行" in out
+
+
+# ---------- Ctrl+C 处理器 ----------
+
+def test_install_interrupt_handler_sets_own_handler(monkeypatch):
+    import signal
+
+    monkeypatch.setattr(signal, "getsignal", lambda sig: signal.default_int_handler)
+    captured = {}
+    monkeypatch.setattr(signal, "signal", lambda sig, h: captured.update(sig=sig, h=h))
+
+    assert install_interrupt_handler() is True
+    assert captured["sig"] == signal.SIGINT and callable(captured["h"])
+
+
+def test_install_interrupt_handler_leaves_foreign_handler(monkeypatch):
+    """pytest / 调用方已经接管 SIGINT 时不许抢。"""
+    import signal
+
+    monkeypatch.setattr(signal, "getsignal", lambda sig: lambda *a: None)
+    called = []
+    monkeypatch.setattr(signal, "signal", lambda *a: called.append(a))
+
+    assert install_interrupt_handler() is False
+    assert called == []
+
+
+def test_interrupt_handler_restores_default_and_raises(monkeypatch):
+    """第一次按 Ctrl+C：提示 + 恢复默认动作（第二次必退）+ 抛 KeyboardInterrupt。"""
+    import signal
+
+    installs = []
+    monkeypatch.setattr(signal, "getsignal", lambda sig: signal.default_int_handler)
+    monkeypatch.setattr(signal, "signal", lambda sig, h: installs.append((sig, h)))
+
+    install_interrupt_handler()
+    handler = installs[0][1]
+    # 模拟第二次安装（处理器内部把 SIGINT 恢复默认）
+    installs.clear()
+
+    try:
+        handler(signal.SIGINT, None)
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("处理器应该抛 KeyboardInterrupt")
+
+    assert installs and installs[0][1] == signal.SIG_DFL

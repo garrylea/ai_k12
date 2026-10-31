@@ -283,7 +283,8 @@ def _execute(args) -> int:
                 print(f"[ERROR] {label} 返回 {rc}，已停止；后续阶段未执行", flush=True)
                 return rc
     except KeyboardInterrupt:
-        print("\n[中断] 已停止；已完成阶段有 checkpoint，可从断点继续", flush=True)
+        print("\n[中断] 已停止；已完成阶段有 checkpoint，重跑同一命令即可继续",
+              flush=True)
         return 130
     except Exception as e:  # 子 CLI 的异常向上抛：立即停，不带着半截数据继续
         print(f"\n[ERROR] 阶段失败：{e}", flush=True)
@@ -301,6 +302,18 @@ def _file_keywords(args) -> list[str]:
 
 
 def main(argv=None) -> int:
+    """入口：一次 Ctrl+C 必须整体停下（含 --files 批量）。"""
+    from cli_ui import install_interrupt_handler
+
+    install_interrupt_handler()
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        print("\n[中断] 已停止", flush=True)
+        return 130
+
+
+def _main(argv=None) -> int:
     args = parse_args(argv)
     keywords = _file_keywords(args)
     if not keywords:
@@ -313,6 +326,10 @@ def main(argv=None) -> int:
         sub.files = None
         print(f"\n=== [批量 {idx}/{len(keywords)}] {kw} ===", flush=True)
         code = _execute(sub)
+        if code in (130, -2):          # Ctrl+C：整批停下，别再问下一份
+            print(f"[中断] 已在「{kw}」停止，剩余 {len(keywords) - idx} 份未处理",
+                  flush=True)
+            return 130
         if code not in (None, 0):
             rc = code
             print(f"[WARN] {kw} 返回 {code}，继续处理下一份", flush=True)

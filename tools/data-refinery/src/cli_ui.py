@@ -184,3 +184,27 @@ class Console:
         self.write("")
         self.rule()
         self.kv(stats)
+
+
+def install_interrupt_handler() -> bool:
+    """第一次 Ctrl+C 正常停止，第二次用系统默认立即杀。
+
+    默认的 KeyboardInterrupt 在阻塞于子进程 / 网络等待时，可能要按好几次才生效
+    （2026-10-31 用户实测：--files 三张卷要按三次）。装上一次性处理器后，
+    第一次就把 SIGINT 恢复成默认动作，第二次必退。
+
+    已有别人接管（pytest、单元测试）时不动，避免抢信号处理器。
+    返回是否安装。
+    """
+    import signal
+
+    if signal.getsignal(signal.SIGINT) not in (signal.default_int_handler, None):
+        return False
+
+    def _handler(signum, frame):        # noqa: ARG001 - 信号处理器签名固定
+        print("\n[中断] 正在停止…（再按一次 Ctrl+C 立即退出）", flush=True)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, _handler)
+    return True

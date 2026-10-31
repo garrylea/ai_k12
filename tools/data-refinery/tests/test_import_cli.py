@@ -261,3 +261,53 @@ def test_fix_entry_tty_calls_review_with_scanned_sources(monkeypatch):
     import_cli._fix_entry(_fix_entry_args(sources=("卷A", "卷B")))([])
 
     assert seen["sources"] == {"卷A", "卷B"}
+
+
+# ---------- Ctrl+C：一次就停（批量不再往下走） ----------
+
+def _stub_stages_with_first(monkeypatch, first):
+    """把四个子阶段换成桩；first 是「第一阶段」的行为。"""
+    calls = []
+    monkeypatch.setattr(import_cli, "convert_main", first)
+    for name in ("extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: calls.append(n))
+    return calls
+
+
+def test_execute_returns_130_and_stops_remaining_stages(monkeypatch, capsys):
+    def interrupted(argv):
+        raise KeyboardInterrupt
+
+    calls = _stub_stages_with_first(monkeypatch, interrupted)
+
+    rc = import_cli.main(["--subject", "语文"])
+
+    assert rc == 130
+    assert calls == [], "中断后不能再跑后面的阶段"
+    assert "中断" in capsys.readouterr().out
+
+
+def test_files_batch_stops_after_one_interrupt(monkeypatch, capsys):
+    """--files 三份：第一次 Ctrl+C 就整批退出，不能一份一份停。"""
+    seen = []
+
+    def fake_execute(args):
+        seen.append(args.file)
+        return 130
+
+    monkeypatch.setattr(import_cli, "_execute", fake_execute)
+
+    rc = import_cli.main(["--subject", "物理", "--files", "A,B,C"])
+
+    assert rc == 130
+    assert seen == ["A"], "中断后不该继续处理 B、C"
+    assert "剩余 2 份未处理" in capsys.readouterr().out
+
+
+def test_keyboard_interrupt_outside_stage_loop_is_130(monkeypatch):
+    def boom(args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(import_cli, "_execute", boom)
+
+    assert import_cli.main(["--subject", "物理"]) == 130

@@ -649,16 +649,25 @@ def review_pending(sources: set[str] | None = None,
 
 
 def main() -> int:
+    """独立入口（scripts/fix_question_cli.py 调它）：一次 Ctrl+C 就退出。"""
     global ISSUES_FILE
     import argparse
 
+    from cli_ui import install_interrupt_handler
+
+    install_interrupt_handler()
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", help="卷名子串过滤，如 人大附中")
     parser.add_argument("--fixes-dir", default=str(FIXES_DIR))
     parser.add_argument("--list", action="store_true", help="只列清单，不进入交互")
     args = parser.parse_args()
 
-    review_pending(file=args.source, list_only=args.list, fixes_dir=Path(args.fixes_dir))
+    try:
+        review_pending(file=args.source, list_only=args.list,
+                       fixes_dir=Path(args.fixes_dir))
+    except KeyboardInterrupt:
+        print("\n[中断] 已退出；本题未记录", flush=True)
+        return 130
     return 0
 
 
