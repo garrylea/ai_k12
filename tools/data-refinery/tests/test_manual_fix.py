@@ -1,0 +1,37 @@
+"""manual_fix：待补题筛选（import_cli 第 7 步按本次扫描到的卷精确取）。"""
+
+import json
+
+import manual_fix
+
+
+def _write(path, rows):
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                    encoding="utf-8")
+
+
+def test_pending_issues_filters_by_exact_sources(tmp_path, monkeypatch):
+    issues = [
+        {"source": "物理-卷A-试卷", "group_order": 7, "kind": "missing", "status": "pending"},
+        {"source": "物理-卷B-试卷", "group_order": 2, "kind": "missing", "status": "pending"},
+        {"source": "物理-卷A-试卷", "group_order": 3, "kind": "missing", "status": "resolved"},
+    ]
+    path = tmp_path / "issues.jsonl"
+    _write(path, issues)
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+
+    got = manual_fix.pending_issues({"物理-卷A-试卷"})
+    assert [i["group_order"] for i in got] == [7], "只取指定卷、且只要 pending"
+
+
+def test_pending_issues_filters_by_substring(tmp_path, monkeypatch):
+    path = tmp_path / "issues.jsonl"
+    _write(path, [
+        {"source": "物理-海淀·人大附中-（上）期中-试卷", "group_order": 7,
+         "kind": "missing", "status": "pending"},
+        {"source": "物理-海淀·一零一中学-（上）期中-试卷", "group_order": 28,
+         "kind": "missing", "status": "pending"},
+    ])
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+
+    assert [i["group_order"] for i in manual_fix.pending_issues(file="人大附中")] == [7]

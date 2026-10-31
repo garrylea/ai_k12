@@ -3,6 +3,7 @@
 面向「单科/单卷」的日常导入，全部阶段共用同一套范围参数
 （`--subject/--stage/--term/--year/--file`，见 scope_filter）：
 
+    python src/import_cli.py --subject 物理 --files "一零一中学,人大附中"  # 一次导入多份卷
     python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
     python src/import_cli.py --subject 语文 --year 2025             # PDF → md → jsonl → 题库
     python src/import_cli.py --file "202507-海淀"                    # 单卷导入
@@ -16,6 +17,11 @@
 
 答案回填是第 5 步（2026-10-28 并入）：默认只补空答案，已有内容不动；
 `--re-answer` 才覆盖；`--skip-answers` 可跳过。
+
+第 6 步扫识别问题（缺号/被吞/卷首页脚），第 7 步在**交互终端**下直接逐条引导
+人工补题（粘贴 md 或给图片走 MinerU），补好的内容落 output/manual_fixes/；
+非交互终端只打印补题命令，不会卡住 CI。补完用 scripts/apply_fixes_cli.py --apply
+统一写库；`--skip-review` 可关掉第 7 步。
 """
 
 import argparse
@@ -55,6 +61,8 @@ def parse_args(argv=None):
     parser.add_argument("--skip-publish", action="store_true", help="跳过 publish")
     parser.add_argument("--skip-load", action="store_true", help="跳过 db_loader（只到 published）")
     parser.add_argument("--skip-answers", action="store_true", help="跳过第 5 步答案回填")
+    parser.add_argument("--skip-review", action="store_true",
+                        help="发现缺题时不进入人工补题（只打印清单与补题命令）")
     parser.add_argument("--re-answer", action="store_true",
                         help="答案回填覆盖已有内容（默认只补空答案）")
     parser.add_argument("--reconvert", action="store_true", help="重跑 MinerU（删除已有 md 重新转换）")
@@ -185,13 +193,38 @@ def _scan_entry(args):
     """识别问题扫描：按本次范围（学科 + 卷名子串）扫已提取的 jsonl。"""
     def _run(_argv) -> int:
         from recognition_scan import run as scan_run
+        issues = scan_run(args.subject or "物理", args.file, write=not args.dry_run)
+        args._scanned_sources = {i["source"] for i in issues}
         if args.dry_run:
-            issues = scan_run(args.subject or "物理", args.file, write=False)
             for it in issues:
                 print(f"[issue] {it['source'][:24]} 题{it['group_order']} {it['kind']}："
                       f"{'；'.join(it['reasons'])}", flush=True)
+        return 0
+    return _run
+
+
+def _fix_entry(args):
+    """人工补题：只处理本次扫描到的问题，TTY 下才进交互。"""
+    def _run(_argv) -> int:
+        import sys
+
+        from manual_fix import review_pending
+
+        sources = getattr(args, "_scanned_sources", None)
+        if not sources:
+            print("[done] 本次没有待人工处理的题", flush=True)
             return 0
-        scan_run(args.subject or "物理", args.file, write=True)
+        if args.dry_run:
+            print(f"[dry-run] {len(sources)} 份卷存在待补题；正式执行时会逐条确认", flush=True)
+            return 0
+        if args.skip_review or not sys.stdin.isatty():
+            print(f"[提示] {len(sources)} 份卷有题目待人工确认；当前非交互终端，已跳过。",
+                  flush=True)
+            print("       逐条补题：python3 scripts/fix_question_cli.py --source <卷名>",
+                  flush=True)
+            print("       补完入库：python3 scripts/apply_fixes_cli.py --apply", flush=True)
+            return 0
+        review_pending(sources=sources)
         return 0
     return _run
 
@@ -219,20 +252,24 @@ def _execute(args) -> int:
 
     stages = []
     if not args.skip_convert:
-        stages.append(("1/6 convert（素材 → md）", convert_main, convert_argv(args)))
+        stages.append(("1/7 convert（素材 → md）", convert_main, convert_argv(args)))
     if not args.skip_extract:
-        stages.append(("2/6 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
+        stages.append(("2/7 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
     if not args.skip_publish:
-        stages.append(("3/6 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
+        stages.append(("3/7 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
     if not args.skip_load:
-        stages.append(("4/6 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
+        stages.append(("4/7 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
     # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起
     if not args.skip_answers and not args.cards_only and not args.skip_load:
-        stages.append(("5/6 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
+        stages.append(("5/7 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
     # 识别问题扫描：缺号 / 被吞 / 卷首页脚被当题，落 output/recognition_issues.jsonl，
     # 供 scripts/fix_question_cli.py 逐条人工补题（不阻塞入库，可随时补跑）
     if not args.cards_only:
-        stages.append(("6/6 识别问题扫描（缺号/被吞/噪声题）", _scan_entry(args), []))
+        stages.append(("6/7 识别问题扫描（缺号/被吞/噪声题）", _scan_entry(args), []))
+        # 扫完直接引导人工补题：交互终端下会逐条问，非交互（CI/管道）只打印命令，
+        # 避免 CI 卡在 input() 上。补完的内容在 output/manual_fixes/，
+        # 用 scripts/apply_fixes_cli.py --apply 统一写库。
+        stages.append(("7/7 人工补题（逐条确认，可跳过）", _fix_entry(args), []))
 
     try:
         for label, fn, sub_argv in stages:
