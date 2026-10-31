@@ -146,7 +146,7 @@ def test_collect_content_quit_raises():
 def test_collect_content_image_goes_through_mineru(tmp_path, monkeypatch):
     img = tmp_path / "shot.png"
     img.write_bytes(b"png")
-    monkeypatch.setattr("sys.stdin", io.StringIO(f"{img}\ny\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"2\n{img}\n\n"))
     called = {}
 
     def fake_convert(image, md_dir):
@@ -163,7 +163,7 @@ def test_collect_content_image_rejected_asks_again(tmp_path, monkeypatch):
     img = tmp_path / "shot.png"
     img.write_bytes(b"png")
     # 第一次给图片并回 n，第二次直接粘贴文本
-    monkeypatch.setattr("sys.stdin", io.StringIO(f"{img}\nn\n手工题干\nEOF\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"2\n{img}\nr\n手工题干\nEOF\n\n"))
     monkeypatch.setattr(manual_fix, "_image_to_markdown", lambda i, d: "OCR 题干")
 
     assert manual_fix._collect_content(tmp_path) == "手工题干"
@@ -190,7 +190,7 @@ def test_ask_records_choice_options(tmp_path, monkeypatch):
     path = _prep_n(tmp_path, monkeypatch)
     issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     monkeypatch.setattr("sys.stdin",
-                        io.StringIO("下列说法正确的是\nA. 甲\nB. 乙\nC. 丙\nD. 丁\nEOF\nA\n"))
+                        io.StringIO("下列说法正确的是\nA. 甲\nB. 乙\nC. 丙\nD. 丁\nEOF\n\nA\n"))
 
     recs = manual_fix._ask(issue, tmp_path)
 
@@ -225,7 +225,7 @@ def test_review_marks_issue_recorded_and_writes_fix_file(tmp_path, monkeypatch):
 
 def test_review_processes_multiple_issues_in_order(tmp_path, monkeypatch):
     path = _prep_n(tmp_path, monkeypatch, n=3)
-    monkeypatch.setattr("sys.stdin", io.StringIO("题一\nEOF\n\n题二\nEOF\n\n题三\nEOF\n\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("题一\nEOF\n\n\n题二\nEOF\n\n\n题三\nEOF\n\n\n"))
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
 
@@ -289,7 +289,7 @@ def test_ask_splits_multi_question_paste_into_records(tmp_path, monkeypatch):
     path = _prep_n(tmp_path, monkeypatch)
     issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "27. 甲题题干\n(1) 小问\n28. 乙题题干\n(1) 小问\nEOF\n答案甲\n答案乙\n"))
+        "27. 甲题题干\n(1) 小问\n28. 乙题题干\n(1) 小问\nEOF\n\n答案甲\n答案乙\n"))
 
     recs = manual_fix._ask(issue, tmp_path)
 
@@ -302,8 +302,7 @@ def test_ask_splits_multi_question_paste_into_records(tmp_path, monkeypatch):
 def test_review_writes_all_records_from_one_paste(tmp_path, monkeypatch):
     path = _prep_n(tmp_path, monkeypatch, n=2)   # 题 10、11 都待补
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "10. 甲题正文\n11. 乙题正文\nEOF\n\n"   # 一次粘贴两题，第二题答案留空
-        "s\n"))                                # 第二条 issue 已被顺带解决，再遇就跳过
+        "10. 甲题正文\n11. 乙题正文\nEOF\n\n\n\n"))                                # 第二条 issue 已被顺带解决，再遇就跳过
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
 
@@ -346,8 +345,8 @@ def test_ask_guides_two_questions_one_at_a_time(tmp_path, monkeypatch, capsys):
     """先录 27（改短）、再录 28（补缺），两块输入各以 EOF 结束。"""
     issue, _ = _prep_pair(tmp_path, monkeypatch)
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "27 题改短后的正文\nEOF\n\n"      # 题 27 正文 + 答案留空
-        "28 题补出来的正文\nEOF\n\n"))    # 题 28 正文 + 答案留空
+        "27 题改短后的正文\nEOF\n\n\n"      # 正文 + 确认 + 答案留空
+        "28 题补出来的正文\nEOF\n\n\n"))    # 题 28 正文 + 答案留空
 
     recs = manual_fix._ask(issue, tmp_path)
 
@@ -372,7 +371,7 @@ def test_ask_skipping_first_still_prompts_second(tmp_path, monkeypatch, capsys):
 def test_review_pair_records_both_numbers(tmp_path, monkeypatch):
     issue, path = _prep_pair(tmp_path, monkeypatch)
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "27 正文\nEOF\n\n28 正文\nEOF\n\n"))
+        "27 正文\nEOF\n\n\n28 正文\nEOF\n\n\n"))
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
 
@@ -412,8 +411,8 @@ def test_collect_content_rejects_echo_then_accepts_next_input(tmp_path, monkeypa
 def test_answer_containing_ui_text_is_cleared(tmp_path, monkeypatch):
     issue, _ = _prep_pair(tmp_path, monkeypatch)
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "27 题正文\nEOF\ns) 跳过   q) 退出\n"          # 答案位置混进界面文字
-        "28 题正文\nEOF\n\n"))
+        "27 题正文\nEOF\n\ns) 跳过   q) 退出\n"        # 答案位置混进界面文字
+        "28 题正文\nEOF\n\n\n"))
 
     recs = manual_fix._ask(issue, tmp_path)
 
@@ -456,3 +455,63 @@ def test_mark_issue_reopen_clears_resolved_marks(tmp_path, monkeypatch):
     assert row["status"] == "pending"
     assert "resolved_at" not in row
     assert row["note"].startswith("补录内容被拒")
+
+
+# ---------- 输入方式菜单（1/2/3）与预览确认 ----------
+
+def test_menu_digit_is_not_part_of_content(tmp_path, monkeypatch):
+    """输入 1 选「粘贴文本」时，1 不能被写进题目（这正是上一轮污染的来源）。"""
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n27. 正文\nEOF\n\n\n"))
+
+    text = manual_fix._collect_content(tmp_path)
+
+    assert text == "27. 正文"
+
+
+def test_menu_3_reads_local_file(tmp_path, monkeypatch):
+    src = tmp_path / "q.md"
+    src.write_text("从文件读到的正文", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"3\n{src}\n\n"))
+
+    assert manual_fix._collect_content(tmp_path) == "从文件读到的正文"
+
+
+def test_menu_2_missing_image_reports_and_reprompts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("2\n/不存在/x.png\n1\n正文\nEOF\n\n\n"))
+
+    assert manual_fix._collect_content(tmp_path) == "正文"
+    assert "找不到文件" in capsys.readouterr().out
+
+
+def test_confirm_redo_discards_previous_text(tmp_path, monkeypatch):
+    """粘错了按 r 重输：上一版不能残留。"""
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "第一版糊了\nEOF\nr\n第二版正确\nEOF\n\n\n"))
+
+    assert manual_fix._collect_content(tmp_path) == "第二版正确"
+
+
+def test_confirm_edit_uses_editor(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO("原始内容\nEOF\ne\n\n\n"))
+    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: "编辑器改过的内容")
+
+    assert manual_fix._collect_content(tmp_path) == "编辑器改过的内容"
+
+
+def test_confirm_edit_without_editor_keeps_original(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("原始内容\nEOF\ne\n\n\n"))
+    monkeypatch.setattr(manual_fix, "_edit_in_editor", lambda text: None)
+
+    assert manual_fix._collect_content(tmp_path) == "原始内容"
+    assert "没找到可用的编辑器" in capsys.readouterr().out
+
+
+def test_confirm_skip_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO("要丢掉的内容\nEOF\ns\n"))
+
+    assert manual_fix._collect_content(tmp_path) is None
+
+
+def test_editor_command_prefers_env(monkeypatch):
+    monkeypatch.setenv("EDITOR", "my-editor --wait")
+    assert manual_fix._editor_command() == ["my-editor", "--wait"]

@@ -4,11 +4,14 @@
     import_cli 第 7 步在 TTY 下自动调用 review_pending()；
     也可以单独跑 scripts/fix_question_cli.py（同一套逻辑）。
 
-一次交互的输入约定：
-- 直接粘贴 Markdown，最后单独一行输入 `EOF`（大小写均可，也认 END / 结束）；
-- 或输入图片路径（.png/.jpg/…），自动调 MinerU 转成 Markdown 并落图；
-- 或输入 `@某个文件路径` 直接读取本地 md/txt；
-- `s` 跳过本题，`q` 退出。
+一次交互的输入约定（2026-10-31 改为显式菜单）：
+- 先选方式：`1` 粘贴文本 / `2` 图片路径（走 MinerU）/ `3` 本地文件；直接粘贴正文也行；
+- 粘贴时出现 `EOF` 即结束（大小写均可，也认 END / 结束）；
+- 录入后先预览，`回车` 确认 / `e` 用 $EDITOR 改 / `r` 重输 / `s` 跳过；
+- `q` 退出。
+
+为什么要有 `e`/`r`：终端只能编辑「当前这一行」，已经交给程序的多行内容改不动 ——
+用户粘错一大段时无法逐字删，只能整段重来或进编辑器改。
 
 输入层用 `sys.stdin.readline()` 而不是 `input()`：终端把整段粘贴当一坨塞进来时
 （bracketed paste），readline 会一次返回多行，旧实现只按行匹配 EOF，把标记连同
@@ -17,8 +20,11 @@
 
 import getpass
 import json
+import os
 import re
+import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import datetime
@@ -226,46 +232,161 @@ def looks_like_ui_echo(text: str) -> bool:
     return weak >= 2
 
 
+def _ask_path(prompt: str) -> Path | None:
+    """读一个路径（去掉引号/空白）；空输入返回 None。"""
+    console().prompt(prompt)
+    raw = (_read_line() or "").strip().strip("'\"")
+    if not raw:
+        return None
+    return Path(raw).expanduser()
+
+
+def _from_image(paper_md_dir: Path, path: Path | None = None) -> str | None:
+    """图片 → MinerU → Markdown；失败返回 None（调用方继续问）。"""
+    c = console()
+    if path is None:
+        path = _ask_path("图片路径 › ")
+        if path is None:
+            return None
+    if not path.exists():
+        c.err(f"找不到文件：{path}")
+        return None
+    c.info(f"调用 MinerU 识别 {path.name} …（可能要 1–4 分钟）")
+    try:
+        text = _image_to_markdown(path, paper_md_dir)
+    except Exception as exc:                      # noqa: BLE001 - 外部命令，任何失败都退回重输
+        c.err(f"MinerU 转换失败：{exc}")
+        return None
+    if not text.strip():
+        c.err("MinerU 没有返回内容")
+        return None
+    return text
+
+
+def _from_file(paper_md_dir: Path, raw: str | None = None) -> str | None:
+    """读取本地 md/txt（图片则走 MinerU）；读不到返回 None。"""
+    c = console()
+    if raw is None:
+        path = _ask_path("文件路径 › ")
+        if path is None:
+            return None
+    else:
+        path = Path(raw.strip().strip("'\"")).expanduser()
+    if not path.exists():
+        c.err(f"找不到文件：{path}")
+        return None
+    if path.suffix.lower() in IMAGE_SUFFIXES:
+        return _from_image(paper_md_dir, path)
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        c.err(f"读不了文件：{exc}")
+        return None
+
+
+def _editor_command() -> list[str] | None:
+    for env in ("VISUAL", "EDITOR"):
+        value = os.environ.get(env)
+        if value:
+            return shlex.split(value)
+    for cand in ("nano", "vim", "vi"):
+        if shutil.which(cand):
+            return [cand]
+    return None
+
+
+def _edit_in_editor(text: str) -> str | None:
+    """把内容丢进 $EDITOR 让人改（终端里粘错的多行没法逐字删，只能这样改）。
+
+    返回改后的正文；没有编辑器或编辑失败时返回 None，调用方保留原内容。
+    """
+    cmd = _editor_command()
+    if cmd is None:
+        return None
+    fd, name = tempfile.mkstemp(suffix=".md", prefix="k12-fix-")
+    path = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        try:
+            code = subprocess.call(cmd + [str(path)])
+        except OSError:
+            return None
+        if code != 0:
+            return None
+        return path.read_text(encoding="utf-8").strip()
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def _confirm_text(text: str) -> tuple[str, str]:
+    """录入后确认；返回 (动作, 正文)，动作 ∈ ok / redo / skip。"""
+    c = console()
+    c.block("将记录这一题", text, max_lines=8)
+    c.legend([("回车", "确认"), ("e", "编辑"), ("r", "重新输入"), ("s", "跳过本题")])
+    c.prompt("› ")
+    ans = (_read_line() or "").strip().lower()
+    if ans in ("s", "skip"):
+        return "skip", ""
+    if ans in ("r", "redo"):
+        return "redo", ""
+    if ans in ("e", "edit"):
+        edited = _edit_in_editor(text)
+        if edited is None:
+            c.warn("没找到可用的编辑器（$VISUAL/$EDITOR/nano/vim），已保留原内容")
+            return "ok", text
+        if not edited.strip():
+            c.warn("编辑后内容为空，已退回重输")
+            return "redo", ""
+        return "ok", edited
+    return "ok", text
+
+
 def _collect_content(paper_md_dir: Path) -> str | None:
-    """读人工输入；返回 Markdown 正文，跳过时返回 None。"""
+    """读人工输入；返回 Markdown 正文，跳过时返回 None。
+
+    先问用哪种方式（1 粘贴 / 2 图片 / 3 文件），再预览确认。
+    直接粘贴正文也认：首行不是 1/2/3/s/q 就当成正文的第一行。
+    """
     c = console()
     while True:
-        c.prompt("› ")
+        c.prompt("选择方式 1/2/3（或直接粘贴正文）› ")
         first = _read_line()
         if first is None:
             return None
         first = first.strip()
-        if first.lower() == "s":
+        low = first.lower()
+        if low == "s":
             return None
-        if first.lower() == "q":
+        if low == "q":
             raise SystemExit(0)
-        if first.startswith("@"):
-            path = Path(first[1:]).expanduser()
-            return path.read_text(encoding="utf-8").strip()
-        if not first:
+
+        if low == "1" or first == "":
             text = _read_block("")
-            if looks_like_ui_echo(text):
-                console().err("这段内容像是把界面文字也粘进来了（含「请提供真题」等），"
-                              "已拒收，请只粘贴题目本身")
-                continue
-            return text
+        elif low == "2":
+            text = _from_image(paper_md_dir)
+        elif low == "3":
+            text = _from_file(paper_md_dir)
+        elif first.startswith("@"):
+            text = _from_file(paper_md_dir, first[1:])
+        else:
+            text = _read_block(first)     # 直接粘贴，首行就是正文
 
-        candidate = Path(first).expanduser()
-        if candidate.suffix.lower() in IMAGE_SUFFIXES and candidate.exists():
-            c.info(f"调用 MinerU 识别 {candidate.name} …")
-            text = _image_to_markdown(candidate, paper_md_dir)
-            c.write("")
-            c.block("识别结果", text, max_lines=12)
-            c.prompt("用这段内容吗？[Y/n] ")
-            if (_read_line() or "").strip().lower() in ("n", "no"):
-                continue
-            return text
-
-        text = _read_block(first)
-        if looks_like_ui_echo(text):
-            console().err("这段内容像是把界面文字也粘进来了（含「请提供真题」等），"
-                          "已拒收，请只粘贴题目本身")
+        if text is None:
             continue
+        if not text.strip():
+            c.warn("没有收到内容，请重新输入")
+            continue
+        if looks_like_ui_echo(text):
+            c.err("这段内容像是把界面文字也粘进来了（含「请提供真题」等），"
+                  "已拒收，请只粘贴题目本身")
+            continue
+
+        action, text = _confirm_text(text)
+        if action == "redo":
+            continue
+        if action == "skip":
+            return None
         return text
 
 
@@ -324,7 +445,7 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
     """引导录入一道题（允许粘贴里带多个题号，但提示按一题一录）。"""
     c = console()
     c.step(index, total, f"录入第 {target_no} 题", note)
-    c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "@文件"),
+    c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "文件路径"),
               ("s", "跳过本题"), ("q", "退出")])
 
     content = _collect_content(paper_md_dir)
