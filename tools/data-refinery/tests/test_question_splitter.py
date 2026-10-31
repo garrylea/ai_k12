@@ -1121,3 +1121,18 @@ def test_duplicate_stem_is_skipped_not_renumbered():
     questions = split_page(text, _Path("x.md"))
 
     assert [q.group_order for q in questions] == [1, 2, 3]
+
+
+def test_is_junk_question_detects_signature_line():
+    """卷尾署名被切成一道题（占掉真实题号）要能识别出来。"""
+    from question_splitter import RawQuestion, is_junk_question
+
+    q = RawQuestion(group_order=4, group_id=None, content="命题人: 李岩\n覃凌\n审核人：许建荣")
+    assert is_junk_question(q) is True
+
+
+def test_is_junk_question_keeps_short_real_question():
+    from question_splitter import RawQuestion, is_junk_question
+
+    q = RawQuestion(group_order=4, group_id=None, content="下列说法正确的是")
+    assert is_junk_question(q) is False

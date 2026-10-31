@@ -174,6 +174,21 @@ def _answers_entry(args):
     return run
 
 
+def _scan_entry(args):
+    """识别问题扫描：按本次范围（学科 + 卷名子串）扫已提取的 jsonl。"""
+    def _run(_argv) -> int:
+        from recognition_scan import run as scan_run
+        if args.dry_run:
+            issues = scan_run(args.subject or "物理", args.file, write=False)
+            for it in issues:
+                print(f"[issue] {it['source'][:24]} 题{it['group_order']} {it['kind']}："
+                      f"{'；'.join(it['reasons'])}", flush=True)
+            return 0
+        scan_run(args.subject or "物理", args.file, write=True)
+        return 0
+    return _run
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     scope = scope_from_args(args)
@@ -197,16 +212,20 @@ def main(argv=None) -> int:
 
     stages = []
     if not args.skip_convert:
-        stages.append(("1/5 convert（素材 → md）", convert_main, convert_argv(args)))
+        stages.append(("1/6 convert（素材 → md）", convert_main, convert_argv(args)))
     if not args.skip_extract:
-        stages.append(("2/5 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
+        stages.append(("2/6 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
     if not args.skip_publish:
-        stages.append(("3/5 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
+        stages.append(("3/6 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
     if not args.skip_load:
-        stages.append(("4/5 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
+        stages.append(("4/6 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
     # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起
     if not args.skip_answers and not args.cards_only and not args.skip_load:
-        stages.append(("5/5 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
+        stages.append(("5/6 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
+    # 识别问题扫描：缺号 / 被吞 / 卷首页脚被当题，落 output/recognition_issues.jsonl，
+    # 供 scripts/fix_question_cli.py 逐条人工补题（不阻塞入库，可随时补跑）
+    if not args.cards_only:
+        stages.append(("6/6 识别问题扫描（缺号/被吞/噪声题）", _scan_entry(args), []))
 
     try:
         for label, fn, sub_argv in stages:

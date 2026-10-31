@@ -466,6 +466,32 @@ def split_inline_group_header(text: str) -> tuple[str, str | None]:
     return text[:m.start()].rstrip(), m.group(1)
 
 
+# 卷首/卷尾非题目文字：Ocr 常把「试卷说明」的第 N 条或卷尾署名切成一道题，
+# 占掉一个真实题号（北师大实验 2024 期中：命题人那行占用了题 4）。
+_JUNK_QUESTION_RE = re.compile(r"命题人|审核人|校对人|命题学校|第\s*\d+\s*页\s*共|共\s*\d+\s*页")
+
+
+def is_junk_question(q: RawQuestion) -> bool:
+    """这条"题"其实是卷首页脚/署名，不是题目。
+
+    判据全部满足才算：内容很短、没有任何选项/答案/材料、命中页脚关键词、
+    且不带 (1)(2) 这类小问（真实验题即使短也有小问）。
+    """
+    text = (q.content or "").strip()
+    if not text or len(text) > 60:
+        return False
+    if getattr(q, "material_text", None):
+        return False
+    if not _JUNK_QUESTION_RE.search(text):
+        return False
+    if re.search(r"[（(]\s*1\s*[）)]", text):
+        return False
+    # 带问号/「下列」「正确」的是真题目，即使短也不丢
+    if re.search(r"[？?]", text) or re.search(r"下列|正确|如图|错误", text):
+        return False
+    return True
+
+
 def split_page(text: str, md_path: Path,
                strategy=None) -> list[RawQuestion]:
     """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。

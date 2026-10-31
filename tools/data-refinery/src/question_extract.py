@@ -16,7 +16,7 @@ from pathlib import Path
 import pymysql
 
 from answer_merger import maybe_merge_answer_md
-from question_splitter import split_page, split_options
+from question_splitter import is_junk_question, split_page, split_options
 from question_labeler import QuestionLabeler, LabeledQuestion
 from qr_detect import strip_qr_images
 from subject_codes import subject_code_for_parts
@@ -392,6 +392,13 @@ def extract_questions_file(source, config, llm, fb_llm,
     # 材料归属（语文阅读材料写在题号之前、按小节归属到每道题）由学科策略决定，
     # 其它学科的策略 attach=False，行为不变。
     questions = split_page(text, md_path, strategy=strategy)
+    # 卷首页脚/署名会被切题器当成一道题，占掉真实题号（北师大实验 2024：题4）
+    kept = [q for q in questions if not is_junk_question(q)]
+    if len(kept) != len(questions):
+        dropped = [q.group_order for q in questions if is_junk_question(q)]
+        print(f"[WARN] {md_path.stem}: 丢弃 {len(questions) - len(kept)} 条非题目行"
+              f"（命题人/页脚等），原题号 {dropped}", flush=True)
+    questions = kept
     if not questions:
         return 0
 

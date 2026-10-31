@@ -1239,6 +1239,7 @@ class DbLoader:
         count = 0
         linked = 0
         updated = 0
+        linked_ids: list[int] = []
         for i, q in enumerate(questions, 1):
             sid = self._subject_id_by_code(normalize_subject(q.get("subject_id")))
             opts = q.get("options")
@@ -1246,14 +1247,25 @@ class DbLoader:
             chash = content_hash(content, opts)
             qid: int | None = None
 
-            # 1) 同卷同题号：原地更新，避免重抽后 hash 变化插出重复题
+            # 1) 同卷同题：优先按 group_order（卷面题号）匹配 —— 重抽后题目行数可能变
+            #    （丢了噪声题、补了缺题），按下标 question_no 匹配会串行（2026-10-31
+            #    北师大实验实测：卷首「命题人」被删后整卷错位）。group_order 缺失时退回下标。
             if paper is not None:
-                exist = self._query(
-                    "SELECT q.id, q.content_hash, q.answer_verified FROM paper_questions pq "
-                    "JOIN questions q ON q.id = pq.question_id "
-                    "WHERE pq.paper_id=%s AND pq.question_no=%s",
-                    (paper[1], i),
-                )
+                go = q.get("group_order")
+                if go is not None:
+                    exist = self._query(
+                        "SELECT q.id, q.content_hash, q.answer_verified FROM paper_questions pq "
+                        "JOIN questions q ON q.id = pq.question_id "
+                        "WHERE pq.paper_id=%s AND pq.group_order=%s",
+                        (paper[1], go),
+                    )
+                else:
+                    exist = self._query(
+                        "SELECT q.id, q.content_hash, q.answer_verified FROM paper_questions pq "
+                        "JOIN questions q ON q.id = pq.question_id "
+                        "WHERE pq.paper_id=%s AND pq.question_no=%s",
+                        (paper[1], i),
+                    )
                 if exist:
                     qid = int(exist[0][0])
                     old_hash = exist[0][1]
@@ -1264,8 +1276,17 @@ class DbLoader:
                             print(f"[WARN] paper={paper[1]} 题{i} 内容有变但 answer_verified=1，"
                                   f"保留人工核验内容不覆盖", flush=True)
                         elif other:
+                            # 新内容在库里已有同一题：把本行改指向它，而不是保留旧内容。
+                            # 旧逻辑保留下会留下"该题号还是上一轮的残题"（北师大实验
+                            # 题4 因此一直挂着「命题人」那行，2026-10-31 实测）。
+                            # 解除本行与旧题的关联；后面的 INSERT IGNORE 会把 other 挂上
+                            # （other 若已在本卷别的位置，IGNORE 自然跳过）
+                            self._exec(
+                                "DELETE FROM paper_questions WHERE paper_id=%s AND question_id=%s",
+                                (paper[1], qid))
                             print(f"[WARN] paper={paper[1]} 题{i} 新内容与已有题 "
-                                  f"#{other} 重复，保留原题不覆盖", flush=True)
+                                  f"#{other} 相同，改为复用该题（原行 #{qid} 解除关联）", flush=True)
+                            qid = other
                         else:
                             self._exec(
                                 "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, "
@@ -1315,7 +1336,28 @@ class DbLoader:
                     (paper[1], qid, i, q.get("group_id"), q.get("group_order")),
                 )
                 linked += 1
+                if qid is not None and qid not in linked_ids:
+                    linked_ids.append(qid)
         if paper is not None:
+            # 清掉本次没有关联到的历史行（重抽后丢掉的噪声题/缺题留下的僵尸行），
+            # 再按卷面题号重排 question_no —— 用「本次挂了哪些题」判定，不看行数，
+            # 避免题目整体位移时误删。
+            if linked_ids:
+                ph = ",".join(["%s"] * len(linked_ids))
+                self._exec(
+                    f"DELETE FROM paper_questions WHERE paper_id=%s "
+                    f"AND question_id NOT IN ({ph})",
+                    (paper[1], *linked_ids))
+                # question_no 以卷面题号为准（缺题时才用行序兜底），删掉历史行后会重排，
+                # 否则会出现「第一题编号是 2」这种错位。
+                self._exec(
+                    "UPDATE paper_questions pq JOIN ("
+                    "  SELECT question_id, ROW_NUMBER() OVER (ORDER BY group_order, question_no) rn"
+                    "  FROM paper_questions WHERE paper_id=%s) t"
+                    " ON t.question_id = pq.question_id "
+                    "SET pq.question_no = COALESCE(pq.group_order, t.rn) "
+                    "WHERE pq.paper_id=%s",
+                    (paper[1], paper[1]))
             self._exec(
                 "UPDATE exam_papers SET question_count=%s WHERE id=%s", (linked, paper[1]))
         self._conn.commit()
