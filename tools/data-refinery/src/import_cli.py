@@ -331,7 +331,11 @@ def _apply_entry(args):
         print("\n是否现在写入题库？ y=写入 / 直接回车=暂不写 › ", end="", flush=True)
         ans = (sys.stdin.readline() or "").strip().lower()
         if ans not in ("y", "yes"):
-            print("[跳过] 记录留在 output/manual_fixes/，随时可 --apply", flush=True)
+            cmd = "python3 scripts/apply_fixes_cli.py --dry-run" + (
+                " " + " ".join(scope) if scope else "")
+            print("[跳过] 未写库；补题记录仍在 output/manual_fixes/", flush=True)
+            print(f"       再看一遍上面的预览：{cmd}", flush=True)
+            print("       确认要写时：把 --dry-run 换成 --apply", flush=True)
             return 0
         return apply_run(["--apply"] + scope, via_pipeline=True)
     return _run
