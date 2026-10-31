@@ -391,6 +391,37 @@ def _ask(issue: dict, paper_md_dir: Path,
     return records
 
 
+def mark_issue(source: str, group_order: int, status: str, *,
+               note: str | None = None, fix_file: str | None = None) -> int:
+    """把某卷某题的所有识别问题切到指定状态；返回改动条数。
+
+    状态语义（2026-10-31 修订）：
+    - pending  ：待人工补录
+    - recorded ：已补录，但还没写进库（等 apply_fixes_cli --apply）
+    - resolved ：已写进库
+    """
+    rows = _read_jsonl(ISSUES_FILE)
+    changed = 0
+    for rec in rows:
+        if rec.get("source") != source or int(rec.get("group_order", -1)) != int(group_order):
+            continue
+        if rec.get("status") == status and note is None:
+            continue
+        rec["status"] = status
+        if status == "resolved":
+            rec["resolved_at"] = datetime.now().isoformat(timespec="seconds")
+        else:
+            rec.pop("resolved_at", None)
+        if fix_file:
+            rec["fix_file"] = fix_file
+        if note is not None:
+            rec["note"] = note
+        changed += 1
+    if changed:
+        _write_jsonl(ISSUES_FILE, rows)
+    return changed
+
+
 def pending_issues(sources: set[str] | None = None,
                    file: str | None = None) -> list[dict]:
     """取待处理的识别问题；sources 精确限定卷（import_cli 用），file 是卷名子串。"""
@@ -474,13 +505,14 @@ def review_pending(sources: set[str] | None = None,
         _write_jsonl(out_file, rows)
 
         # 本次补到的题号（含一次粘贴里带出来的其它题）对同卷同题的 issue 一并收口
+        # 只标「已补录」：还没写库前不能算解决，否则补题文件被作废时会永久丢单
         fixed_numbers = {r["group_order"] for r in records}
         for it in all_issues:
             if (it["source"] == issue["source"] and it.get("status") == "pending"
                     and it["group_order"] in fixed_numbers
                     and it["kind"] in ("missing", "punct_stem", "repair_truncated")):
-                it["status"] = "resolved"
-                it["resolved_at"] = records[0]["created_at"]
+                it["status"] = "recorded"
+                it["recorded_at"] = records[0]["created_at"]
                 it["fix_file"] = str(out_file)
         _write_jsonl(ISSUES_FILE, all_issues)
         result["fixed"] += len(records)

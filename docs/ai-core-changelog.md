@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-10-31 · 识别问题清单的状态语义（补录 ≠ 解决）
+
+**现象**：用户重跑 `import_cli --files "一零一中学,人大附中,北师大实验"`，第 7 步直接从人大附题 16 开始，一零一题 28 完全不出现。
+
+**根因**（两处叠加）：
+
+1. `review_pending` 一写补题文件就把 issue 标 `resolved`，此时**还没写库**；用户上一轮把终端界面一起粘进去，补题文件被移进 `output/manual_fixes/_discarded/`，而记录仍是 `resolved`。
+2. `recognition_scan.run` 去重只按 `(source, group_order, kind)`，**不看状态**——已 `resolved` 的记录挡住新记录，扫描虽仍检出缺题也不会再提示。
+
+**改动**：
+
+- 状态三态：`pending`（待补）/ `recorded`（已补录、未入库）/ `resolved`（已写库）。`review_pending` 只标 `recorded`，`apply_fixes_cli --apply` 提交成功后才标 `resolved`；apply 时被拒（界面文字）则退回 `pending`。
+- `recognition_scan.reopen_unbacked()`：每次扫描复核已标记项——`resolved` 必须有 `applied=true` 的补题记录、`recorded` 必须有补题记录；补题文件被删/移进 `_discarded/` 一律重新打开并写 `note`。
+- 扫描末尾新增 `[待入库]` 提示：已补录未写库的题会点名，避免「补完以为修好了」。
+- `fixed_numbers()` 只看 `output/manual_fixes/*.jsonl` 顶层，`_discarded/` 不计入。
+
 ## 2026-10-30 · 切题/选项/答案改为按学科显式实现
 
 **动因**：用户指出各学科差异大、提示词也不同，不该把学科逻辑埋在 972 行的公共切分器里。核查后确认：提示词与答案提取**已经**分科，缺口在题号切分与选项拆分——`split_options` 里的 `if subject == "chinese"` 分支、一处硬编码 `subject="chinese"` 的调用，以及贯通切分器 10 处的 `attach_material: bool` 开关（只能表达「语文开、其它关」）；英语材料归属从未打开。

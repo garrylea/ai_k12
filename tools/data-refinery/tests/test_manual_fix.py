@@ -210,7 +210,8 @@ def test_ask_returns_none_on_empty_content(tmp_path, monkeypatch):
     assert manual_fix._ask(issue, tmp_path) == []
 
 
-def test_review_marks_issue_resolved_and_writes_fix_file(tmp_path, monkeypatch):
+def test_review_marks_issue_recorded_and_writes_fix_file(tmp_path, monkeypatch):
+    """补录只标「recorded」：还没写库，不能算解决。"""
     path = _prep_n(tmp_path, monkeypatch)
     monkeypatch.setattr("sys.stdin", io.StringIO("题干\nEOF\n\n"))
 
@@ -218,7 +219,7 @@ def test_review_marks_issue_resolved_and_writes_fix_file(tmp_path, monkeypatch):
 
     assert res["fixed"] == 1
     saved = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
-    assert saved["status"] == "resolved"
+    assert saved["status"] == "recorded"
     assert saved["fix_file"].endswith("物理-卷A-试卷.jsonl")
 
 
@@ -310,7 +311,7 @@ def test_review_writes_all_records_from_one_paste(tmp_path, monkeypatch):
     assert [ _json.loads(l)["group_order"] for l in lines] == [10, 11]
     # 两条 issue 都因这次粘贴而收口，不再重复询问
     statuses = [_json.loads(l)["status"] for l in path.read_text(encoding="utf-8").splitlines()]
-    assert statuses == ["resolved", "resolved"]
+    assert statuses == ["recorded", "recorded"]
     assert res["fixed"] == 2 and res["skipped"] == 0, "已收口的题不该再问一遍"
 
 
@@ -378,7 +379,7 @@ def test_review_pair_records_both_numbers(tmp_path, monkeypatch):
     lines = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8").splitlines()
     assert [_json.loads(l)["group_order"] for l in lines] == [27, 28]
     assert res["fixed"] == 2
-    assert _json.loads(path.read_text(encoding="utf-8"))["status"] == "resolved"
+    assert _json.loads(path.read_text(encoding="utf-8"))["status"] == "recorded"
 
 
 # ---------- 界面文字被误当题目时的拦截 ----------
@@ -417,3 +418,41 @@ def test_answer_containing_ui_text_is_cleared(tmp_path, monkeypatch):
     recs = manual_fix._ask(issue, tmp_path)
 
     assert recs[0]["answer"] == "", "界面文字不能当答案"
+
+
+# ---------- 状态流转：recorded → resolved 只在写库后发生 ----------
+
+def test_mark_issue_moves_all_kinds_of_same_question(tmp_path, monkeypatch):
+    path = tmp_path / "issues.jsonl"
+    path.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in [
+        {"source": "卷A", "group_order": 18, "kind": "missing", "status": "recorded"},
+        {"source": "卷A", "group_order": 18, "kind": "punct_stem", "status": "recorded"},
+        {"source": "卷A", "group_order": 19, "kind": "missing", "status": "pending"},
+    ]), encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+
+    changed = manual_fix.mark_issue("卷A", 18, "resolved", note="已写入题库",
+                                    fix_file="/tmp/x.jsonl")
+
+    rows = [_json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()]
+    assert changed == 2
+    assert [r["status"] for r in rows] == ["resolved", "resolved", "pending"]
+    assert rows[0]["note"] == "已写入题库" and rows[0]["fix_file"] == "/tmp/x.jsonl"
+    assert rows[0]["resolved_at"]
+    assert "resolved_at" not in rows[2]
+
+
+def test_mark_issue_reopen_clears_resolved_marks(tmp_path, monkeypatch):
+    path = tmp_path / "issues.jsonl"
+    path.write_text(_json.dumps({"source": "卷A", "group_order": 7, "kind": "missing",
+                                 "status": "resolved", "resolved_at": "2026-10-31T13:00:00",
+                                 "fix_file": "/old.jsonl"}, ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+
+    manual_fix.mark_issue("卷A", 7, "pending", note="补录内容被拒，请重新补录")
+
+    row = _json.loads(path.read_text(encoding="utf-8"))
+    assert row["status"] == "pending"
+    assert "resolved_at" not in row
+    assert row["note"].startswith("补录内容被拒")

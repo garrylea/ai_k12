@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 from subject_codes import subject_code_for_path  # noqa: E402
 
 ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
+# 人工补题的落盘目录；只认顶层 *.jsonl（`_discarded/` 里的作废记录不参与判定）
+FIXES_DIR = ROOT / "output" / "manual_fixes"
 
 # 卷面题号：句点/全角点/顿号三种写法（顿号只有「序号连续」才该算题号，这里只用于诊断）
 _STEM_ANY_RE = re.compile(r"(?m)^\s*#{0,6}\s*(\d{1,2})\s*[.．、]\s*\S")
@@ -76,6 +78,22 @@ def locate_pdf(pdf_root: Path, rel_dir: Path, source: str) -> Path:
         return candidate
     legacy = Path(pdf_root) / rel_dir / f"{source}.pdf"
     return legacy if legacy.exists() else candidate
+
+
+def fixed_numbers(source: str, fixes_dir: Path | None = None) -> dict[int, bool]:
+    """该卷人工补过的题号 -> 是否已写进库（applied）。
+
+    用来判断一条已标记的识别问题到底还算不算数：补题文件被删/作废、
+    或者补了但从没 `apply_fixes_cli --apply`，都说明问题还在。
+    """
+    path = Path(fixes_dir or FIXES_DIR) / f"{source}.jsonl"
+    out: dict[int, bool] = {}
+    for rec in _read_jsonl(path):
+        try:
+            out[int(rec["group_order"])] = bool(rec.get("applied"))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
@@ -190,6 +208,40 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
     return issues
 
 
+def reopen_unbacked(records: list[dict], all_issues: list[dict],
+                    fixes_dir: Path | None = None) -> int:
+    """把「标了已处理、但补题并不成立」的记录退回待处理，返回条数。
+
+    判据（2026-10-31 事故驱动）：
+    - resolved 必须有 applied=true 的补题记录（真写进库了）；
+    - recorded 必须有补题记录（写了但还没入库）；
+    - 补题文件被删/移进 `_discarded/` 时两者都不成立 → 重新打开。
+
+    事故经过：补题时连终端界面一起粘进去，补题文件被作废，但清单仍标 resolved，
+    于是这张卷的缺题再也不会提示（一零一题28、人大附题7 因此消失）。
+    """
+    existing = {(r["source"], r["group_order"], r["kind"]): r for r in records}
+    fix_cache: dict[str, dict[int, bool]] = {}
+    reopened = 0
+    for it in all_issues:
+        rec = existing.get((it["source"], it["group_order"], it["kind"]))
+        if rec is None or rec.get("status") == "pending":
+            continue
+        if it["source"] not in fix_cache:
+            fix_cache[it["source"]] = fixed_numbers(it["source"], fixes_dir)
+        applied = fix_cache[it["source"]].get(int(it["group_order"]))
+        ok = bool(applied) if rec.get("status") == "resolved" else applied is not None
+        if ok:
+            continue
+        rec["status"] = "pending"
+        rec["note"] = ("补题文件不存在或已作废，已重新打开"
+                       if applied is None else "补了但还没写库，已重新打开")
+        rec.pop("resolved_at", None)
+        rec.pop("fix_file", None)
+        reopened += 1
+    return reopened
+
+
 def run(subject: str, file: str | None = None, *, write: bool = True) -> list[dict]:
     """扫描一个学科（可再按卷名子串收窄），返回本次检出的问题列表。
 
@@ -243,12 +295,17 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
         if fresh and fresh.get("pdf") and not rec.get("pdf"):
             rec["pdf"] = fresh["pdf"]
             filled += 1
-    if closed or filled:
+    reopened = reopen_unbacked(records, all_issues)
+
+    if closed or filled or reopened:
         _write_jsonl(ISSUES_FILE, records)
         if closed:
             print(f"[ok] 自动收口 {closed} 条噪声题记录", flush=True)
         if filled:
             print(f"[ok] 补全 {filled} 条记录的原 PDF 路径", flush=True)
+        if reopened:
+            print(f"[ok] 重新打开 {reopened} 条（此前标为已处理，但补题未落库/已作废）",
+                  flush=True)
     known = {(i["source"], i["group_order"], i["kind"]) for i in records}
     added = 0
     with ISSUES_FILE.open("a", encoding="utf-8") as f:
@@ -277,4 +334,13 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
     print(f"[ok] 本次检出 {len(all_issues)} 处，其中 {total_pending} 条待人工处理"
           f"（新增 {added} 条记录）；补题命令：python3 scripts/fix_question_cli.py --source <卷名>",
           flush=True)
+
+    # 补录了但没写库的也别闷着：不提醒的话用户会以为已经修完
+    recorded: dict[str, list[str]] = {}
+    for rec in records:
+        if rec.get("status") == "recorded" and rec.get("source") in scanned:
+            recorded.setdefault(rec["source"], []).append(str(rec["group_order"]))
+    for src in sorted(recorded):
+        print(f"[待入库] {src}: 题 {'、'.join(recorded[src])} 已补录，"
+              f"尚未写库（python3 scripts/apply_fixes_cli.py --apply）", flush=True)
     return all_issues

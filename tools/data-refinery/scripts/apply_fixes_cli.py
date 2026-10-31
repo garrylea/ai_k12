@@ -24,6 +24,7 @@ import pymysql  # noqa: E402
 
 from config import RefineryConfig  # noqa: E402
 from db_loader import content_hash  # noqa: E402
+from manual_fix import mark_issue  # noqa: E402
 from subject_codes import subject_code_for_parts  # noqa: E402
 
 FIXES_DIR = ROOT / "output" / "manual_fixes"
@@ -150,6 +151,8 @@ def main() -> int:
                            password=cfg.db_pass, database=cfg.db_name, charset="utf8mb4",
                            autocommit=False)
     total = 0
+    applied_keys: list[tuple[str, int, str]] = []
+    rejected_keys: list[tuple[str, int, str]] = []
     try:
         with conn.cursor() as cur:
             for f in files:
@@ -160,14 +163,25 @@ def main() -> int:
                 for rec in todo:
                     msg = apply_record(cur, rec, args.apply)
                     print(f"[{rec['source'][:26]}] 题{rec['group_order']}: {msg}")
-                    if args.apply and not msg.startswith("跳过"):
-                        rec["applied"] = True
-                        rec["applied_at"] = datetime.now().isoformat(timespec="seconds")
-                        total += 1
+                    if not args.apply:
+                        continue
+                    if msg.startswith("跳过"):
+                        # 补录内容本身不合法：提交后把它退回待处理，下次扫描/补题还会提醒
+                        rejected_keys.append((rec["source"], rec["group_order"], str(f)))
+                        continue
+                    rec["applied"] = True
+                    rec["applied_at"] = datetime.now().isoformat(timespec="seconds")
+                    total += 1
+                    applied_keys.append((rec["source"], rec["group_order"], str(f)))
                 if args.apply:
                     _write_jsonl(f, rows)
         if args.apply:
             conn.commit()
+            # 状态回写在事务提交之后：写库失败时清单不能被误标成已解决
+            for source, go, f in applied_keys:
+                mark_issue(source, go, "resolved", note="已写入题库", fix_file=f)
+            for source, go, _ in rejected_keys:
+                mark_issue(source, go, "pending", note="补录内容被拒（疑似界面文字），请重新补录")
             print(f"\n[ok] 已写入 {total} 题")
         else:
             conn.rollback()

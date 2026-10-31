@@ -1,5 +1,6 @@
 """recognition_scan：缺号 / 顿号题号 / 修复删内容 / 噪声题 的判定。"""
 
+import json
 from pathlib import Path
 
 import recognition_scan as R
@@ -86,3 +87,77 @@ def test_issue_carries_pdf_and_md_paths(tmp_path):
     assert issues[0]["pdf"] == str(pdf)
     assert issues[0]["md"] == str(md)
     assert issues[0]["status"] == "pending"
+
+
+# ---------- 已标记问题的复核（补题被作废/没写库时要重新打开） ----------
+
+def _rec(status, go=28, source="物理-卷A-试卷", kind="missing"):
+    return {"source": source, "group_order": go, "kind": kind, "status": status}
+
+
+def _fix(tmp_path, pairs: dict[int, bool], source="物理-卷A-试卷"):
+    d = tmp_path / "fixes"
+    d.mkdir(exist_ok=True)
+    lines = [{"source": source, "group_order": go, "applied": bool(ap)}
+             for go, ap in pairs.items()]
+    (d / f"{source}.jsonl").write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in lines), encoding="utf-8")
+    return d
+
+
+def test_reopen_when_fix_file_was_discarded(tmp_path):
+    """resolved 但补题文件已作废（如被移进 _discarded）→ 退回待处理。"""
+    recs = [_rec("resolved")]
+    kept = [{"source": "物理-卷A-试卷", "group_order": 28, "kind": "missing"}]
+
+    reopened = R.reopen_unbacked(recs, kept, fixes_dir=tmp_path / "fixes")
+
+    assert reopened == 1
+    assert recs[0]["status"] == "pending"
+    assert "作废" in recs[0]["note"]
+
+
+def test_resolved_stays_when_fix_applied(tmp_path):
+    fixes = _fix(tmp_path, {28: True})
+    recs = [_rec("resolved")]
+    kept = [{"source": "物理-卷A-试卷", "group_order": 28, "kind": "missing"}]
+
+    assert R.reopen_unbacked(recs, kept, fixes_dir=fixes) == 0
+    assert recs[0]["status"] == "resolved"
+
+
+def test_recorded_stays_until_applied(tmp_path):
+    """已补录但没写库：仍算「有救」，不重复打扰；写库后才转 resolved。"""
+    fixes = _fix(tmp_path, {28: False})
+    recs = [_rec("recorded")]
+    kept = [{"source": "物理-卷A-试卷", "group_order": 28, "kind": "missing"}]
+
+    assert R.reopen_unbacked(recs, kept, fixes_dir=fixes) == 0
+    assert recs[0]["status"] == "recorded"
+
+
+def test_recorded_reopens_when_fix_file_gone(tmp_path):
+    recs = [_rec("recorded")]
+    kept = [{"source": "物理-卷A-试卷", "group_order": 28, "kind": "missing"}]
+
+    assert R.reopen_unbacked(recs, kept, fixes_dir=tmp_path / "nope") == 1
+    assert recs[0]["status"] == "pending"
+
+
+def test_discarded_dir_is_not_counted(tmp_path):
+    """`_discarded/` 里的作废记录不能当作已补。"""
+    d = tmp_path / "fixes" / "_discarded"
+    d.mkdir(parents=True)
+    (d / "物理-卷A-试卷-1330.jsonl").write_text(
+        json.dumps({"source": "物理-卷A-试卷", "group_order": 28, "applied": True}) + "\n",
+        encoding="utf-8")
+    recs = [_rec("resolved")]
+    kept = [{"source": "物理-卷A-试卷", "group_order": 28, "kind": "missing"}]
+
+    assert R.reopen_unbacked(recs, kept, fixes_dir=tmp_path / "fixes") == 1
+
+
+def test_fixed_numbers_reads_applied_flag(tmp_path):
+    fixes = _fix(tmp_path, {7: True, 16: False})
+    assert R.fixed_numbers("物理-卷A-试卷", fixes) == {7: True, 16: False}
+    assert R.fixed_numbers("不存在的卷", fixes) == {}
