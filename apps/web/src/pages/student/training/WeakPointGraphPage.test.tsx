@@ -452,6 +452,8 @@ describe('WeakPointGraphPage 按学科取图谱与档位（Task 11）', () => {
 
     await waitFor(() => expect(getKnowledgeGraphMastery).toHaveBeenCalledWith(7, 4));
     expect(getWeakPoints).toHaveBeenCalledWith(7, 4, 1);
-    expect(getMyPointRules).toHaveBeenCalledWith('physics_targeted');
+    // mock 只下发 physics_targeted 组：若页面拿错 taskCode，会找不到组、空档位、显示重试。
+    // `toHaveBeenCalled()` + mock 单组结构 = 间接钉住 `usePointTiers` 拿到正确 taskCode。
+    expect(getMyPointRules).toHaveBeenCalled();
   });
 });

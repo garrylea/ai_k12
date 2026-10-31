@@ -2002,10 +2002,7 @@ export function getMyLedger(page = 1, pageSize = 20): Promise<PointLedgerPage> {
   return fetchApi<PointLedgerPage>(`/points/me/ledger?${qs.toString()}`);
 }
 
-export function getMyPointRules(taskCode?: string): Promise<MyPointRules> {
-  // taskCode 仅用于测试断言（验证 `usePointTiers` 传了正确的任务码）；
-  // 服务端 `/points/me/rules` 始终返回当前用户全部任务组，前端按 taskCode 自行过滤。
-  void taskCode;
+export function getMyPointRules(): Promise<MyPointRules> {
   return fetchApi<MyPointRules>('/points/me/rules');
 }
 

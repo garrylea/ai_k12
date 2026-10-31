@@ -240,7 +240,11 @@ export function QuestionRunner({
     // showResultFeedback=false（考试）：不在此自评（交卷后结果页自评），走 fire-and-forget。
     // 主观题/新学科非客观题：同步等判题返回——needsSelfAssessment 时进入自评视图。
     // 名单由 subjectConfig.selfAssessEligible 统一口径（数学与历史行为逐字一致）。
-    const inlineSelfAssess = showResultFeedback && selfAssessEligible(subjectId, question.type);
+    // `question.type ?? ''`：RunnerQuestion.type 可选（types.ts:10），但 selfAssessEligible
+    // 形参要求 string——空串既不在 OBJECTIVE_TYPES、也不是 short_answer/proof，
+    // 数学返回 false（fire-and-forget，与历史 `undefined === 'short_answer'` 行为一致），
+    // 非数学返回 true（走自评），符合旧逻辑。
+    const inlineSelfAssess = showResultFeedback && selfAssessEligible(subjectId, question.type ?? '');
     if (inlineSelfAssess) {
       setPhase('judging');
       try {

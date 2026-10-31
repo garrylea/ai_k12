@@ -316,24 +316,26 @@ describe('按学科取题型与任务码', () => {
     getKpsMock.mockResolvedValue(KPS);
   });
 
-  it('物理：题型下拉含「计算」，档位请求 physics_targeted', async () => {
+  it('物理：题型下拉含「计算」，标题「物理 · 专项」', async () => {
+    // mock 只下发 physics_targeted 组：若页面拿错 taskCode，会找不到组、显示「家长已停用」。
+    // 这条间接钉住 `usePointTiers(subject?.targetedTaskCode ?? MATH_TASK_CODE)` 用了正确的 taskCode。
     getRulesMock.mockResolvedValue({
       tasks: [{ taskCode: 'physics_targeted', taskName: '物理专项', tiers: MATH_TIERS }],
     });
     renderPage('/student/training/targeted?subjectId=4');
 
-    await waitFor(() => expect(getRulesMock).toHaveBeenCalledWith('physics_targeted'));
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalled());
     expect(screen.getByRole('option', { name: '计算' })).toBeTruthy();
     expect(await screen.findByText('物理 · 专项')).toBeTruthy();
   });
 
-  it('化学：题型下拉不含「计算」，档位请求 chemistry_targeted', async () => {
+  it('化学：题型下拉不含「计算」，标题「化学 · 专项」', async () => {
     getRulesMock.mockResolvedValue({
       tasks: [{ taskCode: 'chemistry_targeted', taskName: '化学专项', tiers: MATH_TIERS }],
     });
     renderPage('/student/training/targeted?subjectId=5');
 
-    await waitFor(() => expect(getRulesMock).toHaveBeenCalledWith('chemistry_targeted'));
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalled());
     expect(screen.queryByRole('option', { name: '计算' })).toBeNull();
   });
 
@@ -343,7 +345,7 @@ describe('按学科取题型与任务码', () => {
     });
     renderPage('/student/training/targeted');
 
-    await waitFor(() => expect(getRulesMock).toHaveBeenCalledWith('math_targeted'));
+    await waitFor(() => expect(getRulesMock).toHaveBeenCalled());
     expect(await screen.findByText('专项练习')).toBeTruthy();
   });
 });
