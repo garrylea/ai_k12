@@ -130,8 +130,11 @@ def main() -> int:
     parser.add_argument("--fixes-dir", default=str(FIXES_DIR))
     parser.add_argument("--subject", help="学科中文名过滤（按 rel_path 首段）")
     parser.add_argument("--apply", action="store_true", help="真正写库（默认只预览）")
+    parser.add_argument("--dry-run", action="store_true", help="只预览（与默认行为一致，便于显式声明）")
     parser.add_argument("--force", action="store_true", help="连 applied=true 的记录也重放")
     args = parser.parse_args()
+    if args.apply and args.dry_run:
+        parser.error("--apply 与 --dry-run 互斥")
 
     files = sorted(Path(args.fixes_dir).glob("*.jsonl"))
     if not files:
