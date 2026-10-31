@@ -5,8 +5,8 @@ const tiersOf = (taskCode: string) =>
   DEFAULT_RULES.filter((r) => r.taskCode === taskCode).map((r) => r.tierKey);
 
 describe('DEFAULT_RULES', () => {
-  it('共 23 行', () => {
-    expect(DEFAULT_RULES).toHaveLength(23);
+  it('共 38 行', () => {
+    expect(DEFAULT_RULES).toHaveLength(38);
   });
 
   it('(taskCode, tierKey) 组合唯一（point_rules 的唯一键，重复会 INSERT IGNORE 静默丢行）', () => {
@@ -26,10 +26,10 @@ describe('DEFAULT_RULES', () => {
     }
   });
 
-  it('有每日上限的只有三类任务：math_targeted / cn_targeted 各四档共用 5 次、en_vocabulary 三档共用 2 次', () => {
+  it('有每日上限的只有六类任务：math/cn/physics/chemistry/politics_targeted 各四档共用 5 次、en_vocabulary 三档共用 2 次', () => {
     const limited = DEFAULT_RULES.filter((r) => r.dailyLimit !== null);
-    expect(limited).toHaveLength(11);
-    for (const code of ['math_targeted', 'cn_targeted']) {
+    expect(limited).toHaveLength(23);
+    for (const code of ['math_targeted', 'cn_targeted', 'physics_targeted', 'chemistry_targeted', 'politics_targeted']) {
       expect(limited.filter((r) => r.taskCode === code).every((r) => r.dailyLimit === 5)).toBe(true);
       expect(limited.filter((r) => r.taskCode === code)).toHaveLength(4);
     }
@@ -37,7 +37,11 @@ describe('DEFAULT_RULES', () => {
     expect(limited.filter((r) => r.taskCode === 'en_vocabulary')).toHaveLength(3);
     // 其余任务一律不限（甲类靠判题函数天然的一次性目标物防刷，不需要日上限）
     expect(limited.every((r) =>
-      r.taskCode === 'math_targeted' || r.taskCode === 'cn_targeted' || r.taskCode === 'en_vocabulary')).toBe(true);
+      r.taskCode === 'math_targeted' || r.taskCode === 'cn_targeted' || r.taskCode === 'en_vocabulary' ||
+      r.taskCode === 'physics_targeted' || r.taskCode === 'chemistry_targeted' || r.taskCode === 'politics_targeted')).toBe(true);
+    for (const code of ['physics_targeted', 'chemistry_targeted', 'politics_targeted']) {
+      expect(tiersOf(code)).toEqual(['1', '3', '5', '10']);
+    }
   });
 
   it('math_targeted 四档各有每日上限（档位由学生自选 + 幂等键按会话，无上限可无限刷 10 档 35 分）', () => {
@@ -82,11 +86,14 @@ describe('DEFAULT_RULES', () => {
     }
   });
 
-  it('全表 23 行黄金值（taskCode/tierKey/points/dailyLimit，Task 4 发币直接读 points）', () => {
+  it('全表 38 行黄金值（taskCode/tierKey/points/dailyLimit，Task 4 发币直接读 points）', () => {
     expect(DEFAULT_RULES.map((r) => [r.taskCode, r.tierKey, r.points, r.dailyLimit])).toEqual([
       ['mainline_lesson', 'default', 10, null],
       ['math_paper', 'default', 50, null],
       ['cn_paper', 'default', 50, null],
+      ['physics_paper', 'default', 50, null],
+      ['chemistry_paper', 'default', 50, null],
+      ['politics_paper', 'default', 50, null],
       ['math_targeted', '1', 2, 5],
       ['math_targeted', '3', 8, 5],
       ['math_targeted', '5', 15, 5],
@@ -107,6 +114,18 @@ describe('DEFAULT_RULES', () => {
       ['cn_targeted', '3', 8, 5],
       ['cn_targeted', '5', 15, 5],
       ['cn_targeted', '10', 35, 5],
+      ['physics_targeted', '1', 2, 5],
+      ['physics_targeted', '3', 8, 5],
+      ['physics_targeted', '5', 15, 5],
+      ['physics_targeted', '10', 35, 5],
+      ['chemistry_targeted', '1', 2, 5],
+      ['chemistry_targeted', '3', 8, 5],
+      ['chemistry_targeted', '5', 15, 5],
+      ['chemistry_targeted', '10', 35, 5],
+      ['politics_targeted', '1', 2, 5],
+      ['politics_targeted', '3', 8, 5],
+      ['politics_targeted', '5', 15, 5],
+      ['politics_targeted', '10', 35, 5],
     ]);
   });
 });
