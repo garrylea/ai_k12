@@ -139,8 +139,8 @@ export function selfAssessSkipsJudging(subjectId: number, type: string): boolean
 
 1. 读 `useSearchParams().get('subjectId')`，经 `parseSubjectId` 得到 id；`subjectName(id)` 拼标题 `${name} · 训练`。
 2. 错题数请求改 `getTrainingErrorBook({ subjectId: id })`。
-3. 四卡跳转带上查询串：
-   - 专项 `/student/training/targeted?subjectId=<id>`
+3. 四卡跳转带查询串（**数学不带**，与今天逐字一致）：
+   - 专项 `/student/training/targeted?subjectId=<id>`（数学为 `/student/training/targeted`）
    - 考试 `/student/training/exam?subjectId=<id>`
    - 错题 `/student/training/errors?subjectId=<id>`
    - 图谱 `/student/training/weak-points?subjectId=<id>`
