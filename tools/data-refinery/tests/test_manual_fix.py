@@ -102,3 +102,169 @@ def test_review_skip_with_s(tmp_path, monkeypatch):
 
     assert res == {"pending": 1, "fixed": 0, "skipped": 1}
     assert '"status": "pending"' in issues_file.read_text(encoding="utf-8")
+
+
+# ---------- 输入解析的边界 ----------
+
+import pytest
+
+
+@pytest.mark.parametrize("text,body,done", [
+    ("a\nb\nEOF\n", "a\nb", True),
+    ("a\nb\neof\n", "a\nb", True),
+    ("a\nEND\n", "a", True),
+    ("a\n结束\n", "a", True),
+    ("a\nb", "a\nb", False),
+    ("EOF\n", "", True),
+    ("a\nEOF\n多余的尾巴", "a", True),
+])
+def test_split_at_marker(text, body, done):
+    assert manual_fix._split_at_marker(text) == (body, done)
+
+
+def test_collect_content_reads_at_file(tmp_path, monkeypatch):
+    src = tmp_path / "q.md"
+    src.write_text("从文件来的题干", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"@{src}\n"))
+    assert manual_fix._collect_content(tmp_path) == "从文件来的题干"
+
+
+def test_collect_content_quit_raises():
+    monkeypatch_stdin = io.StringIO("q\n")
+    import sys as _sys
+    old = _sys.stdin
+    try:
+        _sys.stdin = monkeypatch_stdin
+        with pytest.raises(SystemExit):
+            manual_fix._collect_content(Path("."))
+    finally:
+        _sys.stdin = old
+
+
+def test_collect_content_image_goes_through_mineru(tmp_path, monkeypatch):
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"png")
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{img}\ny\n"))
+    called = {}
+
+    def fake_convert(image, md_dir):
+        called["image"] = image
+        return "OCR 出来的题干"
+
+    monkeypatch.setattr(manual_fix, "_image_to_markdown", fake_convert)
+
+    assert manual_fix._collect_content(tmp_path) == "OCR 出来的题干"
+    assert called["image"] == img
+
+
+def test_collect_content_image_rejected_asks_again(tmp_path, monkeypatch):
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"png")
+    # 第一次给图片并回 n，第二次直接粘贴文本
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{img}\nn\n手工题干\nEOF\n"))
+    monkeypatch.setattr(manual_fix, "_image_to_markdown", lambda i, d: "OCR 题干")
+
+    assert manual_fix._collect_content(tmp_path) == "手工题干"
+
+
+# ---------- 记录与写回 ----------
+
+def _prep_n(tmp_path, monkeypatch, n=1):
+    md_dir = tmp_path / "md" / "物理" / "初中" / "first" / "2024" / "卷A"
+    md_dir.mkdir(parents=True, exist_ok=True)
+    (md_dir / "卷A.md").write_text("", encoding="utf-8")
+    rows = [{"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+             "group_order": 10 + i, "kind": "missing", "reasons": ["missing_stem"],
+             "excerpt": "", "pdf": None, "md": str(md_dir / "卷A.md"), "status": "pending"}
+            for i in range(n)]
+    path = tmp_path / "issues.jsonl"
+    path.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                    encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    return path
+
+
+def test_ask_records_choice_options(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin",
+                        io.StringIO("下列说法正确的是\nA. 甲\nB. 乙\nC. 丙\nD. 丁\nEOF\nA\n"))
+
+    rec = manual_fix._ask(issue, tmp_path)
+
+    assert rec["content"] == "下列说法正确的是"
+    assert [o["label"] for o in rec["options"]] == ["A", "B", "C", "D"]
+    assert rec["answer"] == "A"
+    assert rec["status"] == "ready" and rec["applied"] is False
+
+
+def test_ask_returns_none_on_empty_content(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", io.StringIO("\nEOF\n"))
+
+    assert manual_fix._ask(issue, tmp_path) is None
+
+
+def test_review_marks_issue_resolved_and_writes_fix_file(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("题干\nEOF\n\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert res["fixed"] == 1
+    saved = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert saved["status"] == "resolved"
+    assert saved["fix_file"].endswith("物理-卷A-试卷.jsonl")
+
+
+def test_review_processes_multiple_issues_in_order(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch, n=3)
+    monkeypatch.setattr("sys.stdin", io.StringIO("题一\nEOF\n\n题二\nEOF\n\n题三\nEOF\n\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert res == {"pending": 3, "fixed": 3, "skipped": 0}
+    lines = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [ _json.loads(l)["group_order"] for l in lines] == [10, 11, 12]
+
+
+def test_review_reentry_same_question_overwrites(tmp_path, monkeypatch):
+    _prep_n(tmp_path, monkeypatch)
+    fixes = tmp_path / "fixes"
+    monkeypatch.setattr("sys.stdin", io.StringIO("第一版\nEOF\n\n"))
+    manual_fix.review_pending(fixes_dir=fixes)
+
+    # 再把同一题改回来（reset 状态后重跑）
+    path = manual_fix.ISSUES_FILE
+    rows = [_json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["status"] = "pending"
+    path.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                    encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO("第二版\nEOF\n\n"))
+    manual_fix.review_pending(fixes_dir=fixes)
+
+    lines = (fixes / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1, "同题号只能留一条"
+    assert "第二版" in lines[0]
+
+
+def test_review_skips_issue_without_md(tmp_path, monkeypatch):
+    path = tmp_path / "issues.jsonl"
+    path.write_text(_json.dumps({
+        "source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+        "group_order": 5, "kind": "missing", "reasons": [], "md": None,
+        "status": "pending"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    assert res["skipped"] == 1 and res["fixed"] == 0
+
+
+def test_review_list_only_does_not_touch_stdin(tmp_path, monkeypatch):
+    path = _prep_n(tmp_path, monkeypatch, n=2)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    res = manual_fix.review_pending(list_only=True)
+    assert res["pending"] == 2 and res["fixed"] == 0
+    assert all(_json.loads(l)["status"] == "pending"
+               for l in path.read_text(encoding="utf-8").splitlines())

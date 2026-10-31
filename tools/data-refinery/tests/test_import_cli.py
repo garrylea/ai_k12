@@ -201,3 +201,63 @@ def test_files_and_file_are_mutually_exclusive():
 
     with pytest.raises(SystemExit):
         parse_args(["--subject", "物理", "--file", "海淀", "--files", "人大附中"])
+
+
+# ---------- 第 7 步：人工补题的触发条件 ----------
+
+class _FakeStdin:
+    def __init__(self, tty: bool):
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def _fix_entry_args(extra=None, sources=("卷A",)):
+    args = parse_args(["--subject", "物理"] + (extra or []))
+    args._scanned_sources = set(sources)
+    return args
+
+
+def test_fix_entry_skips_when_nothing_scanned(monkeypatch, capsys):
+    args = _fix_entry_args(sources=())
+    import_cli._fix_entry(args)([])
+    assert "没有待人工处理的题" in capsys.readouterr().out
+
+
+def test_fix_entry_dry_run_does_not_prompt(monkeypatch, capsys):
+    args = _fix_entry_args(["--dry-run"])
+    monkeypatch.setattr("sys.stdin", _FakeStdin(tty=True))
+    import_cli._fix_entry(args)([])
+    assert "[dry-run]" in capsys.readouterr().out
+
+
+def test_fix_entry_non_tty_prints_hint_instead_of_blocking(monkeypatch, capsys):
+    args = _fix_entry_args()
+    monkeypatch.setattr("sys.stdin", _FakeStdin(tty=False))
+    import_cli._fix_entry(args)([])
+    out = capsys.readouterr().out
+    assert "非交互终端" in out and "fix_question_cli.py" in out
+
+
+def test_fix_entry_skip_review_flag(monkeypatch, capsys):
+    args = _fix_entry_args(["--skip-review"])
+    monkeypatch.setattr("sys.stdin", _FakeStdin(tty=True))
+    import_cli._fix_entry(args)([])
+    assert "非交互终端" in capsys.readouterr().out
+
+
+def test_fix_entry_tty_calls_review_with_scanned_sources(monkeypatch):
+    seen = {}
+
+    def fake_review(sources=None, **kw):
+        seen["sources"] = sources
+        return {"pending": 1, "fixed": 0, "skipped": 0}
+
+    import manual_fix
+
+    monkeypatch.setattr(manual_fix, "review_pending", fake_review)
+    monkeypatch.setattr("sys.stdin", _FakeStdin(tty=True))
+    import_cli._fix_entry(_fix_entry_args(sources=("卷A", "卷B")))([])
+
+    assert seen["sources"] == {"卷A", "卷B"}

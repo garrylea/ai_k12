@@ -67,18 +67,20 @@ def _existing_question(cur, paper_id: int, group_order: int) -> int | None:
 
 
 def _renumber(cur, paper_id: int) -> int:
-    """按 group_order 重排 question_no（卷面顺序），返回改了几行。"""
+    """按卷面题号重排 question_no，返回受影响行数。
+
+    与 db_loader 同一口径：`question_no = COALESCE(group_order, 行序)`，
+    所以补回缺题后题号会对上（而不是把空缺挤掉、整卷顺序错位）。
+    """
     cur.execute(
-        "SELECT question_id, group_order FROM paper_questions "
-        "WHERE paper_id=%s AND group_order IS NOT NULL ORDER BY group_order", (paper_id,))
-    rows = cur.fetchall()
-    changed = 0
-    for idx, (qid, _go) in enumerate(rows, start=1):
-        cur.execute(
-            "UPDATE paper_questions SET question_no=%s WHERE paper_id=%s AND question_id=%s",
-            (idx, paper_id, qid))
-        changed += cur.rowcount
-    return changed
+        "UPDATE paper_questions pq JOIN ("
+        "  SELECT question_id, ROW_NUMBER() OVER (ORDER BY group_order, question_no) rn"
+        "  FROM paper_questions WHERE paper_id=%s) t"
+        " ON t.question_id = pq.question_id "
+        "SET pq.question_no = COALESCE(pq.group_order, t.rn) "
+        "WHERE pq.paper_id=%s",
+        (paper_id, paper_id))
+    return cur.rowcount
 
 
 def apply_record(cur, rec: dict, apply: bool) -> str:
