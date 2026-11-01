@@ -244,8 +244,15 @@ describe('TargetedRunPage 完成发分', () => {
     await answerOnlyQuestion();
 
     expect(judgeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ questionId: 101, source: 'targeted', sessionId: 77 }),
+      expect.objectContaining({
+        questionId: 101, source: 'targeted', sessionId: 77,
+        // 作答历史（2026-11-01）：必须带 sessionUid，否则专项作答永不落库、练习记录看不到
+        sessionUid: expect.any(String),
+        questionCount: expect.any(Number),
+        questionOrder: expect.any(Number),
+      }),
     );
+    expect((judgeMock.mock.calls[0][0] as { sessionUid: string }).sessionUid.length).toBeGreaterThan(0);
   });
 
   it('sessionId 为 null 时判题不带 sessionId 字段', async () => {

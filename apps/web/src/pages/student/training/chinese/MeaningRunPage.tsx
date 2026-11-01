@@ -8,6 +8,7 @@ import ResultStack from '@/components/business/meaning/ResultStack';
 import PassageOverviewBar from '@/components/business/meaning/PassageOverviewBar';
 import { CelebrationOverlay } from '@/components/business';
 import { usePointsFeedback } from '../points-feedback';
+import { newSessionUid } from '@/utils/sessionUid';
 import type { MeaningAnswerPayload, StackItem } from '@/components/business/meaning/types';
 
 /**
@@ -50,6 +51,8 @@ export default function MeaningRunPage() {
   }, [navigate]);
 
   const passage = passages?.[pIdx] ?? null;
+  // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records
+  const sessionUid = useMemo(() => newSessionUid(), []);
   const answerableIdx = useMemo(
     () => (passage ? passage.sentences.filter((s) => s.answerable).map((s) => s.index) : []),
     [passage],
@@ -77,7 +80,15 @@ export default function MeaningRunPage() {
     });
 
     try {
-      const res = await judgeMeaning({ passageId, sentenceIndex, ...answer });
+      const res = await judgeMeaning({
+        passageId,
+        sentenceIndex,
+        ...answer,
+        sessionUid,
+        title: '古诗情感',
+        questionCount: answerableIdx.length,
+        questionOrder: sentenceIndex + 1,
+      });
       if (tokens.current[sentenceIndex] !== token) return;   // 过期响应丢弃
       setStack((prev) => prev.map((it) => (
         it.key === key ? { kind: 'judged', key, sentenceIndex, text, answer, result: res } : it

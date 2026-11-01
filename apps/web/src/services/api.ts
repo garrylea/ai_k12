@@ -948,6 +948,15 @@ export function judgeTraining(payload: {
    * **不接受**这个字段，别往 `judgeVocabularyWord` 上加。
    */
   sessionId?: number;
+  /**
+   * 作答历史（2026-11-01）：本轮专项练习的 UUID（`crypto.randomUUID()`），
+   * 与 `sessionId` **不是**同一个东西——这里只用于把本题写入 `special_answer_records`
+   * 供「练习记录」回放。不传则不记录（向后兼容）。
+   */
+  sessionUid?: string;
+  title?: string;
+  questionCount?: number;
+  questionOrder?: number;
 }): Promise<JudgeResult> {
   return fetchApi<JudgeResult>('/training/judge', {
     method: 'POST',
@@ -1321,6 +1330,11 @@ export function judgeDictation(payload: {
   author: string;
   dynasty: string;
   body: string;
+  /** 作答历史（2026-11-01）：见 judgeTraining 的同名字段说明。 */
+  sessionUid?: string;
+  title?: string;
+  questionCount?: number;
+  questionOrder?: number;
 }): Promise<DictationJudgeResult> {
   return fetchApi<DictationJudgeResult>('/training/dictation/judge', {
     method: 'POST',
@@ -1437,6 +1451,11 @@ export function judgeInterpretation(payload: {
   sentenceIndex: number;
   terms: Array<{ term: string; answer: string }>;
   translation: string;
+  /** 作答历史（2026-11-01）：见 judgeTraining 的同名字段说明。 */
+  sessionUid?: string;
+  title?: string;
+  questionCount?: number;
+  questionOrder?: number;
 }): Promise<InterpretationJudgeResult> {
   return fetchApi<InterpretationJudgeResult>('/training/interpretation/judge', {
     method: 'POST',
@@ -1524,6 +1543,11 @@ export function judgeMeaning(payload: {
   terms: Array<{ term: string; answer: string }>;
   meaning: string;
   emotion: string;
+  /** 作答历史（2026-11-01）：见 judgeTraining 的同名字段说明。 */
+  sessionUid?: string;
+  title?: string;
+  questionCount?: number;
+  questionOrder?: number;
 }): Promise<MeaningJudgeResult> {
   return fetchApi<MeaningJudgeResult>('/training/meaning/judge', {
     method: 'POST',
@@ -1698,6 +1722,11 @@ export function judgeVocabularyWord(payload: {
   senseIndex: number;
   promptKind: VocabularyPromptKind;
   answer: string;
+  /** 作答历史（2026-11-01）：见 judgeTraining 的同名字段说明。 */
+  sessionUid?: string;
+  title?: string;
+  questionCount?: number;
+  questionOrder?: number;
 }): Promise<VocabularyJudgeResult> {
   return fetchApi<VocabularyJudgeResult>('/training/vocabulary/judge', {
     method: 'POST',

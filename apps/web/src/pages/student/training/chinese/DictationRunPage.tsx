@@ -11,6 +11,7 @@ import DictationAnswerForm, { type DictationAnswerValue } from '@/components/bus
 import DictationDiffView from '@/components/business/dictation/DictationDiffView';
 import { CelebrationOverlay } from '@/components/business';
 import { usePointsFeedback } from '../points-feedback';
+import { newSessionUid } from '@/utils/sessionUid';
 
 const EMPTY: DictationAnswerValue = { author: '', dynasty: '', body: '' };
 
@@ -78,11 +79,20 @@ export default function DictationRunPage() {
 
   const current = questions?.[index] ?? null;
   const isLast = questions != null && index === questions.length - 1;
+  // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records
+  const sessionUid = useMemo(() => newSessionUid(), []);
 
   const handleSubmit = async () => {
     if (!current) return;
     const token = ++feedbackToken.current;
-    const payload = { passageId: current.passageId, ...answer };
+    const payload = {
+      passageId: current.passageId,
+      ...answer,
+      sessionUid,
+      title: '古诗文默写',
+      questionCount: questions?.length ?? 1,
+      questionOrder: index + 1,
+    };
     setSubmitting(true);
     setError(null);
     setFeedback(null);

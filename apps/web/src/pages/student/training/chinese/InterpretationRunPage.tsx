@@ -13,6 +13,7 @@ import SentenceBlock, {
 } from '@/components/business/interpretation/SentenceBlock';
 import { CelebrationOverlay } from '@/components/business';
 import { usePointsFeedback } from '../points-feedback';
+import { newSessionUid } from '@/utils/sessionUid';
 
 const EMPTY_ANSWER: InterpretationAnswerValue = { terms: {}, translation: '' };
 
@@ -115,6 +116,8 @@ export default function InterpretationRunPage() {
   const passage = passages?.[pIdx] ?? null;
   const sentenceCount = passage?.sentences.length ?? 0;
   const isLastSentence = currentIdx === sentenceCount - 1;
+  // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records
+  const sessionUid = useMemo(() => newSessionUid(), []);
 
   const stateOf = (idx: number): SentenceState => {
     if (results[idx]) return 'judged';
@@ -154,6 +157,10 @@ export default function InterpretationRunPage() {
       answer: answers[idx]?.terms[t.term] ?? '',
     })),
     translation: answers[idx]?.translation ?? '',
+    sessionUid,
+    title: '古诗文翻译',
+    questionCount: passage!.sentences.length,
+    questionOrder: idx + 1,
   });
 
   const handleNext = () => {

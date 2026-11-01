@@ -23,6 +23,7 @@ import { toast } from '@/components/base/Toast';
 import { normalizeOptions } from './normalizeOptions';
 import { parseRunHandoff } from './run-handoff';
 import { useSessionPointsCompletion } from './session-completion';
+import { newSessionUid } from '@/utils/sessionUid';
 import { SessionPointsRetryNotice } from './SessionPointsRetryNotice';
 import { parseSubjectId, subjectName, SUBJECT_CHINESE } from '@/constants';
 
@@ -62,6 +63,8 @@ export default function TargetedRunPage() {
   const [entries, setEntries] = useState<TargetedPracticeQuestion[] | null>(null);
   // 配置页交接来的会话 id：收尾发分的唯一凭据；null = 会话 INSERT 降级（不发分）
   const [sessionId, setSessionId] = useState<number | null>(null);
+  // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records
+  const sessionUid = useMemo(() => newSessionUid(), []);
 
   // 完成发分（乙类会话页唯一入口）：末题收尾时调 complete；失败可重试
   const { complete: completeSession, retry, needsRetry, unrecoverable, retrying, celebrationProps } =
@@ -151,9 +154,14 @@ export default function TargetedRunPage() {
         source: 'targeted',
         // 会话留痕（后端累加 judged_count）；sessionId 为 null 时不带这个字段
         ...(sessionId != null ? { sessionId } : {}),
+        // 作答历史（2026-11-01）：本次练习 UUID → 后端写 special_answer_records
+        sessionUid,
+        title: `${subjectName(subjectId)}专项练习`,
+        questionCount: questions.length,
+        questionOrder: Number(q.n) || 1,
       });
     },
-    [entryByN, sessionId, subjectId],
+    [entryByN, sessionId, subjectId, sessionUid, questions.length],
   );
 
   const handleRequestHint = useCallback(

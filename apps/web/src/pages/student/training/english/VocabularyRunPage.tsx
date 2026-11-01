@@ -16,6 +16,7 @@ import {
 import { parseRunHandoff } from '../run-handoff';
 import { useSessionPointsCompletion } from '../session-completion';
 import { SessionPointsRetryNotice } from '../SessionPointsRetryNotice';
+import { newSessionUid } from '@/utils/sessionUid';
 
 /**
  * 背单词答题页。
@@ -80,6 +81,8 @@ export default function VocabularyRunPage() {
   }, [finished, completeSession]);
 
   const question = questions?.[idx] ?? null;
+  // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records
+  const sessionUid = useMemo(() => newSessionUid(), []);
 
   /** 判题（fire-and-forget）：结果按题目下标回填，失败只标记不打断 */
   const judgeAt = (index: number, answer: string, q: VocabularyQuestionItem) => {
@@ -88,6 +91,10 @@ export default function VocabularyRunPage() {
       senseIndex: q.senseIndex,
       promptKind: q.promptKind,
       answer,
+      sessionUid,
+      title: '英语背单词',
+      questionCount: questions?.length ?? 1,
+      questionOrder: index + 1,
     })
       .then((result: VocabularyJudgeResult) => {
         setEntries((prev) =>
