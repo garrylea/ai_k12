@@ -2279,3 +2279,19 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 ## 2026-10-10 PRD §7.14 补充角色模型（无继承/变更路径/生效时机）
 
 全部行经代码核实：① RolesGuard 平面匹配（requiredRoles.includes(user.role)），三角色互斥、无继承无转换，管理员不是「更高权限的家长」；② 创建路径——家长自助注册 / 家长建学生子账号 / 管理员仅 seed-admin.ts（ADMIN_INITIAL_*，无 UI 提升入口）；③ 停用生效时机——setParentStatus 循环连带名下学生 + BanRegistry 进程内即时（旧 token 立即 401，重启从 is_active=0 重建），DB 停用标志只拦登录；④ 改/重置密码不踢旧 token（§7.8 口径不变）；⑤ 审计现状——仅订阅调整有 subscription_adjustments，账号停用/封禁无专门审计表（如需属后续立项）。
+
+## 2026-10-31 修复：人工补题不物化图片 + 空白答案覆盖
+
+**现象**：训练轨 2024 西城·北师大实验物理第 3 题题干有图却不显示（前端破图被 `onError` 隐藏，不报错）。
+
+**根因（实测）**：18:14 的引导补题把第 3 题 content 覆盖成 `![](images/cb63….jpg)`、answer 从 `A` 清空，第 4 题新增同样带 `images/…`。`apply_fixes.apply_record` 直接 `UPDATE/INSERT` 原文字段，既没走 `image_rewrite` 的物化，也没保护已有答案。`images/…` 只有 md 目录里有，服务器只服务 `output/assets/` → `/assets/images/…` 404。切题与 publish 均正常（published 第 3 题已是 `questions/physics/0ecfc9b4/3/stem_01.jpg`，HTTP 200）。
+
+**修复**：
+- `image_rewrite.rewrite_fields`（新增，供 publish 与补题共用）**把 `answer` 一起改写**（`answer_NN`）——答案里的图在自评/结果页会展示，之前全库 16 题受影响。
+- `_rewrite_text` 增 `strict`：缺源图默认告警并保留引用（publish 批量），`strict=True`（补题落库）直接抛 `MissingImageError`，不再静默。
+- `apply_fixes.apply_record`：含图记录按 `md` 目录 + `AssetStore` + `questions/{subject}/{hash}/{group_order}` 前缀物化后再写库；`answer=COALESCE(NULLIF(%s,''), answer)`，**空白答案不再覆盖已有答案**。
+- `db_loader.assert_materialized_images`：入库前护栏，题干/答案/解析/材料/选项出现非 `questions//textbooks//http(s)/data:` 前缀的图片引用直接报错拒收。
+
+**遗留数据**：content 仍残留 `images/` 6 题（4/6/52/53/54 卷）+ answer 16 题，需另行批量修复（重新物化后改写，不要简单 reload——published 缺手工补的题）。
+
+**验证**：新增 8 条用例（answer 物化 / strict 缺图 / 补题物化 / 缺图拒收 / 空答案不覆盖 / loader 护栏）；`pytest` 1482 passed。

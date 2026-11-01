@@ -917,3 +917,31 @@ class TestCardPayload:
         base = {"card_type": "concept", "content": "旧"}
         changed = {"card_type": "concept", "content": "新"}
         assert DbLoader._card_payload(base) != DbLoader._card_payload(changed)
+
+
+def test_guard_rejects_unmaterialized_images():
+    from db_loader import assert_materialized_images
+
+    with pytest.raises(ValueError, match="图片引用未物化"):
+        assert_materialized_images(
+            content="如图 ![](images/abc.jpg)", context="paper=54 题3")
+
+
+def test_guard_rejects_images_in_answer_and_options():
+    from db_loader import assert_materialized_images
+
+    with pytest.raises(ValueError, match="图片引用未物化"):
+        assert_materialized_images(answer="![](images/a.jpg)")
+    with pytest.raises(ValueError, match="图片引用未物化"):
+        assert_materialized_images(options=[{"label": "A", "text": "![](images/o.jpg)"}])
+
+
+def test_guard_accepts_materialized_paths():
+    from db_loader import assert_materialized_images
+
+    assert_materialized_images(
+        content="![](questions/physics/abcd/3/stem_01.jpg)",
+        answer="![](questions/physics/abcd/3/answer_01.jpg)",
+        material_text="![](questions/physics/abcd/3/fig_01.jpg)",
+        options=[{"label": "A", "text": "![](questions/physics/abcd/3/opt_a.jpg)"}],
+    )

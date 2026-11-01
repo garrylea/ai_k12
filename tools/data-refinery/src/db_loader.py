@@ -63,6 +63,32 @@ def content_hash(content: str | None, options=None) -> str:
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
+# 图片引用与「已是物化产物」的路径前缀（publish 会改写成 questions/ 或 textbooks/）
+_IMG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+_CANONICAL_IMG_PREFIXES = ("questions/", "textbooks/", "/assets/", "http://", "https://", "data:")
+
+
+def assert_materialized_images(*, content=None, answer=None, explanation=None,
+                               material_text=None, options=None, context: str = "") -> None:
+    """入库前护栏：题干/答案/解析/材料/选项里的图片引用必须是物化后的规范路径。
+
+    出现 ``images/xxx.jpg`` 这类 md 相对路径，说明这条数据绕过了 publish（例如人工
+    补题直写库）。前端会拼成 ``/assets/images/...`` → 404，且破图被 onError 隐藏，
+    学生完全看不到图（2026-10-31 北师大实验第 3/4 题事故）。宁可整条拒收，也不要
+    静默入库。
+    """
+    texts = [content or "", answer or "", explanation or "", material_text or ""]
+    for opt in options or []:
+        texts.append(opt.get("text") or "")
+    for text in texts:
+        for ref in _IMG_REF_RE.findall(text):
+            if not ref.startswith(_CANONICAL_IMG_PREFIXES):
+                where = f"{context} " if context else ""
+                raise ValueError(
+                    f"{where}图片引用未物化：{ref}"
+                    f"（必须是 questions/ 或 textbooks/ 开头的规范路径；先跑 publish）")
+
+
 def options_signature(options) -> str:
     """选项归一签名：只看 label + 文本，不看顺序。
 
@@ -1244,6 +1270,14 @@ class DbLoader:
             sid = self._subject_id_by_code(normalize_subject(q.get("subject_id")))
             opts = q.get("options")
             content = q.get("content") or ""
+            assert_materialized_images(
+                content=content,
+                answer=q.get("answer"),
+                explanation=q.get("explanation"),
+                material_text=q.get("material_text"),
+                options=opts,
+                context=f"paper={paper[1] if paper else '-'} 题{q.get('group_order', i)}",
+            )
             chash = content_hash(content, opts)
             qid: int | None = None
 

@@ -19,6 +19,10 @@ from models import ExamQuestion, TextbookCard
 IMAGE_REF_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
+class MissingImageError(ValueError):
+    """Markdown 引用的图片在 md 目录里找不到（strict 模式）。"""
+
+
 def _ext_of(ref_path: str) -> str:
     suffix = Path(ref_path).suffix
     return suffix if suffix else ".png"
@@ -53,11 +57,17 @@ def _rewrite_text(
     asset_store: AssetStore,
     asset_prefix: str,
     name_fn: Callable[[int, str], str],
+    *,
+    strict: bool = False,
 ) -> tuple[str, list[str], list[dict]]:
     """改写 text 中所有图片引用。
 
     name_fn(index, ext) -> 规范文件名（不含目录）。
     返回 (新 text, 物化的资源相对路径列表, 图片元数据列表[{url, alt, position}])。
+
+    ``strict=False``（publish 批量）时缺源图只告警并保留原引用；``strict=True``
+    （人工补题落库）时直接抛 ``MissingImageError`` —— 补题是人工确认的最后一环，
+    不能把 ``images/…`` 这种前端必然 404 的路径写进库（2026-10-31 事故）。
     """
     materialized: list[str] = []
     metas: list[dict] = []
@@ -68,6 +78,9 @@ def _rewrite_text(
         alt, ref = m.group(1), m.group(2)
         src = _resolve_src(ref, md_images_dir)
         if src is None:
+            if strict:
+                raise MissingImageError(f"图片源文件缺失：{ref}（查找目录 {md_images_dir}）")
+            print(f"[WARN] 图片源缺失，保留原引用：{ref}（查找目录 {md_images_dir}）", flush=True)
             return m.group(0)  # 源文件缺失，保留原引用
         index += 1
         name = name_fn(index, _ext_of(ref))
@@ -89,37 +102,60 @@ def _rewrite_text(
     return new_text, materialized, metas
 
 
-def rewrite_question(
-    q: ExamQuestion,
+def rewrite_fields(
+    *,
+    content: str | None,
+    answer: str | None,
+    explanation: str | None,
+    material_text: str | None,
+    options: list[dict] | None,
     md_images_dir: Path,
     asset_store: AssetStore,
     asset_prefix: str,
-) -> tuple[ExamQuestion, list[str]]:
-    """改写题干(stem_NN)/解析(explain_NN)/材料(fig_NN)/选项(opt_{label})。"""
+    strict: bool = False,
+) -> tuple[str, str, str | None, str | None, list[dict] | None, list[str]]:
+    """改写题干(stem_NN)/答案(answer_NN)/解析(explain_NN)/材料(fig_NN)/选项(opt_{label})。
+
+    **answer 必须一起改写**：答案里的图（实验读数截图等）在自评视图与结果页会展示，
+    漏改就是前端 404（2026-10-31 实测全库 16 题受影响）。
+
+    返回 ``(content, answer, explanation, material_text, options, materialized)``。
+    不依赖 ``ExamQuestion``，供 publish 与人工补题落库共用。
+    """
     materialized: list[str] = []
 
     new_content, m, _ = _rewrite_text(
-        q.content, md_images_dir, asset_store, asset_prefix,
-        lambda i, ext: f"stem_{i:02d}{ext}",
+        content, md_images_dir, asset_store, asset_prefix,
+        lambda i, ext: f"stem_{i:02d}{ext}", strict=strict,
     )
-    q.content, materialized = new_content, materialized + m
+    materialized += m
 
-    if q.explanation:
+    new_answer = answer or ""
+    if new_answer:
+        new_answer, m, _ = _rewrite_text(
+            new_answer, md_images_dir, asset_store, asset_prefix,
+            lambda i, ext: f"answer_{i:02d}{ext}", strict=strict,
+        )
+        materialized += m
+
+    new_exp = explanation
+    if new_exp:
         new_exp, m, _ = _rewrite_text(
-            q.explanation, md_images_dir, asset_store, asset_prefix,
-            lambda i, ext: f"explain_{i:02d}{ext}",
+            new_exp, md_images_dir, asset_store, asset_prefix,
+            lambda i, ext: f"explain_{i:02d}{ext}", strict=strict,
         )
-        q.explanation, materialized = new_exp, materialized + m
+        materialized += m
 
-    if q.material_text:
-        new_mt, m, _ = _rewrite_text(
-            q.material_text, md_images_dir, asset_store, asset_prefix,
-            lambda i, ext: f"fig_{i:02d}{ext}",
+    new_material = material_text
+    if new_material:
+        new_material, m, _ = _rewrite_text(
+            new_material, md_images_dir, asset_store, asset_prefix,
+            lambda i, ext: f"fig_{i:02d}{ext}", strict=strict,
         )
-        q.material_text, materialized = new_mt, materialized + m
+        materialized += m
 
-    if q.options:
-        for opt in q.options:
+    if options:
+        for opt in options:
             label = (opt.get("label") or "").strip().lower()
             text = opt.get("text") or ""
 
@@ -127,13 +163,38 @@ def rewrite_question(
                 base = f"opt_{label}" if label else f"opt_{i:02d}"
                 return f"{base}{ext}" if i == 1 else f"{base}_{i:02d}{ext}"
 
-            new_text, m, _ = _rewrite_text(text, md_images_dir, asset_store, asset_prefix, name_fn)
+            new_text, m, _ = _rewrite_text(
+                text, md_images_dir, asset_store, asset_prefix, name_fn, strict=strict,
+            )
             if new_text != text:
                 opt["text"] = new_text
                 if len(m) == 1:
                     opt["image_url"] = m[0]
                 materialized += m
 
+    return new_content, new_answer, new_exp, new_material, options, materialized
+
+
+def rewrite_question(
+    q: ExamQuestion,
+    md_images_dir: Path,
+    asset_store: AssetStore,
+    asset_prefix: str,
+    *,
+    strict: bool = False,
+) -> tuple[ExamQuestion, list[str]]:
+    """按 ExamQuestion 字段改写（薄封装，保持既有调用点签名）。"""
+    q.content, q.answer, q.explanation, q.material_text, q.options, materialized = rewrite_fields(
+        content=q.content,
+        answer=q.answer,
+        explanation=q.explanation,
+        material_text=q.material_text,
+        options=q.options,
+        md_images_dir=md_images_dir,
+        asset_store=asset_store,
+        asset_prefix=asset_prefix,
+        strict=strict,
+    )
     return q, materialized
 
 

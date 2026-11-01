@@ -137,3 +137,52 @@ class TestRewriteItemDispatch:
         rewrite_item(c, "cards", md_dir, store, "textbooks/math/55")
 
         assert "textbooks/math/55/page_01_fig_01.jpg" in c.content
+
+
+class TestAnswerImages:
+    """答案里的图必须一起物化（自评/结果页会展示参考答案）。"""
+
+    def test_answer_image_materialized(self, tmp_path):
+        md_dir = tmp_path / "md" / "paper"
+        _make_image(md_dir, "ans.jpg")
+        store = LocalAssetStore(tmp_path / "assets")
+        q = ExamQuestion(
+            subject_id="physics", type="short_answer", difficulty=1,
+            content="题干", answer="(1) ![](images/ans.jpg) (2) 见解析",
+        )
+
+        rewrite_question(q, md_dir, store, "questions/physics/abcd/3")
+
+        assert "questions/physics/abcd/3/answer_01.jpg" in q.answer
+        assert "images/ans.jpg" not in q.answer
+        assert store.exists("questions/physics/abcd/3/answer_01.jpg")
+
+    def test_missing_source_keeps_reference_and_warns_by_default(self, tmp_path, capsys):
+        md_dir = tmp_path / "md" / "paper"
+        md_dir.mkdir(parents=True)
+        store = LocalAssetStore(tmp_path / "assets")
+        q = ExamQuestion(
+            subject_id="physics", type="short_answer", difficulty=1,
+            content="如图 ![](images/missing.jpg)", answer="1",
+        )
+
+        rewrite_question(q, md_dir, store, "questions/physics/abcd/3")
+
+        assert "![](images/missing.jpg)" in q.content
+        assert "图片源缺失" in capsys.readouterr().out
+
+    def test_missing_source_raises_in_strict_mode(self, tmp_path):
+        import pytest
+
+        from image_rewrite import MissingImageError
+
+        md_dir = tmp_path / "md" / "paper"
+        md_dir.mkdir(parents=True)
+        store = LocalAssetStore(tmp_path / "assets")
+        q = ExamQuestion(
+            subject_id="physics", type="short_answer", difficulty=1,
+            content="如图 ![](images/missing.jpg)", answer="1",
+        )
+
+        with pytest.raises(MissingImageError, match="图片源文件缺失"):
+            rewrite_question(q, md_dir, store, "questions/physics/abcd/3", strict=True)

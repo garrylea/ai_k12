@@ -172,3 +172,56 @@ def test_dry_run_preview_shows_lengths_and_snippet():
     assert "更新" in msg and "新内容 18 字" in msg
     assert "内容：新的题干内容" in msg
     assert not any(sql.startswith(("INSERT", "UPDATE")) for sql, _ in cur.sql)
+
+
+def test_apply_materializes_images_before_writing(tmp_path):
+    """补题内容里的 md 相对图必须物化，库里只写规范路径（2026-10-31 事故回归）。"""
+    md_dir = tmp_path / "md" / "卷A"
+    (md_dir / "images").mkdir(parents=True)
+    (md_dir / "images" / "q3.jpg").write_bytes(b"\xff\xd8\xffq3")
+    rec = dict(
+        REC,
+        content="如图 ![](images/q3.jpg) 求电流",
+        answer="A",
+        md=str(md_dir / "卷A.md"),
+    )
+    cur = FakeCursor(paper=(54, 4), existing=6061)
+
+    msg = A.apply_record(cur, rec, apply=True, assets_root=tmp_path / "assets")
+
+    assert msg.startswith("更新")
+    sql, args = next((s, a) for s, a in cur.sql if s.startswith("UPDATE questions"))
+    from apply_fixes import _source_key
+
+    expected = f"questions/physics/{_source_key(rec)}/28/stem_01.jpg"
+    assert expected in args[0]
+    assert "images/q3.jpg" not in args[0]
+    assert (tmp_path / "assets" / expected).exists()
+
+
+def test_apply_rejects_when_image_source_missing(tmp_path):
+    md_dir = tmp_path / "md" / "卷A"
+    md_dir.mkdir(parents=True)
+    rec = dict(
+        REC,
+        content="如图 ![](images/gone.jpg)",
+        md=str(md_dir / "卷A.md"),
+    )
+    cur = FakeCursor(paper=(54, 4), existing=6061)
+
+    msg = A.apply_record(cur, rec, apply=True, assets_root=tmp_path / "assets")
+
+    assert msg.startswith("跳过") and "图片源文件缺失" in msg
+    assert not any(sql.startswith(("INSERT", "UPDATE")) for sql, _ in cur.sql)
+
+
+def test_apply_empty_answer_does_not_overwrite_existing():
+    """补题记录没填答案时，不得把库里已有答案清空。"""
+    rec = dict(REC, answer="")
+    cur = FakeCursor(paper=(54, 4), existing=6061)
+
+    A.apply_record(cur, rec, apply=True)
+
+    sql, args = next((s, a) for s, a in cur.sql if s.startswith("UPDATE questions"))
+    assert "COALESCE(NULLIF" in sql
+    assert "" in args

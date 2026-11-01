@@ -12,7 +12,9 @@
 """
 
 import argparse
+import hashlib
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -21,12 +23,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 import pymysql  # noqa: E402
 
+from asset_store import LocalAssetStore  # noqa: E402
 from config import RefineryConfig  # noqa: E402
 from db_loader import content_hash  # noqa: E402
+from image_rewrite import MissingImageError, rewrite_fields  # noqa: E402
 from manual_fix import mark_issue  # noqa: E402
 from subject_codes import subject_code_for_parts  # noqa: E402
 
 FIXES_DIR = ROOT / "output" / "manual_fixes"
+
+_IMG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+
+
+def _source_key(rec: dict) -> str:
+    """与 publish 一致的源稳定键：``rel_path/source`` 的 md5 前 8 位。"""
+    key = f"{rec.get('rel_path', '')}/{rec.get('source', '')}"
+    return hashlib.md5(key.encode("utf-8")).hexdigest()[:8]
+
+
+def _has_images(*texts, options=None) -> bool:
+    for t in texts:
+        if t and _IMG_REF_RE.search(t):
+            return True
+    for opt in options or []:
+        if _IMG_REF_RE.search(opt.get("text") or ""):
+            return True
+    return False
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -100,7 +122,7 @@ def pending_records(subject: str | None = None, source: str | None = None,
     return out
 
 
-def apply_record(cur, rec: dict, apply: bool) -> str:
+def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None) -> str:
     from manual_fix import looks_like_ui_echo
 
     if looks_like_ui_echo(rec.get("content") or ""):
@@ -125,24 +147,53 @@ def apply_record(cur, rec: dict, apply: bool) -> str:
         snippet = (rec.get("content") or "").replace("\n", " ")[:36]
         return f"{detail}\n        内容：{snippet}…"
 
-    chash = content_hash(rec["content"], rec.get("options"))
+    content = rec["content"]
+    answer = rec.get("answer") or ""
+    material_text = rec.get("material_text")
     options = rec.get("options")
+
+    # 补题内容里的图是 md 相对路径（images/xxx.jpg），前端只认物化后的规范路径。
+    # 落库前必须走与 publish 同一套改写 + 拷贝，否则库里留下必然 404 的路径
+    # （2026-10-31 北师大实验第 3/4 题事故）。strict=True：缺源图直接拒绝，不静默。
+    if _has_images(content, answer, material_text, options=options):
+        md = rec.get("md")
+        if not md:
+            return "跳过：题目含图片但补题记录缺少 md 路径，无法物化"
+        code = subject_code_for_parts(Path(rec["rel_path"]).parts, default="")
+        prefix = f"questions/{code}/{_source_key(rec)}/{go}"
+        try:
+            content, answer, _exp, material_text, options, _mat = rewrite_fields(
+                content=content,
+                answer=answer,
+                explanation=None,
+                material_text=material_text,
+                options=options,
+                md_images_dir=Path(md).parent,
+                asset_store=LocalAssetStore(assets_root or (RefineryConfig.from_env().output_dir / "assets")),
+                asset_prefix=prefix,
+                strict=True,
+            )
+        except MissingImageError as e:
+            return f"跳过：{e}"
+
+    chash = content_hash(content, options)
     if qid:
         cur.execute(
-            "UPDATE questions SET content=%s, options=%s, answer=%s, material_text=%s, "
+            "UPDATE questions SET content=%s, options=%s, "
+            "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
             "content_hash=%s, is_active=1 WHERE id=%s",
-            (rec["content"],
+            (content,
              json.dumps(options, ensure_ascii=False) if options else None,
-             rec.get("answer") or "", rec.get("material_text"), chash, qid))
+             answer, material_text, chash, qid))
     else:
         cur.execute(
             "INSERT INTO questions (subject_id, group_order, type, difficulty, content, options, "
             "answer, material_text, grade_band, source, source_year, content_hash, is_active) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
             (subject_id, go, "choice" if options else "short_answer", 2,
-             rec["content"],
+             content,
              json.dumps(options, ensure_ascii=False) if options else None,
-             rec.get("answer") or "", rec.get("material_text"),
+             answer, material_text,
              "junior", rec["source"], 2024, chash))
         qid = int(cur.lastrowid)
         cur.execute(
