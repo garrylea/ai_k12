@@ -15,6 +15,8 @@ import {
   markdownRemarkPluginsWithBreaks,
   markdownRehypePlugins,
   markdownComponents,
+  makeAnswerComponents,
+  ANSWER_IMG_CLASS,
 } from './markdown';
 
 function render(src: string, opts?: { breaks?: boolean }): string {
@@ -195,3 +197,22 @@ describe('图注：图号 + 分格小标合成「图5乙」', () => {
     const caps = [...html.matchAll(/<figcaption[^>]*>(.*?)<\/figcaption>/g)].map((m) => m[1]);
     expect(caps).toEqual(['甲', '图11乙']);
   });
+
+
+describe('作答内容的大图 Markdown 配置', () => {
+  it('makeAnswerComponents：图片使用作答大图样式而非题面 50px 小图', () => {
+    const html = renderToStaticMarkup(
+      createElement(ReactMarkdown, { components: makeAnswerComponents() }, '![图1](/uploads/a/b.png)'),
+    );
+    expect(html).toContain('max-h-[40vh]');
+    expect(html).not.toContain('h-[50px]');
+  });
+
+  it('makeAnswerComponents：可覆盖样式串', () => {
+    const html = renderToStaticMarkup(
+      createElement(ReactMarkdown, { components: makeAnswerComponents('max-h-[10vh]') }, '![图1](/uploads/a.png)'),
+    );
+    expect(html).toContain('max-h-[10vh]');
+    expect(html).not.toContain(ANSWER_IMG_CLASS);
+  });
+});

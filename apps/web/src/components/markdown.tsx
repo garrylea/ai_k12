@@ -225,7 +225,7 @@ export const markdownRehypePlugins: NonNullable<Options['rehypePlugins']> = [
   rehypeSvgAttrNames,
 ];
 
-interface MarkdownImgProps {
+export interface MarkdownImgProps {
   src?: string;
   alt?: string;
   /** 自定义 className（不同上下文图片尺寸差异大：题面 inline 小图、卡片正文大图、聊天气泡中图）。
@@ -465,3 +465,28 @@ export const markdownComponents = {
     </td>
   ),
 };
+
+/**
+ * 作答/结果页的大图样式：与题面小图（默认 `h-[50px]`）区分。
+ * 物理电路图、化学装置图按题面规格会被压成一条细线，必须用这套。
+ * 40vh 上限是为了让"文字 + 图 + 文字"能在同一屏里读，点开还能放大（zoomable）。
+ */
+export const ANSWER_IMG_CLASS =
+  'block max-w-full max-h-[40vh] my-2 rounded-lg object-contain cursor-zoom-in';
+
+/**
+ * 学生作答内容专用的 components 工厂。
+ * 必须是工厂/模块级常量、不能在 render 里现造箭头函数——`img` 的组件类型一旦每次渲染都变，
+ * React 会把 `<img>` 卸载重挂，等于每次输入都重新下载图片。
+ */
+export function makeAnswerComponents(imgClassName: string = ANSWER_IMG_CLASS) {
+  return {
+    ...markdownComponents,
+    // node 是 react-markdown 注入的 HAST 节点、不是合法 DOM 属性，必须解构丢弃，
+    // 否则会随 rest 透传到 <img> 触发 React 报错。
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    img: ({ node: _node, ...rest }: MarkdownImgProps & { node?: unknown }) => (
+      <MarkdownImg {...rest} className={imgClassName} />
+    ),
+  };
+}
