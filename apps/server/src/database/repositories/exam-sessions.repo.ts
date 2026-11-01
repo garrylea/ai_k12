@@ -57,6 +57,8 @@ export interface ExamResultRow {
   is_correct: number | null;
   score: string | number | null;   // DECIMAL 由 mysql2 返回字符串
   analysis: string | null;
+  method: string | null;
+  judged_at: Date | null;
   text: string;
   type: string;
   options: string | null;
@@ -153,6 +155,7 @@ export class ExamSessionsRepository {
   async findAnswersWithQuestions(sessionId: number): Promise<ExamResultRow[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT ea.question_id, ea.question_order, ea.answer_text, ea.is_correct, ea.analysis,
+              ea.method, ea.judged_at,
               q.content AS text, q.type, q.options, q.explanation, q.answer AS answer,
               q.material_text
        FROM exam_answers ea JOIN questions q ON q.id = ea.question_id
@@ -161,5 +164,62 @@ export class ExamSessionsRepository {
       [sessionId],
     );
     return rows as unknown as ExamResultRow[];
+  }
+
+  /**
+   * 练习记录列表（Task 4，2026-11-01）：已交卷的考试会话，按开始时间倒序分页。
+   * `LIMIT ?` 必须走 `pool.query`（不是 execute）——mysql2 对 prepared LIMIT 会报 ER_WRONG_ARGUMENTS，
+   * 有全仓护栏测试 `limit-placeholder.guard.test.ts`。
+   */
+  async listSubmittedByStudent(opts: {
+    studentId: number; subjectId?: number; limit: number; offset: number;
+  }): Promise<Array<ExamSessionRow & { title: string }>> {
+    const where = opts.subjectId
+      ? `WHERE es.student_id = ? AND es.subject_id = ? AND es.status = 'submitted'`
+      : `WHERE es.student_id = ? AND es.status = 'submitted'`;
+    const params = opts.subjectId
+      ? [opts.studentId, opts.subjectId, opts.limit, opts.offset]
+      : [opts.studentId, opts.limit, opts.offset];
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT es.*, ep.title FROM exam_sessions es
+       JOIN exam_papers ep ON es.paper_id = ep.id
+       ${where} ORDER BY es.started_at DESC LIMIT ? OFFSET ?`,
+      params,
+    );
+    return rows as unknown as Array<ExamSessionRow & { title: string }>;
+  }
+
+  /** 已交卷会话总数（分页用）。 */
+  async countSubmittedByStudent(studentId: number, subjectId?: number): Promise<number> {
+    const where = subjectId
+      ? `WHERE student_id = ? AND subject_id = ? AND status = 'submitted'`
+      : `WHERE student_id = ? AND status = 'submitted'`;
+    const params = subjectId ? [studentId, subjectId] : [studentId];
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt FROM exam_sessions ${where}`, params,
+    );
+    return Number((rows[0] as { cnt: number | string }).cnt ?? 0);
+  }
+
+  /** 某会话作答数与正确数（列表"对 x/y"用）。 */
+  async countAnswersBySession(sessionId: number): Promise<{ total: number; correct: number }> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(is_correct = 1), 0) AS correct
+       FROM exam_answers WHERE session_id = ?`, [sessionId],
+    );
+    const r = rows[0] as { total: number | string; correct: number | string };
+    return { total: Number(r.total ?? 0), correct: Number(r.correct ?? 0) };
+  }
+
+  /** 单个会话归属校验 + 带卷名（防 IDOR）。 */
+  async findByIdOwned(
+    sessionId: number, studentId: number,
+  ): Promise<(ExamSessionRow & { title: string }) | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT es.*, ep.title FROM exam_sessions es
+       JOIN exam_papers ep ON es.paper_id = ep.id
+       WHERE es.id = ? AND es.student_id = ?`, [sessionId, studentId],
+    );
+    return (rows[0] as unknown as ExamSessionRow & { title: string }) ?? null;
   }
 }

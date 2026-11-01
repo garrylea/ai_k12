@@ -28,6 +28,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module.js';
 import { AnalyticsInterceptor } from './common/interceptors/analytics.interceptor.js';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware.js';
 import { DevModule } from './modules/dev/dev.module.js';
+import { PracticeHistoryModule } from './modules/practice-history/practice-history.module.js';
 
 @Module({
   imports: [
@@ -63,6 +64,8 @@ import { DevModule } from './modules/dev/dev.module.js';
     BillingModule,
     // 手写识别率调研 demo（2026-10-08）—— dev-only 两个端点，不落库
     DevModule,
+    // 专项练习作答历史（2026-11-01）—— 学生端「练习记录」两条只读端点（考试 + 专项 UNION）
+    PracticeHistoryModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
