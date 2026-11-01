@@ -139,8 +139,9 @@ export function QuestionRunner({
   // 有作答图正在上传（LatexEditor 回传）。上传期间禁提交：此时文本里只有
   // ［图N 上传中…］占位，提上去会把占位标记当答案落库。
   const [answerUploading, setAnswerUploading] = useState(false);
-  // 切题时在飞的上传会落在「别的题」的文本上（编辑器不卸载、只换 value），旧题会永久留下
-  // ［图N 上传中…］而 answerUploading 已归零——所以还要按文本兜底，双保险。
+  // 文本兜底，只负责另一种失效：上传途中切题，占位串跟着答案留在旧题里，而 answerUploading
+  // 已被切题 effect 归零 —— 此时扫文中的占位文本才拦得住「带着占位标记提交」。
+  // （编辑器仍在场时的上传态由 answerUploading 负责，两条判据各管一段，别互相替代。）
   const hasPendingUpload = /上传中…/.test(answer);
   // 文本作答形态：理科（数学/物理/化学）保留左输入+右预览；语文/英语等单栏纯文本
   const latexInput = (answerInput ?? (isMathLikeSubject(subjectId) ? 'latex' : 'plain')) === 'latex';
@@ -210,6 +211,9 @@ export function QuestionRunner({
     setHintState({ show: false, loading: false, error: false });
     const nq = questions[idx];
     setAnswer(nq ? (answerByNRef.current[nq.n] ?? '') : '');
+    // 上传归属上一题的文本，切题后必须归零：切到选择题时 LatexEditor 会卸载，它不再回传 false；
+    // 旧题里残留的「上传中…」由 hasPendingUpload 兜底，两者各管一段。
+    setAnswerUploading(false);
   }, [idx, questions]);
 
   // 提交后切下一题；末题进入等待态，等所有后台判题完成后交结果给父层。
@@ -660,7 +664,15 @@ export function QuestionRunner({
             onClick={handleSubmit}
             disabled={!answer.trim() || answerUploading || hasPendingUpload}
             className="w-12 h-12 rounded-full bg-[var(--brand-500)] text-white flex items-center justify-center disabled:opacity-40 hover:bg-[var(--brand-600)] transition-all shadow-md"
-            title={answerUploading ? '图片上传中' : hasPendingUpload ? '有图片未上传完成，请删除标记后重试' : '提交'}
+            title={
+              !answer.trim()
+                ? '请先作答'
+                : answerUploading
+                  ? '图片上传中'
+                  : hasPendingUpload
+                    ? '有图片未上传完成，请删除标记后重试'
+                    : '提交'
+            }
             aria-label="提交"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

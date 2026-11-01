@@ -1,8 +1,8 @@
 // apps/web/src/components/business/answer/QuestionRunner.repro.test.tsx
 // 复现测试：切题（上一题回退）后，之前已作答的答案应被回填，不丢失。
 // 场景对应 bug 报告：专项训练/考试/错题练习时回到上一题看到作答空白。
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useMemo, useState } from 'react';
 
@@ -10,12 +10,26 @@ import { useMemo, useState } from 'react';
 // 需手动清理，否则上一个用例的 DOM 泄漏到下一个用例导致选择器重复命中。
 afterEach(() => cleanup());
 
-// 上传永挂起：模拟「图还在传」的中间态，断言提交被禁用。
+// 上传挂起 → 由用例自己 resolve。必须可控：只有能 resolve，才能断言「上传完成后恢复可提交」，
+// 否则「上传中禁用」与「残留文本禁用」两条判据互相掩盖（删掉 onUploadingChange 接线也照样绿）。
+// vi.hoisted 保证它在 vi.mock 工厂（被提升到文件顶部）之前就存在。
+const uploadControl = vi.hoisted(() => ({
+  resolve: undefined as undefined | ((v: { fileId: number; url: string }) => void),
+}));
+
 // 必须 ...actual 透传原模块——@/analytics/tracker 也从 '@/services/api' 取命名导出，
 // 整体替换会让那边的导入变 undefined。
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, uploadFile: vi.fn(() => new Promise(() => {})) };
+  return {
+    ...actual,
+    uploadFile: vi.fn(
+      () =>
+        new Promise<{ fileId: number; url: string }>((resolve) => {
+          uploadControl.resolve = resolve;
+        }),
+    ),
+  };
 });
 
 // jsdom 没有 URL.createObjectURL，真实压缩必然抛错（占位会立刻变「上传失败」，
@@ -25,6 +39,7 @@ vi.mock('@/utils/image-compress', async (importOriginal) => {
   return { ...actual, compressImageFile: vi.fn(async (f: File) => f) };
 });
 import { QuestionRunner } from './QuestionRunner';
+import { uploadFile } from '@/services/api';
 import type { RunnerJudgeOutcome, RunnerQuestion } from './types';
 
 function makeQuestions(): RunnerQuestion[] {
@@ -593,6 +608,22 @@ describe('作答图上传中禁提交（防占位文本落库）', () => {
     onFinish: async () => {},
   };
 
+  // 往作答框里贴一张 png：jsdom 无剪贴板，只能手工挂 clipboardData
+  function pasteImage(ta: HTMLTextAreaElement) {
+    const evt = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData?: unknown };
+    Object.defineProperty(evt, 'clipboardData', {
+      value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => new File(['x'], 'a.png', { type: 'image/png' }) }] },
+    });
+    fireEvent(ta, evt);
+  }
+
+  const submitBtn = () => screen.getByRole('button', { name: '提交' }) as HTMLButtonElement;
+
+  beforeEach(() => {
+    uploadControl.resolve = undefined;
+    vi.mocked(uploadFile).mockClear();
+  });
+
   it('作答图上传中：提交按钮禁用，上传完成恢复（防占位文本落库）', async () => {
     const questions = [{ n: '1', text: '电路图题', type: 'short_answer' }];
     render(
@@ -604,13 +635,24 @@ describe('作答图上传中禁提交（防占位文本落库）', () => {
     );
     const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
 
-    const evt = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData?: unknown };
-    Object.defineProperty(evt, 'clipboardData', {
-      value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => new File(['x'], 'a.png', { type: 'image/png' }) }] },
-    });
-    fireEvent(ta, evt);
+    pasteImage(ta);
 
-    await waitFor(() => expect((screen.getByRole('button', { name: '提交' }) as HTMLButtonElement).disabled).toBe(true));
+    // 先证明真的进了上传流程（占位已插入 + 上传真的发起）——否则下面的「禁用」可以被
+    // hasPendingUpload 的文本兜底单独解释掉，测不出 onUploadingChange 有没有接线。
+    await waitFor(() => expect(ta.value).toContain('上传中…'));
+    expect(vi.mocked(uploadFile)).toHaveBeenCalledTimes(1);
+    expect(submitBtn().disabled).toBe(true);
+    // 上传态专属文案：文本兜底态写的是「有图片未上传完成…」，两者不会撞
+    expect(submitBtn().title).toBe('图片上传中');
+
+    await act(async () => {
+      uploadControl.resolve!({ fileId: 1, url: '/uploads/a/b.png' });
+    });
+
+    // 占位被真实图片替换 → 上传态结束，恢复可提交（这条才证明「恢复」）
+    await waitFor(() => expect(ta.value).toContain('![图1]'));
+    expect(submitBtn().disabled).toBe(false);
+    expect(submitBtn().title).toBe('提交');
   });
 
   it('答案里残留「上传中…」标记时也禁用提交（切题时在飞上传的兜底，见 hasPendingUpload）', async () => {
@@ -623,6 +665,37 @@ describe('作答图上传中禁提交（防占位文本落库）', () => {
         {...runnerProps}
       />,
     );
-    await waitFor(() => expect((screen.getByRole('button', { name: '提交' }) as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect(submitBtn().disabled).toBe(true));
+    // 没有在飞上传，禁用只能来自文本兜底 —— 文案须是兜底那条，不能是上传态那条
+    expect(submitBtn().title).toBe('有图片未上传完成，请删除标记后重试');
+  });
+
+  it('上传途中切回选择题：上传态必须归零，不能把提交永久锁死', async () => {
+    // 选择题与解答题共存：切到选择题时 LatexEditor 会被卸载，它不会再把 uploading=false 回传，
+    // 所以父层必须自己在切题时归零（否则 answerUploading 永远 true、整页再也提交不了）。
+    const questions: RunnerQuestion[] = [
+      { n: '1', text: '选择题题干', type: 'choice', options: [{ label: 'A', text: '选项A' }, { label: 'B', text: '选项B' }] },
+      { n: '2', text: '解答题题干', type: 'short_answer' },
+    ];
+    const user = userEvent.setup();
+    render(
+      <QuestionRunner
+        questions={questions}
+        answerInput="latex"
+        startIndex={1}
+        {...runnerProps}
+      />,
+    );
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
+    pasteImage(ta);
+    await waitFor(() => expect(ta.value).toContain('上传中…'));
+    expect(submitBtn().disabled).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: /上一题/ }));
+    // 回到选择题后先选一项：把「空答案」这条禁用原因排除掉，剩下的只能是残留上传态
+    await user.click(screen.getByRole('radio', { name: /选项A/ }));
+
+    expect(submitBtn().disabled).toBe(false);
+    expect(submitBtn().title).toBe('提交');
   });
 });
