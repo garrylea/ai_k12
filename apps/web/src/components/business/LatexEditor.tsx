@@ -1,35 +1,71 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SymbolPalette } from './SymbolPalette';
 import type { PreviewScrollSync } from './preview-scroll-sync';
+import { uploadFile } from '@/services/api';
+import { ensureJpeg } from '@/utils/image-convert';
+import { compressImageFile, MAX_IMAGE_BYTES } from '@/utils/image-compress';
+import { toast } from '@/components/base/Toast';
 
 interface Props {
   value: string;
   onChange: (v: string) => void;
   /** 左输入区 → 右预览区的滚动跟随通道（QuestionRunner 传入同一实例，见 PreviewScrollSync 注释） */
   scrollSync?: { current: PreviewScrollSync };
+  /** 有图片正在上传时回调 true：上层据此禁用提交，避免占位文本落库（spec §4.1 第 8 步） */
+  onUploadingChange?: (uploading: boolean) => void;
 }
 
 /** 模板光标标记：插入后光标落在此处，标记本身不写入文本框。
  *  用于「插入位置不在末尾」的多行模板（如 SymbolPalette 的分类讨论模板）。 */
 const CARET_MARKER = '$0';
+const UPLOAD_TIMEOUT_MS = 15_000;
+/** 占位用纯文本：不产生 <img>，预览区不会闪破图；失败标记与它同构，编号扫描才认得出 */
+const pendingToken = (n: number) => `［图${n} 上传中…］`;
+const failedToken = (n: number) => `［图${n} 上传失败］`;
+const IMG_INDEX_RE = /图(\d+)/g;
 
-export function LatexEditor({ value, onChange, scrollSync }: Props) {
+/** 下一个可用图片编号 = 文中所有「图N」标记（含失败/上传中）的最大值 + 1，避免撞号 */
+function nextImageIndex(text: string): number {
+  let max = 0;
+  for (const m of text.matchAll(IMG_INDEX_RE)) {
+    const n = Number(m[1]);
+    if (n > max) max = n;
+  }
+  return max + 1;
+}
+
+export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [uploading, setUploading] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  // valueRef 是唯一真相：上传 await 期间学生可能继续打字或删掉占位，
+  // 只读 props.value 会拿到发起时的旧快照，把后来的编辑覆盖掉。
+  const valueRef = useRef(value);
+  useEffect(() => { valueRef.current = value; }, [value]);
+
+  /** 所有写入都走这里：同步 valueRef，受控组件本轮回填前异步逻辑也能拿到最新文本 */
+  const emit = (next: string) => {
+    valueRef.current = next;
+    onChange(next);
+  };
+
+  useEffect(() => { onUploadingChange?.(uploading > 0); }, [uploading, onUploadingChange]);
 
   const insertAtCursor = (template: string) => {
     // 先摘掉光标标记，再算落点——标记位置即模板内偏移，与插入位置相加得绝对光标位。
     const markerAt = template.indexOf(CARET_MARKER);
     const latex = markerAt >= 0 ? template.replace(CARET_MARKER, '') : template;
     const ta = ref.current;
+    const base = valueRef.current;
     if (!ta) {
-      onChange(value + latex);
+      emit(base + latex);
       return;
     }
-    const start = ta.selectionStart ?? value.length;
-    const end = ta.selectionEnd ?? value.length;
+    const start = ta.selectionStart ?? base.length;
+    const end = ta.selectionEnd ?? base.length;
     // 左侧始终存放裸 LaTeX（不含 $）；预览侧按需自动补 $...$
-    const next = value.slice(0, start) + latex + value.slice(end);
-    onChange(next);
+    const next = base.slice(0, start) + latex + base.slice(end);
+    emit(next);
     requestAnimationFrame(() => {
       // 光标落点优先级：$0 标记 > 首个 {} 占位内（如 \frac{}{}）> 插入末尾
       const ph = latex.indexOf('{}');
@@ -41,6 +77,101 @@ export function LatexEditor({ value, onChange, scrollSync }: Props) {
         ta.scrollTop = ta.scrollHeight;
       }
     });
+  };
+
+  /** 整段插入（批量占位用），光标落在插入内容之后。
+   *  批量占位必须一次写完：逐张插入会让受控 textarea 的光标在多轮回填间漂移。 */
+  const insertBlock = (block: string) => {
+    const ta = ref.current;
+    const base = valueRef.current;
+    const start = ta?.selectionStart ?? base.length;
+    const end = ta?.selectionEnd ?? base.length;
+    const needsLead = start > 0 && base[start - 1] !== '\n';
+    const needsTail = end < base.length && base[end] !== '\n';
+    const text = `${needsLead ? '\n' : ''}${block}${needsTail ? '\n' : ''}`;
+    emit(base.slice(0, start) + text + base.slice(end));
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      const pos = start + text.length;
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  /** 精确替换一个占位串；找不到（学生已删除）就丢弃结果，绝不追加或复活 */
+  const replaceToken = (token: string, replacement: string) => {
+    const cur = valueRef.current;
+    const idx = cur.indexOf(token);
+    if (idx < 0) return;
+    emit(cur.slice(0, idx) + replacement + cur.slice(idx + token.length));
+    const el = ref.current;
+    const sel = el?.selectionStart;
+    if (!el || sel == null || sel <= idx) return;
+    // 光标在占位之后：按长度差平移，别让它落进替换后的文字里
+    const pos = sel >= idx + token.length ? sel + (replacement.length - token.length) : idx + replacement.length;
+    requestAnimationFrame(() => el.setSelectionRange(pos, pos));
+  };
+
+  const handleImageFiles = async (files: File[]) => {
+    const accepted: File[] = [];
+    for (const f of files) {
+      if (!f.type.startsWith('image/')) continue;
+      if (f.size > MAX_IMAGE_BYTES) { toast('error', '图片过大（最大 5MB）'); continue; }
+      accepted.push(f);
+    }
+    if (accepted.length === 0) return;
+    if (accepted.length > 6) toast('error', '图片较多，建议精简');
+
+    const startIdx = nextImageIndex(valueRef.current);
+    const tokens = accepted.map((_, i) => pendingToken(startIdx + i));
+    insertBlock(tokens.join('\n')); // 一次 onChange 插入全部占位：逐张插会让受控光标漂移
+
+    setUploading((n) => n + accepted.length);
+    for (let i = 0; i < accepted.length; i++) {
+      const token = tokens[i];
+      const n = startIdx + i;
+      try {
+        // 顺序处理：并发上传多张会把 DOM 光标和 onChange 交错打乱
+        const jpeg = await ensureJpeg(accepted[i]);
+        const compressed = await compressImageFile(jpeg);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
+        try {
+          const { url } = await uploadFile(compressed, ctrl.signal);
+          replaceToken(token, `![图${n}](${url})`);
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        // 失败只落在占位处：不抛给上层，也不打断同批其它图片
+        replaceToken(token, failedToken(n));
+        toast('error', '图片上传失败，请重试');
+      } finally {
+        setUploading((n2) => n2 - 1);
+      }
+    }
+  };
+
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files: File[] = [];
+    // 必须在任何 await 之前同步读完 clipboardData（事件对象随后就失效）
+    for (const item of Array.from(e.clipboardData?.items ?? [])) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+      const f = item.getAsFile();
+      if (f) files.push(f);
+    }
+    if (files.length === 0) return; // 纯文本：放行浏览器原生粘贴
+    e.preventDefault();
+    void handleImageFiles(files);
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    setDragging(false);
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0) return;
+    e.preventDefault();
+    void handleImageFiles(files);
   };
 
   /** 光标在末尾且内容溢出时把视口钉到底部。
@@ -60,10 +191,20 @@ export function LatexEditor({ value, onChange, scrollSync }: Props) {
         ref={ref}
         value={value}
         onChange={e => {
-          onChange(e.target.value);
+          emit(e.target.value);
           // 粘贴 / IME 提交走 onChange（input 事件），打完钉底（见 pinToBottomIfCaretAtEnd 注释）
           pinToBottomIfCaretAtEnd(e.currentTarget, e.currentTarget.selectionStart ?? 0);
         }}
+        onPaste={onPaste}
+        onDrop={onDrop}
+        onDragOver={(e) => {
+          // 只认文件拖拽：拖选中的文字进来不该亮高亮框
+          if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
+            e.preventDefault();
+            setDragging(true);
+          }
+        }}
+        onDragLeave={() => setDragging(false)}
         onScroll={e => {
           if (!scrollSync) return;
           const el = e.currentTarget;
@@ -73,7 +214,7 @@ export function LatexEditor({ value, onChange, scrollSync }: Props) {
           scrollSync.current.apply?.();
         }}
         placeholder="在此用 LaTeX 作答，数学公式无需输入 $，直接写 LaTeX 即可"
-        className="flex-1 w-full p-3 resize-none outline-none bg-transparent text-[var(--text-primary)] font-mono text-sm leading-relaxed"
+        className={`flex-1 w-full p-3 resize-none outline-none bg-transparent text-[var(--text-primary)] font-mono text-sm leading-relaxed${dragging ? ' ring-2 ring-[var(--brand-500)]' : ''}`}
       />
     </div>
   );
