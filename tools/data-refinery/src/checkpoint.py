@@ -13,6 +13,9 @@ class RefineryCheckpoint:
         # published 的**发布口径版本**：改写逻辑升级后（如 2026-10-31 开始改写 answer），
         # 旧版本产出的 published 文件不能算数，必须自动重发，而不是让用户记得加 --force。
         self._publish_versions: dict[str, int] = {}
+        # 发布时的**源文件指纹**：extracted 改了（重抽/人工回写）就必须重发，
+        # 否则 checkpoint 会让 published 永远停在旧内容上（题号/题型错位即由此而来）。
+        self._publish_sources: dict[str, str] = {}
         self._toc_parsed: set[str] = set()
 
     def load(self) -> None:
@@ -27,6 +30,9 @@ class RefineryCheckpoint:
         self._published = set(data.get("published", []))
         self._publish_versions = {
             str(k): int(v) for k, v in (data.get("publish_versions") or {}).items()
+        }
+        self._publish_sources = {
+            str(k): str(v) for k, v in (data.get("publish_sources") or {}).items()
         }
         self._toc_parsed = set(data.get("toc_parsed", []))
 
@@ -51,10 +57,17 @@ class RefineryCheckpoint:
         """该文件上次发布时的口径版本；None = 旧版 checkpoint（无版本号）→ 视为过期。"""
         return self._publish_versions.get(rel_path)
 
-    def mark_published(self, rel_path: str, version: int | None = None) -> None:
+    def publish_source_of(self, rel_path: str) -> str | None:
+        """该文件上次发布时的源指纹（extracted jsonl 的 sha256）；None = 未知 → 视为过期。"""
+        return self._publish_sources.get(rel_path)
+
+    def mark_published(self, rel_path: str, version: int | None = None,
+                       source_hash: str | None = None) -> None:
         self._published.add(rel_path)
         if version is not None:
             self._publish_versions[rel_path] = version
+        if source_hash is not None:
+            self._publish_sources[rel_path] = source_hash
         self.save()
 
     def unmark_converted(self, rel_path: str) -> None:
@@ -68,6 +81,7 @@ class RefineryCheckpoint:
     def unmark_published(self, rel_path: str) -> None:
         self._published.discard(rel_path)
         self._publish_versions.pop(rel_path, None)
+        self._publish_sources.pop(rel_path, None)
         self.save()
 
     def is_toc_parsed(self, rel_path: str) -> bool:
@@ -90,6 +104,7 @@ class RefineryCheckpoint:
                     "extracted": sorted(self._extracted),
                     "published": sorted(self._published),
                     "publish_versions": dict(sorted(self._publish_versions.items())),
+                    "publish_sources": dict(sorted(self._publish_sources.items())),
                     "toc_parsed": sorted(self._toc_parsed),
                 },
                 ensure_ascii=False,

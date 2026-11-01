@@ -40,6 +40,31 @@ class TestPublishCli:
 
         assert "Published: 1" in capsys.readouterr().out
 
+    def test_changed_extracted_is_republished(self, tmp_path, capsys):
+        """版本没变但 extracted 改了（重抽/补题回写）也必须重发，否则题目/题型停在旧状态。"""
+        out = _setup(tmp_path)
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+        capsys.readouterr()
+
+        ext = out / "extracted" / "数学" / "试卷" / "试卷.jsonl"
+        item = json.loads(ext.read_text(encoding="utf-8").strip())
+        item["type"] = "choice"
+        item["options"] = [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"},
+                           {"label": "C", "text": "丙"}, {"label": "D", "text": "丁"}]
+        ext.write_text(json.dumps(item, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+        assert "Published: 1" in capsys.readouterr().out
+        published = json.loads(
+            (out / "published" / "数学" / "试卷" / "试卷.jsonl").read_text(encoding="utf-8").strip())
+        assert published["type"] == "choice"
+        assert published["options"][0]["text"] == "甲"
+
     def test_current_version_checkpoint_is_skipped(self, tmp_path, capsys):
         out = _setup(tmp_path)
         with patch("publish_cli.RefineryConfig") as mock_config:

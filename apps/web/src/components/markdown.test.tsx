@@ -109,3 +109,18 @@ describe('语文试卷标注（着重号 / 下划线）渲染', () => {
     expect(html).toContain('<u>嘉年华</u>');
   });
 });
+
+
+describe('图注（图片 + 紧跟的短说明）', () => {
+  it('图片与短图注渲染成 figure/figcaption（居中、浅灰由 class 提供）', () => {
+    const html = render('![](questions/physics/x/1/stem_01.jpg)\n图1');
+    expect(html).toContain('<figure');
+    expect(html).toContain('<figcaption');
+    expect(html).toContain('图1');
+  });
+
+  it('正文段落里的「图 1」不会误判成图注', () => {
+    const html = render('图 1 所示的电路中，开关 S 闭合后三盏灯并联的是');
+    expect(html).not.toContain('<figure');
+  });
+});

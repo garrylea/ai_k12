@@ -2306,3 +2306,12 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 **遗留数据**：content 仍残留 `images/` 6 题（4/6/52/53/54 卷）+ answer 16 题，需另行批量修复（重新物化后改写，不要简单 reload——published 缺手工补的题）。
 
 **验证**：新增 8 条用例（answer 物化 / strict 缺图 / 补题物化 / 缺图拒收 / 空答案不覆盖 / loader 护栏）；`pytest` 1482 passed。
+
+
+## 2026-11-01 修复：publish 跳过导致题型/题号停留在旧状态 + 图注排版
+
+**现象**：第 5 题（电路，四个图选项）在库里是 `short_answer`。extracted 里已经是 `choice` + A–D 四个图片选项 —— 不是识别错了，是 **published 比 extracted 旧**：publish 只按「口径版本」判跳过，extracted 后来改了（重抽/补题回写）也不重发，db_loader 于是加载了旧 published。
+
+**修复**：checkpoint 记录**源文件指纹**（extracted jsonl 的 sha256），跳过条件 = 口径版本一致 **且** 源指纹一致。extracted 一改就自动重发，不再需要 `--force`。
+
+**图注排版**：`markdownComponents` 新增 `p` 覆盖——同一段落里「图片 + 独占一行的短说明（图1/图 3/图2-1）」渲染成 `<figure>`，图注在图下方居中、`text-xs`、`--text-tertiary` 浅灰；正文里的「图 1 所示…」不会误判。

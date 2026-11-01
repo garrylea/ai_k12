@@ -21,7 +21,7 @@
 // 再让 katex 处理 math 节点（math 节点本身是 remark-math 在 mdast 阶段生成的，
 // 已是合法节点不会被 raw 重解析，但若反过来 katex 渲染出的 HTML 会被 raw 当
 // 文本再解析一次，破坏 KaTeX 输出）。
-import { useState } from 'react';
+import { Children, isValidElement, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Options } from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -273,6 +273,42 @@ export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgPr
 }
 
 /**
+ * 图注：紧跟在图片后面、独占一行的短说明（「图1」「图 3」「图2-1」）。
+ *
+ * 题面里的写法是 `![](xxx.jpg)\n图1`（同一个段落）。默认渲染会把「图1」当成
+ * 正文另起一行，看起来像多了一段。这里把「图片 + 短图注」收成 <figure>，
+ * 图注放图片下方居中、小字号、浅灰（视觉上属于图，不属于题干）。
+ */
+const FIG_CAPTION_RE = /^图\s*[0-9一二三四五六七八九十]+([-－—]\s*[0-9]+)?$/;
+
+function MarkdownParagraph({ children }: { children?: ReactNode }) {
+  const items = Children.toArray(children);
+  const images = items.filter(
+    (c) => isValidElement(c) && (c.type === MarkdownImg || c.type === 'img'),
+  );
+  const texts = items
+    .filter((c): c is string => typeof c === 'string')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (
+    images.length > 0
+    && texts.length === 1
+    && texts[0].length <= 10
+    && FIG_CAPTION_RE.test(texts[0])
+  ) {
+    return (
+      <figure className="my-2 flex flex-col items-center">
+        {images}
+        <figcaption className="mt-1 text-center text-xs text-[var(--text-tertiary)]">
+          {texts[0]}
+        </figcaption>
+      </figure>
+    );
+  }
+  return <p>{children}</p>;
+}
+
+/**
  * 默认 components：img + 表格带 border（题面/题块/解析里 HTML 表格与 GFM 表格
  * 都画出表格线，clear 可读）。其余元素用 react-markdown 默认。
  *
@@ -282,6 +318,7 @@ export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgPr
  */
 export const markdownComponents = {
   img: MarkdownImg,
+  p: MarkdownParagraph,
   table: ({ children }: { children?: ReactNode }) => (
     <div className="my-2 overflow-x-auto">
       <table className="border-collapse w-full text-sm">{children}</table>

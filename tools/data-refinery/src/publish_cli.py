@@ -163,8 +163,10 @@ def main(argv=None):
         if args.book and args.book not in str(rel_file):
             continue
         key = str(rel_file)
+        src_hash = hashlib.sha256(jsonl_path.read_bytes()).hexdigest()
         if (not args.force and not args.reconvert
-                and checkpoint.publish_version_of(key) == PUBLISH_VERSION):
+                and checkpoint.publish_version_of(key) == PUBLISH_VERSION
+                and checkpoint.publish_source_of(key) == src_hash):
             skipped += 1
             continue
         try:
@@ -196,7 +198,7 @@ def main(argv=None):
                 for item in out_items:
                     f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-            checkpoint.mark_published(key, PUBLISH_VERSION)
+            checkpoint.mark_published(key, PUBLISH_VERSION, src_hash)
             published += 1
         except Exception as e:
             print(f"[ERROR] {key}: {e}")
