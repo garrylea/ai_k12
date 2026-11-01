@@ -735,6 +735,28 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 
 ---
 
+### 4.29 PracticeHistory — `/api/student/practice-history`（学生端练习记录，2026-11-01，一期）
+
+学生端只读回放「我做过的卷子」。把**考试**（`exam_sessions` + `exam_answers`）与**专项练习**（`special_practice_sessions` + `special_answer_records`，2026-11-01 新建）合成一个视角返回；**不改动 `exam_answers` 与考试模块**。spec：`docs/superpowers/specs/2026-11-01-special-practice-answer-history-design.md`。
+
+**两条端点（均 `@Roles('student')`，归属一律取 JWT 的 `studentId`，不接受 body 里的 studentId）**：
+
+| # | 端点 | 返回（data） |
+|---|---|---|
+| 1 | `GET /api/student/practice-history?page=&pageSize=&subjectId=` | `{items:[{source, sessionId, subjectId, title, module, startedAt, completedAt, totalCount, correctCount}], total, page, pageSize}` |
+| 2 | `GET /api/student/practice-history/:source/:sessionId` | `{session:{同列表项}, questions:[{questionId, questionOrder, answerText, isCorrect, score, method, analysis, judgedAt, questionContent, questionAnswer, questionAnalysis, refType, refId, sentenceIndex, passageTitle, passageSentence}]}` |
+
+**口径**：
+
+1. **列表**：考试侧只取 `status='submitted'`；专项侧全部（含进行中）。两侧各取 `offset+pageSize` 条 -> 合并按 `startedAt` 倒序 -> 再 `slice(offset, offset+pageSize)`，**跨表分页不丢不重**。`page` 最小 1，`pageSize` 默认 20 / 上限 50；非法数字静默回默认值（不 400）。`subjectId` 非空时两侧都过滤。`source` = `exam` | `special`。
+2. **同一套卷子做多次 = 多个 session = 多条记录**（session 粒度，不做「同卷合并」）。
+3. **详情**：`source` 只允许 `exam`/`special`（否则 404/1002，不泄露端点存在性）；会话不存在或非本人 **一律 404/1002**。考试题面取 `questions.content`；语文三专项 `question_id` 为 NULL，题面改为 `passageTitle`（`chinese_passages.work_title`）+ `passageSentence`（`sentences[sentence_index].text`）。
+4. **`answerText` 结构**：数学/物理/化学/英语为原文；语文默写为 `{author,dynasty,body}` JSON；语文解释/含义为 `{terms,translation}` / `{terms,meaning,emotion}` JSON。
+5. **`isCorrect` 三态**：`true`/`false`/`null`（null = 在途/未判定；undetermined 落 null，不当 false）。
+6. **待办（二期）**：家长端逐卷查看 + 薄弱点汇总（数学/语文/物理 KP 维度升级为作答正确率，化学/道法卷子维度，英语除外），**本期不实现**。
+
+---
+
 ## 5. 核心数据流详细设计
 
 以下时序描述将架构 §5 的高层流程细化到端点级别。
