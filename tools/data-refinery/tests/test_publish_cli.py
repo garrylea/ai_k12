@@ -26,6 +26,33 @@ def _setup(tmp_path: Path) -> Path:
 
 
 class TestPublishCli:
+    def test_legacy_checkpoint_without_version_is_republished(self, tmp_path, capsys):
+        """旧版 checkpoint 没有口径版本 → 自动重发，用户不用记 --force。"""
+        out = _setup(tmp_path)
+        (out / ".publish_checkpoint.json").write_text(
+            json.dumps({"published": ["数学/试卷/试卷"], "publish_versions": {}},
+                       ensure_ascii=False),
+            encoding="utf-8",
+        )
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+        assert "Published: 1" in capsys.readouterr().out
+
+    def test_current_version_checkpoint_is_skipped(self, tmp_path, capsys):
+        out = _setup(tmp_path)
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+        capsys.readouterr()
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+        assert "Skipped: 1" in capsys.readouterr().out
+
     def test_publish_rewrites_and_materializes(self, tmp_path, capsys):
         out = _setup(tmp_path)
         with patch("publish_cli.RefineryConfig") as mock_config:

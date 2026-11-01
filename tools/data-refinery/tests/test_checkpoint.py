@@ -32,6 +32,35 @@ class TestRefineryCheckpoint:
         assert not cp.is_converted("x")
 
 
+class TestPublishVersion:
+    """发布口径升级后，旧产物不得被 checkpoint 当成「已发布」。"""
+
+    def test_version_roundtrip(self, tmp_path):
+        cp = RefineryCheckpoint(tmp_path / "cp.json")
+        cp.load()
+        cp.mark_published("a/b", 2)
+        assert cp.publish_version_of("a/b") == 2
+
+        cp2 = RefineryCheckpoint(tmp_path / "cp.json")
+        cp2.load()
+        assert cp2.publish_version_of("a/b") == 2
+
+    def test_legacy_entry_has_no_version(self, tmp_path):
+        path = tmp_path / "legacy.json"
+        path.write_text('{"published": ["a/b"]}', encoding="utf-8")
+        cp = RefineryCheckpoint(path)
+        cp.load()
+        assert cp.is_published("a/b")
+        assert cp.publish_version_of("a/b") is None
+
+    def test_unmark_drops_version(self, tmp_path):
+        cp = RefineryCheckpoint(tmp_path / "cp.json")
+        cp.load()
+        cp.mark_published("a/b", 2)
+        cp.unmark_published("a/b")
+        assert cp.publish_version_of("a/b") is None
+
+
 class TestTocParsed:
     def test_mark_and_query_toc_parsed(self, tmp_path):
         from checkpoint import RefineryCheckpoint

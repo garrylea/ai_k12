@@ -2291,6 +2291,7 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 - `_rewrite_text` 增 `strict`：缺源图默认告警并保留引用（publish 批量），`strict=True`（补题落库）直接抛 `MissingImageError`，不再静默。
 - `apply_fixes.apply_record`：含图记录按 `md` 目录 + `AssetStore` + `questions/{subject}/{hash}/{group_order}` 前缀物化后再写库；`answer=COALESCE(NULLIF(%s,''), answer)`，**空白答案不再覆盖已有答案**。
 - `db_loader.assert_materialized_images`：入库前护栏，题干/答案/解析/材料/选项出现非 `questions//textbooks//http(s)/data:` 前缀的图片引用直接报错拒收。
+- `checkpoint.PUBLISH_VERSION`（=2）：发布口径升级后**自动重发**旧产物，用户仍只需记 `import_cli` 一个命令，不需要 `--force`（2026-10-31 用户指出：能少记一个命令就少记一个）。
 
 **遗留数据**：content 仍残留 `images/` 6 题（4/6/52/53/54 卷）+ answer 16 题，需另行批量修复（重新物化后改写，不要简单 reload——published 缺手工补的题）。
 

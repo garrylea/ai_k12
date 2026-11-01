@@ -22,6 +22,11 @@ from models import ExamQuestion, TextbookCard
 from scope_filter import build_scope, describe, match_scope
 from subject_codes import subject_code_for_path as _subject_code_for
 
+# 发布口径版本：改写范围/规则变化时 +1。旧版本的产物会被**自动重发**，
+# 不需要用户记住 `--force`（2026-10-31 用户指出：能记一个命令就不该让人记两个）。
+# 2 = 起于 2026-10-31：answer 字段里的图片也一并物化改写。
+PUBLISH_VERSION = 2
+
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="物化图片 + 改写路径，输出 published JSONL")
@@ -158,7 +163,8 @@ def main(argv=None):
         if args.book and args.book not in str(rel_file):
             continue
         key = str(rel_file)
-        if not args.force and not args.reconvert and checkpoint.is_published(key):
+        if (not args.force and not args.reconvert
+                and checkpoint.publish_version_of(key) == PUBLISH_VERSION):
             skipped += 1
             continue
         try:
@@ -190,7 +196,7 @@ def main(argv=None):
                 for item in out_items:
                     f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-            checkpoint.mark_published(key)
+            checkpoint.mark_published(key, PUBLISH_VERSION)
             published += 1
         except Exception as e:
             print(f"[ERROR] {key}: {e}")
