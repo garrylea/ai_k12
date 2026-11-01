@@ -124,3 +124,26 @@ describe('图注（图片 + 紧跟的短说明）', () => {
     expect(html).not.toContain('<figure');
   });
 });
+
+
+describe('图注：题面区换了 img 包装组件也要生效', () => {
+  it('自定义 img（形状同 QuestionRunner）仍能识别为图片', () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        ReactMarkdown,
+        {
+          remarkPlugins: markdownRemarkPlugins,
+          rehypePlugins: markdownRehypePlugins,
+          components: {
+            ...markdownComponents,
+            img: (props: { src?: string; alt?: string }) => createElement('img', { ...props, 'data-wrapped': '1' }),
+          },
+        },
+        preprocessMarkdown('![](questions/physics/x/1/stem_01.jpg)\n图2'),
+      ),
+    );
+    expect(html).toContain('<figure');
+    expect(html).toContain('data-wrapped');
+    expect(html).toContain('图2');
+  });
+});

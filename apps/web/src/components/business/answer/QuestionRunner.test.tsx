@@ -479,3 +479,23 @@ describe('QuestionRunner 文本作答形态（2026-10-28：理科两栏 / 文字
     ));
   });
 });
+
+
+describe('题面图注', () => {
+  it('图片后紧跟的短说明渲染为 figcaption（不是正文段落）', () => {
+    render(
+      <QuestionRunner
+        questions={[{ n: '1', text: '如图 1 所示\n![](questions/physics/x/1/stem_01.jpg)\n图1', type: 'choice',
+                      options: [{ label: 'A', text: '甲' }, { label: 'B', text: '乙' }] }]}
+        subjectId={4}
+        draftKeyPrefix="cap"
+        variant="embedded"
+        draftDisabled
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+        onFinish={() => {}}
+      />,
+    );
+    const cap = screen.getByText('图1');
+    expect(cap.tagName).toBe('FIGCAPTION');
+  });
+});

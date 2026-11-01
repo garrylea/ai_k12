@@ -283,27 +283,44 @@ const FIG_CAPTION_RE = /^图\s*[0-9一二三四五六七八九十]+([-－—]\s*
 
 function MarkdownParagraph({ children }: { children?: ReactNode }) {
   const items = Children.toArray(children);
-  const images = items.filter(
-    (c) => isValidElement(c) && (c.type === MarkdownImg || c.type === 'img'),
-  );
-  const texts = items
-    .filter((c): c is string => typeof c === 'string')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (
-    images.length > 0
-    && texts.length === 1
-    && texts[0].length <= 10
-    && FIG_CAPTION_RE.test(texts[0])
-  ) {
-    return (
-      <figure className="my-2 flex flex-col items-center">
-        {images}
-        <figcaption className="mt-1 text-center text-xs text-[var(--text-tertiary)]">
-          {texts[0]}
-        </figcaption>
-      </figure>
-    );
+  // 按 **src 属性**认图，而不是按组件身份：题面区把 img 换成了 MarkdownImg 的包装
+  // 组件（QuestionRunner 的 questionMarkdownComponents），`c.type === MarkdownImg`
+  // 在那里永远不成立（2026-11-01 实测图注没生效）。
+  const isImg = (c: ReactNode) =>
+    isValidElement(c) && typeof (c.props as { src?: unknown }).src === 'string';
+  const isBlank = (c: ReactNode) => typeof c === 'string' && c.trim() === '';
+  const isBreak = (c: ReactNode) => isValidElement(c) && c.type === 'br';
+
+  // 段尾是否「图 + 短说明」。题干与图在同一段落里很常见：
+  // `如图 1 所示…\n![](…jpg)\n图1` —— 不能要求整段只有图片。
+  let end = items.length - 1;
+  while (end >= 0 && isBlank(items[end])) end -= 1;
+  const tail = end >= 0 ? items[end] : null;
+  const caption = typeof tail === 'string' ? tail.trim() : '';
+  if (caption && caption.length <= 10 && FIG_CAPTION_RE.test(caption)) {
+    const images: ReactNode[] = [];
+    let j = end - 1;
+    while (j >= 0) {
+      const c = items[j];
+      if (isBlank(c) || isBreak(c)) { j -= 1; continue; }
+      if (isImg(c)) { images.unshift(c); j -= 1; continue; }
+      break;
+    }
+    if (images.length > 0) {
+      const lead = items.slice(0, j + 1);
+      const hasLead = lead.some((c) => !isBlank(c));
+      return (
+        <>
+          {hasLead && <p>{lead}</p>}
+          <figure className="my-2 flex flex-col items-center">
+            {images}
+            <figcaption className="mt-1 text-center text-xs text-[var(--text-tertiary)]">
+              {caption}
+            </figcaption>
+          </figure>
+        </>
+      );
+    }
   }
   return <p>{children}</p>;
 }
