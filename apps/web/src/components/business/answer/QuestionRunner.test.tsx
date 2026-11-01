@@ -594,31 +594,35 @@ describe('题号后面的题型标签', () => {
   });
 });
 
+// 往作答框里贴一张 png：jsdom 无剪贴板，只能手工挂 clipboardData
+function pasteImage(ta: HTMLTextAreaElement) {
+  const evt = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData?: unknown };
+  Object.defineProperty(evt, 'clipboardData', {
+    value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => new File(['x'], 'a.png', { type: 'image/png' }) }] },
+  });
+  fireEvent(ta, evt);
+}
+
+const submitBtn = () => screen.getByRole('button', { name: '提交' }) as HTMLButtonElement;
+
+// 作答图相关用例的公共 props（两个 describe 共用：上传中禁提交 / 迟到结果归属）
+const imageRunnerProps = {
+  subjectId: 1,
+  draftKeyPrefix: 'img',
+  variant: 'embedded' as const,
+  draftDisabled: true,
+  hints: {},
+  onRequestHint: async () => 'hint',
+  headerActions: () => null,
+  onQuestionChange: () => {},
+  onSubmit: async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: null, method: 'self_assess' }),
+  onFinish: async () => {},
+};
+
 describe('作答图上传中禁提交（防占位文本落库）', () => {
-  const runnerProps = {
-    subjectId: 1,
-    draftKeyPrefix: 'img',
-    variant: 'embedded' as const,
-    draftDisabled: true,
-    hints: {},
-    onRequestHint: async () => 'hint',
-    headerActions: () => null,
-    onQuestionChange: () => {},
-    onSubmit: async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: null, method: 'self_assess' }),
-    onFinish: async () => {},
-  };
 
-  // 往作答框里贴一张 png：jsdom 无剪贴板，只能手工挂 clipboardData
-  function pasteImage(ta: HTMLTextAreaElement) {
-    const evt = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData?: unknown };
-    Object.defineProperty(evt, 'clipboardData', {
-      value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => new File(['x'], 'a.png', { type: 'image/png' }) }] },
-    });
-    fireEvent(ta, evt);
-  }
-
-  const submitBtn = () => screen.getByRole('button', { name: '提交' }) as HTMLButtonElement;
-
+  // 每个用例都从「上传未发起」开始：不清掉上个用例遗留的 resolve 的话，
+  // 用例里 resolve 的是上一个 render 的 promise，断言会假性通过。
   beforeEach(() => {
     uploadControl.resolve = undefined;
     vi.mocked(uploadFile).mockClear();
@@ -630,7 +634,7 @@ describe('作答图上传中禁提交（防占位文本落库）', () => {
       <QuestionRunner
         questions={questions}
         answerInput="latex"
-        {...runnerProps}
+        {...imageRunnerProps}
       />,
     );
     const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -662,7 +666,7 @@ describe('作答图上传中禁提交（防占位文本落库）', () => {
         questions={[{ n: '1', text: '电路图题', type: 'short_answer' }]}
         answerInput="latex"
         initialAnswers={{ '1': '2. ［图1 上传中…］' }}
-        {...runnerProps}
+        {...imageRunnerProps}
       />,
     );
     await waitFor(() => expect(submitBtn().disabled).toBe(true));
@@ -683,7 +687,7 @@ describe('作答图上传中禁提交（防占位文本落库）', () => {
         questions={questions}
         answerInput="latex"
         startIndex={1}
-        {...runnerProps}
+        {...imageRunnerProps}
       />,
     );
     const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -697,5 +701,94 @@ describe('作答图上传中禁提交（防占位文本落库）', () => {
 
     expect(submitBtn().disabled).toBe(false);
     expect(submitBtn().title).toBe('提交');
+  });
+});
+
+// 迟到的上传结果必须写回「发起时的题号」（spec §4.1 第 9 步）。
+// 修复前 updateAnswer 用的是 currentNRef（此刻已是新题），旧图 URL / 旧题整段文本会落进新题。
+describe('作答图上传结果按发起题号写回（切题后迟到的上传）', () => {
+  beforeEach(() => {
+    uploadControl.resolve = undefined;
+    vi.mocked(uploadFile).mockClear();
+  });
+
+  it('切到选择题后迟到 resolve：新题不被污染（仍禁用），结果写回原题', async () => {
+    const questions: RunnerQuestion[] = [
+      { n: '0', text: '选择题题干', type: 'choice', options: [{ label: 'A', text: '选项A' }, { label: 'B', text: '选项B' }] },
+      { n: '1', text: '解答题题干', type: 'short_answer' },
+    ];
+    const user = userEvent.setup();
+    render(<QuestionRunner questions={questions} answerInput="latex" startIndex={1} {...imageRunnerProps} />);
+
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
+    await user.type(ta, '2.');
+    pasteImage(ta);
+    await waitFor(() => expect(ta.value).toContain('上传中…'));
+
+    // 切到选择题：编辑器卸载（valueRef 冻结在旧题文本上，这正是污染源）
+    await user.click(screen.getByRole('button', { name: /上一题/ }));
+    expect(screen.queryByRole('textbox')).toBeNull();
+
+    await act(async () => {
+      uploadControl.resolve!({ fileId: 1, url: '/uploads/a/b.png' });
+    });
+
+    // ① 新题没作答：修复前旧题整段文本会落进来，按钮变成可点/标题变「提交」
+    expect(submitBtn().disabled).toBe(true);
+    expect(submitBtn().title).toBe('请先作答');
+
+    // ② 结果确实写回了原题（而不是丢失）：答完选择题回到 q1 能看到真 URL
+    await user.click(screen.getByRole('radio', { name: /选项A/ }));
+    await user.click(submitBtn());
+    expect(await screen.findByText('解答题题干')).toBeTruthy();
+    const back = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(back.value).toContain('![图1](/uploads/a/b.png)');
+    expect(back.value).not.toContain('上传中');
+  });
+
+  it('LaTeX→LaTeX 切题（实例不卸载）：迟到 resolve 仍写回原题，占位被结算而非丢弃', async () => {
+    const questions: RunnerQuestion[] = [
+      { n: '0', text: '第一题题干', type: 'short_answer' },
+      { n: '1', text: '第二题题干', type: 'short_answer' },
+    ];
+    const user = userEvent.setup();
+    render(<QuestionRunner questions={questions} answerInput="latex" startIndex={1} {...imageRunnerProps} />);
+
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
+    pasteImage(ta);
+    await waitFor(() => expect(ta.value).toContain('上传中…'));
+
+    await user.click(screen.getByRole('button', { name: /上一题/ }));
+    const q0 = screen.getByRole('textbox') as HTMLTextAreaElement;
+    await user.type(q0, '第一题答案');
+
+    await act(async () => {
+      uploadControl.resolve!({ fileId: 1, url: '/uploads/a/b.png' });
+    });
+
+    // 迟到结果不能落到当前这道 LaTeX 题上（实例复用 / 未复用都必须守住）
+    expect(q0.value).toBe('第一题答案');
+    expect(q0.value).not.toContain('![');
+
+    // 答掉 q0 前进到 q1：占位已被真实 URL 替换，不是被丢弃后残留的上传中标记
+    await user.click(submitBtn());
+    expect(await screen.findByText('第二题题干')).toBeTruthy();
+    const back = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(back.value).toContain('![图1](/uploads/a/b.png)');
+    expect(back.value).not.toContain('上传中');
+  });
+
+  it('答案里残留「上传失败」标记时同样禁用提交（失败文本不能当答案交上去）', async () => {
+    render(
+      <QuestionRunner
+        questions={[{ n: '1', text: '电路图题', type: 'short_answer' }]}
+        answerInput="latex"
+        initialAnswers={{ '1': '2. ［图1 上传失败］' }}
+        {...imageRunnerProps}
+      />,
+    );
+    await waitFor(() => expect(submitBtn().disabled).toBe(true));
+    // 与「上传中」区分文案：学生该做的是删标记后重新粘贴，不是等
+    expect(submitBtn().title).toBe('有图片上传失败，请删除标记后重新粘贴');
   });
 });

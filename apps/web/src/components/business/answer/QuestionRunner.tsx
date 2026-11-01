@@ -143,6 +143,10 @@ export function QuestionRunner({
   // 已被切题 effect 归零 —— 此时扫文中的占位文本才拦得住「带着占位标记提交」。
   // （编辑器仍在场时的上传态由 answerUploading 负责，两条判据各管一段，别互相替代。）
   const hasPendingUpload = /上传中…/.test(answer);
+  // 失败标记同样不能当答案交上去：上传失败后文本里留的是 ［图N 上传失败］，
+  // 放行会把它送进 AI 判题、并长期存进错题本（spec §4.1 第 8 步）。
+  // 与上传中分开判定，是为了让 tooltip 说清该重试还是该删标记。
+  const hasUploadFailure = /上传失败］/.test(answer);
   // 文本作答形态：理科（数学/物理/化学）保留左输入+右预览；语文/英语等单栏纯文本
   const latexInput = (answerInput ?? (isMathLikeSubject(subjectId) ? 'latex' : 'plain')) === 'latex';
   // 非理科（语文/英语等文字学科）：阅读量大、作答字数少 —— 题干上限提到 2/3，作答区不再留 280px 保底；
@@ -198,10 +202,17 @@ export function QuestionRunner({
   // 初始作答（续考恢复）在挂载时并入映射：首次 mount 的 initialAnswers 即为最终数据
   // （父层都是数据就绪后才挂载本组件），之后切题回填即可取到已答内容。
   const answerByNRef = useRef<Record<string, string>>(initialAnswers ?? {});
-  const updateAnswer = useCallback((next: string) => {
-    setAnswer(next);
-    if (currentNRef.current) answerByNRef.current[currentNRef.current] = next;
+  // 写哪一题由「发起时」的题号决定，而不是写入时的 currentNRef：作答图的上传是异步的，
+  // 结果回来时学生可能已经切题（切到选择题时编辑器甚至已卸载、valueRef 冻结在旧题文本）。
+  // 按 currentNRef 落笔会让旧题的整段文本/URL 写进新题 —— 新选择题会凭空变成「有答案、可提交」。
+  // 因此：始终更新该题的作答缓存；只有还停在该题时才驱动输入框，否则等切回来由回填 effect 取出
+  // （spec §4.1 第 9 步）。
+  const updateAnswerFor = useCallback((n: string, next: string) => {
+    if (!n) return;
+    answerByNRef.current[n] = next;
+    if (currentNRef.current === n) setAnswer(next);
   }, []);
+  const updateAnswer = useCallback((next: string) => updateAnswerFor(currentNRef.current, next), [updateAnswerFor]);
 
   // 切题时重置提示面板展示态（提示文本本身存于 props.hints，跨题保留），
   // 并回填当前题已记录的作答（answerByNRef）——「上一题」回退时恢复之前
@@ -597,11 +608,18 @@ export function QuestionRunner({
           ) : latexInput ? (
             <>
               {/* min-w-0：训练轨草稿面板并排占位后答题列会窄到 ~440px，两个 50% 分栏默认
-                  min-width:auto 会被内容撑破、把面板顶出可视区 */}
+                  min-width:auto 会被内容撑破、把面板顶出可视区。
+                  key={q.n}：编辑器实例随题重建。切到另一道 LaTeX 题时若不重建，实例会被复用，
+                  它的 valueRef 跟着换成新题文本 —— 迟到的 replaceToken 精确匹配落空，图片结果
+                  被静默丢弃、原题占位永远结算不掉。重建后旧实例的 valueRef 冻在原题文本上，
+                  迟到的替换仍然命中，再经 onChange → updateAnswerFor(原题号) 写回原题。
+                  onChange 捕获渲染时的题号（不是写入时的 currentNRef）：上传结果可能在上层
+                  已切题后才回来，写哪题由发起时决定（见 updateAnswerFor）。 */}
               <div className="w-1/2 min-w-0 border-r border-[var(--bg-subtle)] flex flex-col">
                 <LatexEditor
+                  key={q.n}
                   value={answer}
-                  onChange={updateAnswer}
+                  onChange={(next) => updateAnswerFor(q.n, next)}
                   scrollSync={previewScrollSync}
                   onUploadingChange={setAnswerUploading}
                 />
@@ -662,7 +680,7 @@ export function QuestionRunner({
           </div>
           <button
             onClick={handleSubmit}
-            disabled={!answer.trim() || answerUploading || hasPendingUpload}
+            disabled={!answer.trim() || answerUploading || hasPendingUpload || hasUploadFailure}
             className="w-12 h-12 rounded-full bg-[var(--brand-500)] text-white flex items-center justify-center disabled:opacity-40 hover:bg-[var(--brand-600)] transition-all shadow-md"
             title={
               !answer.trim()
@@ -671,7 +689,9 @@ export function QuestionRunner({
                   ? '图片上传中'
                   : hasPendingUpload
                     ? '有图片未上传完成，请删除标记后重试'
-                    : '提交'
+                    : hasUploadFailure
+                      ? '有图片上传失败，请删除标记后重新粘贴'
+                      : '提交'
             }
             aria-label="提交"
           >
