@@ -11,7 +11,7 @@ import {
   type WeakPointRecommendation,
 } from '@/services/api';
 import { getAuthItem } from '@/services/authStorage';
-import { getTrainingSubject, parseSubjectId } from '@/constants';
+import { getTrainingSubject, parseSubjectId, subjectHomePath, subjectName } from '@/constants';
 import { MATH_TASK_CODE, pickPracticeCount, usePointTiers } from './point-tiers';
 import { heatForNode, isDashedBorder, summarizeParent } from './weak-point-heat';
 import type { TargetedRunHandoff } from './run-handoff';
@@ -176,9 +176,9 @@ export default function WeakPointGraphPage() {
     >
       <div className="w-full max-w-5xl px-4 sm:px-8 py-8">
         <PageHeader
-          to="/student/training/home"
+          to={subjectHomePath(subjectId)}
           caption="返回训练"
-          title="薄弱点图谱 · 数学"
+          title={`${subjectName(subjectId)} · 薄弱点图谱`}
           titleClassName="text-3xl font-extrabold"
         />
 

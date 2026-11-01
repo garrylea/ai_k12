@@ -70,6 +70,7 @@ function renderPage(initialEntry: string = '/student/training/weak-points') {
   const router = createMemoryRouter(
     [
       { path: '/student/training/weak-points', element: <WeakPointGraphPage /> },
+      { path: '/student/training/home', element: <div>训练首页桩</div> },
       { path: '/student/training/targeted/run', element: <div>专项作答页桩</div> },
       { path: '/student/training/errors', element: <div>错题页桩</div> },
       { path: '/student/training/targeted', element: <div>专项配置页桩</div> },
@@ -455,5 +456,35 @@ describe('WeakPointGraphPage 按学科取图谱与档位（Task 11）', () => {
     // mock 只下发 physics_targeted 组：若页面拿错 taskCode，会找不到组、空档位、显示重试。
     // `toHaveBeenCalled()` + mock 单组结构 = 间接钉住 `usePointTiers` 拿到正确 taskCode。
     expect(getMyPointRules).toHaveBeenCalled();
+  });
+
+  it('?subjectId=4 时标题显示「物理」、返回按钮指向物理训练首页（Fix I-1/I-2）', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue({
+      subjectId: 4,
+      candidates: [],
+      recommendation: null,
+      reason: 'no_qualified_candidate',
+    });
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'physics_targeted', taskName: '物理专项', tiers: [{ tierKey: '3' }] }],
+    });
+
+    const { router } = renderPage('/student/training/weak-points?subjectId=4');
+
+    // Fix I-1：标题按当前学科动态生成 —— 物理 → 「物理 · 薄弱点图谱」（原硬编码「薄弱点图谱 · 数学」）
+    expect(await screen.findByText('物理 · 薄弱点图谱')).toBeInTheDocument();
+    // 旧硬编码字面量不应再出现
+    expect(screen.queryByText('薄弱点图谱 · 数学')).toBeNull();
+
+    // Fix I-2：返回按钮的 to 走 subjectHomePath(subjectId) —— 物理为 /student/training/home?subjectId=4。
+    // PageHeader 内部是 BackButton（button + navigate(to)），没有 <a href>；按既有 goErrors 测试的模式
+    // （line 261-275）点击后断言 router.state.location。
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/home?subjectId=4',
+      ),
+    );
   });
 });
