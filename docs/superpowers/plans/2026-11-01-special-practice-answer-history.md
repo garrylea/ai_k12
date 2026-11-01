@@ -1785,6 +1785,24 @@ git commit -m "docs: 同步练习记录端点 + UX §1.5 + 学情批清单二期
 
 ## Self-Review
 
+### ⚠️ 执行中发现的 plan 缺口（Task 10，已补）
+
+**原 plan 的 Task 3 只做了后端**（DTO 加 `sessionUid` + service 旁路写入），但**没有任何任务让前端生成 `sessionUid`**。后果：专项练习判题永远不带 `sessionUid` → `special_answer_records` 永远为空 → 学生端「练习记录」只能看到考试，专项记录永远不出现。
+
+**补漏（commit `f0767e8`）**：
+- 新增 `apps/web/src/utils/sessionUid.ts`（`crypto.randomUUID()`，非 secure context 降级为时间戳+随机串）
+- `api.ts` 的 5 个判题函数 payload 加可选 `sessionUid/title/questionCount/questionOrder`
+- 5 个答题页在挂载时生成一次 UUID（`useMemo(() => newSessionUid(), [])`），每次判题带上：
+  - `TargetedRunPage.tsx`（数学/物理/化学）
+  - `english/VocabularyRunPage.tsx`（英语背词）
+  - `chinese/DictationRunPage.tsx`（默写）
+  - `chinese/InterpretationRunPage.tsx`（解释）
+  - `chinese/MeaningRunPage.tsx`（含义）
+- `ErrorPracticeRunPage.tsx` **不传**（错题练习不在 spec 的「考试 + 专项练习」范围内）
+- 测试：`sessionUid.test.ts` 3 条 + `TargetedRunPage.test.tsx` 断言钉住 `sessionUid` 非空
+
+**教训**：跨前后端的「可选字段」特性，plan 必须**同时列出前端生成点**，否则后端能力悬空、功能静默不生效。后续同类特性在 Self-Review 里加一条「前端是否真的传了」。
+
 ### Spec 覆盖检查
 | spec 章节 | 覆盖任务 |
 |---|---|
