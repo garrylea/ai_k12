@@ -214,6 +214,18 @@ export function QuestionRunner({
   }, []);
   const updateAnswer = useCallback((next: string) => updateAnswerFor(currentNRef.current, next), [updateAnswerFor]);
 
+  /** 迟到上传结果按「题号 + 占位串」精确补丁写回：
+   *  不能整段覆盖——学生切走再回来可能已经继续打字，快照会把它吞掉。 */
+  const replaceAnswerTokenFor = useCallback((n: string, token: string, replacement: string) => {
+    if (!n) return;
+    const cur = answerByNRef.current[n] ?? '';
+    const idx = cur.indexOf(token);
+    if (idx < 0) return; // 占位已被学生删掉 → 丢弃结果，绝不追加
+    const next = cur.slice(0, idx) + replacement + cur.slice(idx + token.length);
+    answerByNRef.current[n] = next;
+    if (currentNRef.current === n) setAnswer(next);
+  }, []);
+
   // 切题时重置提示面板展示态（提示文本本身存于 props.hints，跨题保留），
   // 并回填当前题已记录的作答（answerByNRef）——「上一题」回退时恢复之前
   // 选中/填写的值，新题回填空串。useLayoutEffect 同步在 paint 前回填，
@@ -612,14 +624,15 @@ export function QuestionRunner({
                   key={q.n}：编辑器实例随题重建。切到另一道 LaTeX 题时若不重建，实例会被复用，
                   它的 valueRef 跟着换成新题文本 —— 迟到的 replaceToken 精确匹配落空，图片结果
                   被静默丢弃、原题占位永远结算不掉。重建后旧实例的 valueRef 冻在原题文本上，
-                  迟到的替换仍然命中，再经 onChange → updateAnswerFor(原题号) 写回原题。
-                  onChange 捕获渲染时的题号（不是写入时的 currentNRef）：上传结果可能在上层
-                  已切题后才回来，写哪题由发起时决定（见 updateAnswerFor）。 */}
+                  迟到的替换仍然命中，再经 onReplaceToken → replaceAnswerTokenFor(原题号) 补丁写回。
+                  onChange / onReplaceToken 都捕获渲染时的题号（不是写入时的 currentNRef）：上传结果
+                  可能在切题后才回来，写哪题由发起时决定（见 updateAnswerFor / replaceAnswerTokenFor）。 */}
               <div className="w-1/2 min-w-0 border-r border-[var(--bg-subtle)] flex flex-col">
                 <LatexEditor
                   key={q.n}
                   value={answer}
                   onChange={(next) => updateAnswerFor(q.n, next)}
+                  onReplaceToken={(token, replacement) => replaceAnswerTokenFor(q.n, token, replacement)}
                   scrollSync={previewScrollSync}
                   onUploadingChange={setAnswerUploading}
                 />

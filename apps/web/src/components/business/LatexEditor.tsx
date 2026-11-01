@@ -13,6 +13,9 @@ interface Props {
   scrollSync?: { current: PreviewScrollSync };
   /** 有图片正在上传时回调 true：上层据此禁用提交，避免占位文本落库（spec §4.1 第 8 步） */
   onUploadingChange?: (uploading: boolean) => void;
+  /** 异步上传结果写回：给了就交给上层按题号打补丁（避免整段快照覆盖学生新输入）；
+   *  不给则就地替换当前文本（独立使用/单测的兜底路径）。 */
+  onReplaceToken?: (token: string, replacement: string) => void;
 }
 
 /** 模板光标标记：插入后光标落在此处，标记本身不写入文本框。
@@ -34,7 +37,7 @@ function nextImageIndex(text: string): number {
   return max + 1;
 }
 
-export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: Props) {
+export function LatexEditor({ value, onChange, scrollSync, onUploadingChange, onReplaceToken }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [uploading, setUploading] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -106,6 +109,12 @@ export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: 
 
   /** 精确替换一个占位串；找不到（学生已删除）就丢弃结果，绝不追加或复活 */
   const replaceToken = (token: string, replacement: string) => {
+    if (onReplaceToken) {
+      // 交给上层按题号作用于「该题最新缓存」：本实例可能已卸载、valueRef 冻在发起上传时的
+      // 旧快照上，在这里 emit 会把学生之后输入的内容整段吞掉。编辑器自身文本随后由 value 回流。
+      onReplaceToken(token, replacement);
+      return;
+    }
     const cur = valueRef.current;
     const idx = cur.indexOf(token);
     if (idx < 0) return;

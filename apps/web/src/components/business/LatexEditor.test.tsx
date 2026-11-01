@@ -437,4 +437,21 @@ describe('LatexEditor 贴图', () => {
     resolve({ fileId: 1, url: '/uploads/x.jpg' });
     await waitFor(() => expect(onUploadingChange).toHaveBeenCalledWith(false));
   });
+
+  it('给了 onReplaceToken：结果交给上层按题号补丁，编辑器不再整段回写', async () => {
+    // 上层拿最新缓存做精确替换；编辑器若在这里 emit，父层收到的仍是发起上传时的整段快照，
+    // 学生之后打的字会被吞掉（QuestionRunner 的回归用例守的就是这条链路）。
+    vi.mocked(uploadFile).mockResolvedValue({ fileId: 1, url: '/uploads/x.jpg' });
+    const onChange = vi.fn();
+    const onReplaceToken = vi.fn();
+    render(<LatexEditor value="" onChange={onChange} onReplaceToken={onReplaceToken} />);
+    const el = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    pasteImages(el, [img()]);
+
+    await waitFor(() => expect(onReplaceToken).toHaveBeenCalledTimes(1));
+    expect(onReplaceToken).toHaveBeenCalledWith('［图1 上传中…］', '![图1](/uploads/x.jpg)');
+    // 唯一允许的 onChange 是插入占位那一次；替换不得回写整段文本
+    expect(onChange.mock.calls.some(([v]) => String(v).includes('![图1]'))).toBe(false);
+  });
 });

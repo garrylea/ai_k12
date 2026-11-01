@@ -778,6 +778,42 @@ describe('作答图上传结果按发起题号写回（切题后迟到的上传�
     expect(back.value).not.toContain('上传中');
   });
 
+  it('回到原题并继续输入后才 resolve：按占位补丁写回，不吞掉学生新输入', async () => {
+    // 复现路径：q1 贴图（上传在飞）→ 切到 q0 → 答完提交回到 q1（占位已回填）→ 继续打字 → resolve。
+    // 修复前迟到回调把「发起上传时的整段文本快照」emit 回父层，「继续写」被静默吞掉。
+    const questions: RunnerQuestion[] = [
+      { n: '0', text: '选择题题干', type: 'choice', options: [{ label: 'A', text: '选项A' }, { label: 'B', text: '选项B' }] },
+      { n: '1', text: '解答题题干', type: 'short_answer' },
+    ];
+    const user = userEvent.setup();
+    render(<QuestionRunner questions={questions} answerInput="latex" startIndex={1} {...imageRunnerProps} />);
+
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
+    await user.type(ta, '2.');
+    pasteImage(ta);
+    await waitFor(() => expect(ta.value).toContain('上传中…'));
+
+    // 切到 q0 把 q1 的编辑器卸载（旧实例的 valueRef 从此冻在贴图时那一刻的文本上）
+    await user.click(screen.getByRole('button', { name: /上一题/ }));
+    await user.click(screen.getByRole('radio', { name: /选项A/ }));
+    await user.click(submitBtn());
+    expect(await screen.findByText('解答题题干')).toBeTruthy();
+
+    // 回到 q1：占位由切题回填重新出现在输入框里，学生继续往后写
+    const back = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(back.value).toContain('上传中…');
+    await user.type(back, '继续写');
+
+    await act(async () => {
+      uploadControl.resolve!({ fileId: 1, url: '/uploads/a/b.png' });
+    });
+
+    await waitFor(() => expect(back.value).toContain('![图1](/uploads/a/b.png)'));
+    // 图片补丁必须落在占位处，学生之后打的字一个字都不能少
+    expect(back.value).toContain('继续写');
+    expect(back.value).not.toContain('上传中');
+  });
+
   it('答案里残留「上传失败」标记时同样禁用提交（失败文本不能当答案交上去）', async () => {
     render(
       <QuestionRunner
