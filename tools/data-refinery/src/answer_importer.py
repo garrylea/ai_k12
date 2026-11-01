@@ -133,6 +133,7 @@ class DiffEntry:
     old_explanation: str | None
     new_explanation: str | None
     type_change: tuple[str, str] | None
+    explanation_cleared: bool = False
 
 
 def build_diff(paired: list[tuple[AnswerRecord, QuestionRow]]) -> list[DiffEntry]:
@@ -142,6 +143,8 @@ def build_diff(paired: list[tuple[AnswerRecord, QuestionRow]]) -> list[DiffEntry
         answer_changed = rec.answer is not None and rec.answer != (row.answer or "")
         approach_changed = rec.approach is not None and rec.approach != (row.approach or "")
         expl_changed = rec.explanation is not None and rec.explanation != (row.explanation or "")
+        # 答案变了且记录没带新解析 -> 旧解析作废（见 build_update_sql）
+        expl_cleared = answer_changed and rec.explanation is None and bool((row.explanation or "").strip())
         if not (answer_changed or approach_changed or expl_changed or type_change):
             continue  # 幂等：无变化不出 diff
         diff.append(DiffEntry(
@@ -155,6 +158,7 @@ def build_diff(paired: list[tuple[AnswerRecord, QuestionRow]]) -> list[DiffEntry
             old_explanation=row.explanation,
             new_explanation=rec.explanation,
             type_change=type_change,
+            explanation_cleared=expl_cleared,
         ))
     return diff
 
@@ -211,6 +215,8 @@ def format_report(
                 line = _field_line(name, old, new)
                 if line:
                     lines.append(line)
+            if d.explanation_cleared:
+                lines.append("    解析: (已作废——答案变更，下次判错重新生成)")
             if d.type_change:
                 lines.append(f"    题型: {d.type_change[0]} -> {d.type_change[1]}")
         lines.append("")

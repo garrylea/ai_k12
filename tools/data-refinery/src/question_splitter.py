@@ -403,27 +403,130 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
     return stem, opts
 
 
-def parse_answer_table(line: str) -> dict[int, str]:
-    """解析 HTML 表格提取选择题答案（题号→答案）。
+_CELL_DIGITS_RE = re.compile(r"^\d{1,2}$")
+_CELL_CHOICE_RE = re.compile(r"^[A-D]{1,4}$")
 
-    真实试卷选择题答案常在表格里：
-    <table><tr><td>题号</td><td>1</td>...<td>8</td></tr>
-           <tr><td>答案</td><td>A</td>...<td>D</td></tr></table>
+
+def _table_rows(line: str) -> list[list[str]]:
+    """HTML 表格 → 行×格文本（剥标签、去首尾空白；rowspan/colspan 只留空文本）。"""
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", line, re.DOTALL)
+    return [
+        [re.sub(r"<[^>]+>", "", c).strip()
+         for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)]
+        for row in rows
+    ]
+
+
+def _strip_leading_label(cells: list[str], ok) -> list[str]:
+    """丢掉行首「不是内容」的那一格。
+
+    标签文字各卷不一样（题号/答案/题目/选项/得分…），只能按「它不像本题行的内容」
+    判断，不能维护白名单（数学卷实测有 `选项`）。空格不在此丢 —— 空角格另有对齐规则。
     """
-    import re as _re
-    rows = _re.findall(r'<tr>(.*?)</tr>', line, _re.DOTALL)
+    body = list(cells)
+    if body and body[0] and not ok(body[0]):
+        body = body[1:]
+    return body
+
+
+def _number_cells(cells: list[str]) -> list[str]:
+    """取出题号行的数字格；不是题号行返回 []。"""
+    body = _strip_leading_label(cells, lambda c: bool(_CELL_DIGITS_RE.match(c)))
+    while body and not body[-1]:
+        body.pop()  # 合并单元格占位在行尾
+    if len(body) >= 2 and all(_CELL_DIGITS_RE.match(c) for c in body):
+        return body
+    return []
+
+
+def _choice_body(cells: list[str]) -> list[str]:
+    body = _strip_leading_label(cells, lambda c: bool(_CELL_CHOICE_RE.match(c)))
+    while body and not body[-1]:
+        body.pop()
+    return body
+
+
+def _looks_like_choice_row(cells: list[str]) -> bool:
+    """像答案行（全是 A–D 组合），但未必和题号行对齐 —— 用来区分「答案表错位」与「非答案表」。"""
+    body = _choice_body(cells)
+    return len(body) >= 2 and any(body) and all(
+        not c or _CELL_CHOICE_RE.match(c) for c in body)
+
+
+def _choice_cells(cells: list[str], expected: int) -> list[str]:
+    """取出答案行的选项格；不是答案行、或列数对不上返回 []。
+
+    允许空串（该题缺答案）；`expected` 用来识别空角格：答案行比题号行多一格且首格
+    为空，说明那是表格左上角的空标签位，不是某一题的答案。
+    """
+    body = _choice_body(cells)
+    if len(body) == expected + 1 and body[0] == "":
+        body = body[1:]
+    if len(body) == expected and any(body) and all(
+            not c or _CELL_CHOICE_RE.match(c) for c in body):
+        return body
+    return []
+
+
+def _parse_horizontal(rows: list[list[str]]) -> dict[int, str]:
+    """横向表：数字行 + 下一行答案行，一张表里可以有多组（11–15 常在第二组）。"""
+    result: dict[int, str] = {}
+    for i in range(len(rows) - 1):
+        nums = _number_cells(rows[i])
+        if not nums:
+            continue
+        answers = _choice_cells(rows[i + 1], len(nums))
+        if not answers:
+            # 列数对不齐（OCR 拆并格）：这一组不写，宁空不猜。
+            # 只对「答案行」喊话 —— 数学/统计表（题号 + 分值）在答案段里很常见，
+            # 它们不喊，否则每跑一次都刷一屏无关告警。
+            if _looks_like_choice_row(rows[i + 1]):
+                print(f"[WARN] 答案表列数不齐（题号 {nums[:3]}…，答案 "
+                      f"{len(_choice_body(rows[i + 1]))} 格），该组不写", flush=True)
+            continue
+        for n, a in zip(nums, answers):
+            if a:
+                result[int(n)] = a
+    return result
+
+
+def _parse_vertical(rows: list[list[str]]) -> dict[int, str]:
+    """纵向表：一行一对「题号 | 答案」，表头行（题号/答案）自动跳过。"""
+    result: dict[int, str] = {}
+    pairs = 0
+    for row in rows:
+        body = [c for c in row if c]  # 空角格/合并占位不参与
+        if len(body) != 2 or not _CELL_DIGITS_RE.match(body[0]):
+            continue
+        if not _CELL_CHOICE_RE.match(body[1]):
+            continue
+        pairs += 1
+        result[int(body[0])] = body[1]
+    return result if pairs >= 2 else {}
+
+
+def answer_table_numbers(line: str) -> set[int]:
+    """这张表里「声明了有答案」的题号集合（供调用方核对有没有解析漏）。"""
+    return {int(n) for row in _table_rows(line) for n in _number_cells(row)}
+
+
+def parse_answer_table(line: str) -> dict[int, str]:
+    """解析 HTML 表格提取选择题答案（题号→答案），按版式分派而非按位置猜。
+
+    真实试卷的答案表有三种版式（2026-11 实测 47 份带答案段的 md）：
+    ① 双标签：`题号|1|2…` + `答案|A|B…` —— 两行各有一个标签格；
+    ② 单标签：`题号|1|2…` + `A|B…`    —— 只有数字行有标签格；
+    ③ 无表头：`1|2|3…` + `C|D|A…`     —— 第一格就是题号 1，一格都不能丢。
+    旧实现按①写死「每行跳过第 0 格」，②③ 会把首题答案整格丢掉（北师大实验
+    2024 物理卷第 1 题 C 丢失、入库成了别的值）。
+
+    非答案表（数学的数据表 `x|…|0|1|2` + 数值行）整表返回 {}；列数对不齐的那一组
+    不写。都不猜。
+    """
+    rows = _table_rows(line)
     if len(rows) < 2:
         return {}
-    header = _re.findall(r'<td[^>]*>(.*?)</td>', rows[0], _re.DOTALL)
-    answer_row = _re.findall(r'<td[^>]*>(.*?)</td>', rows[1], _re.DOTALL)
-    result: dict[int, str] = {}
-    for i in range(1, min(len(header), len(answer_row))):
-        try:
-            n = int(header[i].strip())
-            result[n] = answer_row[i].strip()
-        except ValueError:
-            continue
-    return result
+    return _parse_horizontal(rows) or _parse_vertical(rows)
 
 
 @dataclass
@@ -680,6 +783,14 @@ def split_page(text: str, md_path: Path,
             # 表格格式选择题答案（<table>...<tr><td>题号</td>...<td>答案</td>...</table>）
             if '<table>' in line or '<table ' in line:
                 table_answers = parse_answer_table(line)
+                if table_answers:
+                    # 自检：表里明明列了题号，却有几个没解析出答案（版式不识别/列数不齐）。
+                    # 旧版这里是静默丢的 —— 缺答案的题会被后续「补空答案」随意填，
+                    # 而 answer_verified=1 又把错值标成已核验（北师大实验 2024 物理卷事故）。
+                    missing = sorted(answer_table_numbers(line) - set(table_answers))
+                    if missing:
+                        print(f"[WARN] 答案表有题号没解析出答案：{missing}"
+                              f"（该表其它题已写入，这几个题请人工核对）", flush=True)
                 if not table_answers and current_answer_n is not None:
                     # 题号/答案表解析不出（如作文评分标准表）：作为当前题答案续行
                     current_answer_lines.append(line)

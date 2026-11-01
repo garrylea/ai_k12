@@ -78,4 +78,55 @@ describe('ExplanationCapability', () => {
     expect(capturedMessages[1].content).toContain('第2次尝试');
     expect(capturedMessages[1].content).not.toContain('[object Object]');
   });
+
+  it('solution 模式：把选项和学科角色交给模型，并禁止顺着参考答案编理由', async () => {
+    let capturedMessages: { role: string; content: string }[] = [];
+    const mockModelClient = {
+      chat: async (req: { messages: { role: string; content: string }[] }): Promise<ChatResponse> => {
+        capturedMessages = req.messages;
+        return {
+          id: 'r3', model: 'qwen3.8-max',
+          content: '电阻的单位是欧姆。',
+          finishReason: 'stop',
+          usage: { inputTokens: 10, outputTokens: 5, cost: 0 },
+          latencyMs: 5,
+        };
+      },
+    } as unknown as ModelClient;
+
+    const capability = new ExplanationCapability({ modelClient: mockModelClient });
+    await capability.explain({
+      mode: 'solution',
+      studentId: '',
+      subject: 'math',
+      subjectLabel: '物理',
+      question: {
+        content: '在国际单位制中，电阻的单位是',
+        answer: 'C',
+        options: [
+          { label: 'A', text: '安培(A)' },
+          { label: 'B', text: '伏特(V)' },
+          { label: 'C', text: '欧姆(Ω)' },
+          { label: 'D', text: '库仑(C)' },
+        ],
+      },
+      wrongAnswer: '',
+      knowledgePoint: { id: '', name: '' },
+    });
+
+    const system = capturedMessages[0].content;
+    const user = capturedMessages[1].content;
+
+    // 角色按真实学科，不是写死的数学老师
+    expect(system).toContain('中学物理老师');
+    // 冲突时以推导为准，不许反向编理由
+    expect(system).toContain('以你的推导为准');
+    expect(system).toContain('禁止');
+    // 四个选项逐个进提示词（此前一个都不给 → 模型只能顺着「参考答案：D」圆）
+    expect(user).toContain('A. 安培(A)');
+    expect(user).toContain('B. 伏特(V)');
+    expect(user).toContain('C. 欧姆(Ω)');
+    expect(user).toContain('D. 库仑(C)');
+    expect(user).not.toContain('{{');
+  });
 });

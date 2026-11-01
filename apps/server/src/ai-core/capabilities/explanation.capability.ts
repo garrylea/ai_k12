@@ -20,6 +20,16 @@ export interface ExplanationCapabilityDeps {
   modelClient?: ModelClient;
 }
 
+/** 提示词里的角色名。路由键 Subject 只有 math/chinese/english，物化等新学科共用数学档位。 */
+export const SUBJECT_LABELS: Record<string, string> = {
+  math: '数学',
+  chinese: '语文',
+  english: '英语',
+  physics: '物理',
+  chemistry: '化学',
+  politics: '道德与法治',
+};
+
 export class ExplanationCapability {
   private modelRouter = new ModelRouter(getModelConfigRegistry());
   private promptBuilder: PromptBuilder;
@@ -41,7 +51,10 @@ export class ExplanationCapability {
     // knowledge-retry template's {{#errorHistory}}...{{/errorHistory}} section
     // iterates over each entry, resolving {{question}}/{{wrongAnswer}}/{{attempts}}
     // per item. A JSON string would render the section once with garbage.
-    const customVariables: Record<string, unknown> = { wrongAnswer: request.wrongAnswer };
+    const customVariables: Record<string, unknown> = {
+      wrongAnswer: request.wrongAnswer,
+      subjectLabel: request.subjectLabel ?? SUBJECT_LABELS[request.subject] ?? '',
+    };
     if (request.errorHistory) {
       customVariables.errorHistory = request.errorHistory;
     }

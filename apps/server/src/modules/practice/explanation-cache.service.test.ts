@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExplanationCacheService } from './explanation-cache.service.js';
 
-function makeQuestion(over = {} as Partial<{ id: number; answer: string; explanation: string }>) {
-  return { id: 1, answer: 'B', explanation: '', ...over } as any;
+function makeQuestion(over = {} as Partial<{
+  id: number; answer: string; explanation: string;
+  content: string; options: string | null;
+}>) {
+  return { id: 1, answer: 'B', explanation: '', content: '题干', options: null, ...over } as any;
 }
 
 function makeDeps() {
   const questionsRepo = {
     findById: vi.fn(),
     updateExplanation: vi.fn().mockResolvedValue(undefined),
+    findSubjectCode: vi.fn().mockResolvedValue('math'),
   };
   const explanation = { explain: vi.fn() };
   return { questionsRepo, explanation };
@@ -47,6 +51,45 @@ describe('ExplanationCacheService', () => {
     expect(result).toBe('标准题解');
     expect(deps.explanation.explain).toHaveBeenCalledTimes(1);
     expect(deps.questionsRepo.updateExplanation).toHaveBeenCalledWith(1, '标准题解');
+  });
+
+  it('选择题：把选项和真实学科一起交给模型（不给选项它只能顺着答案编）', async () => {
+    deps.explanation.explain.mockResolvedValue({ content: '题解', mode: 'solution' });
+    deps.questionsRepo.findSubjectCode.mockResolvedValue('physics');
+    deps.questionsRepo.findById.mockResolvedValue(makeQuestion({
+      content: '在国际单位制中，电阻的单位是',
+      answer: 'C',
+      options: JSON.stringify([
+        { label: 'A', text: '安培(A)' },
+        { label: 'B', text: '伏特(V)' },
+        { label: 'C', text: '欧姆(Ω)' },
+        { label: 'D', text: '库仑(C)' },
+      ]),
+    }));
+    const svc = new ExplanationCacheService(deps.questionsRepo as any, deps.explanation as any);
+    svc.ensureExplanation(makeQuestion({ answer: 'C' }));
+    await svc.waitExplanation(1, 5000);
+
+    const req = deps.explanation.explain.mock.calls[0][0];
+    expect(req.question.options).toEqual([
+      { label: 'A', text: '安培(A)' },
+      { label: 'B', text: '伏特(V)' },
+      { label: 'C', text: '欧姆(Ω)' },
+      { label: 'D', text: '库仑(C)' },
+    ]);
+    expect(req.question.content).toBe('在国际单位制中，电阻的单位是');
+    // 路由表只有三科：物理共用数学档位，但提示词角色按真实学科
+    expect(req.subject).toBe('math');
+    expect(req.subjectLabel).toBe('物理');
+  });
+
+  it('options 是坏 JSON -> 当没有选项，不影响生成', async () => {
+    deps.explanation.explain.mockResolvedValue({ content: '题解', mode: 'solution' });
+    deps.questionsRepo.findById.mockResolvedValue(makeQuestion({ options: '{不是 JSON' }));
+    const svc = new ExplanationCacheService(deps.questionsRepo as any, deps.explanation as any);
+    svc.ensureExplanation(makeQuestion({ answer: 'B' }));
+    await svc.waitExplanation(1, 5000);
+    expect(deps.explanation.explain.mock.calls[0][0].question.options).toBeUndefined();
   });
 
   it('生成失败 -> 不入库，返回 null', async () => {

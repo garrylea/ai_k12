@@ -107,6 +107,53 @@ class TestDiff:
         rec = AnswerRecord(question_id=1, note="只备注")
         assert build_diff([(rec, _row(1, answer="A", explanation="旧"))]) == []
 
+    def test_answer_change_clears_stale_explanation(self):
+        """答案变了、记录没带新解析 -> 旧解析必须作废（否则「答案 C、解析证 D」并存）。"""
+        rec = AnswerRecord(question_id=1, answer="C")
+        d = build_diff([(rec, _row(1, answer="D", explanation="照着 D 写的解析"))])[0]
+        assert (d.old_answer, d.new_answer) == ("D", "C")
+        assert d.explanation_cleared is True
+
+    def test_answer_change_with_new_explanation_is_not_cleared(self):
+        rec = AnswerRecord(question_id=1, answer="C", explanation="新解析")
+        d = build_diff([(rec, _row(1, answer="D", explanation="旧"))])[0]
+        assert d.explanation_cleared is False
+
+    def test_same_answer_keeps_explanation(self):
+        rec = AnswerRecord(question_id=1, answer="D")
+        assert build_diff([(rec, _row(1, answer="D", explanation="解析"))]) == []
+
+
+class TestUpdateSql:
+    def test_answer_change_nulls_stale_explanation(self):
+        from answer_importer_cli import build_update_sql
+
+        sql, params = build_update_sql(
+            AnswerRecord(question_id=1, answer="C"),
+            _row(1, answer="D", explanation="照着 D 写的解析"),
+        )
+        assert "answer = %s" in sql
+        assert "explanation = NULL" in sql
+        assert params == ["C", 1]
+
+    def test_same_answer_keeps_explanation(self):
+        from answer_importer_cli import build_update_sql
+
+        sql, _params = build_update_sql(
+            AnswerRecord(question_id=1, answer="D"),
+            _row(1, answer="D", explanation="解析"),
+        )
+        assert "explanation = NULL" not in sql
+
+    def test_new_explanation_in_record_is_not_nulled(self):
+        from answer_importer_cli import build_update_sql
+
+        sql, _params = build_update_sql(
+            AnswerRecord(question_id=1, answer="C", explanation="新解析"),
+            _row(1, answer="D", explanation="旧解析"),
+        )
+        assert "explanation = NULL" not in sql
+
 
 class TestLocatePaper:
     def test_unique_exact(self):

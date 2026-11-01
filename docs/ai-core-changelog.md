@@ -8,6 +8,53 @@
 
 ---
 
+## 2026-11-01 修复：AI 题解是照着错答案编的（不给选项 + 角色写死数学）
+
+**现象**：北师大实验 2024 物理卷第 1 题（在国际单位制中，电阻的单位是）库里答案是 D（真值 C），`questions.explanation` 里有一整篇题解在证明 D，还写着「由于题目中未显示具体选项内容」「**如果**选项 D 表示"欧姆"或"Ω"，则正确答案为 D」。
+
+**链路**：判错后 `ExplanationCacheService.ensureExplanation` fire-and-forget → `ExplanationCapability.explain({mode:'solution'})` → `prompts/explanation/solution.md` → 写回 `questions.explanation`（一次性生成、全生命周期复用）。
+
+**根因三条**：
+1. **选项根本没喂**：`ExplanationRequest.question` 只有 `{content, answer?}`，`ensureExplanation` 也只取 `id/answer/explanation`。模型只知道「参考答案：D」，不知道 A/B/C/D 各是什么 → 无法核对，只能顺着 D 圆。
+2. **指令让它顺从答案**：prompt 原文「若参考答案已给出过程，以其为准组织讲解」——没有「推导与答案冲突怎么办」的出口，于是出现「如果选项 D 表示…」这种猜测句。
+3. **学科写死 math**：`subject:'math'` + prompt「你是一位严谨的中学数学老师」，物理/化学/语文的题解全是数学老师写的；`prompt-builder` 的 explanation 分支也完全不看 subject。
+
+**修复**：
+- `ExplanationRequest.question` 加 `options`（`QuestionOption[]`）；`ExplanationCacheService.generate` 用 `parseQuestionOptions()` 解析 `questions.options` 后传入（坏 JSON 当没有，不影响生成）。`solution.md` / `error-analysis.md` 逐条渲染选项。
+- `solution.md` 改口径：先按选项独立推导再比对，**冲突时以推导为准并点明「参考答案 X 与推导不符」**，明令禁止反向编理由和「如果选项…」式猜测句。
+- 新增 `subjectLabel`（`SUBJECT_LABELS`）走提示词角色；路由键仍只有 math/chinese/english，物理/化学/道法**共用数学档位**（`llm_routes` 无对应行），角色名按真实学科 —— `QuestionsRepository.findSubjectCode(id)` 查 `questions.subject_id → subjects.code`。
+- **答案一变解析就作废**：`answer_importer.build_update_sql` 在 answer 变化且记录未带新 explanation 时写 `explanation = NULL`（报告里显示「解析: (已作废——答案变更)」）。否则就会出现答案 C、解析证 D 并存（本次事故的数据面）。
+
+**验证**：server 2278 passed（新增 3 条：选项进 prompt、坏 JSON 兜底、物理角色/路由），仅既有 `billing/subscriptions.service.test.ts` 失败（main 上本就失败）；`tsc --noEmit` 通过；data-refinery 1506 passed（新增 5 条：explanation_cleared 判定 + 三种 SQL 分支）。
+
+**存量清理**：5 条旧口径物理题解（6059/6060/6061/6062/6364，其中 6059 与修正后的答案 C 直接矛盾）已于 2026-11-01 全部 `explanation = NULL` 清空；下次判错按新口径（带选项、先推导后比对）重新生成。
+
+---
+
+## 2026-11-01 修复：答案表首题答案被吞（北师大实验 2024 物理卷 第 1 题入库是 D，真值 C）
+
+**现象**：用户对照原卷发现第 1 题（在国际单位制中，电阻的单位是）答案是 C（欧姆），库里是 D（库仑）。同一卷 11–16 题全空。
+
+**根因（实测三方核对）**：`question_splitter.parse_answer_table` 无条件按「题号|答案」双标签表处理——`for i in range(1, …)` 每行都跳过第 0 格。这卷的答案表是**无表头**版式（`md` 第 420 行）：
+
+```
+<tr>1 2 3 … 10</tr><tr>C D A A A C B C A C</tr>
+<tr>11 12 13 14 15 [rowspan colspan 空]</tr><tr>B D C A C</tr>
+```
+
+第 0 格就是题号 1，连同答案 C 一起被丢掉；且只读 `rows[0]/rows[1]`，第二组（11–15）整组没进解析。实测当前代码产出 `{2:D…10:C}`，**没有第 1 题**。
+库里那个 D 不是这套解析写的（published JSONL 里第 1 题是空），来自 09:18 一次更早的答案文档写入，值恰好等于第 2 题答案——「丢首格、错位一格」的典型结果；`answer_importer` 不做任何一致性校验，还给它打了 `answer_verified=1`。
+
+**修复**：`parse_answer_table` 改成**按版式分派**：标签格按「不像本行内容」判（不维护白名单，数学卷有 `选项` 这种标签）、行尾空占位先修剪、一张表内多组「数字行+答案行」循环配对、列数对不齐的那组不写并打 `[WARN]`。非答案表（数学数据表 `x|…|0|1|2` + 数值行）整表 `{}`——旧实现会把 `0/1/2/3` 当题号把数值当答案写进第 1–3 题（全库对比实测 11 张被误当答案表）。`split_page` 里加自检：表里列了题号却没解析出答案的，打 `[WARN] 答案表有题号没解析出答案：[…]`，不再静默。
+
+**数据修复**：卷 #54 重跑 `answer_extract_cli`（34 题全有答案，原 27），`answer_importer --paper-id 54 --question-no 1,11-16` 只改这 7 题（**不要整卷 `--re-answer`**：24–34 题的库内值是已物化的 `questions/physics/…` 图片路径，答案文档里是原始 `images/…`，整卷覆盖会去物化）。改后 1–20 题三方核对全一致。
+
+**影响面**：全库 47 份带答案段的 md 中，无表头版式 6 张（北师大实验 2024 物理、海淀模拟二 2025/2026 物理各 2 张，后两份未入库）、单标签 1 张；其余 31 张双标签不受影响。`pytest` 1499 passed（新增 `tests/test_answer_table.py` 8 条，含真实表格逐字复刻与数据表误判）。
+
+**遗留**：`output/extracted|published` 的 JSONL 仍是空答案，靠 `answer_verified=1` 挡 db_loader 覆盖；整库 full-reload 会丢这批人工答案（既有问题，非本次引入）。
+
+---
+
 ## 2026-10-31 · 训练轨新增物理 / 化学 / 道德与法治三学科
 
 **做了什么**：训练轨选科页从 3 卡（数/语/英）扩到 6 卡（+ 物 4 / 化 5 / 道 9），物/化的四卡（专项练习 / 真题考试 / 错题练习 / 薄弱点图谱）与数学同构；道法 `enabled=false` 灰卡「内容准备中」。学科差异集中到前后端各一份配置表（`apps/server/src/common/subject-config.ts` 与 `apps/web/src/subjectConfig.ts`），新增学科=加一行配置 + 一张卡，**不要在各页写 `if subject ===`**。

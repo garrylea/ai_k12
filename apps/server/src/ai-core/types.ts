@@ -510,11 +510,23 @@ export interface JudgmentResult {
 
 // ========== Explanation Types (§4.3.3) ==========
 
+/** 选择题选项（与 questions.options 的 JSON 同形）。 */
+export interface QuestionOption {
+  label: string;
+  text: string;
+}
+
 export interface ExplanationRequest {
   mode: 'error_analysis' | 'knowledge_retry' | 'solution';
   studentId: string;
   subject: Subject;
-  question: { content: string; answer?: string };
+  /**
+   * 选项必须传：只给「参考答案：D」不给 A/B/C/D 各是什么，模型无法核对，
+   * 只会顺着答案编理由（2026-11-01 北师大实验物理卷第 1 题事故）。
+   */
+  question: { content: string; answer?: string; options?: QuestionOption[] };
+  /** 提示词里的学科角色名（「数学/物理/道德与法治」）。subject 是路由键，只有三科。 */
+  subjectLabel?: string;
   wrongAnswer: string;
   errorHistory?: { question: string; wrongAnswer: string; attempts: number }[];
   knowledgePoint: { id: string; name: string };
