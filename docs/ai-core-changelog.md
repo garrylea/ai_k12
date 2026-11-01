@@ -2322,3 +2322,8 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 - `db_loader` 原来只在 `content_hash` 变化时整行更新；第 5 题的内容/选项没变、**只有题型**从 short_answer 纠正为 choice，哈希相同 → 跳过更新，题型一直错。现在单独比较 `type`，漂移即更新（`UPDATE questions SET type=?`）。
 - `image_rewrite` 遇到已是 `questions/`/`textbooks/` 等规范前缀的引用**直接原样保留**，不再尝试回 md 目录找源图（此前补题回写后二次 publish 会打一串「图片源缺失」假告警）。
 - `apply_fixes._patch_extracted` 回写 extracted 时写**原始 md 引用**（`images/…`），物化只发生在 publish —— 保持「extracted 存原始、published 存物化」的分层，避免真缺图时被已物化路径掩盖。
+
+
+## 2026-11-01 根因：卷首带题号的页脚抢占了题号
+
+北师大实验 md 卷首有「4. 命题人: 李岩 / 覃凌」，`is_main_stem` 把它当成第 4 题；随后 `is_junk_question` 删掉这条 → 留下缺号 4；真正的第 4 题再出现时又被「重复题号」跳过 → 第 4 题整道消失（后续的补题丢题、题号错位都由它引发）。修复：切题时先跳过「≤40 字且命中 命题人/审核人/校对人/第X页共Y页」的行，不占题号；回归用例 `test_junk_numbered_line_does_not_steal_stem_number`。

@@ -1136,3 +1136,17 @@ def test_is_junk_question_keeps_short_real_question():
 
     q = RawQuestion(group_order=4, group_id=None, content="下列说法正确的是")
     assert is_junk_question(q) is False
+
+
+def test_junk_numbered_line_does_not_steal_stem_number():
+    """卷首「4. 命题人: 李岩」不能占掉真正的第 4 题（否则真 4 题被当重复跳过）。"""
+    text = (
+        "1. 第一题\n"
+        "2. 第二题\n"
+        "3. 第三题\n"
+        "4. 命题人: 李岩\n"
+        "4. 第四题（真）\n"
+    )
+    result = split_page(text, Path("test.md"))
+    assert [q.group_order for q in result] == [1, 2, 3, 4]
+    assert result[-1].content.startswith("第四题")

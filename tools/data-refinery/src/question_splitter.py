@@ -766,6 +766,11 @@ def split_page(text: str, md_path: Path,
                 continue
 
         if ok:
+            # 卷首页脚/署名可能带题号（「4. 命题人: 李岩」「第 3 页 共 8 页」）。
+            # 这类行会先占掉题号，随后该条被 is_junk_question 删掉 → 留下缺号；
+            # 真正的第 4 题又被「重复题号」跳过（2026-11-01 北师大实验实测）。
+            if len(line.strip()) <= 40 and _JUNK_QUESTION_RE.search(line):
+                continue
             # 作文题后的「要求：1. 文体不限 2. 字数…」会被 is_main_stem 认成
             # 1/2/3/4，拆出来就是 4 道没有题干的空题（北京五中 2024 实测）。
             # 只在「卷末大题（≥20）之后回到个位数」时合并——MinerU 输出顺序错乱
