@@ -7,6 +7,7 @@ import {
   markdownRemarkPluginsWithBreaks,
   markdownRehypePlugins,
   markdownComponents,
+  makeAnswerComponents,
   preprocessMarkdown,
 } from '@/components/markdown';
 import type { PracticeQuestion } from './AnswerModal';
@@ -45,6 +46,13 @@ interface Props {
 
 /** 刷新等待上限（秒），与后端 explanation-wait 端点 120s 对齐。 */
 const REFRESH_TIMEOUT_SECONDS = 120;
+
+/**
+ * 学生答案专用 components（作答大图）。
+ * 模块级常量：渲染里现造组件表会让 <img> 每次重挂、反复下载。
+ * 只用于「你的答案」这一处 —— 题面/参考答案/解析仍用题面小图样式。
+ */
+const answerComponents = makeAnswerComponents();
 
 function formatCountdown(s: number): string {
   const m = Math.floor(s / 60);
@@ -218,7 +226,7 @@ export function AnswerResultList({
                         <span className="text-xs text-[var(--text-tertiary)]">你的答案：</span>
                         {a?.studentAnswer ? (
                           <div className="text-[13px] text-[var(--text-primary)] leading-[1.6]">
-                            <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                            <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={answerComponents}>
                               {preprocessMarkdown(autoWrapMath(a.studentAnswer))}
                             </ReactMarkdown>
                           </div>
