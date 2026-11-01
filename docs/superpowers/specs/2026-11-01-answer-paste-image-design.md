@@ -56,31 +56,31 @@
 2. 检查 `e.clipboardData.items` 里是否有 `image/*`：
    - **没有** → 直接放行，走浏览器原生文本粘贴（不 `preventDefault`）。
    - **有** → `e.preventDefault()`，逐张取出 `File`。
-3. 单张校验：
-   - 压缩前 `size > 5MB` → 不传，toast「图片过大（最大 5MB）」，本次粘贴结束（其余张继续按序处理）。
+3. 单张校验（逐张判断，超限的那张跳过，其余照常处理）：
+   - 压缩前 `size > 5MB` → 该张不传，toast「图片过大（最大 5MB）」。
    - HEIC/HEIF → 走 `ensureJpeg`（`apps/web/src/utils/image-convert.ts:8`，动态 import，不加重首屏）。
 4. 压缩（新增共享工具 `apps/web/src/utils/image-compress.ts`）：
    - 最长边 > 1600px → 等比缩到 1600，输出 `image/jpeg`，quality 0.85。
    - 最长边 ≤ 1600 且 `size ≤ 1MB` → 原样返回，不重编码。
+   - 画布先铺白底再画图（PNG 透明区转 JPEG 会变黑）。
    - 逻辑移植自 `draft-image-utils.ts:20-43`（那边返回 data URL，这里返回 `File`/`Blob` 供上传）。
-5. 先在光标处插入占位文本，再异步上传：
+5. **一次性**把本批所有占位按顺序插入光标处（调用一次 `onChange`，避免逐张插入导致受控组件光标漂移）。占位是**纯文本**，不是 Markdown：
    ```
-   ![图1 上传中…]()
+   ［图1 上传中…］
+   ［图2 上传中…］
    ```
-   编号 `N` = 当前答案文本中 `![` 的出现次数 + 1。
-   占位在预览区不会显示成破图（`MarkdownImg` 的 `onError` 会隐藏，见 `markdown.tsx:299`），不会有"加载失败"图标闪烁。
-6. 上传：`uploadFile(file)`（`apps/web/src/services/api.ts:399`，`POST /api/files/upload`，JWT，multipart）。
-   - 成功 → 用 `json.data.url` 替换占位：
+   编号 `N` = 当前答案里所有 `图<数字>` 标记（含成功插入的 `![图N](…)` 与失败标记）的最大编号 + 1。
+   用纯文本占位而不是 `![](…)`：不产生任何 `<img>`，预览区不会闪破图。
+6. 逐张异步上传：`uploadFile(file)`（`apps/web/src/services/api.ts:399`，`POST /api/files/upload`，JWT，multipart）。
+   - 成功 → 把这**一个**占位串（精确匹配 `［图N 上传中…］`）替换为：
      ```
-     ![图1](/uploads/auxiliary/9f3c….jpg)
+     ![图N](/uploads/auxiliary/9f3c….jpg)
      ```
-     并把光标移到该行末尾、补一个换行，方便接着写 `2.`。
-   - 失败（接口非 0 / 网络错误 / 15s 超时）→ 占位替换为：
-     ```
-     ［图1 上传失败］
-     ```
-     toast 提示，**不阻断继续作答**（不弹模态、不清空已写内容）。
-7. 一次粘贴多张：串行处理，编号顺延（图1、图2…），每张都独立占一行。
+     替换是纯字符串替换，不改光标（学生此时可能已在别处继续打字）。
+   - 失败（接口非 0 / 网络错误 / 15s 超时）→ 同一占位替换为 `［图N 上传失败］`，toast，**不阻断继续作答**。
+   - 学生在等待期间把占位删掉了 → 精确匹配落空，**丢弃该结果**（不追加、不复活），服务器上的孤儿文件本期不清理。
+7. 一次粘贴多张：占位一次性插入，上传串行（避免同时打满并发），结果各自替换自己的占位串。
+8. **上传中禁止提交**：只要答案里还有 `上传中…` 标记，提交按钮 disabled（tooltip「图片上传中」），避免把占位文本当成答案交上去、落库成脏数据。
 
 ### 4.2 拖拽
 
@@ -120,14 +120,17 @@
 
 ### 6.1 滚动同步
 
-插入/删除图片会使预览高度突变，现有 `scrollSync` 按比例映射（`preview-scroll-sync.ts`）会把右侧甩到别处。插入或删除占位后必须重放一次 `scrollSync.current.apply?.()`（与 `LatexPreview.tsx:130` 内容变化重放同路）。
+内容变化本身已经会重放：`LatexPreview` 在 `debounced` 变化后调用 `scrollSync.current.apply?.()`（`LatexPreview.tsx:130-132`），所以插入/替换文本**不需要**额外处理。
 
-### 6.2 autoWrapMath 加固
+真正会跳位的是另一件事：**图片解码完成、高度变大**发生在防抖重放之后，此时没有任何 effect 再触发。因此作答预览里的 `<img>` 在 `onLoad` 时补一次 `scrollSync.current.apply?.()`（`MarkdownImg` 需要加一个可选的 `onLoad` 透传，或由 `LatexPreview` 用容器事件委托监听）。
 
-`LatexPreview.autoWrapMath` 的 `PROTECTED_RE`（`LatexPreview.tsx:30`）需把 Markdown 图片/链接纳入保护，避免长 URL 里的 `_`、`/`、`=` 触发 `LATEX_TRIGGER` 被包进 `$…$`：
+占位是纯文本（§4.1 第 5 步），加载期不会产生高度突变。
 
-- 新增保护分支：`!\[[^\]]*\]\([^)]*\)`（图片）与 `\[[^\]]*\]\([^)]*\)`（链接）。
-- 保护顺序排在双 `$` 之后、行内代码之前/后均可，但必须整体匹配、原样保留。
+### 6.2 autoWrapMath：现状已安全，只补回归测试
+
+`autoWrapMath` 不会把图片 URL 包进 `$…$`：URL 被 CJK 边界切成 `![` 与 `](…)` 两段，两段都命中 `MD_INLINE`（`LatexPreview.tsx:21` 的 `!\[` 与 `\]\(`）直接跳过，已实测（2026-11-01 用同样正则跑过 `![图1](/uploads/auxiliary/9f3c-a_b=1.jpg)`，三段均 `shouldWrap=false`）。
+
+**不新增保护分支**（`PROTECTED_RE` 改复杂了反而容易误伤）。只在 `LatexPreview.test.tsx` 补两条回归：图片单独一行、图片与 `$x=1$` 混排，均原样输出。
 
 ## 7. 结果页与回顾
 
@@ -139,36 +142,41 @@
 | 情况 | 本期处理 |
 |---|---|
 | 上传失败 / 断网 / 超时（15s AbortController） | 文本留 `［图N 上传失败］`，toast，可继续作答 |
-| 超过 5MB（压缩前） | 不传，toast |
+| 上传中想提交 | 提交按钮 disabled（tooltip「图片上传中」），防止占位文本落库 |
+| 上传途中学生删掉占位 | 精确匹配落空即丢弃结果，不追加；服务器文件成孤儿（本期不清理） |
+| 超过 5MB（压缩前） | 该张不传，toast；同批其余张照常 |
 | 服务端 20MB 上限 | 前端已先压到 5MB 以内，正常不会触发 |
 | HEIC | `ensureJpeg` 转 JPEG |
+| 透明 PNG | 转 JPEG 前铺白底，避免透明区变黑 |
 | 同一张图重复粘贴 | 各自上传一份（不去重） |
 | 单条作答图片数量 | 软限制：> 6 张时 toast 提示"图片较多，建议精简"，仍允许（避免预览与后续读图过载） |
 | 图片访问权限 | `/uploads/*` 为静态公开目录（`main.ts:61-66`），URL 含 UUID 不可猜；本期接受 |
 | 存储清理 | 不清理、无配额；孤儿文件（学生删了图但文件仍在）本期接受 |
 | 上传归因 | 复用现有端点，`uploaded_files.source` 仍写死 `'auxiliary'`（`files.controller.ts:23`）；本期不改，后续统一 |
+| **iPad 粘贴可达性（未验证）** | iOS Safari 对 `<textarea>` 的图片粘贴行为不稳定，可能 `paste` 事件里拿不到图片。**实施第一步必须先真机验证**；若不可达，需补一个最小入口（一个"插入图片"按钮走 `<input type="file" accept="image/*">`），否则整条链路在 iPad 上不可用 |
 
 ## 9. 涉及文件
 
 | 文件 | 变更 |
 |---|---|
-| `apps/web/src/components/business/LatexEditor.tsx` | `onPaste` / `onDrop` / 拖拽高亮；占位插入与替换；光标位置维持（复用 `insertAtCursor` 的 range 语义） |
-| `apps/web/src/utils/image-compress.ts` | **新增**：`compressImageFile(file): Promise<File>`（最长边 1600、JPEG 0.85、小于则原样） |
-| `apps/web/src/components/business/LatexPreview.tsx` | 新增图片样式覆盖入口；`PROTECTED_RE` 加 Markdown 图片/链接 |
-| `apps/web/src/components/business/PreviewDraftPanel.tsx` | 透传图片样式入口 |
-| `apps/web/src/components/business/answer/QuestionRunner.tsx` | 作答预览传入作答图样式（:591 一带） |
-| `apps/web/src/components/business/AnswerResultList.tsx` | 学生答案的 `img` 用作答图样式（:221） |
-| `apps/web/src/components/markdown.tsx` | 导出作答图样式常量（与 `MarkdownImg` 默认样式并列，避免两处漂移） |
+| `apps/web/src/components/business/LatexEditor.tsx` | `onPaste` / `onDrop` / 拖拽高亮；占位一次性插入与逐张替换；上传中标记暴露给上层（禁提交） |
+| `apps/web/src/utils/image-compress.ts` | **新增**：`compressImageFile(file): Promise<File>`（最长边 1600、JPEG 0.85、白底、小于则原样） |
+| `apps/web/src/components/business/LatexPreview.tsx` | 新增 `imgClassName?: string` 覆盖；图片 `onLoad` 后重放 `scrollSync` |
+| `apps/web/src/components/markdown.tsx` | 导出作答图样式常量；`MarkdownImg` 增加可选 `onLoad` 透传 |
+| `apps/web/src/components/business/PreviewDraftPanel.tsx` | **两个分支都要**透传 `imgClassName`：`!enabled` 时直接返回 `LatexPreview`（物理/化学正好走这条，`:20-22`），`enabled` 时走 tab 分支（`:44-46`） |
+| `apps/web/src/components/business/answer/QuestionRunner.tsx` | 给 `PreviewDraftPanel` 传作答图样式（`:601` 一带）；提交按钮加"上传中"禁用条件（`:650-653`） |
+| `apps/web/src/components/business/AnswerResultList.tsx` | 学生答案的 `img` 用作答图样式（`:221`） |
 
 不改动：后端、schema、`/api/files/upload`、`uploaded_files`、判题链路。
 
 ## 10. 后续（明确不在本期）
 
 1. 让模型真的看图：把答案里的 Markdown 图片按出现顺序解析成 attachments（URL → `uploaded_files` 反查 fileId），走视觉输入。需要讨论/讲评端点接受 attachments，另立一期。
-2. 「画图并插入」按钮 + 草稿导出（省掉截图一步）。
-3. 图片生命周期：删除孤儿文件、配额、压缩档位统一。
-4. 纯文本回显点（无 Markdown 渲染的家长端/管理端列表）的图片展示。
-5. 讨论窗 `DiscussChat` 附件支持。
+2. 判题/讲评入参预处理：服务端在把学生答案送模型前，把 `![…](…)` 换成 `[图N]`，避免模型读到一长串 URL。本期不改判题链路（物理计算题本就自评早退，影响面小）。
+3. 「画图并插入」按钮 + 草稿导出（省掉截图一步）。
+4. 图片生命周期：删除孤儿文件、配额、压缩档位统一。
+5. 纯文本回显点（无 Markdown 渲染的家长端/管理端列表）的图片展示。
+6. 讨论窗 `DiscussChat` 附件支持。
 
 ## 11. 测试清单
 
@@ -177,45 +185,59 @@
 **`LatexEditor.test.tsx`**
 
 1. 粘贴图片 → `onChange` 收到含 `![` 与 URL 的文本，且**插在光标处**（在已有文本中间粘贴，断言前后文保留、标记位置正确）。
-2. 上传中先出现 `上传中` 占位，`uploadFile` resolve 后替换为真 URL，占位不残留。
+2. 上传中先出现纯文本占位 `［图1 上传中…］`（不含 `<img>`、不含 `![](`），`uploadFile` resolve 后替换为真 URL，占位不残留。
 3. `uploadFile` reject → 文本中为 `［图1 上传失败］`，有 toast，`onChange` 不抛、不重复插入。
 4. 剪贴板只有文本 → 不拦截默认行为，`onChange` 收到原文，无任何上传调用。
-5. 连续粘贴两张 → 出现 `图1`、`图2`，编号顺延，各占一行。
-6. 压缩前 > 5MB → 不调用 `uploadFile`，有提示 toast，文本不变。
-7. `onDrop` 拖入图片文件 → 结果与粘贴一致；拖入非图片 → 不处理。
-8. HEIC 文件 → 先走 `ensureJpeg`（mock 断言调用），上传的 `File` 为 JPEG。
+5. 一次粘贴两张 → **单次 `onChange`**（断言调用次数）、两个占位、编号 `图1`/`图2`；两个都 resolve 后各自替换，顺序不串。
+6. 上传途中学生把占位删掉 → resolve 后文本不变（no-op），不追加、不复活。
+7. 上传失败后再粘贴一张 → 编号取 `图2`（跳过已占用编号），不与失败标记撞号。
+8. 压缩前 > 5MB → 不调用 `uploadFile`，有提示 toast，文本不变；同批另一张仍正常上传。
+9. `onDrop` 拖入图片文件 → 结果与粘贴一致；拖入非图片 → 不处理。
+10. HEIC 文件 → 先走 `ensureJpeg`（mock 断言调用），上传的 `File` 为 JPEG。
+11. 存在 `上传中…` 标记时，上层拿到的 `isUploading` 为 true（提交按钮据此禁用，见 §4.1 第 8 步）。
+
+**`image-compress.ts`**
+
+12. 2000×1000 → 输出 1600×800、`type=image/jpeg`。
+13. 800×600 且 <1MB → 原样返回同一对象（不重编码）。
+14. 透明 PNG → 输出 JPEG，透明区为白色（抽样像素断言）。
 
 **`LatexPreview.test.tsx`**
 
-9. `![图1](/uploads/a/b.png)` 渲染出 `<img>`，`src` 不被 `resolveAsset` 改写。
-10. `![第2问](data:image/png;base64,…)` 也能渲染（`data:` 透传）。
-11. 作答预览的图带 `max-h-[40vh]` 一类样式，**不带** `h-[50px]`。
-12. `autoWrapMath('![图1](http://x.com/a_b=1.png)')` 输出与输入完全一致（URL 未被 `$…$` 包裹）。
-13. 回归：`$x=1$` 与 `![图1](http://x/a.png)` 混排时，两者各自保持原样，互不吞并。
-14. 插入图片后 `scrollSync.current.apply` 被调用（防跳位，见 §6.1）。
+15. `![图1](/uploads/a/b.png)` 渲染出 `<img>`，`src` 不被 `resolveAsset` 改写。
+16. `![第2问](data:image/png;base64,…)` 也能渲染（`data:` 透传）。
+17. 作答预览的图带 `max-h-[40vh]` 一类样式，**不带** `h-[50px]`；不传 `imgClassName` 时仍是原默认样式（题干预览不受影响）。
+18. `autoWrapMath('![图1](http://x.com/a_b=1.png)')` 输出与输入完全一致（回归，见 §6.2）。
+19. 回归：`$x=1$` 与 `![图1](http://x/a.png)` 混排时，两者各自保持原样，互不吞并。
+20. 图片触发 `load` 事件后 `scrollSync.current.apply` 被调用（§6.1）。
 
 **`AnswerResultList.test.tsx`**
 
-15. 学生答案含 `![图1](url)` → 渲染 `<img>` 且使用作答图样式（非 50px 细条）。
+21. 学生答案含 `![图1](url)` → 渲染 `<img>` 且使用作答图样式（非 50px 细条）。
 
 ### 11.2 手工验证（真机）
 
-1. iPad Safari：从相册长按复制图片 → 作答框粘贴 → 上传完成 → 插入 → 右侧预览显示大图。
-2. 3000px 大图：上传前压缩生效（网络面板看请求体明显小于原图），预览清晰可辨。
-3. 图文混排：`1. 12V` / 图 / `2. 2A` 三块顺序正确，图独占一段、不与文字挤在一行。
-4. 删除图片那一行 → 预览同步消失，左右滚动不跳位。
-5. 交卷 → 结果页学生答案处显示图片，可点开放大。
-6. 断网粘贴 → 出现失败标记 + 提示；恢复网络重新粘贴可正常插入。
-7. 弱网：上传占位期间继续打字，不卡输入；成功后位置不串。
-8. 暗色主题下图片圆角与边框正常，无白底突兀。
-9. 一次粘贴 7 张 → 出现"图片较多"提示，仍可全部插入。
-10. 长度极长的 URL（UUID 文件名）不会让编辑区横向溢出，预览不报 KaTeX 错。
+1. **iPad Safari：从相册长按复制图片 → 作答框粘贴** —— 这是全案的前提，验不过要走 §8 的最小入口兜底（实施第一步就验）。
+2. 桌面 Chrome/Edge 截图后直接 `Ctrl+V` → 上传完成 → 插入 → 右侧预览显示大图。
+3. 3000px 大图：上传前压缩生效（网络面板看请求体明显小于原图），预览清晰可辨。
+4. 图文混排：`1. 12V` / 图 / `2. 2A` 三块顺序正确，图独占一段、不与文字挤在一行。
+5. 删除图片那一行 → 预览同步消失，左右滚动不跳位。
+6. 图片加载完成后预览不跳位（弱网慢加载最容易暴露）。
+7. 上传中提交按钮禁用；上传完成自动恢复可用。
+8. 交卷 → 结果页学生答案处显示图片，可点开放大。
+9. 断网粘贴 → 出现失败标记 + 提示；恢复网络重新粘贴可正常插入。
+10. 弱网：上传期间继续打字，不卡输入；成功后位置不串。
+11. 暗色主题下图片圆角正常，无白底突兀。
+12. 一次粘贴 7 张 → 出现"图片较多"提示，仍可全部插入。
+13. 超长 URL（UUID 文件名）不会让编辑区横向溢出，预览不报 KaTeX 错。
 
 ## 12. 决策记录
 
 | 日期 | 决策 | 决策人 |
 |---|---|---|
+| 2026-11-01 | 适用范围默认指"作答提交区（LaTeX 编辑器）"，不含讨论窗 `DiscussChat`；若用户所指为讨论窗需另立一期 | 假设待确认 |
 | 2026-11-01 | 不按"空/小问"预生成输入框——题库无空位标注、题干可能不分行，系统不猜 | 用户 |
 | 2026-11-01 | 顺序由图片在文本流中的位置决定；归属由 alt 声明，默认按出现顺序 | 用户 |
 | 2026-11-01 | 入口只做"粘贴/拖拽"，不做画图按钮、不做草稿导出 | 用户 |
 | 2026-11-01 | 不改表结构，图片以 URL 形式随答案文本落库 | 用户 |
+| 2026-11-01 | 评审修正：占位改纯文本；编号取"已有最大 + 1"；多图一次性插入；上传中禁提交；滚动重放改到图片 `onLoad`；`autoWrapMath` 无需加固（实测已安全，仅补回归测试） | 评审 |
