@@ -1,4 +1,4 @@
-import { Injectable, Logger, HttpException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, HttpException, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { JudgeCoreService } from '../practice/judge-core.service.js';
 import { ExplanationCacheService } from '../practice/explanation-cache.service.js';
 import { VariationGeneratorService } from './variation-generator.service.js';
@@ -26,6 +26,9 @@ import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-pra
 import { targetedTaskCode } from '../../common/subject-config.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
+import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
+import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
+import type { SpecialSessionModule } from '../../database/repositories/special-practice-sessions.repo.js';
 import { EventsService } from '../analytics/events.service.js';
 import {
   evaluateDictation,
@@ -88,6 +91,11 @@ export class TrainingService {
     private readonly specialLogsRepo: SpecialPracticeLogsRepository,
     private readonly variationGenerator: VariationGeneratorService,
     private readonly events?: EventsService,
+    /** 作答记录旁路写入（Task 3，2026-11-01）：判题成功后惰性建会话 + 写作答记录。
+     *  @Optional 防 DI 坑：本 repo 是具体类（非接口），实际可注入；加 @Optional 是双保险，
+     *  让既有测试 mock 构造（少传这两个参数）也能跑。 */
+    @Optional() private readonly specialSessionsRepo?: SpecialPracticeSessionsRepository,
+    @Optional() private readonly specialAnswersRepo?: SpecialAnswerRecordsRepository,
   ) {}
 
   /**
@@ -174,9 +182,48 @@ export class TrainingService {
     return [...byId.values()];
   }
 
-  /** 训练判题：JudgeCore 题中心变体的薄封装（source 由端点语义决定，不透传客户端任意值）。 */
-  async judgeTraining(input: { studentId: number; questionId: number; subjectId: number; studentAnswer: string; source: 'targeted' | 'error_practice' }) {
-    return this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
+  /** 训练判题：JudgeCore 题中心变体的薄封装（source 由端点语义决定，不透传客户端任意值）。
+   *  带 sessionUid 时旁路写作答记录（Task 3，2026-11-01）：数学/物理/化学 → math_targeted /
+   *  physics_targeted / chemistry_targeted；写入失败只 warn、不阻断判题（与 special_practice_logs
+   *  同口径）。 */
+  async judgeTraining(input: {
+    studentId: number; questionId: number; subjectId: number; studentAnswer: string;
+    source: 'targeted' | 'error_practice';
+    sessionUid?: string; title?: string; questionCount?: number; questionOrder?: number;
+  }) {
+    const result = await this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
+    // 旁路写作答记录：判题结果算出后、返回前。sessionUid 缺失 = 旧客户端，不写、不报错。
+    if (input.sessionUid && this.specialSessionsRepo && this.specialAnswersRepo) {
+      const module: SpecialSessionModule =
+        input.subjectId === 4 ? 'physics_targeted'
+        : input.subjectId === 5 ? 'chemistry_targeted'
+        : 'math_targeted';
+      try {
+        const sessionId = await this.specialSessionsRepo.upsertSession({
+          sessionUid: input.sessionUid,
+          studentId: input.studentId,
+          subjectId: input.subjectId,
+          module,
+          title: input.title ?? null,
+          questionCount: input.questionCount ?? 0,
+        });
+        await this.specialAnswersRepo.upsertAnswer({
+          sessionId,
+          questionId: input.questionId,
+          questionOrder: input.questionOrder ?? 1,
+          answerText: input.studentAnswer,
+          isCorrect: result.isCorrect,
+          method: result.method ?? 'exact',
+          analysis: result.explanation ?? null,
+          judgedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(
+          `special_answer_records 写入失败（已忽略，不影响判题）: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return result;
   }
 
   /** 语文默写：配置页篇目清单（抽题池 = verified=1 且 memorize_required=1 且 is_active=1）。
@@ -232,6 +279,10 @@ export class TrainingService {
     author: string;
     dynasty: string;
     body: string;
+    sessionUid?: string;
+    title?: string;
+    questionCount?: number;
+    questionOrder?: number;
   }): Promise<DictationJudgeResult> {
     const passage = await this.dictationRepo.findById(input.passageId);
     if (!passage) {
@@ -281,6 +332,36 @@ export class TrainingService {
     } catch (err) {
       // 埋点绝不阻断判题：失败只 warn
       this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);
+    }
+
+    // 作答记录旁路写入（Task 3，2026-11-01）：sessionUid 缺失 = 旧客户端，不写、不报错。
+    // answerText 用 JSON 序列化三字段（与 interpretation/meaning 同款结构化作答）。
+    if (input.sessionUid && this.specialSessionsRepo && this.specialAnswersRepo) {
+      try {
+        const sessionId = await this.specialSessionsRepo.upsertSession({
+          sessionUid: input.sessionUid,
+          studentId: input.studentId,
+          subjectId: 2, // 语文
+          module: 'chinese_dictation',
+          title: input.title ?? null,
+          questionCount: input.questionCount ?? 0,
+        });
+        await this.specialAnswersRepo.upsertSpecialAnswer({
+          sessionId,
+          questionOrder: input.questionOrder ?? 1,
+          refType: 'passage',
+          refId: passage.id,
+          sentenceIndex: null,
+          answerText: JSON.stringify({ author: input.author, dynasty: input.dynasty, body: input.body }),
+          isCorrect: judged.isCorrect,
+          method: 'exact',
+          judgedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(
+          `special_answer_records 写入失败（已忽略，不影响判题）: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     // 显式构造返回，不用 spread：judged 带 method 字段，spread 进对象字面量会触发
@@ -413,6 +494,10 @@ export class TrainingService {
     sentenceIndex: number;
     terms: Array<{ term: string; answer: string }>;
     translation: string;
+    sessionUid?: string;
+    title?: string;
+    questionCount?: number;
+    questionOrder?: number;
   }): Promise<InterpretationJudgeResult> {
     const passage = await this.dictationRepo.findById(input.passageId);
     if (!passage) {
@@ -535,6 +620,36 @@ export class TrainingService {
       });
     } catch (err) {
       this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);
+    }
+
+    // 作答记录旁路写入（Task 3，2026-11-01）：逐句作答，refType=passage，sentenceIndex 入库。
+    // answerText 用 JSON 序列化 terms + translation（结构化、便于回放复盘）。
+    if (input.sessionUid && this.specialSessionsRepo && this.specialAnswersRepo) {
+      try {
+        const sessionId = await this.specialSessionsRepo.upsertSession({
+          sessionUid: input.sessionUid,
+          studentId: input.studentId,
+          subjectId: 2,
+          module: 'chinese_interpretation',
+          title: input.title ?? null,
+          questionCount: input.questionCount ?? 0,
+        });
+        await this.specialAnswersRepo.upsertSpecialAnswer({
+          sessionId,
+          questionOrder: input.questionOrder ?? 1,
+          refType: 'passage',
+          refId: passage.id,
+          sentenceIndex: input.sentenceIndex,
+          answerText: JSON.stringify({ terms: input.terms, translation: input.translation }),
+          isCorrect: interpretationVerdict === 'correct',
+          method: 'exact',
+          judgedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(
+          `special_answer_records 写入失败（已忽略，不影响判题）: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     return {

@@ -132,6 +132,10 @@ export class VocabularyController {
       senseIndex?: number;
       promptKind?: string;
       answer?: string;
+      sessionUid?: string;
+      title?: string;
+      questionCount?: number;
+      questionOrder?: number;
     },
     @CurrentUser() user: JwtUser,
   ) {
@@ -151,6 +155,10 @@ export class VocabularyController {
         promptKind: dto.promptKind as VocabularyPromptKind,
         // 非字符串降级为空串 → 走「未作答」分支，而不是带着 number 进归一化函数变 500
         answer: typeof dto.answer === 'string' ? dto.answer : '',
+        sessionUid: typeof dto.sessionUid === 'string' ? dto.sessionUid : undefined,
+        title: typeof dto.title === 'string' ? dto.title : undefined,
+        questionCount: typeof dto.questionCount === 'number' ? dto.questionCount : undefined,
+        questionOrder: typeof dto.questionOrder === 'number' ? dto.questionOrder : undefined,
       },
       this.studentIdOf(user),
     );

@@ -64,6 +64,10 @@ export class MeaningController {
       terms?: Array<{ term: string; answer: string }>;
       meaning?: string;
       emotion?: string;
+      sessionUid?: string;
+      title?: string;
+      questionCount?: number;
+      questionOrder?: number;
     },
     @CurrentUser() user: JwtUser,
   ): Promise<MeaningJudgeResult> {
@@ -88,6 +92,10 @@ export class MeaningController {
       terms,
       meaning: typeof dto.meaning === 'string' ? dto.meaning : '',
       emotion: typeof dto.emotion === 'string' ? dto.emotion : '',
+      sessionUid: typeof dto.sessionUid === 'string' ? dto.sessionUid : undefined,
+      title: typeof dto.title === 'string' ? dto.title : undefined,
+      questionCount: typeof dto.questionCount === 'number' ? dto.questionCount : undefined,
+      questionOrder: typeof dto.questionOrder === 'number' ? dto.questionOrder : undefined,
     });
   }
 }

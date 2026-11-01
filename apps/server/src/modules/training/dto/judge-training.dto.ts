@@ -13,4 +13,13 @@ export interface JudgeTrainingDto {
   /** 可选：本轮训练会话 id（`math_targeted`）。只用于累加 `judged_count` 审计留痕，
    *  不传也能判题；不存在/非本人/已完成都静默跳过（spec §6.4）。 */
   sessionId?: number;
+  /** 作答记录旁路写入（Task 3，2026-11-01）：全可选，缺 sessionUid 时不写作答记录（向后兼容）。
+   *  - sessionUid：唯一标识本次专项练习会话（同 uid 多次判题复用同一行）
+   *  - title：会话标题（如「数学薄弱点训练」），缺省写 null
+   *  - questionCount：本轮题数，缺省写 0
+   *  - questionOrder：本题在本轮中的序号（1-based），缺省写 1 */
+  sessionUid?: string;
+  title?: string;
+  questionCount?: number;
+  questionOrder?: number;
 }

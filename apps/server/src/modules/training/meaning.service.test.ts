@@ -58,9 +58,12 @@ function makeService(overrides: {
   };
   // 专项日志（Phase 1B）：含义判题会写一行 special_practice_logs。
   const specialLogsRepo = { insert: vi.fn().mockResolvedValue(1) };
+  // 作答记录旁路写入（Task 3，2026-11-01）。
+  const specialSessionsRepo = { upsertSession: vi.fn().mockResolvedValue(42) };
+  const specialAnswersRepo = { upsertSpecialAnswer: vi.fn().mockResolvedValue(undefined), upsertAnswer: vi.fn().mockResolvedValue(undefined) };
   return {
-    service: new MeaningService(repo as never, judge as never, points as never, specialLogsRepo as never, overrides.events),
-    repo, judge, points, specialLogsRepo,
+    service: new MeaningService(repo as never, judge as never, points as never, specialLogsRepo as never, overrides.events, specialSessionsRepo as never, specialAnswersRepo as never),
+    repo, judge, points, specialLogsRepo, specialSessionsRepo, specialAnswersRepo,
   };
 }
 
@@ -415,5 +418,35 @@ describe('MeaningService.judgeMeaning — 埋点 special_unit_judged（Phase 2�
       module: 'chinese_meaning', refType: 'passage', refId: 12,
       props: { verdict: 'incorrect' },
     }));
+  });
+});
+
+// 作答记录旁路写入（Task 3，2026-11-01）：带 sessionUid 时写 special_answer_records。
+describe('MeaningService.judgeMeaning — special_answer_records 旁路写入', () => {
+  it('带 sessionUid 时写 special_answer_records（chinese_meaning）', async () => {
+    const { service, specialSessionsRepo, specialAnswersRepo } = makeService();
+    await service.judgeMeaning({
+      studentId: 5, passageId: 12, sentenceIndex: 1,
+      terms: [{ term: '沉（chén）舟', answer: '沉没的船' }],
+      meaning: '比喻新事物必将取代旧事物', emotion: '豁达乐观',
+      sessionUid: 'm-uid-1', title: '含义专项', questionCount: 2, questionOrder: 1,
+    });
+    expect(specialSessionsRepo.upsertSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionUid: 'm-uid-1', studentId: 5, subjectId: 2, module: 'chinese_meaning',
+    }));
+    expect(specialAnswersRepo.upsertSpecialAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 42, refType: 'passage', refId: 12, sentenceIndex: 1,
+    }));
+  });
+
+  it('不带 sessionUid 时不写作答记录', async () => {
+    const { service, specialSessionsRepo, specialAnswersRepo } = makeService();
+    await service.judgeMeaning({
+      studentId: 5, passageId: 12, sentenceIndex: 1,
+      terms: [{ term: '沉（chén）舟', answer: '沉没的船' }],
+      meaning: '比喻', emotion: '乐观',
+    });
+    expect(specialSessionsRepo.upsertSession).not.toHaveBeenCalled();
+    expect(specialAnswersRepo.upsertSpecialAnswer).not.toHaveBeenCalled();
   });
 });

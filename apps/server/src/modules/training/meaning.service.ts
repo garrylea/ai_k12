@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import {
   ChinesePassagesRepository, toSentences, toKeyTerms, toSentenceMeanings,
   type PassageSentence, type PassageSentenceMeaning,
@@ -10,6 +10,8 @@ import type { PointsAwardReason } from '../points/dto/points.dto.js';
 import { stripPinyinAnnotation } from '../../common/utils/normalize-chinese.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
+import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
+import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
 import { EventsService } from '../analytics/events.service.js';
 import type {
   MeaningPassageListItem, MeaningPassageItem, MeaningJudgeResult,
@@ -38,6 +40,10 @@ export class MeaningService {
     private readonly pointsService: PointsService,
     private readonly specialLogsRepo: SpecialPracticeLogsRepository,
     private readonly events?: EventsService,
+    /** 作答记录旁路写入（Task 3，2026-11-01）：判题成功后惰性建会话 + 写作答记录。
+     *  @Optional 让既有测试 mock 构造（少传这两个参数）也能跑。 */
+    @Optional() private readonly specialSessionsRepo?: SpecialPracticeSessionsRepository,
+    @Optional() private readonly specialAnswersRepo?: SpecialAnswerRecordsRepository,
   ) {}
 
   /**
@@ -174,6 +180,11 @@ export class MeaningService {
     terms: Array<{ term: string; answer: string }>;
     meaning: string;
     emotion: string;
+    /** 作答记录旁路写入（Task 3，2026-11-01）：全可选，缺 sessionUid 时不写、向后兼容。 */
+    sessionUid?: string;
+    title?: string;
+    questionCount?: number;
+    questionOrder?: number;
   }): Promise<MeaningJudgeResult> {
     const passage = await this.passageRepo.findById(input.passageId);
     if (!passage) {
@@ -310,6 +321,36 @@ export class MeaningService {
     } catch (err) {
       // 埋点绝不阻断判题：失败只 warn
       this.logger.warn('special_practice_logs 写入失败（已忽略，不影响判题）', err);
+    }
+
+    // 作答记录旁路写入（Task 3，2026-11-01）：sessionUid 缺失 = 旧客户端，不写、不报错。
+    // answerText 用 JSON 序列化（terms + meaning + emotion），与解释专项同款结构化作答。
+    if (input.sessionUid && this.specialSessionsRepo && this.specialAnswersRepo) {
+      try {
+        const sessionId = await this.specialSessionsRepo.upsertSession({
+          sessionUid: input.sessionUid,
+          studentId: input.studentId,
+          subjectId: 2, // 语文
+          module: 'chinese_meaning',
+          title: input.title ?? null,
+          questionCount: input.questionCount ?? 0,
+        });
+        await this.specialAnswersRepo.upsertSpecialAnswer({
+          sessionId,
+          questionOrder: input.questionOrder ?? 1,
+          refType: 'passage',
+          refId: passage.id,
+          sentenceIndex: input.sentenceIndex,
+          answerText: JSON.stringify({ terms: input.terms, meaning: input.meaning, emotion: input.emotion }),
+          isCorrect: isCorrectOf(meaningVerdict),
+          method: 'ai',
+          judgedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(
+          `special_answer_records 写入失败（已忽略，不影响判题）: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     return {

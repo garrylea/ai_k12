@@ -73,6 +73,8 @@ interface Harness {
   progressRepo: Record<string, ReturnType<typeof vi.fn>>;
   sessionsRepo: Record<string, ReturnType<typeof vi.fn>>;
   specialLogsRepo: { insert: ReturnType<typeof vi.fn> };
+  specialSessionsRepo: { upsertSession: ReturnType<typeof vi.fn> };
+  specialAnswersRepo: { upsertSpecialAnswer: ReturnType<typeof vi.fn>; upsertAnswer: ReturnType<typeof vi.fn> };
   judge: { generate: ReturnType<typeof vi.fn> };
   recordResult: ReturnType<typeof vi.fn>;
 }
@@ -119,6 +121,9 @@ const harness = (opts: {
   const sessionsRepo = { create: vi.fn(async () => 77) };
   // 专项日志（Phase 1B）：判题后写一行 special_practice_logs。
   const specialLogsRepo = { insert: vi.fn(async () => 1) };
+  // 作答记录旁路写入（Task 3，2026-11-01）。
+  const specialSessionsRepo = { upsertSession: vi.fn(async () => 55) };
+  const specialAnswersRepo = { upsertSpecialAnswer: vi.fn(async () => undefined), upsertAnswer: vi.fn(async () => undefined) };
   const service = new VocabularyService(
     wordsRepo as never,
     progressRepo as never,
@@ -130,9 +135,11 @@ const harness = (opts: {
       now: opts.now ?? (() => new Date('2026-09-16T10:00:00+08:00')),
     },
     opts.events,
+    specialSessionsRepo as never,
+    specialAnswersRepo as never,
   );
   return {
-    service, wordsRepo, progressRepo, sessionsRepo, judge, specialLogsRepo,
+    service, wordsRepo, progressRepo, sessionsRepo, judge, specialLogsRepo, specialSessionsRepo, specialAnswersRepo,
     recordResult: progressRepo.recordResult,
   };
 };
@@ -827,5 +834,29 @@ describe('VocabularyService.getFamily', () => {
   it('wordId 不存在 → 404', async () => {
     const h = harness();
     await expect(h.service.getFamily(404)).rejects.toThrow(/单词不存在/);
+  });
+});
+
+// 作答记录旁路写入（Task 3，2026-11-01）：带 sessionUid 时写 special_answer_records。
+describe('VocabularyService.judge — special_answer_records 旁路写入', () => {
+  it('带 sessionUid 时写 special_answer_records（en_vocabulary）', async () => {
+    const h = harness();
+    await h.service.judge(
+      judgeInput({ promptKind: 'cn2en', answer: 'address', sessionUid: 'v-uid-1', title: '背词', questionCount: 10, questionOrder: 1 }),
+      9,
+    );
+    expect(h.specialSessionsRepo.upsertSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionUid: 'v-uid-1', studentId: 9, subjectId: 3, module: 'en_vocabulary',
+    }));
+    expect(h.specialAnswersRepo.upsertSpecialAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 55, refType: 'word', refId: 1, answerText: 'address',
+    }));
+  });
+
+  it('不带 sessionUid 时不写作答记录', async () => {
+    const h = harness();
+    await h.service.judge(judgeInput({ promptKind: 'cn2en', answer: 'address' }), 9);
+    expect(h.specialSessionsRepo.upsertSession).not.toHaveBeenCalled();
+    expect(h.specialAnswersRepo.upsertSpecialAnswer).not.toHaveBeenCalled();
   });
 });

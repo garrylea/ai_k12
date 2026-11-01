@@ -53,7 +53,9 @@ export class TrainingController {
 
   /** 训练判题（题中心变体）：source 白名单校验，非训练来源一律 400。
    *  可选 `sessionId`（乙类会话）只用于累加 `judged_count` 审计留痕，不传也能判题，
-   *  且**失败静默**——审计绝不该影响判题（spec §6.4/§7.2）。 */
+   *  且**失败静默**——审计绝不该影响判题（spec §6.4/§7.2）。
+   *  可选 `sessionUid`（Task 3，2026-11-01）：判题成功后旁路把作答写入
+   *  `special_answer_records`，缺省不写、向后兼容；写入失败只 warn、不阻断判题。 */
   @Post('judge')
   async judge(@Body() dto: JudgeTrainingDto, @CurrentUser() user: JwtUser) {
     if (dto.source !== 'targeted' && dto.source !== 'error_practice') {
@@ -65,6 +67,10 @@ export class TrainingController {
       subjectId: dto.subjectId,
       studentAnswer: dto.studentAnswer,
       source: dto.source,
+      sessionUid: typeof dto.sessionUid === 'string' ? dto.sessionUid : undefined,
+      title: typeof dto.title === 'string' ? dto.title : undefined,
+      questionCount: typeof dto.questionCount === 'number' ? dto.questionCount : undefined,
+      questionOrder: typeof dto.questionOrder === 'number' ? dto.questionOrder : undefined,
     });
     // 判题完成后再记审计：放前面一旦抛错就会把判题结果顶掉。
     await this.recordSessionJudged(dto.sessionId, user.sub);
@@ -299,7 +305,16 @@ export class TrainingController {
    *  normalizeChineseAnswer 触发 TypeError 变 500。 */
   @Post('dictation/judge')
   async judgeDictation(
-    @Body() dto: { passageId: number; author: string; dynasty: string; body: string },
+    @Body() dto: {
+      passageId: number;
+      author: string;
+      dynasty: string;
+      body: string;
+      sessionUid?: string;
+      title?: string;
+      questionCount?: number;
+      questionOrder?: number;
+    },
     @CurrentUser() user: JwtUser,
   ) {
     if (!Number.isInteger(dto.passageId) || dto.passageId < 1) {
@@ -312,6 +327,10 @@ export class TrainingController {
       author: typeof dto.author === 'string' ? dto.author : '',
       dynasty: typeof dto.dynasty === 'string' ? dto.dynasty : '',
       body: typeof dto.body === 'string' ? dto.body : '',
+      sessionUid: typeof dto.sessionUid === 'string' ? dto.sessionUid : undefined,
+      title: typeof dto.title === 'string' ? dto.title : undefined,
+      questionCount: typeof dto.questionCount === 'number' ? dto.questionCount : undefined,
+      questionOrder: typeof dto.questionOrder === 'number' ? dto.questionOrder : undefined,
     });
   }
 
@@ -372,6 +391,10 @@ export class TrainingController {
       sentenceIndex: number;
       terms?: Array<{ term: string; answer: string }>;
       translation?: string;
+      sessionUid?: string;
+      title?: string;
+      questionCount?: number;
+      questionOrder?: number;
     },
     @CurrentUser() user: JwtUser,
   ) {
@@ -395,6 +418,10 @@ export class TrainingController {
       sentenceIndex: dto.sentenceIndex,
       terms,
       translation: typeof dto.translation === 'string' ? dto.translation : '',
+      sessionUid: typeof dto.sessionUid === 'string' ? dto.sessionUid : undefined,
+      title: typeof dto.title === 'string' ? dto.title : undefined,
+      questionCount: typeof dto.questionCount === 'number' ? dto.questionCount : undefined,
+      questionOrder: typeof dto.questionOrder === 'number' ? dto.questionOrder : undefined,
     });
   }
 

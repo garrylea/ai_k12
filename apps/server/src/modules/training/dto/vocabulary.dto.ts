@@ -100,6 +100,11 @@ export interface VocabularyJudgeInput {
   senseIndex: number;
   promptKind: VocabularyPromptKind;
   answer: string;
+  /** 作答记录旁路写入（Task 3，2026-11-01）：全可选，缺 sessionUid 时不写、向后兼容。 */
+  sessionUid?: string;
+  title?: string;
+  questionCount?: number;
+  questionOrder?: number;
 }
 
 /** 标准答案里的一个义项（判完就该让学生看见，含僻义标记与搭配）。 */

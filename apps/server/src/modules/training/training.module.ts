@@ -8,7 +8,7 @@ import { VocabularyService } from './vocabulary.service.js';
 import { PracticeModule } from '../practice/practice.module.js';
 import { PointsModule } from '../points/points.module.js';
 import { AnalyticsModule } from '../analytics/analytics.module.js';
-import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository, EnglishWordsRepository, StudentWordProgressRepository, TrainingSessionsRepository, SpecialPracticeLogsRepository } from '../../database/repositories/index.js';
+import { MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, ChinesePassagesRepository, EnglishWordsRepository, StudentWordProgressRepository, TrainingSessionsRepository, SpecialPracticeLogsRepository, SpecialPracticeSessionsRepository, SpecialAnswerRecordsRepository } from '../../database/repositories/index.js';
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictation-feedback.capability.js';
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
@@ -60,6 +60,6 @@ import { ExamSessionsRepository } from '../../database/repositories/exam-session
   // imports AnalyticsModule（埋点 Phase 2）：TrainingController 注入其导出的 EventsService（hint_requested）
   imports: [PracticeModule, PointsModule, AnalyticsModule],
   controllers: [TrainingController, VocabularyController, MeaningController, RemediationController, VariationController],
-  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository, SpecialPracticeLogsRepository, RemediationService, RemediationGeneratorService, RemediationRepository, ExamSessionsRepository, VariationCapability, VariationService, VariationGeneratorService, VariationQuestionsRepository],
+  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository, SpecialPracticeLogsRepository, SpecialPracticeSessionsRepository, SpecialAnswerRecordsRepository, RemediationService, RemediationGeneratorService, RemediationRepository, ExamSessionsRepository, VariationCapability, VariationService, VariationGeneratorService, VariationQuestionsRepository],
 })
 export class TrainingModule {}
