@@ -256,3 +256,29 @@ def test_apply_writes_back_to_extracted_and_clears_publish_checkpoint(tmp_path):
     assert written[3]["content"] == "补的第4题"
     ckpt = json.loads((out / ".publish_checkpoint.json").read_text(encoding="utf-8"))
     assert f"{rel}/{src}" not in ckpt.get("published", [])
+
+
+def test_write_back_keeps_raw_md_refs(tmp_path):
+    """extracted 保留 md 原始引用（images/...），物化只发生在 publish。"""
+    out = tmp_path / "output"
+    rel = "物理/初中/first/2024/卷B"
+    src = "卷B"
+    ext_file = out / "extracted" / rel / f"{src}.jsonl"
+    ext_file.parent.mkdir(parents=True)
+    ext_file.write_text(json.dumps({"group_order": 1, "content": "题1", "answer": "A"},
+                                   ensure_ascii=False) + "\n", encoding="utf-8")
+    md_dir = tmp_path / "md" / "卷B"
+    (md_dir / "images").mkdir(parents=True)
+    (md_dir / "images" / "q4.jpg").write_bytes(b"\xff\xd8\xffq4")
+
+    rec = dict(REC, rel_path=rel, source=src, group_order=4,
+               content="如图 ![](images/q4.jpg)", answer="A", md=str(md_dir / "卷B.md"))
+    cur = FakeCursor(paper=(54, 4), existing=None)
+
+    A.apply_record(cur, rec, apply=True, assets_root=tmp_path / "assets", output_dir=out)
+
+    written = [json.loads(l) for l in ext_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    row = next(r for r in written if r["group_order"] == 4)
+    assert "images/q4.jpg" in row["content"]
+    sql, args = next((s, a) for s, a in cur.sql if s.startswith("INSERT INTO questions"))
+    assert "questions/physics/" in args[4] and "images/q4.jpg" not in args[4]

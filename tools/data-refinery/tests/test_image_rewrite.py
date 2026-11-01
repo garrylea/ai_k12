@@ -186,3 +186,22 @@ class TestAnswerImages:
 
         with pytest.raises(MissingImageError, match="图片源文件缺失"):
             rewrite_question(q, md_dir, store, "questions/physics/abcd/3", strict=True)
+
+
+class TestAlreadyMaterialized:
+    def test_canonical_ref_is_kept_without_warning(self, tmp_path, capsys):
+        md_dir = tmp_path / "md" / "paper"
+        md_dir.mkdir(parents=True)
+        store = LocalAssetStore(tmp_path / "assets")
+        q = ExamQuestion(
+            subject_id="physics", type="choice", difficulty=1,
+            content="![](questions/physics/abcd/4/stem_01.jpg)",
+            answer="A",
+            options=[{"label": "A", "text": "![](questions/physics/abcd/5/opt_a.jpg)"}],
+        )
+
+        rewrite_question(q, md_dir, store, "questions/physics/abcd/9")
+
+        assert "questions/physics/abcd/4/stem_01.jpg" in q.content
+        assert q.options[0]["text"] == "![](questions/physics/abcd/5/opt_a.jpg)"
+        assert "图片源缺失" not in capsys.readouterr().out

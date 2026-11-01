@@ -18,6 +18,9 @@ from models import ExamQuestion, TextbookCard
 # 匹配 ![alt](path)
 IMAGE_REF_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
+# 已物化的路径前缀：再发布时原样跳过（否则会误报「图片源缺失」）
+_CANONICAL_PREFIXES = ("questions/", "textbooks/", "/assets/", "http://", "https://", "data:")
+
 
 class MissingImageError(ValueError):
     """Markdown 引用的图片在 md 目录里找不到（strict 模式）。"""
@@ -76,6 +79,9 @@ def _rewrite_text(
     def replace(m: re.Match) -> str:
         nonlocal index
         alt, ref = m.group(1), m.group(2)
+        # 已经是物化后的规范路径（补题回写/旧产物二次发布）：原样保留，不再解析源文件。
+        if ref.startswith(_CANONICAL_PREFIXES):
+            return m.group(0)
         src = _resolve_src(ref, md_images_dir)
         if src is None:
             if strict:

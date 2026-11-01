@@ -1288,14 +1288,14 @@ class DbLoader:
                 go = q.get("group_order")
                 if go is not None:
                     exist = self._query(
-                        "SELECT q.id, q.content_hash, q.answer_verified FROM paper_questions pq "
+                        "SELECT q.id, q.content_hash, q.answer_verified, q.type FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.group_order=%s",
                         (paper[1], go),
                     )
                 else:
                     exist = self._query(
-                        "SELECT q.id, q.content_hash, q.answer_verified FROM paper_questions pq "
+                        "SELECT q.id, q.content_hash, q.answer_verified, q.type FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.question_no=%s",
                         (paper[1], i),
@@ -1304,6 +1304,14 @@ class DbLoader:
                     qid = int(exist[0][0])
                     old_hash = exist[0][1]
                     verified = int(exist[0][2] or 0)
+                    old_type = exist[0][3]
+                    if old_hash == chash and old_type != q.get("type"):
+                        # 内容与选项没变、只有题型变了（重抽/补题纠正题型）：
+                        # 哈希相同不会走下面的更新分支，会让选择题一直按 short_answer
+                        # 渲染（2026-11-01 北师大实验第 5 题实测）。
+                        self._exec("UPDATE questions SET type=%s WHERE id=%s",
+                                   (q.get("type"), qid))
+                        updated += 1
                     if old_hash != chash:
                         other = self._reusable_question(chash, opts, exclude_id=qid)
                         if verified:

@@ -12,6 +12,7 @@
 """
 
 import argparse
+import copy
 import hashlib
 import json
 import re
@@ -212,6 +213,11 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     answer = rec.get("answer") or ""
     material_text = rec.get("material_text")
     options = rec.get("options")
+    # extracted 要保留**md 原始引用**（images/...），物化只发生在 publish。
+    # rewrite_fields 会原地改写 options，所以先深拷贝一份原始值用于回写。
+    raw_content, raw_answer = content, answer
+    raw_material = material_text
+    raw_options = copy.deepcopy(options) if options else options
 
     # 补题内容里的图是 md 相对路径（images/xxx.jpg），前端只认物化后的规范路径。
     # 落库前必须走与 publish 同一套改写 + 拷贝，否则库里留下必然 404 的路径
@@ -239,7 +245,8 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
 
     chash = content_hash(content, options)
     _patch_extracted(
-        rec, content=content, answer=answer, material_text=material_text, options=options,
+        rec, content=raw_content, answer=raw_answer,
+        material_text=raw_material, options=raw_options,
         output_dir=output_dir or RefineryConfig.from_env().output_dir,
     )
     if qid:

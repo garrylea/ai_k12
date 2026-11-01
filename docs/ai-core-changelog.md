@@ -2315,3 +2315,10 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 **修复**：checkpoint 记录**源文件指纹**（extracted jsonl 的 sha256），跳过条件 = 口径版本一致 **且** 源指纹一致。extracted 一改就自动重发，不再需要 `--force`。
 
 **图注排版**：`markdownComponents` 新增 `p` 覆盖——同一段落里「图片 + 独占一行的短说明（图1/图 3/图2-1）」渲染成 `<figure>`，图注在图下方居中、`text-xs`、`--text-tertiary` 浅灰；正文里的「图 1 所示…」不会误判。
+
+
+## 2026-11-01 补：题型漂移不更新 + 已物化引用二次告警
+
+- `db_loader` 原来只在 `content_hash` 变化时整行更新；第 5 题的内容/选项没变、**只有题型**从 short_answer 纠正为 choice，哈希相同 → 跳过更新，题型一直错。现在单独比较 `type`，漂移即更新（`UPDATE questions SET type=?`）。
+- `image_rewrite` 遇到已是 `questions/`/`textbooks/` 等规范前缀的引用**直接原样保留**，不再尝试回 md 目录找源图（此前补题回写后二次 publish 会打一串「图片源缺失」假告警）。
+- `apply_fixes._patch_extracted` 回写 extracted 时写**原始 md 引用**（`images/…`），物化只发生在 publish —— 保持「extracted 存原始、published 存物化」的分层，避免真缺图时被已物化路径掩盖。
