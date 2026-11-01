@@ -12,13 +12,15 @@ interface Props {
   enabled: boolean;
   /** 左输入区 → 右预览区的滚动跟随通道（透传给 LatexPreview） */
   scrollSync?: { current: PreviewScrollSync };
+  /** 作答图样式（大图）。物理/化学走 enabled=false 分支，同样必须透传 */
+  imgClassName?: string;
 }
 
-export function PreviewDraftPanel({ answer, questionId, enabled, scrollSync }: Props) {
+export function PreviewDraftPanel({ answer, questionId, enabled, scrollSync, imgClassName }: Props) {
   const [tab, setTab] = useState<Tab>('preview');
 
   if (!enabled) {
-    return <LatexPreview value={answer} scrollSync={scrollSync} />;
+    return <LatexPreview value={answer} scrollSync={scrollSync} imgClassName={imgClassName} />;
   }
 
   const tabBtn = (t: Tab, label: string) => (
@@ -42,7 +44,11 @@ export function PreviewDraftPanel({ answer, questionId, enabled, scrollSync }: P
         {tabBtn('draft', '草稿')}
       </div>
       <div className="flex-1 min-h-0">
-        {tab === 'preview' ? <LatexPreview value={answer} scrollSync={scrollSync} /> : <DraftWhiteboard questionId={questionId} />}
+        {tab === 'preview' ? (
+          <LatexPreview value={answer} scrollSync={scrollSync} imgClassName={imgClassName} />
+        ) : (
+          <DraftWhiteboard questionId={questionId} />
+        )}
       </div>
     </div>
   );
