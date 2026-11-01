@@ -880,6 +880,28 @@ it('作答图上传中：提交按钮禁用，上传完成恢复（防占位文�
 
   await waitFor(() => expect((screen.getByRole('button', { name: '提交' }) as HTMLButtonElement).disabled).toBe(true));
 });
+
+it('答案里残留「上传中…」标记时也禁用提交（切题时在飞上传的兜底，见 hasPendingUpload）', async () => {
+  // 用 initialAnswers 直接注入残留文本：模拟"上传途中切走、回来时编辑器已换题"的状态
+  render(
+    <QuestionRunner
+      questions={[{ n: '1', text: '电路图题', type: 'short_answer' }]}
+      subjectId={1}
+      answerInput="latex"
+      draftKeyPrefix="img"
+      variant="embedded"
+      draftDisabled
+      hints={{}}
+      initialAnswers={{ '1': '2. ［图1 上传中…］' }}
+      onRequestHint={async () => 'hint'}
+      headerActions={() => null}
+      onQuestionChange={() => {}}
+      onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: null, method: 'self_assess' })}
+      onFinish={async () => {}}
+    />,
+  );
+  await waitFor(() => expect((screen.getByRole('button', { name: '提交' }) as HTMLButtonElement).disabled).toBe(true));
+});
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -896,6 +918,9 @@ import { ANSWER_IMG_CLASS } from '@/components/markdown'; // 若已从该模块�
 
 // 组件状态区（与 selfAssess 等并列）
 const [answerUploading, setAnswerUploading] = useState(false);
+// 切题时在飞的上传会落在「别的题」的文本上（编辑器不卸载、只换 value），旧题会永久留下
+// ［图N 上传中…］而 answerUploading 已归零——所以还要按文本兜底，双保险。
+const hasPendingUpload = /上传中…/.test(answer);
 ```
 
 LatexEditor（`:591` 一带）：
@@ -926,8 +951,8 @@ PreviewDraftPanel（`:601`）：
 ```tsx
 <button
   onClick={handleSubmit}
-  disabled={!answer.trim() || answerUploading}
-  title={answerUploading ? '图片上传中' : '提交'}
+  disabled={!answer.trim() || answerUploading || hasPendingUpload}
+  title={answerUploading ? '图片上传中' : hasPendingUpload ? '有图片未上传完成，请删除标记后重试' : '提交'}
   aria-label="提交"
   className="w-12 h-12 rounded-full bg-[var(--brand-500)] text-white flex items-center justify-center disabled:opacity-40 hover:bg-[var(--brand-600)] transition-all shadow-md"
 >
