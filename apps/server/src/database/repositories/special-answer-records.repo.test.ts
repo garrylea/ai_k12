@@ -42,4 +42,18 @@ describe('SpecialAnswerRecordsRepository', () => {
       expect.any(Array),
     );
   });
+
+  it('listBySession 用 q.content 列名（questions 表无 text 列，防 ER_BAD_FIELD_ERROR 回归）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[], []]);
+    const repo = new SpecialAnswerRecordsRepository(pool as any);
+    await repo.listBySession(7);
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('q.content AS question_content');
+    expect(sql).not.toContain('q.text AS question_content');
+    expect(sql).toContain('LEFT JOIN questions q');
+    expect(sql).toContain('sar.session_id = ?');
+    expect(params).toEqual([7]);
+  });
 });
