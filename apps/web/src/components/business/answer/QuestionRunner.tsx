@@ -13,6 +13,7 @@ import {
   markdownComponents,
   preprocessMarkdown,
   MarkdownImg,
+  ANSWER_IMG_CLASS,
 } from '@/components/markdown';
 import { LatexEditor } from '../LatexEditor';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
@@ -135,6 +136,12 @@ export function QuestionRunner({
 }: QuestionRunnerProps) {
   const [idx, setIdx] = useState(startIndex ?? 0);
   const [answer, setAnswer] = useState('');
+  // 有作答图正在上传（LatexEditor 回传）。上传期间禁提交：此时文本里只有
+  // ［图N 上传中…］占位，提上去会把占位标记当答案落库。
+  const [answerUploading, setAnswerUploading] = useState(false);
+  // 切题时在飞的上传会落在「别的题」的文本上（编辑器不卸载、只换 value），旧题会永久留下
+  // ［图N 上传中…］而 answerUploading 已归零——所以还要按文本兜底，双保险。
+  const hasPendingUpload = /上传中…/.test(answer);
   // 文本作答形态：理科（数学/物理/化学）保留左输入+右预览；语文/英语等单栏纯文本
   const latexInput = (answerInput ?? (isMathLikeSubject(subjectId) ? 'latex' : 'plain')) === 'latex';
   // 非理科（语文/英语等文字学科）：阅读量大、作答字数少 —— 题干上限提到 2/3，作答区不再留 280px 保底；
@@ -592,6 +599,7 @@ export function QuestionRunner({
                   value={answer}
                   onChange={updateAnswer}
                   scrollSync={previewScrollSync}
+                  onUploadingChange={setAnswerUploading}
                 />
               </div>
               {/* 右半区：预览 / 草稿 tab。主线保留数学草稿（PRD §7.12）；训练轨答题页传 draftDisabled
@@ -603,6 +611,7 @@ export function QuestionRunner({
                   questionId={`${draftKeyPrefix}-${q.n}`}
                   enabled={!draftDisabled && subjectId === MATH_SUBJECT_ID}
                   scrollSync={previewScrollSync}
+                  imgClassName={ANSWER_IMG_CLASS}
                 />
               </div>
             </>
@@ -649,9 +658,9 @@ export function QuestionRunner({
           </div>
           <button
             onClick={handleSubmit}
-            disabled={!answer.trim()}
+            disabled={!answer.trim() || answerUploading || hasPendingUpload}
             className="w-12 h-12 rounded-full bg-[var(--brand-500)] text-white flex items-center justify-center disabled:opacity-40 hover:bg-[var(--brand-600)] transition-all shadow-md"
-            title="提交"
+            title={answerUploading ? '图片上传中' : hasPendingUpload ? '有图片未上传完成，请删除标记后重试' : '提交'}
             aria-label="提交"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

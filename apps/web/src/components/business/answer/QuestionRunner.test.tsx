@@ -9,6 +9,21 @@ import { useMemo, useState } from 'react';
 // vitest globals:false 下 @testing-library/react 不会自动注册 afterEach cleanup，
 // 需手动清理，否则上一个用例的 DOM 泄漏到下一个用例导致选择器重复命中。
 afterEach(() => cleanup());
+
+// 上传永挂起：模拟「图还在传」的中间态，断言提交被禁用。
+// 必须 ...actual 透传原模块——@/analytics/tracker 也从 '@/services/api' 取命名导出，
+// 整体替换会让那边的导入变 undefined。
+vi.mock('@/services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api')>();
+  return { ...actual, uploadFile: vi.fn(() => new Promise(() => {})) };
+});
+
+// jsdom 没有 URL.createObjectURL，真实压缩必然抛错（占位会立刻变「上传失败」，
+// 上传中态一瞬间就结束，用例会假性通过）。让压缩直通，上传才能真的停在挂起的 uploadFile 上。
+vi.mock('@/utils/image-compress', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/image-compress')>();
+  return { ...actual, compressImageFile: vi.fn(async (f: File) => f) };
+});
 import { QuestionRunner } from './QuestionRunner';
 import type { RunnerJudgeOutcome, RunnerQuestion } from './types';
 
@@ -561,5 +576,53 @@ describe('题号后面的题型标签', () => {
   it('简答题标「简答」', () => {
     render(<QuestionRunner {...base} questions={[{ n: '22', text: '题干', type: 'short_answer' }]} />);
     expect(screen.getByTestId('question-type')).toHaveTextContent('（简答）');
+  });
+});
+
+describe('作答图上传中禁提交（防占位文本落库）', () => {
+  const runnerProps = {
+    subjectId: 1,
+    draftKeyPrefix: 'img',
+    variant: 'embedded' as const,
+    draftDisabled: true,
+    hints: {},
+    onRequestHint: async () => 'hint',
+    headerActions: () => null,
+    onQuestionChange: () => {},
+    onSubmit: async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: null, method: 'self_assess' }),
+    onFinish: async () => {},
+  };
+
+  it('作答图上传中：提交按钮禁用，上传完成恢复（防占位文本落库）', async () => {
+    const questions = [{ n: '1', text: '电路图题', type: 'short_answer' }];
+    render(
+      <QuestionRunner
+        questions={questions}
+        answerInput="latex"
+        {...runnerProps}
+      />,
+    );
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    const evt = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData?: unknown };
+    Object.defineProperty(evt, 'clipboardData', {
+      value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => new File(['x'], 'a.png', { type: 'image/png' }) }] },
+    });
+    fireEvent(ta, evt);
+
+    await waitFor(() => expect((screen.getByRole('button', { name: '提交' }) as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  it('答案里残留「上传中…」标记时也禁用提交（切题时在飞上传的兜底，见 hasPendingUpload）', async () => {
+    // 用 initialAnswers 直接注入残留文本：模拟"上传途中切走、回来时编辑器已换题"的状态
+    render(
+      <QuestionRunner
+        questions={[{ n: '1', text: '电路图题', type: 'short_answer' }]}
+        answerInput="latex"
+        initialAnswers={{ '1': '2. ［图1 上传中…］' }}
+        {...runnerProps}
+      />,
+    );
+    await waitFor(() => expect((screen.getByRole('button', { name: '提交' }) as HTMLButtonElement).disabled).toBe(true));
   });
 });
