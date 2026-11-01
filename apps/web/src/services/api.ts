@@ -3451,3 +3451,66 @@ export const getAdminEvents = (q: AdminAnalyticsWindow & { page?: number; event?
 
 export const getAdminDevices = (w: AdminAnalyticsWindow): Promise<DevicesData> =>
   fetchApi(`/admin/analytics/devices${analyticsQs(w)}`);
+
+// --- Practice History（学生端练习记录，2026-11-01） ---
+// 契约见 docs/api/openapi.yaml 的 /student/practice-history*；改一边要同步另一边。
+
+export interface PracticeHistoryItem {
+  source: 'exam' | 'special';
+  sessionId: number;
+  subjectId: number;
+  title: string | null;
+  module: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  totalCount: number;
+  correctCount: number;
+}
+
+export interface PracticeHistoryQuestion {
+  questionId: number | null;
+  questionOrder: number;
+  answerText: string | null;
+  isCorrect: boolean | null;
+  score: number | null;
+  method: string | null;
+  analysis: string | null;
+  judgedAt: string | null;
+  questionContent: string | null;
+  questionAnswer: string | null;
+  questionAnalysis: string | null;
+  refType: string | null;
+  refId: number | null;
+  sentenceIndex: number | null;
+  passageTitle: string | null;
+  passageSentence: string | null;
+}
+
+export interface PracticeHistoryDetail {
+  session: PracticeHistoryItem;
+  questions: PracticeHistoryQuestion[];
+}
+
+export interface PracticeHistoryListResult {
+  items: PracticeHistoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export function getPracticeHistory(params: {
+  page?: number; pageSize?: number; subjectId?: number;
+} = {}): Promise<PracticeHistoryListResult> {
+  const q = new URLSearchParams();
+  if (params.page !== undefined) q.set('page', String(params.page));
+  if (params.pageSize !== undefined) q.set('pageSize', String(params.pageSize));
+  if (params.subjectId !== undefined) q.set('subjectId', String(params.subjectId));
+  const s = q.toString();
+  return fetchApi<PracticeHistoryListResult>(`/student/practice-history${s ? `?${s}` : ''}`);
+}
+
+export function getPracticeHistoryDetail(
+  source: 'exam' | 'special', sessionId: number,
+): Promise<PracticeHistoryDetail> {
+  return fetchApi<PracticeHistoryDetail>(`/student/practice-history/${source}/${sessionId}`);
+}
