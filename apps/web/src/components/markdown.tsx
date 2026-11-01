@@ -21,8 +21,9 @@
 // 再让 katex 处理 math 节点（math 节点本身是 remark-math 在 mdast 阶段生成的，
 // 已是合法节点不会被 raw 重解析，但若反过来 katex 渲染出的 HTML 会被 raw 当
 // 文本再解析一次，破坏 KaTeX 输出）。
-import { Children, isValidElement, useState } from 'react';
+import { Children, isValidElement, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { Options } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
@@ -235,6 +236,8 @@ interface MarkdownImgProps {
    *  其它 → 120px。
    *  onLoad 后按自然尺寸落桶；默认 120px（常见桶）避免首屏过高。宽按比例自适应（max-w-full 兜底）。 */
   bucketHeight?: boolean;
+  /** 点图放大（默认开）。选项按钮里也生效，点图不会顺带选中该选项。 */
+  zoomable?: boolean;
 }
 
 /**
@@ -243,14 +246,40 @@ interface MarkdownImgProps {
  * 场景通过 className 覆盖（如 CourseDetailPage 用 max-h-[60vh]）。
  * 题面图通过 bucketHeight 启用按宽高比分桶固定高度（见 prop 注释）。
  */
-export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgProps) {
+export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true }: MarkdownImgProps) {
   // 分桶高度状态：bucketHeight=true 时生效，null 表示不参与 className 拼装。
   // 必须无条件调 useState（hooks 规则）——bucketHeight 在调用点是常量，不会切换。
   const [bucketClass, setBucketClass] = useState<string | null>(bucketHeight ? 'h-[120px]' : null);
-  const finalClass = bucketHeight
+  const [zoom, setZoom] = useState(false);
+  const finalClass = (bucketHeight
     ? `${className ?? ''} ${bucketClass ?? ''}`.trim()
-    : (className ?? 'block mx-auto my-2 max-w-full h-[50px] object-contain rounded-lg');
+    : (className ?? 'block mx-auto my-2 max-w-full h-[50px] object-contain rounded-lg'))
+    + (zoomable ? ' cursor-zoom-in' : '');
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setZoom(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoom]);
+  const zoomOverlay = zoom && createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="放大图片"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4"
+      onClick={() => setZoom(false)}
+    >
+      <img
+        src={resolveAsset(src ?? '')}
+        alt={alt ?? ''}
+        className="max-h-[90vh] max-w-[92vw] object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>,
+    document.body,
+  );
   return (
+    <>
     <img
       src={src ? resolveAsset(src) : ''}
       alt={alt ?? ''}
@@ -268,7 +297,12 @@ export function MarkdownImg({ src, alt, className, bucketHeight }: MarkdownImgPr
           : undefined
       }
       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+      // 点图放大：stopPropagation 避免在「选项按钮」里点图被当成选中选项。
+      onClick={zoomable ? (e) => { e.stopPropagation(); setZoom(true); } : undefined}
+      title={zoomable ? '点击放大' : undefined}
     />
+    {zoomOverlay}
+    </>
   );
 }
 

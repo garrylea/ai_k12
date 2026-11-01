@@ -16,11 +16,11 @@ interface Props {
   disabled?: boolean;
 }
 
-// 自定义 img：选项里的图片用 inline-block 小尺寸（固定 30px 高），补 /assets/ 前缀 +
+// 自定义 img：选项里的图片 inline-block，最高 140px（原先 30px 太小，看不清图选项），补 /assets/ 前缀 +
 // 加载失败隐藏。选择题选项图通常是小图标/小图形，inline-block 让图文混排；不分桶。
 const optionMarkdownComponents = {
   img: (props: { src?: string; alt?: string }) => (
-    <MarkdownImg {...props} className="inline-block my-2 max-w-full h-[30px] object-contain rounded-lg align-middle" />
+    <MarkdownImg {...props} className="inline-block my-2 max-w-full max-h-[140px] w-auto object-contain rounded-lg align-middle" />
   ),
 };
 
