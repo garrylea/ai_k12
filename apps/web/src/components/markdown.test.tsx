@@ -16,6 +16,7 @@ import {
   markdownRehypePlugins,
   markdownComponents,
   makeAnswerComponents,
+  resolveAsset,
   ANSWER_IMG_CLASS,
 } from './markdown';
 
@@ -198,6 +199,26 @@ describe('图注：图号 + 分格小标合成「图5乙」', () => {
     expect(caps).toEqual(['甲', '图11乙']);
   });
 
+
+describe('resolveAsset 路径前缀', () => {
+  // 后端有两个独立静态根：/assets/（data-refinery 产物）与 /uploads/（用户上传）。
+  // /uploads/… 本身就是可直接访问的绝对路径，若再补 /assets/ 会变成
+  // /assets/uploads/…，两个静态根都不命中 → 全链路 404（作答贴图就是这个路径）。
+  it('/uploads/ 开头的路径原样返回，不补 /assets/', () => {
+    expect(resolveAsset('/uploads/a/b.png')).toBe('/uploads/a/b.png');
+  });
+
+  it('其它相对路径仍补前缀（只放行 /uploads/，不是「所有以 / 开头都算绝对」）', () => {
+    // ASSET_BASE 未导出：用「带前导斜杠」与「不带」两条同一路径的结果相等来证明
+    // 它仍然走了补前缀分支。
+    expect(resolveAsset('/assets/cover.png')).toBe(resolveAsset('assets/cover.png'));
+    expect(resolveAsset('/assets/cover.png')).not.toBe('/assets/cover.png');
+  });
+
+  it('http(s) 绝对 URL 原样返回', () => {
+    expect(resolveAsset('https://x/y.png')).toBe('https://x/y.png');
+  });
+});
 
 describe('作答内容的大图 Markdown 配置', () => {
   it('makeAnswerComponents：图片使用作答大图样式而非题面 50px 小图', () => {

@@ -45,9 +45,20 @@ import '@/styles/katex-fonts.css';
 // 静态资产前缀。优先取 env（生产部署可能改到 CDN），缺省 /assets/ 走 Vite proxy。
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
 
-/** 把 DB 里的相对图片路径补成可访问 URL；已是绝对 URL（http(s)://）或 data: 直接透传。 */
+/**
+ * 把 DB 里的相对图片路径补成可访问 URL。三类直接透传：
+ * 1) `http(s)://` 已是绝对 URL；
+ * 2) `data:` 内联；
+ * 3) `/uploads/…` —— 用户上传走的是后端**另一个**静态根（`/uploads/`），
+ *    自身已是绝对路径。若不特判就会被补成 `/assets/uploads/…`，
+ *    而 `/assets/` 与 `/uploads/` 是两棵独立的目录树，两边都不命中 → 全链路 404。
+ *    （同口径硬注释见 pages/parent-mobile/MobileChatLogsPage.tsx:66-69）
+ * 其余（`questions/math/…/x.jpg` 等管线产物）才补 ASSET_BASE。
+ */
 export const resolveAsset = (p: string): string =>
-  /^https?:\/\//.test(p) || p.startsWith('data:') ? p : `${ASSET_BASE}${p.replace(/^\/+/, '')}`;
+  /^https?:\/\//.test(p) || p.startsWith('data:') || p.startsWith('/uploads/')
+    ? p
+    : `${ASSET_BASE}${p.replace(/^\/+/, '')}`;
 
 // LLM 输出 JSON 时把换行双转义成 \\n，json.loads 后变成字面 \n（0x5C 0x6E，
 // 反斜杠+n），react-markdown 不认字面 \n（CommonMark 反斜杠转义只对 ASCII

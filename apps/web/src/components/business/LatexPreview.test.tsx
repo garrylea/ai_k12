@@ -268,14 +268,20 @@ describe('LatexPreview 作答图片', () => {
     expect(screen.getByRole('img').className).toContain('h-[50px]');
   });
 
-  // 计划原文这条用 data: URL 验「原样透传、不补 /assets/ 前缀」。实测走不通：
-  // react-markdown 默认 urlTransform 只放行 http(s)/irc/mailto/xmpp（node_modules/
-  // react-markdown/lib/index.js:124、:438），data: 在校验阶段就被清成空串——这是
-  // markdown.tsx 的配置问题、不是 LatexPreview 能修的，且本特性上传后写的是
-  // `/uploads/…` 相对路径，不产生 data:。改用绝对 URL 验同一契约。
-  it('绝对 URL 原样透传（不补 /assets/ 前缀）', () => {
-    render(<LatexPreview value="![第2问](https://cdn.example.com/a.png)" imgClassName={ANSWER_IMG_CLASS} />);
-    expect(screen.getByRole('img').getAttribute('src')).toBe('https://cdn.example.com/a.png');
+  // 作答图上传后写的是 `/uploads/…`（后端独立静态根）。它必须原样进 src——
+  // 一旦被 resolveAsset 补成 /assets/uploads/…，两个静态根都不命中，图上不出来。
+  it('/uploads/ 相对路径原样透传：src 不得被补成 /assets/uploads/…（否则 404）', () => {
+    render(<LatexPreview value="![第2问](/uploads/a/b.png)" imgClassName={ANSWER_IMG_CLASS} />);
+    expect(screen.getByRole('img').getAttribute('src')).toBe('/uploads/a/b.png');
+  });
+
+  // 已知限制：react-markdown 默认 urlTransform 只放行 http(s)/irc/mailto/xmpp，
+  // data: 在进组件前就被清成空串（node_modules/react-markdown/lib/index.js:124、:438）。
+  // 本期口径「不支持内联 base64」，这条用例守着这个现状：将来若要放开 urlTransform，
+  // 必须显式改掉它，而不是悄悄变行为。
+  it('已知限制：data: 内联图不被渲染（react-markdown 默认 urlTransform 清空）', () => {
+    render(<LatexPreview value="![第2问](data:image/png;base64,iVBORw0KGgo=)" imgClassName={ANSWER_IMG_CLASS} />);
+    expect(screen.getByRole('img').getAttribute('src')).toBe('');
   });
 
   it('图片 load 后重放滚动同步（防抖重放发生时图还没加载完）', () => {
@@ -286,6 +292,6 @@ describe('LatexPreview 作答图片', () => {
     const spy = vi.fn(sync.current.apply);
     sync.current.apply = spy;
     fireEvent.load(screen.getByRole('img'));
-    expect(spy).toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
