@@ -196,24 +196,23 @@
 10. HEIC 文件 → 先走 `ensureJpeg`（mock 断言调用），上传的 `File` 为 JPEG。
 11. 存在 `上传中…` 标记时，上层拿到的 `isUploading` 为 true（提交按钮据此禁用，见 §4.1 第 8 步）。
 
-**`image-compress.ts`**
+**`image-compress.ts`**（jsdom 无 canvas / 无图片解码，DOM 路径只能手工验；只把纯计算抽出来单测）
 
-12. 2000×1000 → 输出 1600×800、`type=image/jpeg`。
-13. 800×600 且 <1MB → 原样返回同一对象（不重编码）。
-14. 透明 PNG → 输出 JPEG，透明区为白色（抽样像素断言）。
+12. `scaleSize(2000, 1000)` → `{ w: 1600, h: 800 }`；`scaleSize(800, 600)` 原样；`scaleSize(1000, 2500)` → `{ w: 640, h: 1600 }`。
+13. 边界：`scaleSize(1600, 1200)` 不缩放；取整后任一边都不超过 1600。
 
 **`LatexPreview.test.tsx`**
 
-15. `![图1](/uploads/a/b.png)` 渲染出 `<img>`，`src` 不被 `resolveAsset` 改写。
-16. `![第2问](data:image/png;base64,…)` 也能渲染（`data:` 透传）。
-17. 作答预览的图带 `max-h-[40vh]` 一类样式，**不带** `h-[50px]`；不传 `imgClassName` 时仍是原默认样式（题干预览不受影响）。
-18. `autoWrapMath('![图1](http://x.com/a_b=1.png)')` 输出与输入完全一致（回归，见 §6.2）。
-19. 回归：`$x=1$` 与 `![图1](http://x/a.png)` 混排时，两者各自保持原样，互不吞并。
-20. 图片触发 `load` 事件后 `scrollSync.current.apply` 被调用（§6.1）。
+14. `![图1](/uploads/a/b.png)` 渲染出 `<img>`，`src` 不被 `resolveAsset` 改写。
+15. `![第2问](data:image/png;base64,…)` 也能渲染（`data:` 透传）。
+16. 作答预览的图带 `max-h-[40vh]` 一类样式，**不带** `h-[50px]`；不传 `imgClassName` 时仍是原默认样式（题干预览不受影响）。
+17. `autoWrapMath('![图1](http://x.com/a_b=1.png)')` 输出与输入完全一致（回归，见 §6.2）。
+18. 回归：`$x=1$` 与 `![图1](http://x/a.png)` 混排时，两者各自保持原样，互不吞并。
+19. 图片触发 `load` 事件后 `scrollSync.current.apply` 被调用（§6.1）。
 
 **`AnswerResultList.test.tsx`**
 
-21. 学生答案含 `![图1](url)` → 渲染 `<img>` 且使用作答图样式（非 50px 细条）。
+20. 学生答案含 `![图1](url)` → 渲染 `<img>` 且使用作答图样式（非 50px 细条）。
 
 ### 11.2 手工验证（真机）
 
