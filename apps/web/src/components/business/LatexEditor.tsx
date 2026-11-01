@@ -42,6 +42,9 @@ export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: 
   // 只读 props.value 会拿到发起时的旧快照，把后来的编辑覆盖掉。
   const valueRef = useRef(value);
   useEffect(() => { valueRef.current = value; }, [value]);
+  // 仍在飞的占位串。学生删掉占位后文中已扫不到「图N」，只按文本取号会复用旧号：
+  // 旧请求返回时精确命中新占位 → 旧图顶替新图、新图结果找不到串被丢弃。
+  const inFlightRef = useRef<Set<string>>(new Set());
 
   /** 所有写入都走这里：同步 valueRef，受控组件本轮回填前异步逻辑也能拿到最新文本 */
   const emit = (next: string) => {
@@ -96,6 +99,8 @@ export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: 
       el.focus();
       const pos = start + text.length;
       el.setSelectionRange(pos, pos);
+      // 同 insertAtCursor：程序化选址不滚动，末尾贴图必须钉底，否则学生看不到占位
+      if (pos === el.value.length && el.scrollHeight > el.clientHeight) el.scrollTop = el.scrollHeight;
     });
   };
 
@@ -107,9 +112,10 @@ export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: 
     emit(cur.slice(0, idx) + replacement + cur.slice(idx + token.length));
     const el = ref.current;
     const sel = el?.selectionStart;
-    if (!el || sel == null || sel <= idx) return;
-    // 光标在占位之后：按长度差平移，别让它落进替换后的文字里
-    const pos = sel >= idx + token.length ? sel + (replacement.length - token.length) : idx + replacement.length;
+    // 只有光标贴着或落在占位内时才跟着挪；别处的光标一律不动（spec §4.1 第 6 步：替换不改光标），
+    // 否则学生把光标放到文首时，一次异步返回就把光标拽走了
+    if (!el || sel == null || sel <= idx || sel > idx + token.length) return;
+    const pos = sel === idx + token.length ? idx + replacement.length : sel + (replacement.length - token.length);
     requestAnimationFrame(() => el.setSelectionRange(pos, pos));
   };
 
@@ -123,14 +129,22 @@ export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: 
     if (accepted.length === 0) return;
     if (accepted.length > 6) toast('error', '图片较多，建议精简');
 
-    const startIdx = nextImageIndex(valueRef.current);
-    const tokens = accepted.map((_, i) => pendingToken(startIdx + i));
+    // 编号分配要跳过仍在飞的占位：学生删掉占位后文中已扫不到它，只按文本取号会复用
+    let cursor = nextImageIndex(valueRef.current);
+    const numbers: number[] = [];
+    for (let i = 0; i < accepted.length; i += 1) {
+      while (inFlightRef.current.has(pendingToken(cursor))) cursor += 1;
+      numbers.push(cursor);
+      cursor += 1;
+    }
+    const tokens = numbers.map((n) => pendingToken(n));
+    tokens.forEach((t) => inFlightRef.current.add(t));
     insertBlock(tokens.join('\n')); // 一次 onChange 插入全部占位：逐张插会让受控光标漂移
 
-    setUploading((n) => n + accepted.length);
+    setUploading((c) => c + accepted.length);
     for (let i = 0; i < accepted.length; i++) {
       const token = tokens[i];
-      const n = startIdx + i;
+      const n = numbers[i];
       try {
         // 顺序处理：并发上传多张会把 DOM 光标和 onChange 交错打乱
         const jpeg = await ensureJpeg(accepted[i]);
@@ -148,7 +162,9 @@ export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: 
         replaceToken(token, failedToken(n));
         toast('error', '图片上传失败，请重试');
       } finally {
-        setUploading((n2) => n2 - 1);
+        // 该请求已落地（成功/失败/占位被删），编号可以回到池子里
+        inFlightRef.current.delete(token);
+        setUploading((c) => c - 1);
       }
     }
   };
@@ -169,7 +185,11 @@ export function LatexEditor({ value, onChange, scrollSync, onUploadingChange }: 
   const onDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
     setDragging(false);
     const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
-    if (files.length === 0) return;
+    if (files.length === 0) {
+      // 拖进非图片时浏览器默认导航到该文件——已作答内容会整体丢失，必须拦下
+      if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
+      return;
+    }
     e.preventDefault();
     void handleImageFiles(files);
   };

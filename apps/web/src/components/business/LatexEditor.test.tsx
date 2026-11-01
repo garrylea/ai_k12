@@ -38,9 +38,13 @@ vi.mock('@/utils/image-compress', () => ({
 vi.mock('@/components/base/Toast', () => ({ toast: vi.fn() }));
 
 // vitest globals:false 下需手动 cleanup，避免上个用例 DOM 泄漏导致重复命中。
+// 只清调用记录与一次性实现：不能用 resetAllMocks —— 那会把 ensureJpeg /
+// compressImageFile 的默认实现一起清掉，后续用例的图片链路直接断掉。
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  // uploadFile 的「永挂起 / rejected」实现会跨用例残留，单独重置后由各用例自行设定
+  vi.mocked(uploadFile).mockReset();
 });
 
 /** jsdom 无布局：用实例属性覆写滚动几何，返回可断言的 scrollTop 视图 */
@@ -267,8 +271,9 @@ describe('LatexEditor 贴图', () => {
     el.setSelectionRange(3, 3); // "12V" 之后
     pasteImages(el, [img()]);
 
-    await waitFor(() => expect(el.value).toContain('![图1](/uploads/auxiliary/a.jpg)'));
-    expect(el.value.startsWith('12V')).toBe(true);
+    // 精确到字符：图片独占一行（前后补换行，Markdown 才会渲染成块级图），
+    // 光标前后原文一个字都不能丢
+    await waitFor(() => expect(el.value).toBe('12V\n![图1](/uploads/auxiliary/a.jpg)\n;2A'));
     expect(el.value).not.toContain('上传中');
   });
 
@@ -281,6 +286,20 @@ describe('LatexEditor 贴图', () => {
     await waitFor(() => expect(el.value).toContain('［图1 上传中…］'));
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(el.value).toContain('［图2 上传中…］');
+  });
+
+  it('两张都按序上传完成：各自落到自己的占位，顺序不串', async () => {
+    vi.mocked(uploadFile)
+      .mockResolvedValueOnce({ fileId: 1, url: '/uploads/a.jpg' })
+      .mockResolvedValueOnce({ fileId: 2, url: '/uploads/b.jpg' });
+    const { el } = renderControlled('');
+    pasteImages(el, [img('a.png'), img('b.png')]);
+
+    await waitFor(() => expect(el.value).toContain('![图2](/uploads/b.jpg)'));
+    const first = el.value.indexOf('![图1](/uploads/a.jpg)');
+    const second = el.value.indexOf('![图2](/uploads/b.jpg)');
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(first).toBeLessThan(second);
   });
 
   it('上传失败：占位替换为失败标记并 toast，不抛', async () => {
@@ -318,6 +337,16 @@ describe('LatexEditor 贴图', () => {
     expect(el.value).toBe('');
   });
 
+  it('同批含超限图：超大图被剔除，剩下的仍从图1起编号、不留空档', async () => {
+    vi.mocked(uploadFile).mockResolvedValue({ fileId: 1, url: '/uploads/ok.jpg' });
+    const { el } = renderControlled('');
+    pasteImages(el, [img('big.png', 'image/png', 6 * 1024 * 1024), img('ok.png')]);
+
+    await waitFor(() => expect(el.value).toContain('![图1](/uploads/ok.jpg)'));
+    expect(vi.mocked(uploadFile)).toHaveBeenCalledTimes(1);
+    expect(el.value).not.toContain('图2');
+  });
+
   it('上传途中学生删掉占位：结果丢弃，不追加', async () => {
     let resolve!: (v: { fileId: number; url: string }) => void;
     vi.mocked(uploadFile).mockImplementation(() => new Promise((r) => { resolve = r; }));
@@ -333,6 +362,29 @@ describe('LatexEditor 贴图', () => {
     expect(el.value).toBe('');
   });
 
+  it('占位被删后重新贴图：编号不复用，旧请求返回也不会顶替新占位', async () => {
+    let resolveFirst!: (v: { fileId: number; url: string }) => void;
+    vi.mocked(uploadFile)
+      .mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }))
+      .mockResolvedValueOnce({ fileId: 2, url: '/uploads/b.jpg' });
+    const { el } = renderControlled('');
+    pasteImages(el, [img('a.png')]);
+    await waitFor(() => expect(el.value).toContain('［图1 上传中…］'));
+
+    // 学生删掉占位：文中再扫不到「图1」，只按文本取号会把 1 再发一次
+    fireEvent.change(el, { target: { value: '' } });
+    pasteImages(el, [img('b.png')]);
+    await waitFor(() => expect(el.value).toContain('［图2 上传中…］'));
+
+    resolveFirst({ fileId: 1, url: '/uploads/a.jpg' });
+
+    await waitFor(() => expect(el.value).toContain('![图2](/uploads/b.jpg)'));
+    await new Promise((r) => setTimeout(r, 0));
+    // 旧图必须被丢弃：它若精确命中新占位，新图结果就再也找不到串
+    expect(el.value).not.toContain('![图1]');
+    expect(el.value).not.toContain('/uploads/a.jpg');
+  });
+
   it('拖入图片文件：与粘贴同一路径', async () => {
     vi.mocked(uploadFile).mockResolvedValue({ fileId: 1, url: '/uploads/auxiliary/d.jpg' });
     const { el } = renderControlled('');
@@ -340,13 +392,39 @@ describe('LatexEditor 贴图', () => {
     await waitFor(() => expect(el.value).toContain('![图1](/uploads/auxiliary/d.jpg)'));
   });
 
+  it('拖入非图片文件：拦住浏览器导航，不上传、文本不变', () => {
+    const { el } = renderControlled('已作答');
+    // 不 preventDefault 的话浏览器会导航到该文件，整页作答随之丢失；
+    // fireEvent 返回 false 即代表 defaultPrevented
+    const notNavigated = dropFiles(el, [new File(['x'], 'note.txt', { type: 'text/plain' })]);
+
+    expect(notNavigated).toBe(false);
+    expect(vi.mocked(uploadFile)).not.toHaveBeenCalled();
+    expect(el.value).toBe('已作答');
+  });
+
+  it('末尾贴图：占位插入后视口钉到底部（程序化选址不滚动，否则学生看不到任何反馈）', async () => {
+    vi.mocked(uploadFile).mockImplementation(() => new Promise(() => {}));
+    const { el } = renderControlled('第一行\n第二行');
+    const geo = mockScrollGeometry(el, { scrollTop: 0, scrollHeight: 800, clientHeight: 300 });
+
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length); // 光标在末尾
+    pasteImages(el, [img()]);
+
+    await waitFor(() => expect(el.value).toContain('［图1 上传中…］'));
+    await waitFor(() => expect(geo.scrollTop).toBe(800));
+  });
+
   it('HEIC 先转 JPEG 再上传', async () => {
     vi.mocked(uploadFile).mockResolvedValue({ fileId: 1, url: '/uploads/auxiliary/h.jpg' });
     const { el } = renderControlled('');
     pasteImages(el, [img('h.heic', 'image/heic')]);
-    await waitFor(() => expect(vi.mocked(ensureJpeg)).toHaveBeenCalled());
+    // 必须先等 uploadFile 真的被调用：ensureJpeg 只保证走到转换，压缩与上传还在后面的 await 上
+    await waitFor(() => expect(vi.mocked(uploadFile)).toHaveBeenCalled());
     // 上传物必须是转换后的 JPEG：iOS 截图直接拖进来是 HEIC，服务端认不出
     expect(vi.mocked(uploadFile).mock.calls[0][0].type).toBe('image/jpeg');
+    expect(vi.mocked(ensureJpeg)).toHaveBeenCalled();
   });
 
   it('上传中回调 true，完成后 false（上层据此禁用提交）', async () => {
