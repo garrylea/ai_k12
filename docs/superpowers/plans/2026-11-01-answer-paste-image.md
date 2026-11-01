@@ -264,7 +264,8 @@ git commit -m "feat(web): 作答内容的大图 Markdown 配置（ANSWER_IMG_CLA
 
 **Files:**
 - Modify: `apps/web/src/components/business/LatexPreview.tsx:102-155`
-- Test: `apps/web/src/components/business/LatexPreview.test.tsx`
+- Modify: `apps/web/src/components/markdown.tsx:49-50`（`resolveAsset` 放行 `/uploads/` 前缀）
+- Test: `apps/web/src/components/business/LatexPreview.test.tsx`、`apps/web/src/components/markdown.test.tsx`（`resolveAsset` 单测）
 
 **Interfaces:**
 - Consumes: `makeAnswerComponents`（Task 3）
@@ -290,9 +291,14 @@ describe('LatexPreview 作答图片', () => {
     expect(screen.getByRole('img').className).toContain('h-[50px]');
   });
 
-  it('data: URL 也能渲染（原样透传，不补 /assets/ 前缀）', () => {
+  it('/uploads/ 相对路径原样透传：src 不得被补成 /assets/uploads/…（否则 404）', () => {
+    render(<LatexPreview value="![第2问](/uploads/a/b.png)" imgClassName={ANSWER_IMG_CLASS} />);
+    expect(screen.getByRole('img').getAttribute('src')).toBe('/uploads/a/b.png');
+  });
+
+  it('已知限制：data: 内联图不被渲染（react-markdown 默认 urlTransform 清空）', () => {
     render(<LatexPreview value="![第2问](data:image/png;base64,iVBORw0KGgo=)" imgClassName={ANSWER_IMG_CLASS} />);
-    expect(screen.getByRole('img').getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
+    expect(screen.getByRole('img').getAttribute('src')).toBe('');
   });
 
   it('图片 load 后重放滚动同步（防抖重放发生时图还没加载完）', () => {

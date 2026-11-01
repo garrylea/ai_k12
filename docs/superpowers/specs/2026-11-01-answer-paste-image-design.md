@@ -36,7 +36,8 @@
 
 理由：
 
-- 预览区与结果页本来就用 ReactMarkdown 渲染（`LatexPreview.tsx:146`、`AnswerResultList.tsx:221`），`![]()` 天然支持，`resolveAsset` 对 `data:` 与 `http(s):` 原样透传（`markdown.tsx:49`）。
+- 预览区与结果页本来就用 ReactMarkdown 渲染（`LatexPreview.tsx:146`、`AnswerResultList.tsx:221`），`![]()` 天然支持。**但 `resolveAsset` 必须放行 `/uploads/` 前缀**（现实现只放行 `http(s):` 与 `data:`，会把 `/uploads/a.png` 拼成 `/assets/uploads/a.png` → 404；服务端 `/assets/` 与 `/uploads/` 是两个静态根）。`markdown.tsx:49` 改为三个前缀都原样透传。
+- 内联 base64 图（`data:`）**本期不支持**：react-markdown 10 的默认 `urlTransform` 只放行 `https?/ircs?/mailto/xmpp`，`data:` 会被清成空串。学生图走 `/uploads/`，不受影响。
 - 答案在库里就是 `TEXT`（`answers.answer_text`、`exam_answers.answer_text`、`practice_results.student_answer`），URL 随文本落库，**零 schema 改动**，历史回看天然可用。
 - alt 是现成的"自由文本字段"，用来承载"第几问"，不需要另造标注体系。
 
@@ -162,7 +163,7 @@
 | `apps/web/src/components/business/LatexEditor.tsx` | `onPaste` / `onDrop` / 拖拽高亮；占位一次性插入与逐张替换；上传中标记暴露给上层（禁提交） |
 | `apps/web/src/utils/image-compress.ts` | **新增**：`compressImageFile(file): Promise<File>`（最长边 1600、JPEG 0.85、白底、小于则原样） |
 | `apps/web/src/components/business/LatexPreview.tsx` | 新增 `imgClassName?: string` 覆盖；图片 `onLoad` 后重放 `scrollSync` |
-| `apps/web/src/components/markdown.tsx` | 导出作答图样式常量；`MarkdownImg` 增加可选 `onLoad` 透传 |
+| `apps/web/src/components/markdown.tsx` | 导出作答图样式常量；`MarkdownImg` 增加可选 `onLoad` 透传；**`resolveAsset` 放行 `/uploads/` 前缀**（否则 `/uploads/…` 被拼成 `/assets/uploads/…` → 404） |
 | `apps/web/src/components/business/PreviewDraftPanel.tsx` | **两个分支都要**透传 `imgClassName`：`!enabled` 时直接返回 `LatexPreview`（物理/化学正好走这条，`:20-22`），`enabled` 时走 tab 分支（`:44-46`） |
 | `apps/web/src/components/business/answer/QuestionRunner.tsx` | 给 `PreviewDraftPanel` 传作答图样式（`:601` 一带）；提交按钮加"上传中"禁用条件（`:650-653`） |
 | `apps/web/src/components/business/AnswerResultList.tsx` | 学生答案的 `img` 用作答图样式（`:221`） |
@@ -203,8 +204,8 @@
 
 **`LatexPreview.test.tsx`**
 
-14. `![图1](/uploads/a/b.png)` 渲染出 `<img>`，`src` 不被 `resolveAsset` 改写。
-15. `![第2问](data:image/png;base64,…)` 也能渲染（`data:` 透传）。
+14. `![图1](/uploads/a/b.png)` 渲染出 `<img>`，且 `src` **原样是 `/uploads/a/b.png`**（`resolveAsset` 不得补 `/assets/` 前缀）。
+15. 已知限制守门：`![图1](data:image/png;base64,…)` 渲染出的 `src` 为空串（react-markdown 默认 `urlTransform` 拦 `data:`）——断言这条是为了让「以后要支持 base64」时必须显式改配置，而不是悄悄回归。
 16. 作答预览的图带 `max-h-[40vh]` 一类样式，**不带** `h-[50px]`；不传 `imgClassName` 时仍是原默认样式（题干预览不受影响）。
 17. `autoWrapMath('![图1](http://x.com/a_b=1.png)')` 输出与输入完全一致（回归，见 §6.2）。
 18. 回归：`$x=1$` 与 `![图1](http://x/a.png)` 混排时，两者各自保持原样，互不吞并。
