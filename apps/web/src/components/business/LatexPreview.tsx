@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
+  makeAnswerComponents,
   markdownRemarkPluginsWithBreaks,
   markdownRehypePlugins,
   markdownComponents,
@@ -99,9 +100,23 @@ export function autoWrapMath(text: string): string {
   );
 }
 
-export function LatexPreview({ value, scrollSync }: { value: string; scrollSync?: { current: PreviewScrollSync } }) {
+export function LatexPreview({
+  value,
+  scrollSync,
+  imgClassName,
+}: {
+  value: string;
+  scrollSync?: { current: PreviewScrollSync };
+  /** 作答预览传 ANSWER_IMG_CLASS（大图）；不传沿用题面默认小图样式 */
+  imgClassName?: string;
+}) {
   const [debounced, setDebounced] = useState(value);
   const containerRef = useRef<HTMLDivElement>(null);
+  // 组件表必须稳定：每次渲染新建 img 函数会让 React 卸载重挂 <img>，等于重新下载
+  const components = useMemo(
+    () => (imgClassName ? makeAnswerComponents(imgClassName) : markdownComponents),
+    [imgClassName],
+  );
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), 150);
     return () => clearTimeout(t);
@@ -126,10 +141,22 @@ export function LatexPreview({ value, scrollSync }: { value: string; scrollSync?
     };
   }, [scrollSync, applyRatio]);
 
-  // 内容（防抖）变化后重放：渲染高度变了，按最新比例重新定位
+  // 内容（防抖）变化后重放：渲染高度变了，按最新比例重新定位。
+  // 图片解码完成后高度才最终确定，而防抖重放时图还没加载完——必须再等一次 load，
+  // 否则学生看到的是"插了图，右侧跳到别处"。
   useEffect(() => {
-    scrollSync?.current.apply?.();
-  }, [debounced, scrollSync]);
+    const sync = scrollSync?.current;
+    const el = containerRef.current;
+    if (!sync || !el) return;
+    sync.apply?.();
+    const pending = Array.from(el.querySelectorAll('img')).filter((img) => !img.complete);
+    if (pending.length === 0) return;
+    const onLoad = () => sync.apply?.();
+    for (const img of pending) img.addEventListener('load', onLoad);
+    return () => {
+      for (const img of pending) img.removeEventListener('load', onLoad);
+    };
+  }, [debounced, scrollSync, components]);
 
   const wrapped = autoWrapMath(debounced);
 
@@ -143,7 +170,7 @@ export function LatexPreview({ value, scrollSync }: { value: string; scrollSync?
         // learn-prose：项目自有的 Markdown 排版类（global.css §Learn Prose，标题/列表/引用/图片）。
         // 不要写 `prose`——项目没装 @tailwindcss/typography，那个类是死的，会让标题看起来跟正文一样。
         <div className="learn-prose">
-          <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+          <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={components}>
             {wrapped}
           </ReactMarkdown>
         </div>

@@ -5,13 +5,18 @@
 // 2) 数学符号触发（+ - * / = 等）；
 // 3) 不误伤的边界（Markdown 结构行 / 英文单词 / TeX 特殊字符 / 行内代码 / 未配对 $）。
 // 另覆盖滚动跟随：scrollSync 通道（输入区写入比例 → 预览区按自身高度比例定位 scrollTop）。
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
 import { LatexPreview, autoWrapMath } from './LatexPreview';
 import type { PreviewScrollSync } from './preview-scroll-sync';
-import { markdownRemarkPluginsWithBreaks, markdownRehypePlugins, markdownComponents } from '@/components/markdown';
+import {
+  ANSWER_IMG_CLASS,
+  markdownRemarkPluginsWithBreaks,
+  markdownRehypePlugins,
+  markdownComponents,
+} from '@/components/markdown';
 
 afterEach(() => cleanup());
 
@@ -247,5 +252,40 @@ describe('LatexPreview 滚动跟随（scrollSync 通道）', () => {
     expect(sync.current.apply).toBeTypeOf('function');
     view.unmount();
     expect(sync.current.apply).toBeUndefined();
+  });
+});
+
+describe('LatexPreview 作答图片', () => {
+  it('传 imgClassName 时图片用大图样式，不是题面 50px', () => {
+    render(<LatexPreview value="![图1](/uploads/a/b.png)" imgClassName={ANSWER_IMG_CLASS} />);
+    const img = screen.getByRole('img');
+    expect(img.className).toContain('max-h-[40vh]');
+    expect(img.className).not.toContain('h-[50px]');
+  });
+
+  it('不传 imgClassName 时沿用默认（题干预览不受影响）', () => {
+    render(<LatexPreview value="![图1](/uploads/a/b.png)" />);
+    expect(screen.getByRole('img').className).toContain('h-[50px]');
+  });
+
+  // 计划原文这条用 data: URL 验「原样透传、不补 /assets/ 前缀」。实测走不通：
+  // react-markdown 默认 urlTransform 只放行 http(s)/irc/mailto/xmpp（node_modules/
+  // react-markdown/lib/index.js:124、:438），data: 在校验阶段就被清成空串——这是
+  // markdown.tsx 的配置问题、不是 LatexPreview 能修的，且本特性上传后写的是
+  // `/uploads/…` 相对路径，不产生 data:。改用绝对 URL 验同一契约。
+  it('绝对 URL 原样透传（不补 /assets/ 前缀）', () => {
+    render(<LatexPreview value="![第2问](https://cdn.example.com/a.png)" imgClassName={ANSWER_IMG_CLASS} />);
+    expect(screen.getByRole('img').getAttribute('src')).toBe('https://cdn.example.com/a.png');
+  });
+
+  it('图片 load 后重放滚动同步（防抖重放发生时图还没加载完）', () => {
+    const sync: { current: PreviewScrollSync } = { current: { ratio: 0.5 } };
+    render(<LatexPreview value="![图1](/uploads/a/b.png)" imgClassName={ANSWER_IMG_CLASS} scrollSync={sync} />);
+    // 挂载时组件已把自己的 apply 注册进来，直接 spy 会被覆盖、也数不清是哪次调用；
+    // 这里包一层，只看「load 之后」有没有重放。
+    const spy = vi.fn(sync.current.apply);
+    sync.current.apply = spy;
+    fireEvent.load(screen.getByRole('img'));
+    expect(spy).toHaveBeenCalled();
   });
 });
