@@ -11,6 +11,8 @@ import {
   getMyPointRules,
   getMyPoints,
   getMyRewards,
+  getPracticeHistory,
+  getPracticeHistoryDetail,
   getSubscriptionStatus,
   listUnreadBillingNotices,
   getParentAccount,
@@ -61,6 +63,9 @@ vi.mock('@/services/api', async (importOriginal) => {
     getMyPoints: vi.fn(),
     getMyLedger: vi.fn(),
     getMyRewards: vi.fn(),
+    // 练习记录（2026-11-01）：列表 + 详情页挂载即拉
+    getPracticeHistory: vi.fn(),
+    getPracticeHistoryDetail: vi.fn(),
     // 家长端：`ParentLayout` 的顶栏（学生切换器 + 未读数）与 `/parent/rewards` 概览
     getParentPoints: vi.fn(),
     getParentPointRules: vi.fn(),
@@ -97,6 +102,8 @@ vi.mock('@/services/api', async (importOriginal) => {
 const getMyPointsMock = vi.mocked(getMyPoints);
 const getMyLedgerMock = vi.mocked(getMyLedger);
 const getMyRewardsMock = vi.mocked(getMyRewards);
+const getPracticeHistoryMock = vi.mocked(getPracticeHistory);
+const getPracticeHistoryDetailMock = vi.mocked(getPracticeHistoryDetail);
 const getParentPointsMock = vi.mocked(getParentPoints);
 const getParentPointRulesMock = vi.mocked(getParentPointRules);
 const listMyStudentsMock = vi.mocked(listMyStudents);
@@ -352,6 +359,11 @@ function expectStayPageShell() {
     'href',
     '/student/profile',
   );
+  // 练习记录（2026-11-01）：第三枚胶囊，同属浅停留页
+  expect(screen.getByRole('link', { name: '练习记录' })).toHaveAttribute(
+    'href',
+    '/student/practice-history',
+  );
   // 退出登录（此前这两页根本没有）
   expect(screen.getByRole('button', { name: '退出登录' })).toBeInTheDocument();
 }
@@ -385,6 +397,42 @@ describe('路由表：积分相关页面', () => {
     expect(screen.getByTestId('reward-card-1')).toBeInTheDocument();
 
     expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    expectStayPageShell();
+  });
+
+  it('/student/practice-history 渲染 PracticeHistoryPage 列表（浅停留页外壳）', async () => {
+    setStudentSession();
+    getPracticeHistoryMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+
+    renderAt('/student/practice-history');
+
+    expect(await screen.findByRole('heading', { name: '练习记录' })).toBeInTheDocument();
+    expect(await screen.findByTestId('history-empty')).toBeInTheDocument();
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    expectStayPageShell();
+  });
+
+  it('/student/practice-history/:source/:sessionId 渲染 PracticeHistoryDetailPage', async () => {
+    setStudentSession();
+    getPracticeHistoryDetailMock.mockResolvedValue({
+      session: {
+        source: 'exam', sessionId: 1, subjectId: 4, title: '物理卷', module: null,
+        startedAt: '2026-11-01T06:00:00.000Z', completedAt: '2026-11-01T06:40:00.000Z',
+        totalCount: 1, correctCount: 1,
+      },
+      questions: [{
+        questionId: 100, questionOrder: 1, answerText: 'A', isCorrect: true, score: 1,
+        method: 'exact', analysis: null, judgedAt: null,
+        questionContent: '第1题题面', questionAnswer: 'A', questionAnalysis: '解析',
+        refType: 'question', refId: null, sentenceIndex: null,
+        passageTitle: null, passageSentence: null,
+      }],
+    });
+
+    renderAt('/student/practice-history/exam/1');
+
+    expect(await screen.findByRole('heading', { name: '物理卷' })).toBeInTheDocument();
+    expect(await screen.findByText('第1题题面')).toBeInTheDocument();
     expectStayPageShell();
   });
 

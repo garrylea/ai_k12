@@ -33,6 +33,7 @@ import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 const stayItems = [
   { to: '/student/rewards', label: '奖励册' },
   { to: '/student/profile', label: '个人中心' },
+  { to: '/student/practice-history', label: '练习记录' },
 ];
 
 export default function StudentStayLayout() {
