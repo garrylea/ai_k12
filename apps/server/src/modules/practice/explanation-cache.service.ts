@@ -1,12 +1,36 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
-import { ExplanationCapability } from '../../ai-core/capabilities/explanation.capability.js';
+import { ExplanationCapability, SUBJECT_LABELS } from '../../ai-core/capabilities/explanation.capability.js';
+import type { QuestionOption, Subject } from '../../ai-core/types.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
 /** 解析缓存生成并发上限：防判错风暴打爆强模型。 */
 const QUEUE_CONCURRENCY = 2;
 /** answer 达到该长度视为「过程性题解」，直接直写不入库 LLM（PRD/试卷参考答案常为完整过程）。 */
 const ANSWER_AS_SOLUTION_MIN_LEN = 100;
+
+/** llm_routes 只配了 math/chinese/english 三行：物理/化学/道法共用数学档位（强模型）。 */
+const ROUTE_SUBJECTS: Record<string, Subject> = {
+  math: 'math',
+  chinese: 'chinese',
+  english: 'english',
+};
+
+/** questions.options 的 JSON → 选项数组；坏 JSON/空串都当没有（返回 undefined）。 */
+export function parseQuestionOptions(raw: string | null | undefined): QuestionOption[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return undefined;
+    const options = parsed
+      .filter((o): o is { label: unknown; text?: unknown } => !!o && typeof o === 'object')
+      .filter(o => typeof o.label === 'string')
+      .map(o => ({ label: o.label as string, text: String(o.text ?? '') }));
+    return options.length > 0 ? options : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise<T>((resolve) => {
@@ -121,11 +145,20 @@ export class ExplanationCacheService {
         await this.questionsRepo.updateExplanation(id, q.answer);
         return q.answer;
       }
+      // 学科从库里查：写死 'math' 会让物理/化学题解顶着「数学老师」生成。
+      // 查不到不影响生成（回退数学档位 + 通用角色名）。
+      const subjectCode = await this.questionsRepo.findSubjectCode(id).catch(() => null);
       const result = await this.explanation.explain({
         mode: 'solution',
         studentId: '',
-        subject: 'math',
-        question: { content: q.content, answer: q.answer ?? undefined },
+        subject: ROUTE_SUBJECTS[subjectCode ?? ''] ?? 'math',
+        subjectLabel: SUBJECT_LABELS[subjectCode ?? ''],
+        // 选项必须带上：不给选项，模型只能顺着「参考答案」的字母编理由。
+        question: {
+          content: q.content,
+          answer: q.answer ?? undefined,
+          options: parseQuestionOptions(q.options),
+        },
         wrongAnswer: '',
         knowledgePoint: { id: '', name: '' },
       });

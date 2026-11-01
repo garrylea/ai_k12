@@ -113,6 +113,11 @@ def build_update_sql(rec: AnswerRecord, row: QuestionRow) -> tuple[str, list]:
     if rec.answer is not None:
         sets.append("answer = %s")
         params.append(rec.answer)
+        if rec.answer != (row.answer or "") and rec.explanation is None:
+            # 答案变了：旧解析是按旧答案生成的（LLM 会照着错答案圆出一套理由，
+            # 2026-11-01 北师大实验物理卷第 1 题：答案 C、解析通篇在证 D），必须作废；
+            # 下次判错由 ExplanationCacheService 按新答案重新生成。
+            sets.append("explanation = NULL")
     if rec.approach is not None:
         sets.append("approach = %s")
         params.append(rec.approach)

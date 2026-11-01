@@ -49,6 +49,19 @@ export class QuestionsRepository {
     );
   }
 
+  /**
+   * 题目真实学科 code（math/physics/politics…）。
+   * 解析缓存要按它选提示词角色：QuestionRow 只有 subject_id，写死 'math' 会让
+   * 物理/化学的题解顶着「数学老师」生成（2026-11-01）。
+   */
+  async findSubjectCode(id: number): Promise<string | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT s.code FROM questions q JOIN subjects s ON s.id = q.subject_id WHERE q.id = ?`,
+      [id],
+    );
+    return (rows[0]?.code as string) ?? null;
+  }
+
   async create(row: Omit<QuestionRow, 'id' | 'created_at' | 'is_active'>): Promise<number> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO questions

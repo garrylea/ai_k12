@@ -20,6 +20,9 @@ description: "错题解析 - 分析错因并给出正确解法"
 
 ## User Message
 **题目**：{{question.content}}
+{{#question.options}}
+{{label}}. {{text}}
+{{/question.options}}
 **你的答案**：{{wrongAnswer}}
 **标准答案**：{{question.answer}}
 
