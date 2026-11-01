@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 import pymysql  # noqa: E402
 
 from asset_store import LocalAssetStore  # noqa: E402
+from checkpoint import RefineryCheckpoint  # noqa: E402
 from config import RefineryConfig  # noqa: E402
 from db_loader import content_hash  # noqa: E402
 from image_rewrite import MissingImageError, rewrite_fields  # noqa: E402
@@ -49,6 +50,65 @@ def _has_images(*texts, options=None) -> bool:
         if _IMG_REF_RE.search(opt.get("text") or ""):
             return True
     return False
+
+
+def _patch_extracted(rec: dict, *, content: str, answer: str,
+                     material_text, options, output_dir: Path) -> None:
+    """把补好的题写回 extracted，保证下次 publish/loader 看到同一份题号。
+
+    为什么必须回写：补题原先只写库，published 仍按旧题号（缺题的位置是空洞）。
+    下一次 import 会用 published 的 group_order 去对齐库，一错位就会把人工补的题
+    当成「旧残题」摘掉（2026-10-31 第 4 题脐橙事故）。回写后由 publish 重新物化、
+    db_loader 按同一编号对齐，补题不会再被下一次导入冲掉。
+
+    找不到 extracted（例如只在测试里喂了假路径）时只告警、不影响写库。
+    """
+    rel, src = rec.get("rel_path"), rec.get("source")
+    if not rel or not src:
+        print("[WARN] 补题记录缺少 rel_path/source，跳过 extracted 回写", flush=True)
+        return
+    path = output_dir / "extracted" / rel / f"{src}.jsonl"
+    if not path.exists():
+        print(f"[WARN] 找不到 extracted 产物，跳过回写：{path}", flush=True)
+        return
+
+    rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    go = int(rec["group_order"])
+    payload = {
+        "group_order": go,
+        "type": "choice" if options else "short_answer",
+        "difficulty": 2,
+        "content": content,
+        "options": options,
+        "answer": answer,
+        "material_text": material_text,
+        "needs_review": False,
+    }
+    pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or -1) == go), None)
+    if pos is None:
+        pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or 0) > go), len(rows))
+        sibling = rows[pos] if pos < len(rows) else (rows[-1] if rows else {})
+        rows.insert(pos, {
+            "subject_id": sibling.get("subject_id") or subject_code_for_parts(Path(rel).parts, default=""),
+            "group_id": None,
+            "full_score": sibling.get("full_score"),
+            "grade_band": sibling.get("grade_band") or "junior",
+            "source": src,
+            "source_year": sibling.get("source_year"),
+            **payload,
+        })
+    else:
+        rows[pos] = {**rows[pos], **payload}
+
+    path.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+        encoding="utf-8",
+    )
+    # 让 publish 下次重发这份卷（否则 checkpoint 会跳过，published 还是旧题号）
+    checkpoint = RefineryCheckpoint(output_dir / ".publish_checkpoint.json")
+    checkpoint.load()
+    checkpoint.unmark_published(f"{rel}/{src}")
+    print(f"[INFO] 已回写 extracted 并标记重发：{path}", flush=True)
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -122,7 +182,8 @@ def pending_records(subject: str | None = None, source: str | None = None,
     return out
 
 
-def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None) -> str:
+def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None,
+                 output_dir: Path | None = None) -> str:
     from manual_fix import looks_like_ui_echo
 
     if looks_like_ui_echo(rec.get("content") or ""):
@@ -177,6 +238,10 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
             return f"跳过：{e}"
 
     chash = content_hash(content, options)
+    _patch_extracted(
+        rec, content=content, answer=answer, material_text=material_text, options=options,
+        output_dir=output_dir or RefineryConfig.from_env().output_dir,
+    )
     if qid:
         cur.execute(
             "UPDATE questions SET content=%s, options=%s, "

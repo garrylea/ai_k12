@@ -225,3 +225,34 @@ def test_apply_empty_answer_does_not_overwrite_existing():
     sql, args = next((s, a) for s, a in cur.sql if s.startswith("UPDATE questions"))
     assert "COALESCE(NULLIF" in sql
     assert "" in args
+
+
+def test_apply_writes_back_to_extracted_and_clears_publish_checkpoint(tmp_path):
+    """补题必须回写 extracted，否则下次 import 会按旧题号对齐并摘掉补的题。"""
+    out = tmp_path / "output"
+    rel = "物理/初中/first/2024/卷A"
+    src = "卷A"
+    ext_file = out / "extracted" / rel / f"{src}.jsonl"
+    ext_file.parent.mkdir(parents=True)
+    rows = [
+        {"group_order": 1, "content": "题1", "answer": "A", "subject_id": "physics"},
+        {"group_order": 2, "content": "题2", "answer": "A", "subject_id": "physics"},
+        {"group_order": 3, "content": "题3", "answer": "A", "subject_id": "physics"},
+        {"group_order": 5, "content": "题5", "answer": "A", "subject_id": "physics"},
+    ]
+    ext_file.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    (out / ".publish_checkpoint.json").write_text(
+        json.dumps({"published": [f"{rel}/{src}"], "publish_versions": {f"{rel}/{src}": 2}}),
+        encoding="utf-8",
+    )
+
+    rec = dict(REC, rel_path=rel, source=src, group_order=4, content="补的第4题", answer="B")
+    cur = FakeCursor(paper=(54, 4), existing=None)
+
+    A.apply_record(cur, rec, apply=True, assets_root=tmp_path / "assets", output_dir=out)
+
+    written = [json.loads(l) for l in ext_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert [r["group_order"] for r in written] == [1, 2, 3, 4, 5]
+    assert written[3]["content"] == "补的第4题"
+    ckpt = json.loads((out / ".publish_checkpoint.json").read_text(encoding="utf-8"))
+    assert f"{rel}/{src}" not in ckpt.get("published", [])

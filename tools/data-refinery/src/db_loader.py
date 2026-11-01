@@ -1315,14 +1315,26 @@ class DbLoader:
                             # 新内容在库里已有同一题：把本行改指向它，而不是保留旧内容。
                             # 旧逻辑保留下会留下"该题号还是上一轮的残题"（北师大实验
                             # 题4 因此一直挂着「命题人」那行，2026-10-31 实测）。
-                            # 解除本行与旧题的关联；后面的 INSERT IGNORE 会把 other 挂上
-                            # （other 若已在本卷别的位置，IGNORE 自然跳过）
-                            self._exec(
-                                "DELETE FROM paper_questions WHERE paper_id=%s AND question_id=%s",
-                                (paper[1], qid))
-                            print(f"[WARN] paper={paper[1]} 题{go if go is not None else i} "
-                                  f"新内容与已有题 #{other} 相同，改为复用该题"
-                                  f"（原行 #{qid} 解除关联）", flush=True)
+                            #
+                            # 但如果该题**已经挂在本卷别的位置**，说明 published 与库的
+                            # 题号已经错位（人工补题只写了库、没回写 extracted）。这时删本行
+                            # 只会在卷内留下题号空洞，并把人工补的题从卷里摘掉（2026-10-31
+                            # 脐橙题事故）——保留原行，交给补题回写后重新对齐。
+                            already_linked = self._query(
+                                "SELECT 1 FROM paper_questions WHERE paper_id=%s AND question_id=%s",
+                                (paper[1], other),
+                            )
+                            if already_linked:
+                                print(f"[WARN] paper={paper[1]} 题{go if go is not None else i} "
+                                      f"目标题 #{other} 已挂在本卷别的位置（题号错位），"
+                                      f"保留原行 #{qid} 不删除", flush=True)
+                            else:
+                                self._exec(
+                                    "DELETE FROM paper_questions WHERE paper_id=%s AND question_id=%s",
+                                    (paper[1], qid))
+                                print(f"[WARN] paper={paper[1]} 题{go if go is not None else i} "
+                                      f"新内容与已有题 #{other} 相同，改为复用该题"
+                                      f"（原行 #{qid} 解除关联）", flush=True)
                             qid = other
                         else:
                             self._exec(

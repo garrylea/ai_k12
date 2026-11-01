@@ -2293,6 +2293,16 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 - `db_loader.assert_materialized_images`：入库前护栏，题干/答案/解析/材料/选项出现非 `questions//textbooks//http(s)/data:` 前缀的图片引用直接报错拒收。
 - `checkpoint.PUBLISH_VERSION`（=2）：发布口径升级后**自动重发**旧产物，用户仍只需记 `import_cli` 一个命令，不需要 `--force`（2026-10-31 用户指出：能少记一个命令就少记一个）。
 
+## 2026-10-31 修复：补题只写库导致下次 import 摘掉人工题（第 4 题消失/题号错位）
+
+**现象**：北师大实验物理卷补完第 4 题（脐橙）后重跑 import，卷内第 4 题消失、题号变成 1,2,3,5…34；前端按「第几个」显示题号，于是第 4 个位置显示第 5 题（电路）内容，且该题是 short_answer（需打字），提交箭头因答案为空一直是灰的。
+
+**根因（实测）**：① 补题只写 DB，extracted/published 仍是 33 题（缺第 4 题）；② `db_loader` 入库末尾按「本次关联到的题」清理历史行（`DELETE ... question_id NOT IN (linked_ids)`），published 没有的 6342 被摘掉；③ 重排题号用 `COALESCE(group_order, rn)`，group_order 有洞就保留空洞。
+
+**修复**：
+- `apply_fixes._patch_extracted`：补题落库前**回写 extracted**（同 group_order 替换，缺号按序插入），并 unmark 该卷的 publish checkpoint，下次 publish 自动重发。题号从此与库一致，import 不再错位。
+- `db_loader` 复用分支：目标题**已挂在本卷别的位置**时不再删原行（题号错位时保数据，只告警）。
+
 **遗留数据**：content 仍残留 `images/` 6 题（4/6/52/53/54 卷）+ answer 16 题，需另行批量修复（重新物化后改写，不要简单 reload——published 缺手工补的题）。
 
 **验证**：新增 8 条用例（answer 物化 / strict 缺图 / 补题物化 / 缺图拒收 / 空答案不覆盖 / loader 护栏）；`pytest` 1482 passed。
