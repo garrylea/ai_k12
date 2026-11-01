@@ -293,7 +293,7 @@ describe('ExamsService.submitAnswer', () => {
     });
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith({
       sessionId: 77, questionId: 10, questionOrder: 1, answerText: 'A',
-      isCorrect: 0, method: 'exact', errorType: null, judgedAt: expect.any(Date),
+      isCorrect: 0, score: null, method: 'exact', errorType: null, judgedAt: expect.any(Date),
     });
     // I-1：判题前先落「在途行」（is_correct NULL）——判题在途窗口内自动收卷走补判而非未作答
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledTimes(2);
@@ -525,7 +525,7 @@ describe('ExamsService.submit', () => {
     });
     expect(deps.examSessionsRepo.markSubmitted).toHaveBeenCalledWith(77);
     // 汇总只算客观题：1/2 = 50，主观 1 题单列
-    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 50, subjectiveCount: 1 });
+    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 50, subjectiveCount: 1, partialCount: 0 });
   });
 
   it('I-2 find-or-create：已有未清错题（error_practice/前次考试）-> 复用既有行，不重复 create', async () => {
@@ -600,7 +600,7 @@ describe('ExamsService.submit', () => {
     expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 77, questionId: 12, isCorrect: null, method: 'self_assess',
     }));
-    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0, subjectiveCount: 1 });
+    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0, subjectiveCount: 1, partialCount: 0 });
   });
 
   it('幂等：已 submitted -> 直接重算汇总返回，不重复判题/落库', async () => {
@@ -617,7 +617,7 @@ describe('ExamsService.submit', () => {
       },
     });
     const r = await mkSvc(deps).submit(1, 77);
-    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 33.3, subjectiveCount: 0 });
+    expect(r).toEqual({ correctCount: 1, totalCount: 3, accuracy: 33.3, subjectiveCount: 0, partialCount: 0 });
     expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
     expect(deps.examSessionsRepo.upsertAnswer).not.toHaveBeenCalled();
     expect(deps.examSessionsRepo.markSubmitted).not.toHaveBeenCalled();
@@ -653,7 +653,7 @@ describe('ExamsService.submit', () => {
     }));
     expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(2);
     // ai 模式主观题计入对错：0/3 = 0，subjectiveCount 0
-    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0, subjectiveCount: 0 });
+    expect(r).toEqual({ correctCount: 0, totalCount: 3, accuracy: 0, subjectiveCount: 0, partialCount: 0 });
   });
 
   it('会话不存在 -> 404；非本人 -> 403', async () => {
@@ -1011,5 +1011,49 @@ describe('ExamsService 交卷发分任务码', () => {
     await mkSvc(deps).submit(1, 77);
 
     expect(deps.pointsService.award).toHaveBeenCalledWith(expect.objectContaining({ taskCode }));
+  });
+});
+
+
+describe('多选部分得分（score = 0.5）计入正确率', () => {
+  it('全对 1 题 + 选对不全 1 题 + 错 1 题 -> accuracy 50，partialCount 1', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'AB', is_correct: 1, score: '1.00', method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+          { id: 2, session_id: 77, question_id: 11, question_order: 2, answer_text: 'A', is_correct: 0, score: '0.50', method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+          { id: 3, session_id: 77, question_id: 12, question_order: 3, answer_text: 'D', is_correct: 0, score: '0.00', method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+        ]),
+      },
+    });
+
+    const r = await mkSvc(deps).submit(1, 77);
+
+    expect(r.accuracy).toBe(50);        // (1 + 0.5 + 0) / 3
+    expect(r.correctCount).toBe(1);     // 只有全对算「答对」
+    expect(r.partialCount).toBe(1);
+  });
+
+  it('旧数据没有 score 时退回 is_correct（不因为新列全空而把正确率算成 0）', async () => {
+    const deps = mk({
+      examPapersRepo: papersRepoWithPaper(),
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersBySession: vi.fn().mockResolvedValue([
+          { id: 1, session_id: 77, question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, score: null, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+          { id: 2, session_id: 77, question_id: 11, question_order: 2, answer_text: 'B', is_correct: 0, score: null, method: 'exact', analysis: null, error_type: null, judged_at: new Date() },
+        ]),
+      },
+    });
+
+    const r = await mkSvc(deps).submit(1, 77);
+
+    // 卷面 3 题、只回了 2 条答案：分母仍是 3，得分 1 -> 33.3
+    expect(r.accuracy).toBe(33.3);
+    expect(r.partialCount).toBe(0);
   });
 });

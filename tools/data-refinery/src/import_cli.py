@@ -223,9 +223,8 @@ def _fix_entry(args):
         if args.skip_review or not sys.stdin.isatty():
             print(f"[提示] {len(sources)} 份卷有题目待人工确认；当前非交互终端，已跳过。",
                   flush=True)
-            print("       逐条补题：python3 scripts/fix_question_cli.py --source <卷名>",
-                  flush=True)
-            print("       补完入库：python3 scripts/apply_fixes_cli.py --apply", flush=True)
+            print("       唯一入口（录入后会自动问是否写库）：", flush=True)
+            print("       python3 scripts/fix_question_cli.py --source <卷名>", flush=True)
             return 0
         review_pending(sources=sources)
         return 0
@@ -265,10 +264,12 @@ def _execute(args) -> int:
     # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起
     if not args.skip_answers and not args.cards_only and not args.skip_load:
         stages.append(("5/8 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
-    # 识别问题扫描：缺号 / 被吞 / 卷首页脚被当题，落 output/recognition_issues.jsonl，
-    # 供 scripts/fix_question_cli.py 逐条人工补题（不阻塞入库，可随时补跑）
+    # 识别问题扫描：缺号 / 被吞 / 内容不完整 / 前后题合并 / 卷首页脚被当题，
+    # 落 output/recognition_issues.jsonl，供 scripts/fix_question_cli.py 逐条人工确认
+    # （不阻塞入库，可随时补跑）
     if not args.cards_only:
-        stages.append(("6/8 识别问题扫描（缺号/被吞/噪声题）", _scan_entry(args), []))
+        stages.append(("6/8 识别问题扫描（缺号/被吞/内容不完整/前后题合并/噪声题）",
+                       _scan_entry(args), []))
         # 扫完直接引导人工补题：交互终端下会逐条问，非交互（CI/管道）只打印命令，
         # 避免 CI 卡在 input() 上。补完的内容在 output/manual_fixes/，
         # 用 scripts/apply_fixes_cli.py --apply 统一写库。
@@ -326,13 +327,18 @@ def _write_preview_log(recs: list[dict], scope: list[str]) -> Path | None:
 
 
 def _apply_entry(args):
-    """把第 7 步补的题写进库：先预览，交互终端下确认一次才真写。"""
+    """把第 7 步补的题写进库：先预览，交互终端下确认一次才真写。
+
+    闸门同时看两种记录：还没写库的（pending）**和**写过后被重导冲掉的（needing_replay）。
+    只看前者会漏掉「补过、后来又没了」的题，用户不额外跑命令就永远救不回来。
+    """
     def _run(_argv) -> int:
-        from apply_fixes import pending_records, run as apply_run
+        from apply_fixes import needing_replay, pending_records, run as apply_run
 
         recs = pending_records(args.subject, args.file)
-        if not recs:
-            print("[补题] 没有待入库的补题记录", flush=True)
+        lost = needing_replay(args.subject, args.file)
+        if not recs and not lost:
+            print("[补题] 已是最新：没有待写入、也没有丢失的补题", flush=True)
             return 0
 
         scope = []
@@ -340,34 +346,34 @@ def _apply_entry(args):
             scope += ["--subject", args.subject]
         if args.file:
             scope += ["--source", args.file]
-        print(f"[补题] 待写入 {len(recs)} 条，先预览：", flush=True)
+        head = f"{len(recs)} 条待写入"
+        if lost:
+            head += f"，另有 {len(lost)} 条被重导冲掉需重放"
+        print(f"[补题] {head}，先预览：", flush=True)
         apply_run(["--dry-run"] + scope, via_pipeline=True)
         # 终端可能滚动或被别的程序接管输出，把清单同时落一份文件，随时可查
-        log_path = _write_preview_log(recs, scope)
+        log_path = _write_preview_log(recs + lost, scope)
         if args.dry_run:
             return 0
         if args.skip_review or not sys.stdin.isatty():
-            print("       确认后写入：python3 scripts/apply_fixes_cli.py --apply"
-                  + (" " + " ".join(scope) if scope else ""), flush=True)
+            print("       这一步会在下次运行同一条导入命令时自动再问一次"
+                  "（非交互终端下不写库）", flush=True)
             return 0
 
         print("\n是否现在写入题库？ y=写入 / 直接回车=暂不写 › ", end="", flush=True)
         ans = (sys.stdin.readline() or "").strip().lower()
         if ans not in ("y", "yes"):
-            cmd = "python3 scripts/apply_fixes_cli.py --dry-run" + (
-                " " + " ".join(scope) if scope else "")
             # 把清单再贴一遍：预览可能已经滚上去，这里是屏幕上最后的记录
-            print(f"[跳过] 未写库，本次未写入的 {len(recs)} 条：", flush=True)
-            for rec in recs[:12]:
+            print(f"[跳过] 未写库，本次未写入的 {len(recs) + len(lost)} 条：", flush=True)
+            for rec in (recs + lost)[:12]:
                 label = rec.get("source", "?")
                 if "202407-" in label:
                     label = label.split("202407-", 1)[1]
                 print(f"       {label}  题{rec.get('group_order', '?')}", flush=True)
-            if len(recs) > 12:
-                print(f"       …另有 {len(recs) - 12} 条", flush=True)
-            print("       补题记录仍在 output/manual_fixes/", flush=True)
-            print(f"       再看一遍上面的预览：{cmd}", flush=True)
-            print("       确认要写时：把 --dry-run 换成 --apply", flush=True)
+            if len(recs) + len(lost) > 12:
+                print(f"       …另有 {len(recs) + len(lost) - 12} 条", flush=True)
+            print("       补题记录仍在 output/manual_fixes/；"
+                  "重新运行同一条导入命令会再问一次", flush=True)
             return 0
         return apply_run(["--apply"] + scope, via_pipeline=True)
     return _run

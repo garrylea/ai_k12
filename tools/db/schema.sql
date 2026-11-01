@@ -454,6 +454,7 @@ CREATE TABLE IF NOT EXISTS exam_answers (
   question_order SMALLINT NOT NULL,
   answer_text TEXT,
   is_correct TINYINT(1) DEFAULT NULL,
+  score DECIMAL(3,2) DEFAULT NULL COMMENT '客观题得分比例：1=全对 0.5=选对不全 0=错；主观题 NULL',
   method VARCHAR(20) DEFAULT NULL,         -- 折回自 migrations/2026-09-09_widen_method_columns.sql：容纳 'self_assess'（11 字符）
   analysis TEXT,
   error_type VARCHAR(20) DEFAULT NULL,

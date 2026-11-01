@@ -199,7 +199,8 @@ describe('SubscriptionsService.listPlans', () => {
 describe('SubscriptionsService.getUsageView', () => {
   it('有付费期：periodEnd=currentPeriodEnd、periodStart=periodEnd-30d（rolling），聚合 totals + byDay 形状', async () => {
     const d = mkDeps();
-    const periodEnd = new Date('2026-10-30T00:00:00.000Z');
+    // 不能写死日期：2026-10-30 过后这条会因「period_end 已过期」算出 expired（时间炸弹）
+    const periodEnd = new Date(Date.now() + 5 * 24 * 3600 * 1000);
     d.subsRepo.findByParentId.mockResolvedValue({
       trial_ends_at: null,
       current_period_end: periodEnd,
@@ -357,7 +358,8 @@ describe('SubscriptionsService.adminSetTrial', () => {
 describe('SubscriptionsService.adminGrantDays', () => {
   it('正数：adjustPeriodWithinTx(conn, …, 30) → adjustments 落一行(grant_days) → 返回新 StatusView', async () => {
     const d = mkDeps();
-    const periodEnd = new Date('2026-10-30T00:00:00.000Z');
+    // 不能写死日期：2026-10-30 过后这条会因「period_end 已过期」算出 expired（时间炸弹）
+    const periodEnd = new Date(Date.now() + 5 * 24 * 3600 * 1000);
     d.subsRepo.findByParentId.mockResolvedValue({
       trial_ends_at: null,
       current_period_end: periodEnd,

@@ -35,7 +35,7 @@ const SELF_ASSESS_SUBJECTS = new Set<number>([
 
 /** 闸门①：考试侧「跳过判题直接自评」。语文放全部非客观题；新学科只放真正主观的题型，
  *  填空/计算必须进 JudgeCore 先做归一化比对（spec §3.5）。 */
-const OBJECTIVE_TYPES = new Set(['choice', 'true_false']);
+const OBJECTIVE_TYPES = new Set(['choice', 'multi_choice', 'true_false']);
 const NEW_SUBJECT_SKIP_JUDGE_TYPES = new Set(['short_answer', 'proof']);
 
 export function targetedTaskCode(subjectId: number): string {

@@ -366,8 +366,17 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
             stem = '\n'.join(lines[:a_img]).strip()
             a_text = '\n'.join(lines[a_img:mark_line[0]]).strip()
         else:
-            stem = ''
-            a_text = '\n'.join(lines[:mark_line[0]]).strip()
+            # A 上方一张图都没有：可能是「题干 + A 的文字选项（A 本身没配图）」，
+            # 也可能是「只有题干、A 真的缺内容」。按空行分段，≥2 段时最后一段归 A、
+            # 其余归题干（2026-11-01 人大附题2：A 在原卷上确实没有配图，旧逻辑把
+            # 题干整段塞给 A，stem 变成空串，入库后真题库显示空白题干）。
+            head = '\n'.join(lines[:mark_line[0]]).strip()
+            blocks = [b.strip() for b in re.split(r'\n\s*\n', head) if b.strip()]
+            if len(blocks) >= 2:
+                stem = '\n\n'.join(blocks[:-1])
+                a_text = blocks[-1]
+            else:
+                stem, a_text = '', head
         opts = [{"label": marks[0][2], "text": a_text}]
         for k in range(1, 4):
             seg = '\n'.join(lines[mark_line[k - 1] + 1:mark_line[k]]).strip()
@@ -539,6 +548,7 @@ class RawQuestion:
     explanation: str | None = None  # 解析（答案对齐阶段填入）
     score: int | None = None        # 每题满分（分组标题解析），无则为 None
     material_text: str | None = None  # 同节共享材料（策略的 material_policy 开启时填）
+    multi_choice: bool = False      # 所在大题标题写的是「多项选择题」→ 题型应为 multi_choice
 
 
 def _strip_main_stem_prefix(line: str) -> str:
@@ -616,6 +626,7 @@ def split_page(text: str, md_path: Path,
     questions: list[RawQuestion] = []
     current: RawQuestion | None = None
     current_group_id: str | None = None
+    current_multi = False          # 当前大题是否「多项选择题」
     # 当前分组的分数状态：unified（组内每题统一分）或 map（逐题给分）
     current_unified_score: int | None = None
     current_score_map: dict[int, int] | None = None
@@ -732,6 +743,7 @@ def split_page(text: str, md_path: Path,
                     group_id=current_group_id,
                     content=tail,
                     score=q_score,
+                    multi_choice=current_multi,
                     material_text=_material_for_new_stem() if policy.attach else None,
                 )
                 continue
@@ -744,6 +756,8 @@ def split_page(text: str, md_path: Path,
                     questions.append(current)
                     current = None
             current_group_id = gid
+            # 「多项选择题」大题：这一节所有题都是多选（2026-11-01 人大附卷实测）
+            current_multi = ("多项选择" in line) or ("多选题" in line)
             if policy.attach:
                 _start_scope()
             # 解析每题分数（选择/填空'每题N分'统一分，解答题'第X题N分'逐题 map）
@@ -935,6 +949,7 @@ def split_page(text: str, md_path: Path,
                 group_id=current_group_id,
                 content=content,
                 score=q_score,
+                multi_choice=current_multi,
                 material_text=material,
             )
             if inline_gid:

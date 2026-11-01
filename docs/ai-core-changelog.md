@@ -2374,3 +2374,148 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 ## 2026-11-01 根因：卷首带题号的页脚抢占了题号
 
 北师大实验 md 卷首有「4. 命题人: 李岩 / 覃凌」，`is_main_stem` 把它当成第 4 题；随后 `is_junk_question` 删掉这条 → 留下缺号 4；真正的第 4 题再出现时又被「重复题号」跳过 → 第 4 题整道消失（后续的补题丢题、题号错位都由它引发）。修复：切题时先跳过「≤40 字且命中 命题人/审核人/校对人/第X页共Y页」的行，不占题号；回归用例 `test_junk_numbered_line_does_not_steal_stem_number`。
+
+
+## 2026-11-01 识别问题扫描补「内容层」：不完整 / 前后题合并（人工确认后才改库）
+
+**背景**：手工补题流程只被「缺号清单」触发。人大附 2024 物理 34 个题号全在，但第 27 题缺小问 (1)、第 24 题吞了第 25 题、第 25 题装着第 23 题的正文 —— 三处都不算缺号，一次也没进过人工队列；第 27 题还因 `needs_review` 被写成 `is_active=0`，真题库显示 33 道却无人知道缺哪道。
+
+**改动**：
+- `recognition_scan` 新增两类 issue（确定性判据，不调 LLM）：`incomplete_content`（有 (2) 无 (1)；`needs_review` 且 `labeling_issues` 判过不完整）、`merged_content`（正文里出现另一个题号且 md 里该题号后确实是这段话；正文开头在 md 里唯一归属于另一题号）。所有条目带 `content_sig`（归一化正文 md5）。
+- `manual_fix._ask`：内容层问题先问「你看来有没有问题」。答 2 → `mark_issue(..., verdict=no_change)`，只改清单、不产补题记录、不动题库；答 1 → 走原补录流程，`apply_fixes` 原地 UPDATE + `is_active=1`。
+- `reopen_unbacked` 跳过 `verdict=no_change`；新增 `reopen_changed`：正文指纹变了就退回待确认（避免一次「没问题」永久闭麦）。
+- `review_pending` 返回值加 `confirmed_ok`，汇总里单列「确认无问题」。
+
+**实测（物理 5 卷）**：仅报出人大附 17/24/25/27 与北京四中 23 共 5 条，一零一的两处疑似（「盐水 1、盐水 2」误当题号、两题同开头）已用「md 里该题号后确实是这段话」「正文唯一归属」两条护栏压掉。`pytest` 1520 passed（新增 14 条用例）。
+
+**踩到的坑**：`needs_review` 那条判据一上来给语文出了 195 条（画线句/加点字/图片内表格 —— 本来就是 `_UNREPAIRED_OK` 允许的「只报告不修复」状态）。已按学科收口：这几科只保留确定性判据，语文内容层从 195 条降到 6 条。噪声记录已从 `recognition_issues.jsonl` 清掉（备份 `/tmp/recognition_issues.backup.jsonl`）。
+
+
+## 2026-11-01 补：题干为空 / 补题被重导冲掉却仍显示「已解决」
+
+**现象（用户实测）**：① 第 2 题 `questions.content` 是空串，题干整段跑进了选项 A；② 真题库题号从 1–34 跳号，16、18 没了，清单也不报。查库：`exam_papers 53` 的 `question_count=30`、`updated_at=12:40`，人工补过的 7/16/18/23 四行被摘掉（6338–6341 行还在，只是不再挂到卷上），第 6 题 `is_active` 被重置为 0 —— 12:40 有一次**重导**（publish + db_loader 按 30 题的 published 重建）。补题文件仍是 `applied=true`，清单仍是 `resolved`，于是永远不会再提示。
+
+**修复**：
+- `recognition_scan` 新增 `empty_stem`（正文归一化后为空）→ 归入 `incomplete_content`，走同一条人工确认门。
+- `reopen_unbacked(..., present=当前 extracted 的题号集合)`：`missing/punct_stem` 即使 `applied=true`，只要这次切题产物里仍缺该题号就重新打开（`applied` 只证明「当时写过库」）。
+- `apply_fixes._replay_reason`：写库前查库，「卷在但题没了」或「题在但 `is_active=0`」都自动重放（打印 `[replay]`），不用记 `--force`。
+- `apply_fixes` 写完自动**复扫**刚改的卷（`_rescan` → `recognition_scan.run(..., sources=...)`），状态一次收口。
+- **交互前先列全表**（2026-11-01 用户实测第 2 题「没出现」）：`review_pending` 原来不列清单、只逐条弹，且按文件顺序把第 2 题排在最后（9/9），中途 q 就直接 `SystemExit`、连「还剩几条」都不打。现在：开问前按**卷面题号**排序并打印整张表；q/中断后打印「还没处理：第2题（内容不完整）…」；汇总照旧。
+- **不再让用户记修复命令**：`import_cli` 第 8 步的闸门改为 `pending_records` + `needing_replay`（补过但被重导冲掉的也算「待写入」），正常导入时自动重放；`fix_question_cli` 录完直接问 y 就地入库 + 复扫。`apply_fixes_cli` 退回内部/调试入口。（2026-11-01 用户裁决「命令只能一条」，已写进根 `CLAUDE.md` 工程约定。）
+
+**待办（数据）**：人大附该卷跑**一条** `apply_fixes_cli --source 人大附中 --apply`（自动重放 6/7/16/18/23 + 已录的 17，写完就地复扫）。
+
+
+## 2026-11-01 补：题干被解析成空串（图在上、字母在下、A 无配图）
+
+**现象**：人大附物理第 2 题补录后 `questions.content` 仍是空串。补录记录里就是 `content=""`，题干整段被塞进了选项 A。
+
+**根因（切选项）**：该题排版是「图在上、名称居中、A 在下」，`split_options` 在 A 上方找不到图片行时，把 A 上方**所有**文字都当成 A 的内容 → `stem=''`。这道题 A 本来就没有配图（PDF 300dpi 放大确认：塑料笔杆上方空白，B/C/D 三图对位正确），所以直接命中这个分支。
+
+**修复**：
+- `question_splitter.split_options`：A 上方无图时按空行分段，≥2 段则最后一段归 A、其余归题干；只有 1 段才保持旧行为。
+- `manual_fix._ask_one`：解析出空题干时**拒收**并要求重粘（附「题干 / A. 内容」格式说明），不再把空题干写进库。
+- `recognition_scan`：内容层检查不再因为「这题补过」而跳过；`reopen_unbacked` 对 `incomplete_content/merged_content` 增加判据——补完仍能检出同一问题就重新打开（补坏了不能再显示「已解决」）。
+
+`pytest` 1535 passed（新增 3 条回归：无图 A 的切分、空题干拒收、补过仍要复检）。
+
+
+## 2026-11-01 图注只认「图N」、一段多图只收最后一组
+
+**现象**：考试页（`/student/training/exam/run/:id`，人大附物理第 27 题）三幅图的「甲/乙/丙」没有排到各自图下方，而是留在正文里。
+
+**根因（`components/markdown.tsx` 的 `MarkdownParagraph`）**：
+1. `FIG_CAPTION_RE` 只匹配「图1 / 图 3 / 图2-1」，**不认 甲/乙/丙**（物化三幅并排图的常用小标）；
+2. 只检查「段落最后一组图 + 说明」，一段里出现多组（三幅各带小标）时，前面几组全留在正文；
+3. 软换行会把说明和下一段文字粘进同一个文本节点（`乙\n图22`），整串拿去匹配必然失败。
+
+**修复**：说明改为「取第一行有效文本」再匹配；正则加 甲乙丙丁；整段逐组扫描，每遇到「图 + 紧跟短说明」就输出一个 `<figure>`（说明在 `<figcaption>`，图下居中、小字号、浅灰），图注前后的正文按 `<p>` 分段保留。`web` 1321 tests 通过（新增 2 条：三图三注、普通段落里的「甲」不误判）。
+
+
+## 2026-11-01 新增判据：题型与同大题不一致（选择题丢选项 → 变简答题）
+
+**现象**：人大附物理第 9、10 题在真题库显示「简答题」，第 8、11 题都是「选择题」。第 9 题实际有四张图选项，第 10 题也是选择（选项在 md 里只剩 D）。
+
+**根因**：选项是图片时切题器拆不出 A–D（第 9 题 md 里缺 C 标、两张图连着；第 10 题只剩 D 一项）→ 选项为空 → 题型按「无选项」落成 `short_answer`。另外 `apply_fixes` 的 UPDATE **从来不写 `type`**，所以就算补录带选项也不会改回选择题。
+
+**修复**：
+- `recognition_scan` 新增 `type_mismatch`：同一 `group_id` 大题 ≥5 题且某题型占比 ≥80% 时，异类题报出来（`type_outlier_choice_12of14`）。混排大题（实验题）不报。实测物理 5 卷只命中人大附 9/10、一零一 3/13 共 4 题。
+- `apply_fixes` 两条 UPDATE 都加 `type=IF(%s,'choice',type)`：补录带选项才改成选择题，只补题干时不降级已有题型。
+- `manual_fix`：`type_mismatch` 走同一条「有没有问题」确认门，确认有问题后提示「录入完整题目含 A–D 选项，题型按选项自动判定」。
+
+`pytest` 1541 passed（新增 6 条：4 条判据 + 2 条 type 写回）。
+
+- `apply_fixes._rescan` 写入后立刻点名「补了但没修好」：刚写的题若仍被扫描检出同一问题，直接打印 `[!] 第 N 题：写入的内容仍能检出同一问题…已退回待处理`。此前只在下次导入时弹出来，用户会以为「同一题莫名其妙反复问我」（人大附第 27 题：补录内容仍只有 (2) 没有 (1)，每次复扫都被重新打开）。
+
+
+## 2026-11-01 图注：图号 + 分格小标合成「图5乙」
+
+**现象**：考试页第 7 题（金陵金箔）三幅图，中间那幅的注释应显示「图5乙」，原卷把「图5」和「乙」上下两行排在一起；旧解析只取第一行「图5」当注释，第二行的「乙」就孤立飘在两张图之间。
+
+**修复（`components/markdown.tsx`）**：图注解析时，若第一行是纯图号（`图5`）、下一行是分格小标（`甲乙丙丁`），合成一个 `<figcaption>图5乙</figcaption>`；`FIG_CAPTION_RE` 同步允许 `图N[甲乙丙丁]` 形态。Q27 那种「乙 / 图22」顺序不合并（图号不在第一行）。用人大附第 7 题原文验证：`["甲","图5乙","丙"]`。`web` 1323 tests 通过。
+
+
+## 2026-11-01 新增题型 multi_choice（多选题）：识别 + 多选 UI + 集合判题
+
+**问题**：人大附物理第 16–20 题是「二、多项选择题」，系统一律当单选（`choice`），前端只能选一个；道法/化学也有同类大题。
+
+**改动**：
+- **切题**：`RawQuestion.multi_choice` —— 大题标题含「多项选择」时整节打标；`question_extract` 落库时覆盖 labeler 的 `choice`（模型只会给单选）。`question_labeler._VALID_TYPES` 同步允许。
+- **判题**：`multi_choice` 归入客观题（`OBJECTIVE_TYPES` / `EXACT_ONLY_TYPES`），`compareAnswer(..., type)` 按字母集合比对（`BD` == `DB`），**不做部分得分**；考试时长估算按 1 分钟/题。
+- **前端**：`ChoiceOptionList` 加 `multiple`（checkbox 语义），`QuestionRunner` 对 `multi_choice` 逐项切换、答案按字母序拼成 `AC` 提交；回看/续考恢复同一套字符串。
+- **存量回填**：`tools/data-refinery/scripts/backfill_multi_choice.py`（默认 dry-run）。用「本大题之前最大题号+1 → 本节最大题号」的区间定位，避开 OCR 把 16 认成 6 的坑。已对 4 张物理卷的 16–20 题执行 `--apply`（共 20 道）。
+- 文档：API 设计文档题型枚举、openapi `type` 枚举、`docs/constraints/数据管线.md` 同步。
+
+**待定**：卷面规则是「全对 2 分 / 选对不全 1 分 / 错选 0 分」，当前判对错是全对才算对，**未实现部分得分**（需要给 `exam_answers` 加得分列）。
+
+## 2026-11-01 多选部分得分：全对 1 / 选对不全 0.5 / 错选 0
+
+**规则**：卷面「每小题全选对得 2 分、选对但不全得 1 分、有错选不得分」按比例落成 0/0.5/1（库里 `full_score` 大量为 NULL，绝对分无法统一）。
+
+**落地**：
+- `exam_answers.score DECIMAL(3,2)`（迁移 `2026-11-01_exam_answer_score.sql`，schema.sql 同步），只对客观题写，主观题 NULL。
+- `judge-core.multiChoiceScore()`：有错选=0、选对不全=0.5、全对=1；`JudgeOutput.score` 透传到考试落库（单题提交 + 交卷补判；未答/判失败记 0，不能留 NULL——NULL 会被当主观题排除出分母）。
+- 汇总：`accuracy = SUM(score) / 客观题数`（旧行无 score 时退回 `is_correct`），新增 `partialCount`；结果页文案追加「（含 N 题部分得分）」。
+- 错题本口径不变：只有全对才算答对（`is_correct` 仍为布尔），选对不全仍入错题本。
+
+## 2026-11-01 同卷同题号只允许一条：改「更新」，不再插新行
+
+**原则（用户裁决）**：同一考卷、同一学科、同一题号在库里必须唯一定位；已有就**更新**，只有确实缺题时才插入。
+
+**根因**：重导/补题时如果原行的 `paper_questions` 关联被摘掉，`_existing_question` 查不到 → 走 INSERT / 按哈希复用；内容一变哈希就不同 → 又建一条，旧行留成孤儿（人大附 7/18/23 各多一条）。
+
+**修复**：
+- `apply_fixes._orphan_question`：题号在库但没挂卷时，按 `source + group_order` 找回旧行，**更新内容 + 重新挂卷**，不再 INSERT。
+- `db_loader` 同一处：published 导入前也先找同 source + group_order 的未挂行，复用更新（抽出 `_update_question_row` 供两条路径共用）。
+- 两处收尾都加**组卷守卫**：同一 paper 出现重复 `question_no` 就打 `[WARN] 卷内题号重复：[...]`（组卷会出现同号题）。
+- 清理：删掉人大附的 3 条零引用孤儿（6338/6340/6341）；全库复查 `paper_questions` 已无任何重复题号。
+
+`pytest` 1547 passed（新增「复用同号旧行」回归）。
+
+## 2026-11-01 题型改为「按大题区间」判定（新增 section_analyzer）
+
+**问题**：题型一直由单题特征决定——`question_extract` 里「能拆出 4 个选项就改成 choice」的校正，把物理实验题里用 A/B/C/D 标四幅实验图的题（人大附第 22 题「A 说明____；BD 说明____」）整节改成了选择题；第 25/26/32 题同样错。卷面上题型是**按大题分段**的，同一大题不会混排。
+
+**新增 `src/section_analyzer.py`（切题前先分析，再按区间填题型）**：
+1. 扫 md 的大题标题（`一、单项选择题` / `二、多项选择题` / `三、实验解答题` / `四、科普阅读题` / `五、计算题`），按关键词→题型（非选择 > 多项选择 > 选择 > 判断 > 填空 > 计算；物化另有 实验/探究/科普/阅读 → short_answer）。
+2. 每个大题按题号区间铺开（`一:1-15=choice`），切题后**整段覆盖** labeler 的 type。
+3. **标题丢失时定位换题型的位置**：用标题里写明的「共 X 分、每小题 Y 分」算出本节应有几题；实际题号超出的那段，单独作为「标题缺失」段，用整段选项密度判一个题型（不逐题判）。
+4. 数学「解答题」整节混排 proof/calculation/short_answer，**不整节覆盖**（标题判不出题型时保留单题判定）。
+5. 只对 math/physics/chemistry/politics 生效；语文/英语大题标题不带题型，保持原逻辑。
+
+**存量回填**：`scripts/backfill_section_types.py`（默认 dry-run）。已 `--apply`，22 道题纠正题型；人大附物理现在是 1–15 choice、16–20 multi_choice、21–32 short_answer、33–34 calculation。
+
+`pytest` 1551 passed（新增 4 条 section_analyzer 用例）。
+
+## 2026-11-01 清 options 前必须先并入题干（信息不能丢）
+
+**背景**：题型按大题纠正后，15 道非选择题仍留着 `options`（旧版把 A–D 拆成了结构化选项）。这些 A–D **不是多余的**——第 22 题是四幅实验图（题干正文里只剩「如图16是四个热学实验…目的」，图全在 options 里）、第 26 题是四个待选答案、第 25/32 题同理。直接 `options=NULL` 会让题干残缺。
+
+**做法**：先把 options 里「题干还没有的」文本按 `A. …` 逐条追加到 content 末尾（已出现在 content 里的不重复加），再 `options=NULL` 并重算 `content_hash`。
+- 15 行全部处理；10 行实际并入（例：6046 130→322 字含四图、6049 556→611、6047 399→476、6055 434→478）。
+- `extracted` / `published` 同步合并（否则下次导入会把 options 灌回来），并把 86 处题型改动同步回产物（否则重导会把题型改回旧值）。
+- 规则已写进 `docs/constraints/数据管线.md`：**清 options 前先并入 content，不得直接清空**。
+
+## 2026-11-01 题号后面标出题型（多选高亮）
+
+**需求**：多选题容易被当成单选题作答（只点一个就提交）。在答题页标题「第 N/M 题」后加题型标签：`（单选）`/`（多选）`/`（判断）`/`（填空）`/`（简答）`/`（证明）`/`（计算）`；`multi_choice` 用 brand 色加粗，其余浅灰（`data-testid="question-type"`，`QuestionRunner.tsx`）。`web` 1328 passed（新增 3 条标签用例）。

@@ -333,15 +333,17 @@ def _apply_args(extra=None):
 def test_apply_entry_no_pending(monkeypatch, capsys):
     import apply_fixes
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
 
     assert import_cli._apply_entry(_apply_args())([]) == 0
-    assert "没有待入库的补题记录" in capsys.readouterr().out
+    assert "已是最新" in capsys.readouterr().out
 
 
 def test_apply_entry_dry_run_only_previews(monkeypatch):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
 
     assert import_cli._apply_entry(_apply_args(["--dry-run"]))([]) == 0
@@ -352,19 +354,38 @@ def test_apply_entry_non_tty_prints_command(monkeypatch, capsys):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _FakeStdin(tty=False))
 
     import_cli._apply_entry(_apply_args())([])
     out = capsys.readouterr().out
-    assert "确认后写入" in out and "apply_fixes_cli.py --apply" in out
+    assert "下次运行同一条导入命令" in out, "只给一条入口，别再甩第二个脚本名"
     assert len(calls) == 1 and "--dry-run" in calls[0], "非交互只预览，不许写库"
+
+
+def test_apply_entry_replays_lost_records(monkeypatch, capsys):
+    """补过但被重导冲掉的记录：没有 pending 也要进闸门、也要问用户。"""
+    import apply_fixes
+    calls = []
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "needing_replay",
+                        lambda s, f: [{"source": "卷A", "group_order": 16}])
+    monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr("sys.stdin", _TtyStdin("y\n"))
+
+    import_cli._apply_entry(_apply_args())([])
+
+    out = capsys.readouterr().out
+    assert "被重导冲掉需重放" in out
+    assert calls[-1][0] == "--apply"
 
 
 def test_apply_entry_writes_after_yes(monkeypatch, capsys):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _TtyStdin("y\n"))
 
@@ -378,6 +399,7 @@ def test_apply_entry_declined_keeps_records(monkeypatch, capsys):
     import apply_fixes
     calls = []
     monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _TtyStdin("\n"))
 

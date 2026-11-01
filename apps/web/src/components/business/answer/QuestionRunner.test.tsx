@@ -499,3 +499,67 @@ describe('题面图注', () => {
     expect(cap.tagName).toBe('FIGCAPTION');
   });
 });
+
+
+describe('多选题（multi_choice）', () => {
+  it('可以同时选中多项，提交时答案按字母序拼成 "AC"', async () => {
+    const user = userEvent.setup();
+    const submitted: string[] = [];
+    render(
+      <QuestionRunner
+        questions={[{
+          n: '16', text: '多选：下列说法正确的是', type: 'multi_choice',
+          options: [
+            { label: 'A', text: '说法甲' },
+            { label: 'B', text: '说法乙' },
+            { label: 'C', text: '说法丙' },
+            { label: 'D', text: '说法丁' },
+          ],
+        }]}
+        subjectId={4}
+        draftKeyPrefix="multi"
+        variant="embedded"
+        onSubmit={async (_q, answer) => { submitted.push(answer); return { isCorrect: true, method: 'exact' }; }}
+        onFinish={async () => {}}
+      />,
+    );
+
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(4);
+    await user.click(boxes[0]);
+    await user.click(boxes[2]);
+
+    expect(boxes[0]).toHaveAttribute('aria-checked', 'true');
+    expect(boxes[2]).toHaveAttribute('aria-checked', 'true');
+    expect(boxes[1]).toHaveAttribute('aria-checked', 'false');
+
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    expect(submitted).toEqual(['AC']);
+  });
+});
+
+
+describe('题号后面的题型标签', () => {
+  const base = {
+    subjectId: 4, draftKeyPrefix: 'type-label', variant: 'embedded' as const,
+    onSubmit: async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' }),
+    onFinish: async () => {},
+  };
+
+  it('多选题标「多选」', () => {
+    render(<QuestionRunner {...base} questions={[{ n: '16', text: '题干', type: 'multi_choice',
+      options: [{ label: 'A', text: '甲' }, { label: 'B', text: '乙' }] }]} />);
+    expect(screen.getByTestId('question-type')).toHaveTextContent('（多选）');
+  });
+
+  it('单选题标「单选」', () => {
+    render(<QuestionRunner {...base} questions={[{ n: '1', text: '题干', type: 'choice',
+      options: [{ label: 'A', text: '甲' }] }]} />);
+    expect(screen.getByTestId('question-type')).toHaveTextContent('（单选）');
+  });
+
+  it('简答题标「简答」', () => {
+    render(<QuestionRunner {...base} questions={[{ n: '22', text: '题干', type: 'short_answer' }]} />);
+    expect(screen.getByTestId('question-type')).toHaveTextContent('（简答）');
+  });
+});

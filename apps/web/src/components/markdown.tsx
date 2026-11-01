@@ -307,13 +307,23 @@ export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true
 }
 
 /**
- * 图注：紧跟在图片后面、独占一行的短说明（「图1」「图 3」「图2-1」）。
+ * 图注：紧跟在图片后面、独占一行的短说明。
  *
- * 题面里的写法是 `![](xxx.jpg)\n图1`（同一个段落）。默认渲染会把「图1」当成
- * 正文另起一行，看起来像多了一段。这里把「图片 + 短图注」收成 <figure>，
- * 图注放图片下方居中、小字号、浅灰（视觉上属于图，不属于题干）。
+ * 两种写法都算：整体编号「图1 / 图 3 / 图2-1」，以及分格小标「甲 / 乙 / 丙 / 丁」
+ * （物理、化学习题里三幅并排图常用甲乙丙，2026-11-01 人大附物理第 27 题实测）。
+ *
+ * 题面里的写法是 `![](xxx.jpg)\n图1` 或 `![](a.jpg)\n甲\n![](b.jpg)\n乙`（同一段落）。
+ * 默认渲染会把说明当成正文另起一行（或与图并排），看起来像多了一段。这里把
+ * 「图 + 紧跟的短说明」收成 <figure>，说明放图片下方居中、小字号、浅灰。
  */
-const FIG_CAPTION_RE = /^图\s*[0-9一二三四五六七八九十]+([-－—]\s*[0-9]+)?$/;
+const FIG_CAPTION_RE = /^(?:图\s*[0-9一二三四五六七八九十]+(?:[-－—]\s*[0-9]+)?\s*[甲乙丙丁]?|[甲乙丙丁])$/;
+/** 纯图号（「图5」），后面可能还跟一个分格小标「乙」，要合成「图5乙」。 */
+const FIG_NO_ONLY_RE = /^图\s*[0-9一二三四五六七八九十]+(?:[-－—]\s*[0-9]+)?$/;
+const PANEL_LETTER_RE = /^[甲乙丙丁]$/;
+
+type ParaBlock =
+  | { kind: 'text'; nodes: ReactNode[] }
+  | { kind: 'figure'; images: ReactNode[]; caption: string | null };
 
 function MarkdownParagraph({ children }: { children?: ReactNode }) {
   const items = Children.toArray(children);
@@ -325,38 +335,104 @@ function MarkdownParagraph({ children }: { children?: ReactNode }) {
   const isBlank = (c: ReactNode) => typeof c === 'string' && c.trim() === '';
   const isBreak = (c: ReactNode) => isValidElement(c) && c.type === 'br';
 
-  // 段尾是否「图 + 短说明」。题干与图在同一段落里很常见：
-  // `如图 1 所示…\n![](…jpg)\n图1` —— 不能要求整段只有图片。
-  let end = items.length - 1;
-  while (end >= 0 && isBlank(items[end])) end -= 1;
-  const tail = end >= 0 ? items[end] : null;
-  const caption = typeof tail === 'string' ? tail.trim() : '';
-  if (caption && caption.length <= 10 && FIG_CAPTION_RE.test(caption)) {
-    const images: ReactNode[] = [];
-    let j = end - 1;
-    while (j >= 0) {
-      const c = items[j];
-      if (isBlank(c) || isBreak(c)) { j -= 1; continue; }
-      if (isImg(c)) { images.unshift(c); j -= 1; continue; }
+  // 一段里可能有多组「图 + 小标」（三幅并排图的甲乙丙），必须逐个收，不能只看段尾。
+  const blocks: ParaBlock[] = [];
+  let buf: ReactNode[] = [];
+  const flushText = () => {
+    if (buf.some((c) => !isBlank(c))) blocks.push({ kind: 'text', nodes: buf });
+    buf = [];
+  };
+
+  let i = 0;
+  while (i < items.length) {
+    if (!isImg(items[i])) {
+      buf.push(items[i]);
+      i += 1;
+      continue;
+    }
+    // 连续的多张图（中间只有空白/换行）算同一幅
+    const images: ReactNode[] = [items[i]];
+    let j = i + 1;
+    while (j < items.length) {
+      if (isBlank(items[j]) || isBreak(items[j])) { j += 1; continue; }
+      if (isImg(items[j])) { images.push(items[j]); j += 1; continue; }
       break;
     }
-    if (images.length > 0) {
-      const lead = items.slice(0, j + 1);
-      const hasLead = lead.some((c) => !isBlank(c));
-      return (
-        <>
-          {hasLead && <p>{lead}</p>}
-          <figure className="my-2 flex flex-col items-center">
-            {images}
-            <figcaption className="mt-1 text-center text-xs text-[var(--text-tertiary)]">
-              {caption}
-            </figcaption>
-          </figure>
-        </>
-      );
+    // 紧跟其后的短说明（可能和前后的软换行粘在同一个文本节点里：
+    // `乙\n图22` 是「乙」这行 + 下一行的图号，只能取第一行当图注）
+    let k = j;
+    while (k < items.length && (isBlank(items[k]) || isBreak(items[k]))) k += 1;
+    const tail = k < items.length ? items[k] : null;
+    const tailText = typeof tail === 'string' ? tail : '';
+    // 软换行会让文本节点以 "\n" 开头（`!\[](...)\n图1` → "\n 图1"），
+    // 先跳过空行取第一行有效文本当图注，剩下的还归原段落。
+    const lines = tailText.split('\n');
+    let li = 0;
+    while (li < lines.length && !lines[li].trim()) li += 1;
+    let caption = (lines[li] ?? '').trim();
+    let consumed = li + 1;
+    let rest = lines.slice(consumed).join('\n');
+    let nextI = k + 1;
+
+    // 原卷把「图5」和分格小标「乙」上下叠着排（人大附题7：中间那幅图下面是 图5 / 乙
+    // 两行），拆开渲染会剩一个孤零零的「乙」飘在两张图之间 —— 合成「图5乙」。
+    // 两种情况都要收：① 同一个文本节点里 `图5\n乙`（软换行）；
+    // ② 行尾两个空格造成硬换行（`图11  \n乙`），「乙」被拆到下一个 item（<br> 之后）。
+    if (FIG_NO_ONLY_RE.test(caption)) {
+      if (consumed < lines.length && PANEL_LETTER_RE.test((lines[consumed] ?? '').trim())) {
+        caption = `${caption}${lines[consumed].trim()}`;
+        consumed += 1;
+        rest = lines.slice(consumed).join('\n');
+      } else {
+        // 跨 <br>/空白找下一个文本节点：行尾两空格 → 硬换行 → 「乙」在下一个 item
+        let ni = k + 1;
+        while (ni < items.length && (isBlank(items[ni]) || isBreak(items[ni]))) ni += 1;
+        if (ni < items.length && typeof items[ni] === 'string') {
+          const nextLines = (items[ni] as string).split('\n');
+          let nli = 0;
+          while (nli < nextLines.length && !nextLines[nli].trim()) nli += 1;
+          const nextLine = (nextLines[nli] ?? '').trim();
+          if (PANEL_LETTER_RE.test(nextLine)) {
+            caption = `${caption}${nextLine}`;
+            rest = nextLines.slice(nli + 1).join('\n');
+            nextI = ni + 1;
+          }
+        }
+      }
+    }
+    const hasCaption = caption.length > 0 && caption.length <= 10 && FIG_CAPTION_RE.test(caption);
+    flushText();
+    blocks.push({ kind: 'figure', images, caption: hasCaption ? caption : null });
+    if (hasCaption) {
+      if (rest.trim()) buf.push(rest);   // 图注后面的正文还归原段落
+      i = nextI;
+    } else {
+      i = j;
     }
   }
-  return <p>{children}</p>;
+  flushText();
+
+  if (!blocks.some((b) => b.kind === 'figure')) {
+    return <p>{children}</p>;
+  }
+  return (
+    <div>
+      {blocks.map((b, idx) =>
+        b.kind === 'figure' ? (
+          <figure key={idx} className="my-2 flex flex-col items-center">
+            {b.images}
+            {b.caption && (
+              <figcaption className="mt-1 text-center text-xs text-[var(--text-tertiary)]">
+                {b.caption}
+              </figcaption>
+            )}
+          </figure>
+        ) : (
+          <p key={idx}>{b.nodes}</p>
+        ),
+      )}
+    </div>
+  );
 }
 
 /**

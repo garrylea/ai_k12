@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JudgeCoreService, subjectiveJudgeMode } from './judge-core.service';
+import { JudgeCoreService, compareAnswer, multiChoiceScore, subjectiveJudgeMode } from './judge-core.service';
 import type { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import type { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
 import type { QuestionSelfAssessmentsRepository } from '../../database/repositories/question-self-assessments.repo.js';
@@ -895,5 +895,41 @@ describe('judge-core 埋点挂载（埋点 Phase 2 Task 4）', () => {
     const { svc, events } = makeService();
     await svc.awardErrorFixOnClear(1, 10, 0);
     expect(events.track).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'error_book_cleared' }));
+  });
+});
+
+
+describe('compareAnswer 多选（multi_choice）', () => {
+  it('顺序无关：BD 与 DB 判等', () => {
+    expect(compareAnswer('BD', 'DB', null, 'multi_choice')).toBe(true);
+  });
+
+  it('少选判错（不实现部分得分）', () => {
+    expect(compareAnswer('B', 'BD', null, 'multi_choice')).toBe(false);
+    expect(compareAnswer('BD', 'B', null, 'multi_choice')).toBe(false);
+  });
+
+  it('多选了错的也判错', () => {
+    expect(compareAnswer('ABC', 'BD', null, 'multi_choice')).toBe(false);
+  });
+
+  it('单选仍按严格相等，不会把 AB 当成集合', () => {
+    expect(compareAnswer('AB', 'BA', null, 'choice')).toBe(false);
+  });
+
+  it('空答案判错', () => {
+    expect(compareAnswer('', 'BD', null, 'multi_choice')).toBe(false);
+  });
+});
+
+
+describe('multiChoiceScore（多选部分得分）', () => {
+  it('全对 1 分、选对不全 0.5、有错选 0、空答 0', () => {
+    expect(multiChoiceScore('BD', 'BD')).toBe(1);
+    expect(multiChoiceScore('DB', 'BD')).toBe(1);
+    expect(multiChoiceScore('B', 'BD')).toBe(0.5);
+    expect(multiChoiceScore('D', 'BD')).toBe(0.5);
+    expect(multiChoiceScore('BC', 'BD')).toBe(0);
+    expect(multiChoiceScore('', 'BD')).toBe(0);
   });
 });

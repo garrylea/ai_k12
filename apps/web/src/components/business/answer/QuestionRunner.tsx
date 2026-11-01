@@ -340,10 +340,10 @@ export function QuestionRunner({
 
   if (!q) return null;
 
-  // ===== 选择题判定：auto 模式下 choice/true_false 走点选 =====
+  // ===== 选择题判定：auto 模式下 choice/multi_choice/true_false 走点选 =====
   const choiceOptions: Array<{ label: string; text: string }> | null = (() => {
     if (answerMode !== 'auto') return null;
-    if (q.type !== 'choice' && q.type !== 'true_false') return null;
+    if (q.type !== 'choice' && q.type !== 'multi_choice' && q.type !== 'true_false') return null;
     if (q.options && q.options.length > 0) return q.options;
     if (q.type === 'true_false') {
       return [
@@ -353,6 +353,15 @@ export function QuestionRunner({
     }
     return null;
   })();
+
+  /** 多选题：点一下切换选中，答案按字母序存（"BD"），与判题侧集合比对一致。 */
+  const isMultiChoice = q.type === 'multi_choice' && !!choiceOptions;
+  const toggleMulti = (label: string) => {
+    const picked = new Set(answer.split(''));
+    if (picked.has(label)) picked.delete(label);
+    else picked.add(label);
+    updateAnswer([...picked].sort().join(''));
+  };
 
   const handleHintClick = async () => {
     if (!requestHint) return;
@@ -438,6 +447,19 @@ export function QuestionRunner({
     </div>
   );
 
+  // 题型标签：跟在题号后面，避免「多选」被当成单选（2026-11-01 用户要求）
+  const QUESTION_TYPE_LABEL: Record<string, string> = {
+    choice: '单选',
+    multi_choice: '多选',
+    true_false: '判断',
+    fill_blank: '填空',
+    short_answer: '简答',
+    proof: '证明',
+    calculation: '计算',
+  };
+  const typeLabel = QUESTION_TYPE_LABEL[q.type ?? ''] ?? '';
+  const isMultiType = q.type === 'multi_choice';
+
   // ========== ANSWERING 态 ==========
   const answeringView = (
     <div className="flex-1 min-h-0 flex flex-col gap-3">
@@ -445,6 +467,16 @@ export function QuestionRunner({
       <div className="shrink-0 flex items-center justify-between gap-3">
         <h1 className="font-bold" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
           {typeof title === 'function' ? title(idx, total) : (title ?? `第 ${idx + 1}/${total} 题`)}
+          {typeLabel && (
+            <span
+              data-testid="question-type"
+              className={`ml-2 align-middle text-sm font-medium ${
+                isMultiType ? 'text-[var(--brand-500)]' : 'text-[var(--text-tertiary)]'
+              }`}
+            >
+              （{typeLabel}）
+            </span>
+          )}
         </h1>
         {headerExtra}
       </div>
@@ -544,7 +576,12 @@ export function QuestionRunner({
         >
           {choiceOptions ? (
             <div className="flex-1 min-h-0 overflow-auto">
-              <ChoiceOptionList options={choiceOptions} value={answer} onChange={updateAnswer} />
+              <ChoiceOptionList
+                options={choiceOptions}
+                value={answer}
+                onChange={isMultiChoice ? toggleMulti : updateAnswer}
+                multiple={isMultiChoice}
+              />
             </div>
           ) : latexInput ? (
             <>

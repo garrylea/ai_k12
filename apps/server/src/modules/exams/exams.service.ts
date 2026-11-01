@@ -239,6 +239,7 @@ export class ExamsService {
       questionOrder: q.questionNo,
       answerText: dto.answerText,
       isCorrect: out.isCorrect === null ? null : (out.isCorrect ? 1 : 0),
+      score: out.score ?? null,
       method: out.method,
       errorType: out.errorType ?? null,
       judgedAt: new Date(),
@@ -338,6 +339,7 @@ export class ExamsService {
           questionOrder: q.questionNo,
           answerText: a?.answer_text ?? null,
           isCorrect: 0,
+          score: 0,
           method: 'unanswered',
           judgedAt: new Date(),
         });
@@ -359,6 +361,7 @@ export class ExamsService {
             questionOrder: q.questionNo,
             answerText: a.answer_text,
             isCorrect: out.isCorrect === null ? null : (out.isCorrect ? 1 : 0),
+            score: out.score ?? null,
             method: out.method,
             errorType: out.errorType ?? null,
             judgedAt: new Date(),
@@ -370,6 +373,7 @@ export class ExamsService {
             questionOrder: q.questionNo,
             answerText: a.answer_text,
             isCorrect: 0,
+            score: 0,
             method: 'failed',
             judgedAt: new Date(),
           });
@@ -459,12 +463,20 @@ export class ExamsService {
 
   /** 汇总：主观题（is_correct NULL，self_assess 模式）不计入对错——correctCount/accuracy
    *  只算客观题，subjectiveCount 单列（结果页展示「客观题 X/Y · 主观题 N 题」）。 */
-  private summarize(totalCount: number, answers: Array<Pick<ExamAnswerRow, 'is_correct'>>): ExamSummaryDto {
+  private summarize(totalCount: number,
+                    answers: Array<Pick<ExamAnswerRow, 'is_correct' | 'score'>>): ExamSummaryDto {
     const subjectiveCount = answers.filter((a) => a.is_correct === null).length;
     const objectiveTotal = totalCount - subjectiveCount;
     const correctCount = answers.filter((a) => a.is_correct === 1).length;
-    const accuracy = objectiveTotal > 0 ? Math.round((correctCount / objectiveTotal) * 1000) / 10 : 0;
-    return { correctCount, totalCount, accuracy, subjectiveCount };
+    // 正确率按「得分比例」算：多选选对不全记 0.5（旧行没有 score 时退回 is_correct）
+    const earned = answers
+      .filter((a) => a.is_correct !== null)
+      .reduce((sum, a) => sum + (a.score == null ? (a.is_correct === 1 ? 1 : 0) : Number(a.score)), 0);
+    const partialCount = answers.filter(
+      (a) => a.score != null && Number(a.score) > 0 && Number(a.score) < 1,
+    ).length;
+    const accuracy = objectiveTotal > 0 ? Math.round((earned / objectiveTotal) * 1000) / 10 : 0;
+    return { correctCount, totalCount, accuracy, subjectiveCount, partialCount };
   }
 
   /** 剩余秒数（deadline - now；超时为 0 或负值，由调用方决定收卷语义）。 */
@@ -514,7 +526,7 @@ export class ExamsService {
 export function computeRecommendedDuration(questions: Array<{ type: string }>): number {
   let sum = 0;
   for (const q of questions) {
-    sum += q.type === 'choice' || q.type === 'true_false' ? 1 : 3;
+    sum += q.type === 'choice' || q.type === 'multi_choice' || q.type === 'true_false' ? 1 : 3;
   }
   const rounded = Math.ceil(sum / 15) * 15;
   return Math.min(180, Math.max(30, rounded));

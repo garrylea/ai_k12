@@ -57,6 +57,8 @@ export interface ExamSummaryDto {
   totalCount: number;
   accuracy: number; // 百分比，一位小数（如 33.3）；分母只算客观题
   subjectiveCount: number; // 主观题题数（self_assess 模式不判对错，单独计数）
+  /** 多选「选对不全」的题数（各记 0.5 分，已计入 accuracy）。 */
+  partialCount?: number;
   points?: PointsAwardDto;
 }
 

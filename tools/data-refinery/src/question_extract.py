@@ -18,6 +18,7 @@ import pymysql
 from answer_merger import maybe_merge_answer_md
 from question_splitter import is_junk_question, split_page, split_options
 from question_labeler import QuestionLabeler, LabeledQuestion
+from section_analyzer import analyze_sections
 from qr_detect import strip_qr_images
 from subject_codes import subject_code_for_parts
 from subject_strategies import get_strategy
@@ -316,7 +317,8 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 "subject_id": subject_code,
                 "group_id": q.group_id,
                 "group_order": q.group_order,
-                "type": q.type,
+                # 大题标题写明「多项选择题」时以卷面为准（labeler 只会给 choice）
+                "type": "multi_choice" if getattr(q, "multi_choice", False) else q.type,
                 "difficulty": q.difficulty,
                 "full_score": q.score,
                 "content": item_content,
@@ -464,6 +466,21 @@ def extract_questions_file(source, config, llm, fb_llm,
         enough = choice_low <= len(opts) <= choice_high
         if enough and lab.type != "choice":
             lab.type = "choice"
+
+    # 5.5 题型以「大题」为准：先划出每个大题覆盖的题号区间及题型，再整段覆盖。
+    #     单题特征（能不能拆出 A–D）只在没有大题信息时兜底——物理实验题常用 A/B/C/D
+    #     标四个实验图，按特征判会把整节实验题改成选择题（人大附第 22 题，2026-11-01）。
+    section_types, sections = analyze_sections(text, subject_code)
+    if sections:
+        overridden = 0
+        for lab in labeled:
+            t = section_types.get(lab.group_order)
+            if t and lab.type != t:
+                lab.type = t
+                overridden += 1
+        detail = "，".join(f"{s.gid}:{s.start_no}-{s.end_no}={s.type}"
+                          f"{'(推断)' if s.inferred else ''}" for s in sections)
+        print(f"[sections] 按大题定型 {detail}；纠正 {overridden} 题", flush=True)
 
     # 6. 写 JSONL
     _write_exam_questions_jsonl(labeled, source, extracted_dir,

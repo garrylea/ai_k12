@@ -13,7 +13,7 @@ import type { QuestionRow } from '../../database/repositories/types.js';
 
 /** 仅走 exact 比对的客观题：选项/判断标签形式固定，可靠，不等即判错。
  *  fill_blank 答案形式多样（如 2/3 vs \frac{2}{3}），命中时单独处理：归一化相等走 exact，不等走 AI 复核。 */
-const EXACT_ONLY_TYPES = new Set(['choice', 'true_false']);
+const EXACT_ONLY_TYPES = new Set(['choice', 'multi_choice', 'true_false']);
 
 /** 主观题（解答/证明）：self_assess 模式下不判对错，学生对照参考答案自评。 */
 export const SUBJECTIVE_TYPES = new Set(['short_answer', 'proof']);
@@ -42,9 +42,16 @@ export function normalizeAnswer(s: string): string {
  * 优先按 options 中的 isCorrect 标记判定（选择题）；
  * 若 options 解析失败或未命中，退化为归一化字符串相等比对。
  */
-export function compareAnswer(studentAnswer: string, correctAnswer: string, options: string | null): boolean {
+export function compareAnswer(studentAnswer: string, correctAnswer: string,
+                              options: string | null, type?: string): boolean {
   const a = normalizeAnswer(studentAnswer);
   if (!a) return false;
+  // 多选题（multi_choice）：答案是一组选项字母，顺序无关，"BD" 与 "DB" 等价。
+  // 只对多选生效——单选/填空仍走严格相等，避免把 "ab" 这种填空答案误判成集合。
+  if (type === 'multi_choice') {
+    const set = (s: string) => [...new Set(s.split(''))].sort().join('');
+    return set(a) === set(normalizeAnswer(correctAnswer));
+  }
   if (options) {
     try {
       const opts = JSON.parse(options) as Array<{ label: string; isCorrect?: boolean }>;
@@ -57,6 +64,21 @@ export function compareAnswer(studentAnswer: string, correctAnswer: string, opti
     }
   }
   return a === normalizeAnswer(correctAnswer);
+}
+
+/**
+ * 多选题得分：1 = 全对；0.5 = 选对但不全（所有选中项都在正确集合里）；0 = 有错选/空答。
+ * 卷面规则「全选对得 2 分、选对不全得 1 分、有错选不得分」按比例落到 0/0.5/1，
+ * 不依赖每题满分（库里 full_score 大量为 NULL，按绝对分无法统一）。
+ */
+export function multiChoiceScore(studentAnswer: string, correctAnswer: string): number {
+  const a = normalizeAnswer(studentAnswer);
+  const b = normalizeAnswer(correctAnswer);
+  if (!a) return 0;
+  const picked = new Set(a.split(''));
+  const right = new Set(b.split(''));
+  for (const x of picked) if (!right.has(x)) return 0;   // 有错选
+  return picked.size === right.size ? 1 : 0.5;           // 全对 / 选对不全
 }
 
 export interface JudgeInput {
@@ -100,6 +122,9 @@ export interface JudgeOutput {
   explanation?: string | null;
   /** 客观题空答案：该题暂无标准答案，不计对错（课堂练习守卫）。 */
   noStandardAnswer?: boolean;
+  /** 客观题得分比例（0 / 0.5 / 1）：多选「选对不全」记 0.5；其余客观题 0 或 1。
+   *  主观题/未判为空。考试汇总用（正确率 = 得分之和 / 客观题数）。 */
+  score?: number | null;
 }
 
 export interface JudgeCoreQuestionInput {
@@ -262,9 +287,13 @@ export class JudgeCoreService {
       return this.finishJudge(input.studentId, out);
     }
 
+    let score: number | undefined;
     if (EXACT_ONLY_TYPES.has(q.type)) {
-      // 路由 1：choice/true_false -> exact 比对（标签形式固定，可靠）
-      isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
+      // 路由 1：choice/multi_choice/true_false -> exact 比对（标签形式固定，可靠）
+      isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options, q.type);
+      score = q.type === 'multi_choice'
+        ? multiChoiceScore(input.studentAnswer, q.answer)
+        : (isCorrect ? 1 : 0);
       method = 'exact';
     } else if (prefersExactBeforeSelfAssess(Number(q.subject_id))
                && (q.type === 'fill_blank' || q.type === 'calculation')
@@ -337,7 +366,7 @@ export class JudgeCoreService {
       if (!isCorrect) {
         this.explanationCache.ensureExplanation(q);
       }
-      const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0 };
+      const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0, score };
       this.trackAnswer(input.studentId, moduleName, out, q.id, streakKey);
       return this.finishJudge(input.studentId, out);
     }
@@ -349,7 +378,7 @@ export class JudgeCoreService {
       if (!isCorrect) {
         this.explanationCache.ensureExplanation(q);
       }
-      const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0 };
+      const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId: undefined, pointsAwarded: 0, score };
       this.trackAnswer(input.studentId, moduleName, out, q.id, streakKey);
       return this.finishJudge(input.studentId, out);
     }
@@ -384,7 +413,7 @@ export class JudgeCoreService {
       }
     }
 
-    const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason };
+    const out: JudgeOutput = { questionId: q.id, isCorrect, method, errorType, errorBookId, pointsAwarded, awardReason, score };
     this.trackAnswer(input.studentId, moduleName, out, q.id, streakKey);
     return this.finishJudge(input.studentId, out);
   }
@@ -435,7 +464,7 @@ export class JudgeCoreService {
 
     if (q && EXACT_ONLY_TYPES.has(q.type)) {
       // 路由 1：choice/true_false 命中 -> exact 比对（标签形式固定，可靠）
-      isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options);
+      isCorrect = compareAnswer(input.studentAnswer, q.answer, q.options, q.type);
       method = 'exact';
     } else if (q && (q.type === 'fill_blank' || q.type === 'calculation') && compareAnswer(input.studentAnswer, q.answer, q.options)) {
       // 路由 1b：fill_blank/calculation 命中且归一化相等 -> exact 判对（省 AI）。

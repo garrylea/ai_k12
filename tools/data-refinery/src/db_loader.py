@@ -1345,26 +1345,26 @@ class DbLoader:
                                       f"（原行 #{qid} 解除关联）", flush=True)
                             qid = other
                         else:
-                            self._exec(
-                                "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, "
-                                "type=%s, difficulty=%s, full_score=%s, content=%s, options=%s, "
-                                "answer=%s, explanation=%s, material_text=%s, material_url=%s, "
-                                "grade_band=%s, source=%s, source_year=%s, content_hash=%s, "
-                                "is_active=LEAST(is_active, %s) "
-                                "WHERE id=%s",
-                                (sid, q.get("group_id"), q.get("group_order"), q.get("type"),
-                                 q.get("difficulty"), q.get("full_score"), content,
-                                 json.dumps(opts, ensure_ascii=False) if opts is not None else None,
-                                 q.get("answer") or "", q.get("explanation"), q.get("material_text"),
-                                 q.get("material_url"), q.get("grade_band"), q.get("source"),
-                                 q.get("source_year"), chash,
-                                 # 复核过的不因重导被重新激活；修复过的必须置 0
-                                 0 if q.get("needs_review") else 1,
-                                 qid),
-                            )
+                            self._update_question_row(qid, sid, q, content, opts, chash)
                             updated += 1
 
-            # 2) 其它情况：按（题干哈希 + 选项签名）复用 / 插入
+            # 2) 同卷同题号、只是关联被摘掉的旧行：**更新它**，绝不新建同号题
+            #    （2026-11-01 人大附：题 7/18/23 都因此在卷内出现两份）
+            if qid is None and paper is not None:
+                orphan = self._query(
+                    "SELECT q.id FROM questions q WHERE q.source=%s AND q.group_order=%s "
+                    "AND NOT EXISTS (SELECT 1 FROM paper_questions pq WHERE pq.question_id=q.id) "
+                    "ORDER BY q.id LIMIT 1",
+                    (q.get("source"), q.get("group_order")),
+                )
+                if orphan:
+                    qid = int(orphan[0][0])
+                    self._update_question_row(qid, sid, q, content, opts, chash)
+                    updated += 1
+                    print(f"[INFO] paper={paper[1]} 题{q.get('group_order')} 复用同号旧行 #{qid}"
+                          f"（更新内容，不新建）", flush=True)
+
+            # 3) 其它情况：按（题干哈希 + 选项签名）复用 / 插入
             if qid is None:
                 qid = self._reusable_question(chash, opts)
                 if qid is None:
@@ -1417,6 +1417,13 @@ class DbLoader:
                     (paper[1], paper[1]))
             self._exec(
                 "UPDATE exam_papers SET question_count=%s WHERE id=%s", (linked, paper[1]))
+            # 组卷守卫：同一份卷不允许出现两个同号题（会出现「两道 18 题」）
+            dup = self._query(
+                "SELECT question_no FROM paper_questions WHERE paper_id=%s "
+                "GROUP BY question_no HAVING COUNT(*) > 1", (paper[1],))
+            if dup:
+                print(f"[WARN] paper={paper[1]} 卷内题号重复：{[int(r[0]) for r in dup]}"
+                      f"（组卷会出现同号题，请检查）", flush=True)
         self._conn.commit()
         if updated:
             print(f"[upsert] 同卷原址更新 {updated} 题", flush=True)

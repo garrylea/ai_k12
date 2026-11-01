@@ -1773,6 +1773,8 @@ export interface ExamSummary {
   accuracy: number;
   /** 主观题题数（self_assess 模式不判对错） */
   subjectiveCount?: number;
+  /** 多选「选对不全」的题数（各记 0.5 分，已计入 accuracy） */
+  partialCount?: number;
   /**
    * 交卷发分结果（丙类埋点 math_paper）。
    *

@@ -1,4 +1,12 @@
-"""识别问题扫描：切题后发现缺号，回看相邻题，判断"哪一题吸收了它"。
+"""识别问题扫描：切题后发现问题，产出一份清单供人工逐条确认。
+
+两类问题（2026-11-01 起）：
+① 题号层：缺号、顿号题号、修复砍短、噪声题 —— 题号能不能对上；
+② 内容层：**内容不全**（小问从 (2) 起、LLM 判过不完整）与**前后题合并**
+   （正文里出现别的题号、正文其实属于 md 里另一个题号）—— 题号对上了，
+   但这道题的话不是它自己的/不全。只查①会漏掉「题号齐、内容坏」的卷
+   （2026-10-31 人大附物理：34 题号全在，第 27 题缺小问 (1)、第 24 题吞了
+   第 25 题、第 25 题装着第 23 题的正文，一张卷 3 处内容缺陷全没报）。
 
 背景（2026-10-30 实测，物理 2024 上学期三张卷）：
 - MinerU 会整行漏掉题号（一零一题28、人大附题7/23），正文仍在，被并进上一题；
@@ -8,16 +16,19 @@
 
 本脚本只读：读 extracted/*.jsonl + 对应 md + labeling_issues.jsonl，产出一份结构化清单，
 供 `fix_question_cli.py` 逐条引导人工补题，再由 `apply_fixes_cli.py` 统一入库。
+人工确认「没问题」的条目不写库，只落 `verdict=no_change`，重扫不再打扰（内容变了才重开）。
 
 入口：
     import_cli 第 6 步自动调用 run()；也可以单独跑 scripts/scan_recognition_issues.py。
 """
 
 import argparse
+import hashlib
 import json
 import re
 import statistics
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,10 +41,29 @@ FIXES_DIR = ROOT / "output" / "manual_fixes"
 
 # 卷面题号：句点/全角点/顿号三种写法（顿号只有「序号连续」才该算题号，这里只用于诊断）
 _STEM_ANY_RE = re.compile(r"(?m)^\s*#{0,6}\s*(\d{1,2})\s*[.．、]\s*\S")
+# 同上但用前瞻收尾：m.end() 正好落在题干第一个字，取「题号后面那段话」时不会被吃掉一个字
+_STEM_HEAD_RE = re.compile(r"(?m)^\s*#{0,6}\s*(\d{1,2})\s*[.．、]\s*(?=\S)")
 _OPTION_BLOCK_RE = re.compile(r"(?m)^\s*[A-D]\s*[.．、]\s*\S")
 _EXCERPT_LIMIT = 600
 # 卷首/卷尾的非题目文字（北师大实验卷实测：试卷说明的第 4 条「命题人:…」被切成第 4 题）
 _JUNK_RE = re.compile(r"命题人|审核人|校对人|命题学校|第\s*\d+\s*页\s*共|共\s*\d+\s*页")
+
+# ---- 内容层（2026-11-01）----
+# 正文中间出现的「18、」「25.」：题号前必须是行首/空白/句读，后跟非数字，
+# 才不会把「0.5」「2024、」这类数字误当题号。
+_INLINE_STEM_RE = re.compile(r"(?:^|[\s。；，、])[（(]?(\d{1,2})[)）]?\s*[、.．]\s*(?=[^\s\d])")
+_SUBQ2_RE = re.compile(r"[（(]\s*2\s*[）)]")
+_SUBQ1_RE = re.compile(r"[（(]\s*1\s*[）)]")
+# 归一化口径：只保留中英文/数字/下划线，去掉空白与标点 —— md 与 content 同一套剥法后可直接比对
+_NORM_RE = re.compile(r"[^\w\u4e00-\u9fff]")
+# 取正文开头多少个归一化字符去 md 里定位归属（太短会命中图注/表格里的重复短语）
+_BODY_KEY_LEN = 14
+
+# 这些学科的「原文缺失型」缺陷（画线句/加点字/图片内表格/未随卷给出的材料）按设计
+# 就是 is_complete=false、只报告不修复（真源 question_labeler._UNREPAIRED_OK）。
+# 把它们也当「内容不完整」报出来，30 张语文卷能出 197 条，真正要修的结构缺陷会被淹没
+# —— 这类学科只保留确定性判据（小问从 (2) 起 / 前后题合并）。改 _UNREPAIRED_OK 时两边同步。
+_UNREPAIRED_OK_SUBJECTS = frozenset({"chinese", "politics", "history", "geography", "biology"})
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -67,6 +97,63 @@ def _option_block_count(text: str) -> int:
     return blocks
 
 
+def _norm_text(text: str) -> str:
+    """只留中英文/数字/下划线，去掉空白与标点（md 与 content 用同一套剥法才能比对）。"""
+    return _NORM_RE.sub("", text or "")
+
+
+def content_sig(text: str) -> str:
+    """正文指纹：人工确认「没问题」时存一份，内容变了才让旧结论失效。"""
+    return hashlib.md5(_norm_text(text).encode("utf-8")).hexdigest()
+
+
+def _normalized_md(text: str) -> tuple[str, list[int]]:
+    """归一化整篇 md，并记住每个字符在原文里的下标（用于反查它属于哪一题）。"""
+    chars: list[str] = []
+    index: list[int] = []
+    for i, ch in enumerate(text):
+        if not _NORM_RE.fullmatch(ch):
+            chars.append(ch)
+            index.append(i)
+    return "".join(chars), index
+
+
+def _body_owners(norm_md: str, index: list[int], md_stems: list[tuple[int, int]],
+                 body: str) -> set[int]:
+    """这段正文在原 md 里可能归属哪些题（开头在 md 中每处命中位置之前的最后一个题号）。
+
+    返回集合而不是单值：同一段开头可能出现在多道题里（如两题都以「如图所示, 电源两端
+    电压 U 保持不变…」起头），这时不能断定装错，只有**唯一**归属且不是自己才报。
+    命中不了（正文被 LLM 改写过、开头是图片/公式）或开头太短时返回空集。
+    """
+    key = _norm_text(body)[:_BODY_KEY_LEN]
+    if len(key) < 10:
+        return set()
+    owners: set[int] = set()
+    pos = norm_md.find(key)
+    while pos >= 0:
+        orig = index[pos]
+        owner = None
+        for start, no in md_stems:
+            if start >= orig:
+                break
+            owner = no
+        if owner is not None:
+            owners.add(owner)
+        pos = norm_md.find(key, pos + 1)
+    return owners
+
+
+def _md_stem_bodies(text: str) -> dict[int, list[str]]:
+    """题号 -> 该题号后面那段正文的开头（归一化后前 12 字），用于验证「正文里真有 N 题」。"""
+    out: dict[int, list[str]] = {}
+    for m in _STEM_HEAD_RE.finditer(text):
+        head = _norm_text(text[m.end(): m.end() + 80])[:12]
+        if head:
+            out.setdefault(int(m.group(1)), []).append(head)
+    return out
+
+
 def locate_pdf(pdf_root: Path, rel_dir: Path, source: str) -> Path:
     """素材 PDF 的位置：`<学科>/<学段>/<学期>/<年>/<卷名>.pdf`。
 
@@ -97,7 +184,8 @@ def fixed_numbers(source: str, fixes_dir: Path | None = None) -> dict[int, bool]
 
 
 def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
-               pdf_path: Path | None, labeling_issues: list[dict]) -> list[dict]:
+               pdf_path: Path | None, labeling_issues: list[dict],
+               fixes_dir: Path | None = None) -> list[dict]:
     """单卷扫描，返回 issue 列表（一条=一处需要人工确认的问题）。"""
     if not rows:
         return []
@@ -205,17 +293,111 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
                 rec.get("original_content") or "",
                 regenerated_excerpt=_excerpt(regen.get("content") or ""))
 
+    # ⑤ 内容层：题号对得上，但「话」不是它自己的 —— 缺小问 / 吞了下一题 / 装着别题正文
+    applied = fixed_numbers(source, fixes_dir)
+    label_by_no = {
+        rec.get("group_order"): rec for rec in labeling_issues
+        if rec.get("source") == source
+    }
+    norm_md, norm_index = _normalized_md(md_text)
+    md_stems = [(m.start(), int(m.group(1))) for m in _STEM_ANY_RE.finditer(md_text)]
+    stem_bodies = _md_stem_bodies(md_text)
+    max_no = max(nums)
+    report_llm_flag = subject_code_for_path(rel_path, default="") not in _UNREPAIRED_OK_SUBJECTS
+
+    for r in rows:
+        no = r.get("group_order")
+        if not isinstance(no, int):
+            continue
+        # 注意：**不能**因为「这题人工补过」就跳过内容检查。补了但写坏（题干空、
+        # 合并没拆干净）必须还能被检出来 —— 2026-11-01 人大附题2 就是补完仍然空，
+        # 因为这里按 applied 跳过，扫不出来，也永远不会重开。
+        body = r.get("content") or ""
+        reasons: list[str] = []
+        suspect: int | None = None
+
+        # 题干为空：正文里一个有效字符都没有（图片被拆进选项、题干整段丢失都长这样）
+        if not _norm_text(body):
+            reasons.append("empty_stem")
+
+        # 内容不完整：小问从 (2) 起（丢了 (1)），或标注时 LLM 判过不完整
+        if _SUBQ2_RE.search(body) and not _SUBQ1_RE.search(body):
+            reasons.append("subq_starts_at_2")
+        rec = label_by_no.get(no)
+        if report_llm_flag and r.get("needs_review"):
+            if rec and rec.get("issues"):
+                reasons.append("llm_marked_incomplete")
+                reasons.extend(str(x) for x in rec["issues"] if x)
+            else:
+                reasons.append("flagged_needs_review")
+
+        # 前后题合并①：正文里出现了另一个题号，且 md 里那个题号后面确实是这段话
+        # （只认题号不够：「盐水 1、盐水 2」「图 18」这类数字会被误伤）
+        for m in _INLINE_STEM_RE.finditer(body):
+            other = int(m.group(1))
+            if other == no or not 1 <= other <= max_no:
+                continue
+            tail = _norm_text(body[m.end(): m.end() + 60])[:8]
+            if len(tail) < 5:
+                continue
+            if not any(b.startswith(tail[:6]) for b in stem_bodies.get(other, [])):
+                continue
+            reasons.append(f"body_contains_stem_{other}")
+            suspect = suspect or other
+            break
+
+        # 前后题合并②：本题正文开头在 md 里只出现在另一个题号下面 —— 装错了内容
+        owners = _body_owners(norm_md, norm_index, md_stems, body)
+        if len(owners) == 1 and no not in owners:
+            owner = next(iter(owners))
+            if 1 <= owner <= max_no:
+                reasons.append(f"body_belongs_to_stem_{owner}")
+                suspect = suspect or owner
+
+        if reasons:
+            kind = ("merged_content" if suspect is not None and any(
+                re.match(r"body_(contains|belongs_to)_stem_", x) for x in reasons)
+                else "incomplete_content")
+            add(no, kind, reasons, body, suspect_group_order=suspect,
+                content_sig=content_sig(body))
+
+    # ⑥ 题型与同大题不一致：选择题区里冒出「简答题」= 选项丢了（2026-11-01 人大附题9/10：
+    #    单项选择 14 题里 12 题 choice，只有 9/10 是 short_answer，实际是图片选项没拆出来）
+    by_group: dict[str, list[dict]] = {}
+    for r in rows:
+        g = r.get("group_id")
+        if g and isinstance(r.get("group_order"), int):
+            by_group.setdefault(str(g), []).append(r)
+    for g, items in by_group.items():
+        if len(items) < 5:          # 小题太少不足以判断「这个大题都是同一题型」
+            continue
+        counts = Counter(str(r.get("type") or "") for r in items)
+        top, n = counts.most_common(1)[0]
+        if not top or n / len(items) < 0.8:
+            continue                # 实验题这类本来混排的大题不动
+        for r in items:
+            if str(r.get("type") or "") == top:
+                continue
+            add(r["group_order"], "type_mismatch",
+                [f"type_outlier_{top}_{n}of{len(items)}"],
+                r.get("content") or "", group_id=g, dominant_type=top)
+
     return issues
 
 
 def reopen_unbacked(records: list[dict], all_issues: list[dict],
-                    fixes_dir: Path | None = None) -> int:
+                    fixes_dir: Path | None = None,
+                    present: dict[str, set[int]] | None = None) -> int:
     """把「标了已处理、但补题并不成立」的记录退回待处理，返回条数。
 
-    判据（2026-10-31 事故驱动）：
+    判据（2026-10-31 / 2026-11-01 两次事故驱动）：
     - resolved 必须有 applied=true 的补题记录（真写进库了）；
     - recorded 必须有补题记录（写了但还没入库）；
-    - 补题文件被删/移进 `_discarded/` 时两者都不成立 → 重新打开。
+    - 补题文件被删/移进 `_discarded/` 时两者都不成立 → 重新打开；
+    - **补题记录说已入库，但这次切题产物里仍然没有这个题号** → 补题被后续导入冲掉了
+      （2026-11-01 人大附：题 7/16/18/23 确实补过，之后一次重导把人工题摘掉，
+      清单却一直显示已解决。`applied=true` 只证明「当时写过库」，不证明「现在还活着」，
+      所以还要拿当前 extracted 的题号集合对一次）。
 
     事故经过：补题时连终端界面一起粘进去，补题文件被作废，但清单仍标 resolved，
     于是这张卷的缺题再也不会提示（一零一题28、人大附题7 因此消失）。
@@ -227,26 +409,72 @@ def reopen_unbacked(records: list[dict], all_issues: list[dict],
         rec = existing.get((it["source"], it["group_order"], it["kind"]))
         if rec is None or rec.get("status") == "pending":
             continue
+        # 人工确认「没问题」的条目不靠补题记录收口 —— 本来就没有要写库的东西
+        if rec.get("verdict") == "no_change":
+            continue
         if it["source"] not in fix_cache:
             fix_cache[it["source"]] = fixed_numbers(it["source"], fixes_dir)
         applied = fix_cache[it["source"]].get(int(it["group_order"]))
         ok = bool(applied) if rec.get("status") == "resolved" else applied is not None
+        lost = False
+        # 内容层：这次还检出同一个问题，说明那次补写没生效（题干仍是空、合并没拆干净），
+        # 「已解决」是假的 —— 重新打开让人再修一次。
+        if ok and rec.get("status") == "resolved" and rec.get("kind") in (
+                "incomplete_content", "merged_content"):
+            ok, lost = False, True
+        if ok and present is not None and rec.get("kind") in ("missing", "punct_stem"):
+            have = present.get(it["source"])
+            if have is not None and int(it["group_order"]) not in have:
+                ok, lost = False, True
         if ok:
             continue
         rec["status"] = "pending"
-        rec["note"] = ("补题文件不存在或已作废，已重新打开"
-                       if applied is None else "补了但还没写库，已重新打开")
+        if lost and rec.get("kind") in ("incomplete_content", "merged_content"):
+            rec["note"] = ("补写后仍能检出同一个内容问题（题干还是空 / 合并没拆干净），"
+                           "已重新打开；请重新录入一次")
+        elif lost:
+            rec["note"] = ("补题记录显示已入库，但当前切题产物里仍缺这个题号 —— "
+                           "补题被后续导入冲掉了；内容还在 manual_fixes，"
+                           "下次正常导入会自动重放（不用重录）")
+        else:
+            rec["note"] = ("补题文件不存在或已作废，已重新打开"
+                           if applied is None else "补了但还没写库，已重新打开")
         rec.pop("resolved_at", None)
         rec.pop("fix_file", None)
         reopened += 1
     return reopened
 
 
-def run(subject: str, file: str | None = None, *, write: bool = True) -> list[dict]:
-    """扫描一个学科（可再按卷名子串收窄），返回本次检出的问题列表。
+def reopen_changed(records: list[dict], all_issues: list[dict]) -> int:
+    """内容变了就把「人工确认无问题」退回待确认，返回条数。
+
+    只认内容指纹：同一段正文 → 同一个结论可以一直沿用；重新切题/补题后正文变了，
+    旧结论不一定还成立，必须让人再看一眼（否则一次「没问题」会永久闭麦）。
+    """
+    fresh = {(i["source"], i["group_order"], i["kind"]): i for i in all_issues}
+    reopened = 0
+    for rec in records:
+        if rec.get("verdict") != "no_change":
+            continue
+        it = fresh.get((rec["source"], rec.get("group_order"), rec.get("kind")))
+        old_sig, new_sig = rec.get("content_sig"), (it or {}).get("content_sig")
+        if not old_sig or not new_sig or old_sig == new_sig:
+            continue
+        rec["status"] = "pending"
+        rec["note"] = "题目内容已变化，之前的「确认无问题」作废，请重新确认"
+        for key in ("verdict", "resolved_at", "content_sig"):
+            rec.pop(key, None)
+        reopened += 1
+    return reopened
+
+
+def run(subject: str, file: str | None = None, *, write: bool = True,
+        sources: set[str] | None = None) -> list[dict]:
+    """扫描一个学科（可再按卷名子串 / 精确卷名集合收窄），返回本次检出的问题列表。
 
     write=True 时把新条目追加进 output/recognition_issues.jsonl（按
-    (source, group_order, kind) 去重，可重复执行）。
+    (source, group_order, kind) 去重，可重复执行）。`sources` 给 just-written 的卷用：
+    写库后只复扫这几卷，不惊动同科其它卷。
     """
     extracted_root = ROOT / "output" / "extracted"
     md_root = ROOT / "output" / "md"
@@ -254,6 +482,7 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
     labeling_issues = _read_jsonl(ROOT / "output" / "labeling_issues.jsonl")
 
     all_issues: list[dict] = []
+    present_by_source: dict[str, set[int]] = {}
     for jsonl_path in sorted(extracted_root.rglob("*.jsonl")):
         rel_dir = jsonl_path.parent.relative_to(extracted_root)
         if str(rel_dir).split("/")[0] != subject:
@@ -261,9 +490,14 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
         source = jsonl_path.stem
         if file and file not in source:
             continue
+        if sources is not None and source not in sources:
+            continue
         md_path = md_root / rel_dir / f"{source}.md"
         pdf_path = locate_pdf(pdf_root, rel_dir, source)
         rows = _read_jsonl(jsonl_path)
+        present_by_source[source] = {
+            r["group_order"] for r in rows if isinstance(r.get("group_order"), int)
+        }
         found = scan_paper(source, rel_dir, md_path, rows,
                            pdf_path if pdf_path.exists() else None, labeling_issues)
         all_issues.extend(found)
@@ -295,16 +529,20 @@ def run(subject: str, file: str | None = None, *, write: bool = True) -> list[di
         if fresh and fresh.get("pdf") and not rec.get("pdf"):
             rec["pdf"] = fresh["pdf"]
             filled += 1
-    reopened = reopen_unbacked(records, all_issues)
+    reopened = reopen_unbacked(records, all_issues, present=present_by_source)
+    changed = reopen_changed(records, all_issues)
 
-    if closed or filled or reopened:
+    if closed or filled or reopened or changed:
         _write_jsonl(ISSUES_FILE, records)
         if closed:
             print(f"[ok] 自动收口 {closed} 条噪声题记录", flush=True)
         if filled:
             print(f"[ok] 补全 {filled} 条记录的原 PDF 路径", flush=True)
         if reopened:
-            print(f"[ok] 重新打开 {reopened} 条（此前标为已处理，但补题未落库/已作废）",
+            print(f"[ok] 重新打开 {reopened} 条（此前标为已处理，但补题未落库/已作废/被后续导入冲掉）",
+                  flush=True)
+        if changed:
+            print(f"[ok] 重新打开 {changed} 条（题目内容已变化，旧的「确认无问题」作废）",
                   flush=True)
     known = {(i["source"], i["group_order"], i["kind"]) for i in records}
     added = 0

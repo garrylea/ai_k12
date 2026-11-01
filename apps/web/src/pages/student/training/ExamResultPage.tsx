@@ -160,7 +160,8 @@ export default function ExamResultPage() {
       title: `${subjectName(subjectId)}测验`,
       celebrate: {
         title: '本套试卷已交卷！',
-        subtitle: `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}%`,
+        subtitle: `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}%`
+          + ((summary.partialCount ?? 0) > 0 ? `（含 ${summary.partialCount} 题部分得分）` : ''),
         primaryLabel: '查看成绩',
       },
     });

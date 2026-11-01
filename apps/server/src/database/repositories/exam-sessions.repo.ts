@@ -24,6 +24,7 @@ export interface ExamAnswerRow {
   question_order: number;
   answer_text: string | null;
   is_correct: number | null;
+  score: string | number | null;   // DECIMAL 由 mysql2 返回字符串
   method: string | null; // 'exact' | 'ai' | 'self_assess' | 'unanswered' | 'failed'
   analysis: string | null;
   error_type: string | null;
@@ -40,6 +41,8 @@ export interface UpsertAnswerRow {
   questionOrder: number;
   answerText: string | null;
   isCorrect?: number | null;
+  /** 客观题得分比例 0/0.5/1；主观题/在途不传（NULL）。 */
+  score?: number | null;
   method?: string;
   analysis?: string | null;
   errorType?: string | null;
@@ -52,6 +55,7 @@ export interface ExamResultRow {
   question_order: number;
   answer_text: string | null;
   is_correct: number | null;
+  score: string | number | null;   // DECIMAL 由 mysql2 返回字符串
   analysis: string | null;
   text: string;
   type: string;
@@ -118,19 +122,20 @@ export class ExamSessionsRepository {
   async upsertAnswer(row: UpsertAnswerRow): Promise<void> {
     await this.pool.execute(
       `INSERT INTO exam_answers
-         (session_id, question_id, question_order, answer_text, is_correct, method, analysis, error_type, judged_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (session_id, question_id, question_order, answer_text, is_correct, score, method, analysis, error_type, judged_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          question_order = VALUES(question_order),
          answer_text = VALUES(answer_text),
          is_correct = VALUES(is_correct),
+         score = VALUES(score),
          method = VALUES(method),
          analysis = VALUES(analysis),
          error_type = VALUES(error_type),
          judged_at = VALUES(judged_at)`,
       [
         row.sessionId, row.questionId, row.questionOrder, row.answerText,
-        row.isCorrect ?? null, row.method ?? null, row.analysis ?? null,
+        row.isCorrect ?? null, row.score ?? null, row.method ?? null, row.analysis ?? null,
         row.errorType ?? null, row.judgedAt ?? null,
       ],
     );

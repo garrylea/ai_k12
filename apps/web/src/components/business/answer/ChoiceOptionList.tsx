@@ -14,6 +14,8 @@ interface Props {
   value: string;
   onChange: (label: string) => void;
   disabled?: boolean;
+  /** 多选题：可同时选多个，value 是「按字母排序的选中集合」（如 "BD"）。 */
+  multiple?: boolean;
 }
 
 // 自定义 img：选项里的图片 inline-block，最高 140px（原先 30px 太小，看不清图选项），补 /assets/ 前缀 +
@@ -25,17 +27,19 @@ const optionMarkdownComponents = {
 };
 
 /** 选择题点选作答：线性边框选项卡，点选高亮 brand 色，提交字母 label。
+ *  多选题（multiple）按字母集合作答，value 形如 "BD"。
  *  样式遵循 CleanupPhase 的答题卡规范（--learn-* 变量、无 emoji、圆角卡片）。 */
-export function ChoiceOptionList({ options, value, onChange, disabled = false }: Props) {
+export function ChoiceOptionList({ options, value, onChange, disabled = false, multiple = false }: Props) {
+  const selectedSet = multiple ? new Set(value.split('')) : null;
   return (
-    <div className="flex flex-col gap-2 p-3" role="radiogroup" aria-label="选项">
+    <div className="flex flex-col gap-2 p-3" role={multiple ? 'group' : 'radiogroup'} aria-label="选项">
       {options.map((opt) => {
-        const selected = value === opt.label;
+        const selected = multiple ? selectedSet!.has(opt.label) : value === opt.label;
         return (
           <button
             key={opt.label}
             type="button"
-            role="radio"
+            role={multiple ? 'checkbox' : 'radio'}
             aria-checked={selected}
             disabled={disabled}
             onClick={() => onChange(opt.label)}

@@ -1150,3 +1150,59 @@ def test_junk_numbered_line_does_not_steal_stem_number():
     result = split_page(text, Path("test.md"))
     assert [q.group_order for q in result] == [1, 2, 3, 4]
     assert result[-1].content.startswith("第四题")
+
+
+def test_options_label_below_content_without_image_for_a():
+    """图在上、名称居中、字母在下的排版，且 A 本身没有配图。
+
+    2026-11-01 人大附题2：旧逻辑把 A 上方所有文字都塞给 A，题干变成空串，
+    入库后是一道空白题。现在按空行分段，最后一段归 A、其余归题干。
+    """
+    from question_splitter import split_options
+
+    body = (
+        "图1所示的物品中，通常情况下属于导体的是\n\n"
+        "塑料笔杆\n\nA\n\n"
+        "![](images/b.jpg)\n绘图橡皮\n\nB\n\n"
+        "![](images/c.jpg)\n铅笔芯\n\n图1\n\nC\n\n"
+        "![](images/d.jpg)\n胶条\n\nD"
+    )
+    stem, opts = split_options(body)
+
+    assert stem == "图1所示的物品中，通常情况下属于导体的是"
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[0]["text"] == "塑料笔杆"
+    assert "绘图橡皮" in opts[1]["text"] and "images/b.jpg" in opts[1]["text"]
+
+
+def test_multi_choice_group_marks_its_questions():
+    """大题标题写「多项选择题」→ 这一节的题带 multi_choice 标记（人大附题16-20）。"""
+    from question_splitter import split_page
+
+    md = """## 一、单项选择题（共4分）
+1. 甲
+A. 1
+B. 2
+C. 3
+D. 4
+2. 乙
+A. 1
+B. 2
+C. 3
+D. 4
+
+## 二、多项选择题（共4分，每小题选项多于一个）
+3. 丙
+A. 1
+B. 2
+C. 3
+D. 4
+4. 丁
+A. 1
+B. 2
+C. 3
+D. 4
+"""
+    qs = split_page(md, Path('卷A.md'))
+    flags = {q.group_order: q.multi_choice for q in qs}
+    assert flags == {1: False, 2: False, 3: True, 4: True}

@@ -10402,7 +10402,7 @@ components:
         type:
           type: string
           nullable: true
-          enum: [choice, fill_blank, true_false, short_answer, proof]
+          enum: [choice, multi_choice, fill_blank, true_false, short_answer, proof]
           description: 题型过滤；null=不限题型（白名单外取值 400）
         count:
           type: integer

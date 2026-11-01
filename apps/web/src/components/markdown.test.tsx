@@ -147,3 +147,51 @@ describe('图注：题面区换了 img 包装组件也要生效', () => {
     expect(html).toContain('图2');
   });
 });
+
+
+describe('图注：三幅并排图各自的小标（甲乙丙）', () => {
+  it('每张图后面的甲/乙/丙都收进它自己的 figure，正文前后仍按段落渲染', () => {
+    const html = render(
+      '小明做了三次实验。\n![](a.jpg)\n甲\n![](b.jpg)\n乙\n图22\n![](c.jpg)\n丙\n物体下落的距离远大于厚度。',
+    );
+
+    expect((html.match(/<figure/g) ?? []).length).toBe(3);
+    const caps = [...html.matchAll(/<figcaption[^>]*>(.*?)<\/figcaption>/g)].map((m) => m[1]);
+    expect(caps).toEqual(['甲', '乙', '丙']);
+    expect(html).toContain('小明做了三次实验。');
+    expect(html).toContain('物体下落的距离远大于厚度。');
+    // 图注必须排在图片之后（视觉上在图下方），不能跑到图前面
+    expect(html.indexOf('<img')).toBeLessThan(html.indexOf('<figcaption'));
+  });
+
+  it('普通段落里的「甲」「乙」不会被当成图注', () => {
+    const html = render('甲、乙两球质量相同，乙球先落地。');
+    expect(html).not.toContain('<figure');
+  });
+});
+
+
+describe('图注：图号 + 分格小标合成「图5乙」', () => {
+  it('「图5 / 乙」两行合成一个 figcaption，不再剩孤立的乙', () => {
+    const html = render(
+      '![](a.jpg)\n甲\n![](b.jpg)\n图5\n乙\n![](c.jpg)\n丙',
+    );
+    const caps = [...html.matchAll(/<figcaption[^>]*>(.*?)<\/figcaption>/g)].map((m) => m[1]);
+    expect(caps).toEqual(['甲', '图5乙', '丙']);
+    expect(html).not.toMatch(/>\s*乙\s*<p/);   // 乙 不能单独留在正文段落里
+  });
+
+  it('图号后面不是甲乙丙丁（如「图22」后接正文）时不合并', () => {
+    const html = render('![](a.jpg)\n乙\n图22\n![](b.jpg)\n丙');
+    const caps = [...html.matchAll(/<figcaption[^>]*>(.*?)<\/figcaption>/g)].map((m) => m[1]);
+    expect(caps).toEqual(['乙', '丙']);
+  });
+});
+
+
+  it('行尾两空格造成硬换行（<br>）时，「图11」和「乙」也要合成', () => {
+    // 人大附题15：md 里 图11 后面跟两个空格（硬换行），乙 被拆到下一个 item
+    const html = render('![](a.jpg)\n甲\n![](b.jpg)\n图11  \n乙');
+    const caps = [...html.matchAll(/<figcaption[^>]*>(.*?)<\/figcaption>/g)].map((m) => m[1]);
+    expect(caps).toEqual(['甲', '图11乙']);
+  });

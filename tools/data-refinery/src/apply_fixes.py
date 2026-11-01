@@ -77,7 +77,7 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
     go = int(rec["group_order"])
     payload = {
         "group_order": go,
-        "type": "choice" if options else "short_answer",
+        "type": rec.get("expected_type") or ("choice" if options else "short_answer"),
         "difficulty": 2,
         "content": content,
         "options": options,
@@ -149,6 +149,32 @@ def _existing_question(cur, paper_id: int, group_order: int) -> int | None:
     return int(row[0]) if row else None
 
 
+def _orphan_question(cur, paper_id: int, source: str, group_order: int) -> int | None:
+    """同一份卷、同一题号、当前没挂在卷上的旧行（人工补的第一版 / 上一轮导入的残行）。
+
+    为什么要找它：题号已经存在于库、只是关联被重导摘掉了。这时必须**更新那一行**，
+    再 INSERT 就会在同一份卷里出现两道 18 题（2026-11-01 人大附实测：6338/6340/6341
+    就是这样变成孤儿的）。「内容变了」不是新建的理由 —— 卷内题号就是这道题的身份。
+    """
+    cur.execute(
+        "SELECT q.id FROM questions q "
+        "WHERE q.source=%s AND q.group_order=%s "
+        "  AND NOT EXISTS (SELECT 1 FROM paper_questions pq WHERE pq.question_id=q.id) "
+        "ORDER BY q.id LIMIT 1",
+        (source, group_order))
+    row = cur.fetchone()
+    return int(row[0]) if row else None
+
+
+def _duplicate_numbers(cur, paper_id: int) -> list[int]:
+    """同一份卷里挂了两个以上 question_no 的题号（组卷会出现同号题，必须为 0）。"""
+    cur.execute(
+        "SELECT question_no FROM paper_questions WHERE paper_id=%s "
+        "GROUP BY question_no HAVING COUNT(*) > 1 ORDER BY question_no",
+        (paper_id,))
+    return [int(r[0]) for r in cur.fetchall()]
+
+
 def _renumber(cur, paper_id: int) -> int:
     """按卷面题号重排 question_no，返回受影响行数。
 
@@ -183,6 +209,38 @@ def pending_records(subject: str | None = None, source: str | None = None,
     return out
 
 
+def needing_replay(subject: str | None = None, source: str | None = None,
+                   fixes_dir: Path | None = None) -> list[dict]:
+    """已标 applied、但库里已经不成立（题没了 / 被停用）的补题记录。
+
+    给 import_cli 第 8 步做闸门用：只看 `pending_records` 会漏掉「补过、后来被重导
+    冲掉」的记录（它们 applied=true），于是正常导入也不会去救 —— 2026-11-01 人大附
+    7/16/18/23 就是这样永久消失的。
+    """
+    recs: list[dict] = []
+    for f in sorted(Path(fixes_dir or FIXES_DIR).glob("*.jsonl")):
+        for rec in _read_jsonl(f):
+            if not rec.get("applied"):
+                continue
+            if subject and Path(rec.get("rel_path", "")).parts[:1] != (subject,):
+                continue
+            if source and source not in rec.get("source", ""):
+                continue
+            rec["_file"] = str(f)
+            recs.append(rec)
+    if not recs:
+        return []
+    cfg = RefineryConfig.from_env()
+    conn = pymysql.connect(host=cfg.db_host, port=cfg.db_port, user=cfg.db_user,
+                           password=cfg.db_pass, database=cfg.db_name, charset="utf8mb4",
+                           autocommit=True)
+    try:
+        with conn.cursor() as cur:
+            return [r for r in recs if _replay_reason(cur, r)]
+    finally:
+        conn.close()
+
+
 def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None,
                  output_dir: Path | None = None) -> str:
     from manual_fix import looks_like_ui_echo
@@ -195,7 +253,14 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     paper_id, subject_id = found
     go = int(rec["group_order"])
     qid = _existing_question(cur, paper_id, go)
-    action = "更新" if qid else "新增"
+    orphan = False
+    if qid is None:
+        # 题号在库、只是关联被摘掉（重导/旧版补题）：更新那一行，别新建同号题
+        qid = _orphan_question(cur, paper_id, rec.get("source", ""), go)
+        orphan = qid is not None
+    # 没有挂到卷上时，可能是「新增」，也可能是「复用」一条同内容的遗留行（重导摘了关联、
+    # 没删题）。真正的选择要等内容物化后算哈希才知道，预览先把这个可能说清楚。
+    action = "更新" if qid else "新增（同内容已存在则复用）"
 
     if not apply:
         # 预览要能判断"内容对不对"，只报更新/新增没用（用户 2026-10-31 指出）
@@ -213,6 +278,19 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     answer = rec.get("answer") or ""
     material_text = rec.get("material_text")
     options = rec.get("options")
+    forced_type = rec.get("expected_type") or None
+
+    # 手录时容易漏掉图片语法的 `!`（写成 `[](images/...)` 而不是 `![](images/...)`），
+    # 导致：① rewrite_fields 不认它为图片 → 不物化；② 前端渲染成空链接 → 选项消失。
+    # 入库前统一补 `!`（2026-11-01 人大附题9 C 项实测）。
+    _MISSING_BANG_RE = re.compile(r"(?<!\!)\[\]\(images/")
+    if content:
+        content = _MISSING_BANG_RE.sub("![](images/", content)
+    if options:
+        for o in options:
+            t = o.get("text") or ""
+            if t:
+                o["text"] = _MISSING_BANG_RE.sub("![](images/", t)
     # extracted 要保留**md 原始引用**（images/...），物化只发生在 publish。
     # rewrite_fields 会原地改写 options，所以先深拷贝一份原始值用于回写。
     raw_content, raw_answer = content, answer
@@ -252,30 +330,139 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     if qid:
         cur.execute(
             "UPDATE questions SET content=%s, options=%s, "
+            "type=COALESCE(%s, IF(%s,'choice',type)), "
             "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
             "content_hash=%s, is_active=1 WHERE id=%s",
             (content,
              json.dumps(options, ensure_ascii=False) if options else None,
+             forced_type, 1 if options else 0,
              answer, material_text, chash, qid))
+        if orphan:
+            # 旧行没挂在卷上：把卷内的题号关系补回来（内容已更新，不新建行）
+            cur.execute(
+                "INSERT IGNORE INTO paper_questions "
+                "(paper_id, question_id, question_no, group_order) VALUES (%s,%s,%s,%s)",
+                (paper_id, qid, go, go))
+            action = "更新（复用同号旧行，未新建）"
     else:
-        cur.execute(
-            "INSERT INTO questions (subject_id, group_order, type, difficulty, content, options, "
-            "answer, material_text, grade_band, source, source_year, content_hash, is_active) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
-            (subject_id, go, "choice" if options else "short_answer", 2,
-             content,
-             json.dumps(options, ensure_ascii=False) if options else None,
-             answer, material_text,
-             "junior", rec["source"], 2024, chash))
-        qid = int(cur.lastrowid)
-        cur.execute(
-            "INSERT IGNORE INTO paper_questions (paper_id, question_id, question_no, group_order) "
-            "VALUES (%s,%s,%s,%s)", (paper_id, qid, go, go))
+        # 同一道题的行可能还在（重导只摘了 paper_questions 关联、没删题）：
+        # 直接复用并重新挂到卷上。不加这一步，UNIQUE(content_hash) 会挡下 INSERT
+        # （2026-11-01 人大附 7/16/18/23 实测：四个 hash 与留在库里的 6338–6341 完全相同）。
+        cur.execute("SELECT id FROM questions WHERE content_hash=%s", (chash,))
+        reused = cur.fetchone()
+        if reused:
+            qid = int(reused[0])
+            action = "复用"
+            cur.execute(
+                "UPDATE questions SET content=%s, options=%s, "
+                "type=COALESCE(%s, IF(%s,'choice',type)), "
+                "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, is_active=1 "
+                "WHERE id=%s",
+                (content,
+                 json.dumps(options, ensure_ascii=False) if options else None,
+                 forced_type, 1 if options else 0,
+                 answer, material_text, qid))
+            cur.execute(
+                "INSERT IGNORE INTO paper_questions "
+                "(paper_id, question_id, question_no, group_order) VALUES (%s,%s,%s,%s)",
+                (paper_id, qid, go, go))
+        else:
+            action = "新增"
+            cur.execute(
+                "INSERT INTO questions (subject_id, group_order, type, difficulty, content, options, "
+                "answer, material_text, grade_band, source, source_year, content_hash, is_active) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
+                (subject_id, go, forced_type or ("choice" if options else "short_answer"), 2,
+                 content,
+                 json.dumps(options, ensure_ascii=False) if options else None,
+                 answer, material_text,
+                 "junior", rec["source"], 2024, chash))
+            qid = int(cur.lastrowid)
+            cur.execute(
+                "INSERT IGNORE INTO paper_questions (paper_id, question_id, question_no, group_order) "
+                "VALUES (%s,%s,%s,%s)", (paper_id, qid, go, go))
 
     _renumber(cur, paper_id)
     cur.execute("UPDATE exam_papers SET question_count=(SELECT COUNT(*) FROM paper_questions "
                 "WHERE paper_id=%s) WHERE id=%s", (paper_id, paper_id))
+    dup = _duplicate_numbers(cur, paper_id)
+    if dup:
+        print(f"[WARN] paper={paper_id} 卷内题号重复：{dup}（组卷会出现同号题，请检查）",
+              flush=True)
+    # 记下写入时的内容哈希：下次重导若把这道题的内容换回旧的，能立刻发现并重放
+    rec["applied_hash"] = chash
     return f"{action}：paper={paper_id} 第{go}题 -> question_id={qid}"
+
+
+def _replay_reason(cur, rec: dict) -> str | None:
+    """补题记录标了 applied，但这道题在库里已经不是「人工确认过」的状态了。
+
+    两种表现（2026-11-01 人大附实测，都是一次重导造成的）：
+    - 库里根本没有这道题（人工补的 4 行被重导从 published 重建时摘掉）；
+    - 有这道题，但 `is_active=0`（重导按 `needs_review=true` 重新停用，人工修复被覆盖）。
+
+    为什么必须查库：`applied=true` 只证明「当时写过库」，不证明「现在还活着」。
+    不查就永远不会重放，题就这么永久消失/停用。
+    """
+    found = _paper_row(cur, rec.get("rel_path", ""), rec.get("source", ""))
+    if not found:
+        return None        # 卷自身不在库里：交给 apply_record 报「跳过」，不猜
+    try:
+        go = int(rec["group_order"])
+    except (TypeError, ValueError):
+        return None
+    cur.execute(
+        "SELECT q.id, q.is_active, q.content_hash FROM paper_questions pq "
+        "JOIN questions q ON q.id = pq.question_id "
+        "WHERE pq.paper_id=%s AND pq.group_order=%s", (found[0], go))
+    row = cur.fetchone()
+    if not row:
+        return "库中已无此题"
+    if not int(row[1] or 0):
+        return "库里这题被标为停用（is_active=0）"
+    # 重导会把人工补的内容换回切题产物里的旧版本；哈希对不上就是被覆盖了
+    applied_hash = rec.get("applied_hash")
+    if applied_hash and row[2] and row[2] != applied_hash:
+        return "库里这题的内容已被重新导入覆盖"
+    return None
+
+
+def _rescan(applied: dict[str, dict[str, set[int]]]) -> None:
+    """写完就地复扫刚改过的卷：把清单状态（recorded → resolved / 重新打开）一次收口。
+
+    写库后不复查，清单会停在「已补录未写库」；更要紧的是**补坏了要当场说**：
+    内容仍缺小问/仍装错题时会被扫描重新打开，如果只在下一次导入时弹出来，
+    用户看到的就是「同一题反复问我」。这里写完立刻点名。
+
+    为什么内置：用户不该记第二条命令（2026-11-01 用户裁决「命令只能一条」）。
+    """
+    if not applied:
+        return
+    from recognition_scan import run as scan_run
+
+    print("\n[复扫] 核对刚写入的卷：", flush=True)
+    for subject_cn, by_source in sorted(applied.items()):
+        sources = set(by_source)
+        try:
+            scan_run(subject_cn, None, write=True, sources=sources)
+        except Exception as exc:          # noqa: BLE001 - 复扫失败不能影响已提交的数据
+            print(f"[WARN] 复扫失败（数据已写入，不影响）：{exc}", flush=True)
+            continue
+        # 刚写的题如果又被重新打开，明确说清楚：不是重复打扰，是上次录的内容没修好
+        path = Path(__file__).resolve().parents[1] / "output" / "recognition_issues.jsonl"
+        try:
+            rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()
+                    if l.strip()]
+        except OSError:
+            continue
+        for r in rows:
+            src = r.get("source")
+            if (src in by_source and r.get("status") == "pending"
+                    and int(r.get("group_order") or -1) in by_source[src]
+                    and "仍能检出" in (r.get("note") or "")):
+                print(f"[!] 第 {r['group_order']} 题：写入的内容仍能检出同一问题"
+                      f"（{r.get('note')}），已退回待处理 —— 上次录的内容没修好，"
+                      f"请对照原卷补全后再录一次", flush=True)
 
 
 def run(argv=None, *, via_pipeline: bool = False) -> int:
@@ -303,11 +490,22 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
     previewed = 0
     applied_keys: list[tuple[str, int, str]] = []
     rejected_keys: list[tuple[str, int, str]] = []
+    applied_sources: dict[str, dict[str, set[int]]] = {}   # 学科目录 -> 卷名 -> 题号
     try:
         with conn.cursor() as cur:
             for f in files:
                 rows = _read_jsonl(f)
-                todo = [r for r in rows if args.force or not r.get("applied")]
+                todo = []
+                for r in rows:
+                    if args.force or not r.get("applied"):
+                        todo.append(r)
+                        continue
+                    reason = _replay_reason(cur, r)
+                    if reason:
+                        # 标了已入库但库里已不是人工确认的状态：自动重放
+                        print(f"[replay] {r['source'][:26]} 题{r['group_order']}："
+                              f"{reason}，按补题记录重新写入", flush=True)
+                        todo.append(r)
                 if args.subject:
                     todo = [r for r in todo if Path(r["rel_path"]).parts[0] == args.subject]
                 if args.source:
@@ -327,6 +525,9 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                     rec["applied_at"] = datetime.now().isoformat(timespec="seconds")
                     total += 1
                     applied_keys.append((rec["source"], rec["group_order"], str(f)))
+                    subject_cn = Path(rec["rel_path"]).parts[0]
+                    applied_sources.setdefault(subject_cn, {}).setdefault(
+                        rec["source"], set()).add(int(rec["group_order"]))
                 if args.apply:
                     _write_jsonl(f, rows)
         if args.apply:
@@ -337,6 +538,7 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
             for source, go, _ in rejected_keys:
                 mark_issue(source, go, "pending", note="补录内容被拒（疑似界面文字），请重新补录")
             print(f"\n[ok] 已写入 {total} 题", flush=True)
+            _rescan(applied_sources)
         else:
             conn.rollback()
             if via_pipeline:

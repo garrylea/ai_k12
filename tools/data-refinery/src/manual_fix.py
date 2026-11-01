@@ -57,6 +57,10 @@ _REASON_TEXT = {
     "prev_has_second_subq_series": "上一题里出现了第二组小问",
     "next_starts_with_subq_no_stem": "下一题以 (1) 开头却没有题干",
     "content_looks_like_page_chrome": "这行是卷首页脚/署名，不是题目",
+    "subq_starts_at_2": "小问从 (2) 开始，缺了 (1)",
+    "empty_stem": "题干是空的（正文里没有有效文字）",
+    "llm_marked_incomplete": "标注时判定题干不完整",
+    "flagged_needs_review": "入库时被标为待复核（内容不完整）",
 }
 
 
@@ -82,6 +86,21 @@ def humanize_reasons(reasons: list[str]) -> list[str]:
         m = re.match(r"md_stem_appears_(\d+)x", reason)
         if m:
             out.append(f"原 Markdown 里该题号出现 {m.group(1)} 次")
+            continue
+        m = re.match(r"body_contains_stem_(\d+)$", reason)
+        if m:
+            out.append(f"本题正文里出现了第 {m.group(1)} 题的题号（下一题可能被吞进来了）")
+            continue
+        m = re.match(r"body_belongs_to_stem_(\d+)$", reason)
+        if m:
+            out.append(f"这段正文在原 Markdown 里属于第 {m.group(1)} 题（本题可能装错了内容）")
+            continue
+        m = re.match(r"type_outlier_(\w+?)_(\d+)of(\d+)$", reason)
+        if m:
+            name = {"choice": "选择题", "short_answer": "简答题",
+                    "fill_blank": "填空题", "calculation": "计算题"}.get(m.group(1), m.group(1))
+            out.append(f"同一大题 {m.group(3)} 题里有 {m.group(2)} 题是{name}，本题不是"
+                       "（选择题丢选项就会这样）")
             continue
         out.append(reason)
     return out
@@ -448,7 +467,13 @@ _KIND_TEXT = {
     "punct_stem": "顿号题号未识别",
     "repair_truncated": "自动修复砍短了内容",
     "junk_question": "卷首页脚被当成题目",
+    "incomplete_content": "内容不完整",
+    "merged_content": "前后题可能被合并",
+    "type_mismatch": "题型与同大题不一致",
 }
+
+# 内容层问题：先问「你看来有没有问题」，确认没问题就只落结论、不写库
+_CONTENT_KINDS = ("incomplete_content", "merged_content", "type_mismatch")
 
 
 def _print_context(issue: dict, index: int | None = None, total: int | None = None) -> None:
@@ -464,7 +489,11 @@ def _print_context(issue: dict, index: int | None = None, total: int | None = No
              ("文本", issue.get("md") or "—"),
              ("依据", " · ".join(humanize_reasons(issue.get("reasons") or [])))]
     if issue.get("suspect_group_order"):
-        pairs.append(("疑点", f"第 {issue['suspect_group_order']} 题的正文里可能混进了本题"))
+        if issue.get("kind") == "merged_content":
+            pairs.append(("疑点", f"本题与第 {issue['suspect_group_order']} 题可能粘在一起/串位，"
+                                  "请对照原卷确认哪段话属于哪一题"))
+        else:
+            pairs.append(("疑点", f"第 {issue['suspect_group_order']} 题的正文里可能混进了本题"))
     c.kv([p for p in pairs if p[0] != "依据"], label_width=4)
     reasons = humanize_reasons(issue.get("reasons") or [])
     if reasons:
@@ -479,7 +508,20 @@ def _targets(issue: dict) -> list[tuple[int, str]]:
 
     一题一录（2026-10-31 用户裁决）：不要在一次粘贴里塞多道题，而是
     引导完一题再引导下一题，各自以 EOF 结束。
+
+    内容层问题只改「本题」：`suspect_group_order` 在那是给人看的线索
+    （这题的正文其实属于谁），不是第二个要重录的题号 —— 那题自己会另有条目。
     """
+    if issue.get("kind") in _CONTENT_KINDS:
+        if issue.get("kind") == "type_mismatch":
+            note = ("这一题与同大题其它题的题型不一致，请录入完整题目（含 A–D 选项）；"
+                    "题型会按选项自动判定")
+        elif issue.get("kind") == "merged_content":
+            note = "这一题混进了别的题的内容，请只录入本题自己的完整内容"
+        else:
+            note = "这一题内容不完整（缺小问），请录入完整题目"
+        return [(issue["group_order"], note)]
+
     suspect = issue.get("suspect_group_order")
     seq: list[tuple[int, str]] = []
     if isinstance(suspect, int) and suspect != issue["group_order"]:
@@ -518,6 +560,17 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 c.err("这段内容不像题目（过短或含界面文字），已跳过本条")
                 break
             stem, options = strategy.split_options(body)
+            if not stem.strip() and options and body.strip():
+                # 选项字母写在内容下方（图在上、名称居中、字母在下）时，切分器会把
+                # 题干那一段当成 A 的内容 → 题干空串。直接拒收：写进去就是一道空题
+                # （2026-11-01 人大附题2 实测，写库后真题库显示空白题干）。
+                c.err("题干被解析成了空串（选项字母写在内容下面的排版会造成这样），本条未记录")
+                c.info("请按「题干单独一行 → A. 内容 → B. 内容 …」重粘；"
+                       "没有配图的选项只写文字即可，例如：A. 塑料笔杆")
+                fresh = _collect_content(paper_md_dir)
+                if fresh and fresh.strip():
+                    body = fresh
+                continue
             if options:
                 c.ok(f"第 {target} 题 · 题干 {len(stem)} 字 · 选项 "
                      f"{'/'.join(o['label'] for o in options)}")
@@ -564,6 +617,10 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 "material_text": None,
                 "issue_kind": issue["kind"],
                 "issue_reasons": issue.get("reasons") or [],
+                # 题型以「同大题」为准（试卷不会同一大题混排）：type_mismatch 的题写库时
+                # 直接按大题题型落 type，不再依赖选项有没有拆出来（2026-11-01 用户裁决）
+                "expected_type": (issue.get("dominant_type")
+                                  if issue.get("kind") == "type_mismatch" else None),
                 "pdf": issue.get("pdf"),
                 "md": issue.get("md"),
                 "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -576,11 +633,50 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
     return records
 
 
+def _ask_verdict(issue: dict) -> str:
+    """内容层问题先问「你看来有没有问题」：problem 改 / ok 保持原样 / skip 稍后再说。"""
+    c = console()
+    c.legend([("1", "有问题，我来修正"), ("2", "没有问题，保持原样（不写库）"),
+              ("s", "跳过，下次再问"), ("q", "退出")])
+    while True:
+        c.prompt(f"第 {issue['group_order']} 题你看来有问题吗 › ")
+        raw = _read_line()
+        if raw is None:                 # 输入流结束：当作跳过，别卡死
+            return "skip"
+        ans = raw.strip().lower()
+        if ans in ("1", "y", "yes"):
+            return "problem"
+        if ans in ("2", "n", "no"):
+            return "ok"
+        if ans in ("s", "skip"):
+            return "skip"
+        if ans in ("q", "quit"):
+            raise SystemExit(0)
+        c.warn("请按 1（有问题）/ 2（没问题）/ s（跳过）/ q（退出）选择")
+
+
 def _ask(issue: dict, paper_md_dir: Path,
          index: int | None = None, total: int | None = None) -> list[dict]:
-    """逐题引导：先修被吞的那一题，再补缺失的那一题；每题各自以 EOF 结束。"""
+    """逐题引导：先修被吞的那一题，再补缺失的那一题；每题各自以 EOF 结束。
+
+    内容层问题（不完整/前后题合并）多一道门：先问人工「有没有问题」。
+    确认没问题 → 只把结论写进清单（verdict=no_change），一个字段都不改库；
+    确认有问题 → 走和缺题一样的录入流程，由 apply_fixes 原地更新。
+    """
     strategy = get_strategy(_subject_of(issue))
     _print_context(issue, index, total)
+
+    if issue.get("kind") in _CONTENT_KINDS:
+        verdict = _ask_verdict(issue)
+        if verdict == "ok":
+            mark_issue(issue["source"], issue["group_order"], "resolved",
+                       note="人工确认无问题，未改动", kind=issue.get("kind"),
+                       verdict="no_change",
+                       content_sig=issue.get("content_sig"))
+            console().ok(f"第 {issue['group_order']} 题已标记「确认无问题」，题库未改动")
+            return []
+        if verdict == "skip":
+            return []
 
     targets = _targets(issue)
     records: list[dict] = []
@@ -590,19 +686,23 @@ def _ask(issue: dict, paper_md_dir: Path,
 
 
 def mark_issue(source: str, group_order: int, status: str, *,
-               note: str | None = None, fix_file: str | None = None) -> int:
-    """把某卷某题的所有识别问题切到指定状态；返回改动条数。
+               note: str | None = None, fix_file: str | None = None,
+               kind: str | None = None, **extra) -> int:
+    """把某卷某题（可限定 kind）的识别问题切到指定状态；返回改动条数。
 
     状态语义（2026-10-31 修订）：
     - pending  ：待人工补录
     - recorded ：已补录，但还没写进库（等 apply_fixes_cli --apply）
-    - resolved ：已写进库
+    - resolved ：已写进库；`verdict=no_change` 是「人工确认无问题、未改动」的收口
     """
     rows = _read_jsonl(ISSUES_FILE)
     changed = 0
     for rec in rows:
         if rec.get("source") != source or int(rec.get("group_order", -1)) != int(group_order):
             continue
+        if kind is not None and rec.get("kind") != kind:
+            continue
+
         if rec.get("status") == status and note is None:
             continue
         rec["status"] = status
@@ -614,6 +714,10 @@ def mark_issue(source: str, group_order: int, status: str, *,
             rec["fix_file"] = fix_file
         if note is not None:
             rec["note"] = note
+        for key, value in extra.items():
+            if value is None:
+                continue
+            rec[key] = value
         changed += 1
     if changed:
         _write_jsonl(ISSUES_FILE, rows)
@@ -658,10 +762,10 @@ def review_pending(sources: set[str] | None = None,
                    *, list_only: bool = False,
                    fixes_dir: Path | None = None,
                    limit: int | None = None) -> dict:
-    """逐条引导补题。返回 {"pending", "fixed", "skipped"}。"""
+    """逐条引导补题。返回 {"pending", "fixed", "skipped", "confirmed_ok"}。"""
     c = console()
     issues = pending_issues(sources, file)
-    result = {"pending": len(issues), "fixed": 0, "skipped": 0}
+    result = {"pending": len(issues), "fixed": 0, "skipped": 0, "confirmed_ok": 0}
     if not issues:
         c.write("")
         c.ok("没有待人工处理的题")
@@ -671,12 +775,59 @@ def review_pending(sources: set[str] | None = None,
         _print_table(issues)
         return result
 
+    # 逐条问之前先把整张清单打出来：否则用户不知道后面还有哪几题，
+    # 中途 q 或被打断就以为「没发现问题」（2026-11-01 第 2 题就是这样被漏掉的）。
+    # 按卷面题号排序：和手边的 PDF 同序，对照着看不用来回找。
+    issues.sort(key=lambda i: (i["source"], int(i.get("group_order") or 0), i.get("kind") or ""))
+    _print_table(issues)
+
     c.banner("识别问题补录",
              f"待处理 {len(issues)} 条 · 一题一录，出现 EOF 结束 · s 跳过 · q 退出")
 
     all_issues = _read_jsonl(ISSUES_FILE)   # 写回时要用全量
     out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
     todo = issues[:limit] if limit else issues
+    try:
+        _review_loop(todo, all_issues, out_dir, result, c)
+    except SystemExit:
+        # q 退出：不吞掉剩下的条数，最后一次把没处理的题号列出来
+        c.warn("已退出（未处理的条目会保留，下次运行同一条命令继续问）")
+
+    remaining = len(pending_issues(sources, file))
+    if remaining:
+        _print_remaining(sources, file)
+    c.summary([("本次补录", f"{result['fixed']} 题"),
+               ("确认无问题", f"{result['confirmed_ok']} 条"),
+               ("跳过", f"{result['skipped']} 条"),
+               ("仍待处理", f"{remaining} 条"),
+               ("落盘", str(out_dir))])
+    if result["fixed"]:
+        c.info("补录内容会随本次命令一起入库（结束时还会问一次）")
+    return result
+
+
+def _print_remaining(sources: set[str] | None, file: str | None) -> None:
+    """把还没处理的条目列出来（题号 + 类型），保证中途退出也能看见剩余项。"""
+    left = pending_issues(sources, file)
+    if not left:
+        return
+    c = console()
+    items = [(i["source"], int(i.get("group_order") or 0),
+              _KIND_TEXT.get(i.get("kind"), i.get("kind") or "")) for i in left]
+    items.sort(key=lambda x: (x[0], x[1]))
+    by_src: dict[str, list[str]] = {}
+    for src, no, kind in items:
+        by_src.setdefault(src, []).append(f"第{no}题（{kind}）")
+    c.write("")
+    c.write("  还没处理：")
+    for src, lst in by_src.items():
+        head = "、".join(lst[:8]) + (f" 等 {len(lst)} 条" if len(lst) > 8 else "")
+        c.write(f"  {src}：{head}")
+
+
+def _review_loop(todo: list[dict], all_issues: list[dict], out_dir: Path,
+                 result: dict, c) -> None:
+    """逐条引导的主体（抽出来是为了让 q 退出时还能打印剩余条目）。"""
     for n, issue in enumerate(todo, 1):
         total_now = len(todo)
         # 一次粘贴可能顺带补好别的题号：轮到它时已经 resolved，别再问一遍
@@ -693,7 +844,17 @@ def review_pending(sources: set[str] | None = None,
             continue
         records = _ask(issue, paper_md_dir, n, total_now)
         if not records:
-            result["skipped"] += 1
+            # _ask 里「确认无问题」会直接把清单写成 resolved（不产补题记录），
+            # 这时要把内存里的副本刷新过来，否则下面的整表回写会把它覆盖回 pending
+            all_issues = _read_jsonl(ISSUES_FILE)
+            live = next((it for it in all_issues
+                         if it["source"] == issue["source"]
+                         and it["group_order"] == issue["group_order"]
+                         and it["kind"] == issue["kind"]), None)
+            if live is not None and live.get("verdict") == "no_change":
+                result["confirmed_ok"] += 1
+            else:
+                result["skipped"] += 1
             continue
         out_file = out_dir / f"{issue['source']}.jsonl"
         rows = _read_jsonl(out_file)
@@ -708,21 +869,13 @@ def review_pending(sources: set[str] | None = None,
         for it in all_issues:
             if (it["source"] == issue["source"] and it.get("status") == "pending"
                     and it["group_order"] in fixed_numbers
-                    and it["kind"] in ("missing", "punct_stem", "repair_truncated")):
+                    and it["kind"] in ("missing", "punct_stem", "repair_truncated",
+                                       *_CONTENT_KINDS)):
                 it["status"] = "recorded"
                 it["recorded_at"] = records[0]["created_at"]
                 it["fix_file"] = str(out_file)
         _write_jsonl(ISSUES_FILE, all_issues)
         result["fixed"] += len(records)
-
-    remaining = len(pending_issues(sources, file))
-    c.summary([("本次补录", f"{result['fixed']} 题"),
-               ("跳过", f"{result['skipped']} 条"),
-               ("仍待处理", f"{remaining} 条"),
-               ("落盘", str(out_dir))])
-    if result["fixed"]:
-        c.info("下一步：python3 scripts/apply_fixes_cli.py --dry-run 预览，再加 --apply 入库")
-    return result
 
 
 def main() -> int:
@@ -740,8 +893,19 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        review_pending(file=args.source, list_only=args.list,
-                       fixes_dir=Path(args.fixes_dir))
+        res = review_pending(file=args.source, list_only=args.list,
+                             fixes_dir=Path(args.fixes_dir))
+        # 录完就地入库 + 复扫：用户只记这一条命令，不用再跑 apply_fixes_cli
+        # （2026-11-01 用户裁决「命令只能一条」）。import_cli 第 7 步不走这里。
+        if res.get("fixed") and sys.stdin.isatty():
+            print(f"\n本次补录 {res['fixed']} 题，是否现在写入题库？"
+                  " y=写入 / 直接回车=暂不写 › ", end="", flush=True)
+            if (_read_line() or "").strip().lower() in ("y", "yes"):
+                from apply_fixes import run as apply_run
+                extra = ["--source", args.source] if args.source else []
+                apply_run(["--apply", *extra])
+            else:
+                print("       已保留补题记录；下次运行同一条命令会再问一次", flush=True)
     except KeyboardInterrupt:
         print("\n[中断] 已退出；本题未记录", flush=True)
         return 130

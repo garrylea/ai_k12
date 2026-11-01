@@ -100,7 +100,7 @@ def test_review_skip_with_s(tmp_path, monkeypatch):
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
 
-    assert res == {"pending": 1, "fixed": 0, "skipped": 1}
+    assert res == {"pending": 1, "fixed": 0, "skipped": 1, "confirmed_ok": 0}
     assert '"status": "pending"' in issues_file.read_text(encoding="utf-8")
 
 
@@ -228,7 +228,7 @@ def test_review_processes_multiple_issues_in_order(tmp_path, monkeypatch):
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
 
-    assert res == {"pending": 3, "fixed": 3, "skipped": 0}
+    assert res == {"pending": 3, "fixed": 3, "skipped": 0, "confirmed_ok": 0}
     lines = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8").splitlines()
     assert [ _json.loads(l)["group_order"] for l in lines] == [10, 11, 12]
 
@@ -647,3 +647,112 @@ def test_edit_command_typed_as_answer_is_not_stored(tmp_path, monkeypatch, capsy
 
     assert recs[0]["answer"] == ""
     assert "请按 e 进入编辑" in capsys.readouterr().out
+
+
+# ---------- 内容层问题：先问「有没有问题」，确认没问题就不改库（2026-11-01）----------
+
+def _prep_content(tmp_path, monkeypatch, *, kind="incomplete_content", order=27,
+                  content_sig="sig-1", suspect=None):
+    md_dir = tmp_path / "md" / "物理" / "初中" / "first" / "2024" / "卷A"
+    md_dir.mkdir(parents=True, exist_ok=True)
+    (md_dir / "卷A.md").write_text("", encoding="utf-8")
+    issue = {"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+             "group_order": order, "kind": kind, "reasons": ["subq_starts_at_2"],
+             "excerpt": "……(2) 则 ____ 。", "pdf": None,
+             "md": str(md_dir / "卷A.md"), "status": "pending",
+             "content_sig": content_sig, "suspect_group_order": suspect}
+    path = tmp_path / "issues.jsonl"
+    path.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    return issue, path
+
+
+def test_content_issue_confirm_ok_writes_no_change_and_keeps_db(tmp_path, monkeypatch):
+    """人工确认没问题 → 只落 verdict=no_change，不产补题记录、不碰题库。"""
+    _, path = _prep_content(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("2\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert res["confirmed_ok"] == 1 and res["fixed"] == 0
+    saved = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert saved["status"] == "resolved" and saved["verdict"] == "no_change"
+    assert "未改动" in saved["note"]
+    assert saved["content_sig"] == "sig-1"
+    assert not (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").exists(), "确认无问题不能生成补题记录"
+
+
+def test_content_issue_confirm_problem_records_fix(tmp_path, monkeypatch):
+    """人工确认有问题 → 走补录，由 apply_fixes 原地更新。"""
+    _prep_content(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n题干（含小问 1、2）\nEOF\n1\n\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert res["fixed"] == 1 and res["confirmed_ok"] == 0
+    out = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8")
+    rec = _json.loads(out.splitlines()[0])
+    assert rec["group_order"] == 27 and rec["applied"] is False
+    assert "题干（含小问 1、2）" in rec["content"]
+
+
+def test_content_issue_skip_keeps_pending(tmp_path, monkeypatch):
+    _, path = _prep_content(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("s\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert res["skipped"] == 1 and res["confirmed_ok"] == 0
+    saved = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert saved["status"] == "pending" and "verdict" not in saved
+
+
+def test_merged_issue_only_rewrites_own_number(tmp_path, monkeypatch):
+    """合并类只录本题；suspect（被吞的那题）不在这里重录，它自己另有条目。"""
+    _prep_content(tmp_path, monkeypatch, kind="merged_content", order=24, suspect=25)
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n第24题自己的题干\nEOF\n1\n\n"))
+
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    out = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8")
+    orders = [_json.loads(l)["group_order"] for l in out.splitlines()]
+    assert orders == [24]
+
+
+def test_review_lists_all_pending_and_remaining_after_quit(tmp_path, monkeypatch, capsys):
+    """q 退出不能把剩下的条目吞掉：开头先列全表，退出时再列「还没处理」。"""
+    _prep_n(tmp_path, monkeypatch, n=3)
+    monkeypatch.setattr("sys.stdin", io.StringIO("q\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    out = capsys.readouterr().out
+    assert "共 3 条待处理" in out, "开始前要把全部条目列出来，用户才知道后面还有什么"
+    assert "还没处理" in out and "第10题" in out, "退出后要能看到没处理的题号"
+    assert "仍待处理" in out and res["pending"] == 3
+
+
+def test_ask_refuses_empty_stem_and_asks_again(tmp_path, monkeypatch, capsys):
+    """字母写在内容下面的排版会把题干解析成空串：拒收、提示格式、重新收一次。"""
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    bad = "题干\n塑料笔杆\nA\n![](x.jpg)\n橡皮\nB\n![](y.jpg)\n铅笔芯\nC\n![](z.jpg)\n胶条\nD\nEOF\n1\n"
+    good = "题干\nA. 塑料笔杆\nB. 橡皮\nC. 铅笔芯\nD. 胶条\nEOF\n1\n\n"
+    monkeypatch.setattr("sys.stdin", io.StringIO(bad + good))
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert "题干被解析成了空串" in capsys.readouterr().out
+    assert recs and recs[0]["content"] == "题干", "第二次按正确格式录入要能存下"
+    assert [o["label"] for o in recs[0]["options"]] == ["A", "B", "C", "D"]
+
+
+def test_type_mismatch_record_carries_expected_type(tmp_path, monkeypatch):
+    """题型按「同大题」落库：补录记录要带上 dominant_type，供写库时强制设置。"""
+    issue, _ = _prep_content(tmp_path, monkeypatch, kind="type_mismatch", order=9)
+    issue["dominant_type"] = "choice"
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n题干\nA. 甲\nB. 乙\nC. 丙\nD. 丁\nEOF\n1\n\n"))
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert recs and recs[0]["expected_type"] == "choice"

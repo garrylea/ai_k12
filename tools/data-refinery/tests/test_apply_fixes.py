@@ -8,15 +8,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import apply_fixes_cli as A  # noqa: E402
+import apply_fixes as _impl  # noqa: E402
 
 
 class FakeCursor:
     """按 SQL 片段返回预设结果，记录所有执行过的语句。"""
 
-    def __init__(self, paper=None, existing=None, renumber_rows=None):
+    def __init__(self, paper=None, existing=None, renumber_rows=None,
+                 existing_active=1, hash_row=None, existing_hash=None, orphan_id=None):
         self.sql: list[tuple[str, tuple | None]] = []
         self.paper = paper                # (paper_id, subject_id)
         self.existing = existing          # question_id 或 None
+        self.existing_active = existing_active
+        self.hash_row = hash_row          # 同 content_hash 的行（重导后遗留的孤儿题）
+        self.existing_hash = existing_hash
+        self.orphan_id = orphan_id        # 同卷同题号、但没挂关联的旧行
         self.renumber_rows = renumber_rows or []
         self.rowcount = 1
         self.lastrowid = 777
@@ -26,8 +32,15 @@ class FakeCursor:
         self.sql.append((sql, args))
         if "FROM exam_papers WHERE source_key" in sql:
             self._rows = [self.paper] if self.paper else []
+        elif "SELECT q.id FROM questions q WHERE q.source" in sql:
+            self._rows = [(self.orphan_id,)] if self.orphan_id else []
         elif "SELECT question_id FROM paper_questions" in sql:
             self._rows = [(self.existing,)] if self.existing else []
+        elif "SELECT q.id, q.is_active, q.content_hash FROM paper_questions" in sql:
+            self._rows = ([(self.existing, self.existing_active, self.existing_hash)]
+                          if self.existing else [])
+        elif "SELECT id FROM questions WHERE content_hash" in sql:
+            self._rows = [(self.hash_row,)] if self.hash_row else []
         elif "SELECT question_id, group_order FROM paper_questions" in sql:
             self._rows = list(self.renumber_rows)
         else:
@@ -71,6 +84,23 @@ def test_inserts_new_question_when_group_order_absent():
     assert inserts[0][4] == "题干"
     assert '"A"' in inserts[0][5]
     # 新题必须挂到卷上
+    assert any("INSERT IGNORE INTO paper_questions" in sql for sql, _ in cur.sql)
+
+
+def test_reuses_orphan_row_with_same_content_hash():
+    """重导只摘了关联、没删题：同 content_hash 的行还在，必须复用而不是 INSERT。
+
+    （2026-11-01 人大附实测：题 7/16/18/23 的补题 hash 与遗留的 6338–6341 完全相同，
+    直接 INSERT 会撞 UNIQUE(content_hash)，整批 --apply 失败。）
+    """
+    cur = FakeCursor(paper=(53, 4), existing=None, renumber_rows=[(6339, 16)],
+                     hash_row=6339)
+    msg = A.apply_record(cur, REC, apply=True)
+
+    assert msg.startswith("复用") and "6339" in msg
+    assert not any(sql.startswith("INSERT INTO questions") for sql, _ in cur.sql)
+    assert any("UPDATE questions SET content" in sql and "is_active=1" in sql
+               for sql, _ in cur.sql)
     assert any("INSERT IGNORE INTO paper_questions" in sql for sql, _ in cur.sql)
 
 
@@ -282,3 +312,90 @@ def test_write_back_keeps_raw_md_refs(tmp_path):
     assert "images/q4.jpg" in row["content"]
     sql, args = next((s, a) for s, a in cur.sql if s.startswith("INSERT INTO questions"))
     assert "questions/physics/" in args[4] and "images/q4.jpg" not in args[4]
+
+
+# ---------- 已入库的补题被重导冲掉：自动重放判据（2026-11-01）----------
+
+def _rec16():
+    return {"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+            "group_order": "16"}
+
+
+def test_replay_when_question_gone():
+    cur = FakeCursor(paper=(53, 4), existing=None)
+    assert _impl._replay_reason(cur, _rec16()) == "库中已无此题"
+
+
+def test_replay_when_question_deactivated():
+    """重导按 needs_review 重新停用，人工修复被覆盖 → 也要重放。"""
+    cur = FakeCursor(paper=(53, 4), existing=6033, existing_active=0)
+    assert "is_active=0" in (_impl._replay_reason(cur, _rec16()) or "")
+
+
+def test_no_replay_when_question_healthy():
+    cur = FakeCursor(paper=(53, 4), existing=6339, existing_active=1)
+    assert _impl._replay_reason(cur, _rec16()) is None
+
+
+def test_no_replay_when_paper_absent():
+    """卷都没入库时不做判断，交给 apply_record 报「跳过」。"""
+    cur = FakeCursor(paper=None)
+    assert _impl._replay_reason(cur, _rec16()) is None
+
+
+def test_update_sets_type_when_options_present():
+    """补录带选项时必须把题型改成 choice（人大附题9/10 就是丢了选项后被存成简答题）。"""
+    cur = FakeCursor(paper=(54, 4), existing=6058, renumber_rows=[(6058, 28)])
+    A.apply_record(cur, REC, apply=True)
+
+    update = next((sql, args) for sql, args in cur.sql
+                  if sql.startswith("UPDATE questions SET"))
+    assert "COALESCE(%s, IF(%s,'choice',type))" in update[0]
+    assert update[1][2] is None, "没有指定大题题型时不强制"
+    assert update[1][3] == 1, "有选项 → 置 choice"
+
+
+def test_update_keeps_type_when_no_options():
+    """只录题干（无选项）时不能把 fill_blank 之类的题型降级成简答题。"""
+    rec = {**REC, "options": None}
+    cur = FakeCursor(paper=(54, 4), existing=6058, renumber_rows=[(6058, 28)])
+    A.apply_record(cur, rec, apply=True)
+
+    update = next((sql, args) for sql, args in cur.sql
+                  if sql.startswith("UPDATE questions SET"))
+    assert update[1][3] == 0, "无选项 → 保持原题型"
+
+
+def test_update_forces_group_type_for_type_mismatch():
+    """type_mismatch 的记录带 expected_type：按大题题型写 type，不看选项拆没拆出来。"""
+    rec = {**REC, "options": None, "expected_type": "choice"}
+    cur = FakeCursor(paper=(54, 4), existing=6058, renumber_rows=[(6058, 28)])
+    A.apply_record(cur, rec, apply=True)
+
+    update = next((sql, args) for sql, args in cur.sql
+                  if sql.startswith("UPDATE questions SET"))
+    assert update[1][2] == "choice"
+
+
+def test_replay_when_db_content_overwritten_by_reimport():
+    """补题记录里有 applied_hash、库里内容哈希对不上 → 重导覆盖过，自动重放。"""
+    rec = {**_rec16(), "applied_hash": "aaa"}
+    cur = FakeCursor(paper=(53, 4), existing=6499, existing_active=1, existing_hash="bbb")
+    assert _impl._replay_reason(cur, rec) == "库里这题的内容已被重新导入覆盖"
+
+
+def test_no_replay_when_hash_matches():
+    rec = {**_rec16(), "applied_hash": "aaa"}
+    cur = FakeCursor(paper=(53, 4), existing=6499, existing_active=1, existing_hash="aaa")
+    assert _impl._replay_reason(cur, rec) is None
+
+
+def test_reuses_orphan_row_for_same_paper_and_number():
+    """题号在库、关联被重导摘掉：必须更新那一行并重新挂卷，不能再插入一道同号题。"""
+    cur = FakeCursor(paper=(53, 4), existing=None, renumber_rows=[(6340, 18)], orphan_id=6340)
+    msg = A.apply_record(cur, REC, apply=True)
+
+    assert "复用同号旧行" in msg and "6340" in msg
+    assert not any(sql.startswith("INSERT INTO questions") for sql, _ in cur.sql)
+    assert any("UPDATE questions SET content" in sql for sql, _ in cur.sql)
+    assert any("INSERT IGNORE INTO paper_questions" in sql for sql, _ in cur.sql)
