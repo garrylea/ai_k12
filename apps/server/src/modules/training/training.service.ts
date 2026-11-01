@@ -641,7 +641,7 @@ export class TrainingService {
           refId: passage.id,
           sentenceIndex: input.sentenceIndex,
           answerText: JSON.stringify({ terms: input.terms, translation: input.translation }),
-          isCorrect: interpretationVerdict === 'correct',
+          isCorrect: isCorrectOf(interpretationVerdict),
           method: 'exact',
           judgedAt: new Date(),
         });
