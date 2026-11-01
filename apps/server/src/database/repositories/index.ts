@@ -83,3 +83,7 @@ export type {
   OrderPaymentStatus,
   OrderPlanSnapshot,
 } from './orders.repo.js';
+export { SpecialPracticeSessionsRepository } from './special-practice-sessions.repo.js';
+export type { UpsertSessionInput, SessionListRow, SpecialSessionModule } from './special-practice-sessions.repo.js';
+export { SpecialAnswerRecordsRepository } from './special-answer-records.repo.js';
+export type { UpsertAnswerInput, UpsertSpecialAnswerInput, AnswerRow } from './special-answer-records.repo.js';
