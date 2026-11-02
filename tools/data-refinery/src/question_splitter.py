@@ -998,4 +998,10 @@ def split_page(text: str, md_path: Path,
     if current is not None:
         questions.append(current)
 
+    # 题前共享材料（物理/化学科技阅读题：`请阅读《…》并回答第 N 题` + 材料 + `N. 请根据上述材料`）。
+    # 这是策略的可选钩子：generic/语文/英语没有这个方法，行为不变。
+    attach_pre = getattr(strategy, "attach_pre_material", None)
+    if callable(attach_pre):
+        attach_pre(questions, lines)
+
     return questions

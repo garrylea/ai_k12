@@ -94,3 +94,116 @@ def needs_llm(content: str) -> bool:
     if not content or len(content) < MIN_CONTENT_LEN:
         return False
     return bool(_SUBQ1.search(content))
+
+
+# ── 题前共享材料（第二种形态）────────────────────────────────────────────
+#
+# 物化除了「题内材料」，还有**题号前**的科技阅读题：
+#
+#     ## 四、科技阅读题（共3分，每空1分。）
+#     请阅读《航天动力电池》并回答第 32 题。
+#     ## 航天动力电池
+#     <材料 4 段 + 图>
+#     32. 请根据上述材料，回答下列问题:
+#     (1) …… (2) …… (3) ……
+#
+# 旧管线（物理/化学 material_policy = 不挂材料）把这段材料**整段丢弃**，
+# 结果是题目说「请根据上述材料」而材料不存在（2026-11-02 用户报告第 32 题）。
+# 复用语文那套 MaterialPolicy 也能做，但它动的是切题状态机、会影响语文/英语；
+# 这里改成切完题后的**独立后处理**：按引导语锚点把材料挂到引用它的题目上。
+
+# 材料引导语：出现即代表「下面是这段材料」，位置在题号之前。
+_PRE_ANCHOR = re.compile(
+    r"请阅读《[^》]{1,40}》并回答|请阅读下面的材料|请阅读下列材料|"
+    r"阅读下面的材料|阅读下列材料|阅读材料，回答|请阅读材料"
+)
+
+# 题目的「指向前文」标志：只有这种题才需要把前文材料挂上来。
+_PRE_HINT = re.compile(
+    r"^(?:请)?(?:根据|结合|阅读)(?:上述|上面|上文|以上)(?:的)?(?:材料|短文|文字|内容)"
+)
+
+# 材料块的最低长度（防把「请阅读《x》并回答第 32 题。」一句话当整段材料）。
+MIN_PRE_MATERIAL_LEN = 30
+# 锚点向上回溯的上限行数（一份卷子的一个材料块不会更长）。
+PRE_ANCHOR_WINDOW = 150
+
+
+def _stem_line_index(lines: list[str], n: int, start: int) -> int | None:
+    """从 start 起找题号 N 的行（`32.` / `32．` / `32、`，容忍加粗）。"""
+    pat = re.compile(rf"^\s*(?:\*\*)?{n}\s*[.．、]")
+    for i in range(start, len(lines)):
+        if pat.match(lines[i]):
+            return i
+    return None
+
+
+_ANY_STEM_RE = re.compile(r"^\s*(?:\*\*)?\d{1,3}\s*[.．、]")
+
+
+def needs_pre_material(content: str) -> bool:
+    """题目是否在引用前文材料（「根据上述材料」「请阅读上述短文」）。"""
+    return bool(_PRE_HINT.match((content or "").lstrip()))
+
+
+def pre_material_for(lines: list[str], stem_idx: int) -> str | None:
+    """取 `stem_idx` 之前最近一个材料引导语起的材料块（不含题号行）。
+
+    材料块止于锚点后的**第一个题号行**：共享材料（「根据上述材料回答第 32、33 题」）
+    时，两道题拿到的是同一份，不会把上一题正文算进材料。
+    回填脚本按行号定位时直接用它（切题阶段用 `attach_pre_material`）。
+    """
+    for j in range(stem_idx - 1, max(-1, stem_idx - PRE_ANCHOR_WINDOW), -1):
+        if not _PRE_ANCHOR.search(lines[j]):
+            continue
+        end = next((k for k in range(j + 1, len(lines)) if _ANY_STEM_RE.match(lines[k])), stem_idx)
+        block = "\n".join(lines[j:end]).strip()
+        return block if len(block) >= MIN_PRE_MATERIAL_LEN else None
+    return None
+
+
+def attach_pre_material(questions, lines: list[str]) -> int:
+    """把「题号前的共享材料」挂到引用它的题目上（物理/化学科技阅读题）。
+
+    Args:
+        questions: 已切好的题（需有 `group_order` / `content` / `material_text`）
+        lines: 试卷 MD 的原始行
+
+    Returns:
+        挂上材料的题数
+
+    规则：
+    1. 题目 `content` 以「根据/阅读上述材料」开头（说明它在引用前文）
+    2. 题号行之前、最近 150 行内能找到材料引导语（`请阅读《…》并回答第 N 题` 等）
+    3. 材料 = 引导语行 → 该段第一个题号行之前的所有行（含文章标题、正文、图）
+
+    同一材料块被多题引用时（「根据上述材料回答 1-3 题」），每道题都挂同一份。
+    """
+    if not lines or not questions:
+        return 0
+
+    # 题号 → 行号（按题目顺序向后推进，避免命中答案区的同名题号）
+    stems: list[tuple[int, object]] = []
+    cursor = 0
+    for q in questions:
+        idx = _stem_line_index(lines, q.group_order, cursor)
+        if idx is None:
+            continue
+        stems.append((idx, q))
+        cursor = idx + 1
+    if not stems:
+        return 0
+
+    # 每个锚点的材料 = 锚点行 → 其后的第一个题号行（不含）
+    hits = 0
+    for idx, q in stems:
+        if q.material_text and q.material_text.strip():
+            continue
+        if not _PRE_HINT.match((q.content or "").lstrip()):
+            continue
+        block = pre_material_for(lines, idx)
+        if not block:
+            continue
+        q.material_text = block
+        hits += 1
+    return hits

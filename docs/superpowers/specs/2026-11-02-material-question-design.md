@@ -39,7 +39,15 @@
 - `id=4309`：「29.（6分）阅读下面科普短文。」→ 表 1 → 小问
 - `id=4317`：「37. (6分)絮凝剂常用于污水处理。…【进行实验】取 200 mL…」→ 结果表 → 小问
 
-**全量核查**：在物理/化学 12 份试卷 MD 里 grep「(回答|完成) N–M 题」**零命中**，确认**没有跨题共享材料**。
+**⚠️ 本条已被 2026-11-02 下午的实测推翻（保留原判断以便对照）**：最初 grep「(回答|完成) N–M 题」零命中，据此认为物化没有跨题共享材料。**错的** —— 物化还有一种写法是「请阅读《航天动力电池》并回答第 32 题」，只回答**单题**、不写区间，因此没被那个正则命中。实际存在，见 §11。
+
+实际有**三种**形态：
+
+| 形态 | 原文 | 处理 |
+|---|---|---|
+| A 跨题共享（语文/英语） | 「阅读下面文章，完成 5–8 题」→ 材料 → 5./6./7./8. 各成一题 | `material_text` 每题挂一份（已实现） |
+| B1 题内材料（物化） | 「31. 阅读以下文字…」→ 材料 → `(1)(2)(3)`（小问合并到本主题号） | `split_material()` 从 content 切出（已实现） |
+| B2 题前共享（物化科技阅读题） | 「请阅读《航天动力电池》并回答第 32 题。」→ 材料 → 「32. 请根据上述材料…」 | `attach_pre_material()` 按引导语锚点归属（2026-11-02 补实现） |
 
 ---
 
@@ -172,8 +180,9 @@ ALTER TABLE questions
 ### 6.2 抽取层（B2，`tools/data-refinery`）
 
 - `subject_strategies/types.py`：`QuestionStrategy` 协议加 `split_material()`，默认 `(None, content)`。
-- `physics.py` / `chemistry.py`：实现规则切分（见 §5 B2）。
+- `physics.py` / `chemistry.py`：实现规则切分（见 §5 B2）+ `attach_pre_material()`（形态 B2，见 §11）。
 - `question_extract.py`：切完题后调用 `strategy.split_material(q.content)`，写入 `material_text` / `content`。
+- `question_splitter.split_page()`：末尾调用策略的可选钩子 `attach_pre_material(questions, lines)`（generic/语文/英语没有此方法，行为不变）。
 - 产出候选清单 + 人工确认（脚本：`--material-candidates` 输出待审清单）。
 - 测试：切分前后拼接等原文、误切标志（小问里出现"阅读"不触发）、无材料题零变化。
 
@@ -251,3 +260,62 @@ explanation.explain({ ..., question: { content, answer, options, material } })
 3. **B2**：`split_material()` 钩子 + 物化规则 + 候选清单——2–3 天
 4. **B2**：人工确认 + 落库（只写两列、拼接自校验）
 5. 文档同步（API §4.29 / openapi / constraints）
+
+---
+
+## 11. 实施补充（2026-11-02 追加：形态 B2 + 图片物化）
+
+### 11.1 形态 B2 是什么
+
+用户报告练习记录第 32 题「有材料但看不到」。实测原卷（2024 西城·北师大实验 物理期中）：
+
+```
+## 四、科技阅读题（共3分，每空1分。）
+
+请阅读《航天动力电池》并回答第 32 题。
+
+## 航天动力电池
+
+近期，我国载人航天飞船神舟十八号迎来重大升级……（4 段 + 图23）
+
+32. 请根据上述材料，回答下列问题:
+
+(1) …… (2) …… (3) ……
+```
+
+材料在**题号之前**、被题目用「请根据上述材料」引用 —— 与语文形态 A 同类，但物理的
+`material_policy` 一直是 `attach=False`，切题时这段文本**被整段丢弃**：题目说
+「请根据上述材料」而材料根本不存在（不是渲染问题，是数据缺失）。
+
+同类问题还有 1 道：`id=5994`（2024 西城·北京四中《超导现象》并回答 33 题）。
+
+### 11.2 实现
+
+- `material_split.attach_pre_material(questions, lines)`：
+  1. 只处理 `content` 以「（请）根据/结合/阅读 上述（的）材料|短文|文字|内容」开头的题
+  2. 向上找最近的引导语锚点（`请阅读《…》并回答…` / `阅读下面的材料` / `阅读材料，回答`）
+  3. 材料 = 锚点行 → 其后**第一个题号行**之前（含文章标题、正文、图）
+  4. 同一材料被多题引用时每道题挂同一份
+- 调用点：`question_splitter.split_page()` 末尾，用 `getattr(strategy, 'attach_pre_material', None)`
+  —— generic / 语文 / 英语没有这个方法，**行为零变化**。
+- 回填：`tools/db/material_backfill.py` 第二阶段（按题号 + 题干首行定位原卷行号，读 MD 回捞）。
+
+### 11.3 材料里的图片会 404（顺带修掉）
+
+材料是从原卷 MD 原文切的，图片仍是 `![图](images/xxx.jpg)` 这种 MD 相对路径 →
+前端拼成 `/assets/images/…` → 404 且破图被 `onError` 隐藏（与 2026-10-31 同源）。
+publish 阶段本来会物化（`rewrite_item` 覆盖 `material_text`），但本次是**publish 之后**
+改库，所以回填脚本补了第三阶段：
+
+- 拷贝到 `output/assets/material/<subject>/<文件名>`（文件名是内容哈希，天然不重名）
+- `material_text` 里的路径改写为 `material/<subject>/<文件名>`
+- 实测 3 道题（5994 / 6023 / 6087），图片 `naturalWidth>0` 正常显示
+
+> `output/` 是 gitignore 的派生产物；换机器/重跑管线时，图片由 publish 或本脚本重新物化。
+
+### 11.4 验收（实测通过）
+
+- DB：`material_method='rule'`，6087 材料 624 字、5994 800 字
+- 接口：`GET /api/student/practice-history/exam/44` 带材料题 7 道（24/25/27/30/32/33/34）
+- 浏览器（headless Chromium 实测）：第 32 题材料区 532 字 + 标题「航天动力电池」+ 图 901px 正常
+- 回归：refinery `1563 passed`；回填脚本二次运行 0 可改项（幂等）

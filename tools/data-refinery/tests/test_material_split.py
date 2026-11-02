@@ -124,3 +124,83 @@ def test_concat_invariant_on_all_samples():
         material, rest = split_material_rule(s)
         if material is not None:
             assert material + rest == s
+
+
+# ── 题前共享材料（科技阅读题，2026-11-02 用户报告第 32 题）──────────────────
+
+_READING_PAPER = """30. 小京用电阻丝做了如图 22 所示的实验，请分析并判断阻值大小关系。
+
+## 四、科技阅读题（共3分，每空1分。）
+
+请阅读《航天动力电池》并回答第 31 题。
+
+## 航天动力电池
+
+近期，我国载人航天飞船神舟十八号迎来重大升级，其动力电池由原来的镍镉蓄电池更新为锂离子电池，极大地提升了飞船的载荷运输能力，为空间站运营提供更加稳定高效的在轨支持。
+
+锂离子电池主要由含锂化合物的正极材料、电解质、聚合物隔膜、负极材料和外壳组成。充电时，锂离子在外加电压的作用下从正极材料脱离，经过电解质嵌入负极材料。
+
+31. 请根据上述材料，回答下列问题:
+
+(1) 这样做的的好处是____。
+(2) 在锂离子电池充电过程中, 实现了电能向____的转化。
+"""
+
+
+def test_split_page_attaches_pre_material_to_question():
+    """题号前的科技阅读材料要挂到引用它的题目上（旧管线整段丢弃）。"""
+    from pathlib import Path
+    from question_splitter import split_page
+    from subject_strategies import get_strategy
+
+    qs = split_page(_READING_PAPER, Path("fake.md"), get_strategy("physics"))
+    q31 = next(q for q in qs if q.group_order == 31)
+    assert q31.material_text, "题前材料没被挂上"
+    assert "神舟十八号" in q31.material_text
+    assert "航天动力电池" in q31.material_text
+    # 题干保留「请根据上述材料」，材料不进 content（避免渲染重复）
+    assert "请根据上述材料" in q31.content
+    assert "神舟十八号" not in q31.content
+
+
+def test_attach_pre_material_ignores_questions_without_hint():
+    """没有「根据上述材料」指向前文的题目不挂材料。"""
+    from subject_strategies.material_split import attach_pre_material
+
+    class Q:
+        def __init__(self, n, content):
+            self.group_order = n
+            self.content = content
+            self.material_text = None
+
+    lines = [
+        "请阅读《超导现象》并回答第 1 题。",
+        "",
+        "## 超导现象",
+        "",
+        "低温下电阻变为零，这种现象叫超导现象，具有这种特性的物质叫超导体，可用于输电。",
+        "",
+        "1. 请根据上述材料，回答下列问题：",
+        "",
+        "(1) 实现超导现象的方式有低温。",
+        "",
+        "2. 求电阻 R 的阻值。",
+    ]
+    qs = [Q(1, "请根据上述材料，回答下列问题：\n(1) ……"), Q(2, "求电阻 R 的阻值。")]
+    hits = attach_pre_material(qs, lines)
+    assert hits == 1
+    assert qs[0].material_text and "超导现象" in qs[0].material_text
+    assert qs[1].material_text is None
+
+
+def test_attach_pre_material_skips_when_already_has_material():
+    from subject_strategies.material_split import attach_pre_material
+
+    class Q:
+        def __init__(self):
+            self.group_order = 1
+            self.content = "请根据上述材料，回答下列问题："
+            self.material_text = "已有材料"
+
+    lines = ["请阅读《X》并回答第 1 题。", "", "1. 请根据上述材料，回答下列问题："]
+    assert attach_pre_material([Q()], lines) == 0
