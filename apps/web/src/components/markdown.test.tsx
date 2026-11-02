@@ -237,3 +237,36 @@ describe('作答内容的大图 Markdown 配置', () => {
     expect(html).not.toContain(ANSWER_IMG_CLASS);
   });
 });
+
+/**
+ * LaTeX 方括号定界符归一（2026-11-01 用户报告）。
+ *
+ * 背景：LLM 生成的题目解析写的是标准 LaTeX display math `\[ \text{做功改变内能} \]`，
+ * 而 remark-math 只认 `$` 系定界符 → 页面上原样显示字面 `[ \text{做功改变内能} ]`。
+ * 考试结果页与练习记录详情页共用 preprocessMarkdown，故在共享层归一。
+ */
+describe('preprocessMarkdown：\\[…\\] / \\(…\\) 归一为 $ 系定界符', () => {
+  it('\\[…\\] 渲染成 KaTeX 块级公式，不再显示字面方括号', () => {
+    const html = render('因此，锯条温度升高主要是因为：\n\n\\[\n\\text{做功改变内能}\n\\]\n\n而不是吸收热量。');
+    expect(html).not.toContain('\\text{做功改变内能}');
+    expect(html).not.toContain('[ \\text');
+    expect(html).toContain('katex');
+  });
+
+  it('\\(…\\) 渲染成行内公式', () => {
+    const html = render('当 \\(x=1\\) 时成立');
+    expect(html).not.toContain('\\(x=1\\)');
+    expect(html).toContain('katex');
+  });
+
+  it('\\[\\boxed{B}\\] 这类带花括号的写法也能渲染', () => {
+    const html = render('正确答案是：\n\n\\[\n\\boxed{B}\n\\]');
+    expect(html).not.toContain('\\boxed{B}');
+    expect(html).toContain('katex');
+  });
+
+  it('围栏代码块内的 \\[…\\] 原样保留（不误伤代码示例）', () => {
+    const html = render('```\n\\[ x \\]\n```');
+    expect(html).toContain('\\[');
+  });
+});

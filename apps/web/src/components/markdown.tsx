@@ -102,6 +102,23 @@ const normalizeMathDelimiters = (s: string): string =>
     .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(/\$\$/g, () => '\n$$\n')))
     .join('');
 
+/**
+ * 把 LaTeX 的 `\[ … \]` / `\( … \)` 归一为 remark-math 认得的 `$$ … $$` / `$ … $`。
+ *
+ * 背景（2026-11-01 用户报告）：LLM 生成的题目解析常写成标准 LaTeX 的 display math
+ * `\[ \text{做功改变内能} \]`，而 **remark-math 只识别 `$` 系定界符**，`\[…\]` 会原样
+ * 当普通文本输出（页面上就是字面 `[ \text{做功改变内能} ]`）。同一份解析在考试结果页与
+ * 练习记录详情页都要渲染，所以在共享的 preprocessMarkdown 里统一归一，一处修、全局生效。
+ *
+ * 注意顺序：必须先归一 `\[…\]`（产出 `$$`）再由 normalizeMathDelimiters 规整为独占一行，
+ * 否则 `$$` 后紧跟内容会被当行内 math 解析并抛 KaTeX parse error。
+ * 代码块内不处理（由 mapOutsideFences 保证）。
+ */
+const normalizeLatexBrackets = (s: string): string =>
+  s
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_m, body: string) => `\n$$\n${body}\n$$\n`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$${body}$`);
+
 /** 对围栏代码块之外的文本应用 fn（代码块原样保留）。 */
 const mapOutsideFences = (s: string, fn: (t: string) => string): string =>
   s
@@ -112,7 +129,9 @@ const mapOutsideFences = (s: string, fn: (t: string) => string): string =>
 export const preprocessMarkdown = (s: string | undefined | null): string => {
   if (!s) return '';
   const restored = repairHtml(s.replace(/\\n(?![a-zA-Z])/g, '\n'));
-  return mapOutsideFences(unwrapSvgFences(restored), normalizeMathDelimiters);
+  return mapOutsideFences(unwrapSvgFences(restored), (t) =>
+    normalizeMathDelimiters(normalizeLatexBrackets(t)),
+  );
 };
 
 // ── CommonMark HTML 块吞并修复（remarkSplitHtmlBlocks）──
