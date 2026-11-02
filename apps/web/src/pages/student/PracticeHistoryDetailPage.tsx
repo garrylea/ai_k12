@@ -6,6 +6,7 @@ import {
   markdownRemarkPlugins,
   markdownRehypePlugins,
   markdownComponents,
+  makeAnswerComponents,
   preprocessMarkdown,
 } from '@/components/markdown';
 import {
@@ -25,19 +26,30 @@ import { TRAINING_SUBJECTS } from '@/subjectConfig';
 
 const SUBJECT_NAME = new Map<number, string>(TRAINING_SUBJECTS.map((s) => [s.id, s.name]));
 
+/** 学生作答专用 components（大图）：手绘/拍照的电路图、装置图按题面小图会被压成细线。 */
+const answerComponents = makeAnswerComponents();
+
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function MarkdownBlock({ text, className }: { text: string; className?: string }) {
+function MarkdownBlock({
+  text,
+  className,
+  components = markdownComponents,
+}: {
+  text: string;
+  className?: string;
+  components?: typeof markdownComponents;
+}) {
   return (
     <div className={className}>
       <ReactMarkdown
         remarkPlugins={markdownRemarkPlugins}
         rehypePlugins={markdownRehypePlugins}
-        components={markdownComponents}
+        components={components}
       >
         {preprocessMarkdown(text)}
       </ReactMarkdown>
@@ -134,7 +146,11 @@ function QuestionCard({ q }: { q: PracticeHistoryQuestion }) {
             ))}
           </div>
         ) : q.answerText ? (
-          <MarkdownBlock text={q.answerText} className="mt-1 text-[var(--text-primary)]" />
+          <MarkdownBlock
+            text={q.answerText}
+            components={answerComponents}
+            className="mt-1 text-[var(--text-primary)]"
+          />
         ) : (
           <span className="text-[var(--text-tertiary)]">（未作答）</span>
         )}

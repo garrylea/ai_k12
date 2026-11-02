@@ -182,6 +182,13 @@ export function AnswerResultList({
               return (
                 <div key={q.n} className="bg-[var(--bg-card)] rounded-xl border border-[var(--bg-subtle)] overflow-hidden">
                   <div className="p-3.5 flex items-start gap-3">
+                    {/* 题号（2026-11-01 用户要求：状态图标左侧小字） */}
+                    <span
+                      data-testid={`result-qno-${q.n}`}
+                      className="shrink-0 mt-0.5 min-w-[1.25rem] text-right text-xs text-[var(--text-tertiary)] tabular-nums"
+                    >
+                      {q.n}
+                    </span>
                     {/* Status icon */}
                     <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${failed ? 'bg-[var(--bg-subtle)]' : subjective || noAnswer ? 'bg-[var(--brand-100)]' : correct ? 'bg-[#E8F5EE]' : 'bg-[#FCE8E6]'}`}>
                       {failed ? (

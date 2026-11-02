@@ -35,3 +35,20 @@ describe('AnswerResultList 学生答案图片', () => {
     expect(img.className).not.toContain('max-h-[40vh]');
   });
 });
+
+describe('AnswerResultList 题号', () => {
+  it('每道题在状态图标左侧显示题号（2026-11-01 用户要求）', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题一' }, { n: '2', text: '题二' }]}
+        answers={{
+          '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' },
+          '2': { isCorrect: false, method: 'exact', studentAnswer: 'B' },
+        }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('result-qno-1')).toHaveTextContent('1');
+    expect(screen.getByTestId('result-qno-2')).toHaveTextContent('2');
+  });
+});
