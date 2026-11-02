@@ -39,7 +39,8 @@ const stayItems = [
 export default function StudentStayLayout() {
   const location = useLocation();
   // 来源页 + 来源页自己的 location.state（课程详情缺 state 会被自己的「缺少课程信息」挡住）
-  const back = resolveStayReturn(location.state);
+  // 练习记录按层级固定返回（列表→个人中心、详情→列表），故把当前 pathname 也传进去
+  const back = resolveStayReturn(location.state, location.pathname);
   // 两页互跳时把来源原样带过去，否则切一次 tab 来源就丢了
   const carriedReturnState = buildStayReturnState(back.to, back.state);
 

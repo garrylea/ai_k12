@@ -99,3 +99,55 @@ describe('StudentStayLayout 顶栏「返回」', () => {
     expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
   });
 });
+
+/**
+ * 练习记录（2026-11-02 用户实测）：原本顶栏「返回」沿用来源页协议，
+ * 「星图 → 个人中心 → 练习记录」按返回直接跳回星图（跳过个人中心）。
+ * 练习记录是个人中心的下级页，改为**按层级固定返回**：列表→个人中心、详情→列表。
+ */
+function renderPracticeHistory(initialPath: string, state?: unknown) {
+  const router = createMemoryRouter(
+    [
+      { path: '/student/star-map', element: <div>知识星图</div> },
+      {
+        path: '/student/profile',
+        element: <StudentStayLayout />,
+        children: [{ index: true, element: <div>个人中心内容</div> }],
+      },
+      {
+        path: '/student/practice-history',
+        element: <StudentStayLayout />,
+        children: [
+          { index: true, element: <div>练习记录列表</div> },
+          { path: ':source/:sessionId', element: <div>练习详情内容</div> },
+        ],
+      },
+    ],
+    { initialEntries: [{ pathname: initialPath, state }] },
+  );
+  render(<RouterProvider router={router} />);
+  return router;
+}
+
+describe('练习记录顶栏「返回」按层级走', () => {
+  it('列表页：即使来源是星图，返回也先回个人中心（不跳级）', async () => {
+    const user = userEvent.setup();
+    const router = renderPracticeHistory(
+      '/student/practice-history',
+      buildStayReturnState('/student/star-map', undefined),
+    );
+
+    await user.click(screen.getByRole('button', { name: '返回' }));
+
+    expect(router.state.location.pathname).toBe('/student/profile');
+  });
+
+  it('详情页：返回回到练习记录列表', async () => {
+    const user = userEvent.setup();
+    const router = renderPracticeHistory('/student/practice-history/exam/44');
+
+    await user.click(screen.getByRole('button', { name: '返回' }));
+
+    expect(router.state.location.pathname).toBe('/student/practice-history');
+  });
+});

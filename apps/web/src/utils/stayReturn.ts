@@ -19,6 +19,10 @@
 /** 浅停留页的两条路径（与 `routes/routeTable.tsx` 的两条顶层路由保持同步）。 */
 const STAY_PATHS = ['/student/profile', '/student/rewards'];
 
+/** 练习记录：个人中心的下级页（列表），详情再下一级。 */
+export const PRACTICE_HISTORY_PATH = '/student/practice-history';
+const PRACTICE_HISTORY_HOME = '/student/profile';
+
 /** 没有来源时的兜底落点：回星图。 */
 export const STAY_FALLBACK_PATH = '/student/star-map';
 
@@ -44,8 +48,21 @@ function isStayPath(pathname: string): boolean {
 /**
  * 浅停留页用：算出顶栏「返回」的落点。
  * 来源缺失 / 不是站内路径 / 来源本身是浅停留页 → 兜底星图。
+ *
+ * `pathname` 传当前页路径：**练习记录是个人中心的下级页，按层级固定返回**，
+ * 不看来源 —— 否则「星图 → 个人中心 → 练习记录」按返回会跳过个人中心直接回星图
+ * （2026-11-02 用户实测：练习记录回退到了星图）。
+ *   列表 → 个人中心；详情（/:source/:sessionId）→ 列表。
  */
-export function resolveStayReturn(state: unknown): { to: string; state?: unknown } {
+export function resolveStayReturn(
+  state: unknown,
+  pathname?: string,
+): { to: string; state?: unknown } {
+  if (pathname) {
+    const path = pathname.split(/[?#]/)[0];
+    if (path === PRACTICE_HISTORY_PATH) return { to: PRACTICE_HISTORY_HOME };
+    if (path.startsWith(`${PRACTICE_HISTORY_PATH}/`)) return { to: PRACTICE_HISTORY_PATH };
+  }
   const payload = state as StayReturnState | null | undefined;
   const from = typeof payload?.from === 'string' ? payload.from : '';
   if (!from.startsWith('/') || isStayPath(from)) return { to: STAY_FALLBACK_PATH };
