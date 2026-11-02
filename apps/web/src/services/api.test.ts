@@ -388,6 +388,31 @@ describe('2001 全局拦截（订阅失效硬门禁）', () => {
     await expect(getAiUsage()).rejects.toMatchObject({ code: 1005 });
     expect(assign).not.toHaveBeenCalled();
   });
+
+  /**
+   * 回归钉子（2026-11-02 用户报「锁定页反复横跳」）：已经在锁定页时**不要**再 assign。
+   *
+   * 锁定页自身会发请求（PC App 的 `device-commands` 轮询 / 无本地会话时的
+   * `learning-sessions`）。若这些请求回 2001 后仍 `assign('/student/locked')`，
+   * 浏览器会把**当前页整页重载** → 重载后又发同一个请求 → 再 2001 → 再重载，
+   * 形成无限刷新（实测 10 秒 389 次主 frame 导航），页面上「本账号未订阅」与
+   * 「订阅已过期」两个标题随之闪个不停。后端豁免清单是主修，这里是第二道闸。
+   */
+  it('已在 /student/locked 时 2001 不再 assign（防整页重载死循环），Promise 仍挂起', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { pathname: '/student/locked', assign });
+    stubFetch(403, { code: 2001, message: '订阅已失效', data: null });
+
+    let outcome: 'resolved' | 'rejected' | 'pending' = 'pending';
+    void getMyPoints().then(
+      () => { outcome = 'resolved'; },
+      () => { outcome = 'rejected'; },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(assign).not.toHaveBeenCalled();
+    expect(outcome).toBe('pending');
+  });
 });
 
 describe('1013 全局拦截（单点登录互踢）', () => {

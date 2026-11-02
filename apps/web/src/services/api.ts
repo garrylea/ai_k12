@@ -60,7 +60,13 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     }
     if (json.code === 2001) {
       // 学生端硬门禁：订阅失效。全局跳锁定页（家长角色永远不会收到 2001，跳转对其无影响）。
-      window.location.assign('/student/locked');
+      // ⚠️ **已经在锁定页就不再 assign**（2026-11-02）：assign 同一个 URL 仍是整页重载，
+      // 而锁定页自己会发请求（PC App 的 device-commands 轮询 / learning-sessions）。
+      // 少了这道判断 → 请求回 2001 → 重载 → 又发 → 又 2001 → 页面无限刷新。
+      // 后端 SUBSCRIPTION_EXEMPT 豁免清单是主修，这里只是防止将来新增端点把循环带回来。
+      if (window.location.pathname !== '/student/locked') {
+        window.location.assign('/student/locked');
+      }
       return new Promise<T>(() => {}); // 不 resolve：让调用方挂起，页面即将整体跳走
     }
     throw new ApiError(

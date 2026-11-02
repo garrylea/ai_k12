@@ -125,7 +125,8 @@ pending ──回调验签成功 / confirm-paid 主动查单确认──► paid
   2. `GET /api/progress/students/:studentId/star-map`（锁后学生仍能看到星图与锁定态，否则一脸茫然）
   3. `POST /api/billing/callback/:channel`（渠道回调，免 JWT，验签自证）
   4. `GET /api/quota/subscription`（学生端锁定页展示「找家长续费」需要读状态）
-- **前端全局处理**：`api.ts` 响应层识别 `code=2001` → 统一跳学生端锁定页（非关键请求如积分徽章失败被吞的现状不变）。
+  5. `GET /api/student/device-commands` / `POST /api/student/learning-sessions` / `PATCH /api/student/learning-sessions/:id/end`（**2026-11-02 补**：PC App 壳的 kiosk 轮询、建会话、登出收尾。判据是「锁定页自己会不会发」——不豁免则锁定页发请求 → 2001 → 前端 assign 当前页 → 整页重载 → 再发，无限刷新）
+- **前端全局处理**：`api.ts` 响应层识别 `code=2001` → 统一跳学生端锁定页（非关键请求如积分徽章失败被吞的现状不变）。**已在 `/student/locked` 时不再 assign**（2026-11-02：assign 同一 URL 也是整页重载，会与锁定页自身请求构成死循环）。
 - **性能**：订阅表单行、`parent_id` UNIQUE 索引，每学生请求 +1 次点查；**先不做缓存**，实测慢再议（避免「刚续费还锁着」类缓存事故）。
 - **PC App**：锁定的学生 kiosk 内由前端跳锁定引导页，Electron 壳零改动。
 

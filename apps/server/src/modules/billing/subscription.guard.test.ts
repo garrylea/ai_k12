@@ -129,10 +129,44 @@ describe('SubscriptionGuard', () => {
   });
 });
 
+/**
+ * PC App 壳端点（2026-11-02 修）：锁定页自身每 10s 轮询 `device-commands`、
+ * 无本地会话时还会 `POST learning-sessions`，登出走 `PATCH .../end`。
+ * 这三条若被 2001 拒，前端全局拦截会对**当前页再 assign 一次** →
+ * 整页重载 → 轮询 → 2001 → 再重载，锁定页无限刷新（实测 10s 内 389 次导航）。
+ * 它们只搬运管控状态、不含任何学习内容，锁定态必须继续可用。
+ */
+describe('锁定态豁免：PC App 壳端点', () => {
+  const CASES: [string, string][] = [
+    ['GET', '/api/student/device-commands'],
+    ['POST', '/api/student/learning-sessions'],
+    ['PATCH', '/api/student/learning-sessions/12/end'],
+  ];
+
+  it.each(CASES)('%s %s 过期学生仍放行且不查 repo', async (method, url) => {
+    const repo = makeRepo(EXPIRED);
+    const guard = new SubscriptionGuard(repo as never);
+    const ctx = makeCtx({ method, originalUrl: url, user: { sub: 6, role: 'student' } });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(repo.findByStudentId).not.toHaveBeenCalled();
+  });
+
+  it('相邻路径不被误豁免：learning-sessions 的其它子路径仍被锁', async () => {
+    const repo = makeRepo(EXPIRED);
+    const guard = new SubscriptionGuard(repo as never);
+    const ctx = makeCtx({
+      method: 'PATCH',
+      originalUrl: '/api/student/learning-sessions/12/other',
+      user: { sub: 6, role: 'student' },
+    });
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
 describe('SUBSCRIPTION_EXEMPT 护栏', () => {
-  it('每一项 method ∈ {GET, POST}', () => {
+  it('每一项 method ∈ {GET, POST, PATCH}', () => {
     for (const e of SUBSCRIPTION_EXEMPT) {
-      expect(['GET', 'POST']).toContain(e.method);
+      expect(['GET', 'POST', 'PATCH']).toContain(e.method);
     }
   });
 

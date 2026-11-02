@@ -8,6 +8,25 @@
 
 ---
 
+## 2026-11-02 修复：订阅过期后锁定页无限刷新（PC App 里两个标题来回闪）
+
+**现象**（用户报「页面出现『已超期』与『订阅』两个页面反复横跳」）：订阅过期后，PC App 里的学生锁定页每隔零点几秒整页重载一次，标题在「本账号未订阅」与「订阅已过期」之间闪。（同一页面的两个状态：每次重载 `data=null` 先画前者，接口回来后画后者。）
+
+**实测证据**（本机 `garry1` 试用 2026-10-06 已过期；Playwright 注入 Electron 桥 + 真后端 + 真账号）：
+- 修前：9 秒内 **389 次主 frame 导航、766 次 API 请求**，URL 恒为 `/student/locked`；
+- 修后（只有前端闸门、后端未重启）：同样 9 秒 **4 次导航、4 次请求**，页面稳定。
+- 浏览器（非壳）里**不复现**：`isDesktopShell()` 为 false，整段跳过，所以此前人工冒烟漏掉了。
+
+**根因**：`api.ts` 收到 `code=2001` 一律 `window.location.assign('/student/locked')` —— **assign 同一个 URL 也是整页重载**。而锁定页自己在发请求：PC App 壳的 `GET /api/student/device-commands`（10s 轮询，挂载即发）与 `POST /api/student/learning-sessions`（无本地快照时「取或建」）**不在豁免清单**里 → 2001 → 重载 → 又发 → 循环。
+
+**修法（两道）**：
+1. `SUBSCRIPTION_EXEMPT` 补三条：`GET /api/student/device-commands`、`POST /api/student/learning-sessions`、`PATCH /api/student/learning-sessions/{id}/end`（登出收尾）。判据改成「**锁定页自己会不会发**」，而不是「跟学习有没有关系」——这几条只搬运管控状态、不含学习内容。顺带修掉一个更隐蔽的洞：建会话收到 2001 时 Promise 永不 settle，`LearningSessionShell` 的 `resolved` 永远是 false → **kiosk 不下发**，过期学生在 PC App 里反而没被全屏锁；豁免后会话正常建立，kiosk 照常生效。
+2. `api.ts` 的 2001 分支加幂等闸门：`pathname` 已是 `/student/locked` 就不再 assign（`Promise` 照旧永不 resolve），防将来新增端点把循环带回来。
+
+**测试**：`subscription.guard.test.ts` 新增 3 条豁免断言 + 1 条相邻路径不误豁免（护栏的 method 白名单由 `{GET,POST}` 扩到 `{GET,POST,PATCH}`）；`api.test.ts` 新增「已在锁定页不再 assign」回归钉子。
+
+---
+
 ## 2026-11-01 新增：作答区粘贴图片（物理/化学手绘图）
 
 **问题**：`LatexEditor` 是纯 textarea，图片剪贴板粘进去毫无反应（静默失败）；草稿板能画能贴但提交即清空，学生"草稿画→截图→粘贴"断在最后一步。题目又不保证分小问、分空（题干可能整段不换行），系统无法推断"这题几个空"。
