@@ -36,6 +36,8 @@ export interface PracticeHistoryQuestion {
   judgedAt: Date | null;
   /** 题面（考试：questions.content；语文专项：null，改用 passageTitle + passageSentence）。 */
   questionContent: string | null;
+  /** 材料（questions.material_text，语文/英语阅读材料、物化题内材料）。无材料为 null。 */
+  materialText: string | null;
   questionAnswer: string | null;
   questionAnalysis: string | null;
   /** 语文专项：passage|word；考试为 question。 */

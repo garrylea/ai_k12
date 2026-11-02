@@ -117,6 +117,7 @@ export class PracticeHistoryService {
           analysis: a.analysis,
           judgedAt: a.judged_at,
           questionContent: a.text,
+          materialText: a.material_text,
           questionAnswer: a.answer,
           questionAnalysis: a.explanation,
           refType: 'question',
@@ -165,6 +166,8 @@ export class PracticeHistoryService {
         analysis: a.analysis,
         judgedAt: a.judged_at,
         questionContent: a.question_content,
+        // 专项侧没有 material（语文专项的"材料"是篇名+句原文，走 passageTitle/passageSentence）
+        materialText: null,
         questionAnswer: a.question_answer,
         questionAnalysis: a.question_analysis,
         refType: a.ref_type,

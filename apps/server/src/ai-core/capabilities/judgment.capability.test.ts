@@ -109,3 +109,27 @@ describe('JudgmentCapability', () => {
     expect(mockChat).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('JudgmentCapability — 材料随题进 prompt（2026-11-02）', () => {
+  it('带 material 时 User Message 渲染阅读材料，且位于题目之前', async () => {
+    mockChat.mockResolvedValueOnce({ id: 'r', model: 'm', content: '{"isCorrect":true}', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, latencyMs: 1 });
+    const cap = new JudgmentCapability({ modelClient: mockModelClient, modelRouter: routerWith(primaryModel) });
+    await cap.judge({ ...judgeRequest, material: '阅读下面科普短文：半导体材料的应用……' });
+    const messages = mockChat.mock.calls[0][0].messages as Array<{ role: string; content: string }>;
+    const user = messages.find((m) => m.role === 'user')!.content;
+    expect(user).toContain('**阅读材料**');
+    expect(user).toContain('半导体材料的应用');
+    expect(user.indexOf('阅读材料')).toBeLessThan(user.indexOf('解方程'));
+    expect(user).not.toContain('{{');
+  });
+
+  it('不带 material 时提示词不出现「阅读材料」（零行为变化）', async () => {
+    mockChat.mockResolvedValueOnce({ id: 'r', model: 'm', content: '{"isCorrect":true}', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, latencyMs: 1 });
+    const cap = new JudgmentCapability({ modelClient: mockModelClient, modelRouter: routerWith(primaryModel) });
+    await cap.judge(judgeRequest);
+    const messages = mockChat.mock.calls[0][0].messages as Array<{ role: string; content: string }>;
+    const user = messages.find((m) => m.role === 'user')!.content;
+    expect(user).not.toContain('阅读材料');
+    expect(user).not.toContain('{{');
+  });
+});

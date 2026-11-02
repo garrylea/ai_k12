@@ -113,7 +113,16 @@ export interface PromptContext {
   student: { grade: string; gradeLevel: string };
   cardContent?: string;
   knowledgePoint?: { id: string; name: string; description?: string };
-  question?: { content: string; answer?: string; difficulty?: Difficulty; rubric?: string };
+  question?: {
+    content: string;
+    answer?: string;
+    difficulty?: Difficulty;
+    rubric?: string;
+    /** 阅读理解材料 / 物化题内材料；模板用 `{{#question.material}}` 条件渲染。2026-11-02。 */
+    material?: string | null;
+    /** 选项（explanation 需要，模板逐项渲染）。 */
+    options?: QuestionOption[];
+  };
   studentAnswer?: string;
   dialogueHistory?: Message[];
   userMessage: string;
@@ -503,6 +512,8 @@ export interface JudgmentRequest {
   studentAnswer: string;
   subject: Subject;
   questionType: 'proof' | 'calculation';
+  /** 材料（语文/英语阅读材料、物化题内材料）。有值时拼进 prompt，无材料不传。 */
+  material?: string | null;
 }
 
 export interface JudgmentResult {
@@ -527,9 +538,10 @@ export interface ExplanationRequest {
   /**
    * 选项必须传：只给「参考答案：D」不给 A/B/C/D 各是什么，模型无法核对，
    * 只会顺着答案编理由（2026-11-01 北师大实验物理卷第 1 题事故）。
+   * material：阅读理解材料（语文/英语）或物化题内材料；有值时在题目前渲染。
    */
-  question: { content: string; answer?: string; options?: QuestionOption[] };
-  /** 提示词里的学科角色名（「数学/物理/道德与法治」）。subject 是路由键，只有三科。 */
+  question: { content: string; answer?: string; options?: QuestionOption[]; material?: string | null };
+  /** 提示词里的学科角色名（「数学/物理/道德与法治」）。subject 是路由键，2026-11-01 起物化道各自成档。 */
   subjectLabel?: string;
   wrongAnswer: string;
   errorHistory?: { question: string; wrongAnswer: string; attempts: number }[];

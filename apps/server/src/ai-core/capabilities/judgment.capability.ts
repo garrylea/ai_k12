@@ -55,6 +55,8 @@ export class JudgmentCapability {
           content: request.questionContent,
           answer: request.standardAnswer,
           rubric: request.reference,
+          // 2026-11-02：材料随题进 prompt（模板用 {{#question.material}} 条件渲染，空则不出现）
+          material: request.material ?? null,
         },
         studentAnswer: request.studentAnswer,
         userMessage: '请判断对错',

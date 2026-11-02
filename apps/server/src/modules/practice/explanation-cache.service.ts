@@ -162,6 +162,8 @@ export class ExplanationCacheService {
           content: q.content,
           answer: q.answer ?? undefined,
           options: parseQuestionOptions(q.options),
+          // 2026-11-02：材料随题交给模型（语文/英语阅读、物化题内材料）
+          material: q.material_text ?? null,
         },
         wrongAnswer: '',
         knowledgePoint: { id: '', name: '' },

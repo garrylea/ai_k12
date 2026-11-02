@@ -130,3 +130,43 @@ describe('ExplanationCapability', () => {
     expect(user).not.toContain('{{');
   });
 });
+
+describe('ExplanationCapability — 材料随题进 prompt（2026-11-02）', () => {
+  it('带 material 时题解 prompt 含材料，且位于题目之前', async () => {
+    let user = '';
+    const mockModelClient = {
+      chat: async (req: { messages: { role: string; content: string }[] }) => {
+        user = req.messages.find((m) => m.role === 'user')!.content;
+        return { id: 'r', model: 'm', content: '题解', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, latencyMs: 1 };
+      },
+    } as unknown as import('../infra/model-client/index.js').ModelClient;
+    const cap = new ExplanationCapability({ modelClient: mockModelClient });
+    await cap.explain({
+      mode: 'solution', studentId: '', subject: 'physics',
+      question: { content: '31. (1) 太阳能电池分为……', answer: 'D', material: '半导体材料的应用：自然界的物质……' },
+      wrongAnswer: '', knowledgePoint: { id: '', name: '' },
+    });
+    expect(user).toContain('**阅读材料**');
+    expect(user).toContain('半导体材料的应用');
+    expect(user.indexOf('阅读材料')).toBeLessThan(user.indexOf('31.'));
+    expect(user).not.toContain('{{');
+  });
+
+  it('不带 material 时不渲染材料区块', async () => {
+    let user = '';
+    const mockModelClient = {
+      chat: async (req: { messages: { role: string; content: string }[] }) => {
+        user = req.messages.find((m) => m.role === 'user')!.content;
+        return { id: 'r', model: 'm', content: '题解', finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, cost: 0 }, latencyMs: 1 };
+      },
+    } as unknown as import('../infra/model-client/index.js').ModelClient;
+    const cap = new ExplanationCapability({ modelClient: mockModelClient });
+    await cap.explain({
+      mode: 'solution', studentId: '', subject: 'math',
+      question: { content: '解方程 2x+3=7', answer: 'x=2' },
+      wrongAnswer: '', knowledgePoint: { id: '', name: '' },
+    });
+    expect(user).not.toContain('阅读材料');
+    expect(user).not.toContain('{{');
+  });
+});

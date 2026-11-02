@@ -3506,6 +3506,8 @@ export interface PracticeHistoryQuestion {
   analysis: string | null;
   judgedAt: string | null;
   questionContent: string | null;
+  /** 材料（语文/英语阅读材料、物化题内材料）；无材料为 null。 */
+  materialText: string | null;
   questionAnswer: string | null;
   questionAnalysis: string | null;
   refType: string | null;

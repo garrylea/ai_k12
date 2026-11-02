@@ -344,6 +344,8 @@ export class JudgeCoreService {
           studentAnswer: input.studentAnswer,
           // 2026-11-01：按题目学科取路由档位（此前写死 math，物化道永远走数学档）。
           subject: subjectCodeOf(q.subject_id),
+          // 2026-11-02：阅读理解/题内材料随题交给模型
+          material: q.material_text ?? null,
           questionType,
         });
         isCorrect = result.isCorrect;
@@ -505,6 +507,8 @@ export class JudgeCoreService {
           studentAnswer: input.studentAnswer,
           // q 可能不存在（孤儿题）——回落 math 档，与无学科信息时的历史口径一致。
           subject: q?.subject_id != null ? subjectCodeOf(q.subject_id) : 'math',
+          // 2026-11-02：阅读理解/题内材料随题交给模型
+          material: q?.material_text ?? null,
           questionType,
         });
         isCorrect = result.isCorrect;

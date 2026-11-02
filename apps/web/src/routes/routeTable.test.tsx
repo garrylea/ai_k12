@@ -423,6 +423,7 @@ describe('路由表：积分相关页面', () => {
       questions: [{
         questionId: 100, questionOrder: 1, answerText: 'A', isCorrect: true, score: 1,
         method: 'exact', analysis: null, judgedAt: null,
+        materialText: null,
         questionContent: '第1题题面', questionAnswer: 'A', questionAnalysis: '解析',
         refType: 'question', refId: null, sentenceIndex: null,
         passageTitle: null, passageSentence: null,

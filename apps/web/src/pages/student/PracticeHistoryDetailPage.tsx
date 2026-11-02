@@ -123,6 +123,16 @@ function QuestionCard({ q }: { q: PracticeHistoryQuestion }) {
         <StatusBadge isCorrect={q.isCorrect} />
       </div>
 
+      {/* 材料（语文/英语阅读材料、物化题内材料）：独立区块、可滚动，样式与结果页一致 */}
+      {q.materialText && (
+        <div
+          data-testid="history-material"
+          className="mb-3 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] leading-[1.7]"
+        >
+          <MarkdownBlock text={q.materialText} />
+        </div>
+      )}
+
       {/* 题面：考试取 questionContent；语文专项取篇名 + 句原文 */}
       {q.questionContent ? (
         <MarkdownBlock text={q.questionContent} className="mb-3 text-sm text-[var(--text-primary)]" />

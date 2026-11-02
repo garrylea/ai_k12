@@ -67,6 +67,7 @@ describe('PracticeHistoryDetailPage', () => {
         {
           questionId: 100, questionOrder: 1, answerText: 'B', isCorrect: false, score: 0,
           method: 'exact', analysis: '解析一', judgedAt: null,
+          materialText: '阅读下面的材料，完成第1-3题。',
           questionContent: '第1题题面', questionAnswer: 'C', questionAnalysis: null,
           refType: 'question', refId: null, sentenceIndex: null,
           passageTitle: null, passageSentence: null,
@@ -74,6 +75,7 @@ describe('PracticeHistoryDetailPage', () => {
         {
           questionId: 101, questionOrder: 2, answerText: 'A', isCorrect: true, score: 1,
           method: 'exact', analysis: null, judgedAt: null,
+          materialText: null,
           questionContent: '第2题题面', questionAnswer: 'A', questionAnalysis: '题库解析二',
           refType: 'question', refId: null, sentenceIndex: null,
           passageTitle: null, passageSentence: null,
@@ -90,6 +92,8 @@ describe('PracticeHistoryDetailPage', () => {
     expect(screen.getByText('C')).toBeInTheDocument(); // 正确答案
     expect(screen.getByText('解析一')).toBeInTheDocument();
     expect(screen.getByText('题库解析二')).toBeInTheDocument();
+    // 材料独立区块渲染（2026-11-02 用户要求：语文/英语阅读、物化题内材料）
+    expect(screen.getByTestId('history-material')).toHaveTextContent('阅读下面的材料');
   });
 
   it('语文专项：questionId=null 时按 JSON 渲染作者/朝代/正文', async () => {
@@ -100,6 +104,7 @@ describe('PracticeHistoryDetailPage', () => {
           questionId: null, questionOrder: 1,
           answerText: '{"author":"李白","dynasty":"唐","body":"床前明月光"}',
           isCorrect: false, score: 0, method: 'exact', analysis: null, judgedAt: null,
+          materialText: null,
           questionContent: null, questionAnswer: null, questionAnalysis: null,
           refType: 'passage', refId: 42, sentenceIndex: 0,
           passageTitle: '静夜思', passageSentence: '床前明月光，疑是地上霜。',
@@ -120,6 +125,7 @@ describe('PracticeHistoryDetailPage', () => {
       questions: [{
         questionId: 100, questionOrder: 1, answerText: 'B', isCorrect: null, score: null,
         method: 'failed', analysis: null, judgedAt: null,
+        materialText: null,
         questionContent: '题面', questionAnswer: 'C', questionAnalysis: null,
         refType: 'question', refId: null, sentenceIndex: null,
         passageTitle: null, passageSentence: null,

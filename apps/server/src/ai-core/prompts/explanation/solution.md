@@ -23,6 +23,11 @@ description: "标准题解生成 - 与具体学生作答无关，可入库复用
 
 ## User Message
 
+{{#question.material}}
+**阅读材料**：
+{{question.material}}
+
+{{/question.material}}
 **题目**：
 {{#question}}
 {{question.content}}

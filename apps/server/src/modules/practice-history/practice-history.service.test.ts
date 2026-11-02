@@ -140,7 +140,7 @@ describe('PracticeHistoryService.getDetail', () => {
         question_id: 100, question_order: 1, answer_text: 'B', is_correct: 0, score: '0.00',
         analysis: null, method: 'exact', judged_at: new Date('2026-11-01T06:05:00Z'),
         text: '第1题题面', type: 'choice', options: '[]', explanation: '解析1', answer: 'C',
-        material_text: null,
+        material_text: '阅读下面的材料，完成第1-3题。',
       },
     ]);
     const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
@@ -148,6 +148,8 @@ describe('PracticeHistoryService.getDetail', () => {
     expect(r!.questions[0]).toMatchObject({
       questionId: 100, answerText: 'B', isCorrect: false, questionContent: '第1题题面',
       questionAnswer: 'C', method: 'exact', refType: 'question',
+      // 材料随题返回（语文/英语阅读、物化题内材料）—— 2026-11-02
+      materialText: '阅读下面的材料，完成第1-3题。',
     });
   });
 

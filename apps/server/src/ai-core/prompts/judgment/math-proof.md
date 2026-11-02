@@ -27,6 +27,11 @@ errorType 枚举：logic（逻辑错）/ calculation（计算错）/ format（�
 
 ## User Message
 
+{{#question.material}}
+**阅读材料**：
+{{question.material}}
+
+{{/question.material}}
 **题目**：
 {{#question}}
 {{question.content}}
