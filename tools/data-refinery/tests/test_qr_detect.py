@@ -14,6 +14,9 @@ from qr_detect import is_qr_code, strip_qr_images
 
 FIXTURES = Path(__file__).parent / "fixtures"
 QR_FIXTURE = FIXTURES / "qr_weixin.jpg"
+# 86419 卷题 2 的 C 选项图（铜镜纹样）：184×184、黑占比 0.378、边缘 0.179，
+# 统计特征与二维码完全重合，但只有 1 组定位图案 —— 曾被形态兜底误删。
+MIRROR_FIXTURE = FIXTURES / "mirror_option_c.jpg"
 
 
 def _write_real_figure(path: Path) -> None:
@@ -47,6 +50,31 @@ def test_is_qr_code_false_for_geometry_figure(tmp_path):
     path = tmp_path / "circle.jpg"
     _write_real_figure(path)
     assert is_qr_code(path) is False
+
+
+def test_is_qr_code_false_for_bw_ornament_without_finder_patterns():
+    """回归（2026-11-02）：铜镜纹样统计特征全中，但没有定位图案 → 不是二维码。
+
+    原实现只看尺寸/宽高比/黑占比/边缘密度，把这图当二维码删了，
+    导致 86419 卷题 2 的 C 选项空白。
+    """
+    assert is_qr_code(MIRROR_FIXTURE) is False
+
+
+def test_finder_pattern_groups_rejects_ornament_accepts_qr():
+    """结构判据本身：真码 ≥2 组定位图案，铜镜只有 1 组。"""
+    import cv2
+    import numpy as np
+
+    from qr_detect import _finder_pattern_groups
+
+    def groups(path):
+        img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
+        return _finder_pattern_groups(img)
+
+    assert groups(QR_FIXTURE) >= 2
+    assert groups(FIXTURES / "qr_wechat_logo.jpg") >= 2
+    assert groups(MIRROR_FIXTURE) <= 1
 
 
 def test_is_qr_code_false_for_missing_file(tmp_path):
@@ -88,6 +116,18 @@ def test_strip_qr_images_keeps_text_on_same_line(tmp_path):
 
     assert "images/qr.jpg" not in out
     assert out == "下列抽样方式： 最合适的是"
+
+
+def test_strip_qr_images_keeps_black_white_option_image(tmp_path):
+    """选项图是黑白纹样时不能被当二维码删掉（86419 题 2 C 选项回归）。"""
+    md_dir = _paper_dir(tmp_path)
+    (md_dir / "images" / "mirror.jpg").write_bytes(MIRROR_FIXTURE.read_bytes())
+    text = "B\n![](images/mirror.jpg)\nC\n![](images/qr.jpg)"
+
+    out = strip_qr_images(text, md_dir)
+
+    assert "images/mirror.jpg" in out   # 选项图保留
+    assert "images/qr.jpg" not in out   # 真二维码仍删
 
 
 def test_strip_qr_images_removes_all_occurrences_and_alt_variants(tmp_path):

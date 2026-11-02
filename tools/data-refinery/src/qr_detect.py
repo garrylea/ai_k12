@@ -32,14 +32,58 @@ _QR_FALLBACK_BLACK = (0.35, 0.62)
 _QR_FALLBACK_EDGE = 0.15
 _QR_FALLBACK_ASPECT = (0.85, 1.18)
 
+# 定位图案（finder pattern）结构性判据：真二维码三个角各有一个「黑-白-黑」三层
+# 嵌套的近正方形。统计特征（小尺寸/近正方/黑白各半/边缘密集）对黑白对称的装饰
+# 纹样同样成立 —— 2026-11-02 实测：86419 卷题 2 的铜镜选项图（184×184、黑占比
+# 0.378、边缘 0.179）四项全中，被误删，选项 C 变成空白。加这道结构校验后，
+# 铜镜只剩 1 组嵌套方块、物理实物图 0 组，而真实二维码 2–4 组。
+# 阈值取 2 而不是 3：带 logo/被裁边的真码常只能检出 2 个定位图案（实测 4 张）。
+_QR_FINDER_MIN_GROUPS = 2
+
 # 检测器构造有开销，模块级复用（detectAndDecode 无状态）
 _qr_detector = cv2.QRCodeDetector()
 
 
-def _looks_like_qr(img) -> bool:
-    """解码失败时的形态兜底：小尺寸、近正方、黑白各半、边缘密集。
+def _finder_pattern_groups(img) -> int:
+    """最多有几组「尺寸相近」的定位图案（黑-白-黑三层嵌套的近正方形）。
 
-    只看统计特征，不依赖可解码性。阈值与真实配图有 5 倍以上间隔，
+    返回最大一组的数量（0–3+）。只用于解码失败后的形态兜底，宁可漏判
+    （留下二维码）也不误删配图。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, hierarchy = cv2.findContours(
+        binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if hierarchy is None:
+        return 0
+    hier = hierarchy[0]
+    squares: list[tuple[int, int]] = []
+    for i, contour in enumerate(contours):
+        child = hier[i][2]
+        if child == -1 or hier[child][2] == -1:   # 要求黑-白-黑三层
+            continue
+        _, _, width, height = cv2.boundingRect(contour)
+        if width < 7 or height < 7:
+            continue
+        aspect = width / float(height)
+        extent = cv2.contourArea(contour) / float(width * height)
+        if 0.75 <= aspect <= 1.33 and extent >= 0.55:
+            squares.append((width, height))
+    groups: list[list[tuple[int, int]]] = []
+    for width, height in squares:
+        for group in groups:
+            if abs(group[0][0] - width) <= max(3, group[0][0] * 0.2):
+                group.append((width, height))
+                break
+        else:
+            groups.append([(width, height)])
+    return max((len(group) for group in groups), default=0)
+
+
+def _looks_like_qr(img) -> bool:
+    """解码失败时的形态兜底：小尺寸、近正方、黑白各半、边缘密集 + 定位图案。
+
+    只看统计特征与结构特征，不依赖可解码性。阈值与真实配图有 5 倍以上间隔，
     宁可漏判（留下二维码）也不误删配图。
     """
     height, width = img.shape[:2]
@@ -53,7 +97,10 @@ def _looks_like_qr(img) -> bool:
     black = float((binary == 0).mean())
     if not (_QR_FALLBACK_BLACK[0] <= black <= _QR_FALLBACK_BLACK[1]):
         return False
-    return float((cv2.Canny(gray, 100, 200) > 0).mean()) >= _QR_FALLBACK_EDGE
+    if float((cv2.Canny(gray, 100, 200) > 0).mean()) < _QR_FALLBACK_EDGE:
+        return False
+    # 最后做结构校验（较贵）：没有 2 组定位图案的一律放过
+    return _finder_pattern_groups(img) >= _QR_FINDER_MIN_GROUPS
 
 
 def is_qr_code(disk_path: Path) -> bool:
