@@ -4,239 +4,228 @@
 **状态**：**待用户审核**（未实现）
 **提出人**：用户（2026-11-02）——「物理也有材料题，和语文阅读理解一样，阅读理解中的文章就是材料；不清楚化学有没有。总之这种有材料的该如何处理？语文的阅读理解是怎么处理的？」
 
+> **修订记录（2026-11-02，同日内）**：初稿误判「物理材料与语文一样是跨题共享」。实测原始试卷 MD 后发现**两者结构不同**（见 §2），本版已按实测重写，**不再需要 `material_id`**。
+
 ---
 
-## 1. 现状调研（实测，非推测）
+## 1. 结论先行：两种形态，不是同一种
 
-### 1.1 数据层
+| | 语文 / 英语（形态 A：跨题共享材料） | 物理 / 化学（形态 B：题内材料） |
+|---|---|---|
+| 原文结构 | 「阅读下面文章，完成 5–8 题」→ 材料 → 5./6./7./8. 各自小题 | 「31. 阅读以下文字，并回答问题：」→ 材料 → `(1)(2)(3)` 小问 |
+| 小问是不是主题号 | **是**（5./6./7./8. 各成一个 question） | **不是**（`(1)(2)(3)` 按切分规则合并进同一题） |
+| 一道题里有几份材料 | 通常一份（多个小题共享） | 一份（就在这一题内部） |
+| 材料与问题的关系 | **跨题共享** | **题内混排** |
+| 现有处理 | `questions.material_text` 每题挂一份（靠内容相同隐式分组） | **无**——材料与问题全在 `questions.content` |
+
+**实测证据（物理，海淀·一零一 202407 期中卷第 31 题）**：
+
+```
+## 四、科普阅读题（共3分）
+
+31. 阅读以下文字，并回答问题：
+
+半导体材料的应用
+自然界的物质和材料千千万万，……（6 段科普正文 + 1 张图）
+
+(1) 根据应用的半导体材料的不同, 太阳能电池分为……
+(2) 判断太阳能电池优劣的主要标准是
+(3) 太阳能电池运行的基本原理是
+
+## 五、计算题（共8分……）
+```
+
+**实测证据（化学）**：
+- `id=4309`：「29.（6分）阅读下面科普短文。」→ 表 1 → 小问
+- `id=4317`：「37. (6分)絮凝剂常用于污水处理。…【进行实验】取 200 mL…」→ 结果表 → 小问
+
+**全量核查**：在物理/化学 12 份试卷 MD 里 grep「(回答|完成) N–M 题」**零命中**，确认**没有跨题共享材料**。
+
+---
+
+## 2. 数据现状（实测，2026-11-02）
 
 `questions` 表相关列：
 
 | 列 | 类型 | 实际使用 |
 |---|---|---|
-| `content` | text | 题干正文（**物理/化学的材料目前混在这里**） |
-| `material_text` | text | 语文材料题的材料原文（**只有语文用**） |
-| `material_url` | text | **全库 1465 题 0 行有值**（未使用的死列） |
+| `content` | text | 题干正文（**物理/化学的材料混在这里**） |
+| `material_text` | text | 语文材料题的材料原文（**只有语文用：684 题**） |
+| `material_url` | text | 全库 1465 题 **0 行有值**（死列） |
 | `group_id` | varchar(50) | 值是「一/二/三/四/五」= **试卷大题分区**，不是材料组 |
-| `group_order` | smallint | 大题分区内的题序 |
+| `group_order` | smallint | 大题分区内题序 |
 
-各学科实际数据（2026-11-02 实测）：
+| 学科 | 题数 | 有 material_text |
+|---|---|---|
+| 语文 | 798 | 684 |
+| 物理 | 135 | **0** |
+| 化学 | 75 | **0** |
+| 数学 | 457 | 0 |
 
-| 学科 | 题数 | 有 group_id | 有 material_text |
-|---|---|---|---|
-| 语文 | 798 | 798 | **684** |
-| 物理 | 135 | 128 | **0** |
-| 化学 | 75 | 75 | **0** |
-| 数学 | 457 | 437 | 0 |
+长题分布（>500 字）：物理 16 题、化学 4 题；200–500 字：物理 53、化学 17。这些就是材料题。
 
-**结论**：材料题的**结构字段已经有了**，但只有语文真的把材料放进了 `material_text`；物理/化学的材料**混在 `content` 里**。
+---
 
-### 1.2 语文材料题的隐式分组
-
-语文没有材料表、没有 material_id，靠 **`material_text` 内容完全相同**隐式成组（实测分组规模：1 组 7 题、1 组 6 题、5 组 5 题、21 组 4 题、80 组 3 题、81 组 2 题）。
-
-样例（`questions.id` 5163/5164 共享同一段科技节材料；5165/5166 各自另一段）。
-
-### 1.3 代码链路（材料目前只影响"展示"，不影响判题）
+## 3. 代码链路（材料目前只影响"展示"，不参与判题）
 
 | 环节 | 现状 |
 |---|---|
-| 考试下发题目 | `exams.service.ts:279` 返回 `materialText: row.material_text` |
-| 训练下发题目 | `training.service.ts:798` 返回 `materialText: q.material_text` |
+| 考试下发 | `exams.service.ts:279` → `materialText: row.material_text` |
+| 训练下发 | `training.service.ts:798` → `materialText: q.material_text` |
 | 考试结果页 | `ExamResultPage.tsx:171` → `material: it.materialText` → `AnswerResultList` 在题面上方渲染（`max-h-[32vh]` 可滚动） |
 | 训练作答页 | `TargetedRunPage.tsx:110/117` → `QuestionRunner.tsx:533` 渲染 `q.material` |
-| **判题** | `judgment.capability.ts:55` 只传 `questionContent`（= `q.content`），**材料完全不参与判题** |
-| **解析生成** | `explanation-cache.service.ts:154` 只传 `content` + `answer` + `options`，**不传 material** |
-| **练习记录详情（2026-11-01 新功能）** | **`PracticeHistoryQuestion` 没有 material 字段** —— 语文材料题在历史回放里**看不到材料** |
+| **判题** | `judgment.capability.ts:55` 只传 `questionContent`（= `q.content`），**材料不参与** |
+| **解析** | `explanation-cache.service.ts:154` 只传 `content`+`answer`+`options`，**不传材料** |
+| **练习记录详情** | `PracticeHistoryQuestion` **没有 material 字段** —— 语文材料题历史回放看不到材料 |
 
-### 1.4 物理材料题的实际形态（实测两条）
-
-- `id=6015`（multi_choice）：实验描述 + HTML 表格 + 3 张图 + 「甲/乙/丙」标注，**全在 `content` 里**
-- `id=6026`（short_answer）：开头「阅读以下文字，并回答问题：半导体材料的应用……」+ 三段科普正文 + 小问，**全在 `content` 里**
-
-物理 135 题里：16 题 content > 500 字、53 题 200–500 字，说明确实存在「材料 + 小问」型题目。
-
-**化学同样有**（实测）：
-- `id=4309`：「29.（6分）阅读下面科普短文。市面上有多种多样的保暖材料…」+ 表 1 + 小问
-- `id=4317`：「絮凝剂常用于污水处理…【进行实验】取 200 mL 浑浊程度相同的水样…」+ 结果表 + 小问
-- 化学 75 题：4 题 > 500 字、17 题 200–500 字
+**既有抽取架构**（`tools/data-refinery/src/subject_strategies/`）：
+- 每学科一个 strategy（`chinese.py` / `english.py` / `physics.py` / `chemistry.py` / `politics.py` …）
+- `MaterialPolicy(attach: bool)` + `is_material_title()` + `looks_like_between_material()` —— **只处理形态 A（题号前/两题之间）**
+- 现状：`chinese` / `english` 的 `attach=True`；**物理/化学/道法没有实现 material_policy → 默认 `attach=False`**
+- `2026-09-05` splitter spec §10 已记录：「`material_text` 抽取：数学不抽；道法/物理需要单独拆出共享材料，后续做」——本需求就是这条遗留
 
 ---
 
-## 2. 问题定义
+## 4. 问题定义
 
-1. **语义混在一起**：物理/化学的材料和问题在同一个 `content` 字段，前端无法「材料固定展示、小题滚动」；同一材料的多个小问各自重复一大段材料。
-2. **无法做到「一份材料 + N 道小题」的体验**：现在每道小题都是完整独立卡片，材料重复。
-3. **判题/解析看不到材料**（如果材料被抽到 material_text）：模型只看到小问，缺少上下文，判错概率上升。
-4. **历史回放丢材料**：练习记录详情不返回 material，语文材料题回放只剩小问。
-5. **材料组不可靠**：语文靠「文本完全相同」隐式分组，材料里改一个字就断组；物理若也要分组，需要显式标识。
-
----
-
-## 3. 目标
-
-1. 物理/化学的材料与小题**结构性分离**，且与语文口径统一（都走 `material_text`）。
-2. 同一材料的多个小题能**显式归组**，展示时材料只出现一次（作答页、结果页、历史回放三处一致）。
-3. 判题与解析生成**能拿到材料**（有材料才传，无材料零影响）。
-4. 历史回放（练习记录详情）**返回并渲染材料**。
-5. 老数据（语文 684 题）**不强制重洗**，但可平滑升级到显式分组。
+1. **物理/化学的材料与问题混在 `content`**：一道 1400 字的实验题，学生看到的是"一大坨"，无法像语文那样"材料区可滚动、问题区固定"。
+2. **判题/解析看不到材料**（若把材料抽到 material_text）：模型只看到小问，缺上下文，判错率上升。**现状因为是混在 content 里反而能看全**——这是抽取后必须补的洞。
+3. **历史回放丢材料**：练习记录详情不返回 material，语文材料题回放只剩小问（现存缺口）。
+4. **形态 A 的材料分组靠文本相同**：语文材料改一个字就断组（可接受，因为 material_text 是冗余存储、不承载业务语义）。
 
 ---
 
-## 4. 方案对比
+## 5. 方案
 
-### 方案 A：只补展示，不动数据（最小改动）
+### 方案 A：只补展示（最小止血，1 天）
 
-- 物理/化学材料仍留在 `content`，前端把 `content` 整段渲染（现状）。
-- 只给练习记录详情补 `materialText`。
-- **优点**：零数据迁移，1 天可完成。
-- **缺点**：材料与问题仍然混杂；同一材料多小题仍重复；判题仍看不到"材料"这个概念（但对物理反而没损失，因为材料就在 content 里）。
-- **适用**：只想先让历史回放能看到语文材料。
+- 给练习记录详情补 `materialText`（语文材料题历史回放立刻可用）。
+- 物理/化学**不动**（材料仍在 content，整段渲染）。
+- **优点**：零数据迁移、零判题风险。
+- **缺点**：物理/化学仍有"一大坨"体验。
 
-### 方案 B：统一抽到 `material_text` + 显式 `material_id`（推荐）
+### 方案 B：补齐形态 B 的抽取（推荐，分两步）
 
-- **数据**：物理/化学材料题把材料从 `content` 抽到 `material_text`；小题 `content` 只留问题。
-- **分组**：新增 `material_id`（varchar，同材料组共享），`group_order` 继续表示组内题序。语文老数据可**渐进补**：先按 `material_text` 内容相同回填 `material_id`（一次性脚本），之后新数据由管线写入。
-- **判题**：`JudgmentRequest` 增加可选 `material`，有值时拼进 prompt。
-- **解析**：`explanation.explain` 同样增加 `material`。
-- **展示**：作答页/结果页/历史回放统一「材料区（可折叠/可滚动）+ 小题区」；同组只在第一题前显示材料一次。
-- **优点**：语义清晰；材料只显示一次；判题有上下文；与语文口径统一。
-- **缺点**：需要 data-refinery 抽取 + 人工校验（物理 135 / 化学 75 题，量不大）；老语文数据要回填 material_id；前端三处要改。
+**B1（先做，止血）**：
+- 练习记录详情补 `materialText` + 前端渲染（三处统一）。
+- 判题/解析补可选 `material`（为 B2 铺路，当前 material 为空时行为逐字不变）。
 
-### 方案 C：不改库，运行时按 `group_id` 识别材料组
+**B2（再做，数据管线）**：
+- 在 `physics.py` / `chemistry.py` 新增 **题内材料切分**（新钩子，不复用 `MaterialPolicy`）：
+  ```python
+  class QuestionStrategy(Protocol):
+      def split_material(self, content: str) -> tuple[str | None, str]:
+          """题内材料切分：返回 (material_text, 剩下的小问 content)；无材料返回 (None, content)。"""
+  ```
+  默认实现 `return (None, content)`（generic）——不影响数学/语文/英语。
+- physics/chemistry 的规则（**候选，需人工确认**）：
+  - 触发：`content` 含「阅读以下文字」「阅读下面科普短文」「【进行实验】」「探究…」等标志，且 `content` 长度 ≥ 150 字
+  - 切分点：材料段结束、**第一个行首小问标记**（`(1)` / `（1）` / `(1)…`）处
+  - 返回材料段（含表格/图片）+ 小问段
+  - **自校验**：`material + content` 拼接必须逐字等于原文（构造上可验证，防丢字）
+- **人工确认**：抽取候选输出成清单，人工过一遍再落库（规则误切风险真实存在）。
+- 落库只写 `material_text` 与 `content` 两列，**其他列不动**（项目铁律：只填空不覆盖；前后逐行 MD5 比对）。
 
-- **不可行**：`group_id` 实测是「一/二/三」大题分区（一分区几十道题），不是材料组。硬用会把整个大题的材料混成一份。
+**为什么不复用 `MaterialPolicy`**：它的语义是"题号前/两题之间的短文挂到该题"（跨题共享），而形态 B 的材料在**题号之后、同一题内部**，两个谓词都命中不了。
+
+**为什么不新增 `material_id`**：物化是题内材料（一题一份），不需要分组；语文靠 `material_text` 内容相同已够用。
+
+### 方案 C：把物理/化学的小问也拆成多条 questions（像语文阅读那样）
+
+- 让 `(1)(2)(3)` 各自成为一条 questions，共享 material。
+- **不推荐**：与 splitter spec §3.1「小问号不切，合并到上一个主题号」直接冲突；会改变现有题量/题号/作答粒度；历史数据全部要重切；而且物理小问常常依赖上面的图/表编号（`如图甲`），拆开反而丢上下文。
 
 ---
 
-## 5. 推荐方案（方案 B）详细设计
+## 6. 推荐：B1 → B2
 
-### 5.1 数据模型
+### 6.1 数据层（B2）
 
-**新增列**（`questions` 表）：
+**不新增列**。复用 `material_text`（存材料）+ `content`（存小问）。
 
-```sql
-ALTER TABLE questions
-  ADD COLUMN material_id VARCHAR(64) DEFAULT NULL COMMENT '材料组标识：同材料的多个小题共享；NULL=无材料' AFTER material_url,
-  ADD INDEX idx_questions_material_id (material_id);
-```
+约定：
+- `material_text` 为空 ⇒ 行为与今天完全一致。
+- 物理/化学的题内材料：`material_text` = 材料段，`content` = 小问段；两者拼接 = 原文。
 
-**约定**：
-- `material_id` 为空 ⇒ 无材料题，行为与今天完全一致。
-- `material_id` 非空 ⇒ 该题属于某个材料组；同组各题 `material_text` **内容相同**（冗余保留，避免 JOIN，也兼容老逻辑），`group_order` 为组内题序（从 1 起）。
-- 不新建材料表（YAGNI）：材料只有一段文本 + 可能的图片，塞在一张表里 JOIN 收益不大，且会让 `questions` 的读路径多一次关联。
+### 6.2 抽取层（B2，`tools/data-refinery`）
 
-**语文老数据回填**（一次性脚本，幂等）：
+- `subject_strategies/types.py`：`QuestionStrategy` 协议加 `split_material()`，默认 `(None, content)`。
+- `physics.py` / `chemistry.py`：实现规则切分（见 §5 B2）。
+- `question_extract.py`：切完题后调用 `strategy.split_material(q.content)`，写入 `material_text` / `content`。
+- 产出候选清单 + 人工确认（脚本：`--material-candidates` 输出待审清单）。
+- 测试：切分前后拼接等原文、误切标志（小问里出现"阅读"不触发）、无材料题零变化。
 
-```sql
--- 按 material_text 内容哈希分配 material_id（同内容 = 同组）
-UPDATE questions SET material_id = CONCAT('m-', SUBSTR(MD5(material_text), 1, 16))
-WHERE material_text IS NOT NULL AND TRIM(material_text) <> '' AND material_id IS NULL;
-```
-
-> 同内容的材料偶有「不同试卷各自出现」的情况，会合并成一个 id。这是**可接受**的：material_id 只用于展示分组，不承载业务语义；若将来要严格按卷分组，再加 `paper_id` 维度。
-
-### 5.2 抽取与写入（tools/data-refinery）
-
-- 物理/化学原始题（content 里混排材料）在抽取阶段识别「材料段 + 小问」：
-  - 材料段特征：`阅读以下文字` / `如图所示` + 长段落 + 表格/图；小问特征：`(1)`/`(2)`/`下列` 等。
-  - **不做纯 LLM 自动切分**（不可复现，见 memory「refinery LLM 不可复现」）；用规则的候选切分 + **人工确认**落库。
-- 落库时同时写 `material_text` / `material_id` / `group_order`，`content` 只留小问。
-- **只填空、不覆盖**（项目铁律）：已有人工校订的 `content` 不动；抽取结果写入前逐行 MD5 比对未触碰列。
-
-### 5.3 判题与解析
-
-**判题**：
+### 6.3 判题与解析（B1 先铺）
 
 ```ts
-// judgment.capability.ts JudgmentRequest 增加可选 material
-export interface JudgmentRequest {
-  // ...existing
-  material?: string | null;
-}
-// prompt context.question 增加 material 字段（仅非空时拼入）
-```
+// judgment.capability.ts
+export interface JudgmentRequest { /* … */ material?: string | null }
+// prompt context.question 增加 material（仅非空时拼入）
 
-`judge-core.service.ts` 两处调用补 `material: q.material_text ?? null`。
-
-**解析**：
-
-```ts
-// explanation.capability.ts 请求体增加 material
+// explanation.capability.ts
 explanation.explain({ ..., question: { content, answer, options, material } })
 ```
 
-`explanation-cache.service.ts:151` 补 `material: q.material_text ?? null`。
+`judge-core.service.ts`（两处）与 `explanation-cache.service.ts:151` 补 `material: q.material_text ?? null`。
 
-> 兼容：`material` 均为可选，不传时 prompt 与今天逐字一致（有测试钉住）。
+> 兼容：不传 / 为空时 prompt 与今天逐字一致（加测试钉住）。
 
-### 5.4 展示（三处统一）
+### 6.4 展示（三处统一，B1 就做）
 
-**作答页**（`QuestionRunner`）：已有 `q.material` 渲染区，保持；只调整为「同组材料只显示一次」——需要在训练/考试作答流程里记住"本组材料已展示"。
+- **作答页**（`QuestionRunner`）：已有 `q.material` 区，无需改结构。
+- **结果页**（`AnswerResultList`）：已有 `q.material`（`max-h-[32vh]` 可滚动），无需改结构。
+- **历史回放**（`PracticeHistoryDetailPage`）：**新增 material 渲染**（当前缺字段，见 §3）。
+- 视觉规范：材料区在题面上方、浅底、可滚动（复用现有 `data-testid="question-material"` 样式），问题区紧随其后。**不折叠**（学生需要边看材料边答题，折叠会多一次点击）。
 
-**结果页**（`AnswerResultList`）：现在每题显示自己的 `q.material`。改为：
-- 按 `materialId` 分组；组内**第一题**展示材料区，后续小题不重复（显示「见上文材料」的轻提示或直接省略）。
-- 无 `materialId` 的题（老数据未回填）保持现状：每题显示自己的 material。
-
-**历史回放**（`PracticeHistoryDetailPage`）：**新增 `materialText` 字段**（当前缺失），渲染逻辑与结果页一致。
-
-### 5.5 接口变更
+### 6.5 接口变更
 
 | 端点 | 变更 |
 |---|---|
-| `GET /api/exams/sessions/{id}/results` | `items[]` 增加 `materialId`（`materialText` 已有） |
-| `GET /api/training/targeted/start` 等题目下发 | 增加 `materialId`（`materialText` 已有） |
-| `GET /api/student/practice-history/{source}/{id}` | `questions[]` 增加 `materialText` + `materialId` |
+| `GET /api/student/practice-history/{source}/{id}` | `questions[]` 增加 `materialText` |
+| `GET /api/exams/sessions/{id}/results` | 无变更（`materialText` 已有） |
+| 训练题目下发 | 无变更（`materialText` 已有） |
 
-> API 文档 §4.19 / §4.18 / §4.29 与 openapi 同步（项目铁律）。
-
-### 5.6 迁移与兼容
-
-1. 新增 `material_id` 列（幂等迁移 + schema.sql）。
-2. 语文老数据回填 material_id（一次性脚本，幂等）。
-3. 物理/化学抽取（data-refinery，人工确认）。
-4. 所有读路径对 `material_id` 为空的情况**保持今天的行为**（无材料题零感知）。
-
-### 5.7 测试
-
-- 后端：`questions.material_id` 回填脚本幂等测试；判题/解析带 `material` 时 prompt 含材料、不带时逐字不变；三处接口返回 `materialId/materialText`。
-- 前端：结果页同组材料只渲染一次；无 materialId 时每题渲染（回归）；历史回放渲染材料；作答页材料展示。
-- 数据：抽取脚本「只填空不覆盖」断言（前后逐行 MD5）。
+> API 文档 §4.29 与 openapi 同步。
 
 ---
 
-## 6. 验收标准
+## 7. 验收标准
 
-1. 物理/化学材料题：材料与小题分离，`material_text` 有值、`material_id` 同组一致。
-2. 结果页同一材料的 3 道小题只出现一次材料。
-3. 练习记录详情能看到材料（语文 + 物理 + 化学）。
-4. 判题/解析的 prompt 里能看到材料（抽查日志或单测断言）。
+1. 练习记录详情：语文材料题的**材料可见**（B1）。
+2. 物理/化学材料题：`material_text` 有值、`content` 只剩小问，**两者拼接逐字等于原文**（B2）。
+3. 结果页/作答页/历史回放三处渲染一致（材料区 + 问题区）。
+4. 判题/解析的 prompt 里含材料（单测断言）；无材料时逐字不变（回归）。
 5. 无材料的题（数学等）行为零变化。
-6. 语文老数据回填后，材料题展示不回归。
+6. 人工确认清单 100% 过目（B2）。
 
 ---
 
-## 7. 需要你裁决的点
+## 8. 风险
 
-| # | 决策点 | 选项 | 我的建议 |
+| 风险 | 缓解 |
+|---|---|
+| 题内材料规则误切（把问题当材料 / 把材料截断） | 拼接等原文的自校验 + 人工确认清单；不纯 LLM（不可复现） |
+| 抽离后判题缺材料导致判错率上升 | B2 必须与判题补 material 同批上线（B1 先铺） |
+| 老数据（语文）受影响 | 不动语文数据；`material_text` 为空时行为不变 |
+| 学生边看材料边答题的体验 | 材料区可滚动但不折叠，问题区紧随 |
+
+---
+
+## 9. 需要你裁决（4 项，已按实测收敛）
+
+| # | 决策点 | 选项 | 建议 |
 |---|---|---|---|
-| 1 | 材料存储 | A 保持 content 混排 / B 抽到 material_text | **B** |
-| 2 | 材料组标识 | 新增 `material_id` / 继续靠文本相同隐式分组 | **新增 material_id**（文本相同太脆） |
-| 3 | 材料展示 | 每题重复（语文现状）/ 同组只显示一次 | **只显示一次** |
-| 4 | 判题是否带材料 | 带 / 不带 | **带**（否则材料题判题缺上下文） |
-| 5 | 物理/化学材料抽取方式 | 规则候选 + 人工确认 / 纯 LLM 自动 | **规则 + 人工**（LLM 不可复现） |
-| 6 | 本次范围 | 只做「历史回放补 material」（1 天）/ 全量方案 B | 先做 1 天的最小补丁止血，再做全量？**还是直接做 B** |
-
-> 化学已于 2026-11-02 实测确认**有材料题**：`id=4309`「阅读下面科普短文」、`id=4317`「絮凝剂…【进行实验】」，与物理同形态（材料混在 content）。化学 4 题 >500 字、17 题 200–500 字。
+| 1 | 物理/化学要不要把材料抽到 `material_text` | 不抽（保持 content 混排）/ **抽** | **抽**（否则永远是一坨） |
+| 2 | 抽取方式 | 规则 + 人工确认 / 纯 LLM | **规则 + 人工** |
+| 3 | 是否把小问拆成独立题 | 不拆 / 拆（像语文） | **不拆**（与 splitter spec 冲突、丢图表上下文） |
+| 4 | 范围 | 只做 B1（1 天）/ B1+B2 | 建议 **B1 先上，B2 排期** |
 
 ---
 
-## 8. 待办（审核通过后）
+## 10. 建议实施顺序
 
-1. 迁移 + schema：`material_id` 列
-2. 语文老数据回填 material_id
-3. 物理/化学材料抽取（data-refinery + 人工确认）
-4. 判题/解析补 material
-5. 三处展示改造（作答页 / 结果页 / 历史回放）
-6. 接口 + 文档同步
-7. 测试与端到端验收
+1. **B1**：练习记录详情补 materialText（前后端 + 测试）——1 天
+2. **B1**：判题/解析补可选 material（零行为变化）——半天
+3. **B2**：`split_material()` 钩子 + 物化规则 + 候选清单——2–3 天
+4. **B2**：人工确认 + 落库（只写两列、拼接自校验）
+5. 文档同步（API §4.29 / openapi / constraints）
