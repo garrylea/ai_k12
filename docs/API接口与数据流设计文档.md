@@ -744,7 +744,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 | # | 端点 | 返回（data） |
 |---|---|---|
 | 1 | `GET /api/student/practice-history?page=&pageSize=&subjectId=` | `{items:[{source, sessionId, subjectId, title, module, startedAt, completedAt, totalCount, correctCount}], total, page, pageSize}` |
-| 2 | `GET /api/student/practice-history/:source/:sessionId` | `{session:{同列表项}, questions:[{questionId, questionOrder, answerText, isCorrect, score, method, analysis, judgedAt, questionContent, questionAnswer, questionAnalysis, refType, refId, sentenceIndex, passageTitle, passageSentence}]}` |
+| 2 | `GET /api/student/practice-history/:source/:sessionId` | `{session:{同列表项}, questions:[{questionId, questionOrder, answerText, isCorrect, score, method, analysis, judgedAt, questionContent, materialText, questionAnswer, questionAnalysis, refType, refId, sentenceIndex, passageTitle, passageSentence}]}` |
 
 **口径**：
 

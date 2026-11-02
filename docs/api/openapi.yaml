@@ -7937,6 +7937,10 @@ components:
         questionContent:
           type: string
           nullable: true
+        materialText:
+          type: string
+          nullable: true
+          description: 阅读材料（语文/英语）或物化题内材料；无材料为 null（2026-11-02）
         questionAnswer:
           type: string
           nullable: true

@@ -404,6 +404,17 @@ def extract_questions_file(source, config, llm, fb_llm,
     if not questions:
         return 0
 
+    # 题内材料切分（2026-11-02，物理/化学）：材料与小问在同一题号内
+    # （`31. 阅读以下文字…` + 材料 + `(1)(2)(3)`），切成 material_text + content。
+    # 已有跨题材料（语文/英语的 material_policy）不动；其他学科默认不切。
+    for q in questions:
+        if q.material_text and q.material_text.strip():
+            continue
+        material, rest = strategy.split_material(q.content)
+        if material:
+            q.material_text = material
+            q.content = rest
+
     # 题号缺号告警：MinerU 偶尔整题没转出来（大兴 2024 题18 只剩答案、正文缺失），
     # 切分器无法凭空补，只能显式告警让人核对 PDF。
     nums = {q.group_order for q in questions}

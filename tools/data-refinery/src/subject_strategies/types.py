@@ -69,6 +69,18 @@ class QuestionStrategy(Protocol):
     def material_policy(self) -> MaterialPolicy:
         ...
 
+    def split_material(self, content: str) -> tuple[str | None, str]:
+        """**题内材料切分**（2026-11-02）：返回 (material_text, 剩下的小问 content)。
+
+        与 `material_policy` 是两件事：
+        - `material_policy` 管「题号前 / 两题之间的短文是否归到这道题」（语文/英语，跨题共享）；
+        - `split_material` 管「同一道题内部，材料段与小问段分开」（物理/化学的实验探究题：
+          `31. 阅读以下文字…` + 材料 + `(1)(2)(3)` 全在一个题号内）。
+
+        默认返回 `(None, content)` —— 不切，行为与今天完全一致。
+        """
+        ...
+
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:
         """答案段 → 逐题答案；没有答案段返回空列表。"""
         ...

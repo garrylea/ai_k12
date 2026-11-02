@@ -46,6 +46,10 @@ class GenericStrategy:
     def material_policy(self) -> MaterialPolicy:
         return NO_MATERIAL
 
+    def split_material(self, content: str) -> tuple[str | None, str]:
+        """题内材料切分：默认不切（数学/语文/英语/道法都无此形态）。2026-11-02。"""
+        return (None, content)
+
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:
         return extract_generic_answers(text, md_path, strategy=self)
 
@@ -74,6 +78,10 @@ class NaturalScienceStrategy:
 
     def material_policy(self) -> MaterialPolicy:
         return NO_MATERIAL
+
+    def split_material(self, content: str) -> tuple[str | None, str]:
+        """题内材料切分：默认不切；物理/化学在各自文件覆盖。2026-11-02。"""
+        return (None, content)
 
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:
         # 把 self 当 strategy 传回去：子类若覆盖 split_options / material_policy，
