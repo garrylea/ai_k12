@@ -270,3 +270,36 @@ describe('preprocessMarkdown：\\[…\\] / \\(…\\) 归一为 $ 系定界符', 
     expect(html).toContain('\\[');
   });
 });
+
+/**
+ * 原生 HTML 内的 $…$ 公式（2026-11-02 用户报告）。
+ * 物理第 30 题标准答案把 `$S/mm^{2}$` 写在 `<td>` 里，remark-math 不解析 raw HTML
+ * 内部 → 页面原样显示美元符号。修复：rehype-raw 之后把文本节点里的 $…$ 包成
+ * math 元素，再交给 rehype-katex。
+ */
+describe('preprocessMarkdown/rehype：原生 HTML 内的公式', () => {
+  it('表格单元格里的行内公式渲染成 KaTeX，不再显示字面美元符', () => {
+    const html = render(
+      '<table><tr><td> $S/mm^{2}$ </td><td></td></tr><tr><td>I/A</td><td></td></tr></table>',
+    );
+    expect(html).not.toContain('$S/mm');
+    expect(html).toContain('katex');
+  });
+
+  it('HTML 里的块级公式 $$…$$ 走 display 模式', () => {
+    const html = render('<div>$$a^{2}+b^{2}=c^{2}$$</div>');
+    expect(html).not.toContain('$$a^{2}');
+    expect(html).toContain('katex-display');
+  });
+
+  it('code / pre 内的 $…$ 原样保留（不误伤代码示例）', () => {
+    const html = render('<pre><code>$x$</code></pre>');
+    expect(html).toContain('$x$');
+  });
+
+  it('货币写法不会被误判为公式', () => {
+    const html = render('<p>售价 $100 到 $200 元</p>');
+    expect(html).not.toContain('katex');
+    expect(html).toContain('$100');
+  });
+});

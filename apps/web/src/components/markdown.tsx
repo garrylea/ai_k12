@@ -249,8 +249,81 @@ function rehypeSvgAttrNames() {
   };
 }
 
+// ── 原生 HTML 里的 $…$ 公式 ────────────────────────────────────────────────
+// remark-math 只处理 markdown 文本节点，**不解析 raw HTML 内部**。LLM/题库生成的
+// 标准答案常把公式写进 HTML 表格单元格（如 `<td> $S/mm^{2}$ </td>`），rehype-raw
+// 把表格解析成元素后，单元格里的 `$S/mm^{2}$` 就成了一串普通文本 → 页面上原样显示
+// 美元符号（2026-11-02 用户报告：物理第 30 题实验数据记录表）。
+//
+// 修法：rehype-raw 之后、rehype-katex 之前，把文本节点里的 `$$…$$` / `$…$` 包成
+// `<span class="math math-inline">` / `<div class="math math-display">`（正是
+// remark-math 产出的形状），交给 rehype-katex 正常渲染。remark-math 已处理的公式
+// 是 math 节点（文本里没有 `$`），不会被二次命中；`code`/`pre` 内跳过。
+interface HastLike {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastLike[];
+}
+
+/** 前面已有定界符的 $…$（$$ 优先），行内公式要求紧贴内容、不跨行。 */
+const MATH_IN_HTML_RE = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+const MATH_SKIP_TAGS = new Set(['code', 'pre', 'style', 'script', 'textarea']);
+
+const mathElement = (tex: string, display: boolean): HastLike =>
+  display
+    ? { type: 'element', tagName: 'div', properties: { className: ['math', 'math-display'] }, children: [{ type: 'text', value: tex }] }
+    : { type: 'element', tagName: 'span', properties: { className: ['math', 'math-inline'] }, children: [{ type: 'text', value: tex }] };
+
+/** 把一段文本按公式切成 [文本, 公式, 文本…]；没有公式返回 null。 */
+function splitMathText(value: string): HastLike[] | null {
+  const out: HastLike[] = [];
+  let last = 0;
+  let matched = false;
+  for (const m of value.matchAll(MATH_IN_HTML_RE)) {
+    const [full, displayTex, inlineTex] = m;
+    const display = displayTex !== undefined;
+    const tex = display ? displayTex : inlineTex;
+    // 行内公式不能以空白开头/结尾（$ 100 元 $、$100 到 $200 里的第二段都不算公式）。
+    if (!display && (/^\s/.test(tex) || /\s$/.test(tex))) continue;
+    const start = m.index ?? 0;
+    if (start > last) out.push({ type: 'text', value: value.slice(last, start) });
+    out.push(mathElement(tex, display));
+    last = start + full.length;
+    matched = true;
+  }
+  if (!matched) return null;
+  if (last < value.length) out.push({ type: 'text', value: value.slice(last) });
+  return out;
+}
+
+function rehypeMathInHtml() {
+  return (tree: HastLike) => {
+    const walk = (node: HastLike, insideSkip: boolean) => {
+      if (!node.children) return;
+      const skip = insideSkip || (node.type === 'element' && MATH_SKIP_TAGS.has(node.tagName ?? ''));
+      const next: HastLike[] = [];
+      for (const child of node.children) {
+        if (child.type === 'text' && !skip && child.value) {
+          const parts = splitMathText(child.value);
+          if (parts) {
+            next.push(...parts);
+            continue;
+          }
+        }
+        walk(child, skip);
+        next.push(child);
+      }
+      node.children = next;
+    };
+    walk(tree, false);
+  };
+}
+
 export const markdownRehypePlugins: NonNullable<Options['rehypePlugins']> = [
   rehypeRaw,
+  rehypeMathInHtml,
   [rehypeKatex, { output: 'html' }],
   rehypeSvgAttrNames,
 ];
