@@ -92,11 +92,31 @@ routes:
     - subject: english
       primary: kimi
       fallback: qwen3.8-max
+    # 2026-11-01：物化跟数学（理科快模型）、道法跟语文（文科 kimi）。
+    - subject: physics
+      primary: deepseek-flash
+      fallback: qwen3.8-max
+    - subject: chemistry
+      primary: deepseek-flash
+      fallback: qwen3.8-max
+    - subject: politics
+      primary: kimi
+      fallback: qwen3.8-max
 
   judgment:
     - subject: math
       # 训练模块（专项/考试/错题）判题默认走本地 Qwen3.8-27B；
       # 本地不可用回退 qwen3.8-max（JudgmentCapability 传 thinking:false）。
+      primary: local
+      fallback: qwen3.8-max
+    # 2026-11-01：物化道各自成档，同数学（本地优先）。
+    - subject: physics
+      primary: local
+      fallback: qwen3.8-max
+    - subject: chemistry
+      primary: local
+      fallback: qwen3.8-max
+    - subject: politics
       primary: local
       fallback: qwen3.8-max
 
@@ -110,10 +130,30 @@ routes:
     - subject: english
       primary: kimi
       fallback: qwen3.8-max
+    # 2026-11-01：物化跟数学（reasoner 写解析）、道法跟语文（kimi）。
+    - subject: physics
+      primary: qwen3.8-max
+      fallback: deepseek-flash
+    - subject: chemistry
+      primary: qwen3.8-max
+      fallback: deepseek-flash
+    - subject: politics
+      primary: kimi
+      fallback: qwen3.8-max
 
   hint:
     # 课堂练习提示：轻量启发任务，用快模型（同 judgment/grading），无需重 reasoner。
     - subject: math
+      primary: deepseek-flash
+      fallback: qwen3.8-max
+    # 2026-11-01：物化道各自成档（训练轨提示）。
+    - subject: physics
+      primary: deepseek-flash
+      fallback: qwen3.8-max
+    - subject: chemistry
+      primary: deepseek-flash
+      fallback: qwen3.8-max
+    - subject: politics
       primary: deepseek-flash
       fallback: qwen3.8-max
 

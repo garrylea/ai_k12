@@ -13,7 +13,11 @@ export function contentToText(content: string | ContentPart[]): string {
 // ========== Model Router Types (§3.1.2) ==========
 
 export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge' | 'handwriting';
-export type Subject = 'math' | 'chinese' | 'english';
+/**
+ * AI 路由学科档位。2026-11-01 起物理/化学/道法**各自成档**（此前共用 math）。
+ * 生物/历史/地理仍无入口，由 `subjectCodeOf` 回落 math。
+ */
+export type Subject = 'math' | 'chinese' | 'english' | 'physics' | 'chemistry' | 'politics';
 export type Provider = 'kimi' | 'qwen' | 'gemini' | 'deepseek' | 'local';
 export type Difficulty = 1 | 2 | 3;
 export type Track = 'mainline' | 'auxiliary';

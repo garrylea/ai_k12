@@ -23,7 +23,7 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
-import { targetedTaskCode } from '../../common/subject-config.js';
+import { targetedTaskCode, subjectCodeOf } from '../../common/subject-config.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
 import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
@@ -727,7 +727,8 @@ export class TrainingService {
     try {
       const result = await this.hint.generate({
         questionContent: q.content,
-        subject: 'math',
+        // 2026-11-01：按题目学科取路由档位（此前写死 math，物化道走默认档）。
+        subject: subjectCodeOf(q.subject_id),
       });
       // 3. 写回缓存（失败不阻断返回，仅记日志）
       try {

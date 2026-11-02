@@ -20,7 +20,7 @@ export interface ExplanationCapabilityDeps {
   modelClient?: ModelClient;
 }
 
-/** 提示词里的角色名。路由键 Subject 只有 math/chinese/english，物化等新学科共用数学档位。 */
+/** 提示词里的角色名。2026-11-01 起物化道各自成档，不再共用数学。 */
 export const SUBJECT_LABELS: Record<string, string> = {
   math: '数学',
   chinese: '语文',

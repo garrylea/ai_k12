@@ -78,8 +78,8 @@ describe('ExplanationCacheService', () => {
       { label: 'D', text: '库仑(C)' },
     ]);
     expect(req.question.content).toBe('在国际单位制中，电阻的单位是');
-    // 路由表只有三科：物理共用数学档位，但提示词角色按真实学科
-    expect(req.subject).toBe('math');
+    // 2026-11-01：物化道各自成档（此前共用 math），路由与提示词角色都按真实学科
+    expect(req.subject).toBe('physics');
     expect(req.subjectLabel).toBe('物理');
   });
 

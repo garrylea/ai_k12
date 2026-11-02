@@ -8,7 +8,7 @@ import { PointsService, type AwardResult } from '../points/points.service.js';
 import { EventsService } from '../analytics/events.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
-import { isSelfAssessSubject, prefersExactBeforeSelfAssess } from '../../common/subject-config.js';
+import { isSelfAssessSubject, prefersExactBeforeSelfAssess, subjectCodeOf } from '../../common/subject-config.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
 /** 仅走 exact 比对的客观题：选项/判断标签形式固定，可靠，不等即判错。
@@ -342,7 +342,8 @@ export class JudgeCoreService {
           standardAnswer: q.answer ?? '',
           reference: q.explanation ?? '',
           studentAnswer: input.studentAnswer,
-          subject: 'math',
+          // 2026-11-01：按题目学科取路由档位（此前写死 math，物化道永远走数学档）。
+          subject: subjectCodeOf(q.subject_id),
           questionType,
         });
         isCorrect = result.isCorrect;
@@ -502,7 +503,8 @@ export class JudgeCoreService {
           standardAnswer: q?.answer ?? '',
           reference: q?.explanation ?? '',
           studentAnswer: input.studentAnswer,
-          subject: 'math',
+          // q 可能不存在（孤儿题）——回落 math 档，与无学科信息时的历史口径一致。
+          subject: q?.subject_id != null ? subjectCodeOf(q.subject_id) : 'math',
           questionType,
         });
         isCorrect = result.isCorrect;

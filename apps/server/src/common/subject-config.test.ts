@@ -4,6 +4,7 @@ import {
   paperTaskCode,
   prefersExactBeforeSelfAssess,
   selfAssessSkipsJudging,
+  subjectCodeOf,
   targetedTaskCode,
 } from './subject-config.js';
 
@@ -42,5 +43,19 @@ describe('subject-config 自评口径', () => {
 
   it('只有 4/5/9 先做归一化相等再自评', () => {
     expect([1, 2, 3, 4, 5, 9].filter(prefersExactBeforeSelfAssess)).toEqual([4, 5, 9]);
+  });
+});
+
+describe('subject-config AI 路由档位（2026-11-01）', () => {
+  it('1/2/3/4/5/9 各自成档', () => {
+    expect([1, 2, 3, 4, 5, 9].map(subjectCodeOf)).toEqual([
+      'math', 'chinese', 'english', 'physics', 'chemistry', 'politics',
+    ]);
+  });
+
+  it('表外学科（6/7/8/NaN/null/undefined）回落 math', () => {
+    for (const id of [6, 7, 8, Number.NaN, null, undefined]) {
+      expect(subjectCodeOf(id as never)).toBe('math');
+    }
   });
 });

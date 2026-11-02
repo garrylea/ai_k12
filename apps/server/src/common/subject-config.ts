@@ -62,3 +62,25 @@ export function prefersExactBeforeSelfAssess(subjectId: number): boolean {
   const id = Number(subjectId);
   return id === SUBJECT_PHYSICS || id === SUBJECT_CHEMISTRY || id === SUBJECT_POLITICS;
 }
+
+/**
+ * subject_id → AI 路由学科档位（2026-11-01）。
+ *
+ * 此前 `ai-core` 的 `Subject` 只有 math/chinese/english，物化道共用 math 档位，
+ * 导致运营管理里无法给它们单独配模型。现在三科各自成档；生物/历史/地理仍无入口，
+ * 回落 math（与 `TARGETED_TASK_CODE` 的兜底口径一致）。
+ */
+export type RouteSubject = 'math' | 'chinese' | 'english' | 'physics' | 'chemistry' | 'politics';
+
+const ROUTE_SUBJECT: Readonly<Record<number, RouteSubject>> = {
+  [SUBJECT_MATH]: 'math',
+  [SUBJECT_CHINESE]: 'chinese',
+  [SUBJECT_ENGLISH]: 'english',
+  [SUBJECT_PHYSICS]: 'physics',
+  [SUBJECT_CHEMISTRY]: 'chemistry',
+  [SUBJECT_POLITICS]: 'politics',
+};
+
+export function subjectCodeOf(subjectId: number | null | undefined): RouteSubject {
+  return ROUTE_SUBJECT[Number(subjectId)] ?? 'math';
+}

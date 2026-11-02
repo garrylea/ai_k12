@@ -9,11 +9,15 @@ const QUEUE_CONCURRENCY = 2;
 /** answer 达到该长度视为「过程性题解」，直接直写不入库 LLM（PRD/试卷参考答案常为完整过程）。 */
 const ANSWER_AS_SOLUTION_MIN_LEN = 100;
 
-/** llm_routes 只配了 math/chinese/english 三行：物理/化学/道法共用数学档位（强模型）。 */
+/** questions.subject 的 code → AI 路由档位。2026-11-01 起物化道各自成档（此前共用 math）。 */
 const ROUTE_SUBJECTS: Record<string, Subject> = {
   math: 'math',
   chinese: 'chinese',
   english: 'english',
+  // 2026-11-01：物化道各自成档（此前共用 math），运营管理可单独配模型。
+  physics: 'physics',
+  chemistry: 'chemistry',
+  politics: 'politics',
 };
 
 /** questions.options 的 JSON → 选项数组；坏 JSON/空串都当没有（返回 undefined）。 */

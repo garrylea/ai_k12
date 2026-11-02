@@ -13,7 +13,7 @@ import {
 } from '@/services/api';
 
 const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible', 'local'];
-const SUBJECTS = ['math', 'chinese', 'english', '*'];
+const SUBJECTS = ['math', 'chinese', 'english', 'physics', 'chemistry', 'politics', '*'];
 
 interface ModelFormState {
   modelKey: string;
