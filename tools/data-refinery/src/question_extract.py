@@ -16,6 +16,7 @@ from pathlib import Path
 import pymysql
 
 from answer_merger import maybe_merge_answer_md
+from extract import _parse_json_object
 from question_splitter import is_junk_question, split_page, split_options
 from question_labeler import QuestionLabeler, LabeledQuestion
 from section_analyzer import analyze_sections
@@ -353,6 +354,75 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
     return out_file
 
 
+def _judge_suspects(llm, suspects: list[dict], paper_stem: str) -> set[int]:
+    """把裸题号候选行批量交 LLM 复核，返回可采纳的行索引集合。
+
+    只采纳 `is_stem=true` 且 `number == expected` 的条目（防幻觉/防把数据行当题号）。
+    LLM 不可用或返回异常 → 返回空集，这些题仍由第 6 步扫描报出来走人工补题。
+    """
+    if not suspects:
+        return set()
+    try:
+        prompt_path = Path(__file__).parent / "prompts" / "stem_judge.txt"
+        system = prompt_path.read_text(encoding="utf-8")
+    except OSError:
+        system = (
+            "判断每行是不是试卷新题的开头，只输出 JSON："
+            '{"stems":[{"line_no":123,"number":11,"is_stem":true}]}'
+        )
+    lines_block = []
+    for i, s in enumerate(suspects):
+        lines_block.append(
+            f"--- 候选{ i + 1} 行号={s['line_no']} 期望题号={s['expected']} ---\n"
+            f"前文：{s.get('before','')}\n"
+            f"本行：{s['text']}\n"
+            f"后文：{s.get('after','')}"
+        )
+    user = "\n\n".join(lines_block)
+    try:
+        resp = llm.complete(system, user)
+        data = _parse_json_object(resp.content or "")
+    except Exception as exc:
+        print(f"[stem-judge] {paper_stem}: LLM 复核失败（{exc}），按规则结果继续",
+              flush=True)
+        return set()
+
+    accepted: set[int] = set()
+    by_line = {s["line_no"]: s for s in suspects}
+    for item in data.get("stems", []):
+        try:
+            line_no = int(item.get("line_no"))
+            number = int(item.get("number"))
+        except (TypeError, ValueError):
+            continue
+        if not item.get("is_stem"):
+            continue
+        s = by_line.get(line_no)
+        if s and number == s["expected"]:
+            accepted.add(line_no)
+    if accepted:
+        print(f"[stem-judge] {paper_stem}: LLM 采纳 {len(accepted)} 行裸题号"
+              f"（题号 {[by_line[i]['number'] for i in sorted(by_line) if i in accepted]}）",
+              flush=True)
+    # 留痕：所有候选与结论都落 split_suspects.jsonl，便于复盘
+    try:
+        log_path = Path(__file__).resolve().parents[1] / "output" / "split_suspects.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            for s in suspects:
+                fh.write(json.dumps({
+                    "paper": paper_stem,
+                    "line_no": s["line_no"],
+                    "expected": s["expected"],
+                    "number": s["number"],
+                    "text": s["text"],
+                    "accepted": s["line_no"] in accepted,
+                }, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    return accepted
+
+
 def extract_questions_file(source, config, llm, fb_llm,
                             extracted_dir: Path, label_batch_size: int = 1) -> int:
     """处理单个试卷 MD：切题 + 标注 + 写 JSONL。返回切出的题数。
@@ -393,7 +463,15 @@ def extract_questions_file(source, config, llm, fb_llm,
     # 4. 题号切分 + 答案对齐（一次扫描）
     # 材料归属（语文阅读材料写在题号之前、按小节归属到每道题）由学科策略决定，
     # 其它学科的策略 attach=False，行为不变。
-    questions = split_page(text, md_path, strategy=strategy)
+    suspects: list[dict] = []
+    questions = split_page(text, md_path, strategy=strategy, suspects_out=suspects)
+    # 裸题号兜底：规则没认、又没满足 4 条采纳条件的候选行，整卷一次交 LLM 复核；
+    # 模型说"是题"且题号 == 期望值的才采纳，重跑一遍切分把这几行强制当题号。
+    if suspects and llm is not None:
+        accepted = _judge_suspects(llm, suspects, md_path.stem)
+        if accepted:
+            questions = split_page(text, md_path, strategy=strategy,
+                                   forced_stem_lines=accepted)
     # 卷首页脚/署名会被切题器当成一道题，占掉真实题号（北师大实验 2024：题4）
     kept = [q for q in questions if not is_junk_question(q)]
     if len(kept) != len(questions):

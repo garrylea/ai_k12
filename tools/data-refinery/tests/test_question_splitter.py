@@ -1206,3 +1206,95 @@ D. 4
     qs = split_page(md, Path('卷A.md'))
     flags = {q.group_order: q.multi_choice for q in qs}
     assert flags == {1: False, 2: False, 3: True, 4: True}
+
+
+# ---- 裸题号（OCR 丢了点）规则级 + LLM 兜底 ----
+
+def _math_strategy():
+    return get_strategy("math")
+
+
+def test_bare_stem_accepted_when_continuous_with_next_stem():
+    """`11 在平面直角坐标系…`：题号连续、独立成段、后文有 12 → 规则级认。"""
+    md = """# 卷
+
+1. 题一
+
+2. 题二
+
+3 在平面直角坐标系中求坐标
+
+4. 题四
+"""
+    qs = split_page(md, Path('x.md'), strategy=_math_strategy())
+    assert [q.group_order for q in qs] == [1, 2, 3, 4]
+    assert qs[2].content.startswith("在平面直角坐标系")
+
+
+def test_bare_stem_accepted_at_section_end_via_boundary():
+    """最后一题裸题号、后文是大题标题：边界条件也算采纳。"""
+    md = """# 卷
+
+1. 题一
+
+2 题二后面直接到大题标题
+
+## 二、解答题
+"""
+    qs = split_page(md, Path('x.md'), strategy=_math_strategy())
+    assert [q.group_order for q in qs] == [1, 2]
+    assert qs[1].content.startswith("题二后面")
+
+
+def test_bare_stem_rejected_when_measure_word_follows():
+    """`3 个苹果` 不是题 3（量词开头）。"""
+    md = """# 卷
+
+1. 题一
+
+2. 题二
+
+3 个苹果分给五个小朋友
+
+3. 真正的题三
+
+4. 题四
+"""
+    qs = split_page(md, Path('x.md'), strategy=_math_strategy())
+    assert [q.group_order for q in qs] == [1, 2, 3, 4]
+
+
+def test_bare_stem_rejected_when_measure_word_collects_suspect():
+    """`3 个苹果...`：题号连续但量词开头 → 规则否决，进 suspects 交 LLM 复核。"""
+    md = """# 卷
+
+1. 题一
+
+2. 题二
+
+3 个苹果分给五个小朋友求每人多少
+
+4. 题四
+"""
+    suspects: list = []
+    qs = split_page(md, Path('x.md'), strategy=_math_strategy(), suspects_out=suspects)
+    # 量词开头 → 不认；真正的题 3 缺失，最终只有 1、2、4
+    assert [q.group_order for q in qs] == [1, 2, 4]
+    assert any(s["number"] == 3 for s in suspects)
+
+
+def test_forced_stem_lines_override_rules():
+    """LLM 复核通过的裸题号（forced）第二遍强制当题号，绕过规则级否决。"""
+    md = """1. 题一
+
+2 个苹果分给小朋友
+
+3. 题三
+"""
+    # 第一遍规则会拒「2 个苹果」（量词开头）；带 forced 后第二遍强制当题号
+    suspects: list = []
+    first = split_page(md, Path('x.md'), strategy=_math_strategy(), suspects_out=suspects)
+    assert 2 not in {q.group_order for q in first}
+    qs = split_page(md, Path('x.md'), strategy=_math_strategy(), forced_stem_lines={2})
+    assert 2 in {q.group_order for q in qs}
+    assert qs[1].content.startswith("个苹果分给小朋友")

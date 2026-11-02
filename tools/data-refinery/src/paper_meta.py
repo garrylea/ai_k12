@@ -12,11 +12,14 @@ from dataclasses import dataclass
 _LEVEL_TO_BAND = {"小学": "primary", "初中": "junior", "高中": "senior"}
 _SEMESTER_CN = {"上": "first", "下": "second"}
 
-# 文件名：subject-grade(学期)-YYYYMM-district-exam_type-file_type
+# 文件名：subject-grade(学期)-YYYYMM-district-exam_type-file_type[-来源ID]
+# 来源 ID 后缀是爬虫防重名时加的（tools/crawler/src/core/storage.py）：
+# 文件名冲突时 `…-试卷.pdf` 会存成 `…-试卷-86419.pdf`。这个 id 与卷子无关，
+# 只是去重用的，必须容忍，否则整卷只进题、不建 exam_papers（看不到卷子）。
 _FILENAME_RE = re.compile(
     r"^(?P<subject>[^-]+)-(?P<grade>[^-()]+)\((?P<sem_cn>[上下])\)"
     r"-(?P<year_code>\d{6})-(?P<district>[^-]+)-(?P<exam_type>[^-]+)"
-    r"-(?P<file_type>试卷|答案)\.jsonl$"
+    r"-(?P<file_type>试卷|答案)(?:-\d+)?\.jsonl$"
 )
 
 
@@ -31,6 +34,9 @@ class PaperMeta:
     exam_type: str
     file_type: str
     title: str
+    # 文件名里的原始地点段（`海淀` 或 `海淀·一零一中学`）。title 会用它重建，
+    # 卷面元数据补全后可原样保留学校名，不必把 school 再拆一次。
+    location: str | None = None
 
 
 def _parse_with_dirs(level: str, semester: str, year_dir: str, filename: str) -> PaperMeta | None:
@@ -58,6 +64,7 @@ def _parse_with_dirs(level: str, semester: str, year_dir: str, filename: str) ->
         exam_type=m.group("exam_type"),
         file_type=m.group("file_type"),
         title=f"{year} {location} {m.group('grade')} {m.group('exam_type')}",
+        location=location,
     )
 
 

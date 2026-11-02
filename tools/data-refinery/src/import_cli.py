@@ -35,6 +35,7 @@ from config import RefineryConfig
 from convert_cli import main as convert_main
 from db_loader_cli import main as db_loader_main
 from extract_cli import main as extract_main
+from paper_meta_cli import main as paper_meta_main
 from publish_cli import main as publish_main
 from scope_filter import add_scope_args, describe, scope_argv, scope_from_args
 
@@ -62,6 +63,8 @@ def parse_args(argv=None):
     parser.add_argument("--skip-convert", action="store_true", help="跳过 convert（复用已有 md）")
     parser.add_argument("--skip-extract", action="store_true", help="跳过 extract")
     parser.add_argument("--skip-publish", action="store_true", help="跳过 publish")
+    parser.add_argument("--skip-meta", action="store_true",
+                        help="跳过卷面元数据（output/meta sidecar），文件名缺区县时不再补")
     parser.add_argument("--skip-load", action="store_true", help="跳过 db_loader（只到 published）")
     parser.add_argument("--skip-answers", action="store_true", help="跳过第 5 步答案回填")
     parser.add_argument("--skip-review", action="store_true",
@@ -131,6 +134,16 @@ def publish_argv(args) -> list[str]:
         argv.append("--dry-run")
     if args.re_publish or args.redo:
         argv.append("--reconvert")
+    return argv
+
+
+def meta_argv(args) -> list[str]:
+    """paper_meta_cli：与 extract 同样用 --file（rel_path 子串）。"""
+    argv = _common(args)
+    if args.file:
+        argv += ["--file", args.file]
+    if args.dry_run:
+        argv.append("--dry-run")
     return argv
 
 
@@ -254,28 +267,33 @@ def _execute(args) -> int:
 
     stages = []
     if not args.skip_convert:
-        stages.append(("1/8 convert（素材 → md）", convert_main, convert_argv(args)))
+        stages.append(("1/9 convert（素材 → md）", convert_main, convert_argv(args)))
     if not args.skip_extract:
-        stages.append(("2/8 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
+        stages.append(("2/9 extract（md → cards/questions + LLM 标注）", extract_main, extract_argv(args)))
     if not args.skip_publish:
-        stages.append(("3/8 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
+        stages.append(("3/9 publish（图片物化 + 路径改写）", publish_main, publish_argv(args)))
+    # 卷面元数据 sidecar：文件名缺区县/学校时从 md 首屏补，写 output/meta/<卷>.json
+    # 试卷才需要（教材卡不入 exam_papers）；--cards-only 时跳过避免空跑
+    if not args.skip_meta and not args.cards_only:
+        stages.append(("4/9 试卷元数据（卷面 → output/meta sidecar）",
+                       paper_meta_main, meta_argv(args)))
     if not args.skip_load:
-        stages.append(("4/8 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
+        stages.append(("5/9 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
     # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起
     if not args.skip_answers and not args.cards_only and not args.skip_load:
-        stages.append(("5/8 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
+        stages.append(("6/9 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
     # 识别问题扫描：缺号 / 被吞 / 内容不完整 / 前后题合并 / 卷首页脚被当题，
     # 落 output/recognition_issues.jsonl，供 scripts/fix_question_cli.py 逐条人工确认
     # （不阻塞入库，可随时补跑）
     if not args.cards_only:
-        stages.append(("6/8 识别问题扫描（缺号/被吞/内容不完整/前后题合并/噪声题）",
+        stages.append(("7/9 识别问题扫描（缺号/被吞/内容不完整/前后题合并/噪声题）",
                        _scan_entry(args), []))
         # 扫完直接引导人工补题：交互终端下会逐条问，非交互（CI/管道）只打印命令，
         # 避免 CI 卡在 input() 上。补完的内容在 output/manual_fixes/，
         # 用 scripts/apply_fixes_cli.py --apply 统一写库。
-        stages.append(("7/8 人工补题（逐条确认，可跳过）", _fix_entry(args), []))
+        stages.append(("8/9 人工补题（逐条确认，可跳过）", _fix_entry(args), []))
         # 补完就地入库：先跑一遍预览，TTY 下问一次 y 才写
-        stages.append(("8/8 补题入库（预览后确认）", _apply_entry(args), []))
+        stages.append(("9/9 补题入库（预览后确认）", _apply_entry(args), []))
 
     try:
         for label, fn, sub_argv in stages:

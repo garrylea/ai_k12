@@ -1217,18 +1217,32 @@ class DbLoader:
         """按 source_key 唯一键 find-or-create exam_papers，返回 paper_id。
 
         source_key = published JSONL 相对路径（去 .jsonl），幂等键（同 4 元组 edition 思路）。
+        卷面元数据补全后重导同一卷会带来新的 title/district/grade —— 已存在时按新值
+        UPDATE（不删重建，保留 paper_id 与 paper_questions 关联）。
         """
         row = self._query(
-            "SELECT id FROM exam_papers WHERE source_key=%s LIMIT 1", (source_key,))
-        if row:
-            return int(row[0][0])
-        self._exec(
-            "INSERT INTO exam_papers (subject_id, title, grade, grade_band, semester, "
-            "year, district, exam_type, source_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (subject_id, meta.title, meta.grade, meta.grade_band, meta.semester,
-             meta.year, meta.district, meta.exam_type, source_key),
-        )
-        return int(self._query("SELECT LAST_INSERT_ID()")[0][0])
+            "SELECT id, title, grade, district FROM exam_papers WHERE source_key=%s LIMIT 1",
+            (source_key,))
+        if not row:
+            self._exec(
+                "INSERT INTO exam_papers (subject_id, title, grade, grade_band, semester, "
+                "year, district, exam_type, source_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (subject_id, meta.title, meta.grade, meta.grade_band, meta.semester,
+                 meta.year, meta.district, meta.exam_type, source_key),
+            )
+            return int(self._query("SELECT LAST_INSERT_ID()")[0][0])
+        paper_id = int(row[0][0])
+        old_title, old_grade, old_district = row[0][1], row[0][2], row[0][3]
+        if (old_title, old_grade, old_district) != (meta.title, meta.grade, meta.district):
+            self._exec(
+                "UPDATE exam_papers SET title=%s, grade=%s, district=%s WHERE id=%s",
+                (meta.title, meta.grade, meta.district, paper_id),
+            )
+            print(f"[paper] 更新元数据 #{paper_id}: "
+                  f"grade {old_grade or '空'}→{meta.grade} / "
+                  f"district {old_district or '空'}→{meta.district or '空'}",
+                  flush=True)
+        return paper_id
 
     def find_or_create_paper_from_meta(self, meta: PaperMeta, source_key: str) -> int:
         """CLI 便捷入口：meta.subject（路径首段，中文学科名）归一到 code 再 find-or-create。"""
@@ -1247,6 +1261,27 @@ class DbLoader:
             if options_signature(stored) == sig:
                 return qid
         return None
+
+    def _update_question_row(self, qid: int, sid: int, q: dict,
+                             content: str, opts, chash: str) -> None:
+        """同卷同题号的旧行原址更新（重抽/补题回写时复用，避免卷内出现两份同号题）。
+
+        `answer` 用 COALESCE(NULLIF(%s,''), answer)：新内容没给答案时不覆盖已有答案
+        （人工核验过/答案回填过的题不会被空值清空）。`answer_verified` 不动。
+        """
+        self._exec(
+            "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, type=%s, "
+            "difficulty=%s, full_score=%s, content=%s, options=%s, "
+            "answer=COALESCE(NULLIF(%s,''), answer), explanation=%s, approach=%s, "
+            "material_text=%s, material_url=%s, grade_band=%s, source=%s, "
+            "source_year=%s, content_hash=%s, is_active=1 WHERE id=%s",
+            (sid, q.get("group_id"), q.get("group_order"), q.get("type"),
+             q.get("difficulty"), q.get("full_score"), content,
+             json.dumps(opts, ensure_ascii=False) if opts is not None else None,
+             q.get("answer") or "", q.get("explanation"), q.get("approach"),
+             q.get("material_text"), q.get("material_url"), q.get("grade_band"),
+             q.get("source"), q.get("source_year"), chash, qid),
+        )
 
     def load_questions(self, questions: list[dict],
                        paper: tuple[PaperMeta, int] | None = None) -> int:

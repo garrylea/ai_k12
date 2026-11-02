@@ -13,6 +13,7 @@ from pathlib import Path
 
 from config import RefineryConfig
 from db_loader import DbLoader
+from paper_head import apply_sidecar, load_sidecar
 from paper_meta import parse_paper_meta
 from scope_filter import describe, match_scope, scope_from_args
 
@@ -289,6 +290,11 @@ def main(argv=None):
             paper_ctx = None
             if meta is not None and meta.file_type == "试卷":
                 source_key = rel[: -len(".jsonl")]
+                # 卷面元数据 sidecar（paper_meta_cli 产物）：文件名缺区县/学校时
+                # 用卷面首屏补，district 不再写「北京各」这种集合名
+                sidecar = load_sidecar(cfg.output_dir, rel)
+                if sidecar is not None:
+                    meta = apply_sidecar(meta, sidecar)
                 paper_id = loader.find_or_create_paper_from_meta(meta, source_key)
                 paper_ctx = (meta, paper_id)
             elif meta is None:

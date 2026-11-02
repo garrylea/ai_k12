@@ -81,3 +81,28 @@ def test_district_with_school_keeps_only_district_in_column():
     assert m is not None
     assert m.district == "海淀"
     assert m.title == "2025 海淀·一零一中学 初三 （上）期中"
+
+
+def test_crawler_id_suffix_flat_layout():
+    """爬虫重名时加的来源 id 后缀（`…-试卷-86419.pdf`）必须容忍，
+    否则整卷只进题、不建 exam_papers（86419 实测事故）。"""
+    m = parse_paper_meta(
+        "数学/初中/first/2025/数学-初三(上)-202507-北京各-（上）期中-试卷-86419.jsonl"
+    )
+    assert m is not None
+    assert m.file_type == "试卷"
+    assert m.district == "北京各"
+    assert m.title == "2025 北京各 初三 （上）期中"
+    assert "86419" not in m.title
+
+
+def test_crawler_id_suffix_nested_layout():
+    """嵌套布局：目录名与文件 stem 都带 id 后缀，仍然相等，应识别。"""
+    rel = ("数学/初中/first/2025/数学-初三(上)-202507-北京各-（上）期中-试卷-86419/"
+           "数学-初三(上)-202507-北京各-（上）期中-试卷-86419.jsonl")
+    m = parse_paper_meta(rel)
+    assert m is not None
+    assert m.subject == "数学"
+    assert m.year == 2025
+    assert "86419" not in m.title
+    assert m.location == "北京各"

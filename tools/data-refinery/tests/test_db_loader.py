@@ -758,23 +758,40 @@ class TestFindOrCreatePaper:
         assert inserts[0][1] == meta.title
 
     def test_hit_returns_existing_without_insert(self):
+        meta = _paper_meta()
         loader, queries = _make_loader_seq({
-            "FROM exam_papers WHERE source_key": [[(7,)]],
+            "FROM exam_papers WHERE source_key": [[(7, meta.title, meta.grade, meta.district)]],
         })
-        pid = loader._find_or_create_paper(_paper_meta(), 1, "k")
+        pid = loader._find_or_create_paper(meta, 1, "k")
         assert pid == 7
         assert all(not sql.startswith("INSERT INTO exam_papers") for sql, _ in queries)
+        # 元数据未变时也不 UPDATE
+        assert all(not sql.startswith("UPDATE exam_papers") for sql, _ in queries)
 
     def test_from_meta_maps_chinese_subject_to_code(self):
         """meta.subject 是中文学科名（路径首段），须经 name->code 映射查 subjects。"""
+        meta = _paper_meta()
         loader, queries = _make_loader_seq({
             "FROM subjects WHERE code": [[(1,)]],
-            "FROM exam_papers WHERE source_key": [[(7,)]],
+            "FROM exam_papers WHERE source_key": [[(7, meta.title, meta.grade, meta.district)]],
         })
-        pid = loader.find_or_create_paper_from_meta(_paper_meta(), "k")
+        pid = loader.find_or_create_paper_from_meta(meta, "k")
         assert pid == 7
         subj_args = [a for sql, a in queries if "FROM subjects WHERE code" in sql]
         assert subj_args == [("math",)]
+
+    def test_existing_paper_updates_when_metadata_changes(self):
+        """卷面元数据补全后重导：title/district/grade 变了要 UPDATE，不删重建。"""
+        meta = _paper_meta(district="海淀", grade="初三", title="2024 海淀 初三 模拟二")
+        loader, queries = _make_loader_seq({
+            "FROM exam_papers WHERE source_key": [[(7, "2024 北京各 初三 模拟二", "初三", "北京各")]],
+        })
+        pid = loader._find_or_create_paper(meta, 1, "k")
+        assert pid == 7
+        updates = [a for sql, a in queries if sql.startswith("UPDATE exam_papers")]
+        assert len(updates) == 1
+        # UPDATE 携带新 title/grade/district
+        assert updates[0][:3] == (meta.title, meta.grade, meta.district)
 
 
 class TestLoadQuestionsPaperGrouping:

@@ -150,6 +150,75 @@ def is_sub_stem(line: str) -> bool:
     return bool(_SUB_STEM_RE.match(line))
 
 
+# 裸题号：行首 `11 在平面直角坐标系…`（OCR 把题号后的点丢了）。规则级只在题号连续、
+# 独立成段、后文有下一题号或边界时才认，否则交给 LLM 复核（见 extract 第二遍）。
+_BARE_STEM_RE = re.compile(r"^\s*#{0,6}\s*(\d{1,2})\s+(?=[^\d\s])")
+
+
+def _starts_with_measure_word(rest: str) -> bool:
+    """数字后紧跟量词（`3 个苹果` / `2 分` / `2024 年`）的不是题号。
+
+    这是裸题号规则级最常见的误判，必须先排除；题干几乎不以量词开头。
+    """
+    return rest[:1] in "个只名位元角分秒倍%年月日多余"
+
+
+def _bare_stem_candidate(line: str) -> tuple[int, str] | None:
+    """行首是裸题号 → 返回 (题号, 题干首行)；否则 None。"""
+    m = _BARE_STEM_RE.match(line)
+    if not m:
+        return None
+    n = int(m.group(1))
+    rest = line[m.end():].strip()
+    if not rest:
+        return None
+    return n, rest
+
+
+def _strip_bare_prefix(line: str) -> str:
+    """剥掉行首裸题号前缀（`11 在平面…` -> `在平面…`），保留 markdown 标题符号已 lstrip。"""
+    m = _BARE_STEM_RE.match(line)
+    if not m:
+        return line.lstrip("#").strip()
+    return line[m.end():].strip()
+
+
+def _ends_before_next_stem(lines: list[str], start: int, is_stem) -> bool:
+    """从 start 往后扫：在遇到下一个主题号之前是否先到大题/部分/答案/文末边界。
+
+    用于裸题号采纳条件④的"后文没有 N+1，但本节到此结束"分支（卷末最后一题）。
+    """
+    for j in range(start, len(lines)):
+        line = lines[j].strip()
+        if not line:
+            continue
+        if is_date_trap(line):
+            continue
+        if is_answer_keyword(line) or is_part_header(line)[0] or is_group_header(line)[0]:
+            return True
+        ok, sn = is_stem(line)
+        if ok and sn is not None:
+            return False
+    return True
+
+
+def _bare_stem_ok(lines, i, n, rest, last_stem_no, has_blank_before, is_stem) -> bool:
+    """裸题号是否可以无 LLM 直接采纳（4 条全满足）。"""
+    if not has_blank_before:
+        return False
+    if n != last_stem_no + 1:
+        return False
+    if len(rest) < 6:
+        return False
+    if _starts_with_measure_word(rest):
+        return False
+    if not re.search(r"[\u4e00-\u9fff]", rest):
+        return False
+    if _has_next_stem(lines, i + 1, n, is_stem=is_stem):
+        return True
+    return _ends_before_next_stem(lines, i + 1, is_stem)
+
+
 def is_answer_keyword(line: str) -> bool:
     """行内是否含答案关键字（参考答案/答案/评分参考）。"""
     return bool(_ANSWER_KEYWORD_RE.search(line))
@@ -606,7 +675,9 @@ def is_junk_question(q: RawQuestion) -> bool:
 
 
 def split_page(text: str, md_path: Path,
-               strategy=None) -> list[RawQuestion]:
+               strategy=None, *,
+               forced_stem_lines: set[int] | None = None,
+               suspects_out: list | None = None) -> list[RawQuestion]:
     """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。
 
     Args:
@@ -615,6 +686,11 @@ def split_page(text: str, md_path: Path,
         strategy: 学科策略；None 时用 generic（A–D / 无材料归属）。
             入口 `extract_questions_file` 一定显式传 `get_strategy(subject_code)`，
             不会落到这个默认值上。
+        forced_stem_lines: 行索引集合（0 基，按 split('\n')）。这些行是 LLM 复核后
+            认定的裸题号（`11 xxx` 这种 OCR 丢了点），切题时强制当题号处理。
+            仅供 extract 第二遍调用；通常调用方不传。
+        suspects_out: 若提供，规则没认、又没满足裸题号采纳条件的候选行会追加进去，
+            供调用方批量交 LLM 复核。第一遍切分时传；第二遍（带 forced）不传。
 
     Returns:
         RawQuestion 列表，按题号顺序
@@ -785,6 +861,7 @@ def split_page(text: str, md_path: Path,
         # 题号判定走学科策略（`is_stem`），内核不再自己判——
         # 各科的 is_stem 目前都委托 is_main_stem，行为等价。
         ok, n = strategy.is_stem(line)
+        accepted_bare = False
         if not ok and not in_answer_section and current_part_kind == 'choice':
             # 状态机：选择题区行首 '数字.数字'（题号+年份 '6.2025年' 或疑似小数
             # '9.5'）——若后续存在更大题号（'7.'），说明当前行是题号而非小数
@@ -792,6 +869,29 @@ def split_page(text: str, md_path: Path,
             if amb and _has_next_stem(lines, i + 1, int(amb.group(1)),
                                       is_stem=strategy.is_stem):
                 ok, n = True, int(amb.group(1))
+        # 裸题号（OCR 丢了点）：`11 在平面直角坐标系…`。规则级 4 条全满足才认；
+        # 拿不准的攒进 suspects_out 交 LLM 复核，第二遍带 forced_stem_lines 直接采纳。
+        if not ok and not in_answer_section:
+            cand = _bare_stem_candidate(line)
+            if cand is not None:
+                bn, rest = cand
+                if forced_stem_lines and i in forced_stem_lines:
+                    ok, n = True, bn
+                    accepted_bare = True
+                elif _bare_stem_ok(lines, i, bn, rest, last_stem_no,
+                                   has_blank_before, strategy.is_stem):
+                    ok, n = True, bn
+                    accepted_bare = True
+                elif suspects_out is not None and abs(bn - (last_stem_no + 1)) <= 1 \
+                        and len(rest) >= 6 and re.search(r"[\u4e00-\u9fff]", rest):
+                    suspects_out.append({
+                        "line_no": i,
+                        "expected": last_stem_no + 1,
+                        "number": bn,
+                        "text": line.strip()[:120],
+                        "before": "\n".join(lines[max(0, i - 2):i]),
+                        "after": "\n".join(lines[i + 1:i + 3]),
+                    })
 
         if in_answer_section:
             # 表格格式选择题答案（<table>...<tr><td>题号</td>...<td>答案</td>...</table>）
@@ -936,7 +1036,8 @@ def split_page(text: str, md_path: Path,
                 q_score = current_unified_score
             else:
                 q_score = None
-            content = _strip_main_stem_prefix(line)
+            content = _strip_bare_prefix(line) if accepted_bare \
+                else _strip_main_stem_prefix(line)
             material = _material_for_new_stem() if policy.attach else None
             if policy.attach and between_material:
                 extra = "\n".join(between_material).strip()
