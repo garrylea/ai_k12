@@ -427,4 +427,79 @@ describe('草稿白板：旋转', () => {
     expect(pts[1].x).toBeCloseTo(0, 3);   // 终点 (100,200) 绕起点再转 90° → (0,100)
     expect(pts[1].y).toBeCloseTo(100, 3);
   });
+
+  /** 用矩形工具画 (100,100)-(200,160) */
+  function rectShape(container: Element, canvas: Element) {
+    pickTool(container, '矩形');
+    fireEvent.pointerDown(canvas, { pointerId: 17, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 17, pointerType: 'mouse', buttons: 1, clientX: 200, clientY: 160 });
+    fireEvent.pointerUp(canvas, { pointerId: 17, pointerType: 'mouse', clientX: 200, clientY: 160 });
+  }
+
+  const bboxOfPoints = (pts: { x: number; y: number }[]) => ({
+    x0: Math.min(...pts.map((p) => p.x)),
+    x1: Math.max(...pts.map((p) => p.x)),
+    y0: Math.min(...pts.map((p) => p.y)),
+    y1: Math.max(...pts.map((p) => p.y)),
+  });
+
+  it('矩形默认绕中心转 90°：包围盒以中心对换宽高', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 220]);
+
+    // 中心 (150,130) 是默认中心；旋钮在 (150,74)
+    dragHandleAround({ x: 150, y: 130 }, { x: 150, y: 74 }, canvas, 18);
+
+    const b = bboxOfPoints(getDraft('q1')[0].points);
+    expect(b.x0).toBeCloseTo(120, 0);
+    expect(b.x1).toBeCloseTo(180, 0);
+    expect(b.y0).toBeCloseTo(80, 0);
+    expect(b.y1).toBeCloseTo(180, 0);
+  });
+
+  it('矩形可点选角点当旋转中心：绕左上角转 90°，该角不动', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 220]);
+
+    // 点左上角 (100,100) 当中心：只换中心，不移动
+    fireEvent.pointerDown(canvas, { pointerId: 19, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 19, pointerType: 'mouse', clientX: 100, clientY: 100 });
+    expect(bboxOfPoints(getDraft('q1')[0].points)).toMatchObject({ x0: 100, x1: 200, y0: 100, y1: 160 });
+
+    dragHandleAround({ x: 100, y: 100 }, { x: 150, y: 74 }, canvas, 20);
+
+    const b = bboxOfPoints(getDraft('q1')[0].points);
+    expect(b.x0).toBeCloseTo(40, 0);
+    expect(b.x1).toBeCloseTo(100, 0);
+    expect(b.y0).toBeCloseTo(100, 0);
+    expect(b.y1).toBeCloseTo(200, 0);
+  });
+
+  it('选了角点后移动矩形：中心跟着走，再旋转仍绕那个角', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 220]);
+
+    fireEvent.pointerDown(canvas, { pointerId: 21, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 21, pointerType: 'mouse', clientX: 100, clientY: 100 });
+
+    // 从底边中央拖 +50,+20（该点不在任何候选点命中半径内 → 走普通移动）
+    fireEvent.pointerDown(canvas, { pointerId: 22, pointerType: 'mouse', button: 0, clientX: 150, clientY: 160 });
+    fireEvent.pointerMove(canvas, { pointerId: 22, pointerType: 'mouse', buttons: 1, clientX: 200, clientY: 180 });
+    fireEvent.pointerUp(canvas, { pointerId: 22, pointerType: 'mouse', clientX: 200, clientY: 180 });
+
+    // 移动后中心应在 (150,120)，旋钮在 (200,94)
+    dragHandleAround({ x: 150, y: 120 }, { x: 200, y: 94 }, canvas, 23);
+
+    const b = bboxOfPoints(getDraft('q1')[0].points);
+    expect(b.x0).toBeCloseTo(90, 0);
+    expect(b.x1).toBeCloseTo(150, 0);
+    expect(b.y0).toBeCloseTo(120, 0);
+    expect(b.y1).toBeCloseTo(220, 0);
+  });
 });
