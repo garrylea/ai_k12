@@ -741,13 +741,14 @@ export function DraftWhiteboard({
     if (toolRef.current === 'select') {
       const g = selectGestureRef.current;
       const selB = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
-      // 单选的直线/矩形给出候选中心点；选了哪个点记在 ref 里（换笔迹自动失配 → 退回默认中心）
+      // 单选的直线/矩形/三角形给出候选中心点；选了哪个点记在 ref 里（换笔迹自动失配 → 退回形状默认中心）
       const only = singleSelectedStroke(selectedStrokesRef.current);
-      const pivots = only ? strokePivots(only.points) : null;
+      const shapePivots = only ? strokePivots(only.points) : null;
       const choice = rotatePivotRef.current;
       const activePivot = only && choice && choice.stroke === only
         ? { x: choice.x, y: choice.y }
-        : selB ? { x: (selB.x0 + selB.x1) / 2, y: (selB.y0 + selB.y1) / 2 } : null;
+        : shapePivots?.defaultCenter
+          ?? (selB ? { x: (selB.x0 + selB.x1) / 2, y: (selB.y0 + selB.y1) / 2 } : null);
       drawSelectionOverlay(
         ctx, canvas, selectedStrokesRef.current, imagesRef.current, selectedImageIdsRef.current,
         g && g.kind === 'marquee' ? g : null,
@@ -755,7 +756,7 @@ export function DraftWhiteboard({
           ? {
               handle: rotateHandleFor(selB),
               deg: g && g.kind === 'rotate' ? (g.total * 180) / Math.PI : null,
-              pivots,
+              pivots: shapePivots?.candidates ?? null,
               activePivot,
             }
           : null,
@@ -1164,12 +1165,13 @@ export function DraftWhiteboard({
 
   /** 起手旋转：先克隆选中笔迹（写时复制），再改克隆——历史快照里的旧对象必须保持不变 */
   const startRotate = (x: number, y: number, b: { x0: number; y0: number; x1: number; y1: number }) => {
-    // 中心点：单选一条笔迹且点选过候选点就用它，否则沿用选区包围盒中心
+    // 中心点：单选一条笔迹且点选过候选点就用它；否则用形状自己的默认中心（三角形是重心，不是包围盒中心）
     const only = singleSelectedStroke(selectedStrokesRef.current);
     const choice = rotatePivotRef.current;
     const chosen = only && choice && choice.stroke === only ? { x: choice.x, y: choice.y } : null;
-    const cx = chosen ? chosen.x : (b.x0 + b.x1) / 2;
-    const cy = chosen ? chosen.y : (b.y0 + b.y1) / 2;
+    const fallback = only ? strokePivots(only.points)?.defaultCenter : null;
+    const cx = chosen ? chosen.x : fallback ? fallback.x : (b.x0 + b.x1) / 2;
+    const cy = chosen ? chosen.y : fallback ? fallback.y : (b.y0 + b.y1) / 2;
     const cloneOf = new Map<Stroke, Stroke>();
     const items: RotateGesture['items'] = [];
     for (const s of selectedStrokesRef.current) {
@@ -1249,7 +1251,7 @@ export function DraftWhiteboard({
     // 中心候选点压在图形上：按下时先记下「可能是在点中心」，
     // 抬手时按有没有位移分流——点一下换中心，拖动照常移动（否则中点那 32px 会吃掉“抓住图形拖走”）
     const only = singleSelectedStroke(selectedStrokesRef.current);
-    const candidates = only ? strokePivots(only.points) : null;
+    const candidates = only ? strokePivots(only.points)?.candidates ?? null : null;
     const picked = candidates ? nearestPivot(candidates, x, y, PIVOT_HIT) : null;
     const pivotPick = picked ? { x: picked.x, y: picked.y } : null;
     selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, moved: false, pivotPick, origImages };
@@ -1263,7 +1265,7 @@ export function DraftWhiteboard({
       if (canvas) {
         const b = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
         const only = singleSelectedStroke(selectedStrokesRef.current);
-        const candidates = only ? strokePivots(only.points) : null;
+        const candidates = only ? strokePivots(only.points)?.candidates ?? null : null;
         if (candidates && nearestPivot(candidates, x, y, PIVOT_HIT)) canvas.style.cursor = 'pointer';
         else canvas.style.cursor = (b && hitRotateHandle(b, x, y)) || insideSelectionBounds(x, y) ? 'grab' : 'default';
       }

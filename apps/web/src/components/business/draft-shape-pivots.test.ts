@@ -1,15 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { convexHull, rectangleCorners, strokePivots, nearestPivot } from './draft-shape-pivots';
+import { convexHull, rectangleCorners, triangleCorners, strokePivots, nearestPivot } from './draft-shape-pivots';
 
 type Pt = { x: number; y: number };
 
-/** 与白板矩形工具同款采样：沿四边按 ~3px 步长加密 + 末点闭合回起点 */
-function sampleRect(x0: number, y0: number, x1: number, y1: number): Pt[] {
-  const v: [number, number][] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+/** 与白板图形工具同款采样：沿各边按 ~3px 步长加密 + 末点闭合回起点 */
+function samplePoly(v: [number, number][]): Pt[] {
   const pts: Pt[] = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < v.length; i++) {
     const a = v[i];
-    const b = v[(i + 1) % 4];
+    const b = v[(i + 1) % v.length];
     const m = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3));
     for (let j = 0; j < m; j++) {
       pts.push({ x: a[0] + (b[0] - a[0]) * (j / m), y: a[1] + (b[1] - a[1]) * (j / m) });
@@ -17,6 +16,15 @@ function sampleRect(x0: number, y0: number, x1: number, y1: number): Pt[] {
   }
   pts.push({ x: v[0][0], y: v[0][1] });
   return pts;
+}
+
+function sampleRect(x0: number, y0: number, x1: number, y1: number): Pt[] {
+  return samplePoly([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+}
+
+/** 三角形 (100,100)-(200,100)-(100,160)：重心 (133.33,120)，包围盒中心 (150,130) —— 两者故意不同 */
+function sampleTriangle(): Pt[] {
+  return samplePoly([[100, 100], [200, 100], [100, 160]]);
 }
 
 function rotate(pts: Pt[], cx: number, cy: number, deg: number): Pt[] {
@@ -109,28 +117,60 @@ describe('rectangleCorners', () => {
 });
 
 describe('strokePivots', () => {
-  it('直线：两端点 + 中点', () => {
-    expect(strokePivots([{ x: 100, y: 100 }, { x: 200, y: 100 }])).toEqual([
-      { id: 'start', x: 100, y: 100 },
+  it('直线：默认中点，候选 = 中点 + 两端', () => {
+    const sp = strokePivots([{ x: 100, y: 100 }, { x: 200, y: 100 }])!;
+    expect(sp.defaultCenter).toEqual({ x: 150, y: 100 });
+    expect(sp.candidates).toEqual([
       { id: 'mid', x: 150, y: 100 },
+      { id: 'start', x: 100, y: 100 },
       { id: 'end', x: 200, y: 100 },
     ]);
   });
 
-  it('矩形：中心 + 四角，共 5 个候选', () => {
-    const pivots = strokePivots(sampleRect(100, 100, 200, 160));
-    expect(pivots).not.toBeNull();
-    expect(pivots!).toHaveLength(5);
-    const center = pivots!.find((p) => p.id === 'center')!;
-    expect(center.x).toBeCloseTo(150, 6);
-    expect(center.y).toBeCloseTo(130, 6);
-    expect(sortPts(pivots!.filter((p) => p.id !== 'center'))).toEqual(sortPts([
+  it('矩形：中心 + 四角，共 5 个候选，默认中心=矩形中心', () => {
+    const sp = strokePivots(sampleRect(100, 100, 200, 160))!;
+    expect(sp).not.toBeNull();
+    expect(sp.candidates).toHaveLength(5);
+    expect(sp.defaultCenter.x).toBeCloseTo(150, 6);
+    expect(sp.defaultCenter.y).toBeCloseTo(130, 6);
+    expect(sortPts(sp.candidates.filter((p) => p.id !== 'center'))).toEqual(sortPts([
       { x: 100, y: 100 }, { x: 200, y: 100 }, { x: 200, y: 160 }, { x: 100, y: 160 },
+    ]));
+  });
+
+  it('三角形：重心 + 三个顶点，共 4 个候选，默认中心=重心（不是包围盒中心）', () => {
+    const sp = strokePivots(sampleTriangle())!;
+    expect(sp).not.toBeNull();
+    expect(sp.candidates).toHaveLength(4);
+    // 重心 = 三个顶点平均 = (133.33, 120)；包围盒中心是 (150,130)，两者不同
+    expect(sp.defaultCenter.x).toBeCloseTo(400 / 3, 6);
+    expect(sp.defaultCenter.y).toBeCloseTo(120, 6);
+    expect(sortPts(sp.candidates.filter((p) => p.id !== 'center'))).toEqual(sortPts([
+      { x: 100, y: 100 }, { x: 200, y: 100 }, { x: 100, y: 160 },
     ]));
   });
 
   it('其它图形返回 null（仍绕包围盒中心）', () => {
     expect(strokePivots([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 0 }])).toBeNull();
+  });
+});
+
+describe('triangleCorners', () => {
+  it('三角形三边采样：认得出来', () => {
+    expect(triangleCorners(sampleTriangle())).not.toBeNull();
+  });
+
+  it('已旋转 30° 的三角形仍能认出', () => {
+    expect(triangleCorners(rotate(sampleTriangle(), 150, 130, 30))).not.toBeNull();
+  });
+
+  it('矩形不是三角形', () => {
+    expect(triangleCorners(sampleRect(100, 100, 200, 160))).toBeNull();
+  });
+
+  it('开口的 V 形（少一条边）不算三角形', () => {
+    const v = sampleTriangle().filter((p) => !(p.y < 101 && p.x > 101));
+    expect(triangleCorners(v)).toBeNull();
   });
 });
 

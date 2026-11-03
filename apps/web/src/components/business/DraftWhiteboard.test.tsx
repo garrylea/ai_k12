@@ -504,6 +504,50 @@ describe('草稿白板：旋转', () => {
     expect(b.y0).toBeCloseTo(120, 0);
     expect(b.y1).toBeCloseTo(220, 0);
   });
+
+  /** 用三角形工具画 (100,100)-(200,100)-(100,160)；重心 (133.33,120) */
+  function triangleShape(container: Element, canvas: Element) {
+    pickTool(container, '三角形');
+    for (const [x, y] of [[100, 100], [200, 100], [100, 160]] as const) {
+      fireEvent.pointerDown(canvas, { pointerId: 41, pointerType: 'mouse', button: 0, clientX: x, clientY: y });
+      fireEvent.pointerUp(canvas, { pointerId: 41, pointerType: 'mouse', clientX: x, clientY: y });
+    }
+    fireEvent.click(container.querySelector('button[title="提交当前三角形"]')!);
+  }
+
+  it('三角形默认绕重心转 90°（不是包围盒中心）', () => {
+    const { container, canvas } = setup();
+    triangleShape(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 220]);
+
+    // 重心 (133.33,120)；旋钮在包围盒中心 x=150、y0=100 上方 26 → (150,74)
+    dragHandleAround({ x: 400 / 3, y: 120 }, { x: 150, y: 74 }, canvas, 24);
+
+    const b = bboxOfPoints(getDraft('q1')[0].points);
+    expect(b.x0).toBeCloseTo(100 - 20 / 3, 0);
+    expect(b.x1).toBeCloseTo(100 + 160 / 3, 0);
+    expect(b.y0).toBeCloseTo(120 - 100 / 3, 0);
+    expect(b.y1).toBeCloseTo(120 + 200 / 3, 0);
+  });
+
+  it('三角形可点选顶点当旋转中心：绕该顶点转 90°，顶点不动', () => {
+    const { container, canvas } = setup();
+    triangleShape(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 220]);
+
+    fireEvent.pointerDown(canvas, { pointerId: 25, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 25, pointerType: 'mouse', clientX: 100, clientY: 100 });
+
+    dragHandleAround({ x: 100, y: 100 }, { x: 150, y: 74 }, canvas, 26);
+
+    const b = bboxOfPoints(getDraft('q1')[0].points);
+    expect(b.x0).toBeCloseTo(40, 0);
+    expect(b.x1).toBeCloseTo(100, 0);
+    expect(b.y0).toBeCloseTo(100, 0);
+    expect(b.y1).toBeCloseTo(200, 0);
+  });
 });
 
 describe('草稿白板：选中工具的点选命中', () => {
