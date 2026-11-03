@@ -111,6 +111,29 @@ function hitStroke(stroke: Stroke, x: number, y: number, threshold: number): boo
   return false;
 }
 
+/** 闭合图形判定：首尾点重合（矩形/椭圆/三角形/圆规圆都采样闭合回起点；直线/手写/弧是开口的） */
+function isClosedStroke(pts: ReadonlyArray<DraftPoint>): boolean {
+  if (pts.length < 8) return false;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  return Math.hypot(a.x - b.x, a.y - b.y) <= 2;
+}
+
+/** 射线法判点在多边形内部。
+ *  为什么选中需要它：矩形/圆/三角是**空心轮廓**，只按「离墨迹 ≤4px」判定的话必须正好点在那条 2px
+ *  细线上才选得中；直线整个对象就是那条线，所以"直线好选、闭合图形点不动"。 */
+function pointInPolygon(x: number, y: number, pts: ReadonlyArray<DraftPoint>): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x;
+    const yi = pts[i].y;
+    const xj = pts[j].x;
+    const yj = pts[j].y;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 /** 笔画包围盒（选中框/框选相交判定用；点数为 0 的笔画不会出现在笔迹数组中） */
 function strokeBounds(s: Stroke): { x0: number; y0: number; x1: number; y1: number } {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -1115,6 +1138,8 @@ export function DraftWhiteboard({
     for (let i = strokesRef.current.length - 1; i >= 0; i--) {
       const s = strokesRef.current[i];
       if (hitStroke(s, x, y, s.size / 2 + SELECT_HIT_SLOP)) return { stroke: s };
+      // 闭合图形（矩形/圆/三角）点内部也算命中：空心轮廓只有 2px 细边，点里面选不中会像"坏了"
+      if (isClosedStroke(s.points) && pointInPolygon(x, y, s.points)) return { stroke: s };
     }
     for (let i = imagesRef.current.length - 1; i >= 0; i--) {
       const im = imagesRef.current[i];

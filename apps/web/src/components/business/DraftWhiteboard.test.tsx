@@ -56,6 +56,14 @@ function penLine(canvas: Element, y: number) {
   fireEvent.pointerUp(canvas, { pointerId: 1, pointerType: 'mouse', clientX: 200, clientY: y });
 }
 
+/** 用矩形工具画 (100,100)-(200,160) */
+function rectShape(container: Element, canvas: Element) {
+  pickTool(container, '矩形');
+  fireEvent.pointerDown(canvas, { pointerId: 17, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(canvas, { pointerId: 17, pointerType: 'mouse', buttons: 1, clientX: 200, clientY: 160 });
+  fireEvent.pointerUp(canvas, { pointerId: 17, pointerType: 'mouse', clientX: 200, clientY: 160 });
+}
+
 function pickTool(container: Element, titlePrefix: string) {
   fireEvent.click(container.querySelector(`button[title^="${titlePrefix}"]`)!);
 }
@@ -428,13 +436,7 @@ describe('草稿白板：旋转', () => {
     expect(pts[1].y).toBeCloseTo(100, 3);
   });
 
-  /** 用矩形工具画 (100,100)-(200,160) */
-  function rectShape(container: Element, canvas: Element) {
-    pickTool(container, '矩形');
-    fireEvent.pointerDown(canvas, { pointerId: 17, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
-    fireEvent.pointerMove(canvas, { pointerId: 17, pointerType: 'mouse', buttons: 1, clientX: 200, clientY: 160 });
-    fireEvent.pointerUp(canvas, { pointerId: 17, pointerType: 'mouse', clientX: 200, clientY: 160 });
-  }
+  /** 用矩形工具画 (100,100)-(200,160) —— 定义在模块级，选中/旋转两组用例共用 */
 
   const bboxOfPoints = (pts: { x: number; y: number }[]) => ({
     x0: Math.min(...pts.map((p) => p.x)),
@@ -501,5 +503,32 @@ describe('草稿白板：旋转', () => {
     expect(b.x1).toBeCloseTo(150, 0);
     expect(b.y0).toBeCloseTo(120, 0);
     expect(b.y1).toBeCloseTo(220, 0);
+  });
+});
+
+describe('草稿白板：选中工具的点选命中', () => {
+  it('点在矩形内部也能选中（不必点在那条 2px 细边上）', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    pickTool(container, '选中');
+
+    fireEvent.pointerDown(canvas, { pointerId: 31, pointerType: 'mouse', button: 0, clientX: 150, clientY: 130 });
+    rects = [];
+    fireEvent.pointerUp(canvas, { pointerId: 31, pointerType: 'mouse', clientX: 150, clientY: 130 });
+
+    // 选中后应画出该笔迹的包围盒虚线框（100..200 / 100..160 外扩 4px）
+    expect(rects.some((r) => r.dashed && r.x === 96 && r.y === 96)).toBe(true);
+  });
+
+  it('点在闭合图形外仍然不选中（不把整块画板都当命中区）', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    pickTool(container, '选中');
+
+    fireEvent.pointerDown(canvas, { pointerId: 32, pointerType: 'mouse', button: 0, clientX: 320, clientY: 300 });
+    rects = [];
+    fireEvent.pointerUp(canvas, { pointerId: 32, pointerType: 'mouse', clientX: 320, clientY: 300 });
+
+    expect(rects.some((r) => r.dashed)).toBe(false);
   });
 });
