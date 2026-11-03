@@ -1,6 +1,8 @@
 /** 草稿白板内存缓存：模块级 Map，随题（key）隔离。笔迹与贴图两个并行 Map，clearDraft 同时清两者。
  *  生命周期约定（PRD §7.12）：切 tab / 关开弹窗保留；提交后由父组件调 clearDraft；切题天然隔离。 */
 
+import { clearHistory } from './draft-history';
+
 export interface DraftPoint {
   x: number;
   y: number;
@@ -29,6 +31,8 @@ export function setDraft(key: string, strokes: Stroke[]): void {
 export function clearDraft(key: string): void {
   store.delete(key);
   imageStore.delete(key);
+  // 提交答案/换题时草稿与撤销栈必须一起清：否则同一题重做时，撤销会复活上一轮已提交的草稿
+  clearHistory(key);
 }
 
 /** 草稿贴图：坐标/尺寸相对 board（与笔迹同坐标系；scroll-y 模式 y 可超一屏） */
