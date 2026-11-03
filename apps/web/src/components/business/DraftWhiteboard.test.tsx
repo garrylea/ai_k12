@@ -359,4 +359,72 @@ describe('草稿白板：旋转', () => {
     // 起手角 -90°，拖到 -70° → 原始 20°，Shift 吸附 15° → 线的方向从 0° 变成 15°
     expect(deg).toBeCloseTo(15, 0);
   });
+
+  /** 绕 pivot 旋转 +90°，把手柄从当前极角拖到逆时针 90° 的位置（用极坐标算落点，避免四舍五入） */
+  function dragHandleAround(pivot: { x: number; y: number }, handle: { x: number; y: number }, canvas: Element, pointerId: number) {
+    const r = Math.hypot(handle.x - pivot.x, handle.y - pivot.y);
+    const a0 = Math.atan2(handle.y - pivot.y, handle.x - pivot.x);
+    const endX = pivot.x + r * Math.cos(a0 + Math.PI / 2);
+    const endY = pivot.y + r * Math.sin(a0 + Math.PI / 2);
+    fireEvent.pointerDown(canvas, { pointerId, pointerType: 'mouse', button: 0, clientX: handle.x, clientY: handle.y });
+    fireEvent.pointerMove(canvas, { pointerId, pointerType: 'mouse', buttons: 1, clientX: endX, clientY: endY });
+    fireEvent.pointerUp(canvas, { pointerId, pointerType: 'mouse', clientX: endX, clientY: endY });
+    return { endX, endY };
+  }
+
+  it('直线可点选起点当旋转中心：绕起点转 90°，起点不动', () => {
+    const { container, canvas } = setup();
+    horizontalLine(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 200]);
+
+    // 点起点 (100,100)：只换旋转中心，不起移动/旋转手势
+    fireEvent.pointerDown(canvas, { pointerId: 11, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 11, pointerType: 'mouse', clientX: 100, clientY: 100 });
+    const before = getDraft('q1')[0].points;
+    expect(before[0].x).toBeCloseTo(100, 5);
+    expect(before[0].y).toBeCloseTo(100, 5);
+    expect(before[1].x).toBeCloseTo(200, 5);
+
+    dragHandleAround({ x: 100, y: 100 }, { x: 150, y: 74 }, canvas, 12);
+
+    const pts = getDraft('q1')[0].points;
+    expect(pts[0].x).toBeCloseTo(100, 3); // 起点是旋转中心，不动
+    expect(pts[0].y).toBeCloseTo(100, 3);
+    expect(pts[1].x).toBeCloseTo(100, 3); // 终点绕起点转 90° → (100,200)
+    expect(pts[1].y).toBeCloseTo(200, 3);
+  });
+
+  it('点选中心点本身不记历史（撤销撤的是那条线）', () => {
+    const { container, canvas } = setup();
+    horizontalLine(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 200]);
+
+    fireEvent.pointerDown(canvas, { pointerId: 13, pointerType: 'mouse', button: 0, clientX: 200, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 13, pointerType: 'mouse', clientX: 200, clientY: 100 });
+
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    expect(getDraft('q1')).toHaveLength(0);
+  });
+
+  it('转过一次后中心点选择仍保留：第二次仍绕起点转', () => {
+    const { container, canvas } = setup();
+    horizontalLine(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 200]);
+
+    fireEvent.pointerDown(canvas, { pointerId: 14, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 14, pointerType: 'mouse', clientX: 100, clientY: 100 });
+    dragHandleAround({ x: 100, y: 100 }, { x: 150, y: 74 }, canvas, 15);
+
+    // 现在线是竖直的 (100,100)-(100,200)，手柄在 (100,74)；再绕起点转 90°
+    dragHandleAround({ x: 100, y: 100 }, { x: 100, y: 74 }, canvas, 16);
+
+    const pts = getDraft('q1')[0].points;
+    expect(pts[0].x).toBeCloseTo(100, 3);
+    expect(pts[0].y).toBeCloseTo(100, 3);
+    expect(pts[1].x).toBeCloseTo(0, 3);   // 终点 (100,200) 绕起点再转 90° → (0,100)
+    expect(pts[1].y).toBeCloseTo(100, 3);
+  });
 });

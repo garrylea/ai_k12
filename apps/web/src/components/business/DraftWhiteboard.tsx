@@ -185,6 +185,41 @@ function hitRotateHandle(b: { x0: number; y0: number; x1: number; y1: number }, 
   return Math.hypot(h.x - x, h.y - y) <= ROTATE_HANDLE_HIT;
 }
 
+/** 直线的旋转中心候选：两个端点 + 中点。
+ *  只对「单选一条两点笔迹」提供——多选时没有唯一的一条线，其它图形（矩形/圆/手写）暂不支持改中心，
+ *  仍绕选区包围盒中心转。中心点在这里是**空间中的一个点**，不是图形上的锚：绕端点转时该端点不动。 */
+type LinePivotKind = 'start' | 'mid' | 'end';
+const LINE_PIVOT_KINDS: readonly LinePivotKind[] = ['start', 'mid', 'end'];
+/** 候选点视觉半径 / 命中半径（CSS px）：命中比视觉大一倍多，手指点得着 */
+const PIVOT_DOT_R = 4.5;
+const PIVOT_HIT = 16;
+
+function singleSelectedLine(sel: ReadonlySet<Stroke>): Stroke | null {
+  if (sel.size !== 1) return null;
+  const [only] = sel;
+  return only.points.length === 2 ? only : null;
+}
+
+function linePivotPoint(s: Stroke, kind: LinePivotKind): { x: number; y: number } {
+  const a = s.points[0];
+  const b = s.points[1];
+  if (kind === 'start') return { x: a.x, y: a.y };
+  if (kind === 'end') return { x: b.x, y: b.y };
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+/** 命中最接近的候选点：短线三个点挨得近，按距离取最近，避免永远命中排在前面的那个 */
+function hitLinePivot(s: Stroke, x: number, y: number): LinePivotKind | null {
+  let best: LinePivotKind | null = null;
+  let bestD = Infinity;
+  for (const kind of LINE_PIVOT_KINDS) {
+    const p = linePivotPoint(s, kind);
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d <= PIVOT_HIT && d < bestD) { best = kind; bestD = d; }
+  }
+  return best;
+}
+
 interface RotateGesture {
   kind: 'rotate';
   cx: number;
@@ -475,7 +510,14 @@ function drawSelectionOverlay(
   images: DraftImage[],
   selectedImageIds: ReadonlySet<string>,
   marquee: { startX: number; startY: number; x: number; y: number } | null,
-  rotate: { handle: RotateHandle; deg: number | null } | null,
+  rotate: {
+    handle: RotateHandle;
+    deg: number | null;
+    /** 直线的旋转中心候选点（null = 当前选区不支持改中心） */
+    pivots: { kind: LinePivotKind; x: number; y: number }[] | null;
+    /** 当前生效的中心点（pivots 非空时才有意义） */
+    pivotKind: LinePivotKind;
+  } | null,
 ): void {
   const brand = (getComputedStyle(canvas).getPropertyValue('--brand-500') || '#ff6b35').trim();
   ctx.save();
@@ -502,7 +544,7 @@ function drawSelectionOverlay(
     ctx.strokeRect(x0, y0, w, h);
   }
   if (rotate) {
-    const { handle, deg } = rotate;
+    const { handle, deg, pivots, pivotKind } = rotate;
     const bg = (getComputedStyle(canvas).getPropertyValue('--learn-card-bg') || '#fff').trim();
     ctx.strokeStyle = brand;
     ctx.lineWidth = 1;
@@ -521,6 +563,25 @@ function drawSelectionOverlay(
     ctx.arc(handle.x, handle.y, 2, 0, Math.PI * 2);
     ctx.fillStyle = bg;
     ctx.fill();
+    // 直线的中心点候选：空心圆 = 可选，实心带小孔 = 当前生效（与旋钮同款但要小一号，别抢焦点）
+    if (pivots) {
+      for (const p of pivots) {
+        const active = p.kind === pivotKind;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, PIVOT_DOT_R, 0, Math.PI * 2);
+        ctx.fillStyle = active ? brand : bg;
+        ctx.fill();
+        ctx.strokeStyle = brand;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        if (active) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+          ctx.fillStyle = bg;
+          ctx.fill();
+        }
+      }
+    }
     if (deg !== null) {
       ctx.fillStyle = (getComputedStyle(canvas).getPropertyValue('--text-tertiary') || '#999').trim();
       ctx.font = '12px system-ui, sans-serif';
@@ -627,11 +688,15 @@ export function DraftWhiteboard({
   const selectedStrokesRef = useRef<Set<Stroke>>(new Set());
   const selectedImageIdsRef = useRef<Set<string>>(new Set());
   const selectGestureRef = useRef<
-    | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; moved: boolean; origImages: Map<string, { x: number; y: number }> }
+    | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; moved: boolean; pivotPick: LinePivotKind | null; origImages: Map<string, { x: number; y: number }> }
     | { kind: 'marquee'; startX: number; startY: number; x: number; y: number }
     | RotateGesture
     | null
   >(null);
+  /** 直线旋转中心的选择：记住「哪条线 + 哪个候选点」。
+   *  用 stroke 对象本身做身份：选区换了另一条线就自动失配、退回默认中点；
+   *  移动/旋转会克隆笔迹，那两个手势里会把它改挂到克隆上，否则转一次中心就丢。 */
+  const rotatePivotRef = useRef<{ stroke: Stroke; kind: LinePivotKind } | null>(null);
   const themeMode = useThemeStore((s) => s.mode);
   /** 拖拽悬停在画布上：落点高亮（拖进草稿时让学生看见「松手会放这里」） */
   const [dropHover, setDropHover] = useState(false);
@@ -671,11 +736,23 @@ export function DraftWhiteboard({
     if (toolRef.current === 'select') {
       const g = selectGestureRef.current;
       const selB = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
+      // 单选一条直线时给出三个中心候选点；选了哪条线已记在 ref 里（换线自动失配 → 退回中点）
+      const line = singleSelectedLine(selectedStrokesRef.current);
+      const pivotChoice = rotatePivotRef.current;
+      const pivotKind: LinePivotKind = line && pivotChoice?.stroke === line ? pivotChoice.kind : 'mid';
+      const pivots = line
+        ? LINE_PIVOT_KINDS.map((kind) => ({ kind, ...linePivotPoint(line, kind) }))
+        : null;
       drawSelectionOverlay(
         ctx, canvas, selectedStrokesRef.current, imagesRef.current, selectedImageIdsRef.current,
         g && g.kind === 'marquee' ? g : null,
         selB
-          ? { handle: rotateHandleFor(selB), deg: g && g.kind === 'rotate' ? (g.total * 180) / Math.PI : null }
+          ? {
+              handle: rotateHandleFor(selB),
+              deg: g && g.kind === 'rotate' ? (g.total * 180) / Math.PI : null,
+              pivots,
+              pivotKind,
+            }
           : null,
       );
     }
@@ -1080,8 +1157,15 @@ export function DraftWhiteboard({
 
   /** 起手旋转：先克隆选中笔迹（写时复制），再改克隆——历史快照里的旧对象必须保持不变 */
   const startRotate = (x: number, y: number, b: { x0: number; y0: number; x1: number; y1: number }) => {
-    const cx = (b.x0 + b.x1) / 2;
-    const cy = (b.y0 + b.y1) / 2;
+    // 中心点：单选一条直线时用选中的候选点（默认中点），否则沿用选区包围盒中心
+    const line = singleSelectedLine(selectedStrokesRef.current);
+    const pivotChoice = rotatePivotRef.current;
+    const kind: LinePivotKind = line && pivotChoice?.stroke === line ? pivotChoice.kind : 'mid';
+    const pivot = line
+      ? linePivotPoint(line, kind)
+      : { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 };
+    const cx = pivot.x;
+    const cy = pivot.y;
     const cloneOf = new Map<Stroke, Stroke>();
     const items: RotateGesture['items'] = [];
     for (const s of selectedStrokesRef.current) {
@@ -1095,6 +1179,11 @@ export function DraftWhiteboard({
       });
     }
     strokesRef.current = strokesRef.current.map((s) => cloneOf.get(s) ?? s);
+    // 克隆把对象换了：中心点选择要改挂到克隆上，否则转一次就退回默认中点
+    if (line) {
+      const clone = cloneOf.get(line);
+      rotatePivotRef.current = clone ? { stroke: clone, kind } : null;
+    }
     setSelection(new Set(items.map((it) => it.stroke)), new Set(selectedImageIdsRef.current));
     selectGestureRef.current = { kind: 'rotate', cx, cy, a0: angleAt(cx, cy, x, y), total: 0, items };
     const canvas = canvasRef.current;
@@ -1138,6 +1227,10 @@ export function DraftWhiteboard({
     if (cloneOf.size) {
       strokesRef.current = strokesRef.current.map((s) => cloneOf.get(s) ?? s);
       selectedStrokesRef.current = new Set(cloneOf.values());
+      // 中心点选择跟着克隆搬，移动之后还绕原来那个端点转
+      const pivotChoice = rotatePivotRef.current;
+      const pivotClone = pivotChoice ? cloneOf.get(pivotChoice.stroke) : undefined;
+      if (pivotChoice && pivotClone) rotatePivotRef.current = { stroke: pivotClone, kind: pivotChoice.kind };
     }
     const canvas = canvasRef.current;
     if (canvas) canvas.style.cursor = 'grabbing';
@@ -1147,17 +1240,23 @@ export function DraftWhiteboard({
         .filter((im) => selectedImageIdsRef.current.has(im.id))
         .map((im) => [im.id, { x: im.x, y: im.y }] as const),
     );
-    selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, moved: false, origImages };
+    // 直线的中心候选点压在线上：按下时先记下「可能是在点中心」，
+    // 抬手时按有没有位移分流——点一下换中心，拖动照常移动（否则中点那 32px 会吃掉“抓住线拖走”）
+    const selLine = singleSelectedLine(selectedStrokesRef.current);
+    const pivotPick = selLine ? hitLinePivot(selLine, x, y) : null;
+    selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, moved: false, pivotPick, origImages };
   };
 
   const selectMove = (x: number, y: number, shiftKey: boolean) => {
     const g = selectGestureRef.current;
     const canvas = canvasRef.current;
     if (!g) {
-      // 悬停：落在选中包围盒/旋转手柄上显示抓手（抓取区提示；直接改 DOM 不走 React，避免逐帧重渲染）
+      // 悬停：落在中心候选点/选中包围盒/旋转手柄上给抓取提示（直接改 DOM 不走 React，避免逐帧重渲染）
       if (canvas) {
         const b = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
-        canvas.style.cursor = (b && hitRotateHandle(b, x, y)) || insideSelectionBounds(x, y) ? 'grab' : 'default';
+        const line = singleSelectedLine(selectedStrokesRef.current);
+        if (line && hitLinePivot(line, x, y)) canvas.style.cursor = 'pointer';
+        else canvas.style.cursor = (b && hitRotateHandle(b, x, y)) || insideSelectionBounds(x, y) ? 'grab' : 'default';
       }
       return;
     }
@@ -1232,6 +1331,15 @@ export function DraftWhiteboard({
       return;
     }
     if (g.kind === 'move') {
+      // 没位移又按在中心候选点上：这次手势是「选旋转中心」，不落盘、不记历史
+      if (!g.moved && g.pivotPick) {
+        const line = singleSelectedLine(selectedStrokesRef.current);
+        if (line) rotatePivotRef.current = { stroke: line, kind: g.pivotPick };
+        redraw();
+        const canvas = canvasRef.current;
+        if (canvas) canvas.style.cursor = 'pointer';
+        return;
+      }
       if (g.moved) {
         if (persist) setDraft(questionId, strokesRef.current); // 笔画平移落盘（贴图已随 updateImages 逐帧落盘）
         // 只有净位移够大才记历史：拖出去又拖回原位是空步，记了会让撤销「看起来没反应」
