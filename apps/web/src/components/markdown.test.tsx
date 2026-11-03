@@ -303,3 +303,44 @@ describe('preprocessMarkdown/rehype：原生 HTML 内的公式', () => {
     expect(html).toContain('$100');
   });
 });
+
+// 2026-11-03 用户报告：数学真题 86419 第 8 题 ② 小问「AM的取值范围是0<AM<5」
+// 页面上只剩「0<5」。根因不是关键字/保留字，而是 repairHtml 的旧启发式
+// （`<字母序列` 后跟 `<` 就当残缺标签补 `>`）把不等式链 `<AM<` 改成了 `<AM><`，
+// rehype-raw 于是解析出一个幽灵元素 `<am>`，后面的内容全被吞进该元素。
+// 修法：判据改成**结构**——只有 `<name` 后面紧跟一整只合法标签（有闭合 `>`）才补 `>`。
+describe('repairHtml：只修真正缺 > 的标签，不吞不等式链', () => {
+  it('0<AM<5 原样保留，渲染成字面文本（不再产生 <am> 幽灵元素）', () => {
+    const html = render('②AM的取值范围是0<AM<5；');
+    expect(html).toContain('0&lt;AM&lt;5');
+    expect(html).not.toContain('<am');
+  });
+
+  it('变量名与 HTML 标签同名也不受影响（<5 / <3 / <n 都不是标签）', () => {
+    for (const src of [
+      '$2<a<3$',
+      '$0^{\\circ}<a<90^{\\circ}$',
+      '0<p<1',
+      'a<b<c',
+      '0<div<5',
+      '0<tr<5',
+      '$m<n$',
+      '<table><tr><td>0<x<5</td></tr></table>',
+    ]) {
+      expect(preprocessMarkdown(src)).toBe(src);
+    }
+    expect(render('$0^{\\circ}<a<90^{\\circ}$')).not.toContain('<a>');
+  });
+
+  it('残缺 <tr<td> 仍会被修成 <tr><td>（原能力不回归）', () => {
+    const fixed = preprocessMarkdown('<table<tr<td>20</td></tr></table>');
+    expect(fixed).toContain('<table><tr><td>20</td></tr>');
+    expect(render('<table<tr<td>20</td></tr></table>')).toContain('<table');
+  });
+
+  it('连续残缺（<table<tbody<tr<td>）也能收敛', () => {
+    expect(preprocessMarkdown('<table<tbody<tr<td>1</td></tr></tbody></table>')).toContain(
+      '<table><tbody><tr><td>1</td></tr>',
+    );
+  });
+});

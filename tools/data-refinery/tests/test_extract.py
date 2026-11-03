@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from extract import Extractor, _parse_json_object
+from extract import Extractor, _parse_json_object, repair_malformed_html
 from models import ExamQuestion, TextbookCard
 
 
@@ -110,3 +110,51 @@ class TestParseJSONObject:
         import pytest
         with pytest.raises(json.JSONDecodeError):
             _parse_json_object("not json at all")
+
+
+class TestRepairMalformedHtml:
+    """判据是**结构**：只有 ``<name`` 后面紧跟一整只合法标签（有闭合 ``>``）
+    才补 ``>``。不等式链（``0<AM<5`` / ``$2<a<3$`` / ``$m<n$``）一律不动。"""
+
+    def test_repairs_consecutive_missing_gt(self):
+        assert repair_malformed_html("<table<tr<td>20</td></tr></table>") == (
+            "<table><tr><td>20</td></tr></table>"
+        )
+
+    def test_repairs_chained(self):
+        # 连续三个缺 >：靠多轮替换收敛
+        assert repair_malformed_html("<table<tbody<tr<td>1</td></tr></tbody></table>") == (
+            "<table><tbody><tr><td>1</td></tr></tbody></table>"
+        )
+
+    def test_keeps_inequality_chain_with_uppercase_symbols(self):
+        # 2026-11-03 用户报告：数学真题 86419 第 8 题 ② 小问被吞成 0<5
+        src = "②AM的取值范围是0<AM<5；"
+        assert repair_malformed_html(src) == src
+
+    def test_keeps_variable_chain_even_if_name_looks_like_a_tag(self):
+        # 不靠标签白名单：变量名叫 div/tr/sub 也不会被当成残缺标签，
+        # 因为后面跟的 <5 / <3 / <n 都不是「一整只合法标签」
+        for src in (
+            "$2<a<3$",
+            "$0^{\\circ}<a<90^{\\circ}$",
+            "0<p<1",
+            "a<b<c",
+            "0<div<5",
+            "0<tr<5",
+            "0<sub<5",
+            "$m<n$",
+        ):
+            assert repair_malformed_html(src) == src
+
+    def test_keeps_inequality_inside_table_cell(self):
+        src = "<table><tr><td>0<x<5</td></tr></table>"
+        assert repair_malformed_html(src) == src
+
+    def test_keeps_valid_html_and_plain_text(self):
+        assert repair_malformed_html("<table><tr><td>1</td></tr></table>") == (
+            "<table><tr><td>1</td></tr></table>"
+        )
+        assert repair_malformed_html("a < b") == "a < b"
+        assert repair_malformed_html(None) is None
+        assert repair_malformed_html("") == ""

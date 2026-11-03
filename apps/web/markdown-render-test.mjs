@@ -17,10 +17,19 @@ const ASSET_BASE = '/assets/';
 const resolveAsset = (p) =>
   /^https?:\/\//.test(p) || p.startsWith('data:') ? p : `${ASSET_BASE}${p.replace(/^\/+/, '')}`;
 
-const TAG_LT_RE = /<([a-zA-Z][a-zA-Z0-9]*)(?=<)/g;
+// 与 markdown.tsx 的 BROKEN_TAG_RE 保持一致：只有 `<name` 后面紧跟一整只合法标签
+// （有闭合的 >）才补 >，否则不等式链 0<AM<5 / $2<a<3$ 会被改成 <AM> / <a>。
+const BROKEN_TAG_RE =
+  /<([A-Za-z][A-Za-z0-9]*)(?=<\/?[A-Za-z][A-Za-z0-9]*(?:\s[^<>]*)?\/?>)/g;
 function repairHtml(text) {
   if (!text || !text.includes('<')) return text ?? '';
-  return text.replace(TAG_LT_RE, '<$1>');
+  let out = text;
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(BROKEN_TAG_RE, '<$1>');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
 }
 const preprocessMarkdown = (s) => (s ? repairHtml(s.replace(/\\n(?![a-zA-Z])/g, '\n')) : '');
 
@@ -75,9 +84,10 @@ const rProcessed = safe('processed', () => render(processed));
 const rFixed = safe('fixed', () => render(contentFixed));
 
 // ── 断言 ──
+// 注：原先还有一条「原题面（<tr<td>）不经 preprocessMarkdown 会抛 Invalid tag」，
+// 当前 react-markdown/rehype 版本已不再抛错（parse5 把非法 tag 静默降级，td 内容照出），
+// 这条前提已不成立，删掉避免误导；下一条 B 起才是要守的行为。
 const checks = [
-  { name: 'A. 原题面（残缺 HTML <tr<td>）不经 preprocessMarkdown 渲染抛错 / 降级',
-    pass: !rRaw.ok && (rRaw.err || '').includes('Invalid tag') },
   { name: 'B. 经 preprocessMarkdown（含 repairHtml）后渲染不报错',
     pass: rProcessed.ok },
   { name: 'C. repairHtml 把 <tr<td> 修成 <tr><td>（processed 不含 <tr<）',

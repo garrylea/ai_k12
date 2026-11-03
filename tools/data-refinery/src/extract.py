@@ -56,7 +56,15 @@ def _repair_json_escapes(text: str) -> str:
     return "".join(out)
 
 
-_TAG_LT_RE = re.compile(r"<([a-zA-Z][a-zA-Z0-9]*)(?=<)")
+# 残缺标签：``<name`` 后面紧跟**一整只合法标签**（``<t>`` / ``</t>`` / ``<t a="…">``，
+# 必须有闭合的 ``>``）时，才认定这个 ``name`` 是漏了 ``>``。
+# 判据是结构、不是标签名：只凭「``<`` 后跟字母」会把不等式链当标签 ——
+# ``0<AM<5``（``<5`` 不是标签）、``$2<a<3$``（``<3`` 不是标签）、``$m<n$``
+# 都会被补成 ``<AM>`` / ``<a>``，前端 rehype-raw 解析出幽灵元素把后面内容全吞掉。
+# 与前端 apps/web/src/components/markdown.tsx 的 BROKEN_TAG_RE 保持一致。
+_BROKEN_TAG_RE = re.compile(
+    r"<([A-Za-z][A-Za-z0-9]*)(?=</?[A-Za-z][A-Za-z0-9]*(?:\s[^<>]*)?/?>)"
+)
 
 
 def repair_malformed_html(text: str | None) -> str | None:
@@ -70,12 +78,11 @@ def repair_malformed_html(text: str | None) -> str | None:
     ``<tr<td>20</td>`` 解析成 ``<tr>20<td>21</td></tr>``（20 裸露在 tr 里
     没被 td 包裹）。两者都破坏表格结构，故自己写正则。
 
-    规则：``<tag`` 后跟 ``<``（而非 ``>``）说明 tag 没闭合，补 ``>``。用
-    lookahead ``(?=<)`` 不消耗 ``<``，一次扫描能处理连续残缺
-    （``<table<tr<td>`` → ``<table><tr><td>``：``<table`` 匹配补 ``>``，
-    ``<`` 保留给下一轮 ``<tr`` 匹配）。只匹配 ``<字母序列`` 后跟 ``<``，
-    不误伤合法 ``a < b`` / ``$x < y$``（``<`` 后非字母或后续非 ``<``），
-    也不误伤合法 ``<table>``（``<table`` 后是 ``>`` 不匹配前瞻）。
+    规则：``<name`` 后跟 ``<`` **且后面这一整只是合法标签**（有闭合的 ``>``）时，
+    给 ``name`` 补 ``>``。合法标签必须完整 —— ``0<AM<5`` 的 ``<5`` 不是标签、
+    ``$2<a<3$`` 的 ``<3`` 不是标签，所以不等式链一律不动；``<table<tr<td>`` 的
+    ``<td>`` 是完整标签，故 ``<tr`` 会被修。连续残缺靠反复替换收敛：第一轮修
+    ``<tr``，第二轮 ``<table`` 后面已是 ``<tr>`` 才够格。
 
     调用点：``Extractor.run`` 在 LLM JSON 解析后、构造 dataclass 前，
     对题面 markdown 字段（content / options[].text / answer / explanation /
@@ -84,7 +91,14 @@ def repair_malformed_html(text: str | None) -> str | None:
     """
     if not text or "<" not in text:
         return text
-    return _TAG_LT_RE.sub(r"<\1>", text)
+    out = text
+    # 链式残缺深度 = 连续漏 ``>`` 的标签个数；8 轮足够，上限防死循环。
+    for _ in range(8):
+        nxt = _BROKEN_TAG_RE.sub(r"<\1>", out)
+        if nxt == out:
+            break
+        out = nxt
+    return out
 
 
 # 含 markdown / HTML 表格的题面字段，需在 LLM 输出后调 repair_malformed_html。

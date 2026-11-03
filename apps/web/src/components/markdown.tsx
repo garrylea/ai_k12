@@ -69,12 +69,34 @@ export const resolveAsset = (p: string): string =>
 // 同时调 repairHtml 修 LLM 抽取题面时常见的 HTML 残缺（<tr<td> 缺 >）→ <tr><td>。
 // 前端兜底：已有库数据无需重跑 data-refinery 管线即生效；管线层 extract.py 的
 // repair_malformed_html 是治本（新入库数据已干净）。
-const TAG_LT_RE = /<([a-zA-Z][a-zA-Z0-9]*)(?=<)/g;
+const BROKEN_TAG_RE =
+  /<([A-Za-z][A-Za-z0-9]*)(?=<\/?[A-Za-z][A-Za-z0-9]*(?:\s[^<>]*)?\/?>)/g;
 
-/** 修 HTML 残缺：`<tr<td>` 缺 `>` 的写法 → `<tr><td>`。详见 data-refinery extract.py repair_malformed_html。 */
+/**
+ * 修 HTML 残缺：`<tr<td>` 缺 `>` 的写法 → `<tr><td>`。
+ *
+ * **判据是结构，不是标签名**：只有当 `<name` 后面紧跟**一整只合法标签**
+ * （`<t>` / `</t>` / `<t attr="…">`，必须有闭合的 `>`）时，才认定这个 `name`
+ * 是漏了 `>` 的残缺标签。只凭「`<` 后跟字母」会误伤数学里的一切不等式链：
+ * `0<AM<5`（`<5` 不是标签）、`$2<a<3$`（`<3` 不是标签）、`$m<n$`，
+ * 被补成 `<AM>` / `<a>` 后 rehype-raw 解析出幽灵元素，后面的内容全被吞掉
+ * （2026-11-03 数学真题 86419 第 8 题 ② 小问只剩 `0<5`）。
+ *
+ * 连续残缺（`<table<tr<td>`）靠反复替换收敛：第一轮修 `<tr`（后面是完整的
+ * `<td>`），第二轮 `<table` 后面已是 `<tr>` 才够格。
+ *
+ * 详见 data-refinery extract.py repair_malformed_html（同口径）。
+ */
 export function repairHtml(text: string | undefined | null): string {
   if (!text || !text.includes('<')) return text ?? '';
-  return text.replace(TAG_LT_RE, '<$1>');
+  let out = text;
+  // 链式残缺的深度 = 连续漏 `>` 的标签个数；8 轮足够，另有兜底上限防死循环。
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(BROKEN_TAG_RE, '<$1>');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
 }
 
 // ── 富文本归一化（真实入库内容兜底）──
