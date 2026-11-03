@@ -153,6 +153,23 @@ describe('草稿白板：撤销 / 重做', () => {
     expect(getDraft('q1')).toHaveLength(2);
   });
 
+  it('橡皮拖拽途中按 Ctrl+Z 不撤销（抬手记一步后才生效）', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    pickTool(container, '橡皮');
+
+    // 按下即擦掉这一条，但手势还在进行中（没有 pointerup）
+    fireEvent.pointerDown(canvas, { pointerId: 7, pointerType: 'mouse', button: 0, clientX: 150, clientY: 100 });
+    expect(getDraft('q1')).toHaveLength(0);
+
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(0); // 手势进行中：撤销被忽略，不会把这一批笔画整批恢复
+
+    fireEvent.pointerUp(canvas, { pointerId: 7, pointerType: 'mouse', clientX: 150, clientY: 100 });
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(1); // 抬手记了一步，撤销回到擦除前
+  });
+
   it('选中拖动后撤销，点坐标回到原位', () => {
     const { container, canvas } = setup();
     penLine(canvas, 100);

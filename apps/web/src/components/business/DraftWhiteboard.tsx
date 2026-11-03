@@ -496,6 +496,8 @@ export function DraftWhiteboard({
   const drawingRef = useRef(false);
   /** 本次橡皮手势是否真的擦掉过笔画（一次划过擦多条只记一步历史） */
   const eraserDirtyRef = useRef(false);
+  /** 橡皮拖拽进行中（按下未抬手）：供 gestureBusy 判断，拖拽途中不响应撤销 */
+  const eraserActiveRef = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -886,6 +888,7 @@ export function DraftWhiteboard({
   /** 有手势在进行时不响应撤销（否则会把半截手势写进历史） */
   const gestureBusy = useCallback(() => (
     drawingRef.current
+    || eraserActiveRef.current
     || selectGestureRef.current !== null
     || shapeGestureRef.current !== null
     || triDragRef.current !== null
@@ -1203,12 +1206,14 @@ export function DraftWhiteboard({
         if (triDragRef.current !== null) {
           triangleUp(); // 平移打断顶点拖拽：固定当前位置，状态保留
         }
+        eraserActiveRef.current = false; // 平移接管橡皮拖拽：撤销不再被这个手势挡住（脏标记留给抬手冲）
         return;
       }
       if (panRef.current) return; // 平移中（第三指及以上）：仅记录，不再起笔
     }
     const p = pointFromEvent(e);
     if (tool === 'eraser') {
+      eraserActiveRef.current = true; // 拖拽开始：eraseAt 在 move 里持续擦，手势期间不响应撤销
       eraserDirtyRef.current = false; // 新手势：之前的脏标记已在抬手/取消时冲掉
       eraseAt(p.x, p.y);
       return;
@@ -1292,7 +1297,7 @@ export function DraftWhiteboard({
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
-    if (tool === 'eraser') { flushEraserHistory(); return; }
+    if (tool === 'eraser') { eraserActiveRef.current = false; flushEraserHistory(); return; }
     if (tool === 'compass') {
       const p = pointFromEvent(e);
       compassUp(p.x, p.y);
@@ -1321,6 +1326,7 @@ export function DraftWhiteboard({
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
     drawingRef.current = false;
+    eraserActiveRef.current = false; // 系统打断橡皮拖拽：手势结束，撤销恢复可用
     flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass();
     cancelSelect();
@@ -1329,6 +1335,7 @@ export function DraftWhiteboard({
   };
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
+    eraserActiveRef.current = false; // 捕获丢失等同抬手：橡皮手势结束
     flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass(); // 正常抬手后此事件仍会触发，各 cancel 对无手势态幂等
     cancelSelect();
