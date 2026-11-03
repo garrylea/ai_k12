@@ -250,3 +250,56 @@ describe('草稿白板：题干图拖入', () => {
     expect(getDraftImages('q1')).toHaveLength(0);
   });
 });
+
+describe('草稿白板：旋转', () => {
+  /** 用直线工具画一条精确水平线 (100,100)-(200,100) */
+  function horizontalLine(container: Element, canvas: Element) {
+    pickTool(container, '直线');
+    fireEvent.pointerDown(canvas, { pointerId: 5, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 5, pointerType: 'mouse', buttons: 1, clientX: 200, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 5, pointerType: 'mouse', clientX: 200, clientY: 100 });
+  }
+
+  it('选中后拖旋转手柄 90°：水平线变竖直线，撤销复原', () => {
+    const { container, canvas } = setup();
+    horizontalLine(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 200]);   // 包围盒 x 100..200 / y 100 → 手柄 (150, 74)
+
+    fireEvent.pointerDown(canvas, { pointerId: 9, pointerType: 'mouse', button: 0, clientX: 150, clientY: 74 });
+    fireEvent.pointerMove(canvas, { pointerId: 9, pointerType: 'mouse', buttons: 1, clientX: 250, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 9, pointerType: 'mouse', clientX: 250, clientY: 100 });
+
+    const pts = getDraft('q1')[0].points;
+    expect(pts[0].x).toBeCloseTo(150, 0);
+    expect(pts[0].y).toBeCloseTo(50, 0);
+    expect(pts[1].x).toBeCloseTo(150, 0);
+    expect(pts[1].y).toBeCloseTo(150, 0);
+
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    const back = getDraft('q1')[0].points;
+    expect(back[0].y).toBeCloseTo(100, 5);
+    expect(back[1].x).toBeCloseTo(200, 5);
+  });
+
+  it('按住 Shift 吸附 15°：拖到 20° 位置吸收到 15°', () => {
+    const { container, canvas } = setup();
+    horizontalLine(container, canvas);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 200]);
+
+    // 起手角 -90°，拖到相对 +20° 的位置（极角 -70°）
+    const r = 60;
+    const endX = 150 + r * Math.cos((-70 * Math.PI) / 180);
+    const endY = 100 + r * Math.sin((-70 * Math.PI) / 180);
+    fireEvent.pointerDown(canvas, { pointerId: 10, pointerType: 'mouse', button: 0, clientX: 150, clientY: 74 });
+    fireEvent.pointerMove(canvas, { pointerId: 10, pointerType: 'mouse', buttons: 1, shiftKey: true, clientX: endX, clientY: endY });
+    fireEvent.pointerUp(canvas, { pointerId: 10, pointerType: 'mouse', clientX: endX, clientY: endY });
+
+    const a = getDraft('q1')[0].points[0];
+    const b = getDraft('q1')[0].points[1];
+    const deg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+    // 起手角 -90°，拖到 -70° → 原始 20°，Shift 吸附 15° → 线的方向从 0° 变成 15°
+    expect(deg).toBeCloseTo(15, 0);
+  });
+});

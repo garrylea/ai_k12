@@ -137,6 +137,69 @@ function cloneStroke(s: Stroke): Stroke {
   };
 }
 
+/** 选中笔迹的并集包围盒（null = 没有选中笔迹） */
+function unionStrokeBounds(sel: Iterable<Stroke>): { x0: number; y0: number; x1: number; y1: number } | null {
+  let out: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  for (const s of sel) {
+    const b = strokeBounds(s);
+    if (!out) out = { ...b };
+    else {
+      out.x0 = Math.min(out.x0, b.x0);
+      out.y0 = Math.min(out.y0, b.y0);
+      out.x1 = Math.max(out.x1, b.x1);
+      out.y1 = Math.max(out.y1, b.y1);
+    }
+  }
+  return out;
+}
+
+/** 旋转手柄：默认在选区上方 26px；上方空间不足（y0 < 48）时放到下方，避免顶出画布抓不到 */
+const ROTATE_HANDLE_GAP = 26;
+const ROTATE_HANDLE_R = 6;
+/** 命中半径 20px：iPad 手指够得着（本体只有 12px 直径） */
+const ROTATE_HANDLE_HIT = 20;
+/** Shift 吸附步长 15° */
+const ROTATE_SNAP = Math.PI / 12;
+/** 小于 0.5° 视为没有旋转（不记历史、不落盘） */
+const MIN_ROTATE_ANGLE = Math.PI / 360;
+
+interface RotateHandle {
+  x: number;
+  y: number;
+  /** 连线接在包围盒的哪条边（上方手柄接 y0，下方手柄接 y1） */
+  edgeY: number;
+  below: boolean;
+}
+
+function rotateHandleFor(b: { x0: number; y0: number; x1: number; y1: number }): RotateHandle {
+  const cx = (b.x0 + b.x1) / 2;
+  return b.y0 >= 48
+    ? { x: cx, y: b.y0 - ROTATE_HANDLE_GAP, edgeY: b.y0 - 4, below: false }
+    : { x: cx, y: b.y1 + ROTATE_HANDLE_GAP, edgeY: b.y1 + 4, below: true };
+}
+
+function hitRotateHandle(b: { x0: number; y0: number; x1: number; y1: number }, x: number, y: number): boolean {
+  const h = rotateHandleFor(b);
+  return Math.hypot(h.x - x, h.y - y) <= ROTATE_HANDLE_HIT;
+}
+
+interface RotateGesture {
+  kind: 'rotate';
+  cx: number;
+  cy: number;
+  /** 起手极角 */
+  a0: number;
+  /** 当前累计角（rad，已吸附） */
+  total: number;
+  items: Array<{
+    stroke: Stroke;
+    /** 起手时的点坐标（每帧从它重算，避免逐帧累积误差） */
+    ox: number[];
+    oy: number[];
+    oc?: { x: number; y: number };
+  }>;
+}
+
 /** scroll-y 模式画板高 = 容器可视高 × 该系数（纵向滚动条由此产生） */
 const SCROLL_Y_FACTOR = 1.6;
 
@@ -397,7 +460,8 @@ function drawCompassOverlay(
 }
 
 /**
- * 选中层（仅 select 工具激活时叠加）：选中元素（笔画/贴图）的虚线包围盒 + 框选拖拽矩形。
+ * 选中层（仅 select 工具激活时叠加）：选中元素（笔画/贴图）的虚线包围盒 + 框选拖拽矩形
+ * + 选区旋转手柄（纯贴图选区不画，贴图不参与旋转）。
  * 笔画平移按点列原位改写（无副本），包围盒每次重绘现算——单笔画点列最多千级，开销可忽略。
  */
 function drawSelectionOverlay(
@@ -407,6 +471,7 @@ function drawSelectionOverlay(
   images: DraftImage[],
   selectedImageIds: ReadonlySet<string>,
   marquee: { startX: number; startY: number; x: number; y: number } | null,
+  rotate: { handle: RotateHandle; deg: number | null } | null,
 ): void {
   const brand = (getComputedStyle(canvas).getPropertyValue('--brand-500') || '#ff6b35').trim();
   ctx.save();
@@ -431,6 +496,34 @@ function drawSelectionOverlay(
     ctx.fillRect(x0, y0, w, h);
     ctx.globalAlpha = 1;
     ctx.strokeRect(x0, y0, w, h);
+  }
+  if (rotate) {
+    const { handle, deg } = rotate;
+    const bg = (getComputedStyle(canvas).getPropertyValue('--learn-card-bg') || '#fff').trim();
+    ctx.strokeStyle = brand;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    // 连线：从包围盒边缘接到旋钮
+    ctx.beginPath();
+    ctx.moveTo(handle.x, handle.edgeY);
+    ctx.lineTo(handle.x, handle.below ? handle.y - ROTATE_HANDLE_R : handle.y + ROTATE_HANDLE_R);
+    ctx.stroke();
+    // 旋钮：实心圆 + 中心小孔（视觉上像可抓的把手，与普通控制点区分）
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, ROTATE_HANDLE_R, 0, Math.PI * 2);
+    ctx.fillStyle = brand;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, 2, 0, Math.PI * 2);
+    ctx.fillStyle = bg;
+    ctx.fill();
+    if (deg !== null) {
+      ctx.fillStyle = (getComputedStyle(canvas).getPropertyValue('--text-tertiary') || '#999').trim();
+      ctx.font = '12px system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`${Math.round(deg)}°`, handle.x + 10, handle.y - 10);
+    }
   }
   ctx.restore();
 }
@@ -524,7 +617,7 @@ export function DraftWhiteboard({
   const triangleRef = useRef<TriangleState>({ phase: 'idle' });
   const triDragRef = useRef<number | null>(null);
   // 选中工具：选区（笔画按对象引用、图片按 id）。图片选集另有 state 镜像（驱动贴图层选中态/控制点）；
-  // 笔画选中框画在 canvas 上（redraw 读 ref），无需 state。手势态：拖动移动 / 空白框选，
+  // 笔画选中框画在 canvas 上（redraw 读 ref），无需 state。手势态：拖动移动 / 空白框选 / 旋转手柄，
   // 拖动带图片原位快照（按手势起点绝对定位，防逐帧增量取整漂移）
   const [selectedImageIds, setSelectedImageIds] = useState<ReadonlySet<string>>(EMPTY_SET);
   const selectedStrokesRef = useRef<Set<Stroke>>(new Set());
@@ -532,6 +625,7 @@ export function DraftWhiteboard({
   const selectGestureRef = useRef<
     | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; moved: boolean; origImages: Map<string, { x: number; y: number }> }
     | { kind: 'marquee'; startX: number; startY: number; x: number; y: number }
+    | RotateGesture
     | null
   >(null);
   const themeMode = useThemeStore((s) => s.mode);
@@ -572,9 +666,13 @@ export function DraftWhiteboard({
     }
     if (toolRef.current === 'select') {
       const g = selectGestureRef.current;
+      const selB = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
       drawSelectionOverlay(
         ctx, canvas, selectedStrokesRef.current, imagesRef.current, selectedImageIdsRef.current,
         g && g.kind === 'marquee' ? g : null,
+        selB
+          ? { handle: rotateHandleFor(selB), deg: g && g.kind === 'rotate' ? (g.total * 180) / Math.PI : null }
+          : null,
       );
     }
     if (SHAPE_TOOLS.has(toolRef.current)) {
@@ -973,7 +1071,36 @@ export function DraftWhiteboard({
     return false;
   };
 
+  /** 起手旋转：先克隆选中笔迹（写时复制），再改克隆——历史快照里的旧对象必须保持不变 */
+  const startRotate = (x: number, y: number, b: { x0: number; y0: number; x1: number; y1: number }) => {
+    const cx = (b.x0 + b.x1) / 2;
+    const cy = (b.y0 + b.y1) / 2;
+    const cloneOf = new Map<Stroke, Stroke>();
+    const items: RotateGesture['items'] = [];
+    for (const s of selectedStrokesRef.current) {
+      const clone = cloneStroke(s);
+      cloneOf.set(s, clone);
+      items.push({
+        stroke: clone,
+        ox: s.points.map((p) => p.x),
+        oy: s.points.map((p) => p.y),
+        oc: s.center ? { x: s.center.x, y: s.center.y } : undefined,
+      });
+    }
+    strokesRef.current = strokesRef.current.map((s) => cloneOf.get(s) ?? s);
+    setSelection(new Set(items.map((it) => it.stroke)), new Set(selectedImageIdsRef.current));
+    selectGestureRef.current = { kind: 'rotate', cx, cy, a0: angleAt(cx, cy, x, y), total: 0, items };
+    const canvas = canvasRef.current;
+    if (canvas) canvas.style.cursor = 'grabbing';
+  };
+
   const selectDown = (x: number, y: number, shiftKey: boolean) => {
+    // 旋转手柄的命中优先于元素命中：手柄常常压在选择框外/贴图上方，否则会变成拖走底下那条笔画
+    const selBounds = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
+    if (selBounds && hitRotateHandle(selBounds, x, y)) {
+      startRotate(x, y, selBounds);
+      return;
+    }
     const hit = hitElement(x, y);
     if (hit && 'stroke' in hit) {
       if (shiftKey) { // 加选/移出选区，不起移动手势
@@ -1016,16 +1143,43 @@ export function DraftWhiteboard({
     selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, moved: false, origImages };
   };
 
-  const selectMove = (x: number, y: number) => {
+  const selectMove = (x: number, y: number, shiftKey: boolean) => {
     const g = selectGestureRef.current;
     const canvas = canvasRef.current;
     if (!g) {
-      // 悬停：落在选中包围盒内显示抓手（抓取区提示；直接改 DOM 不走 React，避免逐帧重渲染）
-      if (canvas) canvas.style.cursor = insideSelectionBounds(x, y) ? 'grab' : 'default';
+      // 悬停：落在选中包围盒/旋转手柄上显示抓手（抓取区提示；直接改 DOM 不走 React，避免逐帧重渲染）
+      if (canvas) {
+        const b = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
+        canvas.style.cursor = (b && hitRotateHandle(b, x, y)) || insideSelectionBounds(x, y) ? 'grab' : 'default';
+      }
       return;
     }
     if (g.kind === 'marquee') {
       g.x = x; g.y = y;
+      redraw();
+      return;
+    }
+    if (g.kind === 'rotate') {
+      // 累积角从起手极角算（normalizeAngle 取最短角差）——不是逐帧累加，指针绕一圈也不会自增 360°
+      const raw = normalizeAngle(angleAt(g.cx, g.cy, x, y) - g.a0);
+      const total = shiftKey ? Math.round(raw / ROTATE_SNAP) * ROTATE_SNAP : raw;
+      g.total = total;
+      const cos = Math.cos(total);
+      const sin = Math.sin(total);
+      for (const it of g.items) {
+        for (let i = 0; i < it.stroke.points.length; i++) {
+          const dx = it.ox[i] - g.cx;
+          const dy = it.oy[i] - g.cy;
+          it.stroke.points[i].x = g.cx + dx * cos - dy * sin;
+          it.stroke.points[i].y = g.cy + dx * sin + dy * cos;
+        }
+        if (it.stroke.center && it.oc) {
+          const dx = it.oc.x - g.cx;
+          const dy = it.oc.y - g.cy;
+          it.stroke.center.x = g.cx + dx * cos - dy * sin;
+          it.stroke.center.y = g.cy + dx * sin + dy * cos;
+        }
+      }
       redraw();
       return;
     }
@@ -1059,6 +1213,17 @@ export function DraftWhiteboard({
     const g = selectGestureRef.current;
     if (!g) return;
     selectGestureRef.current = null;
+    if (g.kind === 'rotate') {
+      // 微小角度（< 0.5°）是按下时的抖动，不算一次旋转：不落盘、不记历史（否则撤销栈被空步挤占）
+      if (Math.abs(g.total) >= MIN_ROTATE_ANGLE) {
+        if (persist) setDraft(questionId, strokesRef.current);
+        pushHistory();
+      }
+      const canvas = canvasRef.current;
+      if (canvas) canvas.style.cursor = 'default';
+      redraw();
+      return;
+    }
     if (g.kind === 'move') {
       if (g.moved) {
         if (persist) setDraft(questionId, strokesRef.current); // 笔画平移落盘（贴图已随 updateImages 逐帧落盘）
@@ -1088,11 +1253,19 @@ export function DraftWhiteboard({
     setSelection(strokes, imageIds);
   };
 
-  // 选中手势收尾（系统打断/丢失捕获/两指平移接管）：移动按当前位置落盘，框选丢弃
+  // 选中手势收尾（系统打断/丢失捕获/两指平移接管）：移动按当前位置落盘，框选丢弃，旋转按当前角度落定
   const cancelSelect = () => {
     const g = selectGestureRef.current;
     if (!g) return;
     selectGestureRef.current = null;
+    if (g.kind === 'rotate') {
+      if (Math.abs(g.total) >= MIN_ROTATE_ANGLE) {
+        if (persist) setDraft(questionId, strokesRef.current);
+        pushHistory();
+      }
+      redraw();
+      return;
+    }
     if (g.kind === 'move' && g.moved) {
       if (persist) setDraft(questionId, strokesRef.current);
       pushHistory();
@@ -1302,7 +1475,7 @@ export function DraftWhiteboard({
       return;
     }
     if (tool === 'select') {
-      selectMove(p.x, p.y); // 非手势态内部 no-op
+      selectMove(p.x, p.y, e.shiftKey); // 非手势态内部 no-op
       return;
     }
     if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
@@ -1502,7 +1675,7 @@ export function DraftWhiteboard({
         {toolBtn('ellipse', '椭圆（按住 Shift 画正圆）', <EllipseIcon />)}
         {toolBtn('triangle', '三角形（三点成形，顶点可拖拽调整；Shift 等边）', <TriangleIcon />)}
         {toolBtn('eraser', '橡皮', <EraserIcon />)}
-        {toolBtn('select', '选中（点选/框选，拖动移动，Delete 删除）', <SelectIcon />)}
+        {toolBtn('select', '选中（点选/框选，拖动移动，上方手柄旋转，Delete 删除）', <SelectIcon />)}
         <div className="flex-1" />
         <button
           onClick={doUndo}
