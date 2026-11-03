@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { cleanup, render, fireEvent } from '@testing-library/react';
+import { cleanup, render, fireEvent, waitFor } from '@testing-library/react';
 import { DraftWhiteboard } from './DraftWhiteboard';
-import { clearDraft, getDraft } from './draft-store';
+import { clearDraft, getDraft, getDraftImages } from './draft-store';
+import { beginImageDrag } from './draft-image-drag';
 
 /**
  * 草稿白板「选中」工具的起手判定回归测试。
@@ -39,7 +40,7 @@ beforeEach(() => {
     class { observe() {} disconnect() {} };
 });
 
-afterEach(() => { vi.restoreAllMocks(); cleanup(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); cleanup(); });
 
 /** 渲染白板，返回 canvas 与容器（jsdom 的 getBoundingClientRect 全 0 → clientX/Y 即画布坐标） */
 function setup() {
@@ -212,5 +213,40 @@ describe('草稿白板：撤销 / 重做', () => {
     expect(btn().disabled).toBe(true);
     penLine(canvas, 100);
     expect(btn().disabled).toBe(false);
+  });
+});
+
+describe('草稿白板：题干图拖入', () => {
+  it('落在松手点、宽 60%、可撤销', async () => {
+    class FakeImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      naturalWidth = 400;
+      naturalHeight = 300;
+      set src(_v: string) { queueMicrotask(() => this.onload?.()); }
+    }
+    vi.stubGlobal('Image', FakeImage as unknown as typeof Image);
+
+    const { container, canvas } = setup();
+    Object.defineProperty(canvas, 'clientWidth', { value: 400, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 600, configurable: true });
+    canvas.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: 400, bottom: 600, width: 400, height: 600, x: 0, y: 0, toJSON: () => ({}),
+    }) as DOMRect;
+
+    beginImageDrag({ src: '/assets/q.png', pointerId: 7, clientX: 200, clientY: 300 });
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 200, clientY: 300 });
+
+    await waitFor(() => expect(getDraftImages('q1')).toHaveLength(1));
+    const img = getDraftImages('q1')[0];
+    expect(img.src).toBe('/assets/q.png');
+    expect(img.w).toBe(240);
+    expect(img.h).toBe(180);
+    expect(img.x).toBe(80);
+    expect(img.y).toBe(210);
+    expect(container.querySelector('img[alt="草稿贴图"]')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    expect(getDraftImages('q1')).toHaveLength(0);
   });
 });

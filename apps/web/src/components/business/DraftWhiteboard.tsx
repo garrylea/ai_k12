@@ -13,7 +13,8 @@ import {
   MIN_R, DEFAULT_R, TAP_SLOP, MIN_SWEEP,
 } from './draft-compass';
 import { DraftImageLayer } from './DraftImageLayer';
-import { fileToDraftImage, isEditableTarget } from './draft-image-utils';
+import { fileToDraftImage, draftImageFromSrc, isEditableTarget } from './draft-image-utils';
+import { registerDropTarget } from './draft-image-drag';
 
 type Tool = 'pen' | 'dot' | 'eraser' | 'select' | 'compass' | 'line' | 'rect' | 'ellipse' | 'triangle';
 
@@ -534,6 +535,8 @@ export function DraftWhiteboard({
     | null
   >(null);
   const themeMode = useThemeStore((s) => s.mode);
+  /** 拖拽悬停在画布上：落点高亮（拖进草稿时让学生看见「松手会放这里」） */
+  const [dropHover, setDropHover] = useState(false);
 
   // 切题竞态防护：在途图片解码（FileReader/Image，几百 ms）期间切题，放弃插入避免污染新题视图/覆写旧题 store
   const questionIdRef = useRef(questionId);
@@ -628,6 +631,23 @@ export function DraftWhiteboard({
     }
     if (inserted > 0) pushHistory();
   }, [scrollMode, updateImages, pushHistory]);
+
+  /** 题干图拖入：按松手点插入一张贴图（落点是贴图中心），一次拖入记一步历史 */
+  const insertImageFromSrc = useCallback(async (src: string, at: { x: number; y: number }) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const currentQ = questionIdRef.current;
+    let img: DraftImage;
+    try {
+      img = await draftImageFromSrc(src, canvas.clientWidth, canvas.clientHeight, at);
+    } catch {
+      console.warn('[draft] 图片解码失败，已跳过', src);
+      return;
+    }
+    if (questionIdRef.current !== currentQ) return; // 切题了：丢弃在途插入
+    updateImages((prev) => [...prev, img]);
+    pushHistory();
+  }, [updateImages, pushHistory]);
 
   // 剪贴板粘贴：组件随抽屉/面板条件挂载，监听生命周期 = 草稿可见期；
   // 焦点在输入框时放行（正常粘贴文本），只拦图片文件
@@ -1109,6 +1129,17 @@ export function DraftWhiteboard({
     return () => ro.disconnect();
   }, [redraw, scrollMode]);
 
+  // 拖拽落点 = canvas（画布坐标系原点）；注销函数随卸载调用
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    return registerDropTarget({
+      el: canvas,
+      onHover: setDropHover,
+      onDrop: (src, pt) => { void insertImageFromSrc(src, pt); },
+    });
+  }, [insertImageFromSrc]);
+
   // 主题变化：笔迹颜色自适应（不存色值，重绘时读 CSS 变量）
   useEffect(() => { redraw(); }, [themeMode, redraw]);
 
@@ -1502,7 +1533,10 @@ export function DraftWhiteboard({
       </div>
       {/* 画布区：相对定位容器——圆规/三角形的状态提示与操作以浮条压在其顶部。
           浮条不占布局高度，所以切工具、切换状态时画布尺寸不变，草稿区不会跳动。 */}
-      <div className="flex-1 min-h-0 relative">
+      <div
+        className="flex-1 min-h-0 relative"
+        style={dropHover ? { boxShadow: 'inset 0 0 0 2px var(--brand-500)' } : undefined}
+      >
         {/* 圆规浮条：状态提示 + 半径读数 + 整圆/重置 */}
         {tool === 'compass' && (
           <div

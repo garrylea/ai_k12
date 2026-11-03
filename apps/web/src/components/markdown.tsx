@@ -21,7 +21,7 @@
 // 再让 katex 处理 math 节点（math 节点本身是 remark-math 在 mdast 阶段生成的，
 // 已是合法节点不会被 raw 重解析，但若反过来 katex 渲染出的 HTML 会被 raw 当
 // 文本再解析一次，破坏 KaTeX 输出）。
-import { Children, isValidElement, useEffect, useState } from 'react';
+import { Children, isValidElement, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Options } from 'react-markdown';
@@ -41,6 +41,8 @@ import type { Content, Root } from 'mdast';
 // 和数学公式渲染错位（根号横线缺失）。
 import 'katex/dist/katex.min.css';
 import '@/styles/katex-fonts.css';
+// 题干图 → 草稿的指针拖拽（draggableQuestionMarkdownComponents 的 img 起拖时调用）
+import { beginImageDrag, wasJustDragged } from './business/draft-image-drag';
 
 // 静态资产前缀。优先取 env（生产部署可能改到 CDN），缺省 /assets/ 走 Vite proxy。
 const ASSET_BASE = (import.meta.env.VITE_ASSET_BASE_URL as string) || '/assets/';
@@ -363,7 +365,12 @@ export interface MarkdownImgProps {
   bucketHeight?: boolean;
   /** 点图放大（默认开）。选项按钮里也生效，点图不会顺带选中该选项。 */
   zoomable?: boolean;
+  /** 可作为「拖进草稿」的图源（题干/材料启用）：移动 >10px 起拖，<=10px 仍是点击放大 */
+  dragToDraft?: boolean;
 }
+
+/** 起拖阈值（CSS px）：小于它仍按点击处理（点图放大），避免轻触就拖走 */
+const DRAFT_DRAG_THRESHOLD = 10;
 
 /**
  * 默认 img：补 /assets/ 前缀（resolveAsset）+ 破图隐藏（onError）。
@@ -371,11 +378,13 @@ export interface MarkdownImgProps {
  * 场景通过 className 覆盖（如 CourseDetailPage 用 max-h-[60vh]）。
  * 题面图通过 bucketHeight 启用按宽高比分桶固定高度（见 prop 注释）。
  */
-export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true }: MarkdownImgProps) {
+export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true, dragToDraft }: MarkdownImgProps) {
   // 分桶高度状态：bucketHeight=true 时生效，null 表示不参与 className 拼装。
   // 必须无条件调 useState（hooks 规则）——bucketHeight 在调用点是常量，不会切换。
   const [bucketClass, setBucketClass] = useState<string | null>(bucketHeight ? 'h-[120px]' : null);
   const [zoom, setZoom] = useState(false);
+  // 按下点（仅在 dragToDraft 时使用）：起拖后置 null，同一次按下只起一次拖
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const finalClass = (bucketHeight
     ? `${className ?? ''} ${bucketClass ?? ''}`.trim()
     : (className ?? 'block mx-auto my-2 max-w-full h-[50px] object-contain rounded-lg'))
@@ -386,6 +395,29 @@ export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [zoom]);
+
+  // 拖进草稿（指针事件，鼠标/触屏/手写笔同一套；iPad Safari 不支持 HTML5 拖拽）：
+  // 位移超过阈值才开始拖，否则保持「点图放大」。touch-action:pan-y 保留纵向滚动。
+  const onImgPointerDown = (e: React.PointerEvent<HTMLImageElement>) => {
+    if (!dragToDraft || !e.isPrimary) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    dragOriginRef.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const onImgPointerMove = (e: React.PointerEvent<HTMLImageElement>) => {
+    const origin = dragOriginRef.current;
+    if (!origin) return;
+    if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) <= DRAFT_DRAG_THRESHOLD) return;
+    dragOriginRef.current = null; // 一次按下只起一次拖
+    beginImageDrag({ src: resolveAsset(src ?? ''), pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
+  };
+
+  const endImgDrag = (e: React.PointerEvent<HTMLImageElement>) => {
+    dragOriginRef.current = null;
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
   const zoomOverlay = zoom && createPortal(
     <div
       role="dialog"
@@ -422,8 +454,16 @@ export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true
           : undefined
       }
       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+      // 拖源（仅题干/材料图）：按下记原点，位移过阈值交给拖拽模块；draggable=false 关掉浏览器原生图片拖拽
+      onPointerDown={dragToDraft ? onImgPointerDown : undefined}
+      onPointerMove={dragToDraft ? onImgPointerMove : undefined}
+      onPointerUp={dragToDraft ? endImgDrag : undefined}
+      onPointerCancel={dragToDraft ? endImgDrag : undefined}
+      draggable={dragToDraft ? false : undefined}
+      style={dragToDraft ? { touchAction: 'pan-y', WebkitTouchCallout: 'none', userSelect: 'none' } : undefined}
       // 点图放大：stopPropagation 避免在「选项按钮」里点图被当成选中选项。
-      onClick={zoomable ? (e) => { e.stopPropagation(); setZoom(true); } : undefined}
+      // 刚拖完的 click（松手就落在图上）不再打开放大浮层，否则拖动结束立刻弹大图。
+      onClick={zoomable ? (e) => { e.stopPropagation(); if (wasJustDragged()) return; setZoom(true); } : undefined}
       title={zoomable ? '点击放大' : undefined}
     />
     {zoomOverlay}

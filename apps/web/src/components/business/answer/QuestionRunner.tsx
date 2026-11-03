@@ -52,6 +52,14 @@ const questionMarkdownComponents = {
   ),
 };
 
+// 题干与材料里的图允许拖进草稿（学生要照着图标注）；提示/解析/参考答案仍用不拖的版本，避免误拖
+const draggableQuestionMarkdownComponents = {
+  ...questionMarkdownComponents,
+  img: (props: { src?: string; alt?: string }) => (
+    <MarkdownImg {...props} bucketHeight dragToDraft className="block mx-auto my-4 max-w-full object-contain rounded-lg" />
+  ),
+};
+
 export interface QuestionRunnerProps {
   questions: RunnerQuestion[];
   /** 学科 id（subjects seed 首行 = 数学）；与 draftDisabled 一起决定内嵌草稿 tab 是否启用 */
@@ -537,7 +545,7 @@ export function QuestionRunner({
                 nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'
               }`}
             >
-              <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
+              <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={draggableQuestionMarkdownComponents}>
                 {preprocessMarkdown(q.material)}
               </ReactMarkdown>
             </div>
@@ -547,7 +555,7 @@ export function QuestionRunner({
               <div
                 className={`${variant === 'embedded' ? 'text-lg' : 'text-xl'} text-[var(--text-primary)] [&>*]:font-bold leading-[1.7]`}
               >
-                <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
+                <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={draggableQuestionMarkdownComponents}>
                   {preprocessMarkdown(q.text)}
                 </ReactMarkdown>
               </div>
