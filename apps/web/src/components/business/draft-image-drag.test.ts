@@ -64,6 +64,22 @@ describe('draft-image-drag', () => {
     off();
   });
 
+  it('其它 pointerId 的 pointercancel 不打断当前拖拽', () => {
+    const el = makeTarget({ left: 100, top: 50, width: 200, height: 200 });
+    const onDrop = vi.fn();
+    const off = registerDropTarget({ el, onHover: () => {}, onDrop });
+
+    beginImageDrag({ src: '/assets/q.png', pointerId: 1, clientX: 120, clientY: 60 });
+    // iPad 上第二根手指 / 手掌会为自己的指针发 pointercancel
+    fireEvent.pointerCancel(window, { pointerId: 2, clientX: 120, clientY: 60 });
+    expect(document.querySelector('[data-draft-drag-ghost]')).toBeTruthy();
+
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 150, clientY: 100 });
+    expect(onDrop).toHaveBeenCalledWith('/assets/q.png', { x: 50, y: 50 });
+    expect(document.querySelector('[data-draft-drag-ghost]')).toBeNull();
+    off();
+  });
+
   it('拖拽结束后 300ms 内 wasJustDragged 为真', () => {
     beginImageDrag({ src: '/assets/q.png', pointerId: 1, clientX: 0, clientY: 0 });
     fireEvent.pointerCancel(window, { pointerId: 1, clientX: 0, clientY: 0 });

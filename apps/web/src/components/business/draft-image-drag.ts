@@ -80,7 +80,8 @@ function onUp(e: PointerEvent): void {
   target.onDrop(src, pt);
 }
 
-function onCancel(): void {
+function onCancel(e: PointerEvent): void {
+  if (!state || e.pointerId !== state.pointerId) return;
   cleanup();
 }
 
