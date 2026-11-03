@@ -58,4 +58,31 @@ describe('DraftImageLayer', () => {
     expect(onGesture).toHaveBeenCalledWith(false);
     expect(onGesture.mock.calls).toEqual([[true], [false]]);
   });
+
+  it('手势中选区被清空：主动结束手势（否则父级撤销门闩永远卡死）', () => {
+    const onGesture = vi.fn();
+    const { container, rerender } = render(
+      <DraftImageLayer images={[IMG]} onImagesChange={() => {}} selectedIds={new Set(['i1'])} handlesEnabled onGestureChange={onGesture} />,
+    );
+    fireEvent.pointerDown(container.querySelector('[data-corner="se"]')!, { pointerId: 1, clientX: 100, clientY: 100 });
+    expect(onGesture).toHaveBeenLastCalledWith(true);
+
+    // 控制点随选区消失：pointerup / lostpointercapture 都到不了已卸载的节点
+    rerender(
+      <DraftImageLayer images={[IMG]} onImagesChange={() => {}} selectedIds={new Set()} handlesEnabled={false} onGestureChange={onGesture} />,
+    );
+    expect(onGesture).toHaveBeenLastCalledWith(false);
+  });
+
+  it('手势中整层卸载：主动结束手势', () => {
+    const onGesture = vi.fn();
+    const { container, unmount } = render(
+      <DraftImageLayer images={[IMG]} onImagesChange={() => {}} selectedIds={new Set(['i1'])} handlesEnabled onGestureChange={onGesture} />,
+    );
+    fireEvent.pointerDown(container.querySelector('[data-corner="se"]')!, { pointerId: 1, clientX: 100, clientY: 100 });
+    expect(onGesture).toHaveBeenLastCalledWith(true);
+
+    unmount();
+    expect(onGesture).toHaveBeenLastCalledWith(false);
+  });
 });

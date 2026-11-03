@@ -3,7 +3,7 @@
 // 图片本体 pointer-events:none —— 命中/选中/拖动由父级选中工具在 canvas 层统一处理；
 // 选中图的四角等比缩放控制点与删除钮装在 z-10 覆盖层里压过 canvas（可点击），
 // 选中态由父级 selectedIds 驱动（与笔画选区同一套）。
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { DraftImage } from './draft-store';
 
 /** 四角拖拽宽度下限（px） */
@@ -65,6 +65,29 @@ export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEn
     onGestureChange?.(false); // 上面的守卫保证只发一次（up/cancel/lostcapture 都会进来）
     onCommit?.();   // 缩放逐帧落 store，历史只在手势结束记一步
   };
+
+  // 手势回调的稳定引用：卸载清理只能因「真的卸载」触发，不能因为父级每帧传新箭头函数而误跑
+  const gestureCbRef = useRef(onGestureChange);
+  gestureCbRef.current = onGestureChange;
+
+  // 缩放手势进行中若手柄消失（选区被清空 / 切到别的工具）或整层卸载，pointerup / lostpointercapture
+  // 到不了已卸载的节点，父级「手势进行中」的门闩会永远为 true —— 撤销/重做从此静默失效，
+  // 直到下一次完成缩放才恢复。这里主动收尾。
+  // 不调 onCommit：尺寸已逐帧落 store；且卸载可能是切题（历史键已换，落一步会写错题）。
+  useEffect(() => {
+    const active = resizeRef.current;
+    if (!active) return;
+    if (!handlesEnabled || !selectedIds.has(active.id)) {
+      resizeRef.current = null;
+      gestureCbRef.current?.(false);
+    }
+  }, [handlesEnabled, selectedIds]);
+
+  useEffect(() => () => {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    gestureCbRef.current?.(false);
+  }, []);
 
   const handleStyle = (corner: Corner): React.CSSProperties => {
     const pos: Record<Corner, React.CSSProperties> = {

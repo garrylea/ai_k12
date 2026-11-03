@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, render, fireEvent, waitFor } from '@testing-library/react';
 import { DraftWhiteboard } from './DraftWhiteboard';
-import { clearDraft, getDraft, getDraftImages } from './draft-store';
+import { clearDraft, getDraft, getDraftImages, setDraftImages } from './draft-store';
 import { beginImageDrag } from './draft-image-drag';
 
 /**
@@ -169,6 +169,46 @@ describe('草稿白板：撤销 / 重做', () => {
     fireEvent.pointerUp(canvas, { pointerId: 7, pointerType: 'mouse', clientX: 150, clientY: 100 });
     undoKey();
     expect(getDraft('q1')).toHaveLength(1); // 抬手记了一步，撤销回到擦除前
+  });
+
+  it('贴图缩放手势进行中不响应撤销，手势结束才生效', () => {
+    setDraftImages('q1', [{ id: 'i1', src: '/assets/x.png', x: 10, y: 20, w: 100, h: 60 }]);
+    const { container, canvas } = setup();
+    penLine(canvas, 200);
+    pickTool(container, '选中');
+
+    // 点选贴图（中心 60,50）→ 四角控制点出现
+    fireEvent.pointerDown(canvas, { pointerId: 8, pointerType: 'mouse', button: 0, clientX: 60, clientY: 50 });
+    fireEvent.pointerUp(canvas, { pointerId: 8, pointerType: 'mouse', clientX: 60, clientY: 50 });
+
+    const corner = container.querySelector('[data-corner="se"]')!;
+    expect(corner).toBeTruthy();
+    fireEvent.pointerDown(corner, { pointerId: 9, clientX: 110, clientY: 80 });
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(1); // 手势进行中：撤销被忽略
+
+    fireEvent.pointerUp(corner, { pointerId: 9, clientX: 110, clientY: 80 });
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(0); // 手势结束：撤销生效
+  });
+
+  it('缩放手势中手柄消失（选区被清）后撤销恢复可用', () => {
+    setDraftImages('q1', [{ id: 'i1', src: '/assets/x.png', x: 10, y: 20, w: 100, h: 60 }]);
+    const { container, canvas } = setup();
+    penLine(canvas, 200);
+    pickTool(container, '选中');
+
+    fireEvent.pointerDown(canvas, { pointerId: 8, pointerType: 'mouse', button: 0, clientX: 60, clientY: 50 });
+    fireEvent.pointerUp(canvas, { pointerId: 8, pointerType: 'mouse', clientX: 60, clientY: 50 });
+    fireEvent.pointerDown(container.querySelector('[data-corner="se"]')!, { pointerId: 9, clientX: 110, clientY: 80 });
+
+    // 第二指/手掌点空白 → 清空选区，控制点被卸载，缩放手势收不到 pointerup
+    fireEvent.pointerDown(canvas, { pointerId: 10, pointerType: 'touch', button: 0, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 10, pointerType: 'touch', clientX: 300, clientY: 300 });
+    expect(container.querySelector('[data-corner="se"]')).toBeNull();
+
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(0); // 门闩已释放，撤销不再静默失效
   });
 
   it('选中拖动后撤销，点坐标回到原位', () => {
