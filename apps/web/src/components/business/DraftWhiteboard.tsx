@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useThemeStore } from '@/store/themeStore';
 import {
-  getDraft, setDraft, clearDraft, getDraftImages, setDraftImages,
+  getDraft, setDraft, getDraftImages, setDraftImages,
   type Stroke, type DraftImage, type DraftPoint,
 } from './draft-store';
+import {
+  initHistory, pushState, undo as undoHistory, redo as redoHistory, canUndo, canRedo,
+  type DraftState,
+} from './draft-history';
 import {
   type CompassState, angleAt, handlePos, hitHandle, normalizeAngle, sampleArc, sampleCircle,
   MIN_R, DEFAULT_R, TAP_SLOP, MIN_SWEEP,
@@ -122,6 +126,16 @@ function strokeBounds(s: Stroke): { x0: number; y0: number; x1: number; y1: numb
   return { x0, y0, x1, y1 };
 }
 
+/** 深拷贝单条笔迹（点对象与圆心标记都新建）。
+ *  写时复制用：已经进了历史快照的 Stroke 视为只读，原地改坐标的手势必须先克隆。 */
+function cloneStroke(s: Stroke): Stroke {
+  return {
+    ...s,
+    points: s.points.map((p) => ({ ...p })),
+    ...(s.center ? { center: { ...s.center } } : {}),
+  };
+}
+
 /** scroll-y 模式画板高 = 容器可视高 × 该系数（纵向滚动条由此产生） */
 const SCROLL_Y_FACTOR = 1.6;
 
@@ -147,6 +161,20 @@ const TrashIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6" />
     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
+const UndoIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h9a6 6 0 0 1 0 12h-3" />
+  </svg>
+);
+
+const RedoIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9h-9a6 6 0 0 0 0 12h3" />
   </svg>
 );
 
@@ -466,6 +494,8 @@ export function DraftWhiteboard({
   const toolRef = useRef<Tool>('pen'); // redraw（dep-free）读工具态判断是否画圆规参考层
   const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef(false);
+  /** 本次橡皮手势是否真的擦掉过笔画（一次划过擦多条只记一步历史） */
+  const eraserDirtyRef = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -497,7 +527,7 @@ export function DraftWhiteboard({
   const selectedStrokesRef = useRef<Set<Stroke>>(new Set());
   const selectedImageIdsRef = useRef<Set<string>>(new Set());
   const selectGestureRef = useRef<
-    | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; origImages: Map<string, { x: number; y: number }> }
+    | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; moved: boolean; origImages: Map<string, { x: number; y: number }> }
     | { kind: 'marquee'; startX: number; startY: number; x: number; y: number }
     | null
   >(null);
@@ -506,6 +536,22 @@ export function DraftWhiteboard({
   // 切题竞态防护：在途图片解码（FileReader/Image，几百 ms）期间切题，放弃插入避免污染新题视图/覆写旧题 store
   const questionIdRef = useRef(questionId);
   useEffect(() => { questionIdRef.current = questionId; }, [questionId]);
+
+  /** 只用第二个返回值触发重渲染：历史本体在模块级 Map，按钮可用态渲染时现算（canUndo/canRedo） */
+  const [, bumpHistory] = useState(0);
+
+  /** 记一步：内容与当前态相同（引用全同）时 pushState 返回 false，按钮不会误亮 */
+  const pushHistory = useCallback(() => {
+    if (pushState(questionId, { strokes: strokesRef.current, images: imagesRef.current })) {
+      bumpHistory((v) => v + 1);
+    }
+  }, [questionId]);
+
+  const flushEraserHistory = useCallback(() => {
+    if (!eraserDirtyRef.current) return;
+    eraserDirtyRef.current = false;
+    pushHistory();
+  }, [pushHistory]);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -570,13 +616,16 @@ export function DraftWhiteboard({
       width: wrap.clientWidth,
       height: wrap.clientHeight,
     };
+    let inserted = 0;
     for (let i = 0; i < files.length; i++) {
       const img = await fileToDraftImage(files[i], wrap.clientWidth, viewport);
-      if (questionIdRef.current !== currentQ) return; // 切题了，放弃在途插入
+      if (questionIdRef.current !== currentQ) return; // 切题了，放弃在途插入（不记历史，避免把新题状态写进旧题）
       if (i > 0) { img.x += i * 16; img.y += i * 16; }
       updateImages((prev) => [...prev, img]);
+      inserted += 1;
     }
-  }, [scrollMode, updateImages]);
+    if (inserted > 0) pushHistory();
+  }, [scrollMode, updateImages, pushHistory]);
 
   // 剪贴板粘贴：组件随抽屉/面板条件挂载，监听生命周期 = 草稿可见期；
   // 焦点在输入框时放行（正常粘贴文本），只拦图片文件
@@ -604,10 +653,13 @@ export function DraftWhiteboard({
   // 图形工具产出（弧/整圆/直线，后续矩形/椭圆/三角形同）提交：与手写笔迹同管道（渲染/橡皮/持久化）
   // center 仅正圆传入（圆规整圆 / Shift 正圆），其余图形不传
   const commitShapeStroke = useCallback((points: DraftPoint[], center?: DraftPoint) => {
-    strokesRef.current.push(center ? { points, size: INK_WIDTH, center } : { points, size: INK_WIDTH });
+    const stroke: Stroke = center ? { points, size: INK_WIDTH, center } : { points, size: INK_WIDTH };
+    // 追加必须换新数组：原地 push 会连历史快照里的同一个数组一起改，撤销就「没反应」了
+    strokesRef.current = [...strokesRef.current, stroke];
     if (persist) setDraft(questionId, strokesRef.current);
     redraw();
-  }, [persist, questionId, redraw]);
+    pushHistory();
+  }, [persist, questionId, redraw, pushHistory]);
 
   // —— 圆规单指针状态机（board 坐标；交互规范见设计文档 §3.1）——
   const compassDown = (x: number, y: number) => {
@@ -831,6 +883,45 @@ export function DraftWhiteboard({
     redraw();
   }, [redraw]);
 
+  /** 有手势在进行时不响应撤销（否则会把半截手势写进历史） */
+  const gestureBusy = useCallback(() => (
+    drawingRef.current
+    || selectGestureRef.current !== null
+    || shapeGestureRef.current !== null
+    || triDragRef.current !== null
+    || compassRef.current.phase === 'placing'
+    || compassRef.current.phase === 'resizing'
+    || compassRef.current.phase === 'drawing'
+  ), []);
+
+  /** 把历史快照写回视图与 store；选区必须清空——快照里是另一批对象引用 */
+  const applyHistoryState = useCallback((snap: DraftState) => {
+    strokesRef.current = snap.strokes;
+    imagesRef.current = snap.images;
+    setImages(snap.images);
+    if (persist) {
+      setDraft(questionId, snap.strokes);
+      setDraftImages(questionId, snap.images);
+    }
+    setSelection(new Set(), new Set());
+  }, [persist, questionId, setSelection]);
+
+  const doUndo = useCallback(() => {
+    if (gestureBusy()) return;
+    const snap = undoHistory(questionId);
+    if (!snap) return;
+    applyHistoryState(snap);
+    bumpHistory((v) => v + 1);
+  }, [gestureBusy, questionId, applyHistoryState]);
+
+  const doRedo = useCallback(() => {
+    if (gestureBusy()) return;
+    const snap = redoHistory(questionId);
+    if (!snap) return;
+    applyHistoryState(snap);
+    bumpHistory((v) => v + 1);
+  }, [gestureBusy, questionId, applyHistoryState]);
+
   /** 命中检测：笔画优先（canvas 恒绘制在贴图之上，视觉上层先命中），均从末位（最上层）向前找。
    *  笔迹用严格的起手容差（SELECT_HIT_SLOP）——宽判定会把「拖框框选」抢成「抓住这条笔画」。 */
   const hitElement = (x: number, y: number): { stroke: Stroke } | { imageId: string } | null => {
@@ -883,15 +974,23 @@ export function DraftWhiteboard({
       return;
     }
     // 点中元素或落在选中包围盒内（选中态已就绪）：起移动手势；
-    // 图片原位快照——按手势起点绝对定位，避免逐帧增量取整漂移
+    // 移动会原地改点坐标：起手先克隆选中笔迹，历史快照里的旧对象保持不动。
+    // 点选后没位移（g.moved 为 false）不记历史；克隆坐标与旧对象完全相同，视觉无差异。
+    const cloneOf = new Map<Stroke, Stroke>();
+    for (const s of selectedStrokesRef.current) cloneOf.set(s, cloneStroke(s));
+    if (cloneOf.size) {
+      strokesRef.current = strokesRef.current.map((s) => cloneOf.get(s) ?? s);
+      selectedStrokesRef.current = new Set(cloneOf.values());
+    }
     const canvas = canvasRef.current;
     if (canvas) canvas.style.cursor = 'grabbing';
+    // 图片原位快照——按手势起点绝对定位，避免逐帧增量取整漂移
     const origImages = new Map(
       imagesRef.current
         .filter((im) => selectedImageIdsRef.current.has(im.id))
         .map((im) => [im.id, { x: im.x, y: im.y }] as const),
     );
-    selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, origImages };
+    selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, moved: false, origImages };
   };
 
   const selectMove = (x: number, y: number) => {
@@ -911,6 +1010,7 @@ export function DraftWhiteboard({
     const dx = x - g.lastX;
     const dy = y - g.lastY;
     if (dx === 0 && dy === 0) return;
+    g.moved = true;
     g.lastX = x; g.lastY = y;
     // 笔画：点列原位平移（浮点增量，无取整误差；圆心标记随之一并平移）；
     // 贴图：快照 + 总位移绝对定位（负方向夹 0）
@@ -937,7 +1037,10 @@ export function DraftWhiteboard({
     if (!g) return;
     selectGestureRef.current = null;
     if (g.kind === 'move') {
-      if (persist) setDraft(questionId, strokesRef.current); // 笔画平移落盘（贴图已随 updateImages 逐帧落盘）
+      if (g.moved) {
+        if (persist) setDraft(questionId, strokesRef.current); // 笔画平移落盘（贴图已随 updateImages 逐帧落盘）
+        pushHistory();
+      }
       const canvas = canvasRef.current;
       if (canvas) canvas.style.cursor = insideSelectionBounds(x, y) ? 'grab' : 'default';
       redraw();
@@ -967,7 +1070,10 @@ export function DraftWhiteboard({
     const g = selectGestureRef.current;
     if (!g) return;
     selectGestureRef.current = null;
-    if (g.kind === 'move' && persist) setDraft(questionId, strokesRef.current);
+    if (g.kind === 'move' && g.moved) {
+      if (persist) setDraft(questionId, strokesRef.current);
+      pushHistory();
+    }
     redraw();
   };
 
@@ -1018,6 +1124,9 @@ export function DraftWhiteboard({
     selectedImageIdsRef.current = new Set();
     setSelectedImageIds(new Set());
     selectGestureRef.current = null;
+    // 历史登记初始态：必须在任何 pushState 之前，否则第一笔会被当成初始态、撤销不到空板
+    initHistory(questionId, { strokes: strokesRef.current, images: imagesRef.current });
+    bumpHistory((v) => v + 1);
     redraw();
   }, [questionId, persist, redraw]);
 
@@ -1041,6 +1150,7 @@ export function DraftWhiteboard({
     const before = strokesRef.current.length;
     strokesRef.current = strokesRef.current.filter((s) => !hitStroke(s, x, y, s.size + ERASER_HIT_SLOP));
     if (strokesRef.current.length !== before) {
+      eraserDirtyRef.current = true;
       // 被擦掉的笔画若在选区内，同步移出（防选中框残留）
       const sel = selectedStrokesRef.current;
       if (sel.size) {
@@ -1099,6 +1209,7 @@ export function DraftWhiteboard({
     }
     const p = pointFromEvent(e);
     if (tool === 'eraser') {
+      eraserDirtyRef.current = false; // 新手势：之前的脏标记已在抬手/取消时冲掉
       eraseAt(p.x, p.y);
       return;
     }
@@ -1122,13 +1233,14 @@ export function DraftWhiteboard({
       // 点：按下即落一个点（单点笔迹，size = 直径，渲染半径 size/2）。
       // 复用 drawingRef → 两指平移会撤销这个还没抬手落定的点（与手写笔点按同策略）。
       drawingRef.current = true;
-      strokesRef.current.push({ points: [p], size: DOT_SIZE });
+      strokesRef.current = [...strokesRef.current, { points: [p], size: DOT_SIZE }];
       if (persist) setDraft(questionId, strokesRef.current);
       redraw();
       return;
     }
     drawingRef.current = true;
-    strokesRef.current.push({ points: [p], size: INK_WIDTH });
+    // 追加必须换新数组（写时复制）：原地 push 会连历史快照里的同一个数组一起改，撤销就「没反应」了
+    strokesRef.current = [...strokesRef.current, { points: [p], size: INK_WIDTH }];
     redraw(); // 落笔即渲染：单点（点按）立即成点、连续笔画无"起笔延迟"
   };
 
@@ -1180,6 +1292,7 @@ export function DraftWhiteboard({
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
+    if (tool === 'eraser') { flushEraserHistory(); return; }
     if (tool === 'compass') {
       const p = pointFromEvent(e);
       compassUp(p.x, p.y);
@@ -1201,12 +1314,14 @@ export function DraftWhiteboard({
     if (!drawingRef.current) return;
     drawingRef.current = false;
     if (persist) setDraft(questionId, strokesRef.current);
+    pushHistory();
   };
 
   // 系统打断（来电/手势接管）或捕获丢失：指针从表中移除；中断单指笔迹不落盘、圆规/选中手势收尾
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
     drawingRef.current = false;
+    flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass();
     cancelSelect();
     cancelShape();
@@ -1214,6 +1329,7 @@ export function DraftWhiteboard({
   };
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
+    flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass(); // 正常抬手后此事件仍会触发，各 cancel 对无手势态幂等
     cancelSelect();
     cancelShape();
@@ -1224,12 +1340,13 @@ export function DraftWhiteboard({
     strokesRef.current = [];
     imagesRef.current = [];
     setImages([]);
-    if (persist) clearDraft(questionId); // store 层双清笔迹 + 贴图
+    if (persist) { setDraft(questionId, []); setDraftImages(questionId, []); }
     updateCompass({ phase: 'idle' }); // 圆规一并重置（含重绘）
     shapeGestureRef.current = null;
     resetTriangle();
     selectGestureRef.current = null;
     setSelection(new Set(), new Set());
+    pushHistory();
   };
 
   // 选中工具：Delete/Backspace 删除选中元素（笔画整条 / 贴图整张；焦点在输入框时放行）
@@ -1247,11 +1364,26 @@ export function DraftWhiteboard({
         if (persist) setDraft(questionId, strokesRef.current);
       }
       if (selI.size) updateImages((prev) => prev.filter((im) => !selI.has(im.id)));
+      pushHistory();
       setSelection(new Set(), new Set());
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [tool, persist, questionId, updateImages, setSelection]);
+  }, [tool, persist, questionId, updateImages, setSelection, pushHistory]);
+
+  // 撤销/重做全局快捷键：Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl+Y。
+  // 不绑 Ctrl+R —— 它是浏览器/Electron 的刷新，误触会整页重载、内存草稿全丢。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;       // 在输入框里要撤销文字
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
+      if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); doRedo(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [doUndo, doRedo]);
 
   // 三角形工具：Enter 确认提交 / Escape 重置（焦点在输入框或按钮等可交互元素上时放行，不抢按键）
   useEffect(() => {
@@ -1335,6 +1467,24 @@ export function DraftWhiteboard({
         {toolBtn('select', '选中（点选/框选，拖动移动，Delete 删除）', <SelectIcon />)}
         <div className="flex-1" />
         <button
+          onClick={doUndo}
+          disabled={!canUndo(questionId)}
+          title="撤销（Ctrl+Z）"
+          aria-label="撤销（Ctrl+Z）"
+          className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-subtle)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--learn-card-bg)]"
+        >
+          <UndoIcon />
+        </button>
+        <button
+          onClick={doRedo}
+          disabled={!canRedo(questionId)}
+          title="重做（Ctrl+Shift+Z）"
+          aria-label="重做（Ctrl+Shift+Z）"
+          className="w-[38px] h-[38px] rounded-xl border border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] flex items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--bg-subtle)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--learn-card-bg)]"
+        >
+          <RedoIcon />
+        </button>
+        <button
           onClick={handleClear}
           title="清空草稿"
           aria-label="清空草稿"
@@ -1415,13 +1565,13 @@ export function DraftWhiteboard({
         {scrollMode === 'scroll-y' ? (
           <div ref={wrapRef} className="absolute inset-0 overflow-y-auto overflow-x-hidden">
             <div ref={boardRef} className="relative" style={{ width: '100%' }}>
-              <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} />
+              <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} onCommit={pushHistory} />
               {canvasEl}
             </div>
           </div>
         ) : (
           <div ref={wrapRef} className="absolute inset-0">
-            <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} />
+            <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} onCommit={pushHistory} />
             {canvasEl}
           </div>
         )}

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, render, fireEvent } from '@testing-library/react';
 import { DraftWhiteboard } from './DraftWhiteboard';
-import { clearDraft } from './draft-store';
+import { clearDraft, getDraft } from './draft-store';
 
 /**
  * 草稿白板「选中」工具的起手判定回归测试。
@@ -111,5 +111,89 @@ describe('草稿白板：选中工具起手判定', () => {
 
     expect(boxes).toEqual(expect.arrayContaining([boxOf(160)]));
     expect(boxes).not.toEqual(expect.arrayContaining([boxOf(100)]));
+  });
+});
+
+describe('草稿白板：撤销 / 重做', () => {
+  const undoKey = () => fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+  const redoKey = () => fireEvent.keyDown(document, { key: 'z', ctrlKey: true, shiftKey: true });
+
+  it('Ctrl+Z 撤销一笔、Ctrl+Shift+Z 重做', () => {
+    const { canvas } = setup();
+    penLine(canvas, 100);
+    penLine(canvas, 160);
+    expect(getDraft('q1')).toHaveLength(2);
+
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(1);
+    redoKey();
+    expect(getDraft('q1')).toHaveLength(2);
+  });
+
+  it('Ctrl+Y 也能重做', () => {
+    const { canvas } = setup();
+    penLine(canvas, 100);
+    undoKey();
+    fireEvent.keyDown(document, { key: 'y', ctrlKey: true });
+    expect(getDraft('q1')).toHaveLength(1);
+  });
+
+  it('一次橡皮划过擦掉两条，撤销一次全部回来', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    penLine(canvas, 160);
+    pickTool(container, '橡皮');
+
+    fireEvent.pointerDown(canvas, { pointerId: 4, pointerType: 'mouse', button: 0, clientX: 150, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 4, pointerType: 'mouse', buttons: 1, clientX: 150, clientY: 160 });
+    fireEvent.pointerUp(canvas, { pointerId: 4, pointerType: 'mouse', clientX: 150, clientY: 160 });
+    expect(getDraft('q1')).toHaveLength(0);
+
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(2);
+  });
+
+  it('选中拖动后撤销，点坐标回到原位', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 200]);
+
+    fireEvent.pointerDown(canvas, { pointerId: 6, pointerType: 'mouse', button: 0, clientX: 150, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 6, pointerType: 'mouse', buttons: 1, clientX: 250, clientY: 180 });
+    fireEvent.pointerUp(canvas, { pointerId: 6, pointerType: 'mouse', clientX: 250, clientY: 180 });
+    expect(getDraft('q1')[0].points[0].x).toBeCloseTo(200, 5);
+    expect(getDraft('q1')[0].points[0].y).toBeCloseTo(180, 5);
+
+    undoKey();
+    expect(getDraft('q1')[0].points[0].x).toBeCloseTo(100, 5);
+    expect(getDraft('q1')[0].points[0].y).toBeCloseTo(100, 5);
+  });
+
+  it('清空可撤销', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    fireEvent.click(container.querySelector('button[title="清空草稿"]')!);
+    expect(getDraft('q1')).toHaveLength(0);
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(1);
+  });
+
+  it('输入框里按 Ctrl+Z 不动草稿', () => {
+    const { canvas } = setup();
+    penLine(canvas, 100);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+    expect(getDraft('q1')).toHaveLength(1);
+    input.remove();
+  });
+
+  it('撤销按钮初始禁用，画一笔后可用', () => {
+    const { container, canvas } = setup();
+    const btn = () => container.querySelector('button[aria-label^="撤销"]') as HTMLButtonElement;
+    expect(btn().disabled).toBe(true);
+    penLine(canvas, 100);
+    expect(btn().disabled).toBe(false);
   });
 });
