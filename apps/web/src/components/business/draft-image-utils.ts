@@ -63,5 +63,31 @@ export async function fileToDraftImage(
   const h = Math.round((w / nw) * nh);
   const x = Math.max(0, Math.round(viewport.left + (viewport.width - w) / 2));
   const y = Math.max(0, Math.round(viewport.top + (viewport.height - h) / 2));
-  return { id: newImageId(), dataUrl, x, y, w, h };
+  return { id: newImageId(), src: dataUrl, x, y, w, h };
+}
+
+/** 图片地址（题干图拖入）→ 待插入 DraftImage。
+ *  尺寸/落点口径与 fileToDraftImage 一致：以落点为中心、宽取画板 60%（原图更小按原图）、越界夹回画板内。
+ *  与文件插入的差别只有 src 来源：这里直接用地址，不做压缩转码。 */
+export async function draftImageFromSrc(
+  src: string,
+  boardW: number,
+  boardH: number,
+  at: { x: number; y: number },
+): Promise<DraftImage> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('image decode failed'));
+    el.src = src;
+  });
+  const nw = img.naturalWidth;
+  const nh = img.naturalHeight;
+  if (!nw || !nh) throw new Error('image has no natural size');
+  const w = Math.min(Math.round(boardW * INIT_WIDTH_FACTOR), nw);
+  const h = Math.max(1, Math.round((w / nw) * nh));
+  // 以落点为中心；超出画板则夹回（夹上界用 max(0, …)：图比画板宽时只能贴左边）
+  const x = Math.min(Math.max(0, Math.round(at.x - w / 2)), Math.max(0, boardW - w));
+  const y = Math.min(Math.max(0, Math.round(at.y - h / 2)), Math.max(0, boardH - h));
+  return { id: newImageId(), src, x, y, w, h };
 }

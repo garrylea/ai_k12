@@ -19,9 +19,11 @@ interface Props {
   selectedIds: ReadonlySet<string>;
   /** true = 选中工具激活：渲染控制点/删除钮（其余情况整层穿透） */
   handlesEnabled: boolean;
+  /** 一次「已完成」的改动（缩放手势结束 / 删除）后调用一次，供上层记一步历史 */
+  onCommit?: () => void;
 }
 
-export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEnabled }: Props) {
+export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEnabled, onCommit }: Props) {
   const layerRef = useRef<HTMLDivElement>(null);
   // 缩放：corner 决定锚定对角（nw 锚 se、ne 锚 sw、sw 锚 ne、se 锚 nw）
   const resizeRef = useRef<{
@@ -54,7 +56,11 @@ export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEn
     const y = Math.max(0, r.corner[0] === 'n' ? r.origY + (r.origH - h) : r.origY);
     patchImage(r.id, { x, y, w, h });
   };
-  const endResize = () => { resizeRef.current = null; };
+  const endResize = () => {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    onCommit?.();   // 缩放逐帧落 store，历史只在手势结束记一步
+  };
 
   const handleStyle = (corner: Corner): React.CSSProperties => {
     const pos: Record<Corner, React.CSSProperties> = {
@@ -80,7 +86,7 @@ export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEn
             className={`rounded-lg ${selected ? 'border-2 border-[var(--brand-500)]' : 'border border-[var(--bg-subtle)]'}`}
           >
             <img
-              src={img.dataUrl}
+              src={img.src}
               alt="草稿贴图"
               draggable={false}
               className="w-full h-full object-fill rounded-[inherit] pointer-events-none select-none"
@@ -92,6 +98,7 @@ export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEn
                 {(['nw', 'ne', 'sw', 'se'] as Corner[]).map((c) => (
                   <div
                     key={c}
+                    data-corner={c}
                     style={{ ...handleStyle(c), touchAction: 'none', pointerEvents: 'auto' }}
                     onPointerDown={(e) => startResize(e, img, c)}
                     onPointerMove={onResizeMove}
@@ -105,7 +112,10 @@ export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEn
                   type="button"
                   title="删除图片"
                   aria-label="删除图片"
-                  onClick={() => onImagesChange((prev) => prev.filter((im) => im.id !== img.id))}
+                  onClick={() => {
+                    onImagesChange((prev) => prev.filter((im) => im.id !== img.id));
+                    onCommit?.();
+                  }}
                   className="absolute -top-3 -right-3 w-6 h-6 rounded-full bg-[var(--learn-card-bg)] border border-[var(--bg-subtle)] flex items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--brand-500)] transition-colors"
                   style={{ touchAction: 'none', pointerEvents: 'auto' }}
                 >

@@ -34,7 +34,9 @@ export function clearDraft(key: string): void {
 /** 草稿贴图：坐标/尺寸相对 board（与笔迹同坐标系；scroll-y 模式 y 可超一屏） */
 export interface DraftImage {
   id: string;      // 前端唯一标识，见 draft-image-utils.newImageId()
-  dataUrl: string; // 压缩后的 data URL（最大边 ≤1600，见 draft-image-utils）
+  /** 图片来源：粘贴/文件是压缩后的 data:；题干图拖入是 resolveAsset 后的地址（/assets/… 或 http(s)）。
+   *  用地址而不是再复制一份 base64 —— 同一张题干图拖两次也只有一份数据在内存里。 */
+  src: string;
   x: number;
   y: number;
   w: number; // 显示宽（CSS px）
