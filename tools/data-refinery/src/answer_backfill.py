@@ -29,7 +29,7 @@ def iter_paper_jsonl(published_dir: Path, scope: Scope) -> list[Path]:
         rel = path.relative_to(published_dir)
         if not match_scope(rel, scope):
             continue
-        if _kind(path.name) != "questions":
+        if _kind(path) != "questions":
             continue
         paths.append(path)
     return paths

@@ -20,6 +20,9 @@ from image_scan import scan_page
 from llm import create_llm_client
 from page_chrome import compute_book_chrome, strip_chrome
 from markdown_scanner import MarkdownScanner, MarkdownSource
+from material_kind import (ANSWER as KIND_ANSWER, KIND_LABELS, PAPER as KIND_PAPER,
+                           KindCache, MaterialKindUnknown,
+                           resolve as resolve_kind)
 from models import TextbookCard
 from scope_filter import build_scope, describe, match_scope
 
@@ -396,6 +399,8 @@ def main(argv=None):
     scanner = MarkdownScanner(md_dir)
     checkpoint = RefineryCheckpoint(config.output_dir / ".checkpoint.json")
     checkpoint.load()
+    # 素材类型判定结果缓存：同一份素材只判一次、只问一次用户
+    kind_cache = KindCache(config.output_dir / ".material_kinds.json")
 
     llm = create_llm_client(
         provider=config.llm_provider,
@@ -451,7 +456,14 @@ def main(argv=None):
         sources = [s for s in sources if args.book in str(s.rel_path)]
     if args.dry_run:
         for s in sources:
-            print(f"[dry-run] {s.rel_path / s.md_path.name} ({s.kind})")
+            key = str(s.rel_path / s.md_path.name)
+            try:
+                kind = resolve_kind(key, s.md_path.name, s.md_path, kind_cache,
+                                    allow_ask=False)
+                label = KIND_LABELS[kind]
+            except MaterialKindUnknown:
+                label = "类型未知（正式执行时会问你）"
+            print(f"[dry-run] {s.rel_path / s.md_path.name} ({label})")
         return
 
     # --reconvert：清理匹配页的 checkpoint + 删除已有 JSONL
@@ -496,8 +508,21 @@ def main(argv=None):
             continue
 
         # 试卷题（questions）与教材卡（cards）分流：
-        # 文件名含"试卷" → 独立试卷切题路径（question_extract）
-        if "试卷" in source.md_path.name:
+        # 名称 → 卷面首屏 → 目录结构（同目录有 page_*.md 即教材）→ 都没有就问用户。
+        # 判不出时绝不默认当教材：2026-11-03 两份手工丢进来的卷子就是这样静默降级的。
+        try:
+            material_kind = resolve_kind(
+                file_key, source.md_path.name, source.md_path, kind_cache,
+            )
+        except MaterialKindUnknown:
+            print(f"[ERROR] ({idx}/{total_processed}) {file_key}：无法判断素材类型"
+                  f"（文件名、卷面、目录结构都没有试卷/答案/教材特征）", flush=True)
+            print(f"        交互终端下重跑会问你；也可以直接写 "
+                  f"{kind_cache.path}：{{\"{file_key}\": \"paper|answer|textbook\"}}", flush=True)
+            failed += 1
+            continue
+
+        if material_kind == KIND_PAPER:
             from question_extract import extract_questions_file
             try:
                 count = extract_questions_file(
@@ -513,9 +538,9 @@ def main(argv=None):
             extracted += 1
             continue
 
-        # 文件名含"答案" → 不单独切：答案内容由配对试卷的
-        # maybe_merge_answer_md 吸收（合并纯答案/选择有答案版），避免重复入库
-        if "答案" in source.md_path.name:
+        # 答案文件不单独切：答案内容由配对试卷的 maybe_merge_answer_md 吸收
+        # （合并纯答案/选择有答案版），避免重复入库
+        if material_kind == KIND_ANSWER:
             checkpoint.mark_extracted(file_key)
             print(f"[skip] ({idx}/{total_processed}) {file_key} (答案文件，由配对试卷吸收)", flush=True)
             skipped += 1

@@ -18,6 +18,7 @@ from asset_store import LocalAssetStore
 from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from image_rewrite import rewrite_item
+from material_kind import SCOPE_KIND, kind_of_jsonl
 from models import ExamQuestion, TextbookCard
 from scope_filter import build_scope, describe, match_scope
 from subject_codes import subject_code_for_path as _subject_code_for
@@ -81,11 +82,17 @@ def _match_pages(jsonl_name: str, page_nums: set[int]) -> bool:
     return True
 
 
-def _kind_for(rel_file: Path) -> str:
-    name = rel_file.name
-    if "试卷" in name or "答案" in name:
-        return "questions"
-    return "cards"
+def _kind_for(jsonl_path: Path) -> str:
+    """按 JSONL 里记录的**形状**判类型，形状判不出再退回文件名。
+
+    文件名会把「手工丢进来、名字不带试卷二字」的卷子判成教材卡，进而用
+    TextbookCard 去解析试卷题（2026-11-03 北京中学卷实测）。数据已经切好了，
+    形状比文件名可信。
+    """
+    kind = kind_of_jsonl(jsonl_path)
+    if kind is not None:
+        return SCOPE_KIND[kind]
+    return "questions" if ("试卷" in jsonl_path.name or "答案" in jsonl_path.name) else "cards"
 
 
 def _hash8(s: str) -> str:
@@ -128,7 +135,7 @@ def main(argv=None):
             # --book 与正式发布同口径（否则预演范围偏大，误导重发布判断）
             if args.book and args.book not in str(rel):
                 continue
-            print(f"[dry-run] {rel}.jsonl ({_kind_for(rel)})")
+            print(f"[dry-run] {rel}.jsonl ({_kind_for(p)})")
         return
 
     # --reconvert：清理匹配文件的 checkpoint + 删除已有 published 文件
@@ -170,7 +177,7 @@ def main(argv=None):
             skipped += 1
             continue
         try:
-            kind = _kind_for(rel_file)
+            kind = _kind_for(jsonl_path)
             md_images_dir = md_dir / rel_file.parent  # 含 images/ 的目录
             source_key = _hash8(key)
             subject_code = _subject_code_for(rel_file)

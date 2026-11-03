@@ -84,3 +84,54 @@ def parse_paper_meta(rel_path: str) -> PaperMeta | None:
             return None
         return _parse_with_dirs(parts[-5], parts[-4], parts[-3], parts[-1])
     return None
+
+
+@dataclass(frozen=True)
+class PathParts:
+    """目录段能确定的四项：学科 / 学段 / 学期 / 年份。
+
+    这四项本来就写在路径里，不需要从文件名抠。文件名不合规时用它兜底
+    （2026-11-03：手工丢进来的卷子名字不规范，第 4 步直接 0 命中）。
+    """
+
+    subject: str
+    level: str
+    grade_band: str
+    semester: str
+    year: int
+
+
+def parse_path_parts(rel_path: str) -> PathParts | None:
+    parts = rel_path.replace("\\", "/").split("/")
+    if len(parts) < 5:
+        return None
+    dirs = parts[:-1]
+    # 嵌套布局：{...}/{试卷名目录}/{试卷名}.jsonl → 再退一层
+    if len(dirs) >= 2 and parts[-1].endswith(".jsonl") and dirs[-1] == parts[-1][: -len(".jsonl")]:
+        dirs = dirs[:-1]
+    if len(dirs) < 4:
+        return None
+    subject, level, semester, year_dir = dirs[-4], dirs[-3], dirs[-2], dirs[-1]
+    if level not in _LEVEL_TO_BAND or semester not in ("first", "second") or not year_dir.isdigit():
+        return None
+    return PathParts(subject, level, _LEVEL_TO_BAND[level], semester, int(year_dir))
+
+
+def build_paper_meta(parts: PathParts, grade: str, exam_type: str,
+                     district: str = "", school: str | None = None,
+                     file_type: str = "试卷") -> PaperMeta:
+    """目录段 + 卷面/询问得到的 年级、考试类型 → PaperMeta（文件名不合规时的兜底）。"""
+    location = f"{district}·{school}" if (district and school) else (district or school or "")
+    title = " ".join(x for x in (str(parts.year), location, grade, exam_type) if x)
+    return PaperMeta(
+        subject=parts.subject,
+        grade=grade,
+        grade_band=parts.grade_band,
+        semester=parts.semester,
+        year=parts.year,
+        district=district,
+        exam_type=exam_type,
+        file_type=file_type,
+        title=title,
+        location=location or None,
+    )

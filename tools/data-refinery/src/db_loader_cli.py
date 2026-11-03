@@ -13,7 +13,8 @@ from pathlib import Path
 
 from config import RefineryConfig
 from db_loader import DbLoader
-from paper_head import apply_sidecar, load_sidecar
+from material_kind import SCOPE_KIND, kind_of_jsonl
+from paper_head import apply_sidecar, load_sidecar, meta_from_sidecar
 from paper_meta import parse_paper_meta
 from scope_filter import describe, match_scope, scope_from_args
 
@@ -50,17 +51,40 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _match_kind(rel: Path, args) -> bool:
+def _match_kind(path: Path, args) -> bool:
     """题/卡类型过滤（--questions-only / --cards-only）。"""
-    if args.questions_only and _kind(rel.name) != "questions":
+    if args.questions_only and _kind(path) != "questions":
         return False
-    if args.cards_only and _kind(rel.name) != "cards":
+    if args.cards_only and _kind(path) != "cards":
         return False
     return True
 
 
-def _kind(name: str) -> str:
-    return "questions" if ("试卷" in name or "答案" in name) else "cards"
+def _resolve_meta(output_dir: Path, rel: str):
+    """试卷元数据：文件名优先，文件名不合规时用 sidecar（目录+卷面/用户选择）兜底。
+
+    2026-11-03：手工丢进来的卷子名字不带「试卷」，原先这里返回 None，
+    题目入库但不建 exam_papers，学生端看不到整卷。
+    """
+    meta = parse_paper_meta(rel)
+    sidecar = load_sidecar(output_dir, rel)
+    if meta is None:
+        return meta_from_sidecar(rel, sidecar) if sidecar else None
+    # 卷面元数据 sidecar：文件名缺区县/学校时用卷面首屏补，
+    # district 不再写「北京各」这种集合名
+    return apply_sidecar(meta, sidecar) if sidecar else meta
+
+
+def _kind(path: Path) -> str:
+    """按 JSONL 形状判，形状判不出再退回文件名。
+
+    只看文件名会把「手工丢进来、名字不带试卷二字」的卷子当成教材卡，
+    然后在教材路径上崩掉（2026-11-03 北京中学卷实测，题库 0 条）。
+    """
+    kind = kind_of_jsonl(path)
+    if kind is not None:
+        return SCOPE_KIND[kind]
+    return "questions" if ("试卷" in path.name or "答案" in path.name) else "cards"
 
 
 def _resolve_book_toc(toc_dir: Path, book_key: str) -> Path | None:
@@ -148,7 +172,7 @@ def main(argv=None):
         try:
             # 先建/找 paper（拿 paper_id），再按 paper_id 删关联（覆盖新旧 source 格式）
             rel = match[0].relative_to(published_dir).as_posix()
-            meta = parse_paper_meta(rel)
+            meta = _resolve_meta(cfg.output_dir, rel)
             paper_ctx = None
             if meta is not None and meta.file_type == "试卷":
                 source_key = rel[: -len(".jsonl")]
@@ -183,7 +207,7 @@ def main(argv=None):
         p for p in sorted(published_dir.rglob("*.jsonl"))
         if _match_source(p.name, args.source)
         and match_scope(p.relative_to(published_dir), scope)
-        and _match_kind(p.relative_to(published_dir), args)
+        and _match_kind(p, args)
     ]
     if scope.active or kind_filtered:
         desc = describe(scope)
@@ -196,7 +220,7 @@ def main(argv=None):
 
     if args.dry_run:
         for p in files:
-            print(f"{p.relative_to(published_dir)} ({_kind(p.name)})", flush=True)
+            print(f"{p.relative_to(published_dir)} ({_kind(p)})", flush=True)
         print(f"共 {len(files)} 个文件", flush=True)
         return
 
@@ -238,8 +262,8 @@ def main(argv=None):
                 loader.reset_questions()
                 print("[reset] DELETE questions", flush=True)
 
-        card_files = [p for p in files if _kind(p.name) == "cards"]
-        q_files = [p for p in files if _kind(p.name) == "questions"]
+        card_files = [p for p in files if _kind(p) == "cards"]
+        q_files = [p for p in files if _kind(p) == "questions"]
 
         # cards 按书目录分组、按页顺序收集
         books: dict[str, list[Path]] = {}
@@ -286,15 +310,10 @@ def main(argv=None):
         for p in q_files:
             qs = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
             rel = p.relative_to(published_dir).as_posix()
-            meta = parse_paper_meta(rel)
+            meta = _resolve_meta(cfg.output_dir, rel)
             paper_ctx = None
             if meta is not None and meta.file_type == "试卷":
                 source_key = rel[: -len(".jsonl")]
-                # 卷面元数据 sidecar（paper_meta_cli 产物）：文件名缺区县/学校时
-                # 用卷面首屏补，district 不再写「北京各」这种集合名
-                sidecar = load_sidecar(cfg.output_dir, rel)
-                if sidecar is not None:
-                    meta = apply_sidecar(meta, sidecar)
                 paper_id = loader.find_or_create_paper_from_meta(meta, source_key)
                 paper_ctx = (meta, paper_id)
             elif meta is None:

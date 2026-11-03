@@ -310,6 +310,18 @@ def test_parse_group_scores_map_adjacent_range():
     assert sum(val.values()) == 68  # 解答题小计 68
 
 
+def test_parse_group_scores_stray_hyphen():
+    """'第-17-22题'：源文本多一个连字符（MinerU 产物实测）不能崩，按 17-22 展开。"""
+    kind, val = parse_group_scores(
+        "三、解答题（共12道小题；第-17-22题，每小题5分，第23-26题，每小题6分；"
+        "第27-28题，每小题7分，共68分）"
+    )
+    assert kind == "map"
+    assert val[17] == 5 and val[22] == 5
+    assert val[23] == 6 and val[26] == 6
+    assert val[27] == 7 and val[28] == 7
+
+
 def test_parse_group_scores_none():
     """'解答题(共78分)' 无逐题分 → none。"""
     kind, val = parse_group_scores("## 三、解答题（共78分）")

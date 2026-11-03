@@ -283,11 +283,13 @@ def parse_group_scores(header: str) -> tuple[str, object | None]:
         result: dict[int, int] = {}
         for nums, score in re.findall(r'第([\d-]+)题[^0-9]*?(\d+)\s*分', header):
             score = int(score)
-            if '-' in nums:
-                a, b = nums.split('-')
-                result.update({n: score for n in range(int(a), int(b) + 1)})
-            else:
-                result[int(nums)] = score
+            # 题号段可能带杂散连字符（源文本 '第-17-22题' 实测），按数字取首尾，
+            # 不要 split('-')——多一个连字符就解包失败，整卷抽取直接报错。
+            bounds = [int(n) for n in re.findall(r'\d+', nums)]
+            if len(bounds) >= 2:
+                result.update({n: score for n in range(bounds[0], bounds[-1] + 1)})
+            elif bounds:
+                result[bounds[0]] = score
         return ('map', result) if result else ('none', None)
     m = re.search(r'每题\s*(\d+)\s*分', header)
     if m:

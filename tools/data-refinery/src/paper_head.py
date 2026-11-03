@@ -115,6 +115,12 @@ def _clean_school(name: str) -> str:
             if name.startswith(prefix) and len(name) > len(prefix) + 2:
                 name = name[len(prefix):]
                 changed = True
+    # 「2026北京北京中学」这种：年份后面紧跟的地点把学校名前缀重复了一遍。
+    # 只消完全重复的 2–4 字前缀，不动真正的「北京中学」。
+    for size in (2, 3, 4):
+        if len(name) > size * 2 and name[:size] == name[size:size * 2]:
+            name = name[size:]
+            break
     return name
 
 
@@ -140,6 +146,38 @@ def detect_grade(head: str) -> tuple[str | None, str | None]:
             if re.search(pattern, line):
                 return grade, line[:80]
     return None, None
+
+
+# 考试类型：长词优先（「第一次模拟」不能先被「模拟」吃掉）
+_EXAM_TYPES = (
+    (r"期中", "期中"),
+    (r"期末", "期末"),
+    (r"一模|第一次模拟", "一模"),
+    (r"二模|第二次模拟", "二模"),
+    (r"模拟", "模拟"),
+    (r"月考", "月考"),
+    (r"联考|联合质量检测|联合考试", "联考"),
+    (r"开学考|开学测", "开学考"),
+    (r"学业水平", "学业水平"),
+    (r"质量检测|质量监测", "质量检测"),
+)
+
+
+def detect_exam_type(text: str) -> tuple[str | None, str | None]:
+    """从文件名或卷面首屏认考试类型；认不出返回 (None, None)，由调用方问用户。"""
+    head = head_text(text, max_lines=8)
+    for pattern, label in _EXAM_TYPES:
+        m = re.search(pattern, head)
+        if m:
+            return label, head.splitlines()[0][:80] if head else ""
+    return None, None
+
+
+def detect_grade_from_name(name: str) -> str | None:
+    for pattern, grade in _GRADE_PATTERNS:
+        if re.search(pattern, name):
+            return grade
+    return None
 
 
 def extract_head_meta(md_text: str, llm=None) -> HeadMeta:
@@ -265,12 +303,39 @@ def write_sidecar(output_dir: Path, rel_jsonl: str | Path, head: HeadMeta,
     path = sidecar_path(output_dir, rel_jsonl)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = head.to_json()
+    # 年份/学期/考试类型也落盘：文件名不合规时 db_loader 全靠这份 sidecar 建卷，
+    # 少一个字段就归不了组（2026-11-03）
     payload["merged"] = {
         "title": merged.title,
         "district": merged.district,
         "grade": merged.grade,
+        "year": merged.year,
+        "semester": merged.semester,
+        "exam_type": merged.exam_type,
     }
     if notes:
         payload["notes"] = notes
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def meta_from_sidecar(rel_jsonl: str | Path, sidecar: dict) -> PaperMeta | None:
+    """文件名不合规时，用 sidecar（目录 + 卷面/用户选择）拼出 PaperMeta。
+
+    字段不全就返回 None —— 宁可不归组，也不拼一张字段缺失的假卷子。
+    """
+    from paper_meta import build_paper_meta, parse_path_parts
+
+    merged = sidecar.get("merged") or {}
+    parts = parse_path_parts(str(rel_jsonl).replace("\\", "/"))
+    if parts is None:
+        return None
+    grade = merged.get("grade") or sidecar.get("grade")
+    exam_type = merged.get("exam_type")
+    title = merged.get("title")
+    if not (grade and exam_type and title):
+        return None
+    district = merged.get("district", sidecar.get("district")) or ""
+    school = sidecar.get("school")
+    meta = build_paper_meta(parts, grade, exam_type, district or "", school)
+    return replace(meta, title=title)
