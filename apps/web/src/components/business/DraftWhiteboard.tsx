@@ -162,6 +162,8 @@ const ROTATE_HANDLE_HIT = 20;
 const ROTATE_SNAP = Math.PI / 12;
 /** 小于 0.5° 视为没有旋转（不记历史、不落盘） */
 const MIN_ROTATE_ANGLE = Math.PI / 360;
+/** 选中移动的净位移下限（px）：拖出去又拖回原位（净位移小于它）不算一次移动，不记历史 */
+const MIN_MOVE_PX = 0.5;
 
 interface RotateHandle {
   x: number;
@@ -462,7 +464,9 @@ function drawCompassOverlay(
 /**
  * 选中层（仅 select 工具激活时叠加）：选中元素（笔画/贴图）的虚线包围盒 + 框选拖拽矩形
  * + 选区旋转手柄（纯贴图选区不画，贴图不参与旋转）。
- * 笔画平移按点列原位改写（无副本），包围盒每次重绘现算——单笔画点列最多千级，开销可忽略。
+ * 笔画平移/旋转改的是「起手时克隆出来的副本」的点列坐标（原位改写，不建新数组）——
+ * 历史快照里的元素对象只读，撤销靠的就是它们不被改动，所以起手必须先克隆。
+ * 包围盒每次重绘现算——单笔画点列最多千级，开销可忽略。
  */
 function drawSelectionOverlay(
   ctx: CanvasRenderingContext2D,
@@ -1003,10 +1007,13 @@ export function DraftWhiteboard({
     redraw();
   }, [redraw]);
 
+  /** 贴图四角缩放进行中（DraftImageLayer 内部手势，父级只能靠回调感知） */
+  const imageResizeRef = useRef(false);
   /** 有手势在进行时不响应撤销（否则会把半截手势写进历史） */
   const gestureBusy = useCallback(() => (
     drawingRef.current
     || eraserActiveRef.current
+    || imageResizeRef.current
     || selectGestureRef.current !== null
     || shapeGestureRef.current !== null
     || triDragRef.current !== null
@@ -1227,7 +1234,8 @@ export function DraftWhiteboard({
     if (g.kind === 'move') {
       if (g.moved) {
         if (persist) setDraft(questionId, strokesRef.current); // 笔画平移落盘（贴图已随 updateImages 逐帧落盘）
-        pushHistory();
+        // 只有净位移够大才记历史：拖出去又拖回原位是空步，记了会让撤销「看起来没反应」
+        if (Math.hypot(x - g.startX, y - g.startY) >= MIN_MOVE_PX) pushHistory();
       }
       const canvas = canvasRef.current;
       if (canvas) canvas.style.cursor = insideSelectionBounds(x, y) ? 'grab' : 'default';
@@ -1268,7 +1276,8 @@ export function DraftWhiteboard({
     }
     if (g.kind === 'move' && g.moved) {
       if (persist) setDraft(questionId, strokesRef.current);
-      pushHistory();
+      // 同上：抬手（此处是最后一帧位置）净位移不足时是空步，不记历史
+      if (Math.hypot(g.lastX - g.startX, g.lastY - g.startY) >= MIN_MOVE_PX) pushHistory();
     }
     redraw();
   };
@@ -1779,13 +1788,13 @@ export function DraftWhiteboard({
         {scrollMode === 'scroll-y' ? (
           <div ref={wrapRef} className="absolute inset-0 overflow-y-auto overflow-x-hidden">
             <div ref={boardRef} className="relative" style={{ width: '100%' }}>
-              <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} onCommit={pushHistory} />
+              <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} onCommit={pushHistory} onGestureChange={(active) => { imageResizeRef.current = active; }} />
               {canvasEl}
             </div>
           </div>
         ) : (
           <div ref={wrapRef} className="absolute inset-0">
-            <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} onCommit={pushHistory} />
+            <DraftImageLayer key={questionId} images={images} onImagesChange={updateImages} selectedIds={selectedImageIds} handlesEnabled={tool === 'select'} onCommit={pushHistory} onGestureChange={(active) => { imageResizeRef.current = active; }} />
             {canvasEl}
           </div>
         )}

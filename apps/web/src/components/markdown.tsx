@@ -384,7 +384,9 @@ export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true
   const [bucketClass, setBucketClass] = useState<string | null>(bucketHeight ? 'h-[120px]' : null);
   const [zoom, setZoom] = useState(false);
   // 按下点（仅在 dragToDraft 时使用）：起拖后置 null，同一次按下只起一次拖
-  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
+  // pointerId 一并记下：iPad 上第二根手指/手掌落到同一张图时，move/up 必须按 id 过滤，
+  // 否则副指针能凭空起拖，且它抬手就清掉主指针正在进行的按下
+  const dragOriginRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const finalClass = (bucketHeight
     ? `${className ?? ''} ${bucketClass ?? ''}`.trim()
     : (className ?? 'block mx-auto my-2 max-w-full h-[50px] object-contain rounded-lg'))
@@ -401,19 +403,21 @@ export function MarkdownImg({ src, alt, className, bucketHeight, zoomable = true
   const onImgPointerDown = (e: React.PointerEvent<HTMLImageElement>) => {
     if (!dragToDraft || !e.isPrimary) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    dragOriginRef.current = { x: e.clientX, y: e.clientY };
+    dragOriginRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
   const onImgPointerMove = (e: React.PointerEvent<HTMLImageElement>) => {
     const origin = dragOriginRef.current;
-    if (!origin) return;
+    if (!origin || origin.pointerId !== e.pointerId) return;
     if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) <= DRAFT_DRAG_THRESHOLD) return;
     dragOriginRef.current = null; // 一次按下只起一次拖
     beginImageDrag({ src: resolveAsset(src ?? ''), pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
   };
 
   const endImgDrag = (e: React.PointerEvent<HTMLImageElement>) => {
+    const origin = dragOriginRef.current;
+    if (origin && origin.pointerId !== e.pointerId) return; // 副指针抬手不结束主指针的按下
     dragOriginRef.current = null;
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };

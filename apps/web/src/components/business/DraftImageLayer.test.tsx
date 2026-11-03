@@ -39,4 +39,23 @@ describe('DraftImageLayer', () => {
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 100, clientY: 100 });
     expect(onCommit).toHaveBeenCalledTimes(1);
   });
+
+  it('缩放手势起止回调 onGestureChange（父级据此把手势算进撤销守卫）', () => {
+    const onGesture = vi.fn();
+    const { container } = render(
+      <DraftImageLayer
+        images={[IMG]}
+        onImagesChange={() => {}}
+        selectedIds={new Set(['i1'])}
+        handlesEnabled
+        onGestureChange={onGesture}
+      />,
+    );
+    const handle = container.querySelector('[data-corner="se"]')!;
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 100, clientY: 100 });
+    expect(onGesture).toHaveBeenCalledWith(true);
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 100, clientY: 100 });
+    expect(onGesture).toHaveBeenCalledWith(false);
+    expect(onGesture.mock.calls).toEqual([[true], [false]]);
+  });
 });

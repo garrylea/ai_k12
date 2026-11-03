@@ -188,6 +188,23 @@ describe('草稿白板：撤销 / 重做', () => {
     expect(getDraft('q1')[0].points[0].y).toBeCloseTo(100, 5);
   });
 
+  it('拖动后回到原点不记历史：撤销直接回到上一步', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 200]);
+
+    // 按下笔画 → 拖出去 (+60,+40) → 又拖回起手点 → 抬手：净位移 0，不该记一步空步
+    fireEvent.pointerDown(canvas, { pointerId: 8, pointerType: 'mouse', button: 0, clientX: 150, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 8, pointerType: 'mouse', buttons: 1, clientX: 210, clientY: 140 });
+    fireEvent.pointerMove(canvas, { pointerId: 8, pointerType: 'mouse', buttons: 1, clientX: 150, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 8, pointerType: 'mouse', clientX: 150, clientY: 100 });
+
+    // 最后一次真实操作是那一笔：撤销应回到空板（若记了空步，这里会剩 1 条笔迹）
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(0);
+  });
+
   it('清空可撤销', () => {
     const { container, canvas } = setup();
     penLine(canvas, 100);

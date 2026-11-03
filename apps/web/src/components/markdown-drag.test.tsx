@@ -29,6 +29,22 @@ describe('MarkdownImg 拖源', () => {
     });
   });
 
+  it('副指针（第二根手指/手掌）不能起拖，也不能抢走主指针的按下', () => {
+    const { container } = render(<MarkdownImg src="questions/a.png" alt="" dragToDraft />);
+    const img = container.querySelector('img')!;
+
+    fireEvent.pointerDown(img, { pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: 0, clientY: 0 });
+    // 副指针移动：与按下时的 pointerId 不符，不触发拖拽
+    fireEvent.pointerMove(img, { pointerId: 2, pointerType: 'touch', clientX: 40, clientY: 0 });
+    expect(beginImageDrag).not.toHaveBeenCalled();
+
+    // 主指针继续移动：仍然是同一次按下，正常起拖
+    fireEvent.pointerMove(img, { pointerId: 1, pointerType: 'touch', clientX: 40, clientY: 0 });
+    expect(beginImageDrag).toHaveBeenCalledWith({
+      src: '/assets/questions/a.png', pointerId: 1, clientX: 40, clientY: 0,
+    });
+  });
+
   it('未开 dragToDraft 的图片不参与拖拽', () => {
     const { container } = render(<MarkdownImg src="questions/a.png" alt="" />);
     const img = container.querySelector('img')!;

@@ -21,9 +21,11 @@ interface Props {
   handlesEnabled: boolean;
   /** 一次「已完成」的改动（缩放手势结束 / 删除）后调用一次，供上层记一步历史 */
   onCommit?: () => void;
+  /** 缩放手势起止（true = 手势进行中）：父级据此把手势算进 gestureBusy，途中不响应撤销 */
+  onGestureChange?: (active: boolean) => void;
 }
 
-export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEnabled, onCommit }: Props) {
+export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEnabled, onCommit, onGestureChange }: Props) {
   const layerRef = useRef<HTMLDivElement>(null);
   // 缩放：corner 决定锚定对角（nw 锚 se、ne 锚 sw、sw 锚 ne、se 锚 nw）
   const resizeRef = useRef<{
@@ -41,6 +43,7 @@ export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEn
       id: img.id, corner, startX: e.clientX,
       origX: img.x, origY: img.y, origW: img.w, origH: img.h,
     };
+    onGestureChange?.(true);
   };
   const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = resizeRef.current;
@@ -59,6 +62,7 @@ export function DraftImageLayer({ images, onImagesChange, selectedIds, handlesEn
   const endResize = () => {
     if (!resizeRef.current) return;
     resizeRef.current = null;
+    onGestureChange?.(false); // 上面的守卫保证只发一次（up/cancel/lostcapture 都会进来）
     onCommit?.();   // 缩放逐帧落 store，历史只在手势结束记一步
   };
 
