@@ -1,5 +1,5 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { BackButton, LogoutButton } from '@/components/base';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { BackButton } from '@/components/base';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
@@ -29,6 +29,12 @@ import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
  * 见 `@/utils/stayReturn`）——**不是**回退浏览器历史：两页互跳会把兄弟页压进历史栈，
  * 学生从星图进来、切过奖励册再切回来按「返回」就会退回奖励册而不是星图（2026-09-21 用户实测反馈）。
  * 两页互跳时来源原样带过去，来源缺失时兜底回星图。
+ *
+ * 顶栏右侧是「回到开始页」（→ `/student/entry` 登录后的学习/答疑/训练三入口页），
+ * **不是退出登录**（2026-11-04 用户裁决）：个人中心是「看一眼就走」的浅停留页，
+ * 学生看完该回到登录后的主菜单继续学，而不是被踢回登录页 —— 游戏里进个人中心看完
+ * 回主界面，不会直接退到登录界面。登出仍可在开始页右上角完成（`LogoutButton` 在
+ * `EntrySelectPage` 保留），鉴权清理逻辑也仍在那一处。
  */
 const stayItems = [
   { to: '/student/rewards', label: '奖励册' },
@@ -36,8 +42,26 @@ const stayItems = [
   { to: '/student/practice-history', label: '练习记录' },
 ];
 
+const HomeIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M3 10.5 12 3l9 7.5" />
+    <path d="M5 9.5V21h14V9.5" />
+    <path d="M9.5 21v-6h5v6" />
+  </svg>
+);
+
 export default function StudentStayLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   // 来源页 + 来源页自己的 location.state（课程详情缺 state 会被自己的「缺少课程信息」挡住）
   // 练习记录按层级固定返回（列表→个人中心、详情→列表），故把当前 pathname 也传进去
   const back = resolveStayReturn(location.state, location.pathname);
@@ -75,7 +99,16 @@ export default function StudentStayLayout() {
           ))}
         </nav>
 
-        <LogoutButton />
+        {/* 回到登录后的开始页（不是登出）：浅停留页看完回主菜单继续学 */}
+        <button
+          type="button"
+          onClick={() => navigate('/student/entry')}
+          title="回到开始页"
+          aria-label="回到开始页"
+          className="p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--bg-subtle)] shadow-sm hover:bg-[var(--bg-base)] transition-colors text-[var(--text-secondary)]"
+        >
+          <HomeIcon />
+        </button>
       </header>
 
       {/* 页面内容：学生端统一的 main 样式 */}

@@ -28,6 +28,7 @@ function renderStay(initialEntry: { pathname: string; state?: unknown }) {
     [
       { path: '/student/star-map', element: <div>知识星图</div> },
       { path: '/student/course-detail', element: <div>课程详情</div> },
+      { path: '/student/entry', element: <div>入口选择页</div> },
       {
         path: '/student/profile',
         element: <StudentStayLayout />,
@@ -97,6 +98,24 @@ describe('StudentStayLayout 顶栏「返回」', () => {
     await user.click(screen.getByRole('button', { name: '返回' }));
 
     expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
+  });
+});
+
+describe('StudentStayLayout 顶栏「回到开始页」', () => {
+  it('右上角回登录后的入口选择页，且不清鉴权（不是退出登录）', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('token', 'still-logged-in');
+    const router = renderStay({ pathname: '/student/profile' });
+
+    // 个人中心不再提供登出：登出只在开始页（EntrySelectPage）右上角
+    expect(screen.queryByRole('button', { name: '退出登录' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '回到开始页' }));
+
+    expect(router.state.location.pathname).toBe('/student/entry');
+    expect(screen.getByText('入口选择页')).toBeInTheDocument();
+    expect(localStorage.getItem('token')).toBe('still-logged-in');
+    localStorage.removeItem('token');
   });
 });
 
