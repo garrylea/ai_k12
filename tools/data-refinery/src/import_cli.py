@@ -220,26 +220,33 @@ def _scan_entry(args):
 
 
 def _fix_entry(args):
-    """人工补题：只处理本次扫描到的问题，TTY 下才进交互。"""
+    """人工补题：先处理扫描到的问题，再让用户主动点名重录（不依赖扫描）。"""
     def _run(_argv) -> int:
         import sys
 
-        from manual_fix import review_pending
+        from manual_fix import review_by_numbers, review_pending
 
         sources = getattr(args, "_scanned_sources", None)
-        if not sources:
-            print("[done] 本次没有待人工处理的题", flush=True)
-            return 0
         if args.dry_run:
-            print(f"[dry-run] {len(sources)} 份卷存在待补题；正式执行时会逐条确认", flush=True)
+            if sources:
+                print(f"[dry-run] {len(sources)} 份卷存在待补题；正式执行时会逐条确认", flush=True)
+            print("[dry-run] 正式执行时还会问「还有哪道题要主动重录」", flush=True)
             return 0
         if args.skip_review or not sys.stdin.isatty():
-            print(f"[提示] {len(sources)} 份卷有题目待人工确认；当前非交互终端，已跳过。",
-                  flush=True)
-            print("       唯一入口（录入后会自动问是否写库）：", flush=True)
-            print("       python3 scripts/fix_question_cli.py --source <卷名>", flush=True)
+            if sources:
+                print(f"[提示] {len(sources)} 份卷有题目待人工确认；当前非交互终端，已跳过。",
+                      flush=True)
+                print("       唯一入口（录入后会自动问是否写库）：", flush=True)
+                print("       python3 scripts/fix_question_cli.py --source <卷名>", flush=True)
+            else:
+                print("[done] 本次没有待人工处理的题", flush=True)
             return 0
-        review_pending(sources=sources)
+        if sources:
+            review_pending(sources=sources)
+        # 扫描只报它认得出的结构问题；PDF→MD 阶段丢图/丢字它未必能发现
+        # （2026-11-03 汇文题6 一张图没截出来）。所以每次都在交互终端里问一句
+        # 「还有哪道题要主动重录」，用户可直接粘「材料+题干+选项+图片」整段。
+        review_by_numbers(args.subject, args.file)
         return 0
     return _run
 

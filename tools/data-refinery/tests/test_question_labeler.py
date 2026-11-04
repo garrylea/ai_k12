@@ -158,6 +158,174 @@ def test_validate_rejects_incomplete_missing_regen():
     assert llm.called == 2
 
 
+def test_validate_accepts_physics_missing_image_unrepairable():
+    """物理实验题缺图（图未随卷给出）：模型返回 is_complete=false + regenerated=null
+    + issues 含「缺图」「无法修复」→ 属于 content 型缺陷，接受只报告不修复，
+    保留 type/difficulty/KP，不重试。
+
+    事故（2026-11-03 汇文题21）：Qwen3.8-27B 正确返回了 type=short_answer /
+    difficulty=3 / KP=[P1003] + is_complete=false + regenerated=null + issues
+    含「缺图缺陷，无法修复」，被旧规则判失败→重试→兜底→402→完全丢失，
+    最后用确定性兜底（difficulty 降级 2、KP 丢空）。
+    """
+    good_with_content_defect = (
+        '{"type":"short_answer","difficulty":3,"knowledge_points":["P1003"],'
+        '"suggested_new_kps":[],'
+        '"completeness":{"is_complete":false,"issues":'
+        '["题干提及图2未随卷给出，属于缺图缺陷，无法修复"]},'
+        '"regenerated":null}'
+    )
+    llm = _seq_llm(good_with_content_defect)
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="physics")
+    q = RawQuestion(group_order=21, group_id="三",
+                    content="(1)实验中通过观察 来比较电阻大小；(2)把A、B、C、D电阻丝接入...")
+    res = labeler.label([q], batch_size=1)
+    assert llm.called == 1, "content 型缺陷应一次通过，不重试"
+    assert res[0].type == "short_answer"
+    assert res[0].difficulty == 3
+    assert res[0].knowledge_points == ["P1003"]
+    assert res[0].is_complete is False  # 标 needs_review，is_active=0 不进抽题池
+
+
+def test_validate_rejects_physics_missing_options_still_requires_regen():
+    """物理缺选项（option 型缺陷）：regenerated=null 仍要求修复，重试后成功。
+
+    缺选项有上下文残片可依（数学/物理/化学的设计约定），不能只报告不修复。
+    """
+    bad = ('{"type":"choice","difficulty":2,"knowledge_points":["P1003"],'
+           '"suggested_new_kps":[],'
+           '"completeness":{"is_complete":false,"issues":["选项不足4个"]},'
+           '"regenerated":null}')
+    llm = _seq_llm(bad, _good_item())
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="physics")
+    q = RawQuestion(group_order=5, group_id="一", content="题干 A. 甲 B. 乙 C. 丙")
+    res = labeler.label([q], batch_size=1)
+    assert llm.called == 2, "option 型缺陷应重试"
+    assert res[0].type == "fill_blank"  # 第二次（_good_item）的 type
+
+
+def test_image_option_false_positive_is_treated_complete():
+    """「选项是图片、无法文本校验」是误判：图选项题本身完整，不标 needs_review。
+
+    事故（2026-11-03 汇文题8）：4 张图片选项的合法题被 LLM 判 is_complete=false
+    → needs_review=True → is_active=0 → 被考试题单过滤，页面题号整体前移
+    （用户看到"第8题"其实是第9题，以为图被挪走了）。
+
+    判据是**结构**（4 个选项全是纯图片），不依赖 LLM 措辞——实测三轮措辞都不同。
+    """
+    item = ('{"type":"choice","difficulty":2,"knowledge_points":["P1003"],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,'
+            '"issues":["选择题选项均为电路图图片，且无法从文本中校验图片内容"]}}')
+    llm = _seq_llm(item)  # 只给一次，若重试会耗尽抛错
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="physics")
+    q = RawQuestion(group_order=8, group_id="一",
+                    content="题干\nA.\n![](images/a.jpg)\nB.\n![](images/b.jpg)\n"
+                            "C.\n![](images/c.jpg)\nD.\n![](images/d.jpg)")
+    res = labeler.label([q], batch_size=1)
+    assert llm.called == 1
+    assert res[0].is_complete is True
+    assert res[0].completeness_issues == []
+
+
+def test_text_options_without_images_and_missing_figure_stay_incomplete():
+    """content 里一张图都没有 + LLM 说缺图 → 真缺图，仍标待复核。"""
+    item = ('{"type":"choice","difficulty":2,"knowledge_points":["P1003"],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,'
+            '"issues":["题干要求连接实物图，但未包含实物元件图，无法修复"]}}')
+    llm = _seq_llm(item)
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="physics")
+    q = RawQuestion(group_order=20, group_id="三",
+                    content="题干\nA. 电源电压\nB. 电阻R的阻值\nC. R两端电压\nD. 滑动变阻器阻值")
+    res = labeler.label([q], batch_size=1)
+    assert res[0].is_complete is False
+    assert res[0].completeness_issues
+
+
+def test_missing_figure_claim_ignored_when_images_present():
+    """content 里其实有图 + LLM 说缺图 → 误判（MinerU 已抽图、LLM 看不到），判完整。
+
+    事故（2026-11-03 汇文题20/题21）：实物图、图2（电阻丝参数图）都在 md 里，
+    LLM 纯文本看不到图，判「缺图」→ needs_review → is_active=0 → 考试题单过滤
+    → 页面题号整体前移。
+    """
+    item = ('{"type":"short_answer","difficulty":3,"knowledge_points":["P1003"],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,'
+            '"issues":["题干提到图2，但原文中缺失图2，无法完整解题"]}}')
+    llm = _seq_llm(item)
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="physics")
+    q = RawQuestion(group_order=21, group_id="三",
+                    content="探究电阻大小\n![](images/fig1.jpg)\n"
+                            "![](images/fig2.jpg)\n(1)观察____来比较电阻大小")
+    res = labeler.label([q], batch_size=1)
+    assert res[0].is_complete is True
+    assert res[0].completeness_issues == []
+
+
+def test_missing_figure_claim_ignored_when_images_in_material_text():
+    """图片被 split_material 移到 material_text、content 里没图 → 也要判完整。
+
+    事故（2026-11-03 汇文题18/21/25）：content 图数=0，但 material_text 里有
+    1-3 张图；只查 content 会漏，仍被误标 needs_review。
+    """
+    item = ('{"type":"short_answer","difficulty":3,"knowledge_points":["P1003"],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,'
+            '"issues":["题干写如图所示但图片文件未随卷给出，属于缺图"]}}')
+    llm = _seq_llm(item)
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="physics")
+    q = RawQuestion(group_order=25, group_id="五",
+                    content="如图所示，求电流",
+                    material_text="如图所示的电路\n![](images/fig.jpg)")
+    res = labeler.label([q], batch_size=1)
+    assert res[0].is_complete is True
+    assert res[0].completeness_issues == []
+
+
+def test_structural_defect_with_images_stays_incomplete():
+    """有图但缺陷是文本结构问题（选项冲突/截断）→ 不被图误判吞掉，仍待复核。
+
+    事故（2026-11-03 汇文题24）：选项 A-D 只对应第(1)小题、题干混入 (2)(3)(4)，
+    是真结构问题，不能因为题里有图就放过。
+    """
+    from question_labeler import LabeledQuestion
+    labeler = QuestionLabeler(llm=None, prompt="", knowledge_points=KPS, subject="physics")
+    q = RawQuestion(group_order=24, group_id="四",
+                    content="题干\n![](images/a.jpg)\nA. 甲 B. 乙 C. 丙 D. 丁")
+    labeled = LabeledQuestion.from_raw(q)
+    item = {"type": "short_answer", "difficulty": 3,
+            "knowledge_points": ["P1003"], "suggested_new_kps": [],
+            "completeness": {"is_complete": False,
+                             "issues": ["题目结构混乱：选项A-D仅对应第(1)小题，"
+                                        "题干混入第(2)(3)(4)小题"]}}
+    labeler._fill_from_item(labeled, item)
+    assert labeled.is_complete is False
+    assert labeled.completeness_issues
+
+
+def test_missing_figure_keeps_incomplete():
+    """缺图（题干引用的图未随卷给出）是真缺陷，仍保持 is_complete=False（标待复核）。"""
+    item = ('{"type":"short_answer","difficulty":3,"knowledge_points":["P1003"],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,'
+            '"issues":["题干提及图2未随卷给出，属于缺图缺陷，无法修复"]}}')
+    llm = _seq_llm(item)
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="physics")
+    q = RawQuestion(group_order=21, group_id="三", content="(1)观察 来比较电阻大小")
+    res = labeler.label([q], batch_size=1)
+    assert res[0].is_complete is False
+    assert res[0].completeness_issues
+
+
 def test_validate_rejects_regen_bad_structure():
     """choice 且 is_complete=false：regenerated.options 非 4 项/空 text → 校验失败。"""
     bad = ('{"type":"choice","difficulty":2,"knowledge_points":[],"suggested_new_kps":[],'

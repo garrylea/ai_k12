@@ -256,6 +256,11 @@ export default function ExamRunPage() {
               variant="embedded"
               draftDisabled  // 内嵌草稿由页面级草稿面板替代（2026-09-07）
               showResultFeedback={false}
+              // 标题用**原始题号**（q.n = 卷内 question_no），不用顺序位 idx+1：
+              // needs_review 题被 is_active=0 过滤后，顺序位会整体前移，页面
+              // 「第8题」实际是题9（2026-11-03 汇文事故）。用题号后，隐藏题
+              // 只会让题号跳号（学生知道该题没进本次考试），不会张冠李戴。
+              title={(idx) => `第 ${questions[idx]?.n ?? idx + 1} 题`}
               headerExtra={
                 <div className="flex shrink-0 items-center gap-4">
                   <span className="text-sm text-[var(--text-secondary)]">

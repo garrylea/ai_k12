@@ -304,6 +304,9 @@ _OPTION_MARK_RE = re.compile(r'[\(（]([A-Da-d])[\)）]')
 _BARE_INLINE_RE = re.compile(r'(?<![A-Za-z0-9])([A-D])[.．](?=\s*\S)')
 # 裸字母竖排行：行首单独 'A' / 'A.' / 'A、'（选项内容/配图在标记行之间）
 _BARE_LINE_RE = re.compile(r'^\s*([A-D])\s*[.、．]?\s*$')
+# 行首小问起点 (1)/（1）/1）（OCR 常丢左括号）：用来判断 A-D 是否属于某个小问。
+# 与 material_split._SUBQ1 同口径（那边管材料切分，这边管选项归属）。
+_SUBQ1_LINE = re.compile(r'(?m)^[ \t]*[（(]?\s*1\s*[）)][ \t]*\S')
 
 
 def _find_option_marks(content: str) -> list[tuple[int, int, str]] | None:
@@ -363,6 +366,60 @@ def _first_image_line_above(lines: list[str], li: int) -> int | None:
     return None
 
 
+# 纯图片行（用于图选项排版的图片下移修正）
+_PURE_IMAGE_LINE_RE = re.compile(r'^!\[[^\]]*\]\([^)]*\)\s*$')
+
+
+def _trailing_image_line(text: str) -> str | None:
+    """text 最后一个非空行若是纯图片行，返回该图片 markdown；否则 None。"""
+    stripped = text.rstrip()
+    if not stripped:
+        return None
+    last_line = stripped.rsplit('\n', 1)[-1].strip()
+    if _PURE_IMAGE_LINE_RE.match(last_line):
+        return last_line
+    return None
+
+
+def _strip_trailing_image_line(text: str, img: str) -> str:
+    """从 text 末尾移除指定的图片行（及之后的空白），返回剩余部分。"""
+    idx = text.rstrip().rfind(img)
+    if idx < 0:
+        return text
+    return text.rstrip()[:idx].rstrip()
+
+
+def _shift_images_to_options(stem: str, opts: list[dict]) -> tuple[str, list[dict]]:
+    """图选项排版修正（2026-11-03 汇文物理卷事故）。
+
+    排版「图\\nA.文字\\n图\\nB.文字」时，默认分支把每张图当作**上方**选项的尾部
+    → off-by-one（题干吃了图A、A 吃了图B…，D 没图）。检测到「题干尾部有图 +
+    A/B/C 段尾部都有图」时，每张图下移给**下方**选项：stem 图 → A 头部；
+    A 图 → B 头部；B 图 → C 头部；C 图 → D 头部。
+
+    不触发的情况（安全）：
+    - 题干配图（stem 有图但 A/B/C 是纯文字选项）→ A/B/C 段尾部无图，不触发
+    - 标记独占行的图选项（'图\\nA\\n图\\nB'）→ 走 _pure 分支，不进默认分支
+    - 混合（部分选项有图、部分没有）→ A/B/C 不是全部尾部有图，不触发
+    """
+    stem_img = _trailing_image_line(stem)
+    if stem_img is None:
+        return stem, opts
+    abc_imgs = [_trailing_image_line(opts[j]["text"]) for j in range(3)]
+    if any(img is None for img in abc_imgs):
+        return stem, opts
+    new_stem = _strip_trailing_image_line(stem, stem_img)
+    new_opts: list[dict] = []
+    for j in range(4):
+        old_text = opts[j]["text"]
+        if j < 3:
+            old_text = _strip_trailing_image_line(old_text, abc_imgs[j])
+        img = stem_img if j == 0 else abc_imgs[j - 1]
+        new_text = f"{img}\n{old_text}" if old_text else img
+        new_opts.append({"label": opts[j]["label"], "text": new_text.strip()})
+    return new_stem, new_opts
+
+
 def split_options(content: str) -> tuple[str, list[dict] | None]:
     """通用 A–D 拆分（所有走 generic 的学科共用；语文走 ChineseStrategy）。
 
@@ -390,6 +447,14 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
     """
     marks = _find_option_marks(content)
     if not marks:
+        return content, None
+    # 小问内的选项不是整题选项：实验/多问题的大题里，`A./B./C./D.` 常属于某个
+    # 小问（「(1)…(选填选项前的字母)A. … B. … C. … D. …」）。抽成顶层 options 会
+    # 让小问丢掉 A-D，而整题 type 是 short_answer 又不渲染 options → 学生看不到选项，
+    # 小问无法作答（2026-11-03 汇文题19/20）。
+    # 判据：行首 `(1)` 出现在第一个 A 标记之前 → A-D 在小问内部 → 不拆，保留原文。
+    m_subq = _SUBQ1_LINE.search(content)
+    if m_subq is not None and m_subq.start() < marks[0][0]:
         return content, None
     a_start, _, _ = marks[0]
     d_start, d_end, _ = marks[3]
@@ -480,7 +545,10 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
         else:
             text = content[marks[j][1]:marks[j + 1][0]]
         opts.append({"label": marks[j][2], "text": text.strip()})
-    return stem, opts
+    # 图选项排版修正（2026-11-03 汇文物理卷）：图在标签上方时默认 off-by-one
+    # （题干吃图A、A 吃图B…）。_shift_images_to_options 检测到此排版时把每张图
+    # 下移给下方选项；非此排版（题干配图/纯文字选项）原样返回。
+    return _shift_images_to_options(stem, opts)
 
 
 _CELL_DIGITS_RE = re.compile(r"^\d{1,2}$")

@@ -398,3 +398,91 @@ def test_type_mismatch_ignores_rows_without_group(tmp_path):
 
     issues = R.scan_paper("卷A", Path("物理/x/卷A"), md, rows, None, [])
     assert [i for i in issues if i["kind"] == "type_mismatch"] == []
+
+
+def test_label_failed_fallback_is_reported(tmp_path):
+    """LLM 标注失败的题用 _fallback_label 兜底（type 按选项判、difficulty=2、KP 空），
+    needs_review=False 所以 ⑤ 的 flagged_needs_review 不会命中——必须单独报出来，
+    否则用户不知道哪题 metadata 是兜底的（2026-11-03 用户反馈）。"""
+    md = _md(tmp_path, "1. 甲\n2. 乙\n")
+    rows = _rows((1, "甲"), (2, "乙"))
+    labeling = [{"source": "卷A", "group_order": 2,
+                 "type": "label_failed_fallback",
+                 "issues": ["LLM 标注失败，已用确定性兜底（题型按选项判定、难度 2）"]}]
+    issues = R.scan_paper("卷A", Path("物理/x/卷A"), md, rows, None, labeling)
+
+    failed = [i for i in issues if i["kind"] == "label_failed"]
+    assert len(failed) == 1
+    assert failed[0]["group_order"] == 2
+    assert failed[0]["reasons"]
+
+
+def test_excerpt_includes_material_text(tmp_path):
+    """人工复核看到的 excerpt 要含材料：题干只有小问、图/表在 material_text 里时，
+    只贴 content 会让人误以为题缺内容（2026-11-03 题18）。"""
+    md = _md(tmp_path, "1. 观察图乙\n")
+    rows = [{"group_order": 1, "content": "(2)由图乙可知水温变化",
+             "type": "short_answer", "needs_review": False,
+             "material_text": "如图甲所示\n![](images/a.jpg)\n<table>…</table>"}]
+    issues = R.scan_paper("卷A", Path("物理/x/卷A"), md, rows, None, [])
+
+    inc = [i for i in issues if i["kind"] == "incomplete_content"]
+    assert inc, "小问从(2)起应报 incomplete_content"
+    assert "[材料]" in inc[0]["excerpt"]
+    assert "a.jpg" in inc[0]["excerpt"]
+
+
+def test_empty_stem_not_reported_when_material_has_text(tmp_path):
+    """题干为空但材料有正文 → 不算空题干（材料承载了整题）。"""
+    md = _md(tmp_path, "1. 题干\n")
+    rows = [{"group_order": 1, "content": "", "type": "short_answer",
+             "needs_review": False, "material_text": "如图甲所示，求电流大小。"}]
+    issues = R.scan_paper("卷A", Path("物理/x/卷A"), md, rows, None, [])
+    assert not any("empty_stem" in i["reasons"] for i in issues)
+
+
+def test_llm_only_reasons_helper():
+    assert R._is_llm_only_reasons(["llm_marked_incomplete", "LLM 说缺图"])
+    assert R._is_llm_only_reasons(["flagged_needs_review"])
+    assert not R._is_llm_only_reasons(["empty_stem"])
+    assert not R._is_llm_only_reasons(["llm_marked_incomplete", "subq_starts_at_2"])
+    assert not R._is_llm_only_reasons([])
+
+
+def test_auto_close_stale_llm_only_record():
+    """重抽后 needs_review=False、本次不再检出 → 纯 LLM 标记的旧记录自动收口。"""
+    records = [{"source": "卷A", "group_order": 18, "kind": "incomplete_content",
+                "status": "pending", "reasons": ["llm_marked_incomplete", "缺图乙"]}]
+    closed = R._auto_close_stale(records, current=set(), scanned={"卷A"})
+    assert closed == 1
+    assert records[0]["status"] == "resolved"
+    assert records[0]["auto_closed"] is True
+
+
+def test_auto_close_keeps_record_with_deterministic_reason():
+    """仍含确定性判据（空题干）→ 真问题，不收口。"""
+    records = [{"source": "卷A", "group_order": 5, "kind": "incomplete_content",
+                "status": "pending", "reasons": ["empty_stem"]}]
+    assert R._auto_close_stale(records, current=set(), scanned={"卷A"}) == 0
+    assert records[0]["status"] == "pending"
+
+
+def test_auto_closed_record_not_reopened_by_unbacked():
+    """自动收口的记录不应被 reopen_unbacked 重新打开（它不是靠补题解决的）。"""
+    records = [{"source": "卷A", "group_order": 18, "kind": "incomplete_content",
+                "status": "resolved", "auto_closed": True,
+                "reasons": ["llm_marked_incomplete"]}]
+    issues = [{"source": "卷A", "group_order": 18, "kind": "incomplete_content"}]
+    assert R.reopen_unbacked(records, issues) == 0
+    assert records[0]["status"] == "resolved"
+
+
+def test_auto_close_stale_label_failed():
+    """重抽后标注成功、本次不再检出 label_failed → 旧记录自动收口。"""
+    records = [{"source": "卷A", "group_order": 21, "kind": "label_failed",
+                "status": "pending",
+                "reasons": ["LLM 标注失败，已用确定性兜底"]}]
+    closed = R._auto_close_stale(records, current=set(), scanned={"卷A"})
+    assert closed == 1
+    assert records[0]["status"] == "resolved"
+    assert records[0]["auto_closed"] is True

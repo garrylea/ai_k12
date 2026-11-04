@@ -756,3 +756,60 @@ def test_type_mismatch_record_carries_expected_type(tmp_path, monkeypatch):
     recs = manual_fix._ask(issue, tmp_path)
 
     assert recs and recs[0]["expected_type"] == "choice"
+
+
+# ---------- 主动重录（用户指定题号，不依赖扫描清单）----------
+
+def test_papers_in_scope_filters_by_file(tmp_path, monkeypatch):
+    """按学科 + 卷名子串找已提取的卷。"""
+    root = tmp_path / "dr"
+    ex = root / "output" / "extracted" / "物理" / "初中" / "first" / "2024"
+    for name in ("卷A", "卷B"):
+        (ex / name).mkdir(parents=True)
+        (ex / name / f"{name}.jsonl").write_text("", encoding="utf-8")
+    md = root / "output" / "md" / "物理" / "初中" / "first" / "2024" / "卷A"
+    md.mkdir(parents=True)
+    (md / "卷A.md").write_text("", encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ROOT", root)
+
+    got = manual_fix.papers_in_scope("物理", "卷A")
+    assert [p["source"] for p in got] == ["卷A"]
+    assert got[0]["md"] == md / "卷A.md"
+
+
+def test_save_records_overwrites_same_number(tmp_path):
+    """同题号重复录入时覆盖旧记录，不产生两条。"""
+    manual_fix._save_records("卷A", [{"group_order": 6, "content": "v1"}], tmp_path)
+    manual_fix._save_records("卷A", [{"group_order": 6, "content": "v2"}], tmp_path)
+    rows = manual_fix._read_jsonl(tmp_path / "卷A.jsonl")
+    assert len(rows) == 1 and rows[0]["content"] == "v2"
+
+
+def test_ask_one_splits_material_then_options(tmp_path, monkeypatch):
+    """主动重录：粘贴「材料 + 小问 + 选项」→ material_text / content / options 三处正确。"""
+    import io
+
+    from subject_strategies import get_strategy
+
+    issue = {"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+             "group_order": 19, "kind": "manual_override",
+             "reasons": ["用户主动指定重录"], "md": str(tmp_path / "卷A.md"), "pdf": None}
+    (tmp_path / "卷A.md").write_text("", encoding="utf-8")
+    block = (
+        "阅读以下文字，并回答问题：\n"
+        "半导体材料的应用\n"
+        "自然界的物质和材料千千万万，如果按导电能力划分，可以将所有的物质分为导体、"
+        "半导体和绝缘体三种。其中半导体的导电能力介于导体和绝缘体之间。\n"
+        "![](images/a.jpg)\n"
+        "(1) 太阳能电池分为哪几类？\n"
+        "(2) 判断太阳能电池优劣的主要标准是什么\n"
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n" + block + "EOF\n1\n\n"))
+
+    recs = manual_fix._ask_one(issue, 19, "请录入", tmp_path, get_strategy("physics"))
+
+    assert len(recs) == 1
+    assert "半导体" in (recs[0]["material_text"] or "")
+    assert "(1) 太阳能电池" in recs[0]["content"]
+    assert recs[0]["options"] is None          # 小问选项不抽成整题 options
+    assert recs[0]["group_order"] == 19

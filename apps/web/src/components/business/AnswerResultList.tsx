@@ -182,7 +182,10 @@ export function AnswerResultList({
               return (
                 <div key={q.n} className="bg-[var(--bg-card)] rounded-xl border border-[var(--bg-subtle)] overflow-hidden">
                   <div className="p-3.5 flex items-start gap-3">
-                    {/* 题号（2026-11-01 用户要求：状态图标左侧小字） */}
+                    {/* 题号（2026-11-01 用户要求：状态图标左侧小字）。
+                        显示**原始题号 q.n**（后端 questionNo），与答题页 ExamRunPage 的
+                        「第 {q.n} 题」一致。不能用 idx+1：试卷里有题被 is_active=0 隐藏时，
+                        顺序位会整体前移，学生看到「第 8 题」其实是第 9 题（2026-11-03 汇文事故）。 */}
                     <span
                       data-testid={`result-qno-${q.n}`}
                       className="shrink-0 mt-0.5 min-w-[1.25rem] text-right text-xs text-[var(--text-tertiary)] tabular-nums"

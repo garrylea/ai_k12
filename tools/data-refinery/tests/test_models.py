@@ -67,6 +67,14 @@ def test_exam_question_accepts_calculation_type():
     assert q.type == "calculation"
 
 
+def test_exam_question_accepts_multi_choice_type():
+    """section_analyzer 把「多项选择」标成 multi_choice，前后端/DB 都已支持，
+    publish 的 Literal 也必须收，否则会整卷发布失败（2026-11-03 汇文物理卷事故）。"""
+    q = ExamQuestion(subject_id="physics", type="multi_choice", difficulty=2,
+                     content="多选", answer="ABD")
+    assert q.type == "multi_choice"
+
+
 def test_exam_question_keeps_needs_review_flag():
     q = ExamQuestion(subject_id="chinese", type="choice", difficulty=2, content="题干", answer="A", needs_review=True)
     assert q.needs_review is True

@@ -470,6 +470,7 @@ _KIND_TEXT = {
     "incomplete_content": "内容不完整",
     "merged_content": "前后题可能被合并",
     "type_mismatch": "题型与同大题不一致",
+    "manual_override": "主动重录",
 }
 
 # 内容层问题：先问「你看来有没有问题」，确认没问题就只落结论、不写库
@@ -559,7 +560,12 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             if looks_like_ui_echo(body) or len(body.strip()) < 2:
                 c.err("这段内容不像题目（过短或含界面文字），已跳过本条")
                 break
-            stem, options = strategy.split_options(body)
+            # 粘贴的可能是「材料 + 题干 + 小问 + 选项 + 图片」一整段：
+            # 先按物化策略拆材料（split_material 只在「行首 (1) + (2) 连续」时切，
+            # 普通选择题不受影响），再对剩下的题干/小问拆选项。
+            material, rest = strategy.split_material(body)
+            opts_source = rest if material else body
+            stem, options = strategy.split_options(opts_source)
             if not stem.strip() and options and body.strip():
                 # 选项字母写在内容下方（图在上、名称居中、字母在下）时，切分器会把
                 # 题干那一段当成 A 的内容 → 题干空串。直接拒收：写进去就是一道空题
@@ -571,11 +577,12 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 if fresh and fresh.strip():
                     body = fresh
                 continue
+            mat_note = f" · 材料 {len(material)} 字" if material else ""
             if options:
-                c.ok(f"第 {target} 题 · 题干 {len(stem)} 字 · 选项 "
+                c.ok(f"第 {target} 题 · 题干 {len(stem)} 字{mat_note} · 选项 "
                      f"{'/'.join(o['label'] for o in options)}")
             else:
-                c.ok(f"第 {target} 题 · 题干 {len(body)} 字 · 无选项（按简答题处理）")
+                c.ok(f"第 {target} 题 · 题干 {len(stem)} 字{mat_note} · 无选项（按简答题处理）")
             hint = "答案（可留空；e 改题面 / r 重录 / s 放弃本题）› "
             c.prompt(f"第 {target} 题{hint}" if multi else hint)
             answer = (_read_line() or "").strip()
@@ -614,7 +621,7 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 "content": stem.strip(),
                 "options": options,
                 "answer": answer,
-                "material_text": None,
+                "material_text": material,
                 "issue_kind": issue["kind"],
                 "issue_reasons": issue.get("reasons") or [],
                 # 题型以「同大题」为准（试卷不会同一大题混排）：type_mismatch 的题写库时
@@ -876,6 +883,136 @@ def _review_loop(todo: list[dict], all_issues: list[dict], out_dir: Path,
                 it["fix_file"] = str(out_file)
         _write_jsonl(ISSUES_FILE, all_issues)
         result["fixed"] += len(records)
+
+
+# ── 主动重录（用户指定题号，不依赖扫描清单）────────────────────────────────
+
+def papers_in_scope(subject: str | None, file: str | None) -> list[dict]:
+    """按学科/卷名子串列出范围内已提取的卷，用于主动重录。
+
+    返回 [{source, rel_path, md, pdf}]，按 source 排序。
+    """
+    from recognition_scan import locate_pdf
+
+    root = ROOT / "output"
+    extracted_root = root / "extracted"
+    md_root = root / "md"
+    pdf_root = ROOT.parent / "crawler" / "data"
+    out: list[dict] = []
+    for jsonl in sorted(extracted_root.rglob("*.jsonl")):
+        rel_dir = jsonl.parent.relative_to(extracted_root)
+        if subject and str(rel_dir).split("/")[0] != subject:
+            continue
+        source = jsonl.stem
+        if file and file not in source:
+            continue
+        md = md_root / rel_dir / f"{source}.md"
+        pdf = locate_pdf(pdf_root, rel_dir, source)
+        out.append({"source": source, "rel_path": rel_dir, "md": md,
+                    "pdf": pdf if pdf.exists() else None})
+    return out
+
+
+def _save_records(source: str, records: list[dict], out_dir: Path) -> None:
+    """把补题记录并入 manual_fixes/<source>.jsonl（同题号覆盖）。"""
+    out_file = out_dir / f"{source}.jsonl"
+    rows = _read_jsonl(out_file)
+    for record in records:
+        rows = [r for r in rows if r["group_order"] != record["group_order"]]
+        rows.append(record)
+    _write_jsonl(out_file, rows)
+
+
+def _pick_paper(papers: list[dict]) -> dict | None:
+    """只有一份直接返回；多份时让用户选。回车取消返回 None。"""
+    if len(papers) == 1:
+        return papers[0]
+    c = console()
+    c.write("")
+    c.write("范围内有多份卷：")
+    for i, p in enumerate(papers, 1):
+        c.write(f"  {i}. {p['source']}")
+    while True:
+        c.prompt("选择第几份（回车取消）› ")
+        raw = _read_line()
+        if raw is None or not raw.strip():
+            return None
+        raw = raw.strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(papers):
+            return papers[int(raw) - 1]
+        c.warn(f"请输入 1–{len(papers)}")
+
+
+def review_by_numbers(subject: str | None, file: str | None,
+                      fixes_dir: Path | None = None) -> int:
+    """主动重录：用户直接说「第 N 题有问题」，不依赖扫描清单。
+
+    为什么需要：扫描只报它认得出的结构问题；PDF→MD 阶段丢图/丢字它未必能发现
+    （2026-11-03 汇文题6 一张图没截出来）。这时要能主动点名重录。
+
+    粘贴内容可以是一整段「材料 + 题干 + 小问 + 选项 + 图片」：
+    `_ask_one` 先 `split_material` 拆材料、再 `split_options` 拆选项，
+    分别落到 material_text / content / options；图片引用由 apply_fixes 统一物化。
+
+    Returns: 本次记录的题数。
+    """
+    c = console()
+    papers = papers_in_scope(subject, file)
+    if not papers:
+        c.warn("范围内没找到已提取的卷，无法主动重录")
+        c.info("先跑一次 import_cli（至少到 extract 阶段）再来重录")
+        return 0
+    paper = _pick_paper(papers)
+    if paper is None:
+        return 0
+    md_path = Path(paper["md"])
+    if not md_path.exists():
+        c.err(f"找不到该卷的 md：{md_path}")
+        return 0
+    strategy = get_strategy(subject_code_for_path(paper["rel_path"], default="") or "generic")
+    out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
+
+    c.banner("主动重录",
+             f"{paper['source']} · 输入题号（多个用逗号），回车结束 · q 退出")
+    c.info("粘贴内容可以是「材料 + 题干 + 小问 + 选项 + 图片」一整段，"
+           "程序会分别拆到材料/题干/选项；图片写成 ![](images/xxx.jpg) 引用，"
+           "或直接给图片路径让 MinerU 识别")
+
+    total = 0
+    while True:
+        c.prompt("要重录的题号 › ")
+        raw = _read_line()
+        if raw is None:
+            break
+        raw = raw.strip()
+        if not raw:
+            break
+        if raw.lower() in ("q", "quit"):
+            raise SystemExit(0)
+        nums = [int(x) for x in re.split(r"[,，、\s]+", raw) if x.isdigit()]
+        if not nums:
+            c.warn("没认出题号，请输入如 6 或 6,19,20")
+            continue
+        for i, no in enumerate(nums, 1):
+            issue = {
+                "source": paper["source"],
+                "rel_path": str(paper["rel_path"]),
+                "group_order": no,
+                "kind": "manual_override",
+                "reasons": ["用户主动指定重录"],
+                "md": str(md_path),
+                "pdf": str(paper["pdf"]) if paper["pdf"] else None,
+            }
+            records = _ask_one(issue, no, "用户主动指定这道题有问题，请录入完整内容",
+                               md_path.parent, strategy, i, len(nums))
+            if records:
+                _save_records(paper["source"], records, out_dir)
+                total += len(records)
+    if total:
+        c.ok(f"已记录 {total} 题，随后会随本次导入一起问是否写库")
+    else:
+        c.info("没有录入任何题")
+    return total
 
 
 def main() -> int:

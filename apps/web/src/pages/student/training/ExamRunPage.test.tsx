@@ -110,4 +110,20 @@ describe('ExamRunPage 交卷发分交接', () => {
     // 这条分支根本没交卷，不该发第二个交卷请求
     expect(submitMock).not.toHaveBeenCalled();
   });
+
+  it('题号用原始 questionNo：前序题被 is_active=0 隐藏时，不把题3显示成"第1题"', async () => {
+    // 模拟题1/题2 被 needs_review 过滤，只剩题3（顺序第 1 位）
+    const gapSession: ExamSessionInfo = {
+      ...SESSION,
+      questions: [{ questionId: 103, questionNo: 3, text: '题三', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null }],
+    };
+    sessionMock.mockResolvedValue(gapSession);
+    sessionStorage.setItem('exam:session', JSON.stringify(gapSession));
+
+    renderPage();
+
+    // 必须显示"第 3 题"（卷内题号），而不是顺序位的"第 1/1 题"
+    await waitFor(() => expect(screen.getByText('第 3 题')).toBeTruthy());
+    expect(screen.queryByText('第 1/1 题')).toBeNull();
+  });
 });

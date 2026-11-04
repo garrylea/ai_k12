@@ -254,13 +254,39 @@ def test_fix_entry_tty_calls_review_with_scanned_sources(monkeypatch):
         seen["sources"] = sources
         return {"pending": 1, "fixed": 0, "skipped": 0}
 
+    def fake_by_numbers(subject=None, file=None, **kw):
+        seen["by_numbers"] = True
+        return 0
+
     import manual_fix
 
     monkeypatch.setattr(manual_fix, "review_pending", fake_review)
+    monkeypatch.setattr(manual_fix, "review_by_numbers", fake_by_numbers)
     monkeypatch.setattr("sys.stdin", _FakeStdin(tty=True))
     import_cli._fix_entry(_fix_entry_args(sources=("卷A", "卷B")))([])
 
     assert seen["sources"] == {"卷A", "卷B"}
+    assert seen["by_numbers"] is True
+
+
+def test_fix_entry_tty_offers_manual_reenter_without_scan_issues(monkeypatch):
+    """没有扫描问题时也要问「还有哪道题要主动重录」（PDF→MD 丢图扫描未必能发现）。"""
+    seen = {}
+
+    def fake_by_numbers(subject=None, file=None, **kw):
+        seen["called"] = True
+        return 0
+
+    import manual_fix
+
+    monkeypatch.setattr(manual_fix, "review_pending",
+                        lambda **kw: seen.setdefault("pending_called", True))
+    monkeypatch.setattr(manual_fix, "review_by_numbers", fake_by_numbers)
+    monkeypatch.setattr("sys.stdin", _FakeStdin(tty=True))
+    import_cli._fix_entry(_fix_entry_args(sources=()))([])
+
+    assert seen.get("called") is True
+    assert "pending_called" not in seen      # 没问题就不进逐条补题
 
 
 # ---------- Ctrl+C：一次就停（批量不再往下走） ----------

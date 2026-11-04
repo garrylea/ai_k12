@@ -102,6 +102,32 @@ def _load_labeler_prompt(subject: str) -> str:
     return common.replace("{{subject_rules}}", subject_file.read_text(encoding="utf-8").strip())
 
 
+def _purge_labeling_issues_for_source(log_path: Path, source_name: str) -> None:
+    """清掉该卷上一轮的 completeness / label_failed 记录（保留其它卷）。
+
+    labeling_issues.jsonl 是追加日志：不清会让已修复的旧记录（缺图误判、标注失败
+    兜底）一直留在识别问题扫描里，让人反复确认已完整的题（2026-11-03 题18/21）。
+    坏行原样保留，避免把手改坏的文件整段删掉。
+    """
+    try:
+        if not log_path.exists():
+            return
+        keep: list[str] = []
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                keep.append(line)
+                continue
+            if rec.get("source") != source_name:
+                keep.append(line)
+        log_path.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+    except OSError as e:
+        print(f"[WARN] 清理 labeling_issues 失败（{e}），旧记录可能残留", flush=True)
+
+
 # LLM 修复时出现过的占位/缺失说明（不是题目内容，绝不能入库）
 _PLACEHOLDER_HINTS = (
     "此处应填入", "此处缺失", "需补充", "待补充", "占位", "原文缺失", "材料缺失说明",
@@ -442,6 +468,12 @@ def extract_questions_file(source, config, llm, fb_llm,
     filename = md_path.name
     rel_parts = Path(str(source.rel_path)).parts
 
+    # 0. 清掉本卷上一轮的 completeness / label_failed 记录：labeling_issues.jsonl
+    #    是追加日志，不清会让已修复的旧记录（缺图误判、标注失败兜底）一直留在
+    #    识别问题扫描里，让人反复确认已完整的题（2026-11-03 题18/21）。
+    _purge_labeling_issues_for_source(
+        extracted_dir.parent / "labeling_issues.jsonl", md_path.stem)
+
     # 1. 读 MD + 全角括号归一
     text = md_path.read_text(encoding="utf-8")
     text = normalize_fullwidth_parens(text)
@@ -522,6 +554,10 @@ def extract_questions_file(source, config, llm, fb_llm,
                                      subject=subject_code)
     labeler = QuestionLabeler(llm=llm, prompt=prompt, knowledge_points=kps,
                                fallback_labeler=fb_labeler, subject=subject_code)
+    # 进度预声明：让用户选完试卷类型后立刻看到"正在处理"，而不是 1-2 分钟静默
+    # （26 题 × 每题几秒 = 1-2 分钟无输出，2026-11-03 用户反馈）
+    print(f"[label] {len(questions)} 题待标注（batch_size={label_batch_size}），"
+          f"逐题调 LLM…", flush=True)
     labeled = labeler.label(questions, batch_size=label_batch_size)
     # 标注失败（校验+重试+备选均败）：**不丢题**，用确定性兜底（2026-10-28）
     # LLM 网关抖动时每轮会随机挂 1 题，若直接跳过会导致试卷缺题、重载后题库少题。

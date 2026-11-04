@@ -9,7 +9,7 @@ class ExamQuestion(BaseModel):
     subject_id: str
     group_id: str | None = None
     group_order: int | None = None
-    type: Literal["choice", "fill_blank", "true_false", "short_answer", "proof", "calculation"]
+    type: Literal["choice", "multi_choice", "fill_blank", "true_false", "short_answer", "proof", "calculation"]
     difficulty: int = Field(..., ge=1, le=5)  # 难度 1-5
     full_score: int | None = None          # 每题满分（试卷分组标题解析）
     content: str

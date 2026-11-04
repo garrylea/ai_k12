@@ -4,6 +4,8 @@ LLM 只标注元数据，不改 content、不给答案（answer 由 question_spl
 知识点列表由调用方从 DB 查询后注入（动态读取，不写死在 prompt 文件）。
 """
 
+import re
+
 from extract import _parse_json_object  # 复用 JSON 解析逻辑
 from question_splitter import RawQuestion, split_options
 from dataclasses import dataclass
@@ -48,6 +50,9 @@ _CONTENT_DEFECT_HINTS = (
     "材料", "画线", "画波浪线", "波浪线", "加点", "下划线", "语段", "原文",
     "上下文", "链接材料", "资料卡", "题干截断", "材料截断", "内容截断", "语料",
     "表格", "图片", "音频", "缺图", "段落",
+    # 缺图型（2026-11-03 汇文题20：「未包含实物元件图」）：跟画线句缺失同类，
+    # 原文没给就补不出来，允许只报告不修复。
+    "实物图", "元件图",
 )
 
 # 允许「只报告缺陷、不修复」的学科。
@@ -66,6 +71,49 @@ def _defect_kind(comp: dict) -> str:
     if any(k in text for k in _OPTION_DEFECT_HINTS):
         return "option"
     return "unknown"
+
+
+_PURE_IMAGE_RE = re.compile(r'^!\[[^\]]*\]\([^)]*\)$')
+
+# 文本结构缺陷关键词：截断、选项冲突、缺号等是**真问题**，不能被图误判吞掉。
+# 其余只要缺陷提到「图」、而 content/material 里确实有图，就视为 LLM 看不到图的误判。
+_STRUCTURAL_DEFECT_HINTS = ("截断", "选项", "缺号", "重复", "错位", "题干为空", "空题干")
+
+
+def _figure_missing_but_images_present(content: str, issues: list) -> bool:
+    """缺陷提到图、但题干/材料里其实有图片引用 → LLM 看不到图的误判。
+
+    MinerU 已经把图抽出来了（`![…](…)` 就在 content/material_text 里），LLM 是
+    纯文本模型看不到图，于是用各种措辞说「缺图 / 图不可用 / 无法校验 / 图注缺失」
+    ——措辞每轮都变，穷举关键词追不上（2026-11-03 汇文实测：每次重跑挑不同的题，
+    题8/18/20/21/25 → 题4/15/24）。所以改成宽判据：**提到「图」+ 确实有图**即判完整。
+
+    唯一例外是文本结构缺陷（截断/选项冲突/缺号），那是真问题，不能被这张网吞掉。
+
+    保守边界：content+material 一张图都没有时返回 False（真缺图，保持不完整）。
+    """
+    if '![' not in (content or ''):
+        return False
+    text = " ".join(str(x) for x in (issues or []))
+    if any(h in text for h in _STRUCTURAL_DEFECT_HINTS):
+        return False
+    return "图" in text
+
+
+def _options_are_all_images(content: str, subject: str = "") -> bool:
+    """Python 拆出的选项是否每个都是纯图片（图选项题）。
+
+    这类题选项本身就是图（合法完整），LLM 常因「无法从文本校验图片内容」误判
+    不完整；结构证据（每个选项只有一条 ![](…)）比 LLM 措辞可靠。
+    2026-11-03 汇文题8 实测：三轮不同措辞都误判，结构判据一次命中。
+    """
+    from subject_strategies import get_strategy
+
+    strategy = get_strategy(subject) if subject else None
+    _, opts = (strategy.split_options(content) if strategy else split_options(content))
+    if not opts:
+        return False
+    return all(_PURE_IMAGE_RE.match((o.get("text") or "").strip()) for o in opts)
 
 
 def _validate_item(item: dict, q: RawQuestion, subject: str = "") -> list[str]:
@@ -104,10 +152,18 @@ def _validate_item(item: dict, q: RawQuestion, subject: str = "") -> list[str]:
         if not is_complete:
             if not isinstance(regen, dict):
                 # 「只报告、不修复」是合法结果：原文缺失型缺陷（画线句、图片内文字、
-                # 外部材料）无法从上下文还原，强行修复就是编造。这类题以原文入库并
-                # 打 needs_review（is_active=0，不进抽题池），不至于整题降级丢知识点。
-                # 数学/物理/化学的缺选项通常有残片可依，仍要求修复。
-                if subject not in _UNREPAIRED_OK:
+                # 外部材料、缺图）无法从上下文还原，强行修复就是编造。这类题以原文
+                # 入库并打 needs_review（is_active=0，不进抽题池），不至于整题降级丢
+                # 知识点。数学/物理/化学的缺选项通常有残片可依，仍要求修复后才算通过。
+                #
+                # 2026-11-03：物理实验题缺图（图未随卷给出）跟语文画线句缺失同类——
+                # 模型返回 regenerated=null 明确表示无法修复，应接受。判据用
+                # _defect_kind：缺陷归为 content（缺图/表格/材料/原文缺失）就接受，
+                # 归为 option（缺选项）仍要求修复。Qwen3.8-27B 对汇文题21 正确返回了
+                # type/difficulty/KP + is_complete=false + regenerated=null + issues
+                # 含"缺图缺陷，无法修复"，却被旧规则判失败→重试→兜底→402→完全丢失。
+                defect = _defect_kind(comp)
+                if subject not in _UNREPAIRED_OK and defect != "content":
                     issues.append("is_complete=false 但缺 regenerated")
             else:
                 if not (regen.get("content") or "").strip():
@@ -257,9 +313,15 @@ class QuestionLabeler:
         if batch_size == 0:
             return self._label_batch(questions)
         result: list = []
-        for i in range(0, len(questions), batch_size):
+        n = len(questions)
+        for i in range(0, n, batch_size):
             batch = questions[i:i + batch_size]
             result.extend(self._label_batch(batch))
+            # 进度：每 5 题或最后一批打一次，让用户看到在推进（2026-11-03 用户反馈
+            # 选完试卷类型后 1-2 分钟无输出）。每题都打会刷屏，5 题一行折中。
+            done = min(i + batch_size, n)
+            if done == n or done % 5 == 0:
+                print(f"[label] {done}/{n} done", flush=True)
         return result
 
     def _label_batch(self, batch: list) -> list:
@@ -383,6 +445,18 @@ class QuestionLabeler:
         comp = item.get("completeness") or {}
         labeled.is_complete = bool(comp.get("is_complete", True))
         labeled.completeness_issues = list(comp.get("issues", []) or [])
+        # 「选项是图片 / 图看不到」是误判：图已在题干或材料里（MinerU 抽出），
+        # LLM 纯文本看不到图才判不完整。不标 needs_review，否则 is_active=0
+        # 会被考试题单过滤，页面题号整体前移（汇文题8/18/20/21/25 事故）。
+        # 图片可能被 split_material 移到 material_text，判据要两处都看。
+        if not labeled.is_complete and (
+            _options_are_all_images(labeled.content, self._subject)
+            or _figure_missing_but_images_present(
+                (labeled.content or "") + "\n" + (labeled.material_text or ""),
+                labeled.completeness_issues)
+        ):
+            labeled.is_complete = True
+            labeled.completeness_issues = []
         regen = item.get("regenerated")
         if isinstance(regen, dict):
             # 原文无答案（Python 对齐 answer 为空）时清空 LLM 返回的答案：

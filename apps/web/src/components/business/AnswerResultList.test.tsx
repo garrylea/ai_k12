@@ -51,4 +51,28 @@ describe('AnswerResultList 题号', () => {
     expect(screen.getByTestId('result-qno-1')).toHaveTextContent('1');
     expect(screen.getByTestId('result-qno-2')).toHaveTextContent('2');
   });
+
+  it('题号用原始 questionNo：前序题被 is_active=0 隐藏时，不从 1 重新编排', () => {
+    // 复刻 session 50 / paper 361 的真实场景：第 1 题 is_active=0 被过滤，
+    // 学生答题时 ExamRunPage 显示「第 2 题」…（原始题号）。结果页必须同样用
+    // 原始题号，而不是按数组下标重编成 1/2/3。
+    render(
+      <AnswerResultList
+        questions={[
+          { n: '2', text: '题二' },
+          { n: '3', text: '题三' },
+          { n: '5', text: '题五（跳号）' },
+        ]}
+        answers={{
+          '2': { isCorrect: true, method: 'exact', studentAnswer: 'A' },
+          '3': { isCorrect: false, method: 'exact', studentAnswer: 'B' },
+          '5': { isCorrect: true, method: 'exact', studentAnswer: 'C' },
+        }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('result-qno-2')).toHaveTextContent('2');
+    expect(screen.getByTestId('result-qno-3')).toHaveTextContent('3');
+    expect(screen.getByTestId('result-qno-5')).toHaveTextContent('5');
+  });
 });

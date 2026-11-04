@@ -65,6 +65,56 @@ _BODY_KEY_LEN = 14
 # —— 这类学科只保留确定性判据（小问从 (2) 起 / 前后题合并）。改 _UNREPAIRED_OK 时两边同步。
 _UNREPAIRED_OK_SUBJECTS = frozenset({"chinese", "politics", "history", "geography", "biology"})
 
+# 确定性判据前缀：命中这些说明问题真在（空题干/小问从2起/前后题合并），
+# 不能因为 LLM 标记消失就自动收口。其余 reason 是 LLM 自由文本。
+_DETERMINISTIC_REASON_PREFIXES = (
+    "empty_stem", "subq_starts_at_2", "body_contains_stem_", "body_belongs_to_stem_",
+)
+
+
+def _is_llm_only_reasons(reasons: list | None) -> bool:
+    """这条 issue 是否只由 LLM 标记触发（无确定性判据）→ 标记消失即可自动收口。"""
+    rs = [r for r in (reasons or []) if r]
+    has_llm = any(r in ("llm_marked_incomplete", "flagged_needs_review") for r in rs)
+    has_det = any(str(r).startswith(_DETERMINISTIC_REASON_PREFIXES) for r in rs)
+    return has_llm and not has_det
+
+
+def _auto_close_stale(records: list[dict], current: set, scanned: set) -> int:
+    """自动收口本次不再检出的旧记录，返回条数。
+
+    - junk_question：噪声题已被切题过滤修掉（该行不再被当成题目）；
+    - incomplete_content 且 reasons 纯 LLM 标记：重抽后 needs_review=False，
+      LLM 标记消失说明题已完整（2026-11-03 题18）。含确定性判据的不收口。
+    收口的记录打 `auto_closed=True`，`reopen_unbacked` 会跳过，避免又变回幽灵条目。
+    """
+    closed = 0
+    for rec in records:
+        if rec.get("status") != "pending" or rec.get("source") not in scanned:
+            continue
+        key_junk = (rec["source"], rec.get("group_order"), "junk_question")
+        key_inc = (rec["source"], rec.get("group_order"), "incomplete_content")
+        key_lf = (rec["source"], rec.get("group_order"), "label_failed")
+        if rec.get("kind") == "junk_question" and key_junk not in current:
+            rec["status"] = "resolved"
+            rec["note"] = "已由切题过滤修复（该行不再被当成题目）"
+            rec["auto_closed"] = True
+            closed += 1
+        elif (rec.get("kind") == "incomplete_content"
+                and key_inc not in current
+                and _is_llm_only_reasons(rec.get("reasons"))):
+            rec["status"] = "resolved"
+            rec["note"] = "重抽后该题不再被标 needs_review，自动收口"
+            rec["auto_closed"] = True
+            closed += 1
+        elif rec.get("kind") == "label_failed" and key_lf not in current:
+            # 重抽后该题标注成功（本次不再检出 label_failed）→ 收口
+            rec["status"] = "resolved"
+            rec["note"] = "重抽后该题标注成功，自动收口"
+            rec["auto_closed"] = True
+            closed += 1
+    return closed
+
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
@@ -313,11 +363,15 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
         # 合并没拆干净）必须还能被检出来 —— 2026-11-01 人大附题2 就是补完仍然空，
         # 因为这里按 applied 跳过，扫不出来，也永远不会重开。
         body = r.get("content") or ""
+        material = r.get("material_text") or ""
+        # 人工复核看的是整题（题干 + 材料）：只贴 content 会让审阅者以为题缺内容，
+        # 实际另一半在图/材料里（2026-11-03 题18：content 只有小问、图乙在 material）。
+        full_text = body + (f"\n\n[材料]\n{material}" if material.strip() else "")
         reasons: list[str] = []
         suspect: int | None = None
 
-        # 题干为空：正文里一个有效字符都没有（图片被拆进选项、题干整段丢失都长这样）
-        if not _norm_text(body):
+        # 题干为空：正文和材料都没有有效字符（图片被拆进选项、题干整段丢失都长这样）
+        if not _norm_text(body) and not _norm_text(material):
             reasons.append("empty_stem")
 
         # 内容不完整：小问从 (2) 起（丢了 (1)），或标注时 LLM 判过不完整
@@ -358,7 +412,7 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
             kind = ("merged_content" if suspect is not None and any(
                 re.match(r"body_(contains|belongs_to)_stem_", x) for x in reasons)
                 else "incomplete_content")
-            add(no, kind, reasons, body, suspect_group_order=suspect,
+            add(no, kind, reasons, full_text, suspect_group_order=suspect,
                 content_sig=content_sig(body))
 
     # ⑥ 题型与同大题不一致：选择题区里冒出「简答题」= 选项丢了（2026-11-01 人大附题9/10：
@@ -381,6 +435,25 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
             add(r["group_order"], "type_mismatch",
                 [f"type_outlier_{top}_{n}of{len(items)}"],
                 r.get("content") or "", group_id=g, dominant_type=top)
+
+    # ⑦ LLM 标注失败兜底（2026-11-03 用户反馈）：题入库了但 metadata（type/difficulty/KP）
+    #    是确定性兜底的——type 按 Python 拆选项判（大概率对）、difficulty=2（默认）、KP 空。
+    #    题仍进抽题池可用（needs_review=False，不阻断"不丢题"设计），只报出来让用户知道
+    #    "这题 metadata 是兜底的，建议 --re-extract 重标或人工补 KP/difficulty"。
+    for rec in labeling_issues:
+        if rec.get("source") != source:
+            continue
+        if rec.get("type") != "label_failed_fallback":
+            continue
+        no = rec.get("group_order")
+        if not isinstance(no, int):
+            continue
+        # 已被 ①~⑥ 报过的题不重复报（避免一份兜底同时出现在 multiple kinds）
+        if any(i.get("group_order") == no for i in issues):
+            continue
+        add(no, "label_failed",
+            list(rec.get("issues") or ["llm_label_failed_fallback"]),
+            (by_no.get(no, {}).get("content") or ""))
 
     return issues
 
@@ -408,6 +481,10 @@ def reopen_unbacked(records: list[dict], all_issues: list[dict],
     for it in all_issues:
         rec = existing.get((it["source"], it["group_order"], it["kind"]))
         if rec is None or rec.get("status") == "pending":
+            continue
+        # 自动收口的（LLM 标记消失/噪声题被过滤）不按「补题未落库」重新打开——
+        # 它们不是靠人工补题解决的，重开会变成永远关不掉的幽灵条目。
+        if rec.get("auto_closed"):
             continue
         # 人工确认「没问题」的条目不靠补题记录收口 —— 本来就没有要写库的东西
         if rec.get("verdict") == "no_change":
@@ -509,17 +586,9 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
 
     ISSUES_FILE.parent.mkdir(parents=True, exist_ok=True)
     records = _read_jsonl(ISSUES_FILE)
-    # 旧条目自动收口：噪声题（卷首页脚）已被切题过滤修掉时，别让人工再去"补"一次
     current = {(i["source"], i["group_order"], i["kind"]) for i in all_issues}
     scanned = {i["source"] for i in all_issues}
-    closed = 0
-    for rec in records:
-        if (rec.get("status") == "pending" and rec.get("kind") == "junk_question"
-                and rec.get("source") in scanned
-                and (rec["source"], rec["group_order"], "junk_question") not in current):
-            rec["status"] = "resolved"
-            rec["note"] = "已由切题过滤修复（该行不再被当成题目）"
-            closed += 1
+    closed = _auto_close_stale(records, current, scanned)
     # 老记录里 pdf 为空（早期版本路径算错）时，用这次算出来的补上
     by_key = {(i["source"], i["group_order"], i["kind"]): i for i in all_issues}
     filled = 0

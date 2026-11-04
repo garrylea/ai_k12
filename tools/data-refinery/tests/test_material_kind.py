@@ -10,8 +10,8 @@ import json
 import pytest
 
 from material_kind import (ANSWER, PAPER, TEXTBOOK, KindCache, MaterialKindUnknown,
-                           classify_name, classify_text, kind_of_jsonl, looks_like_book,
-                           resolve)
+                           classify_name, classify_path, classify_text, kind_of_jsonl,
+                           looks_like_book, resolve)
 
 PAPER_HEAD = """# 初三年级数学学科试卷
 
@@ -75,6 +75,39 @@ def test_looks_like_book(tmp_path):
     whole = single / "某卷.md"
     whole.write_text(PAPER_HEAD, encoding="utf-8")
     assert not looks_like_book(whole)
+
+
+# === 目录段判据（2026-11-03）===
+# 现有 534 试卷 + 824 教材页全部符合：试卷在 first/second 下，教材在 上册/下册 下，零交叉。
+# looks_like_book 只对「同目录有 page_*.md 兄弟」有效，整卷 PDF 转出的单 md 没有兄弟，
+# 靠目录段才能判出来（事故：汇文物理卷名字不带「试卷」、卷面没强特征，被问用户）。
+
+def test_classify_path_paper_by_first_segment():
+    """路径含 first/second 段 → 试卷（学期目录）。"""
+    assert classify_path("物理/初中/first/2026/汇文卷/汇文卷.md") == PAPER
+    assert classify_path("物理/初中/second/2025/期末卷.md") == PAPER
+
+
+def test_classify_path_textbook_by_volume_segment():
+    """路径含 上册/下册 段 → 教材（出版社目录）。"""
+    assert classify_path("数学/初中/人教版/九年级/上册/page_018.md") == TEXTBOOK
+    assert classify_path("语文/初中/统编版/七年级/下册/page_003.md") == TEXTBOOK
+
+
+def test_classify_path_returns_none_when_no_signal():
+    assert classify_path("随手一丢.md") is None
+    assert classify_path("物理/初中/2026/卷.md") is None
+
+
+def test_resolve_uses_path_segment_for_paper_without_strong_content(tmp_path):
+    """事故复现：文件名不带「试卷」、卷面首屏没强特征词，但路径含 first → 直接判 PAPER，
+    不再问用户。2026-11-03 汇文物理卷的精确场景。"""
+    # 卷面是「单项选择题」起头，没有 满分/考试时间/本试卷共/试卷 等强特征
+    weak_text = "2025 北京汇文中学初三（上）期中 | 物 理\n\n一、单项选择题\n1. 题干\n"
+    md = tmp_path / "汇文卷.md"
+    md.write_text(weak_text, encoding="utf-8")
+    key = "物理/初中/first/2026/汇文卷/汇文卷.md"
+    assert resolve(key, md.name, md) == PAPER
 
 
 # === 三层兜底 ===

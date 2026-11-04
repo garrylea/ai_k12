@@ -86,6 +86,29 @@ def classify_text(text: str) -> str | None:
     return None
 
 
+# 目录段判据（2026-11-03 用户指出）：现有 534 试卷 + 824 教材页全部符合此规律，零交叉。
+#   试卷：<学科>/初中/first/<年份>/… 或 <学科>/初中/second/<年份>/…
+#   教材：<学科>/初中/<出版社>/<年级>/<上册|下册>/page_*.md
+# 教材用「上册/下册」不用「first/second」；试卷用「first/second」不用「上册/下册」。
+_PAPER_DIR_SEGMENTS = {"first", "second"}
+_TEXTBOOK_DIR_SEGMENTS = {"上册", "下册"}
+
+
+def classify_path(rel_path: str | Path) -> str | None:
+    """按目录段判：路径含 first/second → 试卷；含 上册/下册 → 教材。
+
+    比 looks_like_book 更通用：整卷 PDF 转出来是单 md（同目录无 page_*.md 兄弟），
+    looks_like_book 对它完全无用；但路径段里的 first/second 是强信号。
+    looks_like_book 仍保留作兜底（救回图片书/已切页教材）。
+    """
+    parts = Path(rel_path).parts
+    if any(p in _PAPER_DIR_SEGMENTS for p in parts):
+        return PAPER
+    if any(p in _TEXTBOOK_DIR_SEGMENTS for p in parts):
+        return TEXTBOOK
+    return None
+
+
 def looks_like_book(md_path: Path) -> bool:
     """同目录有 page_*.md 兄弟 → 这是一本书的某一页（教材），不是整卷。"""
     try:
@@ -172,6 +195,15 @@ def resolve(key: str, name: str, md_path: Path | None = None,
         except OSError:
             text = ""
     kind = classify_text(text)
+    if kind:
+        if cache is not None:
+            cache.set(key, kind)
+        return kind
+
+    # 目录段判据（first/second → 试卷；上册/下册 → 教材）：比 looks_like_book 更通用，
+    # 整卷 PDF 转出的单 md 同目录无 page_*.md 兄弟，靠目录段才能判出来。
+    # key 是 md 相对路径（含目录），直接用它判目录段。
+    kind = classify_path(key)
     if kind:
         if cache is not None:
             cache.set(key, kind)

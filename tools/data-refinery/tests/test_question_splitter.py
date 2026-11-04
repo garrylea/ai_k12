@@ -1310,3 +1310,144 @@ def test_forced_stem_lines_override_rules():
     qs = split_page(md, Path('x.md'), strategy=_math_strategy(), forced_stem_lines={2})
     assert 2 in {q.group_order for q in qs}
     assert qs[1].content.startswith("个苹果分给小朋友")
+
+
+def test_split_options_image_above_inline_marker():
+    """图选项排版「图\\nA.文字\\n图\\nB.文字」：图片在标签上方、标记行内带文字。
+
+    默认分支会把每张图当上方选项的尾部 → off-by-one（题干吃图A、A吃图B…）。
+    _shift_images_to_options 检测到此排版时把每张图下移给下方选项。
+
+    事故：2026-11-03 汇文物理卷题1，4 张古代物品图各对应一个选项，原图都被
+    挂给了上一个拥有者，入库后题干里多了一张图、D 选项没图。
+
+    注意：文件名用 SHA-256 哈希风格（实际 MinerU 输出），不要用含大写字母+点
+    的名字（如 图A.jpg）—— _BARE_INLINE_RE 会把文件名里的 'A.' 误当选项标记。
+    """
+    content = (
+        "如图为我国古代劳动人民发明创造的一些物品，"
+        "在通常情况下它们中属于导体的是（ ）\n\n"
+        "![](images/a412abfc.jpg)  \n"
+        "A. 木制的筷子\n\n"
+        "![](images/9f659c97.jpg)  \n"
+        "B. 竹制的书简\n\n"
+        "![](images/1787d628.jpg)  \n"
+        "C. 铜制的编钟\n\n"
+        "![](images/8ab2a530.jpg)  \n"
+        "D. 陶瓷制的茶具"
+    )
+    stem, opts = split_options(content)
+    # stem 不含选项图
+    assert "a412abfc" not in stem
+    # 每张图归属正确选项
+    assert "a412abfc" in opts[0]["text"] and "9f659c97" not in opts[0]["text"]
+    assert "9f659c97" in opts[1]["text"] and "1787d628" not in opts[1]["text"]
+    assert "1787d628" in opts[2]["text"] and "8ab2a530" not in opts[2]["text"]
+    assert "8ab2a530" in opts[3]["text"]
+
+
+def test_split_options_keeps_stem_image_when_options_have_no_image():
+    """题干配图（stem 有图但选项是纯文字）不应触发图片下移。"""
+    content = (
+        "某学习小组连接了如图所示电路。\n\n"
+        "![](images/题干图.jpg)\n\n"
+        "A. 若M接C点，灯泡变暗 B. 若M接B点，灯泡变暗 "
+        "C. 连接时滑片应移到右端 D. 连接时滑片应移到左端"
+    )
+    stem, opts = split_options(content)
+    assert "题干图" in stem
+    assert not any("题干图" in o["text"] for o in opts)
+
+
+def test_subquestion_options_not_extracted_as_top_level():
+    """小问内的 A-D 不抽成整题选项，留在原文（汇文题19/20）。
+
+    实验/多问题的大题里，A-D 常属于某个小问（「(1)…(选填选项前的字母)A. … B. …」）。
+    抽成顶层 options 会让小问丢掉 A-D，而整题 type=short_answer 又不渲染 options
+    → 学生看不到选项。判据：行首 (1) 在第一个 A 标记之前。
+    """
+    content = (
+        "小京用图甲所示的电路测量小灯泡的电阻。\n![](images/甲.jpg)\n"
+        "(1)产生这种现象的原因可能是____。(选填选项前的字母)"
+        "A. 滑动变阻器阻值太大 B. 电压表量程太小 C. 灯泡断路 D. 灯泡短路\n"
+        "(2)电流为____A。"
+    )
+    stem, opts = split_options(content)
+    assert opts is None, "小问内的 A-D 不应被抽成整题选项"
+    assert "A. 滑动变阻器阻值太大" in stem
+    assert "(2)电流为" in stem
+
+
+def test_top_level_options_before_subquestions_still_split():
+    """顶层选项在 (1) 之前 → 仍按整题选项拆（不要误伤正常选择题）。"""
+    content = "题干（ ）A. 甲 B. 乙 C. 丙 D. 丁\n(1) 第一小问\n(2) 第二小问"
+    stem, opts = split_options(content)
+    assert opts is not None and len(opts) == 4
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+
+
+# ---------- 真实卷回归：2025 汇文中学物理卷 题19 / 题20 ----------
+# 两题都是「题干 + 多个小问」，其中某个小问是选择题（"选填选项前的字母 A. B. C. D."）。
+# 事故：split_options 把某小问的 A-D 抽成整题 options，而整题 type=short_answer
+# 不渲染 options → 小问丢了 A-D、学生无法作答。这里用真实原文钉住「不拆」。
+
+# 题19 原文（stem 已被 split_material 切走后的 content）
+_HUIWEN_Q19 = (
+    "(1)正确连接电路后，闭合开关 S，发现灯泡不亮，电压表示数为零，电流表有示数，"
+    "产生这种现象的原因可能是______。(选填选项前的字母)"
+    "A. 滑动变阻器的最大阻值太大了 B. 电压表的量程选小了C. 灯泡 L断路 D. 灯泡 L短路\n"
+    "(2)排除故障后进行实验，闭合开关 S，调节滑动变阻器的滑片 P，"
+    "当电压表示数为 2.4V时，电流表示数如图乙所示，此时通过灯泡的电流为______A，"
+    "灯泡 L 的电阻值为______Ω。"
+)
+
+# 题20 原文（stem 已被 split_material 切走后的 content；含表格、图2、(3) 被 OCR 成 "( )"）
+_HUIWEN_Q20 = (
+    "(1)为了保证实验过程中不拆卸电路元件，请你帮助小妍用笔将实物图连接完整。\n"
+    "(2)在实验过程中，为了保证实验正确完成，必须要保持______不变。(选填选项前的字母)"
+    "A. 电源电压 B. 电阻R的阻值 C. R两端的电压 D. 滑动变阻器的阻值\n"
+    "( )开关闭合前，滑动变阻器阻值调至最大，实验中利用滑动变阻器除了可以起到保护电路"
+    "的作用外，它的另外一个作用是\n"
+    "电阻定律实验器(金属丝长度l，线直径d) 图2\n"
+    "<table><tr><td>U/V</td><td>0.5</td><td>1.0</td></tr>"
+    "<tr><td>I/A</td><td>0.05</td><td>0.10</td></tr></table>\n"
+    "![](images/15f9717f.jpg)\n"
+    "(4)该同学分析下表实验数据，发现 ______，由此可得实验结论：\n"
+    "(5)该同学又仔细分析图像中坐标原点的含义：电压为 0，电流为 0，电阻______。"
+)
+
+
+def test_huiwen_q19_subquestion_options_stay_inline():
+    """题19：小问(1) 的 A-D 不能抽成整题 options（真实原文）。"""
+    stem, opts = split_options(_HUIWEN_Q19)
+    assert opts is None
+    assert "A. 滑动变阻器的最大阻值太大了" in stem
+    assert "B. 电压表的量程选小了" in stem
+    assert "C. 灯泡 L断路" in stem
+    assert "D. 灯泡 L短路" in stem
+    assert "(2)排除故障后进行实验" in stem          # 第二个小问没被吞
+
+
+def test_huiwen_q20_subquestion_options_stay_inline():
+    """题20：小问(2) 的 A-D 不能抽走，表格/图/后续小问都要留在原文。"""
+    stem, opts = split_options(_HUIWEN_Q20)
+    assert opts is None
+    assert "A. 电源电压" in stem
+    assert "D. 滑动变阻器的阻值" in stem
+    assert "<table>" in stem                          # 表格没丢
+    assert "(4)该同学分析下表实验数据" in stem         # 后续小问没丢
+    assert "(5)该同学又仔细分析图像" in stem
+
+
+def test_huiwen_q19_material_then_options_pipeline():
+    """真实链路：split_material 先把题干切到材料，再 split_options 不应拆小问 A-D。"""
+    from subject_strategies.material_split import split_material_rule
+
+    raw = ("小京用图甲所示的电路测量小灯泡的电阻。\n"
+           "![](images/fd1f7688.jpg)  \n甲\n![](images/cbdc46bf.jpg)  \n乙\n"
+           + _HUIWEN_Q19)
+    material, rest = split_material_rule(raw)
+    assert material is not None and "小京用图甲" in material   # 题干进材料（既有设计）
+    stem, opts = split_options(rest)
+    assert opts is None
+    assert "A. 滑动变阻器的最大阻值太大了" in stem

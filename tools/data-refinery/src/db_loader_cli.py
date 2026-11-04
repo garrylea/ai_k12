@@ -307,6 +307,7 @@ def main(argv=None):
             print(f"[ok] {book_key} -> {n} cards", flush=True)
 
         total_q = 0
+        loaded_papers: list[tuple[str, int | None]] = []  # (source_name, paper_id)
         for p in q_files:
             qs = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
             rel = p.relative_to(published_dir).as_posix()
@@ -323,11 +324,31 @@ def main(argv=None):
             # n 只是「本次新增」；重跑时全为 0 很容易被读成「这卷没题」，所以补上总数
             print(f"[ok] {rel} -> 新增 {n} 题 / 本卷共 {len(qs)} 题"
                   + (f"（paper={paper_ctx[1]}）" if paper_ctx else ""), flush=True)
+            loaded_papers.append((p.stem, paper_ctx[1] if paper_ctx else None))
 
         print(f"Loaded: 新增 {total_cards} 张卡 / 新增 {total_q} 题"
               f"（增量模式：已存在或已更新的不计入）"
               + (f"（{failed_books} 本书因业务数据守卫被跳过）" if failed_books else ""),
               flush=True)
+
+        # 核对 SQL：让用户直接复制到 mysql 里确认本次入库数据（2026-11-03 用户反馈）
+        # 只列题（cards 按书归集，核对要 JOIN textbook_versions/lessons，SQL 太复杂不拼）
+        if loaded_papers:
+            print("\n=== 核对 SQL（复制到 mysql 执行） ===", flush=True)
+            for source_name, paper_id in loaded_papers:
+                esc = source_name.replace("'", "''")
+                print(f"-- {source_name}（共 N 题 / paper={paper_id}）：", flush=True)
+                print("SELECT id, group_order, type, difficulty, is_active,", flush=True)
+                print("       LEFT(content, 40) AS preview, answer,", flush=True)
+                print("       JSON_LENGTH(options) AS opt_cnt", flush=True)
+                print(f"FROM questions WHERE source='{esc}' ORDER BY group_order;", flush=True)
+                if paper_id is not None:
+                    print(f"-- 或按 paper_id 查（含 question_no 在卷内序号）：", flush=True)
+                    print("SELECT q.id, pq.question_no, q.type, q.difficulty, q.is_active,", flush=True)
+                    print("       LEFT(q.content, 40) AS preview, q.answer", flush=True)
+                    print("FROM paper_questions pq JOIN questions q ON pq.question_id=q.id", flush=True)
+                    print(f"WHERE pq.paper_id={paper_id} ORDER BY pq.question_no;", flush=True)
+                print(flush=True)
     finally:
         loader.close()
 
