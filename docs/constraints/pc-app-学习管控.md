@@ -53,6 +53,44 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - **不会把人永久困住**：`LogoutButton` 判锁是纯本地的（`learningLock.ts:91` 只读 localStorage，
   不发请求），学生恢复网络后锁若已到期即可登出
 
+### 系统打断后的全屏恢复（2026-11-04）
+
+学生用 Siri / 通知 / Mission Control / 切 Space / Esc 打断 kiosk 后，**不能让它停在非全屏**。
+这些行为本身拦不住（见上文「做不到的别当缺陷修」），但「打断后回不来」是我们自己的洞：
+渲染层只在角色变化时推一次 `setStudentMode(true)`，之后没人重新进 kiosk。
+
+- 守护层在 `apps/desktop/lib/kiosk-guard.js`；`main.js` 里的 `blur` / `leave-full-screen` /
+  `hide` / `show` / `restore` / 最小化 / 睡眠唤醒**只负责调度**，别在 `main.js` 再写一套
+  `focus` / `setKiosk`（会漂移）。
+- **macOS 必须 `app.focus({ steal: true })`**：`win.focus()` 只聚焦窗口、不激活 App，
+  抢不回被 Siri / 其它应用拿走的激活状态。这是本次修复的核心，**删了等于没修**。
+- **kiosk 标志还在、全屏掉了时必须 `setKiosk(false) → setKiosk(true)` 完整重进**
+  （2026-11-05 用户实测修正）：Electron 的 `NativeWindowMac::SetKiosk` 在 `is_kiosk_` 已为
+  true 时**直接 return**，`isKiosk()` 返回的就是这个内部标志；隐藏 Dock / 菜单栏 /
+  禁进程切换那组 `NSApplicationPresentationOptions` 也只在 `false→true` 这一次设置。
+  所以「只补 `setFullScreen(true)`」得到的是普通全屏（Dock 和 Cmd+Tab 全回来，等于没锁），
+  「只调 `setKiosk(true)`」是空操作。`lib/kiosk-guard.js` 的 `forceReenterKiosk()` 是唯一实现，
+  末尾的 `setFullScreen(true)` 是防异步退出动画竞态的兜底，**别删**。
+- 监听 `app.on('did-become-active')`：Siri 把整个 App 顶到后台再切回前台是**App 级**事件，
+  窗口的 `blur` / `focus` 覆盖不到；这条与 `app.show()`（Cmd+H 藏了整个 App）一起补。
+- 节奏：事件触发后延迟 300ms 恢复、两次恢复至少间隔 1500ms、每秒一次看门狗。
+  **不要加 `setAlwaysOnTop`**（会盖住 UAC / 系统安全对话框）。
+- 中断现场看 `userData/kiosk-guard.log`（256KB 截断），记录 `schedule` / `restore` /
+  `restore-error` 与当时四项状态 + `appActive` / 窗口与显示器尺寸 —— 真机复现 Siri
+  时靠它区分「真退出全屏」与「只是切了 Space」。Finder 启动时主进程 stdout 是黑洞，只能靠这个文件。
+- **新增/改名 `lib/*.js` 必须同步 `scripts/verify-asar.js` 的 `REQUIRED`**：漏了会让安装包
+  缺件，护栏测试会红（本次已把 `lib/kiosk-guard.js` 钉进去）。
+- 能力边界不变：学生仍可能短暂看到桌面（约 1 秒），强制退出 / 系统级手势仍挡不住。
+  真正的「绝对切不出去」仍靠 OS 级单应用模式（运维）。
+- **不要在 App 运行时关 Siri / 改系统偏好**（2026-11-05 裁决）：Siri 是系统守护进程，
+  官方禁用手段是 MDM 配置描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，
+  macOS 26 CIS/STIG 的标准做法）或 26.4+ 的 Siri Settings profile，属**装机时一次性配置**；
+  App 运行时 `defaults write` 不可靠（TCC / 完全磁盘访问、需重启或 kill 守护进程、SIP 保护），
+  且本 App 未签名。更致命的是「退出后恢复」不可保证：强杀 / 崩溃 / 断电都会跳过恢复逻辑，
+  把**整台 Mac 的 Siri 永久留成关闭**（影响所有用户），而强杀本就是已接受的逃逸路径。
+  关掉 Siri 也堵不住 Mission Control / 通知 / 控制中心 / Cmd+Tab / 热角等其它控件，
+  所以守护层仍是主防线。若将来要做，只能作为交付文档里给家长/运维的一次性装机步骤。
+
 ### 连不上本地页：重试必须「先探测、再导航」
 
 - **`did-fail-load` 必须过滤 `isMainFrame`，并排除 `ERR_ABORTED`（-3）**

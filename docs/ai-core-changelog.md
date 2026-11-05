@@ -2641,3 +2641,49 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 ## 2026-11-01 题号后面标出题型（多选高亮）
 
 **需求**：多选题容易被当成单选题作答（只点一个就提交）。在答题页标题「第 N/M 题」后加题型标签：`（单选）`/`（多选）`/`（判断）`/`（填空）`/`（简答）`/`（证明）`/`（计算）`；`multi_choice` 用 brand 色加粗，其余浅灰（`data-testid="question-type"`，`QuestionRunner.tsx`）。`web` 1328 passed（新增 3 条标签用例）。
+
+## 2026-11-04 PC App：系统打断 kiosk 后自动恢复全屏
+
+**现象（用户实测）**：学生开始学习后 App 占满桌面，但用 Siri 或其它系统控件可以让 App 进入非全屏状态，且**再也回不去**，学生可以停在其他应用里。
+
+**根因**：
+1. `LearningSessionShell` 只在角色变化时推一次 `setStudentMode(true)`，被系统打断后没有任何地方重新 `setKiosk(true)` —— 逃逸是**永久**的。
+2. `main.js` 的失焦抢回只调 `win.focus()`。Electron 明确：macOS 上要从别的 App 抢回激活必须 `app.focus({ steal: true })`，`win.focus()` 只聚焦窗口、不激活 App —— 所以桌面/别的应用一直留在前台。
+
+**修复**：新增 `apps/desktop/lib/kiosk-guard.js`（纯逻辑、可注入定时器）：
+- 监听 `blur` / `leave-full-screen` / `hide` / `show` / `restore` / 最小化 / 睡眠唤醒，延迟 300ms 恢复；
+- 每秒看门狗兜住没有事件可听的打断；
+- macOS 用 `app.focus({ steal: true })` 抢回激活；
+- 区分两种状态：kiosk 标志掉了 → `setKiosk(true)`；kiosk 标志还在但全屏掉了 → `setFullScreen(true)`（`setKiosk(true)` 会因值没变提前返回，救不回来）；
+- 1500ms 冷却防全屏动画抖动；恢复动作写 `userData/kiosk-guard.log`（256KB 截断），Finder 启动时也能事后定位是哪个事件打掉的。
+
+**边界（未变）**：Siri / 系统手势 / 强制退出在应用层拦不住；本修复只是把「永久逃逸」缩成「约 1 秒的桌面闪现」。绝对锁死仍需 macOS 单应用模式（运维）。
+
+**连带修复**：`scripts/verify-asar.js` 的 `REQUIRED` 补 `lib/kiosk-guard.js`（护栏测试当场变红，补后才过）；`kiosk-guard.wiring.guard.test.js` 钉住 `app.focus({steal:true})`、`leave-full-screen` 与 start/stop 接线。`desktop` 82 passed（新增 12 条守护用例 + 7 条接线护栏）。
+
+## 2026-11-05 kiosk 被系统打断后「抢回焦点却没回全屏」
+
+**用户实测反馈**：上一版守护只把 App 拉回前台，没有把 APP 变回全屏（Dock / 菜单栏 / Cmd+Tab 仍可用，等于没锁）。
+
+**根因（查 Electron 44.4.5 源码确认）**：`shell/browser/native_window_mac.mm:1133` 的
+`NativeWindowMac::SetKiosk` 在 `is_kiosk_` 已为 true 时**直接 return**；`isKiosk()` 返回的正是
+这个内部标志。Siri / 系统把窗口踢出全屏后该标志常仍为 true，于是旧守护的 `setKiosk(true)`
+是空操作，只补的 `setFullScreen(true)` 得到的是**普通全屏**——因为隐藏 Dock / 菜单栏 /
+`DisableProcessSwitching` 那组 `NSApplicationPresentationOptions` 只在 `false→true` 这一次设置。
+
+**修复**：`lib/kiosk-guard.js` 新增 `forceReenterKiosk()`：被踢出全屏时
+`setKiosk(false) → setKiosk(true) → setFullScreen(true)`（最后一下防异步退出动画竞态），
+并重新 `setClosable(false)` / `setMinimizable(false)`；只是失焦（kiosk+全屏都还在）不重进，
+避免每次通知都闪一次全屏。另补 `app.on('did-become-active')`（App 级切回前台，窗口 blur/focus
+覆盖不到）、`app.show()`（Cmd+H 藏了整个 App）、以及日志里的 `appActive` / 窗口与显示器尺寸诊断，
+便于真机区分「真退出全屏」与「只是切了 Space」。
+
+`desktop` 85 passed（守护用例 14 条、接线护栏 8 条）。**仍未在真机用 Siri 复现验证**。
+
+**另：用户问「能否 App 运行时关 Siri、退出后再打开」→ 不做**。Siri 是系统守护进程，官方禁用靠
+MDM 描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，macOS 26 CIS/STIG 标准做法）
+或 26.4+ Siri Settings profile，属装机时一次性配置；运行时 `defaults write` 受 TCC / 完全磁盘访问
+限制、需重启或 kill 守护进程、SIP 保护，且本 App 未签名。更关键的是退出恢复不可保证：强杀 / 崩溃 /
+断电会跳过恢复逻辑，把整台 Mac 的 Siri 永久留成关闭（影响所有用户），而强杀本就是已接受的逃逸路径。
+关掉 Siri 也堵不住 Mission Control / 通知 / 控制中心 / Cmd+Tab / 热角。结论写进
+`docs/constraints/pc-app-学习管控.md`，守护层仍是主防线。

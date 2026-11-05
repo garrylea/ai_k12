@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, powerMonitor, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { SERVER_URL } = require('./server-url.js');
@@ -6,6 +6,7 @@ const { readServerUrlFromFile } = require('./lib/config-file.js');
 const { resolveServerUrl } = require('./lib/resolve-server-url.js');
 const { probeServer } = require('./lib/probe-server.js');
 const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
+const { createKioskGuard } = require('./lib/kiosk-guard.js');
 
 /**
  * **全局禁用代理**（spec §4.7）。
@@ -64,6 +65,69 @@ app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
  */
 let studentMode = false;
 let win = null;
+
+/** 守护日志的大小上限：超过就清空重写，避免长期运行无限增长。 */
+const KIOSK_LOG_MAX_BYTES = 256 * 1024;
+let kioskLogDisabled = false;
+
+/**
+ * 写一行守护日志到 `userData/kiosk-guard.log`。
+ *
+ * **为什么落盘**：Siri / 通知 / Mission Control 打断时，打包后的 App 从 Finder 启动时
+ * 主进程 stdout 进了黑洞（与 `load-error.log` 同一个理由，见 `did-fail-load` 那段）。
+ * 现场只有这个文件能告诉我们「是哪个事件把它打掉的、恢复有没有执行」。
+ *
+ * 写失败**绝不抛**（沿用「写入永不阻断主链路」的纪律），且失败一次后不再重试，
+ * 避免每秒钟刷一条失败日志。
+ */
+function appendKioskLog(message) {
+  if (kioskLogDisabled) return;
+  try {
+    const file = path.join(app.getPath('userData'), 'kiosk-guard.log');
+    try {
+      if (fs.statSync(file).size > KIOSK_LOG_MAX_BYTES) fs.truncateSync(file, 0);
+    } catch {
+      // 文件不存在是正常路径（第一次写）。
+    }
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${message}\n`);
+  } catch {
+    kioskLogDisabled = true;
+  }
+}
+
+/**
+ * 全屏守护（2026-11-04）：系统打断 kiosk 后自动恢复。
+ *
+ * ⚠️ **macOS 必须用 `app.focus({ steal: true })`**：`win.focus()` 只聚焦窗口、
+ * 不激活 App，抢不回被 Siri / 其它应用拿走的激活状态。这一层不能删。
+ * 详见 `lib/kiosk-guard.js` 文件头。
+ */
+const kioskGuard = createKioskGuard({
+  isEnabled: () => studentMode,
+  getWindow: () => win,
+  platform: process.platform,
+  focusApp: () => {
+    // Cmd+H / 系统把整个 App 藏起来时，只 focus 窗口是不够的，先 show 再抢激活。
+    if (app.isHidden && app.isHidden()) app.show();
+    app.focus({ steal: true });
+  },
+  // 只写日志，不参与判定：真机复现 Siri 时用来区分「真退出全屏」与「只是切了 Space」。
+  diagnostics: () => {
+    if (!win || win.isDestroyed()) return {};
+    try {
+      const b = win.getBounds();
+      const d = screen.getDisplayMatching(b).bounds;
+      return {
+        appActive: process.platform === 'darwin' ? app.isActive() : 'n/a',
+        win: `${b.width}x${b.height}@${b.x},${b.y}`,
+        display: `${d.width}x${d.height}`,
+      };
+    } catch {
+      return {};
+    }
+  },
+  log: appendKioskLog,
+});
 
 /**
  * 壳加载的 Web 地址（spec §4.1）。**三层优先级**：
@@ -200,20 +264,31 @@ function createWindow() {
     if (studentMode) event.preventDefault();
   });
   win.on('minimize', (event) => {
-    if (studentMode) event.preventDefault();
+    if (studentMode) {
+      event.preventDefault();
+      kioskGuard.schedule('minimize');
+    }
   });
 
-  // 失焦抢回：**尽力而为**。刻意**不加** setAlwaysOnTop——那会盖住 UAC / 系统安全对话框，
-  // 风险大于收益。macOS 上后台抢占受 OS 限制，抢不回来是已知限制（spec §8 局限 1）。
-  win.on('blur', () => {
-    if (studentMode && win && !win.isDestroyed()) win.focus();
-  });
+  // 系统打断后的恢复：**尽力而为，不是阻断**（spec §8 局限 1）。
+  //
+  // Siri / 通知 / Mission Control / 切 Space / Esc 退出全屏拦不住，但**不能让它停在
+  // 非全屏**。这些事件都只负责「就近调度」，真正的恢复动作与节流在 `lib/kiosk-guard.js`
+  // 与每秒一次的看门狗里 —— 不要在这里各写一套 focus/kiosk 逻辑（会漂移）。
+  //
+  // 刻意**不加** `setAlwaysOnTop`：那会盖住 UAC / 系统安全对话框，风险大于收益。
+  win.on('blur', () => kioskGuard.schedule('blur'));
+  win.on('leave-full-screen', () => kioskGuard.schedule('leave-full-screen'));
+  win.on('hide', () => kioskGuard.schedule('hide'));
+  win.on('show', () => kioskGuard.schedule('show'));
+  win.on('restore', () => kioskGuard.schedule('restore'));
 
   win.on('closed', () => {
     // 窗口没了就把重试表停掉，别留一个每 5 秒空转（被 `!win` 挡掉）的定时器。
     // 注意：这**不是**功能修复 —— 重建窗口后自动重连本来就能工作（interval 回调读的是
     // 模块级 `win`，不是捕获的旧窗口）。新窗口加载失败时 did-fail-load 会自己重新起表。
     stopRetry();
+    kioskGuard.stop();
     win = null;
   });
 }
@@ -240,8 +315,23 @@ app.whenReady().then(() => {
 
   createWindow();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    } else if (studentMode) {
+      // Dock 图标被点击 = App 曾被切到后台。guard 可能因窗口 closed 停过，这里补回。
+      kioskGuard.start();
+      kioskGuard.schedule('app-activate');
+    }
   });
+
+  // 睡眠唤醒 / 解锁后，系统可能重建窗口与全屏状态（macOS 上尤其明显）。
+  // 只调度，不直接改窗口 —— 恢复逻辑与节流统一在 kiosk-guard 里。
+  powerMonitor.on('resume', () => kioskGuard.schedule('power-resume'));
+  powerMonitor.on('unlock-screen', () => kioskGuard.schedule('unlock-screen'));
+
+  // Siri / 通知把 App 顶到后台后，系统把它切回前台会走这里（与窗口的 blur/focus 不同：
+  // 那是窗口级，这是 App 级）。此时最需要重新确认 kiosk 是否还完整。
+  app.on('did-become-active', () => kioskGuard.schedule('did-become-active'));
 });
 
 app.on('window-all-closed', () => {
@@ -258,12 +348,20 @@ function applyStudentMode(on) {
   studentMode = Boolean(on);
   // 先落盘：写失败只 warn、绝不抛（写入永不阻断主链路）。落盘是为了下次启动能恢复。
   writeStudentMode(app.getPath('userData'), studentMode);
+  appendKioskLog(`[guard] student-mode=${studentMode}`);
 
-  if (!win || win.isDestroyed()) return;
+  if (!win || win.isDestroyed()) {
+    kioskGuard.stop();
+    return;
+  }
   win.setKiosk(studentMode);
   win.setClosable(!studentMode);
   // setMinimizable 在 macOS 上是 no-op；Windows/Linux 上有效。不是错误，别加平台分支。
   win.setMinimizable(!studentMode);
+
+  // 学生模式才守护；家长/管理员登录后必须彻底停下，否则会把普通窗口也拽回全屏。
+  if (studentMode) kioskGuard.start();
+  else kioskGuard.stop();
 }
 
 // 渲染层 → 主进程：学生模式开关。`setKiosk` 是真全屏 + 锁定（比 fullscreen 更彻底）。
