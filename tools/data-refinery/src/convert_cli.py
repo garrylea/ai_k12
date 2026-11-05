@@ -12,7 +12,7 @@ from scope_filter import parse_dimensions as _parse_dimensions  # 兼容旧引�
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="将爬虫素材转换为 Markdown")
+    parser = argparse.ArgumentParser(description="将素材（PDF / Word / PPT / 图片）转换为 Markdown")
     parser.add_argument("--input-dir", help="素材输入目录（默认 tools/crawler/data）")
     parser.add_argument("--output-dir", help="输出根目录（MD 落 {该目录}/md/ 下；默认 tools/data-refinery/output）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
@@ -29,6 +29,11 @@ def parse_args(argv=None):
 
 
 def _match_source(material: Material, source: str) -> bool:
+    """来源分流：zgkao 认卷名里的「试卷/答案」，smartedu 认教材拆页图片。
+
+    Office 文档与 PDF 一样是 kind="pdf"（整份文档），不会命中 smartedu；
+    手工放进来的 Word/PPT 卷子走默认的 --source all，或命名带「试卷/答案」走 zgkao。
+    """
     if source == "all":
         return True
     name = material.rel_path.name
@@ -48,6 +53,19 @@ def _match_filters(
 ) -> bool:
     """按学科/学段/学期/年份精确过滤（语义与 extract/publish/db_loader 一致）。"""
     return match_scope(material.rel_path, build_scope(subject, stage, term, year))
+
+
+def _input_label(material: Material) -> str:
+    """dry-run 里显示真实输入格式。
+
+    `kind` 是来源分流 / 日志节流用的分类，不是文件格式名：Office 文档复用 "pdf"
+    （语义是「整份文档」），直接打印会让人以为找到的是 PDF 而不是自己的 .docx。
+    """
+    if material.kind == "images":
+        return "images"
+    if material.input_paths:
+        return material.input_paths[0].suffix.lower().lstrip(".") or material.kind
+    return material.kind
 
 
 def _load_material_entries(materials: str | None, materials_file: str | None) -> list[str]:
@@ -110,7 +128,7 @@ def main(argv=None):
     )
     if args.dry_run:
         for m in materials:
-            print(f"[dry-run] {m.rel_path} ({m.kind})")
+            print(f"[dry-run] {m.rel_path} ({_input_label(m)})")
         _warn_unmatched_entries(entries, scanned)
         _warn_no_match(materials, filters_active)
         return

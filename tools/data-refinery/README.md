@@ -1,6 +1,6 @@
 # Data Refinery（批量模式）
 
-离线数据准备工具，将爬虫下载的 PDF/教材图片转换为 Markdown，再调用 LLM 提取结构化题目或教材卡片。
+离线数据准备工具，将素材（PDF / Word / PPT / 教材图片）转换为 Markdown，再调用 LLM 提取结构化题目或教材卡片。
 
 ## 目录
 
@@ -8,7 +8,7 @@
 tools/data-refinery/
 ├── src/
 │   ├── config.py             # 配置加载（.env）
-│   ├── scanner.py            # 素材扫描器（PDF / 图片书）
+│   ├── scanner.py            # 素材扫描器（PDF / Office / 图片书）
 │   ├── checkpoint.py         # 断点续传
 │   ├── convert.py            # MinerU 调用（含 resume：已有 .md 的页跳过）
 │   ├── convert_cli.py        # convert 子命令
@@ -63,11 +63,22 @@ tools/data-refinery/
 │   │   └── exam_questions.txt
 │   ├── backfill_practice_questions.py  # 一次性：回填练习题（历史数据）
 │   ├── backfill_question_kps.py        # 一次性：回填题目知识点（历史数据）
-│   └── migrate_flat_to_groups.py        # 一次性：扁平结构迁移到 groups（历史数据）
+│   ├── migrate_flat_to_groups.py        # 一次性：扁平结构迁移到 groups（历史数据）
+│   ├── backfill_multi_choice.py         # 一次性：多选题题型回填（存量数据）
+│   ├── backfill_section_types.py        # 一次性：按大题区间回填题型（存量数据）
+│   ├── migrate_content_hash.py          # 一次性：content_hash 口径迁移
+│   ├── fix_question_kps_and_active.py   # 一次性：启用 no_change 题 + 从 extracted 回填 KP
+│   ├── scan_recognition_issues.py       # 识别问题扫描（补跑 / 看明细）
+│   ├── fix_question_cli.py              # 逐条引导补题（独立入口）
+│   ├── apply_fixes_cli.py               # 人工补题写库（apply_fixes.py 的薄壳入口）
+│   └── split_snapshot.py                # 切题黄金快照 --write / --check（行为回归）
+├── conftest.py                          # pytest 就地要求：把 src/ 加入 sys.path
 ├── tests/
 ├── requirements.txt
 └── .env.example
 ```
+
+> **目录约定（2026-11-05 收敛）**：所有 Python 工具代码 —— 库模块、阶段 CLI、一次性回填/迁移、回归与运维入口 —— **统一放 `src/`，不再另建 `scripts/` 等平行的 Python 目录**。原 `scripts/` 下 7 个文件已全部并入 `src/`。`src/` 是扁平 import 命名空间（无 `__init__.py`，由 `conftest.py` 把 `src/` 加入 `sys.path`），运行方式统一 `python3 src/xxx.py`（脚本目录本身已在 `sys.path` 上，不需要再 `sys.path.insert`）；脚本里 `ROOT = Path(__file__).resolve().parents[1]` 仍指向 `tools/data-refinery/`，用于拼 `output/` 与 `tests/fixtures/` 路径。根目录只保留 pytest 就地要求的 `conftest.py`，以及 2026-08 遗留的 `backfill_practice_content.py` / `mark_needs_review.py` / `test_labeler_single_card.py`，**不再往根目录新增 Python 工具脚本**。
 
 ## 安装
 
@@ -123,6 +134,10 @@ card 分析发现的新小节由 `toc_merge` 在入库前合并进
 python src/convert_cli.py --source zgkao --dry-run
 python src/convert_cli.py --source smartedu
 ```
+
+`src/scanner.py` 是**唯一**素材发现入口：除 `*.pdf` 外也收 `.doc` / `.docx` / `.ppt` / `.pptx`（整份文档，MinerU `extract` 原生支持），教材拆页图片仍走 `page_*.jpg`。手工放进 `tools/crawler/data` 的 Word/PPT 卷子会与 PDF 一样被转换。**口径**：`--source smartedu` 只认拆页图片（`kind="images"`），Word 卷请用默认 `--source all`，或卷名带「试卷/答案」时走 `--source zgkao`；同目录同名不同后缀（`foo.pdf` + `foo.docx`）会撞输出目录，PDF 保留原名、Office 那份的 rel_path 加 `_docx` 等后缀区分。新增输入格式须同时改 `scanner.py` 的 `DOCUMENT_SUFFIXES` 与 `convert.py` 的 `MineruRunner._DOCUMENT_SUFFIXES`（两处必须一致，`tests/test_scanner.py` 有对账护栏）。
+
+**命名（不必打中点）**：`西城35中期中练习1.docx` 会解析成 区县=西城 / 学校=35中，标题 `2026 西城·35中 初三 期中`。地点段支持 `·`、`-`、`_`、`/`、空格、`、`、`，`，也支持直接连写；学校简称认「数字/中文数字 + 中」（`35中`、`八十中`、`北京三十五中`），`初中/高中/期中` 不会被误判。新增区县改 `paper_meta.DISTRICTS`。
 
 按维度筛（精确过滤，与 `--materials` 子串取交集）：
 

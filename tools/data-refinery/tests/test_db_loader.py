@@ -824,6 +824,37 @@ class TestLoadQuestionsPaperGrouping:
         upd = [a for sql, a in queries if "UPDATE exam_papers SET question_count" in sql]
         assert upd == [(2, 9)]
 
+    def test_writes_knowledge_points_from_extracted(self):
+        """extract 已标的 knowledge_points 必须落 question_knowledge_points。
+
+        2026-11-05 之前 publish 的 ExamQuestion 模型没有该字段，字段被静默丢弃，
+        db_loader 也没有写入路径，题目入库后永远没知识点（专项练习抽不到）。
+        """
+        qs = [{"subject_id": "math", "content": "题干一", "type": "choice",
+               "group_order": 1, "knowledge_points": ["M0306", "M0101"]}]
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM knowledge_points": [[(7, 1, "M0306"), (8, 1, "M0101")]],
+            "FROM questions WHERE content_hash": [[]],
+            "LAST_INSERT_ID": [[(501,)]],
+        })
+        loader.load_questions(qs, paper=(_paper_meta(), 9))
+        kp = [a for sql, a in queries if "INSERT IGNORE INTO question_knowledge_points" in sql]
+        assert kp == [(501, 7), (501, 8)]
+
+    def test_unknown_kp_code_is_skipped_with_warning(self, capsys):
+        qs = [{"subject_id": "math", "content": "题干一", "type": "choice",
+               "group_order": 1, "knowledge_points": ["NOPE"]}]
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM knowledge_points": [[(7, 1, "M0306")]],
+            "FROM questions WHERE content_hash": [[]],
+            "LAST_INSERT_ID": [[(501,)]],
+        })
+        loader.load_questions(qs, paper=(_paper_meta(), 9))
+        assert not [s for s, _ in queries if "INSERT IGNORE INTO question_knowledge_points" in s]
+        assert "未知知识点" in capsys.readouterr().out
+
     def test_same_stem_different_options_are_two_questions(self):
         """题干都是「下列说法正确的是」、只有选项不同 → 必须留两题。
 

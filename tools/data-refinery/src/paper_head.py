@@ -20,18 +20,22 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from extract import _parse_json_object
-from paper_meta import PaperMeta
+from paper_meta import DISTRICTS, PaperMeta
 
 # 爬虫会把「北京各区」的合集卷命名为 `北京各`；它不是区县，入库时必须当缺失。
 COLLECTIVE_LOCATIONS = {"北京各", "北京各区", "各区", "待确认", "未知", "不详", ""}
 
-DISTRICTS = (
-    "东城", "西城", "朝阳", "海淀", "丰台", "石景山", "门头沟", "房山", "通州",
-    "顺义", "昌平", "大兴", "怀柔", "平谷", "密云", "延庆", "经开",
+# 学校名两种写法：
+#   1) 带明确后缀：…中学 / …学校 / …附中 / …附小 / …小学 / …教育集团
+#   2) 简称：数字或中文数字 + 中（35中 / 八十中 / 十二中 / 北京三十五中）
+# 第 2 种必须限定「数字在前」，否则「初中 / 高中 / 期中 / 其中」全会被当成学校。
+# 明确后缀优先（贪婪，`昌平二中教育集团` 不能被截成 `昌平二中`），
+# 简称分支放后面兜底（`西城35中` / `朝阳八十中`）。
+_SCHOOL_RE = re.compile(
+    r"[\u4e00-\u9fff]{2,16}(?:中学|学校|附中|附小|小学|教育集团)"
+    r"|[\u4e00-\u9fff]{0,8}?[一二三四五六七八九十百零〇0-9]{1,3}中"
 )
-
-# 带「区」的写法优先；单独区名只在标题行里认，避免正文里的地名误伤。
-_SCHOOL_SUFFIXES = ("中学", "学校", "附中", "教育集团", "小学")
+_SCHOOL_NUM_RE = re.compile(r"[一二三四五六七八九十百零〇0-9]{1,3}中$")
 _SCHOOL_STOPWORDS = (
     "填写", "答题卡", "答题纸", "考生", "名称", "所在", "试卷", "草稿纸", "正确填涂",
 )
@@ -39,6 +43,7 @@ _SCHOOL_STOPWORDS = (
 _SCHOOL_PREFIXES = (
     "学年度", "学年", "第一学期", "第二学期", "上学期", "下学期", "期中", "期末",
     "练习", "考试", "试卷", "调研", "联合", "质量检测", "初三年级", "初三", "九年级",
+    "区", "市", "县",
 )
 
 _GRADE_PATTERNS = (
@@ -111,10 +116,25 @@ def _clean_school(name: str) -> str:
     changed = True
     while changed:
         changed = False
+        # 无分隔符写法：`海淀区人大附中` 先把「海淀区」的区字去掉；
+        # `西城35中` 再剥区县前缀。只在剩余的是「数字+中」简称时剥，
+        # 避免把 `昌平二中教育集团` 这类完整校名拆残（既有行为）。
+        for d in DISTRICTS:
+            if name.startswith(d + "区"):
+                name = name[len(d) + 1:]
+                changed = True
+                break
+        for d in DISTRICTS:
+            rest = name[len(d):]
+            if name.startswith(d) and len(rest) >= 3 and _SCHOOL_NUM_RE.search(rest):
+                name = rest
+                changed = True
+                break
         for prefix in _SCHOOL_PREFIXES:
             if name.startswith(prefix) and len(name) > len(prefix) + 2:
                 name = name[len(prefix):]
                 changed = True
+                break
     # 「2026北京北京中学」这种：年份后面紧跟的地点把学校名前缀重复了一遍。
     # 只消完全重复的 2–4 字前缀，不动真正的「北京中学」。
     for size in (2, 3, 4):
@@ -124,16 +144,27 @@ def _clean_school(name: str) -> str:
     return name
 
 
+def _is_school_name(name: str) -> bool:
+    """学校名合法性：明确后缀至少 4 字；`35中` 这类简称至少 3 字。"""
+    if name.endswith(("中学", "学校", "附中", "附小", "小学", "教育集团")):
+        return len(name) >= 4
+    return bool(_SCHOOL_NUM_RE.search(name)) and len(name) >= 3
+
+
 def detect_school(head: str) -> tuple[str | None, str | None]:
-    """返回 (学校名, 命中原句)。取最长且不像套话的匹配。"""
+    """返回 (学校名, 命中原句)。取最长且不像套话的匹配。
+
+    同时认「…中学/学校/附中」与「数字+中」两种写法，后者覆盖 `西城35中`、
+    `朝阳八十中`、`北京四中`、`西城·北京三十五中` —— 手工命名不必输入难打的 `·`。
+    """
     best: tuple[str, str] | None = None
     for line in head.splitlines():
-        for m in re.finditer(r"[\u4e00-\u9fff]{2,16}(?:中学|学校|附中|教育集团|小学)", line):
+        for m in _SCHOOL_RE.finditer(line):
             raw = m.group(0)
             if any(w in raw for w in _SCHOOL_STOPWORDS):
                 continue
             name = _clean_school(raw)
-            if len(name) < 4:
+            if not _is_school_name(name):
                 continue
             if best is None or len(name) > len(best[0]):
                 best = (name, line[:80])

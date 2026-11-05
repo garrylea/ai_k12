@@ -1,18 +1,16 @@
 """切题行为黄金快照：重构前拍基线，重构后逐份比对题数与题干哈希。
 
 用法（在 tools/data-refinery/ 下）：
-    python3 scripts/split_snapshot.py --write     # 写 tests/fixtures/split_snapshot.json
-    python3 scripts/split_snapshot.py --check     # 比对当前代码与基线，有差异退出码 1
+    python3 src/split_snapshot.py --write     # 写 tests/fixtures/split_snapshot.json
+    python3 src/split_snapshot.py --check     # 比对当前代码与基线，有差异退出码 1
 """
 
 import argparse
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 from question_splitter import split_page  # noqa: E402
 from subject_codes import subject_code_for_path  # noqa: E402

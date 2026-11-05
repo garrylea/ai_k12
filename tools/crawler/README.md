@@ -44,8 +44,8 @@ pip install -r requirements.txt
 > ```
 >
 > `--force` 只作用于本次运行，比清空 `data/.checkpoint.json` 更精准——后者会让之后**每个**页面的
-> 抓取都重新下载。删文件后各目录的 `meta.json` 会残留已删文件的记录；下游管线按 `*.pdf` 扫描、
-> 不读 `meta.json`，不影响流程。
+> 抓取都重新下载。删文件后各目录的 `meta.json` 会残留已删文件的记录；下游管线按 PDF/Office 文档与
+> `page_*.jpg` 扫描、不读 `meta.json`，不影响流程。
 >
 > 不要图省事 `rm -rf data/*/*/second`：`second/` 里还有本来就正确的一模/二模数据。
 >
@@ -250,7 +250,7 @@ PDF 链接（不落盘、不查已下文件），那行会写成「将下载」�
 
 ```
 crawler（本工具）          ->  convert_cli  ->  extract_cli  ->  publish_cli  ->  db_loader_cli
-PDF / JPG（./data/...）        PDF/JPG -> MD    MD -> JSONL     图片物化         JSONL -> MySQL
+PDF / JPG（./data/...）     PDF/Office/JPG -> MD   MD -> JSONL   图片物化         JSONL -> MySQL
 ```
 
 - 数据精炼默认输入目录就是 `tools/crawler/data`（`REFINERY_INPUT_DIR` 默认值），无需搬移。

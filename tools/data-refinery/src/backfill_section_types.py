@@ -1,17 +1,15 @@
 """按大题区间回填题型（存量数据）：以 md 的大题标题为准，逐卷覆盖 questions.type。
 
 用法：
-    python3 scripts/backfill_section_types.py            # dry-run
-    python3 scripts/backfill_section_types.py --apply
-    python3 scripts/backfill_section_types.py --subject 物理 --apply
+    python3 src/backfill_section_types.py            # dry-run
+    python3 src/backfill_section_types.py --apply
+    python3 src/backfill_section_types.py --subject 物理 --apply
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 import pymysql  # noqa: E402
 

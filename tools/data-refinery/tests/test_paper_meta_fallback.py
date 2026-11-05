@@ -63,6 +63,34 @@ def test_detect_grade_from_name():
     assert detect_grade_from_name("试卷.pdf") is None
 
 
+def test_split_location_accepts_separator_variants():
+    """地点段不该强迫用户输入难点：中点/横线/下划线/空格/直接连写都要能拆。"""
+    from paper_meta import split_location
+
+    for loc in ("西城·35中", "西城35中", "西城-35中", "西城 35中",
+                "西城_35中", "西城/35中", "西城、35中"):
+        assert split_location(loc) == ("西城", "35中"), loc
+    assert split_location("海淀") == ("海淀", None)
+    assert split_location("北京各") == ("北京各", None)
+    assert split_location("") == ("", None)
+
+
+def test_parse_paper_meta_location_without_separator():
+    """crawler 命名里的地点段也可能没中点（手工改名后），仍要拆出区县 + 学校。"""
+    from paper_meta import parse_paper_meta
+
+    rel = "数学/初中/first/2026/数学-初三(上)-202607-西城35中-（上）期中-试卷.jsonl"
+    m = parse_paper_meta(rel)
+    assert m is not None
+    assert m.district == "西城"
+    assert m.title == "2026 西城·35中 初三 （上）期中"
+
+    # 带中点的写法行为不变
+    rel2 = "数学/初中/first/2024/数学-初三(上)-202407-西城·北京三十五中-（上）期中-试卷.jsonl"
+    m2 = parse_paper_meta(rel2)
+    assert (m2.district, m2.title) == ("西城", "2024 西城·北京三十五中 初三 （上）期中")
+
+
 def test_detect_school_collapses_duplicated_prefix():
     """「2026北京北京中学」不能抽成「北京北京中学」。"""
     assert detect_school("2026北京北京中学初三（上）期中数学")[0] == "北京中学"

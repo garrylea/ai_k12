@@ -380,6 +380,7 @@ class DbLoader:
     def _exec(self, sql, args=None):
         with self._conn.cursor() as cur:
             cur.execute(sql, args)
+            return cur.rowcount
 
     def _query(self, sql, args=None):
         with self._conn.cursor() as cur:
@@ -1301,7 +1302,13 @@ class DbLoader:
         count = 0
         linked = 0
         updated = 0
+        kp_added = 0
         linked_ids: list[int] = []
+        # 知识点字典一次预取（百行级），避免逐题查库；key=(subject_id, code)
+        kp_map: dict[tuple[int, str], int] = {
+            (int(r[1]), str(r[2]).strip()): int(r[0])
+            for r in self._query("SELECT id, subject_id, code FROM knowledge_points")
+        }
         for i, q in enumerate(questions, 1):
             sid = self._subject_id_by_code(normalize_subject(q.get("subject_id")))
             opts = q.get("options")
@@ -1434,6 +1441,18 @@ class DbLoader:
                     )
                     qid = int(self._query("SELECT LAST_INSERT_ID()")[0][0])
                     count += 1
+            # 知识点：extract 阶段已标（publish 透传 knowledge_points），这里落库。
+            # INSERT IGNORE + uniq_qkp_q_kp 保证重跑幂等；未知 code 只告警不阻断。
+            for code in q.get("knowledge_points") or []:
+                kp_id = kp_map.get((sid, str(code).strip()))
+                if kp_id is None:
+                    print(f"[WARN] 未知知识点 code={code!r}（subject_id={sid}），跳过", flush=True)
+                    continue
+                kp_added += self._exec(
+                    "INSERT IGNORE INTO question_knowledge_points "
+                    "(question_id, knowledge_point_id, role) VALUES (%s,%s,'primary')",
+                    (qid, kp_id),
+                ) or 0
             if paper is not None:
                 self._exec(
                     "INSERT IGNORE INTO paper_questions "
@@ -1476,6 +1495,8 @@ class DbLoader:
         self._conn.commit()
         if updated:
             print(f"[upsert] 同卷原址更新 {updated} 题", flush=True)
+        if kp_added:
+            print(f"[kps] 新增知识点关联 {kp_added} 条", flush=True)
         return count
 
     def delete_questions_by_source(self, source: str, purge_paper_data: bool = False) -> dict:

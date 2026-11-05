@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 import paper_head
 from paper_head import (
     HeadMeta,
@@ -56,6 +58,37 @@ def test_detect_school_strips_boilerplate_prefix():
 def test_detect_school_excludes_fill_instruction():
     head = "学校 姓名 准考证号\n在试卷和答题卡上准确填写学校名称"
     assert detect_school(head) == (None, None)
+
+
+@pytest.mark.parametrize("name", [
+    "西城35中期中练习1", "西城35中", "西城·35中", "西城-35中", "西城 35中",
+])
+def test_detect_school_accepts_separator_variants(name):
+    """手工命名不必输入中点：`西城35中` 与 `西城·35中` 都要认出 35 中。"""
+    assert detect_school(name)[0] == "35中"
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("朝阳八十中", "八十中"),
+    ("丰台十二中", "十二中"),
+    ("东城五中", "东城五中"),      # 剥完只剩 2 字，宁可保留全名
+])
+def test_detect_school_chinese_numeral_short_name(name, expected):
+    assert detect_school(name)[0] == expected
+
+
+def test_detect_school_keeps_name_without_district():
+    assert detect_school("北京四中")[0] == "北京四中"
+
+
+def test_detect_school_strips_qu_suffix():
+    assert detect_school("海淀区人大附中")[0] == "人大附中"
+
+
+def test_detect_school_ignores_grade_and_exam_words():
+    """「初中/期中/其中」里的「中」不能当学校（简称分支要求数字在前）。"""
+    assert detect_school("初中数学期中试卷") == (None, None)
+    assert detect_school("2025-2026 学年第一学期 期中考试试卷") == (None, None)
 
 
 def test_detect_grade_eighth():

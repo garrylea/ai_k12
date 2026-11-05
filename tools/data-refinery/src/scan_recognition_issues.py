@@ -1,19 +1,14 @@
 """单独跑识别问题扫描（import_cli 第 6 步已自动执行，这里用于补跑/看明细）。
 
 用法：
-    python3 scripts/scan_recognition_issues.py --subject 物理
-    python3 scripts/scan_recognition_issues.py --subject 物理 --file 人大附中
-    python3 scripts/scan_recognition_issues.py --subject 物理 --dry-run
+    python3 src/scan_recognition_issues.py --subject 物理
+    python3 src/scan_recognition_issues.py --subject 物理 --file 人大附中
+    python3 src/scan_recognition_issues.py --subject 物理 --dry-run
 """
 
 import argparse
-import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from recognition_scan import run  # noqa: E402
+from recognition_scan import run
 
 
 def main() -> int:

@@ -11,7 +11,7 @@
 ```
 ┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌───────────┐    ┌────────┐
 │ crawler  │ →  │  convert_cli │ →  │ extract_cli  │ →  │ publish   │ →  │ MySQL  │
-│ (爬虫)   │    │  PDF→MD      │    │  MD→JSONL    │    │ _cli      │    │        │
+│ (爬虫)   │    │ PDF/Office→MD│    │  MD→JSONL    │    │ _cli      │    │        │
 │ PDF/JPG  │    │  (MinerU)    │    │  (LLM标注)   │    │ 图片物化   │    │        │
 └──────────┘    └──────────────┘    └──────────────┘    └───────────┘    └────────┘
                                          ↑                                 ↑
@@ -23,10 +23,12 @@
               pipeline_cli（总控：toc_parse → extract → publish → toc_merge → db_loader）
 ```
 
+> **素材格式**：crawler 自动产出的仍是 PDF / 拆页 JPG；Word（`.doc`/`.docx`）、PPT（`.ppt`/`.pptx`）可**手工放进** `tools/crawler/data`，convert 阶段由 `src/scanner.py` 一并发现、交给 MinerU `extract` 转成 Markdown（该命令原生支持 Office）。发现层与执行层的后缀集合必须一致，见 `docs/constraints/数据管线.md`。
+
 | 步骤 | 工具 | 输入 | 输出 | 核心依赖 |
 |------|------|------|------|----------|
 | 0 | `crawler` | 网站 URL | PDF / JPG | requests, bs4 |
-| 1 | `convert_cli` | PDF / JPG | Markdown (.md) | MinerU CLI |
+| 1 | `convert_cli` | PDF / Office / JPG | Markdown (.md) | MinerU CLI |
 | 1.5 | `toc_parse_cli` | 目录页 MD | TOC JSON | LLM |
 | 2 | `extract_cli` | Markdown (.md) | Cards JSONL | LLM |
 | 3 | `publish_cli` | Cards JSONL | Published JSONL + assets | — |
@@ -234,9 +236,9 @@ python src/crawler_cli.py --site smartedu --subject 数学 --level 初中 --dry-
 - 示例：`python src/extract_cli.py --subject 语文 --year 2025 --dry-run`
 - 注：`answer_extract_cli` 的 `--subject` 是「覆盖学科识别」（文件名不规范时用），不是过滤条件；它同样支持 `--stage/--term/--year` 过滤定位。
 
-### 4.1 convert_cli — PDF/图片转 Markdown
+### 4.1 convert_cli — PDF/Office/图片转 Markdown
 
-调用 MinerU 将爬虫产出的 PDF/JPG 转为 Markdown。
+调用 MinerU 将 PDF / Word / PPT / 拆页 JPG 转为 Markdown。`src/scanner.py` 是唯一素材发现入口：整份文档认 `.pdf` / `.doc` / `.docx` / `.ppt` / `.pptx`，教材拆页图片认 `page_*.jpg`；MinerU `extract` 原生支持这些 Office 格式，命令层不做扩展名过滤。手工放进 `tools/crawler/data` 的 Word 卷子用默认 `--source all` 即可（`--source smartedu` 只认拆页图片，`--source zgkao` 按卷名「试卷/答案」匹配）。同目录同名不同后缀（`foo.pdf` + `foo.docx`）时 PDF 保留原名、Office 那份 rel_path 加 `_docx` 后缀，避免输出目录撞车。
 
 ```bash
 # 转换所有素材

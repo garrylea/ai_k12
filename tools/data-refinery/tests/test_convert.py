@@ -21,6 +21,23 @@ class TestMineruRunner:
 
         assert calls[0][0] == ["mineru", "extract", str(tmp_path / "a.pdf"), "-o", str(output_dir)]
 
+    def test_builds_extract_command_for_docx(self, tmp_path):
+        """Word 文件名原样进 MinerU extract，不做扩展名过滤。"""
+        runner = MineruRunner(bin_path="mineru", timeout=60)
+        docx = tmp_path / "试卷.docx"
+        output_dir = tmp_path / "out"
+
+        calls = []
+        runner._run = lambda cmd: calls.append(cmd)
+        runner.run([docx], output_dir)
+
+        assert calls[0] == ["mineru", "extract", str(docx), "-o", str(output_dir)]
+
+    def test_is_document_accepts_office_suffixes(self):
+        for suffix in (".pdf", ".doc", ".docx", ".ppt", ".pptx", ".DOCX"):
+            assert MineruRunner._is_document([Path(f"a{suffix}")]) is True
+        assert MineruRunner._is_document([Path("page_001.jpg")]) is False
+
     def test_run_skips_already_converted(self, tmp_path):
         # resume 逻辑在 MineruRunner.run 内（旧设计在 Converter，重构后移入）：
         # 已有对应 .md 的页不重复转换；全部完成时不再调用 _run
@@ -155,6 +172,21 @@ class TestRunnerLogging:
 
         out = capsys.readouterr().out
         assert "[doc] a.pdf done" in out
+        assert "pages 1-1/1" not in out
+
+    def test_docx_logs_document_not_pages(self, tmp_path, capsys, monkeypatch):
+        import convert as convert_mod
+
+        monkeypatch.setattr(convert_mod.time, "sleep", lambda s: None)
+        runner = MineruRunner()
+        monkeypatch.setattr(runner, "_run", lambda cmd: None)
+
+        docx = tmp_path / "a.docx"
+        docx.write_bytes(b"x")
+        runner.run([docx], tmp_path / "out")
+
+        out = capsys.readouterr().out
+        assert "[doc] a.docx done" in out
         assert "pages 1-1/1" not in out
 
     def test_images_keep_page_log(self, tmp_path, capsys, monkeypatch):

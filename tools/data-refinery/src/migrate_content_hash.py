@@ -11,23 +11,18 @@
 4. 默认只预览，`--apply` 才写库。
 
 用法：
-    python3 scripts/migrate_content_hash.py            # 预览
-    python3 scripts/migrate_content_hash.py --apply    # 执行
+    python3 src/migrate_content_hash.py            # 预览
+    python3 src/migrate_content_hash.py --apply    # 执行
 """
 
 import argparse
 import hashlib
-import sys
 from collections import defaultdict
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
+import pymysql
 
-import pymysql  # noqa: E402
-
-from config import RefineryConfig  # noqa: E402
-from db_loader import content_hash  # noqa: E402
+from config import RefineryConfig
+from db_loader import content_hash
 
 
 def main() -> int:

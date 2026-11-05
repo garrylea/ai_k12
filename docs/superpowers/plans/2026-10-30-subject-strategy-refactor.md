@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **2026-11-05 目录收敛**：本计划编写时 `split_snapshot.py` 位于 `tools/data-refinery/scripts/`；该目录已撤销、文件并入 `src/`，下列命令与文件路径已按新路径 `src/split_snapshot.py` 更新，其余描述保留原貌。
+
 **Goal:** 把切题（题号识别）、选项拆分、材料归属、答案提取四件事改成「每学科一份显式实现」，未登记学科直接报错，同时保证 87 例切分测试与黄金快照零差异。
 
 **Architecture:** `question_splitter.py` 保留与学科无关的扫描内核；新增 `subject_strategies/` 包，每个学科一个文件实现 `is_stem / split_options / material_policy / extract_answers`；注册表 `get_strategy(code)` 无静默回退。`subject_cases/` 整体并入后删除。
@@ -34,7 +36,7 @@
 ### Task 0: 黄金快照（动代码之前先拍基线）
 
 **Files:**
-- Create: `tools/data-refinery/scripts/split_snapshot.py`
+- Create: `tools/data-refinery/src/split_snapshot.py`
 - Create: `tools/data-refinery/tests/fixtures/split_snapshot.json`（脚本生成）
 - Test: `tools/data-refinery/tests/test_split_snapshot.py`
 
@@ -48,8 +50,8 @@
 """切题行为黄金快照：重构前拍基线，重构后逐份比对题数与题干哈希。
 
 用法（在 tools/data-refinery/ 下）：
-    python3 scripts/split_snapshot.py --write     # 写 tests/fixtures/split_snapshot.json
-    python3 scripts/split_snapshot.py --check     # 比对当前代码与基线，有差异退出码 1
+    python3 src/split_snapshot.py --write     # 写 tests/fixtures/split_snapshot.json
+    python3 src/split_snapshot.py --check     # 比对当前代码与基线，有差异退出码 1
 """
 
 import argparse
@@ -167,7 +169,7 @@ if __name__ == "__main__":
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from split_snapshot import compare  # noqa: E402
 
@@ -199,18 +201,18 @@ Expected: `5 passed`（上述 3 个 compare 用例 + 抽样只收试卷 + 只改
 
 - [ ] **Step 4: 生成基线（用重构前的代码）**
 
-Run: `cd tools/data-refinery && python3 scripts/split_snapshot.py --write`
+Run: `cd tools/data-refinery && python3 src/split_snapshot.py --write`
 Expected: `[ok] 基线已写入 …/tests/fixtures/split_snapshot.json（N 份）`，N = 26（语数物各 8 份试卷，化学试卷仅 2 份；只抽文件名含「试卷」的 md）
 
 - [ ] **Step 5: 验证基线可复现**
 
-Run: `cd tools/data-refinery && python3 scripts/split_snapshot.py --check`
+Run: `cd tools/data-refinery && python3 src/split_snapshot.py --check`
 Expected: `[ok] N 份快照零差异`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/data-refinery/scripts/split_snapshot.py tools/data-refinery/tests/test_split_snapshot.py tools/data-refinery/tests/fixtures/split_snapshot.json
+git add tools/data-refinery/src/split_snapshot.py tools/data-refinery/tests/test_split_snapshot.py tools/data-refinery/tests/fixtures/split_snapshot.json
 git commit -m "test(splitter): 切题黄金快照基线（题数/题干/材料/分组/分值，26 份试卷抽样）"
 ```
 
@@ -459,7 +461,7 @@ git commit -m "feat(splitter): 学科策略注册表 + generic 策略（未登�
 - Modify: `tools/data-refinery/src/question_extract.py:381-384`
 - Modify: `tools/data-refinery/src/question_labeler.py`（`_render_content` 走策略）
 - Modify: `tools/data-refinery/tests/test_question_splitter.py`（13 处调用签名）
-- Modify: `tools/data-refinery/scripts/split_snapshot.py`（改用 strategy）
+- Modify: `tools/data-refinery/src/split_snapshot.py`（改用 strategy）
 
 **Interfaces:**
 - Consumes: `get_strategy(code)`（Task 1）
@@ -554,7 +556,7 @@ grep -n "attach_material=True" tests/test_question_splitter.py
 
 - [ ] **Step 6: 改快照脚本**
 
-`scripts/split_snapshot.py` 的 `snapshot()` 里：
+`src/split_snapshot.py` 的 `snapshot()` 里：
 
 ```python
         questions = split_page(
@@ -628,7 +630,7 @@ register(ChineseStrategy())
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_question_splitter.py -q`
 Expected: `87 passed`
 
-Run: `cd tools/data-refinery && python3 scripts/split_snapshot.py --check`
+Run: `cd tools/data-refinery && python3 src/split_snapshot.py --check`
 Expected: `[ok] N 份快照零差异`
 
 - [ ] **Step 10: 跑全量**
@@ -777,7 +779,7 @@ def test_core_has_no_subject_conditionals():
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_question_splitter.py tests/subject_strategies tests/test_no_subject_conditionals.py -q`
 Expected: 全绿（87 + 新增）
 
-Run: `cd tools/data-refinery && python3 scripts/split_snapshot.py --check`
+Run: `cd tools/data-refinery && python3 src/split_snapshot.py --check`
 Expected: `[ok] N 份快照零差异` —— **任何差异都必须解释清楚才能继续**
 
 - [ ] **Step 8: Commit**
@@ -930,7 +932,7 @@ register(ChemistryStrategy())
 
 - [ ] **Step 6: 跑测试 + 快照 + 全量**
 
-Run: `cd tools/data-refinery && python3 -m pytest tests/subject_strategies -q && python3 scripts/split_snapshot.py --check`
+Run: `cd tools/data-refinery && python3 -m pytest tests/subject_strategies -q && python3 src/split_snapshot.py --check`
 Expected: 全绿 + 零差异
 
 - [ ] **Step 7: Commit**
@@ -1145,7 +1147,7 @@ def test_unknown_subject_dir_is_not_silently_math():
 
 - [ ] **Step 9: 跑全量 + 快照**
 
-Run: `cd tools/data-refinery && python3 -m pytest tests -q && python3 scripts/split_snapshot.py --check`
+Run: `cd tools/data-refinery && python3 -m pytest tests -q && python3 src/split_snapshot.py --check`
 Expected: 全绿 + 零差异（快照脚本显式传 `default="math"`，不受 Step 7 影响）
 
 - [ ] **Step 10: Commit**
@@ -1215,7 +1217,7 @@ Expected: 全绿
 
 - [ ] **Step 5: 跑全量 + 快照**
 
-Run: `cd tools/data-refinery && python3 -m pytest tests -q && python3 scripts/split_snapshot.py --check`
+Run: `cd tools/data-refinery && python3 -m pytest tests -q && python3 src/split_snapshot.py --check`
 Expected: 全绿 + 零差异
 
 - [ ] **Step 6: Commit**
@@ -1303,7 +1305,7 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
   `_subject_code_for` 识别不出学科目录时返回 `None`，同样报错。
 - 内核 `question_splitter.py` 只保留与学科无关的扫描（行内粘连、日期陷阱、OCR 错认纠正），
   回归判据：`grep -n '"chinese"' src/question_splitter.py` 无命中。
-- 行为回归靠 `scripts/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
+- 行为回归靠 `src/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
   每科至多 8 份试卷抽样，逐题记录题号 / 题干哈希 / 材料哈希 / 大题分组 / 分值），
   重构任何一步都必须零差异。
 ```
@@ -1324,7 +1326,7 @@ Expected: `题数 35 题号连续 True`、`与基线不同的题: 无`
 
 - [ ] **Step 5: 最终全量回归**
 
-Run: `cd tools/data-refinery && python3 -m pytest tests -q && python3 scripts/split_snapshot.py --check`
+Run: `cd tools/data-refinery && python3 -m pytest tests -q && python3 src/split_snapshot.py --check`
 Expected: 全绿 + 零差异
 
 - [ ] **Step 6: Commit**

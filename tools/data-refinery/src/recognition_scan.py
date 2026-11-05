@@ -19,7 +19,7 @@
 人工确认「没问题」的条目不写库，只落 `verdict=no_change`，重扫不再打扰（内容变了才重开）。
 
 入口：
-    import_cli 第 6 步自动调用 run()；也可以单独跑 scripts/scan_recognition_issues.py。
+    import_cli 第 6 步自动调用 run()；也可以单独跑 src/scan_recognition_issues.py。
 """
 
 import argparse
@@ -639,7 +639,7 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
         head = "、".join(items[:8]) + (f" 等 {len(items)} 条" if len(items) > 8 else "")
         print(f"[pending] {src}: {head}", flush=True)
     print(f"[ok] 本次检出 {len(all_issues)} 处，其中 {total_pending} 条待人工处理"
-          f"（新增 {added} 条记录）；补题命令：python3 scripts/fix_question_cli.py --source <卷名>",
+          f"（新增 {added} 条记录）；补题命令：python3 src/fix_question_cli.py --source <卷名>",
           flush=True)
 
     # 补录了但没写库的也别闷着：不提醒的话用户会以为已经修完
@@ -649,5 +649,5 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
             recorded.setdefault(rec["source"], []).append(str(rec["group_order"]))
     for src in sorted(recorded):
         print(f"[待入库] {src}: 题 {'、'.join(recorded[src])} 已补录，"
-              f"尚未写库（python3 scripts/apply_fixes_cli.py --apply）", flush=True)
+              f"尚未写库（python3 src/apply_fixes_cli.py --apply）", flush=True)
     return all_issues

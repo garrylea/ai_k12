@@ -1,4 +1,4 @@
-"""把人工补的题统一写入 MySQL（scripts/fix_question_cli.py 的产物）。
+"""把人工补的题统一写入 MySQL（src/fix_question_cli.py 的产物）。
 
 规则：
 - 以 (paper_id, group_order) 定位题目；该题号已有行 → 原址更新，没有 → 新增并挂到卷上；
@@ -7,8 +7,8 @@
 - 幂等：`applied=true` 的记录跳过，重复执行不会插重。
 
 用法：
-    python3 scripts/apply_fixes_cli.py --dry-run      # 预览会改哪些题
-    python3 scripts/apply_fixes_cli.py --apply        # 真正写库
+    python3 src/apply_fixes_cli.py --dry-run      # 预览会改哪些题
+    python3 src/apply_fixes_cli.py --apply        # 真正写库
 """
 
 import argparse

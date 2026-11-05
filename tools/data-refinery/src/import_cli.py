@@ -237,7 +237,7 @@ def _fix_entry(args):
                 print(f"[提示] {len(sources)} 份卷有题目待人工确认；当前非交互终端，已跳过。",
                       flush=True)
                 print("       唯一入口（录入后会自动问是否写库）：", flush=True)
-                print("       python3 scripts/fix_question_cli.py --source <卷名>", flush=True)
+                print("       python3 src/fix_question_cli.py --source <卷名>", flush=True)
             else:
                 print("[done] 本次没有待人工处理的题", flush=True)
             return 0
@@ -290,14 +290,14 @@ def _execute(args) -> int:
     if not args.skip_answers and not args.cards_only and not args.skip_load:
         stages.append(("6/9 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
     # 识别问题扫描：缺号 / 被吞 / 内容不完整 / 前后题合并 / 卷首页脚被当题，
-    # 落 output/recognition_issues.jsonl，供 scripts/fix_question_cli.py 逐条人工确认
+    # 落 output/recognition_issues.jsonl，供 src/fix_question_cli.py 逐条人工确认
     # （不阻塞入库，可随时补跑）
     if not args.cards_only:
         stages.append(("7/9 识别问题扫描（缺号/被吞/内容不完整/前后题合并/噪声题）",
                        _scan_entry(args), []))
         # 扫完直接引导人工补题：交互终端下会逐条问，非交互（CI/管道）只打印命令，
         # 避免 CI 卡在 input() 上。补完的内容在 output/manual_fixes/，
-        # 用 scripts/apply_fixes_cli.py --apply 统一写库。
+        # 用 src/apply_fixes_cli.py --apply 统一写库。
         stages.append(("8/9 人工补题（逐条确认，可跳过）", _fix_entry(args), []))
         # 补完就地入库：先跑一遍预览，TTY 下问一次 y 才写
         stages.append(("9/9 补题入库（预览后确认）", _apply_entry(args), []))

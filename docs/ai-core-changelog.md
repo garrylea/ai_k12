@@ -8,6 +8,68 @@
 
 ---
 
+## 2026-11-05 改进：试卷命名不再强制中点（`西城35中` 可直接识别）
+
+**需求**（用户）：手工拿到学校资料时常直接命名 `西城35中期中练习1`，旧的 `detect_school` 只认 `…中学|学校|附中|教育集团|小学`，`35中` 认不出 → title 退化成 `2026 西城 初三 期中`、学校名丢失；而强行写 `西城·35中` 的中点在中输入法里很难打。
+
+**改动**：
+- `paper_meta.py` 下沉 `DISTRICTS` + 新增 `split_location()`：地点段支持 `西城·35中` / `西城35中` / `西城-35中` / `西城 35中` / `西城_35中` / `西城/35中` / `西城、35中`；无分隔符时按已知区县前缀切分。`paper_head` 改为复用，避免两处常量漂移。
+- `paper_head._SCHOOL_RE` 增加「数字/中文数字 + 中」分支（`35中`、`八十中`、`十二中`、`北京三十五中`）；明确后缀分支保持**贪婪优先**（`昌平二中教育集团` 不会被截成 `昌平二中`），简称分支要求数字在前（`初中/高中/期中/其中` 不误判）。`_clean_school` 剥区县前缀（`西城35中`→`35中`、`海淀区人大附中`→`人大附中`），但只在剩余是「数字+中」简称时剥，完整校名不拆残。
+- `parse_paper_meta` 的地点段也走 `split_location`，标题统一重组为 `区县·学校`。
+
+**验证**：`西城35中期中练习1` → 区县=西城 / 学校=35中 / 标题 `2026 西城·35中 初三 期中`；`海淀人大附中` → 保留全名；`海淀区人大附中` → 人大附中；`北京四中` → 北京四中；`初中数学期中试卷` → 无学校。新增 13 条用例；全量 pytest **1683 passed / 14 skipped**。
+
+**注意**：已入库的卷不会自动改标题 —— 需重跑第 4 步 `paper_meta`（重写 sidecar）再让 `db_loader` 更新 `exam_papers.title`，或对单卷手工 UPDATE。
+
+---
+
+## 2026-11-05 修复：试卷题知识点入库断链（extract 标了 → publish 丢了 → db_loader 不写）
+
+**现象**（用户报）：西城35中 21 题已入库（`exam_papers` id=420），但专项练习选不到、按 2026 过滤像没有这套卷。
+
+**排查结论（三条独立问题）**：
+1. **知识点断链**：`extract` 的 `question_labeler` 已标 `knowledge_points` 并写进 `output/extracted/*.jsonl`（该卷 21/21 都有，全库 1612/3839），但 `publish_cli` 用 `ExamQuestion(**raw)` + `model_dump()` 重建记录，而 `models.ExamQuestion` **从未有过 `knowledge_points` 字段**（`git log -S` 全空）→ Pydantic `extra=ignore` 静默丢弃；`db_loader` 也没有写 `question_knowledge_points` 的代码。全仓唯一写入点是 `backfill_question_kps.py`（事后 LLM 补标）+ 变式/补偿题的 `bindKnowledgePoint`。库里 1516 条 KP 关联全部集中在 question_id 4239–6091（历史某次全量 backfill 的产物），6091 之后的新题一律 0 —— 所以「以前能进专项」是那批老题补过标，不是导入链路曾经正常。
+2. **is_active 卡在 0**：用户在 import 第 8 步对 5 题（题 2/3/6/11/14）答「没问题」，`manual_fix` 只落 `verdict=no_change` + `status=resolved`，**一个字段都不改库**（`manual_fix.py:678-684` 直接 `return []`），题继续 `is_active=0` 且重扫不再问。这 5 题正是列表题数 16（vs 导入时写的 21）的来源。
+3. **答案为空**：21 题 `answer` 全空（Word 里没有答案段、`output/answers/` 无该卷），而专项抽题 SQL（`questions.repo.ts:133-140`）与知识点列表 count（`knowledge-points.repo.ts:26-36`）都硬性要求 `q.answer <> ''`。
+
+**修复**：
+- `models.ExamQuestion` 增加 `knowledge_points: list[str] | None`；`db_loader.load_questions` 预取 `knowledge_points` 字典后按 code `INSERT IGNORE` 到 `question_knowledge_points(role='primary')`，未知 code 只告警不阻断；`_exec` 返回 `rowcount` 以便统计。补 4 条单测（models 字段透传/可选、db_loader 写入/未知 code 跳过）。
+- 新增一次性脚本 `src/fix_question_kps_and_active.py`（默认 dry-run，`--apply` 才写）：①按 `exam_papers.source_key → paper_questions.question_no/group_order` 精确找回 `verdict=no_change` 的题并置 `is_active=1`（回退 `(source, group_order)` 仅唯一命中）；②扫 `output/extracted/**/*.jsonl` 的 `knowledge_points` 回填 KP（不调 LLM）。已执行：`is_active=1` 1289→1294；KP 关联 1516→3137 行、覆盖题 1131→1502；paper 420 的 active 16→21、KP 0→51。
+
+**遗留**：西城35中 21 题答案仍全空，所以**专项练习仍然抽不到**（走完全部谓词 = 0），配置页知识点 count 也仍为 0。补答案需走 `answer_importer_cli --doc/--records`（卷内无答案段，需人工提供）。另：`verdict=no_change` 不改 `is_active` 的语义本次未改，只在约束文档标注。
+
+**文档**：`docs/constraints/数据管线.md` 新增「试卷题的知识点链路」硬约束；`tools/data-refinery/README.md` 目录树补一次性脚本。
+
+---
+
+## 2026-11-05 修复：data-refinery 接上 Word/PPT 输入（MinerU 早已支持，是发现层漏了）
+
+**现象**（用户报）：`convert` / `import_cli` 好像只能把 PDF 转 md，Word 转不了；但底层 MinerU 支持 Word→MD，怀疑逻辑没写对。核实 `mineru-open-api extract` 确实支持 Word（`.doc`/`.docx`）、PPT（`.ppt`/`.pptx`）、图片、HTML，用户判断成立。
+
+**根因**：不是 MinerU 不支持，是**素材发现层只扫 `*.pdf` 与 `page_*.jpg`**（`tools/data-refinery/src/scanner.py:23,34`，`Material.kind` 注释写死 `"pdf" | "images"`）。`.docx/.doc/.ppt/.pptx` 放进 `crawler/data` 不会生成 `Material` → `convert_cli.py:93,100` 拿不到 → MinerU 永远收不到，`--dry-run` 也不列。而执行层早就接好了：`convert.py:67` `_DOCUMENT_SUFFIXES` 已含 Office、`:96-101` 把文件路径原样交给 `mineru-open-api extract`（无扩展名过滤），2026-10-28 条目还记过「PDF/Office → `[doc]` 日志分流」。即「执行层接上、发现层没接」。上游 crawler 只产 PDF / 拆页 JPG（`tools/crawler/README.md:47` 原写「下游按 `*.pdf` 扫描」），所以**手工丢进来的 Word 会被静默忽略**。
+
+**修复**：`scanner.py` 新增模块级 `DOCUMENT_SUFFIXES = {.pdf,.doc,.docx,.ppt,.pptx}`，一次 `rglob("*")` 按后缀（大小写不敏感）筛出整份文档并各生成一个 `Material`；教材拆页图片分支不变。`kind` 复用 `"pdf"`、注释改注「整份文档：PDF/Office」。同目录同名不同后缀（`foo.pdf` + `foo.docx`）会撞同一个 `rel_path` / 输出目录，PDF 保留原名、Office 那份 rel_path 加 `_docx` 等短后缀区分。`convert.py` 的 MinerU 调用、`import_cli` 编排、extract/publish/db_loader 下游**均未改**（下游只吃 `output/md/**/*.md`）。`convert_cli.py` 的 argparse 描述与 `_match_source` docstring 补口径：Office 是整份文档、不命中 `--source smartedu`，Word 卷走默认 `--source all` 或命名带「试卷/答案」走 `zgkao`。
+
+**测试**：`tests/test_scanner.py` 补 8 例（4 种 Office 后缀 / 大小写 / 子目录 rel_path / 不支持后缀忽略 / pdf+docx 同名区分 / 两个 Office 同名 / 文档与图片书共存 / **后缀集合与 `MineruRunner._DOCUMENT_SUFFIXES` 对账护栏**）；`tests/test_convert.py` 补 3 例（docx 原样进 extract 命令、`_is_document` 接受 Office、docx 走 `[doc]` 日志不走 pages 与 15s 节流）。
+
+**文档**：`tools/data-refinery/README.md`（首段、目录树、§1 convert 口径）、`docs/data-refinery-使用手册.md`（流程图 / 阶段表 / §4.1）、`docs/data-refinery-管线总结与后续.md` 阶段表、`docs/constraints/数据管线.md`（新增「素材格式与唯一发现入口」硬约束）、`tools/crawler/README.md:47,253` 同步。架构设计文档与 2026-07 的设计/计划文档描述的是 crawler 自动产出的 PDF/图片，**保持原貌未回改**。
+
+**补充（同日，用户实测 `--dry-run` 反馈）**：用户跑 `python ./src/import_cli.py --subject 数学 --files "西城35中" --dry-run`，stage1 打印 `[dry-run] 数学/初中/first/2026/西城35中期中练习1 (pdf)`、stage4「命中 0 份试卷」、stage5「0 个文件」，据此判断 Word 没被找到。实测核对：`crawler/data` 下匹配该名字的**只有一个文件** `数学/初中/first/2026/西城35中期中练习1.docx`；直接调 `MaterialScanner.scan()` 得到 `input_paths=['…/西城35中期中练习1.docx']` —— **Word 确实已被发现**，那行 `(pdf)` 就是它。`kind="pdf"` 是来源分流 / 日志节流用的分类（语义「整份文档」），不是格式名，直接打印会把 docx 说成 PDF，是复用 kind 引入的显示缺陷。stage4/5 的 0 命中是 `--dry-run` 的**预期行为**：`convert_cli.py` dry-run 分支直接 return、`convert.py` 根本没调 MinerU，`output/md` / `output/published` 里没有该卷产物，而 `paper_meta_cli` 读 `output/md`、`db_loader_cli` 读 `output/published` → 0；`extract_cli.py:449` 的 `[scope] subject=数学 -> 535 个文件` 也是 `--file` 过滤**之前**的计数，不是「处理了 535 份」。真正验证 Word→MD 必须去掉 `--dry-run`（需有效 `MINERU_TOKEN` 与网络）。**修复**：`convert_cli.py` 新增 `_input_label(material)`，dry-run 打印真实输入后缀（`(docx)` / `(pdf)` / `(pptx)`，图片书仍 `(images)`），`kind` 只留在分流与节流；`tests/test_convert_cli.py` 补 4 例（docx 不再显示 pdf / pptx / pdf 与图片书标签不变 / 无 `input_paths` 的夹具回退到 kind 不崩）。全量 pytest **1666 passed / 14 skipped**。
+
+---
+
+## 2026-11-05 整理：data-refinery 撤销 scripts/，Python 统一收敛到 src/
+
+**现象**（用户报）：`tools/data-refinery/` 下同时有 `src/` 和 `scripts/` 两个 Python 目录，`scripts/` 是 2026-10-30 学科策略重构计划里顺手建的，并非刻意的架构决策；同类一次性回填/运维脚本散在 `src/`、`scripts/`、项目根三处，`README.md` 目录树完全没有 `scripts/`，而 `docs/constraints/数据管线.md` 又写 `python3 scripts/...`，口径不一致；`apply_fixes` 实现还早已回流到 `src/`，`scripts/apply_fixes_cli.py` 只剩薄壳。
+
+**裁决**：撤销 `scripts/`，7 个文件全部并入 `src/`；今后库模块、阶段 CLI、一次性回填/迁移、回归与运维入口统一放 `src/`，**不再另建平行 Python 目录**（`docs/constraints/数据管线.md` 已加硬约束，`tools/data-refinery/README.md` §目录 已写约定）。
+
+**改动**：`git mv` 7 个文件（`apply_fixes_cli` / `fix_question_cli` / `scan_recognition_issues` / `split_snapshot` / `backfill_multi_choice` / `backfill_section_types` / `migrate_content_hash`）；删掉每个文件里 `sys.path.insert(0, ROOT/"src")` —— 脚本自身目录已在 `sys.path` 上，`from config import ...` 等直接可用，不再需要 hack；`ROOT = Path(__file__).resolve().parents[1]` 仍指向 `tools/data-refinery/`，`output/` 与 `tests/fixtures/` 路径不受影响。**未改任何业务逻辑**。同步改 `src/apply_fixes.py` / `manual_fix.py` / `import_cli.py` / `recognition_scan.py` 的 docstring 与 print 路径提示；3 个测试文件（`test_apply_fixes.py` / `test_apply_fixes_integration.py` / `test_split_snapshot.py`）里 `sys.path.insert(..., "scripts")` 改 `"src"`（否则删目录后 import 直接失败）；文档侧 `README.md` 目录树补 7 个文件与目录约定、`docs/constraints/数据管线.md` / `docs/data-refinery-管线总结与后续.md` / `docs/superpowers/plans/2026-10-30-subject-strategy-refactor.md` 及本文件历史条目的命令路径统一改为 `src/...`（历史叙述「实现从 `scripts/` 移到 `src/`」保留原貌）。根目录 2026-08 遗留的 `backfill_practice_content.py` / `mark_needs_review.py` / `test_labeler_single_card.py` 本次不动，仅在 README 注明不再往根目录新增。
+
+**验证**：7 个脚本移入 `src/` 后逐个 `python3 src/xxx.py --help` 全通过（证明去掉 `sys.path.insert` 后 import 仍可达，且 `ROOT` 仍正确指向 `tools/data-refinery/`）；`src/split_snapshot.py --check` 能完整跑完抽样与比对（脚本本身可用，报出的差异是 2026-10-30 基线相对当前 `output/md` 语料的增删与 `material_text` 变化，非本次改动）；全量 `pytest tests -q` **1651 passed / 14 skipped / 5 warnings**。**注意**：全量测试须在离线端点环境下跑（把 `LLM_BASE_URL` / `LLM_FALLBACK_BASE_URL` 指向不可达地址、`DB_HOST` 指向 `127.0.0.1:1`），否则 `tests/test_import_cli.py::test_main_runs_stages_in_order` 会无限挂住 —— 该用例只 mock 了 9 个阶段里的前 4 个，第 4 阶段 `paper_meta` 真去连 LLM、端点不可达时 `sock_connect` 卡死（`sample` 采样确认）；这是 `import_cli` 扩到 9 阶段后的**既有测试漂移**，与本次目录收敛无关。
+
+---
+
 ## 2026-11-04 修改：浅停留页顶栏「退出登录」改为「回到开始页」
 
 **现象**（用户报）：进个人中心后只有「返回」和「退出登录」两个出口，学生看完资料/积分后想回登录后的主菜单，只能先退回来源页或直接被登出。用户原话：「游戏里进个人中心看完是回开始界面，为什么我们这个不行？」
@@ -219,7 +281,7 @@
 **改动**：
 
 - `import_cli` 增加第 8 步「补题入库」：先跑一遍预览（会改哪几题、更新还是新增），交互终端下问一次 `现在写入题库？[y/N]`，答 `y` 才真写；`--dry-run` / 非交互 / `--skip-review` 一律只预览并打印命令。
-- `apply_fixes` 实现从 `scripts/` 移到 `src/`（`scripts/apply_fixes_cli.py` 保留为薄壳），并支持 `--source <卷名子串>` 与传 `argv`。
+- `apply_fixes` 实现从 `scripts/` 移到 `src/`（`src/apply_fixes_cli.py` 保留为薄壳，2026-11-05 目录收敛后路径），并支持 `--source <卷名子串>` 与传 `argv`。
 - 新增 `pending_records(subject, source)`：只挑 `applied != true` 的记录，`_discarded/` 不参与。
 - 预览计数口径修正：`[dry-run] 预览 N 条` 不再显示 `—`。
 
@@ -349,7 +411,7 @@
 - `subject_cases/` 并入 `subject_strategies/` 后删除；`split_page` 由 `attach_material: bool` 改为接收策略对象（`strategy=`）；`split_options(subject=...)` 的 `subject=` 参数删除（传了是 `TypeError`）。
 - 新增 `tests/test_no_subject_conditionals.py`：去注释后断言内核无 `subject ==` / `"chinese"`，防止学科判断回流。
 
-**回归**：`tests/test_question_splitter.py` 87 例断言一行未改（仅改调用签名），全绿；`scripts/split_snapshot.py --check` 26 份抽样（数学/物理/语文各 8、化学 2）零差异；四中物理卷按新策略重切 35 题、题号连续、逐题题干/材料/分组/分值哈希与基线全同（切分是确定性的，不跑非确定的 LLM 重抽比 JSONL）。英语阅读理解短文开始进入 `material_text`（此前为空），靠 `test_english.py` 的「A 篇只归题1、B 篇只归题2」正反断言守护。
+**回归**：`tests/test_question_splitter.py` 87 例断言一行未改（仅改调用签名），全绿；`src/split_snapshot.py --check` 26 份抽样（数学/物理/语文各 8、化学 2）零差异；四中物理卷按新策略重切 35 题、题号连续、逐题题干/材料/分组/分值哈希与基线全同（切分是确定性的，不跑非确定的 LLM 重抽比 JSONL）。英语阅读理解短文开始进入 `material_text`（此前为空），靠 `test_english.py` 的「A 篇只归题1、B 篇只归题2」正反断言守护。
 
 **同日下午 · 全分支审查修复**（I1–I4 / M1–M4，明细见 `.superpowers/sdd/2026-10-30-subject-strategy-refactor/final-fix-report.md`）：
 
@@ -2585,7 +2647,7 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 - **切题**：`RawQuestion.multi_choice` —— 大题标题含「多项选择」时整节打标；`question_extract` 落库时覆盖 labeler 的 `choice`（模型只会给单选）。`question_labeler._VALID_TYPES` 同步允许。
 - **判题**：`multi_choice` 归入客观题（`OBJECTIVE_TYPES` / `EXACT_ONLY_TYPES`），`compareAnswer(..., type)` 按字母集合比对（`BD` == `DB`），**不做部分得分**；考试时长估算按 1 分钟/题。
 - **前端**：`ChoiceOptionList` 加 `multiple`（checkbox 语义），`QuestionRunner` 对 `multi_choice` 逐项切换、答案按字母序拼成 `AC` 提交；回看/续考恢复同一套字符串。
-- **存量回填**：`tools/data-refinery/scripts/backfill_multi_choice.py`（默认 dry-run）。用「本大题之前最大题号+1 → 本节最大题号」的区间定位，避开 OCR 把 16 认成 6 的坑。已对 4 张物理卷的 16–20 题执行 `--apply`（共 20 道）。
+- **存量回填**：`tools/data-refinery/src/backfill_multi_choice.py`（默认 dry-run）。用「本大题之前最大题号+1 → 本节最大题号」的区间定位，避开 OCR 把 16 认成 6 的坑。已对 4 张物理卷的 16–20 题执行 `--apply`（共 20 道）。
 - 文档：API 设计文档题型枚举、openapi `type` 枚举、`docs/constraints/数据管线.md` 同步。
 
 **待定**：卷面规则是「全对 2 分 / 选对不全 1 分 / 错选 0 分」，当前判对错是全对才算对，**未实现部分得分**（需要给 `exam_answers` 加得分列）。
@@ -2625,7 +2687,7 @@ Canonical tokens 在 `apps/web/style.md` §2，实现于 `apps/web/src/styles/gl
 4. 数学「解答题」整节混排 proof/calculation/short_answer，**不整节覆盖**（标题判不出题型时保留单题判定）。
 5. 只对 math/physics/chemistry/politics 生效；语文/英语大题标题不带题型，保持原逻辑。
 
-**存量回填**：`scripts/backfill_section_types.py`（默认 dry-run）。已 `--apply`，22 道题纠正题型；人大附物理现在是 1–15 choice、16–20 multi_choice、21–32 short_answer、33–34 calculation。
+**存量回填**：`src/backfill_section_types.py`（默认 dry-run）。已 `--apply`，22 道题纠正题型；人大附物理现在是 1–15 choice、16–20 multi_choice、21–32 short_answer、33–34 calculation。
 
 `pytest` 1551 passed（新增 4 条 section_analyzer 用例）。
 

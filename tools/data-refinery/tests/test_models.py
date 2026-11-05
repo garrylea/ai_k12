@@ -78,3 +78,21 @@ def test_exam_question_accepts_multi_choice_type():
 def test_exam_question_keeps_needs_review_flag():
     q = ExamQuestion(subject_id="chinese", type="choice", difficulty=2, content="题干", answer="A", needs_review=True)
     assert q.needs_review is True
+
+
+def test_exam_question_keeps_knowledge_points_through_model_dump():
+    """publish 用 `ExamQuestion(**raw)` + `model_dump()` 重建记录。
+
+    模型里没有的字段会被 Pydantic 静默丢弃 —— 2026-11-05 之前 `knowledge_points`
+    就是这样丢的，导致题目入库后永远没有知识点、进不了专项练习。
+    """
+    q = ExamQuestion(subject_id="math", type="choice", difficulty=2,
+                     content="1+1=?", answer="2",
+                     knowledge_points=["M0306", "M0101"])
+    assert q.knowledge_points == ["M0306", "M0101"]
+    assert q.model_dump(mode="json")["knowledge_points"] == ["M0306", "M0101"]
+
+
+def test_exam_question_knowledge_points_optional():
+    q = ExamQuestion(subject_id="math", type="choice", difficulty=2, content="x", answer="1")
+    assert q.knowledge_points is None

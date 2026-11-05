@@ -21,6 +21,10 @@ class ExamQuestion(BaseModel):
     grade_band: str | None = None
     source: str | None = None
     source_year: int | None = None
+    # extract 阶段 LLM 已标注的知识点 code（如 M0306）。publish 必须透传，
+    # db_loader 据此写 question_knowledge_points（2026-11-05 修：此前模型缺此字段，
+    # publish 重建时被 Pydantic 静默丢弃，导致题目入库后永远没有知识点）。
+    knowledge_points: list[str] | None = None
     # 内容由 LLM 补全/修复过（is_complete=false），入库置 is_active=0，人工复核后再放行
     needs_review: bool = False
 

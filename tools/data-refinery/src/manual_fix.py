@@ -2,7 +2,7 @@
 
 入口：
     import_cli 第 7 步在 TTY 下自动调用 review_pending()；
-    也可以单独跑 scripts/fix_question_cli.py（同一套逻辑）。
+    也可以单独跑 src/fix_question_cli.py（同一套逻辑）。
 
 一次交互的输入约定（2026-10-31 改为显式菜单）：
 - 先选方式：`1` 粘贴文本 / `2` 图片路径（走 MinerU）/ `3` 本地文件；直接粘贴正文也行；
@@ -1016,7 +1016,7 @@ def review_by_numbers(subject: str | None, file: str | None,
 
 
 def main() -> int:
-    """独立入口（scripts/fix_question_cli.py 调它）：一次 Ctrl+C 就退出。"""
+    """独立入口（src/fix_question_cli.py 调它）：一次 Ctrl+C 就退出。"""
     global ISSUES_FILE
     import argparse
 

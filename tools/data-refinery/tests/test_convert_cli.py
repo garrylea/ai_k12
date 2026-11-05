@@ -35,6 +35,46 @@ def _run_dry_run(tmp_path, scanned, argv, capsys) -> str:
     return capsys.readouterr().out
 
 
+class TestDryRunInputFormat:
+    """dry-run 要显示真实输入格式：Office 文档别被写成 (pdf) 让人以为找到的是 PDF。"""
+
+    def test_docx_shows_docx_not_pdf(self, tmp_path, capsys):
+        docx = tmp_path / "数学/初中/first/2026/西城35中期中练习1.docx"
+        docx.parent.mkdir(parents=True)
+        docx.write_text("office")
+        m = Material(kind="pdf", source_dir=docx.parent,
+                     rel_path=Path("数学/初中/first/2026/西城35中期中练习1"),
+                     input_paths=[docx])
+        out = _run_dry_run(tmp_path, [m], [], capsys)
+        assert "(docx)" in out
+        assert "(pdf)" not in out
+
+    def test_pptx_shows_pptx(self, tmp_path, capsys):
+        pptx = tmp_path / "课件.pptx"
+        pptx.write_text("office")
+        m = Material(kind="pdf", source_dir=tmp_path, rel_path=Path("课件"),
+                     input_paths=[pptx])
+        out = _run_dry_run(tmp_path, [m], [], capsys)
+        assert "(pptx)" in out
+
+    def test_pdf_and_image_book_keep_their_labels(self, tmp_path, capsys):
+        pdf = tmp_path / "a.pdf"
+        pdf.write_text("pdf")
+        img = tmp_path / "page_001.jpg"
+        img.write_text("jpg")
+        pdf_m = Material(kind="pdf", source_dir=tmp_path, rel_path=Path("a"), input_paths=[pdf])
+        img_m = Material(kind="images", source_dir=tmp_path, rel_path=Path("book"),
+                         input_paths=[img])
+        out = _run_dry_run(tmp_path, [pdf_m, img_m], [], capsys)
+        assert "(pdf)" in out
+        assert "(images)" in out
+
+    def test_missing_input_paths_falls_back_to_kind(self, tmp_path, capsys):
+        """_paper/_textbook 这些夹具构造的 Material 没有 input_paths，不能崩。"""
+        out = _run_dry_run(tmp_path, [_paper("数学/初中/试卷")], [], capsys)
+        assert "(pdf)" in out
+
+
 class TestMatchSource:
     def test_all_passes_everything(self):
         m = Material(kind="pdf", source_dir=Path("."), rel_path=Path("数学/初中/试卷"), input_paths=[])

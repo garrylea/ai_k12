@@ -19,7 +19,7 @@ answer_extract_cli（按学科 case 提取答案 -> 答案文档）-> answer_imp
 
 | 阶段 | 程序 | 输入 | 输出 | 状态 |
 |---|---|---|---|---|
-| 1 convert | `src/convert_cli.py` | 爬虫素材（PDF/图片书，`tools/crawler/data`） | `output/md/*.md` + `images/` | ✅ 跑通（2340 文件） |
+| 1 convert | `src/convert_cli.py` | 素材（PDF / Word / PPT / 图片书，`tools/crawler/data`） | `output/md/*.md` + `images/` | ✅ 跑通（2340 文件） |
 | 2 extract | `src/extract_cli.py` | `output/md/*.md` | `output/extracted/<stem>.jsonl` | ✅ 跑通（25 文件） |
 | 3 publish | `src/publish_cli.py` | `output/extracted/*.jsonl` | `output/published/<stem>.jsonl` + `output/assets/` | ✅ 跑通（25 + 211 assets） |
 | 4 db_loader | `src/db_loader_cli.py` | `output/published/*.jsonl` | MySQL `ai_k12` | ✅ 跑通（34 cards + 466 questions） |
@@ -127,7 +127,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - 「策略写了却没人问」是这轮重构最大风险（`is_stem` 一度是死钩子：单测全绿、管线无视），
   `tests/test_stem_strategy_hook.py` 用一个 `is_stem` 恒为 `(True, 42)` 的假策略钉住
   `split_page` 真的按策略切。
-- 行为回归靠 `scripts/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
+- 行为回归靠 `src/split_snapshot.py --check`（`tests/fixtures/split_snapshot.json`，
   每科至多 8 份试卷抽样，逐题记录题号 / 题干哈希 / 材料哈希 / 大题分组 / 分值），
   重构任何一步都必须零差异。抽样只取 `output/md` 里实际存在的「试卷」md：当前快照
   26 份（数学/物理/语文各 8、化学 2），英语无试卷 md 故无条目，英语行为由

@@ -1,4 +1,4 @@
-"""Markdown 转换器：调用 MinerU 将 PDF/图片转换为 Markdown。"""
+"""Markdown 转换器：调用 MinerU 将 PDF/Office/图片转换为 Markdown。"""
 
 import base64
 import json

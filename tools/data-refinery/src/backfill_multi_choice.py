@@ -4,17 +4,15 @@
 全部改成 multi_choice。不改内容、不改答案，只改 `questions.type`。
 
 用法：
-    python3 scripts/backfill_multi_choice.py --dry-run
-    python3 scripts/backfill_multi_choice.py --apply
+    python3 src/backfill_multi_choice.py --dry-run
+    python3 src/backfill_multi_choice.py --apply
 """
 
 import argparse
 import re
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 import pymysql  # noqa: E402
 
