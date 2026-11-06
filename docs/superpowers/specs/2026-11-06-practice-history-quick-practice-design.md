@@ -211,7 +211,7 @@
   - `source='targeted'`，**不带** `sessionId`、`sessionUid`、`plannedQuestionIds`；
   - 请求新增 `suppressErrorFixPoints: true`（仅重做模式由前端发送）；
   - `judgeTraining` 把该字段透传到 `judgeCore`；
-  - `judgeCore` 在答对清错题时：仍执行 `clearUnclearedByStudentQuestionId` 与 `trackCleared`，但跳过 `awardErrorFixOnClear`（`pointsAwarded=0`，响应不弹分）；
+  - `judgeCore` 在答对清错题时：仍执行 `clearUnclearedByStudentQuestionId` 与 `trackCleared`，但跳过 `awardErrorFixOnClear`（`pointsAwarded=0`，响应不弹分）；`recordSelfAssessment` 同口径（主观题自评对也不发订正分）；
   - 答错仍 `writeErrorBookOrReuse`，source 仍为 `targeted`，错题本/门禁行为与普通专项一致。
 - 该字段不构成安全边界：学生把它设 true 只会少拿自己的订正分；设 false 也只会在「清掉一条未清错题」时拿一次 3 分，无法重复刷。
 
@@ -269,7 +269,7 @@
 - 交接体解析扩展 `title`、`mode`（`parseRunHandoff`）。
 - `mode='redo'`：
   - `sessionUid` 不生成（或生成但判定为 redo 时不发送）；
-  - 判题 `source='targeted'` + `suppressErrorFixPoints: true`；
+  - 判题 `source='targeted'` + `suppressErrorFixPoints: true`；主观题自评也带同一字段；
   - 不带 `sessionId`、`sessionUid`、`plannedQuestionIds`；
   - 不调用 `useSessionPointsCompletion` 的 complete；
   - 结果页隐藏发分块与补偿套题卡。
@@ -293,7 +293,7 @@
 
 - 详情：exam/special 的 `canRedo`/`canSimilar`；无 KP/无答案/下架题/语文专项 → false；前端档位交集（1/2/3/5 ∩ 可用档位）另测。
 - 重做端点：归属 404、跨学生 404、下架题 400、返回白名单无答案；**不建任何会话**（断言 training_sessions/special_practice_sessions/special_answer_records 无新行）。
-- 重做判题：答错写错题本；答对清零；`suppressErrorFixPoints=true` 时 `pointsAwarded=0`，但清零事件仍记。
+- 重做判题：答错写错题本；答对清零；`suppressErrorFixPoints=true` 时 `pointsAwarded=0`，但清零事件仍记；自评对同口径。
 - 同类型：count 白名单；题库抽题难度阶梯/排除；AI 失败降级；0 题 → 无 session；实际 3 题请求 5 → tier_key='3'；落库去重/source/subject_id/KP 绑定。
 - 物理 AI：subject 参数选 physics prompt/route；落库 subject_id=4；multi_choice 答案归一与校验。
 - 占位行：首次判题插入；幂等；`countBySession` 分母包含未作答；详情包含未作答行。
