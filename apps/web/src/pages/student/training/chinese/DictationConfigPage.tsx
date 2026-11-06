@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader, PlusMinusIcon } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import { fetchDictationPassages, startDictation, type DictationPassageItem } from '@/services/api';
 
 /** 题量档（与数学专项一致）。 */
@@ -85,6 +86,7 @@ export default function DictationConfigPage() {
           caption="返回"
           title="古诗文默写"
           titleClassName="text-4xl font-extrabold"
+          actions={<StudentAccountActions />}
         />
 
         {/* 范围 */}

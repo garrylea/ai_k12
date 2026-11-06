@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 
 /** 默写：书卷（线性 SVG）。 */
 const ScrollIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
@@ -108,6 +109,7 @@ export default function ChineseSpecialPage() {
           caption="返回选学科"
           title="语文 · 训练"
           titleClassName="text-4xl font-extrabold"
+          actions={<StudentAccountActions />}
         />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import { Modal } from '@/components/base';
 import { toast } from '@/components/base/Toast';
 import { parseSubjectId, SUBJECT_CHINESE } from '@/constants';
@@ -80,6 +81,7 @@ export default function HiddenQuestionsPage() {
             to={`/student/training/targeted${subjectQuery}`}
             caption="返回专项练习"
             title={subjectId === SUBJECT_CHINESE ? '语文 · 不再展示' : '我的不再展示清单'}
+            actions={<StudentAccountActions />}
           />
 
           <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">

@@ -234,6 +234,9 @@ afterEach(() => {
 
 beforeEach(() => {
   getMyPointsMock.mockReset();
+  // 学生页顶栏统一挂了 `UserBadge`（账号药丸）→ 每个学生会话用例都会拉一次积分。
+  // 给个默认值，避免 `undefined.then` 把页面炸掉；需要特定余额的用例再自行覆盖。
+  getMyPointsMock.mockResolvedValue(POINTS);
   getMyLedgerMock.mockReset();
   getMyRewardsMock.mockReset();
   getParentPointsMock.mockReset();

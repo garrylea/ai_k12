@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import {
   getKnowledgeGraphMastery,
   getWeakPoints,
@@ -180,6 +181,7 @@ export default function WeakPointGraphPage() {
           caption="返回训练"
           title={`${subjectName(subjectId)} · 薄弱点图谱`}
           titleClassName="text-3xl font-extrabold"
+          actions={<StudentAccountActions />}
         />
 
         {/* 推荐条：recFailed 时整条不渲染 */}

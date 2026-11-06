@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { fetchStarMap, type SectionData, type StarMapData } from '@/services/api';
 import { getAuthItem } from '@/services/authStorage';
 import { PageHeader } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import { useLearnContextStore } from '@/store/learnContextStore';
 
 // --- Loading skeleton ---
@@ -231,6 +232,7 @@ export default function StarMapPage() {
           to="/student/subjects"
           caption={data.subjectName}
           title={`${data.gradeName}${data.publisher ? ` · ${data.publisher}` : ''}`}
+          actions={<StudentAccountActions />}
         />
 
         {/* Error toast */}

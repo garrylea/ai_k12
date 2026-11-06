@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader, Skeleton } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import {
   fetchVocabularyOptions,
   startVocabulary,
@@ -120,6 +121,7 @@ export default function VocabularyConfigPage() {
           caption="返回"
           title="背单词"
           titleClassName="text-4xl font-extrabold"
+          actions={<StudentAccountActions />}
         />
 
         {options && (

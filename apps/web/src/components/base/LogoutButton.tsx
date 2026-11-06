@@ -19,6 +19,13 @@ interface LogoutButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const LOCKED_HINT = '本次学习时长未满，需家长解除后才能退出';
 
+/**
+ * 退出图标：门框在右、箭头向左离开门框。
+ *
+ * 原先画的是「门框在左 + 箭头向右」，小尺寸下容易被读成「登录 / 进入」；
+ * 2026-11-06 用户要求改成明确的退出方向。全仓只有这一处图标定义，
+ * 入口页 / 学生端内页 / 家长端 / 管理端会一起生效，保持同一套退出图标。
+ */
 const LogOutIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
   <svg
     className={className}
@@ -29,9 +36,9 @@ const LogOutIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
     strokeLinecap="round"
     strokeLinejoin="round"
   >
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-    <polyline points="16 17 21 12 16 7" />
-    <line x1="21" y1="12" x2="9" y2="12" />
+    <path d="M15 21h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4" />
+    <polyline points="8 17 3 12 8 7" />
+    <line x1="3" y1="12" x2="15" y2="12" />
   </svg>
 );
 

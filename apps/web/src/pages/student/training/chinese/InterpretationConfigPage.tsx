@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader, PlusMinusIcon } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import {
   fetchInterpretationPassages,
   startInterpretation,
@@ -95,6 +96,7 @@ export default function InterpretationConfigPage() {
           caption="返回"
           title="古诗文解释"
           titleClassName="text-4xl font-extrabold"
+          actions={<StudentAccountActions />}
         />
 
         {/* 范围 */}

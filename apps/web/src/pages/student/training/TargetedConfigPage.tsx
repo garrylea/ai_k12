@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import {
   getKnowledgePoints,
   startTargetedPractice,
@@ -243,6 +244,7 @@ export default function TargetedConfigPage() {
             to={subjectHomePath(subjectId)}
             caption="返回训练"
             title={subjectId === SUBJECT_MATH ? '专项练习' : `${subjectName(subjectId)} · 专项`}
+            actions={<StudentAccountActions />}
           />
 
           {/* 工具条：不再展示清单入口 */}

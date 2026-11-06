@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { BackButton } from '@/components/base';
+import { PageHeader } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import { TRAINING_SUBJECTS, type TrainingSubjectConfig } from '@/subjectConfig';
 
 const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
@@ -33,12 +34,12 @@ export default function TrainingSubjectPage() {
       <div className="w-full max-w-4xl px-4 sm:px-8">
         {/* 返回按钮与标题，参照 SubjectSelectPage header 模式；
             底边框即分割线（贴近标题、远离下方选科卡片） */}
-        <header className="flex items-center gap-4 border-b border-slate-200/80 pb-5">
-          <BackButton to="/student/entry" />
-          <h1 className="text-4xl font-extrabold tracking-tight text-[var(--text-primary)]">
-            选择训练学科
-          </h1>
-        </header>
+        <PageHeader
+          to="/student/entry"
+          title="选择训练学科"
+          titleClassName="text-4xl font-extrabold"
+          actions={<StudentAccountActions />}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
           {TRAINING_SUBJECTS.map((subject) =>

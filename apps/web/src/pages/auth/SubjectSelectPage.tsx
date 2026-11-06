@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { Subject } from '@/types';
 import { fetchSubjects } from '@/services/api';
 import { getAuthItem } from '@/services/authStorage';
-import { BackButton } from '@/components/base';
+import { PageHeader } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 
 interface SubjectConfig {
   key: Subject;
@@ -69,12 +70,12 @@ export default function SubjectSelectPage() {
       <div className="w-full max-w-4xl px-4 sm:px-8">
         {/* 返回按钮与问候语作为兄弟元素，参照 StarMapPage header 模式；
             底边框即分割线（贴近标题、远离下方选科卡片） */}
-        <header className="flex items-center gap-4 border-b border-slate-200/80 pb-5">
-          <BackButton to="/student/entry" />
-          <h1 className="text-4xl font-extrabold tracking-tight text-[var(--text-primary)]">
-            你好，{username}！
-          </h1>
-        </header>
+        <PageHeader
+          to="/student/entry"
+          title={`你好，${username}！`}
+          titleClassName="text-4xl font-extrabold"
+          actions={<StudentAccountActions />}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12">
           {subjects.map((subject) =>

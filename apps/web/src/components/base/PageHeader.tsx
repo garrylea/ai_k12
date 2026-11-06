@@ -14,6 +14,8 @@ interface PageHeaderProps {
   className?: string;
   /** 覆盖标题默认样式（text-2xl font-black），需要更大字号时用 */
   titleClassName?: string;
+  /** 右侧操作区（学生端账号药丸 + 退出）；不传则顶栏保持原样 */
+  actions?: ReactNode;
 }
 
 /**
@@ -31,11 +33,14 @@ export function PageHeader({
   state,
   className,
   titleClassName,
+  actions,
 }: PageHeaderProps) {
   return (
     <header
       className={clsx(
         'flex items-center gap-4 border-b border-[var(--bg-subtle)] pb-5',
+        // 账号区在窄屏放不下时折到第二行，避免整页出现横向滚动
+        actions && 'flex-wrap',
         className,
       )}
     >
@@ -55,6 +60,11 @@ export function PageHeader({
           {title}
         </h1>
       </div>
+      {actions ? (
+        <div data-testid="page-header-actions" className="ml-auto flex shrink-0 items-center gap-2">
+          {actions}
+        </div>
+      ) : null}
     </header>
   );
 }

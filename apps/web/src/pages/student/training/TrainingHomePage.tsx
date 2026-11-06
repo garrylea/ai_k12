@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Banner, Button, PageHeader } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import { getRemediationOverview, getTrainingErrorBook, type RemediationOverview } from '@/services/api';
 import { parseSubjectId, subjectName, SUBJECT_MATH } from '@/constants';
 
@@ -148,6 +149,7 @@ export default function TrainingHomePage() {
           caption="返回选学科"
           title={`${subjectName(subjectId)} · 训练`}
           titleClassName="text-4xl font-extrabold"
+          actions={<StudentAccountActions />}
         />
 
         {/* 待完成相似题专项练习（可关闭；用 warning 橘底，info 的蓝是家长端 brand 色） */}

@@ -9,3 +9,4 @@ export { FireworksCanvas } from './FireworksCanvas';
 export { CelebrationOverlay } from './CelebrationOverlay';
 export { LevelPanel } from './LevelPanel';
 export { UserBadge } from './UserBadge';
+export { StudentAccountActions } from './StudentAccountActions';

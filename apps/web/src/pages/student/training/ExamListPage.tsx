@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, Modal, PageHeader, Skeleton, Tag } from '@/components/base';
+import { StudentAccountActions } from '@/components/business';
 import {
   createExamSession,
   getExamPaperDetail,
@@ -208,6 +209,7 @@ export default function ExamListPage() {
             to={subjectHomePath(subjectId)}
             caption="返回训练"
             title={subjectId === SUBJECT_CHINESE ? '语文 · 真题' : '考试'}
+            actions={<StudentAccountActions />}
           />
 
           {/* 筛选区 */}
