@@ -5,6 +5,7 @@ import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import { PracticeHistoryService } from './practice-history.service.js';
 import type { PracticeHistoryDetail, PracticeHistoryListResult } from './practice-history.dto.js';
+import type { HistoryRunQuestion } from '../training/history-practice.service.js';
 
 /**
  * 学生端「练习记录」（Task 4，2026-11-01）。
@@ -68,7 +69,7 @@ export class PracticeHistoryController {
     @Param('sessionId', ParseIntPipe) sessionId: number,
     @Param('questionId', ParseIntPipe) questionId: number,
     @CurrentUser() user: JwtUser,
-  ): Promise<{ questions: unknown[]; title: string }> {
+  ): Promise<{ questions: HistoryRunQuestion[]; title: string }> {
     if (source !== 'exam' && source !== 'special') {
       throw new NotFoundException({ code: 1002, message: '记录不存在' });
     }

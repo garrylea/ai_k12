@@ -19,6 +19,7 @@ import type {
  *
  * 列表把考试与专项练习合成一个视角（spec §4.2）。**只读**，不改任何学生状态。
  * 归属校验一律按 JWT 的 studentId 过滤（防 IDOR）。
+ * 2026-11-06 增加 `redo`（单题重做）：同样只读——回放原题，不建会话、不写作答、不发分。
  */
 @Injectable()
 export class PracticeHistoryService {
