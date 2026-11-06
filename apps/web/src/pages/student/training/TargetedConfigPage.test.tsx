@@ -16,7 +16,7 @@ import {
  * 数学专项配置页（计划 §3 Task 6）。
  *
  * 为什么必须改读接口：计划一给 `/training/targeted/start` 加了**档位白名单**，
- * 白名单来自家长配置的 `(taskCode, tierKey)`；新默认档位是 1/3/5/10。
+ * 白名单来自家长配置的 `(taskCode, tierKey)`；新默认档位是 1/2/3/5/10。
  * 旧常量里的「8 题」现在会被 400 拒绝，所以档位只能来自 `me/rules`。
  */
 afterEach(() => {

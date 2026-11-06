@@ -110,7 +110,7 @@
 - 考试侧：`exam_answers` 已有未作答行（`method='unanswered'`），不改。
 - 专项侧：复用 `special_answer_records`，为「计划了但没答」的题插入**占位行**：
   - `question_id` = 题目 id；
-  - `question_order` = 题单中的真实序号（1..N）；
+  - `question_order` = 该题在**原始题单**中的 1-based 位次；题单中有 id 被跳过时**不压缩**，故可能不连续（非 1..N 连续）；
   - `answer_text` = NULL，`is_correct` = NULL，`method` = NULL，`score` = NULL；
   - 唯一键 `uniq_sar_session_q (session_id, question_id)` 保证幂等。
 
@@ -120,7 +120,8 @@
 - 后端在惰性创建专项会话后，调用 `ensurePlannedQuestions(sessionId, entries)`：
   - 校验每个 id 存在、`is_active=1`、学科与会话一致；不合法跳过并 warn（不阻断判题）；
   - `INSERT IGNORE` 占位行，`question_order` 取**未过滤题单**的数组下标 +1：中途有题失效被跳过时，
-    后一题仍保留原始位次、不压缩（`upsertAnswer` 的 ON DUPLICATE KEY UPDATE 不重写 `question_order`）。
+    后一题仍保留**原始 1-based 位次**、不压缩（`upsertAnswer` 的 ON DUPLICATE KEY UPDATE 不重写 `question_order`），
+    因此库里的 `question_order` **可能不连续**（例如 1,2,4,5）。
 - 老客户端不传该字段 → 不插占位行，行为与现在一致。
 - 一轮专项如果一道题都没答，不会创建会话（现状），因此也不会形成记录。
 
@@ -258,7 +259,8 @@
   - 右：`Button variant="ghost" size="sm"` 两颗；重做用 `text-[var(--text-primary)]`，同类型用 `text-[var(--brand-500)]`；图标 14px 线性 SVG。
 - 点击处理：
   - 重做：置 loading → `redoPractice(source, sessionId, questionId)` → 写交接体（`mode:'redo'`、`sessionId:null`）→ `navigate('/student/training/targeted/run?subjectId=N&returnTo=...')`。
-  - 同类型：弹出小面板（打开时按学科取一次 `getMyPointRules`，取 `[1,2,3,5] ∩ 可用档位`；为空则不显示同类型按钮）；点数字 → 置 loading → `startSimilarPractice(...)` → 写交接体（`mode:'similar'`、`sessionId`）→ 同路由。
+  - 同类型：弹出小面板，只展示已算好的档位数字；点数字 → 置 loading → `startSimilarPractice(...)` → 写交接体（`mode:'similar'`、`sessionId`）→ 同路由。
+  - **档位取值时机（实现口径）**：详情加载完就按学科取一次 `getMyPointRules`（`useEffect` 依赖详情的 `data`，仅数学/物理且存在 `canSimilar` 的题时才请求），取 `[1,2,3,5] ∩ 可用档位` 存进 state；交集为空则**整页不显示**同类型按钮。看起来是「面板打开时取值」，实际必须提前——按钮显不显示取决于交集是否为空，打开面板才取会让按钮先闪一下或永不出来。
   - 错误：toast；空结果：toast「暂时没有同类题」。
 - 「未作答」判定：`q.method === 'unanswered' || q.answerText == null`。
 - 用 `useEffect` 在 `source/sessionId` 变化时清空面板/loading，防止切记录串状态。

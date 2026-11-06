@@ -7822,7 +7822,8 @@ paths:
         会话不存在或非本人一律 404/1002。考试题面取 questions.content；
         语文三专项 question_id 为 NULL，题面改为 passageTitle + passageSentence。
         answerText 结构：数学/物理/化学/英语为原文；语文默写 {author,dynasty,body}；
-        语文解释/含义 {terms,translation} / {terms,meaning,emotion}。只读，不做「再做一遍」。
+        语文解释/含义 {terms,translation} / {terms,meaning,emotion}。
+        canRedo / canSimilar 决定每题是否显示「重做」「同类型练习」（2026-11-06）。
       operationId: getPracticeHistoryDetail
       security: [{ bearerAuth: [] }]
       parameters:
@@ -7855,6 +7856,79 @@ paths:
                               $ref: '#/components/schemas/PracticeHistoryQuestion'
         '404':
           description: 记录不存在或非本人（code=1002）
+
+  /student/practice-history/{source}/{sessionId}/questions/{questionId}/redo:
+    post:
+      tags: [PracticeHistory]
+      summary: 单题重做（不落记录、不发分）
+      operationId: redoPractice
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string, enum: [exam, special] } }
+        - { name: sessionId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: questionId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '201':
+          description: 单题运行数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          title: { type: string }
+                          questions:
+                            type: array
+                            items: { $ref: '#/components/schemas/HistoryRunQuestion' }
+        '404': { description: 记录或题目不属于当前学生（code=1002） }
+        '400': { description: 题目已下架 }
+
+  /student/practice-history/{source}/{sessionId}/questions/{questionId}/similar:
+    post:
+      tags: [PracticeHistory]
+      summary: 同类型练习（落专项记录、按实际题数发档位分）
+      operationId: startSimilarPractice
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string, enum: [exam, special] } }
+        - { name: sessionId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: questionId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [count]
+              properties:
+                count:
+                  type: integer
+                  enum: [1, 2, 3, 5]
+                  description: 题量；还须在该学生可用档位内（否则 400）
+      responses:
+        '201':
+          description: 同类型题单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          title: { type: string }
+                          sessionId: { type: integer, nullable: true }
+                          questions:
+                            type: array
+                            items: { $ref: '#/components/schemas/HistoryRunQuestion' }
+        '400': { description: 题量非法 / 学科不支持 / 无知识点或无答案 }
+        '404': { description: 记录或题目不属于当前学生（code=1002） }
 
 components:
   securitySchemes:
@@ -7963,7 +8037,27 @@ components:
         passageSentence:
           type: string
           nullable: true
-      required: [questionOrder]
+        canRedo:
+          type: boolean
+          description: 有题目 id 且在架 -> 可单题重做（语文/英语专项为 false，2026-11-06）
+        canSimilar:
+          type: boolean
+          description: canRedo + 数学/物理 + 有答案 + 有知识点 -> 可同类型练习（2026-11-06）
+      required: [questionOrder, canRedo, canSimilar]
+
+    HistoryRunQuestion:
+      type: object
+      description: 重做 / 同类型练习的运行态题目（白名单，绝不含 answer / explanation）
+      properties:
+        questionId: { type: integer }
+        text: { type: string }
+        type: { type: string }
+        options:
+          type: array
+          nullable: true
+          items: { type: object }
+        materialText: { type: string, nullable: true }
+      required: [questionId, text, type]
 
     StarMapData:
       type: object
@@ -10503,6 +10597,21 @@ components:
             可选：本轮训练会话 id（乙类会话页专用）。只用于累加
             training_sessions.judged_count 审计留痕，不传也能判题；会话不存在 /
             非本人 / 已完成都静默跳过，不报错
+        plannedQuestionIds:
+          type: array
+          items:
+            type: integer
+          description: >-
+            可选（2026-11-06）：本轮整轮题单（有序，含已答与未答）。服务端只保留
+            存在 / 在架 / 与 subjectId 同学的 id，按数组顺序给
+            special_answer_records 写未作答占位行（question_order 取原数组下标 +1，
+            跳过失效题时不压缩，故可能不连续）。不传 = 旧客户端，不写占位行
+        suppressErrorFixPoints:
+          type: boolean
+          description: >-
+            可选（2026-11-06）：仅当 true 生效（其余值按 false）。单题重做 / 快速练习
+            专用——答对仍清零错题本、仍记清零事件，只是不发错题订正分。
+            客户端发送，不是安全边界；错题本写入 / 清零逻辑不变
 
     TrainingSelfAssessRequest:
       type: object
@@ -10526,6 +10635,11 @@ components:
           type: integer
           nullable: true
           description: 考试来源传 sessionId；其余来源不传或传 null
+        suppressErrorFixPoints:
+          type: boolean
+          description: >-
+            可选（2026-11-06）：仅当 true 生效，语义同 judge——自评对仍清零错题本，
+            只是不发错题订正分。客户端发送，不是安全边界
 
     TrainingHintRequest:
       type: object

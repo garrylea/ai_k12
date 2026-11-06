@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-11-06 练习记录：单题重做与同类型练习
+
+- 练习记录详情每题右上角新增「重做」「同类型练习」；重做单题、不落记录、不发分（错题本仍更新，关闭订正分）；同类型按 KP+题型+难度±1 出 1/2/3/5 题，题库优先、AI 补缺，落专项记录并按实际题数发档位分。
+- 数理化专项开练保存整轮题单（`special_answer_records` 占位行），未作答的题在历史可见；修复专项答题页把 questionId 当题号的既有 bug。
+- 同类型本期开数学/物理；新增 2 题档（5 分）与幂等迁移；新增物理变式 prompt 与 multi_choice 答案归一。
+
+**API / 文档**：§4.29 加两条 POST（`/questions/{questionId}/redo`、`/similar`，无 `@HttpCode` → **201**）与详情 `canRedo`/`canSimilar`；`/api/training/judge` 加 `plannedQuestionIds?` + `suppressErrorFixPoints?`，`/api/training/self-assess` 加 `suppressErrorFixPoints?`。`suppressErrorFixPoints` 只压发分、不改错题本写入/清零，且是**客户端字段、不是安全边界**。openapi.yaml 同步（新增 `HistoryRunQuestion` schema）。
+
+---
+
 ## 2026-11-06 学生端内页顶栏统一挂「用户状态 + 退出」
 
 **需求**：登录状态和退出原先只在 `/student/entry`（以及辅线侧栏、课程详情侧栏）可见；学生进到学科选择/星图/训练等内页后无法确认当前账号或换号。
