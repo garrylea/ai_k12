@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { HistoryPracticeService } from './history-practice.service.js';
 
 const mkQ = (over: any = {}) => ({
@@ -105,5 +105,81 @@ describe('HistoryPracticeService.startSimilar', () => {
       .rejects.toBeInstanceOf(BadRequestException);
     await expect(svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 4 }))
       .rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('题量不在学生可用档位白名单 -> 400', async () => {
+    const { svc, pointRules } = make();
+    pointRules.listTierKeys.mockResolvedValue(['1', '3']);
+    await expect(svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 2 }))
+      .rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('种子题无知识点 -> 400', async () => {
+    const { svc, questionsRepo, kpRepo } = make();
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map());
+    await expect(svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 }))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(kpRepo.findById).not.toHaveBeenCalled();
+  });
+
+  it('种子题学科不符 / 无标准答案 -> 400', async () => {
+    const { svc, questionsRepo } = make();
+    questionsRepo.findById.mockResolvedValue(mkQ({ subject_id: 4 }));
+    await expect(svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 }))
+      .rejects.toBeInstanceOf(BadRequestException);
+
+    questionsRepo.findById.mockResolvedValue(mkQ({ answer: '' }));
+    await expect(svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 }))
+      .rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('第二轮按 [d-1,d,d+1] 放宽，并排除种子题与首轮已选', async () => {
+    const { svc, questionsRepo, kpRepo } = make();
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+    kpRepo.findById.mockResolvedValue({ id: 28, name: '反比例函数' });
+    questionsRepo.findRandomByKpTypeDifficulty
+      .mockResolvedValueOnce([{ id: 201, content: '题1', type: 'choice', options: null, material_text: null }])
+      .mockResolvedValueOnce([]);
+
+    await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
+
+    expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenNthCalledWith(
+      1, 7, 1, 28, 'choice', [2], 3, [100],
+    );
+    expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenNthCalledWith(
+      2, 7, 1, 28, 'choice', [1, 2, 3], 2, [100, 201],
+    );
+  });
+
+  it('题够但没有 ≤ 实际题数的可用档位 -> 照常出题、不建会话', async () => {
+    const { svc, questionsRepo, kpRepo, pointRules, trainingSessionsRepo } = make();
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+    kpRepo.findById.mockResolvedValue({ id: 28, name: '反比例函数' });
+    pointRules.listTierKeys.mockResolvedValue(['5', '10']);
+    questionsRepo.findRandomByKpTypeDifficulty
+      .mockResolvedValueOnce([{ id: 201, content: '题1', type: 'choice', options: null, material_text: null }]);
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 5 });
+
+    expect(r.sessionId).toBeNull();
+    expect(r.questions).toHaveLength(1);
+    expect(trainingSessionsRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('建会话失败只 warn：照常返回题目，sessionId=null', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    const { svc, questionsRepo, kpRepo, trainingSessionsRepo } = make();
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+    kpRepo.findById.mockResolvedValue({ id: 28, name: '反比例函数' });
+    questionsRepo.findRandomByKpTypeDifficulty
+      .mockResolvedValueOnce([{ id: 201, content: '题1', type: 'choice', options: null, material_text: null }]);
+    trainingSessionsRepo.create.mockRejectedValue(new Error('db down'));
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
+
+    expect(r.questions).toHaveLength(1);
+    expect(r.sessionId).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('db down'));
+    warn.mockRestore();
   });
 });
